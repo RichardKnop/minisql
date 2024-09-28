@@ -10,6 +10,73 @@ var (
 	errUnrecognizedStatementType = fmt.Errorf("Unrecognised statement type")
 )
 
+type Operator int
+
+const (
+	// Eq -> "="
+	Eq Operator = iota + 1
+	// Ne -> "!="
+	Ne
+	// Gt -> ">"
+	Gt
+	// Lt -> "<"
+	Lt
+	// Gte -> ">="
+	Gte
+	// Lte -> "<="
+	Lte
+)
+
+type Condition struct {
+	// Operand1 is the left hand side operand
+	Operand1 string
+	// Operand1IsField determines if Operand1 is a literal or a field name
+	Operand1IsField bool
+	// Operator is e.g. "=", ">"
+	Operator Operator
+	// Operand1 is the right hand side operand
+	Operand2 string
+	// Operand2IsField determines if Operand2 is a literal or a field name
+	Operand2IsField bool
+}
+
+type StatementKind int
+
+const (
+	CreateTable StatementKind = iota + 1
+	DropTable
+	Insert
+	Select
+	Update
+	Delete
+)
+
+type ColumnKind int
+
+const (
+	Int4 ColumnKind = iota + 1
+	Int8
+	Varchar
+)
+
+type Column struct {
+	Kind   ColumnKind
+	Size   int
+	Offset int
+	Name   string
+}
+
+type Statement struct {
+	Kind       StatementKind
+	TableName  string
+	Conditions []Condition
+	Updates    map[string]string
+	Inserts    [][]string
+	Fields     []string // Used for SELECT (i.e. SELECTed field names) and INSERT (INSERTEDed field names)
+	Aliases    map[string]string
+	Columns    []Column
+}
+
 // Execute will eventually become virtual machine
 func (s *Statement) Execute(ctx context.Context) error {
 	switch s.Kind {
@@ -32,21 +99,6 @@ func (stmt *Statement) executeSelect(ctx context.Context) error {
 }
 
 type Table struct {
-}
-
-type ColumnKind int
-
-const (
-	Int4 ColumnKind = iota + 1
-	Int8
-	Varchar
-)
-
-type Column struct {
-	Kind   ColumnKind
-	Size   int
-	Offset int
-	Name   string
 }
 
 type Row struct {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/RichardKnop/minisql/internal/pkg/minisql"
+	"github.com/RichardKnop/minisql/internal/pkg/parser"
 )
 
 const (
@@ -81,7 +81,7 @@ func main() {
 				fmt.Printf("Unrecognized meta command: %s\n", inputBuffer)
 			}
 		} else {
-			aParser := minisql.NewParser(inputBuffer)
+			aParser := parser.New(inputBuffer)
 			aStatement, err := aParser.Parse(ctx)
 			if err != nil {
 				// Parser logs error internally
