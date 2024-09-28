@@ -3,11 +3,11 @@ package minisql
 import (
 	"context"
 	"fmt"
-	"unsafe"
 )
 
 var (
-	errUnrecognizedStatementType = fmt.Errorf("Unrecognised statement type")
+	errUnrecognizedStatementType = fmt.Errorf("unrecognised statement type")
+	errMaximumPagesReached       = fmt.Errorf("maximum pages reached")
 )
 
 type Operator int
@@ -60,10 +60,9 @@ const (
 )
 
 type Column struct {
-	Kind   ColumnKind
-	Size   int
-	Offset int
-	Name   string
+	Kind ColumnKind
+	Size int
+	Name string
 }
 
 type Statement struct {
@@ -98,107 +97,79 @@ func (stmt *Statement) executeSelect(ctx context.Context) error {
 	return nil
 }
 
+const (
+	pageSize      = 4096 // 4 kilobytes
+	tableMaxPages = 100  // temporary limit, TODO - remove later
+)
+
+type Database struct {
+	tables map[string]Table
+}
+
+// NewDatabase creates a new database
+// TODO - check if database already exists
+func NewDatabase() (Database, error) {
+	aDatabase := Database{
+		tables: make(map[string]Table),
+	}
+	return aDatabase, nil
+}
+
+// CreateTable creates a new table with a name and columns
+// TODO - check if table already exists
+func (d *Database) CreateTable(ctx context.Context, name string, columns []Column) (Table, error) {
+	aTable := Table{
+		Name:    name,
+		Columns: columns,
+		Pages:   make(map[int]Page),
+	}
+	d.tables[name] = aTable
+	return aTable, nil
+}
+
+type Page struct {
+	Number int
+	buf    [pageSize]byte
+}
+
+// NewPage returns a new page with a number (page numbers begin with 0 for the first page)
+func NewPage(number int) Page {
+	return Page{
+		Number: number,
+		buf:    [pageSize]byte{},
+	}
+}
+
 type Table struct {
-}
-
-type Row struct {
+	Name    string
 	Columns []Column
-	Values  []interface{}
+	Pages   map[int]Page
+	numRows int
 }
 
-func (r Row) Size() int {
-	size := 0
-	for _, aColumn := range r.Columns {
-		size += aColumn.Size
-	}
-	return size
+// RowSize calculates row size in bytes based on its columns
+func (t Table) RowSize() int {
+	return rowSize(t.Columns...)
 }
 
-func (r Row) Marshal() ([]byte, error) {
-	buf := make([]byte, r.Size())
+// RowSlow calculates page and offset where row should go
+func (t Table) RowSlot(rowNumber int) (Page, int, error) {
+	rowSize := t.RowSize()
+	rowsPerPage := pageSize / rowSize
+	pageNumber := rowNumber / rowsPerPage
 
-	for i, aColumn := range r.Columns {
-		switch aColumn.Kind {
-		case Int4:
-			value := r.Values[i].(int32)
-			serializeInt4(value, buf, aColumn.Offset)
-		case Int8:
-			value := r.Values[i].(int64)
-			serializeInt8(value, buf, aColumn.Offset)
-		case Varchar:
-			value := r.Values[i].(string)
-			serializeString(value, buf, aColumn.Offset)
-		}
+	if pageNumber > tableMaxPages-1 {
+		return Page{}, 0, errMaximumPagesReached
 	}
 
-	return buf, nil
-}
-
-func UnmarshalRow(buf []byte, aRow *Row) error {
-	aRow.Values = make([]interface{}, 0, len(aRow.Columns))
-	for _, aColumn := range aRow.Columns {
-		switch aColumn.Kind {
-		case Int4:
-			value := deserializeToInt4(buf, aColumn.Offset)
-			aRow.Values = append(aRow.Values, value)
-		case Int8:
-			value := deserializeToInt8(buf, aColumn.Offset)
-			aRow.Values = append(aRow.Values, value)
-		case Varchar:
-			value := deserializeToString(buf, aColumn.Offset, aColumn.Size)
-			aRow.Values = append(aRow.Values, value)
-		}
+	aPage, ok := t.Pages[pageNumber]
+	if !ok {
+		aPage = NewPage(pageNumber)
+		t.Pages[pageNumber] = aPage
 	}
 
-	return nil
-}
+	rowOffset := rowNumber % rowsPerPage
+	byteOffset := rowOffset * rowSize
 
-func serializeInt4(value int32, buf []byte, offset int) {
-	src := unsafe.Pointer(&value)
-	theSrc := *((*[4]byte)(src))
-	copy(buf[offset:], theSrc[:])
-}
-
-func deserializeToInt4(buf []byte, offset int) int32 {
-	destValue := int32(0)
-	dest := unsafe.Pointer(&destValue)
-	theDest := ((*[4]byte)(dest))
-
-	copy(theDest[:], buf[offset:offset+4])
-
-	return destValue
-}
-
-func serializeInt8(value int64, buf []byte, offset int) {
-	src := unsafe.Pointer(&value)
-	theSrc := *((*[8]byte)(src))
-	copy(buf[offset:], theSrc[:])
-}
-
-func deserializeToInt8(buf []byte, offset int) int64 {
-	destValue := int64(0)
-	dest := unsafe.Pointer(&destValue)
-	theDest := ((*[8]byte)(dest))
-
-	copy(theDest[:], buf[offset:offset+8])
-
-	return destValue
-}
-
-func serializeString(value string, buf []byte, offset int) {
-	const size = unsafe.Sizeof(value)
-	src := unsafe.Pointer(&value)
-	theSrc := *((*[size]byte)(src))
-	copy(buf[offset:], theSrc[:])
-}
-
-func deserializeToString(buf []byte, offset int, length int) string {
-	destValue := ""
-	const size = unsafe.Sizeof(destValue)
-	dest := unsafe.Pointer(&destValue)
-	theDest := ((*[size]byte)(dest))
-
-	copy(theDest[:], buf[offset:offset+length])
-
-	return string(destValue)
+	return aPage, byteOffset, nil
 }
