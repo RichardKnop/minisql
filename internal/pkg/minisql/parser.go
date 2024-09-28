@@ -47,17 +47,6 @@ const (
 	Delete
 )
 
-type ColumnKind int
-
-const (
-	Integer ColumnKind = iota + 1
-	Varchar
-)
-
-type Column struct {
-	Kind ColumnKind
-}
-
 type Statement struct {
 	Kind       StatementKind
 	TableName  string
