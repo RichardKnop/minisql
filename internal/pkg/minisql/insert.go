@@ -4,21 +4,29 @@ import (
 	"context"
 )
 
-func (d Database) executeInsert(ctx context.Context, stmt Statement) (StatementResult, error) {
+func (d *Database) executeInsert(ctx context.Context, stmt Statement) (StatementResult, error) {
 	aTable, ok := d.tables[stmt.TableName]
 	if !ok {
 		return StatementResult{}, errTableDoesNotExist
 	}
 
-	rowNumber := aTable.numRows
+	return aTable.Insert(ctx, stmt)
+}
+
+func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, error) {
+	rowNumber := t.numRows
 	for _, values := range stmt.Inserts {
-		aPage, offset, err := aTable.RowSlot(rowNumber)
+		pageNumber, offset, err := t.RowSlot(rowNumber)
+		if err != nil {
+			return StatementResult{}, err
+		}
+		aPage, err := t.Page(pageNumber)
 		if err != nil {
 			return StatementResult{}, err
 		}
 		aRow := Row{
-			Columns: aTable.Columns,
-			Values:  make([]any, 0, len(aTable.Columns)),
+			Columns: t.Columns,
+			Values:  make([]any, 0, len(t.Columns)),
 		}
 		for _, aColumn := range aRow.Columns {
 			var (
@@ -48,7 +56,7 @@ func (d Database) executeInsert(ctx context.Context, stmt Statement) (StatementR
 		rowNumber += 1
 	}
 
-	rowsAffected := rowNumber - aTable.numRows
-	aTable.numRows = rowNumber
+	rowsAffected := rowNumber - t.numRows
+	t.numRows = rowNumber
 	return StatementResult{RowsAffected: rowsAffected}, nil
 }

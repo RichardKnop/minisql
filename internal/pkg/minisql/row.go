@@ -7,7 +7,11 @@ import (
 
 type Row struct {
 	Columns []Column
-	Values  []interface{}
+	Values  []any
+}
+
+func NewRow(columns []Column) Row {
+	return Row{Columns: columns}
 }
 
 func (r Row) Size() int {
@@ -68,7 +72,7 @@ func (r Row) Marshal() ([]byte, error) {
 
 // TODO - handle NULL values
 func UnmarshalRow(buf []byte, aRow *Row) error {
-	aRow.Values = make([]interface{}, 0, len(aRow.Columns))
+	aRow.Values = make([]any, 0, len(aRow.Columns))
 	for i, aColumn := range aRow.Columns {
 		offset := aRow.columnOffset(i)
 		switch aColumn.Kind {

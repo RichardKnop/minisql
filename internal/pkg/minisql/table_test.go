@@ -11,7 +11,7 @@ import (
 func TestDatabase_CreateTable(t *testing.T) {
 	t.Parallel()
 
-	aDatabase, err := NewDatabase("db")
+	aDatabase, err := NewDatabase("db", nil)
 	require.NoError(t, err)
 
 	aTable, err := aDatabase.CreateTable(context.Background(), "foo", testColumns)
@@ -32,7 +32,7 @@ func TestDatabase_CreateTable(t *testing.T) {
 func TestDatabase_DropTable(t *testing.T) {
 	t.Parallel()
 
-	aDatabase, err := NewDatabase("db")
+	aDatabase, err := NewDatabase("db", nil)
 	require.NoError(t, err)
 
 	err = aDatabase.DropTable(context.Background(), "foo")
@@ -63,6 +63,7 @@ func TestPage_Insert(t *testing.T) {
 		require.NoError(t, err)
 		offset += aRow.Size()
 	}
+	assert.Equal(t, 267*15, aPage.nextOffset)
 
 	// When trying to insert 16th row, we should receive an error
 	// explaining that there is not enough space left in the page
@@ -74,7 +75,7 @@ func TestPage_Insert(t *testing.T) {
 func TestTable_RowSlot(t *testing.T) {
 	t.Parallel()
 
-	aDatabase, err := NewDatabase("db")
+	aDatabase, err := NewDatabase("db", nil)
 	require.NoError(t, err)
 	aTable, err := aDatabase.CreateTable(context.Background(), "foo", testColumns)
 	require.NoError(t, err)
@@ -135,14 +136,14 @@ func TestTable_RowSlot(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			aPage, offset, err := aTable.RowSlot(aTestCase.RowNumber)
+			pageNumber, offset, err := aTable.RowSlot(aTestCase.RowNumber)
 			if aTestCase.Err != nil {
 				require.Error(t, err)
 				assert.ErrorIs(t, err, aTestCase.Err)
 			} else {
 				require.NoError(t, err)
 			}
-			assert.Equal(t, aTestCase.Page, aPage.Number)
+			assert.Equal(t, aTestCase.Page, pageNumber)
 			assert.Equal(t, aTestCase.Offset, offset)
 		})
 	}

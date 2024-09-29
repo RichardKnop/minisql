@@ -18,9 +18,7 @@ func TestSerializeRow(t *testing.T) {
 	data, err := aRow.Marshal()
 	require.NoError(t, err)
 
-	actual := Row{
-		Columns: testColumns,
-	}
+	actual := NewRow(testColumns)
 	err = UnmarshalRow(data, &actual)
 	require.NoError(t, err)
 

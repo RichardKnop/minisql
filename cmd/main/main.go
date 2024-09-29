@@ -70,7 +70,8 @@ func main() {
 	}()
 
 	// TODO - hardcoded database for now
-	aDatabase, err := minisql.NewDatabase("db")
+	aParser := parser.New()
+	aDatabase, err := minisql.NewDatabase("db", aParser)
 	if err != nil {
 		panic(err)
 	}
@@ -96,7 +97,7 @@ func main() {
 				fmt.Printf("Unrecognized meta command: %s\n", inputBuffer)
 			}
 		} else {
-			stmt, err := parser.New(inputBuffer).Parse(ctx)
+			stmt, err := aDatabase.PrepareStatement(ctx, inputBuffer)
 			if err != nil {
 				// Parser logs error internally
 			} else {

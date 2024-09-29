@@ -126,8 +126,7 @@ func TestParse_CreateTable(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			aParser := New(aTestCase.SQL)
-			aStatement, err := aParser.Parse(context.Background())
+			aStatement, err := New().Parse(context.Background(), aTestCase.SQL)
 			if aTestCase.Err != nil {
 				require.Error(t, err)
 				assert.ErrorIs(t, err, aTestCase.Err)
@@ -161,8 +160,7 @@ func TestParse_DropTable(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			aParser := New(aTestCase.SQL)
-			aStatement, err := aParser.Parse(context.Background())
+			aStatement, err := New().Parse(context.Background(), aTestCase.SQL)
 			if aTestCase.Err != nil {
 				require.Error(t, err)
 				assert.ErrorIs(t, err, aTestCase.Err)

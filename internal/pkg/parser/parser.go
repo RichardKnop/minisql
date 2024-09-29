@@ -78,14 +78,18 @@ type parser struct {
 	nextUpdateField string
 }
 
-func New(sql string) *parser {
-	return &parser{
-		sql:  strings.TrimSpace(sql),
-		step: stepBeginning,
-	}
+func New() *parser {
+	return new(parser)
 }
 
-func (p *parser) Parse(ctx context.Context) (minisql.Statement, error) {
+func (p *parser) Parse(ctx context.Context, sql string) (minisql.Statement, error) {
+	p.reset()
+	p.setSQL(sql)
+
+	p.i = 0
+	p.err = nil
+	p.nextUpdateField = ""
+
 	q, err := p.doParse()
 	p.err = err
 	if p.err == nil {
@@ -93,6 +97,18 @@ func (p *parser) Parse(ctx context.Context) (minisql.Statement, error) {
 	}
 	p.logError()
 	return q, p.err
+}
+
+func (p *parser) setSQL(sql string) {
+	p.sql = strings.TrimSpace(sql)
+}
+
+func (p *parser) reset() {
+	p.sql = ""
+	p.step = stepBeginning
+	p.i = 0
+	p.err = nil
+	p.nextUpdateField = ""
 }
 
 func (p *parser) doParse() (minisql.Statement, error) {

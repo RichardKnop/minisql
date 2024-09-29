@@ -40,25 +40,17 @@ func NewDataGen(seed int64) *DataGen {
 	return &g
 }
 
+func (g *DataGen) Rows(number int) []Row {
+	rows := make([]Row, 0, number)
+	for i := 0; i < number; i++ {
+		rows = append(rows, g.Row())
+	}
+	return rows
+}
+
 func (g *DataGen) Row() Row {
 	return Row{
-		Columns: []Column{
-			{
-				Kind: Int8,
-				Size: 8,
-				Name: "id",
-			},
-			{
-				Kind: Varchar,
-				Size: 255,
-				Name: "email",
-			},
-			{
-				Kind: Int4,
-				Size: 4,
-				Name: "age",
-			},
-		},
+		Columns: testColumns,
 		Values: []any{
 			g.Int64(),
 			g.Email(),

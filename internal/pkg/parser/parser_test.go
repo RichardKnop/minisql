@@ -20,7 +20,7 @@ type testCase struct {
 func TestParse_Empty(t *testing.T) {
 	t.Parallel()
 
-	aStatement, err := New("").Parse(context.Background())
+	aStatement, err := New().Parse(context.Background(), "")
 	require.Error(t, err)
 	assert.Equal(t, minisql.Statement{}, aStatement)
 	assert.Equal(t, errEmptyStatementKind, err)
@@ -29,7 +29,8 @@ func TestParse_Empty(t *testing.T) {
 func TestPeekQuotedStringWithLength(t *testing.T) {
 	t.Parallel()
 
-	aParser := New(" 'Hello, 世界' ")
+	aParser := New()
+	aParser.setSQL(" 'Hello, 世界' ")
 
 	quotedValue, ln := aParser.peekQuotedStringWithLength()
 	assert.Equal(t, "Hello, 世界", quotedValue)
@@ -61,7 +62,8 @@ func TestPeepIntWithLength(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			aParser := New(aTestCase.SQL)
+			aParser := New()
+			aParser.setSQL(aTestCase.SQL)
 			intValue, ln := aParser.peepIntWithLength()
 			assert.Equal(t, aTestCase.ExpectedValue, intValue)
 			assert.Equal(t, aTestCase.ExpectedLength, ln)
