@@ -59,17 +59,25 @@ func (p *parser) doParseInsert() (bool, error) {
 		if openingParens != "(" {
 			return false, fmt.Errorf("at INSERT INTO: expected opening parens")
 		}
-		p.Inserts = append(p.Inserts, []string{})
+		p.Inserts = append(p.Inserts, []any{})
 		p.pop()
 		p.step = stepInsertValues
 	case stepInsertValues:
-		quotedValue, ln := p.peekQuotedStringWithLength()
-		if ln == 0 {
-			return false, fmt.Errorf("at INSERT INTO: expected quoted value")
+		intValue, ln := p.peepIntWithLength()
+		if ln > 0 {
+			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], intValue)
+			p.pop()
+			p.step = stepInsertValuesCommaOrClosingParens
+			return true, nil
 		}
-		p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], quotedValue)
-		p.pop()
-		p.step = stepInsertValuesCommaOrClosingParens
+		quotedValue, ln := p.peekQuotedStringWithLength()
+		if ln > 0 {
+			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], quotedValue)
+			p.pop()
+			p.step = stepInsertValuesCommaOrClosingParens
+			return true, nil
+		}
+		return false, fmt.Errorf("at INSERT INTO: expected quoted value or int value")
 	case stepInsertValuesCommaOrClosingParens:
 		commaOrClosingParens := p.peek()
 		if commaOrClosingParens != "," && commaOrClosingParens != ")" {

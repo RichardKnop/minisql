@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"fmt"
 	"unsafe"
 )
 
@@ -10,15 +11,20 @@ type Row struct {
 }
 
 func (r Row) Size() int {
-	return rowSize(r.Columns...)
-}
-
-func rowSize(columns ...Column) int {
 	size := 0
-	for _, aColumn := range columns {
+	for _, aColumn := range r.Columns {
 		size += aColumn.Size
 	}
 	return size
+}
+
+func (r Row) GetColumn(name string) (Column, bool) {
+	for _, aColumn := range r.Columns {
+		if aColumn.Name == name {
+			return aColumn, true
+		}
+	}
+	return Column{}, false
 }
 
 func (r Row) columnOffset(idx int) int {
@@ -29,6 +35,7 @@ func (r Row) columnOffset(idx int) int {
 	return offset
 }
 
+// TODO - handle NULL values
 func (r Row) Marshal() ([]byte, error) {
 	buf := make([]byte, r.Size())
 
@@ -36,13 +43,22 @@ func (r Row) Marshal() ([]byte, error) {
 		offset := r.columnOffset(i)
 		switch aColumn.Kind {
 		case Int4:
-			value := r.Values[i].(int32)
+			value, ok := r.Values[i].(int32)
+			if !ok {
+				return nil, fmt.Errorf("could not cast value to int32")
+			}
 			serializeInt4(value, buf, offset)
 		case Int8:
-			value := r.Values[i].(int64)
+			value, ok := r.Values[i].(int64)
+			if !ok {
+				return nil, fmt.Errorf("could not cast value to int64")
+			}
 			serializeInt8(value, buf, offset)
 		case Varchar:
-			value := r.Values[i].(string)
+			value, ok := r.Values[i].(string)
+			if !ok {
+				return nil, fmt.Errorf("could not cast value to string")
+			}
 			serializeString(value, buf, offset)
 		}
 	}
@@ -50,6 +66,7 @@ func (r Row) Marshal() ([]byte, error) {
 	return buf, nil
 }
 
+// TODO - handle NULL values
 func UnmarshalRow(buf []byte, aRow *Row) error {
 	aRow.Values = make([]interface{}, 0, len(aRow.Columns))
 	for i, aColumn := range aRow.Columns {

@@ -7,7 +7,6 @@ import (
 
 var (
 	errUnrecognizedStatementType = fmt.Errorf("unrecognised statement type")
-	errMaximumPagesReached       = fmt.Errorf("maximum pages reached")
 )
 
 type Operator int
@@ -68,108 +67,57 @@ type Column struct {
 type Statement struct {
 	Kind       StatementKind
 	TableName  string
-	Conditions []Condition
-	Updates    map[string]string
-	Inserts    [][]string
+	Columns    []Column
 	Fields     []string // Used for SELECT (i.e. SELECTed field names) and INSERT (INSERTEDed field names)
 	Aliases    map[string]string
-	Columns    []Column
+	Inserts    [][]any
+	Updates    map[string]any
+	Conditions []Condition
 }
 
-// Execute will eventually become virtual machine
-func (s *Statement) Execute(ctx context.Context) error {
-	switch s.Kind {
-	case Insert:
-		return s.executeInsert(ctx)
-	case Select:
-		return s.executeSelect(ctx)
-	}
-	return errUnrecognizedStatementType
+type StatementResult struct {
+	RowsAffected int
 }
-
-func (stmt *Statement) executeInsert(ctx context.Context) error {
-	fmt.Println("This is where we would do insert")
-	return nil
-}
-
-func (stmt *Statement) executeSelect(ctx context.Context) error {
-	fmt.Println("This is where we would do select")
-	return nil
-}
-
-const (
-	pageSize      = 4096 // 4 kilobytes
-	tableMaxPages = 100  // temporary limit, TODO - remove later
-)
 
 type Database struct {
+	Name   string
 	tables map[string]Table
 }
 
 // NewDatabase creates a new database
 // TODO - check if database already exists
-func NewDatabase() (Database, error) {
+func NewDatabase(name string) (Database, error) {
 	aDatabase := Database{
+		Name:   name,
 		tables: make(map[string]Table),
 	}
 	return aDatabase, nil
 }
 
-// CreateTable creates a new table with a name and columns
-// TODO - check if table already exists
-func (d *Database) CreateTable(ctx context.Context, name string, columns []Column) (Table, error) {
-	aTable := Table{
-		Name:    name,
-		Columns: columns,
-		Pages:   make(map[int]Page),
+// ListTableNames lists names of all tables in the database
+func (d Database) ListTableNames(ctx context.Context) []string {
+	tables := make([]string, 0, len(d.tables))
+	for tableName := range d.tables {
+		tables = append(tables, tableName)
 	}
-	d.tables[name] = aTable
-	return aTable, nil
+	return tables
 }
 
-type Page struct {
-	Number int
-	buf    [pageSize]byte
-}
-
-// NewPage returns a new page with a number (page numbers begin with 0 for the first page)
-func NewPage(number int) Page {
-	return Page{
-		Number: number,
-		buf:    [pageSize]byte{},
+// ExecuteStatement will eventually become virtual machine
+func (d Database) ExecuteStatement(ctx context.Context, stmt Statement) (StatementResult, error) {
+	switch stmt.Kind {
+	case CreateTable:
+		return d.executeCreateTable(ctx, stmt)
+	case DropTable:
+		return d.executeDropTable(ctx, stmt)
+	case Insert:
+		return d.executeInsert(ctx, stmt)
+	case Select:
+		return d.executeSelect(ctx, stmt)
+	case Update:
+		return d.executeUpdate(ctx, stmt)
+	case Delete:
+		return d.executeDelete(ctx, stmt)
 	}
-}
-
-type Table struct {
-	Name    string
-	Columns []Column
-	Pages   map[int]Page
-	numRows int
-}
-
-// RowSize calculates row size in bytes based on its columns
-func (t Table) RowSize() int {
-	return rowSize(t.Columns...)
-}
-
-// RowSlow calculates page and offset where row should go
-func (t Table) RowSlot(rowNumber int) (Page, int, error) {
-	rowSize := t.RowSize()
-	rowsPerPage := pageSize / rowSize
-	pageNumber := rowNumber / rowsPerPage
-
-	if pageNumber > tableMaxPages-1 {
-		return Page{}, 0, errMaximumPagesReached
-	}
-
-	aPage, ok := t.Pages[pageNumber]
-	if !ok {
-		aPage = NewPage(pageNumber)
-		t.Pages[pageNumber] = aPage
-	}
-
-	rowOffset := rowNumber % rowsPerPage
-	byteOffset := rowOffset * rowSize
-
-	return aPage, byteOffset, nil
+	return StatementResult{}, errUnrecognizedStatementType
 }

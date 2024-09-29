@@ -10,7 +10,7 @@ import (
 	"github.com/RichardKnop/minisql/internal/pkg/minisql"
 )
 
-func TestDelete(t *testing.T) {
+func TestParse_Delete(t *testing.T) {
 	t.Parallel()
 
 	testCases := []testCase{

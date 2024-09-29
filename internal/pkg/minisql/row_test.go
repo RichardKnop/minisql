@@ -11,32 +11,7 @@ import (
 func TestSerializeRow(t *testing.T) {
 	t.Parallel()
 
-	columns := []Column{
-		{
-			Kind: Int8,
-			Size: 8,
-			Name: "id",
-		},
-		{
-			Kind: Varchar,
-			Size: 255,
-			Name: "email",
-		},
-		{
-			Kind: Int4,
-			Size: 4,
-			Name: "age",
-		},
-	}
-
-	aRow := Row{
-		Columns: columns,
-		Values: []any{
-			int64(125),
-			"john.doe@example.com",
-			int32(35),
-		},
-	}
+	aRow := gen.Row()
 
 	assert.Equal(t, 267, aRow.Size())
 
@@ -44,13 +19,12 @@ func TestSerializeRow(t *testing.T) {
 	require.NoError(t, err)
 
 	actual := Row{
-		Columns: columns,
+		Columns: testColumns,
 	}
 	err = UnmarshalRow(data, &actual)
 	require.NoError(t, err)
 
 	assert.Equal(t, aRow, actual)
-
 }
 
 func TestSerializeInt4(t *testing.T) {

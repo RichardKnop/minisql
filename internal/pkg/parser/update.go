@@ -69,7 +69,7 @@ func (p *parser) doParseUpdate() (bool, error) {
 
 func (p *parser) setUpdate(field, value string) {
 	if p.Updates == nil {
-		p.Updates = make(map[string]string)
+		p.Updates = make(map[string]any)
 	}
 	p.Updates[field] = value
 }

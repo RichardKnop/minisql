@@ -10,7 +10,7 @@ import (
 	"github.com/RichardKnop/minisql/internal/pkg/minisql"
 )
 
-func TestCreateTable(t *testing.T) {
+func TestParse_CreateTable(t *testing.T) {
 	t.Parallel()
 
 	testCases := []testCase{
@@ -139,7 +139,7 @@ func TestCreateTable(t *testing.T) {
 	}
 }
 
-func TestDropTable(t *testing.T) {
+func TestParse_DropTable(t *testing.T) {
 	t.Parallel()
 
 	testCases := []testCase{

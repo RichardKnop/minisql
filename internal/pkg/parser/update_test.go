@@ -10,7 +10,7 @@ import (
 	"github.com/RichardKnop/minisql/internal/pkg/minisql"
 )
 
-func TestUpdate(t *testing.T) {
+func TestParse_Update(t *testing.T) {
 	t.Parallel()
 
 	testCases := []testCase{
@@ -62,7 +62,7 @@ func TestUpdate(t *testing.T) {
 			Expected: minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]string{
+				Updates: map[string]any{
 					"b": "hello",
 				},
 			},
@@ -74,7 +74,7 @@ func TestUpdate(t *testing.T) {
 			Expected: minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]string{
+				Updates: map[string]any{
 					"b": "hello",
 				},
 				Conditions: []minisql.Condition{
@@ -92,7 +92,7 @@ func TestUpdate(t *testing.T) {
 			Expected: minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]string{
+				Updates: map[string]any{
 					"b": "hello",
 				},
 				Conditions: []minisql.Condition{
@@ -112,7 +112,7 @@ func TestUpdate(t *testing.T) {
 			Expected: minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]string{
+				Updates: map[string]any{
 					"b": "hello\\'world",
 				},
 				Conditions: []minisql.Condition{
@@ -132,7 +132,7 @@ func TestUpdate(t *testing.T) {
 			Expected: minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]string{
+				Updates: map[string]any{
 					"b": "hello",
 					"c": "bye",
 				},
@@ -153,7 +153,7 @@ func TestUpdate(t *testing.T) {
 			Expected: minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]string{
+				Updates: map[string]any{
 					"b": "hello",
 					"c": "bye",
 				},

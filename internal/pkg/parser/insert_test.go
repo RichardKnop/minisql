@@ -10,7 +10,7 @@ import (
 	"github.com/RichardKnop/minisql/internal/pkg/minisql"
 )
 
-func TestInsert(t *testing.T) {
+func TestParse_Insert(t *testing.T) {
 	t.Parallel()
 
 	testCases := []testCase{
@@ -75,7 +75,7 @@ func TestInsert(t *testing.T) {
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b"},
-				Inserts:   [][]string{{}},
+				Inserts:   [][]any{{}},
 			},
 			Err: errInsertFieldValueCountMismatch,
 		},
@@ -86,7 +86,7 @@ func TestInsert(t *testing.T) {
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b"},
-				Inserts:   [][]string{{"1"}},
+				Inserts:   [][]any{{"1"}},
 			},
 		},
 		{
@@ -105,7 +105,7 @@ func TestInsert(t *testing.T) {
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b", "c", "d"},
-				Inserts:   [][]string{{"1", "2", "3"}},
+				Inserts:   [][]any{{"1", "2", "3"}},
 			},
 		},
 		{
@@ -115,7 +115,17 @@ func TestInsert(t *testing.T) {
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b", "c", "d"},
-				Inserts:   [][]string{{"1", "2", "3"}, {"4", "5", "6"}},
+				Inserts:   [][]any{{"1", "2", "3"}, {"4", "5", "6"}},
+			},
+		},
+		{
+			Name: "INSERT with multiple fields of different types works",
+			SQL:  "INSERT INTO 'a' (b, c, d, e, f) VALUES (25, 'foo', 7, 'bar', 1500000)",
+			Expected: minisql.Statement{
+				Kind:      minisql.Insert,
+				TableName: "a",
+				Fields:    []string{"b", "c", "d", "e", "f"},
+				Inserts:   [][]any{{25, "foo", 7, "bar", 1500000}},
 			},
 		},
 	}

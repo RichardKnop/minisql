@@ -10,7 +10,7 @@ import (
 	"github.com/RichardKnop/minisql/internal/pkg/minisql"
 )
 
-func TestSelect(t *testing.T) {
+func TestParse_Select(t *testing.T) {
 	t.Parallel()
 
 	testCases := []testCase{

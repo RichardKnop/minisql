@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/RichardKnop/minisql/internal/pkg/minisql"
 	"github.com/RichardKnop/minisql/internal/pkg/parser"
 )
 
@@ -32,6 +33,7 @@ const (
 	Unknown metaCommand = iota + 1
 	Help
 	Exit
+	ListTables
 )
 
 func isMetaCommand(inputBuffer string) bool {
@@ -44,6 +46,8 @@ func doMetaCommand(inputBuffer string) metaCommand {
 		return Help
 	case "exit":
 		return Exit
+	case "tables":
+		return ListTables
 	default:
 		return Unknown
 	}
@@ -65,6 +69,12 @@ func main() {
 		os.Exit(1)
 	}()
 
+	// TODO - hardcoded database for now
+	aDatabase, err := minisql.NewDatabase("db")
+	if err != nil {
+		panic(err)
+	}
+
 	// REPL (Read-eval-print loop) start
 	for reader.Scan() {
 		inputBuffer := sanitizeReplInput(reader.Text())
@@ -73,20 +83,28 @@ func main() {
 			case Help:
 				fmt.Println(".help    - Show available commands")
 				fmt.Println(".exit    - Closes program")
+				fmt.Println(".tables  - List all tables in the current database")
 			case Exit:
 				// Return exits with code 0 by default, os.Exit(0)
 				// would exit immediately without any defers
 				return
+			case ListTables:
+				for _, table := range aDatabase.ListTableNames(ctx) {
+					fmt.Println(table)
+				}
 			case Unknown:
 				fmt.Printf("Unrecognized meta command: %s\n", inputBuffer)
 			}
 		} else {
-			aParser := parser.New(inputBuffer)
-			aStatement, err := aParser.Parse(ctx)
+			stmt, err := parser.New(inputBuffer).Parse(ctx)
 			if err != nil {
 				// Parser logs error internally
-			} else if err := aStatement.Execute(ctx); err != nil {
-				fmt.Printf("Error executing statement: %s", err)
+			} else {
+				aResult, err := aDatabase.ExecuteStatement(ctx, stmt)
+				if err != nil {
+					fmt.Printf("Error executing statement: %s\n", err)
+				}
+				fmt.Printf("Rows affected: %d\n", aResult.RowsAffected)
 			}
 		}
 		printPrompt()

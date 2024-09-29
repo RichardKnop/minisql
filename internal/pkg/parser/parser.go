@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/RichardKnop/minisql/internal/pkg/minisql"
 )
@@ -353,6 +355,27 @@ func (p *parser) peekQuotedStringWithLength() (string, int) {
 		}
 	}
 	return "", 0
+}
+
+func (p *parser) peepIntWithLength() (int, int) {
+	if len(p.sql) < p.i || !unicode.IsDigit(rune(p.sql[p.i])) {
+		return 0, 0
+	}
+	for i := p.i + 1; i < len(p.sql); i++ {
+		if unicode.IsDigit(rune(p.sql[i])) {
+			continue
+		}
+		intValue, err := strconv.Atoi(p.sql[p.i:i])
+		if err != nil {
+			return 0, 0
+		}
+		return intValue, len(p.sql[p.i:i])
+	}
+	intValue, err := strconv.Atoi(p.sql[p.i:len(p.sql)])
+	if err != nil {
+		return 0, 0
+	}
+	return intValue, len(p.sql[p.i:len(p.sql)])
 }
 
 func (p *parser) peekIdentifierWithLength() (string, int) {
