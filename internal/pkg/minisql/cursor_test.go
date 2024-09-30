@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,8 +28,13 @@ func TestCursor_TableStart_NotEmpty(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
+	pagerMock := new(MockPager)
+	var (
+		page0 = Page{Number: 0}
+	)
+	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(&page0, nil)
 
-	aDatabase, err := NewDatabase("db", nil, nil)
+	aDatabase, err := NewDatabase("db", nil, pagerMock)
 	require.NoError(t, err)
 	aTable, err := aDatabase.CreateTable(ctx, "foo", testColumns)
 	require.NoError(t, err)
@@ -38,14 +44,23 @@ func TestCursor_TableStart_NotEmpty(t *testing.T) {
 	aCursor := TableStart(aTable)
 	assert.Equal(t, 0, aCursor.RowNumber)
 	assert.False(t, aCursor.EndOfTable)
+
+	mock.AssertExpectationsForObjects(t, pagerMock)
 }
 
 func TestCursor_TableEnd(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
+	pagerMock := new(MockPager)
+	var (
+		page0 = Page{Number: 0}
+		page1 = Page{Number: 1}
+	)
+	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(&page0, nil)
+	pagerMock.On("GetPage", mock.Anything, "foo", uint32(1)).Return(&page1, nil)
 
-	aDatabase, err := NewDatabase("db", nil, nil)
+	aDatabase, err := NewDatabase("db", nil, pagerMock)
 	require.NoError(t, err)
 	aTable, err := aDatabase.CreateTable(ctx, "foo", testColumns)
 	require.NoError(t, err)
@@ -56,14 +71,23 @@ func TestCursor_TableEnd(t *testing.T) {
 	aCursor := TableEnd(aTable)
 	assert.Equal(t, 19, aCursor.RowNumber)
 	assert.True(t, aCursor.EndOfTable)
+
+	mock.AssertExpectationsForObjects(t, pagerMock)
 }
 
 func TestCursor_TableAt(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
+	pagerMock := new(MockPager)
+	var (
+		page0 = Page{Number: 0}
+		page1 = Page{Number: 1}
+	)
+	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(&page0, nil)
+	pagerMock.On("GetPage", mock.Anything, "foo", uint32(1)).Return(&page1, nil)
 
-	aDatabase, err := NewDatabase("db", nil, nil)
+	aDatabase, err := NewDatabase("db", nil, pagerMock)
 	require.NoError(t, err)
 	aTable, err := aDatabase.CreateTable(ctx, "foo", testColumns)
 	require.NoError(t, err)
@@ -74,6 +98,8 @@ func TestCursor_TableAt(t *testing.T) {
 	aCursor := TableAt(aTable, 10)
 	assert.Equal(t, 10, aCursor.RowNumber)
 	assert.False(t, aCursor.EndOfTable)
+
+	mock.AssertExpectationsForObjects(t, pagerMock)
 }
 
 func TestCursor_Value(t *testing.T) {

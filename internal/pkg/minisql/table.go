@@ -14,21 +14,9 @@ var (
 type Table struct {
 	Name    string
 	Columns []Column
-	Pages   []*Page
+	pager   Pager
 	rowSize uint32
 	numRows int
-}
-
-// Page retrieves the page by its number or creates a new page and returns it
-func (t *Table) Page(pageNumber uint32) (*Page, error) {
-	if pageNumber >= MaxPages {
-		return nil, errMaximumPagesReached
-	}
-	if int(pageNumber) >= len(t.Pages) {
-		aPage := NewPage(pageNumber)
-		t.Pages = append(t.Pages, aPage)
-	}
-	return t.Pages[pageNumber], nil
 }
 
 // CreateTable creates a new table with a name and columns
@@ -40,7 +28,7 @@ func (d *Database) CreateTable(ctx context.Context, name string, columns []Colum
 	d.tables[name] = &Table{
 		Name:    name,
 		Columns: columns,
-		Pages:   make([]*Page, 0, MaxPages),
+		pager:   d.pager,
 		rowSize: Row{Columns: columns}.Size(),
 	}
 	return d.tables[name], nil

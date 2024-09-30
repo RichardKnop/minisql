@@ -5,7 +5,11 @@ import (
 	"unsafe"
 )
 
+// TODO - RowID will be used as key for B-tree data structure
+type RowID int64
+
 type Row struct {
+	ID      RowID
 	Columns []Column
 	Values  []any
 }

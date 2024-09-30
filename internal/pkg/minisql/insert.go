@@ -22,7 +22,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 		if err != nil {
 			return StatementResult{}, err
 		}
-		aPage, err := t.Page(pageNumber)
+		aPage, err := t.pager.GetPage(ctx, t.Name, pageNumber)
 		if err != nil {
 			return StatementResult{}, err
 		}

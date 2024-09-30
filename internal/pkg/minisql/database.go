@@ -14,7 +14,7 @@ type Parser interface {
 }
 
 type Pager interface {
-	GetPage(int64) (*Page, error)
+	GetPage(context.Context, string, uint32) (*Page, error)
 }
 
 type Database struct {

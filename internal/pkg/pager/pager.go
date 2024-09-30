@@ -11,12 +11,12 @@ import (
 
 const (
 	PageSize = 4096 // 4 kilobytes
-	MaxPages = 100  // temporary limit, TODO - remove later
+	MaxPages = 1000 // temporary limit, TODO - remove later
 )
 
 type Pager struct {
 	PageNum int64
-	Pages   []*minisql.Page
+	Pages   map[string][]*minisql.Page
 
 	fileName string
 	file     *os.File
@@ -52,12 +52,12 @@ func (p *Pager) Open(ctx context.Context) error {
 	}
 	p.PageNum = pageNum
 
-	p.Pages = make([]*minisql.Page, MaxPages)
+	p.Pages = make(map[string][]*minisql.Page)
 
 	return nil
 }
 
-func (p *Pager) GetPage(int64) (*minisql.Page, error) {
+func (p *Pager) GetPage(ctx context.Context, tableName string, pageNumber uint32) (*minisql.Page, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 

@@ -33,7 +33,7 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 			if err != nil {
 				return Row{}, err
 			}
-			aPage, err := t.Page(pageNumber)
+			aPage, err := t.pager.GetPage(ctx, t.Name, pageNumber)
 			if err != nil {
 				return Row{}, err
 			}

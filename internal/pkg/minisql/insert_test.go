@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -12,8 +13,13 @@ func TestTable_Insert(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
+	pagerMock := new(MockPager)
+	var (
+		page0 = Page{Number: 0}
+	)
+	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(&page0, nil)
 
-	aDatabase, err := NewDatabase("db", nil, nil)
+	aDatabase, err := NewDatabase("db", nil, pagerMock)
 	require.NoError(t, err)
 
 	aRow := gen.Row()
@@ -47,4 +53,6 @@ func TestTable_Insert(t *testing.T) {
 	_, err = aResult.Rows(ctx)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrNoMoreRows)
+
+	mock.AssertExpectationsForObjects(t, pagerMock)
 }
