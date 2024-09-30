@@ -13,7 +13,7 @@ func TestSerializeRow(t *testing.T) {
 
 	aRow := gen.Row()
 
-	assert.Equal(t, 267, aRow.Size())
+	assert.Equal(t, uint32(267), aRow.Size())
 
 	data, err := aRow.Marshal()
 	require.NoError(t, err)
@@ -60,7 +60,7 @@ func TestSerializeString(t *testing.T) {
 
 	serializeString(value, buf, 0)
 
-	out := deserializeToString(buf, 0, int(size))
+	out := deserializeToString(buf, 0, uint32(size))
 
 	assert.Equal(t, value, out)
 }

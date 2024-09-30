@@ -70,7 +70,7 @@ func (p *parser) doParseCreateTable() (bool, error) {
 			return false, fmt.Errorf("at CREATE TABLE: varchar size must be > 0 and <= %d", varcharMaxLength)
 		}
 		p.pop()
-		p.Columns[len(p.Columns)-1].Size = size
+		p.Columns[len(p.Columns)-1].Size = uint32(size)
 		closingParens := p.peek()
 		if closingParens != ")" {
 			return false, fmt.Errorf("at CREATE TABLE: expecting closing parenthesis after varchar size")

@@ -55,7 +55,7 @@ const (
 
 type Column struct {
 	Kind ColumnKind
-	Size int
+	Size uint32
 	Name string
 }
 

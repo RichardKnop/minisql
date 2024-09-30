@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/RichardKnop/minisql/internal/pkg/minisql"
+	"github.com/RichardKnop/minisql/internal/pkg/pager"
 	"github.com/RichardKnop/minisql/internal/pkg/parser"
 )
 
@@ -56,6 +57,22 @@ func doMetaCommand(inputBuffer string) metaCommand {
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// TODO - hardcoded database for now
+	aParser := parser.New()
+	aPager := pager.New("db")
+	if err := aPager.Open(ctx); err != nil {
+		panic(err)
+	}
+	defer aPager.Close()
+	aDatabase, err := minisql.NewDatabase("db", aParser, aPager)
+	if err != nil {
+		panic(err)
+	}
+	if err := aDatabase.Open(ctx); err != nil {
+		panic(err)
+	}
+	defer aDatabase.Close()
+
 	reader := bufio.NewScanner(os.Stdin)
 	printPrompt()
 
@@ -68,13 +85,6 @@ func main() {
 		// TODO - cleanup
 		os.Exit(1)
 	}()
-
-	// TODO - hardcoded database for now
-	aParser := parser.New()
-	aDatabase, err := minisql.NewDatabase("db", aParser)
-	if err != nil {
-		panic(err)
-	}
 
 	// REPL (Read-eval-print loop) start
 	for reader.Scan() {

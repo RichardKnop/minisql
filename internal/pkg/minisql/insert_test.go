@@ -13,7 +13,7 @@ func TestTable_Insert(t *testing.T) {
 
 	ctx := context.Background()
 
-	aDatabase, err := NewDatabase("db", nil)
+	aDatabase, err := NewDatabase("db", nil, nil)
 	require.NoError(t, err)
 
 	aRow := gen.Row()

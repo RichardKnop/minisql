@@ -14,9 +14,11 @@ func (d *Database) executeInsert(ctx context.Context, stmt Statement) (Statement
 }
 
 func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, error) {
-	rowNumber := t.numRows
+	inserted := 0
+
+	aCursor := TableEnd(t)
 	for _, values := range stmt.Inserts {
-		pageNumber, offset, err := t.RowSlot(rowNumber)
+		pageNumber, offset, err := aCursor.Value()
 		if err != nil {
 			return StatementResult{}, err
 		}
@@ -28,35 +30,19 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			Columns: t.Columns,
 			Values:  make([]any, 0, len(t.Columns)),
 		}
-		for _, aColumn := range aRow.Columns {
-			var (
-				found    = false
-				fieldIdx = 0
-			)
-			for i, field := range stmt.Fields {
-				if field == aColumn.Name {
-					found = true
-					fieldIdx = i
-					break
-				}
-			}
-			if found {
-				aRow.Values = append(aRow.Values, values[fieldIdx])
-			} else {
-				// TODO - NULL values currently not handled properly
-				aRow.Values = append(aRow.Values, nil)
-			}
-		}
+		aRow = aRow.appendValues(stmt.Fields, values)
+
 		if err := aPage.Insert(ctx, offset, aRow); err != nil {
 			// TODO - handle partial insert by deleting all previously inserted rows
 			// if a row insert fails so we don't end up with inconsistent state
 			return StatementResult{}, err
 		}
 
-		rowNumber += 1
+		aCursor.Advance()
+		inserted += 1
 	}
 
-	rowsAffected := rowNumber - t.numRows
-	t.numRows = rowNumber
+	rowsAffected := inserted
+	t.numRows += inserted
 	return StatementResult{RowsAffected: rowsAffected}, nil
 }
