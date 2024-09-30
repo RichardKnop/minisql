@@ -28,3 +28,27 @@ Create a table:
 minisql> create table foo(id int4, email varchar(255), age int4)
 Rows affected: 0
 ```
+
+Insert a row:
+
+```sh
+minisql> insert into foo(id, email, age) values(1, 'john@example.com', 35)
+Rows affected: 1
+```
+
+Insert multiple rows:
+
+```sh
+minisql> insert into foo(id, email, age) values(2, 'jane@example.com', 32), (3, 'jack@example.com', 27)
+Rows affected: 2
+```
+
+Select from table:
+
+```sh
+minisql> select * from foo
+[1 john@example.com 35]
+[2 jane@example.com 32]
+[3 jack@example.com 27]
+```
+

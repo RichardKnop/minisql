@@ -15,13 +15,13 @@ func TestTable_Select(t *testing.T) {
 	ctx := context.Background()
 	pagerMock := new(MockPager)
 	var (
-		page0 = Page{Number: 0}
-		page1 = Page{Number: 1}
+		page0 = NewPage(0)
+		page1 = NewPage(1)
 	)
-	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(&page0, nil)
-	pagerMock.On("GetPage", mock.Anything, "foo", uint32(1)).Return(&page1, nil)
+	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(page0, nil)
+	pagerMock.On("GetPage", mock.Anything, "foo", uint32(1)).Return(page1, nil)
 
-	aDatabase, err := NewDatabase("db", nil, pagerMock)
+	aDatabase, err := NewDatabase(ctx, "db", nil, pagerMock)
 	require.NoError(t, err)
 	aTable, err := aDatabase.CreateTable(ctx, "foo", testColumns)
 	require.NoError(t, err)

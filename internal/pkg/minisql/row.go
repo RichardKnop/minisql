@@ -1,8 +1,8 @@
 package minisql
 
 import (
+	"bytes"
 	"fmt"
-	"unsafe"
 )
 
 // TODO - RowID will be used as key for B-tree data structure
@@ -109,24 +109,50 @@ func (r Row) Marshal() ([]byte, error) {
 		case Int4:
 			value, ok := r.Values[i].(int32)
 			if !ok {
-				return nil, fmt.Errorf("could not cast value to int32")
+				_, ok = r.Values[i].(int64)
+				if !ok {
+					return nil, fmt.Errorf("could not cast value to either int64 or int32")
+				}
+				value = int32(r.Values[i].(int64))
 			}
-			serializeInt4(value, buf, offset)
-			offset += uint32(aColumn.Size)
+			buf[offset+0] = byte(value >> 0)
+			offset += 1
+			buf[offset+0] = byte(value >> 8)
+			offset += 1
+			buf[offset+0] = byte(value >> 16)
+			offset += 1
+			buf[offset+0] = byte(value >> 24)
+			offset += 1
 		case Int8:
 			value, ok := r.Values[i].(int64)
 			if !ok {
 				return nil, fmt.Errorf("could not cast value to int64")
 			}
-			serializeInt8(value, buf, offset)
-			offset += uint32(aColumn.Size)
+			buf[offset+0] = byte(value >> 0)
+			offset += 1
+			buf[offset+0] = byte(value >> 8)
+			offset += 1
+			buf[offset+0] = byte(value >> 16)
+			offset += 1
+			buf[offset+0] = byte(value >> 24)
+			offset += 1
+			buf[offset+0] = byte(value >> 32)
+			offset += 1
+			buf[offset+0] = byte(value >> 40)
+			offset += 1
+			buf[offset+0] = byte(value >> 48)
+			offset += 1
+			buf[offset+0] = byte(value >> 56)
+			offset += 1
 		case Varchar:
 			value, ok := r.Values[i].(string)
 			if !ok {
 				return nil, fmt.Errorf("could not cast value to string")
 			}
-			serializeString(value, buf, offset)
-			offset += uint32(aColumn.Size)
+			src := make([]byte, len(value))
+			copy(src, []byte(value))
+			copy(buf[offset:], src)
+			offset += aColumn.Size
 		}
 	}
 
@@ -140,66 +166,30 @@ func UnmarshalRow(buf []byte, aRow *Row) error {
 		offset := aRow.columnOffset(i)
 		switch aColumn.Kind {
 		case Int4:
-			value := deserializeToInt4(buf, offset)
-			aRow.Values = append(aRow.Values, value)
+			value := 0 |
+				(uint32(buf[offset+0+0]) << 0) |
+				(uint32(buf[offset+1+0]) << 8) |
+				(uint32(buf[offset+2+0]) << 16) |
+				(uint32(buf[offset+3+0]) << 24)
+			aRow.Values = append(aRow.Values, int32(value))
+			offset += 4
 		case Int8:
-			value := deserializeToInt8(buf, offset)
-			aRow.Values = append(aRow.Values, value)
+			value := 0 |
+				(uint64(buf[offset+0+0]) << 0) |
+				(uint64(buf[offset+1+0]) << 8) |
+				(uint64(buf[offset+2+0]) << 16) |
+				(uint64(buf[offset+3+0]) << 24) |
+				(uint64(buf[offset+4+0]) << 32) |
+				(uint64(buf[offset+5+0]) << 40) |
+				(uint64(buf[offset+6+0]) << 48) |
+				(uint64(buf[offset+7+0]) << 56)
+			aRow.Values = append(aRow.Values, int64(value))
 		case Varchar:
-			value := deserializeToString(buf, offset, aColumn.Size)
-			aRow.Values = append(aRow.Values, value)
+			dst := make([]byte, aColumn.Size)
+			copy(dst, buf[offset:aColumn.Size])
+			aRow.Values = append(aRow.Values, string(bytes.Trim(dst, "\x00")))
 		}
 	}
 
 	return nil
-}
-
-func serializeInt4(value int32, buf []byte, offset uint32) {
-	src := unsafe.Pointer(&value)
-	theSrc := *((*[4]byte)(src))
-	copy(buf[offset:], theSrc[:])
-}
-
-func deserializeToInt4(buf []byte, offset uint32) int32 {
-	destValue := int32(0)
-	dest := unsafe.Pointer(&destValue)
-	theDest := ((*[4]byte)(dest))
-
-	copy(theDest[:], buf[offset:offset+4])
-
-	return destValue
-}
-
-func serializeInt8(value int64, buf []byte, offset uint32) {
-	src := unsafe.Pointer(&value)
-	theSrc := *((*[8]byte)(src))
-	copy(buf[offset:], theSrc[:])
-}
-
-func deserializeToInt8(buf []byte, offset uint32) int64 {
-	destValue := int64(0)
-	dest := unsafe.Pointer(&destValue)
-	theDest := ((*[8]byte)(dest))
-
-	copy(theDest[:], buf[offset:offset+8])
-
-	return destValue
-}
-
-func serializeString(value string, buf []byte, offset uint32) {
-	const size = unsafe.Sizeof(value)
-	src := unsafe.Pointer(&value)
-	theSrc := *((*[size]byte)(src))
-	copy(buf[offset:], theSrc[:])
-}
-
-func deserializeToString(buf []byte, offset, length uint32) string {
-	destValue := ""
-	const size = unsafe.Sizeof(destValue)
-	dest := unsafe.Pointer(&destValue)
-	theDest := ((*[size]byte)(dest))
-
-	copy(theDest[:], buf[offset:offset+length])
-
-	return string(destValue)
 }

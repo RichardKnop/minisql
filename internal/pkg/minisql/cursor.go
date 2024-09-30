@@ -17,7 +17,7 @@ func TableStart(aTable *Table) *Cursor {
 func TableEnd(aTable *Table) *Cursor {
 	rowNumber := 0
 	if aTable.numRows > 0 {
-		rowNumber = aTable.numRows - 1
+		rowNumber = aTable.numRows
 	}
 	return &Cursor{
 		Table:      aTable,
@@ -44,14 +44,14 @@ func (c *Cursor) Advance() {
 func (c *Cursor) Value() (uint32, uint32, error) {
 	rowsPerPage := PageSize / c.Table.rowSize
 	rowNumber := c.RowNumber
-	pageNumber := uint32(rowNumber / int(rowsPerPage))
+	pageIdx := uint32(rowNumber / int(rowsPerPage))
 
-	if pageNumber >= MaxPages {
+	if pageIdx >= MaxPages {
 		return uint32(0), uint32(0), errMaximumPagesReached
 	}
 
 	rowOffset := uint32(rowNumber % int(rowsPerPage))
 	byteOffset := rowOffset * c.Table.rowSize
 
-	return uint32(pageNumber), uint32(byteOffset), nil
+	return pageIdx, uint32(byteOffset), nil
 }

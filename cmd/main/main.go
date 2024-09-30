@@ -58,20 +58,21 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// TODO - hardcoded database for now
-	aParser := parser.New()
-	aPager := pager.New("db")
-	if err := aPager.Open(ctx); err != nil {
-		panic(err)
-	}
-	defer aPager.Close()
-	aDatabase, err := minisql.NewDatabase("db", aParser, aPager)
+	dbFile, err := os.OpenFile("db", os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
 		panic(err)
 	}
-	if err := aDatabase.Open(ctx); err != nil {
+	defer dbFile.Close()
+
+	aPager, err := pager.New(dbFile, minisql.SchemaTableName)
+	if err != nil {
 		panic(err)
 	}
-	defer aDatabase.Close()
+	aDatabase, err := minisql.NewDatabase(ctx, "db", parser.New(), aPager)
+	if err != nil {
+		panic(err)
+	}
+	aDatabase.CreateTestTable()
 
 	reader := bufio.NewScanner(os.Stdin)
 	printPrompt()
@@ -81,6 +82,9 @@ func main() {
 
 	go func() {
 		<-c
+		if err := aDatabase.Close(ctx); err != nil {
+			fmt.Printf("error closing database: %s\n", err)
+		}
 		cancel()
 		// TODO - cleanup
 		os.Exit(1)
@@ -114,8 +118,14 @@ func main() {
 				aResult, err := aDatabase.ExecuteStatement(ctx, stmt)
 				if err != nil {
 					fmt.Printf("Error executing statement: %s\n", err)
+				} else if stmt.Kind == minisql.Insert || stmt.Kind == minisql.Update || stmt.Kind == minisql.Delete {
+					fmt.Printf("Rows affected: %d\n", aResult.RowsAffected)
+				} else if stmt.Kind == minisql.Select {
+					aRow, err := aResult.Rows(ctx)
+					for ; err == nil; aRow, err = aResult.Rows(ctx) {
+						fmt.Println(aRow.Values)
+					}
 				}
-				fmt.Printf("Rows affected: %d\n", aResult.RowsAffected)
 			}
 		}
 		printPrompt()

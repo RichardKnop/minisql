@@ -18,11 +18,11 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 
 	aCursor := TableEnd(t)
 	for _, values := range stmt.Inserts {
-		pageNumber, offset, err := aCursor.Value()
+		pageIdx, offset, err := aCursor.Value()
 		if err != nil {
 			return StatementResult{}, err
 		}
-		aPage, err := t.pager.GetPage(ctx, t.Name, pageNumber)
+		aPage, err := t.pager.GetPage(ctx, t.Name, pageIdx)
 		if err != nil {
 			return StatementResult{}, err
 		}

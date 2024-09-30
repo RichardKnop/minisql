@@ -104,6 +104,7 @@ func (p *parser) setSQL(sql string) {
 }
 
 func (p *parser) reset() {
+	p.Statement = minisql.Statement{}
 	p.sql = ""
 	p.step = stepBeginning
 	p.i = 0
@@ -373,7 +374,7 @@ func (p *parser) peekQuotedStringWithLength() (string, int) {
 	return "", 0
 }
 
-func (p *parser) peepIntWithLength() (int, int) {
+func (p *parser) peepIntWithLength() (int64, int) {
 	if len(p.sql) < p.i || !unicode.IsDigit(rune(p.sql[p.i])) {
 		return 0, 0
 	}
@@ -385,13 +386,13 @@ func (p *parser) peepIntWithLength() (int, int) {
 		if err != nil {
 			return 0, 0
 		}
-		return intValue, len(p.sql[p.i:i])
+		return int64(intValue), len(p.sql[p.i:i])
 	}
 	intValue, err := strconv.Atoi(p.sql[p.i:len(p.sql)])
 	if err != nil {
 		return 0, 0
 	}
-	return intValue, len(p.sql[p.i:len(p.sql)])
+	return int64(intValue), len(p.sql[p.i:len(p.sql)])
 }
 
 func (p *parser) peekIdentifierWithLength() (string, int) {

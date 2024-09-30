@@ -125,7 +125,7 @@ func TestParse_Insert(t *testing.T) {
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b", "c", "d", "e", "f"},
-				Inserts:   [][]any{{25, "foo", 7, "bar", 1500000}},
+				Inserts:   [][]any{{int64(25), "foo", int64(7), "bar", int64(1500000)}},
 			},
 		},
 	}

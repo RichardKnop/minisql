@@ -10,12 +10,64 @@ var (
 )
 
 type Parser interface {
-	Parse(ctx context.Context, sql string) (Statement, error)
+	Parse(context.Context, string) (Statement, error)
 }
 
 type Pager interface {
 	GetPage(context.Context, string, uint32) (*Page, error)
+	FileSize() int64
+	Flush(context.Context, uint32, int64) error
 }
+
+const (
+	// Name of the table that contains database schema
+	SchemaTableName = "minisql_main"
+)
+
+var (
+	schemaTableColumns = []Column{
+		{
+			Kind: Int4,
+			Size: 4,
+			Name: "type",
+		},
+		{
+			Kind: Varchar,
+			Size: 100,
+			Name: "name",
+		},
+		{
+			Kind: Varchar,
+			Size: 100,
+			Name: "table_name",
+		},
+		{
+			Kind: Int8,
+			Size: 8,
+			Name: "root_page",
+		},
+		{
+			Kind: Varchar,
+			Size: 1000,
+			Name: "sql",
+		},
+	}
+
+	schemaTableSQL = `CREATE TABLE minisql_main (
+		type INT4,
+		name VARCHAR(100),
+		table_name VARCHAR(100),
+		root_page INT4,
+		SQL VARCHAR(1000)
+	)`
+)
+
+type SchemaType int
+
+const (
+	SchemaTable SchemaType = iota + 1
+	SchemaIndex
+)
 
 type Database struct {
 	Name   string
@@ -25,81 +77,29 @@ type Database struct {
 }
 
 // NewDatabase creates a new database
-// TODO - check if database already exists
-func NewDatabase(name string, aParser Parser, aPager Pager) (*Database, error) {
-	aDatabase := Database{
+func NewDatabase(ctx context.Context, name string, aParser Parser, aPager Pager) (*Database, error) {
+	aDatabase := &Database{
 		Name:   name,
 		parser: aParser,
 		pager:  aPager,
 		tables: make(map[string]*Table),
 	}
-	return &aDatabase, nil
-}
 
-// const (
-// 	// Defines how much of the first partition is reserved
-// 	// for database configuration
-// 	configSize = 100
-// 	// Name of the table that contains database schema
-// 	mainSchemaTable = "minisql_main"
-// )
+	// rooPageIdx := uint32(0)
 
-// var (
-// 	mainSchemaTableColumns = []Column{
-// 		{
-// 			Kind: Int4,
-// 			Size: 4,
-// 			Name: "type",
-// 		},
-// 		{
-// 			Kind: Varchar,
-// 			Size: 100,
-// 			Name: "name",
-// 		},
-// 		{
-// 			Kind: Varchar,
-// 			Size: 100,
-// 			Name: "table_name",
-// 		},
-// 		{
-// 			Kind: Int8,
-// 			Size: 8,
-// 			Name: "root_page",
-// 		},
-// 		{
-// 			Kind: Varchar,
-// 			Size: 1000,
-// 			Name: "sql",
-// 		},
-// 	}
+	// // Get the root page
+	// aRootPage, err := aDatabase.pager.GetPage(ctx, SchemaTableName, rooPageIdx)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-// 	mainSchemaTableSQL = `CREATE TABLE minisql_main (
-// 		type INT4,
-// 		name VARCHAR(100),
-// 		table_name VARCHAR(100),
-// 		root_page INT4,
-// 		SQL VARCHAR(1000)
-// 	)`
-// )
-
-// type SchemaType int
-
-// const (
-// 	SchemaTable SchemaType = iota + 1
-// 	SchemaIndex
-// )
-
-func (d *Database) Open(ctx context.Context) error {
-	// TODO - open a file pointer
-
-	// aTable, ok := d.tables[mainSchemaTable]
-	// if !ok {
-	// 	// If this is a new database, create minisql_main table and insert its first row
-	// 	// minisql_main's root page will be 0.
-	// 	aTable, err := d.CreateTable(ctx, mainSchemaTable, mainSchemaTableColumns)
+	// if aRootPage.nextOffset == 0 {
+	// 	aTable, err := aDatabase.CreateTable(ctx, SchemaTableName, schemaTableColumns)
 	// 	if err != nil {
-	// 		return err
+	// 		return nil, err
 	// 	}
+
+	// 	// If this is a new database, insert its first row minisql_main's root page will be 0.
 	// 	_, err = aTable.Insert(ctx, Statement{
 	// 		Kind:      Insert,
 	// 		TableName: aTable.Name,
@@ -111,47 +111,130 @@ func (d *Database) Open(ctx context.Context) error {
 	// 			"sql",
 	// 		},
 	// 		Inserts: [][]any{{
-	// 			int32(SchemaTable),
-	// 			mainSchemaTable,
-	// 			mainSchemaTable,
-	// 			int64(0),
-	// 			mainSchemaTableSQL,
+	// 			int32(SchemaTable), // type (only 0 supported now)
+	// 			SchemaTableName,    // name
+	// 			SchemaTableName,    // table name
+	// 			rooPageIdx,         // root page
+	// 			schemaTableSQL,     // sql
 	// 		}},
 	// 	})
 	// 	if err != nil {
-	// 		return err
+	// 		return nil, err
 	// 	}
+	// 	return aDatabase, nil
 	// } else {
-	// 	// Otherwise we need to register all tables
-	// 	aResult, err := aTable.Select(ctx, Statement{
-	// 		Kind:      Select,
-	// 		TableName: aTable.Name,
-	// 		Fields: []string{
-	// 			"type",
-	// 			"table_name",
-	// 			"root_page",
-	// 			"sql",
-	// 		},
-	// 	})
-	// 	if err != nil {
-	// 		return err
-	// 	}
-
-	// 	aRow, err := aResult.Rows(ctx)
-	// 	for err != ErrNoMoreRows {
-	// 		if aRow.Values[1] == mainSchemaTable {
-	// 			// TODO - implement
-	// 		} else {
-	// 			// TODO - implement
-	// 		}
-	// 		aRow, err = aResult.Rows(ctx)
-	// 	}
+	// 	aDatabase.tables[SchemaTableName] = NewTable(SchemaTableName, schemaTableColumns, aPager, rooPageIdx)
 	// }
 
-	return nil
+	// // Otherwise we need to read all existing tables from the schema table
+	// aTable := aDatabase.tables[SchemaTableName]
+	// aResult, err := aTable.Select(ctx, Statement{
+	// 	Kind:      Select,
+	// 	TableName: aTable.Name,
+	// 	Fields: []string{
+	// 		"type",
+	// 		"table_name",
+	// 		"root_page",
+	// 		"sql",
+	// 	},
+	// })
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// aRow, err := aResult.Rows(ctx)
+	// for err != ErrNoMoreRows {
+	// 	if aRow.Values[1] == SchemaTableName {
+	// 		continue
+	// 	}
+
+	// 	stmt, err := aParser.Parse(ctx, aRow.Values[3].(string))
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	aDatabase.tables[stmt.TableName] = NewTable(
+	// 		stmt.TableName,
+	// 		stmt.Columns,
+	// 		aPager,
+	// 		aRow.Values[2].(uint32),
+	// 	)
+
+	// 	aRow, err = aResult.Rows(ctx)
+	// }
+
+	return aDatabase, nil
 }
 
-func (d *Database) Close() error {
+func (d *Database) CreateTestTable() {
+	columns := []Column{
+		{
+			Kind: Int8,
+			Size: 8,
+			Name: "id",
+		},
+		{
+			Kind: Varchar,
+			Size: 255,
+			Name: "email",
+		},
+		{
+			Kind: Int4,
+			Size: 4,
+			Name: "age",
+		},
+	}
+	rowSize := Row{Columns: columns}.Size()
+	d.tables["foo"] = &Table{
+		Name:        "foo",
+		Columns:     columns,
+		RootPageIdx: 0,
+		pager:       d.pager,
+		rowSize:     rowSize,
+		numRows:     int(d.pager.FileSize() / int64(rowSize)),
+	}
+}
+
+func (d *Database) Close(ctx context.Context) error {
+	if len(d.tables) > 1 {
+		return fmt.Errorf("currently only single table is supported")
+	}
+
+	var aTable *Table
+	for tableName := range d.tables {
+		aTable = d.tables[tableName]
+		break
+	}
+
+	numFullPages := aTable.numRows / int(aTable.rowSize)
+	for i := 0; i < numFullPages; i++ {
+		aPage, err := d.pager.GetPage(ctx, aTable.Name, uint32(i))
+		if err != nil {
+			return err
+		}
+		if aPage == nil {
+			continue
+		}
+		if err := d.pager.Flush(ctx, aPage.Index, PageSize); err != nil {
+			return err
+		}
+	}
+
+	// There may be a partial page to write to the end of the file
+	// This should not be needed after we switch to a B-tree
+	numAdditionalRows := aTable.numRows % int(aTable.rowSize)
+	if numAdditionalRows > 0 {
+		pageIdx := numFullPages
+		aPage, err := d.pager.GetPage(ctx, aTable.Name, uint32(pageIdx))
+		if err != nil {
+			return err
+		}
+		if aPage != nil {
+			if err := d.pager.Flush(ctx, aPage.Index, int64(numAdditionalRows*int(aTable.rowSize))); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 

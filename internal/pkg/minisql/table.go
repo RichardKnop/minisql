@@ -12,25 +12,38 @@ var (
 )
 
 type Table struct {
-	Name    string
-	Columns []Column
-	pager   Pager
-	rowSize uint32
-	numRows int
+	Name        string
+	Columns     []Column
+	RootPageIdx uint32
+	pager       Pager
+	rowSize     uint32
+	numRows     int
+}
+
+func NewTable(name string, columns []Column, pager Pager, rootPageIdx uint32) *Table {
+	return &Table{
+		Name:        name,
+		Columns:     columns,
+		RootPageIdx: rootPageIdx,
+		pager:       pager,
+		rowSize:     Row{Columns: columns}.Size(),
+	}
 }
 
 // CreateTable creates a new table with a name and columns
 func (d *Database) CreateTable(ctx context.Context, name string, columns []Column) (*Table, error) {
+	if len(d.tables) == 1 {
+		return nil, fmt.Errorf("currently only single table is supported")
+	}
+
 	aTable, ok := d.tables[name]
 	if ok {
 		return aTable, errTableAlreadyExists
 	}
-	d.tables[name] = &Table{
-		Name:    name,
-		Columns: columns,
-		pager:   d.pager,
-		rowSize: Row{Columns: columns}.Size(),
-	}
+	d.tables[name] = NewTable(name, columns, d.pager, uint32(0))
+
+	// TODO - insert into main schema table
+
 	return d.tables[name], nil
 }
 
@@ -41,6 +54,11 @@ func (d *Database) DropTable(ctx context.Context, name string) error {
 		return errTableDoesNotExist
 	}
 	delete(d.tables, name)
+
+	// TODO - delete pages
+
+	// TODO - delete from main schema table
+
 	return nil
 }
 

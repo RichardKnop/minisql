@@ -43,7 +43,7 @@ func TestPeepIntWithLength(t *testing.T) {
 	testCases := []struct {
 		Name           string
 		SQL            string
-		ExpectedValue  int
+		ExpectedValue  int64
 		ExpectedLength int
 	}{
 		{

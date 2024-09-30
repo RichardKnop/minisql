@@ -14,7 +14,7 @@ func TestCursor_TableStart_Empty(t *testing.T) {
 
 	ctx := context.Background()
 
-	aDatabase, err := NewDatabase("db", nil, nil)
+	aDatabase, err := NewDatabase(ctx, "db", nil, nil)
 	require.NoError(t, err)
 	aTable, err := aDatabase.CreateTable(ctx, "foo", testColumns)
 	require.NoError(t, err)
@@ -30,11 +30,11 @@ func TestCursor_TableStart_NotEmpty(t *testing.T) {
 	ctx := context.Background()
 	pagerMock := new(MockPager)
 	var (
-		page0 = Page{Number: 0}
+		page0 = NewPage(0)
 	)
-	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(&page0, nil)
+	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(page0, nil)
 
-	aDatabase, err := NewDatabase("db", nil, pagerMock)
+	aDatabase, err := NewDatabase(ctx, "db", nil, pagerMock)
 	require.NoError(t, err)
 	aTable, err := aDatabase.CreateTable(ctx, "foo", testColumns)
 	require.NoError(t, err)
@@ -54,13 +54,13 @@ func TestCursor_TableEnd(t *testing.T) {
 	ctx := context.Background()
 	pagerMock := new(MockPager)
 	var (
-		page0 = Page{Number: 0}
-		page1 = Page{Number: 1}
+		page0 = NewPage(0)
+		page1 = NewPage(1)
 	)
-	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(&page0, nil)
-	pagerMock.On("GetPage", mock.Anything, "foo", uint32(1)).Return(&page1, nil)
+	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(page0, nil)
+	pagerMock.On("GetPage", mock.Anything, "foo", uint32(1)).Return(page1, nil)
 
-	aDatabase, err := NewDatabase("db", nil, pagerMock)
+	aDatabase, err := NewDatabase(ctx, "db", nil, pagerMock)
 	require.NoError(t, err)
 	aTable, err := aDatabase.CreateTable(ctx, "foo", testColumns)
 	require.NoError(t, err)
@@ -69,7 +69,7 @@ func TestCursor_TableEnd(t *testing.T) {
 	insertRows(ctx, t, aTable, rows)
 
 	aCursor := TableEnd(aTable)
-	assert.Equal(t, 19, aCursor.RowNumber)
+	assert.Equal(t, 20, aCursor.RowNumber)
 	assert.True(t, aCursor.EndOfTable)
 
 	mock.AssertExpectationsForObjects(t, pagerMock)
@@ -81,13 +81,13 @@ func TestCursor_TableAt(t *testing.T) {
 	ctx := context.Background()
 	pagerMock := new(MockPager)
 	var (
-		page0 = Page{Number: 0}
-		page1 = Page{Number: 1}
+		page0 = NewPage(0)
+		page1 = NewPage(1)
 	)
-	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(&page0, nil)
-	pagerMock.On("GetPage", mock.Anything, "foo", uint32(1)).Return(&page1, nil)
+	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(page0, nil)
+	pagerMock.On("GetPage", mock.Anything, "foo", uint32(1)).Return(page1, nil)
 
-	aDatabase, err := NewDatabase("db", nil, pagerMock)
+	aDatabase, err := NewDatabase(ctx, "db", nil, pagerMock)
 	require.NoError(t, err)
 	aTable, err := aDatabase.CreateTable(ctx, "foo", testColumns)
 	require.NoError(t, err)
@@ -105,9 +105,10 @@ func TestCursor_TableAt(t *testing.T) {
 func TestCursor_Value(t *testing.T) {
 	t.Parallel()
 
-	aDatabase, err := NewDatabase("db", nil, nil)
+	ctx := context.Background()
+	aDatabase, err := NewDatabase(ctx, "db", nil, nil)
 	require.NoError(t, err)
-	aTable, err := aDatabase.CreateTable(context.Background(), "foo", testColumns)
+	aTable, err := aDatabase.CreateTable(ctx, "foo", testColumns)
 	require.NoError(t, err)
 
 	// Row size is 267 bytes
@@ -167,14 +168,14 @@ func TestCursor_Value(t *testing.T) {
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
 			aCursor := TableAt(aTable, aTestCase.RowNumber)
-			pageNumber, offset, err := aCursor.Value()
+			pageIdx, offset, err := aCursor.Value()
 			if aTestCase.Err != nil {
 				require.Error(t, err)
 				assert.ErrorIs(t, err, aTestCase.Err)
 			} else {
 				require.NoError(t, err)
 			}
-			assert.Equal(t, aTestCase.Page, pageNumber)
+			assert.Equal(t, aTestCase.Page, pageIdx)
 			assert.Equal(t, aTestCase.Offset, offset)
 		})
 	}
