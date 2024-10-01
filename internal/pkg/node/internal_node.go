@@ -1,5 +1,9 @@
 package node
 
+const (
+	InternalNodeMaxCells = 510
+)
+
 type InternalNodeHeader struct {
 	Header
 	KeysNum    uint32
@@ -111,7 +115,18 @@ func (c *ICell) Unmarshal(buf []byte) (uint64, error) {
 
 type InternalNode struct {
 	Header InternalNodeHeader
-	ICells [510]ICell
+	ICells [InternalNodeMaxCells]ICell
+}
+
+func NewInternalNode() *InternalNode {
+	aNode := InternalNode{
+		Header: InternalNodeHeader{
+			Header: Header{
+				IsInternal: true,
+			},
+		},
+	}
+	return &aNode
 }
 
 func (n *InternalNode) Size() uint64 {

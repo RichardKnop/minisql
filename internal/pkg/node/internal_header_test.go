@@ -20,7 +20,7 @@ func TestInternalNode_Marshal(t *testing.T) {
 			KeysNum:    1,
 			RightChild: 18,
 		},
-		ICells: [510]ICell{
+		ICells: [InternalNodeMaxCells]ICell{
 			{
 				Key:   5,
 				Child: 2,

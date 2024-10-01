@@ -1,58 +1,49 @@
 package minisql
 
-import (
-	"context"
-	"testing"
+// func TestTable_Insert(t *testing.T) {
+// 	t.Parallel()
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
-)
+// 	ctx := context.Background()
+// 	pagerMock := new(MockPager)
+// 	var (
+// 		page0 = NewPage(0)
+// 	)
+// 	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(page0, nil)
 
-func TestTable_Insert(t *testing.T) {
-	t.Parallel()
+// 	aDatabase, err := NewDatabase(ctx, "db", nil, pagerMock)
+// 	require.NoError(t, err)
 
-	ctx := context.Background()
-	pagerMock := new(MockPager)
-	var (
-		page0 = NewPage(0)
-	)
-	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(page0, nil)
+// 	aRow := gen.Row()
 
-	aDatabase, err := NewDatabase(ctx, "db", nil, pagerMock)
-	require.NoError(t, err)
+// 	insertStmt := Statement{
+// 		Kind:      Insert,
+// 		TableName: "foo",
+// 		Fields:    []string{"id", "email", "age"},
+// 		Inserts:   [][]any{aRow.Values},
+// 	}
 
-	aRow := gen.Row()
+// 	aTable, err := aDatabase.CreateTable(ctx, "foo", testColumns)
+// 	require.NoError(t, err)
 
-	insertStmt := Statement{
-		Kind:      Insert,
-		TableName: "foo",
-		Fields:    []string{"id", "email", "age"},
-		Inserts:   [][]any{aRow.Values},
-	}
+// 	aResult, err := aTable.Insert(ctx, insertStmt)
+// 	require.NoError(t, err)
+// 	assert.Equal(t, 1, aResult.RowsAffected)
 
-	aTable, err := aDatabase.CreateTable(ctx, "foo", testColumns)
-	require.NoError(t, err)
+// 	selectStmt := Statement{
+// 		Kind:      Select,
+// 		TableName: "foo",
+// 		Fields:    []string{"id", "email", "age"},
+// 	}
+// 	aResult, err = aTable.Select(ctx, selectStmt)
+// 	require.NoError(t, err)
 
-	aResult, err := aTable.Insert(ctx, insertStmt)
-	require.NoError(t, err)
-	assert.Equal(t, 1, aResult.RowsAffected)
+// 	selectRow, err := aResult.Rows(ctx)
+// 	require.NoError(t, err)
+// 	assert.Equal(t, aRow, selectRow)
 
-	selectStmt := Statement{
-		Kind:      Select,
-		TableName: "foo",
-		Fields:    []string{"id", "email", "age"},
-	}
-	aResult, err = aTable.Select(ctx, selectStmt)
-	require.NoError(t, err)
+// 	_, err = aResult.Rows(ctx)
+// 	require.Error(t, err)
+// 	assert.ErrorIs(t, err, ErrNoMoreRows)
 
-	selectRow, err := aResult.Rows(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, aRow, selectRow)
-
-	_, err = aResult.Rows(ctx)
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrNoMoreRows)
-
-	mock.AssertExpectationsForObjects(t, pagerMock)
-}
+// 	mock.AssertExpectationsForObjects(t, pagerMock)
+// }

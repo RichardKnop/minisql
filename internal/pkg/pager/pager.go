@@ -6,11 +6,12 @@ import (
 	"io"
 
 	"github.com/RichardKnop/minisql/internal/pkg/minisql"
+	"github.com/RichardKnop/minisql/internal/pkg/node"
 )
 
 const (
 	PageSize = 4096 // 4 kilobytes
-	MaxPages = 1000 // temporary limit, TODO - remove later
+	MaxPages = 1024 // temporary limit, TODO - remove later
 )
 
 type DBFile interface {
@@ -20,9 +21,9 @@ type DBFile interface {
 }
 
 type Pager struct {
-	totalPages int64 // total number of pages
+	totalPages uint32 // total number of pages
 
-	// TODO - temporary we store all pages in a slice, this will be replaced by a B-tree
+	// TODO - store pages per different tables
 	pages []*minisql.Page
 
 	file     DBFile
@@ -43,44 +44,27 @@ func New(file DBFile, schemaTableName string) (*Pager, error) {
 	aPager.fileSize = fileSize
 
 	// Basic check to verify file size is a multiple of page size (4096B)
-	// Uncomment once we switch to B-tree
-	// if fileSize%PageSize != 0 {
-	// 	return nil, fmt.Errorf("db file size is not divisible by page size: %d", fileSize)
-	// }
+	if fileSize%PageSize != 0 {
+		return nil, fmt.Errorf("db file size is not divisible by page size: %d", fileSize)
+	}
 
 	// Check we are not exceeding max page limit
 	totalPages := fileSize / PageSize
 	if totalPages >= MaxPages {
 		return nil, fmt.Errorf(("file size exceeds max pages limit"))
 	}
-	aPager.totalPages = totalPages
+	aPager.totalPages = uint32(totalPages)
 
-	var aRootPage *minisql.Page
-	if aPager.fileSize == 0 {
-		// If the file is empty, this is a fresh database, create root page
-		aRootPage = minisql.NewPage(0)
-	} else {
-		buf := make([]byte, PageSize)
-		rootPageOffset := int64(0)
-		_, err = aPager.file.ReadAt(buf, rootPageOffset)
-		if err != nil && err != io.EOF {
-			return nil, err
-		}
-		aRootPage, err = minisql.NewPageWithData(0, buf)
-		if err != nil {
-			return nil, err
-		}
-	}
-	aPager.pages[aRootPage.Index] = aRootPage
+	// TODO - init root page
 
 	return aPager, nil
 }
 
-func (p *Pager) FileSize() int64 {
-	return p.fileSize
+func (p *Pager) TotalPages(aTable *minisql.Table) uint32 {
+	return p.totalPages
 }
 
-func (p *Pager) GetPage(ctx context.Context, tableName string, pageIdx uint32) (*minisql.Page, error) {
+func (p *Pager) GetPage(ctx context.Context, aTable *minisql.Table, pageIdx uint32) (*minisql.Page, error) {
 	if pageIdx >= MaxPages {
 		return nil, fmt.Errorf("page index %d reached limit of max pages %d", pageIdx, MaxPages)
 	}
@@ -95,19 +79,32 @@ func (p *Pager) GetPage(ctx context.Context, tableName string, pageIdx uint32) (
 				return nil, err
 			}
 
+			// Empty new page will be leaf node
 			if buf[0] == 0 {
-				// Empty new page
-				p.pages[pageIdx] = minisql.NewPage(pageIdx)
-			} else {
-				p.pages[pageIdx], err = minisql.NewPageWithData(pageIdx, buf)
+				// Leaf node
+				rowSize := aTable.RowSize
+				numCells := PageSize / rowSize
+				leaf := node.NewLeafNode(numCells, uint64(rowSize))
+				_, err := leaf.Unmarshal(buf)
 				if err != nil {
 					return nil, err
 				}
+				p.pages[pageIdx] = &minisql.Page{LeafNode: leaf}
+			} else {
+				// Internal node
+				internal := new(node.InternalNode)
+				_, err := internal.Unmarshal(buf)
+				if err != nil {
+					return nil, err
+				}
+				p.pages[pageIdx] = &minisql.Page{InternalNode: internal}
 			}
-		}
-
-		if int64(pageIdx) >= p.totalPages {
-			p.totalPages += 1
+			if pageIdx == 0 {
+				p.pages[pageIdx].LeafNode.Header.IsRoot = true
+			}
+			if pageIdx >= p.totalPages {
+				p.totalPages = pageIdx + 1
+			}
 		}
 	}
 
@@ -120,8 +117,21 @@ func (p *Pager) Flush(ctx context.Context, pageIdx uint32, size int64) error {
 		return fmt.Errorf("flushing nil page")
 	}
 
-	buf := aPage.Data(size)
-	_, err := p.file.WriteAt(buf[:], int64(pageIdx*PageSize))
+	buf := make([]byte, PageSize)
+	if aPage.LeafNode != nil {
+		_, err := aPage.LeafNode.Marshal(buf)
+		if err != nil {
+			return err
+		}
+	} else if aPage.InternalNode != nil {
+		_, err := aPage.InternalNode.Marshal(buf)
+		if err != nil {
+			return err
+		}
+	} else {
+		return fmt.Errorf("error flushing, page %d is neither internal nor leaf node", pageIdx)
+	}
+	_, err := p.file.WriteAt(buf, int64(pageIdx*PageSize))
 
 	return err
 }

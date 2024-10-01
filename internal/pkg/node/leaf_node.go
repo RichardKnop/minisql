@@ -66,11 +66,11 @@ func (h *LeafNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 type Cell struct {
 	Key     uint32
 	Value   []byte // size of rowSize
-	rowSize uint64
+	RowSize uint64
 }
 
 func (c *Cell) Size() uint64 {
-	size := c.rowSize
+	size := c.RowSize
 	size += 4
 	return size
 }
@@ -91,8 +91,8 @@ func (c *Cell) Marshal(buf []byte) ([]byte, error) {
 	buf[3] = byte(c.Key >> 24)
 	i += 4
 
-	copy(buf[i:], c.Value[0:c.rowSize])
-	i += c.rowSize
+	copy(buf[i:], c.Value[0:c.RowSize])
+	i += c.RowSize
 
 	return buf[:i], nil
 }
@@ -107,8 +107,8 @@ func (c *Cell) Unmarshal(buf []byte) (uint64, error) {
 		(uint32(buf[i+3]) << 24)
 	i += 4
 
-	copy(c.Value, buf[i:i+c.rowSize])
-	i += c.rowSize
+	copy(c.Value, buf[i:i+c.RowSize])
+	i += c.RowSize
 
 	return i, nil
 }
@@ -123,7 +123,7 @@ func NewLeafNode(numCells uint32, rowSize uint64) *LeafNode {
 		Cells: make([]Cell, numCells),
 	}
 	for idx := range aNode.Cells {
-		aNode.Cells[idx].rowSize = rowSize
+		aNode.Cells[idx].RowSize = rowSize
 		aNode.Cells[idx].Value = make([]byte, rowSize)
 	}
 	return &aNode
