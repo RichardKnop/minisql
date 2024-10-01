@@ -100,7 +100,7 @@ func (r Row) appendValues(fields []string, values []any) Row {
 // }
 
 // TODO - handle NULL values
-func (r Row) Marshal() ([]byte, error) {
+func (r *Row) Marshal() ([]byte, error) {
 	buf := make([]byte, r.Size())
 
 	for i, aColumn := range r.Columns {
