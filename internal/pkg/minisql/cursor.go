@@ -3,8 +3,6 @@ package minisql
 import (
 	"context"
 	"fmt"
-
-	"github.com/RichardKnop/minisql/internal/pkg/node"
 )
 
 type Cursor struct {
@@ -20,11 +18,11 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint32, aRow *Row) erro
 		return err
 	}
 	if aPage.LeafNode == nil {
-		return fmt.Errorf("error inserting row to a leaf node, key %d", key)
+		return fmt.Errorf("error inserting row to a non leaf node, key %d", key)
 	}
 
 	cells := aPage.LeafNode.Header.Cells
-	maxCells := PageSize / aRow.Size()
+	maxCells := uint32(PageSize / (aRow.Size() + 4)) // +4 for int4 key which is part of Cell
 	if cells >= maxCells {
 		// Split leaf node
 		return c.LeafNodeSplitInsert(ctx, key, aRow)
@@ -65,9 +63,10 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint32, aRow *Row)
 		return err
 	}
 
-	maxCells := PageSize / c.Table.RowSize
+	cellSize := c.Table.RowSize + 4 // +4 for int4 key which is part of Cell
+	maxCells := uint32(PageSize / cellSize)
 
-	newPage.LeafNode = node.NewLeafNode(maxCells, uint64(c.Table.RowSize))
+	newPage.LeafNode = NewLeafNode(maxCells, uint64(c.Table.RowSize))
 	newPage.LeafNode.Header.Parent = oldPage.LeafNode.Header.Parent
 	oldPage.LeafNode.Header.NextLeaf = newPageNum
 	newPage.LeafNode.Header.NextLeaf = oldPage.LeafNode.Header.NextLeaf
@@ -124,14 +123,14 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint32, aRow *Row)
 	// parent page is an internal node
 	oldChildIdx := parentPage.InternalNode.FindChildByKey(oldMaxKey)
 
-	if oldChildIdx >= node.InternalNodeMaxCells {
+	if oldChildIdx >= InternalNodeMaxCells {
 		return fmt.Errorf("exceeded internal node max cells during splitting")
 	}
 	parentPage.InternalNode.ICells[oldChildIdx].Key, _ = oldPage.GetMaxKey()
 	return c.Table.InternalNodeInsert(ctx, parentPageIdx, newPageNum)
 }
 
-func saveToCell(ctx context.Context, cell *node.Cell, key uint32, aRow *Row) error {
+func saveToCell(ctx context.Context, cell *Cell, key uint32, aRow *Row) error {
 	rowBuf, err := aRow.Marshal()
 	if err != nil {
 		return err

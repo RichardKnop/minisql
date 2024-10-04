@@ -1,17 +1,13 @@
 package minisql
 
-import (
-	"github.com/RichardKnop/minisql/internal/pkg/node"
-)
-
 const (
 	PageSize = 4096 // 4 kilobytes
 	MaxPages = 100  // temporary limit, TODO - remove later
 )
 
 type Page struct {
-	InternalNode *node.InternalNode
-	LeafNode     *node.LeafNode
+	InternalNode *InternalNode
+	LeafNode     *LeafNode
 }
 
 func (p *Page) GetMaxKey() (uint32, bool) {

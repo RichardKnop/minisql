@@ -1,4 +1,4 @@
-package node
+package minisql
 
 type LeafNodeHeader struct {
 	Header
@@ -115,7 +115,7 @@ func (c *Cell) Unmarshal(buf []byte) (uint64, error) {
 
 type LeafNode struct {
 	Header LeafNodeHeader
-	Cells  []Cell // length of PageSize / rowSize
+	Cells  []Cell // length of PageSize / (rowSize+4)
 }
 
 func NewLeafNode(numCells uint32, rowSize uint64) *LeafNode {

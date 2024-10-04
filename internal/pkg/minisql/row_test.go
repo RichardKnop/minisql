@@ -12,7 +12,7 @@ func TestRow_Marshal(t *testing.T) {
 
 	aRow := gen.Row()
 
-	assert.Equal(t, uint32(267), aRow.Size())
+	assert.Equal(t, uint64(8+255+4), aRow.Size())
 
 	data, err := aRow.Marshal()
 	require.NoError(t, err)

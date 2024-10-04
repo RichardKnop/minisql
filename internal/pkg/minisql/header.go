@@ -1,4 +1,4 @@
-package node
+package minisql
 
 type Header struct {
 	IsInternal bool

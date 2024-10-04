@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"github.com/RichardKnop/minisql/internal/pkg/minisql"
-	"github.com/RichardKnop/minisql/internal/pkg/node"
 )
 
 const (
@@ -23,7 +22,6 @@ type DBFile interface {
 type Pager struct {
 	totalPages uint32 // total number of pages
 
-	// TODO - store pages per different tables
 	pages []*minisql.Page
 
 	file     DBFile
@@ -55,7 +53,7 @@ func New(file DBFile, schemaTableName string) (*Pager, error) {
 	}
 	aPager.totalPages = uint32(totalPages)
 
-	// TODO - init root page
+	// TODO - init root page?
 
 	return aPager, nil
 }
@@ -69,43 +67,49 @@ func (p *Pager) GetPage(ctx context.Context, aTable *minisql.Table, pageIdx uint
 		return nil, fmt.Errorf("page index %d reached limit of max pages %d", pageIdx, MaxPages)
 	}
 
-	if aPage := p.pages[pageIdx]; aPage == nil {
-		// Cache miss, try to load the page from file first
-		if pageIdx <= uint32(p.totalPages) {
-			// Load page from file
-			buf := make([]byte, PageSize)
-			_, err := p.file.ReadAt(buf, int64(pageIdx*PageSize))
-			if err != nil && err != io.EOF {
-				return nil, err
-			}
+	if p.pages[pageIdx] != nil {
+		return p.pages[pageIdx], nil
+	}
 
-			// Empty new page will be leaf node
-			if buf[0] == 0 {
-				// Leaf node
-				rowSize := aTable.RowSize
-				numCells := PageSize / rowSize
-				leaf := node.NewLeafNode(numCells, uint64(rowSize))
-				_, err := leaf.Unmarshal(buf)
-				if err != nil {
-					return nil, err
-				}
-				p.pages[pageIdx] = &minisql.Page{LeafNode: leaf}
-			} else {
-				// Internal node
-				internal := new(node.InternalNode)
-				_, err := internal.Unmarshal(buf)
-				if err != nil {
-					return nil, err
-				}
-				p.pages[pageIdx] = &minisql.Page{InternalNode: internal}
-			}
-			if pageIdx == 0 {
-				p.pages[pageIdx].LeafNode.Header.IsRoot = true
-			}
-			if pageIdx >= p.totalPages {
-				p.totalPages = pageIdx + 1
-			}
+	// Cache miss, try to load the page from file first
+	// Load page from file
+	buf := make([]byte, PageSize)
+	_, err := p.file.ReadAt(buf, int64(pageIdx*PageSize))
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+
+	// First byte is Internal flag
+	if buf[0] == 0 {
+		// Leaf node
+		cellSize := aTable.RowSize + 4 // +4 for int4 key which is part of Cell
+		numCells := uint32(PageSize / cellSize)
+		leaf := minisql.NewLeafNode(numCells, uint64(aTable.RowSize))
+		_, err := leaf.Unmarshal(buf)
+		if err != nil {
+			return nil, err
 		}
+		p.pages[pageIdx] = &minisql.Page{LeafNode: leaf}
+	} else {
+		// Internal node
+		internal := new(minisql.InternalNode)
+		_, err := internal.Unmarshal(buf)
+		if err != nil {
+			return nil, err
+		}
+		p.pages[pageIdx] = &minisql.Page{InternalNode: internal}
+	}
+	if pageIdx == 0 {
+		if p.pages[pageIdx].LeafNode != nil {
+			p.pages[pageIdx].LeafNode.Header.IsRoot = true
+		}
+		if p.pages[pageIdx].InternalNode != nil {
+			p.pages[pageIdx].InternalNode.Header.IsRoot = true
+			p.pages[pageIdx].InternalNode.Header.IsInternal = true
+		}
+	}
+	if pageIdx >= p.totalPages {
+		p.totalPages = pageIdx + 1
 	}
 
 	return p.pages[pageIdx], nil
@@ -117,7 +121,7 @@ func (p *Pager) Flush(ctx context.Context, pageIdx uint32, size int64) error {
 		return fmt.Errorf("flushing nil page")
 	}
 
-	buf := make([]byte, PageSize)
+	buf := make([]byte, size)
 	if aPage.LeafNode != nil {
 		_, err := aPage.LeafNode.Marshal(buf)
 		if err != nil {
@@ -131,7 +135,6 @@ func (p *Pager) Flush(ctx context.Context, pageIdx uint32, size int64) error {
 	} else {
 		return fmt.Errorf("error flushing, page %d is neither internal nor leaf node", pageIdx)
 	}
-	_, err := p.file.WriteAt(buf, int64(pageIdx*PageSize))
-
+	_, err := p.file.WriteAt(buf, int64(pageIdx)*size)
 	return err
 }

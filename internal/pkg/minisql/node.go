@@ -1,10 +1,13 @@
-package node
+package minisql
 
 import (
 	"fmt"
 )
 
-// FindChildByKey returns the index of the child which should contain the given key
+// FindChildByKey returns the index of the child which should contain the given key.
+// For example, if node has 2 keys, this could return 0 for the leftmost child,
+// 1 for the middle child or 2 for the rightmost child.
+// The returned value is not a node index!
 func (n *InternalNode) FindChildByKey(key uint32) uint32 {
 	var (
 		minIdx = uint32(0)
@@ -23,6 +26,8 @@ func (n *InternalNode) FindChildByKey(key uint32) uint32 {
 	return minIdx
 }
 
+// Child returns a node index of nth child of the node marked by its index
+// (0 for the leftmost child, index equal to number of keys means the rightmost child).
 func (n *InternalNode) Child(childIdx uint32) (uint32, error) {
 	keysNum := n.Header.KeysNum
 	if childIdx > keysNum {

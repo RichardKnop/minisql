@@ -3,8 +3,6 @@ package minisql
 import (
 	"context"
 	"fmt"
-
-	"github.com/RichardKnop/minisql/internal/pkg/node"
 )
 
 var (
@@ -17,7 +15,7 @@ type Table struct {
 	Name        string
 	Columns     []Column
 	RootPageIdx uint32
-	RowSize     uint32
+	RowSize     uint64
 	pager       Pager
 }
 
@@ -31,6 +29,7 @@ func NewTable(name string, columns []Column, pager Pager, rootPageIdx uint32) *T
 	}
 }
 
+// SeekMaxKey returns max key stored in a tree, starting from page index
 func (t *Table) SeekMaxKey(ctx context.Context, pageIdx uint32) (uint32, bool, error) {
 	aPage, err := t.pager.GetPage(ctx, t, pageIdx)
 	if err != nil {
@@ -48,30 +47,24 @@ func (t *Table) SeekMaxKey(ctx context.Context, pageIdx uint32) (uint32, bool, e
 	return t.SeekMaxKey(ctx, aPage.InternalNode.Header.RightChild)
 }
 
-// Seek the page of key, if not exist then return the place key should be
-// for the later INSERT.
+// Seek the cursor for a key, if it does not exist then return the cursor
+// for the page and cell where it should be inserted
 func (t *Table) Seek(ctx context.Context, key uint32) (*Cursor, error) {
 	rootPage, err := t.pager.GetPage(ctx, t, t.RootPageIdx)
 	if err != nil {
 		return nil, err
 	}
 	if rootPage.LeafNode != nil {
-		return t.leafNodeSeek(ctx, t.RootPageIdx, key)
+		return t.leafNodeSeek(ctx, t.RootPageIdx, rootPage, key)
 	} else if rootPage.InternalNode != nil {
-		return t.internalNodeSeek(ctx, t.RootPageIdx, key)
+		return t.internalNodeSeek(ctx, rootPage, key)
 	}
 	return nil, fmt.Errorf("root page type")
 }
 
-func (t *Table) leafNodeSeek(ctx context.Context, pageIdx, key uint32) (*Cursor, error) {
-	var (
-		minIdx, maxIdx, i uint32
-	)
+func (t *Table) leafNodeSeek(ctx context.Context, pageIdx uint32, aPage *Page, key uint32) (*Cursor, error) {
+	var minIdx, maxIdx uint32
 
-	aPage, err := t.pager.GetPage(ctx, t, pageIdx)
-	if err != nil {
-		return nil, err
-	}
 	maxIdx = aPage.LeafNode.Header.Cells
 
 	aCursor := Cursor{
@@ -81,7 +74,7 @@ func (t *Table) leafNodeSeek(ctx context.Context, pageIdx, key uint32) (*Cursor,
 	}
 
 	// Search the Btree
-	for i = maxIdx; i != minIdx; {
+	for i := maxIdx; i != minIdx; {
 		index := (minIdx + i) / 2
 		keyIdx := aPage.LeafNode.Cells[index].Key
 		if key == keyIdx {
@@ -97,30 +90,30 @@ func (t *Table) leafNodeSeek(ctx context.Context, pageIdx, key uint32) (*Cursor,
 
 	aCursor.CellIdx = minIdx
 
+	// If key does not exist, set end of table flag to true
+	if aCursor.CellIdx == (aPage.LeafNode.Header.Cells) && aPage.LeafNode.Header.NextLeaf == 0 {
+		aCursor.EndOfTable = true
+	}
+
 	return &aCursor, nil
 }
 
-func (t *Table) internalNodeSeek(ctx context.Context, pageIdx, key uint32) (*Cursor, error) {
-	aPage, err := t.pager.GetPage(ctx, t, pageIdx)
+func (t *Table) internalNodeSeek(ctx context.Context, aPage *Page, key uint32) (*Cursor, error) {
+	childIdx := aPage.InternalNode.FindChildByKey(key)
+	childPageIdx, err := aPage.InternalNode.Child(childIdx)
 	if err != nil {
 		return nil, err
 	}
 
-	nodeIdx := aPage.InternalNode.FindChildByKey(key)
-	childIdx, err := aPage.InternalNode.Child(nodeIdx)
-	if err != nil {
-		return nil, err
-	}
-
-	childPage, err := t.pager.GetPage(ctx, t, childIdx)
+	childPage, err := t.pager.GetPage(ctx, t, childPageIdx)
 	if err != nil {
 		return nil, err
 	}
 
 	if childPage.InternalNode != nil {
-		return t.internalNodeSeek(ctx, childIdx, key)
+		return t.internalNodeSeek(ctx, childPage, key)
 	}
-	return t.leafNodeSeek(ctx, childIdx, key)
+	return t.leafNodeSeek(ctx, childPageIdx, childPage, key)
 }
 
 func (t *Table) CreateNewRoot(ctx context.Context, rightChildPageIdx uint32) error {
@@ -157,7 +150,7 @@ func (t *Table) CreateNewRoot(ctx context.Context, rightChildPageIdx uint32) err
 	}
 
 	rootPage.LeafNode = nil
-	rootPage.InternalNode = new(node.InternalNode)
+	rootPage.InternalNode = new(InternalNode)
 	rootNode := rootPage.InternalNode
 	// change root node to internal node
 	rootNode.Header.IsRoot = false
@@ -205,7 +198,7 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 	originalKeyCnt := parentPage.InternalNode.Header.KeysNum
 	parentPage.InternalNode.Header.KeysNum += 1
 
-	if parentPage.InternalNode.Header.KeysNum > node.InternalNodeMaxCells {
+	if parentPage.InternalNode.Header.KeysNum > InternalNodeMaxCells {
 		return fmt.Errorf("exceeded internal node max cells during internal node insert")
 	}
 

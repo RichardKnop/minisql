@@ -5,8 +5,6 @@ import (
 	"time"
 
 	"github.com/brianvoe/gofakeit/v6"
-
-	"github.com/RichardKnop/minisql/internal/pkg/node"
 )
 
 var (
@@ -62,33 +60,55 @@ func (g *dataGen) Row() Row {
 	}
 }
 
-// Below is a simple B tree for testing purposes
-//
-//	           +-----------------+
-//	           |      *,5,*      |
-//	           +-----------------+
-//	          /                   \
-//	 +-------+                    +--------+
-//	 | *,2,* |                    | *,18,* |
-//	 +-------+                    +--------+
-//	/         \                  /          \
-//
-// +---------+    +-----+       +-----------+   +------+
-// | 1:c,2:d |    | 5:a |       | 12:b,18:f |   | 21:g |
-// +---------+    +-----+       +-----------+   +------+
+func newRootLeafPageWithCells(cells, rowSize int) *Page {
+	cellSize := rowSize + 4 // +4 for int4 key which is part of Cell
+	numCells := uint32(PageSize / cellSize)
+
+	aRootLeaf := NewLeafNode(numCells, uint64(rowSize))
+	aRootLeaf.Header.Header.IsRoot = true
+	aRootLeaf.Header.Cells = uint32(cells)
+
+	for i := 0; i < cells; i++ {
+		aRootLeaf.Cells[i] = Cell{
+			Key:     uint32(i),
+			Value:   bytes.Repeat([]byte{byte(i)}, rowSize),
+			RowSize: uint64(rowSize),
+		}
+	}
+
+	return &Page{LeafNode: aRootLeaf}
+}
+
+/*
+Below is a simple B tree for testing purposes
+
+		           +-------------------+
+		           |       *,5,*       |
+		           +-------------------+
+		          /                     \
+		     +-------+                  +--------+
+		     | *,2,* |                  | *,18,* |
+		     +-------+                  +--------+
+		    /         \                /          \
+	 +---------+     +-----+     +-----------+    +------+
+	 | 1:c,2:d |     | 5:a |     | 12:b,18:f |    | 21:g |
+	 +---------+     +-----+     +-----------+    +------+
+*/
 func newTestBtree() (*Page, []*Page, []*Page) {
+	defaultCell := NewLeafNode(14, 270)
 	var (
 		// page 0
-		rootPage = &Page{
-			InternalNode: &node.InternalNode{
-				Header: node.InternalNodeHeader{
-					Header: node.Header{
-						IsRoot: true,
+		aRootPage = &Page{
+			InternalNode: &InternalNode{
+				Header: InternalNodeHeader{
+					Header: Header{
+						IsInternal: true,
+						IsRoot:     true,
 					},
 					KeysNum:    1,
 					RightChild: 2, // page 2
 				},
-				ICells: [node.InternalNodeMaxCells]node.ICell{
+				ICells: [InternalNodeMaxCells]ICell{
 					{
 						Key:   5,
 						Child: 1, // page 1
@@ -98,18 +118,18 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 		}
 		// page 1
 		internalPage1 = &Page{
-			InternalNode: &node.InternalNode{
-				Header: node.InternalNodeHeader{
-					Header: node.Header{
+			InternalNode: &InternalNode{
+				Header: InternalNodeHeader{
+					Header: Header{
 						IsInternal: true,
 						Parent:     0, // page 0
 					},
 					KeysNum:    1,
 					RightChild: 4, // page 4
 				},
-				ICells: [node.InternalNodeMaxCells]node.ICell{
+				ICells: [InternalNodeMaxCells]ICell{
 					{
-						Key:   1,
+						Key:   2,
 						Child: 3, // page 3
 					},
 				},
@@ -117,35 +137,35 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 		}
 		// page 2
 		internalPage2 = &Page{
-			InternalNode: &node.InternalNode{
-				Header: node.InternalNodeHeader{
-					Header: node.Header{
+			InternalNode: &InternalNode{
+				Header: InternalNodeHeader{
+					Header: Header{
 						IsInternal: true,
 						Parent:     0,
 					},
 					KeysNum:    1,
-					RightChild: 6,
+					RightChild: 6, // page 6
 				},
-				ICells: [node.InternalNodeMaxCells]node.ICell{
+				ICells: [InternalNodeMaxCells]ICell{
 					{
-						Key:   12,
-						Child: 12,
+						Key:   18,
+						Child: 5, // page 5
 					},
 				},
 			},
 		}
 		// page 3
 		leafPage1 = &Page{
-			LeafNode: &node.LeafNode{
-				Header: node.LeafNodeHeader{
-					Header: node.Header{
+			LeafNode: &LeafNode{
+				Header: LeafNodeHeader{
+					Header: Header{
 						IsInternal: false,
 						Parent:     1,
 					},
 					Cells:    2,
 					NextLeaf: 4,
 				},
-				Cells: []node.Cell{
+				Cells: append([]Cell{
 					{
 						Key:     1,
 						Value:   bytes.Repeat([]byte{byte(1)}, 270),
@@ -156,41 +176,41 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 						Value:   bytes.Repeat([]byte{byte(2)}, 270),
 						RowSize: 270,
 					},
-				},
+				}, defaultCell.Cells[2:]...),
 			},
 		}
 		// page 4
 		leafPage2 = &Page{
-			LeafNode: &node.LeafNode{
-				Header: node.LeafNodeHeader{
-					Header: node.Header{
+			LeafNode: &LeafNode{
+				Header: LeafNodeHeader{
+					Header: Header{
 						IsInternal: false,
 						Parent:     1,
 					},
 					Cells:    1,
 					NextLeaf: 5,
 				},
-				Cells: []node.Cell{
+				Cells: append([]Cell{
 					{
 						Key:     5,
 						Value:   bytes.Repeat([]byte{byte(3)}, 270),
 						RowSize: 270,
 					},
-				},
+				}, defaultCell.Cells[1:]...),
 			},
 		}
 		// page 5
 		leafPage3 = &Page{
-			LeafNode: &node.LeafNode{
-				Header: node.LeafNodeHeader{
-					Header: node.Header{
+			LeafNode: &LeafNode{
+				Header: LeafNodeHeader{
+					Header: Header{
 						IsInternal: false,
 						Parent:     2,
 					},
 					Cells:    2,
 					NextLeaf: 6,
 				},
-				Cells: []node.Cell{
+				Cells: append([]Cell{
 					{
 						Key:     12,
 						Value:   bytes.Repeat([]byte{byte(4)}, 270),
@@ -201,29 +221,41 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 						Value:   bytes.Repeat([]byte{byte(5)}, 270),
 						RowSize: 270,
 					},
-				},
+				}, defaultCell.Cells[2:]...),
 			},
 		}
 		// page 6
 		leafPage4 = &Page{
-			LeafNode: &node.LeafNode{
-				Header: node.LeafNodeHeader{
-					Header: node.Header{
+			LeafNode: &LeafNode{
+				Header: LeafNodeHeader{
+					Header: Header{
 						IsInternal: false,
 						Parent:     2,
 					},
 					Cells: 1,
 				},
-				Cells: []node.Cell{
+				Cells: append([]Cell{
 					{
 						Key:     21,
 						Value:   bytes.Repeat([]byte{byte(6)}, 270),
 						RowSize: 270,
 					},
-				},
+				}, defaultCell.Cells[1:]...),
 			},
+		}
+
+		internalPages = []*Page{
+			internalPage1,
+			internalPage2,
+		}
+
+		leafPages = []*Page{
+			leafPage1,
+			leafPage2,
+			leafPage3,
+			leafPage4,
 		}
 	)
 
-	return rootPage, []*Page{internalPage1, internalPage2}, []*Page{leafPage1, leafPage2, leafPage3, leafPage4}
+	return aRootPage, internalPages, leafPages
 }

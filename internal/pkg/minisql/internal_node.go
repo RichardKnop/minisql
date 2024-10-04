@@ -1,4 +1,4 @@
-package node
+package minisql
 
 const (
 	InternalNodeMaxCells = 510
