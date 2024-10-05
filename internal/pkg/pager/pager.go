@@ -9,7 +9,6 @@ import (
 )
 
 const (
-	PageSize = 4096 // 4 kilobytes
 	MaxPages = 1024 // temporary limit, TODO - remove later
 )
 
@@ -20,6 +19,7 @@ type DBFile interface {
 }
 
 type Pager struct {
+	pageSize   int
 	totalPages uint32 // total number of pages
 
 	pages []*minisql.Page
@@ -29,10 +29,11 @@ type Pager struct {
 }
 
 // New opens the database file and tries to read the root page
-func New(file DBFile, schemaTableName string) (*Pager, error) {
+func New(file DBFile, pageSize int, schemaTableName string) (*Pager, error) {
 	aPager := &Pager{
-		file:  file,
-		pages: make([]*minisql.Page, MaxPages),
+		pageSize: pageSize,
+		file:     file,
+		pages:    make([]*minisql.Page, MaxPages),
 	}
 
 	fileSize, err := aPager.file.Seek(0, io.SeekEnd)
@@ -42,12 +43,12 @@ func New(file DBFile, schemaTableName string) (*Pager, error) {
 	aPager.fileSize = fileSize
 
 	// Basic check to verify file size is a multiple of page size (4096B)
-	if fileSize%PageSize != 0 {
+	if fileSize%int64(pageSize) != 0 {
 		return nil, fmt.Errorf("db file size is not divisible by page size: %d", fileSize)
 	}
 
 	// Check we are not exceeding max page limit
-	totalPages := fileSize / PageSize
+	totalPages := fileSize / int64(pageSize)
 	if totalPages >= MaxPages {
 		return nil, fmt.Errorf(("file size exceeds max pages limit"))
 	}
@@ -73,8 +74,8 @@ func (p *Pager) GetPage(ctx context.Context, aTable *minisql.Table, pageIdx uint
 
 	// Cache miss, try to load the page from file first
 	// Load page from file
-	buf := make([]byte, PageSize)
-	_, err := p.file.ReadAt(buf, int64(pageIdx*PageSize))
+	buf := make([]byte, p.pageSize)
+	_, err := p.file.ReadAt(buf, int64(pageIdx)*int64(p.pageSize))
 	if err != nil && err != io.EOF {
 		return nil, err
 	}
@@ -82,9 +83,7 @@ func (p *Pager) GetPage(ctx context.Context, aTable *minisql.Table, pageIdx uint
 	// First byte is Internal flag
 	if buf[0] == 0 {
 		// Leaf node
-		cellSize := aTable.RowSize + 4 // +4 for int4 key which is part of Cell
-		numCells := uint32(PageSize / cellSize)
-		leaf := minisql.NewLeafNode(numCells, uint64(aTable.RowSize))
+		leaf := minisql.NewLeafNode(uint64(aTable.RowSize))
 		_, err := leaf.Unmarshal(buf)
 		if err != nil {
 			return nil, err

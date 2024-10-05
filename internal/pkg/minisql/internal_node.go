@@ -1,7 +1,8 @@
 package minisql
 
 const (
-	InternalNodeMaxCells = 510
+	// (4096 - 6 - 8) / 12
+	InternalNodeMaxCells = 340
 )
 
 type InternalNodeHeader struct {
@@ -68,12 +69,12 @@ func (h *InternalNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 }
 
 type ICell struct {
-	Key   uint32
+	Key   uint64
 	Child uint32
 }
 
 func (c *ICell) Size() uint64 {
-	return 8
+	return 8 + 4
 }
 
 func (c *ICell) Marshal(buf []byte) ([]byte, error) {
@@ -88,27 +89,35 @@ func (c *ICell) Marshal(buf []byte) ([]byte, error) {
 	buf[1] = byte(c.Key >> 8)
 	buf[2] = byte(c.Key >> 16)
 	buf[3] = byte(c.Key >> 24)
+	buf[4] = byte(c.Key >> 32)
+	buf[5] = byte(c.Key >> 40)
+	buf[6] = byte(c.Key >> 48)
+	buf[7] = byte(c.Key >> 56)
 
-	buf[4] = byte(c.Child >> 0)
-	buf[5] = byte(c.Child >> 8)
-	buf[6] = byte(c.Child >> 16)
-	buf[7] = byte(c.Child >> 24)
+	buf[8] = byte(c.Child >> 0)
+	buf[9] = byte(c.Child >> 8)
+	buf[10] = byte(c.Child >> 16)
+	buf[11] = byte(c.Child >> 24)
 
 	return buf[:size], nil
 }
 
 func (c *ICell) Unmarshal(buf []byte) (uint64, error) {
 	c.Key = 0 |
-		(uint32(buf[0]) << 0) |
-		(uint32(buf[1]) << 8) |
-		(uint32(buf[2]) << 16) |
-		(uint32(buf[3]) << 24)
+		(uint64(buf[0]) << 0) |
+		(uint64(buf[1]) << 8) |
+		(uint64(buf[2]) << 16) |
+		(uint64(buf[3]) << 24) |
+		(uint64(buf[4]) << 32) |
+		(uint64(buf[5]) << 40) |
+		(uint64(buf[6]) << 48) |
+		(uint64(buf[7]) << 56)
 
 	c.Child = 0 |
-		(uint32(buf[4]) << 0) |
-		(uint32(buf[5]) << 8) |
-		(uint32(buf[6]) << 16) |
-		(uint32(buf[7]) << 24)
+		(uint32(buf[8]) << 0) |
+		(uint32(buf[9]) << 8) |
+		(uint32(buf[10]) << 16) |
+		(uint32(buf[11]) << 24)
 
 	return c.Size(), nil
 }

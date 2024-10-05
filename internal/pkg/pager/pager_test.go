@@ -25,7 +25,7 @@ func TestNew_Empty(t *testing.T) {
 	defer dbFile.Close()
 	defer os.Remove(dbFile.Name())
 
-	aPager, err := New(dbFile, "minisql_main")
+	aPager, err := New(dbFile, minisql.PageSize, "minisql_main")
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(0), aPager.fileSize)
@@ -41,7 +41,7 @@ func TestNew_GetPage(t *testing.T) {
 	defer dbFile.Close()
 	defer os.Remove(dbFile.Name())
 
-	aPager, err := New(dbFile, "minisql_main")
+	aPager, err := New(dbFile, minisql.PageSize, "minisql_main")
 	require.NoError(t, err)
 
 	aRootPage, internalPages, leafPages := gen.NewTestBtree()
@@ -61,7 +61,7 @@ func TestNew_GetPage(t *testing.T) {
 	)
 
 	for pageIdx := 0; pageIdx < int(aPager.totalPages); pageIdx++ {
-		err := aPager.Flush(ctx, uint32(pageIdx), PageSize)
+		err := aPager.Flush(ctx, uint32(pageIdx), int64(aPager.pageSize))
 		require.NoError(t, err)
 	}
 

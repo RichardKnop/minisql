@@ -2,7 +2,6 @@ package minisql
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,7 +19,7 @@ func TestCursor_LeafNodeInsert_RootLeafEmptyTable(t *testing.T) {
 		cells, rowSize = 0, aRow.Size()
 		aRootPage      = newRootLeafPageWithCells(cells, int(rowSize))
 		aTable         = NewTable("foo", testColumns, pagerMock, 0)
-		key            = uint32(0)
+		key            = uint64(0)
 	)
 
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
@@ -33,8 +32,6 @@ func TestCursor_LeafNodeInsert_RootLeafEmptyTable(t *testing.T) {
 
 	assert.Equal(t, 1, int(aRootPage.LeafNode.Header.Cells))
 	assert.Equal(t, 0, int(aRootPage.LeafNode.Cells[0].Key))
-
-	fmt.Println(aRootPage.LeafNode.Cells[0].Value)
 
 	actualRow := NewRow(aRow.Columns)
 	err = UnmarshalRow(aRootPage.LeafNode.Cells[0].Value, &actualRow)

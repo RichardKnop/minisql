@@ -25,7 +25,7 @@ func TestTable_SeekMaxKey_EmptyTable(t *testing.T) {
 	rowID, ok, err := aTable.SeekMaxKey(ctx, aTable.RootPageIdx)
 	require.NoError(t, err)
 	assert.False(t, ok)
-	assert.Equal(t, uint32(0), rowID)
+	assert.Equal(t, 0, int(rowID))
 
 	mock.AssertExpectationsForObjects(t, pagerMock)
 }
@@ -65,7 +65,7 @@ func TestTable_Seek_EmptyTable(t *testing.T) {
 
 	pagerMock.On("GetPage", mock.Anything, aTable, aTable.RootPageIdx).Return(aRootPage, nil)
 
-	aCursor, err := aTable.Seek(ctx, uint32(0))
+	aCursor, err := aTable.Seek(ctx, uint64(0))
 	require.NoError(t, err)
 	assert.Equal(t, aTable, aCursor.Table)
 	assert.Equal(t, 0, int(aCursor.PageIdx))
@@ -89,7 +89,7 @@ func TestTable_Seek_RootLeafNode_SingleCell(t *testing.T) {
 	pagerMock.On("GetPage", mock.Anything, aTable, aTable.RootPageIdx).Return(aRootPage, nil)
 
 	// Seek key 0
-	aCursor, err := aTable.Seek(ctx, uint32(0))
+	aCursor, err := aTable.Seek(ctx, uint64(0))
 	require.NoError(t, err)
 	assert.Equal(t, aTable, aCursor.Table)
 	assert.Equal(t, 0, int(aCursor.PageIdx))
@@ -97,7 +97,7 @@ func TestTable_Seek_RootLeafNode_SingleCell(t *testing.T) {
 	assert.False(t, aCursor.EndOfTable)
 
 	// Seek key 1 (doesn't exist, end of table)
-	aCursor, err = aTable.Seek(ctx, uint32(1))
+	aCursor, err = aTable.Seek(ctx, uint64(1))
 	require.NoError(t, err)
 	assert.Equal(t, aTable, aCursor.Table)
 	assert.Equal(t, 0, int(aCursor.PageIdx))
@@ -121,17 +121,17 @@ func TestTable_Seek_RootLeafNode_MoreCells(t *testing.T) {
 	pagerMock.On("GetPage", mock.Anything, aTable, aTable.RootPageIdx).Return(aRootPage, nil)
 
 	// Seek all existing keys
-	for key := uint32(0); key < aRootPage.LeafNode.Header.Cells; key++ {
+	for key := uint64(0); key < uint64(aRootPage.LeafNode.Header.Cells); key++ {
 		aCursor, err := aTable.Seek(ctx, key)
 		require.NoError(t, err)
 		assert.Equal(t, aTable, aCursor.Table)
 		assert.Equal(t, 0, int(aCursor.PageIdx))
-		assert.Equal(t, key, aCursor.CellIdx)
+		assert.Equal(t, int(key), int(aCursor.CellIdx))
 		assert.False(t, aCursor.EndOfTable)
 	}
 
 	// Seek key 3 (does not exist, end of table)
-	aCursor, err := aTable.Seek(ctx, uint32(cells))
+	aCursor, err := aTable.Seek(ctx, uint64(cells))
 	require.NoError(t, err)
 	assert.Equal(t, aTable, aCursor.Table)
 	assert.Equal(t, 0, int(aCursor.PageIdx))
@@ -161,7 +161,7 @@ func TestTable_Seek_RootLeafNode_BiggerTree(t *testing.T) {
 
 	testCases := []struct {
 		Name   string
-		Key    uint32
+		Key    uint64
 		Cursor *Cursor
 	}{
 		{

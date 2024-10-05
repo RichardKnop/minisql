@@ -12,11 +12,10 @@ func TestLeafNode_Marshal(t *testing.T) {
 	t.Parallel()
 
 	var (
-		numCells = uint32(17)
-		rowSize  = uint64(230)
+		rowSize = uint64(230)
+		aNode   = NewLeafNode(rowSize)
 	)
 
-	aNode := NewLeafNode(numCells, rowSize)
 	aNode.Header = LeafNodeHeader{
 		Header: Header{
 			IsInternal: false,
@@ -35,7 +34,7 @@ func TestLeafNode_Marshal(t *testing.T) {
 	data, err := aNode.Marshal(buf)
 	require.NoError(t, err)
 
-	recreatedNode := NewLeafNode(numCells, rowSize)
+	recreatedNode := NewLeafNode(rowSize)
 	_, err = recreatedNode.Unmarshal(data)
 	require.NoError(t, err)
 

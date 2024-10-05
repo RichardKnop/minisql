@@ -64,15 +64,13 @@ func (h *LeafNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 }
 
 type Cell struct {
-	Key     uint32
+	Key     uint64
 	Value   []byte // size of rowSize
 	RowSize uint64
 }
 
 func (c *Cell) Size() uint64 {
-	size := c.RowSize
-	size += 4
-	return size
+	return 8 + c.RowSize
 }
 
 func (c *Cell) Marshal(buf []byte) ([]byte, error) {
@@ -89,7 +87,11 @@ func (c *Cell) Marshal(buf []byte) ([]byte, error) {
 	buf[1] = byte(c.Key >> 8)
 	buf[2] = byte(c.Key >> 16)
 	buf[3] = byte(c.Key >> 24)
-	i += 4
+	buf[4] = byte(c.Key >> 32)
+	buf[5] = byte(c.Key >> 40)
+	buf[6] = byte(c.Key >> 48)
+	buf[7] = byte(c.Key >> 56)
+	i += 8
 
 	copy(buf[i:], c.Value[0:c.RowSize])
 	i += c.RowSize
@@ -101,11 +103,15 @@ func (c *Cell) Unmarshal(buf []byte) (uint64, error) {
 	i := uint64(0)
 
 	c.Key = 0 |
-		(uint32(buf[i+0]) << 0) |
-		(uint32(buf[i+1]) << 8) |
-		(uint32(buf[i+2]) << 16) |
-		(uint32(buf[i+3]) << 24)
-	i += 4
+		(uint64(buf[i+0]) << 0) |
+		(uint64(buf[i+1]) << 8) |
+		(uint64(buf[i+2]) << 16) |
+		(uint64(buf[i+3]) << 24) |
+		(uint64(buf[i+4]) << 32) |
+		(uint64(buf[i+5]) << 40) |
+		(uint64(buf[i+6]) << 48) |
+		(uint64(buf[i+7]) << 56)
+	i += 8
 
 	copy(c.Value, buf[i:i+c.RowSize])
 	i += c.RowSize
@@ -118,9 +124,9 @@ type LeafNode struct {
 	Cells  []Cell // length of PageSize / (rowSize+4)
 }
 
-func NewLeafNode(numCells uint32, rowSize uint64) *LeafNode {
+func NewLeafNode(rowSize uint64) *LeafNode {
 	aNode := LeafNode{
-		Cells: make([]Cell, numCells),
+		Cells: make([]Cell, maxCells(rowSize)),
 	}
 	for idx := range aNode.Cells {
 		aNode.Cells[idx].RowSize = rowSize

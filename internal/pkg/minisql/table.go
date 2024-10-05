@@ -30,7 +30,7 @@ func NewTable(name string, columns []Column, pager Pager, rootPageIdx uint32) *T
 }
 
 // SeekMaxKey returns max key stored in a tree, starting from page index
-func (t *Table) SeekMaxKey(ctx context.Context, pageIdx uint32) (uint32, bool, error) {
+func (t *Table) SeekMaxKey(ctx context.Context, pageIdx uint32) (uint64, bool, error) {
 	aPage, err := t.pager.GetPage(ctx, t, pageIdx)
 	if err != nil {
 		return 0, false, err
@@ -49,7 +49,7 @@ func (t *Table) SeekMaxKey(ctx context.Context, pageIdx uint32) (uint32, bool, e
 
 // Seek the cursor for a key, if it does not exist then return the cursor
 // for the page and cell where it should be inserted
-func (t *Table) Seek(ctx context.Context, key uint32) (*Cursor, error) {
+func (t *Table) Seek(ctx context.Context, key uint64) (*Cursor, error) {
 	rootPage, err := t.pager.GetPage(ctx, t, t.RootPageIdx)
 	if err != nil {
 		return nil, err
@@ -62,7 +62,7 @@ func (t *Table) Seek(ctx context.Context, key uint32) (*Cursor, error) {
 	return nil, fmt.Errorf("root page type")
 }
 
-func (t *Table) leafNodeSeek(ctx context.Context, pageIdx uint32, aPage *Page, key uint32) (*Cursor, error) {
+func (t *Table) leafNodeSeek(ctx context.Context, pageIdx uint32, aPage *Page, key uint64) (*Cursor, error) {
 	var minIdx, maxIdx uint32
 
 	maxIdx = aPage.LeafNode.Header.Cells
@@ -98,7 +98,7 @@ func (t *Table) leafNodeSeek(ctx context.Context, pageIdx uint32, aPage *Page, k
 	return &aCursor, nil
 }
 
-func (t *Table) internalNodeSeek(ctx context.Context, aPage *Page, key uint32) (*Cursor, error) {
+func (t *Table) internalNodeSeek(ctx context.Context, aPage *Page, key uint64) (*Cursor, error) {
 	childIdx := aPage.InternalNode.FindChildByKey(key)
 	childPageIdx, err := aPage.InternalNode.Child(childIdx)
 	if err != nil {

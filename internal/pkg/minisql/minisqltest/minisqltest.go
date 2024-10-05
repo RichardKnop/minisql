@@ -62,42 +62,20 @@ func (g *DataGen) Row() minisql.Row {
 	}
 }
 
-func (g *DataGen) NewRootLeafPageWithCells(cells, size int) *minisql.Page {
-	aRootLeaf := minisql.LeafNode{
-		Header: minisql.LeafNodeHeader{
-			Header: minisql.Header{
-				IsRoot: true,
-			},
-			Cells: uint32(cells),
-		},
-		Cells: []minisql.Cell{
-			{
-				Key:     0,
-				Value:   bytes.Repeat([]byte{byte(1)}, 270),
-				RowSize: 270,
-			},
-			{
-				Key:     1,
-				Value:   bytes.Repeat([]byte{byte(2)}, 270),
-				RowSize: 270,
-			},
-			{
-				Key:     2,
-				Value:   bytes.Repeat([]byte{byte(3)}, 270),
-				RowSize: 270,
-			},
-		},
-	}
-	aRootLeaf.Cells = make([]minisql.Cell, 0, cells)
+func (g *DataGen) NewRootLeafPageWithCells(cells, rowSize int) *minisql.Page {
+	aRootLeaf := minisql.NewLeafNode(uint64(rowSize))
+	aRootLeaf.Header.Header.IsRoot = true
+	aRootLeaf.Header.Cells = uint32(cells)
+
 	for i := 0; i < cells; i++ {
-		aRootLeaf.Cells = append(aRootLeaf.Cells, minisql.Cell{
-			Key:     uint32(i),
-			Value:   bytes.Repeat([]byte{byte(i)}, 270),
-			RowSize: uint64(size),
-		})
+		aRootLeaf.Cells[i] = minisql.Cell{
+			Key:     uint64(i),
+			Value:   bytes.Repeat([]byte{byte(i)}, rowSize),
+			RowSize: uint64(rowSize),
+		}
 	}
 
-	return &minisql.Page{LeafNode: &aRootLeaf}
+	return &minisql.Page{LeafNode: aRootLeaf}
 }
 
 /*
@@ -116,7 +94,7 @@ Below is a simple B tree for testing purposes
 	 +---------+     +-----+     +-----------+    +------+
 */
 func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Page) {
-	defaultCell := minisql.NewLeafNode(14, 270)
+	defaultCell := minisql.NewLeafNode(270)
 	var (
 		// page 0
 		aRootPage = &minisql.Page{

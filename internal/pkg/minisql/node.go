@@ -8,7 +8,7 @@ import (
 // For example, if node has 2 keys, this could return 0 for the leftmost child,
 // 1 for the middle child or 2 for the rightmost child.
 // The returned value is not a node index!
-func (n *InternalNode) FindChildByKey(key uint32) uint32 {
+func (n *InternalNode) FindChildByKey(key uint64) uint32 {
 	var (
 		minIdx = uint32(0)
 		maxIdx = n.Header.KeysNum

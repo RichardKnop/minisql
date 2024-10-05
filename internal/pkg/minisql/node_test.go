@@ -16,7 +16,7 @@ func TestInternalNode_FindChildByKey(t *testing.T) {
 	testCases := []struct {
 		Name     string
 		Page     *Page
-		Key      uint32
+		Key      uint64
 		ChildIdx uint32
 	}{
 		// Root page

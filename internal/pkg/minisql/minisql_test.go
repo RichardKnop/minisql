@@ -61,16 +61,13 @@ func (g *dataGen) Row() Row {
 }
 
 func newRootLeafPageWithCells(cells, rowSize int) *Page {
-	cellSize := rowSize + 4 // +4 for int4 key which is part of Cell
-	numCells := uint32(PageSize / cellSize)
-
-	aRootLeaf := NewLeafNode(numCells, uint64(rowSize))
+	aRootLeaf := NewLeafNode(uint64(rowSize))
 	aRootLeaf.Header.Header.IsRoot = true
 	aRootLeaf.Header.Cells = uint32(cells)
 
 	for i := 0; i < cells; i++ {
 		aRootLeaf.Cells[i] = Cell{
-			Key:     uint32(i),
+			Key:     uint64(i),
 			Value:   bytes.Repeat([]byte{byte(i)}, rowSize),
 			RowSize: uint64(rowSize),
 		}
@@ -95,7 +92,7 @@ Below is a simple B tree for testing purposes
 	 +---------+     +-----+     +-----------+    +------+
 */
 func newTestBtree() (*Page, []*Page, []*Page) {
-	defaultCell := NewLeafNode(14, 270)
+	defaultCell := NewLeafNode(270)
 	var (
 		// page 0
 		aRootPage = &Page{

@@ -10,7 +10,7 @@ type Page struct {
 	LeafNode     *LeafNode
 }
 
-func (p *Page) GetMaxKey() (uint32, bool) {
+func (p *Page) GetMaxKey() (uint64, bool) {
 	if p.InternalNode != nil {
 		return p.InternalNode.ICells[p.InternalNode.Header.KeysNum-1].Key, true
 	}

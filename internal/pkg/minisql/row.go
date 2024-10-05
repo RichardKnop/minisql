@@ -14,6 +14,15 @@ type Row struct {
 	Values  []any
 }
 
+// MaxCells returns how many rows can be stored in a single page
+func (r Row) MaxCells() uint32 {
+	return maxCells(r.Size())
+}
+
+func maxCells(rowSize uint64) uint32 {
+	return uint32(PageSize / (rowSize + 8)) // +8 for int64 row ID
+}
+
 func NewRow(columns []Column) Row {
 	return Row{Columns: columns}
 }

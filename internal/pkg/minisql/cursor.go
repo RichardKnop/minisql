@@ -12,7 +12,7 @@ type Cursor struct {
 	EndOfTable bool
 }
 
-func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint32, aRow *Row) error {
+func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) error {
 	aPage, err := c.Table.pager.GetPage(ctx, c.Table, c.PageIdx)
 	if err != nil {
 		return err
@@ -22,8 +22,7 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint32, aRow *Row) erro
 	}
 
 	cells := aPage.LeafNode.Header.Cells
-	maxCells := uint32(PageSize / (aRow.Size() + 4)) // +4 for int4 key which is part of Cell
-	if cells >= maxCells {
+	if cells >= aRow.MaxCells() {
 		// Split leaf node
 		return c.LeafNodeSplitInsert(ctx, key, aRow)
 	}
@@ -40,7 +39,7 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint32, aRow *Row) erro
 	return saveToCell(ctx, &aCell, key, aRow)
 }
 
-func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint32, aRow *Row) error {
+func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row) error {
 	/*
 	  Create a new node and move half the cells over.
 	  Insert the new value in one of the two nodes.
@@ -63,10 +62,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint32, aRow *Row)
 		return err
 	}
 
-	cellSize := c.Table.RowSize + 4 // +4 for int4 key which is part of Cell
-	maxCells := uint32(PageSize / cellSize)
-
-	newPage.LeafNode = NewLeafNode(maxCells, uint64(c.Table.RowSize))
+	newPage.LeafNode = NewLeafNode(uint64(c.Table.RowSize))
 	newPage.LeafNode.Header.Parent = oldPage.LeafNode.Header.Parent
 	oldPage.LeafNode.Header.NextLeaf = newPageNum
 	newPage.LeafNode.Header.NextLeaf = oldPage.LeafNode.Header.NextLeaf
@@ -82,7 +78,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint32, aRow *Row)
 		rightSplitCount  = (leafNodeMaxCells + 1) / 2
 		leftSplitCount   = leafNodeMaxCells + 1 - rightSplitCount
 	)
-	for i := maxCells; ; i-- {
+	for i := leafNodeMaxCells; ; i-- {
 		if i+1 == 0 {
 			break
 		}
@@ -130,7 +126,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint32, aRow *Row)
 	return c.Table.InternalNodeInsert(ctx, parentPageIdx, newPageNum)
 }
 
-func saveToCell(ctx context.Context, cell *Cell, key uint32, aRow *Row) error {
+func saveToCell(ctx context.Context, cell *Cell, key uint64, aRow *Row) error {
 	rowBuf, err := aRow.Marshal()
 	if err != nil {
 		return err
