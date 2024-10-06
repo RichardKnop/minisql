@@ -14,8 +14,8 @@ type Parser interface {
 }
 
 type Pager interface {
-	GetPage(context.Context, string, uint32) (*Page, error)
-	FileSize() int64
+	GetPage(context.Context, *Table, uint32) (*Page, error)
+	TotalPages(*Table) uint32
 	Flush(context.Context, uint32, int64) error
 }
 
@@ -189,8 +189,7 @@ func (d *Database) CreateTestTable() {
 		Columns:     columns,
 		RootPageIdx: 0,
 		pager:       d.pager,
-		rowSize:     rowSize,
-		numRows:     int(d.pager.FileSize() / int64(rowSize)),
+		RowSize:     rowSize,
 	}
 }
 
@@ -199,41 +198,25 @@ func (d *Database) Close(ctx context.Context) error {
 		return fmt.Errorf("currently only single table is supported")
 	}
 
-	var aTable *Table
-	for tableName := range d.tables {
-		aTable = d.tables[tableName]
-		break
-	}
+	// var aTable *Table
+	// for tableName := range d.tables {
+	// 	aTable = d.tables[tableName]
+	// 	break
+	// }
 
-	numFullPages := aTable.numRows / int(aTable.rowSize)
-	for i := 0; i < numFullPages; i++ {
-		aPage, err := d.pager.GetPage(ctx, aTable.Name, uint32(i))
-		if err != nil {
-			return err
-		}
-		if aPage == nil {
-			continue
-		}
-		if err := d.pager.Flush(ctx, aPage.Index, PageSize); err != nil {
-			return err
-		}
-	}
-
-	// There may be a partial page to write to the end of the file
-	// This should not be needed after we switch to a B-tree
-	numAdditionalRows := aTable.numRows % int(aTable.rowSize)
-	if numAdditionalRows > 0 {
-		pageIdx := numFullPages
-		aPage, err := d.pager.GetPage(ctx, aTable.Name, uint32(pageIdx))
-		if err != nil {
-			return err
-		}
-		if aPage != nil {
-			if err := d.pager.Flush(ctx, aPage.Index, int64(numAdditionalRows*int(aTable.rowSize))); err != nil {
-				return err
-			}
-		}
-	}
+	// numFullPages := aTable.numRows / int(aTable.RowSize)
+	// for i := 0; i < numFullPages; i++ {
+	// 	aPage, err := d.pager.GetPage(ctx, aTable.Name, uint32(i))
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	if aPage == nil {
+	// 		continue
+	// 	}
+	// 	if err := d.pager.Flush(ctx, aPage.Index, PageSize); err != nil {
+	// 		return err
+	// 	}
+	// }
 
 	return nil
 }
@@ -273,4 +256,46 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 		return d.executeDelete(ctx, stmt)
 	}
 	return StatementResult{}, errUnrecognizedStatementType
+}
+
+// CreateTable creates a new table with a name and columns
+func (d *Database) CreateTable(ctx context.Context, name string, columns []Column) (*Table, error) {
+	if len(d.tables) == 1 {
+		return nil, fmt.Errorf("currently only single table is supported")
+	}
+
+	aTable, ok := d.tables[name]
+	if ok {
+		return aTable, errTableAlreadyExists
+	}
+	d.tables[name] = NewTable(name, columns, d.pager, uint32(0))
+
+	// TODO - insert into main schema table
+
+	return d.tables[name], nil
+}
+
+// CreateTable creates a new table with a name and columns
+func (d *Database) DropTable(ctx context.Context, name string) error {
+	_, ok := d.tables[name]
+	if !ok {
+		return errTableDoesNotExist
+	}
+	delete(d.tables, name)
+
+	// TODO - delete pages
+
+	// TODO - delete from main schema table
+
+	return nil
+}
+
+func (d *Database) executeCreateTable(ctx context.Context, stmt Statement) (StatementResult, error) {
+	_, err := d.CreateTable(ctx, stmt.TableName, stmt.Columns)
+	return StatementResult{}, err
+}
+
+func (d *Database) executeDropTable(ctx context.Context, stmt Statement) (StatementResult, error) {
+	err := d.DropTable(ctx, stmt.TableName)
+	return StatementResult{}, err
 }

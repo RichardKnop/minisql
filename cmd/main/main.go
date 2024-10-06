@@ -64,7 +64,7 @@ func main() {
 	}
 	defer dbFile.Close()
 
-	aPager, err := pager.New(dbFile, minisql.SchemaTableName)
+	aPager, err := pager.New(dbFile, minisql.PageSize, minisql.SchemaTableName)
 	if err != nil {
 		panic(err)
 	}

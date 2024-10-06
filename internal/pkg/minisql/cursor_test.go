@@ -9,174 +9,103 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCursor_TableStart_Empty(t *testing.T) {
+func TestCursor_LeafNodeInsert_RootLeafEmptyTable(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
-
-	aDatabase, err := NewDatabase(ctx, "db", nil, nil)
-	require.NoError(t, err)
-	aTable, err := aDatabase.CreateTable(ctx, "foo", testColumns)
-	require.NoError(t, err)
-
-	aCursor := TableStart(aTable)
-	assert.Equal(t, 0, aCursor.RowNumber)
-	assert.True(t, aCursor.EndOfTable)
-}
-
-func TestCursor_TableStart_NotEmpty(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	pagerMock := new(MockPager)
 	var (
-		page0 = NewPage(0)
+		ctx            = context.Background()
+		pagerMock      = new(MockPager)
+		aRow           = gen.Row()
+		cells, rowSize = 0, aRow.Size()
+		aRootPage      = newRootLeafPageWithCells(cells, int(rowSize))
+		aTable         = NewTable("foo", testColumns, pagerMock, 0)
+		key            = uint64(0)
 	)
-	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(page0, nil)
 
-	aDatabase, err := NewDatabase(ctx, "db", nil, pagerMock)
+	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
+
+	aCursor, err := aTable.Seek(ctx, key)
 	require.NoError(t, err)
-	aTable, err := aDatabase.CreateTable(ctx, "foo", testColumns)
+
+	err = aCursor.LeafNodeInsert(ctx, 0, &aRow)
 	require.NoError(t, err)
 
-	insertRows(ctx, t, aTable, gen.Rows(1))
+	assert.Equal(t, 1, int(aRootPage.LeafNode.Header.Cells))
+	assert.Equal(t, 0, int(aRootPage.LeafNode.Cells[0].Key))
 
-	aCursor := TableStart(aTable)
-	assert.Equal(t, 0, aCursor.RowNumber)
-	assert.False(t, aCursor.EndOfTable)
-
-	mock.AssertExpectationsForObjects(t, pagerMock)
+	actualRow := NewRow(aRow.Columns)
+	err = UnmarshalRow(aRootPage.LeafNode.Cells[0].Value, &actualRow)
+	require.NoError(t, err)
+	assert.Equal(t, aRow, actualRow)
 }
 
-func TestCursor_TableEnd(t *testing.T) {
+func TestCursor_LeafNodeInsert_RootLeafFull(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
-	pagerMock := new(MockPager)
 	var (
-		page0 = NewPage(0)
-		page1 = NewPage(1)
+		ctx            = context.Background()
+		pagerMock      = new(MockPager)
+		aRow           = gen.Row()
+		cells, rowSize = aRow.MaxCells(), aRow.Size()
+		aRootPage      = newRootLeafPageWithCells(int(cells), int(rowSize))
+		rightChild     = &Page{LeafNode: NewLeafNode(aRow.Size())}
+		leftChild      = &Page{LeafNode: NewLeafNode(aRow.Size())}
+		aTable         = NewTable("foo", testColumns, pagerMock, 0)
+		key            = uint64(cells)
 	)
-	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(page0, nil)
-	pagerMock.On("GetPage", mock.Anything, "foo", uint32(1)).Return(page1, nil)
 
-	aDatabase, err := NewDatabase(ctx, "db", nil, pagerMock)
-	require.NoError(t, err)
-	aTable, err := aDatabase.CreateTable(ctx, "foo", testColumns)
-	require.NoError(t, err)
+	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
+	pagerMock.On("GetPage", mock.Anything, aTable, uint32(1)).Return(rightChild, nil)
+	pagerMock.On("GetPage", mock.Anything, aTable, uint32(2)).Return(leftChild, nil)
 
-	rows := gen.Rows(20)
-	insertRows(ctx, t, aTable, rows)
+	// TotalPages is called twice, let's make sure the second time it's called,
+	// it will return incremented value since we have created a new page already
+	totalPages := uint32(1)
+	pagerMock.On("TotalPages", aTable).Return(func(t *Table) uint32 {
+		old := totalPages
+		totalPages += 1
+		return old
+	}, nil)
 
-	aCursor := TableEnd(aTable)
-	assert.Equal(t, 20, aCursor.RowNumber)
-	assert.True(t, aCursor.EndOfTable)
-
-	mock.AssertExpectationsForObjects(t, pagerMock)
-}
-
-func TestCursor_TableAt(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	pagerMock := new(MockPager)
-	var (
-		page0 = NewPage(0)
-		page1 = NewPage(1)
-	)
-	pagerMock.On("GetPage", mock.Anything, "foo", uint32(0)).Return(page0, nil)
-	pagerMock.On("GetPage", mock.Anything, "foo", uint32(1)).Return(page1, nil)
-
-	aDatabase, err := NewDatabase(ctx, "db", nil, pagerMock)
-	require.NoError(t, err)
-	aTable, err := aDatabase.CreateTable(ctx, "foo", testColumns)
+	aCursor, err := aTable.Seek(ctx, key)
 	require.NoError(t, err)
 
-	rows := gen.Rows(20)
-	insertRows(ctx, t, aTable, rows)
-
-	aCursor := TableAt(aTable, 10)
-	assert.Equal(t, 10, aCursor.RowNumber)
-	assert.False(t, aCursor.EndOfTable)
-
-	mock.AssertExpectationsForObjects(t, pagerMock)
-}
-
-func TestCursor_Value(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, "db", nil, nil)
-	require.NoError(t, err)
-	aTable, err := aDatabase.CreateTable(ctx, "foo", testColumns)
+	err = aCursor.LeafNodeInsert(ctx, uint64(cells), &aRow)
 	require.NoError(t, err)
 
-	// Row size is 267 bytes
-	// 15 rows will fit into each 4096 bytes page
-	// There are max 100 pages right now (temporary limitation)
+	assert.Equal(t, 1, int(aRootPage.InternalNode.Header.KeysNum))
+	assert.True(t, aRootPage.InternalNode.Header.IsRoot)
+	assert.True(t, aRootPage.InternalNode.Header.IsInternal)
+	assert.Equal(t, 1, int(aRootPage.InternalNode.Header.RightChild))
+	assert.Equal(t, 2, int(aRootPage.InternalNode.ICells[0].Child))
+	assert.Equal(t, 7, int(aRootPage.InternalNode.ICells[0].Key))
 
-	testCases := []struct {
-		Name      string
-		RowNumber int
-		Page      uint32
-		Offset    uint32
-		Err       error
-	}{
-		{
-			Name:      "First row in the table",
-			RowNumber: 0,
-			Page:      uint32(0),
-			Offset:    uint32(0),
-		},
-		{
-			Name:      "Second row in the table",
-			RowNumber: 1,
-			Page:      uint32(0),
-			Offset:    uint32(267),
-		},
-		{
-			Name:      "Third row in the table",
-			RowNumber: 2,
-			Page:      uint32(0),
-			Offset:    uint32(267 * 2),
-		},
-		{
-			Name:      "16th row should be the first row of the second page",
-			RowNumber: 15,
-			Page:      uint32(1),
-			Offset:    uint32(0),
-		},
-		{
-			Name:      "1486th row should be the first row of the last 100th page",
-			RowNumber: 1485,
-			Page:      uint32(99),
-			Offset:    uint32(0),
-		},
-		{
-			Name:      "1500th row should be the last row of the last 100th page",
-			RowNumber: 1499,
-			Page:      uint32(99),
-			Offset:    uint32(267 * 14),
-		},
-		{
-			Name:      "1501th row should cause error",
-			RowNumber: 1500,
-			Err:       errMaximumPagesReached,
-		},
-	}
+	// Assert right leaf
+	assert.False(t, rightChild.LeafNode.Header.IsRoot)
+	assert.False(t, rightChild.LeafNode.Header.IsInternal)
+	assert.Equal(t, 7, int(rightChild.LeafNode.Header.Cells))
+	assert.Equal(t, uint32(0), rightChild.LeafNode.Header.NextLeaf)
+	// Assert keys in the right leaf
+	assert.Equal(t, 8, int(rightChild.LeafNode.Cells[0].Key))
+	assert.Equal(t, 9, int(rightChild.LeafNode.Cells[1].Key))
+	assert.Equal(t, 10, int(rightChild.LeafNode.Cells[2].Key))
+	assert.Equal(t, 11, int(rightChild.LeafNode.Cells[3].Key))
+	assert.Equal(t, 12, int(rightChild.LeafNode.Cells[4].Key))
+	assert.Equal(t, 13, int(rightChild.LeafNode.Cells[5].Key))
+	assert.Equal(t, 14, int(rightChild.LeafNode.Cells[6].Key))
 
-	for _, aTestCase := range testCases {
-		t.Run(aTestCase.Name, func(t *testing.T) {
-			aCursor := TableAt(aTable, aTestCase.RowNumber)
-			pageIdx, offset, err := aCursor.Value()
-			if aTestCase.Err != nil {
-				require.Error(t, err)
-				assert.ErrorIs(t, err, aTestCase.Err)
-			} else {
-				require.NoError(t, err)
-			}
-			assert.Equal(t, aTestCase.Page, pageIdx)
-			assert.Equal(t, aTestCase.Offset, offset)
-		})
-	}
+	// Assert left leaf
+	assert.False(t, leftChild.LeafNode.Header.IsRoot)
+	assert.False(t, leftChild.LeafNode.Header.IsInternal)
+	assert.Equal(t, 8, int(leftChild.LeafNode.Header.Cells))
+	assert.Equal(t, 1, int(leftChild.LeafNode.Header.NextLeaf))
+	// Assert keys in the left leaf
+	assert.Equal(t, 0, int(leftChild.LeafNode.Cells[0].Key))
+	assert.Equal(t, 1, int(leftChild.LeafNode.Cells[1].Key))
+	assert.Equal(t, 2, int(leftChild.LeafNode.Cells[2].Key))
+	assert.Equal(t, 3, int(leftChild.LeafNode.Cells[3].Key))
+	assert.Equal(t, 4, int(leftChild.LeafNode.Cells[4].Key))
+	assert.Equal(t, 5, int(leftChild.LeafNode.Cells[5].Key))
+	assert.Equal(t, 6, int(leftChild.LeafNode.Cells[6].Key))
+	assert.Equal(t, 7, int(leftChild.LeafNode.Cells[7].Key))
 }

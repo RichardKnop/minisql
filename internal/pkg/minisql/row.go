@@ -14,15 +14,24 @@ type Row struct {
 	Values  []any
 }
 
+// MaxCells returns how many rows can be stored in a single page
+func (r Row) MaxCells() uint32 {
+	return maxCells(r.Size())
+}
+
+func maxCells(rowSize uint64) uint32 {
+	return uint32(PageSize / (rowSize + 8)) // +8 for int64 row ID
+}
+
 func NewRow(columns []Column) Row {
 	return Row{Columns: columns}
 }
 
 // Size calculates a size of a row record including a header and payload
-func (r Row) Size() uint32 {
-	size := uint32(0)
+func (r Row) Size() uint64 {
+	size := uint64(0)
 	for _, aColumn := range r.Columns {
-		size += aColumn.Size
+		size += uint64(aColumn.Size)
 	}
 	return size
 }
@@ -65,39 +74,6 @@ func (r Row) appendValues(fields []string, values []any) Row {
 	}
 	return r
 }
-
-// func (r Row) headerSize() uint32 {
-// 	// First we start with header, first byte determines total number of bytes in the header
-// 	size := 1
-// 	// Following are n bytes where n is number of columns, each one defines datatype and size of payload:
-// 	// 0 - NULL
-// 	// 1 - INT4
-// 	// 2 - INT8
-// 	// 3 - VARCHAR
-// 	size += len(r.Columns)
-// 	return uint32(size)
-// }
-
-// func (r Row) header() []byte {
-// 	headerSize := r.headerSize()
-// 	header := make([]byte, headerSize)
-// 	header[0] = byte(headerSize)
-// 	for i, aColumn := range r.Columns {
-// 		if r.Values[i] == nil {
-// 			header[i+1] = 0
-// 		} else {
-// 			switch aColumn.Kind {
-// 			case Int4:
-// 				header[i+1] = 1
-// 			case Int8:
-// 				header[i+1] = 2
-// 			case Varchar:
-// 				header[i+1] = 3
-// 			}
-// 		}
-// 	}
-// 	return header
-// }
 
 // TODO - handle NULL values
 func (r *Row) Marshal() ([]byte, error) {

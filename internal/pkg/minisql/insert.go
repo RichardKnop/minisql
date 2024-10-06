@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"fmt"
 )
 
 func (d *Database) executeInsert(ctx context.Context, stmt Statement) (StatementResult, error) {
@@ -10,39 +11,57 @@ func (d *Database) executeInsert(ctx context.Context, stmt Statement) (Statement
 		return StatementResult{}, errTableDoesNotExist
 	}
 
-	return aTable.Insert(ctx, stmt)
+	if err := aTable.Insert(ctx, stmt); err != nil {
+		return StatementResult{}, err
+	}
+
+	return StatementResult{RowsAffected: len(stmt.Inserts)}, nil
 }
 
-func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, error) {
-	inserted := 0
+func (t *Table) Insert(ctx context.Context, stmt Statement) error {
+	newRowID, found, err := t.SeekMaxKey(ctx, t.RootPageIdx)
+	if err != nil {
+		return err
+	}
+	if found {
+		newRowID = +1
+	}
 
-	aCursor := TableEnd(t)
 	for _, values := range stmt.Inserts {
-		pageIdx, offset, err := aCursor.Value()
-		if err != nil {
-			return StatementResult{}, err
-		}
-		aPage, err := t.pager.GetPage(ctx, t.Name, pageIdx)
-		if err != nil {
-			return StatementResult{}, err
-		}
 		aRow := Row{
 			Columns: t.Columns,
 			Values:  make([]any, 0, len(t.Columns)),
 		}
 		aRow = aRow.appendValues(stmt.Fields, values)
 
-		if err := aPage.Insert(ctx, offset, aRow); err != nil {
-			// TODO - handle partial insert by deleting all previously inserted rows
-			// if a row insert fails so we don't end up with inconsistent state
-			return StatementResult{}, err
+		aCursor, err := t.Seek(ctx, newRowID)
+		if err != nil {
+			return err
 		}
 
-		aCursor.Advance()
-		inserted += 1
+		aPage, err := t.pager.GetPage(ctx, t, aCursor.PageIdx)
+		if err != nil {
+			return err
+		}
+
+		// Must be leaf node
+		if aPage.LeafNode == nil {
+			return fmt.Errorf("trying to insert into non leaf node")
+		}
+		if aCursor.CellIdx < aPage.LeafNode.Header.Cells {
+			if aPage.LeafNode.Cells[aCursor.CellIdx].Key == newRowID {
+				return fmt.Errorf("duplicate key %d", newRowID)
+			}
+		}
+
+		fmt.Println("inserting row", int(newRowID), "cursor", fmt.Sprintf("%+v", aCursor))
+
+		if err := aCursor.LeafNodeInsert(ctx, newRowID, &aRow); err != nil {
+			return err
+		}
+
+		newRowID += 1
 	}
 
-	rowsAffected := inserted
-	t.numRows += inserted
-	return StatementResult{RowsAffected: rowsAffected}, nil
+	return nil
 }
