@@ -2,6 +2,12 @@
 
 `MiniSQL` is a research project aimed at implementing a simple relational database in Golang. This project exists mostly for myself as a way to learn principles and design of relational databases. It is not meant to be used as a real database.
 
+Shout out to some great repos and other resources that invaluable while figuring out how to get this all working together:
+- [Let's Build a Simple Database](https://cstack.github.io/db_tutorial/parts/part1.html)
+- [go-sqldb](https://github.com/auxten/go-sqldb)
+- [sqlparser](https://github.com/marianogappa/sqlparser)
+- [sqlite docs](https://www.sqlite.org/fileformat2.html) (section about file format has been especially useful)
+
 Run `minisql` in your command line:
 
 ```sh
@@ -9,7 +15,7 @@ go run cmd/main/main.go
 minisql>
 ```
 
-## Meta Commands
+## Meta Commands (WIP)
 
 You can use meta commands, type `.help` to see available commands or `.exit` to quit minisql:
 
@@ -20,7 +26,7 @@ minisql> .help
 .tables  - List all tables in the current database
 ```
 
-### SQL Queries
+### SQL Queries (WIP)
 
 Create a table:
 

@@ -26,7 +26,6 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 	if found {
 		newRowID = +1
 	}
-	// fmt.Println("max key", newRowID)
 
 	for _, values := range stmt.Inserts {
 		aRow := Row{
@@ -39,11 +38,12 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 		if err != nil {
 			return err
 		}
+
 		aPage, err := t.pager.GetPage(ctx, t, aCursor.PageIdx)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%+v\n", aPage.LeafNode.Header)
+
 		// Must be leaf node
 		if aPage.LeafNode == nil {
 			return fmt.Errorf("trying to insert into non leaf node")
@@ -54,7 +54,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 			}
 		}
 
-		fmt.Println("inserting row", newRowID, "page index", aCursor.PageIdx, "cell index", aCursor.CellIdx)
+		fmt.Println("inserting row", int(newRowID), "cursor", fmt.Sprintf("%+v", aCursor))
 
 		if err := aCursor.LeafNodeInsert(ctx, newRowID, &aRow); err != nil {
 			return err

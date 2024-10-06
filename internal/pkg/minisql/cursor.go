@@ -6,10 +6,9 @@ import (
 )
 
 type Cursor struct {
-	Table      *Table
-	PageIdx    uint32
-	CellIdx    uint32
-	EndOfTable bool
+	Table   *Table
+	PageIdx uint32
+	CellIdx uint32
 }
 
 func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) error {
@@ -39,12 +38,10 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) erro
 	return saveToCell(ctx, &aCell, key, aRow)
 }
 
+// Create a new node and move half the cells over.
+// Insert the new value in one of the two nodes.
+// Update parent or create a new parent.
 func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row) error {
-	/*
-	  Create a new node and move half the cells over.
-	  Insert the new value in one of the two nodes.
-	  Update parent or create a new parent.
-	*/
 	aPager := c.Table.pager
 
 	oldPage, err := aPager.GetPage(ctx, c.Table, c.PageIdx)
@@ -64,7 +61,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 
 	newPage.LeafNode = NewLeafNode(uint64(c.Table.RowSize))
 	newPage.LeafNode.Header.Parent = oldPage.LeafNode.Header.Parent
-	oldPage.LeafNode.Header.NextLeaf = newPageNum
+
 	newPage.LeafNode.Header.NextLeaf = oldPage.LeafNode.Header.NextLeaf
 	oldPage.LeafNode.Header.NextLeaf = newPageNum
 
@@ -82,11 +79,15 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 		if i+1 == 0 {
 			break
 		}
-		var destPage *Page
-		if i > leftSplitCount {
-			destPage = newPage
+		var (
+			destPage *Page
+			isLeft   = i < leftSplitCount
+		)
+
+		if !isLeft {
+			destPage = newPage // right
 		} else {
-			destPage = oldPage
+			destPage = oldPage // left
 		}
 		cellIdx := i % leftSplitCount
 		destCell := &destPage.LeafNode.Cells[cellIdx]

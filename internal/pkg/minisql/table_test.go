@@ -70,7 +70,6 @@ func TestTable_Seek_EmptyTable(t *testing.T) {
 	assert.Equal(t, aTable, aCursor.Table)
 	assert.Equal(t, 0, int(aCursor.PageIdx))
 	assert.Equal(t, 0, int(aCursor.CellIdx))
-	assert.True(t, aCursor.EndOfTable)
 
 	mock.AssertExpectationsForObjects(t, pagerMock)
 }
@@ -94,7 +93,6 @@ func TestTable_Seek_RootLeafNode_SingleCell(t *testing.T) {
 	assert.Equal(t, aTable, aCursor.Table)
 	assert.Equal(t, 0, int(aCursor.PageIdx))
 	assert.Equal(t, 0, int(aCursor.CellIdx))
-	assert.False(t, aCursor.EndOfTable)
 
 	// Seek key 1 (doesn't exist, end of table)
 	aCursor, err = aTable.Seek(ctx, uint64(1))
@@ -102,20 +100,19 @@ func TestTable_Seek_RootLeafNode_SingleCell(t *testing.T) {
 	assert.Equal(t, aTable, aCursor.Table)
 	assert.Equal(t, 0, int(aCursor.PageIdx))
 	assert.Equal(t, 1, int(aCursor.CellIdx))
-	assert.True(t, aCursor.EndOfTable)
 
 	mock.AssertExpectationsForObjects(t, pagerMock)
 }
 
-func TestTable_Seek_RootLeafNode_MoreCells(t *testing.T) {
+func TestTable_Seek_RootLeafNode_Full(t *testing.T) {
 	t.Parallel()
 
 	var (
 		ctx            = context.Background()
 		pagerMock      = new(MockPager)
-		cells, rowSize = 10, 270
-		aRootPage      = newRootLeafPageWithCells(cells, rowSize)
 		aTable         = NewTable("foo", testColumns, pagerMock, 0)
+		cells, rowSize = maxCells(aTable.RowSize), aTable.RowSize
+		aRootPage      = newRootLeafPageWithCells(int(cells), int(rowSize))
 	)
 
 	pagerMock.On("GetPage", mock.Anything, aTable, aTable.RootPageIdx).Return(aRootPage, nil)
@@ -127,7 +124,6 @@ func TestTable_Seek_RootLeafNode_MoreCells(t *testing.T) {
 		assert.Equal(t, aTable, aCursor.Table)
 		assert.Equal(t, 0, int(aCursor.PageIdx))
 		assert.Equal(t, int(key), int(aCursor.CellIdx))
-		assert.False(t, aCursor.EndOfTable)
 	}
 
 	// Seek key 3 (does not exist, end of table)
@@ -135,8 +131,7 @@ func TestTable_Seek_RootLeafNode_MoreCells(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, aTable, aCursor.Table)
 	assert.Equal(t, 0, int(aCursor.PageIdx))
-	assert.Equal(t, cells, int(aCursor.CellIdx))
-	assert.True(t, aCursor.EndOfTable)
+	assert.Equal(t, int(cells), int(aCursor.CellIdx))
 
 	mock.AssertExpectationsForObjects(t, pagerMock)
 }
@@ -220,7 +215,6 @@ func TestTable_Seek_RootLeafNode_BiggerTree(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, int(aTestCase.Cursor.PageIdx), int(aCursor.PageIdx))
 			assert.Equal(t, int(aTestCase.Cursor.CellIdx), int(aCursor.CellIdx))
-			assert.Equal(t, aTestCase.Cursor.EndOfTable, aCursor.EndOfTable)
 		})
 	}
 
@@ -229,6 +223,36 @@ func TestTable_Seek_RootLeafNode_BiggerTree(t *testing.T) {
 
 func TestTable_CreateNewRoot(t *testing.T) {
 	t.Parallel()
+
+	var (
+		ctx            = context.Background()
+		pagerMock      = new(MockPager)
+		aRow           = gen.Row()
+		cells, rowSize = aRow.MaxCells(), aRow.Size()
+		aRootPage      = newRootLeafPageWithCells(int(cells), int(rowSize))
+		newRightChild  = &Page{LeafNode: NewLeafNode(aRow.Size())}
+		newLeftChild   = &Page{LeafNode: NewLeafNode(aRow.Size())}
+		aTable         = NewTable("foo", testColumns, pagerMock, 0)
+	)
+
+	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
+	pagerMock.On("GetPage", mock.Anything, aTable, uint32(1)).Return(newRightChild, nil)
+	pagerMock.On("TotalPages", aTable).Return(uint32(2), nil)
+	pagerMock.On("GetPage", mock.Anything, aTable, uint32(2)).Return(newLeftChild, nil)
+
+	err := aTable.CreateNewRoot(ctx, uint32(1))
+	require.NoError(t, err)
+	assert.True(t, aRootPage.InternalNode.Header.IsRoot)
+	assert.True(t, aRootPage.InternalNode.Header.IsInternal)
+	assert.Equal(t, 1, int(aRootPage.InternalNode.Header.KeysNum))
+	assert.Equal(t, 1, int(aRootPage.InternalNode.Header.RightChild))
+	assert.Equal(t, ICell{
+		Key:   uint64(cells - 1),
+		Child: 2,
+	}, aRootPage.InternalNode.ICells[0])
+
+	assert.Equal(t, 0, int(newRightChild.LeafNode.Header.Cells))
+	assert.Equal(t, int(cells), int(newLeftChild.LeafNode.Header.Cells))
 }
 
 func TestTable_InternalNodeInsert(t *testing.T) {

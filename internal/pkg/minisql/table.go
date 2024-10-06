@@ -68,9 +68,8 @@ func (t *Table) leafNodeSeek(ctx context.Context, pageIdx uint32, aPage *Page, k
 	maxIdx = aPage.LeafNode.Header.Cells
 
 	aCursor := Cursor{
-		Table:      t,
-		PageIdx:    pageIdx,
-		EndOfTable: false,
+		Table:   t,
+		PageIdx: pageIdx,
 	}
 
 	// Search the Btree
@@ -89,11 +88,6 @@ func (t *Table) leafNodeSeek(ctx context.Context, pageIdx uint32, aPage *Page, k
 	}
 
 	aCursor.CellIdx = minIdx
-
-	// If key does not exist, set end of table flag to true
-	if aCursor.CellIdx == (aPage.LeafNode.Header.Cells) && aPage.LeafNode.Header.NextLeaf == 0 {
-		aCursor.EndOfTable = true
-	}
 
 	return &aCursor, nil
 }
@@ -116,15 +110,12 @@ func (t *Table) internalNodeSeek(ctx context.Context, aPage *Page, key uint64) (
 	return t.leafNodeSeek(ctx, childPageIdx, childPage, key)
 }
 
+// Handle splitting the root.
+// Old root copied to new page, becomes left child.
+// Address of right child passed in.
+// Re-initialize root page to contain the new root node.
+// New root node points to two children.
 func (t *Table) CreateNewRoot(ctx context.Context, rightChildPageIdx uint32) error {
-	/*
-	  Handle splitting the root.
-	  Old root copied to new page, becomes left child.
-	  Address of right child passed in.
-	  Re-initialize root page to contain the new root node.
-	  New root node points to two children.
-	*/
-
 	rootPage, err := t.pager.GetPage(ctx, t, t.RootPageIdx)
 	if err != nil {
 		return err
@@ -134,13 +125,14 @@ func (t *Table) CreateNewRoot(ctx context.Context, rightChildPageIdx uint32) err
 	if err != nil {
 		return err
 	}
+
 	leftChildPageIdx := t.pager.TotalPages(t)
 	leftChildPage, err := t.pager.GetPage(ctx, t, leftChildPageIdx)
 	if err != nil {
 		return err
 	}
 
-	// copy whatever kind of node to leftChildPage, and set nonRoot
+	// Copy all node contents to left child
 	if rootPage.LeafNode != nil {
 		*leftChildPage.LeafNode = *rootPage.LeafNode
 		leftChildPage.LeafNode.Header.IsRoot = false
@@ -149,24 +141,23 @@ func (t *Table) CreateNewRoot(ctx context.Context, rightChildPageIdx uint32) err
 		leftChildPage.InternalNode.Header.IsRoot = false
 	}
 
-	rootPage.LeafNode = nil
+	// Change root node to a new internal node
 	rootPage.InternalNode = new(InternalNode)
 	rootNode := rootPage.InternalNode
-	// change root node to internal node
-	rootNode.Header.IsRoot = false
+	rootNode.Header.IsRoot = true
 	rootNode.Header.IsInternal = true
 	rootNode.Header.KeysNum = 1
 	rootNode.Header.Parent = 0
-	rootNode.Header.RightChild = 0
 
+	// Set left and right child
+	rootNode.Header.RightChild = rightChildPageIdx
 	if err := rootNode.SetChildIdx(0, leftChildPageIdx); err != nil {
 		return err
 	}
-
 	leftChildMaxKey, _ := leftChildPage.GetMaxKey()
 	rootNode.ICells[0].Key = leftChildMaxKey
-	rootNode.Header.RightChild = rightChildPageIdx
 
+	// Set parent for both left and right child
 	if leftChildPage.LeafNode != nil {
 		leftChildPage.LeafNode.Header.Parent = t.RootPageIdx
 	} else if leftChildPage.InternalNode != nil {
@@ -181,10 +172,8 @@ func (t *Table) CreateNewRoot(ctx context.Context, rightChildPageIdx uint32) err
 	return nil
 }
 
+// Add a new child/key pair to parent that corresponds to child
 func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPageIdx uint32) error {
-	/*
-	  Add a new child/key pair to parent that corresponds to child
-	*/
 	parentPage, err := t.pager.GetPage(ctx, t, parentPageIdx)
 	if err != nil {
 		return err
