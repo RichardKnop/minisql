@@ -45,6 +45,24 @@ func (r Row) GetColumn(name string) (Column, bool) {
 	return Column{}, false
 }
 
+func (r Row) GetValue(name string) (any, bool) {
+	var (
+		found     bool
+		columnIdx = 0
+	)
+	for i, aColumn := range r.Columns {
+		if aColumn.Name == name {
+			found = true
+			columnIdx = i
+			break
+		}
+	}
+	if !found {
+		return nil, false
+	}
+	return r.Values[columnIdx], true
+}
+
 func (r Row) columnOffset(idx int) uint32 {
 	offset := uint32(0)
 	for i := 0; i < idx; i++ {

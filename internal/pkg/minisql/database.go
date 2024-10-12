@@ -15,7 +15,8 @@ type Parser interface {
 
 type Pager interface {
 	GetPage(context.Context, *Table, uint32) (*Page, error)
-	TotalPages(*Table) uint32
+	// ListPages() []*Page
+	TotalPages() uint32
 	Flush(context.Context, uint32, int64) error
 }
 
@@ -84,6 +85,12 @@ func NewDatabase(ctx context.Context, name string, aParser Parser, aPager Pager)
 		pager:  aPager,
 		tables: make(map[string]*Table),
 	}
+
+	logger.Sugar().With(
+		"name", name,
+		"total_pages",
+		int(aPager.TotalPages()),
+	).Debug("initializing database")
 
 	// rooPageIdx := uint32(0)
 
@@ -198,25 +205,11 @@ func (d *Database) Close(ctx context.Context) error {
 		return fmt.Errorf("currently only single table is supported")
 	}
 
-	// var aTable *Table
-	// for tableName := range d.tables {
-	// 	aTable = d.tables[tableName]
-	// 	break
-	// }
-
-	// numFullPages := aTable.numRows / int(aTable.RowSize)
-	// for i := 0; i < numFullPages; i++ {
-	// 	aPage, err := d.pager.GetPage(ctx, aTable.Name, uint32(i))
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	if aPage == nil {
-	// 		continue
-	// 	}
-	// 	if err := d.pager.Flush(ctx, aPage.Index, PageSize); err != nil {
-	// 		return err
-	// 	}
-	// }
+	for pageIdx := uint32(0); pageIdx < d.pager.TotalPages(); pageIdx++ {
+		if err := d.pager.Flush(ctx, pageIdx, PageSize); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }

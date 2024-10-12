@@ -20,36 +20,109 @@ func (d *Database) executeSelect(ctx context.Context, stmt Statement) (Statement
 }
 
 func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, error) {
-	return StatementResult{}, fmt.Errorf("not implemented")
-	// var (
-	// 	rowSize = t.RowSize
-	// 	aCursor = TableStart(t)
-	// )
-	// aResult := StatementResult{
-	// 	Rows: func(ctx context.Context) (Row, error) {
-	// 		if aCursor.EndOfTable {
-	// 			return Row{}, ErrNoMoreRows
-	// 		}
+	aCursor, err := t.Seek(ctx, uint64(0))
+	if err != nil {
+		return StatementResult{}, err
+	}
+	aPage, err := t.pager.GetPage(ctx, t, aCursor.PageIdx)
+	if err != nil {
+		return StatementResult{}, err
+	}
+	aCursor.EndOfTable = aPage.LeafNode.Header.Cells == 0
 
-	// 		pageIdx, offset, err := aCursor.Value()
-	// 		if err != nil {
-	// 			return Row{}, err
-	// 		}
-	// 		aPage, err := t.pager.GetPage(ctx, t.Name, pageIdx)
-	// 		if err != nil {
-	// 			return Row{}, err
-	// 		}
+	logger.Sugar().With(
+		"page_index", int(aCursor.PageIdx),
+		"cell_index", int(aCursor.CellIdx),
+	).Debug("fetching rows from")
 
-	// 		aRow := NewRow(t.Columns)
-	// 		if err := UnmarshalRow(aPage.buf[offset:int(offset+rowSize)], &aRow); err != nil {
-	// 			return Row{}, err
-	// 		}
+	var (
+		unfilteredPipe = make(chan Row)
+		filteredPipe   = make(chan Row)
+		limitedPipe    = make(chan Row)
+		errorsPipe     = make(chan error, 1)
+		stopChan       = make(chan bool)
+	)
 
-	// 		aCursor.Advance()
+	go func(out chan<- Row) {
+		defer close(out)
+		for aCursor.EndOfTable == false {
+			aRow, err := aCursor.fetchRow(ctx)
+			if err != nil {
+				errorsPipe <- err
+				return
+			}
 
-	// 		return aRow, nil
-	// 	},
-	// }
+			select {
+			case <-stopChan:
+				return
+			case out <- aRow:
+				continue
+			}
+		}
+	}(unfilteredPipe)
 
-	// return aResult, nil
+	// Filter rows according the WHERE conditions
+	go func(in <-chan Row, out chan<- Row, conditions []Condition) {
+		defer close(out)
+		for aRow := range in {
+			if len(conditions) == 0 {
+				out <- aRow
+				continue
+			}
+			filtered, err := isRowFiltered(conditions, aRow)
+			if err != nil {
+				errorsPipe <- err
+				return
+			}
+			if !filtered {
+				out <- aRow
+			}
+		}
+	}(unfilteredPipe, filteredPipe, stmt.Conditions)
+
+	// Count row count for LIMIT clause.
+	var limit int64 // TODO - set limit from parser
+	go func(in <-chan Row, out chan<- Row, limit int64) {
+		defer close(out)
+		defer close(stopChan)
+		i := int64(0)
+		for aRow := range in {
+			i += 1
+			if i > limit && limit > 0 {
+				return
+			}
+			out <- aRow
+		}
+	}(filteredPipe, limitedPipe, limit)
+
+	aResult := StatementResult{
+		Columns: t.Columns,
+		Rows: func(ctx context.Context) (Row, error) {
+			select {
+			case <-ctx.Done():
+				return Row{}, fmt.Errorf("context done: %w", ctx.Err())
+			case err := <-errorsPipe:
+				return Row{}, err
+			case aRow, open := <-limitedPipe:
+				if !open {
+					return Row{}, ErrNoMoreRows
+				}
+
+				return aRow, nil
+			}
+		},
+	}
+
+	return aResult, nil
+}
+
+func isRowFiltered(conditions []Condition, aRow Row) (filtered bool, err error) {
+	// TODO - implement simple WHERE condition filtering
+	for _, aCondition := range conditions {
+		if aCondition.Operand1IsField {
+
+		}
+	}
+
+	return false, nil
 }

@@ -6,9 +6,10 @@ import (
 )
 
 type Cursor struct {
-	Table   *Table
-	PageIdx uint32
-	CellIdx uint32
+	Table      *Table
+	PageIdx    uint32
+	CellIdx    uint32
+	EndOfTable bool
 }
 
 func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) error {
@@ -34,8 +35,8 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) erro
 	}
 	aPage.LeafNode.Header.Cells += 1
 
-	aCell := aPage.LeafNode.Cells[c.CellIdx]
-	return saveToCell(ctx, &aCell, key, aRow)
+	err = saveToCell(ctx, &aPage.LeafNode.Cells[c.CellIdx], key, aRow)
+	return err
 }
 
 // Create a new node and move half the cells over.
@@ -50,7 +51,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	}
 
 	oldMaxKey, _ := oldPage.GetMaxKey()
-	newPageNum := aPager.TotalPages(c.Table)
+	newPageNum := aPager.TotalPages()
 
 	// Append new page at the end
 	// TODO: Page recycle
@@ -58,6 +59,11 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	if err != nil {
 		return err
 	}
+
+	logger.Sugar().With(
+		"key", int(key),
+		"new_page_index", int(newPageNum),
+	).Debug("leaf node split insert")
 
 	newPage.LeafNode = NewLeafNode(uint64(c.Table.RowSize))
 	newPage.LeafNode.Header.Parent = oldPage.LeafNode.Header.Parent
@@ -103,7 +109,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 		}
 	}
 
-	/* Update cell count on both leaf nodes */
+	// Update cell count on both leaf nodes
 	oldPage.LeafNode.Header.Cells = leftSplitCount
 	newPage.LeafNode.Header.Cells = rightSplitCount
 
@@ -135,4 +141,33 @@ func saveToCell(ctx context.Context, cell *Cell, key uint64, aRow *Row) error {
 	cell.Key = key
 	copy(cell.Value[:], rowBuf)
 	return nil
+}
+
+func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
+	aPage, err := c.Table.pager.GetPage(ctx, c.Table, c.PageIdx)
+	if err != nil {
+		return Row{}, err
+	}
+	aRow := NewRow(c.Table.Columns)
+
+	if err := UnmarshalRow(aPage.LeafNode.Cells[c.CellIdx].Value[:], &aRow); err != nil {
+		return Row{}, err
+	}
+
+	// There are still more cells in the page, move cursor to next cell and return
+	if c.CellIdx < aPage.LeafNode.Header.Cells-1 {
+		c.CellIdx += 1
+		return aRow, nil
+	}
+
+	// If there is no leaf page to the right, set end of table flag and return
+	if aPage.LeafNode.Header.NextLeaf == 0 {
+		c.EndOfTable = true
+		return aRow, nil
+	}
+
+	// Otherwise, we try to move the cursor to the next leaf page
+	c.PageIdx = aPage.LeafNode.Header.NextLeaf
+	c.CellIdx = 0
+	return aRow, nil
 }

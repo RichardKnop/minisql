@@ -19,13 +19,42 @@ func (d *Database) executeInsert(ctx context.Context, stmt Statement) (Statement
 }
 
 func (t *Table) Insert(ctx context.Context, stmt Statement) error {
-	newRowID, found, err := t.SeekMaxKey(ctx, t.RootPageIdx)
+	maxRowID, found, err := t.SeekMaxKey(ctx, t.RootPageIdx)
 	if err != nil {
 		return err
 	}
+	nextRowID := maxRowID
 	if found {
-		newRowID = +1
+		nextRowID += 1
 	}
+
+	// Debug initial root leaf split
+	// page0, err := t.pager.GetPage(ctx, t, uint32(0))
+	// if err != nil {
+	// 	return err
+	// }
+	// page1, err := t.pager.GetPage(ctx, t, uint32(1))
+	// if err != nil {
+	// 	return err
+	// }
+	// page2, err := t.pager.GetPage(ctx, t, uint32(2))
+	// if err != nil {
+	// 	return err
+	// }
+	// fmt.Println("Root Page Left Child", int(page0.InternalNode.ICells[0].Child))
+	// fmt.Println("Root Page Right Child", int(page0.InternalNode.Header.RightChild))
+	// fmt.Println("Root Page Keys")
+	// for i := 0; i < int(page0.InternalNode.Header.KeysNum); i++ {
+	// 	fmt.Println(int(page0.InternalNode.ICells[i].Key))
+	// }
+	// fmt.Println("Left child Keys")
+	// for i := 0; i < int(page2.LeafNode.Header.Cells); i++ {
+	// 	fmt.Println(int(page2.LeafNode.Cells[i].Key))
+	// }
+	// fmt.Println("Right child Keys")
+	// for i := 0; i < int(page1.LeafNode.Header.Cells); i++ {
+	// 	fmt.Println(int(page1.LeafNode.Cells[i].Key))
+	// }
 
 	for _, values := range stmt.Inserts {
 		aRow := Row{
@@ -34,7 +63,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 		}
 		aRow = aRow.appendValues(stmt.Fields, values)
 
-		aCursor, err := t.Seek(ctx, newRowID)
+		aCursor, err := t.Seek(ctx, nextRowID)
 		if err != nil {
 			return err
 		}
@@ -48,19 +77,25 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 		if aPage.LeafNode == nil {
 			return fmt.Errorf("trying to insert into non leaf node")
 		}
+
+		logger.Sugar().With(
+			"row_id", int(nextRowID),
+			"found", found,
+			"page_index", int(aCursor.PageIdx),
+			"cell_index", int(aCursor.CellIdx),
+		).Debug("inserting row")
+
 		if aCursor.CellIdx < aPage.LeafNode.Header.Cells {
-			if aPage.LeafNode.Cells[aCursor.CellIdx].Key == newRowID {
-				return fmt.Errorf("duplicate key %d", newRowID)
+			if aPage.LeafNode.Cells[aCursor.CellIdx].Key == nextRowID {
+				return fmt.Errorf("duplicate key %d", nextRowID)
 			}
 		}
 
-		fmt.Println("inserting row", int(newRowID), "cursor", fmt.Sprintf("%+v", aCursor))
-
-		if err := aCursor.LeafNodeInsert(ctx, newRowID, &aRow); err != nil {
+		if err := aCursor.LeafNodeInsert(ctx, nextRowID, &aRow); err != nil {
 			return err
 		}
 
-		newRowID += 1
+		nextRowID += 1
 	}
 
 	return nil

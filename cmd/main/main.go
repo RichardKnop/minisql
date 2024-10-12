@@ -12,6 +12,7 @@ import (
 	"github.com/RichardKnop/minisql/internal/pkg/minisql"
 	"github.com/RichardKnop/minisql/internal/pkg/pager"
 	"github.com/RichardKnop/minisql/internal/pkg/parser"
+	"github.com/RichardKnop/minisql/internal/pkg/util"
 )
 
 const (
@@ -121,10 +122,12 @@ func main() {
 				} else if stmt.Kind == minisql.Insert || stmt.Kind == minisql.Update || stmt.Kind == minisql.Delete {
 					fmt.Printf("Rows affected: %d\n", aResult.RowsAffected)
 				} else if stmt.Kind == minisql.Select {
+					util.PrintTableHeader(os.Stdout, aResult.Columns)
 					aRow, err := aResult.Rows(ctx)
 					for ; err == nil; aRow, err = aResult.Rows(ctx) {
-						fmt.Println(aRow.Values)
+						util.PrintTableRow(os.Stdout, aResult.Columns, aRow.Values)
 					}
+					util.PrintTableEnd(os.Stdout, aResult.Columns)
 				}
 			}
 		}

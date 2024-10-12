@@ -61,7 +61,7 @@ func TestCursor_LeafNodeInsert_RootLeafFull(t *testing.T) {
 	// TotalPages is called twice, let's make sure the second time it's called,
 	// it will return incremented value since we have created a new page already
 	totalPages := uint32(1)
-	pagerMock.On("TotalPages", aTable).Return(func(t *Table) uint32 {
+	pagerMock.On("TotalPages").Return(func() uint32 {
 		old := totalPages
 		totalPages += 1
 		return old

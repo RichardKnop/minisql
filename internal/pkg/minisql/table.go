@@ -116,7 +116,7 @@ func (t *Table) internalNodeSeek(ctx context.Context, aPage *Page, key uint64) (
 // Re-initialize root page to contain the new root node.
 // New root node points to two children.
 func (t *Table) CreateNewRoot(ctx context.Context, rightChildPageIdx uint32) error {
-	rootPage, err := t.pager.GetPage(ctx, t, t.RootPageIdx)
+	oldRootPage, err := t.pager.GetPage(ctx, t, t.RootPageIdx)
 	if err != nil {
 		return err
 	}
@@ -126,36 +126,40 @@ func (t *Table) CreateNewRoot(ctx context.Context, rightChildPageIdx uint32) err
 		return err
 	}
 
-	leftChildPageIdx := t.pager.TotalPages(t)
+	leftChildPageIdx := t.pager.TotalPages()
 	leftChildPage, err := t.pager.GetPage(ctx, t, leftChildPageIdx)
 	if err != nil {
 		return err
 	}
 
+	logger.Sugar().With(
+		"left_child_index", int(leftChildPageIdx),
+		"right_child_index", int(rightChildPageIdx),
+	).Debug("create new root")
+
 	// Copy all node contents to left child
-	if rootPage.LeafNode != nil {
-		*leftChildPage.LeafNode = *rootPage.LeafNode
+	if oldRootPage.LeafNode != nil {
+		*leftChildPage.LeafNode = *oldRootPage.LeafNode
 		leftChildPage.LeafNode.Header.IsRoot = false
-	} else if rootPage.InternalNode != nil {
-		*leftChildPage.InternalNode = *rootPage.InternalNode
+	} else if oldRootPage.InternalNode != nil {
+		*leftChildPage.InternalNode = *oldRootPage.InternalNode
 		leftChildPage.InternalNode.Header.IsRoot = false
 	}
 
 	// Change root node to a new internal node
-	rootPage.InternalNode = new(InternalNode)
-	rootNode := rootPage.InternalNode
-	rootNode.Header.IsRoot = true
-	rootNode.Header.IsInternal = true
-	rootNode.Header.KeysNum = 1
-	rootNode.Header.Parent = 0
+	newRootNode := NewInternalNode()
+	oldRootPage.LeafNode = nil
+	oldRootPage.InternalNode = newRootNode
+	newRootNode.Header.IsRoot = true
+	newRootNode.Header.KeysNum = 1
 
 	// Set left and right child
-	rootNode.Header.RightChild = rightChildPageIdx
-	if err := rootNode.SetChildIdx(0, leftChildPageIdx); err != nil {
+	newRootNode.Header.RightChild = rightChildPageIdx
+	if err := newRootNode.SetChildIdx(0, leftChildPageIdx); err != nil {
 		return err
 	}
 	leftChildMaxKey, _ := leftChildPage.GetMaxKey()
-	rootNode.ICells[0].Key = leftChildMaxKey
+	newRootNode.ICells[0].Key = leftChildMaxKey
 
 	// Set parent for both left and right child
 	if leftChildPage.LeafNode != nil {

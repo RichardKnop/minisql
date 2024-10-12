@@ -73,6 +73,7 @@ type Statement struct {
 type Iterator func(ctx context.Context) (Row, error)
 
 type StatementResult struct {
+	Columns      []Column
 	Rows         Iterator
 	RowsAffected int
 }

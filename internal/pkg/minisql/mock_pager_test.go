@@ -50,13 +50,13 @@ func (_m *MockPager) GetPage(_a0 context.Context, _a1 *Table, _a2 uint32) (*Page
 	return r0, r1
 }
 
-// TotalPages provides a mock function with given fields: _a0
-func (_m *MockPager) TotalPages(_a0 *Table) uint32 {
-	ret := _m.Called(_a0)
+// TotalPages provides a mock function with given fields:
+func (_m *MockPager) TotalPages() uint32 {
+	ret := _m.Called()
 
 	var r0 uint32
-	if rf, ok := ret.Get(0).(func(*Table) uint32); ok {
-		r0 = rf(_a0)
+	if rf, ok := ret.Get(0).(func() uint32); ok {
+		r0 = rf()
 	} else {
 		r0 = ret.Get(0).(uint32)
 	}

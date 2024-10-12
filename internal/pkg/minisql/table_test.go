@@ -237,7 +237,7 @@ func TestTable_CreateNewRoot(t *testing.T) {
 
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(1)).Return(newRightChild, nil)
-	pagerMock.On("TotalPages", aTable).Return(uint32(2), nil)
+	pagerMock.On("TotalPages").Return(uint32(2), nil)
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(2)).Return(newLeftChild, nil)
 
 	err := aTable.CreateNewRoot(ctx, uint32(1))

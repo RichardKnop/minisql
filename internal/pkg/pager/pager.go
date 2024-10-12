@@ -59,7 +59,7 @@ func New(file DBFile, pageSize int, schemaTableName string) (*Pager, error) {
 	return aPager, nil
 }
 
-func (p *Pager) TotalPages(aTable *minisql.Table) uint32 {
+func (p *Pager) TotalPages() uint32 {
 	return p.totalPages
 }
 
