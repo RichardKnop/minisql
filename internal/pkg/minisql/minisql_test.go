@@ -27,6 +27,29 @@ var (
 			Name: "age",
 		},
 	}
+
+	testBigColumns = []Column{
+		{
+			Kind: Int8,
+			Size: 8,
+			Name: "id",
+		},
+		{
+			Kind: Varchar,
+			Size: 255,
+			Name: "name",
+		},
+		{
+			Kind: Varchar,
+			Size: 255,
+			Name: "email",
+		},
+		{
+			Kind: Varchar,
+			Size: PageSize - 6 - 8 - 4*8 - 8 - 255 - 255,
+			Name: "description",
+		},
+	}
 )
 
 type dataGen struct {
@@ -56,6 +79,26 @@ func (g *dataGen) Row() Row {
 			g.Int64(),
 			g.Email(),
 			int32(g.IntRange(18, 100)),
+		},
+	}
+}
+
+func (g *dataGen) BigRows(number int) []Row {
+	rows := make([]Row, 0, number)
+	for i := 0; i < number; i++ {
+		rows = append(rows, g.BigRow())
+	}
+	return rows
+}
+
+func (g *dataGen) BigRow() Row {
+	return Row{
+		Columns: testBigColumns,
+		Values: []any{
+			g.Int64(),
+			g.Email(),
+			g.Name(),
+			g.Sentence(15),
 		},
 	}
 }

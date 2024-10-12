@@ -121,7 +121,7 @@ func (c *Cell) Unmarshal(buf []byte) (uint64, error) {
 
 type LeafNode struct {
 	Header LeafNodeHeader
-	Cells  []Cell // length of PageSize / (rowSize+4)
+	Cells  []Cell // (PageSize - (6+8)) / (rowSize+8)
 }
 
 func NewLeafNode(rowSize uint64) *LeafNode {

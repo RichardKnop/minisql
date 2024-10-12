@@ -5,11 +5,7 @@ import (
 	"fmt"
 )
 
-// TODO - RowID will be used as key for B-tree data structure
-type RowID int64
-
 type Row struct {
-	ID      RowID
 	Columns []Column
 	Values  []any
 }
@@ -20,7 +16,9 @@ func (r Row) MaxCells() uint32 {
 }
 
 func maxCells(rowSize uint64) uint32 {
-	return uint32(PageSize / (rowSize + 8)) // +8 for int64 row ID
+	// base header is +6, leaf/internal header +8
+	// int64 row ID per cell hence we divide by rowSize + 8
+	return uint32((PageSize - 6 - 8) / (rowSize + 8))
 }
 
 func NewRow(columns []Column) Row {

@@ -203,14 +203,14 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 
 	rightChildMaxKey, _ := rightChildPage.GetMaxKey()
 	if childMaxKey > rightChildMaxKey {
-		/* Replace right child */
+		// Replace right child
 		parentPage.InternalNode.SetChildIdx(originalKeyCnt, rightChildPageIdx)
 		parentPage.InternalNode.ICells[originalKeyCnt].Key = rightChildMaxKey
 		parentPage.InternalNode.Header.RightChild = childPageIdx
 		return nil
 	}
 
-	/* Make room for the new cell */
+	// Make room for the new cell
 	for i := originalKeyCnt; i > index; i-- {
 		parentPage.InternalNode.ICells[i] = parentPage.InternalNode.ICells[i-1]
 	}

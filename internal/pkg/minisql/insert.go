@@ -28,32 +28,31 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 		nextRowID += 1
 	}
 
-	// Debug initial root leaf split
-	// page0, err := t.pager.GetPage(ctx, t, uint32(0))
+	// rootPage, err := t.pager.GetPage(ctx, t, uint32(0))
 	// if err != nil {
 	// 	return err
 	// }
-	// page1, err := t.pager.GetPage(ctx, t, uint32(1))
+	// child, err := t.pager.GetPage(ctx, t, uint32(1))
 	// if err != nil {
 	// 	return err
 	// }
-	// page2, err := t.pager.GetPage(ctx, t, uint32(2))
+	// leftChild, err := t.pager.GetPage(ctx, t, uint32(2))
 	// if err != nil {
 	// 	return err
 	// }
-	// fmt.Println("Root Page Left Child", int(page0.InternalNode.ICells[0].Child))
-	// fmt.Println("Root Page Right Child", int(page0.InternalNode.Header.RightChild))
+	// fmt.Println("Root Page Left Child", int(rootPage.InternalNode.ICells[0].Child))
+	// fmt.Println("Root Page Right Child", int(rootPage.InternalNode.Header.RightChild))
 	// fmt.Println("Root Page Keys")
-	// for i := 0; i < int(page0.InternalNode.Header.KeysNum); i++ {
-	// 	fmt.Println(int(page0.InternalNode.ICells[i].Key))
+	// for i := 0; i < int(rootPage.InternalNode.Header.KeysNum); i++ {
+	// 	fmt.Println(int(rootPage.InternalNode.ICells[i].Key))
 	// }
 	// fmt.Println("Left child Keys")
-	// for i := 0; i < int(page2.LeafNode.Header.Cells); i++ {
-	// 	fmt.Println(int(page2.LeafNode.Cells[i].Key))
+	// for i := 0; i < int(leftChild.LeafNode.Header.Cells); i++ {
+	// 	fmt.Println(int(leftChild.LeafNode.Cells[i].Key))
 	// }
 	// fmt.Println("Right child Keys")
-	// for i := 0; i < int(page1.LeafNode.Header.Cells); i++ {
-	// 	fmt.Println(int(page1.LeafNode.Cells[i].Key))
+	// for i := 0; i < int(child.LeafNode.Header.Cells); i++ {
+	// 	fmt.Println(int(child.LeafNode.Cells[i].Key))
 	// }
 
 	for _, values := range stmt.Inserts {

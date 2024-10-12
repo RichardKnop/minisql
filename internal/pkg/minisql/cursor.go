@@ -71,11 +71,9 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	newPage.LeafNode.Header.NextLeaf = oldPage.LeafNode.Header.NextLeaf
 	oldPage.LeafNode.Header.NextLeaf = newPageNum
 
-	/*
-	  All existing keys plus new key should should be divided
-	  evenly between old (left) and new (right) nodes.
-	  Starting from the right, move each key to correct position.
-	*/
+	// All existing keys plus new key should should be divided
+	// evenly between old (left) and new (right) nodes.
+	// Starting from the right, move each key to correct position.
 	var (
 		leafNodeMaxCells = uint32(len(newPage.LeafNode.Cells))
 		rightSplitCount  = (leafNodeMaxCells + 1) / 2
