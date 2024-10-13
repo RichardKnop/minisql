@@ -45,37 +45,38 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) erro
 func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row) error {
 	aPager := c.Table.pager
 
-	oldPage, err := aPager.GetPage(ctx, c.Table, c.PageIdx)
+	aSplitPage, err := aPager.GetPage(ctx, c.Table, c.PageIdx)
 	if err != nil {
 		return err
 	}
 
-	oldMaxKey, _ := oldPage.GetMaxKey()
-	newPageNum := aPager.TotalPages()
-
-	// Append new page at the end
-	// TODO: Page recycle
-	newPage, err := aPager.GetPage(ctx, c.Table, newPageNum)
-	if err != nil {
-		return err
-	}
+	originalMaxKey, _ := aSplitPage.GetMaxKey()
+	newPageIdx := aPager.TotalPages()
 
 	logger.Sugar().With(
 		"key", int(key),
-		"new_page_index", int(newPageNum),
+		"old_max_key", int(originalMaxKey),
+		"new_page_index", int(newPageIdx),
 	).Debug("leaf node split insert")
 
-	newPage.LeafNode = NewLeafNode(uint64(c.Table.RowSize))
-	newPage.LeafNode.Header.Parent = oldPage.LeafNode.Header.Parent
+	// Append new page at the end
+	// TODO: Page recycle
+	aNewPage, err := aPager.GetPage(ctx, c.Table, newPageIdx)
+	if err != nil {
+		return err
+	}
 
-	newPage.LeafNode.Header.NextLeaf = oldPage.LeafNode.Header.NextLeaf
-	oldPage.LeafNode.Header.NextLeaf = newPageNum
+	aNewPage.LeafNode = NewLeafNode(uint64(c.Table.RowSize))
+	aNewPage.LeafNode.Header.Parent = aSplitPage.LeafNode.Header.Parent
+
+	aNewPage.LeafNode.Header.NextLeaf = aSplitPage.LeafNode.Header.NextLeaf
+	aSplitPage.LeafNode.Header.NextLeaf = newPageIdx
 
 	// All existing keys plus new key should should be divided
 	// evenly between old (left) and new (right) nodes.
 	// Starting from the right, move each key to correct position.
 	var (
-		leafNodeMaxCells = uint32(len(newPage.LeafNode.Cells))
+		leafNodeMaxCells = uint32(len(aNewPage.LeafNode.Cells))
 		rightSplitCount  = (leafNodeMaxCells + 1) / 2
 		leftSplitCount   = leafNodeMaxCells + 1 - rightSplitCount
 	)
@@ -89,9 +90,9 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 		)
 
 		if !isLeft {
-			destPage = newPage // right
+			destPage = aNewPage // right
 		} else {
-			destPage = oldPage // left
+			destPage = aSplitPage // left
 		}
 		cellIdx := i % leftSplitCount
 		destCell := &destPage.LeafNode.Cells[cellIdx]
@@ -101,34 +102,36 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 				return err
 			}
 		} else if i > c.CellIdx {
-			*destCell = oldPage.LeafNode.Cells[i-1]
+			*destCell = aSplitPage.LeafNode.Cells[i-1]
 		} else {
-			*destCell = oldPage.LeafNode.Cells[i]
+			*destCell = aSplitPage.LeafNode.Cells[i]
 		}
 	}
 
 	// Update cell count on both leaf nodes
-	oldPage.LeafNode.Header.Cells = leftSplitCount
-	newPage.LeafNode.Header.Cells = rightSplitCount
+	aSplitPage.LeafNode.Header.Cells = leftSplitCount
+	aNewPage.LeafNode.Header.Cells = rightSplitCount
 
-	if oldPage.LeafNode.Header.IsRoot {
-		return c.Table.CreateNewRoot(ctx, newPageNum)
+	if aSplitPage.LeafNode.Header.IsRoot {
+		_, err := c.Table.CreateNewRoot(ctx, newPageIdx)
+		return err
 	}
 
-	parentPageIdx := oldPage.LeafNode.Header.Parent
-	parentPage, err := aPager.GetPage(ctx, c.Table, parentPageIdx)
+	parentPageIdx := aSplitPage.LeafNode.Header.Parent
+	aParentPage, err := aPager.GetPage(ctx, c.Table, parentPageIdx)
 	if err != nil {
 		return err
 	}
 
-	// parent page is an internal node
-	oldChildIdx := parentPage.InternalNode.FindChildByKey(oldMaxKey)
-
-	if oldChildIdx >= InternalNodeMaxCells {
-		return fmt.Errorf("exceeded internal node max cells during splitting")
+	// If we won't need to split the internal node,
+	// update parent to reflect new max key
+	oldChildIdx := aParentPage.InternalNode.FindChildByKey(originalMaxKey)
+	if oldChildIdx < InternalNodeMaxCells {
+		oldPageNewMaxKey, _ := aSplitPage.GetMaxKey()
+		aParentPage.InternalNode.ICells[oldChildIdx].Key = oldPageNewMaxKey
 	}
-	parentPage.InternalNode.ICells[oldChildIdx].Key, _ = oldPage.GetMaxKey()
-	return c.Table.InternalNodeInsert(ctx, parentPageIdx, newPageNum)
+
+	return c.Table.InternalNodeInsert(ctx, parentPageIdx, newPageIdx)
 }
 
 func saveToCell(ctx context.Context, cell *Cell, key uint64, aRow *Row) error {
@@ -167,5 +170,6 @@ func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
 	// Otherwise, we try to move the cursor to the next leaf page
 	c.PageIdx = aPage.LeafNode.Header.NextLeaf
 	c.CellIdx = 0
+
 	return aRow, nil
 }

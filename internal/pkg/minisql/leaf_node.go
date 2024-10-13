@@ -124,13 +124,19 @@ type LeafNode struct {
 	Cells  []Cell // (PageSize - (6+8)) / (rowSize+8)
 }
 
-func NewLeafNode(rowSize uint64) *LeafNode {
+func NewLeafNode(rowSize uint64, cells ...Cell) *LeafNode {
 	aNode := LeafNode{
 		Cells: make([]Cell, maxCells(rowSize)),
 	}
 	for idx := range aNode.Cells {
 		aNode.Cells[idx].RowSize = rowSize
 		aNode.Cells[idx].Value = make([]byte, rowSize)
+	}
+	if len(cells) > 0 {
+		aNode.Header.Cells = uint32(len(cells))
+		for i, aCell := range cells {
+			aNode.Cells[i] = aCell
+		}
 	}
 	return &aNode
 }

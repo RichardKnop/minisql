@@ -30,7 +30,7 @@ func TestNew_Empty(t *testing.T) {
 
 	assert.Equal(t, int64(0), aPager.fileSize)
 	assert.Equal(t, 0, int(aPager.totalPages))
-	assert.Len(t, aPager.pages, MaxPages)
+	assert.Len(t, aPager.pages, minisql.MaxPages)
 }
 
 func TestNew_GetPage(t *testing.T) {
@@ -66,7 +66,7 @@ func TestNew_GetPage(t *testing.T) {
 	}
 
 	// Reset pager cache to empty the cache
-	aPager.pages = make([]*minisql.Page, MaxPages)
+	aPager.pages = make([]*minisql.Page, minisql.MaxPages)
 	aPager.totalPages = 0
 
 	// Root page
