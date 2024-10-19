@@ -127,7 +127,6 @@ func main() {
 					for ; err == nil; aRow, err = aResult.Rows(ctx) {
 						util.PrintTableRow(os.Stdout, aResult.Columns, aRow.Values)
 					}
-					util.PrintTableEnd(os.Stdout, aResult.Columns)
 				}
 			}
 		}

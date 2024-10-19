@@ -33,6 +33,7 @@ Create a table:
 ```sh
 minisql> create table foo(id int4, email varchar(255), age int4)
 Rows affected: 0
+minisql>
 ```
 
 Insert a row:
@@ -40,6 +41,7 @@ Insert a row:
 ```sh
 minisql> insert into foo(id, email, age) values(1, 'john@example.com', 35)
 Rows affected: 1
+minisql>
 ```
 
 Insert multiple rows:
@@ -47,6 +49,7 @@ Insert multiple rows:
 ```sh
 minisql> insert into foo(id, email, age) values(2, 'jane@example.com', 32), (3, 'jack@example.com', 27)
 Rows affected: 2
+minisql>
 ```
 
 Insert more than a single page worth of data:
@@ -54,18 +57,19 @@ Insert more than a single page worth of data:
 ```sh
 minisql> insert into foo(id, email, age) values(1, 'john@example.com', 35), (2, 'jane@example.com', 32), (3, 'jack@example.com', 27), (4, 'jane@example.com', 32), (5, 'jack@example.com', 27), (6, 'jane@example.com', 32), (7, 'jack@example.com', 27),  (8, 'jane@example.com', 32), (9, 'jack@example.com', 27),  (10, 'jane@example.com', 32), (11, 'jack@example.com', 27),  (12, 'jane@example.com', 32), (13, 'jack@example.com', 27), (14, 'jack@example.com', 27), (15, 'jack@example.com', 27)
 Rows affected: 15
+
+minisql>
 ```
 
 Select from table:
 
 ```sh
 minisql> select * from foo
-+----------------------------------------------------------------------------------------+
-| id                   | email                                    | age                  |
-+----------------------------------------------------------------------------------------+
-| 1                    | john@example.com                         | 35                   |
-| 2                    | jane@example.com                         | 32                   |
-| 3                    | jack@example.com                         | 27                   |
-+----------------------------------------------------------------------------------------+
+ id                   | email                                    | age
+----------------------+------------------------------------------+----------------------
+ 1                    | john@example.com                         | 35
+ 2                    | jane@example.com                         | 32
+ 3                    | jack@example.com                         | 27
+minisql>
 ```
 
