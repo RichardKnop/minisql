@@ -156,6 +156,18 @@ func (t *Table) CreateNewRoot(ctx context.Context, rightChildPageIdx uint32) (*P
 		leftChildPage.LeafNode = nil
 		*leftChildPage.InternalNode = *oldRootPage.InternalNode
 		leftChildPage.InternalNode.Header.IsRoot = false
+		// Update parent for all child pages
+		for i := 0; i < int(leftChildPage.InternalNode.Header.KeysNum); i++ {
+			aChildPage, err := t.pager.GetPage(ctx, t, leftChildPage.InternalNode.ICells[i].Child)
+			if err != nil {
+				return nil, err
+			}
+			if aChildPage.LeafNode != nil {
+				aChildPage.LeafNode.Header.Parent = leftChildPageIdx
+			} else if aChildPage.InternalNode != nil {
+				aChildPage.InternalNode.Header.Parent = leftChildPageIdx
+			}
+		}
 	}
 
 	// Change root node to a new internal node
@@ -199,6 +211,7 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 	if err != nil {
 		return err
 	}
+	aChildPage.LeafNode.Header.Parent = parentPageIdx
 
 	var (
 		childMaxKey, _   = aChildPage.GetMaxKey()
@@ -274,17 +287,16 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 	)
 
 	// Keep half of the keys on the original node, move another half to the sibling
-	// fmt.Println("left split count", int(leftSplitCount))
-	// fmt.Println("right split count", int(rightSplitCount))
 	for i := leftSplitCount; i < maxCells; i++ {
-		aSiblingPage.InternalNode.ICells[i-leftSplitCount] = aSplitPage.InternalNode.ICells[i]
+		aCell := aSplitPage.InternalNode.ICells[i]
+		aSiblingPage.InternalNode.ICells[i-leftSplitCount] = aCell
 		aSplitPage.InternalNode.ICells[i] = ICell{}
 
 		aSiblingPage.InternalNode.Header.KeysNum += 1
 		aSplitPage.InternalNode.Header.KeysNum -= 1
 
 		// Update all pages we are moving to the sibling node on the right with new parent
-		movedPage, err := t.pager.GetPage(ctx, t, aSiblingPage.InternalNode.ICells[i-leftSplitCount].Child)
+		movedPage, err := t.pager.GetPage(ctx, t, aCell.Child)
 		if err != nil {
 			return err
 		}
@@ -297,12 +309,18 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 	if err != nil {
 		return err
 	}
+	aRightLeafPage.LeafNode.Header.Parent = siblingPageIdx
 	aRightLeafMaxKey, _ := aRightLeafPage.GetMaxKey()
 	aSiblingPage.InternalNode.ICells[aSiblingPage.InternalNode.Header.KeysNum] = ICell{
 		Key:   aRightLeafMaxKey,
 		Child: aSplitPage.InternalNode.Header.RightChild,
 	}
 	aSiblingPage.InternalNode.Header.KeysNum += 1
+
+	// Save child now in the sibling page
+	if err := t.InternalNodeInsert(ctx, siblingPageIdx, childPageIdx); err != nil {
+		return err
+	}
 
 	if aSplitPage.InternalNode.Header.IsRoot {
 		aSplitPage, err = t.CreateNewRoot(ctx, siblingPageIdx)
@@ -326,11 +344,6 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 		oldChildIdx := aParentPage.InternalNode.FindChildByKey(originalMaxKey)
 		newMaxKey, _ := aSplitPage.GetMaxKey()
 		aParentPage.InternalNode.ICells[oldChildIdx].Key = newMaxKey
-	}
-
-	// Save child now in the sibling page
-	if err := t.InternalNodeInsert(ctx, siblingPageIdx, childPageIdx); err != nil {
-		return err
 	}
 
 	return nil

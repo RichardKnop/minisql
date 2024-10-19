@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -346,12 +347,14 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	assert.Equal(t, 341, int(aNewRightInternal.InternalNode.ICells[169].Child))
 	assert.Equal(t, 342, int(aNewRightInternal.InternalNode.Header.RightChild))
 
-	// for i, aLeaf := range leafs {
-	// 	if i <= 171 {
-	// 		// assert.Equal(t, 344, int(aLeaf.LeafNode.Header.Parent), fmt.Sprintf("parent not 344 %d", i))
-	// 	} else {
-	// 		assert.Equal(t, 343, int(aLeaf.LeafNode.Header.Parent), fmt.Sprintf("parent not 343 %d", i))
-	// 	}
+	for i, aLeaf := range leafs {
+		assert.Equal(t, 1, int(aLeaf.LeafNode.Header.Cells))
+		assert.Equal(t, i, int(aLeaf.LeafNode.Cells[0].Key))
+		if i < 171 {
+			assert.Equal(t, 344, int(aLeaf.LeafNode.Header.Parent), fmt.Sprintf("parent not 344 %d", i))
+		} else {
+			assert.Equal(t, 343, int(aLeaf.LeafNode.Header.Parent), fmt.Sprintf("parent not 343 %d", i))
+		}
 
-	// }
+	}
 }
