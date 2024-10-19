@@ -63,10 +63,10 @@ const (
 	stepUpdateComma
 	stepDeleteFromTable
 	stepWhere
-	stepWhereField
+	stepWhereConditionField
+	stepWhereConditionOperator
+	stepWhereConditionValue
 	stepWhereOperator
-	stepWhereValue
-	stepWhereAnd
 )
 
 type parser struct {
@@ -241,10 +241,10 @@ func (p *parser) doParse() (minisql.Statement, error) {
 		// WHERE
 		//------------------
 		case stepWhere,
-			stepWhereField,
-			stepWhereOperator,
-			stepWhereValue,
-			stepWhereAnd:
+			stepWhereConditionField,
+			stepWhereConditionOperator,
+			stepWhereConditionValue,
+			stepWhereOperator:
 			continueLoop, err := p.doParseWhere()
 			if err != nil {
 				return p.Statement, err
@@ -264,24 +264,23 @@ func (p *parser) doParseWhere() (bool, error) {
 			return false, fmt.Errorf("expected WHERE")
 		}
 		p.pop()
-		p.step = stepWhereField
-	case stepWhereField:
+		p.step = stepWhereConditionField
+	case stepWhereConditionField:
 		identifier := p.peek()
 		if !isIdentifier(identifier) {
 			return false, fmt.Errorf("at WHERE: expected field")
 		}
-		p.Statement.Conditions = append(
-			p.Statement.Conditions,
-			minisql.Condition{
-				Operand1:        identifier,
-				Operand1IsField: true,
-			},
-		)
+		p.Statement.Conditions = p.Statement.Conditions.Append(minisql.Condition{
+			Operand1:        identifier,
+			Operand1IsField: true,
+		})
 		p.pop()
-		p.step = stepWhereOperator
-	case stepWhereOperator:
-		operator := p.peek()
-		currentCondition := p.Conditions[len(p.Conditions)-1]
+		p.step = stepWhereConditionOperator
+	case stepWhereConditionOperator:
+		var (
+			operator            = p.peek()
+			currentCondition, _ = p.Conditions.LastCondition()
+		)
 		switch operator {
 		case "=":
 			currentCondition.Operator = minisql.Eq
@@ -298,33 +297,38 @@ func (p *parser) doParseWhere() (bool, error) {
 		default:
 			return false, fmt.Errorf("at WHERE: unknown operator")
 		}
-		p.Conditions[len(p.Conditions)-1] = currentCondition
+		p.Conditions.UpdateLast(currentCondition)
 		p.pop()
-		p.step = stepWhereValue
-	case stepWhereValue:
-		currentCondition := p.Conditions[len(p.Conditions)-1]
-		identifier := p.peek()
+		p.step = stepWhereConditionValue
+	case stepWhereConditionValue:
+		var (
+			identifier          = p.peek()
+			currentCondition, _ = p.Conditions.LastCondition()
+		)
 		if isIdentifier(identifier) {
 			currentCondition.Operand2 = identifier
 			currentCondition.Operand2IsField = true
 		} else {
-			quotedValue, ln := p.peekQuotedStringWithLength()
-			if ln == 0 {
-				return false, fmt.Errorf("at WHERE: expected quoted value")
+			value, err := p.peekIntOrQuotedStringWithLength()
+			if err != nil {
+				return false, fmt.Errorf("at WHERE: expected quoted value or int value")
 			}
-			currentCondition.Operand2 = quotedValue
+			currentCondition.Operand2 = value
 			currentCondition.Operand2IsField = false
 		}
-		p.Conditions[len(p.Conditions)-1] = currentCondition
+		p.Conditions.UpdateLast(currentCondition)
 		p.pop()
-		p.step = stepWhereAnd
-	case stepWhereAnd:
-		andRWord := p.peek()
-		if strings.ToUpper(andRWord) != "AND" {
-			return false, fmt.Errorf("expected AND")
+		p.step = stepWhereOperator
+	case stepWhereOperator:
+		anOperator := strings.ToUpper(p.peek())
+		if anOperator != "AND" && anOperator != "OR" {
+			return false, fmt.Errorf("expected one of AND / OR")
+		}
+		if anOperator == "OR" {
+			p.Conditions = append(p.Conditions, make(minisql.Conditions, 0, 1))
 		}
 		p.pop()
-		p.step = stepWhereField
+		p.step = stepWhereConditionField
 	}
 	return false, nil
 }
@@ -395,6 +399,18 @@ func (p *parser) peepIntWithLength() (int64, int) {
 	return int64(intValue), len(p.sql[p.i:len(p.sql)])
 }
 
+func (p *parser) peekIntOrQuotedStringWithLength() (any, error) {
+	intValue, ln := p.peepIntWithLength()
+	if ln > 0 {
+		return intValue, nil
+	}
+	quotedValue, ln := p.peekQuotedStringWithLength()
+	if ln > 0 {
+		return quotedValue, nil
+	}
+	return nil, fmt.Errorf("neither int not quoted value found")
+}
+
 func (p *parser) peekIdentifierWithLength() (string, int) {
 	for i := p.i; i < len(p.sql); i++ {
 		if matched, _ := regexp.MatchString(`[a-zA-Z0-9_*]`, string(p.sql[i])); !matched {
@@ -405,7 +421,7 @@ func (p *parser) peekIdentifierWithLength() (string, int) {
 }
 
 func (p *parser) validate() error {
-	if len(p.Conditions) == 0 && p.step == stepWhereField {
+	if len(p.Conditions) == 0 && p.step == stepWhereConditionField {
 		return errEmptyWhereClause
 	}
 	if p.Kind == 0 {
@@ -420,15 +436,17 @@ func (p *parser) validate() error {
 	if len(p.Conditions) == 0 && (p.Kind == minisql.Update || p.Kind == minisql.Delete) {
 		return errWhereRequiredForUpdateDelete
 	}
-	for _, c := range p.Conditions {
-		if c.Operator == 0 {
-			return errWhereWithoutOperator
-		}
-		if c.Operand1 == "" && c.Operand1IsField {
-			return fmt.Errorf("at WHERE: condition with empty left side operand")
-		}
-		if c.Operand2 == "" && c.Operand2IsField {
-			return fmt.Errorf("at WHERE: condition with empty right side operand")
+	for _, aConditionGroup := range p.Conditions {
+		for _, aCondition := range aConditionGroup {
+			if aCondition.Operator == 0 {
+				return errWhereWithoutOperator
+			}
+			if aCondition.Operand1 == "" && aCondition.Operand1IsField {
+				return fmt.Errorf("at WHERE: condition with empty left side operand")
+			}
+			if aCondition.Operand2 == "" && aCondition.Operand2IsField {
+				return fmt.Errorf("at WHERE: condition with empty right side operand")
+			}
 		}
 	}
 	if p.Kind == minisql.Insert && len(p.Inserts) == 0 {

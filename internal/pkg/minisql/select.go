@@ -62,7 +62,7 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	}(unfilteredPipe)
 
 	// Filter rows according the WHERE conditions
-	go func(in <-chan Row, out chan<- Row, conditions []Condition) {
+	go func(in <-chan Row, out chan<- Row, conditions OneOrMore) {
 		defer close(out)
 		for aRow := range in {
 			if len(conditions) == 0 {
@@ -116,13 +116,13 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	return aResult, nil
 }
 
-func isRowFiltered(conditions []Condition, aRow Row) (filtered bool, err error) {
+func isRowFiltered(conditions OneOrMore, aRow Row) (filtered bool, err error) {
 	// TODO - implement simple WHERE condition filtering
-	for _, aCondition := range conditions {
-		if aCondition.Operand1IsField {
+	// for _, aCondition := range conditions {
+	// 	if aCondition.Operand1IsField {
 
-		}
-	}
+	// 	}
+	// }
 
 	return false, nil
 }

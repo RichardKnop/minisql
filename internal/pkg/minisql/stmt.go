@@ -29,9 +29,39 @@ type Condition struct {
 	// Operator is e.g. "=", ">"
 	Operator Operator
 	// Operand1 is the right hand side operand
-	Operand2 string
+	Operand2 any
 	// Operand2IsField determines if Operand2 is a literal or a field name
 	Operand2IsField bool
+}
+
+type Conditions []Condition
+
+// OneOrMore contains a slice of multiple groups of singular condition, each
+// group joined by OR boolean operator. Every singular condition in each group
+// is joined by AND with other conditions in the same slice.
+type OneOrMore []Conditions
+
+func (o OneOrMore) LastCondition() (Condition, bool) {
+	if len(o) == 0 {
+		return Condition{}, false
+	}
+	lastConditionGroup := o[len(o)-1]
+	if len(lastConditionGroup) > 0 {
+		return lastConditionGroup[len(lastConditionGroup)-1], true
+	}
+	return Condition{}, false
+}
+
+func (o OneOrMore) Append(aCondition Condition) OneOrMore {
+	if len(o) == 0 {
+		o = append(o, make(Conditions, 0, 1))
+	}
+	o[len(o)-1] = append(o[len(o)-1], aCondition)
+	return o
+}
+
+func (o OneOrMore) UpdateLast(aCondition Condition) {
+	o[len(o)-1][len(o[len(o)-1])-1] = aCondition
 }
 
 type StatementKind int
@@ -67,7 +97,7 @@ type Statement struct {
 	Aliases    map[string]string
 	Inserts    [][]any
 	Updates    map[string]any
-	Conditions []Condition // used for WHERE
+	Conditions OneOrMore // used for WHERE
 }
 
 type Iterator func(ctx context.Context) (Row, error)

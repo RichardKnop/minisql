@@ -44,10 +44,12 @@ func TestParse_Delete(t *testing.T) {
 			Expected: minisql.Statement{
 				Kind:      minisql.Delete,
 				TableName: "a",
-				Conditions: []minisql.Condition{
+				Conditions: minisql.OneOrMore{
 					{
-						Operand1:        "b",
-						Operand1IsField: true,
+						{
+							Operand1:        "b",
+							Operand1IsField: true,
+						},
 					},
 				},
 			},
@@ -59,13 +61,15 @@ func TestParse_Delete(t *testing.T) {
 			Expected: minisql.Statement{
 				Kind:      minisql.Delete,
 				TableName: "a",
-				Conditions: []minisql.Condition{
+				Conditions: minisql.OneOrMore{
 					{
-						Operand1:        "b",
-						Operand1IsField: true,
-						Operator:        minisql.Eq,
-						Operand2:        "1",
-						Operand2IsField: false,
+						{
+							Operand1:        "b",
+							Operand1IsField: true,
+							Operator:        minisql.Eq,
+							Operand2:        "1",
+							Operand2IsField: false,
+						},
 					},
 				},
 			},
@@ -76,20 +80,22 @@ func TestParse_Delete(t *testing.T) {
 			Expected: minisql.Statement{
 				Kind:      minisql.Delete,
 				TableName: "a",
-				Conditions: []minisql.Condition{
+				Conditions: minisql.OneOrMore{
 					{
-						Operand1:        "a",
-						Operand1IsField: true,
-						Operator:        minisql.Eq,
-						Operand2:        "1",
-						Operand2IsField: false,
-					},
-					{
-						Operand1:        "b",
-						Operand1IsField: true,
-						Operator:        minisql.Eq,
-						Operand2:        "789",
-						Operand2IsField: false,
+						{
+							Operand1:        "a",
+							Operand1IsField: true,
+							Operator:        minisql.Eq,
+							Operand2:        "1",
+							Operand2IsField: false,
+						},
+						{
+							Operand1:        "b",
+							Operand1IsField: true,
+							Operator:        minisql.Eq,
+							Operand2:        "789",
+							Operand2IsField: false,
+						},
 					},
 				},
 			},

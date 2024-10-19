@@ -79,159 +79,6 @@ func TestParse_Select(t *testing.T) {
 			},
 			Err: nil,
 		},
-
-		{
-			Name: "SELECT with empty WHERE fails",
-			SQL:  "SELECT a, c, d FROM 'b' WHERE",
-			Expected: minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a", "c", "d"},
-			},
-			Err: errEmptyWhereClause,
-		},
-		{
-			Name: "SELECT with WHERE with only operand fails",
-			SQL:  "SELECT a, c, d FROM 'b' WHERE a",
-			Expected: minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a", "c", "d"},
-				Conditions: []minisql.Condition{
-					{
-						Operand1:        "a",
-						Operand1IsField: true,
-					},
-				},
-			},
-			Err: errWhereWithoutOperator,
-		},
-		{
-			Name: "SELECT with WHERE with = works",
-			SQL:  "SELECT a, c, d FROM 'b' WHERE a = ''",
-			Expected: minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a", "c", "d"},
-				Conditions: []minisql.Condition{
-					{
-						Operand1:        "a",
-						Operand1IsField: true,
-						Operator:        minisql.Eq,
-						Operand2:        "",
-						Operand2IsField: false,
-					},
-				},
-			},
-		},
-		{
-			Name: "SELECT with WHERE with < works",
-			SQL:  "SELECT a, c, d FROM 'b' WHERE a < '1'",
-			Expected: minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a", "c", "d"},
-				Conditions: []minisql.Condition{
-					{
-						Operand1:        "a",
-						Operand1IsField: true,
-						Operator:        minisql.Lt,
-						Operand2:        "1",
-						Operand2IsField: false,
-					},
-				},
-			},
-		},
-		{
-			Name: "SELECT with WHERE with <= works",
-			SQL:  "SELECT a, c, d FROM 'b' WHERE a <= '1'",
-			Expected: minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a", "c", "d"},
-				Conditions: []minisql.Condition{
-					{
-						Operand1:        "a",
-						Operand1IsField: true,
-						Operator:        minisql.Lte,
-						Operand2:        "1",
-						Operand2IsField: false,
-					},
-				},
-			},
-		},
-		{
-			Name: "SELECT with WHERE with > works",
-			SQL:  "SELECT a, c, d FROM 'b' WHERE a > '1'",
-			Expected: minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a", "c", "d"},
-				Conditions: []minisql.Condition{
-					{
-						Operand1:        "a",
-						Operand1IsField: true,
-						Operator:        minisql.Gt,
-						Operand2:        "1",
-						Operand2IsField: false,
-					},
-				},
-			},
-		},
-		{
-			Name: "SELECT with WHERE with >= works",
-			SQL:  "SELECT a, c, d FROM 'b' WHERE a >= '1'",
-			Expected: minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a", "c", "d"},
-				Conditions: []minisql.Condition{
-					{
-						Operand1:        "a",
-						Operand1IsField: true,
-						Operator:        minisql.Gte,
-						Operand2:        "1",
-						Operand2IsField: false,
-					},
-				},
-			},
-		},
-		{
-			Name: "SELECT with WHERE with != works",
-			SQL:  "SELECT a, c, d FROM 'b' WHERE a != '1'",
-			Expected: minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a", "c", "d"},
-				Conditions: []minisql.Condition{
-					{
-						Operand1:        "a",
-						Operand1IsField: true,
-						Operator:        minisql.Ne,
-						Operand2:        "1",
-						Operand2IsField: false,
-					},
-				},
-			},
-		},
-		{
-			Name: "SELECT with WHERE with != works (comparing field against another field)",
-			SQL:  "SELECT a, c, d FROM 'b' WHERE a != b",
-			Expected: minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a", "c", "d"},
-				Conditions: []minisql.Condition{
-					{
-						Operand1:        "a",
-						Operand1IsField: true,
-						Operator:        minisql.Ne,
-						Operand2:        "b",
-						Operand2IsField: true,
-					},
-				},
-			},
-		},
 		{
 			Name: "SELECT * works",
 			SQL:  "SELECT * FROM 'b'",
@@ -251,26 +98,310 @@ func TestParse_Select(t *testing.T) {
 			},
 		},
 		{
-			Name: "SELECT with WHERE with two conditions using AND works",
-			SQL:  "SELECT a, c, d FROM 'b' WHERE a != '1' AND b = '2'",
+			Name: "SELECT with empty WHERE fails",
+			SQL:  "SELECT a, c, d FROM 'b' WHERE",
 			Expected: minisql.Statement{
 				Kind:      minisql.Select,
 				TableName: "b",
 				Fields:    []string{"a", "c", "d"},
-				Conditions: []minisql.Condition{
+			},
+			Err: errEmptyWhereClause,
+		},
+		{
+			Name: "SELECT with WHERE with only operand fails",
+			SQL:  "SELECT a, c, d FROM 'b' WHERE a",
+			Expected: minisql.Statement{
+				Kind:      minisql.Select,
+				TableName: "b",
+				Fields:    []string{"a", "c", "d"},
+				Conditions: minisql.OneOrMore{
 					{
-						Operand1:        "a",
-						Operand1IsField: true,
-						Operator:        minisql.Ne,
-						Operand2:        "1",
-						Operand2IsField: false,
+						{
+							Operand1:        "a",
+							Operand1IsField: true,
+						},
+					},
+				},
+			},
+			Err: errWhereWithoutOperator,
+		},
+		{
+			Name: "SELECT with WHERE with = and empty quoted string works",
+			SQL:  "SELECT a, c, d FROM 'b' WHERE a = ''",
+			Expected: minisql.Statement{
+				Kind:      minisql.Select,
+				TableName: "b",
+				Fields:    []string{"a", "c", "d"},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1:        "a",
+							Operand1IsField: true,
+							Operator:        minisql.Eq,
+							Operand2:        "",
+							Operand2IsField: false,
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "SELECT with WHERE with = works",
+			SQL:  "SELECT a, c, d FROM 'b' WHERE a = '1'",
+			Expected: minisql.Statement{
+				Kind:      minisql.Select,
+				TableName: "b",
+				Fields:    []string{"a", "c", "d"},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1:        "a",
+							Operand1IsField: true,
+							Operator:        minisql.Eq,
+							Operand2:        "1",
+							Operand2IsField: false,
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "SELECT with WHERE with = and int value works",
+			SQL:  "SELECT a, c, d FROM 'b' WHERE a = 1",
+			Expected: minisql.Statement{
+				Kind:      minisql.Select,
+				TableName: "b",
+				Fields:    []string{"a", "c", "d"},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1:        "a",
+							Operand1IsField: true,
+							Operator:        minisql.Eq,
+							Operand2:        int64(1),
+							Operand2IsField: false,
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "SELECT with WHERE with < works",
+			SQL:  "SELECT a, c, d FROM 'b' WHERE a < '1'",
+			Expected: minisql.Statement{
+				Kind:      minisql.Select,
+				TableName: "b",
+				Fields:    []string{"a", "c", "d"},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1:        "a",
+							Operand1IsField: true,
+							Operator:        minisql.Lt,
+							Operand2:        "1",
+							Operand2IsField: false,
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "SELECT with WHERE with <= works",
+			SQL:  "SELECT a, c, d FROM 'b' WHERE a <= '1'",
+			Expected: minisql.Statement{
+				Kind:      minisql.Select,
+				TableName: "b",
+				Fields:    []string{"a", "c", "d"},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1:        "a",
+							Operand1IsField: true,
+							Operator:        minisql.Lte,
+							Operand2:        "1",
+							Operand2IsField: false,
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "SELECT with WHERE with > works",
+			SQL:  "SELECT a, c, d FROM 'b' WHERE a > '1'",
+			Expected: minisql.Statement{
+				Kind:      minisql.Select,
+				TableName: "b",
+				Fields:    []string{"a", "c", "d"},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1:        "a",
+							Operand1IsField: true,
+							Operator:        minisql.Gt,
+							Operand2:        "1",
+							Operand2IsField: false,
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "SELECT with WHERE with >= works",
+			SQL:  "SELECT a, c, d FROM 'b' WHERE a >= '1'",
+			Expected: minisql.Statement{
+				Kind:      minisql.Select,
+				TableName: "b",
+				Fields:    []string{"a", "c", "d"},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1:        "a",
+							Operand1IsField: true,
+							Operator:        minisql.Gte,
+							Operand2:        "1",
+							Operand2IsField: false,
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "SELECT with WHERE with != works",
+			SQL:  "SELECT a, c, d FROM 'b' WHERE a != '1'",
+			Expected: minisql.Statement{
+				Kind:      minisql.Select,
+				TableName: "b",
+				Fields:    []string{"a", "c", "d"},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1:        "a",
+							Operand1IsField: true,
+							Operator:        minisql.Ne,
+							Operand2:        "1",
+							Operand2IsField: false,
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "SELECT with WHERE with != works (comparing field against another field)",
+			SQL:  "SELECT a, c, d FROM 'b' WHERE a != b",
+			Expected: minisql.Statement{
+				Kind:      minisql.Select,
+				TableName: "b",
+				Fields:    []string{"a", "c", "d"},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1:        "a",
+							Operand1IsField: true,
+							Operator:        minisql.Ne,
+							Operand2:        "b",
+							Operand2IsField: true,
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "SELECT with WHERE with multiple conditions using AND works",
+			SQL:  "SELECT a, c, d FROM 'b' WHERE a != '1' AND b = 2 and c = '3'",
+			Expected: minisql.Statement{
+				Kind:      minisql.Select,
+				TableName: "b",
+				Fields:    []string{"a", "c", "d"},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1:        "a",
+							Operand1IsField: true,
+							Operator:        minisql.Ne,
+							Operand2:        "1",
+							Operand2IsField: false,
+						},
+						{
+							Operand1:        "b",
+							Operand1IsField: true,
+							Operator:        minisql.Eq,
+							Operand2:        int64(2),
+							Operand2IsField: false,
+						},
+						{
+							Operand1:        "c",
+							Operand1IsField: true,
+							Operator:        minisql.Eq,
+							Operand2:        "3",
+							Operand2IsField: false,
+						},
+					},
+				},
+			},
+			Err: nil,
+		},
+		{
+			Name: "SELECT with WHERE with multiple conditions using OR works",
+			SQL:  "SELECT a, c, d FROM 'b' WHERE a != '1' OR b = 2",
+			Expected: minisql.Statement{
+				Kind:      minisql.Select,
+				TableName: "b",
+				Fields:    []string{"a", "c", "d"},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1:        "a",
+							Operand1IsField: true,
+							Operator:        minisql.Ne,
+							Operand2:        "1",
+							Operand2IsField: false,
+						},
 					},
 					{
-						Operand1:        "b",
-						Operand1IsField: true,
-						Operator:        minisql.Eq,
-						Operand2:        "2",
-						Operand2IsField: false,
+						{
+							Operand1:        "b",
+							Operand1IsField: true,
+							Operator:        minisql.Eq,
+							Operand2:        int64(2),
+							Operand2IsField: false,
+						},
+					},
+				},
+			},
+			Err: nil,
+		},
+		{
+			Name: "SELECT with WHERE with multiple conditions using both AND plus OR works",
+			SQL:  "SELECT a, c, d FROM 'b' WHERE a != '1' and b = 2 OR c= '3'",
+			Expected: minisql.Statement{
+				Kind:      minisql.Select,
+				TableName: "b",
+				Fields:    []string{"a", "c", "d"},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1:        "a",
+							Operand1IsField: true,
+							Operator:        minisql.Ne,
+							Operand2:        "1",
+							Operand2IsField: false,
+						},
+						{
+							Operand1:        "b",
+							Operand1IsField: true,
+							Operator:        minisql.Eq,
+							Operand2:        int64(2),
+							Operand2IsField: false,
+						},
+					},
+					{
+						{
+							Operand1:        "c",
+							Operand1IsField: true,
+							Operator:        minisql.Eq,
+							Operand2:        "3",
+							Operand2IsField: false,
+						},
 					},
 				},
 			},

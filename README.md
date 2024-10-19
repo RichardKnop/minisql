@@ -15,7 +15,32 @@ go run cmd/main/main.go
 minisql>
 ```
 
-## Meta Commands (WIP)
+## Current Features
+
+I plan to implement more features of traditional relational databases in the future as part of this project simply to learn and discovery how various features I have grown acustomed to over the years are implemented under the hood. However, currently only a very small number of features are implemented:
+
+- simple SQL parser (partial support for `CREATE TABLE`, `INSERT`, `SELECT`, `UPDATE`, `DELETE` queries)
+- only tables supported, no indexes (this means all selects are scanning whole tables for now)
+- only `int4`, `int8` and `varchar` columns supported
+- no primary key support (tables internally use row ID as key in B tree data structure)
+- no joins
+- only simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis
+- no transaction support
+- no page overflow support, entire rows must fit within a 4096 byte page
+
+Planned features:
+
+- B+ tree and support indexes (starting with unique and primary)
+- more column types starting with simpler ones such as `bool` and `timestamp`
+- support bigger column types such as `text` that can overflow to more pages via linked list data structure
+- joins such as `INNER`, `LEFT`, `RIGHT`
+- dedicate first 100B of root page for config similar to how sqlite does it
+- support altering tables
+- transactions
+- vacuuming
+- benchmarks
+
+## Meta Commands
 
 You can use meta commands, type `.help` to see available commands or `.exit` to quit minisql:
 
@@ -26,7 +51,7 @@ minisql> .help
 .tables  - List all tables in the current database
 ```
 
-### SQL Queries (WIP)
+### Examples
 
 Create a table:
 
