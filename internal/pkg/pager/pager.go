@@ -8,10 +8,6 @@ import (
 	"github.com/RichardKnop/minisql/internal/pkg/minisql"
 )
 
-const (
-	MaxPages = 1024 // temporary limit, TODO - remove later
-)
-
 type DBFile interface {
 	io.ReadSeeker
 	io.ReaderAt
@@ -33,7 +29,7 @@ func New(file DBFile, pageSize int, schemaTableName string) (*Pager, error) {
 	aPager := &Pager{
 		pageSize: pageSize,
 		file:     file,
-		pages:    make([]*minisql.Page, MaxPages),
+		pages:    make([]*minisql.Page, minisql.MaxPages),
 	}
 
 	fileSize, err := aPager.file.Seek(0, io.SeekEnd)
@@ -49,7 +45,7 @@ func New(file DBFile, pageSize int, schemaTableName string) (*Pager, error) {
 
 	// Check we are not exceeding max page limit
 	totalPages := fileSize / int64(pageSize)
-	if totalPages >= MaxPages {
+	if totalPages >= minisql.MaxPages {
 		return nil, fmt.Errorf(("file size exceeds max pages limit"))
 	}
 	aPager.totalPages = uint32(totalPages)
@@ -64,8 +60,8 @@ func (p *Pager) TotalPages() uint32 {
 }
 
 func (p *Pager) GetPage(ctx context.Context, aTable *minisql.Table, pageIdx uint32) (*minisql.Page, error) {
-	if pageIdx >= MaxPages {
-		return nil, fmt.Errorf("page index %d reached limit of max pages %d", pageIdx, MaxPages)
+	if pageIdx >= minisql.MaxPages {
+		return nil, fmt.Errorf("page index %d reached limit of max pages %d", pageIdx, minisql.MaxPages)
 	}
 
 	if p.pages[pageIdx] != nil {

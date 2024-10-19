@@ -134,6 +134,7 @@ func NewInternalNode() *InternalNode {
 				IsInternal: true,
 			},
 		},
+		ICells: [InternalNodeMaxCells]ICell{},
 	}
 	return &aNode
 }

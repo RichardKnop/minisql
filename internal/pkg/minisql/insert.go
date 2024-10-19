@@ -19,53 +19,19 @@ func (d *Database) executeInsert(ctx context.Context, stmt Statement) (Statement
 }
 
 func (t *Table) Insert(ctx context.Context, stmt Statement) error {
-	maxRowID, found, err := t.SeekMaxKey(ctx, t.RootPageIdx)
+	aCursor, nextRowID, err := t.SeekNextRowID(ctx, t.RootPageIdx)
 	if err != nil {
 		return err
 	}
-	nextRowID := maxRowID
-	if found {
-		nextRowID += 1
-	}
 
-	// rootPage, err := t.pager.GetPage(ctx, t, uint32(0))
-	// if err != nil {
-	// 	return err
-	// }
-	// child, err := t.pager.GetPage(ctx, t, uint32(1))
-	// if err != nil {
-	// 	return err
-	// }
-	// leftChild, err := t.pager.GetPage(ctx, t, uint32(2))
-	// if err != nil {
-	// 	return err
-	// }
-	// fmt.Println("Root Page Left Child", int(rootPage.InternalNode.ICells[0].Child))
-	// fmt.Println("Root Page Right Child", int(rootPage.InternalNode.Header.RightChild))
-	// fmt.Println("Root Page Keys")
-	// for i := 0; i < int(rootPage.InternalNode.Header.KeysNum); i++ {
-	// 	fmt.Println(int(rootPage.InternalNode.ICells[i].Key))
-	// }
-	// fmt.Println("Left child Keys")
-	// for i := 0; i < int(leftChild.LeafNode.Header.Cells); i++ {
-	// 	fmt.Println(int(leftChild.LeafNode.Cells[i].Key))
-	// }
-	// fmt.Println("Right child Keys")
-	// for i := 0; i < int(child.LeafNode.Header.Cells); i++ {
-	// 	fmt.Println(int(child.LeafNode.Cells[i].Key))
-	// }
+	// TODO - lock row so parallel insert won't try to insert the same row ID?
 
-	for _, values := range stmt.Inserts {
+	for i, values := range stmt.Inserts {
 		aRow := Row{
 			Columns: t.Columns,
 			Values:  make([]any, 0, len(t.Columns)),
 		}
 		aRow = aRow.appendValues(stmt.Fields, values)
-
-		aCursor, err := t.Seek(ctx, nextRowID)
-		if err != nil {
-			return err
-		}
 
 		aPage, err := t.pager.GetPage(ctx, t, aCursor.PageIdx)
 		if err != nil {
@@ -78,10 +44,9 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 		}
 
 		logger.Sugar().With(
-			"row_id", int(nextRowID),
-			"found", found,
 			"page_index", int(aCursor.PageIdx),
 			"cell_index", int(aCursor.CellIdx),
+			"row_id", int(nextRowID),
 		).Debug("inserting row")
 
 		if aCursor.CellIdx < aPage.LeafNode.Header.Cells {
@@ -94,7 +59,17 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 			return err
 		}
 
-		nextRowID += 1
+		if i == len(stmt.Inserts)-1 {
+			break
+		}
+
+		// Try to advance cursor to next position, if there is still space in the
+		// current page, just increment cell index, otherwise call Seek to get
+		// new cursor
+		aCursor, nextRowID, err = t.SeekNextRowID(ctx, t.RootPageIdx)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

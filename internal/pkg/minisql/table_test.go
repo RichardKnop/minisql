@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -9,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTable_SeekMaxKey_EmptyTable(t *testing.T) {
+func TestTable_SeekNextRowID_EmptyTable(t *testing.T) {
 	t.Parallel()
 
 	var (
@@ -22,15 +23,19 @@ func TestTable_SeekMaxKey_EmptyTable(t *testing.T) {
 
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil).Once()
 
-	rowID, ok, err := aTable.SeekMaxKey(ctx, aTable.RootPageIdx)
+	aCursor, rowID, err := aTable.SeekNextRowID(ctx, aTable.RootPageIdx)
 	require.NoError(t, err)
-	assert.False(t, ok)
+	assert.Equal(t, &Cursor{
+		Table:   aTable,
+		PageIdx: 0,
+		CellIdx: 0,
+	}, aCursor)
 	assert.Equal(t, 0, int(rowID))
 
 	mock.AssertExpectationsForObjects(t, pagerMock)
 }
 
-func TestTable_SeekMaxKey(t *testing.T) {
+func TestTable_SeekNextRowID(t *testing.T) {
 	t.Parallel()
 
 	var (
@@ -44,10 +49,15 @@ func TestTable_SeekMaxKey(t *testing.T) {
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(2)).Return(internalPages[1], nil).Once()
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(6)).Return(leafPages[3], nil).Once()
 
-	rowID, found, err := aTable.SeekMaxKey(ctx, aTable.RootPageIdx)
+	aCursor, rowID, err := aTable.SeekNextRowID(ctx, aTable.RootPageIdx)
 	require.NoError(t, err)
-	assert.True(t, found)
-	assert.Equal(t, 21, int(rowID))
+	require.NoError(t, err)
+	assert.Equal(t, &Cursor{
+		Table:   aTable,
+		PageIdx: 6,
+		CellIdx: 1,
+	}, aCursor)
+	assert.Equal(t, 22, int(rowID))
 
 	mock.AssertExpectationsForObjects(t, pagerMock)
 }
@@ -240,7 +250,7 @@ func TestTable_CreateNewRoot(t *testing.T) {
 	pagerMock.On("TotalPages").Return(uint32(2), nil)
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(2)).Return(newLeftChild, nil)
 
-	err := aTable.CreateNewRoot(ctx, uint32(1))
+	_, err := aTable.CreateNewRoot(ctx, uint32(1))
 	require.NoError(t, err)
 	assert.True(t, aRootPage.InternalNode.Header.IsRoot)
 	assert.True(t, aRootPage.InternalNode.Header.IsInternal)
@@ -257,4 +267,63 @@ func TestTable_CreateNewRoot(t *testing.T) {
 
 func TestTable_InternalNodeInsert(t *testing.T) {
 	t.Parallel()
+
+	var (
+		ctx                         = context.Background()
+		pagerMock                   = new(MockPager)
+		_, internalPages, leafPages = newTestBtree()
+		aTable                      = NewTable("foo", testColumns, pagerMock, 0)
+		aNewLeaf                    = NewLeafNode(aTable.RowSize)
+	)
+	aNewLeaf.Header.Cells = 1
+	aNewLeaf.Cells[0].Key = 25
+	aNewLeaf.Cells[0].Value = bytes.Repeat([]byte{byte(7)}, 270)
+
+	pagerMock.On("GetPage", mock.Anything, aTable, uint32(2)).Return(internalPages[1], nil).Once()
+	pagerMock.On("GetPage", mock.Anything, aTable, uint32(6)).Return(leafPages[3], nil).Once()
+	pagerMock.On("GetPage", mock.Anything, aTable, uint32(7)).Return(&Page{LeafNode: aNewLeaf}, nil).Once()
+
+	/*
+	   Original Btree:
+
+	   		           +-------------------+
+	   		           |       *,5,*       |
+	   		           +-------------------+
+	   		          /                     \
+	   		     +-------+                  +--------+
+	   		     | *,2,* |                  | *,18,* |
+	   		     +-------+                  +--------+
+	   		    /         \                /          \
+	   	 +---------+     +-----+     +-----------+    +------+
+	   	 | 1:c,2:d |     | 5:a |     | 12:b,18:f |    | 21:g |
+	   	 +---------+     +-----+     +-----------+    +------+
+	*/
+	err := aTable.InternalNodeInsert(ctx, uint32(2), uint32(7))
+	require.NoError(t, err)
+
+	/*
+	   Should become:
+
+	   		           +-------------------+
+	   		           |       *,5,*       |
+	   		           +-------------------+
+	   		          /                     \
+	   		    +-------+                   +--------------+
+	   		    | *,2,* |                   |   *,18,21,*  |
+	   		    +-------+                   +--------------+
+	   		   /         \                 /        |       \
+	   	+---------+    +-----+   +-----------+  +------+  +------+
+	   	| 1:c,2:d |    | 5:a |   | 12:b,18:f |  | 21:g |  | 25:h |
+	   	+---------+    +-----+   +-----------+  +------+  +------+
+	*/
+	assert.Equal(t, 2, int(internalPages[1].InternalNode.Header.KeysNum))
+	assert.Equal(t, ICell{
+		Key:   18,
+		Child: 5,
+	}, internalPages[1].InternalNode.ICells[0])
+	assert.Equal(t, ICell{
+		Key:   21,
+		Child: 6,
+	}, internalPages[1].InternalNode.ICells[1])
+	assert.Equal(t, 7, int(internalPages[1].InternalNode.Header.RightChild))
 }
