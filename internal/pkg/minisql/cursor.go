@@ -53,7 +53,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	originalMaxKey, _ := aSplitPage.GetMaxKey()
 	newPageIdx := aPager.TotalPages()
 
-	logger.Sugar().With(
+	c.Table.logger.Sugar().With(
 		"key", int(key),
 		"old_max_key", int(originalMaxKey),
 		"new_page_index", int(newPageIdx),

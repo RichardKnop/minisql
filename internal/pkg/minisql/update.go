@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-func (d *Database) executeUpdate(ctx context.Context, stmt Statement) (StatementResult, error) {
+func (t *Table) Update(ctx context.Context, stmt Statement) error {
 	fmt.Println("TODO - implement UPDATE")
-	return StatementResult{}, fmt.Errorf("not implemented")
+	return fmt.Errorf("not implemented")
 }

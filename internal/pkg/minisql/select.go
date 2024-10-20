@@ -10,15 +10,6 @@ var (
 	ErrNoMoreRows = errors.New("no more rows")
 )
 
-func (d *Database) executeSelect(ctx context.Context, stmt Statement) (StatementResult, error) {
-	aTable, ok := d.tables[stmt.TableName]
-	if !ok {
-		return StatementResult{}, errTableDoesNotExist
-	}
-
-	return aTable.Select(ctx, stmt)
-}
-
 func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, error) {
 	aCursor, err := t.Seek(ctx, uint64(0))
 	if err != nil {
@@ -30,7 +21,7 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	}
 	aCursor.EndOfTable = aPage.LeafNode.Header.Cells == 0
 
-	logger.Sugar().With(
+	t.logger.Sugar().With(
 		"page_index", int(aCursor.PageIdx),
 		"cell_index", int(aCursor.CellIdx),
 	).Debug("fetching rows from")

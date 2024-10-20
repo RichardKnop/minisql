@@ -1,20 +1,25 @@
-package minisql
+package database
 
 import (
 	"context"
 	"fmt"
+
+	"github.com/RichardKnop/minisql/internal/pkg/minisql"
+	"go.uber.org/zap"
 )
 
 var (
 	errUnrecognizedStatementType = fmt.Errorf("unrecognised statement type")
+	errTableDoesNotExist         = fmt.Errorf("table does not exist")
+	errTableAlreadyExists        = fmt.Errorf("table already exists")
 )
 
 type Parser interface {
-	Parse(context.Context, string) (Statement, error)
+	Parse(context.Context, string) (minisql.Statement, error)
 }
 
 type Pager interface {
-	GetPage(context.Context, *Table, uint32) (*Page, error)
+	GetPage(context.Context, *minisql.Table, uint32) (*minisql.Page, error)
 	// ListPages() []*Page
 	TotalPages() uint32
 	Flush(context.Context, uint32, int64) error
@@ -26,29 +31,29 @@ const (
 )
 
 var (
-	schemaTableColumns = []Column{
+	schemaTableColumns = []minisql.Column{
 		{
-			Kind: Int4,
+			Kind: minisql.Int4,
 			Size: 4,
 			Name: "type",
 		},
 		{
-			Kind: Varchar,
+			Kind: minisql.Varchar,
 			Size: 100,
 			Name: "name",
 		},
 		{
-			Kind: Varchar,
+			Kind: minisql.Varchar,
 			Size: 100,
 			Name: "table_name",
 		},
 		{
-			Kind: Int8,
+			Kind: minisql.Int8,
 			Size: 8,
 			Name: "root_page",
 		},
 		{
-			Kind: Varchar,
+			Kind: minisql.Varchar,
 			Size: 1000,
 			Name: "sql",
 		},
@@ -74,16 +79,18 @@ type Database struct {
 	Name   string
 	parser Parser
 	pager  Pager
-	tables map[string]*Table
+	tables map[string]*minisql.Table
+	logger *zap.Logger
 }
 
-// NewDatabase creates a new database
-func NewDatabase(ctx context.Context, name string, aParser Parser, aPager Pager) (*Database, error) {
+// New creates a new database
+func New(ctx context.Context, logger *zap.Logger, name string, aParser Parser, aPager Pager) (*Database, error) {
 	aDatabase := &Database{
 		Name:   name,
 		parser: aParser,
 		pager:  aPager,
-		tables: make(map[string]*Table),
+		tables: make(map[string]*minisql.Table),
+		logger: logger,
 	}
 
 	logger.Sugar().With(
@@ -173,31 +180,24 @@ func NewDatabase(ctx context.Context, name string, aParser Parser, aPager Pager)
 }
 
 func (d *Database) CreateTestTable() {
-	columns := []Column{
+	columns := []minisql.Column{
 		{
-			Kind: Int8,
+			Kind: minisql.Int8,
 			Size: 8,
 			Name: "id",
 		},
 		{
-			Kind: Varchar,
+			Kind: minisql.Varchar,
 			Size: 255,
 			Name: "email",
 		},
 		{
-			Kind: Int4,
+			Kind: minisql.Int4,
 			Size: 4,
 			Name: "age",
 		},
 	}
-	rowSize := Row{Columns: columns}.Size()
-	d.tables["foo"] = &Table{
-		Name:        "foo",
-		Columns:     columns,
-		RootPageIdx: 0,
-		pager:       d.pager,
-		RowSize:     rowSize,
-	}
+	d.tables["foo"] = minisql.NewTable(d.logger, "foo", columns, d.pager, uint32(0))
 }
 
 func (d *Database) Close(ctx context.Context) error {
@@ -206,7 +206,7 @@ func (d *Database) Close(ctx context.Context) error {
 	}
 
 	for pageIdx := uint32(0); pageIdx < d.pager.TotalPages(); pageIdx++ {
-		if err := d.pager.Flush(ctx, pageIdx, PageSize); err != nil {
+		if err := d.pager.Flush(ctx, pageIdx, minisql.PageSize); err != nil {
 			return err
 		}
 	}
@@ -224,35 +224,35 @@ func (d *Database) ListTableNames(ctx context.Context) []string {
 }
 
 // PrepareStatement parser SQL into a Statement struct
-func (d *Database) PrepareStatement(ctx context.Context, sql string) (Statement, error) {
+func (d *Database) PrepareStatement(ctx context.Context, sql string) (minisql.Statement, error) {
 	stmt, err := d.parser.Parse(ctx, sql)
 	if err != nil {
-		return Statement{}, err
+		return minisql.Statement{}, err
 	}
 	return stmt, nil
 }
 
 // ExecuteStatement will eventually become virtual machine
-func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (StatementResult, error) {
+func (d *Database) ExecuteStatement(ctx context.Context, stmt minisql.Statement) (minisql.StatementResult, error) {
 	switch stmt.Kind {
-	case CreateTable:
+	case minisql.CreateTable:
 		return d.executeCreateTable(ctx, stmt)
-	case DropTable:
+	case minisql.DropTable:
 		return d.executeDropTable(ctx, stmt)
-	case Insert:
+	case minisql.Insert:
 		return d.executeInsert(ctx, stmt)
-	case Select:
+	case minisql.Select:
 		return d.executeSelect(ctx, stmt)
-	case Update:
+	case minisql.Update:
 		return d.executeUpdate(ctx, stmt)
-	case Delete:
+	case minisql.Delete:
 		return d.executeDelete(ctx, stmt)
 	}
-	return StatementResult{}, errUnrecognizedStatementType
+	return minisql.StatementResult{}, errUnrecognizedStatementType
 }
 
 // CreateTable creates a new table with a name and columns
-func (d *Database) CreateTable(ctx context.Context, name string, columns []Column) (*Table, error) {
+func (d *Database) CreateTable(ctx context.Context, name string, columns []minisql.Column) (*minisql.Table, error) {
 	if len(d.tables) == 1 {
 		return nil, fmt.Errorf("currently only single table is supported")
 	}
@@ -264,7 +264,7 @@ func (d *Database) CreateTable(ctx context.Context, name string, columns []Colum
 	if ok {
 		return aTable, errTableAlreadyExists
 	}
-	d.tables[name] = NewTable(name, columns, d.pager, uint32(0))
+	d.tables[name] = minisql.NewTable(d.logger, name, columns, d.pager, uint32(0))
 
 	// TODO - insert into main schema table
 
@@ -286,12 +286,62 @@ func (d *Database) DropTable(ctx context.Context, name string) error {
 	return nil
 }
 
-func (d *Database) executeCreateTable(ctx context.Context, stmt Statement) (StatementResult, error) {
+func (d *Database) executeCreateTable(ctx context.Context, stmt minisql.Statement) (minisql.StatementResult, error) {
 	_, err := d.CreateTable(ctx, stmt.TableName, stmt.Columns)
-	return StatementResult{}, err
+	return minisql.StatementResult{}, err
 }
 
-func (d *Database) executeDropTable(ctx context.Context, stmt Statement) (StatementResult, error) {
+func (d *Database) executeDropTable(ctx context.Context, stmt minisql.Statement) (minisql.StatementResult, error) {
 	err := d.DropTable(ctx, stmt.TableName)
-	return StatementResult{}, err
+	return minisql.StatementResult{}, err
+}
+
+func (d *Database) executeInsert(ctx context.Context, stmt minisql.Statement) (minisql.StatementResult, error) {
+	aTable, ok := d.tables[stmt.TableName]
+	if !ok {
+		return minisql.StatementResult{}, errTableDoesNotExist
+	}
+
+	if err := aTable.Insert(ctx, stmt); err != nil {
+		return minisql.StatementResult{}, err
+	}
+
+	return minisql.StatementResult{RowsAffected: len(stmt.Inserts)}, nil
+}
+
+func (d *Database) executeSelect(ctx context.Context, stmt minisql.Statement) (minisql.StatementResult, error) {
+	aTable, ok := d.tables[stmt.TableName]
+	if !ok {
+		return minisql.StatementResult{}, errTableDoesNotExist
+	}
+
+	return aTable.Select(ctx, stmt)
+}
+
+func (d *Database) executeUpdate(ctx context.Context, stmt minisql.Statement) (minisql.StatementResult, error) {
+	aTable, ok := d.tables[stmt.TableName]
+	if !ok {
+		return minisql.StatementResult{}, errTableDoesNotExist
+	}
+
+	if err := aTable.Update(ctx, stmt); err != nil {
+		return minisql.StatementResult{}, err
+	}
+
+	// TODO - calculate rows affected properly
+	return minisql.StatementResult{RowsAffected: 0}, nil
+}
+
+func (d *Database) executeDelete(ctx context.Context, stmt minisql.Statement) (minisql.StatementResult, error) {
+	aTable, ok := d.tables[stmt.TableName]
+	if !ok {
+		return minisql.StatementResult{}, errTableDoesNotExist
+	}
+
+	if err := aTable.Delete(ctx, stmt); err != nil {
+		return minisql.StatementResult{}, err
+	}
+
+	// TODO - calculate rows affected properly
+	return minisql.StatementResult{RowsAffected: 0}, nil
 }

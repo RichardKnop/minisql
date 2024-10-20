@@ -5,7 +5,10 @@ import (
 	"time"
 
 	"github.com/brianvoe/gofakeit/v7"
+	"go.uber.org/zap"
 )
+
+//go:generate mockery --name=Pager --structname=MockPager --inpackage --case=snake --testonly
 
 var (
 	gen = newDataGen(uint64(time.Now().Unix()))
@@ -50,7 +53,17 @@ var (
 			Name: "description",
 		},
 	}
+
+	testLogger *zap.Logger
 )
+
+func init() {
+	var err error
+	testLogger, err = zap.NewDevelopment()
+	if err != nil {
+		panic(err)
+	}
+}
 
 type dataGen struct {
 	*gofakeit.Faker

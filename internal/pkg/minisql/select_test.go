@@ -20,7 +20,7 @@ func TestTable_Select_SplitRootLeaf(t *testing.T) {
 		aRootPage      = newRootLeafPageWithCells(cells, int(rowSize))
 		rightChild     = &Page{LeafNode: NewLeafNode(rowSize)}
 		leftChild      = &Page{LeafNode: NewLeafNode(rowSize)}
-		aTable         = NewTable("foo", testColumns, pagerMock, 0)
+		aTable         = NewTable(testLogger, "foo", testColumns, pagerMock, 0)
 	)
 
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
@@ -81,7 +81,7 @@ func TestTable_Select_LeafNodeInsert(t *testing.T) {
 		leaf2          = &Page{LeafNode: NewLeafNode(rowSize)}
 		leaf3          = &Page{LeafNode: NewLeafNode(rowSize)}
 		leaf4          = &Page{LeafNode: NewLeafNode(rowSize)}
-		aTable         = NewTable("foo", testColumns, pagerMock, 0)
+		aTable         = NewTable(testLogger, "foo", testColumns, pagerMock, 0)
 	)
 
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)

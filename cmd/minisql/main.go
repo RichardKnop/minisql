@@ -9,6 +9,9 @@ import (
 	"strings"
 	"syscall"
 
+	"go.uber.org/zap"
+
+	"github.com/RichardKnop/minisql/internal/pkg/database"
 	"github.com/RichardKnop/minisql/internal/pkg/minisql"
 	"github.com/RichardKnop/minisql/internal/pkg/pager"
 	"github.com/RichardKnop/minisql/internal/pkg/parser"
@@ -58,6 +61,11 @@ func doMetaCommand(inputBuffer string) metaCommand {
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	logger, err := zap.NewDevelopment()
+	if err != nil {
+		panic(err)
+	}
+
 	// TODO - hardcoded database for now
 	dbFile, err := os.OpenFile("db", os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
@@ -65,11 +73,11 @@ func main() {
 	}
 	defer dbFile.Close()
 
-	aPager, err := pager.New(dbFile, minisql.PageSize, minisql.SchemaTableName)
+	aPager, err := pager.New(dbFile, minisql.PageSize, database.SchemaTableName)
 	if err != nil {
 		panic(err)
 	}
-	aDatabase, err := minisql.NewDatabase(ctx, "db", parser.New(), aPager)
+	aDatabase, err := database.New(ctx, logger, "db", parser.New(), aPager)
 	if err != nil {
 		panic(err)
 	}

@@ -3,6 +3,8 @@ package minisql
 import (
 	"context"
 	"fmt"
+
+	"go.uber.org/zap"
 )
 
 var (
@@ -11,21 +13,30 @@ var (
 	errTableAlreadyExists  = fmt.Errorf("table already exists")
 )
 
+type Pager interface {
+	GetPage(context.Context, *Table, uint32) (*Page, error)
+	// ListPages() []*Page
+	TotalPages() uint32
+	Flush(context.Context, uint32, int64) error
+}
+
 type Table struct {
 	Name        string
 	Columns     []Column
 	RootPageIdx uint32
 	RowSize     uint64
 	pager       Pager
+	logger      *zap.Logger
 }
 
-func NewTable(name string, columns []Column, pager Pager, rootPageIdx uint32) *Table {
+func NewTable(logger *zap.Logger, name string, columns []Column, pager Pager, rootPageIdx uint32) *Table {
 	return &Table{
 		Name:        name,
 		Columns:     columns,
 		RootPageIdx: rootPageIdx,
 		RowSize:     Row{Columns: columns}.Size(),
 		pager:       pager,
+		logger:      logger,
 	}
 }
 
@@ -140,7 +151,7 @@ func (t *Table) CreateNewRoot(ctx context.Context, rightChildPageIdx uint32) (*P
 		return nil, err
 	}
 
-	logger.Sugar().With(
+	t.logger.Sugar().With(
 		"left_child_index", int(leftChildPageIdx),
 		"right_child_index", int(rightChildPageIdx),
 	).Debug("create new root")
@@ -275,7 +286,7 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 	// Set the sibling node parent
 	aSiblingPage.InternalNode.Header.Parent = aSplitPage.InternalNode.Header.Parent
 
-	logger.Sugar().With(
+	t.logger.Sugar().With(
 		"page_index", int(pageIdx),
 		"sibling_page_index", int(siblingPageIdx),
 	).Debug("internal node split insert")

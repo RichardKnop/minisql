@@ -19,7 +19,7 @@ func TestTable_Insert(t *testing.T) {
 		aRow           = gen.Row()
 		cells, rowSize = 0, aRow.Size()
 		aRootPage      = newRootLeafPageWithCells(cells, int(rowSize))
-		aTable         = NewTable("foo", testColumns, pagerMock, 0)
+		aTable         = NewTable(testLogger, "foo", testColumns, pagerMock, 0)
 	)
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
 
@@ -51,7 +51,7 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 		aRow, aRow2, aRow3 = gen.Row(), gen.Row(), gen.Row()
 		cells, rowSize     = 0, aRow.Size()
 		aRootPage          = newRootLeafPageWithCells(cells, int(rowSize))
-		aTable             = NewTable("foo", testColumns, pagerMock, 0)
+		aTable             = NewTable(testLogger, "foo", testColumns, pagerMock, 0)
 	)
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
 
@@ -97,7 +97,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 		aRootPage      = newRootLeafPageWithCells(int(cells), int(rowSize))
 		rightChild     = &Page{LeafNode: NewLeafNode(rowSize)}
 		leftChild      = &Page{LeafNode: NewLeafNode(rowSize)}
-		aTable         = NewTable("foo", testColumns, pagerMock, 0)
+		aTable         = NewTable(testLogger, "foo", testColumns, pagerMock, 0)
 	)
 
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
@@ -180,7 +180,7 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 		leaf2          = &Page{LeafNode: NewLeafNode(rowSize)}
 		leaf3          = &Page{LeafNode: NewLeafNode(rowSize)}
 		leaf4          = &Page{LeafNode: NewLeafNode(rowSize)}
-		aTable         = NewTable("foo", testBigColumns, pagerMock, 0)
+		aTable         = NewTable(testLogger, "foo", testBigColumns, pagerMock, 0)
 	)
 
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
@@ -261,7 +261,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		// numberOfLeafs  = numRows
 		aRootPage = newRootLeafPageWithCells(cells, int(rowSize))
 		leafs     = make([]*Page, 0, numRows)
-		aTable    = NewTable("foo", testBigColumns, pagerMock, 0)
+		aTable    = NewTable(testLogger, "foo", testBigColumns, pagerMock, 0)
 		// These two pages will be returned as leafs by the pager as default behaviour
 		// for allocating a new page but will be converted to internal nodes
 		aNewRightInternal = &Page{LeafNode: NewLeafNode(rowSize)}

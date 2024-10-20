@@ -5,19 +5,6 @@ import (
 	"fmt"
 )
 
-func (d *Database) executeInsert(ctx context.Context, stmt Statement) (StatementResult, error) {
-	aTable, ok := d.tables[stmt.TableName]
-	if !ok {
-		return StatementResult{}, errTableDoesNotExist
-	}
-
-	if err := aTable.Insert(ctx, stmt); err != nil {
-		return StatementResult{}, err
-	}
-
-	return StatementResult{RowsAffected: len(stmt.Inserts)}, nil
-}
-
 func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 	aCursor, nextRowID, err := t.SeekNextRowID(ctx, t.RootPageIdx)
 	if err != nil {
@@ -43,7 +30,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 			return fmt.Errorf("trying to insert into non leaf node")
 		}
 
-		logger.Sugar().With(
+		t.logger.Sugar().With(
 			"page_index", int(aCursor.PageIdx),
 			"cell_index", int(aCursor.CellIdx),
 			"row_id", int(nextRowID),

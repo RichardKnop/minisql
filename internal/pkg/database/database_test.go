@@ -1,4 +1,4 @@
-package minisql
+package database
 
 //go:generate mockery --name=Pager --structname=MockPager --inpackage --case=snake --testonly
 

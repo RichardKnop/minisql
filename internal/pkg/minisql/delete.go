@@ -5,6 +5,7 @@ import (
 	"fmt"
 )
 
-func (d *Database) executeDelete(ctx context.Context, stmt Statement) (StatementResult, error) {
-	return StatementResult{}, fmt.Errorf("not implemented")
+func (t *Table) Delete(ctx context.Context, stmt Statement) error {
+	fmt.Println("TODO - implement DELETE")
+	return fmt.Errorf("not implemented")
 }
