@@ -220,6 +220,206 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			},
 			false,
 		},
+		{
+			"row matches if != condition evaluates as true",
+			aRow,
+			OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  Field,
+							Value: "age",
+						},
+						Operator: Ne,
+						Operand2: Operand{
+							Type:  Integer,
+							Value: int64(42),
+						},
+					},
+				},
+			},
+			true,
+		},
+		{
+			"row does not match if != condition evaluates as false",
+			aRow,
+			OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  Field,
+							Value: "age",
+						},
+						Operator: Ne,
+						Operand2: Operand{
+							Type:  Integer,
+							Value: int64(25),
+						},
+					},
+				},
+			},
+			false,
+		},
+		{
+			"row matches if > condition evaluates as true",
+			aRow,
+			OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  Field,
+							Value: "age",
+						},
+						Operator: Gt,
+						Operand2: Operand{
+							Type:  Integer,
+							Value: int64(24),
+						},
+					},
+				},
+			},
+			true,
+		},
+		{
+			"row does not match if > condition evaluates as false",
+			aRow,
+			OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  Field,
+							Value: "age",
+						},
+						Operator: Gt,
+						Operand2: Operand{
+							Type:  Integer,
+							Value: int64(25),
+						},
+					},
+				},
+			},
+			false,
+		},
+		{
+			"row matches if < condition evaluates as true",
+			aRow,
+			OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  Field,
+							Value: "age",
+						},
+						Operator: Lt,
+						Operand2: Operand{
+							Type:  Integer,
+							Value: int64(26),
+						},
+					},
+				},
+			},
+			true,
+		},
+		{
+			"row does not match if < condition evaluates as false",
+			aRow,
+			OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  Field,
+							Value: "age",
+						},
+						Operator: Lt,
+						Operand2: Operand{
+							Type:  Integer,
+							Value: int64(25),
+						},
+					},
+				},
+			},
+			false,
+		},
+		{
+			"row matches if >= condition evaluates as true",
+			aRow,
+			OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  Field,
+							Value: "age",
+						},
+						Operator: Gte,
+						Operand2: Operand{
+							Type:  Integer,
+							Value: int64(25),
+						},
+					},
+				},
+			},
+			true,
+		},
+		{
+			"row does not match if >= condition evaluates as false",
+			aRow,
+			OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  Field,
+							Value: "age",
+						},
+						Operator: Gte,
+						Operand2: Operand{
+							Type:  Integer,
+							Value: int64(26),
+						},
+					},
+				},
+			},
+			false,
+		},
+		{
+			"row matches if <= condition evaluates as true",
+			aRow,
+			OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  Field,
+							Value: "age",
+						},
+						Operator: Lte,
+						Operand2: Operand{
+							Type:  Integer,
+							Value: int64(25),
+						},
+					},
+				},
+			},
+			true,
+		},
+		{
+			"row does not match if <= condition evaluates as false",
+			aRow,
+			OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  Field,
+							Value: "age",
+						},
+						Operator: Lte,
+						Operand2: Operand{
+							Type:  Integer,
+							Value: int64(24),
+						},
+					},
+				},
+			},
+			false,
+		},
 	}
 
 	for _, aTestCase := range testCases {

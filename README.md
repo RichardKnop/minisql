@@ -2,7 +2,7 @@
 
 `MiniSQL` is a research project aimed at implementing a simple relational database in Golang. This project exists mostly for myself as a way to learn principles and design of relational databases. It is not meant to be used as a real database.
 
-Shout out to some great repos and other resources that invaluable while figuring out how to get this all working together:
+Shout out to some great repos and other resources that were invaluable while figuring out how to get this all working together:
 - [Let's Build a Simple Database](https://cstack.github.io/db_tutorial/parts/part1.html)
 - [go-sqldb](https://github.com/auxten/go-sqldb)
 - [sqlparser](https://github.com/marianogappa/sqlparser)
@@ -31,7 +31,7 @@ I plan to implement more features of traditional relational databases in the fut
 ### Planned features:
 
 - support additional basic query types such as `UPDATE`, `DELETE`, `DROP TABLE`
-- - support `NULL` values
+- support `NULL` values
 - B+ tree and support indexes (starting with unique and primary)
 - more column types starting with simpler ones such as `bool` and `timestamp`
 - support bigger column types such as `text` that can overflow to more pages via linked list data structure

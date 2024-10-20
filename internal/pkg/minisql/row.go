@@ -251,6 +251,7 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 	if !ok {
 		return false, fmt.Errorf("row does not have '%s' column", name)
 	}
+
 	switch aColumn.Kind {
 	case Int4:
 		// Int values from parser always come back as int64, int4 row data
