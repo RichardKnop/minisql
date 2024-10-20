@@ -80,8 +80,10 @@ func TestParse_Update(t *testing.T) {
 				Conditions: minisql.OneOrMore{
 					{
 						{
-							Operand1:        "a",
-							Operand1IsField: true,
+							Operand1: minisql.Operand{
+								Type:  minisql.Field,
+								Value: "a",
+							},
 						},
 					},
 				},
@@ -100,11 +102,15 @@ func TestParse_Update(t *testing.T) {
 				Conditions: minisql.OneOrMore{
 					{
 						{
-							Operand1:        "a",
-							Operand1IsField: true,
-							Operator:        minisql.Eq,
-							Operand2:        "1",
-							Operand2IsField: false,
+							Operand1: minisql.Operand{
+								Type:  minisql.Field,
+								Value: "a",
+							},
+							Operator: minisql.Eq,
+							Operand2: minisql.Operand{
+								Type:  minisql.QuotedString,
+								Value: "1",
+							},
 						},
 					},
 				},
@@ -122,11 +128,15 @@ func TestParse_Update(t *testing.T) {
 				Conditions: minisql.OneOrMore{
 					{
 						{
-							Operand1:        "a",
-							Operand1IsField: true,
-							Operator:        minisql.Eq,
-							Operand2:        "1",
-							Operand2IsField: false,
+							Operand1: minisql.Operand{
+								Type:  minisql.Field,
+								Value: "a",
+							},
+							Operator: minisql.Eq,
+							Operand2: minisql.Operand{
+								Type:  minisql.QuotedString,
+								Value: "1",
+							},
 						},
 					},
 				},
@@ -145,11 +155,15 @@ func TestParse_Update(t *testing.T) {
 				Conditions: minisql.OneOrMore{
 					{
 						{
-							Operand1:        "a",
-							Operand1IsField: true,
-							Operator:        minisql.Eq,
-							Operand2:        "1",
-							Operand2IsField: false,
+							Operand1: minisql.Operand{
+								Type:  minisql.Field,
+								Value: "a",
+							},
+							Operator: minisql.Eq,
+							Operand2: minisql.Operand{
+								Type:  minisql.QuotedString,
+								Value: "1",
+							},
 						},
 					},
 				},
@@ -157,7 +171,7 @@ func TestParse_Update(t *testing.T) {
 		},
 		{
 			Name: "UPDATE with multiple SETs and multiple conditions works",
-			SQL:  "UPDATE 'a' SET b = 'hello', c = 'bye' WHERE a = '1' AND b = '789'",
+			SQL:  "UPDATE 'a' SET b = 'hello', c = 'bye' WHERE a = '1' AND b = 789",
 			Expected: minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
@@ -168,18 +182,26 @@ func TestParse_Update(t *testing.T) {
 				Conditions: minisql.OneOrMore{
 					{
 						{
-							Operand1:        "a",
-							Operand1IsField: true,
-							Operator:        minisql.Eq,
-							Operand2:        "1",
-							Operand2IsField: false,
+							Operand1: minisql.Operand{
+								Type:  minisql.Field,
+								Value: "a",
+							},
+							Operator: minisql.Eq,
+							Operand2: minisql.Operand{
+								Type:  minisql.QuotedString,
+								Value: "1",
+							},
 						},
 						{
-							Operand1:        "b",
-							Operand1IsField: true,
-							Operator:        minisql.Eq,
-							Operand2:        "789",
-							Operand2IsField: false,
+							Operand1: minisql.Operand{
+								Type:  minisql.Field,
+								Value: "b",
+							},
+							Operator: minisql.Eq,
+							Operand2: minisql.Operand{
+								Type:  minisql.Integer,
+								Value: int64(789),
+							},
 						},
 					},
 				},

@@ -271,8 +271,10 @@ func (p *parser) doParseWhere() (bool, error) {
 			return false, fmt.Errorf("at WHERE: expected field")
 		}
 		p.Statement.Conditions = p.Statement.Conditions.Append(minisql.Condition{
-			Operand1:        identifier,
-			Operand1IsField: true,
+			Operand1: minisql.Operand{
+				Type:  minisql.Field,
+				Value: identifier,
+			},
 		})
 		p.pop()
 		p.step = stepWhereConditionOperator
@@ -306,15 +308,22 @@ func (p *parser) doParseWhere() (bool, error) {
 			currentCondition, _ = p.Conditions.LastCondition()
 		)
 		if isIdentifier(identifier) {
-			currentCondition.Operand2 = identifier
-			currentCondition.Operand2IsField = true
+			currentCondition.Operand2 = minisql.Operand{
+				Type:  minisql.Field,
+				Value: identifier,
+			}
 		} else {
 			value, err := p.peekIntOrQuotedStringWithLength()
 			if err != nil {
 				return false, fmt.Errorf("at WHERE: expected quoted value or int value")
 			}
-			currentCondition.Operand2 = value
-			currentCondition.Operand2IsField = false
+			currentCondition.Operand2 = minisql.Operand{
+				Type:  minisql.QuotedString,
+				Value: value,
+			}
+			if _, ok := value.(int64); ok {
+				currentCondition.Operand2.Type = minisql.Integer
+			}
 		}
 		p.Conditions.UpdateLast(currentCondition)
 		p.pop()
@@ -441,10 +450,10 @@ func (p *parser) validate() error {
 			if aCondition.Operator == 0 {
 				return errWhereWithoutOperator
 			}
-			if aCondition.Operand1 == "" && aCondition.Operand1IsField {
+			if aCondition.Operand1.Value == "" && aCondition.Operand1.Type == minisql.Field {
 				return fmt.Errorf("at WHERE: condition with empty left side operand")
 			}
-			if aCondition.Operand2 == "" && aCondition.Operand2IsField {
+			if aCondition.Operand2.Value == "" && aCondition.Operand2.Type == minisql.Field {
 				return fmt.Errorf("at WHERE: condition with empty right side operand")
 			}
 		}

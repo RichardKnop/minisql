@@ -47,8 +47,10 @@ func TestParse_Delete(t *testing.T) {
 				Conditions: minisql.OneOrMore{
 					{
 						{
-							Operand1:        "b",
-							Operand1IsField: true,
+							Operand1: minisql.Operand{
+								Type:  minisql.Field,
+								Value: "b",
+							},
 						},
 					},
 				},
@@ -64,11 +66,15 @@ func TestParse_Delete(t *testing.T) {
 				Conditions: minisql.OneOrMore{
 					{
 						{
-							Operand1:        "b",
-							Operand1IsField: true,
-							Operator:        minisql.Eq,
-							Operand2:        "1",
-							Operand2IsField: false,
+							Operand1: minisql.Operand{
+								Type:  minisql.Field,
+								Value: "b",
+							},
+							Operator: minisql.Eq,
+							Operand2: minisql.Operand{
+								Type:  minisql.QuotedString,
+								Value: "1",
+							},
 						},
 					},
 				},
@@ -76,25 +82,33 @@ func TestParse_Delete(t *testing.T) {
 		},
 		{
 			Name: "DELETE with multiple conditions works",
-			SQL:  "DELETE FROM 'a' WHERE a = '1' AND b = '789'",
+			SQL:  "DELETE FROM 'a' WHERE a = '1' AND b = 789",
 			Expected: minisql.Statement{
 				Kind:      minisql.Delete,
 				TableName: "a",
 				Conditions: minisql.OneOrMore{
 					{
 						{
-							Operand1:        "a",
-							Operand1IsField: true,
-							Operator:        minisql.Eq,
-							Operand2:        "1",
-							Operand2IsField: false,
+							Operand1: minisql.Operand{
+								Type:  minisql.Field,
+								Value: "a",
+							},
+							Operator: minisql.Eq,
+							Operand2: minisql.Operand{
+								Type:  minisql.QuotedString,
+								Value: "1",
+							},
 						},
 						{
-							Operand1:        "b",
-							Operand1IsField: true,
-							Operator:        minisql.Eq,
-							Operand2:        "789",
-							Operand2IsField: false,
+							Operand1: minisql.Operand{
+								Type:  minisql.Field,
+								Value: "b",
+							},
+							Operator: minisql.Eq,
+							Operand2: minisql.Operand{
+								Type:  minisql.Integer,
+								Value: int64(789),
+							},
 						},
 					},
 				},

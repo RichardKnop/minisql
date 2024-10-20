@@ -21,17 +21,31 @@ const (
 	Lte
 )
 
+type OperandType int
+
+const (
+	Field OperandType = iota + 1
+	QuotedString
+	Integer
+)
+
+type Operand struct {
+	Type  OperandType
+	Value any
+}
+
+// IsField determines whether the operand is a literal or a field name
+func (o Operand) IsField() bool {
+	return o.Type == Field
+}
+
 type Condition struct {
 	// Operand1 is the left hand side operand
-	Operand1 string
-	// Operand1IsField determines if Operand1 is a literal or a field name
-	Operand1IsField bool
+	Operand1 Operand
 	// Operator is e.g. "=", ">"
 	Operator Operator
-	// Operand1 is the right hand side operand
-	Operand2 any
-	// Operand2IsField determines if Operand2 is a literal or a field name
-	Operand2IsField bool
+	// Operand2 is the right hand side operand
+	Operand2 Operand
 }
 
 type Conditions []Condition

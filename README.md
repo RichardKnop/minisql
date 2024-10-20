@@ -28,12 +28,13 @@ I plan to implement more features of traditional relational databases in the fut
 - no transaction support
 - no page overflow support, entire rows must fit within a 4096 byte page
 
-Planned features:
+### Planned features:
 
 - B+ tree and support indexes (starting with unique and primary)
 - more column types starting with simpler ones such as `bool` and `timestamp`
 - support bigger column types such as `text` that can overflow to more pages via linked list data structure
 - joins such as `INNER`, `LEFT`, `RIGHT`
+- support `ORDER BY`, `GROUP BY`
 - dedicate first 100B of root page for config similar to how sqlite does it
 - support altering tables
 - transactions
@@ -51,7 +52,7 @@ minisql> .help
 .tables  - List all tables in the current database
 ```
 
-### Examples
+## Examples
 
 Create a table:
 
