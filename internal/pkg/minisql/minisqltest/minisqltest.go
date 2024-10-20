@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"time"
 
-	"github.com/brianvoe/gofakeit/v6"
+	"github.com/brianvoe/gofakeit/v7"
 
 	"github.com/RichardKnop/minisql/internal/pkg/minisql"
 )
 
 var (
-	gen = NewDataGen(time.Now().Unix())
+	gen = NewDataGen(uint64(time.Now().Unix()))
 
 	testColumns = []minisql.Column{
 		{
@@ -35,7 +35,7 @@ type DataGen struct {
 	*gofakeit.Faker
 }
 
-func NewDataGen(seed int64) *DataGen {
+func NewDataGen(seed uint64) *DataGen {
 	g := DataGen{
 		Faker: gofakeit.New(seed),
 	}

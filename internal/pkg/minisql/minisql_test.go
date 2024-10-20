@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"time"
 
-	"github.com/brianvoe/gofakeit/v6"
+	"github.com/brianvoe/gofakeit/v7"
 )
 
 var (
-	gen = newDataGen(time.Now().Unix())
+	gen = newDataGen(uint64(time.Now().Unix()))
 
 	testColumns = []Column{
 		{
@@ -56,7 +56,7 @@ type dataGen struct {
 	*gofakeit.Faker
 }
 
-func newDataGen(seed int64) *dataGen {
+func newDataGen(seed uint64) *dataGen {
 	g := dataGen{
 		Faker: gofakeit.New(seed),
 	}

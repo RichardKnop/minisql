@@ -257,6 +257,9 @@ func (d *Database) CreateTable(ctx context.Context, name string, columns []Colum
 		return nil, fmt.Errorf("currently only single table is supported")
 	}
 
+	// TODO - check row size, currently no row overflowing a page is supported
+	// so we need to return an error for such table DDLs
+
 	aTable, ok := d.tables[name]
 	if ok {
 		return aTable, errTableAlreadyExists
