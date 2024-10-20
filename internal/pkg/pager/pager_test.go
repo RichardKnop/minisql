@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	gen = minisqltest.NewDataGen(time.Now().Unix())
+	gen = minisqltest.NewDataGen(uint64(time.Now().Unix()))
 )
 
 func TestNew_Empty(t *testing.T) {

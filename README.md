@@ -11,7 +11,7 @@ Shout out to some great repos and other resources that invaluable while figuring
 Run `minisql` in your command line:
 
 ```sh
-go run cmd/main/main.go
+go run cmd/minisql/main.go
 minisql>
 ```
 
