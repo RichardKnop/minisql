@@ -21,6 +21,25 @@ const (
 	Lte
 )
 
+func (o Operator) String() string {
+	switch o {
+	case Eq:
+		return "="
+	case Ne:
+		return "!="
+	case Gt:
+		return ">"
+	case Lt:
+		return "<"
+	case Gte:
+		return ">="
+	case Lte:
+		return "<="
+	default:
+		return "Unknown"
+	}
+}
+
 type OperandType int
 
 const (
@@ -97,10 +116,24 @@ const (
 	Varchar
 )
 
+func (k ColumnKind) String() string {
+	switch k {
+	case Int4:
+		return "Int4"
+	case Int8:
+		return "Int8"
+	case Varchar:
+		return "Varchar"
+	default:
+		return "Unknown"
+	}
+}
+
 type Column struct {
-	Kind ColumnKind
-	Size uint32
-	Name string
+	Kind     ColumnKind
+	Size     uint32
+	Nullable bool
+	Name     string
 }
 
 type Statement struct {

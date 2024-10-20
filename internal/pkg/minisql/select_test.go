@@ -130,38 +130,3 @@ func TestTable_Select_LeafNodeInsert(t *testing.T) {
 		i += 1
 	}
 }
-
-func Test_RowMatchesConditions(t *testing.T) {
-	t.Parallel()
-
-	aRow := Row{
-		Columns: testColumns,
-		Values: []any{
-			int64(125478),
-			"john.doe@example.com",
-			int32(25),
-		},
-	}
-
-	testCases := []struct {
-		Name       string
-		aRow       Row
-		Conditions OneOrMore
-		Expected   bool
-	}{
-		{
-			"row matches if conditions are empty",
-			aRow,
-			OneOrMore{},
-			true,
-		},
-	}
-
-	for _, aTestCase := range testCases {
-		t.Run(aTestCase.Name, func(t *testing.T) {
-			actual, err := rowMatchesConditions(aTestCase.Conditions, aTestCase.aRow)
-			require.NoError(t, err)
-			assert.Equal(t, aTestCase.Expected, actual)
-		})
-	}
-}

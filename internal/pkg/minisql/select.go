@@ -60,7 +60,7 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 				out <- aRow
 				continue
 			}
-			ok, err := rowMatchesConditions(conditions, aRow)
+			ok, err := aRow.CheckOneOrMore(conditions)
 			if err != nil {
 				errorsPipe <- err
 				return
@@ -105,63 +105,4 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	}
 
 	return aResult, nil
-}
-
-func rowMatchesConditions(conditions OneOrMore, aRow Row) (bool, error) {
-	if len(conditions) == 0 {
-		return true, nil
-	}
-
-	for _, aConditionGroup := range conditions {
-		groupConditionResult := true
-		for _, aCondition := range aConditionGroup {
-			ok, err := checkConditionOnRow(aCondition, aRow)
-			if err != nil {
-				return false, err
-			}
-
-			if !ok {
-				groupConditionResult = false
-				break
-			}
-		}
-
-		if groupConditionResult {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
-func checkConditionOnRow(aCondition Condition, aRow Row) (bool, error) {
-	// left side is field, right side is literal value
-	if aCondition.Operand1.IsField() && !aCondition.Operand2.IsField() {
-		value, ok := aRow.GetValue(fmt.Sprint(aCondition.Operand1))
-		if !ok {
-			return false, fmt.Errorf("row does not have '%s' column", aCondition.Operand1.Value)
-		}
-		return value == aCondition.Operand2, nil
-	}
-
-	// left side is literal value, right side is field
-	if aCondition.Operand2.IsField() && !aCondition.Operand1.IsField() {
-		value, ok := aRow.GetValue(fmt.Sprint(aCondition.Operand2))
-		if !ok {
-			return false, fmt.Errorf("row does not have '%s' column", aCondition.Operand2.Value)
-		}
-		return value == aCondition.Operand1, nil
-	}
-
-	// both left and right are fields, compare 2 row values
-	if aCondition.Operand1.IsField() && aCondition.Operand2.IsField() {
-
-	}
-
-	// both left and right are literal values, compare them
-	if !aCondition.Operand1.IsField() && !aCondition.Operand2.IsField() {
-
-	}
-
-	return false, nil
 }

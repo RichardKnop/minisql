@@ -185,3 +185,210 @@ func UnmarshalRow(buf []byte, aRow *Row) error {
 
 	return nil
 }
+
+// CheckOneOrMore checks whether row satisfies one or more sets of conditions
+// (cond1 AND cond2) OR (cond3 and cond4) ... etc
+func (r Row) CheckOneOrMore(conditions OneOrMore) (bool, error) {
+	if len(conditions) == 0 {
+		return true, nil
+	}
+
+	for _, aConditionGroup := range conditions {
+		groupConditionResult := true
+		for _, aCondition := range aConditionGroup {
+			ok, err := r.checkCondition(aCondition)
+			if err != nil {
+				return false, err
+			}
+
+			if !ok {
+				groupConditionResult = false
+				break
+			}
+		}
+
+		if groupConditionResult {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func (r Row) checkCondition(aCondition Condition) (bool, error) {
+	// left side is field, right side is literal value
+	if aCondition.Operand1.IsField() && !aCondition.Operand2.IsField() {
+		return r.compareFieldValue(aCondition.Operand1, aCondition.Operand2, aCondition.Operator)
+	}
+
+	// left side is literal value, right side is field
+	if aCondition.Operand2.IsField() && !aCondition.Operand1.IsField() {
+		return r.compareFieldValue(aCondition.Operand2, aCondition.Operand1, aCondition.Operator)
+	}
+
+	// both left and right are fields, compare 2 row values
+	if aCondition.Operand1.IsField() && aCondition.Operand2.IsField() {
+		return r.compareFields(aCondition.Operand1, aCondition.Operand2, aCondition.Operator)
+	}
+
+	// both left and right are literal values, compare them
+	return aCondition.Operand1.Value == aCondition.Operand2.Value, nil
+}
+
+func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Operator) (bool, error) {
+	if fieldOperand.Type != Field {
+		return false, fmt.Errorf("field operand invalid, type '%d'", fieldOperand.Type)
+	}
+	if valueOperand.Type == Field {
+		return false, fmt.Errorf("cannot compare column value against field operand")
+	}
+	name := fmt.Sprint(fieldOperand.Value)
+	aColumn, ok := r.GetColumn(name)
+	if !ok {
+		return false, fmt.Errorf("row does not contain column '%s'", name)
+	}
+	value, ok := r.GetValue(aColumn.Name)
+	if !ok {
+		return false, fmt.Errorf("row does not have '%s' column", name)
+	}
+	switch aColumn.Kind {
+	case Int4:
+		// Int values from parser always come back as int64, int4 row data
+		// will come back as int32 and int8 as int64
+		return compareInt4(int64(value.(int32)), valueOperand.Value.(int64), operator)
+	case Int8:
+		return compareInt8(value.(int64), valueOperand.Value.(int64), operator)
+	case Varchar:
+		return compareVarchar(value, valueOperand.Value, operator)
+	default:
+		return false, fmt.Errorf("unknown column kind '%s'", aColumn.Kind)
+	}
+}
+
+func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, error) {
+	if !field1.IsField() {
+		return false, fmt.Errorf("field operand invalid, type '%d'", field1.Type)
+	}
+	if field2.IsField() {
+		return false, fmt.Errorf("field operand invalid, type '%d'", field2.Type)
+	}
+
+	if field1.Value == field2.Value {
+		return true, nil
+	}
+
+	name1 := fmt.Sprint(field1.Value)
+	aColumn1, ok := r.GetColumn(name1)
+	if !ok {
+		return false, fmt.Errorf("row does not contain column '%s'", name1)
+	}
+	name2 := fmt.Sprint(field2.Value)
+	aColumn2, ok := r.GetColumn(name2)
+	if !ok {
+		return false, fmt.Errorf("row does not contain column '%s'", name2)
+	}
+
+	if aColumn1.Kind != aColumn2.Kind {
+		return false, nil
+	}
+
+	value1, ok := r.GetValue(aColumn1.Name)
+	if !ok {
+		return false, fmt.Errorf("row does not have '%s' column", name1)
+	}
+	value2, ok := r.GetValue(aColumn2.Name)
+	if !ok {
+		return false, fmt.Errorf("row does not have '%s' column", name2)
+	}
+
+	switch aColumn1.Kind {
+	case Int4:
+		return compareInt4(value1, value2, operator)
+	case Int8:
+		return compareInt8(value1, value2, operator)
+	case Varchar:
+		return compareVarchar(value1, value2, operator)
+	default:
+		return false, fmt.Errorf("unknown column kind '%s'", aColumn1.Kind)
+	}
+}
+
+func compareInt4(value1, value2 any, operator Operator) (bool, error) {
+	theValue1, ok := value1.(int64)
+	if !ok {
+		return false, fmt.Errorf("value '%v' cannot be cast as int64", value1)
+	}
+	theValue2, ok := value2.(int64)
+	if !ok {
+		return false, fmt.Errorf("operand value '%v' cannot be cast as int64", value2)
+	}
+	switch operator {
+	case Eq:
+		return int32(theValue1) == int32(theValue2), nil
+	case Ne:
+		return int32(theValue1) != int32(theValue2), nil
+	case Gt:
+		return int32(theValue1) > int32(theValue2), nil
+	case Lt:
+		return int32(theValue1) < int32(theValue2), nil
+	case Gte:
+		return int32(theValue1) >= int32(theValue2), nil
+	case Lte:
+		return int32(theValue1) <= int32(theValue2), nil
+	}
+	return false, fmt.Errorf("unknown operator '%s'", operator)
+}
+
+func compareInt8(value1, value2 any, operator Operator) (bool, error) {
+	theValue1, ok := value1.(int64)
+	if !ok {
+		return false, fmt.Errorf("value '%v' cannot be cast as int64", value1)
+	}
+	theValue2, ok := value2.(int64)
+	if !ok {
+		return false, fmt.Errorf("operand value '%v' cannot be cast as int64", value2)
+	}
+	switch operator {
+	case Eq:
+		return theValue1 == theValue2, nil
+	case Ne:
+		return theValue1 != theValue2, nil
+	case Gt:
+		return theValue1 > theValue2, nil
+	case Lt:
+		return theValue1 < theValue2, nil
+	case Gte:
+		return theValue1 >= theValue2, nil
+	case Lte:
+		return theValue1 <= theValue2, nil
+	}
+	return false, fmt.Errorf("unknown operator '%s'", operator)
+}
+
+func compareVarchar(value1, value2 any, operator Operator) (bool, error) {
+	theValue1, ok := value1.(string)
+	if !ok {
+		return false, fmt.Errorf("value '%v' cannot be cast as string", value1)
+	}
+	theValue2, ok := value2.(string)
+	if !ok {
+		return false, fmt.Errorf("operand value '%v' cannot be cast as string", value2)
+	}
+	// From Golang dosc (https://go.dev/ref/spec#Comparison_operators)
+	// Two string values are compared lexically byte-wise.
+	switch operator {
+	case Eq:
+		return theValue1 == theValue2, nil
+	case Ne:
+		return theValue1 != theValue2, nil
+	case Gt:
+		return theValue1 > theValue2, nil
+	case Lt:
+		return theValue1 < theValue2, nil
+	case Gte:
+		return theValue1 >= theValue2, nil
+	case Lte:
+		return theValue1 <= theValue2, nil
+	}
+	return false, fmt.Errorf("unknown operator '%s'", operator)
+}

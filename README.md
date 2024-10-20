@@ -19,7 +19,7 @@ minisql>
 
 I plan to implement more features of traditional relational databases in the future as part of this project simply to learn and discovery how various features I have grown acustomed to over the years are implemented under the hood. However, currently only a very small number of features are implemented:
 
-- simple SQL parser (partial support for `CREATE TABLE`, `INSERT`, `SELECT`, `UPDATE`, `DELETE` queries)
+- simple SQL parser (partial support for `CREATE TABLE`, `INSERT`, `SELECT` queries)
 - only tables supported, no indexes (this means all selects are scanning whole tables for now)
 - only `int4`, `int8` and `varchar` columns supported
 - no primary key support (tables internally use row ID as key in B tree data structure)
@@ -30,6 +30,8 @@ I plan to implement more features of traditional relational databases in the fut
 
 ### Planned features:
 
+- support additional basic query types such as `UPDATE`, `DELETE`, `DROP TABLE`
+- - support `NULL` values
 - B+ tree and support indexes (starting with unique and primary)
 - more column types starting with simpler ones such as `bool` and `timestamp`
 - support bigger column types such as `text` that can overflow to more pages via linked list data structure
