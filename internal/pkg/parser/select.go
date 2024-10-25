@@ -6,7 +6,8 @@ import (
 )
 
 var (
-	errSelectWithoutFields = fmt.Errorf("at SELECT: expected field to SELECT")
+	errSelectWithoutFields     = fmt.Errorf("at SELECT: expected field to SELECT")
+	errSelectExpectedTableName = fmt.Errorf("at SELECT: expected quoted table name")
 )
 
 func (p *parser) doParseSelect() (bool, error) {
@@ -54,7 +55,7 @@ func (p *parser) doParseSelect() (bool, error) {
 	case stepSelectFromTable:
 		tableName := p.peek()
 		if len(tableName) == 0 {
-			return false, fmt.Errorf("at SELECT: expected quoted table name")
+			return false, errSelectExpectedTableName
 		}
 		p.TableName = tableName
 		p.pop()

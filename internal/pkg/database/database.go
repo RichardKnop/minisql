@@ -324,12 +324,7 @@ func (d *Database) executeUpdate(ctx context.Context, stmt minisql.Statement) (m
 		return minisql.StatementResult{}, errTableDoesNotExist
 	}
 
-	if err := aTable.Update(ctx, stmt); err != nil {
-		return minisql.StatementResult{}, err
-	}
-
-	// TODO - calculate rows affected properly
-	return minisql.StatementResult{RowsAffected: 0}, nil
+	return aTable.Update(ctx, stmt)
 }
 
 func (d *Database) executeDelete(ctx context.Context, stmt minisql.Statement) (minisql.StatementResult, error) {
@@ -338,10 +333,5 @@ func (d *Database) executeDelete(ctx context.Context, stmt minisql.Statement) (m
 		return minisql.StatementResult{}, errTableDoesNotExist
 	}
 
-	if err := aTable.Delete(ctx, stmt); err != nil {
-		return minisql.StatementResult{}, err
-	}
-
-	// TODO - calculate rows affected properly
-	return minisql.StatementResult{RowsAffected: 0}, nil
+	return aTable.Delete(ctx, stmt)
 }

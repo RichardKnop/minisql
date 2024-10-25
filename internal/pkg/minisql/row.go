@@ -8,6 +8,8 @@ import (
 type Row struct {
 	Columns []Column
 	Values  []any
+	// for updates, we store cursor internally
+	cursor Cursor
 }
 
 // MaxCells returns how many rows can be stored in a single page
@@ -59,6 +61,39 @@ func (r Row) GetValue(name string) (any, bool) {
 		return nil, false
 	}
 	return r.Values[columnIdx], true
+}
+
+func (r Row) SetValue(name string, value any) bool {
+	var (
+		found     bool
+		columnIdx = 0
+	)
+	for i, aColumn := range r.Columns {
+		if aColumn.Name == name {
+			found = true
+			columnIdx = i
+			break
+		}
+	}
+	if !found {
+		return false
+	}
+	r.Values[columnIdx] = value
+	return true
+}
+
+func (r Row) Clone() Row {
+	aClone := Row{
+		Columns: make([]Column, 0, len(r.Columns)),
+		Values:  make([]any, 0, len(r.Values)),
+	}
+	for _, aColumn := range r.Columns {
+		aClone.Columns = append(aClone.Columns, aColumn)
+	}
+	for _, aValue := range r.Values {
+		aClone.Values = append(aClone.Values, aValue)
+	}
+	return aClone
 }
 
 func (r Row) columnOffset(idx int) uint32 {

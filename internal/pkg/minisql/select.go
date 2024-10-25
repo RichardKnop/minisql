@@ -11,13 +11,20 @@ var (
 )
 
 func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, error) {
+	aResult := StatementResult{
+		Columns: t.Columns,
+		Rows: func(ctx context.Context) (Row, error) {
+			return Row{}, ErrNoMoreRows
+		},
+	}
+
 	aCursor, err := t.Seek(ctx, uint64(0))
 	if err != nil {
-		return StatementResult{}, err
+		return aResult, err
 	}
 	aPage, err := t.pager.GetPage(ctx, t, aCursor.PageIdx)
 	if err != nil {
-		return StatementResult{}, err
+		return aResult, err
 	}
 	aCursor.EndOfTable = aPage.LeafNode.Header.Cells == 0
 
@@ -86,22 +93,19 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 	}(filteredPipe, limitedPipe, limit)
 
-	aResult := StatementResult{
-		Columns: t.Columns,
-		Rows: func(ctx context.Context) (Row, error) {
-			select {
-			case <-ctx.Done():
-				return Row{}, fmt.Errorf("context done: %w", ctx.Err())
-			case err := <-errorsPipe:
-				return Row{}, err
-			case aRow, open := <-limitedPipe:
-				if !open {
-					return Row{}, ErrNoMoreRows
-				}
-
-				return aRow, nil
+	aResult.Rows = func(ctx context.Context) (Row, error) {
+		select {
+		case <-ctx.Done():
+			return Row{}, fmt.Errorf("context done: %w", ctx.Err())
+		case err := <-errorsPipe:
+			return Row{}, err
+		case aRow, open := <-limitedPipe:
+			if !open {
+				return Row{}, ErrNoMoreRows
 			}
-		},
+
+			return aRow, nil
+		}
 	}
 
 	return aResult, nil

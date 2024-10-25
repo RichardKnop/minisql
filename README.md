@@ -19,7 +19,7 @@ minisql>
 
 I plan to implement more features of traditional relational databases in the future as part of this project simply to learn and discovery how various features I have grown acustomed to over the years are implemented under the hood. However, currently only a very small number of features are implemented:
 
-- simple SQL parser (partial support for `CREATE TABLE`, `INSERT`, `SELECT` queries)
+- simple SQL parser (partial support for `CREATE TABLE`, `INSERT`, `SELECT`, `UPDATE` queries)
 - only tables supported, no indexes (this means all selects are scanning whole tables for now)
 - only `int4`, `int8` and `varchar` columns supported
 - no primary key support (tables internally use row ID as key in B tree data structure)
@@ -30,13 +30,13 @@ I plan to implement more features of traditional relational databases in the fut
 
 ### Planned features:
 
-- support additional basic query types such as `UPDATE`, `DELETE`, `DROP TABLE`
+- support additional basic query types such as `DELETE`, `DROP TABLE`
 - support `NULL` values
 - B+ tree and support indexes (starting with unique and primary)
 - more column types starting with simpler ones such as `bool` and `timestamp`
 - support bigger column types such as `text` that can overflow to more pages via linked list data structure
 - joins such as `INNER`, `LEFT`, `RIGHT`
-- support `ORDER BY`, `GROUP BY`
+- support `ORDER BY`, `LIMIT`, `GROUP BY`
 - dedicate first 100B of root page for config similar to how sqlite does it
 - support altering tables
 - transactions
@@ -85,7 +85,6 @@ Insert more than a single page worth of data:
 ```sh
 minisql> insert into foo(id, email, age) values(1, 'john@example.com', 35), (2, 'jane@example.com', 32), (3, 'jack@example.com', 27), (4, 'jane@example.com', 32), (5, 'jack@example.com', 27), (6, 'jane@example.com', 32), (7, 'jack@example.com', 27),  (8, 'jane@example.com', 32), (9, 'jack@example.com', 27),  (10, 'jane@example.com', 32), (11, 'jack@example.com', 27),  (12, 'jane@example.com', 32), (13, 'jack@example.com', 27), (14, 'jack@example.com', 27), (15, 'jack@example.com', 27)
 Rows affected: 15
-
 minisql>
 ```
 
@@ -98,6 +97,14 @@ minisql> select * from foo
  1                    | john@example.com                         | 35
  2                    | jane@example.com                         | 32
  3                    | jack@example.com                         | 27
+minisql>
+```
+
+Update rows:
+
+```sh
+minisql> update foo set id = 45 where id = 75
+Rows affected: 0
 minisql>
 ```
 

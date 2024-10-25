@@ -65,6 +65,14 @@ func init() {
 	}
 }
 
+func columnNames(columns ...Column) []string {
+	names := make([]string, 0, len(columns))
+	for _, aColumn := range columns {
+		names = append(names, aColumn.Name)
+	}
+	return names
+}
+
 type dataGen struct {
 	*gofakeit.Faker
 }
@@ -75,14 +83,6 @@ func newDataGen(seed uint64) *dataGen {
 	}
 
 	return &g
-}
-
-func (g *dataGen) Rows(number int) []Row {
-	rows := make([]Row, 0, number)
-	for i := 0; i < number; i++ {
-		rows = append(rows, g.Row())
-	}
-	return rows
 }
 
 func (g *dataGen) Row() Row {
@@ -96,10 +96,20 @@ func (g *dataGen) Row() Row {
 	}
 }
 
-func (g *dataGen) BigRows(number int) []Row {
+func (g *dataGen) Rows(number int) []Row {
+	// Make sure all rows will have unique ID, this is important in some tests
+	idMap := map[int64]struct{}{}
 	rows := make([]Row, 0, number)
 	for i := 0; i < number; i++ {
-		rows = append(rows, g.BigRow())
+		aRow := g.Row()
+		_, ok := idMap[aRow.Values[0].(int64)]
+		for ok {
+			aRow = g.Row()
+			_, ok = idMap[aRow.Values[0].(int64)]
+		}
+		rows = append(rows, aRow)
+		idMap[aRow.Values[0].(int64)] = struct{}{}
+
 	}
 	return rows
 }
@@ -114,6 +124,23 @@ func (g *dataGen) BigRow() Row {
 			g.Sentence(15),
 		},
 	}
+}
+
+func (g *dataGen) BigRows(number int) []Row {
+	// Make sure all rows will have unique ID, this is important in some tests
+	idMap := map[int64]struct{}{}
+	rows := make([]Row, 0, number)
+	for i := 0; i < number; i++ {
+		aRow := g.BigRow()
+		_, ok := idMap[aRow.Values[0].(int64)]
+		for ok {
+			aRow = g.BigRow()
+			_, ok = idMap[aRow.Values[0].(int64)]
+		}
+		rows = append(rows, aRow)
+		idMap[aRow.Values[0].(int64)] = struct{}{}
+	}
+	return rows
 }
 
 func newInternalPageWithCells(iCells []ICell, rightChildIdx uint32) *Page {

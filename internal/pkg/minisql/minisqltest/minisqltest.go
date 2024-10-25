@@ -29,6 +29,29 @@ var (
 			Name: "age",
 		},
 	}
+
+	testBigColumns = []minisql.Column{
+		{
+			Kind: minisql.Int8,
+			Size: 8,
+			Name: "id",
+		},
+		{
+			Kind: minisql.Varchar,
+			Size: 255,
+			Name: "name",
+		},
+		{
+			Kind: minisql.Varchar,
+			Size: 255,
+			Name: "email",
+		},
+		{
+			Kind: minisql.Varchar,
+			Size: minisql.PageSize - 6 - 8 - 4*8 - 8 - 255 - 255,
+			Name: "description",
+		},
+	}
 )
 
 type DataGen struct {
@@ -43,14 +66,6 @@ func NewDataGen(seed uint64) *DataGen {
 	return &g
 }
 
-func (g *DataGen) Rows(number int) []minisql.Row {
-	rows := make([]minisql.Row, 0, number)
-	for i := 0; i < number; i++ {
-		rows = append(rows, g.Row())
-	}
-	return rows
-}
-
 func (g *DataGen) Row() minisql.Row {
 	return minisql.Row{
 		Columns: testColumns,
@@ -60,6 +75,53 @@ func (g *DataGen) Row() minisql.Row {
 			int32(g.IntRange(18, 100)),
 		},
 	}
+}
+
+func (g *DataGen) Rows(number int) []minisql.Row {
+	// Make sure all rows will have unique ID, this is important in some tests
+	idMap := map[int64]struct{}{}
+	rows := make([]minisql.Row, 0, number)
+	for i := 0; i < number; i++ {
+		aRow := g.Row()
+		_, ok := idMap[aRow.Values[0].(int64)]
+		for ok {
+			aRow = g.Row()
+			_, ok = idMap[aRow.Values[0].(int64)]
+		}
+		rows = append(rows, aRow)
+		idMap[aRow.Values[0].(int64)] = struct{}{}
+
+	}
+	return rows
+}
+
+func (g *DataGen) BigRow() minisql.Row {
+	return minisql.Row{
+		Columns: testBigColumns,
+		Values: []any{
+			g.Int64(),
+			g.Email(),
+			g.Name(),
+			g.Sentence(15),
+		},
+	}
+}
+
+func (g *DataGen) BigRows(number int) []minisql.Row {
+	// Make sure all rows will have unique ID, this is important in some tests
+	idMap := map[int64]struct{}{}
+	rows := make([]minisql.Row, 0, number)
+	for i := 0; i < number; i++ {
+		aRow := g.BigRow()
+		_, ok := idMap[aRow.Values[0].(int64)]
+		for ok {
+			aRow = g.BigRow()
+			_, ok = idMap[aRow.Values[0].(int64)]
+		}
+		rows = append(rows, aRow)
+		idMap[aRow.Values[0].(int64)] = struct{}{}
+	}
+	return rows
 }
 
 func (g *DataGen) NewRootLeafPageWithCells(cells, rowSize int) *minisql.Page {

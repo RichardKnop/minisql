@@ -12,12 +12,16 @@ import (
 )
 
 var (
-	errInvalidStatementKind         = fmt.Errorf("invalid statement kind")
-	errEmptyStatementKind           = fmt.Errorf("statement kind cannot be empty")
-	errEmptyTableName               = fmt.Errorf("table name cannot be empty")
-	errEmptyWhereClause             = fmt.Errorf("at WHERE: empty WHERE clause")
-	errWhereWithoutOperator         = fmt.Errorf("at WHERE: condition without operator")
-	errWhereRequiredForUpdateDelete = fmt.Errorf("at WHERE: WHERE clause is mandatory for UPDATE & DELETE")
+	errInvalidStatementKind          = fmt.Errorf("invalid statement kind")
+	errEmptyStatementKind            = fmt.Errorf("statement kind cannot be empty")
+	errEmptyTableName                = fmt.Errorf("table name cannot be empty")
+	errEmptyWhereClause              = fmt.Errorf("at WHERE: empty WHERE clause")
+	errWhereWithoutOperator          = fmt.Errorf("at WHERE: condition without operator")
+	errWhereRequiredForUpdateDelete  = fmt.Errorf("at WHERE: WHERE clause is mandatory for UPDATE & DELETE")
+	errWhereExpectedField            = fmt.Errorf("at WHERE: expected field")
+	errWhereExpectedAndOr            = fmt.Errorf("expected one of AND / OR")
+	errWhereExpectedQuotedValueOrInt = fmt.Errorf("at WHERE: expected quoted value or int value")
+	errWhereUnknownOperator          = fmt.Errorf("at WHERE: unknown operator")
 )
 
 var reservedWords = []string{
@@ -268,7 +272,7 @@ func (p *parser) doParseWhere() (bool, error) {
 	case stepWhereConditionField:
 		identifier := p.peek()
 		if !isIdentifier(identifier) {
-			return false, fmt.Errorf("at WHERE: expected field")
+			return false, errWhereExpectedField
 		}
 		p.Statement.Conditions = p.Statement.Conditions.Append(minisql.Condition{
 			Operand1: minisql.Operand{
@@ -297,7 +301,7 @@ func (p *parser) doParseWhere() (bool, error) {
 		case "!=":
 			currentCondition.Operator = minisql.Ne
 		default:
-			return false, fmt.Errorf("at WHERE: unknown operator")
+			return false, errWhereUnknownOperator
 		}
 		p.Conditions.UpdateLast(currentCondition)
 		p.pop()
@@ -313,9 +317,9 @@ func (p *parser) doParseWhere() (bool, error) {
 				Value: identifier,
 			}
 		} else {
-			value, err := p.peekIntOrQuotedStringWithLength()
-			if err != nil {
-				return false, fmt.Errorf("at WHERE: expected quoted value or int value")
+			value, ln := p.peekIntOrQuotedStringWithLength()
+			if ln == 0 {
+				return false, errWhereExpectedQuotedValueOrInt
 			}
 			currentCondition.Operand2 = minisql.Operand{
 				Type:  minisql.QuotedString,
@@ -331,7 +335,7 @@ func (p *parser) doParseWhere() (bool, error) {
 	case stepWhereOperator:
 		anOperator := strings.ToUpper(p.peek())
 		if anOperator != "AND" && anOperator != "OR" {
-			return false, fmt.Errorf("expected one of AND / OR")
+			return false, errWhereExpectedAndOr
 		}
 		if anOperator == "OR" {
 			p.Conditions = append(p.Conditions, make(minisql.Conditions, 0, 1))
@@ -408,16 +412,16 @@ func (p *parser) peepIntWithLength() (int64, int) {
 	return int64(intValue), len(p.sql[p.i:len(p.sql)])
 }
 
-func (p *parser) peekIntOrQuotedStringWithLength() (any, error) {
+func (p *parser) peekIntOrQuotedStringWithLength() (any, int) {
 	intValue, ln := p.peepIntWithLength()
 	if ln > 0 {
-		return intValue, nil
+		return intValue, ln
 	}
 	quotedValue, ln := p.peekQuotedStringWithLength()
 	if ln > 0 {
-		return quotedValue, nil
+		return quotedValue, ln
 	}
-	return nil, fmt.Errorf("neither int not quoted value found")
+	return nil, 0
 }
 
 func (p *parser) peekIdentifierWithLength() (string, int) {

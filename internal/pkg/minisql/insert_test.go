@@ -26,7 +26,7 @@ func TestTable_Insert(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
-		Fields:    []string{"id", "email", "age"},
+		Fields:    columnNames(testColumns...),
 		Inserts:   [][]any{aRow.Values},
 	}
 
@@ -58,7 +58,7 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
-		Fields:    []string{"id", "email", "age"},
+		Fields:    columnNames(testColumns...),
 		Inserts:   [][]any{aRow.Values, aRow2.Values, aRow3.Values},
 	}
 
@@ -116,7 +116,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
-		Fields:    []string{"id", "email", "age"},
+		Fields:    columnNames(testColumns...),
 		Inserts:   [][]any{aRow.Values},
 	}
 
@@ -198,18 +198,19 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 		return old
 	}, nil)
 
-	// Insert test rows
-	for _, aRow := range rows {
-		stmt := Statement{
-			Kind:      Insert,
-			TableName: "foo",
-			Fields:    []string{"id", "email", "name", "description"},
-			Inserts:   [][]any{aRow.Values},
-		}
-
-		err := aTable.Insert(ctx, stmt)
-		require.NoError(t, err)
+	// Batch insert test rows
+	stmt := Statement{
+		Kind:      Insert,
+		TableName: "foo",
+		Fields:    columnNames(testBigColumns...),
+		Inserts:   [][]any{},
 	}
+	for _, aRow := range rows {
+		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	}
+
+	err := aTable.Insert(ctx, stmt)
+	require.NoError(t, err)
 
 	// Assert root node
 	assert.Equal(t, 3, int(aRootPage.InternalNode.Header.KeysNum))
@@ -293,7 +294,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
-		Fields:    []string{"id", "email", "name", "description"},
+		Fields:    columnNames(testBigColumns...),
 		Inserts:   [][]any{},
 	}
 	for _, aRow := range rows {

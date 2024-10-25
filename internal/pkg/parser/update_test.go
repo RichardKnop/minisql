@@ -54,7 +54,7 @@ func TestParse_Update(t *testing.T) {
 				Kind:      minisql.Update,
 				TableName: "a",
 			},
-			Err: errUpdateExpectedQuotedValue,
+			Err: errUpdateExpectedQuotedValueOrInt,
 		},
 		{
 			Name: "Incomplete UPDATE due to no WHERE clause fails",
@@ -98,6 +98,32 @@ func TestParse_Update(t *testing.T) {
 				TableName: "a",
 				Updates: map[string]any{
 					"b": "hello",
+				},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1: minisql.Operand{
+								Type:  minisql.Field,
+								Value: "a",
+							},
+							Operator: minisql.Eq,
+							Operand2: minisql.Operand{
+								Type:  minisql.QuotedString,
+								Value: "1",
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "UPDATE works with int value being set",
+			SQL:  "UPDATE 'a' SET b = 25 WHERE a = '1'",
+			Expected: minisql.Statement{
+				Kind:      minisql.Update,
+				TableName: "a",
+				Updates: map[string]any{
+					"b": int64(25),
 				},
 				Conditions: minisql.OneOrMore{
 					{

@@ -6,8 +6,8 @@ import (
 )
 
 var (
-	errUpdateExpectedEquals      = fmt.Errorf("at UPDATE: expected '='")
-	errUpdateExpectedQuotedValue = fmt.Errorf("at UPDATE: expected quoted value")
+	errUpdateExpectedEquals           = fmt.Errorf("at UPDATE: expected '='")
+	errUpdateExpectedQuotedValueOrInt = fmt.Errorf("at UPDATE: expected quoted value or int")
 )
 
 func (p *parser) doParseUpdate() (bool, error) {
@@ -43,11 +43,11 @@ func (p *parser) doParseUpdate() (bool, error) {
 		p.pop()
 		p.step = stepUpdateValue
 	case stepUpdateValue:
-		quotedValue, ln := p.peekQuotedStringWithLength()
+		value, ln := p.peekIntOrQuotedStringWithLength()
 		if ln == 0 {
-			return false, errUpdateExpectedQuotedValue
+			return false, errUpdateExpectedQuotedValueOrInt
 		}
-		p.setUpdate(p.nextUpdateField, quotedValue)
+		p.setUpdate(p.nextUpdateField, value)
 		p.nextUpdateField = ""
 		p.pop()
 		maybeWhere := p.peek()
@@ -67,7 +67,7 @@ func (p *parser) doParseUpdate() (bool, error) {
 	return false, nil
 }
 
-func (p *parser) setUpdate(field, value string) {
+func (p *parser) setUpdate(field string, value any) {
 	if p.Updates == nil {
 		p.Updates = make(map[string]any)
 	}
