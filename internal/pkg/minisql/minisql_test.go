@@ -2,10 +2,13 @@ package minisql
 
 import (
 	"bytes"
+	"os"
 	"time"
 
 	"github.com/brianvoe/gofakeit/v7"
 	"go.uber.org/zap"
+
+	"github.com/RichardKnop/minisql/internal/pkg/logging"
 )
 
 //go:generate mockery --name=Pager --structname=MockPager --inpackage --case=snake --testonly
@@ -58,8 +61,20 @@ var (
 )
 
 func init() {
-	var err error
-	testLogger, err = zap.NewDevelopment()
+	logConf := logging.DefaultConfig()
+
+	level := os.Getenv("LOG_LEVEL")
+	if level == "" {
+		level = "debug"
+	}
+
+	l, err := logging.ParseLevel(level)
+	if err != nil {
+		panic(err)
+	}
+	logConf.Level = zap.NewAtomicLevelAt(l)
+
+	testLogger, err = logConf.Build()
 	if err != nil {
 		panic(err)
 	}
