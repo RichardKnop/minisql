@@ -6,7 +6,7 @@ import (
 )
 
 func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, error) {
-	aCursor, err := t.Seek(ctx, uint64(0))
+	aCursor, err := t.SeekFirst(ctx)
 	if err != nil {
 		return StatementResult{}, err
 	}

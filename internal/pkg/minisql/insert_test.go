@@ -259,10 +259,9 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		numRows        = InternalNodeMaxCells + 2
 		rows           = gen.BigRows(numRows)
 		cells, rowSize = 0, rows[0].Size()
-		// numberOfLeafs  = numRows
-		aRootPage = newRootLeafPageWithCells(cells, int(rowSize))
-		leafs     = make([]*Page, 0, numRows)
-		aTable    = NewTable(testLogger, "foo", testBigColumns, pagerMock, 0)
+		aRootPage      = newRootLeafPageWithCells(cells, int(rowSize))
+		leafs          = make([]*Page, 0, numRows)
+		aTable         = NewTable(testLogger, "foo", testBigColumns, pagerMock, 0)
 		// These two pages will be returned as leafs by the pager as default behaviour
 		// for allocating a new page but will be converted to internal nodes
 		aNewRightInternal = &Page{LeafNode: NewLeafNode(rowSize)}

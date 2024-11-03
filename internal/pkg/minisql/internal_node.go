@@ -193,3 +193,28 @@ func (n *InternalNode) Unmarshal(buf []byte) (uint64, error) {
 
 	return i, nil
 }
+
+func (n *InternalNode) GetRightChildByIndex(idx uint32) uint32 {
+	if idx == n.Header.KeysNum-1 {
+		return n.Header.RightChild
+	}
+
+	return n.ICells[idx+1].Child
+}
+
+func (n *InternalNode) DeleteKeyByIndex(idx uint32) {
+	if n.Header.KeysNum == 0 {
+		return
+	}
+	if idx == n.Header.KeysNum {
+		n.Header.RightChild = n.ICells[len(n.ICells)-1].Child
+		n.ICells[len(n.ICells)-1] = ICell{}
+	} else {
+		for i := int(idx); i < len(n.ICells)-1; i++ {
+			n.ICells[i] = n.ICells[i+1]
+		}
+	}
+
+	n.ICells[idx] = ICell{}
+	n.Header.KeysNum -= 1
+}
