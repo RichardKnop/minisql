@@ -64,17 +64,16 @@ func (h *LeafNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 }
 
 type Cell struct {
-	Key     uint64
-	Value   []byte // size of rowSize
-	RowSize uint64
+	Key   uint64
+	Value []byte // size of rowSize
 }
 
-func (c *Cell) Size() uint64 {
-	return 8 + c.RowSize
+func (c *Cell) Size(rowSize uint64) uint64 {
+	return 8 + rowSize
 }
 
-func (c *Cell) Marshal(buf []byte) ([]byte, error) {
-	size := c.Size()
+func (c *Cell) Marshal(rowSize uint64, buf []byte) ([]byte, error) {
+	size := c.Size(rowSize)
 	if uint64(cap(buf)) >= size {
 		buf = buf[:size]
 	} else {
@@ -93,13 +92,13 @@ func (c *Cell) Marshal(buf []byte) ([]byte, error) {
 	buf[7] = byte(c.Key >> 56)
 	i += 8
 
-	copy(buf[i:], c.Value[0:c.RowSize])
-	i += c.RowSize
+	copy(buf[i:], c.Value[0:rowSize])
+	i += rowSize
 
 	return buf[:i], nil
 }
 
-func (c *Cell) Unmarshal(buf []byte) (uint64, error) {
+func (c *Cell) Unmarshal(rowSize uint64, buf []byte) (uint64, error) {
 	i := uint64(0)
 
 	c.Key = 0 |
@@ -113,24 +112,31 @@ func (c *Cell) Unmarshal(buf []byte) (uint64, error) {
 		(uint64(buf[i+7]) << 56)
 	i += 8
 
-	copy(c.Value, buf[i:i+c.RowSize])
-	i += c.RowSize
+	copy(c.Value, buf[i:i+rowSize])
+	i += rowSize
 
 	return i, nil
 }
 
 type LeafNode struct {
-	Header LeafNodeHeader
-	Cells  []Cell // (PageSize - (6+8)) / (rowSize+8)
+	Header  LeafNodeHeader
+	Cells   []Cell // (PageSize - (6+8)) / (rowSize+8)
+	RowSize uint64
+}
+
+func NewCell(rowSize uint64) Cell {
+	return Cell{
+		Value: make([]byte, rowSize),
+	}
 }
 
 func NewLeafNode(rowSize uint64, cells ...Cell) *LeafNode {
 	aNode := LeafNode{
-		Cells: make([]Cell, maxCells(rowSize)),
+		Cells:   make([]Cell, 0, maxCells(rowSize)),
+		RowSize: rowSize,
 	}
-	for idx := range aNode.Cells {
-		aNode.Cells[idx].RowSize = rowSize
-		aNode.Cells[idx].Value = make([]byte, rowSize)
+	for i := 0; i < int(maxCells(rowSize)); i++ {
+		aNode.Cells = append(aNode.Cells, NewCell(aNode.RowSize))
 	}
 	if len(cells) > 0 {
 		aNode.Header.Cells = uint32(len(cells))
@@ -146,7 +152,7 @@ func (n *LeafNode) Size() uint64 {
 	size += n.Header.Size()
 
 	for idx := range n.Cells {
-		size += n.Cells[idx].Size()
+		size += n.Cells[idx].Size(n.RowSize)
 	}
 
 	return size
@@ -169,7 +175,7 @@ func (n *LeafNode) Marshal(buf []byte) ([]byte, error) {
 	i += uint64(len(hbuf))
 
 	for idx := range n.Cells {
-		cbuf, err := n.Cells[idx].Marshal(buf[i:])
+		cbuf, err := n.Cells[idx].Marshal(n.RowSize, buf[i:])
 		if err != nil {
 			return nil, err
 		}
@@ -189,7 +195,7 @@ func (n *LeafNode) Unmarshal(buf []byte) (uint64, error) {
 	i += hi
 
 	for idx := 0; idx < int(n.Header.Cells); idx++ {
-		ci, err := n.Cells[idx].Unmarshal(buf[i:])
+		ci, err := n.Cells[idx].Unmarshal(n.RowSize, buf[i:])
 		if err != nil {
 			return 0, err
 		}
@@ -197,4 +203,76 @@ func (n *LeafNode) Unmarshal(buf []byte) (uint64, error) {
 	}
 
 	return i, nil
+}
+
+func (n *LeafNode) AtLeastHalfFull() bool {
+	return int(n.Header.Cells) >= len(n.Cells)/2
+}
+
+func (n *LeafNode) MoreThanHalfFull() bool {
+	return int(n.Header.Cells) > len(n.Cells)/2
+}
+
+func (n *LeafNode) Delete(key uint64) (Cell, bool) {
+	if n.Header.Cells == 0 {
+		return Cell{}, false
+	}
+
+	cellIdx := -1
+	for i := 0; i < len(n.Cells); i++ {
+		if n.Cells[i].Key == key {
+			cellIdx = i
+			break
+		}
+	}
+
+	if cellIdx < 0 {
+		return Cell{}, false
+	}
+	aCellToDelete := n.Cells[cellIdx]
+
+	for i := int(cellIdx); i < len(n.Cells)-1; i++ {
+		n.Cells[cellIdx] = n.Cells[cellIdx+1]
+	}
+	n.Cells[len(n.Cells)-1] = NewCell(n.RowSize)
+
+	n.Header.Cells -= 1
+
+	return aCellToDelete, true
+}
+
+func (n *LeafNode) FirstCell() Cell {
+	return n.Cells[0]
+}
+
+func (n *LeafNode) LastCell() Cell {
+	return n.Cells[n.Header.Cells-1]
+}
+
+func (n *LeafNode) RemoveLastCell() {
+	n.Cells[n.Header.Cells-1] = NewCell(n.RowSize)
+	n.Header.Cells -= 1
+}
+
+func (n *LeafNode) RemoveFirstCell() {
+	for i := 0; i < int(n.Header.Cells)-1; i++ {
+		n.Cells[i] = n.Cells[i+1]
+	}
+	n.Cells[n.Header.Cells-1] = NewCell(n.RowSize)
+	n.Header.Cells -= 1
+}
+
+func (n *LeafNode) PrependCell(aCell Cell) {
+	for i := int(n.Header.Cells) - 1; i > 0; i-- {
+		n.Cells[i] = n.Cells[i-1]
+	}
+	n.Cells[0] = aCell
+	n.Header.Cells += 1
+}
+
+func (n *LeafNode) AppendCells(cells ...Cell) {
+	for _, aCell := range cells {
+		n.Cells[n.Header.Cells] = aCell
+		n.Header.Cells += 1
+	}
 }

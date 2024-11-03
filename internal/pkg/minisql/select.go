@@ -18,7 +18,7 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		},
 	}
 
-	aCursor, err := t.Seek(ctx, uint64(0))
+	aCursor, err := t.SeekFirst(ctx)
 	if err != nil {
 		return aResult, err
 	}

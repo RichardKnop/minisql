@@ -47,22 +47,43 @@ func (t *Table) SeekNextRowID(ctx context.Context, pageIdx uint32) (*Cursor, uin
 	if err != nil {
 		return nil, 0, err
 	}
-	if aPage.LeafNode != nil {
-		if aPage.LeafNode.Header.NextLeaf != 0 {
-			return t.SeekNextRowID(ctx, aPage.LeafNode.Header.NextLeaf)
-		}
-		maxKey, ok := aPage.GetMaxKey()
-		nextRow := maxKey
-		if ok {
-			nextRow += 1
-		}
-		return &Cursor{
-			Table:   t,
-			PageIdx: pageIdx,
-			CellIdx: aPage.LeafNode.Header.Cells,
-		}, nextRow, nil
+	if aPage.LeafNode == nil {
+		return t.SeekNextRowID(ctx, aPage.InternalNode.Header.RightChild)
 	}
-	return t.SeekNextRowID(ctx, aPage.InternalNode.Header.RightChild)
+	if aPage.LeafNode.Header.NextLeaf != 0 {
+		return t.SeekNextRowID(ctx, aPage.LeafNode.Header.NextLeaf)
+	}
+	maxKey, ok := aPage.GetMaxKey()
+	nextRowID := maxKey
+	if ok {
+		nextRowID += 1
+	}
+	return &Cursor{
+		Table:   t,
+		PageIdx: pageIdx,
+		CellIdx: aPage.LeafNode.Header.Cells,
+	}, nextRowID, nil
+}
+
+func (t *Table) SeekFirst(ctx context.Context) (*Cursor, error) {
+	pageIdx := t.RootPageIdx
+	aPage, err := t.pager.GetPage(ctx, t, pageIdx)
+	if err != nil {
+		return nil, err
+	}
+	for aPage.LeafNode == nil {
+		pageIdx = aPage.InternalNode.ICells[0].Child
+		aPage, err = t.pager.GetPage(ctx, t, pageIdx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &Cursor{
+		Table:      t,
+		PageIdx:    pageIdx,
+		CellIdx:    0,
+		EndOfTable: aPage.LeafNode.Header.Cells == 1,
+	}, nil
 }
 
 // Seek the cursor for a key, if it does not exist then return the cursor
@@ -112,7 +133,7 @@ func (t *Table) leafNodeSeek(ctx context.Context, pageIdx uint32, aPage *Page, k
 }
 
 func (t *Table) internalNodeSeek(ctx context.Context, aPage *Page, key uint64) (*Cursor, error) {
-	childIdx := aPage.InternalNode.FindChildByKey(key)
+	childIdx := aPage.InternalNode.IndexOfChild(key)
 	childPageIdx, err := aPage.InternalNode.Child(childIdx)
 	if err != nil {
 		return nil, err
@@ -226,7 +247,7 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 
 	var (
 		childMaxKey, _   = aChildPage.GetMaxKey()
-		index            = aParentPage.InternalNode.FindChildByKey(childMaxKey)
+		index            = aParentPage.InternalNode.IndexOfChild(childMaxKey)
 		originalKeyCount = aParentPage.InternalNode.Header.KeysNum
 	)
 
@@ -341,10 +362,7 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 
 		// Set right child on the split page and remove the last key
 		// (it has moved to the new root page)
-		idx := aSplitPage.InternalNode.Header.KeysNum - 1
-		aSplitPage.InternalNode.Header.RightChild = aSplitPage.InternalNode.ICells[idx].Child
-		aSplitPage.InternalNode.ICells[idx] = ICell{}
-		aSplitPage.InternalNode.Header.KeysNum -= 1
+		aSplitPage.InternalNode.RemoveLastCell()
 	} else {
 		// Update parent to reflect new max split page key
 		parentPageIdx := aSplitPage.InternalNode.Header.Parent
@@ -352,10 +370,336 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 		if err != nil {
 			return err
 		}
-		oldChildIdx := aParentPage.InternalNode.FindChildByKey(originalMaxKey)
+		oldChildIdx := aParentPage.InternalNode.IndexOfChild(originalMaxKey)
 		newMaxKey, _ := aSplitPage.GetMaxKey()
 		aParentPage.InternalNode.ICells[oldChildIdx].Key = newMaxKey
 	}
+
+	return nil
+}
+
+// DeleteKey deletes a key from the table, when this is called, you should already
+// have located the leaf that contains the key and pass its page and cell index here.
+// The deletion process starts at the leaf and then recursively bubbles up the tree.
+func (t *Table) DeleteKey(ctx context.Context, pageIdx uint32, key uint64) error {
+	aPage, err := t.pager.GetPage(ctx, t, pageIdx)
+	if err != nil {
+		return err
+	}
+
+	// First call we will start with a leaf node, then we will recursively call DeleteKey
+	// for all parent nodes until we reach the root
+	firstCell := ICell{}
+	if aNode := aPage.LeafNode; aNode != nil {
+		var err error
+		if err = t.removeFromLeaf(ctx, aNode, key); err != nil {
+			return err
+		}
+	} else if aNode := aPage.InternalNode; aNode != nil {
+		firstCell = aNode.FirstCell()
+		if err := t.removeFromInternal(ctx, aNode, key); err != nil {
+			return err
+		}
+	}
+
+	if isPageLessThanHalfFull(aPage) {
+		if aNode, ok := isInternal(aPage); ok && aNode.Header.IsRoot {
+			if aNode.Header.KeysNum == 0 && firstCell != emptyICell {
+				aNewRoot, err := t.pager.GetPage(ctx, t, firstCell.Child)
+				if err != nil {
+					return err
+				}
+				aNewRoot.InternalNode.Header.IsRoot = true
+				aNewRoot.InternalNode.Header.Parent = 0
+			}
+			return nil
+		} else if aNode, ok := isLeaf(aPage); ok {
+			aParentPage, err := t.pager.GetPage(ctx, t, aNode.Header.Parent)
+			if err != nil {
+				return err
+			}
+			idx := aParentPage.InternalNode.IndexOfChild(key)
+
+			var (
+				leftSibling  *Page
+				rightSibling *Page
+			)
+			if idx < aParentPage.InternalNode.Header.KeysNum-1 {
+				rightSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.GetRightChildByIndex(idx))
+				if err != nil {
+					return err
+				}
+			} else if idx > 0 {
+				leftSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.ICells[idx-1].Child)
+				if err != nil {
+					return err
+				}
+			}
+
+			if rightSibling != nil && rightSibling.LeafNode.MoreThanHalfFull() {
+				if err := t.borrowFromRightLeaf(
+					aParentPage.InternalNode,
+					aPage.LeafNode,
+					rightSibling.LeafNode,
+					idx,
+				); err != nil {
+					return err
+				}
+			} else if leftSibling != nil && leftSibling.LeafNode.MoreThanHalfFull() {
+				if err := t.borrowFromLeftLeaf(
+					aParentPage.InternalNode,
+					aPage.LeafNode,
+					leftSibling.LeafNode,
+					idx,
+				); err != nil {
+					return err
+				}
+			} else if rightSibling != nil && !rightSibling.LeafNode.AtLeastHalfFull() {
+				if err := t.mergeLeafs(
+					aParentPage.InternalNode,
+					aPage.LeafNode,
+					rightSibling.LeafNode,
+					idx,
+				); err != nil {
+					return err
+				}
+			} else if leftSibling != nil && !leftSibling.LeafNode.AtLeastHalfFull() {
+				if err := t.mergeLeafs(
+					aParentPage.InternalNode,
+					leftSibling.LeafNode,
+					aPage.LeafNode,
+					idx,
+				); err != nil {
+					return err
+				}
+			}
+		} else if aNode, ok := isInternal(aPage); ok {
+			aParentPage, err := t.pager.GetPage(ctx, t, aNode.Header.Parent)
+			if err != nil {
+				return err
+			}
+
+			idx, ok := aParentPage.InternalNode.IndexOfPage(pageIdx)
+
+			var (
+				leftSibling  *Page
+				rightSibling *Page
+			)
+			if ok && idx < aParentPage.InternalNode.Header.KeysNum-1 {
+				rightSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.GetRightChildByIndex(uint32(idx)))
+				if err != nil {
+					return err
+				}
+			} else if ok && idx > 0 {
+				leftSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.ICells[idx-1].Child)
+				if err != nil {
+					return err
+				}
+			}
+
+			if rightSibling != nil && rightSibling.InternalNode.MoreThanHalfFull() {
+				if err := t.borrowFromRightInternal(
+					aParentPage.InternalNode,
+					aPage.InternalNode,
+					rightSibling.InternalNode,
+					idx,
+				); err != nil {
+					return err
+				}
+			} else if leftSibling != nil && leftSibling.InternalNode.MoreThanHalfFull() {
+				if err := t.borrowFromLeftInternal(
+					aParentPage.InternalNode,
+					aPage.InternalNode,
+					leftSibling.InternalNode,
+					idx,
+				); err != nil {
+					return err
+				}
+			} else if rightSibling != nil && !rightSibling.LeafNode.MoreThanHalfFull() {
+				if err := t.mergeInternalNodes(
+					aParentPage.InternalNode,
+					aPage.InternalNode,
+					rightSibling.InternalNode,
+					idx,
+				); err != nil {
+					return err
+				}
+			} else if leftSibling != nil && !leftSibling.LeafNode.MoreThanHalfFull() {
+				if err := t.mergeInternalNodes(
+					aParentPage.InternalNode,
+					leftSibling.InternalNode,
+					aPage.InternalNode,
+					idx,
+				); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	if aParent, ok := hasParent(aPage); ok {
+		return t.DeleteKey(ctx, aParent, key)
+	}
+
+	return nil
+}
+
+func isInternal(aPage *Page) (*InternalNode, bool) {
+	if aPage.InternalNode == nil {
+		return nil, false
+	}
+	return aPage.InternalNode, true
+}
+
+func isLeaf(aPage *Page) (*LeafNode, bool) {
+	if aPage.LeafNode == nil {
+		return nil, false
+	}
+	return aPage.LeafNode, true
+}
+
+func hasParent(aPage *Page) (uint32, bool) {
+	if aNode, ok := isLeaf(aPage); ok {
+		return aNode.Header.Parent, true
+	}
+
+	if aNode, ok := isInternal(aPage); ok {
+		if !aNode.Header.IsRoot {
+			return aNode.Header.Parent, true
+		}
+	}
+
+	return 0, false
+}
+
+func isPageLessThanHalfFull(aPage *Page) bool {
+	if aPage.LeafNode != nil && !aPage.LeafNode.AtLeastHalfFull() {
+		return true
+	}
+	if aPage.InternalNode != nil && !aPage.InternalNode.AtLeastHalfFull() {
+		return true
+	}
+	return false
+}
+
+// removeFromLeaf removes the given key from the given leaf node. It removes the associated cell,
+// and updates the key in the parent node if necessary.
+func (t *Table) removeFromLeaf(ctx context.Context, aNode *LeafNode, key uint64) error {
+	aNode.Delete(key)
+
+	if aNode.Header.IsRoot {
+		return nil
+	}
+
+	if aNode.Header.Cells == 0 {
+		return nil
+	}
+
+	aParentPage, err := t.pager.GetPage(ctx, t, aNode.Header.Parent)
+	if err != nil {
+		return err
+	}
+	idx := aParentPage.InternalNode.IndexOfChild(key)
+
+	aParentPage.InternalNode.ICells[idx-1].Key = aNode.Cells[0].Key
+
+	return nil
+}
+
+// removeFromInternal removes the given key from the given internal node. If the key found in the node,
+// it replaces it with the smallest key from the rightmost child.
+func (t *Table) removeFromInternal(ctx context.Context, aNode *InternalNode, key uint64) error {
+	idx, ok := aNode.IndexOfKey(key)
+	if !ok {
+		return nil
+	}
+
+	leftMostLeaf, err := t.pager.GetPage(ctx, t, aNode.GetRightChildByIndex(idx))
+	if err != nil {
+		return err
+	}
+	for leftMostLeaf.LeafNode == nil {
+		leftMostLeaf, err = t.pager.GetPage(ctx, t, aNode.ICells[0].Child)
+		if err != nil {
+			return err
+		}
+	}
+	aNode.ICells[idx].Key = leftMostLeaf.LeafNode.Cells[0].Key
+
+	return nil
+}
+
+// borrowFromLeftLeaf borrows a key from the left neighbor of the given leaf node.
+// It inserts the last key and value from the left neighbor into the given node,
+// and removes the key and value from the left neighbor.
+// It also updates the key in the parent node.
+func (t *Table) borrowFromLeftLeaf(aParent *InternalNode, aNode, leftSibling *LeafNode, idx uint32) error {
+	aCellToRotate := leftSibling.LastCell()
+	leftSibling.RemoveLastCell()
+	aNode.PrependCell(aCellToRotate)
+
+	aParent.ICells[idx-1].Key = aNode.FirstCell().Key
+
+	return nil
+}
+
+// borrowFromRightLeaf borrows a key from the right neighbor of the given leaf node.
+// It inserts the first key and value from the right neighbor into the given node,
+// and removes the key and value from the right neighbor.
+// It also updates the key in the parent node.
+func (t *Table) borrowFromRightLeaf(aParent *InternalNode, aNode, rightSibling *LeafNode, idx uint32) error {
+	aCellToRotate := rightSibling.FirstCell()
+	rightSibling.RemoveFirstCell()
+	aNode.AppendCells(aCellToRotate)
+
+	aParent.ICells[idx].Key = rightSibling.FirstCell().Key
+
+	return nil
+}
+
+// mergeLeafs merges two leaf nodes and deletes the key from the parent node.
+func (t *Table) mergeLeafs(aParent *InternalNode, aPredecessor, aSuccessor *LeafNode, idx uint32) error {
+	aPredecessor.AppendCells(aSuccessor.Cells...)
+	aPredecessor.Header.NextLeaf = aSuccessor.Header.NextLeaf
+	aParent.DeleteKeyByIndex(idx)
+
+	return nil
+}
+
+// borrowFromLeftInternal borrows a key from the left neighbor of the given internal node.
+// It inserts the last key and value from the left neighbor into the given node,
+// and removes the key and value from the left neighbor.
+// It also updates the key in the parent node.
+func (t *Table) borrowFromLeftInternal(aParent, aNode, leftSibling *InternalNode, idx uint32) error {
+	aCellToRotate := leftSibling.LastCell()
+	leftSibling.RemoveLastCell()
+	aNode.PrependCell(aCellToRotate)
+
+	aParent.ICells[idx-1].Key = aNode.FirstCell().Key
+
+	return nil
+}
+
+// borrowFromRightInternal borrows a key from the right neighbor of the given internal node.
+// It inserts the first key and value from the right neighbor into the given node,
+// and removes the key and value from the right neighbor.
+// It also updates the key in the parent node.
+func (t *Table) borrowFromRightInternal(aParent, aNode, rightSibling *InternalNode, idx uint32) error {
+	aCellToRotate := rightSibling.FirstCell()
+	rightSibling.RemoveFirstCell()
+	aNode.AppendCells(aCellToRotate)
+	aNode.Header.RightChild = rightSibling.FirstCell().Child
+
+	aParent.ICells[idx].Key = rightSibling.FirstCell().Key
+
+	return nil
+}
+
+// mergeLeafs merges two internal nodes and deletes the key from the parent node.
+func (t *Table) mergeInternalNodes(aParent, aPredecessor, aSuccessor *InternalNode, idx uint32) error {
+	aPredecessor.AppendCells(aSuccessor.ICells[:]...)
+	aPredecessor.Header.RightChild = aSuccessor.Header.RightChild
+	aParent.DeleteKeyByIndex(idx)
 
 	return nil
 }

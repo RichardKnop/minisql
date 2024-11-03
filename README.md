@@ -7,6 +7,7 @@ Shout out to some great repos and other resources that were invaluable while fig
 - [go-sqldb](https://github.com/auxten/go-sqldb)
 - [sqlparser](https://github.com/marianogappa/sqlparser)
 - [sqlite docs](https://www.sqlite.org/fileformat2.html) (section about file format has been especially useful)
+- [C++ implementation of B+ tree](https://github.com/sayef/bplus-tree)
 
 Run `minisql` in your command line:
 

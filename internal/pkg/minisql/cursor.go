@@ -33,10 +33,13 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) erro
 			aPage.LeafNode.Cells[i] = aPage.LeafNode.Cells[i-1]
 		}
 	}
+
+	if err := saveToCell(&aPage.LeafNode.Cells[c.CellIdx], key, aRow); err != nil {
+		return err
+	}
 	aPage.LeafNode.Header.Cells += 1
 
-	err = saveToCell(&aPage.LeafNode.Cells[c.CellIdx], key, aRow)
-	return err
+	return nil
 }
 
 // Create a new node and move half the cells over.
@@ -125,23 +128,13 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 
 	// If we won't need to split the internal node,
 	// update parent to reflect new max key
-	oldChildIdx := aParentPage.InternalNode.FindChildByKey(originalMaxKey)
+	oldChildIdx := aParentPage.InternalNode.IndexOfChild(originalMaxKey)
 	if oldChildIdx < InternalNodeMaxCells {
 		oldPageNewMaxKey, _ := aSplitPage.GetMaxKey()
 		aParentPage.InternalNode.ICells[oldChildIdx].Key = oldPageNewMaxKey
 	}
 
 	return c.Table.InternalNodeInsert(ctx, parentPageIdx, newPageIdx)
-}
-
-func saveToCell(cell *Cell, key uint64, aRow *Row) error {
-	rowBuf, err := aRow.Marshal()
-	if err != nil {
-		return err
-	}
-	cell.Key = key
-	copy(cell.Value[:], rowBuf)
-	return nil
 }
 
 func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
@@ -186,6 +179,16 @@ func (c *Cursor) update(ctx context.Context, aRow *Row) error {
 	}
 
 	cell := &aPage.LeafNode.Cells[c.CellIdx]
+	copy(cell.Value[:], rowBuf)
+	return nil
+}
+
+func saveToCell(cell *Cell, key uint64, aRow *Row) error {
+	rowBuf, err := aRow.Marshal()
+	if err != nil {
+		return err
+	}
+	cell.Key = key
 	copy(cell.Value[:], rowBuf)
 	return nil
 }

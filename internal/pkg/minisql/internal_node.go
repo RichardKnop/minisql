@@ -1,6 +1,9 @@
 package minisql
 
 const (
+	// Page size: 4096
+	// Header size: 6 (base header) + 8 (internal header)
+	// ICell size: 12
 	// (4096 - 6 - 8) / 12
 	InternalNodeMaxCells = 340
 )
@@ -67,6 +70,8 @@ func (h *InternalNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 
 	return h.Size(), nil
 }
+
+var emptyICell ICell
 
 type ICell struct {
 	Key   uint64
