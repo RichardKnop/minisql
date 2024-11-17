@@ -131,9 +131,8 @@ func (g *DataGen) NewRootLeafPageWithCells(cells, rowSize int) *minisql.Page {
 
 	for i := 0; i < cells; i++ {
 		aRootLeaf.Cells[i] = minisql.Cell{
-			Key:     uint64(i),
-			Value:   bytes.Repeat([]byte{byte(i)}, rowSize),
-			RowSize: uint64(rowSize),
+			Key:   uint64(i),
+			Value: bytes.Repeat([]byte{byte(i)}, rowSize),
 		}
 	}
 
@@ -228,16 +227,15 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 				},
 				Cells: append([]minisql.Cell{
 					{
-						Key:     1,
-						Value:   bytes.Repeat([]byte{byte(1)}, 270),
-						RowSize: 270,
+						Key:   1,
+						Value: bytes.Repeat([]byte{byte(1)}, 270),
 					},
 					{
-						Key:     2,
-						Value:   bytes.Repeat([]byte{byte(2)}, 270),
-						RowSize: 270,
+						Key:   2,
+						Value: bytes.Repeat([]byte{byte(2)}, 270),
 					},
 				}, defaultCell.Cells[2:]...),
+				RowSize: 270,
 			},
 		}
 		// page 4
@@ -253,11 +251,11 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 				},
 				Cells: append([]minisql.Cell{
 					{
-						Key:     5,
-						Value:   bytes.Repeat([]byte{byte(3)}, 270),
-						RowSize: 270,
+						Key:   5,
+						Value: bytes.Repeat([]byte{byte(3)}, 270),
 					},
 				}, defaultCell.Cells[1:]...),
+				RowSize: 270,
 			},
 		}
 		// page 5
@@ -273,16 +271,15 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 				},
 				Cells: append([]minisql.Cell{
 					{
-						Key:     12,
-						Value:   bytes.Repeat([]byte{byte(4)}, 270),
-						RowSize: 270,
+						Key:   12,
+						Value: bytes.Repeat([]byte{byte(4)}, 270),
 					},
 					{
-						Key:     18,
-						Value:   bytes.Repeat([]byte{byte(5)}, 270),
-						RowSize: 270,
+						Key:   18,
+						Value: bytes.Repeat([]byte{byte(5)}, 270),
 					},
 				}, defaultCell.Cells[2:]...),
+				RowSize: 270,
 			},
 		}
 		// page 6
@@ -297,11 +294,11 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 				},
 				Cells: append([]minisql.Cell{
 					{
-						Key:     21,
-						Value:   bytes.Repeat([]byte{byte(6)}, 270),
-						RowSize: 270,
+						Key:   21,
+						Value: bytes.Repeat([]byte{byte(6)}, 270),
 					},
 				}, defaultCell.Cells[1:]...),
+				RowSize: 270,
 			},
 		}
 

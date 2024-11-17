@@ -34,6 +34,30 @@ var (
 		},
 	}
 
+	testMediumColumns = []Column{
+		{
+			Kind: Int8,
+			Size: 8,
+			Name: "id",
+		},
+		{
+			Kind: Varchar,
+			Size: 255,
+			Name: "name",
+		},
+		{
+			Kind: Varchar,
+			Size: 255,
+			Name: "email",
+		},
+		{
+			Kind: Varchar,
+			// Size is defined so 5 of these columns can fit into a single page
+			Size: (PageSize - 6 - 8 - 5*8 - 5*(8+255+255)) / 5,
+			Name: "description",
+		},
+	}
+
 	testBigColumns = []Column{
 		{
 			Kind: Int8,
@@ -129,6 +153,35 @@ func (g *dataGen) Rows(number int) []Row {
 	return rows
 }
 
+func (g *dataGen) MediumRow() Row {
+	return Row{
+		Columns: testMediumColumns,
+		Values: []any{
+			g.Int64(),
+			g.Email(),
+			g.Name(),
+			g.Sentence(5),
+		},
+	}
+}
+
+func (g *dataGen) MediumRows(number int) []Row {
+	// Make sure all rows will have unique ID, this is important in some tests
+	idMap := map[int64]struct{}{}
+	rows := make([]Row, 0, number)
+	for i := 0; i < number; i++ {
+		aRow := g.MediumRow()
+		_, ok := idMap[aRow.Values[0].(int64)]
+		for ok {
+			aRow = g.MediumRow()
+			_, ok = idMap[aRow.Values[0].(int64)]
+		}
+		rows = append(rows, aRow)
+		idMap[aRow.Values[0].(int64)] = struct{}{}
+	}
+	return rows
+}
+
 func (g *dataGen) BigRow() Row {
 	return Row{
 		Columns: testBigColumns,
@@ -177,9 +230,8 @@ func newRootLeafPageWithCells(cells, rowSize int) *Page {
 
 	for i := 0; i < cells; i++ {
 		aRootLeaf.Cells[i] = Cell{
-			Key:     uint64(i),
-			Value:   bytes.Repeat([]byte{byte(i)}, rowSize),
-			RowSize: uint64(rowSize),
+			Key:   uint64(i),
+			Value: bytes.Repeat([]byte{byte(i)}, rowSize),
 		}
 	}
 
@@ -274,16 +326,15 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				},
 				Cells: append([]Cell{
 					{
-						Key:     1,
-						Value:   bytes.Repeat([]byte{byte(1)}, 270),
-						RowSize: 270,
+						Key:   1,
+						Value: bytes.Repeat([]byte{byte(1)}, 270),
 					},
 					{
-						Key:     2,
-						Value:   bytes.Repeat([]byte{byte(2)}, 270),
-						RowSize: 270,
+						Key:   2,
+						Value: bytes.Repeat([]byte{byte(2)}, 270),
 					},
 				}, defaultCell.Cells[2:]...),
+				RowSize: 270,
 			},
 		}
 		// page 4
@@ -299,11 +350,11 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				},
 				Cells: append([]Cell{
 					{
-						Key:     5,
-						Value:   bytes.Repeat([]byte{byte(3)}, 270),
-						RowSize: 270,
+						Key:   5,
+						Value: bytes.Repeat([]byte{byte(3)}, 270),
 					},
 				}, defaultCell.Cells[1:]...),
+				RowSize: 270,
 			},
 		}
 		// page 5
@@ -319,16 +370,15 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				},
 				Cells: append([]Cell{
 					{
-						Key:     12,
-						Value:   bytes.Repeat([]byte{byte(4)}, 270),
-						RowSize: 270,
+						Key:   12,
+						Value: bytes.Repeat([]byte{byte(4)}, 270),
 					},
 					{
-						Key:     18,
-						Value:   bytes.Repeat([]byte{byte(5)}, 270),
-						RowSize: 270,
+						Key:   18,
+						Value: bytes.Repeat([]byte{byte(5)}, 270),
 					},
 				}, defaultCell.Cells[2:]...),
+				RowSize: 270,
 			},
 		}
 		// page 6
@@ -343,11 +393,11 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				},
 				Cells: append([]Cell{
 					{
-						Key:     21,
-						Value:   bytes.Repeat([]byte{byte(6)}, 270),
-						RowSize: 270,
+						Key:   21,
+						Value: bytes.Repeat([]byte{byte(6)}, 270),
 					},
 				}, defaultCell.Cells[1:]...),
+				RowSize: 270,
 			},
 		}
 

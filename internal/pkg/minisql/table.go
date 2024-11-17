@@ -3,6 +3,7 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"go.uber.org/zap"
 )
@@ -47,22 +48,43 @@ func (t *Table) SeekNextRowID(ctx context.Context, pageIdx uint32) (*Cursor, uin
 	if err != nil {
 		return nil, 0, err
 	}
-	if aPage.LeafNode != nil {
-		if aPage.LeafNode.Header.NextLeaf != 0 {
-			return t.SeekNextRowID(ctx, aPage.LeafNode.Header.NextLeaf)
-		}
-		maxKey, ok := aPage.GetMaxKey()
-		nextRow := maxKey
-		if ok {
-			nextRow += 1
-		}
-		return &Cursor{
-			Table:   t,
-			PageIdx: pageIdx,
-			CellIdx: aPage.LeafNode.Header.Cells,
-		}, nextRow, nil
+	if aPage.LeafNode == nil {
+		return t.SeekNextRowID(ctx, aPage.InternalNode.Header.RightChild)
 	}
-	return t.SeekNextRowID(ctx, aPage.InternalNode.Header.RightChild)
+	if aPage.LeafNode.Header.NextLeaf != 0 {
+		return t.SeekNextRowID(ctx, aPage.LeafNode.Header.NextLeaf)
+	}
+	maxKey, ok := aPage.GetMaxKey()
+	nextRowID := maxKey
+	if ok {
+		nextRowID += 1
+	}
+	return &Cursor{
+		Table:   t,
+		PageIdx: pageIdx,
+		CellIdx: aPage.LeafNode.Header.Cells,
+	}, nextRowID, nil
+}
+
+func (t *Table) SeekFirst(ctx context.Context) (*Cursor, error) {
+	pageIdx := t.RootPageIdx
+	aPage, err := t.pager.GetPage(ctx, t, pageIdx)
+	if err != nil {
+		return nil, err
+	}
+	for aPage.LeafNode == nil {
+		pageIdx = aPage.InternalNode.ICells[0].Child
+		aPage, err = t.pager.GetPage(ctx, t, pageIdx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &Cursor{
+		Table:      t,
+		PageIdx:    pageIdx,
+		CellIdx:    0,
+		EndOfTable: aPage.LeafNode.Header.Cells == 1,
+	}, nil
 }
 
 // Seek the cursor for a key, if it does not exist then return the cursor
@@ -356,6 +378,208 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 		newMaxKey, _ := aSplitPage.GetMaxKey()
 		aParentPage.InternalNode.ICells[oldChildIdx].Key = newMaxKey
 	}
+
+	return nil
+}
+
+func countKeys(aPage *Page) int {
+	if aPage.InternalNode != nil {
+		return int(aPage.InternalNode.Header.KeysNum)
+	}
+	return int(aPage.LeafNode.Header.Cells)
+}
+
+func getKey(aPage *Page, i int) uint64 {
+	if aPage.InternalNode != nil {
+		return aPage.InternalNode.ICells[i].Key
+	}
+	return aPage.LeafNode.Cells[i].Key
+}
+
+// func (t *Table) DeleteKey(ctx context.Context, key uint64) error {
+// 	aCurrentPage, err := t.pager.GetPage(ctx, t, t.RootPageIdx)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	found := false
+// 	i := 0
+// 	for i < countKeys(aCurrentPage) {
+// 		nodeKey := getKey(aCurrentPage, i)
+// 		if key == nodeKey {
+// 			found = true
+// 			break
+// 		} else if key < nodeKey {
+// 			break
+// 		}
+// 		i += 1
+// 	}
+
+// 	if found {
+// 		if aCurrentPage.LeafNode != nil {
+// 			aCurrentPage.LeafNode.Delete(i)
+// 		} else {
+// 			// aPredecessor, err := t.pager.GetPage(ctx, t, aCurrentPage.InternalNode.ICells[i].Child)
+// 			// if err != nil {
+// 			// 	return err
+// 			// }
+// 			// if countKeys(aPredecessor) >=
+// 		}
+// 		// if curr.leaf:
+// 		// 	curr.keys.pop(i)
+// 		// else:
+// 		// 	pred = curr.values[i]
+// 		// 	if len(pred.keys) >= self.degree:
+// 		// 		pred_key = self.get_max_key(pred)
+// 		// 		curr.keys[i] = pred_key
+// 		// 		self.delete_from_leaf(pred_key, pred)
+// 		// 	else:
+// 		// 		succ = curr.values[i + 1]
+// 		// 		if len(succ.keys) >= self.degree:
+// 		// 			succ_key = self.get_min_key(succ)
+// 		// 			curr.keys[i] = succ_key
+// 		// 			self.delete_from_leaf(succ_key, succ)
+// 		// 		else:
+// 		// 			self.merge(curr, i, pred, succ)
+// 		// 			self.delete_from_leaf(key, pred)
+// 		// if curr == self.root and not curr.keys:
+// 		// 	self.root = curr.values[0]
+// 	} else {
+
+// 	}
+
+// 	return fmt.Errorf("not implemented")
+// }
+
+func (t *Table) InternalNodeDelete(ctx context.Context, pageIdx uint32, key uint64) error {
+	return fmt.Errorf("not implemented")
+}
+
+func (t *Table) LeafNodeDelete(ctx context.Context, pageIdx, cellIdx uint32, key uint64) error {
+	aPage, err := t.pager.GetPage(ctx, t, pageIdx)
+	if err != nil {
+		return err
+	}
+	if aPage.LeafNode == nil {
+		return fmt.Errorf("error deleting key from a non leaf node, key %d", key)
+	}
+
+	aPage.LeafNode.Delete(cellIdx)
+
+	if aPage.LeafNode.Header.IsRoot || aPage.LeafNode.AtLeastHalfFull() {
+		return nil
+	}
+
+	aParentPage, err := t.pager.GetPage(ctx, t, aPage.LeafNode.Header.Parent)
+	if err != nil {
+		return err
+	}
+	idx := aParentPage.InternalNode.FindChildByKey(key)
+
+	var (
+		leftSibling  *Page
+		rightSibling *Page
+	)
+	if idx > 0 {
+		leftSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.ICells[idx-1].Child)
+		if err != nil {
+			return err
+		}
+	} else {
+		rightSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.GetRightChildByIndex(idx))
+		if err != nil {
+			return err
+		}
+	}
+
+	if idx > 0 && leftSibling.LeafNode.MoreThanHalfFull() {
+		if err := t.rotateRight(ctx, aParentPage, aPage, leftSibling, idx); err != nil {
+			return err
+		}
+	} else if idx < aPage.InternalNode.Header.KeysNum && rightSibling.LeafNode.MoreThanHalfFull() {
+		if err := t.rotateLeft(ctx, aParentPage, aPage, rightSibling, idx); err != nil {
+			return err
+		}
+	} else {
+		if err := t.merge(aParentPage, idx, aPage, rightSibling); err != nil {
+			return err
+		}
+	}
+
+	return t.InternalNodeDelete(ctx, aPage.LeafNode.Header.Parent, key)
+}
+
+func (t *Table) rotateRight(ctx context.Context, aParent, aPage, leftSibling *Page, idx uint32) error {
+	aCellToRotate := leftSibling.LeafNode.Cells[leftSibling.LeafNode.Header.Cells-1]
+	leftSibling.LeafNode.Cells = leftSibling.LeafNode.Cells[0 : leftSibling.LeafNode.Header.Cells-1]
+	leftSibling.LeafNode.Header.Cells -= 1
+
+	aPage.LeafNode.Cells = slices.Insert(aPage.LeafNode.Cells, 0, aCellToRotate)
+	aPage.LeafNode.Header.Cells += 1
+
+	aParent.InternalNode.ICells[idx-1].Key = aCellToRotate.Key
+
+	return nil
+}
+
+func (t *Table) rotateLeft(ctx context.Context, aParent, aPage, rightSibling *Page, idx uint32) error {
+	aCellToRotate := rightSibling.LeafNode.Cells[0]
+	rightSibling.LeafNode.Cells = rightSibling.LeafNode.Cells[1:rightSibling.LeafNode.Header.Cells]
+	rightSibling.LeafNode.Header.Cells -= 1
+
+	aPage.LeafNode.Cells = append(aPage.LeafNode.Cells, aCellToRotate)
+	aPage.LeafNode.Header.Cells += 1
+
+	aParent.InternalNode.ICells[idx].Key = rightSibling.LeafNode.Cells[0].Key
+
+	return nil
+}
+
+func (t *Table) merge(aParent *Page, idx uint32, aPredecessor, aSuccessor *Page) error {
+	aPredecessor.LeafNode.Cells = append(aPredecessor.LeafNode.Cells, aSuccessor.LeafNode.Cells...)
+	aPredecessor.LeafNode.Header.Cells += aSuccessor.LeafNode.Header.Cells
+	aParent.InternalNode.DeleteKeyByIndex(idx)
+
+	return nil
+}
+
+func (t *Table) rotateRightInternal(ctx context.Context, aParent, leftSibling *Page, idx uint32) error {
+	aPage, err := t.pager.GetPage(ctx, t, idx)
+	if err != nil {
+		return err
+	}
+
+	aCellToRotate := leftSibling.InternalNode.ICells[leftSibling.InternalNode.Header.KeysNum-1]
+	leftSibling.InternalNode.ICells[leftSibling.InternalNode.Header.KeysNum-1] = ICell{}
+	leftSibling.InternalNode.Header.KeysNum -= 1
+
+	for i := int(aPage.InternalNode.Header.KeysNum); i > 0; i-- {
+		aPage.InternalNode.ICells[i] = aPage.InternalNode.ICells[i-1]
+	}
+	aPage.InternalNode.ICells[0] = aCellToRotate
+	aPage.InternalNode.Header.KeysNum += 1
+
+	aParent.InternalNode.ICells[idx-1].Key = aCellToRotate.Key
+
+	return nil
+}
+
+func (t *Table) rotateLeftInternal(ctx context.Context, aParent, rightSibling *Page, idx uint32) error {
+	aPage, err := t.pager.GetPage(ctx, t, idx)
+	if err != nil {
+		return err
+	}
+
+	aCellToRotate := rightSibling.InternalNode.ICells[0]
+	for i := 0; i < int(rightSibling.InternalNode.Header.KeysNum); i++ {
+		rightSibling.InternalNode.ICells[i] = rightSibling.InternalNode.ICells[i+1]
+	}
+	rightSibling.InternalNode.ICells[rightSibling.InternalNode.Header.KeysNum-1] = ICell{}
+	rightSibling.InternalNode.Header.KeysNum -= 1
+
+	aPage.InternalNode.ICells[aPage.InternalNode.Header.KeysNum] = aCellToRotate
+	aPage.InternalNode.Header.KeysNum += 1
+
+	aParent.InternalNode.ICells[idx].Key = rightSibling.InternalNode.ICells[0].Key
 
 	return nil
 }
