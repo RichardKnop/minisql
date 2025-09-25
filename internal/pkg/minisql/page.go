@@ -6,6 +6,7 @@ const (
 )
 
 type Page struct {
+	Index        uint32
 	InternalNode *InternalNode
 	LeafNode     *LeafNode
 }

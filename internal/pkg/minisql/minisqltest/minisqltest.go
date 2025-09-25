@@ -159,6 +159,7 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 	var (
 		// page 0
 		aRootPage = &minisql.Page{
+			Index: 0,
 			InternalNode: &minisql.InternalNode{
 				Header: minisql.InternalNodeHeader{
 					Header: minisql.Header{
@@ -178,6 +179,7 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 		}
 		// page 1
 		internalPage1 = &minisql.Page{
+			Index: 1,
 			InternalNode: &minisql.InternalNode{
 				Header: minisql.InternalNodeHeader{
 					Header: minisql.Header{
@@ -197,6 +199,7 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 		}
 		// page 2
 		internalPage2 = &minisql.Page{
+			Index: 2,
 			InternalNode: &minisql.InternalNode{
 				Header: minisql.InternalNodeHeader{
 					Header: minisql.Header{
@@ -216,6 +219,7 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 		}
 		// page 3
 		leafPage1 = &minisql.Page{
+			Index: 3,
 			LeafNode: &minisql.LeafNode{
 				Header: minisql.LeafNodeHeader{
 					Header: minisql.Header{
@@ -240,6 +244,7 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 		}
 		// page 4
 		leafPage2 = &minisql.Page{
+			Index: 4,
 			LeafNode: &minisql.LeafNode{
 				Header: minisql.LeafNodeHeader{
 					Header: minisql.Header{
@@ -260,6 +265,7 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 		}
 		// page 5
 		leafPage3 = &minisql.Page{
+			Index: 5,
 			LeafNode: &minisql.LeafNode{
 				Header: minisql.LeafNodeHeader{
 					Header: minisql.Header{
@@ -284,6 +290,7 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 		}
 		// page 6
 		leafPage4 = &minisql.Page{
+			Index: 6,
 			LeafNode: &minisql.LeafNode{
 				Header: minisql.LeafNodeHeader{
 					Header: minisql.Header{

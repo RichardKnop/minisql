@@ -387,190 +387,53 @@ func (t *Table) DeleteKey(ctx context.Context, pageIdx uint32, key uint64) error
 		return err
 	}
 
-	// First call we will start with a leaf node, then we will recursively call DeleteKey
-	// for all parent nodes until we reach the root
-	firstCell := ICell{}
-	if aNode := aPage.LeafNode; aNode != nil {
-		var err error
-		if err = t.removeFromLeaf(ctx, aNode, key); err != nil {
-			return err
-		}
-	} else if aNode := aPage.InternalNode; aNode != nil {
-		firstCell = aNode.FirstCell()
-		if err := t.removeFromInternal(ctx, aNode, key); err != nil {
-			return err
-		}
+	if aPage.LeafNode == nil {
+		return fmt.Errorf("DeleteKey called on non-leaf node")
 	}
 
-	if isPageLessThanHalfFull(aPage) {
-		if aNode, ok := isInternal(aPage); ok && aNode.Header.IsRoot {
-			if aNode.Header.KeysNum == 0 && firstCell != emptyICell {
-				aNewRoot, err := t.pager.GetPage(ctx, t, firstCell.Child)
-				if err != nil {
-					return err
-				}
-				aNewRoot.InternalNode.Header.IsRoot = true
-				aNewRoot.InternalNode.Header.Parent = 0
-			}
-			return nil
-		} else if aNode, ok := isLeaf(aPage); ok {
-			aParentPage, err := t.pager.GetPage(ctx, t, aNode.Header.Parent)
-			if err != nil {
-				return err
-			}
-			idx := aParentPage.InternalNode.IndexOfChild(key)
+	// Remove key
+	aPage.LeafNode.Delete(key)
 
-			var (
-				leftSibling  *Page
-				rightSibling *Page
-			)
-			if idx < aParentPage.InternalNode.Header.KeysNum-1 {
-				rightSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.GetRightChildByIndex(idx))
-				if err != nil {
-					return err
-				}
-			} else if idx > 0 {
-				leftSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.ICells[idx-1].Child)
-				if err != nil {
-					return err
-				}
-			}
-
-			if rightSibling != nil && rightSibling.LeafNode.MoreThanHalfFull() {
-				if err := t.borrowFromRightLeaf(
-					aParentPage.InternalNode,
-					aPage.LeafNode,
-					rightSibling.LeafNode,
-					idx,
-				); err != nil {
-					return err
-				}
-			} else if leftSibling != nil && leftSibling.LeafNode.MoreThanHalfFull() {
-				if err := t.borrowFromLeftLeaf(
-					aParentPage.InternalNode,
-					aPage.LeafNode,
-					leftSibling.LeafNode,
-					idx,
-				); err != nil {
-					return err
-				}
-			} else if rightSibling != nil && !rightSibling.LeafNode.AtLeastHalfFull() {
-				if err := t.mergeLeafs(
-					aParentPage.InternalNode,
-					aPage.LeafNode,
-					rightSibling.LeafNode,
-					idx,
-				); err != nil {
-					return err
-				}
-			} else if leftSibling != nil && !leftSibling.LeafNode.AtLeastHalfFull() {
-				if err := t.mergeLeafs(
-					aParentPage.InternalNode,
-					leftSibling.LeafNode,
-					aPage.LeafNode,
-					idx,
-				); err != nil {
-					return err
-				}
-			}
-		} else if aNode, ok := isInternal(aPage); ok {
-			aParentPage, err := t.pager.GetPage(ctx, t, aNode.Header.Parent)
-			if err != nil {
-				return err
-			}
-
-			idx, ok := aParentPage.InternalNode.IndexOfPage(pageIdx)
-
-			var (
-				leftSibling  *Page
-				rightSibling *Page
-			)
-			if ok && idx < aParentPage.InternalNode.Header.KeysNum-1 {
-				rightSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.GetRightChildByIndex(uint32(idx)))
-				if err != nil {
-					return err
-				}
-			} else if ok && idx > 0 {
-				leftSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.ICells[idx-1].Child)
-				if err != nil {
-					return err
-				}
-			}
-
-			if rightSibling != nil && rightSibling.InternalNode.MoreThanHalfFull() {
-				if err := t.borrowFromRightInternal(
-					aParentPage.InternalNode,
-					aPage.InternalNode,
-					rightSibling.InternalNode,
-					idx,
-				); err != nil {
-					return err
-				}
-			} else if leftSibling != nil && leftSibling.InternalNode.MoreThanHalfFull() {
-				if err := t.borrowFromLeftInternal(
-					aParentPage.InternalNode,
-					aPage.InternalNode,
-					leftSibling.InternalNode,
-					idx,
-				); err != nil {
-					return err
-				}
-			} else if rightSibling != nil && !rightSibling.LeafNode.MoreThanHalfFull() {
-				if err := t.mergeInternalNodes(
-					aParentPage.InternalNode,
-					aPage.InternalNode,
-					rightSibling.InternalNode,
-					idx,
-				); err != nil {
-					return err
-				}
-			} else if leftSibling != nil && !leftSibling.LeafNode.MoreThanHalfFull() {
-				if err := t.mergeInternalNodes(
-					aParentPage.InternalNode,
-					leftSibling.InternalNode,
-					aPage.InternalNode,
-					idx,
-				); err != nil {
-					return err
-				}
-			}
-		}
+	// Check for underflow
+	if !isPageLessThanHalfFull(aPage) {
+		return nil
 	}
 
-	if aParent, ok := hasParent(aPage); ok {
-		return t.DeleteKey(ctx, aParent, key)
+	// Rebalance leaf node
+	if err := t.rebalanceLeaf(ctx, aPage, key); err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func isInternal(aPage *Page) (*InternalNode, bool) {
-	if aPage.InternalNode == nil {
-		return nil, false
-	}
-	return aPage.InternalNode, true
-}
+// func isInternal(aPage *Page) (*InternalNode, bool) {
+// 	if aPage.InternalNode == nil {
+// 		return nil, false
+// 	}
+// 	return aPage.InternalNode, true
+// }
 
-func isLeaf(aPage *Page) (*LeafNode, bool) {
-	if aPage.LeafNode == nil {
-		return nil, false
-	}
-	return aPage.LeafNode, true
-}
+// func isLeaf(aPage *Page) (*LeafNode, bool) {
+// 	if aPage.LeafNode == nil {
+// 		return nil, false
+// 	}
+// 	return aPage.LeafNode, true
+// }
 
-func hasParent(aPage *Page) (uint32, bool) {
-	if aNode, ok := isLeaf(aPage); ok {
-		return aNode.Header.Parent, true
-	}
+// func hasParent(aPage *Page) (uint32, bool) {
+// 	if aNode, ok := isLeaf(aPage); ok {
+// 		return aNode.Header.Parent, true
+// 	}
 
-	if aNode, ok := isInternal(aPage); ok {
-		if !aNode.Header.IsRoot {
-			return aNode.Header.Parent, true
-		}
-	}
+// 	if aNode, ok := isInternal(aPage); ok {
+// 		if !aNode.Header.IsRoot {
+// 			return aNode.Header.Parent, true
+// 		}
+// 	}
 
-	return 0, false
-}
+// 	return 0, false
+// }
 
 func isPageLessThanHalfFull(aPage *Page) bool {
 	if aPage.LeafNode != nil && !aPage.LeafNode.AtLeastHalfFull() {
@@ -582,49 +445,76 @@ func isPageLessThanHalfFull(aPage *Page) bool {
 	return false
 }
 
-// removeFromLeaf removes the given key from the given leaf node. It removes the associated cell,
-// and updates the key in the parent node if necessary.
-func (t *Table) removeFromLeaf(ctx context.Context, aNode *LeafNode, key uint64) error {
-	aNode.Delete(key)
+func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) error {
+	aLeafNode := aPage.LeafNode
 
-	if aNode.Header.IsRoot {
+	if aLeafNode.Header.IsRoot {
 		return nil
 	}
 
-	if aNode.Header.Cells == 0 {
+	if aLeafNode.Header.Cells == 0 {
 		return nil
 	}
 
-	aParentPage, err := t.pager.GetPage(ctx, t, aNode.Header.Parent)
+	aParentPage, err := t.pager.GetPage(ctx, t, aLeafNode.Header.Parent)
 	if err != nil {
 		return err
 	}
 	idx := aParentPage.InternalNode.IndexOfChild(key)
 
-	aParentPage.InternalNode.ICells[idx-1].Key = aNode.Cells[0].Key
-
-	return nil
-}
-
-// removeFromInternal removes the given key from the given internal node. If the key found in the node,
-// it replaces it with the smallest key from the rightmost child.
-func (t *Table) removeFromInternal(ctx context.Context, aNode *InternalNode, key uint64) error {
-	idx, ok := aNode.IndexOfKey(key)
-	if !ok {
-		return nil
-	}
-
-	leftMostLeaf, err := t.pager.GetPage(ctx, t, aNode.GetRightChildByIndex(idx))
-	if err != nil {
-		return err
-	}
-	for leftMostLeaf.LeafNode == nil {
-		leftMostLeaf, err = t.pager.GetPage(ctx, t, aNode.ICells[0].Child)
+	var (
+		leftSibling  *Page
+		rightSibling *Page
+	)
+	if idx < aParentPage.InternalNode.Header.KeysNum-1 {
+		rightSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.GetRightChildByIndex(idx))
+		if err != nil {
+			return err
+		}
+	} else if idx > 0 {
+		leftSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.ICells[idx-1].Child)
 		if err != nil {
 			return err
 		}
 	}
-	aNode.ICells[idx].Key = leftMostLeaf.LeafNode.Cells[0].Key
+
+	if rightSibling != nil && rightSibling.LeafNode.MoreThanHalfFull() {
+		return t.borrowFromRightLeaf(
+			aParentPage.InternalNode,
+			aLeafNode,
+			rightSibling.LeafNode,
+			idx,
+		)
+	}
+
+	if leftSibling != nil && leftSibling.LeafNode.MoreThanHalfFull() {
+		return t.borrowFromLeftLeaf(
+			aParentPage.InternalNode,
+			aLeafNode,
+			leftSibling.LeafNode,
+			idx,
+		)
+	}
+
+	if rightSibling != nil && !rightSibling.LeafNode.AtLeastHalfFull() {
+		return t.mergeLeafs(
+			ctx,
+			aParentPage,
+			aLeafNode,
+			rightSibling.LeafNode,
+			idx,
+		)
+	}
+
+	if leftSibling != nil && !leftSibling.LeafNode.AtLeastHalfFull() {
+		return t.mergeLeafs(
+			ctx,
+			aParentPage,
+			leftSibling.LeafNode,
+			aLeafNode,
+			idx,
+		)
+	}
 
 	return nil
 }
@@ -658,10 +548,108 @@ func (t *Table) borrowFromRightLeaf(aParent *InternalNode, aNode, rightSibling *
 }
 
 // mergeLeafs merges two leaf nodes and deletes the key from the parent node.
-func (t *Table) mergeLeafs(aParent *InternalNode, aPredecessor, aSuccessor *LeafNode, idx uint32) error {
+func (t *Table) mergeLeafs(ctx context.Context, aParent *Page, aPredecessor, aSuccessor *LeafNode, idx uint32) error {
 	aPredecessor.AppendCells(aSuccessor.Cells...)
 	aPredecessor.Header.NextLeaf = aSuccessor.Header.NextLeaf
-	aParent.DeleteKeyByIndex(idx)
+	aParent.InternalNode.DeleteKeyByIndex(idx)
+
+	if aParent.InternalNode.Header.IsRoot && aParent.InternalNode.Header.KeysNum == 0 {
+		aRootPage, err := t.pager.GetPage(ctx, t, t.RootPageIdx)
+		if err != nil {
+			return err
+		}
+		aRootPage.InternalNode = nil
+		aRootPage.LeafNode = aPredecessor
+		aPredecessor.Header.IsRoot = true
+		aPredecessor.Header.Parent = 0
+		return nil
+	}
+
+	// Check for underflow
+	if !isPageLessThanHalfFull(aParent) {
+		return nil
+	}
+
+	return t.rebalanceInternal(ctx, aParent)
+}
+
+func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
+	aNode := aPage.InternalNode
+	if aNode.Header.IsRoot {
+		if aNode.Header.KeysNum == 0 {
+			aRootPage, err := t.pager.GetPage(ctx, t, t.RootPageIdx)
+			if err != nil {
+				return err
+			}
+			firstChildPage, err := t.pager.GetPage(ctx, t, aNode.ICells[0].Child)
+			if err != nil {
+				return err
+			}
+			aRootPage.InternalNode = firstChildPage.InternalNode
+		}
+		return nil
+	}
+
+	aParentPage, err := t.pager.GetPage(ctx, t, aNode.Header.Parent)
+	if err != nil {
+		return err
+	}
+
+	idx, ok := aParentPage.InternalNode.IndexOfPage(aPage.Index)
+
+	var (
+		leftSibling  *Page
+		rightSibling *Page
+	)
+	if ok && idx < aParentPage.InternalNode.Header.KeysNum-1 {
+		rightSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.GetRightChildByIndex(uint32(idx)))
+		if err != nil {
+			return err
+		}
+	} else if ok && idx > 0 {
+		leftSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.ICells[idx-1].Child)
+		if err != nil {
+			return err
+		}
+	}
+
+	if rightSibling != nil && rightSibling.InternalNode.MoreThanHalfFull() {
+		return t.borrowFromRightInternal(
+			aParentPage.InternalNode,
+			aPage.InternalNode,
+			rightSibling.InternalNode,
+			idx,
+		)
+	}
+
+	if leftSibling != nil && leftSibling.InternalNode.MoreThanHalfFull() {
+		return t.borrowFromLeftInternal(
+			aParentPage.InternalNode,
+			aPage.InternalNode,
+			leftSibling.InternalNode,
+			idx,
+		)
+	}
+
+	if rightSibling != nil && !rightSibling.LeafNode.MoreThanHalfFull() {
+		return t.mergeInternalNodes(
+			ctx,
+			aParentPage,
+			aPage.InternalNode,
+			rightSibling.InternalNode,
+			idx,
+		)
+	}
+
+	if leftSibling != nil && !leftSibling.LeafNode.MoreThanHalfFull() {
+		return t.mergeInternalNodes(
+			ctx,
+			aParentPage,
+			leftSibling.InternalNode,
+			aPage.InternalNode,
+			idx,
+		)
+	}
 
 	return nil
 }
@@ -696,10 +684,15 @@ func (t *Table) borrowFromRightInternal(aParent, aNode, rightSibling *InternalNo
 }
 
 // mergeLeafs merges two internal nodes and deletes the key from the parent node.
-func (t *Table) mergeInternalNodes(aParent, aPredecessor, aSuccessor *InternalNode, idx uint32) error {
+func (t *Table) mergeInternalNodes(ctx context.Context, aParent *Page, aPredecessor, aSuccessor *InternalNode, idx uint32) error {
 	aPredecessor.AppendCells(aSuccessor.ICells[:]...)
 	aPredecessor.Header.RightChild = aSuccessor.Header.RightChild
-	aParent.DeleteKeyByIndex(idx)
+	aParent.InternalNode.DeleteKeyByIndex(idx)
 
-	return nil
+	// Check for underflow
+	if !isPageLessThanHalfFull(aParent) {
+		return nil
+	}
+
+	return t.rebalanceInternal(ctx, aParent)
 }

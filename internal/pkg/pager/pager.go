@@ -84,7 +84,7 @@ func (p *Pager) GetPage(ctx context.Context, aTable *minisql.Table, pageIdx uint
 		if err != nil {
 			return nil, err
 		}
-		p.pages[pageIdx] = &minisql.Page{LeafNode: leaf}
+		p.pages[pageIdx] = &minisql.Page{Index: pageIdx, LeafNode: leaf}
 	} else {
 		// Internal node
 		internal := new(minisql.InternalNode)
@@ -92,7 +92,7 @@ func (p *Pager) GetPage(ctx context.Context, aTable *minisql.Table, pageIdx uint
 		if err != nil {
 			return nil, err
 		}
-		p.pages[pageIdx] = &minisql.Page{InternalNode: internal}
+		p.pages[pageIdx] = &minisql.Page{Index: pageIdx, InternalNode: internal}
 	}
 	if pageIdx == 0 {
 		if p.pages[pageIdx].LeafNode != nil {
