@@ -183,6 +183,16 @@ func (c *Cursor) update(ctx context.Context, aRow *Row) error {
 	return nil
 }
 
+func (c *Cursor) delete(ctx context.Context) error {
+	aPage, err := c.Table.pager.GetPage(ctx, c.Table, c.PageIdx)
+	if err != nil {
+		return err
+	}
+
+	key := aPage.LeafNode.Cells[c.CellIdx].Key
+	return c.Table.DeleteKey(ctx, c.PageIdx, key)
+}
+
 func saveToCell(cell *Cell, key uint64, aRow *Row) error {
 	rowBuf, err := aRow.Marshal()
 	if err != nil {

@@ -71,8 +71,6 @@ func (h *InternalNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 	return h.Size(), nil
 }
 
-var emptyICell ICell
-
 type ICell struct {
 	Key   uint64
 	Child uint32

@@ -2,7 +2,6 @@ package minisqltest
 
 import (
 	"bytes"
-	"time"
 
 	"github.com/brianvoe/gofakeit/v7"
 
@@ -10,8 +9,6 @@ import (
 )
 
 var (
-	gen = NewDataGen(uint64(time.Now().Unix()))
-
 	testColumns = []minisql.Column{
 		{
 			Kind: minisql.Int8,
@@ -48,7 +45,7 @@ var (
 		},
 		{
 			Kind: minisql.Varchar,
-			Size: minisql.PageSize - 6 - 8 - 4*8 - 8 - 255 - 255,
+			Size: minisql.PageSize - 6 - 8 - 8 - (8 + 255 + 255),
 			Name: "description",
 		},
 	}

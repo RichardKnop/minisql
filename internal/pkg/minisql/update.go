@@ -10,11 +10,6 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 	if err != nil {
 		return StatementResult{}, err
 	}
-	aPage, err := t.pager.GetPage(ctx, t, aCursor.PageIdx)
-	if err != nil {
-		return StatementResult{}, err
-	}
-	aCursor.EndOfTable = aPage.LeafNode.Header.Cells == 0
 
 	t.logger.Sugar().Debug("updating rows")
 
@@ -27,7 +22,7 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 
 	go func(out chan<- Row) {
 		defer close(out)
-		for aCursor.EndOfTable == false {
+		for !aCursor.EndOfTable {
 			rowCursor := *aCursor
 			aRow, err := aCursor.fetchRow(ctx)
 			if err != nil {

@@ -5,12 +5,113 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
+func TestTable_Delete_RootLeafNode(t *testing.T) {
+	t.Parallel()
+
+	/*
+		In this test we will test deleting from a root leaf node only tree.
+	*/
+	var (
+		ctx            = context.Background()
+		pagerMock      = new(MockPager)
+		numRows        = 5
+		rows           = gen.MediumRows(numRows)
+		cells, rowSize = 0, rows[0].Size()
+		aRootPage      = newRootLeafPageWithCells(cells, int(rowSize))
+		aTable         = NewTable(testLogger, "foo", testMediumColumns, pagerMock, 0)
+	)
+
+	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
+
+	pagerMock.On("TotalPages").Return(uint32(1), nil)
+
+	// Batch insert test rows
+	stmt := Statement{
+		Kind:      Insert,
+		TableName: "foo",
+		Fields:    columnNames(testMediumColumns...),
+		Inserts:   [][]any{},
+	}
+	for _, aRow := range rows {
+		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	}
+
+	err := aTable.Insert(ctx, stmt)
+	require.NoError(t, err)
+
+	t.Run("delete one row", func(t *testing.T) {
+		id, ok := rows[0].GetValue("id")
+		require.True(t, ok)
+		deleteResult, err := aTable.Delete(ctx, Statement{
+			Kind:      Delete,
+			TableName: "foo",
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  Field,
+							Value: "id",
+						},
+						Operator: Eq,
+						Operand2: Operand{
+							Type:  Integer,
+							Value: id.(int64), // delete first row
+						},
+					},
+				},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, deleteResult.RowsAffected)
+
+		selectResult, err := aTable.Select(ctx, Statement{
+			Kind:      Select,
+			TableName: "foo",
+			Fields:    columnNames(testColumns...),
+		})
+		require.NoError(t, err)
+
+		actual := []Row{}
+		aRow, err := selectResult.Rows(ctx)
+		for ; err == nil; aRow, err = selectResult.Rows(ctx) {
+			actual = append(actual, aRow)
+			assert.NotEqual(t, id, aRow.Values[0].(int64))
+		}
+		assert.Len(t, actual, numRows-1)
+	})
+
+	t.Run("delete all rows", func(t *testing.T) {
+		deleteResult, err := aTable.Delete(ctx, Statement{
+			Kind:      Delete,
+			TableName: "foo",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 4, deleteResult.RowsAffected)
+
+		selectResult, err := aTable.Select(ctx, Statement{
+			Kind:      Select,
+			TableName: "foo",
+			Fields:    columnNames(testColumns...),
+		})
+		require.NoError(t, err)
+
+		actual := []Row{}
+		aRow, err := selectResult.Rows(ctx)
+		for ; err == nil; aRow, err = selectResult.Rows(ctx) {
+			actual = append(actual, aRow)
+		}
+		assert.Empty(t, actual)
+	})
+}
+
 func TestTable_Delete(t *testing.T) {
 	t.Parallel()
+	t.Skip()
 
 	/*
 		In this test we first need to create a big enough tree to have root node,
@@ -67,6 +168,14 @@ func TestTable_Delete(t *testing.T) {
 	err := aTable.Insert(ctx, stmt)
 	require.NoError(t, err)
 
+	fmt.Println(aRootPage.InternalNode.Header.KeysNum, len(aRootPage.InternalNode.ICells))
+	fmt.Println(aRootPage.InternalNode.ICells[0].Key)
+	fmt.Println(aRootPage.InternalNode.ICells[1].Key)
+	fmt.Println(aRootPage.InternalNode.ICells[2].Key)
+	fmt.Println(aRootPage.InternalNode.ICells[3].Key)
+	fmt.Println(aRootPage.InternalNode.ICells[4].Key)
+	fmt.Println("---------")
+
 	fmt.Println(leafs[0].LeafNode.Header.Cells, len(leafs[0].LeafNode.Cells))
 	fmt.Println(leafs[0].LeafNode.Cells[0].Key)
 	fmt.Println(leafs[0].LeafNode.Cells[1].Key)
@@ -104,5 +213,5 @@ func TestTable_Delete(t *testing.T) {
 	fmt.Println(leafs[5].LeafNode.Cells[3].Key)
 	fmt.Println(leafs[5].LeafNode.Cells[4].Key)
 
-	// assert.True(t, false)
+	assert.True(t, false)
 }

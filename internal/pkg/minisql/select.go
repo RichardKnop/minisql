@@ -43,7 +43,7 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 
 	go func(out chan<- Row) {
 		defer close(out)
-		for aCursor.EndOfTable == false {
+		for !aCursor.EndOfTable {
 			aRow, err := aCursor.fetchRow(ctx)
 			if err != nil {
 				errorsPipe <- err

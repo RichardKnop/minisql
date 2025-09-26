@@ -76,7 +76,7 @@ var (
 		},
 		{
 			Kind: Varchar,
-			Size: PageSize - 6 - 8 - 4*8 - 8 - 255 - 255,
+			Size: PageSize - 6 - 8 - 8 - (8 + 255 + 255),
 			Name: "description",
 		},
 	}
@@ -139,7 +139,7 @@ func (g *dataGen) Rows(number int) []Row {
 	// Make sure all rows will have unique ID, this is important in some tests
 	idMap := map[int64]struct{}{}
 	rows := make([]Row, 0, number)
-	for i := 0; i < number; i++ {
+	for range number {
 		aRow := g.Row()
 		_, ok := idMap[aRow.Values[0].(int64)]
 		for ok {
@@ -169,7 +169,7 @@ func (g *dataGen) MediumRows(number int) []Row {
 	// Make sure all rows will have unique ID, this is important in some tests
 	idMap := map[int64]struct{}{}
 	rows := make([]Row, 0, number)
-	for i := 0; i < number; i++ {
+	for range number {
 		aRow := g.MediumRow()
 		_, ok := idMap[aRow.Values[0].(int64)]
 		for ok {
@@ -211,17 +211,17 @@ func (g *dataGen) BigRows(number int) []Row {
 	return rows
 }
 
-func newInternalPageWithCells(iCells []ICell, rightChildIdx uint32) *Page {
-	aRoot := NewInternalNode()
-	aRoot.Header.KeysNum = uint32(len(iCells))
-	aRoot.Header.RightChild = rightChildIdx
+// func newInternalPageWithCells(iCells []ICell, rightChildIdx uint32) *Page {
+// 	aRoot := NewInternalNode()
+// 	aRoot.Header.KeysNum = uint32(len(iCells))
+// 	aRoot.Header.RightChild = rightChildIdx
 
-	for i, iCell := range iCells {
-		aRoot.ICells[i] = iCell
-	}
+// 	for i, iCell := range iCells {
+// 		aRoot.ICells[i] = iCell
+// 	}
 
-	return &Page{InternalNode: aRoot}
-}
+// 	return &Page{InternalNode: aRoot}
+// }
 
 func newRootLeafPageWithCells(cells, rowSize int) *Page {
 	aRootLeaf := NewLeafNode(uint64(rowSize))

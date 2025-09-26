@@ -3,6 +3,7 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"go.uber.org/zap"
 )
@@ -26,6 +27,7 @@ type Table struct {
 	RootPageIdx uint32
 	RowSize     uint64
 	pager       Pager
+	lock        *sync.RWMutex
 	logger      *zap.Logger
 }
 
@@ -36,6 +38,7 @@ func NewTable(logger *zap.Logger, name string, columns []Column, pager Pager, ro
 		RootPageIdx: rootPageIdx,
 		RowSize:     Row{Columns: columns}.Size(),
 		pager:       pager,
+		lock:        new(sync.RWMutex),
 		logger:      logger,
 	}
 }
@@ -82,7 +85,7 @@ func (t *Table) SeekFirst(ctx context.Context) (*Cursor, error) {
 		Table:      t,
 		PageIdx:    pageIdx,
 		CellIdx:    0,
-		EndOfTable: aPage.LeafNode.Header.Cells == 1,
+		EndOfTable: aPage.LeafNode.Header.Cells == 0,
 	}, nil
 }
 

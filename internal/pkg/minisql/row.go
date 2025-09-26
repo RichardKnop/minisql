@@ -87,18 +87,14 @@ func (r Row) Clone() Row {
 		Columns: make([]Column, 0, len(r.Columns)),
 		Values:  make([]any, 0, len(r.Values)),
 	}
-	for _, aColumn := range r.Columns {
-		aClone.Columns = append(aClone.Columns, aColumn)
-	}
-	for _, aValue := range r.Values {
-		aClone.Values = append(aClone.Values, aValue)
-	}
+	aClone.Columns = append(aClone.Columns, r.Columns...)
+	aClone.Values = append(aClone.Values, r.Values...)
 	return aClone
 }
 
 func (r Row) columnOffset(idx int) uint32 {
 	offset := uint32(0)
-	for i := 0; i < idx; i++ {
+	for i := range idx {
 		offset += r.Columns[i].Size
 	}
 	return offset
@@ -199,7 +195,6 @@ func UnmarshalRow(buf []byte, aRow *Row) error {
 				(uint32(buf[offset+2+0]) << 16) |
 				(uint32(buf[offset+3+0]) << 24)
 			aRow.Values = append(aRow.Values, int32(value))
-			offset += 4
 		case Int8:
 			value := 0 |
 				(uint64(buf[offset+0+0]) << 0) |
@@ -213,7 +208,7 @@ func UnmarshalRow(buf []byte, aRow *Row) error {
 			aRow.Values = append(aRow.Values, int64(value))
 		case Varchar:
 			dst := make([]byte, aColumn.Size)
-			copy(dst, buf[offset:aColumn.Size])
+			copy(dst, buf[offset:offset+aColumn.Size])
 			aRow.Values = append(aRow.Values, string(bytes.Trim(dst, "\x00")))
 		}
 	}
