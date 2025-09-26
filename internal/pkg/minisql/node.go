@@ -101,16 +101,21 @@ func (n *InternalNode) DeleteKeyByIndex(idx uint32) {
 	if n.Header.KeysNum == 0 {
 		return
 	}
+
 	if idx == n.Header.KeysNum {
-		n.Header.RightChild = n.ICells[len(n.ICells)-1].Child
-		n.ICells[len(n.ICells)-1] = ICell{}
+		idx -= 1
+	}
+
+	if idx == n.Header.KeysNum-1 {
+		n.Header.RightChild = n.ICells[idx].Child
 	} else {
-		for i := int(idx); i < len(n.ICells)-1; i++ {
+		n.ICells[idx+1].Child = n.ICells[idx].Child
+		for i := int(idx); i < int(n.Header.KeysNum); i++ {
 			n.ICells[i] = n.ICells[i+1]
 		}
 	}
 
-	n.ICells[idx] = ICell{}
+	n.ICells[int(n.Header.KeysNum)-1] = ICell{}
 	n.Header.KeysNum -= 1
 }
 

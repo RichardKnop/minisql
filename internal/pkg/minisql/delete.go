@@ -15,7 +15,7 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 
 	var (
 		unfilteredPipe = make(chan Row)
-		filteredPipe   = make(chan Row)
+		filteredPipe   = make(chan uint64)
 		errorsPipe     = make(chan error, 1)
 		stopChan       = make(chan bool)
 	)
@@ -23,13 +23,11 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 	go func(out chan<- Row) {
 		defer close(out)
 		for !aCursor.EndOfTable {
-			rowCursor := *aCursor
 			aRow, err := aCursor.fetchRow(ctx)
 			if err != nil {
 				errorsPipe <- err
 				return
 			}
-			aRow.cursor = rowCursor
 
 			select {
 			case <-stopChan:
@@ -41,11 +39,11 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 	}(unfilteredPipe)
 
 	// Filter rows according the WHERE conditions
-	go func(in <-chan Row, out chan<- Row, conditions OneOrMore) {
+	go func(in <-chan Row, out chan<- uint64, conditions OneOrMore) {
 		defer close(out)
 		for aRow := range in {
 			if len(conditions) == 0 {
-				out <- aRow
+				out <- aRow.key
 				continue
 			}
 			ok, err := aRow.CheckOneOrMore(conditions)
@@ -54,7 +52,7 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 				return
 			}
 			if ok {
-				out <- aRow
+				out <- aRow.key
 			}
 		}
 	}(unfilteredPipe, filteredPipe, stmt.Conditions)
@@ -63,18 +61,24 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 		Columns: t.Columns,
 	}
 
-	go func(in <-chan Row) {
+	go func(in <-chan uint64) {
 		defer close(stopChan)
 		// When deleting multiple rows, we first collect them all
 		// and then delete them one by one. This is to avoid fetchRow
 		// in unfiltered pipe to skip rows that have been deleted while
 		// scanning the table when doing multiple deletions.
-		rows := make([]Row, 0, 100)
-		for aRow := range in {
-			rows = append(rows, aRow)
+		keys := make([]uint64, 0, 100)
+		for aKey := range in {
+			keys = append(keys, aKey)
 		}
-		for _, aRow := range rows {
-			if err := aRow.cursor.delete(ctx); err != nil {
+		for _, aKey := range keys {
+			aCursor, err := t.Seek(ctx, aKey)
+			if err != nil {
+				errorsPipe <- err
+				return
+			}
+
+			if err := aCursor.delete(ctx); err != nil {
 				errorsPipe <- err
 				return
 			}

@@ -139,16 +139,16 @@ func (g *dataGen) Rows(number int) []Row {
 	// Make sure all rows will have unique ID, this is important in some tests
 	idMap := map[int64]struct{}{}
 	rows := make([]Row, 0, number)
-	for range number {
+	for i := range number {
 		aRow := g.Row()
 		_, ok := idMap[aRow.Values[0].(int64)]
 		for ok {
 			aRow = g.Row()
 			_, ok = idMap[aRow.Values[0].(int64)]
 		}
+		aRow.key = uint64(i)
 		rows = append(rows, aRow)
 		idMap[aRow.Values[0].(int64)] = struct{}{}
-
 	}
 	return rows
 }

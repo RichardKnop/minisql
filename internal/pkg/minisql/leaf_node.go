@@ -219,7 +219,7 @@ func (n *LeafNode) Delete(key uint64) (Cell, bool) {
 	}
 
 	cellIdx := -1
-	for i := 0; i < len(n.Cells); i++ {
+	for i := 0; i < int(n.Header.Cells); i++ {
 		if n.Cells[i].Key == key {
 			cellIdx = i
 			break
@@ -231,10 +231,10 @@ func (n *LeafNode) Delete(key uint64) (Cell, bool) {
 	}
 	aCellToDelete := n.Cells[cellIdx]
 
-	for i := int(cellIdx); i < len(n.Cells)-1; i++ {
-		n.Cells[cellIdx] = n.Cells[cellIdx+1]
+	for i := int(cellIdx); i < int(n.Header.Cells)-1; i++ {
+		n.Cells[i] = n.Cells[i+1]
 	}
-	n.Cells[len(n.Cells)-1] = NewCell(n.RowSize)
+	n.Cells[int(n.Header.Cells)-1] = NewCell(n.RowSize)
 
 	n.Header.Cells -= 1
 

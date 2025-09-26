@@ -8,6 +8,7 @@ import (
 type Row struct {
 	Columns []Column
 	Values  []any
+	key     uint64
 	// for updates, we store cursor internally
 	cursor Cursor
 }
@@ -86,6 +87,7 @@ func (r Row) Clone() Row {
 	aClone := Row{
 		Columns: make([]Column, 0, len(r.Columns)),
 		Values:  make([]any, 0, len(r.Values)),
+		key:     r.key,
 	}
 	aClone.Columns = append(aClone.Columns, r.Columns...)
 	aClone.Values = append(aClone.Values, r.Values...)

@@ -410,34 +410,6 @@ func (t *Table) DeleteKey(ctx context.Context, pageIdx uint32, key uint64) error
 	return nil
 }
 
-// func isInternal(aPage *Page) (*InternalNode, bool) {
-// 	if aPage.InternalNode == nil {
-// 		return nil, false
-// 	}
-// 	return aPage.InternalNode, true
-// }
-
-// func isLeaf(aPage *Page) (*LeafNode, bool) {
-// 	if aPage.LeafNode == nil {
-// 		return nil, false
-// 	}
-// 	return aPage.LeafNode, true
-// }
-
-// func hasParent(aPage *Page) (uint32, bool) {
-// 	if aNode, ok := isLeaf(aPage); ok {
-// 		return aNode.Header.Parent, true
-// 	}
-
-// 	if aNode, ok := isInternal(aPage); ok {
-// 		if !aNode.Header.IsRoot {
-// 			return aNode.Header.Parent, true
-// 		}
-// 	}
-
-// 	return 0, false
-// }
-
 func isPageLessThanHalfFull(aPage *Page) bool {
 	if aPage.LeafNode != nil && !aPage.LeafNode.AtLeastHalfFull() {
 		return true
@@ -469,13 +441,13 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 		leftSibling  *Page
 		rightSibling *Page
 	)
-	if idx < aParentPage.InternalNode.Header.KeysNum-1 {
-		rightSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.GetRightChildByIndex(idx))
+	if idx > 0 {
+		leftSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.ICells[idx-1].Child)
 		if err != nil {
 			return err
 		}
-	} else if idx > 0 {
-		leftSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.ICells[idx-1].Child)
+	} else {
+		rightSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.GetRightChildByIndex(idx))
 		if err != nil {
 			return err
 		}
@@ -499,7 +471,7 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 		)
 	}
 
-	if rightSibling != nil && !rightSibling.LeafNode.AtLeastHalfFull() {
+	if rightSibling != nil && int(rightSibling.LeafNode.Header.Cells+aLeafNode.Header.Cells) <= len(aLeafNode.Cells) {
 		return t.mergeLeafs(
 			ctx,
 			aParentPage,
@@ -509,7 +481,7 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 		)
 	}
 
-	if leftSibling != nil && !leftSibling.LeafNode.AtLeastHalfFull() {
+	if leftSibling != nil && int(leftSibling.LeafNode.Header.Cells+aLeafNode.Header.Cells) <= len(aLeafNode.Cells) {
 		return t.mergeLeafs(
 			ctx,
 			aParentPage,
@@ -545,14 +517,14 @@ func (t *Table) borrowFromRightLeaf(aParent *InternalNode, aNode, rightSibling *
 	rightSibling.RemoveFirstCell()
 	aNode.AppendCells(aCellToRotate)
 
-	aParent.ICells[idx].Key = rightSibling.FirstCell().Key
+	aParent.ICells[idx].Key = aNode.LastCell().Key
 
 	return nil
 }
 
 // mergeLeafs merges two leaf nodes and deletes the key from the parent node.
 func (t *Table) mergeLeafs(ctx context.Context, aParent *Page, aPredecessor, aSuccessor *LeafNode, idx uint32) error {
-	aPredecessor.AppendCells(aSuccessor.Cells...)
+	aPredecessor.AppendCells(aSuccessor.Cells[0:aSuccessor.Header.Cells]...)
 	aPredecessor.Header.NextLeaf = aSuccessor.Header.NextLeaf
 	aParent.InternalNode.DeleteKeyByIndex(idx)
 

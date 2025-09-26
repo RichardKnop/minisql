@@ -147,6 +147,7 @@ func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
 	if err := UnmarshalRow(aPage.LeafNode.Cells[c.CellIdx].Value[:], &aRow); err != nil {
 		return Row{}, err
 	}
+	aRow.key = aPage.LeafNode.Cells[c.CellIdx].Key
 
 	// There are still more cells in the page, move cursor to next cell and return
 	if c.CellIdx < aPage.LeafNode.Header.Cells-1 {
