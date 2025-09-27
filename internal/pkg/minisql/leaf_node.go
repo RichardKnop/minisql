@@ -140,9 +140,7 @@ func NewLeafNode(rowSize uint64, cells ...Cell) *LeafNode {
 	}
 	if len(cells) > 0 {
 		aNode.Header.Cells = uint32(len(cells))
-		for i, aCell := range cells {
-			aNode.Cells[i] = aCell
-		}
+		copy(aNode.Cells, cells)
 	}
 	return &aNode
 }
@@ -206,11 +204,11 @@ func (n *LeafNode) Unmarshal(buf []byte) (uint64, error) {
 }
 
 func (n *LeafNode) AtLeastHalfFull() bool {
-	return int(n.Header.Cells) >= len(n.Cells)/2
+	return int(n.Header.Cells) >= (len(n.Cells)+1)/2
 }
 
 func (n *LeafNode) MoreThanHalfFull() bool {
-	return int(n.Header.Cells) > len(n.Cells)/2
+	return int(n.Header.Cells) > (len(n.Cells)+1)/2
 }
 
 func (n *LeafNode) Delete(key uint64) (Cell, bool) {

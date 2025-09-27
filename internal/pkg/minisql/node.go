@@ -82,11 +82,11 @@ func (n *InternalNode) SetChildIdx(idx, newIdx uint32) error {
 }
 
 func (n *InternalNode) AtLeastHalfFull() bool {
-	return int(n.Header.KeysNum) >= len(n.ICells)/2
+	return int(n.Header.KeysNum) >= (len(n.ICells)+1)/2
 }
 
 func (n *InternalNode) MoreThanHalfFull() bool {
-	return int(n.Header.KeysNum) > len(n.ICells)/2
+	return int(n.Header.KeysNum) > (len(n.ICells)+1)/2
 }
 
 func (n *InternalNode) GetRightChildByIndex(idx uint32) uint32 {

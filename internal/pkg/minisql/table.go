@@ -487,7 +487,7 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 			aParentPage,
 			leftSibling.LeafNode,
 			aLeafNode,
-			idx,
+			idx-1,
 		)
 	}
 
@@ -523,9 +523,10 @@ func (t *Table) borrowFromRightLeaf(aParent *InternalNode, aNode, rightSibling *
 }
 
 // mergeLeafs merges two leaf nodes and deletes the key from the parent node.
-func (t *Table) mergeLeafs(ctx context.Context, aParent *Page, aPredecessor, aSuccessor *LeafNode, idx uint32) error {
-	aPredecessor.AppendCells(aSuccessor.Cells[0:aSuccessor.Header.Cells]...)
-	aPredecessor.Header.NextLeaf = aSuccessor.Header.NextLeaf
+func (t *Table) mergeLeafs(ctx context.Context, aParent *Page, left, right *LeafNode, idx uint32) error {
+	left.AppendCells(right.Cells[0:right.Header.Cells]...)
+	left.Header.NextLeaf = right.Header.NextLeaf
+	// Remove key from parent plus the right child pointer
 	aParent.InternalNode.DeleteKeyByIndex(idx)
 
 	if aParent.InternalNode.Header.IsRoot && aParent.InternalNode.Header.KeysNum == 0 {
@@ -534,9 +535,9 @@ func (t *Table) mergeLeafs(ctx context.Context, aParent *Page, aPredecessor, aSu
 			return err
 		}
 		aRootPage.InternalNode = nil
-		aRootPage.LeafNode = aPredecessor
-		aPredecessor.Header.IsRoot = true
-		aPredecessor.Header.Parent = 0
+		aRootPage.LeafNode = left
+		left.Header.IsRoot = true
+		left.Header.Parent = 0
 		return nil
 	}
 

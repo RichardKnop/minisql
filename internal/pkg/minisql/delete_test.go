@@ -72,7 +72,6 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 
 func TestTable_Delete_RootInternalNode_SecondLevelLeafs(t *testing.T) {
 	t.Parallel()
-	t.Skip()
 
 	/*
 		In this test we will be deleting from slightly less trivial tree with
@@ -142,35 +141,33 @@ func TestTable_Delete_RootInternalNode_SecondLevelLeafs(t *testing.T) {
 	*/
 
 	printTree(t, aTable)
-	assert.Equal(t, uint32(5), aRootPage.InternalNode.Header.KeysNum)
+	assert.Equal(t, 5, int(aRootPage.InternalNode.Header.KeysNum))
 
-	t.Run("delete first three rows to force merging of first two leaves", func(t *testing.T) {
-		keys := rowKeys(rows[0], rows[1], rows[2])
+	t.Run("delete first row to force merging of first two leaves", func(t *testing.T) {
+		ids := rowIDs(rows[0])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
 			TableName:  "foo",
-			Conditions: FieldIsIn("id", Integer, keys...),
+			Conditions: FieldIsIn("id", Integer, ids...),
 		})
 		require.NoError(t, err)
-		assert.Equal(t, 3, deleteResult.RowsAffected)
+		assert.Equal(t, 1, deleteResult.RowsAffected)
 
-		checkRowsAfterDeletion(ctx, t, aTable, rows[3:])
+		checkRowsAfterDeletion(ctx, t, aTable, rows[1:])
 
 		/*
-			After merging of leaf nodes.
-
-			           +----------------------------------------------+
-			           |      5,        8,         11,        14      |
-			           +----------------------------------------------+
-			          /            /         /            /           \
-			+-------+     +-------+    +---------+    +----------+     +----------------+
-			| 3,4,5 |     | 6,7,8 |    | 9,10,11 |    | 12,13,14 |     | 15,16,17,18,19 |
-			+-------+     +-------+    +---------+    +----------+     +----------------+
+				          +----------------------------------------------+
+				          |      5,        8,         11,        14      |
+				          +----------------------------------------------+
+				         /           /          /            /           \
+			+-----------+     +-------+    +---------+    +----------+     +----------------+
+			| 1,2,3,4,5 |     | 6,7,8 |    | 9,10,11 |    | 12,13,14 |     | 15,16,17,18,19 |
+			+-----------+     +-------+    +---------+    +----------+     +----------------+
 		*/
 
 		printTree(t, aTable)
-		assert.Equal(t, uint32(4), aRootPage.InternalNode.Header.KeysNum)
-		assertLeafKeys(t, leafs[0].LeafNode, 3, 4, 5)
+		assert.Equal(t, 4, int(aRootPage.InternalNode.Header.KeysNum))
+		assertLeafKeys(t, leafs[0].LeafNode, 1, 2, 3, 4, 5)
 		// leafs[1] has been merged into leafs[0]
 		assertLeafKeys(t, leafs[2].LeafNode, 6, 7, 8)
 		assertLeafKeys(t, leafs[3].LeafNode, 9, 10, 11)
@@ -178,83 +175,114 @@ func TestTable_Delete_RootInternalNode_SecondLevelLeafs(t *testing.T) {
 		assertLeafKeys(t, leafs[5].LeafNode, 15, 16, 17, 18, 19)
 	})
 
-	t.Run("delete last four rows to force borrowing from left sibling", func(t *testing.T) {
-		keys := rowKeys(rows[16], rows[17], rows[18], rows[19])
+	t.Run("delete last three rows to force merging of last two leaves", func(t *testing.T) {
+		ids := rowIDs(rows[17], rows[18], rows[19])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
 			TableName:  "foo",
-			Conditions: FieldIsIn("id", Integer, keys...),
+			Conditions: FieldIsIn("id", Integer, ids...),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 3, deleteResult.RowsAffected)
+
+		checkRowsAfterDeletion(ctx, t, aTable, rows[1:17])
+
+		/*
+				          +------------------------------------+
+				          |      5,        8,         11,      |
+				          +------------------------------------+
+				         /           /          /               \
+			+-----------+     +-------+    +---------+    +----------------+
+			| 1,2,3,4,5 |     | 6,7,8 |    | 9,10,11 |    | 12,13,14,15,16 |
+			+-----------+     +-------+    +---------+    +----------------+
+		*/
+
+		printTree(t, aTable)
+		assert.Equal(t, 3, int(aRootPage.InternalNode.Header.KeysNum))
+		assertLeafKeys(t, leafs[0].LeafNode, 1, 2, 3, 4, 5)
+		assertLeafKeys(t, leafs[2].LeafNode, 6, 7, 8)
+		assertLeafKeys(t, leafs[3].LeafNode, 9, 10, 11)
+		assertLeafKeys(t, leafs[4].LeafNode, 12, 13, 14, 15, 16)
+	})
+
+	t.Run("keep deleting more rows, another merge", func(t *testing.T) {
+		ids := rowIDs(rows[2], rows[4], rows[6]) //, rows[6], rows[9], rows[11], rows[13])
+		deleteResult, err := aTable.Delete(ctx, Statement{
+			Kind:       Delete,
+			TableName:  "foo",
+			Conditions: FieldIsIn("id", Integer, ids...),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 3, deleteResult.RowsAffected)
+
+		checkRowsAfterDeletion(ctx, t, aTable, []Row{
+			rows[1], rows[3], rows[5], rows[7], rows[8],
+			rows[9], rows[10], rows[11],
+			rows[12], rows[13], rows[14], rows[15], rows[16],
+		})
+
+		/*
+			           +----------------------------+
+			           |        8,         11,      |
+			           +----------------------------+
+			          /              /               \
+			+-----------+      +---------+      +----------------+
+			| 1,3,5,7,8 |      | 9,10,11 |      | 12,13,14,15,16 |
+			+-----------+      +---------+      +----------------+
+		*/
+
+		printTree(t, aTable)
+		assert.Equal(t, 2, int(aRootPage.InternalNode.Header.KeysNum))
+		assertLeafKeys(t, leafs[0].LeafNode, 1, 3, 5, 7, 8)
+		assertLeafKeys(t, leafs[3].LeafNode, 9, 10, 11)
+		assertLeafKeys(t, leafs[4].LeafNode, 12, 13, 14, 15, 16)
+	})
+
+	t.Run("keep deleting more rows, no merge", func(t *testing.T) {
+		ids := rowIDs(rows[9], rows[11], rows[13], rows[15])
+		deleteResult, err := aTable.Delete(ctx, Statement{
+			Kind:       Delete,
+			TableName:  "foo",
+			Conditions: FieldIsIn("id", Integer, ids...),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 4, deleteResult.RowsAffected)
 
-		checkRowsAfterDeletion(ctx, t, aTable, rows[3:16])
-
-		/*
-			After merging of leaf nodes.
-
-			           +----------------------------------------------+
-			           |      5,        8,         11,        13      |
-			           +----------------------------------------------+
-			          /            /         /            /           \
-			+-------+     +-------+    +---------+    +-------+     +-------+
-			| 3,4,5 |     | 6,7,8 |    | 9,10,11 |    | 12,13 |     | 14,15 |
-			+-------+     +-------+    +---------+    +-------+     +-------+
-		*/
-
-		printTree(t, aTable)
-		assert.Equal(t, uint32(4), aRootPage.InternalNode.Header.KeysNum)
-		assertLeafKeys(t, leafs[0].LeafNode, 3, 4, 5)
-		assertLeafKeys(t, leafs[2].LeafNode, 6, 7, 8)
-		assertLeafKeys(t, leafs[3].LeafNode, 9, 10, 11)
-		assertLeafKeys(t, leafs[4].LeafNode, 12, 13)
-		assertLeafKeys(t, leafs[5].LeafNode, 14, 15)
-	})
-
-	t.Run("delete one more row to force merging of last two leaves", func(t *testing.T) {
-		keys := rowKeys(rows[15])
-		deleteResult, err := aTable.Delete(ctx, Statement{
-			Kind:       Delete,
-			TableName:  "foo",
-			Conditions: FieldIsIn("id", Integer, keys...),
+		checkRowsAfterDeletion(ctx, t, aTable, []Row{
+			rows[1], rows[3], rows[5],
+			rows[7], rows[8], rows[10],
+			rows[12], rows[14], rows[16],
 		})
-		require.NoError(t, err)
-		assert.Equal(t, 1, deleteResult.RowsAffected)
-
-		checkRowsAfterDeletion(ctx, t, aTable, rows[3:15])
 
 		/*
-			After merging of leaf nodes.
-
-			           +------------------------------------+
-			           |      5,        8,         11,      |
-			           +------------------------------------+
-			          /            /         /              \
-			+-------+     +-------+    +---------+      +----------+
-			| 3,4,5 |     | 6,7,8 |    | 9,10,11 |      | 12,13,14 |
-			+-------+     +-------+    +---------+      +----------+
+			           +----------------------------+
+			           |        8,         11,      |
+			           +----------------------------+
+			          /              /               \
+			+--------+           +--------+          +----------+
+			| 1,3,5, |           | 7,8,10 |          | 12,14,16 |
+			+--------+           +--------+          +----------+
 		*/
 
 		printTree(t, aTable)
-		assert.Equal(t, uint32(3), aRootPage.InternalNode.Header.KeysNum)
-		assertLeafKeys(t, leafs[0].LeafNode, 3, 4, 5)
-		assertLeafKeys(t, leafs[2].LeafNode, 6, 7, 8)
-		assertLeafKeys(t, leafs[3].LeafNode, 9, 10, 11)
-		assertLeafKeys(t, leafs[4].LeafNode, 12, 13, 14)
+		assert.Equal(t, 2, int(aRootPage.InternalNode.Header.KeysNum))
+		assertLeafKeys(t, leafs[0].LeafNode, 1, 3, 5)
+		assertLeafKeys(t, leafs[3].LeafNode, 7, 8, 10)
+		assertLeafKeys(t, leafs[4].LeafNode, 12, 14, 16)
 	})
 
-	assert.True(t, false)
+	// assert.True(t, false)
 }
 
-func rowKeys(rows ...Row) []any {
-	keys := make([]any, 0, len(rows))
+func rowIDs(rows ...Row) []any {
+	ids := make([]any, 0, len(rows))
 	for _, r := range rows {
 		id, ok := r.GetValue("id")
 		if ok {
-			keys = append(keys, id.(int64))
+			ids = append(ids, id.(int64))
 		}
 	}
-	return keys
+	return ids
 }
 
 func assertLeafKeys(t *testing.T, aLeaf *LeafNode, expectedKeys ...uint64) {
@@ -343,6 +371,13 @@ func printTree(t *testing.T, aTable *Table) {
 				keys = append(keys, aPage.InternalNode.ICells[i].Key)
 			}
 			fmt.Println("Keys:", keys)
+
+			children := make([]uint32, 0, aPage.InternalNode.Header.KeysNum)
+			for i := range aPage.InternalNode.Header.KeysNum {
+				children = append(children, aPage.InternalNode.ICells[i].Child)
+			}
+			children = append(children, aPage.InternalNode.Header.RightChild)
+			fmt.Println("Children:", children)
 		} else {
 			fmt.Println("Leaf node, number of cells:", aPage.LeafNode.Header.Cells, "parent:", aPage.LeafNode.Header.Parent, "next leaf:", aPage.LeafNode.Header.NextLeaf)
 			keys := make([]uint64, 0, aPage.LeafNode.Header.Cells)
