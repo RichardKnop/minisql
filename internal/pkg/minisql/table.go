@@ -503,7 +503,7 @@ func (t *Table) borrowFromLeftLeaf(aParent *InternalNode, aNode, leftSibling *Le
 	leftSibling.RemoveLastCell()
 	aNode.PrependCell(aCellToRotate)
 
-	aParent.ICells[idx-1].Key = aNode.FirstCell().Key
+	aParent.ICells[idx-1].Key = leftSibling.LastCell().Key
 
 	return nil
 }

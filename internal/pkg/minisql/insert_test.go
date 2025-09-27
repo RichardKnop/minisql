@@ -355,6 +355,5 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		} else {
 			assert.Equal(t, 343, int(aLeaf.LeafNode.Header.Parent), fmt.Sprintf("parent not 343 %d", i))
 		}
-
 	}
 }

@@ -263,7 +263,7 @@ func (n *LeafNode) RemoveFirstCell() {
 }
 
 func (n *LeafNode) PrependCell(aCell Cell) {
-	for i := int(n.Header.Cells) - 1; i > 0; i-- {
+	for i := int(n.Header.Cells); i > 0; i-- {
 		n.Cells[i] = n.Cells[i-1]
 	}
 	n.Cells[0] = aCell
