@@ -129,7 +129,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	// If we won't need to split the internal node,
 	// update parent to reflect new max key
 	oldChildIdx := aParentPage.InternalNode.IndexOfChild(originalMaxKey)
-	if oldChildIdx < InternalNodeMaxCells {
+	if oldChildIdx < c.Table.maxICells {
 		oldPageNewMaxKey, _ := aSplitPage.GetMaxKey()
 		aParentPage.InternalNode.ICells[oldChildIdx].Key = oldPageNewMaxKey
 	}

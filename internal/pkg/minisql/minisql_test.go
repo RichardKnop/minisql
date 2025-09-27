@@ -211,18 +211,6 @@ func (g *dataGen) BigRows(number int) []Row {
 	return rows
 }
 
-// func newInternalPageWithCells(iCells []ICell, rightChildIdx uint32) *Page {
-// 	aRoot := NewInternalNode()
-// 	aRoot.Header.KeysNum = uint32(len(iCells))
-// 	aRoot.Header.RightChild = rightChildIdx
-
-// 	for i, iCell := range iCells {
-// 		aRoot.ICells[i] = iCell
-// 	}
-
-// 	return &Page{InternalNode: aRoot}
-// }
-
 func newRootLeafPageWithCells(cells, rowSize int) *Page {
 	aRootLeaf := NewLeafNode(uint64(rowSize))
 	aRootLeaf.Header.Header.IsRoot = true

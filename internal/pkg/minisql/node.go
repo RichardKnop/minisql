@@ -39,16 +39,16 @@ func (n *InternalNode) IndexOfKey(key uint64) (uint32, bool) {
 }
 
 // IndexOfPage returns index of child which contains page number
-// and a boolean flag indicating whether page number was found
-// in the node or not.
-func (n *InternalNode) IndexOfPage(pageIdx uint32) (uint32, bool) {
+func (n *InternalNode) IndexOfPage(pageIdx uint32) (uint32, error) {
 	for idx, aCell := range n.ICells {
 		if aCell.Child == pageIdx {
-			return uint32(idx), true
+			return uint32(idx), nil
 		}
 	}
-
-	return 0, false
+	if n.Header.RightChild == pageIdx {
+		return n.Header.KeysNum, nil
+	}
+	return 0, fmt.Errorf("pageIdx %d not found", pageIdx)
 }
 
 // Child returns a node index of nth child of the node marked by its index

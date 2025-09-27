@@ -8,12 +8,6 @@ import (
 	"go.uber.org/zap"
 )
 
-var (
-	errMaximumPagesReached = fmt.Errorf("maximum pages reached")
-	errTableDoesNotExist   = fmt.Errorf("table does not exist")
-	errTableAlreadyExists  = fmt.Errorf("table already exists")
-)
-
 type Pager interface {
 	GetPage(context.Context, *Table, uint32) (*Page, error)
 	// ListPages() []*Page
@@ -27,6 +21,7 @@ type Table struct {
 	RootPageIdx uint32
 	RowSize     uint64
 	pager       Pager
+	maxICells   uint32
 	lock        *sync.RWMutex
 	logger      *zap.Logger
 }
@@ -38,6 +33,7 @@ func NewTable(logger *zap.Logger, name string, columns []Column, pager Pager, ro
 		RootPageIdx: rootPageIdx,
 		RowSize:     Row{Columns: columns}.Size(),
 		pager:       pager,
+		maxICells:   InternalNodeMaxCells,
 		lock:        new(sync.RWMutex),
 		logger:      logger,
 	}
@@ -97,14 +93,14 @@ func (t *Table) Seek(ctx context.Context, key uint64) (*Cursor, error) {
 		return nil, err
 	}
 	if aRootPage.LeafNode != nil {
-		return t.leafNodeSeek(ctx, t.RootPageIdx, aRootPage, key)
+		return t.leafNodeSeek(t.RootPageIdx, aRootPage, key)
 	} else if aRootPage.InternalNode != nil {
 		return t.internalNodeSeek(ctx, aRootPage, key)
 	}
 	return nil, fmt.Errorf("root page type")
 }
 
-func (t *Table) leafNodeSeek(ctx context.Context, pageIdx uint32, aPage *Page, key uint64) (*Cursor, error) {
+func (t *Table) leafNodeSeek(pageIdx uint32, aPage *Page, key uint64) (*Cursor, error) {
 	var (
 		minIdx uint32
 		maxIdx = aPage.LeafNode.Header.Cells
@@ -150,7 +146,7 @@ func (t *Table) internalNodeSeek(ctx context.Context, aPage *Page, key uint64) (
 	if aChildPage.InternalNode != nil {
 		return t.internalNodeSeek(ctx, aChildPage, key)
 	}
-	return t.leafNodeSeek(ctx, childPageIdx, aChildPage, key)
+	return t.leafNodeSeek(childPageIdx, aChildPage, key)
 }
 
 // Handle splitting the root.
@@ -254,7 +250,7 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 		originalKeyCount = aParentPage.InternalNode.Header.KeysNum
 	)
 
-	if aParentPage.InternalNode.Header.KeysNum >= InternalNodeMaxCells {
+	if aParentPage.InternalNode.Header.KeysNum >= t.maxICells {
 		return t.InternalNodeSplitInsert(ctx, parentPageIdx, childPageIdx)
 	}
 
@@ -316,7 +312,7 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 	).Debug("internal node split insert")
 
 	var (
-		maxCells        = InternalNodeMaxCells       // 340
+		maxCells        = t.maxICells                // 340
 		rightSplitCount = (maxCells - 1) / 2         // 339/2 = 169
 		leftSplitCount  = maxCells - rightSplitCount // 340-169 = 171
 	)
@@ -538,6 +534,7 @@ func (t *Table) mergeLeafs(ctx context.Context, aParent *Page, left, right *Leaf
 		aRootPage.LeafNode = left
 		left.Header.IsRoot = true
 		left.Header.Parent = 0
+		left.Header.NextLeaf = 0
 		return nil
 	}
 
@@ -571,19 +568,22 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 		return err
 	}
 
-	idx, ok := aParentPage.InternalNode.IndexOfPage(aPage.Index)
+	idx, err := aParentPage.InternalNode.IndexOfPage(aPage.Index)
+	if err != nil {
+		return err
+	}
 
 	var (
 		leftSibling  *Page
 		rightSibling *Page
 	)
-	if ok && idx < aParentPage.InternalNode.Header.KeysNum-1 {
-		rightSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.GetRightChildByIndex(uint32(idx)))
+	if idx > 0 {
+		leftSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.ICells[idx-1].Child)
 		if err != nil {
 			return err
 		}
-	} else if ok && idx > 0 {
-		leftSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.ICells[idx-1].Child)
+	} else {
+		rightSibling, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.GetRightChildByIndex(idx))
 		if err != nil {
 			return err
 		}
@@ -607,7 +607,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 		)
 	}
 
-	if rightSibling != nil && !rightSibling.LeafNode.MoreThanHalfFull() {
+	if rightSibling != nil && int(rightSibling.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= len(aNode.ICells) {
 		return t.mergeInternalNodes(
 			ctx,
 			aParentPage,
@@ -617,7 +617,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 		)
 	}
 
-	if leftSibling != nil && !leftSibling.LeafNode.MoreThanHalfFull() {
+	if leftSibling != nil && int(leftSibling.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= len(aNode.ICells) {
 		return t.mergeInternalNodes(
 			ctx,
 			aParentPage,
