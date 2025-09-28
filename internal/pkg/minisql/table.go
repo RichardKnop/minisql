@@ -242,7 +242,11 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 	if err != nil {
 		return err
 	}
-	aChildPage.LeafNode.Header.Parent = parentPageIdx
+	if aChildPage.LeafNode != nil {
+		aChildPage.LeafNode.Header.Parent = parentPageIdx
+	} else if aChildPage.InternalNode != nil {
+		aChildPage.InternalNode.Header.Parent = parentPageIdx
+	}
 
 	var (
 		childMaxKey, _   = aChildPage.GetMaxKey()
@@ -293,23 +297,33 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 	}
 	originalMaxKey, _ := aSplitPage.GetMaxKey()
 
-	// Create a new sibling page, it will be on the same level as original node and to the right of it
-	siblingPageIdx := t.pager.TotalPages()
-	aSiblingPage, err := t.pager.GetPage(ctx, t, siblingPageIdx)
+	// Create a new page, it will be on the same level as original node and to the right of it
+	newPageIdx := t.pager.TotalPages()
+	aNewPage, err := t.pager.GetPage(ctx, t, newPageIdx)
 	if err != nil {
 		return err
 	}
 
 	// Make sure the sibling page is an internal node
-	aSiblingPage.InternalNode = NewInternalNode()
-	aSiblingPage.LeafNode = nil
+	aNewPage.InternalNode = NewInternalNode()
+	aNewPage.LeafNode = nil
 	// Set the sibling node parent
-	aSiblingPage.InternalNode.Header.Parent = aSplitPage.InternalNode.Header.Parent
+	aNewPage.InternalNode.Header.Parent = aSplitPage.InternalNode.Header.Parent
 
 	t.logger.Sugar().With(
 		"page_index", int(pageIdx),
-		"sibling_page_index", int(siblingPageIdx),
+		"new_page_index", int(newPageIdx),
 	).Debug("internal node split insert")
+
+	// for i := range aSplitPage.InternalNode.Header.KeysNum {
+	// 	fmt.Println("BEFORE SPLIT KEY:", aSplitPage.InternalNode.ICells[i].Key)
+	// }
+	// for i := range aSplitPage.InternalNode.Header.KeysNum {
+	// 	fmt.Println("BEFORE SPLIT CHILD:", aSplitPage.InternalNode.ICells[i].Child)
+	// }
+	// if aSplitPage.InternalNode.Header.RightChild != RIGHT_CHILD_NOT_SET {
+	// 	fmt.Println("BEFORE SPLIT CHILD:", aSplitPage.InternalNode.Header.RightChild)
+	// }
 
 	var (
 		maxCells        = t.maxICells                // 340
@@ -317,44 +331,96 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 		leftSplitCount  = maxCells - rightSplitCount // 340-169 = 171
 	)
 
-	// Keep half of the keys on the original node, move another half to the sibling
-	for i := leftSplitCount; i < maxCells; i++ {
-		aCell := aSplitPage.InternalNode.ICells[i]
-		aSiblingPage.InternalNode.ICells[i-leftSplitCount] = aCell
-		aSplitPage.InternalNode.ICells[i] = ICell{}
+	// Keep half of the keys on the original node, move another half to the new node
+	aNewPage.InternalNode.Header.RightChild = aSplitPage.InternalNode.Header.RightChild
+	newPageRightChild, err := t.pager.GetPage(ctx, t, aNewPage.InternalNode.Header.RightChild)
+	if err != nil {
+		return err
+	}
+	if newPageRightChild.LeafNode != nil {
+		newPageRightChild.LeafNode.Header.Parent = newPageIdx
+	} else if newPageRightChild.InternalNode != nil {
+		newPageRightChild.InternalNode.Header.Parent = newPageIdx
+	}
 
-		aSiblingPage.InternalNode.Header.KeysNum += 1
-		aSplitPage.InternalNode.Header.KeysNum -= 1
+	aSplitPage.InternalNode.Header.RightChild = aSplitPage.InternalNode.ICells[leftSplitCount].Child
+	splitPageRightChild, err := t.pager.GetPage(ctx, t, aSplitPage.InternalNode.Header.RightChild)
+	if err != nil {
+		return err
+	}
+	if splitPageRightChild.LeafNode != nil {
+		splitPageRightChild.LeafNode.Header.Parent = newPageIdx
+	} else if splitPageRightChild.InternalNode != nil {
+		splitPageRightChild.InternalNode.Header.Parent = newPageIdx
+	}
+	aSplitPage.InternalNode.ICells[leftSplitCount] = ICell{}
+	aSplitPage.InternalNode.Header.KeysNum -= 1
 
-		// Update all pages we are moving to the sibling node on the right with new parent
-		movedPage, err := t.pager.GetPage(ctx, t, aCell.Child)
+	for i := leftSplitCount + 1; i < maxCells; i++ {
+		// Update all pages we are moving to the new node on the right with new parent
+		movedPage, err := t.pager.GetPage(ctx, t, aSplitPage.InternalNode.ICells[i].Child)
 		if err != nil {
 			return err
 		}
 
-		movedPage.LeafNode.Header.Parent = siblingPageIdx
-	}
-	// Since the split page was full, it had right child leaf set,
-	// add it as extra cell into the sibling page
-	aRightLeafPage, err := t.pager.GetPage(ctx, t, aSplitPage.InternalNode.Header.RightChild)
-	if err != nil {
-		return err
-	}
-	aRightLeafPage.LeafNode.Header.Parent = siblingPageIdx
-	aRightLeafMaxKey, _ := aRightLeafPage.GetMaxKey()
-	aSiblingPage.InternalNode.ICells[aSiblingPage.InternalNode.Header.KeysNum] = ICell{
-		Key:   aRightLeafMaxKey,
-		Child: aSplitPage.InternalNode.Header.RightChild,
-	}
-	aSiblingPage.InternalNode.Header.KeysNum += 1
+		if movedPage.LeafNode != nil {
+			movedPage.LeafNode.Header.Parent = newPageIdx
+		} else if movedPage.InternalNode != nil {
+			movedPage.InternalNode.Header.Parent = newPageIdx
+		}
 
-	// Save child now in the sibling page
-	if err := t.InternalNodeInsert(ctx, siblingPageIdx, childPageIdx); err != nil {
+		aNewPage.InternalNode.AppendCells(aSplitPage.InternalNode.ICells[i])
+		aSplitPage.InternalNode.ICells[i] = ICell{}
+		aSplitPage.InternalNode.Header.KeysNum -= 1
+	}
+
+	// fmt.Println(leftSplitCount, rightSplitCount)
+	// for i := range aSplitPage.InternalNode.Header.KeysNum {
+	// 	fmt.Println("AFTER SPLIT LEFT KEY:", aSplitPage.InternalNode.ICells[i].Key)
+	// }
+	// for i := range aNewPage.InternalNode.Header.KeysNum {
+	// 	fmt.Println("AFTER SPLIT RIGHT KEY:", aNewPage.InternalNode.ICells[i].Key)
+	// }
+	// for i := range aSplitPage.InternalNode.Header.KeysNum {
+	// 	fmt.Println("AFTER SPLIT LEFT CHILD:", aSplitPage.InternalNode.ICells[i].Child)
+	// }
+	// if aSplitPage.InternalNode.Header.RightChild != RIGHT_CHILD_NOT_SET {
+	// 	fmt.Println("AFTER SPLIT LEFT CHILD:", aSplitPage.InternalNode.Header.RightChild)
+	// }
+	// for i := range aNewPage.InternalNode.Header.KeysNum {
+	// 	fmt.Println("AFTER SPLIT RIGHT CHILD:", aNewPage.InternalNode.ICells[i].Child)
+	// }
+	// if aNewPage.InternalNode.Header.RightChild != RIGHT_CHILD_NOT_SET {
+	// 	fmt.Println("AFTER SPLIT RIGHT CHILD:", aNewPage.InternalNode.Header.RightChild)
+	// }
+
+	// Save child now in the new page
+	if err := t.InternalNodeInsert(ctx, newPageIdx, childPageIdx); err != nil {
 		return err
 	}
+
+	// fmt.Println(leftSplitCount, rightSplitCount)
+	// for i := range aSplitPage.InternalNode.Header.KeysNum {
+	// 	fmt.Println("AFTER SPLIT LEFT KEY:", aSplitPage.InternalNode.ICells[i].Key)
+	// }
+	// for i := range aNewPage.InternalNode.Header.KeysNum {
+	// 	fmt.Println("AFTER SPLIT RIGHT KEY:", aNewPage.InternalNode.ICells[i].Key)
+	// }
+	// for i := range aSplitPage.InternalNode.Header.KeysNum {
+	// 	fmt.Println("AFTER SPLIT LEFT CHILD:", aSplitPage.InternalNode.ICells[i].Child)
+	// }
+	// if aSplitPage.InternalNode.Header.RightChild != RIGHT_CHILD_NOT_SET {
+	// 	fmt.Println("AFTER SPLIT LEFT CHILD:", aSplitPage.InternalNode.Header.RightChild)
+	// }
+	// for i := range aNewPage.InternalNode.Header.KeysNum {
+	// 	fmt.Println("AFTER SPLIT RIGHT CHILD:", aNewPage.InternalNode.ICells[i].Child)
+	// }
+	// if aNewPage.InternalNode.Header.RightChild != RIGHT_CHILD_NOT_SET {
+	// 	fmt.Println("AFTER SPLIT RIGHT CHILD:", aNewPage.InternalNode.Header.RightChild)
+	// }
 
 	if aSplitPage.InternalNode.Header.IsRoot {
-		aSplitPage, err = t.CreateNewRoot(ctx, siblingPageIdx)
+		aSplitPage, err = t.CreateNewRoot(ctx, newPageIdx)
 		if err != nil {
 			return err
 		}
@@ -369,9 +435,21 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 		if err != nil {
 			return err
 		}
+
+		if aParentPage.InternalNode.Header.KeysNum >= t.maxICells {
+			return t.InternalNodeInsert(ctx, parentPageIdx, newPageIdx)
+		}
+
 		oldChildIdx := aParentPage.InternalNode.IndexOfChild(originalMaxKey)
 		newMaxKey, _ := aSplitPage.GetMaxKey()
-		aParentPage.InternalNode.ICells[oldChildIdx].Key = newMaxKey
+		aParentPage.InternalNode.ICells[oldChildIdx] = ICell{
+			Key:   newMaxKey,
+			Child: pageIdx,
+		}
+		if oldChildIdx == aParentPage.InternalNode.Header.KeysNum {
+			aParentPage.InternalNode.Header.KeysNum += 1
+		}
+		aParentPage.InternalNode.Header.RightChild = newPageIdx
 	}
 
 	return nil
@@ -394,7 +472,7 @@ func (t *Table) DeleteKey(ctx context.Context, pageIdx uint32, key uint64) error
 	aPage.LeafNode.Delete(key)
 
 	// Check for underflow
-	if !isPageLessThanHalfFull(aPage) {
+	if aPage.LeafNode.AtLeastHalfFull() {
 		return nil
 	}
 
@@ -404,16 +482,6 @@ func (t *Table) DeleteKey(ctx context.Context, pageIdx uint32, key uint64) error
 	}
 
 	return nil
-}
-
-func isPageLessThanHalfFull(aPage *Page) bool {
-	if aPage.LeafNode != nil && !aPage.LeafNode.AtLeastHalfFull() {
-		return true
-	}
-	if aPage.InternalNode != nil && !aPage.InternalNode.AtLeastHalfFull() {
-		return true
-	}
-	return false
 }
 
 func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) error {
@@ -539,7 +607,7 @@ func (t *Table) mergeLeafs(ctx context.Context, aParent *Page, left, right *Leaf
 	}
 
 	// Check for underflow
-	if !isPageLessThanHalfFull(aParent) {
+	if aParent.InternalNode.AtLeastHalfFull(int(t.maxICells)) {
 		return nil
 	}
 
@@ -589,7 +657,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 		}
 	}
 
-	if rightSibling != nil && rightSibling.InternalNode.MoreThanHalfFull() {
+	if rightSibling != nil && rightSibling.InternalNode.MoreThanHalfFull(int(t.maxICells)) {
 		return t.borrowFromRightInternal(
 			aParentPage.InternalNode,
 			aPage.InternalNode,
@@ -598,7 +666,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 		)
 	}
 
-	if leftSibling != nil && leftSibling.InternalNode.MoreThanHalfFull() {
+	if leftSibling != nil && leftSibling.InternalNode.MoreThanHalfFull(int(t.maxICells)) {
 		return t.borrowFromLeftInternal(
 			aParentPage.InternalNode,
 			aPage.InternalNode,
@@ -607,7 +675,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 		)
 	}
 
-	if rightSibling != nil && int(rightSibling.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= len(aNode.ICells) {
+	if rightSibling != nil && int(rightSibling.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= int(t.maxICells) {
 		return t.mergeInternalNodes(
 			ctx,
 			aParentPage,
@@ -617,7 +685,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 		)
 	}
 
-	if leftSibling != nil && int(leftSibling.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= len(aNode.ICells) {
+	if leftSibling != nil && int(leftSibling.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= int(t.maxICells) {
 		return t.mergeInternalNodes(
 			ctx,
 			aParentPage,
@@ -666,7 +734,7 @@ func (t *Table) mergeInternalNodes(ctx context.Context, aParent *Page, aPredeces
 	aParent.InternalNode.DeleteKeyByIndex(idx)
 
 	// Check for underflow
-	if !isPageLessThanHalfFull(aParent) {
+	if aParent.InternalNode.AtLeastHalfFull(int(t.maxICells)) {
 		return nil
 	}
 

@@ -264,11 +264,12 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		aTable         = NewTable(testLogger, "foo", testBigColumns, pagerMock, 0)
 		// These two pages will be returned as leafs by the pager as default behaviour
 		// for allocating a new page but will be converted to internal nodes
-		aNewRightInternal = &Page{LeafNode: NewLeafNode(rowSize)}
-		aNewLeftInternal  = &Page{LeafNode: NewLeafNode(rowSize)}
+		aNewRightInternal = &Page{LeafNode: NewLeafNode(rowSize), Index: uint32(343)}
+		aNewLeftInternal  = &Page{LeafNode: NewLeafNode(rowSize), Index: uint32(344)}
 	)
 	for i := 0; i < numRows; i++ {
 		leafs = append(leafs, &Page{LeafNode: NewLeafNode(rowSize)})
+		leafs[i].Index = uint32(i + 1)
 	}
 
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
@@ -279,8 +280,8 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	}
 	// Splitting root internal node causes 2 more pages to be requested, one for
 	// sibling internal node, one for new root node
-	pagerMock.On("GetPage", mock.Anything, aTable, uint32(343)).Return(aNewRightInternal, nil)
-	pagerMock.On("GetPage", mock.Anything, aTable, uint32(344)).Return(aNewLeftInternal, nil)
+	pagerMock.On("GetPage", mock.Anything, aTable, aNewRightInternal.Index).Return(aNewRightInternal, nil)
+	pagerMock.On("GetPage", mock.Anything, aTable, aNewLeftInternal.Index).Return(aNewLeftInternal, nil)
 
 	totalPages := uint32(1)
 	pagerMock.On("TotalPages").Return(func() uint32 {
@@ -312,10 +313,11 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	assert.Equal(t, 344, int(aRootPage.InternalNode.ICells[0].Child))
 	assert.Equal(t, 170, int(aRootPage.InternalNode.ICells[0].Key))
 
-	// New left internal node should have 171 cells (we move bigger half to the left).
+	// New left internal node should have 170 cells plus a right child.
 	// First two pages should be switched (2, 1) as a result of root leaf split
 	// but after that it continues as 3, 4, ... 171. Keys are 0, 1, ... 170
 	assert.Equal(t, 170, int(aNewLeftInternal.InternalNode.Header.KeysNum))
+	assert.Equal(t, 171, int(aNewLeftInternal.InternalNode.Header.RightChild))
 	assert.False(t, aNewLeftInternal.InternalNode.Header.IsRoot)
 	assert.True(t, aNewLeftInternal.InternalNode.Header.IsInternal)
 	assert.Equal(t, 0, int(aNewLeftInternal.InternalNode.ICells[0].Key))
@@ -326,16 +328,15 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		assert.Equal(t, i, int(aNewLeftInternal.InternalNode.ICells[i].Key))
 		assert.Equal(t, i+1, int(aNewLeftInternal.InternalNode.ICells[i].Child))
 	}
-	assert.Equal(t, 171, int(aNewLeftInternal.InternalNode.Header.RightChild))
 
-	// New right internal node will have 171 cells (smaller half 169 + right child page + new key).
+	// New right internal node will have 169 cells (smaller half 169 + right child page + new key).
 	// Children go from 172, 173, ... 342 and keys from 171, 172, ... 341
-	assert.Equal(t, 171, int(aNewRightInternal.InternalNode.Header.KeysNum))
+	assert.Equal(t, 169, int(aNewRightInternal.InternalNode.Header.KeysNum))
 	assert.False(t, aNewRightInternal.InternalNode.Header.IsRoot)
 	assert.True(t, aNewRightInternal.InternalNode.Header.IsInternal)
 	var (
-		firstRightKey   = 171
-		firstRightChild = 172
+		firstRightKey   = 172
+		firstRightChild = 173
 	)
 	for i := 0; i < 169; i++ {
 		assert.Equal(t, firstRightKey, int(aNewRightInternal.InternalNode.ICells[i].Key))
@@ -343,17 +344,21 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		firstRightKey += 1
 		firstRightChild += 1
 	}
-	assert.Equal(t, 340, int(aNewRightInternal.InternalNode.ICells[169].Key))
-	assert.Equal(t, 341, int(aNewRightInternal.InternalNode.ICells[169].Child))
+	assert.Equal(t, 340, int(aNewRightInternal.InternalNode.ICells[168].Key))
+	assert.Equal(t, 341, int(aNewRightInternal.InternalNode.ICells[168].Child))
 	assert.Equal(t, 342, int(aNewRightInternal.InternalNode.Header.RightChild))
 
 	for i, aLeaf := range leafs {
 		assert.Equal(t, 1, int(aLeaf.LeafNode.Header.Cells))
 		assert.Equal(t, i, int(aLeaf.LeafNode.Cells[0].Key))
+
 		if i < 171 {
 			assert.Equal(t, 344, int(aLeaf.LeafNode.Header.Parent), fmt.Sprintf("parent not 344 %d", i))
 		} else {
 			assert.Equal(t, 343, int(aLeaf.LeafNode.Header.Parent), fmt.Sprintf("parent not 343 %d", i))
 		}
 	}
+
+	// printTree(t, aTable)
+	checkRows(ctx, t, aTable, rows)
 }

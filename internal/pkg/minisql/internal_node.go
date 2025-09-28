@@ -1,5 +1,7 @@
 package minisql
 
+import "math"
+
 const (
 	// Page size: 4096
 	// Header size: 6 (base header) + 8 (internal header)
@@ -130,12 +132,15 @@ type InternalNode struct {
 	ICells [InternalNodeMaxCells]ICell
 }
 
+const RIGHT_CHILD_NOT_SET = math.MaxUint32
+
 func NewInternalNode() *InternalNode {
 	aNode := InternalNode{
 		Header: InternalNodeHeader{
 			Header: Header{
 				IsInternal: true,
 			},
+			RightChild: RIGHT_CHILD_NOT_SET,
 		},
 		ICells: [InternalNodeMaxCells]ICell{},
 	}

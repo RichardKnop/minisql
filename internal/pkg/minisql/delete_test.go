@@ -55,7 +55,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 1, deleteResult.RowsAffected)
 
-		checkRowsAfterDeletion(ctx, t, aTable, rows[1:])
+		checkRows(ctx, t, aTable, rows[1:])
 	})
 
 	t.Run("delete all rows", func(t *testing.T) {
@@ -66,7 +66,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 4, deleteResult.RowsAffected)
 
-		checkRowsAfterDeletion(ctx, t, aTable, nil)
+		checkRows(ctx, t, aTable, nil)
 	})
 }
 
@@ -83,8 +83,9 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		leafs          = make([]*Page, 0, 5)
 		aTable         = NewTable(testLogger, "foo", testMediumColumns, pagerMock, 0)
 	)
-	for i := 0; i < numRows; i++ {
+	for i := range numRows {
 		leafs = append(leafs, &Page{LeafNode: NewLeafNode(rowSize)})
+		leafs[i].Index = uint32(i + 1)
 	}
 
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
@@ -140,7 +141,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 1, deleteResult.RowsAffected)
 
-		checkRowsAfterDeletion(ctx, t, aTable, rows[1:])
+		checkRows(ctx, t, aTable, rows[1:])
 
 		/*
 				          +----------------------------------------------+
@@ -172,7 +173,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 3, deleteResult.RowsAffected)
 
-		checkRowsAfterDeletion(ctx, t, aTable, rows[1:17])
+		checkRows(ctx, t, aTable, rows[1:17])
 
 		/*
 				          +------------------------------------+
@@ -202,7 +203,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 3, deleteResult.RowsAffected)
 
-		checkRowsAfterDeletion(ctx, t, aTable, []Row{
+		checkRows(ctx, t, aTable, []Row{
 			rows[1], rows[3], rows[5], rows[7], rows[8],
 			rows[9], rows[10], rows[11],
 			rows[12], rows[13], rows[14], rows[15], rows[16],
@@ -235,7 +236,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 4, deleteResult.RowsAffected)
 
-		checkRowsAfterDeletion(ctx, t, aTable, []Row{
+		checkRows(ctx, t, aTable, []Row{
 			rows[1], rows[3], rows[5],
 			rows[7], rows[8], rows[10],
 			rows[12], rows[14], rows[16],
@@ -268,7 +269,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 3, deleteResult.RowsAffected)
 
-		checkRowsAfterDeletion(ctx, t, aTable, []Row{
+		checkRows(ctx, t, aTable, []Row{
 			rows[1], rows[7], rows[8],
 			rows[10], rows[14], rows[16],
 		})
@@ -299,7 +300,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 1, deleteResult.RowsAffected)
 
-		checkRowsAfterDeletion(ctx, t, aTable, []Row{
+		checkRows(ctx, t, aTable, []Row{
 			rows[1], rows[7], rows[8],
 			rows[10], rows[16],
 		})
@@ -328,7 +329,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 5, deleteResult.RowsAffected)
 
-		checkRowsAfterDeletion(ctx, t, aTable, nil)
+		checkRows(ctx, t, aTable, nil)
 
 		printTree(t, aTable)
 		assert.Equal(t, 0, int(aRootPage.LeafNode.Header.Cells))
@@ -337,63 +338,66 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	t.Parallel()
-	t.Skip()
 
-	// var (
-	// 	ctx            = context.Background()
-	// 	pagerMock      = new(MockPager)
-	// 	numRows        = 20
-	// 	rows           = gen.MediumRows(numRows)
-	// 	cells, rowSize = 0, rows[0].Size()
-	// 	aRootPage      = newRootLeafPageWithCells(cells, int(rowSize))
-	// 	leafs          = make([]*Page, 0, 5)
-	// 	aTable         = NewTable(testLogger, "foo", testMediumColumns, pagerMock, 0)
-	// )
-	// for i := 0; i < numRows; i++ {
-	// 	leafs = append(leafs, &Page{LeafNode: NewLeafNode(rowSize)})
-	// }
+	var (
+		ctx            = context.Background()
+		pagerMock      = new(MockPager)
+		numRows        = 81
+		rows           = gen.MediumRows(numRows)
+		cells, rowSize = 0, rows[0].Size()
+		aRootPage      = newRootLeafPageWithCells(cells, int(rowSize))
+		leafs          = make([]*Page, 0, 10)
+		aTable         = NewTable(testLogger, "foo", testMediumColumns, pagerMock, 0)
+	)
+	aTable.maxICells = 5 // for testing purposes only, normally 340
+	for i := range numRows {
+		leafs = append(leafs, &Page{LeafNode: NewLeafNode(rowSize)})
+		leafs[i].Index = uint32(i + 1)
+	}
 
-	// pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
-	// pagerMock.On("GetPage", mock.Anything, aTable, uint32(2)).Return(leafs[0], nil)
-	// pagerMock.On("GetPage", mock.Anything, aTable, uint32(1)).Return(leafs[1], nil)
-	// for i := 3; i < 7; i++ {
-	// 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(i)).Return(leafs[i-1], nil)
-	// }
+	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
+	for i := range numRows {
+		pagerMock.On("GetPage", mock.Anything, aTable, uint32(i+1)).Return(leafs[i], nil)
+	}
 
-	// totalPages := uint32(1)
-	// pagerMock.On("TotalPages").Return(func() uint32 {
-	// 	old := totalPages
-	// 	totalPages += 1
-	// 	return old
-	// }, nil)
+	totalPages := uint32(1)
+	pagerMock.On("TotalPages").Return(func() uint32 {
+		old := totalPages
+		totalPages += 1
+		return old
+	}, nil)
 
-	// // Batch insert test rows
-	// stmt := Statement{
-	// 	Kind:      Insert,
-	// 	TableName: "foo",
-	// 	Fields:    columnNames(testMediumColumns...),
-	// 	Inserts:   [][]any{},
-	// }
-	// for _, aRow := range rows {
-	// 	stmt.Inserts = append(stmt.Inserts, aRow.Values)
-	// }
+	// Batch insert test rows
+	stmt := Statement{
+		Kind:      Insert,
+		TableName: "foo",
+		Fields:    columnNames(testMediumColumns...),
+		Inserts:   [][]any{},
+	}
+	for _, aRow := range rows {
+		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	}
 
-	// err := aTable.Insert(ctx, stmt)
-	// require.NoError(t, err)
+	err := aTable.Insert(ctx, stmt)
+	require.NoError(t, err)
 
-	// /*
-	// 	Initial state of the tree:
+	/*
+		Initial state of the tree:
 
-	// 	           +------------------------------------------------+
-	// 	           |   2,       5,       8,         11,        14   |
-	// 	           +------------------------------------------------+
-	// 	          /       /         /        /             /         \
-	// 	+-------+  +-------+  +-------+  +---------+  +----------+  +----------------+
-	// 	| 0,1,2 |  | 3,4,5 |  | 6,7,8 |  | 9,10,11 |  | 12,13,14 |  | 15,16,17,18,19 |
-	// 	+-------+  +-------+  +-------+  +---------+  +----------+  +----------------+
-	// */
+		           +------------------------------------------------+
+		           |   2,       5,       8,         11,        14   |
+		           +------------------------------------------------+
+		          /       /         /        /             /         \
+		+-------+  +-------+  +-------+  +---------+  +----------+  +----------------+
+		| 0,1,2 |  | 3,4,5 |  | 6,7,8 |  | 9,10,11 |  | 12,13,14 |  | 15,16,17,18,19 |
+		+-------+  +-------+  +-------+  +---------+  +----------+  +----------------+
+	*/
 
-	// printTree(t, aTable)
+	printTree(t, aTable)
+
+	checkRows(ctx, t, aTable, rows)
+
+	// assert.True(t, false)
 	// assert.Equal(t, 5, int(aRootPage.InternalNode.Header.KeysNum))
 }
 
@@ -415,7 +419,7 @@ func assertLeafKeys(t *testing.T, aLeaf *LeafNode, expectedKeys ...uint64) {
 	}
 }
 
-func checkRowsAfterDeletion(ctx context.Context, t *testing.T, aTable *Table, expectedRows []Row) {
+func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []Row) {
 	selectResult, err := aTable.Select(ctx, Statement{
 		Kind:      Select,
 		TableName: "foo",
@@ -474,11 +478,13 @@ func (t *Table) BFS(f callback) error {
 				}
 				queue = append(queue, aPage)
 			}
-			aPage, err := t.pager.GetPage(context.Background(), t, current.InternalNode.Header.RightChild)
-			if err != nil {
-				return err
+			if current.InternalNode.Header.RightChild != RIGHT_CHILD_NOT_SET {
+				aPage, err := t.pager.GetPage(context.Background(), t, current.InternalNode.Header.RightChild)
+				if err != nil {
+					return err
+				}
+				queue = append(queue, aPage)
 			}
-			queue = append(queue, aPage)
 		}
 	}
 
@@ -488,7 +494,7 @@ func (t *Table) BFS(f callback) error {
 func printTree(t *testing.T, aTable *Table) {
 	err := aTable.BFS(func(aPage *Page) {
 		if aPage.InternalNode != nil {
-			fmt.Println("Internal node, number of keys:", aPage.InternalNode.Header.KeysNum, "parent:", aPage.InternalNode.Header.Parent)
+			fmt.Println("Internal node,", "page:", aPage.Index, "number of keys:", aPage.InternalNode.Header.KeysNum, "parent:", aPage.InternalNode.Header.Parent)
 			keys := make([]uint64, 0, aPage.InternalNode.Header.KeysNum)
 			for i := range aPage.InternalNode.Header.KeysNum {
 				keys = append(keys, aPage.InternalNode.ICells[i].Key)
@@ -499,10 +505,12 @@ func printTree(t *testing.T, aTable *Table) {
 			for i := range aPage.InternalNode.Header.KeysNum {
 				children = append(children, aPage.InternalNode.ICells[i].Child)
 			}
-			children = append(children, aPage.InternalNode.Header.RightChild)
+			if aPage.InternalNode.Header.RightChild != RIGHT_CHILD_NOT_SET {
+				children = append(children, aPage.InternalNode.Header.RightChild)
+			}
 			fmt.Println("Children:", children)
 		} else {
-			fmt.Println("Leaf node, number of cells:", aPage.LeafNode.Header.Cells, "parent:", aPage.LeafNode.Header.Parent, "next leaf:", aPage.LeafNode.Header.NextLeaf)
+			fmt.Println("Leaf node,", "page:", aPage.Index, "number of cells:", aPage.LeafNode.Header.Cells, "parent:", aPage.LeafNode.Header.Parent, "next leaf:", aPage.LeafNode.Header.NextLeaf)
 			keys := make([]uint64, 0, aPage.LeafNode.Header.Cells)
 			for i := uint32(0); i < aPage.LeafNode.Header.Cells; i++ {
 				keys = append(keys, aPage.LeafNode.Cells[i].Key)
