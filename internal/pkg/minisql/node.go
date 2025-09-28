@@ -175,3 +175,11 @@ func (n *InternalNode) Children() []uint32 {
 	}
 	return children
 }
+
+func (n *InternalNode) UpdateKey(oldKey, newKey uint64) {
+	oldChildIndex, ok := n.IndexOfKey(oldKey)
+	if !ok {
+		return
+	}
+	n.ICells[oldChildIndex].Key = newKey
+}
