@@ -156,3 +156,22 @@ func (n *InternalNode) AppendCells(cells ...ICell) {
 		n.Header.KeysNum += 1
 	}
 }
+
+func (n *InternalNode) Keys() []uint64 {
+	keys := make([]uint64, 0, n.Header.KeysNum)
+	for idx := range n.Header.KeysNum {
+		keys = append(keys, n.ICells[idx].Key)
+	}
+	return keys
+}
+
+func (n *InternalNode) Children() []uint32 {
+	children := make([]uint32, 0, n.Header.KeysNum)
+	for idx := range n.Header.KeysNum {
+		children = append(children, n.ICells[idx].Child)
+	}
+	if n.Header.RightChild != RIGHT_CHILD_NOT_SET {
+		children = append(children, n.Header.RightChild)
+	}
+	return children
+}

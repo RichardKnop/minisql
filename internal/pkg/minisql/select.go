@@ -24,7 +24,7 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	}
 	aPage, err := t.pager.GetPage(ctx, t, aCursor.PageIdx)
 	if err != nil {
-		return aResult, err
+		return aResult, fmt.Errorf("select: %w", err)
 	}
 	aCursor.EndOfTable = aPage.LeafNode.Header.Cells == 0
 

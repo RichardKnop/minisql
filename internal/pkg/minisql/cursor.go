@@ -15,7 +15,7 @@ type Cursor struct {
 func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) error {
 	aPage, err := c.Table.pager.GetPage(ctx, c.Table, c.PageIdx)
 	if err != nil {
-		return err
+		return fmt.Errorf("leaf node insert: %w", err)
 	}
 	if aPage.LeafNode == nil {
 		return fmt.Errorf("error inserting row to a non leaf node, key %d", key)
@@ -50,7 +50,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 
 	aSplitPage, err := aPager.GetPage(ctx, c.Table, c.PageIdx)
 	if err != nil {
-		return err
+		return fmt.Errorf("leaf node split insert: %w", err)
 	}
 
 	originalMaxKey, _ := aSplitPage.GetMaxKey()
@@ -66,7 +66,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	// TODO: Page recycle
 	aNewPage, err := aPager.GetPage(ctx, c.Table, newPageIdx)
 	if err != nil {
-		return err
+		return fmt.Errorf("leaf node split insert: %w", err)
 	}
 
 	aNewPage.LeafNode = NewLeafNode(uint64(c.Table.RowSize))
@@ -123,7 +123,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	parentPageIdx := aSplitPage.LeafNode.Header.Parent
 	aParentPage, err := aPager.GetPage(ctx, c.Table, parentPageIdx)
 	if err != nil {
-		return err
+		return fmt.Errorf("leaf node split insert: %w", err)
 	}
 
 	// If we won't need to split the internal node,
@@ -140,7 +140,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
 	aPage, err := c.Table.pager.GetPage(ctx, c.Table, c.PageIdx)
 	if err != nil {
-		return Row{}, err
+		return Row{}, fmt.Errorf("fetch row: %w", err)
 	}
 	aRow := NewRow(c.Table.Columns)
 
@@ -171,12 +171,12 @@ func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
 func (c *Cursor) update(ctx context.Context, aRow *Row) error {
 	aPage, err := c.Table.pager.GetPage(ctx, c.Table, c.PageIdx)
 	if err != nil {
-		return err
+		return fmt.Errorf("update: %w", err)
 	}
 
 	rowBuf, err := aRow.Marshal()
 	if err != nil {
-		return err
+		return fmt.Errorf("update: %w", err)
 	}
 
 	cell := &aPage.LeafNode.Cells[c.CellIdx]
@@ -187,7 +187,7 @@ func (c *Cursor) update(ctx context.Context, aRow *Row) error {
 func (c *Cursor) delete(ctx context.Context) error {
 	aPage, err := c.Table.pager.GetPage(ctx, c.Table, c.PageIdx)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete: %w", err)
 	}
 
 	key := aPage.LeafNode.Cells[c.CellIdx].Key
@@ -197,7 +197,7 @@ func (c *Cursor) delete(ctx context.Context) error {
 func saveToCell(cell *Cell, key uint64, aRow *Row) error {
 	rowBuf, err := aRow.Marshal()
 	if err != nil {
-		return err
+		return fmt.Errorf("save to cell: %w", err)
 	}
 	cell.Key = key
 	copy(cell.Value[:], rowBuf)

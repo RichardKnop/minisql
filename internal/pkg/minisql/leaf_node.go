@@ -274,3 +274,11 @@ func (n *LeafNode) AppendCells(cells ...Cell) {
 		n.Header.Cells += 1
 	}
 }
+
+func (n *LeafNode) Keys() []uint64 {
+	keys := make([]uint64, 0, n.Header.Cells)
+	for idx := range n.Header.Cells {
+		keys = append(keys, n.Cells[idx].Key)
+	}
+	return keys
+}

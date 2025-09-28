@@ -128,7 +128,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		+-------+  +-------+  +-------+  +---------+  +----------+  +----------------+
 	*/
 
-	printTree(t, aTable)
+	require.NoError(t, printTree(aTable))
 	assert.Equal(t, 5, int(aRootPage.InternalNode.Header.KeysNum))
 
 	t.Run("delete first row to force merging of first two leaves", func(t *testing.T) {
@@ -153,7 +153,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+-----------+     +-------+    +---------+    +----------+     +----------------+
 		*/
 
-		printTree(t, aTable)
+		require.NoError(t, printTree(aTable))
 		assert.Equal(t, 4, int(aRootPage.InternalNode.Header.KeysNum))
 		assertLeafKeys(t, leafs[0].LeafNode, 1, 2, 3, 4, 5)
 		// leafs[1] has been merged into leafs[0]
@@ -185,7 +185,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+-----------+     +-------+    +---------+    +----------------+
 		*/
 
-		printTree(t, aTable)
+		require.NoError(t, printTree(aTable))
 		assert.Equal(t, 3, int(aRootPage.InternalNode.Header.KeysNum))
 		assertLeafKeys(t, leafs[0].LeafNode, 1, 2, 3, 4, 5)
 		assertLeafKeys(t, leafs[2].LeafNode, 6, 7, 8)
@@ -219,7 +219,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+-----------+      +---------+      +----------------+
 		*/
 
-		printTree(t, aTable)
+		require.NoError(t, printTree(aTable))
 		assert.Equal(t, 2, int(aRootPage.InternalNode.Header.KeysNum))
 		assertLeafKeys(t, leafs[0].LeafNode, 1, 3, 5, 7, 8)
 		assertLeafKeys(t, leafs[3].LeafNode, 9, 10, 11)
@@ -252,7 +252,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+--------+           +--------+          +----------+
 		*/
 
-		printTree(t, aTable)
+		require.NoError(t, printTree(aTable))
 		assert.Equal(t, 2, int(aRootPage.InternalNode.Header.KeysNum))
 		assertLeafKeys(t, leafs[0].LeafNode, 1, 3, 5)
 		assertLeafKeys(t, leafs[3].LeafNode, 7, 8, 10)
@@ -284,7 +284,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		 +-------+                +----------+
 		*/
 
-		printTree(t, aTable)
+		require.NoError(t, printTree(aTable))
 		assert.Equal(t, 1, int(aRootPage.InternalNode.Header.KeysNum))
 		assertLeafKeys(t, leafs[0].LeafNode, 1, 7, 8)
 		assertLeafKeys(t, leafs[4].LeafNode, 10, 14, 16)
@@ -311,7 +311,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		   +-----------------+
 		*/
 
-		printTree(t, aTable)
+		require.NoError(t, printTree(aTable))
 		assert.Nil(t, aRootPage.InternalNode)
 		assert.Equal(t, 5, int(aRootPage.LeafNode.Header.Cells))
 		assert.Equal(t, 0, int(aRootPage.LeafNode.Header.Parent))
@@ -331,7 +331,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 		checkRows(ctx, t, aTable, nil)
 
-		printTree(t, aTable)
+		require.NoError(t, printTree(aTable))
 		assert.Equal(t, 0, int(aRootPage.LeafNode.Header.Cells))
 	})
 }
@@ -381,23 +381,57 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	err := aTable.Insert(ctx, stmt)
 	require.NoError(t, err)
 
-	/*
-		Initial state of the tree:
-
-		           +------------------------------------------------+
-		           |   2,       5,       8,         11,        14   |
-		           +------------------------------------------------+
-		          /       /         /        /             /         \
-		+-------+  +-------+  +-------+  +---------+  +----------+  +----------------+
-		| 0,1,2 |  | 3,4,5 |  | 6,7,8 |  | 9,10,11 |  | 12,13,14 |  | 15,16,17,18,19 |
-		+-------+  +-------+  +-------+  +---------+  +----------+  +----------------+
-	*/
-
-	printTree(t, aTable)
-
+	fmt.Println("BEFORE")
+	require.NoError(t, printTree(aTable))
 	checkRows(ctx, t, aTable, rows)
 
-	// assert.True(t, false)
+	// deleteResult, err := aTable.Delete(ctx, Statement{
+	// 	Kind:       Delete,
+	// 	TableName:  "foo",
+	// 	Conditions: FieldIsIn("id", Integer, rowIDs(rows[77])...),
+	// })
+	// require.NoError(t, err)
+	// assert.Equal(t, 1, deleteResult.RowsAffected)
+
+	// fmt.Println("AFTER 1")
+	// require.NoError(t, printTree(aTable))
+
+	// deleteResult, err = aTable.Delete(ctx, Statement{
+	// 	Kind:       Delete,
+	// 	TableName:  "foo",
+	// 	Conditions: FieldIsIn("id", Integer, rowIDs(rows[80])...),
+	// })
+	// require.NoError(t, err)
+	// assert.Equal(t, 1, deleteResult.RowsAffected)
+
+	// fmt.Println("AFTER 2")
+	// require.NoError(t, printTree(aTable))
+
+	// deleteResult, err = aTable.Delete(ctx, Statement{
+	// 	Kind:       Delete,
+	// 	TableName:  "foo",
+	// 	Conditions: FieldIsIn("id", Integer, rowIDs(rows[79])...),
+	// })
+	// require.NoError(t, err)
+	// assert.Equal(t, 1, deleteResult.RowsAffected)
+
+	// fmt.Println("AFTER 3")
+	// require.NoError(t, printTree(aTable))
+
+	// deleteResult, err = aTable.Delete(ctx, Statement{
+	// 	Kind:       Delete,
+	// 	TableName:  "foo",
+	// 	Conditions: FieldIsIn("id", Integer, rowIDs(rows[80])...),
+	// })
+	// require.NoError(t, err)
+	// assert.Equal(t, 1, deleteResult.RowsAffected)
+
+	// fmt.Println("AFTER 4")
+	// require.NoError(t, printTree(aTable))
+
+	// checkRows(ctx, t, aTable, nil)
+
+	assert.True(t, false)
 	// assert.Equal(t, 5, int(aRootPage.InternalNode.Header.KeysNum))
 }
 
@@ -446,78 +480,16 @@ func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []
 	assert.Len(t, actual, len(expectedRows))
 }
 
-type callback func(page *Page)
-
-func (t *Table) BFS(f callback) error {
-
-	rootPage, err := t.pager.GetPage(context.Background(), t, t.RootPageIdx)
-	if err != nil {
-		return err
-	}
-
-	// Create a queue and enqueue the root node
-	queue := make([]*Page, 0, 1)
-	queue = append(queue, rootPage)
-
-	// Repeat until queue is empty
-	for len(queue) > 0 {
-		// Get the first node in the queue
-		current := queue[0]
-
-		// Dequeue
-		queue = queue[1:]
-
-		f(current)
-
-		if current.InternalNode != nil {
-			for i := range current.InternalNode.Header.KeysNum {
-				icell := current.InternalNode.ICells[i]
-				aPage, err := t.pager.GetPage(context.Background(), t, icell.Child)
-				if err != nil {
-					return err
-				}
-				queue = append(queue, aPage)
-			}
-			if current.InternalNode.Header.RightChild != RIGHT_CHILD_NOT_SET {
-				aPage, err := t.pager.GetPage(context.Background(), t, current.InternalNode.Header.RightChild)
-				if err != nil {
-					return err
-				}
-				queue = append(queue, aPage)
-			}
-		}
-	}
-
-	return nil
-}
-
-func printTree(t *testing.T, aTable *Table) {
-	err := aTable.BFS(func(aPage *Page) {
-		if aPage.InternalNode != nil {
-			fmt.Println("Internal node,", "page:", aPage.Index, "number of keys:", aPage.InternalNode.Header.KeysNum, "parent:", aPage.InternalNode.Header.Parent)
-			keys := make([]uint64, 0, aPage.InternalNode.Header.KeysNum)
-			for i := range aPage.InternalNode.Header.KeysNum {
-				keys = append(keys, aPage.InternalNode.ICells[i].Key)
-			}
-			fmt.Println("Keys:", keys)
-
-			children := make([]uint32, 0, aPage.InternalNode.Header.KeysNum)
-			for i := range aPage.InternalNode.Header.KeysNum {
-				children = append(children, aPage.InternalNode.ICells[i].Child)
-			}
-			if aPage.InternalNode.Header.RightChild != RIGHT_CHILD_NOT_SET {
-				children = append(children, aPage.InternalNode.Header.RightChild)
-			}
-			fmt.Println("Children:", children)
-		} else {
-			fmt.Println("Leaf node,", "page:", aPage.Index, "number of cells:", aPage.LeafNode.Header.Cells, "parent:", aPage.LeafNode.Header.Parent, "next leaf:", aPage.LeafNode.Header.NextLeaf)
-			keys := make([]uint64, 0, aPage.LeafNode.Header.Cells)
-			for i := uint32(0); i < aPage.LeafNode.Header.Cells; i++ {
-				keys = append(keys, aPage.LeafNode.Cells[i].Key)
-			}
-			fmt.Println("Keys:", keys)
-		}
-		fmt.Println("---------")
-	})
-	require.NoError(t, err)
-}
+// func printTree(aTable *Table) error {
+// 	return aTable.BFS(func(aPage *Page) {
+// 		if aPage.InternalNode != nil {
+// 			fmt.Println("Internal node,", "page:", aPage.Index, "number of keys:", aPage.InternalNode.Header.KeysNum, "parent:", aPage.InternalNode.Header.Parent)
+// 			fmt.Println("Keys:", aPage.InternalNode.Keys())
+// 			fmt.Println("Children:", aPage.InternalNode.Children())
+// 		} else {
+// 			fmt.Println("Leaf node,", "page:", aPage.Index, "number of cells:", aPage.LeafNode.Header.Cells, "parent:", aPage.LeafNode.Header.Parent, "next leaf:", aPage.LeafNode.Header.NextLeaf)
+// 			fmt.Println("Keys:", aPage.LeafNode.Keys())
+// 		}
+// 		fmt.Println("---------")
+// 	})
+// }
