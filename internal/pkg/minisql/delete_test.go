@@ -135,7 +135,10 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	*/
 
 	require.NoError(t, printTree(aTable))
+	// Check the root page
 	assert.Equal(t, 5, int(aRootPage.InternalNode.Header.KeysNum))
+	assert.Equal(t, []uint64{2, 5, 8, 11, 14}, aRootPage.InternalNode.Keys())
+	// Check the leaf pages
 	assert.Equal(t, []uint64{0, 1, 2}, leafs[0].LeafNode.Keys())
 	assert.Equal(t, []uint64{3, 4, 5}, leafs[1].LeafNode.Keys())
 	assert.Equal(t, []uint64{6, 7, 8}, leafs[2].LeafNode.Keys())
@@ -166,7 +169,10 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		*/
 
 		require.NoError(t, printTree(aTable))
+		// Check the root page
 		assert.Equal(t, 4, int(aRootPage.InternalNode.Header.KeysNum))
+		assert.Equal(t, []uint64{5, 8, 11, 14}, aRootPage.InternalNode.Keys())
+		// Check the leaf pages
 		assert.Equal(t, []uint64{1, 2, 3, 4, 5}, leafs[0].LeafNode.Keys())
 		// leafs[1] has been merged into leafs[0]
 		assert.Equal(t, []uint64{6, 7, 8}, leafs[2].LeafNode.Keys())
@@ -198,7 +204,10 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		*/
 
 		require.NoError(t, printTree(aTable))
+		// Check the root page
 		assert.Equal(t, 3, int(aRootPage.InternalNode.Header.KeysNum))
+		assert.Equal(t, []uint64{5, 8, 11}, aRootPage.InternalNode.Keys())
+		// Check the leaf pages
 		assert.Equal(t, []uint64{1, 2, 3, 4, 5}, leafs[0].LeafNode.Keys())
 		assert.Equal(t, []uint64{6, 7, 8}, leafs[2].LeafNode.Keys())
 		assert.Equal(t, []uint64{9, 10, 11}, leafs[3].LeafNode.Keys())
@@ -232,121 +241,129 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		*/
 
 		require.NoError(t, printTree(aTable))
+		// Check the root page
 		assert.Equal(t, 2, int(aRootPage.InternalNode.Header.KeysNum))
+		assert.Equal(t, []uint64{8, 11}, aRootPage.InternalNode.Keys())
+		// Check the leaf pages
 		assert.Equal(t, []uint64{1, 3, 5, 7, 8}, leafs[0].LeafNode.Keys())
 		assert.Equal(t, []uint64{9, 10, 11}, leafs[3].LeafNode.Keys())
 		assert.Equal(t, []uint64{12, 13, 14, 15, 16}, leafs[4].LeafNode.Keys())
-		assert.False(t, true)
 	})
 
-	// t.Run("keep deleting more rows, no merge", func(t *testing.T) {
-	// 	ids := rowIDs(rows[9], rows[11], rows[13], rows[15])
-	// 	deleteResult, err := aTable.Delete(ctx, Statement{
-	// 		Kind:       Delete,
-	// 		TableName:  "foo",
-	// 		Conditions: FieldIsIn("id", Integer, ids...),
-	// 	})
-	// 	require.NoError(t, err)
-	// 	assert.Equal(t, 4, deleteResult.RowsAffected)
+	t.Run("keep deleting more rows, no merge", func(t *testing.T) {
+		ids := rowIDs(rows[9], rows[11], rows[13], rows[15])
+		deleteResult, err := aTable.Delete(ctx, Statement{
+			Kind:       Delete,
+			TableName:  "foo",
+			Conditions: FieldIsIn("id", Integer, ids...),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 4, deleteResult.RowsAffected)
 
-	// 	checkRows(ctx, t, aTable, []Row{
-	// 		rows[1], rows[3], rows[5],
-	// 		rows[7], rows[8], rows[10],
-	// 		rows[12], rows[14], rows[16],
-	// 	})
+		checkRows(ctx, t, aTable, []Row{
+			rows[1], rows[3], rows[5],
+			rows[7], rows[8], rows[10],
+			rows[12], rows[14], rows[16],
+		})
 
-	// 	/*
-	// 		           +----------------------------+
-	// 		           |        8,         11,      |
-	// 		           +----------------------------+
-	// 		          /              /               \
-	// 		+--------+           +--------+          +----------+
-	// 		| 1,3,5, |           | 7,8,10 |          | 12,14,16 |
-	// 		+--------+           +--------+          +----------+
-	// 	*/
+		/*
+			           +----------------------------+
+			           |        5,         11,      |
+			           +----------------------------+
+			          /              /               \
+			+--------+           +--------+          +----------+
+			| 1,3,5, |           | 7,8,10 |          | 12,14,16 |
+			+--------+           +--------+          +----------+
+		*/
 
-	// 	require.NoError(t, printTree(aTable))
-	// 	assert.Equal(t, 2, int(aRootPage.InternalNode.Header.KeysNum))
-	// 	assert.Equal(t, []uint64{1, 3, 5}, leafs[0].LeafNode.Keys())
-	// 	assert.Equal(t, []uint64{7, 8, 10}, leafs[3].LeafNode.Keys())
-	// 	assert.Equal(t, []uint64{12, 14, 16}, leafs[4].LeafNode.Keys())
-	// })
+		require.NoError(t, printTree(aTable))
+		// Check the root page
+		assert.Equal(t, 2, int(aRootPage.InternalNode.Header.KeysNum))
+		assert.Equal(t, []uint64{5, 11}, aRootPage.InternalNode.Keys())
+		// Check the leaf pages
+		assert.Equal(t, []uint64{1, 3, 5}, leafs[0].LeafNode.Keys())
+		assert.Equal(t, []uint64{7, 8, 10}, leafs[3].LeafNode.Keys())
+		assert.Equal(t, []uint64{12, 14, 16}, leafs[4].LeafNode.Keys())
+	})
 
-	// t.Run("keep deleting more rows, another merge and borrow", func(t *testing.T) {
-	// 	ids := rowIDs(rows[3], rows[12], rows[5])
-	// 	deleteResult, err := aTable.Delete(ctx, Statement{
-	// 		Kind:       Delete,
-	// 		TableName:  "foo",
-	// 		Conditions: FieldIsIn("id", Integer, ids...),
-	// 	})
-	// 	require.NoError(t, err)
-	// 	assert.Equal(t, 3, deleteResult.RowsAffected)
+	t.Run("keep deleting more rows, another merge and borrow", func(t *testing.T) {
+		ids := rowIDs(rows[3], rows[12], rows[5])
+		deleteResult, err := aTable.Delete(ctx, Statement{
+			Kind:       Delete,
+			TableName:  "foo",
+			Conditions: FieldIsIn("id", Integer, ids...),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 3, deleteResult.RowsAffected)
 
-	// 	checkRows(ctx, t, aTable, []Row{
-	// 		rows[1], rows[7], rows[8],
-	// 		rows[10], rows[14], rows[16],
-	// 	})
+		checkRows(ctx, t, aTable, []Row{
+			rows[1], rows[7], rows[8],
+			rows[10], rows[14], rows[16],
+		})
 
-	// 	/*
-	// 	           +-------------+
-	// 	           |      8      |
-	// 	           +-------------+
-	// 	          /               \
-	// 	 +-------+                +----------+
-	// 	 | 1,7,8 |                | 10,14,16 |
-	// 	 +-------+                +----------+
-	// 	*/
+		/*
+		           +-------------+
+		           |      8      |
+		           +-------------+
+		          /               \
+		 +-------+                +----------+
+		 | 1,7,8 |                | 10,14,16 |
+		 +-------+                +----------+
+		*/
 
-	// 	require.NoError(t, printTree(aTable))
-	// 	assert.Equal(t, 1, int(aRootPage.InternalNode.Header.KeysNum))
-	// 	assertLeafKeys(t, leafs[0].LeafNode, 1, 7, 8)
-	// 	assertLeafKeys(t, leafs[4].LeafNode, 10, 14, 16)
-	// })
+		require.NoError(t, printTree(aTable))
+		// Check the root page
+		assert.Equal(t, 1, int(aRootPage.InternalNode.Header.KeysNum))
+		assert.Equal(t, []uint64{8}, aRootPage.InternalNode.Keys())
+		// Check the leaf pages
+		assert.Equal(t, []uint64{1, 7, 8}, leafs[0].LeafNode.Keys())
+		assert.Equal(t, []uint64{10, 14, 16}, leafs[4].LeafNode.Keys())
+	})
 
-	// t.Run("delete one more time, we are left with only root leaf node", func(t *testing.T) {
-	// 	ids := rowIDs(rows[14])
-	// 	deleteResult, err := aTable.Delete(ctx, Statement{
-	// 		Kind:       Delete,
-	// 		TableName:  "foo",
-	// 		Conditions: FieldIsIn("id", Integer, ids...),
-	// 	})
-	// 	require.NoError(t, err)
-	// 	assert.Equal(t, 1, deleteResult.RowsAffected)
+	t.Run("delete one more time, we are left with only root leaf node", func(t *testing.T) {
+		ids := rowIDs(rows[14])
+		deleteResult, err := aTable.Delete(ctx, Statement{
+			Kind:       Delete,
+			TableName:  "foo",
+			Conditions: FieldIsIn("id", Integer, ids...),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, deleteResult.RowsAffected)
 
-	// 	checkRows(ctx, t, aTable, []Row{
-	// 		rows[1], rows[7], rows[8],
-	// 		rows[10], rows[16],
-	// 	})
+		checkRows(ctx, t, aTable, []Row{
+			rows[1], rows[7], rows[8],
+			rows[10], rows[16],
+		})
 
-	// 	/*
-	// 	   +-----------------+
-	// 	   | 1, 7, 8, 10, 16 |
-	// 	   +-----------------+
-	// 	*/
+		/*
+		   +-----------------+
+		   | 1, 7, 8, 10, 16 |
+		   +-----------------+
+		*/
 
-	// 	require.NoError(t, printTree(aTable))
-	// 	assert.Nil(t, aRootPage.InternalNode)
-	// 	assert.Equal(t, 5, int(aRootPage.LeafNode.Header.Cells))
-	// 	assert.Equal(t, 0, int(aRootPage.LeafNode.Header.Parent))
-	// 	assert.Equal(t, 0, int(aRootPage.LeafNode.Header.NextLeaf))
-	// 	assertLeafKeys(t, leafs[0].LeafNode, 1, 7, 8, 10, 16)
-	// })
+		require.NoError(t, printTree(aTable))
+		assert.Nil(t, aRootPage.InternalNode)
+		assert.Equal(t, 5, int(aRootPage.LeafNode.Header.Cells))
+		assert.Equal(t, 0, int(aRootPage.LeafNode.Header.Parent))
+		assert.Equal(t, 0, int(aRootPage.LeafNode.Header.NextLeaf))
+		assert.Equal(t, []uint64{1, 7, 8, 10, 16}, leafs[0].LeafNode.Keys())
+	})
 
-	// t.Run("delete all remaining rows", func(t *testing.T) {
-	// 	ids := rowIDs(rows[1], rows[7], rows[8], rows[10], rows[16])
-	// 	deleteResult, err := aTable.Delete(ctx, Statement{
-	// 		Kind:       Delete,
-	// 		TableName:  "foo",
-	// 		Conditions: FieldIsIn("id", Integer, ids...),
-	// 	})
-	// 	require.NoError(t, err)
-	// 	assert.Equal(t, 5, deleteResult.RowsAffected)
+	t.Run("delete all remaining rows", func(t *testing.T) {
+		ids := rowIDs(rows[1], rows[7], rows[8], rows[10], rows[16])
+		deleteResult, err := aTable.Delete(ctx, Statement{
+			Kind:       Delete,
+			TableName:  "foo",
+			Conditions: FieldIsIn("id", Integer, ids...),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 5, deleteResult.RowsAffected)
 
-	// 	checkRows(ctx, t, aTable, nil)
+		checkRows(ctx, t, aTable, nil)
 
-	// 	require.NoError(t, printTree(aTable))
-	// 	assert.Equal(t, 0, int(aRootPage.LeafNode.Header.Cells))
-	// })
+		require.NoError(t, printTree(aTable))
+		assert.Equal(t, 0, int(aRootPage.LeafNode.Header.Cells))
+	})
 }
 
 func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
@@ -356,7 +373,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	var (
 		ctx            = context.Background()
 		pagerMock      = new(MockPager)
-		numRows        = 21
+		numRows        = 81
 		rows           = gen.MediumRows(numRows)
 		cells, rowSize = 0, rows[0].Size()
 		aRootPage      = newRootLeafPageWithCells(cells, int(rowSize))
@@ -405,16 +422,29 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	require.NoError(t, printTree(aTable))
 	checkRows(ctx, t, aTable, rows)
 
-	// deleteResult, err := aTable.Delete(ctx, Statement{
+	deleteResult, err := aTable.Delete(ctx, Statement{
+		Kind:       Delete,
+		TableName:  "foo",
+		Conditions: FieldIsIn("id", Integer, rowIDs(rows[62:]...)...),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 19, deleteResult.RowsAffected)
+
+	fmt.Println("AFTER 1")
+	require.NoError(t, printTree(aTable))
+	checkRows(ctx, t, aTable, rows[0:62])
+
+	// deleteResult, err = aTable.Delete(ctx, Statement{
 	// 	Kind:       Delete,
 	// 	TableName:  "foo",
-	// 	Conditions: FieldIsIn("id", Integer, rowIDs(rows[77])...),
+	// 	Conditions: FieldIsIn("id", Integer, rowIDs(rows[62])...),
 	// })
 	// require.NoError(t, err)
 	// assert.Equal(t, 1, deleteResult.RowsAffected)
 
-	// fmt.Println("AFTER 1")
+	// fmt.Println("AFTER 2")
 	// require.NoError(t, printTree(aTable))
+	// checkRows(ctx, t, aTable, rows[0:62])
 
 	// deleteResult, err = aTable.Delete(ctx, Statement{
 	// 	Kind:       Delete,

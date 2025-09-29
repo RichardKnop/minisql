@@ -452,12 +452,12 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 			aParentPage.InternalNode,
 			aLeafNode,
 			left.LeafNode,
-			idx,
+			idx-1,
 		)
 	}
 
 	if right != nil && int(right.LeafNode.Header.Cells+aLeafNode.Header.Cells) <= len(aLeafNode.Cells) {
-		fmt.Println("MERGE RIGHT LEAF", "left", aPage.Index, "right", right.Index, "left keys", aLeafNode.Keys(), "right keys", right.LeafNode.Keys())
+		fmt.Println("MERGE RIGHT LEAF", "key", key, "left", aPage.Index, "right", right.Index, "left keys", aLeafNode.Keys(), "right keys", right.LeafNode.Keys())
 		return t.mergeLeaves(
 			ctx,
 			aParentPage,
@@ -468,13 +468,13 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 	}
 
 	if left != nil && int(left.LeafNode.Header.Cells+aLeafNode.Header.Cells) <= len(aLeafNode.Cells) {
-		fmt.Println("MERGE LEFT LEAF", "left", left.Index, "right", aPage.Index, "left keys", left.LeafNode.Keys(), "right keys", aLeafNode.Keys())
+		fmt.Println("MERGE LEFT LEAF", "key", key, "left", left.Index, "right", aPage.Index, "left keys", left.LeafNode.Keys(), "right keys", aLeafNode.Keys())
 		return t.mergeLeaves(
 			ctx,
 			aParentPage,
 			left,
 			aPage,
-			idx,
+			idx-1,
 		)
 	}
 
@@ -490,7 +490,7 @@ func (t *Table) borrowFromLeftLeaf(aParent *InternalNode, aNode, leftSibling *Le
 	leftSibling.RemoveLastCell()
 	aNode.PrependCell(aCellToRotate)
 
-	aParent.ICells[idx-1].Key = leftSibling.LastCell().Key
+	aParent.ICells[idx].Key = leftSibling.LastCell().Key
 
 	return nil
 }
@@ -504,7 +504,7 @@ func (t *Table) borrowFromRightLeaf(aParent *InternalNode, aNode, rightSibling *
 	rightSibling.RemoveFirstCell()
 	aNode.AppendCells(aCellToRotate)
 
-	aParent.ICells[idx-1].Key = aNode.LastCell().Key
+	aParent.ICells[idx].Key = aNode.LastCell().Key
 
 	return nil
 }
@@ -597,11 +597,12 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 			aParentPage.InternalNode,
 			aPage.InternalNode,
 			left.InternalNode,
-			idx,
+			idx-1,
 		)
 	}
 
 	if right != nil && int(right.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= int(t.maxICells) {
+		fmt.Println("MERGE RIGHT INTERNAL", "left", aPage.Index, "right", right.Index, "left keys", aNode.Keys(), "right keys", right.InternalNode.Keys())
 		return t.mergeInternalNodes(
 			ctx,
 			aParentPage,
@@ -612,12 +613,13 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 	}
 
 	if left != nil && int(left.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= int(t.maxICells) {
+		fmt.Println("MERGE LEFT INTERNAL", "left", left.Index, "right", aPage.Index, "left keys", left.InternalNode.Keys(), "right keys", aNode.Keys())
 		return t.mergeInternalNodes(
 			ctx,
 			aParentPage,
 			left,
 			aPage,
-			idx,
+			idx-1,
 		)
 	}
 
