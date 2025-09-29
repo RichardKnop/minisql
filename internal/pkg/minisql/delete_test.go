@@ -2,7 +2,6 @@ package minisql
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -368,12 +367,11 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	t.Parallel()
-	t.Skip()
 
 	var (
 		ctx            = context.Background()
 		pagerMock      = new(MockPager)
-		numRows        = 81
+		numRows        = 100
 		rows           = gen.MediumRows(numRows)
 		cells, rowSize = 0, rows[0].Size()
 		aRootPage      = newRootLeafPageWithCells(cells, int(rowSize))
@@ -393,8 +391,10 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	}
 
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
-	for i := range numRows {
-		pagerMock.On("GetPage", mock.Anything, aTable, uint32(i+1)).Return(leafs[i], nil)
+	pagerMock.On("GetPage", mock.Anything, aTable, uint32(2)).Return(leafs[0], nil)
+	pagerMock.On("GetPage", mock.Anything, aTable, uint32(1)).Return(leafs[1], nil)
+	for i := 3; i < numRows; i++ {
+		pagerMock.On("GetPage", mock.Anything, aTable, uint32(i)).Return(leafs[i-1], nil)
 	}
 
 	totalPages := uint32(1)
@@ -418,71 +418,21 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	err := aTable.Insert(ctx, stmt)
 	require.NoError(t, err)
 
-	fmt.Println("BEFORE")
+	// fmt.Println("BEFORE")
 	require.NoError(t, printTree(aTable))
 	checkRows(ctx, t, aTable, rows)
 
 	deleteResult, err := aTable.Delete(ctx, Statement{
-		Kind:       Delete,
-		TableName:  "foo",
-		Conditions: FieldIsIn("id", Integer, rowIDs(rows[62:]...)...),
+		Kind:      Delete,
+		TableName: "foo",
+		// Conditions: FieldIsIn("id", Integer, rowIDs(rows[0:10]...)...),
 	})
 	require.NoError(t, err)
-	assert.Equal(t, 19, deleteResult.RowsAffected)
+	assert.Equal(t, len(rows), deleteResult.RowsAffected)
 
-	fmt.Println("AFTER 1")
+	// fmt.Println("AFTER")
 	require.NoError(t, printTree(aTable))
-	checkRows(ctx, t, aTable, rows[0:62])
-
-	// deleteResult, err = aTable.Delete(ctx, Statement{
-	// 	Kind:       Delete,
-	// 	TableName:  "foo",
-	// 	Conditions: FieldIsIn("id", Integer, rowIDs(rows[62])...),
-	// })
-	// require.NoError(t, err)
-	// assert.Equal(t, 1, deleteResult.RowsAffected)
-
-	// fmt.Println("AFTER 2")
-	// require.NoError(t, printTree(aTable))
-	// checkRows(ctx, t, aTable, rows[0:62])
-
-	// deleteResult, err = aTable.Delete(ctx, Statement{
-	// 	Kind:       Delete,
-	// 	TableName:  "foo",
-	// 	Conditions: FieldIsIn("id", Integer, rowIDs(rows[80])...),
-	// })
-	// require.NoError(t, err)
-	// assert.Equal(t, 1, deleteResult.RowsAffected)
-
-	// fmt.Println("AFTER 2")
-	// require.NoError(t, printTree(aTable))
-
-	// deleteResult, err = aTable.Delete(ctx, Statement{
-	// 	Kind:       Delete,
-	// 	TableName:  "foo",
-	// 	Conditions: FieldIsIn("id", Integer, rowIDs(rows[79])...),
-	// })
-	// require.NoError(t, err)
-	// assert.Equal(t, 1, deleteResult.RowsAffected)
-
-	// fmt.Println("AFTER 3")
-	// require.NoError(t, printTree(aTable))
-
-	// deleteResult, err = aTable.Delete(ctx, Statement{
-	// 	Kind:       Delete,
-	// 	TableName:  "foo",
-	// 	Conditions: FieldIsIn("id", Integer, rowIDs(rows[80])...),
-	// })
-	// require.NoError(t, err)
-	// assert.Equal(t, 1, deleteResult.RowsAffected)
-
-	// fmt.Println("AFTER 4")
-	// require.NoError(t, printTree(aTable))
-
-	// checkRows(ctx, t, aTable, nil)
-
-	assert.True(t, false)
-	// assert.Equal(t, 5, int(aRootPage.InternalNode.Header.KeysNum))
+	checkRows(ctx, t, aTable, nil)
 }
 
 func rowIDs(rows ...Row) []any {

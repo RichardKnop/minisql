@@ -53,7 +53,10 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 		return fmt.Errorf("leaf node split insert: %w", err)
 	}
 
-	originalMaxKey, _ := aSplitPage.GetMaxKey()
+	originalMaxKey, err := c.Table.GetMaxKey(ctx, aSplitPage)
+	if err != nil {
+		return fmt.Errorf("leaf node split insert: %w", err)
+	}
 	newPageIdx := aPager.TotalPages()
 
 	c.Table.logger.Sugar().With(
@@ -130,7 +133,10 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	// update parent to reflect new max key
 	oldChildIdx := aParentPage.InternalNode.IndexOfChild(originalMaxKey)
 	if oldChildIdx < c.Table.maxICells {
-		oldPageNewMaxKey, _ := aSplitPage.GetMaxKey()
+		oldPageNewMaxKey, err := c.Table.GetMaxKey(ctx, aSplitPage)
+		if err != nil {
+			return fmt.Errorf("leaf node split insert: %w", err)
+		}
 		aParentPage.InternalNode.ICells[oldChildIdx].Key = oldPageNewMaxKey
 	}
 

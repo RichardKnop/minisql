@@ -311,7 +311,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	assert.Equal(t, 1, int(aRootPage.InternalNode.Header.KeysNum))
 	assert.Equal(t, 343, int(aRootPage.InternalNode.Header.RightChild))
 	assert.Equal(t, 344, int(aRootPage.InternalNode.ICells[0].Child))
-	assert.Equal(t, 169, int(aRootPage.InternalNode.ICells[0].Key))
+	assert.Equal(t, 170, int(aRootPage.InternalNode.ICells[0].Key))
 
 	// New left internal node should have 171 cells (170 + right child page).
 	// First two pages should be switched (2, 1) as a result of root leaf split

@@ -9,6 +9,7 @@ import (
 // 1 for the middle child or 2 for the rightmost child.
 // The returned value is not a node index!
 func (n *InternalNode) IndexOfChild(key uint64) uint32 {
+	// Binary search
 	var (
 		minIdx = uint32(0)
 		maxIdx = n.Header.KeysNum
@@ -174,12 +175,4 @@ func (n *InternalNode) Children() []uint32 {
 		children = append(children, n.Header.RightChild)
 	}
 	return children
-}
-
-func (n *InternalNode) UpdateKey(oldKey, newKey uint64) {
-	oldChildIndex, ok := n.IndexOfKey(oldKey)
-	if !ok {
-		return
-	}
-	n.ICells[oldChildIndex].Key = newKey
 }

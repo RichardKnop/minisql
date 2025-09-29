@@ -52,10 +52,10 @@ func (t *Table) SeekNextRowID(ctx context.Context, pageIdx uint32) (*Cursor, uin
 	if aPage.LeafNode.Header.NextLeaf != 0 {
 		return t.SeekNextRowID(ctx, aPage.LeafNode.Header.NextLeaf)
 	}
-	maxKey, ok := aPage.GetMaxKey()
+	maxKey, err := t.GetMaxKey(ctx, aPage)
 	nextRowID := maxKey
-	if ok {
-		nextRowID += 1
+	if err == nil {
+		nextRowID = maxKey + 1
 	}
 	return &Cursor{
 		Table:   t,
@@ -209,7 +209,10 @@ func (t *Table) CreateNewRoot(ctx context.Context, rightChildPageIdx uint32) (*P
 	if err := newRootNode.SetChildIdx(0, leftChildPageIdx); err != nil {
 		return nil, err
 	}
-	leftChildMaxKey, _ := leftChildPage.GetMaxKey()
+	leftChildMaxKey, err := t.GetMaxKey(ctx, leftChildPage)
+	if err != nil {
+		return nil, fmt.Errorf("create new root: %w", err)
+	}
 	newRootNode.ICells[0].Key = leftChildMaxKey
 
 	// Set parent for both left and right child
@@ -240,8 +243,11 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 	}
 	setParent(aChildPage, parentPageIdx)
 
+	childMaxKey, err := t.GetMaxKey(ctx, aChildPage)
+	if err != nil {
+		return fmt.Errorf("internal node insert: %w", err)
+	}
 	var (
-		childMaxKey, _   = aChildPage.GetMaxKey()
 		index            = aParentPage.InternalNode.IndexOfChild(childMaxKey)
 		originalKeyCount = aParentPage.InternalNode.Header.KeysNum
 	)
@@ -258,7 +264,10 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 		return fmt.Errorf("internal node insert: %w", err)
 	}
 
-	rightChildMaxKey, _ := rightChildPage.GetMaxKey()
+	rightChildMaxKey, err := t.GetMaxKey(ctx, rightChildPage)
+	if err != nil {
+		return fmt.Errorf("internal node insert: %w", err)
+	}
 	if childMaxKey > rightChildMaxKey {
 		// Replace right child
 		aParentPage.InternalNode.SetChildIdx(originalKeyCount, rightChildPageIdx)
@@ -288,13 +297,19 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 		return fmt.Errorf("internal node split insert: %w", err)
 	}
 	splittingRoot := aSplitPage.InternalNode.Header.IsRoot
-	oldMaxKey, _ := aSplitPage.GetMaxKey()
+	oldMaxKey, err := t.GetMaxKey(ctx, aSplitPage)
+	if err != nil {
+		return fmt.Errorf("internal node split insert: %w", err)
+	}
 
 	childPage, err := t.pager.GetPage(ctx, t, childPageIdx)
 	if err != nil {
 		return fmt.Errorf("internal node split insert: %w", err)
 	}
-	childMaxKey, _ := childPage.GetMaxKey()
+	childMaxKey, err := t.GetMaxKey(ctx, childPage)
+	if err != nil {
+		return fmt.Errorf("internal node split insert: %w", err)
+	}
 
 	newPageIdx := t.pager.TotalPages()
 	// Create a new page, it will be on the same level as original node and to the right of it
@@ -312,11 +327,15 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 	).Debug("internal node split insert")
 
 	if splittingRoot {
-		leftChild, err := t.CreateNewRoot(ctx, newPageIdx)
+		/*
+		   If we are splitting the root, we need to update old_node to point
+		   to the new root's left child, new_page_num will already point to
+		   the new root's right child
+		*/
+		aSplitPage, err = t.CreateNewRoot(ctx, newPageIdx)
 		if err != nil {
 			return err
 		}
-		aSplitPage = leftChild
 	}
 	aNewPage.InternalNode.Header.Parent = aSplitPage.InternalNode.Header.Parent
 
@@ -330,8 +349,6 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 	}
 	setParent(newPageRightChild, newPageIdx)
 	aSplitPage.InternalNode.Header.RightChild = RIGHT_CHILD_NOT_SET
-
-	fmt.Println("INTERNAL NODE SPLIT", "page number", pageIdx, "keys", aSplitPage.InternalNode.Keys(), "children", aSplitPage.InternalNode.Children())
 
 	// For each key until you get to the middle key, move the key and the child to the new node
 	for i := maxCells - 1; i > maxCells/2; i-- {
@@ -347,9 +364,13 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 	aSplitPage.InternalNode.Header.RightChild, _ = aSplitPage.InternalNode.Child(aSplitPage.InternalNode.Header.KeysNum - 1)
 	aSplitPage.InternalNode.RemoveLastCell()
 
+	maxAfterSplit, err := t.GetMaxKey(ctx, aSplitPage)
+	if err != nil {
+		return fmt.Errorf("internal node split insert: %w", err)
+	}
+
 	// Determine which of the two nodes after the split should contain the child to be inserted,
 	// and insert the child
-	maxAfterSplit, _ := aSplitPage.GetMaxKey()
 	if childMaxKey < maxAfterSplit {
 		if err := t.InternalNodeInsert(ctx, pageIdx, childPageIdx); err != nil {
 			return fmt.Errorf("internal node split insert: %w", err)
@@ -366,13 +387,27 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 	if err != nil {
 		return fmt.Errorf("internal node split insert: %w", err)
 	}
-	aParentPage.InternalNode.UpdateKey(oldMaxKey, maxAfterSplit)
+	aParentPage.InternalNode.ICells[aParentPage.InternalNode.IndexOfChild(oldMaxKey)].Key = maxAfterSplit
 
 	if splittingRoot {
 		return nil
 	}
 
 	return t.InternalNodeInsert(ctx, aSplitPage.InternalNode.Header.Parent, newPageIdx)
+}
+
+func (t *Table) GetMaxKey(ctx context.Context, aPage *Page) (uint64, error) {
+	if aPage.LeafNode != nil {
+		if aPage.LeafNode.Header.Cells == 0 {
+			return 0, fmt.Errorf("get max key: leaf node has no cells")
+		}
+		return aPage.LeafNode.Cells[aPage.LeafNode.Header.Cells-1].Key, nil
+	}
+	rightChild, err := t.pager.GetPage(ctx, t, aPage.InternalNode.Header.RightChild)
+	if err != nil {
+		return 0, err
+	}
+	return t.GetMaxKey(ctx, rightChild)
 }
 
 // DeleteKey deletes a key from the table, when this is called, you should already
@@ -405,7 +440,6 @@ func (t *Table) DeleteKey(ctx context.Context, pageIdx uint32, key uint64) error
 }
 
 func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) error {
-	fmt.Println("REBALANCE LEAF", "page number", aPage.Index, "keys", aPage.LeafNode.Keys())
 	aLeafNode := aPage.LeafNode
 
 	if aLeafNode.Header.IsRoot {
@@ -457,7 +491,6 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 	}
 
 	if right != nil && int(right.LeafNode.Header.Cells+aLeafNode.Header.Cells) <= len(aLeafNode.Cells) {
-		fmt.Println("MERGE RIGHT LEAF", "key", key, "left", aPage.Index, "right", right.Index, "left keys", aLeafNode.Keys(), "right keys", right.LeafNode.Keys())
 		return t.mergeLeaves(
 			ctx,
 			aParentPage,
@@ -468,7 +501,6 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 	}
 
 	if left != nil && int(left.LeafNode.Header.Cells+aLeafNode.Header.Cells) <= len(aLeafNode.Cells) {
-		fmt.Println("MERGE LEFT LEAF", "key", key, "left", left.Index, "right", aPage.Index, "left keys", left.LeafNode.Keys(), "right keys", aLeafNode.Keys())
 		return t.mergeLeaves(
 			ctx,
 			aParentPage,
@@ -485,12 +517,12 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 // It inserts the last key and value from the left neighbor into the given node,
 // and removes the key and value from the left neighbor.
 // It also updates the key in the parent node.
-func (t *Table) borrowFromLeftLeaf(aParent *InternalNode, aNode, leftSibling *LeafNode, idx uint32) error {
-	aCellToRotate := leftSibling.LastCell()
-	leftSibling.RemoveLastCell()
-	aNode.PrependCell(aCellToRotate)
+func (t *Table) borrowFromLeftLeaf(aParent *InternalNode, right, left *LeafNode, idx uint32) error {
+	aCellToRotate := left.LastCell()
+	left.RemoveLastCell()
+	right.PrependCell(aCellToRotate)
 
-	aParent.ICells[idx].Key = leftSibling.LastCell().Key
+	aParent.ICells[idx].Key = left.LastCell().Key
 
 	return nil
 }
@@ -499,12 +531,12 @@ func (t *Table) borrowFromLeftLeaf(aParent *InternalNode, aNode, leftSibling *Le
 // It inserts the first key and value from the right neighbor into the given node,
 // and removes the key and value from the right neighbor.
 // It also updates the key in the parent node.
-func (t *Table) borrowFromRightLeaf(aParent *InternalNode, aNode, rightSibling *LeafNode, idx uint32) error {
-	aCellToRotate := rightSibling.FirstCell()
-	rightSibling.RemoveFirstCell()
-	aNode.AppendCells(aCellToRotate)
+func (t *Table) borrowFromRightLeaf(aParent *InternalNode, left, right *LeafNode, idx uint32) error {
+	aCellToRotate := right.FirstCell()
+	right.RemoveFirstCell()
+	left.AppendCells(aCellToRotate)
 
-	aParent.ICells[idx].Key = aNode.LastCell().Key
+	aParent.ICells[idx].Key = right.FirstCell().Key
 
 	return nil
 }
@@ -515,9 +547,6 @@ func (t *Table) mergeLeaves(ctx context.Context, aParent, left, right *Page, idx
 	left.LeafNode.Header.NextLeaf = right.LeafNode.Header.NextLeaf
 	// Remove key from parent plus the right child pointer
 	aParent.InternalNode.DeleteKeyByIndex(idx)
-	// if aParent.InternalNode.Header.RightChild == right.Index {
-	// 	aParent.InternalNode.Header.RightChild = right.LeafNode.Header.NextLeaf
-	// }
 
 	if aParent.InternalNode.Header.IsRoot && aParent.InternalNode.Header.KeysNum == 0 {
 		aRootPage, err := t.pager.GetPage(ctx, t, t.RootPageIdx)
@@ -602,7 +631,6 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 	}
 
 	if right != nil && int(right.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= int(t.maxICells) {
-		fmt.Println("MERGE RIGHT INTERNAL", "left", aPage.Index, "right", right.Index, "left keys", aNode.Keys(), "right keys", right.InternalNode.Keys())
 		return t.mergeInternalNodes(
 			ctx,
 			aParentPage,
@@ -613,7 +641,6 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 	}
 
 	if left != nil && int(left.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= int(t.maxICells) {
-		fmt.Println("MERGE LEFT INTERNAL", "left", left.Index, "right", aPage.Index, "left keys", left.InternalNode.Keys(), "right keys", aNode.Keys())
 		return t.mergeInternalNodes(
 			ctx,
 			aParentPage,
@@ -630,12 +657,12 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 // It inserts the last key and value from the left neighbor into the given node,
 // and removes the key and value from the left neighbor.
 // It also updates the key in the parent node.
-func (t *Table) borrowFromLeftInternal(aParent, aNode, leftSibling *InternalNode, idx uint32) error {
-	aCellToRotate := leftSibling.LastCell()
-	leftSibling.RemoveLastCell()
-	aNode.PrependCell(aCellToRotate)
+func (t *Table) borrowFromLeftInternal(aParent, right, left *InternalNode, idx uint32) error {
+	aCellToRotate := left.LastCell()
+	left.RemoveLastCell()
+	right.PrependCell(aCellToRotate)
 
-	aParent.ICells[idx].Key = aNode.FirstCell().Key
+	aParent.ICells[idx].Key = aCellToRotate.Key
 
 	return nil
 }
@@ -644,18 +671,22 @@ func (t *Table) borrowFromLeftInternal(aParent, aNode, leftSibling *InternalNode
 // It inserts the first key and value from the right neighbor into the given node,
 // and removes the key and value from the right neighbor.
 // It also updates the key in the parent node.
-func (t *Table) borrowFromRightInternal(aParent, aNode, rightSibling *InternalNode, idx uint32) error {
-	aCellToRotate := rightSibling.FirstCell()
-	rightSibling.RemoveFirstCell()
-	aNode.AppendCells(aCellToRotate)
-	aNode.Header.RightChild = rightSibling.FirstCell().Child
+func (t *Table) borrowFromRightInternal(aParent, left, right *InternalNode, idx uint32) error {
+	aCellToRotate := right.FirstCell()
+	right.RemoveFirstCell()
 
-	aParent.ICells[idx].Key = rightSibling.FirstCell().Key
+	left.AppendCells(ICell{
+		Child: left.Header.RightChild,
+		Key:   aParent.ICells[idx].Key,
+	})
+	left.Header.RightChild = aCellToRotate.Child
+
+	aParent.ICells[idx].Key = aCellToRotate.Key
 
 	return nil
 }
 
-// mergeLeafs merges two internal nodes and deletes the key from the parent node.
+// mergeInternalNodes merges two internal nodes and deletes the key from the parent node.
 func (t *Table) mergeInternalNodes(ctx context.Context, aParent, left, right *Page, idx uint32) error {
 	var (
 		leftCells = left.InternalNode.Header.KeysNum
@@ -680,12 +711,15 @@ func (t *Table) mergeInternalNodes(ctx context.Context, aParent, left, right *Pa
 	}
 	setParent(newRightChildPage, leftIndex)
 
-	// Do not lose right most childe of the left node in the process
+	// Do not lose right most child of the left node in the process
 	oldRightChildPage, err := t.pager.GetPage(ctx, t, left.InternalNode.Header.RightChild)
 	if err != nil {
 		return fmt.Errorf("merge internal nodes: %w", err)
 	}
-	maxKey, _ := oldRightChildPage.GetMaxKey()
+	maxKey, err := t.GetMaxKey(ctx, oldRightChildPage)
+	if err != nil {
+		return fmt.Errorf("merge internal nodes: %w", err)
+	}
 	iCell := ICell{
 		Child: left.InternalNode.Header.RightChild,
 		Key:   maxKey,
@@ -699,7 +733,7 @@ func (t *Table) mergeInternalNodes(ctx context.Context, aParent, left, right *Pa
 	if aParent.InternalNode.Header.IsRoot && aParent.InternalNode.Header.KeysNum == 0 {
 		aRootPage, err := t.pager.GetPage(ctx, t, t.RootPageIdx)
 		if err != nil {
-			return fmt.Errorf("merge leaves: %w", err)
+			return fmt.Errorf("merge internal nodes: %w", err)
 		}
 		aRootPage.InternalNode = left.InternalNode
 		aRootPage.LeafNode = nil
