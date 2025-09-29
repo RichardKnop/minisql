@@ -5,7 +5,7 @@ import (
 
 	"github.com/brianvoe/gofakeit/v7"
 
-	"github.com/RichardKnop/minisql/internal/pkg/minisql"
+	"github.com/RichardKnop/minisql/internal/core/minisql"
 )
 
 var (

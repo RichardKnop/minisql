@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/RichardKnop/minisql/internal/pkg/minisql"
+	"github.com/RichardKnop/minisql/internal/core/minisql"
 )
 
 type DBFile interface {

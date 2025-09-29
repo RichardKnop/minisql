@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/RichardKnop/minisql/internal/pkg/minisql"
 	"go.uber.org/zap"
+
+	"github.com/RichardKnop/minisql/internal/core/minisql"
 )
 
 var (

@@ -454,19 +454,19 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 	if err != nil {
 		return fmt.Errorf("rebalance leaf: %w", err)
 	}
-	idx := aParentPage.InternalNode.IndexOfChild(key)
+	myPositionInParent := aParentPage.InternalNode.IndexOfChild(key)
 
 	var (
 		left  *Page
 		right *Page
 	)
-	if idx > 0 {
-		left, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.ICells[idx-1].Child)
+	if myPositionInParent > 0 {
+		left, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.ICells[myPositionInParent-1].Child)
 		if err != nil {
 			return fmt.Errorf("rebalance leaf: %w", err)
 		}
 	} else {
-		right, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.GetRightChildByIndex(idx))
+		right, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.GetRightChildByIndex(myPositionInParent))
 		if err != nil {
 			return fmt.Errorf("rebalance leaf: %w", err)
 		}
@@ -477,7 +477,7 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 			aParentPage.InternalNode,
 			aLeafNode,
 			right.LeafNode,
-			idx,
+			myPositionInParent,
 		)
 	}
 
@@ -486,7 +486,7 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 			aParentPage.InternalNode,
 			aLeafNode,
 			left.LeafNode,
-			idx-1,
+			myPositionInParent-1,
 		)
 	}
 
@@ -496,7 +496,7 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 			aParentPage,
 			aPage,
 			right,
-			idx,
+			myPositionInParent,
 		)
 	}
 
@@ -506,7 +506,7 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 			aParentPage,
 			left,
 			aPage,
-			idx-1,
+			myPositionInParent-1,
 		)
 	}
 
@@ -517,10 +517,10 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 // It inserts the last key and value from the left neighbor into the given node,
 // and removes the key and value from the left neighbor.
 // It also updates the key in the parent node.
-func (t *Table) borrowFromLeftLeaf(aParent *InternalNode, right, left *LeafNode, idx uint32) error {
+func (t *Table) borrowFromLeftLeaf(aParent *InternalNode, aNode, left *LeafNode, idx uint32) error {
 	aCellToRotate := left.LastCell()
 	left.RemoveLastCell()
-	right.PrependCell(aCellToRotate)
+	aNode.PrependCell(aCellToRotate)
 
 	aParent.ICells[idx].Key = left.LastCell().Key
 
@@ -531,10 +531,10 @@ func (t *Table) borrowFromLeftLeaf(aParent *InternalNode, right, left *LeafNode,
 // It inserts the first key and value from the right neighbor into the given node,
 // and removes the key and value from the right neighbor.
 // It also updates the key in the parent node.
-func (t *Table) borrowFromRightLeaf(aParent *InternalNode, left, right *LeafNode, idx uint32) error {
+func (t *Table) borrowFromRightLeaf(aParent *InternalNode, aNode, right *LeafNode, idx uint32) error {
 	aCellToRotate := right.FirstCell()
 	right.RemoveFirstCell()
-	left.AppendCells(aCellToRotate)
+	aNode.AppendCells(aCellToRotate)
 
 	aParent.ICells[idx].Key = right.FirstCell().Key
 
@@ -591,7 +591,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 		return fmt.Errorf("rebalance internal: %w", err)
 	}
 
-	idx, err := aParentPage.InternalNode.IndexOfPage(aPage.Index)
+	myPositionInParent, err := aParentPage.InternalNode.IndexOfPage(aPage.Index)
 	if err != nil {
 		return fmt.Errorf("rebalance internal: %w", err)
 	}
@@ -600,13 +600,13 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 		left  *Page
 		right *Page
 	)
-	if idx > 0 {
-		left, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.ICells[idx-1].Child)
+	if myPositionInParent > 0 {
+		left, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.ICells[myPositionInParent-1].Child)
 		if err != nil {
 			return fmt.Errorf("rebalance internal: %w", err)
 		}
 	} else {
-		right, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.GetRightChildByIndex(idx))
+		right, err = t.pager.GetPage(ctx, t, aParentPage.InternalNode.GetRightChildByIndex(myPositionInParent))
 		if err != nil {
 			return fmt.Errorf("rebalance internal: %w", err)
 		}
@@ -617,7 +617,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 			aParentPage.InternalNode,
 			aPage.InternalNode,
 			right.InternalNode,
-			idx,
+			myPositionInParent,
 		)
 	}
 
@@ -626,7 +626,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 			aParentPage.InternalNode,
 			aPage.InternalNode,
 			left.InternalNode,
-			idx-1,
+			myPositionInParent-1,
 		)
 	}
 
@@ -636,7 +636,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 			aParentPage,
 			aPage,
 			right,
-			idx,
+			myPositionInParent,
 		)
 	}
 
@@ -646,7 +646,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 			aParentPage,
 			left,
 			aPage,
-			idx-1,
+			myPositionInParent-1,
 		)
 	}
 
@@ -783,8 +783,8 @@ func (t *Table) BFS(f callback) error {
 
 		if current.InternalNode != nil {
 			for i := range current.InternalNode.Header.KeysNum {
-				icell := current.InternalNode.ICells[i]
-				aPage, err := t.pager.GetPage(context.Background(), t, icell.Child)
+				iCell := current.InternalNode.ICells[i]
+				aPage, err := t.pager.GetPage(context.Background(), t, iCell.Child)
 				if err != nil {
 					return err
 				}

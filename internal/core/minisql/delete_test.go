@@ -96,6 +96,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(2)).Return(leafs[0], nil)
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(1)).Return(leafs[1], nil)
+	// There will be 7 pages in total (root + 6 leafs)
 	for i := 3; i < 7; i++ {
 		pagerMock.On("GetPage", mock.Anything, aTable, uint32(i)).Return(leafs[i-1], nil)
 	}
@@ -363,6 +364,8 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		require.NoError(t, printTree(aTable))
 		assert.Equal(t, 0, int(aRootPage.LeafNode.Header.Cells))
 	})
+
+	assert.Equal(t, 7, int(totalPages))
 }
 
 func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
@@ -393,7 +396,8 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(2)).Return(leafs[0], nil)
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(1)).Return(leafs[1], nil)
-	for i := 3; i < numRows; i++ {
+	// There will be 47 pages in total
+	for i := 3; i < 47; i++ {
 		pagerMock.On("GetPage", mock.Anything, aTable, uint32(i)).Return(leafs[i-1], nil)
 	}
 
@@ -433,6 +437,8 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	// fmt.Println("AFTER")
 	require.NoError(t, printTree(aTable))
 	checkRows(ctx, t, aTable, nil)
+
+	assert.Equal(t, 47, int(totalPages))
 }
 
 func rowIDs(rows ...Row) []any {

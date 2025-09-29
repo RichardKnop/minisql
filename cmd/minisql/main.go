@@ -11,11 +11,11 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/RichardKnop/minisql/internal/pkg/database"
+	"github.com/RichardKnop/minisql/internal/core/database"
+	"github.com/RichardKnop/minisql/internal/core/minisql"
+	"github.com/RichardKnop/minisql/internal/core/pager"
+	"github.com/RichardKnop/minisql/internal/core/parser"
 	"github.com/RichardKnop/minisql/internal/pkg/logging"
-	"github.com/RichardKnop/minisql/internal/pkg/minisql"
-	"github.com/RichardKnop/minisql/internal/pkg/pager"
-	"github.com/RichardKnop/minisql/internal/pkg/parser"
 	"github.com/RichardKnop/minisql/internal/pkg/util"
 )
 
