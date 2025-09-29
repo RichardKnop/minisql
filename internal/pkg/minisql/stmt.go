@@ -97,6 +97,26 @@ func (o OneOrMore) UpdateLast(aCondition Condition) {
 	o[len(o)-1][len(o[len(o)-1])-1] = aCondition
 }
 
+func FieldIsIn(fieldName string, operandType OperandType, values ...any) OneOrMore {
+	oneOrMore := make(OneOrMore, 0, len(values))
+	for _, v := range values {
+		oneOrMore = append(oneOrMore, Conditions{
+			{
+				Operand1: Operand{
+					Type:  Field,
+					Value: fieldName,
+				},
+				Operator: Eq,
+				Operand2: Operand{
+					Type:  operandType,
+					Value: v,
+				},
+			},
+		})
+	}
+	return oneOrMore
+}
+
 type StatementKind int
 
 const (

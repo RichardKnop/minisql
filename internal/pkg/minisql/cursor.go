@@ -15,7 +15,7 @@ type Cursor struct {
 func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) error {
 	aPage, err := c.Table.pager.GetPage(ctx, c.Table, c.PageIdx)
 	if err != nil {
-		return err
+		return fmt.Errorf("leaf node insert: %w", err)
 	}
 	if aPage.LeafNode == nil {
 		return fmt.Errorf("error inserting row to a non leaf node, key %d", key)
@@ -33,10 +33,13 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) erro
 			aPage.LeafNode.Cells[i] = aPage.LeafNode.Cells[i-1]
 		}
 	}
+
+	if err := saveToCell(&aPage.LeafNode.Cells[c.CellIdx], key, aRow); err != nil {
+		return err
+	}
 	aPage.LeafNode.Header.Cells += 1
 
-	err = saveToCell(&aPage.LeafNode.Cells[c.CellIdx], key, aRow)
-	return err
+	return nil
 }
 
 // Create a new node and move half the cells over.
@@ -47,10 +50,13 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 
 	aSplitPage, err := aPager.GetPage(ctx, c.Table, c.PageIdx)
 	if err != nil {
-		return err
+		return fmt.Errorf("leaf node split insert: %w", err)
 	}
 
-	originalMaxKey, _ := aSplitPage.GetMaxKey()
+	originalMaxKey, err := c.Table.GetMaxKey(ctx, aSplitPage)
+	if err != nil {
+		return fmt.Errorf("leaf node split insert: %w", err)
+	}
 	newPageIdx := aPager.TotalPages()
 
 	c.Table.logger.Sugar().With(
@@ -63,7 +69,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	// TODO: Page recycle
 	aNewPage, err := aPager.GetPage(ctx, c.Table, newPageIdx)
 	if err != nil {
-		return err
+		return fmt.Errorf("leaf node split insert: %w", err)
 	}
 
 	aNewPage.LeafNode = NewLeafNode(uint64(c.Table.RowSize))
@@ -120,40 +126,34 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	parentPageIdx := aSplitPage.LeafNode.Header.Parent
 	aParentPage, err := aPager.GetPage(ctx, c.Table, parentPageIdx)
 	if err != nil {
-		return err
+		return fmt.Errorf("leaf node split insert: %w", err)
 	}
 
 	// If we won't need to split the internal node,
 	// update parent to reflect new max key
-	oldChildIdx := aParentPage.InternalNode.FindChildByKey(originalMaxKey)
-	if oldChildIdx < InternalNodeMaxCells {
-		oldPageNewMaxKey, _ := aSplitPage.GetMaxKey()
+	oldChildIdx := aParentPage.InternalNode.IndexOfChild(originalMaxKey)
+	if oldChildIdx < c.Table.maxICells {
+		oldPageNewMaxKey, err := c.Table.GetMaxKey(ctx, aSplitPage)
+		if err != nil {
+			return fmt.Errorf("leaf node split insert: %w", err)
+		}
 		aParentPage.InternalNode.ICells[oldChildIdx].Key = oldPageNewMaxKey
 	}
 
 	return c.Table.InternalNodeInsert(ctx, parentPageIdx, newPageIdx)
 }
 
-func saveToCell(cell *Cell, key uint64, aRow *Row) error {
-	rowBuf, err := aRow.Marshal()
-	if err != nil {
-		return err
-	}
-	cell.Key = key
-	copy(cell.Value[:], rowBuf)
-	return nil
-}
-
 func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
 	aPage, err := c.Table.pager.GetPage(ctx, c.Table, c.PageIdx)
 	if err != nil {
-		return Row{}, err
+		return Row{}, fmt.Errorf("fetch row: %w", err)
 	}
 	aRow := NewRow(c.Table.Columns)
 
 	if err := UnmarshalRow(aPage.LeafNode.Cells[c.CellIdx].Value[:], &aRow); err != nil {
 		return Row{}, err
 	}
+	aRow.key = aPage.LeafNode.Cells[c.CellIdx].Key
 
 	// There are still more cells in the page, move cursor to next cell and return
 	if c.CellIdx < aPage.LeafNode.Header.Cells-1 {
@@ -177,15 +177,35 @@ func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
 func (c *Cursor) update(ctx context.Context, aRow *Row) error {
 	aPage, err := c.Table.pager.GetPage(ctx, c.Table, c.PageIdx)
 	if err != nil {
-		return err
+		return fmt.Errorf("update: %w", err)
 	}
 
 	rowBuf, err := aRow.Marshal()
 	if err != nil {
-		return err
+		return fmt.Errorf("update: %w", err)
 	}
 
 	cell := &aPage.LeafNode.Cells[c.CellIdx]
+	copy(cell.Value[:], rowBuf)
+	return nil
+}
+
+func (c *Cursor) delete(ctx context.Context) error {
+	aPage, err := c.Table.pager.GetPage(ctx, c.Table, c.PageIdx)
+	if err != nil {
+		return fmt.Errorf("delete: %w", err)
+	}
+
+	key := aPage.LeafNode.Cells[c.CellIdx].Key
+	return c.Table.DeleteKey(ctx, c.PageIdx, key)
+}
+
+func saveToCell(cell *Cell, key uint64, aRow *Row) error {
+	rowBuf, err := aRow.Marshal()
+	if err != nil {
+		return fmt.Errorf("save to cell: %w", err)
+	}
+	cell.Key = key
 	copy(cell.Value[:], rowBuf)
 	return nil
 }

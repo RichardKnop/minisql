@@ -313,7 +313,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	assert.Equal(t, 344, int(aRootPage.InternalNode.ICells[0].Child))
 	assert.Equal(t, 170, int(aRootPage.InternalNode.ICells[0].Key))
 
-	// New left internal node should have 171 cells (we move bigger half to the left).
+	// New left internal node should have 171 cells (170 + right child page).
 	// First two pages should be switched (2, 1) as a result of root leaf split
 	// but after that it continues as 3, 4, ... 171. Keys are 0, 1, ... 170
 	assert.Equal(t, 170, int(aNewLeftInternal.InternalNode.Header.KeysNum))
@@ -329,16 +329,16 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	}
 	assert.Equal(t, 171, int(aNewLeftInternal.InternalNode.Header.RightChild))
 
-	// New right internal node will have 171 cells (smaller half 169 + right child page + new key).
+	// New right internal node will have 169 cells.
 	// Children go from 172, 173, ... 342 and keys from 171, 172, ... 341
-	assert.Equal(t, 171, int(aNewRightInternal.InternalNode.Header.KeysNum))
+	assert.Equal(t, 170, int(aNewRightInternal.InternalNode.Header.KeysNum))
 	assert.False(t, aNewRightInternal.InternalNode.Header.IsRoot)
 	assert.True(t, aNewRightInternal.InternalNode.Header.IsInternal)
 	var (
 		firstRightKey   = 171
 		firstRightChild = 172
 	)
-	for i := 0; i < 169; i++ {
+	for i := 0; i < 170; i++ {
 		assert.Equal(t, firstRightKey, int(aNewRightInternal.InternalNode.ICells[i].Key))
 		assert.Equal(t, firstRightChild, int(aNewRightInternal.InternalNode.ICells[i].Child))
 		firstRightKey += 1

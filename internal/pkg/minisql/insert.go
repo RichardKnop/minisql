@@ -22,7 +22,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 
 		aPage, err := t.pager.GetPage(ctx, t, aCursor.PageIdx)
 		if err != nil {
-			return err
+			return fmt.Errorf("insert: %w", err)
 		}
 
 		// Must be leaf node

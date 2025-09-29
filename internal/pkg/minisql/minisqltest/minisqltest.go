@@ -2,7 +2,6 @@ package minisqltest
 
 import (
 	"bytes"
-	"time"
 
 	"github.com/brianvoe/gofakeit/v7"
 
@@ -10,8 +9,6 @@ import (
 )
 
 var (
-	gen = NewDataGen(uint64(time.Now().Unix()))
-
 	testColumns = []minisql.Column{
 		{
 			Kind: minisql.Int8,
@@ -48,7 +45,7 @@ var (
 		},
 		{
 			Kind: minisql.Varchar,
-			Size: minisql.PageSize - 6 - 8 - 4*8 - 8 - 255 - 255,
+			Size: minisql.PageSize - 6 - 8 - 8 - (8 + 255 + 255),
 			Name: "description",
 		},
 	}
@@ -131,9 +128,8 @@ func (g *DataGen) NewRootLeafPageWithCells(cells, rowSize int) *minisql.Page {
 
 	for i := 0; i < cells; i++ {
 		aRootLeaf.Cells[i] = minisql.Cell{
-			Key:     uint64(i),
-			Value:   bytes.Repeat([]byte{byte(i)}, rowSize),
-			RowSize: uint64(rowSize),
+			Key:   uint64(i),
+			Value: bytes.Repeat([]byte{byte(i)}, rowSize),
 		}
 	}
 
@@ -160,6 +156,7 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 	var (
 		// page 0
 		aRootPage = &minisql.Page{
+			Index: 0,
 			InternalNode: &minisql.InternalNode{
 				Header: minisql.InternalNodeHeader{
 					Header: minisql.Header{
@@ -179,6 +176,7 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 		}
 		// page 1
 		internalPage1 = &minisql.Page{
+			Index: 1,
 			InternalNode: &minisql.InternalNode{
 				Header: minisql.InternalNodeHeader{
 					Header: minisql.Header{
@@ -198,6 +196,7 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 		}
 		// page 2
 		internalPage2 = &minisql.Page{
+			Index: 2,
 			InternalNode: &minisql.InternalNode{
 				Header: minisql.InternalNodeHeader{
 					Header: minisql.Header{
@@ -217,6 +216,7 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 		}
 		// page 3
 		leafPage1 = &minisql.Page{
+			Index: 3,
 			LeafNode: &minisql.LeafNode{
 				Header: minisql.LeafNodeHeader{
 					Header: minisql.Header{
@@ -228,20 +228,20 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 				},
 				Cells: append([]minisql.Cell{
 					{
-						Key:     1,
-						Value:   bytes.Repeat([]byte{byte(1)}, 270),
-						RowSize: 270,
+						Key:   1,
+						Value: bytes.Repeat([]byte{byte(1)}, 270),
 					},
 					{
-						Key:     2,
-						Value:   bytes.Repeat([]byte{byte(2)}, 270),
-						RowSize: 270,
+						Key:   2,
+						Value: bytes.Repeat([]byte{byte(2)}, 270),
 					},
 				}, defaultCell.Cells[2:]...),
+				RowSize: 270,
 			},
 		}
 		// page 4
 		leafPage2 = &minisql.Page{
+			Index: 4,
 			LeafNode: &minisql.LeafNode{
 				Header: minisql.LeafNodeHeader{
 					Header: minisql.Header{
@@ -253,15 +253,16 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 				},
 				Cells: append([]minisql.Cell{
 					{
-						Key:     5,
-						Value:   bytes.Repeat([]byte{byte(3)}, 270),
-						RowSize: 270,
+						Key:   5,
+						Value: bytes.Repeat([]byte{byte(3)}, 270),
 					},
 				}, defaultCell.Cells[1:]...),
+				RowSize: 270,
 			},
 		}
 		// page 5
 		leafPage3 = &minisql.Page{
+			Index: 5,
 			LeafNode: &minisql.LeafNode{
 				Header: minisql.LeafNodeHeader{
 					Header: minisql.Header{
@@ -273,20 +274,20 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 				},
 				Cells: append([]minisql.Cell{
 					{
-						Key:     12,
-						Value:   bytes.Repeat([]byte{byte(4)}, 270),
-						RowSize: 270,
+						Key:   12,
+						Value: bytes.Repeat([]byte{byte(4)}, 270),
 					},
 					{
-						Key:     18,
-						Value:   bytes.Repeat([]byte{byte(5)}, 270),
-						RowSize: 270,
+						Key:   18,
+						Value: bytes.Repeat([]byte{byte(5)}, 270),
 					},
 				}, defaultCell.Cells[2:]...),
+				RowSize: 270,
 			},
 		}
 		// page 6
 		leafPage4 = &minisql.Page{
+			Index: 6,
 			LeafNode: &minisql.LeafNode{
 				Header: minisql.LeafNodeHeader{
 					Header: minisql.Header{
@@ -297,11 +298,11 @@ func (g *DataGen) NewTestBtree() (*minisql.Page, []*minisql.Page, []*minisql.Pag
 				},
 				Cells: append([]minisql.Cell{
 					{
-						Key:     21,
-						Value:   bytes.Repeat([]byte{byte(6)}, 270),
-						RowSize: 270,
+						Key:   21,
+						Value: bytes.Repeat([]byte{byte(6)}, 270),
 					},
 				}, defaultCell.Cells[1:]...),
+				RowSize: 270,
 			},
 		}
 

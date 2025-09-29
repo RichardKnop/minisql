@@ -18,13 +18,13 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		},
 	}
 
-	aCursor, err := t.Seek(ctx, uint64(0))
+	aCursor, err := t.SeekFirst(ctx)
 	if err != nil {
 		return aResult, err
 	}
 	aPage, err := t.pager.GetPage(ctx, t, aCursor.PageIdx)
 	if err != nil {
-		return aResult, err
+		return aResult, fmt.Errorf("select: %w", err)
 	}
 	aCursor.EndOfTable = aPage.LeafNode.Header.Cells == 0
 
@@ -43,7 +43,7 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 
 	go func(out chan<- Row) {
 		defer close(out)
-		for aCursor.EndOfTable == false {
+		for !aCursor.EndOfTable {
 			aRow, err := aCursor.fetchRow(ctx)
 			if err != nil {
 				errorsPipe <- err

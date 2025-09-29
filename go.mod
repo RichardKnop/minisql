@@ -3,7 +3,7 @@ module github.com/RichardKnop/minisql
 go 1.23.1
 
 require (
-	github.com/brianvoe/gofakeit/v7 v7.0.4
+	github.com/brianvoe/gofakeit/v7 v7.7.3
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/zap v1.27.0
 )

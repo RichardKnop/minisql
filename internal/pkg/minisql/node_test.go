@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestInternalNode_FindChildByKey(t *testing.T) {
+func TestInternalNode_IndexOfChild(t *testing.T) {
 	t.Parallel()
 
 	// Root node has only 1 key so there will only be 2 children
@@ -98,7 +98,7 @@ func TestInternalNode_FindChildByKey(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			childIdx := aTestCase.Page.InternalNode.FindChildByKey(aTestCase.Key)
+			childIdx := aTestCase.Page.InternalNode.IndexOfChild(aTestCase.Key)
 			assert.Equal(t, int(aTestCase.ChildIdx), int(childIdx))
 		})
 	}
