@@ -193,7 +193,7 @@ func (t *Table) CreateNewRoot(ctx context.Context, rightChildPageIdx uint32) (*P
 			if err != nil {
 				return nil, fmt.Errorf("create new root: %w", err)
 			}
-			setParent(aChildPage, leftChildPageIdx)
+			aChildPage.setParent(leftChildPageIdx)
 		}
 	}
 
@@ -206,7 +206,7 @@ func (t *Table) CreateNewRoot(ctx context.Context, rightChildPageIdx uint32) (*P
 
 	// Set left and right child
 	newRootNode.Header.RightChild = rightChildPageIdx
-	if err := newRootNode.SetChildIdx(0, leftChildPageIdx); err != nil {
+	if err := newRootNode.SetChild(0, leftChildPageIdx); err != nil {
 		return nil, err
 	}
 	leftChildMaxKey, err := t.GetMaxKey(ctx, leftChildPage)
@@ -216,18 +216,10 @@ func (t *Table) CreateNewRoot(ctx context.Context, rightChildPageIdx uint32) (*P
 	newRootNode.ICells[0].Key = leftChildMaxKey
 
 	// Set parent for both left and right child
-	setParent(leftChildPage, t.RootPageIdx)
-	setParent(rightChildPage, t.RootPageIdx)
+	leftChildPage.setParent(t.RootPageIdx)
+	rightChildPage.setParent(t.RootPageIdx)
 
 	return leftChildPage, nil
-}
-
-func setParent(aPage *Page, parentIdx uint32) {
-	if aPage.LeafNode != nil {
-		aPage.LeafNode.Header.Parent = parentIdx
-	} else if aPage.InternalNode != nil {
-		aPage.InternalNode.Header.Parent = parentIdx
-	}
 }
 
 // Add a new child/key pair to parent that corresponds to child
@@ -241,7 +233,7 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 	if err != nil {
 		return fmt.Errorf("internal node insert: %w", err)
 	}
-	setParent(aChildPage, parentPageIdx)
+	aChildPage.setParent(parentPageIdx)
 
 	childMaxKey, err := t.GetMaxKey(ctx, aChildPage)
 	if err != nil {
@@ -256,6 +248,20 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 		return t.InternalNodeSplitInsert(ctx, parentPageIdx, childPageIdx)
 	}
 
+	/*
+	  An internal node with a right child of INVALID_PAGE_NUM is empty
+	*/
+	if aParentPage.InternalNode.Header.RightChild == RIGHT_CHILD_NOT_SET {
+		aParentPage.InternalNode.Header.RightChild = childPageIdx
+		return nil
+	}
+
+	/*
+	  If we are already at the max number of cells for a node, we cannot increment
+	  before splitting. Incrementing without inserting a new key/child pair
+	  and immediately calling internal_node_split_and_insert has the effect
+	  of creating a new key at (max_cells + 1) with an uninitialized value
+	*/
 	aParentPage.InternalNode.Header.KeysNum += 1
 
 	rightChildPageIdx := aParentPage.InternalNode.Header.RightChild
@@ -270,7 +276,7 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 	}
 	if childMaxKey > rightChildMaxKey {
 		// Replace right child
-		aParentPage.InternalNode.SetChildIdx(originalKeyCount, rightChildPageIdx)
+		aParentPage.InternalNode.SetChild(originalKeyCount, rightChildPageIdx)
 		aParentPage.InternalNode.ICells[originalKeyCount].Key = rightChildMaxKey
 		aParentPage.InternalNode.Header.RightChild = childPageIdx
 		return nil
@@ -280,7 +286,7 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 	for i := originalKeyCount; i > index; i-- {
 		aParentPage.InternalNode.ICells[i] = aParentPage.InternalNode.ICells[i-1]
 	}
-	aParentPage.InternalNode.SetChildIdx(index, childPageIdx)
+	aParentPage.InternalNode.SetChild(index, childPageIdx)
 	aParentPage.InternalNode.ICells[index].Key = childMaxKey
 
 	return nil
@@ -347,7 +353,7 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 	if err != nil {
 		return fmt.Errorf("internal node split insert: %w", err)
 	}
-	setParent(newPageRightChild, newPageIdx)
+	newPageRightChild.setParent(newPageIdx)
 	aSplitPage.InternalNode.Header.RightChild = RIGHT_CHILD_NOT_SET
 
 	// For each key until you get to the middle key, move the key and the child to the new node
@@ -375,12 +381,12 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 		if err := t.InternalNodeInsert(ctx, pageIdx, childPageIdx); err != nil {
 			return fmt.Errorf("internal node split insert: %w", err)
 		}
-		setParent(childPage, pageIdx)
+		childPage.setParent(pageIdx)
 	} else {
 		if err := t.InternalNodeInsert(ctx, newPageIdx, childPageIdx); err != nil {
 			return fmt.Errorf("internal node split insert: %w", err)
 		}
-		setParent(childPage, newPageIdx)
+		childPage.setParent(newPageIdx)
 	}
 
 	aParentPage, err := t.pager.GetPage(ctx, t, aSplitPage.InternalNode.Header.Parent)
@@ -703,13 +709,13 @@ func (t *Table) mergeInternalNodes(ctx context.Context, aParent, left, right *Pa
 		if err != nil {
 			return fmt.Errorf("merge internal nodes: %w", err)
 		}
-		setParent(movedPage, leftIndex)
+		movedPage.setParent(leftIndex)
 	}
 	newRightChildPage, err := t.pager.GetPage(ctx, t, right.InternalNode.Header.RightChild)
 	if err != nil {
 		return fmt.Errorf("merge internal nodes: %w", err)
 	}
-	setParent(newRightChildPage, leftIndex)
+	newRightChildPage.setParent(leftIndex)
 
 	// Do not lose right most child of the left node in the process
 	oldRightChildPage, err := t.pager.GetPage(ctx, t, left.InternalNode.Header.RightChild)
@@ -744,9 +750,9 @@ func (t *Table) mergeInternalNodes(ctx context.Context, aParent, left, right *Pa
 			if err != nil {
 				return fmt.Errorf("merge internal nodes: %w", err)
 			}
-			setParent(childPage, leftIndex)
+			childPage.setParent(leftIndex)
 		}
-		setParent(oldRightChildPage, leftIndex)
+		oldRightChildPage.setParent(leftIndex)
 		return nil
 	}
 

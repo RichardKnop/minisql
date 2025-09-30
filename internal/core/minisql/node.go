@@ -67,18 +67,18 @@ func (n *InternalNode) Child(childIdx uint32) (uint32, error) {
 	return n.ICells[childIdx].Child, nil
 }
 
-func (n *InternalNode) SetChildIdx(idx, newIdx uint32) error {
+func (n *InternalNode) SetChild(idx, childPage uint32) error {
 	keysNum := n.Header.KeysNum
 	if idx > keysNum {
 		return fmt.Errorf("childIdx %d out of keysNum %d", idx, keysNum)
 	}
 
 	if idx == keysNum {
-		n.Header.RightChild = newIdx
+		n.Header.RightChild = childPage
 		return nil
 	}
 
-	n.ICells[idx].Child = newIdx
+	n.ICells[idx].Child = childPage
 	return nil
 }
 

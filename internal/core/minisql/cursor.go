@@ -21,15 +21,14 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) erro
 		return fmt.Errorf("error inserting row to a non leaf node, key %d", key)
 	}
 
-	cells := aPage.LeafNode.Header.Cells
-	if cells >= aRow.MaxCells() {
+	if aPage.LeafNode.Header.Cells >= aRow.MaxCells() {
 		// Split leaf node
 		return c.LeafNodeSplitInsert(ctx, key, aRow)
 	}
 
-	if c.CellIdx < cells {
+	if c.CellIdx < aPage.LeafNode.Header.Cells {
 		// Need make room for new cell
-		for i := cells; i > c.CellIdx; i-- {
+		for i := aPage.LeafNode.Header.Cells; i > c.CellIdx; i-- {
 			aPage.LeafNode.Cells[i] = aPage.LeafNode.Cells[i-1]
 		}
 	}

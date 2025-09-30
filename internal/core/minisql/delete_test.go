@@ -2,7 +2,9 @@ package minisql
 
 import (
 	"context"
+	"log"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -382,7 +384,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 		aTable         = NewTable(testLogger, "foo", testMediumColumns, pagerMock, 0)
 	)
 	aTable.maxICells = 5 // for testing purposes only, normally 340
-	for i := range numRows {
+	for i := range 47 {
 		leafs = append(leafs, &Page{LeafNode: NewLeafNode(rowSize)})
 		if i == 0 {
 			leafs[i].Index = uint32(2)
@@ -419,8 +421,11 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
+	start := time.Now()
 	err := aTable.Insert(ctx, stmt)
 	require.NoError(t, err)
+	elapsed := time.Since(start)
+	log.Printf("Insert took %s", elapsed)
 
 	// fmt.Println("BEFORE")
 	require.NoError(t, printTree(aTable))
