@@ -1,11 +1,9 @@
-package pager
+package minisql
 
 import (
 	"context"
 	"fmt"
 	"io"
-
-	"github.com/RichardKnop/minisql/internal/core/minisql"
 )
 
 type DBFile interface {
@@ -18,18 +16,18 @@ type Pager struct {
 	pageSize   int
 	totalPages uint32 // total number of pages
 
-	pages []*minisql.Page
+	pages []*Page
 
 	file     DBFile
 	fileSize int64
 }
 
 // New opens the database file and tries to read the root page
-func New(file DBFile, pageSize int, schemaTableName string) (*Pager, error) {
+func NewPager(file DBFile, pageSize int, schemaTableName string) (*Pager, error) {
 	aPager := &Pager{
 		pageSize: pageSize,
 		file:     file,
-		pages:    make([]*minisql.Page, minisql.MaxPages),
+		pages:    make([]*Page, 0, 1000),
 	}
 
 	fileSize, err := aPager.file.Seek(0, io.SeekEnd)
@@ -45,9 +43,6 @@ func New(file DBFile, pageSize int, schemaTableName string) (*Pager, error) {
 
 	// Check we are not exceeding max page limit
 	totalPages := fileSize / int64(pageSize)
-	if totalPages >= minisql.MaxPages {
-		return nil, fmt.Errorf(("file size exceeds max pages limit"))
-	}
 	aPager.totalPages = uint32(totalPages)
 
 	// TODO - init root page?
@@ -59,41 +54,54 @@ func (p *Pager) TotalPages() uint32 {
 	return p.totalPages
 }
 
-func (p *Pager) GetPage(ctx context.Context, aTable *minisql.Table, pageIdx uint32) (*minisql.Page, error) {
-	if pageIdx >= minisql.MaxPages {
-		return nil, fmt.Errorf("page index %d reached limit of max pages %d", pageIdx, minisql.MaxPages)
-	}
-
-	if p.pages[pageIdx] != nil {
+func (p *Pager) GetPage(ctx context.Context, aTable *Table, pageIdx uint32) (*Page, error) {
+	if int(pageIdx) < len(p.pages) {
 		return p.pages[pageIdx], nil
 	}
 
-	// Cache miss, try to load the page from file first
-	// Load page from file
-	buf := make([]byte, p.pageSize)
-	_, err := p.file.ReadAt(buf, int64(pageIdx)*int64(p.pageSize))
-	if err != nil && err != io.EOF {
-		return nil, err
+	if int(pageIdx) > int(p.totalPages) {
+		return nil, fmt.Errorf("cannot skip index when getting page, index: %d, number of pages: %d", pageIdx, len(p.pages))
 	}
 
-	// First byte is Internal flag
-	if buf[0] == 0 {
+	buf := make([]byte, p.pageSize)
+
+	// Requesting a new page
+	if int(pageIdx) == int(p.totalPages) {
 		// Leaf node
-		leaf := minisql.NewLeafNode(uint64(aTable.RowSize))
+		leaf := NewLeafNode(uint64(aTable.RowSize))
 		_, err := leaf.Unmarshal(buf)
 		if err != nil {
 			return nil, err
 		}
-		p.pages[pageIdx] = &minisql.Page{Index: pageIdx, LeafNode: leaf}
+		p.pages = append(p.pages, &Page{Index: pageIdx, LeafNode: leaf})
+		p.totalPages = pageIdx + 1
 	} else {
-		// Internal node
-		internal := new(minisql.InternalNode)
-		_, err := internal.Unmarshal(buf)
+		// Page should exist, load the page from file
+		_, err := p.file.ReadAt(buf, int64(pageIdx)*int64(p.pageSize))
 		if err != nil {
 			return nil, err
 		}
-		p.pages[pageIdx] = &minisql.Page{Index: pageIdx, InternalNode: internal}
+
+		// First byte is Internal flag, this condition is also true if page does not exist
+		if buf[0] == 0 {
+			// Leaf node
+			leaf := NewLeafNode(uint64(aTable.RowSize))
+			_, err := leaf.Unmarshal(buf)
+			if err != nil {
+				return nil, err
+			}
+			p.pages = append(p.pages, &Page{Index: pageIdx, LeafNode: leaf})
+		} else {
+			// Internal node
+			internal := new(InternalNode)
+			_, err := internal.Unmarshal(buf)
+			if err != nil {
+				return nil, err
+			}
+			p.pages = append(p.pages, &Page{Index: pageIdx, InternalNode: internal})
+		}
 	}
+
 	if pageIdx == 0 {
 		if p.pages[pageIdx].LeafNode != nil {
 			p.pages[pageIdx].LeafNode.Header.IsRoot = true
@@ -102,9 +110,6 @@ func (p *Pager) GetPage(ctx context.Context, aTable *minisql.Table, pageIdx uint
 			p.pages[pageIdx].InternalNode.Header.IsRoot = true
 			p.pages[pageIdx].InternalNode.Header.IsInternal = true
 		}
-	}
-	if pageIdx >= p.totalPages {
-		p.totalPages = pageIdx + 1
 	}
 
 	return p.pages[pageIdx], nil
