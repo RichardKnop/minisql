@@ -1,23 +1,15 @@
-package pager
+package minisql
 
 import (
 	"context"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/RichardKnop/minisql/internal/core/minisql"
-	"github.com/RichardKnop/minisql/internal/core/minisql/minisqltest"
 )
 
-var (
-	gen = minisqltest.NewDataGen(uint64(time.Now().Unix()))
-)
-
-func TestNew_Empty(t *testing.T) {
+func TestNewPager_Empty(t *testing.T) {
 	t.Parallel()
 
 	dbFile, err := os.CreateTemp(".", "testdb")
@@ -25,12 +17,12 @@ func TestNew_Empty(t *testing.T) {
 	defer dbFile.Close()
 	defer os.Remove(dbFile.Name())
 
-	aPager, err := New(dbFile, minisql.PageSize, "minisql_main")
+	aPager, err := NewPager(dbFile, PageSize, "minisql_main")
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(0), aPager.fileSize)
 	assert.Equal(t, 0, int(aPager.totalPages))
-	assert.Len(t, aPager.pages, minisql.MaxPages)
+	assert.Len(t, aPager.pages, 0)
 }
 
 func TestNew_GetPage(t *testing.T) {
@@ -41,33 +33,36 @@ func TestNew_GetPage(t *testing.T) {
 	defer dbFile.Close()
 	defer os.Remove(dbFile.Name())
 
-	aPager, err := New(dbFile, minisql.PageSize, "minisql_main")
+	aPager, err := NewPager(dbFile, PageSize, "minisql_main")
 	require.NoError(t, err)
 
-	aRootPage, internalPages, leafPages := gen.NewTestBtree()
+	aRootPage, internalPages, leafPages := newTestBtree()
 
-	aPager.pages[0] = aRootPage
-	aPager.pages[1] = internalPages[0]
-	aPager.pages[2] = internalPages[1]
-	aPager.pages[3] = leafPages[0]
-	aPager.pages[4] = leafPages[1]
-	aPager.pages[5] = leafPages[2]
-	aPager.pages[6] = leafPages[3]
+	aPager.pages = append(aPager.pages, aRootPage)
+	aPager.pages = append(aPager.pages, internalPages[0])
+	aPager.pages = append(aPager.pages, internalPages[1])
+	aPager.pages = append(aPager.pages, leafPages[0])
+	aPager.pages = append(aPager.pages, leafPages[1])
+	aPager.pages = append(aPager.pages, leafPages[2])
+	aPager.pages = append(aPager.pages, leafPages[3])
 	aPager.totalPages = 7
+	assert.Len(t, aPager.pages, 7)
 
 	var (
 		ctx    = context.Background()
-		aTable = &minisql.Table{RowSize: 270}
+		aTable = &Table{RowSize: 270}
 	)
 
-	for pageIdx := 0; pageIdx < int(aPager.totalPages); pageIdx++ {
+	for pageIdx := 0; pageIdx < int(aPager.TotalPages()); pageIdx++ {
 		err := aPager.Flush(ctx, uint32(pageIdx), int64(aPager.pageSize))
 		require.NoError(t, err)
 	}
 
-	// Reset pager cache to empty the cache
-	aPager.pages = make([]*minisql.Page, minisql.MaxPages)
-	aPager.totalPages = 0
+	// Reset pager to empty the cache
+	dbFile.Seek(0, 0)
+	aPager, err = NewPager(dbFile, PageSize, "minisql_main")
+	require.NoError(t, err)
+	assert.Equal(t, 7, int(aPager.totalPages))
 
 	// Root page
 	aPage, err := aPager.GetPage(ctx, aTable, uint32(0))

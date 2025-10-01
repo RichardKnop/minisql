@@ -13,7 +13,6 @@ import (
 
 	"github.com/RichardKnop/minisql/internal/core/database"
 	"github.com/RichardKnop/minisql/internal/core/minisql"
-	"github.com/RichardKnop/minisql/internal/core/pager"
 	"github.com/RichardKnop/minisql/internal/core/parser"
 	"github.com/RichardKnop/minisql/internal/pkg/logging"
 	"github.com/RichardKnop/minisql/internal/pkg/util"
@@ -89,7 +88,7 @@ func main() {
 	}
 	defer dbFile.Close()
 
-	aPager, err := pager.New(dbFile, minisql.PageSize, database.SchemaTableName)
+	aPager, err := minisql.NewPager(dbFile, minisql.PageSize, database.SchemaTableName)
 	if err != nil {
 		panic(err)
 	}

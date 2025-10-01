@@ -2,7 +2,6 @@ package minisql
 
 const (
 	PageSize = 4096 // 4 kilobytes
-	MaxPages = 1000 // temporary limit, TODO - remove later
 )
 
 type Page struct {

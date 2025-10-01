@@ -2,43 +2,27 @@ package minisql
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
 func TestTable_Select(t *testing.T) {
 	t.Parallel()
 
+	tempFile, err := os.CreateTemp("", "testdb")
+	require.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+	aPager, err := NewPager(tempFile, PageSize, "minisql_main")
+	require.NoError(t, err)
+
 	var (
-		ctx            = context.Background()
-		pagerMock      = new(MockPager)
-		rows           = gen.Rows(38)
-		cells, rowSize = 0, rows[0].Size()
-		aRootPage      = newRootLeafPageWithCells(cells, int(rowSize))
-		leaf1          = &Page{LeafNode: NewLeafNode(rowSize)}
-		leaf2          = &Page{LeafNode: NewLeafNode(rowSize)}
-		leaf3          = &Page{LeafNode: NewLeafNode(rowSize)}
-		leaf4          = &Page{LeafNode: NewLeafNode(rowSize)}
-		aTable         = NewTable(testLogger, "foo", testColumns, pagerMock, 0)
+		ctx    = context.Background()
+		rows   = gen.Rows(38)
+		aTable = NewTable(testLogger, "foo", testColumns, aPager, 0)
 	)
-
-	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
-	pagerMock.On("GetPage", mock.Anything, aTable, uint32(1)).Return(leaf2, nil)
-	pagerMock.On("GetPage", mock.Anything, aTable, uint32(2)).Return(leaf1, nil)
-	pagerMock.On("GetPage", mock.Anything, aTable, uint32(3)).Return(leaf3, nil)
-	pagerMock.On("GetPage", mock.Anything, aTable, uint32(4)).Return(leaf4, nil)
-
-	// TotalPages is called 3 times, let's make sure each time it's called, it returns
-	// an incremented value since we have created a new page in the meantime
-	totalPages := uint32(1)
-	pagerMock.On("TotalPages").Return(func() uint32 {
-		old := totalPages
-		totalPages += 1
-		return old
-	}, nil)
 
 	// Batch insert test rows
 	insertStmt := Statement{
@@ -51,7 +35,7 @@ func TestTable_Select(t *testing.T) {
 		insertStmt.Inserts = append(insertStmt.Inserts, aRow.Values)
 	}
 
-	err := aTable.Insert(ctx, insertStmt)
+	err = aTable.Insert(ctx, insertStmt)
 	require.NoError(t, err)
 
 	testCases := []struct {

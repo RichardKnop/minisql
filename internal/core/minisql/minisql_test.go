@@ -262,6 +262,7 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 					},
 				},
 			},
+			Index: 0,
 		}
 		// page 1
 		internalPage1 = &Page{
@@ -281,6 +282,7 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 					},
 				},
 			},
+			Index: 1,
 		}
 		// page 2
 		internalPage2 = &Page{
@@ -300,6 +302,7 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 					},
 				},
 			},
+			Index: 2,
 		}
 		// page 3
 		leafPage1 = &Page{
@@ -324,6 +327,7 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				}, defaultCell.Cells[2:]...),
 				RowSize: 270,
 			},
+			Index: 3,
 		}
 		// page 4
 		leafPage2 = &Page{
@@ -344,6 +348,7 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				}, defaultCell.Cells[1:]...),
 				RowSize: 270,
 			},
+			Index: 4,
 		}
 		// page 5
 		leafPage3 = &Page{
@@ -368,6 +373,7 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				}, defaultCell.Cells[2:]...),
 				RowSize: 270,
 			},
+			Index: 5,
 		}
 		// page 6
 		leafPage4 = &Page{
@@ -387,6 +393,7 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				}, defaultCell.Cells[1:]...),
 				RowSize: 270,
 			},
+			Index: 6,
 		}
 
 		internalPages = []*Page{
