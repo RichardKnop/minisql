@@ -68,6 +68,22 @@ func TestParse_CreateTable(t *testing.T) {
 			},
 		},
 		{
+			Name: "CREATE TABLE with IF NOT EXISTS works",
+			SQL:  "CREATE TABLE IF NOT EXISTS foo (bar int4)",
+			Expected: minisql.Statement{
+				Kind:        minisql.CreateTable,
+				TableName:   "foo",
+				IfNotExists: true,
+				Columns: []minisql.Column{
+					{
+						Name: "bar",
+						Kind: minisql.Int4,
+						Size: 4,
+					},
+				},
+			},
+		},
+		{
 			Name: "CREATE TABLE with single int8 column works",
 			SQL:  "CREATE TABLE foo (bar int8)",
 			Expected: minisql.Statement{

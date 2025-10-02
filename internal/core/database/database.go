@@ -26,11 +26,6 @@ type Pager interface {
 	Flush(context.Context, uint32, int64) error
 }
 
-const (
-	// Name of the table that contains database schema
-	SchemaTableName = "minisql_main"
-)
-
 var (
 	schemaTableColumns = []minisql.Column{
 		{

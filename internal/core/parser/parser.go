@@ -32,13 +32,14 @@ var reservedWords = []string{
 	// statement types
 	"CREATE TABLE", "DROP TABLE", "SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
-	"WHERE", "FROM", "SET", "AS",
+	"IF NOT EXISTS", "WHERE", "FROM", "SET", "AS",
 }
 
 type step int
 
 const (
 	stepBeginning step = iota + 1
+	stepCreateTableIfNotExists
 	stepCreateTableName
 	stepCreateTableOpeningParens
 	stepCreateTableColumn
@@ -130,7 +131,7 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			case "CREATE TABLE":
 				p.Kind = minisql.CreateTable
 				p.pop()
-				p.step = stepCreateTableName
+				p.step = stepCreateTableIfNotExists
 			case "DROP TABLE":
 				p.Kind = minisql.DropTable
 				p.pop()
@@ -157,7 +158,8 @@ func (p *parser) doParse() (minisql.Statement, error) {
 		// -----------------
 		// CREATE TABLE
 		//------------------
-		case stepCreateTableName,
+		case stepCreateTableIfNotExists,
+			stepCreateTableName,
 			stepCreateTableOpeningParens,
 			stepCreateTableColumn,
 			stepCreateTableColumnDef,

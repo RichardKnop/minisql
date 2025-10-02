@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"go.uber.org/zap"
@@ -58,8 +59,11 @@ func doMetaCommand(inputBuffer string) metaCommand {
 	}
 }
 
+const defaultDbFileName = "db"
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	logConf := logging.DefaultConfig()
 
@@ -78,17 +82,16 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
 	defer logger.Sync() // flushes buffer, if any
 
 	// TODO - hardcoded database for now
-	dbFile, err := os.OpenFile("db", os.O_RDWR|os.O_CREATE, 0600)
+	dbFile, err := os.OpenFile(defaultDbFileName, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
 		panic(err)
 	}
 	defer dbFile.Close()
 
-	aPager, err := minisql.NewPager(dbFile, minisql.PageSize, database.SchemaTableName)
+	aPager, err := minisql.NewPager(dbFile, minisql.PageSize, minisql.SchemaTableName)
 	if err != nil {
 		panic(err)
 	}
@@ -98,63 +101,75 @@ func main() {
 	}
 	aDatabase.CreateTestTable()
 
-	reader := bufio.NewScanner(os.Stdin)
-	printPrompt()
-
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	wg := new(sync.WaitGroup)
+	wg.Add(1)
 
 	go func() {
-		<-c
-		if err := aDatabase.Close(ctx); err != nil {
-			fmt.Printf("error closing database: %s\n", err)
-		}
-		cancel()
-		// TODO - cleanup
-		os.Exit(1)
-	}()
+		defer wg.Done()
+		reader := bufio.NewScanner(os.Stdin)
+		printPrompt()
 
-	// REPL (Read-eval-print loop) start
-	for reader.Scan() {
-		inputBuffer := sanitizeReplInput(reader.Text())
-		if isMetaCommand(inputBuffer) {
-			switch doMetaCommand(inputBuffer[1:]) {
-			case Help:
-				fmt.Println(".help    - Show available commands")
-				fmt.Println(".exit    - Closes program")
-				fmt.Println(".tables  - List all tables in the current database")
-			case Exit:
-				// Return exits with code 0 by default, os.Exit(0)
-				// would exit immediately without any defers
-				return
-			case ListTables:
-				for _, table := range aDatabase.ListTableNames(ctx) {
-					fmt.Println(table)
-				}
-			case Unknown:
-				fmt.Printf("Unrecognized meta command: %s\n", inputBuffer)
+		// REPL (Read-eval-print loop) start
+		for reader.Scan() {
+			if ctx.Err() != nil {
+				break
 			}
-		} else {
-			stmt, err := aDatabase.PrepareStatement(ctx, inputBuffer)
-			if err != nil {
-				// Parser logs error internally
+
+			inputBuffer := sanitizeReplInput(reader.Text())
+			if isMetaCommand(inputBuffer) {
+				switch doMetaCommand(inputBuffer[1:]) {
+				case Help:
+					fmt.Println(".help    - Show available commands")
+					fmt.Println(".exit    - Closes program")
+					fmt.Println(".tables  - List all tables in the current database")
+				case Exit:
+					// Return exits with code 0 by default, os.Exit(0)
+					// would exit immediately without any defers
+					return
+				case ListTables:
+					for _, table := range aDatabase.ListTableNames(ctx) {
+						fmt.Println(table)
+					}
+				case Unknown:
+					fmt.Printf("Unrecognized meta command: %s\n", inputBuffer)
+				}
 			} else {
-				aResult, err := aDatabase.ExecuteStatement(ctx, stmt)
+				stmt, err := aDatabase.PrepareStatement(ctx, inputBuffer)
 				if err != nil {
-					fmt.Printf("Error executing statement: %s\n", err)
-				} else if stmt.Kind == minisql.Insert || stmt.Kind == minisql.Update || stmt.Kind == minisql.Delete {
-					fmt.Printf("Rows affected: %d\n", aResult.RowsAffected)
-				} else if stmt.Kind == minisql.Select {
-					util.PrintTableHeader(os.Stdout, aResult.Columns)
-					aRow, err := aResult.Rows(ctx)
-					for ; err == nil; aRow, err = aResult.Rows(ctx) {
-						util.PrintTableRow(os.Stdout, aResult.Columns, aRow.Values)
+					// Parser logs error internally
+				} else {
+					aResult, err := aDatabase.ExecuteStatement(ctx, stmt)
+					if err != nil {
+						fmt.Printf("Error executing statement: %s\n", err)
+					} else if stmt.Kind == minisql.Insert || stmt.Kind == minisql.Update || stmt.Kind == minisql.Delete {
+						fmt.Printf("Rows affected: %d\n", aResult.RowsAffected)
+					} else if stmt.Kind == minisql.Select {
+						util.PrintTableHeader(os.Stdout, aResult.Columns)
+						aRow, err := aResult.Rows(ctx)
+						for ; err == nil; aRow, err = aResult.Rows(ctx) {
+							util.PrintTableRow(os.Stdout, aResult.Columns, aRow.Values)
+						}
 					}
 				}
 			}
+			printPrompt()
 		}
-		printPrompt()
+		// Print an additional line if we encountered an EOF character
+		fmt.Println()
+	}()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+
+	if err := aDatabase.Close(ctx); err != nil {
+		fmt.Printf("error closing database: %s\n", err)
 	}
-	// Print an additional line if we encountered an EOF character
-	fmt.Println()
+
+	cancel()
+
+	wg.Wait()
+
+	// TODO - cleanup
+	os.Exit(1)
 }

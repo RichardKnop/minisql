@@ -157,14 +157,15 @@ type Column struct {
 }
 
 type Statement struct {
-	Kind       StatementKind
-	TableName  string
-	Columns    []Column // use for CREATE TABLE
-	Fields     []string // Used for SELECT (i.e. SELECTed field names) and INSERT (INSERTEDed field names)
-	Aliases    map[string]string
-	Inserts    [][]any
-	Updates    map[string]any
-	Conditions OneOrMore // used for WHERE
+	Kind        StatementKind
+	IfNotExists bool
+	TableName   string
+	Columns     []Column // use for CREATE TABLE
+	Fields      []string // Used for SELECT (i.e. SELECTed field names) and INSERT (INSERTEDed field names)
+	Aliases     map[string]string
+	Inserts     [][]any
+	Updates     map[string]any
+	Conditions  OneOrMore // used for WHERE
 }
 
 type Iterator func(ctx context.Context) (Row, error)

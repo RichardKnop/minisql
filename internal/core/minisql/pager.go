@@ -12,7 +12,7 @@ type DBFile interface {
 	io.WriterAt
 }
 
-type Pager struct {
+type pagerImpl struct {
 	pageSize   int
 	totalPages uint32 // total number of pages
 
@@ -23,8 +23,8 @@ type Pager struct {
 }
 
 // New opens the database file and tries to read the root page
-func NewPager(file DBFile, pageSize int, schemaTableName string) (*Pager, error) {
-	aPager := &Pager{
+func NewPager(file DBFile, pageSize int, schemaTableName string) (*pagerImpl, error) {
+	aPager := &pagerImpl{
 		pageSize: pageSize,
 		file:     file,
 		pages:    make([]*Page, 0, 1000),
@@ -41,7 +41,6 @@ func NewPager(file DBFile, pageSize int, schemaTableName string) (*Pager, error)
 		return nil, fmt.Errorf("db file size is not divisible by page size: %d", fileSize)
 	}
 
-	// Check we are not exceeding max page limit
 	totalPages := fileSize / int64(pageSize)
 	aPager.totalPages = uint32(totalPages)
 
@@ -50,11 +49,11 @@ func NewPager(file DBFile, pageSize int, schemaTableName string) (*Pager, error)
 	return aPager, nil
 }
 
-func (p *Pager) TotalPages() uint32 {
+func (p *pagerImpl) TotalPages() uint32 {
 	return p.totalPages
 }
 
-func (p *Pager) GetPage(ctx context.Context, aTable *Table, pageIdx uint32) (*Page, error) {
+func (p *pagerImpl) GetPage(ctx context.Context, aTable *Table, pageIdx uint32) (*Page, error) {
 	if int(pageIdx) < len(p.pages) {
 		return p.pages[pageIdx], nil
 	}
@@ -115,7 +114,7 @@ func (p *Pager) GetPage(ctx context.Context, aTable *Table, pageIdx uint32) (*Pa
 	return p.pages[pageIdx], nil
 }
 
-func (p *Pager) Flush(ctx context.Context, pageIdx uint32, size int64) error {
+func (p *pagerImpl) Flush(ctx context.Context, pageIdx uint32, size int64) error {
 	aPage := p.pages[pageIdx]
 	if aPage == nil {
 		return fmt.Errorf("flushing nil page")

@@ -22,7 +22,7 @@ func (p *parser) doParseUpdate() (bool, error) {
 		p.step = stepUpdateSet
 	case stepUpdateSet:
 		setRWord := p.peek()
-		if setRWord != "SET" {
+		if strings.ToUpper(setRWord) != "SET" {
 			return false, fmt.Errorf("at UPDATE: expected 'SET'")
 		}
 		p.pop()

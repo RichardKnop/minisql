@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/RichardKnop/minisql/internal/core/minisql"
 )
@@ -18,6 +19,15 @@ var (
 
 func (p *parser) doParseCreateTable() (bool, error) {
 	switch p.step {
+	case stepCreateTableIfNotExists:
+		ifnotExists := p.peek()
+		p.step = stepCreateTableName
+		if strings.ToUpper(ifnotExists) != "IF NOT EXISTS" {
+			return true, nil
+		}
+		p.IfNotExists = true
+		p.pop()
+		p.step = stepCreateTableName
 	case stepCreateTableName:
 		tableName := p.peek()
 		if len(tableName) == 0 {

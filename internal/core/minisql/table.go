@@ -8,9 +8,8 @@ import (
 	"go.uber.org/zap"
 )
 
-type Pagable interface {
+type Pager interface {
 	GetPage(context.Context, *Table, uint32) (*Page, error)
-	// ListPages() []*Page
 	TotalPages() uint32
 	Flush(context.Context, uint32, int64) error
 }
@@ -20,13 +19,13 @@ type Table struct {
 	Columns     []Column
 	RootPageIdx uint32
 	RowSize     uint64
-	pager       Pagable
+	pager       Pager
 	maxICells   uint32
 	lock        *sync.RWMutex
 	logger      *zap.Logger
 }
 
-func NewTable(logger *zap.Logger, name string, columns []Column, pager Pagable, rootPageIdx uint32) *Table {
+func NewTable(logger *zap.Logger, name string, columns []Column, pager Pager, rootPageIdx uint32) *Table {
 	return &Table{
 		Name:        name,
 		Columns:     columns,
