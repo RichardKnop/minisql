@@ -6,6 +6,10 @@ import (
 )
 
 func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, error) {
+	// Write lock limits concurrent writes to the table
+	t.writeLock.Lock()
+	defer t.writeLock.Unlock()
+
 	aCursor, err := t.SeekFirst(ctx)
 	if err != nil {
 		return StatementResult{}, err

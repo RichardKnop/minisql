@@ -29,7 +29,35 @@ I plan to implement more features of traditional relational databases in the fut
 - no transaction support
 - no page overflow support, entire rows must fit within a 4096 byte page
 
-### Planned features:
+### Data Types And Storage
+
+| Data type    | Description |
+|--------------|-------------|
+| `BOOLEAN`    | 1-byte boolean value (true/false). |
+| `INT4`       | 4-byte signed integer (-2,147,483,648 to 2,147,483,647). |
+| `INT8`       | 8-byte signed integer (-9,223,372,036,854,775,808 to 9,223,372,036,854,775,807). |
+| `REAL`       | 4-byte single-precision floating-point number. |
+| `DOUBLE`     | 8-byte double-precision floating-point number. |
+| `VARCHAR(n)` | Variable-length string with maximum length of n bytes. It is stored in row and cannot exceed page size. |
+
+Each page size is `4096 bytes`. Rows larger than page size are not supporter. Therefor, the largest allowed row size is `4066 bytes`.
+
+```
+4096 (page size) 
+- 6 (base header size) 
+- 8 (internal / leaf node header size) 
+- 8 (null bit map) 
+- 8 (row ID) 
+= 4066 
+```
+
+If you try to create a table where a single row would exceed 4096 bytes, an error will be returned.
+
+Each row has an internal row ID which is an unsigned 64 bit integer starting at 0. These are used as keys in B+ Tree data structure. 
+
+Moreover, each row starts with 64 bit null mask which determines which values are NULL. Because of the NULL bit mask being an unsigned 64 bit integer, tables are limited to `maximum of 64 columns`.
+
+## Planned features:
 
 - support additional basic query types such as `DROP TABLE`
 - support `NULL` values
