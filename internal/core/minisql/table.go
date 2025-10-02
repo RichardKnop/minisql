@@ -21,7 +21,7 @@ type Table struct {
 	RowSize     uint64
 	pager       Pager
 	maxICells   uint32
-	lock        *sync.RWMutex
+	writeLock   *sync.RWMutex
 	logger      *zap.Logger
 }
 
@@ -33,7 +33,7 @@ func NewTable(logger *zap.Logger, name string, columns []Column, pager Pager, ro
 		RowSize:     Row{Columns: columns}.Size(),
 		pager:       pager,
 		maxICells:   InternalNodeMaxCells,
-		lock:        new(sync.RWMutex),
+		writeLock:   new(sync.RWMutex),
 		logger:      logger,
 	}
 }

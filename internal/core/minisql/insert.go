@@ -6,12 +6,14 @@ import (
 )
 
 func (t *Table) Insert(ctx context.Context, stmt Statement) error {
+	// Write lock limits concurrent writes to the table
+	t.writeLock.Lock()
+	defer t.writeLock.Unlock()
+
 	aCursor, nextRowID, err := t.SeekNextRowID(ctx, t.RootPageIdx)
 	if err != nil {
 		return err
 	}
-
-	// TODO - lock row so parallel insert won't try to insert the same row ID?
 
 	for i, values := range stmt.Inserts {
 		aRow := Row{
