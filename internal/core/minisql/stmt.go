@@ -2,6 +2,8 @@ package minisql
 
 import (
 	"context"
+	"fmt"
+	"unicode/utf8"
 )
 
 type Operator int
@@ -166,9 +168,47 @@ type Statement struct {
 	Columns     []Column // use for CREATE TABLE
 	Fields      []string // Used for SELECT (i.e. SELECTed field names) and INSERT (INSERTEDed field names)
 	Aliases     map[string]string
-	Inserts     [][]any
-	Updates     map[string]any
+	Inserts     [][]OptionalValue
+	Updates     map[string]OptionalValue
 	Conditions  OneOrMore // used for WHERE
+}
+
+func (s Statement) Validate(aTable *Table) error {
+	if len(s.Inserts) > 0 {
+		for i, aField := range s.Fields {
+			aColumn, ok := aTable.ColumnByName(aField)
+			if !ok {
+				return fmt.Errorf("unknown field %q in table %q", aField, aTable.Name)
+			}
+			for _, anInsert := range s.Inserts {
+				if !anInsert[i].Valid && !aColumn.Nullable {
+					return fmt.Errorf("field %q cannot be NULL", aField)
+				}
+				if aColumn.Kind == Varchar && !utf8.ValidString(anInsert[i].Value.(string)) {
+					return fmt.Errorf("field %q expects valid UTF-8 string", aField)
+				}
+			}
+		}
+		return nil
+	}
+
+	if len(s.Updates) > 0 {
+		for _, aField := range s.Fields {
+			aColumn, ok := aTable.ColumnByName(aField)
+			if !ok {
+				return fmt.Errorf("unknown field %q in table %q", aField, aTable.Name)
+			}
+			if !s.Updates[aField].Valid && !aColumn.Nullable {
+				return fmt.Errorf("field %q cannot be NULL", aField)
+			}
+			if aColumn.Kind == Varchar && !utf8.ValidString(s.Updates[aField].Value.(string)) {
+				return fmt.Errorf("field %q expects valid UTF-8 string", aField)
+			}
+		}
+		return nil
+	}
+
+	return nil
 }
 
 type Iterator func(ctx context.Context) (Row, error)

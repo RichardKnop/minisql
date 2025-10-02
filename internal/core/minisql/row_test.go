@@ -31,10 +31,10 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 	var (
 		aRow = Row{
 			Columns: testColumns,
-			Values: []any{
-				int64(125478),
-				"john.doe@example.com",
-				int32(25),
+			Values: []OptionalValue{
+				{Value: int64(125478), Valid: true},
+				{Value: "john.doe@example.com", Valid: true},
+				{Value: int32(25), Valid: true},
 			},
 		}
 		idMatch = Condition{

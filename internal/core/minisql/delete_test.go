@@ -36,7 +36,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		Kind:      Insert,
 		TableName: "foo",
 		Fields:    columnNames(testMediumColumns...),
-		Inserts:   [][]any{},
+		Inserts:   [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
@@ -51,7 +51,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
 			TableName:  "foo",
-			Conditions: FieldIsIn("id", Integer, id.(int64)),
+			Conditions: FieldIsIn("id", Integer, id.Value.(int64)),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 1, deleteResult.RowsAffected)
@@ -92,7 +92,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		Kind:      Insert,
 		TableName: "foo",
 		Fields:    columnNames(testMediumColumns...),
-		Inserts:   [][]any{},
+		Inserts:   [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
@@ -369,7 +369,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 		Kind:      Insert,
 		TableName: "foo",
 		Fields:    columnNames(testMediumColumns...),
-		Inserts:   [][]any{},
+		Inserts:   [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
@@ -404,7 +404,7 @@ func rowIDs(rows ...Row) []any {
 	for _, r := range rows {
 		id, ok := r.GetValue("id")
 		if ok {
-			ids = append(ids, id.(int64))
+			ids = append(ids, id.Value.(int64))
 		}
 	}
 	return ids
@@ -422,7 +422,7 @@ func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []
 	for _, r := range expectedRows {
 		id, ok := r.GetValue("id")
 		require.True(t, ok)
-		expectedIDMap[id.(int64)] = struct{}{}
+		expectedIDMap[id.Value.(int64)] = struct{}{}
 	}
 
 	actual := make([]Row, 0, 10)
@@ -430,7 +430,7 @@ func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []
 	for ; err == nil; aRow, err = selectResult.Rows(ctx) {
 		actual = append(actual, aRow)
 		if len(expectedIDMap) > 0 {
-			_, ok := expectedIDMap[aRow.Values[0].(int64)]
+			_, ok := expectedIDMap[aRow.Values[0].Value.(int64)]
 			assert.True(t, ok)
 		}
 	}

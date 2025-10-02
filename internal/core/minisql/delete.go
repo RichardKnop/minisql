@@ -6,6 +6,10 @@ import (
 )
 
 func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, error) {
+	if err := stmt.Validate(t); err != nil {
+		return StatementResult{}, err
+	}
+
 	// Write lock limits concurrent writes to the table
 	t.writeLock.Lock()
 	defer t.writeLock.Unlock()

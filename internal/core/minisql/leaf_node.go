@@ -1,5 +1,7 @@
 package minisql
 
+import "math"
+
 type LeafNodeHeader struct {
 	Header
 	Cells    uint32
@@ -270,7 +272,8 @@ func marshalUint32(buf []byte, n uint32, i uint64) {
 }
 
 func unmarshalUint32(buf []byte, i uint64) uint32 {
-	return (uint32(buf[i+0]) << 0) |
+	return 0 |
+		(uint32(buf[i+0]) << 0) |
 		(uint32(buf[i+1]) << 8) |
 		(uint32(buf[i+2]) << 16) |
 		(uint32(buf[i+3]) << 24)
@@ -288,7 +291,7 @@ func marshalUint64(buf []byte, n, i uint64) {
 }
 
 func unmarshalUint64(buf []byte, i uint64) uint64 {
-	return (uint64(buf[i+0]) << 0) |
+	return 0 | (uint64(buf[i+0]) << 0) |
 		(uint64(buf[i+1]) << 8) |
 		(uint64(buf[i+2]) << 16) |
 		(uint64(buf[i+3]) << 24) |
@@ -296,4 +299,82 @@ func unmarshalUint64(buf []byte, i uint64) uint64 {
 		(uint64(buf[i+5]) << 40) |
 		(uint64(buf[i+6]) << 48) |
 		(uint64(buf[i+7]) << 56)
+}
+
+func marshalInt32(buf []byte, n int32, i uint64) {
+	buf[i+0] = byte(n >> 0)
+	buf[i+1] = byte(n >> 8)
+	buf[i+2] = byte(n >> 16)
+	buf[i+3] = byte(n >> 24)
+}
+
+func unmarshalInt32(buf []byte, i uint64) int32 {
+	return 0 |
+		(int32(buf[i+0]) << 0) |
+		(int32(buf[i+1]) << 8) |
+		(int32(buf[i+2]) << 16) |
+		(int32(buf[i+3]) << 24)
+}
+
+func marshalInt64(buf []byte, n int64, i uint64) {
+	buf[i+0] = byte(n >> 0)
+	buf[i+1] = byte(n >> 8)
+	buf[i+2] = byte(n >> 16)
+	buf[i+3] = byte(n >> 24)
+	buf[i+4] = byte(n >> 32)
+	buf[i+5] = byte(n >> 40)
+	buf[i+6] = byte(n >> 48)
+	buf[i+7] = byte(n >> 56)
+}
+
+func unmarshalInt64(buf []byte, i uint64) int64 {
+	return 0 |
+		(int64(buf[i+0]) << 0) |
+		(int64(buf[i+1]) << 8) |
+		(int64(buf[i+2]) << 16) |
+		(int64(buf[i+3]) << 24) |
+		(int64(buf[i+4]) << 32) |
+		(int64(buf[i+5]) << 40) |
+		(int64(buf[i+6]) << 48) |
+		(int64(buf[i+7]) << 56)
+}
+
+func marshalFloat32(buf []byte, n float32, i uint64) {
+	bits := math.Float32bits(n)
+	buf[i+0] = byte(bits >> 24)
+	buf[i+1] = byte(bits >> 16)
+	buf[i+2] = byte(bits >> 8)
+	buf[i+3] = byte(bits >> 0)
+}
+
+func unmarshalFloat32(buf []byte, i uint64) float32 {
+	return math.Float32frombits(0 |
+		(uint32(buf[i+0]) << 24) |
+		(uint32(buf[i+1]) << 16) |
+		(uint32(buf[i+2]) << 8) |
+		(uint32(buf[i+3]) << 0))
+}
+
+func marshalFloat64(buf []byte, n float64, i uint64) {
+	bits := math.Float64bits(n)
+	buf[i+0] = byte(bits >> 56)
+	buf[i+1] = byte(bits >> 48)
+	buf[i+2] = byte(bits >> 40)
+	buf[i+3] = byte(bits >> 32)
+	buf[i+4] = byte(bits >> 24)
+	buf[i+5] = byte(bits >> 16)
+	buf[i+6] = byte(bits >> 8)
+	buf[i+7] = byte(bits >> 0)
+}
+
+func unmarshalFloat64(buf []byte, i uint64) float64 {
+	return math.Float64frombits(0 |
+		(uint64(buf[i+0]) << 56) |
+		(uint64(buf[i+1+0]) << 48) |
+		(uint64(buf[i+2+0]) << 40) |
+		(uint64(buf[i+3+0]) << 32) |
+		(uint64(buf[i+4+0]) << 24) |
+		(uint64(buf[i+5+0]) << 16) |
+		(uint64(buf[i+6+0]) << 8) |
+		(uint64(buf[i+7+0]) << 0))
 }

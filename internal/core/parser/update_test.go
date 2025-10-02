@@ -62,8 +62,8 @@ func TestParse_Update(t *testing.T) {
 			Expected: minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]any{
-					"b": "hello",
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Value: "hello", Valid: true},
 				},
 			},
 			Err: errEmptyWhereClause,
@@ -74,8 +74,8 @@ func TestParse_Update(t *testing.T) {
 			Expected: minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]any{
-					"b": "hello",
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Value: "hello", Valid: true},
 				},
 				Conditions: minisql.OneOrMore{
 					{
@@ -96,8 +96,8 @@ func TestParse_Update(t *testing.T) {
 			Expected: minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]any{
-					"b": "hello",
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Value: "hello", Valid: true},
 				},
 				Conditions: minisql.OneOrMore{
 					{
@@ -122,8 +122,34 @@ func TestParse_Update(t *testing.T) {
 			Expected: minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]any{
-					"b": int64(25),
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Value: int64(25), Valid: true},
+				},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1: minisql.Operand{
+								Type:  minisql.Field,
+								Value: "a",
+							},
+							Operator: minisql.Eq,
+							Operand2: minisql.Operand{
+								Type:  minisql.QuotedString,
+								Value: "1",
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "UPDATE works with NULL",
+			SQL:  "UPDATE 'a' SET b = NULL WHERE a = '1'",
+			Expected: minisql.Statement{
+				Kind:      minisql.Update,
+				TableName: "a",
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Valid: false},
 				},
 				Conditions: minisql.OneOrMore{
 					{
@@ -148,8 +174,8 @@ func TestParse_Update(t *testing.T) {
 			Expected: minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]any{
-					"b": "hello\\'world",
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Value: "hello\\'world", Valid: true},
 				},
 				Conditions: minisql.OneOrMore{
 					{
@@ -174,9 +200,9 @@ func TestParse_Update(t *testing.T) {
 			Expected: minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]any{
-					"b": "hello",
-					"c": "bye",
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Value: "hello", Valid: true},
+					"c": {Value: "bye", Valid: true},
 				},
 				Conditions: minisql.OneOrMore{
 					{
@@ -201,9 +227,9 @@ func TestParse_Update(t *testing.T) {
 			Expected: minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]any{
-					"b": "hello",
-					"c": "bye",
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Value: "hello", Valid: true},
+					"c": {Value: "bye", Valid: true},
 				},
 				Conditions: minisql.OneOrMore{
 					{

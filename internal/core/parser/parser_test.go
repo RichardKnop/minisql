@@ -37,7 +37,7 @@ func TestPeekQuotedStringWithLength(t *testing.T) {
 	assert.Equal(t, 15, ln)
 }
 
-func TestPeepIntWithLength(t *testing.T) {
+func TestPeekIntWithLength(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
@@ -64,8 +64,48 @@ func TestPeepIntWithLength(t *testing.T) {
 		t.Run(aTestCase.Name, func(t *testing.T) {
 			aParser := New()
 			aParser.setSQL(aTestCase.SQL)
-			intValue, ln := aParser.peepIntWithLength()
+			intValue, ln := aParser.peekIntWithLength()
 			assert.Equal(t, aTestCase.ExpectedValue, intValue)
+			assert.Equal(t, aTestCase.ExpectedLength, ln)
+		})
+	}
+}
+
+func TestPeekIdentifierWithLength(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		Name           string
+		SQL            string
+		ExpectedValue  string
+		ExpectedLength int
+	}{
+		{
+			"Invalid identifier",
+			" 'foo' ",
+			"",
+			0,
+		},
+		{
+			"Valid identifier",
+			" foobar ",
+			"foobar",
+			6,
+		},
+		{
+			"Valid identifier with underscore and digits",
+			" foo_bar123 ",
+			"foo_bar123",
+			10,
+		},
+	}
+
+	for _, aTestCase := range testCases {
+		t.Run(aTestCase.Name, func(t *testing.T) {
+			aParser := New()
+			aParser.setSQL(aTestCase.SQL)
+			identifier, ln := aParser.peekIdentifierWithLength()
+			assert.Equal(t, aTestCase.ExpectedValue, identifier)
 			assert.Equal(t, aTestCase.ExpectedLength, ln)
 		})
 	}

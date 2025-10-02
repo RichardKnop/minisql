@@ -32,7 +32,7 @@ var reservedWords = []string{
 	// statement types
 	"CREATE TABLE", "DROP TABLE", "SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
-	"IF NOT EXISTS", "WHERE", "FROM", "SET", "AS",
+	"NULL", "IF NOT EXISTS", "WHERE", "FROM", "SET", "AS",
 }
 
 type step int
@@ -393,7 +393,7 @@ func (p *parser) peekQuotedStringWithLength() (string, int) {
 	return "", 0
 }
 
-func (p *parser) peepIntWithLength() (int64, int) {
+func (p *parser) peekIntWithLength() (int64, int) {
 	if len(p.sql) < p.i || !unicode.IsDigit(rune(p.sql[p.i])) {
 		return 0, 0
 	}
@@ -415,7 +415,7 @@ func (p *parser) peepIntWithLength() (int64, int) {
 }
 
 func (p *parser) peekIntOrQuotedStringWithLength() (any, int) {
-	intValue, ln := p.peepIntWithLength()
+	intValue, ln := p.peekIntWithLength()
 	if ln > 0 {
 		return intValue, ln
 	}
@@ -426,9 +426,11 @@ func (p *parser) peekIntOrQuotedStringWithLength() (any, int) {
 	return nil, 0
 }
 
+var identifierRegexp = regexp.MustCompile(`[a-zA-Z0-9_*]`)
+
 func (p *parser) peekIdentifierWithLength() (string, int) {
 	for i := p.i; i < len(p.sql); i++ {
-		if matched, _ := regexp.MatchString(`[a-zA-Z0-9_*]`, string(p.sql[i])); !matched {
+		if !identifierRegexp.MatchString(string(p.sql[i])) {
 			return p.sql[p.i:i], len(p.sql[p.i:i])
 		}
 	}

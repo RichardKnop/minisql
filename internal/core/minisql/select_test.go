@@ -29,7 +29,7 @@ func TestTable_Select(t *testing.T) {
 		Kind:      Insert,
 		TableName: "foo",
 		Fields:    columnNames(testColumns...),
-		Inserts:   [][]any{},
+		Inserts:   [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		insertStmt.Inserts = append(insertStmt.Inserts, aRow.Values)
@@ -92,7 +92,7 @@ func TestTable_Select(t *testing.T) {
 							Operator: Eq,
 							Operand2: Operand{
 								Type:  Integer,
-								Value: rows[5].Values[0].(int64),
+								Value: rows[5].Values[0].Value.(int64),
 							},
 						},
 					},

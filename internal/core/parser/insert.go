@@ -3,6 +3,8 @@ package parser
 import (
 	"fmt"
 	"strings"
+
+	"github.com/RichardKnop/minisql/internal/core/minisql"
 )
 
 var (
@@ -59,20 +61,27 @@ func (p *parser) doParseInsert() (bool, error) {
 		if openingParens != "(" {
 			return false, fmt.Errorf("at INSERT INTO: expected opening parens")
 		}
-		p.Inserts = append(p.Inserts, []any{})
+		p.Inserts = append(p.Inserts, []minisql.OptionalValue{})
 		p.pop()
 		p.step = stepInsertValues
 	case stepInsertValues:
-		intValue, ln := p.peepIntWithLength()
+		nullRWord := p.peek()
+		if strings.ToUpper(nullRWord) == "NULL" {
+			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.OptionalValue{Valid: false})
+			p.pop()
+			p.step = stepInsertValuesCommaOrClosingParens
+			return true, nil
+		}
+		intValue, ln := p.peekIntWithLength()
 		if ln > 0 {
-			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], intValue)
+			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.OptionalValue{Value: intValue, Valid: true})
 			p.pop()
 			p.step = stepInsertValuesCommaOrClosingParens
 			return true, nil
 		}
 		quotedValue, ln := p.peekQuotedStringWithLength()
 		if ln > 0 {
-			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], quotedValue)
+			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.OptionalValue{Value: quotedValue, Valid: true})
 			p.pop()
 			p.step = stepInsertValuesCommaOrClosingParens
 			return true, nil

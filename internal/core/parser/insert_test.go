@@ -75,7 +75,7 @@ func TestParse_Insert(t *testing.T) {
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b"},
-				Inserts:   [][]any{{}},
+				Inserts:   [][]minisql.OptionalValue{{}},
 			},
 			Err: errInsertFieldValueCountMismatch,
 		},
@@ -86,7 +86,7 @@ func TestParse_Insert(t *testing.T) {
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b"},
-				Inserts:   [][]any{{"1"}},
+				Inserts:   [][]minisql.OptionalValue{{{Value: "1", Valid: true}}},
 			},
 		},
 		{
@@ -105,7 +105,13 @@ func TestParse_Insert(t *testing.T) {
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b", "c", "d"},
-				Inserts:   [][]any{{"1", "2", "3"}},
+				Inserts: [][]minisql.OptionalValue{
+					{
+						{Value: "1", Valid: true},
+						{Value: "2", Valid: true},
+						{Value: "3", Valid: true},
+					},
+				},
 			},
 		},
 		{
@@ -115,17 +121,36 @@ func TestParse_Insert(t *testing.T) {
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b", "c", "d"},
-				Inserts:   [][]any{{"1", "2", "3"}, {"4", "5", "6"}},
+				Inserts: [][]minisql.OptionalValue{
+					{
+						{Value: "1", Valid: true},
+						{Value: "2", Valid: true},
+						{Value: "3", Valid: true},
+					},
+					{
+						{Value: "4", Valid: true},
+						{Value: "5", Valid: true},
+						{Value: "6", Valid: true},
+					},
+				},
 			},
 		},
 		{
 			Name: "INSERT with multiple fields of different types works",
-			SQL:  "INSERT INTO 'a' (b, c, d, e, f) VALUES (25, 'foo', 7, 'bar', 1500000)",
+			SQL:  "INSERT INTO 'a' (b, c, d, e, f) VALUES (25, 'foo', 7, 'bar', NULL)",
 			Expected: minisql.Statement{
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b", "c", "d", "e", "f"},
-				Inserts:   [][]any{{int64(25), "foo", int64(7), "bar", int64(1500000)}},
+				Inserts: [][]minisql.OptionalValue{
+					{
+						{Value: int64(25), Valid: true},
+						{Value: "foo", Valid: true},
+						{Value: int64(7), Valid: true},
+						{Value: "bar", Valid: true},
+						{Valid: false},
+					},
+				},
 			},
 		},
 	}

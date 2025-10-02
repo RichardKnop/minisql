@@ -38,7 +38,7 @@ I plan to implement more features of traditional relational databases in the fut
 | `INT8`       | 8-byte signed integer (-9,223,372,036,854,775,808 to 9,223,372,036,854,775,807). |
 | `REAL`       | 4-byte single-precision floating-point number. |
 | `DOUBLE`     | 8-byte double-precision floating-point number. |
-| `VARCHAR(n)` | Variable-length string with maximum length of n bytes. It is stored in row and cannot exceed page size. |
+| `VARCHAR(n)` | Variable-length string with maximum length of n bytes. It is stored in row as text with UTF-8 encoding and cannot exceed page size. |
 
 Each page size is `4096 bytes`. Rows larger than page size are not supporter. Therefor, the largest allowed row size is `4066 bytes`.
 
