@@ -116,10 +116,16 @@ func (p *parser) doParseDropTable() (bool, error) {
 
 func isColumnDef(token string) (minisql.Column, bool) {
 	switch token {
+	case "BOOLEAN":
+		return minisql.Column{Kind: minisql.Boolean, Size: 1}, true
 	case "INT4":
 		return minisql.Column{Kind: minisql.Int4, Size: 4}, true
 	case "INT8":
 		return minisql.Column{Kind: minisql.Int8, Size: 8}, true
+	case "REAL":
+		return minisql.Column{Kind: minisql.Real, Size: 4}, true
+	case "DOUBLE":
+		return minisql.Column{Kind: minisql.Double, Size: 8}, true
 	case "VARCHAR(":
 		return minisql.Column{Kind: minisql.Varchar}, true
 	default:

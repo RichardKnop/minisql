@@ -22,7 +22,7 @@ I plan to implement more features of traditional relational databases in the fut
 
 - simple SQL parser (partial support for `CREATE TABLE`, `INSERT`, `SELECT`, `UPDATE`, `DELETE` queries)
 - only tables supported, no indexes (this means all selects are scanning whole tables for now)
-- only `int4`, `int8` and `varchar` columns supported
+- only `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE` and `VARCHAR` data types supported
 - no primary key support (tables internally use row ID as key in B tree data structure)
 - no joins
 - only simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis

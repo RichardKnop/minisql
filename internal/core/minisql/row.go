@@ -3,6 +3,7 @@ package minisql
 import (
 	"bytes"
 	"fmt"
+	"math"
 )
 
 type Row struct {
@@ -131,6 +132,17 @@ func (r *Row) Marshal() ([]byte, error) {
 	for i, aColumn := range r.Columns {
 		offset := r.columnOffset(i)
 		switch aColumn.Kind {
+		case Boolean:
+			value, ok := r.Values[i].(bool)
+			if !ok {
+				return nil, fmt.Errorf("could not cast value to bool")
+			}
+			if value {
+				buf[offset+0] = byte(1)
+			} else {
+				buf[offset+0] = byte(0)
+			}
+			offset += 1
 		case Int4:
 			value, ok := r.Values[i].(int32)
 			if !ok {
@@ -169,6 +181,46 @@ func (r *Row) Marshal() ([]byte, error) {
 			offset += 1
 			buf[offset+0] = byte(value >> 56)
 			offset += 1
+		case Real:
+			value, ok := r.Values[i].(float32)
+			if !ok {
+				_, ok = r.Values[i].(float64)
+				if !ok {
+					return nil, fmt.Errorf("could not cast value to either float64 or float32")
+				}
+				value = float32(r.Values[i].(float64))
+			}
+			n := math.Float32bits(value)
+			buf[offset+0] = byte(n >> 24)
+			offset += 1
+			buf[offset+0] = byte(n >> 16)
+			offset += 1
+			buf[offset+0] = byte(n >> 8)
+			offset += 1
+			buf[offset+0] = byte(n)
+			offset += 1
+		case Double:
+			value, ok := r.Values[i].(float64)
+			if !ok {
+				return nil, fmt.Errorf("could not cast value to float64")
+			}
+			n := math.Float64bits(value)
+			buf[offset+0] = byte(n >> 56)
+			offset += 1
+			buf[offset+0] = byte(n >> 48)
+			offset += 1
+			buf[offset+0] = byte(n >> 40)
+			offset += 1
+			buf[offset+0] = byte(n >> 32)
+			offset += 1
+			buf[offset+0] = byte(n >> 24)
+			offset += 1
+			buf[offset+0] = byte(n >> 16)
+			offset += 1
+			buf[offset+0] = byte(n >> 8)
+			offset += 1
+			buf[offset+0] = byte(n)
+			offset += 1
 		case Varchar:
 			value, ok := r.Values[i].(string)
 			if !ok {
@@ -190,6 +242,9 @@ func UnmarshalRow(buf []byte, aRow *Row) error {
 	for i, aColumn := range aRow.Columns {
 		offset := aRow.columnOffset(i)
 		switch aColumn.Kind {
+		case Boolean:
+			value := 0 | (uint32(buf[offset+0+0]) << 0)
+			aRow.Values = append(aRow.Values, value == uint32(1))
 		case Int4:
 			value := 0 |
 				(uint32(buf[offset+0+0]) << 0) |
@@ -208,6 +263,24 @@ func UnmarshalRow(buf []byte, aRow *Row) error {
 				(uint64(buf[offset+6+0]) << 48) |
 				(uint64(buf[offset+7+0]) << 56)
 			aRow.Values = append(aRow.Values, int64(value))
+		case Real:
+			value := 0 |
+				(uint32(buf[offset+0+0]) << 24) |
+				(uint32(buf[offset+1+0]) << 16) |
+				(uint32(buf[offset+2+0]) << 8) |
+				(uint32(buf[offset+3+0]) << 0)
+			aRow.Values = append(aRow.Values, math.Float32frombits(value))
+		case Double:
+			value := 0 |
+				(uint64(buf[offset+0+0]) << 56) |
+				(uint64(buf[offset+1+0]) << 48) |
+				(uint64(buf[offset+2+0]) << 40) |
+				(uint64(buf[offset+3+0]) << 32) |
+				(uint64(buf[offset+4+0]) << 24) |
+				(uint64(buf[offset+5+0]) << 16) |
+				(uint64(buf[offset+6+0]) << 8) |
+				(uint64(buf[offset+7+0]) << 0)
+			aRow.Values = append(aRow.Values, math.Float64frombits(value))
 		case Varchar:
 			dst := make([]byte, aColumn.Size)
 			copy(dst, buf[offset:offset+aColumn.Size])
