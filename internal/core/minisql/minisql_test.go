@@ -32,6 +32,21 @@ var (
 			Size: 4,
 			Name: "age",
 		},
+		{
+			Kind: Boolean,
+			Size: 1,
+			Name: "verified",
+		},
+		{
+			Kind: Real,
+			Size: 4,
+			Name: "test_real",
+		},
+		{
+			Kind: Double,
+			Size: 8,
+			Name: "test_double",
+		},
 	}
 
 	testMediumColumns = []Column{
@@ -43,18 +58,33 @@ var (
 		{
 			Kind: Varchar,
 			Size: 255,
-			Name: "name",
+			Name: "email",
 		},
 		{
-			Kind: Varchar,
-			Size: 255,
-			Name: "email",
+			Kind: Int4,
+			Size: 4,
+			Name: "age",
+		},
+		{
+			Kind: Boolean,
+			Size: 1,
+			Name: "verified",
+		},
+		{
+			Kind: Real,
+			Size: 4,
+			Name: "test_real",
+		},
+		{
+			Kind: Double,
+			Size: 8,
+			Name: "test_double",
 		},
 		{
 			Kind: Varchar,
 			// Size is defined so 5 of these columns can fit into a single page
-			Size: (PageSize - 6 - 8 - 5*8 - 5*(8+255+255)) / 5,
-			Name: "description",
+			Size: (PageSize - 6 - 8 - 5*8 - 5*(8+255+4+1+4+8)) / 5,
+			Name: "test_varchar",
 		},
 	}
 
@@ -67,17 +97,32 @@ var (
 		{
 			Kind: Varchar,
 			Size: 255,
-			Name: "name",
-		},
-		{
-			Kind: Varchar,
-			Size: 255,
 			Name: "email",
 		},
 		{
+			Kind: Int4,
+			Size: 4,
+			Name: "age",
+		},
+		{
+			Kind: Boolean,
+			Size: 1,
+			Name: "verified",
+		},
+		{
+			Kind: Real,
+			Size: 4,
+			Name: "test_real",
+		},
+		{
+			Kind: Double,
+			Size: 8,
+			Name: "test_double",
+		},
+		{
 			Kind: Varchar,
-			Size: PageSize - 6 - 8 - 8 - (8 + 255 + 255),
-			Name: "description",
+			Size: PageSize - 6 - 8 - 8 - (8 + 255 + 4 + 1 + 4 + 8),
+			Name: "test_varchar",
 		},
 	}
 
@@ -131,6 +176,9 @@ func (g *dataGen) Row() Row {
 			g.Int64(),
 			g.Email(),
 			int32(g.IntRange(18, 100)),
+			g.Bool(),
+			g.Float32(),
+			g.Float64(),
 		},
 	}
 }
@@ -159,7 +207,10 @@ func (g *dataGen) MediumRow() Row {
 		Values: []any{
 			g.Int64(),
 			g.Email(),
-			g.Name(),
+			int32(g.IntRange(18, 100)),
+			g.Bool(),
+			g.Float32(),
+			g.Float64(),
 			g.Sentence(5),
 		},
 	}
@@ -188,7 +239,10 @@ func (g *dataGen) BigRow() Row {
 		Values: []any{
 			g.Int64(),
 			g.Email(),
-			g.Name(),
+			int32(g.IntRange(18, 100)),
+			g.Bool(),
+			g.Float32(),
+			g.Float64(),
 			g.Sentence(15),
 		},
 	}
@@ -246,6 +300,7 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 	var (
 		// page 0
 		aRootPage = &Page{
+			Index: 0,
 			InternalNode: &InternalNode{
 				Header: InternalNodeHeader{
 					Header: Header{
@@ -262,10 +317,10 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 					},
 				},
 			},
-			Index: 0,
 		}
 		// page 1
 		internalPage1 = &Page{
+			Index: 1,
 			InternalNode: &InternalNode{
 				Header: InternalNodeHeader{
 					Header: Header{
@@ -282,10 +337,10 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 					},
 				},
 			},
-			Index: 1,
 		}
 		// page 2
 		internalPage2 = &Page{
+			Index: 2,
 			InternalNode: &InternalNode{
 				Header: InternalNodeHeader{
 					Header: Header{
@@ -302,10 +357,10 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 					},
 				},
 			},
-			Index: 2,
 		}
 		// page 3
 		leafPage1 = &Page{
+			Index: 3,
 			LeafNode: &LeafNode{
 				Header: LeafNodeHeader{
 					Header: Header{
@@ -327,10 +382,10 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				}, defaultCell.Cells[2:]...),
 				RowSize: 270,
 			},
-			Index: 3,
 		}
 		// page 4
 		leafPage2 = &Page{
+			Index: 4,
 			LeafNode: &LeafNode{
 				Header: LeafNodeHeader{
 					Header: Header{
@@ -348,10 +403,10 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				}, defaultCell.Cells[1:]...),
 				RowSize: 270,
 			},
-			Index: 4,
 		}
 		// page 5
 		leafPage3 = &Page{
+			Index: 5,
 			LeafNode: &LeafNode{
 				Header: LeafNodeHeader{
 					Header: Header{
@@ -373,10 +428,10 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				}, defaultCell.Cells[2:]...),
 				RowSize: 270,
 			},
-			Index: 5,
 		}
 		// page 6
 		leafPage4 = &Page{
+			Index: 6,
 			LeafNode: &LeafNode{
 				Header: LeafNodeHeader{
 					Header: Header{
@@ -393,7 +448,6 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				}, defaultCell.Cells[1:]...),
 				RowSize: 270,
 			},
-			Index: 6,
 		}
 
 		internalPages = []*Page{

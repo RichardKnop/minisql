@@ -53,27 +53,42 @@ func TestParse_CreateTable(t *testing.T) {
 			Err: errCreateTableInvalidColumDef,
 		},
 		{
-			Name: "CREATE TABLE with single int4 column works",
-			SQL:  "CREATE TABLE foo (bar int4)",
+			Name: "CREATE TABLE with single boolean column works",
+			SQL:  "CREATE TABLE foo (bar boolean)",
 			Expected: minisql.Statement{
 				Kind:      minisql.CreateTable,
 				TableName: "foo",
 				Columns: []minisql.Column{
 					{
 						Name: "bar",
-						Kind: minisql.Int4,
-						Size: 4,
+						Kind: minisql.Boolean,
+						Size: 1,
 					},
 				},
 			},
 		},
 		{
 			Name: "CREATE TABLE with IF NOT EXISTS works",
-			SQL:  "CREATE TABLE IF NOT EXISTS foo (bar int4)",
+			SQL:  "CREATE TABLE IF NOT EXISTS foo (bar boolean)",
 			Expected: minisql.Statement{
 				Kind:        minisql.CreateTable,
 				TableName:   "foo",
 				IfNotExists: true,
+				Columns: []minisql.Column{
+					{
+						Name: "bar",
+						Kind: minisql.Boolean,
+						Size: 1,
+					},
+				},
+			},
+		},
+		{
+			Name: "CREATE TABLE with single int4 column works",
+			SQL:  "CREATE TABLE foo (bar int4)",
+			Expected: minisql.Statement{
+				Kind:      minisql.CreateTable,
+				TableName: "foo",
 				Columns: []minisql.Column{
 					{
 						Name: "bar",
@@ -99,6 +114,36 @@ func TestParse_CreateTable(t *testing.T) {
 			},
 		},
 		{
+			Name: "CREATE TABLE with single real column works",
+			SQL:  "CREATE TABLE foo (bar real)",
+			Expected: minisql.Statement{
+				Kind:      minisql.CreateTable,
+				TableName: "foo",
+				Columns: []minisql.Column{
+					{
+						Name: "bar",
+						Kind: minisql.Real,
+						Size: 4,
+					},
+				},
+			},
+		},
+		{
+			Name: "CREATE TABLE with single double column works",
+			SQL:  "CREATE TABLE foo (bar double)",
+			Expected: minisql.Statement{
+				Kind:      minisql.CreateTable,
+				TableName: "foo",
+				Columns: []minisql.Column{
+					{
+						Name: "bar",
+						Kind: minisql.Double,
+						Size: 8,
+					},
+				},
+			},
+		},
+		{
 			Name: "CREATE TABLE with single varchar column works",
 			SQL:  "CREATE TABLE foo (bar varchar(255))",
 			Expected: minisql.Statement{
@@ -115,23 +160,38 @@ func TestParse_CreateTable(t *testing.T) {
 		},
 		{
 			Name: "CREATE TABLE with multiple columns works",
-			SQL:  "CREATE TABLE foo (bar int4, lorem int8, ipsum varchar(255))",
+			SQL:  "CREATE TABLE foo (bar boolean, baz int4, qux int8, lorem real, ipsum double, sit varchar(255))",
 			Expected: minisql.Statement{
 				Kind:      minisql.CreateTable,
 				TableName: "foo",
 				Columns: []minisql.Column{
 					{
 						Name: "bar",
+						Kind: minisql.Boolean,
+						Size: 1,
+					},
+					{
+						Name: "baz",
 						Kind: minisql.Int4,
 						Size: 4,
 					},
 					{
-						Name: "lorem",
+						Name: "qux",
 						Kind: minisql.Int8,
 						Size: 8,
 					},
 					{
+						Name: "lorem",
+						Kind: minisql.Real,
+						Size: 4,
+					},
+					{
 						Name: "ipsum",
+						Kind: minisql.Double,
+						Size: 8,
+					},
+					{
+						Name: "sit",
 						Kind: minisql.Varchar,
 						Size: 255,
 					},

@@ -25,6 +25,21 @@ var (
 			Size: 4,
 			Name: "age",
 		},
+		{
+			Kind: minisql.Boolean,
+			Size: 1,
+			Name: "verified",
+		},
+		{
+			Kind: minisql.Real,
+			Size: 4,
+			Name: "test_real",
+		},
+		{
+			Kind: minisql.Double,
+			Size: 8,
+			Name: "test_double",
+		},
 	}
 
 	testBigColumns = []minisql.Column{
@@ -36,17 +51,32 @@ var (
 		{
 			Kind: minisql.Varchar,
 			Size: 255,
-			Name: "name",
-		},
-		{
-			Kind: minisql.Varchar,
-			Size: 255,
 			Name: "email",
 		},
 		{
+			Kind: minisql.Int4,
+			Size: 4,
+			Name: "age",
+		},
+		{
+			Kind: minisql.Boolean,
+			Size: 1,
+			Name: "verified",
+		},
+		{
+			Kind: minisql.Real,
+			Size: 4,
+			Name: "test_real",
+		},
+		{
+			Kind: minisql.Double,
+			Size: 8,
+			Name: "test_double",
+		},
+		{
 			Kind: minisql.Varchar,
-			Size: minisql.PageSize - 6 - 8 - 8 - (8 + 255 + 255),
-			Name: "description",
+			Size: minisql.PageSize - 6 - 8 - 8 - (8 + 255 + 4 + 1 + 4 + 8),
+			Name: "test_varchar",
 		},
 	}
 )
@@ -70,6 +100,9 @@ func (g *DataGen) Row() minisql.Row {
 			g.Int64(),
 			g.Email(),
 			int32(g.IntRange(18, 100)),
+			g.Bool(),
+			g.Float32(),
+			g.Float64(),
 		},
 	}
 }
@@ -98,7 +131,10 @@ func (g *DataGen) BigRow() minisql.Row {
 		Values: []any{
 			g.Int64(),
 			g.Email(),
-			g.Name(),
+			int32(g.IntRange(18, 100)),
+			g.Bool(),
+			g.Float32(),
+			g.Float64(),
 			g.Sentence(15),
 		},
 	}

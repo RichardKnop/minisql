@@ -131,8 +131,11 @@ const (
 type ColumnKind int
 
 const (
-	Int4 ColumnKind = iota + 1
+	Boolean ColumnKind = iota + 1
+	Int4
 	Int8
+	Real
+	Double
 	Varchar
 )
 
