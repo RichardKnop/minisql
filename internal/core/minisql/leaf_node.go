@@ -26,15 +26,9 @@ func (h *LeafNodeHeader) Marshal(buf []byte) ([]byte, error) {
 	}
 	i += uint64(len(hbuf))
 
-	buf[i+0] = byte(h.Cells >> 0)
-	buf[i+1] = byte(h.Cells >> 8)
-	buf[i+2] = byte(h.Cells >> 16)
-	buf[i+3] = byte(h.Cells >> 24)
-
-	buf[i+4] = byte(h.NextLeaf >> 0)
-	buf[i+5] = byte(h.NextLeaf >> 8)
-	buf[i+6] = byte(h.NextLeaf >> 16)
-	buf[i+7] = byte(h.NextLeaf >> 24)
+	marshalUint32(buf, h.Cells, i)
+	i += 4
+	marshalUint32(buf, h.NextLeaf, i)
 
 	return buf[:size], nil
 }
@@ -48,28 +42,22 @@ func (h *LeafNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 	}
 	i += hi
 
-	h.Cells = 0 |
-		(uint32(buf[i+0]) << 0) |
-		(uint32(buf[i+1]) << 8) |
-		(uint32(buf[i+2]) << 16) |
-		(uint32(buf[i+3]) << 24)
-
-	h.NextLeaf = 0 |
-		(uint32(buf[i+4]) << 0) |
-		(uint32(buf[i+5]) << 8) |
-		(uint32(buf[i+6]) << 16) |
-		(uint32(buf[i+7]) << 24)
+	h.Cells = unmarshalUint32(buf, i)
+	i += 4
+	h.NextLeaf = unmarshalUint32(buf, i)
 
 	return h.Size(), nil
 }
 
 type Cell struct {
-	Key   uint64
-	Value []byte // size of rowSize
+	NullBitmask uint64
+	Key         uint64
+	Value       []byte
 }
 
 func (c *Cell) Size(rowSize uint64) uint64 {
-	return 8 + rowSize
+	// 8 bytes for null bitmask, 8 bytes for key
+	return 8 + 8 + rowSize
 }
 
 func (c *Cell) Marshal(rowSize uint64, buf []byte) ([]byte, error) {
@@ -82,14 +70,10 @@ func (c *Cell) Marshal(rowSize uint64, buf []byte) ([]byte, error) {
 
 	i := uint64(0)
 
-	buf[0] = byte(c.Key >> 0)
-	buf[1] = byte(c.Key >> 8)
-	buf[2] = byte(c.Key >> 16)
-	buf[3] = byte(c.Key >> 24)
-	buf[4] = byte(c.Key >> 32)
-	buf[5] = byte(c.Key >> 40)
-	buf[6] = byte(c.Key >> 48)
-	buf[7] = byte(c.Key >> 56)
+	marshalUint64(buf, c.NullBitmask, i)
+	i += 8
+
+	marshalUint64(buf, c.Key, i)
 	i += 8
 
 	copy(buf[i:], c.Value[0:rowSize])
@@ -101,15 +85,10 @@ func (c *Cell) Marshal(rowSize uint64, buf []byte) ([]byte, error) {
 func (c *Cell) Unmarshal(rowSize uint64, buf []byte) (uint64, error) {
 	i := uint64(0)
 
-	c.Key = 0 |
-		(uint64(buf[i+0]) << 0) |
-		(uint64(buf[i+1]) << 8) |
-		(uint64(buf[i+2]) << 16) |
-		(uint64(buf[i+3]) << 24) |
-		(uint64(buf[i+4]) << 32) |
-		(uint64(buf[i+5]) << 40) |
-		(uint64(buf[i+6]) << 48) |
-		(uint64(buf[i+7]) << 56)
+	c.NullBitmask = unmarshalUint64(buf, i)
+	i += 8
+
+	c.Key = unmarshalUint64(buf, i)
 	i += 8
 
 	copy(c.Value, buf[i:i+rowSize])
@@ -120,7 +99,7 @@ func (c *Cell) Unmarshal(rowSize uint64, buf []byte) (uint64, error) {
 
 type LeafNode struct {
 	Header  LeafNodeHeader
-	Cells   []Cell // (PageSize - (6+8)) / (rowSize+8)
+	Cells   []Cell // (PageSize - (6+8)) / (rowSize+8+8)
 	RowSize uint64
 }
 
@@ -281,4 +260,40 @@ func (n *LeafNode) Keys() []uint64 {
 		keys = append(keys, n.Cells[idx].Key)
 	}
 	return keys
+}
+
+func marshalUint32(buf []byte, n uint32, i uint64) {
+	buf[i+0] = byte(n >> 0)
+	buf[i+1] = byte(n >> 8)
+	buf[i+2] = byte(n >> 16)
+	buf[i+3] = byte(n >> 24)
+}
+
+func unmarshalUint32(buf []byte, i uint64) uint32 {
+	return (uint32(buf[i+0]) << 0) |
+		(uint32(buf[i+1]) << 8) |
+		(uint32(buf[i+2]) << 16) |
+		(uint32(buf[i+3]) << 24)
+}
+
+func marshalUint64(buf []byte, n, i uint64) {
+	buf[i+0] = byte(n >> 0)
+	buf[i+1] = byte(n >> 8)
+	buf[i+2] = byte(n >> 16)
+	buf[i+3] = byte(n >> 24)
+	buf[i+4] = byte(n >> 32)
+	buf[i+5] = byte(n >> 40)
+	buf[i+6] = byte(n >> 48)
+	buf[i+7] = byte(n >> 56)
+}
+
+func unmarshalUint64(buf []byte, i uint64) uint64 {
+	return (uint64(buf[i+0]) << 0) |
+		(uint64(buf[i+1]) << 8) |
+		(uint64(buf[i+2]) << 16) |
+		(uint64(buf[i+3]) << 24) |
+		(uint64(buf[i+4]) << 32) |
+		(uint64(buf[i+5]) << 40) |
+		(uint64(buf[i+6]) << 48) |
+		(uint64(buf[i+7]) << 56)
 }

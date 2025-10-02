@@ -283,6 +283,9 @@ func (d *Database) DropTable(ctx context.Context, name string) error {
 }
 
 func (d *Database) executeCreateTable(ctx context.Context, stmt minisql.Statement) (minisql.StatementResult, error) {
+	if len(stmt.Columns) > minisql.MaxColumns {
+		return minisql.StatementResult{}, fmt.Errorf("maximum number of columns is %d", minisql.MaxColumns)
+	}
 	_, err := d.CreateTable(ctx, stmt.TableName, stmt.Columns)
 	return minisql.StatementResult{}, err
 }

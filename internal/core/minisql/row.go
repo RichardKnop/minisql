@@ -21,15 +21,16 @@ func (r Row) MaxCells() uint32 {
 
 func maxCells(rowSize uint64) uint32 {
 	// base header is +6, leaf/internal header +8
-	// int64 row ID per cell hence we divide by rowSize + 8
-	return uint32((PageSize - 6 - 8) / (rowSize + 8))
+	// and uint64 row ID per cell
+	// hence we divide by rowSize + 8 + 8
+	return uint32((PageSize - 6 - 8) / (rowSize + 8 + 8))
 }
 
 func NewRow(columns []Column) Row {
 	return Row{Columns: columns}
 }
 
-// Size calculates a size of a row record including a header and payload
+// Size calculates a size of a row record excluding null bitmask and row ID
 func (r Row) Size() uint64 {
 	size := uint64(0)
 	for _, aColumn := range r.Columns {
@@ -125,7 +126,6 @@ func (r Row) appendValues(fields []string, values []any) Row {
 	return r
 }
 
-// TODO - handle NULL values
 func (r *Row) Marshal() ([]byte, error) {
 	buf := make([]byte, r.Size())
 
@@ -236,14 +236,13 @@ func (r *Row) Marshal() ([]byte, error) {
 	return buf, nil
 }
 
-// TODO - handle NULL values
 func UnmarshalRow(buf []byte, aRow *Row) error {
 	aRow.Values = make([]any, 0, len(aRow.Columns))
 	for i, aColumn := range aRow.Columns {
 		offset := aRow.columnOffset(i)
 		switch aColumn.Kind {
 		case Boolean:
-			value := 0 | (uint32(buf[offset+0+0]) << 0)
+			value := (uint32(buf[offset+0+0]) << 0)
 			aRow.Values = append(aRow.Values, value == uint32(1))
 		case Int4:
 			value := 0 |
