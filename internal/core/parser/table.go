@@ -65,7 +65,7 @@ func (p *parser) doParseCreateTable() (bool, error) {
 			p.step = stepCreateTableVarcharLength
 		} else {
 			p.Columns[len(p.Columns)-1].Size = aColumn.Size
-			p.step = stepCreateTableCommaOrClosingParens
+			p.step = stepCreateTableColumnNullNotNull
 		}
 	case stepCreateTableVarcharLength:
 		sizeToken := p.peek()
@@ -86,7 +86,21 @@ func (p *parser) doParseCreateTable() (bool, error) {
 			return false, fmt.Errorf("at CREATE TABLE: expecting closing parenthesis after varchar size")
 		}
 		p.pop()
+		p.step = stepCreateTableColumnNullNotNull
+	case stepCreateTableColumnNullNotNull:
+		nullNotNull := p.peek()
 		p.step = stepCreateTableCommaOrClosingParens
+		switch nullNotNull {
+		case "NOT NULL":
+			p.Columns[len(p.Columns)-1].Nullable = false
+		case "NULL":
+			p.Columns[len(p.Columns)-1].Nullable = true
+		default:
+			// Default to nullable if not specified
+			p.Columns[len(p.Columns)-1].Nullable = true
+			return true, nil
+		}
+		p.pop()
 	case stepCreateTableCommaOrClosingParens:
 		commaOrClosingParens := p.peek()
 		if commaOrClosingParens != "," && commaOrClosingParens != ")" {

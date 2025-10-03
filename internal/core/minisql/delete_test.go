@@ -18,7 +18,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, "minisql_main")
+	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
 	require.NoError(t, err)
 
 	/*
@@ -77,7 +77,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, "minisql_main")
+	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
 	require.NoError(t, err)
 
 	var (
@@ -353,7 +353,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, "minisql_main")
+	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
 	require.NoError(t, err)
 
 	var (

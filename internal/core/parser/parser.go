@@ -32,7 +32,7 @@ var reservedWords = []string{
 	// statement types
 	"CREATE TABLE", "DROP TABLE", "SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
-	"NULL", "IF NOT EXISTS", "WHERE", "FROM", "SET", "AS",
+	"NOT NULL", "NULL", "IF NOT EXISTS", "WHERE", "FROM", "SET", "AS",
 }
 
 type step int
@@ -45,6 +45,7 @@ const (
 	stepCreateTableColumn
 	stepCreateTableColumnDef
 	stepCreateTableVarcharLength
+	stepCreateTableColumnNullNotNull
 	stepCreateTableCommaOrClosingParens
 	stepDropTableName
 	stepSelectField
@@ -164,6 +165,7 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			stepCreateTableColumn,
 			stepCreateTableColumnDef,
 			stepCreateTableVarcharLength,
+			stepCreateTableColumnNullNotNull,
 			stepCreateTableCommaOrClosingParens:
 			continueLoop, err := p.doParseCreateTable()
 			if err != nil {
