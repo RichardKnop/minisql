@@ -35,6 +35,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testMediumColumns...),
 		Inserts:   [][]OptionalValue{},
 	}
@@ -91,6 +92,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testMediumColumns...),
 		Inserts:   [][]OptionalValue{},
 	}
@@ -368,6 +370,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testMediumColumns...),
 		Inserts:   [][]OptionalValue{},
 	}

@@ -46,8 +46,10 @@ type OperandType int
 
 const (
 	Field OperandType = iota + 1
+	Null
 	QuotedString
 	Integer
+	Float
 )
 
 type Operand struct {
@@ -175,12 +177,22 @@ type Statement struct {
 
 func (s Statement) Validate(aTable *Table) error {
 	if len(s.Inserts) > 0 {
+		// TODO - handle default values
+		if len(s.Columns) != len(aTable.Columns) {
+			return fmt.Errorf("insert: expected %d columns, got %d", len(aTable.Columns), len(s.Columns))
+		}
+		if len(s.Fields) != len(aTable.Columns) {
+			return fmt.Errorf("insert: expected %d fields, got %d", len(aTable.Columns), len(s.Fields))
+		}
 		for i, aField := range s.Fields {
 			aColumn, ok := aTable.ColumnByName(aField)
 			if !ok {
 				return fmt.Errorf("unknown field %q in table %q", aField, aTable.Name)
 			}
 			for _, anInsert := range s.Inserts {
+				if len(anInsert) != len(s.Fields) {
+					return fmt.Errorf("insert: expected %d values, got %d", len(s.Fields), len(anInsert))
+				}
 				if !anInsert[i].Valid && !aColumn.Nullable {
 					return fmt.Errorf("field %q cannot be NULL", aField)
 				}

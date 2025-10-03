@@ -13,12 +13,12 @@ var (
 	errInsertNoFields                = fmt.Errorf("at INSERT INTO: expected at least one field to insert")
 )
 
-func (p *parser) doParseInsert() (bool, error) {
+func (p *parser) doParseInsert() error {
 	switch p.step {
 	case stepInsertTable:
 		tableName := p.peek()
 		if len(tableName) == 0 {
-			return false, fmt.Errorf("at INSERT INTO: expected quoted table name")
+			return fmt.Errorf("at INSERT INTO: expected quoted table name")
 		}
 		p.TableName = tableName
 		p.pop()
@@ -26,14 +26,14 @@ func (p *parser) doParseInsert() (bool, error) {
 	case stepInsertFieldsOpeningParens:
 		openingParens := p.peek()
 		if len(openingParens) != 1 || openingParens != "(" {
-			return false, fmt.Errorf("at INSERT INTO: expected opening parens")
+			return fmt.Errorf("at INSERT INTO: expected opening parens")
 		}
 		p.pop()
 		p.step = stepInsertFields
 	case stepInsertFields:
 		identifier := p.peek()
 		if !isIdentifier(identifier) {
-			return false, errInsertNoFields
+			return errInsertNoFields
 		}
 		p.Fields = append(p.Fields, identifier)
 		p.pop()
@@ -41,25 +41,25 @@ func (p *parser) doParseInsert() (bool, error) {
 	case stepInsertFieldsCommaOrClosingParens:
 		commaOrClosingParens := p.peek()
 		if commaOrClosingParens != "," && commaOrClosingParens != ")" {
-			return false, fmt.Errorf("at INSERT INTO: expected comma or closing parens")
+			return fmt.Errorf("at INSERT INTO: expected comma or closing parens")
 		}
 		p.pop()
 		if commaOrClosingParens == "," {
 			p.step = stepInsertFields
-			return true, nil
+			return nil
 		}
 		p.step = stepInsertValuesRWord
 	case stepInsertValuesRWord:
 		valuesRWord := p.peek()
 		if strings.ToUpper(valuesRWord) != "VALUES" {
-			return false, fmt.Errorf("at INSERT INTO: expected 'VALUES'")
+			return fmt.Errorf("at INSERT INTO: expected 'VALUES'")
 		}
 		p.pop()
 		p.step = stepInsertValuesOpeningParens
 	case stepInsertValuesOpeningParens:
 		openingParens := p.peek()
 		if openingParens != "(" {
-			return false, fmt.Errorf("at INSERT INTO: expected opening parens")
+			return fmt.Errorf("at INSERT INTO: expected opening parens")
 		}
 		p.Inserts = append(p.Inserts, []minisql.OptionalValue{})
 		p.pop()
@@ -70,45 +70,38 @@ func (p *parser) doParseInsert() (bool, error) {
 			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.OptionalValue{Valid: false})
 			p.pop()
 			p.step = stepInsertValuesCommaOrClosingParens
-			return true, nil
+			return nil
 		}
-		intValue, ln := p.peekIntWithLength()
+		value, ln := p.peekNumberOrQuotedStringWithLength()
 		if ln > 0 {
-			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.OptionalValue{Value: intValue, Valid: true})
+			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.OptionalValue{Value: value, Valid: true})
 			p.pop()
 			p.step = stepInsertValuesCommaOrClosingParens
-			return true, nil
+			return nil
 		}
-		quotedValue, ln := p.peekQuotedStringWithLength()
-		if ln > 0 {
-			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.OptionalValue{Value: quotedValue, Valid: true})
-			p.pop()
-			p.step = stepInsertValuesCommaOrClosingParens
-			return true, nil
-		}
-		return false, fmt.Errorf("at INSERT INTO: expected quoted value or int value")
+		return fmt.Errorf("at INSERT INTO: expected quoted value or int value")
 	case stepInsertValuesCommaOrClosingParens:
 		commaOrClosingParens := p.peek()
 		if commaOrClosingParens != "," && commaOrClosingParens != ")" {
-			return false, fmt.Errorf("at INSERT INTO: expected comma or closing parens")
+			return fmt.Errorf("at INSERT INTO: expected comma or closing parens")
 		}
 		p.pop()
 		if commaOrClosingParens == "," {
 			p.step = stepInsertValues
-			return true, nil
+			return nil
 		}
 		currentInsertRow := p.Inserts[len(p.Inserts)-1]
 		if len(currentInsertRow) < len(p.Fields) {
-			return false, errInsertFieldValueCountMismatch
+			return errInsertFieldValueCountMismatch
 		}
 		p.step = stepInsertValuesCommaBeforeOpeningParens
 	case stepInsertValuesCommaBeforeOpeningParens:
 		commaRWord := p.peek()
 		if strings.ToUpper(commaRWord) != "," {
-			return false, fmt.Errorf("at INSERT INTO: expected comma")
+			return fmt.Errorf("at INSERT INTO: expected comma")
 		}
 		p.pop()
 		p.step = stepInsertValuesOpeningParens
 	}
-	return false, nil
+	return nil
 }

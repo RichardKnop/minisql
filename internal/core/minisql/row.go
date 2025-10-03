@@ -3,6 +3,8 @@ package minisql
 import (
 	"bytes"
 	"fmt"
+
+	"github.com/RichardKnop/minisql/pkg/bitwise"
 )
 
 type OptionalValue struct {
@@ -426,4 +428,15 @@ func compareVarchar(value1, value2 any, operator Operator) (bool, error) {
 		return theValue1 <= theValue2, nil
 	}
 	return false, fmt.Errorf("unknown operator '%s'", operator)
+}
+
+// NullBitmask returns a bitmask representing which columns are NULL
+func (r Row) NullBitmask() uint64 {
+	var bitmask uint64 = 0
+	for i, val := range r.Values {
+		if !val.Valid {
+			bitmask = bitwise.Set(bitmask, int(i))
+		}
+	}
+	return bitmask
 }

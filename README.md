@@ -136,4 +136,3 @@ minisql> update foo set id = 45 where id = 75
 Rows affected: 0
 minisql>
 ```
-

@@ -28,6 +28,7 @@ func TestTable_Select(t *testing.T) {
 	insertStmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testColumns...),
 		Inserts:   [][]OptionalValue{},
 	}

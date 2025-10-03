@@ -51,7 +51,7 @@ func (p *parser) doParseUpdate() (bool, error) {
 			p.nextUpdateField = ""
 			p.pop()
 		} else {
-			value, ln := p.peekIntOrQuotedStringWithLength()
+			value, ln := p.peekNumberOrQuotedStringWithLength()
 			if ln == 0 {
 				return false, errUpdateExpectedQuotedValueOrInt
 			}

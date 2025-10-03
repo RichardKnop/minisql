@@ -17,13 +17,13 @@ var (
 	errCreateTableInvalidColumDef = fmt.Errorf("at CREATE TABLE: invalid column definition")
 )
 
-func (p *parser) doParseCreateTable() (bool, error) {
+func (p *parser) doParseCreateTable() error {
 	switch p.step {
 	case stepCreateTableIfNotExists:
 		ifnotExists := p.peek()
 		p.step = stepCreateTableName
 		if strings.ToUpper(ifnotExists) != "IF NOT EXISTS" {
-			return true, nil
+			return nil
 		}
 		p.IfNotExists = true
 		p.pop()
@@ -31,7 +31,7 @@ func (p *parser) doParseCreateTable() (bool, error) {
 	case stepCreateTableName:
 		tableName := p.peek()
 		if len(tableName) == 0 {
-			return false, fmt.Errorf("at CREATE TABLE: expected quoted table name")
+			return fmt.Errorf("at CREATE TABLE: expected quoted table name")
 		}
 		p.TableName = tableName
 		p.pop()
@@ -39,14 +39,14 @@ func (p *parser) doParseCreateTable() (bool, error) {
 	case stepCreateTableOpeningParens:
 		openingParens := p.peek()
 		if len(openingParens) != 1 || openingParens != "(" {
-			return false, fmt.Errorf("at CREATE TABLE: expected opening parens")
+			return fmt.Errorf("at CREATE TABLE: expected opening parens")
 		}
 		p.pop()
 		p.step = stepCreateTableColumn
 	case stepCreateTableColumn:
 		identifier := p.peek()
 		if !isIdentifier(identifier) {
-			return false, errCreateTableNoColumns
+			return errCreateTableNoColumns
 		}
 		p.Columns = append(p.Columns, minisql.Column{
 			Name: identifier,
@@ -57,7 +57,7 @@ func (p *parser) doParseCreateTable() (bool, error) {
 		columnDef := p.peek()
 		aColumn, ok := isColumnDef(columnDef)
 		if !ok {
-			return false, errCreateTableInvalidColumDef
+			return errCreateTableInvalidColumDef
 		}
 		p.pop()
 		p.Columns[len(p.Columns)-1].Kind = aColumn.Kind
@@ -71,19 +71,19 @@ func (p *parser) doParseCreateTable() (bool, error) {
 		sizeToken := p.peek()
 		size, err := strconv.Atoi(sizeToken)
 		if err != nil {
-			return false, fmt.Errorf("at CREATE TABLE: varchar size '%s' must be an integer", sizeToken)
+			return fmt.Errorf("at CREATE TABLE: varchar size '%s' must be an integer", sizeToken)
 		}
 		if size <= 0 {
-			return false, fmt.Errorf("at CREATE TABLE: varchar size must be a positive integer")
+			return fmt.Errorf("at CREATE TABLE: varchar size must be a positive integer")
 		}
 		if size > varcharMaxLength {
-			return false, fmt.Errorf("at CREATE TABLE: varchar size must be > 0 and <= %d", varcharMaxLength)
+			return fmt.Errorf("at CREATE TABLE: varchar size must be > 0 and <= %d", varcharMaxLength)
 		}
 		p.pop()
 		p.Columns[len(p.Columns)-1].Size = uint32(size)
 		closingParens := p.peek()
 		if closingParens != ")" {
-			return false, fmt.Errorf("at CREATE TABLE: expecting closing parenthesis after varchar size")
+			return fmt.Errorf("at CREATE TABLE: expecting closing parenthesis after varchar size")
 		}
 		p.pop()
 		p.step = stepCreateTableColumnNullNotNull
@@ -98,34 +98,34 @@ func (p *parser) doParseCreateTable() (bool, error) {
 		default:
 			// Default to nullable if not specified
 			p.Columns[len(p.Columns)-1].Nullable = true
-			return true, nil
+			return nil
 		}
 		p.pop()
 	case stepCreateTableCommaOrClosingParens:
 		commaOrClosingParens := p.peek()
 		if commaOrClosingParens != "," && commaOrClosingParens != ")" {
-			return false, fmt.Errorf("at CREATE TABLE: expected comma or closing parens")
+			return fmt.Errorf("at CREATE TABLE: expected comma or closing parens")
 		}
 		p.pop()
 		if commaOrClosingParens == "," {
 			p.step = stepCreateTableColumn
-			return true, nil
+			return nil
 		}
 	}
-	return false, nil
+	return nil
 }
 
-func (p *parser) doParseDropTable() (bool, error) {
+func (p *parser) doParseDropTable() error {
 	switch p.step {
 	case stepDropTableName:
 		tableName := p.peek()
 		if len(tableName) == 0 {
-			return false, fmt.Errorf("at DROP TABLE: expected quoted table name")
+			return fmt.Errorf("at DROP TABLE: expected quoted table name")
 		}
 		p.TableName = tableName
 		p.pop()
 	}
-	return false, nil
+	return nil
 }
 
 func isColumnDef(token string) (minisql.Column, bool) {

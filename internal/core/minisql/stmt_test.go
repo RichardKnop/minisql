@@ -39,10 +39,53 @@ func TestStatement_Validate(t *testing.T) {
 		},
 	}
 
+	t.Run("INSERT with wrong number of columns should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Insert,
+			TableName: "test_table",
+			Columns:   testTable.Columns[1:], // Missing the "id" column
+			Fields:    []string{"id", "email", "age", "verified"},
+			Inserts: [][]OptionalValue{
+				{
+					{Value: int32(1), Valid: true},
+					{Value: "test@example.com", Valid: true},
+					{Value: int32(25), Valid: true},
+					{Value: true, Valid: true},
+				},
+			},
+		}
+
+		err := stmt.Validate(testTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "insert: expected 4 columns, got 3")
+	})
+
+	t.Run("INSERT with wrong number of fields should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Insert,
+			TableName: "test_table",
+			Columns:   testTable.Columns,
+			Fields:    []string{"id", "email", "age"},
+			Inserts: [][]OptionalValue{
+				{
+					{Value: int32(1), Valid: true},
+					{Value: "test@example.com", Valid: true},
+					{Value: int32(25), Valid: true},
+					{Value: true, Valid: true},
+				},
+			},
+		}
+
+		err := stmt.Validate(testTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "insert: expected 4 fields, got 3")
+	})
+
 	t.Run("INSERT with NULL to non-nullable column should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
 			TableName: "test_table",
+			Columns:   testTable.Columns,
 			Fields:    []string{"id", "email", "age", "verified"},
 			Inserts: [][]OptionalValue{
 				{
@@ -63,6 +106,7 @@ func TestStatement_Validate(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
 			TableName: "test_table",
+			Columns:   testTable.Columns,
 			Fields:    []string{"id", "email", "age", "verified"},
 			Inserts: [][]OptionalValue{
 				{
@@ -82,6 +126,7 @@ func TestStatement_Validate(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
 			TableName: "test_table",
+			Columns:   testTable.Columns,
 			Fields:    []string{"id", "email", "age", "verified"},
 			Inserts: [][]OptionalValue{
 				{
@@ -97,55 +142,12 @@ func TestStatement_Validate(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("UPDATE with NULL to non-nullable column should fail", func(t *testing.T) {
-		stmt := Statement{
-			Kind:      Update,
-			TableName: "test_table",
-			Fields:    []string{"email"},
-			Updates: map[string]OptionalValue{
-				"email": {Valid: false}, // NULL for non-nullable email
-			},
-		}
-
-		err := stmt.Validate(testTable)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, `field "email" cannot be NULL`)
-	})
-
-	t.Run("UPDATE with NULL to nullable column should succeed", func(t *testing.T) {
-		stmt := Statement{
-			Kind:      Update,
-			TableName: "test_table",
-			Fields:    []string{"age"},
-			Updates: map[string]OptionalValue{
-				"age": {Valid: false}, // NULL for nullable age
-			},
-		}
-
-		err := stmt.Validate(testTable)
-		require.NoError(t, err)
-	})
-
-	t.Run("UPDATE with valid value should succeed", func(t *testing.T) {
-		stmt := Statement{
-			Kind:      Update,
-			TableName: "test_table",
-			Fields:    []string{"email", "age"},
-			Updates: map[string]OptionalValue{
-				"email": {Value: "new@example.com", Valid: true},
-				"age":   {Value: int32(30), Valid: true},
-			},
-		}
-
-		err := stmt.Validate(testTable)
-		require.NoError(t, err)
-	})
-
 	t.Run("INSERT with unknown field should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
 			TableName: "test_table",
-			Fields:    []string{"unknown_field"},
+			Columns:   testTable.Columns,
+			Fields:    []string{"unknown_field", "unknown_field", "unknown_field", "unknown_field"},
 			Inserts: [][]OptionalValue{
 				{
 					{Value: "some_value", Valid: true},
@@ -162,11 +164,14 @@ func TestStatement_Validate(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
 			TableName: "test_table",
-			Fields:    []string{"id", "email"},
+			Columns:   testTable.Columns,
+			Fields:    []string{"id", "email", "age", "verified"},
 			Inserts: [][]OptionalValue{
 				{
 					{Value: int32(1), Valid: true},
 					{Value: string([]byte{0xff, 0xfe, 0xfd}), Valid: true}, // invalid UTF-8
+					{Valid: false}, // NULL for nullable age
+					{Valid: false}, // NULL for nullable verified
 				},
 			},
 		}
@@ -174,5 +179,52 @@ func TestStatement_Validate(t *testing.T) {
 		err := stmt.Validate(testTable)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `field "email" expects valid UTF-8 string`)
+	})
+
+	t.Run("UPDATE with NULL to non-nullable column should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Update,
+			TableName: "test_table",
+			Columns:   testTable.Columns,
+			Fields:    []string{"email"},
+			Updates: map[string]OptionalValue{
+				"email": {Valid: false}, // NULL for non-nullable email
+			},
+		}
+
+		err := stmt.Validate(testTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `field "email" cannot be NULL`)
+	})
+
+	t.Run("UPDATE with NULL to nullable column should succeed", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Update,
+			TableName: "test_table",
+			Columns:   testTable.Columns,
+			Fields:    []string{"age"},
+			Updates: map[string]OptionalValue{
+				"age": {Valid: false}, // NULL for nullable age
+			},
+		}
+
+		err := stmt.Validate(testTable)
+		require.NoError(t, err)
+	})
+
+	t.Run("UPDATE with valid value should succeed", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Update,
+			TableName: "test_table",
+			Columns:   testTable.Columns,
+			Fields:    []string{"email", "age"},
+			Updates: map[string]OptionalValue{
+				"email": {Value: "new@example.com", Valid: true},
+				"age":   {Value: int32(30), Valid: true},
+			},
+		}
+
+		err := stmt.Validate(testTable)
+		require.NoError(t, err)
 	})
 }

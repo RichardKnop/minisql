@@ -15,117 +15,119 @@ func TestParse_Insert(t *testing.T) {
 
 	testCases := []testCase{
 		{
-			Name:     "Empty INSERT fails",
-			SQL:      "INSERT INTO",
-			Expected: minisql.Statement{Kind: minisql.Insert},
-			Err:      errEmptyTableName,
+			"Empty INSERT fails",
+			"INSERT INTO",
+			minisql.Statement{Kind: minisql.Insert},
+			errEmptyTableName,
 		},
 		{
-			Name: "INSERT with no rows to insert fails",
-			SQL:  "INSERT INTO 'a'",
-			Expected: minisql.Statement{
+			"INSERT with no rows to insert fails",
+			"INSERT INTO 'a'",
+			minisql.Statement{
 				Kind:      minisql.Insert,
 				TableName: "a",
 			},
-			Err: errNoRowsToInsert,
+			errNoRowsToInsert,
 		},
 		{
-			Name: "INSERT with incomplete value section fails",
-			SQL:  "INSERT INTO 'a' (",
-			Expected: minisql.Statement{
+			"INSERT with incomplete value section fails",
+			"INSERT INTO 'a' (",
+			minisql.Statement{
 				Kind:      minisql.Insert,
 				TableName: "a",
 			},
-			Err: errNoRowsToInsert,
+			errNoRowsToInsert,
 		},
 		{
-			Name: "INSERT with incomplete value section fails #2",
-			SQL:  "INSERT INTO 'a' (b",
-			Expected: minisql.Statement{
-				Kind:      minisql.Insert,
-				TableName: "a",
-				Fields:    []string{"b"},
-			},
-			Err: errNoRowsToInsert,
-		},
-		{
-			Name: "INSERT with incomplete value section fails #3",
-			SQL:  "INSERT INTO 'a' (b)",
-			Expected: minisql.Statement{
+			"INSERT with incomplete value section fails #2",
+			"INSERT INTO 'a' (b",
+			minisql.Statement{
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b"},
 			},
-			Err: errNoRowsToInsert,
+			errNoRowsToInsert,
 		},
 		{
-			Name: "INSERT with incomplete value section fails #4",
-			SQL:  "INSERT INTO 'a' (b) VALUES",
-			Expected: minisql.Statement{
+			"INSERT with incomplete value section fails #3",
+			"INSERT INTO 'a' (b)",
+			minisql.Statement{
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b"},
 			},
-			Err: errNoRowsToInsert,
+			errNoRowsToInsert,
 		},
 		{
-			Name: "INSERT with incomplete row fails",
-			SQL:  "INSERT INTO 'a' (b) VALUES (",
-			Expected: minisql.Statement{
+			"INSERT with incomplete value section fails #4",
+			"INSERT INTO 'a' (b) VALUES",
+			minisql.Statement{
+				Kind:      minisql.Insert,
+				TableName: "a",
+				Fields:    []string{"b"},
+			},
+			errNoRowsToInsert,
+		},
+		{
+			"INSERT with incomplete row fails",
+			"INSERT INTO 'a' (b) VALUES (",
+			minisql.Statement{
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b"},
 				Inserts:   [][]minisql.OptionalValue{{}},
 			},
-			Err: errInsertFieldValueCountMismatch,
+			errInsertFieldValueCountMismatch,
 		},
 		{
-			Name: "INSERT works",
-			SQL:  "INSERT INTO 'a' (b) VALUES ('1')",
-			Expected: minisql.Statement{
+			"INSERT works",
+			"INSERT INTO 'a' (b) VALUES ('1')",
+			minisql.Statement{
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b"},
 				Inserts:   [][]minisql.OptionalValue{{{Value: "1", Valid: true}}},
 			},
+			nil,
 		},
 		{
-			Name: "INSERT * fails",
-			SQL:  "INSERT INTO 'a' (*) VALUES ('1')",
-			Expected: minisql.Statement{
+			"INSERT * fails",
+			"INSERT INTO 'a' (*) VALUES ('1')",
+			minisql.Statement{
 				Kind:      minisql.Insert,
 				TableName: "a",
 			},
-			Err: errInsertNoFields,
+			errInsertNoFields,
 		},
 		{
-			Name: "INSERT with multiple fields works",
-			SQL:  "INSERT INTO 'a' (b,c,    d) VALUES ('1','2' ,  '3' )",
-			Expected: minisql.Statement{
+			"INSERT with multiple fields works",
+			"INSERT INTO 'a' (b,c,    d) VALUES ('1',2 ,  3.75 )",
+			minisql.Statement{
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b", "c", "d"},
 				Inserts: [][]minisql.OptionalValue{
 					{
 						{Value: "1", Valid: true},
-						{Value: "2", Valid: true},
-						{Value: "3", Valid: true},
+						{Value: int64(2), Valid: true},
+						{Value: float64(3.75), Valid: true},
 					},
 				},
 			},
+			nil,
 		},
 		{
-			Name: "INSERT with multiple fields and multiple values works",
-			SQL:  "INSERT INTO 'a' (b,c,    d) VALUES ('1','2' ,  '3' ),('4','5' ,'6' )",
-			Expected: minisql.Statement{
+			"INSERT with multiple fields and multiple values works",
+			"INSERT INTO 'a' (b,c,    d) VALUES ('1',2 ,  3.75 ),('4','5' ,'6' )",
+			minisql.Statement{
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b", "c", "d"},
 				Inserts: [][]minisql.OptionalValue{
 					{
 						{Value: "1", Valid: true},
-						{Value: "2", Valid: true},
-						{Value: "3", Valid: true},
+						{Value: int64(2), Valid: true},
+						{Value: float64(3.75), Valid: true},
 					},
 					{
 						{Value: "4", Valid: true},
@@ -134,11 +136,12 @@ func TestParse_Insert(t *testing.T) {
 					},
 				},
 			},
+			nil,
 		},
 		{
-			Name: "INSERT with multiple fields of different types works",
-			SQL:  "INSERT INTO 'a' (b, c, d, e, f) VALUES (25, 'foo', 7, 'bar', NULL)",
-			Expected: minisql.Statement{
+			"INSERT with multiple fields of different types works",
+			"INSERT INTO 'a' (b, c, d, e, f) VALUES (25, 'foo', 7, 'bar', NULL)",
+			minisql.Statement{
 				Kind:      minisql.Insert,
 				TableName: "a",
 				Fields:    []string{"b", "c", "d", "e", "f"},
@@ -152,6 +155,7 @@ func TestParse_Insert(t *testing.T) {
 					},
 				},
 			},
+			nil,
 		},
 	}
 

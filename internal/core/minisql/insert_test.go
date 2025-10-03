@@ -28,6 +28,7 @@ func TestTable_Insert(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testColumns...),
 		Inserts:   [][]OptionalValue{aRow.Values},
 	}
@@ -62,6 +63,7 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testColumns...),
 		Inserts:   [][]OptionalValue{aRow.Values, aRow2.Values, aRow3.Values},
 	}
@@ -108,6 +110,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testMediumColumns...),
 	}
 	for _, aRow := range rows {
@@ -174,6 +177,7 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testBigColumns...),
 		Inserts:   [][]OptionalValue{},
 	}
@@ -240,6 +244,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testBigColumns...),
 		Inserts:   [][]OptionalValue{},
 	}
