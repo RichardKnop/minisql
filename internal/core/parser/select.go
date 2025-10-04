@@ -7,15 +7,15 @@ import (
 
 var (
 	errSelectWithoutFields     = fmt.Errorf("at SELECT: expected field to SELECT")
-	errSelectExpectedTableName = fmt.Errorf("at SELECT: expected quoted table name")
+	errSelectExpectedTableName = fmt.Errorf("at SELECT: expected table name identifier")
 )
 
-func (p *parser) doParseSelect() (bool, error) {
+func (p *parser) doParseSelect() error {
 	switch p.step {
 	case stepSelectField:
 		identifier := p.peek()
 		if !isIdentifierOrAsterisk(identifier) {
-			return false, errSelectWithoutFields
+			return errSelectWithoutFields
 		}
 		p.Fields = append(p.Fields, identifier)
 		p.pop()
@@ -24,7 +24,7 @@ func (p *parser) doParseSelect() (bool, error) {
 			p.pop()
 			alias := p.peek()
 			if !isIdentifier(alias) {
-				return false, fmt.Errorf("at SELECT: expected field alias for \"" + identifier + " as\" to SELECT")
+				return fmt.Errorf("at SELECT: expected field alias for \"" + identifier + " as\" to SELECT")
 			}
 			if p.Aliases == nil {
 				p.Aliases = make(map[string]string)
@@ -35,31 +35,31 @@ func (p *parser) doParseSelect() (bool, error) {
 		}
 		if strings.ToUpper(maybeFrom) == "FROM" {
 			p.step = stepSelectFrom
-			return true, nil
+			return nil
 		}
 		p.step = stepSelectComma
 	case stepSelectComma:
 		commaRWord := p.peek()
 		if commaRWord != "," {
-			return false, fmt.Errorf("at SELECT: expected comma or FROM")
+			return fmt.Errorf("at SELECT: expected comma or FROM")
 		}
 		p.pop()
 		p.step = stepSelectField
 	case stepSelectFrom:
 		fromRWord := p.peek()
 		if strings.ToUpper(fromRWord) != "FROM" {
-			return false, fmt.Errorf("at SELECT: expected FROM")
+			return fmt.Errorf("at SELECT: expected FROM")
 		}
 		p.pop()
 		p.step = stepSelectFromTable
 	case stepSelectFromTable:
-		tableName := p.peek()
-		if len(tableName) == 0 {
-			return false, errSelectExpectedTableName
+		tableName, _ := p.peekIdentifierWithLength()
+		if !isIdentifier(tableName) {
+			return errSelectExpectedTableName
 		}
 		p.TableName = tableName
 		p.pop()
 		p.step = stepWhere
 	}
-	return false, nil
+	return nil
 }

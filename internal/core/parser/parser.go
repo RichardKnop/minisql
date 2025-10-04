@@ -12,16 +12,9 @@ import (
 )
 
 var (
-	errInvalidStatementKind          = fmt.Errorf("invalid statement kind")
-	errEmptyStatementKind            = fmt.Errorf("statement kind cannot be empty")
-	errEmptyTableName                = fmt.Errorf("table name cannot be empty")
-	errEmptyWhereClause              = fmt.Errorf("at WHERE: empty WHERE clause")
-	errWhereWithoutOperator          = fmt.Errorf("at WHERE: condition without operator")
-	errWhereRequiredForUpdateDelete  = fmt.Errorf("at WHERE: WHERE clause is mandatory for UPDATE & DELETE")
-	errWhereExpectedField            = fmt.Errorf("at WHERE: expected field")
-	errWhereExpectedAndOr            = fmt.Errorf("expected one of AND / OR")
-	errWhereExpectedQuotedValueOrInt = fmt.Errorf("at WHERE: expected quoted value or int value")
-	errWhereUnknownOperator          = fmt.Errorf("at WHERE: unknown operator")
+	errInvalidStatementKind = fmt.Errorf("invalid statement kind")
+	errEmptyStatementKind   = fmt.Errorf("statement kind cannot be empty")
+	errEmptyTableName       = fmt.Errorf("table name cannot be empty")
 )
 
 var reservedWords = []string{
@@ -32,7 +25,7 @@ var reservedWords = []string{
 	// statement types
 	"CREATE TABLE", "DROP TABLE", "SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
-	"IF NOT EXISTS", "WHERE", "FROM", "SET", "AS",
+	"*", "IS NULL", "IS NOT NULL", "NOT NULL", "NULL", "IF NOT EXISTS", "WHERE", "FROM", "SET", "AS",
 }
 
 type step int
@@ -45,6 +38,7 @@ const (
 	stepCreateTableColumn
 	stepCreateTableColumnDef
 	stepCreateTableVarcharLength
+	stepCreateTableColumnNullNotNull
 	stepCreateTableCommaOrClosingParens
 	stepDropTableName
 	stepSelectField
@@ -104,8 +98,9 @@ func (p *parser) Parse(ctx context.Context, sql string) (minisql.Statement, erro
 	return q, p.err
 }
 
-func (p *parser) setSQL(sql string) {
+func (p *parser) setSQL(sql string) *parser {
 	p.sql = strings.TrimSpace(sql)
+	return p
 }
 
 func (p *parser) reset() {
@@ -118,10 +113,7 @@ func (p *parser) reset() {
 }
 
 func (p *parser) doParse() (minisql.Statement, error) {
-	for {
-		if p.i >= len(p.sql) {
-			return p.Statement, p.err
-		}
+	for p.i < len(p.sql) {
 		switch p.step {
 		// -----------------
 		// QUERY TYPE
@@ -164,24 +156,17 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			stepCreateTableColumn,
 			stepCreateTableColumnDef,
 			stepCreateTableVarcharLength,
+			stepCreateTableColumnNullNotNull,
 			stepCreateTableCommaOrClosingParens:
-			continueLoop, err := p.doParseCreateTable()
-			if err != nil {
+			if err := p.doParseCreateTable(); err != nil {
 				return p.Statement, err
-			}
-			if continueLoop {
-				continue
 			}
 			// -----------------
 			// DROP TABLE
 			//------------------
 		case stepDropTableName:
-			continueLoop, err := p.doParseDropTable()
-			if err != nil {
+			if err := p.doParseDropTable(); err != nil {
 				return p.Statement, err
-			}
-			if continueLoop {
-				continue
 			}
 		// -----------------
 		// INSERT INTO
@@ -195,12 +180,8 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			stepInsertValues,
 			stepInsertValuesCommaOrClosingParens,
 			stepInsertValuesCommaBeforeOpeningParens:
-			continueLoop, err := p.doParseInsert()
-			if err != nil {
+			if err := p.doParseInsert(); err != nil {
 				return p.Statement, err
-			}
-			if continueLoop {
-				continue
 			}
 		// -----------------
 		// SELECT
@@ -209,13 +190,10 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			stepSelectComma,
 			stepSelectFrom,
 			stepSelectFromTable:
-			continueLoop, err := p.doParseSelect()
-			if err != nil {
+			if err := p.doParseSelect(); err != nil {
 				return p.Statement, err
 			}
-			if continueLoop {
-				continue
-			}
+
 		// -----------------
 		// UPDATE
 		//------------------
@@ -225,23 +203,16 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			stepUpdateEquals,
 			stepUpdateValue,
 			stepUpdateComma:
-			continueLoop, err := p.doParseUpdate()
+			_, err := p.doParseUpdate()
 			if err != nil {
 				return p.Statement, err
-			}
-			if continueLoop {
-				continue
 			}
 		// -----------------
 		// DELETE FROM
 		//------------------
 		case stepDeleteFromTable:
-			continueLoop, err := p.doParseDelete()
-			if err != nil {
+			if err := p.doParseDelete(); err != nil {
 				return p.Statement, err
-			}
-			if continueLoop {
-				continue
 			}
 		// -----------------
 		// WHERE
@@ -251,101 +222,12 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			stepWhereConditionOperator,
 			stepWhereConditionValue,
 			stepWhereOperator:
-			continueLoop, err := p.doParseWhere()
-			if err != nil {
+			if err := p.doParseWhere(); err != nil {
 				return p.Statement, err
 			}
-			if continueLoop {
-				continue
-			}
 		}
 	}
-}
-
-func (p *parser) doParseWhere() (bool, error) {
-	switch p.step {
-	case stepWhere:
-		whereRWord := p.peek()
-		if strings.ToUpper(whereRWord) != "WHERE" {
-			return false, fmt.Errorf("expected WHERE")
-		}
-		p.pop()
-		p.step = stepWhereConditionField
-	case stepWhereConditionField:
-		identifier := p.peek()
-		if !isIdentifier(identifier) {
-			return false, errWhereExpectedField
-		}
-		p.Statement.Conditions = p.Statement.Conditions.Append(minisql.Condition{
-			Operand1: minisql.Operand{
-				Type:  minisql.Field,
-				Value: identifier,
-			},
-		})
-		p.pop()
-		p.step = stepWhereConditionOperator
-	case stepWhereConditionOperator:
-		var (
-			operator            = p.peek()
-			currentCondition, _ = p.Conditions.LastCondition()
-		)
-		switch operator {
-		case "=":
-			currentCondition.Operator = minisql.Eq
-		case ">":
-			currentCondition.Operator = minisql.Gt
-		case ">=":
-			currentCondition.Operator = minisql.Gte
-		case "<":
-			currentCondition.Operator = minisql.Lt
-		case "<=":
-			currentCondition.Operator = minisql.Lte
-		case "!=":
-			currentCondition.Operator = minisql.Ne
-		default:
-			return false, errWhereUnknownOperator
-		}
-		p.Conditions.UpdateLast(currentCondition)
-		p.pop()
-		p.step = stepWhereConditionValue
-	case stepWhereConditionValue:
-		var (
-			identifier          = p.peek()
-			currentCondition, _ = p.Conditions.LastCondition()
-		)
-		if isIdentifier(identifier) {
-			currentCondition.Operand2 = minisql.Operand{
-				Type:  minisql.Field,
-				Value: identifier,
-			}
-		} else {
-			value, ln := p.peekIntOrQuotedStringWithLength()
-			if ln == 0 {
-				return false, errWhereExpectedQuotedValueOrInt
-			}
-			currentCondition.Operand2 = minisql.Operand{
-				Type:  minisql.QuotedString,
-				Value: value,
-			}
-			if _, ok := value.(int64); ok {
-				currentCondition.Operand2.Type = minisql.Integer
-			}
-		}
-		p.Conditions.UpdateLast(currentCondition)
-		p.pop()
-		p.step = stepWhereOperator
-	case stepWhereOperator:
-		anOperator := strings.ToUpper(p.peek())
-		if anOperator != "AND" && anOperator != "OR" {
-			return false, errWhereExpectedAndOr
-		}
-		if anOperator == "OR" {
-			p.Conditions = append(p.Conditions, make(minisql.Conditions, 0, 1))
-		}
-		p.pop()
-		p.step = stepWhereConditionField
-	}
-	return false, nil
+	return p.Statement, p.err
 }
 
 func (p *parser) peek() string {
@@ -369,15 +251,25 @@ func (p *parser) peekWithLength() (string, int) {
 	if p.i >= len(p.sql) {
 		return "", 0
 	}
+	// First check for reserved words
 	for _, rWord := range reservedWords {
 		token := strings.ToUpper(p.sql[p.i:min(len(p.sql), p.i+len(rWord))])
 		if token == rWord {
 			return token, len(token)
 		}
 	}
-	if p.sql[p.i] == '\'' { // Quoted string
+	// Next for quoted string literals
+	if p.sql[p.i] == '\'' {
 		return p.peekQuotedStringWithLength()
 	}
+	// Next for numbers (floats or integers)
+	if unicode.IsDigit(rune(p.sql[p.i])) {
+		_, ln := p.peekNumberWithLength()
+		if ln > 0 {
+			return p.sql[p.i : p.i+ln], ln
+		}
+	}
+	// And finally for identifiers
 	return p.peekIdentifierWithLength()
 }
 
@@ -393,7 +285,7 @@ func (p *parser) peekQuotedStringWithLength() (string, int) {
 	return "", 0
 }
 
-func (p *parser) peepIntWithLength() (int64, int) {
+func (p *parser) peekIntWithLength() (int64, int) {
 	if len(p.sql) < p.i || !unicode.IsDigit(rune(p.sql[p.i])) {
 		return 0, 0
 	}
@@ -414,10 +306,34 @@ func (p *parser) peepIntWithLength() (int64, int) {
 	return int64(intValue), len(p.sql[p.i:len(p.sql)])
 }
 
-func (p *parser) peekIntOrQuotedStringWithLength() (any, int) {
-	intValue, ln := p.peepIntWithLength()
+func (p *parser) peekNumberWithLength() (float64, int) {
+	if len(p.sql) < p.i || !unicode.IsDigit(rune(p.sql[p.i])) {
+		return 0.0, 0
+	}
+	for i := p.i + 1; i < len(p.sql); i++ {
+		if unicode.IsDigit(rune(p.sql[i])) || p.sql[i] == '.' {
+			continue
+		}
+		floatValue, err := strconv.ParseFloat(p.sql[p.i:i], 64)
+		if err != nil {
+			return 0.0, 0
+		}
+		return floatValue, len(p.sql[p.i:i])
+	}
+	floatValue, err := strconv.ParseFloat(p.sql[p.i:len(p.sql)], 64)
+	if err != nil {
+		return 0.0, 0
+	}
+	return floatValue, len(p.sql[p.i:len(p.sql)])
+}
+
+func (p *parser) peekNumberOrQuotedStringWithLength() (any, int) {
+	number, ln := p.peekNumberWithLength()
 	if ln > 0 {
-		return intValue, ln
+		if float64(int64(number)) == number {
+			return int64(number), ln
+		}
+		return number, ln
 	}
 	quotedValue, ln := p.peekQuotedStringWithLength()
 	if ln > 0 {
@@ -426,13 +342,17 @@ func (p *parser) peekIntOrQuotedStringWithLength() (any, int) {
 	return nil, 0
 }
 
+var identifierCharRegexp = regexp.MustCompile(`[\"a-zA-Z_0-9]`)
+
 func (p *parser) peekIdentifierWithLength() (string, int) {
-	for i := p.i; i < len(p.sql); i++ {
-		if matched, _ := regexp.MatchString(`[a-zA-Z0-9_*]`, string(p.sql[i])); !matched {
-			return p.sql[p.i:i], len(p.sql[p.i:i])
+	var i int
+	for i = p.i; i < len(p.sql); i++ {
+		if !identifierCharRegexp.MatchString(string(p.sql[i])) {
+			break
 		}
 	}
-	return p.sql[p.i:], len(p.sql[p.i:])
+	identifier := p.sql[p.i:i]
+	return strings.Trim(identifier, "\""), len(identifier)
 }
 
 func (p *parser) validate() error {
@@ -486,14 +406,15 @@ func (p *parser) logError() {
 	fmt.Println(p.err)
 }
 
+var identifierRegexp = regexp.MustCompile(`(\"[a-zA-Z_][a-zA-Z_0-9]*\"|[a-zA-Z_][a-zA-Z_0-9]*)`)
+
 func isIdentifier(s string) bool {
 	for _, rw := range reservedWords {
 		if strings.ToUpper(s) == rw {
 			return false
 		}
 	}
-	matched, _ := regexp.MatchString("[a-zA-Z_][a-zA-Z_0-9]*", s)
-	return matched
+	return identifierRegexp.MatchString(s)
 }
 
 func isIdentifierOrAsterisk(s string) bool {

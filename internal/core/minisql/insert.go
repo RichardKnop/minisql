@@ -6,6 +6,10 @@ import (
 )
 
 func (t *Table) Insert(ctx context.Context, stmt Statement) error {
+	if err := stmt.Validate(t); err != nil {
+		return err
+	}
+
 	// Write lock limits concurrent writes to the table
 	t.writeLock.Lock()
 	defer t.writeLock.Unlock()
@@ -18,7 +22,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 	for i, values := range stmt.Inserts {
 		aRow := Row{
 			Columns: t.Columns,
-			Values:  make([]any, 0, len(t.Columns)),
+			Values:  make([]OptionalValue, 0, len(t.Columns)),
 		}
 		aRow = aRow.appendValues(stmt.Fields, values)
 

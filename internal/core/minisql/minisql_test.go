@@ -23,29 +23,34 @@ var (
 			Name: "id",
 		},
 		{
-			Kind: Varchar,
-			Size: 255,
-			Name: "email",
+			Kind:     Varchar,
+			Size:     255,
+			Name:     "email",
+			Nullable: true,
 		},
 		{
-			Kind: Int4,
-			Size: 4,
-			Name: "age",
+			Kind:     Int4,
+			Size:     4,
+			Name:     "age",
+			Nullable: true,
 		},
 		{
-			Kind: Boolean,
-			Size: 1,
-			Name: "verified",
+			Kind:     Boolean,
+			Size:     1,
+			Name:     "verified",
+			Nullable: true,
 		},
 		{
-			Kind: Real,
-			Size: 4,
-			Name: "test_real",
+			Kind:     Real,
+			Size:     4,
+			Name:     "test_real",
+			Nullable: true,
 		},
 		{
-			Kind: Double,
-			Size: 8,
-			Name: "test_double",
+			Kind:     Double,
+			Size:     8,
+			Name:     "test_double",
+			Nullable: true,
 		},
 	}
 
@@ -56,35 +61,41 @@ var (
 			Name: "id",
 		},
 		{
-			Kind: Varchar,
-			Size: 255,
-			Name: "email",
+			Kind:     Varchar,
+			Size:     255,
+			Name:     "email",
+			Nullable: true,
 		},
 		{
-			Kind: Int4,
-			Size: 4,
-			Name: "age",
+			Kind:     Int4,
+			Size:     4,
+			Name:     "age",
+			Nullable: true,
 		},
 		{
-			Kind: Boolean,
-			Size: 1,
-			Name: "verified",
+			Kind:     Boolean,
+			Size:     1,
+			Name:     "verified",
+			Nullable: true,
 		},
 		{
-			Kind: Real,
-			Size: 4,
-			Name: "test_real",
+			Kind:     Real,
+			Size:     4,
+			Name:     "test_real",
+			Nullable: true,
 		},
 		{
-			Kind: Double,
-			Size: 8,
-			Name: "test_double",
+			Kind:     Double,
+			Size:     8,
+			Name:     "test_double",
+			Nullable: true,
 		},
 		{
 			Kind: Varchar,
 			// Size is defined so 5 of these columns can fit into a single page
-			Size: (PageSize - 6 - 8 - 5*8 - 5*(8+255+4+1+4+8)) / 5,
-			Name: "test_varchar",
+			Size:     (PageSize - 6 - 8 - 5*8 - 5*8 - 5*(8+255+4+1+4+8)) / 5,
+			Name:     "test_varchar",
+			Nullable: true,
 		},
 	}
 
@@ -95,34 +106,40 @@ var (
 			Name: "id",
 		},
 		{
-			Kind: Varchar,
-			Size: 255,
-			Name: "email",
+			Kind:     Varchar,
+			Size:     255,
+			Name:     "email",
+			Nullable: true,
 		},
 		{
-			Kind: Int4,
-			Size: 4,
-			Name: "age",
+			Kind:     Int4,
+			Size:     4,
+			Name:     "age",
+			Nullable: true,
 		},
 		{
-			Kind: Boolean,
-			Size: 1,
-			Name: "verified",
+			Kind:     Boolean,
+			Size:     1,
+			Name:     "verified",
+			Nullable: true,
 		},
 		{
-			Kind: Real,
-			Size: 4,
-			Name: "test_real",
+			Kind:     Real,
+			Size:     4,
+			Name:     "test_real",
+			Nullable: true,
 		},
 		{
-			Kind: Double,
-			Size: 8,
-			Name: "test_double",
+			Kind:     Double,
+			Size:     8,
+			Name:     "test_double",
+			Nullable: true,
 		},
 		{
-			Kind: Varchar,
-			Size: PageSize - 6 - 8 - 8 - (8 + 255 + 4 + 1 + 4 + 8),
-			Name: "test_varchar",
+			Kind:     Varchar,
+			Size:     PageSize - 6 - 8 - 8 - 8 - (8 + 255 + 4 + 1 + 4 + 8),
+			Name:     "test_varchar",
+			Nullable: true,
 		},
 	}
 
@@ -172,13 +189,13 @@ func newDataGen(seed uint64) *dataGen {
 func (g *dataGen) Row() Row {
 	return Row{
 		Columns: testColumns,
-		Values: []any{
-			g.Int64(),
-			g.Email(),
-			int32(g.IntRange(18, 100)),
-			g.Bool(),
-			g.Float32(),
-			g.Float64(),
+		Values: []OptionalValue{
+			{Value: g.Int64(), Valid: true},
+			{Value: g.Email(), Valid: true},
+			{Value: int32(g.IntRange(18, 100)), Valid: true},
+			{Value: g.Bool(), Valid: true},
+			{Value: g.Float32(), Valid: true},
+			{Value: g.Float64(), Valid: true},
 		},
 	}
 }
@@ -189,14 +206,14 @@ func (g *dataGen) Rows(number int) []Row {
 	rows := make([]Row, 0, number)
 	for i := range number {
 		aRow := g.Row()
-		_, ok := idMap[aRow.Values[0].(int64)]
+		_, ok := idMap[aRow.Values[0].Value.(int64)]
 		for ok {
 			aRow = g.Row()
-			_, ok = idMap[aRow.Values[0].(int64)]
+			_, ok = idMap[aRow.Values[0].Value.(int64)]
 		}
-		aRow.key = uint64(i)
+		aRow.Key = uint64(i)
 		rows = append(rows, aRow)
-		idMap[aRow.Values[0].(int64)] = struct{}{}
+		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
 	}
 	return rows
 }
@@ -204,14 +221,14 @@ func (g *dataGen) Rows(number int) []Row {
 func (g *dataGen) MediumRow() Row {
 	return Row{
 		Columns: testMediumColumns,
-		Values: []any{
-			g.Int64(),
-			g.Email(),
-			int32(g.IntRange(18, 100)),
-			g.Bool(),
-			g.Float32(),
-			g.Float64(),
-			g.Sentence(5),
+		Values: []OptionalValue{
+			{Value: g.Int64(), Valid: true},
+			{Value: g.Email(), Valid: true},
+			{Value: int32(g.IntRange(18, 100)), Valid: true},
+			{Value: g.Bool(), Valid: true},
+			{Value: g.Float32(), Valid: true},
+			{Value: g.Float64(), Valid: true},
+			{Value: g.Sentence(5), Valid: true},
 		},
 	}
 }
@@ -220,15 +237,16 @@ func (g *dataGen) MediumRows(number int) []Row {
 	// Make sure all rows will have unique ID, this is important in some tests
 	idMap := map[int64]struct{}{}
 	rows := make([]Row, 0, number)
-	for range number {
+	for i := range number {
 		aRow := g.MediumRow()
-		_, ok := idMap[aRow.Values[0].(int64)]
+		_, ok := idMap[aRow.Values[0].Value.(int64)]
 		for ok {
 			aRow = g.MediumRow()
-			_, ok = idMap[aRow.Values[0].(int64)]
+			_, ok = idMap[aRow.Values[0].Value.(int64)]
 		}
+		aRow.Key = uint64(i)
 		rows = append(rows, aRow)
-		idMap[aRow.Values[0].(int64)] = struct{}{}
+		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
 	}
 	return rows
 }
@@ -236,14 +254,14 @@ func (g *dataGen) MediumRows(number int) []Row {
 func (g *dataGen) BigRow() Row {
 	return Row{
 		Columns: testBigColumns,
-		Values: []any{
-			g.Int64(),
-			g.Email(),
-			int32(g.IntRange(18, 100)),
-			g.Bool(),
-			g.Float32(),
-			g.Float64(),
-			g.Sentence(15),
+		Values: []OptionalValue{
+			{Value: g.Int64(), Valid: true},
+			{Value: g.Email(), Valid: true},
+			{Value: int32(g.IntRange(18, 100)), Valid: true},
+			{Value: g.Bool(), Valid: true},
+			{Value: g.Float32(), Valid: true},
+			{Value: g.Float64(), Valid: true},
+			{Value: g.Sentence(15), Valid: true},
 		},
 	}
 }
@@ -252,15 +270,16 @@ func (g *dataGen) BigRows(number int) []Row {
 	// Make sure all rows will have unique ID, this is important in some tests
 	idMap := map[int64]struct{}{}
 	rows := make([]Row, 0, number)
-	for i := 0; i < number; i++ {
+	for i := range number {
 		aRow := g.BigRow()
-		_, ok := idMap[aRow.Values[0].(int64)]
+		_, ok := idMap[aRow.Values[0].Value.(int64)]
 		for ok {
 			aRow = g.BigRow()
-			_, ok = idMap[aRow.Values[0].(int64)]
+			_, ok = idMap[aRow.Values[0].Value.(int64)]
 		}
+		aRow.Key = uint64(i)
 		rows = append(rows, aRow)
-		idMap[aRow.Values[0].(int64)] = struct{}{}
+		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
 	}
 	return rows
 }

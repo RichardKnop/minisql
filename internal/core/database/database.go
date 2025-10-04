@@ -27,7 +27,7 @@ type Pager interface {
 }
 
 var (
-	schemaTableColumns = []minisql.Column{
+	mainTableColumns = []minisql.Column{
 		{
 			Kind: minisql.Int4,
 			Size: 4,
@@ -35,32 +35,26 @@ var (
 		},
 		{
 			Kind: minisql.Varchar,
-			Size: 100,
+			Size: 255,
 			Name: "name",
 		},
 		{
-			Kind: minisql.Varchar,
-			Size: 100,
-			Name: "table_name",
-		},
-		{
-			Kind: minisql.Int8,
-			Size: 8,
+			Kind: minisql.Int4,
+			Size: 4,
 			Name: "root_page",
 		},
 		{
 			Kind: minisql.Varchar,
-			Size: 1000,
+			Size: 2056,
 			Name: "sql",
 		},
 	}
 
-	schemaTableSQL = `CREATE TABLE minisql_main (
+	mainTableSQL = `CREATE TABLE minisql_main (
 		type INT4,
-		name VARCHAR(100),
-		table_name VARCHAR(100),
+		table_name VARCHAR(255),
 		root_page INT4,
-		SQL VARCHAR(1000)
+		SQL VARCHAR(2056)
 	)`
 )
 
@@ -249,6 +243,10 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt minisql.Statement)
 
 // CreateTable creates a new table with a name and columns
 func (d *Database) CreateTable(ctx context.Context, name string, columns []minisql.Column) (*minisql.Table, error) {
+	if len(columns) > minisql.MaxColumns {
+		return nil, fmt.Errorf("maximum number of columns is %d", minisql.MaxColumns)
+	}
+
 	if len(d.tables) == 1 {
 		return nil, fmt.Errorf("currently only single table is supported")
 	}

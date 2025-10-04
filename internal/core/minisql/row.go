@@ -3,13 +3,19 @@ package minisql
 import (
 	"bytes"
 	"fmt"
-	"math"
+
+	"github.com/RichardKnop/minisql/pkg/bitwise"
 )
 
+type OptionalValue struct {
+	Value any
+	Valid bool
+}
+
 type Row struct {
+	Key     uint64
 	Columns []Column
-	Values  []any
-	key     uint64
+	Values  []OptionalValue
 	// for updates, we store cursor internally
 	cursor Cursor
 }
@@ -21,15 +27,16 @@ func (r Row) MaxCells() uint32 {
 
 func maxCells(rowSize uint64) uint32 {
 	// base header is +6, leaf/internal header +8
-	// int64 row ID per cell hence we divide by rowSize + 8
-	return uint32((PageSize - 6 - 8) / (rowSize + 8))
+	// and uint64 row ID per cell
+	// hence we divide by rowSize + 8 + 8
+	return uint32((PageSize - 6 - 8) / (rowSize + 8 + 8))
 }
 
 func NewRow(columns []Column) Row {
 	return Row{Columns: columns}
 }
 
-// Size calculates a size of a row record including a header and payload
+// Size calculates a size of a row record excluding null bitmask and row ID
 func (r Row) Size() uint64 {
 	size := uint64(0)
 	for _, aColumn := range r.Columns {
@@ -47,7 +54,7 @@ func (r Row) GetColumn(name string) (Column, bool) {
 	return Column{}, false
 }
 
-func (r Row) GetValue(name string) (any, bool) {
+func (r Row) GetValue(name string) (OptionalValue, bool) {
 	var (
 		found     bool
 		columnIdx = 0
@@ -60,12 +67,12 @@ func (r Row) GetValue(name string) (any, bool) {
 		}
 	}
 	if !found {
-		return nil, false
+		return OptionalValue{}, false
 	}
 	return r.Values[columnIdx], true
 }
 
-func (r Row) SetValue(name string, value any) bool {
+func (r Row) SetValue(name string, value OptionalValue) bool {
 	var (
 		found     bool
 		columnIdx = 0
@@ -87,8 +94,8 @@ func (r Row) SetValue(name string, value any) bool {
 func (r Row) Clone() Row {
 	aClone := Row{
 		Columns: make([]Column, 0, len(r.Columns)),
-		Values:  make([]any, 0, len(r.Values)),
-		key:     r.key,
+		Values:  make([]OptionalValue, 0, len(r.Values)),
+		Key:     r.Key,
 	}
 	aClone.Columns = append(aClone.Columns, r.Columns...)
 	aClone.Values = append(aClone.Values, r.Values...)
@@ -103,7 +110,7 @@ func (r Row) columnOffset(idx int) uint32 {
 	return offset
 }
 
-func (r Row) appendValues(fields []string, values []any) Row {
+func (r Row) appendValues(fields []string, values []OptionalValue) Row {
 	var (
 		found    = false
 		fieldIdx = 0
@@ -119,172 +126,106 @@ func (r Row) appendValues(fields []string, values []any) Row {
 		if found {
 			r.Values = append(r.Values, values[fieldIdx])
 		} else {
-			r.Values = append(r.Values, nil)
+			r.Values = append(r.Values, OptionalValue{})
 		}
 	}
 	return r
 }
 
-// TODO - handle NULL values
 func (r *Row) Marshal() ([]byte, error) {
 	buf := make([]byte, r.Size())
 
 	for i, aColumn := range r.Columns {
 		offset := r.columnOffset(i)
+		if !r.Values[i].Valid {
+			src := make([]byte, aColumn.Size)
+			copy(buf[offset:], src)
+			continue
+		}
 		switch aColumn.Kind {
 		case Boolean:
-			value, ok := r.Values[i].(bool)
+			value, ok := r.Values[i].Value.(bool)
 			if !ok {
 				return nil, fmt.Errorf("could not cast value to bool")
 			}
 			if value {
-				buf[offset+0] = byte(1)
+				buf[offset] = byte(1)
 			} else {
-				buf[offset+0] = byte(0)
+				buf[offset] = byte(0)
 			}
-			offset += 1
 		case Int4:
-			value, ok := r.Values[i].(int32)
+			value, ok := r.Values[i].Value.(int32)
 			if !ok {
-				_, ok = r.Values[i].(int64)
+				_, ok = r.Values[i].Value.(int64)
 				if !ok {
 					return nil, fmt.Errorf("could not cast value to either int64 or int32")
 				}
-				value = int32(r.Values[i].(int64))
+				value = int32(r.Values[i].Value.(int64))
 			}
-			buf[offset+0] = byte(value >> 0)
-			offset += 1
-			buf[offset+0] = byte(value >> 8)
-			offset += 1
-			buf[offset+0] = byte(value >> 16)
-			offset += 1
-			buf[offset+0] = byte(value >> 24)
-			offset += 1
+			marshalInt32(buf, value, uint64(offset))
 		case Int8:
-			value, ok := r.Values[i].(int64)
+			value, ok := r.Values[i].Value.(int64)
 			if !ok {
 				return nil, fmt.Errorf("could not cast value to int64")
 			}
-			buf[offset+0] = byte(value >> 0)
-			offset += 1
-			buf[offset+0] = byte(value >> 8)
-			offset += 1
-			buf[offset+0] = byte(value >> 16)
-			offset += 1
-			buf[offset+0] = byte(value >> 24)
-			offset += 1
-			buf[offset+0] = byte(value >> 32)
-			offset += 1
-			buf[offset+0] = byte(value >> 40)
-			offset += 1
-			buf[offset+0] = byte(value >> 48)
-			offset += 1
-			buf[offset+0] = byte(value >> 56)
-			offset += 1
+			marshalInt64(buf, value, uint64(offset))
 		case Real:
-			value, ok := r.Values[i].(float32)
+			value, ok := r.Values[i].Value.(float32)
 			if !ok {
-				_, ok = r.Values[i].(float64)
+				_, ok = r.Values[i].Value.(float64)
 				if !ok {
 					return nil, fmt.Errorf("could not cast value to either float64 or float32")
 				}
-				value = float32(r.Values[i].(float64))
+				value = float32(r.Values[i].Value.(float64))
 			}
-			n := math.Float32bits(value)
-			buf[offset+0] = byte(n >> 24)
-			offset += 1
-			buf[offset+0] = byte(n >> 16)
-			offset += 1
-			buf[offset+0] = byte(n >> 8)
-			offset += 1
-			buf[offset+0] = byte(n)
-			offset += 1
+			marshalFloat32(buf, value, uint64(offset))
 		case Double:
-			value, ok := r.Values[i].(float64)
+			value, ok := r.Values[i].Value.(float64)
 			if !ok {
 				return nil, fmt.Errorf("could not cast value to float64")
 			}
-			n := math.Float64bits(value)
-			buf[offset+0] = byte(n >> 56)
-			offset += 1
-			buf[offset+0] = byte(n >> 48)
-			offset += 1
-			buf[offset+0] = byte(n >> 40)
-			offset += 1
-			buf[offset+0] = byte(n >> 32)
-			offset += 1
-			buf[offset+0] = byte(n >> 24)
-			offset += 1
-			buf[offset+0] = byte(n >> 16)
-			offset += 1
-			buf[offset+0] = byte(n >> 8)
-			offset += 1
-			buf[offset+0] = byte(n)
-			offset += 1
+			marshalFloat64(buf, value, uint64(offset))
 		case Varchar:
-			value, ok := r.Values[i].(string)
+			src := make([]byte, aColumn.Size)
+			value, ok := r.Values[i].Value.(string)
 			if !ok {
 				return nil, fmt.Errorf("could not cast value to string")
 			}
-			src := make([]byte, len(value))
 			copy(src, []byte(value))
 			copy(buf[offset:], src)
-			offset += aColumn.Size
 		}
 	}
 
 	return buf, nil
 }
 
-// TODO - handle NULL values
-func UnmarshalRow(buf []byte, aRow *Row) error {
-	aRow.Values = make([]any, 0, len(aRow.Columns))
+func UnmarshalRow(aCell Cell, aRow *Row) error {
+	aRow.Key = aCell.Key
+	aRow.Values = make([]OptionalValue, 0, len(aRow.Columns))
 	for i, aColumn := range aRow.Columns {
+		if bitwise.IsSet(aCell.NullBitmask, i) {
+			aRow.Values = append(aRow.Values, OptionalValue{Valid: false})
+			continue
+		}
 		offset := aRow.columnOffset(i)
 		switch aColumn.Kind {
 		case Boolean:
-			value := 0 | (uint32(buf[offset+0+0]) << 0)
-			aRow.Values = append(aRow.Values, value == uint32(1))
+			value := (uint32(aCell.Value[:][offset+0+0]) << 0)
+			aRow.Values = append(aRow.Values, OptionalValue{Value: value == uint32(1), Valid: true})
 		case Int4:
-			value := 0 |
-				(uint32(buf[offset+0+0]) << 0) |
-				(uint32(buf[offset+1+0]) << 8) |
-				(uint32(buf[offset+2+0]) << 16) |
-				(uint32(buf[offset+3+0]) << 24)
-			aRow.Values = append(aRow.Values, int32(value))
+			value := unmarshalInt32(aCell.Value[:], uint64(offset))
+			aRow.Values = append(aRow.Values, OptionalValue{Value: int32(value), Valid: true})
 		case Int8:
-			value := 0 |
-				(uint64(buf[offset+0+0]) << 0) |
-				(uint64(buf[offset+1+0]) << 8) |
-				(uint64(buf[offset+2+0]) << 16) |
-				(uint64(buf[offset+3+0]) << 24) |
-				(uint64(buf[offset+4+0]) << 32) |
-				(uint64(buf[offset+5+0]) << 40) |
-				(uint64(buf[offset+6+0]) << 48) |
-				(uint64(buf[offset+7+0]) << 56)
-			aRow.Values = append(aRow.Values, int64(value))
+			value := unmarshalInt64(aCell.Value[:], uint64(offset))
+			aRow.Values = append(aRow.Values, OptionalValue{Value: int64(value), Valid: true})
 		case Real:
-			value := 0 |
-				(uint32(buf[offset+0+0]) << 24) |
-				(uint32(buf[offset+1+0]) << 16) |
-				(uint32(buf[offset+2+0]) << 8) |
-				(uint32(buf[offset+3+0]) << 0)
-			aRow.Values = append(aRow.Values, math.Float32frombits(value))
+			aRow.Values = append(aRow.Values, OptionalValue{Value: unmarshalFloat32(aCell.Value[:], uint64(offset)), Valid: true})
 		case Double:
-			value := 0 |
-				(uint64(buf[offset+0+0]) << 56) |
-				(uint64(buf[offset+1+0]) << 48) |
-				(uint64(buf[offset+2+0]) << 40) |
-				(uint64(buf[offset+3+0]) << 32) |
-				(uint64(buf[offset+4+0]) << 24) |
-				(uint64(buf[offset+5+0]) << 16) |
-				(uint64(buf[offset+6+0]) << 8) |
-				(uint64(buf[offset+7+0]) << 0)
-			aRow.Values = append(aRow.Values, math.Float64frombits(value))
+			aRow.Values = append(aRow.Values, OptionalValue{Value: unmarshalFloat64(aCell.Value[:], uint64(offset)), Valid: true})
 		case Varchar:
 			dst := make([]byte, aColumn.Size)
-			copy(dst, buf[offset:offset+aColumn.Size])
-			aRow.Values = append(aRow.Values, string(bytes.Trim(dst, "\x00")))
+			copy(dst, aCell.Value[:][offset:offset+aColumn.Size])
+			aRow.Values = append(aRow.Values, OptionalValue{Value: string(bytes.Trim(dst, "\x00")), Valid: true})
 		}
 	}
 
@@ -321,6 +262,7 @@ func (r Row) CheckOneOrMore(conditions OneOrMore) (bool, error) {
 }
 
 func (r Row) checkCondition(aCondition Condition) (bool, error) {
+
 	// left side is field, right side is literal value
 	if aCondition.Operand1.IsField() && !aCondition.Operand2.IsField() {
 		return r.compareFieldValue(aCondition.Operand1, aCondition.Operand2, aCondition.Operator)
@@ -357,15 +299,26 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 		return false, fmt.Errorf("row does not have '%s' column", name)
 	}
 
+	if valueOperand.Type == Null {
+		switch operator {
+		case Eq:
+			return !value.Valid, nil
+		case Ne:
+			return value.Valid, nil
+		default:
+			return false, fmt.Errorf("only '=' and '!=' operators supported when comparing against NULL")
+		}
+	}
+
 	switch aColumn.Kind {
 	case Int4:
 		// Int values from parser always come back as int64, int4 row data
 		// will come back as int32 and int8 as int64
-		return compareInt4(int64(value.(int32)), valueOperand.Value.(int64), operator)
+		return compareInt4(int64(value.Value.(int32)), valueOperand.Value.(int64), operator)
 	case Int8:
-		return compareInt8(value.(int64), valueOperand.Value.(int64), operator)
+		return compareInt8(value.Value.(int64), valueOperand.Value.(int64), operator)
 	case Varchar:
-		return compareVarchar(value, valueOperand.Value, operator)
+		return compareVarchar(value.Value, valueOperand.Value, operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", aColumn.Kind)
 	}
@@ -409,11 +362,11 @@ func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, err
 
 	switch aColumn1.Kind {
 	case Int4:
-		return compareInt4(value1, value2, operator)
+		return compareInt4(value1.Value, value2.Value, operator)
 	case Int8:
-		return compareInt8(value1, value2, operator)
+		return compareInt8(value1.Value, value2.Value, operator)
 	case Varchar:
-		return compareVarchar(value1, value2, operator)
+		return compareVarchar(value1.Value, value2.Value, operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", aColumn1.Kind)
 	}
@@ -497,4 +450,15 @@ func compareVarchar(value1, value2 any, operator Operator) (bool, error) {
 		return theValue1 <= theValue2, nil
 	}
 	return false, fmt.Errorf("unknown operator '%s'", operator)
+}
+
+// NullBitmask returns a bitmask representing which columns are NULL
+func (r Row) NullBitmask() uint64 {
+	var bitmask uint64 = 0
+	for i, val := range r.Values {
+		if !val.Valid {
+			bitmask = bitwise.Set(bitmask, int(i))
+		}
+	}
+	return bitmask
 }

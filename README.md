@@ -21,12 +21,13 @@ minisql>
 I plan to implement more features of traditional relational databases in the future as part of this project simply to learn and discovery how various features I have grown acustomed to over the years are implemented under the hood. However, currently only a very small number of features are implemented:
 
 - simple SQL parser (partial support for `CREATE TABLE`, `INSERT`, `SELECT`, `UPDATE`, `DELETE` queries)
-- only tables supported, no indexes (this means all selects are scanning whole tables for now)
-- only `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE` and `VARCHAR` data types supported
-- no primary key support (tables internally use row ID as key in B tree data structure)
+- simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis
+- only tables supported, no indexes yet (this means all selects are scanning whole tables for now)
+- `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE` and `VARCHAR` data types supported
+- `NULL` and `NOT NULL` support (via null bit mask included in each row/cell)
+- no primary key support (tables internally use row ID as key in B+ tree data structure)
 - no joins
-- only simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis
-- no transaction support
+- no transaction support, no concurrent writes
 - no page overflow support, entire rows must fit within a 4096 byte page
 
 ### Data Types And Storage
@@ -38,7 +39,7 @@ I plan to implement more features of traditional relational databases in the fut
 | `INT8`       | 8-byte signed integer (-9,223,372,036,854,775,808 to 9,223,372,036,854,775,807). |
 | `REAL`       | 4-byte single-precision floating-point number. |
 | `DOUBLE`     | 8-byte double-precision floating-point number. |
-| `VARCHAR(n)` | Variable-length string with maximum length of n bytes. It is stored in row and cannot exceed page size. |
+| `VARCHAR(n)` | Variable-length string with maximum length of n bytes. It is stored in row as text with UTF-8 encoding and cannot exceed page size. |
 
 Each page size is `4096 bytes`. Rows larger than page size are not supporter. Therefor, the largest allowed row size is `4066 bytes`.
 
@@ -60,9 +61,8 @@ Moreover, each row starts with 64 bit null mask which determines which values ar
 ## Planned features:
 
 - support additional basic query types such as `DROP TABLE`
-- support `NULL` values
-- B+ tree and support indexes (starting with unique and primary)
-- more column types starting with simpler ones such as `bool` and `timestamp`
+- B tree indexes (starting with unique and primary)
+- Support `timestamp` column
 - support bigger column types such as `text` that can overflow to more pages via linked list data structure
 - joins such as `INNER`, `LEFT`, `RIGHT`
 - support `ORDER BY`, `LIMIT`, `GROUP BY`
@@ -136,4 +136,3 @@ minisql> update foo set id = 45 where id = 75
 Rows affected: 0
 minisql>
 ```
-

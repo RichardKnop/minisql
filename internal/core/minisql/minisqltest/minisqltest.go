@@ -16,29 +16,34 @@ var (
 			Name: "id",
 		},
 		{
-			Kind: minisql.Varchar,
-			Size: 255,
-			Name: "email",
+			Kind:     minisql.Varchar,
+			Size:     255,
+			Name:     "email",
+			Nullable: true,
 		},
 		{
-			Kind: minisql.Int4,
-			Size: 4,
-			Name: "age",
+			Kind:     minisql.Int4,
+			Size:     4,
+			Name:     "age",
+			Nullable: true,
 		},
 		{
-			Kind: minisql.Boolean,
-			Size: 1,
-			Name: "verified",
+			Kind:     minisql.Boolean,
+			Size:     1,
+			Name:     "verified",
+			Nullable: true,
 		},
 		{
-			Kind: minisql.Real,
-			Size: 4,
-			Name: "test_real",
+			Kind:     minisql.Real,
+			Size:     4,
+			Name:     "test_real",
+			Nullable: true,
 		},
 		{
-			Kind: minisql.Double,
-			Size: 8,
-			Name: "test_double",
+			Kind:     minisql.Double,
+			Size:     8,
+			Name:     "test_double",
+			Nullable: true,
 		},
 	}
 
@@ -49,34 +54,40 @@ var (
 			Name: "id",
 		},
 		{
-			Kind: minisql.Varchar,
-			Size: 255,
-			Name: "email",
+			Kind:     minisql.Varchar,
+			Size:     255,
+			Name:     "email",
+			Nullable: true,
 		},
 		{
-			Kind: minisql.Int4,
-			Size: 4,
-			Name: "age",
+			Kind:     minisql.Int4,
+			Size:     4,
+			Name:     "age",
+			Nullable: true,
 		},
 		{
-			Kind: minisql.Boolean,
-			Size: 1,
-			Name: "verified",
+			Kind:     minisql.Boolean,
+			Size:     1,
+			Name:     "verified",
+			Nullable: true,
 		},
 		{
-			Kind: minisql.Real,
-			Size: 4,
-			Name: "test_real",
+			Kind:     minisql.Real,
+			Size:     4,
+			Name:     "test_real",
+			Nullable: true,
 		},
 		{
-			Kind: minisql.Double,
-			Size: 8,
-			Name: "test_double",
+			Kind:     minisql.Double,
+			Size:     8,
+			Name:     "test_double",
+			Nullable: true,
 		},
 		{
-			Kind: minisql.Varchar,
-			Size: minisql.PageSize - 6 - 8 - 8 - (8 + 255 + 4 + 1 + 4 + 8),
-			Name: "test_varchar",
+			Kind:     minisql.Varchar,
+			Size:     minisql.PageSize - 6 - 8 - 8 - 8 - (8 + 255 + 4 + 1 + 4 + 8),
+			Name:     "test_varchar",
+			Nullable: true,
 		},
 	}
 )
@@ -96,13 +107,13 @@ func NewDataGen(seed uint64) *DataGen {
 func (g *DataGen) Row() minisql.Row {
 	return minisql.Row{
 		Columns: testColumns,
-		Values: []any{
-			g.Int64(),
-			g.Email(),
-			int32(g.IntRange(18, 100)),
-			g.Bool(),
-			g.Float32(),
-			g.Float64(),
+		Values: []minisql.OptionalValue{
+			{Value: g.Int64(), Valid: true},
+			{Value: g.Email(), Valid: true},
+			{Value: int32(g.IntRange(18, 100)), Valid: true},
+			{Value: g.Bool(), Valid: true},
+			{Value: g.Float32(), Valid: true},
+			{Value: g.Float64(), Valid: true},
 		},
 	}
 }
@@ -111,15 +122,16 @@ func (g *DataGen) Rows(number int) []minisql.Row {
 	// Make sure all rows will have unique ID, this is important in some tests
 	idMap := map[int64]struct{}{}
 	rows := make([]minisql.Row, 0, number)
-	for i := 0; i < number; i++ {
+	for i := range number {
 		aRow := g.Row()
-		_, ok := idMap[aRow.Values[0].(int64)]
+		_, ok := idMap[aRow.Values[0].Value.(int64)]
 		for ok {
 			aRow = g.Row()
-			_, ok = idMap[aRow.Values[0].(int64)]
+			_, ok = idMap[aRow.Values[0].Value.(int64)]
 		}
+		aRow.Key = uint64(i)
 		rows = append(rows, aRow)
-		idMap[aRow.Values[0].(int64)] = struct{}{}
+		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
 
 	}
 	return rows
@@ -128,14 +140,14 @@ func (g *DataGen) Rows(number int) []minisql.Row {
 func (g *DataGen) BigRow() minisql.Row {
 	return minisql.Row{
 		Columns: testBigColumns,
-		Values: []any{
-			g.Int64(),
-			g.Email(),
-			int32(g.IntRange(18, 100)),
-			g.Bool(),
-			g.Float32(),
-			g.Float64(),
-			g.Sentence(15),
+		Values: []minisql.OptionalValue{
+			{Value: g.Int64(), Valid: true},
+			{Value: g.Email(), Valid: true},
+			{Value: int32(g.IntRange(18, 100)), Valid: true},
+			{Value: g.Bool(), Valid: true},
+			{Value: g.Float32(), Valid: true},
+			{Value: g.Float64(), Valid: true},
+			{Value: g.Sentence(15), Valid: true},
 		},
 	}
 }
@@ -144,15 +156,16 @@ func (g *DataGen) BigRows(number int) []minisql.Row {
 	// Make sure all rows will have unique ID, this is important in some tests
 	idMap := map[int64]struct{}{}
 	rows := make([]minisql.Row, 0, number)
-	for i := 0; i < number; i++ {
+	for i := range number {
 		aRow := g.BigRow()
-		_, ok := idMap[aRow.Values[0].(int64)]
+		_, ok := idMap[aRow.Values[0].Value.(int64)]
 		for ok {
 			aRow = g.BigRow()
-			_, ok = idMap[aRow.Values[0].(int64)]
+			_, ok = idMap[aRow.Values[0].Value.(int64)]
 		}
+		aRow.Key = uint64(i)
 		rows = append(rows, aRow)
-		idMap[aRow.Values[0].(int64)] = struct{}{}
+		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
 	}
 	return rows
 }

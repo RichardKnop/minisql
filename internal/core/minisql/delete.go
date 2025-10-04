@@ -6,6 +6,10 @@ import (
 )
 
 func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, error) {
+	if err := stmt.Validate(t); err != nil {
+		return StatementResult{}, err
+	}
+
 	// Write lock limits concurrent writes to the table
 	t.writeLock.Lock()
 	defer t.writeLock.Unlock()
@@ -47,7 +51,7 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 		defer close(out)
 		for aRow := range in {
 			if len(conditions) == 0 {
-				out <- aRow.key
+				out <- aRow.Key
 				continue
 			}
 			ok, err := aRow.CheckOneOrMore(conditions)
@@ -56,7 +60,7 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 				return
 			}
 			if ok {
-				out <- aRow.key
+				out <- aRow.Key
 			}
 		}
 	}(unfilteredPipe, filteredPipe, stmt.Conditions)

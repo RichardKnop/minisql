@@ -38,6 +38,15 @@ func NewTable(logger *zap.Logger, name string, columns []Column, pager Pager, ro
 	}
 }
 
+func (t *Table) ColumnByName(name string) (Column, bool) {
+	for i := range t.Columns {
+		if t.Columns[i].Name == name {
+			return t.Columns[i], true
+		}
+	}
+	return Column{}, false
+}
+
 // SeekNextRowID returns cursor pointing at the position after the last row ID
 // plus a new row ID to insert
 func (t *Table) SeekNextRowID(ctx context.Context, pageIdx uint32) (*Cursor, uint64, error) {
@@ -806,18 +815,4 @@ func (t *Table) BFS(f callback) error {
 	}
 
 	return nil
-}
-
-func printTree(aTable *Table) error {
-	return aTable.BFS(func(aPage *Page) {
-		if aPage.InternalNode != nil {
-			fmt.Println("Internal node,", "page:", aPage.Index, "number of keys:", aPage.InternalNode.Header.KeysNum, "parent:", aPage.InternalNode.Header.Parent)
-			fmt.Println("Keys:", aPage.InternalNode.Keys())
-			fmt.Println("Children:", aPage.InternalNode.Children())
-		} else {
-			fmt.Println("Leaf node,", "page:", aPage.Index, "number of cells:", aPage.LeafNode.Header.Cells, "parent:", aPage.LeafNode.Header.Parent, "next leaf:", aPage.LeafNode.Header.NextLeaf)
-			fmt.Println("Keys:", aPage.LeafNode.Keys())
-		}
-		fmt.Println("---------")
-	})
 }

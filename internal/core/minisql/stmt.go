@@ -2,6 +2,8 @@ package minisql
 
 import (
 	"context"
+	"fmt"
+	"unicode/utf8"
 )
 
 type Operator int
@@ -44,8 +46,10 @@ type OperandType int
 
 const (
 	Field OperandType = iota + 1
+	Null
 	QuotedString
 	Integer
+	Float
 )
 
 type Operand struct {
@@ -117,6 +121,40 @@ func FieldIsIn(fieldName string, operandType OperandType, values ...any) OneOrMo
 	return oneOrMore
 }
 
+func FieldIsNull(fieldName string) OneOrMore {
+	return OneOrMore{
+		{
+			{
+				Operand1: Operand{
+					Type:  Field,
+					Value: fieldName,
+				},
+				Operator: Eq,
+				Operand2: Operand{
+					Type: Null,
+				},
+			},
+		},
+	}
+}
+
+func FieldIsNotNull(fieldName string) OneOrMore {
+	return OneOrMore{
+		{
+			{
+				Operand1: Operand{
+					Type:  Field,
+					Value: fieldName,
+				},
+				Operator: Ne,
+				Operand2: Operand{
+					Type: Null,
+				},
+			},
+		},
+	}
+}
+
 type StatementKind int
 
 const (
@@ -166,9 +204,62 @@ type Statement struct {
 	Columns     []Column // use for CREATE TABLE
 	Fields      []string // Used for SELECT (i.e. SELECTed field names) and INSERT (INSERTEDed field names)
 	Aliases     map[string]string
-	Inserts     [][]any
-	Updates     map[string]any
+	Inserts     [][]OptionalValue
+	Updates     map[string]OptionalValue
 	Conditions  OneOrMore // used for WHERE
+}
+
+func (s Statement) Validate(aTable *Table) error {
+	if len(s.Inserts) > 0 {
+		// TODO - handle default values
+		if len(s.Columns) != len(aTable.Columns) {
+			return fmt.Errorf("insert: expected %d columns, got %d", len(aTable.Columns), len(s.Columns))
+		}
+		if len(s.Fields) != len(aTable.Columns) {
+			return fmt.Errorf("insert: expected %d fields, got %d", len(aTable.Columns), len(s.Fields))
+		}
+		for i, aField := range s.Fields {
+			aColumn, ok := aTable.ColumnByName(aField)
+			if !ok {
+				return fmt.Errorf("unknown field %q in table %q", aField, aTable.Name)
+			}
+			for _, anInsert := range s.Inserts {
+				if len(anInsert) != len(s.Fields) {
+					return fmt.Errorf("insert: expected %d values, got %d", len(s.Fields), len(anInsert))
+				}
+				if !anInsert[i].Valid && !aColumn.Nullable {
+					return fmt.Errorf("field %q cannot be NULL", aField)
+				}
+				if anInsert[i].Valid {
+					if aColumn.Kind == Varchar && !utf8.ValidString(anInsert[i].Value.(string)) {
+						return fmt.Errorf("field %q expects valid UTF-8 string", aField)
+					}
+				}
+
+			}
+		}
+		return nil
+	}
+
+	if len(s.Updates) > 0 {
+		for _, aField := range s.Fields {
+			aColumn, ok := aTable.ColumnByName(aField)
+			if !ok {
+				return fmt.Errorf("unknown field %q in table %q", aField, aTable.Name)
+			}
+			if !s.Updates[aField].Valid && !aColumn.Nullable {
+				return fmt.Errorf("field %q cannot be NULL", aField)
+			}
+			if s.Updates[aField].Valid {
+				if aColumn.Kind == Varchar && !utf8.ValidString(s.Updates[aField].Value.(string)) {
+					return fmt.Errorf("field %q expects valid UTF-8 string", aField)
+				}
+			}
+		}
+		return nil
+	}
+
+	return nil
 }
 
 type Iterator func(ctx context.Context) (Row, error)

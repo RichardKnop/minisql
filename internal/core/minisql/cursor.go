@@ -33,7 +33,7 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) erro
 		}
 	}
 
-	if err := saveToCell(&aPage.LeafNode.Cells[c.CellIdx], key, aRow); err != nil {
+	if err := c.saveToCell(&aPage.LeafNode.Cells[c.CellIdx], key, aRow); err != nil {
 		return err
 	}
 	aPage.LeafNode.Header.Cells += 1
@@ -103,7 +103,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 		destCell := &destPage.LeafNode.Cells[cellIdx]
 
 		if i == c.CellIdx {
-			if err := saveToCell(destCell, key, aRow); err != nil {
+			if err := c.saveToCell(destCell, key, aRow); err != nil {
 				return err
 			}
 		} else if i > c.CellIdx {
@@ -149,10 +149,10 @@ func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
 	}
 	aRow := NewRow(c.Table.Columns)
 
-	if err := UnmarshalRow(aPage.LeafNode.Cells[c.CellIdx].Value[:], &aRow); err != nil {
+	if err := UnmarshalRow(aPage.LeafNode.Cells[c.CellIdx], &aRow); err != nil {
 		return Row{}, err
 	}
-	aRow.key = aPage.LeafNode.Cells[c.CellIdx].Key
+	aRow.Key = aPage.LeafNode.Cells[c.CellIdx].Key
 
 	// There are still more cells in the page, move cursor to next cell and return
 	if c.CellIdx < aPage.LeafNode.Header.Cells-1 {
@@ -173,19 +173,34 @@ func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
 	return aRow, nil
 }
 
+func (c *Cursor) saveToCell(cell *Cell, key uint64, aRow *Row) error {
+	rowBuf, err := aRow.Marshal()
+	if err != nil {
+		return fmt.Errorf("save to cell: %w", err)
+	}
+
+	cell.NullBitmask = aRow.NullBitmask()
+	cell.Key = key
+	copy(cell.Value[:], rowBuf)
+
+	return nil
+}
+
 func (c *Cursor) update(ctx context.Context, aRow *Row) error {
 	aPage, err := c.Table.pager.GetPage(ctx, c.Table, c.PageIdx)
 	if err != nil {
 		return fmt.Errorf("update: %w", err)
 	}
+	cell := &aPage.LeafNode.Cells[c.CellIdx]
 
 	rowBuf, err := aRow.Marshal()
 	if err != nil {
 		return fmt.Errorf("update: %w", err)
 	}
 
-	cell := &aPage.LeafNode.Cells[c.CellIdx]
+	cell.NullBitmask = aRow.NullBitmask()
 	copy(cell.Value[:], rowBuf)
+
 	return nil
 }
 
@@ -197,14 +212,4 @@ func (c *Cursor) delete(ctx context.Context) error {
 
 	key := aPage.LeafNode.Cells[c.CellIdx].Key
 	return c.Table.DeleteKey(ctx, c.PageIdx, key)
-}
-
-func saveToCell(cell *Cell, key uint64, aRow *Row) error {
-	rowBuf, err := aRow.Marshal()
-	if err != nil {
-		return fmt.Errorf("save to cell: %w", err)
-	}
-	cell.Key = key
-	copy(cell.Value[:], rowBuf)
-	return nil
 }

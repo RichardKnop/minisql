@@ -2,7 +2,6 @@ package minisql
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"testing"
@@ -18,7 +17,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, "minisql_main")
+	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
 	require.NoError(t, err)
 
 	/*
@@ -28,15 +27,21 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		ctx     = context.Background()
 		numRows = 5
 		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, "foo", testMediumColumns, aPager, 0)
+		aTable  = NewTable(testLogger, testTableName, testMediumColumns, aPager, 0)
 	)
+
+	// Set some values to NULL so we can test selecting/filtering on NULLs
+	rows[1].Values[2] = OptionalValue{Valid: false}
+	rows[3].Values[5] = OptionalValue{Valid: false}
+	rows[4].Values[5] = OptionalValue{Valid: false}
 
 	// Batch insert test rows
 	stmt := Statement{
 		Kind:      Insert,
-		TableName: "foo",
+		TableName: aTable.Name,
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testMediumColumns...),
-		Inserts:   [][]any{},
+		Inserts:   [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
@@ -45,13 +50,25 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	err = aTable.Insert(ctx, stmt)
 	require.NoError(t, err)
 
-	t.Run("delete one row", func(t *testing.T) {
+	t.Run("Delete rows with NULL values when no rows match", func(t *testing.T) {
+		deleteResult, err := aTable.Delete(ctx, Statement{
+			Kind:       Delete,
+			TableName:  aTable.Name,
+			Conditions: FieldIsNull("id"),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 0, deleteResult.RowsAffected)
+
+		checkRows(ctx, t, aTable, rows)
+	})
+
+	t.Run("Delete one row", func(t *testing.T) {
 		id, ok := rows[0].GetValue("id")
 		require.True(t, ok)
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  "foo",
-			Conditions: FieldIsIn("id", Integer, id.(int64)),
+			TableName:  aTable.Name,
+			Conditions: FieldIsIn("id", Integer, id.Value.(int64)),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 1, deleteResult.RowsAffected)
@@ -59,13 +76,37 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		checkRows(ctx, t, aTable, rows[1:])
 	})
 
-	t.Run("delete all rows", func(t *testing.T) {
+	t.Run("Delete rows with NULL values", func(t *testing.T) {
 		deleteResult, err := aTable.Delete(ctx, Statement{
-			Kind:      Delete,
-			TableName: "foo",
+			Kind:       Delete,
+			TableName:  aTable.Name,
+			Conditions: FieldIsNull("age"),
 		})
 		require.NoError(t, err)
-		assert.Equal(t, 4, deleteResult.RowsAffected)
+		assert.Equal(t, 1, deleteResult.RowsAffected)
+
+		checkRows(ctx, t, aTable, rows[2:])
+	})
+
+	t.Run("Delete rows with NOT NULL values", func(t *testing.T) {
+		deleteResult, err := aTable.Delete(ctx, Statement{
+			Kind:       Delete,
+			TableName:  aTable.Name,
+			Conditions: FieldIsNotNull("test_double"),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, deleteResult.RowsAffected)
+
+		checkRows(ctx, t, aTable, rows[3:])
+	})
+
+	t.Run("Delete all rows", func(t *testing.T) {
+		deleteResult, err := aTable.Delete(ctx, Statement{
+			Kind:      Delete,
+			TableName: aTable.Name,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 2, deleteResult.RowsAffected)
 
 		checkRows(ctx, t, aTable, nil)
 	})
@@ -77,22 +118,23 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, "minisql_main")
+	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
 	require.NoError(t, err)
 
 	var (
 		ctx     = context.Background()
 		numRows = 20
 		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, "foo", testMediumColumns, aPager, 0)
+		aTable  = NewTable(testLogger, testTableName, testMediumColumns, aPager, 0)
 	)
 
 	// Batch insert test rows
 	stmt := Statement{
 		Kind:      Insert,
-		TableName: "foo",
+		TableName: aTable.Name,
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testMediumColumns...),
-		Inserts:   [][]any{},
+		Inserts:   [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
@@ -113,7 +155,8 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		+-------+  +-------+  +-------+  +---------+  +----------+  +----------------+
 	*/
 
-	require.NoError(t, printTree(aTable))
+	//require.NoError(t, printTree(aTable))
+
 	// Check the root page
 	assert.Equal(t, 5, int(aPager.pages[0].InternalNode.Header.KeysNum))
 	assert.Equal(t, []uint64{2, 5, 8, 11, 14}, aPager.pages[0].InternalNode.Keys())
@@ -125,11 +168,11 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	assert.Equal(t, []uint64{12, 13, 14}, aPager.pages[5].LeafNode.Keys())
 	assert.Equal(t, []uint64{15, 16, 17, 18, 19}, aPager.pages[6].LeafNode.Keys())
 
-	t.Run("delete first row to force merging of first two leaves", func(t *testing.T) {
+	t.Run("Delete first row to force merging of first two leaves", func(t *testing.T) {
 		ids := rowIDs(rows[0])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  "foo",
+			TableName:  aTable.Name,
 			Conditions: FieldIsIn("id", Integer, ids...),
 		})
 		require.NoError(t, err)
@@ -147,7 +190,8 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+-----------+     +-------+    +---------+    +----------+     +----------------+
 		*/
 
-		require.NoError(t, printTree(aTable))
+		//require.NoError(t, printTree(aTable))
+
 		// Check the root page
 		assert.Equal(t, 4, int(aPager.pages[0].InternalNode.Header.KeysNum))
 		assert.Equal(t, []uint64{5, 8, 11, 14}, aPager.pages[0].InternalNode.Keys())
@@ -160,11 +204,11 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		assert.Equal(t, []uint64{15, 16, 17, 18, 19}, aPager.pages[6].LeafNode.Keys())
 	})
 
-	t.Run("delete last three rows to force merging of last two leaves", func(t *testing.T) {
+	t.Run("Delete last three rows to force merging of last two leaves", func(t *testing.T) {
 		ids := rowIDs(rows[17], rows[18], rows[19])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  "foo",
+			TableName:  aTable.Name,
 			Conditions: FieldIsIn("id", Integer, ids...),
 		})
 		require.NoError(t, err)
@@ -182,7 +226,8 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+-----------+     +-------+    +---------+    +----------------+
 		*/
 
-		require.NoError(t, printTree(aTable))
+		//require.NoError(t, printTree(aTable))
+
 		// Check the root page
 		assert.Equal(t, 3, int(aPager.pages[0].InternalNode.Header.KeysNum))
 		assert.Equal(t, []uint64{5, 8, 11}, aPager.pages[0].InternalNode.Keys())
@@ -193,11 +238,11 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		assert.Equal(t, []uint64{12, 13, 14, 15, 16}, aPager.pages[5].LeafNode.Keys())
 	})
 
-	t.Run("keep deleting more rows, another merge", func(t *testing.T) {
+	t.Run("Keep deleting more rows, another merge", func(t *testing.T) {
 		ids := rowIDs(rows[2], rows[4], rows[6])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  "foo",
+			TableName:  aTable.Name,
 			Conditions: FieldIsIn("id", Integer, ids...),
 		})
 		require.NoError(t, err)
@@ -219,7 +264,8 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+-----------+      +---------+      +----------------+
 		*/
 
-		require.NoError(t, printTree(aTable))
+		//require.NoError(t, printTree(aTable))
+
 		// Check the root page
 		assert.Equal(t, 2, int(aPager.pages[0].InternalNode.Header.KeysNum))
 		assert.Equal(t, []uint64{8, 11}, aPager.pages[0].InternalNode.Keys())
@@ -229,11 +275,11 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		assert.Equal(t, []uint64{12, 13, 14, 15, 16}, aPager.pages[5].LeafNode.Keys())
 	})
 
-	t.Run("keep deleting more rows, no merge", func(t *testing.T) {
+	t.Run("Keep deleting more rows, no merge", func(t *testing.T) {
 		ids := rowIDs(rows[9], rows[11], rows[13], rows[15])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  "foo",
+			TableName:  aTable.Name,
 			Conditions: FieldIsIn("id", Integer, ids...),
 		})
 		require.NoError(t, err)
@@ -255,7 +301,8 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+--------+           +--------+          +----------+
 		*/
 
-		require.NoError(t, printTree(aTable))
+		//require.NoError(t, printTree(aTable))
+
 		// Check the root page
 		assert.Equal(t, 2, int(aPager.pages[0].InternalNode.Header.KeysNum))
 		assert.Equal(t, []uint64{5, 11}, aPager.pages[0].InternalNode.Keys())
@@ -265,11 +312,11 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		assert.Equal(t, []uint64{12, 14, 16}, aPager.pages[5].LeafNode.Keys())
 	})
 
-	t.Run("keep deleting more rows, another merge and borrow", func(t *testing.T) {
+	t.Run("Keep deleting more rows, another merge and borrow", func(t *testing.T) {
 		ids := rowIDs(rows[3], rows[12], rows[5])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  "foo",
+			TableName:  aTable.Name,
 			Conditions: FieldIsIn("id", Integer, ids...),
 		})
 		require.NoError(t, err)
@@ -290,7 +337,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		 +-------+                +----------+
 		*/
 
-		require.NoError(t, printTree(aTable))
+		//require.NoError(t, printTree(aTable))
 		// Check the root page
 		assert.Equal(t, 1, int(aPager.pages[0].InternalNode.Header.KeysNum))
 		assert.Equal(t, []uint64{8}, aPager.pages[0].InternalNode.Keys())
@@ -299,11 +346,11 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		assert.Equal(t, []uint64{10, 14, 16}, aPager.pages[5].LeafNode.Keys())
 	})
 
-	t.Run("delete one more time, we are left with only root leaf node", func(t *testing.T) {
+	t.Run("Delete one more time, we are left with only root leaf node", func(t *testing.T) {
 		ids := rowIDs(rows[14])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  "foo",
+			TableName:  aTable.Name,
 			Conditions: FieldIsIn("id", Integer, ids...),
 		})
 		require.NoError(t, err)
@@ -320,7 +367,8 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		   +-----------------+
 		*/
 
-		require.NoError(t, printTree(aTable))
+		//require.NoError(t, printTree(aTable))
+
 		assert.Nil(t, aPager.pages[0].InternalNode)
 		assert.Equal(t, 5, int(aPager.pages[0].LeafNode.Header.Cells))
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Header.Parent))
@@ -328,11 +376,11 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		assert.Equal(t, []uint64{1, 7, 8, 10, 16}, aPager.pages[2].LeafNode.Keys())
 	})
 
-	t.Run("delete all remaining rows", func(t *testing.T) {
+	t.Run("Delete all remaining rows", func(t *testing.T) {
 		ids := rowIDs(rows[1], rows[7], rows[8], rows[10], rows[16])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  "foo",
+			TableName:  aTable.Name,
 			Conditions: FieldIsIn("id", Integer, ids...),
 		})
 		require.NoError(t, err)
@@ -340,7 +388,8 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 		checkRows(ctx, t, aTable, nil)
 
-		require.NoError(t, printTree(aTable))
+		//require.NoError(t, printTree(aTable))
+
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Header.Cells))
 	})
 
@@ -353,23 +402,24 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, "minisql_main")
+	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
 	require.NoError(t, err)
 
 	var (
 		ctx     = context.Background()
 		numRows = 100
 		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, "foo", testMediumColumns, aPager, 0)
+		aTable  = NewTable(testLogger, testTableName, testMediumColumns, aPager, 0)
 	)
 	aTable.maxICells = 5 // for testing purposes only, normally 340
 
 	// Batch insert test rows
 	stmt := Statement{
 		Kind:      Insert,
-		TableName: "foo",
+		TableName: aTable.Name,
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testMediumColumns...),
-		Inserts:   [][]any{},
+		Inserts:   [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
@@ -381,19 +431,21 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	elapsed := time.Since(start)
 	log.Printf("Insert took %s", elapsed)
 
-	fmt.Println("BEFORE")
-	require.NoError(t, printTree(aTable))
+	//fmt.Println("BEFORE")
+	//require.NoError(t, printTree(aTable))
+
 	checkRows(ctx, t, aTable, rows)
 
 	deleteResult, err := aTable.Delete(ctx, Statement{
 		Kind:      Delete,
-		TableName: "foo",
+		TableName: aTable.Name,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, len(rows), deleteResult.RowsAffected)
 
-	fmt.Println("AFTER")
-	require.NoError(t, printTree(aTable))
+	//fmt.Println("AFTER")
+	//require.NoError(t, printTree(aTable))
+
 	checkRows(ctx, t, aTable, nil)
 
 	assert.Equal(t, 47, int(aPager.TotalPages()))
@@ -404,7 +456,7 @@ func rowIDs(rows ...Row) []any {
 	for _, r := range rows {
 		id, ok := r.GetValue("id")
 		if ok {
-			ids = append(ids, id.(int64))
+			ids = append(ids, id.Value.(int64))
 		}
 	}
 	return ids
@@ -413,7 +465,7 @@ func rowIDs(rows ...Row) []any {
 func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []Row) {
 	selectResult, err := aTable.Select(ctx, Statement{
 		Kind:      Select,
-		TableName: "foo",
+		TableName: aTable.Name,
 		Fields:    columnNames(testColumns...),
 	})
 	require.NoError(t, err)
@@ -422,31 +474,21 @@ func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []
 	for _, r := range expectedRows {
 		id, ok := r.GetValue("id")
 		require.True(t, ok)
-		expectedIDMap[id.(int64)] = struct{}{}
+		expectedIDMap[id.Value.(int64)] = struct{}{}
 	}
 
-	actual := make([]Row, 0, 10)
+	var actual []Row
 	aRow, err := selectResult.Rows(ctx)
 	for ; err == nil; aRow, err = selectResult.Rows(ctx) {
 		actual = append(actual, aRow)
 		if len(expectedIDMap) > 0 {
-			_, ok := expectedIDMap[aRow.Values[0].(int64)]
+			_, ok := expectedIDMap[aRow.Values[0].Value.(int64)]
 			assert.True(t, ok)
 		}
 	}
-	assert.Len(t, actual, len(expectedRows))
+	require.Len(t, actual, len(expectedRows))
+	for i := range len(expectedRows) {
+		assert.Equal(t, actual[i], expectedRows[i], "row %d does not match expected", i)
+		assert.Equal(t, actual[i].NullBitmask(), expectedRows[i].NullBitmask(), "row %d null bitmask does not match expected", i)
+	}
 }
-
-// func printTree(aTable *Table) error {
-// 	return aTable.BFS(func(aPage *Page) {
-// 		if aPage.InternalNode != nil {
-// 			fmt.Println("Internal node,", "page:", aPage.Index, "number of keys:", aPage.InternalNode.Header.KeysNum, "parent:", aPage.InternalNode.Header.Parent)
-// 			fmt.Println("Keys:", aPage.InternalNode.Keys())
-// 			fmt.Println("Children:", aPage.InternalNode.Children())
-// 		} else {
-// 			fmt.Println("Leaf node,", "page:", aPage.Index, "number of cells:", aPage.LeafNode.Header.Cells, "parent:", aPage.LeafNode.Header.Parent, "next leaf:", aPage.LeafNode.Header.NextLeaf)
-// 			fmt.Println("Keys:", aPage.LeafNode.Keys())
-// 		}
-// 		fmt.Println("---------")
-// 	})
-// }
