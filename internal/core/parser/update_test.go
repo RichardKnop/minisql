@@ -15,67 +15,67 @@ func TestParse_Update(t *testing.T) {
 
 	testCases := []testCase{
 		{
-			Name:     "Empty UPDATE fails",
-			SQL:      "UPDATE",
-			Expected: minisql.Statement{Kind: minisql.Update},
-			Err:      errEmptyTableName,
+			"Empty UPDATE fails",
+			"UPDATE",
+			minisql.Statement{Kind: minisql.Update},
+			errEmptyTableName,
 		},
 		{
-			Name: "Incomplete UPDATE with table name fails",
-			SQL:  "UPDATE 'a'",
-			Expected: minisql.Statement{
+			"Incomplete UPDATE with table name fails",
+			"UPDATE 'a'",
+			minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
 			},
-			Err: errWhereRequiredForUpdateDelete,
+			errWhereRequiredForUpdateDelete,
 		},
 		{
-			Name: "Incomplete UPDATE with table name and SET fails",
-			SQL:  "UPDATE 'a' SET",
-			Expected: minisql.Statement{
+			"Incomplete UPDATE with table name and SET fails",
+			"UPDATE 'a' SET",
+			minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
 			},
-			Err: errWhereRequiredForUpdateDelete,
+			errWhereRequiredForUpdateDelete,
 		},
 		{
-			Name: "Incomplete UPDATE with table name, SET with a field but no value and WHERE fails",
-			SQL:  "UPDATE 'a' SET b WHERE",
-			Expected: minisql.Statement{
+			"Incomplete UPDATE with table name, SET with a field but no value and WHERE fails",
+			"UPDATE 'a' SET b WHERE",
+			minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
 			},
-			Err: errUpdateExpectedEquals,
+			errUpdateExpectedEquals,
 		},
 		{
-			Name: "Incomplete UPDATE with table name, SET with a field and = but no value and WHERE fails",
-			SQL:  "UPDATE 'a' SET b = WHERE",
-			Expected: minisql.Statement{
+			"Incomplete UPDATE with table name, SET with a field and = but no value and WHERE fails",
+			"UPDATE 'a' SET b = WHERE",
+			minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
 			},
-			Err: errUpdateExpectedQuotedValueOrInt,
+			errUpdateExpectedQuotedValueOrInt,
 		},
 		{
-			Name: "Incomplete UPDATE due to no WHERE clause fails",
-			SQL:  "UPDATE 'a' SET b = 'hello' WHERE",
-			Expected: minisql.Statement{
+			"Incomplete UPDATE due to no WHERE clause fails",
+			"UPDATE 'a' SET b = 'hello' WHERE",
+			minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]any{
-					"b": "hello",
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Value: "hello", Valid: true},
 				},
 			},
-			Err: errEmptyWhereClause,
+			errEmptyWhereClause,
 		},
 		{
-			Name: "Incomplete UPDATE due incomplete WHERE clause fails",
-			SQL:  "UPDATE 'a' SET b = 'hello' WHERE a",
-			Expected: minisql.Statement{
+			"Incomplete UPDATE due incomplete WHERE clause fails",
+			"UPDATE 'a' SET b = 'hello' WHERE a",
+			minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]any{
-					"b": "hello",
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Value: "hello", Valid: true},
 				},
 				Conditions: minisql.OneOrMore{
 					{
@@ -88,42 +88,16 @@ func TestParse_Update(t *testing.T) {
 					},
 				},
 			},
-			Err: errWhereWithoutOperator,
+			errWhereWithoutOperator,
 		},
 		{
-			Name: "UPDATE works",
-			SQL:  "UPDATE 'a' SET b = 'hello' WHERE a = '1'",
-			Expected: minisql.Statement{
+			"UPDATE works",
+			"UPDATE 'a' SET b = 'hello' WHERE a = '1'",
+			minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]any{
-					"b": "hello",
-				},
-				Conditions: minisql.OneOrMore{
-					{
-						{
-							Operand1: minisql.Operand{
-								Type:  minisql.Field,
-								Value: "a",
-							},
-							Operator: minisql.Eq,
-							Operand2: minisql.Operand{
-								Type:  minisql.QuotedString,
-								Value: "1",
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			Name: "UPDATE works with int value being set",
-			SQL:  "UPDATE 'a' SET b = 25 WHERE a = '1'",
-			Expected: minisql.Statement{
-				Kind:      minisql.Update,
-				TableName: "a",
-				Updates: map[string]any{
-					"b": int64(25),
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Value: "hello", Valid: true},
 				},
 				Conditions: minisql.OneOrMore{
 					{
@@ -141,15 +115,16 @@ func TestParse_Update(t *testing.T) {
 					},
 				},
 			},
+			nil,
 		},
 		{
-			Name: "UPDATE works with simple quote inside",
-			SQL:  "UPDATE 'a' SET b = 'hello\\'world' WHERE a = '1'",
-			Expected: minisql.Statement{
+			"UPDATE works with int value being set",
+			"UPDATE 'a' SET b = 25 WHERE a = '1'",
+			minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]any{
-					"b": "hello\\'world",
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Value: int64(25), Valid: true},
 				},
 				Conditions: minisql.OneOrMore{
 					{
@@ -167,16 +142,16 @@ func TestParse_Update(t *testing.T) {
 					},
 				},
 			},
+			nil,
 		},
 		{
-			Name: "UPDATE with multiple SETs works",
-			SQL:  "UPDATE 'a' SET b = 'hello', c = 'bye' WHERE a = '1'",
-			Expected: minisql.Statement{
+			"UPDATE works with float value being set",
+			"UPDATE 'a' SET b = 3.75 WHERE a = '1'",
+			minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]any{
-					"b": "hello",
-					"c": "bye",
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Value: float64(3.75), Valid: true},
 				},
 				Conditions: minisql.OneOrMore{
 					{
@@ -194,16 +169,99 @@ func TestParse_Update(t *testing.T) {
 					},
 				},
 			},
+			nil,
 		},
 		{
-			Name: "UPDATE with multiple SETs and multiple conditions works",
-			SQL:  "UPDATE 'a' SET b = 'hello', c = 'bye' WHERE a = '1' AND b = 789",
-			Expected: minisql.Statement{
+			"UPDATE works with NULL",
+			"UPDATE 'a' SET b = NULL WHERE a = '1'",
+			minisql.Statement{
 				Kind:      minisql.Update,
 				TableName: "a",
-				Updates: map[string]any{
-					"b": "hello",
-					"c": "bye",
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Valid: false},
+				},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1: minisql.Operand{
+								Type:  minisql.Field,
+								Value: "a",
+							},
+							Operator: minisql.Eq,
+							Operand2: minisql.Operand{
+								Type:  minisql.QuotedString,
+								Value: "1",
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"UPDATE works with simple quote inside",
+			"UPDATE 'a' SET b = 'hello\\'world' WHERE a = '1'",
+			minisql.Statement{
+				Kind:      minisql.Update,
+				TableName: "a",
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Value: "hello\\'world", Valid: true},
+				},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1: minisql.Operand{
+								Type:  minisql.Field,
+								Value: "a",
+							},
+							Operator: minisql.Eq,
+							Operand2: minisql.Operand{
+								Type:  minisql.QuotedString,
+								Value: "1",
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"UPDATE with multiple SETs works",
+			"UPDATE 'a' SET b = 'hello', c = 'bye' WHERE a = '1'",
+			minisql.Statement{
+				Kind:      minisql.Update,
+				TableName: "a",
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Value: "hello", Valid: true},
+					"c": {Value: "bye", Valid: true},
+				},
+				Conditions: minisql.OneOrMore{
+					{
+						{
+							Operand1: minisql.Operand{
+								Type:  minisql.Field,
+								Value: "a",
+							},
+							Operator: minisql.Eq,
+							Operand2: minisql.Operand{
+								Type:  minisql.QuotedString,
+								Value: "1",
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"UPDATE with multiple SETs and multiple conditions works",
+			"UPDATE 'a' SET b = 'hello', c = 'bye' WHERE a = '1' AND b = 789",
+			minisql.Statement{
+				Kind:      minisql.Update,
+				TableName: "a",
+				Updates: map[string]minisql.OptionalValue{
+					"b": {Value: "hello", Valid: true},
+					"c": {Value: "bye", Valid: true},
 				},
 				Conditions: minisql.OneOrMore{
 					{
@@ -232,6 +290,7 @@ func TestParse_Update(t *testing.T) {
 					},
 				},
 			},
+			nil,
 		},
 	}
 

@@ -38,6 +38,15 @@ func NewTable(logger *zap.Logger, name string, columns []Column, pager Pager, ro
 	}
 }
 
+func (t *Table) ColumnByName(name string) (Column, bool) {
+	for i := range t.Columns {
+		if t.Columns[i].Name == name {
+			return t.Columns[i], true
+		}
+	}
+	return Column{}, false
+}
+
 // SeekNextRowID returns cursor pointing at the position after the last row ID
 // plus a new row ID to insert
 func (t *Table) SeekNextRowID(ctx context.Context, pageIdx uint32) (*Cursor, uint64, error) {

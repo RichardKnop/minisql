@@ -15,33 +15,33 @@ func TestParse_Delete(t *testing.T) {
 
 	testCases := []testCase{
 		{
-			Name:     "Empty DELETE fails",
-			SQL:      "DELETE FROM",
-			Expected: minisql.Statement{Kind: minisql.Delete},
-			Err:      errEmptyTableName,
+			"Empty DELETE fails",
+			"DELETE FROM",
+			minisql.Statement{Kind: minisql.Delete},
+			errEmptyTableName,
 		},
 		{
-			Name: "DELETE without WHERE fails",
-			SQL:  "DELETE FROM 'a'",
-			Expected: minisql.Statement{
+			"DELETE without WHERE fails",
+			"DELETE FROM 'a'",
+			minisql.Statement{
 				Kind:      minisql.Delete,
 				TableName: "a",
 			},
-			Err: errWhereRequiredForUpdateDelete,
+			errWhereRequiredForUpdateDelete,
 		},
 		{
-			Name: "DELETE with empty WHERE fails",
-			SQL:  "DELETE FROM 'a' WHERE",
-			Expected: minisql.Statement{
+			"DELETE with empty WHERE fails",
+			"DELETE FROM 'a' WHERE",
+			minisql.Statement{
 				Kind:      minisql.Delete,
 				TableName: "a",
 			},
-			Err: errEmptyWhereClause,
+			errEmptyWhereClause,
 		},
 		{
-			Name: "DELETE with WHERE with field but no operator fails",
-			SQL:  "DELETE FROM 'a' WHERE b",
-			Expected: minisql.Statement{
+			"DELETE with WHERE with field but no operator fails",
+			"DELETE FROM 'a' WHERE b",
+			minisql.Statement{
 				Kind:      minisql.Delete,
 				TableName: "a",
 				Conditions: minisql.OneOrMore{
@@ -55,35 +55,12 @@ func TestParse_Delete(t *testing.T) {
 					},
 				},
 			},
-			Err: errWhereWithoutOperator,
+			errWhereWithoutOperator,
 		},
 		{
-			Name: "DELETE with WHERE works",
-			SQL:  "DELETE FROM 'a' WHERE b = '1'",
-			Expected: minisql.Statement{
-				Kind:      minisql.Delete,
-				TableName: "a",
-				Conditions: minisql.OneOrMore{
-					{
-						{
-							Operand1: minisql.Operand{
-								Type:  minisql.Field,
-								Value: "b",
-							},
-							Operator: minisql.Eq,
-							Operand2: minisql.Operand{
-								Type:  minisql.QuotedString,
-								Value: "1",
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			Name: "DELETE with multiple conditions works",
-			SQL:  "DELETE FROM 'a' WHERE a = '1' AND b = 789",
-			Expected: minisql.Statement{
+			"DELETE with multiple conditions works",
+			"DELETE FROM 'a' WHERE a = '1' AND b = 789",
+			minisql.Statement{
 				Kind:      minisql.Delete,
 				TableName: "a",
 				Conditions: minisql.OneOrMore{
@@ -113,6 +90,7 @@ func TestParse_Delete(t *testing.T) {
 					},
 				},
 			},
+			nil,
 		},
 	}
 

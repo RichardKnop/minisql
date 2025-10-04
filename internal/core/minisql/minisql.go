@@ -1,5 +1,6 @@
 package minisql
 
 const (
-	SchemaTableName = "minisql_main"
+	SchemaTableName = "minisql_schema"
+	MaxColumns      = 64
 )

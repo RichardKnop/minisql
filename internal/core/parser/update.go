@@ -3,6 +3,8 @@ package parser
 import (
 	"fmt"
 	"strings"
+
+	"github.com/RichardKnop/minisql/internal/core/minisql"
 )
 
 var (
@@ -43,13 +45,20 @@ func (p *parser) doParseUpdate() (bool, error) {
 		p.pop()
 		p.step = stepUpdateValue
 	case stepUpdateValue:
-		value, ln := p.peekIntOrQuotedStringWithLength()
-		if ln == 0 {
-			return false, errUpdateExpectedQuotedValueOrInt
+		nullRWord := p.peek()
+		if strings.ToUpper(nullRWord) == "NULL" {
+			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Valid: false})
+			p.nextUpdateField = ""
+			p.pop()
+		} else {
+			value, ln := p.peekNumberOrQuotedStringWithLength()
+			if ln == 0 {
+				return false, errUpdateExpectedQuotedValueOrInt
+			}
+			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: value, Valid: ln > 0})
+			p.nextUpdateField = ""
+			p.pop()
 		}
-		p.setUpdate(p.nextUpdateField, value)
-		p.nextUpdateField = ""
-		p.pop()
 		maybeWhere := p.peek()
 		if strings.ToUpper(maybeWhere) == "WHERE" {
 			p.step = stepWhere
@@ -67,9 +76,9 @@ func (p *parser) doParseUpdate() (bool, error) {
 	return false, nil
 }
 
-func (p *parser) setUpdate(field string, value any) {
+func (p *parser) setUpdate(field string, value minisql.OptionalValue) {
 	if p.Updates == nil {
-		p.Updates = make(map[string]any)
+		p.Updates = make(map[string]minisql.OptionalValue)
 	}
 	p.Updates[field] = value
 }

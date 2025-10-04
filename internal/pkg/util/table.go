@@ -37,7 +37,7 @@ func PrintTableHeader(w io.Writer, columns []minisql.Column) {
 	fmt.Fprint(w, "\n")
 }
 
-func PrintTableRow(w io.Writer, columns []minisql.Column, values []any) {
+func PrintTableRow(w io.Writer, columns []minisql.Column, values []minisql.OptionalValue) {
 	columnSize := computeTableSize(columns)
 
 	for i, aValue := range values {

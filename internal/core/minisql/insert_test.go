@@ -16,7 +16,7 @@ func TestTable_Insert(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, "minisql_main")
+	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
 	require.NoError(t, err)
 
 	var (
@@ -28,8 +28,9 @@ func TestTable_Insert(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testColumns...),
-		Inserts:   [][]any{aRow.Values},
+		Inserts:   [][]OptionalValue{aRow.Values},
 	}
 
 	err = aTable.Insert(ctx, stmt)
@@ -50,7 +51,7 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, "minisql_main")
+	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
 	require.NoError(t, err)
 
 	var (
@@ -62,8 +63,9 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testColumns...),
-		Inserts:   [][]any{aRow.Values, aRow2.Values, aRow3.Values},
+		Inserts:   [][]OptionalValue{aRow.Values, aRow2.Values, aRow3.Values},
 	}
 
 	err = aTable.Insert(ctx, stmt)
@@ -96,7 +98,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, "minisql_main")
+	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
 	require.NoError(t, err)
 
 	var (
@@ -108,6 +110,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testMediumColumns...),
 	}
 	for _, aRow := range rows {
@@ -161,7 +164,7 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, "minisql_main")
+	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
 	require.NoError(t, err)
 
 	var (
@@ -174,8 +177,9 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testBigColumns...),
-		Inserts:   [][]any{},
+		Inserts:   [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
@@ -217,7 +221,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, "minisql_main")
+	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
 	require.NoError(t, err)
 
 	/*
@@ -240,8 +244,9 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	stmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testBigColumns...),
-		Inserts:   [][]any{},
+		Inserts:   [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)

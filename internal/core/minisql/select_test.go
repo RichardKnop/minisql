@@ -15,7 +15,7 @@ func TestTable_Select(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, "minisql_main")
+	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
 	require.NoError(t, err)
 
 	var (
@@ -28,8 +28,9 @@ func TestTable_Select(t *testing.T) {
 	insertStmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testColumns...),
-		Inserts:   [][]any{},
+		Inserts:   [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		insertStmt.Inserts = append(insertStmt.Inserts, aRow.Values)
@@ -92,7 +93,7 @@ func TestTable_Select(t *testing.T) {
 							Operator: Eq,
 							Operand2: Operand{
 								Type:  Integer,
-								Value: rows[5].Values[0].(int64),
+								Value: rows[5].Values[0].Value.(int64),
 							},
 						},
 					},

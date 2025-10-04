@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/RichardKnop/minisql/pkg/bitwise"
 )
 
 func TestLeafNode_Marshal(t *testing.T) {
@@ -29,6 +31,7 @@ func TestLeafNode_Marshal(t *testing.T) {
 	aNode.Cells[0].Value = bytes.Repeat([]byte{1}, 230)
 	aNode.Cells[1].Key = 2
 	aNode.Cells[1].Value = bytes.Repeat([]byte{1}, 230)
+	aNode.Cells[1].NullBitmask = bitwise.Set(uint64(0), 1)
 
 	buf := make([]byte, aNode.Size())
 	data, err := aNode.Marshal(buf)

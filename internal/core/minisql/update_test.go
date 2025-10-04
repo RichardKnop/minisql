@@ -15,7 +15,7 @@ func TestTable_Update(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, "minisql_main")
+	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
 	require.NoError(t, err)
 
 	var (
@@ -28,8 +28,9 @@ func TestTable_Update(t *testing.T) {
 	insertStmt := Statement{
 		Kind:      Insert,
 		TableName: "foo",
+		Columns:   aTable.Columns,
 		Fields:    columnNames(testColumns...),
-		Inserts:   [][]any{},
+		Inserts:   [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		insertStmt.Inserts = append(insertStmt.Inserts, aRow.Values)
@@ -43,7 +44,7 @@ func TestTable_Update(t *testing.T) {
 	for i, aRow := range rows {
 		expectedRow := aRow.Clone()
 		if i == 5 {
-			expectedRow.SetValue("email", "updatedsingle@foo.bar")
+			expectedRow.SetValue("email", OptionalValue{Value: "updatedsingle@foo.bar", Valid: true})
 		}
 
 		singleUpdatedRow = append(singleUpdatedRow, expectedRow)
@@ -52,7 +53,7 @@ func TestTable_Update(t *testing.T) {
 	allUpdatedRows := make([]Row, 0, len(rows))
 	for _, aRow := range rows {
 		expectedRow := aRow.Clone()
-		expectedRow.SetValue("email", "updatedall@foo.bar")
+		expectedRow.SetValue("email", OptionalValue{Value: "updatedall@foo.bar", Valid: true})
 		allUpdatedRows = append(allUpdatedRows, expectedRow)
 	}
 
@@ -67,8 +68,8 @@ func TestTable_Update(t *testing.T) {
 			Statement{
 				Kind:      Update,
 				TableName: "foo",
-				Updates: map[string]any{
-					"email": "updatedsingle@foo.bar",
+				Updates: map[string]OptionalValue{
+					"email": {Value: "updatedsingle@foo.bar", Valid: true},
 				},
 				Conditions: OneOrMore{
 					{
@@ -80,7 +81,7 @@ func TestTable_Update(t *testing.T) {
 							Operator: Eq,
 							Operand2: Operand{
 								Type:  Integer,
-								Value: rows[5].Values[0].(int64),
+								Value: rows[5].Values[0].Value.(int64),
 							},
 						},
 					},
@@ -94,20 +95,20 @@ func TestTable_Update(t *testing.T) {
 			Statement{
 				Kind:      Update,
 				TableName: "foo",
-				Updates: map[string]any{
-					"email": "updatedall@foo.bar",
+				Updates: map[string]OptionalValue{
+					"email": {Value: "updatedall@foo.bar", Valid: true},
 				},
 			},
 			38,
 			allUpdatedRows,
 		},
 		{
-			"Update now rows",
+			"Update no rows",
 			Statement{
 				Kind:      Update,
 				TableName: "foo",
-				Updates: map[string]any{
-					"email": "updatednone@foo.bar",
+				Updates: map[string]OptionalValue{
+					"email": {Value: "updatednone@foo.bar", Valid: true},
 				},
 				Conditions: OneOrMore{
 					{
