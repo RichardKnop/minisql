@@ -90,7 +90,6 @@ func (p *parser) doParseWhere() error {
 			if ln == 0 {
 				return errWhereExpectedQuotedStringOrNumber
 			}
-			fmt.Println("value:", value)
 			currentCondition.Operand2 = minisql.Operand{
 				Type:  minisql.QuotedString,
 				Value: value,
@@ -106,7 +105,6 @@ func (p *parser) doParseWhere() error {
 		p.step = stepWhereOperator
 	case stepWhereOperator:
 		anOperator := strings.ToUpper(p.peek())
-		fmt.Println("anOperator:", anOperator)
 		if anOperator != "AND" && anOperator != "OR" {
 			return errWhereExpectedAndOr
 		}

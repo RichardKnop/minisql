@@ -39,6 +39,25 @@ func Test_Set(t *testing.T) {
 	assert.Equal(t, expected, fmt.Sprintf("%.64b", actual))
 }
 
+func Test_Toggle(t *testing.T) {
+	t.Parallel()
+
+	// We will be toggling on the 8th bit (index starts at 0)
+	k := 7
+
+	// Toogle on
+	expected := strings.Repeat("0", 56) + "10001111"
+	n := bin2uint("00001111")
+	actual := Toggle(n, k)
+	assert.Equal(t, expected, fmt.Sprintf("%.64b", actual))
+
+	// Toggle off
+	expected = strings.Repeat("0", 56) + "00001111"
+	n = bin2uint("10001111")
+	actual = Toggle(n, k)
+	assert.Equal(t, expected, fmt.Sprintf("%.64b", actual))
+}
+
 func Test_IsSet(t *testing.T) {
 	t.Parallel()
 

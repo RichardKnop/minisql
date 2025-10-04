@@ -250,8 +250,10 @@ func (s Statement) Validate(aTable *Table) error {
 			if !s.Updates[aField].Valid && !aColumn.Nullable {
 				return fmt.Errorf("field %q cannot be NULL", aField)
 			}
-			if aColumn.Kind == Varchar && !utf8.ValidString(s.Updates[aField].Value.(string)) {
-				return fmt.Errorf("field %q expects valid UTF-8 string", aField)
+			if s.Updates[aField].Valid {
+				if aColumn.Kind == Varchar && !utf8.ValidString(s.Updates[aField].Value.(string)) {
+					return fmt.Errorf("field %q expects valid UTF-8 string", aField)
+				}
 			}
 		}
 		return nil
