@@ -30,11 +30,9 @@ func TestTable_Insert(t *testing.T) {
 
 	t.Run("Insert row with all NOT NULL values", func(t *testing.T) {
 		stmt := Statement{
-			Kind:      Insert,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
-			Fields:    columnNames(testColumns...),
-			Inserts:   [][]OptionalValue{rows[0].Values},
+			Kind:    Insert,
+			Fields:  columnNames(testColumns...),
+			Inserts: [][]OptionalValue{rows[0].Values},
 		}
 
 		err = aTable.Insert(ctx, stmt)
@@ -54,11 +52,9 @@ func TestTable_Insert(t *testing.T) {
 	t.Run("Insert row with NULL value", func(t *testing.T) {
 		rows[1].Values[1] = OptionalValue{Valid: false} // set second column to NULL
 		stmt := Statement{
-			Kind:      Insert,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
-			Fields:    columnNames(testColumns...),
-			Inserts:   [][]OptionalValue{rows[1].Values},
+			Kind:    Insert,
+			Fields:  columnNames(testColumns...),
+			Inserts: [][]OptionalValue{rows[1].Values},
 		}
 
 		err = aTable.Insert(ctx, stmt)
@@ -93,10 +89,8 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 	)
 
 	stmt := Statement{
-		Kind:      Insert,
-		TableName: aTable.Name,
-		Columns:   aTable.Columns,
-		Fields:    columnNames(testColumns...),
+		Kind:   Insert,
+		Fields: columnNames(testColumns...),
 	}
 	for _, aRow := range rows {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
@@ -129,10 +123,8 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 	)
 
 	stmt := Statement{
-		Kind:      Insert,
-		TableName: aTable.Name,
-		Columns:   aTable.Columns,
-		Fields:    columnNames(testMediumColumns...),
+		Kind:   Insert,
+		Fields: columnNames(testMediumColumns...),
 	}
 	for _, aRow := range rows {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
@@ -196,11 +188,9 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 
 	// Batch insert test rows
 	stmt := Statement{
-		Kind:      Insert,
-		TableName: aTable.Name,
-		Columns:   aTable.Columns,
-		Fields:    columnNames(testBigColumns...),
-		Inserts:   [][]OptionalValue{},
+		Kind:    Insert,
+		Fields:  columnNames(testBigColumns...),
+		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
@@ -263,11 +253,9 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 
 	// Batch insert test rows
 	stmt := Statement{
-		Kind:      Insert,
-		TableName: aTable.Name,
-		Columns:   aTable.Columns,
-		Fields:    columnNames(testBigColumns...),
-		Inserts:   [][]OptionalValue{},
+		Kind:    Insert,
+		Fields:  columnNames(testBigColumns...),
+		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)

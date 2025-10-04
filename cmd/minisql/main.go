@@ -99,22 +99,46 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	aDatabase.CreateTestTable()
 
-	wg := new(sync.WaitGroup)
+	var (
+		stmtChan = make(chan minisql.Statement)
+		wg       = new(sync.WaitGroup)
+	)
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// TODO - support multiple concurrent read statements
 	wg.Add(1)
-
 	go func() {
 		defer wg.Done()
+		for stmt := range stmtChan {
+			aResult, err := aDatabase.ExecuteStatement(ctx, stmt)
+			if err != nil {
+				fmt.Printf("Error executing statement: %s\n", err)
+			} else if !stmt.ReadOnly() {
+				fmt.Printf("Rows affected: %d\n", aResult.RowsAffected)
+			} else if stmt.Kind == minisql.Select {
+				util.PrintTableHeader(os.Stdout, aResult.Columns)
+				aRow, err := aResult.Rows(ctx)
+				for ; err == nil; aRow, err = aResult.Rows(ctx) {
+					util.PrintTableRow(os.Stdout, aResult.Columns, aRow.Values)
+				}
+			}
+			printPrompt()
+		}
+	}()
+
+	go func() {
 		reader := bufio.NewScanner(os.Stdin)
 		printPrompt()
 
 		// REPL (Read-eval-print loop) start
 		for reader.Scan() {
-			if ctx.Err() != nil {
+			if reader.Err() != nil {
+				fmt.Printf("Error reading input: %s\n", reader.Err())
 				break
 			}
-
 			inputBuffer := sanitizeReplInput(reader.Text())
 			if isMetaCommand(inputBuffer) {
 				switch doMetaCommand(inputBuffer[1:]) {
@@ -125,6 +149,7 @@ func main() {
 				case Exit:
 					// Return exits with code 0 by default, os.Exit(0)
 					// would exit immediately without any defers
+					sigChan <- syscall.SIGINT
 					return
 				case ListTables:
 					for _, table := range aDatabase.ListTableNames(ctx) {
@@ -133,43 +158,30 @@ func main() {
 				case Unknown:
 					fmt.Printf("Unrecognized meta command: %s\n", inputBuffer)
 				}
+				printPrompt()
 			} else {
 				stmt, err := aDatabase.PrepareStatement(ctx, inputBuffer)
 				if err != nil {
 					// Parser logs error internally
-				} else {
-					aResult, err := aDatabase.ExecuteStatement(ctx, stmt)
-					if err != nil {
-						fmt.Printf("Error executing statement: %s\n", err)
-					} else if stmt.Kind == minisql.Insert || stmt.Kind == minisql.Update || stmt.Kind == minisql.Delete {
-						fmt.Printf("Rows affected: %d\n", aResult.RowsAffected)
-					} else if stmt.Kind == minisql.Select {
-						util.PrintTableHeader(os.Stdout, aResult.Columns)
-						aRow, err := aResult.Rows(ctx)
-						for ; err == nil; aRow, err = aResult.Rows(ctx) {
-							util.PrintTableRow(os.Stdout, aResult.Columns, aRow.Values)
-						}
-					}
+					printPrompt()
+					continue
 				}
+				stmtChan <- stmt
 			}
-			printPrompt()
 		}
 		// Print an additional line if we encountered an EOF character
 		fmt.Println()
 	}()
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
+	close(stmtChan)
 
 	if err := aDatabase.Close(ctx); err != nil {
 		fmt.Printf("error closing database: %s\n", err)
 	}
-
 	cancel()
 
 	wg.Wait()
 
-	// TODO - cleanup
-	os.Exit(1)
+	os.Exit(0)
 }

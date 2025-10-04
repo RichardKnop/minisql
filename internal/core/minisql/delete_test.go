@@ -37,11 +37,9 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 
 	// Batch insert test rows
 	stmt := Statement{
-		Kind:      Insert,
-		TableName: aTable.Name,
-		Columns:   aTable.Columns,
-		Fields:    columnNames(testMediumColumns...),
-		Inserts:   [][]OptionalValue{},
+		Kind:    Insert,
+		Fields:  columnNames(testMediumColumns...),
+		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
@@ -53,7 +51,6 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	t.Run("Delete rows with NULL values when no rows match", func(t *testing.T) {
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  aTable.Name,
 			Conditions: FieldIsNull("id"),
 		})
 		require.NoError(t, err)
@@ -67,7 +64,6 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		require.True(t, ok)
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  aTable.Name,
 			Conditions: FieldIsIn("id", Integer, id.Value.(int64)),
 		})
 		require.NoError(t, err)
@@ -79,7 +75,6 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	t.Run("Delete rows with NULL values", func(t *testing.T) {
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  aTable.Name,
 			Conditions: FieldIsNull("age"),
 		})
 		require.NoError(t, err)
@@ -91,7 +86,6 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	t.Run("Delete rows with NOT NULL values", func(t *testing.T) {
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  aTable.Name,
 			Conditions: FieldIsNotNull("test_double"),
 		})
 		require.NoError(t, err)
@@ -102,8 +96,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 
 	t.Run("Delete all rows", func(t *testing.T) {
 		deleteResult, err := aTable.Delete(ctx, Statement{
-			Kind:      Delete,
-			TableName: aTable.Name,
+			Kind: Delete,
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 2, deleteResult.RowsAffected)
@@ -130,11 +123,9 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 	// Batch insert test rows
 	stmt := Statement{
-		Kind:      Insert,
-		TableName: aTable.Name,
-		Columns:   aTable.Columns,
-		Fields:    columnNames(testMediumColumns...),
-		Inserts:   [][]OptionalValue{},
+		Kind:    Insert,
+		Fields:  columnNames(testMediumColumns...),
+		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
@@ -172,7 +163,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[0])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  aTable.Name,
 			Conditions: FieldIsIn("id", Integer, ids...),
 		})
 		require.NoError(t, err)
@@ -208,7 +198,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[17], rows[18], rows[19])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  aTable.Name,
 			Conditions: FieldIsIn("id", Integer, ids...),
 		})
 		require.NoError(t, err)
@@ -242,7 +231,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[2], rows[4], rows[6])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  aTable.Name,
 			Conditions: FieldIsIn("id", Integer, ids...),
 		})
 		require.NoError(t, err)
@@ -279,7 +267,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[9], rows[11], rows[13], rows[15])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  aTable.Name,
 			Conditions: FieldIsIn("id", Integer, ids...),
 		})
 		require.NoError(t, err)
@@ -316,7 +303,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[3], rows[12], rows[5])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  aTable.Name,
 			Conditions: FieldIsIn("id", Integer, ids...),
 		})
 		require.NoError(t, err)
@@ -350,7 +336,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[14])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  aTable.Name,
 			Conditions: FieldIsIn("id", Integer, ids...),
 		})
 		require.NoError(t, err)
@@ -380,7 +365,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[1], rows[7], rows[8], rows[10], rows[16])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			TableName:  aTable.Name,
 			Conditions: FieldIsIn("id", Integer, ids...),
 		})
 		require.NoError(t, err)
@@ -415,11 +399,9 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 
 	// Batch insert test rows
 	stmt := Statement{
-		Kind:      Insert,
-		TableName: aTable.Name,
-		Columns:   aTable.Columns,
-		Fields:    columnNames(testMediumColumns...),
-		Inserts:   [][]OptionalValue{},
+		Kind:    Insert,
+		Fields:  columnNames(testMediumColumns...),
+		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
@@ -437,8 +419,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	checkRows(ctx, t, aTable, rows)
 
 	deleteResult, err := aTable.Delete(ctx, Statement{
-		Kind:      Delete,
-		TableName: aTable.Name,
+		Kind: Delete,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, len(rows), deleteResult.RowsAffected)
@@ -464,9 +445,8 @@ func rowIDs(rows ...Row) []any {
 
 func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []Row) {
 	selectResult, err := aTable.Select(ctx, Statement{
-		Kind:      Select,
-		TableName: aTable.Name,
-		Fields:    columnNames(testColumns...),
+		Kind:   Select,
+		Fields: columnNames(testColumns...),
 	})
 	require.NoError(t, err)
 

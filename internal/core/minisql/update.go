@@ -6,6 +6,9 @@ import (
 )
 
 func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, error) {
+	stmt.TableName = t.Name
+	stmt.Columns = t.Columns
+
 	if err := stmt.Validate(t); err != nil {
 		return StatementResult{}, err
 	}

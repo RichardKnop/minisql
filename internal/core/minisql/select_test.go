@@ -31,11 +31,9 @@ func TestTable_Select(t *testing.T) {
 
 	// Batch insert test rows
 	insertStmt := Statement{
-		Kind:      Insert,
-		TableName: aTable.Name,
-		Columns:   aTable.Columns,
-		Fields:    columnNames(testColumns...),
-		Inserts:   [][]OptionalValue{},
+		Kind:    Insert,
+		Fields:  columnNames(testColumns...),
+		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		insertStmt.Inserts = append(insertStmt.Inserts, aRow.Values)
@@ -46,9 +44,8 @@ func TestTable_Select(t *testing.T) {
 
 	t.Run("Select all rows", func(t *testing.T) {
 		stmt := Statement{
-			Kind:      Select,
-			TableName: aTable.Name,
-			Fields:    columnNames(testColumns...),
+			Kind:   Select,
+			Fields: columnNames(testColumns...),
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)
@@ -66,9 +63,8 @@ func TestTable_Select(t *testing.T) {
 
 	t.Run("Select no rows", func(t *testing.T) {
 		stmt := Statement{
-			Kind:      Select,
-			TableName: aTable.Name,
-			Fields:    columnNames(testColumns...),
+			Kind:   Select,
+			Fields: columnNames(testColumns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -101,9 +97,8 @@ func TestTable_Select(t *testing.T) {
 
 	t.Run("Select single row", func(t *testing.T) {
 		stmt := Statement{
-			Kind:      Select,
-			TableName: aTable.Name,
-			Fields:    columnNames(testColumns...),
+			Kind:   Select,
+			Fields: columnNames(testColumns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -138,7 +133,6 @@ func TestTable_Select(t *testing.T) {
 	t.Run("Select rows with NULL values when there are none", func(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
-			TableName:  aTable.Name,
 			Fields:     columnNames(testColumns...),
 			Conditions: FieldIsNull("id"),
 		}
@@ -159,7 +153,6 @@ func TestTable_Select(t *testing.T) {
 	t.Run("Select rows with NULL values", func(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
-			TableName:  aTable.Name,
 			Fields:     columnNames(testColumns...),
 			Conditions: FieldIsNull("age"),
 		}
@@ -182,7 +175,6 @@ func TestTable_Select(t *testing.T) {
 	t.Run("Select rows with NOT NULL values", func(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
-			TableName:  aTable.Name,
 			Fields:     columnNames(testColumns...),
 			Conditions: FieldIsNotNull("age"),
 		}

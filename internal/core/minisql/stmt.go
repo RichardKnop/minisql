@@ -121,6 +121,26 @@ func FieldIsIn(fieldName string, operandType OperandType, values ...any) OneOrMo
 	return oneOrMore
 }
 
+func FieldIsNotIn(fieldName string, operandType OperandType, values ...any) OneOrMore {
+	oneOrMore := make(OneOrMore, 0, len(values))
+	for _, v := range values {
+		oneOrMore = append(oneOrMore, Conditions{
+			{
+				Operand1: Operand{
+					Type:  Field,
+					Value: fieldName,
+				},
+				Operator: Ne,
+				Operand2: Operand{
+					Type:  operandType,
+					Value: v,
+				},
+			},
+		})
+	}
+	return oneOrMore
+}
+
 func FieldIsNull(fieldName string) OneOrMore {
 	return OneOrMore{
 		{
@@ -207,6 +227,10 @@ type Statement struct {
 	Inserts     [][]OptionalValue
 	Updates     map[string]OptionalValue
 	Conditions  OneOrMore // used for WHERE
+}
+
+func (s Statement) ReadOnly() bool {
+	return s.Kind == Select
 }
 
 func (s Statement) Validate(aTable *Table) error {

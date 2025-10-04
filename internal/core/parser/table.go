@@ -129,7 +129,7 @@ func (p *parser) doParseDropTable() error {
 }
 
 func isColumnDef(token string) (minisql.Column, bool) {
-	switch token {
+	switch strings.ToUpper(token) {
 	case "BOOLEAN":
 		return minisql.Column{Kind: minisql.Boolean, Size: 1}, true
 	case "INT4":

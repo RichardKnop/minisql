@@ -54,7 +54,7 @@ func (p *pagerImpl) TotalPages() uint32 {
 }
 
 func (p *pagerImpl) GetPage(ctx context.Context, aTable *Table, pageIdx uint32) (*Page, error) {
-	if int(pageIdx) < len(p.pages) {
+	if len(p.pages) > int(pageIdx) && p.pages[pageIdx] != nil {
 		return p.pages[pageIdx], nil
 	}
 
@@ -81,6 +81,13 @@ func (p *pagerImpl) GetPage(ctx context.Context, aTable *Table, pageIdx uint32) 
 			return nil, err
 		}
 
+		if len(p.pages) < int(pageIdx)+1 {
+			// Extend pages slice
+			for i := len(p.pages); i < int(pageIdx)+1; i++ {
+				p.pages = append(p.pages, nil)
+			}
+		}
+
 		// First byte is Internal flag, this condition is also true if page does not exist
 		if buf[0] == 0 {
 			// Leaf node
@@ -89,7 +96,7 @@ func (p *pagerImpl) GetPage(ctx context.Context, aTable *Table, pageIdx uint32) 
 			if err != nil {
 				return nil, err
 			}
-			p.pages = append(p.pages, &Page{Index: pageIdx, LeafNode: leaf})
+			p.pages[pageIdx] = &Page{Index: pageIdx, LeafNode: leaf}
 		} else {
 			// Internal node
 			internal := new(InternalNode)
@@ -97,7 +104,7 @@ func (p *pagerImpl) GetPage(ctx context.Context, aTable *Table, pageIdx uint32) 
 			if err != nil {
 				return nil, err
 			}
-			p.pages = append(p.pages, &Page{Index: pageIdx, InternalNode: internal})
+			p.pages[pageIdx] = &Page{Index: pageIdx, InternalNode: internal}
 		}
 	}
 
@@ -115,10 +122,11 @@ func (p *pagerImpl) GetPage(ctx context.Context, aTable *Table, pageIdx uint32) 
 }
 
 func (p *pagerImpl) Flush(ctx context.Context, pageIdx uint32, size int64) error {
-	aPage := p.pages[pageIdx]
-	if aPage == nil {
-		return fmt.Errorf("flushing nil page")
+	if int(pageIdx) >= len(p.pages) || p.pages[pageIdx] == nil {
+		return nil
 	}
+
+	aPage := p.pages[pageIdx]
 
 	buf := make([]byte, size)
 	if aPage.LeafNode != nil {

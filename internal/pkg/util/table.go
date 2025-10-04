@@ -11,7 +11,8 @@ import (
 const (
 	truncatedStringEnd = " ..."
 	nonVarCharLength   = 20
-	maxLength          = 40
+	maxLength          = 50
+	maxMultiLineLength = 500
 )
 
 func PrintTableHeader(w io.Writer, columns []minisql.Column) {
@@ -40,18 +41,74 @@ func PrintTableHeader(w io.Writer, columns []minisql.Column) {
 func PrintTableRow(w io.Writer, columns []minisql.Column, values []minisql.OptionalValue) {
 	columnSize := computeTableSize(columns)
 
+	rows := make([][]string, 0, 1)
+	rows = append(rows, make([]string, len(values)))
 	for i, aValue := range values {
-		aStringValue := fmt.Sprint(aValue)
-		r := []rune(aStringValue)
-		if len(r) >= maxLength-len(truncatedStringEnd) {
-			aStringValue = string(r[0:maxLength-len(truncatedStringEnd)]) + truncatedStringEnd
+		aStringValue := "NULL"
+		if aValue.Valid {
+			aStringValue = fmt.Sprint(aValue.Value)
 		}
-		fmt.Fprintf(w, " %-*s ", columnSize[i], aStringValue)
-		if i != len(columns)-1 {
-			fmt.Fprint(w, "|")
+
+		r := []rune(aStringValue)
+		if len(r) >= maxLength {
+			if len(r) >= maxMultiLineLength {
+				aStringValue = string(r[0:maxMultiLineLength-len(truncatedStringEnd)]) + truncatedStringEnd
+			}
+			lines := splitStringIntoLines(aStringValue, maxLength)
+			for _, line := range lines {
+				added := false
+				for _, aRow := range rows {
+					if aRow[i] == "" {
+						aRow[i] = line
+						added = true
+						break
+					}
+				}
+				if !added {
+					rows = append(rows, make([]string, len(values)))
+					rows[len(rows)-1][i] = line
+				}
+			}
+		} else {
+			rows[0][i] = aStringValue
 		}
 	}
-	fmt.Fprintf(w, "\n")
+
+	for _, aRow := range rows {
+		for j, aCell := range aRow {
+			fmt.Fprintf(w, " %-*s ", columnSize[j], aCell)
+			if j != len(columns)-1 {
+				fmt.Fprint(w, "|")
+			}
+		}
+		fmt.Fprintf(w, "\n")
+	}
+}
+
+func splitStringIntoLines(text string, maxWidth int) []string {
+	if len(text) == 0 {
+		return []string{""}
+	}
+
+	lines := strings.Split(text, "\n")
+	finalLines := make([]string, 0, len(lines))
+
+	for _, line := range lines {
+		runes := []rune(line)
+		if len(runes) <= maxWidth {
+			finalLines = append(finalLines, line)
+			continue
+		}
+		for i := 0; i < len(runes); i += maxWidth {
+			end := i + maxWidth
+			if end > len(runes) {
+				end = len(runes)
+			}
+			finalLines = append(finalLines, string(runes[i:end]))
+		}
+	}
+
+	return finalLines
 }
 
 func computeTableSize(columns []minisql.Column) []int {

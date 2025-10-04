@@ -85,12 +85,40 @@ minisql> .help
 
 ## Examples
 
-Create a table:
+Run `minisql` command:
 
 ```sh
-minisql> create table foo(id int4, email varchar(255), age int4)
+go run cmd/minisql/main.go
+```
+
+When creating a new MiniSQL database, it is initialised with `minisql_schema` system table which holds schema of all tables within the database:
+
+```sh
+minisql> select * from minisql_schema
+ type                 | name                                               | root_page            | sql                                                
+----------------------+----------------------------------------------------+----------------------+----------------------------------------------------
+ 1                    | minisql_schema                                     | 0                    | create table minisql_schema (                      
+                      |                                                    |                      | 	type int4,                                        
+                      |                                                    |                      | 	table_name varchar(255),                          
+                      |                                                    |                      | 	root_page int4,                                   
+                      |                                                    |                      | 	sql varchar(2056)                                 
+                      |                                                    |                      | )                                                  
+```
+
+You can create your own non-system table now:
+
+```sh
+minisql> create table users(id int4, name varchar(255), email varchar(255), age int4)
 Rows affected: 0
 minisql>
+```
+
+You can now check a new table has been added:
+
+```sh
+minisql> .tables
+minisql_schema
+todo
 ```
 
 Insert a row:

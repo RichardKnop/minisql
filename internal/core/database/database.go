@@ -21,7 +21,6 @@ type Parser interface {
 
 type Pager interface {
 	GetPage(context.Context, *minisql.Table, uint32) (*minisql.Page, error)
-	// ListPages() []*Page
 	TotalPages() uint32
 	Flush(context.Context, uint32, int64) error
 }
@@ -29,34 +28,38 @@ type Pager interface {
 var (
 	mainTableColumns = []minisql.Column{
 		{
-			Kind: minisql.Int4,
-			Size: 4,
-			Name: "type",
+			Kind:     minisql.Int4,
+			Size:     4,
+			Name:     "type",
+			Nullable: false,
 		},
 		{
-			Kind: minisql.Varchar,
-			Size: 255,
-			Name: "name",
+			Kind:     minisql.Varchar,
+			Size:     255,
+			Name:     "name",
+			Nullable: false,
 		},
 		{
-			Kind: minisql.Int4,
-			Size: 4,
-			Name: "root_page",
+			Kind:     minisql.Int4,
+			Size:     4,
+			Name:     "root_page",
+			Nullable: true,
 		},
 		{
-			Kind: minisql.Varchar,
-			Size: 2056,
-			Name: "sql",
+			Kind:     minisql.Varchar,
+			Size:     2056,
+			Name:     "sql",
+			Nullable: true,
 		},
 	}
-
-	mainTableSQL = `CREATE TABLE minisql_main (
-		type INT4,
-		table_name VARCHAR(255),
-		root_page INT4,
-		SQL VARCHAR(2056)
-	)`
 )
+
+var mainTableSQL = fmt.Sprintf(`create table %s (
+	type int4 not null,
+	table_name varchar(255) not null,
+	root_page int4,
+	sql varchar(2056)
+)`, minisql.SchemaTableName)
 
 type SchemaType int
 
@@ -83,119 +86,116 @@ func New(ctx context.Context, logger *zap.Logger, name string, aParser Parser, a
 		logger: logger,
 	}
 
+	var (
+		totalPages = int(aPager.TotalPages())
+		rooPageIdx = uint32(0)
+	)
+
 	logger.Sugar().With(
 		"name", name,
-		"total_pages",
-		int(aPager.TotalPages()),
+		"total_pages", totalPages,
 	).Debug("initializing database")
 
-	// rooPageIdx := uint32(0)
+	if totalPages == 0 {
+		logger.Sugar().With(
+			"name", minisql.SchemaTableName,
+			"root_page", rooPageIdx,
+		).Debug("creating main schema table")
 
-	// // Get the root page
-	// aRootPage, err := aDatabase.pager.GetPage(ctx, SchemaTableName, rooPageIdx)
-	// if err != nil {
-	// 	return nil, err
-	// }
+		// New database, need to create the main schema table
+		mainTable := minisql.NewTable(
+			logger,
+			minisql.SchemaTableName,
+			mainTableColumns,
+			aPager,
+			rooPageIdx,
+		)
+		aDatabase.tables[minisql.SchemaTableName] = mainTable
 
-	// if aRootPage.nextOffset == 0 {
-	// 	aTable, err := aDatabase.CreateTable(ctx, SchemaTableName, schemaTableColumns)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
+		// And save record of itself
+		if err := mainTable.Insert(ctx, minisql.Statement{
+			Kind:      minisql.Insert,
+			TableName: mainTable.Name,
+			Columns:   mainTable.Columns,
+			Fields: []string{
+				"type",
+				"name",
+				"root_page",
+				"sql",
+			},
+			Inserts: [][]minisql.OptionalValue{
+				{
+					{Value: int32(SchemaTable), Valid: true},           // type (only 0 supported now)
+					{Value: mainTable.Name, Valid: true},               // name
+					{Value: int32(mainTable.RootPageIdx), Valid: true}, // root page
+					{Value: mainTableSQL, Valid: true},                 // sql
+				},
+			},
+		}); err != nil {
+			return nil, err
+		}
 
-	// 	// If this is a new database, insert its first row minisql_main's root page will be 0.
-	// 	_, err = aTable.Insert(ctx, Statement{
-	// 		Kind:      Insert,
-	// 		TableName: aTable.Name,
-	// 		Fields: []string{
-	// 			"type",
-	// 			"name",
-	// 			"table_name",
-	// 			"root_page",
-	// 			"sql",
-	// 		},
-	// 		Inserts: [][]any{{
-	// 			int32(SchemaTable), // type (only 0 supported now)
-	// 			SchemaTableName,    // name
-	// 			SchemaTableName,    // table name
-	// 			rooPageIdx,         // root page
-	// 			schemaTableSQL,     // sql
-	// 		}},
-	// 	})
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// 	return aDatabase, nil
-	// } else {
-	// 	aDatabase.tables[SchemaTableName] = NewTable(SchemaTableName, schemaTableColumns, aPager, rooPageIdx)
-	// }
+		if err := aPager.Flush(ctx, mainTable.RootPageIdx, minisql.PageSize); err != nil {
+			return nil, err
+		}
 
-	// // Otherwise we need to read all existing tables from the schema table
-	// aTable := aDatabase.tables[SchemaTableName]
-	// aResult, err := aTable.Select(ctx, Statement{
-	// 	Kind:      Select,
-	// 	TableName: aTable.Name,
-	// 	Fields: []string{
-	// 		"type",
-	// 		"table_name",
-	// 		"root_page",
-	// 		"sql",
-	// 	},
-	// })
-	// if err != nil {
-	// 	return nil, err
-	// }
+		return aDatabase, nil
+	}
 
-	// aRow, err := aResult.Rows(ctx)
-	// for err != ErrNoMoreRows {
-	// 	if aRow.Values[1] == SchemaTableName {
-	// 		continue
-	// 	}
+	// Otherwise, main table already exists,
+	// we need to read all existing tables from the schema table
+	mainTable := minisql.NewTable(
+		logger,
+		minisql.SchemaTableName,
+		mainTableColumns,
+		aPager,
+		rooPageIdx,
+	)
+	aDatabase.tables[mainTable.Name] = mainTable
+	aResult, err := mainTable.Select(ctx, minisql.Statement{
+		Kind:      minisql.Select,
+		TableName: mainTable.Name,
+		Columns:   mainTable.Columns,
+		Fields: []string{
+			"type",
+			"name",
+			"root_page",
+			"sql",
+		},
+		Conditions: minisql.FieldIsNotIn("name", minisql.QuotedString, mainTable.Name), // skip self
+	})
+	if err != nil {
+		return nil, err
+	}
 
-	// 	stmt, err := aParser.Parse(ctx, aRow.Values[3].(string))
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// 	aDatabase.tables[stmt.TableName] = NewTable(
-	// 		stmt.TableName,
-	// 		stmt.Columns,
-	// 		aPager,
-	// 		aRow.Values[2].(uint32),
-	// 	)
+	aRow, err := aResult.Rows(ctx)
+	for ; err == nil; aRow, err = aResult.Rows(ctx) {
+		stmt, err := aParser.Parse(ctx, aRow.Values[3].Value.(string))
+		if err != nil {
+			return nil, err
+		}
+		aDatabase.tables[stmt.TableName] = minisql.NewTable(
+			logger,
+			stmt.TableName,
+			stmt.Columns,
+			aPager,
+			uint32(aRow.Values[2].Value.(int32)),
+		)
 
-	// 	aRow, err = aResult.Rows(ctx)
-	// }
+		logger.Sugar().With(
+			"name", stmt.TableName,
+			"root_page", uint32(aRow.Values[2].Value.(int32)),
+		).Debug("loaded table")
+	}
 
 	return aDatabase, nil
 }
 
-func (d *Database) CreateTestTable() {
-	columns := []minisql.Column{
-		{
-			Kind: minisql.Int8,
-			Size: 8,
-			Name: "id",
-		},
-		{
-			Kind: minisql.Varchar,
-			Size: 255,
-			Name: "email",
-		},
-		{
-			Kind: minisql.Int4,
-			Size: 4,
-			Name: "age",
-		},
-	}
-	d.tables["foo"] = minisql.NewTable(d.logger, "foo", columns, d.pager, uint32(0))
-}
-
 func (d *Database) Close(ctx context.Context) error {
-	if len(d.tables) > 1 {
-		return fmt.Errorf("currently only single table is supported")
-	}
-
 	for pageIdx := uint32(0); pageIdx < d.pager.TotalPages(); pageIdx++ {
+		d.logger.Sugar().With(
+			"page", pageIdx,
+		).Debug("flushing page to disk")
 		if err := d.pager.Flush(ctx, pageIdx, minisql.PageSize); err != nil {
 			return err
 		}
@@ -247,20 +247,61 @@ func (d *Database) CreateTable(ctx context.Context, name string, columns []minis
 		return nil, fmt.Errorf("maximum number of columns is %d", minisql.MaxColumns)
 	}
 
-	if len(d.tables) == 1 {
-		return nil, fmt.Errorf("currently only single table is supported")
-	}
-
 	// TODO - check row size, currently no row overflowing a page is supported
 	// so we need to return an error for such table DDLs
 
-	aTable, ok := d.tables[name]
+	_, ok := d.tables[name]
 	if ok {
-		return aTable, errTableAlreadyExists
+		return nil, errTableAlreadyExists
 	}
-	d.tables[name] = minisql.NewTable(d.logger, name, columns, d.pager, uint32(0))
 
-	// TODO - insert into main schema table
+	// Save table record into minisql_schema system table
+	mainTable := d.tables[minisql.SchemaTableName]
+	if err := mainTable.Insert(ctx, minisql.Statement{
+		Kind:      minisql.Insert,
+		TableName: mainTable.Name,
+		Columns:   mainTable.Columns,
+		Fields: []string{
+			"type",
+			"name",
+			"root_page",
+			"sql",
+		},
+		Inserts: [][]minisql.OptionalValue{
+			{
+				{Value: int32(SchemaTable), Valid: true},              // type (only 0 supported now)
+				{Value: name, Valid: true},                            // name
+				{Valid: false},                                        // update later, we don't know root page yet
+				{Value: "create table todo (todo int4)", Valid: true}, // TODO - store actual SQL of the table
+			},
+		},
+	}); err != nil {
+		return nil, err
+	}
+
+	// Now let's create the actual table, inserting into the system table might have
+	// caused a split and new page being created, so now we know what the root page
+	// for the new table should be.
+	d.tables[name] = minisql.NewTable(
+		d.logger,
+		name,
+		columns,
+		d.pager,
+		d.pager.TotalPages(),
+	)
+
+	_, err := mainTable.Update(ctx, minisql.Statement{
+		Kind:      minisql.Update,
+		TableName: mainTable.Name,
+		Columns:   mainTable.Columns,
+		Updates: map[string]minisql.OptionalValue{
+			"root_page": {Value: int32(d.tables[name].RootPageIdx), Valid: true},
+		},
+		Conditions: minisql.FieldIsIn("name", minisql.QuotedString, name),
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	return d.tables[name], nil
 }

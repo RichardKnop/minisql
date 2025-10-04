@@ -26,11 +26,9 @@ func TestTable_Update(t *testing.T) {
 
 	// Batch insert test rows
 	insertStmt := Statement{
-		Kind:      Insert,
-		TableName: aTable.Name,
-		Columns:   aTable.Columns,
-		Fields:    columnNames(testColumns...),
-		Inserts:   [][]OptionalValue{},
+		Kind:    Insert,
+		Fields:  columnNames(testColumns...),
+		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
 		insertStmt.Inserts = append(insertStmt.Inserts, aRow.Values)
@@ -41,8 +39,7 @@ func TestTable_Update(t *testing.T) {
 
 	t.Run("Update no rows", func(t *testing.T) {
 		stmt := Statement{
-			Kind:      Update,
-			TableName: aTable.Name,
+			Kind: Update,
 			Updates: map[string]OptionalValue{
 				"email": {Value: "updatednone@foo.bar", Valid: true},
 			},
@@ -72,26 +69,11 @@ func TestTable_Update(t *testing.T) {
 
 	t.Run("Update single row", func(t *testing.T) {
 		stmt := Statement{
-			Kind:      Update,
-			TableName: aTable.Name,
+			Kind: Update,
 			Updates: map[string]OptionalValue{
 				"email": {Value: "updatedsingle@foo.bar", Valid: true},
 			},
-			Conditions: OneOrMore{
-				{
-					{
-						Operand1: Operand{
-							Type:  Field,
-							Value: "id",
-						},
-						Operator: Eq,
-						Operand2: Operand{
-							Type:  Integer,
-							Value: rows[5].Values[0].Value.(int64),
-						},
-					},
-				},
-			},
+			Conditions: FieldIsIn("id", Integer, rows[5].Values[0].Value.(int64)),
 		}
 
 		aResult, err := aTable.Update(ctx, stmt)
@@ -114,26 +96,11 @@ func TestTable_Update(t *testing.T) {
 
 	t.Run("Update single row, set column to NULL", func(t *testing.T) {
 		stmt := Statement{
-			Kind:      Update,
-			TableName: aTable.Name,
+			Kind: Update,
 			Updates: map[string]OptionalValue{
 				"email": {Valid: false},
 			},
-			Conditions: OneOrMore{
-				{
-					{
-						Operand1: Operand{
-							Type:  Field,
-							Value: "id",
-						},
-						Operator: Eq,
-						Operand2: Operand{
-							Type:  Integer,
-							Value: rows[18].Values[0].Value.(int64),
-						},
-					},
-				},
-			},
+			Conditions: FieldIsIn("id", Integer, rows[18].Values[0].Value.(int64)),
 		}
 
 		aResult, err := aTable.Update(ctx, stmt)
@@ -159,8 +126,7 @@ func TestTable_Update(t *testing.T) {
 
 	t.Run("Update all rows", func(t *testing.T) {
 		stmt := Statement{
-			Kind:      Update,
-			TableName: aTable.Name,
+			Kind: Update,
 			Updates: map[string]OptionalValue{
 				"email": {Value: "updatedall@foo.bar", Valid: true},
 			},
