@@ -51,7 +51,7 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 		defer close(out)
 		for aRow := range in {
 			if len(conditions) == 0 {
-				out <- aRow.key
+				out <- aRow.Key
 				continue
 			}
 			ok, err := aRow.CheckOneOrMore(conditions)
@@ -60,7 +60,7 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 				return
 			}
 			if ok {
-				out <- aRow.key
+				out <- aRow.Key
 			}
 		}
 	}(unfilteredPipe, filteredPipe, stmt.Conditions)

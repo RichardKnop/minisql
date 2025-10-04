@@ -21,13 +21,13 @@ func TestTable_Update(t *testing.T) {
 	var (
 		ctx    = context.Background()
 		rows   = gen.Rows(38)
-		aTable = NewTable(testLogger, "foo", testColumns, aPager, 0)
+		aTable = NewTable(testLogger, testTableName, testColumns, aPager, 0)
 	)
 
 	// Batch insert test rows
 	insertStmt := Statement{
 		Kind:      Insert,
-		TableName: "foo",
+		TableName: aTable.Name,
 		Columns:   aTable.Columns,
 		Fields:    columnNames(testColumns...),
 		Inserts:   [][]OptionalValue{},
@@ -39,119 +39,145 @@ func TestTable_Update(t *testing.T) {
 	err = aTable.Insert(ctx, insertStmt)
 	require.NoError(t, err)
 
-	// Prepare expected rows for test cases
-	singleUpdatedRow := make([]Row, 0, len(rows))
-	for i, aRow := range rows {
-		expectedRow := aRow.Clone()
-		if i == 5 {
-			expectedRow.SetValue("email", OptionalValue{Value: "updatedsingle@foo.bar", Valid: true})
+	t.Run("Update no rows", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Update,
+			TableName: aTable.Name,
+			Updates: map[string]OptionalValue{
+				"email": {Value: "updatednone@foo.bar", Valid: true},
+			},
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  Field,
+							Value: "email",
+						},
+						Operator: Eq,
+						Operand2: Operand{
+							Type:  QuotedString,
+							Value: "bogus",
+						},
+					},
+				},
+			},
 		}
 
-		singleUpdatedRow = append(singleUpdatedRow, expectedRow)
-	}
+		aResult, err := aTable.Update(ctx, stmt)
+		require.NoError(t, err)
+		assert.Equal(t, 0, aResult.RowsAffected)
 
-	allUpdatedRows := make([]Row, 0, len(rows))
-	for _, aRow := range rows {
-		expectedRow := aRow.Clone()
-		expectedRow.SetValue("email", OptionalValue{Value: "updatedall@foo.bar", Valid: true})
-		allUpdatedRows = append(allUpdatedRows, expectedRow)
-	}
+		checkRows(ctx, t, aTable, rows)
+	})
 
-	testCases := []struct {
-		Name         string
-		Stmt         Statement
-		RowsAffected int
-		Expected     []Row
-	}{
-		{
-			"Update single row",
-			Statement{
-				Kind:      Update,
-				TableName: "foo",
-				Updates: map[string]OptionalValue{
-					"email": {Value: "updatedsingle@foo.bar", Valid: true},
-				},
-				Conditions: OneOrMore{
+	t.Run("Update single row", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Update,
+			TableName: aTable.Name,
+			Updates: map[string]OptionalValue{
+				"email": {Value: "updatedsingle@foo.bar", Valid: true},
+			},
+			Conditions: OneOrMore{
+				{
 					{
-						{
-							Operand1: Operand{
-								Type:  Field,
-								Value: "id",
-							},
-							Operator: Eq,
-							Operand2: Operand{
-								Type:  Integer,
-								Value: rows[5].Values[0].Value.(int64),
-							},
+						Operand1: Operand{
+							Type:  Field,
+							Value: "id",
+						},
+						Operator: Eq,
+						Operand2: Operand{
+							Type:  Integer,
+							Value: rows[5].Values[0].Value.(int64),
 						},
 					},
 				},
 			},
-			1,
-			singleUpdatedRow,
-		},
-		{
-			"Update all rows",
-			Statement{
-				Kind:      Update,
-				TableName: "foo",
-				Updates: map[string]OptionalValue{
-					"email": {Value: "updatedall@foo.bar", Valid: true},
-				},
-			},
-			38,
-			allUpdatedRows,
-		},
-		{
-			"Update no rows",
-			Statement{
-				Kind:      Update,
-				TableName: "foo",
-				Updates: map[string]OptionalValue{
-					"email": {Value: "updatednone@foo.bar", Valid: true},
-				},
-				Conditions: OneOrMore{
-					{
-						{
-							Operand1: Operand{
-								Type:  Field,
-								Value: "email",
-							},
-							Operator: Eq,
-							Operand2: Operand{
-								Type:  QuotedString,
-								Value: "bogus",
-							},
-						},
-					},
-				},
-			},
-			0,
-			allUpdatedRows,
-		},
-	}
+		}
 
-	for _, aTestCase := range testCases {
-		t.Run(aTestCase.Name, func(t *testing.T) {
-			aResult, err := aTable.Update(ctx, aTestCase.Stmt)
-			require.NoError(t, err)
-			assert.Equal(t, aTestCase.RowsAffected, aResult.RowsAffected)
+		aResult, err := aTable.Update(ctx, stmt)
+		require.NoError(t, err)
+		assert.Equal(t, 1, aResult.RowsAffected)
 
-			aResult, err = aTable.Select(ctx, Statement{
-				Kind:      Select,
-				TableName: "foo",
-				Fields:    columnNames(testColumns...),
-			})
-			require.NoError(t, err)
-
-			// Use iterator to collect all rows
-			actual := []Row{}
-			aRow, err := aResult.Rows(ctx)
-			for ; err == nil; aRow, err = aResult.Rows(ctx) {
-				actual = append(actual, aRow)
+		// Prepare expected rows with one updated row
+		expected := make([]Row, 0, len(rows))
+		for i, aRow := range rows {
+			expectedRow := aRow.Clone()
+			if i == 5 {
+				expectedRow.SetValue("email", OptionalValue{Value: "updatedsingle@foo.bar", Valid: true})
 			}
 
-			assert.Equal(t, aTestCase.Expected, actual)
-		})
-	}
+			expected = append(expected, expectedRow)
+		}
+
+		checkRows(ctx, t, aTable, expected)
+	})
+
+	t.Run("Update single row, set column to NULL", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Update,
+			TableName: aTable.Name,
+			Updates: map[string]OptionalValue{
+				"email": {Valid: false},
+			},
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  Field,
+							Value: "id",
+						},
+						Operator: Eq,
+						Operand2: Operand{
+							Type:  Integer,
+							Value: rows[18].Values[0].Value.(int64),
+						},
+					},
+				},
+			},
+		}
+
+		aResult, err := aTable.Update(ctx, stmt)
+		require.NoError(t, err)
+		assert.Equal(t, 1, aResult.RowsAffected)
+
+		// Prepare expected rows with one updated row
+		expected := make([]Row, 0, len(rows))
+		for i, aRow := range rows {
+			expectedRow := aRow.Clone()
+			if i == 5 {
+				expectedRow.SetValue("email", OptionalValue{Value: "updatedsingle@foo.bar", Valid: true})
+			}
+			if i == 18 {
+				expectedRow.SetValue("email", OptionalValue{Valid: false})
+			}
+
+			expected = append(expected, expectedRow)
+		}
+
+		checkRows(ctx, t, aTable, expected)
+	})
+
+	t.Run("Update all rows", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Update,
+			TableName: aTable.Name,
+			Updates: map[string]OptionalValue{
+				"email": {Value: "updatedall@foo.bar", Valid: true},
+			},
+		}
+
+		aResult, err := aTable.Update(ctx, stmt)
+		require.NoError(t, err)
+		assert.Equal(t, 38, aResult.RowsAffected)
+
+		// Prepare expected rows with all rows updated
+		expected := make([]Row, 0, len(rows))
+		for _, aRow := range rows {
+			expectedRow := aRow.Clone()
+			expectedRow.SetValue("email", OptionalValue{Value: "updatedall@foo.bar", Valid: true})
+			expected = append(expected, expectedRow)
+		}
+
+		checkRows(ctx, t, aTable, expected)
+	})
 }

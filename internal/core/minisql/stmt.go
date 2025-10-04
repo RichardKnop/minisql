@@ -121,6 +121,40 @@ func FieldIsIn(fieldName string, operandType OperandType, values ...any) OneOrMo
 	return oneOrMore
 }
 
+func FieldIsNull(fieldName string) OneOrMore {
+	return OneOrMore{
+		{
+			{
+				Operand1: Operand{
+					Type:  Field,
+					Value: fieldName,
+				},
+				Operator: Eq,
+				Operand2: Operand{
+					Type: Null,
+				},
+			},
+		},
+	}
+}
+
+func FieldIsNotNull(fieldName string) OneOrMore {
+	return OneOrMore{
+		{
+			{
+				Operand1: Operand{
+					Type:  Field,
+					Value: fieldName,
+				},
+				Operator: Ne,
+				Operand2: Operand{
+					Type: Null,
+				},
+			},
+		},
+	}
+}
+
 type StatementKind int
 
 const (
@@ -196,9 +230,12 @@ func (s Statement) Validate(aTable *Table) error {
 				if !anInsert[i].Valid && !aColumn.Nullable {
 					return fmt.Errorf("field %q cannot be NULL", aField)
 				}
-				if aColumn.Kind == Varchar && !utf8.ValidString(anInsert[i].Value.(string)) {
-					return fmt.Errorf("field %q expects valid UTF-8 string", aField)
+				if anInsert[i].Valid {
+					if aColumn.Kind == Varchar && !utf8.ValidString(anInsert[i].Value.(string)) {
+						return fmt.Errorf("field %q expects valid UTF-8 string", aField)
+					}
 				}
+
 			}
 		}
 		return nil

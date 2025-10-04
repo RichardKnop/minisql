@@ -13,9 +13,9 @@ type OptionalValue struct {
 }
 
 type Row struct {
+	Key     uint64
 	Columns []Column
 	Values  []OptionalValue
-	key     uint64
 	// for updates, we store cursor internally
 	cursor Cursor
 }
@@ -95,7 +95,7 @@ func (r Row) Clone() Row {
 	aClone := Row{
 		Columns: make([]Column, 0, len(r.Columns)),
 		Values:  make([]OptionalValue, 0, len(r.Values)),
-		key:     r.key,
+		Key:     r.Key,
 	}
 	aClone.Columns = append(aClone.Columns, r.Columns...)
 	aClone.Values = append(aClone.Values, r.Values...)
@@ -137,6 +137,11 @@ func (r *Row) Marshal() ([]byte, error) {
 
 	for i, aColumn := range r.Columns {
 		offset := r.columnOffset(i)
+		if !r.Values[i].Valid {
+			src := make([]byte, aColumn.Size)
+			copy(buf[offset:], src)
+			continue
+		}
 		switch aColumn.Kind {
 		case Boolean:
 			value, ok := r.Values[i].Value.(bool)
@@ -181,11 +186,11 @@ func (r *Row) Marshal() ([]byte, error) {
 			}
 			marshalFloat64(buf, value, uint64(offset))
 		case Varchar:
+			src := make([]byte, aColumn.Size)
 			value, ok := r.Values[i].Value.(string)
 			if !ok {
 				return nil, fmt.Errorf("could not cast value to string")
 			}
-			src := make([]byte, len(value))
 			copy(src, []byte(value))
 			copy(buf[offset:], src)
 		}
@@ -194,27 +199,32 @@ func (r *Row) Marshal() ([]byte, error) {
 	return buf, nil
 }
 
-func UnmarshalRow(buf []byte, aRow *Row) error {
+func UnmarshalRow(aCell Cell, aRow *Row) error {
+	aRow.Key = aCell.Key
 	aRow.Values = make([]OptionalValue, 0, len(aRow.Columns))
 	for i, aColumn := range aRow.Columns {
+		if bitwise.IsSet(aCell.NullBitmask, i) {
+			aRow.Values = append(aRow.Values, OptionalValue{Valid: false})
+			continue
+		}
 		offset := aRow.columnOffset(i)
 		switch aColumn.Kind {
 		case Boolean:
-			value := (uint32(buf[offset+0+0]) << 0)
+			value := (uint32(aCell.Value[:][offset+0+0]) << 0)
 			aRow.Values = append(aRow.Values, OptionalValue{Value: value == uint32(1), Valid: true})
 		case Int4:
-			value := unmarshalInt32(buf, uint64(offset))
+			value := unmarshalInt32(aCell.Value[:], uint64(offset))
 			aRow.Values = append(aRow.Values, OptionalValue{Value: int32(value), Valid: true})
 		case Int8:
-			value := unmarshalInt64(buf, uint64(offset))
+			value := unmarshalInt64(aCell.Value[:], uint64(offset))
 			aRow.Values = append(aRow.Values, OptionalValue{Value: int64(value), Valid: true})
 		case Real:
-			aRow.Values = append(aRow.Values, OptionalValue{Value: unmarshalFloat32(buf, uint64(offset)), Valid: true})
+			aRow.Values = append(aRow.Values, OptionalValue{Value: unmarshalFloat32(aCell.Value[:], uint64(offset)), Valid: true})
 		case Double:
-			aRow.Values = append(aRow.Values, OptionalValue{Value: unmarshalFloat64(buf, uint64(offset)), Valid: true})
+			aRow.Values = append(aRow.Values, OptionalValue{Value: unmarshalFloat64(aCell.Value[:], uint64(offset)), Valid: true})
 		case Varchar:
 			dst := make([]byte, aColumn.Size)
-			copy(dst, buf[offset:offset+aColumn.Size])
+			copy(dst, aCell.Value[:][offset:offset+aColumn.Size])
 			aRow.Values = append(aRow.Values, OptionalValue{Value: string(bytes.Trim(dst, "\x00")), Valid: true})
 		}
 	}
@@ -252,6 +262,7 @@ func (r Row) CheckOneOrMore(conditions OneOrMore) (bool, error) {
 }
 
 func (r Row) checkCondition(aCondition Condition) (bool, error) {
+
 	// left side is field, right side is literal value
 	if aCondition.Operand1.IsField() && !aCondition.Operand2.IsField() {
 		return r.compareFieldValue(aCondition.Operand1, aCondition.Operand2, aCondition.Operator)
@@ -286,6 +297,17 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 	value, ok := r.GetValue(aColumn.Name)
 	if !ok {
 		return false, fmt.Errorf("row does not have '%s' column", name)
+	}
+
+	if valueOperand.Type == Null {
+		switch operator {
+		case Eq:
+			return !value.Valid, nil
+		case Ne:
+			return value.Valid, nil
+		default:
+			return false, fmt.Errorf("only '=' and '!=' operators supported when comparing against NULL")
+		}
 	}
 
 	switch aColumn.Kind {

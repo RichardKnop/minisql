@@ -6,9 +6,12 @@ import (
 	"os"
 	"testing"
 
+	"github.com/RichardKnop/minisql/pkg/bitwise"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var testTableName = "test_table"
 
 func TestTable_Insert(t *testing.T) {
 	t.Parallel()
@@ -21,28 +24,57 @@ func TestTable_Insert(t *testing.T) {
 
 	var (
 		ctx    = context.Background()
-		aRow   = gen.Row()
-		aTable = NewTable(testLogger, "foo", testColumns, aPager, 0)
+		rows   = gen.Rows(2)
+		aTable = NewTable(testLogger, testTableName, testColumns, aPager, 0)
 	)
 
-	stmt := Statement{
-		Kind:      Insert,
-		TableName: "foo",
-		Columns:   aTable.Columns,
-		Fields:    columnNames(testColumns...),
-		Inserts:   [][]OptionalValue{aRow.Values},
-	}
+	t.Run("Insert row with all NOT NULL values", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Insert,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    columnNames(testColumns...),
+			Inserts:   [][]OptionalValue{rows[0].Values},
+		}
 
-	err = aTable.Insert(ctx, stmt)
-	require.NoError(t, err)
+		err = aTable.Insert(ctx, stmt)
+		require.NoError(t, err)
 
-	assert.Equal(t, 1, int(aPager.pages[0].LeafNode.Header.Cells))
-	assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Cells[0].Key))
+		assert.Equal(t, 1, int(aPager.pages[0].LeafNode.Header.Cells))
+		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Cells[0].Key))
 
-	actualRow := NewRow(aRow.Columns)
-	err = UnmarshalRow(aPager.pages[0].LeafNode.Cells[0].Value, &actualRow)
-	require.NoError(t, err)
-	assert.Equal(t, aRow, actualRow)
+		actualRow := NewRow(rows[0].Columns)
+		err = UnmarshalRow(aPager.pages[0].LeafNode.Cells[0], &actualRow)
+		require.NoError(t, err)
+		assert.Equal(t, rows[0], actualRow)
+		assert.Equal(t, rows[0].NullBitmask(), actualRow.NullBitmask())
+		assert.Equal(t, uint64(0), actualRow.NullBitmask())
+	})
+
+	t.Run("Insert row with NULL value", func(t *testing.T) {
+		rows[1].Values[1] = OptionalValue{Valid: false} // set second column to NULL
+		stmt := Statement{
+			Kind:      Insert,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    columnNames(testColumns...),
+			Inserts:   [][]OptionalValue{rows[1].Values},
+		}
+
+		err = aTable.Insert(ctx, stmt)
+		require.NoError(t, err)
+
+		assert.Equal(t, 2, int(aPager.pages[0].LeafNode.Header.Cells))
+		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Cells[0].Key))
+		assert.Equal(t, 1, int(aPager.pages[0].LeafNode.Cells[1].Key))
+
+		actualRow := NewRow(rows[1].Columns)
+		err = UnmarshalRow(aPager.pages[0].LeafNode.Cells[1], &actualRow)
+		require.NoError(t, err)
+		assert.Equal(t, rows[1], actualRow)
+		assert.Equal(t, rows[1].NullBitmask(), actualRow.NullBitmask())
+		assert.Equal(t, bitwise.Set(uint64(0), 1), actualRow.NullBitmask())
+	})
 }
 
 func TestTable_Insert_MultiInsert(t *testing.T) {
@@ -55,17 +87,19 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 	require.NoError(t, err)
 
 	var (
-		ctx                = context.Background()
-		aRow, aRow2, aRow3 = gen.Row(), gen.Row(), gen.Row()
-		aTable             = NewTable(testLogger, "foo", testColumns, aPager, 0)
+		ctx    = context.Background()
+		rows   = gen.Rows(3)
+		aTable = NewTable(testLogger, testTableName, testColumns, aPager, 0)
 	)
 
 	stmt := Statement{
 		Kind:      Insert,
-		TableName: "foo",
+		TableName: aTable.Name,
 		Columns:   aTable.Columns,
 		Fields:    columnNames(testColumns...),
-		Inserts:   [][]OptionalValue{aRow.Values, aRow2.Values, aRow3.Values},
+	}
+	for _, aRow := range rows {
+		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
 	err = aTable.Insert(ctx, stmt)
@@ -76,20 +110,7 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 	assert.Equal(t, 1, int(aPager.pages[0].LeafNode.Cells[1].Key))
 	assert.Equal(t, 2, int(aPager.pages[0].LeafNode.Cells[2].Key))
 
-	actualRow := NewRow(aRow.Columns)
-	err = UnmarshalRow(aPager.pages[0].LeafNode.Cells[0].Value, &actualRow)
-	require.NoError(t, err)
-	assert.Equal(t, aRow, actualRow)
-
-	actualRow2 := NewRow(aRow.Columns)
-	err = UnmarshalRow(aPager.pages[0].LeafNode.Cells[1].Value, &actualRow2)
-	require.NoError(t, err)
-	assert.Equal(t, aRow2, actualRow2)
-
-	actualRow3 := NewRow(aRow.Columns)
-	err = UnmarshalRow(aPager.pages[0].LeafNode.Cells[2].Value, &actualRow3)
-	require.NoError(t, err)
-	assert.Equal(t, aRow3, actualRow3)
+	checkRows(ctx, t, aTable, rows)
 }
 
 func TestTable_Insert_SplitRootLeaf(t *testing.T) {
@@ -104,12 +125,12 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 	var (
 		ctx    = context.Background()
 		rows   = gen.MediumRows(6)
-		aTable = NewTable(testLogger, "foo", testMediumColumns, aPager, 0)
+		aTable = NewTable(testLogger, testTableName, testMediumColumns, aPager, 0)
 	)
 
 	stmt := Statement{
 		Kind:      Insert,
-		TableName: "foo",
+		TableName: aTable.Name,
 		Columns:   aTable.Columns,
 		Fields:    columnNames(testMediumColumns...),
 	}
@@ -120,7 +141,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 	err = aTable.Insert(ctx, stmt)
 	require.NoError(t, err)
 
-	require.NoError(t, printTree(aTable))
+	//require.NoError(t, printTree(aTable))
 
 	assert.Equal(t, 1, int(aPager.pages[0].InternalNode.Header.KeysNum))
 	assert.True(t, aPager.pages[0].InternalNode.Header.IsRoot)
@@ -170,13 +191,13 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 	var (
 		ctx    = context.Background()
 		rows   = gen.BigRows(4)
-		aTable = NewTable(testLogger, "foo", testBigColumns, aPager, 0)
+		aTable = NewTable(testLogger, testTableName, testBigColumns, aPager, 0)
 	)
 
 	// Batch insert test rows
 	stmt := Statement{
 		Kind:      Insert,
-		TableName: "foo",
+		TableName: aTable.Name,
 		Columns:   aTable.Columns,
 		Fields:    columnNames(testBigColumns...),
 		Inserts:   [][]OptionalValue{},
@@ -188,7 +209,7 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 	err = aTable.Insert(ctx, stmt)
 	require.NoError(t, err)
 
-	require.NoError(t, printTree(aTable))
+	//require.NoError(t, printTree(aTable))
 
 	// Assert root node
 	aRootPage := aPager.pages[0]
@@ -237,13 +258,13 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		ctx     = context.Background()
 		numRows = InternalNodeMaxCells + 2
 		rows    = gen.BigRows(numRows)
-		aTable  = NewTable(testLogger, "foo", testBigColumns, aPager, 0)
+		aTable  = NewTable(testLogger, testTableName, testBigColumns, aPager, 0)
 	)
 
 	// Batch insert test rows
 	stmt := Statement{
 		Kind:      Insert,
-		TableName: "foo",
+		TableName: aTable.Name,
 		Columns:   aTable.Columns,
 		Fields:    columnNames(testBigColumns...),
 		Inserts:   [][]OptionalValue{},
@@ -314,4 +335,18 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 			assert.Equal(t, 343, int(aLeaf.LeafNode.Header.Parent), fmt.Sprintf("parent not 343 %d", i))
 		}
 	}
+}
+
+func printTree(aTable *Table) error {
+	return aTable.BFS(func(aPage *Page) {
+		if aPage.InternalNode != nil {
+			fmt.Println("Internal node,", "page:", aPage.Index, "number of keys:", aPage.InternalNode.Header.KeysNum, "parent:", aPage.InternalNode.Header.Parent)
+			fmt.Println("Keys:", aPage.InternalNode.Keys())
+			fmt.Println("Children:", aPage.InternalNode.Children())
+		} else {
+			fmt.Println("Leaf node,", "page:", aPage.Index, "number of cells:", aPage.LeafNode.Header.Cells, "parent:", aPage.LeafNode.Header.Parent, "next leaf:", aPage.LeafNode.Header.NextLeaf)
+			fmt.Println("Keys:", aPage.LeafNode.Keys())
+		}
+		fmt.Println("---------")
+	})
 }

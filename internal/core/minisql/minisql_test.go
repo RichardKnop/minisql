@@ -23,29 +23,34 @@ var (
 			Name: "id",
 		},
 		{
-			Kind: Varchar,
-			Size: 255,
-			Name: "email",
+			Kind:     Varchar,
+			Size:     255,
+			Name:     "email",
+			Nullable: true,
 		},
 		{
-			Kind: Int4,
-			Size: 4,
-			Name: "age",
+			Kind:     Int4,
+			Size:     4,
+			Name:     "age",
+			Nullable: true,
 		},
 		{
-			Kind: Boolean,
-			Size: 1,
-			Name: "verified",
+			Kind:     Boolean,
+			Size:     1,
+			Name:     "verified",
+			Nullable: true,
 		},
 		{
-			Kind: Real,
-			Size: 4,
-			Name: "test_real",
+			Kind:     Real,
+			Size:     4,
+			Name:     "test_real",
+			Nullable: true,
 		},
 		{
-			Kind: Double,
-			Size: 8,
-			Name: "test_double",
+			Kind:     Double,
+			Size:     8,
+			Name:     "test_double",
+			Nullable: true,
 		},
 	}
 
@@ -56,35 +61,41 @@ var (
 			Name: "id",
 		},
 		{
-			Kind: Varchar,
-			Size: 255,
-			Name: "email",
+			Kind:     Varchar,
+			Size:     255,
+			Name:     "email",
+			Nullable: true,
 		},
 		{
-			Kind: Int4,
-			Size: 4,
-			Name: "age",
+			Kind:     Int4,
+			Size:     4,
+			Name:     "age",
+			Nullable: true,
 		},
 		{
-			Kind: Boolean,
-			Size: 1,
-			Name: "verified",
+			Kind:     Boolean,
+			Size:     1,
+			Name:     "verified",
+			Nullable: true,
 		},
 		{
-			Kind: Real,
-			Size: 4,
-			Name: "test_real",
+			Kind:     Real,
+			Size:     4,
+			Name:     "test_real",
+			Nullable: true,
 		},
 		{
-			Kind: Double,
-			Size: 8,
-			Name: "test_double",
+			Kind:     Double,
+			Size:     8,
+			Name:     "test_double",
+			Nullable: true,
 		},
 		{
 			Kind: Varchar,
 			// Size is defined so 5 of these columns can fit into a single page
-			Size: (PageSize - 6 - 8 - 5*8 - 5*8 - 5*(8+255+4+1+4+8)) / 5,
-			Name: "test_varchar",
+			Size:     (PageSize - 6 - 8 - 5*8 - 5*8 - 5*(8+255+4+1+4+8)) / 5,
+			Name:     "test_varchar",
+			Nullable: true,
 		},
 	}
 
@@ -95,34 +106,40 @@ var (
 			Name: "id",
 		},
 		{
-			Kind: Varchar,
-			Size: 255,
-			Name: "email",
+			Kind:     Varchar,
+			Size:     255,
+			Name:     "email",
+			Nullable: true,
 		},
 		{
-			Kind: Int4,
-			Size: 4,
-			Name: "age",
+			Kind:     Int4,
+			Size:     4,
+			Name:     "age",
+			Nullable: true,
 		},
 		{
-			Kind: Boolean,
-			Size: 1,
-			Name: "verified",
+			Kind:     Boolean,
+			Size:     1,
+			Name:     "verified",
+			Nullable: true,
 		},
 		{
-			Kind: Real,
-			Size: 4,
-			Name: "test_real",
+			Kind:     Real,
+			Size:     4,
+			Name:     "test_real",
+			Nullable: true,
 		},
 		{
-			Kind: Double,
-			Size: 8,
-			Name: "test_double",
+			Kind:     Double,
+			Size:     8,
+			Name:     "test_double",
+			Nullable: true,
 		},
 		{
-			Kind: Varchar,
-			Size: PageSize - 6 - 8 - 8 - 8 - (8 + 255 + 4 + 1 + 4 + 8),
-			Name: "test_varchar",
+			Kind:     Varchar,
+			Size:     PageSize - 6 - 8 - 8 - 8 - (8 + 255 + 4 + 1 + 4 + 8),
+			Name:     "test_varchar",
+			Nullable: true,
 		},
 	}
 
@@ -194,7 +211,7 @@ func (g *dataGen) Rows(number int) []Row {
 			aRow = g.Row()
 			_, ok = idMap[aRow.Values[0].Value.(int64)]
 		}
-		aRow.key = uint64(i)
+		aRow.Key = uint64(i)
 		rows = append(rows, aRow)
 		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
 	}
@@ -220,13 +237,14 @@ func (g *dataGen) MediumRows(number int) []Row {
 	// Make sure all rows will have unique ID, this is important in some tests
 	idMap := map[int64]struct{}{}
 	rows := make([]Row, 0, number)
-	for range number {
+	for i := range number {
 		aRow := g.MediumRow()
 		_, ok := idMap[aRow.Values[0].Value.(int64)]
 		for ok {
 			aRow = g.MediumRow()
 			_, ok = idMap[aRow.Values[0].Value.(int64)]
 		}
+		aRow.Key = uint64(i)
 		rows = append(rows, aRow)
 		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
 	}
@@ -252,13 +270,14 @@ func (g *dataGen) BigRows(number int) []Row {
 	// Make sure all rows will have unique ID, this is important in some tests
 	idMap := map[int64]struct{}{}
 	rows := make([]Row, 0, number)
-	for i := 0; i < number; i++ {
+	for i := range number {
 		aRow := g.BigRow()
 		_, ok := idMap[aRow.Values[0].Value.(int64)]
 		for ok {
 			aRow = g.BigRow()
 			_, ok = idMap[aRow.Values[0].Value.(int64)]
 		}
+		aRow.Key = uint64(i)
 		rows = append(rows, aRow)
 		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
 	}
