@@ -47,14 +47,14 @@ var (
 		},
 		{
 			Kind:     minisql.Varchar,
-			Size:     2056,
+			Size:     minisql.PageSize - 6 - 8 - 8 - 8 - (4 + 255 + 4), // use remaining space
 			Name:     "sql",
 			Nullable: true,
 		},
 	}
 )
 
-var mainTableSQL = fmt.Sprintf(`create table %s (
+var mainTableSQL = fmt.Sprintf(`create table "%s" (
 	type int4 not null,
 	table_name varchar(255) not null,
 	root_page int4,
@@ -153,9 +153,7 @@ func New(ctx context.Context, logger *zap.Logger, name string, aParser Parser, a
 	)
 	aDatabase.tables[mainTable.Name] = mainTable
 	aResult, err := mainTable.Select(ctx, minisql.Statement{
-		Kind:      minisql.Select,
-		TableName: mainTable.Name,
-		Columns:   mainTable.Columns,
+		Kind: minisql.Select,
 		Fields: []string{
 			"type",
 			"name",
@@ -242,13 +240,31 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt minisql.Statement)
 }
 
 // CreateTable creates a new table with a name and columns
-func (d *Database) CreateTable(ctx context.Context, name string, columns []minisql.Column) (*minisql.Table, error) {
+func (d *Database) CreateTable(ctx context.Context, stmt minisql.Statement) (*minisql.Table, error) {
+	name, columns := stmt.TableName, stmt.Columns
+
+	if len(name) == 0 {
+		return nil, fmt.Errorf("table name is required")
+	}
+
+	if len(columns) == 0 {
+		return nil, fmt.Errorf("at least one column is required")
+	}
+
 	if len(columns) > minisql.MaxColumns {
 		return nil, fmt.Errorf("maximum number of columns is %d", minisql.MaxColumns)
 	}
 
-	// TODO - check row size, currently no row overflowing a page is supported
-	// so we need to return an error for such table DDLs
+	rowSize := 0
+	for _, aColumn := range columns {
+		rowSize += int(aColumn.Size)
+	}
+	// Page size minus base + internal/leaf header, minus key and null bitmask
+	maximumRowSize := int(minisql.PageSize) - 6 - 8 - 8 - 8
+
+	if rowSize > maximumRowSize {
+		return nil, fmt.Errorf("row size %d exceeds maximum allowed %d", rowSize, maximumRowSize)
+	}
 
 	_, ok := d.tables[name]
 	if ok {
@@ -269,10 +285,10 @@ func (d *Database) CreateTable(ctx context.Context, name string, columns []minis
 		},
 		Inserts: [][]minisql.OptionalValue{
 			{
-				{Value: int32(SchemaTable), Valid: true},              // type (only 0 supported now)
-				{Value: name, Valid: true},                            // name
-				{Valid: false},                                        // update later, we don't know root page yet
-				{Value: "create table todo (todo int4)", Valid: true}, // TODO - store actual SQL of the table
+				{Value: int32(SchemaTable), Valid: true},    // type (only 0 supported now)
+				{Value: name, Valid: true},                  // name
+				{Valid: false},                              // update later, we don't know root page yet
+				{Value: stmt.CreateTableDDL(), Valid: true}, // TODO - store actual SQL of the table
 			},
 		},
 	}); err != nil {
@@ -322,7 +338,7 @@ func (d *Database) DropTable(ctx context.Context, name string) error {
 }
 
 func (d *Database) executeCreateTable(ctx context.Context, stmt minisql.Statement) (minisql.StatementResult, error) {
-	_, err := d.CreateTable(ctx, stmt.TableName, stmt.Columns)
+	_, err := d.CreateTable(ctx, stmt)
 	return minisql.StatementResult{}, err
 }
 

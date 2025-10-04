@@ -3,6 +3,7 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -199,14 +200,20 @@ const (
 
 func (k ColumnKind) String() string {
 	switch k {
+	case Boolean:
+		return "boolean"
 	case Int4:
-		return "Int4"
+		return "int4"
 	case Int8:
-		return "Int8"
+		return "int8"
+	case Real:
+		return "real"
+	case Double:
+		return "double"
 	case Varchar:
-		return "Varchar"
+		return "varchar"
 	default:
-		return "Unknown"
+		return "unknown"
 	}
 }
 
@@ -284,6 +291,25 @@ func (s Statement) Validate(aTable *Table) error {
 	}
 
 	return nil
+}
+
+func (stmt Statement) CreateTableDDL() string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("create table \"%s\" (\n", stmt.TableName))
+	for i, col := range stmt.Columns {
+		sb.WriteString(fmt.Sprintf("	%s %s", col.Name, col.Kind))
+		if col.Kind == Varchar {
+			sb.WriteString(fmt.Sprintf("(%d)", col.Size))
+		}
+		if !col.Nullable {
+			sb.WriteString(" not null")
+		}
+		if i < len(stmt.Columns)-1 {
+			sb.WriteString(",\n")
+		}
+	}
+	sb.WriteString("\n)")
+	return sb.String()
 }
 
 type Iterator func(ctx context.Context) (Row, error)

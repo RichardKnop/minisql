@@ -17,3 +17,12 @@ func (p *Page) setParent(parentIdx uint32) {
 		p.InternalNode.Header.Parent = parentIdx
 	}
 }
+
+func MaximumColumnSize(columns []Column) int {
+	// Page size minus base + internal/leaf header, minus key and null bitmask
+	remaining := int(PageSize) - 6 - 8 - 8 - 8
+	for _, aColumn := range columns {
+		remaining -= int(aColumn.Size)
+	}
+	return remaining
+}

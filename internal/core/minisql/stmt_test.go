@@ -228,3 +228,86 @@ func TestStatement_Validate(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+// ...existing code...
+
+func TestStatement_CreateTableDDL(t *testing.T) {
+	t.Run("table with all data types and nullable columns", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: "users",
+			Columns: []Column{
+				{
+					Kind:     Int8,
+					Size:     8,
+					Name:     "id",
+					Nullable: false,
+				},
+				{
+					Kind:     Varchar,
+					Size:     255,
+					Name:     "email",
+					Nullable: true,
+				},
+				{
+					Kind:     Int4,
+					Size:     4,
+					Name:     "age",
+					Nullable: true,
+				},
+				{
+					Kind:     Boolean,
+					Size:     1,
+					Name:     "verified",
+					Nullable: false,
+				},
+				{
+					Kind:     Real,
+					Size:     4,
+					Name:     "score",
+					Nullable: true,
+				},
+				{
+					Kind:     Double,
+					Size:     8,
+					Name:     "balance",
+					Nullable: true,
+				},
+			},
+		}
+
+		expected := `create table "users" (
+	id int8 not null,
+	email varchar(255),
+	age int4,
+	verified boolean not null,
+	score real,
+	balance double
+)`
+
+		actual := stmt.CreateTableDDL()
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("table with special characters in name", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: "test_table_123",
+			Columns: []Column{
+				{
+					Kind:     Int4,
+					Size:     4,
+					Name:     "column_with_underscore",
+					Nullable: false,
+				},
+			},
+		}
+
+		expected := `create table "test_table_123" (
+	column_with_underscore int4 not null
+)`
+
+		actual := stmt.CreateTableDDL()
+		assert.Equal(t, expected, actual)
+	})
+}

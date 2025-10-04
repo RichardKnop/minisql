@@ -124,7 +124,7 @@ todo
 Insert a row:
 
 ```sh
-minisql> insert into foo(id, email, age) values(1, 'john@example.com', 35)
+minisql> insert into users(id, name, email, age) values(1, 'John Doe', 'john@example.com', 35)
 Rows affected: 1
 minisql>
 ```
@@ -132,35 +132,39 @@ minisql>
 Insert multiple rows:
 
 ```sh
-minisql> insert into foo(id, email, age) values(2, 'jane@example.com', 32), (3, 'jack@example.com', 27)
+minisql> insert into users(id, name, email, age) values(2, 'Jane Doe', 'jane@example.com', 32), (3, 'Jack Doe', 'jack@example.com', 27)
 Rows affected: 2
-minisql>
-```
-
-Insert more than a single page worth of data:
-
-```sh
-minisql> insert into foo(id, email, age) values(1, 'john@example.com', 35), (2, 'jane@example.com', 32), (3, 'jack@example.com', 27), (4, 'jane@example.com', 32), (5, 'jack@example.com', 27), (6, 'jane@example.com', 32), (7, 'jack@example.com', 27),  (8, 'jane@example.com', 32), (9, 'jack@example.com', 27),  (10, 'jane@example.com', 32), (11, 'jack@example.com', 27),  (12, 'jane@example.com', 32), (13, 'jack@example.com', 27), (14, 'jack@example.com', 27), (15, 'jack@example.com', 27)
-Rows affected: 15
 minisql>
 ```
 
 Select from table:
 
 ```sh
-minisql> select * from foo
- id                   | email                                    | age
-----------------------+------------------------------------------+----------------------
- 1                    | john@example.com                         | 35
- 2                    | jane@example.com                         | 32
- 3                    | jack@example.com                         | 27
+minisql> select * from users
+ id                   | name                                               | email                                              | age                  
+----------------------+----------------------------------------------------+----------------------------------------------------+----------------------
+ 1                    | john doe                                           | john@example.com                                   | 35                   
+ 2                    | jane doe                                           | jane@example.com                                   | 32                   
+ 3                    | jack doe                                           | jack@example.com                                   | 27   
 minisql>
 ```
 
 Update rows:
 
 ```sh
-minisql> update foo set id = 45 where id = 75
-Rows affected: 0
+minisql> update users set age = 36 where id = 1
+Rows affected: 1
+minisql>
+```
+
+Select to verify update:
+
+```sh
+minisql> select * from users
+ id                   | name                                               | email                                              | age                  
+----------------------+----------------------------------------------------+----------------------------------------------------+----------------------
+ 1                    | john doe                                           | john@example.com                                   | 36                   
+ 2                    | jane doe                                           | jane@example.com                                   | 32                   
+ 3                    | jack doe                                           | jack@example.com                                   | 27     
 minisql>
 ```

@@ -190,6 +190,23 @@ func TestParse_CreateTable(t *testing.T) {
 			nil,
 		},
 		{
+			"CREATE TABLE with quoted table name identifier works",
+			`CREATE TABLE "foo" (bar int4)`,
+			minisql.Statement{
+				Kind:      minisql.CreateTable,
+				TableName: "foo",
+				Columns: []minisql.Column{
+					{
+						Name:     "bar",
+						Kind:     minisql.Int4,
+						Size:     4,
+						Nullable: true,
+					},
+				},
+			},
+			nil,
+		},
+		{
 			"CREATE TABLE with multiple columns works",
 			"CREATE TABLE foo (bar boolean not null, baz int4, qux int8 not null, lorem real null, ipsum double, sit varchar(255))",
 			minisql.Statement{

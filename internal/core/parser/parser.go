@@ -82,6 +82,7 @@ func New() *parser {
 }
 
 func (p *parser) Parse(ctx context.Context, sql string) (minisql.Statement, error) {
+	sql = strings.Join(strings.Fields(sql), " ")
 	p.reset()
 	p.setSQL(sql)
 
