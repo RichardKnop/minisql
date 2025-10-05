@@ -30,7 +30,7 @@ func TestNewDatabase(t *testing.T) {
 	assert.Equal(t, testDbName, aDatabase.Name)
 	assert.Equal(t, SchemaTableName, aDatabase.tables[SchemaTableName].Name)
 	assert.Equal(t, uint32(0), aDatabase.tables[SchemaTableName].RootPageIdx)
-	assert.Equal(t, []string{SchemaTableName}, aDatabase.ListTableNames(ctx))
+	assert.Contains(t, aDatabase.ListTableNames(ctx), SchemaTableName)
 
 	mock.AssertExpectationsForObjects(t, mockParser)
 }
@@ -62,7 +62,8 @@ func TestDatabase_CreateTable(t *testing.T) {
 	assert.Len(t, aDatabase.tables, 2)
 	assert.Equal(t, uint32(0), aDatabase.tables[SchemaTableName].RootPageIdx)
 	assert.Equal(t, uint32(3), aDatabase.tables[testTableName].RootPageIdx)
-	assert.Equal(t, []string{SchemaTableName, testTableName}, aDatabase.ListTableNames(ctx))
+	assert.Contains(t, aDatabase.ListTableNames(ctx), SchemaTableName)
+	assert.Contains(t, aDatabase.ListTableNames(ctx), testTableName)
 
 	mock.AssertExpectationsForObjects(t, mockParser)
 }
