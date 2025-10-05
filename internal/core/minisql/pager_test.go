@@ -38,6 +38,8 @@ func TestPager_GetPage(t *testing.T) {
 
 	aRootPage, internalPages, leafPages := newTestBtree()
 
+	aPager.dbHeader.FirstFreePage = 1
+	aPager.dbHeader.FreePageCount = 2
 	aPager.pages = append(aPager.pages, aRootPage)
 	aPager.pages = append(aPager.pages, internalPages[0])
 	aPager.pages = append(aPager.pages, internalPages[1])
@@ -64,6 +66,10 @@ func TestPager_GetPage(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 7, int(aPager.totalPages))
 
+	// DB header
+	assert.Equal(t, 1, int(aPager.dbHeader.FirstFreePage))
+	assert.Equal(t, 2, int(aPager.dbHeader.FreePageCount))
+
 	// Root page
 	aPage, err := aPager.GetPage(ctx, aTable, uint32(0))
 	require.NoError(t, err)
@@ -79,7 +85,7 @@ func TestPager_GetPage(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, internalPages[1], aPage)
 
-	// // Leaf pages
+	// Leaf pages
 
 	aPage, err = aPager.GetPage(ctx, aTable, uint32(3))
 	require.NoError(t, err)

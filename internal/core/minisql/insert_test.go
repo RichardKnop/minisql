@@ -228,7 +228,6 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 
 func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	t.Parallel()
-	// t.Skip()
 
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)

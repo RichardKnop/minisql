@@ -1,6 +1,9 @@
 package minisql
 
-import "math"
+import (
+	"fmt"
+	"math"
+)
 
 const (
 	// Page size: 4096
@@ -8,6 +11,8 @@ const (
 	// ICell size: 12
 	// (4096 - 6 - 8) / 12
 	InternalNodeMaxCells = 340
+	// (4096 - 6 - 8 - 100) / 12
+	RootInternalNodeMaxCells = 331
 )
 
 type InternalNodeHeader struct {
@@ -209,7 +214,7 @@ func (n *InternalNode) MarshalRoot(buf []byte) ([]byte, error) {
 	if uint64(cap(buf)) >= size {
 		buf = buf[:size]
 	} else {
-		buf = make([]byte, size)
+		return nil, fmt.Errorf("buffer too small to marshal root internal node, need %d bytes", size)
 	}
 
 	i := uint64(0)
@@ -220,7 +225,7 @@ func (n *InternalNode) MarshalRoot(buf []byte) ([]byte, error) {
 	}
 	i += uint64(len(hbuf))
 
-	for idx := range n.ICells[0:331] {
+	for idx := range n.ICells[0:RootInternalNodeMaxCells] {
 		icbuf, err := n.ICells[idx].Marshal(buf[i:])
 		if err != nil {
 			return nil, err
@@ -240,7 +245,7 @@ func (n *InternalNode) UnmarshalRoot(buf []byte) (uint64, error) {
 	}
 	i += hi
 
-	for idx := range n.ICells[0:331] {
+	for idx := range n.ICells[0:RootInternalNodeMaxCells] {
 		ci, err := n.ICells[idx].Unmarshal(buf[i:])
 		if err != nil {
 			return 0, err

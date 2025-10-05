@@ -1,6 +1,9 @@
 package minisql
 
-import "math"
+import (
+	"fmt"
+	"math"
+)
 
 type LeafNodeHeader struct {
 	Header
@@ -189,7 +192,7 @@ func (n *LeafNode) MarshalRoot(buf []byte) ([]byte, error) {
 	if uint64(cap(buf)) >= size {
 		buf = buf[:size]
 	} else {
-		buf = make([]byte, size)
+		return nil, fmt.Errorf("buffer too small to marshal root leaf node, need %d bytes", size)
 	}
 
 	i := uint64(0)

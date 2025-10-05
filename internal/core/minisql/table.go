@@ -252,7 +252,7 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 		originalKeyCount = aParentPage.InternalNode.Header.KeysNum
 	)
 
-	if int(aParentPage.InternalNode.Header.KeysNum) >= t.maxICells(parentPageIdx) {
+	if aParentPage.InternalNode.Header.KeysNum >= uint32(t.maxICells(parentPageIdx)) {
 		return t.InternalNodeSplitInsert(ctx, parentPageIdx, childPageIdx)
 	}
 
@@ -775,7 +775,7 @@ func (t *Table) mergeInternalNodes(ctx context.Context, aParent, left, right *Pa
 func (t *Table) maxICells(pageIdx uint32) int {
 	maxICells := t.maximumICells
 	if maxICells == InternalNodeMaxCells && pageIdx == 0 {
-		maxICells = maxICells - uint32(100/ICellSize) - 1 // root page has less space
+		maxICells = maxICells - uint32(RootPageConfigSize/ICellSize) - 1 // root page has less space
 	}
 	return int(maxICells)
 }
