@@ -94,7 +94,7 @@ var (
 		{
 			Kind: Varchar,
 			// Size is defined so 5 of these columns can fit into a single page
-			Size:     (PageSize - 6 - 8 - 5*8 - 5*8 - 5*(8+255+4+1+4+8)) / 5,
+			Size:     (PageSize - uint32(RootPageConfigSize) - 6 - 8 - 5*8 - 5*8 - 5*(8+255+4+1+4+8)) / 5,
 			Name:     "test_varchar",
 			Nullable: true,
 		},
@@ -138,7 +138,7 @@ var (
 		},
 		{
 			Kind:     Varchar,
-			Size:     PageSize - 6 - 8 - 8 - 8 - (8 + 255 + 4 + 1 + 4 + 8) - uint32(RootPageConfigSize),
+			Size:     PageSize - uint32(RootPageConfigSize) - 6 - 8 - 8 - 8 - (8 + 255 + 4 + 1 + 4 + 8),
 			Name:     "test_varchar",
 			Nullable: true,
 		},
