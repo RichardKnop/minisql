@@ -21,7 +21,11 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) erro
 		return fmt.Errorf("error inserting row to a non leaf node, key %d", key)
 	}
 
-	if aPage.LeafNode.Header.Cells >= aRow.MaxCells() {
+	maxCells := aRow.MaxCells()
+	if aPage.Index == 0 {
+		maxCells = aRow.MaxRootCells()
+	}
+	if aPage.LeafNode.Header.Cells >= maxCells {
 		// Split leaf node
 		return c.LeafNodeSplitInsert(ctx, key, aRow)
 	}
@@ -81,7 +85,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	// evenly between old (left) and new (right) nodes.
 	// Starting from the right, move each key to correct position.
 	var (
-		leafNodeMaxCells = uint32(len(aNewPage.LeafNode.Cells))
+		leafNodeMaxCells = uint32(aSplitPage.LeafNode.Header.Cells)
 		rightSplitCount  = (leafNodeMaxCells + 1) / 2
 		leftSplitCount   = leafNodeMaxCells + 1 - rightSplitCount
 	)
@@ -131,7 +135,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	// If we won't need to split the internal node,
 	// update parent to reflect new max key
 	oldChildIdx := aParentPage.InternalNode.IndexOfChild(originalMaxKey)
-	if oldChildIdx < c.Table.maxICells {
+	if int(oldChildIdx) < c.Table.maxICells(aSplitPage.Index) {
 		oldPageNewMaxKey, err := c.Table.GetMaxKey(ctx, aSplitPage)
 		if err != nil {
 			return fmt.Errorf("leaf node split insert: %w", err)

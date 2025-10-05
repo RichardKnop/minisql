@@ -25,7 +25,7 @@ func TestNewPager_Empty(t *testing.T) {
 	assert.Len(t, aPager.pages, 0)
 }
 
-func TestNew_GetPage(t *testing.T) {
+func TestPager_GetPage(t *testing.T) {
 	t.Parallel()
 
 	dbFile, err := os.CreateTemp(".", "testdb")
@@ -38,6 +38,8 @@ func TestNew_GetPage(t *testing.T) {
 
 	aRootPage, internalPages, leafPages := newTestBtree()
 
+	aPager.dbHeader.FirstFreePage = 1
+	aPager.dbHeader.FreePageCount = 2
 	aPager.pages = append(aPager.pages, aRootPage)
 	aPager.pages = append(aPager.pages, internalPages[0])
 	aPager.pages = append(aPager.pages, internalPages[1])
@@ -63,6 +65,10 @@ func TestNew_GetPage(t *testing.T) {
 	aPager, err = NewPager(dbFile, PageSize, SchemaTableName)
 	require.NoError(t, err)
 	assert.Equal(t, 7, int(aPager.totalPages))
+
+	// DB header
+	assert.Equal(t, 1, int(aPager.dbHeader.FirstFreePage))
+	assert.Equal(t, 2, int(aPager.dbHeader.FreePageCount))
 
 	// Root page
 	aPage, err := aPager.GetPage(ctx, aTable, uint32(0))

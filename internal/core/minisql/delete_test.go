@@ -377,6 +377,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Header.Cells))
 	})
 
+	// TODO - adjust this after page recycling is implemented
 	assert.Equal(t, 7, int(aPager.TotalPages()))
 }
 
@@ -395,7 +396,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 		rows    = gen.MediumRows(numRows)
 		aTable  = NewTable(testLogger, testTableName, testMediumColumns, aPager, 0)
 	)
-	aTable.maxICells = 5 // for testing purposes only, normally 340
+	aTable.maximumICells = 5 // for testing purposes only, normally 340
 
 	// Batch insert test rows
 	stmt := Statement{
@@ -414,9 +415,10 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	log.Printf("Insert took %s", elapsed)
 
 	//fmt.Println("BEFORE")
-	//require.NoError(t, printTree(aTable))
+	// require.NoError(t, printTree(aTable))
 
 	checkRows(ctx, t, aTable, rows)
+	assert.Equal(t, 47, int(aPager.TotalPages()))
 
 	deleteResult, err := aTable.Delete(ctx, Statement{
 		Kind: Delete,
@@ -425,10 +427,11 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	assert.Equal(t, len(rows), deleteResult.RowsAffected)
 
 	//fmt.Println("AFTER")
-	//require.NoError(t, printTree(aTable))
+	// require.NoError(t, printTree(aTable))
 
 	checkRows(ctx, t, aTable, nil)
 
+	// TODO - adjust this after page recycling is implemented
 	assert.Equal(t, 47, int(aPager.TotalPages()))
 }
 
@@ -466,6 +469,7 @@ func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []
 			assert.True(t, ok)
 		}
 	}
+
 	require.Len(t, actual, len(expectedRows))
 	for i := range len(expectedRows) {
 		assert.Equal(t, actual[i], expectedRows[i], "row %d does not match expected", i)

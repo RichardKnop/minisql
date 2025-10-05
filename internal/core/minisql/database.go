@@ -14,7 +14,7 @@ var (
 )
 
 var (
-	maximumSchemaSQL = PageSize - 6 - 8 - 8 - 8 - (4 + 255 + 4)
+	maximumSchemaSQL = PageSize - 6 - 8 - 8 - 8 - (4 + 255 + 4) - RootPageConfigSize
 	mainTableColumns = []Column{
 		{
 			Kind:     Int4,
@@ -317,8 +317,6 @@ func (d *Database) DropTable(ctx context.Context, name string) error {
 	// TODO - delete pages
 
 	// TODO - delete from main schema table
-
-	return nil
 }
 
 func (d *Database) executeCreateTable(ctx context.Context, stmt Statement) (StatementResult, error) {

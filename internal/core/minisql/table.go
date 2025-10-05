@@ -15,26 +15,26 @@ type Pager interface {
 }
 
 type Table struct {
-	Name        string
-	Columns     []Column
-	RootPageIdx uint32
-	RowSize     uint64
-	pager       Pager
-	maxICells   uint32
-	writeLock   *sync.RWMutex
-	logger      *zap.Logger
+	Name          string
+	Columns       []Column
+	RootPageIdx   uint32
+	RowSize       uint64
+	pager         Pager
+	maximumICells uint32
+	writeLock     *sync.RWMutex
+	logger        *zap.Logger
 }
 
 func NewTable(logger *zap.Logger, name string, columns []Column, pager Pager, rootPageIdx uint32) *Table {
 	return &Table{
-		Name:        name,
-		Columns:     columns,
-		RootPageIdx: rootPageIdx,
-		RowSize:     Row{Columns: columns}.Size(),
-		pager:       pager,
-		maxICells:   InternalNodeMaxCells,
-		writeLock:   new(sync.RWMutex),
-		logger:      logger,
+		Name:          name,
+		Columns:       columns,
+		RootPageIdx:   rootPageIdx,
+		RowSize:       Row{Columns: columns}.Size(),
+		pager:         pager,
+		maximumICells: InternalNodeMaxCells,
+		writeLock:     new(sync.RWMutex),
+		logger:        logger,
 	}
 }
 
@@ -252,7 +252,7 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 		originalKeyCount = aParentPage.InternalNode.Header.KeysNum
 	)
 
-	if aParentPage.InternalNode.Header.KeysNum >= t.maxICells {
+	if aParentPage.InternalNode.Header.KeysNum >= uint32(t.maxICells(parentPageIdx)) {
 		return t.InternalNodeSplitInsert(ctx, parentPageIdx, childPageIdx)
 	}
 
@@ -353,7 +353,7 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 	}
 	aNewPage.InternalNode.Header.Parent = aSplitPage.InternalNode.Header.Parent
 
-	var maxCells = t.maxICells
+	maxICells := t.maxICells(pageIdx)
 
 	// First put right child into new node and set right child of old node to invalid page number
 	aNewPage.InternalNode.Header.RightChild = aSplitPage.InternalNode.Header.RightChild
@@ -365,7 +365,7 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 	aSplitPage.InternalNode.Header.RightChild = RIGHT_CHILD_NOT_SET
 
 	// For each key until you get to the middle key, move the key and the child to the new node
-	for i := maxCells - 1; i > maxCells/2; i-- {
+	for i := maxICells - 1; i > maxICells/2; i-- {
 		if err := t.InternalNodeInsert(ctx, newPageIdx, aSplitPage.InternalNode.ICells[i].Child); err != nil {
 			return fmt.Errorf("internal node split insert: %w", err)
 		}
@@ -576,7 +576,7 @@ func (t *Table) mergeLeaves(ctx context.Context, aParent, left, right *Page, idx
 	}
 
 	// Check for underflow
-	if aParent.InternalNode.AtLeastHalfFull(int(t.maxICells)) {
+	if aParent.InternalNode.AtLeastHalfFull(t.maxICells(aParent.Index)) {
 		return nil
 	}
 
@@ -626,7 +626,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 		}
 	}
 
-	if right != nil && right.InternalNode.MoreThanHalfFull(int(t.maxICells)) {
+	if right != nil && right.InternalNode.MoreThanHalfFull(t.maxICells(right.Index)) {
 		return t.borrowFromRightInternal(
 			aParentPage.InternalNode,
 			aPage.InternalNode,
@@ -635,7 +635,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 		)
 	}
 
-	if left != nil && left.InternalNode.MoreThanHalfFull(int(t.maxICells)) {
+	if left != nil && left.InternalNode.MoreThanHalfFull(t.maxICells(left.Index)) {
 		return t.borrowFromLeftInternal(
 			aParentPage.InternalNode,
 			aPage.InternalNode,
@@ -644,7 +644,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 		)
 	}
 
-	if right != nil && int(right.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= int(t.maxICells) {
+	if right != nil && int(right.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= t.maxICells(right.Index) {
 		return t.mergeInternalNodes(
 			ctx,
 			aParentPage,
@@ -654,7 +654,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 		)
 	}
 
-	if left != nil && int(left.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= int(t.maxICells) {
+	if left != nil && int(left.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= t.maxICells(left.Index) {
 		return t.mergeInternalNodes(
 			ctx,
 			aParentPage,
@@ -765,11 +765,19 @@ func (t *Table) mergeInternalNodes(ctx context.Context, aParent, left, right *Pa
 	}
 
 	// Check for underflow
-	if aParent.InternalNode.AtLeastHalfFull(int(t.maxICells)) {
+	if aParent.InternalNode.AtLeastHalfFull(t.maxICells(aParent.Index)) {
 		return nil
 	}
 
 	return t.rebalanceInternal(ctx, aParent)
+}
+
+func (t *Table) maxICells(pageIdx uint32) int {
+	maxICells := t.maximumICells
+	if maxICells == InternalNodeMaxCells && pageIdx == 0 {
+		maxICells = maxICells - uint32(RootPageConfigSize/ICellSize) - 1 // root page has less space
+	}
+	return int(maxICells)
 }
 
 type callback func(page *Page)

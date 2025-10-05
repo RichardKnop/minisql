@@ -20,7 +20,7 @@ type Row struct {
 	cursor Cursor
 }
 
-// MaxCells returns how many rows can be stored in a single page
+// MaxCells returns how many rows can be stored in a non root page
 func (r Row) MaxCells() uint32 {
 	return maxCells(r.Size())
 }
@@ -30,6 +30,18 @@ func maxCells(rowSize uint64) uint32 {
 	// and uint64 row ID per cell
 	// hence we divide by rowSize + 8 + 8
 	return uint32((PageSize - 6 - 8) / (rowSize + 8 + 8))
+}
+
+// MaxRootCells returns how many rows can be stored in a root page
+func (r Row) MaxRootCells() uint32 {
+	return maxRootCells(r.Size())
+}
+
+func maxRootCells(rowSize uint64) uint32 {
+	// base header is +6, leaf/internal header +8
+	// and uint64 row ID per cell
+	// hence we divide by rowSize + 8 + 8
+	return uint32((PageSize - 6 - 8 - RootPageConfigSize) / (rowSize + 8 + 8))
 }
 
 func NewRow(columns []Column) Row {
