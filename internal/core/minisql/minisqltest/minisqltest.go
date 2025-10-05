@@ -85,7 +85,7 @@ var (
 		},
 		{
 			Kind:     minisql.Varchar,
-			Size:     minisql.PageSize - 6 - 8 - 8 - 8 - (8 + 255 + 4 + 1 + 4 + 8),
+			Size:     minisql.PageSize - 6 - 8 - 8 - 8 - (8 + 255 + 4 + 1 + 4 + 8) - uint32(minisql.RootPageConfigSize),
 			Name:     "test_varchar",
 			Nullable: true,
 		},

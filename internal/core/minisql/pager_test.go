@@ -79,7 +79,7 @@ func TestNew_GetPage(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, internalPages[1], aPage)
 
-	// Leaf pages
+	// // Leaf pages
 
 	aPage, err = aPager.GetPage(ctx, aTable, uint32(3))
 	require.NoError(t, err)

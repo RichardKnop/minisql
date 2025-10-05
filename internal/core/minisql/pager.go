@@ -44,8 +44,6 @@ func NewPager(file DBFile, pageSize int, schemaTableName string) (*pagerImpl, er
 	totalPages := fileSize / int64(pageSize)
 	aPager.totalPages = uint32(totalPages)
 
-	// TODO - init root page?
-
 	return aPager, nil
 }
 
@@ -62,21 +60,28 @@ func (p *pagerImpl) GetPage(ctx context.Context, aTable *Table, pageIdx uint32) 
 		return nil, fmt.Errorf("cannot skip index when getting page, index: %d, number of pages: %d", pageIdx, len(p.pages))
 	}
 
-	buf := make([]byte, p.pageSize)
+	bufSize := p.pageSize
+	if pageIdx == 0 {
+		bufSize -= RootPageConfigSize
+	}
+	buf := make([]byte, bufSize)
 
 	// Requesting a new page
 	if int(pageIdx) == int(p.totalPages) {
 		// Leaf node
 		leaf := NewLeafNode(uint64(aTable.RowSize))
-		_, err := leaf.Unmarshal(buf)
-		if err != nil {
+		if err := unmarshalLeaf(pageIdx, leaf, buf); err != nil {
 			return nil, err
 		}
 		p.pages = append(p.pages, &Page{Index: pageIdx, LeafNode: leaf})
 		p.totalPages = pageIdx + 1
 	} else {
 		// Page should exist, load the page from file
-		_, err := p.file.ReadAt(buf, int64(pageIdx)*int64(p.pageSize))
+		offset := int64(pageIdx) * int64(p.pageSize)
+		if pageIdx == 0 {
+			offset += int64(RootPageConfigSize)
+		}
+		_, err := p.file.ReadAt(buf, offset)
 		if err != nil {
 			return nil, err
 		}
@@ -92,16 +97,14 @@ func (p *pagerImpl) GetPage(ctx context.Context, aTable *Table, pageIdx uint32) 
 		if buf[0] == 0 {
 			// Leaf node
 			leaf := NewLeafNode(uint64(aTable.RowSize))
-			_, err := leaf.Unmarshal(buf)
-			if err != nil {
+			if err := unmarshalLeaf(pageIdx, leaf, buf); err != nil {
 				return nil, err
 			}
 			p.pages[pageIdx] = &Page{Index: pageIdx, LeafNode: leaf}
 		} else {
 			// Internal node
 			internal := new(InternalNode)
-			_, err := internal.Unmarshal(buf)
-			if err != nil {
+			if err := unmarshalInternal(pageIdx, internal, buf); err != nil {
 				return nil, err
 			}
 			p.pages[pageIdx] = &Page{Index: pageIdx, InternalNode: internal}
@@ -129,19 +132,65 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx uint32) error {
 	aPage := p.pages[pageIdx]
 
 	buf := make([]byte, p.pageSize)
+
+	if err := marshal(aPage, buf); err != nil {
+		return err
+	}
+
+	if pageIdx == 0 {
+		_, err := p.file.WriteAt(buf[0:p.pageSize-RootPageConfigSize], int64(RootPageConfigSize))
+		return err
+	}
+
+	_, err := p.file.WriteAt(buf, int64(pageIdx)*int64(p.pageSize))
+	return err
+}
+
+func unmarshalLeaf(pageIdx uint32, leaf *LeafNode, buf []byte) error {
+	unmarshaler := leaf.Unmarshal
+	if pageIdx == 0 {
+		unmarshaler = leaf.UnmarshalRoot
+	}
+	_, err := unmarshaler(buf)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func unmarshalInternal(pageIdx uint32, internal *InternalNode, buf []byte) error {
+	unmarshaler := internal.Unmarshal
+	if pageIdx == 0 {
+		unmarshaler = internal.UnmarshalRoot
+	}
+	_, err := unmarshaler(buf)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func marshal(aPage *Page, buf []byte) error {
 	if aPage.LeafNode != nil {
-		_, err := aPage.LeafNode.Marshal(buf)
+		marshaler := aPage.LeafNode.Marshal
+		if aPage.Index == 0 {
+			marshaler = aPage.LeafNode.MarshalRoot
+		}
+		_, err := marshaler(buf)
 		if err != nil {
 			return err
 		}
 	} else if aPage.InternalNode != nil {
-		_, err := aPage.InternalNode.Marshal(buf)
+		marshaler := aPage.InternalNode.Marshal
+		if aPage.Index == 0 {
+			marshaler = aPage.InternalNode.MarshalRoot
+		}
+		_, err := marshaler(buf)
 		if err != nil {
 			return err
 		}
 	} else {
-		return fmt.Errorf("error flushing, page %d is neither internal nor leaf node", pageIdx)
+		return fmt.Errorf("error flushing, page %d is neither internal nor leaf node", aPage.Index)
 	}
-	_, err := p.file.WriteAt(buf, int64(pageIdx)*int64(p.pageSize))
-	return err
+	return nil
 }

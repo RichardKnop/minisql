@@ -138,7 +138,7 @@ var (
 		},
 		{
 			Kind:     Varchar,
-			Size:     PageSize - 6 - 8 - 8 - 8 - (8 + 255 + 4 + 1 + 4 + 8),
+			Size:     PageSize - 6 - 8 - 8 - 8 - (8 + 255 + 4 + 1 + 4 + 8) - uint32(RootPageConfigSize),
 			Name:     "test_varchar",
 			Nullable: true,
 		},

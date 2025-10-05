@@ -78,8 +78,10 @@ type ICell struct {
 	Child uint32
 }
 
+const ICellSize = 12 // (8+4)
+
 func (c *ICell) Size() uint64 {
-	return 8 + 4
+	return ICellSize
 }
 
 func (c *ICell) Marshal(buf []byte) ([]byte, error) {
@@ -192,6 +194,53 @@ func (n *InternalNode) Unmarshal(buf []byte) (uint64, error) {
 	i += hi
 
 	for idx := range n.ICells {
+		ci, err := n.ICells[idx].Unmarshal(buf[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += ci
+	}
+
+	return i, nil
+}
+
+func (n *InternalNode) MarshalRoot(buf []byte) ([]byte, error) {
+	size := n.Size() - uint64(RootPageConfigSize)
+	if uint64(cap(buf)) >= size {
+		buf = buf[:size]
+	} else {
+		buf = make([]byte, size)
+	}
+
+	i := uint64(0)
+
+	hbuf, err := n.Header.Marshal(buf[i+0:])
+	if err != nil {
+		return nil, err
+	}
+	i += uint64(len(hbuf))
+
+	for idx := range n.ICells[0:331] {
+		icbuf, err := n.ICells[idx].Marshal(buf[i:])
+		if err != nil {
+			return nil, err
+		}
+		i += uint64(len(icbuf))
+	}
+
+	return buf[:i], nil
+}
+
+func (n *InternalNode) UnmarshalRoot(buf []byte) (uint64, error) {
+	i := uint64(0)
+
+	hi, err := n.Header.Unmarshal(buf[i:])
+	if err != nil {
+		return 0, err
+	}
+	i += hi
+
+	for idx := range n.ICells[0:331] {
 		ci, err := n.ICells[idx].Unmarshal(buf[i:])
 		if err != nil {
 			return 0, err

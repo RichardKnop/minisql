@@ -52,7 +52,7 @@ Each page size is `4096 bytes`. Rows larger than page size are not supported. Th
 
 All tables are kept tract of via a system table `minisql_schema` which contains table name, `CREATE TABLE` SQL to document table structure and a root page index indicating which page contains root node of the table B+ Tree.
 
-`CREATE TABLE` SQL definition cannot exceed `3803 bytes` to fit into a single page.
+`CREATE TABLE` SQL definition cannot exceed `3703 bytes` to fit into a single page.
 
 Each row has an internal row ID which is an unsigned 64 bit integer starting at 0. These are used as keys in B+ Tree data structure. 
 
