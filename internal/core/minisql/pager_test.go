@@ -25,7 +25,7 @@ func TestNewPager_Empty(t *testing.T) {
 	assert.Len(t, aPager.pages, 0)
 }
 
-func TestNew_GetPage(t *testing.T) {
+func TestPager_GetPage(t *testing.T) {
 	t.Parallel()
 
 	dbFile, err := os.CreateTemp(".", "testdb")

@@ -200,7 +200,7 @@ func (n *LeafNode) MarshalRoot(buf []byte) ([]byte, error) {
 	}
 	i += uint64(len(hbuf))
 
-	for idx := range n.Cells[len(n.Cells)-int(RootPageConfigSize/n.RowSize+1):] {
+	for idx := range n.Cells[0 : len(n.Cells)-int(RootPageConfigSize/n.RowSize)-1] {
 		cbuf, err := n.Cells[idx].Marshal(n.RowSize, buf[i:])
 		if err != nil {
 			return nil, err
@@ -220,7 +220,7 @@ func (n *LeafNode) UnmarshalRoot(buf []byte) (uint64, error) {
 	}
 	i += hi
 
-	for idx := range n.Cells[len(n.Cells)-int(RootPageConfigSize/n.RowSize+1):] {
+	for idx := range n.Cells[0 : len(n.Cells)-int(RootPageConfigSize/n.RowSize)-1] {
 		ci, err := n.Cells[idx].Unmarshal(n.RowSize, buf[i:])
 		if err != nil {
 			return 0, err

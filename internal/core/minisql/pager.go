@@ -16,7 +16,8 @@ type pagerImpl struct {
 	pageSize   int
 	totalPages uint32 // total number of pages
 
-	pages []*Page
+	dbHeader DatabaseHeader
+	pages    []*Page
 
 	file     DBFile
 	fileSize int64
@@ -60,11 +61,7 @@ func (p *pagerImpl) GetPage(ctx context.Context, aTable *Table, pageIdx uint32) 
 		return nil, fmt.Errorf("cannot skip index when getting page, index: %d, number of pages: %d", pageIdx, len(p.pages))
 	}
 
-	bufSize := p.pageSize
-	if pageIdx == 0 {
-		bufSize -= RootPageConfigSize
-	}
-	buf := make([]byte, bufSize)
+	buf := make([]byte, p.pageSize)
 
 	// Requesting a new page
 	if int(pageIdx) == int(p.totalPages) {
@@ -78,9 +75,6 @@ func (p *pagerImpl) GetPage(ctx context.Context, aTable *Table, pageIdx uint32) 
 	} else {
 		// Page should exist, load the page from file
 		offset := int64(pageIdx) * int64(p.pageSize)
-		if pageIdx == 0 {
-			offset += int64(RootPageConfigSize)
-		}
 		_, err := p.file.ReadAt(buf, offset)
 		if err != nil {
 			return nil, err
@@ -93,18 +87,29 @@ func (p *pagerImpl) GetPage(ctx context.Context, aTable *Table, pageIdx uint32) 
 			}
 		}
 
+		if pageIdx == 0 {
+			if err := UnmarshalDatabaseHeader(buf[0:RootPageConfigSize], &p.dbHeader); err != nil {
+				return nil, err
+			}
+		}
+
+		idx := 0
+		if pageIdx == 0 {
+			idx = RootPageConfigSize
+		}
+
 		// First byte is Internal flag, this condition is also true if page does not exist
-		if buf[0] == 0 {
+		if buf[idx] == 0 {
 			// Leaf node
 			leaf := NewLeafNode(uint64(aTable.RowSize))
-			if err := unmarshalLeaf(pageIdx, leaf, buf); err != nil {
+			if err := unmarshalLeaf(pageIdx, leaf, buf[idx:]); err != nil {
 				return nil, err
 			}
 			p.pages[pageIdx] = &Page{Index: pageIdx, LeafNode: leaf}
 		} else {
 			// Internal node
 			internal := new(InternalNode)
-			if err := unmarshalInternal(pageIdx, internal, buf); err != nil {
+			if err := unmarshalInternal(pageIdx, internal, buf[idx:]); err != nil {
 				return nil, err
 			}
 			p.pages[pageIdx] = &Page{Index: pageIdx, InternalNode: internal}
