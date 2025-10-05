@@ -11,7 +11,7 @@ import (
 type Pager interface {
 	GetPage(context.Context, *Table, uint32) (*Page, error)
 	TotalPages() uint32
-	Flush(context.Context, uint32, int64) error
+	Flush(context.Context, uint32) error
 }
 
 type Table struct {

@@ -25,10 +25,8 @@ I plan to implement more features of traditional relational databases in the fut
 - only tables supported, no indexes yet (this means all selects are scanning whole tables for now)
 - `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE` and `VARCHAR` data types supported
 - `NULL` and `NOT NULL` support (via null bit mask included in each row/cell)
-- no primary key support (tables internally use row ID as key in B+ tree data structure)
-- no joins
-- no transaction support, no concurrent writes
-- no page overflow support, entire rows must fit within a 4096 byte page
+- page size is `4096 bytes`, rows cannot exceed page size (minus required headers etc)
+- maximum number of columns for each table is `64`
 
 ### Data Types And Storage
 
@@ -41,18 +39,20 @@ I plan to implement more features of traditional relational databases in the fut
 | `DOUBLE`     | 8-byte double-precision floating-point number. |
 | `VARCHAR(n)` | Variable-length string with maximum length of n bytes. It is stored in row as text with UTF-8 encoding and cannot exceed page size. |
 
-Each page size is `4096 bytes`. Rows larger than page size are not supporter. Therefor, the largest allowed row size is `4066 bytes`.
+Each page size is `4096 bytes`. Rows larger than page size are not supported. Therefor, the largest allowed row size is `4066 bytes`.
 
 ```
 4096 (page size) 
 - 6 (base header size) 
 - 8 (internal / leaf node header size) 
-- 8 (null bit map) 
-- 8 (row ID) 
+- 8 (null bit mask) 
+- 8 (internal row ID / key) 
 = 4066 
 ```
 
-If you try to create a table where a single row would exceed 4096 bytes, an error will be returned.
+All tables are kept tract of via a system table `minisql_schema` which contains table name, `CREATE TABLE` SQL to document table structure and a root page index indicating which page contains root node of the table B+ Tree.
+
+`CREATE TABLE` SQL definition cannot exceed `3803 bytes` to fit into a single page.
 
 Each row has an internal row ID which is an unsigned 64 bit integer starting at 0. These are used as keys in B+ Tree data structure. 
 
@@ -61,8 +61,10 @@ Moreover, each row starts with 64 bit null mask which determines which values ar
 ## Planned features:
 
 - support additional basic query types such as `DROP TABLE`
+- page recycling
 - B tree indexes (starting with unique and primary)
-- Support `timestamp` column
+- autoincrementing primary keys
+- `timestamp` column and basic date/time functions
 - support bigger column types such as `text` that can overflow to more pages via linked list data structure
 - joins such as `INNER`, `LEFT`, `RIGHT`
 - support `ORDER BY`, `LIMIT`, `GROUP BY`
@@ -97,12 +99,13 @@ When creating a new MiniSQL database, it is initialised with `minisql_schema` sy
 minisql> select * from minisql_schema
  type                 | name                                               | root_page            | sql                                                
 ----------------------+----------------------------------------------------+----------------------+----------------------------------------------------
- 1                    | minisql_schema                                     | 0                    | create table minisql_schema (                      
-                      |                                                    |                      | 	type int4,                                        
-                      |                                                    |                      | 	table_name varchar(255),                          
-                      |                                                    |                      | 	root_page int4,                                   
-                      |                                                    |                      | 	sql varchar(2056)                                 
+ 1                    | minisql_schema                                     | 0                    | create table "minisql_schema" (                    
+                      |                                                    |                      | 	type int4 not null,                            
+                      |                                                    |                      | 	table_name varchar(255) not null,              
+                      |                                                    |                      | 	root_page int4,                                
+                      |                                                    |                      | 	sql varchar(2056)                              
                       |                                                    |                      | )                                                  
+minisql>
 ```
 
 You can create your own non-system table now:
@@ -118,7 +121,7 @@ You can now check a new table has been added:
 ```sh
 minisql> .tables
 minisql_schema
-todo
+users
 ```
 
 Insert a row:

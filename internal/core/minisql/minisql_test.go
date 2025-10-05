@@ -12,6 +12,7 @@ import (
 )
 
 //go:generate mockery --name=Pager --structname=MockPager --inpackage --case=snake --testonly
+//go:generate mockery --name=Parser --structname=MockParser --inpackage --case=snake --testonly
 
 var (
 	gen = newDataGen(uint64(time.Now().Unix()))

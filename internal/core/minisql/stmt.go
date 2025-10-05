@@ -241,8 +241,37 @@ func (s Statement) ReadOnly() bool {
 }
 
 func (s Statement) Validate(aTable *Table) error {
-	if len(s.Inserts) > 0 {
-		// TODO - handle default values
+
+	switch s.Kind {
+	case CreateTable:
+		if len(s.TableName) == 0 {
+			return fmt.Errorf("table name is required")
+		}
+
+		if len(s.Columns) == 0 {
+			return fmt.Errorf("at least one column is required")
+		}
+
+		if len(s.Columns) > MaxColumns {
+			return fmt.Errorf("maximum number of columns is %d", MaxColumns)
+		}
+
+		rowSize := 0
+		for _, aColumn := range s.Columns {
+			rowSize += int(aColumn.Size)
+		}
+		// Page size minus base + internal/leaf header, minus key and null bitmask
+		maximumRowSize := int(PageSize) - 6 - 8 - 8 - 8
+
+		if rowSize > maximumRowSize {
+			return fmt.Errorf("row size %d exceeds maximum allowed %d", rowSize, maximumRowSize)
+		}
+
+		return nil
+	case Insert:
+		if len(s.Inserts) == 0 {
+			return fmt.Errorf("at least one row to insert is required")
+		}
 		if len(s.Columns) != len(aTable.Columns) {
 			return fmt.Errorf("insert: expected %d columns, got %d", len(aTable.Columns), len(s.Columns))
 		}
@@ -270,9 +299,10 @@ func (s Statement) Validate(aTable *Table) error {
 			}
 		}
 		return nil
-	}
-
-	if len(s.Updates) > 0 {
+	case Update:
+		if len(s.Updates) == 0 {
+			return fmt.Errorf("at least one field to update is required")
+		}
 		for _, aField := range s.Fields {
 			aColumn, ok := aTable.ColumnByName(aField)
 			if !ok {

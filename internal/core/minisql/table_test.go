@@ -263,6 +263,8 @@ func TestTable_CreateNewRoot(t *testing.T) {
 
 	assert.Equal(t, 0, int(newRightChild.LeafNode.Header.Cells))
 	assert.Equal(t, int(cells), int(newLeftChild.LeafNode.Header.Cells))
+
+	mock.AssertExpectationsForObjects(t, pagerMock)
 }
 
 func TestTable_InternalNodeInsert(t *testing.T) {
@@ -326,4 +328,6 @@ func TestTable_InternalNodeInsert(t *testing.T) {
 		Child: 6,
 	}, internalPages[1].InternalNode.ICells[1])
 	assert.Equal(t, 7, int(internalPages[1].InternalNode.Header.RightChild))
+
+	mock.AssertExpectationsForObjects(t, pagerMock)
 }

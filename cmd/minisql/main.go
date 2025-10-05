@@ -12,7 +12,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/RichardKnop/minisql/internal/core/database"
 	"github.com/RichardKnop/minisql/internal/core/minisql"
 	"github.com/RichardKnop/minisql/internal/core/parser"
 	"github.com/RichardKnop/minisql/internal/pkg/logging"
@@ -95,7 +94,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	aDatabase, err := database.New(ctx, logger, "db", parser.New(), aPager)
+	aDatabase, err := minisql.NewDatabase(ctx, logger, "db", parser.New(), aPager)
 	if err != nil {
 		panic(err)
 	}

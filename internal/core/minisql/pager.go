@@ -121,14 +121,14 @@ func (p *pagerImpl) GetPage(ctx context.Context, aTable *Table, pageIdx uint32) 
 	return p.pages[pageIdx], nil
 }
 
-func (p *pagerImpl) Flush(ctx context.Context, pageIdx uint32, size int64) error {
+func (p *pagerImpl) Flush(ctx context.Context, pageIdx uint32) error {
 	if int(pageIdx) >= len(p.pages) || p.pages[pageIdx] == nil {
 		return nil
 	}
 
 	aPage := p.pages[pageIdx]
 
-	buf := make([]byte, size)
+	buf := make([]byte, p.pageSize)
 	if aPage.LeafNode != nil {
 		_, err := aPage.LeafNode.Marshal(buf)
 		if err != nil {
@@ -142,6 +142,6 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx uint32, size int64) error
 	} else {
 		return fmt.Errorf("error flushing, page %d is neither internal nor leaf node", pageIdx)
 	}
-	_, err := p.file.WriteAt(buf, int64(pageIdx)*size)
+	_, err := p.file.WriteAt(buf, int64(pageIdx)*int64(p.pageSize))
 	return err
 }

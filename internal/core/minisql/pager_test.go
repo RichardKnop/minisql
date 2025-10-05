@@ -54,7 +54,7 @@ func TestNew_GetPage(t *testing.T) {
 	)
 
 	for pageIdx := 0; pageIdx < int(aPager.TotalPages()); pageIdx++ {
-		err := aPager.Flush(ctx, uint32(pageIdx), int64(aPager.pageSize))
+		err := aPager.Flush(ctx, uint32(pageIdx))
 		require.NoError(t, err)
 	}
 

@@ -18,9 +18,7 @@ func Test_Unset(t *testing.T) {
 	k := 2
 
 	expected := strings.Repeat("0", 56) + "00001011"
-
 	actual := Unset(n, k)
-
 	assert.Equal(t, expected, fmt.Sprintf("%.64b", actual))
 }
 
@@ -33,9 +31,7 @@ func Test_Set(t *testing.T) {
 	k := 7
 
 	expected := strings.Repeat("0", 56) + "10001111"
-
 	actual := Set(n, k)
-
 	assert.Equal(t, expected, fmt.Sprintf("%.64b", actual))
 }
 

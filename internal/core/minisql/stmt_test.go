@@ -39,6 +39,57 @@ func TestStatement_Validate(t *testing.T) {
 		},
 	}
 
+	t.Run("CREATE without table name should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind: CreateTable,
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "table name is required")
+	})
+
+	t.Run("CREATE without columns name should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: testTableName,
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "at least one column is required")
+	})
+
+	t.Run("CREATE with too many columns should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: testTableName,
+			Columns:   make([]Column, MaxColumns+1), // Exceed max columns
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "maximum number of columns is 64")
+	})
+
+	t.Run("CREATE with excessive row size should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: testTableName,
+			Columns: []Column{
+				{
+					Size: PageSize - 6 - 8 - 8 - 8 + 1, // Exceed max row size by 1 byte
+					Kind: Varchar,
+					Name: "too_large",
+				},
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "row size 4067 exceeds maximum allowed 4066")
+	})
+
 	t.Run("INSERT with wrong number of columns should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
