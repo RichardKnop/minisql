@@ -25,6 +25,37 @@ func TestNewPager_Empty(t *testing.T) {
 	assert.Len(t, aPager.pages, 0)
 }
 
+func TestNewPager_WithDBHeader(t *testing.T) {
+	t.Parallel()
+
+	dbFile, err := os.CreateTemp(".", "testdb")
+	require.NoError(t, err)
+	defer dbFile.Close()
+	defer os.Remove(dbFile.Name())
+
+	rowSize := 270
+	aRootLeaf := NewLeafNode(uint64(rowSize))
+	aRootLeaf.Header.Header.IsRoot = true
+
+	aPager, err := NewPager(dbFile, PageSize, SchemaTableName)
+	require.NoError(t, err)
+	aPager.dbHeader.FirstFreePage = 125
+	aPager.dbHeader.FreePageCount = 2
+	aPager.pages = append(aPager.pages, &Page{LeafNode: aRootLeaf})
+
+	// Flushing the root page should also write the DB header
+	err = aPager.Flush(context.Background(), 0)
+	require.NoError(t, err)
+
+	// Reset pager to empty the cache
+	dbFile.Seek(0, 0)
+	aPager, err = NewPager(dbFile, PageSize, SchemaTableName)
+	require.NoError(t, err)
+	assert.Equal(t, 1, int(aPager.totalPages))
+	assert.Equal(t, uint32(125), aPager.dbHeader.FirstFreePage)
+	assert.Equal(t, uint32(2), aPager.dbHeader.FreePageCount)
+}
+
 func TestPager_GetPage(t *testing.T) {
 	t.Parallel()
 
@@ -38,8 +69,6 @@ func TestPager_GetPage(t *testing.T) {
 
 	aRootPage, internalPages, leafPages := newTestBtree()
 
-	aPager.dbHeader.FirstFreePage = 1
-	aPager.dbHeader.FreePageCount = 2
 	aPager.pages = append(aPager.pages, aRootPage)
 	aPager.pages = append(aPager.pages, internalPages[0])
 	aPager.pages = append(aPager.pages, internalPages[1])
@@ -65,10 +94,6 @@ func TestPager_GetPage(t *testing.T) {
 	aPager, err = NewPager(dbFile, PageSize, SchemaTableName)
 	require.NoError(t, err)
 	assert.Equal(t, 7, int(aPager.totalPages))
-
-	// DB header
-	assert.Equal(t, 1, int(aPager.dbHeader.FirstFreePage))
-	assert.Equal(t, 2, int(aPager.dbHeader.FreePageCount))
 
 	// Root page
 	aPage, err := aPager.GetPage(ctx, aTable, uint32(0))

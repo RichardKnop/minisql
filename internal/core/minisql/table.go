@@ -11,6 +11,8 @@ import (
 type Pager interface {
 	GetPage(context.Context, *Table, uint32) (*Page, error)
 	TotalPages() uint32
+	GetFreePage(context.Context, *Table) (*Page, error)
+	AddFreePage(context.Context, uint32) error
 	Flush(context.Context, uint32) error
 }
 
@@ -505,23 +507,31 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 	}
 
 	if right != nil && int(right.LeafNode.Header.Cells+aLeafNode.Header.Cells) <= len(aLeafNode.Cells) {
-		return t.mergeLeaves(
+		if err := t.mergeLeaves(
 			ctx,
 			aParentPage,
 			aPage,
 			right,
 			myPositionInParent,
-		)
+		); err != nil {
+			return err
+		}
+
+		return t.pager.AddFreePage(ctx, right.Index)
 	}
 
 	if left != nil && int(left.LeafNode.Header.Cells+aLeafNode.Header.Cells) <= len(aLeafNode.Cells) {
-		return t.mergeLeaves(
+		if err := t.mergeLeaves(
 			ctx,
 			aParentPage,
 			left,
 			aPage,
 			myPositionInParent-1,
-		)
+		); err != nil {
+			return err
+		}
+
+		return t.pager.AddFreePage(ctx, aPage.Index)
 	}
 
 	return nil
@@ -568,11 +578,12 @@ func (t *Table) mergeLeaves(ctx context.Context, aParent, left, right *Page, idx
 			return fmt.Errorf("merge leaves: %w", err)
 		}
 		aRootPage.InternalNode = nil
-		aRootPage.LeafNode = left.LeafNode
-		left.LeafNode.Header.IsRoot = true
-		left.LeafNode.Header.Parent = 0
-		left.LeafNode.Header.NextLeaf = 0
-		return nil
+		aRootPage.LeafNode = NewLeafNode(t.RowSize)
+		*aRootPage.LeafNode = *left.LeafNode
+		aRootPage.LeafNode.Header.IsRoot = true
+		aRootPage.LeafNode.Header.Parent = 0
+		aRootPage.LeafNode.Header.NextLeaf = 0
+		return t.pager.AddFreePage(ctx, left.Index)
 	}
 
 	// Check for underflow
@@ -645,23 +656,31 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 	}
 
 	if right != nil && int(right.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= t.maxICells(right.Index) {
-		return t.mergeInternalNodes(
+		if err := t.mergeInternalNodes(
 			ctx,
 			aParentPage,
 			aPage,
 			right,
 			myPositionInParent,
-		)
+		); err != nil {
+			return err
+		}
+
+		return t.pager.AddFreePage(ctx, right.Index)
 	}
 
 	if left != nil && int(left.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= t.maxICells(left.Index) {
-		return t.mergeInternalNodes(
+		if err := t.mergeInternalNodes(
 			ctx,
 			aParentPage,
 			left,
 			aPage,
 			myPositionInParent-1,
-		)
+		); err != nil {
+			return err
+		}
+
+		return t.pager.AddFreePage(ctx, aPage.Index)
 	}
 
 	return nil

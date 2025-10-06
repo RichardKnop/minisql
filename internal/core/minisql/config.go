@@ -1,7 +1,5 @@
 package minisql
 
-// TODO - implement page recycling using a free list
-// See PAGE_RECYCLING.md for design notes
 type DatabaseHeader struct {
 	FirstFreePage uint32 // Points to first free page, 0 if none
 	FreePageCount uint32 // Number of free pages available
@@ -27,5 +25,16 @@ func (h *DatabaseHeader) Marshal() ([]byte, error) {
 func UnmarshalDatabaseHeader(buf []byte, dbHeader *DatabaseHeader) error {
 	dbHeader.FirstFreePage = unmarshalUint32(buf, 0)
 	dbHeader.FreePageCount = unmarshalUint32(buf, 4)
+	return nil
+}
+
+func (n *FreePage) Marshal() ([]byte, error) {
+	buf := make([]byte, 4)
+	marshalUint32(buf, n.NextFreePage, 0)
+	return buf, nil
+}
+
+func UnmarshalFreePage(buf []byte, n *FreePage) error {
+	n.NextFreePage = unmarshalUint32(buf, 0)
 	return nil
 }

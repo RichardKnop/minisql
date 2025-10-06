@@ -6,7 +6,7 @@ const (
 
 type Page struct {
 	Index        uint32
-	FreePage     *FreePage // TODO - implement page recycling
+	FreePage     *FreePage
 	InternalNode *InternalNode
 	LeafNode     *LeafNode
 }

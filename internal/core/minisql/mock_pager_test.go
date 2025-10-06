@@ -13,6 +13,24 @@ type MockPager struct {
 	mock.Mock
 }
 
+// AddFreePage provides a mock function with given fields: _a0, _a1
+func (_m *MockPager) AddFreePage(_a0 context.Context, _a1 uint32) error {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddFreePage")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, uint32) error); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // Flush provides a mock function with given fields: _a0, _a1
 func (_m *MockPager) Flush(_a0 context.Context, _a1 uint32) error {
 	ret := _m.Called(_a0, _a1)
@@ -29,6 +47,36 @@ func (_m *MockPager) Flush(_a0 context.Context, _a1 uint32) error {
 	}
 
 	return r0
+}
+
+// GetFreePage provides a mock function with given fields: _a0, _a1
+func (_m *MockPager) GetFreePage(_a0 context.Context, _a1 *Table) (*Page, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFreePage")
+	}
+
+	var r0 *Page
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *Table) (*Page, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *Table) *Page); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*Page)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *Table) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // GetPage provides a mock function with given fields: _a0, _a1, _a2
