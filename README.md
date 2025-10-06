@@ -27,6 +27,7 @@ I plan to implement more features of traditional relational databases in the fut
 - `NULL` and `NOT NULL` support (via null bit mask included in each row/cell)
 - page size is `4096 bytes`, rows cannot exceed page size (minus required headers etc)
 - maximum number of columns for each table is `64`
+- basic page recycling (when nodes are merged, the node that no longer exists in the tree is added to free pages linked list in the config and can be later reused as a new page)
 
 ### Data Types And Storage
 
@@ -61,7 +62,6 @@ Moreover, each row starts with 64 bit null mask which determines which values ar
 ## Planned features:
 
 - support additional basic query types such as `DROP TABLE`
-- page recycling
 - B tree indexes (starting with unique and primary)
 - autoincrementing primary keys
 - `timestamp` column and basic date/time functions

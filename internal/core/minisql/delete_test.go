@@ -2,10 +2,8 @@ package minisql
 
 import (
 	"context"
-	"log"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -453,14 +451,11 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	start := time.Now()
 	err = aTable.Insert(ctx, stmt)
 	require.NoError(t, err)
-	elapsed := time.Since(start)
-	log.Printf("Insert took %s", elapsed)
 
 	//fmt.Println("BEFORE")
-	// require.NoError(t, printTree(aTable))
+	//require.NoError(t, printTree(aTable))
 
 	checkRows(ctx, t, aTable, rows)
 	assert.Equal(t, 47, int(aPager.TotalPages()))
@@ -472,20 +467,89 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	assert.Equal(t, len(rows), deleteResult.RowsAffected)
 
 	//fmt.Println("AFTER")
-	// require.NoError(t, printTree(aTable))
+	//require.NoError(t, printTree(aTable))
 
 	checkRows(ctx, t, aTable, nil)
 
 	assert.Equal(t, 47, int(aPager.TotalPages()))
-	// TODO - why is this 44 and not 46? We should be recycling all but the root page
-	assert.Equal(t, 44, int(aPager.dbHeader.FreePageCount))
+	assert.Equal(t, 46, int(aPager.dbHeader.FreePageCount))
 }
 
 func TestTable_PageRecycling(t *testing.T) {
 	t.Parallel()
-	t.Skip()
 
-	// TODO - check all recycled pages are reused before allocating new pages
+	tempFile, err := os.CreateTemp("", "testdb")
+	require.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
+	require.NoError(t, err)
+
+	var (
+		ctx     = context.Background()
+		numRows = 100
+		rows    = gen.MediumRows(numRows)
+		aTable  = NewTable(testLogger, testTableName, testMediumColumns, aPager, 0)
+	)
+	aTable.maximumICells = 5 // for testing purposes only, normally 340
+
+	// Batch insert test rows
+	stmt := Statement{
+		Kind:    Insert,
+		Fields:  columnNames(testMediumColumns...),
+		Inserts: [][]OptionalValue{},
+	}
+	for _, aRow := range rows {
+		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	}
+
+	err = aTable.Insert(ctx, stmt)
+	require.NoError(t, err)
+
+	assert.Equal(t, 47, int(aPager.TotalPages()))
+	assert.Equal(t, 0, int(aPager.dbHeader.FreePageCount))
+	checkRows(ctx, t, aTable, rows)
+
+	// Now delete all rows, this will free up 46 pages
+	// but the root page will remain in use
+	deleteResult, err := aTable.Delete(ctx, Statement{
+		Kind: Delete,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, len(rows), deleteResult.RowsAffected)
+
+	checkRows(ctx, t, aTable, nil)
+	assert.Equal(t, 47, int(aPager.TotalPages()))
+	assert.Equal(t, 46, int(aPager.dbHeader.FreePageCount))
+
+	// Now we reinsert the same rows again
+	err = aTable.Insert(ctx, stmt)
+	require.NoError(t, err)
+
+	// We should still have the same number of pages in total
+	// and no free pages
+	assert.Equal(t, 47, int(aPager.TotalPages()))
+	assert.Equal(t, 0, int(aPager.dbHeader.FreePageCount))
+	checkRows(ctx, t, aTable, rows)
+}
+
+func (p *pagerImpl) getFreePages() ([]int, error) {
+	var freePages []int
+
+	nextFreePage := p.dbHeader.FirstFreePage
+	for nextFreePage != 0 {
+		freePages = append(freePages, int(nextFreePage))
+
+		freePage, err := p.GetPage(context.Background(), nil, nextFreePage)
+		if err != nil {
+			return nil, err
+		}
+
+		nextFreePage = freePage.FreePage.NextFreePage
+	}
+
+	// sort.Ints(freePages)
+
+	return freePages, nil
 }
 
 func rowIDs(rows ...Row) []any {

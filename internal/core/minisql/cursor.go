@@ -64,7 +64,6 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 		return fmt.Errorf("get original max key: %w", err)
 	}
 	// Use recycled page if available, otherwise create new one
-	// Append new page at the end
 	aNewPage, err := aPager.GetFreePage(ctx, c.Table)
 	if err != nil {
 		return fmt.Errorf("get new page: %w", err)

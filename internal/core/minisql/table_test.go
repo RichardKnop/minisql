@@ -240,15 +240,14 @@ func TestTable_CreateNewRoot(t *testing.T) {
 		aRow           = gen.Row()
 		cells, rowSize = aRow.MaxCells(), aRow.Size()
 		aRootPage      = newRootLeafPageWithCells(int(cells), int(rowSize))
-		newRightChild  = &Page{LeafNode: NewLeafNode(aRow.Size())}
-		newLeftChild   = &Page{LeafNode: NewLeafNode(aRow.Size())}
+		newRightChild  = &Page{Index: 1, LeafNode: NewLeafNode(aRow.Size())}
+		newLeftChild   = &Page{Index: 2, LeafNode: NewLeafNode(aRow.Size())}
 		aTable         = NewTable(testLogger, testTableName, testColumns, pagerMock, 0)
 	)
 
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(0)).Return(aRootPage, nil)
 	pagerMock.On("GetPage", mock.Anything, aTable, uint32(1)).Return(newRightChild, nil)
-	pagerMock.On("TotalPages").Return(uint32(2), nil)
-	pagerMock.On("GetPage", mock.Anything, aTable, uint32(2)).Return(newLeftChild, nil)
+	pagerMock.On("GetFreePage", mock.Anything, aTable).Return(newLeftChild, nil)
 
 	_, err := aTable.CreateNewRoot(ctx, uint32(1))
 	require.NoError(t, err)
