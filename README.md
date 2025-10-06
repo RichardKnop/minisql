@@ -26,6 +26,7 @@ I plan to implement more features of traditional relational databases in the fut
 - `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE` and `VARCHAR` data types supported
 - `NULL` and `NOT NULL` support (via null bit mask included in each row/cell)
 - page size is `4096 bytes`, rows cannot exceed page size (minus required headers etc)
+- first 100 bytes of the root page are reserved for config
 - maximum number of columns for each table is `64`
 
 ### Data Types And Storage
@@ -68,7 +69,6 @@ Moreover, each row starts with 64 bit null mask which determines which values ar
 - support bigger column types such as `text` that can overflow to more pages via linked list data structure
 - joins such as `INNER`, `LEFT`, `RIGHT`
 - support `ORDER BY`, `LIMIT`, `GROUP BY`
-- dedicate first 100B of root page for config similar to how sqlite does it
 - support altering tables
 - transactions
 - vacuuming
