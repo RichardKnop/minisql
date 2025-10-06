@@ -3,6 +3,7 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"go.uber.org/zap"
 )
@@ -62,21 +63,23 @@ type Parser interface {
 }
 
 type Database struct {
-	Name   string
-	parser Parser
-	pager  Pager
-	tables map[string]*Table
-	logger *zap.Logger
+	Name      string
+	parser    Parser
+	pager     Pager
+	tables    map[string]*Table
+	writeLock *sync.RWMutex
+	logger    *zap.Logger
 }
 
 // NewDatabase creates a new database
 func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser Parser, aPager Pager) (*Database, error) {
 	aDatabase := &Database{
-		Name:   name,
-		parser: aParser,
-		pager:  aPager,
-		tables: make(map[string]*Table),
-		logger: logger,
+		Name:      name,
+		parser:    aParser,
+		pager:     aPager,
+		tables:    make(map[string]*Table),
+		writeLock: new(sync.RWMutex),
+		logger:    logger,
 	}
 
 	var (
@@ -251,6 +254,10 @@ func (d *Database) CreateTable(ctx context.Context, stmt Statement) (*Table, err
 	if ok {
 		return nil, errTableAlreadyExists
 	}
+
+	// Prevent concurrent create table operations to avoid conflicts
+	d.writeLock.Lock()
+	defer d.writeLock.Unlock()
 
 	// Save table record into minisql_schema system table
 	mainTable := d.tables[SchemaTableName]
