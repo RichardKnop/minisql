@@ -2,10 +2,8 @@ package minisql
 
 import (
 	"context"
-	"log"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -103,6 +101,10 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 
 		checkRows(ctx, t, aTable, nil)
 	})
+
+	// Root page is never recycled
+	assert.Equal(t, 0, int(aPager.dbHeader.FirstFreePage))
+	assert.Equal(t, 0, int(aPager.dbHeader.FreePageCount))
 }
 
 func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
@@ -192,6 +194,13 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		assert.Equal(t, []uint64{9, 10, 11}, aPager.pages[4].LeafNode.Keys())
 		assert.Equal(t, []uint64{12, 13, 14}, aPager.pages[5].LeafNode.Keys())
 		assert.Equal(t, []uint64{15, 16, 17, 18, 19}, aPager.pages[6].LeafNode.Keys())
+		// Check that leafs[1] is now a free page
+		assert.NotNil(t, aPager.pages[1].FreePage)
+		assert.Nil(t, aPager.pages[1].LeafNode)
+		assert.Nil(t, aPager.pages[1].InternalNode)
+		assert.Equal(t, 0, int(aPager.pages[1].FreePage.NextFreePage))
+		assert.Equal(t, int(aPager.pages[1].Index), int(aPager.dbHeader.FirstFreePage))
+		assert.Equal(t, 1, int(aPager.dbHeader.FreePageCount))
 	})
 
 	t.Run("Delete last three rows to force merging of last two leaves", func(t *testing.T) {
@@ -225,6 +234,13 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		assert.Equal(t, []uint64{6, 7, 8}, aPager.pages[3].LeafNode.Keys())
 		assert.Equal(t, []uint64{9, 10, 11}, aPager.pages[4].LeafNode.Keys())
 		assert.Equal(t, []uint64{12, 13, 14, 15, 16}, aPager.pages[5].LeafNode.Keys())
+		// Check that leafs[6] is now a free page
+		assert.NotNil(t, aPager.pages[6].FreePage)
+		assert.Nil(t, aPager.pages[6].LeafNode)
+		assert.Nil(t, aPager.pages[6].InternalNode)
+		assert.Equal(t, int(aPager.pages[1].Index), int(aPager.pages[6].FreePage.NextFreePage))
+		assert.Equal(t, int(aPager.pages[6].Index), int(aPager.dbHeader.FirstFreePage))
+		assert.Equal(t, 2, int(aPager.dbHeader.FreePageCount))
 	})
 
 	t.Run("Keep deleting more rows, another merge", func(t *testing.T) {
@@ -261,6 +277,13 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		assert.Equal(t, []uint64{1, 3, 5, 7, 8}, aPager.pages[2].LeafNode.Keys())
 		assert.Equal(t, []uint64{9, 10, 11}, aPager.pages[4].LeafNode.Keys())
 		assert.Equal(t, []uint64{12, 13, 14, 15, 16}, aPager.pages[5].LeafNode.Keys())
+		// Check that leafs[3] is now a free page
+		assert.NotNil(t, aPager.pages[3].FreePage)
+		assert.Nil(t, aPager.pages[3].LeafNode)
+		assert.Nil(t, aPager.pages[3].InternalNode)
+		assert.Equal(t, int(aPager.pages[6].Index), int(aPager.pages[3].FreePage.NextFreePage))
+		assert.Equal(t, int(aPager.pages[3].Index), int(aPager.dbHeader.FirstFreePage))
+		assert.Equal(t, 3, int(aPager.dbHeader.FreePageCount))
 	})
 
 	t.Run("Keep deleting more rows, no merge", func(t *testing.T) {
@@ -330,6 +353,13 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		// Check the leaf pages
 		assert.Equal(t, []uint64{1, 7, 8}, aPager.pages[2].LeafNode.Keys())
 		assert.Equal(t, []uint64{10, 14, 16}, aPager.pages[5].LeafNode.Keys())
+		// Check that leafs[4] is now a free page
+		assert.NotNil(t, aPager.pages[4].FreePage)
+		assert.Nil(t, aPager.pages[4].LeafNode)
+		assert.Nil(t, aPager.pages[4].InternalNode)
+		assert.Equal(t, int(aPager.pages[3].Index), int(aPager.pages[4].FreePage.NextFreePage))
+		assert.Equal(t, int(aPager.pages[4].Index), int(aPager.dbHeader.FirstFreePage))
+		assert.Equal(t, 4, int(aPager.dbHeader.FreePageCount))
 	})
 
 	t.Run("Delete one more time, we are left with only root leaf node", func(t *testing.T) {
@@ -358,7 +388,14 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		assert.Equal(t, 5, int(aPager.pages[0].LeafNode.Header.Cells))
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Header.Parent))
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Header.NextLeaf))
-		assert.Equal(t, []uint64{1, 7, 8, 10, 16}, aPager.pages[2].LeafNode.Keys())
+		assert.Equal(t, []uint64{1, 7, 8, 10, 16}, aPager.pages[0].LeafNode.Keys())
+		// Check there are two more free pages (6 in total now)
+		assert.NotNil(t, aPager.pages[5].FreePage)
+		assert.Nil(t, aPager.pages[5].LeafNode)
+		assert.Nil(t, aPager.pages[5].InternalNode)
+		assert.Equal(t, int(aPager.pages[2].Index), int(aPager.pages[5].FreePage.NextFreePage))
+		assert.Equal(t, int(aPager.pages[5].Index), int(aPager.dbHeader.FirstFreePage))
+		assert.Equal(t, 6, int(aPager.dbHeader.FreePageCount))
 	})
 
 	t.Run("Delete all remaining rows", func(t *testing.T) {
@@ -377,8 +414,14 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Header.Cells))
 	})
 
-	// TODO - adjust this after page recycling is implemented
 	assert.Equal(t, 7, int(aPager.TotalPages()))
+	// Root page cannot be recycled so there should still be just 6 free pages
+	assert.NotNil(t, aPager.pages[5].FreePage)
+	assert.Nil(t, aPager.pages[5].LeafNode)
+	assert.Nil(t, aPager.pages[5].InternalNode)
+	assert.Equal(t, int(aPager.pages[2].Index), int(aPager.pages[5].FreePage.NextFreePage))
+	assert.Equal(t, int(aPager.pages[5].Index), int(aPager.dbHeader.FirstFreePage))
+	assert.Equal(t, 6, int(aPager.dbHeader.FreePageCount))
 }
 
 func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
@@ -408,14 +451,11 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	start := time.Now()
 	err = aTable.Insert(ctx, stmt)
 	require.NoError(t, err)
-	elapsed := time.Since(start)
-	log.Printf("Insert took %s", elapsed)
 
 	//fmt.Println("BEFORE")
-	// require.NoError(t, printTree(aTable))
+	//require.NoError(t, printTree(aTable))
 
 	checkRows(ctx, t, aTable, rows)
 	assert.Equal(t, 47, int(aPager.TotalPages()))
@@ -427,12 +467,89 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	assert.Equal(t, len(rows), deleteResult.RowsAffected)
 
 	//fmt.Println("AFTER")
-	// require.NoError(t, printTree(aTable))
+	//require.NoError(t, printTree(aTable))
 
 	checkRows(ctx, t, aTable, nil)
 
-	// TODO - adjust this after page recycling is implemented
 	assert.Equal(t, 47, int(aPager.TotalPages()))
+	assert.Equal(t, 46, int(aPager.dbHeader.FreePageCount))
+}
+
+func TestTable_PageRecycling(t *testing.T) {
+	t.Parallel()
+
+	tempFile, err := os.CreateTemp("", "testdb")
+	require.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
+	require.NoError(t, err)
+
+	var (
+		ctx     = context.Background()
+		numRows = 100
+		rows    = gen.MediumRows(numRows)
+		aTable  = NewTable(testLogger, testTableName, testMediumColumns, aPager, 0)
+	)
+	aTable.maximumICells = 5 // for testing purposes only, normally 340
+
+	// Batch insert test rows
+	stmt := Statement{
+		Kind:    Insert,
+		Fields:  columnNames(testMediumColumns...),
+		Inserts: [][]OptionalValue{},
+	}
+	for _, aRow := range rows {
+		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	}
+
+	err = aTable.Insert(ctx, stmt)
+	require.NoError(t, err)
+
+	assert.Equal(t, 47, int(aPager.TotalPages()))
+	assert.Equal(t, 0, int(aPager.dbHeader.FreePageCount))
+	checkRows(ctx, t, aTable, rows)
+
+	// Now delete all rows, this will free up 46 pages
+	// but the root page will remain in use
+	deleteResult, err := aTable.Delete(ctx, Statement{
+		Kind: Delete,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, len(rows), deleteResult.RowsAffected)
+
+	checkRows(ctx, t, aTable, nil)
+	assert.Equal(t, 47, int(aPager.TotalPages()))
+	assert.Equal(t, 46, int(aPager.dbHeader.FreePageCount))
+
+	// Now we reinsert the same rows again
+	err = aTable.Insert(ctx, stmt)
+	require.NoError(t, err)
+
+	// We should still have the same number of pages in total
+	// and no free pages
+	assert.Equal(t, 47, int(aPager.TotalPages()))
+	assert.Equal(t, 0, int(aPager.dbHeader.FreePageCount))
+	checkRows(ctx, t, aTable, rows)
+}
+
+func (p *pagerImpl) getFreePages() ([]int, error) {
+	var freePages []int
+
+	nextFreePage := p.dbHeader.FirstFreePage
+	for nextFreePage != 0 {
+		freePages = append(freePages, int(nextFreePage))
+
+		freePage, err := p.GetPage(context.Background(), nil, nextFreePage)
+		if err != nil {
+			return nil, err
+		}
+
+		nextFreePage = freePage.FreePage.NextFreePage
+	}
+
+	// sort.Ints(freePages)
+
+	return freePages, nil
 }
 
 func rowIDs(rows ...Row) []any {

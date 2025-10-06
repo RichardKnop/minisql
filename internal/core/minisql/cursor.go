@@ -15,7 +15,7 @@ type Cursor struct {
 func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) error {
 	aPage, err := c.Table.pager.GetPage(ctx, c.Table, c.PageIdx)
 	if err != nil {
-		return fmt.Errorf("leaf node insert: %w", err)
+		return fmt.Errorf("get page: %w", err)
 	}
 	if aPage.LeafNode == nil {
 		return fmt.Errorf("error inserting row to a non leaf node, key %d", key)
@@ -27,7 +27,10 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) erro
 	}
 	if aPage.LeafNode.Header.Cells >= maxCells {
 		// Split leaf node
-		return c.LeafNodeSplitInsert(ctx, key, aRow)
+		if err := c.LeafNodeSplitInsert(ctx, key, aRow); err != nil {
+			return fmt.Errorf("leaf node split insert: %w", err)
+		}
+		return nil
 	}
 
 	if c.CellIdx < aPage.LeafNode.Header.Cells {
@@ -53,33 +56,30 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 
 	aSplitPage, err := aPager.GetPage(ctx, c.Table, c.PageIdx)
 	if err != nil {
-		return fmt.Errorf("leaf node split insert: %w", err)
+		return fmt.Errorf("get page: %w", err)
 	}
 
 	originalMaxKey, err := c.Table.GetMaxKey(ctx, aSplitPage)
 	if err != nil {
-		return fmt.Errorf("leaf node split insert: %w", err)
+		return fmt.Errorf("get original max key: %w", err)
 	}
-	newPageIdx := aPager.TotalPages()
+	// Use recycled page if available, otherwise create new one
+	aNewPage, err := aPager.GetFreePage(ctx, c.Table)
+	if err != nil {
+		return fmt.Errorf("get new page: %w", err)
+	}
 
 	c.Table.logger.Sugar().With(
 		"key", int(key),
 		"old_max_key", int(originalMaxKey),
-		"new_page_index", int(newPageIdx),
+		"new_page_index", int(aNewPage.Index),
 	).Debug("leaf node split insert")
 
-	// Append new page at the end
-	// TODO: Page recycle
-	aNewPage, err := aPager.GetPage(ctx, c.Table, newPageIdx)
-	if err != nil {
-		return fmt.Errorf("leaf node split insert: %w", err)
-	}
-
-	aNewPage.LeafNode = NewLeafNode(uint64(c.Table.RowSize))
+	aNewPage.LeafNode = NewLeafNode(c.Table.RowSize)
 	aNewPage.LeafNode.Header.Parent = aSplitPage.LeafNode.Header.Parent
 
 	aNewPage.LeafNode.Header.NextLeaf = aSplitPage.LeafNode.Header.NextLeaf
-	aSplitPage.LeafNode.Header.NextLeaf = newPageIdx
+	aSplitPage.LeafNode.Header.NextLeaf = aNewPage.Index
 
 	// All existing keys plus new key should should be divided
 	// evenly between old (left) and new (right) nodes.
@@ -122,14 +122,14 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	aNewPage.LeafNode.Header.Cells = rightSplitCount
 
 	if aSplitPage.LeafNode.Header.IsRoot {
-		_, err := c.Table.CreateNewRoot(ctx, newPageIdx)
+		_, err := c.Table.CreateNewRoot(ctx, aNewPage.Index)
 		return err
 	}
 
 	parentPageIdx := aSplitPage.LeafNode.Header.Parent
 	aParentPage, err := aPager.GetPage(ctx, c.Table, parentPageIdx)
 	if err != nil {
-		return fmt.Errorf("leaf node split insert: %w", err)
+		return fmt.Errorf("get parent page %w", err)
 	}
 
 	// If we won't need to split the internal node,
@@ -138,12 +138,12 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	if int(oldChildIdx) < c.Table.maxICells(aSplitPage.Index) {
 		oldPageNewMaxKey, err := c.Table.GetMaxKey(ctx, aSplitPage)
 		if err != nil {
-			return fmt.Errorf("leaf node split insert: %w", err)
+			return fmt.Errorf("get old page max key %w", err)
 		}
 		aParentPage.InternalNode.ICells[oldChildIdx].Key = oldPageNewMaxKey
 	}
 
-	return c.Table.InternalNodeInsert(ctx, parentPageIdx, newPageIdx)
+	return c.Table.InternalNodeInsert(ctx, parentPageIdx, aNewPage.Index)
 }
 
 func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
