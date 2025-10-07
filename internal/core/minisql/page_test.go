@@ -1,33 +1,87 @@
 package minisql
 
-// import (
-// 	"context"
-// 	"testing"
+import (
+	"context"
+	"os"
+	"testing"
 
-// 	"github.com/stretchr/testify/assert"
-// 	"github.com/stretchr/testify/require"
-// )
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
-// func TestPage_Insert(t *testing.T) {
-// 	t.Parallel()
+func TestTable_PageRecycling(t *testing.T) {
+	t.Parallel()
 
-// 	aPage := NewPage(0)
+	tempFile, err := os.CreateTemp("", "testdb")
+	require.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+	aPager, err := NewPager(tempFile, PageSize)
+	require.NoError(t, err)
 
-// 	// Row size is 267 bytes
-// 	// 4096B page can fit 15 rows
+	var (
+		ctx     = context.Background()
+		numRows = 100
+		rows    = gen.MediumRows(numRows)
+		aTable  = NewTable(testLogger, testTableName, testMediumColumns, aPager, 0)
+	)
+	aTable.maximumICells = 5 // for testing purposes only, normally 340
 
-// 	offset := uint32(0)
-// 	for i := 0; i < 15; i++ {
-// 		aRow := gen.Row()
-// 		err := aPage.Insert(context.Background(), offset, aRow)
-// 		require.NoError(t, err)
-// 		offset += aRow.Size()
-// 	}
-// 	assert.Equal(t, uint32(267*15), aPage.nextOffset)
+	// Batch insert test rows
+	stmt := Statement{
+		Kind:    Insert,
+		Fields:  columnNames(testMediumColumns...),
+		Inserts: [][]OptionalValue{},
+	}
+	for _, aRow := range rows {
+		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	}
 
-// 	// When trying to insert 16th row, we should receive an error
-// 	// explaining that there is not enough space left in the page
-// 	err := aPage.Insert(context.Background(), offset, gen.Row())
-// 	require.Error(t, err)
-// 	assert.Equal(t, "error inserting 267 bytes into page at offset 4005, not enough space", err.Error())
-// }
+	err = aTable.Insert(ctx, stmt)
+	require.NoError(t, err)
+
+	assert.Equal(t, 47, int(aPager.TotalPages()))
+	assert.Equal(t, 0, int(aPager.dbHeader.FreePageCount))
+	checkRows(ctx, t, aTable, rows)
+
+	// Now delete all rows, this will free up 46 pages
+	// but the root page will remain in use
+	deleteResult, err := aTable.Delete(ctx, Statement{
+		Kind: Delete,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, len(rows), deleteResult.RowsAffected)
+
+	checkRows(ctx, t, aTable, nil)
+	assert.Equal(t, 47, int(aPager.TotalPages()))
+	assert.Equal(t, 46, int(aPager.dbHeader.FreePageCount))
+
+	// Now we reinsert the same rows again
+	err = aTable.Insert(ctx, stmt)
+	require.NoError(t, err)
+
+	// We should still have the same number of pages in total
+	// and no free pages
+	assert.Equal(t, 47, int(aPager.TotalPages()))
+	assert.Equal(t, 0, int(aPager.dbHeader.FreePageCount))
+	checkRows(ctx, t, aTable, rows)
+}
+
+func (p *pagerImpl) getFreePages(rowSize uint64) ([]int, error) {
+	var freePages []int
+
+	nextFreePage := p.dbHeader.FirstFreePage
+	for nextFreePage != 0 {
+		freePages = append(freePages, int(nextFreePage))
+
+		freePage, err := p.GetPage(context.Background(), nextFreePage, rowSize)
+		if err != nil {
+			return nil, err
+		}
+
+		nextFreePage = freePage.FreePage.NextFreePage
+	}
+
+	// sort.Ints(freePages)
+
+	return freePages, nil
+}

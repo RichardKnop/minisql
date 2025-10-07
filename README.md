@@ -20,7 +20,13 @@ minisql>
 
 I plan to implement more features of traditional relational databases in the future as part of this project simply to learn and discovery how various features I have grown acustomed to over the years are implemented under the hood. However, currently only a very small number of features are implemented:
 
-- simple SQL parser (partial support for `CREATE TABLE`, `INSERT`, `SELECT`, `UPDATE`, `DELETE` queries)
+- simple SQL parser with partial support for basic queries: 
+  - `CREATE TABLE`
+  - `DROP TABLE`
+  - `INSERT`
+  - `SELECT`
+  - `UPDATE`
+  - `DELETE`
 - simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis
 - only tables supported, no indexes yet (this means all selects are scanning whole tables for now)
 - `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE` and `VARCHAR` data types supported
@@ -62,7 +68,6 @@ Moreover, each row starts with 64 bit null mask which determines which values ar
 
 ## Planned features:
 
-- support additional basic query types such as `DROP TABLE`
 - B tree indexes (starting with unique and primary)
 - autoincrementing primary keys
 - `timestamp` column and basic date/time functions

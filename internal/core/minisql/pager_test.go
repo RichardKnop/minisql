@@ -17,7 +17,7 @@ func TestNewPager_Empty(t *testing.T) {
 	defer dbFile.Close()
 	defer os.Remove(dbFile.Name())
 
-	aPager, err := NewPager(dbFile, PageSize, SchemaTableName)
+	aPager, err := NewPager(dbFile, PageSize)
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(0), aPager.fileSize)
@@ -37,7 +37,7 @@ func TestNewPager_WithDBHeader(t *testing.T) {
 	aRootLeaf := NewLeafNode(uint64(rowSize))
 	aRootLeaf.Header.Header.IsRoot = true
 
-	aPager, err := NewPager(dbFile, PageSize, SchemaTableName)
+	aPager, err := NewPager(dbFile, PageSize)
 	require.NoError(t, err)
 	aPager.dbHeader.FirstFreePage = 125
 	aPager.dbHeader.FreePageCount = 2
@@ -49,7 +49,7 @@ func TestNewPager_WithDBHeader(t *testing.T) {
 
 	// Reset pager to empty the cache
 	dbFile.Seek(0, 0)
-	aPager, err = NewPager(dbFile, PageSize, SchemaTableName)
+	aPager, err = NewPager(dbFile, PageSize)
 	require.NoError(t, err)
 	assert.Equal(t, 1, int(aPager.totalPages))
 	assert.Equal(t, uint32(125), aPager.dbHeader.FirstFreePage)
@@ -64,7 +64,7 @@ func TestPager_GetPage(t *testing.T) {
 	defer dbFile.Close()
 	defer os.Remove(dbFile.Name())
 
-	aPager, err := NewPager(dbFile, PageSize, SchemaTableName)
+	aPager, err := NewPager(dbFile, PageSize)
 	require.NoError(t, err)
 
 	aRootPage, internalPages, leafPages := newTestBtree()
@@ -91,40 +91,40 @@ func TestPager_GetPage(t *testing.T) {
 
 	// Reset pager to empty the cache
 	dbFile.Seek(0, 0)
-	aPager, err = NewPager(dbFile, PageSize, SchemaTableName)
+	aPager, err = NewPager(dbFile, PageSize)
 	require.NoError(t, err)
 	assert.Equal(t, 7, int(aPager.totalPages))
 
 	// Root page
-	aPage, err := aPager.GetPage(ctx, aTable, uint32(0))
+	aPage, err := aPager.GetPage(ctx, uint32(0), aTable.RowSize)
 	require.NoError(t, err)
 	assert.Equal(t, aRootPage, aPage)
 
 	// Internal pages
 
-	aPage, err = aPager.GetPage(ctx, aTable, uint32(1))
+	aPage, err = aPager.GetPage(ctx, uint32(1), aTable.RowSize)
 	require.NoError(t, err)
 	assert.Equal(t, internalPages[0], aPage)
 
-	aPage, err = aPager.GetPage(ctx, aTable, uint32(2))
+	aPage, err = aPager.GetPage(ctx, uint32(2), aTable.RowSize)
 	require.NoError(t, err)
 	assert.Equal(t, internalPages[1], aPage)
 
 	// Leaf pages
 
-	aPage, err = aPager.GetPage(ctx, aTable, uint32(3))
+	aPage, err = aPager.GetPage(ctx, uint32(3), aTable.RowSize)
 	require.NoError(t, err)
 	assert.Equal(t, leafPages[0], aPage)
 
-	aPage, err = aPager.GetPage(ctx, aTable, uint32(4))
+	aPage, err = aPager.GetPage(ctx, uint32(4), aTable.RowSize)
 	require.NoError(t, err)
 	assert.Equal(t, leafPages[1], aPage)
 
-	aPage, err = aPager.GetPage(ctx, aTable, uint32(5))
+	aPage, err = aPager.GetPage(ctx, uint32(5), aTable.RowSize)
 	require.NoError(t, err)
 	assert.Equal(t, leafPages[2], aPage)
 
-	aPage, err = aPager.GetPage(ctx, aTable, uint32(6))
+	aPage, err = aPager.GetPage(ctx, uint32(6), aTable.RowSize)
 	require.NoError(t, err)
 	assert.Equal(t, leafPages[3], aPage)
 }

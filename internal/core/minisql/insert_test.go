@@ -19,7 +19,7 @@ func TestTable_Insert(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
+	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
 
 	var (
@@ -79,7 +79,7 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
+	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
 
 	var (
@@ -113,7 +113,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
+	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
 
 	var (
@@ -177,7 +177,7 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
+	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
 
 	var (
@@ -232,7 +232,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
+	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
 
 	/*
@@ -338,18 +338,4 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 			assert.Equal(t, 334, int(aLeaf.LeafNode.Header.Parent), fmt.Sprintf("parent not 334 %d", i))
 		}
 	}
-}
-
-func printTree(aTable *Table) error {
-	return aTable.BFS(func(aPage *Page) {
-		if aPage.InternalNode != nil {
-			fmt.Println("Internal node,", "page:", aPage.Index, "number of keys:", aPage.InternalNode.Header.KeysNum, "parent:", aPage.InternalNode.Header.Parent)
-			fmt.Println("Keys:", aPage.InternalNode.Keys())
-			fmt.Println("Children:", aPage.InternalNode.Children())
-		} else {
-			fmt.Println("Leaf node,", "page:", aPage.Index, "number of cells:", aPage.LeafNode.Header.Cells, "parent:", aPage.LeafNode.Header.Parent, "next leaf:", aPage.LeafNode.Header.NextLeaf)
-			fmt.Println("Keys:", aPage.LeafNode.Keys())
-		}
-		fmt.Println("---------")
-	})
 }

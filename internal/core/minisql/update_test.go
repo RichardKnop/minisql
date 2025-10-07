@@ -15,7 +15,7 @@ func TestTable_Update(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
+	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
 
 	var (

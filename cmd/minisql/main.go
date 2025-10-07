@@ -90,7 +90,7 @@ func main() {
 	}
 	defer dbFile.Close()
 
-	aPager, err := minisql.NewPager(dbFile, minisql.PageSize, minisql.SchemaTableName)
+	aPager, err := minisql.NewPager(dbFile, minisql.PageSize)
 	if err != nil {
 		panic(err)
 	}

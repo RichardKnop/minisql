@@ -18,7 +18,7 @@ func TestNewDatabase(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
+	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
 	mockParser := new(MockParser)
 
@@ -41,7 +41,7 @@ func TestDatabase_CreateTable(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
+	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
 	mockParser := new(MockParser)
 
@@ -54,16 +54,54 @@ func TestDatabase_CreateTable(t *testing.T) {
 		TableName: testTableName,
 		Columns:   testColumns,
 	}
-	aTable, err := aDatabase.CreateTable(ctx, stmt)
+	_, err = aDatabase.ExecuteStatement(ctx, stmt)
 	require.NoError(t, err)
-	assert.Equal(t, testTableName, aTable.Name)
-	assert.Equal(t, testColumns, aTable.Columns)
 
 	assert.Len(t, aDatabase.tables, 2)
-	assert.Equal(t, uint32(0), aDatabase.tables[SchemaTableName].RootPageIdx)
+	assert.Equal(t, testTableName, aDatabase.tables[testTableName].Name)
+	assert.Equal(t, testColumns, aDatabase.tables[testTableName].Columns)
 	assert.Equal(t, uint32(3), aDatabase.tables[testTableName].RootPageIdx)
+	assert.Equal(t, uint32(0), aDatabase.tables[SchemaTableName].RootPageIdx)
+
+	mock.AssertExpectationsForObjects(t, mockParser)
+}
+
+func TestDatabase_DropTable(t *testing.T) {
+	t.Parallel()
+
+	tempFile, err := os.CreateTemp("", "testdb")
+	require.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+	aPager, err := NewPager(tempFile, PageSize)
+	require.NoError(t, err)
+	mockParser := new(MockParser)
+
+	ctx := context.Background()
+	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, mockParser, aPager)
+	require.NoError(t, err)
+
+	stmt := Statement{
+		Kind:      CreateTable,
+		TableName: testTableName,
+		Columns:   testColumns,
+	}
+	_, err = aDatabase.ExecuteStatement(ctx, stmt)
+	require.NoError(t, err)
+
+	assert.Len(t, aDatabase.tables, 2)
+
+	stmt = Statement{
+		Kind:      DropTable,
+		TableName: testTableName,
+	}
+	_, err = aDatabase.ExecuteStatement(ctx, stmt)
+	require.NoError(t, err)
+
+	assert.Len(t, aDatabase.tables, 1)
+	assert.Equal(t, testDbName, aDatabase.Name)
+	assert.Equal(t, SchemaTableName, aDatabase.tables[SchemaTableName].Name)
+	assert.Equal(t, uint32(0), aDatabase.tables[SchemaTableName].RootPageIdx)
 	assert.Contains(t, aDatabase.ListTableNames(ctx), SchemaTableName)
-	assert.Contains(t, aDatabase.ListTableNames(ctx), testTableName)
 
 	mock.AssertExpectationsForObjects(t, mockParser)
 }
