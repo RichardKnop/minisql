@@ -150,6 +150,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser P
 		rooPageIdx,
 	)
 	aDatabase.tables[mainTable.Name] = mainTable
+
 	aResult, err := mainTable.Select(ctx, Statement{
 		Kind: Select,
 		Fields: []string{
@@ -259,6 +260,8 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 		return nil, errTableAlreadyExists
 	}
 
+	d.logger.Sugar().With("name", name).Debug("creating table")
+
 	// Save table record into minisql_schema system table
 	mainTable := d.tables[SchemaTableName]
 	if err := mainTable.Insert(ctx, Statement{
@@ -286,10 +289,12 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 	// Now let's create the actual table, inserting into the system table might have
 	// caused a split and new page being created, so now we know what the root page
 	// for the new table should be.
-	freePage, err := d.pager.GetFreePage(ctx, Row{Columns: columns}.Size())
+	rowSize := Row{Columns: columns}.Size()
+	freePage, err := d.pager.GetFreePage(ctx, rowSize)
 	if err != nil {
 		return nil, err
 	}
+	freePage.LeafNode = NewLeafNode(rowSize)
 	createdTable := NewTable(
 		d.logger,
 		name,
@@ -318,28 +323,32 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 
 // dropTable drops a table and all its data
 func (d *Database) dropTable(ctx context.Context, name string) error {
-	aTable, ok := d.tables[name]
+	tableToDelete, ok := d.tables[name]
 	if !ok {
 		return errTableDoesNotExist
 	}
 
+	d.logger.Sugar().With("name", tableToDelete.Name).Debug("dropping table")
+
 	mainTable := d.tables[SchemaTableName]
 	_, err := mainTable.Delete(ctx, Statement{
 		Kind:       Delete,
-		Conditions: FieldIsIn("name", QuotedString, aTable.Name),
+		Conditions: FieldIsIn("name", QuotedString, tableToDelete.Name),
 	})
 	if err != nil {
 		return err
 	}
 
 	// Free all table pages
-	aTable.BFS(func(page *Page) {
-		if err := d.pager.AddFreePage(ctx, page.Index, aTable.RowSize); err != nil {
+	tableToDelete.BFS(func(page *Page) {
+		if err := d.pager.AddFreePage(ctx, page.Index, tableToDelete.RowSize); err != nil {
 			d.logger.Sugar().With(
 				"page", page.Index,
 				"error", err,
 			).Error("failed to free page")
+			return
 		}
+		d.logger.Sugar().With("page", page).Debug("freed page")
 	})
 
 	d.tableLocks.Delete(name)
@@ -357,6 +366,10 @@ func (d *Database) executeCreateTable(ctx context.Context, stmt Statement) (Stat
 }
 
 func (d *Database) executeDropTable(ctx context.Context, stmt Statement) (StatementResult, error) {
+	if isSystemTable(stmt.TableName) {
+		return StatementResult{}, fmt.Errorf("cannot drop system table %s", SchemaTableName)
+	}
+
 	// Only one CREATE/DROP TABLE operation can happen at a time
 	d.dbLock.Lock()
 	defer d.dbLock.Unlock()
@@ -376,6 +389,10 @@ func (d *Database) executeDropTable(ctx context.Context, stmt Statement) (Statem
 }
 
 func (d *Database) executeInsert(ctx context.Context, stmt Statement) (StatementResult, error) {
+	if isSystemTable(stmt.TableName) {
+		return StatementResult{}, fmt.Errorf("inserts into system table %s are not allowed", SchemaTableName)
+	}
+
 	// Lock the table for reading to block any potential DROP TABLE operation
 	// until this function returns.
 	tableLock, ok := d.tableLocks.Load(stmt.TableName)
@@ -398,14 +415,16 @@ func (d *Database) executeInsert(ctx context.Context, stmt Statement) (Statement
 }
 
 func (d *Database) executeSelect(ctx context.Context, stmt Statement) (StatementResult, error) {
-	// Lock the table for reading to block any potential DROP TABLE operation
-	// until this function returns.
-	tableLock, ok := d.tableLocks.Load(stmt.TableName)
-	if !ok {
-		return StatementResult{}, errTableDoesNotExist
+	if !isSystemTable(stmt.TableName) {
+		// Lock the table for reading to block any potential DROP TABLE operation
+		// until this function returns.
+		tableLock, ok := d.tableLocks.Load(stmt.TableName)
+		if !ok {
+			return StatementResult{}, errTableDoesNotExist
+		}
+		tableLock.(*sync.RWMutex).RLock()
+		defer tableLock.(*sync.RWMutex).RUnlock()
 	}
-	tableLock.(*sync.RWMutex).RLock()
-	defer tableLock.(*sync.RWMutex).RUnlock()
 
 	aTable, ok := d.tables[stmt.TableName]
 	if !ok {
@@ -416,6 +435,10 @@ func (d *Database) executeSelect(ctx context.Context, stmt Statement) (Statement
 }
 
 func (d *Database) executeUpdate(ctx context.Context, stmt Statement) (StatementResult, error) {
+	if isSystemTable(stmt.TableName) {
+		return StatementResult{}, fmt.Errorf("updates to system table %s are not allowed", SchemaTableName)
+	}
+
 	// Lock the table for reading to block any potential DROP TABLE operation
 	// until this function returns.
 	tableLock, ok := d.tableLocks.Load(stmt.TableName)
@@ -434,6 +457,10 @@ func (d *Database) executeUpdate(ctx context.Context, stmt Statement) (Statement
 }
 
 func (d *Database) executeDelete(ctx context.Context, stmt Statement) (StatementResult, error) {
+	if isSystemTable(stmt.TableName) {
+		return StatementResult{}, fmt.Errorf("deletes from system table %s are not allowed", SchemaTableName)
+	}
+
 	// Lock the table for reading to block any potential DROP TABLE operation
 	// until this function returns.
 	tableLock, ok := d.tableLocks.Load(stmt.TableName)
@@ -449,4 +476,8 @@ func (d *Database) executeDelete(ctx context.Context, stmt Statement) (Statement
 	}
 
 	return aTable.Delete(ctx, stmt)
+}
+
+func isSystemTable(name string) bool {
+	return name == SchemaTableName
 }

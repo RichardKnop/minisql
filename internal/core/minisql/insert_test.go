@@ -339,17 +339,3 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		}
 	}
 }
-
-func printTree(aTable *Table) error {
-	return aTable.BFS(func(aPage *Page) {
-		if aPage.InternalNode != nil {
-			fmt.Println("Internal node,", "page:", aPage.Index, "number of keys:", aPage.InternalNode.Header.KeysNum, "parent:", aPage.InternalNode.Header.Parent)
-			fmt.Println("Keys:", aPage.InternalNode.Keys())
-			fmt.Println("Children:", aPage.InternalNode.Children())
-		} else {
-			fmt.Println("Leaf node,", "page:", aPage.Index, "number of cells:", aPage.LeafNode.Header.Cells, "parent:", aPage.LeafNode.Header.Parent, "next leaf:", aPage.LeafNode.Header.NextLeaf)
-			fmt.Println("Keys:", aPage.LeafNode.Keys())
-		}
-		fmt.Println("---------")
-	})
-}

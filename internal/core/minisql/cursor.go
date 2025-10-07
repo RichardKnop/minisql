@@ -215,5 +215,7 @@ func (c *Cursor) delete(ctx context.Context) error {
 	}
 
 	key := aPage.LeafNode.Cells[c.CellIdx].Key
-	return c.Table.DeleteKey(ctx, c.PageIdx, key)
+	err = c.Table.DeleteKey(ctx, c.PageIdx, key)
+
+	return err
 }
