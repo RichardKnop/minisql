@@ -19,7 +19,7 @@ func TestTable_Insert(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
+	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
 
 	var (
@@ -79,7 +79,7 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
+	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
 
 	var (
@@ -113,7 +113,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
+	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
 
 	var (
@@ -177,7 +177,7 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
+	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
 
 	var (
@@ -232,7 +232,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "testdb")
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, SchemaTableName)
+	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
 
 	/*

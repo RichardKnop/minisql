@@ -29,7 +29,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 		}
 		aRow = aRow.appendValues(stmt.Fields, values)
 
-		aPage, err := t.pager.GetPage(ctx, t, aCursor.PageIdx)
+		aPage, err := t.pager.GetPage(ctx, aCursor.PageIdx, t.RowSize)
 		if err != nil {
 			return fmt.Errorf("insert: %w", err)
 		}
