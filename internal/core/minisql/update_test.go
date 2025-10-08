@@ -17,11 +17,12 @@ func TestTable_Update(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
+	tablePager := NewTablePager(aPager, Row{Columns: testColumns}.Size())
 
 	var (
 		ctx    = context.Background()
 		rows   = gen.Rows(38)
-		aTable = NewTable(testLogger, testTableName, testColumns, aPager, 0)
+		aTable = NewTable(testLogger, testTableName, testColumns, tablePager, 0)
 	)
 
 	// Batch insert test rows

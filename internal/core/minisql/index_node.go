@@ -164,6 +164,8 @@ type IndexNode[T bool | int32 | int64 | float32 | float64 | string] struct {
 // 	}
 // }
 
+const MinimumIndexCells = 4
+
 func maxIndexCells(keySize uint64) uint32 {
 	// index header = 13
 	// each cell = keySize + 8 + 4

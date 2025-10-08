@@ -80,11 +80,12 @@ func TestPager_GetPage(t *testing.T) {
 	assert.Len(t, aPager.pages, 7)
 
 	var (
-		ctx    = context.Background()
-		aTable = &Table{RowSize: 270}
+		ctx        = context.Background()
+		aTable     = &Table{RowSize: 270}
+		tablePager = NewTablePager(aPager, aTable.RowSize)
 	)
 
-	for pageIdx := 0; pageIdx < int(aPager.TotalPages()); pageIdx++ {
+	for pageIdx := 0; pageIdx < int(tablePager.TotalPages()); pageIdx++ {
 		err := aPager.Flush(ctx, uint32(pageIdx))
 		require.NoError(t, err)
 	}
@@ -94,37 +95,38 @@ func TestPager_GetPage(t *testing.T) {
 	aPager, err = NewPager(dbFile, PageSize)
 	require.NoError(t, err)
 	assert.Equal(t, 7, int(aPager.totalPages))
+	tablePager = NewTablePager(aPager, aTable.RowSize)
 
 	// Root page
-	aPage, err := aPager.GetPage(ctx, uint32(0), aTable.RowSize)
+	aPage, err := tablePager.GetPage(ctx, uint32(0))
 	require.NoError(t, err)
 	assert.Equal(t, aRootPage, aPage)
 
 	// Internal pages
 
-	aPage, err = aPager.GetPage(ctx, uint32(1), aTable.RowSize)
+	aPage, err = tablePager.GetPage(ctx, uint32(1))
 	require.NoError(t, err)
 	assert.Equal(t, internalPages[0], aPage)
 
-	aPage, err = aPager.GetPage(ctx, uint32(2), aTable.RowSize)
+	aPage, err = tablePager.GetPage(ctx, uint32(2))
 	require.NoError(t, err)
 	assert.Equal(t, internalPages[1], aPage)
 
 	// Leaf pages
 
-	aPage, err = aPager.GetPage(ctx, uint32(3), aTable.RowSize)
+	aPage, err = tablePager.GetPage(ctx, uint32(3))
 	require.NoError(t, err)
 	assert.Equal(t, leafPages[0], aPage)
 
-	aPage, err = aPager.GetPage(ctx, uint32(4), aTable.RowSize)
+	aPage, err = tablePager.GetPage(ctx, uint32(4))
 	require.NoError(t, err)
 	assert.Equal(t, leafPages[1], aPage)
 
-	aPage, err = aPager.GetPage(ctx, uint32(5), aTable.RowSize)
+	aPage, err = tablePager.GetPage(ctx, uint32(5))
 	require.NoError(t, err)
 	assert.Equal(t, leafPages[2], aPage)
 
-	aPage, err = aPager.GetPage(ctx, uint32(6), aTable.RowSize)
+	aPage, err = tablePager.GetPage(ctx, uint32(6))
 	require.NoError(t, err)
 	assert.Equal(t, leafPages[3], aPage)
 }

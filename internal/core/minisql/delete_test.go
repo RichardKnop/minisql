@@ -17,6 +17,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
+	tablePager := NewTablePager(aPager, Row{Columns: testMediumColumns}.Size())
 
 	/*
 		In this test we will be deleting from a root leaf node only tree.
@@ -25,7 +26,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		ctx     = context.Background()
 		numRows = 5
 		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, testTableName, testMediumColumns, aPager, 0)
+		aTable  = NewTable(testLogger, testTableName, testMediumColumns, tablePager, 0)
 	)
 
 	// Set some values to NULL so we can test selecting/filtering on NULLs
@@ -115,12 +116,13 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
+	tablePager := NewTablePager(aPager, Row{Columns: testMediumColumns}.Size())
 
 	var (
 		ctx     = context.Background()
 		numRows = 20
 		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, testTableName, testMediumColumns, aPager, 0)
+		aTable  = NewTable(testLogger, testTableName, testMediumColumns, tablePager, 0)
 	)
 
 	// Batch insert test rows
@@ -432,12 +434,13 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
+	tablePager := NewTablePager(aPager, Row{Columns: testMediumColumns}.Size())
 
 	var (
 		ctx     = context.Background()
 		numRows = 100
 		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, testTableName, testMediumColumns, aPager, 0)
+		aTable  = NewTable(testLogger, testTableName, testMediumColumns, tablePager, 0)
 	)
 	aTable.maximumICells = 5 // for testing purposes only, normally 340
 

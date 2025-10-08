@@ -105,7 +105,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser P
 			logger,
 			SchemaTableName,
 			mainTableColumns,
-			aPager,
+			NewTablePager(aPager, Row{Columns: mainTableColumns}.Size()),
 			rooPageIdx,
 		)
 		aDatabase.tables[SchemaTableName] = mainTable
@@ -146,7 +146,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser P
 		logger,
 		SchemaTableName,
 		mainTableColumns,
-		aPager,
+		NewTablePager(aPager, Row{Columns: mainTableColumns}.Size()),
 		rooPageIdx,
 	)
 	aDatabase.tables[mainTable.Name] = mainTable
@@ -175,7 +175,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser P
 			logger,
 			stmt.TableName,
 			stmt.Columns,
-			aPager,
+			NewTablePager(aPager, Row{Columns: stmt.Columns}.Size()),
 			uint32(aRow.Values[2].Value.(int32)),
 		)
 
@@ -290,7 +290,8 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 	// caused a split and new page being created, so now we know what the root page
 	// for the new table should be.
 	rowSize := Row{Columns: columns}.Size()
-	freePage, err := d.pager.GetFreePage(ctx, rowSize)
+	tablePager := NewTablePager(d.pager, rowSize)
+	freePage, err := tablePager.GetFreePage(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +300,7 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 		d.logger,
 		name,
 		columns,
-		d.pager,
+		tablePager,
 		freePage.Index,
 	)
 
@@ -340,8 +341,9 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	}
 
 	// Free all table pages
+	tablePager := NewTablePager(d.pager, tableToDelete.RowSize)
 	tableToDelete.BFS(func(page *Page) {
-		if err := d.pager.AddFreePage(ctx, page.Index, tableToDelete.RowSize); err != nil {
+		if err := tablePager.AddFreePage(ctx, page.Index); err != nil {
 			d.logger.Sugar().With(
 				"page", page.Index,
 				"error", err,

@@ -17,12 +17,13 @@ func TestTable_PageRecycling(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
+	tablePager := NewTablePager(aPager, Row{Columns: testMediumColumns}.Size())
 
 	var (
 		ctx     = context.Background()
 		numRows = 100
 		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, testTableName, testMediumColumns, aPager, 0)
+		aTable  = NewTable(testLogger, testTableName, testMediumColumns, tablePager, 0)
 	)
 	aTable.maximumICells = 5 // for testing purposes only, normally 340
 
@@ -69,11 +70,13 @@ func TestTable_PageRecycling(t *testing.T) {
 func (p *pagerImpl) getFreePages(rowSize uint64) ([]int, error) {
 	var freePages []int
 
+	tablePager := NewTablePager(p, rowSize)
+
 	nextFreePage := p.dbHeader.FirstFreePage
 	for nextFreePage != 0 {
 		freePages = append(freePages, int(nextFreePage))
 
-		freePage, err := p.GetPage(context.Background(), nextFreePage, rowSize)
+		freePage, err := tablePager.GetPage(context.Background(), nextFreePage)
 		if err != nil {
 			return nil, err
 		}

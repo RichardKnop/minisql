@@ -67,7 +67,20 @@ func (p *pagerImpl) TotalPages() uint32 {
 	return p.totalPages
 }
 
-func (p *pagerImpl) GetPage(ctx context.Context, pageIdx uint32, rowSize uint64) (*Page, error) {
+type PageType int
+
+const (
+	PageTypeTable PageType = iota + 1
+	PageTypeIndex
+)
+
+type PageOptions struct {
+	Type    PageType
+	RowSize uint64
+	KeySize uint64
+}
+
+func (p *pagerImpl) GetPage(ctx context.Context, pageIdx uint32, opts PageOptions) (*Page, error) {
 	if len(p.pages) > int(pageIdx) && p.pages[pageIdx] != nil {
 		return p.pages[pageIdx], nil
 	}
@@ -81,7 +94,7 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx uint32, rowSize uint64)
 	// Requesting a new page
 	if int(pageIdx) == int(p.totalPages) {
 		// Leaf node
-		leaf := NewLeafNode(rowSize)
+		leaf := NewLeafNode(opts.RowSize)
 		if err := unmarshalLeaf(pageIdx, leaf, buf); err != nil {
 			return nil, err
 		}
@@ -116,7 +129,7 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx uint32, rowSize uint64)
 		} else if buf[idx] == 0 {
 			// First byte is Internal flag, this condition is also true if page does not exist
 			// Leaf node
-			leaf := NewLeafNode(rowSize)
+			leaf := NewLeafNode(opts.RowSize)
 			if err := unmarshalLeaf(pageIdx, leaf, buf[idx:]); err != nil {
 				return nil, err
 			}
@@ -144,15 +157,15 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx uint32, rowSize uint64)
 	return p.pages[pageIdx], nil
 }
 
-func (p *pagerImpl) GetFreePage(ctx context.Context, rowSize uint64) (*Page, error) {
+func (p *pagerImpl) GetFreePage(ctx context.Context, opts PageOptions) (*Page, error) {
 	// Check if there are any free pages
 	if p.dbHeader.FirstFreePage == 0 {
 		// No free pages, allocate new one
-		return p.GetPage(ctx, p.TotalPages(), rowSize)
+		return p.GetPage(ctx, p.TotalPages(), opts)
 	}
 
 	// Get the first free page
-	freePage, err := p.GetPage(ctx, p.dbHeader.FirstFreePage, rowSize)
+	freePage, err := p.GetPage(ctx, p.dbHeader.FirstFreePage, opts)
 	if err != nil {
 		return nil, fmt.Errorf("get free page: %w", err)
 	}
@@ -169,13 +182,13 @@ func (p *pagerImpl) GetFreePage(ctx context.Context, rowSize uint64) (*Page, err
 	return freePage, nil
 }
 
-func (p *pagerImpl) AddFreePage(ctx context.Context, pageIdx uint32, rowSize uint64) error {
+func (p *pagerImpl) AddFreePage(ctx context.Context, pageIdx uint32, opts PageOptions) error {
 	if pageIdx == 0 {
 		return fmt.Errorf("cannot free page 0 (header page)")
 	}
 
 	// Get the page to mark as free
-	freePage, err := p.GetPage(ctx, pageIdx, rowSize)
+	freePage, err := p.GetPage(ctx, pageIdx, opts)
 	if err != nil {
 		return fmt.Errorf("add free page: %w", err)
 	}
