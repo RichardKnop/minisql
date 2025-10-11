@@ -187,6 +187,9 @@ func maxIndexKeys(keySize uint64) uint32 {
 // Use int8 for bool so we can use comparison operators
 func NewIndexNode[T int8 | int32 | int64 | float32 | float64 | string](keySize uint64, cells ...IndexCell[T]) *IndexNode[T] {
 	aNode := IndexNode[T]{
+		Header: IndexNodeHeader{
+			RightChild: RIGHT_CHILD_NOT_SET,
+		},
 		Cells:   make([]IndexCell[T], 0, maxIndexKeys(keySize)),
 		KeySize: keySize,
 	}
@@ -256,4 +259,41 @@ func (n *IndexNode[T]) Unmarshal(buf []byte) (uint64, error) {
 	}
 
 	return i, nil
+}
+
+// Child returns a node index of nth child of the node marked by its index
+// (0 for the leftmost child, index equal to number of keys means the rightmost child).
+func (n *IndexNode[T]) Child(childIdx uint32) (uint32, error) {
+	keysNum := n.Header.Keys
+	if childIdx > keysNum {
+		return 0, fmt.Errorf("childIdx %d out of keysNum %d", childIdx, keysNum)
+	}
+
+	if childIdx == keysNum {
+		return n.Header.RightChild, nil
+	}
+
+	return n.Cells[childIdx].Child, nil
+}
+
+func (n *IndexNode[T]) Keys() []T {
+	keys := make([]T, 0, n.Header.Keys)
+	for i := range n.Header.Keys {
+		keys = append(keys, n.Cells[i].Key)
+	}
+	return keys
+}
+
+func (n *IndexNode[T]) Children() []uint32 {
+	children := make([]uint32, 0, n.Header.Keys+1)
+	for i := range n.Header.Keys {
+		if n.Cells[i].Child == 0 {
+			continue
+		}
+		children = append(children, n.Cells[i].Child)
+	}
+	if n.Header.RightChild > 0 && n.Header.RightChild != RIGHT_CHILD_NOT_SET {
+		children = append(children, n.Header.RightChild)
+	}
+	return children
 }

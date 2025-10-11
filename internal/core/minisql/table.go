@@ -252,7 +252,7 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 	}
 
 	/*
-	  An internal node with a right child of INVALID_PAGE_NUM is empty
+	  An internal node with a right child of RIGHT_CHILD_NOT_SET is empty
 	*/
 	if aParentPage.InternalNode.Header.RightChild == RIGHT_CHILD_NOT_SET {
 		aParentPage.InternalNode.Header.RightChild = childPageIdx
@@ -844,8 +844,8 @@ func (t *Table) BFS(f callback) error {
 	return nil
 }
 
-// func printTree(aTable *Table) error {
-// 	return aTable.BFS(func(aPage *Page) {
+// func (t *Table) print() error {
+// 	return t.BFS(func(aPage *Page) {
 // 		if aPage.InternalNode != nil {
 // 			fmt.Println("Internal node,", "page:", aPage.Index, "number of keys:", aPage.InternalNode.Header.KeysNum, "parent:", aPage.InternalNode.Header.Parent)
 // 			fmt.Println("Keys:", aPage.InternalNode.Keys())

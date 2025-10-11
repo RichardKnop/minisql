@@ -136,7 +136,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 	err = aTable.Insert(ctx, stmt)
 	require.NoError(t, err)
 
-	//require.NoError(t, printTree(aTable))
+	//require.NoError(t, aTable.print())
 
 	assert.Equal(t, 1, int(aPager.pages[0].InternalNode.Header.KeysNum))
 	assert.True(t, aPager.pages[0].InternalNode.Header.IsRoot)
@@ -203,7 +203,7 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 	err = aTable.Insert(ctx, stmt)
 	require.NoError(t, err)
 
-	//require.NoError(t, printTree(aTable))
+	//require.NoError(t, aTable.print())
 
 	// Assert root node
 	aRootPage := aPager.pages[0]
@@ -272,7 +272,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	err = aTable.Insert(ctx, stmt)
 	require.NoError(t, err)
 
-	//require.NoError(t, printTree(aTable))
+	//require.NoError(t, aTable.print())
 	checkRows(ctx, t, aTable, rows)
 
 	// Assert root node

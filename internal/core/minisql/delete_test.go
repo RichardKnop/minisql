@@ -150,7 +150,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		+-------+  +-------+  +-------+  +---------+  +----------+  +----------------+
 	*/
 
-	//require.NoError(t, printTree(aTable))
+	//require.NoError(t, aTable.print())
 
 	// Check the root page
 	assert.Equal(t, 5, int(aPager.pages[0].InternalNode.Header.KeysNum))
@@ -184,7 +184,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+-----------+     +-------+    +---------+    +----------+     +----------------+
 		*/
 
-		//require.NoError(t, printTree(aTable))
+		//require.NoError(t, aTable.print())
 
 		// Check the root page
 		assert.Equal(t, 4, int(aPager.pages[0].InternalNode.Header.KeysNum))
@@ -226,7 +226,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+-----------+     +-------+    +---------+    +----------------+
 		*/
 
-		//require.NoError(t, printTree(aTable))
+		//require.NoError(t, aTable.print())
 
 		// Check the root page
 		assert.Equal(t, 3, int(aPager.pages[0].InternalNode.Header.KeysNum))
@@ -270,7 +270,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+-----------+      +---------+      +----------------+
 		*/
 
-		//require.NoError(t, printTree(aTable))
+		//require.NoError(t, aTable.print())
 
 		// Check the root page
 		assert.Equal(t, 2, int(aPager.pages[0].InternalNode.Header.KeysNum))
@@ -313,7 +313,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+--------+           +--------+          +----------+
 		*/
 
-		//require.NoError(t, printTree(aTable))
+		//require.NoError(t, aTable.print())
 
 		// Check the root page
 		assert.Equal(t, 2, int(aPager.pages[0].InternalNode.Header.KeysNum))
@@ -348,7 +348,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		 +-------+                +----------+
 		*/
 
-		//require.NoError(t, printTree(aTable))
+		//require.NoError(t, aTable.print())
 		// Check the root page
 		assert.Equal(t, 1, int(aPager.pages[0].InternalNode.Header.KeysNum))
 		assert.Equal(t, []uint64{8}, aPager.pages[0].InternalNode.Keys())
@@ -384,7 +384,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		   +-----------------+
 		*/
 
-		//require.NoError(t, printTree(aTable))
+		//require.NoError(t, aTable.print())
 
 		assert.Nil(t, aPager.pages[0].InternalNode)
 		assert.Equal(t, 5, int(aPager.pages[0].LeafNode.Header.Cells))
@@ -411,7 +411,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 		checkRows(ctx, t, aTable, nil)
 
-		//require.NoError(t, printTree(aTable))
+		//require.NoError(t, aTable.print())
 
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Header.Cells))
 	})
@@ -458,7 +458,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	require.NoError(t, err)
 
 	//fmt.Println("BEFORE")
-	//require.NoError(t, printTree(aTable))
+	//require.NoError(t, aTable.print())
 
 	checkRows(ctx, t, aTable, rows)
 	assert.Equal(t, 47, int(aPager.TotalPages()))
@@ -470,7 +470,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	assert.Equal(t, len(rows), deleteResult.RowsAffected)
 
 	//fmt.Println("AFTER")
-	//require.NoError(t, printTree(aTable))
+	//require.NoError(t, aTable.print())
 
 	checkRows(ctx, t, aTable, nil)
 

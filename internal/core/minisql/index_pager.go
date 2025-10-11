@@ -60,6 +60,7 @@ func (p *indexPager[T]) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
 
 	// Requesting a new page
 	if int(pageIdx) == int(p.totalPages) {
+		node.Header.RightChild = RIGHT_CHILD_NOT_SET
 		p.pages = append(p.pages, &Page{Index: pageIdx, IndexNode: node})
 		p.totalPages = pageIdx + 1
 		return p.pages[len(p.pages)-1], nil
