@@ -13,17 +13,17 @@ type MockPager struct {
 	mock.Mock
 }
 
-// AddFreePage provides a mock function with given fields: _a0, _a1, _a2
-func (_m *MockPager) AddFreePage(_a0 context.Context, _a1 uint32, _a2 uint64) error {
-	ret := _m.Called(_a0, _a1, _a2)
+// AddFreePage provides a mock function with given fields: _a0, _a1
+func (_m *MockPager) AddFreePage(_a0 context.Context, _a1 uint32) error {
+	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for AddFreePage")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, uint32, uint64) error); ok {
-		r0 = rf(_a0, _a1, _a2)
+	if rf, ok := ret.Get(0).(func(context.Context, uint32) error); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -49,9 +49,9 @@ func (_m *MockPager) Flush(_a0 context.Context, _a1 uint32) error {
 	return r0
 }
 
-// GetFreePage provides a mock function with given fields: _a0, _a1
-func (_m *MockPager) GetFreePage(_a0 context.Context, _a1 uint64) (*Page, error) {
-	ret := _m.Called(_a0, _a1)
+// GetFreePage provides a mock function with given fields: _a0
+func (_m *MockPager) GetFreePage(_a0 context.Context) (*Page, error) {
+	ret := _m.Called(_a0)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetFreePage")
@@ -59,19 +59,19 @@ func (_m *MockPager) GetFreePage(_a0 context.Context, _a1 uint64) (*Page, error)
 
 	var r0 *Page
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, uint64) (*Page, error)); ok {
-		return rf(_a0, _a1)
+	if rf, ok := ret.Get(0).(func(context.Context) (*Page, error)); ok {
+		return rf(_a0)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, uint64) *Page); ok {
-		r0 = rf(_a0, _a1)
+	if rf, ok := ret.Get(0).(func(context.Context) *Page); ok {
+		r0 = rf(_a0)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*Page)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, uint64) error); ok {
-		r1 = rf(_a0, _a1)
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(_a0)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -79,9 +79,9 @@ func (_m *MockPager) GetFreePage(_a0 context.Context, _a1 uint64) (*Page, error)
 	return r0, r1
 }
 
-// GetPage provides a mock function with given fields: _a0, _a1, _a2
-func (_m *MockPager) GetPage(_a0 context.Context, _a1 uint32, _a2 uint64) (*Page, error) {
-	ret := _m.Called(_a0, _a1, _a2)
+// GetPage provides a mock function with given fields: _a0, _a1
+func (_m *MockPager) GetPage(_a0 context.Context, _a1 uint32) (*Page, error) {
+	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetPage")
@@ -89,19 +89,19 @@ func (_m *MockPager) GetPage(_a0 context.Context, _a1 uint32, _a2 uint64) (*Page
 
 	var r0 *Page
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, uint32, uint64) (*Page, error)); ok {
-		return rf(_a0, _a1, _a2)
+	if rf, ok := ret.Get(0).(func(context.Context, uint32) (*Page, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, uint32, uint64) *Page); ok {
-		r0 = rf(_a0, _a1, _a2)
+	if rf, ok := ret.Get(0).(func(context.Context, uint32) *Page); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*Page)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, uint32, uint64) error); ok {
-		r1 = rf(_a0, _a1, _a2)
+	if rf, ok := ret.Get(1).(func(context.Context, uint32) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}

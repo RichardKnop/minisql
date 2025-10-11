@@ -23,7 +23,7 @@ func TestNewDatabase(t *testing.T) {
 	mockParser := new(MockParser)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, mockParser, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, mockParser, aPager, aPager)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 1)
@@ -46,7 +46,7 @@ func TestDatabase_CreateTable(t *testing.T) {
 	mockParser := new(MockParser)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, mockParser, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, mockParser, aPager, aPager)
 	require.NoError(t, err)
 
 	stmt := Statement{
@@ -77,7 +77,7 @@ func TestDatabase_DropTable(t *testing.T) {
 	mockParser := new(MockParser)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, mockParser, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, mockParser, aPager, aPager)
 	require.NoError(t, err)
 
 	stmt := Statement{

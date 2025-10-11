@@ -94,7 +94,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	aDatabase, err := minisql.NewDatabase(ctx, logger, "db", parser.New(), aPager)
+	aDatabase, err := minisql.NewDatabase(ctx, logger, "db", parser.New(), aPager, aPager)
 	if err != nil {
 		panic(err)
 	}
