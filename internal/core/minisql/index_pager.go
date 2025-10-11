@@ -2,7 +2,6 @@ package minisql
 
 import (
 	"context"
-	"fmt"
 )
 
 func (p *pagerImpl) ForIndex(kind ColumnKind, keySize uint64) Pager {
@@ -69,8 +68,4 @@ func (p *indexPager[T]) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
 	// Existing page
 	p.pages[pageIdx] = &Page{Index: pageIdx, IndexNode: node}
 	return p.pages[pageIdx], nil
-}
-
-func (p *indexPager[T]) Marshal(aPage *Page, buf []byte) ([]byte, error) {
-	return nil, fmt.Errorf("not implemented")
 }

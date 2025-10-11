@@ -178,7 +178,7 @@ type IndexNode[T int8 | int32 | int64 | float32 | float64 | string] struct {
 
 const MinimumIndexCells = 4
 
-func maxIndexCells(keySize uint64) uint32 {
+func maxIndexKeys(keySize uint64) uint32 {
 	// index header = 13
 	// each cell = keySize + 8 + 4
 	return uint32((PageSize - 13) / (keySize + 8 + 4))
@@ -187,10 +187,10 @@ func maxIndexCells(keySize uint64) uint32 {
 // Use int8 for bool so we can use comparison operators
 func NewIndexNode[T int8 | int32 | int64 | float32 | float64 | string](keySize uint64, cells ...IndexCell[T]) *IndexNode[T] {
 	aNode := IndexNode[T]{
-		Cells:   make([]IndexCell[T], 0, maxIndexCells(keySize)),
+		Cells:   make([]IndexCell[T], 0, maxIndexKeys(keySize)),
 		KeySize: keySize,
 	}
-	for i := 0; i < int(maxIndexCells(keySize)); i++ {
+	for i := 0; i < int(maxIndexKeys(keySize)); i++ {
 		aNode.Cells = append(aNode.Cells, IndexCell[T]{})
 	}
 	if len(cells) > 0 {

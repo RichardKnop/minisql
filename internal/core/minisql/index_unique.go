@@ -28,50 +28,111 @@ func NewIndex[T int8 | int32 | int64 | float32 | float64 | string](logger *zap.L
 	}
 }
 
+func (idx *UniqueIndex[T]) Insert(ctx context.Context, key T) error {
+	aRooTPage, err := idx.getPage(ctx, idx.RootPageIdx)
+	if err != nil {
+		return fmt.Errorf("get root page: %w", err)
+	}
+
+	if aRooTPage.Node.Header.Keys == 0 {
+		aRooTPage.Node.Cells[0] = IndexCell[T]{
+			Key: key,
+			// TODO - set RowID
+		}
+		aRooTPage.Node.Header.Keys += 1
+		return nil
+	}
+
+	if aRooTPage.Node.Header.Keys < maxIndexKeys(aRooTPage.Node.KeySize) {
+		return idx.InsertNotFull(ctx, idx.RootPageIdx, key)
+	}
+
+	newRootPage, err := idx.getFreePage(ctx)
+	if err != nil {
+		return fmt.Errorf("get new root page: %w", err)
+	}
+
+	newRootPage.Node.Cells[0].Child = idx.RootPageIdx
+	newRootPage.Node.Header.IsRoot = true
+	newRootPage.Node.Header.IsLeaf = false
+	if err := idx.SplitChild(ctx, aRooTPage.Node, 0); err != nil {
+		return fmt.Errorf("split child: %w", err)
+	}
+	i := 0
+	if newRootPage.Node.Cells[0].Key < key {
+		i += 1
+	}
+	if err := idx.InsertNotFull(ctx, newRootPage.Node.Cells[i].Child, key); err != nil {
+		return fmt.Errorf("insert not full: %w", err)
+	}
+	return nil
+}
+
 func (idx *UniqueIndex[T]) InsertNotFull(ctx context.Context, pageIdx uint32, key T) error {
-	_, aNode, err := idx.getPageNode(ctx, pageIdx)
+	aPage, err := idx.getPage(ctx, pageIdx)
 	if err != nil {
 		return fmt.Errorf("get page: %w", err)
 	}
 
-	i := int(aNode.Header.Keys) // number of keys
-	if aNode.Header.IsLeaf {
-		for i >= 0 && aNode.Cells[i].Key > key {
-			aNode.Cells[i+1] = aNode.Cells[i]
+	i := int(aPage.Node.Header.Keys)
+
+	if aPage.Node.Header.IsLeaf {
+		for i >= 0 && aPage.Node.Cells[i].Key > key {
+			aPage.Node.Cells[i+1] = aPage.Node.Cells[i]
 			i -= 1
 		}
-		aNode.Cells[i+1] = IndexCell[T]{
+		aPage.Node.Cells[i+1] = IndexCell[T]{
 			Key: key,
 			// TODO - set RowID
 		}
-		aNode.Header.Keys += 1
+		aPage.Node.Header.Keys += 1
 		return nil
 	}
 
-	for i >= 0 && aNode.Cells[i].Key > key {
+	for i >= 0 && aPage.Node.Cells[i].Key > key {
 		i -= 1
 	}
-	_, aChildNode, err := idx.getPageNode(ctx, aNode.Cells[i+1].Child)
+	childPage, err := idx.getPage(ctx, aPage.Node.Cells[i+1].Child)
 	if err != nil {
 		return fmt.Errorf("get child page: %w", err)
 	}
-	if aChildNode.Header.Keys == maxIndexCells(aNode.KeySize) {
-		if err := idx.SplitChild(ctx, aChildNode, uint32(i+1)); err != nil {
+	if childPage.Node.Header.Keys == maxIndexKeys(aPage.Node.KeySize) {
+		if err := idx.SplitChild(ctx, childPage.Node, uint32(i+1)); err != nil {
 			return fmt.Errorf("split child: %w", err)
 		}
-		if aNode.Cells[i+1].Key < key {
+		if aPage.Node.Cells[i+1].Key < key {
 			i += 1
 		}
 	}
 
 	// Recurse to child node
-	return idx.InsertNotFull(ctx, aNode.Cells[i+1].Child, key)
+	return idx.InsertNotFull(ctx, aPage.Node.Cells[i+1].Child, key)
 }
 
 // A utility function to split the child y of this node. i is index of y in
 //
 //	child array C[].  The Child y must be full when this function is called
 func (idx *UniqueIndex[T]) SplitChild(ctx context.Context, aChildNode *IndexNode[T], indexInParent uint32) error {
+	newPage, err := idx.getFreePage(ctx)
+	if err != nil {
+		return fmt.Errorf("get new page: %w", err)
+	}
+
+	masKeys := maxIndexKeys(aChildNode.KeySize)
+	maxChildren := masKeys + 1
+
+	// Move smaller half to the new node
+	newPage.Node.Header.IsLeaf = aChildNode.Header.IsLeaf
+	newPage.Node.Header.Keys = maxChildren/2 - 1
+	aChildNode.Header.Keys = maxChildren / 2
+	newPage.Node.Header.RightChild = aChildNode.Header.RightChild
+
+	// Move everything to the right of median to new node,
+	// median key will move to parent
+
+	for j := uint32(0); j < maxChildren/2-1; j++ {
+		newPage.Node.Cells[j] = aChildNode.Cells[j+maxChildren/2]
+	}
 
 	// TODO - implement
 	return nil
@@ -86,21 +147,21 @@ func (idx *UniqueIndex[T]) SplitChild(ctx context.Context, aChildNode *IndexNode
 
 // # A utility function to split the child y of this node. i is index of y in
 // # child array C[].  The Child y must be full when this function is called
-// def splitChild(self, i, y):
-//     z = BTreeNode(y.t, y.leaf)
+// def splitChild(self, i, child):
+//     z = BTreeNode(child.t, child.leaf)
 //     z.n = self.t - 1
 //     for j in range(self.t - 1):
-//         z.keys[j] = y.keys[j + self.t]
-//     if not y.leaf:
+//         z.keys[j] = child.keys[j + self.t]
+//     if not child.leaf:
 //         for j in range(self.t):
-//             z.C[j] = y.C[j + self.t]
-//     y.n = self.t - 1
+//             z.C[j] = child.C[j + self.t]
+//     child.n = self.t - 1
 //     for j in range(self.n, i, -1):
 //         self.C[j + 1] = self.C[j]
 //     self.C[i + 1] = z
 //     for j in range(self.n - 1, i - 1, -1):
 //         self.keys[j + 1] = self.keys[j]
-//     self.keys[i] = y.keys[self.t - 1]
+//     self.keys[i] = child.keys[self.t - 1]
 //     self.n += 1
 
 // # The main function that inserts a new key in this B-Tree
@@ -122,55 +183,30 @@ func (idx *UniqueIndex[T]) SplitChild(ctx context.Context, aChildNode *IndexNode
 //         else:
 //             self.root.insertNonFull(k)
 
-func (idx *UniqueIndex[T]) Insert(ctx context.Context, key T) error {
-	_, aRootNode, err := idx.getPageNode(ctx, idx.RootPageIdx)
-	if err != nil {
-		return fmt.Errorf("get root page: %w", err)
-	}
-
-	if aRootNode.Header.Keys == 0 {
-		aRootNode.Cells[0] = IndexCell[T]{
-			Key: key,
-			// TODO - set RowID
-		}
-		aRootNode.Header.Keys += 1
-		return nil
-	}
-
-	if aRootNode.Header.Keys == maxIndexCells(aRootNode.KeySize) {
-		// newRootPage, err := idx.pager.GetFreePage(ctx)
-		// if err != nil {
-		// 	return fmt.Errorf("get new root page: %w", err)
-		// }
-
-		newRootNode := NewIndexNode[T](aRootNode.KeySize)
-		newRootNode.Cells[0].Child = idx.RootPageIdx
-		newRootNode.Header.IsRoot = true
-		newRootNode.Header.IsLeaf = false
-		if err := idx.SplitChild(ctx, aRootNode, 0); err != nil {
-			return fmt.Errorf("split child: %w", err)
-		}
-		i := 0
-		if newRootNode.Cells[0].Key < key {
-			i += 1
-		}
-		if err := idx.InsertNotFull(ctx, newRootNode.Cells[i].Child, key); err != nil {
-			return fmt.Errorf("insert not full: %w", err)
-		}
-		return nil
-	}
-
-	return idx.InsertNotFull(ctx, idx.RootPageIdx, key)
+type IndexPage[T int8 | int32 | int64 | float32 | float64 | string] struct {
+	Node *IndexNode[T]
 }
 
-func (idx *UniqueIndex[T]) getPageNode(ctx context.Context, pageIdx uint32) (*Page, *IndexNode[T], error) {
-	page, err := idx.pager.GetPage(ctx, pageIdx)
+func (idx *UniqueIndex[T]) getFreePage(ctx context.Context) (*IndexPage[T], error) {
+	page, err := idx.pager.GetFreePage(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("get page: %w", err)
+		return nil, fmt.Errorf("get free page: %w", err)
 	}
 	node, ok := page.IndexNode.(*IndexNode[T])
 	if !ok {
-		return nil, nil, fmt.Errorf("unexpected index node type")
+		return nil, fmt.Errorf("unexpected index node type")
 	}
-	return page, node, nil
+	return &IndexPage[T]{Node: node}, nil
+}
+
+func (idx *UniqueIndex[T]) getPage(ctx context.Context, pageIdx uint32) (*IndexPage[T], error) {
+	page, err := idx.pager.GetPage(ctx, pageIdx)
+	if err != nil {
+		return nil, fmt.Errorf("get page: %w", err)
+	}
+	node, ok := page.IndexNode.(*IndexNode[T])
+	if !ok {
+		return nil, fmt.Errorf("unexpected index node type")
+	}
+	return &IndexPage[T]{Node: node}, nil
 }
