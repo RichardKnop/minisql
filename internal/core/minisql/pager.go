@@ -12,6 +12,8 @@ type DBFile interface {
 	io.WriterAt
 }
 
+type PageUnmarshaler func(pageIdx uint32, buf []byte) (*Page, error)
+
 type pagerImpl struct {
 	pageSize   int
 	totalPages uint32 // total number of pages
@@ -67,20 +69,7 @@ func (p *pagerImpl) TotalPages() uint32 {
 	return p.totalPages
 }
 
-type PageType int
-
-const (
-	PageTypeTable PageType = iota + 1
-	PageTypeIndex
-)
-
-type PageOptions struct {
-	Type    PageType
-	RowSize uint64
-	KeySize uint64
-}
-
-func (p *pagerImpl) GetPage(ctx context.Context, pageIdx uint32, opts PageOptions) (*Page, error) {
+func (p *pagerImpl) GetPage(ctx context.Context, pageIdx uint32, unmarshaler PageUnmarshaler) (*Page, error) {
 	if len(p.pages) > int(pageIdx) && p.pages[pageIdx] != nil {
 		return p.pages[pageIdx], nil
 	}
@@ -91,17 +80,8 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx uint32, opts PageOption
 
 	buf := make([]byte, p.pageSize)
 
-	// Requesting a new page
-	if int(pageIdx) == int(p.totalPages) {
-		// Leaf node
-		leaf := NewLeafNode(opts.RowSize)
-		if err := unmarshalLeaf(pageIdx, leaf, buf); err != nil {
-			return nil, err
-		}
-		p.pages = append(p.pages, &Page{Index: pageIdx, LeafNode: leaf})
-		p.totalPages = pageIdx + 1
-	} else {
-		// Page should exist, load the page from file
+	if int(pageIdx) != int(p.totalPages) {
+		// If we are not requesting a new page, read the page from file
 		offset := int64(pageIdx) * int64(p.pageSize)
 		_, err := p.file.ReadAt(buf, offset)
 		if err != nil {
@@ -114,34 +94,11 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx uint32, opts PageOption
 				p.pages = append(p.pages, nil)
 			}
 		}
+	}
 
-		idx := 0
-		if pageIdx == 0 {
-			idx = RootPageConfigSize
-		}
-
-		if p.dbHeader.FirstFreePage != 0 && pageIdx == p.dbHeader.FirstFreePage {
-			aFreePage := new(FreePage)
-			if err := UnmarshalFreePage(buf[idx:], aFreePage); err != nil {
-				return nil, err
-			}
-			p.pages[pageIdx] = &Page{Index: pageIdx, FreePage: aFreePage}
-		} else if buf[idx] == 0 {
-			// First byte is Internal flag, this condition is also true if page does not exist
-			// Leaf node
-			leaf := NewLeafNode(opts.RowSize)
-			if err := unmarshalLeaf(pageIdx, leaf, buf[idx:]); err != nil {
-				return nil, err
-			}
-			p.pages[pageIdx] = &Page{Index: pageIdx, LeafNode: leaf}
-		} else {
-			// Internal node
-			internal := new(InternalNode)
-			if err := unmarshalInternal(pageIdx, internal, buf[idx:]); err != nil {
-				return nil, err
-			}
-			p.pages[pageIdx] = &Page{Index: pageIdx, InternalNode: internal}
-		}
+	_, err := unmarshaler(pageIdx, buf)
+	if err != nil {
+		return nil, err
 	}
 
 	if pageIdx == 0 {
@@ -157,15 +114,15 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx uint32, opts PageOption
 	return p.pages[pageIdx], nil
 }
 
-func (p *pagerImpl) GetFreePage(ctx context.Context, opts PageOptions) (*Page, error) {
+func (p *pagerImpl) GetFreePage(ctx context.Context, unmarshaler PageUnmarshaler) (*Page, error) {
 	// Check if there are any free pages
 	if p.dbHeader.FirstFreePage == 0 {
 		// No free pages, allocate new one
-		return p.GetPage(ctx, p.TotalPages(), opts)
+		return p.GetPage(ctx, p.TotalPages(), unmarshaler)
 	}
 
 	// Get the first free page
-	freePage, err := p.GetPage(ctx, p.dbHeader.FirstFreePage, opts)
+	freePage, err := p.GetPage(ctx, p.dbHeader.FirstFreePage, unmarshaler)
 	if err != nil {
 		return nil, fmt.Errorf("get free page: %w", err)
 	}
@@ -178,17 +135,18 @@ func (p *pagerImpl) GetFreePage(ctx context.Context, opts PageOptions) (*Page, e
 	freePage.FreePage = nil
 	freePage.LeafNode = nil
 	freePage.InternalNode = nil
+	freePage.IndexNode = nil
 
 	return freePage, nil
 }
 
-func (p *pagerImpl) AddFreePage(ctx context.Context, pageIdx uint32, opts PageOptions) error {
+func (p *pagerImpl) AddFreePage(ctx context.Context, pageIdx uint32, unmarshaler PageUnmarshaler) error {
 	if pageIdx == 0 {
 		return fmt.Errorf("cannot free page 0 (header page)")
 	}
 
 	// Get the page to mark as free
-	freePage, err := p.GetPage(ctx, pageIdx, opts)
+	freePage, err := p.GetPage(ctx, pageIdx, unmarshaler)
 	if err != nil {
 		return fmt.Errorf("add free page: %w", err)
 	}
@@ -217,7 +175,7 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx uint32) error {
 	aPage := p.pages[pageIdx]
 
 	buf := make([]byte, p.pageSize)
-	_, err := marshal(aPage, buf)
+	_, err := marshalPage(aPage, buf)
 	if err != nil {
 		return err
 	}
@@ -240,31 +198,7 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx uint32) error {
 	return err
 }
 
-func unmarshalLeaf(pageIdx uint32, leaf *LeafNode, buf []byte) error {
-	unmarshaler := leaf.Unmarshal
-	if pageIdx == 0 {
-		unmarshaler = leaf.UnmarshalRoot
-	}
-	_, err := unmarshaler(buf)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func unmarshalInternal(pageIdx uint32, internal *InternalNode, buf []byte) error {
-	unmarshaler := internal.Unmarshal
-	if pageIdx == 0 {
-		unmarshaler = internal.UnmarshalRoot
-	}
-	_, err := unmarshaler(buf)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func marshal(aPage *Page, buf []byte) ([]byte, error) {
+func marshalPage(aPage *Page, buf []byte) ([]byte, error) {
 	if aPage.FreePage != nil {
 		data, err := aPage.FreePage.Marshal()
 		if err != nil {
@@ -292,6 +226,23 @@ func marshal(aPage *Page, buf []byte) ([]byte, error) {
 			return nil, err
 		}
 		return data, nil
+	} else if aPage.IndexNode != nil {
+		switch node := aPage.IndexNode.(type) {
+		case *IndexNode[int8]:
+			return node.Marshal(buf)
+		case *IndexNode[int32]:
+			return node.Marshal(buf)
+		case *IndexNode[int64]:
+			return node.Marshal(buf)
+		case *IndexNode[float32]:
+			return node.Marshal(buf)
+		case *IndexNode[float64]:
+			return node.Marshal(buf)
+		case *IndexNode[string]:
+			return node.Marshal(buf)
+		default:
+			return nil, fmt.Errorf("error flushing, unknown index node type for page %d", aPage.Index)
+		}
 	}
 	return nil, fmt.Errorf("error flushing, page %d is neither internal nor leaf node nor free page", aPage.Index)
 }

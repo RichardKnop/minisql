@@ -7,13 +7,14 @@ import (
 
 type IndexNodeHeader struct {
 	IsRoot     bool
+	IsLeaf     bool
 	Parent     uint32
 	Keys       uint32
 	RightChild uint32
 }
 
 func (h *IndexNodeHeader) Size() (s uint64) {
-	return 1 + 4 + 4 + 4
+	return 1 + 1 + 4 + 4 + 4
 }
 
 func (h *IndexNodeHeader) Marshal(buf []byte) ([]byte, error) {
@@ -33,6 +34,13 @@ func (h *IndexNodeHeader) Marshal(buf []byte) ([]byte, error) {
 	}
 	i += 1
 
+	if h.IsLeaf {
+		buf[1] = 1
+	} else {
+		buf[1] = 0
+	}
+	i += 1
+
 	marshalUint32(buf, h.Parent, i)
 	i += 4
 
@@ -49,6 +57,8 @@ func (h *IndexNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 	i := uint64(0)
 	h.IsRoot = buf[i] == 1
 	i += 1
+	h.IsLeaf = buf[i] == 1
+	i += 1
 	h.Parent = unmarshalUint32(buf, i)
 	i += 4
 	h.Keys = unmarshalUint32(buf, i)
@@ -57,7 +67,8 @@ func (h *IndexNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 	return h.Size(), nil
 }
 
-type IndexCell[T bool | int32 | int64 | float32 | float64 | string] struct {
+// Use int8 for bool so we can use comparison operators
+type IndexCell[T int8 | int32 | int64 | float32 | float64 | string] struct {
 	Key   T
 	RowID uint64
 	Child uint32
@@ -80,8 +91,8 @@ func (c *IndexCell[T]) Marshal(keySize uint64, buf []byte) ([]byte, error) {
 	// Marshal the key based on its type
 	keyAny := any(c.Key)
 	switch v := keyAny.(type) {
-	case bool:
-		if v {
+	case int8:
+		if v == 1 {
 			buf[i] = 1
 		} else {
 			buf[i] = 0
@@ -119,7 +130,7 @@ func (c *IndexCell[T]) Unmarshal(keySize uint64, buf []byte) (uint64, error) {
 	// Unmarshal the key based on its type
 	keyAny := any(c.Key)
 	switch v := keyAny.(type) {
-	case bool:
+	case int8:
 		c.Key = any(buf[i] == 1).(T)
 		i += 1
 	case int32:
@@ -150,7 +161,8 @@ func (c *IndexCell[T]) Unmarshal(keySize uint64, buf []byte) (uint64, error) {
 	return i, nil
 }
 
-type IndexNode[T bool | int32 | int64 | float32 | float64 | string] struct {
+// Use int8 for bool so we can use comparison operators
+type IndexNode[T int8 | int32 | int64 | float32 | float64 | string] struct {
 	Header  IndexNodeHeader
 	Cells   []IndexCell[T] // (PageSize - (5)) / (CellSize + 4 + 8)
 	KeySize uint64
@@ -172,7 +184,8 @@ func maxIndexCells(keySize uint64) uint32 {
 	return uint32((PageSize - 13) / (keySize + 8 + 4))
 }
 
-func NewIndexNode[T bool | int32 | int64 | float32 | float64 | string](keySize uint64, cells ...IndexCell[T]) *IndexNode[T] {
+// Use int8 for bool so we can use comparison operators
+func NewIndexNode[T int8 | int32 | int64 | float32 | float64 | string](keySize uint64, cells ...IndexCell[T]) *IndexNode[T] {
 	aNode := IndexNode[T]{
 		Cells:   make([]IndexCell[T], 0, maxIndexCells(keySize)),
 		KeySize: keySize,

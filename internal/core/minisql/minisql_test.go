@@ -11,7 +11,7 @@ import (
 	"github.com/RichardKnop/minisql/internal/pkg/logging"
 )
 
-//go:generate mockery --name=TablePager --structname=MockTablePager --inpackage --case=snake --testonly
+//go:generate mockery --name=Pager --structname=MockPager --inpackage --case=snake --testonly
 //go:generate mockery --name=Parser --structname=MockParser --inpackage --case=snake --testonly
 
 var (

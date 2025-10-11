@@ -13,13 +13,13 @@ type Table struct {
 	Columns       []Column
 	RootPageIdx   uint32
 	RowSize       uint64
-	pager         TablePager
+	pager         Pager
 	maximumICells uint32
 	writeLock     *sync.RWMutex
 	logger        *zap.Logger
 }
 
-func NewTable(logger *zap.Logger, name string, columns []Column, pager TablePager, rootPageIdx uint32) *Table {
+func NewTable(logger *zap.Logger, name string, columns []Column, pager Pager, rootPageIdx uint32) *Table {
 	return &Table{
 		Name:          name,
 		Columns:       columns,

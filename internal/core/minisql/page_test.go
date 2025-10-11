@@ -17,7 +17,7 @@ func TestTable_PageRecycling(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
-	tablePager := NewTablePager(aPager, Row{Columns: testMediumColumns}.Size())
+	tablePager := aPager.ForTable(Row{Columns: testMediumColumns}.Size())
 
 	var (
 		ctx     = context.Background()
@@ -70,7 +70,7 @@ func TestTable_PageRecycling(t *testing.T) {
 func (p *pagerImpl) getFreePages(rowSize uint64) ([]int, error) {
 	var freePages []int
 
-	tablePager := NewTablePager(p, rowSize)
+	tablePager := p.ForTable(rowSize)
 
 	nextFreePage := p.dbHeader.FirstFreePage
 	for nextFreePage != 0 {

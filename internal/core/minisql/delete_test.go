@@ -17,7 +17,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
-	tablePager := NewTablePager(aPager, Row{Columns: testMediumColumns}.Size())
+	tablePager := aPager.ForTable(Row{Columns: testMediumColumns}.Size())
 
 	/*
 		In this test we will be deleting from a root leaf node only tree.
@@ -116,7 +116,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
-	tablePager := NewTablePager(aPager, Row{Columns: testMediumColumns}.Size())
+	tablePager := aPager.ForTable(Row{Columns: testMediumColumns}.Size())
 
 	var (
 		ctx     = context.Background()
@@ -434,7 +434,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
-	tablePager := NewTablePager(aPager, Row{Columns: testMediumColumns}.Size())
+	tablePager := aPager.ForTable(Row{Columns: testMediumColumns}.Size())
 
 	var (
 		ctx     = context.Background()

@@ -82,10 +82,10 @@ func TestPager_GetPage(t *testing.T) {
 	var (
 		ctx        = context.Background()
 		aTable     = &Table{RowSize: 270}
-		tablePager = NewTablePager(aPager, aTable.RowSize)
+		tablePager = aPager.ForTable(aTable.RowSize)
 	)
 
-	for pageIdx := 0; pageIdx < int(tablePager.TotalPages()); pageIdx++ {
+	for pageIdx := 0; pageIdx < int(aPager.TotalPages()); pageIdx++ {
 		err := aPager.Flush(ctx, uint32(pageIdx))
 		require.NoError(t, err)
 	}
@@ -95,7 +95,7 @@ func TestPager_GetPage(t *testing.T) {
 	aPager, err = NewPager(dbFile, PageSize)
 	require.NoError(t, err)
 	assert.Equal(t, 7, int(aPager.totalPages))
-	tablePager = NewTablePager(aPager, aTable.RowSize)
+	tablePager = aPager.ForTable(aTable.RowSize)
 
 	// Root page
 	aPage, err := tablePager.GetPage(ctx, uint32(0))

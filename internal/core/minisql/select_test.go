@@ -17,7 +17,7 @@ func TestTable_Select(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
-	tablePager := NewTablePager(aPager, Row{Columns: testColumns}.Size())
+	tablePager := aPager.ForTable(Row{Columns: testColumns}.Size())
 
 	var (
 		ctx    = context.Background()
