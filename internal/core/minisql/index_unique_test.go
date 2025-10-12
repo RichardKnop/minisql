@@ -38,7 +38,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 			+----------+
 		*/
 
-		//require.NoError(t, anIndex.print())
+		// require.NoError(t, anIndex.print())
 
 		rootNode := aPager.pages[0].IndexNode.(*IndexNode[int64])
 		assert.True(t, rootNode.Header.IsRoot)
@@ -62,7 +62,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 						+-----+         +--------+
 		*/
 
-		//require.NoError(t, anIndex.print())
+		// require.NoError(t, anIndex.print())
 
 		rootNode := aPager.pages[0].IndexNode.(*IndexNode[int64])
 		leftChild := aPager.pages[1].IndexNode.(*IndexNode[int64])
@@ -409,4 +409,126 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		assert.Empty(t, leaf7.Children())
 	})
 
+	actualKeys := []int64{}
+	err = anIndex.BFS(func(aPage *Page) {
+		node := aPage.IndexNode.(*IndexNode[int64])
+		actualKeys = append(actualKeys, node.Keys()...)
+	})
+	require.NoError(t, err)
+
+	expectedKys := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}
+
+	assert.ElementsMatch(t, expectedKys, actualKeys)
+}
+
+func TestUniqueIndex_Insert_OutOfOrder(t *testing.T) {
+	t.Parallel()
+
+	tempFile, err := os.CreateTemp("", "testdb")
+	require.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+	aPager, err := NewPager(tempFile, PageSize)
+	require.NoError(t, err)
+	aColumn := Column{Name: "test_column", Kind: Int8, Size: 8}
+	indexPager := aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size))
+	anIndex := NewUniqueIndex[int64](zap.NewNop(), "test_index", aColumn, indexPager, 0)
+	anIndex.maximumKeys = 3
+
+	keys := []int64{9, 5, 3, 14, 11, 1, 7, 15, 12, 6, 10, 13, 4, 8, 2}
+
+	for _, key := range keys {
+		err := anIndex.Insert(context.Background(), key)
+		require.NoError(t, err)
+	}
+
+	/*
+								        +----------------------+
+								        |           7          |
+								        +----------------------+
+		                               /                        \
+							+---------+                          +---------------+
+							|  3 , 5  |                          |  11   ,   14  |
+							+---------+                          +---------------+
+					       /     |     \                        /        |        \
+			 	 +--------+    +---+    +---+   +--------------+   +-----------+   +----+
+				 |  1 , 2 |    | 4 |    | 6 |   |  8 , 9 , 10  |   |  12 , 13  |   | 15 |
+				 +--------+    +---+    +---+   +--------------+   +-----------+   +----+
+	*/
+
+	actualKeys := []int64{}
+	err = anIndex.BFS(func(aPage *Page) {
+		node := aPage.IndexNode.(*IndexNode[int64])
+		actualKeys = append(actualKeys, node.Keys()...)
+	})
+	require.NoError(t, err)
+
+	assert.ElementsMatch(t, keys, actualKeys)
+
+	require.NoError(t, anIndex.print())
+
+	// var (
+	// 	rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
+	// 	internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
+	// 	internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
+	// 	leaf1     = aPager.pages[1].IndexNode.(*IndexNode[int64])
+	// 	leaf2     = aPager.pages[3].IndexNode.(*IndexNode[int64])
+	// 	leaf3     = aPager.pages[2].IndexNode.(*IndexNode[int64])
+	// 	leaf4     = aPager.pages[4].IndexNode.(*IndexNode[int64])
+	// )
+
+	// // Root node
+
+	// assert.True(t, rootNode.Header.IsRoot)
+	// assert.False(t, rootNode.Header.IsLeaf)
+	// assert.Equal(t, 1, int(rootNode.Header.Keys))
+	// assert.Equal(t, []int64{5}, rootNode.Keys())
+	// assert.Equal(t, []uint32{5, 6}, rootNode.Children())
+
+	// // Internal nodes
+
+	// assert.False(t, internal1.Header.IsRoot)
+	// assert.False(t, internal1.Header.IsLeaf)
+	// assert.Equal(t, 0, int(internal1.Header.Parent))
+	// assert.Equal(t, 1, int(internal1.Header.Keys))
+	// assert.Equal(t, []int64{2}, internal1.Keys())
+	// assert.Equal(t, []uint32{1, 3}, internal1.Children())
+
+	// assert.False(t, internal2.Header.IsRoot)
+	// assert.False(t, internal2.Header.IsLeaf)
+	// assert.Equal(t, 0, int(internal2.Header.Parent))
+	// assert.Equal(t, 1, int(internal2.Header.Keys))
+	// assert.Equal(t, []int64{8}, internal2.Keys())
+	// assert.Equal(t, []uint32{2, 4}, internal2.Children())
+
+	// // Leaf nodes
+
+	// assert.False(t, leaf1.Header.IsRoot)
+	// assert.True(t, leaf1.Header.IsLeaf)
+	// assert.Equal(t, 5, int(leaf1.Header.Parent))
+	// assert.Equal(t, 1, int(leaf1.Header.Keys))
+	// assert.Equal(t, []int64{1}, leaf1.Keys())
+	// assert.Empty(t, leaf1.Children())
+
+	// assert.False(t, leaf2.Header.IsRoot)
+	// assert.True(t, leaf2.Header.IsLeaf)
+	// assert.Equal(t, 5, int(leaf2.Header.Parent))
+	// assert.Equal(t, 2, int(leaf2.Header.Keys))
+	// assert.Equal(t, []int64{3, 4}, leaf2.Keys())
+	// assert.Empty(t, leaf2.Children())
+
+	// assert.False(t, leaf3.Header.IsRoot)
+	// assert.True(t, leaf3.Header.IsLeaf)
+	// assert.Equal(t, 6, int(leaf3.Header.Parent))
+	// assert.Equal(t, 2, int(leaf3.Header.Keys))
+	// assert.Equal(t, []int64{6, 7}, leaf3.Keys())
+	// assert.Empty(t, leaf3.Children())
+
+	// assert.False(t, leaf4.Header.IsRoot)
+	// assert.True(t, leaf4.Header.IsLeaf)
+	// assert.Equal(t, 6, int(leaf4.Header.Parent))
+	// assert.Equal(t, 3, int(leaf4.Header.Keys))
+	// assert.Equal(t, []int64{9, 10, 11}, leaf4.Keys())
+	// assert.Empty(t, leaf4.Children())
+
+	// assert.True(t, false)
 }

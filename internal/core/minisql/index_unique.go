@@ -16,6 +16,7 @@ type UniqueIndex[T int8 | int32 | int64 | float32 | float64 | string] struct {
 	writeLock   *sync.RWMutex
 	logger      *zap.Logger
 	maximumKeys uint32
+	debug       bool
 }
 
 func NewUniqueIndex[T int8 | int32 | int64 | float32 | float64 | string](logger *zap.Logger, name string, column Column, pager Pager, rootPageIdx uint32) *UniqueIndex[T] {
@@ -130,6 +131,7 @@ func (idx *UniqueIndex[T]) InsertNotFull(ctx context.Context, pageIdx uint32, ke
 	for i >= 0 && aNode.Cells[i].Key > key {
 		i -= 1
 	}
+
 	childIdx, err := aNode.Child(uint32(i + 1))
 	if err != nil {
 		return fmt.Errorf("get child: %w", err)
@@ -200,18 +202,29 @@ func (idx *UniqueIndex[T]) SplitChild(ctx context.Context, parentPage, splitPage
 	}
 
 	// Update parent
-	for j := int(parentNode.Header.Keys); j > int(indexInParent); j-- {
-		parentNode.Cells[j+1].Child = parentNode.Cells[j].Child
-	}
-	parentNode.Header.RightChild = newPage.Index
-	for j := int(parentNode.Header.Keys); j >= int(indexInParent); j-- {
+	for j := int(parentNode.Header.Keys) - 1; j >= int(indexInParent); j-- {
 		parentNode.Cells[j+1].Key = parentNode.Cells[j].Key
+		// parentNode.Cells[j+1].Child = parentNode.Cells[j].Child
 	}
 	parentNode.Cells[indexInParent].Key = splitNode.Cells[leftCount-1].Key
+
+	// parentNode.Cells[indexInParent+1].Child = newPage.Index
 	parentNode.Cells[indexInParent].Child = splitPage.Index
 	splitNode.Cells[leftCount] = IndexCell[T]{}
 
 	parentNode.Header.Keys += 1
+
+	for j := int(parentNode.Header.Keys) - 1; j > int(indexInParent); j-- {
+		if j+1 >= int(maxKeys) {
+			continue
+		}
+		if err := parentNode.SetChild(uint32(j+1), parentNode.Cells[j].Child); err != nil {
+			return fmt.Errorf("set child: %w", err)
+		}
+	}
+	if err := parentNode.SetChild(indexInParent+1, newPage.Index); err != nil {
+		return fmt.Errorf("set child: %w", err)
+	}
 
 	return nil
 }

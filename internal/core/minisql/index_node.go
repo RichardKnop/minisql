@@ -276,6 +276,21 @@ func (n *IndexNode[T]) Child(childIdx uint32) (uint32, error) {
 	return n.Cells[childIdx].Child, nil
 }
 
+func (n *IndexNode[T]) SetChild(idx, childPage uint32) error {
+	keysNum := n.Header.Keys
+	if idx > keysNum {
+		return fmt.Errorf("childIdx %d out of keysNum %d", idx, keysNum)
+	}
+
+	if idx == keysNum {
+		n.Header.RightChild = childPage
+		return nil
+	}
+
+	n.Cells[idx].Child = childPage
+	return nil
+}
+
 func (n *IndexNode[T]) Keys() []T {
 	keys := make([]T, 0, n.Header.Keys)
 	for i := range n.Header.Keys {
@@ -285,11 +300,11 @@ func (n *IndexNode[T]) Keys() []T {
 }
 
 func (n *IndexNode[T]) Children() []uint32 {
+	if n.Header.IsLeaf {
+		return nil
+	}
 	children := make([]uint32, 0, n.Header.Keys+1)
 	for i := range n.Header.Keys {
-		if n.Cells[i].Child == 0 {
-			continue
-		}
 		children = append(children, n.Cells[i].Child)
 	}
 	if n.Header.RightChild > 0 && n.Header.RightChild != RIGHT_CHILD_NOT_SET {
