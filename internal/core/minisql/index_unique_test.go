@@ -48,6 +48,12 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		assert.Equal(t, []uint64{101, 102, 103}, rootNode.RowIDs())
 	})
 
+	t.Run("Insert duplicate key fails", func(t *testing.T) {
+		err = anIndex.Insert(context.Background(), key-1, uint64(key-1+100))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrDuplicateKey)
+	})
+
 	t.Run("Insert 4th key, causes a split", func(t *testing.T) {
 		err = anIndex.Insert(context.Background(), key, uint64(key+100))
 		require.NoError(t, err)

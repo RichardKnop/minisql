@@ -49,6 +49,15 @@ func (idx *UniqueIndex[T]) Insert(ctx context.Context, key T, rowID uint64) erro
 		return nil
 	}
 
+	// Check for duplicate key
+	_, ok, err := idx.Seek(ctx, aRootPage, key)
+	if err != nil {
+		return fmt.Errorf("seek key: %w", err)
+	}
+	if ok {
+		return ErrDuplicateKey
+	}
+
 	// Root is not full, insert new key
 	if aRootNode.Header.Keys < idx.maxIndexKeys(aRootNode.KeySize) {
 		return idx.InsertNotFull(ctx, idx.RootPageIdx, key, rowID)
@@ -107,6 +116,8 @@ func (idx *UniqueIndex[T]) maxIndexKeys(keySize uint64) uint32 {
 	// each cell = keySize + 8 + 4
 	return uint32((PageSize - 14) / (keySize + 8 + 4))
 }
+
+var ErrDuplicateKey = fmt.Errorf("duplicate key")
 
 func (idx *UniqueIndex[T]) InsertNotFull(ctx context.Context, pageIdx uint32, key T, rowID uint64) error {
 	aPage, err := idx.pager.GetPage(ctx, pageIdx)
