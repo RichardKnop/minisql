@@ -79,6 +79,27 @@ type Conditions []Condition
 // is joined by AND with other conditions in the same slice.
 type OneOrMore []Conditions
 
+// IsValidCondition checks that all fields of the condition are set
+func IsValidCondition(c Condition) bool {
+	if c.Operand1.Type == 0 {
+		return false
+	}
+	if c.Operand1.Value == 0 {
+		return false
+	}
+	if c.Operator == 0 {
+		return false
+	}
+	if c.Operand2.Type == 0 {
+		return false
+	}
+	if c.Operand2.Value == 0 {
+		return false
+	}
+
+	return true
+}
+
 func (o OneOrMore) LastCondition() (Condition, bool) {
 	if len(o) == 0 {
 		return Condition{}, false
@@ -338,7 +359,7 @@ func (stmt Statement) CreateTableDDL() string {
 			sb.WriteString(",\n")
 		}
 	}
-	sb.WriteString("\n)")
+	sb.WriteString("\n);")
 	return sb.String()
 }
 

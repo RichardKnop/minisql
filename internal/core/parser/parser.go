@@ -26,6 +26,7 @@ var reservedWords = []string{
 	"CREATE TABLE", "DROP TABLE", "SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
 	"*", "IS NULL", "IS NOT NULL", "NOT NULL", "NULL", "IF NOT EXISTS", "WHERE", "FROM", "SET", "AS",
+	";",
 }
 
 type step int
@@ -66,6 +67,7 @@ const (
 	stepWhereConditionOperator
 	stepWhereConditionValue
 	stepWhereOperator
+	stepStatementEnd
 )
 
 type parser struct {
@@ -73,7 +75,6 @@ type parser struct {
 	i               int // where we are in the query
 	sql             string
 	step            step
-	err             error
 	nextUpdateField string
 }
 
@@ -81,22 +82,18 @@ func New() *parser {
 	return new(parser)
 }
 
-func (p *parser) Parse(ctx context.Context, sql string) (minisql.Statement, error) {
+func (p *parser) Parse(ctx context.Context, sql string) ([]minisql.Statement, error) {
 	sql = strings.Join(strings.Fields(sql), " ")
 	p.reset()
 	p.setSQL(sql)
 
 	p.i = 0
-	p.err = nil
 	p.nextUpdateField = ""
 
-	q, err := p.doParse()
-	p.err = err
-	if p.err == nil {
-		p.err = p.validate()
-	}
-	p.logError()
-	return q, p.err
+	statements, err := p.doParse()
+
+	p.logError(err)
+	return statements, err
 }
 
 func (p *parser) setSQL(sql string) *parser {
@@ -109,11 +106,11 @@ func (p *parser) reset() {
 	p.sql = ""
 	p.step = stepBeginning
 	p.i = 0
-	p.err = nil
 	p.nextUpdateField = ""
 }
 
-func (p *parser) doParse() (minisql.Statement, error) {
+func (p *parser) doParse() ([]minisql.Statement, error) {
+	var statements []minisql.Statement
 	for p.i < len(p.sql) {
 		switch p.step {
 		// -----------------
@@ -146,7 +143,7 @@ func (p *parser) doParse() (minisql.Statement, error) {
 				p.pop()
 				p.step = stepDeleteFromTable
 			default:
-				return p.Statement, errInvalidStatementKind
+				return statements, errInvalidStatementKind
 			}
 		// -----------------
 		// CREATE TABLE
@@ -160,14 +157,14 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			stepCreateTableColumnNullNotNull,
 			stepCreateTableCommaOrClosingParens:
 			if err := p.doParseCreateTable(); err != nil {
-				return p.Statement, err
+				return statements, err
 			}
 			// -----------------
 			// DROP TABLE
 			//------------------
 		case stepDropTableName:
 			if err := p.doParseDropTable(); err != nil {
-				return p.Statement, err
+				return statements, err
 			}
 		// -----------------
 		// INSERT INTO
@@ -182,7 +179,7 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			stepInsertValuesCommaOrClosingParens,
 			stepInsertValuesCommaBeforeOpeningParens:
 			if err := p.doParseInsert(); err != nil {
-				return p.Statement, err
+				return statements, err
 			}
 		// -----------------
 		// SELECT
@@ -192,9 +189,8 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			stepSelectFrom,
 			stepSelectFromTable:
 			if err := p.doParseSelect(); err != nil {
-				return p.Statement, err
+				return statements, err
 			}
-
 		// -----------------
 		// UPDATE
 		//------------------
@@ -206,14 +202,14 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			stepUpdateComma:
 			_, err := p.doParseUpdate()
 			if err != nil {
-				return p.Statement, err
+				return statements, err
 			}
 		// -----------------
 		// DELETE FROM
 		//------------------
 		case stepDeleteFromTable:
 			if err := p.doParseDelete(); err != nil {
-				return p.Statement, err
+				return statements, err
 			}
 		// -----------------
 		// WHERE
@@ -224,11 +220,38 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			stepWhereConditionValue,
 			stepWhereOperator:
 			if err := p.doParseWhere(); err != nil {
-				return p.Statement, err
+				return statements, err
+			}
+		case stepStatementEnd:
+			semicolon := p.peek()
+			if semicolon != ";" && len(semicolon) != 0 {
+				return statements, fmt.Errorf("at DROP TABLE: expected semicolon")
+			}
+			if semicolon == ";" {
+				p.pop()
+				if err := p.validate(p.Statement); err != nil {
+					return nil, err
+				}
+				statements = append(statements, p.Statement)
+				if p.i < len(p.sql)-1 {
+					p.step = stepBeginning
+					p.Statement = minisql.Statement{}
+					p.nextUpdateField = ""
+				} else {
+					return statements, nil
+				}
 			}
 		}
 	}
-	return p.Statement, p.err
+
+	if p.step != stepStatementEnd {
+		if err := p.validate(p.Statement); err != nil {
+			return nil, err
+		}
+		statements = append(statements, p.Statement)
+	}
+
+	return statements, nil
 }
 
 func (p *parser) peek() string {
@@ -356,23 +379,20 @@ func (p *parser) peekIdentifierWithLength() (string, int) {
 	return strings.Trim(identifier, "\""), len(identifier)
 }
 
-func (p *parser) validate() error {
-	if len(p.Conditions) == 0 && p.step == stepWhereConditionField {
+func (p *parser) validate(stmt minisql.Statement) error {
+	if len(stmt.Conditions) == 0 && p.step == stepWhereConditionField {
 		return errEmptyWhereClause
 	}
-	if p.Kind == 0 {
+	if stmt.Kind == 0 {
 		return errEmptyStatementKind
 	}
-	if p.TableName == "" {
+	if stmt.TableName == "" {
 		return errEmptyTableName
 	}
-	if p.Kind == minisql.CreateTable && len(p.Columns) == 0 {
+	if stmt.Kind == minisql.CreateTable && len(stmt.Columns) == 0 {
 		return errCreateTableNoColumns
 	}
-	if len(p.Conditions) == 0 && (p.Kind == minisql.Update || p.Kind == minisql.Delete) {
-		return errWhereRequiredForUpdateDelete
-	}
-	for _, aConditionGroup := range p.Conditions {
+	for _, aConditionGroup := range stmt.Conditions {
 		for _, aCondition := range aConditionGroup {
 			if aCondition.Operator == 0 {
 				return errWhereWithoutOperator
@@ -385,26 +405,29 @@ func (p *parser) validate() error {
 			}
 		}
 	}
-	if p.Kind == minisql.Insert && len(p.Inserts) == 0 {
+	if stmt.Kind == minisql.Insert && len(stmt.Inserts) == 0 {
 		return errNoRowsToInsert
 	}
-	if p.Kind == minisql.Insert {
-		for _, i := range p.Inserts {
-			if len(i) != len(p.Fields) {
+	if stmt.Kind == minisql.Insert {
+		for _, i := range stmt.Inserts {
+			if len(i) != len(stmt.Fields) {
 				return errInsertFieldValueCountMismatch
 			}
 		}
 	}
+	if stmt.Kind == minisql.Update && len(stmt.Updates) == 0 {
+		return errNoFieldsToUpdate
+	}
 	return nil
 }
 
-func (p *parser) logError() {
-	if p.err == nil {
+func (p *parser) logError(err error) {
+	if err == nil {
 		return
 	}
 	fmt.Println(p.sql)
 	fmt.Println(strings.Repeat(" ", p.i) + "^")
-	fmt.Println(p.err)
+	fmt.Println(err)
 }
 
 var identifierRegexp = regexp.MustCompile(`(\"[a-zA-Z_][a-zA-Z_0-9]*\"|[a-zA-Z_][a-zA-Z_0-9]*)`)

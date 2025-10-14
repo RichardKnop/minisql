@@ -111,6 +111,7 @@ func (p *parser) doParseCreateTable() error {
 			p.step = stepCreateTableColumn
 			return nil
 		}
+		p.step = stepStatementEnd
 	}
 	return nil
 }
@@ -124,6 +125,7 @@ func (p *parser) doParseDropTable() error {
 		}
 		p.TableName = tableName
 		p.pop()
+		p.step = stepStatementEnd
 	}
 	return nil
 }

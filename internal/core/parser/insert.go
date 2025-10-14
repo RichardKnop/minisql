@@ -96,8 +96,12 @@ func (p *parser) doParseInsert() error {
 		}
 		p.step = stepInsertValuesCommaBeforeOpeningParens
 	case stepInsertValuesCommaBeforeOpeningParens:
-		commaRWord := p.peek()
-		if strings.ToUpper(commaRWord) != "," {
+		commaOrEnd := p.peek()
+		if commaOrEnd == ";" {
+			p.step = stepStatementEnd
+			return nil
+		}
+		if commaOrEnd != "," {
 			return fmt.Errorf("at INSERT INTO: expected comma")
 		}
 		p.pop()
