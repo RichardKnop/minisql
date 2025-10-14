@@ -109,24 +109,6 @@ func (_m *MockPager) GetPage(_a0 context.Context, _a1 uint32) (*Page, error) {
 	return r0, r1
 }
 
-// TotalPages provides a mock function with no fields
-func (_m *MockPager) TotalPages() uint32 {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for TotalPages")
-	}
-
-	var r0 uint32
-	if rf, ok := ret.Get(0).(func() uint32); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(uint32)
-	}
-
-	return r0
-}
-
 // NewMockPager creates a new instance of MockPager. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockPager(t interface {

@@ -26,6 +26,7 @@ var reservedWords = []string{
 	"CREATE TABLE", "DROP TABLE", "SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
 	"*", "IS NULL", "IS NOT NULL", "NOT NULL", "NULL", "IF NOT EXISTS", "WHERE", "FROM", "SET", "AS",
+	";",
 }
 
 type step int
@@ -66,6 +67,7 @@ const (
 	stepWhereConditionOperator
 	stepWhereConditionValue
 	stepWhereOperator
+	stepStatementEnd
 )
 
 type parser struct {
@@ -81,7 +83,7 @@ func New() *parser {
 	return new(parser)
 }
 
-func (p *parser) Parse(ctx context.Context, sql string) (minisql.Statement, error) {
+func (p *parser) Parse(ctx context.Context, sql string) ([]minisql.Statement, error) {
 	sql = strings.Join(strings.Fields(sql), " ")
 	p.reset()
 	p.setSQL(sql)
@@ -90,13 +92,13 @@ func (p *parser) Parse(ctx context.Context, sql string) (minisql.Statement, erro
 	p.err = nil
 	p.nextUpdateField = ""
 
-	q, err := p.doParse()
+	statements, err := p.doParse()
 	p.err = err
 	if p.err == nil {
 		p.err = p.validate()
 	}
 	p.logError()
-	return q, p.err
+	return statements, p.err
 }
 
 func (p *parser) setSQL(sql string) *parser {
@@ -113,7 +115,8 @@ func (p *parser) reset() {
 	p.nextUpdateField = ""
 }
 
-func (p *parser) doParse() (minisql.Statement, error) {
+func (p *parser) doParse() ([]minisql.Statement, error) {
+	var statements []minisql.Statement
 	for p.i < len(p.sql) {
 		switch p.step {
 		// -----------------
@@ -146,7 +149,7 @@ func (p *parser) doParse() (minisql.Statement, error) {
 				p.pop()
 				p.step = stepDeleteFromTable
 			default:
-				return p.Statement, errInvalidStatementKind
+				return statements, errInvalidStatementKind
 			}
 		// -----------------
 		// CREATE TABLE
@@ -160,14 +163,14 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			stepCreateTableColumnNullNotNull,
 			stepCreateTableCommaOrClosingParens:
 			if err := p.doParseCreateTable(); err != nil {
-				return p.Statement, err
+				return statements, err
 			}
 			// -----------------
 			// DROP TABLE
 			//------------------
 		case stepDropTableName:
 			if err := p.doParseDropTable(); err != nil {
-				return p.Statement, err
+				return statements, err
 			}
 		// -----------------
 		// INSERT INTO
@@ -182,7 +185,7 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			stepInsertValuesCommaOrClosingParens,
 			stepInsertValuesCommaBeforeOpeningParens:
 			if err := p.doParseInsert(); err != nil {
-				return p.Statement, err
+				return statements, err
 			}
 		// -----------------
 		// SELECT
@@ -192,7 +195,7 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			stepSelectFrom,
 			stepSelectFromTable:
 			if err := p.doParseSelect(); err != nil {
-				return p.Statement, err
+				return statements, err
 			}
 
 		// -----------------
@@ -206,14 +209,14 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			stepUpdateComma:
 			_, err := p.doParseUpdate()
 			if err != nil {
-				return p.Statement, err
+				return statements, err
 			}
 		// -----------------
 		// DELETE FROM
 		//------------------
 		case stepDeleteFromTable:
 			if err := p.doParseDelete(); err != nil {
-				return p.Statement, err
+				return statements, err
 			}
 		// -----------------
 		// WHERE
@@ -224,11 +227,26 @@ func (p *parser) doParse() (minisql.Statement, error) {
 			stepWhereConditionValue,
 			stepWhereOperator:
 			if err := p.doParseWhere(); err != nil {
-				return p.Statement, err
+				return statements, err
+			}
+		case stepStatementEnd:
+			semicolon := p.peek()
+			if semicolon != ";" && len(semicolon) != 0 {
+				return statements, fmt.Errorf("at DROP TABLE: expected semicolon")
+			}
+			if semicolon == ";" {
+				p.pop()
+				statements = append(statements, p.Statement)
+				if p.i < len(p.sql)-1 {
+					p.step = stepBeginning
+					p.Statement = minisql.Statement{}
+					p.nextUpdateField = ""
+				}
 			}
 		}
 	}
-	return p.Statement, p.err
+
+	return statements, p.err
 }
 
 func (p *parser) peek() string {

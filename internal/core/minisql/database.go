@@ -59,7 +59,7 @@ const (
 )
 
 type Parser interface {
-	Parse(context.Context, string) (Statement, error)
+	Parse(context.Context, string) ([]Statement, error)
 }
 
 type Database struct {
@@ -170,10 +170,14 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser P
 
 	aRow, err := aResult.Rows(ctx)
 	for ; err == nil; aRow, err = aResult.Rows(ctx) {
-		stmt, err := aParser.Parse(ctx, aRow.Values[3].Value.(string))
+		stmts, err := aParser.Parse(ctx, aRow.Values[3].Value.(string))
 		if err != nil {
 			return nil, err
 		}
+		if len(stmts) != 1 {
+			return nil, fmt.Errorf("expected one statement when loading table, got %d", len(stmts))
+		}
+		stmt := stmts[0]
 		aDatabase.tables[stmt.TableName] = NewTable(
 			logger,
 			stmt.TableName,
@@ -215,13 +219,13 @@ func (d *Database) ListTableNames(ctx context.Context) []string {
 	return tables
 }
 
-// PrepareStatement parses SQL into a Statement struct
-func (d *Database) PrepareStatement(ctx context.Context, sql string) (Statement, error) {
-	stmt, err := d.parser.Parse(ctx, sql)
+// PrepareStatements parses SQL into a slice of Statement struct
+func (d *Database) PrepareStatements(ctx context.Context, sql string) ([]Statement, error) {
+	stmts, err := d.parser.Parse(ctx, sql)
 	if err != nil {
-		return Statement{}, err
+		return nil, err
 	}
-	return stmt, nil
+	return stmts, nil
 }
 
 // ExecuteStatement will eventually become virtual machine

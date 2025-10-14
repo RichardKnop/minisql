@@ -159,13 +159,15 @@ func main() {
 				}
 				printPrompt()
 			} else {
-				stmt, err := aDatabase.PrepareStatement(ctx, inputBuffer)
+				stmts, err := aDatabase.PrepareStatements(ctx, inputBuffer)
 				if err != nil {
 					// Parser logs error internally
 					printPrompt()
 					continue
 				}
-				stmtChan <- stmt
+				for _, stmt := range stmts {
+					stmtChan <- stmt
+				}
 			}
 		}
 		// Print an additional line if we encountered an EOF character
