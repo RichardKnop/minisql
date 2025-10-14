@@ -14,22 +14,24 @@ type MockParser struct {
 }
 
 // Parse provides a mock function with given fields: _a0, _a1
-func (_m *MockParser) Parse(_a0 context.Context, _a1 string) (Statement, error) {
+func (_m *MockParser) Parse(_a0 context.Context, _a1 string) ([]Statement, error) {
 	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Parse")
 	}
 
-	var r0 Statement
+	var r0 []Statement
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (Statement, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]Statement, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) Statement); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) []Statement); ok {
 		r0 = rf(_a0, _a1)
 	} else {
-		r0 = ret.Get(0).(Statement)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]Statement)
+		}
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {

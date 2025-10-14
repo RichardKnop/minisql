@@ -17,164 +17,157 @@ func TestParse_Select(t *testing.T) {
 		{
 			"SELECT without FROM fails",
 			"SELECT",
-			minisql.Statement{Kind: minisql.Select},
+			nil,
 			errEmptyTableName,
 		},
 		{
 			"SELECT without fields fails",
 			"SELECT FROM 'a'",
-			minisql.Statement{Kind: minisql.Select},
+			nil,
 			errSelectWithoutFields,
 		},
 		{
 			"SELECT with comma and empty field fails",
 			"SELECT b, FROM 'a'",
-			minisql.Statement{
-				Kind:   minisql.Select,
-				Fields: []string{"b"},
-			},
+			nil,
 			errSelectWithoutFields,
 		},
 		{
 			"SELECT works",
-			"SELECT a FROM b",
-			minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a"},
+			"SELECT a FROM b;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Fields:    []string{"a"},
+				},
 			},
 			nil,
 		},
 		{
 			"SELECT works with lowercase",
-			"select a fRoM b",
-			minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a"},
+			" select a fRoM b;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Fields:    []string{"a"},
+				},
 			},
 			nil,
 		},
 		{
 			"SELECT many fields works",
-			"SELECT a, c, d FROM b",
-			minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a", "c", "d"},
+			"SELECT a, c, d FROM b ;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Fields:    []string{"a", "c", "d"},
+				},
 			},
 			nil,
 		},
 		{
 			"SELECT with alias works",
-			"SELECT a as z, b as y, c FROM b",
-			minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a", "b", "c"},
-				Aliases: map[string]string{
-					"a": "z",
-					"b": "y",
+			"SELECT a as z, b as y, c FROM b ; ",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Fields:    []string{"a", "b", "c"},
+					Aliases: map[string]string{
+						"a": "z",
+						"b": "y",
+					},
 				},
 			},
 			nil,
 		},
 		{
 			"SELECT * works",
-			"SELECT * FROM b",
-			minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"*"},
+			"SELECT * FROM b;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Fields:    []string{"*"},
+				},
 			},
 			nil,
 		},
 		{
 			"SELECT a, * works",
-			"SELECT a, * FROM b",
-			minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a", "*"},
+			"SELECT a, * FROM b;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Fields:    []string{"a", "*"},
+				},
 			},
 			nil,
 		},
 		{
 			"SELECT with empty WHERE fails",
 			"SELECT a, c, d FROM b WHERE",
-			minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a", "c", "d"},
-			},
+			nil,
 			errEmptyWhereClause,
 		},
 		{
 			"SELECT with WHERE with only operand fails",
 			"SELECT a, c, d FROM b WHERE a",
-			minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a", "c", "d"},
-				Conditions: minisql.OneOrMore{
-					{
-						{
-							Operand1: minisql.Operand{
-								Type:  minisql.Field,
-								Value: "a",
-							},
-						},
-					},
-				},
-			},
+			nil,
 			errWhereWithoutOperator,
 		},
 		{
-			Name: "SELECT with WHERE with multiple conditions using AND works",
-			SQL:  `SELECT a, c, d FROM "b" WHERE a != '1' AND b = 2 and c = '3'`,
-			Expected: minisql.Statement{
-				Kind:      minisql.Select,
-				TableName: "b",
-				Fields:    []string{"a", "c", "d"},
-				Conditions: minisql.OneOrMore{
-					{
+			"SELECT with WHERE with multiple conditions using AND works",
+			`SELECT a, c, d FROM "b" WHERE a != '1' AND b = 2 and c = '3';`,
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Fields:    []string{"a", "c", "d"},
+					Conditions: minisql.OneOrMore{
 						{
-							Operand1: minisql.Operand{
-								Type:  minisql.Field,
-								Value: "a",
+							{
+								Operand1: minisql.Operand{
+									Type:  minisql.Field,
+									Value: "a",
+								},
+								Operator: minisql.Ne,
+								Operand2: minisql.Operand{
+									Type:  minisql.QuotedString,
+									Value: "1",
+								},
 							},
-							Operator: minisql.Ne,
-							Operand2: minisql.Operand{
-								Type:  minisql.QuotedString,
-								Value: "1",
+							{
+								Operand1: minisql.Operand{
+									Type:  minisql.Field,
+									Value: "b",
+								},
+								Operator: minisql.Eq,
+								Operand2: minisql.Operand{
+									Type:  minisql.Integer,
+									Value: int64(2),
+								},
 							},
-						},
-						{
-							Operand1: minisql.Operand{
-								Type:  minisql.Field,
-								Value: "b",
-							},
-							Operator: minisql.Eq,
-							Operand2: minisql.Operand{
-								Type:  minisql.Integer,
-								Value: int64(2),
-							},
-						},
-						{
-							Operand1: minisql.Operand{
-								Type:  minisql.Field,
-								Value: "c",
-							},
-							Operator: minisql.Eq,
-							Operand2: minisql.Operand{
-								Type:  minisql.QuotedString,
-								Value: "3",
+							{
+								Operand1: minisql.Operand{
+									Type:  minisql.Field,
+									Value: "c",
+								},
+								Operator: minisql.Eq,
+								Operand2: minisql.Operand{
+									Type:  minisql.QuotedString,
+									Value: "3",
+								},
 							},
 						},
 					},
 				},
 			},
-			Err: nil,
+			nil,
 		},
 	}
 

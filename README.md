@@ -101,7 +101,7 @@ go run cmd/minisql/main.go
 When creating a new MiniSQL database, it is initialised with `minisql_schema` system table which holds schema of all tables within the database:
 
 ```sh
-minisql> select * from minisql_schema
+minisql> select * from minisql_schema;
  type                 | name                                               | root_page            | sql                                                
 ----------------------+----------------------------------------------------+----------------------+----------------------------------------------------
  1                    | minisql_schema                                     | 0                    | create table "minisql_schema" (                    
@@ -116,7 +116,7 @@ minisql>
 You can create your own non-system table now:
 
 ```sh
-minisql> create table users(id int4, name varchar(255), email varchar(255), age int4)
+minisql> create table users(id int4, name varchar(255), email varchar(255), age int4);
 Rows affected: 0
 minisql>
 ```
@@ -132,7 +132,7 @@ users
 Insert a row:
 
 ```sh
-minisql> insert into users(id, name, email, age) values(1, 'John Doe', 'john@example.com', 35)
+minisql> insert into users(id, name, email, age) values(1, 'John Doe', 'john@example.com', 35);
 Rows affected: 1
 minisql>
 ```
@@ -140,7 +140,7 @@ minisql>
 Insert multiple rows:
 
 ```sh
-minisql> insert into users(id, name, email, age) values(2, 'Jane Doe', 'jane@example.com', 32), (3, 'Jack Doe', 'jack@example.com', 27)
+minisql> insert into users(id, name, email, age) values(2, 'Jane Doe', 'jane@example.com', 32), (3, 'Jack Doe', 'jack@example.com', 27);
 Rows affected: 2
 minisql>
 ```
@@ -148,7 +148,7 @@ minisql>
 Select from table:
 
 ```sh
-minisql> select * from users
+minisql> select * from users;
  id                   | name                                               | email                                              | age                  
 ----------------------+----------------------------------------------------+----------------------------------------------------+----------------------
  1                    | john doe                                           | john@example.com                                   | 35                   
@@ -160,7 +160,7 @@ minisql>
 Update rows:
 
 ```sh
-minisql> update users set age = 36 where id = 1
+minisql> update users set age = 36 where id = 1;
 Rows affected: 1
 minisql>
 ```
@@ -168,7 +168,7 @@ minisql>
 Select to verify update:
 
 ```sh
-minisql> select * from users
+minisql> select * from users;
  id                   | name                                               | email                                              | age                  
 ----------------------+----------------------------------------------------+----------------------------------------------------+----------------------
  1                    | john doe                                           | john@example.com                                   | 36                   

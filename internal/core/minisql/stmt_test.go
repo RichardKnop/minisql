@@ -334,7 +334,7 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 	verified boolean not null,
 	score real,
 	balance double
-)`
+);`
 
 		actual := stmt.CreateTableDDL()
 		assert.Equal(t, expected, actual)
@@ -356,7 +356,7 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 
 		expected := `create table "test_table_123" (
 	column_with_underscore int4 not null
-)`
+);`
 
 		actual := stmt.CreateTableDDL()
 		assert.Equal(t, expected, actual)

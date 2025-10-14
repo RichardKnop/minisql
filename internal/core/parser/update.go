@@ -8,8 +8,10 @@ import (
 )
 
 var (
+	errUpdateExpectetSet              = fmt.Errorf("at UPDATE: expected 'SET'")
 	errUpdateExpectedEquals           = fmt.Errorf("at UPDATE: expected '='")
 	errUpdateExpectedQuotedValueOrInt = fmt.Errorf("at UPDATE: expected quoted value or int")
+	errNoFieldsToUpdate               = fmt.Errorf("at UPDATE: expected at least one field to update")
 )
 
 func (p *parser) doParseUpdate() (bool, error) {
@@ -25,7 +27,7 @@ func (p *parser) doParseUpdate() (bool, error) {
 	case stepUpdateSet:
 		setRWord := p.peek()
 		if strings.ToUpper(setRWord) != "SET" {
-			return false, fmt.Errorf("at UPDATE: expected 'SET'")
+			return false, errUpdateExpectetSet
 		}
 		p.pop()
 		p.step = stepUpdateField

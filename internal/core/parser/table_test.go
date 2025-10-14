@@ -17,53 +17,41 @@ func TestParse_CreateTable(t *testing.T) {
 		{
 			"Empty CREATE TABLE fails",
 			"CREATE TABLE",
-			minisql.Statement{Kind: minisql.CreateTable},
+			nil,
 			errEmptyTableName,
 		},
 		{
 			"CREATE TABLE with no opening parens fails",
 			"CREATE TABLE foo",
-			minisql.Statement{
-				Kind:      minisql.CreateTable,
-				TableName: "foo",
-			},
+			nil,
 			errCreateTableNoColumns,
 		},
 		{
 			"CREATE TABLE with no schema fails",
 			"CREATE TABLE foo ()",
-			minisql.Statement{
-				Kind:      minisql.CreateTable,
-				TableName: "foo",
-			},
+			nil,
 			errCreateTableNoColumns,
 		},
 		{
 			"CREATE TABLE with invalid column schema fails",
 			"CREATE TABLE foo (bar INVALID",
-			minisql.Statement{
-				Kind:      minisql.CreateTable,
-				TableName: "foo",
-				Columns: []minisql.Column{
-					{
-						Name: "bar",
-					},
-				},
-			},
+			nil,
 			errCreateTableInvalidColumDef,
 		},
 		{
 			"CREATE TABLE with single boolean column works",
-			"CREATE TABLE foo (bar boolean)",
-			minisql.Statement{
-				Kind:      minisql.CreateTable,
-				TableName: "foo",
-				Columns: []minisql.Column{
-					{
-						Name:     "bar",
-						Kind:     minisql.Boolean,
-						Size:     1,
-						Nullable: true,
+			"CREATE TABLE foo (bar boolean);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:     "bar",
+							Kind:     minisql.Boolean,
+							Size:     1,
+							Nullable: true,
+						},
 					},
 				},
 			},
@@ -71,17 +59,19 @@ func TestParse_CreateTable(t *testing.T) {
 		},
 		{
 			"CREATE TABLE with IF NOT EXISTS works",
-			"CREATE TABLE IF NOT EXISTS foo (bar boolean)",
-			minisql.Statement{
-				Kind:        minisql.CreateTable,
-				TableName:   "foo",
-				IfNotExists: true,
-				Columns: []minisql.Column{
-					{
-						Name:     "bar",
-						Kind:     minisql.Boolean,
-						Size:     1,
-						Nullable: true,
+			"CREATE TABLE IF NOT EXISTS foo (bar boolean);",
+			[]minisql.Statement{
+				{
+					Kind:        minisql.CreateTable,
+					TableName:   "foo",
+					IfNotExists: true,
+					Columns: []minisql.Column{
+						{
+							Name:     "bar",
+							Kind:     minisql.Boolean,
+							Size:     1,
+							Nullable: true,
+						},
 					},
 				},
 			},
@@ -89,16 +79,18 @@ func TestParse_CreateTable(t *testing.T) {
 		},
 		{
 			"CREATE TABLE with single int4 column works",
-			"CREATE TABLE foo (bar int4)",
-			minisql.Statement{
-				Kind:      minisql.CreateTable,
-				TableName: "foo",
-				Columns: []minisql.Column{
-					{
-						Name:     "bar",
-						Kind:     minisql.Int4,
-						Size:     4,
-						Nullable: true,
+			"CREATE TABLE foo (bar int4);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:     "bar",
+							Kind:     minisql.Int4,
+							Size:     4,
+							Nullable: true,
+						},
 					},
 				},
 			},
@@ -106,16 +98,18 @@ func TestParse_CreateTable(t *testing.T) {
 		},
 		{
 			"CREATE TABLE with single int8 column works",
-			"CREATE TABLE foo (bar int8)",
-			minisql.Statement{
-				Kind:      minisql.CreateTable,
-				TableName: "foo",
-				Columns: []minisql.Column{
-					{
-						Name:     "bar",
-						Kind:     minisql.Int8,
-						Size:     8,
-						Nullable: true,
+			"CREATE TABLE foo (bar int8);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:     "bar",
+							Kind:     minisql.Int8,
+							Size:     8,
+							Nullable: true,
+						},
 					},
 				},
 			},
@@ -123,16 +117,18 @@ func TestParse_CreateTable(t *testing.T) {
 		},
 		{
 			"CREATE TABLE with single real column works",
-			"CREATE TABLE foo (bar real)",
-			minisql.Statement{
-				Kind:      minisql.CreateTable,
-				TableName: "foo",
-				Columns: []minisql.Column{
-					{
-						Name:     "bar",
-						Kind:     minisql.Real,
-						Size:     4,
-						Nullable: true,
+			"CREATE TABLE foo (bar real);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:     "bar",
+							Kind:     minisql.Real,
+							Size:     4,
+							Nullable: true,
+						},
 					},
 				},
 			},
@@ -140,16 +136,18 @@ func TestParse_CreateTable(t *testing.T) {
 		},
 		{
 			"CREATE TABLE with single double column works",
-			"CREATE TABLE foo (bar double)",
-			minisql.Statement{
-				Kind:      minisql.CreateTable,
-				TableName: "foo",
-				Columns: []minisql.Column{
-					{
-						Name:     "bar",
-						Kind:     minisql.Double,
-						Size:     8,
-						Nullable: true,
+			"CREATE TABLE foo (bar double);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:     "bar",
+							Kind:     minisql.Double,
+							Size:     8,
+							Nullable: true,
+						},
 					},
 				},
 			},
@@ -157,16 +155,18 @@ func TestParse_CreateTable(t *testing.T) {
 		},
 		{
 			"CREATE TABLE with single varchar column works",
-			"CREATE TABLE foo (bar varchar(255))",
-			minisql.Statement{
-				Kind:      minisql.CreateTable,
-				TableName: "foo",
-				Columns: []minisql.Column{
-					{
-						Name:     "bar",
-						Kind:     minisql.Varchar,
-						Size:     255,
-						Nullable: true,
+			"CREATE TABLE foo (bar varchar(255));",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:     "bar",
+							Kind:     minisql.Varchar,
+							Size:     255,
+							Nullable: true,
+						},
 					},
 				},
 			},
@@ -174,16 +174,18 @@ func TestParse_CreateTable(t *testing.T) {
 		},
 		{
 			"CREATE TABLE with single not null column works",
-			"CREATE TABLE foo (bar int4 not null)",
-			minisql.Statement{
-				Kind:      minisql.CreateTable,
-				TableName: "foo",
-				Columns: []minisql.Column{
-					{
-						Name:     "bar",
-						Kind:     minisql.Int4,
-						Size:     4,
-						Nullable: false,
+			"CREATE TABLE foo (bar int4 not null);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:     "bar",
+							Kind:     minisql.Int4,
+							Size:     4,
+							Nullable: false,
+						},
 					},
 				},
 			},
@@ -191,16 +193,18 @@ func TestParse_CreateTable(t *testing.T) {
 		},
 		{
 			"CREATE TABLE with quoted table name identifier works",
-			`CREATE TABLE "foo" (bar int4)`,
-			minisql.Statement{
-				Kind:      minisql.CreateTable,
-				TableName: "foo",
-				Columns: []minisql.Column{
-					{
-						Name:     "bar",
-						Kind:     minisql.Int4,
-						Size:     4,
-						Nullable: true,
+			`CREATE TABLE "foo" (bar int4);`,
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:     "bar",
+							Kind:     minisql.Int4,
+							Size:     4,
+							Nullable: true,
+						},
 					},
 				},
 			},
@@ -208,46 +212,55 @@ func TestParse_CreateTable(t *testing.T) {
 		},
 		{
 			"CREATE TABLE with multiple columns works",
-			"CREATE TABLE foo (bar boolean not null, baz int4, qux int8 not null, lorem real null, ipsum double, sit varchar(255))",
-			minisql.Statement{
-				Kind:      minisql.CreateTable,
-				TableName: "foo",
-				Columns: []minisql.Column{
-					{
-						Name:     "bar",
-						Kind:     minisql.Boolean,
-						Size:     1,
-						Nullable: false,
-					},
-					{
-						Name:     "baz",
-						Kind:     minisql.Int4,
-						Size:     4,
-						Nullable: true,
-					},
-					{
-						Name:     "qux",
-						Kind:     minisql.Int8,
-						Size:     8,
-						Nullable: false,
-					},
-					{
-						Name:     "lorem",
-						Kind:     minisql.Real,
-						Size:     4,
-						Nullable: true,
-					},
-					{
-						Name:     "ipsum",
-						Kind:     minisql.Double,
-						Size:     8,
-						Nullable: true,
-					},
-					{
-						Name:     "sit",
-						Kind:     minisql.Varchar,
-						Size:     255,
-						Nullable: true,
+			`CREATE TABLE foo (
+				bar boolean not null, 
+				baz int4, 
+				qux int8 not null, 
+				lorem real null, 
+				ipsum double, 
+				sit varchar(255))
+			;`,
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:     "bar",
+							Kind:     minisql.Boolean,
+							Size:     1,
+							Nullable: false,
+						},
+						{
+							Name:     "baz",
+							Kind:     minisql.Int4,
+							Size:     4,
+							Nullable: true,
+						},
+						{
+							Name:     "qux",
+							Kind:     minisql.Int8,
+							Size:     8,
+							Nullable: false,
+						},
+						{
+							Name:     "lorem",
+							Kind:     minisql.Real,
+							Size:     4,
+							Nullable: true,
+						},
+						{
+							Name:     "ipsum",
+							Kind:     minisql.Double,
+							Size:     8,
+							Nullable: true,
+						},
+						{
+							Name:     "sit",
+							Kind:     minisql.Varchar,
+							Size:     255,
+							Nullable: true,
+						},
 					},
 				},
 			},
@@ -276,15 +289,17 @@ func TestParse_DropTable(t *testing.T) {
 		{
 			Name:     "Empty DROP TABLE fails",
 			SQL:      "DROP TABLE",
-			Expected: minisql.Statement{Kind: minisql.DropTable},
+			Expected: nil,
 			Err:      errEmptyTableName,
 		},
 		{
 			Name: "DROP TABLE works",
-			SQL:  "DROP TABLE foo",
-			Expected: minisql.Statement{
-				Kind:      minisql.DropTable,
-				TableName: "foo",
+			SQL:  "DROP TABLE foo;",
+			Expected: []minisql.Statement{
+				{
+					Kind:      minisql.DropTable,
+					TableName: "foo",
+				},
 			},
 		},
 	}

@@ -10,7 +10,6 @@ import (
 var (
 	errEmptyWhereClause                  = fmt.Errorf("at WHERE: empty WHERE clause")
 	errWhereWithoutOperator              = fmt.Errorf("at WHERE: condition without operator")
-	errWhereRequiredForUpdateDelete      = fmt.Errorf("at WHERE: WHERE clause is mandatory for UPDATE & DELETE")
 	errWhereExpectedField                = fmt.Errorf("at WHERE: expected field")
 	errWhereExpectedAndOr                = fmt.Errorf("expected one of AND / OR")
 	errWhereExpectedQuotedStringOrNumber = fmt.Errorf("at WHERE: expected quoted string or number value")
@@ -20,8 +19,13 @@ var (
 func (p *parser) doParseWhere() error {
 	switch p.step {
 	case stepWhere:
-		whereRWord := p.peek()
-		if strings.ToUpper(whereRWord) != "WHERE" {
+		whereOrEnd := p.peek()
+		if whereOrEnd == ";" {
+			p.step = stepStatementEnd
+			return nil
+		}
+		whereRWord := strings.ToUpper(whereOrEnd)
+		if whereRWord != "WHERE" {
 			return fmt.Errorf("expected WHERE")
 		}
 		p.pop()
@@ -104,7 +108,15 @@ func (p *parser) doParseWhere() error {
 		p.pop()
 		p.step = stepWhereOperator
 	case stepWhereOperator:
-		anOperator := strings.ToUpper(p.peek())
+		operatorOrEnd := p.peek()
+		lastCondition, ok := p.Conditions.LastCondition()
+		if ok && minisql.IsValidCondition(lastCondition) {
+			if operatorOrEnd == ";" {
+				p.step = stepStatementEnd
+				return nil
+			}
+		}
+		anOperator := strings.ToUpper(operatorOrEnd)
 		if anOperator != "AND" && anOperator != "OR" {
 			return errWhereExpectedAndOr
 		}

@@ -13,16 +13,16 @@ import (
 type testCase struct {
 	Name     string
 	SQL      string
-	Expected minisql.Statement
+	Expected []minisql.Statement
 	Err      error
 }
 
 func TestParse_Empty(t *testing.T) {
 	t.Parallel()
 
-	aStatement, err := New().Parse(context.Background(), "")
+	statements, err := New().Parse(context.Background(), "")
 	require.Error(t, err)
-	assert.Equal(t, minisql.Statement{}, aStatement)
+	assert.Empty(t, statements)
 	assert.Equal(t, errEmptyStatementKind, err)
 }
 
