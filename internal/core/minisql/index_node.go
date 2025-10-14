@@ -299,6 +299,14 @@ func (n *IndexNode[T]) Keys() []T {
 	return keys
 }
 
+func (n *IndexNode[T]) RowIDs() []uint64 {
+	rowIDs := make([]uint64, 0, n.Header.Keys)
+	for i := range n.Header.Keys {
+		rowIDs = append(rowIDs, n.Cells[i].RowID)
+	}
+	return rowIDs
+}
+
 func (n *IndexNode[T]) Children() []uint32 {
 	if n.Header.IsLeaf {
 		return nil

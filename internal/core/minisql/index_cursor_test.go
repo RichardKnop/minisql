@@ -26,7 +26,7 @@ func TestUniqueIndex_Seek(t *testing.T) {
 	keys := []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
 
 	for _, key := range keys {
-		err := anIndex.Insert(context.Background(), key)
+		err := anIndex.Insert(context.Background(), key, 0)
 		require.NoError(t, err)
 	}
 

@@ -30,7 +30,7 @@ func NewUniqueIndex[T int8 | int32 | int64 | float32 | float64 | string](logger 
 	}
 }
 
-func (idx *UniqueIndex[T]) Insert(ctx context.Context, key T) error {
+func (idx *UniqueIndex[T]) Insert(ctx context.Context, key T, rowID uint64) error {
 	aRootPage, err := idx.pager.GetPage(ctx, idx.RootPageIdx)
 	if err != nil {
 		return fmt.Errorf("get root page: %w", err)
@@ -40,8 +40,8 @@ func (idx *UniqueIndex[T]) Insert(ctx context.Context, key T) error {
 	// Root is empty, insert the first key
 	if aRootNode.Header.Keys == 0 {
 		aRootNode.Cells[0] = IndexCell[T]{
-			Key: key,
-			// TODO - set RowID
+			Key:   key,
+			RowID: rowID,
 		}
 		aRootNode.Header.IsRoot = true
 		aRootNode.Header.IsLeaf = true
@@ -51,7 +51,7 @@ func (idx *UniqueIndex[T]) Insert(ctx context.Context, key T) error {
 
 	// Root is not full, insert new key
 	if aRootNode.Header.Keys < idx.maxIndexKeys(aRootNode.KeySize) {
-		return idx.InsertNotFull(ctx, idx.RootPageIdx, key)
+		return idx.InsertNotFull(ctx, idx.RootPageIdx, key, rowID)
 	}
 
 	// Root is full, need to split. Old root page will become left child
@@ -93,7 +93,7 @@ func (idx *UniqueIndex[T]) Insert(ctx context.Context, key T) error {
 	if err != nil {
 		return fmt.Errorf("get child: %w", err)
 	}
-	if err := idx.InsertNotFull(ctx, childIdx, key); err != nil {
+	if err := idx.InsertNotFull(ctx, childIdx, key, rowID); err != nil {
 		return fmt.Errorf("insert not full: %w", err)
 	}
 	return nil
@@ -108,7 +108,7 @@ func (idx *UniqueIndex[T]) maxIndexKeys(keySize uint64) uint32 {
 	return uint32((PageSize - 14) / (keySize + 8 + 4))
 }
 
-func (idx *UniqueIndex[T]) InsertNotFull(ctx context.Context, pageIdx uint32, key T) error {
+func (idx *UniqueIndex[T]) InsertNotFull(ctx context.Context, pageIdx uint32, key T, rowID uint64) error {
 	aPage, err := idx.pager.GetPage(ctx, pageIdx)
 	if err != nil {
 		return fmt.Errorf("get page: %w", err)
@@ -120,9 +120,11 @@ func (idx *UniqueIndex[T]) InsertNotFull(ctx context.Context, pageIdx uint32, ke
 	if aNode.Header.IsLeaf {
 		for i >= 0 && aNode.Cells[i].Key > key {
 			aNode.Cells[i+1].Key = aNode.Cells[i].Key
+			aNode.Cells[i+1].RowID = aNode.Cells[i].RowID
 			i -= 1
 		}
 		aNode.Cells[i+1].Key = key
+		aNode.Cells[i+1].RowID = rowID
 		aNode.Header.Keys += 1
 		return nil
 	}
@@ -155,7 +157,7 @@ func (idx *UniqueIndex[T]) InsertNotFull(ctx context.Context, pageIdx uint32, ke
 	if err != nil {
 		return fmt.Errorf("get child: %w", err)
 	}
-	return idx.InsertNotFull(ctx, childIdx, key)
+	return idx.InsertNotFull(ctx, childIdx, key, rowID)
 }
 
 // Split a child node into two nodes and move the median key up to the parent node
@@ -202,11 +204,14 @@ func (idx *UniqueIndex[T]) SplitChild(ctx context.Context, parentPage, splitPage
 	}
 
 	// Update parent
+	rowIDToMoveUp := splitNode.Cells[leftCount-1].RowID
 	for j := int(parentNode.Header.Keys) - 1; j >= int(indexInParent); j-- {
 		parentNode.Cells[j+1].Key = parentNode.Cells[j].Key
+		parentNode.Cells[j+1].RowID = parentNode.Cells[j].RowID
 	}
 	parentNode.Header.Keys += 1
 	parentNode.Cells[indexInParent].Key = splitNode.Cells[leftCount-1].Key
+	parentNode.Cells[indexInParent].RowID = rowIDToMoveUp
 	splitNode.Cells[leftCount] = IndexCell[T]{}
 
 	for j := int(parentNode.Header.Keys) - 1; j > int(indexInParent); j-- {
@@ -280,6 +285,7 @@ func (idx *UniqueIndex[T]) print() error {
 		aNode := aPage.IndexNode.(*IndexNode[T])
 		fmt.Println("Index node,", "page:", aPage.Index, "number of keys:", aNode.Header.Keys, "parent:", aNode.Header.Parent, "right child:", aNode.Header.RightChild)
 		fmt.Println("Keys:", aNode.Keys())
+		fmt.Println("Row IDs:", aNode.RowIDs())
 		fmt.Println("Children:", aNode.Children())
 		fmt.Println("---------")
 	})
