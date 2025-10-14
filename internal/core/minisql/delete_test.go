@@ -17,6 +17,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
+	tablePager := aPager.ForTable(Row{Columns: testMediumColumns}.Size())
 
 	/*
 		In this test we will be deleting from a root leaf node only tree.
@@ -25,7 +26,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		ctx     = context.Background()
 		numRows = 5
 		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, testTableName, testMediumColumns, aPager, 0)
+		aTable  = NewTable(testLogger, testTableName, testMediumColumns, tablePager, 0)
 	)
 
 	// Set some values to NULL so we can test selecting/filtering on NULLs
@@ -115,12 +116,13 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
+	tablePager := aPager.ForTable(Row{Columns: testMediumColumns}.Size())
 
 	var (
 		ctx     = context.Background()
 		numRows = 20
 		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, testTableName, testMediumColumns, aPager, 0)
+		aTable  = NewTable(testLogger, testTableName, testMediumColumns, tablePager, 0)
 	)
 
 	// Batch insert test rows
@@ -148,7 +150,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		+-------+  +-------+  +-------+  +---------+  +----------+  +----------------+
 	*/
 
-	//require.NoError(t, printTree(aTable))
+	//require.NoError(t, aTable.print())
 
 	// Check the root page
 	assert.Equal(t, 5, int(aPager.pages[0].InternalNode.Header.KeysNum))
@@ -182,7 +184,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+-----------+     +-------+    +---------+    +----------+     +----------------+
 		*/
 
-		//require.NoError(t, printTree(aTable))
+		//require.NoError(t, aTable.print())
 
 		// Check the root page
 		assert.Equal(t, 4, int(aPager.pages[0].InternalNode.Header.KeysNum))
@@ -224,7 +226,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+-----------+     +-------+    +---------+    +----------------+
 		*/
 
-		//require.NoError(t, printTree(aTable))
+		//require.NoError(t, aTable.print())
 
 		// Check the root page
 		assert.Equal(t, 3, int(aPager.pages[0].InternalNode.Header.KeysNum))
@@ -268,7 +270,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+-----------+      +---------+      +----------------+
 		*/
 
-		//require.NoError(t, printTree(aTable))
+		//require.NoError(t, aTable.print())
 
 		// Check the root page
 		assert.Equal(t, 2, int(aPager.pages[0].InternalNode.Header.KeysNum))
@@ -311,7 +313,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+--------+           +--------+          +----------+
 		*/
 
-		//require.NoError(t, printTree(aTable))
+		//require.NoError(t, aTable.print())
 
 		// Check the root page
 		assert.Equal(t, 2, int(aPager.pages[0].InternalNode.Header.KeysNum))
@@ -346,7 +348,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		 +-------+                +----------+
 		*/
 
-		//require.NoError(t, printTree(aTable))
+		//require.NoError(t, aTable.print())
 		// Check the root page
 		assert.Equal(t, 1, int(aPager.pages[0].InternalNode.Header.KeysNum))
 		assert.Equal(t, []uint64{8}, aPager.pages[0].InternalNode.Keys())
@@ -382,7 +384,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		   +-----------------+
 		*/
 
-		//require.NoError(t, printTree(aTable))
+		//require.NoError(t, aTable.print())
 
 		assert.Nil(t, aPager.pages[0].InternalNode)
 		assert.Equal(t, 5, int(aPager.pages[0].LeafNode.Header.Cells))
@@ -409,7 +411,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 		checkRows(ctx, t, aTable, nil)
 
-		//require.NoError(t, printTree(aTable))
+		//require.NoError(t, aTable.print())
 
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Header.Cells))
 	})
@@ -432,12 +434,13 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
+	tablePager := aPager.ForTable(Row{Columns: testMediumColumns}.Size())
 
 	var (
 		ctx     = context.Background()
 		numRows = 100
 		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, testTableName, testMediumColumns, aPager, 0)
+		aTable  = NewTable(testLogger, testTableName, testMediumColumns, tablePager, 0)
 	)
 	aTable.maximumICells = 5 // for testing purposes only, normally 340
 
@@ -455,7 +458,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	require.NoError(t, err)
 
 	//fmt.Println("BEFORE")
-	//require.NoError(t, printTree(aTable))
+	//require.NoError(t, aTable.print())
 
 	checkRows(ctx, t, aTable, rows)
 	assert.Equal(t, 47, int(aPager.TotalPages()))
@@ -467,7 +470,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	assert.Equal(t, len(rows), deleteResult.RowsAffected)
 
 	//fmt.Println("AFTER")
-	//require.NoError(t, printTree(aTable))
+	//require.NoError(t, aTable.print())
 
 	checkRows(ctx, t, aTable, nil)
 

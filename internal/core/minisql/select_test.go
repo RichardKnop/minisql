@@ -17,11 +17,12 @@ func TestTable_Select(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
+	tablePager := aPager.ForTable(Row{Columns: testColumns}.Size())
 
 	var (
 		ctx    = context.Background()
 		rows   = gen.Rows(38)
-		aTable = NewTable(testLogger, testTableName, testColumns, aPager, 0)
+		aTable = NewTable(testLogger, testTableName, testColumns, tablePager, 0)
 	)
 
 	// Set some values to NULL so we can test selecting/filtering on NULLs

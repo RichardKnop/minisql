@@ -48,7 +48,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	_, err = minisql.NewDatabase(ctx, logger, defaultDbFileName, parser.New(), aPager)
+	_, err = minisql.NewDatabase(ctx, logger, defaultDbFileName, parser.New(), aPager, aPager)
 	if err != nil {
 		panic(err)
 	}

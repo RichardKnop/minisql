@@ -9,6 +9,7 @@ type Page struct {
 	FreePage     *FreePage
 	InternalNode *InternalNode
 	LeafNode     *LeafNode
+	IndexNode    any
 }
 
 func (p *Page) setParent(parentIdx uint32) {

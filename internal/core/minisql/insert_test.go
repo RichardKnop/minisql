@@ -21,11 +21,12 @@ func TestTable_Insert(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
+	tablePager := aPager.ForTable(Row{Columns: testColumns}.Size())
 
 	var (
 		ctx    = context.Background()
 		rows   = gen.Rows(2)
-		aTable = NewTable(testLogger, testTableName, testColumns, aPager, 0)
+		aTable = NewTable(testLogger, testTableName, testColumns, tablePager, 0)
 	)
 
 	t.Run("Insert row with all NOT NULL values", func(t *testing.T) {
@@ -81,11 +82,12 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
+	tablePager := aPager.ForTable(Row{Columns: testColumns}.Size())
 
 	var (
 		ctx    = context.Background()
 		rows   = gen.Rows(3)
-		aTable = NewTable(testLogger, testTableName, testColumns, aPager, 0)
+		aTable = NewTable(testLogger, testTableName, testColumns, tablePager, 0)
 	)
 
 	stmt := Statement{
@@ -115,11 +117,12 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
+	tablePager := aPager.ForTable(Row{Columns: testMediumColumns}.Size())
 
 	var (
 		ctx    = context.Background()
 		rows   = gen.MediumRows(6)
-		aTable = NewTable(testLogger, testTableName, testMediumColumns, aPager, 0)
+		aTable = NewTable(testLogger, testTableName, testMediumColumns, tablePager, 0)
 	)
 
 	stmt := Statement{
@@ -133,7 +136,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 	err = aTable.Insert(ctx, stmt)
 	require.NoError(t, err)
 
-	//require.NoError(t, printTree(aTable))
+	//require.NoError(t, aTable.print())
 
 	assert.Equal(t, 1, int(aPager.pages[0].InternalNode.Header.KeysNum))
 	assert.True(t, aPager.pages[0].InternalNode.Header.IsRoot)
@@ -179,11 +182,12 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
+	tablePager := aPager.ForTable(Row{Columns: testBigColumns}.Size())
 
 	var (
 		ctx    = context.Background()
 		rows   = gen.BigRows(4)
-		aTable = NewTable(testLogger, testTableName, testBigColumns, aPager, 0)
+		aTable = NewTable(testLogger, testTableName, testBigColumns, tablePager, 0)
 	)
 
 	// Batch insert test rows
@@ -199,7 +203,7 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 	err = aTable.Insert(ctx, stmt)
 	require.NoError(t, err)
 
-	//require.NoError(t, printTree(aTable))
+	//require.NoError(t, aTable.print())
 
 	// Assert root node
 	aRootPage := aPager.pages[0]
@@ -234,6 +238,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
+	tablePager := aPager.ForTable(Row{Columns: testBigColumns}.Size())
 
 	/*
 		In this test we are trying to simulate an internal node split. We will create
@@ -247,7 +252,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	*/
 	var (
 		ctx     = context.Background()
-		aTable  = NewTable(testLogger, testTableName, testBigColumns, aPager, 0)
+		aTable  = NewTable(testLogger, testTableName, testBigColumns, tablePager, 0)
 		numRows = aTable.maxICells(0) + 2
 		rows    = gen.BigRows(numRows)
 	)
@@ -267,7 +272,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	err = aTable.Insert(ctx, stmt)
 	require.NoError(t, err)
 
-	//require.NoError(t, printTree(aTable))
+	//require.NoError(t, aTable.print())
 	checkRows(ctx, t, aTable, rows)
 
 	// Assert root node

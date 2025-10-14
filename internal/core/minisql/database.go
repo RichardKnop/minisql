@@ -65,7 +65,8 @@ type Parser interface {
 type Database struct {
 	Name       string
 	parser     Parser
-	pager      Pager
+	factory    PagerFactory
+	flusher    PageFlusher
 	tables     map[string]*Table
 	dbLock     *sync.RWMutex
 	tableLocks sync.Map
@@ -73,11 +74,12 @@ type Database struct {
 }
 
 // NewDatabase creates a new database
-func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser Parser, aPager Pager) (*Database, error) {
+func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser Parser, factory PagerFactory, flusher PageFlusher) (*Database, error) {
 	aDatabase := &Database{
 		Name:       name,
 		parser:     aParser,
-		pager:      aPager,
+		factory:    factory,
+		flusher:    flusher,
 		tables:     make(map[string]*Table),
 		dbLock:     new(sync.RWMutex),
 		tableLocks: sync.Map{},
@@ -85,8 +87,9 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser P
 	}
 
 	var (
-		totalPages = int(aPager.TotalPages())
-		rooPageIdx = uint32(0)
+		mainTablePager = factory.ForTable(Row{Columns: mainTableColumns}.Size())
+		totalPages     = int(flusher.TotalPages())
+		rooPageIdx     = uint32(0)
 	)
 
 	logger.Sugar().With(
@@ -105,7 +108,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser P
 			logger,
 			SchemaTableName,
 			mainTableColumns,
-			aPager,
+			mainTablePager,
 			rooPageIdx,
 		)
 		aDatabase.tables[SchemaTableName] = mainTable
@@ -133,7 +136,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser P
 			return nil, err
 		}
 
-		if err := aPager.Flush(ctx, mainTable.RootPageIdx); err != nil {
+		if err := mainTablePager.Flush(ctx, mainTable.RootPageIdx); err != nil {
 			return nil, err
 		}
 
@@ -146,7 +149,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser P
 		logger,
 		SchemaTableName,
 		mainTableColumns,
-		aPager,
+		mainTablePager,
 		rooPageIdx,
 	)
 	aDatabase.tables[mainTable.Name] = mainTable
@@ -175,7 +178,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser P
 			logger,
 			stmt.TableName,
 			stmt.Columns,
-			aPager,
+			factory.ForTable(Row{Columns: stmt.Columns}.Size()),
 			uint32(aRow.Values[2].Value.(int32)),
 		)
 
@@ -191,11 +194,11 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser P
 }
 
 func (d *Database) Close(ctx context.Context) error {
-	for pageIdx := uint32(0); pageIdx < d.pager.TotalPages(); pageIdx++ {
+	for pageIdx := uint32(0); pageIdx < d.flusher.TotalPages(); pageIdx++ {
 		d.logger.Sugar().With(
 			"page", pageIdx,
 		).Debug("flushing page to disk")
-		if err := d.pager.Flush(ctx, pageIdx); err != nil {
+		if err := d.flusher.Flush(ctx, pageIdx); err != nil {
 			return err
 		}
 	}
@@ -290,7 +293,8 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 	// caused a split and new page being created, so now we know what the root page
 	// for the new table should be.
 	rowSize := Row{Columns: columns}.Size()
-	freePage, err := d.pager.GetFreePage(ctx, rowSize)
+	tablePager := d.factory.ForTable(rowSize)
+	freePage, err := tablePager.GetFreePage(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +303,7 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 		d.logger,
 		name,
 		columns,
-		d.pager,
+		tablePager,
 		freePage.Index,
 	)
 
@@ -340,8 +344,9 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	}
 
 	// Free all table pages
+	tablePager := d.factory.ForTable(tableToDelete.RowSize)
 	tableToDelete.BFS(func(page *Page) {
-		if err := d.pager.AddFreePage(ctx, page.Index, tableToDelete.RowSize); err != nil {
+		if err := tablePager.AddFreePage(ctx, page.Index); err != nil {
 			d.logger.Sugar().With(
 				"page", page.Index,
 				"error", err,
