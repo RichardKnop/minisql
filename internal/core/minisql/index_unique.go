@@ -204,26 +204,24 @@ func (idx *UniqueIndex[T]) SplitChild(ctx context.Context, parentPage, splitPage
 	// Update parent
 	for j := int(parentNode.Header.Keys) - 1; j >= int(indexInParent); j-- {
 		parentNode.Cells[j+1].Key = parentNode.Cells[j].Key
-		// parentNode.Cells[j+1].Child = parentNode.Cells[j].Child
 	}
+	parentNode.Header.Keys += 1
 	parentNode.Cells[indexInParent].Key = splitNode.Cells[leftCount-1].Key
-
-	// parentNode.Cells[indexInParent+1].Child = newPage.Index
-	parentNode.Cells[indexInParent].Child = splitPage.Index
 	splitNode.Cells[leftCount] = IndexCell[T]{}
 
-	parentNode.Header.Keys += 1
-
 	for j := int(parentNode.Header.Keys) - 1; j > int(indexInParent); j-- {
-		if j+1 >= int(maxKeys) {
+		if j+1 >= int(parentNode.Header.Keys) {
 			continue
 		}
 		if err := parentNode.SetChild(uint32(j+1), parentNode.Cells[j].Child); err != nil {
-			return fmt.Errorf("set child: %w", err)
+			return fmt.Errorf("set child 1: %w", err)
 		}
 	}
+	if err := parentNode.SetChild(indexInParent, splitPage.Index); err != nil {
+		return fmt.Errorf("set child 2: %w", err)
+	}
 	if err := parentNode.SetChild(indexInParent+1, newPage.Index); err != nil {
-		return fmt.Errorf("set child: %w", err)
+		return fmt.Errorf("set child 2: %w", err)
 	}
 
 	return nil
