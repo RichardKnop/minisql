@@ -303,6 +303,7 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 		return nil, err
 	}
 	freePage.LeafNode = NewLeafNode(rowSize)
+	freePage.LeafNode.Header.IsRoot = true
 	createdTable := NewTable(
 		d.logger,
 		name,

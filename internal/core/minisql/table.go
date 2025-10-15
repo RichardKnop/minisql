@@ -455,6 +455,8 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 		return nil
 	}
 
+	fmt.Println("is root", aLeafNode.Header.IsRoot, "rebalancing leaf", aPage.Index, "at parent", aLeafNode.Header.Parent)
+
 	aParentPage, err := t.pager.GetPage(ctx, aLeafNode.Header.Parent)
 	if err != nil {
 		return fmt.Errorf("rebalance leaf: %w", err)
