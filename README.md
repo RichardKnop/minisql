@@ -140,9 +140,9 @@ users
 Insert a row:
 
 ```sh
-minisql> insert into users(id, name, email, age) values(1, 'John Doe', 'john@example.com', 35);
-insert into users(id, name, email, age) values(2, 'Jane Doe', 'jane@example.com', 32);
-insert into users(id, name, email, age) values(3, 'Jack Doe', 'jack@example.com', 27);
+minisql> insert into users(id, name, email, age) values(1, 'John Doe', 'john@example.com', 35),
+(2, 'Jane Doe', 'jane@example.com', 32),
+(3, 'Jack Doe', 'jack@example.com', 27);
 Rows affected: 1
 minisql>
 ```

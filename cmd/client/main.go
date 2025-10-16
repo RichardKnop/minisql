@@ -33,10 +33,25 @@ func main() {
 	reader := bufio.NewReader(os.Stdin)
 
 	printPrompt()
+	var input string
 	for {
-		input, err := reader.ReadString('\n')
+		r, _, err := reader.ReadRune()
 		if err != nil {
-			break
+			log.Fatal(err)
+		}
+		input += string(r)
+		if input == "." {
+			command, err := reader.ReadString('\n')
+			if err != nil {
+				log.Fatal(err)
+			}
+			input += command
+		} else {
+			query, err := reader.ReadString(';')
+			if err != nil {
+				log.Fatal(err)
+			}
+			input += query
 		}
 
 		input = strings.TrimSpace(input)
@@ -79,6 +94,8 @@ func main() {
 		}
 
 		printPrompt()
+		input = ""
+		reader.Reset(os.Stdin)
 	}
 }
 
