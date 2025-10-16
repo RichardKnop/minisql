@@ -92,10 +92,18 @@ minisql> .help
 
 ## Examples
 
-Run `minisql` command:
+Start the database:
 
 ```sh
 go run cmd/minisql/main.go
+```
+
+It will start a TCP server listening on port 8080.
+
+Use client to connect to the database:
+
+```sh
+go run cmd/client/main.go
 ```
 
 When creating a new MiniSQL database, it is initialised with `minisql_schema` system table which holds schema of all tables within the database:
@@ -132,9 +140,9 @@ users
 Insert a row:
 
 ```sh
-minisql> insert into users(id, name, email, age) values(1, 'John Doe', 'john@example.com', 35);
-insert into users(id, name, email, age) values(2, 'Jane Doe', 'jane@example.com', 32);
-insert into users(id, name, email, age) values(3, 'Jack Doe', 'jack@example.com', 27);
+minisql> insert into users(id, name, email, age) values(1, 'John Doe', 'john@example.com', 35),
+(2, 'Jane Doe', 'jane@example.com', 32),
+(3, 'Jack Doe', 'jack@example.com', 27);
 Rows affected: 1
 minisql>
 ```
@@ -185,3 +193,15 @@ You can also delete rows:
 minisql> delete from users;
 Rows affected: 3
 ```
+
+
+echo "insert into users(id, name, email, age) values(1, 'John Doe', 'john@example.com', 35);
+insert into users(id, name, email, age) values(2, 'Jane Doe', 'jane@example.com', 32);
+insert into users(id, name, email, age) values(3, 'Jack Doe', 'jack@example.com', 27);" | nc localhost 8080
+
+
+printf '%s\n' '
+insert into users(id, name, email, age) values(1, 'John Doe', 'john@example.com', 35);
+insert into users(id, name, email, age) values(2, 'Jane Doe', 'jane@example.com', 32);
+insert into users(id, name, email, age) values(3, 'Jack Doe', 'jack@example.com', 27);
+' | nc localhost 8080
