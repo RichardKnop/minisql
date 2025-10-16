@@ -193,15 +193,3 @@ You can also delete rows:
 minisql> delete from users;
 Rows affected: 3
 ```
-
-
-echo "insert into users(id, name, email, age) values(1, 'John Doe', 'john@example.com', 35);
-insert into users(id, name, email, age) values(2, 'Jane Doe', 'jane@example.com', 32);
-insert into users(id, name, email, age) values(3, 'Jack Doe', 'jack@example.com', 27);" | nc localhost 8080
-
-
-printf '%s\n' '
-insert into users(id, name, email, age) values(1, 'John Doe', 'john@example.com', 35);
-insert into users(id, name, email, age) values(2, 'Jane Doe', 'jane@example.com', 32);
-insert into users(id, name, email, age) values(3, 'Jack Doe', 'jack@example.com', 27);
-' | nc localhost 8080
