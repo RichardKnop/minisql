@@ -688,12 +688,15 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 // It inserts the last key and value from the left neighbor into the given node,
 // and removes the key and value from the left neighbor.
 // It also updates the key in the parent node.
-func (t *Table) borrowFromLeftInternal(aParent, right, left *InternalNode, idx uint32) error {
-	aCellToRotate := left.LastCell()
-	left.RemoveLastCell()
-	right.PrependCell(aCellToRotate)
+func (t *Table) borrowFromLeftInternal(aParent, aNode, left *InternalNode, idx uint32) error {
+	aNode.PrependCell(ICell{
+		Key:   aParent.ICells[idx-1].Key,
+		Child: left.Header.RightChild,
+	})
 
-	aParent.ICells[idx].Key = aCellToRotate.Key
+	aParent.ICells[idx-1].Key = left.LastCell().Key
+
+	left.RemoveLastCell()
 
 	return nil
 }
@@ -702,17 +705,16 @@ func (t *Table) borrowFromLeftInternal(aParent, right, left *InternalNode, idx u
 // It inserts the first key and value from the right neighbor into the given node,
 // and removes the key and value from the right neighbor.
 // It also updates the key in the parent node.
-func (t *Table) borrowFromRightInternal(aParent, left, right *InternalNode, idx uint32) error {
-	aCellToRotate := right.FirstCell()
-	right.RemoveFirstCell()
-
-	left.AppendCells(ICell{
-		Child: left.Header.RightChild,
+func (t *Table) borrowFromRightInternal(aParent, aNode, right *InternalNode, idx uint32) error {
+	aNode.AppendCells(ICell{
+		Child: aNode.Header.RightChild,
 		Key:   aParent.ICells[idx].Key,
 	})
-	left.Header.RightChild = aCellToRotate.Child
+	aNode.Header.RightChild = right.FirstCell().Child
 
-	aParent.ICells[idx].Key = aCellToRotate.Key
+	aParent.ICells[idx].Key = right.FirstCell().Key
+
+	right.RemoveFirstCell()
 
 	return nil
 }

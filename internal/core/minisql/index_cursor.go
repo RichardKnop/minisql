@@ -10,7 +10,7 @@ type IndexCursor struct {
 	CellIdx uint32
 }
 
-func (idx *UniqueIndex[T]) Seek(ctx context.Context, aPage *Page, key T) (IndexCursor, bool, error) {
+func (ui *UniqueIndex[T]) Seek(ctx context.Context, aPage *Page, key T) (IndexCursor, bool, error) {
 	i := uint32(0)
 	aNode := aPage.IndexNode.(*IndexNode[T])
 
@@ -30,9 +30,9 @@ func (idx *UniqueIndex[T]) Seek(ctx context.Context, aPage *Page, key T) (IndexC
 	if err != nil {
 		return IndexCursor{}, false, fmt.Errorf("get child: %w", err)
 	}
-	childPage, err := idx.pager.GetPage(ctx, childIdx)
+	childPage, err := ui.pager.GetPage(ctx, childIdx)
 	if err != nil {
 		return IndexCursor{}, false, fmt.Errorf("get child page: %w", err)
 	}
-	return idx.Seek(ctx, childPage, key)
+	return ui.Seek(ctx, childPage, key)
 }
