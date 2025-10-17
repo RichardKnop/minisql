@@ -320,3 +320,79 @@ func (n *IndexNode[T]) Children() []uint32 {
 	}
 	return children
 }
+
+func (n *IndexNode[T]) DeleteKeyByIndex(idx uint32) {
+	if n.Header.Keys == 0 {
+		return
+	}
+
+	if idx == n.Header.Keys {
+		idx -= 1
+	}
+
+	if idx == n.Header.Keys-1 {
+		n.Header.RightChild = n.Cells[idx].Child
+	} else {
+		n.Cells[idx+1].Child = n.Cells[idx].Child
+		for i := int(idx); i < int(n.Header.Keys-1); i++ {
+			n.Cells[i] = n.Cells[i+1]
+		}
+	}
+
+	n.Cells[int(n.Header.Keys)-1] = IndexCell[T]{}
+	n.Header.Keys -= 1
+}
+
+func (n *IndexNode[T]) AtLeastHalfFull(maxCells int) bool {
+	return int(n.Header.Keys) >= (maxCells+1)/2
+}
+
+func (n *IndexNode[T]) MoreThanHalfFull(maxCells int) bool {
+	return int(n.Header.Keys) > (maxCells+1)/2
+}
+
+func (n *IndexNode[T]) GetRightChildByIndex(idx uint32) uint32 {
+	if idx == n.Header.Keys-1 {
+		return n.Header.RightChild
+	}
+
+	return n.Cells[idx+1].Child
+}
+
+func (n *IndexNode[T]) FirstCell() IndexCell[T] {
+	return n.Cells[0]
+}
+
+func (n *IndexNode[T]) LastCell() IndexCell[T] {
+	return n.Cells[n.Header.Keys-1]
+}
+
+func (n *IndexNode[T]) RemoveFirstCell() {
+	for i := 0; i < int(n.Header.Keys)-1; i++ {
+		n.Cells[i] = n.Cells[i+1]
+	}
+	n.Cells[n.Header.Keys-1] = IndexCell[T]{}
+	n.Header.Keys -= 1
+}
+
+func (n *IndexNode[T]) RemoveLastCell() {
+	idx := n.Header.Keys - 1
+	n.Header.RightChild = n.Cells[idx].Child
+	n.Cells[idx] = IndexCell[T]{}
+	n.Header.Keys -= 1
+}
+
+func (n *IndexNode[T]) PrependCell(aCell IndexCell[T]) {
+	for i := int(n.Header.Keys) - 1; i > 0; i-- {
+		n.Cells[i] = n.Cells[i-1]
+	}
+	n.Cells[0] = aCell
+	n.Header.Keys += 1
+}
+
+func (n *IndexNode[T]) AppendCells(cells ...IndexCell[T]) {
+	for _, aCell := range cells {
+		n.Cells[n.Header.Keys] = aCell
+		n.Header.Keys += 1
+	}
+}
