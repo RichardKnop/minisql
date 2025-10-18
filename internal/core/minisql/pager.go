@@ -159,6 +159,7 @@ func (p *pagerImpl) AddFreePage(ctx context.Context, pageIdx uint32, unmarshaler
 	// Clear other node types
 	freePage.LeafNode = nil
 	freePage.InternalNode = nil
+	freePage.IndexNode = nil
 
 	// Update header
 	p.dbHeader.FirstFreePage = pageIdx

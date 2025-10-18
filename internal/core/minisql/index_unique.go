@@ -317,6 +317,9 @@ func (ui *UniqueIndex[T]) Delete(ctx context.Context, key T) error {
 
 // remove a key from the sub-tree rooted with this node
 func (ui *UniqueIndex[T]) remove(ctx context.Context, aPage *Page, key T) error {
+	if ui.debug {
+		fmt.Println("Removing key:", key, "page index:", aPage.Index)
+	}
 	aNode := aPage.IndexNode.(*IndexNode[T])
 
 	// Find index of the first key greater than or equal to key
@@ -329,83 +332,57 @@ func (ui *UniqueIndex[T]) remove(ctx context.Context, aPage *Page, key T) error 
 		// If the key is in this node and this is a leaf node, just remove the key
 		if aNode.Header.IsLeaf {
 			aNode.DeleteKeyByIndex(uint32(idx))
-		} else {
-			// Otherwise call recursive function to remove the key from internal node
-			if err := ui.removeFromInternal(ctx, aPage, idx); err != nil {
-				return fmt.Errorf("remove from internal: %w", err)
-			}
-		}
-	} else {
-		if aNode.Header.IsLeaf {
-			return fmt.Errorf("the key %v does not exist in the tree", key)
+			return nil
 		}
 
-		flag := idx == int(aNode.Header.Keys)
-
-		childIdx, err := aNode.Child(uint32(idx))
-		if err != nil {
-			return fmt.Errorf("get child: %w", err)
-		}
-		childPage, err := ui.pager.GetPage(ctx, childIdx)
-		if err != nil {
-			return fmt.Errorf("get child page: %w", err)
+		// Otherwise call recursive function to remove the key from internal node
+		if err := ui.removeFromInternal(ctx, aPage, idx); err != nil {
+			return fmt.Errorf("remove from internal: %w", err)
 		}
 
-		var (
-			childNode = childPage.IndexNode.(*IndexNode[T])
-			maxCells  = int(ui.maxIndexKeys(childNode.KeySize))
-		)
+		return nil
+	}
 
-		if !childNode.AtLeastHalfFull(maxCells) {
-			if err := ui.fill(ctx, aPage, childPage, idx); err != nil {
-				return fmt.Errorf("fill child: %w", err)
-			}
-		}
+	if aNode.Header.IsLeaf {
+		return fmt.Errorf("the key %v does not exist in the tree", key)
+	}
 
-		if flag && idx > int(aNode.Header.Keys) {
-			prevChildIdx, err := aNode.Child(uint32(idx - 1))
-			if err != nil {
-				return fmt.Errorf("get prev child: %w", err)
-			}
-			prevChildPage, err := ui.pager.GetPage(ctx, prevChildIdx)
-			if err != nil {
-				return fmt.Errorf("get prev child page: %w", err)
-			}
-			return ui.remove(ctx, prevChildPage, key)
-		} else {
-			// childIdx, err := aNode.Child(uint32(idx))
-			// if err != nil {
-			// 	return fmt.Errorf("get child: %w", err)
-			// }
-			// childPage, err := ui.pager.GetPage(ctx, childIdx)
-			// if err != nil {
-			// 	return fmt.Errorf("get child page: %w", err)
-			// }
-			// childNode := childPage.IndexNode.(*IndexNode[T])
-			return ui.remove(ctx, childPage, key)
+	flag := idx == int(aNode.Header.Keys)
+
+	childIdx, err := aNode.Child(uint32(idx))
+	if err != nil {
+		return fmt.Errorf("get child: %w", err)
+	}
+	childPage, err := ui.pager.GetPage(ctx, childIdx)
+	if err != nil {
+		return fmt.Errorf("get child page: %w", err)
+	}
+
+	var (
+		childNode = childPage.IndexNode.(*IndexNode[T])
+		maxCells  = int(ui.maxIndexKeys(childNode.KeySize))
+	)
+
+	if !childNode.AtLeastHalfFull(maxCells) {
+		fmt.Println("Filling child", "parent page:", aPage.Index, "child page:", childPage.Index, "idx in parent:", idx, "keys", childNode.Header.Keys)
+		if err := ui.fill(ctx, aPage, childPage, idx); err != nil {
+			return fmt.Errorf("fill child: %w", err)
 		}
 	}
 
-	// if idx < self.n and self.keys[idx] == k:
-	//     if self.leaf:
-	//         self.remove_from_leaf(idx)
-	//     else:
-	//         self.remove_from_non_leaf(idx)
-	// else:
-	//     if self.leaf:
-	//         print(f"The key {k} does not exist in the tree")
-	//         return
+	if flag && idx > int(aNode.Header.Keys) {
+		prevChildIdx, err := aNode.Child(uint32(idx - 1))
+		if err != nil {
+			return fmt.Errorf("get prev child: %w", err)
+		}
+		prevChildPage, err := ui.pager.GetPage(ctx, prevChildIdx)
+		if err != nil {
+			return fmt.Errorf("get prev child page: %w", err)
+		}
+		return ui.remove(ctx, prevChildPage, key)
+	}
 
-	//     flag = idx == self.n
-	//     if self.C[idx].n < self.t:
-	//         self.fill(idx)
-
-	//     if flag and idx > self.n:
-	//         self.C[idx - 1].remove(k)
-	//     else:
-	//         self.C[idx].remove(k)
-
-	return nil
+	return ui.remove(ctx, childPage, key)
 }
 
 // A function to remove the idx-th key from this node, which is a non-leaf node
@@ -447,6 +424,10 @@ func (ui *UniqueIndex[T]) removeFromInternal(ctx context.Context, aPage *Page, i
 		if err != nil {
 			return fmt.Errorf("get predecessor key: %w", err)
 		}
+		if ui.debug {
+			fmt.Println("Pred key left:", predKey)
+		}
+
 		aNode.Cells[idx].Key = predKey
 		if err := ui.remove(ctx, leftChildPage, predKey); err != nil {
 			return fmt.Errorf("remove predecessor key: %w", err)
@@ -456,6 +437,10 @@ func (ui *UniqueIndex[T]) removeFromInternal(ctx context.Context, aPage *Page, i
 		if err != nil {
 			return fmt.Errorf("get successor key: %w", err)
 		}
+		if ui.debug {
+			fmt.Println("Successor key right:", succKey)
+		}
+
 		aNode.Cells[idx].Key = succKey
 		if err := ui.remove(ctx, rightChildPage, succKey); err != nil {
 			return fmt.Errorf("remove successor key: %w", err)
@@ -468,20 +453,6 @@ func (ui *UniqueIndex[T]) removeFromInternal(ctx context.Context, aPage *Page, i
 			return fmt.Errorf("remove key from merged child: %w", err)
 		}
 	}
-
-	// k = self.keys[idx]
-
-	// if self.C[idx].n >= self.t:
-	//     pred = self.get_pred(idx)
-	//     self.keys[idx] = pred
-	//     self.C[idx].remove(pred)
-	// elif self.C[idx + 1].n >= self.t:
-	//     succ = self.get_succ(idx)
-	//     self.keys[idx] = succ
-	//     self.C[idx + 1].remove(succ)
-	// else:
-	//     self.merge(idx)
-	//     self.C[idx].remove(k)
 
 	return nil
 }
@@ -528,60 +499,67 @@ func (ui *UniqueIndex[T]) getSucc(ctx context.Context, aNode *IndexNode[T], idx 
 
 func (ui *UniqueIndex[T]) fill(ctx context.Context, aParent, aPage *Page, idx int) error {
 	var (
-		aNode     = aPage.IndexNode.(*IndexNode[T])
-		maxCells  = ui.maxIndexKeys(aNode.KeySize)
-		leftPage  *Page
-		rightPage *Page
-		leftNode  *IndexNode[T]
-		rightNode *IndexNode[T]
+		parentNode = aParent.IndexNode.(*IndexNode[T])
+		aNode      = aPage.IndexNode.(*IndexNode[T])
+		maxCells   = ui.maxIndexKeys(aNode.KeySize)
+		left       *Page
+		right      *Page
+		leftNode   *IndexNode[T]
+		rightNode  *IndexNode[T]
 	)
 
 	var err error
 	if idx != 0 {
-		leftPage, err = ui.pager.GetPage(ctx, aNode.Cells[idx-1].Child)
+		left, err = ui.pager.GetPage(ctx, parentNode.Cells[idx-1].Child)
 		if err != nil {
 			return fmt.Errorf("get left page: %w", err)
 		}
-		leftNode = leftPage.IndexNode.(*IndexNode[T])
-	} else if idx != int(aNode.Header.Keys) {
-		rightPage, err = ui.pager.GetPage(ctx, aNode.GetRightChildByIndex(uint32(idx)))
+		leftNode = left.IndexNode.(*IndexNode[T])
+	} else if idx != int(parentNode.Header.Keys) {
+		right, err = ui.pager.GetPage(ctx, parentNode.GetRightChildByIndex(uint32(idx)))
 		if err != nil {
 			return fmt.Errorf("get right page: %w", err)
 		}
-		rightNode = rightPage.IndexNode.(*IndexNode[T])
+		rightNode = right.IndexNode.(*IndexNode[T])
 	}
 
-	if idx != 0 && leftNode.MoreThanHalfFull(int(maxCells)) {
-		if err := ui.borrowFromLeft(aNode, aNode, leftNode, uint32(idx)); err != nil {
-			return fmt.Errorf("borrow from left: %w", err)
+	if left != nil && leftNode.MoreThanHalfFull(int(maxCells)) {
+		if ui.debug {
+			fmt.Println("Borrow from left", "parent page:", aParent.Index, "left page:", aPage.Index, "left page:", left.Index, "idx in parent:", idx)
 		}
-	} else if idx != int(aNode.Header.Keys) && rightNode.MoreThanHalfFull(int(maxCells)) {
-		if err := ui.borrowFromRight(aNode, aNode, rightNode, uint32(idx)); err != nil {
-			return fmt.Errorf("borrow from right: %w", err)
+
+		return ui.borrowFromLeft(aNode, aNode, leftNode, uint32(idx))
+	}
+
+	if right != nil && rightNode.MoreThanHalfFull(int(maxCells)) {
+		if ui.debug {
+			fmt.Println("Borrow from right", "parent page:", aParent.Index, "left page:", aPage.Index, "right page:", right.Index, "idx in parent:", idx)
 		}
-	} else if idx != int(aNode.Header.Keys) {
-		if err := ui.merge(ctx, aParent, aPage, rightPage, uint32(idx)); err != nil {
+
+		return ui.borrowFromRight(aNode, aNode, rightNode, uint32(idx))
+	}
+
+	if idx != int(parentNode.Header.Keys) {
+		if ui.debug {
+			fmt.Println(int(maxCells), rightNode.Header.Keys, aNode.Header.Keys)
+			fmt.Println("Merge with left", "parent page:", aParent.Index, "left page:", aPage.Index, "right page:", right.Index, "idx in parent:", idx)
+		}
+
+		if err := ui.merge(ctx, aParent, aPage, right, uint32(idx)); err != nil {
 			return fmt.Errorf("merge with left: %w", err)
 		}
-		//return ui.pager.AddFreePage(ctx, rightPage.Index)
-	} else {
-		if err := ui.merge(ctx, aParent, leftPage, aPage, uint32(idx-1)); err != nil {
-			return fmt.Errorf("merge with right: %w", err)
-		}
-		//return ui.pager.AddFreePage(ctx, aPage.Index)
+
+		return ui.pager.AddFreePage(ctx, right.Index)
 	}
 
-	// if idx != 0 and self.C[idx - 1].n >= self.t:
-	//     self.borrow_from_prev(idx)
-	// elif idx != self.n and self.C[idx + 1].n >= self.t:
-	//     self.borrow_from_next(idx)
-	// else:
-	//     if idx != self.n:
-	//         self.merge(idx)
-	//     else:
-	//         self.merge(idx - 1)
+	if ui.debug {
+		fmt.Println("Merge with right", "parent page:", aParent.Index, "left page:", left.Index, "right page:", aPage.Index, "idx in parent:", idx)
+	}
 
-	return nil
+	if err := ui.merge(ctx, aParent, left, aPage, uint32(idx-1)); err != nil {
+		return fmt.Errorf("merge with right: %w", err)
+	}
+	return ui.pager.AddFreePage(ctx, aPage.Index)
 }
 
 // A function to borrow a key from C[idx-1] and insert it into C[idx]
@@ -596,25 +574,6 @@ func (ui *UniqueIndex[T]) borrowFromLeft(aParent, aNode, left *IndexNode[T], idx
 	aParent.Cells[idx-1].RowID = left.LastCell().RowID
 
 	left.RemoveLastCell()
-
-	// child, sibling = self.C[idx], self.C[idx - 1]
-
-	// for i in range(child.n - 1, -1, -1):
-	//     child.keys[i + 1] = child.keys[i]
-
-	// if not child.leaf:
-	//     for i in range(child.n, -1, -1):
-	//         child.C[i + 1] = child.C[i]
-
-	// child.keys[0] = self.keys[idx - 1]
-
-	// if not child.leaf:
-	//     child.C[0] = sibling.C[sibling.n]
-
-	// self.keys[idx - 1] = sibling.keys[sibling.n - 1]
-
-	// child.n += 1
-	// sibling.n -= 1
 
 	return nil
 }
@@ -631,25 +590,6 @@ func (ui *UniqueIndex[T]) borrowFromRight(aParent, aNode, right *IndexNode[T], i
 	aParent.Cells[idx].RowID = right.FirstCell().RowID
 
 	right.RemoveFirstCell()
-
-	//    child, sibling = self.C[idx], self.C[idx + 1]
-
-	//     child.keys[child.n] = self.keys[idx]
-
-	//     if not child.leaf:
-	//         child.C[child.n + 1] = sibling.C[0]
-
-	//     self.keys[idx] = sibling.keys[0]
-
-	//     for i in range(1, sibling.n):
-	//         sibling.keys[i - 1] = sibling.keys[i]
-
-	//     if not sibling.leaf:
-	//         for i in range(1, sibling.n + 1):
-	//             sibling.C[i - 1] = sibling.C[i]
-
-	//     child.n += 1
-	//     sibling.n -= 1
 
 	return nil
 }
@@ -688,7 +628,7 @@ func (ui *UniqueIndex[T]) merge(ctx context.Context, aParent, aPage, aSibling *P
 			if err != nil {
 				return fmt.Errorf("get moved page: %w", err)
 			}
-			movedPage.setParent(leftIndex)
+			movedPage.IndexNode.(*IndexNode[T]).Header.Parent = leftIndex
 		}
 	}
 
@@ -707,28 +647,7 @@ func (ui *UniqueIndex[T]) merge(ctx context.Context, aParent, aPage, aSibling *P
 		}
 	}
 
-	leftNode.Header.Keys += rightNode.Header.Keys + 1
 	parentNode.Header.Keys -= 1
-
-	//    child, sibling = self.C[idx], self.C[idx + 1]
-
-	//     child.keys[self.t - 1] = self.keys[idx]
-
-	//     for i in range(sibling.n):
-	//         child.keys[i + self.t] = sibling.keys[i]
-
-	//     if not child.leaf:
-	//         for i in range(sibling.n + 1):
-	//             child.C[i + self.t] = sibling.C[i]
-
-	//     for i in range(idx + 1, self.n):
-	//         self.keys[i - 1] = self.keys[i]
-
-	//     for i in range(idx + 2, self.n + 1):
-	//         self.C[i - 1] = self.C[i]
-
-	//     child.n += sibling.n + 1
-	//     self.n -= 1
 
 	return nil
 }

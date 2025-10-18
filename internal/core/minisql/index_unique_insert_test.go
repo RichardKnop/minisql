@@ -2,7 +2,6 @@ package minisql
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"testing"
 
@@ -622,74 +621,4 @@ func TestUniqueIndex_Insert_OutOfOrder(t *testing.T) {
 	assert.Equal(t, []int64{20, 21}, leaf8.Keys())
 	assert.Empty(t, leaf8.Children())
 	assert.Equal(t, []uint64{120, 121}, leaf8.RowIDs())
-}
-
-func TestUniqueIndex_Delete(t *testing.T) {
-	t.Parallel()
-	t.Skip()
-
-	tempFile, err := os.CreateTemp("", "testdb")
-	require.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize)
-	require.NoError(t, err)
-	aColumn := Column{Name: "test_column", Kind: Int8, Size: 8}
-	indexPager := aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size))
-	anIndex := NewUniqueIndex[int64](zap.NewNop(), "test_index", aColumn, indexPager, 0)
-	anIndex.maximumKeys = 3
-
-	keys := []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
-
-	for _, key := range keys {
-		err := anIndex.Insert(context.Background(), key, uint64(key+100))
-		require.NoError(t, err)
-	}
-
-	/*
-									+------------------------------------------------+
-									|        9              ,             16         |
-									+------------------------------------------------+
-				                   /                        |                         \
-					+-------------+                       +---------+                  +---------------+
-					|   2  ,  5   |                       | 11 , 13 |                  |      19       |
-					+-------------+                       +---------+                  +---------------+
-				   /       |       \                     /     |     \                /                 \
-		 	  +---+    +-------+  +-----------+    +----+   +-----+  +---------+   +---------+         +---------+
-			  | 1 |    | 3 , 4 |  | 6 , 7 , 8 |    | 10 |   |  12 |  | 14 , 15 |   | 17 , 18 |         | 20 , 21 |
-			  +---+    +-------+  +-----------+    +----+   +-----+  +---------+   +---------+         +---------+
-	*/
-
-	actualKeys := []int64{}
-	err = anIndex.BFS(func(aPage *Page) {
-		node := aPage.IndexNode.(*IndexNode[int64])
-		actualKeys = append(actualKeys, node.Keys()...)
-	})
-	require.NoError(t, err)
-
-	assert.ElementsMatch(t, keys, actualKeys)
-
-	require.NoError(t, anIndex.print())
-
-	t.Run("Delete a key from leftmost leaf", func(t *testing.T) {
-		fmt.Println("AAAAAAAAAA")
-		err := anIndex.Delete(context.Background(), 1)
-		require.NoError(t, err)
-		fmt.Println("BBBBBBBBB")
-
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
-		fmt.Println("CCCCCCCCC")
-
-		expectedKeys := []int64{2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
-
-		require.NoError(t, anIndex.print())
-	})
-
 }
