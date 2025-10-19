@@ -631,9 +631,9 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 
 	if right != nil && right.InternalNode.MoreThanHalfFull(t.maxICells(right.Index)) {
 		if err := t.borrowFromRightInternal(
-			aParentPage.InternalNode,
-			aPage.InternalNode,
-			right.InternalNode,
+			aParentPage,
+			aPage,
+			right,
 			myPositionInParent,
 		); err != nil {
 			return fmt.Errorf("borrow from right internal: %w", err)
@@ -643,9 +643,9 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 
 	if left != nil && left.InternalNode.MoreThanHalfFull(t.maxICells(left.Index)) {
 		if err := t.borrowFromLeftInternal(
-			aParentPage.InternalNode,
-			aPage.InternalNode,
-			left.InternalNode,
+			aParentPage,
+			aPage,
+			left,
 			myPositionInParent-1,
 		); err != nil {
 			return fmt.Errorf("borrow from left internal: %w", err)
@@ -688,15 +688,21 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 // It inserts the last key and value from the left neighbor into the given node,
 // and removes the key and value from the left neighbor.
 // It also updates the key in the parent node.
-func (t *Table) borrowFromLeftInternal(aParent, aNode, left *InternalNode, idx uint32) error {
-	aNode.PrependCell(ICell{
-		Key:   aParent.ICells[idx-1].Key,
-		Child: left.Header.RightChild,
+func (t *Table) borrowFromLeftInternal(aParent, aPage, left *Page, idx uint32) error {
+	aPage.InternalNode.PrependCell(ICell{
+		Key:   aParent.InternalNode.ICells[idx-1].Key,
+		Child: left.InternalNode.Header.RightChild,
 	})
 
-	aParent.ICells[idx-1].Key = left.LastCell().Key
+	aParent.InternalNode.ICells[idx-1].Key = left.InternalNode.LastCell().Key
 
-	left.RemoveLastCell()
+	childPage, err := t.pager.GetPage(context.Background(), left.InternalNode.Header.RightChild)
+	if err != nil {
+		return fmt.Errorf("get child page: %w", err)
+	}
+	childPage.setParent(aPage.Index)
+
+	left.InternalNode.RemoveLastCell()
 
 	return nil
 }
@@ -705,16 +711,22 @@ func (t *Table) borrowFromLeftInternal(aParent, aNode, left *InternalNode, idx u
 // It inserts the first key and value from the right neighbor into the given node,
 // and removes the key and value from the right neighbor.
 // It also updates the key in the parent node.
-func (t *Table) borrowFromRightInternal(aParent, aNode, right *InternalNode, idx uint32) error {
-	aNode.AppendCells(ICell{
-		Child: aNode.Header.RightChild,
-		Key:   aParent.ICells[idx].Key,
+func (t *Table) borrowFromRightInternal(aParent, aPage, right *Page, idx uint32) error {
+	aPage.InternalNode.AppendCells(ICell{
+		Child: aPage.InternalNode.Header.RightChild,
+		Key:   aParent.InternalNode.ICells[idx].Key,
 	})
-	aNode.Header.RightChild = right.FirstCell().Child
+	aPage.InternalNode.Header.RightChild = right.InternalNode.FirstCell().Child
 
-	aParent.ICells[idx].Key = right.FirstCell().Key
+	childPage, err := t.pager.GetPage(context.Background(), aPage.InternalNode.Header.RightChild)
+	if err != nil {
+		return fmt.Errorf("get child page: %w", err)
+	}
+	childPage.setParent(aPage.Index)
 
-	right.RemoveFirstCell()
+	aParent.InternalNode.ICells[idx].Key = right.InternalNode.FirstCell().Key
+
+	right.InternalNode.RemoveFirstCell()
 
 	return nil
 }

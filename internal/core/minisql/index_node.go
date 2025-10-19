@@ -168,20 +168,12 @@ type IndexNode[T int8 | int32 | int64 | float32 | float64 | string] struct {
 	KeySize uint64
 }
 
-// func NewIndexCell[T bool | int32 | int64 | float32 | float64 | string](key T, rowID uint64, child uint32) IndexCell[T] {
-// 	return IndexCell[T]{
-// 		Key:   key,
-// 		RowID: rowID,
-// 		Child: child,
-// 	}
-// }
-
 const MinimumIndexCells = 4
 
 func maxIndexKeys(keySize uint64) uint32 {
-	// index header = 13
+	// index header = 14
 	// each cell = keySize + 8 + 4
-	return uint32((PageSize - 13) / (keySize + 8 + 4))
+	return uint32((PageSize - 14) / (keySize + 8 + 4))
 }
 
 // Use int8 for bool so we can use comparison operators
@@ -383,8 +375,11 @@ func (n *IndexNode[T]) RemoveLastCell() {
 }
 
 func (n *IndexNode[T]) PrependCell(aCell IndexCell[T]) {
-	for i := int(n.Header.Keys) - 1; i > 0; i-- {
-		n.Cells[i] = n.Cells[i-1]
+	if n.Header.Keys == 1 {
+
+	}
+	for i := int(n.Header.Keys) - 1; i >= 0; i-- {
+		n.Cells[i+1] = n.Cells[i]
 	}
 	n.Cells[0] = aCell
 	n.Header.Keys += 1
