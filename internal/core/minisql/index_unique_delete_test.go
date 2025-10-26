@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"math/rand/v2"
 	"os"
 	"testing"
 
@@ -1116,6 +1117,57 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		// No new pages should be recycled
 		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{1, 2, 8, 9, 5, 6, 11, 7, 10, 3, 4})
 	})
+}
+
+func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
+	t.Parallel()
+
+	tempFile, err := os.CreateTemp("", "testdb")
+	require.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+	aPager, err := NewPager(tempFile, PageSize)
+	require.NoError(t, err)
+	aColumn := Column{Name: "test_column", Kind: Int8, Size: 8}
+	idxPager := aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size))
+	anIndex := NewUniqueIndex[int64](zap.NewNop(), "test_index", aColumn, idxPager, 0)
+	anIndex.maximumKeys = 3
+
+	// Insert 100 keys in random order
+	keys := make([]int64, 0, 100)
+	for i := int64(1); i <= 100; i++ {
+		keys = append(keys, i)
+	}
+	rand.Shuffle(len(keys), func(i, j int) { keys[i], keys[j] = keys[j], keys[i] })
+
+	for _, key := range keys {
+		err := anIndex.Insert(context.Background(), key, uint64(key+100))
+		require.NoError(t, err)
+	}
+
+	// Verify all keys are present
+	actualKeys := []int64{}
+	err = anIndex.BFS(func(aPage *Page) {
+		node := aPage.IndexNode.(*IndexNode[int64])
+		actualKeys = append(actualKeys, node.Keys()...)
+	})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, keys, actualKeys)
+
+	// Delete all keys in random order
+	rand.Shuffle(len(keys), func(i, j int) { keys[i], keys[j] = keys[j], keys[i] })
+	for _, key := range keys {
+		err := anIndex.Delete(context.Background(), key)
+		require.NoError(t, err)
+	}
+
+	// Verify index is empty
+	actualKeys = []int64{}
+	err = anIndex.BFS(func(aPage *Page) {
+		node := aPage.IndexNode.(*IndexNode[int64])
+		actualKeys = append(actualKeys, node.Keys()...)
+	})
+	require.NoError(t, err)
+	assert.Empty(t, actualKeys)
 }
 
 func assertFreePages(t *testing.T, aPager *indexPager[int64], expectedFreePages []uint32) {
