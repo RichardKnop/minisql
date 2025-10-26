@@ -41,11 +41,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		// require.NoError(t, anIndex.print())
 
 		rootNode := aPager.pages[0].IndexNode.(*IndexNode[int64])
-		assert.True(t, rootNode.Header.IsRoot)
-		assert.True(t, rootNode.Header.IsLeaf)
-		assert.Equal(t, 3, int(rootNode.Header.Keys))
-		assert.Equal(t, []int64{1, 2, 3}, rootNode.Keys())
-		assert.Equal(t, []uint64{101, 102, 103}, rootNode.RowIDs())
+		assertIndexNode(t, rootNode, true, true, 0, []int64{1, 2, 3}, nil)
 	})
 
 	t.Run("Insert duplicate key fails", func(t *testing.T) {
@@ -75,26 +71,9 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		leftChild := aPager.pages[1].IndexNode.(*IndexNode[int64])
 		rightChild := aPager.pages[2].IndexNode.(*IndexNode[int64])
 
-		assert.True(t, rootNode.Header.IsRoot)
-		assert.False(t, rootNode.Header.IsLeaf)
-		assert.Equal(t, 1, int(rootNode.Header.Keys))
-		assert.Equal(t, []int64{2}, rootNode.Keys())
-		assert.Equal(t, []uint32{1, 2}, rootNode.Children())
-		assert.Equal(t, []uint64{102}, rootNode.RowIDs())
-
-		assert.False(t, leftChild.Header.IsRoot)
-		assert.True(t, leftChild.Header.IsLeaf)
-		assert.Equal(t, 0, int(leftChild.Header.Parent))
-		assert.Equal(t, 1, int(leftChild.Header.Keys))
-		assert.Equal(t, []int64{1}, leftChild.Keys())
-		assert.Equal(t, []uint64{101}, leftChild.RowIDs())
-
-		assert.False(t, rightChild.Header.IsRoot)
-		assert.True(t, rightChild.Header.IsLeaf)
-		assert.Equal(t, 0, int(rightChild.Header.Parent))
-		assert.Equal(t, 2, int(rightChild.Header.Keys))
-		assert.Equal(t, []int64{3, 4}, rightChild.Keys())
-		assert.Equal(t, []uint64{103, 104}, rightChild.RowIDs())
+		assertIndexNode(t, rootNode, true, false, 0, []int64{2}, []uint32{1, 2})
+		assertIndexNode(t, leftChild, false, true, 0, []int64{1}, nil)
+		assertIndexNode(t, rightChild, false, true, 0, []int64{3, 4}, nil)
 	})
 
 	t.Run("Insert 2 more keys, another split", func(t *testing.T) {
@@ -123,36 +102,10 @@ func TestUniqueIndex_Insert(t *testing.T) {
 			rightChild  = aPager.pages[3].IndexNode.(*IndexNode[int64])
 		)
 
-		assert.True(t, rootNode.Header.IsRoot)
-		assert.False(t, rootNode.Header.IsLeaf)
-		assert.Equal(t, 2, int(rootNode.Header.Keys))
-		assert.Equal(t, []int64{2, 4}, rootNode.Keys())
-		assert.Equal(t, []uint32{1, 2, 3}, rootNode.Children())
-		assert.Equal(t, []uint64{102, 104}, rootNode.RowIDs())
-
-		assert.False(t, leftChild.Header.IsRoot)
-		assert.True(t, leftChild.Header.IsLeaf)
-		assert.Equal(t, 0, int(leftChild.Header.Parent))
-		assert.Equal(t, 1, int(leftChild.Header.Keys))
-		assert.Equal(t, []int64{1}, leftChild.Keys())
-		assert.Empty(t, leftChild.Children())
-		assert.Equal(t, []uint64{101}, leftChild.RowIDs())
-
-		assert.False(t, middleChild.Header.IsRoot)
-		assert.True(t, middleChild.Header.IsLeaf)
-		assert.Equal(t, 0, int(middleChild.Header.Parent))
-		assert.Equal(t, 1, int(middleChild.Header.Keys))
-		assert.Equal(t, []int64{3}, middleChild.Keys())
-		assert.Empty(t, middleChild.Children())
-		assert.Equal(t, []uint64{103}, middleChild.RowIDs())
-
-		assert.False(t, rightChild.Header.IsRoot)
-		assert.True(t, rightChild.Header.IsLeaf)
-		assert.Equal(t, 0, int(rightChild.Header.Parent))
-		assert.Equal(t, 2, int(rightChild.Header.Keys))
-		assert.Equal(t, []int64{5, 6}, rightChild.Keys())
-		assert.Empty(t, rightChild.Children())
-		assert.Equal(t, []uint64{105, 106}, rightChild.RowIDs())
+		assertIndexNode(t, rootNode, true, false, 0, []int64{2, 4}, []uint32{1, 2, 3})
+		assertIndexNode(t, leftChild, false, true, 0, []int64{1}, nil)
+		assertIndexNode(t, middleChild, false, true, 0, []int64{3}, nil)
+		assertIndexNode(t, rightChild, false, true, 0, []int64{5, 6}, nil)
 	})
 
 	t.Run("Insert 2 more keys, another split", func(t *testing.T) {
@@ -182,44 +135,13 @@ func TestUniqueIndex_Insert(t *testing.T) {
 			leaf4    = aPager.pages[4].IndexNode.(*IndexNode[int64])
 		)
 
-		assert.True(t, rootNode.Header.IsRoot)
-		assert.False(t, rootNode.Header.IsLeaf)
-		assert.Equal(t, 3, int(rootNode.Header.Keys))
-		assert.Equal(t, []int64{2, 4, 6}, rootNode.Keys())
-		assert.Equal(t, []uint32{1, 2, 3, 4}, rootNode.Children())
-		assert.Equal(t, []uint64{102, 104, 106}, rootNode.RowIDs())
-
-		assert.False(t, leaf1.Header.IsRoot)
-		assert.True(t, leaf1.Header.IsLeaf)
-		assert.Equal(t, 0, int(leaf1.Header.Parent))
-		assert.Equal(t, 1, int(leaf1.Header.Keys))
-		assert.Equal(t, []int64{1}, leaf1.Keys())
-		assert.Empty(t, leaf1.Children())
-		assert.Equal(t, []uint64{101}, leaf1.RowIDs())
-
-		assert.False(t, leaf2.Header.IsRoot)
-		assert.True(t, leaf2.Header.IsLeaf)
-		assert.Equal(t, 0, int(leaf2.Header.Parent))
-		assert.Equal(t, 1, int(leaf2.Header.Keys))
-		assert.Equal(t, []int64{3}, leaf2.Keys())
-		assert.Empty(t, leaf2.Children())
-		assert.Equal(t, []uint64{103}, leaf2.RowIDs())
-
-		assert.False(t, leaf3.Header.IsRoot)
-		assert.True(t, leaf3.Header.IsLeaf)
-		assert.Equal(t, 0, int(leaf3.Header.Parent))
-		assert.Equal(t, 1, int(leaf3.Header.Keys))
-		assert.Equal(t, []int64{5}, leaf3.Keys())
-		assert.Empty(t, leaf3.Children())
-		assert.Equal(t, []uint64{105}, leaf3.RowIDs())
-
-		assert.False(t, leaf4.Header.IsRoot)
-		assert.True(t, leaf4.Header.IsLeaf)
-		assert.Equal(t, 0, int(leaf4.Header.Parent))
-		assert.Equal(t, 2, int(leaf4.Header.Keys))
-		assert.Equal(t, []int64{7, 8}, leaf4.Keys())
-		assert.Empty(t, leaf4.Children())
-		assert.Equal(t, []uint64{107, 108}, leaf4.RowIDs())
+		// Root node
+		assertIndexNode(t, rootNode, true, false, 0, []int64{2, 4, 6}, []uint32{1, 2, 3, 4})
+		// Leaf nodes
+		assertIndexNode(t, leaf1, false, true, 0, []int64{1}, nil)
+		assertIndexNode(t, leaf2, false, true, 0, []int64{3}, nil)
+		assertIndexNode(t, leaf3, false, true, 0, []int64{5}, nil)
+		assertIndexNode(t, leaf4, false, true, 0, []int64{7, 8}, nil)
 	})
 
 	t.Run("Insert 1 more key, internal split", func(t *testing.T) {
@@ -254,65 +176,15 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		)
 
 		// Root node
-
-		assert.True(t, rootNode.Header.IsRoot)
-		assert.False(t, rootNode.Header.IsLeaf)
-		assert.Equal(t, 1, int(rootNode.Header.Keys))
-		assert.Equal(t, []int64{4}, rootNode.Keys())
-		assert.Equal(t, []uint32{5, 6}, rootNode.Children())
-		assert.Equal(t, []uint64{104}, rootNode.RowIDs())
-
+		assertIndexNode(t, rootNode, true, false, 0, []int64{4}, []uint32{5, 6})
 		// Internal nodes
-
-		assert.False(t, internal1.Header.IsRoot)
-		assert.False(t, internal1.Header.IsLeaf)
-		assert.Equal(t, 0, int(internal1.Header.Parent))
-		assert.Equal(t, 1, int(internal1.Header.Keys))
-		assert.Equal(t, []int64{2}, internal1.Keys())
-		assert.Equal(t, []uint32{1, 2}, internal1.Children())
-		assert.Equal(t, []uint64{102}, internal1.RowIDs())
-
-		assert.False(t, internal2.Header.IsRoot)
-		assert.False(t, internal2.Header.IsLeaf)
-		assert.Equal(t, 0, int(internal2.Header.Parent))
-		assert.Equal(t, 1, int(internal2.Header.Keys))
-		assert.Equal(t, []int64{6}, internal2.Keys())
-		assert.Equal(t, []uint32{3, 4}, internal2.Children())
-		assert.Equal(t, []uint64{106}, internal2.RowIDs())
-
+		assertIndexNode(t, internal1, false, false, 0, []int64{2}, []uint32{1, 2})
+		assertIndexNode(t, internal2, false, false, 0, []int64{6}, []uint32{3, 4})
 		// Leaf nodes
-
-		assert.False(t, leaf1.Header.IsRoot)
-		assert.True(t, leaf1.Header.IsLeaf)
-		assert.Equal(t, 5, int(leaf1.Header.Parent))
-		assert.Equal(t, 1, int(leaf1.Header.Keys))
-		assert.Equal(t, []int64{1}, leaf1.Keys())
-		assert.Empty(t, leaf1.Children())
-		assert.Equal(t, []uint64{101}, leaf1.RowIDs())
-
-		assert.False(t, leaf2.Header.IsRoot)
-		assert.True(t, leaf2.Header.IsLeaf)
-		assert.Equal(t, 5, int(leaf2.Header.Parent))
-		assert.Equal(t, 1, int(leaf2.Header.Keys))
-		assert.Equal(t, []int64{3}, leaf2.Keys())
-		assert.Empty(t, leaf2.Children())
-		assert.Equal(t, []uint64{103}, leaf2.RowIDs())
-
-		assert.False(t, leaf3.Header.IsRoot)
-		assert.True(t, leaf3.Header.IsLeaf)
-		assert.Equal(t, 6, int(leaf3.Header.Parent))
-		assert.Equal(t, 1, int(leaf3.Header.Keys))
-		assert.Equal(t, []int64{5}, leaf3.Keys())
-		assert.Empty(t, leaf3.Children())
-		assert.Equal(t, []uint64{105}, leaf3.RowIDs())
-
-		assert.False(t, leaf4.Header.IsRoot)
-		assert.True(t, leaf4.Header.IsLeaf)
-		assert.Equal(t, 6, int(leaf4.Header.Parent))
-		assert.Equal(t, 3, int(leaf4.Header.Keys))
-		assert.Equal(t, []int64{7, 8, 9}, leaf4.Keys())
-		assert.Empty(t, leaf4.Children())
-		assert.Equal(t, []uint64{107, 108, 109}, leaf4.RowIDs())
+		assertIndexNode(t, leaf1, false, true, 5, []int64{1}, nil)
+		assertIndexNode(t, leaf2, false, true, 5, []int64{3}, nil)
+		assertIndexNode(t, leaf3, false, true, 6, []int64{5}, nil)
+		assertIndexNode(t, leaf4, false, true, 6, []int64{7, 8, 9}, nil)
 	})
 
 	t.Run("Keep inserting more keys", func(t *testing.T) {
@@ -353,97 +225,19 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		)
 
 		// Root node
-
-		assert.True(t, rootNode.Header.IsRoot)
-		assert.False(t, rootNode.Header.IsLeaf)
-		assert.Equal(t, 2, int(rootNode.Header.Keys))
-		assert.Equal(t, []int64{4, 8}, rootNode.Keys())
-		assert.Equal(t, []uint32{5, 6, 9}, rootNode.Children())
-		assert.Equal(t, []uint64{104, 108}, rootNode.RowIDs())
-
+		assertIndexNode(t, rootNode, true, false, 0, []int64{4, 8}, []uint32{5, 6, 9})
 		// Internal nodes
-
-		assert.False(t, internal1.Header.IsRoot)
-		assert.False(t, internal1.Header.IsLeaf)
-		assert.Equal(t, 0, int(internal1.Header.Parent))
-		assert.Equal(t, 1, int(internal1.Header.Keys))
-		assert.Equal(t, []int64{2}, internal1.Keys())
-		assert.Equal(t, []uint32{1, 2}, internal1.Children())
-		assert.Equal(t, []uint64{102}, internal1.RowIDs())
-
-		assert.False(t, internal2.Header.IsRoot)
-		assert.False(t, internal2.Header.IsLeaf)
-		assert.Equal(t, 0, int(internal2.Header.Parent))
-		assert.Equal(t, 1, int(internal2.Header.Keys))
-		assert.Equal(t, []int64{6}, internal2.Keys())
-		assert.Equal(t, []uint32{3, 4}, internal2.Children())
-		assert.Equal(t, []uint64{106}, internal2.RowIDs())
-
-		assert.False(t, internal3.Header.IsRoot)
-		assert.False(t, internal3.Header.IsLeaf)
-		assert.Equal(t, 0, int(internal3.Header.Parent))
-		assert.Equal(t, 2, int(internal3.Header.Keys))
-		assert.Equal(t, []int64{10, 12}, internal3.Keys())
-		assert.Equal(t, []uint32{7, 8, 10}, internal3.Children())
-		assert.Equal(t, []uint64{110, 112}, internal3.RowIDs())
-
+		assertIndexNode(t, internal1, false, false, 0, []int64{2}, []uint32{1, 2})
+		assertIndexNode(t, internal2, false, false, 0, []int64{6}, []uint32{3, 4})
+		assertIndexNode(t, internal3, false, false, 0, []int64{10, 12}, []uint32{7, 8, 10})
 		// Leaf nodes
-
-		assert.False(t, leaf1.Header.IsRoot)
-		assert.True(t, leaf1.Header.IsLeaf)
-		assert.Equal(t, 5, int(leaf1.Header.Parent))
-		assert.Equal(t, 1, int(leaf1.Header.Keys))
-		assert.Equal(t, []int64{1}, leaf1.Keys())
-		assert.Empty(t, leaf1.Children())
-		assert.Equal(t, []uint64{101}, leaf1.RowIDs())
-
-		assert.False(t, leaf2.Header.IsRoot)
-		assert.True(t, leaf2.Header.IsLeaf)
-		assert.Equal(t, 5, int(leaf2.Header.Parent))
-		assert.Equal(t, 1, int(leaf2.Header.Keys))
-		assert.Equal(t, []int64{3}, leaf2.Keys())
-		assert.Empty(t, leaf2.Children())
-		assert.Equal(t, []uint64{103}, leaf2.RowIDs())
-
-		assert.False(t, leaf3.Header.IsRoot)
-		assert.True(t, leaf3.Header.IsLeaf)
-		assert.Equal(t, 6, int(leaf3.Header.Parent))
-		assert.Equal(t, 1, int(leaf3.Header.Keys))
-		assert.Equal(t, []int64{5}, leaf3.Keys())
-		assert.Empty(t, leaf3.Children())
-		assert.Equal(t, []uint64{105}, leaf3.RowIDs())
-
-		assert.False(t, leaf4.Header.IsRoot)
-		assert.True(t, leaf4.Header.IsLeaf)
-		assert.Equal(t, 6, int(leaf4.Header.Parent))
-		assert.Equal(t, 1, int(leaf4.Header.Keys))
-		assert.Equal(t, []int64{7}, leaf4.Keys())
-		assert.Empty(t, leaf4.Children())
-		assert.Equal(t, []uint64{107}, leaf4.RowIDs())
-
-		assert.False(t, leaf5.Header.IsRoot)
-		assert.True(t, leaf5.Header.IsLeaf)
-		assert.Equal(t, 9, int(leaf5.Header.Parent))
-		assert.Equal(t, 1, int(leaf5.Header.Keys))
-		assert.Equal(t, []int64{9}, leaf5.Keys())
-		assert.Empty(t, leaf5.Children())
-		assert.Equal(t, []uint64{109}, leaf5.RowIDs())
-
-		assert.False(t, leaf6.Header.IsRoot)
-		assert.True(t, leaf6.Header.IsLeaf)
-		assert.Equal(t, 9, int(leaf6.Header.Parent))
-		assert.Equal(t, 1, int(leaf6.Header.Keys))
-		assert.Equal(t, []int64{11}, leaf6.Keys())
-		assert.Empty(t, leaf6.Children())
-		assert.Equal(t, []uint64{111}, leaf6.RowIDs())
-
-		assert.False(t, leaf7.Header.IsRoot)
-		assert.True(t, leaf7.Header.IsLeaf)
-		assert.Equal(t, 9, int(leaf7.Header.Parent))
-		assert.Equal(t, 2, int(leaf7.Header.Keys))
-		assert.Equal(t, []int64{13, 14}, leaf7.Keys())
-		assert.Empty(t, leaf7.Children())
-		assert.Equal(t, []uint64{113, 114}, leaf7.RowIDs())
+		assertIndexNode(t, leaf1, false, true, 5, []int64{1}, nil)
+		assertIndexNode(t, leaf2, false, true, 5, []int64{3}, nil)
+		assertIndexNode(t, leaf3, false, true, 6, []int64{5}, nil)
+		assertIndexNode(t, leaf4, false, true, 6, []int64{7}, nil)
+		assertIndexNode(t, leaf5, false, true, 9, []int64{9}, nil)
+		assertIndexNode(t, leaf6, false, true, 9, []int64{11}, nil)
+		assertIndexNode(t, leaf7, false, true, 9, []int64{13, 14}, nil)
 	})
 
 	actualKeys := []int64{}
@@ -522,103 +316,40 @@ func TestUniqueIndex_Insert_OutOfOrder(t *testing.T) {
 	)
 
 	// Root node
-
-	assert.True(t, rootNode.Header.IsRoot)
-	assert.False(t, rootNode.Header.IsLeaf)
-	assert.Equal(t, 2, int(rootNode.Header.Keys))
-	assert.Equal(t, []int64{9, 16}, rootNode.Keys())
-	assert.Equal(t, []uint32{5, 6, 10}, rootNode.Children())
-	assert.Equal(t, []uint64{109, 116}, rootNode.RowIDs())
-
+	assertIndexNode(t, rootNode, true, false, 0, []int64{9, 16}, []uint32{5, 6, 10})
 	// Internal nodes
+	assertIndexNode(t, internal1, false, false, 0, []int64{2, 5}, []uint32{1, 9, 4})
+	assertIndexNode(t, internal2, false, false, 0, []int64{11, 13}, []uint32{2, 7, 11})
+	assertIndexNode(t, internal3, false, false, 0, []int64{19}, []uint32{3, 8})
+	// // Leaf nodes
+	assertIndexNode(t, leaf1, false, true, 5, []int64{1}, nil)
+	assertIndexNode(t, leaf2, false, true, 5, []int64{3, 4}, nil)
+	assertIndexNode(t, leaf3, false, true, 5, []int64{6, 7, 8}, nil)
+	assertIndexNode(t, leaf4, false, true, 6, []int64{10}, nil)
+	assertIndexNode(t, leaf5, false, true, 6, []int64{12}, nil)
+	assertIndexNode(t, leaf6, false, true, 6, []int64{14, 15}, nil)
+	assertIndexNode(t, leaf7, false, true, 10, []int64{17, 18}, nil)
+	assertIndexNode(t, leaf8, false, true, 10, []int64{20, 21}, nil)
+}
 
-	assert.False(t, internal1.Header.IsRoot)
-	assert.False(t, internal1.Header.IsLeaf)
-	assert.Equal(t, 0, int(internal1.Header.Parent))
-	assert.Equal(t, 2, int(internal1.Header.Keys))
-	assert.Equal(t, []int64{2, 5}, internal1.Keys())
-	assert.Equal(t, []uint32{1, 9, 4}, internal1.Children())
-	assert.Equal(t, []uint64{102, 105}, internal1.RowIDs())
-
-	assert.False(t, internal2.Header.IsRoot)
-	assert.False(t, internal2.Header.IsLeaf)
-	assert.Equal(t, 0, int(internal2.Header.Parent))
-	assert.Equal(t, 2, int(internal2.Header.Keys))
-	assert.Equal(t, []int64{11, 13}, internal2.Keys())
-	assert.Equal(t, []uint32{2, 7, 11}, internal2.Children())
-	assert.Equal(t, []uint64{111, 113}, internal2.RowIDs())
-
-	assert.False(t, internal3.Header.IsRoot)
-	assert.False(t, internal3.Header.IsLeaf)
-	assert.Equal(t, 0, int(internal3.Header.Parent))
-	assert.Equal(t, 1, int(internal3.Header.Keys))
-	assert.Equal(t, []int64{19}, internal3.Keys())
-	assert.Equal(t, []uint32{3, 8}, internal3.Children())
-	assert.Equal(t, []uint64{119}, internal3.RowIDs())
-
-	// Leaf nodes
-
-	assert.False(t, leaf1.Header.IsRoot)
-	assert.True(t, leaf1.Header.IsLeaf)
-	assert.Equal(t, 5, int(leaf1.Header.Parent))
-	assert.Equal(t, 1, int(leaf1.Header.Keys))
-	assert.Equal(t, []int64{1}, leaf1.Keys())
-	assert.Empty(t, leaf1.Children())
-	assert.Equal(t, []uint64{101}, leaf1.RowIDs())
-
-	assert.False(t, leaf2.Header.IsRoot)
-	assert.True(t, leaf2.Header.IsLeaf)
-	assert.Equal(t, 5, int(leaf2.Header.Parent))
-	assert.Equal(t, 2, int(leaf2.Header.Keys))
-	assert.Equal(t, []int64{3, 4}, leaf2.Keys())
-	assert.Empty(t, leaf2.Children())
-	assert.Equal(t, []uint64{103, 104}, leaf2.RowIDs())
-
-	assert.False(t, leaf3.Header.IsRoot)
-	assert.True(t, leaf3.Header.IsLeaf)
-	assert.Equal(t, 5, int(leaf3.Header.Parent))
-	assert.Equal(t, 3, int(leaf3.Header.Keys))
-	assert.Equal(t, []int64{6, 7, 8}, leaf3.Keys())
-	assert.Empty(t, leaf3.Children())
-	assert.Equal(t, []uint64{106, 107, 108}, leaf3.RowIDs())
-
-	assert.False(t, leaf4.Header.IsRoot)
-	assert.True(t, leaf4.Header.IsLeaf)
-	assert.Equal(t, 6, int(leaf4.Header.Parent))
-	assert.Equal(t, 1, int(leaf4.Header.Keys))
-	assert.Equal(t, []int64{10}, leaf4.Keys())
-	assert.Empty(t, leaf4.Children())
-	assert.Equal(t, []uint64{110}, leaf4.RowIDs())
-
-	assert.False(t, leaf5.Header.IsRoot)
-	assert.True(t, leaf5.Header.IsLeaf)
-	assert.Equal(t, 6, int(leaf5.Header.Parent))
-	assert.Equal(t, 1, int(leaf5.Header.Keys))
-	assert.Equal(t, []int64{12}, leaf5.Keys())
-	assert.Empty(t, leaf5.Children())
-	assert.Equal(t, []uint64{112}, leaf5.RowIDs())
-
-	assert.False(t, leaf6.Header.IsRoot)
-	assert.True(t, leaf6.Header.IsLeaf)
-	assert.Equal(t, 6, int(leaf6.Header.Parent))
-	assert.Equal(t, 2, int(leaf6.Header.Keys))
-	assert.Equal(t, []int64{14, 15}, leaf6.Keys())
-	assert.Empty(t, leaf6.Children())
-	assert.Equal(t, []uint64{114, 115}, leaf6.RowIDs())
-
-	assert.False(t, leaf7.Header.IsRoot)
-	assert.True(t, leaf7.Header.IsLeaf)
-	assert.Equal(t, 10, int(leaf7.Header.Parent))
-	assert.Equal(t, 2, int(leaf7.Header.Keys))
-	assert.Equal(t, []int64{17, 18}, leaf7.Keys())
-	assert.Empty(t, leaf7.Children())
-	assert.Equal(t, []uint64{117, 118}, leaf7.RowIDs())
-
-	assert.False(t, leaf8.Header.IsRoot)
-	assert.True(t, leaf8.Header.IsLeaf)
-	assert.Equal(t, 10, int(leaf8.Header.Parent))
-	assert.Equal(t, 2, int(leaf8.Header.Keys))
-	assert.Equal(t, []int64{20, 21}, leaf8.Keys())
-	assert.Empty(t, leaf8.Children())
-	assert.Equal(t, []uint64{120, 121}, leaf8.RowIDs())
+func assertIndexNode(t *testing.T, aNode *IndexNode[int64], isRoot, isLeaf bool, parent uint32, keys []int64, children []uint32) {
+	if isRoot {
+		assert.True(t, aNode.Header.IsRoot, "should be a root node")
+	} else {
+		assert.False(t, aNode.Header.IsRoot, "should not be a root node")
+	}
+	if isLeaf {
+		assert.True(t, aNode.Header.IsLeaf, "should be a leaf node")
+	} else {
+		assert.False(t, aNode.Header.IsLeaf, "should not be a leaf node")
+	}
+	assert.Equal(t, parent, aNode.Header.Parent, "parent index mismatch")
+	assert.Equal(t, len(keys), int(aNode.Header.Keys), "number of keys mismatch")
+	assert.Equal(t, keys, aNode.Keys(), "keys mismatch")
+	assert.Equal(t, children, aNode.Children(), "children mismatch")
+	expectedRowIDs := make([]uint64, len(keys))
+	for i := range keys {
+		expectedRowIDs[i] = uint64(keys[i] + 100)
+	}
+	assert.Equal(t, expectedRowIDs, aNode.RowIDs(), "row IDs mismatch")
 }

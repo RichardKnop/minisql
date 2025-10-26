@@ -284,6 +284,9 @@ func (n *IndexNode[T]) SetChild(idx, childPage uint32) error {
 }
 
 func (n *IndexNode[T]) Keys() []T {
+	if n.Header.Keys == 0 {
+		return nil
+	}
 	keys := make([]T, 0, n.Header.Keys)
 	for i := range n.Header.Keys {
 		keys = append(keys, n.Cells[i].Key)
@@ -390,4 +393,8 @@ func (n *IndexNode[T]) AppendCells(cells ...IndexCell[T]) {
 		n.Cells[n.Header.Keys] = aCell
 		n.Header.Keys += 1
 	}
+}
+
+func (n *IndexNode[T]) setParent(parentIdx uint32) {
+	n.Header.Parent = parentIdx
 }
