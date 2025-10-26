@@ -168,20 +168,12 @@ type IndexNode[T int8 | int32 | int64 | float32 | float64 | string] struct {
 	KeySize uint64
 }
 
-// func NewIndexCell[T bool | int32 | int64 | float32 | float64 | string](key T, rowID uint64, child uint32) IndexCell[T] {
-// 	return IndexCell[T]{
-// 		Key:   key,
-// 		RowID: rowID,
-// 		Child: child,
-// 	}
-// }
-
 const MinimumIndexCells = 4
 
 func maxIndexKeys(keySize uint64) uint32 {
-	// index header = 13
+	// index header = 14
 	// each cell = keySize + 8 + 4
-	return uint32((PageSize - 13) / (keySize + 8 + 4))
+	return uint32((PageSize - 14) / (keySize + 8 + 4))
 }
 
 // Use int8 for bool so we can use comparison operators
@@ -292,6 +284,9 @@ func (n *IndexNode[T]) SetChild(idx, childPage uint32) error {
 }
 
 func (n *IndexNode[T]) Keys() []T {
+	if n.Header.Keys == 0 {
+		return nil
+	}
 	keys := make([]T, 0, n.Header.Keys)
 	for i := range n.Header.Keys {
 		keys = append(keys, n.Cells[i].Key)
@@ -319,4 +314,87 @@ func (n *IndexNode[T]) Children() []uint32 {
 		children = append(children, n.Header.RightChild)
 	}
 	return children
+}
+
+func (n *IndexNode[T]) DeleteKeyByIndex(idx uint32) {
+	if n.Header.Keys == 0 {
+		return
+	}
+
+	if idx == n.Header.Keys {
+		idx -= 1
+	}
+
+	if idx == n.Header.Keys-1 {
+		n.Header.RightChild = n.Cells[idx].Child
+	} else {
+		n.Cells[idx+1].Child = n.Cells[idx].Child
+		for i := int(idx); i < int(n.Header.Keys-1); i++ {
+			n.Cells[i] = n.Cells[i+1]
+		}
+	}
+
+	n.Cells[int(n.Header.Keys)-1] = IndexCell[T]{}
+	n.Header.Keys -= 1
+}
+
+func (n *IndexNode[T]) AtLeastHalfFull(maxCells int) bool {
+	return int(n.Header.Keys) >= (maxCells+1)/2
+}
+
+func (n *IndexNode[T]) MoreThanHalfFull(maxCells int) bool {
+	return int(n.Header.Keys) > (maxCells+1)/2
+}
+
+func (n *IndexNode[T]) GetRightChildByIndex(idx uint32) uint32 {
+	if idx == n.Header.Keys-1 {
+		return n.Header.RightChild
+	}
+
+	return n.Cells[idx+1].Child
+}
+
+func (n *IndexNode[T]) FirstCell() IndexCell[T] {
+	return n.Cells[0]
+}
+
+func (n *IndexNode[T]) LastCell() IndexCell[T] {
+	return n.Cells[n.Header.Keys-1]
+}
+
+func (n *IndexNode[T]) RemoveFirstCell() {
+	for i := 0; i < int(n.Header.Keys)-1; i++ {
+		n.Cells[i] = n.Cells[i+1]
+	}
+	n.Cells[n.Header.Keys-1] = IndexCell[T]{}
+	n.Header.Keys -= 1
+}
+
+func (n *IndexNode[T]) RemoveLastCell() {
+	idx := n.Header.Keys - 1
+	n.Header.RightChild = n.Cells[idx].Child
+	n.Cells[idx] = IndexCell[T]{}
+	n.Header.Keys -= 1
+}
+
+func (n *IndexNode[T]) PrependCell(aCell IndexCell[T]) {
+	if n.Header.Keys == 1 {
+
+	}
+	for i := int(n.Header.Keys) - 1; i >= 0; i-- {
+		n.Cells[i+1] = n.Cells[i]
+	}
+	n.Cells[0] = aCell
+	n.Header.Keys += 1
+}
+
+func (n *IndexNode[T]) AppendCells(cells ...IndexCell[T]) {
+	for _, aCell := range cells {
+		n.Cells[n.Header.Keys] = aCell
+		n.Header.Keys += 1
+	}
+}
+
+func (n *IndexNode[T]) setParent(parentIdx uint32) {
+	n.Header.Parent = parentIdx
 }
