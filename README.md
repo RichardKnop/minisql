@@ -137,21 +137,13 @@ minisql_schema
 users
 ```
 
-Insert a row:
+Insert rows:
 
 ```sh
 minisql> insert into users(id, name, email, age) values(1, 'John Doe', 'john@example.com', 35),
 (2, 'Jane Doe', 'jane@example.com', 32),
 (3, 'Jack Doe', 'jack@example.com', 27);
 Rows affected: 1
-minisql>
-```
-
-Insert multiple rows:
-
-```sh
-minisql> insert into users(id, name, email, age) values(2, 'Jane Doe', 'jane@example.com', 32), (3, 'Jack Doe', 'jack@example.com', 27);
-Rows affected: 2
 minisql>
 ```
 

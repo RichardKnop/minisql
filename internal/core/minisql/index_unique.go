@@ -565,7 +565,7 @@ func (ui *UniqueIndex[T]) fill(ctx context.Context, aParent, aPage *Page, idx in
 	return ui.pager.AddFreePage(ctx, aPage.Index)
 }
 
-// A function to borrow a key from C[idx-1] and insert it into C[idx]
+// A function to borrow a key from left sibling
 func (ui *UniqueIndex[T]) borrowFromLeft(aParent, aPage, left *Page, idx uint32) error {
 	var (
 		parentNode = aParent.IndexNode.(*IndexNode[T])
@@ -595,7 +595,7 @@ func (ui *UniqueIndex[T]) borrowFromLeft(aParent, aPage, left *Page, idx uint32)
 	return nil
 }
 
-// A function to borrow a key from C[idx+1] and place it in C[idx]
+// A function to borrow a key from right sibling
 func (ui *UniqueIndex[T]) borrowFromRight(aParent, aPage, right *Page, idx uint32) error {
 	var (
 		parentNode = aParent.IndexNode.(*IndexNode[T])
