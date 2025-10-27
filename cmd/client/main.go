@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -18,12 +19,22 @@ const (
 	cliName string = "minisql"
 )
 
+var (
+	addressFlag string
+)
+
+func init() {
+	flag.StringVar(&addressFlag, "a", ":8080", "Address to dial")
+}
+
 func printPrompt() {
 	fmt.Print(cliName, "> ")
 }
 
 func main() {
-	conn, err := net.Dial("tcp", ":8080")
+	flag.Parse()
+
+	conn, err := net.Dial("tcp", addressFlag)
 	if err != nil {
 		log.Fatal(err)
 	}

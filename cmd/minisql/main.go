@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -24,6 +25,16 @@ import (
 
 const defaultDbFileName = "db"
 
+var (
+	dbNameFlag string
+	portFlag   int
+)
+
+func init() {
+	flag.StringVar(&dbNameFlag, "db", defaultDbFileName, "Filename of the database to use")
+	flag.IntVar(&portFlag, "port", 8080, "Port to listen on")
+}
+
 type Server struct {
 	listener net.Listener
 	database *minisql.Database
@@ -33,6 +44,8 @@ type Server struct {
 }
 
 func main() {
+	flag.Parse()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -55,7 +68,7 @@ func main() {
 	}
 	defer logger.Sync() // flushes buffer, if any
 
-	dbFile, err := os.OpenFile(defaultDbFileName, os.O_RDWR|os.O_CREATE, 0600)
+	dbFile, err := os.OpenFile(dbNameFlag, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
 		panic(err)
 	}
@@ -79,12 +92,12 @@ func main() {
 		logger:   logger,
 	}
 
-	listener, err := net.Listen("tcp", ":8080")
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", portFlag))
 	if err != nil {
 		panic(err)
 	}
 	defer listener.Close()
-	logger.Info("Listening on port 8080")
+	logger.Info("Listening on port", zap.Int("port", portFlag))
 
 	aServer.listener = listener
 	aServer.wg.Add(1)
