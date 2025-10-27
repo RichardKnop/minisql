@@ -48,12 +48,12 @@ func TestTable_Update(t *testing.T) {
 				{
 					{
 						Operand1: Operand{
-							Type:  Field,
+							Type:  OperandField,
 							Value: "email",
 						},
 						Operator: Eq,
 						Operand2: Operand{
-							Type:  QuotedString,
+							Type:  OperandQuotedString,
 							Value: "bogus",
 						},
 					},
@@ -74,7 +74,7 @@ func TestTable_Update(t *testing.T) {
 			Updates: map[string]OptionalValue{
 				"email": {Value: "updatedsingle@foo.bar", Valid: true},
 			},
-			Conditions: FieldIsIn("id", Integer, rows[5].Values[0].Value.(int64)),
+			Conditions: FieldIsInAny("id", OperandInteger, rows[5].Values[0].Value.(int64)),
 		}
 
 		aResult, err := aTable.Update(ctx, stmt)
@@ -101,7 +101,7 @@ func TestTable_Update(t *testing.T) {
 			Updates: map[string]OptionalValue{
 				"email": {Valid: false},
 			},
-			Conditions: FieldIsIn("id", Integer, rows[18].Values[0].Value.(int64)),
+			Conditions: FieldIsInAny("id", OperandInteger, rows[18].Values[0].Value.(int64)),
 		}
 
 		aResult, err := aTable.Update(ctx, stmt)

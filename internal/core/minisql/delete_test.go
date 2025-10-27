@@ -50,7 +50,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	t.Run("Delete rows with NULL values when no rows match", func(t *testing.T) {
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			Conditions: FieldIsNull("id"),
+			Conditions: NewOneOrMore(Conditions{FieldIsNull("id")}),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 0, deleteResult.RowsAffected)
@@ -63,7 +63,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		require.True(t, ok)
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			Conditions: FieldIsIn("id", Integer, id.Value.(int64)),
+			Conditions: FieldIsInAny("id", OperandInteger, id.Value.(int64)),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 1, deleteResult.RowsAffected)
@@ -74,7 +74,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	t.Run("Delete rows with NULL values", func(t *testing.T) {
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			Conditions: FieldIsNull("age"),
+			Conditions: NewOneOrMore(Conditions{FieldIsNull("age")}),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 1, deleteResult.RowsAffected)
@@ -85,7 +85,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	t.Run("Delete rows with NOT NULL values", func(t *testing.T) {
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			Conditions: FieldIsNotNull("test_double"),
+			Conditions: NewOneOrMore(Conditions{FieldIsNotNull("test_double")}),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 1, deleteResult.RowsAffected)
@@ -167,7 +167,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[0])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			Conditions: FieldIsIn("id", Integer, ids...),
+			Conditions: FieldIsInAny("id", OperandInteger, ids...),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 1, deleteResult.RowsAffected)
@@ -209,7 +209,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[17], rows[18], rows[19])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			Conditions: FieldIsIn("id", Integer, ids...),
+			Conditions: FieldIsInAny("id", OperandInteger, ids...),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 3, deleteResult.RowsAffected)
@@ -249,7 +249,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[2], rows[4], rows[6])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			Conditions: FieldIsIn("id", Integer, ids...),
+			Conditions: FieldIsInAny("id", OperandInteger, ids...),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 3, deleteResult.RowsAffected)
@@ -292,7 +292,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[9], rows[11], rows[13], rows[15])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			Conditions: FieldIsIn("id", Integer, ids...),
+			Conditions: FieldIsInAny("id", OperandInteger, ids...),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 4, deleteResult.RowsAffected)
@@ -328,7 +328,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[3], rows[12], rows[5])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			Conditions: FieldIsIn("id", Integer, ids...),
+			Conditions: FieldIsInAny("id", OperandInteger, ids...),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 3, deleteResult.RowsAffected)
@@ -368,7 +368,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[14])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			Conditions: FieldIsIn("id", Integer, ids...),
+			Conditions: FieldIsInAny("id", OperandInteger, ids...),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 1, deleteResult.RowsAffected)
@@ -404,7 +404,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[1], rows[7], rows[8], rows[10], rows[16])
 		deleteResult, err := aTable.Delete(ctx, Statement{
 			Kind:       Delete,
-			Conditions: FieldIsIn("id", Integer, ids...),
+			Conditions: FieldIsInAny("id", OperandInteger, ids...),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 5, deleteResult.RowsAffected)

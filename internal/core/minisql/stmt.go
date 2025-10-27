@@ -46,11 +46,12 @@ func (o Operator) String() string {
 type OperandType int
 
 const (
-	Field OperandType = iota + 1
-	Null
-	QuotedString
-	Integer
-	Float
+	OperandField OperandType = iota + 1
+	OperandNull
+	OperandQuotedString
+	OperandBoolean
+	OperandInteger
+	OperandFloat
 )
 
 type Operand struct {
@@ -60,7 +61,7 @@ type Operand struct {
 
 // IsField determines whether the operand is a literal or a field name
 func (o Operand) IsField() bool {
-	return o.Type == Field
+	return o.Type == OperandField
 }
 
 type Condition struct {
@@ -78,6 +79,10 @@ type Conditions []Condition
 // group joined by OR boolean operator. Every singular condition in each group
 // is joined by AND with other conditions in the same slice.
 type OneOrMore []Conditions
+
+func NewOneOrMore(conditionGroups ...Conditions) OneOrMore {
+	return OneOrMore(conditionGroups)
+}
 
 // IsValidCondition checks that all fields of the condition are set
 func IsValidCondition(c Condition) bool {
@@ -123,76 +128,96 @@ func (o OneOrMore) UpdateLast(aCondition Condition) {
 	o[len(o)-1][len(o[len(o)-1])-1] = aCondition
 }
 
-func FieldIsIn(fieldName string, operandType OperandType, values ...any) OneOrMore {
-	oneOrMore := make(OneOrMore, 0, len(values))
-	for _, v := range values {
-		oneOrMore = append(oneOrMore, Conditions{
-			{
-				Operand1: Operand{
-					Type:  Field,
-					Value: fieldName,
-				},
-				Operator: Eq,
-				Operand2: Operand{
-					Type:  operandType,
-					Value: v,
-				},
-			},
-		})
-	}
-	return oneOrMore
-}
-
-func FieldIsNotIn(fieldName string, operandType OperandType, values ...any) OneOrMore {
-	oneOrMore := make(OneOrMore, 0, len(values))
-	for _, v := range values {
-		oneOrMore = append(oneOrMore, Conditions{
-			{
-				Operand1: Operand{
-					Type:  Field,
-					Value: fieldName,
-				},
-				Operator: Ne,
-				Operand2: Operand{
-					Type:  operandType,
-					Value: v,
-				},
-			},
-		})
-	}
-	return oneOrMore
-}
-
-func FieldIsNull(fieldName string) OneOrMore {
-	return OneOrMore{
-		{
-			{
-				Operand1: Operand{
-					Type:  Field,
-					Value: fieldName,
-				},
-				Operator: Eq,
-				Operand2: Operand{
-					Type: Null,
-				},
-			},
+func FieldIsIn(fieldName string, operandType OperandType, value any) Condition {
+	return Condition{
+		Operand1: Operand{
+			Type:  OperandField,
+			Value: fieldName,
+		},
+		Operator: Eq,
+		Operand2: Operand{
+			Type:  operandType,
+			Value: value,
 		},
 	}
 }
 
-func FieldIsNotNull(fieldName string) OneOrMore {
-	return OneOrMore{
-		{
+func FieldIsInAny(fieldName string, operandType OperandType, values ...any) OneOrMore {
+	conditions := make(OneOrMore, 0, len(values))
+	for _, v := range values {
+		conditions = append(conditions, Conditions{
 			{
 				Operand1: Operand{
-					Type:  Field,
+					Type:  OperandField,
+					Value: fieldName,
+				},
+				Operator: Eq,
+				Operand2: Operand{
+					Type:  operandType,
+					Value: v,
+				},
+			},
+		})
+	}
+	return conditions
+}
+
+func FieldIsNotIn(fieldName string, operandType OperandType, value any) Condition {
+	return Condition{
+		Operand1: Operand{
+			Type:  OperandField,
+			Value: fieldName,
+		},
+		Operator: Ne,
+		Operand2: Operand{
+			Type:  operandType,
+			Value: value,
+		},
+	}
+}
+
+func FieldIsNotInAny(fieldName string, operandType OperandType, values ...any) OneOrMore {
+	conditions := make(OneOrMore, 0, len(values))
+	for _, v := range values {
+		conditions = append(conditions, Conditions{
+			{
+				Operand1: Operand{
+					Type:  OperandField,
 					Value: fieldName,
 				},
 				Operator: Ne,
 				Operand2: Operand{
-					Type: Null,
+					Type:  operandType,
+					Value: v,
 				},
 			},
+		})
+	}
+	return conditions
+}
+
+func FieldIsNull(fieldName string) Condition {
+	return Condition{
+		Operand1: Operand{
+			Type:  OperandField,
+			Value: fieldName,
+		},
+		Operator: Eq,
+		Operand2: Operand{
+			Type: OperandNull,
+		},
+	}
+}
+
+func FieldIsNotNull(fieldName string) Condition {
+	return Condition{
+		Operand1: Operand{
+			Type:  OperandField,
+			Value: fieldName,
+		},
+		Operator: Ne,
+		Operand2: Operand{
+			Type: OperandNull,
 		},
 	}
 }
@@ -239,10 +264,12 @@ func (k ColumnKind) String() string {
 }
 
 type Column struct {
-	Kind     ColumnKind
-	Size     uint32
-	Nullable bool
-	Name     string
+	Kind          ColumnKind
+	Size          uint32
+	PrimaryKey    bool
+	Autoincrement bool
+	Nullable      bool
+	Name          string
 }
 
 type Statement struct {
@@ -262,7 +289,6 @@ func (s Statement) ReadOnly() bool {
 }
 
 func (s Statement) Validate(aTable *Table) error {
-
 	switch s.Kind {
 	case CreateTable:
 		if len(s.TableName) == 0 {
@@ -277,15 +303,20 @@ func (s Statement) Validate(aTable *Table) error {
 			return fmt.Errorf("maximum number of columns is %d", MaxColumns)
 		}
 
-		rowSize := 0
-		for _, aColumn := range s.Columns {
-			rowSize += int(aColumn.Size)
-		}
-		// Page size minus base + internal/leaf header, minus key and null bitmask
-		maximumRowSize := int(PageSize) - 6 - 8 - 8 - 8
+		remainingPageSpace := remainingPageSpace(s.Columns)
 
-		if rowSize > maximumRowSize {
-			return fmt.Errorf("row size %d exceeds maximum allowed %d", rowSize, maximumRowSize)
+		if remainingPageSpace < 0 {
+			return fmt.Errorf("row size %d exceeds maximum allowed %d", UsablePageSize-remainingPageSpace, UsablePageSize)
+		}
+
+		primaryKeyCount := 0
+		for _, aColumn := range s.Columns {
+			if aColumn.PrimaryKey {
+				primaryKeyCount += 1
+			}
+		}
+		if primaryKeyCount > 1 {
+			return fmt.Errorf("only one primary key column is supported")
 		}
 
 		return nil

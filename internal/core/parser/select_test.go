@@ -132,34 +132,34 @@ func TestParse_Select(t *testing.T) {
 						{
 							{
 								Operand1: minisql.Operand{
-									Type:  minisql.Field,
+									Type:  minisql.OperandField,
 									Value: "a",
 								},
 								Operator: minisql.Ne,
 								Operand2: minisql.Operand{
-									Type:  minisql.QuotedString,
+									Type:  minisql.OperandQuotedString,
 									Value: "1",
 								},
 							},
 							{
 								Operand1: minisql.Operand{
-									Type:  minisql.Field,
+									Type:  minisql.OperandField,
 									Value: "b",
 								},
 								Operator: minisql.Eq,
 								Operand2: minisql.Operand{
-									Type:  minisql.Integer,
+									Type:  minisql.OperandInteger,
 									Value: int64(2),
 								},
 							},
 							{
 								Operand1: minisql.Operand{
-									Type:  minisql.Field,
+									Type:  minisql.OperandField,
 									Value: "c",
 								},
 								Operator: minisql.Eq,
 								Operand2: minisql.Operand{
-									Type:  minisql.QuotedString,
+									Type:  minisql.OperandQuotedString,
 									Value: "3",
 								},
 							},

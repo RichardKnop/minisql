@@ -62,6 +62,7 @@ func TestDatabase_CreateTable(t *testing.T) {
 	assert.Equal(t, testColumns, aDatabase.tables[testTableName].Columns)
 	assert.Equal(t, uint32(3), aDatabase.tables[testTableName].RootPageIdx)
 	assert.Equal(t, uint32(0), aDatabase.tables[SchemaTableName].RootPageIdx)
+	assert.ElementsMatch(t, []string{SchemaTableName, testTableName}, aDatabase.ListTableNames(ctx))
 
 	mock.AssertExpectationsForObjects(t, mockParser)
 }
@@ -101,7 +102,7 @@ func TestDatabase_DropTable(t *testing.T) {
 	assert.Equal(t, testDbName, aDatabase.Name)
 	assert.Equal(t, SchemaTableName, aDatabase.tables[SchemaTableName].Name)
 	assert.Equal(t, uint32(0), aDatabase.tables[SchemaTableName].RootPageIdx)
-	assert.Contains(t, aDatabase.ListTableNames(ctx), SchemaTableName)
+	assert.Equal(t, []string{SchemaTableName}, aDatabase.ListTableNames(ctx))
 
 	mock.AssertExpectationsForObjects(t, mockParser)
 }

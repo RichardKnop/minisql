@@ -70,12 +70,12 @@ func TestTable_Select(t *testing.T) {
 				{
 					{
 						Operand1: Operand{
-							Type:  Field,
+							Type:  OperandField,
 							Value: "email",
 						},
 						Operator: Eq,
 						Operand2: Operand{
-							Type:  QuotedString,
+							Type:  OperandQuotedString,
 							Value: "bogus",
 						},
 					},
@@ -104,12 +104,12 @@ func TestTable_Select(t *testing.T) {
 				{
 					{
 						Operand1: Operand{
-							Type:  Field,
+							Type:  OperandField,
 							Value: "id",
 						},
 						Operator: Eq,
 						Operand2: Operand{
-							Type:  Integer,
+							Type:  OperandInteger,
 							Value: rows[5].Values[0].Value.(int64),
 						},
 					},
@@ -135,7 +135,7 @@ func TestTable_Select(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
 			Fields:     columnNames(testColumns...),
-			Conditions: FieldIsNull("id"),
+			Conditions: OneOrMore{{FieldIsNull("id")}},
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)
@@ -155,7 +155,7 @@ func TestTable_Select(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
 			Fields:     columnNames(testColumns...),
-			Conditions: FieldIsNull("age"),
+			Conditions: OneOrMore{{FieldIsNull("age")}},
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)
@@ -177,7 +177,7 @@ func TestTable_Select(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
 			Fields:     columnNames(testColumns...),
-			Conditions: FieldIsNotNull("age"),
+			Conditions: OneOrMore{{FieldIsNotNull("age")}},
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)

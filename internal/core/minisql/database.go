@@ -15,7 +15,7 @@ var (
 )
 
 var (
-	maximumSchemaSQL = PageSize - 6 - 8 - 8 - 8 - (4 + 255 + 4) - RootPageConfigSize
+	maximumSchemaSQL = UsablePageSize - (4 + 255 + 4) - RootPageConfigSize
 	mainTableColumns = []Column{
 		{
 			Kind:     Int4,
@@ -63,14 +63,16 @@ type Parser interface {
 }
 
 type Database struct {
-	Name       string
-	parser     Parser
-	factory    PagerFactory
-	flusher    PageFlusher
-	tables     map[string]*Table
-	dbLock     *sync.RWMutex
-	tableLocks sync.Map
-	logger     *zap.Logger
+	Name    string
+	parser  Parser
+	factory PagerFactory
+	flusher PageFlusher
+	tables  map[string]*Table
+	// TODO - populate
+	primaryKeys map[string]any
+	dbLock      *sync.RWMutex
+	tableLocks  sync.Map
+	logger      *zap.Logger
 }
 
 // NewDatabase creates a new database
@@ -162,7 +164,12 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser P
 			"root_page",
 			"sql",
 		},
-		Conditions: FieldIsNotIn("name", QuotedString, mainTable.Name), // skip self
+		Conditions: OneOrMore{
+			{
+				FieldIsIn("type", OperandInteger, int64(SchemaTable)),
+				FieldIsNotIn("name", OperandQuotedString, mainTable.Name), // skip main table itself
+			},
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -319,7 +326,12 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 		Updates: map[string]OptionalValue{
 			"root_page": {Value: int32(createdTable.RootPageIdx), Valid: true},
 		},
-		Conditions: FieldIsIn("name", QuotedString, name),
+		Conditions: OneOrMore{
+			{
+				FieldIsIn("type", OperandInteger, int64(SchemaTable)),
+				FieldIsIn("name", OperandQuotedString, name),
+			},
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -341,8 +353,13 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 
 	mainTable := d.tables[SchemaTableName]
 	_, err := mainTable.Delete(ctx, Statement{
-		Kind:       Delete,
-		Conditions: FieldIsIn("name", QuotedString, tableToDelete.Name),
+		Kind: Delete,
+		Conditions: OneOrMore{
+			{
+				FieldIsIn("type", OperandInteger, int64(SchemaTable)),
+				FieldIsIn("name", OperandQuotedString, tableToDelete.Name),
+			},
+		},
 	})
 	if err != nil {
 		return err

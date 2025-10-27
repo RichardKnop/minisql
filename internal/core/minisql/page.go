@@ -20,9 +20,12 @@ func (p *Page) setParent(parentIdx uint32) {
 	}
 }
 
-func MaximumColumnSize(columns []Column) int {
-	// Page size minus base + internal/leaf header, minus key and null bitmask
-	remaining := int(PageSize) - 6 - 8 - 8 - 8
+// UsablePageSize returns the usable size of a page after accounting for headers
+// Page size minus base + internal/leaf header, minus key and null bitmask
+const UsablePageSize = PageSize - 6 - 8 - 8 - 8
+
+func remainingPageSpace(columns []Column) int {
+	remaining := UsablePageSize
 	for _, aColumn := range columns {
 		remaining -= int(aColumn.Size)
 	}
