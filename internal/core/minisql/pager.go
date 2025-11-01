@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 )
 
 type DBFile interface {
@@ -23,6 +24,8 @@ type pagerImpl struct {
 
 	file     DBFile
 	fileSize int64
+
+	mu sync.RWMutex
 }
 
 // New opens the database file and tries to read the root page
@@ -114,58 +117,22 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx uint32, unmarshaler Pag
 	return p.pages[pageIdx], nil
 }
 
-func (p *pagerImpl) GetFreePage(ctx context.Context, unmarshaler PageUnmarshaler) (*Page, error) {
-	// Check if there are any free pages
-	if p.dbHeader.FirstFreePage == 0 {
-		// No free pages, allocate new one
-		return p.GetPage(ctx, p.TotalPages(), unmarshaler)
-	}
-
-	// Get the first free page
-	freePage, err := p.GetPage(ctx, p.dbHeader.FirstFreePage, unmarshaler)
-	if err != nil {
-		return nil, fmt.Errorf("get free page: %w", err)
-	}
-
-	// Update header to point to next free page
-	p.dbHeader.FirstFreePage = freePage.FreePage.NextFreePage
-	p.dbHeader.FreePageCount--
-
-	// Clear the page for reuse
-	freePage.FreePage = nil
-	freePage.LeafNode = nil
-	freePage.InternalNode = nil
-	freePage.IndexNode = nil
-
-	return freePage, nil
+func (p *pagerImpl) GetHeader(ctx context.Context) DatabaseHeader {
+	return p.dbHeader
 }
 
-func (p *pagerImpl) AddFreePage(ctx context.Context, pageIdx uint32, unmarshaler PageUnmarshaler) error {
-	if pageIdx == 0 {
-		return fmt.Errorf("cannot free page 0 (header page)")
-	}
+func (p *pagerImpl) SaveHeader(ctx context.Context, header DatabaseHeader) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-	// Get the page to mark as free
-	freePage, err := p.GetPage(ctx, pageIdx, unmarshaler)
-	if err != nil {
-		return fmt.Errorf("add free page: %w", err)
-	}
+	p.dbHeader = header
+}
 
-	// Initialize as free page
-	freePage.FreePage = &FreePage{
-		NextFreePage: p.dbHeader.FirstFreePage,
-	}
+func (p *pagerImpl) SavePage(ctx context.Context, pageIdx uint32, page *Page) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-	// Clear other node types
-	freePage.LeafNode = nil
-	freePage.InternalNode = nil
-	freePage.IndexNode = nil
-
-	// Update header
-	p.dbHeader.FirstFreePage = pageIdx
-	p.dbHeader.FreePageCount++
-
-	return nil
+	p.pages[pageIdx] = page
 }
 
 func (p *pagerImpl) Flush(ctx context.Context, pageIdx uint32) error {
@@ -203,7 +170,7 @@ func marshalPage(aPage *Page, buf []byte) ([]byte, error) {
 	if aPage.FreePage != nil {
 		data, err := aPage.FreePage.Marshal()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error flushing page %d: %w", aPage.Index, err)
 		}
 		copy(buf, data)
 		return buf[:len(data)], nil
@@ -214,7 +181,7 @@ func marshalPage(aPage *Page, buf []byte) ([]byte, error) {
 		}
 		data, err := marshaler(buf)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error flushing page %d: %w", aPage.Index, err)
 		}
 		return data, nil
 	} else if aPage.InternalNode != nil {
@@ -224,26 +191,15 @@ func marshalPage(aPage *Page, buf []byte) ([]byte, error) {
 		}
 		data, err := marshaler(buf)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error flushing page %d: %w", aPage.Index, err)
 		}
 		return data, nil
 	} else if aPage.IndexNode != nil {
-		switch node := aPage.IndexNode.(type) {
-		case *IndexNode[int8]:
-			return node.Marshal(buf)
-		case *IndexNode[int32]:
-			return node.Marshal(buf)
-		case *IndexNode[int64]:
-			return node.Marshal(buf)
-		case *IndexNode[float32]:
-			return node.Marshal(buf)
-		case *IndexNode[float64]:
-			return node.Marshal(buf)
-		case *IndexNode[string]:
-			return node.Marshal(buf)
-		default:
-			return nil, fmt.Errorf("error flushing, unknown index node type for page %d", aPage.Index)
+		data, err := marshalIndexNode(aPage, buf)
+		if err != nil {
+			return nil, fmt.Errorf("error flushing page %d: %w", aPage.Index, err)
 		}
+		return data, nil
 	}
-	return nil, fmt.Errorf("error flushing, page %d is neither internal nor leaf node nor free page", aPage.Index)
+	return nil, fmt.Errorf("error flushing page %d, neither internal nor leaf node nor free page", aPage.Index)
 }

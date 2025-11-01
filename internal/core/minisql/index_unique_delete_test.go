@@ -8,7 +8,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
 
 func TestUniqueIndex_Delete(t *testing.T) {
@@ -19,17 +18,30 @@ func TestUniqueIndex_Delete(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
-	aColumn := Column{Name: "test_column", Kind: Int8, Size: 8}
-	idxPager := aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size))
-	anIndex := NewUniqueIndex[int64](zap.NewNop(), "test_index", aColumn, idxPager, 0)
+
+	var (
+		ctx       = context.Background()
+		keys      = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
+		aColumn   = Column{Name: "test_column", Kind: Int8, Size: 8}
+		txManager = NewTransactionManager()
+		idxPager  = NewTransactionalPager(
+			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
+			txManager,
+		)
+		anIndex = NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, idxPager, 0)
+	)
 	anIndex.maximumKeys = 3
 
-	keys := []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
-
-	for _, key := range keys {
-		err := anIndex.Insert(context.Background(), key, uint64(key+100))
-		require.NoError(t, err)
-	}
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for _, key := range keys {
+			err := anIndex.Insert(ctx, key, uint64(key+100))
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}, aPager)
+	require.NoError(t, err)
 
 	/*
 									+------------------------------------------------+
@@ -91,7 +103,9 @@ func TestUniqueIndex_Delete(t *testing.T) {
 	assertIndexNode(t, leaf8, false, true, 10, []int64{20, 21}, nil)
 
 	t.Run("Delete a key from leftmost leaf", func(t *testing.T) {
-		err := anIndex.Delete(context.Background(), 1)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 1)
+		}, aPager)
 		require.NoError(t, err)
 
 		/*
@@ -156,14 +170,17 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf8, false, true, 10, []int64{20, 21}, nil)
 
 		// No page should be recycled yet
-		assertFreePages(t, idxPager.(*indexPager[int64]), nil)
+		assertFreePages(t, idxPager, nil)
 	})
 
 	t.Run("Delete another key, no pages recyclet yet", func(t *testing.T) {
-		err := anIndex.Delete(context.Background(), 4)
-		require.NoError(t, err)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			if err := anIndex.Delete(ctx, 4); err != nil {
+				return nil
+			}
 
-		err = anIndex.Delete(context.Background(), 5)
+			return anIndex.Delete(ctx, 5)
+		}, aPager)
 		require.NoError(t, err)
 
 		/*
@@ -228,11 +245,13 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf8, false, true, 10, []int64{20, 21}, nil)
 
 		// No page should be recycled yet
-		assertFreePages(t, idxPager.(*indexPager[int64]), nil)
+		assertFreePages(t, idxPager, nil)
 	})
 
 	t.Run("Delete another key, first recycled page", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 8)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 8)
+		}, aPager)
 		require.NoError(t, err)
 
 		/*
@@ -295,11 +314,13 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf7, false, true, 10, []int64{20, 21}, nil)
 
 		// Assert new recycled page
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{4})
+		assertFreePages(t, idxPager, []uint32{4})
 	})
 
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 19)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 19)
+		}, aPager)
 		require.NoError(t, err)
 
 		/*
@@ -362,12 +383,15 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf7, false, true, 10, []int64{20, 21}, nil)
 
 		// No new pages should be recycled
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{4})
+		assertFreePages(t, idxPager, []uint32{4})
 	})
 
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 20)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 20)
+		}, aPager)
 		require.NoError(t, err)
+
 		/*
 										+------------------------------------------------+
 										|        9              ,             13         |
@@ -428,12 +452,15 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf7, false, true, 10, []int64{21}, nil)
 
 		// No new pages should be recycled
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{4})
+		assertFreePages(t, idxPager, []uint32{4})
 	})
 
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 16)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 16)
+		}, aPager)
 		require.NoError(t, err)
+
 		/*
 										+------------------------------------------------+
 										|        9              ,             13         |
@@ -494,12 +521,15 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf7, false, true, 10, []int64{21}, nil)
 
 		// No new pages should be recycled
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{4})
+		assertFreePages(t, idxPager, []uint32{4})
 	})
 
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 15)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 15)
+		}, aPager)
 		require.NoError(t, err)
+
 		/*
 										+------------------------------------------------+
 										|        9              ,             13         |
@@ -558,12 +588,15 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf6, false, true, 10, []int64{21}, nil)
 
 		// Assert new recycled page
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{3, 4})
+		assertFreePages(t, idxPager, []uint32{3, 4})
 	})
 
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 13)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 13)
+		}, aPager)
 		require.NoError(t, err)
+
 		/*
 										+------------------+
 										|        9         |
@@ -619,12 +652,15 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf6, false, true, 6, []int64{21}, nil)
 
 		// Assert new recycled page
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{10, 3, 4})
+		assertFreePages(t, idxPager, []uint32{10, 3, 4})
 	})
 
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 10)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 10)
+		}, aPager)
 		require.NoError(t, err)
+
 		/*
 										+------------------+
 										|        9         |
@@ -678,12 +714,15 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf5, false, true, 6, []int64{21}, nil)
 
 		// Assert new recycled page
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{7, 10, 3, 4})
+		assertFreePages(t, idxPager, []uint32{7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 9)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 9)
+		}, aPager)
 		require.NoError(t, err)
+
 		/*
 										+------------------+
 										|        11        |
@@ -737,12 +776,15 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf5, false, true, 6, []int64{21}, nil)
 
 		// No new pages should be recycled
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{7, 10, 3, 4})
+		assertFreePages(t, idxPager, []uint32{7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 11)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 11)
+		}, aPager)
 		require.NoError(t, err)
+
 		/*
 										+------------------+
 										|        12        |
@@ -794,12 +836,15 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf4, false, true, 6, []int64{21}, nil)
 
 		// Assert new recycled page
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []uint32{11, 7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key, 2 pages recycled, only root and leaves left", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 3)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 3)
+		}, aPager)
 		require.NoError(t, err)
+
 		/*
 										+-------------------------+
 										|   6   ,   12   ,   18   |
@@ -840,12 +885,15 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf4, false, true, 0, []int64{21}, nil)
 
 		// Assert 2 new recycled pages
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{5, 6, 11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []uint32{5, 6, 11, 7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 14)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 14)
+		}, aPager)
 		require.NoError(t, err)
+
 		/*
 										+-------------------------+
 										|   6   ,   12   ,   18   |
@@ -886,12 +934,15 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf4, false, true, 0, []int64{21}, nil)
 
 		// No new pages should be recycled
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{5, 6, 11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []uint32{5, 6, 11, 7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 6)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 6)
+		}, aPager)
 		require.NoError(t, err)
+
 		/*
 										+-----------------+
 										|   12   ,   18   |
@@ -930,12 +981,15 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf3, false, true, 0, []int64{21}, nil)
 
 		// Assert new recycled page
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{9, 5, 6, 11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []uint32{9, 5, 6, 11, 7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 17)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 17)
+		}, aPager)
 		require.NoError(t, err)
+
 		/*
 										+----------------+
 										|   7   ,   18   |
@@ -974,12 +1028,15 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf3, false, true, 0, []int64{21}, nil)
 
 		// No new pages should be recycled
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{9, 5, 6, 11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []uint32{9, 5, 6, 11, 7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 21)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 21)
+		}, aPager)
 		require.NoError(t, err)
+
 		/*
 										+-------+
 										|   7   |
@@ -1016,12 +1073,15 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf2, false, true, 0, []int64{12, 18}, nil)
 
 		// Assert new recycled page
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{8, 9, 5, 6, 11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []uint32{8, 9, 5, 6, 11, 7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 2)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 2)
+		}, aPager)
 		require.NoError(t, err)
+
 		/*
 										+-------+
 										|   12  |
@@ -1058,11 +1118,13 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, leaf2, false, true, 0, []int64{18}, nil)
 
 		// No new pages should be recycled
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{8, 9, 5, 6, 11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []uint32{8, 9, 5, 6, 11, 7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key, only root leaf left", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 18)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Delete(ctx, 18)
+		}, aPager)
 		require.NoError(t, err)
 		/*
 			+----------+
@@ -1091,19 +1153,18 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, rootNode, true, true, 0, []int64{7, 12}, nil)
 
 		// Assert 2 new recycled pages
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{1, 2, 8, 9, 5, 6, 11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []uint32{1, 2, 8, 9, 5, 6, 11, 7, 10, 3, 4})
 	})
 
 	t.Run("Delete remaining keys, empty root leaf left", func(t *testing.T) {
-		err = anIndex.Delete(context.Background(), 12)
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			if err := anIndex.Delete(ctx, 12); err != nil {
+				return err
+			}
+
+			return anIndex.Delete(ctx, 7)
+		}, aPager)
 		require.NoError(t, err)
-		err = anIndex.Delete(context.Background(), 7)
-		require.NoError(t, err)
-		/*
-			+----------+
-			|  7 , 12  |
-			+----------+
-		*/
 
 		// require.NoError(t, anIndex.print())
 
@@ -1115,7 +1176,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, rootNode, true, true, 0, nil, nil)
 
 		// No new pages should be recycled
-		assertFreePages(t, idxPager.(*indexPager[int64]), []uint32{1, 2, 8, 9, 5, 6, 11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []uint32{1, 2, 8, 9, 5, 6, 11, 7, 10, 3, 4})
 	})
 }
 
@@ -1127,9 +1188,17 @@ func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
-	aColumn := Column{Name: "test_column", Kind: Int8, Size: 8}
-	idxPager := aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size))
-	anIndex := NewUniqueIndex[int64](zap.NewNop(), "test_index", aColumn, idxPager, 0)
+
+	var (
+		ctx       = context.Background()
+		aColumn   = Column{Name: "test_column", Kind: Int8, Size: 8}
+		txManager = NewTransactionManager()
+		idxPager  = NewTransactionalPager(
+			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
+			txManager,
+		)
+		anIndex = NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, idxPager, 0)
+	)
 	anIndex.maximumKeys = 3
 
 	// Insert 100 keys in random order
@@ -1139,10 +1208,16 @@ func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
 	}
 	rand.Shuffle(len(keys), func(i, j int) { keys[i], keys[j] = keys[j], keys[i] })
 
-	for _, key := range keys {
-		err := anIndex.Insert(context.Background(), key, uint64(key+100))
-		require.NoError(t, err)
-	}
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for _, key := range keys {
+			err := anIndex.Insert(ctx, key, uint64(key+100))
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}, aPager)
+	require.NoError(t, err)
 
 	// Verify all keys are present
 	actualKeys := []int64{}
@@ -1155,10 +1230,15 @@ func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
 
 	// Delete all keys in random order
 	rand.Shuffle(len(keys), func(i, j int) { keys[i], keys[j] = keys[j], keys[i] })
-	for _, key := range keys {
-		err := anIndex.Delete(context.Background(), key)
-		require.NoError(t, err)
-	}
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for _, key := range keys {
+			if err := anIndex.Delete(ctx, key); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, aPager)
+	require.NoError(t, err)
 
 	// Verify index is empty
 	actualKeys = []int64{}
@@ -1170,18 +1250,21 @@ func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
 	assert.Empty(t, actualKeys)
 }
 
-func assertFreePages(t *testing.T, aPager *indexPager[int64], expectedFreePages []uint32) {
+func assertFreePages(t *testing.T, aPager Pager, expectedFreePages []uint32) {
 	t.Helper()
 
-	assert.Equal(t, len(expectedFreePages), int(aPager.dbHeader.FreePageCount))
+	dbHeader := aPager.GetHeader(context.Background())
+
+	assert.Equal(t, len(expectedFreePages), int(dbHeader.FreePageCount))
 
 	actualFreePages := []uint32{}
-	currentFreePageID := aPager.dbHeader.FirstFreePage
+	currentFreePageID := dbHeader.FirstFreePage
 
 	for currentFreePageID != 0 {
 		actualFreePages = append(actualFreePages, currentFreePageID)
-		currentFreePage := aPager.pages[currentFreePageID].FreePage
-		currentFreePageID = currentFreePage.NextFreePage
+		currentFreePage, err := aPager.GetPage(context.Background(), currentFreePageID)
+		require.NoError(t, err)
+		currentFreePageID = currentFreePage.FreePage.NextFreePage
 	}
 
 	if expectedFreePages == nil {

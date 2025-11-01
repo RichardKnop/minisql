@@ -17,12 +17,16 @@ func TestTable_Select(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
-	tablePager := aPager.ForTable(Row{Columns: testColumns}.Size())
+	txManager := NewTransactionManager()
+	tablePager := NewTransactionalPager(
+		aPager.ForTable(Row{Columns: testColumns}.Size()),
+		txManager,
+	)
 
 	var (
 		ctx    = context.Background()
 		rows   = gen.Rows(38)
-		aTable = NewTable(testLogger, testTableName, testColumns, tablePager, 0)
+		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumns, 0)
 	)
 
 	// Set some values to NULL so we can test selecting/filtering on NULLs
@@ -40,7 +44,9 @@ func TestTable_Select(t *testing.T) {
 		insertStmt.Inserts = append(insertStmt.Inserts, aRow.Values)
 	}
 
-	err = aTable.Insert(ctx, insertStmt)
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return aTable.Insert(ctx, insertStmt)
+	}, aPager)
 	require.NoError(t, err)
 
 	t.Run("Select all rows", func(t *testing.T) {
@@ -70,12 +76,12 @@ func TestTable_Select(t *testing.T) {
 				{
 					{
 						Operand1: Operand{
-							Type:  Field,
+							Type:  OperandField,
 							Value: "email",
 						},
 						Operator: Eq,
 						Operand2: Operand{
-							Type:  QuotedString,
+							Type:  OperandQuotedString,
 							Value: "bogus",
 						},
 					},
@@ -104,12 +110,12 @@ func TestTable_Select(t *testing.T) {
 				{
 					{
 						Operand1: Operand{
-							Type:  Field,
+							Type:  OperandField,
 							Value: "id",
 						},
 						Operator: Eq,
 						Operand2: Operand{
-							Type:  Integer,
+							Type:  OperandInteger,
 							Value: rows[5].Values[0].Value.(int64),
 						},
 					},
@@ -135,7 +141,7 @@ func TestTable_Select(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
 			Fields:     columnNames(testColumns...),
-			Conditions: FieldIsNull("id"),
+			Conditions: OneOrMore{{FieldIsNull("id")}},
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)
@@ -155,7 +161,7 @@ func TestTable_Select(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
 			Fields:     columnNames(testColumns...),
-			Conditions: FieldIsNull("age"),
+			Conditions: OneOrMore{{FieldIsNull("age")}},
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)
@@ -177,7 +183,7 @@ func TestTable_Select(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
 			Fields:     columnNames(testColumns...),
-			Conditions: FieldIsNotNull("age"),
+			Conditions: OneOrMore{{FieldIsNotNull("age")}},
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)

@@ -25,7 +25,7 @@ var reservedWords = []string{
 	// statement types
 	"CREATE TABLE", "DROP TABLE", "SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
-	"*", "IS NULL", "IS NOT NULL", "NOT NULL", "NULL", "IF NOT EXISTS", "WHERE", "FROM", "SET", "AS",
+	"*", "PRIMARY KEY", "IS NULL", "IS NOT NULL", "NOT NULL", "NULL", "IF NOT EXISTS", "WHERE", "FROM", "SET", "AS",
 	";",
 }
 
@@ -39,6 +39,7 @@ const (
 	stepCreateTableColumn
 	stepCreateTableColumnDef
 	stepCreateTableVarcharLength
+	stepCreateTableColumnPrimaryKey
 	stepCreateTableColumnNullNotNull
 	stepCreateTableCommaOrClosingParens
 	stepDropTableName
@@ -154,6 +155,7 @@ func (p *parser) doParse() ([]minisql.Statement, error) {
 			stepCreateTableColumn,
 			stepCreateTableColumnDef,
 			stepCreateTableVarcharLength,
+			stepCreateTableColumnPrimaryKey,
 			stepCreateTableColumnNullNotNull,
 			stepCreateTableCommaOrClosingParens:
 			if err := p.doParseCreateTable(); err != nil {
@@ -389,18 +391,29 @@ func (p *parser) validate(stmt minisql.Statement) error {
 	if stmt.TableName == "" {
 		return errEmptyTableName
 	}
-	if stmt.Kind == minisql.CreateTable && len(stmt.Columns) == 0 {
-		return errCreateTableNoColumns
+	if stmt.Kind == minisql.CreateTable {
+		if len(stmt.Columns) == 0 {
+			return errCreateTableNoColumns
+		}
+		primareKeysNum := 0
+		for _, aColumn := range stmt.Columns {
+			if aColumn.PrimaryKey {
+				primareKeysNum++
+			}
+		}
+		if primareKeysNum > 1 {
+			return errCreateTableMultiplePrimaryKeys
+		}
 	}
 	for _, aConditionGroup := range stmt.Conditions {
 		for _, aCondition := range aConditionGroup {
 			if aCondition.Operator == 0 {
 				return errWhereWithoutOperator
 			}
-			if aCondition.Operand1.Value == "" && aCondition.Operand1.Type == minisql.Field {
+			if aCondition.Operand1.Value == "" && aCondition.Operand1.Type == minisql.OperandField {
 				return fmt.Errorf("at WHERE: condition with empty left side operand")
 			}
-			if aCondition.Operand2.Value == "" && aCondition.Operand2.Type == minisql.Field {
+			if aCondition.Operand2.Value == "" && aCondition.Operand2.Type == minisql.OperandField {
 				return fmt.Errorf("at WHERE: condition with empty right side operand")
 			}
 		}

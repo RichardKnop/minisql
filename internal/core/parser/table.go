@@ -13,8 +13,9 @@ const (
 )
 
 var (
-	errCreateTableNoColumns       = fmt.Errorf("at CREATE TABLE: no columns specified")
-	errCreateTableInvalidColumDef = fmt.Errorf("at CREATE TABLE: invalid column definition")
+	errCreateTableNoColumns           = fmt.Errorf("at CREATE TABLE: no columns specified")
+	errCreateTableInvalidColumDef     = fmt.Errorf("at CREATE TABLE: invalid column definition")
+	errCreateTableMultiplePrimaryKeys = fmt.Errorf("at CREATE TABLE: multiple PRIMARY KEY columns specified")
 )
 
 func (p *parser) doParseCreateTable() error {
@@ -65,7 +66,7 @@ func (p *parser) doParseCreateTable() error {
 			p.step = stepCreateTableVarcharLength
 		} else {
 			p.Columns[len(p.Columns)-1].Size = aColumn.Size
-			p.step = stepCreateTableColumnNullNotNull
+			p.step = stepCreateTableColumnPrimaryKey
 		}
 	case stepCreateTableVarcharLength:
 		sizeToken := p.peek()
@@ -86,7 +87,22 @@ func (p *parser) doParseCreateTable() error {
 			return fmt.Errorf("at CREATE TABLE: expecting closing parenthesis after varchar size")
 		}
 		p.pop()
-		p.step = stepCreateTableColumnNullNotNull
+		p.step = stepCreateTableColumnPrimaryKey
+	case stepCreateTableColumnPrimaryKey:
+		primaryKey := p.peek()
+		if primaryKey != "PRIMARY KEY" {
+			p.step = stepCreateTableColumnNullNotNull
+			return nil
+		}
+		for _, col := range p.Columns {
+			if col.PrimaryKey {
+				return errCreateTableMultiplePrimaryKeys
+			}
+		}
+		p.Columns[len(p.Columns)-1].PrimaryKey = true
+		p.Columns[len(p.Columns)-1].Nullable = false
+		p.pop()
+		p.step = stepCreateTableCommaOrClosingParens
 	case stepCreateTableColumnNullNotNull:
 		nullNotNull := p.peek()
 		p.step = stepCreateTableCommaOrClosingParens

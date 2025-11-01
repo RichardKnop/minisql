@@ -17,12 +17,16 @@ func TestTable_Update(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
-	tablePager := aPager.ForTable(Row{Columns: testColumns}.Size())
+	txManager := NewTransactionManager()
+	tablePager := NewTransactionalPager(
+		aPager.ForTable(Row{Columns: testColumns}.Size()),
+		txManager,
+	)
 
 	var (
 		ctx    = context.Background()
 		rows   = gen.Rows(38)
-		aTable = NewTable(testLogger, testTableName, testColumns, tablePager, 0)
+		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumns, 0)
 	)
 
 	// Batch insert test rows
@@ -35,7 +39,9 @@ func TestTable_Update(t *testing.T) {
 		insertStmt.Inserts = append(insertStmt.Inserts, aRow.Values)
 	}
 
-	err = aTable.Insert(ctx, insertStmt)
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return aTable.Insert(ctx, insertStmt)
+	}, aPager)
 	require.NoError(t, err)
 
 	t.Run("Update no rows", func(t *testing.T) {
@@ -48,12 +54,12 @@ func TestTable_Update(t *testing.T) {
 				{
 					{
 						Operand1: Operand{
-							Type:  Field,
+							Type:  OperandField,
 							Value: "email",
 						},
 						Operator: Eq,
 						Operand2: Operand{
-							Type:  QuotedString,
+							Type:  OperandQuotedString,
 							Value: "bogus",
 						},
 					},
@@ -61,7 +67,12 @@ func TestTable_Update(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Update(ctx, stmt)
+		var aResult StatementResult
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			var err error
+			aResult, err = aTable.Update(ctx, stmt)
+			return err
+		}, aPager)
 		require.NoError(t, err)
 		assert.Equal(t, 0, aResult.RowsAffected)
 
@@ -74,10 +85,15 @@ func TestTable_Update(t *testing.T) {
 			Updates: map[string]OptionalValue{
 				"email": {Value: "updatedsingle@foo.bar", Valid: true},
 			},
-			Conditions: FieldIsIn("id", Integer, rows[5].Values[0].Value.(int64)),
+			Conditions: FieldIsInAny("id", OperandInteger, rows[5].Values[0].Value.(int64)),
 		}
 
-		aResult, err := aTable.Update(ctx, stmt)
+		var aResult StatementResult
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			var err error
+			aResult, err = aTable.Update(ctx, stmt)
+			return err
+		}, aPager)
 		require.NoError(t, err)
 		assert.Equal(t, 1, aResult.RowsAffected)
 
@@ -101,10 +117,15 @@ func TestTable_Update(t *testing.T) {
 			Updates: map[string]OptionalValue{
 				"email": {Valid: false},
 			},
-			Conditions: FieldIsIn("id", Integer, rows[18].Values[0].Value.(int64)),
+			Conditions: FieldIsInAny("id", OperandInteger, rows[18].Values[0].Value.(int64)),
 		}
 
-		aResult, err := aTable.Update(ctx, stmt)
+		var aResult StatementResult
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			var err error
+			aResult, err = aTable.Update(ctx, stmt)
+			return err
+		}, aPager)
 		require.NoError(t, err)
 		assert.Equal(t, 1, aResult.RowsAffected)
 
@@ -133,7 +154,12 @@ func TestTable_Update(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Update(ctx, stmt)
+		var aResult StatementResult
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			var err error
+			aResult, err = aTable.Update(ctx, stmt)
+			return err
+		}, aPager)
 		require.NoError(t, err)
 		assert.Equal(t, 38, aResult.RowsAffected)
 

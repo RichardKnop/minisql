@@ -35,72 +35,95 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 				{Value: int64(125478), Valid: true},
 				{Value: "john.doe@example.com", Valid: true},
 				{Value: int32(25), Valid: true},
+				{Value: true, Valid: true},
 			},
 		}
 		idMatch = Condition{
 			Operand1: Operand{
-				Type:  Field,
+				Type:  OperandField,
 				Value: "id",
 			},
 			Operator: Eq,
 			Operand2: Operand{
-				Type:  Integer,
+				Type:  OperandInteger,
 				Value: int64(125478),
 			},
 		}
 		idMismatch = Condition{
 			Operand1: Operand{
-				Type:  Field,
+				Type:  OperandField,
 				Value: "id",
 			},
 			Operator: Eq,
 			Operand2: Operand{
-				Type:  Integer,
+				Type:  OperandInteger,
 				Value: int64(678),
 			},
 		}
 		emailMatch = Condition{
 			Operand1: Operand{
-				Type:  Field,
+				Type:  OperandField,
 				Value: "email",
 			},
 			Operator: Eq,
 			Operand2: Operand{
-				Type:  QuotedString,
+				Type:  OperandQuotedString,
 				Value: "john.doe@example.com",
 			},
 		}
 		emailMismatch = Condition{
 			Operand1: Operand{
-				Type:  Field,
+				Type:  OperandField,
 				Value: "email",
 			},
 			Operator: Eq,
 			Operand2: Operand{
-				Type:  QuotedString,
+				Type:  OperandQuotedString,
 				Value: "jack.ipsum@example.com",
 			},
 		}
 		ageMatch = Condition{
 			Operand1: Operand{
-				Type:  Field,
+				Type:  OperandField,
 				Value: "age",
 			},
 			Operator: Eq,
 			Operand2: Operand{
-				Type:  Integer,
+				Type:  OperandInteger,
 				Value: int64(25),
 			},
 		}
 		ageMismatch = Condition{
 			Operand1: Operand{
-				Type:  Field,
+				Type:  OperandField,
 				Value: "age",
 			},
 			Operator: Eq,
 			Operand2: Operand{
-				Type:  Integer,
+				Type:  OperandInteger,
 				Value: int64(42),
+			},
+		}
+		verifiedMatch = Condition{
+			Operand1: Operand{
+				Type:  OperandField,
+				Value: "verified",
+			},
+			Operator: Eq,
+			Operand2: Operand{
+				Type:  OperandBoolean,
+				Value: true,
+			},
+		}
+		verifiedMismatch = Condition{
+			Operand1: Operand{
+				Type:  OperandField,
+				Value: "verified",
+			},
+			Operator: Eq,
+			Operand2: Operand{
+				Type:  OperandBoolean,
+				Value: false,
 			},
 		}
 	)
@@ -153,6 +176,26 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			OneOrMore{
 				{
 					emailMismatch,
+				},
+			},
+			false,
+		},
+		{
+			"row matches if condition comparing with boolean is true",
+			aRow,
+			OneOrMore{
+				{
+					verifiedMatch,
+				},
+			},
+			true,
+		},
+		{
+			"row does not match if condition comparing with boolean is false",
+			aRow,
+			OneOrMore{
+				{
+					verifiedMismatch,
 				},
 			},
 			false,
@@ -228,12 +271,12 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 				{
 					{
 						Operand1: Operand{
-							Type:  Field,
+							Type:  OperandField,
 							Value: "age",
 						},
 						Operator: Ne,
 						Operand2: Operand{
-							Type:  Integer,
+							Type:  OperandInteger,
 							Value: int64(42),
 						},
 					},
@@ -248,12 +291,12 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 				{
 					{
 						Operand1: Operand{
-							Type:  Field,
+							Type:  OperandField,
 							Value: "age",
 						},
 						Operator: Ne,
 						Operand2: Operand{
-							Type:  Integer,
+							Type:  OperandInteger,
 							Value: int64(25),
 						},
 					},
@@ -268,12 +311,12 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 				{
 					{
 						Operand1: Operand{
-							Type:  Field,
+							Type:  OperandField,
 							Value: "age",
 						},
 						Operator: Gt,
 						Operand2: Operand{
-							Type:  Integer,
+							Type:  OperandInteger,
 							Value: int64(24),
 						},
 					},
@@ -288,12 +331,12 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 				{
 					{
 						Operand1: Operand{
-							Type:  Field,
+							Type:  OperandField,
 							Value: "age",
 						},
 						Operator: Gt,
 						Operand2: Operand{
-							Type:  Integer,
+							Type:  OperandInteger,
 							Value: int64(25),
 						},
 					},
@@ -308,12 +351,12 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 				{
 					{
 						Operand1: Operand{
-							Type:  Field,
+							Type:  OperandField,
 							Value: "age",
 						},
 						Operator: Lt,
 						Operand2: Operand{
-							Type:  Integer,
+							Type:  OperandInteger,
 							Value: int64(26),
 						},
 					},
@@ -328,12 +371,12 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 				{
 					{
 						Operand1: Operand{
-							Type:  Field,
+							Type:  OperandField,
 							Value: "age",
 						},
 						Operator: Lt,
 						Operand2: Operand{
-							Type:  Integer,
+							Type:  OperandInteger,
 							Value: int64(25),
 						},
 					},
@@ -348,12 +391,12 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 				{
 					{
 						Operand1: Operand{
-							Type:  Field,
+							Type:  OperandField,
 							Value: "age",
 						},
 						Operator: Gte,
 						Operand2: Operand{
-							Type:  Integer,
+							Type:  OperandInteger,
 							Value: int64(25),
 						},
 					},
@@ -368,12 +411,12 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 				{
 					{
 						Operand1: Operand{
-							Type:  Field,
+							Type:  OperandField,
 							Value: "age",
 						},
 						Operator: Gte,
 						Operand2: Operand{
-							Type:  Integer,
+							Type:  OperandInteger,
 							Value: int64(26),
 						},
 					},
@@ -388,12 +431,12 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 				{
 					{
 						Operand1: Operand{
-							Type:  Field,
+							Type:  OperandField,
 							Value: "age",
 						},
 						Operator: Lte,
 						Operand2: Operand{
-							Type:  Integer,
+							Type:  OperandInteger,
 							Value: int64(25),
 						},
 					},
@@ -408,12 +451,12 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 				{
 					{
 						Operand1: Operand{
-							Type:  Field,
+							Type:  OperandField,
 							Value: "age",
 						},
 						Operator: Lte,
 						Operand2: Operand{
-							Type:  Integer,
+							Type:  OperandInteger,
 							Value: int64(24),
 						},
 					},

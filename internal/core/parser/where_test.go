@@ -27,12 +27,12 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "b",
 						},
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
-							Type:  minisql.Integer,
+							Type:  minisql.OperandInteger,
 							Value: int64(1),
 						},
 					},
@@ -47,12 +47,12 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "b",
 						},
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
-							Type:  minisql.Float,
+							Type:  minisql.OperandFloat,
 							Value: float64(1.5),
 						},
 					},
@@ -67,12 +67,12 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "b",
 						},
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
-							Type:  minisql.QuotedString,
+							Type:  minisql.OperandQuotedString,
 							Value: "1",
 						},
 					},
@@ -87,12 +87,12 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "b",
 						},
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
-							Type:  minisql.QuotedString,
+							Type:  minisql.OperandQuotedString,
 							Value: "",
 						},
 					},
@@ -107,12 +107,12 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "a",
 						},
 						Operator: minisql.Lt,
 						Operand2: minisql.Operand{
-							Type:  minisql.QuotedString,
+							Type:  minisql.OperandQuotedString,
 							Value: "1",
 						},
 					},
@@ -127,12 +127,12 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "a",
 						},
 						Operator: minisql.Lte,
 						Operand2: minisql.Operand{
-							Type:  minisql.QuotedString,
+							Type:  minisql.OperandQuotedString,
 							Value: "1",
 						},
 					},
@@ -147,12 +147,12 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "a",
 						},
 						Operator: minisql.Gt,
 						Operand2: minisql.Operand{
-							Type:  minisql.Integer,
+							Type:  minisql.OperandInteger,
 							Value: int64(25),
 						},
 					},
@@ -167,12 +167,12 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "a",
 						},
 						Operator: minisql.Gte,
 						Operand2: minisql.Operand{
-							Type:  minisql.Integer,
+							Type:  minisql.OperandInteger,
 							Value: int64(25),
 						},
 					},
@@ -187,12 +187,12 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "a",
 						},
 						Operator: minisql.Ne,
 						Operand2: minisql.Operand{
-							Type:  minisql.QuotedString,
+							Type:  minisql.OperandQuotedString,
 							Value: "1",
 						},
 					},
@@ -207,12 +207,12 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "a",
 						},
 						Operator: minisql.Ne,
 						Operand2: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "b",
 						},
 					},
@@ -227,12 +227,12 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "b",
 						},
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
-							Type: minisql.Null,
+							Type: minisql.OperandNull,
 						},
 					},
 				},
@@ -246,12 +246,12 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "b",
 						},
 						Operator: minisql.Ne,
 						Operand2: minisql.Operand{
-							Type: minisql.Null,
+							Type: minisql.OperandNull,
 						},
 					},
 				},
@@ -265,23 +265,23 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "a",
 						},
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
-							Type:  minisql.QuotedString,
+							Type:  minisql.OperandQuotedString,
 							Value: "1",
 						},
 					},
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "b",
 						},
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
-							Type:  minisql.Integer,
+							Type:  minisql.OperandInteger,
 							Value: int64(789),
 						},
 					},
@@ -296,34 +296,34 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "a",
 						},
 						Operator: minisql.Ne,
 						Operand2: minisql.Operand{
-							Type:  minisql.QuotedString,
+							Type:  minisql.OperandQuotedString,
 							Value: "1",
 						},
 					},
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "b",
 						},
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
-							Type:  minisql.Integer,
+							Type:  minisql.OperandInteger,
 							Value: int64(2),
 						},
 					},
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "c",
 						},
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
-							Type:  minisql.QuotedString,
+							Type:  minisql.OperandQuotedString,
 							Value: "3",
 						},
 					},
@@ -338,12 +338,12 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "a",
 						},
 						Operator: minisql.Ne,
 						Operand2: minisql.Operand{
-							Type:  minisql.QuotedString,
+							Type:  minisql.OperandQuotedString,
 							Value: "1",
 						},
 					},
@@ -351,12 +351,12 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "b",
 						},
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
-							Type:  minisql.Integer,
+							Type:  minisql.OperandInteger,
 							Value: int64(2),
 						},
 					},
@@ -371,23 +371,23 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "a",
 						},
 						Operator: minisql.Ne,
 						Operand2: minisql.Operand{
-							Type:  minisql.QuotedString,
+							Type:  minisql.OperandQuotedString,
 							Value: "1",
 						},
 					},
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "b",
 						},
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
-							Type:  minisql.Integer,
+							Type:  minisql.OperandInteger,
 							Value: int64(2),
 						},
 					},
@@ -395,12 +395,12 @@ func TestParse_Where(t *testing.T) {
 				{
 					{
 						Operand1: minisql.Operand{
-							Type:  minisql.Field,
+							Type:  minisql.OperandField,
 							Value: "c",
 						},
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
-							Type:  minisql.QuotedString,
+							Type:  minisql.OperandQuotedString,
 							Value: "3",
 						},
 					},

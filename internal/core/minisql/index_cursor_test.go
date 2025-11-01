@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
 
 func TestUniqueIndex_Seek(t *testing.T) {
@@ -18,17 +17,29 @@ func TestUniqueIndex_Seek(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
-	aColumn := Column{Name: "test_column", Kind: Int8, Size: 8}
-	indexPager := aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size))
-	anIndex := NewUniqueIndex[int64](zap.NewNop(), "test_index", aColumn, indexPager, 0)
+
+	var (
+		ctx        = context.Background()
+		keys       = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
+		aColumn    = Column{Name: "test_column", Kind: Int8, Size: 8}
+		txManager  = NewTransactionManager()
+		indexPager = NewTransactionalPager(
+			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
+			txManager,
+		)
+		anIndex = NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, indexPager, 0)
+	)
 	anIndex.maximumKeys = 3
 
-	keys := []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
-
-	for _, key := range keys {
-		err := anIndex.Insert(context.Background(), key, 0)
-		require.NoError(t, err)
-	}
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for _, key := range keys {
+			if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, aPager)
+	require.NoError(t, err)
 
 	/*
 									+------------------------------------------------+

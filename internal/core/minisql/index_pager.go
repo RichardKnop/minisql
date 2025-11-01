@@ -4,25 +4,6 @@ import (
 	"context"
 )
 
-func (p *pagerImpl) ForIndex(kind ColumnKind, keySize uint64) Pager {
-	switch kind {
-	case Boolean:
-		return &indexPager[int8]{p, keySize}
-	case Int4:
-		return &indexPager[int32]{p, keySize}
-	case Int8:
-		return &indexPager[int64]{p, keySize}
-	case Real:
-		return &indexPager[float32]{p, keySize}
-	case Double:
-		return &indexPager[float64]{p, keySize}
-	case Varchar:
-		return &indexPager[string]{p, keySize}
-	default:
-		return nil
-	}
-}
-
 type indexPager[T int8 | int32 | int64 | float32 | float64 | string] struct {
 	*pagerImpl
 	keySize uint64
@@ -30,14 +11,6 @@ type indexPager[T int8 | int32 | int64 | float32 | float64 | string] struct {
 
 func (p *indexPager[T]) GetPage(ctx context.Context, pageIdx uint32) (*Page, error) {
 	return p.pagerImpl.GetPage(ctx, pageIdx, p.unmarshal)
-}
-
-func (p *indexPager[T]) GetFreePage(ctx context.Context) (*Page, error) {
-	return p.pagerImpl.GetFreePage(ctx, p.unmarshal)
-}
-
-func (p *indexPager[T]) AddFreePage(ctx context.Context, pageIdx uint32) error {
-	return p.pagerImpl.AddFreePage(ctx, pageIdx, p.unmarshal)
 }
 
 func (p *indexPager[T]) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
@@ -61,8 +34,10 @@ func (p *indexPager[T]) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
 	// Requesting a new page
 	if int(pageIdx) == int(p.totalPages) {
 		node.Header.RightChild = RIGHT_CHILD_NOT_SET
+		p.mu.Lock()
 		p.pages = append(p.pages, &Page{Index: pageIdx, IndexNode: node})
 		p.totalPages = pageIdx + 1
+		p.mu.Unlock()
 		return p.pages[len(p.pages)-1], nil
 	}
 

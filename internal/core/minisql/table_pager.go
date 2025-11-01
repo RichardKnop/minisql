@@ -4,13 +4,6 @@ import (
 	"context"
 )
 
-func (p *pagerImpl) ForTable(rowSize uint64) Pager {
-	return &tablePager{
-		pagerImpl: p,
-		rowSize:   rowSize,
-	}
-}
-
 type tablePager struct {
 	*pagerImpl
 	rowSize uint64
@@ -18,14 +11,6 @@ type tablePager struct {
 
 func (p *tablePager) GetPage(ctx context.Context, pageIdx uint32) (*Page, error) {
 	return p.pagerImpl.GetPage(ctx, pageIdx, p.unmarshal)
-}
-
-func (p *tablePager) GetFreePage(ctx context.Context) (*Page, error) {
-	return p.pagerImpl.GetFreePage(ctx, p.unmarshal)
-}
-
-func (p *tablePager) AddFreePage(ctx context.Context, pageIdx uint32) error {
-	return p.pagerImpl.AddFreePage(ctx, pageIdx, p.unmarshal)
 }
 
 func (p *tablePager) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
@@ -46,8 +31,10 @@ func (p *tablePager) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
 		if err := unmarshalLeaf(pageIdx, leaf, buf); err != nil {
 			return nil, err
 		}
+		p.mu.Lock()
 		p.pages = append(p.pages, &Page{Index: pageIdx, LeafNode: leaf})
 		p.totalPages = pageIdx + 1
+		p.mu.Unlock()
 		return p.pages[len(p.pages)-1], nil
 	}
 
