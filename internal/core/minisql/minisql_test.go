@@ -288,10 +288,10 @@ func newRootLeafPageWithCells(cells, rowSize int) *Page {
 	aRootLeaf.Header.Cells = uint32(cells)
 
 	for i := 0; i < cells; i++ {
-		aRootLeaf.Cells[i] = Cell{
+		aRootLeaf.Cells = append(aRootLeaf.Cells, Cell{
 			Key:   uint64(i),
 			Value: bytes.Repeat([]byte{byte(i)}, rowSize),
-		}
+		})
 	}
 
 	return &Page{LeafNode: aRootLeaf}
@@ -313,7 +313,6 @@ Below is a simple B tree for testing purposes
 	 +---------+     +-----+     +-----------+    +------+
 */
 func newTestBtree() (*Page, []*Page, []*Page) {
-	defaultCell := NewLeafNode(270)
 	var (
 		// page 0
 		aRootPage = &Page{
@@ -387,7 +386,7 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 					Cells:    2,
 					NextLeaf: 4,
 				},
-				Cells: append([]Cell{
+				Cells: []Cell{
 					{
 						Key:   1,
 						Value: bytes.Repeat([]byte{byte(1)}, 270),
@@ -396,7 +395,7 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 						Key:   2,
 						Value: bytes.Repeat([]byte{byte(2)}, 270),
 					},
-				}, defaultCell.Cells[2:]...),
+				},
 				RowSize: 270,
 			},
 		}
@@ -412,12 +411,12 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 					Cells:    1,
 					NextLeaf: 5,
 				},
-				Cells: append([]Cell{
+				Cells: []Cell{
 					{
 						Key:   5,
 						Value: bytes.Repeat([]byte{byte(3)}, 270),
 					},
-				}, defaultCell.Cells[1:]...),
+				},
 				RowSize: 270,
 			},
 		}
@@ -433,7 +432,7 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 					Cells:    2,
 					NextLeaf: 6,
 				},
-				Cells: append([]Cell{
+				Cells: []Cell{
 					{
 						Key:   12,
 						Value: bytes.Repeat([]byte{byte(4)}, 270),
@@ -442,7 +441,7 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 						Key:   18,
 						Value: bytes.Repeat([]byte{byte(5)}, 270),
 					},
-				}, defaultCell.Cells[2:]...),
+				},
 				RowSize: 270,
 			},
 		}
@@ -457,12 +456,12 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 					},
 					Cells: 1,
 				},
-				Cells: append([]Cell{
+				Cells: []Cell{
 					{
 						Key:   21,
 						Value: bytes.Repeat([]byte{byte(6)}, 270),
 					},
-				}, defaultCell.Cells[1:]...),
+				},
 				RowSize: 270,
 			},
 		}

@@ -85,7 +85,6 @@ func TestTable_PageRecycling(t *testing.T) {
 
 func TestPage_Clone(t *testing.T) {
 	t.Parallel()
-	t.Skip()
 
 	t.Run("leaf page", func(t *testing.T) {
 		original := &Page{

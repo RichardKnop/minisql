@@ -534,7 +534,7 @@ func (d *Database) ExecuteInTransaction(ctx context.Context, statements ...State
 		for _, stmt := range statements {
 			aResult, err := d.executeStatement(ctx, stmt)
 			if err != nil {
-				return fmt.Errorf("failed to execute statement %v: %w", stmt, err)
+				return err
 			}
 			results = append(results, aResult)
 		}

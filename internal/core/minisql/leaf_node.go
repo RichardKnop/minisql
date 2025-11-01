@@ -1,7 +1,6 @@
 package minisql
 
 import (
-	"fmt"
 	"math"
 )
 
@@ -122,15 +121,12 @@ func NewCell(rowSize uint64) Cell {
 
 func NewLeafNode(rowSize uint64, cells ...Cell) *LeafNode {
 	aNode := LeafNode{
-		Cells:   make([]Cell, 0, maxCells(rowSize)),
+		Cells:   make([]Cell, 0, len(cells)),
 		RowSize: rowSize,
-	}
-	for i := 0; i < int(maxCells(rowSize)); i++ {
-		aNode.Cells = append(aNode.Cells, NewCell(aNode.RowSize))
 	}
 	if len(cells) > 0 {
 		aNode.Header.Cells = uint32(len(cells))
-		copy(aNode.Cells, cells)
+		aNode.Cells = append(aNode.Cells, cells...)
 	}
 	return &aNode
 }
@@ -183,53 +179,7 @@ func (n *LeafNode) Unmarshal(buf []byte) (uint64, error) {
 	i += hi
 
 	for idx := 0; idx < int(n.Header.Cells); idx++ {
-		ci, err := n.Cells[idx].Unmarshal(n.RowSize, buf[i:])
-		if err != nil {
-			return 0, err
-		}
-		i += ci
-	}
-
-	return i, nil
-}
-
-func (n *LeafNode) MarshalRoot(buf []byte) ([]byte, error) {
-	size := n.Size() - uint64(RootPageConfigSize)
-	if uint64(cap(buf)) >= size {
-		buf = buf[:size]
-	} else {
-		return nil, fmt.Errorf("buffer too small to marshal root leaf node, need %d bytes", size)
-	}
-
-	i := uint64(0)
-
-	hbuf, err := n.Header.Marshal(buf[i:])
-	if err != nil {
-		return nil, err
-	}
-	i += uint64(len(hbuf))
-
-	for idx := range n.Cells {
-		cbuf, err := n.Cells[idx].Marshal(n.RowSize, buf[i:])
-		if err != nil {
-			return nil, err
-		}
-		i += uint64(len(cbuf))
-	}
-
-	return buf[:i], nil
-}
-
-func (n *LeafNode) UnmarshalRoot(buf []byte) (uint64, error) {
-	i := uint64(0)
-
-	hi, err := n.Header.Unmarshal(buf[i:])
-	if err != nil {
-		return 0, err
-	}
-	i += hi
-
-	for idx := range n.Cells {
+		n.Cells = append(n.Cells, NewCell(n.RowSize))
 		ci, err := n.Cells[idx].Unmarshal(n.RowSize, buf[i:])
 		if err != nil {
 			return 0, err

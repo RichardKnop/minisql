@@ -175,21 +175,13 @@ func marshalPage(aPage *Page, buf []byte) ([]byte, error) {
 		copy(buf, data)
 		return buf[:len(data)], nil
 	} else if aPage.LeafNode != nil {
-		marshaler := aPage.LeafNode.Marshal
-		if aPage.Index == 0 {
-			marshaler = aPage.LeafNode.MarshalRoot
-		}
-		data, err := marshaler(buf)
+		data, err := aPage.LeafNode.Marshal(buf)
 		if err != nil {
 			return nil, fmt.Errorf("error flushing page %d: %w", aPage.Index, err)
 		}
 		return data, nil
 	} else if aPage.InternalNode != nil {
-		marshaler := aPage.InternalNode.Marshal
-		if aPage.Index == 0 {
-			marshaler = aPage.InternalNode.MarshalRoot
-		}
-		data, err := marshaler(buf)
+		data, err := aPage.InternalNode.Marshal(buf)
 		if err != nil {
 			return nil, fmt.Errorf("error flushing page %d: %w", aPage.Index, err)
 		}

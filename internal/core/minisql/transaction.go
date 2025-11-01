@@ -127,12 +127,12 @@ func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(
 
 	if err := fn(ctx); err != nil {
 		tm.RollbackTransaction(ctx, tx)
-		return fmt.Errorf("transaction failed: %w", err)
+		return err
 	}
 
 	if err := tm.CommitTransaction(ctx, tx, saver); err != nil {
 		tm.RollbackTransaction(ctx, tx)
-		return fmt.Errorf("failed to commit transaction: %w", err)
+		return err
 	}
 
 	return nil

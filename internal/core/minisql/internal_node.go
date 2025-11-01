@@ -1,7 +1,6 @@
 package minisql
 
 import (
-	"fmt"
 	"math"
 )
 
@@ -185,7 +184,7 @@ func (n *InternalNode) Marshal(buf []byte) ([]byte, error) {
 	}
 	i += uint64(len(hbuf))
 
-	for idx := range n.ICells {
+	for idx := range n.ICells[0:n.Header.KeysNum] {
 		icbuf, err := n.ICells[idx].Marshal(buf[i:])
 		if err != nil {
 			return nil, err
@@ -205,54 +204,7 @@ func (n *InternalNode) Unmarshal(buf []byte) (uint64, error) {
 	}
 	i += hi
 
-	for idx := range n.ICells {
-		ci, err := n.ICells[idx].Unmarshal(buf[i:])
-		if err != nil {
-			return 0, err
-		}
-		i += ci
-	}
-
-	return i, nil
-}
-
-func (n *InternalNode) MarshalRoot(buf []byte) ([]byte, error) {
-	size := n.Size() - uint64(RootPageConfigSize)
-	if uint64(cap(buf)) >= size {
-		buf = buf[:size]
-	} else {
-		return nil, fmt.Errorf("buffer too small to marshal root internal node, need %d bytes", size)
-	}
-
-	i := uint64(0)
-
-	hbuf, err := n.Header.Marshal(buf[i+0:])
-	if err != nil {
-		return nil, err
-	}
-	i += uint64(len(hbuf))
-
-	for idx := range n.ICells[0:RootInternalNodeMaxCells] {
-		icbuf, err := n.ICells[idx].Marshal(buf[i:])
-		if err != nil {
-			return nil, err
-		}
-		i += uint64(len(icbuf))
-	}
-
-	return buf[:i], nil
-}
-
-func (n *InternalNode) UnmarshalRoot(buf []byte) (uint64, error) {
-	i := uint64(0)
-
-	hi, err := n.Header.Unmarshal(buf[i:])
-	if err != nil {
-		return 0, err
-	}
-	i += hi
-
-	for idx := range n.ICells[0:RootInternalNodeMaxCells] {
+	for idx := range n.ICells[0:n.Header.KeysNum] {
 		ci, err := n.ICells[idx].Unmarshal(buf[i:])
 		if err != nil {
 			return 0, err

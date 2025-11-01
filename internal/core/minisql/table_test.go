@@ -277,8 +277,10 @@ func TestTable_InternalNodeInsert(t *testing.T) {
 		aNewLeaf                    = NewLeafNode(aTable.RowSize)
 	)
 	aNewLeaf.Header.Cells = 1
-	aNewLeaf.Cells[0].Key = 25
-	aNewLeaf.Cells[0].Value = bytes.Repeat([]byte{byte(7)}, 270)
+	aNewLeaf.Cells = append(aNewLeaf.Cells, Cell{
+		Key:   25,
+		Value: bytes.Repeat([]byte{byte(7)}, 270),
+	})
 
 	pagerMock.On("ModifyPage", mock.Anything, uint32(2)).Return(internalPages[1], nil).Once()
 	pagerMock.On("ModifyPage", mock.Anything, uint32(6)).Return(leafPages[3], nil).Once()

@@ -28,7 +28,8 @@ func (p *tablePager) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
 	if int(pageIdx) == int(p.totalPages) {
 		// Leaf node
 		leaf := NewLeafNode(p.rowSize)
-		if err := unmarshalLeaf(pageIdx, leaf, buf); err != nil {
+		_, err := leaf.Unmarshal(buf)
+		if err != nil {
 			return nil, err
 		}
 		p.mu.Lock()
@@ -46,7 +47,8 @@ func (p *tablePager) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
 		// First byte is Internal flag, this condition is also true if page does not exist
 		// Leaf node
 		leaf := NewLeafNode(p.rowSize)
-		if err := unmarshalLeaf(pageIdx, leaf, buf[idx:]); err != nil {
+		_, err := leaf.Unmarshal(buf[idx:])
+		if err != nil {
 			return nil, err
 		}
 		p.pages[pageIdx] = &Page{Index: pageIdx, LeafNode: leaf}
@@ -55,33 +57,10 @@ func (p *tablePager) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
 
 	// Internal node
 	internal := new(InternalNode)
-	if err := unmarshalInternal(pageIdx, internal, buf[idx:]); err != nil {
+	_, err := internal.Unmarshal(buf[idx:])
+	if err != nil {
 		return nil, err
 	}
 	p.pages[pageIdx] = &Page{Index: pageIdx, InternalNode: internal}
 	return p.pages[pageIdx], nil
-}
-
-func unmarshalLeaf(pageIdx uint32, leaf *LeafNode, buf []byte) error {
-	unmarshaler := leaf.Unmarshal
-	if pageIdx == 0 {
-		unmarshaler = leaf.UnmarshalRoot
-	}
-	_, err := unmarshaler(buf)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func unmarshalInternal(pageIdx uint32, internal *InternalNode, buf []byte) error {
-	unmarshaler := internal.Unmarshal
-	if pageIdx == 0 {
-		unmarshaler = internal.UnmarshalRoot
-	}
-	_, err := unmarshaler(buf)
-	if err != nil {
-		return err
-	}
-	return nil
 }

@@ -225,7 +225,7 @@ func (s *Server) handleSQL(ctx context.Context, conn net.Conn, sql string) error
 		if err != nil {
 			return s.sendResponse(conn, protocol.Response{
 				Success: false,
-				Error:   fmt.Sprintf("Execute statement error: %v", err),
+				Error:   err.Error(),
 			})
 		}
 		aResult := results[0]
