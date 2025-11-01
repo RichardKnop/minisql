@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
 
 func TestUniqueIndex_Insert(t *testing.T) {
@@ -18,19 +17,31 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
-	aColumn := Column{Name: "test_column", Kind: Int8, Size: 8}
-	indexPager := aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size))
-	anIndex := NewUniqueIndex[int64](zap.NewNop(), "test_index", aColumn, indexPager, 0)
+
+	var (
+		ctx        = context.Background()
+		key        = int64(1)
+		aColumn    = Column{Name: "test_column", Kind: Int8, Size: 8}
+		txManager  = NewTransactionManager()
+		indexPager = NewTransactionalPager(
+			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
+			txManager,
+		)
+		anIndex = NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, indexPager, 0)
+	)
 	anIndex.maximumKeys = 3
 
-	key := int64(1)
-
 	t.Run("Insert first three keys into root node", func(t *testing.T) {
-		for i := 0; i < 3; i++ {
-			err = anIndex.Insert(context.Background(), key, uint64(key+100))
-			require.NoError(t, err)
-			key++
-		}
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			for i := 0; i < 3; i++ {
+				if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
+					return err
+				}
+				key++
+			}
+			return nil
+		}, aPager)
+		require.NoError(t, err)
 
 		/*
 			+----------+
@@ -45,13 +56,17 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	})
 
 	t.Run("Insert duplicate key fails", func(t *testing.T) {
-		err = anIndex.Insert(context.Background(), key-1, uint64(key-1+100))
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Insert(ctx, key-1, uint64(key-1+100))
+		}, aPager)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrDuplicateKey)
 	})
 
 	t.Run("Insert 4th key, causes a split", func(t *testing.T) {
-		err = anIndex.Insert(context.Background(), key, uint64(key+100))
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Insert(ctx, key, uint64(key+100))
+		}, aPager)
 		require.NoError(t, err)
 		key++
 
@@ -77,11 +92,16 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	})
 
 	t.Run("Insert 2 more keys, another split", func(t *testing.T) {
-		for i := 0; i < 2; i++ {
-			err = anIndex.Insert(context.Background(), key, uint64(key+100))
-			require.NoError(t, err)
-			key++
-		}
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			for i := 0; i < 2; i++ {
+				if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
+					return err
+				}
+				key++
+			}
+			return nil
+		}, aPager)
+		require.NoError(t, err)
 
 		/*
 						        +---------------------+
@@ -109,11 +129,16 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	})
 
 	t.Run("Insert 2 more keys, another split", func(t *testing.T) {
-		for i := 0; i < 2; i++ {
-			err = anIndex.Insert(context.Background(), key, uint64(key+100))
-			require.NoError(t, err)
-			key++
-		}
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			for i := 0; i < 2; i++ {
+				if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
+					return err
+				}
+				key++
+			}
+			return nil
+		}, aPager)
+		require.NoError(t, err)
 
 		/*
 						        +-------------------------+
@@ -145,7 +170,9 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	})
 
 	t.Run("Insert 1 more key, internal split", func(t *testing.T) {
-		err = anIndex.Insert(context.Background(), key, uint64(key+100))
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return anIndex.Insert(ctx, key, uint64(key+100))
+		}, aPager)
 		require.NoError(t, err)
 		key++
 
@@ -188,11 +215,16 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	})
 
 	t.Run("Keep inserting more keys", func(t *testing.T) {
-		for i := 0; i < 5; i++ {
-			err = anIndex.Insert(context.Background(), key, uint64(key+100))
-			require.NoError(t, err)
-			key++
-		}
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			for i := 0; i < 5; i++ {
+				if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
+					return err
+				}
+				key++
+			}
+			return nil
+		}, aPager)
+		require.NoError(t, err)
 
 		/*
 									    +-------------------------------+
@@ -260,17 +292,30 @@ func TestUniqueIndex_Insert_OutOfOrder(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
-	aColumn := Column{Name: "test_column", Kind: Int8, Size: 8}
-	indexPager := aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size))
-	anIndex := NewUniqueIndex[int64](zap.NewNop(), "test_index", aColumn, indexPager, 0)
+
+	var (
+		ctx        = context.Background()
+		keys       = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
+		aColumn    = Column{Name: "test_column", Kind: Int8, Size: 8}
+		txManager  = NewTransactionManager()
+		indexPager = NewTransactionalPager(
+			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
+			txManager,
+		)
+		anIndex = NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, indexPager, 0)
+	)
 	anIndex.maximumKeys = 3
 
-	keys := []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
-
-	for _, key := range keys {
-		err := anIndex.Insert(context.Background(), key, uint64(key+100))
-		require.NoError(t, err)
-	}
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for _, key := range keys {
+			err := anIndex.Insert(ctx, key, uint64(key+100))
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}, aPager)
+	require.NoError(t, err)
 
 	/*
 									+------------------------------------------------+
@@ -295,7 +340,7 @@ func TestUniqueIndex_Insert_OutOfOrder(t *testing.T) {
 
 	assert.ElementsMatch(t, keys, actualKeys)
 
-	require.NoError(t, anIndex.print())
+	// require.NoError(t, anIndex.print())
 
 	var (
 		rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])

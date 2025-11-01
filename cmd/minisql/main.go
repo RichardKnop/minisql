@@ -78,7 +78,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	aDatabase, err := minisql.NewDatabase(ctx, logger, "db", parser.New(), aPager, aPager)
+	aDatabase, err := minisql.NewDatabase(ctx, logger, "db", parser.New(), aPager, aPager, aPager)
 	if err != nil {
 		panic(err)
 	}
@@ -221,13 +221,14 @@ func (s *Server) handleSQL(ctx context.Context, conn net.Conn, sql string) error
 	}
 
 	for _, stmt := range stmts {
-		aResult, err := s.database.ExecuteStatement(ctx, stmt)
+		results, err := s.database.ExecuteInTransaction(ctx, stmt)
 		if err != nil {
 			return s.sendResponse(conn, protocol.Response{
 				Success: false,
 				Error:   fmt.Sprintf("Execute statement error: %v", err),
 			})
 		}
+		aResult := results[0]
 
 		aResponse := protocol.Response{
 			Kind:         stmt.Kind,

@@ -139,6 +139,13 @@ type InternalNode struct {
 	ICells [InternalNodeMaxCells]ICell
 }
 
+func (n *InternalNode) Clone() *InternalNode {
+	aCopy := NewInternalNode()
+	copy(aCopy.ICells[:], n.ICells[:])
+	aCopy.Header = n.Header
+	return aCopy
+}
+
 const RIGHT_CHILD_NOT_SET = math.MaxUint32
 
 func NewInternalNode() *InternalNode {
