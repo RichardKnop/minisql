@@ -13,10 +13,6 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 		return err
 	}
 
-	// Write lock limits concurrent writes to the table
-	t.writeLock.Lock()
-	defer t.writeLock.Unlock()
-
 	aCursor, nextRowID, err := t.SeekNextRowID(ctx, t.RootPageIdx)
 	if err != nil {
 		return err
@@ -29,7 +25,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 		}
 		aRow = aRow.appendValues(stmt.Fields, values)
 
-		aPage, err := t.pager.GetPage(ctx, aCursor.PageIdx)
+		aPage, err := t.pager.ModifyPage(ctx, aCursor.PageIdx)
 		if err != nil {
 			return fmt.Errorf("insert: %w", err)
 		}

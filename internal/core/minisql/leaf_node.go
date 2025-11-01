@@ -108,6 +108,12 @@ type LeafNode struct {
 	RowSize uint64
 }
 
+func (n *LeafNode) Clone() *LeafNode {
+	aCopy := NewLeafNode(n.RowSize, n.Cells...)
+	aCopy.Header = n.Header
+	return aCopy
+}
+
 func NewCell(rowSize uint64) Cell {
 	return Cell{
 		Value: make([]byte, rowSize),

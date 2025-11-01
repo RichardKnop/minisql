@@ -30,7 +30,7 @@ func (ui *UniqueIndex[T]) Seek(ctx context.Context, aPage *Page, key T) (IndexCu
 	if err != nil {
 		return IndexCursor{}, false, fmt.Errorf("get child: %w", err)
 	}
-	childPage, err := ui.pager.GetPage(ctx, childIdx)
+	childPage, err := ui.pager.ReadPage(ctx, childIdx)
 	if err != nil {
 		return IndexCursor{}, false, fmt.Errorf("get child page: %w", err)
 	}
