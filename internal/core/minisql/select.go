@@ -22,7 +22,7 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	if err != nil {
 		return aResult, err
 	}
-	aPage, err := t.pager.GetPage(ctx, aCursor.PageIdx)
+	aPage, err := t.pager.ReadPage(ctx, aCursor.PageIdx)
 	if err != nil {
 		return aResult, fmt.Errorf("select: %w", err)
 	}

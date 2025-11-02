@@ -295,10 +295,10 @@ func (r Row) checkCondition(aCondition Condition) (bool, error) {
 }
 
 func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Operator) (bool, error) {
-	if fieldOperand.Type != Field {
+	if fieldOperand.Type != OperandField {
 		return false, fmt.Errorf("field operand invalid, type '%d'", fieldOperand.Type)
 	}
-	if valueOperand.Type == Field {
+	if valueOperand.Type == OperandField {
 		return false, fmt.Errorf("cannot compare column value against field operand")
 	}
 	name := fmt.Sprint(fieldOperand.Value)
@@ -306,31 +306,33 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 	if !ok {
 		return false, fmt.Errorf("row does not contain column '%s'", name)
 	}
-	value, ok := r.GetValue(aColumn.Name)
+	fieldValue, ok := r.GetValue(aColumn.Name)
 	if !ok {
 		return false, fmt.Errorf("row does not have '%s' column", name)
 	}
 
-	if valueOperand.Type == Null {
+	if valueOperand.Type == OperandNull {
 		switch operator {
 		case Eq:
-			return !value.Valid, nil
+			return !fieldValue.Valid, nil
 		case Ne:
-			return value.Valid, nil
+			return fieldValue.Valid, nil
 		default:
 			return false, fmt.Errorf("only '=' and '!=' operators supported when comparing against NULL")
 		}
 	}
 
 	switch aColumn.Kind {
+	case Boolean:
+		return compareBoolean(fieldValue.Value.(bool), valueOperand.Value.(bool), operator)
 	case Int4:
 		// Int values from parser always come back as int64, int4 row data
 		// will come back as int32 and int8 as int64
-		return compareInt4(int64(value.Value.(int32)), valueOperand.Value.(int64), operator)
+		return compareInt4(int64(fieldValue.Value.(int32)), valueOperand.Value.(int64), operator)
 	case Int8:
-		return compareInt8(value.Value.(int64), valueOperand.Value.(int64), operator)
+		return compareInt8(fieldValue.Value.(int64), valueOperand.Value.(int64), operator)
 	case Varchar:
-		return compareVarchar(value.Value, valueOperand.Value, operator)
+		return compareVarchar(fieldValue.Value, valueOperand.Value, operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", aColumn.Kind)
 	}
@@ -373,6 +375,8 @@ func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, err
 	}
 
 	switch aColumn1.Kind {
+	case Boolean:
+		return compareBoolean(value1.Value, value2.Value, operator)
 	case Int4:
 		return compareInt4(value1.Value, value2.Value, operator)
 	case Int8:
@@ -382,6 +386,32 @@ func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, err
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", aColumn1.Kind)
 	}
+}
+
+func compareBoolean(value1, value2 any, operator Operator) (bool, error) {
+	theValue1, ok := value1.(bool)
+	if !ok {
+		return false, fmt.Errorf("value '%v' cannot be cast as bool", value1)
+	}
+	theValue2, ok := value2.(bool)
+	if !ok {
+		return false, fmt.Errorf("operand value '%v' cannot be cast as bool", value2)
+	}
+	switch operator {
+	case Eq:
+		return theValue1 == theValue2, nil
+	case Ne:
+		return theValue1 != theValue2, nil
+	case Gt:
+		return false, fmt.Errorf("cannot compare boolean values with '>'")
+	case Lt:
+		return false, fmt.Errorf("cannot compare boolean values with '<'")
+	case Gte:
+		return false, fmt.Errorf("cannot compare boolean values with '>='")
+	case Lte:
+		return false, fmt.Errorf("cannot compare boolean values with '<='")
+	}
+	return false, fmt.Errorf("unknown operator '%s'", operator)
 }
 
 func compareInt4(value1, value2 any, operator Operator) (bool, error) {

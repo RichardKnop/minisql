@@ -8,6 +8,8 @@ import (
 )
 
 func TestStatement_Validate(t *testing.T) {
+	t.Parallel()
+
 	// Create a test table with both nullable and non-nullable columns
 	aTable := &Table{
 		Name: testTableName,
@@ -78,7 +80,7 @@ func TestStatement_Validate(t *testing.T) {
 			TableName: testTableName,
 			Columns: []Column{
 				{
-					Size: PageSize - 6 - 8 - 8 - 8 + 1, // Exceed max row size by 1 byte
+					Size: UsablePageSize + 1, // Exceed max row size by 1 byte
 					Kind: Varchar,
 					Name: "too_large",
 				},
@@ -280,9 +282,9 @@ func TestStatement_Validate(t *testing.T) {
 	})
 }
 
-// ...existing code...
-
 func TestStatement_CreateTableDDL(t *testing.T) {
+	t.Parallel()
+
 	t.Run("table with all data types and nullable columns", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      CreateTable,
@@ -360,5 +362,193 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 
 		actual := stmt.CreateTableDDL()
 		assert.Equal(t, expected, actual)
+	})
+}
+
+func TestFieldIsIn(t *testing.T) {
+	t.Parallel()
+
+	t.Run("string field with quoted string value", func(t *testing.T) {
+		condition := FieldIsIn("email", OperandQuotedString, "john@example.com")
+
+		expected := Condition{
+			Operand1: Operand{
+				Type:  OperandField,
+				Value: "email",
+			},
+			Operator: Eq,
+			Operand2: Operand{
+				Type:  OperandQuotedString,
+				Value: "john@example.com",
+			},
+		}
+
+		assert.Equal(t, expected, condition)
+	})
+
+	t.Run("boolean field with boolean value", func(t *testing.T) {
+		condition := FieldIsIn("verified", OperandBoolean, true)
+
+		expected := Condition{
+			Operand1: Operand{
+				Type:  OperandField,
+				Value: "verified",
+			},
+			Operator: Eq,
+			Operand2: Operand{
+				Type:  OperandBoolean,
+				Value: true,
+			},
+		}
+
+		assert.Equal(t, expected, condition)
+	})
+
+	t.Run("integer field with integer value", func(t *testing.T) {
+		condition := FieldIsIn("id", OperandInteger, int64(25))
+
+		expected := Condition{
+			Operand1: Operand{
+				Type:  OperandField,
+				Value: "id",
+			},
+			Operator: Eq,
+			Operand2: Operand{
+				Type:  OperandInteger,
+				Value: int64(25),
+			},
+		}
+
+		assert.Equal(t, expected, condition)
+	})
+
+	t.Run("float field with float value", func(t *testing.T) {
+		condition := FieldIsIn("score", OperandFloat, 95.5)
+
+		expected := Condition{
+			Operand1: Operand{
+				Type:  OperandField,
+				Value: "score",
+			},
+			Operator: Eq,
+			Operand2: Operand{
+				Type:  OperandFloat,
+				Value: 95.5,
+			},
+		}
+
+		assert.Equal(t, expected, condition)
+	})
+
+	t.Run("field with null value", func(t *testing.T) {
+		condition := FieldIsIn("description", OperandNull, nil)
+
+		expected := Condition{
+			Operand1: Operand{
+				Type:  OperandField,
+				Value: "description",
+			},
+			Operator: Eq,
+			Operand2: Operand{
+				Type:  OperandNull,
+				Value: nil,
+			},
+		}
+
+		assert.Equal(t, expected, condition)
+	})
+}
+
+func TestFieldIsNotIn(t *testing.T) {
+	t.Parallel()
+
+	t.Run("string field with quoted string value", func(t *testing.T) {
+		condition := FieldIsNotIn("email", OperandQuotedString, "john@example.com")
+
+		expected := Condition{
+			Operand1: Operand{
+				Type:  OperandField,
+				Value: "email",
+			},
+			Operator: Ne,
+			Operand2: Operand{
+				Type:  OperandQuotedString,
+				Value: "john@example.com",
+			},
+		}
+
+		assert.Equal(t, expected, condition)
+	})
+
+	t.Run("boolean field with boolean value", func(t *testing.T) {
+		condition := FieldIsNotIn("verified", OperandBoolean, true)
+
+		expected := Condition{
+			Operand1: Operand{
+				Type:  OperandField,
+				Value: "verified",
+			},
+			Operator: Ne,
+			Operand2: Operand{
+				Type:  OperandBoolean,
+				Value: true,
+			},
+		}
+
+		assert.Equal(t, expected, condition)
+	})
+
+	t.Run("integer field with integer value", func(t *testing.T) {
+		condition := FieldIsNotIn("id", OperandInteger, int64(25))
+
+		expected := Condition{
+			Operand1: Operand{
+				Type:  OperandField,
+				Value: "id",
+			},
+			Operator: Ne,
+			Operand2: Operand{
+				Type:  OperandInteger,
+				Value: int64(25),
+			},
+		}
+
+		assert.Equal(t, expected, condition)
+	})
+
+	t.Run("float field with float value", func(t *testing.T) {
+		condition := FieldIsNotIn("score", OperandFloat, 95.5)
+
+		expected := Condition{
+			Operand1: Operand{
+				Type:  OperandField,
+				Value: "score",
+			},
+			Operator: Ne,
+			Operand2: Operand{
+				Type:  OperandFloat,
+				Value: 95.5,
+			},
+		}
+
+		assert.Equal(t, expected, condition)
+	})
+
+	t.Run("field with null value", func(t *testing.T) {
+		condition := FieldIsNotIn("description", OperandNull, nil)
+
+		expected := Condition{
+			Operand1: Operand{
+				Type:  OperandField,
+				Value: "description",
+			},
+			Operator: Ne,
+			Operand2: Operand{
+				Type:  OperandNull,
+				Value: nil,
+			},
+		}
+
+		assert.Equal(t, expected, condition)
 	})
 }

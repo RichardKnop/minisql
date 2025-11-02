@@ -218,8 +218,8 @@ func TestParse_CreateTable(t *testing.T) {
 				qux int8 not null, 
 				lorem real null, 
 				ipsum double, 
-				sit varchar(255))
-			;`,
+				sit varchar(255)
+			);`,
 			[]minisql.Statement{
 				{
 					Kind:      minisql.CreateTable,
@@ -257,6 +257,44 @@ func TestParse_CreateTable(t *testing.T) {
 						},
 						{
 							Name:     "sit",
+							Kind:     minisql.Varchar,
+							Size:     255,
+							Nullable: true,
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"CREATE TABLE with multiple primary key columns fails",
+			`CREATE TABLE foo (
+				id int8 primary key, 
+				bar varchar(255) primary key
+			);`,
+			nil,
+			errCreateTableMultiplePrimaryKeys,
+		},
+		{
+			"CREATE TABLE with primary key",
+			`CREATE TABLE foo (
+				id int8 primary key, 
+				bar varchar(255)
+			);`,
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:       "id",
+							Kind:       minisql.Int8,
+							Size:       8,
+							PrimaryKey: true,
+							Nullable:   false,
+						},
+						{
+							Name:     "bar",
 							Kind:     minisql.Varchar,
 							Size:     255,
 							Nullable: true,

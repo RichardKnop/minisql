@@ -9,28 +9,29 @@ import (
 )
 
 type UniqueIndex[T int8 | int32 | int64 | float32 | float64 | string] struct {
+	logger      *zap.Logger
 	Name        string
 	Column      Column
 	RootPageIdx uint32
-	pager       Pager
-	writeLock   *sync.RWMutex
-	logger      *zap.Logger
+	pager       TxPager
+	txManager   *TransactionManager
+	writeLock   sync.RWMutex
 	maximumKeys uint32
 }
 
-func NewUniqueIndex[T int8 | int32 | int64 | float32 | float64 | string](logger *zap.Logger, name string, column Column, pager Pager, rootPageIdx uint32) *UniqueIndex[T] {
+func NewUniqueIndex[T int8 | int32 | int64 | float32 | float64 | string](logger *zap.Logger, txManager *TransactionManager, name string, column Column, pager TxPager, rootPageIdx uint32) *UniqueIndex[T] {
 	return &UniqueIndex[T]{
+		logger:      logger,
 		Name:        name,
 		Column:      column,
 		RootPageIdx: rootPageIdx,
 		pager:       pager,
-		writeLock:   new(sync.RWMutex),
-		logger:      logger,
+		txManager:   txManager,
 	}
 }
 
 func (ui *UniqueIndex[T]) Insert(ctx context.Context, key T, rowID uint64) error {
-	aRootPage, err := ui.pager.GetPage(ctx, ui.RootPageIdx)
+	aRootPage, err := ui.pager.ModifyPage(ctx, ui.RootPageIdx)
 	if err != nil {
 		return fmt.Errorf("get root page: %w", err)
 	}
@@ -73,7 +74,7 @@ func (ui *UniqueIndex[T]) Insert(ctx context.Context, key T, rowID uint64) error
 	newLeftChildNode.Header.IsRoot = false
 	// Update children to set new parent
 	for _, childIdx := range newLeftChildNode.Children() {
-		aChildPage, err := ui.pager.GetPage(ctx, childIdx)
+		aChildPage, err := ui.pager.ModifyPage(ctx, childIdx)
 		if err != nil {
 			return fmt.Errorf("get child page: %w", err)
 		}
@@ -117,7 +118,7 @@ func (idx *UniqueIndex[T]) maxIndexKeys(keySize uint64) uint32 {
 var ErrDuplicateKey = fmt.Errorf("duplicate key")
 
 func (ui *UniqueIndex[T]) InsertNotFull(ctx context.Context, pageIdx uint32, key T, rowID uint64) error {
-	aPage, err := ui.pager.GetPage(ctx, pageIdx)
+	aPage, err := ui.pager.ModifyPage(ctx, pageIdx)
 	if err != nil {
 		return fmt.Errorf("get page: %w", err)
 	}
@@ -146,7 +147,7 @@ func (ui *UniqueIndex[T]) InsertNotFull(ctx context.Context, pageIdx uint32, key
 	if err != nil {
 		return fmt.Errorf("get child: %w", err)
 	}
-	childPage, err := ui.pager.GetPage(ctx, childIdx)
+	childPage, err := ui.pager.ModifyPage(ctx, childIdx)
 	if err != nil {
 		return fmt.Errorf("get child page: %w", err)
 	}
@@ -203,7 +204,7 @@ func (ui *UniqueIndex[T]) SplitChild(ctx context.Context, parentPage, splitPage 
 	}
 	// Update children to set new parent
 	for _, childIdx := range newNode.Children() {
-		aChildPage, err := ui.pager.GetPage(ctx, childIdx)
+		aChildPage, err := ui.pager.ModifyPage(ctx, childIdx)
 		if err != nil {
 			return fmt.Errorf("get child page: %w", err)
 		}
@@ -243,8 +244,7 @@ func (ui *UniqueIndex[T]) SplitChild(ctx context.Context, parentPage, splitPage 
 type indexCallback[T int8 | int32 | int64 | float32 | float64 | string] func(page *Page)
 
 func (ui *UniqueIndex[T]) BFS(f indexCallback[T]) error {
-
-	rootPage, err := ui.pager.GetPage(context.Background(), ui.RootPageIdx)
+	rootPage, err := ui.pager.ReadPage(context.Background(), ui.RootPageIdx)
 	if err != nil {
 		return err
 	}
@@ -269,14 +269,14 @@ func (ui *UniqueIndex[T]) BFS(f indexCallback[T]) error {
 				if idxCell.Child == 0 {
 					continue
 				}
-				aPage, err := ui.pager.GetPage(context.Background(), idxCell.Child)
+				aPage, err := ui.pager.ReadPage(context.Background(), idxCell.Child)
 				if err != nil {
 					return err
 				}
 				queue = append(queue, aPage)
 			}
 			if current.IndexNode.(*IndexNode[T]).Header.RightChild > 0 && current.IndexNode.(*IndexNode[T]).Header.RightChild != RIGHT_CHILD_NOT_SET {
-				aPage, err := ui.pager.GetPage(context.Background(), current.IndexNode.(*IndexNode[T]).Header.RightChild)
+				aPage, err := ui.pager.ReadPage(context.Background(), current.IndexNode.(*IndexNode[T]).Header.RightChild)
 				if err != nil {
 					return err
 				}
@@ -300,7 +300,7 @@ func (ui *UniqueIndex[T]) print() error {
 }
 
 func (ui *UniqueIndex[T]) Delete(ctx context.Context, key T) error {
-	aRootPage, err := ui.pager.GetPage(ctx, ui.RootPageIdx)
+	aRootPage, err := ui.pager.ModifyPage(ctx, ui.RootPageIdx)
 	if err != nil {
 		return fmt.Errorf("get root page: %w", err)
 	}
@@ -325,7 +325,7 @@ func (ui *UniqueIndex[T]) Delete(ctx context.Context, key T) error {
 		if err != nil {
 			return fmt.Errorf("get first child: %w", err)
 		}
-		firstChildPage, err := ui.pager.GetPage(ctx, firstChildIdx)
+		firstChildPage, err := ui.pager.ModifyPage(ctx, firstChildIdx)
 		if err != nil {
 			return fmt.Errorf("get new root page: %w", err)
 		}
@@ -335,7 +335,7 @@ func (ui *UniqueIndex[T]) Delete(ctx context.Context, key T) error {
 		aRootNode.Header.IsRoot = true
 		// Update children to set new parent
 		for _, childIdx := range aRootNode.Children() {
-			aChildPage, err := ui.pager.GetPage(ctx, childIdx)
+			aChildPage, err := ui.pager.ModifyPage(ctx, childIdx)
 			if err != nil {
 				return fmt.Errorf("get child page: %w", err)
 			}
@@ -385,7 +385,7 @@ func (ui *UniqueIndex[T]) remove(ctx context.Context, aPage *Page, key T) error 
 	if err != nil {
 		return fmt.Errorf("get child: %w", err)
 	}
-	childPage, err := ui.pager.GetPage(ctx, childIdx)
+	childPage, err := ui.pager.ModifyPage(ctx, childIdx)
 	if err != nil {
 		return fmt.Errorf("get child page: %w", err)
 	}
@@ -406,7 +406,7 @@ func (ui *UniqueIndex[T]) remove(ctx context.Context, aPage *Page, key T) error 
 		if err != nil {
 			return fmt.Errorf("get prev child: %w", err)
 		}
-		prevChildPage, err := ui.pager.GetPage(ctx, prevChildIdx)
+		prevChildPage, err := ui.pager.ModifyPage(ctx, prevChildIdx)
 		if err != nil {
 			return fmt.Errorf("get prev child page: %w", err)
 		}
@@ -423,7 +423,7 @@ func (ui *UniqueIndex[T]) removeFromInternal(ctx context.Context, aPage *Page, i
 		maxCells = int(ui.maxIndexKeys(aNode.KeySize))
 	)
 
-	leftChildPage, err := ui.pager.GetPage(ctx, aNode.Cells[idx].Child)
+	leftChildPage, err := ui.pager.ModifyPage(ctx, aNode.Cells[idx].Child)
 	if err != nil {
 		return fmt.Errorf("get left child page: %w", err)
 	}
@@ -433,7 +433,7 @@ func (ui *UniqueIndex[T]) removeFromInternal(ctx context.Context, aPage *Page, i
 	if err != nil {
 		return fmt.Errorf("get right child index: %w", err)
 	}
-	rightChildPage, err := ui.pager.GetPage(ctx, rightPageIdx)
+	rightChildPage, err := ui.pager.ModifyPage(ctx, rightPageIdx)
 	if err != nil {
 		return fmt.Errorf("get right child page: %w", err)
 	}
@@ -478,13 +478,13 @@ func (ui *UniqueIndex[T]) removeFromInternal(ctx context.Context, aPage *Page, i
 
 // getPred finds predecessor of the key at the idx-th position in the node
 func (ui *UniqueIndex[T]) getPred(ctx context.Context, aNode *IndexNode[T], idx int) (IndexCell[T], error) {
-	curPage, err := ui.pager.GetPage(ctx, aNode.Cells[idx].Child)
+	curPage, err := ui.pager.ModifyPage(ctx, aNode.Cells[idx].Child)
 	if err != nil {
 		return *new(IndexCell[T]), fmt.Errorf("get child page: %w", err)
 	}
 	cur := curPage.IndexNode.(*IndexNode[T])
 	for !cur.Header.IsLeaf {
-		aPage, err := ui.pager.GetPage(ctx, cur.Header.RightChild)
+		aPage, err := ui.pager.ModifyPage(ctx, cur.Header.RightChild)
 		if err != nil {
 			return *new(IndexCell[T]), fmt.Errorf("get page: %w", err)
 		}
@@ -500,13 +500,13 @@ func (ui *UniqueIndex[T]) getSucc(ctx context.Context, aNode *IndexNode[T], idx 
 	if err != nil {
 		return *new(IndexCell[T]), fmt.Errorf("get child index: %w", err)
 	}
-	curPage, err := ui.pager.GetPage(ctx, curIdx)
+	curPage, err := ui.pager.ModifyPage(ctx, curIdx)
 	if err != nil {
 		return *new(IndexCell[T]), fmt.Errorf("get child page: %w", err)
 	}
 	cur := curPage.IndexNode.(*IndexNode[T])
 	for !cur.Header.IsLeaf {
-		aPage, err := ui.pager.GetPage(ctx, cur.Cells[0].Child)
+		aPage, err := ui.pager.ModifyPage(ctx, cur.Cells[0].Child)
 		if err != nil {
 			return *new(IndexCell[T]), fmt.Errorf("get page: %w", err)
 		}
@@ -529,14 +529,14 @@ func (ui *UniqueIndex[T]) fill(ctx context.Context, aParent, aPage *Page, idx in
 
 	var err error
 	if idx != 0 {
-		left, err = ui.pager.GetPage(ctx, parentNode.Cells[idx-1].Child)
+		left, err = ui.pager.ModifyPage(ctx, parentNode.Cells[idx-1].Child)
 		if err != nil {
 			return fmt.Errorf("get left page: %w", err)
 		}
 		leftNode = left.IndexNode.(*IndexNode[T])
 	}
 	if idx != int(parentNode.Header.Keys) {
-		right, err = ui.pager.GetPage(ctx, parentNode.GetRightChildByIndex(uint32(idx)))
+		right, err = ui.pager.ModifyPage(ctx, parentNode.GetRightChildByIndex(uint32(idx)))
 		if err != nil {
 			return fmt.Errorf("get right page: %w", err)
 		}
@@ -544,11 +544,11 @@ func (ui *UniqueIndex[T]) fill(ctx context.Context, aParent, aPage *Page, idx in
 	}
 
 	if left != nil && leftNode.AtLeastHalfFull(int(maxCells)) {
-		return ui.borrowFromLeft(aParent, aPage, left, uint32(idx))
+		return ui.borrowFromLeft(ctx, aParent, aPage, left, uint32(idx))
 	}
 
 	if right != nil && rightNode.AtLeastHalfFull(int(maxCells)) {
-		return ui.borrowFromRight(aParent, aPage, right, uint32(idx))
+		return ui.borrowFromRight(ctx, aParent, aPage, right, uint32(idx))
 	}
 
 	if idx != int(parentNode.Header.Keys) {
@@ -566,7 +566,7 @@ func (ui *UniqueIndex[T]) fill(ctx context.Context, aParent, aPage *Page, idx in
 }
 
 // A function to borrow a key from left sibling
-func (ui *UniqueIndex[T]) borrowFromLeft(aParent, aPage, left *Page, idx uint32) error {
+func (ui *UniqueIndex[T]) borrowFromLeft(ctx context.Context, aParent, aPage, left *Page, idx uint32) error {
 	var (
 		parentNode = aParent.IndexNode.(*IndexNode[T])
 		aNode      = aPage.IndexNode.(*IndexNode[T])
@@ -580,7 +580,7 @@ func (ui *UniqueIndex[T]) borrowFromLeft(aParent, aPage, left *Page, idx uint32)
 	})
 
 	if !leftNode.Header.IsLeaf {
-		childPage, err := ui.pager.GetPage(context.Background(), leftNode.Header.RightChild)
+		childPage, err := ui.pager.ModifyPage(ctx, leftNode.Header.RightChild)
 		if err != nil {
 			return fmt.Errorf("get child page: %w", err)
 		}
@@ -596,7 +596,7 @@ func (ui *UniqueIndex[T]) borrowFromLeft(aParent, aPage, left *Page, idx uint32)
 }
 
 // A function to borrow a key from right sibling
-func (ui *UniqueIndex[T]) borrowFromRight(aParent, aPage, right *Page, idx uint32) error {
+func (ui *UniqueIndex[T]) borrowFromRight(ctx context.Context, aParent, aPage, right *Page, idx uint32) error {
 	var (
 		parentNode = aParent.IndexNode.(*IndexNode[T])
 		aNode      = aPage.IndexNode.(*IndexNode[T])
@@ -611,7 +611,7 @@ func (ui *UniqueIndex[T]) borrowFromRight(aParent, aPage, right *Page, idx uint3
 	aNode.Header.RightChild = rightNode.FirstCell().Child
 
 	if !aNode.Header.IsLeaf {
-		childPage, err := ui.pager.GetPage(context.Background(), aNode.Header.RightChild)
+		childPage, err := ui.pager.ModifyPage(ctx, aNode.Header.RightChild)
 		if err != nil {
 			return fmt.Errorf("get child page: %w", err)
 		}
@@ -643,7 +643,7 @@ func (ui *UniqueIndex[T]) merge(ctx context.Context, aParent, left, right *Page,
 
 	if !rightNode.Header.IsLeaf {
 		for _, iCell := range cellsToMoveLeft {
-			movedPage, err := ui.pager.GetPage(ctx, iCell.Child)
+			movedPage, err := ui.pager.ModifyPage(ctx, iCell.Child)
 			if err != nil {
 				return fmt.Errorf("get moved page: %w", err)
 			}
@@ -651,7 +651,7 @@ func (ui *UniqueIndex[T]) merge(ctx context.Context, aParent, left, right *Page,
 		}
 	}
 	if !leftNode.Header.IsLeaf {
-		newRightChildPage, err := ui.pager.GetPage(ctx, rightNode.Header.RightChild)
+		newRightChildPage, err := ui.pager.ModifyPage(ctx, rightNode.Header.RightChild)
 		if err != nil {
 			return fmt.Errorf("get new right child page: %w", err)
 		}

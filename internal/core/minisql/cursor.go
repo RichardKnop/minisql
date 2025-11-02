@@ -13,7 +13,7 @@ type Cursor struct {
 }
 
 func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) error {
-	aPage, err := c.Table.pager.GetPage(ctx, c.PageIdx)
+	aPage, err := c.Table.pager.ModifyPage(ctx, c.PageIdx)
 	if err != nil {
 		return fmt.Errorf("get page: %w", err)
 	}
@@ -40,7 +40,7 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) erro
 		}
 	}
 
-	if err := c.saveToCell(&aPage.LeafNode.Cells[c.CellIdx], key, aRow); err != nil {
+	if err := c.saveToCell(aPage.LeafNode, c.CellIdx, key, aRow); err != nil {
 		return err
 	}
 	aPage.LeafNode.Header.Cells += 1
@@ -54,7 +54,7 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) erro
 func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row) error {
 	aPager := c.Table.pager
 
-	aSplitPage, err := aPager.GetPage(ctx, c.PageIdx)
+	aSplitPage, err := aPager.ModifyPage(ctx, c.PageIdx)
 	if err != nil {
 		return fmt.Errorf("get page: %w", err)
 	}
@@ -104,16 +104,15 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 			destPage = aSplitPage // left
 		}
 		cellIdx := i % leftSplitCount
-		destCell := &destPage.LeafNode.Cells[cellIdx]
 
 		if i == c.CellIdx {
-			if err := c.saveToCell(destCell, key, aRow); err != nil {
+			if err := c.saveToCell(destPage.LeafNode, cellIdx, key, aRow); err != nil {
 				return err
 			}
 		} else if i > c.CellIdx {
-			*destCell = aSplitPage.LeafNode.Cells[i-1]
+			destPage.LeafNode.Cells[cellIdx] = aSplitPage.LeafNode.Cells[i-1]
 		} else {
-			*destCell = aSplitPage.LeafNode.Cells[i]
+			destPage.LeafNode.Cells[cellIdx] = aSplitPage.LeafNode.Cells[i]
 		}
 	}
 
@@ -127,7 +126,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	}
 
 	parentPageIdx := aSplitPage.LeafNode.Header.Parent
-	aParentPage, err := aPager.GetPage(ctx, parentPageIdx)
+	aParentPage, err := aPager.ModifyPage(ctx, parentPageIdx)
 	if err != nil {
 		return fmt.Errorf("get parent page %w", err)
 	}
@@ -147,7 +146,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 }
 
 func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
-	aPage, err := c.Table.pager.GetPage(ctx, c.PageIdx)
+	aPage, err := c.Table.pager.ReadPage(ctx, c.PageIdx)
 	if err != nil {
 		return Row{}, fmt.Errorf("fetch row: %w", err)
 	}
@@ -177,21 +176,27 @@ func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
 	return aRow, nil
 }
 
-func (c *Cursor) saveToCell(cell *Cell, key uint64, aRow *Row) error {
+func (c *Cursor) saveToCell(aNode *LeafNode, cellIdx uint32, key uint64, aRow *Row) error {
 	rowBuf, err := aRow.Marshal()
 	if err != nil {
 		return fmt.Errorf("save to cell: %w", err)
 	}
 
-	cell.NullBitmask = aRow.NullBitmask()
-	cell.Key = key
-	copy(cell.Value[:], rowBuf)
+	if cellIdx >= uint32(len(aNode.Cells)) {
+		for i := uint32(len(aNode.Cells)); i <= cellIdx; i++ {
+			aNode.Cells = append(aNode.Cells, NewCell(aNode.RowSize))
+		}
+	}
+	aCell := &aNode.Cells[cellIdx]
+	aCell.NullBitmask = aRow.NullBitmask()
+	aCell.Key = key
+	copy(aCell.Value[:], rowBuf)
 
 	return nil
 }
 
 func (c *Cursor) update(ctx context.Context, aRow *Row) error {
-	aPage, err := c.Table.pager.GetPage(ctx, c.PageIdx)
+	aPage, err := c.Table.pager.ModifyPage(ctx, c.PageIdx)
 	if err != nil {
 		return fmt.Errorf("update: %w", err)
 	}
@@ -209,7 +214,7 @@ func (c *Cursor) update(ctx context.Context, aRow *Row) error {
 }
 
 func (c *Cursor) delete(ctx context.Context) error {
-	aPage, err := c.Table.pager.GetPage(ctx, c.PageIdx)
+	aPage, err := c.Table.pager.ModifyPage(ctx, c.PageIdx)
 	if err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}

@@ -398,3 +398,89 @@ func (n *IndexNode[T]) AppendCells(cells ...IndexCell[T]) {
 func (n *IndexNode[T]) setParent(parentIdx uint32) {
 	n.Header.Parent = parentIdx
 }
+
+func marshalIndexNode(anyNode any, buf []byte) ([]byte, error) {
+	switch aNode := anyNode.(type) {
+	case *IndexNode[int8]:
+		return aNode.Marshal(buf)
+	case *IndexNode[int32]:
+		return aNode.Marshal(buf)
+	case *IndexNode[int64]:
+		return aNode.Marshal(buf)
+	case *IndexNode[float32]:
+		return aNode.Marshal(buf)
+	case *IndexNode[float64]:
+		return aNode.Marshal(buf)
+	case *IndexNode[string]:
+		return aNode.Marshal(buf)
+	default:
+		return nil, fmt.Errorf("unknown index node type")
+	}
+}
+
+func copyIndexNode(anyNode any) any {
+	switch aNode := anyNode.(type) {
+	case *IndexNode[int8]:
+		aCopy := &IndexNode[int8]{
+			Header:  aNode.Header,
+			Cells:   make([]IndexCell[int8], 0, maxIndexKeys(aNode.KeySize)),
+			KeySize: aNode.KeySize,
+		}
+		for _, aCell := range aNode.Cells {
+			aCopy.Cells = append(aCopy.Cells, aCell)
+		}
+		return aCopy
+	case *IndexNode[int32]:
+		aCopy := &IndexNode[int32]{
+			Header:  aNode.Header,
+			Cells:   make([]IndexCell[int32], 0, maxIndexKeys(aNode.KeySize)),
+			KeySize: aNode.KeySize,
+		}
+		for _, aCell := range aNode.Cells {
+			aCopy.Cells = append(aCopy.Cells, aCell)
+		}
+		return aCopy
+	case *IndexNode[int64]:
+		aCopy := &IndexNode[int64]{
+			Header:  aNode.Header,
+			Cells:   make([]IndexCell[int64], 0, maxIndexKeys(aNode.KeySize)),
+			KeySize: aNode.KeySize,
+		}
+		for _, aCell := range aNode.Cells {
+			aCopy.Cells = append(aCopy.Cells, aCell)
+		}
+		return aCopy
+	case *IndexNode[float32]:
+		aCopy := &IndexNode[float32]{
+			Header:  aNode.Header,
+			Cells:   make([]IndexCell[float32], 0, maxIndexKeys(aNode.KeySize)),
+			KeySize: aNode.KeySize,
+		}
+		for _, aCell := range aNode.Cells {
+			aCopy.Cells = append(aCopy.Cells, aCell)
+		}
+		return aCopy
+	case *IndexNode[float64]:
+		aCopy := &IndexNode[float64]{
+			Header:  aNode.Header,
+			Cells:   make([]IndexCell[float64], 0, maxIndexKeys(aNode.KeySize)),
+			KeySize: aNode.KeySize,
+		}
+		for _, aCell := range aNode.Cells {
+			aCopy.Cells = append(aCopy.Cells, aCell)
+		}
+		return aCopy
+	case *IndexNode[string]:
+		aCopy := &IndexNode[string]{
+			Header:  aNode.Header,
+			Cells:   make([]IndexCell[string], 0, maxIndexKeys(aNode.KeySize)),
+			KeySize: aNode.KeySize,
+		}
+		for _, aCell := range aNode.Cells {
+			aCopy.Cells = append(aCopy.Cells, aCell)
+		}
+		return aCopy
+	default:
+		return nil
+	}
+}

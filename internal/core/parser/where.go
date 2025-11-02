@@ -37,7 +37,7 @@ func (p *parser) doParseWhere() error {
 		}
 		p.Statement.Conditions = p.Statement.Conditions.Append(minisql.Condition{
 			Operand1: minisql.Operand{
-				Type:  minisql.Field,
+				Type:  minisql.OperandField,
 				Value: identifier,
 			},
 		})
@@ -51,12 +51,12 @@ func (p *parser) doParseWhere() error {
 		if strings.ToUpper(operatorOrNullComparison) == "IS NULL" {
 			currentCondition.Operator = minisql.Eq
 			currentCondition.Operand2 = minisql.Operand{
-				Type: minisql.Null,
+				Type: minisql.OperandNull,
 			}
 		} else if strings.ToUpper(operatorOrNullComparison) == "IS NOT NULL" {
 			currentCondition.Operator = minisql.Ne
 			currentCondition.Operand2 = minisql.Operand{
-				Type: minisql.Null,
+				Type: minisql.OperandNull,
 			}
 		} else {
 			switch operatorOrNullComparison {
@@ -86,7 +86,7 @@ func (p *parser) doParseWhere() error {
 		)
 		if isIdentifier(identifier) {
 			currentCondition.Operand2 = minisql.Operand{
-				Type:  minisql.Field,
+				Type:  minisql.OperandField,
 				Value: identifier,
 			}
 		} else {
@@ -95,13 +95,13 @@ func (p *parser) doParseWhere() error {
 				return errWhereExpectedQuotedStringOrNumber
 			}
 			currentCondition.Operand2 = minisql.Operand{
-				Type:  minisql.QuotedString,
+				Type:  minisql.OperandQuotedString,
 				Value: value,
 			}
 			if _, ok := value.(int64); ok {
-				currentCondition.Operand2.Type = minisql.Integer
+				currentCondition.Operand2.Type = minisql.OperandInteger
 			} else if _, ok := value.(float64); ok {
-				currentCondition.Operand2.Type = minisql.Float
+				currentCondition.Operand2.Type = minisql.OperandFloat
 			}
 		}
 		p.Conditions.UpdateLast(currentCondition)

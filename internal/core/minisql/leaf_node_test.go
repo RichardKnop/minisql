@@ -27,11 +27,14 @@ func TestLeafNode_Marshal(t *testing.T) {
 		Cells:    2,
 		NextLeaf: 4,
 	}
-	aNode.Cells[0].Key = 1
-	aNode.Cells[0].Value = bytes.Repeat([]byte{1}, 230)
-	aNode.Cells[1].Key = 2
-	aNode.Cells[1].Value = bytes.Repeat([]byte{1}, 230)
-	aNode.Cells[1].NullBitmask = bitwise.Set(uint64(0), 1)
+	aNode.Cells = append(aNode.Cells, Cell{
+		Key:   1,
+		Value: bytes.Repeat([]byte{1}, 230),
+	}, Cell{
+		Key:         2,
+		Value:       bytes.Repeat([]byte{1}, 230),
+		NullBitmask: bitwise.Set(uint64(0), 1),
+	})
 
 	buf := make([]byte, aNode.Size())
 	data, err := aNode.Marshal(buf)

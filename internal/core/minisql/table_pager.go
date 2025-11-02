@@ -4,13 +4,6 @@ import (
 	"context"
 )
 
-func (p *pagerImpl) ForTable(rowSize uint64) Pager {
-	return &tablePager{
-		pagerImpl: p,
-		rowSize:   rowSize,
-	}
-}
-
 type tablePager struct {
 	*pagerImpl
 	rowSize uint64
@@ -18,14 +11,6 @@ type tablePager struct {
 
 func (p *tablePager) GetPage(ctx context.Context, pageIdx uint32) (*Page, error) {
 	return p.pagerImpl.GetPage(ctx, pageIdx, p.unmarshal)
-}
-
-func (p *tablePager) GetFreePage(ctx context.Context) (*Page, error) {
-	return p.pagerImpl.GetFreePage(ctx, p.unmarshal)
-}
-
-func (p *tablePager) AddFreePage(ctx context.Context, pageIdx uint32) error {
-	return p.pagerImpl.AddFreePage(ctx, pageIdx, p.unmarshal)
 }
 
 func (p *tablePager) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
@@ -43,11 +28,14 @@ func (p *tablePager) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
 	if int(pageIdx) == int(p.totalPages) {
 		// Leaf node
 		leaf := NewLeafNode(p.rowSize)
-		if err := unmarshalLeaf(pageIdx, leaf, buf); err != nil {
+		_, err := leaf.Unmarshal(buf)
+		if err != nil {
 			return nil, err
 		}
+		p.mu.Lock()
 		p.pages = append(p.pages, &Page{Index: pageIdx, LeafNode: leaf})
 		p.totalPages = pageIdx + 1
+		p.mu.Unlock()
 		return p.pages[len(p.pages)-1], nil
 	}
 
@@ -59,7 +47,8 @@ func (p *tablePager) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
 		// First byte is Internal flag, this condition is also true if page does not exist
 		// Leaf node
 		leaf := NewLeafNode(p.rowSize)
-		if err := unmarshalLeaf(pageIdx, leaf, buf[idx:]); err != nil {
+		_, err := leaf.Unmarshal(buf[idx:])
+		if err != nil {
 			return nil, err
 		}
 		p.pages[pageIdx] = &Page{Index: pageIdx, LeafNode: leaf}
@@ -68,33 +57,10 @@ func (p *tablePager) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
 
 	// Internal node
 	internal := new(InternalNode)
-	if err := unmarshalInternal(pageIdx, internal, buf[idx:]); err != nil {
+	_, err := internal.Unmarshal(buf[idx:])
+	if err != nil {
 		return nil, err
 	}
 	p.pages[pageIdx] = &Page{Index: pageIdx, InternalNode: internal}
 	return p.pages[pageIdx], nil
-}
-
-func unmarshalLeaf(pageIdx uint32, leaf *LeafNode, buf []byte) error {
-	unmarshaler := leaf.Unmarshal
-	if pageIdx == 0 {
-		unmarshaler = leaf.UnmarshalRoot
-	}
-	_, err := unmarshaler(buf)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func unmarshalInternal(pageIdx uint32, internal *InternalNode, buf []byte) error {
-	unmarshaler := internal.Unmarshal
-	if pageIdx == 0 {
-		unmarshaler = internal.UnmarshalRoot
-	}
-	_, err := unmarshaler(buf)
-	if err != nil {
-		return err
-	}
-	return nil
 }

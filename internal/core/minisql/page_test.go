@@ -17,13 +17,17 @@ func TestTable_PageRecycling(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
-	tablePager := aPager.ForTable(Row{Columns: testMediumColumns}.Size())
+	txManager := NewTransactionManager()
+	tablePager := NewTransactionalPager(
+		aPager.ForTable(Row{Columns: testMediumColumns}.Size()),
+		txManager,
+	)
 
 	var (
 		ctx     = context.Background()
 		numRows = 100
 		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, testTableName, testMediumColumns, tablePager, 0)
+		aTable  = NewTable(testLogger, tablePager, txManager, testTableName, testMediumColumns, 0)
 	)
 	aTable.maximumICells = 5 // for testing purposes only, normally 340
 
@@ -37,8 +41,12 @@ func TestTable_PageRecycling(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	err = aTable.Insert(ctx, stmt)
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return aTable.Insert(ctx, stmt)
+	}, aPager)
 	require.NoError(t, err)
+
+	// require.NoError(t, aTable.print())
 
 	assert.Equal(t, 47, int(aPager.TotalPages()))
 	assert.Equal(t, 0, int(aPager.dbHeader.FreePageCount))
@@ -46,18 +54,26 @@ func TestTable_PageRecycling(t *testing.T) {
 
 	// Now delete all rows, this will free up 46 pages
 	// but the root page will remain in use
-	deleteResult, err := aTable.Delete(ctx, Statement{
-		Kind: Delete,
-	})
+	var aResult StatementResult
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		var err error
+		aResult, err = aTable.Delete(ctx, Statement{
+			Kind: Delete,
+		})
+		return err
+	}, aPager)
 	require.NoError(t, err)
-	assert.Equal(t, len(rows), deleteResult.RowsAffected)
+
+	assert.Equal(t, len(rows), aResult.RowsAffected)
 
 	checkRows(ctx, t, aTable, nil)
 	assert.Equal(t, 47, int(aPager.TotalPages()))
 	assert.Equal(t, 46, int(aPager.dbHeader.FreePageCount))
 
 	// Now we reinsert the same rows again
-	err = aTable.Insert(ctx, stmt)
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return aTable.Insert(ctx, stmt)
+	}, aPager)
 	require.NoError(t, err)
 
 	// We should still have the same number of pages in total
@@ -67,24 +83,134 @@ func TestTable_PageRecycling(t *testing.T) {
 	checkRows(ctx, t, aTable, rows)
 }
 
-func (p *pagerImpl) getFreePages(rowSize uint64) ([]int, error) {
-	var freePages []int
+func TestPage_Clone(t *testing.T) {
+	t.Parallel()
 
-	tablePager := p.ForTable(rowSize)
-
-	nextFreePage := p.dbHeader.FirstFreePage
-	for nextFreePage != 0 {
-		freePages = append(freePages, int(nextFreePage))
-
-		freePage, err := tablePager.GetPage(context.Background(), nextFreePage)
-		if err != nil {
-			return nil, err
+	t.Run("leaf page", func(t *testing.T) {
+		original := &Page{
+			Index: 5,
+			LeafNode: &LeafNode{
+				Header: LeafNodeHeader{
+					Header: Header{
+						IsInternal: false,
+						IsRoot:     true,
+						Parent:     7,
+					},
+					Cells:    2,
+					NextLeaf: 9,
+				},
+				RowSize: 16,
+				Cells: []Cell{
+					{
+						NullBitmask: 0,
+						Key:         1,
+						Value:       []byte("first value"),
+					},
+					{
+						NullBitmask: 0,
+						Key:         2,
+						Value:       []byte("second value"),
+					},
+				},
+			},
 		}
 
-		nextFreePage = freePage.FreePage.NextFreePage
-	}
+		copied := original.Clone()
 
-	// sort.Ints(freePages)
+		require.Nil(t, copied.InternalNode)
+		require.Nil(t, copied.FreePage)
+		require.Nil(t, copied.IndexNode)
+		require.NotNil(t, copied.LeafNode)
+		assert.Equal(t, original.Index, copied.Index)
+		assert.Equal(t, original.LeafNode, copied.LeafNode)
+	})
 
-	return freePages, nil
+	t.Run("internal page", func(t *testing.T) {
+		iCells := [InternalNodeMaxCells]ICell{}
+		iCells[0] = ICell{
+			Key:   10,
+			Child: 3,
+		}
+		iCells[1] = ICell{
+			Key:   20,
+			Child: 4,
+		}
+		original := &Page{
+			Index: 5,
+			InternalNode: &InternalNode{
+				Header: InternalNodeHeader{
+					Header: Header{
+						IsInternal: false,
+						IsRoot:     true,
+						Parent:     7,
+					},
+					KeysNum:    2,
+					RightChild: 9,
+				},
+				ICells: iCells,
+			},
+		}
+
+		copied := original.Clone()
+
+		require.Nil(t, copied.LeafNode)
+		require.Nil(t, copied.FreePage)
+		require.Nil(t, copied.IndexNode)
+		require.NotNil(t, copied.InternalNode)
+		assert.Equal(t, original.Index, copied.Index)
+		assert.Equal(t, original.InternalNode, copied.InternalNode)
+	})
+
+	t.Run("free page", func(t *testing.T) {
+		original := &Page{
+			Index: 5,
+			FreePage: &FreePage{
+				NextFreePage: 10,
+			},
+		}
+
+		copied := original.Clone()
+
+		require.Nil(t, copied.LeafNode)
+		require.Nil(t, copied.InternalNode)
+		require.Nil(t, copied.IndexNode)
+		require.NotNil(t, copied.FreePage)
+		assert.Equal(t, original.Index, copied.Index)
+		assert.Equal(t, original.FreePage, copied.FreePage)
+	})
+
+	t.Run("index page", func(t *testing.T) {
+		original := &Page{
+			Index: 5,
+			IndexNode: &IndexNode[int64]{
+				Header: IndexNodeHeader{
+					IsRoot:     false,
+					IsLeaf:     true,
+					Parent:     7,
+					Keys:       2,
+					RightChild: 65,
+				},
+				KeySize: 8,
+				Cells: []IndexCell[int64]{
+					{
+						Key:   100,
+						Child: 3,
+					},
+					{
+						Key:   200,
+						Child: 4,
+					},
+				},
+			},
+		}
+
+		copied := original.Clone()
+
+		require.Nil(t, copied.LeafNode)
+		require.Nil(t, copied.InternalNode)
+		require.Nil(t, copied.FreePage)
+		require.NotNil(t, copied.IndexNode)
+		assert.Equal(t, original.Index, copied.Index)
+		assert.Equal(t, original.IndexNode, copied.IndexNode)
+	})
 }
