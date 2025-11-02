@@ -291,10 +291,11 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 			TableName: "users",
 			Columns: []Column{
 				{
-					Kind:     Int8,
-					Size:     8,
-					Name:     "id",
-					Nullable: false,
+					Kind:       Int8,
+					Size:       8,
+					Name:       "id",
+					Nullable:   false,
+					PrimaryKey: true,
 				},
 				{
 					Kind:     Varchar,
@@ -330,7 +331,7 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 		}
 
 		expected := `create table "users" (
-	id int8 not null,
+	id int8 primary key,
 	email varchar(255),
 	age int4,
 	verified boolean not null,
@@ -363,6 +364,52 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 		actual := stmt.CreateTableDDL()
 		assert.Equal(t, expected, actual)
 	})
+}
+
+func TestStatement_InsertForColumn(t *testing.T) {
+	t.Parallel()
+
+	stmt := Statement{
+		Kind:      Insert,
+		TableName: "users",
+		Columns: []Column{
+			{
+				Kind:     Int4,
+				Size:     4,
+				Name:     "id",
+				Nullable: false,
+			},
+			{
+				Kind:     Varchar,
+				Size:     255,
+				Name:     "email",
+				Nullable: false,
+			},
+		},
+		Fields: []string{"id", "email"},
+		Inserts: [][]OptionalValue{
+			{
+				{Value: int32(1), Valid: true},
+				{Value: "john@example.com", Valid: true},
+			},
+			{
+				{Value: int32(2), Valid: true},
+				{Value: "jane@example.com", Valid: true},
+			},
+		},
+	}
+
+	val, ok := stmt.InsertForColumn("email", 5)
+	require.False(t, ok)
+	assert.Equal(t, OptionalValue{}, val)
+
+	val, ok = stmt.InsertForColumn("email", 0)
+	require.True(t, ok)
+	assert.Equal(t, OptionalValue{Value: "john@example.com", Valid: true}, val)
+
+	val, ok = stmt.InsertForColumn("email", 1)
+	require.True(t, ok)
+	assert.Equal(t, OptionalValue{Value: "jane@example.com", Valid: true}, val)
 }
 
 func TestFieldIsIn(t *testing.T) {

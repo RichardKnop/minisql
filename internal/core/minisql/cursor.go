@@ -75,7 +75,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 		"new_page_index", int(aNewPage.Index),
 	).Debug("leaf node split insert")
 
-	aNewPage.LeafNode = NewLeafNode(c.Table.RowSize)
+	aNewPage.LeafNode = NewLeafNode(c.Table.rowSize)
 	aNewPage.LeafNode.Header.Parent = aSplitPage.LeafNode.Header.Parent
 
 	aNewPage.LeafNode.Header.NextLeaf = aSplitPage.LeafNode.Header.NextLeaf
@@ -121,7 +121,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	aNewPage.LeafNode.Header.Cells = rightSplitCount
 
 	if aSplitPage.LeafNode.Header.IsRoot {
-		_, err := c.Table.CreateNewRoot(ctx, aNewPage.Index)
+		_, err := c.Table.createNewRoot(ctx, aNewPage.Index)
 		return err
 	}
 
@@ -195,20 +195,74 @@ func (c *Cursor) saveToCell(aNode *LeafNode, cellIdx uint32, key uint64, aRow *R
 	return nil
 }
 
-func (c *Cursor) update(ctx context.Context, aRow *Row) error {
+func (c *Cursor) update(ctx context.Context, stmt Statement, aRow *Row) (bool, error) {
+	var (
+		oldPkValue, _ = aRow.GetValue(c.Table.PrimaryKey.Column.Name)
+		changedValues = map[string]struct{}{}
+	)
+	for name, value := range stmt.Updates {
+		found, changed := aRow.SetValue(name, value)
+		if found && changed {
+			changedValues[name] = struct{}{}
+		}
+	}
+
+	if len(changedValues) == 0 {
+		// No changes
+		return false, nil
+	}
+
+	if c.Table.HasPrimaryKey() {
+		// Only update primary key if it has changed
+		_, ok := changedValues[c.Table.PrimaryKey.Column.Name]
+		if ok {
+			if err := c.updatePrimaryKey(ctx, oldPkValue, aRow); err != nil {
+				return false, err
+			}
+		}
+	}
+
 	aPage, err := c.Table.pager.ModifyPage(ctx, c.PageIdx)
 	if err != nil {
-		return fmt.Errorf("update: %w", err)
+		return false, fmt.Errorf("update: %w", err)
 	}
 	cell := &aPage.LeafNode.Cells[c.CellIdx]
 
 	rowBuf, err := aRow.Marshal()
 	if err != nil {
-		return fmt.Errorf("update: %w", err)
+		return false, fmt.Errorf("update: %w", err)
 	}
 
 	cell.NullBitmask = aRow.NullBitmask()
 	copy(cell.Value[:], rowBuf)
+
+	return true, nil
+}
+
+func (c *Cursor) updatePrimaryKey(ctx context.Context, oldPkValue OptionalValue, aRow *Row) error {
+	if c.Table.PrimaryKey.Index == nil {
+		return fmt.Errorf("table %s has primary key but no index", c.Table.Name)
+	}
+	pkValue, ok := aRow.GetValue(c.Table.PrimaryKey.Column.Name)
+	if !ok {
+		return nil
+	}
+	if !pkValue.Valid {
+		return fmt.Errorf("cannot update primary key %s to NULL", c.Table.PrimaryKey.Name)
+	}
+	castedValue, err := castPrimaryKeyValue(c.Table.PrimaryKey.Column, pkValue.Value)
+	if err != nil {
+		return fmt.Errorf("failed to cast primary key value for %s: %w", c.Table.PrimaryKey.Name, err)
+	}
+	rowID := aRow.Key
+	// We try to insert new primary key first to avoid leaving table in inconsistent state
+	// If the new primary key is already taken, we return an error without modifying the existing row
+	if err := c.Table.PrimaryKey.Index.Insert(ctx, castedValue, rowID); err != nil {
+		return fmt.Errorf("failed to insert new primary key %s: %w", c.Table.PrimaryKey.Name, err)
+	}
+	if err := c.Table.PrimaryKey.Index.Delete(ctx, oldPkValue.Value); err != nil {
+		return fmt.Errorf("failed to delete old primary key %s: %w", c.Table.PrimaryKey.Name, err)
+	}
 
 	return nil
 }
@@ -220,7 +274,24 @@ func (c *Cursor) delete(ctx context.Context) error {
 	}
 
 	key := aPage.LeafNode.Cells[c.CellIdx].Key
-	err = c.Table.DeleteKey(ctx, c.PageIdx, key)
 
-	return err
+	if c.Table.HasPrimaryKey() {
+		aRow, err := c.fetchRow(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to fetch row: %w", err)
+		}
+		primaryKeyValue, ok := aRow.GetValue(c.Table.PrimaryKey.Column.Name)
+		if !ok {
+			return fmt.Errorf("primary key %s not found in row", c.Table.PrimaryKey.Name)
+		}
+		if err := c.Table.PrimaryKey.Index.Delete(ctx, primaryKeyValue.Value); err != nil {
+			return fmt.Errorf("failed to delete primary key %s: %w", c.Table.PrimaryKey.Name, err)
+		}
+	}
+
+	if err := c.Table.DeleteKey(ctx, c.PageIdx, key); err != nil {
+		return fmt.Errorf("failed to delete key: %w", err)
+	}
+
+	return nil
 }

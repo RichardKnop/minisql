@@ -73,16 +73,15 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 	go func(in <-chan Row) {
 		defer close(stopChan)
 		for aRow := range in {
-			for name, value := range stmt.Updates {
-				aRow.SetValue(name, value)
-			}
-
-			if err := aRow.cursor.update(ctx, &aRow); err != nil {
+			changed, err := aRow.cursor.update(ctx, stmt, &aRow)
+			if err != nil {
 				errorsPipe <- err
 				return
 			}
 
-			aResult.RowsAffected += 1
+			if changed {
+				aResult.RowsAffected += 1
+			}
 		}
 	}(filteredPipe)
 

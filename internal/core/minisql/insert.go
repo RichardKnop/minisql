@@ -13,12 +13,32 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 		return err
 	}
 
-	aCursor, nextRowID, err := t.SeekNextRowID(ctx, t.RootPageIdx)
+	aCursor, nextRowID, err := t.SeekNextRowID(ctx, t.GetRootPageIdx())
 	if err != nil {
 		return err
 	}
 
 	for i, values := range stmt.Inserts {
+		if t.HasPrimaryKey() {
+			if t.PrimaryKey.Index == nil {
+				return fmt.Errorf("table %s has primary key but no index", t.Name)
+			}
+			pkValue, ok := stmt.InsertForColumn(t.PrimaryKey.Column.Name, i)
+			if !ok {
+				return fmt.Errorf("failed to get value for primary key %s", t.PrimaryKey.Name)
+			}
+			if !pkValue.Valid {
+				return fmt.Errorf("cannot insert NULL into primary key %s", t.PrimaryKey.Name)
+			}
+			castedValue, err := castPrimaryKeyValue(t.PrimaryKey.Column, pkValue.Value)
+			if err != nil {
+				return fmt.Errorf("failed to cast primary key value for %s: %w", t.PrimaryKey.Name, err)
+			}
+			if err := t.PrimaryKey.Index.Insert(ctx, castedValue, nextRowID); err != nil {
+				return fmt.Errorf("failed to insert primary key %s: %w", t.PrimaryKey.Name, err)
+			}
+		}
+
 		aRow := Row{
 			Columns: t.Columns,
 			Values:  make([]OptionalValue, 0, len(t.Columns)),
@@ -58,7 +78,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 		// Try to advance cursor to next position, if there is still space in the
 		// current page, just increment cell index, otherwise call Seek to get
 		// new cursor
-		aCursor, nextRowID, err = t.SeekNextRowID(ctx, t.RootPageIdx)
+		aCursor, nextRowID, err = t.SeekNextRowID(ctx, t.GetRootPageIdx())
 		if err != nil {
 			return err
 		}

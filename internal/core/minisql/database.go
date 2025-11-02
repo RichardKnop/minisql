@@ -12,6 +12,8 @@ var (
 	errUnrecognizedStatementType = fmt.Errorf("unrecognised statement type")
 	errTableDoesNotExist         = fmt.Errorf("table does not exist")
 	errTableAlreadyExists        = fmt.Errorf("table already exists")
+	errPrimaryKeyDoesNotExist    = fmt.Errorf("primary key does not exist")
+	errPrimaryKeyAlreadyExists   = fmt.Errorf("primary key already exists")
 )
 
 var (
@@ -44,18 +46,27 @@ var (
 	}
 )
 
-var mainTableSQL = fmt.Sprintf(`create table "%s" (
-	type int4 not null,
-	table_name varchar(255) not null,
-	root_page int4,
-	sql varchar(2056)
-);`, SchemaTableName)
+var (
+	mainTableSQL = fmt.Sprintf(`create table "%s" (
+		type int4 not null,
+		name varchar(255) not null,
+		root_page int4,
+		sql varchar(2056)
+	);`, SchemaTableName)
+
+	mainTableFields = []string{
+		"type",
+		"name",
+		"root_page",
+		"sql",
+	}
+)
 
 type SchemaType int
 
 const (
 	SchemaTable SchemaType = iota + 1
-	SchemaIndex
+	SchemaPrimaryKey
 )
 
 type Parser interface {
@@ -63,15 +74,14 @@ type Parser interface {
 }
 
 type Database struct {
-	Name      string
-	parser    Parser
-	factory   PagerFactory
-	saver     PageSaver
-	flusher   PageFlusher
-	txManager *TransactionManager
-	tables    map[string]*Table
-	// TODO - populate
-	primaryKeys map[string]any
+	Name        string
+	parser      Parser
+	factory     PagerFactory
+	saver       PageSaver
+	flusher     PageFlusher
+	txManager   *TransactionManager
+	tables      map[string]*Table
+	primaryKeys map[string]BTreeIndex
 	dbLock      *sync.RWMutex
 	logger      *zap.Logger
 }
@@ -79,15 +89,16 @@ type Database struct {
 // NewDatabase creates a new database
 func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser Parser, factory PagerFactory, saver PageSaver, flusher PageFlusher) (*Database, error) {
 	aDatabase := &Database{
-		Name:      name,
-		parser:    aParser,
-		factory:   factory,
-		saver:     saver,
-		flusher:   flusher,
-		txManager: NewTransactionManager(),
-		tables:    make(map[string]*Table),
-		dbLock:    new(sync.RWMutex),
-		logger:    logger,
+		Name:        name,
+		parser:      aParser,
+		factory:     factory,
+		saver:       saver,
+		flusher:     flusher,
+		txManager:   NewTransactionManager(),
+		tables:      make(map[string]*Table),
+		primaryKeys: make(map[string]BTreeIndex),
+		dbLock:      new(sync.RWMutex),
+		logger:      logger,
 	}
 
 	if err := aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -133,25 +144,20 @@ func (d *Database) init(ctx context.Context) error {
 			Kind:      Insert,
 			TableName: mainTable.Name,
 			Columns:   mainTable.Columns,
-			Fields: []string{
-				"type",
-				"name",
-				"root_page",
-				"sql",
-			},
+			Fields:    mainTableFields,
 			Inserts: [][]OptionalValue{
 				{
-					{Value: int32(SchemaTable), Valid: true},           // type (only 0 supported now)
-					{Value: mainTable.Name, Valid: true},               // name
-					{Value: int32(mainTable.RootPageIdx), Valid: true}, // root page
-					{Value: mainTableSQL, Valid: true},                 // sql
+					{Value: int32(SchemaTable), Valid: true},                // type (only 0 supported now)
+					{Value: mainTable.Name, Valid: true},                    // name
+					{Value: int32(mainTable.GetRootPageIdx()), Valid: true}, // root page
+					{Value: mainTableSQL, Valid: true},                      // sql
 				},
 			},
 		}); err != nil {
 			return err
 		}
 
-		if err := d.flusher.Flush(ctx, mainTable.RootPageIdx); err != nil {
+		if err := d.flusher.Flush(ctx, mainTable.GetRootPageIdx()); err != nil {
 			return err
 		}
 
@@ -171,13 +177,8 @@ func (d *Database) init(ctx context.Context) error {
 	d.tables[mainTable.Name] = mainTable
 
 	aResult, err := mainTable.Select(ctx, Statement{
-		Kind: Select,
-		Fields: []string{
-			"type",
-			"name",
-			"root_page",
-			"sql",
-		},
+		Kind:   Select,
+		Fields: mainTableFields,
 		Conditions: OneOrMore{
 			{
 				FieldIsNotIn("name", OperandQuotedString, mainTable.Name), // skip main table itself
@@ -190,36 +191,63 @@ func (d *Database) init(ctx context.Context) error {
 
 	aRow, err := aResult.Rows(ctx)
 	for ; err == nil; aRow, err = aResult.Rows(ctx) {
-		aType := SchemaType(aRow.Values[0].Value.(int32))
-		if aType != SchemaTable {
-			// TODO - support indexes later
-			continue
-		}
-
-		stmts, err := d.parser.Parse(ctx, aRow.Values[3].Value.(string))
-		if err != nil {
-			return err
-		}
-		if len(stmts) != 1 {
-			return fmt.Errorf("expected one statement when loading table, got %d", len(stmts))
-		}
-		stmt := stmts[0]
-		d.tables[stmt.TableName] = NewTable(
-			d.logger,
-			NewTransactionalPager(
-				d.factory.ForTable(Row{Columns: stmt.Columns}.Size()),
+		switch SchemaType(aRow.Values[0].Value.(int32)) {
+		case SchemaTable:
+			stmts, err := d.parser.Parse(ctx, aRow.Values[3].Value.(string))
+			if err != nil {
+				return err
+			}
+			if len(stmts) != 1 {
+				return fmt.Errorf("expected one statement when loading table, got %d", len(stmts))
+			}
+			stmt := stmts[0]
+			rootPageIdx := uint32(aRow.Values[2].Value.(int32))
+			d.tables[stmt.TableName] = NewTable(
+				d.logger,
+				NewTransactionalPager(
+					d.factory.ForTable(Row{Columns: stmt.Columns}.Size()),
+					d.txManager,
+				),
 				d.txManager,
-			),
-			d.txManager,
-			stmt.TableName,
-			stmt.Columns,
-			uint32(aRow.Values[2].Value.(int32)),
-		)
+				stmt.TableName,
+				stmt.Columns,
+				rootPageIdx,
+			)
 
-		d.logger.Sugar().With(
-			"name", stmt.TableName,
-			"root_page", uint32(aRow.Values[2].Value.(int32)),
-		).Debug("loaded table")
+			d.logger.Sugar().With(
+				"name", stmt.TableName,
+				"root_page", rootPageIdx,
+			).Debug("loaded table")
+		case SchemaPrimaryKey:
+			var (
+				pkName    = aRow.Values[1].Value.(string)
+				tableName = tableNameFromPrimaryKey(pkName)
+			)
+			aTable, ok := d.tables[tableName]
+			if !ok {
+				fmt.Println(d.tables)
+				return fmt.Errorf("table %s for primary key index %s does not exist", tableName, pkName)
+			}
+			primaryKeyPager := NewTransactionalPager(
+				d.factory.ForIndex(aTable.PrimaryKey.Column.Kind, uint64(aTable.PrimaryKey.Column.Size)),
+				d.txManager,
+			)
+			rootPageIdx := uint32(aRow.Values[2].Value.(int32))
+			d.primaryKeys[tableName], err = aTable.primaryKeyIndex(primaryKeyPager, rootPageIdx)
+			if err != nil {
+				return err
+			}
+
+			// Set primary key on the table instance
+			aTable.PrimaryKey.Index = d.primaryKeys[tableName]
+
+			d.logger.Sugar().With(
+				"name", aTable.PrimaryKey.Name,
+				"root_page", rootPageIdx,
+			).Debug("loaded primary key index")
+		default:
+			return fmt.Errorf("unrecognized schema type %d", aRow.Values[0].Value.(int32))
+		}
 	}
 
 	return nil
@@ -285,46 +313,14 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 		return nil, fmt.Errorf("table definition too long, maximum length is %d", maximumSchemaSQL)
 	}
 
-	var (
-		name    = stmt.TableName
-		columns = stmt.Columns
-	)
-
-	_, ok := d.tables[name]
+	_, ok := d.tables[stmt.TableName]
 	if ok {
 		return nil, errTableAlreadyExists
 	}
 
-	d.logger.Sugar().With("name", name).Debug("creating table")
+	d.logger.Sugar().With("name", stmt.TableName).Debug("creating table")
 
-	// Save table record into minisql_schema system table
-	mainTable := d.tables[SchemaTableName]
-	if err := mainTable.Insert(ctx, Statement{
-		Kind:      Insert,
-		TableName: mainTable.Name,
-		Columns:   mainTable.Columns,
-		Fields: []string{
-			"type",
-			"name",
-			"root_page",
-			"sql",
-		},
-		Inserts: [][]OptionalValue{
-			{
-				{Value: int32(SchemaTable), Valid: true},    // type (only 0 supported now)
-				{Value: name, Valid: true},                  // name
-				{Valid: false},                              // update later, we don't know root page yet
-				{Value: stmt.CreateTableDDL(), Valid: true}, // TODO - store actual SQL of the table
-			},
-		},
-	}); err != nil {
-		return nil, err
-	}
-
-	// Now let's create the actual table, inserting into the system table might have
-	// caused a split and new page being created, so now we know what the root page
-	// for the new table should be.
-	rowSize := Row{Columns: columns}.Size()
+	rowSize := Row{Columns: stmt.Columns}.Size()
 	tablePager := NewTransactionalPager(
 		d.factory.ForTable(rowSize),
 		d.txManager,
@@ -339,31 +335,65 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 		d.logger,
 		tablePager,
 		d.txManager,
-		name,
-		columns,
+		stmt.TableName,
+		stmt.Columns,
 		freePage.Index,
 	)
 
-	_, err = mainTable.Update(ctx, Statement{
-		Kind:      Update,
-		TableName: mainTable.Name,
-		Columns:   mainTable.Columns,
-		Updates: map[string]OptionalValue{
-			"root_page": {Value: int32(createdTable.RootPageIdx), Valid: true},
-		},
-		Conditions: OneOrMore{
-			{
-				FieldIsIn("type", OperandInteger, int64(SchemaTable)),
-				FieldIsIn("name", OperandQuotedString, name),
-			},
-		},
-	})
+	// Save table record into minisql_schema system table
+	if err := d.insertIntoMainTable(ctx, SchemaTable, stmt.TableName, freePage.Index, stmt.CreateTableDDL()); err != nil {
+		return nil, err
+	}
+	d.tables[stmt.TableName] = createdTable
+
+	if createdTable.HasPrimaryKey() {
+		createdIndex, err := d.createPrimaryKeyIndex(ctx, createdTable)
+		if err != nil {
+			delete(d.tables, stmt.TableName)
+			return nil, err
+		}
+		d.primaryKeys[stmt.TableName] = createdIndex
+		// Set primary key on the table instance
+		createdTable.PrimaryKey.Index = d.primaryKeys[createdTable.Name]
+	}
+
+	return d.tables[stmt.TableName], nil
+}
+
+func (d *Database) createPrimaryKeyIndex(ctx context.Context, aTable *Table) (BTreeIndex, error) {
+	_, ok := d.primaryKeys[aTable.Name]
+	if ok {
+		return nil, errPrimaryKeyAlreadyExists
+	}
+	pkColumn := aTable.PrimaryKey.Column
+
+	d.logger.Sugar().With("column", pkColumn.Name).Debug("creating primary key")
+
+	primaryKeyPager := NewTransactionalPager(
+		d.factory.ForIndex(pkColumn.Kind, uint64(pkColumn.Size)),
+		d.txManager,
+	)
+	freePage, err := primaryKeyPager.GetFreePage(ctx)
 	if err != nil {
 		return nil, err
 	}
+	createdIndex, err := d.newPrimaryKeyIndex(primaryKeyPager, freePage, aTable)
+	if err != nil {
+		return nil, err
+	}
+	if err := d.insertIntoMainTable(ctx, SchemaPrimaryKey, aTable.PrimaryKey.Name, freePage.Index, ""); err != nil {
+		return nil, err
+	}
+	return createdIndex, nil
+}
 
-	d.tables[name] = createdTable
-	return d.tables[name], nil
+func (d *Database) newPrimaryKeyIndex(aPager *TransactionalPager, freePage *Page, aTable *Table) (BTreeIndex, error) {
+	_, ok := d.primaryKeys[aTable.Name]
+	if ok {
+		return nil, errPrimaryKeyAlreadyExists
+	}
+
+	return aTable.newPrimaryKeyIndex(aPager, freePage)
 }
 
 // dropTable drops a table and all its data
@@ -375,25 +405,25 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 
 	d.logger.Sugar().With("name", tableToDelete.Name).Debug("dropping table")
 
-	mainTable := d.tables[SchemaTableName]
-	_, err := mainTable.Delete(ctx, Statement{
-		Kind: Delete,
-		Conditions: OneOrMore{
-			{
-				FieldIsIn("type", OperandInteger, int64(SchemaTable)),
-				FieldIsIn("name", OperandQuotedString, tableToDelete.Name),
-			},
-		},
-	})
-	if err != nil {
+	if err := d.deleteFromMainTable(ctx, SchemaTable, tableToDelete.Name); err != nil {
 		return err
+	}
+	if tableToDelete.HasPrimaryKey() {
+		_, ok := d.primaryKeys[tableToDelete.Name]
+		if !ok {
+			return errPrimaryKeyDoesNotExist
+		}
+		if err := d.deleteFromMainTable(ctx, SchemaPrimaryKey, tableToDelete.PrimaryKey.Name); err != nil {
+			return err
+		}
 	}
 
 	// Free all table pages
 	tablePager := NewTransactionalPager(
-		d.factory.ForTable(tableToDelete.RowSize),
+		d.factory.ForTable(tableToDelete.rowSize),
 		d.txManager,
 	)
+	// First free pages for the table itself
 	tableToDelete.BFS(func(page *Page) {
 		if err := tablePager.AddFreePage(ctx, page.Index); err != nil {
 			d.logger.Sugar().With(
@@ -402,10 +432,24 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 			).Error("failed to free page")
 			return
 		}
-		d.logger.Sugar().With("page", page).Debug("freed page")
+		d.logger.Sugar().With("page", page.Index).Debug("freed page")
 	})
+	// And then free pages for the primary key index if any
+	if tableToDelete.HasPrimaryKey() {
+		d.primaryKeys[tableToDelete.Name].BFS(func(page *Page) {
+			if err := tablePager.AddFreePage(ctx, page.Index); err != nil {
+				d.logger.Sugar().With(
+					"page", page.Index,
+					"error", err,
+				).Error("failed to free page")
+				return
+			}
+			d.logger.Sugar().With("page", page.Index).Debug("freed page 2")
+		})
+	}
 
 	delete(d.tables, name)
+	delete(d.primaryKeys, name)
 	return nil
 }
 
@@ -544,6 +588,38 @@ func (d *Database) ExecuteInTransaction(ctx context.Context, statements ...State
 	}
 
 	return results, nil
+}
+
+func (d *Database) insertIntoMainTable(ctx context.Context, aType SchemaType, name string, rootIdx uint32, ddl string) error {
+	mainTable := d.tables[SchemaTableName]
+	return mainTable.Insert(ctx, Statement{
+		Kind:      Insert,
+		TableName: mainTable.Name,
+		Columns:   mainTable.Columns,
+		Fields:    mainTableFields,
+		Inserts: [][]OptionalValue{
+			{
+				{Value: int32(aType), Valid: true},
+				{Value: name, Valid: true},
+				{Value: int32(rootIdx), Valid: true},
+				{Value: ddl, Valid: ddl != ""},
+			},
+		},
+	})
+}
+
+func (d *Database) deleteFromMainTable(ctx context.Context, aType SchemaType, name string) error {
+	mainTable := d.tables[SchemaTableName]
+	_, err := mainTable.Delete(ctx, Statement{
+		Kind: Delete,
+		Conditions: OneOrMore{
+			{
+				FieldIsIn("type", OperandInteger, int64(aType)),
+				FieldIsIn("name", OperandQuotedString, name),
+			},
+		},
+	})
+	return err
 }
 
 func isSystemTable(name string) bool {

@@ -4,7 +4,7 @@ import (
 	"context"
 )
 
-type indexPager[T int8 | int32 | int64 | float32 | float64 | string] struct {
+type indexPager[T IndexKey] struct {
 	*pagerImpl
 	keySize uint64
 }

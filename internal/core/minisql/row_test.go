@@ -474,3 +474,58 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		})
 	}
 }
+
+func TestRow_GetValue(t *testing.T) {
+	t.Parallel()
+
+	aRow := Row{
+		Columns: testColumns,
+		Values: []OptionalValue{
+			{Value: int64(125478), Valid: true},
+			{Value: "test@example.com", Valid: true},
+		},
+	}
+
+	t.Run("found", func(t *testing.T) {
+		value, found := aRow.GetValue("email")
+		assert.True(t, found)
+		assert.Equal(t, OptionalValue{Value: "test@example.com", Valid: true}, value)
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		value, found := aRow.GetValue("bogus")
+		assert.False(t, found)
+		assert.Equal(t, OptionalValue{Value: nil, Valid: false}, value)
+	})
+}
+
+func TestRow_SetValue(t *testing.T) {
+	t.Parallel()
+
+	aRow := Row{
+		Columns: testColumns,
+		Values: []OptionalValue{
+			{Value: int64(125478), Valid: true},
+			{Value: "test@example.com", Valid: true},
+		},
+	}
+
+	t.Run("found and changed", func(t *testing.T) {
+		found, changed := aRow.SetValue("email", OptionalValue{Value: "new@example.com", Valid: true})
+		assert.True(t, found)
+		assert.True(t, changed)
+	})
+
+	t.Run("found but not changed", func(t *testing.T) {
+		found, changed := aRow.SetValue("id", OptionalValue{Value: int64(125478), Valid: true})
+		assert.True(t, found)
+		assert.False(t, changed)
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		found, changed := aRow.SetValue("bogus", OptionalValue{Value: "value", Valid: true})
+		assert.False(t, found)
+		assert.False(t, changed)
+	})
+
+}

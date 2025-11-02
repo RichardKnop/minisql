@@ -58,7 +58,7 @@ Each page size is `4096 bytes`. Rows larger than page size are not supported. Th
 = 4066 
 ```
 
-All tables are kept tract of via a system table `minisql_schema` which contains table name, `CREATE TABLE` SQL to document table structure and a root page index indicating which page contains root node of the table B+ Tree.
+All tables are kept track of via a system table `minisql_schema` which contains table name, `CREATE TABLE` SQL to document table structure and a root page index indicating which page contains root node of the table B+ Tree.
 
 `CREATE TABLE` SQL definition cannot exceed `3703 bytes` to fit into a single page.
 
@@ -124,7 +124,7 @@ minisql>
 You can create your own non-system table now:
 
 ```sh
-minisql> create table users(id int4, name varchar(255), email varchar(255), age int4);
+minisql> create table users(id int4 primary key, name varchar(255), email varchar(255), age int4);
 Rows affected: 0
 minisql>
 ```
@@ -140,10 +140,18 @@ users
 Insert rows:
 
 ```sh
-minisql> insert into users(id, name, email, age) values(1, 'John Doe', 'john@example.com', 35),
+minisql> insert into users("id", "name", "email", "age") values(1, 'John Doe', 'john@example.com', 35),
 (2, 'Jane Doe', 'jane@example.com', 32),
 (3, 'Jack Doe', 'jack@example.com', 27);
-Rows affected: 1
+Rows affected: 3
+minisql>
+```
+
+When trying to insert a duplicate primary key, you will get an error:
+
+```sh
+minisql> insert into users("id", "name", "email", "age") values(1, 'John Doe', 'john@example.com', 35);
+Error: failed to insert primary key pk_users: duplicate key
 minisql>
 ```
 

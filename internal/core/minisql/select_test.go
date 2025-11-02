@@ -2,7 +2,6 @@ package minisql
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,13 +9,8 @@ import (
 )
 
 func TestTable_Select(t *testing.T) {
-	t.Parallel()
+	aPager := initTest(t)
 
-	tempFile, err := os.CreateTemp("", "testdb")
-	require.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize)
-	require.NoError(t, err)
 	txManager := NewTransactionManager()
 	tablePager := NewTransactionalPager(
 		aPager.ForTable(Row{Columns: testColumns}.Size()),
@@ -44,7 +38,7 @@ func TestTable_Select(t *testing.T) {
 		insertStmt.Inserts = append(insertStmt.Inserts, aRow.Values)
 	}
 
-	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, insertStmt)
 	}, aPager)
 	require.NoError(t, err)

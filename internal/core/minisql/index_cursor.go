@@ -10,7 +10,12 @@ type IndexCursor struct {
 	CellIdx uint32
 }
 
-func (ui *UniqueIndex[T]) Seek(ctx context.Context, aPage *Page, key T) (IndexCursor, bool, error) {
+func (ui *UniqueIndex[T]) Seek(ctx context.Context, aPage *Page, keyAny any) (IndexCursor, bool, error) {
+	key, ok := keyAny.(T)
+	if !ok {
+		return IndexCursor{}, false, fmt.Errorf("invalid key type: %T", keyAny)
+	}
+
 	i := uint32(0)
 	aNode := aPage.IndexNode.(*IndexNode[T])
 

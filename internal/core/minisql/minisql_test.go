@@ -141,6 +141,28 @@ var (
 		},
 	}
 
+	testColumnsWithPrimaryKey = []Column{
+		{
+			Kind:          Int8,
+			Size:          8,
+			Name:          "id",
+			PrimaryKey:    true,
+			Autoincrement: true,
+		},
+		{
+			Kind:     Varchar,
+			Size:     255,
+			Name:     "email",
+			Nullable: true,
+		},
+		{
+			Kind:     Boolean,
+			Size:     1,
+			Name:     "verified",
+			Nullable: true,
+		},
+	}
+
 	testLogger *zap.Logger
 )
 
@@ -278,6 +300,27 @@ func (g *dataGen) BigRows(number int) []Row {
 		aRow.Key = uint64(i)
 		rows = append(rows, aRow)
 		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
+	}
+	return rows
+}
+
+func (g *dataGen) RowWithPrimaryKey(primaryKey int64) Row {
+	return Row{
+		Columns: testColumnsWithPrimaryKey,
+		Values: []OptionalValue{
+			{Value: primaryKey, Valid: true},
+			{Value: g.Email(), Valid: true},
+			{Value: g.Bool(), Valid: true},
+		},
+	}
+}
+
+func (g *dataGen) RowsWithPrimaryKey(number int) []Row {
+	rows := make([]Row, 0, number)
+	for i := 0; i < number; i++ {
+		aRow := g.RowWithPrimaryKey(int64(i + 1))
+		aRow.Key = uint64(i)
+		rows = append(rows, aRow)
 	}
 	return rows
 }

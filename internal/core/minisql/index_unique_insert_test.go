@@ -2,7 +2,6 @@ package minisql
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,15 +9,8 @@ import (
 )
 
 func TestUniqueIndex_Insert(t *testing.T) {
-	t.Parallel()
-
-	tempFile, err := os.CreateTemp("", "testdb")
-	require.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize)
-	require.NoError(t, err)
-
 	var (
+		aPager     = initTest(t)
 		ctx        = context.Background()
 		key        = int64(1)
 		aColumn    = Column{Name: "test_column", Kind: Int8, Size: 8}
@@ -32,7 +24,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	anIndex.maximumKeys = 3
 
 	t.Run("Insert first three keys into root node", func(t *testing.T) {
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for i := 0; i < 3; i++ {
 				if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
 					return err
@@ -56,7 +48,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	})
 
 	t.Run("Insert duplicate key fails", func(t *testing.T) {
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Insert(ctx, key-1, uint64(key-1+100))
 		}, aPager)
 		require.Error(t, err)
@@ -64,7 +56,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	})
 
 	t.Run("Insert 4th key, causes a split", func(t *testing.T) {
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Insert(ctx, key, uint64(key+100))
 		}, aPager)
 		require.NoError(t, err)
@@ -92,7 +84,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	})
 
 	t.Run("Insert 2 more keys, another split", func(t *testing.T) {
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for i := 0; i < 2; i++ {
 				if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
 					return err
@@ -129,7 +121,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	})
 
 	t.Run("Insert 2 more keys, another split", func(t *testing.T) {
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for i := 0; i < 2; i++ {
 				if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
 					return err
@@ -170,7 +162,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	})
 
 	t.Run("Insert 1 more key, internal split", func(t *testing.T) {
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Insert(ctx, key, uint64(key+100))
 		}, aPager)
 		require.NoError(t, err)
@@ -215,7 +207,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	})
 
 	t.Run("Keep inserting more keys", func(t *testing.T) {
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for i := 0; i < 5; i++ {
 				if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
 					return err
@@ -273,7 +265,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	})
 
 	actualKeys := []int64{}
-	err = anIndex.BFS(func(aPage *Page) {
+	err := anIndex.BFS(func(aPage *Page) {
 		node := aPage.IndexNode.(*IndexNode[int64])
 		actualKeys = append(actualKeys, node.Keys()...)
 	})
@@ -285,15 +277,8 @@ func TestUniqueIndex_Insert(t *testing.T) {
 }
 
 func TestUniqueIndex_Insert_OutOfOrder(t *testing.T) {
-	t.Parallel()
-
-	tempFile, err := os.CreateTemp("", "testdb")
-	require.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize)
-	require.NoError(t, err)
-
 	var (
+		aPager     = initTest(t)
 		ctx        = context.Background()
 		keys       = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
 		aColumn    = Column{Name: "test_column", Kind: Int8, Size: 8}
@@ -306,7 +291,7 @@ func TestUniqueIndex_Insert_OutOfOrder(t *testing.T) {
 	)
 	anIndex.maximumKeys = 3
 
-	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
 			err := anIndex.Insert(ctx, key, uint64(key+100))
 			if err != nil {
