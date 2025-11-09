@@ -332,8 +332,14 @@ func (s Statement) Validate(aTable *Table) error {
 		if len(s.Columns) != len(aTable.Columns) {
 			return fmt.Errorf("insert: expected %d columns, got %d", len(aTable.Columns), len(s.Columns))
 		}
-		if len(s.Fields) != len(aTable.Columns) {
-			return fmt.Errorf("insert: expected %d fields, got %d", len(aTable.Columns), len(s.Fields))
+		requiredFields := 0
+		for _, aColumn := range s.Columns {
+			if !aColumn.Nullable {
+				requiredFields += 1
+			}
+		}
+		if len(s.Fields) < requiredFields {
+			return fmt.Errorf("insert: expected at least %d fields, got %d", requiredFields, len(s.Fields))
 		}
 		for i, aField := range s.Fields {
 			aColumn, ok := aTable.ColumnByName(aField)

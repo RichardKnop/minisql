@@ -90,7 +90,7 @@ func (p *parser) doParseCreateTable() error {
 		p.step = stepCreateTableColumnPrimaryKey
 	case stepCreateTableColumnPrimaryKey:
 		primaryKey := p.peek()
-		if primaryKey != "PRIMARY KEY" {
+		if primaryKey != "PRIMARY KEY" && primaryKey != "PRIMARY KEY AUTOINCREMENT" {
 			p.step = stepCreateTableColumnNullNotNull
 			return nil
 		}
@@ -98,6 +98,12 @@ func (p *parser) doParseCreateTable() error {
 			if col.PrimaryKey {
 				return errCreateTableMultiplePrimaryKeys
 			}
+		}
+		if primaryKey == "PRIMARY KEY AUTOINCREMENT" {
+			if p.Columns[len(p.Columns)-1].Kind != minisql.Int8 {
+				return fmt.Errorf("at CREATE TABLE: AUTOINCREMENT primary key must be of type INT8")
+			}
+			p.Columns[len(p.Columns)-1].Autoincrement = true
 		}
 		p.Columns[len(p.Columns)-1].PrimaryKey = true
 		p.Columns[len(p.Columns)-1].Nullable = false

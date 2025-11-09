@@ -113,25 +113,22 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, "insert: expected 4 columns, got 3")
 	})
 
-	t.Run("INSERT with wrong number of fields should fail", func(t *testing.T) {
+	t.Run("INSERT with less than minimum required number of fields should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
 			TableName: aTable.Name,
 			Columns:   aTable.Columns,
-			Fields:    []string{"id", "email", "age"},
+			Fields:    []string{"id"},
 			Inserts: [][]OptionalValue{
 				{
 					{Value: int32(1), Valid: true},
-					{Value: "test@example.com", Valid: true},
-					{Value: int32(25), Valid: true},
-					{Value: true, Valid: true},
 				},
 			},
 		}
 
 		err := stmt.Validate(aTable)
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "insert: expected 4 fields, got 3")
+		assert.ErrorContains(t, err, "insert: expected at least 2 fields, got 1")
 	})
 
 	t.Run("INSERT with NULL to non-nullable column should fail", func(t *testing.T) {
