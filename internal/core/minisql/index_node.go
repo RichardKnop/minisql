@@ -68,7 +68,7 @@ func (h *IndexNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 }
 
 // Use int8 for bool so we can use comparison operators
-type IndexCell[T int8 | int32 | int64 | float32 | float64 | string] struct {
+type IndexCell[T IndexKey] struct {
 	Key   T
 	RowID uint64
 	Child uint32
@@ -162,7 +162,7 @@ func (c *IndexCell[T]) Unmarshal(keySize uint64, buf []byte) (uint64, error) {
 }
 
 // Use int8 for bool so we can use comparison operators
-type IndexNode[T int8 | int32 | int64 | float32 | float64 | string] struct {
+type IndexNode[T IndexKey] struct {
 	Header  IndexNodeHeader
 	Cells   []IndexCell[T] // (PageSize - (5)) / (CellSize + 4 + 8)
 	KeySize uint64
@@ -177,7 +177,7 @@ func maxIndexKeys(keySize uint64) uint32 {
 }
 
 // Use int8 for bool so we can use comparison operators
-func NewIndexNode[T int8 | int32 | int64 | float32 | float64 | string](keySize uint64, cells ...IndexCell[T]) *IndexNode[T] {
+func NewIndexNode[T IndexKey](keySize uint64, cells ...IndexCell[T]) *IndexNode[T] {
 	aNode := IndexNode[T]{
 		Header: IndexNodeHeader{
 			RightChild: RIGHT_CHILD_NOT_SET,
@@ -414,7 +414,7 @@ func marshalIndexNode(anyNode any, buf []byte) ([]byte, error) {
 	case *IndexNode[string]:
 		return aNode.Marshal(buf)
 	default:
-		return nil, fmt.Errorf("unknown index node type")
+		return nil, fmt.Errorf("unknown index node type: %T", aNode)
 	}
 }
 

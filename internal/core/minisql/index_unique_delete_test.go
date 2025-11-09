@@ -3,7 +3,6 @@ package minisql
 import (
 	"context"
 	"math/rand/v2"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,15 +10,8 @@ import (
 )
 
 func TestUniqueIndex_Delete(t *testing.T) {
-	t.Parallel()
-
-	tempFile, err := os.CreateTemp("", "testdb")
-	require.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize)
-	require.NoError(t, err)
-
 	var (
+		aPager    = initTest(t)
 		ctx       = context.Background()
 		keys      = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
 		aColumn   = Column{Name: "test_column", Kind: Int8, Size: 8}
@@ -32,7 +24,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 	)
 	anIndex.maximumKeys = 3
 
-	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
 			err := anIndex.Insert(ctx, key, uint64(key+100))
 			if err != nil {
@@ -104,7 +96,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete a key from leftmost leaf", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 1)
+			return anIndex.Delete(ctx, int64(1))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -175,11 +167,11 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, no pages recyclet yet", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			if err := anIndex.Delete(ctx, 4); err != nil {
+			if err := anIndex.Delete(ctx, int64(4)); err != nil {
 				return nil
 			}
 
-			return anIndex.Delete(ctx, 5)
+			return anIndex.Delete(ctx, int64(5))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -250,7 +242,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, first recycled page", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 8)
+			return anIndex.Delete(ctx, int64(8))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -319,7 +311,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 19)
+			return anIndex.Delete(ctx, int64(19))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -388,7 +380,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 20)
+			return anIndex.Delete(ctx, int64(20))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -457,7 +449,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 16)
+			return anIndex.Delete(ctx, int64(16))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -526,7 +518,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 15)
+			return anIndex.Delete(ctx, int64(15))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -593,7 +585,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 13)
+			return anIndex.Delete(ctx, int64(13))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -657,7 +649,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 10)
+			return anIndex.Delete(ctx, int64(10))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -719,7 +711,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 9)
+			return anIndex.Delete(ctx, int64(9))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -781,7 +773,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 11)
+			return anIndex.Delete(ctx, int64(11))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -841,7 +833,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, 2 pages recycled, only root and leaves left", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 3)
+			return anIndex.Delete(ctx, int64(3))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -890,7 +882,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 14)
+			return anIndex.Delete(ctx, int64(14))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -939,7 +931,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 6)
+			return anIndex.Delete(ctx, int64(6))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -986,7 +978,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 17)
+			return anIndex.Delete(ctx, int64(17))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -1033,7 +1025,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 21)
+			return anIndex.Delete(ctx, int64(21))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -1078,7 +1070,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 2)
+			return anIndex.Delete(ctx, int64(2))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -1123,7 +1115,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, only root leaf left", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, 18)
+			return anIndex.Delete(ctx, int64(18))
 		}, aPager)
 		require.NoError(t, err)
 		/*
@@ -1158,11 +1150,11 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	t.Run("Delete remaining keys, empty root leaf left", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			if err := anIndex.Delete(ctx, 12); err != nil {
+			if err := anIndex.Delete(ctx, int64(12)); err != nil {
 				return err
 			}
 
-			return anIndex.Delete(ctx, 7)
+			return anIndex.Delete(ctx, int64(7))
 		}, aPager)
 		require.NoError(t, err)
 
@@ -1181,15 +1173,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 }
 
 func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
-	t.Parallel()
-
-	tempFile, err := os.CreateTemp("", "testdb")
-	require.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize)
-	require.NoError(t, err)
-
 	var (
+		aPager    = initTest(t)
 		ctx       = context.Background()
 		aColumn   = Column{Name: "test_column", Kind: Int8, Size: 8}
 		txManager = NewTransactionManager()
@@ -1208,7 +1193,7 @@ func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
 	}
 	rand.Shuffle(len(keys), func(i, j int) { keys[i], keys[j] = keys[j], keys[i] })
 
-	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
 			err := anIndex.Insert(ctx, key, uint64(key+100))
 			if err != nil {
@@ -1251,8 +1236,6 @@ func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
 }
 
 func assertFreePages(t *testing.T, aPager Pager, expectedFreePages []uint32) {
-	t.Helper()
-
 	dbHeader := aPager.GetHeader(context.Background())
 
 	assert.Equal(t, len(expectedFreePages), int(dbHeader.FreePageCount))

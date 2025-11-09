@@ -310,7 +310,12 @@ func (s Statement) Validate(aTable *Table) error {
 		}
 
 		primaryKeyCount := 0
+		nameMap := map[string]struct{}{}
 		for _, aColumn := range s.Columns {
+			if _, exists := nameMap[aColumn.Name]; exists {
+				return fmt.Errorf("duplicate column name %q", aColumn.Name)
+			}
+			nameMap[aColumn.Name] = struct{}{}
 			if aColumn.PrimaryKey {
 				primaryKeyCount += 1
 			}
@@ -383,7 +388,9 @@ func (stmt Statement) CreateTableDDL() string {
 		if col.Kind == Varchar {
 			sb.WriteString(fmt.Sprintf("(%d)", col.Size))
 		}
-		if !col.Nullable {
+		if col.PrimaryKey {
+			sb.WriteString(" primary key")
+		} else if !col.Nullable {
 			sb.WriteString(" not null")
 		}
 		if i < len(stmt.Columns)-1 {
@@ -400,4 +407,52 @@ type StatementResult struct {
 	Columns      []Column
 	Rows         Iterator
 	RowsAffected int
+}
+
+func (stmt Statement) InsertForColumn(name string, insertIdx int) (OptionalValue, bool) {
+	fieldIdx := -1
+	for i, colName := range stmt.Fields {
+		if colName == name {
+			fieldIdx = i
+			break
+		}
+	}
+	if fieldIdx == -1 {
+		return OptionalValue{}, false
+	}
+	if insertIdx < 0 || insertIdx >= len(stmt.Inserts) {
+		return OptionalValue{}, false
+	}
+	value := stmt.Inserts[insertIdx][fieldIdx]
+
+	return value, true
+}
+
+// castPrimaryKeyValue casts the primary key value to the appropriate type based on the column kind
+// parser returns all numbers as int64 or float64, but primary keys can be int4 (int32) or real (float32)
+func castPrimaryKeyValue(aColumn Column, aValue any) (any, error) {
+	switch aColumn.Kind {
+	case Int4:
+		value, ok := aValue.(int32)
+		if !ok {
+			_, ok = aValue.(int64)
+			if !ok {
+				return nil, fmt.Errorf("could not cast value for column %s to either int64 or int32", aColumn.Name)
+			}
+			value = int32(aValue.(int64))
+		}
+		return value, nil
+	case Real:
+		value, ok := aValue.(float32)
+		if !ok {
+			_, ok = aValue.(float64)
+			if !ok {
+				return nil, fmt.Errorf("could not cast value for column %s to either float64 or float32", aColumn.Name)
+			}
+			value = float32(aValue.(float64))
+		}
+		return value, nil
+	default:
+		return aValue, nil
+	}
 }

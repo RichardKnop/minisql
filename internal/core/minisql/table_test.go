@@ -10,6 +10,36 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	testTableName  = "test_table"
+	testTableName2 = "test_table_2"
+)
+
+func TestNewTable_WithPrimaryKey(t *testing.T) {
+	t.Parallel()
+
+	var columns = []Column{
+		{
+			Kind:       Int8,
+			Size:       8,
+			Name:       "id",
+			PrimaryKey: true,
+		},
+		{
+			Kind:     Varchar,
+			Size:     255,
+			Name:     "email",
+			Nullable: true,
+		},
+	}
+
+	aTable := NewTable(testLogger, nil, nil, "tablename", columns, 0)
+	assert.Equal(t, PrimaryKey{
+		Name:   "pk_tablename",
+		Column: columns[0],
+	}, aTable.PrimaryKey)
+}
+
 func TestTable_SeekNextRowID_EmptyTable(t *testing.T) {
 	t.Parallel()
 
@@ -23,7 +53,7 @@ func TestTable_SeekNextRowID_EmptyTable(t *testing.T) {
 
 	pagerMock.On("ReadPage", mock.Anything, uint32(0)).Return(aRootPage, nil).Once()
 
-	aCursor, rowID, err := aTable.SeekNextRowID(ctx, aTable.RootPageIdx)
+	aCursor, rowID, err := aTable.SeekNextRowID(ctx, aTable.GetRootPageIdx())
 	require.NoError(t, err)
 	assert.Equal(t, &Cursor{
 		Table:   aTable,
@@ -49,7 +79,7 @@ func TestTable_SeekNextRowID(t *testing.T) {
 	pagerMock.On("ReadPage", mock.Anything, uint32(2)).Return(internalPages[1], nil).Once()
 	pagerMock.On("ReadPage", mock.Anything, uint32(6)).Return(leafPages[3], nil).Once()
 
-	aCursor, rowID, err := aTable.SeekNextRowID(ctx, aTable.RootPageIdx)
+	aCursor, rowID, err := aTable.SeekNextRowID(ctx, aTable.GetRootPageIdx())
 	require.NoError(t, err)
 	require.NoError(t, err)
 	assert.Equal(t, &Cursor{
@@ -73,7 +103,7 @@ func TestTable_Seek_EmptyTable(t *testing.T) {
 		aTable         = NewTable(testLogger, pagerMock, NewTransactionManager(), testTableName, testColumns, 0)
 	)
 
-	pagerMock.On("ReadPage", mock.Anything, aTable.RootPageIdx).Return(aRootPage, nil)
+	pagerMock.On("ReadPage", mock.Anything, aTable.GetRootPageIdx()).Return(aRootPage, nil)
 
 	aCursor, err := aTable.Seek(ctx, uint64(0))
 	require.NoError(t, err)
@@ -95,7 +125,7 @@ func TestTable_Seek_RootLeafNode_SingleCell(t *testing.T) {
 		aTable         = NewTable(testLogger, pagerMock, NewTransactionManager(), testTableName, testColumns, 0)
 	)
 
-	pagerMock.On("ReadPage", mock.Anything, aTable.RootPageIdx).Return(aRootPage, nil)
+	pagerMock.On("ReadPage", mock.Anything, aTable.GetRootPageIdx()).Return(aRootPage, nil)
 
 	// Seek key 0
 	aCursor, err := aTable.Seek(ctx, uint64(0))
@@ -121,11 +151,11 @@ func TestTable_Seek_RootLeafNode_Full(t *testing.T) {
 		ctx            = context.Background()
 		pagerMock      = new(MockPager)
 		aTable         = NewTable(testLogger, pagerMock, NewTransactionManager(), testTableName, testColumns, 0)
-		cells, rowSize = maxCells(aTable.RowSize), aTable.RowSize
+		cells, rowSize = maxCells(aTable.rowSize), aTable.rowSize
 		aRootPage      = newRootLeafPageWithCells(int(cells), int(rowSize))
 	)
 
-	pagerMock.On("ReadPage", mock.Anything, aTable.RootPageIdx).Return(aRootPage, nil)
+	pagerMock.On("ReadPage", mock.Anything, aTable.GetRootPageIdx()).Return(aRootPage, nil)
 
 	// Seek all existing keys
 	for key := uint64(0); key < uint64(aRootPage.LeafNode.Header.Cells); key++ {
@@ -249,7 +279,7 @@ func TestTable_CreateNewRoot(t *testing.T) {
 	pagerMock.On("ModifyPage", mock.Anything, uint32(1)).Return(newRightChild, nil)
 	pagerMock.On("GetFreePage", mock.Anything).Return(newLeftChild, nil)
 
-	_, err := aTable.CreateNewRoot(ctx, uint32(1))
+	_, err := aTable.createNewRoot(ctx, uint32(1))
 	require.NoError(t, err)
 	assert.True(t, aRootPage.InternalNode.Header.IsRoot)
 	assert.True(t, aRootPage.InternalNode.Header.IsInternal)
@@ -274,7 +304,7 @@ func TestTable_InternalNodeInsert(t *testing.T) {
 		pagerMock                   = new(MockPager)
 		_, internalPages, leafPages = newTestBtree()
 		aTable                      = NewTable(testLogger, pagerMock, NewTransactionManager(), testTableName, testColumns, 0)
-		aNewLeaf                    = NewLeafNode(aTable.RowSize)
+		aNewLeaf                    = NewLeafNode(aTable.rowSize)
 	)
 	aNewLeaf.Header.Cells = 1
 	aNewLeaf.Cells = append(aNewLeaf.Cells, Cell{

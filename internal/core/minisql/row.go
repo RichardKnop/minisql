@@ -84,7 +84,11 @@ func (r Row) GetValue(name string) (OptionalValue, bool) {
 	return r.Values[columnIdx], true
 }
 
-func (r Row) SetValue(name string, value OptionalValue) bool {
+// SetValue sets value for a given column name
+// returns (true, true) if value was changed
+// returns (true, false) if value was not changed
+// returns (false, false) if column not found
+func (r Row) SetValue(name string, value OptionalValue) (bool, bool) {
 	var (
 		found     bool
 		columnIdx = 0
@@ -97,10 +101,13 @@ func (r Row) SetValue(name string, value OptionalValue) bool {
 		}
 	}
 	if !found {
-		return false
+		return false, false
 	}
-	r.Values[columnIdx] = value
-	return true
+	if r.Values[columnIdx] != value {
+		r.Values[columnIdx] = value
+		return true, true
+	}
+	return true, false
 }
 
 func (r Row) Clone() Row {
@@ -170,7 +177,7 @@ func (r *Row) Marshal() ([]byte, error) {
 			if !ok {
 				_, ok = r.Values[i].Value.(int64)
 				if !ok {
-					return nil, fmt.Errorf("could not cast value to either int64 or int32")
+					return nil, fmt.Errorf("could not cast value for column %s to either int64 or int32", aColumn.Name)
 				}
 				value = int32(r.Values[i].Value.(int64))
 			}
@@ -178,7 +185,7 @@ func (r *Row) Marshal() ([]byte, error) {
 		case Int8:
 			value, ok := r.Values[i].Value.(int64)
 			if !ok {
-				return nil, fmt.Errorf("could not cast value to int64")
+				return nil, fmt.Errorf("could not cast value for column %s to int64", aColumn.Name)
 			}
 			marshalInt64(buf, value, uint64(offset))
 		case Real:
@@ -186,7 +193,7 @@ func (r *Row) Marshal() ([]byte, error) {
 			if !ok {
 				_, ok = r.Values[i].Value.(float64)
 				if !ok {
-					return nil, fmt.Errorf("could not cast value to either float64 or float32")
+					return nil, fmt.Errorf("could not cast value for column %s to either float64 or float32", aColumn.Name)
 				}
 				value = float32(r.Values[i].Value.(float64))
 			}
@@ -194,14 +201,14 @@ func (r *Row) Marshal() ([]byte, error) {
 		case Double:
 			value, ok := r.Values[i].Value.(float64)
 			if !ok {
-				return nil, fmt.Errorf("could not cast value to float64")
+				return nil, fmt.Errorf("could not cast value for column %s to float64", aColumn.Name)
 			}
 			marshalFloat64(buf, value, uint64(offset))
 		case Varchar:
 			src := make([]byte, aColumn.Size)
 			value, ok := r.Values[i].Value.(string)
 			if !ok {
-				return nil, fmt.Errorf("could not cast value to string")
+				return nil, fmt.Errorf("could not cast value for column %s to string", aColumn.Name)
 			}
 			copy(src, []byte(value))
 			copy(buf[offset:], src)

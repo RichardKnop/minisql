@@ -2,7 +2,6 @@ package minisql
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,27 +9,20 @@ import (
 )
 
 func TestTable_Delete_RootLeafNode(t *testing.T) {
-	t.Parallel()
-
-	tempFile, err := os.CreateTemp("", "testdb")
-	require.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize)
-	require.NoError(t, err)
-	txManager := NewTransactionManager()
-	tablePager := NewTransactionalPager(
-		aPager.ForTable(Row{Columns: testMediumColumns}.Size()),
-		txManager,
-	)
-
 	/*
 		In this test we will be deleting from a root leaf node only tree.
 	*/
 	var (
-		ctx     = context.Background()
-		numRows = 5
-		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, tablePager, txManager, testTableName, testMediumColumns, 0)
+		aPager     = initTest(t)
+		ctx        = context.Background()
+		numRows    = 5
+		rows       = gen.MediumRows(numRows)
+		txManager  = NewTransactionManager()
+		tablePager = NewTransactionalPager(
+			aPager.ForTable(Row{Columns: testMediumColumns}.Size()),
+			txManager,
+		)
+		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testMediumColumns, 0)
 	)
 
 	// Set some values to NULL so we can test selecting/filtering on NULLs
@@ -48,7 +40,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, stmt)
 	}, aPager)
 	require.NoError(t, err)
@@ -141,24 +133,17 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 }
 
 func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
-	t.Parallel()
-
-	tempFile, err := os.CreateTemp("", "testdb")
-	require.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize)
-	require.NoError(t, err)
-	txManager := NewTransactionManager()
-	tablePager := NewTransactionalPager(
-		aPager.ForTable(Row{Columns: testMediumColumns}.Size()),
-		txManager,
-	)
-
 	var (
-		ctx     = context.Background()
-		numRows = 20
-		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, tablePager, txManager, testTableName, testMediumColumns, 0)
+		aPager     = initTest(t)
+		ctx        = context.Background()
+		numRows    = 20
+		rows       = gen.MediumRows(numRows)
+		txManager  = NewTransactionManager()
+		tablePager = NewTransactionalPager(
+			aPager.ForTable(Row{Columns: testMediumColumns}.Size()),
+			txManager,
+		)
+		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testMediumColumns, 0)
 	)
 
 	// Batch insert test rows
@@ -171,7 +156,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, stmt)
 	}, aPager)
 	require.NoError(t, err)
@@ -508,24 +493,17 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 }
 
 func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
-	t.Parallel()
-
-	tempFile, err := os.CreateTemp("", "testdb")
-	require.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize)
-	require.NoError(t, err)
-	txManager := NewTransactionManager()
-	tablePager := NewTransactionalPager(
-		aPager.ForTable(Row{Columns: testMediumColumns}.Size()),
-		txManager,
-	)
-
 	var (
-		ctx     = context.Background()
-		numRows = 100
-		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, tablePager, txManager, testTableName, testMediumColumns, 0)
+		aPager     = initTest(t)
+		ctx        = context.Background()
+		numRows    = 100
+		rows       = gen.MediumRows(numRows)
+		txManager  = NewTransactionManager()
+		tablePager = NewTransactionalPager(
+			aPager.ForTable(Row{Columns: testMediumColumns}.Size()),
+			txManager,
+		)
+		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testMediumColumns, 0)
 	)
 	aTable.maximumICells = 5 // for testing purposes only, normally 340
 
@@ -539,7 +517,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, stmt)
 	}, aPager)
 	require.NoError(t, err)

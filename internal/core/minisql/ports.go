@@ -31,3 +31,11 @@ type TxPager interface {
 	GetFreePage(context.Context) (*Page, error)
 	AddFreePage(context.Context, uint32) error
 }
+
+type BTreeIndex interface {
+	GetRootPageIdx() uint32
+	Seek(ctx context.Context, aPage *Page, keyAny any) (IndexCursor, bool, error)
+	Insert(ctx context.Context, key any, rowID uint64) error
+	Delete(ctx context.Context, key any) error
+	BFS(f indexCallback) error
+}

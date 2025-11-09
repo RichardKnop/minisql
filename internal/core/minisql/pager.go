@@ -187,7 +187,7 @@ func marshalPage(aPage *Page, buf []byte) ([]byte, error) {
 		}
 		return data, nil
 	} else if aPage.IndexNode != nil {
-		data, err := marshalIndexNode(aPage, buf)
+		data, err := marshalIndexNode(aPage.IndexNode, buf)
 		if err != nil {
 			return nil, fmt.Errorf("error flushing page %d: %w", aPage.Index, err)
 		}

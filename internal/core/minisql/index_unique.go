@@ -8,30 +8,43 @@ import (
 	"go.uber.org/zap"
 )
 
-type UniqueIndex[T int8 | int32 | int64 | float32 | float64 | string] struct {
+type IndexKey interface {
+	int8 | int32 | int64 | float32 | float64 | string
+}
+
+type UniqueIndex[T IndexKey] struct {
 	logger      *zap.Logger
 	Name        string
 	Column      Column
-	RootPageIdx uint32
+	rootPageIdx uint32
 	pager       TxPager
 	txManager   *TransactionManager
 	writeLock   sync.RWMutex
 	maximumKeys uint32
 }
 
-func NewUniqueIndex[T int8 | int32 | int64 | float32 | float64 | string](logger *zap.Logger, txManager *TransactionManager, name string, column Column, pager TxPager, rootPageIdx uint32) *UniqueIndex[T] {
+func NewUniqueIndex[T IndexKey](logger *zap.Logger, txManager *TransactionManager, name string, column Column, pager TxPager, rootPageIdx uint32) *UniqueIndex[T] {
 	return &UniqueIndex[T]{
 		logger:      logger,
 		Name:        name,
 		Column:      column,
-		RootPageIdx: rootPageIdx,
+		rootPageIdx: rootPageIdx,
 		pager:       pager,
 		txManager:   txManager,
 	}
 }
 
-func (ui *UniqueIndex[T]) Insert(ctx context.Context, key T, rowID uint64) error {
-	aRootPage, err := ui.pager.ModifyPage(ctx, ui.RootPageIdx)
+func (ui *UniqueIndex[T]) GetRootPageIdx() uint32 {
+	return ui.rootPageIdx
+}
+
+func (ui *UniqueIndex[T]) Insert(ctx context.Context, keyAny any, rowID uint64) error {
+	key, ok := keyAny.(T)
+	if !ok {
+		return fmt.Errorf("invalid key type: %T", keyAny)
+	}
+
+	aRootPage, err := ui.pager.ModifyPage(ctx, ui.GetRootPageIdx())
 	if err != nil {
 		return fmt.Errorf("get root page: %w", err)
 	}
@@ -50,7 +63,7 @@ func (ui *UniqueIndex[T]) Insert(ctx context.Context, key T, rowID uint64) error
 	}
 
 	// Check for duplicate key
-	_, ok, err := ui.Seek(ctx, aRootPage, key)
+	_, ok, err = ui.Seek(ctx, aRootPage, key)
 	if err != nil {
 		return fmt.Errorf("seek key: %w", err)
 	}
@@ -60,7 +73,7 @@ func (ui *UniqueIndex[T]) Insert(ctx context.Context, key T, rowID uint64) error
 
 	// Root is not full, insert new key
 	if aRootNode.Header.Keys < ui.maxIndexKeys(aRootNode.KeySize) {
-		return ui.InsertNotFull(ctx, ui.RootPageIdx, key, rowID)
+		return ui.insertNotFull(ctx, ui.GetRootPageIdx(), key, rowID)
 	}
 
 	// Root is full, need to split. Old root page will become left child
@@ -91,7 +104,7 @@ func (ui *UniqueIndex[T]) Insert(ctx context.Context, key T, rowID uint64) error
 	aRootNode.Cells[0].Child = newLeftChild.Index
 	aRootPage.IndexNode = aRootNode
 
-	if err := ui.SplitChild(ctx, aRootPage, newLeftChild, 0); err != nil {
+	if err := ui.splitChild(ctx, aRootPage, newLeftChild, 0); err != nil {
 		return fmt.Errorf("split child: %w", err)
 	}
 	i := uint32(0)
@@ -102,7 +115,7 @@ func (ui *UniqueIndex[T]) Insert(ctx context.Context, key T, rowID uint64) error
 	if err != nil {
 		return fmt.Errorf("get child: %w", err)
 	}
-	if err := ui.InsertNotFull(ctx, childIdx, key, rowID); err != nil {
+	if err := ui.insertNotFull(ctx, childIdx, key, rowID); err != nil {
 		return fmt.Errorf("insert not full: %w", err)
 	}
 	return nil
@@ -117,7 +130,7 @@ func (idx *UniqueIndex[T]) maxIndexKeys(keySize uint64) uint32 {
 
 var ErrDuplicateKey = fmt.Errorf("duplicate key")
 
-func (ui *UniqueIndex[T]) InsertNotFull(ctx context.Context, pageIdx uint32, key T, rowID uint64) error {
+func (ui *UniqueIndex[T]) insertNotFull(ctx context.Context, pageIdx uint32, key T, rowID uint64) error {
 	aPage, err := ui.pager.ModifyPage(ctx, pageIdx)
 	if err != nil {
 		return fmt.Errorf("get page: %w", err)
@@ -153,7 +166,7 @@ func (ui *UniqueIndex[T]) InsertNotFull(ctx context.Context, pageIdx uint32, key
 	}
 	childNode := childPage.IndexNode.(*IndexNode[T])
 	if childNode.Header.Keys == ui.maxIndexKeys(childNode.KeySize) {
-		if err := ui.SplitChild(ctx, aPage, childPage, uint32(i+1)); err != nil {
+		if err := ui.splitChild(ctx, aPage, childPage, uint32(i+1)); err != nil {
 			return fmt.Errorf("split child: %w", err)
 		}
 		if aNode.Cells[i+1].Key < key {
@@ -166,11 +179,11 @@ func (ui *UniqueIndex[T]) InsertNotFull(ctx context.Context, pageIdx uint32, key
 	if err != nil {
 		return fmt.Errorf("get child: %w", err)
 	}
-	return ui.InsertNotFull(ctx, childIdx, key, rowID)
+	return ui.insertNotFull(ctx, childIdx, key, rowID)
 }
 
 // Split a child node into two nodes and move the median key up to the parent node
-func (ui *UniqueIndex[T]) SplitChild(ctx context.Context, parentPage, splitPage *Page, indexInParent uint32) error {
+func (ui *UniqueIndex[T]) splitChild(ctx context.Context, parentPage, splitPage *Page, indexInParent uint32) error {
 	parentNode := parentPage.IndexNode.(*IndexNode[T])
 	splitNode := splitPage.IndexNode.(*IndexNode[T])
 
@@ -241,10 +254,10 @@ func (ui *UniqueIndex[T]) SplitChild(ctx context.Context, parentPage, splitPage 
 	return nil
 }
 
-type indexCallback[T int8 | int32 | int64 | float32 | float64 | string] func(page *Page)
+type indexCallback func(page *Page)
 
-func (ui *UniqueIndex[T]) BFS(f indexCallback[T]) error {
-	rootPage, err := ui.pager.ReadPage(context.Background(), ui.RootPageIdx)
+func (ui *UniqueIndex[T]) BFS(f indexCallback) error {
+	rootPage, err := ui.pager.ReadPage(context.Background(), ui.GetRootPageIdx())
 	if err != nil {
 		return err
 	}
@@ -299,8 +312,13 @@ func (ui *UniqueIndex[T]) print() error {
 	})
 }
 
-func (ui *UniqueIndex[T]) Delete(ctx context.Context, key T) error {
-	aRootPage, err := ui.pager.ModifyPage(ctx, ui.RootPageIdx)
+func (ui *UniqueIndex[T]) Delete(ctx context.Context, keyAny any) error {
+	key, ok := keyAny.(T)
+	if !ok {
+		return fmt.Errorf("invalid key type: %T", keyAny)
+	}
+
+	aRootPage, err := ui.pager.ModifyPage(ctx, ui.GetRootPageIdx())
 	if err != nil {
 		return fmt.Errorf("get root page: %w", err)
 	}
@@ -340,7 +358,7 @@ func (ui *UniqueIndex[T]) Delete(ctx context.Context, key T) error {
 				return fmt.Errorf("get child page: %w", err)
 			}
 			aChildNode := aChildPage.IndexNode.(*IndexNode[T])
-			aChildNode.Header.Parent = ui.RootPageIdx
+			aChildNode.Header.Parent = ui.GetRootPageIdx()
 		}
 		if err := ui.pager.AddFreePage(ctx, firstChildIdx); err != nil {
 			return fmt.Errorf("add free page: %w", err)
@@ -635,7 +653,7 @@ func (ui *UniqueIndex[T]) merge(ctx context.Context, aParent, left, right *Page,
 		leftIndex  = left.Index
 	)
 	if parentNode.Header.IsRoot && parentNode.Header.Keys == 1 {
-		leftIndex = ui.RootPageIdx
+		leftIndex = ui.GetRootPageIdx()
 	}
 
 	// Update parent of all cells we are moving to the left node

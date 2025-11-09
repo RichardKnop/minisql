@@ -3,15 +3,23 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 )
 
+type PrimaryKey struct {
+	Name   string
+	Column Column
+	Index  BTreeIndex
+}
+
 type Table struct {
 	Name          string
 	Columns       []Column
-	RootPageIdx   uint32
-	RowSize       uint64
+	PrimaryKey    PrimaryKey
+	rowSize       uint64
+	rootPageIdx   uint32
 	maximumICells uint32
 	logger        *zap.Logger
 	pager         TxPager
@@ -19,16 +27,42 @@ type Table struct {
 }
 
 func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, name string, columns []Column, rootPageIdx uint32) *Table {
-	return &Table{
+	aTable := &Table{
 		Name:          name,
 		Columns:       columns,
-		RootPageIdx:   rootPageIdx,
-		RowSize:       Row{Columns: columns}.Size(),
+		rowSize:       Row{Columns: columns}.Size(),
+		rootPageIdx:   rootPageIdx,
 		maximumICells: InternalNodeMaxCells,
 		logger:        logger,
 		pager:         pager,
 		txManager:     txManager,
 	}
+	for _, aColumn := range columns {
+		if aColumn.PrimaryKey {
+			aTable.PrimaryKey = PrimaryKey{
+				Name:   primaryKeyName(name),
+				Column: aColumn,
+			}
+			break
+		}
+	}
+	return aTable
+}
+
+func primaryKeyName(tableName string) string {
+	return fmt.Sprintf("pk_%s", tableName)
+}
+
+func tableNameFromPrimaryKey(pkName string) string {
+	return strings.TrimPrefix(pkName, "pk_")
+}
+
+func (t *Table) GetRootPageIdx() uint32 {
+	return t.rootPageIdx
+}
+
+func (t *Table) HasPrimaryKey() bool {
+	return t.PrimaryKey.Name != ""
 }
 
 func (t *Table) ColumnByName(name string) (Column, bool) {
@@ -66,7 +100,7 @@ func (t *Table) SeekNextRowID(ctx context.Context, pageIdx uint32) (*Cursor, uin
 }
 
 func (t *Table) SeekFirst(ctx context.Context) (*Cursor, error) {
-	pageIdx := t.RootPageIdx
+	pageIdx := t.GetRootPageIdx()
 	aPage, err := t.pager.ReadPage(ctx, pageIdx)
 	if err != nil {
 		return nil, fmt.Errorf("seek first: %w", err)
@@ -89,12 +123,12 @@ func (t *Table) SeekFirst(ctx context.Context) (*Cursor, error) {
 // Seek the cursor for a key, if it does not exist then return the cursor
 // for the page and cell where it should be inserted
 func (t *Table) Seek(ctx context.Context, key uint64) (*Cursor, error) {
-	aRootPage, err := t.pager.ReadPage(ctx, t.RootPageIdx)
+	aRootPage, err := t.pager.ReadPage(ctx, t.GetRootPageIdx())
 	if err != nil {
 		return nil, fmt.Errorf("seek: %w", err)
 	}
 	if aRootPage.LeafNode != nil {
-		return t.leafNodeSeek(t.RootPageIdx, aRootPage, key)
+		return t.leafNodeSeek(t.GetRootPageIdx(), aRootPage, key)
 	} else if aRootPage.InternalNode != nil {
 		return t.internalNodeSeek(ctx, aRootPage, key)
 	}
@@ -155,8 +189,8 @@ func (t *Table) internalNodeSeek(ctx context.Context, aPage *Page, key uint64) (
 // Address of right child passed in.
 // Re-initialize root page to contain the new root node.
 // New root node points to two children.
-func (t *Table) CreateNewRoot(ctx context.Context, rightChildPageIdx uint32) (*Page, error) {
-	oldRootPage, err := t.pager.ModifyPage(ctx, t.RootPageIdx)
+func (t *Table) createNewRoot(ctx context.Context, rightChildPageIdx uint32) (*Page, error) {
+	oldRootPage, err := t.pager.ModifyPage(ctx, t.GetRootPageIdx())
 	if err != nil {
 		return nil, fmt.Errorf("get old root page: %w", err)
 	}
@@ -221,8 +255,8 @@ func (t *Table) CreateNewRoot(ctx context.Context, rightChildPageIdx uint32) (*P
 	newRootNode.ICells[0].Key = leftChildMaxKey
 
 	// Set parent for both left and right child
-	leftChildPage.setParent(t.RootPageIdx)
-	rightChildPage.setParent(t.RootPageIdx)
+	leftChildPage.setParent(t.GetRootPageIdx())
+	rightChildPage.setParent(t.GetRootPageIdx())
 
 	return leftChildPage, nil
 }
@@ -343,7 +377,7 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 		   to the new root's left child, new_page_num will already point to
 		   the new root's right child
 		*/
-		aSplitPage, err = t.CreateNewRoot(ctx, aNewPage.Index)
+		aSplitPage, err = t.createNewRoot(ctx, aNewPage.Index)
 		if err != nil {
 			return fmt.Errorf("create new root: %w", err)
 		}
@@ -567,12 +601,12 @@ func (t *Table) mergeLeaves(ctx context.Context, aParent, left, right *Page, idx
 	aParent.InternalNode.DeleteKeyByIndex(idx)
 
 	if aParent.InternalNode.Header.IsRoot && aParent.InternalNode.Header.KeysNum == 0 {
-		aRootPage, err := t.pager.ModifyPage(ctx, t.RootPageIdx)
+		aRootPage, err := t.pager.ModifyPage(ctx, t.GetRootPageIdx())
 		if err != nil {
 			return fmt.Errorf("get root page: %w", err)
 		}
 		aRootPage.InternalNode = nil
-		aRootPage.LeafNode = NewLeafNode(t.RowSize)
+		aRootPage.LeafNode = NewLeafNode(t.rowSize)
 		*aRootPage.LeafNode = *left.LeafNode
 		aRootPage.LeafNode.Header.IsRoot = true
 		aRootPage.LeafNode.Header.Parent = 0
@@ -592,7 +626,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 	aNode := aPage.InternalNode
 	if aNode.Header.IsRoot {
 		if aNode.Header.KeysNum == 0 {
-			aRootPage, err := t.pager.ModifyPage(ctx, t.RootPageIdx)
+			aRootPage, err := t.pager.ModifyPage(ctx, t.GetRootPageIdx())
 			if err != nil {
 				return fmt.Errorf("rebalance internal: %w", err)
 			}
@@ -743,7 +777,7 @@ func (t *Table) mergeInternalNodes(ctx context.Context, aParent, left, right *Pa
 		leftIndex = left.Index
 	)
 	if aParent.InternalNode.Header.IsRoot && aParent.InternalNode.Header.KeysNum == 1 {
-		leftIndex = t.RootPageIdx
+		leftIndex = t.GetRootPageIdx()
 	}
 
 	// Update parent of all cells we are moving to the left node
@@ -781,7 +815,7 @@ func (t *Table) mergeInternalNodes(ctx context.Context, aParent, left, right *Pa
 
 	// If root has no keys, make left the new root
 	if aParent.InternalNode.Header.IsRoot && aParent.InternalNode.Header.KeysNum == 0 {
-		aRootPage, err := t.pager.ModifyPage(ctx, t.RootPageIdx)
+		aRootPage, err := t.pager.ModifyPage(ctx, t.GetRootPageIdx())
 		if err != nil {
 			return fmt.Errorf("get root page: %w", err)
 		}
@@ -819,7 +853,7 @@ func (t *Table) maxICells(pageIdx uint32) int {
 type callback func(page *Page)
 
 func (t *Table) BFS(f callback) error {
-	rootPage, err := t.pager.ReadPage(context.Background(), t.RootPageIdx)
+	rootPage, err := t.pager.ReadPage(context.Background(), t.GetRootPageIdx())
 	if err != nil {
 		return err
 	}
@@ -858,6 +892,105 @@ func (t *Table) BFS(f callback) error {
 	}
 
 	return nil
+}
+
+func (t *Table) newPrimaryKeyIndex(aPager *TransactionalPager, freePage *Page) (BTreeIndex, error) {
+	pkColumn := t.PrimaryKey.Column
+
+	switch pkColumn.Kind {
+	case Boolean:
+		indexNode := NewIndexNode[int8](uint64(pkColumn.Size))
+		indexNode.Header.IsRoot = true
+		freePage.IndexNode = indexNode
+	case Int4:
+		indexNode := NewIndexNode[int32](uint64(pkColumn.Size))
+		indexNode.Header.IsRoot = true
+		freePage.IndexNode = indexNode
+	case Int8:
+		indexNode := NewIndexNode[int64](uint64(pkColumn.Size))
+		indexNode.Header.IsRoot = true
+		freePage.IndexNode = indexNode
+	case Real:
+		indexNode := NewIndexNode[float32](uint64(pkColumn.Size))
+		indexNode.Header.IsRoot = true
+		freePage.IndexNode = indexNode
+	case Double:
+		indexNode := NewIndexNode[float64](uint64(pkColumn.Size))
+		indexNode.Header.IsRoot = true
+		freePage.IndexNode = indexNode
+	case Varchar:
+		indexNode := NewIndexNode[string](uint64(pkColumn.Size))
+		indexNode.Header.IsRoot = true
+		freePage.IndexNode = indexNode
+	default:
+		return nil, fmt.Errorf("unsupported primary key type %v", pkColumn.Kind)
+	}
+
+	return t.primaryKeyIndex(aPager, freePage.Index)
+}
+
+func (t *Table) primaryKeyIndex(aPager *TransactionalPager, rootPageIdx uint32) (BTreeIndex, error) {
+	pkColumn := t.PrimaryKey.Column
+	fmt.Println("AAAAAA", t.PrimaryKey.Column)
+
+	switch pkColumn.Kind {
+	case Boolean:
+		return NewUniqueIndex[int8](
+			t.logger,
+			t.txManager,
+			t.PrimaryKey.Name,
+			pkColumn,
+			aPager,
+			rootPageIdx,
+		), nil
+	case Int4:
+		return NewUniqueIndex[int32](
+			t.logger,
+			t.txManager,
+			t.PrimaryKey.Name,
+			pkColumn,
+			aPager,
+			rootPageIdx,
+		), nil
+	case Int8:
+		return NewUniqueIndex[int64](
+			t.logger,
+			t.txManager,
+			t.PrimaryKey.Name,
+			pkColumn,
+			aPager,
+			rootPageIdx,
+		), nil
+	case Real:
+		return NewUniqueIndex[float32](
+			t.logger,
+			t.txManager,
+			t.PrimaryKey.Name,
+			pkColumn,
+			aPager,
+			rootPageIdx,
+		), nil
+	case Double:
+		return NewUniqueIndex[float64](
+			t.logger,
+			t.txManager,
+			t.PrimaryKey.Name,
+			pkColumn,
+			aPager,
+			rootPageIdx,
+		), nil
+	case Varchar:
+		return NewUniqueIndex[string](
+			t.logger,
+			t.txManager,
+			t.PrimaryKey.Name,
+			pkColumn,
+			aPager,
+			rootPageIdx,
+		), nil
+	default:
+		return nil, fmt.Errorf("unsupported primary key type %v", pkColumn.Kind)
+	}
 }
 
 func (t *Table) print() error {

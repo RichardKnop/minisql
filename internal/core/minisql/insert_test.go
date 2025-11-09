@@ -3,7 +3,6 @@ package minisql
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 
 	"github.com/RichardKnop/minisql/pkg/bitwise"
@@ -11,25 +10,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var testTableName = "test_table"
-
 func TestTable_Insert(t *testing.T) {
-	t.Parallel()
-
-	tempFile, err := os.CreateTemp("", "testdb")
-	require.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize)
-	require.NoError(t, err)
-	txManager := NewTransactionManager()
-	tablePager := NewTransactionalPager(
-		aPager.ForTable(Row{Columns: testColumns}.Size()),
-		txManager,
-	)
-
 	var (
-		ctx    = context.Background()
-		rows   = gen.Rows(2)
+		aPager     = initTest(t)
+		ctx        = context.Background()
+		rows       = gen.Rows(2)
+		txManager  = NewTransactionManager()
+		tablePager = NewTransactionalPager(
+			aPager.ForTable(Row{Columns: testColumns}.Size()),
+			txManager,
+		)
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumns, 0)
 	)
 
@@ -83,22 +73,15 @@ func TestTable_Insert(t *testing.T) {
 }
 
 func TestTable_Insert_MultiInsert(t *testing.T) {
-	t.Parallel()
-
-	tempFile, err := os.CreateTemp("", "testdb")
-	require.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize)
-	require.NoError(t, err)
-	txManager := NewTransactionManager()
-	tablePager := NewTransactionalPager(
-		aPager.ForTable(Row{Columns: testColumns}.Size()),
-		txManager,
-	)
-
 	var (
-		ctx    = context.Background()
-		rows   = gen.Rows(3)
+		aPager     = initTest(t)
+		ctx        = context.Background()
+		rows       = gen.Rows(3)
+		txManager  = NewTransactionManager()
+		tablePager = NewTransactionalPager(
+			aPager.ForTable(Row{Columns: testColumns}.Size()),
+			txManager,
+		)
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumns, 0)
 	)
 
@@ -110,7 +93,7 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, stmt)
 	}, aPager)
 	require.NoError(t, err)
@@ -124,22 +107,15 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 }
 
 func TestTable_Insert_SplitRootLeaf(t *testing.T) {
-	t.Parallel()
-
-	tempFile, err := os.CreateTemp("", "testdb")
-	require.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize)
-	require.NoError(t, err)
-	txManager := NewTransactionManager()
-	tablePager := NewTransactionalPager(
-		aPager.ForTable(Row{Columns: testMediumColumns}.Size()),
-		txManager,
-	)
-
 	var (
-		ctx    = context.Background()
-		rows   = gen.MediumRows(6)
+		aPager     = initTest(t)
+		ctx        = context.Background()
+		rows       = gen.MediumRows(6)
+		txManager  = NewTransactionManager()
+		tablePager = NewTransactionalPager(
+			aPager.ForTable(Row{Columns: testMediumColumns}.Size()),
+			txManager,
+		)
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testMediumColumns, 0)
 	)
 
@@ -151,7 +127,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, stmt)
 	}, aPager)
 	require.NoError(t, err)
@@ -195,22 +171,15 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 }
 
 func TestTable_Insert_SplitLeaf(t *testing.T) {
-	t.Parallel()
-
-	tempFile, err := os.CreateTemp("", "testdb")
-	require.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize)
-	require.NoError(t, err)
-	txManager := NewTransactionManager()
-	tablePager := NewTransactionalPager(
-		aPager.ForTable(Row{Columns: testBigColumns}.Size()),
-		txManager,
-	)
-
 	var (
-		ctx    = context.Background()
-		rows   = gen.BigRows(4)
+		aPager     = initTest(t)
+		ctx        = context.Background()
+		rows       = gen.BigRows(4)
+		txManager  = NewTransactionManager()
+		tablePager = NewTransactionalPager(
+			aPager.ForTable(Row{Columns: testBigColumns}.Size()),
+			txManager,
+		)
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testBigColumns, 0)
 	)
 
@@ -224,7 +193,7 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, stmt)
 	}, aPager)
 	require.NoError(t, err)
@@ -257,19 +226,6 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 }
 
 func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
-	t.Parallel()
-
-	tempFile, err := os.CreateTemp("", "testdb")
-	require.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize)
-	require.NoError(t, err)
-	txManager := NewTransactionManager()
-	tablePager := NewTransactionalPager(
-		aPager.ForTable(Row{Columns: testBigColumns}.Size()),
-		txManager,
-	)
-
 	/*
 		In this test we are trying to simulate an internal node split. We will create
 		a new tree and start inserting big rows (each row is big enough to take all
@@ -281,7 +237,13 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		each inheriting half of leaf nodes.
 	*/
 	var (
-		ctx     = context.Background()
+		aPager     = initTest(t)
+		ctx        = context.Background()
+		txManager  = NewTransactionManager()
+		tablePager = NewTransactionalPager(
+			aPager.ForTable(Row{Columns: testBigColumns}.Size()),
+			txManager,
+		)
 		aTable  = NewTable(testLogger, tablePager, txManager, testTableName, testBigColumns, 0)
 		numRows = aTable.maxICells(0) + 2
 		rows    = gen.BigRows(numRows)
@@ -299,7 +261,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, stmt)
 	}, aPager)
 	require.NoError(t, err)
