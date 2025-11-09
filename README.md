@@ -30,6 +30,7 @@ I plan to implement more features of traditional relational databases in the fut
 - simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis
 - only tables supported, no indexes yet (this means all selects are scanning whole tables for now)
 - `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE` and `VARCHAR` data types supported
+- `PRIMARY KEY` support, only single column, no composite primary keys
 - `NULL` and `NOT NULL` support (via null bit mask included in each row/cell)
 - page size is `4096 bytes`, rows cannot exceed page size (minus required headers etc)
 - first 100 bytes of the root page are reserved for config
