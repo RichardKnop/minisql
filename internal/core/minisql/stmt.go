@@ -284,6 +284,15 @@ type Statement struct {
 	Conditions  OneOrMore // used for WHERE
 }
 
+func (s Statement) HasField(name string) bool {
+	for _, field := range s.Fields {
+		if field == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (s Statement) ReadOnly() bool {
 	return s.Kind == Select
 }
@@ -332,14 +341,12 @@ func (s Statement) Validate(aTable *Table) error {
 		if len(s.Columns) != len(aTable.Columns) {
 			return fmt.Errorf("insert: expected %d columns, got %d", len(aTable.Columns), len(s.Columns))
 		}
-		requiredFields := 0
 		for _, aColumn := range s.Columns {
 			if !aColumn.Nullable {
-				requiredFields += 1
+				if !s.HasField(aColumn.Name) {
+					return fmt.Errorf("missing required field %q", aColumn.Name)
+				}
 			}
-		}
-		if len(s.Fields) < requiredFields {
-			return fmt.Errorf("insert: expected at least %d fields, got %d", requiredFields, len(s.Fields))
 		}
 		for i, aField := range s.Fields {
 			aColumn, ok := aTable.ColumnByName(aField)

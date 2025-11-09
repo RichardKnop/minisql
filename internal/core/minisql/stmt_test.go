@@ -113,7 +113,7 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, "insert: expected 4 columns, got 3")
 	})
 
-	t.Run("INSERT with less than minimum required number of fields should fail", func(t *testing.T) {
+	t.Run("INSERT with missing required field should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
 			TableName: aTable.Name,
@@ -128,7 +128,7 @@ func TestStatement_Validate(t *testing.T) {
 
 		err := stmt.Validate(aTable)
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "insert: expected at least 2 fields, got 1")
+		assert.ErrorContains(t, err, `missing required field "email"`)
 	})
 
 	t.Run("INSERT with NULL to non-nullable column should fail", func(t *testing.T) {
@@ -197,17 +197,19 @@ func TestStatement_Validate(t *testing.T) {
 			Kind:      Insert,
 			TableName: aTable.Name,
 			Columns:   aTable.Columns,
-			Fields:    []string{"unknown_field", "unknown_field", "unknown_field", "unknown_field"},
+			Fields:    []string{"id", "email", "bogus"},
 			Inserts: [][]OptionalValue{
 				{
-					{Value: "some_value", Valid: true},
+					{Value: int32(1), Valid: true},
+					{Value: "test@example.com", Valid: true},
+					{Value: int32(25), Valid: true},
 				},
 			},
 		}
 
 		err := stmt.Validate(aTable)
 		require.Error(t, err)
-		assert.ErrorContains(t, err, `unknown field "unknown_field" in table "test_table"`)
+		assert.ErrorContains(t, err, `unknown field "bogus" in table "test_table"`)
 	})
 
 	t.Run("INSERT with invalid UTF-8 string should fail", func(t *testing.T) {
