@@ -424,7 +424,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 		d.txManager,
 	)
 	// First free pages for the table itself
-	tableToDelete.BFS(func(page *Page) {
+	tableToDelete.BFS(ctx, func(page *Page) {
 		if err := tablePager.AddFreePage(ctx, page.Index); err != nil {
 			d.logger.Sugar().With(
 				"page", page.Index,
@@ -436,7 +436,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	})
 	// And then free pages for the primary key index if any
 	if tableToDelete.HasPrimaryKey() {
-		d.primaryKeys[tableToDelete.Name].BFS(func(page *Page) {
+		d.primaryKeys[tableToDelete.Name].BFS(ctx, func(page *Page) {
 			if err := tablePager.AddFreePage(ctx, page.Index); err != nil {
 				d.logger.Sugar().With(
 					"page", page.Index,

@@ -256,8 +256,8 @@ func (ui *UniqueIndex[T]) splitChild(ctx context.Context, parentPage, splitPage 
 
 type indexCallback func(page *Page)
 
-func (ui *UniqueIndex[T]) BFS(f indexCallback) error {
-	rootPage, err := ui.pager.ReadPage(context.Background(), ui.GetRootPageIdx())
+func (ui *UniqueIndex[T]) BFS(ctx context.Context, f indexCallback) error {
+	rootPage, err := ui.pager.ReadPage(ctx, ui.GetRootPageIdx())
 	if err != nil {
 		return err
 	}
@@ -282,14 +282,14 @@ func (ui *UniqueIndex[T]) BFS(f indexCallback) error {
 				if idxCell.Child == 0 {
 					continue
 				}
-				aPage, err := ui.pager.ReadPage(context.Background(), idxCell.Child)
+				aPage, err := ui.pager.ReadPage(ctx, idxCell.Child)
 				if err != nil {
 					return err
 				}
 				queue = append(queue, aPage)
 			}
 			if current.IndexNode.(*IndexNode[T]).Header.RightChild > 0 && current.IndexNode.(*IndexNode[T]).Header.RightChild != RIGHT_CHILD_NOT_SET {
-				aPage, err := ui.pager.ReadPage(context.Background(), current.IndexNode.(*IndexNode[T]).Header.RightChild)
+				aPage, err := ui.pager.ReadPage(ctx, current.IndexNode.(*IndexNode[T]).Header.RightChild)
 				if err != nil {
 					return err
 				}
@@ -302,7 +302,7 @@ func (ui *UniqueIndex[T]) BFS(f indexCallback) error {
 }
 
 func (ui *UniqueIndex[T]) print() error {
-	return ui.BFS(func(aPage *Page) {
+	return ui.BFS(context.Background(), func(aPage *Page) {
 		aNode := aPage.IndexNode.(*IndexNode[T])
 		fmt.Println("Index node,", "page:", aPage.Index, "leaf", aNode.Header.IsLeaf, "number of keys:", aNode.Header.Keys, "parent:", aNode.Header.Parent, "right child:", aNode.Header.RightChild)
 		fmt.Println("Keys:", aNode.Keys())

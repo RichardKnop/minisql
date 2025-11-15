@@ -31,6 +31,7 @@ I plan to implement more features of traditional relational databases in the fut
 - only tables supported, no indexes yet (this means all selects are scanning whole tables for now)
 - `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE` and `VARCHAR` data types supported
 - `PRIMARY KEY` support, only single column, no composite primary keys
+- `AUTOINCREMENT` support, primary key must be of type `INT8` for autoincrement
 - `NULL` and `NOT NULL` support (via null bit mask included in each row/cell)
 - page size is `4096 bytes`, rows cannot exceed page size (minus required headers etc)
 - first 100 bytes of the root page are reserved for config
@@ -125,7 +126,7 @@ minisql>
 You can create your own non-system table now:
 
 ```sh
-minisql> create table users(id int4 primary key, name varchar(255), email varchar(255), age int4);
+minisql> create table users(id int8 primary key autoincrement, name varchar(255), email varchar(255), age int4);
 Rows affected: 0
 minisql>
 ```
@@ -141,9 +142,9 @@ users
 Insert rows:
 
 ```sh
-minisql> insert into users("id", "name", "email", "age") values(1, 'John Doe', 'john@example.com', 35),
-(2, 'Jane Doe', 'jane@example.com', 32),
-(3, 'Jack Doe', 'jack@example.com', 27);
+minisql> insert into users("name", "email", "age") values('John Doe', 'john@example.com', 35),
+('Jane Doe', 'jane@example.com', 32),
+('Jack Doe', 'jack@example.com', 27);
 Rows affected: 3
 minisql>
 ```

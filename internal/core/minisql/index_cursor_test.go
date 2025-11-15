@@ -109,3 +109,70 @@ func TestUniqueIndex_Seek(t *testing.T) {
 		assert.Equal(t, uint32(1), aCursor.CellIdx)
 	})
 }
+
+func TestUniqueIndex_SeekLastKey(t *testing.T) {
+	var (
+		aPager     = initTest(t)
+		ctx        = context.Background()
+		keys       = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
+		aColumn    = Column{Name: "test_column", Kind: Int8, Size: 8}
+		txManager  = NewTransactionManager()
+		indexPager = NewTransactionalPager(
+			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
+			txManager,
+		)
+	)
+
+	// Initialize empty index, this normally happens in the database init step
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		freePage, err := indexPager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		indexNode := NewIndexNode[int64](uint64(aColumn.Size))
+		indexNode.Header.IsRoot = true
+		indexNode.Header.IsLeaf = true
+		freePage.IndexNode = indexNode
+		return nil
+	}, aPager)
+	require.NoError(t, err)
+
+	anIndex := NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, indexPager, 0)
+	anIndex.maximumKeys = 3
+
+	t.Run("empty index", func(t *testing.T) {
+		lastKey, err := anIndex.SeekLastKey(ctx, anIndex.GetRootPageIdx())
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), lastKey)
+	})
+
+	t.Run("populated index", func(t *testing.T) {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			for _, key := range keys {
+				if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
+					return err
+				}
+			}
+			return nil
+		}, aPager)
+		require.NoError(t, err)
+
+		/*
+										+------------------------------------------------+
+										|        9              ,             16         |
+										+------------------------------------------------+
+					                   /                        |                         \
+						+-------------+                       +---------+                  +---------------+
+						|   2  ,  5   |                       | 11 , 13 |                  |      19       |
+						+-------------+                       +---------+                  +---------------+
+					   /       |       \                     /     |     \                /                 \
+			 	  +---+    +-------+  +-----------+    +----+   +-----+  +---------+   +---------+         +---------+
+				  | 1 |    | 3 , 4 |  | 6 , 7 , 8 |    | 10 |   |  12 |  | 14 , 15 |   | 17 , 18 |         | 20 , 21 |
+				  +---+    +-------+  +-----------+    +----+   +-----+  +---------+   +---------+         +---------+
+		*/
+
+		lastKey, err := anIndex.SeekLastKey(ctx, anIndex.GetRootPageIdx())
+		require.NoError(t, err)
+		assert.Equal(t, int64(21), lastKey)
+	})
+}

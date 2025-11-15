@@ -290,11 +290,11 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 			TableName: "users",
 			Columns: []Column{
 				{
-					Kind:       Int8,
-					Size:       8,
-					Name:       "id",
-					Nullable:   false,
-					PrimaryKey: true,
+					Kind:          Int8,
+					Size:          8,
+					Name:          "id",
+					PrimaryKey:    true,
+					Autoincrement: true,
 				},
 				{
 					Kind:     Varchar,
@@ -330,7 +330,7 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 		}
 
 		expected := `create table "users" (
-	id int8 primary key,
+	id int8 primary key autoincrement,
 	email varchar(255),
 	age int4,
 	verified boolean not null,

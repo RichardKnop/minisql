@@ -343,6 +343,9 @@ func (s Statement) Validate(aTable *Table) error {
 		}
 		for _, aColumn := range s.Columns {
 			if !aColumn.Nullable {
+				if aColumn.PrimaryKey && aColumn.Autoincrement {
+					continue
+				}
 				if !s.HasField(aColumn.Name) {
 					return fmt.Errorf("missing required field %q", aColumn.Name)
 				}
@@ -357,7 +360,7 @@ func (s Statement) Validate(aTable *Table) error {
 				if len(anInsert) != len(s.Fields) {
 					return fmt.Errorf("insert: expected %d values, got %d", len(s.Fields), len(anInsert))
 				}
-				if !anInsert[i].Valid && !aColumn.Nullable {
+				if !anInsert[i].Valid && !aColumn.Nullable && !(aColumn.PrimaryKey && aColumn.Autoincrement) {
 					return fmt.Errorf("field %q cannot be NULL", aField)
 				}
 				if anInsert[i].Valid {
@@ -403,6 +406,9 @@ func (stmt Statement) CreateTableDDL() string {
 		}
 		if col.PrimaryKey {
 			sb.WriteString(" primary key")
+			if col.Autoincrement {
+				sb.WriteString(" autoincrement")
+			}
 		} else if !col.Nullable {
 			sb.WriteString(" not null")
 		}
@@ -439,6 +445,15 @@ func (stmt Statement) InsertForColumn(name string, insertIdx int) (OptionalValue
 	value := stmt.Inserts[insertIdx][fieldIdx]
 
 	return value, true
+}
+
+func (stmt Statement) ColumnIdx(name string) int {
+	for i, colName := range stmt.Fields {
+		if colName == name {
+			return i
+		}
+	}
+	return -1
 }
 
 // castPrimaryKeyValue casts the primary key value to the appropriate type based on the column kind

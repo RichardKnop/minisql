@@ -3,11 +3,23 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"slices"
 )
 
 func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 	stmt.TableName = t.Name
 	stmt.Columns = t.Columns
+
+	// First, we will make sure to add any nullable columns that are missing from the
+	// insert statement, setting them to NULL
+	for i, aColumn := range t.Columns {
+		if !stmt.HasField(aColumn.Name) {
+			stmt.Fields = slices.Insert(stmt.Fields, i, aColumn.Name)
+			for j := range stmt.Inserts {
+				stmt.Inserts[j] = slices.Insert(stmt.Inserts[j], i, OptionalValue{})
+			}
+		}
+	}
 
 	if err := stmt.Validate(t); err != nil {
 		return err
@@ -20,23 +32,13 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 
 	for i, values := range stmt.Inserts {
 		if t.HasPrimaryKey() {
-			if t.PrimaryKey.Index == nil {
-				return fmt.Errorf("table %s has primary key but no index", t.Name)
-			}
-			pkValue, ok := stmt.InsertForColumn(t.PrimaryKey.Column.Name, i)
-			if !ok {
-				return fmt.Errorf("failed to get value for primary key %s", t.PrimaryKey.Name)
-			}
-			if !pkValue.Valid {
-				return fmt.Errorf("cannot insert NULL into primary key %s", t.PrimaryKey.Name)
-			}
-			castedValue, err := castPrimaryKeyValue(t.PrimaryKey.Column, pkValue.Value)
+			insertedPrimaryKey, err := t.insertPrimaryKey(ctx, stmt, i, nextRowID)
 			if err != nil {
-				return fmt.Errorf("failed to cast primary key value for %s: %w", t.PrimaryKey.Name, err)
+				return err
 			}
-			if err := t.PrimaryKey.Index.Insert(ctx, castedValue, nextRowID); err != nil {
-				return fmt.Errorf("failed to insert primary key %s: %w", t.PrimaryKey.Name, err)
-			}
+			// Update statement with autoincremented primary key value
+			pkIdx := stmt.ColumnIdx(t.PrimaryKey.Column.Name)
+			values[pkIdx] = OptionalValue{Value: insertedPrimaryKey, Valid: true}
 		}
 
 		aRow := Row{
@@ -85,4 +87,51 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 	}
 
 	return nil
+}
+
+func (t *Table) insertPrimaryKey(ctx context.Context, stmt Statement, i int, rowID uint64) (any, error) {
+	if t.PrimaryKey.Index == nil {
+		return 0, fmt.Errorf("table %s has primary key but no index", t.Name)
+	}
+	pkValue, ok := stmt.InsertForColumn(t.PrimaryKey.Column.Name, i)
+	if !ok {
+		return 0, fmt.Errorf("failed to get value for primary key %s", t.PrimaryKey.Name)
+	}
+	if !pkValue.Valid {
+		if !t.PrimaryKey.Autoincrement {
+			return 0, fmt.Errorf("failed to get value for primary key %s", t.PrimaryKey.Name)
+		}
+		newPrimaryKey, err := t.insertAutoincrementedPrimaryKey(ctx, rowID)
+		if err != nil {
+			return 0, err
+		}
+		return newPrimaryKey, nil
+	}
+	castedValue, err := castPrimaryKeyValue(t.PrimaryKey.Column, pkValue.Value)
+	if err != nil {
+		return 0, fmt.Errorf("failed to cast primary key value for %s: %w", t.PrimaryKey.Name, err)
+	}
+	if err := t.PrimaryKey.Index.Insert(ctx, castedValue, rowID); err != nil {
+		return 0, fmt.Errorf("failed to insert primary key %s: %w", t.PrimaryKey.Name, err)
+	}
+	return castedValue, nil
+}
+
+func (t *Table) insertAutoincrementedPrimaryKey(ctx context.Context, rowID uint64) (int64, error) {
+	if t.PrimaryKey.Autoincrement && t.PrimaryKey.Column.Kind != Int8 {
+		return 0, fmt.Errorf("autoincrement primary key %s must be of type INT8", t.PrimaryKey.Name)
+	}
+	lastKey, err := t.PrimaryKey.Index.SeekLastKey(ctx, t.PrimaryKey.Index.GetRootPageIdx())
+	if err != nil {
+		return 0, err
+	}
+	lastPrimaryKey, ok := lastKey.(int64)
+	if !ok {
+		return 0, fmt.Errorf("failed to cast last primary key value for autoincrement")
+	}
+	newPrimaryKey := lastPrimaryKey + 1
+	if err := t.PrimaryKey.Index.Insert(ctx, newPrimaryKey, rowID); err != nil {
+		return 0, fmt.Errorf("failed to insert primary key %s: %w", t.PrimaryKey.Name, err)
+	}
+	return newPrimaryKey, nil
 }

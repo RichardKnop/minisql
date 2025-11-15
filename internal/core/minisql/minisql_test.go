@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/brianvoe/gofakeit/v7"
+	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 
 	"github.com/RichardKnop/minisql/internal/pkg/logging"
@@ -317,7 +318,7 @@ func (g *dataGen) RowWithPrimaryKey(primaryKey int64) Row {
 
 func (g *dataGen) RowsWithPrimaryKey(number int) []Row {
 	rows := make([]Row, 0, number)
-	for i := 0; i < number; i++ {
+	for i := range number {
 		aRow := g.RowWithPrimaryKey(int64(i + 1))
 		aRow.Key = uint64(i)
 		rows = append(rows, aRow)
@@ -330,7 +331,7 @@ func newRootLeafPageWithCells(cells, rowSize int) *Page {
 	aRootLeaf.Header.Header.IsRoot = true
 	aRootLeaf.Header.Cells = uint32(cells)
 
-	for i := 0; i < cells; i++ {
+	for i := range cells {
 		aRootLeaf.Cells = append(aRootLeaf.Cells, Cell{
 			Key:   uint64(i),
 			Value: bytes.Repeat([]byte{byte(i)}, rowSize),
@@ -523,4 +524,9 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 	)
 
 	return aRootPage, internalPages, leafPages
+}
+
+func resetMock(aMock *mock.Mock) {
+	aMock.ExpectedCalls = nil
+	aMock.Calls = nil
 }
