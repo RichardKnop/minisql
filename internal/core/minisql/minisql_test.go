@@ -327,7 +327,7 @@ func (g *dataGen) RowsWithPrimaryKey(number int) []Row {
 }
 
 func newRootLeafPageWithCells(cells, rowSize int) *Page {
-	aRootLeaf := NewLeafNode(uint64(rowSize))
+	aRootLeaf := NewLeafNode()
 	aRootLeaf.Header.Header.IsRoot = true
 	aRootLeaf.Header.Cells = uint32(cells)
 
@@ -440,7 +440,6 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 						Value: bytes.Repeat([]byte{byte(2)}, 270),
 					},
 				},
-				RowSize: 270,
 			},
 		}
 		// page 4
@@ -461,7 +460,6 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 						Value: bytes.Repeat([]byte{byte(3)}, 270),
 					},
 				},
-				RowSize: 270,
 			},
 		}
 		// page 5
@@ -486,7 +484,6 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 						Value: bytes.Repeat([]byte{byte(5)}, 270),
 					},
 				},
-				RowSize: 270,
 			},
 		}
 		// page 6
@@ -506,7 +503,6 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 						Value: bytes.Repeat([]byte{byte(6)}, 270),
 					},
 				},
-				RowSize: 270,
 			},
 		}
 

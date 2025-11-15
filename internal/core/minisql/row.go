@@ -29,7 +29,7 @@ func maxCells(rowSize uint64) uint32 {
 	// base header is +6, leaf/internal header +8
 	// and uint64 row ID per cell
 	// hence we divide by rowSize + 8 + 8
-	return uint32((PageSize - 6 - 8) / (rowSize + 8 + 8))
+	return uint32((PageSize - headerSize()) / (rowSize + 8 + 8))
 }
 
 // MaxRootCells returns how many rows can be stored in a root page
@@ -41,7 +41,7 @@ func maxRootCells(rowSize uint64) uint32 {
 	// base header is +6, leaf/internal header +8
 	// and uint64 row ID per cell
 	// hence we divide by rowSize + 8 + 8
-	return uint32((PageSize - 6 - 8 - RootPageConfigSize) / (rowSize + 8 + 8))
+	return uint32((PageSize - rootHeaderSize()) / (rowSize + 8 + 8))
 }
 
 func NewRow(columns []Column) Row {
@@ -50,8 +50,12 @@ func NewRow(columns []Column) Row {
 
 // Size calculates a size of a row record excluding null bitmask and row ID
 func (r Row) Size() uint64 {
+	return sizeOfColumns(r.Columns)
+}
+
+func sizeOfColumns(columns []Column) uint64 {
 	size := uint64(0)
-	for _, aColumn := range r.Columns {
+	for _, aColumn := range columns {
 		size += uint64(aColumn.Size)
 	}
 	return size

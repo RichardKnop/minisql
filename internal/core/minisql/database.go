@@ -112,7 +112,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser P
 
 func (d *Database) init(ctx context.Context) error {
 	var (
-		mainTablePager = d.factory.ForTable(Row{Columns: mainTableColumns}.Size())
+		mainTablePager = d.factory.ForTable(mainTableColumns)
 		totalPages     = int(d.flusher.TotalPages())
 		rooPageIdx     = uint32(0)
 	)
@@ -205,7 +205,7 @@ func (d *Database) init(ctx context.Context) error {
 			d.tables[stmt.TableName] = NewTable(
 				d.logger,
 				NewTransactionalPager(
-					d.factory.ForTable(Row{Columns: stmt.Columns}.Size()),
+					d.factory.ForTable(stmt.Columns),
 					d.txManager,
 				),
 				d.txManager,
@@ -320,16 +320,15 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 
 	d.logger.Sugar().With("name", stmt.TableName).Debug("creating table")
 
-	rowSize := Row{Columns: stmt.Columns}.Size()
 	tablePager := NewTransactionalPager(
-		d.factory.ForTable(rowSize),
+		d.factory.ForTable(stmt.Columns),
 		d.txManager,
 	)
 	freePage, err := tablePager.GetFreePage(ctx)
 	if err != nil {
 		return nil, err
 	}
-	freePage.LeafNode = NewLeafNode(rowSize)
+	freePage.LeafNode = NewLeafNode()
 	freePage.LeafNode.Header.IsRoot = true
 	createdTable := NewTable(
 		d.logger,
@@ -420,7 +419,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 
 	// Free all table pages
 	tablePager := NewTransactionalPager(
-		d.factory.ForTable(tableToDelete.rowSize),
+		d.factory.ForTable(tableToDelete.Columns),
 		d.txManager,
 	)
 	// First free pages for the table itself

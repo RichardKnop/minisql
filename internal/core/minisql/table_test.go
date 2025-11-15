@@ -196,8 +196,9 @@ func TestTable_Seek_EmptyTable(t *testing.T) {
 
 	t.Run("root leaf node full", func(t *testing.T) {
 		var (
-			cells, rowSize = maxCells(aTable.rowSize), aTable.rowSize
-			aRootPage      = newRootLeafPageWithCells(int(cells), int(rowSize))
+			rowSize   = sizeOfColumns(aTable.Columns)
+			cells     = maxCells(rowSize)
+			aRootPage = newRootLeafPageWithCells(int(cells), int(rowSize))
 		)
 		pagerMock.On("ReadPage", mock.Anything, aTable.GetRootPageIdx()).Return(aRootPage, nil)
 
@@ -315,8 +316,8 @@ func TestTable_CreateNewRoot(t *testing.T) {
 		aRow           = gen.Row()
 		cells, rowSize = aRow.MaxCells(), aRow.Size()
 		aRootPage      = newRootLeafPageWithCells(int(cells), int(rowSize))
-		newRightChild  = &Page{Index: 1, LeafNode: NewLeafNode(aRow.Size())}
-		newLeftChild   = &Page{Index: 2, LeafNode: NewLeafNode(aRow.Size())}
+		newRightChild  = &Page{Index: 1, LeafNode: NewLeafNode()}
+		newLeftChild   = &Page{Index: 2, LeafNode: NewLeafNode()}
 		aTable         = NewTable(testLogger, pagerMock, NewTransactionManager(), testTableName, testColumns, 0)
 	)
 
@@ -349,7 +350,7 @@ func TestTable_InternalNodeInsert(t *testing.T) {
 		pagerMock                   = new(MockPager)
 		_, internalPages, leafPages = newTestBtree()
 		aTable                      = NewTable(testLogger, pagerMock, NewTransactionManager(), testTableName, testColumns, 0)
-		aNewLeaf                    = NewLeafNode(aTable.rowSize)
+		aNewLeaf                    = NewLeafNode()
 	)
 	aNewLeaf.Header.Cells = 1
 	aNewLeaf.Cells = append(aNewLeaf.Cells, Cell{

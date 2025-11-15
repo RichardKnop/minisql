@@ -19,7 +19,7 @@ func TestTable_PageRecycling(t *testing.T) {
 	require.NoError(t, err)
 	txManager := NewTransactionManager()
 	tablePager := NewTransactionalPager(
-		aPager.ForTable(Row{Columns: testMediumColumns}.Size()),
+		aPager.ForTable(testMediumColumns),
 		txManager,
 	)
 
@@ -99,7 +99,6 @@ func TestPage_Clone(t *testing.T) {
 					Cells:    2,
 					NextLeaf: 9,
 				},
-				RowSize: 16,
 				Cells: []Cell{
 					{
 						NullBitmask: 0,

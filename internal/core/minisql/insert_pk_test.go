@@ -14,12 +14,11 @@ func TestTable_Insert_PrimaryKey(t *testing.T) {
 		ctx        = context.Background()
 		txManager  = NewTransactionManager()
 		tablePager = NewTransactionalPager(
-			aPager.ForTable(Row{Columns: testColumnsWithPrimaryKey}.Size()),
+			aPager.ForTable(testColumnsWithPrimaryKey),
 			txManager,
 		)
-		rows    = gen.RowsWithPrimaryKey(100)
-		rowSize = Row{Columns: testColumnsWithPrimaryKey}.Size()
-		aTable  *Table
+		rows   = gen.RowsWithPrimaryKey(100)
+		aTable *Table
 	)
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -27,7 +26,7 @@ func TestTable_Insert_PrimaryKey(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		freePage.LeafNode = NewLeafNode(rowSize)
+		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumnsWithPrimaryKey, freePage.Index)
 		return nil
@@ -86,12 +85,11 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 		ctx        = context.Background()
 		txManager  = NewTransactionManager()
 		tablePager = NewTransactionalPager(
-			aPager.ForTable(Row{Columns: testColumnsWithPrimaryKey}.Size()),
+			aPager.ForTable(testColumnsWithPrimaryKey),
 			txManager,
 		)
-		rows    = gen.RowsWithPrimaryKey(1)
-		rowSize = Row{Columns: testColumnsWithPrimaryKey}.Size()
-		aTable  *Table
+		rows   = gen.RowsWithPrimaryKey(1)
+		aTable *Table
 	)
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -99,7 +97,7 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		freePage.LeafNode = NewLeafNode(rowSize)
+		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumnsWithPrimaryKey, freePage.Index)
 		return nil
