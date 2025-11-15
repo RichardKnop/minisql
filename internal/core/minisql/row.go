@@ -20,28 +20,11 @@ type Row struct {
 	cursor Cursor
 }
 
-// MaxCells returns how many rows can be stored in a non root page
-func (r Row) MaxCells() uint32 {
-	return maxCells(r.Size())
-}
-
 func maxCells(rowSize uint64) uint32 {
 	// base header is +6, leaf/internal header +8
 	// and uint64 row ID per cell
 	// hence we divide by rowSize + 8 + 8
-	return uint32((PageSize - 6 - 8) / (rowSize + 8 + 8))
-}
-
-// MaxRootCells returns how many rows can be stored in a root page
-func (r Row) MaxRootCells() uint32 {
-	return maxRootCells(r.Size())
-}
-
-func maxRootCells(rowSize uint64) uint32 {
-	// base header is +6, leaf/internal header +8
-	// and uint64 row ID per cell
-	// hence we divide by rowSize + 8 + 8
-	return uint32((PageSize - 6 - 8 - RootPageConfigSize) / (rowSize + 8 + 8))
+	return uint32((PageSize - headerSize()) / (rowSize + 8 + 8))
 }
 
 func NewRow(columns []Column) Row {
@@ -49,15 +32,19 @@ func NewRow(columns []Column) Row {
 }
 
 // Size calculates a size of a row record excluding null bitmask and row ID
-func (r Row) Size() uint64 {
+func (r *Row) Size() uint64 {
+	return sizeOfColumns(r.Columns)
+}
+
+func sizeOfColumns(columns []Column) uint64 {
 	size := uint64(0)
-	for _, aColumn := range r.Columns {
+	for _, aColumn := range columns {
 		size += uint64(aColumn.Size)
 	}
 	return size
 }
 
-func (r Row) GetColumn(name string) (Column, bool) {
+func (r *Row) GetColumn(name string) (Column, bool) {
 	for _, aColumn := range r.Columns {
 		if aColumn.Name == name {
 			return aColumn, true
@@ -66,7 +53,7 @@ func (r Row) GetColumn(name string) (Column, bool) {
 	return Column{}, false
 }
 
-func (r Row) GetValue(name string) (OptionalValue, bool) {
+func (r *Row) GetValue(name string) (OptionalValue, bool) {
 	var (
 		found     bool
 		columnIdx = 0
@@ -88,7 +75,7 @@ func (r Row) GetValue(name string) (OptionalValue, bool) {
 // returns (true, true) if value was changed
 // returns (true, false) if value was not changed
 // returns (false, false) if column not found
-func (r Row) SetValue(name string, value OptionalValue) (bool, bool) {
+func (r *Row) SetValue(name string, value OptionalValue) (bool, bool) {
 	var (
 		found     bool
 		columnIdx = 0
@@ -110,7 +97,7 @@ func (r Row) SetValue(name string, value OptionalValue) (bool, bool) {
 	return true, false
 }
 
-func (r Row) Clone() Row {
+func (r *Row) Clone() Row {
 	aClone := Row{
 		Columns: make([]Column, 0, len(r.Columns)),
 		Values:  make([]OptionalValue, 0, len(r.Values)),
@@ -121,7 +108,7 @@ func (r Row) Clone() Row {
 	return aClone
 }
 
-func (r Row) columnOffset(idx int) uint32 {
+func (r *Row) columnOffset(idx int) uint32 {
 	offset := uint32(0)
 	for i := range idx {
 		offset += r.Columns[i].Size
@@ -129,7 +116,7 @@ func (r Row) columnOffset(idx int) uint32 {
 	return offset
 }
 
-func (r Row) appendValues(fields []string, values []OptionalValue) Row {
+func (r *Row) appendValues(fields []string, values []OptionalValue) {
 	var (
 		found    = false
 		fieldIdx = 0
@@ -148,7 +135,6 @@ func (r Row) appendValues(fields []string, values []OptionalValue) Row {
 			r.Values = append(r.Values, OptionalValue{})
 		}
 	}
-	return r
 }
 
 func (r *Row) Marshal() ([]byte, error) {
@@ -218,33 +204,33 @@ func (r *Row) Marshal() ([]byte, error) {
 	return buf, nil
 }
 
-func UnmarshalRow(aCell Cell, aRow *Row) error {
-	aRow.Key = aCell.Key
-	aRow.Values = make([]OptionalValue, 0, len(aRow.Columns))
-	for i, aColumn := range aRow.Columns {
+func (r *Row) Unmarshal(aCell Cell) error {
+	r.Key = aCell.Key
+	r.Values = make([]OptionalValue, 0, len(r.Columns))
+	for i, aColumn := range r.Columns {
 		if bitwise.IsSet(aCell.NullBitmask, i) {
-			aRow.Values = append(aRow.Values, OptionalValue{Valid: false})
+			r.Values = append(r.Values, OptionalValue{Valid: false})
 			continue
 		}
-		offset := aRow.columnOffset(i)
+		offset := r.columnOffset(i)
 		switch aColumn.Kind {
 		case Boolean:
 			value := (uint32(aCell.Value[:][offset+0+0]) << 0)
-			aRow.Values = append(aRow.Values, OptionalValue{Value: value == uint32(1), Valid: true})
+			r.Values = append(r.Values, OptionalValue{Value: value == uint32(1), Valid: true})
 		case Int4:
 			value := unmarshalInt32(aCell.Value[:], uint64(offset))
-			aRow.Values = append(aRow.Values, OptionalValue{Value: int32(value), Valid: true})
+			r.Values = append(r.Values, OptionalValue{Value: int32(value), Valid: true})
 		case Int8:
 			value := unmarshalInt64(aCell.Value[:], uint64(offset))
-			aRow.Values = append(aRow.Values, OptionalValue{Value: int64(value), Valid: true})
+			r.Values = append(r.Values, OptionalValue{Value: int64(value), Valid: true})
 		case Real:
-			aRow.Values = append(aRow.Values, OptionalValue{Value: unmarshalFloat32(aCell.Value[:], uint64(offset)), Valid: true})
+			r.Values = append(r.Values, OptionalValue{Value: unmarshalFloat32(aCell.Value[:], uint64(offset)), Valid: true})
 		case Double:
-			aRow.Values = append(aRow.Values, OptionalValue{Value: unmarshalFloat64(aCell.Value[:], uint64(offset)), Valid: true})
+			r.Values = append(r.Values, OptionalValue{Value: unmarshalFloat64(aCell.Value[:], uint64(offset)), Valid: true})
 		case Varchar:
 			dst := make([]byte, aColumn.Size)
 			copy(dst, aCell.Value[:][offset:offset+aColumn.Size])
-			aRow.Values = append(aRow.Values, OptionalValue{Value: string(bytes.Trim(dst, "\x00")), Valid: true})
+			r.Values = append(r.Values, OptionalValue{Value: string(bytes.Trim(dst, "\x00")), Valid: true})
 		}
 	}
 
@@ -253,7 +239,7 @@ func UnmarshalRow(aCell Cell, aRow *Row) error {
 
 // CheckOneOrMore checks whether row satisfies one or more sets of conditions
 // (cond1 AND cond2) OR (cond3 and cond4) ... etc
-func (r Row) CheckOneOrMore(conditions OneOrMore) (bool, error) {
+func (r *Row) CheckOneOrMore(conditions OneOrMore) (bool, error) {
 	if len(conditions) == 0 {
 		return true, nil
 	}
@@ -280,8 +266,7 @@ func (r Row) CheckOneOrMore(conditions OneOrMore) (bool, error) {
 	return false, nil
 }
 
-func (r Row) checkCondition(aCondition Condition) (bool, error) {
-
+func (r *Row) checkCondition(aCondition Condition) (bool, error) {
 	// left side is field, right side is literal value
 	if aCondition.Operand1.IsField() && !aCondition.Operand2.IsField() {
 		return r.compareFieldValue(aCondition.Operand1, aCondition.Operand2, aCondition.Operator)
@@ -301,7 +286,7 @@ func (r Row) checkCondition(aCondition Condition) (bool, error) {
 	return aCondition.Operand1.Value == aCondition.Operand2.Value, nil
 }
 
-func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Operator) (bool, error) {
+func (r *Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Operator) (bool, error) {
 	if fieldOperand.Type != OperandField {
 		return false, fmt.Errorf("field operand invalid, type '%d'", fieldOperand.Type)
 	}
@@ -345,7 +330,7 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 	}
 }
 
-func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, error) {
+func (r *Row) compareFields(field1, field2 Operand, operator Operator) (bool, error) {
 	if !field1.IsField() {
 		return false, fmt.Errorf("field operand invalid, type '%d'", field1.Type)
 	}
@@ -502,7 +487,7 @@ func compareVarchar(value1, value2 any, operator Operator) (bool, error) {
 }
 
 // NullBitmask returns a bitmask representing which columns are NULL
-func (r Row) NullBitmask() uint64 {
+func (r *Row) NullBitmask() uint64 {
 	var bitmask uint64 = 0
 	for i, val := range r.Values {
 		if !val.Valid {

@@ -17,7 +17,7 @@ func TestTable_Insert(t *testing.T) {
 		rows       = gen.Rows(2)
 		txManager  = NewTransactionManager()
 		tablePager = NewTransactionalPager(
-			aPager.ForTable(Row{Columns: testColumns}.Size()),
+			aPager.ForTable(testColumns),
 			txManager,
 		)
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumns, 0)
@@ -39,7 +39,7 @@ func TestTable_Insert(t *testing.T) {
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Cells[0].Key))
 
 		actualRow := NewRow(rows[0].Columns)
-		err = UnmarshalRow(aPager.pages[0].LeafNode.Cells[0], &actualRow)
+		err = actualRow.Unmarshal(aPager.pages[0].LeafNode.Cells[0])
 		require.NoError(t, err)
 		assert.Equal(t, rows[0], actualRow)
 		assert.Equal(t, rows[0].NullBitmask(), actualRow.NullBitmask())
@@ -64,7 +64,7 @@ func TestTable_Insert(t *testing.T) {
 		assert.Equal(t, 1, int(aPager.pages[0].LeafNode.Cells[1].Key))
 
 		actualRow := NewRow(rows[1].Columns)
-		err = UnmarshalRow(aPager.pages[0].LeafNode.Cells[1], &actualRow)
+		err = actualRow.Unmarshal(aPager.pages[0].LeafNode.Cells[1])
 		require.NoError(t, err)
 		assert.Equal(t, rows[1], actualRow)
 		assert.Equal(t, rows[1].NullBitmask(), actualRow.NullBitmask())
@@ -79,7 +79,7 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 		rows       = gen.Rows(3)
 		txManager  = NewTransactionManager()
 		tablePager = NewTransactionalPager(
-			aPager.ForTable(Row{Columns: testColumns}.Size()),
+			aPager.ForTable(testColumns),
 			txManager,
 		)
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumns, 0)
@@ -113,7 +113,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 		rows       = gen.MediumRows(6)
 		txManager  = NewTransactionManager()
 		tablePager = NewTransactionalPager(
-			aPager.ForTable(Row{Columns: testMediumColumns}.Size()),
+			aPager.ForTable(testMediumColumns),
 			txManager,
 		)
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testMediumColumns, 0)
@@ -177,7 +177,7 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 		rows       = gen.BigRows(4)
 		txManager  = NewTransactionManager()
 		tablePager = NewTransactionalPager(
-			aPager.ForTable(Row{Columns: testBigColumns}.Size()),
+			aPager.ForTable(testBigColumns),
 			txManager,
 		)
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testBigColumns, 0)
@@ -241,7 +241,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		ctx        = context.Background()
 		txManager  = NewTransactionManager()
 		tablePager = NewTransactionalPager(
-			aPager.ForTable(Row{Columns: testBigColumns}.Size()),
+			aPager.ForTable(testBigColumns),
 			txManager,
 		)
 		aTable  = NewTable(testLogger, tablePager, txManager, testTableName, testBigColumns, 0)

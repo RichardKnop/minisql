@@ -13,7 +13,7 @@ func TestTable_Select(t *testing.T) {
 
 	txManager := NewTransactionManager()
 	tablePager := NewTransactionalPager(
-		aPager.ForTable(Row{Columns: testColumns}.Size()),
+		aPager.ForTable(testColumns),
 		txManager,
 	)
 

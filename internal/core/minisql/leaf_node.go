@@ -59,13 +59,13 @@ type Cell struct {
 	Value       []byte
 }
 
-func (c *Cell) Size(rowSize uint64) uint64 {
+func (c *Cell) Size() uint64 {
 	// 8 bytes for null bitmask, 8 bytes for key
-	return 8 + 8 + rowSize
+	return 8 + 8 + uint64(len(c.Value))
 }
 
-func (c *Cell) Marshal(rowSize uint64, buf []byte) ([]byte, error) {
-	size := c.Size(rowSize)
+func (c *Cell) Marshal(buf []byte) ([]byte, error) {
+	size := c.Size()
 	if uint64(cap(buf)) >= size {
 		buf = buf[:size]
 	} else {
@@ -80,13 +80,13 @@ func (c *Cell) Marshal(rowSize uint64, buf []byte) ([]byte, error) {
 	marshalUint64(buf, c.Key, i)
 	i += 8
 
-	copy(buf[i:], c.Value[0:rowSize])
-	i += rowSize
+	copy(buf[i:], c.Value)
+	i += uint64(len(c.Value))
 
 	return buf[:i], nil
 }
 
-func (c *Cell) Unmarshal(rowSize uint64, buf []byte) (uint64, error) {
+func (c *Cell) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	i := uint64(0)
 
 	c.NullBitmask = unmarshalUint64(buf, i)
@@ -95,34 +95,30 @@ func (c *Cell) Unmarshal(rowSize uint64, buf []byte) (uint64, error) {
 	c.Key = unmarshalUint64(buf, i)
 	i += 8
 
-	copy(c.Value, buf[i:i+rowSize])
-	i += rowSize
+	for _, aColumn := range columns {
+		val := make([]byte, aColumn.Size)
+		n := copy(val, buf[i:i+uint64(aColumn.Size)])
+		i += uint64(n)
+		c.Value = append(c.Value, val...)
+	}
 
 	return i, nil
 }
 
 type LeafNode struct {
-	Header  LeafNodeHeader
-	Cells   []Cell // (PageSize - (6+8)) / (rowSize+8+8)
-	RowSize uint64
+	Header LeafNodeHeader
+	Cells  []Cell
 }
 
 func (n *LeafNode) Clone() *LeafNode {
-	aCopy := NewLeafNode(n.RowSize, n.Cells...)
+	aCopy := NewLeafNode(n.Cells...)
 	aCopy.Header = n.Header
 	return aCopy
 }
 
-func NewCell(rowSize uint64) Cell {
-	return Cell{
-		Value: make([]byte, rowSize),
-	}
-}
-
-func NewLeafNode(rowSize uint64, cells ...Cell) *LeafNode {
+func NewLeafNode(cells ...Cell) *LeafNode {
 	aNode := LeafNode{
-		Cells:   make([]Cell, 0, len(cells)),
-		RowSize: rowSize,
+		Cells: make([]Cell, 0, len(cells)),
 	}
 	if len(cells) > 0 {
 		aNode.Header.Cells = uint32(len(cells))
@@ -136,7 +132,7 @@ func (n *LeafNode) Size() uint64 {
 	size += n.Header.Size()
 
 	for idx := range n.Cells {
-		size += n.Cells[idx].Size(n.RowSize)
+		size += n.Cells[idx].Size()
 	}
 
 	return size
@@ -159,7 +155,7 @@ func (n *LeafNode) Marshal(buf []byte) ([]byte, error) {
 	i += uint64(len(hbuf))
 
 	for idx := range n.Cells {
-		cbuf, err := n.Cells[idx].Marshal(n.RowSize, buf[i:])
+		cbuf, err := n.Cells[idx].Marshal(buf[i:])
 		if err != nil {
 			return nil, err
 		}
@@ -169,7 +165,7 @@ func (n *LeafNode) Marshal(buf []byte) ([]byte, error) {
 	return buf[:i], nil
 }
 
-func (n *LeafNode) Unmarshal(buf []byte) (uint64, error) {
+func (n *LeafNode) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	i := uint64(0)
 
 	hi, err := n.Header.Unmarshal(buf[i:])
@@ -179,8 +175,8 @@ func (n *LeafNode) Unmarshal(buf []byte) (uint64, error) {
 	i += hi
 
 	for idx := 0; idx < int(n.Header.Cells); idx++ {
-		n.Cells = append(n.Cells, NewCell(n.RowSize))
-		ci, err := n.Cells[idx].Unmarshal(n.RowSize, buf[i:])
+		n.Cells = append(n.Cells, Cell{})
+		ci, err := n.Cells[idx].Unmarshal(columns, buf[i:])
 		if err != nil {
 			return 0, err
 		}
@@ -219,7 +215,7 @@ func (n *LeafNode) Delete(key uint64) (Cell, bool) {
 	for i := int(cellIdx); i < int(n.Header.Cells)-1; i++ {
 		n.Cells[i] = n.Cells[i+1]
 	}
-	n.Cells[int(n.Header.Cells)-1] = NewCell(n.RowSize)
+	n.Cells[int(n.Header.Cells)-1] = Cell{}
 
 	n.Header.Cells -= 1
 
@@ -235,7 +231,7 @@ func (n *LeafNode) LastCell() Cell {
 }
 
 func (n *LeafNode) RemoveLastCell() {
-	n.Cells[n.Header.Cells-1] = NewCell(n.RowSize)
+	n.Cells[n.Header.Cells-1] = Cell{}
 	n.Header.Cells -= 1
 }
 
@@ -243,7 +239,7 @@ func (n *LeafNode) RemoveFirstCell() {
 	for i := 0; i < int(n.Header.Cells)-1; i++ {
 		n.Cells[i] = n.Cells[i+1]
 	}
-	n.Cells[n.Header.Cells-1] = NewCell(n.RowSize)
+	n.Cells[n.Header.Cells-1] = Cell{}
 	n.Header.Cells -= 1
 }
 

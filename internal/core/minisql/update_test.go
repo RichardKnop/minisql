@@ -15,7 +15,7 @@ func TestTable_Update(t *testing.T) {
 		rows       = gen.Rows(38)
 		txManager  = NewTransactionManager()
 		tablePager = NewTransactionalPager(
-			aPager.ForTable(Row{Columns: testColumns}.Size()),
+			aPager.ForTable(testColumns),
 			txManager,
 		)
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumns, 0)

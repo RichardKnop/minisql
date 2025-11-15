@@ -45,7 +45,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 			Columns: t.Columns,
 			Values:  make([]OptionalValue, 0, len(t.Columns)),
 		}
-		aRow = aRow.appendValues(stmt.Fields, values)
+		aRow.appendValues(stmt.Fields, values)
 
 		aPage, err := t.pager.ModifyPage(ctx, aCursor.PageIdx)
 		if err != nil {
