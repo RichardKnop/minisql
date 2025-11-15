@@ -14,8 +14,7 @@ func TestLeafNode_Marshal(t *testing.T) {
 	t.Parallel()
 
 	var (
-		rowSize = uint64(230)
-		aNode   = NewLeafNode(rowSize)
+		aNode = NewLeafNode()
 	)
 
 	aNode.Header = LeafNodeHeader{
@@ -40,13 +39,18 @@ func TestLeafNode_Marshal(t *testing.T) {
 	data, err := aNode.Marshal(buf)
 	require.NoError(t, err)
 
-	recreatedNode := NewLeafNode(rowSize)
-	_, err = recreatedNode.Unmarshal(data)
+	recreatedNode := NewLeafNode()
+	_, err = recreatedNode.Unmarshal([]Column{
+		{
+			Kind: Varchar,
+			Size: 230,
+		},
+	}, data)
 	require.NoError(t, err)
 
 	assert.Equal(t, aNode, recreatedNode)
 
-	for idx := 0; idx < len(aNode.Cells); idx++ {
-		assert.Equal(t, aNode.Cells[idx], recreatedNode.Cells[idx])
-	}
+	// for idx := 0; idx < len(aNode.Cells); idx++ {
+	// 	assert.Equal(t, aNode.Cells[idx], recreatedNode.Cells[idx])
+	// }
 }

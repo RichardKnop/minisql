@@ -5,7 +5,7 @@ import (
 )
 
 type PagerFactory interface {
-	ForTable(uint64) Pager
+	ForTable([]Column) Pager
 	ForIndex(kind ColumnKind, keySize uint64) Pager
 }
 

@@ -1,9 +1,9 @@
 package minisql
 
-func (p *pagerImpl) ForTable(rowSize uint64) Pager {
+func (p *pagerImpl) ForTable(columns []Column) Pager {
 	return &tablePager{
 		pagerImpl: p,
-		rowSize:   rowSize,
+		columns:   columns,
 	}
 }
 

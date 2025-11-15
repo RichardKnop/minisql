@@ -33,8 +33,7 @@ func TestNewPager_WithDBHeader(t *testing.T) {
 	defer dbFile.Close()
 	defer os.Remove(dbFile.Name())
 
-	rowSize := 270
-	aRootLeaf := NewLeafNode(uint64(rowSize))
+	aRootLeaf := NewLeafNode()
 	aRootLeaf.Header.Header.IsRoot = true
 
 	aPager, err := NewPager(dbFile, PageSize)
@@ -80,9 +79,11 @@ func TestPager_GetPage(t *testing.T) {
 	assert.Len(t, aPager.pages, 7)
 
 	var (
-		ctx        = context.Background()
-		aTable     = &Table{rowSize: 270}
-		tablePager = aPager.ForTable(aTable.rowSize)
+		ctx     = context.Background()
+		columns = []Column{
+			{Kind: Varchar, Size: 270},
+		}
+		tablePager = aPager.ForTable(columns)
 	)
 
 	for pageIdx := 0; pageIdx < int(aPager.TotalPages()); pageIdx++ {
@@ -95,7 +96,7 @@ func TestPager_GetPage(t *testing.T) {
 	aPager, err = NewPager(dbFile, PageSize)
 	require.NoError(t, err)
 	assert.Equal(t, 7, int(aPager.totalPages))
-	tablePager = aPager.ForTable(aTable.rowSize)
+	tablePager = aPager.ForTable(columns)
 
 	// Root page
 	aPage, err := tablePager.GetPage(ctx, uint32(0))
