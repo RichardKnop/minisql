@@ -9,9 +9,10 @@ import (
 )
 
 type PrimaryKey struct {
-	Name   string
-	Column Column
-	Index  BTreeIndex
+	Name          string
+	Column        Column
+	Autoincrement bool
+	Index         BTreeIndex
 }
 
 type Table struct {
@@ -40,8 +41,9 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 	for _, aColumn := range columns {
 		if aColumn.PrimaryKey {
 			aTable.PrimaryKey = PrimaryKey{
-				Name:   primaryKeyName(name),
-				Column: aColumn,
+				Name:          primaryKeyName(name),
+				Column:        aColumn,
+				Autoincrement: aColumn.Autoincrement,
 			}
 			break
 		}
@@ -99,6 +101,7 @@ func (t *Table) SeekNextRowID(ctx context.Context, pageIdx uint32) (*Cursor, uin
 	}, nextRowID, nil
 }
 
+// SeelFirst returns cursor pointing at the first row in the table
 func (t *Table) SeekFirst(ctx context.Context) (*Cursor, error) {
 	pageIdx := t.GetRootPageIdx()
 	aPage, err := t.pager.ReadPage(ctx, pageIdx)
@@ -117,6 +120,25 @@ func (t *Table) SeekFirst(ctx context.Context) (*Cursor, error) {
 		PageIdx:    pageIdx,
 		CellIdx:    0,
 		EndOfTable: aPage.LeafNode.Header.Cells == 0,
+	}, nil
+}
+
+// SeekLast returns cursor pointing at the last row in the table
+func (t *Table) SeekLast(ctx context.Context, pageIdx uint32) (*Cursor, error) {
+	aPage, err := t.pager.ReadPage(ctx, pageIdx)
+	if err != nil {
+		return nil, fmt.Errorf("seek next row ID: %w", err)
+	}
+	if aPage.LeafNode == nil {
+		return t.SeekLast(ctx, aPage.InternalNode.Header.RightChild)
+	}
+	if aPage.LeafNode.Header.NextLeaf != 0 {
+		return t.SeekLast(ctx, aPage.LeafNode.Header.NextLeaf)
+	}
+	return &Cursor{
+		Table:   t,
+		PageIdx: pageIdx,
+		CellIdx: aPage.LeafNode.Header.Cells,
 	}, nil
 }
 
@@ -852,8 +874,8 @@ func (t *Table) maxICells(pageIdx uint32) int {
 
 type callback func(page *Page)
 
-func (t *Table) BFS(f callback) error {
-	rootPage, err := t.pager.ReadPage(context.Background(), t.GetRootPageIdx())
+func (t *Table) BFS(ctx context.Context, f callback) error {
+	rootPage, err := t.pager.ReadPage(ctx, t.GetRootPageIdx())
 	if err != nil {
 		return err
 	}
@@ -875,14 +897,14 @@ func (t *Table) BFS(f callback) error {
 		if current.InternalNode != nil {
 			for i := range current.InternalNode.Header.KeysNum {
 				iCell := current.InternalNode.ICells[i]
-				aPage, err := t.pager.ReadPage(context.Background(), iCell.Child)
+				aPage, err := t.pager.ReadPage(ctx, iCell.Child)
 				if err != nil {
 					return err
 				}
 				queue = append(queue, aPage)
 			}
 			if current.InternalNode.Header.RightChild != RIGHT_CHILD_NOT_SET {
-				aPage, err := t.pager.ReadPage(context.Background(), current.InternalNode.Header.RightChild)
+				aPage, err := t.pager.ReadPage(ctx, current.InternalNode.Header.RightChild)
 				if err != nil {
 					return err
 				}
@@ -901,26 +923,32 @@ func (t *Table) newPrimaryKeyIndex(aPager *TransactionalPager, freePage *Page) (
 	case Boolean:
 		indexNode := NewIndexNode[int8](uint64(pkColumn.Size))
 		indexNode.Header.IsRoot = true
+		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Int4:
 		indexNode := NewIndexNode[int32](uint64(pkColumn.Size))
 		indexNode.Header.IsRoot = true
+		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Int8:
 		indexNode := NewIndexNode[int64](uint64(pkColumn.Size))
 		indexNode.Header.IsRoot = true
+		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Real:
 		indexNode := NewIndexNode[float32](uint64(pkColumn.Size))
 		indexNode.Header.IsRoot = true
+		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Double:
 		indexNode := NewIndexNode[float64](uint64(pkColumn.Size))
 		indexNode.Header.IsRoot = true
+		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Varchar:
 		indexNode := NewIndexNode[string](uint64(pkColumn.Size))
 		indexNode.Header.IsRoot = true
+		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	default:
 		return nil, fmt.Errorf("unsupported primary key type %v", pkColumn.Kind)
@@ -931,7 +959,6 @@ func (t *Table) newPrimaryKeyIndex(aPager *TransactionalPager, freePage *Page) (
 
 func (t *Table) primaryKeyIndex(aPager *TransactionalPager, rootPageIdx uint32) (BTreeIndex, error) {
 	pkColumn := t.PrimaryKey.Column
-	fmt.Println("AAAAAA", t.PrimaryKey.Column)
 
 	switch pkColumn.Kind {
 	case Boolean:
@@ -994,7 +1021,7 @@ func (t *Table) primaryKeyIndex(aPager *TransactionalPager, rootPageIdx uint32) 
 }
 
 func (t *Table) print() error {
-	return t.BFS(func(aPage *Page) {
+	return t.BFS(context.Background(), func(aPage *Page) {
 		if aPage.InternalNode != nil {
 			fmt.Println("Internal node,", "page:", aPage.Index, "root:", aPage.InternalNode.Header.IsRoot, "number of keys:", aPage.InternalNode.Header.KeysNum, "parent:", aPage.InternalNode.Header.Parent)
 			fmt.Println("Keys:", aPage.InternalNode.Keys())

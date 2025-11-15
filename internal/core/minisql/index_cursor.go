@@ -41,3 +41,18 @@ func (ui *UniqueIndex[T]) Seek(ctx context.Context, aPage *Page, keyAny any) (In
 	}
 	return ui.Seek(ctx, childPage, key)
 }
+
+func (ui *UniqueIndex[T]) SeekLastKey(ctx context.Context, pageIdx uint32) (any, error) {
+	aPage, err := ui.pager.ReadPage(ctx, pageIdx)
+	if err != nil {
+		return nil, fmt.Errorf("seek next row ID: %w", err)
+	}
+	aNode := aPage.IndexNode.(*IndexNode[T])
+	if aNode.Header.IsLeaf == false {
+		return ui.SeekLastKey(ctx, aNode.Header.RightChild)
+	}
+	if aNode.Header.Keys == 0 {
+		return int64(0), nil
+	}
+	return aNode.Cells[aNode.Header.Keys-1].Key, nil
+}

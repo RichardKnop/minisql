@@ -264,16 +264,9 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		assertIndexNode(t, leaf7, false, true, 9, []int64{13, 14}, nil)
 	})
 
-	actualKeys := []int64{}
-	err := anIndex.BFS(func(aPage *Page) {
-		node := aPage.IndexNode.(*IndexNode[int64])
-		actualKeys = append(actualKeys, node.Keys()...)
-	})
-	require.NoError(t, err)
+	expectedKeys := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}
 
-	expectedKys := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}
-
-	assert.ElementsMatch(t, expectedKys, actualKeys)
+	checkIndexKeys(ctx, t, anIndex, expectedKeys)
 }
 
 func TestUniqueIndex_Insert_OutOfOrder(t *testing.T) {
@@ -316,14 +309,7 @@ func TestUniqueIndex_Insert_OutOfOrder(t *testing.T) {
 			  +---+    +-------+  +-----------+    +----+   +-----+  +---------+   +---------+         +---------+
 	*/
 
-	actualKeys := []int64{}
-	err = anIndex.BFS(func(aPage *Page) {
-		node := aPage.IndexNode.(*IndexNode[int64])
-		actualKeys = append(actualKeys, node.Keys()...)
-	})
-	require.NoError(t, err)
-
-	assert.ElementsMatch(t, keys, actualKeys)
+	checkIndexKeys(ctx, t, anIndex, keys)
 
 	// require.NoError(t, anIndex.print())
 

@@ -49,14 +49,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			  +---+    +-------+  +-----------+    +----+   +-----+  +---------+   +---------+         +---------+
 	*/
 
-	actualKeys := []int64{}
-	err = anIndex.BFS(func(aPage *Page) {
-		node := aPage.IndexNode.(*IndexNode[int64])
-		actualKeys = append(actualKeys, node.Keys()...)
-	})
-	require.NoError(t, err)
-
-	assert.ElementsMatch(t, keys, actualKeys)
+	checkIndexKeys(ctx, t, anIndex, keys)
 
 	//require.NoError(t, anIndex.print())
 
@@ -114,16 +107,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			            +---+    +---+    +-----------+  +----+   +----+  +---------+   +---------+         +---------+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		// require.NoError(t, anIndex.print())
 
@@ -189,16 +174,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			            +---+    +---+    +---+        +----+   +----+  +---------+   +---------+         +---------+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		//require.NoError(t, anIndex.print())
 
@@ -260,16 +237,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			              +---+       +-------+      +----+   +----+  +---------+   +---------+         +---------+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		// require.NoError(t, anIndex.print())
 
@@ -329,16 +298,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			              +---+       +-------+      +----+        +----+      +---------+      +----+      +---------+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		//require.NoError(t, anIndex.print())
 
@@ -398,16 +359,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			              +---+       +-------+      +----+        +----+      +---------+      +----+      +-----+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		//require.NoError(t, anIndex.print())
 
@@ -467,16 +420,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			              +---+       +-------+      +----+        +----+           +----+      +----+      +-----+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 17, 18, 21}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		//require.NoError(t, anIndex.print())
 
@@ -536,16 +481,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			              +---+       +-------+      +----+        +----+      +---------+       +----+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 17, 18, 21}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		// require.NoError(t, anIndex.print())
 
@@ -603,16 +540,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			              +---+       +-------+       +----+     +----+    +----+    +----+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 14, 17, 18, 21}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		// require.NoError(t, anIndex.print())
 
@@ -667,16 +596,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			              +---+       +-------+   +---------+    +----+      +----+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{2, 3, 6, 7, 9, 11, 12, 14, 17, 18, 21}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		// require.NoError(t, anIndex.print())
 
@@ -729,16 +650,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			              +---+       +-------+       +----+      +----+      +----+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{2, 3, 6, 7, 11, 12, 14, 17, 18, 21}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		// require.NoError(t, anIndex.print())
 
@@ -791,16 +704,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			              +---+       +-------+       +---------+     +----+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{2, 3, 6, 7, 12, 14, 17, 18, 21}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		// require.NoError(t, anIndex.print())
 
@@ -847,16 +752,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			                       +---+      +---+  +---------+    +----+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{2, 6, 7, 12, 14, 17, 18, 21}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		// require.NoError(t, anIndex.print())
 
@@ -896,16 +793,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			                       +---+      +---+    +----+      +----+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{2, 6, 7, 12, 17, 18, 21}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		// require.NoError(t, anIndex.print())
 
@@ -945,16 +834,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			                   +-------+       +----+       +----+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{2, 7, 12, 17, 18, 21}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		// require.NoError(t, anIndex.print())
 
@@ -992,16 +873,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			                      +---+        +----+       +----+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{2, 7, 12, 18, 21}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		// require.NoError(t, anIndex.print())
 
@@ -1039,16 +912,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			                      +---+           +---------+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{2, 7, 12, 18}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		// require.NoError(t, anIndex.print())
 
@@ -1084,16 +949,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			                      +---+           +----+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{7, 12, 18}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		// require.NoError(t, anIndex.print())
 
@@ -1124,16 +981,8 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			+----------+
 		*/
 
-		actualKeys = []int64{}
-		err = anIndex.BFS(func(aPage *Page) {
-			node := aPage.IndexNode.(*IndexNode[int64])
-			actualKeys = append(actualKeys, node.Keys()...)
-		})
-		require.NoError(t, err)
-
 		expectedKeys := []int64{7, 12}
-
-		assert.ElementsMatch(t, expectedKeys, actualKeys)
+		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
 		// require.NoError(t, anIndex.print())
 
@@ -1205,13 +1054,7 @@ func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all keys are present
-	actualKeys := []int64{}
-	err = anIndex.BFS(func(aPage *Page) {
-		node := aPage.IndexNode.(*IndexNode[int64])
-		actualKeys = append(actualKeys, node.Keys()...)
-	})
-	require.NoError(t, err)
-	assert.ElementsMatch(t, keys, actualKeys)
+	checkIndexKeys(ctx, t, anIndex, keys)
 
 	// Delete all keys in random order
 	rand.Shuffle(len(keys), func(i, j int) { keys[i], keys[j] = keys[j], keys[i] })
@@ -1226,13 +1069,7 @@ func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify index is empty
-	actualKeys = []int64{}
-	err = anIndex.BFS(func(aPage *Page) {
-		node := aPage.IndexNode.(*IndexNode[int64])
-		actualKeys = append(actualKeys, node.Keys()...)
-	})
-	require.NoError(t, err)
-	assert.Empty(t, actualKeys)
+	checkIndexKeys(ctx, t, anIndex, nil)
 }
 
 func assertFreePages(t *testing.T, aPager Pager, expectedFreePages []uint32) {
