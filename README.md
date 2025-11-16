@@ -29,7 +29,7 @@ I plan to implement more features of traditional relational databases in the fut
   - `DELETE`
 - simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis
 - only tables supported, no indexes yet (this means all selects are scanning whole tables for now)
-- `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE` and `VARCHAR` data types supported
+- `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE`, `TEXT` and `VARCHAR` data types supported
 - `PRIMARY KEY` support, only single column, no composite primary keys
 - `AUTOINCREMENT` support, primary key must be of type `INT8` for autoincrement
 - `NULL` and `NOT NULL` support (via null bit mask included in each row/cell)
@@ -47,7 +47,8 @@ I plan to implement more features of traditional relational databases in the fut
 | `INT8`       | 8-byte signed integer (-9,223,372,036,854,775,808 to 9,223,372,036,854,775,807). |
 | `REAL`       | 4-byte single-precision floating-point number. |
 | `DOUBLE`     | 8-byte double-precision floating-point number. |
-| `VARCHAR(n)` | Variable-length string with maximum length of n bytes. It is stored in row as text with UTF-8 encoding and cannot exceed page size. |
+| `TEXT`       | Variable-length text. If length is <= 255, the text is stored inline, otherwise text is stored in overflow pages (with UTF-8 encoding). |
+| `VARCHAR(n)` | Storage works the same way as `TEXT` but allows limiting length of inserted/updated text to max value. |
 
 Each page size is `4096 bytes`. Rows larger than page size are not supported. Therefor, the largest allowed row size is `4066 bytes`.
 
@@ -118,15 +119,15 @@ minisql> select * from minisql_schema;
                       |                                                    |                      | 	type int4 not null,                            
                       |                                                    |                      | 	table_name varchar(255) not null,              
                       |                                                    |                      | 	root_page int4,                                
-                      |                                                    |                      | 	sql varchar(2056)                              
-                      |                                                    |                      | )                                                  
+                      |                                                    |                      | 	sql text                              
+                      |                                                    |                      | )
 minisql>
 ```
 
 You can create your own non-system table now:
 
 ```sh
-minisql> create table users(id int8 primary key autoincrement, name varchar(255), email varchar(255), age int4);
+minisql> create table users(id int8 primary key autoincrement, name varchar(255), email text, age int4);
 Rows affected: 0
 minisql>
 ```

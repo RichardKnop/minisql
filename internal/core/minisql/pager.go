@@ -167,29 +167,34 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx uint32) error {
 }
 
 func marshalPage(aPage *Page, buf []byte) ([]byte, error) {
-	if aPage.FreePage != nil {
-		data, err := aPage.FreePage.Marshal()
+	if aPage.OverflowPage != nil {
+		data, err := aPage.OverflowPage.Marshal(buf)
 		if err != nil {
-			return nil, fmt.Errorf("error flushing page %d: %w", aPage.Index, err)
+			return nil, fmt.Errorf("error flushing overflow page %d: %w", aPage.Index, err)
 		}
-		copy(buf, data)
-		return buf[:len(data)], nil
+		return data, nil
+	} else if aPage.FreePage != nil {
+		data, err := aPage.FreePage.Marshal(buf)
+		if err != nil {
+			return nil, fmt.Errorf("error flushing freepage %d: %w", aPage.Index, err)
+		}
+		return data, nil
 	} else if aPage.LeafNode != nil {
 		data, err := aPage.LeafNode.Marshal(buf)
 		if err != nil {
-			return nil, fmt.Errorf("error flushing page %d: %w", aPage.Index, err)
+			return nil, fmt.Errorf("error flushing leaf page %d: %w", aPage.Index, err)
 		}
 		return data, nil
 	} else if aPage.InternalNode != nil {
 		data, err := aPage.InternalNode.Marshal(buf)
 		if err != nil {
-			return nil, fmt.Errorf("error flushing page %d: %w", aPage.Index, err)
+			return nil, fmt.Errorf("error flushing internal page %d: %w", aPage.Index, err)
 		}
 		return data, nil
 	} else if aPage.IndexNode != nil {
 		data, err := marshalIndexNode(aPage.IndexNode, buf)
 		if err != nil {
-			return nil, fmt.Errorf("error flushing page %d: %w", aPage.Index, err)
+			return nil, fmt.Errorf("error flushing index page %d: %w", aPage.Index, err)
 		}
 		return data, nil
 	}

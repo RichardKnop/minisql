@@ -2,7 +2,9 @@ package minisql
 
 import (
 	"bytes"
+	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/brianvoe/gofakeit/v7"
@@ -23,7 +25,7 @@ var (
 		},
 		{
 			Kind:     Varchar,
-			Size:     255,
+			Size:     MaxInlineVarchar,
 			Name:     "email",
 			Nullable: true,
 		},
@@ -52,95 +54,103 @@ var (
 			Nullable: true,
 		},
 	}
+	testRowSize = uint64(8 + 4 + 255 + 4 + 1 + 4 + 8) // calculated size of testColumns
 
-	testMediumColumns = []Column{
-		{
-			Kind: Int8,
-			Size: 8,
-			Name: "id",
+	mediumRowBaseSize = uint32(8 + (varcharLengthPrefixSize + MaxInlineVarchar) + 4 + 1 + 4 + 8)
+	// Append varcharts until row size is so that 5 of these full rows can fit into a page
+	testMediumColumns = appendUntilSize(
+		[]Column{
+			{
+				Kind: Int8,
+				Size: 8,
+				Name: "id",
+			},
+			{
+				Kind:     Varchar,
+				Size:     MaxInlineVarchar,
+				Name:     "email",
+				Nullable: true,
+			},
+			{
+				Kind:     Int4,
+				Size:     4,
+				Name:     "age",
+				Nullable: true,
+			},
+			{
+				Kind:     Boolean,
+				Size:     1,
+				Name:     "verified",
+				Nullable: true,
+			},
+			{
+				Kind:     Real,
+				Size:     4,
+				Name:     "test_real",
+				Nullable: true,
+			},
+			{
+				Kind:     Double,
+				Size:     8,
+				Name:     "test_double",
+				Nullable: true,
+			},
 		},
-		{
-			Kind:     Varchar,
-			Size:     255,
-			Name:     "email",
-			Nullable: true,
-		},
-		{
-			Kind:     Int4,
-			Size:     4,
-			Name:     "age",
-			Nullable: true,
-		},
-		{
-			Kind:     Boolean,
-			Size:     1,
-			Name:     "verified",
-			Nullable: true,
-		},
-		{
-			Kind:     Real,
-			Size:     4,
-			Name:     "test_real",
-			Nullable: true,
-		},
-		{
-			Kind:     Double,
-			Size:     8,
-			Name:     "test_double",
-			Nullable: true,
-		},
-		{
-			Kind: Varchar,
-			// Size is defined so 5 of these columns can fit into a single page
-			Size:     (PageSize - uint32(RootPageConfigSize) - 6 - 8 - 5*8 - 5*8 - 5*(8+255+4+1+4+8)) / 5,
-			Name:     "test_varchar",
-			Nullable: true,
-		},
-	}
+		int((PageSize-uint32(RootPageConfigSize)-
+			6- // base header
+			8- // leaf header
+			5*8- // 5 keys
+			5*8- // 5 null bitmasks
+			5*mediumRowBaseSize)/5),
+	)
 
-	testBigColumns = []Column{
-		{
-			Kind: Int8,
-			Size: 8,
-			Name: "id",
+	bigRowBaseSize = uint32(8 + (varcharLengthPrefixSize + MaxInlineVarchar) + 4 + 1 + 4 + 8)
+	// Append varcharts until row size is so that one full row fills en entire page
+	testBigColumns = appendUntilSize(
+		[]Column{
+			{
+				Kind: Int8,
+				Size: 8,
+				Name: "id",
+			},
+			{
+				Kind:     Varchar,
+				Size:     MaxInlineVarchar,
+				Name:     "email",
+				Nullable: true,
+			},
+			{
+				Kind:     Int4,
+				Size:     4,
+				Name:     "age",
+				Nullable: true,
+			},
+			{
+				Kind:     Boolean,
+				Size:     1,
+				Name:     "verified",
+				Nullable: true,
+			},
+			{
+				Kind:     Real,
+				Size:     4,
+				Name:     "test_real",
+				Nullable: true,
+			},
+			{
+				Kind:     Double,
+				Size:     8,
+				Name:     "test_double",
+				Nullable: true,
+			},
 		},
-		{
-			Kind:     Varchar,
-			Size:     255,
-			Name:     "email",
-			Nullable: true,
-		},
-		{
-			Kind:     Int4,
-			Size:     4,
-			Name:     "age",
-			Nullable: true,
-		},
-		{
-			Kind:     Boolean,
-			Size:     1,
-			Name:     "verified",
-			Nullable: true,
-		},
-		{
-			Kind:     Real,
-			Size:     4,
-			Name:     "test_real",
-			Nullable: true,
-		},
-		{
-			Kind:     Double,
-			Size:     8,
-			Name:     "test_double",
-			Nullable: true,
-		},
-		{
-			Kind:     Varchar,
-			Size:     PageSize - uint32(RootPageConfigSize) - 6 - 8 - 8 - 8 - (8 + 255 + 4 + 1 + 4 + 8),
-			Name:     "test_varchar",
-			Nullable: true,
-		},
-	}
+		int((PageSize - uint32(RootPageConfigSize) -
+			6 - // base header
+			8 - // leaf header
+			8 - // 5 keys
+			8 - // 5 null bitmasks
+			bigRowBaseSize)),
+	)
 
 	testColumnsWithPrimaryKey = []Column{
 		{
@@ -152,7 +162,7 @@ var (
 		},
 		{
 			Kind:     Varchar,
-			Size:     255,
+			Size:     MaxInlineVarchar,
 			Name:     "email",
 			Nullable: true,
 		},
@@ -164,8 +174,46 @@ var (
 		},
 	}
 
+	testOverflowColumns = []Column{
+		{
+			Kind: Int8,
+			Size: 8,
+			Name: "id",
+		},
+		{
+			Kind:     Varchar,
+			Size:     MaxInlineVarchar,
+			Name:     "email",
+			Nullable: true,
+		},
+		{
+			Kind:     Text,
+			Name:     "profile",
+			Nullable: true,
+		},
+	}
+
 	testLogger *zap.Logger
 )
+
+func appendUntilSize(columns []Column, targetSize int) []Column {
+	size := 0
+	i := 0
+	for size < targetSize {
+		columns = append(columns, Column{
+			Kind:     Varchar,
+			Size:     MaxInlineVarchar,
+			Name:     fmt.Sprintf("test_varchar_%d", i),
+			Nullable: true,
+		})
+		i++
+		size += varcharLengthPrefixSize + MaxInlineVarchar
+	}
+	if size > targetSize {
+		columns[len(columns)-1].Size -= uint32(size - targetSize)
+	}
+	return columns
+}
 
 func init() {
 	logConf := logging.DefaultConfig()
@@ -212,13 +260,24 @@ func (g *dataGen) Row() Row {
 		Columns: testColumns,
 		Values: []OptionalValue{
 			{Value: g.Int64(), Valid: true},
-			{Value: g.Email(), Valid: true},
+			{Value: g.paddedEmail(), Valid: true},
 			{Value: int32(g.IntRange(18, 100)), Valid: true},
 			{Value: g.Bool(), Valid: true},
 			{Value: g.Float32(), Valid: true},
 			{Value: g.Float64(), Valid: true},
 		},
 	}
+}
+
+func (g *dataGen) paddedEmail() string {
+	email := g.Email()
+	paddingLength := MaxInlineVarchar - len(email)
+	parts := strings.Split(email, "@")
+	parts[0] += "+"
+	for i := 0; i < paddingLength-1; i++ {
+		parts[0] += g.Letter()
+	}
+	return strings.Join(parts, "@")
 }
 
 func (g *dataGen) Rows(number int) []Row {
@@ -240,18 +299,32 @@ func (g *dataGen) Rows(number int) []Row {
 }
 
 func (g *dataGen) MediumRow() Row {
-	return Row{
+	aRow := Row{
 		Columns: testMediumColumns,
 		Values: []OptionalValue{
 			{Value: g.Int64(), Valid: true},
-			{Value: g.Email(), Valid: true},
+			{Value: g.paddedEmail(), Valid: true},
 			{Value: int32(g.IntRange(18, 100)), Valid: true},
 			{Value: g.Bool(), Valid: true},
 			{Value: g.Float32(), Valid: true},
 			{Value: g.Float64(), Valid: true},
-			{Value: g.Sentence(5), Valid: true},
 		},
 	}
+	for len(aRow.Values) < len(testMediumColumns) {
+		aRow.Values = append(
+			aRow.Values,
+			OptionalValue{Value: g.textOfLength(testMediumColumns[len(aRow.Values)].Size), Valid: true},
+		)
+	}
+	return aRow
+}
+
+func (g *dataGen) textOfLength(length uint32) string {
+	txt := ""
+	for len(txt) < int(length) {
+		txt += g.Sentence(10)
+	}
+	return txt[0:length]
 }
 
 func (g *dataGen) MediumRows(number int) []Row {
@@ -273,18 +346,24 @@ func (g *dataGen) MediumRows(number int) []Row {
 }
 
 func (g *dataGen) BigRow() Row {
-	return Row{
+	aRow := Row{
 		Columns: testBigColumns,
 		Values: []OptionalValue{
 			{Value: g.Int64(), Valid: true},
-			{Value: g.Email(), Valid: true},
+			{Value: g.paddedEmail(), Valid: true},
 			{Value: int32(g.IntRange(18, 100)), Valid: true},
 			{Value: g.Bool(), Valid: true},
 			{Value: g.Float32(), Valid: true},
 			{Value: g.Float64(), Valid: true},
-			{Value: g.Sentence(15), Valid: true},
 		},
 	}
+	for len(aRow.Values) < len(testBigColumns) {
+		aRow.Values = append(
+			aRow.Values,
+			OptionalValue{Value: g.textOfLength(testBigColumns[len(aRow.Values)].Size), Valid: true},
+		)
+	}
+	return aRow
 }
 
 func (g *dataGen) BigRows(number int) []Row {
@@ -322,6 +401,38 @@ func (g *dataGen) RowsWithPrimaryKey(number int) []Row {
 		aRow := g.RowWithPrimaryKey(int64(i + 1))
 		aRow.Key = uint64(i)
 		rows = append(rows, aRow)
+	}
+	return rows
+}
+
+func (g *dataGen) OverflowRow(textSize uint32) Row {
+	return Row{
+		Columns: testOverflowColumns,
+		Values: []OptionalValue{
+			{Value: g.Int64(), Valid: true},
+			{Value: g.paddedEmail(), Valid: true},
+			{Value: g.textOfLength(textSize), Valid: true},
+		},
+	}
+}
+
+func (g *dataGen) OverflowRows(number int, sizes []uint32) []Row {
+	if len(sizes) != number {
+		panic("sizes length must match number of rows")
+	}
+	// Make sure all rows will have unique ID, this is important in some tests
+	idMap := map[int64]struct{}{}
+	rows := make([]Row, 0, number)
+	for i := range number {
+		aRow := g.OverflowRow(sizes[i])
+		_, ok := idMap[aRow.Values[0].Value.(int64)]
+		for ok {
+			aRow = g.OverflowRow(sizes[i])
+			_, ok = idMap[aRow.Values[0].Value.(int64)]
+		}
+		aRow.Key = uint64(i)
+		rows = append(rows, aRow)
+		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
 	}
 	return rows
 }
@@ -433,11 +544,11 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				Cells: []Cell{
 					{
 						Key:   1,
-						Value: bytes.Repeat([]byte{byte(1)}, 270),
+						Value: prefixWithLength(bytes.Repeat([]byte{byte(1)}, 270)),
 					},
 					{
 						Key:   2,
-						Value: bytes.Repeat([]byte{byte(2)}, 270),
+						Value: prefixWithLength(bytes.Repeat([]byte{byte(2)}, 270)),
 					},
 				},
 			},
@@ -457,7 +568,7 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				Cells: []Cell{
 					{
 						Key:   5,
-						Value: bytes.Repeat([]byte{byte(3)}, 270),
+						Value: prefixWithLength(bytes.Repeat([]byte{byte(3)}, 270)),
 					},
 				},
 			},
@@ -477,11 +588,11 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				Cells: []Cell{
 					{
 						Key:   12,
-						Value: bytes.Repeat([]byte{byte(4)}, 270),
+						Value: prefixWithLength(bytes.Repeat([]byte{byte(4)}, 270)),
 					},
 					{
 						Key:   18,
-						Value: bytes.Repeat([]byte{byte(5)}, 270),
+						Value: prefixWithLength(bytes.Repeat([]byte{byte(5)}, 270)),
 					},
 				},
 			},
@@ -500,7 +611,7 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				Cells: []Cell{
 					{
 						Key:   21,
-						Value: bytes.Repeat([]byte{byte(6)}, 270),
+						Value: prefixWithLength(bytes.Repeat([]byte{byte(6)}, 270)),
 					},
 				},
 			},

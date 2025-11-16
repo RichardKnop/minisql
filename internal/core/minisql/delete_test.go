@@ -487,6 +487,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	assert.NotNil(t, aPager.pages[5].FreePage)
 	assert.Nil(t, aPager.pages[5].LeafNode)
 	assert.Nil(t, aPager.pages[5].InternalNode)
+	assert.Nil(t, aPager.pages[5].OverflowPage)
 	assert.Equal(t, int(aPager.pages[2].Index), int(aPager.pages[5].FreePage.NextFreePage))
 	assert.Equal(t, int(aPager.pages[5].Index), int(aPager.dbHeader.FirstFreePage))
 	assert.Equal(t, 6, int(aPager.dbHeader.FreePageCount))

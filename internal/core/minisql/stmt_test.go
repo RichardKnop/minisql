@@ -22,7 +22,7 @@ func TestStatement_Validate(t *testing.T) {
 			},
 			{
 				Kind:     Varchar,
-				Size:     255,
+				Size:     MaxInlineVarchar,
 				Name:     "email",
 				Nullable: false, // non-nullable
 			},
@@ -298,7 +298,7 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 				},
 				{
 					Kind:     Varchar,
-					Size:     255,
+					Size:     MaxInlineVarchar,
 					Name:     "email",
 					Nullable: true,
 				},
@@ -380,7 +380,7 @@ func TestStatement_InsertForColumn(t *testing.T) {
 			},
 			{
 				Kind:     Varchar,
-				Size:     255,
+				Size:     MaxInlineVarchar,
 				Name:     "email",
 				Nullable: false,
 			},
