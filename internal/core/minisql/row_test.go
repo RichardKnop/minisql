@@ -19,7 +19,7 @@ func TestRow_Marshal(t *testing.T) {
 	require.NoError(t, err)
 
 	actual := NewRow(testColumns)
-	err = UnmarshalRow(Cell{Value: data}, &actual)
+	err = actual.Unmarshal(Cell{Value: data})
 	require.NoError(t, err)
 
 	assert.Equal(t, aRow, actual)

@@ -21,11 +21,7 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) erro
 		return fmt.Errorf("error inserting row to a non leaf node, key %d", key)
 	}
 
-	maxCells := aRow.MaxCells()
-	if aPage.Index == 0 {
-		maxCells = aRow.MaxRootCells()
-	}
-	if aPage.LeafNode.Header.Cells >= maxCells {
+	if aRow.Size() > aPage.AvailableSpace() {
 		// Split leaf node
 		if err := c.LeafNodeSplitInsert(ctx, key, aRow); err != nil {
 			return fmt.Errorf("leaf node split insert: %w", err)
@@ -75,7 +71,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 		"new_page_index", int(aNewPage.Index),
 	).Debug("leaf node split insert")
 
-	aNewPage.LeafNode = NewLeafNode(c.Table.rowSize)
+	aNewPage.LeafNode = NewLeafNode()
 	aNewPage.LeafNode.Header.Parent = aSplitPage.LeafNode.Header.Parent
 
 	aNewPage.LeafNode.Header.NextLeaf = aSplitPage.LeafNode.Header.NextLeaf
@@ -152,7 +148,7 @@ func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
 	}
 	aRow := NewRow(c.Table.Columns)
 
-	if err := UnmarshalRow(aPage.LeafNode.Cells[c.CellIdx], &aRow); err != nil {
+	if err := aRow.Unmarshal(aPage.LeafNode.Cells[c.CellIdx]); err != nil {
 		return Row{}, err
 	}
 	aRow.Key = aPage.LeafNode.Cells[c.CellIdx].Key
@@ -182,14 +178,19 @@ func (c *Cursor) saveToCell(aNode *LeafNode, cellIdx uint32, key uint64, aRow *R
 		return fmt.Errorf("save to cell: %w", err)
 	}
 
+	// When splitting nodes, we will be iterating over all cells from last cell to first,
+	// and assigning them to either the original node or the new node. Thus, we expand the
+	// cell slice here as it will be filled from end to start.
 	if cellIdx >= uint32(len(aNode.Cells)) {
 		for i := uint32(len(aNode.Cells)); i <= cellIdx; i++ {
-			aNode.Cells = append(aNode.Cells, NewCell(aNode.RowSize))
+			aNode.Cells = append(aNode.Cells, Cell{})
 		}
 	}
+
 	aCell := &aNode.Cells[cellIdx]
 	aCell.NullBitmask = aRow.NullBitmask()
 	aCell.Key = key
+	aCell.Value = make([]byte, len(rowBuf))
 	copy(aCell.Value[:], rowBuf)
 
 	return nil

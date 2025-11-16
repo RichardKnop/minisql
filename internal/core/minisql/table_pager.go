@@ -6,7 +6,7 @@ import (
 
 type tablePager struct {
 	*pagerImpl
-	rowSize uint64
+	columns []Column
 }
 
 func (p *tablePager) GetPage(ctx context.Context, pageIdx uint32) (*Page, error) {
@@ -27,8 +27,8 @@ func (p *tablePager) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
 	// Requesting a new page
 	if int(pageIdx) == int(p.totalPages) {
 		// Leaf node
-		leaf := NewLeafNode(p.rowSize)
-		_, err := leaf.Unmarshal(buf)
+		leaf := NewLeafNode()
+		_, err := leaf.Unmarshal(p.columns, buf)
 		if err != nil {
 			return nil, err
 		}
@@ -46,8 +46,8 @@ func (p *tablePager) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
 	if buf[idx] == 0 {
 		// First byte is Internal flag, this condition is also true if page does not exist
 		// Leaf node
-		leaf := NewLeafNode(p.rowSize)
-		_, err := leaf.Unmarshal(buf[idx:])
+		leaf := NewLeafNode()
+		_, err := leaf.Unmarshal(p.columns, buf[idx:])
 		if err != nil {
 			return nil, err
 		}

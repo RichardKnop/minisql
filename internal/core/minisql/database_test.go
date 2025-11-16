@@ -175,7 +175,7 @@ func TestDatabase_DropTable(t *testing.T) {
 	assert.Equal(t, uint32(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
 	assert.Equal(t, []string{SchemaTableName}, aDatabase.ListTableNames(ctx))
 
-	tablePager := aDatabase.factory.ForTable(Row{Columns: testColumns}.Size())
+	tablePager := aDatabase.factory.ForTable(testColumns)
 	assertFreePages(t, tablePager, []uint32{1, 2, 3})
 }
 
@@ -211,7 +211,7 @@ func TestDatabase_DropTable_WithPrimaryKey(t *testing.T) {
 	assert.Equal(t, []string{SchemaTableName}, aDatabase.ListTableNames(ctx))
 	assert.Empty(t, aDatabase.primaryKeys)
 
-	tablePager := aDatabase.factory.ForTable(Row{Columns: testColumns}.Size())
+	tablePager := aDatabase.factory.ForTable(testColumns)
 	assertFreePages(t, tablePager, []uint32{4, 1, 5, 3, 2})
 }
 

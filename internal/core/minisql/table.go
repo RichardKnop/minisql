@@ -19,7 +19,6 @@ type Table struct {
 	Name          string
 	Columns       []Column
 	PrimaryKey    PrimaryKey
-	rowSize       uint64
 	rootPageIdx   uint32
 	maximumICells uint32
 	logger        *zap.Logger
@@ -31,7 +30,6 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 	aTable := &Table{
 		Name:          name,
 		Columns:       columns,
-		rowSize:       Row{Columns: columns}.Size(),
 		rootPageIdx:   rootPageIdx,
 		maximumICells: InternalNodeMaxCells,
 		logger:        logger,
@@ -628,7 +626,7 @@ func (t *Table) mergeLeaves(ctx context.Context, aParent, left, right *Page, idx
 			return fmt.Errorf("get root page: %w", err)
 		}
 		aRootPage.InternalNode = nil
-		aRootPage.LeafNode = NewLeafNode(t.rowSize)
+		aRootPage.LeafNode = NewLeafNode()
 		*aRootPage.LeafNode = *left.LeafNode
 		aRootPage.LeafNode.Header.IsRoot = true
 		aRootPage.LeafNode.Header.Parent = 0

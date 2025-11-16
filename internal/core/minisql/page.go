@@ -16,20 +16,17 @@ type Page struct {
 	IndexNode    any
 }
 
-func (p *Page) setParent(parentIdx uint32) {
-	if p.LeafNode != nil {
-		p.LeafNode.Header.Parent = parentIdx
-	} else if p.InternalNode != nil {
-		p.InternalNode.Header.Parent = parentIdx
+func (p *Page) AvailableSpace() uint64 {
+	maxPageSize := PageSize - headerSize()
+	if p.Index == 0 {
+		maxPageSize = PageSize - rootHeaderSize()
 	}
-}
-
-func remainingPageSpace(columns []Column) int {
-	remaining := UsablePageSize
-	for _, aColumn := range columns {
-		remaining -= int(aColumn.Size)
+	takenPageSize := uint64(0)
+	for i := uint32(0); i < p.LeafNode.Header.Cells; i++ {
+		// key + null bitmask + value
+		takenPageSize += uint64(len(p.LeafNode.Cells[i].Value)) + 8 + 8
 	}
-	return remaining
+	return maxPageSize - takenPageSize
 }
 
 // Create a deep copy of the page
@@ -51,4 +48,28 @@ func (p *Page) Clone() *Page {
 	}
 
 	return pageCopy
+}
+
+func headerSize() uint64 {
+	return 6 + 8 // base header + leaf/internal header
+}
+
+func rootHeaderSize() uint64 {
+	return 6 + 8 + RootPageConfigSize // base header + leaf/internal header + root page config
+}
+
+func (p *Page) setParent(parentIdx uint32) {
+	if p.LeafNode != nil {
+		p.LeafNode.Header.Parent = parentIdx
+	} else if p.InternalNode != nil {
+		p.InternalNode.Header.Parent = parentIdx
+	}
+}
+
+func remainingPageSpace(columns []Column) int {
+	remaining := UsablePageSize
+	for _, aColumn := range columns {
+		remaining -= int(aColumn.Size)
+	}
+	return remaining
 }

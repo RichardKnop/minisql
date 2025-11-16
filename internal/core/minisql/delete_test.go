@@ -19,7 +19,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		rows       = gen.MediumRows(numRows)
 		txManager  = NewTransactionManager()
 		tablePager = NewTransactionalPager(
-			aPager.ForTable(Row{Columns: testMediumColumns}.Size()),
+			aPager.ForTable(testMediumColumns),
 			txManager,
 		)
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testMediumColumns, 0)
@@ -140,7 +140,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		rows       = gen.MediumRows(numRows)
 		txManager  = NewTransactionManager()
 		tablePager = NewTransactionalPager(
-			aPager.ForTable(Row{Columns: testMediumColumns}.Size()),
+			aPager.ForTable(testMediumColumns),
 			txManager,
 		)
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testMediumColumns, 0)
@@ -500,7 +500,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 		rows       = gen.MediumRows(numRows)
 		txManager  = NewTransactionManager()
 		tablePager = NewTransactionalPager(
-			aPager.ForTable(Row{Columns: testMediumColumns}.Size()),
+			aPager.ForTable(testMediumColumns),
 			txManager,
 		)
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testMediumColumns, 0)
