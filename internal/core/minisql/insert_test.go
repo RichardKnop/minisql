@@ -38,8 +38,11 @@ func TestTable_Insert(t *testing.T) {
 		assert.Equal(t, 1, int(aPager.pages[0].LeafNode.Header.Cells))
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Cells[0].Key))
 
-		actualRow := NewRow(rows[0].Columns)
-		err = actualRow.Unmarshal(aPager.pages[0].LeafNode.Cells[0])
+		aCursor, err := aTable.SeekLast(ctx, 0)
+		require.NoError(t, err)
+		actualRow, err := aCursor.fetchRow(ctx)
+		require.NoError(t, err)
+
 		require.NoError(t, err)
 		assert.Equal(t, rows[0], actualRow)
 		assert.Equal(t, rows[0].NullBitmask(), actualRow.NullBitmask())
@@ -63,9 +66,11 @@ func TestTable_Insert(t *testing.T) {
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Cells[0].Key))
 		assert.Equal(t, 1, int(aPager.pages[0].LeafNode.Cells[1].Key))
 
-		actualRow := NewRow(rows[1].Columns)
-		err = actualRow.Unmarshal(aPager.pages[0].LeafNode.Cells[1])
+		aCursor, err := aTable.SeekLast(ctx, 0)
 		require.NoError(t, err)
+		actualRow, err := aCursor.fetchRow(ctx)
+		require.NoError(t, err)
+
 		assert.Equal(t, rows[1], actualRow)
 		assert.Equal(t, rows[1].NullBitmask(), actualRow.NullBitmask())
 		assert.Equal(t, bitwise.Set(uint64(0), 1), actualRow.NullBitmask())
@@ -337,4 +342,82 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 			assert.Equal(t, 334, int(aLeaf.LeafNode.Header.Parent), fmt.Sprintf("parent not 334 %d", i))
 		}
 	}
+}
+
+func TestTable_Insert_Overflow(t *testing.T) {
+	var (
+		aPager     = initTest(t)
+		ctx        = context.Background()
+		txManager  = NewTransactionManager()
+		tablePager = NewTransactionalPager(
+			aPager.ForTable(testOverflowColumns),
+			txManager,
+		)
+		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testOverflowColumns, 0)
+		rows   = []Row{
+			gen.OverflowRow(MaxInlineVarchar),
+			gen.OverflowRow(MaxInlineVarchar + 100),
+			gen.OverflowRow(MaxOverflowPageData + 100),
+		}
+	)
+
+	t.Run("First insert non overflow text", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Insert,
+			Fields: columnNames(testOverflowColumns...),
+		}
+		stmt.Inserts = append(stmt.Inserts, rows[0].Values)
+
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return aTable.Insert(ctx, stmt)
+		}, aPager)
+		require.NoError(t, err)
+
+		require.Equal(t, 1, int(aPager.TotalPages()))
+		assert.NotNil(t, aPager.pages[0].LeafNode)
+	})
+
+	t.Run("Now insert a text that will overflow to a single page", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Insert,
+			Fields: columnNames(testOverflowColumns...),
+		}
+		stmt.Inserts = append(stmt.Inserts, rows[1].Values)
+
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return aTable.Insert(ctx, stmt)
+		}, aPager)
+		require.NoError(t, err)
+
+		require.Equal(t, 2, int(aPager.TotalPages()))
+		assert.NotNil(t, aPager.pages[0].LeafNode)
+		assert.NotNil(t, aPager.pages[1].OverflowPage)
+		assert.Equal(t, 0, int(aPager.pages[1].OverflowPage.Header.NextPage))
+		assert.Equal(t, 355, int(aPager.pages[1].OverflowPage.Header.DataSize))
+	})
+
+	t.Run("Now insert a text that will overflow to a 2 pages", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Insert,
+			Fields: columnNames(testOverflowColumns...),
+		}
+		stmt.Inserts = append(stmt.Inserts, rows[2].Values)
+
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			return aTable.Insert(ctx, stmt)
+		}, aPager)
+		require.NoError(t, err)
+
+		require.Equal(t, 4, int(aPager.TotalPages()))
+		assert.NotNil(t, aPager.pages[0].LeafNode)
+		assert.NotNil(t, aPager.pages[1].OverflowPage)
+		assert.NotNil(t, aPager.pages[2].OverflowPage)
+		assert.NotNil(t, aPager.pages[3].OverflowPage)
+
+		assert.Equal(t, aPager.pages[3].Index, aPager.pages[2].OverflowPage.Header.NextPage)
+		assert.Equal(t, 0, int(aPager.pages[3].OverflowPage.Header.NextPage))
+
+		assert.Equal(t, MaxOverflowPageData, int(aPager.pages[2].OverflowPage.Header.DataSize))
+		assert.Equal(t, 100, int(aPager.pages[3].OverflowPage.Header.DataSize))
+	})
 }

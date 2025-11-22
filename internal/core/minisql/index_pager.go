@@ -18,7 +18,7 @@ func (p *indexPager[T]) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
 
 	if p.dbHeader.FirstFreePage != 0 && pageIdx == p.dbHeader.FirstFreePage {
 		aFreePage := new(FreePage)
-		if err := UnmarshalFreePage(buf[idx:], aFreePage); err != nil {
+		if err := aFreePage.Unmarshal(buf[idx:]); err != nil {
 			return nil, err
 		}
 		p.pages[pageIdx] = &Page{Index: pageIdx, FreePage: aFreePage}

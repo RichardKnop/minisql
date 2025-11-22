@@ -17,7 +17,7 @@ var (
 )
 
 var (
-	maximumSchemaSQL = UsablePageSize - (4 + 255 + 4) - RootPageConfigSize
+	maximumSchemaSQL = UsablePageSize - (4 + MaxInlineVarchar + 4 + 2*varcharLengthPrefixSize) - RootPageConfigSize
 	mainTableColumns = []Column{
 		{
 			Kind:     Int4,
@@ -27,7 +27,7 @@ var (
 		},
 		{
 			Kind:     Varchar,
-			Size:     255,
+			Size:     MaxInlineVarchar,
 			Name:     "name",
 			Nullable: false,
 		},
@@ -51,7 +51,7 @@ var (
 		type int4 not null,
 		name varchar(255) not null,
 		root_page int4,
-		sql varchar(2056)
+		sql text
 	);`, SchemaTableName)
 
 	mainTableFields = []string{

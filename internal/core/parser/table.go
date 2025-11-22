@@ -164,6 +164,8 @@ func isColumnDef(token string) (minisql.Column, bool) {
 		return minisql.Column{Kind: minisql.Real, Size: 4}, true
 	case "DOUBLE":
 		return minisql.Column{Kind: minisql.Double, Size: 8}, true
+	case "TEXT":
+		return minisql.Column{Kind: minisql.Text}, true
 	case "VARCHAR(":
 		return minisql.Column{Kind: minisql.Varchar}, true
 	default:

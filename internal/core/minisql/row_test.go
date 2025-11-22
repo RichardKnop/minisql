@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,10 +11,20 @@ import (
 func TestRow_Marshal(t *testing.T) {
 	t.Parallel()
 
-	aRow := gen.Row()
+	var (
+		ctx       = context.Background()
+		aRow      = gen.Row()
+		pagerMock = new(MockTxPager)
+	)
 
-	// 8 for int8, 255 for varchar, 4 for int4, 1 for boolean, 4 for real, 8 for double
-	assert.Equal(t, uint64(8+255+4+1+4+8), aRow.Size())
+	// 8 for int8
+	// 4+255 for varchar/text
+	// 4 for int4
+	// 1 for boolean
+	// 4 for real
+	// 8 for double
+	assert.Equal(t, uint64(8+(4+MaxInlineVarchar)+4+1+4+8), aRow.Size())
+	wrapTextValues(ctx, pagerMock, &aRow)
 
 	data, err := aRow.Marshal()
 	require.NoError(t, err)

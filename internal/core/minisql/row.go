@@ -3,6 +3,7 @@ package minisql
 import (
 	"bytes"
 	"fmt"
+	"math"
 
 	"github.com/RichardKnop/minisql/pkg/bitwise"
 )
@@ -33,13 +34,39 @@ func NewRow(columns []Column) Row {
 
 // Size calculates a size of a row record excluding null bitmask and row ID
 func (r *Row) Size() uint64 {
-	return sizeOfColumns(r.Columns)
-}
-
-func sizeOfColumns(columns []Column) uint64 {
 	size := uint64(0)
-	for _, aColumn := range columns {
-		size += uint64(aColumn.Size)
+	for i, aColumn := range r.Columns {
+		if !aColumn.Kind.IsText() {
+			size += uint64(aColumn.Size)
+			continue
+		}
+		size += varcharLengthPrefixSize
+
+		if !r.Values[i].Valid {
+			continue
+		}
+
+		s, ok := r.Values[i].Value.(string)
+		if ok {
+			if uint64(len(s)) <= MaxInlineVarchar {
+				size += uint64(len(s))
+			} else {
+				size += 4 // first overflow page index
+			}
+			continue
+		}
+
+		tp, ok := r.Values[i].Value.(TextPointer)
+		if ok {
+			if uint64(len(tp.Data)) <= MaxInlineVarchar {
+				size += uint64(len(tp.Data))
+			} else {
+				size += 4 // first overflow page index
+			}
+			continue
+		}
+
+		panic(fmt.Sprintf("cannot calculate size for non-string/textpointer value for text column: %v, type: %T", r.Values[i].Value, r.Values[i].Value))
 	}
 	return size
 }
@@ -108,14 +135,6 @@ func (r *Row) Clone() Row {
 	return aClone
 }
 
-func (r *Row) columnOffset(idx int) uint32 {
-	offset := uint32(0)
-	for i := range idx {
-		offset += r.Columns[i].Size
-	}
-	return offset
-}
-
 func (r *Row) appendValues(fields []string, values []OptionalValue) {
 	var (
 		found    = false
@@ -138,14 +157,12 @@ func (r *Row) appendValues(fields []string, values []OptionalValue) {
 }
 
 func (r *Row) Marshal() ([]byte, error) {
-	buf := make([]byte, r.Size())
+	buf := make([]byte, 0, r.Size())
 
+	offset := uint64(0)
 	for i, aColumn := range r.Columns {
-		offset := r.columnOffset(i)
 		if !r.Values[i].Valid {
-			src := make([]byte, aColumn.Size)
-			copy(buf[offset:], src)
-			continue
+			continue // NULL values take no space (tracked in bitmask)
 		}
 		switch aColumn.Kind {
 		case Boolean:
@@ -154,10 +171,11 @@ func (r *Row) Marshal() ([]byte, error) {
 				return nil, fmt.Errorf("could not cast value to bool")
 			}
 			if value {
-				buf[offset] = byte(1)
+				buf = append(buf, byte(1))
 			} else {
-				buf[offset] = byte(0)
+				buf = append(buf, byte(0))
 			}
+			offset += 1
 		case Int4:
 			value, ok := r.Values[i].Value.(int32)
 			if !ok {
@@ -167,13 +185,17 @@ func (r *Row) Marshal() ([]byte, error) {
 				}
 				value = int32(r.Values[i].Value.(int64))
 			}
-			marshalInt32(buf, value, uint64(offset))
+			buf = append(buf, make([]byte, 4)...)
+			marshalInt32(buf, value, offset)
+			offset += 4
 		case Int8:
 			value, ok := r.Values[i].Value.(int64)
 			if !ok {
 				return nil, fmt.Errorf("could not cast value for column %s to int64", aColumn.Name)
 			}
-			marshalInt64(buf, value, uint64(offset))
+			buf = append(buf, make([]byte, 8)...)
+			marshalInt64(buf, value, offset)
+			offset += 8
 		case Real:
 			value, ok := r.Values[i].Value.(float32)
 			if !ok {
@@ -183,21 +205,30 @@ func (r *Row) Marshal() ([]byte, error) {
 				}
 				value = float32(r.Values[i].Value.(float64))
 			}
-			marshalFloat32(buf, value, uint64(offset))
+			buf = append(buf, make([]byte, 4)...)
+			marshalFloat32(buf, value, offset)
+			offset += 4
 		case Double:
 			value, ok := r.Values[i].Value.(float64)
 			if !ok {
 				return nil, fmt.Errorf("could not cast value for column %s to float64", aColumn.Name)
 			}
-			marshalFloat64(buf, value, uint64(offset))
-		case Varchar:
-			src := make([]byte, aColumn.Size)
-			value, ok := r.Values[i].Value.(string)
+			buf = append(buf, make([]byte, 8)...)
+			marshalFloat64(buf, value, offset)
+			offset += 8
+		case Varchar, Text:
+			textPointer, ok := r.Values[i].Value.(TextPointer)
 			if !ok {
-				return nil, fmt.Errorf("could not cast value for column %s to string", aColumn.Name)
+				return nil, fmt.Errorf("could not cast value for column %s to text pointer", aColumn.Name)
 			}
-			copy(src, []byte(value))
-			copy(buf[offset:], src)
+
+			size := textPointer.Size()
+			buf = append(buf, make([]byte, size)...)
+			_, err := textPointer.Marshal(buf, offset)
+			if err != nil {
+				return nil, err
+			}
+			offset += size
 		}
 	}
 
@@ -207,30 +238,43 @@ func (r *Row) Marshal() ([]byte, error) {
 func (r *Row) Unmarshal(aCell Cell) error {
 	r.Key = aCell.Key
 	r.Values = make([]OptionalValue, 0, len(r.Columns))
+	offset := 0
 	for i, aColumn := range r.Columns {
 		if bitwise.IsSet(aCell.NullBitmask, i) {
 			r.Values = append(r.Values, OptionalValue{Valid: false})
 			continue
 		}
-		offset := r.columnOffset(i)
 		switch aColumn.Kind {
 		case Boolean:
-			value := (uint32(aCell.Value[:][offset+0+0]) << 0)
+			value := (uint32(aCell.Value[offset+0+0]) << 0)
 			r.Values = append(r.Values, OptionalValue{Value: value == uint32(1), Valid: true})
+			offset += 1
 		case Int4:
-			value := unmarshalInt32(aCell.Value[:], uint64(offset))
+			value := unmarshalInt32(aCell.Value, uint64(offset))
 			r.Values = append(r.Values, OptionalValue{Value: int32(value), Valid: true})
+			offset += 4
 		case Int8:
-			value := unmarshalInt64(aCell.Value[:], uint64(offset))
+			value := unmarshalInt64(aCell.Value, uint64(offset))
 			r.Values = append(r.Values, OptionalValue{Value: int64(value), Valid: true})
+			offset += 8
 		case Real:
-			r.Values = append(r.Values, OptionalValue{Value: unmarshalFloat32(aCell.Value[:], uint64(offset)), Valid: true})
+			value := unmarshalFloat32(aCell.Value, uint64(offset))
+			r.Values = append(r.Values, OptionalValue{Value: value, Valid: true})
+			offset += 4
 		case Double:
-			r.Values = append(r.Values, OptionalValue{Value: unmarshalFloat64(aCell.Value[:], uint64(offset)), Valid: true})
-		case Varchar:
-			dst := make([]byte, aColumn.Size)
-			copy(dst, aCell.Value[:][offset:offset+aColumn.Size])
-			r.Values = append(r.Values, OptionalValue{Value: string(bytes.Trim(dst, "\x00")), Valid: true})
+			value := unmarshalFloat64(aCell.Value, uint64(offset))
+			r.Values = append(r.Values, OptionalValue{Value: value, Valid: true})
+			offset += 8
+		case Varchar, Text:
+			textPointer := TextPointer{}
+			if err := textPointer.Unmarshal(aCell.Value, uint64(offset)); err != nil {
+				return err
+			}
+			if textPointer.IsInline() {
+				textPointer.Data = bytes.Trim(textPointer.Data, "\x00")
+			}
+			offset += int(textPointer.Size())
+			r.Values = append(r.Values, OptionalValue{Value: textPointer, Valid: true})
 		}
 	}
 
@@ -495,4 +539,125 @@ func (r *Row) NullBitmask() uint64 {
 		}
 	}
 	return bitmask
+}
+
+func marshalUint32(buf []byte, n uint32, i uint64) []byte {
+	buf[i+0] = byte(n >> 0)
+	buf[i+1] = byte(n >> 8)
+	buf[i+2] = byte(n >> 16)
+	buf[i+3] = byte(n >> 24)
+	return buf
+}
+
+func unmarshalUint32(buf []byte, i uint64) uint32 {
+	return 0 |
+		(uint32(buf[i+0]) << 0) |
+		(uint32(buf[i+1]) << 8) |
+		(uint32(buf[i+2]) << 16) |
+		(uint32(buf[i+3]) << 24)
+}
+
+func marshalUint64(buf []byte, n, i uint64) []byte {
+	buf[i+0] = byte(n >> 0)
+	buf[i+1] = byte(n >> 8)
+	buf[i+2] = byte(n >> 16)
+	buf[i+3] = byte(n >> 24)
+	buf[i+4] = byte(n >> 32)
+	buf[i+5] = byte(n >> 40)
+	buf[i+6] = byte(n >> 48)
+	buf[i+7] = byte(n >> 56)
+	return buf
+}
+
+func unmarshalUint64(buf []byte, i uint64) uint64 {
+	return 0 | (uint64(buf[i+0]) << 0) |
+		(uint64(buf[i+1]) << 8) |
+		(uint64(buf[i+2]) << 16) |
+		(uint64(buf[i+3]) << 24) |
+		(uint64(buf[i+4]) << 32) |
+		(uint64(buf[i+5]) << 40) |
+		(uint64(buf[i+6]) << 48) |
+		(uint64(buf[i+7]) << 56)
+}
+
+func marshalInt32(buf []byte, n int32, i uint64) []byte {
+	buf[i+0] = byte(n >> 0)
+	buf[i+1] = byte(n >> 8)
+	buf[i+2] = byte(n >> 16)
+	buf[i+3] = byte(n >> 24)
+	return buf
+}
+
+func unmarshalInt32(buf []byte, i uint64) int32 {
+	return 0 |
+		(int32(buf[i+0]) << 0) |
+		(int32(buf[i+1]) << 8) |
+		(int32(buf[i+2]) << 16) |
+		(int32(buf[i+3]) << 24)
+}
+
+func marshalInt64(buf []byte, n int64, i uint64) []byte {
+	buf[i+0] = byte(n >> 0)
+	buf[i+1] = byte(n >> 8)
+	buf[i+2] = byte(n >> 16)
+	buf[i+3] = byte(n >> 24)
+	buf[i+4] = byte(n >> 32)
+	buf[i+5] = byte(n >> 40)
+	buf[i+6] = byte(n >> 48)
+	buf[i+7] = byte(n >> 56)
+	return buf
+}
+
+func unmarshalInt64(buf []byte, i uint64) int64 {
+	return 0 |
+		(int64(buf[i+0]) << 0) |
+		(int64(buf[i+1]) << 8) |
+		(int64(buf[i+2]) << 16) |
+		(int64(buf[i+3]) << 24) |
+		(int64(buf[i+4]) << 32) |
+		(int64(buf[i+5]) << 40) |
+		(int64(buf[i+6]) << 48) |
+		(int64(buf[i+7]) << 56)
+}
+
+func marshalFloat32(buf []byte, n float32, i uint64) []byte {
+	bits := math.Float32bits(n)
+	buf[i+0] = byte(bits >> 24)
+	buf[i+1] = byte(bits >> 16)
+	buf[i+2] = byte(bits >> 8)
+	buf[i+3] = byte(bits >> 0)
+	return buf
+}
+
+func unmarshalFloat32(buf []byte, i uint64) float32 {
+	return math.Float32frombits(0 |
+		(uint32(buf[i+0]) << 24) |
+		(uint32(buf[i+1]) << 16) |
+		(uint32(buf[i+2]) << 8) |
+		(uint32(buf[i+3]) << 0))
+}
+
+func marshalFloat64(buf []byte, n float64, i uint64) []byte {
+	bits := math.Float64bits(n)
+	buf[i+0] = byte(bits >> 56)
+	buf[i+1] = byte(bits >> 48)
+	buf[i+2] = byte(bits >> 40)
+	buf[i+3] = byte(bits >> 32)
+	buf[i+4] = byte(bits >> 24)
+	buf[i+5] = byte(bits >> 16)
+	buf[i+6] = byte(bits >> 8)
+	buf[i+7] = byte(bits >> 0)
+	return buf
+}
+
+func unmarshalFloat64(buf []byte, i uint64) float64 {
+	return math.Float64frombits(0 |
+		(uint64(buf[i+0]) << 56) |
+		(uint64(buf[i+1+0]) << 48) |
+		(uint64(buf[i+2+0]) << 40) |
+		(uint64(buf[i+3+0]) << 32) |
+		(uint64(buf[i+4+0]) << 24) |
+		(uint64(buf[i+5+0]) << 16) |
+		(uint64(buf[i+6+0]) << 8) |
+		(uint64(buf[i+7+0]) << 0))
 }

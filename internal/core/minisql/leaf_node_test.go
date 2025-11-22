@@ -4,17 +4,22 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/RichardKnop/minisql/pkg/bitwise"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/RichardKnop/minisql/pkg/bitwise"
 )
 
 func TestLeafNode_Marshal(t *testing.T) {
 	t.Parallel()
 
 	var (
-		aNode = NewLeafNode()
+		aNode   = NewLeafNode()
+		columns = []Column{
+			{
+				Kind: Varchar,
+				Size: 230,
+			},
+		}
 	)
 
 	aNode.Header = LeafNodeHeader{
@@ -28,11 +33,10 @@ func TestLeafNode_Marshal(t *testing.T) {
 	}
 	aNode.Cells = append(aNode.Cells, Cell{
 		Key:   1,
-		Value: bytes.Repeat([]byte{1}, 230),
+		Value: prefixWithLength(bytes.Repeat([]byte{'a'}, 230)),
 	}, Cell{
 		Key:         2,
-		Value:       bytes.Repeat([]byte{1}, 230),
-		NullBitmask: bitwise.Set(uint64(0), 1),
+		NullBitmask: bitwise.Set(uint64(0), 0),
 	})
 
 	buf := make([]byte, aNode.Size())
@@ -40,17 +44,17 @@ func TestLeafNode_Marshal(t *testing.T) {
 	require.NoError(t, err)
 
 	recreatedNode := NewLeafNode()
-	_, err = recreatedNode.Unmarshal([]Column{
-		{
-			Kind: Varchar,
-			Size: 230,
-		},
-	}, data)
+	_, err = recreatedNode.Unmarshal(columns, data)
 	require.NoError(t, err)
 
 	assert.Equal(t, aNode, recreatedNode)
 
-	// for idx := 0; idx < len(aNode.Cells); idx++ {
-	// 	assert.Equal(t, aNode.Cells[idx], recreatedNode.Cells[idx])
-	// }
+	for idx := 0; idx < len(aNode.Cells); idx++ {
+		assert.Equal(t, aNode.Cells[idx], recreatedNode.Cells[idx])
+	}
+}
+
+func prefixWithLength(data []byte) []byte {
+	lengthPrefix := marshalUint32(make([]byte, 4), uint32(len(data)), 0)
+	return append(lengthPrefix, data...)
 }

@@ -166,3 +166,84 @@ func TestTable_Update(t *testing.T) {
 		checkRows(ctx, t, aTable, expected)
 	})
 }
+
+func TestTable_Update_Overflow(t *testing.T) {
+	var (
+		aPager     = initTest(t)
+		ctx        = context.Background()
+		txManager  = NewTransactionManager()
+		tablePager = NewTransactionalPager(
+			aPager.ForTable(testOverflowColumns),
+			txManager,
+		)
+		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testOverflowColumns, 0)
+		rows   = gen.OverflowRows(3, []uint32{
+			MaxInlineVarchar,          // inline text
+			MaxInlineVarchar + 100,    // text overflows to 1 page
+			MaxOverflowPageData + 100, // text overflows to multiple pages
+		})
+	)
+
+	// Batch insert test rows
+	insertStmt := Statement{
+		Kind:    Insert,
+		Fields:  columnNames(testOverflowColumns...),
+		Inserts: [][]OptionalValue{},
+	}
+	for _, aRow := range rows {
+		insertStmt.Inserts = append(insertStmt.Inserts, aRow.Values)
+	}
+
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return aTable.Insert(ctx, insertStmt)
+	}, aPager)
+	require.NoError(t, err)
+
+	t.Run("Update inline text to overflow text", func(t *testing.T) {
+		updatedText := gen.textOfLength(MaxInlineVarchar + 200)
+		stmt := Statement{
+			Kind: Update,
+			Updates: map[string]OptionalValue{
+				"profile": {Value: updatedText, Valid: true},
+			},
+			Conditions: FieldIsInAny("id", OperandInteger, rows[0].Values[0].Value.(int64)),
+		}
+
+		var aResult StatementResult
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			var err error
+			aResult, err = aTable.Update(ctx, stmt)
+			return err
+		}, aPager)
+		require.NoError(t, err)
+		assert.Equal(t, 1, aResult.RowsAffected)
+
+		// Prepare expected rows with one updated row
+		expected := make([]Row, 0, len(rows))
+		for i, aRow := range rows {
+			expectedRow := aRow.Clone()
+			if i == 0 {
+				expectedRow.SetValue("profile", OptionalValue{Value: updatedText, Valid: true})
+			}
+
+			expected = append(expected, expectedRow)
+		}
+
+		checkRows(ctx, t, aTable, expected)
+
+		require.Equal(t, 5, int(aPager.TotalPages()))
+		assert.NotNil(t, aPager.pages[0].LeafNode)
+		assert.NotNil(t, aPager.pages[1].OverflowPage)
+		assert.NotNil(t, aPager.pages[2].OverflowPage)
+		assert.NotNil(t, aPager.pages[3].OverflowPage)
+		assert.NotNil(t, aPager.pages[4].OverflowPage)
+
+		assert.Equal(t, 0, int(aPager.pages[1].OverflowPage.Header.NextPage))
+		assert.Equal(t, aPager.pages[3].Index, aPager.pages[2].OverflowPage.Header.NextPage)
+		assert.Equal(t, 0, int(aPager.pages[3].OverflowPage.Header.NextPage))
+		assert.Equal(t, 0, int(aPager.pages[4].OverflowPage.Header.NextPage))
+
+		assert.Equal(t, MaxOverflowPageData, int(aPager.pages[2].OverflowPage.Header.DataSize))
+		assert.Equal(t, 100, int(aPager.pages[3].OverflowPage.Header.DataSize))
+	})
+}

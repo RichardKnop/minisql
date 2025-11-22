@@ -75,8 +75,8 @@ func TestNewDatabase_WithExistingTableAndPrimaryKey(t *testing.T) {
 
 	assert.Equal(t, uint32(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
 	assert.Equal(t, uint32(1), aDatabase.tables[testTableName].GetRootPageIdx())
-	assert.Equal(t, uint32(4), aDatabase.tables[testTableName2].GetRootPageIdx())
-	assert.Equal(t, uint32(6), aDatabase.primaryKeys[testTableName2].GetRootPageIdx())
+	assert.Equal(t, uint32(2), aDatabase.tables[testTableName2].GetRootPageIdx())
+	assert.Equal(t, uint32(3), aDatabase.primaryKeys[testTableName2].GetRootPageIdx())
 
 	mock.AssertExpectationsForObjects(t, mockParser)
 }
@@ -108,7 +108,8 @@ func TestDatabase_CreateTable(t *testing.T) {
 	assert.Equal(t, uint32(1), aDatabase.tables[testTableName].GetRootPageIdx())
 	assert.Equal(t, uint32(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
 
-	assert.Len(t, aPager.pages, 4)
+	// Root page plus a new page for table, should be 2 in total
+	assert.Len(t, aPager.pages, 2)
 }
 
 func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
@@ -138,11 +139,10 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 
 	assert.Equal(t, uint32(1), aDatabase.tables[testTableName].GetRootPageIdx())
 	assert.Equal(t, uint32(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
-	assert.Equal(t, uint32(4), aDatabase.primaryKeys[testTableName].GetRootPageIdx())
+	assert.Equal(t, uint32(2), aDatabase.primaryKeys[testTableName].GetRootPageIdx())
 
-	// Each row in main schema table currently takes entire page, so root page plus 3 leaf pages
-	// plus a page for test table and a page for primary key index, total should be 6
-	assert.Len(t, aPager.pages, 6)
+	// Root page plus a new page for table and index, should be 3 in total
+	assert.Len(t, aPager.pages, 3)
 }
 
 func TestDatabase_DropTable(t *testing.T) {
@@ -176,7 +176,7 @@ func TestDatabase_DropTable(t *testing.T) {
 	assert.Equal(t, []string{SchemaTableName}, aDatabase.ListTableNames(ctx))
 
 	tablePager := aDatabase.factory.ForTable(testColumns)
-	assertFreePages(t, tablePager, []uint32{1, 2, 3})
+	assertFreePages(t, tablePager, []uint32{1})
 }
 
 func TestDatabase_DropTable_WithPrimaryKey(t *testing.T) {
@@ -212,7 +212,7 @@ func TestDatabase_DropTable_WithPrimaryKey(t *testing.T) {
 	assert.Empty(t, aDatabase.primaryKeys)
 
 	tablePager := aDatabase.factory.ForTable(testColumns)
-	assertFreePages(t, tablePager, []uint32{4, 1, 5, 3, 2})
+	assertFreePages(t, tablePager, []uint32{2, 1})
 }
 
 func initTest(t *testing.T) *pagerImpl {

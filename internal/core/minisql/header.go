@@ -19,9 +19,9 @@ func (h *Header) Marshal(buf []byte) ([]byte, error) {
 	}
 
 	if h.IsInternal {
-		buf[0] = 1
+		buf[0] = PageTypeInternal
 	} else {
-		buf[0] = 0
+		buf[0] = PageTypeLeaf
 	}
 
 	if h.IsRoot {
@@ -39,7 +39,7 @@ func (h *Header) Marshal(buf []byte) ([]byte, error) {
 }
 
 func (h *Header) Unmarshal(buf []byte) (uint64, error) {
-	h.IsInternal = buf[0] == 1
+	h.IsInternal = buf[0] == PageTypeInternal
 	h.IsRoot = buf[1] == 1
 	h.Parent = 0 |
 		(uint32(buf[0+2]) << 0) |

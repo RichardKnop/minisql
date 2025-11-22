@@ -154,6 +154,24 @@ func TestParse_CreateTable(t *testing.T) {
 			nil,
 		},
 		{
+			"CREATE TABLE with single text column works",
+			"CREATE TABLE foo (bar text);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:     "bar",
+							Kind:     minisql.Text,
+							Nullable: true,
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
 			"CREATE TABLE with single varchar column works",
 			"CREATE TABLE foo (bar varchar(255));",
 			[]minisql.Statement{
@@ -164,7 +182,7 @@ func TestParse_CreateTable(t *testing.T) {
 						{
 							Name:     "bar",
 							Kind:     minisql.Varchar,
-							Size:     255,
+							Size:     minisql.MaxInlineVarchar,
 							Nullable: true,
 						},
 					},
@@ -258,7 +276,7 @@ func TestParse_CreateTable(t *testing.T) {
 						{
 							Name:     "sit",
 							Kind:     minisql.Varchar,
-							Size:     255,
+							Size:     minisql.MaxInlineVarchar,
 							Nullable: true,
 						},
 					},
@@ -296,7 +314,7 @@ func TestParse_CreateTable(t *testing.T) {
 						{
 							Name:     "bar",
 							Kind:     minisql.Varchar,
-							Size:     255,
+							Size:     minisql.MaxInlineVarchar,
 							Nullable: true,
 						},
 					},
@@ -326,7 +344,7 @@ func TestParse_CreateTable(t *testing.T) {
 						{
 							Name:     "bar",
 							Kind:     minisql.Varchar,
-							Size:     255,
+							Size:     minisql.MaxInlineVarchar,
 							Nullable: true,
 						},
 					},
