@@ -57,7 +57,13 @@ func (p *parser) doParseUpdate() (bool, error) {
 			if ln == 0 {
 				return false, errUpdateExpectedQuotedValueOrInt
 			}
-			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: value, Valid: ln > 0})
+			var updateValue minisql.OptionalValue
+			if strValue, ok := value.(string); ok {
+				updateValue = minisql.OptionalValue{Value: minisql.NewTextPointer([]byte(strValue)), Valid: true}
+			} else {
+				updateValue = minisql.OptionalValue{Value: value, Valid: true}
+			}
+			p.setUpdate(p.nextUpdateField, updateValue)
 			p.nextUpdateField = ""
 			p.pop()
 		}

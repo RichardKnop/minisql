@@ -38,6 +38,11 @@ func TestTable_Update_PrimaryKey(t *testing.T) {
 		aTable.txManager,
 	)
 
+	expected := make([]Row, 0, len(rows))
+	for _, aRow := range rows {
+		expected = append(expected, aRow.Clone())
+	}
+
 	t.Run("Insert rows with primary key", func(t *testing.T) {
 		stmt := Statement{
 			Kind:    Insert,
@@ -135,13 +140,10 @@ func TestTable_Update_PrimaryKey(t *testing.T) {
 		assert.Equal(t, 1, aResult.RowsAffected)
 
 		// Prepare expected rows with one updated row
-		expected := make([]Row, 0, len(rows))
-		for i, aRow := range rows {
-			expectedRow := aRow.Clone()
+		for i, aRow := range expected {
 			if i == 0 {
-				expectedRow.SetValue("id", OptionalValue{Value: int64(42), Valid: true})
+				aRow.SetValue("id", OptionalValue{Value: int64(42), Valid: true})
 			}
-			expected = append(expected, expectedRow)
 		}
 
 		checkRows(ctx, t, aTable, expected)

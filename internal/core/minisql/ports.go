@@ -21,8 +21,8 @@ type Pager interface {
 }
 
 type PageSaver interface {
-	SavePage(ctx context.Context, pageIdx uint32, page *Page)
-	SaveHeader(ctx context.Context, header DatabaseHeader)
+	SavePage(context.Context, uint32, *Page)
+	SaveHeader(context.Context, DatabaseHeader)
 }
 
 type TxPager interface {
@@ -30,6 +30,7 @@ type TxPager interface {
 	ModifyPage(context.Context, uint32) (*Page, error)
 	GetFreePage(context.Context) (*Page, error)
 	AddFreePage(context.Context, uint32) error
+	GetOverflowPage(context.Context, uint32) (*Page, error)
 }
 
 type BTreeIndex interface {

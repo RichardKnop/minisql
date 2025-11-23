@@ -29,11 +29,12 @@ func TestNewDatabase(t *testing.T) {
 }
 
 func TestNewDatabase_WithExistingTableAndPrimaryKey(t *testing.T) {
-	aPager := initTest(t)
+	var (
+		aPager     = initTest(t)
+		mockParser = new(MockParser)
+		ctx        = context.Background()
+	)
 
-	mockParser := new(MockParser)
-
-	ctx := context.Background()
 	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, mockParser, aPager, aPager, aPager)
 	require.NoError(t, err)
 

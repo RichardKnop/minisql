@@ -3,6 +3,8 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 )
 
 type Cursor struct {
@@ -153,8 +155,8 @@ func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
 	}
 	aRow.Key = aPage.LeafNode.Cells[c.CellIdx].Key
 
-	if err := unwrapTextPointers(ctx, c.Table.pager, &aRow); err != nil {
-		return Row{}, fmt.Errorf("unwrap text pointers: %w", err)
+	if err := readOverflowTexts(ctx, c.Table.pager, &aRow); err != nil {
+		return Row{}, fmt.Errorf("read overflow texts: %w", err)
 	}
 
 	// There are still more cells in the page, move cursor to next cell and return
@@ -177,8 +179,8 @@ func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
 }
 
 func (c *Cursor) saveToCell(ctx context.Context, aNode *LeafNode, cellIdx uint32, key uint64, aRow *Row) error {
-	if err := wrapTextValues(ctx, c.Table.pager, aRow); err != nil {
-		return fmt.Errorf("wrap text columns in pointers: %w", err)
+	if err := storeOverflowTexts(ctx, c.Table.pager, aRow); err != nil {
+		return fmt.Errorf("store overflow texts: %w", err)
 	}
 
 	rowBuf, err := aRow.Marshal()
@@ -207,12 +209,16 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow *Row) (bool, e
 	var (
 		oldRow        = aRow.Clone()
 		oldPkValue, _ = oldRow.GetValue(c.Table.PrimaryKey.Column.Name)
-		changedValues = map[string]struct{}{}
+		changedValues = map[string]Column{}
 	)
 	for name, value := range stmt.Updates {
+		aColumn, ok := aRow.GetColumn(name)
+		if !ok {
+			return false, fmt.Errorf("column '%s' not found", name)
+		}
 		found, changed := aRow.SetValue(name, value)
 		if found && changed {
-			changedValues[name] = struct{}{}
+			changedValues[name] = aColumn
 		}
 	}
 
@@ -258,8 +264,18 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow *Row) (bool, e
 		return true, nil
 	}
 
-	if err := wrapTextValues(ctx, c.Table.pager, aRow); err != nil {
-		return false, fmt.Errorf("wrap text columns in pointers: %w", err)
+	// Remove any overflow pages
+	if hasTextColumn(c.Table.Columns...) {
+		// TODO - a more efficient implementation would be to try to reuse existing overflow pages
+		// if possible. For example if text size didn't change much and fits into existing overflow pages.
+		changedColumns := slices.Collect(maps.Values(changedValues))
+		if err := c.Table.freeOverflowPages(ctx, &oldRow, changedColumns...); err != nil {
+			return false, err
+		}
+	}
+
+	if err := storeOverflowTexts(ctx, c.Table.pager, aRow); err != nil {
+		return false, fmt.Errorf("store overflow texts: %w", err)
 	}
 
 	if c.Table.HasPrimaryKey() {
@@ -272,15 +288,15 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow *Row) (bool, e
 		}
 	}
 
-	cell := &aPage.LeafNode.Cells[c.CellIdx]
+	aCell := &aPage.LeafNode.Cells[c.CellIdx]
 
 	rowBuf, err := aRow.Marshal()
 	if err != nil {
 		return false, fmt.Errorf("update: %w", err)
 	}
 
-	cell.NullBitmask = aRow.NullBitmask()
-	copy(cell.Value[:], rowBuf)
+	aCell.NullBitmask = aRow.NullBitmask()
+	aCell.Value = rowBuf
 
 	return true, nil
 }

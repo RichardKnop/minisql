@@ -386,18 +386,18 @@ func (s Statement) Validate(aTable *Table) error {
 					return fmt.Errorf("field %q cannot be NULL", aField)
 				}
 				if anInsert[i].Valid {
-					if aColumn.Kind.IsText() && !utf8.ValidString(anInsert[i].Value.(string)) {
+					if aColumn.Kind.IsText() && !utf8.ValidString(anInsert[i].Value.(TextPointer).String()) {
 						return fmt.Errorf("field %q expects valid UTF-8 string", aField)
 					}
 				}
 				if aColumn.Kind.IsText() && anInsert[i].Valid {
 					switch aColumn.Kind {
 					case Varchar:
-						if len([]byte(anInsert[i].Value.(string))) > int(aColumn.Size) {
+						if len([]byte(anInsert[i].Value.(TextPointer).String())) > int(aColumn.Size) {
 							return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", aField, aColumn.Size)
 						}
 					case Text:
-						if len([]byte(anInsert[i].Value.(string))) > MaxOverflowTextSize {
+						if len([]byte(anInsert[i].Value.(TextPointer).String())) > MaxOverflowTextSize {
 							return fmt.Errorf("field %q exceeds maximum TEXT length of %d", aField, MaxOverflowTextSize)
 						}
 					}
@@ -419,7 +419,7 @@ func (s Statement) Validate(aTable *Table) error {
 				return fmt.Errorf("field %q cannot be NULL", aField)
 			}
 			if s.Updates[aField].Valid {
-				if aColumn.Kind == Varchar && !utf8.ValidString(s.Updates[aField].Value.(string)) {
+				if aColumn.Kind == Varchar && !utf8.ValidString(s.Updates[aField].Value.(TextPointer).String()) {
 					return fmt.Errorf("field %q expects valid UTF-8 string", aField)
 				}
 			}

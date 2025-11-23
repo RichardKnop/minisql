@@ -251,6 +251,74 @@ func (_c *MockTxPager_GetFreePage_Call) RunAndReturn(run func(context1 context.C
 	return _c
 }
 
+// GetOverflowPage provides a mock function for the type MockTxPager
+func (_mock *MockTxPager) GetOverflowPage(context1 context.Context, v uint32) (*Page, error) {
+	ret := _mock.Called(context1, v)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetOverflowPage")
+	}
+
+	var r0 *Page
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint32) (*Page, error)); ok {
+		return returnFunc(context1, v)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint32) *Page); ok {
+		r0 = returnFunc(context1, v)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*Page)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, uint32) error); ok {
+		r1 = returnFunc(context1, v)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockTxPager_GetOverflowPage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetOverflowPage'
+type MockTxPager_GetOverflowPage_Call struct {
+	*mock.Call
+}
+
+// GetOverflowPage is a helper method to define mock.On call
+//   - context1 context.Context
+//   - v uint32
+func (_e *MockTxPager_Expecter) GetOverflowPage(context1 interface{}, v interface{}) *MockTxPager_GetOverflowPage_Call {
+	return &MockTxPager_GetOverflowPage_Call{Call: _e.mock.On("GetOverflowPage", context1, v)}
+}
+
+func (_c *MockTxPager_GetOverflowPage_Call) Run(run func(context1 context.Context, v uint32)) *MockTxPager_GetOverflowPage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint32
+		if args[1] != nil {
+			arg1 = args[1].(uint32)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockTxPager_GetOverflowPage_Call) Return(page *Page, err error) *MockTxPager_GetOverflowPage_Call {
+	_c.Call.Return(page, err)
+	return _c
+}
+
+func (_c *MockTxPager_GetOverflowPage_Call) RunAndReturn(run func(context1 context.Context, v uint32) (*Page, error)) *MockTxPager_GetOverflowPage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ModifyPage provides a mock function for the type MockTxPager
 func (_mock *MockTxPager) ModifyPage(context1 context.Context, v uint32) (*Page, error) {
 	ret := _mock.Called(context1, v)

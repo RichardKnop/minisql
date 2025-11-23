@@ -101,7 +101,7 @@ func TestStatement_Validate(t *testing.T) {
 			Inserts: [][]OptionalValue{
 				{
 					{Value: int32(1), Valid: true},
-					{Value: "test@example.com", Valid: true},
+					{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
 					{Value: int32(25), Valid: true},
 					{Value: true, Valid: true},
 				},
@@ -140,7 +140,7 @@ func TestStatement_Validate(t *testing.T) {
 			Inserts: [][]OptionalValue{
 				{
 					{Valid: false}, // NULL for non-nullable id
-					{Value: "test@example.com", Valid: true},
+					{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
 					{Value: int32(25), Valid: true},
 					{Value: true, Valid: true},
 				},
@@ -161,7 +161,7 @@ func TestStatement_Validate(t *testing.T) {
 			Inserts: [][]OptionalValue{
 				{
 					{Value: int32(1), Valid: true},
-					{Value: "test@example.com", Valid: true},
+					{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
 					{Valid: false}, // NULL for nullable age
 					{Valid: false}, // NULL for nullable verified
 				},
@@ -181,7 +181,7 @@ func TestStatement_Validate(t *testing.T) {
 			Inserts: [][]OptionalValue{
 				{
 					{Value: int32(1), Valid: true},
-					{Value: "test@example.com", Valid: true},
+					{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
 					{Value: int32(25), Valid: true},
 					{Value: true, Valid: true},
 				},
@@ -201,7 +201,7 @@ func TestStatement_Validate(t *testing.T) {
 			Inserts: [][]OptionalValue{
 				{
 					{Value: int32(1), Valid: true},
-					{Value: "test@example.com", Valid: true},
+					{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
 					{Value: int32(25), Valid: true},
 				},
 			},
@@ -221,7 +221,7 @@ func TestStatement_Validate(t *testing.T) {
 			Inserts: [][]OptionalValue{
 				{
 					{Value: int32(1), Valid: true},
-					{Value: string([]byte{0xff, 0xfe, 0xfd}), Valid: true}, // invalid UTF-8
+					{Value: NewTextPointer([]byte{0xff, 0xfe, 0xfd}), Valid: true}, // invalid UTF-8
 					{Valid: false}, // NULL for nullable age
 					{Valid: false}, // NULL for nullable verified
 				},
@@ -271,7 +271,7 @@ func TestStatement_Validate(t *testing.T) {
 			Columns:   aTable.Columns,
 			Fields:    []string{"email", "age"},
 			Updates: map[string]OptionalValue{
-				"email": {Value: "new@example.com", Valid: true},
+				"email": {Value: NewTextPointer([]byte("new@example.com")), Valid: true},
 				"age":   {Value: int32(30), Valid: true},
 			},
 		}

@@ -64,7 +64,7 @@ func TestParse_Insert(t *testing.T) {
 					Kind:      minisql.Insert,
 					TableName: "a",
 					Fields:    []string{"b"},
-					Inserts:   [][]minisql.OptionalValue{{{Value: "1", Valid: true}}},
+					Inserts:   [][]minisql.OptionalValue{{{Value: minisql.NewTextPointer([]byte("1")), Valid: true}}},
 				},
 			},
 			nil,
@@ -85,7 +85,7 @@ func TestParse_Insert(t *testing.T) {
 					Fields:    []string{"b", "c", "d"},
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: "1", Valid: true},
+							{Value: minisql.NewTextPointer([]byte("1")), Valid: true},
 							{Value: int64(2), Valid: true},
 							{Value: float64(3.75), Valid: true},
 						},
@@ -104,14 +104,14 @@ func TestParse_Insert(t *testing.T) {
 					Fields:    []string{"b", "c", "d"},
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: "1", Valid: true},
+							{Value: minisql.NewTextPointer([]byte("1")), Valid: true},
 							{Value: int64(2), Valid: true},
 							{Value: float64(3.75), Valid: true},
 						},
 						{
-							{Value: "4", Valid: true},
-							{Value: "5", Valid: true},
-							{Value: "6", Valid: true},
+							{Value: minisql.NewTextPointer([]byte("4")), Valid: true},
+							{Value: minisql.NewTextPointer([]byte("5")), Valid: true},
+							{Value: minisql.NewTextPointer([]byte("6")), Valid: true},
 						},
 					},
 				},
@@ -129,9 +129,9 @@ func TestParse_Insert(t *testing.T) {
 					Inserts: [][]minisql.OptionalValue{
 						{
 							{Value: int64(25), Valid: true},
-							{Value: "foo", Valid: true},
+							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
 							{Value: int64(7), Valid: true},
-							{Value: "bar", Valid: true},
+							{Value: minisql.NewTextPointer([]byte("bar")), Valid: true},
 							{Valid: false},
 						},
 					},

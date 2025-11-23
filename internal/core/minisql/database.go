@@ -147,10 +147,10 @@ func (d *Database) init(ctx context.Context) error {
 			Fields:    mainTableFields,
 			Inserts: [][]OptionalValue{
 				{
-					{Value: int32(SchemaTable), Valid: true},                // type (only 0 supported now)
-					{Value: mainTable.Name, Valid: true},                    // name
-					{Value: int32(mainTable.GetRootPageIdx()), Valid: true}, // root page
-					{Value: mainTableSQL, Valid: true},                      // sql
+					{Value: int32(SchemaTable), Valid: true},                     // type (only 0 supported now)
+					{Value: NewTextPointer([]byte(mainTable.Name)), Valid: true}, // name
+					{Value: int32(mainTable.GetRootPageIdx()), Valid: true},      // root page
+					{Value: NewTextPointer([]byte(mainTableSQL)), Valid: true},   // sql
 				},
 			},
 		}); err != nil {
@@ -193,7 +193,7 @@ func (d *Database) init(ctx context.Context) error {
 	for ; err == nil; aRow, err = aResult.Rows(ctx) {
 		switch SchemaType(aRow.Values[0].Value.(int32)) {
 		case SchemaTable:
-			stmts, err := d.parser.Parse(ctx, aRow.Values[3].Value.(string))
+			stmts, err := d.parser.Parse(ctx, aRow.Values[3].Value.(TextPointer).String())
 			if err != nil {
 				return err
 			}
@@ -220,7 +220,7 @@ func (d *Database) init(ctx context.Context) error {
 			).Debug("loaded table")
 		case SchemaPrimaryKey:
 			var (
-				pkName    = aRow.Values[1].Value.(string)
+				pkName    = aRow.Values[1].Value.(TextPointer).String()
 				tableName = tableNameFromPrimaryKey(pkName)
 			)
 			aTable, ok := d.tables[tableName]
@@ -599,9 +599,9 @@ func (d *Database) insertIntoMainTable(ctx context.Context, aType SchemaType, na
 		Inserts: [][]OptionalValue{
 			{
 				{Value: int32(aType), Valid: true},
-				{Value: name, Valid: true},
+				{Value: NewTextPointer([]byte(name)), Valid: true},
 				{Value: int32(rootIdx), Valid: true},
-				{Value: ddl, Valid: ddl != ""},
+				{Value: NewTextPointer([]byte(ddl)), Valid: ddl != ""},
 			},
 		},
 	})

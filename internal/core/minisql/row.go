@@ -117,6 +117,17 @@ func (r *Row) SetValue(name string, value OptionalValue) (bool, bool) {
 	if !found {
 		return false, false
 	}
+	if r.Columns[columnIdx].Kind.IsText() {
+		if r.Values[columnIdx].Valid != value.Valid {
+			r.Values[columnIdx] = value
+			return true, true
+		}
+		if !r.Values[columnIdx].Value.(TextPointer).IsEqual(value.Value.(TextPointer)) {
+			r.Values[columnIdx] = value
+			return true, true
+		}
+		return true, false
+	}
 	if r.Values[columnIdx] != value {
 		r.Values[columnIdx] = value
 		return true, true
@@ -367,8 +378,8 @@ func (r *Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Ope
 		return compareInt4(int64(fieldValue.Value.(int32)), valueOperand.Value.(int64), operator)
 	case Int8:
 		return compareInt8(fieldValue.Value.(int64), valueOperand.Value.(int64), operator)
-	case Varchar:
-		return compareVarchar(fieldValue.Value, valueOperand.Value, operator)
+	case Varchar, Text:
+		return compareText(fieldValue.Value, valueOperand.Value, operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", aColumn.Kind)
 	}
@@ -417,8 +428,8 @@ func (r *Row) compareFields(field1, field2 Operand, operator Operator) (bool, er
 		return compareInt4(value1.Value, value2.Value, operator)
 	case Int8:
 		return compareInt8(value1.Value, value2.Value, operator)
-	case Varchar:
-		return compareVarchar(value1.Value, value2.Value, operator)
+	case Varchar, Text:
+		return compareText(value1.Value, value2.Value, operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", aColumn1.Kind)
 	}
@@ -502,32 +513,36 @@ func compareInt8(value1, value2 any, operator Operator) (bool, error) {
 	return false, fmt.Errorf("unknown operator '%s'", operator)
 }
 
-func compareVarchar(value1, value2 any, operator Operator) (bool, error) {
-	theValue1, ok := value1.(string)
-	if !ok {
-		return false, fmt.Errorf("value '%v' cannot be cast as string", value1)
-	}
-	theValue2, ok := value2.(string)
-	if !ok {
-		return false, fmt.Errorf("operand value '%v' cannot be cast as string", value2)
-	}
+func compareText(value1, value2 any, operator Operator) (bool, error) {
 	// From Golang dosc (https://go.dev/ref/spec#Comparison_operators)
 	// Two string values are compared lexically byte-wise.
 	switch operator {
 	case Eq:
-		return theValue1 == theValue2, nil
+		return getTextToCompare(value1) == getTextToCompare(value2), nil
 	case Ne:
-		return theValue1 != theValue2, nil
+		return getTextToCompare(value1) != getTextToCompare(value2), nil
 	case Gt:
-		return theValue1 > theValue2, nil
+		return getTextToCompare(value1) > getTextToCompare(value2), nil
 	case Lt:
-		return theValue1 < theValue2, nil
+		return getTextToCompare(value1) < getTextToCompare(value2), nil
 	case Gte:
-		return theValue1 >= theValue2, nil
+		return getTextToCompare(value1) >= getTextToCompare(value2), nil
 	case Lte:
-		return theValue1 <= theValue2, nil
+		return getTextToCompare(value1) <= getTextToCompare(value2), nil
 	}
 	return false, fmt.Errorf("unknown operator '%s'", operator)
+}
+
+func getTextToCompare(value any) string {
+	_, ok := value.(string)
+	if ok {
+		return value.(string)
+	}
+	textPointer, ok := value.(TextPointer)
+	if !ok {
+		panic(fmt.Sprintf("text value to compare is neither string nor TextPointer %v", value))
+	}
+	return string(textPointer.Data)
 }
 
 // NullBitmask returns a bitmask representing which columns are NULL

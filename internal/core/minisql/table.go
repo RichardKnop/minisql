@@ -511,8 +511,12 @@ func (t *Table) DeleteKey(ctx context.Context, pageIdx uint32, key uint64) error
 	return nil
 }
 
-func (t *Table) freeOverflowPages(ctx context.Context, aRow *Row) error {
-	for _, aColumn := range aRow.Columns {
+func (t *Table) freeOverflowPages(ctx context.Context, aRow *Row, onlyForColumns ...Column) error {
+	columns := aRow.Columns
+	if onlyForColumns != nil {
+		columns = onlyForColumns
+	}
+	for _, aColumn := range columns {
 		if !aColumn.Kind.IsText() {
 			continue
 		}
@@ -527,19 +531,21 @@ func (t *Table) freeOverflowPages(ctx context.Context, aRow *Row) error {
 		if textPointer.IsInline() {
 			continue
 		}
-		overflowPage, err := t.pager.ModifyPage(ctx, textPointer.FirstPage)
+		pagesToFree := make([]uint32, 0, 1)
+		overflowPage, err := t.pager.GetOverflowPage(ctx, textPointer.FirstPage)
 		if err != nil {
 			return err
 		}
-		if err := t.pager.AddFreePage(ctx, overflowPage.Index); err != nil {
-			return err
-		}
+		pagesToFree = append(pagesToFree, overflowPage.Index)
 		for overflowPage.OverflowPage.Header.NextPage > 0 {
-			if err := t.pager.AddFreePage(ctx, overflowPage.OverflowPage.Header.NextPage); err != nil {
+			overflowPage, err = t.pager.GetOverflowPage(ctx, overflowPage.OverflowPage.Header.NextPage)
+			if err != nil {
 				return err
 			}
-			overflowPage, err = t.pager.ModifyPage(ctx, overflowPage.OverflowPage.Header.NextPage)
-			if err != nil {
+			pagesToFree = append(pagesToFree, overflowPage.Index)
+		}
+		for _, pageIdx := range pagesToFree {
+			if err := t.pager.AddFreePage(ctx, pageIdx); err != nil {
 				return err
 			}
 		}

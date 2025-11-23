@@ -269,7 +269,7 @@ func (g *dataGen) Row() Row {
 	}
 }
 
-func (g *dataGen) paddedEmail() string {
+func (g *dataGen) paddedEmail() TextPointer {
 	email := g.Email()
 	paddingLength := MaxInlineVarchar - len(email)
 	parts := strings.Split(email, "@")
@@ -277,7 +277,7 @@ func (g *dataGen) paddedEmail() string {
 	for i := 0; i < paddingLength-1; i++ {
 		parts[0] += g.Letter()
 	}
-	return strings.Join(parts, "@")
+	return NewTextPointer([]byte(strings.Join(parts, "@")))
 }
 
 func (g *dataGen) Rows(number int) []Row {
@@ -319,12 +319,12 @@ func (g *dataGen) MediumRow() Row {
 	return aRow
 }
 
-func (g *dataGen) textOfLength(length uint32) string {
+func (g *dataGen) textOfLength(length uint32) TextPointer {
 	txt := ""
 	for len(txt) < int(length) {
 		txt += g.Sentence(10)
 	}
-	return txt[0:length]
+	return NewTextPointer([]byte(txt[0:length]))
 }
 
 func (g *dataGen) MediumRows(number int) []Row {
@@ -389,7 +389,7 @@ func (g *dataGen) RowWithPrimaryKey(primaryKey int64) Row {
 		Columns: testColumnsWithPrimaryKey,
 		Values: []OptionalValue{
 			{Value: primaryKey, Valid: true},
-			{Value: g.Email(), Valid: true},
+			{Value: NewTextPointer([]byte(g.Email())), Valid: true},
 			{Value: g.Bool(), Valid: true},
 		},
 	}

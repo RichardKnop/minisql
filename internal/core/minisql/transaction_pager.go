@@ -82,7 +82,18 @@ func (tp *TransactionalPager) GetFreePage(ctx context.Context) (*Page, error) {
 	// Check if there are any free pages
 	if dbHeader.FirstFreePage == 0 {
 		// No free pages, allocate new one
-		return tp.ModifyPage(ctx, tp.TotalPages())
+		freePage, err := tp.ModifyPage(ctx, tp.TotalPages())
+		if err != nil {
+			return nil, fmt.Errorf("allocate new free page: %w", err)
+		}
+		// Clear the page for reuse
+		freePage.OverflowPage = nil
+		freePage.FreePage = nil
+		freePage.LeafNode = nil
+		freePage.InternalNode = nil
+		freePage.IndexNode = nil
+
+		return freePage, nil
 	}
 
 	// Get the first free page
