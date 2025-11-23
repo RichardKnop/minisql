@@ -78,18 +78,12 @@ func TestStatement_Validate(t *testing.T) {
 		stmt := Statement{
 			Kind:      CreateTable,
 			TableName: testTableName,
-			Columns: []Column{
-				{
-					Size: UsablePageSize + 1, // Exceed max row size by 1 byte
-					Kind: Varchar,
-					Name: "too_large",
-				},
-			},
+			Columns:   appendUntilSize([]Column{}, UsablePageSize+1), // Exceed page size
 		}
 
 		err := stmt.Validate(aTable)
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "row size 4067 exceeds maximum allowed 4066")
+		assert.ErrorContains(t, err, "potential row size exceeds maximum allowed 4066")
 	})
 
 	t.Run("INSERT with wrong number of columns should fail", func(t *testing.T) {

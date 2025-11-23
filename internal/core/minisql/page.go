@@ -100,11 +100,3 @@ func (p *Page) setParent(parentIdx uint32) {
 		p.InternalNode.Header.Parent = parentIdx
 	}
 }
-
-func remainingPageSpace(columns []Column) int {
-	remaining := UsablePageSize
-	for _, aColumn := range columns {
-		remaining -= int(aColumn.Size)
-	}
-	return remaining
-}

@@ -322,118 +322,148 @@ func (s Statement) ReadOnly() bool {
 func (s Statement) Validate(aTable *Table) error {
 	switch s.Kind {
 	case CreateTable:
-		if len(s.TableName) == 0 {
-			return fmt.Errorf("table name is required")
-		}
-
-		if len(s.Columns) == 0 {
-			return fmt.Errorf("at least one column is required")
-		}
-
-		if len(s.Columns) > MaxColumns {
-			return fmt.Errorf("maximum number of columns is %d", MaxColumns)
-		}
-
-		remainingPageSpace := remainingPageSpace(s.Columns)
-
-		if remainingPageSpace < 0 {
-			return fmt.Errorf("row size %d exceeds maximum allowed %d", UsablePageSize-remainingPageSpace, UsablePageSize)
-		}
-
-		primaryKeyCount := 0
-		nameMap := map[string]struct{}{}
-		for _, aColumn := range s.Columns {
-			if _, exists := nameMap[aColumn.Name]; exists {
-				return fmt.Errorf("duplicate column name %q", aColumn.Name)
-			}
-			nameMap[aColumn.Name] = struct{}{}
-			if aColumn.PrimaryKey {
-				primaryKeyCount += 1
-			}
-		}
-		if primaryKeyCount > 1 {
-			return fmt.Errorf("only one primary key column is supported")
-		}
-
-		return nil
+		return s.validateCreateTable()
 	case Insert:
-		if len(s.Inserts) == 0 {
-			return fmt.Errorf("at least one row to insert is required")
-		}
-		if len(s.Columns) != len(aTable.Columns) {
-			return fmt.Errorf("insert: expected %d columns, got %d", len(aTable.Columns), len(s.Columns))
-		}
-		for _, aColumn := range s.Columns {
-			if !aColumn.Nullable {
-				if aColumn.PrimaryKey && aColumn.Autoincrement {
-					continue
-				}
-				if !s.HasField(aColumn.Name) {
-					return fmt.Errorf("missing required field %q", aColumn.Name)
-				}
-			}
-		}
-		for i, aField := range s.Fields {
-			aColumn, ok := aTable.ColumnByName(aField)
-			if !ok {
-				return fmt.Errorf("unknown field %q in table %q", aField, aTable.Name)
-			}
-			for _, anInsert := range s.Inserts {
-				if len(anInsert) != len(s.Fields) {
-					return fmt.Errorf("insert: expected %d values, got %d", len(s.Fields), len(anInsert))
-				}
-				if !anInsert[i].Valid && !aColumn.Nullable && !(aColumn.PrimaryKey && aColumn.Autoincrement) {
-					return fmt.Errorf("field %q cannot be NULL", aField)
-				}
-				if anInsert[i].Valid {
-					if aColumn.Kind.IsText() && !utf8.ValidString(anInsert[i].Value.(TextPointer).String()) {
-						return fmt.Errorf("field %q expects valid UTF-8 string", aField)
-					}
-				}
-				if aColumn.Kind.IsText() && anInsert[i].Valid {
-					switch aColumn.Kind {
-					case Varchar:
-						if len([]byte(anInsert[i].Value.(TextPointer).String())) > int(aColumn.Size) {
-							return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", aField, aColumn.Size)
-						}
-					case Text:
-						if len([]byte(anInsert[i].Value.(TextPointer).String())) > MaxOverflowTextSize {
-							return fmt.Errorf("field %q exceeds maximum TEXT length of %d", aField, MaxOverflowTextSize)
-						}
-					}
-
-				}
-			}
-		}
-		return nil
+		return s.validateInsert(aTable)
 	case Update:
-		if len(s.Updates) == 0 {
-			return fmt.Errorf("at least one field to update is required")
-		}
-		for _, aField := range s.Fields {
-			aColumn, ok := aTable.ColumnByName(aField)
-			if !ok {
-				return fmt.Errorf("unknown field %q in table %q", aField, aTable.Name)
-			}
-			if !s.Updates[aField].Valid && !aColumn.Nullable {
-				return fmt.Errorf("field %q cannot be NULL", aField)
-			}
-			if s.Updates[aField].Valid {
-				if aColumn.Kind == Varchar && !utf8.ValidString(s.Updates[aField].Value.(TextPointer).String()) {
-					return fmt.Errorf("field %q expects valid UTF-8 string", aField)
-				}
-			}
-		}
-		return nil
+		return s.validateUpdate(aTable)
 	}
 
 	return nil
 }
 
-func (stmt Statement) CreateTableDDL() string {
+func (s Statement) validateCreateTable() error {
+	if len(s.TableName) == 0 {
+		return fmt.Errorf("table name is required")
+	}
+
+	if len(s.Columns) == 0 {
+		return fmt.Errorf("at least one column is required")
+	}
+
+	if len(s.Columns) > MaxColumns {
+		return fmt.Errorf("maximum number of columns is %d", MaxColumns)
+	}
+
+	if !canInlinedRowFitInPage(s.Columns) {
+		return fmt.Errorf("potential row size exceeds maximum allowed %d", UsablePageSize)
+	}
+
+	var (
+		primaryKeyCount = 0
+		nameMap         = map[string]struct{}{}
+	)
+	for _, aColumn := range s.Columns {
+		if _, exists := nameMap[aColumn.Name]; exists {
+			return fmt.Errorf("duplicate column name %s", aColumn.Name)
+		}
+		nameMap[aColumn.Name] = struct{}{}
+		if aColumn.PrimaryKey {
+			primaryKeyCount += 1
+		}
+	}
+	if primaryKeyCount > 1 {
+		return fmt.Errorf("only one primary key column is supported")
+	}
+
+	return nil
+}
+
+// Check whether a row with the given columns can fit in a page if all columns are inlined
+func canInlinedRowFitInPage(columns []Column) bool {
+	remaining := UsablePageSize
+	for _, aColumn := range columns {
+		if aColumn.Kind.IsText() {
+			// For TEXT and VARCHAR, assume each column has maximum inline size
+			// and will take 4+255 bytes each (length prefix + max varchar inline size)
+			remaining -= (varcharLengthPrefixSize + MaxInlineVarchar)
+		} else {
+			remaining -= int(aColumn.Size)
+		}
+		if remaining < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (s Statement) validateInsert(aTable *Table) error {
+	if len(s.Inserts) == 0 {
+		return fmt.Errorf("at least one row to insert is required")
+	}
+	if len(s.Columns) != len(aTable.Columns) {
+		return fmt.Errorf("insert: expected %d columns, got %d", len(aTable.Columns), len(s.Columns))
+	}
+	for _, aColumn := range s.Columns {
+		if !aColumn.Nullable {
+			if aColumn.PrimaryKey && aColumn.Autoincrement {
+				continue
+			}
+			if !s.HasField(aColumn.Name) {
+				return fmt.Errorf("missing required field %q", aColumn.Name)
+			}
+		}
+	}
+	for i, aField := range s.Fields {
+		aColumn, ok := aTable.ColumnByName(aField)
+		if !ok {
+			return fmt.Errorf("unknown field %q in table %q", aField, aTable.Name)
+		}
+		for _, anInsert := range s.Inserts {
+			if len(anInsert) != len(s.Fields) {
+				return fmt.Errorf("insert: expected %d values, got %d", len(s.Fields), len(anInsert))
+			}
+			if !anInsert[i].Valid && !aColumn.Nullable && !(aColumn.PrimaryKey && aColumn.Autoincrement) {
+				return fmt.Errorf("field %q cannot be NULL", aField)
+			}
+			if anInsert[i].Valid {
+				if aColumn.Kind.IsText() && !utf8.ValidString(anInsert[i].Value.(TextPointer).String()) {
+					return fmt.Errorf("field %q expects valid UTF-8 string", aField)
+				}
+			}
+			if aColumn.Kind.IsText() && anInsert[i].Valid {
+				switch aColumn.Kind {
+				case Varchar:
+					if len([]byte(anInsert[i].Value.(TextPointer).String())) > int(aColumn.Size) {
+						return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", aField, aColumn.Size)
+					}
+				case Text:
+					if len([]byte(anInsert[i].Value.(TextPointer).String())) > MaxOverflowTextSize {
+						return fmt.Errorf("field %q exceeds maximum TEXT length of %d", aField, MaxOverflowTextSize)
+					}
+				}
+
+			}
+		}
+	}
+	return nil
+}
+
+func (s Statement) validateUpdate(aTable *Table) error {
+	if len(s.Updates) == 0 {
+		return fmt.Errorf("at least one field to update is required")
+	}
+	for _, aField := range s.Fields {
+		aColumn, ok := aTable.ColumnByName(aField)
+		if !ok {
+			return fmt.Errorf("unknown field %q in table %q", aField, aTable.Name)
+		}
+		if !s.Updates[aField].Valid && !aColumn.Nullable {
+			return fmt.Errorf("field %q cannot be NULL", aField)
+		}
+		if s.Updates[aField].Valid {
+			if aColumn.Kind == Varchar && !utf8.ValidString(s.Updates[aField].Value.(TextPointer).String()) {
+				return fmt.Errorf("field %q expects valid UTF-8 string", aField)
+			}
+		}
+	}
+	return nil
+}
+
+func (s Statement) CreateTableDDL() string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("create table \"%s\" (\n", stmt.TableName))
-	for i, col := range stmt.Columns {
+	sb.WriteString(fmt.Sprintf("create table \"%s\" (\n", s.TableName))
+	for i, col := range s.Columns {
 		sb.WriteString(fmt.Sprintf("	%s %s", col.Name, col.Kind))
 		if col.Kind == Varchar {
 			sb.WriteString(fmt.Sprintf("(%d)", col.Size))
@@ -446,7 +476,7 @@ func (stmt Statement) CreateTableDDL() string {
 		} else if !col.Nullable {
 			sb.WriteString(" not null")
 		}
-		if i < len(stmt.Columns)-1 {
+		if i < len(s.Columns)-1 {
 			sb.WriteString(",\n")
 		}
 	}
