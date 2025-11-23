@@ -10,23 +10,53 @@ const (
 
 type Page struct {
 	Index        uint32
+	OverflowPage *OverflowPage
 	FreePage     *FreePage
 	InternalNode *InternalNode
 	LeafNode     *LeafNode
 	IndexNode    any
 }
 
-func (p *Page) AvailableSpace() uint64 {
-	maxPageSize := PageSize - headerSize()
+func (p *Page) MaxSpace() uint64 {
+	maxSpace := PageSize - headerSize()
 	if p.Index == 0 {
-		maxPageSize = PageSize - rootHeaderSize()
+		maxSpace = PageSize - rootHeaderSize()
 	}
+	return maxSpace
+}
+
+func (p *Page) TakenSpace() uint64 {
 	takenPageSize := uint64(0)
 	for i := uint32(0); i < p.LeafNode.Header.Cells; i++ {
-		// key + null bitmask + value
-		takenPageSize += uint64(len(p.LeafNode.Cells[i].Value)) + 8 + 8
+		takenPageSize += p.LeafNode.Cells[i].Size()
 	}
-	return maxPageSize - takenPageSize
+	return takenPageSize
+}
+
+func (p *Page) AvailableSpace() uint64 {
+	return p.MaxSpace() - p.TakenSpace()
+}
+
+func (p *Page) HasSpaceForRow(aRow *Row) bool {
+	return aRow.Size()+8+8 <= p.AvailableSpace()
+}
+
+func (p *Page) AtLeastHalfFull() bool {
+	return p.AvailableSpace() < p.MaxSpace()/2
+}
+
+func (p *Page) CanMergeWith(p2 *Page) bool {
+	return p2.TakenSpace() <= p.AvailableSpace()
+}
+
+func (p *Page) CanBorrowFirst() bool {
+	firstCellSize := p.LeafNode.Cells[0].Size()
+	return p.AvailableSpace()+firstCellSize < p.MaxSpace()/2
+}
+
+func (p *Page) CanBorrowLast() bool {
+	lastCellSize := p.LeafNode.Cells[p.LeafNode.Header.Cells-1].Size()
+	return p.AvailableSpace()+lastCellSize < p.MaxSpace()/2
 }
 
 // Create a deep copy of the page
@@ -42,6 +72,11 @@ func (p *Page) Clone() *Page {
 	} else if p.FreePage != nil {
 		pageCopy.FreePage = &FreePage{
 			NextFreePage: p.FreePage.NextFreePage,
+		}
+	} else if p.OverflowPage != nil {
+		pageCopy.OverflowPage = &OverflowPage{
+			Header: p.OverflowPage.Header,
+			Data:   p.OverflowPage.Data,
 		}
 	} else if p.IndexNode != nil {
 		pageCopy.IndexNode = copyIndexNode(p.IndexNode)

@@ -82,7 +82,18 @@ func (tp *TransactionalPager) GetFreePage(ctx context.Context) (*Page, error) {
 	// Check if there are any free pages
 	if dbHeader.FirstFreePage == 0 {
 		// No free pages, allocate new one
-		return tp.ModifyPage(ctx, tp.TotalPages())
+		freePage, err := tp.ModifyPage(ctx, tp.TotalPages())
+		if err != nil {
+			return nil, fmt.Errorf("allocate new free page: %w", err)
+		}
+		// Clear the page for reuse
+		freePage.OverflowPage = nil
+		freePage.FreePage = nil
+		freePage.LeafNode = nil
+		freePage.InternalNode = nil
+		freePage.IndexNode = nil
+
+		return freePage, nil
 	}
 
 	// Get the first free page
@@ -97,6 +108,7 @@ func (tp *TransactionalPager) GetFreePage(ctx context.Context) (*Page, error) {
 	tx.DbHeaderWrite = &dbHeader
 
 	// Clear the page for reuse
+	freePage.OverflowPage = nil
 	freePage.FreePage = nil
 	freePage.LeafNode = nil
 	freePage.InternalNode = nil
@@ -132,6 +144,7 @@ func (tp *TransactionalPager) AddFreePage(ctx context.Context, pageIdx uint32) e
 	freePage.LeafNode = nil
 	freePage.InternalNode = nil
 	freePage.IndexNode = nil
+	freePage.OverflowPage = nil
 
 	// Update header
 	dbHeader.FirstFreePage = pageIdx
@@ -160,4 +173,18 @@ func (tp *TransactionalPager) readDBHeader(ctx context.Context) DatabaseHeader {
 	}
 
 	return dbHeader
+}
+
+func (tp *TransactionalPager) GetOverflowPage(ctx context.Context, pageIdx uint32) (*Page, error) {
+	tx := TxFromContext(ctx)
+	if tx == nil {
+		return nil, fmt.Errorf("cannot get overflow page outside transaction")
+	}
+
+	overflowPage, err := tp.ModifyPage(ctx, pageIdx)
+	if err != nil {
+		return nil, fmt.Errorf("get overflow page: %w", err)
+	}
+
+	return overflowPage, nil
 }

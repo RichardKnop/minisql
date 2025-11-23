@@ -196,3 +196,69 @@ func TestTable_Select(t *testing.T) {
 		assert.Equal(t, expected, actual)
 	})
 }
+
+func TestTable_Select_Overflow(t *testing.T) {
+	var (
+		aPager     = initTest(t)
+		ctx        = context.Background()
+		txManager  = NewTransactionManager()
+		tablePager = NewTransactionalPager(
+			aPager.ForTable(testOverflowColumns),
+			txManager,
+		)
+		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testOverflowColumns, 0)
+		rows   = gen.OverflowRows(3, []uint32{
+			MaxInlineVarchar,          // inline text
+			MaxInlineVarchar + 100,    // text overflows to 1 page
+			MaxOverflowPageData + 100, // text overflows to multiple pages
+		})
+	)
+
+	// Batch insert test rows
+	insertStmt := Statement{
+		Kind:    Insert,
+		Fields:  columnNames(testOverflowColumns...),
+		Inserts: [][]OptionalValue{},
+	}
+	for _, aRow := range rows {
+		insertStmt.Inserts = append(insertStmt.Inserts, aRow.Values)
+	}
+
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return aTable.Insert(ctx, insertStmt)
+	}, aPager)
+	require.NoError(t, err)
+
+	t.Run("Select all rows", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: columnNames(testOverflowColumns...),
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		// Use iterator to collect all rows
+		actual := []Row{}
+		aRow, err := aResult.Rows(ctx)
+		for ; err == nil; aRow, err = aResult.Rows(ctx) {
+			actual = append(actual, aRow)
+		}
+
+		// Set expected first overflow pages on rows
+		overflow1, _ := rows[1].GetValue("profile")
+		tp1 := overflow1.Value.(TextPointer)
+		tp1.FirstPage = 1
+		overflow1.Value = tp1
+		rows[1].SetValue("profile", overflow1)
+
+		overflow2, _ := rows[2].GetValue("profile")
+		tp2 := overflow2.Value.(TextPointer)
+		tp2.FirstPage = 2
+		overflow2.Value = tp2
+		rows[2].SetValue("profile", overflow2)
+
+		// And now we can assert
+		assert.Equal(t, rows, actual)
+	})
+}

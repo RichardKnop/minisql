@@ -64,7 +64,7 @@ func TestParse_Update(t *testing.T) {
 					Kind:      minisql.Update,
 					TableName: "a",
 					Updates: map[string]minisql.OptionalValue{
-						"b": {Value: "hello", Valid: true},
+						"b": {Value: minisql.NewTextPointer([]byte("hello")), Valid: true},
 					},
 					Conditions: minisql.OneOrMore{
 						{
@@ -180,7 +180,7 @@ func TestParse_Update(t *testing.T) {
 					Kind:      minisql.Update,
 					TableName: "a",
 					Updates: map[string]minisql.OptionalValue{
-						"b": {Value: "hello\\'world", Valid: true},
+						"b": {Value: minisql.NewTextPointer([]byte("hello\\'world")), Valid: true},
 					},
 					Conditions: minisql.OneOrMore{
 						{
@@ -209,8 +209,8 @@ func TestParse_Update(t *testing.T) {
 					Kind:      minisql.Update,
 					TableName: "a",
 					Updates: map[string]minisql.OptionalValue{
-						"b": {Value: "hello", Valid: true},
-						"c": {Value: "bye", Valid: true},
+						"b": {Value: minisql.NewTextPointer([]byte("hello")), Valid: true},
+						"c": {Value: minisql.NewTextPointer([]byte("bye")), Valid: true},
 					},
 					Conditions: minisql.OneOrMore{
 						{
@@ -239,8 +239,8 @@ func TestParse_Update(t *testing.T) {
 					Kind:      minisql.Update,
 					TableName: "a",
 					Updates: map[string]minisql.OptionalValue{
-						"b": {Value: "hello", Valid: true},
-						"c": {Value: "bye", Valid: true},
+						"b": {Value: minisql.NewTextPointer([]byte("hello")), Valid: true},
+						"c": {Value: minisql.NewTextPointer([]byte("bye")), Valid: true},
 					},
 					Conditions: minisql.OneOrMore{
 						{

@@ -242,6 +242,7 @@ const (
 	Real
 	Double
 	Varchar
+	Text
 )
 
 func (k ColumnKind) String() string {
@@ -258,9 +259,21 @@ func (k ColumnKind) String() string {
 		return "double"
 	case Varchar:
 		return "varchar"
+	case Text:
+		return "text"
 	default:
 		return "unknown"
 	}
+}
+
+func (k ColumnKind) IsText() bool {
+	if k == Varchar {
+		return true
+	}
+	if k == Text {
+		return true
+	}
+	return false
 }
 
 type Column struct {
@@ -270,6 +283,15 @@ type Column struct {
 	Autoincrement bool
 	Nullable      bool
 	Name          string
+}
+
+func hasTextColumn(columns ...Column) bool {
+	for _, aColumn := range columns {
+		if aColumn.Kind.IsText() {
+			return true
+		}
+	}
+	return false
 }
 
 type Statement struct {
@@ -364,11 +386,23 @@ func (s Statement) Validate(aTable *Table) error {
 					return fmt.Errorf("field %q cannot be NULL", aField)
 				}
 				if anInsert[i].Valid {
-					if aColumn.Kind == Varchar && !utf8.ValidString(anInsert[i].Value.(string)) {
+					if aColumn.Kind.IsText() && !utf8.ValidString(anInsert[i].Value.(TextPointer).String()) {
 						return fmt.Errorf("field %q expects valid UTF-8 string", aField)
 					}
 				}
+				if aColumn.Kind.IsText() && anInsert[i].Valid {
+					switch aColumn.Kind {
+					case Varchar:
+						if len([]byte(anInsert[i].Value.(TextPointer).String())) > int(aColumn.Size) {
+							return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", aField, aColumn.Size)
+						}
+					case Text:
+						if len([]byte(anInsert[i].Value.(TextPointer).String())) > MaxOverflowTextSize {
+							return fmt.Errorf("field %q exceeds maximum TEXT length of %d", aField, MaxOverflowTextSize)
+						}
+					}
 
+				}
 			}
 		}
 		return nil
@@ -385,7 +419,7 @@ func (s Statement) Validate(aTable *Table) error {
 				return fmt.Errorf("field %q cannot be NULL", aField)
 			}
 			if s.Updates[aField].Valid {
-				if aColumn.Kind == Varchar && !utf8.ValidString(s.Updates[aField].Value.(string)) {
+				if aColumn.Kind == Varchar && !utf8.ValidString(s.Updates[aField].Value.(TextPointer).String()) {
 					return fmt.Errorf("field %q expects valid UTF-8 string", aField)
 				}
 			}
@@ -454,33 +488,4 @@ func (stmt Statement) ColumnIdx(name string) int {
 		}
 	}
 	return -1
-}
-
-// castPrimaryKeyValue casts the primary key value to the appropriate type based on the column kind
-// parser returns all numbers as int64 or float64, but primary keys can be int4 (int32) or real (float32)
-func castPrimaryKeyValue(aColumn Column, aValue any) (any, error) {
-	switch aColumn.Kind {
-	case Int4:
-		value, ok := aValue.(int32)
-		if !ok {
-			_, ok = aValue.(int64)
-			if !ok {
-				return nil, fmt.Errorf("could not cast value for column %s to either int64 or int32", aColumn.Name)
-			}
-			value = int32(aValue.(int64))
-		}
-		return value, nil
-	case Real:
-		value, ok := aValue.(float32)
-		if !ok {
-			_, ok = aValue.(float64)
-			if !ok {
-				return nil, fmt.Errorf("could not cast value for column %s to either float64 or float32", aColumn.Name)
-			}
-			value = float32(aValue.(float64))
-		}
-		return value, nil
-	default:
-		return aValue, nil
-	}
 }

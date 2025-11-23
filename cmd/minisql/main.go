@@ -241,7 +241,25 @@ func (s *Server) handleSQL(ctx context.Context, conn net.Conn, sql string) error
 		if aResult.Rows != nil {
 			aRow, err := aResult.Rows(ctx)
 			for ; err == nil; aRow, err = aResult.Rows(ctx) {
-				aResponse.Rows = append(aResponse.Rows, aRow.Values)
+				// Convert TextPointer structs to strings
+				// TODO - find less hacky way to do this
+				values := make([]minisql.OptionalValue, 0, len(aRow.Values))
+				for _, aValue := range aRow.Values {
+					if !aValue.Valid {
+						values = append(values, aValue)
+						continue
+					}
+					textPointer, ok := aValue.Value.(minisql.TextPointer)
+					if !ok {
+						values = append(values, aValue)
+						continue
+					}
+					values = append(values, minisql.OptionalValue{
+						Value: textPointer.String(),
+						Valid: true,
+					})
+				}
+				aResponse.Rows = append(aResponse.Rows, values)
 			}
 		}
 

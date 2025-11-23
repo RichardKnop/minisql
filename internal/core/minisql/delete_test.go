@@ -487,6 +487,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	assert.NotNil(t, aPager.pages[5].FreePage)
 	assert.Nil(t, aPager.pages[5].LeafNode)
 	assert.Nil(t, aPager.pages[5].InternalNode)
+	assert.Nil(t, aPager.pages[5].OverflowPage)
 	assert.Equal(t, int(aPager.pages[2].Index), int(aPager.pages[5].FreePage.NextFreePage))
 	assert.Equal(t, int(aPager.pages[5].Index), int(aPager.dbHeader.FirstFreePage))
 	assert.Equal(t, 6, int(aPager.dbHeader.FreePageCount))
@@ -549,6 +550,83 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	assert.Equal(t, 46, int(aPager.dbHeader.FreePageCount))
 }
 
+func TestTable_Delete_Overflow(t *testing.T) {
+	var (
+		aPager     = initTest(t)
+		ctx        = context.Background()
+		txManager  = NewTransactionManager()
+		tablePager = NewTransactionalPager(
+			aPager.ForTable(testOverflowColumns),
+			txManager,
+		)
+		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testOverflowColumns, 0)
+		rows   = gen.OverflowRows(3, []uint32{
+			MaxInlineVarchar,          // inline text
+			MaxInlineVarchar + 100,    // text overflows to 1 page
+			MaxOverflowPageData + 100, // text overflows to multiple pages
+		})
+	)
+
+	// Batch insert test rows
+	insertStmt := Statement{
+		Kind:    Insert,
+		Fields:  columnNames(testOverflowColumns...),
+		Inserts: [][]OptionalValue{},
+	}
+	for _, aRow := range rows {
+		insertStmt.Inserts = append(insertStmt.Inserts, aRow.Values)
+	}
+
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return aTable.Insert(ctx, insertStmt)
+	}, aPager)
+	require.NoError(t, err)
+
+	require.Equal(t, 4, int(aPager.TotalPages()))
+
+	t.Run("Delete inline non overflowing row", func(t *testing.T) {
+		ids := rowIDs(rows[0])
+
+		var aResult StatementResult
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			var err error
+			aResult, err = aTable.Delete(ctx, Statement{
+				Kind:       Delete,
+				Conditions: FieldIsInAny("id", OperandInteger, ids...),
+			})
+			return err
+		}, aPager)
+		require.NoError(t, err)
+
+		assert.Equal(t, 1, aResult.RowsAffected)
+		checkRows(ctx, t, aTable, rows[1:])
+
+		require.Equal(t, 4, int(aPager.TotalPages()))
+		assertFreePages(t, tablePager, nil)
+	})
+
+	t.Run("Delete overflowing rows", func(t *testing.T) {
+		ids := rowIDs(rows[1], rows[2])
+
+		var aResult StatementResult
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			var err error
+			aResult, err = aTable.Delete(ctx, Statement{
+				Kind:       Delete,
+				Conditions: FieldIsInAny("id", OperandInteger, ids...),
+			})
+			return err
+		}, aPager)
+		require.NoError(t, err)
+
+		assert.Equal(t, 2, aResult.RowsAffected)
+		checkRows(ctx, t, aTable, nil)
+
+		require.Equal(t, 4, int(aPager.TotalPages()))
+		assertFreePages(t, tablePager, []uint32{3, 2, 1})
+	})
+}
+
 func rowIDs(rows ...Row) []any {
 	ids := make([]any, 0, len(rows))
 	for _, r := range rows {
@@ -586,7 +664,18 @@ func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []
 
 	require.Len(t, actual, len(expectedRows))
 	for i := range len(expectedRows) {
-		assert.Equal(t, actual[i], expectedRows[i], "row %d does not match expected", i)
+		assert.Equal(t, actual[i].Key, expectedRows[i].Key, "row key %d does not match expected", i)
+		assert.Equal(t, actual[i].Columns, expectedRows[i].Columns, "row columns %d does not match expected", i)
+		// Compare values, for text values, we don't want to compare pointers to overflow pages
+		for j, aValue := range expectedRows[i].Values {
+			tp, ok := aValue.Value.(TextPointer)
+			if ok {
+				assert.Equal(t, tp.Length, actual[i].Values[j].Value.(TextPointer).Length, "row %d text pointer length %d does not match expected", i, j)
+				assert.Equal(t, tp.Data, actual[i].Values[j].Value.(TextPointer).Data, "row %d text pointer data %d does not match expected", i, j)
+			} else {
+				assert.Equal(t, actual[i].Values[j], expectedRows[i].Values[j], "row %d value %d does not match expected", i, j)
+			}
+		}
 		assert.Equal(t, actual[i].NullBitmask(), expectedRows[i].NullBitmask(), "row %d null bitmask does not match expected", i)
 	}
 }

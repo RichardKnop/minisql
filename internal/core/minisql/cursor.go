@@ -3,6 +3,8 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 )
 
 type Cursor struct {
@@ -21,7 +23,7 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) erro
 		return fmt.Errorf("error inserting row to a non leaf node, key %d", key)
 	}
 
-	if aRow.Size() > aPage.AvailableSpace() {
+	if !aPage.HasSpaceForRow(aRow) {
 		// Split leaf node
 		if err := c.LeafNodeSplitInsert(ctx, key, aRow); err != nil {
 			return fmt.Errorf("leaf node split insert: %w", err)
@@ -36,7 +38,7 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) erro
 		}
 	}
 
-	if err := c.saveToCell(aPage.LeafNode, c.CellIdx, key, aRow); err != nil {
+	if err := c.saveToCell(ctx, aPage.LeafNode, c.CellIdx, key, aRow); err != nil {
 		return err
 	}
 	aPage.LeafNode.Header.Cells += 1
@@ -102,7 +104,7 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 		cellIdx := i % leftSplitCount
 
 		if i == c.CellIdx {
-			if err := c.saveToCell(destPage.LeafNode, cellIdx, key, aRow); err != nil {
+			if err := c.saveToCell(ctx, destPage.LeafNode, cellIdx, key, aRow); err != nil {
 				return err
 			}
 		} else if i > c.CellIdx {
@@ -153,6 +155,10 @@ func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
 	}
 	aRow.Key = aPage.LeafNode.Cells[c.CellIdx].Key
 
+	if err := readOverflowTexts(ctx, c.Table.pager, &aRow); err != nil {
+		return Row{}, fmt.Errorf("read overflow texts: %w", err)
+	}
+
 	// There are still more cells in the page, move cursor to next cell and return
 	if c.CellIdx < aPage.LeafNode.Header.Cells-1 {
 		c.CellIdx += 1
@@ -172,7 +178,11 @@ func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
 	return aRow, nil
 }
 
-func (c *Cursor) saveToCell(aNode *LeafNode, cellIdx uint32, key uint64, aRow *Row) error {
+func (c *Cursor) saveToCell(ctx context.Context, aNode *LeafNode, cellIdx uint32, key uint64, aRow *Row) error {
+	if err := storeOverflowTexts(ctx, c.Table.pager, aRow); err != nil {
+		return fmt.Errorf("store overflow texts: %w", err)
+	}
+
 	rowBuf, err := aRow.Marshal()
 	if err != nil {
 		return fmt.Errorf("save to cell: %w", err)
@@ -190,21 +200,25 @@ func (c *Cursor) saveToCell(aNode *LeafNode, cellIdx uint32, key uint64, aRow *R
 	aCell := &aNode.Cells[cellIdx]
 	aCell.NullBitmask = aRow.NullBitmask()
 	aCell.Key = key
-	aCell.Value = make([]byte, len(rowBuf))
-	copy(aCell.Value[:], rowBuf)
+	aCell.Value = rowBuf
 
 	return nil
 }
 
 func (c *Cursor) update(ctx context.Context, stmt Statement, aRow *Row) (bool, error) {
 	var (
-		oldPkValue, _ = aRow.GetValue(c.Table.PrimaryKey.Column.Name)
-		changedValues = map[string]struct{}{}
+		oldRow        = aRow.Clone()
+		oldPkValue, _ = oldRow.GetValue(c.Table.PrimaryKey.Column.Name)
+		changedValues = map[string]Column{}
 	)
 	for name, value := range stmt.Updates {
+		aColumn, ok := aRow.GetColumn(name)
+		if !ok {
+			return false, fmt.Errorf("column '%s' not found", name)
+		}
 		found, changed := aRow.SetValue(name, value)
 		if found && changed {
-			changedValues[name] = struct{}{}
+			changedValues[name] = aColumn
 		}
 	}
 
@@ -213,59 +227,78 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow *Row) (bool, e
 		return false, nil
 	}
 
+	aPage, err := c.Table.pager.ModifyPage(ctx, c.PageIdx)
+	if err != nil {
+		return false, fmt.Errorf("update: %w", err)
+	}
+
+	// In case the new row is larger than available space (after removing old row),
+	// we need to delete the old row and re-insert the new row. This will likely cause
+	// a split, but that's better than trying to move rows around in the page. Since we
+	// use internal row IDs as keys, we will reinsert to the same page.
+	if aRow.Size() > aPage.AvailableSpace()-oldRow.Size() {
+		// Delete the row
+		if err := c.delete(ctx); err != nil {
+			return false, fmt.Errorf("update delete old row: %w", err)
+		}
+		// Reinsert primary key if applicable
+		if c.Table.HasPrimaryKey() {
+			if c.Table.PrimaryKey.Index == nil {
+				return false, fmt.Errorf("table %s has primary key but no index", c.Table.Name)
+			}
+
+			pkValue, ok := stmt.Updates[c.Table.PrimaryKey.Name]
+			if !ok {
+				return false, fmt.Errorf("failed to get value for primary key %s", c.Table.PrimaryKey.Name)
+			}
+
+			_, err := c.Table.insertPrimaryKey(ctx, pkValue, aRow.Key)
+			if err != nil {
+				return false, err
+			}
+		}
+		// Reinsert with the same row ID
+		if err := c.LeafNodeInsert(ctx, aRow.Key, aRow); err != nil {
+			return false, fmt.Errorf("update re-insert new row: %w", err)
+		}
+		return true, nil
+	}
+
+	// Remove any overflow pages
+	if hasTextColumn(c.Table.Columns...) {
+		// TODO - a more efficient implementation would be to try to reuse existing overflow pages
+		// if possible. For example if text size didn't change much and fits into existing overflow pages.
+		changedColumns := slices.Collect(maps.Values(changedValues))
+		if err := c.Table.freeOverflowPages(ctx, &oldRow, changedColumns...); err != nil {
+			return false, err
+		}
+	}
+
+	if err := storeOverflowTexts(ctx, c.Table.pager, aRow); err != nil {
+		return false, fmt.Errorf("store overflow texts: %w", err)
+	}
+
 	if c.Table.HasPrimaryKey() {
 		// Only update primary key if it has changed
 		_, ok := changedValues[c.Table.PrimaryKey.Column.Name]
 		if ok {
-			if err := c.updatePrimaryKey(ctx, oldPkValue, aRow); err != nil {
+			if err := c.Table.updatePrimaryKey(ctx, oldPkValue, aRow); err != nil {
 				return false, err
 			}
 		}
 	}
 
-	aPage, err := c.Table.pager.ModifyPage(ctx, c.PageIdx)
-	if err != nil {
-		return false, fmt.Errorf("update: %w", err)
-	}
-	cell := &aPage.LeafNode.Cells[c.CellIdx]
+	aCell := &aPage.LeafNode.Cells[c.CellIdx]
 
 	rowBuf, err := aRow.Marshal()
 	if err != nil {
 		return false, fmt.Errorf("update: %w", err)
 	}
 
-	cell.NullBitmask = aRow.NullBitmask()
-	copy(cell.Value[:], rowBuf)
+	aCell.NullBitmask = aRow.NullBitmask()
+	aCell.Value = rowBuf
 
 	return true, nil
-}
-
-func (c *Cursor) updatePrimaryKey(ctx context.Context, oldPkValue OptionalValue, aRow *Row) error {
-	if c.Table.PrimaryKey.Index == nil {
-		return fmt.Errorf("table %s has primary key but no index", c.Table.Name)
-	}
-	pkValue, ok := aRow.GetValue(c.Table.PrimaryKey.Column.Name)
-	if !ok {
-		return nil
-	}
-	if !pkValue.Valid {
-		return fmt.Errorf("cannot update primary key %s to NULL", c.Table.PrimaryKey.Name)
-	}
-	castedValue, err := castPrimaryKeyValue(c.Table.PrimaryKey.Column, pkValue.Value)
-	if err != nil {
-		return fmt.Errorf("failed to cast primary key value for %s: %w", c.Table.PrimaryKey.Name, err)
-	}
-	rowID := aRow.Key
-	// We try to insert new primary key first to avoid leaving table in inconsistent state
-	// If the new primary key is already taken, we return an error without modifying the existing row
-	if err := c.Table.PrimaryKey.Index.Insert(ctx, castedValue, rowID); err != nil {
-		return fmt.Errorf("failed to insert new primary key %s: %w", c.Table.PrimaryKey.Name, err)
-	}
-	if err := c.Table.PrimaryKey.Index.Delete(ctx, oldPkValue.Value); err != nil {
-		return fmt.Errorf("failed to delete old primary key %s: %w", c.Table.PrimaryKey.Name, err)
-	}
-
-	return nil
 }
 
 func (c *Cursor) delete(ctx context.Context) error {
@@ -276,22 +309,32 @@ func (c *Cursor) delete(ctx context.Context) error {
 
 	key := aPage.LeafNode.Cells[c.CellIdx].Key
 
-	if c.Table.HasPrimaryKey() {
-		aRow, err := c.fetchRow(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to fetch row: %w", err)
-		}
-		primaryKeyValue, ok := aRow.GetValue(c.Table.PrimaryKey.Column.Name)
-		if !ok {
-			return fmt.Errorf("primary key %s not found in row", c.Table.PrimaryKey.Name)
-		}
-		if err := c.Table.PrimaryKey.Index.Delete(ctx, primaryKeyValue.Value); err != nil {
-			return fmt.Errorf("failed to delete primary key %s: %w", c.Table.PrimaryKey.Name, err)
-		}
+	if err := c.deletePrimaryKey(ctx); err != nil {
+		return fmt.Errorf("delete primary key: %w", err)
 	}
 
 	if err := c.Table.DeleteKey(ctx, c.PageIdx, key); err != nil {
 		return fmt.Errorf("failed to delete key: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Cursor) deletePrimaryKey(ctx context.Context) error {
+	if !c.Table.HasPrimaryKey() {
+		return nil
+	}
+
+	aRow, err := c.fetchRow(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch row: %w", err)
+	}
+	primaryKeyValue, ok := aRow.GetValue(c.Table.PrimaryKey.Column.Name)
+	if !ok {
+		return fmt.Errorf("primary key %s not found in row", c.Table.PrimaryKey.Name)
+	}
+	if err := c.Table.PrimaryKey.Index.Delete(ctx, primaryKeyValue.Value); err != nil {
+		return fmt.Errorf("failed to delete primary key %s: %w", c.Table.PrimaryKey.Name, err)
 	}
 
 	return nil

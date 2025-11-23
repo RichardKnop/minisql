@@ -74,7 +74,13 @@ func (p *parser) doParseInsert() error {
 		}
 		value, ln := p.peekNumberOrQuotedStringWithLength()
 		if ln > 0 {
-			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.OptionalValue{Value: value, Valid: true})
+			var insertValue minisql.OptionalValue
+			if strValue, ok := value.(string); ok {
+				insertValue = minisql.OptionalValue{Value: minisql.NewTextPointer([]byte(strValue)), Valid: true}
+			} else {
+				insertValue = minisql.OptionalValue{Value: value, Valid: true}
+			}
+			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], insertValue)
 			p.pop()
 			p.step = stepInsertValuesCommaOrClosingParens
 			return nil

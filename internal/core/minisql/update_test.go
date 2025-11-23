@@ -40,7 +40,7 @@ func TestTable_Update(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"email": {Value: "updatednone@foo.bar", Valid: true},
+				"email": {Value: NewTextPointer([]byte("updatednone@foo.bar")), Valid: true},
 			},
 			Conditions: OneOrMore{
 				{
@@ -75,7 +75,7 @@ func TestTable_Update(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"email": {Value: "updatedsingle@foo.bar", Valid: true},
+				"email": {Value: NewTextPointer([]byte("updatedsingle@foo.bar")), Valid: true},
 			},
 			Conditions: FieldIsInAny("id", OperandInteger, rows[5].Values[0].Value.(int64)),
 		}
@@ -94,7 +94,7 @@ func TestTable_Update(t *testing.T) {
 		for i, aRow := range rows {
 			expectedRow := aRow.Clone()
 			if i == 5 {
-				expectedRow.SetValue("email", OptionalValue{Value: "updatedsingle@foo.bar", Valid: true})
+				expectedRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("updatedsingle@foo.bar")), Valid: true})
 			}
 
 			expected = append(expected, expectedRow)
@@ -126,7 +126,7 @@ func TestTable_Update(t *testing.T) {
 		for i, aRow := range rows {
 			expectedRow := aRow.Clone()
 			if i == 5 {
-				expectedRow.SetValue("email", OptionalValue{Value: "updatedsingle@foo.bar", Valid: true})
+				expectedRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("updatedsingle@foo.bar")), Valid: true})
 			}
 			if i == 18 {
 				expectedRow.SetValue("email", OptionalValue{Valid: false})
@@ -142,7 +142,7 @@ func TestTable_Update(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"email": {Value: "updatedall@foo.bar", Valid: true},
+				"email": {Value: NewTextPointer([]byte("updatedall@foo.bar")), Valid: true},
 			},
 		}
 
@@ -159,10 +159,234 @@ func TestTable_Update(t *testing.T) {
 		expected := make([]Row, 0, len(rows))
 		for _, aRow := range rows {
 			expectedRow := aRow.Clone()
-			expectedRow.SetValue("email", OptionalValue{Value: "updatedall@foo.bar", Valid: true})
+			expectedRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("updatedall@foo.bar")), Valid: true})
 			expected = append(expected, expectedRow)
 		}
 
 		checkRows(ctx, t, aTable, expected)
+	})
+}
+
+func TestTable_Update_Overflow(t *testing.T) {
+	var (
+		aPager     = initTest(t)
+		ctx        = context.Background()
+		txManager  = NewTransactionManager()
+		tablePager = NewTransactionalPager(
+			aPager.ForTable(testOverflowColumns),
+			txManager,
+		)
+		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testOverflowColumns, 0)
+		rows   = gen.OverflowRows(3, []uint32{
+			MaxInlineVarchar,          // inline text
+			MaxInlineVarchar + 100,    // text overflows to 1 page
+			MaxOverflowPageData + 100, // text overflows to multiple pages
+		})
+		updatedOverflowText       = gen.textOfLength(MaxInlineVarchar + 200)
+		updatedInlineText         = gen.textOfLength(MaxInlineVarchar)
+		updatedShrunkOverflowText = gen.textOfLength(MaxOverflowPageData - 100)
+		expandedOverflowText      = gen.textOfLength(MaxOverflowPageData + 200)
+	)
+
+	// Batch insert test rows
+	insertStmt := Statement{
+		Kind:    Insert,
+		Fields:  columnNames(testOverflowColumns...),
+		Inserts: [][]OptionalValue{},
+	}
+	for _, aRow := range rows {
+		insertStmt.Inserts = append(insertStmt.Inserts, aRow.Values)
+	}
+
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return aTable.Insert(ctx, insertStmt)
+	}, aPager)
+	require.NoError(t, err)
+
+	require.Equal(t, 4, int(aPager.TotalPages()))
+
+	expected := make([]Row, 0, len(rows))
+	for _, aRow := range rows {
+		expected = append(expected, aRow.Clone())
+	}
+
+	t.Run("Update inline text to overflow text", func(t *testing.T) {
+		stmt := Statement{
+			Kind: Update,
+			Updates: map[string]OptionalValue{
+				"profile": {Value: updatedOverflowText, Valid: true},
+			},
+			Conditions: FieldIsInAny("id", OperandInteger, rows[0].Values[0].Value.(int64)),
+		}
+
+		var aResult StatementResult
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			var err error
+			aResult, err = aTable.Update(ctx, stmt)
+			return err
+		}, aPager)
+		require.NoError(t, err)
+		assert.Equal(t, 1, aResult.RowsAffected)
+
+		// Prepare expected rows with one updated row
+		for i, aRow := range expected {
+			if i == 0 {
+				aRow.SetValue("profile", OptionalValue{Value: updatedOverflowText, Valid: true})
+			}
+		}
+
+		checkRows(ctx, t, aTable, expected)
+
+		require.Equal(t, 5, int(aPager.TotalPages()))
+		assert.NotNil(t, aPager.pages[0].LeafNode)
+		assert.NotNil(t, aPager.pages[1].OverflowPage)
+		assert.NotNil(t, aPager.pages[2].OverflowPage)
+		assert.NotNil(t, aPager.pages[3].OverflowPage)
+		assert.NotNil(t, aPager.pages[4].OverflowPage)
+
+		assert.Equal(t, 0, int(aPager.pages[1].OverflowPage.Header.NextPage))
+		assert.Equal(t, aPager.pages[3].Index, aPager.pages[2].OverflowPage.Header.NextPage)
+		assert.Equal(t, 0, int(aPager.pages[3].OverflowPage.Header.NextPage))
+		assert.Equal(t, 0, int(aPager.pages[4].OverflowPage.Header.NextPage))
+
+		assert.Equal(t, MaxOverflowPageData, int(aPager.pages[2].OverflowPage.Header.DataSize))
+		assert.Equal(t, 100, int(aPager.pages[3].OverflowPage.Header.DataSize))
+		assert.Equal(t, 455, int(aPager.pages[4].OverflowPage.Header.DataSize))
+	})
+
+	t.Run("Update overflow text to inline text", func(t *testing.T) {
+		stmt := Statement{
+			Kind: Update,
+			Updates: map[string]OptionalValue{
+				"profile": {Value: updatedInlineText, Valid: true},
+			},
+			Conditions: FieldIsInAny("id", OperandInteger, rows[1].Values[0].Value.(int64)),
+		}
+
+		var aResult StatementResult
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			var err error
+			aResult, err = aTable.Update(ctx, stmt)
+			return err
+		}, aPager)
+		require.NoError(t, err)
+		assert.Equal(t, 1, aResult.RowsAffected)
+
+		// Prepare expected rows with second updated row
+		for i, aRow := range expected {
+			if i == 1 {
+				aRow.SetValue("profile", OptionalValue{Value: updatedInlineText, Valid: true})
+			}
+		}
+
+		checkRows(ctx, t, aTable, expected)
+
+		require.Equal(t, 5, int(aPager.TotalPages()))
+		assert.NotNil(t, aPager.pages[0].LeafNode)
+		assert.NotNil(t, aPager.pages[1].FreePage) // freed overflow page
+		assert.NotNil(t, aPager.pages[2].OverflowPage)
+		assert.NotNil(t, aPager.pages[3].OverflowPage)
+		assert.NotNil(t, aPager.pages[4].OverflowPage)
+
+		assert.Equal(t, aPager.pages[3].Index, aPager.pages[2].OverflowPage.Header.NextPage)
+		assert.Equal(t, 0, int(aPager.pages[3].OverflowPage.Header.NextPage))
+		assert.Equal(t, 0, int(aPager.pages[4].OverflowPage.Header.NextPage))
+
+		assert.Equal(t, MaxOverflowPageData, int(aPager.pages[2].OverflowPage.Header.DataSize))
+		assert.Equal(t, 100, int(aPager.pages[3].OverflowPage.Header.DataSize))
+		assert.Equal(t, 455, int(aPager.pages[4].OverflowPage.Header.DataSize))
+
+		assertFreePages(t, tablePager, []uint32{1})
+	})
+
+	t.Run("Update overflow text to shrink overflow pages from 2 to 1", func(t *testing.T) {
+		stmt := Statement{
+			Kind: Update,
+			Updates: map[string]OptionalValue{
+				"profile": {Value: updatedShrunkOverflowText, Valid: true},
+			},
+			Conditions: FieldIsInAny("id", OperandInteger, rows[2].Values[0].Value.(int64)),
+		}
+
+		var aResult StatementResult
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			var err error
+			aResult, err = aTable.Update(ctx, stmt)
+			return err
+		}, aPager)
+		require.NoError(t, err)
+		assert.Equal(t, 1, aResult.RowsAffected)
+
+		// Prepare expected rows with third updated row
+		for i, aRow := range expected {
+			if i == 2 {
+				aRow.SetValue("profile", OptionalValue{Value: updatedShrunkOverflowText, Valid: true})
+			}
+		}
+
+		checkRows(ctx, t, aTable, expected)
+
+		require.Equal(t, 5, int(aPager.TotalPages()))
+		assert.NotNil(t, aPager.pages[0].LeafNode)
+		assert.NotNil(t, aPager.pages[1].FreePage)
+		assert.NotNil(t, aPager.pages[2].FreePage) // freed overflow page
+		// freed overflow page which gets reused when shrinking from 2 to 1 overflow pages
+		assert.NotNil(t, aPager.pages[3].OverflowPage)
+		assert.NotNil(t, aPager.pages[4].OverflowPage)
+
+		assert.Equal(t, 0, int(aPager.pages[3].OverflowPage.Header.NextPage))
+		assert.Equal(t, 0, int(aPager.pages[4].OverflowPage.Header.NextPage))
+
+		assert.Equal(t, MaxOverflowPageData-100, int(aPager.pages[3].OverflowPage.Header.DataSize))
+		assert.Equal(t, 455, int(aPager.pages[4].OverflowPage.Header.DataSize))
+
+		assertFreePages(t, tablePager, []uint32{2, 1})
+	})
+
+	t.Run("Update overflow text to expand overflow pages from 1 to 2", func(t *testing.T) {
+		stmt := Statement{
+			Kind: Update,
+			Updates: map[string]OptionalValue{
+				"profile": {Value: expandedOverflowText, Valid: true},
+			},
+			Conditions: FieldIsInAny("id", OperandInteger, rows[0].Values[0].Value.(int64)),
+		}
+
+		var aResult StatementResult
+		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			var err error
+			aResult, err = aTable.Update(ctx, stmt)
+			return err
+		}, aPager)
+		require.NoError(t, err)
+		assert.Equal(t, 1, aResult.RowsAffected)
+
+		// Prepare expected rows with third updated row
+		for i, aRow := range expected {
+			if i == 0 {
+				aRow.SetValue("profile", OptionalValue{Value: expandedOverflowText, Valid: true})
+			}
+		}
+
+		checkRows(ctx, t, aTable, expected)
+
+		require.Equal(t, 5, int(aPager.TotalPages()))
+		assert.NotNil(t, aPager.pages[0].LeafNode)
+		assert.NotNil(t, aPager.pages[1].FreePage)
+		// this free page gets reused when expanding from 1 to 2 overflow pages
+		assert.NotNil(t, aPager.pages[2].OverflowPage)
+		// freed overflow page which gets reused when shrinking from 2 to 1 overflow pages
+		assert.NotNil(t, aPager.pages[3].OverflowPage)
+		assert.NotNil(t, aPager.pages[4].OverflowPage)
+
+		assert.Equal(t, 0, int(aPager.pages[3].OverflowPage.Header.NextPage))
+		assert.Equal(t, 2, int(aPager.pages[4].OverflowPage.Header.NextPage))
+		assert.Equal(t, 0, int(aPager.pages[2].OverflowPage.Header.NextPage))
+
+		assert.Equal(t, MaxOverflowPageData-100, int(aPager.pages[3].OverflowPage.Header.DataSize))
+		assert.Equal(t, MaxOverflowPageData, int(aPager.pages[4].OverflowPage.Header.DataSize))
+		assert.Equal(t, 200, int(aPager.pages[2].OverflowPage.Header.DataSize))
+
+		assertFreePages(t, tablePager, []uint32{1})
 	})
 }

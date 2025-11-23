@@ -8,13 +8,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type PrimaryKey struct {
-	Name          string
-	Column        Column
-	Autoincrement bool
-	Index         BTreeIndex
-}
-
 type Table struct {
 	Name          string
 	Columns       []Column
@@ -136,7 +129,7 @@ func (t *Table) SeekLast(ctx context.Context, pageIdx uint32) (*Cursor, error) {
 	return &Cursor{
 		Table:   t,
 		PageIdx: pageIdx,
-		CellIdx: aPage.LeafNode.Header.Cells,
+		CellIdx: aPage.LeafNode.Header.Cells - 1,
 	}, nil
 }
 
@@ -492,16 +485,70 @@ func (t *Table) DeleteKey(ctx context.Context, pageIdx uint32, key uint64) error
 	}
 
 	// Remove key
-	aPage.LeafNode.Delete(key)
+	cellToDelete, ok := aPage.LeafNode.Delete(key)
+
+	// Remove any overflow pages
+	if ok && hasTextColumn(t.Columns...) {
+		aRow := NewRow(t.Columns)
+		if err := aRow.Unmarshal(cellToDelete); err != nil {
+			return err
+		}
+		if err := t.freeOverflowPages(ctx, &aRow); err != nil {
+			return err
+		}
+	}
 
 	// Check for underflow
-	if aPage.LeafNode.AtLeastHalfFull() {
+	if aPage.AtLeastHalfFull() {
 		return nil
 	}
 
 	// Rebalance leaf node
 	if err := t.rebalanceLeaf(ctx, aPage, key); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func (t *Table) freeOverflowPages(ctx context.Context, aRow *Row, onlyForColumns ...Column) error {
+	columns := aRow.Columns
+	if onlyForColumns != nil {
+		columns = onlyForColumns
+	}
+	for _, aColumn := range columns {
+		if !aColumn.Kind.IsText() {
+			continue
+		}
+		value, ok := aRow.GetValue(aColumn.Name)
+		if !ok || !value.Valid {
+			continue
+		}
+		textPointer, ok := value.Value.(TextPointer)
+		if !ok {
+			return fmt.Errorf("expected TextPointer value for text column %s", aColumn.Name)
+		}
+		if textPointer.IsInline() {
+			continue
+		}
+		pagesToFree := make([]uint32, 0, 1)
+		overflowPage, err := t.pager.GetOverflowPage(ctx, textPointer.FirstPage)
+		if err != nil {
+			return err
+		}
+		pagesToFree = append(pagesToFree, overflowPage.Index)
+		for overflowPage.OverflowPage.Header.NextPage > 0 {
+			overflowPage, err = t.pager.GetOverflowPage(ctx, overflowPage.OverflowPage.Header.NextPage)
+			if err != nil {
+				return err
+			}
+			pagesToFree = append(pagesToFree, overflowPage.Index)
+		}
+		for _, pageIdx := range pagesToFree {
+			if err := t.pager.AddFreePage(ctx, pageIdx); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
@@ -536,7 +583,7 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 		}
 	}
 
-	if right != nil && right.LeafNode.MoreThanHalfFull() {
+	if right != nil && right.CanBorrowFirst() {
 		return t.borrowFromRightLeaf(
 			aParentPage.InternalNode,
 			aLeafNode,
@@ -545,7 +592,7 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 		)
 	}
 
-	if left != nil && left.LeafNode.MoreThanHalfFull() {
+	if left != nil && left.CanBorrowLast() {
 		return t.borrowFromLeftLeaf(
 			aParentPage.InternalNode,
 			aLeafNode,
@@ -554,7 +601,7 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 		)
 	}
 
-	if right != nil && int(right.LeafNode.Header.Cells+aLeafNode.Header.Cells) <= len(aLeafNode.Cells) {
+	if right != nil && aPage.CanMergeWith(right) {
 		if err := t.mergeLeaves(
 			ctx,
 			aParentPage,
@@ -568,7 +615,7 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 		return t.pager.AddFreePage(ctx, right.Index)
 	}
 
-	if left != nil && int(left.LeafNode.Header.Cells+aLeafNode.Header.Cells) <= len(aLeafNode.Cells) {
+	if left != nil && aPage.CanMergeWith(left) {
 		if err := t.mergeLeaves(
 			ctx,
 			aParentPage,

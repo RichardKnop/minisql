@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,10 +11,20 @@ import (
 func TestRow_Marshal(t *testing.T) {
 	t.Parallel()
 
-	aRow := gen.Row()
+	var (
+		ctx       = context.Background()
+		aRow      = gen.Row()
+		pagerMock = new(MockTxPager)
+	)
 
-	// 8 for int8, 255 for varchar, 4 for int4, 1 for boolean, 4 for real, 8 for double
-	assert.Equal(t, uint64(8+255+4+1+4+8), aRow.Size())
+	// 8 for int8
+	// 4+255 for varchar/text
+	// 4 for int4
+	// 1 for boolean
+	// 4 for real
+	// 8 for double
+	assert.Equal(t, uint64(8+(4+MaxInlineVarchar)+4+1+4+8), aRow.Size())
+	storeOverflowTexts(ctx, pagerMock, &aRow)
 
 	data, err := aRow.Marshal()
 	require.NoError(t, err)
@@ -506,12 +517,12 @@ func TestRow_SetValue(t *testing.T) {
 		Columns: testColumns,
 		Values: []OptionalValue{
 			{Value: int64(125478), Valid: true},
-			{Value: "test@example.com", Valid: true},
+			{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
 		},
 	}
 
 	t.Run("found and changed", func(t *testing.T) {
-		found, changed := aRow.SetValue("email", OptionalValue{Value: "new@example.com", Valid: true})
+		found, changed := aRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("new@example.com")), Valid: true})
 		assert.True(t, found)
 		assert.True(t, changed)
 	})
@@ -523,7 +534,7 @@ func TestRow_SetValue(t *testing.T) {
 	})
 
 	t.Run("not found", func(t *testing.T) {
-		found, changed := aRow.SetValue("bogus", OptionalValue{Value: "value", Valid: true})
+		found, changed := aRow.SetValue("bogus", OptionalValue{Value: NewTextPointer([]byte("value")), Valid: true})
 		assert.False(t, found)
 		assert.False(t, changed)
 	})

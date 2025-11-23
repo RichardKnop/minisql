@@ -21,7 +21,7 @@ var reservedWords = []string{
 	// operators
 	"(", ")", ">=", "<=", "!=", ",", "=", ">", "<",
 	// column types
-	"BOOLEAN", "INT4", "INT8", "REAL", "DOUBLE", "VARCHAR(",
+	"BOOLEAN", "INT4", "INT8", "REAL", "DOUBLE", "TEXT", "VARCHAR(",
 	// statement types
 	"CREATE TABLE", "DROP TABLE", "SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
