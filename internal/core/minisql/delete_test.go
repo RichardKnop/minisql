@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestTable_Delete_RootLeafNode(t *testing.T) {
@@ -17,7 +18,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		ctx        = context.Background()
 		numRows    = 5
 		rows       = gen.MediumRows(numRows)
-		txManager  = NewTransactionManager()
+		txManager  = NewTransactionManager(zap.NewNop())
 		tablePager = NewTransactionalPager(
 			aPager.ForTable(testMediumColumns),
 			txManager,
@@ -138,7 +139,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ctx        = context.Background()
 		numRows    = 20
 		rows       = gen.MediumRows(numRows)
-		txManager  = NewTransactionManager()
+		txManager  = NewTransactionManager(zap.NewNop())
 		tablePager = NewTransactionalPager(
 			aPager.ForTable(testMediumColumns),
 			txManager,
@@ -499,7 +500,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 		ctx        = context.Background()
 		numRows    = 100
 		rows       = gen.MediumRows(numRows)
-		txManager  = NewTransactionManager()
+		txManager  = NewTransactionManager(zap.NewNop())
 		tablePager = NewTransactionalPager(
 			aPager.ForTable(testMediumColumns),
 			txManager,
@@ -554,7 +555,7 @@ func TestTable_Delete_Overflow(t *testing.T) {
 	var (
 		aPager     = initTest(t)
 		ctx        = context.Background()
-		txManager  = NewTransactionManager()
+		txManager  = NewTransactionManager(zap.NewNop())
 		tablePager = NewTransactionalPager(
 			aPager.ForTable(testOverflowColumns),
 			txManager,

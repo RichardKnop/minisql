@@ -6,12 +6,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestTable_Select(t *testing.T) {
 	aPager := initTest(t)
 
-	txManager := NewTransactionManager()
+	txManager := NewTransactionManager(zap.NewNop())
 	tablePager := NewTransactionalPager(
 		aPager.ForTable(testColumns),
 		txManager,
@@ -201,7 +202,7 @@ func TestTable_Select_Overflow(t *testing.T) {
 	var (
 		aPager     = initTest(t)
 		ctx        = context.Background()
-		txManager  = NewTransactionManager()
+		txManager  = NewTransactionManager(zap.NewNop())
 		tablePager = NewTransactionalPager(
 			aPager.ForTable(testOverflowColumns),
 			txManager,

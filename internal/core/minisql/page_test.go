@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestTable_PageRecycling(t *testing.T) {
@@ -17,7 +18,7 @@ func TestTable_PageRecycling(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
-	txManager := NewTransactionManager()
+	txManager := NewTransactionManager(zap.NewNop())
 	tablePager := NewTransactionalPager(
 		aPager.ForTable(testMediumColumns),
 		txManager,

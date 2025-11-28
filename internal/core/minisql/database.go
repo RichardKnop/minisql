@@ -94,7 +94,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser P
 		factory:     factory,
 		saver:       saver,
 		flusher:     flusher,
-		txManager:   NewTransactionManager(),
+		txManager:   NewTransactionManager(logger),
 		tables:      make(map[string]*Table),
 		primaryKeys: make(map[string]BTreeIndex),
 		dbLock:      new(sync.RWMutex),
@@ -303,7 +303,103 @@ func (d *Database) executeStatement(ctx context.Context, stmt Statement) (Statem
 	return StatementResult{}, errUnrecognizedStatementType
 }
 
-// CreateTable creates a new table with a name and columns
+func (d *Database) executeCreateTable(ctx context.Context, stmt Statement) (StatementResult, error) {
+	// Only one CREATE/DROP TABLE operation can happen at a time
+	d.dbLock.Lock()
+	defer d.dbLock.Unlock()
+
+	_, err := d.createTable(ctx, stmt)
+	if err != nil {
+		return StatementResult{}, err
+	}
+
+	return StatementResult{}, nil
+}
+
+func (d *Database) executeDropTable(ctx context.Context, stmt Statement) (StatementResult, error) {
+	if isSystemTable(stmt.TableName) {
+		return StatementResult{}, fmt.Errorf("cannot drop system table %s", SchemaTableName)
+	}
+
+	// Only one CREATE/DROP TABLE operation can happen at a time
+	d.dbLock.Lock()
+	defer d.dbLock.Unlock()
+
+	if err := d.dropTable(ctx, stmt.TableName); err != nil {
+		return StatementResult{}, err
+	}
+
+	return StatementResult{}, nil
+}
+
+func (d *Database) executeInsert(ctx context.Context, stmt Statement) (StatementResult, error) {
+	if isSystemTable(stmt.TableName) {
+		return StatementResult{}, fmt.Errorf("inserts into system table %s are not allowed", SchemaTableName)
+	}
+
+	aTable, ok := d.tables[stmt.TableName]
+	if !ok {
+		return StatementResult{}, errTableDoesNotExist
+	}
+
+	if err := aTable.Insert(ctx, stmt); err != nil {
+		return StatementResult{}, err
+	}
+
+	return StatementResult{RowsAffected: len(stmt.Inserts)}, nil
+}
+
+func (d *Database) executeSelect(ctx context.Context, stmt Statement) (StatementResult, error) {
+	aTable, ok := d.tables[stmt.TableName]
+	if !ok {
+		return StatementResult{}, errTableDoesNotExist
+	}
+
+	aResult, err := aTable.Select(ctx, stmt)
+	if err != nil {
+		return StatementResult{}, err
+	}
+
+	return aResult, nil
+}
+
+func (d *Database) executeUpdate(ctx context.Context, stmt Statement) (StatementResult, error) {
+	if isSystemTable(stmt.TableName) {
+		return StatementResult{}, fmt.Errorf("updates to system table %s are not allowed", SchemaTableName)
+	}
+
+	aTable, ok := d.tables[stmt.TableName]
+	if !ok {
+		return StatementResult{}, errTableDoesNotExist
+	}
+
+	aResult, err := aTable.Update(ctx, stmt)
+	if err != nil {
+		return StatementResult{}, err
+	}
+
+	return aResult, nil
+}
+
+func (d *Database) executeDelete(ctx context.Context, stmt Statement) (StatementResult, error) {
+	if isSystemTable(stmt.TableName) {
+		return StatementResult{}, fmt.Errorf("deletes from system table %s are not allowed", SchemaTableName)
+	}
+
+	aTable, ok := d.tables[stmt.TableName]
+	if !ok {
+		return StatementResult{}, errTableDoesNotExist
+	}
+
+	aResult, err := aTable.Delete(ctx, stmt)
+	if err != nil {
+		return StatementResult{}, err
+	}
+
+	return aResult, nil
+}
+
+// createTable creates a new table with a name and columns
 func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, error) {
 	if err := stmt.Validate((nil)); err != nil {
 		return nil, err
@@ -450,143 +546,6 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	delete(d.tables, name)
 	delete(d.primaryKeys, name)
 	return nil
-}
-
-func (d *Database) executeCreateTable(ctx context.Context, stmt Statement) (StatementResult, error) {
-	// Only one CREATE/DROP TABLE operation can happen at a time
-	d.dbLock.Lock()
-	defer d.dbLock.Unlock()
-
-	if err := d.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		_, err := d.createTable(ctx, stmt)
-		return err
-	}, d.saver); err != nil {
-		return StatementResult{}, err
-	}
-
-	return StatementResult{}, nil
-}
-
-func (d *Database) executeDropTable(ctx context.Context, stmt Statement) (StatementResult, error) {
-	if isSystemTable(stmt.TableName) {
-		return StatementResult{}, fmt.Errorf("cannot drop system table %s", SchemaTableName)
-	}
-
-	// Only one CREATE/DROP TABLE operation can happen at a time
-	d.dbLock.Lock()
-	defer d.dbLock.Unlock()
-
-	if err := d.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		return d.dropTable(ctx, stmt.TableName)
-	}, d.saver); err != nil {
-		return StatementResult{}, err
-	}
-
-	return StatementResult{}, nil
-}
-
-func (d *Database) executeInsert(ctx context.Context, stmt Statement) (StatementResult, error) {
-	if isSystemTable(stmt.TableName) {
-		return StatementResult{}, fmt.Errorf("inserts into system table %s are not allowed", SchemaTableName)
-	}
-
-	aTable, ok := d.tables[stmt.TableName]
-	if !ok {
-		return StatementResult{}, errTableDoesNotExist
-	}
-
-	if err := d.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		return aTable.Insert(ctx, stmt)
-	}, d.saver); err != nil {
-		return StatementResult{}, err
-	}
-
-	return StatementResult{RowsAffected: len(stmt.Inserts)}, nil
-}
-
-func (d *Database) executeSelect(ctx context.Context, stmt Statement) (StatementResult, error) {
-	aTable, ok := d.tables[stmt.TableName]
-	if !ok {
-		return StatementResult{}, errTableDoesNotExist
-	}
-
-	var aResult StatementResult
-	if err := d.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		var err error
-		aResult, err = aTable.Select(ctx, stmt)
-		return err
-	}, d.saver); err != nil {
-		return StatementResult{}, err
-	}
-
-	return aResult, nil
-}
-
-func (d *Database) executeUpdate(ctx context.Context, stmt Statement) (StatementResult, error) {
-	if isSystemTable(stmt.TableName) {
-		return StatementResult{}, fmt.Errorf("updates to system table %s are not allowed", SchemaTableName)
-	}
-
-	aTable, ok := d.tables[stmt.TableName]
-	if !ok {
-		return StatementResult{}, errTableDoesNotExist
-	}
-
-	var aResult StatementResult
-	if err := d.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		var err error
-		aResult, err = aTable.Update(ctx, stmt)
-		return err
-	}, d.saver); err != nil {
-		return StatementResult{}, err
-	}
-
-	return aResult, nil
-}
-
-func (d *Database) executeDelete(ctx context.Context, stmt Statement) (StatementResult, error) {
-	if isSystemTable(stmt.TableName) {
-		return StatementResult{}, fmt.Errorf("deletes from system table %s are not allowed", SchemaTableName)
-	}
-
-	aTable, ok := d.tables[stmt.TableName]
-	if !ok {
-		return StatementResult{}, errTableDoesNotExist
-	}
-
-	var aResult StatementResult
-	if err := d.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		var err error
-		aResult, err = aTable.Delete(ctx, stmt)
-		return err
-	}, d.saver); err != nil {
-		return StatementResult{}, err
-	}
-
-	return aResult, nil
-}
-
-func (d *Database) BeginTransaction(ctx context.Context) (context.Context, *Transaction) {
-	tx := d.txManager.BeginTransaction(ctx)
-	return WithTransaction(ctx, tx), tx
-}
-
-func (d *Database) ExecuteInTransaction(ctx context.Context, statements ...Statement) ([]StatementResult, error) {
-	var results []StatementResult
-	if err := d.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		for _, stmt := range statements {
-			aResult, err := d.executeStatement(ctx, stmt)
-			if err != nil {
-				return err
-			}
-			results = append(results, aResult)
-		}
-		return nil
-	}, d.saver); err != nil {
-		return nil, err
-	}
-
-	return results, nil
 }
 
 func (d *Database) insertIntoMainTable(ctx context.Context, aType SchemaType, name string, rootIdx PageIndex, ddl string) error {

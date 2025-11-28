@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 const (
@@ -46,7 +47,7 @@ func TestTable_SeekNextRowID(t *testing.T) {
 	var (
 		ctx       = context.Background()
 		pagerMock = new(MockTxPager)
-		aTable    = NewTable(testLogger, pagerMock, NewTransactionManager(), testTableName, testColumns, 0)
+		aTable    = NewTable(testLogger, pagerMock, NewTransactionManager(zap.NewNop()), testTableName, testColumns, 0)
 	)
 
 	t.Run("empty table", func(t *testing.T) {
@@ -97,7 +98,7 @@ func TestTable_SeekFirst(t *testing.T) {
 	var (
 		ctx                                 = context.Background()
 		pagerMock                           = new(MockTxPager)
-		aTable                              = NewTable(testLogger, pagerMock, NewTransactionManager(), testTableName, testColumns, 0)
+		aTable                              = NewTable(testLogger, pagerMock, NewTransactionManager(zap.NewNop()), testTableName, testColumns, 0)
 		aRootPage, internalPages, leafPages = newTestBtree()
 	)
 
@@ -122,7 +123,7 @@ func TestTable_SeekLast(t *testing.T) {
 	var (
 		ctx                                 = context.Background()
 		pagerMock                           = new(MockTxPager)
-		aTable                              = NewTable(testLogger, pagerMock, NewTransactionManager(), testTableName, testColumns, 0)
+		aTable                              = NewTable(testLogger, pagerMock, NewTransactionManager(zap.NewNop()), testTableName, testColumns, 0)
 		aRootPage, internalPages, leafPages = newTestBtree()
 	)
 
@@ -147,7 +148,7 @@ func TestTable_Seek_EmptyTable(t *testing.T) {
 	var (
 		ctx       = context.Background()
 		pagerMock = new(MockTxPager)
-		aTable    = NewTable(testLogger, pagerMock, NewTransactionManager(), testTableName, testColumns, 0)
+		aTable    = NewTable(testLogger, pagerMock, NewTransactionManager(zap.NewNop()), testTableName, testColumns, 0)
 	)
 
 	t.Run("empty table", func(t *testing.T) {
@@ -227,7 +228,7 @@ func TestTable_Seek_RootLeafNode_BiggerTree(t *testing.T) {
 	var (
 		ctx                                 = context.Background()
 		pagerMock                           = new(MockTxPager)
-		aTable                              = NewTable(testLogger, pagerMock, NewTransactionManager(), testTableName, testColumns, 0)
+		aTable                              = NewTable(testLogger, pagerMock, NewTransactionManager(zap.NewNop()), testTableName, testColumns, 0)
 		aRootPage, internalPages, leafPages = newTestBtree()
 	)
 
@@ -312,7 +313,7 @@ func TestTable_CreateNewRoot(t *testing.T) {
 	var (
 		ctx           = context.Background()
 		pagerMock     = new(MockTxPager)
-		aTable        = NewTable(testLogger, pagerMock, NewTransactionManager(), testTableName, testColumns, 0)
+		aTable        = NewTable(testLogger, pagerMock, NewTransactionManager(zap.NewNop()), testTableName, testColumns, 0)
 		cells         = maxCells(testRowSize)
 		aRootPage     = newRootLeafPageWithCells(int(cells), int(testRowSize))
 		newRightChild = &Page{Index: 1, LeafNode: NewLeafNode()}
@@ -347,7 +348,7 @@ func TestTable_InternalNodeInsert(t *testing.T) {
 		ctx                         = context.Background()
 		pagerMock                   = new(MockTxPager)
 		_, internalPages, leafPages = newTestBtree()
-		aTable                      = NewTable(testLogger, pagerMock, NewTransactionManager(), testTableName, testColumns, 0)
+		aTable                      = NewTable(testLogger, pagerMock, NewTransactionManager(zap.NewNop()), testTableName, testColumns, 0)
 		aNewLeaf                    = NewLeafNode()
 	)
 	aNewLeaf.Header.Cells = 1

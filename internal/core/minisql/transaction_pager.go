@@ -32,8 +32,11 @@ func (tp *TransactionalPager) ReadPage(ctx context.Context, pageIdx PageIndex) (
 	}
 
 	// Read from base pager and track in read set
+	var currentVersion uint64
 	tp.mu.RLock()
-	currentVersion := tp.txManager.globalPageVersions[pageIdx]
+	if _, ok := tp.txManager.globalPageVersions[pageIdx]; ok {
+		currentVersion = tp.txManager.globalPageVersions[pageIdx]
+	}
 	tp.mu.RUnlock()
 
 	page, err := tp.GetPage(ctx, pageIdx)

@@ -8,10 +8,6 @@ import (
 	"github.com/RichardKnop/minisql/internal/core/minisql"
 )
 
-const (
-	varcharMaxLength = 65535
-)
-
 var (
 	errCreateTableNoColumns           = fmt.Errorf("at CREATE TABLE: no columns specified")
 	errCreateTableInvalidColumDef     = fmt.Errorf("at CREATE TABLE: invalid column definition")
@@ -77,8 +73,8 @@ func (p *parser) doParseCreateTable() error {
 		if size <= 0 {
 			return fmt.Errorf("at CREATE TABLE: varchar size must be a positive integer")
 		}
-		if size > varcharMaxLength {
-			return fmt.Errorf("at CREATE TABLE: varchar size must be > 0 and <= %d", varcharMaxLength)
+		if size > minisql.MaxOverflowTextSize {
+			return fmt.Errorf("at CREATE TABLE: varchar size must be > 0 and <= %d", minisql.MaxOverflowTextSize)
 		}
 		p.pop()
 		p.Columns[len(p.Columns)-1].Size = uint32(size)

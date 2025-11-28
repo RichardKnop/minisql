@@ -33,6 +33,7 @@ I plan to implement more features of traditional relational databases in the fut
 - `PRIMARY KEY` support, only single column, no composite primary keys
 - `AUTOINCREMENT` support, primary key must be of type `INT8` for autoincrement
 - `NULL` and `NOT NULL` support (via null bit mask included in each row/cell)
+- each statement is wrapped in a single statement transaction unless you control transaction context manually with `BEGIN`, `COMMIT`, `ROLLBACK` keywords
 - page size is `4096 bytes`, rows cannot exceed page size (minus required headers etc)
 - first 100 bytes of the root page are reserved for config
 - maximum number of columns for each table is `64`

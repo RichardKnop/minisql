@@ -27,6 +27,7 @@ var reservedWords = []string{
 	// statement other
 	"*", "PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "IS NULL", "IS NOT NULL", "NOT NULL", "NULL",
 	"IF NOT EXISTS", "WHERE", "FROM", "SET", "AS",
+	"BEGIN", "COMMIT", "ROLLBACK",
 	";",
 }
 
@@ -144,6 +145,18 @@ func (p *parser) doParse() ([]minisql.Statement, error) {
 				p.Kind = minisql.Delete
 				p.pop()
 				p.step = stepDeleteFromTable
+			case "BEGIN":
+				p.Kind = minisql.BeginTransaction
+				p.pop()
+				p.step = stepStatementEnd
+			case "COMMIT":
+				p.Kind = minisql.CommitTransaction
+				p.pop()
+				p.step = stepStatementEnd
+			case "ROLLBACK":
+				p.Kind = minisql.RollbackTransaction
+				p.pop()
+				p.step = stepStatementEnd
 			default:
 				return statements, errInvalidStatementKind
 			}
@@ -228,7 +241,7 @@ func (p *parser) doParse() ([]minisql.Statement, error) {
 		case stepStatementEnd:
 			semicolon := p.peek()
 			if semicolon != ";" && len(semicolon) != 0 {
-				return statements, fmt.Errorf("at DROP TABLE: expected semicolon")
+				return statements, fmt.Errorf("expected semicolon")
 			}
 			if semicolon == ";" {
 				p.pop()
@@ -388,6 +401,9 @@ func (p *parser) validate(stmt minisql.Statement) error {
 	}
 	if stmt.Kind == 0 {
 		return errEmptyStatementKind
+	}
+	if stmt.Kind == minisql.BeginTransaction || stmt.Kind == minisql.CommitTransaction || stmt.Kind == minisql.RollbackTransaction {
+		return nil
 	}
 	if stmt.TableName == "" {
 		return errEmptyTableName

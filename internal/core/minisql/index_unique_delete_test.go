@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestUniqueIndex_Delete(t *testing.T) {
@@ -15,7 +16,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		ctx       = context.Background()
 		keys      = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
 		aColumn   = Column{Name: "test_column", Kind: Int8, Size: 8}
-		txManager = NewTransactionManager()
+		txManager = NewTransactionManager(zap.NewNop())
 		idxPager  = NewTransactionalPager(
 			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
 			txManager,
@@ -1025,7 +1026,7 @@ func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
 		aPager    = initTest(t)
 		ctx       = context.Background()
 		aColumn   = Column{Name: "test_column", Kind: Int8, Size: 8}
-		txManager = NewTransactionManager()
+		txManager = NewTransactionManager(zap.NewNop())
 		idxPager  = NewTransactionalPager(
 			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
 			txManager,

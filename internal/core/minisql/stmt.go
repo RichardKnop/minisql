@@ -231,6 +231,9 @@ const (
 	Select
 	Update
 	Delete
+	BeginTransaction
+	CommitTransaction
+	RollbackTransaction
 )
 
 type ColumnKind int

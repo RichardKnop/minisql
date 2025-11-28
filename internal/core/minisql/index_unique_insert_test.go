@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestUniqueIndex_Insert(t *testing.T) {
@@ -14,7 +15,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		ctx        = context.Background()
 		key        = int64(1)
 		aColumn    = Column{Name: "test_column", Kind: Int8, Size: 8}
-		txManager  = NewTransactionManager()
+		txManager  = NewTransactionManager(zap.NewNop())
 		indexPager = NewTransactionalPager(
 			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
 			txManager,
@@ -275,7 +276,7 @@ func TestUniqueIndex_Insert_OutOfOrder(t *testing.T) {
 		ctx        = context.Background()
 		keys       = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
 		aColumn    = Column{Name: "test_column", Kind: Int8, Size: 8}
-		txManager  = NewTransactionManager()
+		txManager  = NewTransactionManager(zap.NewNop())
 		indexPager = NewTransactionalPager(
 			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
 			txManager,
