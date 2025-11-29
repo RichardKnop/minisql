@@ -51,7 +51,7 @@ func TestNewPager_WithDBHeader(t *testing.T) {
 	aPager, err = NewPager(dbFile, PageSize)
 	require.NoError(t, err)
 	assert.Equal(t, 1, int(aPager.totalPages))
-	assert.Equal(t, uint32(125), aPager.dbHeader.FirstFreePage)
+	assert.Equal(t, PageIndex(125), aPager.dbHeader.FirstFreePage)
 	assert.Equal(t, uint32(2), aPager.dbHeader.FreePageCount)
 }
 
@@ -86,8 +86,8 @@ func TestPager_GetPage(t *testing.T) {
 		tablePager = aPager.ForTable(columns)
 	)
 
-	for pageIdx := 0; pageIdx < int(aPager.TotalPages()); pageIdx++ {
-		err := aPager.Flush(ctx, uint32(pageIdx))
+	for pageIdx := PageIndex(0); pageIdx < PageIndex(aPager.TotalPages()); pageIdx++ {
+		err := aPager.Flush(ctx, pageIdx)
 		require.NoError(t, err)
 	}
 
@@ -99,35 +99,35 @@ func TestPager_GetPage(t *testing.T) {
 	tablePager = aPager.ForTable(columns)
 
 	// Root page
-	aPage, err := tablePager.GetPage(ctx, uint32(0))
+	aPage, err := tablePager.GetPage(ctx, 0)
 	require.NoError(t, err)
 	assert.Equal(t, aRootPage, aPage)
 
 	// Internal pages
 
-	aPage, err = tablePager.GetPage(ctx, uint32(1))
+	aPage, err = tablePager.GetPage(ctx, 1)
 	require.NoError(t, err)
 	assert.Equal(t, internalPages[0], aPage)
 
-	aPage, err = tablePager.GetPage(ctx, uint32(2))
+	aPage, err = tablePager.GetPage(ctx, 2)
 	require.NoError(t, err)
 	assert.Equal(t, internalPages[1], aPage)
 
 	// Leaf pages
 
-	aPage, err = tablePager.GetPage(ctx, uint32(3))
+	aPage, err = tablePager.GetPage(ctx, 3)
 	require.NoError(t, err)
 	assert.Equal(t, leafPages[0], aPage)
 
-	aPage, err = tablePager.GetPage(ctx, uint32(4))
+	aPage, err = tablePager.GetPage(ctx, 4)
 	require.NoError(t, err)
 	assert.Equal(t, leafPages[1], aPage)
 
-	aPage, err = tablePager.GetPage(ctx, uint32(5))
+	aPage, err = tablePager.GetPage(ctx, 5)
 	require.NoError(t, err)
 	assert.Equal(t, leafPages[2], aPage)
 
-	aPage, err = tablePager.GetPage(ctx, uint32(6))
+	aPage, err = tablePager.GetPage(ctx, 6)
 	require.NoError(t, err)
 	assert.Equal(t, leafPages[3], aPage)
 }

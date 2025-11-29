@@ -13,8 +13,8 @@ const (
 )
 
 type OverflowPageHeader struct {
-	NextPage uint32 // 0 if last page
-	DataSize uint32 // Actual data size in this page
+	NextPage PageIndex // 0 if last page
+	DataSize uint32    // Actual data size in this page
 }
 
 func (h *OverflowPageHeader) Size() uint64 {
@@ -43,7 +43,7 @@ func (n *OverflowPage) Marshal(buf []byte) ([]byte, error) {
 	buf[i] = PageTypeOverflow
 	i += 1
 
-	marshalUint32(buf, n.Header.NextPage, i)
+	marshalUint32(buf, uint32(n.Header.NextPage), i)
 	i += 4
 
 	marshalUint32(buf, n.Header.DataSize, i)
@@ -63,7 +63,7 @@ func (n *OverflowPage) Unmarshal(buf []byte) error {
 	}
 	i += 1
 
-	n.Header.NextPage = unmarshalUint32(buf, i)
+	n.Header.NextPage = PageIndex(unmarshalUint32(buf, i))
 	i += 4
 
 	n.Header.DataSize = unmarshalUint32(buf, i)

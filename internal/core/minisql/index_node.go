@@ -8,9 +8,9 @@ import (
 type IndexNodeHeader struct {
 	IsRoot     bool
 	IsLeaf     bool
-	Parent     uint32
+	Parent     PageIndex
 	Keys       uint32
-	RightChild uint32
+	RightChild PageIndex
 }
 
 func (h *IndexNodeHeader) Size() (s uint64) {
@@ -41,13 +41,13 @@ func (h *IndexNodeHeader) Marshal(buf []byte) ([]byte, error) {
 	}
 	i += 1
 
-	marshalUint32(buf, h.Parent, i)
+	marshalUint32(buf, uint32(h.Parent), i)
 	i += 4
 
 	marshalUint32(buf, h.Keys, i)
 	i += 4
 
-	marshalUint32(buf, h.RightChild, i)
+	marshalUint32(buf, uint32(h.RightChild), i)
 	i += 4
 
 	return buf[:size], nil
@@ -59,11 +59,11 @@ func (h *IndexNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 	i += 1
 	h.IsLeaf = buf[i] == 1
 	i += 1
-	h.Parent = unmarshalUint32(buf, i)
+	h.Parent = PageIndex(unmarshalUint32(buf, i))
 	i += 4
 	h.Keys = unmarshalUint32(buf, i)
 	i += 4
-	h.RightChild = unmarshalUint32(buf, i)
+	h.RightChild = PageIndex(unmarshalUint32(buf, i))
 	return h.Size(), nil
 }
 
@@ -71,7 +71,7 @@ func (h *IndexNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 type IndexCell[T IndexKey] struct {
 	Key   T
 	RowID uint64
-	Child uint32
+	Child PageIndex
 }
 
 func (c *IndexCell[T]) Size(keySize uint64) uint64 {
@@ -118,7 +118,7 @@ func (c *IndexCell[T]) Marshal(keySize uint64, buf []byte) ([]byte, error) {
 	marshalUint64(buf, c.RowID, i)
 	i += 8
 
-	marshalUint32(buf, c.Child, i)
+	marshalUint32(buf, uint32(c.Child), i)
 	i += 4
 
 	return buf[:i], nil
@@ -155,7 +155,7 @@ func (c *IndexCell[T]) Unmarshal(keySize uint64, buf []byte) (uint64, error) {
 	c.RowID = unmarshalUint64(buf, i)
 	i += 8
 
-	c.Child = unmarshalUint32(buf, i)
+	c.Child = PageIndex(unmarshalUint32(buf, i))
 	i += 4
 
 	return i, nil
@@ -255,7 +255,7 @@ func (n *IndexNode[T]) Unmarshal(buf []byte) (uint64, error) {
 
 // Child returns a node index of nth child of the node marked by its index
 // (0 for the leftmost child, index equal to number of keys means the rightmost child).
-func (n *IndexNode[T]) Child(childIdx uint32) (uint32, error) {
+func (n *IndexNode[T]) Child(childIdx uint32) (PageIndex, error) {
 	keysNum := n.Header.Keys
 	if childIdx > keysNum {
 		return 0, fmt.Errorf("childIdx %d out of keysNum %d", childIdx, keysNum)
@@ -268,7 +268,7 @@ func (n *IndexNode[T]) Child(childIdx uint32) (uint32, error) {
 	return n.Cells[childIdx].Child, nil
 }
 
-func (n *IndexNode[T]) SetChild(idx, childPage uint32) error {
+func (n *IndexNode[T]) SetChild(idx uint32, childPage PageIndex) error {
 	keysNum := n.Header.Keys
 	if idx > keysNum {
 		return fmt.Errorf("childIdx %d out of keysNum %d", idx, keysNum)
@@ -302,11 +302,11 @@ func (n *IndexNode[T]) RowIDs() []uint64 {
 	return rowIDs
 }
 
-func (n *IndexNode[T]) Children() []uint32 {
+func (n *IndexNode[T]) Children() []PageIndex {
 	if n.Header.IsLeaf {
 		return nil
 	}
-	children := make([]uint32, 0, n.Header.Keys+1)
+	children := make([]PageIndex, 0, n.Header.Keys+1)
 	for i := range n.Header.Keys {
 		children = append(children, n.Cells[i].Child)
 	}
@@ -346,7 +346,7 @@ func (n *IndexNode[T]) MoreThanHalfFull(maxCells int) bool {
 	return int(n.Header.Keys) > (maxCells+1)/2
 }
 
-func (n *IndexNode[T]) GetRightChildByIndex(idx uint32) uint32 {
+func (n *IndexNode[T]) GetRightChildByIndex(idx uint32) PageIndex {
 	if idx == n.Header.Keys-1 {
 		return n.Header.RightChild
 	}
@@ -395,7 +395,7 @@ func (n *IndexNode[T]) AppendCells(cells ...IndexCell[T]) {
 	}
 }
 
-func (n *IndexNode[T]) setParent(parentIdx uint32) {
+func (n *IndexNode[T]) setParent(parentIdx PageIndex) {
 	n.Header.Parent = parentIdx
 }
 

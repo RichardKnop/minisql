@@ -7,7 +7,7 @@ import (
 type LeafNodeHeader struct {
 	Header
 	Cells    uint32
-	NextLeaf uint32
+	NextLeaf PageIndex
 }
 
 func (h *LeafNodeHeader) Size() uint64 {
@@ -32,7 +32,7 @@ func (h *LeafNodeHeader) Marshal(buf []byte) ([]byte, error) {
 
 	marshalUint32(buf, h.Cells, i)
 	i += 4
-	marshalUint32(buf, h.NextLeaf, i)
+	marshalUint32(buf, uint32(h.NextLeaf), i)
 
 	return buf[:size], nil
 }
@@ -48,7 +48,7 @@ func (h *LeafNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 
 	h.Cells = unmarshalUint32(buf, i)
 	i += 4
-	h.NextLeaf = unmarshalUint32(buf, i)
+	h.NextLeaf = PageIndex(unmarshalUint32(buf, i))
 
 	return h.Size(), nil
 }

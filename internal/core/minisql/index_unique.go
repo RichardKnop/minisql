@@ -16,14 +16,14 @@ type UniqueIndex[T IndexKey] struct {
 	logger      *zap.Logger
 	Name        string
 	Column      Column
-	rootPageIdx uint32
+	rootPageIdx PageIndex
 	pager       TxPager
 	txManager   *TransactionManager
 	writeLock   sync.RWMutex
 	maximumKeys uint32
 }
 
-func NewUniqueIndex[T IndexKey](logger *zap.Logger, txManager *TransactionManager, name string, column Column, pager TxPager, rootPageIdx uint32) *UniqueIndex[T] {
+func NewUniqueIndex[T IndexKey](logger *zap.Logger, txManager *TransactionManager, name string, column Column, pager TxPager, rootPageIdx PageIndex) *UniqueIndex[T] {
 	return &UniqueIndex[T]{
 		logger:      logger,
 		Name:        name,
@@ -34,7 +34,7 @@ func NewUniqueIndex[T IndexKey](logger *zap.Logger, txManager *TransactionManage
 	}
 }
 
-func (ui *UniqueIndex[T]) GetRootPageIdx() uint32 {
+func (ui *UniqueIndex[T]) GetRootPageIdx() PageIndex {
 	return ui.rootPageIdx
 }
 
@@ -130,7 +130,7 @@ func (idx *UniqueIndex[T]) maxIndexKeys(keySize uint64) uint32 {
 
 var ErrDuplicateKey = fmt.Errorf("duplicate key")
 
-func (ui *UniqueIndex[T]) insertNotFull(ctx context.Context, pageIdx uint32, key T, rowID uint64) error {
+func (ui *UniqueIndex[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T, rowID uint64) error {
 	aPage, err := ui.pager.ModifyPage(ctx, pageIdx)
 	if err != nil {
 		return fmt.Errorf("get page: %w", err)

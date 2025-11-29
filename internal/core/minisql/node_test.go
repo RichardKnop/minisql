@@ -125,30 +125,30 @@ func TestInternalNode_Child(t *testing.T) {
 	testCases := []struct {
 		Name     string
 		ChildIdx uint32
-		NodeIdx  uint32
+		PageIdx  PageIndex
 	}{
 		{
 			Name:     "Child with index 0 is the leftmost child node 1",
 			ChildIdx: 0,
-			NodeIdx:  1,
+			PageIdx:  1,
 		},
 		{
 			Name:     "Child with index 1 is the middle child node 2",
 			ChildIdx: 1,
-			NodeIdx:  2,
+			PageIdx:  2,
 		},
 		{
 			Name:     "Child with index 2 is the rightmost child node 3",
 			ChildIdx: 2,
-			NodeIdx:  3,
+			PageIdx:  3,
 		},
 	}
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			nodeIdx, err := aNode.Child(aTestCase.ChildIdx)
+			pageIdx, err := aNode.Child(aTestCase.ChildIdx)
 			require.NoError(t, err)
-			assert.Equal(t, int(aTestCase.NodeIdx), int(nodeIdx))
+			assert.Equal(t, int(aTestCase.PageIdx), int(pageIdx))
 		})
 	}
 }

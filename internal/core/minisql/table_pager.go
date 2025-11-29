@@ -17,11 +17,11 @@ type tablePager struct {
 	columns []Column
 }
 
-func (p *tablePager) GetPage(ctx context.Context, pageIdx uint32) (*Page, error) {
+func (p *tablePager) GetPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
 	return p.pagerImpl.GetPage(ctx, pageIdx, p.unmarshal)
 }
 
-func (p *tablePager) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
+func (p *tablePager) unmarshal(pageIdx PageIndex, buf []byte) (*Page, error) {
 	idx := 0
 
 	// Requesting a new page
@@ -37,7 +37,7 @@ func (p *tablePager) unmarshal(pageIdx uint32, buf []byte) (*Page, error) {
 			Index:    pageIdx,
 			LeafNode: leaf,
 		})
-		p.totalPages = pageIdx + 1
+		p.totalPages = uint32(pageIdx + 1)
 		p.mu.Unlock()
 		return p.pages[len(p.pages)-1], nil
 	}

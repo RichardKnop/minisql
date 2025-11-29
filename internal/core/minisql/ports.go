@@ -11,32 +11,32 @@ type PagerFactory interface {
 
 type PageFlusher interface {
 	TotalPages() uint32
-	Flush(context.Context, uint32) error
+	Flush(context.Context, PageIndex) error
 }
 
 type Pager interface {
-	GetPage(context.Context, uint32) (*Page, error)
+	GetPage(context.Context, PageIndex) (*Page, error)
 	GetHeader(context.Context) DatabaseHeader
 	TotalPages() uint32
 }
 
 type PageSaver interface {
-	SavePage(context.Context, uint32, *Page)
+	SavePage(context.Context, PageIndex, *Page)
 	SaveHeader(context.Context, DatabaseHeader)
 }
 
 type TxPager interface {
-	ReadPage(context.Context, uint32) (*Page, error)
-	ModifyPage(context.Context, uint32) (*Page, error)
+	ReadPage(context.Context, PageIndex) (*Page, error)
+	ModifyPage(context.Context, PageIndex) (*Page, error)
 	GetFreePage(context.Context) (*Page, error)
-	AddFreePage(context.Context, uint32) error
-	GetOverflowPage(context.Context, uint32) (*Page, error)
+	AddFreePage(context.Context, PageIndex) error
+	GetOverflowPage(context.Context, PageIndex) (*Page, error)
 }
 
 type BTreeIndex interface {
-	GetRootPageIdx() uint32
+	GetRootPageIdx() PageIndex
 	Seek(ctx context.Context, aPage *Page, keyAny any) (IndexCursor, bool, error)
-	SeekLastKey(ctx context.Context, pageIdx uint32) (any, error)
+	SeekLastKey(ctx context.Context, pageIdx PageIndex) (any, error)
 	Insert(ctx context.Context, key any, rowID uint64) error
 	Delete(ctx context.Context, key any) error
 	BFS(ctx context.Context, f indexCallback) error

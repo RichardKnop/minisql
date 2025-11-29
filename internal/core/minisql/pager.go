@@ -13,7 +13,7 @@ type DBFile interface {
 	io.WriterAt
 }
 
-type PageUnmarshaler func(pageIdx uint32, buf []byte) (*Page, error)
+type PageUnmarshaler func(pageIdx PageIndex, buf []byte) (*Page, error)
 
 type pagerImpl struct {
 	pageSize   int
@@ -72,7 +72,7 @@ func (p *pagerImpl) TotalPages() uint32 {
 	return p.totalPages
 }
 
-func (p *pagerImpl) GetPage(ctx context.Context, pageIdx uint32, unmarshaler PageUnmarshaler) (*Page, error) {
+func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler PageUnmarshaler) (*Page, error) {
 	if len(p.pages) > int(pageIdx) && p.pages[pageIdx] != nil {
 		return p.pages[pageIdx], nil
 	}
@@ -128,14 +128,14 @@ func (p *pagerImpl) SaveHeader(ctx context.Context, header DatabaseHeader) {
 	p.dbHeader = header
 }
 
-func (p *pagerImpl) SavePage(ctx context.Context, pageIdx uint32, page *Page) {
+func (p *pagerImpl) SavePage(ctx context.Context, pageIdx PageIndex, page *Page) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	p.pages[pageIdx] = page
 }
 
-func (p *pagerImpl) Flush(ctx context.Context, pageIdx uint32) error {
+func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 	if int(pageIdx) >= len(p.pages) || p.pages[pageIdx] == nil {
 		return nil
 	}

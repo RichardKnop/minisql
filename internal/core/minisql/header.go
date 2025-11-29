@@ -3,7 +3,7 @@ package minisql
 type Header struct {
 	IsInternal bool
 	IsRoot     bool
-	Parent     uint32
+	Parent     PageIndex
 }
 
 func (h *Header) Size() uint64 {
@@ -41,11 +41,11 @@ func (h *Header) Marshal(buf []byte) ([]byte, error) {
 func (h *Header) Unmarshal(buf []byte) (uint64, error) {
 	h.IsInternal = buf[0] == PageTypeInternal
 	h.IsRoot = buf[1] == 1
-	h.Parent = 0 |
+	h.Parent = PageIndex(0 |
 		(uint32(buf[0+2]) << 0) |
 		(uint32(buf[1+2]) << 8) |
 		(uint32(buf[2+2]) << 16) |
-		(uint32(buf[3+2]) << 24)
+		(uint32(buf[3+2]) << 24))
 
 	return h.Size(), nil
 }

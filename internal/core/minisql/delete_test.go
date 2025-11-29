@@ -623,7 +623,7 @@ func TestTable_Delete_Overflow(t *testing.T) {
 		checkRows(ctx, t, aTable, nil)
 
 		require.Equal(t, 4, int(aPager.TotalPages()))
-		assertFreePages(t, tablePager, []uint32{3, 2, 1})
+		assertFreePages(t, tablePager, []PageIndex{3, 2, 1})
 	})
 }
 
