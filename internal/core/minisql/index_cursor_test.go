@@ -65,7 +65,7 @@ func TestUniqueIndex_Seek(t *testing.T) {
 		aCursor, ok, err := anIndex.Seek(context.Background(), aRootPage, int64(16))
 		require.NoError(t, err)
 		assert.True(t, ok)
-		assert.Equal(t, uint32(0), aCursor.PageIdx)
+		assert.Equal(t, PageIndex(0), aCursor.PageIdx)
 		assert.Equal(t, uint32(1), aCursor.CellIdx)
 	})
 
@@ -73,7 +73,7 @@ func TestUniqueIndex_Seek(t *testing.T) {
 		aCursor, ok, err := anIndex.Seek(context.Background(), aRootPage, int64(11))
 		require.NoError(t, err)
 		assert.True(t, ok)
-		assert.Equal(t, uint32(6), aCursor.PageIdx)
+		assert.Equal(t, PageIndex(6), aCursor.PageIdx)
 		assert.Equal(t, uint32(0), aCursor.CellIdx)
 	})
 
@@ -81,7 +81,7 @@ func TestUniqueIndex_Seek(t *testing.T) {
 		aCursor, ok, err := anIndex.Seek(context.Background(), aRootPage, int64(5))
 		require.NoError(t, err)
 		assert.True(t, ok)
-		assert.Equal(t, uint32(5), aCursor.PageIdx)
+		assert.Equal(t, PageIndex(5), aCursor.PageIdx)
 		assert.Equal(t, uint32(1), aCursor.CellIdx)
 	})
 
@@ -89,7 +89,7 @@ func TestUniqueIndex_Seek(t *testing.T) {
 		aCursor, ok, err := anIndex.Seek(context.Background(), aRootPage, int64(3))
 		require.NoError(t, err)
 		assert.True(t, ok)
-		assert.Equal(t, uint32(9), aCursor.PageIdx)
+		assert.Equal(t, PageIndex(9), aCursor.PageIdx)
 		assert.Equal(t, uint32(0), aCursor.CellIdx)
 	})
 
@@ -97,7 +97,7 @@ func TestUniqueIndex_Seek(t *testing.T) {
 		aCursor, ok, err := anIndex.Seek(context.Background(), aRootPage, int64(7))
 		require.NoError(t, err)
 		assert.True(t, ok)
-		assert.Equal(t, uint32(4), aCursor.PageIdx)
+		assert.Equal(t, PageIndex(4), aCursor.PageIdx)
 		assert.Equal(t, uint32(1), aCursor.CellIdx)
 	})
 
@@ -105,7 +105,7 @@ func TestUniqueIndex_Seek(t *testing.T) {
 		aCursor, ok, err := anIndex.Seek(context.Background(), aRootPage, int64(18))
 		require.NoError(t, err)
 		assert.True(t, ok)
-		assert.Equal(t, uint32(3), aCursor.PageIdx)
+		assert.Equal(t, PageIndex(3), aCursor.PageIdx)
 		assert.Equal(t, uint32(1), aCursor.CellIdx)
 	})
 }

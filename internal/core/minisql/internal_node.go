@@ -17,7 +17,7 @@ const (
 type InternalNodeHeader struct {
 	Header
 	KeysNum    uint32
-	RightChild uint32
+	RightChild PageIndex
 }
 
 func (h *InternalNodeHeader) Size() (s uint64) {
@@ -68,18 +68,18 @@ func (h *InternalNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 		(uint32(buf[i+2]) << 16) |
 		(uint32(buf[i+3]) << 24)
 
-	h.RightChild = 0 |
+	h.RightChild = PageIndex(0 |
 		(uint32(buf[i+4]) << 0) |
 		(uint32(buf[i+5]) << 8) |
 		(uint32(buf[i+6]) << 16) |
-		(uint32(buf[i+7]) << 24)
+		(uint32(buf[i+7]) << 24))
 
 	return h.Size(), nil
 }
 
 type ICell struct {
 	Key   uint64
-	Child uint32
+	Child PageIndex
 }
 
 const ICellSize = 12 // (8+4)
@@ -124,11 +124,11 @@ func (c *ICell) Unmarshal(buf []byte) (uint64, error) {
 		(uint64(buf[6]) << 48) |
 		(uint64(buf[7]) << 56)
 
-	c.Child = 0 |
+	c.Child = PageIndex(0 |
 		(uint32(buf[8]) << 0) |
 		(uint32(buf[9]) << 8) |
 		(uint32(buf[10]) << 16) |
-		(uint32(buf[11]) << 24)
+		(uint32(buf[11]) << 24))
 
 	return c.Size(), nil
 }

@@ -6,7 +6,7 @@ import (
 
 // Free page structure - reuse the existing page structure
 type FreePage struct {
-	NextFreePage uint32 // Points to next free page, 0 if last
+	NextFreePage PageIndex // Points to next free page, 0 if last
 	// Rest of page is unused
 }
 
@@ -16,7 +16,7 @@ func (n *FreePage) Marshal(buf []byte) ([]byte, error) {
 	buf[i] = PageTypeFree
 	i += 1
 
-	marshalUint32(buf, n.NextFreePage, i)
+	marshalUint32(buf, uint32(n.NextFreePage), i)
 	return buf, nil
 }
 
@@ -28,6 +28,6 @@ func (n *FreePage) Unmarshal(buf []byte) error {
 	}
 	i += 1
 
-	n.NextFreePage = unmarshalUint32(buf, i)
+	n.NextFreePage = PageIndex(unmarshalUint32(buf, i))
 	return nil
 }

@@ -9,7 +9,7 @@ import (
 
 type Cursor struct {
 	Table      *Table
-	PageIdx    uint32
+	PageIdx    PageIndex
 	CellIdx    uint32
 	EndOfTable bool
 }

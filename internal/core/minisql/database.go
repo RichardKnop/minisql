@@ -114,7 +114,7 @@ func (d *Database) init(ctx context.Context) error {
 	var (
 		mainTablePager = d.factory.ForTable(mainTableColumns)
 		totalPages     = int(d.flusher.TotalPages())
-		rooPageIdx     = uint32(0)
+		rooPageIdx     = PageIndex(0)
 	)
 
 	d.logger.Sugar().With(
@@ -201,7 +201,7 @@ func (d *Database) init(ctx context.Context) error {
 				return fmt.Errorf("expected one statement when loading table, got %d", len(stmts))
 			}
 			stmt := stmts[0]
-			rootPageIdx := uint32(aRow.Values[2].Value.(int32))
+			rootPageIdx := PageIndex(aRow.Values[2].Value.(int32))
 			d.tables[stmt.TableName] = NewTable(
 				d.logger,
 				NewTransactionalPager(
@@ -232,7 +232,7 @@ func (d *Database) init(ctx context.Context) error {
 				d.factory.ForIndex(aTable.PrimaryKey.Column.Kind, uint64(aTable.PrimaryKey.Column.Size)),
 				d.txManager,
 			)
-			rootPageIdx := uint32(aRow.Values[2].Value.(int32))
+			rootPageIdx := PageIndex(aRow.Values[2].Value.(int32))
 			d.primaryKeys[tableName], err = aTable.primaryKeyIndex(primaryKeyPager, rootPageIdx)
 			if err != nil {
 				return err
@@ -254,7 +254,7 @@ func (d *Database) init(ctx context.Context) error {
 }
 
 func (d *Database) Close(ctx context.Context) error {
-	for pageIdx := uint32(0); pageIdx < d.flusher.TotalPages(); pageIdx++ {
+	for pageIdx := PageIndex(0); pageIdx < PageIndex(d.flusher.TotalPages()); pageIdx++ {
 		d.logger.Sugar().With(
 			"page", pageIdx,
 		).Debug("flushing page to disk")
@@ -589,7 +589,7 @@ func (d *Database) ExecuteInTransaction(ctx context.Context, statements ...State
 	return results, nil
 }
 
-func (d *Database) insertIntoMainTable(ctx context.Context, aType SchemaType, name string, rootIdx uint32, ddl string) error {
+func (d *Database) insertIntoMainTable(ctx context.Context, aType SchemaType, name string, rootIdx PageIndex, ddl string) error {
 	mainTable := d.tables[SchemaTableName]
 	return mainTable.Insert(ctx, Statement{
 		Kind:      Insert,

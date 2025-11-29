@@ -78,9 +78,9 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		leftChild := aPager.pages[1].IndexNode.(*IndexNode[int64])
 		rightChild := aPager.pages[2].IndexNode.(*IndexNode[int64])
 
-		assertIndexNode(t, rootNode, true, false, 0, []int64{2}, []uint32{1, 2})
-		assertIndexNode(t, leftChild, false, true, 0, []int64{1}, nil)
-		assertIndexNode(t, rightChild, false, true, 0, []int64{3, 4}, nil)
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{2}, []PageIndex{1, 2})
+		assertIndexNode(t, leftChild, false, true, PageIndex(0), []int64{1}, nil)
+		assertIndexNode(t, rightChild, false, true, PageIndex(0), []int64{3, 4}, nil)
 	})
 
 	t.Run("Insert 2 more keys, another split", func(t *testing.T) {
@@ -114,10 +114,10 @@ func TestUniqueIndex_Insert(t *testing.T) {
 			rightChild  = aPager.pages[3].IndexNode.(*IndexNode[int64])
 		)
 
-		assertIndexNode(t, rootNode, true, false, 0, []int64{2, 4}, []uint32{1, 2, 3})
-		assertIndexNode(t, leftChild, false, true, 0, []int64{1}, nil)
-		assertIndexNode(t, middleChild, false, true, 0, []int64{3}, nil)
-		assertIndexNode(t, rightChild, false, true, 0, []int64{5, 6}, nil)
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{2, 4}, []PageIndex{1, 2, 3})
+		assertIndexNode(t, leftChild, false, true, PageIndex(0), []int64{1}, nil)
+		assertIndexNode(t, middleChild, false, true, PageIndex(0), []int64{3}, nil)
+		assertIndexNode(t, rightChild, false, true, PageIndex(0), []int64{5, 6}, nil)
 	})
 
 	t.Run("Insert 2 more keys, another split", func(t *testing.T) {
@@ -153,12 +153,12 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{2, 4, 6}, []uint32{1, 2, 3, 4})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{2, 4, 6}, []PageIndex{1, 2, 3, 4})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 0, []int64{1}, nil)
-		assertIndexNode(t, leaf2, false, true, 0, []int64{3}, nil)
-		assertIndexNode(t, leaf3, false, true, 0, []int64{5}, nil)
-		assertIndexNode(t, leaf4, false, true, 0, []int64{7, 8}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(0), []int64{1}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(0), []int64{3}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(0), []int64{5}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(0), []int64{7, 8}, nil)
 	})
 
 	t.Run("Insert 1 more key, internal split", func(t *testing.T) {
@@ -195,15 +195,15 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{4}, []uint32{5, 6})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{4}, []PageIndex{5, 6})
 		// Internal nodes
-		assertIndexNode(t, internal1, false, false, 0, []int64{2}, []uint32{1, 2})
-		assertIndexNode(t, internal2, false, false, 0, []int64{6}, []uint32{3, 4})
+		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{2}, []PageIndex{1, 2})
+		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{6}, []PageIndex{3, 4})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 5, []int64{1}, nil)
-		assertIndexNode(t, leaf2, false, true, 5, []int64{3}, nil)
-		assertIndexNode(t, leaf3, false, true, 6, []int64{5}, nil)
-		assertIndexNode(t, leaf4, false, true, 6, []int64{7, 8, 9}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{1}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{3}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{5}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{7, 8, 9}, nil)
 	})
 
 	t.Run("Keep inserting more keys", func(t *testing.T) {
@@ -249,19 +249,19 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{4, 8}, []uint32{5, 6, 9})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{4, 8}, []PageIndex{5, 6, 9})
 		// Internal nodes
-		assertIndexNode(t, internal1, false, false, 0, []int64{2}, []uint32{1, 2})
-		assertIndexNode(t, internal2, false, false, 0, []int64{6}, []uint32{3, 4})
-		assertIndexNode(t, internal3, false, false, 0, []int64{10, 12}, []uint32{7, 8, 10})
+		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{2}, []PageIndex{1, 2})
+		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{6}, []PageIndex{3, 4})
+		assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{10, 12}, []PageIndex{7, 8, 10})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 5, []int64{1}, nil)
-		assertIndexNode(t, leaf2, false, true, 5, []int64{3}, nil)
-		assertIndexNode(t, leaf3, false, true, 6, []int64{5}, nil)
-		assertIndexNode(t, leaf4, false, true, 6, []int64{7}, nil)
-		assertIndexNode(t, leaf5, false, true, 9, []int64{9}, nil)
-		assertIndexNode(t, leaf6, false, true, 9, []int64{11}, nil)
-		assertIndexNode(t, leaf7, false, true, 9, []int64{13, 14}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{1}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{3}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{5}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{7}, nil)
+		assertIndexNode(t, leaf5, false, true, PageIndex(9), []int64{9}, nil)
+		assertIndexNode(t, leaf6, false, true, PageIndex(9), []int64{11}, nil)
+		assertIndexNode(t, leaf7, false, true, PageIndex(9), []int64{13, 14}, nil)
 	})
 
 	expectedKeys := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}
@@ -332,23 +332,23 @@ func TestUniqueIndex_Insert_OutOfOrder(t *testing.T) {
 	)
 
 	// Root node
-	assertIndexNode(t, rootNode, true, false, 0, []int64{9, 16}, []uint32{5, 6, 10})
+	assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 16}, []PageIndex{5, 6, 10})
 	// Internal nodes
-	assertIndexNode(t, internal1, false, false, 0, []int64{2, 5}, []uint32{1, 9, 4})
-	assertIndexNode(t, internal2, false, false, 0, []int64{11, 13}, []uint32{2, 7, 11})
-	assertIndexNode(t, internal3, false, false, 0, []int64{19}, []uint32{3, 8})
+	assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{2, 5}, []PageIndex{1, 9, 4})
+	assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 13}, []PageIndex{2, 7, 11})
+	assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{19}, []PageIndex{3, 8})
 	// // Leaf nodes
-	assertIndexNode(t, leaf1, false, true, 5, []int64{1}, nil)
-	assertIndexNode(t, leaf2, false, true, 5, []int64{3, 4}, nil)
-	assertIndexNode(t, leaf3, false, true, 5, []int64{6, 7, 8}, nil)
-	assertIndexNode(t, leaf4, false, true, 6, []int64{10}, nil)
-	assertIndexNode(t, leaf5, false, true, 6, []int64{12}, nil)
-	assertIndexNode(t, leaf6, false, true, 6, []int64{14, 15}, nil)
-	assertIndexNode(t, leaf7, false, true, 10, []int64{17, 18}, nil)
-	assertIndexNode(t, leaf8, false, true, 10, []int64{20, 21}, nil)
+	assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{1}, nil)
+	assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{3, 4}, nil)
+	assertIndexNode(t, leaf3, false, true, PageIndex(5), []int64{6, 7, 8}, nil)
+	assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{10}, nil)
+	assertIndexNode(t, leaf5, false, true, PageIndex(6), []int64{12}, nil)
+	assertIndexNode(t, leaf6, false, true, PageIndex(6), []int64{14, 15}, nil)
+	assertIndexNode(t, leaf7, false, true, PageIndex(10), []int64{17, 18}, nil)
+	assertIndexNode(t, leaf8, false, true, PageIndex(10), []int64{20, 21}, nil)
 }
 
-func assertIndexNode(t *testing.T, aNode *IndexNode[int64], isRoot, isLeaf bool, parent uint32, keys []int64, children []uint32) {
+func assertIndexNode(t *testing.T, aNode *IndexNode[int64], isRoot, isLeaf bool, parent PageIndex, keys []int64, children []PageIndex) {
 	if isRoot {
 		assert.True(t, aNode.Header.IsRoot, "should be a root node")
 	} else {

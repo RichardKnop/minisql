@@ -40,7 +40,7 @@ func (n *InternalNode) IndexOfKey(key uint64) (uint32, bool) {
 }
 
 // IndexOfPage returns index of child which contains page number
-func (n *InternalNode) IndexOfPage(pageIdx uint32) (uint32, error) {
+func (n *InternalNode) IndexOfPage(pageIdx PageIndex) (uint32, error) {
 	for idx, aCell := range n.ICells {
 		if aCell.Child == pageIdx {
 			return uint32(idx), nil
@@ -54,7 +54,7 @@ func (n *InternalNode) IndexOfPage(pageIdx uint32) (uint32, error) {
 
 // Child returns a node index of nth child of the node marked by its index
 // (0 for the leftmost child, index equal to number of keys means the rightmost child).
-func (n *InternalNode) Child(childIdx uint32) (uint32, error) {
+func (n *InternalNode) Child(childIdx uint32) (PageIndex, error) {
 	keysNum := n.Header.KeysNum
 	if childIdx > keysNum {
 		return 0, fmt.Errorf("childIdx %d out of keysNum %d", childIdx, keysNum)
@@ -67,7 +67,7 @@ func (n *InternalNode) Child(childIdx uint32) (uint32, error) {
 	return n.ICells[childIdx].Child, nil
 }
 
-func (n *InternalNode) SetChild(idx, childPage uint32) error {
+func (n *InternalNode) SetChild(idx uint32, childPage PageIndex) error {
 	keysNum := n.Header.KeysNum
 	if idx > keysNum {
 		return fmt.Errorf("childIdx %d out of keysNum %d", idx, keysNum)
@@ -90,7 +90,7 @@ func (n *InternalNode) MoreThanHalfFull(maxIcells int) bool {
 	return int(n.Header.KeysNum) > (maxIcells+1)/2
 }
 
-func (n *InternalNode) GetRightChildByIndex(idx uint32) uint32 {
+func (n *InternalNode) GetRightChildByIndex(idx uint32) PageIndex {
 	if idx == n.Header.KeysNum-1 {
 		return n.Header.RightChild
 	}
@@ -166,8 +166,8 @@ func (n *InternalNode) Keys() []uint64 {
 	return keys
 }
 
-func (n *InternalNode) Children() []uint32 {
-	children := make([]uint32, 0, n.Header.KeysNum)
+func (n *InternalNode) Children() []PageIndex {
+	children := make([]PageIndex, 0, n.Header.KeysNum)
 	for idx := range n.Header.KeysNum {
 		children = append(children, n.ICells[idx].Child)
 	}

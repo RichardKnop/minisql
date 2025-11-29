@@ -296,7 +296,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 		assert.Equal(t, 100, int(aPager.pages[3].OverflowPage.Header.DataSize))
 		assert.Equal(t, 455, int(aPager.pages[4].OverflowPage.Header.DataSize))
 
-		assertFreePages(t, tablePager, []uint32{1})
+		assertFreePages(t, tablePager, []PageIndex{1})
 	})
 
 	t.Run("Update overflow text to shrink overflow pages from 2 to 1", func(t *testing.T) {
@@ -340,7 +340,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 		assert.Equal(t, MaxOverflowPageData-100, int(aPager.pages[3].OverflowPage.Header.DataSize))
 		assert.Equal(t, 455, int(aPager.pages[4].OverflowPage.Header.DataSize))
 
-		assertFreePages(t, tablePager, []uint32{2, 1})
+		assertFreePages(t, tablePager, []PageIndex{2, 1})
 	})
 
 	t.Run("Update overflow text to expand overflow pages from 1 to 2", func(t *testing.T) {
@@ -387,6 +387,6 @@ func TestTable_Update_Overflow(t *testing.T) {
 		assert.Equal(t, MaxOverflowPageData, int(aPager.pages[4].OverflowPage.Header.DataSize))
 		assert.Equal(t, 200, int(aPager.pages[2].OverflowPage.Header.DataSize))
 
-		assertFreePages(t, tablePager, []uint32{1})
+		assertFreePages(t, tablePager, []PageIndex{1})
 	})
 }

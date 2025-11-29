@@ -133,16 +133,16 @@ func (_m *MockTxPager) EXPECT() *MockTxPager_Expecter {
 }
 
 // AddFreePage provides a mock function for the type MockTxPager
-func (_mock *MockTxPager) AddFreePage(context1 context.Context, v uint32) error {
-	ret := _mock.Called(context1, v)
+func (_mock *MockTxPager) AddFreePage(context1 context.Context, pageIndex PageIndex) error {
+	ret := _mock.Called(context1, pageIndex)
 
 	if len(ret) == 0 {
 		panic("no return value specified for AddFreePage")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uint32) error); ok {
-		r0 = returnFunc(context1, v)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, PageIndex) error); ok {
+		r0 = returnFunc(context1, pageIndex)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -156,20 +156,20 @@ type MockTxPager_AddFreePage_Call struct {
 
 // AddFreePage is a helper method to define mock.On call
 //   - context1 context.Context
-//   - v uint32
-func (_e *MockTxPager_Expecter) AddFreePage(context1 interface{}, v interface{}) *MockTxPager_AddFreePage_Call {
-	return &MockTxPager_AddFreePage_Call{Call: _e.mock.On("AddFreePage", context1, v)}
+//   - pageIndex PageIndex
+func (_e *MockTxPager_Expecter) AddFreePage(context1 interface{}, pageIndex interface{}) *MockTxPager_AddFreePage_Call {
+	return &MockTxPager_AddFreePage_Call{Call: _e.mock.On("AddFreePage", context1, pageIndex)}
 }
 
-func (_c *MockTxPager_AddFreePage_Call) Run(run func(context1 context.Context, v uint32)) *MockTxPager_AddFreePage_Call {
+func (_c *MockTxPager_AddFreePage_Call) Run(run func(context1 context.Context, pageIndex PageIndex)) *MockTxPager_AddFreePage_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 uint32
+		var arg1 PageIndex
 		if args[1] != nil {
-			arg1 = args[1].(uint32)
+			arg1 = args[1].(PageIndex)
 		}
 		run(
 			arg0,
@@ -184,7 +184,7 @@ func (_c *MockTxPager_AddFreePage_Call) Return(err error) *MockTxPager_AddFreePa
 	return _c
 }
 
-func (_c *MockTxPager_AddFreePage_Call) RunAndReturn(run func(context1 context.Context, v uint32) error) *MockTxPager_AddFreePage_Call {
+func (_c *MockTxPager_AddFreePage_Call) RunAndReturn(run func(context1 context.Context, pageIndex PageIndex) error) *MockTxPager_AddFreePage_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -252,8 +252,8 @@ func (_c *MockTxPager_GetFreePage_Call) RunAndReturn(run func(context1 context.C
 }
 
 // GetOverflowPage provides a mock function for the type MockTxPager
-func (_mock *MockTxPager) GetOverflowPage(context1 context.Context, v uint32) (*Page, error) {
-	ret := _mock.Called(context1, v)
+func (_mock *MockTxPager) GetOverflowPage(context1 context.Context, pageIndex PageIndex) (*Page, error) {
+	ret := _mock.Called(context1, pageIndex)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetOverflowPage")
@@ -261,18 +261,18 @@ func (_mock *MockTxPager) GetOverflowPage(context1 context.Context, v uint32) (*
 
 	var r0 *Page
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uint32) (*Page, error)); ok {
-		return returnFunc(context1, v)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, PageIndex) (*Page, error)); ok {
+		return returnFunc(context1, pageIndex)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uint32) *Page); ok {
-		r0 = returnFunc(context1, v)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, PageIndex) *Page); ok {
+		r0 = returnFunc(context1, pageIndex)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*Page)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, uint32) error); ok {
-		r1 = returnFunc(context1, v)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, PageIndex) error); ok {
+		r1 = returnFunc(context1, pageIndex)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -286,20 +286,20 @@ type MockTxPager_GetOverflowPage_Call struct {
 
 // GetOverflowPage is a helper method to define mock.On call
 //   - context1 context.Context
-//   - v uint32
-func (_e *MockTxPager_Expecter) GetOverflowPage(context1 interface{}, v interface{}) *MockTxPager_GetOverflowPage_Call {
-	return &MockTxPager_GetOverflowPage_Call{Call: _e.mock.On("GetOverflowPage", context1, v)}
+//   - pageIndex PageIndex
+func (_e *MockTxPager_Expecter) GetOverflowPage(context1 interface{}, pageIndex interface{}) *MockTxPager_GetOverflowPage_Call {
+	return &MockTxPager_GetOverflowPage_Call{Call: _e.mock.On("GetOverflowPage", context1, pageIndex)}
 }
 
-func (_c *MockTxPager_GetOverflowPage_Call) Run(run func(context1 context.Context, v uint32)) *MockTxPager_GetOverflowPage_Call {
+func (_c *MockTxPager_GetOverflowPage_Call) Run(run func(context1 context.Context, pageIndex PageIndex)) *MockTxPager_GetOverflowPage_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 uint32
+		var arg1 PageIndex
 		if args[1] != nil {
-			arg1 = args[1].(uint32)
+			arg1 = args[1].(PageIndex)
 		}
 		run(
 			arg0,
@@ -314,14 +314,14 @@ func (_c *MockTxPager_GetOverflowPage_Call) Return(page *Page, err error) *MockT
 	return _c
 }
 
-func (_c *MockTxPager_GetOverflowPage_Call) RunAndReturn(run func(context1 context.Context, v uint32) (*Page, error)) *MockTxPager_GetOverflowPage_Call {
+func (_c *MockTxPager_GetOverflowPage_Call) RunAndReturn(run func(context1 context.Context, pageIndex PageIndex) (*Page, error)) *MockTxPager_GetOverflowPage_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // ModifyPage provides a mock function for the type MockTxPager
-func (_mock *MockTxPager) ModifyPage(context1 context.Context, v uint32) (*Page, error) {
-	ret := _mock.Called(context1, v)
+func (_mock *MockTxPager) ModifyPage(context1 context.Context, pageIndex PageIndex) (*Page, error) {
+	ret := _mock.Called(context1, pageIndex)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ModifyPage")
@@ -329,18 +329,18 @@ func (_mock *MockTxPager) ModifyPage(context1 context.Context, v uint32) (*Page,
 
 	var r0 *Page
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uint32) (*Page, error)); ok {
-		return returnFunc(context1, v)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, PageIndex) (*Page, error)); ok {
+		return returnFunc(context1, pageIndex)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uint32) *Page); ok {
-		r0 = returnFunc(context1, v)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, PageIndex) *Page); ok {
+		r0 = returnFunc(context1, pageIndex)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*Page)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, uint32) error); ok {
-		r1 = returnFunc(context1, v)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, PageIndex) error); ok {
+		r1 = returnFunc(context1, pageIndex)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -354,20 +354,20 @@ type MockTxPager_ModifyPage_Call struct {
 
 // ModifyPage is a helper method to define mock.On call
 //   - context1 context.Context
-//   - v uint32
-func (_e *MockTxPager_Expecter) ModifyPage(context1 interface{}, v interface{}) *MockTxPager_ModifyPage_Call {
-	return &MockTxPager_ModifyPage_Call{Call: _e.mock.On("ModifyPage", context1, v)}
+//   - pageIndex PageIndex
+func (_e *MockTxPager_Expecter) ModifyPage(context1 interface{}, pageIndex interface{}) *MockTxPager_ModifyPage_Call {
+	return &MockTxPager_ModifyPage_Call{Call: _e.mock.On("ModifyPage", context1, pageIndex)}
 }
 
-func (_c *MockTxPager_ModifyPage_Call) Run(run func(context1 context.Context, v uint32)) *MockTxPager_ModifyPage_Call {
+func (_c *MockTxPager_ModifyPage_Call) Run(run func(context1 context.Context, pageIndex PageIndex)) *MockTxPager_ModifyPage_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 uint32
+		var arg1 PageIndex
 		if args[1] != nil {
-			arg1 = args[1].(uint32)
+			arg1 = args[1].(PageIndex)
 		}
 		run(
 			arg0,
@@ -382,14 +382,14 @@ func (_c *MockTxPager_ModifyPage_Call) Return(page *Page, err error) *MockTxPage
 	return _c
 }
 
-func (_c *MockTxPager_ModifyPage_Call) RunAndReturn(run func(context1 context.Context, v uint32) (*Page, error)) *MockTxPager_ModifyPage_Call {
+func (_c *MockTxPager_ModifyPage_Call) RunAndReturn(run func(context1 context.Context, pageIndex PageIndex) (*Page, error)) *MockTxPager_ModifyPage_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // ReadPage provides a mock function for the type MockTxPager
-func (_mock *MockTxPager) ReadPage(context1 context.Context, v uint32) (*Page, error) {
-	ret := _mock.Called(context1, v)
+func (_mock *MockTxPager) ReadPage(context1 context.Context, pageIndex PageIndex) (*Page, error) {
+	ret := _mock.Called(context1, pageIndex)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ReadPage")
@@ -397,18 +397,18 @@ func (_mock *MockTxPager) ReadPage(context1 context.Context, v uint32) (*Page, e
 
 	var r0 *Page
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uint32) (*Page, error)); ok {
-		return returnFunc(context1, v)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, PageIndex) (*Page, error)); ok {
+		return returnFunc(context1, pageIndex)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uint32) *Page); ok {
-		r0 = returnFunc(context1, v)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, PageIndex) *Page); ok {
+		r0 = returnFunc(context1, pageIndex)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*Page)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, uint32) error); ok {
-		r1 = returnFunc(context1, v)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, PageIndex) error); ok {
+		r1 = returnFunc(context1, pageIndex)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -422,20 +422,20 @@ type MockTxPager_ReadPage_Call struct {
 
 // ReadPage is a helper method to define mock.On call
 //   - context1 context.Context
-//   - v uint32
-func (_e *MockTxPager_Expecter) ReadPage(context1 interface{}, v interface{}) *MockTxPager_ReadPage_Call {
-	return &MockTxPager_ReadPage_Call{Call: _e.mock.On("ReadPage", context1, v)}
+//   - pageIndex PageIndex
+func (_e *MockTxPager_Expecter) ReadPage(context1 interface{}, pageIndex interface{}) *MockTxPager_ReadPage_Call {
+	return &MockTxPager_ReadPage_Call{Call: _e.mock.On("ReadPage", context1, pageIndex)}
 }
 
-func (_c *MockTxPager_ReadPage_Call) Run(run func(context1 context.Context, v uint32)) *MockTxPager_ReadPage_Call {
+func (_c *MockTxPager_ReadPage_Call) Run(run func(context1 context.Context, pageIndex PageIndex)) *MockTxPager_ReadPage_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 uint32
+		var arg1 PageIndex
 		if args[1] != nil {
-			arg1 = args[1].(uint32)
+			arg1 = args[1].(PageIndex)
 		}
 		run(
 			arg0,
@@ -450,7 +450,7 @@ func (_c *MockTxPager_ReadPage_Call) Return(page *Page, err error) *MockTxPager_
 	return _c
 }
 
-func (_c *MockTxPager_ReadPage_Call) RunAndReturn(run func(context1 context.Context, v uint32) (*Page, error)) *MockTxPager_ReadPage_Call {
+func (_c *MockTxPager_ReadPage_Call) RunAndReturn(run func(context1 context.Context, pageIndex PageIndex) (*Page, error)) *MockTxPager_ReadPage_Call {
 	_c.Call.Return(run)
 	return _c
 }

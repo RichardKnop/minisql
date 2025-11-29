@@ -8,8 +8,10 @@ const (
 	UsablePageSize = PageSize - 6 - 8 - 8 - 8
 )
 
+type PageIndex uint32
+
 type Page struct {
-	Index        uint32
+	Index        PageIndex
 	OverflowPage *OverflowPage
 	FreePage     *FreePage
 	InternalNode *InternalNode
@@ -93,7 +95,7 @@ func rootHeaderSize() uint64 {
 	return 6 + 8 + RootPageConfigSize // base header + leaf/internal header + root page config
 }
 
-func (p *Page) setParent(parentIdx uint32) {
+func (p *Page) setParent(parentIdx PageIndex) {
 	if p.LeafNode != nil {
 		p.LeafNode.Header.Parent = parentIdx
 	} else if p.InternalNode != nil {

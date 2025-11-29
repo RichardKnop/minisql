@@ -6,7 +6,7 @@ import (
 )
 
 type IndexCursor struct {
-	PageIdx uint32
+	PageIdx PageIndex
 	CellIdx uint32
 }
 
@@ -42,7 +42,7 @@ func (ui *UniqueIndex[T]) Seek(ctx context.Context, aPage *Page, keyAny any) (In
 	return ui.Seek(ctx, childPage, key)
 }
 
-func (ui *UniqueIndex[T]) SeekLastKey(ctx context.Context, pageIdx uint32) (any, error) {
+func (ui *UniqueIndex[T]) SeekLastKey(ctx context.Context, pageIdx PageIndex) (any, error) {
 	aPage, err := ui.pager.ReadPage(ctx, pageIdx)
 	if err != nil {
 		return nil, fmt.Errorf("seek next row ID: %w", err)

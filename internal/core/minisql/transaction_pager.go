@@ -19,7 +19,7 @@ func NewTransactionalPager(basePager Pager, txManager *TransactionManager) *Tran
 	}
 }
 
-func (tp *TransactionalPager) ReadPage(ctx context.Context, pageIdx uint32) (*Page, error) {
+func (tp *TransactionalPager) ReadPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
 	tx := TxFromContext(ctx)
 	if tx == nil {
 		// No transaction context, use base pager directly
@@ -47,7 +47,7 @@ func (tp *TransactionalPager) ReadPage(ctx context.Context, pageIdx uint32) (*Pa
 	return page, nil
 }
 
-func (tp *TransactionalPager) ModifyPage(ctx context.Context, pageIdx uint32) (*Page, error) {
+func (tp *TransactionalPager) ModifyPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
 	tx := TxFromContext(ctx)
 	if tx == nil {
 		return nil, fmt.Errorf("cannot modify page outside transaction")
@@ -82,7 +82,7 @@ func (tp *TransactionalPager) GetFreePage(ctx context.Context) (*Page, error) {
 	// Check if there are any free pages
 	if dbHeader.FirstFreePage == 0 {
 		// No free pages, allocate new one
-		freePage, err := tp.ModifyPage(ctx, tp.TotalPages())
+		freePage, err := tp.ModifyPage(ctx, PageIndex(tp.TotalPages()))
 		if err != nil {
 			return nil, fmt.Errorf("allocate new free page: %w", err)
 		}
@@ -117,7 +117,7 @@ func (tp *TransactionalPager) GetFreePage(ctx context.Context) (*Page, error) {
 	return freePage, nil
 }
 
-func (tp *TransactionalPager) AddFreePage(ctx context.Context, pageIdx uint32) error {
+func (tp *TransactionalPager) AddFreePage(ctx context.Context, pageIdx PageIndex) error {
 	tx := TxFromContext(ctx)
 	if tx == nil {
 		return fmt.Errorf("cannot add free page outside transaction")
@@ -175,7 +175,7 @@ func (tp *TransactionalPager) readDBHeader(ctx context.Context) DatabaseHeader {
 	return dbHeader
 }
 
-func (tp *TransactionalPager) GetOverflowPage(ctx context.Context, pageIdx uint32) (*Page, error) {
+func (tp *TransactionalPager) GetOverflowPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
 	tx := TxFromContext(ctx)
 	if tx == nil {
 		return nil, fmt.Errorf("cannot get overflow page outside transaction")

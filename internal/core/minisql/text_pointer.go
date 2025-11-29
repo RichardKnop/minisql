@@ -9,8 +9,8 @@ import (
 // Stored in the main row, text of length <= MaxInlineVarchar is stored inline,
 // oterwise we point to an overflow page.
 type TextPointer struct {
-	Length    uint32 // Total size of text
-	FirstPage uint32 // First overflow page (if not inline)
+	Length    uint32    // Total size of text
+	FirstPage PageIndex // First overflow page (if not inline)
 	Data      []byte
 }
 
@@ -53,7 +53,7 @@ func (tp *TextPointer) Marshal(buf []byte, i uint64) ([]byte, error) {
 		i += uint64(n)
 	} else {
 		// Write first overflow page index
-		marshalUint32(buf, tp.FirstPage, i)
+		marshalUint32(buf, uint32(tp.FirstPage), i)
 		i += 4
 	}
 
@@ -72,7 +72,7 @@ func (tp *TextPointer) Unmarshal(buf []byte, i uint64) error {
 		i += uint64(tp.Length)
 	} else {
 		// Read first overflow page index
-		tp.FirstPage = unmarshalUint32(buf, i)
+		tp.FirstPage = PageIndex(unmarshalUint32(buf, i))
 		i += 4
 	}
 

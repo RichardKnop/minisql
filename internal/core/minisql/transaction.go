@@ -12,10 +12,10 @@ type TransactionID uint64
 type Transaction struct {
 	ID            TransactionID
 	StartTime     time.Time
-	ReadSet       map[uint32]uint64 // pageIdx -> version when read
-	WriteSet      map[uint32]*Page  // pageIdx -> modified page copy
-	DbHeaderRead  *uint64           // version of DB header when read
-	DbHeaderWrite *DatabaseHeader   // modified DB header
+	ReadSet       map[PageIndex]uint64 // pageIdx -> version when read
+	WriteSet      map[PageIndex]*Page  // pageIdx -> modified page copy
+	DbHeaderRead  *uint64              // version of DB header when read
+	DbHeaderWrite *DatabaseHeader      // modified DB header
 	Status        TransactionStatus
 }
 
@@ -31,7 +31,7 @@ type TransactionManager struct {
 	mu                    sync.RWMutex
 	nextTxID              TransactionID
 	transactions          map[TransactionID]*Transaction
-	globalPageVersions    map[uint32]uint64 // pageIdx -> current version
+	globalPageVersions    map[PageIndex]uint64 // pageIdx -> current version
 	globalDbHeaderVersion uint64
 }
 
@@ -39,7 +39,7 @@ func NewTransactionManager() *TransactionManager {
 	return &TransactionManager{
 		nextTxID:           1,
 		transactions:       make(map[TransactionID]*Transaction),
-		globalPageVersions: make(map[uint32]uint64),
+		globalPageVersions: make(map[PageIndex]uint64),
 	}
 }
 
@@ -50,8 +50,8 @@ func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction
 	tx := &Transaction{
 		ID:        tm.nextTxID,
 		StartTime: time.Now(),
-		ReadSet:   make(map[uint32]uint64),
-		WriteSet:  make(map[uint32]*Page),
+		ReadSet:   make(map[PageIndex]uint64),
+		WriteSet:  make(map[PageIndex]*Page),
 		Status:    TxActive,
 	}
 
@@ -114,7 +114,7 @@ func (tm *TransactionManager) RollbackTransaction(ctx context.Context, tx *Trans
 	tx.Status = TxAborted
 
 	// Simply discard all changes - they're only in memory
-	tx.WriteSet = make(map[uint32]*Page)
+	tx.WriteSet = make(map[PageIndex]*Page)
 	tx.DbHeaderWrite = nil
 
 	// Clean up transaction

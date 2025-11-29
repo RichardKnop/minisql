@@ -72,20 +72,20 @@ func TestUniqueIndex_Delete(t *testing.T) {
 	)
 
 	// Root node
-	assertIndexNode(t, rootNode, true, false, 0, []int64{9, 16}, []uint32{5, 6, 10})
+	assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 16}, []PageIndex{5, 6, 10})
 	// Internal nodes
-	assertIndexNode(t, internal1, false, false, 0, []int64{2, 5}, []uint32{1, 9, 4})
-	assertIndexNode(t, internal2, false, false, 0, []int64{11, 13}, []uint32{2, 7, 11})
-	assertIndexNode(t, internal3, false, false, 0, []int64{19}, []uint32{3, 8})
+	assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{2, 5}, []PageIndex{1, 9, 4})
+	assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 13}, []PageIndex{2, 7, 11})
+	assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{19}, []PageIndex{3, 8})
 	// Leaf nodes
-	assertIndexNode(t, leaf1, false, true, 5, []int64{1}, nil)
-	assertIndexNode(t, leaf2, false, true, 5, []int64{3, 4}, nil)
-	assertIndexNode(t, leaf3, false, true, 5, []int64{6, 7, 8}, nil)
-	assertIndexNode(t, leaf4, false, true, 6, []int64{10}, nil)
-	assertIndexNode(t, leaf5, false, true, 6, []int64{12}, nil)
-	assertIndexNode(t, leaf6, false, true, 6, []int64{14, 15}, nil)
-	assertIndexNode(t, leaf7, false, true, 10, []int64{17, 18}, nil)
-	assertIndexNode(t, leaf8, false, true, 10, []int64{20, 21}, nil)
+	assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{1}, nil)
+	assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{3, 4}, nil)
+	assertIndexNode(t, leaf3, false, true, PageIndex(5), []int64{6, 7, 8}, nil)
+	assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{10}, nil)
+	assertIndexNode(t, leaf5, false, true, PageIndex(6), []int64{12}, nil)
+	assertIndexNode(t, leaf6, false, true, PageIndex(6), []int64{14, 15}, nil)
+	assertIndexNode(t, leaf7, false, true, PageIndex(10), []int64{17, 18}, nil)
+	assertIndexNode(t, leaf8, false, true, PageIndex(10), []int64{20, 21}, nil)
 
 	t.Run("Delete a key from leftmost leaf", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -131,20 +131,20 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{9, 16}, []uint32{5, 6, 10})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 16}, []PageIndex{5, 6, 10})
 		// Internal nodes
-		assertIndexNode(t, internal1, false, false, 0, []int64{3, 5}, []uint32{1, 9, 4})
-		assertIndexNode(t, internal2, false, false, 0, []int64{11, 13}, []uint32{2, 7, 11})
-		assertIndexNode(t, internal3, false, false, 0, []int64{19}, []uint32{3, 8})
+		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3, 5}, []PageIndex{1, 9, 4})
+		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 13}, []PageIndex{2, 7, 11})
+		assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{19}, []PageIndex{3, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 5, []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, 5, []int64{4}, nil)
-		assertIndexNode(t, leaf3, false, true, 5, []int64{6, 7, 8}, nil)
-		assertIndexNode(t, leaf4, false, true, 6, []int64{10}, nil)
-		assertIndexNode(t, leaf5, false, true, 6, []int64{12}, nil)
-		assertIndexNode(t, leaf6, false, true, 6, []int64{14, 15}, nil)
-		assertIndexNode(t, leaf7, false, true, 10, []int64{17, 18}, nil)
-		assertIndexNode(t, leaf8, false, true, 10, []int64{20, 21}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{4}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(5), []int64{6, 7, 8}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{10}, nil)
+		assertIndexNode(t, leaf5, false, true, PageIndex(6), []int64{12}, nil)
+		assertIndexNode(t, leaf6, false, true, PageIndex(6), []int64{14, 15}, nil)
+		assertIndexNode(t, leaf7, false, true, PageIndex(10), []int64{17, 18}, nil)
+		assertIndexNode(t, leaf8, false, true, PageIndex(10), []int64{20, 21}, nil)
 
 		// No page should be recycled yet
 		assertFreePages(t, idxPager, nil)
@@ -198,20 +198,20 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{9, 16}, []uint32{5, 6, 10})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 16}, []PageIndex{5, 6, 10})
 		// Internal nodes
-		assertIndexNode(t, internal1, false, false, 0, []int64{3, 7}, []uint32{1, 9, 4})
-		assertIndexNode(t, internal2, false, false, 0, []int64{11, 13}, []uint32{2, 7, 11})
-		assertIndexNode(t, internal3, false, false, 0, []int64{19}, []uint32{3, 8})
+		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3, 7}, []PageIndex{1, 9, 4})
+		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 13}, []PageIndex{2, 7, 11})
+		assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{19}, []PageIndex{3, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 5, []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, 5, []int64{6}, nil)
-		assertIndexNode(t, leaf3, false, true, 5, []int64{8}, nil)
-		assertIndexNode(t, leaf4, false, true, 6, []int64{10}, nil)
-		assertIndexNode(t, leaf5, false, true, 6, []int64{12}, nil)
-		assertIndexNode(t, leaf6, false, true, 6, []int64{14, 15}, nil)
-		assertIndexNode(t, leaf7, false, true, 10, []int64{17, 18}, nil)
-		assertIndexNode(t, leaf8, false, true, 10, []int64{20, 21}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(5), []int64{8}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{10}, nil)
+		assertIndexNode(t, leaf5, false, true, PageIndex(6), []int64{12}, nil)
+		assertIndexNode(t, leaf6, false, true, PageIndex(6), []int64{14, 15}, nil)
+		assertIndexNode(t, leaf7, false, true, PageIndex(10), []int64{17, 18}, nil)
+		assertIndexNode(t, leaf8, false, true, PageIndex(10), []int64{20, 21}, nil)
 
 		// No page should be recycled yet
 		assertFreePages(t, idxPager, nil)
@@ -260,22 +260,21 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{9, 16}, []uint32{5, 6, 10})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 16}, []PageIndex{5, 6, 10})
 		// Internal nodes
-		assertIndexNode(t, internal1, false, false, 0, []int64{3}, []uint32{1, 9})
-		assertIndexNode(t, internal2, false, false, 0, []int64{11, 13}, []uint32{2, 7, 11})
-		assertIndexNode(t, internal3, false, false, 0, []int64{19}, []uint32{3, 8})
+		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 13}, []PageIndex{2, 7, 11})
+		assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{19}, []PageIndex{3, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 5, []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, 5, []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, 6, []int64{10}, nil)
-		assertIndexNode(t, leaf4, false, true, 6, []int64{12}, nil)
-		assertIndexNode(t, leaf5, false, true, 6, []int64{14, 15}, nil)
-		assertIndexNode(t, leaf6, false, true, 10, []int64{17, 18}, nil)
-		assertIndexNode(t, leaf7, false, true, 10, []int64{20, 21}, nil)
-
+		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
+		assertIndexNode(t, leaf5, false, true, PageIndex(6), []int64{14, 15}, nil)
+		assertIndexNode(t, leaf6, false, true, PageIndex(10), []int64{17, 18}, nil)
+		assertIndexNode(t, leaf7, false, true, PageIndex(10), []int64{20, 21}, nil)
 		// Assert new recycled page
-		assertFreePages(t, idxPager, []uint32{4})
+		assertFreePages(t, idxPager, []PageIndex{4})
 	})
 
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
@@ -321,22 +320,22 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{9, 13}, []uint32{5, 6, 10})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 13}, []PageIndex{5, 6, 10})
 		// Internal nodes
-		assertIndexNode(t, internal1, false, false, 0, []int64{3}, []uint32{1, 9})
-		assertIndexNode(t, internal2, false, false, 0, []int64{11}, []uint32{2, 7})
-		assertIndexNode(t, internal3, false, false, 0, []int64{16, 18}, []uint32{11, 3, 8})
+		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11}, []PageIndex{2, 7})
+		assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{16, 18}, []PageIndex{11, 3, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 5, []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, 5, []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, 6, []int64{10}, nil)
-		assertIndexNode(t, leaf4, false, true, 6, []int64{12}, nil)
-		assertIndexNode(t, leaf5, false, true, 10, []int64{14, 15}, nil)
-		assertIndexNode(t, leaf6, false, true, 10, []int64{17}, nil)
-		assertIndexNode(t, leaf7, false, true, 10, []int64{20, 21}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
+		assertIndexNode(t, leaf5, false, true, PageIndex(10), []int64{14, 15}, nil)
+		assertIndexNode(t, leaf6, false, true, PageIndex(10), []int64{17}, nil)
+		assertIndexNode(t, leaf7, false, true, PageIndex(10), []int64{20, 21}, nil)
 
 		// No new pages should be recycled
-		assertFreePages(t, idxPager, []uint32{4})
+		assertFreePages(t, idxPager, []PageIndex{4})
 	})
 
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
@@ -382,22 +381,22 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{9, 13}, []uint32{5, 6, 10})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 13}, []PageIndex{5, 6, 10})
 		// Internal nodes
-		assertIndexNode(t, internal1, false, false, 0, []int64{3}, []uint32{1, 9})
-		assertIndexNode(t, internal2, false, false, 0, []int64{11}, []uint32{2, 7})
-		assertIndexNode(t, internal3, false, false, 0, []int64{16, 18}, []uint32{11, 3, 8})
+		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11}, []PageIndex{2, 7})
+		assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{16, 18}, []PageIndex{11, 3, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 5, []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, 5, []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, 6, []int64{10}, nil)
-		assertIndexNode(t, leaf4, false, true, 6, []int64{12}, nil)
-		assertIndexNode(t, leaf5, false, true, 10, []int64{14, 15}, nil)
-		assertIndexNode(t, leaf6, false, true, 10, []int64{17}, nil)
-		assertIndexNode(t, leaf7, false, true, 10, []int64{21}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
+		assertIndexNode(t, leaf5, false, true, PageIndex(10), []int64{14, 15}, nil)
+		assertIndexNode(t, leaf6, false, true, PageIndex(10), []int64{17}, nil)
+		assertIndexNode(t, leaf7, false, true, PageIndex(10), []int64{21}, nil)
 
 		// No new pages should be recycled
-		assertFreePages(t, idxPager, []uint32{4})
+		assertFreePages(t, idxPager, []PageIndex{4})
 	})
 
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
@@ -443,22 +442,22 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{9, 13}, []uint32{5, 6, 10})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 13}, []PageIndex{5, 6, 10})
 		// Internal nodes
-		assertIndexNode(t, internal1, false, false, 0, []int64{3}, []uint32{1, 9})
-		assertIndexNode(t, internal2, false, false, 0, []int64{11}, []uint32{2, 7})
-		assertIndexNode(t, internal3, false, false, 0, []int64{15, 18}, []uint32{11, 3, 8})
+		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11}, []PageIndex{2, 7})
+		assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{15, 18}, []PageIndex{11, 3, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 5, []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, 5, []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, 6, []int64{10}, nil)
-		assertIndexNode(t, leaf4, false, true, 6, []int64{12}, nil)
-		assertIndexNode(t, leaf5, false, true, 10, []int64{14}, nil)
-		assertIndexNode(t, leaf6, false, true, 10, []int64{17}, nil)
-		assertIndexNode(t, leaf7, false, true, 10, []int64{21}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
+		assertIndexNode(t, leaf5, false, true, PageIndex(10), []int64{14}, nil)
+		assertIndexNode(t, leaf6, false, true, PageIndex(10), []int64{17}, nil)
+		assertIndexNode(t, leaf7, false, true, PageIndex(10), []int64{21}, nil)
 
 		// No new pages should be recycled
-		assertFreePages(t, idxPager, []uint32{4})
+		assertFreePages(t, idxPager, []PageIndex{4})
 	})
 
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
@@ -503,21 +502,21 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{9, 13}, []uint32{5, 6, 10})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 13}, []PageIndex{5, 6, 10})
 		// Internal nodes
-		assertIndexNode(t, internal1, false, false, 0, []int64{3}, []uint32{1, 9})
-		assertIndexNode(t, internal2, false, false, 0, []int64{11}, []uint32{2, 7})
-		assertIndexNode(t, internal3, false, false, 0, []int64{18}, []uint32{11, 8})
+		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11}, []PageIndex{2, 7})
+		assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{18}, []PageIndex{11, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 5, []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, 5, []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, 6, []int64{10}, nil)
-		assertIndexNode(t, leaf4, false, true, 6, []int64{12}, nil)
-		assertIndexNode(t, leaf5, false, true, 10, []int64{14, 17}, nil)
-		assertIndexNode(t, leaf6, false, true, 10, []int64{21}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
+		assertIndexNode(t, leaf5, false, true, PageIndex(10), []int64{14, 17}, nil)
+		assertIndexNode(t, leaf6, false, true, PageIndex(10), []int64{21}, nil)
 
 		// Assert new recycled page
-		assertFreePages(t, idxPager, []uint32{3, 4})
+		assertFreePages(t, idxPager, []PageIndex{3, 4})
 	})
 
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
@@ -560,20 +559,20 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{9}, []uint32{5, 6})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9}, []PageIndex{5, 6})
 		//Internal nodes
-		assertIndexNode(t, internal1, false, false, 0, []int64{3}, []uint32{1, 9})
-		assertIndexNode(t, internal2, false, false, 0, []int64{11, 14, 18}, []uint32{2, 7, 11, 8})
+		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 14, 18}, []PageIndex{2, 7, 11, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 5, []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, 5, []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, 6, []int64{10}, nil)
-		assertIndexNode(t, leaf4, false, true, 6, []int64{12}, nil)
-		assertIndexNode(t, leaf5, false, true, 6, []int64{17}, nil)
-		assertIndexNode(t, leaf6, false, true, 6, []int64{21}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
+		assertIndexNode(t, leaf5, false, true, PageIndex(6), []int64{17}, nil)
+		assertIndexNode(t, leaf6, false, true, PageIndex(6), []int64{21}, nil)
 
 		// Assert new recycled page
-		assertFreePages(t, idxPager, []uint32{10, 3, 4})
+		assertFreePages(t, idxPager, []PageIndex{10, 3, 4})
 	})
 
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
@@ -615,19 +614,19 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{9}, []uint32{5, 6})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9}, []PageIndex{5, 6})
 		//Internal nodes
-		assertIndexNode(t, internal1, false, false, 0, []int64{3}, []uint32{1, 9})
-		assertIndexNode(t, internal2, false, false, 0, []int64{14, 18}, []uint32{2, 11, 8})
+		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{14, 18}, []PageIndex{2, 11, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 5, []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, 5, []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, 6, []int64{11, 12}, nil)
-		assertIndexNode(t, leaf4, false, true, 6, []int64{17}, nil)
-		assertIndexNode(t, leaf5, false, true, 6, []int64{21}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{11, 12}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{17}, nil)
+		assertIndexNode(t, leaf5, false, true, PageIndex(6), []int64{21}, nil)
 
 		// Assert new recycled page
-		assertFreePages(t, idxPager, []uint32{7, 10, 3, 4})
+		assertFreePages(t, idxPager, []PageIndex{7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
@@ -669,19 +668,19 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{11}, []uint32{5, 6})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{11}, []PageIndex{5, 6})
 		//Internal nodes
-		assertIndexNode(t, internal1, false, false, 0, []int64{3}, []uint32{1, 9})
-		assertIndexNode(t, internal2, false, false, 0, []int64{14, 18}, []uint32{2, 11, 8})
+		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{14, 18}, []PageIndex{2, 11, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 5, []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, 5, []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, 6, []int64{12}, nil)
-		assertIndexNode(t, leaf4, false, true, 6, []int64{17}, nil)
-		assertIndexNode(t, leaf5, false, true, 6, []int64{21}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{12}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{17}, nil)
+		assertIndexNode(t, leaf5, false, true, PageIndex(6), []int64{21}, nil)
 
 		// No new pages should be recycled
-		assertFreePages(t, idxPager, []uint32{7, 10, 3, 4})
+		assertFreePages(t, idxPager, []PageIndex{7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
@@ -722,18 +721,18 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{12}, []uint32{5, 6})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{12}, []PageIndex{5, 6})
 		//Internal nodes
-		assertIndexNode(t, internal1, false, false, 0, []int64{3}, []uint32{1, 9})
-		assertIndexNode(t, internal2, false, false, 0, []int64{18}, []uint32{2, 8})
+		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{18}, []PageIndex{2, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 5, []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, 5, []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, 6, []int64{14, 17}, nil)
-		assertIndexNode(t, leaf4, false, true, 6, []int64{21}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{14, 17}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{21}, nil)
 
 		// Assert new recycled page
-		assertFreePages(t, idxPager, []uint32{11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []PageIndex{11, 7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key, 2 pages recycled, only root and leaves left", func(t *testing.T) {
@@ -766,15 +765,15 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{6, 12, 18}, []uint32{1, 9, 2, 8})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{6, 12, 18}, []PageIndex{1, 9, 2, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 0, []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, 0, []int64{7}, nil)
-		assertIndexNode(t, leaf3, false, true, 0, []int64{14, 17}, nil)
-		assertIndexNode(t, leaf4, false, true, 0, []int64{21}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(0), []int64{2}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(0), []int64{7}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(0), []int64{14, 17}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(0), []int64{21}, nil)
 
 		// Assert 2 new recycled pages
-		assertFreePages(t, idxPager, []uint32{5, 6, 11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []PageIndex{5, 6, 11, 7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key", func(t *testing.T) {
@@ -807,15 +806,15 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{6, 12, 18}, []uint32{1, 9, 2, 8})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{6, 12, 18}, []PageIndex{1, 9, 2, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 0, []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, 0, []int64{7}, nil)
-		assertIndexNode(t, leaf3, false, true, 0, []int64{17}, nil)
-		assertIndexNode(t, leaf4, false, true, 0, []int64{21}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(0), []int64{2}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(0), []int64{7}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(0), []int64{17}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(0), []int64{21}, nil)
 
 		// No new pages should be recycled
-		assertFreePages(t, idxPager, []uint32{5, 6, 11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []PageIndex{5, 6, 11, 7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key", func(t *testing.T) {
@@ -847,14 +846,14 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{12, 18}, []uint32{1, 2, 8})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{12, 18}, []PageIndex{1, 2, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 0, []int64{2, 7}, nil)
-		assertIndexNode(t, leaf2, false, true, 0, []int64{17}, nil)
-		assertIndexNode(t, leaf3, false, true, 0, []int64{21}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(0), []int64{2, 7}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(0), []int64{17}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(0), []int64{21}, nil)
 
 		// Assert new recycled page
-		assertFreePages(t, idxPager, []uint32{9, 5, 6, 11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []PageIndex{9, 5, 6, 11, 7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key", func(t *testing.T) {
@@ -886,14 +885,14 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{7, 18}, []uint32{1, 2, 8})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{7, 18}, []PageIndex{1, 2, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 0, []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, 0, []int64{12}, nil)
-		assertIndexNode(t, leaf3, false, true, 0, []int64{21}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(0), []int64{2}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(0), []int64{12}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(0), []int64{21}, nil)
 
 		// No new pages should be recycled
-		assertFreePages(t, idxPager, []uint32{9, 5, 6, 11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []PageIndex{9, 5, 6, 11, 7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key", func(t *testing.T) {
@@ -924,13 +923,13 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{7}, []uint32{1, 2})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{7}, []PageIndex{1, 2})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 0, []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, 0, []int64{12, 18}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(0), []int64{2}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(0), []int64{12, 18}, nil)
 
 		// Assert new recycled page
-		assertFreePages(t, idxPager, []uint32{8, 9, 5, 6, 11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []PageIndex{8, 9, 5, 6, 11, 7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key", func(t *testing.T) {
@@ -961,13 +960,13 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, 0, []int64{12}, []uint32{1, 2})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{12}, []PageIndex{1, 2})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, 0, []int64{7}, nil)
-		assertIndexNode(t, leaf2, false, true, 0, []int64{18}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(0), []int64{7}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(0), []int64{18}, nil)
 
 		// No new pages should be recycled
-		assertFreePages(t, idxPager, []uint32{8, 9, 5, 6, 11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []PageIndex{8, 9, 5, 6, 11, 7, 10, 3, 4})
 	})
 
 	t.Run("Delete another key, only root leaf left", func(t *testing.T) {
@@ -994,7 +993,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, rootNode, true, true, 0, []int64{7, 12}, nil)
 
 		// Assert 2 new recycled pages
-		assertFreePages(t, idxPager, []uint32{1, 2, 8, 9, 5, 6, 11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []PageIndex{1, 2, 8, 9, 5, 6, 11, 7, 10, 3, 4})
 	})
 
 	t.Run("Delete remaining keys, empty root leaf left", func(t *testing.T) {
@@ -1017,7 +1016,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		assertIndexNode(t, rootNode, true, true, 0, nil, nil)
 
 		// No new pages should be recycled
-		assertFreePages(t, idxPager, []uint32{1, 2, 8, 9, 5, 6, 11, 7, 10, 3, 4})
+		assertFreePages(t, idxPager, []PageIndex{1, 2, 8, 9, 5, 6, 11, 7, 10, 3, 4})
 	})
 }
 
@@ -1072,12 +1071,12 @@ func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
 	checkIndexKeys(ctx, t, anIndex, nil)
 }
 
-func assertFreePages(t *testing.T, aPager Pager, expectedFreePages []uint32) {
+func assertFreePages(t *testing.T, aPager Pager, expectedFreePages []PageIndex) {
 	dbHeader := aPager.GetHeader(context.Background())
 
 	assert.Equal(t, len(expectedFreePages), int(dbHeader.FreePageCount))
 
-	actualFreePages := []uint32{}
+	actualFreePages := []PageIndex{}
 	currentFreePageID := dbHeader.FirstFreePage
 
 	for currentFreePageID != 0 {
@@ -1088,7 +1087,7 @@ func assertFreePages(t *testing.T, aPager Pager, expectedFreePages []uint32) {
 	}
 
 	if expectedFreePages == nil {
-		expectedFreePages = []uint32{}
+		expectedFreePages = []PageIndex{}
 	}
 	assert.Equal(t, expectedFreePages, actualFreePages)
 }
