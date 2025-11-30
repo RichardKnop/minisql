@@ -41,6 +41,11 @@ type Server struct {
 	quit     chan struct{}
 	wg       sync.WaitGroup
 	logger   *zap.Logger
+
+	// Add connection tracking
+	connections map[minisql.ConnectionID]*minisql.Connection
+	nextConnID  minisql.ConnectionID
+	connMu      sync.RWMutex
 }
 
 func main() {
@@ -87,9 +92,10 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	aServer := &Server{
-		database: aDatabase,
-		quit:     make(chan struct{}),
-		logger:   logger,
+		database:    aDatabase,
+		quit:        make(chan struct{}),
+		connections: make(map[minisql.ConnectionID]*minisql.Connection),
+		logger:      logger,
 	}
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", portFlag))
@@ -97,12 +103,12 @@ func main() {
 		panic(err)
 	}
 	defer listener.Close()
-	logger.Info("Listening on port", zap.Int("port", portFlag))
+	logger.Info("listening on port", zap.Int("port", portFlag))
 
 	aServer.listener = listener
 	aServer.wg.Add(1)
 
-	go aServer.serve()
+	go aServer.serve(ctx)
 
 	<-sigChan
 
@@ -115,7 +121,7 @@ func main() {
 	os.Exit(0)
 }
 
-func (s *Server) serve() {
+func (s *Server) serve(ctx context.Context) {
 	defer s.wg.Done()
 
 	for {
@@ -129,10 +135,28 @@ func (s *Server) serve() {
 			}
 		} else {
 			s.wg.Add(1)
-			go func() {
+			go func(tcpConn net.Conn) {
 				defer s.wg.Done()
-				s.handleConnection(context.Background(), conn)
-			}()
+
+				// Create connection context
+				s.connMu.Lock()
+				s.nextConnID++
+				aConnection := s.database.NewConnection(s.nextConnID, tcpConn)
+				s.connections[aConnection.ID] = aConnection
+				s.connMu.Unlock()
+
+				s.logger.Debug("new connection", zap.String("id", fmt.Sprint(aConnection.ID)))
+
+				// Handle connection messages
+				s.handleConnection(ctx, aConnection)
+
+				// Cleanup on disconnect
+				s.connMu.Lock()
+				delete(s.connections, aConnection.ID)
+				s.connMu.Unlock()
+
+				s.logger.Debug("connection closed", zap.String("id", fmt.Sprint(aConnection.ID)))
+			}(conn)
 		}
 	}
 }
@@ -143,8 +167,9 @@ func (s *Server) stop() {
 	s.wg.Wait()
 }
 
-func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
+func (s *Server) handleConnection(ctx context.Context, conn *minisql.Connection) {
 	defer conn.Close()
+	defer conn.Cleanup(ctx)
 
 	buf := make([]byte, 2048)
 
@@ -154,13 +179,13 @@ ReadLoop:
 		case <-s.quit:
 			return
 		default:
-			conn.SetDeadline(time.Now().Add(200 * time.Millisecond))
-			n, err := conn.Read(buf)
+			conn.TcpConn().SetDeadline(time.Now().Add(200 * time.Millisecond))
+			n, err := conn.TcpConn().Read(buf)
 			if err != nil {
 				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
 					continue ReadLoop
 				} else if err != io.EOF {
-					log.Println("read error", err)
+					s.logger.Error("read error", zap.Error(err))
 					return
 				}
 			}
@@ -169,14 +194,14 @@ ReadLoop:
 			}
 
 			if err := s.handleMessage(ctx, conn, buf[:n]); err != nil {
-				log.Println("Error:", err)
+				s.logger.Error("error handling message", zap.Error(err))
 				return
 			}
 		}
 	}
 }
 
-func (s *Server) handleMessage(ctx context.Context, conn net.Conn, msg []byte) error {
+func (s *Server) handleMessage(ctx context.Context, conn *minisql.Connection, msg []byte) error {
 	s.logger.Debug("Received message", zap.String("message", string(msg)))
 
 	var req protocol.Request
@@ -211,7 +236,7 @@ func (s *Server) handleMessage(ctx context.Context, conn net.Conn, msg []byte) e
 	return nil
 }
 
-func (s *Server) handleSQL(ctx context.Context, conn net.Conn, sql string) error {
+func (s *Server) handleSQL(ctx context.Context, conn *minisql.Connection, sql string) error {
 	stmts, err := s.database.PrepareStatements(ctx, sql)
 	if err != nil {
 		return s.sendResponse(conn, protocol.Response{
@@ -221,12 +246,15 @@ func (s *Server) handleSQL(ctx context.Context, conn net.Conn, sql string) error
 	}
 
 	for _, stmt := range stmts {
-		results, err := s.database.ExecuteInTransaction(ctx, stmt)
+		results, err := conn.ExecuteStatements(ctx, stmt)
 		if err != nil {
 			return s.sendResponse(conn, protocol.Response{
 				Success: false,
 				Error:   err.Error(),
 			})
+		}
+		if len(results) == 0 {
+			continue
 		}
 		aResult := results[0]
 
@@ -271,16 +299,16 @@ func (s *Server) handleSQL(ctx context.Context, conn net.Conn, sql string) error
 	return nil
 }
 
-func (s *Server) sendResponse(conn net.Conn, resp protocol.Response) error {
+func (s *Server) sendResponse(conn *minisql.Connection, resp protocol.Response) error {
 	jsonData, err := json.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("error marshalling response: %v", err)
 	}
-	_, err = conn.Write(jsonData)
+	_, err = conn.TcpConn().Write(jsonData)
 	if err != nil {
 		return fmt.Errorf("error writing response: %v", err)
 	}
-	_, err = conn.Write([]byte("\n"))
+	_, err = conn.TcpConn().Write([]byte("\n"))
 	if err != nil {
 		return fmt.Errorf("error writing response newline: %v", err)
 	}

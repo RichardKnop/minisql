@@ -2,10 +2,28 @@ package minisql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 )
+
+type txKeyType struct{}
+
+var txKey = txKeyType{}
+
+func WithTransaction(ctx context.Context, tx *Transaction) context.Context {
+	return context.WithValue(ctx, txKey, tx)
+}
+
+func TxFromContext(ctx context.Context) *Transaction {
+	if tx, ok := ctx.Value(txKey).(*Transaction); ok {
+		return tx
+	}
+	return nil
+}
 
 type TransactionID uint64
 
@@ -33,14 +51,40 @@ type TransactionManager struct {
 	transactions          map[TransactionID]*Transaction
 	globalPageVersions    map[PageIndex]uint64 // pageIdx -> current version
 	globalDbHeaderVersion uint64
+	logger                *zap.Logger
 }
 
-func NewTransactionManager() *TransactionManager {
+func NewTransactionManager(logger *zap.Logger) *TransactionManager {
 	return &TransactionManager{
 		nextTxID:           1,
 		transactions:       make(map[TransactionID]*Transaction),
 		globalPageVersions: make(map[PageIndex]uint64),
+		logger:             logger,
 	}
+}
+
+func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(ctx context.Context) error, saver PageSaver) error {
+	// If there is a transaction already in context, use it.
+	// This means tx was manually started with BEGIN
+	// and will stay open until COMMIT/ROLLBACK.
+	if TxFromContext(ctx) != nil {
+		return fn(ctx)
+	}
+
+	tx := tm.BeginTransaction(ctx)
+	ctx = WithTransaction(ctx, tx)
+
+	if err := fn(ctx); err != nil {
+		tm.RollbackTransaction(ctx, tx)
+		return err
+	}
+
+	if err := tm.CommitTransaction(ctx, tx, saver); err != nil {
+		tm.RollbackTransaction(ctx, tx)
+		return err
+	}
+
+	return nil
 }
 
 func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction {
@@ -58,8 +102,12 @@ func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction
 	tm.nextTxID++
 	tm.transactions[tx.ID] = tx
 
+	tm.logger.Debug("begin transaction", zap.Uint64("tx_id", uint64(tx.ID)))
+
 	return tx
 }
+
+var ErrTxConflict = errors.New("transaction conflict detected")
 
 func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transaction, saver PageSaver) error {
 	tm.mu.Lock()
@@ -75,13 +123,13 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		if currentVersion > readVersion {
 			// Page was modified by another transaction
 			tx.Status = TxAborted
-			return fmt.Errorf("transaction %d aborted due to conflict on page %d", tx.ID, pageIdx)
+			return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", ErrTxConflict, tx.ID, pageIdx)
 		}
 	}
 	if tx.DbHeaderRead != nil && tm.globalDbHeaderVersion > *tx.DbHeaderRead {
 		// DB header was modified by another transaction
 		tx.Status = TxAborted
-		return fmt.Errorf("transaction %d aborted due to conflict on DB header", tx.ID)
+		return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
 	}
 
 	// No conflicts, apply all writes
@@ -104,6 +152,8 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 	// Clean up transaction
 	delete(tm.transactions, tx.ID)
 
+	tm.logger.Debug("commit transaction", zap.Uint64("tx_id", uint64(tx.ID)))
+
 	return nil
 }
 
@@ -119,21 +169,6 @@ func (tm *TransactionManager) RollbackTransaction(ctx context.Context, tx *Trans
 
 	// Clean up transaction
 	delete(tm.transactions, tx.ID)
-}
 
-func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(ctx context.Context) error, saver PageSaver) error {
-	tx := tm.BeginTransaction(ctx)
-	ctx = WithTransaction(ctx, tx)
-
-	if err := fn(ctx); err != nil {
-		tm.RollbackTransaction(ctx, tx)
-		return err
-	}
-
-	if err := tm.CommitTransaction(ctx, tx, saver); err != nil {
-		tm.RollbackTransaction(ctx, tx)
-		return err
-	}
-
-	return nil
+	tm.logger.Debug("rollback transaction", zap.Uint64("tx_id", uint64(tx.ID)))
 }

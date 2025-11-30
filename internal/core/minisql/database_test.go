@@ -49,7 +49,7 @@ func TestNewDatabase_WithExistingTableAndPrimaryKey(t *testing.T) {
 		TableName: testTableName2,
 		Columns:   testColumnsWithPrimaryKey,
 	}
-	_, err = aDatabase.ExecuteInTransaction(ctx, stmt, stmt2)
+	_, err = aDatabase.NewConnection(1, nil).ExecuteStatements(ctx, stmt, stmt2)
 	require.NoError(t, err)
 
 	// Now, let's flush and re-initialize the database to load existing tables
@@ -94,7 +94,7 @@ func TestDatabase_CreateTable(t *testing.T) {
 		TableName: testTableName,
 		Columns:   testColumns,
 	}
-	_, err = aDatabase.ExecuteInTransaction(ctx, stmt)
+	_, err = aDatabase.NewConnection(1, nil).ExecuteStatements(ctx, stmt)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 2)
@@ -125,7 +125,7 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 		TableName: testTableName,
 		Columns:   testColumnsWithPrimaryKey,
 	}
-	_, err = aDatabase.ExecuteInTransaction(ctx, stmt)
+	_, err = aDatabase.NewConnection(1, nil).ExecuteStatements(ctx, stmt)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 2)
@@ -158,7 +158,7 @@ func TestDatabase_DropTable(t *testing.T) {
 		TableName: testTableName,
 		Columns:   testColumns,
 	}
-	_, err = aDatabase.ExecuteInTransaction(ctx, stmt)
+	_, err = aDatabase.NewConnection(1, nil).ExecuteStatements(ctx, stmt)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 2)
@@ -167,7 +167,7 @@ func TestDatabase_DropTable(t *testing.T) {
 		Kind:      DropTable,
 		TableName: testTableName,
 	}
-	_, err = aDatabase.ExecuteInTransaction(ctx, stmt)
+	_, err = aDatabase.NewConnection(1, nil).ExecuteStatements(ctx, stmt)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 1)
@@ -192,7 +192,7 @@ func TestDatabase_DropTable_WithPrimaryKey(t *testing.T) {
 		TableName: testTableName,
 		Columns:   testColumnsWithPrimaryKey,
 	}
-	_, err = aDatabase.ExecuteInTransaction(ctx, stmt)
+	_, err = aDatabase.NewConnection(1, nil).ExecuteStatements(ctx, stmt)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 2)
@@ -202,7 +202,7 @@ func TestDatabase_DropTable_WithPrimaryKey(t *testing.T) {
 		Kind:      DropTable,
 		TableName: testTableName,
 	}
-	_, err = aDatabase.ExecuteInTransaction(ctx, stmt)
+	_, err = aDatabase.NewConnection(1, nil).ExecuteStatements(ctx, stmt)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 1)

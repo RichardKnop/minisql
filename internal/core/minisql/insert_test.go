@@ -8,6 +8,7 @@ import (
 	"github.com/RichardKnop/minisql/pkg/bitwise"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestTable_Insert(t *testing.T) {
@@ -15,7 +16,7 @@ func TestTable_Insert(t *testing.T) {
 		aPager     = initTest(t)
 		ctx        = context.Background()
 		rows       = gen.Rows(2)
-		txManager  = NewTransactionManager()
+		txManager  = NewTransactionManager(zap.NewNop())
 		tablePager = NewTransactionalPager(
 			aPager.ForTable(testColumns),
 			txManager,
@@ -82,7 +83,7 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 		aPager     = initTest(t)
 		ctx        = context.Background()
 		rows       = gen.Rows(3)
-		txManager  = NewTransactionManager()
+		txManager  = NewTransactionManager(zap.NewNop())
 		tablePager = NewTransactionalPager(
 			aPager.ForTable(testColumns),
 			txManager,
@@ -116,7 +117,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 		aPager     = initTest(t)
 		ctx        = context.Background()
 		rows       = gen.MediumRows(6)
-		txManager  = NewTransactionManager()
+		txManager  = NewTransactionManager(zap.NewNop())
 		tablePager = NewTransactionalPager(
 			aPager.ForTable(testMediumColumns),
 			txManager,
@@ -180,7 +181,7 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 		aPager     = initTest(t)
 		ctx        = context.Background()
 		rows       = gen.BigRows(4)
-		txManager  = NewTransactionManager()
+		txManager  = NewTransactionManager(zap.NewNop())
 		tablePager = NewTransactionalPager(
 			aPager.ForTable(testBigColumns),
 			txManager,
@@ -244,7 +245,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	var (
 		aPager     = initTest(t)
 		ctx        = context.Background()
-		txManager  = NewTransactionManager()
+		txManager  = NewTransactionManager(zap.NewNop())
 		tablePager = NewTransactionalPager(
 			aPager.ForTable(testBigColumns),
 			txManager,
@@ -348,7 +349,7 @@ func TestTable_Insert_Overflow(t *testing.T) {
 	var (
 		aPager     = initTest(t)
 		ctx        = context.Background()
-		txManager  = NewTransactionManager()
+		txManager  = NewTransactionManager(zap.NewNop())
 		tablePager = NewTransactionalPager(
 			aPager.ForTable(testOverflowColumns),
 			txManager,

@@ -6,13 +6,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestTable_Update_PrimaryKey(t *testing.T) {
 	var (
 		aPager     = initTest(t)
 		ctx        = context.Background()
-		txManager  = NewTransactionManager()
+		txManager  = NewTransactionManager(zap.NewNop())
 		tablePager = NewTransactionalPager(
 			aPager.ForTable(testColumnsWithPrimaryKey),
 			txManager,
