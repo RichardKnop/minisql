@@ -12,15 +12,14 @@ import (
 func TestTable_Select(t *testing.T) {
 	aPager := initTest(t)
 
-	txManager := NewTransactionManager(zap.NewNop())
-	tablePager := NewTransactionalPager(
-		aPager.ForTable(testColumns),
-		txManager,
-	)
-
 	var (
-		ctx    = context.Background()
-		rows   = gen.Rows(38)
+		ctx        = context.Background()
+		rows       = gen.Rows(38)
+		txManager  = NewTransactionManager(zap.NewNop())
+		tablePager = NewTransactionalPager(
+			aPager.ForTable(testColumns),
+			txManager,
+		)
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumns, 0)
 	)
 

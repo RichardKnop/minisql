@@ -129,7 +129,6 @@ You can create your own non-system table now:
 
 ```sh
 minisql> create table users(id int8 primary key autoincrement, name varchar(255), email text, age int4);
-Rows affected: 0
 minisql>
 ```
 

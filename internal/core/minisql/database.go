@@ -54,12 +54,7 @@ var (
 		sql text
 	);`, SchemaTableName)
 
-	mainTableFields = []string{
-		"type",
-		"name",
-		"root_page",
-		"sql",
-	}
+	mainTableFields = columnNames(mainTableColumns...)
 )
 
 type SchemaType int
