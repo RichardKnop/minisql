@@ -6,10 +6,10 @@ const (
 	RootPageConfigSize = 100
 )
 
-func columnNames(columns ...Column) []string {
-	names := make([]string, 0, len(columns))
+func fieldsFromColumns(columns ...Column) []Field {
+	fields := make([]Field, 0, len(columns))
 	for _, aColumn := range columns {
-		names = append(names, aColumn.Name)
+		fields = append(fields, Field{Name: aColumn.Name})
 	}
-	return names
+	return fields
 }

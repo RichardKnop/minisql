@@ -54,7 +54,7 @@ var (
 		sql text
 	);`, SchemaTableName)
 
-	mainTableFields = columnNames(mainTableColumns...)
+	mainTableFields = fieldsFromColumns(mainTableColumns...)
 )
 
 type SchemaType int

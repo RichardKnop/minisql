@@ -31,7 +31,7 @@ func TestTable_Select(t *testing.T) {
 	// Batch insert test rows
 	insertStmt := Statement{
 		Kind:    Insert,
-		Fields:  columnNames(testColumns...),
+		Fields:  fieldsFromColumns(testColumns...),
 		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
@@ -46,7 +46,7 @@ func TestTable_Select(t *testing.T) {
 	t.Run("Select all rows", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: columnNames(testColumns...),
+			Fields: fieldsFromColumns(testColumns...),
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)
@@ -65,7 +65,7 @@ func TestTable_Select(t *testing.T) {
 	t.Run("Select no rows", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: columnNames(testColumns...),
+			Fields: fieldsFromColumns(testColumns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -99,7 +99,7 @@ func TestTable_Select(t *testing.T) {
 	t.Run("Select single row", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: columnNames(testColumns...),
+			Fields: fieldsFromColumns(testColumns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -134,7 +134,7 @@ func TestTable_Select(t *testing.T) {
 	t.Run("Select rows with NULL values when there are none", func(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
-			Fields:     columnNames(testColumns...),
+			Fields:     fieldsFromColumns(testColumns...),
 			Conditions: OneOrMore{{FieldIsNull("id")}},
 		}
 
@@ -154,7 +154,7 @@ func TestTable_Select(t *testing.T) {
 	t.Run("Select rows with NULL values", func(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
-			Fields:     columnNames(testColumns...),
+			Fields:     fieldsFromColumns(testColumns...),
 			Conditions: OneOrMore{{FieldIsNull("age")}},
 		}
 
@@ -176,7 +176,7 @@ func TestTable_Select(t *testing.T) {
 	t.Run("Select rows with NOT NULL values", func(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
-			Fields:     columnNames(testColumns...),
+			Fields:     fieldsFromColumns(testColumns...),
 			Conditions: OneOrMore{{FieldIsNotNull("age")}},
 		}
 
@@ -217,7 +217,7 @@ func TestTable_Select_Overflow(t *testing.T) {
 	// Batch insert test rows
 	insertStmt := Statement{
 		Kind:    Insert,
-		Fields:  columnNames(testOverflowColumns...),
+		Fields:  fieldsFromColumns(testOverflowColumns...),
 		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
@@ -232,7 +232,7 @@ func TestTable_Select_Overflow(t *testing.T) {
 	t.Run("Select all rows", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: columnNames(testOverflowColumns...),
+			Fields: fieldsFromColumns(testOverflowColumns...),
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)

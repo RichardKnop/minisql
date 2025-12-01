@@ -42,7 +42,7 @@ func TestTable_Insert_PrimaryKey(t *testing.T) {
 	t.Run("Insert rows with primary key", func(t *testing.T) {
 		stmt := Statement{
 			Kind:    Insert,
-			Fields:  columnNames(testColumnsWithPrimaryKey...),
+			Fields:  fieldsFromColumns(testColumnsWithPrimaryKey...),
 			Inserts: make([][]OptionalValue, 0, len(rows)),
 		}
 		for _, aRow := range rows {
@@ -68,7 +68,7 @@ func TestTable_Insert_PrimaryKey(t *testing.T) {
 	t.Run("Try to insert duplicate primary key", func(t *testing.T) {
 		stmt := Statement{
 			Kind:    Insert,
-			Fields:  columnNames(testColumnsWithPrimaryKey...),
+			Fields:  fieldsFromColumns(testColumnsWithPrimaryKey...),
 			Inserts: [][]OptionalValue{rows[0].Values},
 		}
 
@@ -113,7 +113,7 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 	t.Run("Insert rows without primary key, autoincrement should generate primary keys", func(t *testing.T) {
 		stmt := Statement{
 			Kind:    Insert,
-			Fields:  columnNames(testColumnsWithPrimaryKey[1:]...), // exclude primary key column
+			Fields:  fieldsFromColumns(testColumnsWithPrimaryKey[1:]...), // exclude primary key column
 			Inserts: make([][]OptionalValue, 0, len(rows)),
 		}
 		for _, aRow := range rows {
@@ -147,7 +147,7 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 func checkRowsWithPrimaryKey(ctx context.Context, t *testing.T, aTable *Table, expectedRows []Row) {
 	selectResult, err := aTable.Select(ctx, Statement{
 		Kind:   Select,
-		Fields: columnNames(testColumnsWithPrimaryKey...),
+		Fields: fieldsFromColumns(testColumnsWithPrimaryKey...),
 	})
 	require.NoError(t, err)
 

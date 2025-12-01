@@ -32,7 +32,7 @@ func TestConnection_ExecuteStatements(t *testing.T) {
 	results, err := testConn.ExecuteStatements(ctx, Statement{
 		Kind:      Insert,
 		TableName: testTable.Name,
-		Fields:    columnNames(testColumns...),
+		Fields:    fieldsFromColumns(testColumns...),
 		Inserts:   [][]OptionalValue{rows[0].Values},
 	})
 	require.NoError(t, err)
@@ -47,7 +47,7 @@ func TestConnection_ExecuteStatements(t *testing.T) {
 		results, err := testConn.ExecuteStatements(ctx, Statement{
 			Kind:      Select,
 			TableName: testTable.Name,
-			Fields:    columnNames(testColumns...),
+			Fields:    fieldsFromColumns(testColumns...),
 		})
 		require.NoError(t, err)
 		require.Len(t, results, 1)

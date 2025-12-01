@@ -34,7 +34,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	// Batch insert test rows
 	stmt := Statement{
 		Kind:    Insert,
-		Fields:  columnNames(testMediumColumns...),
+		Fields:  fieldsFromColumns(testMediumColumns...),
 		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
@@ -150,7 +150,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	// Batch insert test rows
 	stmt := Statement{
 		Kind:    Insert,
-		Fields:  columnNames(testMediumColumns...),
+		Fields:  fieldsFromColumns(testMediumColumns...),
 		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
@@ -512,7 +512,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	// Batch insert test rows
 	stmt := Statement{
 		Kind:    Insert,
-		Fields:  columnNames(testMediumColumns...),
+		Fields:  fieldsFromColumns(testMediumColumns...),
 		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
@@ -571,7 +571,7 @@ func TestTable_Delete_Overflow(t *testing.T) {
 	// Batch insert test rows
 	insertStmt := Statement{
 		Kind:    Insert,
-		Fields:  columnNames(testOverflowColumns...),
+		Fields:  fieldsFromColumns(testOverflowColumns...),
 		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
@@ -642,7 +642,7 @@ func rowIDs(rows ...Row) []any {
 func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []Row) {
 	selectResult, err := aTable.Select(ctx, Statement{
 		Kind:   Select,
-		Fields: columnNames(testColumns...),
+		Fields: fieldsFromColumns(testColumns...),
 	})
 	require.NoError(t, err)
 

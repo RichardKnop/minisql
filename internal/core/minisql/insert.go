@@ -14,7 +14,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 	// insert statement, setting them to NULL
 	for i, aColumn := range t.Columns {
 		if !stmt.HasField(aColumn.Name) {
-			stmt.Fields = slices.Insert(stmt.Fields, i, aColumn.Name)
+			stmt.Fields = slices.Insert(stmt.Fields, i, Field{Name: aColumn.Name})
 			for j := range stmt.Inserts {
 				stmt.Inserts[j] = slices.Insert(stmt.Inserts[j], i, OptionalValue{})
 			}

@@ -297,12 +297,16 @@ func hasTextColumn(columns ...Column) bool {
 	return false
 }
 
+type Field struct {
+	Name string
+}
+
 type Statement struct {
 	Kind        StatementKind
 	IfNotExists bool
 	TableName   string
 	Columns     []Column // use for CREATE TABLE
-	Fields      []string // Used for SELECT (i.e. SELECTed field names) and INSERT (INSERTEDed field names)
+	Fields      []Field  // Used for SELECT (i.e. SELECTed field names) and INSERT (INSERTEDed field names)
 	Aliases     map[string]string
 	Inserts     [][]OptionalValue
 	Updates     map[string]OptionalValue
@@ -311,7 +315,7 @@ type Statement struct {
 
 func (s Statement) HasField(name string) bool {
 	for _, field := range s.Fields {
-		if field == name {
+		if field.Name == name {
 			return true
 		}
 	}
@@ -408,34 +412,33 @@ func (s Statement) validateInsert(aTable *Table) error {
 		}
 	}
 	for i, aField := range s.Fields {
-		aColumn, ok := aTable.ColumnByName(aField)
+		aColumn, ok := aTable.ColumnByName(aField.Name)
 		if !ok {
-			return fmt.Errorf("unknown field %q in table %q", aField, aTable.Name)
+			return fmt.Errorf("unknown field %q in table %q", aField.Name, aTable.Name)
 		}
 		for _, anInsert := range s.Inserts {
 			if len(anInsert) != len(s.Fields) {
 				return fmt.Errorf("insert: expected %d values, got %d", len(s.Fields), len(anInsert))
 			}
 			if !anInsert[i].Valid && !aColumn.Nullable && !(aColumn.PrimaryKey && aColumn.Autoincrement) {
-				return fmt.Errorf("field %q cannot be NULL", aField)
+				return fmt.Errorf("field %q cannot be NULL", aField.Name)
 			}
 			if anInsert[i].Valid {
 				if aColumn.Kind.IsText() && !utf8.ValidString(anInsert[i].Value.(TextPointer).String()) {
-					return fmt.Errorf("field %q expects valid UTF-8 string", aField)
+					return fmt.Errorf("field %q expects valid UTF-8 string", aField.Name)
 				}
 			}
 			if aColumn.Kind.IsText() && anInsert[i].Valid {
 				switch aColumn.Kind {
 				case Varchar:
 					if len([]byte(anInsert[i].Value.(TextPointer).String())) > int(aColumn.Size) {
-						return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", aField, aColumn.Size)
+						return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", aField.Name, aColumn.Size)
 					}
 				case Text:
 					if len([]byte(anInsert[i].Value.(TextPointer).String())) > MaxOverflowTextSize {
-						return fmt.Errorf("field %q exceeds maximum TEXT length of %d", aField, MaxOverflowTextSize)
+						return fmt.Errorf("field %q exceeds maximum TEXT length of %d", aField.Name, MaxOverflowTextSize)
 					}
 				}
-
 			}
 		}
 	}
@@ -447,16 +450,16 @@ func (s Statement) validateUpdate(aTable *Table) error {
 		return fmt.Errorf("at least one field to update is required")
 	}
 	for _, aField := range s.Fields {
-		aColumn, ok := aTable.ColumnByName(aField)
+		aColumn, ok := aTable.ColumnByName(aField.Name)
 		if !ok {
-			return fmt.Errorf("unknown field %q in table %q", aField, aTable.Name)
+			return fmt.Errorf("unknown field %q in table %q", aField.Name, aTable.Name)
 		}
-		if !s.Updates[aField].Valid && !aColumn.Nullable {
-			return fmt.Errorf("field %q cannot be NULL", aField)
+		if !s.Updates[aField.Name].Valid && !aColumn.Nullable {
+			return fmt.Errorf("field %q cannot be NULL", aField.Name)
 		}
-		if s.Updates[aField].Valid {
-			if aColumn.Kind == Varchar && !utf8.ValidString(s.Updates[aField].Value.(TextPointer).String()) {
-				return fmt.Errorf("field %q expects valid UTF-8 string", aField)
+		if s.Updates[aField.Name].Valid {
+			if aColumn.Kind == Varchar && !utf8.ValidString(s.Updates[aField.Name].Value.(TextPointer).String()) {
+				return fmt.Errorf("field %q expects valid UTF-8 string", aField.Name)
 			}
 		}
 	}
@@ -497,8 +500,8 @@ type StatementResult struct {
 
 func (stmt Statement) InsertForColumn(name string, insertIdx int) (OptionalValue, bool) {
 	fieldIdx := -1
-	for i, colName := range stmt.Fields {
-		if colName == name {
+	for i, aField := range stmt.Fields {
+		if aField.Name == name {
 			fieldIdx = i
 			break
 		}
@@ -515,8 +518,8 @@ func (stmt Statement) InsertForColumn(name string, insertIdx int) (OptionalValue
 }
 
 func (stmt Statement) ColumnIdx(name string) int {
-	for i, colName := range stmt.Fields {
-		if colName == name {
+	for i, aField := range stmt.Fields {
+		if aField.Name == name {
 			return i
 		}
 	}

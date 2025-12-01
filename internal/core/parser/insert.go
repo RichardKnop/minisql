@@ -35,7 +35,7 @@ func (p *parser) doParseInsert() error {
 		if !isIdentifier(identifier) {
 			return errInsertNoFields
 		}
-		p.Fields = append(p.Fields, identifier)
+		p.Fields = append(p.Fields, minisql.Field{Name: identifier})
 		p.pop()
 		p.step = stepInsertFieldsCommaOrClosingParens
 	case stepInsertFieldsCommaOrClosingParens:

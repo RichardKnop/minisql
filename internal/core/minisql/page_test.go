@@ -35,7 +35,7 @@ func TestTable_PageRecycling(t *testing.T) {
 	// Batch insert test rows
 	stmt := Statement{
 		Kind:    Insert,
-		Fields:  columnNames(testMediumColumns...),
+		Fields:  fieldsFromColumns(testMediumColumns...),
 		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {

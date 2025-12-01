@@ -39,7 +39,7 @@ func TestParse_Select(t *testing.T) {
 				{
 					Kind:      minisql.Select,
 					TableName: "b",
-					Fields:    []string{"a"},
+					Fields:    []minisql.Field{{Name: "a"}},
 				},
 			},
 			nil,
@@ -51,7 +51,7 @@ func TestParse_Select(t *testing.T) {
 				{
 					Kind:      minisql.Select,
 					TableName: "b",
-					Fields:    []string{"a"},
+					Fields:    []minisql.Field{{Name: "a"}},
 				},
 			},
 			nil,
@@ -63,7 +63,7 @@ func TestParse_Select(t *testing.T) {
 				{
 					Kind:      minisql.Select,
 					TableName: "b",
-					Fields:    []string{"a", "c", "d"},
+					Fields:    []minisql.Field{{Name: "a"}, {Name: "c"}, {Name: "d"}},
 				},
 			},
 			nil,
@@ -75,7 +75,7 @@ func TestParse_Select(t *testing.T) {
 				{
 					Kind:      minisql.Select,
 					TableName: "b",
-					Fields:    []string{"a", "b", "c"},
+					Fields:    []minisql.Field{{Name: "a"}, {Name: "b"}, {Name: "c"}},
 					Aliases: map[string]string{
 						"a": "z",
 						"b": "y",
@@ -91,7 +91,7 @@ func TestParse_Select(t *testing.T) {
 				{
 					Kind:      minisql.Select,
 					TableName: "b",
-					Fields:    []string{"*"},
+					Fields:    []minisql.Field{{Name: "*"}},
 				},
 			},
 			nil,
@@ -103,7 +103,7 @@ func TestParse_Select(t *testing.T) {
 				{
 					Kind:      minisql.Select,
 					TableName: "b",
-					Fields:    []string{"a", "*"},
+					Fields:    []minisql.Field{{Name: "a"}, {Name: "*"}},
 				},
 			},
 			nil,
@@ -127,7 +127,7 @@ func TestParse_Select(t *testing.T) {
 				{
 					Kind:      minisql.Select,
 					TableName: "b",
-					Fields:    []string{"a", "c", "d"},
+					Fields:    []minisql.Field{{Name: "a"}, {Name: "c"}, {Name: "d"}},
 					Conditions: minisql.OneOrMore{
 						{
 							{

@@ -146,14 +146,14 @@ func (r *Row) Clone() Row {
 	return aClone
 }
 
-func (r *Row) appendValues(fields []string, values []OptionalValue) {
+func (r *Row) appendValues(fields []Field, values []OptionalValue) {
 	var (
 		found    = false
 		fieldIdx = 0
 	)
 	for _, aColumn := range r.Columns {
-		for i, field := range fields {
-			if field == aColumn.Name {
+		for i, aField := range fields {
+			if aField.Name == aColumn.Name {
 				found = true
 				fieldIdx = i
 				break

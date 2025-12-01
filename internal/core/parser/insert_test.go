@@ -63,7 +63,7 @@ func TestParse_Insert(t *testing.T) {
 				{
 					Kind:      minisql.Insert,
 					TableName: "a",
-					Fields:    []string{"b"},
+					Fields:    []minisql.Field{{Name: "b"}},
 					Inserts:   [][]minisql.OptionalValue{{{Value: minisql.NewTextPointer([]byte("1")), Valid: true}}},
 				},
 			},
@@ -82,7 +82,7 @@ func TestParse_Insert(t *testing.T) {
 				{
 					Kind:      minisql.Insert,
 					TableName: "a",
-					Fields:    []string{"b", "c", "d"},
+					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "d"}},
 					Inserts: [][]minisql.OptionalValue{
 						{
 							{Value: minisql.NewTextPointer([]byte("1")), Valid: true},
@@ -101,7 +101,7 @@ func TestParse_Insert(t *testing.T) {
 				{
 					Kind:      minisql.Insert,
 					TableName: "a",
-					Fields:    []string{"b", "c", "d"},
+					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "d"}},
 					Inserts: [][]minisql.OptionalValue{
 						{
 							{Value: minisql.NewTextPointer([]byte("1")), Valid: true},
@@ -125,7 +125,7 @@ func TestParse_Insert(t *testing.T) {
 				{
 					Kind:      minisql.Insert,
 					TableName: "a",
-					Fields:    []string{"b", "c", "d", "e", "f"},
+					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "d"}, {Name: "e"}, {Name: "f"}},
 					Inserts: [][]minisql.OptionalValue{
 						{
 							{Value: int64(25), Valid: true},

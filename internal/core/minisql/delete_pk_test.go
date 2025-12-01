@@ -42,7 +42,7 @@ func TestTable_Delete_PrimaryKey(t *testing.T) {
 	t.Run("Insert rows with primary key", func(t *testing.T) {
 		stmt := Statement{
 			Kind:    Insert,
-			Fields:  columnNames(testColumnsWithPrimaryKey...),
+			Fields:  fieldsFromColumns(testColumnsWithPrimaryKey...),
 			Inserts: make([][]OptionalValue, 0, len(rows)),
 		}
 		for _, aRow := range rows {

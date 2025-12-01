@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -91,7 +92,7 @@ func TestStatement_Validate(t *testing.T) {
 			Kind:      Insert,
 			TableName: aTable.Name,
 			Columns:   aTable.Columns[1:], // Missing the "id" column
-			Fields:    []string{"id", "email", "age", "verified"},
+			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
 					{Value: int32(1), Valid: true},
@@ -112,7 +113,7 @@ func TestStatement_Validate(t *testing.T) {
 			Kind:      Insert,
 			TableName: aTable.Name,
 			Columns:   aTable.Columns,
-			Fields:    []string{"id"},
+			Fields:    []Field{{Name: "id"}},
 			Inserts: [][]OptionalValue{
 				{
 					{Value: int32(1), Valid: true},
@@ -130,7 +131,7 @@ func TestStatement_Validate(t *testing.T) {
 			Kind:      Insert,
 			TableName: aTable.Name,
 			Columns:   aTable.Columns,
-			Fields:    []string{"id", "email", "age", "verified"},
+			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
 					{Valid: false}, // NULL for non-nullable id
@@ -151,7 +152,7 @@ func TestStatement_Validate(t *testing.T) {
 			Kind:      Insert,
 			TableName: aTable.Name,
 			Columns:   aTable.Columns,
-			Fields:    []string{"id", "email", "age", "verified"},
+			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
 					{Value: int32(1), Valid: true},
@@ -171,7 +172,7 @@ func TestStatement_Validate(t *testing.T) {
 			Kind:      Insert,
 			TableName: aTable.Name,
 			Columns:   aTable.Columns,
-			Fields:    []string{"id", "email", "age", "verified"},
+			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
 					{Value: int32(1), Valid: true},
@@ -191,7 +192,7 @@ func TestStatement_Validate(t *testing.T) {
 			Kind:      Insert,
 			TableName: aTable.Name,
 			Columns:   aTable.Columns,
-			Fields:    []string{"id", "email", "bogus"},
+			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "bogus"}},
 			Inserts: [][]OptionalValue{
 				{
 					{Value: int32(1), Valid: true},
@@ -211,7 +212,7 @@ func TestStatement_Validate(t *testing.T) {
 			Kind:      Insert,
 			TableName: aTable.Name,
 			Columns:   aTable.Columns,
-			Fields:    []string{"id", "email", "age", "verified"},
+			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
 					{Value: int32(1), Valid: true},
@@ -227,12 +228,47 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, `field "email" expects valid UTF-8 string`)
 	})
 
+	t.Run("INSERT with text exceeding maximum VARCHAR length should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Insert,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    []Field{{Name: "id"}, {Name: "email"}},
+			Inserts: [][]OptionalValue{
+				{
+					{Value: int32(1), Valid: true},
+					{Value: NewTextPointer(bytes.Repeat([]byte{'a'}, 256)), Valid: true},
+				},
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `field "email" exceeds maximum VARCHAR length of 255`)
+	})
+
+	t.Run("UPDATE with unknown field should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Update,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    []Field{{Name: "unknown_field"}},
+			Updates: map[string]OptionalValue{
+				"unknown_field": {Valid: false},
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `unknown field "unknown_field" in table "test_table"`)
+	})
+
 	t.Run("UPDATE with NULL to non-nullable column should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Update,
 			TableName: aTable.Name,
 			Columns:   aTable.Columns,
-			Fields:    []string{"email"},
+			Fields:    []Field{{Name: "email"}},
 			Updates: map[string]OptionalValue{
 				"email": {Valid: false}, // NULL for non-nullable email
 			},
@@ -248,7 +284,7 @@ func TestStatement_Validate(t *testing.T) {
 			Kind:      Update,
 			TableName: aTable.Name,
 			Columns:   aTable.Columns,
-			Fields:    []string{"age"},
+			Fields:    []Field{{Name: "age"}},
 			Updates: map[string]OptionalValue{
 				"age": {Valid: false}, // NULL for nullable age
 			},
@@ -263,7 +299,7 @@ func TestStatement_Validate(t *testing.T) {
 			Kind:      Update,
 			TableName: aTable.Name,
 			Columns:   aTable.Columns,
-			Fields:    []string{"email", "age"},
+			Fields:    []Field{{Name: "email"}, {Name: "age"}},
 			Updates: map[string]OptionalValue{
 				"email": {Value: NewTextPointer([]byte("new@example.com")), Valid: true},
 				"age":   {Value: int32(30), Valid: true},
@@ -379,7 +415,7 @@ func TestStatement_InsertForColumn(t *testing.T) {
 				Nullable: false,
 			},
 		},
-		Fields: []string{"id", "email"},
+		Fields: []Field{{Name: "id"}, {Name: "email"}},
 		Inserts: [][]OptionalValue{
 			{
 				{Value: int32(1), Valid: true},

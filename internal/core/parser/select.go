@@ -3,6 +3,8 @@ package parser
 import (
 	"fmt"
 	"strings"
+
+	"github.com/RichardKnop/minisql/internal/core/minisql"
 )
 
 var (
@@ -17,7 +19,7 @@ func (p *parser) doParseSelect() error {
 		if !isIdentifierOrAsterisk(identifier) {
 			return errSelectWithoutFields
 		}
-		p.Fields = append(p.Fields, identifier)
+		p.Fields = append(p.Fields, minisql.Field{Name: identifier})
 		p.pop()
 		maybeFrom := p.peek()
 		if strings.ToUpper(maybeFrom) == "AS" {

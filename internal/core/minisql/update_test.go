@@ -25,7 +25,7 @@ func TestTable_Update(t *testing.T) {
 	// Batch insert test rows
 	insertStmt := Statement{
 		Kind:    Insert,
-		Fields:  columnNames(testColumns...),
+		Fields:  fieldsFromColumns(testColumns...),
 		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
@@ -192,7 +192,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 	// Batch insert test rows
 	insertStmt := Statement{
 		Kind:    Insert,
-		Fields:  columnNames(testOverflowColumns...),
+		Fields:  fieldsFromColumns(testOverflowColumns...),
 		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
