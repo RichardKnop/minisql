@@ -472,10 +472,17 @@ func (s Statement) validateSelect(aTable *Table) error {
 	if len(s.Fields) == 0 {
 		return fmt.Errorf("at least one field to select is required")
 	}
-	for _, aField := range s.Fields {
-		_, ok := aTable.ColumnByName(aField.Name)
-		if !ok {
-			return fmt.Errorf("unknown field %q in table %q", aField.Name, aTable.Name)
+	if !s.IsSelectAll() {
+		fieldMap := map[string]struct{}{}
+		for _, aField := range s.Fields {
+			_, ok := aTable.ColumnByName(aField.Name)
+			if !ok {
+				return fmt.Errorf("unknown field %q in table %q", aField.Name, aTable.Name)
+			}
+			if _, exists := fieldMap[aField.Name]; exists {
+				return fmt.Errorf("duplicate field %q in select statement", aField.Name)
+			}
+			fieldMap[aField.Name] = struct{}{}
 		}
 	}
 	return nil
@@ -532,11 +539,15 @@ func (stmt Statement) InsertForColumn(name string, insertIdx int) (OptionalValue
 	return value, true
 }
 
-func (stmt Statement) ColumnIdx(name string) int {
-	for i, aField := range stmt.Fields {
-		if aField.Name == name {
+func (s Statement) ColumnIdx(name string) int {
+	for i, aColumn := range s.Columns {
+		if aColumn.Name == name {
 			return i
 		}
 	}
 	return -1
+}
+
+func (s Statement) IsSelectAll() bool {
+	return s.Kind == Select && len(s.Fields) == 1 && s.Fields[0].Name == "*"
 }

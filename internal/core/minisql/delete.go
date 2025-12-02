@@ -27,10 +27,23 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 		stopChan       = make(chan bool)
 	)
 
+	// Only fetch fields needed for WHERE conditions
+	var selectedFields []Field
+	for _, conditions := range stmt.Conditions {
+		for _, cond := range conditions {
+			if cond.Operand1.Type == OperandField {
+				selectedFields = append(selectedFields, Field{Name: cond.Operand1.Value.(string)})
+			}
+			if cond.Operand2.Type == OperandField {
+				selectedFields = append(selectedFields, Field{Name: cond.Operand2.Value.(string)})
+			}
+		}
+	}
+
 	go func(out chan<- Row) {
 		defer close(out)
 		for !aCursor.EndOfTable {
-			aRow, err := aCursor.fetchRow(ctx)
+			aRow, err := aCursor.fetchRow(ctx, selectedFields...)
 			if err != nil {
 				errorsPipe <- err
 				return

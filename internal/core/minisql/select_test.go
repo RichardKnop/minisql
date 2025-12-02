@@ -191,9 +191,82 @@ func TestTable_Select(t *testing.T) {
 		}
 
 		// rows[5] and rows[32] have NULL age values, so exclude them
-		expected := append(rows[0:5], append(rows[6:32], rows[33:]...)...)
+		expected := make([]Row, 0, len(rows)-2)
+		for i, aRow := range rows {
+			if i == 5 || i == 32 {
+				continue
+			}
+			expected = append(expected, aRow)
+		}
 		assert.Len(t, actual, len(expected))
 		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("Select only some columns", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: []Field{{Name: "id"}, {Name: "verified"}},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		// Use iterator to collect all rows
+		actual := []Row{}
+		aRow, err := aResult.Rows(ctx)
+		for ; err == nil; aRow, err = aResult.Rows(ctx) {
+			actual = append(actual, aRow)
+		}
+
+		expected := make([]Row, 0, len(rows))
+		// Since we are only selecting id, name, filter out other columns and values
+		for _, aRow := range rows {
+			expected = append(expected, Row{
+				Key:     aRow.Key,
+				Columns: []Column{aRow.Columns[0], aRow.Columns[3]},
+				Values:  []OptionalValue{aRow.Values[0], aRow.Values[3]},
+			})
+		}
+		assert.Len(t, actual, len(expected))
+		assert.Equal(t, expected, actual)
+		assert.Equal(t, []Column{testColumns[0], testColumns[3]}, aResult.Columns)
+	})
+
+	t.Run("Select only some columns with where condtition on unselected column", func(t *testing.T) {
+		stmt := Statement{
+			Kind:       Select,
+			Fields:     []Field{{Name: "id"}, {Name: "email"}},
+			Conditions: OneOrMore{{FieldIsNotNull("age")}},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		// Use iterator to collect all rows
+		actual := []Row{}
+		aRow, err := aResult.Rows(ctx)
+		for ; err == nil; aRow, err = aResult.Rows(ctx) {
+			actual = append(actual, aRow)
+		}
+
+		// rows[5] and rows[32] have NULL age values, so exclude them
+		expected := make([]Row, 0, len(rows)-2)
+		for i, aRow := range rows {
+			if i == 5 || i == 32 {
+				continue
+			}
+			// Since we are only selecting id, email, filter out other columns and values
+			expectedRow := Row{
+				Key:     aRow.Key,
+				Columns: []Column{aRow.Columns[0], aRow.Columns[1]},
+				Values:  []OptionalValue{aRow.Values[0], aRow.Values[1]},
+			}
+			expected = append(expected, expectedRow)
+
+		}
+		assert.Len(t, actual, len(expected))
+		assert.Equal(t, expected, actual)
+		assert.Equal(t, []Column{testColumns[0], testColumns[1]}, aResult.Columns)
 	})
 }
 

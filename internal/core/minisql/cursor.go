@@ -143,14 +143,14 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row)
 	return c.Table.InternalNodeInsert(ctx, parentPageIdx, aNewPage.Index)
 }
 
-func (c *Cursor) fetchRow(ctx context.Context) (Row, error) {
+func (c *Cursor) fetchRow(ctx context.Context, selectedFields ...Field) (Row, error) {
 	aPage, err := c.Table.pager.ReadPage(ctx, c.PageIdx)
 	if err != nil {
 		return Row{}, fmt.Errorf("fetch row: %w", err)
 	}
 	aRow := NewRow(c.Table.Columns)
 
-	if err := aRow.Unmarshal(aPage.LeafNode.Cells[c.CellIdx]); err != nil {
+	if err := aRow.Unmarshal(aPage.LeafNode.Cells[c.CellIdx], selectedFields...); err != nil {
 		return Row{}, err
 	}
 	aRow.Key = aPage.LeafNode.Cells[c.CellIdx].Key
@@ -212,8 +212,8 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow *Row) (bool, e
 		changedValues = map[string]Column{}
 	)
 	for name, value := range stmt.Updates {
-		aColumn, ok := aRow.GetColumn(name)
-		if !ok {
+		aColumn, idx := aRow.GetColumn(name)
+		if idx < 0 {
 			return false, fmt.Errorf("column '%s' not found", name)
 		}
 		found, changed := aRow.SetValue(name, value)
