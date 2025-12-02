@@ -642,7 +642,7 @@ func rowIDs(rows ...Row) []any {
 func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []Row) {
 	selectResult, err := aTable.Select(ctx, Statement{
 		Kind:   Select,
-		Fields: fieldsFromColumns(testColumns...),
+		Fields: fieldsFromColumns(aTable.Columns...),
 	})
 	require.NoError(t, err)
 

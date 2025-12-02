@@ -334,6 +334,8 @@ func (s Statement) Validate(aTable *Table) error {
 		return s.validateInsert(aTable)
 	case Update:
 		return s.validateUpdate(aTable)
+	case Select:
+		return s.validateSelect(aTable)
 	}
 
 	return nil
@@ -461,6 +463,19 @@ func (s Statement) validateUpdate(aTable *Table) error {
 			if aColumn.Kind == Varchar && !utf8.ValidString(s.Updates[aField.Name].Value.(TextPointer).String()) {
 				return fmt.Errorf("field %q expects valid UTF-8 string", aField.Name)
 			}
+		}
+	}
+	return nil
+}
+
+func (s Statement) validateSelect(aTable *Table) error {
+	if len(s.Fields) == 0 {
+		return fmt.Errorf("at least one field to select is required")
+	}
+	for _, aField := range s.Fields {
+		_, ok := aTable.ColumnByName(aField.Name)
+		if !ok {
+			return fmt.Errorf("unknown field %q in table %q", aField.Name, aTable.Name)
 		}
 	}
 	return nil

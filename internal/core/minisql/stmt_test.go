@@ -309,6 +309,32 @@ func TestStatement_Validate(t *testing.T) {
 		err := stmt.Validate(aTable)
 		require.NoError(t, err)
 	})
+
+	t.Run("SELECT with no fields should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    []Field{}, // No fields specified
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `at least one field to select is required`)
+	})
+
+	t.Run("SELECT with unknown field should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    []Field{{Name: "unknown_field"}},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `unknown field "unknown_field" in table "test_table"`)
+	})
 }
 
 func TestStatement_CreateTableDDL(t *testing.T) {

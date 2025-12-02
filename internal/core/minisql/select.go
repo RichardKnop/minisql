@@ -11,6 +11,13 @@ var (
 )
 
 func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, error) {
+	stmt.TableName = t.Name
+	stmt.Columns = t.Columns
+
+	if err := stmt.Validate(t); err != nil {
+		return StatementResult{}, err
+	}
+
 	aResult := StatementResult{
 		Columns: t.Columns,
 		Rows: func(ctx context.Context) (Row, error) {
