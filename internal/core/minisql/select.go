@@ -18,20 +18,13 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, err
 	}
 
-	aResult := StatementResult{
-		Columns: t.Columns,
-		Rows: func(ctx context.Context) (Row, error) {
-			return Row{}, ErrNoMoreRows
-		},
-	}
-
 	aCursor, err := t.SeekFirst(ctx)
 	if err != nil {
-		return aResult, err
+		return StatementResult{}, err
 	}
 	aPage, err := t.pager.ReadPage(ctx, aCursor.PageIdx)
 	if err != nil {
-		return aResult, fmt.Errorf("select: %w", err)
+		return StatementResult{}, fmt.Errorf("select: %w", err)
 	}
 	aCursor.EndOfTable = aPage.LeafNode.Header.Cells == 0
 
@@ -48,10 +41,47 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		stopChan       = make(chan bool)
 	)
 
+	// Only fetch fields included in the SELECT query or fields needed for WHERE conditions
+	// TODO - handle * plus other fiels, for example SELECT *, a, b FROM table WHERE c = 1
+	var (
+		selectAll       = stmt.IsSelectAll()
+		requestedFields []Field
+		selectedFields  []Field
+	)
+	if selectAll {
+		requestedFields = fieldsFromColumns(t.Columns...)
+		selectedFields = requestedFields
+	} else {
+		requestedFields = stmt.Fields
+		selectedFields = requestedFields
+		for _, conditions := range stmt.Conditions {
+			for _, cond := range conditions {
+				if cond.Operand1.Type == OperandField {
+					selectedFields = append(selectedFields, Field{Name: cond.Operand1.Value.(string)})
+				}
+				if cond.Operand2.Type == OperandField {
+					selectedFields = append(selectedFields, Field{Name: cond.Operand2.Value.(string)})
+				}
+			}
+		}
+	}
+
+	aResult := StatementResult{
+		Columns: make([]Column, 0, len(requestedFields)),
+		Rows: func(ctx context.Context) (Row, error) {
+			return Row{}, ErrNoMoreRows
+		},
+	}
+	for _, aField := range requestedFields {
+		if colIdx := stmt.ColumnIdx(aField.Name); colIdx >= 0 {
+			aResult.Columns = append(aResult.Columns, t.Columns[colIdx])
+		}
+	}
+
 	go func(out chan<- Row) {
 		defer close(out)
 		for !aCursor.EndOfTable {
-			aRow, err := aCursor.fetchRow(ctx)
+			aRow, err := aCursor.fetchRow(ctx, selectedFields...)
 			if err != nil {
 				errorsPipe <- err
 				return
@@ -96,7 +126,11 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 			if i > limit && limit > 0 {
 				return
 			}
-			out <- aRow
+			if selectAll {
+				out <- aRow
+			} else {
+				out <- aRow.OnlyFields(requestedFields...)
+			}
 		}
 	}(filteredPipe, limitedPipe, limit)
 

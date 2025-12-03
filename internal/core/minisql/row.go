@@ -71,13 +71,30 @@ func (r *Row) Size() uint64 {
 	return size
 }
 
-func (r *Row) GetColumn(name string) (Column, bool) {
-	for _, aColumn := range r.Columns {
+func (r *Row) OnlyFields(fields ...Field) Row {
+	filteredRow := Row{
+		Key:     r.Key,
+		Columns: make([]Column, 0, len(fields)),
+		Values:  make([]OptionalValue, 0, len(fields)),
+	}
+	for _, aField := range fields {
+		aColumn, idx := r.GetColumn(aField.Name)
+		if idx < 0 {
+			continue
+		}
+		filteredRow.Columns = append(filteredRow.Columns, aColumn)
+		filteredRow.Values = append(filteredRow.Values, r.Values[idx])
+	}
+	return filteredRow
+}
+
+func (r *Row) GetColumn(name string) (Column, int) {
+	for i, aColumn := range r.Columns {
 		if aColumn.Name == name {
-			return aColumn, true
+			return aColumn, i
 		}
 	}
-	return Column{}, false
+	return Column{}, -1
 }
 
 func (r *Row) GetValue(name string) (OptionalValue, bool) {
@@ -246,12 +263,38 @@ func (r *Row) Marshal() ([]byte, error) {
 	return buf, nil
 }
 
-func (r *Row) Unmarshal(aCell Cell) error {
+func (r *Row) Unmarshal(aCell Cell, selectedFields ...Field) error {
 	r.Key = aCell.Key
 	r.Values = make([]OptionalValue, 0, len(r.Columns))
+
+	// Create a set of selected column names for fast lookup
+	selectedSet := make(map[string]bool)
+	if len(selectedFields) == 0 {
+		for _, aColumn := range r.Columns {
+			selectedSet[aColumn.Name] = true
+		}
+	} else {
+		for _, aField := range selectedFields {
+			selectedSet[aField.Name] = true
+		}
+	}
+
 	offset := 0
 	for i, aColumn := range r.Columns {
-		if bitwise.IsSet(aCell.NullBitmask, i) {
+		// Check if column is NULL
+		isNull := bitwise.IsSet(aCell.NullBitmask, i)
+
+		// If column not selected, skip it but track offset
+		if len(selectedSet) > 0 && !selectedSet[aColumn.Name] {
+			r.Values = append(r.Values, OptionalValue{Valid: false})
+			if !isNull {
+				// Skip over the data without unmarshaling
+				offset += int(r.getColumnSize(aColumn, aCell.Value, offset))
+			}
+			continue
+		}
+
+		if isNull {
 			r.Values = append(r.Values, OptionalValue{Valid: false})
 			continue
 		}
@@ -290,6 +333,26 @@ func (r *Row) Unmarshal(aCell Cell) error {
 	}
 
 	return nil
+}
+
+func (r *Row) getColumnSize(col Column, data []byte, offset int) uint64 {
+	switch col.Kind {
+	case Boolean:
+		return 1
+	case Int4:
+		return 4
+	case Int8:
+		return 8
+	case Real:
+		return 4
+	case Double:
+		return 8
+	case Varchar, Text:
+		// Read length prefix to determine size
+		length := unmarshalUint32(data, uint64(offset))
+		return TextPointer{Length: length}.Size()
+	}
+	return 0
 }
 
 // CheckOneOrMore checks whether row satisfies one or more sets of conditions
@@ -349,8 +412,8 @@ func (r *Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Ope
 		return false, fmt.Errorf("cannot compare column value against field operand")
 	}
 	name := fmt.Sprint(fieldOperand.Value)
-	aColumn, ok := r.GetColumn(name)
-	if !ok {
+	aColumn, idx := r.GetColumn(name)
+	if idx < 0 {
 		return false, fmt.Errorf("row does not contain column '%s'", name)
 	}
 	fieldValue, ok := r.GetValue(aColumn.Name)
@@ -398,13 +461,13 @@ func (r *Row) compareFields(field1, field2 Operand, operator Operator) (bool, er
 	}
 
 	name1 := fmt.Sprint(field1.Value)
-	aColumn1, ok := r.GetColumn(name1)
-	if !ok {
+	aColumn1, idx1 := r.GetColumn(name1)
+	if idx1 < 0 {
 		return false, fmt.Errorf("row does not contain column '%s'", name1)
 	}
 	name2 := fmt.Sprint(field2.Value)
-	aColumn2, ok := r.GetColumn(name2)
-	if !ok {
+	aColumn2, idx2 := r.GetColumn(name2)
+	if idx2 < 0 {
 		return false, fmt.Errorf("row does not contain column '%s'", name2)
 	}
 

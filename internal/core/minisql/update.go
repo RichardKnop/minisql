@@ -27,6 +27,8 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 		stopChan       = make(chan bool)
 	)
 
+	// TODO - implement partial updates by passing selected fields to fetchRow
+
 	go func(out chan<- Row) {
 		defer close(out)
 		for !aCursor.EndOfTable {

@@ -79,9 +79,9 @@ func (c *Connection) ExecuteStatements(ctx context.Context, statements ...Statem
 	var results []StatementResult
 
 	for _, stmt := range statements {
-		// Add a check here to prevent user queries on system schema table.
-		// We only allow internal system operations to access it.
-		if stmt.TableName == SchemaTableName {
+		// Add a check here to prevent write user queries on system schema table.
+		// We only allow internal system operations to modify it. Users can only read.
+		if stmt.TableName == SchemaTableName && stmt.Kind != Select {
 			return nil, fmt.Errorf("user queries on system schema table are not allowed")
 		}
 		if c.HasActiveTransaction() {

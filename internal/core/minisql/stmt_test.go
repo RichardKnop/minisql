@@ -323,6 +323,19 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, `at least one field to select is required`)
 	})
 
+	t.Run("SELECT with duplicate should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "id"}},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `duplicate field "id" in select statement`)
+	})
+
 	t.Run("SELECT with unknown field should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
@@ -653,4 +666,20 @@ func TestFieldIsNotIn(t *testing.T) {
 
 		assert.Equal(t, expected, condition)
 	})
+}
+
+func TestStatement_IsSelectAll(t *testing.T) {
+	t.Parallel()
+
+	stmt := Statement{
+		Kind:   Select,
+		Fields: []Field{{Name: "*"}},
+	}
+	stmt2 := Statement{
+		Kind:   Select,
+		Fields: []Field{{Name: "id"}, {Name: "email"}},
+	}
+
+	assert.True(t, stmt.IsSelectAll())
+	assert.False(t, stmt2.IsSelectAll())
 }
