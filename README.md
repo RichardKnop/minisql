@@ -196,3 +196,23 @@ You can also delete rows:
 minisql> delete from users;
 Rows affected: 3
 ```
+
+## Development 
+
+MiniSQL uses [mockery](https://github.com/vektra/mockery) to generate mocks for interfaces. Install mockery:
+
+```sh
+go install github.com/vektra/mockery/v3@v3.6.1
+```
+
+Then to generate mocks:
+
+```sh
+mockery
+```
+
+To run unit tests:
+
+```sh
+LOG_LEVEL=info go test ./... -count=1
+```
