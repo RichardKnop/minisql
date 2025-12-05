@@ -8,6 +8,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const MaxIndexKeySize = 255
+
 type IndexKey interface {
 	int8 | int32 | int64 | float32 | float64 | string
 }
@@ -23,15 +25,21 @@ type UniqueIndex[T IndexKey] struct {
 	maximumKeys uint32
 }
 
-func NewUniqueIndex[T IndexKey](logger *zap.Logger, txManager *TransactionManager, name string, column Column, pager TxPager, rootPageIdx PageIndex) *UniqueIndex[T] {
+func NewUniqueIndex[T IndexKey](logger *zap.Logger, txManager *TransactionManager, name string, aColumn Column, pager TxPager, rootPageIdx PageIndex) (*UniqueIndex[T], error) {
+	if aColumn.Kind == Text {
+		return nil, fmt.Errorf("unique index does not support text columns")
+	}
+	if aColumn.Kind == Varchar && aColumn.Size > MaxIndexKeySize {
+		return nil, fmt.Errorf("unique index does not support varchar columns larger than %d", MaxIndexKeySize)
+	}
 	return &UniqueIndex[T]{
 		logger:      logger,
 		Name:        name,
-		Column:      column,
+		Column:      aColumn,
 		rootPageIdx: rootPageIdx,
 		pager:       pager,
 		txManager:   txManager,
-	}
+	}, nil
 }
 
 func (ui *UniqueIndex[T]) GetRootPageIdx() PageIndex {

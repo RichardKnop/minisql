@@ -268,3 +268,45 @@ func (n *LeafNode) Keys() []uint64 {
 	}
 	return keys
 }
+
+func (n *LeafNode) MaxSpace() uint64 {
+	maxSpace := PageSize - headerSize()
+	if n.Header.IsRoot {
+		maxSpace = PageSize - rootHeaderSize()
+	}
+	return maxSpace
+}
+
+func (n *LeafNode) TakenSpace() uint64 {
+	takenPageSize := uint64(0)
+	for i := uint32(0); i < n.Header.Cells; i++ {
+		takenPageSize += n.Cells[i].Size()
+	}
+	return takenPageSize
+}
+
+func (n *LeafNode) AvailableSpace() uint64 {
+	return n.MaxSpace() - n.TakenSpace()
+}
+
+func (n *LeafNode) HasSpaceForRow(aRow *Row) bool {
+	return aRow.Size()+8+8 <= n.AvailableSpace()
+}
+
+func (n *LeafNode) AtLeastHalfFull() bool {
+	return n.AvailableSpace() < n.MaxSpace()/2
+}
+
+func (n *LeafNode) CanMergeWith(n2 *LeafNode) bool {
+	return n2.TakenSpace() <= n.AvailableSpace()
+}
+
+func (n *LeafNode) CanBorrowFirst() bool {
+	firstCellSize := n.Cells[0].Size()
+	return n.AvailableSpace()+firstCellSize < n.MaxSpace()/2
+}
+
+func (n *LeafNode) CanBorrowLast() bool {
+	lastCellSize := n.Cells[n.Header.Cells-1].Size()
+	return n.AvailableSpace()+lastCellSize < n.MaxSpace()/2
+}

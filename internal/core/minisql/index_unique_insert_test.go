@@ -20,8 +20,9 @@ func TestUniqueIndex_Insert(t *testing.T) {
 			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
 			txManager,
 		)
-		anIndex = NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, indexPager, 0)
 	)
+	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, indexPager, 0)
+	require.NoError(t, err)
 	anIndex.maximumKeys = 3
 
 	t.Run("Insert first three keys into root node", func(t *testing.T) {
@@ -281,14 +282,14 @@ func TestUniqueIndex_Insert_OutOfOrder(t *testing.T) {
 			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
 			txManager,
 		)
-		anIndex = NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, indexPager, 0)
 	)
+	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, indexPager, 0)
+	require.NoError(t, err)
 	anIndex.maximumKeys = 3
 
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
-			err := anIndex.Insert(ctx, key, uint64(key+100))
-			if err != nil {
+			if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
 				return err
 			}
 		}

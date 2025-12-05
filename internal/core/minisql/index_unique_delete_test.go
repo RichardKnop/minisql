@@ -21,14 +21,14 @@ func TestUniqueIndex_Delete(t *testing.T) {
 			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
 			txManager,
 		)
-		anIndex = NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, idxPager, 0)
 	)
+	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, idxPager, 0)
+	require.NoError(t, err)
 	anIndex.maximumKeys = 3
 
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
-			err := anIndex.Insert(ctx, key, uint64(key+100))
-			if err != nil {
+			if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
 				return err
 			}
 		}
@@ -1031,8 +1031,8 @@ func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
 			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
 			txManager,
 		)
-		anIndex = NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, idxPager, 0)
 	)
+	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, idxPager, 0)
 	anIndex.maximumKeys = 3
 
 	// Insert 100 keys in random order
@@ -1042,10 +1042,9 @@ func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
 	}
 	rand.Shuffle(len(keys), func(i, j int) { keys[i], keys[j] = keys[j], keys[i] })
 
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
-			err := anIndex.Insert(ctx, key, uint64(key+100))
-			if err != nil {
+			if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
 				return err
 			}
 		}

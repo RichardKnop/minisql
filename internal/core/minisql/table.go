@@ -499,7 +499,7 @@ func (t *Table) DeleteKey(ctx context.Context, pageIdx PageIndex, key uint64) er
 	}
 
 	// Check for underflow
-	if aPage.AtLeastHalfFull() {
+	if aPage.LeafNode.AtLeastHalfFull() {
 		return nil
 	}
 
@@ -583,7 +583,7 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 		}
 	}
 
-	if right != nil && right.CanBorrowFirst() {
+	if right != nil && right.LeafNode.CanBorrowFirst() {
 		return t.borrowFromRightLeaf(
 			aParentPage.InternalNode,
 			aLeafNode,
@@ -592,7 +592,7 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 		)
 	}
 
-	if left != nil && left.CanBorrowLast() {
+	if left != nil && left.LeafNode.CanBorrowLast() {
 		return t.borrowFromLeftLeaf(
 			aParentPage.InternalNode,
 			aLeafNode,
@@ -601,7 +601,7 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 		)
 	}
 
-	if right != nil && aPage.CanMergeWith(right) {
+	if right != nil && aLeafNode.CanMergeWith(right.LeafNode) {
 		if err := t.mergeLeaves(
 			ctx,
 			aParentPage,
@@ -615,7 +615,7 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) erro
 		return t.pager.AddFreePage(ctx, right.Index)
 	}
 
-	if left != nil && aPage.CanMergeWith(left) {
+	if left != nil && aLeafNode.CanMergeWith(left.LeafNode) {
 		if err := t.mergeLeaves(
 			ctx,
 			aParentPage,
@@ -1014,7 +1014,7 @@ func (t *Table) primaryKeyIndex(aPager *TransactionalPager, rootPageIdx PageInde
 			pkColumn,
 			aPager,
 			rootPageIdx,
-		), nil
+		)
 	case Int4:
 		return NewUniqueIndex[int32](
 			t.logger,
@@ -1023,7 +1023,7 @@ func (t *Table) primaryKeyIndex(aPager *TransactionalPager, rootPageIdx PageInde
 			pkColumn,
 			aPager,
 			rootPageIdx,
-		), nil
+		)
 	case Int8:
 		return NewUniqueIndex[int64](
 			t.logger,
@@ -1032,7 +1032,7 @@ func (t *Table) primaryKeyIndex(aPager *TransactionalPager, rootPageIdx PageInde
 			pkColumn,
 			aPager,
 			rootPageIdx,
-		), nil
+		)
 	case Real:
 		return NewUniqueIndex[float32](
 			t.logger,
@@ -1041,7 +1041,7 @@ func (t *Table) primaryKeyIndex(aPager *TransactionalPager, rootPageIdx PageInde
 			pkColumn,
 			aPager,
 			rootPageIdx,
-		), nil
+		)
 	case Double:
 		return NewUniqueIndex[float64](
 			t.logger,
@@ -1050,7 +1050,7 @@ func (t *Table) primaryKeyIndex(aPager *TransactionalPager, rootPageIdx PageInde
 			pkColumn,
 			aPager,
 			rootPageIdx,
-		), nil
+		)
 	case Varchar:
 		return NewUniqueIndex[string](
 			t.logger,
@@ -1059,7 +1059,7 @@ func (t *Table) primaryKeyIndex(aPager *TransactionalPager, rootPageIdx PageInde
 			pkColumn,
 			aPager,
 			rootPageIdx,
-		), nil
+		)
 	default:
 		return nil, fmt.Errorf("unsupported primary key type %v", pkColumn.Kind)
 	}

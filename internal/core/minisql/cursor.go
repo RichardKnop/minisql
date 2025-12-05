@@ -23,7 +23,7 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) erro
 		return fmt.Errorf("error inserting row to a non leaf node, key %d", key)
 	}
 
-	if !aPage.HasSpaceForRow(aRow) {
+	if !aPage.LeafNode.HasSpaceForRow(aRow) {
 		// Split leaf node
 		if err := c.LeafNodeSplitInsert(ctx, key, aRow); err != nil {
 			return fmt.Errorf("leaf node split insert: %w", err)
@@ -236,7 +236,7 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow *Row) (bool, e
 	// we need to delete the old row and re-insert the new row. This will likely cause
 	// a split, but that's better than trying to move rows around in the page. Since we
 	// use internal row IDs as keys, we will reinsert to the same page.
-	if aRow.Size() > aPage.AvailableSpace()-oldRow.Size() {
+	if aRow.Size() > aPage.LeafNode.AvailableSpace()-oldRow.Size() {
 		// Delete the row
 		if err := c.delete(ctx); err != nil {
 			return false, fmt.Errorf("update delete old row: %w", err)
