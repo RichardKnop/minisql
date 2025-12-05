@@ -1,7 +1,6 @@
 package minisql
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,29 +10,46 @@ import (
 func TestRow_Marshal(t *testing.T) {
 	t.Parallel()
 
-	var (
-		ctx       = context.Background()
-		aRow      = gen.Row()
-		pagerMock = new(MockTxPager)
-	)
+	t.Run("unmarshal all values", func(t *testing.T) {
+		aRow := gen.Row()
 
-	// 8 for int8
-	// 4+255 for varchar/text
-	// 4 for int4
-	// 1 for boolean
-	// 4 for real
-	// 8 for double
-	assert.Equal(t, uint64(8+(4+MaxInlineVarchar)+4+1+4+8), aRow.Size())
-	storeOverflowTexts(ctx, pagerMock, &aRow)
+		// 8 for int8
+		// 4+255 for varchar/text
+		// 4 for int4
+		// 1 for boolean
+		// 4 for real
+		// 8 for double
+		assert.Equal(t, uint64(8+(varcharLengthPrefixSize+MaxInlineVarchar)+4+1+4+8), aRow.Size())
 
-	data, err := aRow.Marshal()
-	require.NoError(t, err)
+		data, err := aRow.Marshal()
+		require.NoError(t, err)
 
-	actual := NewRow(testColumns)
-	err = actual.Unmarshal(Cell{Value: data})
-	require.NoError(t, err)
+		actual := NewRow(testColumns)
+		err = actual.Unmarshal(Cell{Value: data})
+		require.NoError(t, err)
 
-	assert.Equal(t, aRow, actual)
+		assert.Equal(t, aRow, actual)
+	})
+
+	t.Run("unmarshal partial values", func(t *testing.T) {
+		aRow := gen.Row()
+
+		data, err := aRow.Marshal()
+		require.NoError(t, err)
+
+		selectedFields := fieldsFromColumns(testColumns[0:2]...)
+
+		partialRow := NewRow(testColumns)
+		err = partialRow.Unmarshal(Cell{Value: data}, selectedFields...)
+		require.NoError(t, err)
+
+		assert.Equal(t, aRow.Values[0], partialRow.Values[0])
+		assert.Equal(t, aRow.Values[1], partialRow.Values[1])
+		assert.False(t, partialRow.Values[2].Valid)
+		assert.False(t, partialRow.Values[3].Valid)
+		assert.False(t, partialRow.Values[4].Valid)
+		assert.False(t, partialRow.Values[5].Valid)
+	})
 }
 
 func TestRow_CheckOneOrMore(t *testing.T) {
