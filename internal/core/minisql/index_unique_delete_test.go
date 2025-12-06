@@ -52,7 +52,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	checkIndexKeys(ctx, t, anIndex, keys)
 
-	//require.NoError(t, anIndex.print())
+	// require.NoError(t, anIndex.print())
 
 	var (
 		rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -1033,11 +1033,10 @@ func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
 		)
 	)
 	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, idxPager, 0)
-	anIndex.maximumKeys = 3
 
-	// Insert 100 keys in random order
-	keys := make([]int64, 0, 100)
-	for i := int64(1); i <= 100; i++ {
+	// Insert 10000 keys in random order
+	keys := make([]int64, 0, 10000)
+	for i := int64(1); i <= 10000; i++ {
 		keys = append(keys, i)
 	}
 	rand.Shuffle(len(keys), func(i, j int) { keys[i], keys[j] = keys[j], keys[i] })

@@ -97,7 +97,7 @@ var (
 			},
 		},
 		int((PageSize-uint32(RootPageConfigSize)-
-			6- // base header
+			7- // base header
 			8- // leaf header
 			5*8- // 5 keys
 			5*8- // 5 null bitmasks
@@ -145,7 +145,7 @@ var (
 			},
 		},
 		int((PageSize - uint32(RootPageConfigSize) -
-			6 - // base header
+			7 - // base header
 			8 - // leaf header
 			8 - // 5 keys
 			8 - // 5 null bitmasks

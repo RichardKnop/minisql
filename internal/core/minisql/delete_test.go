@@ -498,7 +498,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	var (
 		aPager     = initTest(t)
 		ctx        = context.Background()
-		numRows    = 100
+		numRows    = 1000
 		rows       = gen.MediumRows(numRows)
 		txManager  = NewTransactionManager(zap.NewNop())
 		tablePager = NewTransactionalPager(
@@ -507,7 +507,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 		)
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testMediumColumns, 0)
 	)
-	aTable.maximumICells = 5 // for testing purposes only, normally 340
+	// aTable.maximumICells = 5 // for testing purposes only, normally 340
 
 	// Batch insert test rows
 	stmt := Statement{
@@ -528,7 +528,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	//require.NoError(t, aTable.print())
 
 	checkRows(ctx, t, aTable, rows)
-	assert.Equal(t, 47, int(aPager.TotalPages()))
+	assert.Equal(t, 336, int(aPager.TotalPages()))
 
 	var aResult StatementResult
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -547,8 +547,8 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 
 	checkRows(ctx, t, aTable, nil)
 
-	assert.Equal(t, 47, int(aPager.TotalPages()))
-	assert.Equal(t, 46, int(aPager.dbHeader.FreePageCount))
+	assert.Equal(t, 336, int(aPager.TotalPages()))
+	assert.Equal(t, 335, int(aPager.dbHeader.FreePageCount))
 }
 
 func TestTable_Delete_Overflow(t *testing.T) {

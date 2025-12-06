@@ -130,7 +130,7 @@ func TestUniqueIndex_SeekLastKey(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		indexNode := NewIndexNode[int64](uint64(aColumn.Size))
+		indexNode := NewIndexNode[int64]()
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode

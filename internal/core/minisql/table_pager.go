@@ -9,6 +9,7 @@ const (
 	PageTypeLeaf byte = iota
 	PageTypeInternal
 	PageTypeOverflow
+	PageTypeIndex
 	PageTypeFree
 )
 

@@ -190,7 +190,6 @@ func TestPage_Clone(t *testing.T) {
 					Keys:       2,
 					RightChild: 65,
 				},
-				KeySize: 8,
 				Cells: []IndexCell[int64]{
 					{
 						Key:   100,

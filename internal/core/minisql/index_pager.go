@@ -2,11 +2,11 @@ package minisql
 
 import (
 	"context"
+	"fmt"
 )
 
 type indexPager[T IndexKey] struct {
 	*pagerImpl
-	keySize uint64
 }
 
 func (p *indexPager[T]) GetPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
@@ -16,23 +16,14 @@ func (p *indexPager[T]) GetPage(ctx context.Context, pageIdx PageIndex) (*Page, 
 func (p *indexPager[T]) unmarshal(pageIdx PageIndex, buf []byte) (*Page, error) {
 	idx := 0
 
-	if p.dbHeader.FirstFreePage != 0 && pageIdx == p.dbHeader.FirstFreePage {
-		aFreePage := new(FreePage)
-		if err := aFreePage.Unmarshal(buf[idx:]); err != nil {
-			return nil, err
-		}
-		p.pages[pageIdx] = &Page{Index: pageIdx, FreePage: aFreePage}
-		return p.pages[pageIdx], nil
-	}
-
-	node := NewIndexNode[T](p.keySize)
-	_, err := node.Unmarshal(buf)
-	if err != nil {
-		return nil, err
-	}
-
 	// Requesting a new page
 	if int(pageIdx) == int(p.totalPages) {
+		node := NewIndexNode[T]()
+		buf[idx] = PageTypeIndex
+		_, err := node.Unmarshal(buf)
+		if err != nil {
+			return nil, err
+		}
 		node.Header.RightChild = RIGHT_CHILD_NOT_SET
 		p.mu.Lock()
 		p.pages = append(p.pages, &Page{Index: pageIdx, IndexNode: node})
@@ -42,6 +33,27 @@ func (p *indexPager[T]) unmarshal(pageIdx PageIndex, buf []byte) (*Page, error) 
 	}
 
 	// Existing page
-	p.pages[pageIdx] = &Page{Index: pageIdx, IndexNode: node}
-	return p.pages[pageIdx], nil
+	switch buf[idx] {
+	case PageTypeIndex:
+		node := NewIndexNode[T]()
+		_, err := node.Unmarshal(buf)
+		if err != nil {
+			return nil, err
+		}
+		p.pages[pageIdx] = &Page{Index: pageIdx, IndexNode: node}
+		return p.pages[pageIdx], nil
+	case PageTypeFree:
+		// Free page
+		aFreePage := new(FreePage)
+		if err := aFreePage.Unmarshal(buf[idx:]); err != nil {
+			return nil, err
+		}
+		p.pages[pageIdx] = &Page{
+			Index:    pageIdx,
+			FreePage: aFreePage,
+		}
+		return p.pages[pageIdx], nil
+	}
+
+	return nil, fmt.Errorf("unrecognised page type byte %d", buf[idx])
 }

@@ -90,11 +90,7 @@ func (tp *TransactionalPager) GetFreePage(ctx context.Context) (*Page, error) {
 			return nil, fmt.Errorf("allocate new free page: %w", err)
 		}
 		// Clear the page for reuse
-		freePage.OverflowPage = nil
-		freePage.FreePage = nil
-		freePage.LeafNode = nil
-		freePage.InternalNode = nil
-		freePage.IndexNode = nil
+		freePage.Clear()
 
 		return freePage, nil
 	}
@@ -111,13 +107,17 @@ func (tp *TransactionalPager) GetFreePage(ctx context.Context) (*Page, error) {
 	tx.DbHeaderWrite = &dbHeader
 
 	// Clear the page for reuse
-	freePage.OverflowPage = nil
-	freePage.FreePage = nil
-	freePage.LeafNode = nil
-	freePage.InternalNode = nil
-	freePage.IndexNode = nil
+	freePage.Clear()
 
 	return freePage, nil
+}
+
+func (p *Page) Clear() {
+	p.OverflowPage = nil
+	p.FreePage = nil
+	p.LeafNode = nil
+	p.InternalNode = nil
+	p.IndexNode = nil
 }
 
 func (tp *TransactionalPager) AddFreePage(ctx context.Context, pageIdx PageIndex) error {
