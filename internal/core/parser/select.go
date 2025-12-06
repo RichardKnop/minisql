@@ -26,7 +26,7 @@ func (p *parser) doParseSelect() error {
 			p.pop()
 			alias := p.peek()
 			if !isIdentifier(alias) {
-				return fmt.Errorf("at SELECT: expected field alias for \"" + identifier + " as\" to SELECT")
+				return fmt.Errorf(`at SELECT: expected field alias for "identifier as"`)
 			}
 			if p.Aliases == nil {
 				p.Aliases = make(map[string]string)
