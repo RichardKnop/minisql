@@ -14,7 +14,7 @@ type Cursor struct {
 	EndOfTable bool
 }
 
-func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) error {
+func (c *Cursor) LeafNodeInsert(ctx context.Context, key RowID, aRow *Row) error {
 	aPage, err := c.Table.pager.ModifyPage(ctx, c.PageIdx)
 	if err != nil {
 		return fmt.Errorf("get page: %w", err)
@@ -49,7 +49,7 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key uint64, aRow *Row) erro
 // Create a new node and move half the cells over.
 // Insert the new value in one of the two nodes.
 // Update parent or create a new parent.
-func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key uint64, aRow *Row) error {
+func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key RowID, aRow *Row) error {
 	aPager := c.Table.pager
 
 	aSplitPage, err := aPager.ModifyPage(ctx, c.PageIdx)
@@ -178,7 +178,7 @@ func (c *Cursor) fetchRow(ctx context.Context, selectedFields ...Field) (Row, er
 	return aRow, nil
 }
 
-func (c *Cursor) saveToCell(ctx context.Context, aNode *LeafNode, cellIdx uint32, key uint64, aRow *Row) error {
+func (c *Cursor) saveToCell(ctx context.Context, aNode *LeafNode, cellIdx uint32, key RowID, aRow *Row) error {
 	if err := storeOverflowTexts(ctx, c.Table.pager, aRow); err != nil {
 		return fmt.Errorf("store overflow texts: %w", err)
 	}

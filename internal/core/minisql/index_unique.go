@@ -46,7 +46,7 @@ func (ui *UniqueIndex[T]) GetRootPageIdx() PageIndex {
 	return ui.rootPageIdx
 }
 
-func (ui *UniqueIndex[T]) Insert(ctx context.Context, keyAny any, rowID uint64) error {
+func (ui *UniqueIndex[T]) Insert(ctx context.Context, keyAny any, rowID RowID) error {
 	key, ok := keyAny.(T)
 	if !ok {
 		return fmt.Errorf("invalid key type: %T", keyAny)
@@ -145,7 +145,7 @@ func (idx *UniqueIndex[T]) atLeastHalfFull(aNode *IndexNode[T]) bool {
 
 var ErrDuplicateKey = fmt.Errorf("duplicate key")
 
-func (ui *UniqueIndex[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T, rowID uint64) error {
+func (ui *UniqueIndex[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T, rowID RowID) error {
 	aPage, err := ui.pager.ModifyPage(ctx, pageIdx)
 	if err != nil {
 		return fmt.Errorf("get page: %w", err)

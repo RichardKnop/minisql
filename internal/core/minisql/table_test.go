@@ -159,7 +159,7 @@ func TestTable_Seek_EmptyTable(t *testing.T) {
 
 		pagerMock.On("ReadPage", mock.Anything, aTable.GetRootPageIdx()).Return(aRootPage, nil).Once()
 
-		aCursor, err := aTable.Seek(ctx, uint64(0))
+		aCursor, err := aTable.Seek(ctx, RowID(0))
 		require.NoError(t, err)
 		assert.Equal(t, aTable, aCursor.Table)
 		assert.Equal(t, 0, int(aCursor.PageIdx))
@@ -178,14 +178,14 @@ func TestTable_Seek_EmptyTable(t *testing.T) {
 		pagerMock.On("ReadPage", mock.Anything, aTable.GetRootPageIdx()).Return(aRootPage, nil)
 
 		// Seek key 0
-		aCursor, err := aTable.Seek(ctx, uint64(0))
+		aCursor, err := aTable.Seek(ctx, RowID(0))
 		require.NoError(t, err)
 		assert.Equal(t, aTable, aCursor.Table)
 		assert.Equal(t, 0, int(aCursor.PageIdx))
 		assert.Equal(t, 0, int(aCursor.CellIdx))
 
 		// Seek key 1 (doesn't exist, end of table)
-		aCursor, err = aTable.Seek(ctx, uint64(1))
+		aCursor, err = aTable.Seek(ctx, RowID(1))
 		require.NoError(t, err)
 		assert.Equal(t, aTable, aCursor.Table)
 		assert.Equal(t, 0, int(aCursor.PageIdx))
@@ -204,7 +204,7 @@ func TestTable_Seek_EmptyTable(t *testing.T) {
 
 		// Seek all existing keys
 		for key := uint64(0); key < uint64(aRootPage.LeafNode.Header.Cells); key++ {
-			aCursor, err := aTable.Seek(ctx, key)
+			aCursor, err := aTable.Seek(ctx, RowID(key))
 			require.NoError(t, err)
 			assert.Equal(t, aTable, aCursor.Table)
 			assert.Equal(t, 0, int(aCursor.PageIdx))
@@ -212,7 +212,7 @@ func TestTable_Seek_EmptyTable(t *testing.T) {
 		}
 
 		// Seek key 3 (does not exist, end of table)
-		aCursor, err := aTable.Seek(ctx, uint64(cells))
+		aCursor, err := aTable.Seek(ctx, RowID(cells))
 		require.NoError(t, err)
 		assert.Equal(t, aTable, aCursor.Table)
 		assert.Equal(t, 0, int(aCursor.PageIdx))
@@ -297,7 +297,7 @@ func TestTable_Seek_RootLeafNode_BiggerTree(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			aCursor, err := aTable.Seek(ctx, aTestCase.Key)
+			aCursor, err := aTable.Seek(ctx, RowID(aTestCase.Key))
 			require.NoError(t, err)
 			assert.Equal(t, int(aTestCase.Cursor.PageIdx), int(aCursor.PageIdx))
 			assert.Equal(t, int(aTestCase.Cursor.CellIdx), int(aCursor.CellIdx))
@@ -331,7 +331,7 @@ func TestTable_CreateNewRoot(t *testing.T) {
 	assert.Equal(t, 1, int(aRootPage.InternalNode.Header.KeysNum))
 	assert.Equal(t, 1, int(aRootPage.InternalNode.Header.RightChild))
 	assert.Equal(t, ICell{
-		Key:   uint64(cells - 1),
+		Key:   RowID(cells - 1),
 		Child: 2,
 	}, aRootPage.InternalNode.ICells[0])
 

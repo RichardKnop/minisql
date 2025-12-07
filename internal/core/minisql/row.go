@@ -13,8 +13,10 @@ type OptionalValue struct {
 	Valid bool
 }
 
+type RowID uint64
+
 type Row struct {
-	Key     uint64
+	Key     RowID
 	Columns []Column
 	Values  []OptionalValue
 	// for updates, we store cursor internally
@@ -376,6 +378,31 @@ func (r *Row) CheckOneOrMore(conditions OneOrMore) (bool, error) {
 		if groupConditionResult {
 			return true, nil
 		}
+	}
+
+	return false, nil
+}
+
+func (r *Row) CheckConditions(aConditionGroup Conditions) (bool, error) {
+	if len(aConditionGroup) == 0 {
+		return true, nil
+	}
+
+	groupConditionResult := true
+	for _, aCondition := range aConditionGroup {
+		ok, err := r.checkCondition(aCondition)
+		if err != nil {
+			return false, err
+		}
+
+		if !ok {
+			groupConditionResult = false
+			break
+		}
+	}
+
+	if groupConditionResult {
+		return true, nil
 	}
 
 	return false, nil
