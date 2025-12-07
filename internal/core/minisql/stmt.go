@@ -359,8 +359,9 @@ func (s Statement) validateCreateTable() error {
 	}
 
 	var (
-		primaryKeyCount = 0
-		nameMap         = map[string]struct{}{}
+		primaryKeyCount  = 0
+		primaryKeyColumn Column
+		nameMap          = map[string]struct{}{}
 	)
 	for _, aColumn := range s.Columns {
 		if _, exists := nameMap[aColumn.Name]; exists {
@@ -368,11 +369,20 @@ func (s Statement) validateCreateTable() error {
 		}
 		nameMap[aColumn.Name] = struct{}{}
 		if aColumn.PrimaryKey {
+			primaryKeyColumn = aColumn
 			primaryKeyCount += 1
 		}
 	}
 	if primaryKeyCount > 1 {
 		return fmt.Errorf("only one primary key column is supported")
+	}
+	if primaryKeyCount == 1 {
+		if primaryKeyColumn.Kind == Text {
+			return fmt.Errorf("primary key cannot be of type TEXT")
+		}
+		if primaryKeyColumn.Kind == Varchar && primaryKeyColumn.Size > MaxIndexKeySize {
+			return fmt.Errorf("primary key of type VARCHAR exceeds max index key size %d", MaxIndexKeySize)
+		}
 	}
 
 	return nil

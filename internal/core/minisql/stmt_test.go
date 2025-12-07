@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -85,6 +86,86 @@ func TestStatement_Validate(t *testing.T) {
 		err := stmt.Validate(aTable)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "potential row size exceeds maximum allowed 4066")
+	})
+
+	t.Run("CREATE with multiple primary keys should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: testTableName,
+			Columns: []Column{
+				{
+					Kind:       Int8,
+					PrimaryKey: true,
+					Name:       "id1",
+				},
+				{
+					Kind:       Int8,
+					PrimaryKey: true,
+					Name:       "id2",
+				},
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "only one primary key column is supported")
+	})
+
+	t.Run("CREATE with TEXT primary key should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: testTableName,
+			Columns: []Column{
+				{
+					Kind:       Text,
+					PrimaryKey: true,
+				},
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "primary key cannot be of type TEXT")
+	})
+
+	t.Run("CREATE with VARCHAR primary key exceeding max size should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: testTableName,
+			Columns: []Column{
+				{
+					Kind:       Varchar,
+					PrimaryKey: true,
+					Size:       300,
+				},
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, fmt.Sprintf("primary key of type VARCHAR exceeds max index key size %d", MaxIndexKeySize))
+	})
+
+	t.Run("CREATE with should succeed", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: testTableName,
+			Columns:   testColumns,
+		}
+
+		err := stmt.Validate(aTable)
+		require.NoError(t, err)
+	})
+
+	t.Run("CREATE with primary key should succeed", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: testTableName,
+			Columns:   testColumnsWithPrimaryKey,
+		}
+
+		err := stmt.Validate(aTable)
+		require.NoError(t, err)
 	})
 
 	t.Run("INSERT with wrong number of columns should fail", func(t *testing.T) {

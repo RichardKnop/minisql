@@ -294,6 +294,24 @@ func TestParse_CreateTable(t *testing.T) {
 			errCreateTableMultiplePrimaryKeys,
 		},
 		{
+			"CREATE TABLE with VARCHER primary key with size > 255 fails",
+			`CREATE TABLE foo (
+				id varchar(300) primary key, 
+				bar varchar(255) primary key
+			);`,
+			nil,
+			errCreateTablePrimaryKeyVarcharTooLarge,
+		},
+		{
+			"CREATE TABLE with TEXT primary key fails",
+			`CREATE TABLE foo (
+				id text primary key, 
+				bar varchar(255)
+			);`,
+			nil,
+			errCreateTablePrimaryKeyTextNotAllowed,
+		},
+		{
 			"CREATE TABLE with primary key",
 			`CREATE TABLE foo (
 				id int8 primary key, 

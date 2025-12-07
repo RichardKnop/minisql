@@ -9,9 +9,11 @@ import (
 )
 
 var (
-	errCreateTableNoColumns           = fmt.Errorf("at CREATE TABLE: no columns specified")
-	errCreateTableInvalidColumDef     = fmt.Errorf("at CREATE TABLE: invalid column definition")
-	errCreateTableMultiplePrimaryKeys = fmt.Errorf("at CREATE TABLE: multiple PRIMARY KEY columns specified")
+	errCreateTableNoColumns                 = fmt.Errorf("at CREATE TABLE: no columns specified")
+	errCreateTableInvalidColumDef           = fmt.Errorf("at CREATE TABLE: invalid column definition")
+	errCreateTableMultiplePrimaryKeys       = fmt.Errorf("at CREATE TABLE: multiple PRIMARY KEY columns specified")
+	errCreateTablePrimaryKeyTextNotAllowed  = fmt.Errorf("at CREATE TABLE: AUTOINCREMENT primary key cannot be of type TEXT")
+	errCreateTablePrimaryKeyVarcharTooLarge = fmt.Errorf("at CREATE TABLE: AUTOINCREMENT primary key of type VARCHAR exceeds max index key size %d", minisql.MaxIndexKeySize)
 )
 
 func (p *parser) doParseCreateTable() error {
@@ -95,10 +97,14 @@ func (p *parser) doParseCreateTable() error {
 				return errCreateTableMultiplePrimaryKeys
 			}
 		}
+		aColumn := p.Columns[len(p.Columns)-1]
+		if aColumn.Kind == minisql.Text {
+			return errCreateTablePrimaryKeyTextNotAllowed
+		}
+		if aColumn.Kind == minisql.Varchar && aColumn.Size > minisql.MaxIndexKeySize {
+			return errCreateTablePrimaryKeyVarcharTooLarge
+		}
 		if primaryKey == "PRIMARY KEY AUTOINCREMENT" {
-			if p.Columns[len(p.Columns)-1].Kind != minisql.Int8 {
-				return fmt.Errorf("at CREATE TABLE: AUTOINCREMENT primary key must be of type INT8")
-			}
 			p.Columns[len(p.Columns)-1].Autoincrement = true
 		}
 		p.Columns[len(p.Columns)-1].PrimaryKey = true
