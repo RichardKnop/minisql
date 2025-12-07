@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"fmt"
 	"math/rand/v2"
 	"testing"
 
@@ -1068,6 +1069,59 @@ func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
 
 	// Verify index is empty
 	checkIndexKeys(ctx, t, anIndex, nil)
+}
+
+func TestUniqueIndex_Delete_Varchar(t *testing.T) {
+	var (
+		aPager    = initTest(t)
+		ctx       = context.Background()
+		aColumn   = Column{Name: "test_column", Kind: Varchar, Size: 100}
+		txManager = NewTransactionManager(zap.NewNop())
+		idxPager  = NewTransactionalPager(
+			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
+			txManager,
+		)
+	)
+	anIndex, err := NewUniqueIndex[string](testLogger, txManager, "test_index", aColumn, idxPager, 0)
+
+	// Insert 100 keys in random order
+	keys := make([]string, 0, 1000)
+	for i := int64(1); i <= 1000; i++ {
+		aKey := fmt.Sprintf("key_%d: %s", i, gen.Sentence(10))
+		if len(aKey) > 100 {
+			aKey = aKey[:100]
+		}
+		keys = append(keys, aKey)
+	}
+	rand.Shuffle(len(keys), func(i, j int) { keys[i], keys[j] = keys[j], keys[i] })
+
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for i, key := range keys {
+			if err := anIndex.Insert(ctx, key, uint64(i+100)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, aPager)
+	require.NoError(t, err)
+
+	// Verify all keys are present
+	checkIndexVarcharKeys(ctx, t, anIndex, keys)
+
+	// Delete all keys in random order
+	rand.Shuffle(len(keys), func(i, j int) { keys[i], keys[j] = keys[j], keys[i] })
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for _, key := range keys {
+			if err := anIndex.Delete(ctx, key); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, aPager)
+	require.NoError(t, err)
+
+	// Verify index is empty
+	checkIndexVarcharKeys(ctx, t, anIndex, nil)
 }
 
 func assertFreePages(t *testing.T, aPager Pager, expectedFreePages []PageIndex) {

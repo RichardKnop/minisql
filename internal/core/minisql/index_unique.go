@@ -324,17 +324,6 @@ func (ui *UniqueIndex[T]) BFS(ctx context.Context, f indexCallback) error {
 	return nil
 }
 
-func (ui *UniqueIndex[T]) print() error {
-	return ui.BFS(context.Background(), func(aPage *Page) {
-		aNode := aPage.IndexNode.(*IndexNode[T])
-		fmt.Println("Index node,", "page:", aPage.Index, "leaf", aNode.Header.IsLeaf, "number of keys:", aNode.Header.Keys, "parent:", aNode.Header.Parent, "right child:", aNode.Header.RightChild)
-		fmt.Println("Keys:", aNode.Keys())
-		fmt.Println("Row IDs:", aNode.RowIDs())
-		fmt.Println("Children:", aNode.Children())
-		fmt.Println("---------")
-	})
-}
-
 func (ui *UniqueIndex[T]) Delete(ctx context.Context, keyAny any) error {
 	key, ok := keyAny.(T)
 	if !ok {
@@ -703,4 +692,15 @@ func (ui *UniqueIndex[T]) merge(ctx context.Context, aParent, left, right *Page,
 	parentNode.DeleteKeyByIndex(idx)
 
 	return nil
+}
+
+func (ui *UniqueIndex[T]) print() error {
+	return ui.BFS(context.Background(), func(aPage *Page) {
+		aNode := aPage.IndexNode.(*IndexNode[T])
+		fmt.Println("Index node,", "page:", aPage.Index, "leaf", aNode.Header.IsLeaf, "number of keys:", aNode.Header.Keys, "parent:", aNode.Header.Parent, "right child:", aNode.Header.RightChild)
+		fmt.Println("Keys:", aNode.Keys())
+		fmt.Println("Row IDs:", aNode.RowIDs())
+		fmt.Println("Children:", aNode.Children())
+		fmt.Println("---------")
+	})
 }

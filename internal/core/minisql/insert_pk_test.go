@@ -186,3 +186,15 @@ func checkIndexKeys(ctx context.Context, t *testing.T, anIndex BTreeIndex, expec
 	require.Len(t, actualKeys, len(expectedKeys))
 	assert.ElementsMatch(t, expectedKeys, actualKeys)
 }
+
+func checkIndexVarcharKeys(ctx context.Context, t *testing.T, anIndex BTreeIndex, expectedKeys []string) {
+	actualKeys := make([]string, 0, 100)
+	err := anIndex.BFS(ctx, func(aPage *Page) {
+		node := aPage.IndexNode.(*IndexNode[string])
+		actualKeys = append(actualKeys, node.Keys()...)
+	})
+	require.NoError(t, err)
+
+	require.Len(t, actualKeys, len(expectedKeys))
+	assert.ElementsMatch(t, expectedKeys, actualKeys)
+}
