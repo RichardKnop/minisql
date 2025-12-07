@@ -78,7 +78,7 @@ func (h *InternalNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 }
 
 type ICell struct {
-	Key   uint64
+	Key   RowID
 	Child PageIndex
 }
 
@@ -96,39 +96,25 @@ func (c *ICell) Marshal(buf []byte) ([]byte, error) {
 		buf = make([]byte, size)
 	}
 
-	buf[0] = byte(c.Key >> 0)
-	buf[1] = byte(c.Key >> 8)
-	buf[2] = byte(c.Key >> 16)
-	buf[3] = byte(c.Key >> 24)
-	buf[4] = byte(c.Key >> 32)
-	buf[5] = byte(c.Key >> 40)
-	buf[6] = byte(c.Key >> 48)
-	buf[7] = byte(c.Key >> 56)
+	i := uint64(0)
 
-	buf[8] = byte(c.Child >> 0)
-	buf[9] = byte(c.Child >> 8)
-	buf[10] = byte(c.Child >> 16)
-	buf[11] = byte(c.Child >> 24)
+	buf = marshalUint64(buf, uint64(c.Key), i)
+	i += 8
+
+	buf = marshalUint32(buf, uint32(c.Child), i)
+	i += 4
 
 	return buf[:size], nil
 }
 
 func (c *ICell) Unmarshal(buf []byte) (uint64, error) {
-	c.Key = 0 |
-		(uint64(buf[0]) << 0) |
-		(uint64(buf[1]) << 8) |
-		(uint64(buf[2]) << 16) |
-		(uint64(buf[3]) << 24) |
-		(uint64(buf[4]) << 32) |
-		(uint64(buf[5]) << 40) |
-		(uint64(buf[6]) << 48) |
-		(uint64(buf[7]) << 56)
+	i := uint64(0)
 
-	c.Child = PageIndex(0 |
-		(uint32(buf[8]) << 0) |
-		(uint32(buf[9]) << 8) |
-		(uint32(buf[10]) << 16) |
-		(uint32(buf[11]) << 24))
+	c.Key = RowID(unmarshalUint64(buf, i))
+	i += 8
+
+	c.Child = PageIndex(unmarshalUint32(buf, i))
+	i += 4
 
 	return c.Size(), nil
 }

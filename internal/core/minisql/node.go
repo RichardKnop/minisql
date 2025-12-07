@@ -8,7 +8,7 @@ import (
 // For example, if node has 2 keys, this could return 0 for the leftmost child,
 // 1 for the middle child or 2 for the rightmost child.
 // The returned value is not a node index!
-func (n *InternalNode) IndexOfChild(key uint64) uint32 {
+func (n *InternalNode) IndexOfChild(key RowID) uint32 {
 	// Binary search
 	var (
 		minIdx = uint32(0)
@@ -29,7 +29,7 @@ func (n *InternalNode) IndexOfChild(key uint64) uint32 {
 
 // IndexOfKey returns index of cell with key and a boolean flag
 // indicating whether key was found in the node or not.
-func (n *InternalNode) IndexOfKey(key uint64) (uint32, bool) {
+func (n *InternalNode) IndexOfKey(key RowID) (uint32, bool) {
 	for idx, aCell := range n.ICells {
 		if aCell.Key == key {
 			return uint32(idx), true
@@ -158,8 +158,8 @@ func (n *InternalNode) AppendCells(cells ...ICell) {
 	}
 }
 
-func (n *InternalNode) Keys() []uint64 {
-	keys := make([]uint64, 0, n.Header.KeysNum)
+func (n *InternalNode) Keys() []RowID {
+	keys := make([]RowID, 0, n.Header.KeysNum)
 	for idx := range n.Header.KeysNum {
 		keys = append(keys, n.ICells[idx].Key)
 	}

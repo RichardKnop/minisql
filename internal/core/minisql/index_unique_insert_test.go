@@ -28,7 +28,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	t.Run("Insert first three keys into root node", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for i := 0; i < 3; i++ {
-				if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
+				if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
 					return err
 				}
 				key++
@@ -51,7 +51,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 
 	t.Run("Insert duplicate key fails", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Insert(ctx, key-1, uint64(key-1+100))
+			return anIndex.Insert(ctx, key-1, RowID(key-1+100))
 		}, aPager)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrDuplicateKey)
@@ -59,7 +59,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 
 	t.Run("Insert 4th key, causes a split", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Insert(ctx, key, uint64(key+100))
+			return anIndex.Insert(ctx, key, RowID(key+100))
 		}, aPager)
 		require.NoError(t, err)
 		key++
@@ -88,7 +88,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	t.Run("Insert 2 more keys, another split", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for i := 0; i < 2; i++ {
-				if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
+				if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
 					return err
 				}
 				key++
@@ -125,7 +125,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	t.Run("Insert 2 more keys, another split", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for i := 0; i < 2; i++ {
-				if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
+				if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
 					return err
 				}
 				key++
@@ -165,7 +165,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 
 	t.Run("Insert 1 more key, internal split", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Insert(ctx, key, uint64(key+100))
+			return anIndex.Insert(ctx, key, RowID(key+100))
 		}, aPager)
 		require.NoError(t, err)
 		key++
@@ -211,7 +211,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	t.Run("Keep inserting more keys", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for i := 0; i < 5; i++ {
-				if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
+				if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
 					return err
 				}
 				key++
@@ -289,7 +289,7 @@ func TestUniqueIndex_Insert_OutOfOrder(t *testing.T) {
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
-			if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
+			if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
 				return err
 			}
 		}
@@ -365,9 +365,9 @@ func assertIndexNode(t *testing.T, aNode *IndexNode[int64], isRoot, isLeaf bool,
 	assert.Equal(t, len(keys), int(aNode.Header.Keys), "number of keys mismatch")
 	assert.Equal(t, keys, aNode.Keys(), "keys mismatch")
 	assert.Equal(t, children, aNode.Children(), "children mismatch")
-	expectedRowIDs := make([]uint64, len(keys))
+	expectedRowIDs := make([]RowID, len(keys))
 	for i := range keys {
-		expectedRowIDs[i] = uint64(keys[i] + 100)
+		expectedRowIDs[i] = RowID(keys[i] + 100)
 	}
 	assert.Equal(t, expectedRowIDs, aNode.RowIDs(), "row IDs mismatch")
 }

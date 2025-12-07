@@ -35,9 +35,10 @@ type TxPager interface {
 
 type BTreeIndex interface {
 	GetRootPageIdx() PageIndex
+	Find(ctx context.Context, keyAny any) (RowID, error)
 	Seek(ctx context.Context, aPage *Page, keyAny any) (IndexCursor, bool, error)
 	SeekLastKey(ctx context.Context, pageIdx PageIndex) (any, error)
-	Insert(ctx context.Context, key any, rowID uint64) error
+	Insert(ctx context.Context, key any, rowID RowID) error
 	Delete(ctx context.Context, key any) error
 	BFS(ctx context.Context, f indexCallback) error
 }

@@ -12,7 +12,7 @@ type PrimaryKey struct {
 	Index         BTreeIndex
 }
 
-func (t *Table) insertPrimaryKey(ctx context.Context, pkValue OptionalValue, rowID uint64) (any, error) {
+func (t *Table) insertPrimaryKey(ctx context.Context, pkValue OptionalValue, rowID RowID) (any, error) {
 	if !pkValue.Valid {
 		if !t.PrimaryKey.Autoincrement {
 			return 0, fmt.Errorf("failed to get value for primary key %s", t.PrimaryKey.Name)
@@ -33,7 +33,7 @@ func (t *Table) insertPrimaryKey(ctx context.Context, pkValue OptionalValue, row
 	return castedValue, nil
 }
 
-func (t *Table) insertAutoincrementedPrimaryKey(ctx context.Context, rowID uint64) (int64, error) {
+func (t *Table) insertAutoincrementedPrimaryKey(ctx context.Context, rowID RowID) (int64, error) {
 	if t.PrimaryKey.Autoincrement && t.PrimaryKey.Column.Kind != Int8 {
 		return 0, fmt.Errorf("autoincrement primary key %s must be of type INT8", t.PrimaryKey.Name)
 	}

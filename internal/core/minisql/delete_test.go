@@ -178,14 +178,14 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 	// Check the root page
 	assert.Equal(t, 5, int(aPager.pages[0].InternalNode.Header.KeysNum))
-	assert.Equal(t, []uint64{2, 5, 8, 11, 14}, aPager.pages[0].InternalNode.Keys())
+	assert.Equal(t, []RowID{2, 5, 8, 11, 14}, aPager.pages[0].InternalNode.Keys())
 	// Check the leaf pages
-	assert.Equal(t, []uint64{0, 1, 2}, aPager.pages[2].LeafNode.Keys())
-	assert.Equal(t, []uint64{3, 4, 5}, aPager.pages[1].LeafNode.Keys())
-	assert.Equal(t, []uint64{6, 7, 8}, aPager.pages[3].LeafNode.Keys())
-	assert.Equal(t, []uint64{9, 10, 11}, aPager.pages[4].LeafNode.Keys())
-	assert.Equal(t, []uint64{12, 13, 14}, aPager.pages[5].LeafNode.Keys())
-	assert.Equal(t, []uint64{15, 16, 17, 18, 19}, aPager.pages[6].LeafNode.Keys())
+	assert.Equal(t, []RowID{0, 1, 2}, aPager.pages[2].LeafNode.Keys())
+	assert.Equal(t, []RowID{3, 4, 5}, aPager.pages[1].LeafNode.Keys())
+	assert.Equal(t, []RowID{6, 7, 8}, aPager.pages[3].LeafNode.Keys())
+	assert.Equal(t, []RowID{9, 10, 11}, aPager.pages[4].LeafNode.Keys())
+	assert.Equal(t, []RowID{12, 13, 14}, aPager.pages[5].LeafNode.Keys())
+	assert.Equal(t, []RowID{15, 16, 17, 18, 19}, aPager.pages[6].LeafNode.Keys())
 
 	t.Run("Delete first row to force merging of first two leaves", func(t *testing.T) {
 		ids := rowIDs(rows[0])
@@ -218,14 +218,14 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 		// Check the root page
 		assert.Equal(t, 4, int(aPager.pages[0].InternalNode.Header.KeysNum))
-		assert.Equal(t, []uint64{5, 8, 11, 14}, aPager.pages[0].InternalNode.Keys())
+		assert.Equal(t, []RowID{5, 8, 11, 14}, aPager.pages[0].InternalNode.Keys())
 		// Check the leaf pages
-		assert.Equal(t, []uint64{1, 2, 3, 4, 5}, aPager.pages[2].LeafNode.Keys())
+		assert.Equal(t, []RowID{1, 2, 3, 4, 5}, aPager.pages[2].LeafNode.Keys())
 		// leafs[1] has been merged into leafs[0]
-		assert.Equal(t, []uint64{6, 7, 8}, aPager.pages[3].LeafNode.Keys())
-		assert.Equal(t, []uint64{9, 10, 11}, aPager.pages[4].LeafNode.Keys())
-		assert.Equal(t, []uint64{12, 13, 14}, aPager.pages[5].LeafNode.Keys())
-		assert.Equal(t, []uint64{15, 16, 17, 18, 19}, aPager.pages[6].LeafNode.Keys())
+		assert.Equal(t, []RowID{6, 7, 8}, aPager.pages[3].LeafNode.Keys())
+		assert.Equal(t, []RowID{9, 10, 11}, aPager.pages[4].LeafNode.Keys())
+		assert.Equal(t, []RowID{12, 13, 14}, aPager.pages[5].LeafNode.Keys())
+		assert.Equal(t, []RowID{15, 16, 17, 18, 19}, aPager.pages[6].LeafNode.Keys())
 		// Check that leafs[1] is now a free page
 		assert.NotNil(t, aPager.pages[1].FreePage)
 		assert.Nil(t, aPager.pages[1].LeafNode)
@@ -266,12 +266,12 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 		// Check the root page
 		assert.Equal(t, 3, int(aPager.pages[0].InternalNode.Header.KeysNum))
-		assert.Equal(t, []uint64{5, 8, 11}, aPager.pages[0].InternalNode.Keys())
+		assert.Equal(t, []RowID{5, 8, 11}, aPager.pages[0].InternalNode.Keys())
 		// Check the leaf pages
-		assert.Equal(t, []uint64{1, 2, 3, 4, 5}, aPager.pages[2].LeafNode.Keys())
-		assert.Equal(t, []uint64{6, 7, 8}, aPager.pages[3].LeafNode.Keys())
-		assert.Equal(t, []uint64{9, 10, 11}, aPager.pages[4].LeafNode.Keys())
-		assert.Equal(t, []uint64{12, 13, 14, 15, 16}, aPager.pages[5].LeafNode.Keys())
+		assert.Equal(t, []RowID{1, 2, 3, 4, 5}, aPager.pages[2].LeafNode.Keys())
+		assert.Equal(t, []RowID{6, 7, 8}, aPager.pages[3].LeafNode.Keys())
+		assert.Equal(t, []RowID{9, 10, 11}, aPager.pages[4].LeafNode.Keys())
+		assert.Equal(t, []RowID{12, 13, 14, 15, 16}, aPager.pages[5].LeafNode.Keys())
 		// Check that leafs[6] is now a free page
 		assert.NotNil(t, aPager.pages[6].FreePage)
 		assert.Nil(t, aPager.pages[6].LeafNode)
@@ -316,11 +316,11 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 		// Check the root page
 		assert.Equal(t, 2, int(aPager.pages[0].InternalNode.Header.KeysNum))
-		assert.Equal(t, []uint64{8, 11}, aPager.pages[0].InternalNode.Keys())
+		assert.Equal(t, []RowID{8, 11}, aPager.pages[0].InternalNode.Keys())
 		// Check the leaf pages
-		assert.Equal(t, []uint64{1, 3, 5, 7, 8}, aPager.pages[2].LeafNode.Keys())
-		assert.Equal(t, []uint64{9, 10, 11}, aPager.pages[4].LeafNode.Keys())
-		assert.Equal(t, []uint64{12, 13, 14, 15, 16}, aPager.pages[5].LeafNode.Keys())
+		assert.Equal(t, []RowID{1, 3, 5, 7, 8}, aPager.pages[2].LeafNode.Keys())
+		assert.Equal(t, []RowID{9, 10, 11}, aPager.pages[4].LeafNode.Keys())
+		assert.Equal(t, []RowID{12, 13, 14, 15, 16}, aPager.pages[5].LeafNode.Keys())
 		// Check that leafs[3] is now a free page
 		assert.NotNil(t, aPager.pages[3].FreePage)
 		assert.Nil(t, aPager.pages[3].LeafNode)
@@ -365,11 +365,11 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 		// Check the root page
 		assert.Equal(t, 2, int(aPager.pages[0].InternalNode.Header.KeysNum))
-		assert.Equal(t, []uint64{5, 11}, aPager.pages[0].InternalNode.Keys())
+		assert.Equal(t, []RowID{5, 11}, aPager.pages[0].InternalNode.Keys())
 		// Check the leaf pages
-		assert.Equal(t, []uint64{1, 3, 5}, aPager.pages[2].LeafNode.Keys())
-		assert.Equal(t, []uint64{7, 8, 10}, aPager.pages[4].LeafNode.Keys())
-		assert.Equal(t, []uint64{12, 14, 16}, aPager.pages[5].LeafNode.Keys())
+		assert.Equal(t, []RowID{1, 3, 5}, aPager.pages[2].LeafNode.Keys())
+		assert.Equal(t, []RowID{7, 8, 10}, aPager.pages[4].LeafNode.Keys())
+		assert.Equal(t, []RowID{12, 14, 16}, aPager.pages[5].LeafNode.Keys())
 	})
 
 	t.Run("Keep deleting more rows, another merge and borrow", func(t *testing.T) {
@@ -406,10 +406,10 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 		// Check the root page
 		assert.Equal(t, 1, int(aPager.pages[0].InternalNode.Header.KeysNum))
-		assert.Equal(t, []uint64{8}, aPager.pages[0].InternalNode.Keys())
+		assert.Equal(t, []RowID{8}, aPager.pages[0].InternalNode.Keys())
 		// Check the leaf pages
-		assert.Equal(t, []uint64{1, 7, 8}, aPager.pages[2].LeafNode.Keys())
-		assert.Equal(t, []uint64{10, 14, 16}, aPager.pages[5].LeafNode.Keys())
+		assert.Equal(t, []RowID{1, 7, 8}, aPager.pages[2].LeafNode.Keys())
+		assert.Equal(t, []RowID{10, 14, 16}, aPager.pages[5].LeafNode.Keys())
 		// Check that leafs[4] is now a free page
 		assert.NotNil(t, aPager.pages[4].FreePage)
 		assert.Nil(t, aPager.pages[4].LeafNode)
@@ -451,7 +451,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		assert.Equal(t, 5, int(aPager.pages[0].LeafNode.Header.Cells))
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Header.Parent))
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Header.NextLeaf))
-		assert.Equal(t, []uint64{1, 7, 8, 10, 16}, aPager.pages[0].LeafNode.Keys())
+		assert.Equal(t, []RowID{1, 7, 8, 10, 16}, aPager.pages[0].LeafNode.Keys())
 		// Check there are two more free pages (6 in total now)
 		assert.NotNil(t, aPager.pages[5].FreePage)
 		assert.Nil(t, aPager.pages[5].LeafNode)

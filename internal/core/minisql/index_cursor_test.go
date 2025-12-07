@@ -26,7 +26,7 @@ func TestUniqueIndex_Seek(t *testing.T) {
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
-			if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
+			if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
 				return err
 			}
 		}
@@ -151,7 +151,7 @@ func TestUniqueIndex_SeekLastKey(t *testing.T) {
 	t.Run("populated index", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for _, key := range keys {
-				if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
+				if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
 					return err
 				}
 			}

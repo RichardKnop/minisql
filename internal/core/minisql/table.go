@@ -69,7 +69,7 @@ func (t *Table) ColumnByName(name string) (Column, bool) {
 
 // SeekNextRowID returns cursor pointing at the position after the last row ID
 // plus a new row ID to insert
-func (t *Table) SeekNextRowID(ctx context.Context, pageIdx PageIndex) (*Cursor, uint64, error) {
+func (t *Table) SeekNextRowID(ctx context.Context, pageIdx PageIndex) (*Cursor, RowID, error) {
 	aPage, err := t.pager.ReadPage(ctx, pageIdx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("seek next row ID: %w", err)
@@ -135,7 +135,7 @@ func (t *Table) SeekLast(ctx context.Context, pageIdx PageIndex) (*Cursor, error
 
 // Seek the cursor for a key, if it does not exist then return the cursor
 // for the page and cell where it should be inserted
-func (t *Table) Seek(ctx context.Context, key uint64) (*Cursor, error) {
+func (t *Table) Seek(ctx context.Context, key RowID) (*Cursor, error) {
 	aRootPage, err := t.pager.ReadPage(ctx, t.GetRootPageIdx())
 	if err != nil {
 		return nil, fmt.Errorf("seek: %w", err)
@@ -148,7 +148,7 @@ func (t *Table) Seek(ctx context.Context, key uint64) (*Cursor, error) {
 	return nil, fmt.Errorf("root page type")
 }
 
-func (t *Table) leafNodeSeek(pageIdx PageIndex, aPage *Page, key uint64) (*Cursor, error) {
+func (t *Table) leafNodeSeek(pageIdx PageIndex, aPage *Page, key RowID) (*Cursor, error) {
 	var (
 		minIdx uint32
 		maxIdx = aPage.LeafNode.Header.Cells
@@ -179,7 +179,7 @@ func (t *Table) leafNodeSeek(pageIdx PageIndex, aPage *Page, key uint64) (*Curso
 	return &aCursor, nil
 }
 
-func (t *Table) internalNodeSeek(ctx context.Context, aPage *Page, key uint64) (*Cursor, error) {
+func (t *Table) internalNodeSeek(ctx context.Context, aPage *Page, key RowID) (*Cursor, error) {
 	childIdx := aPage.InternalNode.IndexOfChild(key)
 	childPageIdx, err := aPage.InternalNode.Child(childIdx)
 	if err != nil {
@@ -457,7 +457,7 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 	return t.InternalNodeInsert(ctx, aSplitPage.InternalNode.Header.Parent, aNewPage.Index)
 }
 
-func (t *Table) GetMaxKey(ctx context.Context, aPage *Page) (uint64, error) {
+func (t *Table) GetMaxKey(ctx context.Context, aPage *Page) (RowID, error) {
 	if aPage.LeafNode != nil {
 		if aPage.LeafNode.Header.Cells == 0 {
 			return 0, fmt.Errorf("get max key: leaf node has no cells")
@@ -474,7 +474,7 @@ func (t *Table) GetMaxKey(ctx context.Context, aPage *Page) (uint64, error) {
 // DeleteKey deletes a key from the table, when this is called, you should already
 // have located the leaf that contains the key and pass its page and cell index here.
 // The deletion process starts at the leaf and then recursively bubbles up the tree.
-func (t *Table) DeleteKey(ctx context.Context, pageIdx PageIndex, key uint64) error {
+func (t *Table) DeleteKey(ctx context.Context, pageIdx PageIndex, key RowID) error {
 	aPage, err := t.pager.ModifyPage(ctx, pageIdx)
 	if err != nil {
 		return fmt.Errorf("delete key: %w", err)
@@ -554,7 +554,7 @@ func (t *Table) freeOverflowPages(ctx context.Context, aRow *Row, onlyForColumns
 	return nil
 }
 
-func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key uint64) error {
+func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key RowID) error {
 	aLeafNode := aPage.LeafNode
 
 	if aLeafNode.Header.IsRoot {

@@ -13,12 +13,11 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, err
 	}
 
-	aCursor, err := t.SeekFirst(ctx)
-	if err != nil {
-		return StatementResult{}, err
-	}
+	// Create query plan
+	plan := t.PlanQuery(ctx, stmt)
 
-	t.logger.Sugar().Debug("updating rows")
+	t.logger.Sugar().With("query type", "UPDATE").Debugf("Query plan: scan_type=%s, use_index=%v, index_keys=%v",
+		plan.ScanType.String(), plan.IsIndexScan(), plan.IndexKeyGroups)
 
 	var (
 		unfilteredPipe = make(chan Row)
@@ -27,37 +26,22 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 		stopChan       = make(chan bool)
 	)
 
-	// TODO - implement partial updates by passing selected fields to fetchRow
+	// Execute based on plan
+	if plan.IsIndexScan() {
+		// Use primary key index lookup
+		go t.indexPointScan(ctx, plan, fieldsFromColumns(t.Columns...), unfilteredPipe, errorsPipe, stopChan)
+	} else {
+		// Sequential scan
+		go t.sequentialScan(ctx, fieldsFromColumns(t.Columns...), unfilteredPipe, errorsPipe, stopChan)
+	}
 
-	go func(out chan<- Row) {
-		defer close(out)
-		for !aCursor.EndOfTable {
-			rowCursor := *aCursor
-			aRow, err := aCursor.fetchRow(ctx)
-			if err != nil {
-				errorsPipe <- err
-				return
-			}
-			aRow.cursor = rowCursor
-
-			select {
-			case <-stopChan:
-				return
-			case out <- aRow:
-				continue
-			}
-		}
-	}(unfilteredPipe)
-
-	// Filter rows according the WHERE conditions
-	go func(in <-chan Row, out chan<- Row, conditions OneOrMore) {
+	// Filter rows according to the WHERE conditions. In case of an index scan,
+	// any remaining filtering will happen here. In case of a sequential scan,
+	// this will filter all rows.
+	go func(in <-chan Row, out chan<- Row) {
 		defer close(out)
 		for aRow := range in {
-			if len(conditions) == 0 {
-				out <- aRow
-				continue
-			}
-			ok, err := aRow.CheckOneOrMore(conditions)
+			ok, err := plan.FilterRow(aRow)
 			if err != nil {
 				errorsPipe <- err
 				return
@@ -66,7 +50,7 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 				out <- aRow
 			}
 		}
-	}(unfilteredPipe, filteredPipe, stmt.Conditions)
+	}(unfilteredPipe, filteredPipe)
 
 	aResult := StatementResult{
 		Columns: t.Columns,

@@ -55,7 +55,7 @@ func (h *LeafNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 
 type Cell struct {
 	NullBitmask uint64
-	Key         uint64
+	Key         RowID
 	Value       []byte
 }
 
@@ -77,7 +77,7 @@ func (c *Cell) Marshal(buf []byte) ([]byte, error) {
 	marshalUint64(buf, c.NullBitmask, i)
 	i += 8
 
-	marshalUint64(buf, c.Key, i)
+	marshalUint64(buf, uint64(c.Key), i)
 	i += 8
 
 	copy(buf[i:], c.Value)
@@ -92,7 +92,7 @@ func (c *Cell) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	c.NullBitmask = unmarshalUint64(buf, offset)
 	offset += 8
 
-	c.Key = unmarshalUint64(buf, offset)
+	c.Key = RowID(unmarshalUint64(buf, offset))
 	offset += 8
 
 	for i, aColumn := range columns {
@@ -197,7 +197,7 @@ func (n *LeafNode) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	return i, nil
 }
 
-func (n *LeafNode) Delete(key uint64) (Cell, bool) {
+func (n *LeafNode) Delete(key RowID) (Cell, bool) {
 	if n.Header.Cells == 0 {
 		return Cell{}, false
 	}
@@ -261,8 +261,8 @@ func (n *LeafNode) AppendCells(cells ...Cell) {
 	}
 }
 
-func (n *LeafNode) Keys() []uint64 {
-	keys := make([]uint64, 0, n.Header.Cells)
+func (n *LeafNode) Keys() []RowID {
+	keys := make([]RowID, 0, n.Header.Cells)
 	for idx := range n.Header.Cells {
 		keys = append(keys, n.Cells[idx].Key)
 	}

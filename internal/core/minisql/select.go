@@ -18,27 +18,11 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, err
 	}
 
-	aCursor, err := t.SeekFirst(ctx)
-	if err != nil {
-		return StatementResult{}, err
-	}
-	aPage, err := t.pager.ReadPage(ctx, aCursor.PageIdx)
-	if err != nil {
-		return StatementResult{}, fmt.Errorf("select: %w", err)
-	}
-	aCursor.EndOfTable = aPage.LeafNode.Header.Cells == 0
+	// Create query plan
+	plan := t.PlanQuery(ctx, stmt)
 
-	t.logger.Sugar().With(
-		"page_index", int(aCursor.PageIdx),
-		"cell_index", int(aCursor.CellIdx),
-	).Debug("fetching rows from")
-
-	var (
-		unfilteredPipe = make(chan Row)
-		filteredPipe   = make(chan Row)
-		errorsPipe     = make(chan error, 1)
-		stopChan       = make(chan bool)
-	)
+	t.logger.Sugar().With("query type", "SELECT").Debugf("Query plan: scan_type=%s, use_index=%v, index_keys=%v",
+		plan.ScanType.String(), plan.IsIndexScan(), plan.IndexKeyGroups)
 
 	// Only fetch fields included in the SELECT query or fields needed for WHERE conditions
 	// TODO - handle * plus other fiels, for example SELECT *, a, b FROM table WHERE c = 1
@@ -77,27 +61,27 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 	}
 
-	go func(out chan<- Row) {
-		defer close(out)
-		for !aCursor.EndOfTable {
-			aRow, err := aCursor.fetchRow(ctx, selectedFields...)
-			if err != nil {
-				errorsPipe <- err
-				return
-			}
+	var (
+		unfilteredPipe = make(chan Row)
+		filteredPipe   = make(chan Row)
+		errorsPipe     = make(chan error, 1)
+		stopChan       = make(chan bool)
+	)
 
-			select {
-			case <-stopChan:
-				return
-			case out <- aRow:
-				continue
-			}
-		}
-	}(unfilteredPipe)
+	// Execute based on plan
+	if plan.IsIndexScan() {
+		// Use primary key index lookup
+		go t.indexPointScan(ctx, plan, selectedFields, unfilteredPipe, errorsPipe, stopChan)
+	} else {
+		// Sequential scan
+		go t.sequentialScan(ctx, selectedFields, unfilteredPipe, errorsPipe, stopChan)
+	}
 
-	// Filter rows according the WHERE conditions
-	// Count row count for LIMIT clause.
-	go func(in <-chan Row, out chan<- Row, stmt Statement) {
+	// Filter rows according to the WHERE conditions. In case of an index scan,
+	// any remaining filtering will happen here. In case of a sequential scan,
+	// this will filter all rows.
+	// LIMIT and OFFSET are also applied here.
+	go func(in <-chan Row, out chan<- Row) {
 		defer close(out)
 		defer close(stopChan)
 		var limit, offset int64
@@ -111,7 +95,7 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 			if stmt.Limit.Valid && limit == 0 {
 				return
 			}
-			aRow, ok, err := stmt.filterRow(aRow)
+			ok, err := plan.FilterRow(aRow)
 			if err != nil {
 				errorsPipe <- err
 				return
@@ -128,7 +112,7 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 			}
 			sendFetchedRow(aRow, out, selectAll, requestedFields...)
 		}
-	}(unfilteredPipe, filteredPipe, stmt)
+	}(unfilteredPipe, filteredPipe)
 
 	aResult.Rows = func(ctx context.Context) (Row, error) {
 		select {
@@ -148,24 +132,90 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	return aResult, nil
 }
 
-func (s Statement) filterRow(aRow Row) (Row, bool, error) {
-	if len(s.Conditions) == 0 {
-		return aRow, true, nil
-	}
-	ok, err := aRow.CheckOneOrMore(s.Conditions)
-	if err != nil {
-		return Row{}, false, err
-	}
-	if !ok {
-		return Row{}, false, nil
-	}
-	return aRow, true, nil
-}
-
 func sendFetchedRow(aRow Row, out chan<- Row, selectAll bool, requestedFields ...Field) {
 	if selectAll {
 		out <- aRow
 	} else {
 		out <- aRow.OnlyFields(requestedFields...)
+	}
+}
+
+func (t *Table) indexPointScan(ctx context.Context, plan QueryPlan,
+	selectedFields []Field, out chan<- Row, errorsPipe chan<- error, stopChan <-chan bool) {
+
+	defer close(out)
+
+	// Lookup each primary key value
+	for _, pkGroup := range plan.IndexKeyGroups {
+		for _, pkValue := range pkGroup {
+			// Find row ID from primary key index
+			rowID, err := t.PrimaryKey.Index.Find(ctx, pkValue)
+			if err != nil {
+				if errors.Is(err, ErrNotFound) {
+					// Key not found, skip
+					continue
+				}
+				errorsPipe <- fmt.Errorf("index lookup failed: %w", err)
+				return
+			}
+
+			// Find the row by ID
+			aCursor, err := t.Seek(ctx, rowID)
+			if err != nil {
+				errorsPipe <- fmt.Errorf("find row failed: %w", err)
+				return
+			}
+
+			// Fetch the row
+			rowCursor := *aCursor
+			aRow, err := aCursor.fetchRow(ctx, selectedFields...)
+			if err != nil {
+				errorsPipe <- fmt.Errorf("fetch row failed: %w", err)
+				return
+			}
+			aRow.cursor = rowCursor
+
+			select {
+			case <-stopChan:
+				return
+			case out <- aRow:
+				continue
+			}
+		}
+	}
+}
+
+func (t *Table) sequentialScan(ctx context.Context, selectedFields []Field,
+	out chan<- Row, errorsPipe chan<- error, stopChan <-chan bool) {
+	defer close(out)
+
+	aCursor, err := t.SeekFirst(ctx)
+	if err != nil {
+		errorsPipe <- err
+		return
+	}
+
+	aPage, err := t.pager.ReadPage(ctx, aCursor.PageIdx)
+	if err != nil {
+		errorsPipe <- fmt.Errorf("sequential scan: %w", err)
+		return
+	}
+	aCursor.EndOfTable = aPage.LeafNode.Header.Cells == 0
+
+	for !aCursor.EndOfTable {
+		rowCursor := *aCursor
+		aRow, err := aCursor.fetchRow(ctx, selectedFields...)
+		if err != nil {
+			errorsPipe <- err
+			return
+		}
+		aRow.cursor = rowCursor
+
+		select {
+		case <-stopChan:
+			return
+		case out <- aRow:
+			continue
+		}
 	}
 }

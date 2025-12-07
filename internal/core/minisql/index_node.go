@@ -72,7 +72,7 @@ func (h *IndexNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 // Use int8 for bool so we can use comparison operators
 type IndexCell[T IndexKey] struct {
 	Key   T
-	RowID uint64
+	RowID RowID
 	Child PageIndex
 }
 
@@ -137,7 +137,7 @@ func (c *IndexCell[T]) Marshal(buf []byte) ([]byte, error) {
 		return nil, fmt.Errorf("unsupported key type: %T", v)
 	}
 
-	marshalUint64(buf, c.RowID, i)
+	marshalUint64(buf, uint64(c.RowID), i)
 	i += 8
 
 	marshalUint32(buf, uint32(c.Child), i)
@@ -177,7 +177,7 @@ func (c *IndexCell[T]) Unmarshal(buf []byte) (uint64, error) {
 		return 0, fmt.Errorf("unsupported column type: %T", v)
 	}
 
-	c.RowID = unmarshalUint64(buf, i)
+	c.RowID = RowID(unmarshalUint64(buf, i))
 	i += 8
 
 	c.Child = PageIndex(unmarshalUint32(buf, i))
@@ -311,8 +311,8 @@ func (n *IndexNode[T]) Keys() []T {
 	return keys
 }
 
-func (n *IndexNode[T]) RowIDs() []uint64 {
-	rowIDs := make([]uint64, 0, n.Header.Keys)
+func (n *IndexNode[T]) RowIDs() []RowID {
+	rowIDs := make([]RowID, 0, n.Header.Keys)
 	for i := range n.Header.Keys {
 		rowIDs = append(rowIDs, n.Cells[i].RowID)
 	}

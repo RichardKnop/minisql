@@ -16,7 +16,7 @@ func TestInternalNode_IndexOfChild(t *testing.T) {
 	testCases := []struct {
 		Name     string
 		Page     *Page
-		Key      uint64
+		Key      RowID
 		ChildIdx uint32
 	}{
 		// Root page

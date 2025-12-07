@@ -29,7 +29,7 @@ func TestUniqueIndex_Delete(t *testing.T) {
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
-			if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
+			if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
 				return err
 			}
 		}
@@ -1044,7 +1044,7 @@ func TestUniqueIndex_Delete_Random_Shuffle(t *testing.T) {
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
-			if err := anIndex.Insert(ctx, key, uint64(key+100)); err != nil {
+			if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
 				return err
 			}
 		}
@@ -1097,7 +1097,7 @@ func TestUniqueIndex_Delete_Varchar(t *testing.T) {
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for i, key := range keys {
-			if err := anIndex.Insert(ctx, key, uint64(i+100)); err != nil {
+			if err := anIndex.Insert(ctx, key, RowID(i+100)); err != nil {
 				return err
 			}
 		}

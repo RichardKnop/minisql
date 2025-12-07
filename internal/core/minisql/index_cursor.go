@@ -10,6 +10,38 @@ type IndexCursor struct {
 	CellIdx uint32
 }
 
+var ErrNotFound = fmt.Errorf("not found")
+
+func (ui *UniqueIndex[T]) Find(ctx context.Context, keyAny any) (RowID, error) {
+	key, ok := keyAny.(T)
+	if !ok {
+		return 0, fmt.Errorf("invalid key type: %T", keyAny)
+	}
+
+	aRootPage, err := ui.pager.ReadPage(ctx, ui.GetRootPageIdx())
+	if err != nil {
+		return 0, err
+	}
+
+	aCursor, ok, err := ui.Seek(ctx, aRootPage, key)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, fmt.Errorf("%w: %v", ErrNotFound, key)
+	}
+
+	aPage, err := ui.pager.ReadPage(ctx, aCursor.PageIdx)
+	if err != nil {
+		return 0, fmt.Errorf("read page: %w", err)
+	}
+	aNode := aPage.IndexNode.(*IndexNode[T])
+	if aCursor.CellIdx >= aNode.Header.Keys {
+		return 0, fmt.Errorf("invalid cell index: %d", aCursor.CellIdx)
+	}
+	return RowID(aNode.Cells[aCursor.CellIdx].RowID), nil
+}
+
 func (ui *UniqueIndex[T]) Seek(ctx context.Context, aPage *Page, keyAny any) (IndexCursor, bool, error) {
 	key, ok := keyAny.(T)
 	if !ok {

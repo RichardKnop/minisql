@@ -13,17 +13,11 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, err
 	}
 
-	aCursor, err := t.SeekFirst(ctx)
-	if err != nil {
-		return StatementResult{}, err
-	}
+	// Create query plan
+	plan := t.PlanQuery(ctx, stmt)
 
-	var (
-		unfilteredPipe = make(chan Row)
-		filteredPipe   = make(chan uint64)
-		errorsPipe     = make(chan error, 1)
-		stopChan       = make(chan bool)
-	)
+	t.logger.Sugar().With("query type", "DELETE").Debugf("Query plan: scan_type=%s, use_index=%v, index_keys=%v",
+		plan.ScanType.String(), plan.IsIndexScan(), plan.IndexKeyGroups)
 
 	// Only fetch fields needed for WHERE conditions
 	var selectedFields []Field
@@ -38,33 +32,29 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 	}
 
-	go func(out chan<- Row) {
-		defer close(out)
-		for !aCursor.EndOfTable {
-			aRow, err := aCursor.fetchRow(ctx, selectedFields...)
-			if err != nil {
-				errorsPipe <- err
-				return
-			}
+	var (
+		unfilteredPipe = make(chan Row)
+		filteredPipe   = make(chan RowID)
+		errorsPipe     = make(chan error, 1)
+		stopChan       = make(chan bool)
+	)
 
-			select {
-			case <-stopChan:
-				return
-			case out <- aRow:
-				continue
-			}
-		}
-	}(unfilteredPipe)
+	// Execute based on plan
+	if plan.IsIndexScan() {
+		// Use primary key index lookup
+		go t.indexPointScan(ctx, plan, selectedFields, unfilteredPipe, errorsPipe, stopChan)
+	} else {
+		// Sequential scan
+		go t.sequentialScan(ctx, selectedFields, unfilteredPipe, errorsPipe, stopChan)
+	}
 
-	// Filter rows according the WHERE conditions
-	go func(in <-chan Row, out chan<- uint64, conditions OneOrMore) {
+	// Filter rows according to the WHERE conditions. In case of an index scan,
+	// any remaining filtering will happen here. In case of a sequential scan,
+	// this will filter all rows.
+	go func(in <-chan Row, out chan<- RowID) {
 		defer close(out)
 		for aRow := range in {
-			if len(conditions) == 0 {
-				out <- aRow.Key
-				continue
-			}
-			ok, err := aRow.CheckOneOrMore(conditions)
+			ok, err := plan.FilterRow(aRow)
 			if err != nil {
 				errorsPipe <- err
 				return
@@ -73,19 +63,19 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 				out <- aRow.Key
 			}
 		}
-	}(unfilteredPipe, filteredPipe, stmt.Conditions)
+	}(unfilteredPipe, filteredPipe)
 
 	aResult := StatementResult{
 		Columns: t.Columns,
 	}
 
-	go func(in <-chan uint64) {
+	go func(in <-chan RowID) {
 		defer close(stopChan)
 		// When deleting multiple rows, we first collect them all
 		// and then delete them one by one. This is to avoid fetchRow
 		// in unfiltered pipe to skip rows that have been deleted while
 		// scanning the table when doing multiple deletions.
-		keys := make([]uint64, 0, 100)
+		keys := make([]RowID, 0, 100)
 		for aKey := range in {
 			keys = append(keys, aKey)
 		}
