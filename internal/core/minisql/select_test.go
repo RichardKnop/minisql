@@ -62,6 +62,67 @@ func TestTable_Select(t *testing.T) {
 		assert.Equal(t, rows, actual)
 	})
 
+	t.Run("Select with LIMIT", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(testColumns...),
+			Limit:  OptionalValue{Value: int64(10), Valid: true},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		// Use iterator to collect all rows
+		actual := []Row{}
+		aRow, err := aResult.Rows(ctx)
+		for ; err == nil; aRow, err = aResult.Rows(ctx) {
+			actual = append(actual, aRow)
+		}
+
+		assert.Equal(t, rows[0:10], actual)
+	})
+
+	t.Run("Select with OFFSET", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(testColumns...),
+			Offset: OptionalValue{Value: int64(10), Valid: true},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		// Use iterator to collect all rows
+		actual := []Row{}
+		aRow, err := aResult.Rows(ctx)
+		for ; err == nil; aRow, err = aResult.Rows(ctx) {
+			actual = append(actual, aRow)
+		}
+
+		assert.Equal(t, rows[10:], actual)
+	})
+
+	t.Run("Select with LIMIT and OFFSET", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(testColumns...),
+			Limit:  OptionalValue{Value: int64(5), Valid: true},
+			Offset: OptionalValue{Value: int64(10), Valid: true},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		// Use iterator to collect all rows
+		actual := []Row{}
+		aRow, err := aResult.Rows(ctx)
+		for ; err == nil; aRow, err = aResult.Rows(ctx) {
+			actual = append(actual, aRow)
+		}
+
+		assert.Equal(t, rows[10:15], actual)
+	})
+
 	t.Run("Select no rows", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,

@@ -629,3 +629,7 @@ func resetMock(aMock *mock.Mock) {
 	aMock.ExpectedCalls = nil
 	aMock.Calls = nil
 }
+
+func intPtr(i int64) *int64 {
+	return &i
+}

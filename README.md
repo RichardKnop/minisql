@@ -27,8 +27,7 @@ I plan to implement more features of traditional relational databases in the fut
   - `SELECT`
   - `UPDATE`
   - `DELETE`
-- simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis
-- only tables supported, no indexes yet (this means all selects are scanning whole tables for now)
+- only tables and primary keys supported, more index support to be implemented in the future
 - `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE`, `TEXT` and `VARCHAR` data types supported
 - `PRIMARY KEY` support, only single column, no composite primary keys
 - `AUTOINCREMENT` support, primary key must be of type `INT8` for autoincrement
@@ -38,6 +37,8 @@ I plan to implement more features of traditional relational databases in the fut
 - first 100 bytes of the root page are reserved for config
 - maximum number of columns for each table is `64`
 - basic page recycling (when nodes are merged, the node that no longer exists in the tree is added to free pages linked list in the config and can be later reused as a new page)
+- simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis
+- `LIMIT` and `OFFSET` clauses for basic pagination
 
 ### Data Types And Storage
 

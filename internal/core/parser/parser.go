@@ -26,7 +26,7 @@ var reservedWords = []string{
 	"CREATE TABLE", "DROP TABLE", "SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
 	"*", "PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "IS NULL", "IS NOT NULL", "NOT NULL", "NULL",
-	"IF NOT EXISTS", "WHERE", "FROM", "SET", "AS",
+	"IF NOT EXISTS", "WHERE", "FROM", "SET", "AS", "LIMIT",
 	"BEGIN", "COMMIT", "ROLLBACK",
 	";",
 }
@@ -65,11 +65,15 @@ const (
 	stepUpdateValue
 	stepUpdateComma
 	stepDeleteFromTable
+	stepSelectLimit
+	stepSelectOffset
 	stepWhere
 	stepWhereConditionField
 	stepWhereConditionOperator
 	stepWhereConditionValue
 	stepWhereOperator
+	stepWhereLimit
+	stepWhereOffset
 	stepStatementEnd
 )
 
@@ -203,7 +207,9 @@ func (p *parser) doParse() ([]minisql.Statement, error) {
 		case stepSelectField,
 			stepSelectComma,
 			stepSelectFrom,
-			stepSelectFromTable:
+			stepSelectFromTable,
+			stepSelectLimit,
+			stepSelectOffset:
 			if err := p.doParseSelect(); err != nil {
 				return statements, err
 			}
@@ -234,7 +240,9 @@ func (p *parser) doParse() ([]minisql.Statement, error) {
 			stepWhereConditionField,
 			stepWhereConditionOperator,
 			stepWhereConditionValue,
-			stepWhereOperator:
+			stepWhereOperator,
+			stepWhereLimit,
+			stepWhereOffset:
 			if err := p.doParseWhere(); err != nil {
 				return statements, err
 			}

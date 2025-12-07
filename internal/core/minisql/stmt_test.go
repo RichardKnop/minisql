@@ -429,6 +429,34 @@ func TestStatement_Validate(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `unknown field "unknown_field" in table "test_table"`)
 	})
+
+	t.Run("SELECT with invalid limit should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    []Field{{Name: "id"}, {Name: "email"}},
+			Limit:     OptionalValue{Value: int64(-5), Valid: true},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `LIMIT must be a non-negative integer`)
+	})
+
+	t.Run("SELECT with invalid offset should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    []Field{{Name: "id"}, {Name: "email"}},
+			Offset:    OptionalValue{Value: int64(-5), Valid: true},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `OFFSET must be a non-negative integer`)
+	})
 }
 
 func TestStatement_CreateTableDDL(t *testing.T) {

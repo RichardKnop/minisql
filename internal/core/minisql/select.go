@@ -36,7 +36,6 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	var (
 		unfilteredPipe = make(chan Row)
 		filteredPipe   = make(chan Row)
-		limitedPipe    = make(chan Row)
 		errorsPipe     = make(chan error, 1)
 		stopChan       = make(chan bool)
 	)
@@ -97,42 +96,39 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	}(unfilteredPipe)
 
 	// Filter rows according the WHERE conditions
-	go func(in <-chan Row, out chan<- Row, conditions OneOrMore) {
+	// Count row count for LIMIT clause.
+	go func(in <-chan Row, out chan<- Row, stmt Statement) {
 		defer close(out)
+		defer close(stopChan)
+		var limit, offset int64
+		if stmt.Limit.Valid {
+			limit = stmt.Limit.Value.(int64)
+		}
+		if stmt.Offset.Valid {
+			offset = stmt.Offset.Value.(int64)
+		}
 		for aRow := range in {
-			if len(conditions) == 0 {
-				out <- aRow
-				continue
+			if stmt.Limit.Valid && limit == 0 {
+				return
 			}
-			ok, err := aRow.CheckOneOrMore(conditions)
+			aRow, ok, err := stmt.filterRow(aRow)
 			if err != nil {
 				errorsPipe <- err
 				return
 			}
-			if ok {
-				out <- aRow
+			if !ok {
+				continue
 			}
+			if stmt.Offset.Valid && offset > 0 {
+				offset -= 1
+				continue
+			}
+			if stmt.Limit.Valid {
+				limit -= 1
+			}
+			sendFetchedRow(aRow, out, selectAll, requestedFields...)
 		}
-	}(unfilteredPipe, filteredPipe, stmt.Conditions)
-
-	// Count row count for LIMIT clause.
-	var limit int64 // TODO - set limit from parser
-	go func(in <-chan Row, out chan<- Row, limit int64) {
-		defer close(out)
-		defer close(stopChan)
-		i := int64(0)
-		for aRow := range in {
-			i += 1
-			if i > limit && limit > 0 {
-				return
-			}
-			if selectAll {
-				out <- aRow
-			} else {
-				out <- aRow.OnlyFields(requestedFields...)
-			}
-		}
-	}(filteredPipe, limitedPipe, limit)
+	}(unfilteredPipe, filteredPipe, stmt)
 
 	aResult.Rows = func(ctx context.Context) (Row, error) {
 		select {
@@ -140,7 +136,7 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 			return Row{}, fmt.Errorf("context done: %w", ctx.Err())
 		case err := <-errorsPipe:
 			return Row{}, err
-		case aRow, open := <-limitedPipe:
+		case aRow, open := <-filteredPipe:
 			if !open {
 				return Row{}, ErrNoMoreRows
 			}
@@ -150,4 +146,26 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	}
 
 	return aResult, nil
+}
+
+func (s Statement) filterRow(aRow Row) (Row, bool, error) {
+	if len(s.Conditions) == 0 {
+		return aRow, true, nil
+	}
+	ok, err := aRow.CheckOneOrMore(s.Conditions)
+	if err != nil {
+		return Row{}, false, err
+	}
+	if !ok {
+		return Row{}, false, nil
+	}
+	return aRow, true, nil
+}
+
+func sendFetchedRow(aRow Row, out chan<- Row, selectAll bool, requestedFields ...Field) {
+	if selectAll {
+		out <- aRow
+	} else {
+		out <- aRow.OnlyFields(requestedFields...)
+	}
 }
