@@ -534,7 +534,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 				).Error("failed to free page")
 				return
 			}
-			d.logger.Sugar().With("page", page.Index).Debug("freed page 2")
+			d.logger.Sugar().With("page", page.Index).Debug("freed index page")
 		})
 	}
 

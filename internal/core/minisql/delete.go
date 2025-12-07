@@ -18,8 +18,6 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, err
 	}
 
-	t.logger.Sugar().Debug("deleting rows")
-
 	var (
 		unfilteredPipe = make(chan Row)
 		filteredPipe   = make(chan uint64)
@@ -109,6 +107,7 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 
 	select {
 	case <-ctx.Done():
+		t.logger.Sugar().Debugf("deleted %d rows", aResult.RowsAffected)
 		return aResult, fmt.Errorf("context done: %w", ctx.Err())
 	case err := <-errorsPipe:
 		return aResult, err

@@ -10,17 +10,17 @@ func (p *pagerImpl) ForTable(columns []Column) Pager {
 func (p *pagerImpl) ForIndex(kind ColumnKind, keySize uint64) Pager {
 	switch kind {
 	case Boolean:
-		return &indexPager[int8]{p, keySize}
+		return &indexPager[int8]{p}
 	case Int4:
-		return &indexPager[int32]{p, keySize}
+		return &indexPager[int32]{p}
 	case Int8:
-		return &indexPager[int64]{p, keySize}
+		return &indexPager[int64]{p}
 	case Real:
-		return &indexPager[float32]{p, keySize}
+		return &indexPager[float32]{p}
 	case Double:
-		return &indexPager[float64]{p, keySize}
+		return &indexPager[float64]{p}
 	case Varchar:
-		return &indexPager[string]{p, keySize}
+		return &indexPager[string]{p}
 	default:
 		return nil
 	}

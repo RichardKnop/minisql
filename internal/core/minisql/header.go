@@ -1,5 +1,7 @@
 package minisql
 
+import "fmt"
+
 type Header struct {
 	IsInternal bool
 	IsRoot     bool
@@ -7,7 +9,7 @@ type Header struct {
 }
 
 func (h *Header) Size() uint64 {
-	return 6
+	return 1 + 1 + 1 + 4
 }
 
 func (h *Header) Marshal(buf []byte) ([]byte, error) {
@@ -18,27 +20,34 @@ func (h *Header) Marshal(buf []byte) ([]byte, error) {
 		buf = make([]byte, size)
 	}
 
+	i := uint64(0)
 	if h.IsInternal {
-		buf[0] = PageTypeInternal
+		buf[i] = PageTypeInternal
 	} else {
-		buf[0] = PageTypeLeaf
+		buf[i] = PageTypeLeaf
 	}
+	i += 1
 
 	if h.IsRoot {
-		buf[1] = 1
+		buf[i] = 1
 	} else {
-		buf[1] = 0
+		buf[i] = 0
 	}
+	i += 1
 
-	buf[0+2] = byte(h.Parent >> 0)
-	buf[1+2] = byte(h.Parent >> 8)
-	buf[2+2] = byte(h.Parent >> 16)
-	buf[3+2] = byte(h.Parent >> 24)
+	buf[i] = byte(h.Parent >> 0)
+	buf[i+1] = byte(h.Parent >> 8)
+	buf[i+2] = byte(h.Parent >> 16)
+	buf[i+3] = byte(h.Parent >> 24)
+	i += 4
 
 	return buf[:size], nil
 }
 
 func (h *Header) Unmarshal(buf []byte) (uint64, error) {
+	if buf[0] != PageTypeLeaf && buf[0] != PageTypeInternal {
+		return 0, fmt.Errorf("unrecognised page type byte %d", buf[0])
+	}
 	h.IsInternal = buf[0] == PageTypeInternal
 	h.IsRoot = buf[1] == 1
 	h.Parent = PageIndex(0 |

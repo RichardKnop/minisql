@@ -11,8 +11,7 @@ func TestIndexNode_Int8_Marshal(t *testing.T) {
 	t.Parallel()
 
 	var (
-		keySize = uint64(8)
-		aNode   = NewIndexNode[int64](keySize)
+		aNode = NewIndexNode[int64]()
 	)
 
 	// Populate with values that don't necessarily make sense, we are
@@ -36,7 +35,7 @@ func TestIndexNode_Int8_Marshal(t *testing.T) {
 	data, err := aNode.Marshal(buf)
 	require.NoError(t, err)
 
-	recreatedNode := NewIndexNode[int64](keySize)
+	recreatedNode := NewIndexNode[int64]()
 	_, err = recreatedNode.Unmarshal(data)
 	require.NoError(t, err)
 
@@ -51,8 +50,7 @@ func TestIndexNode_Varchar_Marshal(t *testing.T) {
 	t.Parallel()
 
 	var (
-		keySize = uint64(255)
-		aNode   = NewIndexNode[string](keySize)
+		aNode = NewIndexNode[string]()
 	)
 
 	// Populate with values that don't necessarily make sense, we are
@@ -68,7 +66,7 @@ func TestIndexNode_Varchar_Marshal(t *testing.T) {
 	aNode.Cells[0].Key = "foo"
 	aNode.Cells[0].RowID = 125
 	aNode.Cells[0].Child = 7
-	aNode.Cells[1].Key = "bar"
+	aNode.Cells[1].Key = "bar qux"
 	aNode.Cells[1].RowID = 126
 	aNode.Cells[1].Child = 8
 
@@ -76,7 +74,7 @@ func TestIndexNode_Varchar_Marshal(t *testing.T) {
 	data, err := aNode.Marshal(buf)
 	require.NoError(t, err)
 
-	recreatedNode := NewIndexNode[string](keySize)
+	recreatedNode := NewIndexNode[string]()
 	_, err = recreatedNode.Unmarshal(data)
 	require.NoError(t, err)
 
@@ -85,4 +83,9 @@ func TestIndexNode_Varchar_Marshal(t *testing.T) {
 	for idx := 0; idx < len(aNode.Cells); idx++ {
 		assert.Equal(t, aNode.Cells[idx], recreatedNode.Cells[idx])
 	}
+
+	expectedSize := int(15 + // header
+		(varcharLengthPrefixSize + 3) + 12 + // cell 1
+		(varcharLengthPrefixSize + 7) + 12) // cell 2
+	assert.Equal(t, expectedSize, int(recreatedNode.Size()))
 }

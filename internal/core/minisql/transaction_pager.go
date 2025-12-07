@@ -3,13 +3,11 @@ package minisql
 import (
 	"context"
 	"fmt"
-	"sync"
 )
 
 type TransactionalPager struct {
 	Pager
 	txManager *TransactionManager
-	mu        sync.RWMutex
 }
 
 func NewTransactionalPager(basePager Pager, txManager *TransactionManager) *TransactionalPager {
@@ -27,17 +25,13 @@ func (tp *TransactionalPager) ReadPage(ctx context.Context, pageIdx PageIndex) (
 	}
 
 	// Check if we have a modified version in our write set
-	if modifiedPage, exists := tx.WriteSet[pageIdx]; exists {
+	modifiedPage, exists := tx.GetModifiedPage(pageIdx)
+	if exists {
 		return modifiedPage, nil
 	}
 
 	// Read from base pager and track in read set
-	var currentVersion uint64
-	tp.mu.RLock()
-	if _, ok := tp.txManager.globalPageVersions[pageIdx]; ok {
-		currentVersion = tp.txManager.globalPageVersions[pageIdx]
-	}
-	tp.mu.RUnlock()
+	currentVersion := tp.txManager.GlobalPageVersion(ctx, pageIdx)
 
 	page, err := tp.GetPage(ctx, pageIdx)
 	if err != nil {
@@ -45,7 +39,7 @@ func (tp *TransactionalPager) ReadPage(ctx context.Context, pageIdx PageIndex) (
 	}
 
 	// Track this read in our read set
-	tx.ReadSet[pageIdx] = currentVersion
+	tx.TrackRead(pageIdx, currentVersion)
 
 	return page, nil
 }
@@ -57,7 +51,8 @@ func (tp *TransactionalPager) ModifyPage(ctx context.Context, pageIdx PageIndex)
 	}
 
 	// Check if we already have a copy in write set
-	if modifiedPage, exists := tx.WriteSet[pageIdx]; exists {
+	modifiedPage, exists := tx.GetModifiedPage(pageIdx)
+	if exists {
 		return modifiedPage, nil
 	}
 
@@ -68,8 +63,8 @@ func (tp *TransactionalPager) ModifyPage(ctx context.Context, pageIdx PageIndex)
 	}
 
 	// Create a deep copy for modification
-	modifiedPage := originalPage.Clone()
-	tx.WriteSet[pageIdx] = modifiedPage
+	modifiedPage = originalPage.Clone()
+	tx.TrackWrite(pageIdx, modifiedPage)
 
 	return modifiedPage, nil
 }
@@ -90,11 +85,7 @@ func (tp *TransactionalPager) GetFreePage(ctx context.Context) (*Page, error) {
 			return nil, fmt.Errorf("allocate new free page: %w", err)
 		}
 		// Clear the page for reuse
-		freePage.OverflowPage = nil
-		freePage.FreePage = nil
-		freePage.LeafNode = nil
-		freePage.InternalNode = nil
-		freePage.IndexNode = nil
+		freePage.Clear()
 
 		return freePage, nil
 	}
@@ -108,16 +99,20 @@ func (tp *TransactionalPager) GetFreePage(ctx context.Context) (*Page, error) {
 	// Update header to point to next free page
 	dbHeader.FirstFreePage = freePage.FreePage.NextFreePage
 	dbHeader.FreePageCount--
-	tx.DbHeaderWrite = &dbHeader
+	tx.TrackDBHeaderWrite(dbHeader)
 
 	// Clear the page for reuse
-	freePage.OverflowPage = nil
-	freePage.FreePage = nil
-	freePage.LeafNode = nil
-	freePage.InternalNode = nil
-	freePage.IndexNode = nil
+	freePage.Clear()
 
 	return freePage, nil
+}
+
+func (p *Page) Clear() {
+	p.OverflowPage = nil
+	p.FreePage = nil
+	p.LeafNode = nil
+	p.InternalNode = nil
+	p.IndexNode = nil
 }
 
 func (tp *TransactionalPager) AddFreePage(ctx context.Context, pageIdx PageIndex) error {
@@ -152,7 +147,7 @@ func (tp *TransactionalPager) AddFreePage(ctx context.Context, pageIdx PageIndex
 	// Update header
 	dbHeader.FirstFreePage = pageIdx
 	dbHeader.FreePageCount++
-	tx.DbHeaderWrite = &dbHeader
+	tx.TrackDBHeaderWrite(dbHeader)
 
 	return nil
 }
@@ -162,17 +157,13 @@ func (tp *TransactionalPager) readDBHeader(ctx context.Context) DatabaseHeader {
 
 	// Check if we already have a copy of database header in the transaction
 	var dbHeader DatabaseHeader
-	if tx.DbHeaderWrite != nil {
-		dbHeader = *tx.DbHeaderWrite
+	if header, exists := tx.GetModifiedDBHeader(); exists {
+		dbHeader = *header
 	} else {
 		// Read header version and track it
-		tp.mu.RLock()
-		currentVersion := tp.txManager.globalDbHeaderVersion
-		tp.mu.RUnlock()
-
+		currentVersion := tp.txManager.GlobalDBHeaderVersion(ctx)
 		dbHeader = tp.GetHeader(ctx)
-
-		tx.DbHeaderRead = &currentVersion
+		tx.TrackDBHeaderRead(currentVersion)
 	}
 
 	return dbHeader

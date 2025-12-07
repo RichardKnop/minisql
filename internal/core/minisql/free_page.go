@@ -23,7 +23,7 @@ func (n *FreePage) Marshal(buf []byte) ([]byte, error) {
 func (n *FreePage) Unmarshal(buf []byte) error {
 	i := uint64(0)
 
-	if buf[i] != PageTypeOverflow {
+	if buf[i] != PageTypeFree {
 		return fmt.Errorf("invalid free page type byte %d", buf[i])
 	}
 	i += 1

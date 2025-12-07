@@ -198,11 +198,8 @@ func (r *Row) Marshal() ([]byte, error) {
 			if !ok {
 				return nil, fmt.Errorf("could not cast value to bool")
 			}
-			if value {
-				buf = append(buf, byte(1))
-			} else {
-				buf = append(buf, byte(0))
-			}
+			buf = append(buf, make([]byte, 1)...)
+			marshalBool(buf, value, offset)
 			offset += 1
 		case Int4:
 			value, ok := r.Values[i].Value.(int32)
@@ -300,8 +297,8 @@ func (r *Row) Unmarshal(aCell Cell, selectedFields ...Field) error {
 		}
 		switch aColumn.Kind {
 		case Boolean:
-			value := (uint32(aCell.Value[offset+0+0]) << 0)
-			r.Values = append(r.Values, OptionalValue{Value: value == uint32(1), Valid: true})
+			value := unmarshalBool(aCell.Value, uint64(offset))
+			r.Values = append(r.Values, OptionalValue{Value: value == true, Valid: true})
 			offset += 1
 		case Int4:
 			value := unmarshalInt32(aCell.Value, uint64(offset))
@@ -619,6 +616,19 @@ func (r *Row) NullBitmask() uint64 {
 	return bitmask
 }
 
+func marshalBool(buf []byte, b bool, i uint64) []byte {
+	if b {
+		buf[i] = byte(1)
+		return buf
+	}
+	buf[i] = byte(0)
+	return buf
+}
+
+func unmarshalBool(buf []byte, i uint64) bool {
+	return buf[i] == 1
+}
+
 func marshalUint32(buf []byte, n uint32, i uint64) []byte {
 	buf[i+0] = byte(n >> 0)
 	buf[i+1] = byte(n >> 8)
@@ -656,6 +666,15 @@ func unmarshalUint64(buf []byte, i uint64) uint64 {
 		(uint64(buf[i+5]) << 40) |
 		(uint64(buf[i+6]) << 48) |
 		(uint64(buf[i+7]) << 56)
+}
+
+func marshalInt8(buf []byte, n int8, i uint64) []byte {
+	buf[i] = byte(n >> 0)
+	return buf
+}
+
+func unmarshalInt8(buf []byte, i uint64) int8 {
+	return 0 | (int8(buf[i]) << 0)
 }
 
 func marshalInt32(buf []byte, n int32, i uint64) []byte {
