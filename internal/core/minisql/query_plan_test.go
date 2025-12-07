@@ -41,7 +41,7 @@ func TestTable_PlanQuery(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						Condition{
+						{
 							Operand1: Operand{Type: OperandField, Value: "email"},
 							Operator: Eq,
 							Operand2: Operand{Type: OperandQuotedString, Value: "foo@example.com"},
@@ -53,7 +53,7 @@ func TestTable_PlanQuery(t *testing.T) {
 				ScanType: ScanTypeSequential,
 				Filters: OneOrMore{
 					{
-						Condition{
+						{
 							Operand1: Operand{Type: OperandField, Value: "email"},
 							Operator: Eq,
 							Operand2: Operand{Type: OperandQuotedString, Value: "foo@example.com"},
@@ -69,7 +69,7 @@ func TestTable_PlanQuery(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						Condition{
+						{
 							Operand1: Operand{Type: OperandField, Value: "id"},
 							Operator: Eq,
 							Operand2: Operand{Type: OperandInteger, Value: int64(42)},
@@ -97,14 +97,14 @@ func TestTable_PlanQuery(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						Condition{
+						{
 							Operand1: Operand{Type: OperandField, Value: "id"},
 							Operator: Eq,
 							Operand2: Operand{Type: OperandInteger, Value: int64(42)},
 						},
 					},
 					{
-						Condition{
+						{
 							Operand1: Operand{Type: OperandField, Value: "id"},
 							Operator: Eq,
 							Operand2: Operand{Type: OperandInteger, Value: int64(69)},

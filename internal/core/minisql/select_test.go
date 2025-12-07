@@ -158,6 +158,7 @@ func TestTable_Select(t *testing.T) {
 	})
 
 	t.Run("Select single row", func(t *testing.T) {
+		id := rowIDs(rows[5])[0]
 		stmt := Statement{
 			Kind:   Select,
 			Fields: fieldsFromColumns(testColumns...),
@@ -171,7 +172,7 @@ func TestTable_Select(t *testing.T) {
 						Operator: Eq,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: rows[5].Values[0].Value.(int64),
+							Value: id,
 						},
 					},
 				},
