@@ -61,7 +61,39 @@ func (p *parser) doParseSelect() error {
 		}
 		p.TableName = tableName
 		p.pop()
-		p.step = stepWhere
+		p.step = stepSelectLimit
+	case stepSelectLimit:
+		limitRWord := p.peek()
+		if strings.ToUpper(limitRWord) != "LIMIT" {
+			p.step = stepSelectOffset
+			return nil
+		}
+		p.pop()
+		limitValue, n := p.peekIntWithLength()
+		if n == 0 {
+			return fmt.Errorf("at SELECT: expected integer value for LIMIT")
+		}
+		p.Limit = minisql.OptionalValue{Value: limitValue, Valid: true}
+		p.pop()
+		p.step = stepSelectOffset
+	case stepSelectOffset:
+		offsetRWord := p.peek()
+		if strings.ToUpper(offsetRWord) != "OFFSET" {
+			if !p.Offset.Valid {
+				p.step = stepWhere
+				return nil
+			}
+			p.step = stepStatementEnd
+			return nil
+		}
+		p.pop()
+		offsetValue, n := p.peekIntWithLength()
+		if n == 0 {
+			return fmt.Errorf("at SELECT: expected integer value for OFFSET")
+		}
+		p.Offset = minisql.OptionalValue{Value: offsetValue, Valid: true}
+		p.pop()
+		p.step = stepStatementEnd
 	}
 	return nil
 }

@@ -108,23 +108,60 @@ func (p *parser) doParseWhere() error {
 		p.pop()
 		p.step = stepWhereOperator
 	case stepWhereOperator:
-		operatorOrEnd := p.peek()
+		rWord := strings.ToUpper(p.peek())
 		lastCondition, ok := p.Conditions.LastCondition()
 		if ok && minisql.IsValidCondition(lastCondition) {
-			if operatorOrEnd == ";" {
+			if rWord == ";" {
 				p.step = stepStatementEnd
 				return nil
 			}
 		}
-		anOperator := strings.ToUpper(operatorOrEnd)
-		if anOperator != "AND" && anOperator != "OR" {
+		if rWord == "LIMIT" {
+			p.step = stepWhereLimit
+			return nil
+		}
+		if rWord == "OFFSET" {
+			p.step = stepWhereOffset
+			return nil
+		}
+		if rWord != "AND" && rWord != "OR" {
 			return errWhereExpectedAndOr
 		}
-		if anOperator == "OR" {
+		if rWord == "OR" {
 			p.Conditions = append(p.Conditions, make(minisql.Conditions, 0, 1))
 		}
 		p.pop()
 		p.step = stepWhereConditionField
+
+	case stepWhereLimit:
+		if strings.ToUpper(p.peek()) != "LIMIT" {
+			return fmt.Errorf("at WHERE: expected LIMIT")
+		}
+		p.pop()
+		limitValue, n := p.peekIntWithLength()
+		if n == 0 {
+			return fmt.Errorf("at WHERE: expected integer value for LIMIT")
+		}
+		p.Limit = minisql.OptionalValue{Value: limitValue, Valid: true}
+		p.pop()
+		p.step = stepWhereOffset
+	case stepWhereOffset:
+		rWord := p.peek()
+		if rWord == ";" {
+			p.step = stepStatementEnd
+			return nil
+		}
+		if strings.ToUpper(rWord) != "OFFSET" {
+			return fmt.Errorf("at WHERE: expected OFFSET")
+		}
+		p.pop()
+		offsetValue, n := p.peekIntWithLength()
+		if n == 0 {
+			return fmt.Errorf("at WHERE: expected integer value for OFFSET")
+		}
+		p.Offset = minisql.OptionalValue{Value: offsetValue, Valid: true}
+		p.pop()
+		p.step = stepStatementEnd
 	}
 	return nil
 }

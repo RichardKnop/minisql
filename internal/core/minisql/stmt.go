@@ -311,6 +311,9 @@ type Statement struct {
 	Inserts     [][]OptionalValue
 	Updates     map[string]OptionalValue
 	Conditions  OneOrMore // used for WHERE
+	Limit       OptionalValue
+	Offset      OptionalValue
+	fetchedRows int64
 }
 
 func (s Statement) HasField(name string) bool {
@@ -481,6 +484,18 @@ func (s Statement) validateUpdate(aTable *Table) error {
 func (s Statement) validateSelect(aTable *Table) error {
 	if len(s.Fields) == 0 {
 		return fmt.Errorf("at least one field to select is required")
+	}
+	if s.Limit.Valid {
+		limitValue, ok := s.Limit.Value.(int64)
+		if !ok || limitValue < 0 {
+			return fmt.Errorf("LIMIT must be a non-negative integer")
+		}
+	}
+	if s.Offset.Valid {
+		offsetValue, ok := s.Offset.Value.(int64)
+		if !ok || offsetValue < 0 {
+			return fmt.Errorf("OFFSET must be a non-negative integer")
+		}
 	}
 	if !s.IsSelectAll() {
 		fieldMap := map[string]struct{}{}
