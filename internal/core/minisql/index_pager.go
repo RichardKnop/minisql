@@ -17,7 +17,10 @@ func (p *indexPager[T]) unmarshal(pageIdx PageIndex, buf []byte) (*Page, error) 
 	idx := 0
 
 	// Requesting a new page
-	if int(pageIdx) == int(p.totalPages) {
+	p.mu.RLock()
+	totalPages := p.totalPages
+	p.mu.RUnlock()
+	if int(pageIdx) == int(totalPages) {
 		node := NewIndexNode[T]()
 		buf[idx] = PageTypeIndex
 		_, err := node.Unmarshal(buf)

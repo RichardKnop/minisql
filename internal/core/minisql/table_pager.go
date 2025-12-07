@@ -26,7 +26,10 @@ func (p *tablePager) unmarshal(pageIdx PageIndex, buf []byte) (*Page, error) {
 	idx := 0
 
 	// Requesting a new page
-	if int(pageIdx) == int(p.totalPages) {
+	p.mu.RLock()
+	totalPages := p.totalPages
+	p.mu.RUnlock()
+	if int(pageIdx) == int(totalPages) {
 		// Leaf node
 		leaf := NewLeafNode()
 		_, err := leaf.Unmarshal(p.columns, buf)

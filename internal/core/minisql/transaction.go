@@ -2,12 +2,8 @@ package minisql
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"sync"
 	"time"
-
-	"go.uber.org/zap"
 )
 
 type txKeyType struct{}
@@ -35,6 +31,7 @@ type Transaction struct {
 	DbHeaderRead  *uint64              // version of DB header when read
 	DbHeaderWrite *DatabaseHeader      // modified DB header
 	Status        TransactionStatus
+	mu            sync.RWMutex
 }
 
 type TransactionStatus int
@@ -45,130 +42,74 @@ const (
 	TxAborted
 )
 
-type TransactionManager struct {
-	mu                    sync.RWMutex
-	nextTxID              TransactionID
-	transactions          map[TransactionID]*Transaction
-	globalPageVersions    map[PageIndex]uint64 // pageIdx -> current version
-	globalDbHeaderVersion uint64
-	logger                *zap.Logger
-}
-
-func NewTransactionManager(logger *zap.Logger) *TransactionManager {
-	return &TransactionManager{
-		nextTxID:           1,
-		transactions:       make(map[TransactionID]*Transaction),
-		globalPageVersions: make(map[PageIndex]uint64),
-		logger:             logger,
-	}
-}
-
-func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(ctx context.Context) error, saver PageSaver) error {
-	// If there is a transaction already in context, use it.
-	// This means tx was manually started with BEGIN
-	// and will stay open until COMMIT/ROLLBACK.
-	if TxFromContext(ctx) != nil {
-		return fn(ctx)
-	}
-
-	tx := tm.BeginTransaction(ctx)
-	ctx = WithTransaction(ctx, tx)
-
-	if err := fn(ctx); err != nil {
-		tm.RollbackTransaction(ctx, tx)
-		return err
-	}
-
-	if err := tm.CommitTransaction(ctx, tx, saver); err != nil {
-		tm.RollbackTransaction(ctx, tx)
-		return err
-	}
-
-	return nil
-}
-
-func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-
-	tx := &Transaction{
-		ID:        tm.nextTxID,
-		StartTime: time.Now(),
-		ReadSet:   make(map[PageIndex]uint64),
-		WriteSet:  make(map[PageIndex]*Page),
-		Status:    TxActive,
-	}
-
-	tm.nextTxID++
-	tm.transactions[tx.ID] = tx
-
-	tm.logger.Debug("begin transaction", zap.Uint64("tx_id", uint64(tx.ID)))
-
-	return tx
-}
-
-var ErrTxConflict = errors.New("transaction conflict detected")
-
-func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transaction, saver PageSaver) error {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-
-	if tx.Status != TxActive {
-		return fmt.Errorf("transaction %d is not active", tx.ID)
-	}
-
-	// Check for conflicts (simplified optimistic concurrency control)
-	for pageIdx, readVersion := range tx.ReadSet {
-		currentVersion := tm.globalPageVersions[pageIdx]
-		if currentVersion > readVersion {
-			// Page was modified by another transaction
-			tx.Status = TxAborted
-			return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", ErrTxConflict, tx.ID, pageIdx)
-		}
-	}
-	if tx.DbHeaderRead != nil && tm.globalDbHeaderVersion > *tx.DbHeaderRead {
-		// DB header was modified by another transaction
-		tx.Status = TxAborted
-		return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
-	}
-
-	// No conflicts, apply all writes
-	// First update DB header if modified
-	if tx.DbHeaderWrite != nil {
-		saver.SaveHeader(ctx, *tx.DbHeaderWrite)
-		tm.globalDbHeaderVersion += 1
-	}
-	// Then update modified pages
-	for pageIdx, modifiedPage := range tx.WriteSet {
-		// Write the modified page to base storage
-		saver.SavePage(ctx, pageIdx, modifiedPage)
-
-		// Increment page version
-		tm.globalPageVersions[pageIdx] += 1
-	}
-
+func (tx *Transaction) Commit() {
 	tx.Status = TxCommitted
-
-	// Clean up transaction
-	delete(tm.transactions, tx.ID)
-
-	tm.logger.Debug("commit transaction", zap.Uint64("tx_id", uint64(tx.ID)))
-
-	return nil
 }
 
-func (tm *TransactionManager) RollbackTransaction(ctx context.Context, tx *Transaction) {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
+func (tx *Transaction) Abort() {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
 
 	tx.Status = TxAborted
-
 	// Simply discard all changes - they're only in memory
 	tx.WriteSet = make(map[PageIndex]*Page)
 	tx.DbHeaderWrite = nil
+}
 
-	// Clean up transaction
-	delete(tm.transactions, tx.ID)
+func (tx *Transaction) TrackRead(pageIdx PageIndex, version uint64) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	tx.ReadSet[pageIdx] = version
+}
 
-	tm.logger.Debug("rollback transaction", zap.Uint64("tx_id", uint64(tx.ID)))
+func (tx *Transaction) TrackWrite(pageIdx PageIndex, page *Page) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	tx.WriteSet[pageIdx] = page
+}
+
+func (tx *Transaction) TrackDBHeaderRead(version uint64) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	tx.DbHeaderRead = &version
+}
+
+func (tx *Transaction) TrackDBHeaderWrite(header DatabaseHeader) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	tx.DbHeaderWrite = &header
+}
+
+func (tx *Transaction) GetReadVersions() map[PageIndex]uint64 {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+	return tx.ReadSet
+}
+
+func (tx *Transaction) GetWriteVersions() map[PageIndex]*Page {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+	return tx.WriteSet
+}
+
+func (tx *Transaction) GetDBHeaderReadVersion() (uint64, bool) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+	if tx.DbHeaderRead == nil {
+		return 0, false
+	}
+	return *tx.DbHeaderRead, true
+}
+
+func (tx *Transaction) GetModifiedPage(pageIdx PageIndex) (*Page, bool) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+	modifiedPage, exists := tx.WriteSet[pageIdx]
+	return modifiedPage, exists
+}
+
+func (tx *Transaction) GetModifiedDBHeader() (*DatabaseHeader, bool) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+	return tx.DbHeaderWrite, tx.DbHeaderWrite != nil
 }
