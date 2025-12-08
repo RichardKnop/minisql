@@ -7,9 +7,9 @@ import (
 type ScanType int
 
 const (
-	ScanTypeSequential ScanType = iota // Full table scan
-	ScanTypeIndexPoint                 // Index lookup for specific key(s)
-	ScanTypeIndexRange                 // Index range scan (TODO - not implemented yet)
+	ScanTypeSequential ScanType = iota + 1 // Full table scan
+	ScanTypeIndexPoint                     // Index lookup for specific key(s)
+	ScanTypeIndexRange                     // Index range scan (TODO - not implemented yet)
 )
 
 func (st ScanType) String() string {

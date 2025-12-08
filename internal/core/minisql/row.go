@@ -445,7 +445,8 @@ func (r *Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Ope
 		return false, fmt.Errorf("row does not have '%s' column", name)
 	}
 
-	if valueOperand.Type == OperandNull {
+	switch valueOperand.Type {
+	case OperandNull:
 		switch operator {
 		case Eq:
 			return !fieldValue.Valid, nil
@@ -454,6 +455,53 @@ func (r *Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Ope
 		default:
 			return false, fmt.Errorf("only '=' and '!=' operators supported when comparing against NULL")
 		}
+	case OperandList:
+		switch operator {
+		case In, NotIn:
+			switch aColumn.Kind {
+			case Boolean:
+				return false, fmt.Errorf("IN / NOT IN operator not supported for boolean columns")
+			case Int4:
+				foundInList, err := isInListInt4(fieldValue.Value, valueOperand.Value)
+				if operator == In {
+					return foundInList, err
+				}
+				return !foundInList, err
+			case Int8:
+				foundInList, err := isInListInt8(fieldValue.Value, valueOperand.Value)
+				if operator == In {
+					return foundInList, err
+				}
+				return !foundInList, err
+			case Real:
+				foundInList, err := isInListReal(fieldValue.Value, valueOperand.Value)
+				if operator == In {
+					return foundInList, err
+				}
+				return !foundInList, err
+			case Double:
+				foundInList, err := isInListDouble(fieldValue.Value, valueOperand.Value)
+				if operator == In {
+					return foundInList, err
+				}
+				return !foundInList, err
+			case Varchar, Text:
+				foundInList, err := isInListText(fieldValue.Value, valueOperand.Value)
+				if operator == In {
+					return foundInList, err
+				}
+				return !foundInList, err
+			default:
+				return false, fmt.Errorf("unknown column kind '%s'", aColumn.Kind)
+			}
+
+		default:
+			return false, fmt.Errorf("only 'IN' and 'NOT IN' operators supported when comparing against list")
+		}
+	}
+
+	if !fieldValue.Valid {
+		return false, nil // NULL cannot be compared to non-NULL value
 	}
 
 	switch aColumn.Kind {
@@ -465,11 +513,37 @@ func (r *Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Ope
 		return compareInt4(int64(fieldValue.Value.(int32)), valueOperand.Value.(int64), operator)
 	case Int8:
 		return compareInt8(fieldValue.Value.(int64), valueOperand.Value.(int64), operator)
+	case Real:
+		return compareReal(float64(fieldValue.Value.(float32)), valueOperand.Value.(float64), operator)
+	case Double:
+		return compareDouble(fieldValue.Value.(float64), valueOperand.Value.(float64), operator)
 	case Varchar, Text:
 		return compareText(fieldValue.Value, valueOperand.Value, operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", aColumn.Kind)
 	}
+}
+
+func (r *Row) compareFieldValueToList(aColumn Column, fieldValue any, valueOperand Operand, operator Operator) (bool, error) {
+	// switch aColumn.Kind {
+	// case Boolean:
+	// 	return compareBoolean(fieldValue.Value.(bool), valueOperand.Value.(bool), operator)
+	// case Int4:
+	// 	// Int values from parser always come back as int64, int4 row data
+	// 	// will come back as int32 and int8 as int64
+	// 	return compareInt4(int64(fieldValue.Value.(int32)), valueOperand.Value.(int64), operator)
+	// case Int8:
+	// 	return compareInt8(fieldValue.Value.(int64), valueOperand.Value.(int64), operator)
+	// case Real:
+	// 	return compareReal(float64(fieldValue.Value.(float32)), valueOperand.Value.(float64), operator)
+	// case Double:
+	// 	return compareDouble(fieldValue.Value.(float64), valueOperand.Value.(float64), operator)
+	// case Varchar, Text:
+	// 	return compareText(fieldValue.Value, valueOperand.Value, operator)
+	// default:
+	// 	return false, fmt.Errorf("unknown column kind '%s'", aColumn.Kind)
+	// }
+	return false, fmt.Errorf("not implemented")
 }
 
 func (r *Row) compareFields(field1, field2 Operand, operator Operator) (bool, error) {
@@ -515,121 +589,15 @@ func (r *Row) compareFields(field1, field2 Operand, operator Operator) (bool, er
 		return compareInt4(value1.Value, value2.Value, operator)
 	case Int8:
 		return compareInt8(value1.Value, value2.Value, operator)
+	case Real:
+		return compareReal(value1.Value, value2.Value, operator)
+	case Double:
+		return compareDouble(value1.Value, value2.Value, operator)
 	case Varchar, Text:
 		return compareText(value1.Value, value2.Value, operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", aColumn1.Kind)
 	}
-}
-
-func compareBoolean(value1, value2 any, operator Operator) (bool, error) {
-	theValue1, ok := value1.(bool)
-	if !ok {
-		return false, fmt.Errorf("value '%v' cannot be cast as bool", value1)
-	}
-	theValue2, ok := value2.(bool)
-	if !ok {
-		return false, fmt.Errorf("operand value '%v' cannot be cast as bool", value2)
-	}
-	switch operator {
-	case Eq:
-		return theValue1 == theValue2, nil
-	case Ne:
-		return theValue1 != theValue2, nil
-	case Gt:
-		return false, fmt.Errorf("cannot compare boolean values with '>'")
-	case Lt:
-		return false, fmt.Errorf("cannot compare boolean values with '<'")
-	case Gte:
-		return false, fmt.Errorf("cannot compare boolean values with '>='")
-	case Lte:
-		return false, fmt.Errorf("cannot compare boolean values with '<='")
-	}
-	return false, fmt.Errorf("unknown operator '%s'", operator)
-}
-
-func compareInt4(value1, value2 any, operator Operator) (bool, error) {
-	theValue1, ok := value1.(int64)
-	if !ok {
-		return false, fmt.Errorf("value '%v' cannot be cast as int64", value1)
-	}
-	theValue2, ok := value2.(int64)
-	if !ok {
-		return false, fmt.Errorf("operand value '%v' cannot be cast as int64", value2)
-	}
-	switch operator {
-	case Eq:
-		return int32(theValue1) == int32(theValue2), nil
-	case Ne:
-		return int32(theValue1) != int32(theValue2), nil
-	case Gt:
-		return int32(theValue1) > int32(theValue2), nil
-	case Lt:
-		return int32(theValue1) < int32(theValue2), nil
-	case Gte:
-		return int32(theValue1) >= int32(theValue2), nil
-	case Lte:
-		return int32(theValue1) <= int32(theValue2), nil
-	}
-	return false, fmt.Errorf("unknown operator '%s'", operator)
-}
-
-func compareInt8(value1, value2 any, operator Operator) (bool, error) {
-	theValue1, ok := value1.(int64)
-	if !ok {
-		return false, fmt.Errorf("value '%v' cannot be cast as int64", value1)
-	}
-	theValue2, ok := value2.(int64)
-	if !ok {
-		return false, fmt.Errorf("operand value '%v' cannot be cast as int64", value2)
-	}
-	switch operator {
-	case Eq:
-		return theValue1 == theValue2, nil
-	case Ne:
-		return theValue1 != theValue2, nil
-	case Gt:
-		return theValue1 > theValue2, nil
-	case Lt:
-		return theValue1 < theValue2, nil
-	case Gte:
-		return theValue1 >= theValue2, nil
-	case Lte:
-		return theValue1 <= theValue2, nil
-	}
-	return false, fmt.Errorf("unknown operator '%s'", operator)
-}
-
-func compareText(value1, value2 any, operator Operator) (bool, error) {
-	// From Golang dosc (https://go.dev/ref/spec#Comparison_operators)
-	// Two string values are compared lexically byte-wise.
-	switch operator {
-	case Eq:
-		return getTextToCompare(value1) == getTextToCompare(value2), nil
-	case Ne:
-		return getTextToCompare(value1) != getTextToCompare(value2), nil
-	case Gt:
-		return getTextToCompare(value1) > getTextToCompare(value2), nil
-	case Lt:
-		return getTextToCompare(value1) < getTextToCompare(value2), nil
-	case Gte:
-		return getTextToCompare(value1) >= getTextToCompare(value2), nil
-	case Lte:
-		return getTextToCompare(value1) <= getTextToCompare(value2), nil
-	}
-	return false, fmt.Errorf("unknown operator '%s'", operator)
-}
-
-func getTextToCompare(value any) string {
-	_, ok := value.(string)
-	if ok {
-		return value.(string)
-	}
-	textPointer, ok := value.(TextPointer)
-	if !ok {
-		panic(fmt.Sprintf("text value to compare is neither string nor TextPointer %v", value))
-	}
-	return string(textPointer.Data)
 }
 
 // NullBitmask returns a bitmask representing which columns are NULL

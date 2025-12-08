@@ -457,6 +457,34 @@ func TestStatement_Validate(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `OFFSET must be a non-negative integer`)
 	})
+
+	t.Run("SELECT with inconsistent argument list for IN should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    fieldsFromColumns(aTable.Columns...),
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: In,
+						Operand2: Operand{
+							Type:  OperandList,
+							Value: []any{int64(1), "string_instead_of_int"},
+						},
+					},
+				},
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `mixed operand types in WHERE condition list`)
+	})
 }
 
 func TestStatement_CreateTableDDL(t *testing.T) {
@@ -587,194 +615,6 @@ func TestStatement_InsertForColumn(t *testing.T) {
 	val, ok = stmt.InsertForColumn("email", 1)
 	require.True(t, ok)
 	assert.Equal(t, OptionalValue{Value: "jane@example.com", Valid: true}, val)
-}
-
-func TestFieldIsIn(t *testing.T) {
-	t.Parallel()
-
-	t.Run("string field with quoted string value", func(t *testing.T) {
-		condition := FieldIsIn("email", OperandQuotedString, "john@example.com")
-
-		expected := Condition{
-			Operand1: Operand{
-				Type:  OperandField,
-				Value: "email",
-			},
-			Operator: Eq,
-			Operand2: Operand{
-				Type:  OperandQuotedString,
-				Value: "john@example.com",
-			},
-		}
-
-		assert.Equal(t, expected, condition)
-	})
-
-	t.Run("boolean field with boolean value", func(t *testing.T) {
-		condition := FieldIsIn("verified", OperandBoolean, true)
-
-		expected := Condition{
-			Operand1: Operand{
-				Type:  OperandField,
-				Value: "verified",
-			},
-			Operator: Eq,
-			Operand2: Operand{
-				Type:  OperandBoolean,
-				Value: true,
-			},
-		}
-
-		assert.Equal(t, expected, condition)
-	})
-
-	t.Run("integer field with integer value", func(t *testing.T) {
-		condition := FieldIsIn("id", OperandInteger, int64(25))
-
-		expected := Condition{
-			Operand1: Operand{
-				Type:  OperandField,
-				Value: "id",
-			},
-			Operator: Eq,
-			Operand2: Operand{
-				Type:  OperandInteger,
-				Value: int64(25),
-			},
-		}
-
-		assert.Equal(t, expected, condition)
-	})
-
-	t.Run("float field with float value", func(t *testing.T) {
-		condition := FieldIsIn("score", OperandFloat, 95.5)
-
-		expected := Condition{
-			Operand1: Operand{
-				Type:  OperandField,
-				Value: "score",
-			},
-			Operator: Eq,
-			Operand2: Operand{
-				Type:  OperandFloat,
-				Value: 95.5,
-			},
-		}
-
-		assert.Equal(t, expected, condition)
-	})
-
-	t.Run("field with null value", func(t *testing.T) {
-		condition := FieldIsIn("description", OperandNull, nil)
-
-		expected := Condition{
-			Operand1: Operand{
-				Type:  OperandField,
-				Value: "description",
-			},
-			Operator: Eq,
-			Operand2: Operand{
-				Type:  OperandNull,
-				Value: nil,
-			},
-		}
-
-		assert.Equal(t, expected, condition)
-	})
-}
-
-func TestFieldIsNotIn(t *testing.T) {
-	t.Parallel()
-
-	t.Run("string field with quoted string value", func(t *testing.T) {
-		condition := FieldIsNotIn("email", OperandQuotedString, "john@example.com")
-
-		expected := Condition{
-			Operand1: Operand{
-				Type:  OperandField,
-				Value: "email",
-			},
-			Operator: Ne,
-			Operand2: Operand{
-				Type:  OperandQuotedString,
-				Value: "john@example.com",
-			},
-		}
-
-		assert.Equal(t, expected, condition)
-	})
-
-	t.Run("boolean field with boolean value", func(t *testing.T) {
-		condition := FieldIsNotIn("verified", OperandBoolean, true)
-
-		expected := Condition{
-			Operand1: Operand{
-				Type:  OperandField,
-				Value: "verified",
-			},
-			Operator: Ne,
-			Operand2: Operand{
-				Type:  OperandBoolean,
-				Value: true,
-			},
-		}
-
-		assert.Equal(t, expected, condition)
-	})
-
-	t.Run("integer field with integer value", func(t *testing.T) {
-		condition := FieldIsNotIn("id", OperandInteger, int64(25))
-
-		expected := Condition{
-			Operand1: Operand{
-				Type:  OperandField,
-				Value: "id",
-			},
-			Operator: Ne,
-			Operand2: Operand{
-				Type:  OperandInteger,
-				Value: int64(25),
-			},
-		}
-
-		assert.Equal(t, expected, condition)
-	})
-
-	t.Run("float field with float value", func(t *testing.T) {
-		condition := FieldIsNotIn("score", OperandFloat, 95.5)
-
-		expected := Condition{
-			Operand1: Operand{
-				Type:  OperandField,
-				Value: "score",
-			},
-			Operator: Ne,
-			Operand2: Operand{
-				Type:  OperandFloat,
-				Value: 95.5,
-			},
-		}
-
-		assert.Equal(t, expected, condition)
-	})
-
-	t.Run("field with null value", func(t *testing.T) {
-		condition := FieldIsNotIn("description", OperandNull, nil)
-
-		expected := Condition{
-			Operand1: Operand{
-				Type:  OperandField,
-				Value: "description",
-			},
-			Operator: Ne,
-			Operand2: Operand{
-				Type:  OperandNull,
-				Value: nil,
-			},
-		}
-
-		assert.Equal(t, expected, condition)
-	})
 }
 
 func TestStatement_IsSelectAll(t *testing.T) {

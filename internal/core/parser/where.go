@@ -48,36 +48,50 @@ func (p *parser) doParseWhere() error {
 			operatorOrNullComparison = p.peek()
 			currentCondition, _      = p.Conditions.LastCondition()
 		)
-		if strings.ToUpper(operatorOrNullComparison) == "IS NULL" {
+		switch strings.ToUpper(operatorOrNullComparison) {
+		case "IS NULL":
 			currentCondition.Operator = minisql.Eq
 			currentCondition.Operand2 = minisql.Operand{
 				Type: minisql.OperandNull,
 			}
-		} else if strings.ToUpper(operatorOrNullComparison) == "IS NOT NULL" {
+		case "IS NOT NULL":
 			currentCondition.Operator = minisql.Ne
 			currentCondition.Operand2 = minisql.Operand{
 				Type: minisql.OperandNull,
 			}
-		} else {
-			switch operatorOrNullComparison {
-			case "=":
-				currentCondition.Operator = minisql.Eq
-			case ">":
-				currentCondition.Operator = minisql.Gt
-			case ">=":
-				currentCondition.Operator = minisql.Gte
-			case "<":
-				currentCondition.Operator = minisql.Lt
-			case "<=":
-				currentCondition.Operator = minisql.Lte
-			case "!=":
-				currentCondition.Operator = minisql.Ne
-			default:
-				return errWhereUnknownOperator
+		case "IN (":
+			currentCondition.Operator = minisql.In
+			currentCondition.Operand2 = minisql.Operand{
+				Type:  minisql.OperandList,
+				Value: []any{},
 			}
+		case "NOT IN (":
+			currentCondition.Operator = minisql.NotIn
+			currentCondition.Operand2 = minisql.Operand{
+				Type:  minisql.OperandList,
+				Value: []any{},
+			}
+		case "=":
+			currentCondition.Operator = minisql.Eq
+		case ">":
+			currentCondition.Operator = minisql.Gt
+		case ">=":
+			currentCondition.Operator = minisql.Gte
+		case "<":
+			currentCondition.Operator = minisql.Lt
+		case "<=":
+			currentCondition.Operator = minisql.Lte
+		case "!=":
+			currentCondition.Operator = minisql.Ne
+		default:
+			return errWhereUnknownOperator
 		}
 		p.Conditions.UpdateLast(currentCondition)
 		p.pop()
+		if currentCondition.Operator == minisql.In || currentCondition.Operator == minisql.NotIn {
+			p.step = stepWhereConditionListValue
+			return nil
+		}
 		p.step = stepWhereConditionValue
 	case stepWhereConditionValue:
 		var (
@@ -107,6 +121,28 @@ func (p *parser) doParseWhere() error {
 		p.Conditions.UpdateLast(currentCondition)
 		p.pop()
 		p.step = stepWhereOperator
+	case stepWhereConditionListValue:
+		currentCondition, _ := p.Conditions.LastCondition()
+		value, ln := p.peekNumberOrQuotedStringWithLength()
+		if ln == 0 {
+			return errWhereExpectedQuotedStringOrNumber
+		}
+		currentCondition.Operand2.Value = append(currentCondition.Operand2.Value.([]any), value)
+		p.Conditions.UpdateLast(currentCondition)
+		p.pop()
+		p.step = stepWhereConditionListValueCommaOrEnd
+	case stepWhereConditionListValueCommaOrEnd:
+		switch strings.ToUpper(p.peek()) {
+		case ",":
+			p.pop()
+			p.step = stepWhereConditionListValue
+			return nil
+		case ")":
+			p.pop()
+			p.step = stepWhereOperator
+			return nil
+		}
+		return fmt.Errorf("at WHERE IN (...): expected , or )")
 	case stepWhereOperator:
 		rWord := strings.ToUpper(p.peek())
 		lastCondition, ok := p.Conditions.LastCondition()
@@ -132,7 +168,6 @@ func (p *parser) doParseWhere() error {
 		}
 		p.pop()
 		p.step = stepWhereConditionField
-
 	case stepWhereLimit:
 		if strings.ToUpper(p.peek()) != "LIMIT" {
 			return fmt.Errorf("at WHERE: expected LIMIT")

@@ -38,6 +38,7 @@ I plan to implement more features of traditional relational databases in the fut
 - maximum number of columns for each table is `64`
 - basic page recycling (when nodes are merged, the node that no longer exists in the tree is added to free pages linked list in the config and can be later reused as a new page)
 - simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis
+- supported operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`
 - `LIMIT` and `OFFSET` clauses for basic pagination
 
 ### Data Types And Storage

@@ -7,221 +7,6 @@ import (
 	"unicode/utf8"
 )
 
-type Operator int
-
-const (
-	// Eq -> "="
-	Eq Operator = iota + 1
-	// Ne -> "!="
-	Ne
-	// Gt -> ">"
-	Gt
-	// Lt -> "<"
-	Lt
-	// Gte -> ">="
-	Gte
-	// Lte -> "<="
-	Lte
-)
-
-func (o Operator) String() string {
-	switch o {
-	case Eq:
-		return "="
-	case Ne:
-		return "!="
-	case Gt:
-		return ">"
-	case Lt:
-		return "<"
-	case Gte:
-		return ">="
-	case Lte:
-		return "<="
-	default:
-		return "Unknown"
-	}
-}
-
-type OperandType int
-
-const (
-	OperandField OperandType = iota + 1
-	OperandNull
-	OperandQuotedString
-	OperandBoolean
-	OperandInteger
-	OperandFloat
-)
-
-type Operand struct {
-	Type  OperandType
-	Value any
-}
-
-// IsField determines whether the operand is a literal or a field name
-func (o Operand) IsField() bool {
-	return o.Type == OperandField
-}
-
-type Condition struct {
-	// Operand1 is the left hand side operand
-	Operand1 Operand
-	// Operator is e.g. "=", ">"
-	Operator Operator
-	// Operand2 is the right hand side operand
-	Operand2 Operand
-}
-
-type Conditions []Condition
-
-// OneOrMore contains a slice of multiple groups of singular condition, each
-// group joined by OR boolean operator. Every singular condition in each group
-// is joined by AND with other conditions in the same slice.
-type OneOrMore []Conditions
-
-func NewOneOrMore(conditionGroups ...Conditions) OneOrMore {
-	return OneOrMore(conditionGroups)
-}
-
-// IsValidCondition checks that all fields of the condition are set
-func IsValidCondition(c Condition) bool {
-	if c.Operand1.Type == 0 {
-		return false
-	}
-	if c.Operand1.Value == 0 {
-		return false
-	}
-	if c.Operator == 0 {
-		return false
-	}
-	if c.Operand2.Type == 0 {
-		return false
-	}
-	if c.Operand2.Value == 0 {
-		return false
-	}
-
-	return true
-}
-
-func (o OneOrMore) LastCondition() (Condition, bool) {
-	if len(o) == 0 {
-		return Condition{}, false
-	}
-	lastConditionGroup := o[len(o)-1]
-	if len(lastConditionGroup) > 0 {
-		return lastConditionGroup[len(lastConditionGroup)-1], true
-	}
-	return Condition{}, false
-}
-
-func (o OneOrMore) Append(aCondition Condition) OneOrMore {
-	if len(o) == 0 {
-		o = append(o, make(Conditions, 0, 1))
-	}
-	o[len(o)-1] = append(o[len(o)-1], aCondition)
-	return o
-}
-
-func (o OneOrMore) UpdateLast(aCondition Condition) {
-	o[len(o)-1][len(o[len(o)-1])-1] = aCondition
-}
-
-func FieldIsIn(fieldName string, operandType OperandType, value any) Condition {
-	return Condition{
-		Operand1: Operand{
-			Type:  OperandField,
-			Value: fieldName,
-		},
-		Operator: Eq,
-		Operand2: Operand{
-			Type:  operandType,
-			Value: value,
-		},
-	}
-}
-
-func FieldIsInAny(fieldName string, operandType OperandType, values ...any) OneOrMore {
-	conditions := make(OneOrMore, 0, len(values))
-	for _, v := range values {
-		conditions = append(conditions, Conditions{
-			{
-				Operand1: Operand{
-					Type:  OperandField,
-					Value: fieldName,
-				},
-				Operator: Eq,
-				Operand2: Operand{
-					Type:  operandType,
-					Value: v,
-				},
-			},
-		})
-	}
-	return conditions
-}
-
-func FieldIsNotIn(fieldName string, operandType OperandType, value any) Condition {
-	return Condition{
-		Operand1: Operand{
-			Type:  OperandField,
-			Value: fieldName,
-		},
-		Operator: Ne,
-		Operand2: Operand{
-			Type:  operandType,
-			Value: value,
-		},
-	}
-}
-
-func FieldIsNotInAny(fieldName string, operandType OperandType, values ...any) OneOrMore {
-	conditions := make(OneOrMore, 0, len(values))
-	for _, v := range values {
-		conditions = append(conditions, Conditions{
-			{
-				Operand1: Operand{
-					Type:  OperandField,
-					Value: fieldName,
-				},
-				Operator: Ne,
-				Operand2: Operand{
-					Type:  operandType,
-					Value: v,
-				},
-			},
-		})
-	}
-	return conditions
-}
-
-func FieldIsNull(fieldName string) Condition {
-	return Condition{
-		Operand1: Operand{
-			Type:  OperandField,
-			Value: fieldName,
-		},
-		Operator: Eq,
-		Operand2: Operand{
-			Type: OperandNull,
-		},
-	}
-}
-
-func FieldIsNotNull(fieldName string) Condition {
-	return Condition{
-		Operand1: Operand{
-			Type:  OperandField,
-			Value: fieldName,
-		},
-		Operator: Ne,
-		Operand2: Operand{
-			Type: OperandNull,
-		},
-	}
-}
-
 type StatementKind int
 
 const (
@@ -332,13 +117,25 @@ func (s Statement) ReadOnly() bool {
 func (s Statement) Validate(aTable *Table) error {
 	switch s.Kind {
 	case CreateTable:
-		return s.validateCreateTable()
+		if err := s.validateCreateTable(); err != nil {
+			return err
+		}
 	case Insert:
-		return s.validateInsert(aTable)
+		if err := s.validateInsert(aTable); err != nil {
+			return err
+		}
 	case Update:
-		return s.validateUpdate(aTable)
+		if err := s.validateUpdate(aTable); err != nil {
+			return err
+		}
 	case Select:
-		return s.validateSelect(aTable)
+		if err := s.validateSelect(aTable); err != nil {
+			return err
+		}
+	}
+
+	if err := s.validateWhere(); err != nil {
+		return err
 	}
 
 	return nil
@@ -347,6 +144,10 @@ func (s Statement) Validate(aTable *Table) error {
 func (s Statement) validateCreateTable() error {
 	if len(s.TableName) == 0 {
 		return fmt.Errorf("table name is required")
+	}
+
+	if len(s.Conditions) > 0 {
+		return fmt.Errorf("CREATE TABLE cannot have WHERE conditions")
 	}
 
 	if len(s.Columns) == 0 {
@@ -413,9 +214,15 @@ func (s Statement) validateInsert(aTable *Table) error {
 	if len(s.Inserts) == 0 {
 		return fmt.Errorf("at least one row to insert is required")
 	}
+
 	if len(s.Columns) != len(aTable.Columns) {
 		return fmt.Errorf("insert: expected %d columns, got %d", len(aTable.Columns), len(s.Columns))
 	}
+
+	if len(s.Conditions) > 0 {
+		return fmt.Errorf("INSERT cannot have WHERE conditions")
+	}
+
 	for _, aColumn := range s.Columns {
 		if !aColumn.Nullable {
 			if aColumn.PrimaryKey && aColumn.Autoincrement {
@@ -508,6 +315,36 @@ func (s Statement) validateSelect(aTable *Table) error {
 				return fmt.Errorf("duplicate field %q in select statement", aField.Name)
 			}
 			fieldMap[aField.Name] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func (s Statement) validateWhere() error {
+	for _, aConditionGroup := range s.Conditions {
+		for _, aCondition := range aConditionGroup {
+			if !IsValidCondition(aCondition) {
+				return fmt.Errorf("invalid condition in WHERE clause")
+			}
+			if aCondition.Operand1.Type == OperandList {
+				return fmt.Errorf("operand1 in WHERE condition cannot be a list")
+			}
+			if aCondition.Operand2.Type == OperandList {
+				var valueType string
+				for _, value := range aCondition.Operand2.Value.([]any) {
+					if valueType == "" {
+						valueType = fmt.Sprintf("%T", value)
+						_, ok := value.(bool)
+						if ok {
+							return fmt.Errorf("IN / NOT IN operator not supported for boolean columns")
+						}
+						continue
+					}
+					if fmt.Sprintf("%T", value) != valueType {
+						return fmt.Errorf("mixed operand types in WHERE condition list")
+					}
+				}
+			}
 		}
 	}
 	return nil

@@ -63,6 +63,8 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 				{Value: "john.doe@example.com", Valid: true},
 				{Value: int32(25), Valid: true},
 				{Value: true, Valid: true},
+				{}, // NULL value
+				{}, // NULL value
 			},
 		}
 		idMatch = Condition{
@@ -485,6 +487,106 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operand2: Operand{
 							Type:  OperandInteger,
 							Value: int64(24),
+						},
+					},
+				},
+			},
+			false,
+		},
+		{
+			"row does not match if field value is NULL",
+			aRow,
+			OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "test_real",
+						},
+						Operator: Eq,
+						Operand2: Operand{
+							Type:  OperandFloat,
+							Value: float64(2.5),
+						},
+					},
+				},
+			},
+			false,
+		},
+		{
+			"row matches if IN condition evaluates as true",
+			aRow,
+			OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: In,
+						Operand2: Operand{
+							Type:  OperandList,
+							Value: []any{int64(123), int64(125478), int64(789)},
+						},
+					},
+				},
+			},
+			true,
+		},
+		{
+			"row does not match if IN condition evaluates as false",
+			aRow,
+			OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: In,
+						Operand2: Operand{
+							Type:  OperandList,
+							Value: []any{int64(123), int64(456), int64(789)},
+						},
+					},
+				},
+			},
+			false,
+		},
+		{
+			"row matches if NOT IN condition evaluates as true",
+			aRow,
+			OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: NotIn,
+						Operand2: Operand{
+							Type:  OperandList,
+							Value: []any{int64(123), int64(456), int64(789)},
+						},
+					},
+				},
+			},
+			true,
+		},
+		{
+			"row does not match if NOT IN condition evaluates as false",
+			aRow,
+			OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: NotIn,
+						Operand2: Operand{
+							Type:  OperandList,
+							Value: []any{int64(123), int64(125478), int64(789)},
 						},
 					},
 				},

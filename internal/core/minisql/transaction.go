@@ -37,7 +37,7 @@ type Transaction struct {
 type TransactionStatus int
 
 const (
-	TxActive TransactionStatus = iota
+	TxActive TransactionStatus = iota + 1
 	TxCommitted
 	TxAborted
 )
