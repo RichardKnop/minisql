@@ -408,6 +408,46 @@ func TestParse_Where(t *testing.T) {
 			},
 			nil,
 		},
+		{
+			"WHERE with IN() condition",
+			"WHERE a IN (1, 2, 3)",
+			minisql.OneOrMore{
+				{
+					{
+						Operand1: minisql.Operand{
+							Type:  minisql.OperandField,
+							Value: "a",
+						},
+						Operator: minisql.In,
+						Operand2: minisql.Operand{
+							Type:  minisql.OperandList,
+							Value: []any{int64(1), int64(2), int64(3)},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with NOT IN() condition",
+			"WHERE a NOT IN ('b', 'c', 'd')",
+			minisql.OneOrMore{
+				{
+					{
+						Operand1: minisql.Operand{
+							Type:  minisql.OperandField,
+							Value: "a",
+						},
+						Operator: minisql.NotIn,
+						Operand2: minisql.Operand{
+							Type:  minisql.OperandList,
+							Value: []any{"b", "c", "d"},
+						},
+					},
+				},
+			},
+			nil,
+		},
 	}
 
 	for _, aTestCase := range testCases {

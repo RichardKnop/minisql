@@ -26,7 +26,7 @@ var reservedWords = []string{
 	"CREATE TABLE", "DROP TABLE", "SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
 	"*", "PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "IS NULL", "IS NOT NULL", "NOT NULL", "NULL",
-	"IF NOT EXISTS", "WHERE", "FROM", "SET", "AS", "LIMIT",
+	"IF NOT EXISTS", "WHERE", "FROM", "SET", "AS", "LIMIT", "IN (", "NOT IN (",
 	"BEGIN", "COMMIT", "ROLLBACK",
 	";",
 }
@@ -71,6 +71,8 @@ const (
 	stepWhereConditionField
 	stepWhereConditionOperator
 	stepWhereConditionValue
+	stepWhereConditionListValue
+	stepWhereConditionListValueCommaOrEnd
 	stepWhereOperator
 	stepWhereLimit
 	stepWhereOffset
@@ -240,6 +242,8 @@ func (p *parser) doParse() ([]minisql.Statement, error) {
 			stepWhereConditionField,
 			stepWhereConditionOperator,
 			stepWhereConditionValue,
+			stepWhereConditionListValue,
+			stepWhereConditionListValueCommaOrEnd,
 			stepWhereOperator,
 			stepWhereLimit,
 			stepWhereOffset:
