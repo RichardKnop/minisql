@@ -79,7 +79,11 @@ func TestTable_Update_PrimaryKey(t *testing.T) {
 			Updates: map[string]OptionalValue{
 				"id": {Value: id2.Value, Valid: true},
 			},
-			Conditions: FieldIsInAny("id", OperandInteger, id.Value.(int64)),
+			Conditions: OneOrMore{
+				{
+					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+				},
+			},
 		}
 
 		var aResult StatementResult
@@ -104,7 +108,11 @@ func TestTable_Update_PrimaryKey(t *testing.T) {
 			Updates: map[string]OptionalValue{
 				"id": {Value: id.Value, Valid: true},
 			},
-			Conditions: FieldIsInAny("id", OperandInteger, id.Value.(int64)),
+			Conditions: OneOrMore{
+				{
+					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+				},
+			},
 		}
 
 		var aResult StatementResult
@@ -128,7 +136,11 @@ func TestTable_Update_PrimaryKey(t *testing.T) {
 			Updates: map[string]OptionalValue{
 				"id": {Value: int64(42), Valid: true},
 			},
-			Conditions: FieldIsInAny("id", OperandInteger, id.Value.(int64)),
+			Conditions: OneOrMore{
+				{
+					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+				},
+			},
 		}
 
 		var aResult StatementResult

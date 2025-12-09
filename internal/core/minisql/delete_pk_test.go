@@ -68,8 +68,12 @@ func TestTable_Delete_PrimaryKey(t *testing.T) {
 		require.True(t, ok)
 
 		stmt := Statement{
-			Kind:       Delete,
-			Conditions: FieldIsInAny("id", OperandInteger, id.Value.(int64)),
+			Kind: Delete,
+			Conditions: OneOrMore{
+				{
+					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+				},
+			},
 		}
 
 		var aResult StatementResult

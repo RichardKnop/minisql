@@ -176,7 +176,7 @@ func (d *Database) init(ctx context.Context) error {
 		Fields: mainTableFields,
 		Conditions: OneOrMore{
 			{
-				FieldIsNotIn("name", OperandQuotedString, mainTable.Name), // skip main table itself
+				FieldIsNotEqual("name", OperandQuotedString, mainTable.Name), // skip main table itself
 			},
 		},
 	})
@@ -567,8 +567,8 @@ func (d *Database) deleteFromMainTable(ctx context.Context, aType SchemaType, na
 		Kind: Delete,
 		Conditions: OneOrMore{
 			{
-				FieldIsIn("type", OperandInteger, int64(aType)),
-				FieldIsIn("name", OperandQuotedString, name),
+				FieldIsEqual("type", OperandInteger, int64(aType)),
+				FieldIsEqual("name", OperandQuotedString, name),
 			},
 		},
 	})

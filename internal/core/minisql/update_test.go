@@ -73,12 +73,19 @@ func TestTable_Update(t *testing.T) {
 	})
 
 	t.Run("Update single row", func(t *testing.T) {
+		id, ok := rows[5].GetValue("id")
+		require.True(t, ok)
+
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
 				"email": {Value: NewTextPointer([]byte("updatedsingle@foo.bar")), Valid: true},
 			},
-			Conditions: FieldIsInAny("id", OperandInteger, rows[5].Values[0].Value.(int64)),
+			Conditions: OneOrMore{
+				{
+					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+				},
+			},
 		}
 
 		var aResult StatementResult
@@ -105,12 +112,19 @@ func TestTable_Update(t *testing.T) {
 	})
 
 	t.Run("Update single row, set column to NULL", func(t *testing.T) {
+		id, ok := rows[18].GetValue("id")
+		require.True(t, ok)
+
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
 				"email": {Valid: false},
 			},
-			Conditions: FieldIsInAny("id", OperandInteger, rows[18].Values[0].Value.(int64)),
+			Conditions: OneOrMore{
+				{
+					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+				},
+			},
 		}
 
 		var aResult StatementResult
@@ -212,12 +226,19 @@ func TestTable_Update_Overflow(t *testing.T) {
 	}
 
 	t.Run("Update inline text to overflow text", func(t *testing.T) {
+		id, ok := rows[0].GetValue("id")
+		require.True(t, ok)
+
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
 				"profile": {Value: updatedOverflowText, Valid: true},
 			},
-			Conditions: FieldIsInAny("id", OperandInteger, rows[0].Values[0].Value.(int64)),
+			Conditions: OneOrMore{
+				{
+					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+				},
+			},
 		}
 
 		var aResult StatementResult
@@ -256,12 +277,19 @@ func TestTable_Update_Overflow(t *testing.T) {
 	})
 
 	t.Run("Update overflow text to inline text", func(t *testing.T) {
+		id, ok := rows[1].GetValue("id")
+		require.True(t, ok)
+
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
 				"profile": {Value: updatedInlineText, Valid: true},
 			},
-			Conditions: FieldIsInAny("id", OperandInteger, rows[1].Values[0].Value.(int64)),
+			Conditions: OneOrMore{
+				{
+					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+				},
+			},
 		}
 
 		var aResult StatementResult
@@ -301,12 +329,19 @@ func TestTable_Update_Overflow(t *testing.T) {
 	})
 
 	t.Run("Update overflow text to shrink overflow pages from 2 to 1", func(t *testing.T) {
+		id, ok := rows[2].GetValue("id")
+		require.True(t, ok)
+
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
 				"profile": {Value: updatedShrunkOverflowText, Valid: true},
 			},
-			Conditions: FieldIsInAny("id", OperandInteger, rows[2].Values[0].Value.(int64)),
+			Conditions: OneOrMore{
+				{
+					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+				},
+			},
 		}
 
 		var aResult StatementResult
@@ -345,12 +380,19 @@ func TestTable_Update_Overflow(t *testing.T) {
 	})
 
 	t.Run("Update overflow text to expand overflow pages from 1 to 2", func(t *testing.T) {
+		id, ok := rows[0].GetValue("id")
+		require.True(t, ok)
+
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
 				"profile": {Value: expandedOverflowText, Valid: true},
 			},
-			Conditions: FieldIsInAny("id", OperandInteger, rows[0].Values[0].Value.(int64)),
+			Conditions: OneOrMore{
+				{
+					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+				},
+			},
 		}
 
 		var aResult StatementResult

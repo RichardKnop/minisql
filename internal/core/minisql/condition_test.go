@@ -51,11 +51,11 @@ func TestIsValidCondition(t *testing.T) {
 	}
 }
 
-func TestFieldIsIn(t *testing.T) {
+func TestFieldIsEqual(t *testing.T) {
 	t.Parallel()
 
 	t.Run("string field with quoted string value", func(t *testing.T) {
-		condition := FieldIsIn("email", OperandQuotedString, "john@example.com")
+		condition := FieldIsEqual("email", OperandQuotedString, "john@example.com")
 
 		expected := Condition{
 			Operand1: Operand{
@@ -73,7 +73,7 @@ func TestFieldIsIn(t *testing.T) {
 	})
 
 	t.Run("boolean field with boolean value", func(t *testing.T) {
-		condition := FieldIsIn("verified", OperandBoolean, true)
+		condition := FieldIsEqual("verified", OperandBoolean, true)
 
 		expected := Condition{
 			Operand1: Operand{
@@ -91,7 +91,7 @@ func TestFieldIsIn(t *testing.T) {
 	})
 
 	t.Run("integer field with integer value", func(t *testing.T) {
-		condition := FieldIsIn("id", OperandInteger, int64(25))
+		condition := FieldIsEqual("id", OperandInteger, int64(25))
 
 		expected := Condition{
 			Operand1: Operand{
@@ -109,7 +109,7 @@ func TestFieldIsIn(t *testing.T) {
 	})
 
 	t.Run("float field with float value", func(t *testing.T) {
-		condition := FieldIsIn("score", OperandFloat, 95.5)
+		condition := FieldIsEqual("score", OperandFloat, 95.5)
 
 		expected := Condition{
 			Operand1: Operand{
@@ -127,7 +127,7 @@ func TestFieldIsIn(t *testing.T) {
 	})
 
 	t.Run("field with null value", func(t *testing.T) {
-		condition := FieldIsIn("description", OperandNull, nil)
+		condition := FieldIsEqual("description", OperandNull, nil)
 
 		expected := Condition{
 			Operand1: Operand{
@@ -145,11 +145,11 @@ func TestFieldIsIn(t *testing.T) {
 	})
 }
 
-func TestFieldIsNotIn(t *testing.T) {
+func TestFieldIsNotEqual(t *testing.T) {
 	t.Parallel()
 
 	t.Run("string field with quoted string value", func(t *testing.T) {
-		condition := FieldIsNotIn("email", OperandQuotedString, "john@example.com")
+		condition := FieldIsNotEqual("email", OperandQuotedString, "john@example.com")
 
 		expected := Condition{
 			Operand1: Operand{
@@ -167,7 +167,7 @@ func TestFieldIsNotIn(t *testing.T) {
 	})
 
 	t.Run("boolean field with boolean value", func(t *testing.T) {
-		condition := FieldIsNotIn("verified", OperandBoolean, true)
+		condition := FieldIsNotEqual("verified", OperandBoolean, true)
 
 		expected := Condition{
 			Operand1: Operand{
@@ -185,7 +185,7 @@ func TestFieldIsNotIn(t *testing.T) {
 	})
 
 	t.Run("integer field with integer value", func(t *testing.T) {
-		condition := FieldIsNotIn("id", OperandInteger, int64(25))
+		condition := FieldIsNotEqual("id", OperandInteger, int64(25))
 
 		expected := Condition{
 			Operand1: Operand{
@@ -203,7 +203,7 @@ func TestFieldIsNotIn(t *testing.T) {
 	})
 
 	t.Run("float field with float value", func(t *testing.T) {
-		condition := FieldIsNotIn("score", OperandFloat, 95.5)
+		condition := FieldIsNotEqual("score", OperandFloat, 95.5)
 
 		expected := Condition{
 			Operand1: Operand{
@@ -221,7 +221,7 @@ func TestFieldIsNotIn(t *testing.T) {
 	})
 
 	t.Run("field with null value", func(t *testing.T) {
-		condition := FieldIsNotIn("description", OperandNull, nil)
+		condition := FieldIsNotEqual("description", OperandNull, nil)
 
 		expected := Condition{
 			Operand1: Operand{

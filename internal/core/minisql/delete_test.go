@@ -70,8 +70,12 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
-				Kind:       Delete,
-				Conditions: FieldIsInAny("id", OperandInteger, id.Value.(int64)),
+				Kind: Delete,
+				Conditions: OneOrMore{
+					{
+						FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+					},
+				},
 			})
 			return err
 		}, aPager)
@@ -194,8 +198,12 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
-				Kind:       Delete,
-				Conditions: FieldIsInAny("id", OperandInteger, ids...),
+				Kind: Delete,
+				Conditions: OneOrMore{
+					{
+						FieldIsInAny("id", ids...),
+					},
+				},
 			})
 			return err
 		}, aPager)
@@ -242,8 +250,12 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
-				Kind:       Delete,
-				Conditions: FieldIsInAny("id", OperandInteger, ids...),
+				Kind: Delete,
+				Conditions: OneOrMore{
+					{
+						FieldIsInAny("id", ids...),
+					},
+				},
 			})
 			return err
 		}, aPager)
@@ -288,8 +300,12 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
-				Kind:       Delete,
-				Conditions: FieldIsInAny("id", OperandInteger, ids...),
+				Kind: Delete,
+				Conditions: OneOrMore{
+					{
+						FieldIsInAny("id", ids...),
+					},
+				},
 			})
 			return err
 		}, aPager)
@@ -337,8 +353,12 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
-				Kind:       Delete,
-				Conditions: FieldIsInAny("id", OperandInteger, ids...),
+				Kind: Delete,
+				Conditions: OneOrMore{
+					{
+						FieldIsInAny("id", ids...),
+					},
+				},
 			})
 			return err
 		}, aPager)
@@ -379,8 +399,12 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
-				Kind:       Delete,
-				Conditions: FieldIsInAny("id", OperandInteger, ids...),
+				Kind: Delete,
+				Conditions: OneOrMore{
+					{
+						FieldIsInAny("id", ids...),
+					},
+				},
 			})
 			return err
 		}, aPager)
@@ -426,8 +450,12 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
-				Kind:       Delete,
-				Conditions: FieldIsInAny("id", OperandInteger, ids...),
+				Kind: Delete,
+				Conditions: OneOrMore{
+					{
+						FieldIsInAny("id", ids...),
+					},
+				},
 			})
 			return err
 		}, aPager)
@@ -468,8 +496,12 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
-				Kind:       Delete,
-				Conditions: FieldIsInAny("id", OperandInteger, ids...),
+				Kind: Delete,
+				Conditions: OneOrMore{
+					{
+						FieldIsInAny("id", ids...),
+					},
+				},
 			})
 			return err
 		}, aPager)
@@ -592,8 +624,12 @@ func TestTable_Delete_Overflow(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
-				Kind:       Delete,
-				Conditions: FieldIsInAny("id", OperandInteger, ids...),
+				Kind: Delete,
+				Conditions: OneOrMore{
+					{
+						FieldIsInAny("id", ids...),
+					},
+				},
 			})
 			return err
 		}, aPager)
@@ -613,8 +649,12 @@ func TestTable_Delete_Overflow(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
-				Kind:       Delete,
-				Conditions: FieldIsInAny("id", OperandInteger, ids...),
+				Kind: Delete,
+				Conditions: OneOrMore{
+					{
+						FieldIsInAny("id", ids...),
+					},
+				},
 			})
 			return err
 		}, aPager)

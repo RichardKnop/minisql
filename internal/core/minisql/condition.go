@@ -1,6 +1,8 @@
 package minisql
 
-import "fmt"
+import (
+	"fmt"
+)
 
 type Operator int
 
@@ -136,7 +138,7 @@ func (o OneOrMore) UpdateLast(aCondition Condition) {
 	o[len(o)-1][len(o[len(o)-1])-1] = aCondition
 }
 
-func FieldIsIn(fieldName string, operandType OperandType, value any) Condition {
+func FieldIsEqual(fieldName string, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
@@ -150,27 +152,7 @@ func FieldIsIn(fieldName string, operandType OperandType, value any) Condition {
 	}
 }
 
-func FieldIsInAny(fieldName string, operandType OperandType, values ...any) OneOrMore {
-	conditions := make(OneOrMore, 0, len(values))
-	for _, v := range values {
-		conditions = append(conditions, Conditions{
-			{
-				Operand1: Operand{
-					Type:  OperandField,
-					Value: fieldName,
-				},
-				Operator: Eq,
-				Operand2: Operand{
-					Type:  operandType,
-					Value: v,
-				},
-			},
-		})
-	}
-	return conditions
-}
-
-func FieldIsNotIn(fieldName string, operandType OperandType, value any) Condition {
+func FieldIsNotEqual(fieldName string, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
@@ -184,24 +166,32 @@ func FieldIsNotIn(fieldName string, operandType OperandType, value any) Conditio
 	}
 }
 
-func FieldIsNotInAny(fieldName string, operandType OperandType, values ...any) OneOrMore {
-	conditions := make(OneOrMore, 0, len(values))
-	for _, v := range values {
-		conditions = append(conditions, Conditions{
-			{
-				Operand1: Operand{
-					Type:  OperandField,
-					Value: fieldName,
-				},
-				Operator: Ne,
-				Operand2: Operand{
-					Type:  operandType,
-					Value: v,
-				},
-			},
-		})
+func FieldIsInAny(fieldName string, values ...any) Condition {
+	return Condition{
+		Operand1: Operand{
+			Type:  OperandField,
+			Value: fieldName,
+		},
+		Operator: In,
+		Operand2: Operand{
+			Type:  OperandList,
+			Value: values,
+		},
 	}
-	return conditions
+}
+
+func FieldIsNotInAny(fieldName string, values ...any) Condition {
+	return Condition{
+		Operand1: Operand{
+			Type:  OperandField,
+			Value: fieldName,
+		},
+		Operator: NotIn,
+		Operand2: Operand{
+			Type:  OperandList,
+			Value: values,
+		},
+	}
 }
 
 func FieldIsNull(fieldName string) Condition {
@@ -482,6 +472,8 @@ func isInListText(value, list any) (bool, error) {
 	return false, nil
 }
 
+// Values coming from parser will be strings, string values stored in the database
+// will be wrapped in TextPointer struct.
 func getTextToCompare(value any) string {
 	_, ok := value.(string)
 	if ok {
