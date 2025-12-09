@@ -17,10 +17,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/RichardKnop/minisql/internal/core/minisql"
-	"github.com/RichardKnop/minisql/internal/core/parser"
-	"github.com/RichardKnop/minisql/internal/core/protocol"
+	"github.com/RichardKnop/minisql/internal/minisql"
+	"github.com/RichardKnop/minisql/internal/parser"
 	"github.com/RichardKnop/minisql/internal/pkg/logging"
+	"github.com/RichardKnop/minisql/internal/protocol"
 )
 
 const defaultDbFileName = "db"

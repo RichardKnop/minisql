@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/RichardKnop/minisql/internal/core/minisql"
+	"github.com/RichardKnop/minisql/internal/minisql"
 )
 
 var (

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/RichardKnop/minisql/internal/core/minisql"
+	"github.com/RichardKnop/minisql/internal/minisql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/RichardKnop/minisql/internal/core/minisql"
+	"github.com/RichardKnop/minisql/internal/minisql"
 )
 
 const (

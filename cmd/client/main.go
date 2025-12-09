@@ -10,9 +10,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/RichardKnop/minisql/internal/core/minisql"
-	"github.com/RichardKnop/minisql/internal/core/protocol"
+	"github.com/RichardKnop/minisql/internal/minisql"
 	"github.com/RichardKnop/minisql/internal/pkg/util"
+	"github.com/RichardKnop/minisql/internal/protocol"
 )
 
 const (

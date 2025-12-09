@@ -1,7 +1,7 @@
 package protocol
 
 import (
-	"github.com/RichardKnop/minisql/internal/core/minisql"
+	"github.com/RichardKnop/minisql/internal/minisql"
 )
 
 // This is very simplistic TCP protocol using JSON messages terminated by newlines.

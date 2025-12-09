@@ -9,7 +9,7 @@ pkgname: '{{.SrcPackageName}}'
 recursive: true
 template: testify
 packages:
-  github.com/RichardKnop/minisql/internal/core/minisql:
+  github.com/RichardKnop/minisql/internal/minisql:
     interfaces:
       Parser: 
       PageSaver:
