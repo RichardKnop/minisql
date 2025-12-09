@@ -115,11 +115,13 @@ func (p QueryPlan) setPKIndexScan(pkName string, pkColumn string, conditions One
 			primaryKeysForGroup = make([]any, 0, 10)
 		)
 		for _, aCondition := range group {
-			if isPrimaryKeyEquality(aCondition, pkColumn) {
+			keys, ok := isPrimaryKeyEquality(aCondition, pkColumn)
+			if ok {
 				hasPKCondition = true
-				aKey := aCondition.Operand2.Value
-				primaryKeysForGroup = append(primaryKeysForGroup, aKey)
-				keyFiltersMap[aKey] = groupIdx
+				primaryKeysForGroup = append(primaryKeysForGroup, keys...)
+				for _, aKey := range keys {
+					keyFiltersMap[aKey] = groupIdx
+				}
 				continue
 			}
 			remainingForGroup = append(remainingForGroup, aCondition)
@@ -145,21 +147,30 @@ func (p QueryPlan) setPKIndexScan(pkName string, pkColumn string, conditions One
 	return p
 }
 
-func isPrimaryKeyEquality(cond Condition, pkColumn string) bool {
+func isPrimaryKeyEquality(cond Condition, pkColumn string) ([]any, bool) {
 	// Check: column_name = literal_value
-	if cond.Operator != Eq {
-		return false
+	// Also consider IN operator for primary key
+	if cond.Operator != Eq && cond.Operator != In {
+		return nil, false
 	}
 
 	if cond.Operand1.Type != OperandField {
-		return false
+		return nil, false
 	}
 
 	fieldName, ok := cond.Operand1.Value.(string)
 	if !ok || fieldName != pkColumn {
-		return false
+		return nil, false
 	}
 
 	// Right operand must be a literal (not another field)
-	return cond.Operand2.Type != OperandField
+	if cond.Operand2.Type == OperandField {
+		return nil, false
+	}
+
+	if cond.Operator == Eq {
+		return []any{cond.Operand2.Value}, true
+	}
+
+	return cond.Operand2.Value.([]any), true
 }

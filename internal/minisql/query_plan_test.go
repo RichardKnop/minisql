@@ -240,6 +240,35 @@ func TestTable_PlanQuery(t *testing.T) {
 				},
 			},
 		},
+		{
+			"Single primary key IN condition",
+			aTableWithPK,
+			Statement{
+				Kind: Select,
+				Conditions: OneOrMore{
+					{
+						{
+							Operand1: Operand{Type: OperandField, Value: "id"},
+							Operator: In,
+							Operand2: Operand{Type: OperandList, Value: []any{int64(42), int64(69)}},
+						},
+					},
+				},
+			},
+			QueryPlan{
+				ScanType:        ScanTypeIndexPoint,
+				IndexName:       "pk_users",
+				IndexColumnName: "id",
+				IndexKeyGroups: [][]any{
+					{int64(42), int64(69)},
+				},
+				Filters: OneOrMore{{}},
+				KeyFiltersMap: map[any]int{
+					int64(42): 0,
+					int64(69): 0,
+				},
+			},
+		},
 	}
 
 	for _, aTestCase := range testCases {

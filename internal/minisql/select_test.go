@@ -52,14 +52,7 @@ func TestTable_Select(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		// Use iterator to collect all rows
-		actual := []Row{}
-		aRow, err := aResult.Rows(ctx)
-		for ; err == nil; aRow, err = aResult.Rows(ctx) {
-			actual = append(actual, aRow)
-		}
-
-		assert.Equal(t, rows, actual)
+		assert.Equal(t, rows, aResult.CollectRows(ctx))
 	})
 
 	t.Run("Select with LIMIT", func(t *testing.T) {
@@ -72,14 +65,7 @@ func TestTable_Select(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		// Use iterator to collect all rows
-		actual := []Row{}
-		aRow, err := aResult.Rows(ctx)
-		for ; err == nil; aRow, err = aResult.Rows(ctx) {
-			actual = append(actual, aRow)
-		}
-
-		assert.Equal(t, rows[0:10], actual)
+		assert.Equal(t, rows[0:10], aResult.CollectRows(ctx))
 	})
 
 	t.Run("Select with OFFSET", func(t *testing.T) {
@@ -92,14 +78,7 @@ func TestTable_Select(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		// Use iterator to collect all rows
-		actual := []Row{}
-		aRow, err := aResult.Rows(ctx)
-		for ; err == nil; aRow, err = aResult.Rows(ctx) {
-			actual = append(actual, aRow)
-		}
-
-		assert.Equal(t, rows[10:], actual)
+		assert.Equal(t, rows[10:], aResult.CollectRows(ctx))
 	})
 
 	t.Run("Select with LIMIT and OFFSET", func(t *testing.T) {
@@ -113,14 +92,7 @@ func TestTable_Select(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		// Use iterator to collect all rows
-		actual := []Row{}
-		aRow, err := aResult.Rows(ctx)
-		for ; err == nil; aRow, err = aResult.Rows(ctx) {
-			actual = append(actual, aRow)
-		}
-
-		assert.Equal(t, rows[10:15], actual)
+		assert.Equal(t, rows[10:15], aResult.CollectRows(ctx))
 	})
 
 	t.Run("Select no rows", func(t *testing.T) {
@@ -147,14 +119,7 @@ func TestTable_Select(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		// Use iterator to collect all rows
-		actual := []Row{}
-		aRow, err := aResult.Rows(ctx)
-		for ; err == nil; aRow, err = aResult.Rows(ctx) {
-			actual = append(actual, aRow)
-		}
-
-		assert.Empty(t, actual)
+		assert.Empty(t, aResult.CollectRows(ctx))
 	})
 
 	t.Run("Select single row", func(t *testing.T) {
@@ -182,15 +147,81 @@ func TestTable_Select(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		// Use iterator to collect all rows
-		actual := []Row{}
-		aRow, err := aResult.Rows(ctx)
-		for ; err == nil; aRow, err = aResult.Rows(ctx) {
-			actual = append(actual, aRow)
-		}
-
+		actual := aResult.CollectRows(ctx)
 		assert.Len(t, actual, 1)
 		assert.Equal(t, rows[5], actual[0])
+	})
+
+	t.Run("Select multiple rows with IN", func(t *testing.T) {
+		ids := rowIDs(rows[5], rows[11], rows[12], rows[33])
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(testColumns...),
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: In,
+						Operand2: Operand{
+							Type:  OperandList,
+							Value: ids,
+						},
+					},
+				},
+			},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		// We expect rows 5, 11, 12, and 33
+		expected := make([]Row, 0, len(ids))
+		for i, aRow := range rows {
+			if i != 5 && i != 11 && i != 12 && i != 33 {
+				continue
+			}
+			expected = append(expected, aRow)
+		}
+		assert.Equal(t, expected, aResult.CollectRows(ctx))
+	})
+
+	t.Run("Select multiple rows with NOT IN", func(t *testing.T) {
+		ids := rowIDs(rows[5], rows[11], rows[12], rows[33])
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(testColumns...),
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: NotIn,
+						Operand2: Operand{
+							Type:  OperandList,
+							Value: ids,
+						},
+					},
+				},
+			},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		// We expect rows other than 5, 11, 12, and 33
+		expected := make([]Row, 0, len(ids))
+		for i, aRow := range rows {
+			if i == 5 || i == 11 || i == 12 || i == 33 {
+				continue
+			}
+			expected = append(expected, aRow)
+		}
+		assert.Equal(t, expected, aResult.CollectRows(ctx))
 	})
 
 	t.Run("Select rows with NULL values when there are none", func(t *testing.T) {
@@ -203,14 +234,7 @@ func TestTable_Select(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		// Use iterator to collect all rows
-		actual := []Row{}
-		aRow, err := aResult.Rows(ctx)
-		for ; err == nil; aRow, err = aResult.Rows(ctx) {
-			actual = append(actual, aRow)
-		}
-
-		assert.Empty(t, actual)
+		assert.Empty(t, aResult.CollectRows(ctx))
 	})
 
 	t.Run("Select rows with NULL values", func(t *testing.T) {
@@ -223,14 +247,8 @@ func TestTable_Select(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		// Use iterator to collect all rows
-		actual := []Row{}
-		aRow, err := aResult.Rows(ctx)
-		for ; err == nil; aRow, err = aResult.Rows(ctx) {
-			actual = append(actual, aRow)
-		}
-
 		// rows[5] and rows[32] have NULL age values
+		actual := aResult.CollectRows(ctx)
 		assert.Len(t, actual, 2)
 		assert.Equal(t, []Row{rows[5], rows[32]}, actual)
 	})
@@ -245,13 +263,6 @@ func TestTable_Select(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		// Use iterator to collect all rows
-		actual := []Row{}
-		aRow, err := aResult.Rows(ctx)
-		for ; err == nil; aRow, err = aResult.Rows(ctx) {
-			actual = append(actual, aRow)
-		}
-
 		// rows[5] and rows[32] have NULL age values, so exclude them
 		expected := make([]Row, 0, len(rows)-2)
 		for i, aRow := range rows {
@@ -260,6 +271,7 @@ func TestTable_Select(t *testing.T) {
 			}
 			expected = append(expected, aRow)
 		}
+		actual := aResult.CollectRows(ctx)
 		assert.Len(t, actual, len(expected))
 		assert.Equal(t, expected, actual)
 	})
@@ -273,15 +285,8 @@ func TestTable_Select(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		// Use iterator to collect all rows
-		actual := []Row{}
-		aRow, err := aResult.Rows(ctx)
-		for ; err == nil; aRow, err = aResult.Rows(ctx) {
-			actual = append(actual, aRow)
-		}
-
-		expected := make([]Row, 0, len(rows))
 		// Since we are only selecting id, name, filter out other columns and values
+		expected := make([]Row, 0, len(rows))
 		for _, aRow := range rows {
 			expected = append(expected, Row{
 				Key:     aRow.Key,
@@ -289,6 +294,7 @@ func TestTable_Select(t *testing.T) {
 				Values:  []OptionalValue{aRow.Values[0], aRow.Values[3]},
 			})
 		}
+		actual := aResult.CollectRows(ctx)
 		assert.Len(t, actual, len(expected))
 		assert.Equal(t, expected, actual)
 		assert.Equal(t, []Column{testColumns[0], testColumns[3]}, aResult.Columns)
@@ -303,13 +309,6 @@ func TestTable_Select(t *testing.T) {
 
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
-
-		// Use iterator to collect all rows
-		actual := []Row{}
-		aRow, err := aResult.Rows(ctx)
-		for ; err == nil; aRow, err = aResult.Rows(ctx) {
-			actual = append(actual, aRow)
-		}
 
 		// rows[5] and rows[32] have NULL age values, so exclude them
 		expected := make([]Row, 0, len(rows)-2)
@@ -326,6 +325,7 @@ func TestTable_Select(t *testing.T) {
 			expected = append(expected, expectedRow)
 
 		}
+		actual := aResult.CollectRows(ctx)
 		assert.Len(t, actual, len(expected))
 		assert.Equal(t, expected, actual)
 		assert.Equal(t, []Column{testColumns[0], testColumns[1]}, aResult.Columns)
@@ -373,13 +373,6 @@ func TestTable_Select_Overflow(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		// Use iterator to collect all rows
-		actual := []Row{}
-		aRow, err := aResult.Rows(ctx)
-		for ; err == nil; aRow, err = aResult.Rows(ctx) {
-			actual = append(actual, aRow)
-		}
-
 		// Set expected first overflow pages on rows
 		overflow1, _ := rows[1].GetValue("profile")
 		tp1 := overflow1.Value.(TextPointer)
@@ -394,6 +387,6 @@ func TestTable_Select_Overflow(t *testing.T) {
 		rows[2].SetValue("profile", overflow2)
 
 		// And now we can assert
-		assert.Equal(t, rows, actual)
+		assert.Equal(t, rows, aResult.CollectRows(ctx))
 	})
 }

@@ -382,6 +382,15 @@ type StatementResult struct {
 	RowsAffected int
 }
 
+func (r StatementResult) CollectRows(ctx context.Context) []Row {
+	results := []Row{}
+	aRow, err := r.Rows(ctx)
+	for ; err == nil; aRow, err = r.Rows(ctx) {
+		results = append(results, aRow)
+	}
+	return results
+}
+
 func (stmt Statement) InsertForColumn(name string, insertIdx int) (OptionalValue, bool) {
 	fieldIdx := -1
 	for i, aField := range stmt.Fields {

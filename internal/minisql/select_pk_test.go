@@ -75,14 +75,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		// Use iterator to collect all rows
-		actual := []Row{}
-		aRow, err := aResult.Rows(ctx)
-		for ; err == nil; aRow, err = aResult.Rows(ctx) {
-			actual = append(actual, aRow)
-		}
-
-		assert.Equal(t, rows, actual)
+		assert.Equal(t, rows, aResult.CollectRows(ctx))
 	})
 
 	t.Run("Select single row by primary key (index scan)", func(t *testing.T) {
@@ -110,13 +103,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		// Use iterator to collect all rows
-		actual := []Row{}
-		aRow, err := aResult.Rows(ctx)
-		for ; err == nil; aRow, err = aResult.Rows(ctx) {
-			actual = append(actual, aRow)
-		}
-
+		actual := aResult.CollectRows(ctx)
 		assert.Len(t, actual, 1)
 		assert.Equal(t, rows[5], actual[0])
 	})
@@ -162,14 +149,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		// Use iterator to collect all rows
-		actual := []Row{}
-		aRow, err := aResult.Rows(ctx)
-		for ; err == nil; aRow, err = aResult.Rows(ctx) {
-			actual = append(actual, aRow)
-		}
-
 		expected := []Row{rows[5].Clone(), rows[15].Clone()}
-		assert.Equal(t, expected, actual)
+		assert.Equal(t, expected, aResult.CollectRows(ctx))
 	})
 }
