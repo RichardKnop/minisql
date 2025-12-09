@@ -2,6 +2,8 @@ package minisql
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -329,6 +331,62 @@ func TestTable_Select(t *testing.T) {
 		assert.Len(t, actual, len(expected))
 		assert.Equal(t, expected, actual)
 		assert.Equal(t, []Column{testColumns[0], testColumns[1]}, aResult.Columns)
+	})
+
+	t.Run("Select with order by sort in memory asc", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(testColumns...),
+			OrderBy: []OrderBy{
+				{
+					Field:     Field{Name: "email"},
+					Direction: Asc,
+				},
+			},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		//We expect all rows sorted by email descending
+		expected := make([]Row, 0, len(rows))
+		for _, aRow := range rows {
+			expected = append(expected, aRow)
+		}
+		sort.Slice(expected, func(i, j int) bool {
+			email1, _ := expected[i].GetValue("email")
+			email2, _ := expected[j].GetValue("email")
+			return strings.Compare(email1.Value.(TextPointer).String(), email2.Value.(TextPointer).String()) < 0
+		})
+		assert.Equal(t, expected, aResult.CollectRows(ctx))
+	})
+
+	t.Run("Select with order by sort in memory desc", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(testColumns...),
+			OrderBy: []OrderBy{
+				{
+					Field:     Field{Name: "email"},
+					Direction: Desc,
+				},
+			},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		//We expect all rows sorted by email descending
+		expected := make([]Row, 0, len(rows))
+		for _, aRow := range rows {
+			expected = append(expected, aRow)
+		}
+		sort.Slice(expected, func(i, j int) bool {
+			email1, _ := expected[i].GetValue("email")
+			email2, _ := expected[j].GetValue("email")
+			return strings.Compare(email1.Value.(TextPointer).String(), email2.Value.(TextPointer).String()) > 0
+		})
+		assert.Equal(t, expected, aResult.CollectRows(ctx))
 	})
 }
 

@@ -26,7 +26,8 @@ var reservedWords = []string{
 	"CREATE TABLE", "DROP TABLE", "SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
 	"*", "PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "IS NULL", "IS NOT NULL", "NOT NULL", "NULL",
-	"IF NOT EXISTS", "WHERE", "FROM", "SET", "AS", "LIMIT", "IN (", "NOT IN (",
+	"IF NOT EXISTS", "WHERE", "FROM", "SET", "ASC", "DESC", "AS", "IN (", "NOT IN (",
+	"ORDER BY", "LIMIT", "OFFSET",
 	"BEGIN", "COMMIT", "ROLLBACK",
 	";",
 }
@@ -45,10 +46,6 @@ const (
 	stepCreateTableColumnNullNotNull
 	stepCreateTableCommaOrClosingParens
 	stepDropTableName
-	stepSelectField
-	stepSelectFrom
-	stepSelectComma
-	stepSelectFromTable
 	stepInsertTable
 	stepInsertFieldsOpeningParens
 	stepInsertFields
@@ -65,6 +62,13 @@ const (
 	stepUpdateValue
 	stepUpdateComma
 	stepDeleteFromTable
+	stepSelectField
+	stepSelectFrom
+	stepSelectComma
+	stepSelectFromTable
+	stepSelectOrderBy
+	stepSelectOrderByField
+	stepSelectOrderByComma
 	stepSelectLimit
 	stepSelectOffset
 	stepWhere
@@ -74,8 +78,6 @@ const (
 	stepWhereConditionListValue
 	stepWhereConditionListValueCommaOrEnd
 	stepWhereOperator
-	stepWhereLimit
-	stepWhereOffset
 	stepStatementEnd
 )
 
@@ -210,6 +212,9 @@ func (p *parser) doParse() ([]minisql.Statement, error) {
 			stepSelectComma,
 			stepSelectFrom,
 			stepSelectFromTable,
+			stepSelectOrderBy,
+			stepSelectOrderByField,
+			stepSelectOrderByComma,
 			stepSelectLimit,
 			stepSelectOffset:
 			if err := p.doParseSelect(); err != nil {
@@ -244,9 +249,7 @@ func (p *parser) doParse() ([]minisql.Statement, error) {
 			stepWhereConditionValue,
 			stepWhereConditionListValue,
 			stepWhereConditionListValueCommaOrEnd,
-			stepWhereOperator,
-			stepWhereLimit,
-			stepWhereOffset:
+			stepWhereOperator:
 			if err := p.doParseWhere(); err != nil {
 				return statements, err
 			}

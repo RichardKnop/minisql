@@ -109,6 +109,82 @@ func TestParse_Select(t *testing.T) {
 			nil,
 		},
 		{
+			"SELECT with ORDER BY works",
+			"SELECT * FROM b ORDER BY a;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Fields:    []minisql.Field{{Name: "*"}},
+					OrderBy: []minisql.OrderBy{
+						{
+							Field:     minisql.Field{Name: "a"},
+							Direction: minisql.Asc,
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT with ORDER BY ASC works",
+			"SELECT * FROM b ORDER BY a ASC;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Fields:    []minisql.Field{{Name: "*"}},
+					OrderBy: []minisql.OrderBy{
+						{
+							Field:     minisql.Field{Name: "a"},
+							Direction: minisql.Asc,
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT with ORDER BY DESC works",
+			"SELECT * FROM b ORDER BY a DESC;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Fields:    []minisql.Field{{Name: "*"}},
+					OrderBy: []minisql.OrderBy{
+						{
+							Field:     minisql.Field{Name: "a"},
+							Direction: minisql.Desc,
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT with ORDER BY multiple fields works",
+			"SELECT * FROM b ORDER BY a DESC, c ASC;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Fields:    []minisql.Field{{Name: "*"}},
+					OrderBy: []minisql.OrderBy{
+						{
+							Field:     minisql.Field{Name: "a"},
+							Direction: minisql.Desc,
+						},
+						{
+							Field:     minisql.Field{Name: "c"},
+							Direction: minisql.Asc,
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
 			"SELECT with LIMIT works",
 			"SELECT * FROM b LIMIT 10;",
 			[]minisql.Statement{
@@ -290,6 +366,43 @@ func TestParse_Select(t *testing.T) {
 					},
 					Limit:  minisql.OptionalValue{Value: int64(10), Valid: true},
 					Offset: minisql.OptionalValue{Value: int64(20), Valid: true},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT with WHERE and ORDER B works",
+			`SELECT a, c, d FROM "b" WHERE a = 2 ORDER BY c ASC, d DESC;`,
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Fields:    []minisql.Field{{Name: "a"}, {Name: "c"}, {Name: "d"}},
+					Conditions: minisql.OneOrMore{
+						{
+							{
+								Operand1: minisql.Operand{
+									Type:  minisql.OperandField,
+									Value: "a",
+								},
+								Operator: minisql.Eq,
+								Operand2: minisql.Operand{
+									Type:  minisql.OperandInteger,
+									Value: int64(2),
+								},
+							},
+						},
+					},
+					OrderBy: []minisql.OrderBy{
+						{
+							Field:     minisql.Field{Name: "c"},
+							Direction: minisql.Asc,
+						},
+						{
+							Field:     minisql.Field{Name: "d"},
+							Direction: minisql.Desc,
+						},
+					},
 				},
 			},
 			nil,

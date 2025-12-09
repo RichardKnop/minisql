@@ -28,6 +28,15 @@ func (p *parser) doParseWhere() error {
 		if whereRWord != "WHERE" {
 			return fmt.Errorf("expected WHERE")
 		}
+		if len(p.OrderBy) > 0 {
+			return fmt.Errorf("at WHERE: ORDER BY must be after WHERE clause")
+		}
+		if p.Offset.Valid || p.Limit.Valid {
+			return fmt.Errorf("at WHERE: OFFSET / LIMIT must be after WHERE clause")
+		}
+		if len(p.Conditions) > 0 {
+			return fmt.Errorf("at WHERE: multiple WHERE clauses are not supported")
+		}
 		p.pop()
 		p.step = stepWhereConditionField
 	case stepWhereConditionField:
@@ -152,12 +161,8 @@ func (p *parser) doParseWhere() error {
 				return nil
 			}
 		}
-		if rWord == "LIMIT" {
-			p.step = stepWhereLimit
-			return nil
-		}
-		if rWord == "OFFSET" {
-			p.step = stepWhereOffset
+		if rWord == "ORDER BY" || rWord == "LIMIT" || rWord == "OFFSET" {
+			p.step = stepSelectOrderBy
 			return nil
 		}
 		if rWord != "AND" && rWord != "OR" {
@@ -168,35 +173,6 @@ func (p *parser) doParseWhere() error {
 		}
 		p.pop()
 		p.step = stepWhereConditionField
-	case stepWhereLimit:
-		if strings.ToUpper(p.peek()) != "LIMIT" {
-			return fmt.Errorf("at WHERE: expected LIMIT")
-		}
-		p.pop()
-		limitValue, n := p.peekIntWithLength()
-		if n == 0 {
-			return fmt.Errorf("at WHERE: expected integer value for LIMIT")
-		}
-		p.Limit = minisql.OptionalValue{Value: limitValue, Valid: true}
-		p.pop()
-		p.step = stepWhereOffset
-	case stepWhereOffset:
-		rWord := p.peek()
-		if rWord == ";" {
-			p.step = stepStatementEnd
-			return nil
-		}
-		if strings.ToUpper(rWord) != "OFFSET" {
-			return fmt.Errorf("at WHERE: expected OFFSET")
-		}
-		p.pop()
-		offsetValue, n := p.peekIntWithLength()
-		if n == 0 {
-			return fmt.Errorf("at WHERE: expected integer value for OFFSET")
-		}
-		p.Offset = minisql.OptionalValue{Value: offsetValue, Valid: true}
-		p.pop()
-		p.step = stepStatementEnd
 	}
 	return nil
 }
