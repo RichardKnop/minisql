@@ -5,7 +5,7 @@ const (
 
 	// UsablePageSize returns the usable size of a page after accounting for headers
 	// Page size minus base + internal/leaf header, minus key and null bitmask
-	UsablePageSize = PageSize - 6 - 8 - 8 - 8
+	UsablePageSize = PageSize - 7 - 8 - 8 - 8
 )
 
 type PageIndex uint32

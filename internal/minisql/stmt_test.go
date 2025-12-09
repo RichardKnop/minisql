@@ -85,7 +85,7 @@ func TestStatement_Validate(t *testing.T) {
 
 		err := stmt.Validate(aTable)
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "potential row size exceeds maximum allowed 4066")
+		assert.ErrorContains(t, err, "potential row size exceeds maximum allowed 4065")
 	})
 
 	t.Run("CREATE with multiple primary keys should fail", func(t *testing.T) {

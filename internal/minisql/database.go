@@ -38,8 +38,7 @@ var (
 			Nullable: true,
 		},
 		{
-			Kind:     Varchar,
-			Size:     uint32(maximumSchemaSQL),
+			Kind:     Text,
 			Name:     "sql",
 			Nullable: true,
 		},

@@ -57,11 +57,11 @@ Each page size is `4096 bytes`. Rows larger than page size are not supported. Th
 
 ```
 4096 (page size) 
-- 6 (base header size) 
+- 7 (base header size) 
 - 8 (internal / leaf node header size) 
 - 8 (null bit mask) 
 - 8 (internal row ID / key) 
-= 4066 
+= 4065
 ```
 
 All tables are kept track of via a system table `minisql_schema` which contains table name, `CREATE TABLE` SQL to document table structure and a root page index indicating which page contains root node of the table B+ Tree.
