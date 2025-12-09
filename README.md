@@ -74,14 +74,15 @@ Moreover, each row starts with 64 bit null mask which determines which values ar
 
 ## Planned features:
 
-- B tree indexes (starting with unique and primary)
-- autoincrementing primary keys
-- `timestamp` column and basic date/time functions
-- support bigger column types such as `text` that can overflow to more pages via linked list data structure
+- build on existing primary key support, add unique and non unique index support
+- `timestamp`, `datetime` columns and basic date/time functions
 - joins such as `INNER`, `LEFT`, `RIGHT`
-- support `ORDER BY`, `LIMIT`, `GROUP BY`
+- support `ORDER BY`, `GROUP BY`
+- UPDATE from a SELECT
+- upsert (insert on conflict)
+- more complex WHERE clauses
 - support altering tables
-- transactions
+- more sophisticated query planner
 - vacuuming
 - benchmarks
 
