@@ -2,6 +2,8 @@
 
 `MiniSQL` is a research project aimed at implementing a simple relational database in Golang. This project exists mostly for myself as a way to learn principles and design of relational databases. It is not meant to be used as a real database.
 
+[![Donate Bitcoin](https://img.shields.io/badge/donate-bitcoin-orange.svg)](https://richardknop.github.io/donate/)
+
 Shout out to some great repos and other resources that were invaluable while figuring out how to get this all working together:
 - [Let's Build a Simple Database](https://cstack.github.io/db_tutorial/parts/part1.html)
 - [go-sqldb](https://github.com/auxten/go-sqldb)
