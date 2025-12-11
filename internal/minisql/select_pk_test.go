@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -108,6 +109,42 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		assert.Equal(t, rows[5], actual[0])
 	})
 
+	t.Run("Select multiple rows by primary keys (index scan)", func(t *testing.T) {
+		ids := rowIDs(rows[5], rows[11], rows[12], rows[33])
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(testColumnsWithPrimaryKey...),
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: In,
+						Operand2: Operand{
+							Type:  OperandList,
+							Value: ids,
+						},
+					},
+				},
+			},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		// We expect rows 5, 11, 12, and 33
+		expected := make([]Row, 0, len(ids))
+		for i, aRow := range rows {
+			if i != 5 && i != 11 && i != 12 && i != 33 {
+				continue
+			}
+			expected = append(expected, aRow)
+		}
+		assert.Equal(t, expected, aResult.CollectRows(ctx))
+	})
+
 	t.Run("Select multiple rows by primary key and other column (sequential scan)", func(t *testing.T) {
 		var (
 			id       = rowIDs(rows[5])[0]
@@ -150,6 +187,62 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		require.NoError(t, err)
 
 		expected := []Row{rows[5].Clone(), rows[15].Clone()}
+		assert.Equal(t, expected, aResult.CollectRows(ctx))
+	})
+
+	t.Run("Select with order by sort with index asc", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(testColumnsWithPrimaryKey...),
+			OrderBy: []OrderBy{
+				{
+					Field:     Field{Name: "id"},
+					Direction: Asc,
+				},
+			},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		// We expect all rows sorted by ID descending
+		expected := make([]Row, 0, len(rows))
+		for _, aRow := range rows {
+			expected = append(expected, aRow)
+		}
+		sort.Slice(expected, func(i, j int) bool {
+			id1, _ := expected[i].GetValue("id")
+			id2, _ := expected[j].GetValue("id")
+			return id1.Value.(int64) < id2.Value.(int64)
+		})
+		assert.Equal(t, expected, aResult.CollectRows(ctx))
+	})
+
+	t.Run("Select with order by sort with index desc", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(testColumnsWithPrimaryKey...),
+			OrderBy: []OrderBy{
+				{
+					Field:     Field{Name: "id"},
+					Direction: Desc,
+				},
+			},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		// We expect all rows sorted by ID descending
+		expected := make([]Row, 0, len(rows))
+		for _, aRow := range rows {
+			expected = append(expected, aRow)
+		}
+		sort.Slice(expected, func(i, j int) bool {
+			id1, _ := expected[i].GetValue("id")
+			id2, _ := expected[j].GetValue("id")
+			return id1.Value.(int64) > id2.Value.(int64)
+		})
 		assert.Equal(t, expected, aResult.CollectRows(ctx))
 	})
 }

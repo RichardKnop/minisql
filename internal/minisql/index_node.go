@@ -260,6 +260,9 @@ func (n *IndexNode[T]) Unmarshal(buf []byte) (uint64, error) {
 	i += hi
 
 	for idx := 0; idx < int(n.Header.Keys); idx++ {
+		if len(n.Cells) == idx {
+			n.Cells = append(n.Cells, IndexCell[T]{})
+		}
 		ci, err := n.Cells[idx].Unmarshal(buf[i:])
 		if err != nil {
 			return 0, err
@@ -515,10 +518,6 @@ func (n *IndexNode[T]) HasSpaceForKey(key T) bool {
 func (n *IndexNode[T]) AtLeastHalfFull() bool {
 	return n.AvailableSpace() < (n.MaxSpace())/2
 }
-
-// func (n *IndexNode[T]) AtLeastHalfFull(maxCells int) bool {
-// 	return int(n.Header.Keys) >= (maxCells+1)/2
-// }
 
 func (n *IndexNode[T]) CanMergeWith(n2 *IndexNode[T]) bool {
 	return n2.TakenSpace() <= n.AvailableSpace()

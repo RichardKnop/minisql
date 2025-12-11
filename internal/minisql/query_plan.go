@@ -9,7 +9,7 @@ type ScanType int
 const (
 	ScanTypeSequential ScanType = iota + 1 // Full table scan
 	ScanTypeIndexPoint                     // Index lookup for specific key(s)
-	ScanTypeIndexRange                     // Index range scan (TODO - not implemented yet)
+	ScanTypeIndexRange                     // Index range scan
 )
 
 func (st ScanType) String() string {
@@ -33,22 +33,32 @@ type QueryPlan struct {
 	IndexKeyGroups  [][]any     // Keys to lookup in index
 	Filters         OneOrMore   // Additional filters to apply
 	KeyFiltersMap   map[any]int // Map of keys to filter group index
+
+	// Ordering
+	UseIndexForOrder bool // Can we use index for ordering?
+	OrderBy          []OrderBy
+	SortInMemory     bool // Do we need in-memory sort?
+	SortReverse      bool // Reverse index scan order?
 }
 
-func (p QueryPlan) IsIndexScan() bool {
+func (p QueryPlan) IsIndexPointScan() bool {
 	return p.ScanType == ScanTypeIndexPoint
+}
+
+func (p QueryPlan) IsIndexRangeScan() bool {
+	return p.ScanType == ScanTypeIndexRange
 }
 
 // FilterRow applies the query plan filters to the given row
 func (p QueryPlan) FilterRow(aRow Row) (bool, error) {
-	if !p.IsIndexScan() && len(p.Filters) == 0 {
+	if !p.IsIndexPointScan() && len(p.Filters) == 0 {
 		return true, nil
 	}
 	var (
 		ok  bool
 		err error
 	)
-	if p.IsIndexScan() {
+	if p.IsIndexPointScan() {
 		pkValue, _ := aRow.GetValue(p.IndexColumnName)
 		ok, err = aRow.CheckConditions(p.Filters[p.KeyFiltersMap[pkValue.Value]])
 	} else {
@@ -68,16 +78,19 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) QueryPlan {
 	plan := QueryPlan{
 		ScanType: ScanTypeSequential,
 		Filters:  stmt.Conditions,
+		OrderBy:  stmt.OrderBy,
 	}
 
 	// No WHERE clause = sequential scan
 	if len(stmt.Conditions) == 0 {
-		return plan
+		// But we might still use index for ordering
+		return plan.optimizeOrdering(t)
 	}
 
 	// No primary key = sequential scan
 	if !t.HasPrimaryKey() {
-		return plan
+		// But we might still use index for ordering
+		return plan.optimizeOrdering(t)
 	}
 
 	// Check if we can do an index scan using the primary key
@@ -86,6 +99,9 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) QueryPlan {
 		t.PrimaryKey.Column.Name,
 		stmt.Conditions,
 	)
+
+	// Optimize ordering based on scan type
+	plan = plan.optimizeOrdering(t)
 
 	return plan
 }
@@ -173,4 +189,70 @@ func isPrimaryKeyEquality(cond Condition, pkColumn string) ([]any, bool) {
 	}
 
 	return cond.Operand2.Value.([]any), true
+}
+
+func (p QueryPlan) optimizeOrdering(t *Table) QueryPlan {
+	// No ORDER BY clause
+	if len(p.OrderBy) == 0 {
+		return p
+	}
+
+	if len(p.OrderBy) > 1 {
+		// TODO - Multiple ORDER BY columns (revisit later)
+		// Always need in-memory sort for now
+		p.SortInMemory = true
+		return p
+	}
+
+	// Single column ORDER BY
+	var orderCol = p.OrderBy[0].Field.Name
+
+	p.SortReverse = p.OrderBy[0].Direction == Desc
+
+	// Sequential scan
+	if p.ScanType == ScanTypeSequential {
+		// Either order ORDER BY indexed column
+		if t.HasPrimaryKey() && orderCol == t.PrimaryKey.Column.Name {
+			// Use PK index for ordering
+			p.ScanType = ScanTypeIndexRange
+			p.IndexName = t.PrimaryKey.Name
+			p.IndexColumnName = orderCol
+			p.UseIndexForOrder = true
+			p.SortInMemory = false
+
+			return p
+		}
+
+		// TODO: Check for secondary indexes on orderCol
+		// For now, fall through to in-memory sort
+		p.SortInMemory = true
+	}
+
+	// Index scan on PK, ORDER BY the same PK column
+	if p.ScanType == ScanTypeIndexPoint && orderCol == p.IndexColumnName {
+		// TODO - let's sort in memory for now, revisit later, we could order the keys
+		// according to index order instead of fetching in arbitrary order
+		p.SortInMemory = true
+		return p
+	}
+
+	// Case 4: Index scan, ORDER BY different column
+	// Need in-memory sort after fetching
+	p.SortInMemory = true
+	return p
+}
+
+func (p QueryPlan) logArgs(args ...any) []any {
+	args = append(args, "scan type", p.ScanType.String())
+	if len(p.OrderBy) > 0 {
+		args = append(args, "order by", p.OrderBy[0].Field.Name+" "+p.OrderBy[0].Direction.String())
+		args = append(args, "sort in memory", p.SortInMemory)
+	}
+	if p.IndexName != "" {
+		args = append(args, "index name", p.IndexName)
+	}
+	if len(p.IndexKeyGroups) > 0 {
+		args = append(args, "index keys", p.IndexKeyGroups)
+	}
+	return args
 }

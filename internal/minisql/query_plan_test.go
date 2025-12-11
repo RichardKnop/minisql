@@ -241,7 +241,7 @@ func TestTable_PlanQuery(t *testing.T) {
 			},
 		},
 		{
-			"Single primary key IN condition",
+			"Multiple primary keys IN condition",
 			aTableWithPK,
 			Statement{
 				Kind: Select,
@@ -266,6 +266,112 @@ func TestTable_PlanQuery(t *testing.T) {
 				KeyFiltersMap: map[any]int{
 					int64(42): 0,
 					int64(69): 0,
+				},
+			},
+		},
+		{
+			"Sequential scan order in memory",
+			aTableWithPK,
+			Statement{
+				Kind: Select,
+				OrderBy: []OrderBy{
+					{
+						Field:     Field{Name: "email"},
+						Direction: Desc,
+					},
+				},
+			},
+			QueryPlan{
+				ScanType:     ScanTypeSequential,
+				SortInMemory: true,
+				SortReverse:  true,
+				OrderBy: []OrderBy{
+					{
+						Field:     Field{Name: "email"},
+						Direction: Desc,
+					},
+				},
+			},
+		},
+		{
+			"Sequential scan order with index",
+			aTableWithPK,
+			Statement{
+				Kind: Select,
+				OrderBy: []OrderBy{
+					{
+						Field:     Field{Name: "id"},
+						Direction: Desc,
+					},
+				},
+			},
+			QueryPlan{
+				ScanType:         ScanTypeIndexRange,
+				IndexName:        "pk_users",
+				IndexColumnName:  "id",
+				UseIndexForOrder: true,
+				SortInMemory:     false,
+				SortReverse:      true,
+				OrderBy: []OrderBy{
+					{
+						Field:     Field{Name: "id"},
+						Direction: Desc,
+					},
+				},
+			},
+		},
+		{
+			"Multiple primary keys IN condition plus order by",
+			aTableWithPK,
+			Statement{
+				Kind: Select,
+				Conditions: OneOrMore{
+					{
+						{
+							Operand1: Operand{Type: OperandField, Value: "id"},
+							Operator: In,
+							Operand2: Operand{Type: OperandList, Value: []any{int64(42), int64(69)}},
+						},
+						{
+							Operand1: Operand{Type: OperandField, Value: "verified"},
+							Operator: Eq,
+							Operand2: Operand{Type: OperandBoolean, Value: true},
+						},
+					},
+				},
+				OrderBy: []OrderBy{
+					{
+						Field:     Field{Name: "id"},
+						Direction: Desc,
+					},
+				},
+			},
+			QueryPlan{
+				ScanType:         ScanTypeIndexPoint,
+				IndexName:        "pk_users",
+				IndexColumnName:  "id",
+				UseIndexForOrder: false,
+				SortInMemory:     true,
+				SortReverse:      true,
+				IndexKeyGroups: [][]any{
+					{int64(42), int64(69)},
+				},
+				Filters: OneOrMore{{
+					{
+						Operand1: Operand{Type: OperandField, Value: "verified"},
+						Operator: Eq,
+						Operand2: Operand{Type: OperandBoolean, Value: true},
+					},
+				}},
+				KeyFiltersMap: map[any]int{
+					int64(42): 0,
+					int64(69): 0,
+				},
+				OrderBy: []OrderBy{
+					{
+						Field:     Field{Name: "id"},
+						Direction: Desc,
+					},
 				},
 			},
 		},

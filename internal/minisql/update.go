@@ -16,8 +16,7 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 	// Create query plan
 	plan := t.PlanQuery(ctx, stmt)
 
-	t.logger.Sugar().With("query type", "UPDATE").Debugf("Query plan: scan_type=%s, use_index=%v, index_keys=%v",
-		plan.ScanType.String(), plan.IsIndexScan(), plan.IndexKeyGroups)
+	t.logger.Sugar().With(plan.logArgs("query type", "UPDATE")...).Debug("query plan")
 
 	var (
 		unfilteredPipe = make(chan Row)
@@ -27,12 +26,12 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 	)
 
 	// Execute based on plan
-	if plan.IsIndexScan() {
+	if plan.IsIndexPointScan() {
 		// Use primary key index lookup
-		go t.indexPointScan(ctx, plan, fieldsFromColumns(t.Columns...), unfilteredPipe, errorsPipe, stopChan)
+		go t.indexPointScan(ctx, plan, fieldsFromColumns(t.Columns...), unfilteredPipe, errorsPipe)
 	} else {
 		// Sequential scan
-		go t.sequentialScan(ctx, fieldsFromColumns(t.Columns...), unfilteredPipe, errorsPipe, stopChan)
+		go t.sequentialScan(ctx, fieldsFromColumns(t.Columns...), unfilteredPipe, errorsPipe)
 	}
 
 	// Filter rows according to the WHERE conditions. In case of an index scan,
@@ -72,11 +71,12 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 	}(filteredPipe)
 
 	select {
-	case <-ctx.Done():
-		return aResult, fmt.Errorf("context done: %w", ctx.Err())
 	case err := <-errorsPipe:
 		return aResult, err
+	case <-ctx.Done():
+		return aResult, fmt.Errorf("context done: %w", ctx.Err())
 	case <-stopChan:
+		t.logger.Sugar().Debugf("updated %d rows", aResult.RowsAffected)
 		return aResult, nil
 	}
 }

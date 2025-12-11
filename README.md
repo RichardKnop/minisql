@@ -199,19 +199,10 @@ minisql>
 Select to verify update:
 
 ```sh
-minisql> select * from users;
+minisql> select * from users where id=1;
  id                   | name                                               | email                                              | age                  
 ----------------------+----------------------------------------------------+----------------------------------------------------+----------------------
- 1                    | Danny Mason                                        | Danny_Mason2966@xqj6f.tech                         | 36                   
- 2                    | Johnathan Walker                                   | Johnathan_Walker250@ptr6k.page                     | 32                   
- 3                    | Tyson Weldon                                       | Tyson_Weldon2108@zynuu.video                       | 27                   
- 4                    | Mason Callan                                       | Mason_Callan9524@bu2lo.edu                         | 19                   
- 5                    | Logan Flynn                                        | Logan_Flynn9019@xtwt3.pro                          | 42                   
- 6                    | Beatrice Uttley                                    | Beatrice_Uttley1670@1wa8o.org                      | 32                   
- 7                    | Harry Johnson                                      | Harry_Johnson5515@jcf8v.video                      | 25                   
- 8                    | Carl Thomson                                       | Carl_Thomson4218@kyb7t.host                        | 53                   
- 9                    | Kaylee Johnson                                     | Kaylee_Johnson8112@c2nyu.design                    | 48                   
- 10                   | Cristal Duvall                                     | Cristal_Duvall6639@yvu30.press                     | 27                   
+ 1                    | Danny Mason                                        | Danny_Mason2966@xqj6f.tech                         | 36                                
 minisql>
 ```
 

@@ -86,6 +86,29 @@ type Field struct {
 	Name string
 }
 
+type Direction int
+
+const (
+	Asc Direction = iota + 1
+	Desc
+)
+
+func (d Direction) String() string {
+	switch d {
+	case Asc:
+		return "ASC"
+	case Desc:
+		return "DESC"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+type OrderBy struct {
+	Field     Field
+	Direction Direction
+}
+
 type Statement struct {
 	Kind        StatementKind
 	IfNotExists bool
@@ -96,6 +119,7 @@ type Statement struct {
 	Inserts     [][]OptionalValue
 	Updates     map[string]OptionalValue
 	Conditions  OneOrMore // used for WHERE
+	OrderBy     []OrderBy
 	Limit       OptionalValue
 	Offset      OptionalValue
 	fetchedRows int64

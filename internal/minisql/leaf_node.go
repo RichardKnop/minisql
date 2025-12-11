@@ -186,7 +186,9 @@ func (n *LeafNode) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	i += hi
 
 	for idx := 0; idx < int(n.Header.Cells); idx++ {
-		n.Cells = append(n.Cells, Cell{})
+		if len(n.Cells) == idx {
+			n.Cells = append(n.Cells, Cell{})
+		}
 		ci, err := n.Cells[idx].Unmarshal(columns, buf[i:])
 		if err != nil {
 			return 0, err

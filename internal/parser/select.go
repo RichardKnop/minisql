@@ -12,6 +12,15 @@ var (
 	errSelectExpectedTableName = fmt.Errorf("at SELECT: expected table name identifier")
 )
 
+/*
+SELECT select_list
+
+	    FROM table_expression
+		[ WHERE ... ]
+	    [ ORDER BY ... ]
+	    [ LIMIT { count | ALL } ]
+	    [ OFFSET start ]
+*/
 func (p *parser) doParseSelect() error {
 	switch p.step {
 	case stepSelectField:
@@ -61,7 +70,49 @@ func (p *parser) doParseSelect() error {
 		}
 		p.TableName = tableName
 		p.pop()
-		p.step = stepSelectLimit
+		p.step = stepSelectOrderBy
+	case stepSelectOrderBy:
+		offsetRWord := p.peek()
+		if strings.ToUpper(offsetRWord) != "ORDER BY" {
+			p.step = stepSelectLimit
+			return nil
+		}
+		p.pop()
+		p.step = stepSelectOrderByField
+	case stepSelectOrderByField:
+		identifier := p.peek()
+		if !isIdentifier(identifier) {
+			if len(p.OrderBy) == 0 {
+				return fmt.Errorf(`at ORDER BY: expected identifier`)
+			}
+			p.step = stepSelectLimit
+			return nil
+		}
+		if identifier == "*" {
+			return fmt.Errorf(`at ORDER BY: cannot order by "*"`)
+		}
+		p.pop()
+		// Start with default direction as ASC
+		theDirection := minisql.Asc
+		if direction := strings.ToUpper(p.peek()); direction == "ASC" || direction == "DESC" {
+			if direction == "DESC" {
+				theDirection = minisql.Desc
+			}
+			p.pop()
+		}
+		p.OrderBy = append(p.OrderBy, minisql.OrderBy{
+			Field:     minisql.Field{Name: identifier},
+			Direction: theDirection,
+		})
+		p.step = stepSelectOrderByComma
+	case stepSelectOrderByComma:
+		commaRWord := p.peek()
+		if commaRWord != "," {
+			p.step = stepSelectLimit
+			return nil
+		}
+		p.pop()
+		p.step = stepSelectOrderByField
 	case stepSelectLimit:
 		limitRWord := p.peek()
 		if strings.ToUpper(limitRWord) != "LIMIT" {

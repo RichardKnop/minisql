@@ -40,5 +40,6 @@ type BTreeIndex interface {
 	SeekLastKey(ctx context.Context, pageIdx PageIndex) (any, error)
 	Insert(ctx context.Context, key any, rowID RowID) error
 	Delete(ctx context.Context, key any) error
+	ScanAll(ctx context.Context, reverse bool, callback indexScanner) error
 	BFS(ctx context.Context, f indexCallback) error
 }

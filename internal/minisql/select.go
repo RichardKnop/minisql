@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 )
 
 var (
@@ -21,8 +22,7 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	// Create query plan
 	plan := t.PlanQuery(ctx, stmt)
 
-	t.logger.Sugar().With("query type", "SELECT").Debugf("Query plan: scan_type=%s, use_index=%v, index_keys=%v",
-		plan.ScanType.String(), plan.IsIndexScan(), plan.IndexKeyGroups)
+	t.logger.Sugar().With(plan.logArgs("query type", "SELECT")...).Debug("query plan")
 
 	// Only fetch fields included in the SELECT query or fields needed for WHERE conditions
 	// TODO - handle * plus other fiels, for example SELECT *, a, b FROM table WHERE c = 1
@@ -49,6 +49,38 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 	}
 
+	var (
+		unfilteredPipe = make(chan Row)
+		filteredPipe   = make(chan Row)
+		errorsPipe     = make(chan error, 1)
+	)
+
+	// Execute scan based on plan
+	if plan.IsIndexRangeScan() && plan.UseIndexForOrder {
+		// Scan all using index order
+		go t.indexScanAll(ctx, plan, selectedFields, unfilteredPipe, errorsPipe)
+	} else if plan.IsIndexPointScan() {
+		// Use primary key index lookup
+		go t.indexPointScan(ctx, plan, selectedFields, unfilteredPipe, errorsPipe)
+	} else {
+		// Sequential scan
+		go t.sequentialScan(ctx, selectedFields, unfilteredPipe, errorsPipe)
+	}
+
+	// Collect rows if we need to sort
+	if plan.SortInMemory {
+		return t.selectWithSort(ctx, stmt, plan, unfilteredPipe, errorsPipe, requestedFields, selectAll)
+	}
+
+	// Stream results (already ordered or no ordering needed)
+	return t.selectStreaming(ctx, stmt, plan, unfilteredPipe, filteredPipe, errorsPipe, requestedFields, selectAll)
+
+}
+
+func (t *Table) selectStreaming(ctx context.Context, stmt Statement, plan QueryPlan,
+	unfilteredPipe <-chan Row, filteredPipe chan Row, errorsPipe chan error,
+	requestedFields []Field, selectAll bool) (StatementResult, error) {
+
 	aResult := StatementResult{
 		Columns: make([]Column, 0, len(requestedFields)),
 		Rows: func(ctx context.Context) (Row, error) {
@@ -61,29 +93,12 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 	}
 
-	var (
-		unfilteredPipe = make(chan Row)
-		filteredPipe   = make(chan Row)
-		errorsPipe     = make(chan error, 1)
-		stopChan       = make(chan bool)
-	)
-
-	// Execute based on plan
-	if plan.IsIndexScan() {
-		// Use primary key index lookup
-		go t.indexPointScan(ctx, plan, selectedFields, unfilteredPipe, errorsPipe, stopChan)
-	} else {
-		// Sequential scan
-		go t.sequentialScan(ctx, selectedFields, unfilteredPipe, errorsPipe, stopChan)
-	}
-
 	// Filter rows according to the WHERE conditions. In case of an index scan,
 	// any remaining filtering will happen here. In case of a sequential scan,
 	// this will filter all rows.
 	// LIMIT and OFFSET are also applied here.
 	go func(in <-chan Row, out chan<- Row) {
 		defer close(out)
-		defer close(stopChan)
 		var limit, offset int64
 		if stmt.Limit.Valid {
 			limit = stmt.Limit.Value.(int64)
@@ -132,6 +147,83 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	return aResult, nil
 }
 
+func (t *Table) selectWithSort(ctx context.Context, stmt Statement, plan QueryPlan,
+	unfilteredPipe <-chan Row, errorsPipe chan error, requestedFields []Field, selectAll bool) (StatementResult, error) {
+
+	// Collect all rows
+	var allRows []Row
+	for aRow := range unfilteredPipe {
+		ok, err := plan.FilterRow(aRow)
+		if err != nil {
+			return StatementResult{}, err
+		}
+		if ok {
+			aRow.cursor = Cursor{} // Clear cursor to save memory
+			allRows = append(allRows, aRow)
+		}
+	}
+
+	// Check for errors
+	select {
+	case err := <-errorsPipe:
+		if err != nil {
+			return StatementResult{}, err
+		}
+	default:
+	}
+
+	// Sort in memory
+	if err := t.sortRows(allRows, plan.OrderBy); err != nil {
+		return StatementResult{}, err
+	}
+
+	// Apply LIMIT and OFFSET
+	offset := 0
+	limit := len(allRows)
+	if stmt.Offset.Valid {
+		offset = int(stmt.Offset.Value.(int64))
+	}
+	if stmt.Limit.Valid {
+		limit = int(stmt.Limit.Value.(int64))
+	}
+
+	if offset >= len(allRows) {
+		allRows = []Row{}
+	} else {
+		end := offset + limit
+		if end > len(allRows) {
+			end = len(allRows)
+		}
+		allRows = allRows[offset:end]
+	}
+
+	// Create result with materialized rows
+	idx := 0
+	aResult := StatementResult{
+		Columns: make([]Column, 0, len(requestedFields)),
+	}
+	for _, field := range requestedFields {
+		if colIdx := stmt.ColumnIdx(field.Name); colIdx >= 0 {
+			aResult.Columns = append(aResult.Columns, t.Columns[colIdx])
+		}
+	}
+
+	aResult.Rows = func(ctx context.Context) (Row, error) {
+		if idx >= len(allRows) {
+			return Row{}, ErrNoMoreRows
+		}
+		row := allRows[idx]
+		idx++
+
+		if selectAll {
+			return row, nil
+		}
+		return row, nil
+	}
+
+	return aResult, nil
+}
+
 func sendFetchedRow(aRow Row, out chan<- Row, selectAll bool, requestedFields ...Field) {
 	if selectAll {
 		out <- aRow
@@ -140,8 +232,54 @@ func sendFetchedRow(aRow Row, out chan<- Row, selectAll bool, requestedFields ..
 	}
 }
 
+func (t *Table) indexScanAll(ctx context.Context, plan QueryPlan,
+	selectedFields []Field, out chan<- Row, errorsPipe chan<- error) {
+
+	defer close(out)
+
+	if !t.HasPrimaryKey() {
+		errorsPipe <- fmt.Errorf("no primary key for index scan")
+		return
+	}
+
+	// Scan index in order (or reverse order)
+	err := t.PrimaryKey.Index.ScanAll(ctx, plan.SortReverse, func(key any, rowID RowID) error {
+		// Find the row by ID
+		cursor, err := t.Seek(ctx, rowID)
+		if err != nil {
+			return fmt.Errorf("find row failed: %w", err)
+		}
+
+		// Fetch the row
+		aRow, err := cursor.fetchRow(ctx, selectedFields...)
+		if err != nil {
+			return fmt.Errorf("fetch row failed: %w", err)
+		}
+
+		// Apply filters
+		ok, err := plan.FilterRow(aRow)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil // Skip this row
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case out <- aRow:
+			return nil
+		}
+	})
+
+	if err != nil && err != io.EOF {
+		errorsPipe <- err
+	}
+}
+
 func (t *Table) indexPointScan(ctx context.Context, plan QueryPlan,
-	selectedFields []Field, out chan<- Row, errorsPipe chan<- error, stopChan <-chan bool) {
+	selectedFields []Field, out chan<- Row, errorsPipe chan<- error) {
 
 	defer close(out)
 
@@ -173,10 +311,10 @@ func (t *Table) indexPointScan(ctx context.Context, plan QueryPlan,
 				errorsPipe <- fmt.Errorf("fetch row failed: %w", err)
 				return
 			}
-			aRow.cursor = rowCursor
+			aRow.cursor = rowCursor // TODO - we only want to add cursor for UPDATE
 
 			select {
-			case <-stopChan:
+			case <-ctx.Done():
 				return
 			case out <- aRow:
 				continue
@@ -186,7 +324,8 @@ func (t *Table) indexPointScan(ctx context.Context, plan QueryPlan,
 }
 
 func (t *Table) sequentialScan(ctx context.Context, selectedFields []Field,
-	out chan<- Row, errorsPipe chan<- error, stopChan <-chan bool) {
+	out chan<- Row, errorsPipe chan<- error) {
+
 	defer close(out)
 
 	aCursor, err := t.SeekFirst(ctx)
@@ -209,10 +348,10 @@ func (t *Table) sequentialScan(ctx context.Context, selectedFields []Field,
 			errorsPipe <- err
 			return
 		}
-		aRow.cursor = rowCursor
+		aRow.cursor = rowCursor // TODO - we only want to add cursor for UPDATE
 
 		select {
-		case <-stopChan:
+		case <-ctx.Done():
 			return
 		case out <- aRow:
 			continue

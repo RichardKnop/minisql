@@ -273,16 +273,28 @@ func (g *dataGen) paddedEmail() TextPointer {
 }
 
 func (g *dataGen) Rows(number int) []Row {
-	// Make sure all rows will have unique ID, this is important in some tests
-	idMap := map[int64]struct{}{}
-	rows := make([]Row, 0, number)
+	var (
+		idMap    = map[int64]struct{}{}
+		emailMap = map[string]struct{}{}
+		rows     = make([]Row, 0, number)
+	)
 	for i := range number {
 		aRow := g.Row()
+
+		// Ensure unique ID
 		_, ok := idMap[aRow.Values[0].Value.(int64)]
 		for ok {
 			aRow = g.Row()
 			_, ok = idMap[aRow.Values[0].Value.(int64)]
 		}
+
+		// Ensure unique email
+		_, ok = emailMap[aRow.Values[1].Value.(TextPointer).String()]
+		for ok {
+			aRow = g.Row()
+			_, ok = emailMap[aRow.Values[1].Value.(TextPointer).String()]
+		}
+
 		aRow.Key = RowID(i)
 		rows = append(rows, aRow)
 		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
@@ -320,16 +332,28 @@ func (g *dataGen) textOfLength(length uint32) TextPointer {
 }
 
 func (g *dataGen) MediumRows(number int) []Row {
-	// Make sure all rows will have unique ID, this is important in some tests
-	idMap := map[int64]struct{}{}
-	rows := make([]Row, 0, number)
+	var (
+		idMap    = map[int64]struct{}{}
+		emailMap = map[string]struct{}{}
+		rows     = make([]Row, 0, number)
+	)
 	for i := range number {
 		aRow := g.MediumRow()
+
+		// Ensure unique ID
 		_, ok := idMap[aRow.Values[0].Value.(int64)]
 		for ok {
-			aRow = g.MediumRow()
+			aRow = g.Row()
 			_, ok = idMap[aRow.Values[0].Value.(int64)]
 		}
+
+		// Ensure unique email
+		_, ok = emailMap[aRow.Values[1].Value.(TextPointer).String()]
+		for ok {
+			aRow = g.Row()
+			_, ok = emailMap[aRow.Values[1].Value.(TextPointer).String()]
+		}
+
 		aRow.Key = RowID(i)
 		rows = append(rows, aRow)
 		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
@@ -359,16 +383,28 @@ func (g *dataGen) BigRow() Row {
 }
 
 func (g *dataGen) BigRows(number int) []Row {
-	// Make sure all rows will have unique ID, this is important in some tests
-	idMap := map[int64]struct{}{}
-	rows := make([]Row, 0, number)
+	var (
+		idMap    = map[int64]struct{}{}
+		emailMap = map[string]struct{}{}
+		rows     = make([]Row, 0, number)
+	)
 	for i := range number {
 		aRow := g.BigRow()
+
+		// Ensure unique ID
 		_, ok := idMap[aRow.Values[0].Value.(int64)]
 		for ok {
-			aRow = g.BigRow()
+			aRow = g.Row()
 			_, ok = idMap[aRow.Values[0].Value.(int64)]
 		}
+
+		// Ensure unique email
+		_, ok = emailMap[aRow.Values[1].Value.(TextPointer).String()]
+		for ok {
+			aRow = g.Row()
+			_, ok = emailMap[aRow.Values[1].Value.(TextPointer).String()]
+		}
+
 		aRow.Key = RowID(i)
 		rows = append(rows, aRow)
 		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
@@ -388,9 +424,20 @@ func (g *dataGen) RowWithPrimaryKey(primaryKey int64) Row {
 }
 
 func (g *dataGen) RowsWithPrimaryKey(number int) []Row {
-	rows := make([]Row, 0, number)
+	var (
+		emailMap = map[string]struct{}{}
+		rows     = make([]Row, 0, number)
+	)
 	for i := range number {
 		aRow := g.RowWithPrimaryKey(int64(i + 1))
+
+		// Ensure unique email
+		_, ok := emailMap[aRow.Values[1].Value.(TextPointer).String()]
+		for ok {
+			aRow = g.Row()
+			_, ok = emailMap[aRow.Values[1].Value.(TextPointer).String()]
+		}
+
 		aRow.Key = RowID(i)
 		rows = append(rows, aRow)
 	}

@@ -27,6 +27,12 @@ func (t *Table) insertPrimaryKey(ctx context.Context, pkValue OptionalValue, row
 	if err != nil {
 		return 0, fmt.Errorf("failed to cast primary key value for %s: %w", t.PrimaryKey.Name, err)
 	}
+
+	t.logger.Sugar().With(
+		"name", t.PrimaryKey.Name,
+		"key", castedValue,
+	).Debug("inserting primary key")
+
 	if err := t.PrimaryKey.Index.Insert(ctx, castedValue, rowID); err != nil {
 		return 0, fmt.Errorf("failed to insert primary key %s: %w", t.PrimaryKey.Name, err)
 	}
@@ -46,6 +52,12 @@ func (t *Table) insertAutoincrementedPrimaryKey(ctx context.Context, rowID RowID
 		return 0, fmt.Errorf("failed to cast last primary key value for autoincrement")
 	}
 	newPrimaryKey := lastPrimaryKey + 1
+
+	t.logger.Sugar().With(
+		"name", t.PrimaryKey.Name,
+		"key", int(newPrimaryKey),
+	).Debug("inserting autoincremented primary key")
+
 	if err := t.PrimaryKey.Index.Insert(ctx, newPrimaryKey, rowID); err != nil {
 		return 0, fmt.Errorf("failed to insert primary key %s: %w", t.PrimaryKey.Name, err)
 	}

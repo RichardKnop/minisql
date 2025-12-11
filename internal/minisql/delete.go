@@ -16,8 +16,7 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 	// Create query plan
 	plan := t.PlanQuery(ctx, stmt)
 
-	t.logger.Sugar().With("query type", "DELETE").Debugf("Query plan: scan_type=%s, use_index=%v, index_keys=%v",
-		plan.ScanType.String(), plan.IsIndexScan(), plan.IndexKeyGroups)
+	t.logger.Sugar().With(plan.logArgs("query type", "DELETE")...).Debug("query plan")
 
 	// Only fetch fields needed for WHERE conditions
 	var selectedFields []Field
@@ -40,12 +39,12 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 	)
 
 	// Execute based on plan
-	if plan.IsIndexScan() {
+	if plan.IsIndexPointScan() {
 		// Use primary key index lookup
-		go t.indexPointScan(ctx, plan, selectedFields, unfilteredPipe, errorsPipe, stopChan)
+		go t.indexPointScan(ctx, plan, selectedFields, unfilteredPipe, errorsPipe)
 	} else {
 		// Sequential scan
-		go t.sequentialScan(ctx, selectedFields, unfilteredPipe, errorsPipe, stopChan)
+		go t.sequentialScan(ctx, selectedFields, unfilteredPipe, errorsPipe)
 	}
 
 	// Filter rows according to the WHERE conditions. In case of an index scan,
@@ -97,11 +96,11 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 
 	select {
 	case <-ctx.Done():
-		t.logger.Sugar().Debugf("deleted %d rows", aResult.RowsAffected)
 		return aResult, fmt.Errorf("context done: %w", ctx.Err())
 	case err := <-errorsPipe:
 		return aResult, err
 	case <-stopChan:
+		t.logger.Sugar().Debugf("deleted %d rows", aResult.RowsAffected)
 		return aResult, nil
 	}
 }
