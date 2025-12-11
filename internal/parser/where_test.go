@@ -62,7 +62,7 @@ func TestParse_Where(t *testing.T) {
 		},
 		{
 			"WHERE with quoted string",
-			"WHERE b = '1'",
+			"WHERE b = 'Foo Bar'",
 			minisql.OneOrMore{
 				{
 					{
@@ -73,7 +73,7 @@ func TestParse_Where(t *testing.T) {
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
 							Type:  minisql.OperandQuotedString,
-							Value: "1",
+							Value: "Foo Bar",
 						},
 					},
 				},
@@ -94,6 +94,26 @@ func TestParse_Where(t *testing.T) {
 						Operand2: minisql.Operand{
 							Type:  minisql.OperandQuotedString,
 							Value: "",
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with field comparison",
+			"WHERE a = b",
+			minisql.OneOrMore{
+				{
+					{
+						Operand1: minisql.Operand{
+							Type:  minisql.OperandField,
+							Value: "a",
+						},
+						Operator: minisql.Eq,
+						Operand2: minisql.Operand{
+							Type:  minisql.OperandField,
+							Value: "b",
 						},
 					},
 				},
@@ -194,26 +214,6 @@ func TestParse_Where(t *testing.T) {
 						Operand2: minisql.Operand{
 							Type:  minisql.OperandQuotedString,
 							Value: "1",
-						},
-					},
-				},
-			},
-			nil,
-		},
-		{
-			"WHERE with != works (comparing field against another field)",
-			"WHERE a != b",
-			minisql.OneOrMore{
-				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "a",
-						},
-						Operator: minisql.Ne,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "b",
 						},
 					},
 				},

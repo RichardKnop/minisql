@@ -238,7 +238,7 @@ func TestParse_Select(t *testing.T) {
 		},
 		{
 			"SELECT with WHERE with multiple conditions using AND works",
-			`SELECT a, c, d FROM "b" WHERE a != '1' AND b = 2 and c = '3';`,
+			`SELECT a, c, d FROM "b" WHERE a != '1' AND b = 2 and c = 'Foo Bar';`,
 			[]minisql.Statement{
 				{
 					Kind:      minisql.Select,
@@ -276,7 +276,7 @@ func TestParse_Select(t *testing.T) {
 								Operator: minisql.Eq,
 								Operand2: minisql.Operand{
 									Type:  minisql.OperandQuotedString,
-									Value: "3",
+									Value: "Foo Bar",
 								},
 							},
 						},

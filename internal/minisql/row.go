@@ -548,10 +548,10 @@ func (r *Row) compareFieldValueToList(aColumn Column, fieldValue any, valueOpera
 
 func (r *Row) compareFields(field1, field2 Operand, operator Operator) (bool, error) {
 	if !field1.IsField() {
-		return false, fmt.Errorf("field operand invalid, type '%d'", field1.Type)
+		return false, fmt.Errorf("field 1 operand invalid, type '%d'", field1.Type)
 	}
 	if field2.IsField() {
-		return false, fmt.Errorf("field operand invalid, type '%d'", field2.Type)
+		return false, fmt.Errorf("field 2 operand invalid, type '%d'", field2.Type)
 	}
 
 	if field1.Value == field2.Value {

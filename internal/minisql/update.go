@@ -3,6 +3,7 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"sync"
 )
 
 func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, error) {
@@ -16,40 +17,26 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 	// Create query plan
 	plan := t.PlanQuery(ctx, stmt)
 
-	t.logger.Sugar().With(plan.logArgs("query type", "UPDATE")...).Debug("query plan")
+	t.logger.Sugar().With("query type", "UPDATE", "plan", plan).Debug("query plan")
 
 	var (
-		unfilteredPipe = make(chan Row)
 		filteredPipe   = make(chan Row)
 		errorsPipe     = make(chan error, 1)
 		stopChan       = make(chan bool)
+		wg             = new(sync.WaitGroup)
+		selectedFields = fieldsFromColumns(t.Columns...)
 	)
 
-	// Execute based on plan
-	if plan.IsIndexPointScan() {
-		// Use primary key index lookup
-		go t.indexPointScan(ctx, plan, fieldsFromColumns(t.Columns...), unfilteredPipe, errorsPipe)
-	} else {
-		// Sequential scan
-		go t.sequentialScan(ctx, fieldsFromColumns(t.Columns...), unfilteredPipe, errorsPipe)
-	}
-
-	// Filter rows according to the WHERE conditions. In case of an index scan,
-	// any remaining filtering will happen here. In case of a sequential scan,
-	// this will filter all rows.
-	go func(in <-chan Row, out chan<- Row) {
-		defer close(out)
-		for aRow := range in {
-			ok, err := plan.FilterRow(aRow)
-			if err != nil {
-				errorsPipe <- err
-				return
-			}
-			if ok {
-				out <- aRow
-			}
+	// Execute scans based on plan
+	wg.Go(func() {
+		if err := plan.Execute(ctx, t, selectedFields, filteredPipe); err != nil {
+			errorsPipe <- err
 		}
-	}(unfilteredPipe, filteredPipe)
+	})
+	go func() {
+		wg.Wait()
+		close(filteredPipe)
+	}()
 
 	aResult := StatementResult{
 		Columns: t.Columns,

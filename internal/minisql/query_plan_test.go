@@ -31,7 +31,11 @@ func TestTable_PlanQuery(t *testing.T) {
 				Kind: Select,
 			},
 			QueryPlan{
-				ScanType: ScanTypeSequential,
+				Scans: []Scan{
+					{
+						Type: ScanTypeSequential,
+					},
+				},
 			},
 		},
 		{
@@ -50,20 +54,24 @@ func TestTable_PlanQuery(t *testing.T) {
 				},
 			},
 			QueryPlan{
-				ScanType: ScanTypeSequential,
-				Filters: OneOrMore{
+				Scans: []Scan{
 					{
-						{
-							Operand1: Operand{Type: OperandField, Value: "email"},
-							Operator: Eq,
-							Operand2: Operand{Type: OperandQuotedString, Value: "foo@example.com"},
+						Type: ScanTypeSequential,
+						Filters: OneOrMore{
+							{
+								{
+									Operand1: Operand{Type: OperandField, Value: "email"},
+									Operator: Eq,
+									Operand2: Operand{Type: OperandQuotedString, Value: "foo@example.com"},
+								},
+							},
 						},
 					},
 				},
 			},
 		},
 		{
-			"Single primary key equality condition",
+			"Single primary key equality condition (index point scan)",
 			aTableWithPK,
 			Statement{
 				Kind: Select,
@@ -78,20 +86,19 @@ func TestTable_PlanQuery(t *testing.T) {
 				},
 			},
 			QueryPlan{
-				ScanType:        ScanTypeIndexPoint,
-				IndexName:       "pk_users",
-				IndexColumnName: "id",
-				IndexKeyGroups: [][]any{
-					{int64(42)},
-				},
-				Filters: OneOrMore{{}},
-				KeyFiltersMap: map[any]int{
-					int64(42): 0,
+				Scans: []Scan{
+					{
+						Type:            ScanTypeIndexPoint,
+						IndexName:       "pk_users",
+						IndexColumnName: "id",
+						IndexKeys:       []any{int64(42)},
+						Filters:         OneOrMore{{}},
+					},
 				},
 			},
 		},
 		{
-			"Multiple primary key equality conditions",
+			"Multiple primary key equality conditions (index point scan)",
 			aTableWithPK,
 			Statement{
 				Kind: Select,
@@ -113,22 +120,26 @@ func TestTable_PlanQuery(t *testing.T) {
 				},
 			},
 			QueryPlan{
-				ScanType:        ScanTypeIndexPoint,
-				IndexName:       "pk_users",
-				IndexColumnName: "id",
-				IndexKeyGroups: [][]any{
-					{int64(42)},
-					{int64(69)},
-				},
-				Filters: OneOrMore{{}, {}},
-				KeyFiltersMap: map[any]int{
-					int64(42): 0,
-					int64(69): 1,
+				Scans: []Scan{
+					{
+						Type:            ScanTypeIndexPoint,
+						IndexName:       "pk_users",
+						IndexColumnName: "id",
+						IndexKeys:       []any{int64(42)},
+						Filters:         OneOrMore{{}},
+					},
+					{
+						Type:            ScanTypeIndexPoint,
+						IndexName:       "pk_users",
+						IndexColumnName: "id",
+						IndexKeys:       []any{int64(69)},
+						Filters:         OneOrMore{{}},
+					},
 				},
 			},
 		},
 		{
-			"Multiple primary key equality conditions with extra remaining filters for both groups",
+			"Multiple primary key equality conditions with extra remaining filters for both groups (index point scan)",
 			aTableWithPK,
 			Statement{
 				Kind: Select,
@@ -160,37 +171,42 @@ func TestTable_PlanQuery(t *testing.T) {
 				},
 			},
 			QueryPlan{
-				ScanType:        ScanTypeIndexPoint,
-				IndexName:       "pk_users",
-				IndexColumnName: "id",
-				IndexKeyGroups: [][]any{
-					{int64(42)},
-					{int64(69)},
-				},
-				Filters: OneOrMore{
+				Scans: []Scan{
 					{
-						{
-							Operand1: Operand{Type: OperandField, Value: "email"},
-							Operator: Eq,
-							Operand2: Operand{Type: OperandQuotedString, Value: "foo@example.com"},
+						Type:            ScanTypeIndexPoint,
+						IndexName:       "pk_users",
+						IndexColumnName: "id",
+						IndexKeys:       []any{int64(42)},
+						Filters: OneOrMore{
+							{
+								{
+									Operand1: Operand{Type: OperandField, Value: "email"},
+									Operator: Eq,
+									Operand2: Operand{Type: OperandQuotedString, Value: "foo@example.com"},
+								},
+							},
 						},
 					},
 					{
-						{
-							Operand1: Operand{Type: OperandField, Value: "email"},
-							Operator: Eq,
-							Operand2: Operand{Type: OperandQuotedString, Value: "bar@example.com"},
+						Type:            ScanTypeIndexPoint,
+						IndexName:       "pk_users",
+						IndexColumnName: "id",
+						IndexKeys:       []any{int64(69)},
+						Filters: OneOrMore{
+							{
+								{
+									Operand1: Operand{Type: OperandField, Value: "email"},
+									Operator: Eq,
+									Operand2: Operand{Type: OperandQuotedString, Value: "bar@example.com"},
+								},
+							},
 						},
 					},
-				},
-				KeyFiltersMap: map[any]int{
-					int64(42): 0,
-					int64(69): 1,
 				},
 			},
 		},
 		{
-			"Multiple primary key equality conditions with extra remaining filters for only one group",
+			"Multiple primary key equality conditions with extra remaining filters for only one group (index point scan)",
 			aTableWithPK,
 			Statement{
 				Kind: Select,
@@ -217,31 +233,34 @@ func TestTable_PlanQuery(t *testing.T) {
 				},
 			},
 			QueryPlan{
-				ScanType:        ScanTypeIndexPoint,
-				IndexName:       "pk_users",
-				IndexColumnName: "id",
-				IndexKeyGroups: [][]any{
-					{int64(42)},
-					{int64(69)},
-				},
-				Filters: OneOrMore{
+				Scans: []Scan{
 					{
-						{
-							Operand1: Operand{Type: OperandField, Value: "email"},
-							Operator: Eq,
-							Operand2: Operand{Type: OperandQuotedString, Value: "foo@example.com"},
+						Type:            ScanTypeIndexPoint,
+						IndexName:       "pk_users",
+						IndexColumnName: "id",
+						IndexKeys:       []any{int64(42)},
+						Filters: OneOrMore{
+							{
+								{
+									Operand1: Operand{Type: OperandField, Value: "email"},
+									Operator: Eq,
+									Operand2: Operand{Type: OperandQuotedString, Value: "foo@example.com"},
+								},
+							},
 						},
 					},
-					{},
-				},
-				KeyFiltersMap: map[any]int{
-					int64(42): 0,
-					int64(69): 1,
+					{
+						Type:            ScanTypeIndexPoint,
+						IndexName:       "pk_users",
+						IndexColumnName: "id",
+						IndexKeys:       []any{int64(69)},
+						Filters:         OneOrMore{{}},
+					},
 				},
 			},
 		},
 		{
-			"Multiple primary keys IN condition",
+			"Multiple primary keys IN condition (index point scan)",
 			aTableWithPK,
 			Statement{
 				Kind: Select,
@@ -256,21 +275,19 @@ func TestTable_PlanQuery(t *testing.T) {
 				},
 			},
 			QueryPlan{
-				ScanType:        ScanTypeIndexPoint,
-				IndexName:       "pk_users",
-				IndexColumnName: "id",
-				IndexKeyGroups: [][]any{
-					{int64(42), int64(69)},
-				},
-				Filters: OneOrMore{{}},
-				KeyFiltersMap: map[any]int{
-					int64(42): 0,
-					int64(69): 0,
+				Scans: []Scan{
+					{
+						Type:            ScanTypeIndexPoint,
+						IndexName:       "pk_users",
+						IndexColumnName: "id",
+						IndexKeys:       []any{int64(42), int64(69)},
+						Filters:         OneOrMore{{}},
+					},
 				},
 			},
 		},
 		{
-			"Sequential scan order in memory",
+			"Order in memory (sequential scan)",
 			aTableWithPK,
 			Statement{
 				Kind: Select,
@@ -282,7 +299,11 @@ func TestTable_PlanQuery(t *testing.T) {
 				},
 			},
 			QueryPlan{
-				ScanType:     ScanTypeSequential,
+				Scans: []Scan{
+					{
+						Type: ScanTypeSequential,
+					},
+				},
 				SortInMemory: true,
 				SortReverse:  true,
 				OrderBy: []OrderBy{
@@ -294,7 +315,7 @@ func TestTable_PlanQuery(t *testing.T) {
 			},
 		},
 		{
-			"Sequential scan order with index",
+			"Ordered by primary key descending (index scan)",
 			aTableWithPK,
 			Statement{
 				Kind: Select,
@@ -306,12 +327,14 @@ func TestTable_PlanQuery(t *testing.T) {
 				},
 			},
 			QueryPlan{
-				ScanType:         ScanTypeIndexRange,
-				IndexName:        "pk_users",
-				IndexColumnName:  "id",
-				UseIndexForOrder: true,
-				SortInMemory:     false,
-				SortReverse:      true,
+				Scans: []Scan{
+					{
+						Type:            ScanTypeIndexAll,
+						IndexName:       "pk_users",
+						IndexColumnName: "id",
+					},
+				},
+				SortReverse: true,
 				OrderBy: []OrderBy{
 					{
 						Field:     Field{Name: "id"},
@@ -321,7 +344,7 @@ func TestTable_PlanQuery(t *testing.T) {
 			},
 		},
 		{
-			"Multiple primary keys IN condition plus order by",
+			"Multiple primary keys IN condition plus order by (index point scan)",
 			aTableWithPK,
 			Statement{
 				Kind: Select,
@@ -347,26 +370,189 @@ func TestTable_PlanQuery(t *testing.T) {
 				},
 			},
 			QueryPlan{
-				ScanType:         ScanTypeIndexPoint,
-				IndexName:        "pk_users",
-				IndexColumnName:  "id",
-				UseIndexForOrder: false,
-				SortInMemory:     true,
-				SortReverse:      true,
-				IndexKeyGroups: [][]any{
-					{int64(42), int64(69)},
-				},
-				Filters: OneOrMore{{
+				Scans: []Scan{
 					{
-						Operand1: Operand{Type: OperandField, Value: "verified"},
-						Operator: Eq,
-						Operand2: Operand{Type: OperandBoolean, Value: true},
+						Type:            ScanTypeIndexPoint,
+						IndexName:       "pk_users",
+						IndexColumnName: "id",
+						IndexKeys:       []any{int64(42), int64(69)},
+						Filters: OneOrMore{{
+							{
+								Operand1: Operand{Type: OperandField, Value: "verified"},
+								Operator: Eq,
+								Operand2: Operand{Type: OperandBoolean, Value: true},
+							},
+						}},
 					},
-				}},
-				KeyFiltersMap: map[any]int{
-					int64(42): 0,
-					int64(69): 0,
 				},
+				SortInMemory: true,
+				SortReverse:  true,
+				OrderBy: []OrderBy{
+					{
+						Field:     Field{Name: "id"},
+						Direction: Desc,
+					},
+				},
+			},
+		},
+		{
+			"A single range scan with remaining filters",
+			aTableWithPK,
+			Statement{
+				Kind: Select,
+				Conditions: OneOrMore{
+					{
+						{
+							Operand1: Operand{Type: OperandField, Value: "id"},
+							Operator: Gt,
+							Operand2: Operand{Type: OperandInteger, Value: int64(42)},
+						},
+						{
+							Operand1: Operand{Type: OperandField, Value: "id"},
+							Operator: Lte,
+							Operand2: Operand{Type: OperandInteger, Value: int64(69)},
+						},
+						{
+							Operand1: Operand{Type: OperandField, Value: "verified"},
+							Operator: Eq,
+							Operand2: Operand{Type: OperandBoolean, Value: true},
+						},
+					},
+				},
+			},
+			QueryPlan{
+				Scans: []Scan{
+					{
+						Type:            ScanTypeIndexRange,
+						IndexName:       "pk_users",
+						IndexColumnName: "id",
+						RangeCondition: RangeCondition{
+							Lower: &RangeBound{
+								Value:     int64(42),
+								Inclusive: false,
+							},
+							Upper: &RangeBound{
+								Value:     int64(69),
+								Inclusive: true,
+							},
+						},
+						Filters: OneOrMore{{
+							{
+								Operand1: Operand{Type: OperandField, Value: "verified"},
+								Operator: Eq,
+								Operand2: Operand{Type: OperandBoolean, Value: true},
+							},
+						}},
+					},
+				},
+			},
+		},
+		{
+			"Multiple range scans",
+			aTableWithPK,
+			Statement{
+				Kind: Select,
+				Conditions: OneOrMore{
+					{
+						{
+							Operand1: Operand{Type: OperandField, Value: "id"},
+							Operator: Gte,
+							Operand2: Operand{Type: OperandInteger, Value: int64(42)},
+						},
+					},
+					{
+						{
+							Operand1: Operand{Type: OperandField, Value: "id"},
+							Operator: Lt,
+							Operand2: Operand{Type: OperandInteger, Value: int64(27)},
+						},
+						{
+							Operand1: Operand{Type: OperandField, Value: "verified"},
+							Operator: Eq,
+							Operand2: Operand{Type: OperandBoolean, Value: true},
+						},
+					},
+				},
+			},
+			QueryPlan{
+				Scans: []Scan{
+					{
+						Type:            ScanTypeIndexRange,
+						IndexName:       "pk_users",
+						IndexColumnName: "id",
+						RangeCondition: RangeCondition{
+							Lower: &RangeBound{
+								Value:     int64(42),
+								Inclusive: true,
+							},
+						},
+					},
+					{
+						Type:            ScanTypeIndexRange,
+						IndexName:       "pk_users",
+						IndexColumnName: "id",
+						RangeCondition: RangeCondition{
+							Upper: &RangeBound{
+								Value: int64(27),
+							},
+						},
+						Filters: OneOrMore{{
+							{
+								Operand1: Operand{Type: OperandField, Value: "verified"},
+								Operator: Eq,
+								Operand2: Operand{Type: OperandBoolean, Value: true},
+							},
+						}},
+					},
+				},
+			},
+		},
+		{
+			"A range scan with order by primary key (ordered in memory)",
+			aTableWithPK,
+			Statement{
+				Kind: Select,
+				Conditions: OneOrMore{
+					{
+						{
+							Operand1: Operand{Type: OperandField, Value: "id"},
+							Operator: Gt,
+							Operand2: Operand{Type: OperandInteger, Value: int64(42)},
+						},
+						{
+							Operand1: Operand{Type: OperandField, Value: "id"},
+							Operator: Lte,
+							Operand2: Operand{Type: OperandInteger, Value: int64(69)},
+						},
+					},
+				},
+				OrderBy: []OrderBy{
+					{
+						Field:     Field{Name: "id"},
+						Direction: Desc,
+					},
+				},
+			},
+			QueryPlan{
+				Scans: []Scan{
+					{
+						Type:            ScanTypeIndexRange,
+						IndexName:       "pk_users",
+						IndexColumnName: "id",
+						RangeCondition: RangeCondition{
+							Lower: &RangeBound{
+								Value:     int64(42),
+								Inclusive: false,
+							},
+							Upper: &RangeBound{
+								Value:     int64(69),
+								Inclusive: true,
+							},
+						},
+					},
+				},
+				SortInMemory: true,
+				SortReverse:  true,
 				OrderBy: []OrderBy{
 					{
 						Field:     Field{Name: "id"},
@@ -381,6 +567,214 @@ func TestTable_PlanQuery(t *testing.T) {
 		t.Run(aTestCase.Name, func(t *testing.T) {
 			actual := aTableWithPK.PlanQuery(context.Background(), aTestCase.Stmt)
 			assert.Equal(t, aTestCase.Expected, actual)
+		})
+	}
+}
+
+func TestTryRangeScan(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		Name         string
+		PKName       string
+		PKColumn     string
+		Conditions   Conditions
+		ExpectedScan Scan
+		ExpectedOK   bool
+	}{
+		{
+			"Equality operator does not qualify for range scan",
+			"pk_users",
+			"id",
+			Conditions{
+				{
+					Operand1: Operand{Type: OperandField, Value: "id"},
+					Operator: Eq,
+					Operand2: Operand{Type: OperandInteger, Value: int64(10)},
+				},
+			},
+			Scan{},
+			false,
+		},
+		{
+			"Range scan with lower bound only",
+			"pk_users",
+			"id",
+			Conditions{
+				{
+					Operand1: Operand{Type: OperandField, Value: "id"},
+					Operator: Gt,
+					Operand2: Operand{Type: OperandInteger, Value: int64(10)},
+				},
+			},
+			Scan{
+				Type:            ScanTypeIndexRange,
+				IndexName:       "pk_users",
+				IndexColumnName: "id",
+				RangeCondition: RangeCondition{
+					Lower: &RangeBound{
+						Value: int64(10),
+					},
+				},
+			},
+			true,
+		},
+		{
+			"Range scan with lower bound only (inclusive)",
+			"pk_users",
+			"id",
+			Conditions{
+				{
+					Operand1: Operand{Type: OperandField, Value: "id"},
+					Operator: Gte,
+					Operand2: Operand{Type: OperandInteger, Value: int64(10)},
+				},
+			},
+			Scan{
+				Type:            ScanTypeIndexRange,
+				IndexName:       "pk_users",
+				IndexColumnName: "id",
+				RangeCondition: RangeCondition{
+					Lower: &RangeBound{
+						Value:     int64(10),
+						Inclusive: true,
+					},
+				},
+			},
+			true,
+		},
+		{
+			"Range scan with upper bound only",
+			"pk_users",
+			"id",
+			Conditions{
+				{
+					Operand1: Operand{Type: OperandField, Value: "id"},
+					Operator: Lt,
+					Operand2: Operand{Type: OperandInteger, Value: int64(10)},
+				},
+			},
+			Scan{
+				Type:            ScanTypeIndexRange,
+				IndexName:       "pk_users",
+				IndexColumnName: "id",
+				RangeCondition: RangeCondition{
+					Upper: &RangeBound{
+						Value: int64(10),
+					},
+				},
+			},
+			true,
+		},
+		{
+			"Range scan with upper bound only (inclusive)",
+			"pk_users",
+			"id",
+			Conditions{
+				{
+					Operand1: Operand{Type: OperandField, Value: "id"},
+					Operator: Lte,
+					Operand2: Operand{Type: OperandInteger, Value: int64(10)},
+				},
+			},
+			Scan{
+				Type:            ScanTypeIndexRange,
+				IndexName:       "pk_users",
+				IndexColumnName: "id",
+				RangeCondition: RangeCondition{
+					Upper: &RangeBound{
+						Value:     int64(10),
+						Inclusive: true,
+					},
+				},
+			},
+			true,
+		},
+		{
+			"Range scan with with both lower and upper bounds",
+			"pk_users",
+			"id",
+			Conditions{
+				{
+					Operand1: Operand{Type: OperandField, Value: "id"},
+					Operator: Lte,
+					Operand2: Operand{Type: OperandInteger, Value: int64(10)},
+				},
+				{
+					Operand1: Operand{Type: OperandField, Value: "id"},
+					Operator: Gt,
+					Operand2: Operand{Type: OperandInteger, Value: int64(5)},
+				},
+			},
+			Scan{
+				Type:            ScanTypeIndexRange,
+				IndexName:       "pk_users",
+				IndexColumnName: "id",
+				RangeCondition: RangeCondition{
+					Lower: &RangeBound{
+						Value: int64(5),
+					},
+					Upper: &RangeBound{
+						Value:     int64(10),
+						Inclusive: true,
+					},
+				},
+			},
+			true,
+		},
+		{
+			"Range scan with with both lower and upper bounds and remaining filters",
+			"pk_users",
+			"id",
+			Conditions{
+				{
+					Operand1: Operand{Type: OperandField, Value: "id"},
+					Operator: Lte,
+					Operand2: Operand{Type: OperandInteger, Value: int64(10)},
+				},
+				{
+					Operand1: Operand{Type: OperandField, Value: "id"},
+					Operator: Gt,
+					Operand2: Operand{Type: OperandInteger, Value: int64(5)},
+				},
+				{
+					Operand1: Operand{Type: OperandField, Value: "name"},
+					Operator: Eq,
+					Operand2: Operand{Type: OperandQuotedString, Value: "foo"},
+				},
+			},
+			Scan{
+				Type:            ScanTypeIndexRange,
+				IndexName:       "pk_users",
+				IndexColumnName: "id",
+				RangeCondition: RangeCondition{
+					Lower: &RangeBound{
+						Value: int64(5),
+					},
+					Upper: &RangeBound{
+						Value:     int64(10),
+						Inclusive: true,
+					},
+				},
+				Filters: OneOrMore{{
+					{
+						Operand1: Operand{Type: OperandField, Value: "name"},
+						Operator: Eq,
+						Operand2: Operand{Type: OperandQuotedString, Value: "foo"},
+					},
+				}},
+			},
+			true,
+		},
+	}
+
+	for _, aTestCase := range testCases {
+		t.Run(aTestCase.Name, func(t *testing.T) {
+			aScan, ok := tryRangeScan(aTestCase.PKName, aTestCase.PKColumn, aTestCase.Conditions)
+			assert.Equal(t, aTestCase.ExpectedOK, ok)
+			if ok {
+				assert.Equal(t, aTestCase.ExpectedScan, aScan)
+			}
 		})
 	}
 }
