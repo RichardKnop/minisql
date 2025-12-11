@@ -115,7 +115,7 @@ func computeTableSize(columns []minisql.Column) []int {
 	// find max width for each column
 	columnSize := make([]int, len(columns))
 	for i, aColumn := range columns {
-		if aColumn.Kind == minisql.Varchar {
+		if aColumn.Kind.IsText() {
 			columnSize[i] = maxLength
 		} else {
 			columnSize[i] = nonVarCharLength

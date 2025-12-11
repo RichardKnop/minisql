@@ -68,8 +68,6 @@ Each page size is `4096 bytes`. Rows larger than page size are not supported. Th
 
 All tables are kept track of via a system table `minisql_schema` which contains table name, `CREATE TABLE` SQL to document table structure and a root page index indicating which page contains root node of the table B+ Tree.
 
-`CREATE TABLE` SQL definition cannot exceed `3703 bytes` to fit into a single page.
-
 Each row has an internal row ID which is an unsigned 64 bit integer starting at 0. These are used as keys in B+ Tree data structure. 
 
 Moreover, each row starts with 64 bit null mask which determines which values are NULL. Because of the NULL bit mask being an unsigned 64 bit integer, tables are limited to `maximum of 64 columns`.
@@ -146,20 +144,27 @@ minisql_schema
 users
 ```
 
-Insert rows:
+Insert test rows:
 
 ```sh
-minisql> insert into users("name", "email", "age") values('John Doe', 'john@example.com', 35),
-('Jane Doe', 'jane@example.com', 32),
-('Jack Doe', 'jack@example.com', 27);
-Rows affected: 3
+minisql> insert into users("name", "email", "age") values('Danny Mason', 'Danny_Mason2966@xqj6f.tech', 35),
+('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', 32),
+('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video', 27),
+('Mason Callan', 'Mason_Callan9524@bu2lo.edu', 19),
+('Logan Flynn', 'Logan_Flynn9019@xtwt3.pro', 42),
+('Beatrice Uttley', 'Beatrice_Uttley1670@1wa8o.org', 32),
+('Harry Johnson', 'Harry_Johnson5515@jcf8v.video', 25),
+('Carl Thomson', 'Carl_Thomson4218@kyb7t.host', 53),
+('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design', 48),
+('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press', 27);
+Rows affected: 10
 minisql>
 ```
 
 When trying to insert a duplicate primary key, you will get an error:
 
 ```sh
-minisql> insert into users("id", "name", "email", "age") values(1, 'John Doe', 'john@example.com', 35);
+minisql> insert into users("id", "name", "email", "age") values(1, 'Danny Mason', 'Danny_Mason2966@xqj6f.tech', 35);
 Error: failed to insert primary key pk_users: duplicate key
 minisql>
 ```
@@ -170,9 +175,16 @@ Select from table:
 minisql> select * from users;
  id                   | name                                               | email                                              | age                  
 ----------------------+----------------------------------------------------+----------------------------------------------------+----------------------
- 1                    | john doe                                           | john@example.com                                   | 35                   
- 2                    | jane doe                                           | jane@example.com                                   | 32                   
- 3                    | jack doe                                           | jack@example.com                                   | 27   
+ 1                    | Danny Mason                                        | Danny_Mason2966@xqj6f.tech                         | 35                   
+ 2                    | Johnathan Walker                                   | Johnathan_Walker250@ptr6k.page                     | 32                   
+ 3                    | Tyson Weldon                                       | Tyson_Weldon2108@zynuu.video                       | 27                   
+ 4                    | Mason Callan                                       | Mason_Callan9524@bu2lo.edu                         | 19                   
+ 5                    | Logan Flynn                                        | Logan_Flynn9019@xtwt3.pro                          | 42                   
+ 6                    | Beatrice Uttley                                    | Beatrice_Uttley1670@1wa8o.org                      | 32                   
+ 7                    | Harry Johnson                                      | Harry_Johnson5515@jcf8v.video                      | 25                   
+ 8                    | Carl Thomson                                       | Carl_Thomson4218@kyb7t.host                        | 53                   
+ 9                    | Kaylee Johnson                                     | Kaylee_Johnson8112@c2nyu.design                    | 48                   
+ 10                   | Cristal Duvall                                     | Cristal_Duvall6639@yvu30.press                     | 27                   
 minisql>
 ```
 
@@ -190,9 +202,16 @@ Select to verify update:
 minisql> select * from users;
  id                   | name                                               | email                                              | age                  
 ----------------------+----------------------------------------------------+----------------------------------------------------+----------------------
- 1                    | john doe                                           | john@example.com                                   | 36                   
- 2                    | jane doe                                           | jane@example.com                                   | 32                   
- 3                    | jack doe                                           | jack@example.com                                   | 27     
+ 1                    | Danny Mason                                        | Danny_Mason2966@xqj6f.tech                         | 36                   
+ 2                    | Johnathan Walker                                   | Johnathan_Walker250@ptr6k.page                     | 32                   
+ 3                    | Tyson Weldon                                       | Tyson_Weldon2108@zynuu.video                       | 27                   
+ 4                    | Mason Callan                                       | Mason_Callan9524@bu2lo.edu                         | 19                   
+ 5                    | Logan Flynn                                        | Logan_Flynn9019@xtwt3.pro                          | 42                   
+ 6                    | Beatrice Uttley                                    | Beatrice_Uttley1670@1wa8o.org                      | 32                   
+ 7                    | Harry Johnson                                      | Harry_Johnson5515@jcf8v.video                      | 25                   
+ 8                    | Carl Thomson                                       | Carl_Thomson4218@kyb7t.host                        | 53                   
+ 9                    | Kaylee Johnson                                     | Kaylee_Johnson8112@c2nyu.design                    | 48                   
+ 10                   | Cristal Duvall                                     | Cristal_Duvall6639@yvu30.press                     | 27                   
 minisql>
 ```
 
@@ -200,7 +219,7 @@ You can also delete rows:
 
 ```sh
 minisql> delete from users;
-Rows affected: 3
+Rows affected: 10
 ```
 
 ## Development 
