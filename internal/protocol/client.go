@@ -28,10 +28,18 @@ func (c *Client) Close() {
 	c.conn.Close()
 }
 
-func (c *Client) SendRequest(req Request) (Response, error) {
+func (c *Client) SendMetaCommand(cmd string) (Response, error) {
+	return c.sendRequest(Request{Type: cmd})
+}
+
+func (c *Client) SendQuery(query string) (Response, error) {
+	return c.sendRequest(Request{Type: "sql", SQL: query})
+}
+
+func (c *Client) sendRequest(req Request) (Response, error) {
 	data, err := json.Marshal(req)
 	if err != nil {
-		return Response{}, err
+		return Response{}, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	_, err = c.conn.Write(append(data, '\n'))

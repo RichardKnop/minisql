@@ -48,11 +48,7 @@ func NewServer(db *minisql.Database, logger *zap.Logger, port int) (*Server, err
 }
 
 func (s *Server) Serve(ctx context.Context) {
-	s.wg.Add(1)
-
-	go func() {
-		defer s.wg.Done()
-
+	s.wg.Go(func() {
 		for {
 			conn, err := s.listener.Accept()
 			if err != nil {
@@ -88,7 +84,7 @@ func (s *Server) Serve(ctx context.Context) {
 				}(conn)
 			}
 		}
-	}()
+	})
 }
 
 func (s *Server) Stop() {
@@ -219,7 +215,7 @@ func (s *Server) handleSQL(ctx context.Context, conn *minisql.Connection, sql st
 				}
 				aResponse.Rows = append(aResponse.Rows, values)
 			}
-			if err != nil && err != minisql.ErrNoMoreRows {
+			if err != minisql.ErrNoMoreRows {
 				return s.sendResponse(conn, Response{
 					Success: false,
 					Error:   err.Error(),

@@ -78,17 +78,15 @@ func main() {
 			continue
 		}
 
-		var req protocol.Request
+		var resp protocol.Response
 		switch input {
 		case ".ping":
-			req = protocol.Request{Type: "ping"}
+			resp, err = aClient.SendMetaCommand("ping")
 		case ".tables":
-			req = protocol.Request{Type: "list_tables"}
+			resp, err = aClient.SendMetaCommand("list_tables")
 		default:
-			req = protocol.Request{Type: "sql", SQL: input}
+			resp, err = aClient.SendQuery(input)
 		}
-
-		resp, err := aClient.SendRequest(req)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}

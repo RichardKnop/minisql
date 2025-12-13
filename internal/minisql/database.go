@@ -46,12 +46,12 @@ var (
 )
 
 var (
-	mainTableSQL = fmt.Sprintf(`create table "%s" (
-		type int4 not null,
-		name varchar(255) not null,
-		root_page int4,
-		sql text
-	);`, SchemaTableName)
+	MainTableSQL = fmt.Sprintf(`create table "%s" (
+	type int4 not null,
+	name varchar(255) not null,
+	root_page int4,
+	sql text
+);`, SchemaTableName)
 
 	mainTableFields = fieldsFromColumns(mainTableColumns...)
 )
@@ -144,7 +144,7 @@ func (d *Database) init(ctx context.Context) error {
 					{Value: int32(SchemaTable), Valid: true},                     // type (only 0 supported now)
 					{Value: NewTextPointer([]byte(mainTable.Name)), Valid: true}, // name
 					{Value: int32(mainTable.GetRootPageIdx()), Valid: true},      // root page
-					{Value: NewTextPointer([]byte(mainTableSQL)), Valid: true},   // sql
+					{Value: NewTextPointer([]byte(MainTableSQL)), Valid: true},   // sql
 				},
 			},
 		}); err != nil {
