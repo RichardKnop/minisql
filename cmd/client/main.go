@@ -2,16 +2,13 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
-	"net"
 	"os"
 	"strings"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
-	"github.com/RichardKnop/minisql/internal/pkg/util"
 	"github.com/RichardKnop/minisql/internal/protocol"
 )
 
@@ -34,13 +31,12 @@ func printPrompt() {
 func main() {
 	flag.Parse()
 
-	conn, err := net.Dial("tcp", addressFlag)
+	aClient, err := protocol.NewClient(addressFlag)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer conn.Close()
+	defer aClient.Close()
 
-	scanner := bufio.NewScanner(conn)
 	reader := bufio.NewReader(os.Stdin)
 
 	printPrompt()
@@ -92,32 +88,16 @@ func main() {
 			req = protocol.Request{Type: "sql", SQL: input}
 		}
 
-		if err := sendRequest(conn, req); err != nil {
+		resp, err := aClient.SendRequest(req)
+		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
-
-		// Read response
-		if scanner.Scan() {
-			var resp protocol.Response
-			if err := json.Unmarshal(scanner.Bytes(), &resp); err == nil {
-				printResponse(resp)
-			}
-		}
+		printResponse(resp)
 
 		printPrompt()
 		input = ""
 		reader.Reset(os.Stdin)
 	}
-}
-
-func sendRequest(conn net.Conn, req protocol.Request) error {
-	data, err := json.Marshal(req)
-	if err != nil {
-		return err
-	}
-
-	_, err = conn.Write(append(data, '\n'))
-	return err
 }
 
 func printResponse(resp protocol.Response) {
@@ -131,11 +111,11 @@ func printResponse(resp protocol.Response) {
 	}
 
 	if resp.Kind == minisql.Select {
-		util.PrintTableHeader(os.Stdout, resp.Columns)
+		protocol.PrintTableHeader(os.Stdout, resp.Columns)
 	}
 	if len(resp.Rows) > 0 {
 		for _, row := range resp.Rows {
-			util.PrintTableRow(os.Stdout, resp.Columns, row)
+			protocol.PrintTableRow(os.Stdout, resp.Columns, row)
 		}
 	}
 
