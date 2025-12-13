@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"fmt"
 )
 
 type ScanType int
@@ -25,14 +26,19 @@ func (st ScanType) String() string {
 	}
 }
 
+type RangeBound struct {
+	Value     any
+	Inclusive bool // true for >= or <=, false for > or <
+}
+
+type RangeCondition struct {
+	Lower *RangeBound // nil = unbounded
+	Upper *RangeBound // nil = unbounded
+}
+
 // QueryPlan determines how to execute a query
 type QueryPlan struct {
-	ScanType        ScanType
-	IndexName       string
-	IndexColumnName string
-	IndexKeyGroups  [][]any     // Keys to lookup in index
-	Filters         OneOrMore   // Additional filters to apply
-	KeyFiltersMap   map[any]int // Map of keys to filter group index
+	Scans []Scan
 
 	// Ordering
 	UseIndexForOrder bool // Can we use index for ordering?
@@ -41,69 +47,130 @@ type QueryPlan struct {
 	SortReverse      bool // Reverse index scan order?
 }
 
-func (p QueryPlan) IsIndexPointScan() bool {
-	return p.ScanType == ScanTypeIndexPoint
+type Scan struct {
+	Type            ScanType
+	IndexName       string
+	IndexColumnName string
+	IndexKeys       []any          // Keys to lookup in index
+	RangeCondition  RangeCondition // upper/lower bounds for range scan
+	Filters         OneOrMore      // Additional filters to apply
 }
 
-func (p QueryPlan) IsIndexRangeScan() bool {
-	return p.ScanType == ScanTypeIndexRange
-}
-
-// FilterRow applies the query plan filters to the given row
-func (p QueryPlan) FilterRow(aRow Row) (bool, error) {
-	if !p.IsIndexPointScan() && len(p.Filters) == 0 {
-		return true, nil
-	}
-	var (
-		ok  bool
-		err error
-	)
-	if p.IsIndexPointScan() {
-		pkValue, _ := aRow.GetValue(p.IndexColumnName)
-		ok, err = aRow.CheckConditions(p.Filters[p.KeyFiltersMap[pkValue.Value]])
-	} else {
-		ok, err = aRow.CheckOneOrMore(p.Filters)
-	}
+// FilterRow applies filtering on scanned rows according to filters
+func (s Scan) FilterRow(aRow Row) (bool, error) {
+	ok, err := aRow.CheckOneOrMore(s.Filters)
 	if err != nil {
 		return false, err
 	}
-	if !ok {
-		return false, nil
+	return ok, nil
+}
+
+func (p QueryPlan) Execute(ctx context.Context, t *Table, selectedFields []Field, filteredPipe chan<- Row) error {
+	if len(p.Scans) == 1 {
+		switch p.Scans[0].Type {
+		case ScanTypeIndexRange:
+			if p.UseIndexForOrder {
+				return t.indexScanAll(ctx, p, p.Scans[0], selectedFields, filteredPipe)
+			}
+			return t.indexRangeScan(ctx, p.Scans[0], selectedFields, filteredPipe)
+		case ScanTypeSequential:
+			return t.sequentialScan(ctx, p.Scans[0], selectedFields, filteredPipe)
+		case ScanTypeIndexPoint:
+			return t.indexPointScan(ctx, p.Scans[0], selectedFields, filteredPipe)
+		default:
+			return fmt.Errorf("unhandled scan type in single scan: %d", p.Scans[0].Type)
+		}
 	}
-	return true, nil
+	for _, aScan := range p.Scans {
+		switch aScan.Type {
+		case ScanTypeIndexRange:
+			if err := t.indexRangeScan(ctx, aScan, selectedFields, filteredPipe); err != nil {
+				return err
+			}
+		case ScanTypeIndexPoint:
+			if err := t.indexPointScan(ctx, aScan, selectedFields, filteredPipe); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unhandled scan type in single scan: %d", aScan.Type)
+		}
+	}
+	return nil
 }
 
 // PlanQuery creates a query plan based on the statement and table schema
 func (t *Table) PlanQuery(ctx context.Context, stmt Statement) QueryPlan {
+	// By default, assume we are doing a single sequential scan
 	plan := QueryPlan{
-		ScanType: ScanTypeSequential,
-		Filters:  stmt.Conditions,
-		OrderBy:  stmt.OrderBy,
+		Scans: []Scan{{
+			Type:    ScanTypeSequential,
+			Filters: stmt.Conditions,
+		}},
+		OrderBy: stmt.OrderBy,
 	}
 
-	// No WHERE clause = sequential scan
+	// If there is no where clause, no need to consider index scans
 	if len(stmt.Conditions) == 0 {
 		// But we might still use index for ordering
 		return plan.optimizeOrdering(t)
 	}
 
-	// No primary key = sequential scan
+	// If there is no primary key, we cannot do index scans
+	// TODO - consider secondary indexes later
 	if !t.HasPrimaryKey() {
 		// But we might still use index for ordering
 		return plan.optimizeOrdering(t)
 	}
 
 	// Check if we can do an index scan using the primary key
-	plan = plan.setPKIndexScan(
+	plan = plan.setPKIndexScans(
 		t.PrimaryKey.Name,
 		t.PrimaryKey.Column.Name,
 		stmt.Conditions,
 	)
 
-	// Optimize ordering based on scan type
-	plan = plan.optimizeOrdering(t)
+	// But we might still use index for ordering
+	return plan.optimizeOrdering(t)
+}
 
-	return plan
+func (p QueryPlan) optimizeOrdering(t *Table) QueryPlan {
+	// No ORDER BY clause
+	if len(p.OrderBy) == 0 {
+		return p
+	}
+
+	if len(p.OrderBy) > 1 {
+		// TODO - Multiple ORDER BY columns (revisit later)
+		// Always need in-memory sort for now
+		p.SortInMemory = true
+		return p
+	}
+
+	// Single column ORDER BY
+	var orderCol = p.OrderBy[0].Field.Name
+	p.SortReverse = p.OrderBy[0].Direction == Desc
+
+	// Sequential scan
+	if len(p.Scans) == 1 && p.Scans[0].Type == ScanTypeSequential {
+		// Either order ORDER BY indexed column
+		if t.HasPrimaryKey() && orderCol == t.PrimaryKey.Column.Name {
+			// Use PK index for ordering
+			p.Scans[0].Type = ScanTypeIndexRange
+			p.Scans[0].IndexName = t.PrimaryKey.Name
+			p.Scans[0].IndexColumnName = orderCol
+			p.UseIndexForOrder = true
+			p.SortInMemory = false
+			return p
+		}
+
+		// TODO: Check for secondary indexes on orderCol
+		// For now, fall through to in-memory sort
+		p.SortInMemory = true
+	}
+
+	p.SortInMemory = true
+
+	return p
 }
 
 // Check whether we can perform an index scan. Each condition group is separated by OR,
@@ -115,7 +182,7 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) QueryPlan {
 //
 // can be executed as an index scan on for keys 1 and 2 with remaining filters
 // (a = 'foo') for 1 and (b = 'bar') for 2.
-func (p QueryPlan) setPKIndexScan(pkName string, pkColumn string, conditions OneOrMore) QueryPlan {
+func (p QueryPlan) setPKIndexScans(pkName string, pkColumn string, conditions OneOrMore) QueryPlan {
 	var (
 		primaryKeys              = make([][]any, 0, 10)
 		remaining                = make([]Conditions, 0, len(conditions))
@@ -151,19 +218,31 @@ func (p QueryPlan) setPKIndexScan(pkName string, pkColumn string, conditions One
 	}
 
 	if allGroupsHavePKCondition {
-		// Can use primary key index
-		p.IndexName = pkName
-		p.IndexColumnName = pkColumn
-		p.IndexKeyGroups = primaryKeys
-		p.ScanType = ScanTypeIndexPoint
-		p.Filters = remaining
-		p.KeyFiltersMap = keyFiltersMap
+		p.Scans = make([]Scan, 0, len(conditions))
+		for groupIdx := range conditions {
+			p.Scans = append(p.Scans, Scan{
+				Type:            ScanTypeIndexPoint,
+				IndexName:       pkName,
+				IndexColumnName: pkColumn,
+				IndexKeys:       primaryKeys[groupIdx],
+				Filters:         OneOrMore{remaining[groupIdx]},
+			})
+		}
 	}
 
 	return p
 }
 
 func isPrimaryKeyEquality(cond Condition, pkColumn string) ([]any, bool) {
+	fieldName, ok := cond.Operand1.Value.(string)
+	if !ok || fieldName != pkColumn {
+		return nil, false
+	}
+
+	return isEquality(cond)
+}
+
+func isEquality(cond Condition) ([]any, bool) {
 	// Check: column_name = literal_value
 	// Also consider IN operator for primary key
 	if cond.Operator != Eq && cond.Operator != In {
@@ -171,11 +250,6 @@ func isPrimaryKeyEquality(cond Condition, pkColumn string) ([]any, bool) {
 	}
 
 	if cond.Operand1.Type != OperandField {
-		return nil, false
-	}
-
-	fieldName, ok := cond.Operand1.Value.(string)
-	if !ok || fieldName != pkColumn {
 		return nil, false
 	}
 
@@ -191,68 +265,118 @@ func isPrimaryKeyEquality(cond Condition, pkColumn string) ([]any, bool) {
 	return cond.Operand2.Value.([]any), true
 }
 
-func (p QueryPlan) optimizeOrdering(t *Table) QueryPlan {
-	// No ORDER BY clause
-	if len(p.OrderBy) == 0 {
-		return p
-	}
+// func (s Scan) tryRangeScan(pkName string, pkColumn string, filters Conditions) QueryPlan {
+// 	var (
+// 		rangeCondition      = RangeCondition{}
+// 		remainingFilters    = make(Conditions, 0)
+// 		foundRangeCondition = false
+// 	)
 
-	if len(p.OrderBy) > 1 {
-		// TODO - Multiple ORDER BY columns (revisit later)
-		// Always need in-memory sort for now
-		p.SortInMemory = true
-		return p
-	}
+// 	// Scan conditions to find range predicates on PK
+// 	for _, aCondition := range filters {
+// 		if aCondition.Operand1.Type != OperandField {
+// 			remainingFilters = append(remainingFilters, aCondition)
+// 			continue
+// 		}
 
-	// Single column ORDER BY
-	var orderCol = p.OrderBy[0].Field.Name
+// 		fieldName, ok := aCondition.Operand1.Value.(string)
+// 		if !ok || fieldName != pkColumn {
+// 			remainingFilters = append(remainingFilters, aCondition)
+// 			continue
+// 		}
 
-	p.SortReverse = p.OrderBy[0].Direction == Desc
+// 		// PK column condition - check if it's a range operator
+// 		if aCondition.Operand2.Type == OperandField {
+// 			// Can't use index if comparing to another field
+// 			remainingFilters = append(remainingFilters, aCondition)
+// 			continue
+// 		}
 
-	// Sequential scan
-	if p.ScanType == ScanTypeSequential {
-		// Either order ORDER BY indexed column
-		if t.HasPrimaryKey() && orderCol == t.PrimaryKey.Column.Name {
-			// Use PK index for ordering
-			p.ScanType = ScanTypeIndexRange
-			p.IndexName = t.PrimaryKey.Name
-			p.IndexColumnName = orderCol
-			p.UseIndexForOrder = true
-			p.SortInMemory = false
+// 		foundRangeCondition = true
 
-			return p
-		}
+// 		switch aCondition.Operator {
+// 		case Gt:
+// 			// id > X
+// 			if rangeCondition.Lower == nil ||
+// 				compareAny(aCondition.Operand2.Value, rangeCondition.Lower.Value) > 0 {
+// 				rangeCondition.Lower = &RangeBound{
+// 					Value:     aCondition.Operand2.Value,
+// 					Inclusive: false,
+// 				}
+// 			}
 
-		// TODO: Check for secondary indexes on orderCol
-		// For now, fall through to in-memory sort
-		p.SortInMemory = true
-	}
+// 		case Gte:
+// 			// id >= X
+// 			if rangeCondition.Lower == nil ||
+// 				compareAny(aCondition.Operand2.Value, rangeCondition.Lower.Value) > 0 {
+// 				rangeCondition.Lower = &RangeBound{
+// 					Value:     aCondition.Operand2.Value,
+// 					Inclusive: true,
+// 				}
+// 			}
 
-	// Index scan on PK, ORDER BY the same PK column
-	if p.ScanType == ScanTypeIndexPoint && orderCol == p.IndexColumnName {
-		// TODO - let's sort in memory for now, revisit later, we could order the keys
-		// according to index order instead of fetching in arbitrary order
-		p.SortInMemory = true
-		return p
-	}
+// 		case Lt:
+// 			// id < X
+// 			if rangeCondition.Upper == nil ||
+// 				compareAny(aCondition.Operand2.Value, rangeCondition.Upper.Value) < 0 {
+// 				rangeCondition.Upper = &RangeBound{
+// 					Value:     aCondition.Operand2.Value,
+// 					Inclusive: false,
+// 				}
+// 			}
 
-	// Case 4: Index scan, ORDER BY different column
-	// Need in-memory sort after fetching
-	p.SortInMemory = true
-	return p
-}
+// 		case Lte:
+// 			// id <= X
+// 			if rangeCondition.Upper == nil ||
+// 				compareAny(aCondition.Operand2.Value, rangeCondition.Upper.Value) < 0 {
+// 				rangeCondition.Upper = &RangeBound{
+// 					Value:     aCondition.Operand2.Value,
+// 					Inclusive: true,
+// 				}
+// 			}
+
+// 		case Eq:
+// 			// id = X (special case: range with same lower and upper bound)
+// 			rangeCondition.Lower = &RangeBound{
+// 				Value:     aCondition.Operand2.Value,
+// 				Inclusive: true,
+// 			}
+// 			rangeCondition.Upper = &RangeBound{
+// 				Value:     aCondition.Operand2.Value,
+// 				Inclusive: true,
+// 			}
+
+// 		default:
+// 			// Other operators don't support range scan
+// 			remainingFilters = append(remainingFilters, aCondition)
+// 		}
+// 	}
+
+// 	if !foundRangeCondition {
+// 		return p
+// 	}
+
+// 	// Validate range is sensible
+// 	if rangeCondition.Lower != nil && rangeCondition.Upper != nil {
+// 		cmp := compareAny(rangeCondition.Lower.Value, rangeCondition.Upper.Value)
+// 		if cmp > 0 {
+// 			// Lower > Upper = empty range, no results
+// 			// Could optimize by returning empty result, but for now just don't use index
+// 			return p
+// 		}
+// 	}
+
+// 	// Create range scan plan
+// 	p.ScanType = ScanTypeIndexRange
+// 	p.IndexName = pkName
+// 	p.IndexColumnName = pkColumn
+// 	p.RangeCondition = rangeCondition
+// 	p.Filters = OneOrMore{remainingFilters}
+
+// 	return p
+// }
 
 func (p QueryPlan) logArgs(args ...any) []any {
-	args = append(args, "scan type", p.ScanType.String())
-	if len(p.OrderBy) > 0 {
-		args = append(args, "order by", p.OrderBy[0].Field.Name+" "+p.OrderBy[0].Direction.String())
-		args = append(args, "sort in memory", p.SortInMemory)
-	}
-	if p.IndexName != "" {
-		args = append(args, "index name", p.IndexName)
-	}
-	if len(p.IndexKeyGroups) > 0 {
-		args = append(args, "index keys", p.IndexKeyGroups)
-	}
+	args = append(args, "plan", p)
 	return args
 }

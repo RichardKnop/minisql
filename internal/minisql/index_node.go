@@ -278,7 +278,7 @@ func (n *IndexNode[T]) Unmarshal(buf []byte) (uint64, error) {
 func (n *IndexNode[T]) Child(childIdx uint32) (PageIndex, error) {
 	keysNum := n.Header.Keys
 	if childIdx > keysNum {
-		return 0, fmt.Errorf("childIdx %d out of keysNum %d", childIdx, keysNum)
+		return 0, fmt.Errorf("childIdx %d out of keys num %d", childIdx, keysNum)
 	}
 
 	if childIdx == keysNum {
@@ -291,7 +291,7 @@ func (n *IndexNode[T]) Child(childIdx uint32) (PageIndex, error) {
 func (n *IndexNode[T]) SetChild(idx uint32, childPage PageIndex) error {
 	keysNum := n.Header.Keys
 	if idx > keysNum {
-		return fmt.Errorf("childIdx %d out of keysNum %d", idx, keysNum)
+		return fmt.Errorf("childIdx %d out of keys num %d", idx, keysNum)
 	}
 
 	if idx == keysNum {

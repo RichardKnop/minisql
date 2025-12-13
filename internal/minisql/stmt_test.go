@@ -485,6 +485,45 @@ func TestStatement_Validate(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `mixed operand types in WHERE condition list`)
 	})
+
+	t.Run("WHERE with conflicting equality conditions should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    fieldsFromColumns(aTable.Columns...),
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: Eq,
+						Operand2: Operand{
+							Type:  OperandInteger,
+							Value: int64(1),
+						},
+					},
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: Eq,
+						Operand2: Operand{
+							Type:  OperandInteger,
+							Value: int64(2),
+						},
+					},
+				},
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `conflicting equality conditions for field "id" in WHERE clause`)
+	})
 }
 
 func TestStatement_CreateTableDDL(t *testing.T) {

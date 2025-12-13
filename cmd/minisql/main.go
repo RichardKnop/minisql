@@ -289,6 +289,12 @@ func (s *Server) handleSQL(ctx context.Context, conn *minisql.Connection, sql st
 				}
 				aResponse.Rows = append(aResponse.Rows, values)
 			}
+			if err != nil && err != minisql.ErrNoMoreRows {
+				return s.sendResponse(conn, protocol.Response{
+					Success: false,
+					Error:   err.Error(),
+				})
+			}
 		} else if stmt.Kind == minisql.CreateTable {
 			aResponse.Message = fmt.Sprintf("Table '%s' created successfully", stmt.TableName)
 		} else if stmt.Kind == minisql.DropTable {
