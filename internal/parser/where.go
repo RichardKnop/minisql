@@ -8,12 +8,13 @@ import (
 )
 
 var (
-	errEmptyWhereClause                  = fmt.Errorf("at WHERE: empty WHERE clause")
-	errWhereWithoutOperator              = fmt.Errorf("at WHERE: condition without operator")
-	errWhereExpectedField                = fmt.Errorf("at WHERE: expected field")
-	errWhereExpectedAndOr                = fmt.Errorf("expected one of AND / OR")
-	errWhereExpectedQuotedStringOrNumber = fmt.Errorf("at WHERE: expected quoted string or number value")
-	errWhereUnknownOperator              = fmt.Errorf("at WHERE: unknown operator")
+	errEmptyWhereClause                            = fmt.Errorf("at WHERE: empty WHERE clause")
+	errWhereWithoutOperator                        = fmt.Errorf("at WHERE: condition without operator")
+	errWhereExpectedField                          = fmt.Errorf("at WHERE: expected field")
+	errWhereExpectedAndOr                          = fmt.Errorf("expected one of AND / OR")
+	errWhereExpectedQuotedStringOrNumber           = fmt.Errorf("at WHERE: expected quoted string or number value")
+	errWhereExpectedIdentifierQuotedStringOrNumber = fmt.Errorf("at WHERE: expected identifier, quoted string or number value")
+	errWhereUnknownOperator                        = fmt.Errorf("at WHERE: unknown operator")
 )
 
 func (p *parser) doParseWhere() error {
@@ -103,20 +104,18 @@ func (p *parser) doParseWhere() error {
 		}
 		p.step = stepWhereConditionValue
 	case stepWhereConditionValue:
-		var (
-			identifier          = p.peek()
-			currentCondition, _ = p.Conditions.LastCondition()
-		)
-		if isIdentifier(identifier) {
-			currentCondition.Operand2 = minisql.Operand{
-				Type:  minisql.OperandField,
-				Value: identifier,
+		var currentCondition, _ = p.Conditions.LastCondition()
+		value, ln := p.peekNumberOrQuotedStringWithLength()
+		if ln == 0 {
+			if identifier := p.peek(); isIdentifier(identifier) {
+				currentCondition.Operand2 = minisql.Operand{
+					Type:  minisql.OperandField,
+					Value: identifier,
+				}
+			} else {
+				return errWhereExpectedIdentifierQuotedStringOrNumber
 			}
 		} else {
-			value, ln := p.peekNumberOrQuotedStringWithLength()
-			if ln == 0 {
-				return errWhereExpectedQuotedStringOrNumber
-			}
 			currentCondition.Operand2 = minisql.Operand{
 				Type:  minisql.OperandQuotedString,
 				Value: value,

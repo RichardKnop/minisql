@@ -74,6 +74,27 @@ func (ui *UniqueIndex[T]) Seek(ctx context.Context, aPage *Page, keyAny any) (In
 	return ui.Seek(ctx, childPage, key)
 }
 
+func (ui *UniqueIndex[T]) SeekFirst(ctx context.Context, aPage *Page) (IndexCursor, bool, error) {
+	pageIdx := ui.GetRootPageIdx()
+	aPage, err := ui.pager.ReadPage(ctx, pageIdx)
+	if err != nil {
+		return IndexCursor{}, false, fmt.Errorf("seek first: %w", err)
+	}
+	aNode := aPage.IndexNode.(*IndexNode[T])
+
+	for !aNode.Header.IsLeaf {
+		pageIdx = aNode.FirstCell().Child
+		aPage, err = ui.pager.ReadPage(ctx, pageIdx)
+		if err != nil {
+			return IndexCursor{}, false, fmt.Errorf("seek first: %w", err)
+		}
+	}
+	return IndexCursor{
+		PageIdx: pageIdx,
+		CellIdx: 0,
+	}, aNode.Header.Keys == 0, nil
+}
+
 func (ui *UniqueIndex[T]) SeekLastKey(ctx context.Context, pageIdx PageIndex) (any, error) {
 	aPage, err := ui.pager.ReadPage(ctx, pageIdx)
 	if err != nil {

@@ -47,9 +47,13 @@ func compareValues(a, b OptionalValue) int {
 		return 1
 	}
 
-	switch aVal := a.Value.(type) {
+	return compareAny(a.Value, b.Value)
+}
+
+func compareAny(a, b any) int {
+	switch aVal := a.(type) {
 	case bool:
-		bVal := b.Value.(bool)
+		bVal := b.(bool)
 		if aVal == bVal {
 			return 0
 		}
@@ -59,7 +63,7 @@ func compareValues(a, b OptionalValue) int {
 		return -1
 
 	case int32:
-		bVal := b.Value.(int32)
+		bVal := b.(int32)
 		if aVal < bVal {
 			return -1
 		} else if aVal > bVal {
@@ -68,7 +72,7 @@ func compareValues(a, b OptionalValue) int {
 		return 0
 
 	case int64:
-		bVal := b.Value.(int64)
+		bVal := b.(int64)
 		if aVal < bVal {
 			return -1
 		} else if aVal > bVal {
@@ -77,7 +81,7 @@ func compareValues(a, b OptionalValue) int {
 		return 0
 
 	case float32:
-		bVal := b.Value.(float32)
+		bVal := b.(float32)
 		if aVal < bVal {
 			return -1
 		} else if aVal > bVal {
@@ -86,7 +90,7 @@ func compareValues(a, b OptionalValue) int {
 		return 0
 
 	case float64:
-		bVal := b.Value.(float64)
+		bVal := b.(float64)
 		if aVal < bVal {
 			return -1
 		} else if aVal > bVal {
@@ -95,11 +99,11 @@ func compareValues(a, b OptionalValue) int {
 		return 0
 
 	case string:
-		bVal := b.Value.(string)
+		bVal := b.(string)
 		return strings.Compare(aVal, bVal)
 
 	case TextPointer:
-		bVal := b.Value.(TextPointer)
+		bVal := b.(TextPointer)
 		return strings.Compare(aVal.String(), bVal.String())
 
 	default:

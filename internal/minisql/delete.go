@@ -3,6 +3,7 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"sync"
 )
 
 func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, error) {
@@ -16,7 +17,7 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 	// Create query plan
 	plan := t.PlanQuery(ctx, stmt)
 
-	t.logger.Sugar().With(plan.logArgs("query type", "DELETE")...).Debug("query plan")
+	t.logger.Sugar().With("query type", "DELETE", "plan", plan).Debug("query plan")
 
 	// Only fetch fields needed for WHERE conditions
 	var selectedFields []Field
@@ -32,51 +33,36 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 	}
 
 	var (
-		unfilteredPipe = make(chan Row)
-		filteredPipe   = make(chan RowID)
-		errorsPipe     = make(chan error, 1)
-		stopChan       = make(chan bool)
+		filteredPipe = make(chan Row)
+		errorsPipe   = make(chan error, 1)
+		stopChan     = make(chan bool)
+		wg           = new(sync.WaitGroup)
 	)
 
-	// Execute based on plan
-	if plan.IsIndexPointScan() {
-		// Use primary key index lookup
-		go t.indexPointScan(ctx, plan, selectedFields, unfilteredPipe, errorsPipe)
-	} else {
-		// Sequential scan
-		go t.sequentialScan(ctx, selectedFields, unfilteredPipe, errorsPipe)
-	}
-
-	// Filter rows according to the WHERE conditions. In case of an index scan,
-	// any remaining filtering will happen here. In case of a sequential scan,
-	// this will filter all rows.
-	go func(in <-chan Row, out chan<- RowID) {
-		defer close(out)
-		for aRow := range in {
-			ok, err := plan.FilterRow(aRow)
-			if err != nil {
-				errorsPipe <- err
-				return
-			}
-			if ok {
-				out <- aRow.Key
-			}
+	// Execute scans based on plan
+	wg.Go(func() {
+		if err := plan.Execute(ctx, t, selectedFields, filteredPipe); err != nil {
+			errorsPipe <- err
 		}
-	}(unfilteredPipe, filteredPipe)
+	})
+	go func() {
+		wg.Wait()
+		close(filteredPipe)
+	}()
 
 	aResult := StatementResult{
 		Columns: t.Columns,
 	}
 
-	go func(in <-chan RowID) {
+	go func(in <-chan Row) {
 		defer close(stopChan)
 		// When deleting multiple rows, we first collect them all
 		// and then delete them one by one. This is to avoid fetchRow
 		// in unfiltered pipe to skip rows that have been deleted while
 		// scanning the table when doing multiple deletions.
 		keys := make([]RowID, 0, 100)
-		for aKey := range in {
-			keys = append(keys, aKey)
+		for aRow := range in {
+			keys = append(keys, aRow.Key)
 		}
 		for _, aKey := range keys {
 			aCursor, err := t.Seek(ctx, aKey)

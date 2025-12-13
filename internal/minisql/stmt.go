@@ -346,6 +346,7 @@ func (s Statement) validateSelect(aTable *Table) error {
 
 func (s Statement) validateWhere() error {
 	for _, aConditionGroup := range s.Conditions {
+		equalityMap := map[string][]any{}
 		for _, aCondition := range aConditionGroup {
 			if !IsValidCondition(aCondition) {
 				return fmt.Errorf("invalid condition in WHERE clause")
@@ -367,6 +368,16 @@ func (s Statement) validateWhere() error {
 					if fmt.Sprintf("%T", value) != valueType {
 						return fmt.Errorf("mixed operand types in WHERE condition list")
 					}
+				}
+			}
+
+			if args, ok := isEquality(aCondition); ok {
+				fieldName := aCondition.Operand1.Value.(string)
+				_, ok2 := equalityMap[fieldName]
+				if !ok2 {
+					equalityMap[fieldName] = args
+				} else {
+					return fmt.Errorf("conflicting equality conditions for field %q in WHERE clause", fieldName)
 				}
 			}
 		}
