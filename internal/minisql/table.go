@@ -966,32 +966,32 @@ func (t *Table) newPrimaryKeyIndex(aPager *TransactionalPager, freePage *Page) (
 
 	switch pkColumn.Kind {
 	case Boolean:
-		indexNode := NewIndexNode[int8]()
+		indexNode := NewUniqueIndexNode[int8]()
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Int4:
-		indexNode := NewIndexNode[int32]()
+		indexNode := NewUniqueIndexNode[int32]()
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Int8:
-		indexNode := NewIndexNode[int64]()
+		indexNode := NewUniqueIndexNode[int64]()
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Real:
-		indexNode := NewIndexNode[float32]()
+		indexNode := NewUniqueIndexNode[float32]()
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Double:
-		indexNode := NewIndexNode[float64]()
+		indexNode := NewUniqueIndexNode[float64]()
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Varchar:
-		indexNode := NewIndexNode[string]()
+		indexNode := NewUniqueIndexNode[string]()
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode

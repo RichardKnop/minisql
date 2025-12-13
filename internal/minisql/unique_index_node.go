@@ -70,13 +70,13 @@ func (h *IndexNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 }
 
 // Use int8 for bool so we can use comparison operators
-type IndexCell[T IndexKey] struct {
+type UniqueIndexCell[T IndexKey] struct {
 	Key   T
 	RowID RowID
 	Child PageIndex
 }
 
-func (c *IndexCell[T]) Size() uint64 {
+func (c *UniqueIndexCell[T]) Size() uint64 {
 	size := uint64(8 + 4)
 	size += keySize(c.Key)
 	return size
@@ -100,7 +100,7 @@ func keySize[T IndexKey](key T) uint64 {
 	return 0
 }
 
-func (c *IndexCell[T]) Marshal(buf []byte) ([]byte, error) {
+func (c *UniqueIndexCell[T]) Marshal(buf []byte) ([]byte, error) {
 	size := c.Size()
 	if uint64(cap(buf)) >= size {
 		buf = buf[:size]
@@ -146,7 +146,7 @@ func (c *IndexCell[T]) Marshal(buf []byte) ([]byte, error) {
 	return buf[:i], nil
 }
 
-func (c *IndexCell[T]) Unmarshal(buf []byte) (uint64, error) {
+func (c *UniqueIndexCell[T]) Unmarshal(buf []byte) (uint64, error) {
 	i := uint64(0)
 
 	// Unmarshal the key based on its type
@@ -187,24 +187,24 @@ func (c *IndexCell[T]) Unmarshal(buf []byte) (uint64, error) {
 }
 
 // Use int8 for bool so we can use comparison operators
-type IndexNode[T IndexKey] struct {
+type UniqueIndexNode[T IndexKey] struct {
 	Header IndexNodeHeader
-	Cells  []IndexCell[T] // (PageSize - (5)) / (CellSize + 4 + 8)
+	Cells  []UniqueIndexCell[T] // (PageSize - (5)) / (CellSize + 4 + 8)
 }
 
 // TODO - this is not used currently
 const MinimumIndexCells = 4
 
 // Use int8 for bool so we can use comparison operators
-func NewIndexNode[T IndexKey](cells ...IndexCell[T]) *IndexNode[T] {
-	aNode := IndexNode[T]{
+func NewUniqueIndexNode[T IndexKey](cells ...UniqueIndexCell[T]) *UniqueIndexNode[T] {
+	aNode := UniqueIndexNode[T]{
 		Header: IndexNodeHeader{
 			RightChild: RIGHT_CHILD_NOT_SET,
 		},
-		Cells: make([]IndexCell[T], 0, MinimumIndexCells),
+		Cells: make([]UniqueIndexCell[T], 0, MinimumIndexCells),
 	}
 	for i := 0; i < MinimumIndexCells; i++ {
-		aNode.Cells = append(aNode.Cells, IndexCell[T]{})
+		aNode.Cells = append(aNode.Cells, UniqueIndexCell[T]{})
 	}
 	if len(cells) > 0 {
 		aNode.Header.Keys = uint32(len(cells)) - 1
@@ -213,7 +213,7 @@ func NewIndexNode[T IndexKey](cells ...IndexCell[T]) *IndexNode[T] {
 	return &aNode
 }
 
-func (n *IndexNode[T]) Size() uint64 {
+func (n *UniqueIndexNode[T]) Size() uint64 {
 	size := n.Header.Size()
 
 	for idx := range n.Header.Keys {
@@ -223,7 +223,7 @@ func (n *IndexNode[T]) Size() uint64 {
 	return size
 }
 
-func (n *IndexNode[T]) Marshal(buf []byte) ([]byte, error) {
+func (n *UniqueIndexNode[T]) Marshal(buf []byte) ([]byte, error) {
 	size := n.Size()
 	if uint64(cap(buf)) >= size {
 		buf = buf[:size]
@@ -250,7 +250,7 @@ func (n *IndexNode[T]) Marshal(buf []byte) ([]byte, error) {
 	return buf[:i], nil
 }
 
-func (n *IndexNode[T]) Unmarshal(buf []byte) (uint64, error) {
+func (n *UniqueIndexNode[T]) Unmarshal(buf []byte) (uint64, error) {
 	i := uint64(0)
 
 	hi, err := n.Header.Unmarshal(buf[i:])
@@ -261,7 +261,7 @@ func (n *IndexNode[T]) Unmarshal(buf []byte) (uint64, error) {
 
 	for idx := 0; idx < int(n.Header.Keys); idx++ {
 		if len(n.Cells) == idx {
-			n.Cells = append(n.Cells, IndexCell[T]{})
+			n.Cells = append(n.Cells, UniqueIndexCell[T]{})
 		}
 		ci, err := n.Cells[idx].Unmarshal(buf[i:])
 		if err != nil {
@@ -275,7 +275,7 @@ func (n *IndexNode[T]) Unmarshal(buf []byte) (uint64, error) {
 
 // Child returns a node index of nth child of the node marked by its index
 // (0 for the leftmost child, index equal to number of keys means the rightmost child).
-func (n *IndexNode[T]) Child(childIdx uint32) (PageIndex, error) {
+func (n *UniqueIndexNode[T]) Child(childIdx uint32) (PageIndex, error) {
 	keysNum := n.Header.Keys
 	if childIdx > keysNum {
 		return 0, fmt.Errorf("childIdx %d out of keys num %d", childIdx, keysNum)
@@ -288,7 +288,7 @@ func (n *IndexNode[T]) Child(childIdx uint32) (PageIndex, error) {
 	return n.Cells[childIdx].Child, nil
 }
 
-func (n *IndexNode[T]) SetChild(idx uint32, childPage PageIndex) error {
+func (n *UniqueIndexNode[T]) SetChild(idx uint32, childPage PageIndex) error {
 	keysNum := n.Header.Keys
 	if idx > keysNum {
 		return fmt.Errorf("childIdx %d out of keys num %d", idx, keysNum)
@@ -303,7 +303,7 @@ func (n *IndexNode[T]) SetChild(idx uint32, childPage PageIndex) error {
 	return nil
 }
 
-func (n *IndexNode[T]) Keys() []T {
+func (n *UniqueIndexNode[T]) Keys() []T {
 	if n.Header.Keys == 0 {
 		return nil
 	}
@@ -314,7 +314,7 @@ func (n *IndexNode[T]) Keys() []T {
 	return keys
 }
 
-func (n *IndexNode[T]) RowIDs() []RowID {
+func (n *UniqueIndexNode[T]) RowIDs() []RowID {
 	rowIDs := make([]RowID, 0, n.Header.Keys)
 	for i := range n.Header.Keys {
 		rowIDs = append(rowIDs, n.Cells[i].RowID)
@@ -322,7 +322,7 @@ func (n *IndexNode[T]) RowIDs() []RowID {
 	return rowIDs
 }
 
-func (n *IndexNode[T]) Children() []PageIndex {
+func (n *UniqueIndexNode[T]) Children() []PageIndex {
 	if n.Header.IsLeaf {
 		return nil
 	}
@@ -336,7 +336,7 @@ func (n *IndexNode[T]) Children() []PageIndex {
 	return children
 }
 
-func (n *IndexNode[T]) DeleteKeyByIndex(idx uint32) {
+func (n *UniqueIndexNode[T]) DeleteKeyByIndex(idx uint32) {
 	if n.Header.Keys == 0 {
 		return
 	}
@@ -354,11 +354,11 @@ func (n *IndexNode[T]) DeleteKeyByIndex(idx uint32) {
 		}
 	}
 
-	n.Cells[int(n.Header.Keys)-1] = IndexCell[T]{}
+	n.Cells[int(n.Header.Keys)-1] = UniqueIndexCell[T]{}
 	n.Header.Keys -= 1
 }
 
-func (n *IndexNode[T]) GetRightChildByIndex(idx uint32) PageIndex {
+func (n *UniqueIndexNode[T]) GetRightChildByIndex(idx uint32) PageIndex {
 	if idx == n.Header.Keys-1 {
 		return n.Header.RightChild
 	}
@@ -366,32 +366,32 @@ func (n *IndexNode[T]) GetRightChildByIndex(idx uint32) PageIndex {
 	return n.Cells[idx+1].Child
 }
 
-func (n *IndexNode[T]) FirstCell() IndexCell[T] {
+func (n *UniqueIndexNode[T]) FirstCell() UniqueIndexCell[T] {
 	return n.Cells[0]
 }
 
-func (n *IndexNode[T]) LastCell() IndexCell[T] {
+func (n *UniqueIndexNode[T]) LastCell() UniqueIndexCell[T] {
 	return n.Cells[n.Header.Keys-1]
 }
 
-func (n *IndexNode[T]) RemoveFirstCell() {
+func (n *UniqueIndexNode[T]) RemoveFirstCell() {
 	for i := 0; i < int(n.Header.Keys)-1; i++ {
 		n.Cells[i] = n.Cells[i+1]
 	}
-	n.Cells[n.Header.Keys-1] = IndexCell[T]{}
+	n.Cells[n.Header.Keys-1] = UniqueIndexCell[T]{}
 	n.Header.Keys -= 1
 }
 
-func (n *IndexNode[T]) RemoveLastCell() {
+func (n *UniqueIndexNode[T]) RemoveLastCell() {
 	idx := n.Header.Keys - 1
 	n.Header.RightChild = n.Cells[idx].Child
-	n.Cells[idx] = IndexCell[T]{}
+	n.Cells[idx] = UniqueIndexCell[T]{}
 	n.Header.Keys -= 1
 }
 
-func (n *IndexNode[T]) PrependCell(aCell IndexCell[T]) {
+func (n *UniqueIndexNode[T]) PrependCell(aCell UniqueIndexCell[T]) {
 	if len(n.Cells) <= int(n.Header.Keys) {
-		n.Cells = append(n.Cells, IndexCell[T]{})
+		n.Cells = append(n.Cells, UniqueIndexCell[T]{})
 	}
 	for i := int(n.Header.Keys) - 1; i >= 0; i-- {
 		n.Cells[i+1] = n.Cells[i]
@@ -400,33 +400,33 @@ func (n *IndexNode[T]) PrependCell(aCell IndexCell[T]) {
 	n.Header.Keys += 1
 }
 
-func (n *IndexNode[T]) AppendCells(cells ...IndexCell[T]) {
+func (n *UniqueIndexNode[T]) AppendCells(cells ...UniqueIndexCell[T]) {
 	for _, aCell := range cells {
 		if len(n.Cells) <= int(n.Header.Keys) {
-			n.Cells = append(n.Cells, IndexCell[T]{})
+			n.Cells = append(n.Cells, UniqueIndexCell[T]{})
 		}
 		n.Cells[n.Header.Keys] = aCell
 		n.Header.Keys += 1
 	}
 }
 
-func (n *IndexNode[T]) setParent(parentIdx PageIndex) {
+func (n *UniqueIndexNode[T]) setParent(parentIdx PageIndex) {
 	n.Header.Parent = parentIdx
 }
 
 func marshalIndexNode(anyNode any, buf []byte) ([]byte, error) {
 	switch aNode := anyNode.(type) {
-	case *IndexNode[int8]:
+	case *UniqueIndexNode[int8]:
 		return aNode.Marshal(buf)
-	case *IndexNode[int32]:
+	case *UniqueIndexNode[int32]:
 		return aNode.Marshal(buf)
-	case *IndexNode[int64]:
+	case *UniqueIndexNode[int64]:
 		return aNode.Marshal(buf)
-	case *IndexNode[float32]:
+	case *UniqueIndexNode[float32]:
 		return aNode.Marshal(buf)
-	case *IndexNode[float64]:
+	case *UniqueIndexNode[float64]:
 		return aNode.Marshal(buf)
-	case *IndexNode[string]:
+	case *UniqueIndexNode[string]:
 		return aNode.Marshal(buf)
 	default:
 		return nil, fmt.Errorf("unknown index node type: %T", aNode)
@@ -435,55 +435,55 @@ func marshalIndexNode(anyNode any, buf []byte) ([]byte, error) {
 
 func copyIndexNode(anyNode any) any {
 	switch aNode := anyNode.(type) {
-	case *IndexNode[int8]:
-		aCopy := &IndexNode[int8]{
+	case *UniqueIndexNode[int8]:
+		aCopy := &UniqueIndexNode[int8]{
 			Header: aNode.Header,
-			Cells:  make([]IndexCell[int8], 0, MinimumIndexCells),
+			Cells:  make([]UniqueIndexCell[int8], 0, MinimumIndexCells),
 		}
 		for _, aCell := range aNode.Cells {
 			aCopy.Cells = append(aCopy.Cells, aCell)
 		}
 		return aCopy
-	case *IndexNode[int32]:
-		aCopy := &IndexNode[int32]{
+	case *UniqueIndexNode[int32]:
+		aCopy := &UniqueIndexNode[int32]{
 			Header: aNode.Header,
-			Cells:  make([]IndexCell[int32], 0, MinimumIndexCells),
+			Cells:  make([]UniqueIndexCell[int32], 0, MinimumIndexCells),
 		}
 		for _, aCell := range aNode.Cells {
 			aCopy.Cells = append(aCopy.Cells, aCell)
 		}
 		return aCopy
-	case *IndexNode[int64]:
-		aCopy := &IndexNode[int64]{
+	case *UniqueIndexNode[int64]:
+		aCopy := &UniqueIndexNode[int64]{
 			Header: aNode.Header,
-			Cells:  make([]IndexCell[int64], 0, MinimumIndexCells),
+			Cells:  make([]UniqueIndexCell[int64], 0, MinimumIndexCells),
 		}
 		for _, aCell := range aNode.Cells {
 			aCopy.Cells = append(aCopy.Cells, aCell)
 		}
 		return aCopy
-	case *IndexNode[float32]:
-		aCopy := &IndexNode[float32]{
+	case *UniqueIndexNode[float32]:
+		aCopy := &UniqueIndexNode[float32]{
 			Header: aNode.Header,
-			Cells:  make([]IndexCell[float32], 0, MinimumIndexCells),
+			Cells:  make([]UniqueIndexCell[float32], 0, MinimumIndexCells),
 		}
 		for _, aCell := range aNode.Cells {
 			aCopy.Cells = append(aCopy.Cells, aCell)
 		}
 		return aCopy
-	case *IndexNode[float64]:
-		aCopy := &IndexNode[float64]{
+	case *UniqueIndexNode[float64]:
+		aCopy := &UniqueIndexNode[float64]{
 			Header: aNode.Header,
-			Cells:  make([]IndexCell[float64], 0, MinimumIndexCells),
+			Cells:  make([]UniqueIndexCell[float64], 0, MinimumIndexCells),
 		}
 		for _, aCell := range aNode.Cells {
 			aCopy.Cells = append(aCopy.Cells, aCell)
 		}
 		return aCopy
-	case *IndexNode[string]:
-		aCopy := &IndexNode[string]{
+	case *UniqueIndexNode[string]:
+		aCopy := &UniqueIndexNode[string]{
 			Header: aNode.Header,
-			Cells:  make([]IndexCell[string], 0, MinimumIndexCells),
+			Cells:  make([]UniqueIndexCell[string], 0, MinimumIndexCells),
 		}
 		for _, aCell := range aNode.Cells {
 			aCopy.Cells = append(aCopy.Cells, aCell)
@@ -494,12 +494,12 @@ func copyIndexNode(anyNode any) any {
 	}
 }
 
-func (n *IndexNode[T]) MaxSpace() uint64 {
+func (n *UniqueIndexNode[T]) MaxSpace() uint64 {
 	maxSpace := PageSize - indexHeaderSize()
 	return maxSpace
 }
 
-func (n *IndexNode[T]) TakenSpace() uint64 {
+func (n *UniqueIndexNode[T]) TakenSpace() uint64 {
 	takenPageSize := uint64(0)
 	for i := uint32(0); i < n.Header.Keys; i++ {
 		takenPageSize += n.Cells[i].Size()
@@ -507,28 +507,28 @@ func (n *IndexNode[T]) TakenSpace() uint64 {
 	return takenPageSize
 }
 
-func (n *IndexNode[T]) AvailableSpace() uint64 {
+func (n *UniqueIndexNode[T]) AvailableSpace() uint64 {
 	return n.MaxSpace() - n.TakenSpace()
 }
 
-func (n *IndexNode[T]) HasSpaceForKey(key T) bool {
+func (n *UniqueIndexNode[T]) HasSpaceForKey(key T) bool {
 	return (keySize(key) + 8 + 4) <= n.AvailableSpace()
 }
 
-func (n *IndexNode[T]) AtLeastHalfFull() bool {
+func (n *UniqueIndexNode[T]) AtLeastHalfFull() bool {
 	return n.AvailableSpace() < (n.MaxSpace())/2
 }
 
-func (n *IndexNode[T]) CanMergeWith(n2 *IndexNode[T]) bool {
+func (n *UniqueIndexNode[T]) CanMergeWith(n2 *UniqueIndexNode[T]) bool {
 	return n2.TakenSpace() <= n.AvailableSpace()
 }
 
-func (n *IndexNode[T]) CanBorrowFirst() bool {
+func (n *UniqueIndexNode[T]) CanBorrowFirst() bool {
 	firstCellSize := n.Cells[0].Size()
 	return n.AvailableSpace()+firstCellSize < n.MaxSpace()/2
 }
 
-func (n *IndexNode[T]) CanBorrowLast() bool {
+func (n *UniqueIndexNode[T]) CanBorrowLast() bool {
 	lastCellSize := n.Cells[n.Header.Keys-1].Size()
 	return n.AvailableSpace()+lastCellSize < n.MaxSpace()/2
 }

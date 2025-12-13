@@ -24,7 +24,7 @@ func (ui *UniqueIndex[T]) scanAscending(ctx context.Context, pageIdx PageIndex, 
 		return err
 	}
 
-	aNode := aPage.IndexNode.(*IndexNode[T])
+	aNode := aPage.IndexNode.(*UniqueIndexNode[T])
 
 	if aNode.Header.IsLeaf {
 		// Leaf node: just visit all keys in order
@@ -71,7 +71,7 @@ func (ui *UniqueIndex[T]) scanDescending(ctx context.Context, pageIdx PageIndex,
 		return err
 	}
 
-	aNode := aPage.IndexNode.(*IndexNode[T])
+	aNode := aPage.IndexNode.(*UniqueIndexNode[T])
 
 	if aNode.Header.IsLeaf {
 		// Leaf node: visit all keys in reverse order
@@ -143,7 +143,7 @@ func (ui *UniqueIndex[T]) scanRangeFrom(
 	if err != nil {
 		return err
 	}
-	aNode := aPage.IndexNode.(*IndexNode[T])
+	aNode := aPage.IndexNode.(*UniqueIndexNode[T])
 
 	// Start at cellIdx, traverse in-order
 	for i := cellIdx; i < aNode.Header.Keys; i++ {
@@ -203,7 +203,7 @@ func (ui *UniqueIndex[T]) scanRangeFrom(
 		if err != nil {
 			return fmt.Errorf("read parent page: %w", err)
 		}
-		parentNode := parentPage.IndexNode.(*IndexNode[T])
+		parentNode := parentPage.IndexNode.(*UniqueIndexNode[T])
 		if parentNode.Header.IsRoot {
 			reachedRoot = true
 		} else {
@@ -258,7 +258,7 @@ func (ui *UniqueIndex[T]) scanRangeRecursive(ctx context.Context, pageIdx PageIn
 	if err != nil {
 		return err
 	}
-	aNode := aPage.IndexNode.(*IndexNode[T])
+	aNode := aPage.IndexNode.(*UniqueIndexNode[T])
 
 	for i := uint32(0); i < aNode.Header.Keys; i++ {
 		// Visit left child before key[i]

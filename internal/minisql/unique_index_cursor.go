@@ -35,7 +35,7 @@ func (ui *UniqueIndex[T]) Find(ctx context.Context, keyAny any) (RowID, error) {
 	if err != nil {
 		return 0, fmt.Errorf("read page: %w", err)
 	}
-	aNode := aPage.IndexNode.(*IndexNode[T])
+	aNode := aPage.IndexNode.(*UniqueIndexNode[T])
 	if aCursor.CellIdx >= aNode.Header.Keys {
 		return 0, fmt.Errorf("invalid cell index: %d", aCursor.CellIdx)
 	}
@@ -49,7 +49,7 @@ func (ui *UniqueIndex[T]) Seek(ctx context.Context, aPage *Page, keyAny any) (In
 	}
 
 	i := uint32(0)
-	aNode := aPage.IndexNode.(*IndexNode[T])
+	aNode := aPage.IndexNode.(*UniqueIndexNode[T])
 
 	for i < aNode.Header.Keys && key > aNode.Cells[i].Key {
 		i++
@@ -80,7 +80,7 @@ func (ui *UniqueIndex[T]) SeekFirst(ctx context.Context, aPage *Page) (IndexCurs
 	if err != nil {
 		return IndexCursor{}, false, fmt.Errorf("seek first: %w", err)
 	}
-	aNode := aPage.IndexNode.(*IndexNode[T])
+	aNode := aPage.IndexNode.(*UniqueIndexNode[T])
 
 	for !aNode.Header.IsLeaf {
 		pageIdx = aNode.FirstCell().Child
@@ -100,7 +100,7 @@ func (ui *UniqueIndex[T]) SeekLastKey(ctx context.Context, pageIdx PageIndex) (a
 	if err != nil {
 		return nil, fmt.Errorf("seek next row ID: %w", err)
 	}
-	aNode := aPage.IndexNode.(*IndexNode[T])
+	aNode := aPage.IndexNode.(*UniqueIndexNode[T])
 	if aNode.Header.IsLeaf == false {
 		return ui.SeekLastKey(ctx, aNode.Header.RightChild)
 	}

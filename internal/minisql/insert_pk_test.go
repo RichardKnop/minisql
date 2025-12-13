@@ -178,7 +178,7 @@ func checkRowsWithPrimaryKey(ctx context.Context, t *testing.T, aTable *Table, e
 func checkIndexKeys(ctx context.Context, t *testing.T, anIndex BTreeIndex, expectedKeys []int64) {
 	actualKeys := make([]int64, 0, 100)
 	err := anIndex.BFS(ctx, func(aPage *Page) {
-		node := aPage.IndexNode.(*IndexNode[int64])
+		node := aPage.IndexNode.(*UniqueIndexNode[int64])
 		actualKeys = append(actualKeys, node.Keys()...)
 	})
 	require.NoError(t, err)
@@ -190,7 +190,7 @@ func checkIndexKeys(ctx context.Context, t *testing.T, anIndex BTreeIndex, expec
 func checkIndexVarcharKeys(ctx context.Context, t *testing.T, anIndex BTreeIndex, expectedKeys []string) {
 	actualKeys := make([]string, 0, 100)
 	err := anIndex.BFS(ctx, func(aPage *Page) {
-		node := aPage.IndexNode.(*IndexNode[string])
+		node := aPage.IndexNode.(*UniqueIndexNode[string])
 		actualKeys = append(actualKeys, node.Keys()...)
 	})
 	require.NoError(t, err)

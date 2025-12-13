@@ -182,7 +182,7 @@ func TestPage_Clone(t *testing.T) {
 	t.Run("index page", func(t *testing.T) {
 		original := &Page{
 			Index: 5,
-			IndexNode: &IndexNode[int64]{
+			IndexNode: &UniqueIndexNode[int64]{
 				Header: IndexNodeHeader{
 					IsRoot:     false,
 					IsLeaf:     true,
@@ -190,7 +190,7 @@ func TestPage_Clone(t *testing.T) {
 					Keys:       2,
 					RightChild: 65,
 				},
-				Cells: []IndexCell[int64]{
+				Cells: []UniqueIndexCell[int64]{
 					{
 						Key:   100,
 						Child: 3,

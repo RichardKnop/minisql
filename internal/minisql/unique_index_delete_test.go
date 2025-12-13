@@ -56,38 +56,38 @@ func TestUniqueIndex_Delete(t *testing.T) {
 	// require.NoError(t, anIndex.print())
 
 	var (
-		rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-		internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-		internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-		internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+		rootNode  = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+		internal1 = aPager.pages[5].IndexNode.(*UniqueIndexNode[int64])
+		internal2 = aPager.pages[6].IndexNode.(*UniqueIndexNode[int64])
+		internal3 = aPager.pages[10].IndexNode.(*UniqueIndexNode[int64])
 		// leaves of first internal node
-		leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-		leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
-		leaf3 = aPager.pages[4].IndexNode.(*IndexNode[int64])
+		leaf1 = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+		leaf2 = aPager.pages[9].IndexNode.(*UniqueIndexNode[int64])
+		leaf3 = aPager.pages[4].IndexNode.(*UniqueIndexNode[int64])
 		// leaves of second internal node
-		leaf4 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-		leaf5 = aPager.pages[7].IndexNode.(*IndexNode[int64])
-		leaf6 = aPager.pages[11].IndexNode.(*IndexNode[int64])
+		leaf4 = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+		leaf5 = aPager.pages[7].IndexNode.(*UniqueIndexNode[int64])
+		leaf6 = aPager.pages[11].IndexNode.(*UniqueIndexNode[int64])
 		// leaves of third node
-		leaf7 = aPager.pages[3].IndexNode.(*IndexNode[int64])
-		leaf8 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+		leaf7 = aPager.pages[3].IndexNode.(*UniqueIndexNode[int64])
+		leaf8 = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
 	)
 
 	// Root node
-	assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 16}, []PageIndex{5, 6, 10})
+	assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 16}, []PageIndex{5, 6, 10})
 	// Internal nodes
-	assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{2, 5}, []PageIndex{1, 9, 4})
-	assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 13}, []PageIndex{2, 7, 11})
-	assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{19}, []PageIndex{3, 8})
+	assertUniqueIndexNode(t, internal1, false, false, PageIndex(0), []int64{2, 5}, []PageIndex{1, 9, 4})
+	assertUniqueIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 13}, []PageIndex{2, 7, 11})
+	assertUniqueIndexNode(t, internal3, false, false, PageIndex(0), []int64{19}, []PageIndex{3, 8})
 	// Leaf nodes
-	assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{1}, nil)
-	assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{3, 4}, nil)
-	assertIndexNode(t, leaf3, false, true, PageIndex(5), []int64{6, 7, 8}, nil)
-	assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{10}, nil)
-	assertIndexNode(t, leaf5, false, true, PageIndex(6), []int64{12}, nil)
-	assertIndexNode(t, leaf6, false, true, PageIndex(6), []int64{14, 15}, nil)
-	assertIndexNode(t, leaf7, false, true, PageIndex(10), []int64{17, 18}, nil)
-	assertIndexNode(t, leaf8, false, true, PageIndex(10), []int64{20, 21}, nil)
+	assertUniqueIndexNode(t, leaf1, false, true, PageIndex(5), []int64{1}, nil)
+	assertUniqueIndexNode(t, leaf2, false, true, PageIndex(5), []int64{3, 4}, nil)
+	assertUniqueIndexNode(t, leaf3, false, true, PageIndex(5), []int64{6, 7, 8}, nil)
+	assertUniqueIndexNode(t, leaf4, false, true, PageIndex(6), []int64{10}, nil)
+	assertUniqueIndexNode(t, leaf5, false, true, PageIndex(6), []int64{12}, nil)
+	assertUniqueIndexNode(t, leaf6, false, true, PageIndex(6), []int64{14, 15}, nil)
+	assertUniqueIndexNode(t, leaf7, false, true, PageIndex(10), []int64{17, 18}, nil)
+	assertUniqueIndexNode(t, leaf8, false, true, PageIndex(10), []int64{20, 21}, nil)
 
 	t.Run("Delete a key from leftmost leaf", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -115,38 +115,38 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		// require.NoError(t, anIndex.print())
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-			internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+			rootNode  = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			internal1 = aPager.pages[5].IndexNode.(*UniqueIndexNode[int64])
+			internal2 = aPager.pages[6].IndexNode.(*UniqueIndexNode[int64])
+			internal3 = aPager.pages[10].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
-			leaf3 = aPager.pages[4].IndexNode.(*IndexNode[int64])
+			leaf1 = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2 = aPager.pages[9].IndexNode.(*UniqueIndexNode[int64])
+			leaf3 = aPager.pages[4].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of second internal node
-			leaf4 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf5 = aPager.pages[7].IndexNode.(*IndexNode[int64])
-			leaf6 = aPager.pages[11].IndexNode.(*IndexNode[int64])
+			leaf4 = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+			leaf5 = aPager.pages[7].IndexNode.(*UniqueIndexNode[int64])
+			leaf6 = aPager.pages[11].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of third node
-			leaf7 = aPager.pages[3].IndexNode.(*IndexNode[int64])
-			leaf8 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf7 = aPager.pages[3].IndexNode.(*UniqueIndexNode[int64])
+			leaf8 = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 16}, []PageIndex{5, 6, 10})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 16}, []PageIndex{5, 6, 10})
 		// Internal nodes
-		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3, 5}, []PageIndex{1, 9, 4})
-		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 13}, []PageIndex{2, 7, 11})
-		assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{19}, []PageIndex{3, 8})
+		assertUniqueIndexNode(t, internal1, false, false, PageIndex(0), []int64{3, 5}, []PageIndex{1, 9, 4})
+		assertUniqueIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 13}, []PageIndex{2, 7, 11})
+		assertUniqueIndexNode(t, internal3, false, false, PageIndex(0), []int64{19}, []PageIndex{3, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{4}, nil)
-		assertIndexNode(t, leaf3, false, true, PageIndex(5), []int64{6, 7, 8}, nil)
-		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{10}, nil)
-		assertIndexNode(t, leaf5, false, true, PageIndex(6), []int64{12}, nil)
-		assertIndexNode(t, leaf6, false, true, PageIndex(6), []int64{14, 15}, nil)
-		assertIndexNode(t, leaf7, false, true, PageIndex(10), []int64{17, 18}, nil)
-		assertIndexNode(t, leaf8, false, true, PageIndex(10), []int64{20, 21}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(5), []int64{4}, nil)
+		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(5), []int64{6, 7, 8}, nil)
+		assertUniqueIndexNode(t, leaf4, false, true, PageIndex(6), []int64{10}, nil)
+		assertUniqueIndexNode(t, leaf5, false, true, PageIndex(6), []int64{12}, nil)
+		assertUniqueIndexNode(t, leaf6, false, true, PageIndex(6), []int64{14, 15}, nil)
+		assertUniqueIndexNode(t, leaf7, false, true, PageIndex(10), []int64{17, 18}, nil)
+		assertUniqueIndexNode(t, leaf8, false, true, PageIndex(10), []int64{20, 21}, nil)
 
 		// No page should be recycled yet
 		assertFreePages(t, idxPager, nil)
@@ -182,38 +182,38 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		//require.NoError(t, anIndex.print())
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-			internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+			rootNode  = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			internal1 = aPager.pages[5].IndexNode.(*UniqueIndexNode[int64])
+			internal2 = aPager.pages[6].IndexNode.(*UniqueIndexNode[int64])
+			internal3 = aPager.pages[10].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
-			leaf3 = aPager.pages[4].IndexNode.(*IndexNode[int64])
+			leaf1 = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2 = aPager.pages[9].IndexNode.(*UniqueIndexNode[int64])
+			leaf3 = aPager.pages[4].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of second internal node
-			leaf4 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf5 = aPager.pages[7].IndexNode.(*IndexNode[int64])
-			leaf6 = aPager.pages[11].IndexNode.(*IndexNode[int64])
+			leaf4 = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+			leaf5 = aPager.pages[7].IndexNode.(*UniqueIndexNode[int64])
+			leaf6 = aPager.pages[11].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of third node
-			leaf7 = aPager.pages[3].IndexNode.(*IndexNode[int64])
-			leaf8 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf7 = aPager.pages[3].IndexNode.(*UniqueIndexNode[int64])
+			leaf8 = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 16}, []PageIndex{5, 6, 10})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 16}, []PageIndex{5, 6, 10})
 		// Internal nodes
-		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3, 7}, []PageIndex{1, 9, 4})
-		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 13}, []PageIndex{2, 7, 11})
-		assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{19}, []PageIndex{3, 8})
+		assertUniqueIndexNode(t, internal1, false, false, PageIndex(0), []int64{3, 7}, []PageIndex{1, 9, 4})
+		assertUniqueIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 13}, []PageIndex{2, 7, 11})
+		assertUniqueIndexNode(t, internal3, false, false, PageIndex(0), []int64{19}, []PageIndex{3, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6}, nil)
-		assertIndexNode(t, leaf3, false, true, PageIndex(5), []int64{8}, nil)
-		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{10}, nil)
-		assertIndexNode(t, leaf5, false, true, PageIndex(6), []int64{12}, nil)
-		assertIndexNode(t, leaf6, false, true, PageIndex(6), []int64{14, 15}, nil)
-		assertIndexNode(t, leaf7, false, true, PageIndex(10), []int64{17, 18}, nil)
-		assertIndexNode(t, leaf8, false, true, PageIndex(10), []int64{20, 21}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6}, nil)
+		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(5), []int64{8}, nil)
+		assertUniqueIndexNode(t, leaf4, false, true, PageIndex(6), []int64{10}, nil)
+		assertUniqueIndexNode(t, leaf5, false, true, PageIndex(6), []int64{12}, nil)
+		assertUniqueIndexNode(t, leaf6, false, true, PageIndex(6), []int64{14, 15}, nil)
+		assertUniqueIndexNode(t, leaf7, false, true, PageIndex(10), []int64{17, 18}, nil)
+		assertUniqueIndexNode(t, leaf8, false, true, PageIndex(10), []int64{20, 21}, nil)
 
 		// No page should be recycled yet
 		assertFreePages(t, idxPager, nil)
@@ -245,36 +245,36 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		// require.NoError(t, anIndex.print())
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-			internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+			rootNode  = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			internal1 = aPager.pages[5].IndexNode.(*UniqueIndexNode[int64])
+			internal2 = aPager.pages[6].IndexNode.(*UniqueIndexNode[int64])
+			internal3 = aPager.pages[10].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2 = aPager.pages[9].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[7].IndexNode.(*IndexNode[int64])
-			leaf5 = aPager.pages[11].IndexNode.(*IndexNode[int64])
+			leaf3 = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+			leaf4 = aPager.pages[7].IndexNode.(*UniqueIndexNode[int64])
+			leaf5 = aPager.pages[11].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of third node
-			leaf6 = aPager.pages[3].IndexNode.(*IndexNode[int64])
-			leaf7 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf6 = aPager.pages[3].IndexNode.(*UniqueIndexNode[int64])
+			leaf7 = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 16}, []PageIndex{5, 6, 10})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 16}, []PageIndex{5, 6, 10})
 		// Internal nodes
-		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
-		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 13}, []PageIndex{2, 7, 11})
-		assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{19}, []PageIndex{3, 8})
+		assertUniqueIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertUniqueIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 13}, []PageIndex{2, 7, 11})
+		assertUniqueIndexNode(t, internal3, false, false, PageIndex(0), []int64{19}, []PageIndex{3, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
-		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
-		assertIndexNode(t, leaf5, false, true, PageIndex(6), []int64{14, 15}, nil)
-		assertIndexNode(t, leaf6, false, true, PageIndex(10), []int64{17, 18}, nil)
-		assertIndexNode(t, leaf7, false, true, PageIndex(10), []int64{20, 21}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
+		assertUniqueIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
+		assertUniqueIndexNode(t, leaf5, false, true, PageIndex(6), []int64{14, 15}, nil)
+		assertUniqueIndexNode(t, leaf6, false, true, PageIndex(10), []int64{17, 18}, nil)
+		assertUniqueIndexNode(t, leaf7, false, true, PageIndex(10), []int64{20, 21}, nil)
 		// Assert new recycled page
 		assertFreePages(t, idxPager, []PageIndex{4})
 	})
@@ -305,36 +305,36 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		//require.NoError(t, anIndex.print())
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-			internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+			rootNode  = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			internal1 = aPager.pages[5].IndexNode.(*UniqueIndexNode[int64])
+			internal2 = aPager.pages[6].IndexNode.(*UniqueIndexNode[int64])
+			internal3 = aPager.pages[10].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2 = aPager.pages[9].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[7].IndexNode.(*IndexNode[int64])
+			leaf3 = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+			leaf4 = aPager.pages[7].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of third node
-			leaf5 = aPager.pages[11].IndexNode.(*IndexNode[int64])
-			leaf6 = aPager.pages[3].IndexNode.(*IndexNode[int64])
-			leaf7 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf5 = aPager.pages[11].IndexNode.(*UniqueIndexNode[int64])
+			leaf6 = aPager.pages[3].IndexNode.(*UniqueIndexNode[int64])
+			leaf7 = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 13}, []PageIndex{5, 6, 10})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 13}, []PageIndex{5, 6, 10})
 		// Internal nodes
-		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
-		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11}, []PageIndex{2, 7})
-		assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{16, 18}, []PageIndex{11, 3, 8})
+		assertUniqueIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertUniqueIndexNode(t, internal2, false, false, PageIndex(0), []int64{11}, []PageIndex{2, 7})
+		assertUniqueIndexNode(t, internal3, false, false, PageIndex(0), []int64{16, 18}, []PageIndex{11, 3, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
-		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
-		assertIndexNode(t, leaf5, false, true, PageIndex(10), []int64{14, 15}, nil)
-		assertIndexNode(t, leaf6, false, true, PageIndex(10), []int64{17}, nil)
-		assertIndexNode(t, leaf7, false, true, PageIndex(10), []int64{20, 21}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
+		assertUniqueIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
+		assertUniqueIndexNode(t, leaf5, false, true, PageIndex(10), []int64{14, 15}, nil)
+		assertUniqueIndexNode(t, leaf6, false, true, PageIndex(10), []int64{17}, nil)
+		assertUniqueIndexNode(t, leaf7, false, true, PageIndex(10), []int64{20, 21}, nil)
 
 		// No new pages should be recycled
 		assertFreePages(t, idxPager, []PageIndex{4})
@@ -366,36 +366,36 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		//require.NoError(t, anIndex.print())
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-			internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+			rootNode  = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			internal1 = aPager.pages[5].IndexNode.(*UniqueIndexNode[int64])
+			internal2 = aPager.pages[6].IndexNode.(*UniqueIndexNode[int64])
+			internal3 = aPager.pages[10].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2 = aPager.pages[9].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[7].IndexNode.(*IndexNode[int64])
+			leaf3 = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+			leaf4 = aPager.pages[7].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of third node
-			leaf5 = aPager.pages[11].IndexNode.(*IndexNode[int64])
-			leaf6 = aPager.pages[3].IndexNode.(*IndexNode[int64])
-			leaf7 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf5 = aPager.pages[11].IndexNode.(*UniqueIndexNode[int64])
+			leaf6 = aPager.pages[3].IndexNode.(*UniqueIndexNode[int64])
+			leaf7 = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 13}, []PageIndex{5, 6, 10})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 13}, []PageIndex{5, 6, 10})
 		// Internal nodes
-		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
-		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11}, []PageIndex{2, 7})
-		assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{16, 18}, []PageIndex{11, 3, 8})
+		assertUniqueIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertUniqueIndexNode(t, internal2, false, false, PageIndex(0), []int64{11}, []PageIndex{2, 7})
+		assertUniqueIndexNode(t, internal3, false, false, PageIndex(0), []int64{16, 18}, []PageIndex{11, 3, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
-		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
-		assertIndexNode(t, leaf5, false, true, PageIndex(10), []int64{14, 15}, nil)
-		assertIndexNode(t, leaf6, false, true, PageIndex(10), []int64{17}, nil)
-		assertIndexNode(t, leaf7, false, true, PageIndex(10), []int64{21}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
+		assertUniqueIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
+		assertUniqueIndexNode(t, leaf5, false, true, PageIndex(10), []int64{14, 15}, nil)
+		assertUniqueIndexNode(t, leaf6, false, true, PageIndex(10), []int64{17}, nil)
+		assertUniqueIndexNode(t, leaf7, false, true, PageIndex(10), []int64{21}, nil)
 
 		// No new pages should be recycled
 		assertFreePages(t, idxPager, []PageIndex{4})
@@ -427,36 +427,36 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		//require.NoError(t, anIndex.print())
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-			internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+			rootNode  = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			internal1 = aPager.pages[5].IndexNode.(*UniqueIndexNode[int64])
+			internal2 = aPager.pages[6].IndexNode.(*UniqueIndexNode[int64])
+			internal3 = aPager.pages[10].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2 = aPager.pages[9].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[7].IndexNode.(*IndexNode[int64])
+			leaf3 = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+			leaf4 = aPager.pages[7].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of third node
-			leaf5 = aPager.pages[11].IndexNode.(*IndexNode[int64])
-			leaf6 = aPager.pages[3].IndexNode.(*IndexNode[int64])
-			leaf7 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf5 = aPager.pages[11].IndexNode.(*UniqueIndexNode[int64])
+			leaf6 = aPager.pages[3].IndexNode.(*UniqueIndexNode[int64])
+			leaf7 = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 13}, []PageIndex{5, 6, 10})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 13}, []PageIndex{5, 6, 10})
 		// Internal nodes
-		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
-		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11}, []PageIndex{2, 7})
-		assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{15, 18}, []PageIndex{11, 3, 8})
+		assertUniqueIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertUniqueIndexNode(t, internal2, false, false, PageIndex(0), []int64{11}, []PageIndex{2, 7})
+		assertUniqueIndexNode(t, internal3, false, false, PageIndex(0), []int64{15, 18}, []PageIndex{11, 3, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
-		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
-		assertIndexNode(t, leaf5, false, true, PageIndex(10), []int64{14}, nil)
-		assertIndexNode(t, leaf6, false, true, PageIndex(10), []int64{17}, nil)
-		assertIndexNode(t, leaf7, false, true, PageIndex(10), []int64{21}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
+		assertUniqueIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
+		assertUniqueIndexNode(t, leaf5, false, true, PageIndex(10), []int64{14}, nil)
+		assertUniqueIndexNode(t, leaf6, false, true, PageIndex(10), []int64{17}, nil)
+		assertUniqueIndexNode(t, leaf7, false, true, PageIndex(10), []int64{21}, nil)
 
 		// No new pages should be recycled
 		assertFreePages(t, idxPager, []PageIndex{4})
@@ -488,34 +488,34 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		// require.NoError(t, anIndex.print())
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-			internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+			rootNode  = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			internal1 = aPager.pages[5].IndexNode.(*UniqueIndexNode[int64])
+			internal2 = aPager.pages[6].IndexNode.(*UniqueIndexNode[int64])
+			internal3 = aPager.pages[10].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2 = aPager.pages[9].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[7].IndexNode.(*IndexNode[int64])
+			leaf3 = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+			leaf4 = aPager.pages[7].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of third node
-			leaf5 = aPager.pages[11].IndexNode.(*IndexNode[int64])
-			leaf6 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf5 = aPager.pages[11].IndexNode.(*UniqueIndexNode[int64])
+			leaf6 = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 13}, []PageIndex{5, 6, 10})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 13}, []PageIndex{5, 6, 10})
 		// Internal nodes
-		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
-		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11}, []PageIndex{2, 7})
-		assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{18}, []PageIndex{11, 8})
+		assertUniqueIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertUniqueIndexNode(t, internal2, false, false, PageIndex(0), []int64{11}, []PageIndex{2, 7})
+		assertUniqueIndexNode(t, internal3, false, false, PageIndex(0), []int64{18}, []PageIndex{11, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
-		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
-		assertIndexNode(t, leaf5, false, true, PageIndex(10), []int64{14, 17}, nil)
-		assertIndexNode(t, leaf6, false, true, PageIndex(10), []int64{21}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
+		assertUniqueIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
+		assertUniqueIndexNode(t, leaf5, false, true, PageIndex(10), []int64{14, 17}, nil)
+		assertUniqueIndexNode(t, leaf6, false, true, PageIndex(10), []int64{21}, nil)
 
 		// Assert new recycled page
 		assertFreePages(t, idxPager, []PageIndex{3, 4})
@@ -547,31 +547,31 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		// require.NoError(t, anIndex.print())
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
+			rootNode  = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			internal1 = aPager.pages[5].IndexNode.(*UniqueIndexNode[int64])
+			internal2 = aPager.pages[6].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2 = aPager.pages[9].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[7].IndexNode.(*IndexNode[int64])
-			leaf5 = aPager.pages[11].IndexNode.(*IndexNode[int64])
-			leaf6 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf3 = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+			leaf4 = aPager.pages[7].IndexNode.(*UniqueIndexNode[int64])
+			leaf5 = aPager.pages[11].IndexNode.(*UniqueIndexNode[int64])
+			leaf6 = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9}, []PageIndex{5, 6})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9}, []PageIndex{5, 6})
 		//Internal nodes
-		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
-		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 14, 18}, []PageIndex{2, 7, 11, 8})
+		assertUniqueIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertUniqueIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 14, 18}, []PageIndex{2, 7, 11, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
-		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
-		assertIndexNode(t, leaf5, false, true, PageIndex(6), []int64{17}, nil)
-		assertIndexNode(t, leaf6, false, true, PageIndex(6), []int64{21}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(6), []int64{10}, nil)
+		assertUniqueIndexNode(t, leaf4, false, true, PageIndex(6), []int64{12}, nil)
+		assertUniqueIndexNode(t, leaf5, false, true, PageIndex(6), []int64{17}, nil)
+		assertUniqueIndexNode(t, leaf6, false, true, PageIndex(6), []int64{21}, nil)
 
 		// Assert new recycled page
 		assertFreePages(t, idxPager, []PageIndex{10, 3, 4})
@@ -603,29 +603,29 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		// require.NoError(t, anIndex.print())
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
+			rootNode  = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			internal1 = aPager.pages[5].IndexNode.(*UniqueIndexNode[int64])
+			internal2 = aPager.pages[6].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2 = aPager.pages[9].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[11].IndexNode.(*IndexNode[int64])
-			leaf5 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf3 = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+			leaf4 = aPager.pages[11].IndexNode.(*UniqueIndexNode[int64])
+			leaf5 = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9}, []PageIndex{5, 6})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9}, []PageIndex{5, 6})
 		//Internal nodes
-		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
-		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{14, 18}, []PageIndex{2, 11, 8})
+		assertUniqueIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertUniqueIndexNode(t, internal2, false, false, PageIndex(0), []int64{14, 18}, []PageIndex{2, 11, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{11, 12}, nil)
-		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{17}, nil)
-		assertIndexNode(t, leaf5, false, true, PageIndex(6), []int64{21}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(6), []int64{11, 12}, nil)
+		assertUniqueIndexNode(t, leaf4, false, true, PageIndex(6), []int64{17}, nil)
+		assertUniqueIndexNode(t, leaf5, false, true, PageIndex(6), []int64{21}, nil)
 
 		// Assert new recycled page
 		assertFreePages(t, idxPager, []PageIndex{7, 10, 3, 4})
@@ -657,29 +657,29 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		// require.NoError(t, anIndex.print())
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
+			rootNode  = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			internal1 = aPager.pages[5].IndexNode.(*UniqueIndexNode[int64])
+			internal2 = aPager.pages[6].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2 = aPager.pages[9].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[11].IndexNode.(*IndexNode[int64])
-			leaf5 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf3 = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+			leaf4 = aPager.pages[11].IndexNode.(*UniqueIndexNode[int64])
+			leaf5 = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{11}, []PageIndex{5, 6})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{11}, []PageIndex{5, 6})
 		//Internal nodes
-		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
-		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{14, 18}, []PageIndex{2, 11, 8})
+		assertUniqueIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertUniqueIndexNode(t, internal2, false, false, PageIndex(0), []int64{14, 18}, []PageIndex{2, 11, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{12}, nil)
-		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{17}, nil)
-		assertIndexNode(t, leaf5, false, true, PageIndex(6), []int64{21}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(6), []int64{12}, nil)
+		assertUniqueIndexNode(t, leaf4, false, true, PageIndex(6), []int64{17}, nil)
+		assertUniqueIndexNode(t, leaf5, false, true, PageIndex(6), []int64{21}, nil)
 
 		// No new pages should be recycled
 		assertFreePages(t, idxPager, []PageIndex{7, 10, 3, 4})
@@ -711,27 +711,27 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		// require.NoError(t, anIndex.print())
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
+			rootNode  = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			internal1 = aPager.pages[5].IndexNode.(*UniqueIndexNode[int64])
+			internal2 = aPager.pages[6].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2 = aPager.pages[9].IndexNode.(*UniqueIndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf3 = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+			leaf4 = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{12}, []PageIndex{5, 6})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{12}, []PageIndex{5, 6})
 		//Internal nodes
-		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
-		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{18}, []PageIndex{2, 8})
+		assertUniqueIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
+		assertUniqueIndexNode(t, internal2, false, false, PageIndex(0), []int64{18}, []PageIndex{2, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
-		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{14, 17}, nil)
-		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{21}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(5), []int64{2}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(5), []int64{6, 7}, nil)
+		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(6), []int64{14, 17}, nil)
+		assertUniqueIndexNode(t, leaf4, false, true, PageIndex(6), []int64{21}, nil)
 
 		// Assert new recycled page
 		assertFreePages(t, idxPager, []PageIndex{11, 7, 10, 3, 4})
@@ -759,20 +759,20 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		// require.NoError(t, anIndex.print())
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			leaf1    = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2    = aPager.pages[9].IndexNode.(*IndexNode[int64])
-			leaf3    = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4    = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			rootNode = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			leaf1    = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2    = aPager.pages[9].IndexNode.(*UniqueIndexNode[int64])
+			leaf3    = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+			leaf4    = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{6, 12, 18}, []PageIndex{1, 9, 2, 8})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{6, 12, 18}, []PageIndex{1, 9, 2, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(0), []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(0), []int64{7}, nil)
-		assertIndexNode(t, leaf3, false, true, PageIndex(0), []int64{14, 17}, nil)
-		assertIndexNode(t, leaf4, false, true, PageIndex(0), []int64{21}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(0), []int64{2}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(0), []int64{7}, nil)
+		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(0), []int64{14, 17}, nil)
+		assertUniqueIndexNode(t, leaf4, false, true, PageIndex(0), []int64{21}, nil)
 
 		// Assert 2 new recycled pages
 		assertFreePages(t, idxPager, []PageIndex{5, 6, 11, 7, 10, 3, 4})
@@ -800,20 +800,20 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		// require.NoError(t, anIndex.print())
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			leaf1    = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2    = aPager.pages[9].IndexNode.(*IndexNode[int64])
-			leaf3    = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4    = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			rootNode = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			leaf1    = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2    = aPager.pages[9].IndexNode.(*UniqueIndexNode[int64])
+			leaf3    = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+			leaf4    = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{6, 12, 18}, []PageIndex{1, 9, 2, 8})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{6, 12, 18}, []PageIndex{1, 9, 2, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(0), []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(0), []int64{7}, nil)
-		assertIndexNode(t, leaf3, false, true, PageIndex(0), []int64{17}, nil)
-		assertIndexNode(t, leaf4, false, true, PageIndex(0), []int64{21}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(0), []int64{2}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(0), []int64{7}, nil)
+		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(0), []int64{17}, nil)
+		assertUniqueIndexNode(t, leaf4, false, true, PageIndex(0), []int64{21}, nil)
 
 		// No new pages should be recycled
 		assertFreePages(t, idxPager, []PageIndex{5, 6, 11, 7, 10, 3, 4})
@@ -841,18 +841,18 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		// require.NoError(t, anIndex.print())
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			leaf1    = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2    = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf3    = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			rootNode = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			leaf1    = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2    = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+			leaf3    = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{12, 18}, []PageIndex{1, 2, 8})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{12, 18}, []PageIndex{1, 2, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(0), []int64{2, 7}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(0), []int64{17}, nil)
-		assertIndexNode(t, leaf3, false, true, PageIndex(0), []int64{21}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(0), []int64{2, 7}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(0), []int64{17}, nil)
+		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(0), []int64{21}, nil)
 
 		// Assert new recycled page
 		assertFreePages(t, idxPager, []PageIndex{9, 5, 6, 11, 7, 10, 3, 4})
@@ -880,18 +880,18 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		// require.NoError(t, anIndex.print())
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			leaf1    = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2    = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf3    = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			rootNode = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			leaf1    = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2    = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+			leaf3    = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{7, 18}, []PageIndex{1, 2, 8})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{7, 18}, []PageIndex{1, 2, 8})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(0), []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(0), []int64{12}, nil)
-		assertIndexNode(t, leaf3, false, true, PageIndex(0), []int64{21}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(0), []int64{2}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(0), []int64{12}, nil)
+		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(0), []int64{21}, nil)
 
 		// No new pages should be recycled
 		assertFreePages(t, idxPager, []PageIndex{9, 5, 6, 11, 7, 10, 3, 4})
@@ -919,16 +919,16 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		// require.NoError(t, anIndex.print())
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			leaf1    = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2    = aPager.pages[2].IndexNode.(*IndexNode[int64])
+			rootNode = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			leaf1    = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2    = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{7}, []PageIndex{1, 2})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{7}, []PageIndex{1, 2})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(0), []int64{2}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(0), []int64{12, 18}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(0), []int64{2}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(0), []int64{12, 18}, nil)
 
 		// Assert new recycled page
 		assertFreePages(t, idxPager, []PageIndex{8, 9, 5, 6, 11, 7, 10, 3, 4})
@@ -956,16 +956,16 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		// require.NoError(t, anIndex.print())
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			leaf1    = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2    = aPager.pages[2].IndexNode.(*IndexNode[int64])
+			rootNode = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
+			leaf1    = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
+			leaf2    = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{12}, []PageIndex{1, 2})
+		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{12}, []PageIndex{1, 2})
 		// Leaf nodes
-		assertIndexNode(t, leaf1, false, true, PageIndex(0), []int64{7}, nil)
-		assertIndexNode(t, leaf2, false, true, PageIndex(0), []int64{18}, nil)
+		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(0), []int64{7}, nil)
+		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(0), []int64{18}, nil)
 
 		// No new pages should be recycled
 		assertFreePages(t, idxPager, []PageIndex{8, 9, 5, 6, 11, 7, 10, 3, 4})
@@ -988,11 +988,11 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		// require.NoError(t, anIndex.print())
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
+			rootNode = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, true, 0, []int64{7, 12}, nil)
+		assertUniqueIndexNode(t, rootNode, true, true, 0, []int64{7, 12}, nil)
 
 		// Assert 2 new recycled pages
 		assertFreePages(t, idxPager, []PageIndex{1, 2, 8, 9, 5, 6, 11, 7, 10, 3, 4})
@@ -1011,11 +1011,11 @@ func TestUniqueIndex_Delete(t *testing.T) {
 		// require.NoError(t, anIndex.print())
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
+			rootNode = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
 		)
 
 		// Root node
-		assertIndexNode(t, rootNode, true, true, 0, nil, nil)
+		assertUniqueIndexNode(t, rootNode, true, true, 0, nil, nil)
 
 		// No new pages should be recycled
 		assertFreePages(t, idxPager, []PageIndex{1, 2, 8, 9, 5, 6, 11, 7, 10, 3, 4})

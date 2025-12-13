@@ -7,11 +7,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestIndexNode_Int8_Marshal(t *testing.T) {
+func TestUniqueIndexNode_Int8_Marshal(t *testing.T) {
 	t.Parallel()
 
 	var (
-		aNode = NewIndexNode[int64]()
+		aNode = NewUniqueIndexNode[int64]()
 	)
 
 	// Populate with values that don't necessarily make sense, we are
@@ -35,7 +35,7 @@ func TestIndexNode_Int8_Marshal(t *testing.T) {
 	data, err := aNode.Marshal(buf)
 	require.NoError(t, err)
 
-	recreatedNode := NewIndexNode[int64]()
+	recreatedNode := NewUniqueIndexNode[int64]()
 	_, err = recreatedNode.Unmarshal(data)
 	require.NoError(t, err)
 
@@ -46,11 +46,11 @@ func TestIndexNode_Int8_Marshal(t *testing.T) {
 	}
 }
 
-func TestIndexNode_Varchar_Marshal(t *testing.T) {
+func TestUniqueIndexNode_Varchar_Marshal(t *testing.T) {
 	t.Parallel()
 
 	var (
-		aNode = NewIndexNode[string]()
+		aNode = NewUniqueIndexNode[string]()
 	)
 
 	// Populate with values that don't necessarily make sense, we are
@@ -74,7 +74,7 @@ func TestIndexNode_Varchar_Marshal(t *testing.T) {
 	data, err := aNode.Marshal(buf)
 	require.NoError(t, err)
 
-	recreatedNode := NewIndexNode[string]()
+	recreatedNode := NewUniqueIndexNode[string]()
 	_, err = recreatedNode.Unmarshal(data)
 	require.NoError(t, err)
 

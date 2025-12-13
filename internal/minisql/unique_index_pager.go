@@ -21,7 +21,7 @@ func (p *indexPager[T]) unmarshal(pageIdx PageIndex, buf []byte) (*Page, error) 
 	totalPages := p.totalPages
 	p.mu.RUnlock()
 	if int(pageIdx) == int(totalPages) {
-		node := NewIndexNode[T]()
+		node := NewUniqueIndexNode[T]()
 		buf[idx] = PageTypeIndex
 		_, err := node.Unmarshal(buf)
 		if err != nil {
@@ -38,7 +38,7 @@ func (p *indexPager[T]) unmarshal(pageIdx PageIndex, buf []byte) (*Page, error) 
 	// Existing page
 	switch buf[idx] {
 	case PageTypeIndex:
-		node := NewIndexNode[T]()
+		node := NewUniqueIndexNode[T]()
 		_, err := node.Unmarshal(buf)
 		if err != nil {
 			return nil, err
