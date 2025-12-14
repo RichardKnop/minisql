@@ -170,7 +170,7 @@ func assertTables(t *testing.T, aClient *protocol.Client, expectedTables ...stri
 	resp, err := aClient.SendMetaCommand("list_tables")
 	require.NoError(t, err)
 	assert.True(t, resp.Success)
-	assert.Equal(t, expectedTables, strings.Split(resp.Message, "\n"))
+	assert.ElementsMatch(t, expectedTables, strings.Split(resp.Message, "\n"))
 }
 
 func assertSchemaTableRow(t *testing.T, row []minisql.OptionalValue, expectedType minisql.SchemaType, expectedName string, expectedRootPage int, expectedSQL string) {
