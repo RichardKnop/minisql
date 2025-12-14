@@ -66,13 +66,13 @@ func TestOverflowPage_Marshal(t *testing.T) {
 		assert.Equal(t, aNode, recreatedNode)
 	})
 
-	t.Run("overflow data", func(t *testing.T) {
+	t.Run("overflows to next page", func(t *testing.T) {
 		aNode := &OverflowPage{
 			Header: OverflowPageHeader{
 				NextPage: 42,
-				DataSize: 1024,
+				DataSize: MaxOverflowPageData,
 			},
-			Data: bytes.Repeat([]byte{'a'}, 1024),
+			Data: bytes.Repeat([]byte{'a'}, MaxOverflowPageData),
 		}
 
 		buf := make([]byte, 0, 100)

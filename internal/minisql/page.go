@@ -11,12 +11,13 @@ const (
 type PageIndex uint32
 
 type Page struct {
-	Index        PageIndex
-	OverflowPage *OverflowPage
-	FreePage     *FreePage
-	InternalNode *InternalNode
-	LeafNode     *LeafNode
-	IndexNode    any
+	Index             PageIndex
+	OverflowPage      *OverflowPage
+	FreePage          *FreePage
+	InternalNode      *InternalNode
+	LeafNode          *LeafNode
+	IndexNode         any
+	IndexOverflowNode *IndexOverflowPage
 }
 
 // Create a deep copy of the page
@@ -40,6 +41,11 @@ func (p *Page) Clone() *Page {
 		}
 	} else if p.IndexNode != nil {
 		pageCopy.IndexNode = copyIndexNode(p.IndexNode)
+	} else if p.IndexOverflowNode != nil {
+		pageCopy.IndexOverflowNode = &IndexOverflowPage{
+			Header: p.IndexOverflowNode.Header,
+			RowIDs: append([]RowID{}, p.IndexOverflowNode.RowIDs...),
+		}
 	}
 
 	return pageCopy

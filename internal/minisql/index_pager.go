@@ -7,6 +7,7 @@ import (
 
 type indexPager[T IndexKey] struct {
 	*pagerImpl
+	unique bool
 }
 
 func (p *indexPager[T]) GetPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
@@ -21,7 +22,7 @@ func (p *indexPager[T]) unmarshal(pageIdx PageIndex, buf []byte) (*Page, error) 
 	totalPages := p.totalPages
 	p.mu.RUnlock()
 	if int(pageIdx) == int(totalPages) {
-		node := NewUniqueIndexNode[T]()
+		node := NewIndexNode[T](p.unique)
 		buf[idx] = PageTypeIndex
 		_, err := node.Unmarshal(buf)
 		if err != nil {
@@ -38,7 +39,7 @@ func (p *indexPager[T]) unmarshal(pageIdx PageIndex, buf []byte) (*Page, error) 
 	// Existing page
 	switch buf[idx] {
 	case PageTypeIndex:
-		node := NewUniqueIndexNode[T]()
+		node := NewIndexNode[T](p.unique)
 		_, err := node.Unmarshal(buf)
 		if err != nil {
 			return nil, err
@@ -56,7 +57,18 @@ func (p *indexPager[T]) unmarshal(pageIdx PageIndex, buf []byte) (*Page, error) 
 			FreePage: aFreePage,
 		}
 		return p.pages[pageIdx], nil
+	case PageTypeIndexOverflow:
+		// Index overflow page
+		overflow := new(IndexOverflowPage)
+		if err := overflow.Unmarshal(buf[idx:]); err != nil {
+			return nil, err
+		}
+		p.pages[pageIdx] = &Page{
+			Index:             pageIdx,
+			IndexOverflowNode: overflow,
+		}
+		return p.pages[pageIdx], nil
 	}
 
-	return nil, fmt.Errorf("unrecognised page type byte %d", buf[idx])
+	return nil, fmt.Errorf("unrecognised index page type byte %d", buf[idx])
 }

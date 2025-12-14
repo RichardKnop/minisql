@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestUniqueIndex_ScanAll(t *testing.T) {
+func TestIndex_ScanAll(t *testing.T) {
 	var (
 		aPager    = initTest(t)
 		ctx       = context.Background()
@@ -17,7 +17,7 @@ func TestUniqueIndex_ScanAll(t *testing.T) {
 		aColumn   = Column{Name: "test_column", Kind: Int8, Size: 8}
 		txManager = NewTransactionManager(zap.NewNop())
 		idxPager  = NewTransactionalPager(
-			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
+			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size), true),
 			txManager,
 		)
 	)
@@ -72,7 +72,7 @@ func TestUniqueIndex_ScanAll(t *testing.T) {
 	})
 }
 
-func TestUniqueIndex_ScanRange(t *testing.T) {
+func TestIndex_ScanRange(t *testing.T) {
 	var (
 		aPager    = initTest(t)
 		ctx       = context.Background()
@@ -80,7 +80,7 @@ func TestUniqueIndex_ScanRange(t *testing.T) {
 		aColumn   = Column{Name: "test_column", Kind: Int8, Size: 8}
 		txManager = NewTransactionManager(zap.NewNop())
 		idxPager  = NewTransactionalPager(
-			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
+			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size), true),
 			txManager,
 		)
 	)

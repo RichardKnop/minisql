@@ -8,7 +8,7 @@ import (
 type indexScanner func(key any, rowID RowID) error
 
 // ScanAll iterates over all keys in the index in order using in-order traversal
-func (ui *UniqueIndex[T]) ScanAll(ctx context.Context, reverse bool, callback indexScanner) error {
+func (ui *Index[T]) ScanAll(ctx context.Context, reverse bool, callback indexScanner) error {
 	if reverse {
 		return ui.scanDescending(ctx, ui.GetRootPageIdx(), callback)
 	}
@@ -18,20 +18,22 @@ func (ui *UniqueIndex[T]) ScanAll(ctx context.Context, reverse bool, callback in
 // scanAscending performs in-order traversal (ascending order)
 // Structure: child[0] key[0] child[1] key[1] ... child[n-1] key[n-1] child[n]
 // where child[i] is stored in Cells[i].Child and child[n] is RightChild
-func (ui *UniqueIndex[T]) scanAscending(ctx context.Context, pageIdx PageIndex, callback indexScanner) error {
+func (ui *Index[T]) scanAscending(ctx context.Context, pageIdx PageIndex, callback indexScanner) error {
 	aPage, err := ui.pager.ReadPage(ctx, pageIdx)
 	if err != nil {
 		return err
 	}
 
-	aNode := aPage.IndexNode.(*UniqueIndexNode[T])
+	aNode := aPage.IndexNode.(*IndexNode[T])
 
 	if aNode.Header.IsLeaf {
 		// Leaf node: just visit all keys in order
 		for i := uint32(0); i < aNode.Header.Keys; i++ {
 			aCell := aNode.Cells[i]
-			if err := callback(aCell.Key, aCell.RowID); err != nil {
-				return err
+			for _, rowID := range aCell.RowIDs {
+				if err := callback(aCell.Key, rowID); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -49,8 +51,10 @@ func (ui *UniqueIndex[T]) scanAscending(ctx context.Context, pageIdx PageIndex, 
 		}
 
 		// Visit the key itself
-		if err := callback(aCell.Key, aCell.RowID); err != nil {
-			return err
+		for _, rowID := range aCell.RowIDs {
+			if err := callback(aCell.Key, rowID); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -65,20 +69,22 @@ func (ui *UniqueIndex[T]) scanAscending(ctx context.Context, pageIdx PageIndex, 
 }
 
 // scanDescending performs reverse in-order traversal (descending order)
-func (ui *UniqueIndex[T]) scanDescending(ctx context.Context, pageIdx PageIndex, callback indexScanner) error {
+func (ui *Index[T]) scanDescending(ctx context.Context, pageIdx PageIndex, callback indexScanner) error {
 	aPage, err := ui.pager.ReadPage(ctx, pageIdx)
 	if err != nil {
 		return err
 	}
 
-	aNode := aPage.IndexNode.(*UniqueIndexNode[T])
+	aNode := aPage.IndexNode.(*IndexNode[T])
 
 	if aNode.Header.IsLeaf {
 		// Leaf node: visit all keys in reverse order
 		for i := int(aNode.Header.Keys) - 1; i >= 0; i-- {
 			aCell := aNode.Cells[i]
-			if err := callback(aCell.Key, aCell.RowID); err != nil {
-				return err
+			for _, rowID := range aCell.RowIDs {
+				if err := callback(aCell.Key, rowID); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -97,8 +103,10 @@ func (ui *UniqueIndex[T]) scanDescending(ctx context.Context, pageIdx PageIndex,
 		aCell := aNode.Cells[i]
 
 		// Visit the key
-		if err := callback(aCell.Key, aCell.RowID); err != nil {
-			return err
+		for _, rowID := range aCell.RowIDs {
+			if err := callback(aCell.Key, rowID); err != nil {
+				return err
+			}
 		}
 
 		// Visit left child of this key
@@ -113,7 +121,7 @@ func (ui *UniqueIndex[T]) scanDescending(ctx context.Context, pageIdx PageIndex,
 }
 
 // ScanRange scans keys within the specified range using in-order traversal with range checks.
-func (ui *UniqueIndex[T]) ScanRange(ctx context.Context, rangeCondition RangeCondition, callback indexScanner) error {
+func (ui *Index[T]) ScanRange(ctx context.Context, rangeCondition RangeCondition, callback indexScanner) error {
 	// If lower bound exists, seek to it
 	if rangeCondition.Lower != nil {
 		aPage, err := ui.pager.ReadPage(ctx, ui.GetRootPageIdx())
@@ -121,18 +129,20 @@ func (ui *UniqueIndex[T]) ScanRange(ctx context.Context, rangeCondition RangeCon
 			return err
 		}
 
-		aCursor, _, err := ui.Seek(ctx, aPage, rangeCondition.Lower.Value.(T))
+		aCursor, ok, err := ui.Seek(ctx, aPage, rangeCondition.Lower.Value.(T))
 		if err != nil {
 			return err
 		}
-		return ui.scanRangeFrom(ctx, aCursor.PageIdx, aCursor.CellIdx, rangeCondition, callback)
+		if ok {
+			return ui.scanRangeFrom(ctx, aCursor.PageIdx, aCursor.CellIdx, rangeCondition, callback)
+		}
 	}
 	// Otherwise, scan from the beginning
 	return ui.scanRangeRecursive(ctx, ui.GetRootPageIdx(), rangeCondition, callback)
 }
 
 // scanRangeFrom scans in in-order traversal starting from a given page and cell index (for B-tree).
-func (ui *UniqueIndex[T]) scanRangeFrom(
+func (ui *Index[T]) scanRangeFrom(
 	ctx context.Context,
 	pageIdx PageIndex,
 	cellIdx uint32,
@@ -143,7 +153,7 @@ func (ui *UniqueIndex[T]) scanRangeFrom(
 	if err != nil {
 		return err
 	}
-	aNode := aPage.IndexNode.(*UniqueIndexNode[T])
+	aNode := aPage.IndexNode.(*IndexNode[T])
 
 	// Start at cellIdx, traverse in-order
 	for i := cellIdx; i < aNode.Header.Keys; i++ {
@@ -175,8 +185,10 @@ func (ui *UniqueIndex[T]) scanRangeFrom(
 		}
 
 		// Key is within range
-		if err := callback(key, aCell.RowID); err != nil {
-			return err
+		for _, rowID := range aCell.RowIDs {
+			if err := callback(key, rowID); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -203,7 +215,7 @@ func (ui *UniqueIndex[T]) scanRangeFrom(
 		if err != nil {
 			return fmt.Errorf("read parent page: %w", err)
 		}
-		parentNode := parentPage.IndexNode.(*UniqueIndexNode[T])
+		parentNode := parentPage.IndexNode.(*IndexNode[T])
 		if parentNode.Header.IsRoot {
 			reachedRoot = true
 		} else {
@@ -235,8 +247,10 @@ func (ui *UniqueIndex[T]) scanRangeFrom(
 				key   = aCell.Key
 			)
 
-			if err := callback(key, aCell.RowID); err != nil {
-				return err
+			for _, rowID := range aCell.RowIDs {
+				if err := callback(key, rowID); err != nil {
+					return err
+				}
 			}
 
 			nextChildIdx, err := parentNode.Child(uint32(idx) + 1)
@@ -253,12 +267,12 @@ func (ui *UniqueIndex[T]) scanRangeFrom(
 }
 
 // scanRangeRecursive traverses the tree in-order, applying range checks at each step.
-func (ui *UniqueIndex[T]) scanRangeRecursive(ctx context.Context, pageIdx PageIndex, rangeCondition RangeCondition, callback indexScanner) error {
+func (ui *Index[T]) scanRangeRecursive(ctx context.Context, pageIdx PageIndex, rangeCondition RangeCondition, callback indexScanner) error {
 	aPage, err := ui.pager.ReadPage(ctx, pageIdx)
 	if err != nil {
 		return err
 	}
-	aNode := aPage.IndexNode.(*UniqueIndexNode[T])
+	aNode := aPage.IndexNode.(*IndexNode[T])
 
 	for i := uint32(0); i < aNode.Header.Keys; i++ {
 		// Visit left child before key[i]
@@ -289,8 +303,10 @@ func (ui *UniqueIndex[T]) scanRangeRecursive(ctx context.Context, pageIdx PageIn
 		}
 
 		// Key is within range
-		if err := callback(key, aCell.RowID); err != nil {
-			return err
+		for _, rowID := range aCell.RowIDs {
+			if err := callback(key, rowID); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -298,6 +314,53 @@ func (ui *UniqueIndex[T]) scanRangeRecursive(ctx context.Context, pageIdx PageIn
 	if !aNode.Header.IsLeaf && aNode.Header.RightChild != 0 {
 		if err := ui.scanRangeRecursive(ctx, aNode.Header.RightChild, rangeCondition, callback); err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+type indexCallback func(page *Page)
+
+func (ui *Index[T]) BFS(ctx context.Context, f indexCallback) error {
+	rootPage, err := ui.pager.ReadPage(ctx, ui.GetRootPageIdx())
+	if err != nil {
+		return err
+	}
+
+	// Create a queue and enqueue the root node
+	queue := make([]*Page, 0, 1)
+	queue = append(queue, rootPage)
+
+	// Repeat until queue is empty
+	for len(queue) > 0 {
+		// Get the first node in the queue
+		current := queue[0]
+
+		// Dequeue
+		queue = queue[1:]
+
+		f(current)
+
+		if current.IndexNode != nil {
+			for i := range current.IndexNode.(*IndexNode[T]).Header.Keys {
+				idxCell := current.IndexNode.(*IndexNode[T]).Cells[i]
+				if idxCell.Child == 0 {
+					continue
+				}
+				aPage, err := ui.pager.ReadPage(ctx, idxCell.Child)
+				if err != nil {
+					return err
+				}
+				queue = append(queue, aPage)
+			}
+			if current.IndexNode.(*IndexNode[T]).Header.RightChild > 0 && current.IndexNode.(*IndexNode[T]).Header.RightChild != RIGHT_CHILD_NOT_SET {
+				aPage, err := ui.pager.ReadPage(ctx, current.IndexNode.(*IndexNode[T]).Header.RightChild)
+				if err != nil {
+					return err
+				}
+				queue = append(queue, aPage)
+			}
 		}
 	}
 

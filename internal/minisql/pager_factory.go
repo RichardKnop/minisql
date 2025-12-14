@@ -7,20 +7,20 @@ func (p *pagerImpl) ForTable(columns []Column) Pager {
 	}
 }
 
-func (p *pagerImpl) ForIndex(kind ColumnKind, keySize uint64) Pager {
+func (p *pagerImpl) ForIndex(kind ColumnKind, keySize uint64, unique bool) Pager {
 	switch kind {
 	case Boolean:
-		return &indexPager[int8]{p}
+		return &indexPager[int8]{p, unique}
 	case Int4:
-		return &indexPager[int32]{p}
+		return &indexPager[int32]{p, unique}
 	case Int8:
-		return &indexPager[int64]{p}
+		return &indexPager[int64]{p, unique}
 	case Real:
-		return &indexPager[float32]{p}
+		return &indexPager[float32]{p, unique}
 	case Double:
-		return &indexPager[float64]{p}
+		return &indexPager[float64]{p, unique}
 	case Varchar:
-		return &indexPager[string]{p}
+		return &indexPager[string]{p, unique}
 	default:
 		return nil
 	}
