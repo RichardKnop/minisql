@@ -145,7 +145,7 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 	buf := make([]byte, p.pageSize)
 	_, err := marshalPage(aPage, buf)
 	if err != nil {
-		return err
+		return fmt.Errorf("error flushing page %d: %w", aPage.Index, err)
 	}
 
 	if pageIdx != 0 {
@@ -170,33 +170,39 @@ func marshalPage(aPage *Page, buf []byte) ([]byte, error) {
 	if aPage.OverflowPage != nil {
 		data, err := aPage.OverflowPage.Marshal(buf)
 		if err != nil {
-			return nil, fmt.Errorf("error flushing overflow page %d: %w", aPage.Index, err)
+			return nil, fmt.Errorf("error marshaling overflow node: %w", err)
 		}
 		return data, nil
 	} else if aPage.FreePage != nil {
 		data, err := aPage.FreePage.Marshal(buf)
 		if err != nil {
-			return nil, fmt.Errorf("error flushing freepage %d: %w", aPage.Index, err)
+			return nil, fmt.Errorf("error marshaling freepage node: %w", err)
 		}
 		return data, nil
 	} else if aPage.LeafNode != nil {
 		data, err := aPage.LeafNode.Marshal(buf)
 		if err != nil {
-			return nil, fmt.Errorf("error flushing leaf page %d: %w", aPage.Index, err)
+			return nil, fmt.Errorf("error marshaling leaf node: %w", err)
 		}
 		return data, nil
 	} else if aPage.InternalNode != nil {
 		data, err := aPage.InternalNode.Marshal(buf)
 		if err != nil {
-			return nil, fmt.Errorf("error flushing internal page %d: %w", aPage.Index, err)
+			return nil, fmt.Errorf("error marshaling internal node: %w", err)
 		}
 		return data, nil
 	} else if aPage.IndexNode != nil {
 		data, err := marshalIndexNode(aPage.IndexNode, buf)
 		if err != nil {
-			return nil, fmt.Errorf("error flushing index page %d: %w", aPage.Index, err)
+			return nil, fmt.Errorf("error marshaling index node: %w", err)
+		}
+		return data, nil
+	} else if aPage.IndexOverflowNode != nil {
+		data, err := aPage.IndexOverflowNode.Marshal(buf)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling index overflow node: %w", err)
 		}
 		return data, nil
 	}
-	return nil, fmt.Errorf("error flushing page %d, neither internal nor leaf node nor free page", aPage.Index)
+	return nil, fmt.Errorf("no known node type found")
 }

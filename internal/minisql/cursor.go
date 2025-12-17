@@ -333,7 +333,7 @@ func (c *Cursor) deletePrimaryKey(ctx context.Context) error {
 	if !ok {
 		return fmt.Errorf("primary key %s not found in row", c.Table.PrimaryKey.Name)
 	}
-	if err := c.Table.PrimaryKey.Index.Delete(ctx, primaryKeyValue.Value); err != nil {
+	if err := c.Table.PrimaryKey.Index.Delete(ctx, primaryKeyValue.Value, aRow.Key); err != nil {
 		return fmt.Errorf("failed to delete primary key %s: %w", c.Table.PrimaryKey.Name, err)
 	}
 

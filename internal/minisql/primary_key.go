@@ -85,7 +85,7 @@ func (t *Table) updatePrimaryKey(ctx context.Context, oldPkValue OptionalValue, 
 	if err := t.PrimaryKey.Index.Insert(ctx, castedValue, rowID); err != nil {
 		return fmt.Errorf("failed to insert new primary key %s: %w", t.PrimaryKey.Name, err)
 	}
-	if err := t.PrimaryKey.Index.Delete(ctx, oldPkValue.Value); err != nil {
+	if err := t.PrimaryKey.Index.Delete(ctx, oldPkValue.Value, rowID); err != nil {
 		return fmt.Errorf("failed to delete old primary key %s: %w", t.PrimaryKey.Name, err)
 	}
 

@@ -7,11 +7,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUniqueIndexNode_Int8_Marshal(t *testing.T) {
+func TestIndexNode_Int8_Marshal(t *testing.T) {
 	t.Parallel()
 
 	var (
-		aNode = NewUniqueIndexNode[int64]()
+		aNode = NewIndexNode[int64](true)
 	)
 
 	// Populate with values that don't necessarily make sense, we are
@@ -25,17 +25,17 @@ func TestUniqueIndexNode_Int8_Marshal(t *testing.T) {
 	}
 
 	aNode.Cells[0].Key = int64(125)
-	aNode.Cells[0].RowID = 125
+	aNode.Cells[0].RowIDs = []RowID{125}
 	aNode.Cells[0].Child = 7
 	aNode.Cells[1].Key = int64(126)
-	aNode.Cells[1].RowID = 126
+	aNode.Cells[1].RowIDs = []RowID{126}
 	aNode.Cells[1].Child = 8
 
 	buf := make([]byte, aNode.Size())
 	data, err := aNode.Marshal(buf)
 	require.NoError(t, err)
 
-	recreatedNode := NewUniqueIndexNode[int64]()
+	recreatedNode := NewIndexNode[int64](true)
 	_, err = recreatedNode.Unmarshal(data)
 	require.NoError(t, err)
 
@@ -46,11 +46,11 @@ func TestUniqueIndexNode_Int8_Marshal(t *testing.T) {
 	}
 }
 
-func TestUniqueIndexNode_Varchar_Marshal(t *testing.T) {
+func TestIndexNode_Varchar_Marshal(t *testing.T) {
 	t.Parallel()
 
 	var (
-		aNode = NewUniqueIndexNode[string]()
+		aNode = NewIndexNode[string](true)
 	)
 
 	// Populate with values that don't necessarily make sense, we are
@@ -64,17 +64,17 @@ func TestUniqueIndexNode_Varchar_Marshal(t *testing.T) {
 	}
 
 	aNode.Cells[0].Key = "foo"
-	aNode.Cells[0].RowID = 125
+	aNode.Cells[0].RowIDs = []RowID{125}
 	aNode.Cells[0].Child = 7
 	aNode.Cells[1].Key = "bar qux"
-	aNode.Cells[1].RowID = 126
+	aNode.Cells[1].RowIDs = []RowID{126}
 	aNode.Cells[1].Child = 8
 
 	buf := make([]byte, aNode.Size())
 	data, err := aNode.Marshal(buf)
 	require.NoError(t, err)
 
-	recreatedNode := NewUniqueIndexNode[string]()
+	recreatedNode := NewIndexNode[string](true)
 	_, err = recreatedNode.Unmarshal(data)
 	require.NoError(t, err)
 

@@ -966,32 +966,32 @@ func (t *Table) newPrimaryKeyIndex(aPager *TransactionalPager, freePage *Page) (
 
 	switch pkColumn.Kind {
 	case Boolean:
-		indexNode := NewUniqueIndexNode[int8]()
+		indexNode := NewIndexNode[int8](true)
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Int4:
-		indexNode := NewUniqueIndexNode[int32]()
+		indexNode := NewIndexNode[int32](true)
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Int8:
-		indexNode := NewUniqueIndexNode[int64]()
+		indexNode := NewIndexNode[int64](true)
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Real:
-		indexNode := NewUniqueIndexNode[float32]()
+		indexNode := NewIndexNode[float32](true)
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Double:
-		indexNode := NewUniqueIndexNode[float64]()
+		indexNode := NewIndexNode[float64](true)
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Varchar:
-		indexNode := NewUniqueIndexNode[string]()
+		indexNode := NewIndexNode[string](true)
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
@@ -1068,11 +1068,19 @@ func (t *Table) primaryKeyIndex(aPager *TransactionalPager, rootPageIdx PageInde
 func (t *Table) print() error {
 	return t.BFS(context.Background(), func(aPage *Page) {
 		if aPage.InternalNode != nil {
-			fmt.Println("Internal node,", "page:", aPage.Index, "root:", aPage.InternalNode.Header.IsRoot, "number of keys:", aPage.InternalNode.Header.KeysNum, "parent:", aPage.InternalNode.Header.Parent)
+			fmt.Println("Internal node,",
+				"page:", aPage.Index,
+				"root:", aPage.InternalNode.Header.IsRoot,
+				"number of keys:", aPage.InternalNode.Header.KeysNum,
+				"parent:", aPage.InternalNode.Header.Parent)
 			fmt.Println("Keys:", aPage.InternalNode.Keys())
 			fmt.Println("Children:", aPage.InternalNode.Children())
 		} else {
-			fmt.Println("Leaf node,", "page:", aPage.Index, "number of cells:", aPage.LeafNode.Header.Cells, "parent:", aPage.LeafNode.Header.Parent, "next leaf:", aPage.LeafNode.Header.NextLeaf)
+			fmt.Println("Leaf node,",
+				"page:", aPage.Index,
+				"number of cells:", aPage.LeafNode.Header.Cells,
+				"parent:", aPage.LeafNode.Header.Parent,
+				"next leaf:", aPage.LeafNode.Header.NextLeaf)
 			fmt.Println("Keys:", aPage.LeafNode.Keys())
 		}
 		fmt.Println("---------")

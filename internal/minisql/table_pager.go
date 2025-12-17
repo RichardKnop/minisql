@@ -11,6 +11,7 @@ const (
 	PageTypeOverflow
 	PageTypeIndex
 	PageTypeFree
+	PageTypeIndexOverflow
 )
 
 type tablePager struct {
@@ -99,5 +100,5 @@ func (p *tablePager) unmarshal(pageIdx PageIndex, buf []byte) (*Page, error) {
 		return p.pages[pageIdx], nil
 	}
 
-	return nil, fmt.Errorf("unrecognised page type byte %d", buf[idx])
+	return nil, fmt.Errorf("unrecognised table page type byte %d", buf[idx])
 }

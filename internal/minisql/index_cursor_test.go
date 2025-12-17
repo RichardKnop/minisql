@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestUniqueIndex_Seek(t *testing.T) {
+func TestIndex_Seek(t *testing.T) {
 	var (
 		aPager     = initTest(t)
 		ctx        = context.Background()
@@ -17,7 +17,7 @@ func TestUniqueIndex_Seek(t *testing.T) {
 		aColumn    = Column{Name: "test_column", Kind: Int8, Size: 8}
 		txManager  = NewTransactionManager(zap.NewNop())
 		indexPager = NewTransactionalPager(
-			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
+			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size), true),
 			txManager,
 		)
 	)
@@ -59,7 +59,7 @@ func TestUniqueIndex_Seek(t *testing.T) {
 		aCursor, ok, err := anIndex.Seek(context.Background(), aRootPage, int64(27))
 		require.NoError(t, err)
 		assert.False(t, ok)
-		assert.Equal(t, IndexCursor{}, aCursor)
+		assert.Equal(t, IndexCursor[int64]{}, aCursor)
 	})
 
 	t.Run("root node key", func(t *testing.T) {
@@ -111,7 +111,7 @@ func TestUniqueIndex_Seek(t *testing.T) {
 	})
 }
 
-func TestUniqueIndex_SeekLastKey(t *testing.T) {
+func TestIndex_SeekLastKey(t *testing.T) {
 	var (
 		aPager     = initTest(t)
 		ctx        = context.Background()
@@ -119,7 +119,7 @@ func TestUniqueIndex_SeekLastKey(t *testing.T) {
 		aColumn    = Column{Name: "test_column", Kind: Int8, Size: 8}
 		txManager  = NewTransactionManager(zap.NewNop())
 		indexPager = NewTransactionalPager(
-			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
+			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size), true),
 			txManager,
 		)
 	)
@@ -130,7 +130,7 @@ func TestUniqueIndex_SeekLastKey(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		indexNode := NewUniqueIndexNode[int64]()
+		indexNode := NewIndexNode[int64](true)
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode

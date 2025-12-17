@@ -6,7 +6,7 @@ import (
 
 type PagerFactory interface {
 	ForTable([]Column) Pager
-	ForIndex(kind ColumnKind, keySize uint64) Pager
+	ForIndex(kind ColumnKind, keySize uint64, unique bool) Pager
 }
 
 type PageFlusher interface {
@@ -35,11 +35,10 @@ type TxPager interface {
 
 type BTreeIndex interface {
 	GetRootPageIdx() PageIndex
-	Find(ctx context.Context, keyAny any) (RowID, error)
-	Seek(ctx context.Context, aPage *Page, keyAny any) (IndexCursor, bool, error)
+	FindRowIDs(ctx context.Context, key any) ([]RowID, error)
 	SeekLastKey(ctx context.Context, pageIdx PageIndex) (any, error)
 	Insert(ctx context.Context, key any, rowID RowID) error
-	Delete(ctx context.Context, key any) error
+	Delete(ctx context.Context, key any, rowID RowID) error
 	ScanAll(ctx context.Context, reverse bool, callback indexScanner) error
 	ScanRange(ctx context.Context, rangeCondition RangeCondition, callback indexScanner) error
 	BFS(ctx context.Context, f indexCallback) error

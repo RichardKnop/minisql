@@ -37,7 +37,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 	require.NoError(t, err)
 
 	primaryKeyPager := NewTransactionalPager(
-		aPager.ForIndex(aTable.PrimaryKey.Column.Kind, uint64(aTable.PrimaryKey.Column.Size)),
+		aPager.ForIndex(aTable.PrimaryKey.Column.Kind, uint64(aTable.PrimaryKey.Column.Size), true),
 		aTable.txManager,
 	)
 

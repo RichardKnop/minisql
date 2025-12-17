@@ -223,7 +223,7 @@ func (d *Database) init(ctx context.Context) error {
 				return fmt.Errorf("table %s for primary key index %s does not exist", tableName, pkName)
 			}
 			primaryKeyPager := NewTransactionalPager(
-				d.factory.ForIndex(aTable.PrimaryKey.Column.Kind, uint64(aTable.PrimaryKey.Column.Size)),
+				d.factory.ForIndex(aTable.PrimaryKey.Column.Kind, uint64(aTable.PrimaryKey.Column.Size), true),
 				d.txManager,
 			)
 			rootPageIdx := PageIndex(aRow.Values[2].Value.(int32))
@@ -459,7 +459,7 @@ func (d *Database) createPrimaryKeyIndex(ctx context.Context, aTable *Table) (BT
 	d.logger.Sugar().With("column", pkColumn.Name).Debug("creating primary key")
 
 	primaryKeyPager := NewTransactionalPager(
-		d.factory.ForIndex(pkColumn.Kind, uint64(pkColumn.Size)),
+		d.factory.ForIndex(pkColumn.Kind, uint64(pkColumn.Size), true),
 		d.txManager,
 	)
 	freePage, err := primaryKeyPager.GetFreePage(ctx)

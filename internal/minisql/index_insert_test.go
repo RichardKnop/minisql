@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestUniqueIndex_Insert(t *testing.T) {
+func TestIndex_Insert(t *testing.T) {
 	var (
 		aPager     = initTest(t)
 		ctx        = context.Background()
@@ -17,7 +17,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		aColumn    = Column{Name: "test_column", Kind: Int8, Size: 8}
 		txManager  = NewTransactionManager(zap.NewNop())
 		indexPager = NewTransactionalPager(
-			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
+			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size), true),
 			txManager,
 		)
 	)
@@ -45,8 +45,8 @@ func TestUniqueIndex_Insert(t *testing.T) {
 
 		// require.NoError(t, anIndex.print())
 
-		rootNode := aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
-		assertUniqueIndexNode(t, rootNode, true, true, 0, []int64{1, 2, 3}, nil)
+		rootNode := aPager.pages[0].IndexNode.(*IndexNode[int64])
+		assertIndexNode(t, rootNode, true, true, 0, []int64{1, 2, 3}, nil)
 	})
 
 	t.Run("Insert duplicate key fails", func(t *testing.T) {
@@ -76,13 +76,13 @@ func TestUniqueIndex_Insert(t *testing.T) {
 
 		// require.NoError(t, anIndex.print())
 
-		rootNode := aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
-		leftChild := aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
-		rightChild := aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
+		rootNode := aPager.pages[0].IndexNode.(*IndexNode[int64])
+		leftChild := aPager.pages[1].IndexNode.(*IndexNode[int64])
+		rightChild := aPager.pages[2].IndexNode.(*IndexNode[int64])
 
-		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{2}, []PageIndex{1, 2})
-		assertUniqueIndexNode(t, leftChild, false, true, PageIndex(0), []int64{1}, nil)
-		assertUniqueIndexNode(t, rightChild, false, true, PageIndex(0), []int64{3, 4}, nil)
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{2}, []PageIndex{1, 2})
+		assertIndexNode(t, leftChild, false, true, PageIndex(0), []int64{1}, nil)
+		assertIndexNode(t, rightChild, false, true, PageIndex(0), []int64{3, 4}, nil)
 	})
 
 	t.Run("Insert 2 more keys, another split", func(t *testing.T) {
@@ -110,16 +110,16 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		//require.NoError(t, anIndex.print())
 
 		var (
-			rootNode    = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
-			leftChild   = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
-			middleChild = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
-			rightChild  = aPager.pages[3].IndexNode.(*UniqueIndexNode[int64])
+			rootNode    = aPager.pages[0].IndexNode.(*IndexNode[int64])
+			leftChild   = aPager.pages[1].IndexNode.(*IndexNode[int64])
+			middleChild = aPager.pages[2].IndexNode.(*IndexNode[int64])
+			rightChild  = aPager.pages[3].IndexNode.(*IndexNode[int64])
 		)
 
-		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{2, 4}, []PageIndex{1, 2, 3})
-		assertUniqueIndexNode(t, leftChild, false, true, PageIndex(0), []int64{1}, nil)
-		assertUniqueIndexNode(t, middleChild, false, true, PageIndex(0), []int64{3}, nil)
-		assertUniqueIndexNode(t, rightChild, false, true, PageIndex(0), []int64{5, 6}, nil)
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{2, 4}, []PageIndex{1, 2, 3})
+		assertIndexNode(t, leftChild, false, true, PageIndex(0), []int64{1}, nil)
+		assertIndexNode(t, middleChild, false, true, PageIndex(0), []int64{3}, nil)
+		assertIndexNode(t, rightChild, false, true, PageIndex(0), []int64{5, 6}, nil)
 	})
 
 	t.Run("Insert 2 more keys, another split", func(t *testing.T) {
@@ -147,20 +147,20 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		//require.NoError(t, anIndex.print())
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
-			leaf1    = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
-			leaf2    = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
-			leaf3    = aPager.pages[3].IndexNode.(*UniqueIndexNode[int64])
-			leaf4    = aPager.pages[4].IndexNode.(*UniqueIndexNode[int64])
+			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
+			leaf1    = aPager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2    = aPager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf3    = aPager.pages[3].IndexNode.(*IndexNode[int64])
+			leaf4    = aPager.pages[4].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
-		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{2, 4, 6}, []PageIndex{1, 2, 3, 4})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{2, 4, 6}, []PageIndex{1, 2, 3, 4})
 		// Leaf nodes
-		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(0), []int64{1}, nil)
-		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(0), []int64{3}, nil)
-		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(0), []int64{5}, nil)
-		assertUniqueIndexNode(t, leaf4, false, true, PageIndex(0), []int64{7, 8}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(0), []int64{1}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(0), []int64{3}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(0), []int64{5}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(0), []int64{7, 8}, nil)
 	})
 
 	t.Run("Insert 1 more key, internal split", func(t *testing.T) {
@@ -187,25 +187,25 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		//require.NoError(t, anIndex.print())
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*UniqueIndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*UniqueIndexNode[int64])
-			leaf1     = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
-			leaf2     = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
-			leaf3     = aPager.pages[3].IndexNode.(*UniqueIndexNode[int64])
-			leaf4     = aPager.pages[4].IndexNode.(*UniqueIndexNode[int64])
+			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
+			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
+			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
+			leaf1     = aPager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2     = aPager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf3     = aPager.pages[3].IndexNode.(*IndexNode[int64])
+			leaf4     = aPager.pages[4].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
-		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{4}, []PageIndex{5, 6})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{4}, []PageIndex{5, 6})
 		// Internal nodes
-		assertUniqueIndexNode(t, internal1, false, false, PageIndex(0), []int64{2}, []PageIndex{1, 2})
-		assertUniqueIndexNode(t, internal2, false, false, PageIndex(0), []int64{6}, []PageIndex{3, 4})
+		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{2}, []PageIndex{1, 2})
+		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{6}, []PageIndex{3, 4})
 		// Leaf nodes
-		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(5), []int64{1}, nil)
-		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(5), []int64{3}, nil)
-		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(6), []int64{5}, nil)
-		assertUniqueIndexNode(t, leaf4, false, true, PageIndex(6), []int64{7, 8, 9}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{1}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{3}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{5}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{7, 8, 9}, nil)
 	})
 
 	t.Run("Keep inserting more keys", func(t *testing.T) {
@@ -237,33 +237,33 @@ func TestUniqueIndex_Insert(t *testing.T) {
 		//require.NoError(t, anIndex.print())
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*UniqueIndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*UniqueIndexNode[int64])
-			internal3 = aPager.pages[9].IndexNode.(*UniqueIndexNode[int64])
-			leaf1     = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
-			leaf2     = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
-			leaf3     = aPager.pages[3].IndexNode.(*UniqueIndexNode[int64])
-			leaf4     = aPager.pages[4].IndexNode.(*UniqueIndexNode[int64])
-			leaf5     = aPager.pages[7].IndexNode.(*UniqueIndexNode[int64])
-			leaf6     = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
-			leaf7     = aPager.pages[10].IndexNode.(*UniqueIndexNode[int64])
+			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
+			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
+			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
+			internal3 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1     = aPager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2     = aPager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf3     = aPager.pages[3].IndexNode.(*IndexNode[int64])
+			leaf4     = aPager.pages[4].IndexNode.(*IndexNode[int64])
+			leaf5     = aPager.pages[7].IndexNode.(*IndexNode[int64])
+			leaf6     = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf7     = aPager.pages[10].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
-		assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{4, 8}, []PageIndex{5, 6, 9})
+		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{4, 8}, []PageIndex{5, 6, 9})
 		// Internal nodes
-		assertUniqueIndexNode(t, internal1, false, false, PageIndex(0), []int64{2}, []PageIndex{1, 2})
-		assertUniqueIndexNode(t, internal2, false, false, PageIndex(0), []int64{6}, []PageIndex{3, 4})
-		assertUniqueIndexNode(t, internal3, false, false, PageIndex(0), []int64{10, 12}, []PageIndex{7, 8, 10})
+		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{2}, []PageIndex{1, 2})
+		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{6}, []PageIndex{3, 4})
+		assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{10, 12}, []PageIndex{7, 8, 10})
 		// Leaf nodes
-		assertUniqueIndexNode(t, leaf1, false, true, PageIndex(5), []int64{1}, nil)
-		assertUniqueIndexNode(t, leaf2, false, true, PageIndex(5), []int64{3}, nil)
-		assertUniqueIndexNode(t, leaf3, false, true, PageIndex(6), []int64{5}, nil)
-		assertUniqueIndexNode(t, leaf4, false, true, PageIndex(6), []int64{7}, nil)
-		assertUniqueIndexNode(t, leaf5, false, true, PageIndex(9), []int64{9}, nil)
-		assertUniqueIndexNode(t, leaf6, false, true, PageIndex(9), []int64{11}, nil)
-		assertUniqueIndexNode(t, leaf7, false, true, PageIndex(9), []int64{13, 14}, nil)
+		assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{1}, nil)
+		assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{3}, nil)
+		assertIndexNode(t, leaf3, false, true, PageIndex(6), []int64{5}, nil)
+		assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{7}, nil)
+		assertIndexNode(t, leaf5, false, true, PageIndex(9), []int64{9}, nil)
+		assertIndexNode(t, leaf6, false, true, PageIndex(9), []int64{11}, nil)
+		assertIndexNode(t, leaf7, false, true, PageIndex(9), []int64{13, 14}, nil)
 	})
 
 	expectedKeys := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}
@@ -271,7 +271,7 @@ func TestUniqueIndex_Insert(t *testing.T) {
 	checkIndexKeys(ctx, t, anIndex, expectedKeys)
 }
 
-func TestUniqueIndex_Insert_OutOfOrder(t *testing.T) {
+func TestIndex_Insert_OutOfOrder(t *testing.T) {
 	var (
 		aPager     = initTest(t)
 		ctx        = context.Background()
@@ -279,7 +279,7 @@ func TestUniqueIndex_Insert_OutOfOrder(t *testing.T) {
 		aColumn    = Column{Name: "test_column", Kind: Int8, Size: 8}
 		txManager  = NewTransactionManager(zap.NewNop())
 		indexPager = NewTransactionalPager(
-			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size)),
+			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size), true),
 			txManager,
 		)
 	)
@@ -316,41 +316,41 @@ func TestUniqueIndex_Insert_OutOfOrder(t *testing.T) {
 	// require.NoError(t, anIndex.print())
 
 	var (
-		rootNode  = aPager.pages[0].IndexNode.(*UniqueIndexNode[int64])
-		internal1 = aPager.pages[5].IndexNode.(*UniqueIndexNode[int64])
-		internal2 = aPager.pages[6].IndexNode.(*UniqueIndexNode[int64])
-		internal3 = aPager.pages[10].IndexNode.(*UniqueIndexNode[int64])
+		rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
+		internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
+		internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
+		internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
 		// leaves of first internal node
-		leaf1 = aPager.pages[1].IndexNode.(*UniqueIndexNode[int64])
-		leaf2 = aPager.pages[9].IndexNode.(*UniqueIndexNode[int64])
-		leaf3 = aPager.pages[4].IndexNode.(*UniqueIndexNode[int64])
+		leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
+		leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+		leaf3 = aPager.pages[4].IndexNode.(*IndexNode[int64])
 		// leaves of second internal node
-		leaf4 = aPager.pages[2].IndexNode.(*UniqueIndexNode[int64])
-		leaf5 = aPager.pages[7].IndexNode.(*UniqueIndexNode[int64])
-		leaf6 = aPager.pages[11].IndexNode.(*UniqueIndexNode[int64])
+		leaf4 = aPager.pages[2].IndexNode.(*IndexNode[int64])
+		leaf5 = aPager.pages[7].IndexNode.(*IndexNode[int64])
+		leaf6 = aPager.pages[11].IndexNode.(*IndexNode[int64])
 		// leaves of third node
-		leaf7 = aPager.pages[3].IndexNode.(*UniqueIndexNode[int64])
-		leaf8 = aPager.pages[8].IndexNode.(*UniqueIndexNode[int64])
+		leaf7 = aPager.pages[3].IndexNode.(*IndexNode[int64])
+		leaf8 = aPager.pages[8].IndexNode.(*IndexNode[int64])
 	)
 
 	// Root node
-	assertUniqueIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 16}, []PageIndex{5, 6, 10})
+	assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9, 16}, []PageIndex{5, 6, 10})
 	// Internal nodes
-	assertUniqueIndexNode(t, internal1, false, false, PageIndex(0), []int64{2, 5}, []PageIndex{1, 9, 4})
-	assertUniqueIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 13}, []PageIndex{2, 7, 11})
-	assertUniqueIndexNode(t, internal3, false, false, PageIndex(0), []int64{19}, []PageIndex{3, 8})
+	assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{2, 5}, []PageIndex{1, 9, 4})
+	assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 13}, []PageIndex{2, 7, 11})
+	assertIndexNode(t, internal3, false, false, PageIndex(0), []int64{19}, []PageIndex{3, 8})
 	// // Leaf nodes
-	assertUniqueIndexNode(t, leaf1, false, true, PageIndex(5), []int64{1}, nil)
-	assertUniqueIndexNode(t, leaf2, false, true, PageIndex(5), []int64{3, 4}, nil)
-	assertUniqueIndexNode(t, leaf3, false, true, PageIndex(5), []int64{6, 7, 8}, nil)
-	assertUniqueIndexNode(t, leaf4, false, true, PageIndex(6), []int64{10}, nil)
-	assertUniqueIndexNode(t, leaf5, false, true, PageIndex(6), []int64{12}, nil)
-	assertUniqueIndexNode(t, leaf6, false, true, PageIndex(6), []int64{14, 15}, nil)
-	assertUniqueIndexNode(t, leaf7, false, true, PageIndex(10), []int64{17, 18}, nil)
-	assertUniqueIndexNode(t, leaf8, false, true, PageIndex(10), []int64{20, 21}, nil)
+	assertIndexNode(t, leaf1, false, true, PageIndex(5), []int64{1}, nil)
+	assertIndexNode(t, leaf2, false, true, PageIndex(5), []int64{3, 4}, nil)
+	assertIndexNode(t, leaf3, false, true, PageIndex(5), []int64{6, 7, 8}, nil)
+	assertIndexNode(t, leaf4, false, true, PageIndex(6), []int64{10}, nil)
+	assertIndexNode(t, leaf5, false, true, PageIndex(6), []int64{12}, nil)
+	assertIndexNode(t, leaf6, false, true, PageIndex(6), []int64{14, 15}, nil)
+	assertIndexNode(t, leaf7, false, true, PageIndex(10), []int64{17, 18}, nil)
+	assertIndexNode(t, leaf8, false, true, PageIndex(10), []int64{20, 21}, nil)
 }
 
-func assertUniqueIndexNode(t *testing.T, aNode *UniqueIndexNode[int64], isRoot, isLeaf bool, parent PageIndex, keys []int64, children []PageIndex) {
+func assertIndexNode(t *testing.T, aNode *IndexNode[int64], isRoot, isLeaf bool, parent PageIndex, keys []int64, children []PageIndex) {
 	if isRoot {
 		assert.True(t, aNode.Header.IsRoot, "should be a root node")
 	} else {

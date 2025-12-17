@@ -303,7 +303,7 @@ func (t *Table) indexPointScan(ctx context.Context, aScan Scan, selectedFields [
 	// Lookup each primary key value
 	for _, pkValue := range aScan.IndexKeys {
 		// Find row ID from primary key index
-		rowID, err := t.PrimaryKey.Index.Find(ctx, pkValue)
+		rowIDs, err := t.PrimaryKey.Index.FindRowIDs(ctx, pkValue)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				// Key not found, skip
@@ -311,6 +311,8 @@ func (t *Table) indexPointScan(ctx context.Context, aScan Scan, selectedFields [
 			}
 			return fmt.Errorf("index lookup failed: %w", err)
 		}
+		// Primary keys only have one row ID per key
+		rowID := rowIDs[0]
 
 		// Find the row by ID
 		aCursor, err := t.Seek(ctx, rowID)
