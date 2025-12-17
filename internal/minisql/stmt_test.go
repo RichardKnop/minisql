@@ -12,36 +12,71 @@ import (
 func TestStatement_Validate(t *testing.T) {
 	t.Parallel()
 
-	// Create a test table with both nullable and non-nullable columns
-	aTable := &Table{
-		Name: testTableName,
-		Columns: []Column{
-			{
-				Kind:     Int4,
-				Size:     4,
-				Name:     "id",
-				Nullable: false, // non-nullable
+	// Test tables to validate against
+	var (
+		aTable = &Table{
+			Name: testTableName,
+			Columns: []Column{
+				{
+					Kind: Int4,
+					Size: 4,
+					Name: "id",
+				},
+				{
+					Kind: Varchar,
+					Size: MaxInlineVarchar,
+					Name: "email",
+				},
+				{
+					Kind:     Int4,
+					Size:     4,
+					Name:     "age",
+					Nullable: true,
+				},
+				{
+					Kind:     Boolean,
+					Size:     1,
+					Name:     "verified",
+					Nullable: true,
+				},
 			},
-			{
-				Kind:     Varchar,
-				Size:     MaxInlineVarchar,
-				Name:     "email",
-				Nullable: false, // non-nullable
+		}
+
+		aTableWithPK = &Table{
+			Name: testTableName,
+			Columns: []Column{
+				{
+					Kind:       Int8,
+					Size:       8,
+					Name:       "id",
+					PrimaryKey: true,
+				},
+				{
+					Kind: Varchar,
+					Size: MaxInlineVarchar,
+					Name: "email",
+				},
 			},
-			{
-				Kind:     Int4,
-				Size:     4,
-				Name:     "age",
-				Nullable: true, // nullable
+		}
+
+		aTableWithAutoincrementPK = &Table{
+			Name: testTableName,
+			Columns: []Column{
+				{
+					Kind:          Int8,
+					Size:          8,
+					Name:          "id",
+					PrimaryKey:    true,
+					Autoincrement: true,
+				},
+				{
+					Kind: Varchar,
+					Size: MaxInlineVarchar,
+					Name: "email",
+				},
 			},
-			{
-				Kind:     Boolean,
-				Size:     1,
-				Name:     "verified",
-				Nullable: true, // nullable
-			},
-		},
-	}
+		}
+	)
 
 	t.Run("CREATE without table name should fail", func(t *testing.T) {
 		stmt := Statement{
@@ -109,6 +144,24 @@ func TestStatement_Validate(t *testing.T) {
 		err := stmt.Validate(aTable)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "only one primary key column is supported")
+	})
+
+	t.Run("CREATE with nullable primary key should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: testTableName,
+			Columns: []Column{
+				{
+					Kind:       Int8,
+					Nullable:   true,
+					PrimaryKey: true,
+				},
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "primary key column cannot be nullable")
 	})
 
 	t.Run("CREATE with TEXT primary key should fail", func(t *testing.T) {
@@ -207,7 +260,44 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, `missing required field "email"`)
 	})
 
-	t.Run("INSERT with NULL to non-nullable column should fail", func(t *testing.T) {
+	t.Run("INSERT with NULL for primary key should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Insert,
+			TableName: aTableWithPK.Name,
+			Columns:   aTableWithPK.Columns,
+			Fields:    []Field{{Name: "id"}, {Name: "email"}},
+			Inserts: [][]OptionalValue{
+				{
+					{Valid: false}, // NULL for primary key
+					{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
+				},
+			},
+		}
+
+		err := stmt.Validate(aTableWithPK)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `field "id" cannot be NULL`)
+	})
+
+	t.Run("INSERT with NULL for auto-incremented primary key should succeed", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Insert,
+			TableName: aTableWithAutoincrementPK.Name,
+			Columns:   aTableWithAutoincrementPK.Columns,
+			Fields:    []Field{{Name: "id"}, {Name: "email"}},
+			Inserts: [][]OptionalValue{
+				{
+					{Valid: false}, // NULL for primary key
+					{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
+				},
+			},
+		}
+
+		err := stmt.Validate(aTableWithAutoincrementPK)
+		require.NoError(t, err)
+	})
+
+	t.Run("INSERT with NULL for non-nullable column should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
 			TableName: aTable.Name,
@@ -228,7 +318,7 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, `field "id" cannot be NULL`)
 	})
 
-	t.Run("INSERT with NULL to nullable column should succeed", func(t *testing.T) {
+	t.Run("INSERT with NULL for nullable column should succeed", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
 			TableName: aTable.Name,

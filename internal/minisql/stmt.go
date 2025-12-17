@@ -205,6 +205,9 @@ func (s Statement) validateCreateTable() error {
 		return fmt.Errorf("only one primary key column is supported")
 	}
 	if primaryKeyCount == 1 {
+		if primaryKeyColumn.Nullable {
+			return fmt.Errorf("primary key column cannot be nullable")
+		}
 		if primaryKeyColumn.Kind == Text {
 			return fmt.Errorf("primary key cannot be of type TEXT")
 		}
@@ -266,7 +269,10 @@ func (s Statement) validateInsert(aTable *Table) error {
 			if len(anInsert) != len(s.Fields) {
 				return fmt.Errorf("insert: expected %d values, got %d", len(s.Fields), len(anInsert))
 			}
-			if !anInsert[i].Valid && !aColumn.Nullable && !(aColumn.PrimaryKey && aColumn.Autoincrement) {
+			if !anInsert[i].Valid && aColumn.PrimaryKey && !aColumn.Autoincrement {
+				return fmt.Errorf("primary key on field %q cannot be NULL", aField.Name)
+			}
+			if !anInsert[i].Valid && !aColumn.Nullable && !aColumn.PrimaryKey {
 				return fmt.Errorf("field %q cannot be NULL", aField.Name)
 			}
 			if anInsert[i].Valid {
@@ -304,7 +310,7 @@ func (s Statement) validateUpdate(aTable *Table) error {
 			return fmt.Errorf("field %q cannot be NULL", aField.Name)
 		}
 		if s.Updates[aField.Name].Valid {
-			if aColumn.Kind == Varchar && !utf8.ValidString(s.Updates[aField.Name].Value.(TextPointer).String()) {
+			if aColumn.Kind.IsText() && !utf8.ValidString(s.Updates[aField.Name].Value.(TextPointer).String()) {
 				return fmt.Errorf("field %q expects valid UTF-8 string", aField.Name)
 			}
 		}
