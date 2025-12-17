@@ -98,13 +98,14 @@ func (n *InternalNode) GetRightChildByIndex(idx uint32) PageIndex {
 	return n.ICells[idx+1].Child
 }
 
-func (n *InternalNode) DeleteKeyByIndex(idx uint32) {
+// Removes key from plus the right child pointer
+func (n *InternalNode) DeleteKeyAndRightChild(idx uint32) error {
 	if n.Header.KeysNum == 0 {
-		return
+		return nil
 	}
 
-	if idx == n.Header.KeysNum {
-		idx -= 1
+	if idx >= n.Header.KeysNum {
+		return fmt.Errorf("index %d out of range for keys %d", idx, n.Header.KeysNum)
 	}
 
 	if idx == n.Header.KeysNum-1 {
@@ -118,6 +119,8 @@ func (n *InternalNode) DeleteKeyByIndex(idx uint32) {
 
 	n.ICells[int(n.Header.KeysNum)-1] = ICell{}
 	n.Header.KeysNum -= 1
+
+	return nil
 }
 
 func (n *InternalNode) FirstCell() ICell {

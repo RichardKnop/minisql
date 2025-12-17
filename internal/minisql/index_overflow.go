@@ -157,11 +157,7 @@ func removeRowID[T IndexKey](ctx context.Context, aPager TxPager, aNode *IndexNo
 	if aNode.Cells[cellIdx].InlineRowIDs == 1 {
 		// If there is only one inline row ID and it matches, remove the key
 		if aNode.Cells[cellIdx].RowIDs[0] == rowID {
-			fmt.Println(aNode.Header.Keys, "keys before removing key with single inline row ID")
-			fmt.Println("Removing key with single inline row ID", key, rowID)
-			aNode.DeleteKeyByIndex(uint32(cellIdx))
-			fmt.Println(aNode.Header.Keys, "keys after removing key with single inline row ID")
-			return nil
+			return aNode.DeleteKeyAndRightChild(uint32(cellIdx))
 		}
 		return fmt.Errorf("row ID %d not found for key %v", rowID, key)
 	}
@@ -232,25 +228,6 @@ func removeRowID[T IndexKey](ctx context.Context, aPager TxPager, aNode *IndexNo
 
 	return nil
 }
-
-// func freeOverflowIndexPages[T IndexKey](ctx context.Context, aPager TxPager, overflowIdx PageIndex) error {
-// 	if overflowIdx == 0 {
-// 		return nil
-// 	}
-
-// 	for overflowIdx != 0 {
-// 		overflowPage, err := aPager.ReadPage(ctx, overflowIdx)
-// 		if err != nil {
-// 			return fmt.Errorf("read index overflow page %d: %w", overflowIdx, err)
-// 		}
-// 		overflowIdx = overflowPage.IndexOverflowNode.Header.NextPage
-// 		if err := aPager.AddFreePage(ctx, overflowPage.Index); err != nil {
-// 			return fmt.Errorf("free index overflow page %d: %w", overflowPage.Index, err)
-// 		}
-// 	}
-
-// 	return nil
-// }
 
 func readOverflowRowIDs[T IndexKey](ctx context.Context, aPager TxPager, overflowIdx PageIndex) ([]RowID, error) {
 	if overflowIdx == 0 {

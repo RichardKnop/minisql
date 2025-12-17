@@ -388,8 +388,7 @@ func (ui *Index[T]) remove(ctx context.Context, aPage *Page, key T, rowID RowID)
 			// If unique index, just remove the key.
 			// Or if there is only one row ID for non-unique index.
 			if ui.unique || aNode.Cells[idx].InlineRowIDs == 1 {
-				aNode.DeleteKeyByIndex(uint32(idx))
-				return nil
+				return aNode.DeleteKeyAndRightChild(uint32(idx))
 			}
 
 			// For non-unique index with multiple row IDs, remove specific row ID
@@ -714,9 +713,7 @@ func (ui *Index[T]) merge(ctx context.Context, aParent, left, right *Page, idx u
 	leftNode.AppendCells(append([]IndexCell[T]{aCell}, cellsToMoveLeft...)...)
 	leftNode.Header.RightChild = rightNode.Header.RightChild
 
-	parentNode.DeleteKeyByIndex(idx)
-
-	return nil
+	return parentNode.DeleteKeyAndRightChild(idx)
 }
 
 func (ui *Index[T]) print() error {

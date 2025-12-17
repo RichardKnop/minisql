@@ -664,8 +664,11 @@ func (t *Table) borrowFromRightLeaf(aParent *InternalNode, aNode, right *LeafNod
 func (t *Table) mergeLeaves(ctx context.Context, aParent, left, right *Page, idx uint32) error {
 	left.LeafNode.AppendCells(right.LeafNode.Cells[0:right.LeafNode.Header.Cells]...)
 	left.LeafNode.Header.NextLeaf = right.LeafNode.Header.NextLeaf
+
 	// Remove key from parent plus the right child pointer
-	aParent.InternalNode.DeleteKeyByIndex(idx)
+	if err := aParent.InternalNode.DeleteKeyAndRightChild(idx); err != nil {
+		return err
+	}
 
 	if aParent.InternalNode.Header.IsRoot && aParent.InternalNode.Header.KeysNum == 0 {
 		aRootPage, err := t.pager.ModifyPage(ctx, t.GetRootPageIdx())
@@ -878,7 +881,10 @@ func (t *Table) mergeInternalNodes(ctx context.Context, aParent, left, right *Pa
 	left.InternalNode.AppendCells(append([]ICell{iCell}, cellsToMoveLeft...)...)
 	left.InternalNode.Header.RightChild = right.InternalNode.Header.RightChild
 
-	aParent.InternalNode.DeleteKeyByIndex(idx)
+	// Remove key from parent plus the right child pointer
+	if err := aParent.InternalNode.DeleteKeyAndRightChild(idx); err != nil {
+		return err
+	}
 
 	// If root has no keys, make left the new root
 	if aParent.InternalNode.Header.IsRoot && aParent.InternalNode.Header.KeysNum == 0 {
