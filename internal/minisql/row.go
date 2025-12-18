@@ -256,6 +256,14 @@ func (r *Row) Marshal() ([]byte, error) {
 				return nil, err
 			}
 			offset += size
+		case Timestamp:
+			value, ok := r.Values[i].Value.(Time)
+			if !ok {
+				return nil, fmt.Errorf("could not cast value for column %s to time", aColumn.Name)
+			}
+			buf = append(buf, make([]byte, 8)...)
+			marshalInt64(buf, value.TotalMicroseconds(), offset)
+			offset += 8
 		}
 	}
 
@@ -328,6 +336,10 @@ func (r *Row) Unmarshal(aCell Cell, selectedFields ...Field) error {
 			}
 			offset += int(textPointer.Size())
 			r.Values = append(r.Values, OptionalValue{Value: textPointer, Valid: true})
+		case Timestamp:
+			value := unmarshalInt64(aCell.Value, uint64(offset))
+			r.Values = append(r.Values, OptionalValue{Value: FromMicroseconds(int64(value)), Valid: true})
+			offset += 8
 		}
 	}
 
@@ -350,6 +362,8 @@ func (r *Row) getColumnSize(col Column, data []byte, offset int) uint64 {
 		// Read length prefix to determine size
 		length := unmarshalUint32(data, uint64(offset))
 		return TextPointer{Length: length}.Size()
+	case Timestamp:
+		return 8
 	}
 	return 0
 }
@@ -491,6 +505,12 @@ func (r *Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Ope
 					return foundInList, err
 				}
 				return !foundInList, err
+			case Timestamp:
+				foundInList, err := isInListTimestamp(fieldValue.Value, valueOperand.Value)
+				if operator == In {
+					return foundInList, err
+				}
+				return !foundInList, err
 			default:
 				return false, fmt.Errorf("unknown column kind '%s'", aColumn.Kind)
 			}
@@ -519,31 +539,11 @@ func (r *Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Ope
 		return compareDouble(fieldValue.Value.(float64), valueOperand.Value.(float64), operator)
 	case Varchar, Text:
 		return compareText(fieldValue.Value, valueOperand.Value, operator)
+	case Timestamp:
+		return compareTimestamp(fieldValue.Value, valueOperand.Value, operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", aColumn.Kind)
 	}
-}
-
-func (r *Row) compareFieldValueToList(aColumn Column, fieldValue any, valueOperand Operand, operator Operator) (bool, error) {
-	// switch aColumn.Kind {
-	// case Boolean:
-	// 	return compareBoolean(fieldValue.Value.(bool), valueOperand.Value.(bool), operator)
-	// case Int4:
-	// 	// Int values from parser always come back as int64, int4 row data
-	// 	// will come back as int32 and int8 as int64
-	// 	return compareInt4(int64(fieldValue.Value.(int32)), valueOperand.Value.(int64), operator)
-	// case Int8:
-	// 	return compareInt8(fieldValue.Value.(int64), valueOperand.Value.(int64), operator)
-	// case Real:
-	// 	return compareReal(float64(fieldValue.Value.(float32)), valueOperand.Value.(float64), operator)
-	// case Double:
-	// 	return compareDouble(fieldValue.Value.(float64), valueOperand.Value.(float64), operator)
-	// case Varchar, Text:
-	// 	return compareText(fieldValue.Value, valueOperand.Value, operator)
-	// default:
-	// 	return false, fmt.Errorf("unknown column kind '%s'", aColumn.Kind)
-	// }
-	return false, fmt.Errorf("not implemented")
 }
 
 func (r *Row) compareFields(field1, field2 Operand, operator Operator) (bool, error) {
@@ -595,6 +595,8 @@ func (r *Row) compareFields(field1, field2 Operand, operator Operator) (bool, er
 		return compareDouble(value1.Value, value2.Value, operator)
 	case Varchar, Text:
 		return compareText(value1.Value, value2.Value, operator)
+	case Timestamp:
+		return compareInt8(value1.Value, value2.Value, operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", aColumn1.Kind)
 	}

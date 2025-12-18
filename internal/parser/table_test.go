@@ -191,6 +191,25 @@ func TestParse_CreateTable(t *testing.T) {
 			nil,
 		},
 		{
+			"CREATE TABLE with single timestamp column works",
+			"CREATE TABLE foo (bar timestamp);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:     "bar",
+							Kind:     minisql.Timestamp,
+							Size:     8,
+							Nullable: true,
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
 			"CREATE TABLE with single not null column works",
 			"CREATE TABLE foo (bar int4 not null);",
 			[]minisql.Statement{

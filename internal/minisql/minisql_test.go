@@ -44,13 +44,13 @@ var (
 		{
 			Kind:     Real,
 			Size:     4,
-			Name:     "test_real",
+			Name:     "score",
 			Nullable: true,
 		},
 		{
-			Kind:     Double,
+			Kind:     Timestamp,
 			Size:     8,
-			Name:     "test_double",
+			Name:     "created_at",
 			Nullable: true,
 		},
 	}
@@ -86,13 +86,13 @@ var (
 			{
 				Kind:     Real,
 				Size:     4,
-				Name:     "test_real",
+				Name:     "score",
 				Nullable: true,
 			},
 			{
-				Kind:     Double,
+				Kind:     Timestamp,
 				Size:     8,
-				Name:     "test_double",
+				Name:     "created_at",
 				Nullable: true,
 			},
 		},
@@ -134,13 +134,13 @@ var (
 			{
 				Kind:     Real,
 				Size:     4,
-				Name:     "test_real",
+				Name:     "score",
 				Nullable: true,
 			},
 			{
-				Kind:     Double,
+				Kind:     Timestamp,
 				Size:     8,
-				Name:     "test_double",
+				Name:     "created_at",
 				Nullable: true,
 			},
 		},
@@ -256,7 +256,7 @@ func (g *dataGen) Row() Row {
 			{Value: int32(g.IntRange(18, 100)), Valid: true},
 			{Value: g.Bool(), Valid: true},
 			{Value: g.Float32(), Valid: true},
-			{Value: g.Float64(), Valid: true},
+			{Value: MustParseTimestamp(g.PastDate().Format(timestampFormat)), Valid: true},
 		},
 	}
 }
@@ -311,7 +311,7 @@ func (g *dataGen) MediumRow() Row {
 			{Value: int32(g.IntRange(18, 100)), Valid: true},
 			{Value: g.Bool(), Valid: true},
 			{Value: g.Float32(), Valid: true},
-			{Value: g.Float64(), Valid: true},
+			{Value: MustParseTimestamp(g.PastDate().Format(timestampFormat)), Valid: true},
 		},
 	}
 	for len(aRow.Values) < len(testMediumColumns) {
@@ -343,14 +343,14 @@ func (g *dataGen) MediumRows(number int) []Row {
 		// Ensure unique ID
 		_, ok := idMap[aRow.Values[0].Value.(int64)]
 		for ok {
-			aRow = g.Row()
+			aRow = g.MediumRow()
 			_, ok = idMap[aRow.Values[0].Value.(int64)]
 		}
 
 		// Ensure unique email
 		_, ok = emailMap[aRow.Values[1].Value.(TextPointer).String()]
 		for ok {
-			aRow = g.Row()
+			aRow = g.MediumRow()
 			_, ok = emailMap[aRow.Values[1].Value.(TextPointer).String()]
 		}
 
@@ -370,7 +370,7 @@ func (g *dataGen) BigRow() Row {
 			{Value: int32(g.IntRange(18, 100)), Valid: true},
 			{Value: g.Bool(), Valid: true},
 			{Value: g.Float32(), Valid: true},
-			{Value: g.Float64(), Valid: true},
+			{Value: MustParseTimestamp(g.PastDate().Format(timestampFormat)), Valid: true},
 		},
 	}
 	for len(aRow.Values) < len(testBigColumns) {
@@ -394,14 +394,14 @@ func (g *dataGen) BigRows(number int) []Row {
 		// Ensure unique ID
 		_, ok := idMap[aRow.Values[0].Value.(int64)]
 		for ok {
-			aRow = g.Row()
+			aRow = g.BigRow()
 			_, ok = idMap[aRow.Values[0].Value.(int64)]
 		}
 
 		// Ensure unique email
 		_, ok = emailMap[aRow.Values[1].Value.(TextPointer).String()]
 		for ok {
-			aRow = g.Row()
+			aRow = g.BigRow()
 			_, ok = emailMap[aRow.Values[1].Value.(TextPointer).String()]
 		}
 

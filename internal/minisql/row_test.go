@@ -18,7 +18,7 @@ func TestRow_Marshal(t *testing.T) {
 		// 4 for int4
 		// 1 for boolean
 		// 4 for real
-		// 8 for double
+		// 8 for timestamp
 		assert.Equal(t, uint64(8+(varcharLengthPrefixSize+MaxInlineVarchar)+4+1+4+8), aRow.Size())
 
 		data, err := aRow.Marshal()
@@ -55,18 +55,11 @@ func TestRow_Marshal(t *testing.T) {
 func TestRow_CheckOneOrMore(t *testing.T) {
 	t.Parallel()
 
+	aRow := gen.Row()
+	aRowWithNulls := gen.Row()
+	aRowWithNulls.Values[4] = OptionalValue{} // 5th column to NULL
+
 	var (
-		aRow = Row{
-			Columns: testColumns,
-			Values: []OptionalValue{
-				{Value: int64(125478), Valid: true},
-				{Value: "john.doe@example.com", Valid: true},
-				{Value: int32(25), Valid: true},
-				{Value: true, Valid: true},
-				{}, // NULL value
-				{}, // NULL value
-			},
-		}
 		idMatch = Condition{
 			Operand1: Operand{
 				Type:  OperandField,
@@ -75,7 +68,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandInteger,
-				Value: int64(125478),
+				Value: aRow.Values[0].Value.(int64),
 			},
 		}
 		idMismatch = Condition{
@@ -86,7 +79,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandInteger,
-				Value: int64(678),
+				Value: aRow.Values[0].Value.(int64) + 1,
 			},
 		}
 		emailMatch = Condition{
@@ -97,7 +90,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandQuotedString,
-				Value: "john.doe@example.com",
+				Value: aRow.Values[1].Value,
 			},
 		}
 		emailMismatch = Condition{
@@ -108,7 +101,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandQuotedString,
-				Value: "jack.ipsum@example.com",
+				Value: NewTextPointer([]byte(aRow.Values[1].Value.(TextPointer).String() + "bogus")),
 			},
 		}
 		ageMatch = Condition{
@@ -119,7 +112,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandInteger,
-				Value: int64(25),
+				Value: int64(aRow.Values[2].Value.(int32)),
 			},
 		}
 		ageMismatch = Condition{
@@ -130,7 +123,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandInteger,
-				Value: int64(42),
+				Value: int64(aRow.Values[2].Value.(int32) + 1),
 			},
 		}
 		verifiedMatch = Condition{
@@ -141,7 +134,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandBoolean,
-				Value: true,
+				Value: aRow.Values[3].Value.(bool),
 			},
 		}
 		verifiedMismatch = Condition{
@@ -152,7 +145,29 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandBoolean,
-				Value: false,
+				Value: !aRow.Values[3].Value.(bool),
+			},
+		}
+		timestampMatch = Condition{
+			Operand1: Operand{
+				Type:  OperandField,
+				Value: "created_at",
+			},
+			Operator: Eq,
+			Operand2: Operand{
+				Type:  OperandQuotedString,
+				Value: aRow.Values[5].Value.(Time).String(),
+			},
+		}
+		timestampMismatch = Condition{
+			Operand1: Operand{
+				Type:  OperandField,
+				Value: "created_at",
+			},
+			Operator: Eq,
+			Operand2: Operand{
+				Type:  OperandQuotedString,
+				Value: "1000-01-01 00:00:00 BC",
 			},
 		}
 	)
@@ -225,6 +240,26 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			OneOrMore{
 				{
 					verifiedMismatch,
+				},
+			},
+			false,
+		},
+		{
+			"row matches if condition comparing with timestamp is true",
+			aRow,
+			OneOrMore{
+				{
+					timestampMatch,
+				},
+			},
+			true,
+		},
+		{
+			"row does not match if condition comparing with timestamp is false",
+			aRow,
+			OneOrMore{
+				{
+					timestampMismatch,
 				},
 			},
 			false,
@@ -306,7 +341,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Ne,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(42),
+							Value: int64(999),
 						},
 					},
 				},
@@ -326,7 +361,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Ne,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(25),
+							Value: int64(aRow.Values[2].Value.(int32)),
 						},
 					},
 				},
@@ -346,7 +381,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Gt,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(24),
+							Value: int64(4),
 						},
 					},
 				},
@@ -366,7 +401,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Gt,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(25),
+							Value: int64(aRow.Values[2].Value.(int32)),
 						},
 					},
 				},
@@ -386,7 +421,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Lt,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(26),
+							Value: int64(999),
 						},
 					},
 				},
@@ -406,7 +441,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Lt,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(25),
+							Value: int64(4),
 						},
 					},
 				},
@@ -426,7 +461,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Gte,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(25),
+							Value: int64(aRow.Values[2].Value.(int32)),
 						},
 					},
 				},
@@ -446,7 +481,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Gte,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(26),
+							Value: int64(999),
 						},
 					},
 				},
@@ -466,7 +501,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Lte,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(25),
+							Value: int64(aRow.Values[2].Value.(int32)),
 						},
 					},
 				},
@@ -486,7 +521,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Lte,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(24),
+							Value: int64(aRow.Values[2].Value.(int32)) - 1,
 						},
 					},
 				},
@@ -495,18 +530,18 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row does not match if field value is NULL",
-			aRow,
+			aRowWithNulls,
 			OneOrMore{
 				{
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "test_real",
+							Value: "created_at",
 						},
 						Operator: Eq,
 						Operand2: Operand{
-							Type:  OperandFloat,
-							Value: float64(2.5),
+							Type:  OperandQuotedString,
+							Value: "2000-01-01 00:00:00",
 						},
 					},
 				},
@@ -526,7 +561,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: In,
 						Operand2: Operand{
 							Type:  OperandList,
-							Value: []any{int64(123), int64(125478), int64(789)},
+							Value: []any{aRow.Values[0].Value.(int64) - 1, aRow.Values[0].Value.(int64), aRow.Values[0].Value.(int64) + 1},
 						},
 					},
 				},
@@ -546,7 +581,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: In,
 						Operand2: Operand{
 							Type:  OperandList,
-							Value: []any{int64(123), int64(456), int64(789)},
+							Value: []any{aRow.Values[0].Value.(int64) - 1, aRow.Values[0].Value.(int64) - 2, aRow.Values[0].Value.(int64) + 1},
 						},
 					},
 				},
@@ -566,7 +601,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: NotIn,
 						Operand2: Operand{
 							Type:  OperandList,
-							Value: []any{int64(123), int64(456), int64(789)},
+							Value: []any{aRow.Values[0].Value.(int64) - 1, aRow.Values[0].Value.(int64) - 2, aRow.Values[0].Value.(int64) + 1},
 						},
 					},
 				},
@@ -586,7 +621,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: NotIn,
 						Operand2: Operand{
 							Type:  OperandList,
-							Value: []any{int64(123), int64(125478), int64(789)},
+							Value: []any{aRow.Values[0].Value.(int64) - 1, aRow.Values[0].Value.(int64), aRow.Values[0].Value.(int64) + 1},
 						},
 					},
 				},

@@ -9,6 +9,88 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestStatement_PrepareInsert(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Insert with partial fields populates missing fields with NULLs", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Insert,
+			TableName: "users",
+			Columns:   testColumns[0:4],
+			Fields: []Field{
+				{Name: "email"},
+			},
+			Inserts: [][]OptionalValue{
+				{
+					{Value: "foo@example.com", Valid: true},
+				},
+				{
+					{Value: "bar@example.com", Valid: true},
+				},
+			},
+		}
+
+		err := stmt.PrepareInsert()
+		require.NoError(t, err)
+
+		assert.Equal(t, fieldsFromColumns(stmt.Columns...), stmt.Fields)
+		assert.Equal(t, [][]OptionalValue{
+			{
+				{}, // id
+				{Value: "foo@example.com", Valid: true},
+				{}, // age
+				{}, // verified
+			},
+			{
+				{}, // id
+				{Value: "bar@example.com", Valid: true},
+				{}, // age
+				{}, // verified
+			},
+		}, stmt.Inserts)
+	})
+
+	t.Run("Parse timestamps in INSERT statements", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Insert,
+			TableName: "users",
+			Columns: []Column{
+				{
+					Kind: Timestamp,
+					Size: 8,
+					Name: "created_at",
+				},
+			},
+			Fields: []Field{
+				{Name: "created_at"},
+			},
+			Inserts: [][]OptionalValue{
+				{
+					{Value: NewTextPointer([]byte("2025-12-20 03:13:27.674801")), Valid: true},
+				},
+			},
+		}
+
+		err := stmt.PrepareInsert()
+		require.NoError(t, err)
+
+		assert.Equal(t, fieldsFromColumns(stmt.Columns...), stmt.Fields)
+		assert.Equal(t, [][]OptionalValue{
+			{
+				{Value: Time{
+					Year:         2025,
+					Month:        12,
+					Day:          20,
+					Hour:         3,
+					Minutes:      13,
+					Seconds:      27,
+					Microseconds: 674801,
+				}, Valid: true},
+			},
+		}, stmt.Inserts)
+	})
+}
+
 func TestStatement_Validate(t *testing.T) {
 	t.Parallel()
 
@@ -434,6 +516,22 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, `unknown field "unknown_field" in table "test_table"`)
 	})
 
+	t.Run("UPDATE with invalid UTF-8 string should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Update,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    []Field{{Name: "email"}},
+			Updates: map[string]OptionalValue{
+				"email": {Value: NewTextPointer([]byte{0xff, 0xfe, 0xfd}), Valid: true}, // invalid UTF-8,
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `field "email" expects valid UTF-8 string`)
+	})
+
 	t.Run("UPDATE with NULL to non-nullable column should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Update,
@@ -614,6 +712,127 @@ func TestStatement_Validate(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `conflicting equality conditions for field "id" in WHERE clause`)
 	})
+}
+
+func TestStatement_ValidateColumnValue(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name        string
+		column      Column
+		insertValue OptionalValue
+		err         string
+	}{
+		{
+			"invalid BOOLEAN value",
+			Column{Kind: Boolean, Name: "foo"},
+			OptionalValue{Value: "not_a_bool", Valid: true},
+			`field "foo" expects BOOLEAN value`,
+		},
+		{
+			"valid BOOLEAN value",
+			Column{Kind: Boolean, Name: "foo"},
+			OptionalValue{Value: true, Valid: true},
+			"",
+		},
+		{
+			"invalid INT4 value",
+			Column{Kind: Int4, Name: "foo"},
+			OptionalValue{Value: "not_an_int", Valid: true},
+			`field "foo" expects INT4 value`,
+		},
+		{
+			"valid INT4 value",
+			Column{Kind: Int4, Name: "foo"},
+			OptionalValue{Value: int32(25), Valid: true},
+			"",
+		},
+		{
+			"invalid INT8 value",
+			Column{Kind: Int8, Name: "foo"},
+			OptionalValue{Value: int32(25), Valid: true},
+			`field "foo" expects INT8 value`,
+		},
+		{
+			"valid INT8 value",
+			Column{Kind: Int8, Name: "foo"},
+			OptionalValue{Value: int64(25), Valid: true},
+			"",
+		},
+		{
+			"invalid REAL value",
+			Column{Kind: Real, Name: "foo"},
+			OptionalValue{Value: "not_a_real", Valid: true},
+			`field "foo" expects REAL value`,
+		},
+		{
+			"valid REAL value",
+			Column{Kind: Real, Name: "foo"},
+			OptionalValue{Value: float32(25.5), Valid: true},
+			"",
+		},
+		{
+			"invalid DOUBLE value",
+			Column{Kind: Double, Name: "foo"},
+			OptionalValue{Value: float32(25.5), Valid: true},
+			`field "foo" expects DOUBLE value`,
+		},
+		{
+			"valid DOUBLE value",
+			Column{Kind: Double, Name: "foo"},
+			OptionalValue{Value: float64(25.5), Valid: true},
+			"",
+		},
+		{
+			"invalid TEXT value",
+			Column{Kind: Text, Name: "foo"},
+			OptionalValue{Value: float32(25.5), Valid: true},
+			`field "foo" expects a text value`,
+		},
+		{
+			"valid TEXT value",
+			Column{Kind: Text, Name: "foo"},
+			OptionalValue{Value: NewTextPointer([]byte("some text")), Valid: true},
+			"",
+		},
+		{
+			"invalid VARCHAR value",
+			Column{Kind: Varchar, Name: "foo"},
+			OptionalValue{Value: float32(25.5), Valid: true},
+			`field "foo" expects a text value`,
+		},
+		{
+			"valid VARCHAR value",
+			Column{Kind: Varchar, Name: "foo"},
+			OptionalValue{Value: NewTextPointer([]byte("some text")), Valid: true},
+			"",
+		},
+		{
+			"invalid TIMESTAMP value",
+			Column{Kind: Timestamp, Name: "foo"},
+			OptionalValue{Value: int32(25), Valid: true},
+			`field "foo" expects time value`,
+		},
+		{
+			"valid TIMESTAMP value",
+			Column{Kind: Timestamp, Name: "foo"},
+			OptionalValue{Value: MustParseTimestamp("2000-01-01 00:00:00"), Valid: true},
+			"",
+		},
+	}
+
+	for _, aTestCase := range testCases {
+		t.Run(aTestCase.name, func(t *testing.T) {
+			stmt := Statement{}
+			err := stmt.validateColumnValue(aTestCase.column, aTestCase.insertValue)
+			if aTestCase.err == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.ErrorContains(t, err, aTestCase.err)
+		})
+	}
 }
 
 func TestStatement_CreateTableDDL(t *testing.T) {

@@ -170,6 +170,8 @@ func isColumnDef(token string) (minisql.Column, bool) {
 		return minisql.Column{Kind: minisql.Text}, true
 	case "VARCHAR(":
 		return minisql.Column{Kind: minisql.Varchar}, true
+	case "TIMESTAMP":
+		return minisql.Column{Kind: minisql.Timestamp, Size: 8}, true
 	default:
 		return minisql.Column{}, false
 	}

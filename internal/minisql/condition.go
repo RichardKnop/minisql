@@ -370,6 +370,50 @@ func compareText(value1, value2 any, operator Operator) (bool, error) {
 	return false, fmt.Errorf("unknown operator '%s'", operator)
 }
 
+func compareTimestamp(value1, value2 any, operator Operator) (bool, error) {
+	theValue1, err := getTimestampToCompare(value1)
+	if err != nil {
+		return false, err
+	}
+	theValue2, err := getTimestampToCompare(value2)
+	if err != nil {
+		return false, err
+	}
+	switch operator {
+	case Eq:
+		return theValue1 == theValue2, nil
+	case Ne:
+		return theValue1 != theValue2, nil
+	case Gt:
+		return theValue1 > theValue2, nil
+	case Lt:
+		return theValue1 < theValue2, nil
+	case Gte:
+		return theValue1 >= theValue2, nil
+	case Lte:
+		return theValue1 <= theValue2, nil
+	}
+	return false, fmt.Errorf("unknown operator '%s'", operator)
+}
+
+// Values for WHERE condition coming from parser will be strings,
+// timestamps values stored in the database will be Time struct.
+func getTimestampToCompare(value any) (int64, error) {
+	_, ok := value.(string)
+	if ok {
+		timestamp, err := ParseTimestamp(value.(string))
+		if err != nil {
+			return 0, err
+		}
+		return timestamp.TotalMicroseconds(), nil
+	}
+	timestamp, ok := value.(Time)
+	if !ok {
+		panic(fmt.Sprintf("timestamp value to compare is neither string nor Time %v", value))
+	}
+	return timestamp.TotalMicroseconds(), nil
+}
+
 func isInListInt4(value, list any) (bool, error) {
 	_, ok := value.(int64)
 	if !ok {
@@ -472,8 +516,29 @@ func isInListText(value, list any) (bool, error) {
 	return false, nil
 }
 
-// Values coming from parser will be strings, string values stored in the database
-// will be wrapped in TextPointer struct.
+func isInListTimestamp(value, list any) (bool, error) {
+	_, ok := value.(Time)
+	if !ok {
+		return false, fmt.Errorf("value '%v' cannot be cast as Time", value)
+	}
+	theList, ok := list.([]any)
+	if !ok {
+		return false, fmt.Errorf("list '%v' cannot be cast as []any", list)
+	}
+	for _, listValue := range theList {
+		match, err := compareTimestamp(value, listValue, Eq)
+		if err != nil {
+			return false, err
+		}
+		if match {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// Values for WHERE condition coming from parser will be strings,
+// timestamps values stored in the database will be TextPointer struct.
 func getTextToCompare(value any) string {
 	_, ok := value.(string)
 	if ok {

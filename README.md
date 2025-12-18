@@ -30,7 +30,7 @@ I plan to implement more features of traditional relational databases in the fut
   - `UPDATE`
   - `DELETE`
 - only tables and primary keys supported, more index support to be implemented in the future
-- `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE`, `TEXT` and `VARCHAR` data types supported
+- `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE`, `TEXT`, `VARCHAR`, `TIMESTAMP` data types supported
 - `PRIMARY KEY` support, only single column, no composite primary keys
 - `AUTOINCREMENT` support, primary key must be of type `INT8` for autoincrement
 - `NULL` and `NOT NULL` support (via null bit mask included in each row/cell)
@@ -54,6 +54,7 @@ I plan to implement more features of traditional relational databases in the fut
 | `DOUBLE`     | 8-byte double-precision floating-point number. |
 | `TEXT`       | Variable-length text. If length is <= 255, the text is stored inline, otherwise text is stored in overflow pages (with UTF-8 encoding). |
 | `VARCHAR(n)` | Storage works the same way as `TEXT` but allows limiting length of inserted/updated text to max value. |
+| `TIMESTAMP`  | 8-byte signed integer representing number of microseconds from `2000-01-01 00:00:00 UTC` (`Postgres epoch`). Supported range is from `4713 BC` to `294276 AD` inclusive. |
 
 Each page size is `4096 bytes`. Rows larger than page size are not supported. Therefor, the largest allowed row size is `4066 bytes`.
 

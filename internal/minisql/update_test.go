@@ -79,7 +79,8 @@ func TestTable_Update(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"email": {Value: NewTextPointer([]byte("updatedsingle@foo.bar")), Valid: true},
+				"email":      {Value: NewTextPointer([]byte("updatedsingle@foo.bar")), Valid: true},
+				"created_at": {Value: MustParseTimestamp("2000-01-01 00:00:00"), Valid: true},
 			},
 			Conditions: OneOrMore{
 				{
@@ -103,6 +104,8 @@ func TestTable_Update(t *testing.T) {
 			expectedRow := aRow.Clone()
 			if i == 5 {
 				expectedRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("updatedsingle@foo.bar")), Valid: true})
+				expectedRow.SetValue("created_at", OptionalValue{Value: MustParseTimestamp("2000-01-01 00:00:00"), Valid: true})
+				rows[i] = expectedRow
 			}
 
 			expected = append(expected, expectedRow)
@@ -140,9 +143,6 @@ func TestTable_Update(t *testing.T) {
 		expected := make([]Row, 0, len(rows))
 		for i, aRow := range rows {
 			expectedRow := aRow.Clone()
-			if i == 5 {
-				expectedRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("updatedsingle@foo.bar")), Valid: true})
-			}
 			if i == 18 {
 				expectedRow.SetValue("email", OptionalValue{Valid: false})
 			}

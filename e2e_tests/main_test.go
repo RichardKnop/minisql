@@ -23,7 +23,8 @@ const (
 	createUsersTable = `create table "users" (
 	id int8 primary key autoincrement,
 	name varchar(255),
-	email text
+	email text,
+	created timestamp
 );`
 )
 
@@ -99,16 +100,16 @@ func TestEndToEnd(t *testing.T) {
 		require.NoError(t, err)
 		assertTables(t, aClient, "minisql_schema", "users")
 
-		resp, err := aClient.SendQuery(`insert into users("name", "email") values('Danny Mason', 'Danny_Mason2966@xqj6f.tech'),
-('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page'),
-('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video'),
-('Mason Callan', 'Mason_Callan9524@bu2lo.edu'),
-('Logan Flynn', 'Logan_Flynn9019@xtwt3.pro'),
-('Beatrice Uttley', 'Beatrice_Uttley1670@1wa8o.org'),
-('Harry Johnson', 'Harry_Johnson5515@jcf8v.video'),
-('Carl Thomson', 'Carl_Thomson4218@kyb7t.host'),
-('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design'),
-('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press');`)
+		resp, err := aClient.SendQuery(`insert into users("name", "email", "created") values('Danny Mason', 'Danny_Mason2966@xqj6f.tech', '2024-01-01 12:00:00'),
+('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 12:00:00'),
+('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video', '2024-01-03 12:00:00'),
+('Mason Callan', 'Mason_Callan9524@bu2lo.edu', '2024-01-04 12:00:00'),
+('Logan Flynn', 'Logan_Flynn9019@xtwt3.pro', '2024-01-05 12:00:00'),
+('Beatrice Uttley', 'Beatrice_Uttley1670@1wa8o.org', '2024-01-06 12:00:00'),
+('Harry Johnson', 'Harry_Johnson5515@jcf8v.video', '2024-01-07 12:00:00'),
+('Carl Thomson', 'Carl_Thomson4218@kyb7t.host', '2024-01-08 12:00:00'),
+('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design', '2024-01-09 12:00:00'),
+('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press', '2024-01-10 12:00:00');`)
 		require.NoError(t, err)
 
 		fmt.Printf("Insert Response: %+v\n", resp)
@@ -119,18 +120,25 @@ func TestEndToEnd(t *testing.T) {
 	})
 
 	t.Run("Basic select queries", func(t *testing.T) {
-		resp, err := aClient.SendQuery(`select * from users;`)
+		resp, err := aClient.SendQuery(`select * from users order by id;`)
 		require.NoError(t, err)
 
 		assert.True(t, resp.Success)
 		assert.Equal(t, minisql.Select, resp.Kind)
-		assert.Len(t, resp.Columns, 3)
+		assert.Len(t, resp.Columns, 4)
 		assert.Equal(t, "id", resp.Columns[0].Name)
 		assert.Equal(t, "name", resp.Columns[1].Name)
 		assert.Equal(t, "email", resp.Columns[2].Name)
+		assert.Equal(t, "created", resp.Columns[3].Name)
 
 		require.NotEmpty(t, resp.Rows)
 		assert.Len(t, resp.Rows, 10)
+		assert.Equal(t, []minisql.OptionalValue{
+			{Value: float64(1), Valid: true},
+			{Value: "Danny Mason", Valid: true},
+			{Value: "Danny_Mason2966@xqj6f.tech", Valid: true},
+			{Value: "2024-01-01 12:00:00", Valid: true},
+		}, resp.Rows[0])
 	})
 }
 

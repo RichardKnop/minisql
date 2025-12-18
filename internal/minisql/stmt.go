@@ -3,6 +3,7 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -31,6 +32,7 @@ const (
 	Double
 	Varchar
 	Text
+	Timestamp
 )
 
 func (k ColumnKind) String() string {
@@ -49,6 +51,8 @@ func (k ColumnKind) String() string {
 		return "varchar"
 	case Text:
 		return "text"
+	case Timestamp:
+		return "timestamp"
 	default:
 		return "unknown"
 	}
@@ -136,6 +140,87 @@ func (s Statement) HasField(name string) bool {
 
 func (s Statement) ReadOnly() bool {
 	return s.Kind == Select
+}
+
+func (s Statement) ColumnByName(name string) (Column, bool) {
+	for i := range s.Columns {
+		if s.Columns[i].Name == name {
+			return s.Columns[i], true
+		}
+	}
+	return Column{}, false
+}
+
+// PrepareInsert makes sure to add any nullable columns that are missing from the
+// insert statement, setting them to NULL. It also converts timestamp string values to int64.
+func (s *Statement) PrepareInsert() error {
+	for i, aColumn := range s.Columns {
+		if !s.HasField(aColumn.Name) {
+			s.Fields = slices.Insert(s.Fields, i, Field{Name: aColumn.Name})
+			for j := range s.Inserts {
+				s.Inserts[j] = slices.Insert(s.Inserts[j], i, OptionalValue{})
+			}
+		}
+
+		if aColumn.Kind != Timestamp {
+			continue
+		}
+
+		fieldIdx := i
+		for j := range s.Inserts {
+			if !s.Inserts[j][fieldIdx].Valid {
+				continue
+			}
+			timestamp, err := parseTimeValue(s.Inserts[j][fieldIdx].Value)
+			if err != nil {
+				return err
+			}
+			s.Inserts[j][fieldIdx].Value = timestamp
+		}
+	}
+	return nil
+}
+
+func (s *Statement) PrepareUpdate() error {
+	if len(s.Updates) == 0 {
+		return nil
+	}
+	for _, aField := range s.Fields {
+		aColumn, ok := s.ColumnByName(aField.Name)
+		if !ok {
+			return fmt.Errorf("unknown field %q in table %q", aField.Name, s.TableName)
+		}
+		if aColumn.Kind != Timestamp {
+			continue
+		}
+		for aColumnName, updateValue := range s.Updates {
+			if aColumnName != aField.Name || !updateValue.Valid {
+				continue
+			}
+			timestamp, err := parseTimeValue(updateValue.Value)
+			if err != nil {
+				return err
+			}
+			s.Updates[aColumnName] = OptionalValue{Valid: true, Value: timestamp}
+		}
+	}
+	return nil
+}
+
+func parseTimeValue(value any) (Time, error) {
+	_, ok := value.(Time)
+	if ok {
+		return value.(Time), nil
+	}
+	tp, ok := value.(TextPointer)
+	if !ok {
+		return Time{}, fmt.Errorf("timestamp field expects TextPointer value")
+	}
+	timestamp, err := ParseTimestamp(tp.String())
+	if err != nil {
+		return Time{}, fmt.Errorf("invalid timestamp format for field: %v", err)
+	}
+	return timestamp, nil
 }
 
 func (s Statement) Validate(aTable *Table) error {
@@ -269,26 +354,21 @@ func (s Statement) validateInsert(aTable *Table) error {
 			if len(anInsert) != len(s.Fields) {
 				return fmt.Errorf("insert: expected %d values, got %d", len(s.Fields), len(anInsert))
 			}
-			if !anInsert[i].Valid && aColumn.PrimaryKey && !aColumn.Autoincrement {
-				return fmt.Errorf("primary key on field %q cannot be NULL", aField.Name)
-			}
-			if !anInsert[i].Valid && !aColumn.Nullable && !aColumn.PrimaryKey {
-				return fmt.Errorf("field %q cannot be NULL", aField.Name)
-			}
-			if anInsert[i].Valid {
-				if aColumn.Kind.IsText() && !utf8.ValidString(anInsert[i].Value.(TextPointer).String()) {
-					return fmt.Errorf("field %q expects valid UTF-8 string", aField.Name)
-				}
+			if err := s.validateColumnValue(aColumn, anInsert[i]); err != nil {
+				return err
 			}
 			if aColumn.Kind.IsText() && anInsert[i].Valid {
+				if !utf8.ValidString(anInsert[i].Value.(TextPointer).String()) {
+					return fmt.Errorf("field %q expects valid UTF-8 string", aColumn.Name)
+				}
 				switch aColumn.Kind {
 				case Varchar:
 					if len([]byte(anInsert[i].Value.(TextPointer).String())) > int(aColumn.Size) {
-						return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", aField.Name, aColumn.Size)
+						return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", aColumn.Name, aColumn.Size)
 					}
 				case Text:
 					if len([]byte(anInsert[i].Value.(TextPointer).String())) > MaxOverflowTextSize {
-						return fmt.Errorf("field %q exceeds maximum TEXT length of %d", aField.Name, MaxOverflowTextSize)
+						return fmt.Errorf("field %q exceeds maximum TEXT length of %d", aColumn.Name, MaxOverflowTextSize)
 					}
 				}
 			}
@@ -306,13 +386,8 @@ func (s Statement) validateUpdate(aTable *Table) error {
 		if !ok {
 			return fmt.Errorf("unknown field %q in table %q", aField.Name, aTable.Name)
 		}
-		if !s.Updates[aField.Name].Valid && !aColumn.Nullable {
-			return fmt.Errorf("field %q cannot be NULL", aField.Name)
-		}
-		if s.Updates[aField.Name].Valid {
-			if aColumn.Kind.IsText() && !utf8.ValidString(s.Updates[aField.Name].Value.(TextPointer).String()) {
-				return fmt.Errorf("field %q expects valid UTF-8 string", aField.Name)
-			}
+		if err := s.validateColumnValue(aColumn, s.Updates[aField.Name]); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -345,6 +420,65 @@ func (s Statement) validateSelect(aTable *Table) error {
 				return fmt.Errorf("duplicate field %q in select statement", aField.Name)
 			}
 			fieldMap[aField.Name] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func (s Statement) validateColumnValue(aColumn Column, insertValue OptionalValue) error {
+	if !insertValue.Valid && aColumn.PrimaryKey && !aColumn.Autoincrement {
+		return fmt.Errorf("primary key on field %q cannot be NULL", aColumn.Name)
+	}
+	if !insertValue.Valid && !aColumn.Nullable && !aColumn.PrimaryKey {
+		return fmt.Errorf("field %q cannot be NULL", aColumn.Name)
+	}
+	if !insertValue.Valid {
+		return nil
+	}
+	switch aColumn.Kind {
+	case Boolean:
+		_, ok := insertValue.Value.(bool)
+		if !ok {
+			return fmt.Errorf("field %q expects BOOLEAN value", aColumn.Name)
+		}
+	case Int4:
+		_, ok := insertValue.Value.(int64)
+		if !ok {
+			_, ok2 := insertValue.Value.(int32)
+			if !ok2 {
+				return fmt.Errorf("field %q expects INT4 value", aColumn.Name)
+			}
+		}
+	case Int8:
+		_, ok := insertValue.Value.(int64)
+		if !ok {
+			return fmt.Errorf("field %q expects INT8 value", aColumn.Name)
+		}
+	case Real:
+		_, ok := insertValue.Value.(float64)
+		if !ok {
+			_, ok2 := insertValue.Value.(float32)
+			if !ok2 {
+				return fmt.Errorf("field %q expects REAL value", aColumn.Name)
+			}
+		}
+	case Double:
+		_, ok := insertValue.Value.(float64)
+		if !ok {
+			return fmt.Errorf("field %q expects DOUBLE value", aColumn.Name)
+		}
+	case Varchar, Text:
+		tp, ok := insertValue.Value.(TextPointer)
+		if !ok {
+			return fmt.Errorf("field %q expects a text value", aColumn.Name)
+		}
+		if aColumn.Kind.IsText() && !utf8.ValidString(tp.String()) {
+			return fmt.Errorf("field %q expects valid UTF-8 string", aColumn.Name)
+		}
+	case Timestamp:
+		_, ok := insertValue.Value.(Time)
+		if !ok {
+			return fmt.Errorf("field %q expects time value", aColumn.Name)
 		}
 	}
 	return nil

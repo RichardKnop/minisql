@@ -10,6 +10,10 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 	stmt.TableName = t.Name
 	stmt.Columns = t.Columns
 
+	if err := stmt.PrepareUpdate(); err != nil {
+		return StatementResult{}, err
+	}
+
 	if err := stmt.Validate(t); err != nil {
 		return StatementResult{}, err
 	}
