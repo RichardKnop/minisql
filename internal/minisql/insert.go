@@ -3,22 +3,14 @@ package minisql
 import (
 	"context"
 	"fmt"
-	"slices"
 )
 
 func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 	stmt.TableName = t.Name
 	stmt.Columns = t.Columns
 
-	// First, we will make sure to add any nullable columns that are missing from the
-	// insert statement, setting them to NULL
-	for i, aColumn := range t.Columns {
-		if !stmt.HasField(aColumn.Name) {
-			stmt.Fields = slices.Insert(stmt.Fields, i, Field{Name: aColumn.Name})
-			for j := range stmt.Inserts {
-				stmt.Inserts[j] = slices.Insert(stmt.Inserts[j], i, OptionalValue{})
-			}
-		}
+	if err := stmt.Prepare(); err != nil {
+		return err
 	}
 
 	if err := stmt.Validate(t); err != nil {

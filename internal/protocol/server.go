@@ -204,14 +204,22 @@ func (s *Server) handleSQL(ctx context.Context, conn *minisql.Connection, sql st
 						continue
 					}
 					textPointer, ok := aValue.Value.(minisql.TextPointer)
-					if !ok {
-						values = append(values, aValue)
+					if ok {
+						values = append(values, minisql.OptionalValue{
+							Value: textPointer.String(),
+							Valid: true,
+						})
 						continue
 					}
-					values = append(values, minisql.OptionalValue{
-						Value: textPointer.String(),
-						Valid: true,
-					})
+					timestamp, ok := aValue.Value.(minisql.Time)
+					if ok {
+						values = append(values, minisql.OptionalValue{
+							Value: timestamp.String(),
+							Valid: true,
+						})
+						continue
+					}
+					values = append(values, aValue)
 				}
 				aResponse.Rows = append(aResponse.Rows, values)
 			}

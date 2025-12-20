@@ -107,7 +107,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
 				Kind:       Delete,
-				Conditions: NewOneOrMore(Conditions{FieldIsNotNull("test_double")}),
+				Conditions: NewOneOrMore(Conditions{FieldIsNotNull("created_at")}),
 			})
 			return err
 		}, aPager)
@@ -711,7 +711,7 @@ func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []
 		for j, aValue := range expectedRows[i].Values {
 			tp, ok := aValue.Value.(TextPointer)
 			if ok {
-				assert.Equal(t, tp.Length, actual[i].Values[j].Value.(TextPointer).Length, "row %d text pointer length %d does not match expected", i, j)
+				assert.Equal(t, int(tp.Length), int(actual[i].Values[j].Value.(TextPointer).Length), "row %d text pointer length %d does not match expected", i, j)
 				assert.Equal(t, tp.Data, actual[i].Values[j].Value.(TextPointer).Data, "row %d text pointer data %d does not match expected", i, j)
 			} else {
 				assert.Equal(t, actual[i].Values[j], expectedRows[i].Values[j], "row %d value %d does not match expected", i, j)
