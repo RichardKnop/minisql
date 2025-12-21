@@ -111,7 +111,7 @@ func TestTable_Select(t *testing.T) {
 						Operator: Eq,
 						Operand2: Operand{
 							Type:  OperandQuotedString,
-							Value: "bogus",
+							Value: NewTextPointer([]byte("bogus")),
 						},
 					},
 				},

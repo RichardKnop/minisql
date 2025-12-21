@@ -10,7 +10,7 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 	stmt.TableName = t.Name
 	stmt.Columns = t.Columns
 
-	if err := stmt.Prepare(); err != nil {
+	if err := stmt.Prepare(Time{}); err != nil {
 		return StatementResult{}, err
 	}
 

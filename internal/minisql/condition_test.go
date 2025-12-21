@@ -55,7 +55,7 @@ func TestFieldIsEqual(t *testing.T) {
 	t.Parallel()
 
 	t.Run("string field with quoted string value", func(t *testing.T) {
-		condition := FieldIsEqual("email", OperandQuotedString, "john@example.com")
+		condition := FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("john@example.com")))
 
 		expected := Condition{
 			Operand1: Operand{
@@ -65,7 +65,7 @@ func TestFieldIsEqual(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandQuotedString,
-				Value: "john@example.com",
+				Value: NewTextPointer([]byte("john@example.com")),
 			},
 		}
 
@@ -149,7 +149,7 @@ func TestFieldIsNotEqual(t *testing.T) {
 	t.Parallel()
 
 	t.Run("string field with quoted string value", func(t *testing.T) {
-		condition := FieldIsNotEqual("email", OperandQuotedString, "john@example.com")
+		condition := FieldIsNotEqual("email", OperandQuotedString, NewTextPointer([]byte("john@example.com")))
 
 		expected := Condition{
 			Operand1: Operand{
@@ -159,7 +159,7 @@ func TestFieldIsNotEqual(t *testing.T) {
 			Operator: Ne,
 			Operand2: Operand{
 				Type:  OperandQuotedString,
-				Value: "john@example.com",
+				Value: NewTextPointer([]byte("john@example.com")),
 			},
 		}
 

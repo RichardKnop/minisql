@@ -27,18 +27,6 @@ func (n *InternalNode) IndexOfChild(key RowID) uint32 {
 	return minIdx
 }
 
-// IndexOfKey returns index of cell with key and a boolean flag
-// indicating whether key was found in the node or not.
-func (n *InternalNode) IndexOfKey(key RowID) (uint32, bool) {
-	for idx, aCell := range n.ICells {
-		if aCell.Key == key {
-			return uint32(idx), true
-		}
-	}
-
-	return 0, false
-}
-
 // IndexOfPage returns index of child which contains page number
 func (n *InternalNode) IndexOfPage(pageIdx PageIndex) (uint32, error) {
 	for idx, aCell := range n.ICells {

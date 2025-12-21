@@ -36,10 +36,11 @@ var (
 			Nullable: true,
 		},
 		{
-			Kind:     Boolean,
-			Size:     1,
-			Name:     "verified",
-			Nullable: true,
+			Kind:         Boolean,
+			Size:         1,
+			Name:         "verified",
+			Nullable:     true,
+			DefaultValue: OptionalValue{Value: false, Valid: true},
 		},
 		{
 			Kind:     Real,
@@ -48,10 +49,11 @@ var (
 			Nullable: true,
 		},
 		{
-			Kind:     Timestamp,
-			Size:     8,
-			Name:     "created_at",
-			Nullable: true,
+			Kind:         Timestamp,
+			Size:         8,
+			Name:         "created_at",
+			Nullable:     true,
+			DefaultValue: OptionalValue{Value: MustParseTimestamp("0001-01-01 00:00:00.000000"), Valid: true},
 		},
 	}
 	testRowSize = uint64(8 + 4 + 255 + 4 + 1 + 4 + 8) // calculated size of testColumns
@@ -78,10 +80,11 @@ var (
 				Nullable: true,
 			},
 			{
-				Kind:     Boolean,
-				Size:     1,
-				Name:     "verified",
-				Nullable: true,
+				Kind:         Boolean,
+				Size:         1,
+				Name:         "verified",
+				Nullable:     true,
+				DefaultValue: OptionalValue{Value: false, Valid: true},
 			},
 			{
 				Kind:     Real,
@@ -90,10 +93,11 @@ var (
 				Nullable: true,
 			},
 			{
-				Kind:     Timestamp,
-				Size:     8,
-				Name:     "created_at",
-				Nullable: true,
+				Kind:         Timestamp,
+				Size:         8,
+				Name:         "created_at",
+				Nullable:     true,
+				DefaultValue: OptionalValue{Value: MustParseTimestamp("0001-01-01 00:00:00.000000"), Valid: true},
 			},
 		},
 		int((PageSize-uint32(RootPageConfigSize)-
@@ -126,10 +130,11 @@ var (
 				Nullable: true,
 			},
 			{
-				Kind:     Boolean,
-				Size:     1,
-				Name:     "verified",
-				Nullable: true,
+				Kind:         Boolean,
+				Size:         1,
+				Name:         "verified",
+				Nullable:     true,
+				DefaultValue: OptionalValue{Value: false, Valid: true},
 			},
 			{
 				Kind:     Real,
@@ -138,10 +143,11 @@ var (
 				Nullable: true,
 			},
 			{
-				Kind:     Timestamp,
-				Size:     8,
-				Name:     "created_at",
-				Nullable: true,
+				Kind:         Timestamp,
+				Size:         8,
+				Name:         "created_at",
+				Nullable:     true,
+				DefaultValue: OptionalValue{Value: MustParseTimestamp("0001-01-01 00:00:00.000000"), Valid: true},
 			},
 		},
 		int((PageSize - uint32(RootPageConfigSize) -
@@ -167,10 +173,11 @@ var (
 			Nullable: true,
 		},
 		{
-			Kind:     Boolean,
-			Size:     1,
-			Name:     "verified",
-			Nullable: true,
+			Kind:         Boolean,
+			Size:         1,
+			Name:         "verified",
+			Nullable:     true,
+			DefaultValue: OptionalValue{Value: false, Valid: true},
 		},
 	}
 

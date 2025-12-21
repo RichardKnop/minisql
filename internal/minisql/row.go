@@ -376,20 +376,11 @@ func (r *Row) CheckOneOrMore(conditions OneOrMore) (bool, error) {
 	}
 
 	for _, aConditionGroup := range conditions {
-		groupConditionResult := true
-		for _, aCondition := range aConditionGroup {
-			ok, err := r.checkCondition(aCondition)
-			if err != nil {
-				return false, err
-			}
-
-			if !ok {
-				groupConditionResult = false
-				break
-			}
+		ok, err := r.CheckConditions(aConditionGroup)
+		if err != nil {
+			return false, err
 		}
-
-		if groupConditionResult {
+		if ok {
 			return true, nil
 		}
 	}
@@ -596,7 +587,7 @@ func (r *Row) compareFields(field1, field2 Operand, operator Operator) (bool, er
 	case Varchar, Text:
 		return compareText(value1.Value, value2.Value, operator)
 	case Timestamp:
-		return compareInt8(value1.Value, value2.Value, operator)
+		return compareTimestamp(value1.Value, value2.Value, operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", aColumn1.Kind)
 	}

@@ -59,7 +59,7 @@ func TestParse_Delete(t *testing.T) {
 								Operator: minisql.Eq,
 								Operand2: minisql.Operand{
 									Type:  minisql.OperandQuotedString,
-									Value: "1",
+									Value: minisql.NewTextPointer([]byte("1")),
 								},
 							},
 							{

@@ -34,6 +34,7 @@ I plan to implement more features of traditional relational databases in the fut
 - `PRIMARY KEY` support, only single column, no composite primary keys
 - `AUTOINCREMENT` support, primary key must be of type `INT8` for autoincrement
 - `NULL` and `NOT NULL` support (via null bit mask included in each row/cell)
+- `DEFAULT` support for all columns including `NOW()` for `TIMESTAMP`
 - each statement is wrapped in a single statement transaction unless you control transaction context manually with `BEGIN`, `COMMIT`, `ROLLBACK` keywords
 - page size is `4096 bytes`, rows cannot exceed page size (minus required headers etc)
 - first 100 bytes of the root page are reserved for config
@@ -76,7 +77,6 @@ Moreover, each row starts with 64 bit null mask which determines which values ar
 ## Planned features:
 
 - build on existing primary key support, add unique and non unique index support
-- default values for columns
 - date/time functions to make working with `TIMESTAMP` type easier
 - joins such as `INNER`, `LEFT`, `RIGHT`
 - support `ORDER BY`, `GROUP BY`

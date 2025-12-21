@@ -389,6 +389,105 @@ func TestParse_CreateTable(t *testing.T) {
 			},
 			nil,
 		},
+		{
+			"CREATE TABLE with a column with default boolean value works",
+			"CREATE TABLE foo (bar boolean default true);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:         "bar",
+							Kind:         minisql.Boolean,
+							Size:         1,
+							Nullable:     true,
+							DefaultValue: minisql.OptionalValue{Value: true, Valid: true},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"CREATE TABLE with a column with default int value works",
+			"CREATE TABLE foo (bar int8 default 100);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:         "bar",
+							Kind:         minisql.Int8,
+							Size:         8,
+							Nullable:     true,
+							DefaultValue: minisql.OptionalValue{Value: int64(100), Valid: true},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"CREATE TABLE with a column with default float value works",
+			"CREATE TABLE foo (bar double default 0.25);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:         "bar",
+							Kind:         minisql.Double,
+							Size:         8,
+							Nullable:     true,
+							DefaultValue: minisql.OptionalValue{Value: float64(0.25), Valid: true},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"CREATE TABLE with a column with default string value works",
+			"CREATE TABLE foo (bar text default 'hello');",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:         "bar",
+							Kind:         minisql.Text,
+							Nullable:     true,
+							DefaultValue: minisql.OptionalValue{Value: "hello", Valid: true},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"CREATE TABLE with a column with default timestamp value works",
+			"CREATE TABLE foo (bar timestamp default now());",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:            "bar",
+							Kind:            minisql.Timestamp,
+							Size:            8,
+							Nullable:        true,
+							DefaultValueNow: true,
+						},
+					},
+				},
+			},
+			nil,
+		},
 	}
 
 	for _, aTestCase := range testCases {

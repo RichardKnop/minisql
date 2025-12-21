@@ -175,7 +175,7 @@ func (d *Database) init(ctx context.Context) error {
 		Fields: mainTableFields,
 		Conditions: OneOrMore{
 			{
-				FieldIsNotEqual("name", OperandQuotedString, mainTable.Name), // skip main table itself
+				FieldIsNotEqual("name", OperandQuotedString, NewTextPointer([]byte(mainTable.Name))), // skip main table itself
 			},
 		},
 	})
@@ -195,6 +195,11 @@ func (d *Database) init(ctx context.Context) error {
 				return fmt.Errorf("expected one statement when loading table, got %d", len(stmts))
 			}
 			stmt := stmts[0]
+			// Validate CREATE TABLE query is valid, this also parses any default values
+			// and transforms them into TextPointer for text columns or TIme for timestamps.
+			if err := stmt.Validate(nil); err != nil {
+				return err
+			}
 			rootPageIdx := PageIndex(aRow.Values[2].Value.(int32))
 			d.tables[stmt.TableName] = NewTable(
 				d.logger,
@@ -567,7 +572,7 @@ func (d *Database) deleteFromMainTable(ctx context.Context, aType SchemaType, na
 		Conditions: OneOrMore{
 			{
 				FieldIsEqual("type", OperandInteger, int64(aType)),
-				FieldIsEqual("name", OperandQuotedString, name),
+				FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte(name))),
 			},
 		},
 	})

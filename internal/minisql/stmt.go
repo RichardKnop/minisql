@@ -69,12 +69,14 @@ func (k ColumnKind) IsText() bool {
 }
 
 type Column struct {
-	Kind          ColumnKind
-	Size          uint32
-	PrimaryKey    bool
-	Autoincrement bool
-	Nullable      bool
-	Name          string
+	Kind            ColumnKind
+	Size            uint32
+	PrimaryKey      bool
+	Autoincrement   bool
+	Nullable        bool
+	DefaultValue    OptionalValue
+	DefaultValueNow bool
+	Name            string
 }
 
 func hasTextColumn(columns ...Column) bool {
@@ -152,10 +154,10 @@ func (s Statement) ColumnByName(name string) (Column, bool) {
 }
 
 // Prepare performs any necessary preparation on the statement before validation/execution.
-func (s *Statement) Prepare() error {
+func (s *Statement) Prepare(now Time) error {
 	switch s.Kind {
 	case Insert:
-		if err := s.prepareInsert(); err != nil {
+		if err := s.prepareInsert(now); err != nil {
 			return err
 		}
 	case Update:
@@ -163,17 +165,23 @@ func (s *Statement) Prepare() error {
 			return err
 		}
 	}
-	return nil
+	return s.prepareWhere()
 }
 
 // prepareInsert makes sure to add any nullable columns that are missing from the
 // insert statement, setting them to NULL. It also converts timestamp string values to int64.
-func (s *Statement) prepareInsert() error {
+func (s *Statement) prepareInsert(now Time) error {
 	for i, aColumn := range s.Columns {
 		if !s.HasField(aColumn.Name) {
 			s.Fields = slices.Insert(s.Fields, i, Field{Name: aColumn.Name})
 			for j := range s.Inserts {
-				s.Inserts[j] = slices.Insert(s.Inserts[j], i, OptionalValue{})
+				var value OptionalValue
+				if aColumn.DefaultValue.Valid {
+					value = aColumn.DefaultValue
+				} else if aColumn.DefaultValueNow {
+					value = OptionalValue{Valid: true, Value: now}
+				}
+				s.Inserts[j] = slices.Insert(s.Inserts[j], i, value)
 			}
 		}
 
@@ -222,6 +230,65 @@ func (s *Statement) prepareUpdate() error {
 	return nil
 }
 
+// prepareWhere converts timestamp string values in WHERE conditions to Time.
+func (s *Statement) prepareWhere() error {
+	for i, aConditionGroup := range s.Conditions {
+		for j, aCondition := range aConditionGroup {
+			// left side is field, right side is literal value
+			if aCondition.Operand1.IsField() && !aCondition.Operand2.IsField() {
+				aColumn, ok := s.ColumnByName(aCondition.Operand1.Value.(string))
+				if !ok {
+					return fmt.Errorf("unknown field %q in table %q", aCondition.Operand1.Value.(string), s.TableName)
+				}
+				if aColumn.Kind != Timestamp {
+					continue
+				}
+				if aCondition.Operand2.Type == OperandList {
+					for k, value := range aCondition.Operand2.Value.([]any) {
+						timestamp, err := parseTimeValue(value)
+						if err != nil {
+							return err
+						}
+						s.Conditions[i][j].Operand2.Value.([]any)[k] = timestamp
+					}
+				} else {
+					timestamp, err := parseTimeValue(aCondition.Operand2.Value)
+					if err != nil {
+						return err
+					}
+					s.Conditions[i][j].Operand2.Value = timestamp
+				}
+			}
+			// left side is literal value, right side is field
+			if aCondition.Operand2.IsField() && !aCondition.Operand1.IsField() {
+				aColumn, ok := s.ColumnByName(aCondition.Operand2.Value.(string))
+				if !ok {
+					return fmt.Errorf("unknown field %q in table %q", aCondition.Operand2.Value.(string), s.TableName)
+				}
+				if aColumn.Kind != Timestamp {
+					continue
+				}
+				if aCondition.Operand1.Type == OperandList {
+					for k, value := range aCondition.Operand1.Value.([]any) {
+						timestamp, err := parseTimeValue(value)
+						if err != nil {
+							return err
+						}
+						s.Conditions[i][j].Operand1.Value.([]any)[k] = timestamp
+					}
+				} else {
+					timestamp, err := parseTimeValue(aCondition.Operand1.Value)
+					if err != nil {
+						return err
+					}
+					s.Conditions[i][j].Operand1.Value = timestamp
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func parseTimeValue(value any) (Time, error) {
 	_, ok := value.(Time)
 	if ok {
@@ -265,7 +332,7 @@ func (s Statement) Validate(aTable *Table) error {
 	return nil
 }
 
-func (s Statement) validateCreateTable() error {
+func (s *Statement) validateCreateTable() error {
 	if len(s.TableName) == 0 {
 		return fmt.Errorf("table name is required")
 	}
@@ -291,7 +358,14 @@ func (s Statement) validateCreateTable() error {
 		primaryKeyColumn Column
 		nameMap          = map[string]struct{}{}
 	)
-	for _, aColumn := range s.Columns {
+	for i, aColumn := range s.Columns {
+		if aColumn.DefaultValue.Valid {
+			validColumn, err := validateDefaultValue(aColumn)
+			if err != nil {
+				return err
+			}
+			s.Columns[i] = validColumn
+		}
 		if _, exists := nameMap[aColumn.Name]; exists {
 			return fmt.Errorf("duplicate column name %s", aColumn.Name)
 		}
@@ -317,6 +391,58 @@ func (s Statement) validateCreateTable() error {
 	}
 
 	return nil
+}
+
+func validateDefaultValue(aColumn Column) (Column, error) {
+	switch aColumn.Kind {
+	case Boolean:
+		_, ok := aColumn.DefaultValue.Value.(bool)
+		if !ok {
+			return aColumn, fmt.Errorf("default value '%s' is not a valid boolean", aColumn.DefaultValue.Value)
+		}
+	case Int4, Int8:
+		_, ok := aColumn.DefaultValue.Value.(int64)
+		if !ok {
+			return aColumn, fmt.Errorf("default value '%s' is not a valid integer", aColumn.DefaultValue.Value)
+		}
+	case Real, Double:
+		_, ok := aColumn.DefaultValue.Value.(float64)
+		if !ok {
+			return aColumn, fmt.Errorf("default value '%s' is not a valid float", aColumn.DefaultValue.Value)
+		}
+	case Text, Varchar:
+		// If this is already a TextPointer, accept it as is
+		_, ok := aColumn.DefaultValue.Value.(TextPointer)
+		if ok {
+			return aColumn, nil
+		}
+		// Otherwise, validate and transform to TextPointer
+		_, ok = aColumn.DefaultValue.Value.(string)
+		if !ok {
+			return aColumn, fmt.Errorf("default value '%s' is not a valid string", aColumn.DefaultValue.Value)
+		}
+		if len(aColumn.DefaultValue.Value.(string)) > MaxInlineVarchar {
+			return aColumn, fmt.Errorf("default value '%s' exceeds maximum inline text size of %d", aColumn.DefaultValue.Value, MaxInlineVarchar)
+		}
+		aColumn.DefaultValue.Value = NewTextPointer([]byte(aColumn.DefaultValue.Value.(string)))
+	case Timestamp:
+		// If this is already a Time, accept it as is
+		_, ok := aColumn.DefaultValue.Value.(Time)
+		if ok {
+			return aColumn, nil
+		}
+		// Otherwise, validate and transform to Time
+		_, ok = aColumn.DefaultValue.Value.(string)
+		if !ok {
+			return aColumn, fmt.Errorf("default value '%s' is not a valid string", aColumn.DefaultValue.Value)
+		}
+		timestamp, err := ParseTimestamp(aColumn.DefaultValue.Value.(string))
+		if err != nil {
+			return aColumn, fmt.Errorf("default value '%s' is not a valid timestamp: %v", aColumn.DefaultValue.Value, err)
+		}
+		aColumn.DefaultValue.Value = timestamp
+	}
+	return aColumn, nil
 }
 
 // Check whether a row with the given columns can fit in a page if all columns are inlined
@@ -351,13 +477,14 @@ func (s Statement) validateInsert(aTable *Table) error {
 	}
 
 	for _, aColumn := range s.Columns {
-		if !aColumn.Nullable {
-			if aColumn.PrimaryKey && aColumn.Autoincrement {
-				continue
-			}
-			if !s.HasField(aColumn.Name) {
-				return fmt.Errorf("missing required field %q", aColumn.Name)
-			}
+		if aColumn.Nullable {
+			continue
+		}
+		if aColumn.PrimaryKey && aColumn.Autoincrement || aColumn.DefaultValue.Valid {
+			continue
+		}
+		if !s.HasField(aColumn.Name) {
+			return fmt.Errorf("missing required field %q", aColumn.Name)
 		}
 	}
 	for i, aField := range s.Fields {
@@ -553,8 +680,30 @@ func (s Statement) CreateTableDDL() string {
 			if col.Autoincrement {
 				sb.WriteString(" autoincrement")
 			}
-		} else if !col.Nullable {
-			sb.WriteString(" not null")
+		} else {
+			if !col.Nullable {
+				sb.WriteString(" not null")
+			}
+			if col.DefaultValueNow {
+				sb.WriteString(" default now()")
+			} else if col.DefaultValue.Valid {
+				switch col.Kind {
+				case Boolean:
+					if col.DefaultValue.Value.(bool) {
+						sb.WriteString(" default true")
+					} else {
+						sb.WriteString(" default false")
+					}
+				case Int4, Int8:
+					sb.WriteString(fmt.Sprintf(" default %d", col.DefaultValue.Value.(int64)))
+				case Real, Double:
+					sb.WriteString(fmt.Sprintf(" default %f", col.DefaultValue.Value.(float64)))
+				case Varchar, Text:
+					sb.WriteString(fmt.Sprintf(" default '%s'", col.DefaultValue.Value.(TextPointer).String()))
+				case Timestamp:
+					sb.WriteString(fmt.Sprintf(" default '%s'", col.DefaultValue.Value.(Time).String()))
+				}
+			}
 		}
 		if i < len(s.Columns)-1 {
 			sb.WriteString(",\n")
@@ -610,5 +759,5 @@ func (s Statement) ColumnIdx(name string) int {
 }
 
 func (s Statement) IsSelectAll() bool {
-	return s.Kind == Select && len(s.Fields) == 1 && s.Fields[0].Name == "*"
+	return s.ReadOnly() && len(s.Fields) == 1 && s.Fields[0].Name == "*"
 }

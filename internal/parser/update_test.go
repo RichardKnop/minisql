@@ -76,10 +76,24 @@ func TestParse_Update(t *testing.T) {
 								Operator: minisql.Eq,
 								Operand2: minisql.Operand{
 									Type:  minisql.OperandQuotedString,
-									Value: "1",
+									Value: minisql.NewTextPointer([]byte("1")),
 								},
 							},
 						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"UPDATE works with boolean value being set",
+			"UPDATE 'a' SET b = false;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Update,
+					TableName: "a",
+					Updates: map[string]minisql.OptionalValue{
+						"b": {Value: false, Valid: true},
 					},
 				},
 			},
@@ -105,7 +119,7 @@ func TestParse_Update(t *testing.T) {
 								Operator: minisql.Eq,
 								Operand2: minisql.Operand{
 									Type:  minisql.OperandQuotedString,
-									Value: "1",
+									Value: minisql.NewTextPointer([]byte("1")),
 								},
 							},
 						},
@@ -134,7 +148,7 @@ func TestParse_Update(t *testing.T) {
 								Operator: minisql.Eq,
 								Operand2: minisql.Operand{
 									Type:  minisql.OperandQuotedString,
-									Value: "1",
+									Value: minisql.NewTextPointer([]byte("1")),
 								},
 							},
 						},
@@ -163,7 +177,7 @@ func TestParse_Update(t *testing.T) {
 								Operator: minisql.Eq,
 								Operand2: minisql.Operand{
 									Type:  minisql.OperandQuotedString,
-									Value: "1",
+									Value: minisql.NewTextPointer([]byte("1")),
 								},
 							},
 						},
@@ -192,7 +206,7 @@ func TestParse_Update(t *testing.T) {
 								Operator: minisql.Eq,
 								Operand2: minisql.Operand{
 									Type:  minisql.OperandQuotedString,
-									Value: "1",
+									Value: minisql.NewTextPointer([]byte("1")),
 								},
 							},
 						},
@@ -222,7 +236,7 @@ func TestParse_Update(t *testing.T) {
 								Operator: minisql.Eq,
 								Operand2: minisql.Operand{
 									Type:  minisql.OperandQuotedString,
-									Value: "1",
+									Value: minisql.NewTextPointer([]byte("1")),
 								},
 							},
 						},
@@ -252,7 +266,7 @@ func TestParse_Update(t *testing.T) {
 								Operator: minisql.Eq,
 								Operand2: minisql.Operand{
 									Type:  minisql.OperandQuotedString,
-									Value: "1",
+									Value: minisql.NewTextPointer([]byte("1")),
 								},
 							},
 							{
