@@ -111,7 +111,7 @@ func (r *Row) GetValue(name string) (OptionalValue, bool) {
 			break
 		}
 	}
-	if !found {
+	if !found || columnIdx >= len(r.Values) {
 		return OptionalValue{}, false
 	}
 	return r.Values[columnIdx], true
@@ -270,20 +270,22 @@ func (r *Row) Marshal() ([]byte, error) {
 	return buf, nil
 }
 
+// For any columns not selected, we skip unmarshaling them but we include
+// empty OptionalValue in the Values slice to maintain alignment (some functions)
+// use column index to access row values so we need to make sure indexes align.
 func (r *Row) Unmarshal(aCell Cell, selectedFields ...Field) error {
 	r.Key = aCell.Key
+
+	if len(selectedFields) == 0 {
+		r.Values = make([]OptionalValue, len(r.Columns))
+		return nil
+	}
 	r.Values = make([]OptionalValue, 0, len(r.Columns))
 
 	// Create a set of selected column names for fast lookup
 	selectedSet := make(map[string]bool)
-	if len(selectedFields) == 0 {
-		for _, aColumn := range r.Columns {
-			selectedSet[aColumn.Name] = true
-		}
-	} else {
-		for _, aField := range selectedFields {
-			selectedSet[aField.Name] = true
-		}
+	for _, aField := range selectedFields {
+		selectedSet[aField.Name] = true
 	}
 
 	offset := 0

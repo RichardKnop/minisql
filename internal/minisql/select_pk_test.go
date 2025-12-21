@@ -79,7 +79,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		assert.Equal(t, rows, aResult.CollectRows(ctx))
 	})
 
-	t.Run("Select single row by primary key (index scan)", func(t *testing.T) {
+	t.Run("Select single row by primary key - index scan", func(t *testing.T) {
 		id := rowIDs(rows[5])[0]
 		stmt := Statement{
 			Kind:   Select,
@@ -109,7 +109,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		assert.Equal(t, rows[5], actual[0])
 	})
 
-	t.Run("Select multiple rows by primary keys (index scan)", func(t *testing.T) {
+	t.Run("Select multiple rows by primary keys - index scan", func(t *testing.T) {
 		ids := rowIDs(rows[5], rows[11], rows[12], rows[33])
 		stmt := Statement{
 			Kind:   Select,
@@ -145,7 +145,169 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		assert.Equal(t, expected, aResult.CollectRows(ctx))
 	})
 
-	t.Run("Select multiple rows by primary key and other column (sequential scan)", func(t *testing.T) {
+	t.Run("Select rows where primary key is NOT INT - range scan", func(t *testing.T) {
+		ids := rowIDs(rows[5], rows[11], rows[12], rows[33])
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(testColumnsWithPrimaryKey...),
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: NotIn,
+						Operand2: Operand{
+							Type:  OperandList,
+							Value: ids,
+						},
+					},
+				},
+			},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		// We expect all rows other than 5, 11, 12, and 33
+		expected := make([]Row, 0, len(ids))
+		for i, aRow := range rows {
+			if i == 5 || i == 11 || i == 12 || i == 33 {
+				continue
+			}
+			expected = append(expected, aRow)
+		}
+		assert.Equal(t, expected, aResult.CollectRows(ctx))
+	})
+
+	t.Run("Select rows by range with lower bound - range scan", func(t *testing.T) {
+		id := rowIDs(rows[10])[0]
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(testColumnsWithPrimaryKey...),
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: Gt,
+						Operand2: Operand{
+							Type:  OperandInteger,
+							Value: id,
+						},
+					},
+				},
+			},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		// We expect rows 12 and onwards
+		expected := make([]Row, 0, len(rows)-11)
+		for i, aRow := range rows {
+			if i < 11 {
+				continue
+			}
+			expected = append(expected, aRow)
+		}
+		actual := aResult.CollectRows(ctx)
+		assert.Len(t, actual, len(expected))
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("Select rows by range with upper bound - range scan", func(t *testing.T) {
+		id := rowIDs(rows[30])[0]
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(testColumnsWithPrimaryKey...),
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: Lt,
+						Operand2: Operand{
+							Type:  OperandInteger,
+							Value: id,
+						},
+					},
+				},
+			},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		// We expect rows until 30
+		expected := make([]Row, 0, len(rows)-9)
+		for i, aRow := range rows {
+			if i >= 30 {
+				continue
+			}
+			expected = append(expected, aRow)
+		}
+		actual := aResult.CollectRows(ctx)
+		assert.Len(t, actual, len(expected))
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("Select rows by range with both lower and upper bound - range scan", func(t *testing.T) {
+		id1 := rowIDs(rows[10])[0]
+		id2 := rowIDs(rows[30])[0]
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(testColumnsWithPrimaryKey...),
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: Gte,
+						Operand2: Operand{
+							Type:  OperandInteger,
+							Value: id1,
+						},
+					},
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: Lte,
+						Operand2: Operand{
+							Type:  OperandInteger,
+							Value: id2,
+						},
+					},
+				},
+			},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		// We expect all rows between 10 and 30 inclusive
+		expected := make([]Row, 0, len(rows)-9)
+		for i, aRow := range rows {
+			if i < 10 || i > 30 {
+				continue
+			}
+			expected = append(expected, aRow)
+		}
+		actual := aResult.CollectRows(ctx)
+		assert.Len(t, actual, len(expected))
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("Select multiple rows by primary key and other column - sequential scan", func(t *testing.T) {
 		var (
 			id       = rowIDs(rows[5])[0]
 			email, _ = rows[15].GetValue("email")

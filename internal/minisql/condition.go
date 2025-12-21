@@ -220,6 +220,20 @@ func FieldIsNotNull(fieldName string) Condition {
 	}
 }
 
+func FieldIsGreater(fieldName string, operandType OperandType, value any) Condition {
+	return Condition{
+		Operand1: Operand{
+			Type:  OperandField,
+			Value: fieldName,
+		},
+		Operator: Gt,
+		Operand2: Operand{
+			Type:  operandType,
+			Value: value,
+		},
+	}
+}
+
 func compareBoolean(value1, value2 any, operator Operator) (bool, error) {
 	theValue1, ok := value1.(bool)
 	if !ok {

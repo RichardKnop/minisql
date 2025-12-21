@@ -160,6 +160,9 @@ func storeOverflowText(ctx context.Context, aPager TxPager, textPointer *TextPoi
 }
 
 func readOverflowTexts(ctx context.Context, aPager TxPager, aRow *Row) error {
+	if len(aRow.Values) == 0 {
+		return nil
+	}
 	for _, aColumn := range aRow.Columns {
 		if !aColumn.Kind.IsText() {
 			continue

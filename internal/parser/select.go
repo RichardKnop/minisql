@@ -8,8 +8,11 @@ import (
 )
 
 var (
-	errSelectWithoutFields     = fmt.Errorf("at SELECT: expected field to SELECT")
-	errSelectExpectedTableName = fmt.Errorf("at SELECT: expected table name identifier")
+	errSelectWithoutFields        = fmt.Errorf("at SELECT: expected field to SELECT")
+	errSelectExpectedTableName    = fmt.Errorf("at SELECT: expected table name identifier")
+	errCannotCombineAsterisk      = fmt.Errorf(`at SELECT: cannot combine "*" with other fields`)
+	errCannotCombineCountAsterisk = fmt.Errorf(`at SELECT: cannot combine "COUNT(*)" with other fields`)
+	errExpectedFrom               = fmt.Errorf("at SELECT: expected FROM")
 )
 
 /*
@@ -25,13 +28,41 @@ func (p *parser) doParseSelect() error {
 	switch p.step {
 	case stepSelectField:
 		identifier := p.peek()
-		if !isIdentifierOrAsterisk(identifier) {
+		if !isIdentifier(identifier) && identifier != "*" && strings.ToUpper(identifier) != "COUNT(*)" {
 			return errSelectWithoutFields
 		}
+
 		p.Fields = append(p.Fields, minisql.Field{Name: identifier})
 		p.pop()
-		maybeFrom := p.peek()
-		if strings.ToUpper(maybeFrom) == "AS" {
+		maybeFrom := strings.ToUpper(p.peek())
+
+		// Handle * for selecting all rows
+		if identifier == "*" {
+			if len(p.Fields) > 1 {
+				return errCannotCombineAsterisk
+			}
+			if maybeFrom != "FROM" {
+				return errExpectedFrom
+			}
+			p.step = stepSelectFrom
+			return nil
+		}
+
+		// Handle COUNT(*) special case
+		if identifier == "COUNT(*)" {
+			if len(p.Fields) > 1 {
+				return errCannotCombineCountAsterisk
+			}
+			if maybeFrom != "FROM" {
+				return errExpectedFrom
+			}
+			p.step = stepSelectFrom
+			return nil
+		}
+
+		// Otherwise we expect an AS alias, FROM or comma and next field
+		switch maybeFrom {
+		case "AS":
 			p.pop()
 			alias := p.peek()
 			if !isIdentifier(alias) {
@@ -43,11 +74,11 @@ func (p *parser) doParseSelect() error {
 			p.Aliases[identifier] = alias
 			p.pop()
 			maybeFrom = p.peek()
-		}
-		if strings.ToUpper(maybeFrom) == "FROM" {
+		case "FROM":
 			p.step = stepSelectFrom
 			return nil
 		}
+
 		p.step = stepSelectComma
 	case stepSelectComma:
 		commaRWord := p.peek()
@@ -57,9 +88,9 @@ func (p *parser) doParseSelect() error {
 		p.pop()
 		p.step = stepSelectField
 	case stepSelectFrom:
-		fromRWord := p.peek()
-		if strings.ToUpper(fromRWord) != "FROM" {
-			return fmt.Errorf("at SELECT: expected FROM")
+		from := strings.ToUpper(p.peek())
+		if from != "FROM" {
+			return errExpectedFrom
 		}
 		p.pop()
 		p.step = stepSelectFromTable

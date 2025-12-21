@@ -19,7 +19,7 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 
 	t.logger.Sugar().With("query type", "DELETE", "plan", plan).Debug("query plan")
 
-	// Only fetch fields needed for WHERE conditions
+	// We need to select any fields used in WHERE conditions to filter rows to delete.
 	var selectedFields []Field
 	for _, conditions := range stmt.Conditions {
 		for _, cond := range conditions {

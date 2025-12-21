@@ -3,8 +3,6 @@ package minisql
 import (
 	"context"
 	"fmt"
-	"maps"
-	"slices"
 )
 
 type Cursor struct {
@@ -265,10 +263,17 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow *Row) (bool, e
 	}
 
 	// Remove any overflow pages
-	if hasTextColumn(c.Table.Columns...) {
+	if overflowColumns := textOverflowColumns(c.Table.Columns...); len(overflowColumns) > 0 {
 		// TODO - a more efficient implementation would be to try to reuse existing overflow pages
 		// if possible. For example if text size didn't change much and fits into existing overflow pages.
-		changedColumns := slices.Collect(maps.Values(changedValues))
+		changedColumns := make([]Column, 0, len(changedValues))
+		for _, aColumn := range overflowColumns {
+			_, ok := changedValues[aColumn.Name]
+			if !ok {
+				continue
+			}
+			changedColumns = append(changedColumns, aColumn)
+		}
 		if err := c.Table.freeOverflowPages(ctx, &oldRow, changedColumns...); err != nil {
 			return false, err
 		}
@@ -325,7 +330,7 @@ func (c *Cursor) deletePrimaryKey(ctx context.Context) error {
 		return nil
 	}
 
-	aRow, err := c.fetchRow(ctx)
+	aRow, err := c.fetchRow(ctx, Field{Name: c.Table.PrimaryKey.Column.Name})
 	if err != nil {
 		return fmt.Errorf("failed to fetch row: %w", err)
 	}

@@ -33,6 +33,54 @@ func TestParse_Select(t *testing.T) {
 			errSelectWithoutFields,
 		},
 		{
+			"SELECT a, * works fails",
+			"SELECT a, * FROM b;",
+			nil,
+			errCannotCombineAsterisk,
+		},
+		{
+			"SELECT *, a works fails",
+			"SELECT *, a FROM b;",
+			nil,
+			errExpectedFrom,
+		},
+		{
+			"SELECT a, COUNT(*) works fails",
+			"SELECT a, COUNT(*) FROM b;",
+			nil,
+			errCannotCombineCountAsterisk,
+		},
+		{
+			"SELECT COUNT(*), a works fails",
+			"SELECT COUNT(*), a FROM b;",
+			nil,
+			errExpectedFrom,
+		},
+		{
+			"SELECT * works",
+			"SELECT * FROM b;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Fields:    []minisql.Field{{Name: "*"}},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT COUNT(*) works",
+			"SELECT COUNT(*) FROM b;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Fields:    []minisql.Field{{Name: "COUNT(*)"}},
+				},
+			},
+			nil,
+		},
+		{
 			"SELECT works",
 			"SELECT a FROM b;",
 			[]minisql.Statement{
@@ -80,30 +128,6 @@ func TestParse_Select(t *testing.T) {
 						"a": "z",
 						"b": "y",
 					},
-				},
-			},
-			nil,
-		},
-		{
-			"SELECT * works",
-			"SELECT * FROM b;",
-			[]minisql.Statement{
-				{
-					Kind:      minisql.Select,
-					TableName: "b",
-					Fields:    []minisql.Field{{Name: "*"}},
-				},
-			},
-			nil,
-		},
-		{
-			"SELECT a, * works",
-			"SELECT a, * FROM b;",
-			[]minisql.Statement{
-				{
-					Kind:      minisql.Select,
-					TableName: "b",
-					Fields:    []minisql.Field{{Name: "a"}, {Name: "*"}},
 				},
 			},
 			nil,

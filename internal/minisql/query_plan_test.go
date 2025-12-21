@@ -287,6 +287,40 @@ func TestTable_PlanQuery(t *testing.T) {
 			},
 		},
 		{
+			"Single primary key NOT equal condition (index range scan)",
+			aTableWithPK,
+			Statement{
+				Kind: Select,
+				Conditions: OneOrMore{
+					{
+						{
+							Operand1: Operand{Type: OperandField, Value: "id"},
+							Operator: Ne,
+							Operand2: Operand{Type: OperandInteger, Value: int64(42)},
+						},
+					},
+				},
+			},
+			QueryPlan{
+				Scans: []Scan{
+					{
+						Type:            ScanTypeIndexRange,
+						IndexName:       "pk_users",
+						IndexColumnName: "id",
+						Filters: OneOrMore{
+							{
+								{
+									Operand1: Operand{Type: OperandField, Value: "id"},
+									Operator: Ne,
+									Operand2: Operand{Type: OperandInteger, Value: int64(42)},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
 			"Order in memory (sequential scan)",
 			aTableWithPK,
 			Statement{
@@ -595,6 +629,31 @@ func TestTryRangeScan(t *testing.T) {
 			},
 			Scan{},
 			false,
+		},
+		{
+			"Not equal operator",
+			"pk_users",
+			"id",
+			Conditions{
+				{
+					Operand1: Operand{Type: OperandField, Value: "id"},
+					Operator: Ne,
+					Operand2: Operand{Type: OperandInteger, Value: int64(10)},
+				},
+			},
+			Scan{
+				Type:            ScanTypeIndexRange,
+				IndexName:       "pk_users",
+				IndexColumnName: "id",
+				Filters: OneOrMore{{
+					{
+						Operand1: Operand{Type: OperandField, Value: "id"},
+						Operator: Ne,
+						Operand2: Operand{Type: OperandInteger, Value: int64(10)},
+					},
+				}},
+			},
+			true,
 		},
 		{
 			"Range scan with lower bound only",

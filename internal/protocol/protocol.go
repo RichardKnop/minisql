@@ -19,6 +19,7 @@ type Response struct {
 	Success      bool                      `json:"success"`
 	Error        string                    `json:"error,omitempty"`
 	Columns      []minisql.Column          `json:"columns,omitempty"`
+	Count        int64                     `json:"count,omitempty"`
 	Rows         [][]minisql.OptionalValue `json:"rows,omitempty"`
 	RowsAffected int                       `json:"rows_affected,omitempty"`
 	Message      string                    `json:"message,omitempty"`

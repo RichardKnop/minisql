@@ -114,6 +114,16 @@ func TestIndex_ScanRange(t *testing.T) {
 
 	// require.NoError(t, anIndex.print())
 
+	t.Run("scan range all", func(t *testing.T) {
+		var scannedKeys []int64
+		err := anIndex.ScanRange(ctx, RangeCondition{}, func(key any, rowID RowID) error {
+			scannedKeys = append(scannedKeys, key.(int64))
+			return nil
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}, scannedKeys)
+	})
+
 	t.Run("scan range < 18", func(t *testing.T) {
 		var scannedKeys []int64
 		err := anIndex.ScanRange(ctx, RangeCondition{

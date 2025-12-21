@@ -348,7 +348,7 @@ func TestTable_Select(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		//We expect all rows sorted by email descending
+		// We expect all rows sorted by email ascending
 		expected := make([]Row, 0, len(rows))
 		for _, aRow := range rows {
 			expected = append(expected, aRow)
@@ -376,7 +376,7 @@ func TestTable_Select(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		//We expect all rows sorted by email descending
+		// We expect all rows sorted by email descending
 		expected := make([]Row, 0, len(rows))
 		for _, aRow := range rows {
 			expected = append(expected, aRow)
@@ -387,6 +387,52 @@ func TestTable_Select(t *testing.T) {
 			return strings.Compare(email1.Value.(TextPointer).String(), email2.Value.(TextPointer).String()) > 0
 		})
 		assert.Equal(t, expected, aResult.CollectRows(ctx))
+	})
+
+	t.Run("Count all rows", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: []Field{{Name: "COUNT(*)"}},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+		assert.Equal(t, len(rows), int(aResult.Count))
+		assert.Nil(t, aResult.Rows)
+	})
+
+	t.Run("Count rows with condition", func(t *testing.T) {
+		// Pick one of middle IDs and prepared expected count
+		expected := make([]Row, 0, len(rows))
+		for _, aRow := range rows {
+			expected = append(expected, aRow)
+		}
+		sort.Slice(expected, func(i, j int) bool {
+			id1, _ := expected[i].GetValue("id")
+			id2, _ := expected[j].GetValue("id")
+			return id1.Value.(int64) < id2.Value.(int64)
+		})
+		var (
+			middleID      = expected[10].Values[0].Value.(int64)
+			expectedCount int64
+		)
+		for _, aRow := range expected {
+			idVal, _ := aRow.GetValue("id")
+			if idVal.Value.(int64) > middleID {
+				expectedCount += 1
+			}
+		}
+
+		stmt := Statement{
+			Kind:       Select,
+			Fields:     []Field{{Name: "COUNT(*)"}},
+			Conditions: OneOrMore{{FieldIsGreater("id", OperandInteger, middleID)}},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+		assert.Equal(t, expectedCount, aResult.Count)
+		assert.Nil(t, aResult.Rows)
 	})
 }
 
