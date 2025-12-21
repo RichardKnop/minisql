@@ -504,9 +504,9 @@ func (t *Table) DeleteKey(ctx context.Context, pageIdx PageIndex, key RowID) err
 	cellToDelete, ok := aPage.LeafNode.Delete(key)
 
 	// Remove any overflow pages
-	if ok && hasTextColumn(t.Columns...) {
+	if overflowFields := textOverflowFields(t.Columns...); len(overflowFields) > 0 && ok {
 		aRow := NewRow(t.Columns)
-		if err := aRow.Unmarshal(cellToDelete); err != nil {
+		if err := aRow.Unmarshal(cellToDelete, overflowFields...); err != nil {
 			return err
 		}
 		if err := t.freeOverflowPages(ctx, &aRow); err != nil {

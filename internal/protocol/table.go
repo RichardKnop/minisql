@@ -11,7 +11,8 @@ import (
 const (
 	truncatedStringEnd = " ..."
 	nonVarCharLength   = 20
-	maxLength          = 50
+	timestampLength    = 29
+	maxLength          = 40
 	maxMultiLineLength = 500
 )
 
@@ -117,6 +118,8 @@ func computeTableSize(columns []minisql.Column) []int {
 	for i, aColumn := range columns {
 		if aColumn.Kind.IsText() {
 			columnSize[i] = maxLength
+		} else if aColumn.Kind == minisql.Timestamp {
+			columnSize[i] = timestampLength
 		} else {
 			columnSize[i] = nonVarCharLength
 		}

@@ -79,13 +79,32 @@ type Column struct {
 	Name            string
 }
 
-func hasTextColumn(columns ...Column) bool {
+func textOverflowColumns(columns ...Column) []Column {
+	overflowColumns := make([]Column, 0, len(columns))
 	for _, aColumn := range columns {
-		if aColumn.Kind.IsText() {
-			return true
+		if !aColumn.Kind.IsText() {
+			continue
 		}
+		if aColumn.Kind == Varchar && aColumn.Size <= MaxInlineVarchar {
+			continue
+		}
+		overflowColumns = append(overflowColumns, aColumn)
 	}
-	return false
+	return overflowColumns
+}
+
+func textOverflowFields(columns ...Column) []Field {
+	overflowFields := make([]Field, 0, len(columns))
+	for _, aColumn := range columns {
+		if !aColumn.Kind.IsText() {
+			continue
+		}
+		if aColumn.Kind == Varchar && aColumn.Size <= MaxInlineVarchar {
+			continue
+		}
+		overflowFields = append(overflowFields, Field{Name: aColumn.Name})
+	}
+	return overflowFields
 }
 
 type Field struct {
@@ -551,19 +570,43 @@ func (s Statement) validateSelect(aTable *Table) error {
 			return fmt.Errorf("OFFSET must be a non-negative integer")
 		}
 	}
-	if !s.IsSelectAll() {
-		fieldMap := map[string]struct{}{}
-		for _, aField := range s.Fields {
-			_, ok := aTable.ColumnByName(aField.Name)
-			if !ok {
-				return fmt.Errorf("unknown field %q in table %q", aField.Name, aTable.Name)
-			}
-			if _, exists := fieldMap[aField.Name]; exists {
-				return fmt.Errorf("duplicate field %q in select statement", aField.Name)
-			}
-			fieldMap[aField.Name] = struct{}{}
+
+	if s.IsSelectCountAll() {
+		if len(s.OrderBy) > 0 {
+			return fmt.Errorf("ORDER BY cannot be used with COUNT(*)")
+		}
+		if s.Offset.Valid {
+			return fmt.Errorf("OFFSET cannot be used with COUNT(*)")
+		}
+		if s.Limit.Valid {
+			return fmt.Errorf("LIMIT cannot be used with COUNT(*)")
 		}
 	}
+	if s.IsSelectAll() || s.IsSelectCountAll() {
+		return nil
+	}
+
+	fieldMap := map[string]struct{}{}
+	for _, aField := range s.Fields {
+		_, ok := aTable.ColumnByName(aField.Name)
+		if !ok {
+			return fmt.Errorf("unknown field %q in table %q", aField.Name, aTable.Name)
+		}
+		if _, exists := fieldMap[aField.Name]; exists {
+			return fmt.Errorf("duplicate field %q in select statement", aField.Name)
+		}
+		fieldMap[aField.Name] = struct{}{}
+	}
+
+	if len(s.OrderBy) > 0 {
+		for _, anOrderBy := range s.OrderBy {
+			_, ok := aTable.ColumnByName(anOrderBy.Field.Name)
+			if !ok {
+				return fmt.Errorf("unknown field %q in ORDER BY clause", anOrderBy.Field.Name)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -717,6 +760,7 @@ type Iterator func(ctx context.Context) (Row, error)
 
 type StatementResult struct {
 	Columns      []Column
+	Count        int64
 	Rows         Iterator
 	RowsAffected int
 }
@@ -756,6 +800,10 @@ func (s Statement) ColumnIdx(name string) int {
 		}
 	}
 	return -1
+}
+
+func (s Statement) IsSelectCountAll() bool {
+	return s.ReadOnly() && len(s.Fields) == 1 && strings.ToUpper(s.Fields[0].Name) == "COUNT(*)"
 }
 
 func (s Statement) IsSelectAll() bool {

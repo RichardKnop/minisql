@@ -59,7 +59,7 @@ var (
 	testRowSize = uint64(8 + 4 + 255 + 4 + 1 + 4 + 8) // calculated size of testColumns
 
 	mediumRowBaseSize = uint32(8 + (varcharLengthPrefixSize + MaxInlineVarchar) + 4 + 1 + 4 + 8)
-	// Append varcharts until row size is so that 5 of these full rows can fit into a page
+	// Append varchars until row size is so that 5 of these full rows can fit into a page
 	testMediumColumns = appendUntilSize(
 		[]Column{
 			{

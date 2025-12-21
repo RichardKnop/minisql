@@ -201,7 +201,6 @@ func (ui *Index[T]) scanRangeFrom(
 
 	if aNode.Header.IsRoot {
 		return nil
-
 	}
 
 	// Recurse to the parent to find all succeeding keys

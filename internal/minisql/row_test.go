@@ -25,7 +25,7 @@ func TestRow_Marshal(t *testing.T) {
 		require.NoError(t, err)
 
 		actual := NewRow(testColumns)
-		err = actual.Unmarshal(Cell{Value: data})
+		err = actual.Unmarshal(Cell{Value: data}, fieldsFromColumns(aRow.Columns...)...)
 		require.NoError(t, err)
 
 		assert.Equal(t, aRow, actual)

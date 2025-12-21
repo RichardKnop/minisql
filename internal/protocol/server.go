@@ -188,11 +188,18 @@ func (s *Server) handleSQL(ctx context.Context, conn *minisql.Connection, sql st
 			Kind:         stmt.Kind,
 			Success:      true,
 			Columns:      aResult.Columns,
+			Count:        aResult.Count,
 			Rows:         make([][]minisql.OptionalValue, 0, 10),
 			RowsAffected: aResult.RowsAffected,
 		}
 
-		if aResult.Rows != nil {
+		if aResponse.Count > 0 {
+			aResponse.Columns = []minisql.Column{{
+				Name: "COUNT(*)",
+				Kind: minisql.Int8,
+			}}
+			aResponse.Rows = append(aResponse.Rows, []minisql.OptionalValue{{Value: aResponse.Count, Valid: true}})
+		} else if aResult.Rows != nil {
 			aRow, err := aResult.Rows(ctx)
 			for ; err == nil; aRow, err = aResult.Rows(ctx) {
 				// Convert TextPointer structs to strings

@@ -133,7 +133,7 @@ minisql>
 You can create your own non-system table now:
 
 ```sh
-minisql> create table users(id int8 primary key autoincrement, name varchar(255), email text, age int4);
+minisql> create table users(id int8 primary key autoincrement, name varchar(255), email text, age int4, created timestamp default now());
 Table 'users' created successfully
 minisql>
 ```
@@ -175,18 +175,18 @@ Select from table:
 
 ```sh
 minisql> select * from users;
- id                   | name                                               | email                                              | age                  
-----------------------+----------------------------------------------------+----------------------------------------------------+----------------------
- 1                    | Danny Mason                                        | Danny_Mason2966@xqj6f.tech                         | 35                   
- 2                    | Johnathan Walker                                   | Johnathan_Walker250@ptr6k.page                     | 32                   
- 3                    | Tyson Weldon                                       | Tyson_Weldon2108@zynuu.video                       | 27                   
- 4                    | Mason Callan                                       | Mason_Callan9524@bu2lo.edu                         | 19                   
- 5                    | Logan Flynn                                        | Logan_Flynn9019@xtwt3.pro                          | 42                   
- 6                    | Beatrice Uttley                                    | Beatrice_Uttley1670@1wa8o.org                      | 32                   
- 7                    | Harry Johnson                                      | Harry_Johnson5515@jcf8v.video                      | 25                   
- 8                    | Carl Thomson                                       | Carl_Thomson4218@kyb7t.host                        | 53                   
- 9                    | Kaylee Johnson                                     | Kaylee_Johnson8112@c2nyu.design                    | 48                   
- 10                   | Cristal Duvall                                     | Cristal_Duvall6639@yvu30.press                     | 27                   
+ id                   | name                                     | email                                    | age                  | created                       
+----------------------+------------------------------------------+------------------------------------------+----------------------+-------------------------------
+ 1                    | Danny Mason                              | Danny_Mason2966@xqj6f.tech               | 35                   | 2025-12-21 22:31:35.514831    
+ 2                    | Johnathan Walker                         | Johnathan_Walker250@ptr6k.page           | 32                   | 2025-12-21 22:31:35.514831    
+ 3                    | Tyson Weldon                             | Tyson_Weldon2108@zynuu.video             | 27                   | 2025-12-21 22:31:35.514831    
+ 4                    | Mason Callan                             | Mason_Callan9524@bu2lo.edu               | 19                   | 2025-12-21 22:31:35.514831    
+ 5                    | Logan Flynn                              | Logan_Flynn9019@xtwt3.pro                | 42                   | 2025-12-21 22:31:35.514831    
+ 6                    | Beatrice Uttley                          | Beatrice_Uttley1670@1wa8o.org            | 32                   | 2025-12-21 22:31:35.514831    
+ 7                    | Harry Johnson                            | Harry_Johnson5515@jcf8v.video            | 25                   | 2025-12-21 22:31:35.514831    
+ 8                    | Carl Thomson                             | Carl_Thomson4218@kyb7t.host              | 53                   | 2025-12-21 22:31:35.514831    
+ 9                    | Kaylee Johnson                           | Kaylee_Johnson8112@c2nyu.design          | 48                   | 2025-12-21 22:31:35.514831    
+ 10                   | Cristal Duvall                           | Cristal_Duvall6639@yvu30.press           | 27                   | 2025-12-21 22:31:35.514831  
 minisql>
 ```
 
@@ -202,9 +202,9 @@ Select to verify update:
 
 ```sh
 minisql> select * from users where id=1;
- id                   | name                                               | email                                              | age                  
-----------------------+----------------------------------------------------+----------------------------------------------------+----------------------
- 1                    | Danny Mason                                        | Danny_Mason2966@xqj6f.tech                         | 36                                
+ id                   | name                                     | email                                    | age                  | created                       
+----------------------+------------------------------------------+------------------------------------------+----------------------+-------------------------------
+ 1                    | Danny Mason                              | Danny_Mason2966@xqj6f.tech               | 36                   | 2025-12-21 22:31:35.514831              
 minisql>
 ```
 

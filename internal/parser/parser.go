@@ -19,15 +19,15 @@ var (
 
 var reservedWords = []string{
 	// operators
-	"(", ")", ">=", "<=", "!=", ",", "=", ">", "<",
+	"(", ")", ">=", "<=", "!=", ",", "=", ">", "<", "IN (", "NOT IN (",
 	// column types
 	"BOOLEAN", "INT4", "INT8", "REAL", "DOUBLE", "TEXT", "VARCHAR(", "TIMESTAMP",
 	// statement types
 	"CREATE TABLE", "DROP TABLE", "SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
-	"*", "PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "DEFAULT", "NOT NULL", "NULL",
+	"*", "COUNT(*)", "PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "DEFAULT", "NOT NULL", "NULL",
 	"IS NULL", "IS NOT NULL", "TRUE", "FALSE", "NOW()",
-	"IF NOT EXISTS", "WHERE", "FROM", "SET", "ASC", "DESC", "AS", "IN (", "NOT IN (",
+	"IF NOT EXISTS", "WHERE", "FROM", "SET", "ASC", "DESC", "AS",
 	"ORDER BY", "LIMIT", "OFFSET",
 	"BEGIN", "COMMIT", "ROLLBACK",
 	";",
@@ -498,15 +498,4 @@ func isIdentifier(s string) bool {
 		}
 	}
 	return identifierRegexp.MatchString(s)
-}
-
-func isIdentifierOrAsterisk(s string) bool {
-	return isIdentifier(s) || s == "*"
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

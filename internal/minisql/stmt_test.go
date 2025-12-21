@@ -724,7 +724,71 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, `unknown field "unknown_field" in table "test_table"`)
 	})
 
-	t.Run("SELECT with invalid limit should fail", func(t *testing.T) {
+	t.Run("SELECT with unknown field in ORDER BY should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    []Field{{Name: "id"}, {Name: "email"}},
+			OrderBy: []OrderBy{
+				{
+					Field: Field{Name: "unknown_field"},
+				},
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `unknown field "unknown_field" in ORDER BY clause`)
+	})
+
+	t.Run("SELECT COUNT(*) with ORDER BY should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    []Field{{Name: "COUNT(*)"}},
+			OrderBy: []OrderBy{
+				{
+					Field: Field{Name: "id"},
+				},
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `ORDER BY cannot be used with COUNT(*)`)
+	})
+
+	t.Run("SELECT COUNT(*) with OFFSET should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    []Field{{Name: "COUNT(*)"}},
+			Offset:    OptionalValue{Value: int64(100), Valid: true},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `OFFSET cannot be used with COUNT(*)`)
+	})
+
+	t.Run("SELECT COUNT(*) with LIMIT should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    []Field{{Name: "COUNT(*)"}},
+			Limit:     OptionalValue{Value: int64(100), Valid: true},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `LIMIT cannot be used with COUNT(*)`)
+	})
+
+	t.Run("SELECT with invalid LIMIT should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
 			TableName: aTable.Name,
