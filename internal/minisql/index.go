@@ -182,7 +182,7 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 	if aNode.Header.IsLeaf {
 		// Find location to insert new key, shift keys to make space
 		i := int(aNode.Header.Keys) - 1
-		aNode.Cells = append(aNode.Cells, IndexCell[T]{})
+		aNode.Cells = append(aNode.Cells, NewIndexCell[T](ui.unique))
 		for i >= 0 && aNode.Cells[i].Key > key {
 			aNode.Cells[i+1].Key = aNode.Cells[i].Key
 			aNode.Cells[i+1].InlineRowIDs = aNode.Cells[i].InlineRowIDs
@@ -272,7 +272,7 @@ func (ui *Index[T]) splitChild(ctx context.Context, parentPage, splitPage *Page,
 
 	// Update parent node
 	if len(parentNode.Cells) < int(parentNode.Header.Keys+1) {
-		parentNode.Cells = append(parentNode.Cells, IndexCell[T]{})
+		parentNode.Cells = append(parentNode.Cells, NewIndexCell[T](ui.unique))
 	}
 	for j := int(parentNode.Header.Keys) - 1; j >= int(indexInParent); j-- {
 		parentNode.Cells[j+1].Key = parentNode.Cells[j].Key
@@ -282,13 +282,13 @@ func (ui *Index[T]) splitChild(ctx context.Context, parentPage, splitPage *Page,
 	}
 	parentNode.Header.Keys += 1
 	if len(parentNode.Cells) < int(indexInParent) {
-		parentNode.Cells = append(parentNode.Cells, IndexCell[T]{})
+		parentNode.Cells = append(parentNode.Cells, NewIndexCell[T](ui.unique))
 	}
 	parentNode.Cells[indexInParent].Key = aCellToMoveToParent.Key
 	parentNode.Cells[indexInParent].InlineRowIDs = aCellToMoveToParent.InlineRowIDs
 	parentNode.Cells[indexInParent].RowIDs = aCellToMoveToParent.RowIDs
 	parentNode.Cells[indexInParent].Overflow = aCellToMoveToParent.Overflow
-	splitNode.Cells[leftCount] = IndexCell[T]{}
+	splitNode.Cells[leftCount] = NewIndexCell[T](ui.unique)
 
 	for j := int(parentNode.Header.Keys) - 1; j > int(indexInParent); j-- {
 		if j+1 >= int(parentNode.Header.Keys) {
@@ -616,6 +616,7 @@ func (ui *Index[T]) borrowFromLeft(ctx context.Context, aParent, aPage, left *Pa
 		RowIDs:       parentNode.Cells[idx-1].RowIDs,
 		Overflow:     parentNode.Cells[idx-1].Overflow,
 		Child:        leftNode.Header.RightChild,
+		unique:       ui.unique,
 	})
 
 	if !leftNode.Header.IsLeaf {
@@ -650,6 +651,7 @@ func (ui *Index[T]) borrowFromRight(ctx context.Context, aParent, aPage, right *
 		RowIDs:       parentNode.Cells[idx].RowIDs,
 		Overflow:     parentNode.Cells[idx].Overflow,
 		Child:        aNode.Header.RightChild,
+		unique:       ui.unique,
 	})
 	aNode.Header.RightChild = rightNode.FirstCell().Child
 
@@ -709,6 +711,7 @@ func (ui *Index[T]) merge(ctx context.Context, aParent, left, right *Page, idx u
 		InlineRowIDs: parentNode.Cells[idx].InlineRowIDs,
 		RowIDs:       parentNode.Cells[idx].RowIDs,
 		Overflow:     parentNode.Cells[idx].Overflow,
+		unique:       ui.unique,
 	}
 	leftNode.AppendCells(append([]IndexCell[T]{aCell}, cellsToMoveLeft...)...)
 	leftNode.Header.RightChild = rightNode.Header.RightChild

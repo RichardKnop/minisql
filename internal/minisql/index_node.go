@@ -426,7 +426,8 @@ func (n *IndexNode[T]) DeleteKeyAndRightChild(idx uint32) error {
 		}
 	}
 
-	n.Cells[int(n.Header.Keys)-1] = IndexCell[T]{}
+	unique := n.Cells[int(n.Header.Keys)-1].unique
+	n.Cells[int(n.Header.Keys)-1] = NewIndexCell[T](unique)
 	n.Header.Keys -= 1
 
 	return nil
@@ -452,7 +453,8 @@ func (n *IndexNode[T]) RemoveFirstCell() {
 	for i := 0; i < int(n.Header.Keys)-1; i++ {
 		n.Cells[i] = n.Cells[i+1]
 	}
-	n.Cells[n.Header.Keys-1] = IndexCell[T]{}
+	unique := n.Cells[n.Header.Keys-1].unique
+	n.Cells[n.Header.Keys-1] = NewIndexCell[T](unique)
 	n.Header.Keys -= 1
 }
 
@@ -460,14 +462,14 @@ func (n *IndexNode[T]) RemoveLastCell() IndexCell[T] {
 	idx := n.Header.Keys - 1
 	n.Header.RightChild = n.Cells[idx].Child
 	aCellToRemove := n.Cells[idx]
-	n.Cells[idx] = IndexCell[T]{}
+	n.Cells[idx] = NewIndexCell[T](aCellToRemove.unique)
 	n.Header.Keys -= 1
 	return aCellToRemove
 }
 
 func (n *IndexNode[T]) PrependCell(aCell IndexCell[T]) {
 	if len(n.Cells) <= int(n.Header.Keys) {
-		n.Cells = append(n.Cells, IndexCell[T]{})
+		n.Cells = append(n.Cells, NewIndexCell[T](n.Cells[0].unique))
 	}
 	for i := int(n.Header.Keys) - 1; i >= 0; i-- {
 		n.Cells[i+1] = n.Cells[i]
@@ -479,7 +481,7 @@ func (n *IndexNode[T]) PrependCell(aCell IndexCell[T]) {
 func (n *IndexNode[T]) AppendCells(cells ...IndexCell[T]) {
 	for _, aCell := range cells {
 		if len(n.Cells) <= int(n.Header.Keys) {
-			n.Cells = append(n.Cells, IndexCell[T]{})
+			n.Cells = append(n.Cells, NewIndexCell[T](n.Cells[0].unique))
 		}
 		n.Cells[n.Header.Keys] = aCell
 		n.Header.Keys += 1
