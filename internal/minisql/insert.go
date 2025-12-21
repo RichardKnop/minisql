@@ -9,7 +9,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 	stmt.TableName = t.Name
 	stmt.Columns = t.Columns
 
-	if err := stmt.Prepare(); err != nil {
+	if err := stmt.Prepare(t.clock()); err != nil {
 		return err
 	}
 

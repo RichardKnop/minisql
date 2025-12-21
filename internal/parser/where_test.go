@@ -73,7 +73,7 @@ func TestParse_Where(t *testing.T) {
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
 							Type:  minisql.OperandQuotedString,
-							Value: "Foo Bar",
+							Value: minisql.NewTextPointer([]byte("Foo Bar")),
 						},
 					},
 				},
@@ -93,7 +93,7 @@ func TestParse_Where(t *testing.T) {
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
 							Type:  minisql.OperandQuotedString,
-							Value: "",
+							Value: minisql.NewTextPointer([]byte("")),
 						},
 					},
 				},
@@ -133,7 +133,7 @@ func TestParse_Where(t *testing.T) {
 						Operator: minisql.Lt,
 						Operand2: minisql.Operand{
 							Type:  minisql.OperandQuotedString,
-							Value: "1",
+							Value: minisql.NewTextPointer([]byte("1")),
 						},
 					},
 				},
@@ -153,7 +153,7 @@ func TestParse_Where(t *testing.T) {
 						Operator: minisql.Lte,
 						Operand2: minisql.Operand{
 							Type:  minisql.OperandQuotedString,
-							Value: "1",
+							Value: minisql.NewTextPointer([]byte("1")),
 						},
 					},
 				},
@@ -213,7 +213,7 @@ func TestParse_Where(t *testing.T) {
 						Operator: minisql.Ne,
 						Operand2: minisql.Operand{
 							Type:  minisql.OperandQuotedString,
-							Value: "1",
+							Value: minisql.NewTextPointer([]byte("1")),
 						},
 					},
 				},
@@ -271,7 +271,7 @@ func TestParse_Where(t *testing.T) {
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
 							Type:  minisql.OperandQuotedString,
-							Value: "1",
+							Value: minisql.NewTextPointer([]byte("1")),
 						},
 					},
 					{
@@ -302,7 +302,7 @@ func TestParse_Where(t *testing.T) {
 						Operator: minisql.Ne,
 						Operand2: minisql.Operand{
 							Type:  minisql.OperandQuotedString,
-							Value: "1",
+							Value: minisql.NewTextPointer([]byte("1")),
 						},
 					},
 					{
@@ -324,7 +324,7 @@ func TestParse_Where(t *testing.T) {
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
 							Type:  minisql.OperandQuotedString,
-							Value: "3",
+							Value: minisql.NewTextPointer([]byte("3")),
 						},
 					},
 				},
@@ -344,7 +344,7 @@ func TestParse_Where(t *testing.T) {
 						Operator: minisql.Ne,
 						Operand2: minisql.Operand{
 							Type:  minisql.OperandQuotedString,
-							Value: "1",
+							Value: minisql.NewTextPointer([]byte("1")),
 						},
 					},
 				},
@@ -377,7 +377,7 @@ func TestParse_Where(t *testing.T) {
 						Operator: minisql.Ne,
 						Operand2: minisql.Operand{
 							Type:  minisql.OperandQuotedString,
-							Value: "1",
+							Value: minisql.NewTextPointer([]byte("1")),
 						},
 					},
 					{
@@ -401,7 +401,7 @@ func TestParse_Where(t *testing.T) {
 						Operator: minisql.Eq,
 						Operand2: minisql.Operand{
 							Type:  minisql.OperandQuotedString,
-							Value: "3",
+							Value: minisql.NewTextPointer([]byte("3")),
 						},
 					},
 				},
@@ -441,7 +441,7 @@ func TestParse_Where(t *testing.T) {
 						Operator: minisql.NotIn,
 						Operand2: minisql.Operand{
 							Type:  minisql.OperandList,
-							Value: []any{"b", "c", "d"},
+							Value: []any{minisql.NewTextPointer([]byte("b")), minisql.NewTextPointer([]byte("c")), minisql.NewTextPointer([]byte("d"))},
 						},
 					},
 				},

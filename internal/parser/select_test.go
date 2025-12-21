@@ -254,7 +254,7 @@ func TestParse_Select(t *testing.T) {
 								Operator: minisql.Ne,
 								Operand2: minisql.Operand{
 									Type:  minisql.OperandQuotedString,
-									Value: "1",
+									Value: minisql.NewTextPointer([]byte("1")),
 								},
 							},
 							{
@@ -276,7 +276,7 @@ func TestParse_Select(t *testing.T) {
 								Operator: minisql.Eq,
 								Operand2: minisql.Operand{
 									Type:  minisql.OperandQuotedString,
-									Value: "Foo Bar",
+									Value: minisql.NewTextPointer([]byte("Foo Bar")),
 								},
 							},
 						},

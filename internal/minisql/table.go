@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -17,7 +18,10 @@ type Table struct {
 	logger        *zap.Logger
 	pager         TxPager
 	txManager     *TransactionManager
+	clock         clock
 }
+
+type clock func() Time
 
 func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, name string, columns []Column, rootPageIdx PageIndex) *Table {
 	aTable := &Table{
@@ -28,6 +32,18 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 		logger:        logger,
 		pager:         pager,
 		txManager:     txManager,
+		clock: func() Time {
+			now := time.Now()
+			return Time{
+				Year:         int32(now.Year()),
+				Month:        int8(now.Month()),
+				Day:          int8(now.Day()),
+				Hour:         int8(now.Hour()),
+				Minutes:      int8(now.Minute()),
+				Seconds:      int8(now.Second()),
+				Microseconds: int32(now.Nanosecond() / 1000),
+			}
+		},
 	}
 	for _, aColumn := range columns {
 		if aColumn.PrimaryKey {

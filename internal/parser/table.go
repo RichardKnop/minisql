@@ -14,6 +14,7 @@ var (
 	errCreateTableMultiplePrimaryKeys       = fmt.Errorf("at CREATE TABLE: multiple PRIMARY KEY columns specified")
 	errCreateTablePrimaryKeyTextNotAllowed  = fmt.Errorf("at CREATE TABLE: AUTOINCREMENT primary key cannot be of type TEXT")
 	errCreateTablePrimaryKeyVarcharTooLarge = fmt.Errorf("at CREATE TABLE: AUTOINCREMENT primary key of type VARCHAR exceeds max index key size %d", minisql.MaxIndexKeySize)
+	errCreateTableDefaultValueExpected      = fmt.Errorf("at CREATE TABLE: expected default value after DEFAULT")
 )
 
 func (p *parser) doParseCreateTable() error {
@@ -113,7 +114,7 @@ func (p *parser) doParseCreateTable() error {
 		p.step = stepCreateTableCommaOrClosingParens
 	case stepCreateTableColumnNullNotNull:
 		nullNotNull := p.peek()
-		p.step = stepCreateTableCommaOrClosingParens
+		p.step = stepCreateTableColumnDefaultValue
 		switch nullNotNull {
 		case "NOT NULL":
 			p.Columns[len(p.Columns)-1].Nullable = false
@@ -125,6 +126,33 @@ func (p *parser) doParseCreateTable() error {
 			return nil
 		}
 		p.pop()
+	case stepCreateTableColumnDefaultValue:
+		defaultRWord := p.peek()
+		p.step = stepCreateTableCommaOrClosingParens
+		if defaultRWord != "DEFAULT" {
+			return nil
+		}
+		p.pop()
+		if strings.ToUpper(p.peek()) == "NOW()" {
+			if p.Columns[len(p.Columns)-1].Kind != minisql.Timestamp {
+				return fmt.Errorf("at CREATE TABLE: NOW() default value is only valid for TIMESTAMP columns")
+			}
+			p.Columns[len(p.Columns)-1].DefaultValueNow = true
+			p.pop()
+			return nil
+		}
+		defaultValue, n := p.peekValue()
+		if n == 0 {
+			return errCreateTableDefaultValueExpected
+		}
+		if err := isDefaultValueValid(p.Columns[len(p.Columns)-1], defaultValue); err != nil {
+			return err
+		}
+		p.pop()
+		p.Columns[len(p.Columns)-1].DefaultValue = minisql.OptionalValue{
+			Value: defaultValue,
+			Valid: true,
+		}
 	case stepCreateTableCommaOrClosingParens:
 		commaOrClosingParens := p.peek()
 		if commaOrClosingParens != "," && commaOrClosingParens != ")" {
@@ -136,6 +164,32 @@ func (p *parser) doParseCreateTable() error {
 			return nil
 		}
 		p.step = stepStatementEnd
+	}
+	return nil
+}
+
+func isDefaultValueValid(column minisql.Column, valueToken any) error {
+	switch column.Kind {
+	case minisql.Boolean:
+		_, ok := valueToken.(bool)
+		if !ok {
+			return fmt.Errorf("at CREATE TABLE: default value '%s' is not a valid boolean", valueToken)
+		}
+	case minisql.Int4, minisql.Int8:
+		_, ok := valueToken.(int64)
+		if !ok {
+			return fmt.Errorf("at CREATE TABLE: default value '%s' is not a valid integer", valueToken)
+		}
+	case minisql.Real, minisql.Double:
+		_, ok := valueToken.(float64)
+		if !ok {
+			return fmt.Errorf("at CREATE TABLE: default value '%s' is not a valid float", valueToken)
+		}
+	case minisql.Text, minisql.Varchar, minisql.Timestamp:
+		_, ok := valueToken.(string)
+		if !ok {
+			return fmt.Errorf("at CREATE TABLE: default value '%s' is not a valid string", valueToken)
+		}
 	}
 	return nil
 }

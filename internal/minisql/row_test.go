@@ -156,7 +156,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandQuotedString,
-				Value: aRow.Values[5].Value.(Time).String(),
+				Value: aRow.Values[5].Value.(Time),
 			},
 		}
 		timestampMismatch = Condition{
@@ -167,7 +167,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandQuotedString,
-				Value: "1000-01-01 00:00:00 BC",
+				Value: MustParseTimestamp("1000-01-01 00:00:00 BC"),
 			},
 		}
 	)
@@ -541,7 +541,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Eq,
 						Operand2: Operand{
 							Type:  OperandQuotedString,
-							Value: "2000-01-01 00:00:00",
+							Value: MustParseTimestamp("2000-01-01 00:00:00"),
 						},
 					},
 				},

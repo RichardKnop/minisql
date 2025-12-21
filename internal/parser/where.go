@@ -105,7 +105,7 @@ func (p *parser) doParseWhere() error {
 		p.step = stepWhereConditionValue
 	case stepWhereConditionValue:
 		var currentCondition, _ = p.Conditions.LastCondition()
-		value, ln := p.peekNumberOrQuotedStringWithLength()
+		value, ln := p.peekValue()
 		if ln == 0 {
 			if identifier := p.peek(); isIdentifier(identifier) {
 				currentCondition.Operand2 = minisql.Operand{
@@ -120,10 +120,14 @@ func (p *parser) doParseWhere() error {
 				Type:  minisql.OperandQuotedString,
 				Value: value,
 			}
-			if _, ok := value.(int64); ok {
+			if _, ok := value.(bool); ok {
+				currentCondition.Operand2.Type = minisql.OperandBoolean
+			} else if _, ok := value.(int64); ok {
 				currentCondition.Operand2.Type = minisql.OperandInteger
 			} else if _, ok := value.(float64); ok {
 				currentCondition.Operand2.Type = minisql.OperandFloat
+			} else if _, ok := value.(string); ok {
+				currentCondition.Operand2.Value = minisql.NewTextPointer([]byte(value.(string)))
 			}
 		}
 		p.Conditions.UpdateLast(currentCondition)
@@ -131,9 +135,12 @@ func (p *parser) doParseWhere() error {
 		p.step = stepWhereOperator
 	case stepWhereConditionListValue:
 		currentCondition, _ := p.Conditions.LastCondition()
-		value, ln := p.peekNumberOrQuotedStringWithLength()
+		value, ln := p.peekValue()
 		if ln == 0 {
 			return errWhereExpectedQuotedStringOrNumber
+		}
+		if _, ok := value.(string); ok {
+			value = minisql.NewTextPointer([]byte(value.(string)))
 		}
 		currentCondition.Operand2.Value = append(currentCondition.Operand2.Value.([]any), value)
 		p.Conditions.UpdateLast(currentCondition)

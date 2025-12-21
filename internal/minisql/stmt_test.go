@@ -12,7 +12,7 @@ import (
 func TestStatement_Prepare_Insert(t *testing.T) {
 	t.Parallel()
 
-	t.Run("Insert with partial fields populates missing fields with NULLs", func(t *testing.T) {
+	t.Run("Insert with partial fields populates missing fields with NULLs or default values", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
 			TableName: "users",
@@ -30,7 +30,7 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 			},
 		}
 
-		err := stmt.Prepare()
+		err := stmt.Prepare(Time{})
 		require.NoError(t, err)
 
 		assert.Equal(t, fieldsFromColumns(stmt.Columns...), stmt.Fields)
@@ -38,14 +38,14 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 			{
 				{}, // id
 				{Value: "foo@example.com", Valid: true},
-				{}, // age
-				{}, // verified
+				{},                          // age
+				{Value: false, Valid: true}, // verified has default value
 			},
 			{
 				{}, // id
 				{Value: "bar@example.com", Valid: true},
-				{}, // age
-				{}, // verified
+				{},                          // age
+				{Value: false, Valid: true}, // verified has default value
 			},
 		}, stmt.Inserts)
 	})
@@ -71,23 +71,67 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 			},
 		}
 
-		err := stmt.Prepare()
+		err := stmt.Prepare(Time{})
 		require.NoError(t, err)
 
 		assert.Equal(t, fieldsFromColumns(stmt.Columns...), stmt.Fields)
 		assert.Equal(t, [][]OptionalValue{
 			{
-				{Value: Time{
-					Year:         2025,
-					Month:        12,
-					Day:          20,
-					Hour:         3,
-					Minutes:      13,
-					Seconds:      27,
-					Microseconds: 674801,
-				}, Valid: true},
+				{
+					Value: Time{
+						Year:         2025,
+						Month:        12,
+						Day:          20,
+						Hour:         3,
+						Minutes:      13,
+						Seconds:      27,
+						Microseconds: 674801,
+					},
+					Valid: true,
+				},
 			},
 		}, stmt.Inserts)
+	})
+}
+
+func TestStatement_Prepare_Update(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Parse timestamps in UPDATE statements", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Update,
+			TableName: "users",
+			Columns: []Column{
+				{
+					Kind: Timestamp,
+					Size: 8,
+					Name: "created_at",
+				},
+			},
+			Fields: []Field{
+				{Name: "created_at"},
+			},
+			Updates: map[string]OptionalValue{
+				"created_at": {Value: NewTextPointer([]byte("2025-12-20 03:13:27.674801")), Valid: true},
+			},
+		}
+
+		err := stmt.Prepare(Time{})
+		require.NoError(t, err)
+
+		assert.Equal(t, fieldsFromColumns(stmt.Columns...), stmt.Fields)
+		assert.Equal(t, OptionalValue{
+			Value: Time{
+				Year:         2025,
+				Month:        12,
+				Day:          20,
+				Hour:         3,
+				Minutes:      13,
+				Seconds:      27,
+				Microseconds: 674801,
+			},
+			Valid: true,
+		}, stmt.Updates["created_at"])
 	})
 }
 
@@ -158,54 +202,78 @@ func TestStatement_Validate(t *testing.T) {
 				},
 			},
 		}
+
+		aTableWithDefaultValue = &Table{
+			Name: testTableName,
+			Columns: []Column{
+				{
+					Kind:       Int8,
+					Size:       8,
+					Name:       "id",
+					PrimaryKey: true,
+				},
+				{
+					Kind:         Varchar,
+					Size:         MaxInlineVarchar,
+					Name:         "status",
+					DefaultValue: OptionalValue{Value: "pending", Valid: true},
+				},
+				{
+					Kind:         Timestamp,
+					Size:         8,
+					Name:         "created_at",
+					DefaultValue: OptionalValue{Value: "0001-01-01 00:00:00", Valid: true},
+				},
+			},
+		}
 	)
 
-	t.Run("CREATE without table name should fail", func(t *testing.T) {
+	t.Run("CREATE TABLE without table name should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind: CreateTable,
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(nil)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "table name is required")
 	})
 
-	t.Run("CREATE without columns name should fail", func(t *testing.T) {
+	t.Run("CREATE TABLE without columns name should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      CreateTable,
 			TableName: testTableName,
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(nil)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "at least one column is required")
 	})
 
-	t.Run("CREATE with too many columns should fail", func(t *testing.T) {
+	t.Run("CREATE TABLE with too many columns should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      CreateTable,
 			TableName: testTableName,
 			Columns:   make([]Column, MaxColumns+1), // Exceed max columns
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(nil)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "maximum number of columns is 64")
 	})
 
-	t.Run("CREATE with excessive row size should fail", func(t *testing.T) {
+	t.Run("CREATE TABLE with excessive row size should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      CreateTable,
 			TableName: testTableName,
 			Columns:   appendUntilSize([]Column{}, UsablePageSize+1), // Exceed page size
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(nil)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "potential row size exceeds maximum allowed 4065")
 	})
 
-	t.Run("CREATE with multiple primary keys should fail", func(t *testing.T) {
+	t.Run("CREATE TABLE with multiple primary keys should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      CreateTable,
 			TableName: testTableName,
@@ -223,12 +291,12 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(nil)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "only one primary key column is supported")
 	})
 
-	t.Run("CREATE with nullable primary key should fail", func(t *testing.T) {
+	t.Run("CREATE TABLE with nullable primary key should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      CreateTable,
 			TableName: testTableName,
@@ -241,12 +309,12 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(nil)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "primary key column cannot be nullable")
 	})
 
-	t.Run("CREATE with TEXT primary key should fail", func(t *testing.T) {
+	t.Run("CREATE TABLE with TEXT primary key should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      CreateTable,
 			TableName: testTableName,
@@ -258,12 +326,12 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(nil)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "primary key cannot be of type TEXT")
 	})
 
-	t.Run("CREATE with VARCHAR primary key exceeding max size should fail", func(t *testing.T) {
+	t.Run("CREATE TABLE with VARCHAR primary key exceeding max size should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      CreateTable,
 			TableName: testTableName,
@@ -276,31 +344,52 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(nil)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, fmt.Sprintf("primary key of type VARCHAR exceeds max index key size %d", MaxIndexKeySize))
 	})
 
-	t.Run("CREATE with should succeed", func(t *testing.T) {
+	t.Run("CREATE TABLE should succeed", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      CreateTable,
 			TableName: testTableName,
 			Columns:   testColumns,
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(nil)
 		require.NoError(t, err)
 	})
 
-	t.Run("CREATE with primary key should succeed", func(t *testing.T) {
+	t.Run("CREATE TABLE with primary key should succeed", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      CreateTable,
 			TableName: testTableName,
 			Columns:   testColumnsWithPrimaryKey,
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(nil)
 		require.NoError(t, err)
+	})
+
+	t.Run("CREATE TABLE with default values should succeed and parse default values", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: aTableWithDefaultValue.Name,
+			Columns:   aTableWithDefaultValue.Columns,
+		}
+
+		_, ok := aTableWithDefaultValue.Columns[1].DefaultValue.Value.(TextPointer)
+		assert.False(t, ok)
+		_, ok = aTableWithDefaultValue.Columns[2].DefaultValue.Value.(Time)
+		assert.False(t, ok)
+
+		err := stmt.Validate(nil)
+		require.NoError(t, err)
+
+		_, ok = aTableWithDefaultValue.Columns[1].DefaultValue.Value.(TextPointer)
+		assert.True(t, ok, "expected default value for 'status' column to be TextPointer")
+		_, ok = aTableWithDefaultValue.Columns[2].DefaultValue.Value.(Time)
+		assert.True(t, ok, "expected default value for 'created_at' column to be Time")
 	})
 
 	t.Run("INSERT with wrong number of columns should fail", func(t *testing.T) {
@@ -340,6 +429,23 @@ func TestStatement_Validate(t *testing.T) {
 		err := stmt.Validate(aTable)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `missing required field "email"`)
+	})
+
+	t.Run("INSERT with missing field for column with default values should succeed", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Insert,
+			TableName: aTableWithDefaultValue.Name,
+			Columns:   aTableWithDefaultValue.Columns,
+			Fields:    []Field{{Name: "id"}},
+			Inserts: [][]OptionalValue{
+				{
+					{Value: int64(1), Valid: true},
+				},
+			},
+		}
+
+		err := stmt.Validate(aTableWithDefaultValue)
+		require.NoError(t, err)
 	})
 
 	t.Run("INSERT with NULL for primary key should fail", func(t *testing.T) {
@@ -863,10 +969,11 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 					Nullable: true,
 				},
 				{
-					Kind:     Boolean,
-					Size:     1,
-					Name:     "verified",
-					Nullable: false,
+					Kind:         Boolean,
+					Size:         1,
+					Name:         "verified",
+					Nullable:     false,
+					DefaultValue: OptionalValue{Value: false, Valid: true},
 				},
 				{
 					Kind:     Real,
@@ -875,10 +982,11 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 					Nullable: true,
 				},
 				{
-					Kind:     Double,
-					Size:     8,
-					Name:     "balance",
-					Nullable: true,
+					Kind:            Timestamp,
+					Size:            8,
+					Name:            "created_at",
+					Nullable:        true,
+					DefaultValueNow: true,
 				},
 			},
 		}
@@ -887,9 +995,9 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 	id int8 primary key autoincrement,
 	email varchar(255),
 	age int4,
-	verified boolean not null,
+	verified boolean not null default false,
 	score real,
-	balance double
+	created_at timestamp default now()
 );`
 
 		actual := stmt.CreateTableDDL()

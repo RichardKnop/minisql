@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
 	"github.com/RichardKnop/minisql/internal/parser"
@@ -18,13 +19,14 @@ import (
 )
 
 const (
-	port             = 8082
-	addr             = ":8082"
+	port = 8082
+	addr = ":8082"
+
 	createUsersTable = `create table "users" (
 	id int8 primary key autoincrement,
 	name varchar(255),
 	email text,
-	created timestamp
+	created timestamp default now()
 );`
 )
 
@@ -100,23 +102,34 @@ func TestEndToEnd(t *testing.T) {
 		require.NoError(t, err)
 		assertTables(t, aClient, "minisql_schema", "users")
 
-		resp, err := aClient.SendQuery(`insert into users("name", "email", "created") values('Danny Mason', 'Danny_Mason2966@xqj6f.tech', '2024-01-01 12:00:00'),
-('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 12:00:00'),
-('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video', '2024-01-03 12:00:00'),
-('Mason Callan', 'Mason_Callan9524@bu2lo.edu', '2024-01-04 12:00:00'),
-('Logan Flynn', 'Logan_Flynn9019@xtwt3.pro', '2024-01-05 12:00:00'),
-('Beatrice Uttley', 'Beatrice_Uttley1670@1wa8o.org', '2024-01-06 12:00:00'),
-('Harry Johnson', 'Harry_Johnson5515@jcf8v.video', '2024-01-07 12:00:00'),
-('Carl Thomson', 'Carl_Thomson4218@kyb7t.host', '2024-01-08 12:00:00'),
-('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design', '2024-01-09 12:00:00'),
-('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press', '2024-01-10 12:00:00');`)
+		// First insert one row with explicitely set timestamp for created column
+		resp, err := aClient.SendQuery(`insert into users("name", "email", "created") 
+values('Danny Mason', 'Danny_Mason2966@xqj6f.tech', '2024-01-01 12:00:00');`)
+		require.NoError(t, err)
+		fmt.Printf("Insert Response: %+v\n", resp)
+
+		// Next try to specify primary key manually without using autoincrement
+		resp, err = aClient.SendQuery(`insert into users("id", "name", "email", "created") 
+values(100, 'Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:27');`)
+		require.NoError(t, err)
+		fmt.Printf("Insert Response: %+v\n", resp)
+
+		// Next insert multiple rows without specifying created column (should default to now())
+		resp, err = aClient.SendQuery(`insert into users("name", "email") values('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video'),
+('Mason Callan', 'Mason_Callan9524@bu2lo.edu'),
+('Logan Flynn', 'Logan_Flynn9019@xtwt3.pro'),
+('Beatrice Uttley', 'Beatrice_Uttley1670@1wa8o.org'),
+('Harry Johnson', 'Harry_Johnson5515@jcf8v.video'),
+('Carl Thomson', 'Carl_Thomson4218@kyb7t.host'),
+('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design'),
+('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press');`)
 		require.NoError(t, err)
 
 		fmt.Printf("Insert Response: %+v\n", resp)
 
 		assert.True(t, resp.Success)
 		assert.Equal(t, minisql.Insert, resp.Kind)
-		assert.Equal(t, 10, resp.RowsAffected)
+		assert.Equal(t, 8, resp.RowsAffected)
 	})
 
 	t.Run("Basic select queries", func(t *testing.T) {
@@ -139,6 +152,28 @@ func TestEndToEnd(t *testing.T) {
 			{Value: "Danny_Mason2966@xqj6f.tech", Valid: true},
 			{Value: "2024-01-01 12:00:00", Valid: true},
 		}, resp.Rows[0])
+
+		require.NotEmpty(t, resp.Rows)
+		assert.Len(t, resp.Rows, 10)
+		assert.Equal(t, []minisql.OptionalValue{
+			{Value: float64(100), Valid: true},
+			{Value: "Johnathan Walker", Valid: true},
+			{Value: "Johnathan_Walker250@ptr6k.page", Valid: true},
+			{Value: "2024-01-02 15:30:27", Valid: true},
+		}, resp.Rows[1])
+
+		now := time.Now().UTC()
+		for i := 2; i < 10; i++ {
+			assert.Equal(t, float64(100+i-1), resp.Rows[i][0].Value.(float64)) // id should continue from 100
+			timestamp, err := minisql.ParseTimestamp(resp.Rows[i][3].Value.(string))
+			require.NoError(t, err)
+			assert.Equal(t, now.Year(), int(timestamp.Year))
+			assert.Equal(t, now.Month(), time.Month(timestamp.Month))
+			assert.Equal(t, now.Day(), int(timestamp.Day))
+			assert.Equal(t, now.Hour(), int(timestamp.Hour))
+			assert.Equal(t, now.Minute(), int(timestamp.Minutes))
+			assert.Equal(t, now.Second(), int(timestamp.Seconds))
+		}
 	})
 }
 

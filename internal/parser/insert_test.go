@@ -120,7 +120,7 @@ func TestParse_Insert(t *testing.T) {
 		},
 		{
 			"INSERT with multiple fields of different types works",
-			"INSERT INTO 'a' (b, c, d, e, f) VALUES (25, 'foo', 7, 'bar', NULL);",
+			"INSERT INTO 'a' (b, c, d, e, f) VALUES (25, 'foo', true, 42.69, NULL);",
 			[]minisql.Statement{
 				{
 					Kind:      minisql.Insert,
@@ -130,8 +130,8 @@ func TestParse_Insert(t *testing.T) {
 						{
 							{Value: int64(25), Valid: true},
 							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
-							{Value: int64(7), Valid: true},
-							{Value: minisql.NewTextPointer([]byte("bar")), Valid: true},
+							{Value: true, Valid: true},
+							{Value: float64(42.69), Valid: true},
 							{Valid: false},
 						},
 					},

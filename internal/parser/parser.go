@@ -25,7 +25,8 @@ var reservedWords = []string{
 	// statement types
 	"CREATE TABLE", "DROP TABLE", "SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
-	"*", "PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "IS NULL", "IS NOT NULL", "NOT NULL", "NULL",
+	"*", "PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "DEFAULT", "NOT NULL", "NULL",
+	"IS NULL", "IS NOT NULL", "TRUE", "FALSE", "NOW()",
 	"IF NOT EXISTS", "WHERE", "FROM", "SET", "ASC", "DESC", "AS", "IN (", "NOT IN (",
 	"ORDER BY", "LIMIT", "OFFSET",
 	"BEGIN", "COMMIT", "ROLLBACK",
@@ -44,6 +45,7 @@ const (
 	stepCreateTableVarcharLength
 	stepCreateTableColumnPrimaryKey
 	stepCreateTableColumnNullNotNull
+	stepCreateTableColumnDefaultValue
 	stepCreateTableCommaOrClosingParens
 	stepDropTableName
 	stepInsertTable
@@ -179,6 +181,7 @@ func (p *parser) doParse() ([]minisql.Statement, error) {
 			stepCreateTableVarcharLength,
 			stepCreateTableColumnPrimaryKey,
 			stepCreateTableColumnNullNotNull,
+			stepCreateTableColumnDefaultValue,
 			stepCreateTableCommaOrClosingParens:
 			if err := p.doParseCreateTable(); err != nil {
 				return statements, err
@@ -229,8 +232,7 @@ func (p *parser) doParse() ([]minisql.Statement, error) {
 			stepUpdateEquals,
 			stepUpdateValue,
 			stepUpdateComma:
-			_, err := p.doParseUpdate()
-			if err != nil {
+			if err := p.doParseUpdate(); err != nil {
 				return statements, err
 			}
 		// -----------------
@@ -340,6 +342,14 @@ func (p *parser) peekQuotedStringWithLength() (string, int) {
 	return "", 0
 }
 
+func (p *parser) peekBooleanWithLength() (bool, int) {
+	boolValue := strings.ToUpper(p.peek())
+	if boolValue == "TRUE" || boolValue == "FALSE" {
+		return boolValue == "TRUE", len(boolValue)
+	}
+	return false, 0
+}
+
 func (p *parser) peekIntWithLength() (int64, int) {
 	if len(p.sql) < p.i || !unicode.IsDigit(rune(p.sql[p.i])) {
 		return 0, 0
@@ -382,7 +392,11 @@ func (p *parser) peekNumberWithLength() (float64, int) {
 	return floatValue, len(p.sql[p.i:len(p.sql)])
 }
 
-func (p *parser) peekNumberOrQuotedStringWithLength() (any, int) {
+func (p *parser) peekValue() (any, int) {
+	boolean, ln := p.peekBooleanWithLength()
+	if ln > 0 {
+		return boolean, ln
+	}
 	number, ln := p.peekNumberWithLength()
 	if ln > 0 {
 		if float64(int64(number)) == number {
