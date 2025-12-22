@@ -115,13 +115,13 @@ You can create your own non-system table now:
 
 ```go
 _, err := s.db.Exec(`create table "users" (
-  id int8 primary key autoincrement,
+	id int8 primary key autoincrement,
 	name varchar(255),
 	email text,
 	created timestamp default now()
 );`)
 if err != nil {
-  return err
+	return err
 }
 ```
 
@@ -161,11 +161,11 @@ _, err := s.db.ExecContext(context.Background(), `insert into users("name", "ema
 ('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design', 48),
 ('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press', 27);`)
 if err != nil {
-  return err
+	return err
 }
 rowsAffected, err = aResult.RowsAffected()
 if err != nil {
-  return err
+	return err
 }
 // rowsAffected = 10
 ```
@@ -175,10 +175,10 @@ When trying to insert a duplicate primary key, you will get an error:
 ```go
 _, err := s.db.ExecContext(context.Background(), `insert into users("id", "name", "email", "age") values(1, 'Danny Mason', 'Danny_Mason2966@xqj6f.tech', 35);`)
 if err != nil {
-  if errors.Is(err, minisql.ErrDuplicateKey) {
-    // handle duplicate primary key
-  }
-  return err
+	if errors.Is(err, minisql.ErrDuplicateKey) {
+		// handle duplicate primary key
+	}
+	return err
 }
 ```
 
@@ -194,20 +194,20 @@ Select from table:
 
 rows, err := s.db.QueryContext(context.Background(), `select * from users;`)
 if err != nil {
-  return err
+	return err
 }
 defer rows.Close()
 var users []user
 for rows.Next() {
 	var aUser user
 	err := rows.Scan(&aUser.ID, &aUser.Name, &aUser.Email, &aUser.Created)
-  if err != nil {
-    return err
-  }
+	if err != nil {
+		return err
+	}
 	users = append(users, aUser)
 }
 if err := rows.Err(); err != nil {
-  return err
+	return err
 }
 // continue
 ```
@@ -234,11 +234,11 @@ Update rows:
 ```go
 _, err := s.db.ExecContext(context.Background(), `update users set age = 36 where id = 1;`)
 if err != nil {
-  return err
+	return err
 }
 rowsAffected, err = aResult.RowsAffected()
 if err != nil {
-  return err
+	return err
 }
 // rowsAffected = 1
 ```
@@ -256,11 +256,11 @@ You can also delete rows:
 ```go
 _, err := s.db.ExecContext(context.Background(), `delete from users;`)
 if err != nil {
-  return err
+	return err
 }
 rowsAffected, err = aResult.RowsAffected()
 if err != nil {
-  return err
+	return err
 }
 // continue
 ```
