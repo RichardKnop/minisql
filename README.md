@@ -109,7 +109,6 @@ When creating a new MiniSQL database, it is initialised with `minisql_schema` sy
             |                                |                 | 	root_page int4,                                
             |                                |                 | 	sql text                              
             |                                |                 | )
-minisql>
 ```
 
 You can create your own non-system table now:
