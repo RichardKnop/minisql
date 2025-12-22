@@ -1,6 +1,6 @@
 # minisql
 
-`MiniSQL` is a research project aimed at implementing a simple relational database in Golang. This project exists mostly for myself as a way to learn principles and design of relational databases. It is not meant to be used as a real database.
+`MiniSQL` is an embedded single file database written in Golang, inspired by `SQLite` (however borrowing some features from other databases as well). It originally started as a research project aimed at learning about internals of relational databases. Over time it has progressed and grown to its current form. It is a very early stage project and it might contain bugs and is not battle tested. Please employ caution when using this database.
 
 [![Donate Bitcoin](https://img.shields.io/badge/donate-bitcoin-orange.svg)](https://richardknop.github.io/donate/)
 
@@ -11,11 +11,18 @@ Shout out to some great repos and other resources that were invaluable while fig
 - [sqlite docs](https://www.sqlite.org/fileformat2.html) (section about file format has been especially useful)
 - [C++ implementation of B+ tree](https://github.com/sayef/bplus-tree)
 
-Run `minisql` in your command line:
+To use minisql in your Go code, import the driver:
 
-```sh
-go run cmd/minisql/main.go
-minisql>
+```go
+import (
+  _ "github.com/RichardKnop/minisql"
+)
+```
+
+And create a database instance:
+
+```go
+db, err := sql.Open("minisql", "./my.db")
 ```
 
 ## Current Features
@@ -23,10 +30,10 @@ minisql>
 I plan to implement more features of traditional relational databases in the future as part of this project simply to learn and discovery how various features I have grown acustomed to over the years are implemented under the hood. However, currently only a very small number of features are implemented:
 
 - simple SQL parser with partial support for basic queries: 
-  - `CREATE TABLE`
+  - `CREATE TABLE`, `CREATE TABLE IF NOT EXISTS`
   - `DROP TABLE`
-  - `INSERT`
-  - `SELECT`
+  - `INSERT` (single row or multi rows via tuple of values separated by comma)
+  - `SELECT` (all fields with `*`, only specific fields or count rows with `COUNT(*)`)
   - `UPDATE`
   - `DELETE`
 - only tables and primary keys supported, more index support to be implemented in the future
@@ -79,77 +86,72 @@ Moreover, each row starts with 64 bit null mask which determines which values ar
 - build on existing primary key support, add unique and non unique index support
 - date/time functions to make working with `TIMESTAMP` type easier
 - joins such as `INNER`, `LEFT`, `RIGHT`
-- support `ORDER BY`, `GROUP BY`
+- support `GROUP BY`
 - UPDATE from a SELECT
 - upsert (insert on conflict)
+- rollback journal file
 - more complex WHERE clauses
 - support altering tables
 - more sophisticated query planner
 - vacuuming
 - benchmarks
 
-## Meta Commands
-
-You can use meta commands, type `.help` to see available commands or `.exit` to quit minisql:
-
-```sh
-minisql> .help
-.help    - Show available commands
-.exit    - Closes program
-.tables  - List all tables in the current database
-```
-
 ## Examples
-
-Start the database:
-
-```sh
-go run cmd/minisql/main.go
-```
-
-It will start a TCP server listening on port 8080.
-
-Use client to connect to the database:
-
-```sh
-go run cmd/client/main.go
-```
 
 When creating a new MiniSQL database, it is initialised with `minisql_schema` system table which holds schema of all tables within the database:
 
 ```sh
-minisql> select * from minisql_schema;
- type                 | name                                               | root_page            | sql                                                
-----------------------+----------------------------------------------------+----------------------+----------------------------------------------------
- 1                    | minisql_schema                                     | 0                    | create table "minisql_schema" (                    
-                      |                                                    |                      | 	type int4 not null,                            
-                      |                                                    |                      | 	table_name varchar(255) not null,              
-                      |                                                    |                      | 	root_page int4,                                
-                      |                                                    |                      | 	sql text                              
-                      |                                                    |                      | )
+ type       | name                           | root_page       | sql                                                
+------------+--------------------------------+-----------------+----------------------------------------------------
+ 1          | minisql_schema                 | 0               | create table "minisql_schema" (                    
+            |                                |                 | 	type int4 not null,                            
+            |                                |                 | 	table_name varchar(255) not null,              
+            |                                |                 | 	root_page int4,                                
+            |                                |                 | 	sql text                              
+            |                                |                 | )
 minisql>
 ```
 
 You can create your own non-system table now:
 
-```sh
-minisql> create table users(id int8 primary key autoincrement, name varchar(255), email text, age int4, created timestamp default now());
-Table 'users' created successfully
-minisql>
+```go
+_, err := s.db.Exec(`create table "users" (
+  id int8 primary key autoincrement,
+	name varchar(255),
+	email text,
+	created timestamp default now()
+);`)
+if err != nil {
+  return err
+}
 ```
 
-You can now check a new table has been added:
+Now you should see your table in the `minisql_schema`:
 
 ```sh
-minisql> .tables
-minisql_schema
-users
+ type       | name                           | root_page       | sql                                                
+------------+--------------------------------+-----------------+----------------------------------------------------
+ 1          | minisql_schema                 | 0               | create table "minisql_schema" (                    
+            |                                |                 | 	type int4 not null,                               
+            |                                |                 | 	name varchar(255) not null,                       
+            |                                |                 | 	root_page int4,                                   
+            |                                |                 | 	sql text                                          
+            |                                |                 | );                                                 
+ 1          | users                          | 1               | create table "users" (                             
+            |                                |                 | 	id int8 primary key autoincrement,                
+            |                                |                 | 	name varchar(255),                                
+            |                                |                 | 	email text,                                       
+            |                                |                 | 	age int4                                          
+            |                                |                 | );                                                 
+ 2          | pk_users                       | 2               | NULL                                               
 ```
+
+There is a new entry for `users` table as well as one for the primary key index.
 
 Insert test rows:
 
-```sh
-minisql> insert into users("name", "email", "age") values('Danny Mason', 'Danny_Mason2966@xqj6f.tech', 35),
+```go
+_, err := s.db.ExecContext(context.Background(), `insert into users("name", "email", "age") values('Danny Mason', 'Danny_Mason2966@xqj6f.tech', 35),
 ('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', 32),
 ('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video', 27),
 ('Mason Callan', 'Mason_Callan9524@bu2lo.edu', 19),
@@ -158,61 +160,110 @@ minisql> insert into users("name", "email", "age") values('Danny Mason', 'Danny_
 ('Harry Johnson', 'Harry_Johnson5515@jcf8v.video', 25),
 ('Carl Thomson', 'Carl_Thomson4218@kyb7t.host', 53),
 ('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design', 48),
-('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press', 27);
-Rows affected: 10
-minisql>
+('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press', 27);`)
+if err != nil {
+  return err
+}
+rowsAffected, err = aResult.RowsAffected()
+if err != nil {
+  return err
+}
+// rowsAffected = 10
 ```
 
 When trying to insert a duplicate primary key, you will get an error:
 
-```sh
-minisql> insert into users("id", "name", "email", "age") values(1, 'Danny Mason', 'Danny_Mason2966@xqj6f.tech', 35);
-Error: failed to insert primary key pk_users: duplicate key
-minisql>
+```go
+_, err := s.db.ExecContext(context.Background(), `insert into users("id", "name", "email", "age") values(1, 'Danny Mason', 'Danny_Mason2966@xqj6f.tech', 35);`)
+if err != nil {
+  if errors.Is(err, minisql.ErrDuplicateKey) {
+    // handle duplicate primary key
+  }
+  return err
+}
 ```
 
 Select from table:
 
+```go
+// type user struct {
+// 	ID      int64
+// 	Name    string
+// 	Email   string
+// 	Created time.Time
+// }
+
+rows, err := s.db.QueryContext(context.Background(), `select * from users;`)
+if err != nil {
+  return err
+}
+defer rows.Close()
+var users []user
+for rows.Next() {
+	var aUser user
+	err := rows.Scan(&aUser.ID, &aUser.Name, &aUser.Email, &aUser.Created)
+  if err != nil {
+    return err
+  }
+	users = append(users, aUser)
+}
+if err := rows.Err(); err != nil {
+  return err
+}
+// continue
+```
+
+Table should have 10 rows now:
+
 ```sh
-minisql> select * from users;
- id                   | name                                     | email                                    | age                  | created                       
-----------------------+------------------------------------------+------------------------------------------+----------------------+-------------------------------
- 1                    | Danny Mason                              | Danny_Mason2966@xqj6f.tech               | 35                   | 2025-12-21 22:31:35.514831    
- 2                    | Johnathan Walker                         | Johnathan_Walker250@ptr6k.page           | 32                   | 2025-12-21 22:31:35.514831    
- 3                    | Tyson Weldon                             | Tyson_Weldon2108@zynuu.video             | 27                   | 2025-12-21 22:31:35.514831    
- 4                    | Mason Callan                             | Mason_Callan9524@bu2lo.edu               | 19                   | 2025-12-21 22:31:35.514831    
- 5                    | Logan Flynn                              | Logan_Flynn9019@xtwt3.pro                | 42                   | 2025-12-21 22:31:35.514831    
- 6                    | Beatrice Uttley                          | Beatrice_Uttley1670@1wa8o.org            | 32                   | 2025-12-21 22:31:35.514831    
- 7                    | Harry Johnson                            | Harry_Johnson5515@jcf8v.video            | 25                   | 2025-12-21 22:31:35.514831    
- 8                    | Carl Thomson                             | Carl_Thomson4218@kyb7t.host              | 53                   | 2025-12-21 22:31:35.514831    
- 9                    | Kaylee Johnson                           | Kaylee_Johnson8112@c2nyu.design          | 48                   | 2025-12-21 22:31:35.514831    
- 10                   | Cristal Duvall                           | Cristal_Duvall6639@yvu30.press           | 27                   | 2025-12-21 22:31:35.514831  
-minisql>
+ id         | name                           | email                                    | age        | created                       
+------------+--------------------------------+------------------------------------------+------------+-------------------------------
+ 1          | Danny Mason                    | Danny_Mason2966@xqj6f.tech               | 35         | 2025-12-21 22:31:35.514831    
+ 2          | Johnathan Walker               | Johnathan_Walker250@ptr6k.page           | 32         | 2025-12-21 22:31:35.514831    
+ 3          | Tyson Weldon                   | Tyson_Weldon2108@zynuu.video             | 27         | 2025-12-21 22:31:35.514831    
+ 4          | Mason Callan                   | Mason_Callan9524@bu2lo.edu               | 19         | 2025-12-21 22:31:35.514831    
+ 5          | Logan Flynn                    | Logan_Flynn9019@xtwt3.pro                | 42         | 2025-12-21 22:31:35.514831    
+ 6          | Beatrice Uttley                | Beatrice_Uttley1670@1wa8o.org            | 32         | 2025-12-21 22:31:35.514831    
+ 7          | Harry Johnson                  | Harry_Johnson5515@jcf8v.video            | 25         | 2025-12-21 22:31:35.514831    
+ 8          | Carl Thomson                   | Carl_Thomson4218@kyb7t.host              | 53         | 2025-12-21 22:31:35.514831    
+ 9          | Kaylee Johnson                 | Kaylee_Johnson8112@c2nyu.design          | 48         | 2025-12-21 22:31:35.514831    
+ 10         | Cristal Duvall                 | Cristal_Duvall6639@yvu30.press           | 27         | 2025-12-21 22:31:35.514831    
 ```
 
 Update rows:
 
-```sh
-minisql> update users set age = 36 where id = 1;
-Rows affected: 1
-minisql>
+```go
+_, err := s.db.ExecContext(context.Background(), `update users set age = 36 where id = 1;`)
+if err != nil {
+  return err
+}
+rowsAffected, err = aResult.RowsAffected()
+if err != nil {
+  return err
+}
+// rowsAffected = 1
 ```
 
 Select to verify update:
 
 ```sh
-minisql> select * from users where id=1;
- id                   | name                                     | email                                    | age                  | created                       
-----------------------+------------------------------------------+------------------------------------------+----------------------+-------------------------------
- 1                    | Danny Mason                              | Danny_Mason2966@xqj6f.tech               | 36                   | 2025-12-21 22:31:35.514831              
-minisql>
+ id         | name                           | email                                    | age        | created                       
+------------+--------------------------------+------------------------------------------+------------+-------------------------------
+ 1          | Danny Mason                    | Danny_Mason2966@xqj6f.tech               | 36         | 2025-12-21 22:31:35.514831    
 ```
 
 You can also delete rows:
 
-```sh
-minisql> delete from users;
-Rows affected: 10
+```go
+_, err := s.db.ExecContext(context.Background(), `delete from users;`)
+if err != nil {
+  return err
+}
+rowsAffected, err = aResult.RowsAffected()
+if err != nil {
+  return err
+}
+// continue
 ```
 
 ## Development 

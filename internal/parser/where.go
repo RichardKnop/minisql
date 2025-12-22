@@ -64,11 +64,19 @@ func (p *parser) doParseWhere() error {
 			currentCondition.Operand2 = minisql.Operand{
 				Type: minisql.OperandNull,
 			}
+			p.step = stepWhereOperator
+			p.Conditions.UpdateLast(currentCondition)
+			p.pop()
+			return nil
 		case "IS NOT NULL":
 			currentCondition.Operator = minisql.Ne
 			currentCondition.Operand2 = minisql.Operand{
 				Type: minisql.OperandNull,
 			}
+			p.step = stepWhereOperator
+			p.Conditions.UpdateLast(currentCondition)
+			p.pop()
+			return nil
 		case "IN (":
 			currentCondition.Operator = minisql.In
 			currentCondition.Operand2 = minisql.Operand{

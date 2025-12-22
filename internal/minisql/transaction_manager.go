@@ -98,11 +98,15 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
 	}
 
+	pagesToFlush := make([]PageIndex, 0, len(tx.WriteSet))
+
 	// No conflicts, apply all writes
 	// First update DB header if modified
 	if header, modified := tx.GetModifiedDBHeader(); modified {
 		saver.SaveHeader(ctx, *header)
 		tm.globalDbHeaderVersion += 1
+
+		pagesToFlush = append(pagesToFlush, 0) // header is first 100 bytes of page 0
 	}
 	// Then update modified pages
 	for pageIdx, modifiedPage := range tx.GetWriteVersions() {
@@ -111,12 +115,24 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 
 		// Increment page version
 		tm.globalPageVersions[pageIdx] += 1
+
+		pagesToFlush = append(pagesToFlush, pageIdx)
 	}
 
 	tx.Commit()
 
 	// Clean up transaction
 	delete(tm.transactions, tx.ID)
+
+	// TODO - implement rollback journal file
+	// https://sqlite.org/atomiccommit.html
+
+	// Flush modified pages to disk
+	for _, pageIdx := range pagesToFlush {
+		if err := saver.Flush(ctx, pageIdx); err != nil {
+			return fmt.Errorf("failed to flush page %d: %w", pageIdx, err)
+		}
+	}
 
 	tm.logger.Debug("commit transaction", zap.Uint64("tx_id", uint64(tx.ID)))
 

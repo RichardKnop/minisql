@@ -760,7 +760,6 @@ type Iterator func(ctx context.Context) (Row, error)
 
 type StatementResult struct {
 	Columns      []Column
-	Count        int64
 	Rows         Iterator
 	RowsAffected int
 }

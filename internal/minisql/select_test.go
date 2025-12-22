@@ -397,8 +397,13 @@ func TestTable_Select(t *testing.T) {
 
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
-		assert.Equal(t, len(rows), int(aResult.Count))
-		assert.Nil(t, aResult.Rows)
+
+		assert.Equal(t, []Row{
+			{
+				Columns: []Column{{Name: "COUNT(*)"}},
+				Values:  []OptionalValue{{Value: int64(len(rows)), Valid: true}},
+			},
+		}, aResult.CollectRows(ctx))
 	})
 
 	t.Run("Count rows with condition", func(t *testing.T) {
@@ -431,8 +436,13 @@ func TestTable_Select(t *testing.T) {
 
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
-		assert.Equal(t, expectedCount, aResult.Count)
-		assert.Nil(t, aResult.Rows)
+
+		assert.Equal(t, []Row{
+			{
+				Columns: []Column{{Name: "COUNT(*)"}},
+				Values:  []OptionalValue{{Value: int64(expectedCount), Valid: true}},
+			},
+		}, aResult.CollectRows(ctx))
 	})
 }
 

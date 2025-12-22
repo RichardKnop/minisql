@@ -9,20 +9,21 @@ type PagerFactory interface {
 	ForIndex(kind ColumnKind, keySize uint64, unique bool) Pager
 }
 
-type PageFlusher interface {
-	TotalPages() uint32
-	Flush(context.Context, PageIndex) error
-}
-
 type Pager interface {
 	GetPage(context.Context, PageIndex) (*Page, error)
 	GetHeader(context.Context) DatabaseHeader
 	TotalPages() uint32
 }
 
+type Flusher interface {
+	TotalPages() uint32
+	Flush(context.Context, PageIndex) error
+}
+
 type PageSaver interface {
 	SavePage(context.Context, PageIndex, *Page)
 	SaveHeader(context.Context, DatabaseHeader)
+	Flusher
 }
 
 type TxPager interface {
@@ -43,3 +44,16 @@ type BTreeIndex interface {
 	ScanRange(ctx context.Context, rangeCondition RangeCondition, callback indexScanner) error
 	BFS(ctx context.Context, f indexCallback) error
 }
+
+// func (d *Database) Flush(ctx context.Context) error {
+// 	for pageIdx := PageIndex(0); pageIdx < PageIndex(d.saver.TotalPages()); pageIdx++ {
+// 		d.logger.Sugar().With(
+// 			"page", pageIdx,
+// 		).Debug("flushing page to disk")
+// 		if err := d.saver.Flush(ctx, pageIdx); err != nil {
+// 			return err
+// 		}
+// 	}
+
+// 	return nil
+// }

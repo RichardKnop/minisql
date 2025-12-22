@@ -114,7 +114,24 @@ func (t *Table) selectCount(ctx context.Context, filteredPipe chan Row, errorsPi
 	case err := <-errorsPipe:
 		return StatementResult{}, err
 	case <-stopChan:
-		return StatementResult{Count: count}, nil
+		rowReturned := false
+		return StatementResult{
+			Columns: []Column{
+				{Name: "COUNT(*)"},
+			},
+			Rows: func(ctx context.Context) (Row, error) {
+				if rowReturned {
+					return Row{}, ErrNoMoreRows
+				}
+				rowReturned = true
+				return Row{
+					Columns: []Column{
+						{Name: "COUNT(*)"},
+					},
+					Values: []OptionalValue{{Valid: true, Value: count}},
+				}, nil
+			},
+		}, nil
 	}
 }
 

@@ -132,6 +132,63 @@ func (_m *MockPageSaver) EXPECT() *MockPageSaver_Expecter {
 	return &MockPageSaver_Expecter{mock: &_m.Mock}
 }
 
+// Flush provides a mock function for the type MockPageSaver
+func (_mock *MockPageSaver) Flush(context1 context.Context, pageIndex PageIndex) error {
+	ret := _mock.Called(context1, pageIndex)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Flush")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, PageIndex) error); ok {
+		r0 = returnFunc(context1, pageIndex)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockPageSaver_Flush_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Flush'
+type MockPageSaver_Flush_Call struct {
+	*mock.Call
+}
+
+// Flush is a helper method to define mock.On call
+//   - context1 context.Context
+//   - pageIndex PageIndex
+func (_e *MockPageSaver_Expecter) Flush(context1 interface{}, pageIndex interface{}) *MockPageSaver_Flush_Call {
+	return &MockPageSaver_Flush_Call{Call: _e.mock.On("Flush", context1, pageIndex)}
+}
+
+func (_c *MockPageSaver_Flush_Call) Run(run func(context1 context.Context, pageIndex PageIndex)) *MockPageSaver_Flush_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 PageIndex
+		if args[1] != nil {
+			arg1 = args[1].(PageIndex)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockPageSaver_Flush_Call) Return(err error) *MockPageSaver_Flush_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockPageSaver_Flush_Call) RunAndReturn(run func(context1 context.Context, pageIndex PageIndex) error) *MockPageSaver_Flush_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SaveHeader provides a mock function for the type MockPageSaver
 func (_mock *MockPageSaver) SaveHeader(context1 context.Context, databaseHeader DatabaseHeader) {
 	_mock.Called(context1, databaseHeader)
@@ -227,6 +284,50 @@ func (_c *MockPageSaver_SavePage_Call) Return() *MockPageSaver_SavePage_Call {
 
 func (_c *MockPageSaver_SavePage_Call) RunAndReturn(run func(context1 context.Context, pageIndex PageIndex, page *Page)) *MockPageSaver_SavePage_Call {
 	_c.Run(run)
+	return _c
+}
+
+// TotalPages provides a mock function for the type MockPageSaver
+func (_mock *MockPageSaver) TotalPages() uint32 {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for TotalPages")
+	}
+
+	var r0 uint32
+	if returnFunc, ok := ret.Get(0).(func() uint32); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(uint32)
+	}
+	return r0
+}
+
+// MockPageSaver_TotalPages_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TotalPages'
+type MockPageSaver_TotalPages_Call struct {
+	*mock.Call
+}
+
+// TotalPages is a helper method to define mock.On call
+func (_e *MockPageSaver_Expecter) TotalPages() *MockPageSaver_TotalPages_Call {
+	return &MockPageSaver_TotalPages_Call{Call: _e.mock.On("TotalPages")}
+}
+
+func (_c *MockPageSaver_TotalPages_Call) Run(run func()) *MockPageSaver_TotalPages_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockPageSaver_TotalPages_Call) Return(v uint32) *MockPageSaver_TotalPages_Call {
+	_c.Call.Return(v)
+	return _c
+}
+
+func (_c *MockPageSaver_TotalPages_Call) RunAndReturn(run func() uint32) *MockPageSaver_TotalPages_Call {
+	_c.Call.Return(run)
 	return _c
 }
 

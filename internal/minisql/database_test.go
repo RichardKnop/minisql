@@ -18,7 +18,7 @@ func TestNewDatabase(t *testing.T) {
 	aPager := initTest(t)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, nil, aPager, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, nil, aPager, aPager)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 1)
@@ -35,7 +35,7 @@ func TestNewDatabase_WithExistingTableAndPrimaryKey(t *testing.T) {
 		ctx        = context.Background()
 	)
 
-	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, mockParser, aPager, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, mockParser, aPager, aPager)
 	require.NoError(t, err)
 
 	// Let's create 2 tables, one without and one with primary key
@@ -49,16 +49,20 @@ func TestNewDatabase_WithExistingTableAndPrimaryKey(t *testing.T) {
 		TableName: testTableName2,
 		Columns:   testColumnsWithPrimaryKey,
 	}
-	_, err = aDatabase.NewConnection(1, nil).ExecuteStatements(ctx, stmt, stmt2)
-	require.NoError(t, err)
 
-	// Now, let's flush and re-initialize the database to load existing tables
-	require.NoError(t, aDatabase.Flush(ctx))
+	for _, s := range []Statement{stmt, stmt2} {
+		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			_, err := aDatabase.ExecuteStatement(ctx, s)
+			return err
+		}, aDatabase.saver)
+		require.NoError(t, err)
+	}
 
+	// Now, let's re-initialize the database to load existing tables
 	mockParser.On("Parse", mock.Anything, stmt.CreateTableDDL()).Return([]Statement{stmt}, nil).Once()
 	mockParser.On("Parse", mock.Anything, stmt2.CreateTableDDL()).Return([]Statement{stmt2}, nil).Once()
 
-	aDatabase, err = NewDatabase(ctx, testLogger, testDbName, mockParser, aPager, aPager, aPager)
+	aDatabase, err = NewDatabase(ctx, testLogger, testDbName, mockParser, aPager, aPager)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 3)
@@ -86,7 +90,7 @@ func TestDatabase_CreateTable(t *testing.T) {
 	aPager := initTest(t)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, nil, aPager, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, nil, aPager, aPager)
 	require.NoError(t, err)
 
 	stmt := Statement{
@@ -94,7 +98,10 @@ func TestDatabase_CreateTable(t *testing.T) {
 		TableName: testTableName,
 		Columns:   testColumns,
 	}
-	_, err = aDatabase.NewConnection(1, nil).ExecuteStatements(ctx, stmt)
+	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		_, err := aDatabase.ExecuteStatement(ctx, stmt)
+		return err
+	}, aDatabase.saver)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 2)
@@ -117,7 +124,7 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 	aPager := initTest(t)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, nil, aPager, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, nil, aPager, aPager)
 	require.NoError(t, err)
 
 	stmt := Statement{
@@ -125,7 +132,10 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 		TableName: testTableName,
 		Columns:   testColumnsWithPrimaryKey,
 	}
-	_, err = aDatabase.NewConnection(1, nil).ExecuteStatements(ctx, stmt)
+	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		_, err := aDatabase.ExecuteStatement(ctx, stmt)
+		return err
+	}, aDatabase.saver)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 2)
@@ -150,7 +160,7 @@ func TestDatabase_DropTable(t *testing.T) {
 	aPager := initTest(t)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, nil, aPager, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, nil, aPager, aPager)
 	require.NoError(t, err)
 
 	stmt := Statement{
@@ -158,7 +168,10 @@ func TestDatabase_DropTable(t *testing.T) {
 		TableName: testTableName,
 		Columns:   testColumns,
 	}
-	_, err = aDatabase.NewConnection(1, nil).ExecuteStatements(ctx, stmt)
+	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		_, err := aDatabase.ExecuteStatement(ctx, stmt)
+		return err
+	}, aDatabase.saver)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 2)
@@ -167,7 +180,10 @@ func TestDatabase_DropTable(t *testing.T) {
 		Kind:      DropTable,
 		TableName: testTableName,
 	}
-	_, err = aDatabase.NewConnection(1, nil).ExecuteStatements(ctx, stmt)
+	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		_, err := aDatabase.ExecuteStatement(ctx, stmt)
+		return err
+	}, aDatabase.saver)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 1)
@@ -184,7 +200,7 @@ func TestDatabase_DropTable_WithPrimaryKey(t *testing.T) {
 	aPager := initTest(t)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, nil, aPager, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, nil, aPager, aPager)
 	require.NoError(t, err)
 
 	stmt := Statement{
@@ -192,7 +208,10 @@ func TestDatabase_DropTable_WithPrimaryKey(t *testing.T) {
 		TableName: testTableName,
 		Columns:   testColumnsWithPrimaryKey,
 	}
-	_, err = aDatabase.NewConnection(1, nil).ExecuteStatements(ctx, stmt)
+	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		_, err := aDatabase.ExecuteStatement(ctx, stmt)
+		return err
+	}, aDatabase.saver)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 2)
@@ -202,7 +221,10 @@ func TestDatabase_DropTable_WithPrimaryKey(t *testing.T) {
 		Kind:      DropTable,
 		TableName: testTableName,
 	}
-	_, err = aDatabase.NewConnection(1, nil).ExecuteStatements(ctx, stmt)
+	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		_, err := aDatabase.ExecuteStatement(ctx, stmt)
+		return err
+	}, aDatabase.saver)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 1)
