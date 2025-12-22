@@ -76,6 +76,8 @@ func TestTransactionManager_Commit(t *testing.T) {
 		// Setup expectations
 		pagerMock.On("SavePage", ctx, PageIndex(4), tx.WriteSet[4]).Return(nil).Once()
 		pagerMock.On("SaveHeader", ctx, *tx.DbHeaderWrite).Return(nil).Once()
+		pagerMock.On("Flush", ctx, PageIndex(0)).Return(nil).Once()
+		pagerMock.On("Flush", ctx, PageIndex(4)).Return(nil).Once()
 
 		err := txManager.CommitTransaction(ctx, tx, pagerMock)
 		require.NoError(t, err)
@@ -122,6 +124,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		pagerMock.On("SavePage", ctx, PageIndex(3), writeTx.WriteSet[3]).Return(nil).Once()
 
 		// Commit the writing transaction first
+		pagerMock.On("Flush", ctx, PageIndex(3)).Return(nil).Once()
 		err := txManager.CommitTransaction(ctx, writeTx, pagerMock)
 		require.NoError(t, err)
 
@@ -174,6 +177,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 
 		// Setup expectations
 		pagerMock.On("SavePage", ctx, PageIndex(4), writeTx2.WriteSet[4]).Return(nil).Once()
+		pagerMock.On("Flush", ctx, PageIndex(4)).Return(nil).Once()
 
 		// Commit the second transaction first
 		err := txManager.CommitTransaction(ctx, writeTx2, pagerMock)

@@ -1,0 +1,201 @@
+package e2etests
+
+import (
+	"context"
+	"database/sql"
+	"time"
+
+	"github.com/RichardKnop/minisql/internal/minisql"
+)
+
+type user struct {
+	ID      int64
+	Name    sql.NullString
+	Email   sql.NullString
+	Created time.Time
+}
+
+func (s *TestSuite) TestSelect() {
+	_, err := s.db.Exec(createUsersTableSQL)
+	s.Require().NoError(err)
+
+	s.Run("Insert some test users", func() {
+		// First insert one row with explicitely set timestamp for created column
+		aResult, err := s.db.ExecContext(context.Background(), `insert into users("name", "email", "created") 
+values('Danny Mason', 'Danny_Mason2966@xqj6f.tech', '2024-01-01 12:00:00');`)
+		s.Require().NoError(err)
+		rowsAffected, err := aResult.RowsAffected()
+		s.Require().NoError(err)
+		s.Require().Equal(int64(1), rowsAffected)
+
+		// Next try to specify primary key manually without using autoincrement
+		aResult, err = s.db.ExecContext(context.Background(), `insert into users("id", "name", "email", "created") 
+values(100, 'Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:27');`)
+		s.Require().NoError(err)
+		rowsAffected, err = aResult.RowsAffected()
+		s.Require().NoError(err)
+		s.Require().Equal(int64(1), rowsAffected)
+
+		// Next insert multiple rows without specifying created column (should default to now())
+		aResult, err = s.db.ExecContext(context.Background(), `insert into users("name", "email") values('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video'),
+('Mason Callan', 'Mason_Callan9524@bu2lo.edu'),
+('Logan Flynn', 'Logan_Flynn9019@xtwt3.pro'),
+('Beatrice Uttley', 'Beatrice_Uttley1670@1wa8o.org'),
+('Harry Johnson', 'Harry_Johnson5515@jcf8v.video'),
+('Carl Thomson', 'Carl_Thomson4218@kyb7t.host'),
+('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design'),
+('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press');`)
+		s.Require().NoError(err)
+		rowsAffected, err = aResult.RowsAffected()
+		s.Require().NoError(err)
+		s.Require().Equal(int64(8), rowsAffected)
+
+		// Inserting user with duplicate primary key should fail
+		aResult, err = s.db.ExecContext(context.Background(), `insert into users("id", "name", "email", "created") 
+values(100, 'Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:27');`)
+		s.Require().Error(err)
+		s.ErrorIs(err, minisql.ErrDuplicateKey)
+		s.Equal("failed to insert primary key pk_users: duplicate key", err.Error())
+		s.Nil(aResult)
+	})
+
+	s.Run("Basic select query", func() {
+		users := s.collectUsers(`select * from users order by id;`)
+		s.Require().Len(users, 10)
+
+		s.Equal(user{
+			ID:      1,
+			Name:    sql.NullString{String: "Danny Mason", Valid: true},
+			Email:   sql.NullString{String: "Danny_Mason2966@xqj6f.tech", Valid: true},
+			Created: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+		}, users[0])
+
+		s.Equal(user{
+			ID:      100,
+			Name:    sql.NullString{String: "Johnathan Walker", Valid: true},
+			Email:   sql.NullString{String: "Johnathan_Walker250@ptr6k.page", Valid: true},
+			Created: time.Date(2024, 1, 2, 15, 30, 27, 0, time.UTC),
+		}, users[1])
+
+		now := time.Now().UTC()
+		for i := 2; i < 10; i++ {
+			s.Equal(int64(100+i-1), users[i].ID) // id should continue from 100
+			s.Equal(now.Year(), users[i].Created.Year())
+			s.Equal(now.Month(), users[i].Created.Month())
+			s.Equal(now.Day(), users[i].Created.Day())
+			s.Equal(now.Hour(), users[i].Created.Hour())
+			s.Equal(now.Minute(), users[i].Created.Minute())
+			s.Equal(now.Second(), users[i].Created.Second())
+		}
+	})
+
+	s.Run("Limit offset", func() {
+		users := s.collectUsers(`select * from users limit 1;`)
+		s.Require().Len(users, 1)
+		s.Equal(int64(1), users[0].ID)
+
+		users = s.collectUsers(`select * from users offset 9;`)
+		s.Require().Len(users, 1)
+		s.Equal(int64(108), users[0].ID)
+
+		users = s.collectUsers(`select * from users limit 2 offset 4;`)
+		s.Require().Len(users, 2)
+		s.Equal(int64(103), users[0].ID)
+		s.Equal(int64(104), users[1].ID)
+	})
+
+	s.Run("Where conditions on primary key", func() {
+		users := s.collectUsers(`select * from users where id = 107;`)
+		s.Require().Len(users, 1)
+		s.Equal("Kaylee Johnson", users[0].Name.String)
+
+		users = s.collectUsers(`select * from users where id != 105;`)
+		s.Require().Len(users, 9)
+		for _, aUser := range users {
+			s.Require().NotEqual("Harry Johnson", aUser.Name.String)
+		}
+
+		users = s.collectUsers(`select * from users where id in (103, 105);`)
+		s.Require().Len(users, 2)
+		s.Equal("Logan Flynn", users[0].Name.String)
+		s.Equal("Harry Johnson", users[1].Name.String)
+
+		users = s.collectUsers(`select * from users where id not in (100, 1, 107, 106, 105, 101, 102);`)
+		s.Require().Len(users, 3)
+		s.Equal("Logan Flynn", users[0].Name.String)
+		s.Equal("Beatrice Uttley", users[1].Name.String)
+		s.Equal("Cristal Duvall", users[2].Name.String)
+
+		users = s.collectUsers(`select * from users where id = 102 or id = 104;`)
+		s.Require().Len(users, 2)
+		s.Equal("Mason Callan", users[0].Name.String)
+		s.Equal("Beatrice Uttley", users[1].Name.String)
+
+		users = s.collectUsers(`select * from users where id > 105;`)
+		s.Require().Len(users, 3)
+		s.Equal("Carl Thomson", users[0].Name.String)
+		s.Equal("Kaylee Johnson", users[1].Name.String)
+		s.Equal("Cristal Duvall", users[2].Name.String)
+	})
+
+	s.Run("Reinitialise to force unmarshaling from disk", func() {
+		s.db, err = sql.Open("minisql", s.dbFile.Name())
+		s.Require().NoError(err)
+
+		users := s.collectUsers(`select * from users order by id desc;`)
+		s.Require().Len(users, 10)
+
+		expectedIDs := []int64{108, 107, 106, 105, 104, 103, 102, 101, 100, 1}
+		for i := 9; i >= 0; i-- {
+			s.Equal(expectedIDs[i], users[i].ID)
+		}
+	})
+
+	s.Run("Selecting based on NULL values", func() {
+		// Insert a user with NULL email
+		aResult, err := s.db.ExecContext(context.Background(), `insert into users("name") values('Null Email User');`)
+		s.Require().NoError(err)
+		rowsAffected, err := aResult.RowsAffected()
+		s.Require().NoError(err)
+		s.Require().Equal(int64(1), rowsAffected)
+
+		users := s.collectUsers(`select * from users where email is null;`)
+		s.Require().Len(users, 1)
+		s.False(users[0].Email.Valid)
+		s.Empty(users[0].Email.String)
+		s.Equal("Null Email User", users[0].Name.String)
+
+		expectedIDs := []int64{1, 100, 101, 102, 103, 104, 105, 106, 107, 108}
+		users = s.collectUsers(`select * from users where email is not null;`)
+		s.Require().Len(users, 10)
+		for i := 0; i < 10; i++ {
+			s.Equal(expectedIDs[i], users[i].ID)
+			s.True(users[i].Email.Valid)
+			s.NotEmpty(users[i].Email.String)
+		}
+	})
+
+	s.Run("Selecting only specific fields", func() {
+		var name sql.NullString
+		err := s.db.QueryRowContext(context.Background(), `select name from users where id =106;`).Scan(&name)
+		s.Require().NoError(err)
+		s.True(name.Valid)
+		s.Equal("Carl Thomson", name.String)
+	})
+}
+
+func (s TestSuite) collectUsers(query string) []user {
+	rows, err := s.db.QueryContext(context.Background(), query)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	var users []user
+	for rows.Next() {
+		var aUser user
+		err := rows.Scan(&aUser.ID, &aUser.Name, &aUser.Email, &aUser.Created)
+		s.Require().NoError(err)
+		users = append(users, aUser)
+	}
+	s.Require().NoError(rows.Err())
+	return users
+}

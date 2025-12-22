@@ -72,7 +72,6 @@ type Database struct {
 	parser      Parser
 	factory     PagerFactory
 	saver       PageSaver
-	flusher     PageFlusher
 	txManager   *TransactionManager
 	tables      map[string]*Table
 	primaryKeys map[string]BTreeIndex
@@ -81,13 +80,12 @@ type Database struct {
 }
 
 // NewDatabase creates a new database
-func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser Parser, factory PagerFactory, saver PageSaver, flusher PageFlusher) (*Database, error) {
+func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser Parser, factory PagerFactory, saver PageSaver) (*Database, error) {
 	aDatabase := &Database{
 		Name:        name,
 		parser:      aParser,
 		factory:     factory,
 		saver:       saver,
-		flusher:     flusher,
 		txManager:   NewTransactionManager(logger),
 		tables:      make(map[string]*Table),
 		primaryKeys: make(map[string]BTreeIndex),
@@ -107,7 +105,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser P
 func (d *Database) init(ctx context.Context) error {
 	var (
 		mainTablePager = d.factory.ForTable(mainTableColumns)
-		totalPages     = int(d.flusher.TotalPages())
+		totalPages     = int(d.saver.TotalPages())
 		rooPageIdx     = PageIndex(0)
 	)
 
@@ -148,10 +146,6 @@ func (d *Database) init(ctx context.Context) error {
 				},
 			},
 		}); err != nil {
-			return err
-		}
-
-		if err := d.flusher.Flush(ctx, mainTable.GetRootPageIdx()); err != nil {
 			return err
 		}
 
@@ -252,19 +246,6 @@ func (d *Database) init(ctx context.Context) error {
 	return nil
 }
 
-func (d *Database) Flush(ctx context.Context) error {
-	for pageIdx := PageIndex(0); pageIdx < PageIndex(d.flusher.TotalPages()); pageIdx++ {
-		d.logger.Sugar().With(
-			"page", pageIdx,
-		).Debug("flushing page to disk")
-		if err := d.flusher.Flush(ctx, pageIdx); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // ListTableNames lists names of all tables in the database
 func (d *Database) ListTableNames(ctx context.Context) []string {
 	tables := make([]string, 0, len(d.tables))
@@ -283,6 +264,21 @@ func (d *Database) PrepareStatements(ctx context.Context, sql string) ([]Stateme
 	return stmts, nil
 }
 
+// GetTransactionManager returns the transaction manager for this database
+func (d *Database) GetTransactionManager() *TransactionManager {
+	return d.txManager
+}
+
+// GetSaver returns the page saver for this database
+func (d *Database) GetSaver() PageSaver {
+	return d.saver
+}
+
+// ExecuteStatement executes a single statement and returns the result
+func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (StatementResult, error) {
+	return d.executeStatement(ctx, stmt)
+}
+
 // executeStatement will eventually become virtual machine
 func (d *Database) executeStatement(ctx context.Context, stmt Statement) (StatementResult, error) {
 	switch stmt.Kind {
@@ -298,6 +294,8 @@ func (d *Database) executeStatement(ctx context.Context, stmt Statement) (Statem
 		return d.executeUpdate(ctx, stmt)
 	case Delete:
 		return d.executeDelete(ctx, stmt)
+	case BeginTransaction, CommitTransaction, RollbackTransaction:
+		return StatementResult{}, fmt.Errorf("transaction statements should be handled at connection level")
 	}
 	return StatementResult{}, errUnrecognizedStatementType
 }
@@ -410,6 +408,9 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 
 	_, ok := d.tables[stmt.TableName]
 	if ok {
+		if stmt.IfNotExists {
+			return d.tables[stmt.TableName], nil
+		}
 		return nil, errTableAlreadyExists
 	}
 

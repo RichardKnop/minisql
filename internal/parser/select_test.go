@@ -431,6 +431,69 @@ func TestParse_Select(t *testing.T) {
 			},
 			nil,
 		},
+		{
+			"SELECT ending with IS NOT NULL works",
+			`select * from a where b = 'c' and d is not null;`,
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "a",
+					Fields:    []minisql.Field{{Name: "*"}},
+					Conditions: minisql.OneOrMore{
+						{
+							{
+								Operand1: minisql.Operand{
+									Type:  minisql.OperandField,
+									Value: "b",
+								},
+								Operator: minisql.Eq,
+								Operand2: minisql.Operand{
+									Type:  minisql.OperandQuotedString,
+									Value: minisql.NewTextPointer([]byte("c")),
+								},
+							},
+							{
+								Operand1: minisql.Operand{
+									Type:  minisql.OperandField,
+									Value: "d",
+								},
+								Operator: minisql.Ne,
+								Operand2: minisql.Operand{
+									Type: minisql.OperandNull,
+								},
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT ending with IS NULL works",
+			`select * from a where b is null;`,
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "a",
+					Fields:    []minisql.Field{{Name: "*"}},
+					Conditions: minisql.OneOrMore{
+						{
+							{
+								Operand1: minisql.Operand{
+									Type:  minisql.OperandField,
+									Value: "b",
+								},
+								Operator: minisql.Eq,
+								Operand2: minisql.Operand{
+									Type: minisql.OperandNull,
+								},
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
 	}
 
 	for _, aTestCase := range testCases {

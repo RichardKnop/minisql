@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -52,6 +53,19 @@ type Time struct {
 	Minutes      int8
 	Seconds      int8
 	Microseconds int32
+}
+
+func (t Time) GoTime() time.Time {
+	return time.Date(
+		int(t.Year),
+		time.Month(t.Month),
+		int(t.Day),
+		int(t.Hour),
+		int(t.Minutes),
+		int(t.Seconds),
+		int(t.Microseconds)*1000,
+		time.UTC,
+	)
 }
 
 func (t Time) String() string {
