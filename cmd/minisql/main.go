@@ -81,7 +81,7 @@ func main() {
 	<-sigChan
 
 	srv.Stop()
-	if err := aDatabase.Close(ctx); err != nil {
+	if err := aDatabase.Flush(ctx); err != nil {
 		fmt.Printf("error closing database: %s\n", err)
 	}
 	cancel()

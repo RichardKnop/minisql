@@ -53,7 +53,7 @@ func TestNewDatabase_WithExistingTableAndPrimaryKey(t *testing.T) {
 	require.NoError(t, err)
 
 	// Now, let's flush and re-initialize the database to load existing tables
-	require.NoError(t, aDatabase.Close(ctx))
+	require.NoError(t, aDatabase.Flush(ctx))
 
 	mockParser.On("Parse", mock.Anything, stmt.CreateTableDDL()).Return([]Statement{stmt}, nil).Once()
 	mockParser.On("Parse", mock.Anything, stmt2.CreateTableDDL()).Return([]Statement{stmt2}, nil).Once()

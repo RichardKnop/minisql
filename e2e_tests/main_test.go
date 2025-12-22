@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -31,8 +32,18 @@ const (
 )
 
 func TestEndToEnd(t *testing.T) {
-	err := startServer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tempFile, err := os.CreateTemp("", "testdb")
+	if err != nil {
+		require.NoError(t, err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	db, stopServer, err := startServer(ctx, tempFile)
 	require.NoError(t, err)
+	defer stopServer()
 
 	aClient, err := protocol.NewClient(addr)
 	require.NoError(t, err)
@@ -46,7 +57,7 @@ func TestEndToEnd(t *testing.T) {
 	t.Run("Test meta commands", func(t *testing.T) {
 		resp, err := aClient.SendMetaCommand("ping")
 		require.NoError(t, err)
-		assert.True(t, resp.Success)
+		require.True(t, resp.Success)
 		assert.Equal(t, "pong", resp.Message)
 
 		assertTables(t, aClient, "minisql_schema")
@@ -88,7 +99,7 @@ func TestEndToEnd(t *testing.T) {
 	t.Run("Test dropping a table", func(t *testing.T) {
 		resp, err := aClient.SendQuery(`drop table users;`)
 		require.NoError(t, err)
-		assert.True(t, resp.Success)
+		require.True(t, resp.Success)
 		assert.Equal(t, minisql.DropTable, resp.Kind)
 		assert.Equal(t, "Table 'users' dropped successfully", resp.Message)
 
@@ -106,13 +117,15 @@ func TestEndToEnd(t *testing.T) {
 		resp, err := aClient.SendQuery(`insert into users("name", "email", "created") 
 values('Danny Mason', 'Danny_Mason2966@xqj6f.tech', '2024-01-01 12:00:00');`)
 		require.NoError(t, err)
-		fmt.Printf("Insert Response: %+v\n", resp)
+		// fmt.Printf("Insert Response: %+v\n", resp)
+		require.True(t, resp.Success)
 
 		// Next try to specify primary key manually without using autoincrement
 		resp, err = aClient.SendQuery(`insert into users("id", "name", "email", "created") 
 values(100, 'Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:27');`)
 		require.NoError(t, err)
-		fmt.Printf("Insert Response: %+v\n", resp)
+		// fmt.Printf("Insert Response: %+v\n", resp)
+		require.True(t, resp.Success)
 
 		// Next insert multiple rows without specifying created column (should default to now())
 		resp, err = aClient.SendQuery(`insert into users("name", "email") values('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video'),
@@ -124,10 +137,8 @@ values(100, 'Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15
 ('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design'),
 ('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press');`)
 		require.NoError(t, err)
-
-		fmt.Printf("Insert Response: %+v\n", resp)
-
-		assert.True(t, resp.Success)
+		// fmt.Printf("Insert Response: %+v\n", resp)
+		require.True(t, resp.Success)
 		assert.Equal(t, minisql.Insert, resp.Kind)
 		assert.Equal(t, 8, resp.RowsAffected)
 	})
@@ -135,8 +146,8 @@ values(100, 'Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15
 	t.Run("Basic select queries", func(t *testing.T) {
 		resp, err := aClient.SendQuery(`select * from users order by id;`)
 		require.NoError(t, err)
+		require.True(t, resp.Success)
 
-		assert.True(t, resp.Success)
 		assert.Equal(t, minisql.Select, resp.Kind)
 		assert.Len(t, resp.Columns, 4)
 		assert.Equal(t, "id", resp.Columns[0].Name)
@@ -173,6 +184,31 @@ values(100, 'Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15
 			assert.Equal(t, now.Hour(), int(timestamp.Hour))
 			assert.Equal(t, now.Minute(), int(timestamp.Minutes))
 			assert.Equal(t, now.Second(), int(timestamp.Seconds))
+		}
+	})
+
+	t.Run("Flush database and reinitialise to test unmarshaling from disk", func(t *testing.T) {
+		// Flush database to ensure all pages are written to disk
+		err := db.Flush(ctx)
+		require.NoError(t, err)
+
+		// Reinitialize database to clear pager cache, force read from disk
+		stopServer()
+		aClient.Close()
+		db, stopServer, err = startServer(ctx, tempFile)
+		require.NoError(t, err)
+		defer stopServer()
+		aClient, err := protocol.NewClient(addr)
+		require.NoError(t, err)
+		defer aClient.Close()
+
+		resp, err := aClient.SendQuery(`select * from users order by id desc;`)
+		require.NoError(t, err)
+		require.True(t, resp.Success)
+
+		expectedIDs := []float64{108, 107, 106, 105, 104, 103, 102, 101, 100, 1}
+		for i := 9; i >= 0; i-- {
+			assert.Equal(t, expectedIDs[i], resp.Rows[i][0].Value.(float64))
 		}
 	})
 }
@@ -234,26 +270,17 @@ func assertSchemaTableRow(t *testing.T, row []minisql.OptionalValue, expectedTyp
 	}
 }
 
-func startServer(t *testing.T) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	tempFile, err := os.CreateTemp("", "testdb")
+func startServer(ctx context.Context, dbFile minisql.DBFile) (*minisql.Database, func(), error) {
+	aPager, err := minisql.NewPager(dbFile, minisql.PageSize)
 	if err != nil {
-		return err
-	}
-	t.Cleanup(func() { os.Remove(tempFile.Name()) })
-
-	aPager, err := minisql.NewPager(tempFile, minisql.PageSize)
-	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	logger := zap.NewNop()
 
 	aDatabase, err := minisql.NewDatabase(ctx, logger, "testdb_e2e", parser.New(), aPager, aPager, aPager)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	sigChan := make(chan os.Signal, 1)
@@ -261,17 +288,10 @@ func startServer(t *testing.T) error {
 
 	srv, err := protocol.NewServer(aDatabase, logger, port)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	srv.Serve(ctx)
 
-	t.Cleanup(func() {
-		srv.Stop()
-		if err := aDatabase.Close(ctx); err != nil {
-			fmt.Printf("error closing database: %s\n", err)
-		}
-	})
-
-	return nil
+	return aDatabase, sync.OnceFunc(srv.Stop), nil
 }

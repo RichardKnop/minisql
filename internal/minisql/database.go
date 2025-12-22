@@ -252,7 +252,7 @@ func (d *Database) init(ctx context.Context) error {
 	return nil
 }
 
-func (d *Database) Close(ctx context.Context) error {
+func (d *Database) Flush(ctx context.Context) error {
 	for pageIdx := PageIndex(0); pageIdx < PageIndex(d.flusher.TotalPages()); pageIdx++ {
 		d.logger.Sugar().With(
 			"page", pageIdx,
