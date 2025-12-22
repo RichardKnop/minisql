@@ -106,6 +106,18 @@ func compareAny(a, b any) int {
 		bVal := b.(TextPointer)
 		return strings.Compare(aVal.String(), bVal.String())
 
+	case Time:
+		var (
+			aMicroseconds = a.(Time).TotalMicroseconds()
+			bMicroseconds = b.(Time).TotalMicroseconds()
+		)
+		if aMicroseconds < bMicroseconds {
+			return -1
+		} else if aMicroseconds > bMicroseconds {
+			return 1
+		}
+		return 0
+
 	default:
 		return 0
 	}

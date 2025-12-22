@@ -19,25 +19,24 @@ func (s *TestSuite) TestSelect() {
 	_, err := s.db.Exec(createUsersTableSQL)
 	s.Require().NoError(err)
 
-	s.Run("Insert some test users", func() {
-		// First insert one row with explicitely set timestamp for created column
-		aResult, err := s.db.ExecContext(context.Background(), `insert into users("name", "email", "created") 
+	// First insert one row with explicitely set timestamp for created column
+	aResult, err := s.db.ExecContext(context.Background(), `insert into users("name", "email", "created") 
 values('Danny Mason', 'Danny_Mason2966@xqj6f.tech', '2024-01-01 12:00:00');`)
-		s.Require().NoError(err)
-		rowsAffected, err := aResult.RowsAffected()
-		s.Require().NoError(err)
-		s.Require().Equal(int64(1), rowsAffected)
+	s.Require().NoError(err)
+	rowsAffected, err := aResult.RowsAffected()
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), rowsAffected)
 
-		// Next try to specify primary key manually without using autoincrement
-		aResult, err = s.db.ExecContext(context.Background(), `insert into users("id", "name", "email", "created") 
+	// Next try to specify primary key manually without using autoincrement
+	aResult, err = s.db.ExecContext(context.Background(), `insert into users("id", "name", "email", "created") 
 values(100, 'Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:27');`)
-		s.Require().NoError(err)
-		rowsAffected, err = aResult.RowsAffected()
-		s.Require().NoError(err)
-		s.Require().Equal(int64(1), rowsAffected)
+	s.Require().NoError(err)
+	rowsAffected, err = aResult.RowsAffected()
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), rowsAffected)
 
-		// Next insert multiple rows without specifying created column (should default to now())
-		aResult, err = s.db.ExecContext(context.Background(), `insert into users("name", "email") values('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video'),
+	// Next insert multiple rows without specifying created column (should default to now())
+	aResult, err = s.db.ExecContext(context.Background(), `insert into users("name", "email") values('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video'),
 ('Mason Callan', 'Mason_Callan9524@bu2lo.edu'),
 ('Logan Flynn', 'Logan_Flynn9019@xtwt3.pro'),
 ('Beatrice Uttley', 'Beatrice_Uttley1670@1wa8o.org'),
@@ -45,19 +44,18 @@ values(100, 'Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15
 ('Carl Thomson', 'Carl_Thomson4218@kyb7t.host'),
 ('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design'),
 ('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press');`)
-		s.Require().NoError(err)
-		rowsAffected, err = aResult.RowsAffected()
-		s.Require().NoError(err)
-		s.Require().Equal(int64(8), rowsAffected)
+	s.Require().NoError(err)
+	rowsAffected, err = aResult.RowsAffected()
+	s.Require().NoError(err)
+	s.Require().Equal(int64(8), rowsAffected)
 
-		// Inserting user with duplicate primary key should fail
-		aResult, err = s.db.ExecContext(context.Background(), `insert into users("id", "name", "email", "created") 
+	// Inserting user with duplicate primary key should fail
+	aResult, err = s.db.ExecContext(context.Background(), `insert into users("id", "name", "email", "created") 
 values(100, 'Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:27');`)
-		s.Require().Error(err)
-		s.ErrorIs(err, minisql.ErrDuplicateKey)
-		s.Equal("failed to insert primary key pk_users: duplicate key", err.Error())
-		s.Nil(aResult)
-	})
+	s.Require().Error(err)
+	s.ErrorIs(err, minisql.ErrDuplicateKey)
+	s.Equal("failed to insert primary key pkey__users: duplicate key", err.Error())
+	s.Nil(aResult)
 
 	s.Run("Basic select query", func() {
 		users := s.collectUsers(`select * from users order by id;`)
@@ -151,6 +149,36 @@ values(100, 'Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15
 		}
 	})
 
+	s.Run("Selecting based on timestamp column", func() {
+		twentiethCentury := time.Date(1999, 7, 19, 22, 11, 56, 112456*1000, time.UTC).Format("2006-01-02 15:04:05")
+		users := s.collectUsers(`select * from users where created < '` + twentiethCentury + `';`)
+		s.Require().Empty(users)
+
+		aMinuteAgo := time.Now().Add(-1 * time.Minute).UTC().Format("2006-01-02 15:04:05")
+		users = s.collectUsers(`select * from users where created < '` + aMinuteAgo + `';`)
+		s.Require().Len(users, 2)
+		s.Equal(user{
+			ID:      1,
+			Name:    sql.NullString{String: "Danny Mason", Valid: true},
+			Email:   sql.NullString{String: "Danny_Mason2966@xqj6f.tech", Valid: true},
+			Created: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+		}, users[0])
+		s.Equal(user{
+			ID:      100,
+			Name:    sql.NullString{String: "Johnathan Walker", Valid: true},
+			Email:   sql.NullString{String: "Johnathan_Walker250@ptr6k.page", Valid: true},
+			Created: time.Date(2024, 1, 2, 15, 30, 27, 0, time.UTC),
+		}, users[1])
+
+		aMinuteLater := time.Now().Add(1 * time.Minute).UTC().Format("2006-01-02 15:04:05")
+		expectedIDs := []int64{101, 102, 103, 104, 105, 106, 107, 108}
+		users = s.collectUsers(`select * from users where created > '` + aMinuteAgo + `' and created < '` + aMinuteLater + `';`)
+		s.Require().Len(users, 8)
+		for i := range 8 {
+			s.Equal(expectedIDs[i], users[i].ID)
+		}
+	})
+
 	s.Run("Selecting based on NULL values", func() {
 		// Insert a user with NULL email
 		aResult, err := s.db.ExecContext(context.Background(), `insert into users("name") values('Null Email User');`)
@@ -168,7 +196,7 @@ values(100, 'Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15
 		expectedIDs := []int64{1, 100, 101, 102, 103, 104, 105, 106, 107, 108}
 		users = s.collectUsers(`select * from users where email is not null;`)
 		s.Require().Len(users, 10)
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			s.Equal(expectedIDs[i], users[i].ID)
 			s.True(users[i].Email.Valid)
 			s.NotEmpty(users[i].Email.String)

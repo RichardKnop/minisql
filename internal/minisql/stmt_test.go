@@ -349,6 +349,79 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, fmt.Sprintf("primary key of type VARCHAR exceeds max index key size %d", MaxIndexKeySize))
 	})
 
+	t.Run("CREATE TABLE with autoincrement primary key of invalid type should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: testTableName,
+			Columns: []Column{
+				{
+					Kind:          Real,
+					PrimaryKey:    true,
+					Autoincrement: true,
+				},
+			},
+		}
+
+		err := stmt.Validate(nil)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "autoincrement primary key must be of type INT4 or INT8")
+	})
+
+	t.Run("CREATE TABLE with more than one index on a column should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: testTableName,
+			Columns: []Column{
+				{
+					Name:       "foo",
+					Kind:       Varchar,
+					Size:       MaxInlineVarchar,
+					PrimaryKey: true,
+					Unique:     true,
+				},
+			},
+		}
+
+		err := stmt.Validate(nil)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "column foo can only have one index")
+	})
+
+	t.Run("CREATE TABLE with TEXT unique key should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: testTableName,
+			Columns: []Column{
+				{
+					Kind:   Text,
+					Unique: true,
+				},
+			},
+		}
+
+		err := stmt.Validate(nil)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "unique key cannot be of type TEXT")
+	})
+
+	t.Run("CREATE TABLE with VARCHAR unique key exceeding max size should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: testTableName,
+			Columns: []Column{
+				{
+					Kind:   Varchar,
+					Unique: true,
+					Size:   300,
+				},
+			},
+		}
+
+		err := stmt.Validate(nil)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, fmt.Sprintf("unique key of type VARCHAR exceeds max index key size %d", MaxIndexKeySize))
+	})
+
 	t.Run("CREATE TABLE should succeed", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      CreateTable,

@@ -172,12 +172,19 @@ var (
 			Name:     "email",
 			Nullable: true,
 		},
+	}
+
+	testColumnsWithUniqueIndex = []Column{
 		{
-			Kind:         Boolean,
-			Size:         1,
-			Name:         "verified",
-			Nullable:     true,
-			DefaultValue: OptionalValue{Value: false, Valid: true},
+			Kind: Int8,
+			Size: 8,
+			Name: "id",
+		},
+		{
+			Kind:   Varchar,
+			Size:   MaxInlineVarchar,
+			Name:   "email",
+			Unique: true,
 		},
 	}
 
@@ -425,7 +432,6 @@ func (g *dataGen) RowWithPrimaryKey(primaryKey int64) Row {
 		Values: []OptionalValue{
 			{Value: primaryKey, Valid: true},
 			{Value: NewTextPointer([]byte(g.Email())), Valid: true},
-			{Value: g.Bool(), Valid: true},
 		},
 	}
 }
@@ -441,7 +447,38 @@ func (g *dataGen) RowsWithPrimaryKey(number int) []Row {
 		// Ensure unique email
 		_, ok := emailMap[aRow.Values[1].Value.(TextPointer).String()]
 		for ok {
-			aRow = g.Row()
+			aRow = g.RowWithPrimaryKey(int64(i + 1))
+			_, ok = emailMap[aRow.Values[1].Value.(TextPointer).String()]
+		}
+
+		aRow.Key = RowID(i)
+		rows = append(rows, aRow)
+	}
+	return rows
+}
+
+func (g *dataGen) RowWithUniqueIndex() Row {
+	return Row{
+		Columns: testColumnsWithUniqueIndex,
+		Values: []OptionalValue{
+			{Value: g.Int64(), Valid: true},
+			{Value: NewTextPointer([]byte(g.Email())), Valid: true},
+		},
+	}
+}
+
+func (g *dataGen) RowsWithUniqueIndex(number int) []Row {
+	var (
+		emailMap = map[string]struct{}{}
+		rows     = make([]Row, 0, number)
+	)
+	for i := range number {
+		aRow := g.RowWithUniqueIndex()
+
+		// Ensure unique email
+		_, ok := emailMap[aRow.Values[1].Value.(TextPointer).String()]
+		for ok {
+			aRow = g.RowWithUniqueIndex()
 			_, ok = emailMap[aRow.Values[1].Value.(TextPointer).String()]
 		}
 

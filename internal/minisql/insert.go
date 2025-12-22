@@ -9,6 +9,10 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 	stmt.TableName = t.Name
 	stmt.Columns = t.Columns
 
+	if stmt.Kind != Insert {
+		return fmt.Errorf("invalid statement kind for INSERT: %v", stmt.Kind)
+	}
+
 	if err := stmt.Prepare(t.clock()); err != nil {
 		return err
 	}
@@ -37,9 +41,25 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 			if err != nil {
 				return err
 			}
+
 			// Update statement with autoincremented primary key value
 			pkIdx := stmt.ColumnIdx(t.PrimaryKey.Column.Name)
 			values[pkIdx] = OptionalValue{Value: insertedPrimaryKey, Valid: true}
+		}
+
+		for _, uniqueIndex := range t.UniqueIndexes {
+			if uniqueIndex.Index == nil {
+				return fmt.Errorf("table %s has unique index %s but no index", t.Name, uniqueIndex.Name)
+			}
+
+			uniqueValue, ok := stmt.InsertForColumn(uniqueIndex.Column.Name, i)
+			if !ok {
+				return fmt.Errorf("failed to get value for unique index %s", uniqueIndex.Name)
+			}
+
+			if err := t.insertUniqueKey(ctx, uniqueIndex, uniqueValue, nextRowID); err != nil {
+				return err
+			}
 		}
 
 		aRow := Row{
@@ -70,7 +90,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 			}
 		}
 
-		if err := aCursor.LeafNodeInsert(ctx, nextRowID, &aRow); err != nil {
+		if err := aCursor.LeafNodeInsert(ctx, nextRowID, aRow); err != nil {
 			return err
 		}
 

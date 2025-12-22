@@ -218,10 +218,9 @@ func TestParse_CreateTable(t *testing.T) {
 					TableName: "foo",
 					Columns: []minisql.Column{
 						{
-							Name:     "bar",
-							Kind:     minisql.Int4,
-							Size:     4,
-							Nullable: false,
+							Name: "bar",
+							Kind: minisql.Int4,
+							Size: 4,
 						},
 					},
 				},
@@ -263,10 +262,9 @@ func TestParse_CreateTable(t *testing.T) {
 					TableName: "foo",
 					Columns: []minisql.Column{
 						{
-							Name:     "bar",
-							Kind:     minisql.Boolean,
-							Size:     1,
-							Nullable: false,
+							Name: "bar",
+							Kind: minisql.Boolean,
+							Size: 1,
 						},
 						{
 							Name:     "baz",
@@ -313,10 +311,10 @@ func TestParse_CreateTable(t *testing.T) {
 			errCreateTableMultiplePrimaryKeys,
 		},
 		{
-			"CREATE TABLE with VARCHER primary key with size > 255 fails",
+			"CREATE TABLE with VARCHAR unique key with size > 255 fails",
 			`CREATE TABLE foo (
 				id varchar(300) primary key, 
-				bar varchar(255) primary key
+				bar varchar(255) 
 			);`,
 			nil,
 			errCreateTablePrimaryKeyVarcharTooLarge,
@@ -346,7 +344,6 @@ func TestParse_CreateTable(t *testing.T) {
 							Kind:       minisql.Int8,
 							Size:       8,
 							PrimaryKey: true,
-							Nullable:   false,
 						},
 						{
 							Name:     "bar",
@@ -376,12 +373,80 @@ func TestParse_CreateTable(t *testing.T) {
 							Size:          8,
 							PrimaryKey:    true,
 							Autoincrement: true,
-							Nullable:      false,
 						},
 						{
 							Name:     "bar",
 							Kind:     minisql.Varchar,
 							Size:     minisql.MaxInlineVarchar,
+							Nullable: true,
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"CREATE TABLE with VARCHAR unique key with size > 255 fails",
+			`CREATE TABLE foo (
+				id int8 primary key, 
+				bar varchar(300) unique
+			);`,
+			nil,
+			errCreateTableUniqueVarcharTooLarge,
+		},
+		{
+			"CREATE TABLE with TEXT primary key fails",
+			`CREATE TABLE foo (
+				id int8 primary key,
+				bar text unique
+			);`,
+			nil,
+			errCreateTableUniqueTextNotAllowed,
+		},
+		{
+			"CREATE TABLE with unique key",
+			`CREATE TABLE foo (
+				bar varchar(255) unique
+			);`,
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:     "bar",
+							Kind:     minisql.Varchar,
+							Size:     minisql.MaxInlineVarchar,
+							Unique:   true,
+							Nullable: true,
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"CREATE TABLE with both primary and unique key",
+			`CREATE TABLE foo (
+				id int8 primary key,
+				bar varchar(255) unique
+			);`,
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:       "id",
+							Kind:       minisql.Int8,
+							Size:       8,
+							PrimaryKey: true,
+						},
+						{
+							Name:     "bar",
+							Kind:     minisql.Varchar,
+							Size:     minisql.MaxInlineVarchar,
+							Unique:   true,
 							Nullable: true,
 						},
 					},

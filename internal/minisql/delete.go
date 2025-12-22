@@ -10,12 +10,19 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 	stmt.TableName = t.Name
 	stmt.Columns = t.Columns
 
+	if stmt.Kind != Delete {
+		return StatementResult{}, fmt.Errorf("invalid statement kind for DELETE: %v", stmt.Kind)
+	}
+
 	if err := stmt.Validate(t); err != nil {
 		return StatementResult{}, err
 	}
 
 	// Create query plan
-	plan := t.PlanQuery(ctx, stmt)
+	plan, err := t.PlanQuery(ctx, stmt)
+	if err != nil {
+		return StatementResult{}, err
+	}
 
 	t.logger.Sugar().With("query type", "DELETE", "plan", plan).Debug("query plan")
 
@@ -57,21 +64,34 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 	go func(in <-chan Row) {
 		defer close(stopChan)
 		// When deleting multiple rows, we first collect them all
-		// and then delete them one by one. This is to avoid fetchRow
-		// in unfiltered pipe to skip rows that have been deleted while
-		// scanning the table when doing multiple deletions.
-		keys := make([]RowID, 0, 100)
+		// and then delete them one by one. This is to avoid conflict
+		// with rows that are still being read because delete can cause
+		// nodes to be split or merged which can cause cells to move around.
+		rows := make([]Row, 0, 100)
 		for aRow := range in {
-			keys = append(keys, aRow.Key)
+			rows = append(rows, aRow)
 		}
-		for _, aKey := range keys {
-			aCursor, err := t.Seek(ctx, aKey)
+		for _, aRow := range rows {
+			// Row locations can change after each delete, so we seek again for each key
+			// to make sure we have the correct cursor.
+			aCursor, err := t.Seek(ctx, aRow.Key)
 			if err != nil {
 				errorsPipe <- err
 				return
 			}
 
-			if err := aCursor.delete(ctx); err != nil {
+			if len(selectedFields) < len(t.Columns) {
+				// Load full row before delete, this is so we have all indexed values available
+				// for proper index cleanup as well as any overflow data that needs to be freed.
+				fullRow, err := aCursor.fetchRow(ctx, false, fieldsFromColumns(t.Columns...)...)
+				if err != nil {
+					errorsPipe <- err
+					return
+				}
+				aRow = fullRow
+			}
+
+			if err := aCursor.delete(ctx, aRow); err != nil {
 				errorsPipe <- err
 				return
 			}

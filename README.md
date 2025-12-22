@@ -83,10 +83,10 @@ Moreover, each row starts with 64 bit null mask which determines which values ar
 
 ## Planned features:
 
-- build on existing primary key support, add unique and non unique index support
+- composite unique index
 - date/time functions to make working with `TIMESTAMP` type easier
 - joins such as `INNER`, `LEFT`, `RIGHT`
-- support `GROUP BY`
+- support `GROUP BY` and aggregation functions such as `MAX`, `MIN`, `SUM`
 - UPDATE from a SELECT
 - upsert (insert on conflict)
 - rollback journal file
@@ -142,7 +142,7 @@ Now you should see your table in the `minisql_schema`:
             |                                |                 | 	email text,                                       
             |                                |                 | 	age int4                                          
             |                                |                 | );                                                 
- 2          | pk_users                       | 2               | NULL                                               
+ 2          | pkey__users                    | 2               | NULL                                               
 ```
 
 There is a new entry for `users` table as well as one for the primary key index.

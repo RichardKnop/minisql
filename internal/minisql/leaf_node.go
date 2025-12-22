@@ -291,7 +291,7 @@ func (n *LeafNode) AvailableSpace() uint64 {
 	return n.MaxSpace() - n.TakenSpace()
 }
 
-func (n *LeafNode) HasSpaceForRow(aRow *Row) bool {
+func (n *LeafNode) HasSpaceForRow(aRow Row) bool {
 	return aRow.Size()+8+8 <= n.AvailableSpace()
 }
 

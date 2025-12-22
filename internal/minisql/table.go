@@ -3,7 +3,6 @@ package minisql
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -13,6 +12,7 @@ type Table struct {
 	Name          string
 	Columns       []Column
 	PrimaryKey    PrimaryKey
+	UniqueIndexes map[string]UniqueIndex
 	rootPageIdx   PageIndex
 	maximumICells uint32
 	logger        *zap.Logger
@@ -32,6 +32,7 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 		logger:        logger,
 		pager:         pager,
 		txManager:     txManager,
+		UniqueIndexes: make(map[string]UniqueIndex),
 		clock: func() Time {
 			now := time.Now()
 			return Time{
@@ -48,22 +49,25 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 	for _, aColumn := range columns {
 		if aColumn.PrimaryKey {
 			aTable.PrimaryKey = PrimaryKey{
-				Name:          primaryKeyName(name),
-				Column:        aColumn,
+				IndexInfo: IndexInfo{
+					Name:   primaryKeyName(name),
+					Column: aColumn,
+				},
 				Autoincrement: aColumn.Autoincrement,
 			}
 			break
 		}
+		if aColumn.Unique {
+			indexName := uniqueIndexName(name, aColumn.Name)
+			aTable.UniqueIndexes[indexName] = UniqueIndex{
+				IndexInfo: IndexInfo{
+					Name:   indexName,
+					Column: aColumn,
+				},
+			}
+		}
 	}
 	return aTable
-}
-
-func primaryKeyName(tableName string) string {
-	return fmt.Sprintf("pk_%s", tableName)
-}
-
-func tableNameFromPrimaryKey(pkName string) string {
-	return strings.TrimPrefix(pkName, "pk_")
 }
 
 func (t *Table) GetRootPageIdx() PageIndex {
@@ -81,6 +85,16 @@ func (t *Table) ColumnByName(name string) (Column, bool) {
 		}
 	}
 	return Column{}, false
+}
+
+func (t *Table) IndexByName(name string) (BTreeIndex, bool) {
+	if t.HasPrimaryKey() && t.PrimaryKey.Name == name {
+		return t.PrimaryKey.Index, true
+	}
+	if index, ok := t.UniqueIndexes[name]; ok {
+		return index.Index, true
+	}
+	return nil, false
 }
 
 // SeekNextRowID returns cursor pointing at the position after the last row ID
@@ -983,10 +997,8 @@ func (t *Table) BFS(ctx context.Context, f callback) error {
 	return nil
 }
 
-func (t *Table) newPrimaryKeyIndex(aPager *TransactionalPager, freePage *Page) (BTreeIndex, error) {
-	pkColumn := t.PrimaryKey.Column
-
-	switch pkColumn.Kind {
+func (t *Table) createBTreeIndex(aPager *TransactionalPager, freePage *Page, aColumn Column, indexName string) (BTreeIndex, error) {
+	switch aColumn.Kind {
 	case Boolean:
 		indexNode := NewIndexNode[int8](true)
 		indexNode.Header.IsRoot = true
@@ -1018,22 +1030,20 @@ func (t *Table) newPrimaryKeyIndex(aPager *TransactionalPager, freePage *Page) (
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	default:
-		return nil, fmt.Errorf("unsupported primary key type %v", pkColumn.Kind)
+		return nil, fmt.Errorf("unsupported BTree index column type %v for index %s", aColumn.Kind, indexName)
 	}
 
-	return t.primaryKeyIndex(aPager, freePage.Index)
+	return t.newBTreeIndex(aPager, freePage.Index, aColumn, indexName)
 }
 
-func (t *Table) primaryKeyIndex(aPager *TransactionalPager, rootPageIdx PageIndex) (BTreeIndex, error) {
-	pkColumn := t.PrimaryKey.Column
-
-	switch pkColumn.Kind {
+func (t *Table) newBTreeIndex(aPager *TransactionalPager, rootPageIdx PageIndex, aColumn Column, indexName string) (BTreeIndex, error) {
+	switch aColumn.Kind {
 	case Boolean:
 		return NewUniqueIndex[int8](
 			t.logger,
 			t.txManager,
-			t.PrimaryKey.Name,
-			pkColumn,
+			indexName,
+			aColumn,
 			aPager,
 			rootPageIdx,
 		)
@@ -1041,8 +1051,8 @@ func (t *Table) primaryKeyIndex(aPager *TransactionalPager, rootPageIdx PageInde
 		return NewUniqueIndex[int32](
 			t.logger,
 			t.txManager,
-			t.PrimaryKey.Name,
-			pkColumn,
+			indexName,
+			aColumn,
 			aPager,
 			rootPageIdx,
 		)
@@ -1050,8 +1060,8 @@ func (t *Table) primaryKeyIndex(aPager *TransactionalPager, rootPageIdx PageInde
 		return NewUniqueIndex[int64](
 			t.logger,
 			t.txManager,
-			t.PrimaryKey.Name,
-			pkColumn,
+			indexName,
+			aColumn,
 			aPager,
 			rootPageIdx,
 		)
@@ -1059,8 +1069,8 @@ func (t *Table) primaryKeyIndex(aPager *TransactionalPager, rootPageIdx PageInde
 		return NewUniqueIndex[float32](
 			t.logger,
 			t.txManager,
-			t.PrimaryKey.Name,
-			pkColumn,
+			indexName,
+			aColumn,
 			aPager,
 			rootPageIdx,
 		)
@@ -1068,8 +1078,8 @@ func (t *Table) primaryKeyIndex(aPager *TransactionalPager, rootPageIdx PageInde
 		return NewUniqueIndex[float64](
 			t.logger,
 			t.txManager,
-			t.PrimaryKey.Name,
-			pkColumn,
+			indexName,
+			aColumn,
 			aPager,
 			rootPageIdx,
 		)
@@ -1077,13 +1087,13 @@ func (t *Table) primaryKeyIndex(aPager *TransactionalPager, rootPageIdx PageInde
 		return NewUniqueIndex[string](
 			t.logger,
 			t.txManager,
-			t.PrimaryKey.Name,
-			pkColumn,
+			indexName,
+			aColumn,
 			aPager,
 			rootPageIdx,
 		)
 	default:
-		return nil, fmt.Errorf("unsupported primary key type %v", pkColumn.Kind)
+		return nil, fmt.Errorf("unsupported BTree index column type %v for index %s", aColumn.Kind, indexName)
 	}
 }
 
