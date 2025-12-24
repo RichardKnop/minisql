@@ -36,17 +36,13 @@ I plan to implement more features of traditional relational databases in the fut
   - `SELECT` (all fields with `*`, only specific fields or count rows with `COUNT(*)`)
   - `UPDATE`
   - `DELETE`
-- only tables and primary keys supported, more index support to be implemented in the future
 - `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE`, `TEXT`, `VARCHAR`, `TIMESTAMP` data types supported
 - `PRIMARY KEY` support, only single column, no composite primary keys
 - `AUTOINCREMENT` support, primary key must be of type `INT8` for autoincrement
+- `UNIQUE` index can be specified when creating a table
 - `NULL` and `NOT NULL` support (via null bit mask included in each row/cell)
 - `DEFAULT` support for all columns including `NOW()` for `TIMESTAMP`
-- each statement is wrapped in a single statement transaction unless you control transaction context manually with `BEGIN`, `COMMIT`, `ROLLBACK` keywords
-- page size is `4096 bytes`, rows cannot exceed page size (minus required headers etc)
-- first 100 bytes of the root page are reserved for config
-- maximum number of columns for each table is `64`
-- basic page recycling (when nodes are merged, the node that no longer exists in the tree is added to free pages linked list in the config and can be later reused as a new page)
+- `BEGIN`, `COMMIT`, `ROLLBACK`, if not specified, each query will be wrapped in auto commit transaction
 - simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis
 - supported operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`
 - `LIMIT` and `OFFSET` clauses for basic pagination
@@ -64,7 +60,7 @@ I plan to implement more features of traditional relational databases in the fut
 | `VARCHAR(n)` | Storage works the same way as `TEXT` but allows limiting length of inserted/updated text to max value. |
 | `TIMESTAMP`  | 8-byte signed integer representing number of microseconds from `2000-01-01 00:00:00 UTC` (`Postgres epoch`). Supported range is from `4713 BC` to `294276 AD` inclusive. |
 
-Each page size is `4096 bytes`. Rows larger than page size are not supported. Therefor, the largest allowed row size is `4066 bytes`.
+Each page size is `4096 bytes`. Rows larger than page size are not supported. Therefor, the largest allowed row size is `4066 bytes`. Only exception is root page 0 has first 100 bytes reserved for config.
 
 ```
 4096 (page size) 
@@ -79,19 +75,20 @@ All tables are kept track of via a system table `minisql_schema` which contains 
 
 Each row has an internal row ID which is an unsigned 64 bit integer starting at 0. These are used as keys in B+ Tree data structure. 
 
-Moreover, each row starts with 64 bit null mask which determines which values are NULL. Because of the NULL bit mask being an unsigned 64 bit integer, tables are limited to `maximum of 64 columns`.
+Moreover, each row starts with 64 bit null mask which determines which values are NULL. Because of the NULL bit mask being an unsigned 64 bit integer, there is a limit of `maximum 64 columns per table`.
 
 ## Planned features:
 
 - composite unique index
 - date/time functions to make working with `TIMESTAMP` type easier
 - joins such as `INNER`, `LEFT`, `RIGHT`
+- foreign keys
 - support `GROUP BY` and aggregation functions such as `MAX`, `MIN`, `SUM`
 - UPDATE from a SELECT
 - upsert (insert on conflict)
 - rollback journal file
 - more complex WHERE clauses
-- support altering tables
+- support altering tables, creating and dropping of indexes outside of create table query
 - more sophisticated query planner
 - vacuuming
 - benchmarks
@@ -101,14 +98,14 @@ Moreover, each row starts with 64 bit null mask which determines which values ar
 When creating a new MiniSQL database, it is initialised with `minisql_schema` system table which holds schema of all tables within the database:
 
 ```sh
- type       | name                           | root_page       | sql                                                
-------------+--------------------------------+-----------------+----------------------------------------------------
- 1          | minisql_schema                 | 0               | create table "minisql_schema" (                    
-            |                                |                 | 	type int4 not null,                            
-            |                                |                 | 	table_name varchar(255) not null,              
-            |                                |                 | 	root_page int4,                                
-            |                                |                 | 	sql text                              
-            |                                |                 | )
+ type   | name                       | root_page   | sql                                                
+--------+----------------------------+-------------+----------------------------------------------------
+ 1      | minisql_schema             | 0           | create table "minisql_schema" (                    
+        |                            |             | 	type int4 not null,                            
+        |                            |             | 	table_name varchar(255) not null,              
+        |                            |             | 	root_page int4,                                
+        |                            |             | 	sql text                              
+        |                            |             | )
 ```
 
 You can create your own non-system table now:
@@ -128,21 +125,21 @@ if err != nil {
 Now you should see your table in the `minisql_schema`:
 
 ```sh
- type       | name                           | root_page       | sql                                                
-------------+--------------------------------+-----------------+----------------------------------------------------
- 1          | minisql_schema                 | 0               | create table "minisql_schema" (                    
-            |                                |                 | 	type int4 not null,                               
-            |                                |                 | 	name varchar(255) not null,                       
-            |                                |                 | 	root_page int4,                                   
-            |                                |                 | 	sql text                                          
-            |                                |                 | );                                                 
- 1          | users                          | 1               | create table "users" (                             
-            |                                |                 | 	id int8 primary key autoincrement,                
-            |                                |                 | 	name varchar(255),                                
-            |                                |                 | 	email text,                                       
-            |                                |                 | 	age int4                                          
-            |                                |                 | );                                                 
- 2          | pkey__users                    | 2               | NULL                                               
+ type   | name                       | root_page   | sql                                                
+--------+----------------------------+-------------+----------------------------------------------------
+ 1      | minisql_schema             | 0           | create table "minisql_schema" (                    
+        |                            |             | 	type int4 not null,                               
+        |                            |             | 	name varchar(255) not null,                       
+        |                            |             | 	root_page int4,                                   
+        |                            |             | 	sql text                                          
+        |                            |             | );                                                 
+ 1      | users                      | 1           | create table "users" (                             
+        |                            |             | 	id int8 primary key autoincrement,                
+        |                            |             | 	name varchar(255),                                
+        |                            |             | 	email text,                                       
+        |                            |             | 	age int4                                          
+        |                            |             | );                                                 
+ 2      | pkey__users                | 2           | NULL                                               
 ```
 
 There is a new entry for `users` table as well as one for the primary key index.
@@ -215,18 +212,18 @@ if err := rows.Err(); err != nil {
 Table should have 10 rows now:
 
 ```sh
- id         | name                           | email                                    | age        | created                       
-------------+--------------------------------+------------------------------------------+------------+-------------------------------
- 1          | Danny Mason                    | Danny_Mason2966@xqj6f.tech               | 35         | 2025-12-21 22:31:35.514831    
- 2          | Johnathan Walker               | Johnathan_Walker250@ptr6k.page           | 32         | 2025-12-21 22:31:35.514831    
- 3          | Tyson Weldon                   | Tyson_Weldon2108@zynuu.video             | 27         | 2025-12-21 22:31:35.514831    
- 4          | Mason Callan                   | Mason_Callan9524@bu2lo.edu               | 19         | 2025-12-21 22:31:35.514831    
- 5          | Logan Flynn                    | Logan_Flynn9019@xtwt3.pro                | 42         | 2025-12-21 22:31:35.514831    
- 6          | Beatrice Uttley                | Beatrice_Uttley1670@1wa8o.org            | 32         | 2025-12-21 22:31:35.514831    
- 7          | Harry Johnson                  | Harry_Johnson5515@jcf8v.video            | 25         | 2025-12-21 22:31:35.514831    
- 8          | Carl Thomson                   | Carl_Thomson4218@kyb7t.host              | 53         | 2025-12-21 22:31:35.514831    
- 9          | Kaylee Johnson                 | Kaylee_Johnson8112@c2nyu.design          | 48         | 2025-12-21 22:31:35.514831    
- 10         | Cristal Duvall                 | Cristal_Duvall6639@yvu30.press           | 27         | 2025-12-21 22:31:35.514831    
+ id     | name                       | email                                | age    | created                       
+--------+--------------------------------+----------------------------------+--------+-------------------------------
+ 1      | Danny Mason                | Danny_Mason2966@xqj6f.tech           | 35     | 2025-12-21 22:31:35.514831    
+ 2      | Johnathan Walker           | Johnathan_Walker250@ptr6k.page       | 32     | 2025-12-21 22:31:35.514831    
+ 3      | Tyson Weldon               | Tyson_Weldon2108@zynuu.video         | 27     | 2025-12-21 22:31:35.514831    
+ 4      | Mason Callan               | Mason_Callan9524@bu2lo.edu           | 19     | 2025-12-21 22:31:35.514831    
+ 5      | Logan Flynn                | Logan_Flynn9019@xtwt3.pro            | 42     | 2025-12-21 22:31:35.514831    
+ 6      | Beatrice Uttley            | Beatrice_Uttley1670@1wa8o.org        | 32     | 2025-12-21 22:31:35.514831    
+ 7      | Harry Johnson              | Harry_Johnson5515@jcf8v.video        | 25     | 2025-12-21 22:31:35.514831    
+ 8      | Carl Thomson               | Carl_Thomson4218@kyb7t.host          | 53     | 2025-12-21 22:31:35.514831    
+ 9      | Kaylee Johnson             | Kaylee_Johnson8112@c2nyu.design      | 48     | 2025-12-21 22:31:35.514831    
+ 10     | Cristal Duvall             | Cristal_Duvall6639@yvu30.press       | 27     | 2025-12-21 22:31:35.514831    
 ```
 
 Update rows:
@@ -246,9 +243,9 @@ if err != nil {
 Select to verify update:
 
 ```sh
- id         | name                           | email                                    | age        | created                       
-------------+--------------------------------+------------------------------------------+------------+-------------------------------
- 1          | Danny Mason                    | Danny_Mason2966@xqj6f.tech               | 36         | 2025-12-21 22:31:35.514831    
+ id     | name                       | email                                | age    | created                       
+--------+----------------------------+--------------------------------------+--------+-------------------------------
+ 1      | Danny Mason                | Danny_Mason2966@xqj6f.tech           | 36     | 2025-12-21 22:31:35.514831    
 ```
 
 You can also delete rows:
