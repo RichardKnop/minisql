@@ -442,6 +442,12 @@ func (d *Database) executeDelete(ctx context.Context, stmt Statement) (Statement
 
 // createTable creates a new table with a name and columns
 func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, error) {
+	var err error
+	stmt, err = stmt.PrepareDefaultValues()
+	if err != nil {
+		return nil, err
+	}
+
 	if err := stmt.Validate((nil)); err != nil {
 		return nil, err
 	}

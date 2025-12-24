@@ -13,7 +13,8 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 		return fmt.Errorf("invalid statement kind for INSERT: %v", stmt.Kind)
 	}
 
-	if err := stmt.Prepare(t.clock()); err != nil {
+	var err error
+	if stmt, err = stmt.Prepare(t.clock()); err != nil {
 		return err
 	}
 
@@ -66,7 +67,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 			Columns: t.Columns,
 			Values:  make([]OptionalValue, 0, len(t.Columns)),
 		}
-		aRow.appendValues(stmt.Fields, values)
+		aRow = aRow.AppendValues(stmt.Fields, values)
 
 		aPage, err := t.pager.ModifyPage(ctx, aCursor.PageIdx)
 		if err != nil {

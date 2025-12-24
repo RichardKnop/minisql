@@ -14,7 +14,8 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, fmt.Errorf("invalid statement kind for UPDATE: %v", stmt.Kind)
 	}
 
-	if err := stmt.Prepare(Time{}); err != nil {
+	var err error
+	if stmt, err = stmt.Prepare(Time{}); err != nil {
 		return StatementResult{}, err
 	}
 

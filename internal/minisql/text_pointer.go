@@ -95,42 +95,42 @@ func (tp TextPointer) IsEqual(tp2 TextPointer) bool {
 	return true
 }
 
-func storeOverflowTexts(ctx context.Context, aPager TxPager, aRow Row) error {
-	for i, aColumn := range aRow.Columns {
+func (r Row) storeOverflowTexts(ctx context.Context, aPager TxPager) (Row, error) {
+	for i, aColumn := range r.Columns {
 		if !aColumn.Kind.IsText() {
 			continue
 		}
-		value, ok := aRow.GetValue(aColumn.Name)
+		value, ok := r.GetValue(aColumn.Name)
 		if !ok || !value.Valid {
 			continue
 		}
 		textPointer, ok := value.Value.(TextPointer)
 		if !ok {
-			return fmt.Errorf("expected TextPointer value for text column %s", aColumn.Name)
+			return r, fmt.Errorf("expected TextPointer value for text column %s", aColumn.Name)
 		}
-		if err := storeOverflowText(ctx, aPager, &textPointer); err != nil {
-			return err
+		if err := textPointer.storeOverflowText(ctx, aPager); err != nil {
+			return r, err
 		}
-		aRow.Values[i] = OptionalValue{
+		r.Values[i] = OptionalValue{
 			Valid: true,
 			Value: textPointer,
 		}
 	}
-	return nil
+	return r, nil
 }
 
-func storeOverflowText(ctx context.Context, aPager TxPager, textPointer *TextPointer) error {
-	if textPointer.IsInline() {
+func (tp *TextPointer) storeOverflowText(ctx context.Context, aPager TxPager) error {
+	if tp.IsInline() {
 		return nil
 	}
 
-	if len(textPointer.Data) > MaxOverflowTextSize {
-		return fmt.Errorf("text size %d exceeds maximum overflow text size %d", len(textPointer.Data), MaxOverflowTextSize)
+	if len(tp.Data) > MaxOverflowTextSize {
+		return fmt.Errorf("text size %d exceeds maximum overflow text size %d", len(tp.Data), MaxOverflowTextSize)
 	}
 
 	// Calculate how many overflow pages are needed
-	numPages := textPointer.NumberOfPages()
-	dataSizeToStore := textPointer.Length
+	numPages := tp.NumberOfPages()
+	dataSizeToStore := tp.Length
 
 	// Store text in overflow pages
 	var previousPage *Page
@@ -140,7 +140,7 @@ func storeOverflowText(ctx context.Context, aPager TxPager, textPointer *TextPoi
 			return fmt.Errorf("allocate overflow page: %w", err)
 		}
 		if i == 0 {
-			textPointer.FirstPage = freePage.Index
+			tp.FirstPage = freePage.Index
 		}
 		dataSize := min(dataSizeToStore, MaxOverflowPageData)
 		dataSizeToStore -= dataSize
@@ -148,7 +148,7 @@ func storeOverflowText(ctx context.Context, aPager TxPager, textPointer *TextPoi
 			Header: OverflowPageHeader{
 				DataSize: dataSize,
 			},
-			Data: textPointer.Data[i*MaxOverflowPageData : i*MaxOverflowPageData+dataSize],
+			Data: tp.Data[i*MaxOverflowPageData : i*MaxOverflowPageData+dataSize],
 		}
 		if previousPage != nil {
 			previousPage.OverflowPage.Header.NextPage = freePage.Index
@@ -159,21 +159,21 @@ func storeOverflowText(ctx context.Context, aPager TxPager, textPointer *TextPoi
 	return nil
 }
 
-func readOverflowTexts(ctx context.Context, aPager TxPager, aRow *Row) error {
-	if len(aRow.Values) == 0 {
-		return nil
+func (r Row) readOverflowTexts(ctx context.Context, aPager TxPager) (Row, error) {
+	if len(r.Values) == 0 {
+		return r, nil
 	}
-	for _, aColumn := range aRow.Columns {
+	for _, aColumn := range r.Columns {
 		if !aColumn.Kind.IsText() {
 			continue
 		}
-		value, ok := aRow.GetValue(aColumn.Name)
+		value, ok := r.GetValue(aColumn.Name)
 		if !ok || !value.Valid {
 			continue
 		}
 		textPointer, ok := value.Value.(TextPointer)
 		if !ok {
-			return fmt.Errorf("expected TextPointer value for text column %s", aColumn.Name)
+			return Row{}, fmt.Errorf("expected TextPointer value for text column %s", aColumn.Name)
 		}
 		if textPointer.IsInline() {
 			continue
@@ -187,10 +187,10 @@ func readOverflowTexts(ctx context.Context, aPager TxPager, aRow *Row) error {
 		for remainingSize > 0 {
 			overflowPage, err := aPager.ReadPage(ctx, currentPageIdx)
 			if err != nil {
-				return fmt.Errorf("read overflow page %d: %w", currentPageIdx, err)
+				return Row{}, fmt.Errorf("read overflow page %d: %w", currentPageIdx, err)
 			}
 			if overflowPage.OverflowPage == nil {
-				return fmt.Errorf("page %d is not an overflow page", currentPageIdx)
+				return Row{}, fmt.Errorf("page %d is not an overflow page", currentPageIdx)
 			}
 			dataSize := min(remainingSize, overflowPage.OverflowPage.Header.DataSize)
 			overflowData = append(overflowData, overflowPage.OverflowPage.Data[:dataSize]...)
@@ -198,7 +198,7 @@ func readOverflowTexts(ctx context.Context, aPager TxPager, aRow *Row) error {
 			currentPageIdx = overflowPage.OverflowPage.Header.NextPage
 		}
 		textPointer.Data = bytes.Trim(overflowData, "\x00")
-		aRow.SetValue(aColumn.Name, OptionalValue{Value: textPointer, Valid: true})
+		r, _ = r.SetValue(aColumn.Name, OptionalValue{Value: textPointer, Valid: true})
 	}
-	return nil
+	return r, nil
 }

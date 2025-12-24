@@ -30,7 +30,8 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 			},
 		}
 
-		err := stmt.Prepare(Time{})
+		var err error
+		stmt, err = stmt.Prepare(Time{})
 		require.NoError(t, err)
 
 		assert.Equal(t, fieldsFromColumns(stmt.Columns...), stmt.Fields)
@@ -71,7 +72,8 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 			},
 		}
 
-		err := stmt.Prepare(Time{})
+		var err error
+		stmt, err = stmt.Prepare(Time{})
 		require.NoError(t, err)
 
 		assert.Equal(t, fieldsFromColumns(stmt.Columns...), stmt.Fields)
@@ -116,7 +118,8 @@ func TestStatement_Prepare_Update(t *testing.T) {
 			},
 		}
 
-		err := stmt.Prepare(Time{})
+		var err error
+		stmt, err = stmt.Prepare(Time{})
 		require.NoError(t, err)
 
 		assert.Equal(t, fieldsFromColumns(stmt.Columns...), stmt.Fields)
@@ -133,6 +136,48 @@ func TestStatement_Prepare_Update(t *testing.T) {
 			Valid: true,
 		}, stmt.Updates["created_at"])
 	})
+}
+
+func TestStatement_PrepareDefaultValues(t *testing.T) {
+	t.Parallel()
+
+	stmt := Statement{
+		Kind: CreateTable,
+		Columns: []Column{
+			{
+				Kind:       Int8,
+				Size:       8,
+				Name:       "id",
+				PrimaryKey: true,
+			},
+			{
+				Kind:         Varchar,
+				Size:         MaxInlineVarchar,
+				Name:         "status",
+				DefaultValue: OptionalValue{Value: "pending", Valid: true},
+			},
+			{
+				Kind:         Timestamp,
+				Size:         8,
+				Name:         "created_at",
+				DefaultValue: OptionalValue{Value: "0001-01-01 00:00:00", Valid: true},
+			},
+		},
+	}
+
+	_, ok := stmt.Columns[1].DefaultValue.Value.(TextPointer)
+	assert.False(t, ok)
+	_, ok = stmt.Columns[2].DefaultValue.Value.(Time)
+	assert.False(t, ok)
+
+	var err error
+	stmt, err = stmt.PrepareDefaultValues()
+	require.NoError(t, err)
+
+	_, ok = stmt.Columns[1].DefaultValue.Value.(TextPointer)
+	assert.True(t, ok, "expected default value for 'status' column to be TextPointer")
+	_, ok = stmt.Columns[2].DefaultValue.Value.(Time)
+	assert.True(t, ok, "expected default value for 'created_at' column to be Time")
 }
 
 func TestStatement_Validate(t *testing.T) {
@@ -442,27 +487,6 @@ func TestStatement_Validate(t *testing.T) {
 
 		err := stmt.Validate(nil)
 		require.NoError(t, err)
-	})
-
-	t.Run("CREATE TABLE with default values should succeed and parse default values", func(t *testing.T) {
-		stmt := Statement{
-			Kind:      CreateTable,
-			TableName: aTableWithDefaultValue.Name,
-			Columns:   aTableWithDefaultValue.Columns,
-		}
-
-		_, ok := aTableWithDefaultValue.Columns[1].DefaultValue.Value.(TextPointer)
-		assert.False(t, ok)
-		_, ok = aTableWithDefaultValue.Columns[2].DefaultValue.Value.(Time)
-		assert.False(t, ok)
-
-		err := stmt.Validate(nil)
-		require.NoError(t, err)
-
-		_, ok = aTableWithDefaultValue.Columns[1].DefaultValue.Value.(TextPointer)
-		assert.True(t, ok, "expected default value for 'status' column to be TextPointer")
-		_, ok = aTableWithDefaultValue.Columns[2].DefaultValue.Value.(Time)
-		assert.True(t, ok, "expected default value for 'created_at' column to be Time")
 	})
 
 	t.Run("INSERT with wrong number of columns should fail", func(t *testing.T) {

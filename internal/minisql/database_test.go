@@ -46,17 +46,17 @@ func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 	stmt := Statement{
 		Kind:      CreateTable,
 		TableName: testTableName,
-		Columns:   testColumns,
+		Columns:   append([]Column{}, testColumns...),
 	}
 	stmt2 := Statement{
 		Kind:      CreateTable,
 		TableName: testTableName2,
-		Columns:   testColumnsWithPrimaryKey,
+		Columns:   append([]Column{}, testColumnsWithPrimaryKey...),
 	}
 	stmt3 := Statement{
 		Kind:      CreateTable,
 		TableName: testTableName3,
-		Columns:   testColumnsWithUniqueIndex,
+		Columns:   append([]Column{}, testColumnsWithUniqueIndex...),
 	}
 
 	for _, s := range []Statement{stmt, stmt2, stmt3} {
@@ -139,7 +139,7 @@ func TestDatabase_CreateTable(t *testing.T) {
 	stmt := Statement{
 		Kind:      CreateTable,
 		TableName: testTableName,
-		Columns:   testColumns,
+		Columns:   append([]Column{}, testColumns...),
 	}
 	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		_, err := aDatabase.ExecuteStatement(ctx, stmt)
@@ -181,7 +181,7 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 	stmt := Statement{
 		Kind:      CreateTable,
 		TableName: testTableName,
-		Columns:   testColumnsWithPrimaryKey,
+		Columns:   append([]Column{}, testColumnsWithPrimaryKey...),
 	}
 	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		_, err := aDatabase.ExecuteStatement(ctx, stmt)
@@ -231,7 +231,7 @@ func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
 	stmt := Statement{
 		Kind:      CreateTable,
 		TableName: testTableName,
-		Columns:   testColumnsWithUniqueIndex,
+		Columns:   append([]Column{}, testColumnsWithUniqueIndex...),
 	}
 	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		_, err := aDatabase.ExecuteStatement(ctx, stmt)

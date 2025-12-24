@@ -103,8 +103,8 @@ func TestTable_Update(t *testing.T) {
 		for i, aRow := range rows {
 			expectedRow := aRow.Clone()
 			if i == 5 {
-				expectedRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("updatedsingle@foo.bar")), Valid: true})
-				expectedRow.SetValue("created_at", OptionalValue{Value: MustParseTimestamp("2000-01-01 00:00:00"), Valid: true})
+				expectedRow, _ = expectedRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("updatedsingle@foo.bar")), Valid: true})
+				expectedRow, _ = expectedRow.SetValue("created_at", OptionalValue{Value: MustParseTimestamp("2000-01-01 00:00:00"), Valid: true})
 				rows[i] = expectedRow
 			}
 
@@ -144,7 +144,7 @@ func TestTable_Update(t *testing.T) {
 		for i, aRow := range rows {
 			expectedRow := aRow.Clone()
 			if i == 18 {
-				expectedRow.SetValue("email", OptionalValue{Valid: false})
+				expectedRow, _ = expectedRow.SetValue("email", OptionalValue{Valid: false})
 			}
 
 			expected = append(expected, expectedRow)
@@ -174,7 +174,7 @@ func TestTable_Update(t *testing.T) {
 		expected := make([]Row, 0, len(rows))
 		for _, aRow := range rows {
 			expectedRow := aRow.Clone()
-			expectedRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("updatedall@foo.bar")), Valid: true})
+			expectedRow, _ = expectedRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("updatedall@foo.bar")), Valid: true})
 			expected = append(expected, expectedRow)
 		}
 
@@ -252,9 +252,10 @@ func TestTable_Update_Overflow(t *testing.T) {
 
 		// Prepare expected rows with one updated row
 		for i, aRow := range expected {
-			if i == 0 {
-				aRow.SetValue("profile", OptionalValue{Value: updatedOverflowText, Valid: true})
+			if i != 0 {
+				continue
 			}
+			aRow, _ = aRow.SetValue("profile", OptionalValue{Value: updatedOverflowText, Valid: true})
 		}
 
 		checkRows(ctx, t, aTable, expected)
@@ -303,9 +304,10 @@ func TestTable_Update_Overflow(t *testing.T) {
 
 		// Prepare expected rows with second updated row
 		for i, aRow := range expected {
-			if i == 1 {
-				aRow.SetValue("profile", OptionalValue{Value: updatedInlineText, Valid: true})
+			if i != 1 {
+				continue
 			}
+			aRow, _ = aRow.SetValue("profile", OptionalValue{Value: updatedInlineText, Valid: true})
 		}
 
 		checkRows(ctx, t, aTable, expected)
@@ -355,9 +357,10 @@ func TestTable_Update_Overflow(t *testing.T) {
 
 		// Prepare expected rows with third updated row
 		for i, aRow := range expected {
-			if i == 2 {
-				aRow.SetValue("profile", OptionalValue{Value: updatedShrunkOverflowText, Valid: true})
+			if i != 2 {
+				continue
 			}
+			aRow, _ = aRow.SetValue("profile", OptionalValue{Value: updatedShrunkOverflowText, Valid: true})
 		}
 
 		checkRows(ctx, t, aTable, expected)
@@ -406,9 +409,10 @@ func TestTable_Update_Overflow(t *testing.T) {
 
 		// Prepare expected rows with third updated row
 		for i, aRow := range expected {
-			if i == 0 {
-				aRow.SetValue("profile", OptionalValue{Value: expandedOverflowText, Valid: true})
+			if i != 0 {
+				continue
 			}
+			aRow, _ = aRow.SetValue("profile", OptionalValue{Value: expandedOverflowText, Valid: true})
 		}
 
 		checkRows(ctx, t, aTable, expected)

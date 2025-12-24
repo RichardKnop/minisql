@@ -158,9 +158,10 @@ func TestTable_Update_PrimaryKey(t *testing.T) {
 
 		// Prepare expected rows with one updated row
 		for i, aRow := range expected {
-			if i == 0 {
-				aRow.SetValue("id", OptionalValue{Value: int64(42), Valid: true})
+			if i != 0 {
+				continue
 			}
+			aRow, _ = aRow.SetValue("id", OptionalValue{Value: int64(42), Valid: true})
 		}
 
 		checkRows(ctx, t, aTable, expected)

@@ -492,13 +492,13 @@ func TestTable_Select_Overflow(t *testing.T) {
 		tp1 := overflow1.Value.(TextPointer)
 		tp1.FirstPage = 1
 		overflow1.Value = tp1
-		rows[1].SetValue("profile", overflow1)
+		rows[1], _ = rows[1].SetValue("profile", overflow1)
 
 		overflow2, _ := rows[2].GetValue("profile")
 		tp2 := overflow2.Value.(TextPointer)
 		tp2.FirstPage = 2
 		overflow2.Value = tp2
-		rows[2].SetValue("profile", overflow2)
+		rows[2], _ = rows[2].SetValue("profile", overflow2)
 
 		// And now we can assert
 		assert.Equal(t, rows, collectRows(ctx, aResult))
