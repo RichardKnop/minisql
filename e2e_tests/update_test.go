@@ -38,6 +38,19 @@ func (s *TestSuite) TestUpdate() {
 		{String: "Cristal Duvall", Valid: true},
 	}
 
+	expectedEmails := []sql.NullString{
+		{String: "Danny_Mason2966@xqj6f.tech", Valid: true},
+		{String: "Johnathan_Walker250@ptr6k.page", Valid: true},
+		{String: "Tyson_Weldon2108@zynuu.video", Valid: true},
+		{String: "Mason_Callan9524@bu2lo.edu", Valid: true},
+		{String: "Logan_Flynn9019@xtwt3.pro", Valid: true},
+		{String: "Beatrice_Uttley1670@1wa8o.org", Valid: true},
+		{String: "Harry_Johnson5515@jcf8v.video", Valid: true},
+		{String: "Carl_Thomson4218@kyb7t.host", Valid: true},
+		{String: "Kaylee_Johnson8112@c2nyu.design", Valid: true},
+		{String: "Cristal_Duvall6639@yvu30.press", Valid: true},
+	}
+
 	s.Run("Update with where matching no rows", func() {
 		aResult, err := s.db.ExecContext(context.Background(), `update users set name = 'Updated Name' where id = 9999;`)
 		s.Require().NoError(err)
@@ -49,6 +62,7 @@ func (s *TestSuite) TestUpdate() {
 		s.Require().Len(users, 10)
 		for i, aUser := range users {
 			s.Equal(expectedNames[i], aUser.Name)
+			s.Equal(expectedEmails[i], aUser.Email)
 		}
 	})
 
@@ -65,6 +79,7 @@ func (s *TestSuite) TestUpdate() {
 		s.Require().Len(users, 10)
 		for i, aUser := range users {
 			s.Equal(expectedNames[i], aUser.Name)
+			s.Equal(expectedEmails[i], aUser.Email)
 		}
 	})
 
@@ -82,6 +97,7 @@ func (s *TestSuite) TestUpdate() {
 		s.Require().Len(users, 10)
 		for i, aUser := range users {
 			s.Equal(expectedNames[i], aUser.Name)
+			s.Equal(expectedEmails[i], aUser.Email)
 		}
 	})
 
@@ -98,6 +114,7 @@ func (s *TestSuite) TestUpdate() {
 		s.Require().Len(users, 10)
 		for i, aUser := range users {
 			s.Equal(expectedNames[i], aUser.Name)
+			s.Equal(expectedEmails[i], aUser.Email)
 		}
 
 		aResult, err = s.db.ExecContext(context.Background(), `update users set name = 'Kaylee Johnson' where id = 9;`)
@@ -112,6 +129,32 @@ func (s *TestSuite) TestUpdate() {
 		s.Require().Len(users, 10)
 		for i, aUser := range users {
 			s.Equal(expectedNames[i], aUser.Name)
+			s.Equal(expectedEmails[i], aUser.Email)
+		}
+	})
+
+	s.Run("Updating primary key to NULL fails", func() {
+		aResult, err := s.db.ExecContext(context.Background(), `update users set id = null;`)
+		s.Require().Error(err)
+		s.ErrorContains(err, "cannot update primary key pkey__users to NULL")
+		s.Nil(aResult)
+	})
+
+	s.Run("Updating unique index key to NULL succeeds", func() {
+		aResult, err := s.db.ExecContext(context.Background(), `update users set email = null where id = 3 or id = 7;`)
+		s.Require().NoError(err)
+		rowsAffected, err = aResult.RowsAffected()
+		s.Require().NoError(err)
+		s.Require().Equal(int64(2), rowsAffected)
+
+		expectedEmails[2] = sql.NullString{}
+		expectedEmails[6] = sql.NullString{}
+
+		users := s.collectUsers(`select * from users;`)
+		s.Require().Len(users, 10)
+		for i, aUser := range users {
+			s.Equal(expectedNames[i], aUser.Name)
+			s.Equal(expectedEmails[i], aUser.Email)
 		}
 	})
 }
