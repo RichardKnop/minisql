@@ -1122,6 +1122,7 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 					Size:     MaxInlineVarchar,
 					Name:     "email",
 					Nullable: true,
+					Unique:   true,
 				},
 				{
 					Kind:     Int4,
@@ -1154,7 +1155,7 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 
 		expected := `create table "users" (
 	id int8 primary key autoincrement,
-	email varchar(255),
+	email varchar(255) unique,
 	age int4,
 	verified boolean not null default false,
 	score real,

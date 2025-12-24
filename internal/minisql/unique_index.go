@@ -24,6 +24,7 @@ func tableNameFromUniqueIndex(indexName string) string {
 }
 
 func (t *Table) insertUniqueKey(ctx context.Context, uniqueIndex UniqueIndex, uniqueValue OptionalValue, rowID RowID) error {
+	// We only need to insert into the unique index if the value is not NULL
 	if !uniqueValue.Valid {
 		return nil
 	}

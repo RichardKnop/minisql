@@ -242,7 +242,7 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 				}
 			}
 
-			if isEquality(aCondition) {
+			if isEquality(aCondition) && aCondition.Operand2.Type != OperandNull {
 				keys, err := equalityKeys(aColumn, aCondition)
 				if err != nil {
 					return err

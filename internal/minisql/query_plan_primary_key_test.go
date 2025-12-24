@@ -64,6 +64,29 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 			},
 		},
 		{
+			"Single unique index key equality condition but NULL - sequential scan",
+			Statement{
+				Kind: Select,
+				Conditions: OneOrMore{
+					{
+						FieldIsNull("id"),
+					},
+				},
+			},
+			QueryPlan{
+				Scans: []Scan{
+					{
+						Type: ScanTypeSequential,
+						Filters: OneOrMore{
+							{
+								FieldIsNull("id"),
+							},
+						},
+					},
+				},
+			},
+		},
+		{
 			"Single unique index key equality condition - index point scan",
 			Statement{
 				Kind: Select,

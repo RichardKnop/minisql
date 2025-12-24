@@ -51,10 +51,18 @@ values(100, 'Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15
 
 	// Inserting user with duplicate primary key should fail
 	aResult, err = s.db.ExecContext(context.Background(), `insert into users("id", "name", "email", "created") 
-values(100, 'Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:27');`)
+values(100, 'Johnathan Walker', 'Johnathan_Walker250+new@ptr6k.page', '2024-01-02 15:30:27');`)
 	s.Require().Error(err)
 	s.ErrorIs(err, minisql.ErrDuplicateKey)
 	s.Equal("failed to insert primary key pkey__users: duplicate key", err.Error())
+	s.Nil(aResult)
+
+	// Inserting user with duplicate unique index key should fail
+	aResult, err = s.db.ExecContext(context.Background(), `insert into users("name", "email", "created") 
+values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:27');`)
+	s.Require().Error(err)
+	s.ErrorIs(err, minisql.ErrDuplicateKey)
+	s.Equal("failed to insert key for unique index key__users__email: duplicate key", err.Error())
 	s.Nil(aResult)
 
 	s.Run("Basic select query", func() {
@@ -220,7 +228,7 @@ func (s TestSuite) collectUsers(query string) []user {
 	var users []user
 	for rows.Next() {
 		var aUser user
-		err := rows.Scan(&aUser.ID, &aUser.Name, &aUser.Email, &aUser.Created)
+		err := rows.Scan(&aUser.ID, &aUser.Email, &aUser.Name, &aUser.Created)
 		s.Require().NoError(err)
 		users = append(users, aUser)
 	}

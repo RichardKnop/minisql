@@ -55,7 +55,6 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 				},
 				Autoincrement: aColumn.Autoincrement,
 			}
-			break
 		}
 		if aColumn.Unique {
 			indexName := uniqueIndexName(name, aColumn.Name)

@@ -476,6 +476,7 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 	}
 	freePage.LeafNode = NewLeafNode()
 	freePage.LeafNode.Header.IsRoot = true
+
 	createdTable := NewTable(
 		d.logger,
 		tablePager,

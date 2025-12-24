@@ -766,6 +766,9 @@ func (s Statement) CreateTableDDL() string {
 				sb.WriteString(" autoincrement")
 			}
 		} else {
+			if col.Unique {
+				sb.WriteString(" unique")
+			}
 			if !col.Nullable {
 				sb.WriteString(" not null")
 			}

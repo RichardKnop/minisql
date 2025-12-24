@@ -311,7 +311,7 @@ func TestParse_CreateTable(t *testing.T) {
 			errCreateTableMultiplePrimaryKeys,
 		},
 		{
-			"CREATE TABLE with VARCHAR unique key with size > 255 fails",
+			"CREATE TABLE with VARCHAR primary key with size > 255 fails",
 			`CREATE TABLE foo (
 				id varchar(300) primary key, 
 				bar varchar(255) 
@@ -386,7 +386,7 @@ func TestParse_CreateTable(t *testing.T) {
 			nil,
 		},
 		{
-			"CREATE TABLE with VARCHAR unique key with size > 255 fails",
+			"CREATE TABLE with VARCHAR unique index key with size > 255 fails",
 			`CREATE TABLE foo (
 				id int8 primary key, 
 				bar varchar(300) unique
@@ -395,7 +395,7 @@ func TestParse_CreateTable(t *testing.T) {
 			errCreateTableUniqueVarcharTooLarge,
 		},
 		{
-			"CREATE TABLE with TEXT primary key fails",
+			"CREATE TABLE with TEXT unique index key fails",
 			`CREATE TABLE foo (
 				id int8 primary key,
 				bar text unique
@@ -404,21 +404,43 @@ func TestParse_CreateTable(t *testing.T) {
 			errCreateTableUniqueTextNotAllowed,
 		},
 		{
-			"CREATE TABLE with unique key",
-			`CREATE TABLE foo (
-				bar varchar(255) unique
-			);`,
+			"CREATE TABLE with unique index key",
+			`create table "users" (
+	id int8 primary key autoincrement,
+	email varchar(255) unique,
+	name text,
+	created timestamp default now()
+);`,
 			[]minisql.Statement{
 				{
 					Kind:      minisql.CreateTable,
-					TableName: "foo",
+					TableName: "users",
 					Columns: []minisql.Column{
 						{
-							Name:     "bar",
+							Name:          "id",
+							Kind:          minisql.Int8,
+							Size:          8,
+							PrimaryKey:    true,
+							Autoincrement: true,
+						},
+						{
+							Name:     "email",
 							Kind:     minisql.Varchar,
 							Size:     minisql.MaxInlineVarchar,
-							Unique:   true,
 							Nullable: true,
+							Unique:   true,
+						},
+						{
+							Name:     "name",
+							Kind:     minisql.Text,
+							Nullable: true,
+						},
+						{
+							Name:            "created",
+							Kind:            minisql.Timestamp,
+							Size:            8,
+							Nullable:        true,
+							DefaultValueNow: true,
 						},
 					},
 				},
