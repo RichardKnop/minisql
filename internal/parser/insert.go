@@ -65,8 +65,15 @@ func (p *parser) doParseInsert() error {
 		p.pop()
 		p.step = stepInsertValues
 	case stepInsertValues:
-		if strings.ToUpper(p.peek()) == "NULL" {
+		specialValue := strings.ToUpper(p.peek())
+		if specialValue == "NULL" {
 			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.OptionalValue{Valid: false})
+			p.pop()
+			p.step = stepInsertValuesCommaOrClosingParens
+			return nil
+		}
+		if specialValue == "NOW()" {
+			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.OptionalValue{Value: minisql.FunctionNow, Valid: true})
 			p.pop()
 			p.step = stepInsertValuesCommaOrClosingParens
 			return nil

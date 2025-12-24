@@ -113,8 +113,9 @@ You can create your own non-system table now:
 ```go
 _, err := s.db.Exec(`create table "users" (
 	id int8 primary key autoincrement,
-	name varchar(255),
-	email text,
+	email varchar(255) unique,
+	name text,
+	age int4,
 	created timestamp default now()
 );`)
 if err != nil {
@@ -135,11 +136,13 @@ Now you should see your table in the `minisql_schema`:
         |                            |             | );                                                 
  1      | users                      | 1           | create table "users" (                             
         |                            |             | 	id int8 primary key autoincrement,                
-        |                            |             | 	name varchar(255),                                
-        |                            |             | 	email text,                                       
-        |                            |             | 	age int4                                          
+        |                            |             | 	email varchar(255) unique,                               
+        |                            |             | 	name text,                                       
+        |                            |             | 	age int4,                                          
+        |                            |             | 	created timestamp default now()                  
         |                            |             | );                                                 
  2      | pkey__users                | 2           | NULL                                               
+ 3      | key__users_email           | 3           | NULL                                               
 ```
 
 There is a new entry for `users` table as well as one for the primary key index.
@@ -147,16 +150,16 @@ There is a new entry for `users` table as well as one for the primary key index.
 Insert test rows:
 
 ```go
-_, err := s.db.ExecContext(context.Background(), `insert into users("name", "email", "age") values('Danny Mason', 'Danny_Mason2966@xqj6f.tech', 35),
-('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', 32),
-('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video', 27),
-('Mason Callan', 'Mason_Callan9524@bu2lo.edu', 19),
-('Logan Flynn', 'Logan_Flynn9019@xtwt3.pro', 42),
-('Beatrice Uttley', 'Beatrice_Uttley1670@1wa8o.org', 32),
-('Harry Johnson', 'Harry_Johnson5515@jcf8v.video', 25),
-('Carl Thomson', 'Carl_Thomson4218@kyb7t.host', 53),
-('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design', 48),
-('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press', 27);`)
+_, err := s.db.ExecContext(context.Background(), `insert into users("email", "name", "age") values('Danny_Mason2966@xqj6f.tech', 'Danny Mason', 35),
+('Johnathan_Walker250@ptr6k.page', 'Johnathan Walker', 32),
+('Tyson_Weldon2108@zynuu.video', 'Tyson Weldon', 27),
+('Mason_Callan9524@bu2lo.edu', 'Mason Callan', 19),
+('Logan_Flynn9019@xtwt3.pro', 'Logan Flynn',, 42),
+('Beatrice_Uttley1670@1wa8o.org', 'Beatrice Uttley', 32),
+('Harry_Johnson5515@jcf8v.video', 'Harry Johnson', 25),
+('Carl_Thomson4218@kyb7t.host', 'Carl Thomson', 53),
+('Kaylee_Johnson8112@c2nyu.design', 'Kaylee Johnson', 48),
+('Cristal_Duvall6639@yvu30.press', 'Cristal Duvall', 27);`)
 if err != nil {
 	return err
 }
@@ -212,18 +215,18 @@ if err := rows.Err(); err != nil {
 Table should have 10 rows now:
 
 ```sh
- id     | name                       | email                                | age    | created                       
---------+--------------------------------+----------------------------------+--------+-------------------------------
- 1      | Danny Mason                | Danny_Mason2966@xqj6f.tech           | 35     | 2025-12-21 22:31:35.514831    
- 2      | Johnathan Walker           | Johnathan_Walker250@ptr6k.page       | 32     | 2025-12-21 22:31:35.514831    
- 3      | Tyson Weldon               | Tyson_Weldon2108@zynuu.video         | 27     | 2025-12-21 22:31:35.514831    
- 4      | Mason Callan               | Mason_Callan9524@bu2lo.edu           | 19     | 2025-12-21 22:31:35.514831    
- 5      | Logan Flynn                | Logan_Flynn9019@xtwt3.pro            | 42     | 2025-12-21 22:31:35.514831    
- 6      | Beatrice Uttley            | Beatrice_Uttley1670@1wa8o.org        | 32     | 2025-12-21 22:31:35.514831    
- 7      | Harry Johnson              | Harry_Johnson5515@jcf8v.video        | 25     | 2025-12-21 22:31:35.514831    
- 8      | Carl Thomson               | Carl_Thomson4218@kyb7t.host          | 53     | 2025-12-21 22:31:35.514831    
- 9      | Kaylee Johnson             | Kaylee_Johnson8112@c2nyu.design      | 48     | 2025-12-21 22:31:35.514831    
- 10     | Cristal Duvall             | Cristal_Duvall6639@yvu30.press       | 27     | 2025-12-21 22:31:35.514831    
+ id     | email                            | name                    | age    | created                       
+--------+----------------------------------+-------------------------+--------+-------------------------------
+ 1      | Danny_Mason2966@xqj6f.tech       | Danny Mason             | 35     | 2025-12-21 22:31:35.514831    
+ 2      | Johnathan_Walker250@ptr6k.page   | Johnathan Walker        | 32     | 2025-12-21 22:31:35.514831    
+ 3      | Tyson_Weldon2108@zynuu.video     | Tyson Weldon            | 27     | 2025-12-21 22:31:35.514831    
+ 4      | Mason_Callan9524@bu2lo.edu       | Mason Callan.           | 19     | 2025-12-21 22:31:35.514831    
+ 5      | Logan_Flynn9019@xtwt3.pro        | Logan Flynn             | 42     | 2025-12-21 22:31:35.514831    
+ 6      | Beatrice_Uttley1670@1wa8o.org    | Beatrice Uttley         | 32     | 2025-12-21 22:31:35.514831    
+ 7      | Harry_Johnson5515@jcf8v.video    | Harry Johnson.          | 25     | 2025-12-21 22:31:35.514831    
+ 8      | Carl_Thomson4218@kyb7t.host      | Carl Thomson            | 53     | 2025-12-21 22:31:35.514831    
+ 9      | Kaylee_Johnson8112@c2nyu.design  | Kaylee Johnson.         | 48     | 2025-12-21 22:31:35.514831    
+ 10     | Cristal_Duvall6639@yvu30.press   | Cristal Duvall.         | 27     | 2025-12-21 22:31:35.514831    
 ```
 
 Update rows:
@@ -243,9 +246,9 @@ if err != nil {
 Select to verify update:
 
 ```sh
- id     | name                       | email                                | age    | created                       
---------+----------------------------+--------------------------------------+--------+-------------------------------
- 1      | Danny Mason                | Danny_Mason2966@xqj6f.tech           | 36     | 2025-12-21 22:31:35.514831    
+ id     | email                            | name                    | age    | created                       
+--------+----------------------------------+-------------------------+--------+-------------------------------
+ 1      | Danny_Mason2966@xqj6f.tech       | Danny Mason             | 36     | 2025-12-21 22:31:35.514831    
 ```
 
 You can also delete rows:

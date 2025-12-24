@@ -47,8 +47,13 @@ func (p *parser) doParseUpdate() error {
 		p.pop()
 		p.step = stepUpdateValue
 	case stepUpdateValue:
-		if strings.ToUpper(p.peek()) == "NULL" {
+		specialValue := strings.ToUpper(p.peek())
+		if specialValue == "NULL" {
 			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Valid: false})
+			p.nextUpdateField = ""
+			p.pop()
+		} else if specialValue == "NOW()" {
+			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: minisql.FunctionNow, Valid: true})
 			p.nextUpdateField = ""
 			p.pop()
 		} else {

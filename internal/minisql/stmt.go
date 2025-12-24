@@ -134,6 +134,12 @@ type OrderBy struct {
 	Direction Direction
 }
 
+type Function struct {
+	Name string
+}
+
+var FunctionNow = Function{Name: "NOW()"}
+
 type Statement struct {
 	Kind        StatementKind
 	IfNotExists bool
@@ -143,6 +149,7 @@ type Statement struct {
 	Aliases     map[string]string
 	Inserts     [][]OptionalValue
 	Updates     map[string]OptionalValue
+	Functions   map[string]Function
 	Conditions  OneOrMore // used for WHERE
 	OrderBy     []OrderBy
 	Limit       OptionalValue
@@ -183,7 +190,7 @@ func (s Statement) Prepare(now Time) (Statement, error) {
 		}
 	case Update:
 		var err error
-		s, err = s.prepareUpdate()
+		s, err = s.prepareUpdate(now)
 		if err != nil {
 			return Statement{}, err
 		}
@@ -208,26 +215,36 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 			}
 		}
 
-		if aColumn.Kind != Timestamp {
-			continue
-		}
-
 		fieldIdx := i
 		for j := range s.Inserts {
 			if !s.Inserts[j][fieldIdx].Valid {
 				continue
 			}
+
+			if fn, ok := s.Inserts[j][fieldIdx].Value.(Function); ok {
+				if fn.Name == FunctionNow.Name {
+					s.Inserts[j][fieldIdx].Value = now
+				} else {
+					return Statement{}, fmt.Errorf("unsupported function %q in INSERT", fn.Name)
+				}
+			}
+
+			if aColumn.Kind != Timestamp {
+				continue
+			}
+
 			timestamp, err := parseTimeValue(s.Inserts[j][fieldIdx].Value)
 			if err != nil {
 				return Statement{}, err
 			}
 			s.Inserts[j][fieldIdx].Value = timestamp
 		}
+
 	}
 	return s, nil
 }
 
-func (s Statement) prepareUpdate() (Statement, error) {
+func (s Statement) prepareUpdate(now Time) (Statement, error) {
 	if len(s.Updates) == 0 {
 		return s, nil
 	}
@@ -236,19 +253,31 @@ func (s Statement) prepareUpdate() (Statement, error) {
 		if !ok {
 			return Statement{}, fmt.Errorf("unknown field %q in table %q", aField.Name, s.TableName)
 		}
-		if aColumn.Kind != Timestamp {
+		updateValue, ok := s.Updates[aField.Name]
+		if !ok {
+			return Statement{}, fmt.Errorf("missing update value for field %q", aField.Name)
+		}
+
+		if !updateValue.Valid {
 			continue
 		}
-		for aColumnName, updateValue := range s.Updates {
-			if aColumnName != aField.Name || !updateValue.Valid {
-				continue
+
+		if fn, ok := updateValue.Value.(Function); ok {
+			if fn.Name == FunctionNow.Name {
+				updateValue.Value = now
+				s.Updates[aField.Name] = updateValue
+			} else {
+				return Statement{}, fmt.Errorf("unsupported function %q in UPDATE", fn.Name)
 			}
+		} else if aColumn.Kind == Timestamp {
 			timestamp, err := parseTimeValue(updateValue.Value)
 			if err != nil {
 				return Statement{}, err
 			}
-			s.Updates[aColumnName] = OptionalValue{Valid: true, Value: timestamp}
+			updateValue.Value = timestamp
+			s.Updates[aField.Name] = updateValue
 		}
+
 	}
 	return s, nil
 }

@@ -139,6 +139,25 @@ func TestParse_Insert(t *testing.T) {
 			},
 			nil,
 		},
+		{
+			"INSERT with NOW() function works",
+			"INSERT INTO 'a' (b, c, d) VALUES (25, NOW(), 'foo');",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Insert,
+					TableName: "a",
+					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "d"}},
+					Inserts: [][]minisql.OptionalValue{
+						{
+							{Value: int64(25), Valid: true},
+							{Value: minisql.FunctionNow, Valid: true},
+							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+						},
+					},
+				},
+			},
+			nil,
+		},
 	}
 
 	for _, aTestCase := range testCases {

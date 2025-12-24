@@ -12,6 +12,16 @@ import (
 func TestStatement_Prepare_Insert(t *testing.T) {
 	t.Parallel()
 
+	now := Time{
+		Year:         2025,
+		Month:        12,
+		Day:          20,
+		Hour:         3,
+		Minutes:      13,
+		Seconds:      27,
+		Microseconds: 674801,
+	}
+
 	t.Run("Insert with partial fields populates missing fields with NULLs or default values", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
@@ -51,7 +61,7 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 		}, stmt.Inserts)
 	})
 
-	t.Run("Parse timestamps in INSERT statements", func(t *testing.T) {
+	t.Run("Unknown functions in INSERT statements cause error", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
 			TableName: "users",
@@ -67,28 +77,82 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 			},
 			Inserts: [][]OptionalValue{
 				{
-					{Value: NewTextPointer([]byte("2025-12-20 03:13:27.674801")), Valid: true},
+					{Value: Function{Name: "UNKNOWN_FUNCTION"}, Valid: true},
+				},
+			},
+		}
+
+		_, err := stmt.Prepare(Time{})
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `unsupported function "UNKNOWN_FUNCTION" in INSERT`)
+	})
+
+	t.Run("Replace NOW() function in INSERT statements with Time", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Insert,
+			TableName: "users",
+			Columns: []Column{
+				{
+					Kind: Timestamp,
+					Size: 8,
+					Name: "created_at",
+				},
+			},
+			Fields: []Field{
+				{Name: "created_at"},
+			},
+			Inserts: [][]OptionalValue{
+				{
+					{Value: FunctionNow, Valid: true},
 				},
 			},
 		}
 
 		var err error
-		stmt, err = stmt.Prepare(Time{})
+		stmt, err = stmt.Prepare(now)
 		require.NoError(t, err)
 
 		assert.Equal(t, fieldsFromColumns(stmt.Columns...), stmt.Fields)
 		assert.Equal(t, [][]OptionalValue{
 			{
 				{
-					Value: Time{
-						Year:         2025,
-						Month:        12,
-						Day:          20,
-						Hour:         3,
-						Minutes:      13,
-						Seconds:      27,
-						Microseconds: 674801,
-					},
+					Value: now,
+					Valid: true,
+				},
+			},
+		}, stmt.Inserts)
+	})
+
+	t.Run("Parse NOW() function in INSERT statements", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Insert,
+			TableName: "users",
+			Columns: []Column{
+				{
+					Kind: Timestamp,
+					Size: 8,
+					Name: "created_at",
+				},
+			},
+			Fields: []Field{
+				{Name: "created_at"},
+			},
+			Inserts: [][]OptionalValue{
+				{
+					{Value: FunctionNow, Valid: true},
+				},
+			},
+		}
+
+		var err error
+		stmt, err = stmt.Prepare(now)
+		require.NoError(t, err)
+
+		assert.Equal(t, fieldsFromColumns(stmt.Columns...), stmt.Fields)
+		assert.Equal(t, [][]OptionalValue{
+			{
+				{
+					Value: now,
 					Valid: true,
 				},
 			},
@@ -98,6 +162,16 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 
 func TestStatement_Prepare_Update(t *testing.T) {
 	t.Parallel()
+
+	now := Time{
+		Year:         2025,
+		Month:        12,
+		Day:          20,
+		Hour:         3,
+		Minutes:      13,
+		Seconds:      27,
+		Microseconds: 674801,
+	}
 
 	t.Run("Parse timestamps in UPDATE statements", func(t *testing.T) {
 		stmt := Statement{
@@ -124,15 +198,61 @@ func TestStatement_Prepare_Update(t *testing.T) {
 
 		assert.Equal(t, fieldsFromColumns(stmt.Columns...), stmt.Fields)
 		assert.Equal(t, OptionalValue{
-			Value: Time{
-				Year:         2025,
-				Month:        12,
-				Day:          20,
-				Hour:         3,
-				Minutes:      13,
-				Seconds:      27,
-				Microseconds: 674801,
+			Value: now,
+			Valid: true,
+		}, stmt.Updates["created_at"])
+	})
+
+	t.Run("Unknown functions in UPDATE statements cause error", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Update,
+			TableName: "users",
+			Columns: []Column{
+				{
+					Kind: Timestamp,
+					Size: 8,
+					Name: "created_at",
+				},
 			},
+			Fields: []Field{
+				{Name: "created_at"},
+			},
+			Updates: map[string]OptionalValue{
+				"created_at": {Value: Function{Name: "UNKNOWN_FUNCTION"}, Valid: true},
+			},
+		}
+
+		_, err := stmt.Prepare(now)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `unsupported function "UNKNOWN_FUNCTION" in UPDATE`)
+	})
+
+	t.Run("Replace NOW() function in UPDATE statements", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Update,
+			TableName: "users",
+			Columns: []Column{
+				{
+					Kind: Timestamp,
+					Size: 8,
+					Name: "created_at",
+				},
+			},
+			Fields: []Field{
+				{Name: "created_at"},
+			},
+			Updates: map[string]OptionalValue{
+				"created_at": {Value: FunctionNow, Valid: true},
+			},
+		}
+
+		var err error
+		stmt, err = stmt.Prepare(now)
+		require.NoError(t, err)
+
+		assert.Equal(t, fieldsFromColumns(stmt.Columns...), stmt.Fields)
+		assert.Equal(t, OptionalValue{
+			Value: now,
 			Valid: true,
 		}, stmt.Updates["created_at"])
 	})

@@ -359,8 +359,7 @@ func TestParse_CreateTable(t *testing.T) {
 		{
 			"CREATE TABLE with autoincrementing primary key",
 			`CREATE TABLE foo (
-				id int8 primary key autoincrement, 
-				bar varchar(255)
+				id int8 primary key autoincrement
 			);`,
 			[]minisql.Statement{
 				{
@@ -373,12 +372,6 @@ func TestParse_CreateTable(t *testing.T) {
 							Size:          8,
 							PrimaryKey:    true,
 							Autoincrement: true,
-						},
-						{
-							Name:     "bar",
-							Kind:     minisql.Varchar,
-							Size:     minisql.MaxInlineVarchar,
-							Nullable: true,
 						},
 					},
 				},
@@ -405,6 +398,28 @@ func TestParse_CreateTable(t *testing.T) {
 		},
 		{
 			"CREATE TABLE with unique index key",
+			`CREATE TABLE foo (
+				bar varchar(255) unique
+			);`,
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:     "bar",
+							Kind:     minisql.Varchar,
+							Size:     minisql.MaxInlineVarchar,
+							Unique:   true,
+							Nullable: true,
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"CREATE TABLE with both primary key and unique index key",
 			`create table "users" (
 	id int8 primary key autoincrement,
 	email varchar(255) unique,

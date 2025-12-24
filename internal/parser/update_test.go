@@ -217,14 +217,14 @@ func TestParse_Update(t *testing.T) {
 		},
 		{
 			"UPDATE with multiple SETs works",
-			"UPDATE 'a' SET b = 'hello', c = 'bye' WHERE a = '1';",
+			"UPDATE 'a' SET b = 'hello', c = NOW() WHERE a = '1';",
 			[]minisql.Statement{
 				{
 					Kind:      minisql.Update,
 					TableName: "a",
 					Updates: map[string]minisql.OptionalValue{
 						"b": {Value: minisql.NewTextPointer([]byte("hello")), Valid: true},
-						"c": {Value: minisql.NewTextPointer([]byte("bye")), Valid: true},
+						"c": {Value: minisql.FunctionNow, Valid: true},
 					},
 					Conditions: minisql.OneOrMore{
 						{

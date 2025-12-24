@@ -20,38 +20,46 @@ func (s *TestSuite) TestSelect() {
 	s.Require().NoError(err)
 
 	// First insert one row with explicitely set timestamp for created column
-	aResult, err := s.db.ExecContext(context.Background(), `insert into users("name", "email", "created") 
-values('Danny Mason', 'Danny_Mason2966@xqj6f.tech', '2024-01-01 12:00:00');`)
+	aResult, err := s.db.ExecContext(context.Background(), `insert into users("email", "name", "created") 
+values('Danny_Mason2966@xqj6f.tech', 'Danny Mason', '2024-01-01 12:00:00');`)
 	s.Require().NoError(err)
 	rowsAffected, err := aResult.RowsAffected()
 	s.Require().NoError(err)
 	s.Require().Equal(int64(1), rowsAffected)
 
 	// Next try to specify primary key manually without using autoincrement
-	aResult, err = s.db.ExecContext(context.Background(), `insert into users("id", "name", "email", "created") 
-values(100, 'Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:27');`)
+	aResult, err = s.db.ExecContext(context.Background(), `insert into users("id", "email", "name", "created") 
+values(100, 'Johnathan_Walker250@ptr6k.page', 'Johnathan Walker', '2024-01-02 15:30:27');`)
 	s.Require().NoError(err)
 	rowsAffected, err = aResult.RowsAffected()
 	s.Require().NoError(err)
 	s.Require().Equal(int64(1), rowsAffected)
 
 	// Next insert multiple rows without specifying created column (should default to now())
+	// Also switch order of name and email to ensure columns are mapped correctly
 	aResult, err = s.db.ExecContext(context.Background(), `insert into users("name", "email") values('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video'),
 ('Mason Callan', 'Mason_Callan9524@bu2lo.edu'),
 ('Logan Flynn', 'Logan_Flynn9019@xtwt3.pro'),
 ('Beatrice Uttley', 'Beatrice_Uttley1670@1wa8o.org'),
 ('Harry Johnson', 'Harry_Johnson5515@jcf8v.video'),
 ('Carl Thomson', 'Carl_Thomson4218@kyb7t.host'),
-('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design'),
-('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press');`)
+('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design');`)
 	s.Require().NoError(err)
 	rowsAffected, err = aResult.RowsAffected()
 	s.Require().NoError(err)
-	s.Require().Equal(int64(8), rowsAffected)
+	s.Require().Equal(int64(7), rowsAffected)
+
+	// Insert one more row to test using NOW() function for created timestamp
+	aResult, err = s.db.ExecContext(context.Background(), `insert into users("email", "name", "created") 
+values('Cristal_Duvall6639@yvu30.press', 'Cristal Duvall', NOW());`)
+	s.Require().NoError(err)
+	rowsAffected, err = aResult.RowsAffected()
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), rowsAffected)
 
 	// Inserting user with duplicate primary key should fail
-	aResult, err = s.db.ExecContext(context.Background(), `insert into users("id", "name", "email", "created") 
-values(100, 'Johnathan Walker', 'Johnathan_Walker250+new@ptr6k.page', '2024-01-02 15:30:27');`)
+	aResult, err = s.db.ExecContext(context.Background(), `insert into users("id", "email", "name", "created") 
+values(100, 'Johnathan_Walker250+new@ptr6k.page', 'Johnathan Walker', '2024-01-02 15:30:27');`)
 	s.Require().Error(err)
 	s.ErrorIs(err, minisql.ErrDuplicateKey)
 	s.Equal("failed to insert primary key pkey__users: duplicate key", err.Error())
