@@ -281,7 +281,7 @@ func (c *Conn) executeStatement(ctx context.Context, stmt minisql.Statement) (mi
 		var err error
 		result, err = c.db.ExecuteStatement(txCtx, stmt)
 		return err
-	}, c.db.GetSaver())
+	}, minisql.TxCommitter{Saver: c.db.GetSaver(), DDLSaver: c.db.GetDDLSaver()})
 
 	return result, err
 }

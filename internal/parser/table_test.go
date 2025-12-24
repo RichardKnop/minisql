@@ -563,7 +563,7 @@ func TestParse_CreateTable(t *testing.T) {
 							Name:         "bar",
 							Kind:         minisql.Text,
 							Nullable:     true,
-							DefaultValue: minisql.OptionalValue{Value: "hello", Valid: true},
+							DefaultValue: minisql.OptionalValue{Value: minisql.NewTextPointer([]byte("hello")), Valid: true},
 						},
 					},
 				},

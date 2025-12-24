@@ -21,6 +21,31 @@ const (
 	RollbackTransaction
 )
 
+func (s StatementKind) String() string {
+	switch s {
+	case CreateTable:
+		return "CREATE TABLE"
+	case DropTable:
+		return "DROP TABLE"
+	case Insert:
+		return "INSERT"
+	case Select:
+		return "SELECT"
+	case Update:
+		return "UPDATE"
+	case Delete:
+		return "DELETE"
+	case BeginTransaction:
+		return "BEGIN TRANSACTION"
+	case CommitTransaction:
+		return "COMMIT TRANSACTION"
+	case RollbackTransaction:
+		return "ROLLBACK TRANSACTION"
+	default:
+		return "UNKNOWN"
+	}
+}
+
 type ColumnKind int
 
 const (
@@ -138,7 +163,11 @@ type Function struct {
 	Name string
 }
 
-var FunctionNow = Function{Name: "NOW()"}
+const nowFunctionName = "NOW()"
+
+var FunctionNow = Function{Name: nowFunctionName}
+
+type Placeholder struct{}
 
 type Statement struct {
 	Kind        StatementKind
@@ -149,12 +178,126 @@ type Statement struct {
 	Aliases     map[string]string
 	Inserts     [][]OptionalValue
 	Updates     map[string]OptionalValue
-	Functions   map[string]Function
-	Conditions  OneOrMore // used for WHERE
+	Functions   map[string]Function // NOW(), etc.
+	Conditions  OneOrMore           // used for WHERE
 	OrderBy     []OrderBy
 	Limit       OptionalValue
 	Offset      OptionalValue
 	fetchedRows int64
+}
+
+// NumPlaceholders returns the number of placeholder parameters (?) in the statement.
+func (s Statement) NumPlaceholders() int {
+	count := 0
+
+	if s.Kind == Insert {
+		for _, anInsert := range s.Inserts {
+			for _, aValue := range anInsert {
+				if _, ok := aValue.Value.(Placeholder); ok {
+					count += 1
+				}
+			}
+		}
+	}
+
+	if s.Kind == Update {
+		for _, aValue := range s.Updates {
+			if _, ok := aValue.Value.(Placeholder); ok {
+				count += 1
+			}
+		}
+	}
+
+	for _, aConditionGroup := range s.Conditions {
+		for _, aCondition := range aConditionGroup {
+			if aCondition.Operand2.Type == OperandPlaceholder {
+				count += 1
+				continue
+			}
+			if aCondition.Operand2.Type == OperandList {
+				for _, value := range aCondition.Operand2.Value.([]any) {
+					if _, ok := value.(Placeholder); ok {
+						count += 1
+					}
+				}
+			}
+		}
+	}
+
+	return count
+}
+
+func (s Statement) BindArguments(args ...any) (Statement, error) {
+	if s.Kind == Insert {
+		for i, anInsert := range s.Inserts {
+			for j, aValue := range anInsert {
+				if _, ok := aValue.Value.(Placeholder); !ok {
+					continue
+				}
+				if len(args) == 0 {
+					return Statement{}, fmt.Errorf("not enough arguments to bind placeholders")
+				}
+				s.Inserts[i][j].Value = args[0]
+				args = args[1:]
+			}
+		}
+	}
+
+	if s.Kind == Update {
+		for field, aValue := range s.Updates {
+			if _, ok := aValue.Value.(Placeholder); !ok {
+				continue
+			}
+			if len(args) == 0 {
+				return Statement{}, fmt.Errorf("not enough arguments to bind placeholders")
+			}
+			s.Updates[field] = OptionalValue{Value: args[0], Valid: true}
+			args = args[1:]
+		}
+	}
+
+	for i, aConditionGroup := range s.Conditions {
+		for j, aCondition := range aConditionGroup {
+			if aCondition.Operand2.Type == OperandPlaceholder {
+				if len(args) == 0 {
+					return Statement{}, fmt.Errorf("not enough arguments to bind placeholders")
+				}
+				aCondition.Operand2.Type = operandTypeFromAny(args[0])
+				aCondition.Operand2.Value = args[0]
+				s.Conditions[i][j] = aCondition
+				args = args[1:]
+				continue
+			}
+			if aCondition.Operand2.Type == OperandList {
+				for i, value := range aCondition.Operand2.Value.([]any) {
+					if _, ok := value.(Placeholder); !ok {
+						continue
+					}
+					aCondition.Operand2.Type = operandTypeFromAny(args[0])
+					aCondition.Operand2.Value.([]any)[i] = args[0]
+					args = args[1:]
+				}
+				s.Conditions[i][j] = aCondition
+			}
+		}
+	}
+
+	return s, nil
+}
+
+func operandTypeFromAny(value any) OperandType {
+	switch value.(type) {
+	case int64, int32:
+		return OperandInteger
+	case float64, float32:
+		return OperandFloat
+	case bool:
+		return OperandBoolean
+	case string, TextPointer:
+		return OperandQuotedString
+	default:
+		return 0
+	}
 }
 
 func (s Statement) HasField(name string) bool {
@@ -286,55 +429,31 @@ func (s Statement) prepareUpdate(now Time) (Statement, error) {
 func (s Statement) prepareWhere() (Statement, error) {
 	for i, aConditionGroup := range s.Conditions {
 		for j, aCondition := range aConditionGroup {
-			// left side is field, right side is literal value
-			if aCondition.Operand1.IsField() && !aCondition.Operand2.IsField() {
-				aColumn, ok := s.ColumnByName(aCondition.Operand1.Value.(string))
-				if !ok {
-					return Statement{}, fmt.Errorf("unknown field %q in table %q", aCondition.Operand1.Value.(string), s.TableName)
-				}
-				if aColumn.Kind != Timestamp {
-					continue
-				}
-				if aCondition.Operand2.Type == OperandList {
-					for k, value := range aCondition.Operand2.Value.([]any) {
-						timestamp, err := parseTimeValue(value)
-						if err != nil {
-							return Statement{}, err
-						}
-						s.Conditions[i][j].Operand2.Value.([]any)[k] = timestamp
-					}
-				} else {
-					timestamp, err := parseTimeValue(aCondition.Operand2.Value)
-					if err != nil {
-						return Statement{}, err
-					}
-					s.Conditions[i][j].Operand2.Value = timestamp
-				}
+			// We only want to continue if left operand is a field and right operand is not a field.
+			if !aCondition.Operand1.IsField() || aCondition.Operand2.IsField() {
+				continue
 			}
-			// left side is literal value, right side is field
-			if aCondition.Operand2.IsField() && !aCondition.Operand1.IsField() {
-				aColumn, ok := s.ColumnByName(aCondition.Operand2.Value.(string))
-				if !ok {
-					return Statement{}, fmt.Errorf("unknown field %q in table %q", aCondition.Operand2.Value.(string), s.TableName)
-				}
-				if aColumn.Kind != Timestamp {
-					continue
-				}
-				if aCondition.Operand1.Type == OperandList {
-					for k, value := range aCondition.Operand1.Value.([]any) {
-						timestamp, err := parseTimeValue(value)
-						if err != nil {
-							return Statement{}, err
-						}
-						s.Conditions[i][j].Operand1.Value.([]any)[k] = timestamp
-					}
-				} else {
-					timestamp, err := parseTimeValue(aCondition.Operand1.Value)
+			aColumn, ok := s.ColumnByName(aCondition.Operand1.Value.(string))
+			if !ok {
+				return Statement{}, fmt.Errorf("unknown field %q in table %q", aCondition.Operand1.Value.(string), s.TableName)
+			}
+			if aColumn.Kind != Timestamp {
+				continue
+			}
+			if aCondition.Operand2.Type == OperandList {
+				for k, value := range aCondition.Operand2.Value.([]any) {
+					timestamp, err := parseTimeValue(value)
 					if err != nil {
 						return Statement{}, err
 					}
-					s.Conditions[i][j].Operand1.Value = timestamp
+					s.Conditions[i][j].Operand2.Value.([]any)[k] = timestamp
 				}
+			} else {
+				timestamp, err := parseTimeValue(aCondition.Operand2.Value)
+				if err != nil {
+					return Statement{}, err
+				}
+				s.Conditions[i][j].Operand2.Value = timestamp
 			}
 		}
 	}
@@ -384,14 +503,34 @@ func (s Statement) Validate(aTable *Table) error {
 	return nil
 }
 
+// PrepareDefaultValues validates and prepares default values for columns in CREATE TABLE statements.
+// In case of TIMESTAMP columns, it transforms string default values into Time.
 func (s Statement) PrepareDefaultValues() (Statement, error) {
 	for i, aColumn := range s.Columns {
-		if aColumn.DefaultValue.Valid {
-			validColumn, err := validateDefaultValue(aColumn)
-			if err != nil {
-				return Statement{}, err
+		if !aColumn.DefaultValue.Valid {
+			continue
+		}
+		if aColumn.Kind == Timestamp {
+			// If this is already a Time, accept it as is
+			_, ok := aColumn.DefaultValue.Value.(Time)
+			if ok {
+				return s, nil
 			}
-			s.Columns[i] = validColumn
+			// Otherwise, validate and transform to Time
+			_, ok = aColumn.DefaultValue.Value.(TextPointer)
+			if !ok {
+				return s, fmt.Errorf("default value '%s' is not a valid TextPointer", aColumn.DefaultValue.Value)
+			}
+			timestamp, err := ParseTimestamp(aColumn.DefaultValue.Value.(TextPointer).String())
+			if err != nil {
+				return s, fmt.Errorf("default value '%s' is not a valid timestamp: %v", aColumn.DefaultValue.Value, err)
+			}
+			aColumn.DefaultValue.Value = timestamp
+			s.Columns[i] = aColumn
+		}
+
+		if err := isValueValidForColumn(aColumn, aColumn.DefaultValue); err != nil {
+			return s, fmt.Errorf("invalid default value: %w", err)
 		}
 	}
 	return s, nil
@@ -473,58 +612,6 @@ func (s Statement) validateCreateTable() error {
 	return nil
 }
 
-func validateDefaultValue(aColumn Column) (Column, error) {
-	switch aColumn.Kind {
-	case Boolean:
-		_, ok := aColumn.DefaultValue.Value.(bool)
-		if !ok {
-			return aColumn, fmt.Errorf("default value '%s' is not a valid boolean", aColumn.DefaultValue.Value)
-		}
-	case Int4, Int8:
-		_, ok := aColumn.DefaultValue.Value.(int64)
-		if !ok {
-			return aColumn, fmt.Errorf("default value '%s' is not a valid integer", aColumn.DefaultValue.Value)
-		}
-	case Real, Double:
-		_, ok := aColumn.DefaultValue.Value.(float64)
-		if !ok {
-			return aColumn, fmt.Errorf("default value '%s' is not a valid float", aColumn.DefaultValue.Value)
-		}
-	case Text, Varchar:
-		// If this is already a TextPointer, accept it as is
-		_, ok := aColumn.DefaultValue.Value.(TextPointer)
-		if ok {
-			return aColumn, nil
-		}
-		// Otherwise, validate and transform to TextPointer
-		_, ok = aColumn.DefaultValue.Value.(string)
-		if !ok {
-			return aColumn, fmt.Errorf("default value '%s' is not a valid string", aColumn.DefaultValue.Value)
-		}
-		if len(aColumn.DefaultValue.Value.(string)) > MaxInlineVarchar {
-			return aColumn, fmt.Errorf("default value '%s' exceeds maximum inline text size of %d", aColumn.DefaultValue.Value, MaxInlineVarchar)
-		}
-		aColumn.DefaultValue.Value = NewTextPointer([]byte(aColumn.DefaultValue.Value.(string)))
-	case Timestamp:
-		// If this is already a Time, accept it as is
-		_, ok := aColumn.DefaultValue.Value.(Time)
-		if ok {
-			return aColumn, nil
-		}
-		// Otherwise, validate and transform to Time
-		_, ok = aColumn.DefaultValue.Value.(string)
-		if !ok {
-			return aColumn, fmt.Errorf("default value '%s' is not a valid string", aColumn.DefaultValue.Value)
-		}
-		timestamp, err := ParseTimestamp(aColumn.DefaultValue.Value.(string))
-		if err != nil {
-			return aColumn, fmt.Errorf("default value '%s' is not a valid timestamp: %v", aColumn.DefaultValue.Value, err)
-		}
-		aColumn.DefaultValue.Value = timestamp
-	}
-	return aColumn, nil
-}
-
 // Check whether a row with the given columns can fit in a page if all columns are inlined
 func canInlinedRowFitInPage(columns []Column) bool {
 	remaining := UsablePageSize
@@ -567,6 +654,7 @@ func (s Statement) validateInsert(aTable *Table) error {
 			return fmt.Errorf("missing required field %q", aColumn.Name)
 		}
 	}
+
 	for i, aField := range s.Fields {
 		aColumn, ok := aTable.ColumnByName(aField.Name)
 		if !ok {
@@ -579,23 +667,9 @@ func (s Statement) validateInsert(aTable *Table) error {
 			if err := s.validateColumnValue(aColumn, anInsert[i]); err != nil {
 				return err
 			}
-			if aColumn.Kind.IsText() && anInsert[i].Valid {
-				if !utf8.ValidString(anInsert[i].Value.(TextPointer).String()) {
-					return fmt.Errorf("field %q expects valid UTF-8 string", aColumn.Name)
-				}
-				switch aColumn.Kind {
-				case Varchar:
-					if len([]byte(anInsert[i].Value.(TextPointer).String())) > int(aColumn.Size) {
-						return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", aColumn.Name, aColumn.Size)
-					}
-				case Text:
-					if len([]byte(anInsert[i].Value.(TextPointer).String())) > MaxOverflowTextSize {
-						return fmt.Errorf("field %q exceeds maximum TEXT length of %d", aColumn.Name, MaxOverflowTextSize)
-					}
-				}
-			}
 		}
 	}
+
 	return nil
 }
 
@@ -671,60 +745,80 @@ func (s Statement) validateSelect(aTable *Table) error {
 	return nil
 }
 
-func (s Statement) validateColumnValue(aColumn Column, insertValue OptionalValue) error {
-	if !insertValue.Valid && aColumn.PrimaryKey && !aColumn.Autoincrement {
+func (s Statement) validateColumnValue(aColumn Column, aValue OptionalValue) error {
+	if _, ok := aValue.Value.(Placeholder); ok {
+		return fmt.Errorf("unbound placeholder in value for field %q", aColumn.Name)
+	}
+	if !aValue.Valid && aColumn.PrimaryKey && !aColumn.Autoincrement {
 		return fmt.Errorf("primary key on field %q cannot be NULL", aColumn.Name)
 	}
-	if !insertValue.Valid && !aColumn.Nullable && !aColumn.PrimaryKey {
+	if !aValue.Valid && !aColumn.Nullable && !aColumn.PrimaryKey {
 		return fmt.Errorf("field %q cannot be NULL", aColumn.Name)
 	}
-	if !insertValue.Valid {
+	if err := isValueValidForColumn(aColumn, aValue); err != nil {
+		return fmt.Errorf("invalid field value: %w", err)
+	}
+	return nil
+}
+
+func isValueValidForColumn(aColumn Column, aValue OptionalValue) error {
+	if !aValue.Valid {
 		return nil
 	}
 	switch aColumn.Kind {
 	case Boolean:
-		_, ok := insertValue.Value.(bool)
+		_, ok := aValue.Value.(bool)
 		if !ok {
-			return fmt.Errorf("field %q expects BOOLEAN value", aColumn.Name)
+			return fmt.Errorf("expects BOOLEAN value for %q", aColumn.Name)
 		}
 	case Int4:
-		_, ok := insertValue.Value.(int64)
+		_, ok := aValue.Value.(int64)
 		if !ok {
-			_, ok2 := insertValue.Value.(int32)
+			_, ok2 := aValue.Value.(int32)
 			if !ok2 {
-				return fmt.Errorf("field %q expects INT4 value", aColumn.Name)
+				return fmt.Errorf("expects INT4 value for %q", aColumn.Name)
 			}
 		}
 	case Int8:
-		_, ok := insertValue.Value.(int64)
+		_, ok := aValue.Value.(int64)
 		if !ok {
-			return fmt.Errorf("field %q expects INT8 value", aColumn.Name)
+			return fmt.Errorf("expects INT8 value for %q", aColumn.Name)
 		}
 	case Real:
-		_, ok := insertValue.Value.(float64)
+		_, ok := aValue.Value.(float64)
 		if !ok {
-			_, ok2 := insertValue.Value.(float32)
+			_, ok2 := aValue.Value.(float32)
 			if !ok2 {
-				return fmt.Errorf("field %q expects REAL value", aColumn.Name)
+				return fmt.Errorf("expects REAL value for %q", aColumn.Name)
 			}
 		}
 	case Double:
-		_, ok := insertValue.Value.(float64)
+		_, ok := aValue.Value.(float64)
 		if !ok {
-			return fmt.Errorf("field %q expects DOUBLE value", aColumn.Name)
+			return fmt.Errorf("expects DOUBLE value for %q", aColumn.Name)
 		}
 	case Varchar, Text:
-		tp, ok := insertValue.Value.(TextPointer)
+		tp, ok := aValue.Value.(TextPointer)
 		if !ok {
-			return fmt.Errorf("field %q expects a text value", aColumn.Name)
+			return fmt.Errorf("expects a text value for %q", aColumn.Name)
 		}
-		if aColumn.Kind.IsText() && !utf8.ValidString(tp.String()) {
-			return fmt.Errorf("field %q expects valid UTF-8 string", aColumn.Name)
+		switch aColumn.Kind {
+		case Varchar:
+			if len([]byte(aValue.Value.(TextPointer).String())) > int(aColumn.Size) {
+				return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", aColumn.Name, aColumn.Size)
+			}
+		case Text:
+			if len([]byte(aValue.Value.(TextPointer).String())) > MaxOverflowTextSize {
+				return fmt.Errorf("field %q exceeds maximum TEXT length of %d", aColumn.Name, MaxOverflowTextSize)
+			}
+		}
+		if !utf8.ValidString(tp.String()) {
+			return fmt.Errorf("expects valid UTF-8 string for %q", aColumn.Name)
 		}
 	case Timestamp:
-		_, ok := insertValue.Value.(Time)
+		_, ok := aValue.Value.(Time)
 		if !ok {
-			return fmt.Errorf("field %q expects time value", aColumn.Name)
+			return fmt.Errorf("expects time value for %q", aColumn.Name)
 		}
 	}
 	return nil
@@ -734,6 +828,12 @@ func (s Statement) validateWhere() error {
 	for _, aConditionGroup := range s.Conditions {
 		equalityMap := map[string][]any{}
 		for _, aCondition := range aConditionGroup {
+			if aCondition.Operand1.Type != OperandField {
+				return fmt.Errorf("operand1 in WHERE condition must be a field")
+			}
+			if aCondition.Operand2.Type == OperandPlaceholder {
+				return fmt.Errorf("unbound placeholder in WHERE clause")
+			}
 			if !IsValidCondition(aCondition) {
 				return fmt.Errorf("invalid condition in WHERE clause")
 			}
@@ -743,6 +843,9 @@ func (s Statement) validateWhere() error {
 			if aCondition.Operand2.Type == OperandList {
 				var valueType string
 				for _, value := range aCondition.Operand2.Value.([]any) {
+					if _, ok := value.(Placeholder); ok {
+						return fmt.Errorf("unbound placeholder in WHERE clause")
+					}
 					if valueType == "" {
 						valueType = fmt.Sprintf("%T", value)
 						_, ok := value.(bool)

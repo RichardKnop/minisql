@@ -43,7 +43,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, stmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	t.Run("Delete rows with NULL values when no rows match", func(t *testing.T) {
@@ -55,7 +55,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 				Conditions: NewOneOrMore(Conditions{FieldIsNull("id")}),
 			})
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 0, aResult.RowsAffected)
@@ -78,7 +78,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 				},
 			})
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, aResult.RowsAffected)
@@ -94,7 +94,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 				Conditions: NewOneOrMore(Conditions{FieldIsNull("age")}),
 			})
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, aResult.RowsAffected)
@@ -110,7 +110,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 				Conditions: NewOneOrMore(Conditions{FieldIsNotNull("created_at")}),
 			})
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, aResult.RowsAffected)
@@ -125,7 +125,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 				Kind: Delete,
 			})
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 2, aResult.RowsAffected)
@@ -163,7 +163,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, stmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	/*
@@ -206,7 +206,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 				},
 			})
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, aResult.RowsAffected)
@@ -258,7 +258,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 				},
 			})
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 3, aResult.RowsAffected)
@@ -308,7 +308,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 				},
 			})
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 3, aResult.RowsAffected)
@@ -361,7 +361,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 				},
 			})
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 4, aResult.RowsAffected)
@@ -407,7 +407,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 				},
 			})
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 3, aResult.RowsAffected)
@@ -458,7 +458,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 				},
 			})
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, aResult.RowsAffected)
@@ -504,7 +504,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 				},
 			})
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 5, aResult.RowsAffected)
@@ -553,7 +553,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, stmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	//fmt.Println("BEFORE")
@@ -569,7 +569,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 			Kind: Delete,
 		})
 		return err
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	assert.Equal(t, len(rows), aResult.RowsAffected)
@@ -612,7 +612,7 @@ func TestTable_Delete_Overflow(t *testing.T) {
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, insertStmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	require.Equal(t, 4, int(aPager.TotalPages()))
@@ -632,7 +632,7 @@ func TestTable_Delete_Overflow(t *testing.T) {
 				},
 			})
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, aResult.RowsAffected)
@@ -657,7 +657,7 @@ func TestTable_Delete_Overflow(t *testing.T) {
 				},
 			})
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 2, aResult.RowsAffected)

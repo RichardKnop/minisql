@@ -158,6 +158,25 @@ func TestParse_Insert(t *testing.T) {
 			},
 			nil,
 		},
+		{
+			"INSERT with placeholders works",
+			"INSERT INTO 'a' (b, c, d) VALUES (?, ?, ?);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Insert,
+					TableName: "a",
+					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "d"}},
+					Inserts: [][]minisql.OptionalValue{
+						{
+							{Value: minisql.Placeholder{}, Valid: true},
+							{Value: minisql.Placeholder{}, Valid: true},
+							{Value: minisql.Placeholder{}, Valid: true},
+						},
+					},
+				},
+			},
+			nil,
+		},
 	}
 
 	for _, aTestCase := range testCases {

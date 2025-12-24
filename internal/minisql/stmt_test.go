@@ -9,6 +9,54 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestStatement_NumberPlaceholders(t *testing.T) {
+	t.Parallel()
+
+	stmt := Statement{
+		Kind:      Update,
+		TableName: "a",
+		Updates: map[string]OptionalValue{
+			"b": {Value: NewTextPointer([]byte("foo")), Valid: true},
+			"c": {Value: Placeholder{}, Valid: true},
+		},
+		Conditions: OneOrMore{
+			{
+				FieldIsEqual("a", OperandPlaceholder, nil),
+				FieldIsEqual("b", OperandInteger, int64(789)),
+			},
+		},
+	}
+
+	assert.Equal(t, 2, stmt.NumPlaceholders())
+}
+
+func TestStatement_BindArguments(t *testing.T) {
+	t.Parallel()
+
+	stmt := Statement{
+		Kind:      Update,
+		TableName: "a",
+		Updates: map[string]OptionalValue{
+			"b": {Value: NewTextPointer([]byte("foo")), Valid: true},
+			"c": {Value: Placeholder{}, Valid: true},
+		},
+		Conditions: OneOrMore{
+			{
+				FieldIsEqual("a", OperandPlaceholder, nil),
+				FieldIsEqual("b", OperandInteger, int64(789)),
+			},
+		},
+	}
+
+	var err error
+	stmt, err = stmt.BindArguments(int64(123), "bar")
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(123), stmt.Updates["c"].Value)
+	condition := stmt.Conditions[0][0]
+	assert.Equal(t, "bar", condition.Operand2.Value)
+}
+
 func TestStatement_Prepare_Insert(t *testing.T) {
 	t.Parallel()
 
@@ -271,32 +319,22 @@ func TestStatement_PrepareDefaultValues(t *testing.T) {
 				PrimaryKey: true,
 			},
 			{
-				Kind:         Varchar,
-				Size:         MaxInlineVarchar,
-				Name:         "status",
-				DefaultValue: OptionalValue{Value: "pending", Valid: true},
-			},
-			{
 				Kind:         Timestamp,
 				Size:         8,
 				Name:         "created_at",
-				DefaultValue: OptionalValue{Value: "0001-01-01 00:00:00", Valid: true},
+				DefaultValue: OptionalValue{Value: NewTextPointer([]byte("0001-01-01 00:00:00")), Valid: true},
 			},
 		},
 	}
 
-	_, ok := stmt.Columns[1].DefaultValue.Value.(TextPointer)
-	assert.False(t, ok)
-	_, ok = stmt.Columns[2].DefaultValue.Value.(Time)
+	_, ok := stmt.Columns[1].DefaultValue.Value.(Time)
 	assert.False(t, ok)
 
 	var err error
 	stmt, err = stmt.PrepareDefaultValues()
 	require.NoError(t, err)
 
-	_, ok = stmt.Columns[1].DefaultValue.Value.(TextPointer)
-	assert.True(t, ok, "expected default value for 'status' column to be TextPointer")
-	_, ok = stmt.Columns[2].DefaultValue.Value.(Time)
+	_, ok = stmt.Columns[1].DefaultValue.Value.(Time)
 	assert.True(t, ok, "expected default value for 'created_at' column to be Time")
 }
 
@@ -723,6 +761,27 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, `field "id" cannot be NULL`)
 	})
 
+	t.Run("INSERT with unbound placeholder should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Insert,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
+			Inserts: [][]OptionalValue{
+				{
+					{Value: int32(1), Valid: true},
+					{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
+					{Value: int32(25), Valid: true},
+					{Value: Placeholder{}, Valid: true},
+				},
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `unbound placeholder in value for field "verified"`)
+	})
+
 	t.Run("INSERT with NULL for nullable column should succeed", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
@@ -801,7 +860,7 @@ func TestStatement_Validate(t *testing.T) {
 
 		err := stmt.Validate(aTable)
 		require.Error(t, err)
-		assert.ErrorContains(t, err, `field "email" expects valid UTF-8 string`)
+		assert.ErrorContains(t, err, `expects valid UTF-8 string for "email"`)
 	})
 
 	t.Run("INSERT with text exceeding maximum VARCHAR length should fail", func(t *testing.T) {
@@ -852,7 +911,7 @@ func TestStatement_Validate(t *testing.T) {
 
 		err := stmt.Validate(aTable)
 		require.Error(t, err)
-		assert.ErrorContains(t, err, `field "email" expects valid UTF-8 string`)
+		assert.ErrorContains(t, err, `expects valid UTF-8 string for "email"`)
 	})
 
 	t.Run("UPDATE with NULL to non-nullable column should fail", func(t *testing.T) {
@@ -862,13 +921,29 @@ func TestStatement_Validate(t *testing.T) {
 			Columns:   aTable.Columns,
 			Fields:    []Field{{Name: "email"}},
 			Updates: map[string]OptionalValue{
-				"email": {Valid: false}, // NULL for non-nullable email
+				"email": {}, // NULL for non-nullable email
 			},
 		}
 
 		err := stmt.Validate(aTable)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `field "email" cannot be NULL`)
+	})
+
+	t.Run("UPDATE with unbound placeholder should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Update,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    []Field{{Name: "age"}},
+			Updates: map[string]OptionalValue{
+				"age": {Value: Placeholder{}, Valid: true}, // ? (unbound placeholder)
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `unbound placeholder in value for field "age"`)
 	})
 
 	t.Run("UPDATE with NULL to nullable column should succeed", func(t *testing.T) {
@@ -1033,6 +1108,92 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, `OFFSET must be a non-negative integer`)
 	})
 
+	t.Run("SELECT with non field left operand should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    fieldsFromColumns(aTable.Columns...),
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandInteger,
+							Value: int64(1),
+						},
+						Operator: Eq,
+						Operand2: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+					},
+				},
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `operand1 in WHERE condition must be a field`)
+	})
+
+	t.Run("SELECT with unbound placeholder should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    fieldsFromColumns(aTable.Columns...),
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: Eq,
+						Operand2: Operand{
+							Type: OperandPlaceholder,
+						},
+					},
+				},
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `unbound placeholder in WHERE clause`)
+	})
+
+	t.Run("SELECT with unbound placeholder in list condition should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    fieldsFromColumns(aTable.Columns...),
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{
+							Type:  OperandField,
+							Value: "id",
+						},
+						Operator: NotIn,
+						Operand2: Operand{
+							Type: OperandList,
+							Value: []any{
+								int64(1),
+								Placeholder{},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `unbound placeholder in WHERE clause`)
+	})
+
 	t.Run("SELECT with inconsistent argument list for IN should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
@@ -1061,7 +1222,7 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, `mixed operand types in WHERE condition list`)
 	})
 
-	t.Run("WHERE with conflicting equality conditions should fail", func(t *testing.T) {
+	t.Run("SELECT with conflicting equality conditions should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
 			TableName: aTable.Name,
@@ -1114,7 +1275,7 @@ func TestStatement_ValidateColumnValue(t *testing.T) {
 			"invalid BOOLEAN value",
 			Column{Kind: Boolean, Name: "foo"},
 			OptionalValue{Value: "not_a_bool", Valid: true},
-			`field "foo" expects BOOLEAN value`,
+			`expects BOOLEAN value for "foo"`,
 		},
 		{
 			"valid BOOLEAN value",
@@ -1126,7 +1287,7 @@ func TestStatement_ValidateColumnValue(t *testing.T) {
 			"invalid INT4 value",
 			Column{Kind: Int4, Name: "foo"},
 			OptionalValue{Value: "not_an_int", Valid: true},
-			`field "foo" expects INT4 value`,
+			`expects INT4 value for "foo"`,
 		},
 		{
 			"valid INT4 value",
@@ -1138,7 +1299,7 @@ func TestStatement_ValidateColumnValue(t *testing.T) {
 			"invalid INT8 value",
 			Column{Kind: Int8, Name: "foo"},
 			OptionalValue{Value: int32(25), Valid: true},
-			`field "foo" expects INT8 value`,
+			`expects INT8 value for "foo"`,
 		},
 		{
 			"valid INT8 value",
@@ -1150,7 +1311,7 @@ func TestStatement_ValidateColumnValue(t *testing.T) {
 			"invalid REAL value",
 			Column{Kind: Real, Name: "foo"},
 			OptionalValue{Value: "not_a_real", Valid: true},
-			`field "foo" expects REAL value`,
+			`expects REAL value for "foo"`,
 		},
 		{
 			"valid REAL value",
@@ -1162,7 +1323,7 @@ func TestStatement_ValidateColumnValue(t *testing.T) {
 			"invalid DOUBLE value",
 			Column{Kind: Double, Name: "foo"},
 			OptionalValue{Value: float32(25.5), Valid: true},
-			`field "foo" expects DOUBLE value`,
+			`expects DOUBLE value for "foo"`,
 		},
 		{
 			"valid DOUBLE value",
@@ -1174,7 +1335,7 @@ func TestStatement_ValidateColumnValue(t *testing.T) {
 			"invalid TEXT value",
 			Column{Kind: Text, Name: "foo"},
 			OptionalValue{Value: float32(25.5), Valid: true},
-			`field "foo" expects a text value`,
+			`expects a text value for "foo"`,
 		},
 		{
 			"valid TEXT value",
@@ -1186,11 +1347,11 @@ func TestStatement_ValidateColumnValue(t *testing.T) {
 			"invalid VARCHAR value",
 			Column{Kind: Varchar, Name: "foo"},
 			OptionalValue{Value: float32(25.5), Valid: true},
-			`field "foo" expects a text value`,
+			`expects a text value for "foo"`,
 		},
 		{
 			"valid VARCHAR value",
-			Column{Kind: Varchar, Name: "foo"},
+			Column{Kind: Varchar, Size: 100, Name: "foo"},
 			OptionalValue{Value: NewTextPointer([]byte("some text")), Valid: true},
 			"",
 		},
@@ -1198,7 +1359,7 @@ func TestStatement_ValidateColumnValue(t *testing.T) {
 			"invalid TIMESTAMP value",
 			Column{Kind: Timestamp, Name: "foo"},
 			OptionalValue{Value: int32(25), Valid: true},
-			`field "foo" expects time value`,
+			`expects time value for "foo"`,
 		},
 		{
 			"valid TIMESTAMP value",

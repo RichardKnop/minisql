@@ -167,6 +167,9 @@ func (p *parser) doParseCreateTable() error {
 			return err
 		}
 		p.pop()
+		if _, ok := defaultValue.(string); ok {
+			defaultValue = minisql.NewTextPointer([]byte(defaultValue.(string)))
+		}
 		p.Columns[len(p.Columns)-1].DefaultValue = minisql.OptionalValue{
 			Value: defaultValue,
 			Valid: true,

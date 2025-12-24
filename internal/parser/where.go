@@ -8,13 +8,13 @@ import (
 )
 
 var (
-	errEmptyWhereClause                            = fmt.Errorf("at WHERE: empty WHERE clause")
-	errWhereWithoutOperator                        = fmt.Errorf("at WHERE: condition without operator")
-	errWhereExpectedField                          = fmt.Errorf("at WHERE: expected field")
-	errWhereExpectedAndOr                          = fmt.Errorf("expected one of AND / OR")
-	errWhereExpectedQuotedStringOrNumber           = fmt.Errorf("at WHERE: expected quoted string or number value")
-	errWhereExpectedIdentifierQuotedStringOrNumber = fmt.Errorf("at WHERE: expected identifier, quoted string or number value")
-	errWhereUnknownOperator                        = fmt.Errorf("at WHERE: unknown operator")
+	errEmptyWhereClause                          = fmt.Errorf("at WHERE: empty WHERE clause")
+	errWhereWithoutOperator                      = fmt.Errorf("at WHERE: condition without operator")
+	errWhereExpectedField                        = fmt.Errorf("at WHERE: expected field")
+	errWhereExpectedAndOr                        = fmt.Errorf("expected one of AND / OR")
+	errWhereExpectedPlaceholderOrValue           = fmt.Errorf("at WHERE: expected placeholder or value")
+	errWhereExpectedIdentifierPlaceholderOrValue = fmt.Errorf("at WHERE: expected identifier, placeholder or value")
+	errWhereUnknownOperator                      = fmt.Errorf("at WHERE: unknown operator")
 )
 
 func (p *parser) doParseWhere() error {
@@ -113,17 +113,10 @@ func (p *parser) doParseWhere() error {
 		p.step = stepWhereConditionValue
 	case stepWhereConditionValue:
 		var currentCondition, _ = p.Conditions.LastCondition()
+		p.step = stepWhereOperator
+
 		value, ln := p.peekValue()
-		if ln == 0 {
-			if identifier := p.peek(); isIdentifier(identifier) {
-				currentCondition.Operand2 = minisql.Operand{
-					Type:  minisql.OperandField,
-					Value: identifier,
-				}
-			} else {
-				return errWhereExpectedIdentifierQuotedStringOrNumber
-			}
-		} else {
+		if ln != 0 {
 			currentCondition.Operand2 = minisql.Operand{
 				Type:  minisql.OperandQuotedString,
 				Value: value,
@@ -137,23 +130,54 @@ func (p *parser) doParseWhere() error {
 			} else if _, ok := value.(string); ok {
 				currentCondition.Operand2.Value = minisql.NewTextPointer([]byte(value.(string)))
 			}
+			p.Conditions.UpdateLast(currentCondition)
+			p.pop()
+			return nil
 		}
-		p.Conditions.UpdateLast(currentCondition)
-		p.pop()
-		p.step = stepWhereOperator
+
+		placeholderOrField := p.peek()
+		if placeholderOrField == "?" {
+			currentCondition.Operand2 = minisql.Operand{
+				Type: minisql.OperandPlaceholder,
+			}
+			p.Conditions.UpdateLast(currentCondition)
+			p.pop()
+			return nil
+		} else if isIdentifier(placeholderOrField) {
+			currentCondition.Operand2 = minisql.Operand{
+				Type:  minisql.OperandField,
+				Value: placeholderOrField,
+			}
+			p.Conditions.UpdateLast(currentCondition)
+			p.pop()
+			return nil
+		}
+
+		return errWhereExpectedIdentifierPlaceholderOrValue
 	case stepWhereConditionListValue:
 		currentCondition, _ := p.Conditions.LastCondition()
-		value, ln := p.peekValue()
-		if ln == 0 {
-			return errWhereExpectedQuotedStringOrNumber
-		}
-		if _, ok := value.(string); ok {
-			value = minisql.NewTextPointer([]byte(value.(string)))
-		}
-		currentCondition.Operand2.Value = append(currentCondition.Operand2.Value.([]any), value)
-		p.Conditions.UpdateLast(currentCondition)
-		p.pop()
 		p.step = stepWhereConditionListValueCommaOrEnd
+
+		value, ln := p.peekValue()
+		if ln != 0 {
+			if _, ok := value.(string); ok {
+				value = minisql.NewTextPointer([]byte(value.(string)))
+			}
+			currentCondition.Operand2.Value = append(currentCondition.Operand2.Value.([]any), value)
+			p.Conditions.UpdateLast(currentCondition)
+			p.pop()
+			return nil
+		}
+
+		if p.peek() == "?" {
+			currentCondition.Operand2.Value = append(currentCondition.Operand2.Value.([]any), minisql.Placeholder{})
+			p.Conditions.UpdateLast(currentCondition)
+			p.pop()
+			return nil
+		}
+
+		return errWhereExpectedPlaceholderOrValue
+
 	case stepWhereConditionListValueCommaOrEnd:
 		switch strings.ToUpper(p.peek()) {
 		case ",":

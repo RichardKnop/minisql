@@ -34,7 +34,7 @@ func TestTable_Update(t *testing.T) {
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, insertStmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	t.Run("Update no rows", func(t *testing.T) {
@@ -65,7 +65,7 @@ func TestTable_Update(t *testing.T) {
 			var err error
 			aResult, err = aTable.Update(ctx, stmt)
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 		assert.Equal(t, 0, aResult.RowsAffected)
 
@@ -94,7 +94,7 @@ func TestTable_Update(t *testing.T) {
 			var err error
 			aResult, err = aTable.Update(ctx, stmt)
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 		assert.Equal(t, 1, aResult.RowsAffected)
 
@@ -135,7 +135,7 @@ func TestTable_Update(t *testing.T) {
 			var err error
 			aResult, err = aTable.Update(ctx, stmt)
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 		assert.Equal(t, 1, aResult.RowsAffected)
 
@@ -166,7 +166,7 @@ func TestTable_Update(t *testing.T) {
 			var err error
 			aResult, err = aTable.Update(ctx, stmt)
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 		assert.Equal(t, 38, aResult.RowsAffected)
 
@@ -215,7 +215,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, insertStmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	require.Equal(t, 4, int(aPager.TotalPages()))
@@ -246,7 +246,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 			var err error
 			aResult, err = aTable.Update(ctx, stmt)
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 		assert.Equal(t, 1, aResult.RowsAffected)
 
@@ -298,7 +298,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 			var err error
 			aResult, err = aTable.Update(ctx, stmt)
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 		assert.Equal(t, 1, aResult.RowsAffected)
 
@@ -351,7 +351,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 			var err error
 			aResult, err = aTable.Update(ctx, stmt)
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 		assert.Equal(t, 1, aResult.RowsAffected)
 
@@ -403,7 +403,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 			var err error
 			aResult, err = aTable.Update(ctx, stmt)
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 		assert.Equal(t, 1, aResult.RowsAffected)
 

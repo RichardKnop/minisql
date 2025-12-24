@@ -52,6 +52,7 @@ type OperandType int
 
 const (
 	OperandField OperandType = iota + 1
+	OperandPlaceholder
 	OperandNull
 	OperandQuotedString
 	OperandBoolean

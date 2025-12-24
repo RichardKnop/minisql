@@ -19,7 +19,7 @@ var (
 
 var reservedWords = []string{
 	// operators
-	"(", ")", ">=", "<=", "!=", ",", "=", ">", "<", "IN (", "NOT IN (",
+	"(", ")", ">=", "<=", "!=", ",", "=", ">", "<", "IN (", "NOT IN (", "?",
 	// column types
 	"BOOLEAN", "INT4", "INT8", "REAL", "DOUBLE", "TEXT", "VARCHAR(", "TIMESTAMP",
 	// statement types

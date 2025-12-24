@@ -34,7 +34,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 		freePage.LeafNode.Header.IsRoot = true
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumnsWithUniqueIndex, freePage.Index)
 		return nil
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	indexPager := NewTransactionalPager(
@@ -73,7 +73,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 			return err
 		}
 		return aTable.Insert(ctx, stmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	checkRows(ctx, t, aTable, rows)

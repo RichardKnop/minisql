@@ -32,7 +32,7 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 		freePage.LeafNode.Header.IsRoot = true
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumnsWithUniqueIndex, freePage.Index)
 		return nil
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	indexPager := NewTransactionalPager(
@@ -71,7 +71,7 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 			return err
 		}
 		return aTable.Insert(ctx, stmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	checkRows(ctx, t, aTable, rows)
@@ -99,7 +99,7 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 			var err error
 			aResult, err = aTable.Update(ctx, stmt)
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrDuplicateKey)
 		assert.Equal(t, 0, aResult.RowsAffected)
@@ -128,7 +128,7 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 			var err error
 			aResult, err = aTable.Update(ctx, stmt)
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 		assert.Equal(t, 0, aResult.RowsAffected)
 
@@ -161,7 +161,7 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 			var err error
 			aResult, err = aTable.Update(ctx, stmt)
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 		assert.Equal(t, 1, aResult.RowsAffected)
 

@@ -33,7 +33,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		freePage.LeafNode.Header.IsRoot = true
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumnsWithPrimaryKey, freePage.Index)
 		return nil
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	primaryKeyPager := NewTransactionalPager(
@@ -66,7 +66,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 			return err
 		}
 		return aTable.Insert(ctx, stmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	checkRows(ctx, t, aTable, rows)

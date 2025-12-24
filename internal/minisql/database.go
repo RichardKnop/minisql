@@ -12,10 +12,6 @@ var (
 	errUnrecognizedStatementType = fmt.Errorf("unrecognised statement type")
 	errTableDoesNotExist         = fmt.Errorf("table does not exist")
 	errTableAlreadyExists        = fmt.Errorf("table already exists")
-	errPrimaryKeyDoesNotExist    = fmt.Errorf("primary key does not exist")
-	errPrimaryKeyAlreadyExists   = fmt.Errorf("primary key already exists")
-	errUniqueIndexDoesNotExist   = fmt.Errorf("unique index does not exist")
-	errUniqueIndexAlreadyExists  = fmt.Errorf("unique index already exists")
 )
 
 var (
@@ -71,36 +67,32 @@ type Parser interface {
 }
 
 type Database struct {
-	Name        string
-	parser      Parser
-	factory     PagerFactory
-	saver       PageSaver
-	txManager   *TransactionManager
-	tables      map[string]*Table
-	primaryKeys map[string]BTreeIndex
-	indexes     map[string]map[string]BTreeIndex
-	dbLock      *sync.RWMutex
-	logger      *zap.Logger
+	Name      string
+	parser    Parser
+	factory   PagerFactory
+	saver     PageSaver
+	txManager *TransactionManager
+	tables    map[string]*Table
+	dbLock    *sync.RWMutex
+	logger    *zap.Logger
 }
 
 // NewDatabase creates a new database
 func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser Parser, factory PagerFactory, saver PageSaver) (*Database, error) {
 	aDatabase := &Database{
-		Name:        name,
-		parser:      aParser,
-		factory:     factory,
-		saver:       saver,
-		txManager:   NewTransactionManager(logger),
-		tables:      make(map[string]*Table),
-		primaryKeys: make(map[string]BTreeIndex),
-		indexes:     make(map[string]map[string]BTreeIndex),
-		dbLock:      new(sync.RWMutex),
-		logger:      logger,
+		Name:      name,
+		parser:    aParser,
+		factory:   factory,
+		saver:     saver,
+		txManager: NewTransactionManager(logger),
+		tables:    make(map[string]*Table),
+		dbLock:    new(sync.RWMutex),
+		logger:    logger,
 	}
 
 	if err := aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aDatabase.init(ctx)
-	}, saver); err != nil {
+	}, TxCommitter{aDatabase.saver, aDatabase}); err != nil {
 		return nil, err
 	}
 
@@ -230,13 +222,13 @@ func (d *Database) init(ctx context.Context) error {
 				d.txManager,
 			)
 			rootPageIdx := PageIndex(aRow.Values[2].Value.(int32))
-			d.primaryKeys[tableName], err = aTable.newBTreeIndex(primaryKeyPager, rootPageIdx, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name)
+			btreeIndex, err := aTable.newBTreeIndex(primaryKeyPager, rootPageIdx, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name)
 			if err != nil {
 				return err
 			}
 
 			// Set primary key BTree index on the table instance
-			aTable.PrimaryKey.Index = d.primaryKeys[tableName]
+			aTable.PrimaryKey.Index = btreeIndex
 
 			d.logger.Sugar().With(
 				"name", aTable.PrimaryKey.Name,
@@ -264,10 +256,6 @@ func (d *Database) init(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if _, ok := d.indexes[tableName]; !ok {
-				d.indexes[tableName] = make(map[string]BTreeIndex)
-			}
-			d.indexes[tableName][indexName] = btreeIndex
 
 			// Set unique BTree index on the table instance
 			uniqueIndex.Index = btreeIndex
@@ -288,8 +276,23 @@ func (d *Database) init(ctx context.Context) error {
 	return nil
 }
 
+func (d *Database) SaveDDLChanges(ctx context.Context, createdTables []*Table, droppedTables []string) {
+	d.dbLock.Lock()
+	defer d.dbLock.Unlock()
+
+	for _, aTable := range createdTables {
+		d.tables[aTable.Name] = aTable
+	}
+	for _, tableName := range droppedTables {
+		delete(d.tables, tableName)
+	}
+}
+
 // ListTableNames lists names of all tables in the database
 func (d *Database) ListTableNames(ctx context.Context) []string {
+	d.dbLock.RLock()
+	defer d.dbLock.RUnlock()
+
 	tables := make([]string, 0, len(d.tables))
 	for tableName := range d.tables {
 		tables = append(tables, tableName)
@@ -314,6 +317,10 @@ func (d *Database) GetTransactionManager() *TransactionManager {
 // GetSaver returns the page saver for this database
 func (d *Database) GetSaver() PageSaver {
 	return d.saver
+}
+
+func (d *Database) GetDDLSaver() DDLSaver {
+	return d
 }
 
 // ExecuteStatement executes a single statement and returns the result
@@ -378,10 +385,13 @@ func (d *Database) executeInsert(ctx context.Context, stmt Statement) (Statement
 		return StatementResult{}, fmt.Errorf("inserts into system table %s are not allowed", SchemaTableName)
 	}
 
+	d.dbLock.RLock()
 	aTable, ok := d.tables[stmt.TableName]
 	if !ok {
+		d.dbLock.RUnlock()
 		return StatementResult{}, errTableDoesNotExist
 	}
+	d.dbLock.RUnlock()
 
 	if err := aTable.Insert(ctx, stmt); err != nil {
 		return StatementResult{}, err
@@ -391,10 +401,13 @@ func (d *Database) executeInsert(ctx context.Context, stmt Statement) (Statement
 }
 
 func (d *Database) executeSelect(ctx context.Context, stmt Statement) (StatementResult, error) {
+	d.dbLock.RLock()
 	aTable, ok := d.tables[stmt.TableName]
 	if !ok {
+		d.dbLock.RUnlock()
 		return StatementResult{}, errTableDoesNotExist
 	}
+	d.dbLock.RUnlock()
 
 	aResult, err := aTable.Select(ctx, stmt)
 	if err != nil {
@@ -409,10 +422,13 @@ func (d *Database) executeUpdate(ctx context.Context, stmt Statement) (Statement
 		return StatementResult{}, fmt.Errorf("updates to system table %s are not allowed", SchemaTableName)
 	}
 
+	d.dbLock.RLock()
 	aTable, ok := d.tables[stmt.TableName]
 	if !ok {
+		d.dbLock.RUnlock()
 		return StatementResult{}, errTableDoesNotExist
 	}
+	d.dbLock.RUnlock()
 
 	aResult, err := aTable.Update(ctx, stmt)
 	if err != nil {
@@ -427,10 +443,13 @@ func (d *Database) executeDelete(ctx context.Context, stmt Statement) (Statement
 		return StatementResult{}, fmt.Errorf("deletes from system table %s are not allowed", SchemaTableName)
 	}
 
+	d.dbLock.RLock()
 	aTable, ok := d.tables[stmt.TableName]
 	if !ok {
+		d.dbLock.RUnlock()
 		return StatementResult{}, errTableDoesNotExist
 	}
+	d.dbLock.RUnlock()
 
 	aResult, err := aTable.Delete(ctx, stmt)
 	if err != nil {
@@ -442,6 +461,11 @@ func (d *Database) executeDelete(ctx context.Context, stmt Statement) (Statement
 
 // createTable creates a new table with a name and columns
 func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, error) {
+	tx := TxFromContext(ctx)
+	if tx == nil {
+		return nil, fmt.Errorf("create table must be called within a transaction")
+	}
+
 	var err error
 	stmt, err = stmt.PrepareDefaultValues()
 	if err != nil {
@@ -490,43 +514,32 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 	if err := d.insertIntoMainTable(ctx, SchemaTable, stmt.TableName, freePage.Index, stmt.CreateTableDDL()); err != nil {
 		return nil, err
 	}
-	d.tables[stmt.TableName] = createdTable
 
 	if createdTable.HasPrimaryKey() {
 		createdIndex, err := d.createPrimaryKey(ctx, createdTable, createdTable.PrimaryKey.Column)
 		if err != nil {
-			delete(d.tables, stmt.TableName)
 			return nil, err
 		}
-		d.primaryKeys[stmt.TableName] = createdIndex
 		// Set primary key on the table instance
-		createdTable.PrimaryKey.Index = d.primaryKeys[createdTable.Name]
+		createdTable.PrimaryKey.Index = createdIndex
 	}
 
 	for _, uniqueIndex := range createdTable.UniqueIndexes {
 		createdIndex, err := d.createUniqueIndex(ctx, createdTable, uniqueIndex)
 		if err != nil {
-			delete(d.tables, stmt.TableName)
 			return nil, err
 		}
-		if _, ok := d.indexes[stmt.TableName]; !ok {
-			d.indexes[stmt.TableName] = make(map[string]BTreeIndex)
-		}
-		d.indexes[stmt.TableName][uniqueIndex.Name] = createdIndex
 		// Set primary key on the table instance
 		uniqueIndex.Index = createdIndex
 		createdTable.UniqueIndexes[uniqueIndex.Name] = uniqueIndex
 	}
 
-	return d.tables[stmt.TableName], nil
+	tx.DDLChanges.CreateTables = append(tx.DDLChanges.CreateTables, createdTable)
+
+	return createdTable, nil
 }
 
 func (d *Database) createPrimaryKey(ctx context.Context, aTable *Table, aColumn Column) (BTreeIndex, error) {
-	_, ok := d.primaryKeys[aTable.Name]
-	if ok {
-		return nil, errPrimaryKeyAlreadyExists
-	}
-
 	d.logger.Sugar().With("column", aColumn.Name).Debug("creating primary key")
 
 	indexPager := NewTransactionalPager(
@@ -536,11 +549,6 @@ func (d *Database) createPrimaryKey(ctx context.Context, aTable *Table, aColumn 
 	freePage, err := indexPager.GetFreePage(ctx)
 	if err != nil {
 		return nil, err
-	}
-
-	_, ok = d.primaryKeys[aTable.Name]
-	if ok {
-		return nil, errPrimaryKeyAlreadyExists
 	}
 
 	createdIndex, err := aTable.createBTreeIndex(indexPager, freePage, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name)
@@ -556,11 +564,6 @@ func (d *Database) createPrimaryKey(ctx context.Context, aTable *Table, aColumn 
 }
 
 func (d *Database) createUniqueIndex(ctx context.Context, aTable *Table, uniqueIndex UniqueIndex) (BTreeIndex, error) {
-	_, ok := d.indexes[aTable.Name][uniqueIndex.Name]
-	if ok {
-		return nil, errUniqueIndexAlreadyExists
-	}
-
 	d.logger.Sugar().With("column", uniqueIndex.Column.Name).Debug("creating unique index")
 
 	indexPager := NewTransactionalPager(
@@ -570,11 +573,6 @@ func (d *Database) createUniqueIndex(ctx context.Context, aTable *Table, uniqueI
 	freePage, err := indexPager.GetFreePage(ctx)
 	if err != nil {
 		return nil, err
-	}
-
-	_, ok = d.indexes[aTable.Name][uniqueIndex.Name]
-	if ok {
-		return nil, errUniqueIndexAlreadyExists
 	}
 
 	createdIndex, err := aTable.createBTreeIndex(indexPager, freePage, uniqueIndex.Column, uniqueIndex.Name)
@@ -591,6 +589,11 @@ func (d *Database) createUniqueIndex(ctx context.Context, aTable *Table, uniqueI
 
 // dropTable drops a table and all its data
 func (d *Database) dropTable(ctx context.Context, name string) error {
+	tx := TxFromContext(ctx)
+	if tx == nil {
+		return fmt.Errorf("drop table must be called within a transaction")
+	}
+
 	tableToDelete, ok := d.tables[name]
 	if !ok {
 		return errTableDoesNotExist
@@ -602,19 +605,11 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 		return err
 	}
 	if tableToDelete.HasPrimaryKey() {
-		_, ok := d.primaryKeys[tableToDelete.Name]
-		if !ok {
-			return errPrimaryKeyDoesNotExist
-		}
 		if err := d.deleteFromMainTable(ctx, SchemaPrimaryKey, tableToDelete.PrimaryKey.Name); err != nil {
 			return err
 		}
 	}
 	for _, uniqueIndex := range tableToDelete.UniqueIndexes {
-		_, ok := d.indexes[tableToDelete.Name][uniqueIndex.Name]
-		if !ok {
-			return errUniqueIndexDoesNotExist
-		}
 		if err := d.deleteFromMainTable(ctx, SchemaUniqueIndex, uniqueIndex.Name); err != nil {
 			return err
 		}
@@ -638,7 +633,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	})
 	// And then free pages for the primary key index if any
 	if tableToDelete.HasPrimaryKey() {
-		d.primaryKeys[tableToDelete.Name].BFS(ctx, func(page *Page) {
+		tableToDelete.PrimaryKey.Index.BFS(ctx, func(page *Page) {
 			if err := tablePager.AddFreePage(ctx, page.Index); err != nil {
 				d.logger.Sugar().With(
 					"page", page.Index,
@@ -651,7 +646,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	}
 	// And then free pages for unique indexes index if any
 	for _, uniqueIndex := range tableToDelete.UniqueIndexes {
-		d.indexes[tableToDelete.Name][uniqueIndex.Name].BFS(ctx, func(page *Page) {
+		uniqueIndex.Index.BFS(ctx, func(page *Page) {
 			if err := tablePager.AddFreePage(ctx, page.Index); err != nil {
 				d.logger.Sugar().With(
 					"page", page.Index,
@@ -663,14 +658,8 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 		})
 	}
 
-	delete(d.tables, name)
-	delete(d.primaryKeys, name)
-	for _, uniqueIndex := range tableToDelete.UniqueIndexes {
-		delete(d.indexes[name], uniqueIndex.Name)
-	}
-	if len(d.indexes[name]) == 0 {
-		delete(d.indexes, name)
-	}
+	tx.DDLChanges.DropTables = append(tx.DDLChanges.DropTables, tableToDelete.Name)
+
 	return nil
 }
 

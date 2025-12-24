@@ -31,7 +31,7 @@ func TestTable_Insert_PrimaryKey(t *testing.T) {
 		freePage.LeafNode.Header.IsRoot = true
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumnsWithPrimaryKey, freePage.Index)
 		return nil
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	primaryKeyPager := NewTransactionalPager(
@@ -59,7 +59,7 @@ func TestTable_Insert_PrimaryKey(t *testing.T) {
 			return err
 		}
 		return aTable.Insert(ctx, stmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	checkRows(ctx, t, aTable, rows)
@@ -73,7 +73,7 @@ func TestTable_Insert_PrimaryKey(t *testing.T) {
 
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return aTable.Insert(ctx, stmt)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrDuplicateKey)
 
@@ -103,7 +103,7 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 		freePage.LeafNode.Header.IsRoot = true
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumnsWithPrimaryKey, freePage.Index)
 		return nil
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	primaryKeyPager := NewTransactionalPager(
@@ -136,7 +136,7 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 				return err
 			}
 			return aTable.Insert(ctx, stmt)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		checkRowsWithPrimaryKey(ctx, t, aTable, rows)
