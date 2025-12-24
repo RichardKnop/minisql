@@ -173,15 +173,19 @@ func (s Statement) ColumnByName(name string) (Column, bool) {
 }
 
 // Prepare performs any necessary preparation on the statement before validation/execution.
-func (s *Statement) Prepare(now Time) error {
+func (s Statement) Prepare(now Time) (Statement, error) {
 	switch s.Kind {
 	case Insert:
-		if err := s.prepareInsert(now); err != nil {
-			return err
+		var err error
+		s, err = s.prepareInsert(now)
+		if err != nil {
+			return Statement{}, err
 		}
 	case Update:
-		if err := s.prepareUpdate(); err != nil {
-			return err
+		var err error
+		s, err = s.prepareUpdate()
+		if err != nil {
+			return Statement{}, err
 		}
 	}
 	return s.prepareWhere()
@@ -189,7 +193,7 @@ func (s *Statement) Prepare(now Time) error {
 
 // prepareInsert makes sure to add any nullable columns that are missing from the
 // insert statement, setting them to NULL. It also converts timestamp string values to int64.
-func (s *Statement) prepareInsert(now Time) error {
+func (s Statement) prepareInsert(now Time) (Statement, error) {
 	for i, aColumn := range s.Columns {
 		if !s.HasField(aColumn.Name) {
 			s.Fields = slices.Insert(s.Fields, i, Field{Name: aColumn.Name})
@@ -215,22 +219,22 @@ func (s *Statement) prepareInsert(now Time) error {
 			}
 			timestamp, err := parseTimeValue(s.Inserts[j][fieldIdx].Value)
 			if err != nil {
-				return err
+				return Statement{}, err
 			}
 			s.Inserts[j][fieldIdx].Value = timestamp
 		}
 	}
-	return nil
+	return s, nil
 }
 
-func (s *Statement) prepareUpdate() error {
+func (s Statement) prepareUpdate() (Statement, error) {
 	if len(s.Updates) == 0 {
-		return nil
+		return s, nil
 	}
 	for _, aField := range s.Fields {
 		aColumn, ok := s.ColumnByName(aField.Name)
 		if !ok {
-			return fmt.Errorf("unknown field %q in table %q", aField.Name, s.TableName)
+			return Statement{}, fmt.Errorf("unknown field %q in table %q", aField.Name, s.TableName)
 		}
 		if aColumn.Kind != Timestamp {
 			continue
@@ -241,23 +245,23 @@ func (s *Statement) prepareUpdate() error {
 			}
 			timestamp, err := parseTimeValue(updateValue.Value)
 			if err != nil {
-				return err
+				return Statement{}, err
 			}
 			s.Updates[aColumnName] = OptionalValue{Valid: true, Value: timestamp}
 		}
 	}
-	return nil
+	return s, nil
 }
 
 // prepareWhere converts timestamp string values in WHERE conditions to Time.
-func (s *Statement) prepareWhere() error {
+func (s Statement) prepareWhere() (Statement, error) {
 	for i, aConditionGroup := range s.Conditions {
 		for j, aCondition := range aConditionGroup {
 			// left side is field, right side is literal value
 			if aCondition.Operand1.IsField() && !aCondition.Operand2.IsField() {
 				aColumn, ok := s.ColumnByName(aCondition.Operand1.Value.(string))
 				if !ok {
-					return fmt.Errorf("unknown field %q in table %q", aCondition.Operand1.Value.(string), s.TableName)
+					return Statement{}, fmt.Errorf("unknown field %q in table %q", aCondition.Operand1.Value.(string), s.TableName)
 				}
 				if aColumn.Kind != Timestamp {
 					continue
@@ -266,14 +270,14 @@ func (s *Statement) prepareWhere() error {
 					for k, value := range aCondition.Operand2.Value.([]any) {
 						timestamp, err := parseTimeValue(value)
 						if err != nil {
-							return err
+							return Statement{}, err
 						}
 						s.Conditions[i][j].Operand2.Value.([]any)[k] = timestamp
 					}
 				} else {
 					timestamp, err := parseTimeValue(aCondition.Operand2.Value)
 					if err != nil {
-						return err
+						return Statement{}, err
 					}
 					s.Conditions[i][j].Operand2.Value = timestamp
 				}
@@ -282,7 +286,7 @@ func (s *Statement) prepareWhere() error {
 			if aCondition.Operand2.IsField() && !aCondition.Operand1.IsField() {
 				aColumn, ok := s.ColumnByName(aCondition.Operand2.Value.(string))
 				if !ok {
-					return fmt.Errorf("unknown field %q in table %q", aCondition.Operand2.Value.(string), s.TableName)
+					return Statement{}, fmt.Errorf("unknown field %q in table %q", aCondition.Operand2.Value.(string), s.TableName)
 				}
 				if aColumn.Kind != Timestamp {
 					continue
@@ -291,21 +295,21 @@ func (s *Statement) prepareWhere() error {
 					for k, value := range aCondition.Operand1.Value.([]any) {
 						timestamp, err := parseTimeValue(value)
 						if err != nil {
-							return err
+							return Statement{}, err
 						}
 						s.Conditions[i][j].Operand1.Value.([]any)[k] = timestamp
 					}
 				} else {
 					timestamp, err := parseTimeValue(aCondition.Operand1.Value)
 					if err != nil {
-						return err
+						return Statement{}, err
 					}
 					s.Conditions[i][j].Operand1.Value = timestamp
 				}
 			}
 		}
 	}
-	return nil
+	return s, nil
 }
 
 func parseTimeValue(value any) (Time, error) {
@@ -351,7 +355,20 @@ func (s Statement) Validate(aTable *Table) error {
 	return nil
 }
 
-func (s *Statement) validateCreateTable() error {
+func (s Statement) PrepareDefaultValues() (Statement, error) {
+	for i, aColumn := range s.Columns {
+		if aColumn.DefaultValue.Valid {
+			validColumn, err := validateDefaultValue(aColumn)
+			if err != nil {
+				return Statement{}, err
+			}
+			s.Columns[i] = validColumn
+		}
+	}
+	return s, nil
+}
+
+func (s Statement) validateCreateTable() error {
 	if len(s.TableName) == 0 {
 		return fmt.Errorf("table name is required")
 	}
@@ -378,15 +395,7 @@ func (s *Statement) validateCreateTable() error {
 		nameMap          = map[string]struct{}{}
 		indexMap         = map[string]struct{}{}
 	)
-	for i, aColumn := range s.Columns {
-		if aColumn.DefaultValue.Valid {
-			validColumn, err := validateDefaultValue(aColumn)
-			if err != nil {
-				return err
-			}
-			s.Columns[i] = validColumn
-		}
-
+	for _, aColumn := range s.Columns {
 		if _, exists := nameMap[aColumn.Name]; exists {
 			return fmt.Errorf("duplicate column name %s", aColumn.Name)
 		}

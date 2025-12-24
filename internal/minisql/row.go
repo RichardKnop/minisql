@@ -33,7 +33,7 @@ func NewRow(columns []Column) Row {
 }
 
 // Size calculates a size of a row record excluding null bitmask and row ID
-func (r *Row) Size() uint64 {
+func (r Row) Size() uint64 {
 	size := uint64(0)
 	for i, aColumn := range r.Columns {
 		if !aColumn.Kind.IsText() {
@@ -71,7 +71,7 @@ func (r *Row) Size() uint64 {
 	return size
 }
 
-func (r *Row) OnlyFields(fields ...Field) Row {
+func (r Row) OnlyFields(fields ...Field) Row {
 	filteredRow := Row{
 		Key:     r.Key,
 		Columns: make([]Column, 0, len(fields)),
@@ -88,7 +88,7 @@ func (r *Row) OnlyFields(fields ...Field) Row {
 	return filteredRow
 }
 
-func (r *Row) GetColumn(name string) (Column, int) {
+func (r Row) GetColumn(name string) (Column, int) {
 	for i, aColumn := range r.Columns {
 		if aColumn.Name == name {
 			return aColumn, i
@@ -97,7 +97,7 @@ func (r *Row) GetColumn(name string) (Column, int) {
 	return Column{}, -1
 }
 
-func (r *Row) GetValue(name string) (OptionalValue, bool) {
+func (r Row) GetValue(name string) (OptionalValue, bool) {
 	var (
 		found     bool
 		columnIdx = 0
@@ -115,11 +115,8 @@ func (r *Row) GetValue(name string) (OptionalValue, bool) {
 	return r.Values[columnIdx], true
 }
 
-// SetValue sets value for a given column name
-// returns (true, true) if value was changed
-// returns (true, false) if value was not changed
-// returns (false, false) if column not found
-func (r *Row) SetValue(name string, value OptionalValue) (bool, bool) {
+// SetValue returns true if value has changed
+func (r Row) SetValue(name string, value OptionalValue) (Row, bool) {
 	var (
 		found     bool
 		columnIdx = 0
@@ -132,13 +129,13 @@ func (r *Row) SetValue(name string, value OptionalValue) (bool, bool) {
 		}
 	}
 	if !found {
-		return false, false
+		return r, false
 	}
 	if !compareValue(r.Columns[columnIdx].Kind, r.Values[columnIdx], value) {
 		r.Values[columnIdx] = value
-		return true, true
+		return r, true
 	}
-	return true, false
+	return r, false
 }
 
 func compareValue(kind ColumnKind, v1, v2 OptionalValue) bool {
@@ -162,7 +159,7 @@ func compareValue(kind ColumnKind, v1, v2 OptionalValue) bool {
 	return tp1.IsEqual(tp2)
 }
 
-func (r *Row) Clone() Row {
+func (r Row) Clone() Row {
 	aClone := Row{
 		Columns: make([]Column, 0, len(r.Columns)),
 		Values:  make([]OptionalValue, 0, len(r.Values)),
@@ -173,7 +170,7 @@ func (r *Row) Clone() Row {
 	return aClone
 }
 
-func (r *Row) appendValues(fields []Field, values []OptionalValue) {
+func (r Row) AppendValues(fields []Field, values []OptionalValue) Row {
 	var (
 		found    = false
 		fieldIdx = 0
@@ -192,9 +189,10 @@ func (r *Row) appendValues(fields []Field, values []OptionalValue) {
 			r.Values = append(r.Values, OptionalValue{})
 		}
 	}
+	return r
 }
 
-func (r *Row) Marshal() ([]byte, error) {
+func (r Row) Marshal() ([]byte, error) {
 	buf := make([]byte, 0, r.Size())
 
 	offset := uint64(0)
@@ -281,12 +279,12 @@ func (r *Row) Marshal() ([]byte, error) {
 // For any columns not selected, we skip unmarshaling them but we include
 // empty OptionalValue in the Values slice to maintain alignment (some functions)
 // use column index to access row values so we need to make sure indexes align.
-func (r *Row) Unmarshal(aCell Cell, selectedFields ...Field) error {
+func (r Row) Unmarshal(aCell Cell, selectedFields ...Field) (Row, error) {
 	r.Key = aCell.Key
 
 	if len(selectedFields) == 0 {
 		r.Values = make([]OptionalValue, len(r.Columns))
-		return nil
+		return r, nil
 	}
 	r.Values = make([]OptionalValue, 0, len(r.Columns))
 
@@ -339,7 +337,7 @@ func (r *Row) Unmarshal(aCell Cell, selectedFields ...Field) error {
 		case Varchar, Text:
 			textPointer := TextPointer{}
 			if err := textPointer.Unmarshal(aCell.Value, uint64(offset)); err != nil {
-				return err
+				return Row{}, err
 			}
 			if textPointer.IsInline() {
 				textPointer.Data = bytes.Trim(textPointer.Data, "\x00")
@@ -353,10 +351,10 @@ func (r *Row) Unmarshal(aCell Cell, selectedFields ...Field) error {
 		}
 	}
 
-	return nil
+	return r, nil
 }
 
-func (r *Row) getColumnSize(col Column, data []byte, offset int) uint64 {
+func (r Row) getColumnSize(col Column, data []byte, offset int) uint64 {
 	switch col.Kind {
 	case Boolean:
 		return 1
@@ -380,7 +378,7 @@ func (r *Row) getColumnSize(col Column, data []byte, offset int) uint64 {
 
 // CheckOneOrMore checks whether row satisfies one or more sets of conditions
 // (cond1 AND cond2) OR (cond3 and cond4) ... etc
-func (r *Row) CheckOneOrMore(conditions OneOrMore) (bool, error) {
+func (r Row) CheckOneOrMore(conditions OneOrMore) (bool, error) {
 	if len(conditions) == 0 {
 		return true, nil
 	}
@@ -398,7 +396,7 @@ func (r *Row) CheckOneOrMore(conditions OneOrMore) (bool, error) {
 	return false, nil
 }
 
-func (r *Row) CheckConditions(aConditionGroup Conditions) (bool, error) {
+func (r Row) CheckConditions(aConditionGroup Conditions) (bool, error) {
 	if len(aConditionGroup) == 0 {
 		return true, nil
 	}
@@ -423,7 +421,7 @@ func (r *Row) CheckConditions(aConditionGroup Conditions) (bool, error) {
 	return false, nil
 }
 
-func (r *Row) checkCondition(aCondition Condition) (bool, error) {
+func (r Row) checkCondition(aCondition Condition) (bool, error) {
 	// left side is field, right side is literal value
 	if aCondition.Operand1.IsField() && !aCondition.Operand2.IsField() {
 		return r.compareFieldValue(aCondition.Operand1, aCondition.Operand2, aCondition.Operator)
@@ -443,7 +441,7 @@ func (r *Row) checkCondition(aCondition Condition) (bool, error) {
 	return aCondition.Operand1.Value == aCondition.Operand2.Value, nil
 }
 
-func (r *Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Operator) (bool, error) {
+func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Operator) (bool, error) {
 	if fieldOperand.Type != OperandField {
 		return false, fmt.Errorf("field operand invalid, type '%d'", fieldOperand.Type)
 	}
@@ -547,7 +545,7 @@ func (r *Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Ope
 	}
 }
 
-func (r *Row) compareFields(field1, field2 Operand, operator Operator) (bool, error) {
+func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, error) {
 	if !field1.IsField() {
 		return false, fmt.Errorf("field 1 operand invalid, type '%d'", field1.Type)
 	}
@@ -604,7 +602,7 @@ func (r *Row) compareFields(field1, field2 Operand, operator Operator) (bool, er
 }
 
 // NullBitmask returns a bitmask representing which columns are NULL
-func (r *Row) NullBitmask() uint64 {
+func (r Row) NullBitmask() uint64 {
 	var bitmask uint64 = 0
 	for i, val := range r.Values {
 		if !val.Valid {

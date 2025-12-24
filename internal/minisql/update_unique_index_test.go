@@ -167,9 +167,10 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 
 		// Prepare expected rows with one updated row
 		for i, aRow := range expected {
-			if i == 0 {
-				aRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("newemail@example.com")), Valid: true})
+			if i != 0 {
+				continue
 			}
+			aRow, _ = aRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("newemail@example.com")), Valid: true})
 		}
 
 		checkRows(ctx, t, aTable, expected)

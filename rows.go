@@ -19,7 +19,7 @@ type Rows struct {
 // columns of the result is inferred from the length of the
 // slice. If a particular column name isn't known, an empty
 // string should be returned for that entry.
-func (r *Rows) Columns() []string {
+func (r Rows) Columns() []string {
 	names := make([]string, 0, len(r.columns))
 	for _, aColumn := range r.columns {
 		names = append(names, aColumn.Name)
@@ -28,7 +28,7 @@ func (r *Rows) Columns() []string {
 }
 
 // Close closes the rows iterator.
-func (r *Rows) Close() error {
+func (r Rows) Close() error {
 	return nil
 }
 
@@ -41,7 +41,7 @@ func (r *Rows) Close() error {
 // The dest should not be written to outside of Next. Care
 // should be taken when closing Rows not to modify
 // a buffer held in dest.
-func (r *Rows) Next(dest []driver.Value) error {
+func (r Rows) Next(dest []driver.Value) error {
 	if !r.iter.Next(r.ctx) {
 		if err := r.iter.Err(); err != nil {
 			return err

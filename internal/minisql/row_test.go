@@ -25,7 +25,7 @@ func TestRow_Marshal(t *testing.T) {
 		require.NoError(t, err)
 
 		actual := NewRow(testColumns)
-		err = actual.Unmarshal(Cell{Value: data}, fieldsFromColumns(aRow.Columns...)...)
+		actual, err = actual.Unmarshal(Cell{Value: data}, fieldsFromColumns(aRow.Columns...)...)
 		require.NoError(t, err)
 
 		assert.Equal(t, aRow, actual)
@@ -40,7 +40,7 @@ func TestRow_Marshal(t *testing.T) {
 		selectedFields := fieldsFromColumns(testColumns[0:2]...)
 
 		partialRow := NewRow(testColumns)
-		err = partialRow.Unmarshal(Cell{Value: data}, selectedFields...)
+		partialRow, err = partialRow.Unmarshal(Cell{Value: data}, selectedFields...)
 		require.NoError(t, err)
 
 		assert.Equal(t, aRow.Values[0], partialRow.Values[0])
@@ -674,22 +674,13 @@ func TestRow_SetValue(t *testing.T) {
 		},
 	}
 
-	t.Run("found and changed", func(t *testing.T) {
-		found, changed := aRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("new@example.com")), Valid: true})
-		assert.True(t, found)
+	t.Run("changed", func(t *testing.T) {
+		_, changed := aRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("new@example.com")), Valid: true})
 		assert.True(t, changed)
 	})
 
-	t.Run("found but not changed", func(t *testing.T) {
-		found, changed := aRow.SetValue("id", OptionalValue{Value: int64(125478), Valid: true})
-		assert.True(t, found)
+	t.Run("not changed", func(t *testing.T) {
+		_, changed := aRow.SetValue("id", OptionalValue{Value: int64(125478), Valid: true})
 		assert.False(t, changed)
 	})
-
-	t.Run("not found", func(t *testing.T) {
-		found, changed := aRow.SetValue("bogus", OptionalValue{Value: NewTextPointer([]byte("value")), Valid: true})
-		assert.False(t, found)
-		assert.False(t, changed)
-	})
-
 }

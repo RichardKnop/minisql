@@ -148,12 +148,14 @@ func (c *Cursor) fetchRow(ctx context.Context, advance bool, selectedFields ...F
 	}
 
 	aRow := NewRow(c.Table.Columns)
-	if err := aRow.Unmarshal(aPage.LeafNode.Cells[c.CellIdx], selectedFields...); err != nil {
+	aRow, err = aRow.Unmarshal(aPage.LeafNode.Cells[c.CellIdx], selectedFields...)
+	if err != nil {
 		return Row{}, err
 	}
 	aRow.Key = aPage.LeafNode.Cells[c.CellIdx].Key
 
-	if err := readOverflowTexts(ctx, c.Table.pager, &aRow); err != nil {
+	aRow, err = aRow.readOverflowTexts(ctx, c.Table.pager)
+	if err != nil {
 		return Row{}, fmt.Errorf("read overflow texts: %w", err)
 	}
 
@@ -181,7 +183,9 @@ func (c *Cursor) fetchRow(ctx context.Context, advance bool, selectedFields ...F
 }
 
 func (c *Cursor) saveToCell(ctx context.Context, aNode *LeafNode, cellIdx uint32, key RowID, aRow Row) error {
-	if err := storeOverflowTexts(ctx, c.Table.pager, aRow); err != nil {
+	var err error
+	aRow, err = aRow.storeOverflowTexts(ctx, c.Table.pager)
+	if err != nil {
 		return fmt.Errorf("store overflow texts: %w", err)
 	}
 
@@ -217,8 +221,9 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 		if idx < 0 {
 			return false, fmt.Errorf("column '%s' not found", name)
 		}
-		found, changed := aRow.SetValue(name, value)
-		if found && changed {
+		var changed bool
+		aRow, changed = aRow.SetValue(name, value)
+		if changed {
 			changedValues[name] = aColumn
 		}
 	}
@@ -284,12 +289,13 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 			}
 			changedColumns = append(changedColumns, aColumn)
 		}
-		if err := c.Table.freeOverflowPages(ctx, &oldRow, changedColumns...); err != nil {
+		if err := c.Table.freeOverflowPages(ctx, oldRow, changedColumns...); err != nil {
 			return false, err
 		}
 	}
 
-	if err := storeOverflowTexts(ctx, c.Table.pager, aRow); err != nil {
+	aRow, err = aRow.storeOverflowTexts(ctx, c.Table.pager)
+	if err != nil {
 		return false, fmt.Errorf("store overflow texts: %w", err)
 	}
 

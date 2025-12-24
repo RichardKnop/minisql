@@ -520,10 +520,11 @@ func (t *Table) DeleteKey(ctx context.Context, pageIdx PageIndex, key RowID) err
 	// Remove any overflow pages
 	if overflowFields := textOverflowFields(t.Columns...); len(overflowFields) > 0 && ok {
 		aRow := NewRow(t.Columns)
-		if err := aRow.Unmarshal(cellToDelete, overflowFields...); err != nil {
+		aRow, err = aRow.Unmarshal(cellToDelete, overflowFields...)
+		if err != nil {
 			return err
 		}
-		if err := t.freeOverflowPages(ctx, &aRow); err != nil {
+		if err := t.freeOverflowPages(ctx, aRow); err != nil {
 			return err
 		}
 	}
@@ -541,7 +542,7 @@ func (t *Table) DeleteKey(ctx context.Context, pageIdx PageIndex, key RowID) err
 	return nil
 }
 
-func (t *Table) freeOverflowPages(ctx context.Context, aRow *Row, onlyForColumns ...Column) error {
+func (t *Table) freeOverflowPages(ctx context.Context, aRow Row, onlyForColumns ...Column) error {
 	columns := aRow.Columns
 	if onlyForColumns != nil {
 		columns = onlyForColumns

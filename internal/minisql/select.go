@@ -19,7 +19,8 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, fmt.Errorf("invalid statement kind for SELECT: %v", stmt.Kind)
 	}
 
-	if err := stmt.Prepare(t.clock()); err != nil {
+	var err error
+	if stmt, err = stmt.Prepare(t.clock()); err != nil {
 		return StatementResult{}, err
 	}
 
