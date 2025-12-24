@@ -234,6 +234,48 @@ func FieldIsGreater(fieldName string, operandType OperandType, value any) Condit
 	}
 }
 
+func FieldIsGreaterOrEqual(fieldName string, operandType OperandType, value any) Condition {
+	return Condition{
+		Operand1: Operand{
+			Type:  OperandField,
+			Value: fieldName,
+		},
+		Operator: Gte,
+		Operand2: Operand{
+			Type:  operandType,
+			Value: value,
+		},
+	}
+}
+
+func FieldIsLess(fieldName string, operandType OperandType, value any) Condition {
+	return Condition{
+		Operand1: Operand{
+			Type:  OperandField,
+			Value: fieldName,
+		},
+		Operator: Lt,
+		Operand2: Operand{
+			Type:  operandType,
+			Value: value,
+		},
+	}
+}
+
+func FieldIsLessOrEqual(fieldName string, operandType OperandType, value any) Condition {
+	return Condition{
+		Operand1: Operand{
+			Type:  OperandField,
+			Value: fieldName,
+		},
+		Operator: Lte,
+		Operand2: Operand{
+			Type:  operandType,
+			Value: value,
+		},
+	}
+}
+
 func compareBoolean(value1, value2 any, operator Operator) (bool, error) {
 	theValue1, ok := value1.(bool)
 	if !ok {
