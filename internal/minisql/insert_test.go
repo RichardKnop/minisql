@@ -41,7 +41,7 @@ func TestTable_Insert(t *testing.T) {
 
 		aCursor, err := aTable.SeekLast(ctx, 0)
 		require.NoError(t, err)
-		actualRow, err := aCursor.fetchRow(ctx, fieldsFromColumns(testColumns...)...)
+		actualRow, err := aCursor.fetchRow(ctx, false, fieldsFromColumns(testColumns...)...)
 		require.NoError(t, err)
 
 		require.NoError(t, err)
@@ -69,7 +69,7 @@ func TestTable_Insert(t *testing.T) {
 
 		aCursor, err := aTable.SeekLast(ctx, 0)
 		require.NoError(t, err)
-		actualRow, err := aCursor.fetchRow(ctx, fieldsFromColumns(testColumns...)...)
+		actualRow, err := aCursor.fetchRow(ctx, false, fieldsFromColumns(testColumns...)...)
 		require.NoError(t, err)
 
 		assert.Equal(t, rows[1], actualRow)

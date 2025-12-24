@@ -25,10 +25,10 @@ var reservedWords = []string{
 	// statement types
 	"CREATE TABLE", "DROP TABLE", "SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
-	"*", "COUNT(*)", "PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "DEFAULT", "NOT NULL", "NULL",
+	"*", "COUNT(*)", "ORDER BY", "LIMIT", "OFFSET",
+	"PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "DEFAULT", "NOT NULL", "NULL", "UNIQUE",
 	"IS NULL", "IS NOT NULL", "TRUE", "FALSE", "NOW()",
 	"IF NOT EXISTS", "WHERE", "FROM", "SET", "ASC", "DESC", "AS",
-	"ORDER BY", "LIMIT", "OFFSET",
 	"BEGIN", "COMMIT", "ROLLBACK",
 	";",
 }
@@ -45,6 +45,7 @@ const (
 	stepCreateTableVarcharLength
 	stepCreateTableColumnPrimaryKey
 	stepCreateTableColumnNullNotNull
+	stepCreateTableColumnUnique
 	stepCreateTableColumnDefaultValue
 	stepCreateTableCommaOrClosingParens
 	stepDropTableName
@@ -181,6 +182,7 @@ func (p *parser) doParse() ([]minisql.Statement, error) {
 			stepCreateTableVarcharLength,
 			stepCreateTableColumnPrimaryKey,
 			stepCreateTableColumnNullNotNull,
+			stepCreateTableColumnUnique,
 			stepCreateTableColumnDefaultValue,
 			stepCreateTableCommaOrClosingParens:
 			if err := p.doParseCreateTable(); err != nil {

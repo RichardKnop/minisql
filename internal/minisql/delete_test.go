@@ -694,14 +694,15 @@ func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []
 	}
 
 	var actual []Row
-	aRow, err := selectResult.Rows(ctx)
-	for ; err == nil; aRow, err = selectResult.Rows(ctx) {
+	for selectResult.Rows.Next(ctx) {
+		aRow := selectResult.Rows.Row()
 		actual = append(actual, aRow)
 		if len(expectedIDMap) > 0 {
 			_, ok := expectedIDMap[aRow.Values[0].Value.(int64)]
 			assert.True(t, ok)
 		}
 	}
+	require.NoError(t, selectResult.Rows.Err())
 
 	require.Len(t, actual, len(expectedRows))
 	for i := range len(expectedRows) {

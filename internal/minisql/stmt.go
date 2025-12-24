@@ -1,7 +1,6 @@
 package minisql
 
 import (
-	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -73,6 +72,7 @@ type Column struct {
 	Size            uint32
 	PrimaryKey      bool
 	Autoincrement   bool
+	Unique          bool
 	Nullable        bool
 	DefaultValue    OptionalValue
 	DefaultValueNow bool
@@ -376,6 +376,7 @@ func (s *Statement) validateCreateTable() error {
 		primaryKeyCount  = 0
 		primaryKeyColumn Column
 		nameMap          = map[string]struct{}{}
+		indexMap         = map[string]struct{}{}
 	)
 	for i, aColumn := range s.Columns {
 		if aColumn.DefaultValue.Valid {
@@ -385,13 +386,32 @@ func (s *Statement) validateCreateTable() error {
 			}
 			s.Columns[i] = validColumn
 		}
+
 		if _, exists := nameMap[aColumn.Name]; exists {
 			return fmt.Errorf("duplicate column name %s", aColumn.Name)
 		}
 		nameMap[aColumn.Name] = struct{}{}
+
 		if aColumn.PrimaryKey {
+			if _, ok := indexMap[aColumn.Name]; ok {
+				return fmt.Errorf("column %s can only have one index", aColumn.Name)
+			}
 			primaryKeyColumn = aColumn
 			primaryKeyCount += 1
+			indexMap[aColumn.Name] = struct{}{}
+		}
+
+		if aColumn.Unique {
+			if _, ok := indexMap[aColumn.Name]; ok {
+				return fmt.Errorf("column %s can only have one index", aColumn.Name)
+			}
+			if aColumn.Kind == Text {
+				return fmt.Errorf("unique key cannot be of type TEXT")
+			}
+			if aColumn.Kind == Varchar && aColumn.Size > MaxIndexKeySize {
+				return fmt.Errorf("unique key of type VARCHAR exceeds max index key size %d", MaxIndexKeySize)
+			}
+			indexMap[aColumn.Name] = struct{}{}
 		}
 	}
 	if primaryKeyCount > 1 {
@@ -406,6 +426,9 @@ func (s *Statement) validateCreateTable() error {
 		}
 		if primaryKeyColumn.Kind == Varchar && primaryKeyColumn.Size > MaxIndexKeySize {
 			return fmt.Errorf("primary key of type VARCHAR exceeds max index key size %d", MaxIndexKeySize)
+		}
+		if primaryKeyColumn.Autoincrement && primaryKeyColumn.Kind != Int8 && primaryKeyColumn.Kind != Int4 {
+			return fmt.Errorf("autoincrement primary key must be of type INT4 or INT8")
 		}
 	}
 
@@ -696,8 +719,18 @@ func (s Statement) validateWhere() error {
 				}
 			}
 
-			if args, ok := isEquality(aCondition); ok {
+			if isEquality(aCondition) {
 				fieldName := aCondition.Operand1.Value.(string)
+				aColumn, ok := s.ColumnByName(fieldName)
+				if !ok {
+					return fmt.Errorf("unknown field %q in WHERE clause", aCondition.Operand1.Value.(string))
+				}
+
+				args, err := equalityKeys(aColumn, aCondition)
+				if err != nil {
+					return err
+				}
+
 				_, ok2 := equalityMap[fieldName]
 				if !ok2 {
 					equalityMap[fieldName] = args
@@ -754,23 +787,6 @@ func (s Statement) CreateTableDDL() string {
 	}
 	sb.WriteString("\n);")
 	return sb.String()
-}
-
-type Iterator func(ctx context.Context) (Row, error)
-
-type StatementResult struct {
-	Columns      []Column
-	Rows         Iterator
-	RowsAffected int
-}
-
-func (r StatementResult) CollectRows(ctx context.Context) []Row {
-	results := []Row{}
-	aRow, err := r.Rows(ctx)
-	for ; err == nil; aRow, err = r.Rows(ctx) {
-		results = append(results, aRow)
-	}
-	return results
 }
 
 func (stmt Statement) InsertForColumn(name string, insertIdx int) (OptionalValue, bool) {

@@ -95,7 +95,7 @@ func (tp TextPointer) IsEqual(tp2 TextPointer) bool {
 	return true
 }
 
-func storeOverflowTexts(ctx context.Context, aPager TxPager, aRow *Row) error {
+func storeOverflowTexts(ctx context.Context, aPager TxPager, aRow Row) error {
 	for i, aColumn := range aRow.Columns {
 		if !aColumn.Kind.IsText() {
 			continue

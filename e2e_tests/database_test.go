@@ -164,7 +164,7 @@ func (s *TestSuite) assertUsersTable(table, pk table) {
 	s.Equal(createUsersTableSQL, *table.SQL)
 
 	s.Equal(minisql.SchemaPrimaryKey, pk.SchemaType)
-	s.Equal("pk_users", pk.Name)
+	s.Equal("pkey__users", pk.Name)
 	s.Equal(2, int(pk.RootPage))
 	s.Nil(pk.SQL)
 }

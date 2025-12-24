@@ -39,34 +39,33 @@ func TestTable_Update_PrimaryKey(t *testing.T) {
 		aTable.txManager,
 	)
 
-	expected := make([]Row, 0, len(rows))
+	// Batch insert test rows
+	stmt := Statement{
+		Kind:    Insert,
+		Fields:  fieldsFromColumns(aTable.Columns...),
+		Inserts: make([][]OptionalValue, 0, len(rows)),
+	}
 	for _, aRow := range rows {
-		expected = append(expected, aRow.Clone())
+		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	t.Run("Insert rows with primary key", func(t *testing.T) {
-		stmt := Statement{
-			Kind:    Insert,
-			Fields:  fieldsFromColumns(testColumnsWithPrimaryKey...),
-			Inserts: make([][]OptionalValue, 0, len(rows)),
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		freePage, err := primaryKeyPager.GetFreePage(ctx)
+		if err != nil {
+			return err
 		}
-		for _, aRow := range rows {
-			stmt.Inserts = append(stmt.Inserts, aRow.Values)
+		aTable.PrimaryKey.Index, err = aTable.createBTreeIndex(
+			primaryKeyPager,
+			freePage,
+			aTable.PrimaryKey.Column,
+			aTable.PrimaryKey.Name,
+		)
+		if err != nil {
+			return err
 		}
-
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			freePage, err := primaryKeyPager.GetFreePage(ctx)
-			if err != nil {
-				return err
-			}
-			aTable.PrimaryKey.Index, err = aTable.newPrimaryKeyIndex(primaryKeyPager, freePage)
-			if err != nil {
-				return err
-			}
-			return aTable.Insert(ctx, stmt)
-		}, aPager)
-		require.NoError(t, err)
-	})
+		return aTable.Insert(ctx, stmt)
+	}, aPager)
+	require.NoError(t, err)
 
 	t.Run("Duplicate primary key error", func(t *testing.T) {
 		id, ok := rows[0].GetValue("id")
@@ -126,6 +125,11 @@ func TestTable_Update_PrimaryKey(t *testing.T) {
 
 		checkRows(ctx, t, aTable, rows)
 	})
+
+	expected := make([]Row, 0, len(rows))
+	for _, aRow := range rows {
+		expected = append(expected, aRow.Clone())
+	}
 
 	t.Run("Update primary key", func(t *testing.T) {
 		id, ok := rows[0].GetValue("id")

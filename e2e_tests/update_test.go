@@ -9,8 +9,8 @@ func (s *TestSuite) TestUpdate() {
 	_, err := s.db.Exec(createUsersTableSQL)
 	s.Require().NoError(err)
 
-	s.Run("Insert some test users", func() {
-		aResult, err := s.db.ExecContext(context.Background(), `insert into users("name", "email") values('Danny Mason', 'Danny_Mason2966@xqj6f.tech'),
+	// Insert test users
+	aResult, err := s.db.ExecContext(context.Background(), `insert into users("name", "email") values('Danny Mason', 'Danny_Mason2966@xqj6f.tech'),
 ('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page'),
 ('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video'),
 ('Mason Callan', 'Mason_Callan9524@bu2lo.edu'),
@@ -20,11 +20,10 @@ func (s *TestSuite) TestUpdate() {
 ('Carl Thomson', 'Carl_Thomson4218@kyb7t.host'),
 ('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design'),
 ('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press');`)
-		s.Require().NoError(err)
-		rowsAffected, err := aResult.RowsAffected()
-		s.Require().NoError(err)
-		s.Require().Equal(int64(10), rowsAffected)
-	})
+	s.Require().NoError(err)
+	rowsAffected, err := aResult.RowsAffected()
+	s.Require().NoError(err)
+	s.Require().Equal(int64(10), rowsAffected)
 
 	expectedNames := []sql.NullString{
 		{String: "Danny Mason", Valid: true},

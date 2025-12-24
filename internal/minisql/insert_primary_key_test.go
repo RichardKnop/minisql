@@ -39,36 +39,35 @@ func TestTable_Insert_PrimaryKey(t *testing.T) {
 		aTable.txManager,
 	)
 
-	t.Run("Insert rows with primary key", func(t *testing.T) {
-		stmt := Statement{
-			Kind:    Insert,
-			Fields:  fieldsFromColumns(testColumnsWithPrimaryKey...),
-			Inserts: make([][]OptionalValue, 0, len(rows)),
-		}
-		for _, aRow := range rows {
-			stmt.Inserts = append(stmt.Inserts, aRow.Values)
-		}
+	// Batch insert test rows
+	stmt := Statement{
+		Kind:    Insert,
+		Fields:  fieldsFromColumns(aTable.Columns...),
+		Inserts: make([][]OptionalValue, 0, len(rows)),
+	}
+	for _, aRow := range rows {
+		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	}
 
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			freePage, err := primaryKeyPager.GetFreePage(ctx)
-			if err != nil {
-				return err
-			}
-			aTable.PrimaryKey.Index, err = aTable.newPrimaryKeyIndex(primaryKeyPager, freePage)
-			if err != nil {
-				return err
-			}
-			return aTable.Insert(ctx, stmt)
-		}, aPager)
-		require.NoError(t, err)
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		freePage, err := primaryKeyPager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		aTable.PrimaryKey.Index, err = aTable.createBTreeIndex(primaryKeyPager, freePage, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name)
+		if err != nil {
+			return err
+		}
+		return aTable.Insert(ctx, stmt)
+	}, aPager)
+	require.NoError(t, err)
 
-		checkRows(ctx, t, aTable, rows)
-	})
+	checkRows(ctx, t, aTable, rows)
 
 	t.Run("Try to insert duplicate primary key", func(t *testing.T) {
 		stmt := Statement{
 			Kind:    Insert,
-			Fields:  fieldsFromColumns(testColumnsWithPrimaryKey...),
+			Fields:  fieldsFromColumns(aTable.Columns...),
 			Inserts: [][]OptionalValue{rows[0].Values},
 		}
 
@@ -77,6 +76,8 @@ func TestTable_Insert_PrimaryKey(t *testing.T) {
 		}, aPager)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrDuplicateKey)
+
+		checkRows(ctx, t, aTable, rows)
 	})
 }
 
@@ -113,7 +114,7 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 	t.Run("Insert rows without primary key, autoincrement should generate primary keys", func(t *testing.T) {
 		stmt := Statement{
 			Kind:    Insert,
-			Fields:  fieldsFromColumns(testColumnsWithPrimaryKey[1:]...), // exclude primary key column
+			Fields:  fieldsFromColumns(aTable.Columns[1:]...), // exclude primary key column
 			Inserts: make([][]OptionalValue, 0, len(rows)),
 		}
 		for _, aRow := range rows {
@@ -125,7 +126,12 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			aTable.PrimaryKey.Index, err = aTable.newPrimaryKeyIndex(primaryKeyPager, freePage)
+			aTable.PrimaryKey.Index, err = aTable.createBTreeIndex(
+				primaryKeyPager,
+				freePage,
+				aTable.PrimaryKey.Column,
+				aTable.PrimaryKey.Name,
+			)
 			if err != nil {
 				return err
 			}
@@ -147,7 +153,7 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 func checkRowsWithPrimaryKey(ctx context.Context, t *testing.T, aTable *Table, expectedRows []Row) {
 	selectResult, err := aTable.Select(ctx, Statement{
 		Kind:   Select,
-		Fields: fieldsFromColumns(testColumnsWithPrimaryKey...),
+		Fields: fieldsFromColumns(aTable.Columns...),
 	})
 	require.NoError(t, err)
 
@@ -159,14 +165,15 @@ func checkRowsWithPrimaryKey(ctx context.Context, t *testing.T, aTable *Table, e
 	}
 
 	var actual []Row
-	aRow, err := selectResult.Rows(ctx)
-	for ; err == nil; aRow, err = selectResult.Rows(ctx) {
+	for selectResult.Rows.Next(ctx) {
+		aRow := selectResult.Rows.Row()
 		actual = append(actual, aRow)
 		if len(expectedIDMap) > 0 {
 			_, ok := expectedIDMap[aRow.Values[0].Value.(int64)]
 			assert.True(t, ok)
 		}
 	}
+	require.NoError(t, selectResult.Rows.Err())
 
 	require.Len(t, actual, len(expectedRows))
 	for i := range len(expectedRows) {

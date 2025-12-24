@@ -3,7 +3,6 @@ package minisql
 import (
 	"context"
 	"database/sql/driver"
-	"errors"
 	"fmt"
 	"io"
 
@@ -43,18 +42,14 @@ func (r *Rows) Close() error {
 // should be taken when closing Rows not to modify
 // a buffer held in dest.
 func (r *Rows) Next(dest []driver.Value) error {
-	if r.iter == nil {
+	if !r.iter.Next(r.ctx) {
+		if err := r.iter.Err(); err != nil {
+			return err
+		}
 		return io.EOF
 	}
 
-	aRow, err := r.iter(r.ctx)
-	if err != nil {
-		if errors.Is(err, minisql.ErrNoMoreRows) {
-			return io.EOF
-		}
-		return err
-	}
-
+	aRow := r.iter.Row()
 	if len(aRow.Values) != len(dest) {
 		return fmt.Errorf("expected %d values, got %d", len(dest), len(aRow.Values))
 	}
@@ -70,5 +65,6 @@ func (r *Rows) Next(dest []driver.Value) error {
 			dest[i] = aRow.Values[i].Value
 		}
 	}
+
 	return nil
 }

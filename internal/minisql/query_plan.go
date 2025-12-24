@@ -100,7 +100,7 @@ func (p QueryPlan) Execute(ctx context.Context, t *Table, selectedFields []Field
 }
 
 // PlanQuery creates a query plan based on the statement and table schema
-func (t *Table) PlanQuery(ctx context.Context, stmt Statement) QueryPlan {
+func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error) {
 	// By default, assume we are doing a single sequential scan
 	plan := QueryPlan{
 		Scans: []Scan{{
@@ -113,25 +113,22 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) QueryPlan {
 	// If there is no where clause, no need to consider index scans
 	if len(stmt.Conditions) == 0 {
 		// But we might still use index for ordering
-		return plan.optimizeOrdering(t)
+		return plan.optimizeOrdering(t), nil
 	}
 
-	// If there is no primary key, we cannot do index scans
-	// TODO - consider secondary indexes later
-	if !t.HasPrimaryKey() {
+	// If there are no indexes, we cannot do index scans
+	if !t.HasPrimaryKey() && len(t.UniqueIndexes) == 0 {
 		// But we might still use index for ordering
-		return plan.optimizeOrdering(t)
+		return plan.optimizeOrdering(t), nil
 	}
 
-	// Check if we can do an index scan using the primary key
-	plan = plan.setPKIndexScans(
-		t.PrimaryKey.Name,
-		t.PrimaryKey.Column.Name,
-		stmt.Conditions,
-	)
+	// Check if we can do an index scans
+	if err := plan.setIndexScans(t, stmt.Conditions); err != nil {
+		return QueryPlan{}, err
+	}
 
 	// But we might still use index for ordering
-	return plan.optimizeOrdering(t)
+	return plan.optimizeOrdering(t), nil
 }
 
 func (p QueryPlan) optimizeOrdering(t *Table) QueryPlan {
@@ -153,12 +150,20 @@ func (p QueryPlan) optimizeOrdering(t *Table) QueryPlan {
 
 	// Sequential scan
 	if len(p.Scans) == 1 && p.Scans[0].Type == ScanTypeSequential {
+		indexMap := make(map[string]IndexInfo)
+		if t.HasPrimaryKey() {
+			indexMap[t.PrimaryKey.Column.Name] = t.PrimaryKey.IndexInfo
+		}
+		for _, index := range t.UniqueIndexes {
+			indexMap[index.Column.Name] = index.IndexInfo
+		}
+
 		// Either order ORDER BY indexed column
-		if t.HasPrimaryKey() && orderCol == t.PrimaryKey.Column.Name {
+		if info, ok := indexMap[orderCol]; ok {
 			// Use PK index for ordering
 			p.Scans[0].Type = ScanTypeIndexAll
-			p.Scans[0].IndexName = t.PrimaryKey.Name
-			p.Scans[0].IndexColumnName = orderCol
+			p.Scans[0].IndexName = info.Name
+			p.Scans[0].IndexColumnName = info.Column.Name
 			p.SortInMemory = false
 			return p
 		}
@@ -182,105 +187,165 @@ func (p QueryPlan) optimizeOrdering(t *Table) QueryPlan {
 //
 // can be executed as an index scan on for keys 1 and 2 with remaining filters
 // (a = 'foo') for 1 and (b = 'bar') for 2.
-func (p QueryPlan) setPKIndexScans(pkName string, pkColumn string, conditions OneOrMore) QueryPlan {
+func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 	var (
-		allGroupsHavePKCondition = true
-		primaryKeys              = make([][]any, 0, 10)
-		remaining                = make([]Conditions, 0, len(conditions))
+		allGroupsHaveIndexCondition = true
+		indexKeys                   = make([][]any, 0, 10)
+		remaining                   = make([]Conditions, 0, len(conditions))
+		groupIndex                  = make(map[int]IndexInfo)
 	)
+
+	indexMap := make(map[string]struct{})
+	if t.HasPrimaryKey() {
+		indexMap[t.PrimaryKey.Column.Name] = struct{}{}
+	}
+	for _, index := range t.UniqueIndexes {
+		indexMap[index.Column.Name] = struct{}{}
+	}
 
 	// Each group is separated by OR, for example:
 	// (a = 1 AND b = 2) OR (a = 3 AND b = 4)
 	// would be 2 groups with 2 conditions each
-	for _, group := range conditions {
-		// Check if this group contains a primary key condition
+	for groupIDx, group := range conditions {
+		// Check if this group contains an index condition
 		var (
-			hasPKCondition      = false
-			remainingForGroup   = make(Conditions, 0, 10)
-			primaryKeysForGroup = make([]any, 0, 10)
+			hasIndexCondition = false
+			remainingForGroup = make(Conditions, 0, 10)
+			indexKeysForGroup = make([]any, 0, 10)
 		)
 		for _, aCondition := range group {
-			if !isPrimaryKey(aCondition, pkColumn) {
-				remainingForGroup = append(remainingForGroup, aCondition)
-				continue
+			fieldName, ok := aCondition.Operand1.Value.(string)
+			if !ok {
+				return fmt.Errorf("invalid field name in condition: %v", aCondition.Operand1.Value)
 			}
-			hasPKCondition = true
-			keys, ok := isEquality(aCondition)
+			_, ok = indexMap[fieldName]
 			if !ok {
 				remainingForGroup = append(remainingForGroup, aCondition)
 				continue
 			}
-			primaryKeysForGroup = append(primaryKeysForGroup, keys...)
+			aColumn, ok := t.ColumnByName(fieldName)
+			if !ok {
+				return fmt.Errorf("invalid field name in condition: %s", fieldName)
+			}
+
+			// If group contains conditions on multiple indexes, we prefer primary key if present,
+			// otherwise just take the first one we find.
+			hasIndexCondition = true
+			if fieldName == t.PrimaryKey.Column.Name {
+				groupIndex[groupIDx] = t.PrimaryKey.IndexInfo
+			} else if _, exists := groupIndex[groupIDx]; !exists {
+				for _, uniqueIndex := range t.UniqueIndexes {
+					if uniqueIndex.Column.Name == fieldName {
+						groupIndex[groupIDx] = uniqueIndex.IndexInfo
+						break
+					}
+				}
+			}
+
+			if isEquality(aCondition) {
+				keys, err := equalityKeys(aColumn, aCondition)
+				if err != nil {
+					return err
+				}
+
+				indexKeysForGroup = append(indexKeysForGroup, keys...)
+			} else {
+				remainingForGroup = append(remainingForGroup, aCondition)
+				continue
+			}
 		}
-		if !hasPKCondition {
-			allGroupsHavePKCondition = false
+		if !hasIndexCondition {
+			allGroupsHaveIndexCondition = false
 			break
 		}
 		remaining = append(remaining, remainingForGroup)
-		primaryKeys = append(primaryKeys, primaryKeysForGroup)
+		indexKeys = append(indexKeys, indexKeysForGroup)
 	}
 
-	// In case all groups don't contain a primary key condition, we cannot do index scan
-	// since we would need to do a full table scan anyway for the group without PK condition.
-	if !allGroupsHavePKCondition {
-		return p
+	// In case all groups don't contain an index key condition, we cannot do index scan
+	// since we would need to do a full table scan anyway for the group without index condition.
+	if !allGroupsHaveIndexCondition {
+		return nil
 	}
 
-	// In case we reach here, we can do index scans on primary key.
+	// In case we reach here, we can do index scans..
 	// We need to check if we can do range scans instead of point lookups.
-	p.Scans = make([]Scan, 0, len(conditions))
+	indexScans := make([]Scan, 0, len(conditions))
 	for groupIdx, group := range conditions {
-		rangeScan, ok := tryRangeScan(pkName, pkColumn, group)
+		rangeScan, ok := tryRangeScan(groupIndex[groupIdx], group)
 		if ok {
-			p.Scans = append(p.Scans, rangeScan)
+			indexScans = append(indexScans, rangeScan)
 			continue
 		}
 
-		p.Scans = append(p.Scans, Scan{
-			Type:            ScanTypeIndexPoint,
-			IndexName:       pkName,
-			IndexColumnName: pkColumn,
-			IndexKeys:       primaryKeys[groupIdx],
-			Filters:         OneOrMore{remaining[groupIdx]},
-		})
+		// Only choose point scan if there are keys to lookup, for example in case of
+		// NOT IN clause, we won't have any keys to lookup even though there is an index condition.
+		if len(indexKeys[groupIdx]) > 0 {
+			indexScans = append(indexScans, Scan{
+				Type:            ScanTypeIndexPoint,
+				IndexName:       groupIndex[groupIdx].Name,
+				IndexColumnName: groupIndex[groupIdx].Column.Name,
+				IndexKeys:       indexKeys[groupIdx],
+				Filters:         OneOrMore{remaining[groupIdx]},
+			})
+		}
+	}
+	// We could get here and have no index scans available, in that case do not overwrite existing plan.
+	if len(indexScans) > 0 {
+		p.Scans = indexScans
 	}
 
-	return p
+	return nil
 }
 
-func isPrimaryKey(cond Condition, pkColumn string) bool {
-	fieldName, ok := cond.Operand1.Value.(string)
-	return ok && fieldName == pkColumn
-}
-
-func isEquality(cond Condition) ([]any, bool) {
+func isEquality(cond Condition) bool {
 	// Check: column_name = literal_value
 	// Also consider IN operator for primary key
 	if cond.Operator != Eq && cond.Operator != In {
-		return nil, false
+		return false
 	}
 
 	if cond.Operand1.Type != OperandField {
-		return nil, false
+		return false
 	}
 
 	// Right operand must be a literal (not another field)
 	if cond.Operand2.Type == OperandField {
-		return nil, false
+		return false
 	}
 
-	if cond.Operator == Eq {
-		return []any{cond.Operand2.Value}, true
-	}
-
-	return cond.Operand2.Value.([]any), true
+	return true
 }
 
-func tryRangeScan(pkName string, keyColumn string, filters Conditions) (Scan, bool) {
+func equalityKeys(aColumn Column, cond Condition) ([]any, error) {
+	if cond.Operator == Eq {
+		if cond.Operand2.Type == OperandNull {
+			return []any{cond.Operand2.Value}, nil
+		}
+		keyValue, err := castKeyValue(aColumn, cond.Operand2.Value)
+		if err != nil {
+			return nil, err
+		}
+		return []any{keyValue}, nil
+	}
+
+	// TODO what if NULL is included in list?
+	keyValues := make([]any, 0, len(cond.Operand2.Value.([]any)))
+	for _, rawValue := range cond.Operand2.Value.([]any) {
+		keyValue, err := castKeyValue(aColumn, rawValue)
+		if err != nil {
+			return nil, err
+		}
+		keyValues = append(keyValues, keyValue)
+	}
+
+	return keyValues, nil
+}
+
+func tryRangeScan(indexInfo IndexInfo, filters Conditions) (Scan, bool) {
 	var (
-		rangeCondition      = RangeCondition{}
-		remainingFilters    = make(Conditions, 0)
-		foundRangeCondition = false
+		rangeCondition   = RangeCondition{}
+		remainingFilters = make(Conditions, 0)
 	)
 
 	// Scan conditions to find range predicates on PK
@@ -291,7 +356,7 @@ func tryRangeScan(pkName string, keyColumn string, filters Conditions) (Scan, bo
 		}
 
 		fieldName, ok := aCondition.Operand1.Value.(string)
-		if !ok || fieldName != keyColumn {
+		if !ok || fieldName != indexInfo.Column.Name {
 			remainingFilters = append(remainingFilters, aCondition)
 			continue
 		}
@@ -302,56 +367,61 @@ func tryRangeScan(pkName string, keyColumn string, filters Conditions) (Scan, bo
 			continue
 		}
 
-		// Key column condition - check if it's a range operator
-		foundRangeCondition = true
+		conditionValue, err := castKeyValue(indexInfo.Column, aCondition.Operand2.Value)
+		if err != nil {
+			return Scan{}, false
+		}
 
 		switch aCondition.Operator {
 		case Gt:
 			// id > X
 			if rangeCondition.Lower == nil ||
-				compareAny(aCondition.Operand2.Value, rangeCondition.Lower.Value) > 0 {
+				compareAny(conditionValue, rangeCondition.Lower.Value) > 0 {
 				rangeCondition.Lower = &RangeBound{
-					Value:     aCondition.Operand2.Value,
+					Value:     conditionValue,
 					Inclusive: false,
 				}
 			}
 		case Gte:
 			// id >= X
 			if rangeCondition.Lower == nil ||
-				compareAny(aCondition.Operand2.Value, rangeCondition.Lower.Value) > 0 {
+				compareAny(conditionValue, rangeCondition.Lower.Value) > 0 {
 				rangeCondition.Lower = &RangeBound{
-					Value:     aCondition.Operand2.Value,
+					Value:     conditionValue,
 					Inclusive: true,
 				}
 			}
 		case Lt:
 			// id < X
 			if rangeCondition.Upper == nil ||
-				compareAny(aCondition.Operand2.Value, rangeCondition.Upper.Value) < 0 {
+				compareAny(conditionValue, rangeCondition.Upper.Value) < 0 {
 				rangeCondition.Upper = &RangeBound{
-					Value:     aCondition.Operand2.Value,
+					Value:     conditionValue,
 					Inclusive: false,
 				}
 			}
 		case Lte:
 			// id <= X
 			if rangeCondition.Upper == nil ||
-				compareAny(aCondition.Operand2.Value, rangeCondition.Upper.Value) < 0 {
+				compareAny(conditionValue, rangeCondition.Upper.Value) < 0 {
 				rangeCondition.Upper = &RangeBound{
-					Value:     aCondition.Operand2.Value,
+					Value:     conditionValue,
 					Inclusive: true,
 				}
 			}
 		case Eq, In:
-			// id = X (we will be doing index point scan instead so just return)
+			// id = X, id IN (...) - we will be doing index point scan instead so just return
+			return Scan{}, false
+		case Ne, NotIn:
+			// id != X , id NOT IN (...) - we will be doing a sequential scan so just return
 			return Scan{}, false
 		default:
-			// Other operators don't support range scan
-			remainingFilters = append(remainingFilters, aCondition)
+			// This should not happen, we cover all operators with switch cases above
+			return Scan{}, false
 		}
 	}
 
-	if !foundRangeCondition {
+	if rangeCondition.Lower == nil && rangeCondition.Upper == nil {
 		return Scan{}, false
 	}
 
@@ -368,8 +438,8 @@ func tryRangeScan(pkName string, keyColumn string, filters Conditions) (Scan, bo
 	// Create range scan plan
 	aScan := Scan{
 		Type:            ScanTypeIndexRange,
-		IndexName:       pkName,
-		IndexColumnName: keyColumn,
+		IndexName:       indexInfo.Name,
+		IndexColumnName: indexInfo.Column.Name,
 		RangeCondition:  rangeCondition,
 	}
 	if len(remainingFilters) > 0 {

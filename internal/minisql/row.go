@@ -19,8 +19,6 @@ type Row struct {
 	Key     RowID
 	Columns []Column
 	Values  []OptionalValue
-	// for updates, we store cursor internally
-	cursor Cursor
 }
 
 func maxCells(rowSize uint64) uint32 {
@@ -136,22 +134,32 @@ func (r *Row) SetValue(name string, value OptionalValue) (bool, bool) {
 	if !found {
 		return false, false
 	}
-	if r.Columns[columnIdx].Kind.IsText() {
-		if r.Values[columnIdx].Valid != value.Valid {
-			r.Values[columnIdx] = value
-			return true, true
-		}
-		if !r.Values[columnIdx].Value.(TextPointer).IsEqual(value.Value.(TextPointer)) {
-			r.Values[columnIdx] = value
-			return true, true
-		}
-		return true, false
-	}
-	if r.Values[columnIdx] != value {
+	if !compareValue(r.Columns[columnIdx].Kind, r.Values[columnIdx], value) {
 		r.Values[columnIdx] = value
 		return true, true
 	}
 	return true, false
+}
+
+func compareValue(kind ColumnKind, v1, v2 OptionalValue) bool {
+	if !v1.Valid && !v2.Valid {
+		return true
+	}
+	if v1.Valid != v2.Valid {
+		return false
+	}
+	if !kind.IsText() {
+		return v1.Value == v2.Value
+	}
+	tp1, ok := v1.Value.(TextPointer)
+	if !ok {
+		return false
+	}
+	tp2, ok := v2.Value.(TextPointer)
+	if !ok {
+		return false
+	}
+	return tp1.IsEqual(tp2)
 }
 
 func (r *Row) Clone() Row {

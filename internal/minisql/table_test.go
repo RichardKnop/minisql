@@ -14,6 +14,7 @@ import (
 const (
 	testTableName  = "test_table"
 	testTableName2 = "test_table_2"
+	testTableName3 = "test_table_3"
 )
 
 func TestNewTable_WithPrimaryKey(t *testing.T) {
@@ -36,8 +37,10 @@ func TestNewTable_WithPrimaryKey(t *testing.T) {
 
 	aTable := NewTable(testLogger, nil, nil, "tablename", columns, 0)
 	assert.Equal(t, PrimaryKey{
-		Name:   "pk_tablename",
-		Column: columns[0],
+		IndexInfo: IndexInfo{
+			Name:   primaryKeyName("tablename"),
+			Column: columns[0],
+		},
 	}, aTable.PrimaryKey)
 }
 

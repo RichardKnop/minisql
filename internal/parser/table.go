@@ -12,8 +12,10 @@ var (
 	errCreateTableNoColumns                 = fmt.Errorf("at CREATE TABLE: no columns specified")
 	errCreateTableInvalidColumDef           = fmt.Errorf("at CREATE TABLE: invalid column definition")
 	errCreateTableMultiplePrimaryKeys       = fmt.Errorf("at CREATE TABLE: multiple PRIMARY KEY columns specified")
-	errCreateTablePrimaryKeyTextNotAllowed  = fmt.Errorf("at CREATE TABLE: AUTOINCREMENT primary key cannot be of type TEXT")
-	errCreateTablePrimaryKeyVarcharTooLarge = fmt.Errorf("at CREATE TABLE: AUTOINCREMENT primary key of type VARCHAR exceeds max index key size %d", minisql.MaxIndexKeySize)
+	errCreateTablePrimaryKeyTextNotAllowed  = fmt.Errorf("at CREATE TABLE: primary key cannot be of type TEXT")
+	errCreateTablePrimaryKeyVarcharTooLarge = fmt.Errorf("at CREATE TABLE: primary key of type VARCHAR exceeds max index key size %d", minisql.MaxIndexKeySize)
+	errCreateTableUniqueTextNotAllowed      = fmt.Errorf("at CREATE TABLE: unique key cannot be of type TEXT")
+	errCreateTableUniqueVarcharTooLarge     = fmt.Errorf("at CREATE TABLE: unique key of type VARCHAR exceeds max index key size %d", minisql.MaxIndexKeySize)
 	errCreateTableDefaultValueExpected      = fmt.Errorf("at CREATE TABLE: expected default value after DEFAULT")
 )
 
@@ -114,7 +116,7 @@ func (p *parser) doParseCreateTable() error {
 		p.step = stepCreateTableCommaOrClosingParens
 	case stepCreateTableColumnNullNotNull:
 		nullNotNull := p.peek()
-		p.step = stepCreateTableColumnDefaultValue
+		p.step = stepCreateTableColumnUnique
 		switch nullNotNull {
 		case "NOT NULL":
 			p.Columns[len(p.Columns)-1].Nullable = false
@@ -126,6 +128,22 @@ func (p *parser) doParseCreateTable() error {
 			return nil
 		}
 		p.pop()
+	case stepCreateTableColumnUnique:
+		unique := strings.ToUpper(p.peek())
+		p.step = stepCreateTableColumnDefaultValue
+		if unique != "UNIQUE" {
+			return nil
+		}
+		aColumn := p.Columns[len(p.Columns)-1]
+		if aColumn.Kind == minisql.Text {
+			return errCreateTableUniqueTextNotAllowed
+		}
+		if aColumn.Kind == minisql.Varchar && aColumn.Size > minisql.MaxIndexKeySize {
+			return errCreateTableUniqueVarcharTooLarge
+		}
+		p.Columns[len(p.Columns)-1].Unique = true
+		p.pop()
+		p.step = stepCreateTableCommaOrClosingParens
 	case stepCreateTableColumnDefaultValue:
 		defaultRWord := p.peek()
 		p.step = stepCreateTableCommaOrClosingParens

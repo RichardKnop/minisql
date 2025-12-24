@@ -48,45 +48,45 @@ func TestTable_Select(t *testing.T) {
 	t.Run("Select all rows", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(testColumns...),
+			Fields: fieldsFromColumns(aTable.Columns...),
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		assert.Equal(t, rows, aResult.CollectRows(ctx))
+		assert.Equal(t, rows, collectRows(ctx, aResult))
 	})
 
 	t.Run("Select with LIMIT", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(testColumns...),
+			Fields: fieldsFromColumns(aTable.Columns...),
 			Limit:  OptionalValue{Value: int64(10), Valid: true},
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		assert.Equal(t, rows[0:10], aResult.CollectRows(ctx))
+		assert.Equal(t, rows[0:10], collectRows(ctx, aResult))
 	})
 
 	t.Run("Select with OFFSET", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(testColumns...),
+			Fields: fieldsFromColumns(aTable.Columns...),
 			Offset: OptionalValue{Value: int64(10), Valid: true},
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		assert.Equal(t, rows[10:], aResult.CollectRows(ctx))
+		assert.Equal(t, rows[10:], collectRows(ctx, aResult))
 	})
 
 	t.Run("Select with LIMIT and OFFSET", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(testColumns...),
+			Fields: fieldsFromColumns(aTable.Columns...),
 			Limit:  OptionalValue{Value: int64(5), Valid: true},
 			Offset: OptionalValue{Value: int64(10), Valid: true},
 		}
@@ -94,13 +94,13 @@ func TestTable_Select(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		assert.Equal(t, rows[10:15], aResult.CollectRows(ctx))
+		assert.Equal(t, rows[10:15], collectRows(ctx, aResult))
 	})
 
 	t.Run("Select no rows", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(testColumns...),
+			Fields: fieldsFromColumns(aTable.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -121,14 +121,14 @@ func TestTable_Select(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		assert.Empty(t, aResult.CollectRows(ctx))
+		assert.Empty(t, collectRows(ctx, aResult))
 	})
 
 	t.Run("Select single row", func(t *testing.T) {
 		id := rowIDs(rows[5])[0]
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(testColumns...),
+			Fields: fieldsFromColumns(aTable.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -149,7 +149,7 @@ func TestTable_Select(t *testing.T) {
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		actual := aResult.CollectRows(ctx)
+		actual := collectRows(ctx, aResult)
 		assert.Len(t, actual, 1)
 		assert.Equal(t, rows[5], actual[0])
 	})
@@ -158,7 +158,7 @@ func TestTable_Select(t *testing.T) {
 		ids := rowIDs(rows[5], rows[11], rows[12], rows[33])
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(testColumns...),
+			Fields: fieldsFromColumns(aTable.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -187,14 +187,14 @@ func TestTable_Select(t *testing.T) {
 			}
 			expected = append(expected, aRow)
 		}
-		assert.Equal(t, expected, aResult.CollectRows(ctx))
+		assert.Equal(t, expected, collectRows(ctx, aResult))
 	})
 
 	t.Run("Select multiple rows with NOT IN", func(t *testing.T) {
 		ids := rowIDs(rows[5], rows[11], rows[12], rows[33])
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(testColumns...),
+			Fields: fieldsFromColumns(aTable.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -223,26 +223,26 @@ func TestTable_Select(t *testing.T) {
 			}
 			expected = append(expected, aRow)
 		}
-		assert.Equal(t, expected, aResult.CollectRows(ctx))
+		assert.Equal(t, expected, collectRows(ctx, aResult))
 	})
 
 	t.Run("Select rows with NULL values when there are none", func(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
-			Fields:     fieldsFromColumns(testColumns...),
+			Fields:     fieldsFromColumns(aTable.Columns...),
 			Conditions: OneOrMore{{FieldIsNull("id")}},
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		assert.Empty(t, aResult.CollectRows(ctx))
+		assert.Empty(t, collectRows(ctx, aResult))
 	})
 
 	t.Run("Select rows with NULL values", func(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
-			Fields:     fieldsFromColumns(testColumns...),
+			Fields:     fieldsFromColumns(aTable.Columns...),
 			Conditions: OneOrMore{{FieldIsNull("age")}},
 		}
 
@@ -250,7 +250,7 @@ func TestTable_Select(t *testing.T) {
 		require.NoError(t, err)
 
 		// rows[5] and rows[32] have NULL age values
-		actual := aResult.CollectRows(ctx)
+		actual := collectRows(ctx, aResult)
 		assert.Len(t, actual, 2)
 		assert.Equal(t, []Row{rows[5], rows[32]}, actual)
 	})
@@ -258,7 +258,7 @@ func TestTable_Select(t *testing.T) {
 	t.Run("Select rows with NOT NULL values", func(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
-			Fields:     fieldsFromColumns(testColumns...),
+			Fields:     fieldsFromColumns(aTable.Columns...),
 			Conditions: OneOrMore{{FieldIsNotNull("age")}},
 		}
 
@@ -273,7 +273,7 @@ func TestTable_Select(t *testing.T) {
 			}
 			expected = append(expected, aRow)
 		}
-		actual := aResult.CollectRows(ctx)
+		actual := collectRows(ctx, aResult)
 		assert.Len(t, actual, len(expected))
 		assert.Equal(t, expected, actual)
 	})
@@ -296,10 +296,10 @@ func TestTable_Select(t *testing.T) {
 				Values:  []OptionalValue{aRow.Values[0], aRow.Values[3]},
 			})
 		}
-		actual := aResult.CollectRows(ctx)
+		actual := collectRows(ctx, aResult)
 		assert.Len(t, actual, len(expected))
 		assert.Equal(t, expected, actual)
-		assert.Equal(t, []Column{testColumns[0], testColumns[3]}, aResult.Columns)
+		assert.Equal(t, []Column{aTable.Columns[0], aTable.Columns[3]}, aResult.Columns)
 	})
 
 	t.Run("Select only some columns with where condtition on unselected column", func(t *testing.T) {
@@ -327,7 +327,7 @@ func TestTable_Select(t *testing.T) {
 			expected = append(expected, expectedRow)
 
 		}
-		actual := aResult.CollectRows(ctx)
+		actual := collectRows(ctx, aResult)
 		assert.Len(t, actual, len(expected))
 		assert.Equal(t, expected, actual)
 		assert.Equal(t, []Column{testColumns[0], testColumns[1]}, aResult.Columns)
@@ -336,7 +336,7 @@ func TestTable_Select(t *testing.T) {
 	t.Run("Select with order by sort in memory asc", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(testColumns...),
+			Fields: fieldsFromColumns(aTable.Columns...),
 			OrderBy: []OrderBy{
 				{
 					Field:     Field{Name: "email"},
@@ -358,13 +358,13 @@ func TestTable_Select(t *testing.T) {
 			email2, _ := expected[j].GetValue("email")
 			return strings.Compare(email1.Value.(TextPointer).String(), email2.Value.(TextPointer).String()) < 0
 		})
-		assert.Equal(t, expected, aResult.CollectRows(ctx))
+		assert.Equal(t, expected, collectRows(ctx, aResult))
 	})
 
 	t.Run("Select with order by sort in memory desc", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(testColumns...),
+			Fields: fieldsFromColumns(aTable.Columns...),
 			OrderBy: []OrderBy{
 				{
 					Field:     Field{Name: "email"},
@@ -386,7 +386,7 @@ func TestTable_Select(t *testing.T) {
 			email2, _ := expected[j].GetValue("email")
 			return strings.Compare(email1.Value.(TextPointer).String(), email2.Value.(TextPointer).String()) > 0
 		})
-		assert.Equal(t, expected, aResult.CollectRows(ctx))
+		assert.Equal(t, expected, collectRows(ctx, aResult))
 	})
 
 	t.Run("Count all rows", func(t *testing.T) {
@@ -403,7 +403,7 @@ func TestTable_Select(t *testing.T) {
 				Columns: []Column{{Name: "COUNT(*)"}},
 				Values:  []OptionalValue{{Value: int64(len(rows)), Valid: true}},
 			},
-		}, aResult.CollectRows(ctx))
+		}, collectRows(ctx, aResult))
 	})
 
 	t.Run("Count rows with condition", func(t *testing.T) {
@@ -442,7 +442,7 @@ func TestTable_Select(t *testing.T) {
 				Columns: []Column{{Name: "COUNT(*)"}},
 				Values:  []OptionalValue{{Value: int64(expectedCount), Valid: true}},
 			},
-		}, aResult.CollectRows(ctx))
+		}, collectRows(ctx, aResult))
 	})
 }
 
@@ -501,6 +501,17 @@ func TestTable_Select_Overflow(t *testing.T) {
 		rows[2].SetValue("profile", overflow2)
 
 		// And now we can assert
-		assert.Equal(t, rows, aResult.CollectRows(ctx))
+		assert.Equal(t, rows, collectRows(ctx, aResult))
 	})
+}
+
+func collectRows(ctx context.Context, r StatementResult) []Row {
+	results := []Row{}
+	for r.Rows.Next(ctx) {
+		results = append(results, r.Rows.Row())
+	}
+	if err := r.Rows.Err(); err != nil {
+		panic(err)
+	}
+	return results
 }
