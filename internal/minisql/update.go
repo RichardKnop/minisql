@@ -60,13 +60,7 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 	// in place as we read them from the pipe. This can significantly improve performance for
 	// large updates. In case indexed values are changing or row size increases, we have to collect
 	// all rows and then update them after that to avoid issues with changing row locations.
-	indexMap := make(map[string]struct{})
-	if t.HasPrimaryKey() {
-		indexMap[t.PrimaryKey.Column.Name] = struct{}{}
-	}
-	for _, index := range t.UniqueIndexes {
-		indexMap[index.Column.Name] = struct{}{}
-	}
+	indexMap := t.IndexMap()
 	go func(in <-chan Row, out chan<- []Row) {
 		defer close(out)
 		cantUpdateInPlace := make([]Row, 0, 10)

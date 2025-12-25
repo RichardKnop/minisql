@@ -611,7 +611,21 @@ func (s Statement) validateCreateTable() error {
 			}
 			indexMap[aColumn.Name] = struct{}{}
 		}
+
+		if aColumn.Index {
+			if _, ok := indexMap[aColumn.Name]; ok {
+				return fmt.Errorf("column %s can only have one index", aColumn.Name)
+			}
+			if aColumn.Kind == Text {
+				return fmt.Errorf("secondary index key cannot be of type TEXT")
+			}
+			if aColumn.Kind == Varchar && aColumn.Size > MaxIndexKeySize {
+				return fmt.Errorf("secondary index key of type VARCHAR exceeds max index key size %d", MaxIndexKeySize)
+			}
+			indexMap[aColumn.Name] = struct{}{}
+		}
 	}
+
 	if primaryKeyCount > 1 {
 		return fmt.Errorf("only one primary key column is supported")
 	}

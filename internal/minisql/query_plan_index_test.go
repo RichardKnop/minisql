@@ -8,21 +8,36 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTable_PlanQuery_UniqueIndex(t *testing.T) {
+func TestTable_PlanQuery_SingleIndex(t *testing.T) {
 	t.Parallel()
 
-	indexName := "key__users__email"
-	aTable := &Table{
-		UniqueIndexes: map[string]UniqueIndex{
-			indexName: {
-				IndexInfo: IndexInfo{
-					Name:   indexName,
-					Column: testColumnsWithUniqueIndex[1],
+	// We can test both unique and secondary indexes using similar table structures.
+	// Query plan should be the same for both types of indexes in these simple test cases.
+	var (
+		indexName             = "foo"
+		aTableWithUniqueIndex = &Table{
+			UniqueIndexes: map[string]UniqueIndex{
+				indexName: {
+					IndexInfo: IndexInfo{
+						Name:   indexName,
+						Column: testColumnsWithUniqueIndex[1],
+					},
 				},
 			},
-		},
-		Columns: testColumnsWithUniqueIndex,
-	}
+			Columns: testColumnsWithUniqueIndex,
+		}
+		aTableWithSecondaryIndex = &Table{
+			SecondaryIndexes: map[string]SecondaryIndex{
+				indexName: {
+					IndexInfo: IndexInfo{
+						Name:   indexName,
+						Column: testColumnsWithSecondaryIndex[1],
+					},
+				},
+			},
+			Columns: testColumnsWithSecondaryIndex,
+		}
+	)
 
 	testCases := []struct {
 		Name     string
@@ -66,7 +81,7 @@ func TestTable_PlanQuery_UniqueIndex(t *testing.T) {
 			},
 		},
 		{
-			"Single unique index key equality condition but NULL - sequential scan",
+			"Single index key equality condition but NULL - sequential scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
@@ -89,7 +104,7 @@ func TestTable_PlanQuery_UniqueIndex(t *testing.T) {
 			},
 		},
 		{
-			"Single unique index key equality condition - index point scan",
+			"Single index key equality condition - index point scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
@@ -111,7 +126,7 @@ func TestTable_PlanQuery_UniqueIndex(t *testing.T) {
 			},
 		},
 		{
-			"Multiple unique index key equality conditions - index point scan",
+			"Multiple index key equality conditions - index point scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
@@ -143,7 +158,7 @@ func TestTable_PlanQuery_UniqueIndex(t *testing.T) {
 			},
 		},
 		{
-			"Multiple unique index key equality conditions with extra remaining filters for both groups - index point scan",
+			"Multiple index key equality conditions with extra remaining filters for both groups - index point scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
@@ -185,7 +200,7 @@ func TestTable_PlanQuery_UniqueIndex(t *testing.T) {
 			},
 		},
 		{
-			"Multiple primary key equality conditions with extra remaining filters for only one group - index point scan",
+			"Multiple index key equality conditions with extra remaining filters for only one group - index point scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
@@ -222,7 +237,7 @@ func TestTable_PlanQuery_UniqueIndex(t *testing.T) {
 			},
 		},
 		{
-			"Multiple unique index keys IN condition - index point scan",
+			"Multiple index keys IN condition - index point scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
@@ -244,7 +259,7 @@ func TestTable_PlanQuery_UniqueIndex(t *testing.T) {
 			},
 		},
 		{
-			"Multiple unique index keys NOT IN condition - sequential scan",
+			"Multiple index keys NOT IN condition - sequential scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
@@ -265,7 +280,7 @@ func TestTable_PlanQuery_UniqueIndex(t *testing.T) {
 			},
 		},
 		{
-			"Single unique index key NOT equal condition - sequential scan",
+			"Single index key NOT equal condition - sequential scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
@@ -315,7 +330,7 @@ func TestTable_PlanQuery_UniqueIndex(t *testing.T) {
 			},
 		},
 		{
-			"Ordered by primary key descending - index scan",
+			"Ordered by index key descending - index scan",
 			Statement{
 				Kind: Select,
 				OrderBy: []OrderBy{
@@ -343,7 +358,7 @@ func TestTable_PlanQuery_UniqueIndex(t *testing.T) {
 			},
 		},
 		{
-			"Multiple unique index keys IN condition plus order by - index point scan",
+			"Multiple index keys IN condition plus order by - index point scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
@@ -460,7 +475,7 @@ func TestTable_PlanQuery_UniqueIndex(t *testing.T) {
 			},
 		},
 		{ // TODO - perhaps we should be ordering by using the index rather than sorting in memory?
-			"A range scan with order by unique index key - ordered in memory",
+			"A range scan with order by index key - ordered in memory",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
@@ -507,8 +522,16 @@ func TestTable_PlanQuery_UniqueIndex(t *testing.T) {
 	}
 
 	for _, aTestCase := range testCases {
-		t.Run(aTestCase.Name, func(t *testing.T) {
-			actual, err := aTable.PlanQuery(context.Background(), aTestCase.Stmt)
+		t.Run(aTestCase.Name+"- unique index", func(t *testing.T) {
+			actual, err := aTableWithUniqueIndex.PlanQuery(context.Background(), aTestCase.Stmt)
+			require.NoError(t, err)
+			assert.Equal(t, aTestCase.Expected, actual)
+		})
+	}
+
+	for _, aTestCase := range testCases {
+		t.Run(aTestCase.Name+"- secondary index", func(t *testing.T) {
+			actual, err := aTableWithSecondaryIndex.PlanQuery(context.Background(), aTestCase.Stmt)
 			require.NoError(t, err)
 			assert.Equal(t, aTestCase.Expected, actual)
 		})

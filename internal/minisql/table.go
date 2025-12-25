@@ -110,6 +110,20 @@ func (t *Table) IndexByName(name string) (BTreeIndex, bool) {
 	return nil, false
 }
 
+func (t *Table) IndexMap() map[string]IndexInfo {
+	indexMap := make(map[string]IndexInfo)
+	if t.HasPrimaryKey() {
+		indexMap[t.PrimaryKey.Column.Name] = t.PrimaryKey.IndexInfo
+	}
+	for _, index := range t.UniqueIndexes {
+		indexMap[index.Column.Name] = index.IndexInfo
+	}
+	for _, index := range t.SecondaryIndexes {
+		indexMap[index.Column.Name] = index.IndexInfo
+	}
+	return indexMap
+}
+
 // SeekNextRowID returns cursor pointing at the position after the last row ID
 // plus a new row ID to insert
 func (t *Table) SeekNextRowID(ctx context.Context, pageIdx PageIndex) (*Cursor, RowID, error) {

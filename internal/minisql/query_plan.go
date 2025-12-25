@@ -117,7 +117,7 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error
 	}
 
 	// If there are no indexes, we cannot do index scans
-	if !t.HasPrimaryKey() && len(t.UniqueIndexes) == 0 {
+	if !t.HasPrimaryKey() && len(t.UniqueIndexes) == 0 && len(t.SecondaryIndexes) == 0 {
 		// But we might still use index for ordering
 		return plan.optimizeOrdering(t), nil
 	}
@@ -150,13 +150,7 @@ func (p QueryPlan) optimizeOrdering(t *Table) QueryPlan {
 
 	// Sequential scan
 	if len(p.Scans) == 1 && p.Scans[0].Type == ScanTypeSequential {
-		indexMap := make(map[string]IndexInfo)
-		if t.HasPrimaryKey() {
-			indexMap[t.PrimaryKey.Column.Name] = t.PrimaryKey.IndexInfo
-		}
-		for _, index := range t.UniqueIndexes {
-			indexMap[index.Column.Name] = index.IndexInfo
-		}
+		indexMap := t.IndexMap()
 
 		// Either order ORDER BY indexed column
 		if info, ok := indexMap[orderCol]; ok {
@@ -193,15 +187,8 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 		indexKeys                   = make([][]any, 0, 10)
 		remaining                   = make([]Conditions, 0, len(conditions))
 		groupIndex                  = make(map[int]IndexInfo)
+		indexMap                    = t.IndexMap()
 	)
-
-	indexMap := make(map[string]struct{})
-	if t.HasPrimaryKey() {
-		indexMap[t.PrimaryKey.Column.Name] = struct{}{}
-	}
-	for _, index := range t.UniqueIndexes {
-		indexMap[index.Column.Name] = struct{}{}
-	}
 
 	// Each group is separated by OR, for example:
 	// (a = 1 AND b = 2) OR (a = 3 AND b = 4)
@@ -228,19 +215,13 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 				return fmt.Errorf("invalid field name in condition: %s", fieldName)
 			}
 
-			// If group contains conditions on multiple indexes, we prefer primary key if present,
-			// otherwise just take the first one we find.
+			// If group contains conditions on multiple indexes, we must pick only one.
 			hasIndexCondition = true
-			if fieldName == t.PrimaryKey.Column.Name {
-				groupIndex[groupIDx] = t.PrimaryKey.IndexInfo
-			} else if _, exists := groupIndex[groupIDx]; !exists {
-				for _, uniqueIndex := range t.UniqueIndexes {
-					if uniqueIndex.Column.Name == fieldName {
-						groupIndex[groupIDx] = uniqueIndex.IndexInfo
-						break
-					}
-				}
+			info, ok := pickIndexInfo(t, fieldName)
+			if !ok {
+				return fmt.Errorf("could not find index info for field: %s", fieldName)
 			}
+			groupIndex[groupIDx] = info
 
 			if isEquality(aCondition) && aCondition.Operand2.Type != OperandNull {
 				keys, err := equalityKeys(aColumn, aCondition)
@@ -296,6 +277,26 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 	}
 
 	return nil
+}
+
+// pickIndexInfo chooses index info for a given field name, preferring primary key,
+// then unique indexes, then secondary indexes
+func pickIndexInfo(t *Table, fieldName string) (IndexInfo, bool) {
+	if fieldName == t.PrimaryKey.Column.Name {
+		return t.PrimaryKey.IndexInfo, true
+	}
+	for _, uniqueIndex := range t.UniqueIndexes {
+		if uniqueIndex.Column.Name == fieldName {
+			return uniqueIndex.IndexInfo, true
+		}
+	}
+
+	for _, secondaryIndex := range t.SecondaryIndexes {
+		if secondaryIndex.Column.Name == fieldName {
+			return secondaryIndex.IndexInfo, true
+		}
+	}
+	return IndexInfo{}, false
 }
 
 func isEquality(cond Condition) bool {

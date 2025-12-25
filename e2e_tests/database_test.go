@@ -2,7 +2,6 @@ package e2etests
 
 import (
 	"database/sql"
-	"fmt"
 	"os"
 	"testing"
 
@@ -158,7 +157,7 @@ func (s *TestSuite) TestCreateTable() {
 
 		schemas := s.scanSchemas()
 		s.Require().Equal(8, len(schemas))
-		fmt.Println(schemas)
+
 		s.assertSchemaTable(schemas[0])
 		// Page numbers will be reversed because we dropped the table previously and
 		// pages were freed up and now reused back from linked list of free pages.
