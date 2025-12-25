@@ -60,6 +60,7 @@ const (
 	SchemaTable SchemaType = iota + 1
 	SchemaPrimaryKey
 	SchemaUniqueIndex
+	SchemaSecondaryIndex
 )
 
 type Parser interface {
@@ -265,6 +266,37 @@ func (d *Database) init(ctx context.Context) error {
 				"name", uniqueIndex.Name,
 				"root_page", rootPageIdx,
 			).Debug("loaded unique index")
+		case SchemaSecondaryIndex:
+			var (
+				indexName = aRow.Values[1].Value.(TextPointer).String()
+				tableName = tableNameFromSecondaryIndex(indexName)
+			)
+			aTable, ok := d.tables[tableName]
+			if !ok {
+				return fmt.Errorf("table %s for secondary index %s does not exist", tableName, indexName)
+			}
+			secondaryIndex, ok := aTable.SecondaryIndexes[indexName]
+			if !ok {
+				return fmt.Errorf("secondary index %s does not exist on table %s", indexName, tableName)
+			}
+			indexPager := NewTransactionalPager(
+				d.factory.ForIndex(secondaryIndex.Column.Kind, uint64(secondaryIndex.Column.Size), true),
+				d.txManager,
+			)
+			rootPageIdx := PageIndex(aRow.Values[2].Value.(int32))
+			btreeIndex, err := aTable.newBTreeIndex(indexPager, rootPageIdx, secondaryIndex.Column, secondaryIndex.Name)
+			if err != nil {
+				return err
+			}
+
+			// Set unique BTree index on the table instance
+			secondaryIndex.Index = btreeIndex
+			aTable.SecondaryIndexes[indexName] = secondaryIndex
+
+			d.logger.Sugar().With(
+				"name", secondaryIndex.Name,
+				"root_page", rootPageIdx,
+			).Debug("loaded secondary index")
 		default:
 			return fmt.Errorf("unrecognized schema type %d", aRow.Values[0].Value.(int32))
 		}
@@ -520,7 +552,7 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 		if err != nil {
 			return nil, err
 		}
-		// Set primary key on the table instance
+		// Set primary key index on the table instance
 		createdTable.PrimaryKey.Index = createdIndex
 	}
 
@@ -529,9 +561,19 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 		if err != nil {
 			return nil, err
 		}
-		// Set primary key on the table instance
+		// Set unique index on the table instance
 		uniqueIndex.Index = createdIndex
 		createdTable.UniqueIndexes[uniqueIndex.Name] = uniqueIndex
+	}
+
+	for _, secondaryIndex := range createdTable.SecondaryIndexes {
+		createdIndex, err := d.createSecondaryIndex(ctx, createdTable, secondaryIndex)
+		if err != nil {
+			return nil, err
+		}
+		// Set secondary index on the table instance
+		secondaryIndex.Index = createdIndex
+		createdTable.SecondaryIndexes[secondaryIndex.Name] = secondaryIndex
 	}
 
 	tx.DDLChanges.CreateTables = append(tx.DDLChanges.CreateTables, createdTable)
@@ -587,6 +629,30 @@ func (d *Database) createUniqueIndex(ctx context.Context, aTable *Table, uniqueI
 	return createdIndex, nil
 }
 
+func (d *Database) createSecondaryIndex(ctx context.Context, aTable *Table, secondaryIndex SecondaryIndex) (BTreeIndex, error) {
+	d.logger.Sugar().With("column", secondaryIndex.Column.Name).Debug("creating secondary index")
+
+	indexPager := NewTransactionalPager(
+		d.factory.ForIndex(secondaryIndex.Column.Kind, uint64(secondaryIndex.Column.Size), true),
+		d.txManager,
+	)
+	freePage, err := indexPager.GetFreePage(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	createdIndex, err := aTable.createBTreeIndex(indexPager, freePage, secondaryIndex.Column, secondaryIndex.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := d.insertIntoMainTable(ctx, SchemaSecondaryIndex, secondaryIndex.Name, freePage.Index, ""); err != nil {
+		return nil, err
+	}
+
+	return createdIndex, nil
+}
+
 // dropTable drops a table and all its data
 func (d *Database) dropTable(ctx context.Context, name string) error {
 	tx := TxFromContext(ctx)
@@ -611,6 +677,11 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	}
 	for _, uniqueIndex := range tableToDelete.UniqueIndexes {
 		if err := d.deleteFromMainTable(ctx, SchemaUniqueIndex, uniqueIndex.Name); err != nil {
+			return err
+		}
+	}
+	for _, secondaryIndex := range tableToDelete.SecondaryIndexes {
+		if err := d.deleteFromMainTable(ctx, SchemaSecondaryIndex, secondaryIndex.Name); err != nil {
 			return err
 		}
 	}
@@ -654,7 +725,20 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 				).Error("failed to free unique index page")
 				return
 			}
-			d.logger.Sugar().With("page", page.Index).Debug("freed index page")
+			d.logger.Sugar().With("page", page.Index).Debug("freed unique index page")
+		})
+	}
+	// And then free pages for secondary indexes index if any
+	for _, secondaryIndex := range tableToDelete.SecondaryIndexes {
+		secondaryIndex.Index.BFS(ctx, func(page *Page) {
+			if err := tablePager.AddFreePage(ctx, page.Index); err != nil {
+				d.logger.Sugar().With(
+					"page", page.Index,
+					"error", err,
+				).Error("failed to free secondary index page")
+				return
+			}
+			d.logger.Sugar().With("page", page.Index).Debug("freed secondary index page")
 		})
 	}
 

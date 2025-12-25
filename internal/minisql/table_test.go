@@ -15,6 +15,7 @@ const (
 	testTableName  = "test_table"
 	testTableName2 = "test_table_2"
 	testTableName3 = "test_table_3"
+	testTableName4 = "test_table_4"
 )
 
 func TestNewTable_WithPrimaryKey(t *testing.T) {

@@ -30,7 +30,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 	for i, values := range stmt.Inserts {
 		if t.HasPrimaryKey() {
 			if t.PrimaryKey.Index == nil {
-				return fmt.Errorf("table %s has primary key but no index", t.Name)
+				return fmt.Errorf("table %s has primary key but no Btree index instance", t.Name)
 			}
 
 			pkValue, ok := stmt.InsertForColumn(t.PrimaryKey.Column.Name, i)
@@ -50,15 +50,30 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 
 		for _, uniqueIndex := range t.UniqueIndexes {
 			if uniqueIndex.Index == nil {
-				return fmt.Errorf("table %s has unique index %s but no index", t.Name, uniqueIndex.Name)
+				return fmt.Errorf("table %s has unique index %s but no Btree index instance", t.Name, uniqueIndex.Name)
 			}
 
-			uniqueValue, ok := stmt.InsertForColumn(uniqueIndex.Column.Name, i)
+			indexValue, ok := stmt.InsertForColumn(uniqueIndex.Column.Name, i)
 			if !ok {
 				return fmt.Errorf("failed to get value for unique index %s", uniqueIndex.Name)
 			}
 
-			if err := t.insertUniqueKey(ctx, uniqueIndex, uniqueValue, nextRowID); err != nil {
+			if err := t.insertUniqueIndexKey(ctx, uniqueIndex, indexValue, nextRowID); err != nil {
+				return err
+			}
+		}
+
+		for _, secondaryIndex := range t.SecondaryIndexes {
+			if secondaryIndex.Index == nil {
+				return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
+			}
+
+			indexValue, ok := stmt.InsertForColumn(secondaryIndex.Column.Name, i)
+			if !ok {
+				return fmt.Errorf("failed to get value for secondary index %s", secondaryIndex.Name)
+			}
+
+			if err := t.insertSecondaryIndexKey(ctx, secondaryIndex, indexValue, nextRowID); err != nil {
 				return err
 			}
 		}
