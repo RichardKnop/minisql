@@ -261,18 +261,29 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 		}
 		// Resinsert unique keys if applicable
 		for _, uniqueIndex := range c.Table.UniqueIndexes {
-			uniqueValue, ok := stmt.Updates[uniqueIndex.Column.Name]
+			indexValue, ok := stmt.Updates[uniqueIndex.Column.Name]
 			if !ok {
 				return false, fmt.Errorf("failed to get value for unique index %s", uniqueIndex.Name)
 			}
 
-			if err := c.Table.insertUniqueKey(ctx, uniqueIndex, uniqueValue, aRow.Key); err != nil {
+			if err := c.Table.insertUniqueIndexKey(ctx, uniqueIndex, indexValue, aRow.Key); err != nil {
 				return false, err
 			}
 		}
 		// Reinsert with the same row ID
 		if err := c.LeafNodeInsert(ctx, aRow.Key, aRow); err != nil {
 			return false, fmt.Errorf("update re-insert new row: %w", err)
+		}
+		// Resinsert secondary keys if applicable
+		for _, secondaryIndex := range c.Table.SecondaryIndexes {
+			indexValue, ok := stmt.Updates[secondaryIndex.Column.Name]
+			if !ok {
+				return false, fmt.Errorf("failed to get value for secondary index %s", secondaryIndex.Name)
+			}
+
+			if err := c.Table.insertSecondaryIndexKey(ctx, secondaryIndex, indexValue, aRow.Key); err != nil {
+				return false, err
+			}
 		}
 		return true, nil
 	}
@@ -303,11 +314,11 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 		// Only update primary key if it has changed
 		_, ok := changedValues[c.Table.PrimaryKey.Column.Name]
 		if ok {
-			oldPkValue, ok := oldRow.GetValue(c.Table.PrimaryKey.Column.Name)
+			oldIndexKey, ok := oldRow.GetValue(c.Table.PrimaryKey.Column.Name)
 			if !ok {
 				return false, fmt.Errorf("failed to get old value for primary key %s", c.Table.PrimaryKey.Name)
 			}
-			if err := c.Table.updatePrimaryKey(ctx, oldPkValue, aRow); err != nil {
+			if err := c.Table.updatePrimaryKey(ctx, oldIndexKey, aRow); err != nil {
 				return false, err
 			}
 		}
@@ -316,11 +327,24 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 		// Only update unique index key if it has changed
 		_, ok := changedValues[uniqueIndex.Column.Name]
 		if ok {
-			oldUniqueValue, ok := oldRow.GetValue(uniqueIndex.Column.Name)
+			oldIndexKey, ok := oldRow.GetValue(uniqueIndex.Column.Name)
 			if !ok {
 				return false, fmt.Errorf("failed to get old value for unique index %s", uniqueIndex.Name)
 			}
-			if err := c.Table.updateUniqueKey(ctx, uniqueIndex, oldUniqueValue, aRow); err != nil {
+			if err := c.Table.updateUniqueIndexKey(ctx, uniqueIndex, oldIndexKey, aRow); err != nil {
+				return false, err
+			}
+		}
+	}
+	for _, secondaryIndex := range c.Table.SecondaryIndexes {
+		// Only update secondary index key if it has changed
+		_, ok := changedValues[secondaryIndex.Column.Name]
+		if ok {
+			oldIndexKey, ok := oldRow.GetValue(secondaryIndex.Column.Name)
+			if !ok {
+				return false, fmt.Errorf("failed to get old value for secondary index %s", secondaryIndex.Name)
+			}
+			if err := c.Table.updateSecondaryIndexKey(ctx, secondaryIndex, oldIndexKey, aRow); err != nil {
 				return false, err
 			}
 		}
@@ -344,8 +368,12 @@ func (c *Cursor) delete(ctx context.Context, aRow Row) error {
 		return fmt.Errorf("delete primary key: %w", err)
 	}
 
-	if err := c.deleteUniqueKeys(ctx, aRow); err != nil {
-		return fmt.Errorf("delete unique keys: %w", err)
+	if err := c.deleteUniqueIndexKeys(ctx, aRow); err != nil {
+		return fmt.Errorf("delete unique index keys: %w", err)
+	}
+
+	if err := c.deleteSecondaryIndexKeys(ctx, aRow); err != nil {
+		return fmt.Errorf("delete secondary index keys: %w", err)
 	}
 
 	if err := c.Table.DeleteKey(ctx, c.PageIdx, aRow.Key); err != nil {
@@ -377,24 +405,48 @@ func (c *Cursor) deletePrimaryKey(ctx context.Context, aRow Row) error {
 	return nil
 }
 
-func (c *Cursor) deleteUniqueKeys(ctx context.Context, aRow Row) error {
+func (c *Cursor) deleteUniqueIndexKeys(ctx context.Context, aRow Row) error {
 	if len(c.Table.UniqueIndexes) == 0 {
 		return nil
 	}
 
 	for _, uniqueIndex := range c.Table.UniqueIndexes {
-		uniqueValue, ok := aRow.GetValue(uniqueIndex.Column.Name)
+		indexValue, ok := aRow.GetValue(uniqueIndex.Column.Name)
 		if !ok {
 			return fmt.Errorf("unique index key %s not found in row", uniqueIndex.Name)
 		}
 
-		castedValue, err := castKeyValue(uniqueIndex.Column, uniqueValue.Value)
+		castedValue, err := castKeyValue(uniqueIndex.Column, indexValue.Value)
 		if err != nil {
 			return fmt.Errorf("failed to cast key value for unique index %s: %w", uniqueIndex.Name, err)
 		}
 
 		if err := uniqueIndex.Index.Delete(ctx, castedValue, aRow.Key); err != nil {
 			return fmt.Errorf("failed to delete unique index key %s: %w", uniqueIndex.Name, err)
+		}
+	}
+
+	return nil
+}
+
+func (c *Cursor) deleteSecondaryIndexKeys(ctx context.Context, aRow Row) error {
+	if len(c.Table.SecondaryIndexes) == 0 {
+		return nil
+	}
+
+	for _, secondaryIndex := range c.Table.SecondaryIndexes {
+		indexValue, ok := aRow.GetValue(secondaryIndex.Column.Name)
+		if !ok {
+			return fmt.Errorf("unique index key %s not found in row", secondaryIndex.Name)
+		}
+
+		castedValue, err := castKeyValue(secondaryIndex.Column, indexValue.Value)
+		if err != nil {
+			return fmt.Errorf("failed to cast key value for secondary index %s: %w", secondaryIndex.Name, err)
+		}
+
+		if err := secondaryIndex.Index.Delete(ctx, castedValue, aRow.Key); err != nil {
+			return fmt.Errorf("failed to delete secondary index key %s: %w", secondaryIndex.Name, err)
 		}
 	}
 

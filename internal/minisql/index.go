@@ -308,11 +308,6 @@ func (ui *Index[T]) splitChild(ctx context.Context, parentPage, splitPage *Page,
 	return nil
 }
 
-type IndexItem struct {
-	Key   any
-	RowID *RowID
-}
-
 func (ui *Index[T]) Delete(ctx context.Context, keyAny any, rowID RowID) error {
 	key, ok := keyAny.(T)
 	if !ok {

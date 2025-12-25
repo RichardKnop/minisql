@@ -98,6 +98,7 @@ type Column struct {
 	PrimaryKey      bool
 	Autoincrement   bool
 	Unique          bool
+	Index           bool
 	Nullable        bool
 	DefaultValue    OptionalValue
 	DefaultValueNow bool

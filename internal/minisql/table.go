@@ -9,30 +9,32 @@ import (
 )
 
 type Table struct {
-	Name          string
-	Columns       []Column
-	PrimaryKey    PrimaryKey
-	UniqueIndexes map[string]UniqueIndex
-	rootPageIdx   PageIndex
-	maximumICells uint32
-	logger        *zap.Logger
-	pager         TxPager
-	txManager     *TransactionManager
-	clock         clock
+	Name             string
+	Columns          []Column
+	PrimaryKey       PrimaryKey
+	UniqueIndexes    map[string]UniqueIndex
+	SecondaryIndexes map[string]SecondaryIndex
+	rootPageIdx      PageIndex
+	maximumICells    uint32
+	logger           *zap.Logger
+	pager            TxPager
+	txManager        *TransactionManager
+	clock            clock
 }
 
 type clock func() Time
 
 func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, name string, columns []Column, rootPageIdx PageIndex) *Table {
 	aTable := &Table{
-		Name:          name,
-		Columns:       columns,
-		rootPageIdx:   rootPageIdx,
-		maximumICells: InternalNodeMaxCells,
-		logger:        logger,
-		pager:         pager,
-		txManager:     txManager,
-		UniqueIndexes: make(map[string]UniqueIndex),
+		Name:             name,
+		Columns:          columns,
+		rootPageIdx:      rootPageIdx,
+		maximumICells:    InternalNodeMaxCells,
+		logger:           logger,
+		pager:            pager,
+		txManager:        txManager,
+		UniqueIndexes:    make(map[string]UniqueIndex),
+		SecondaryIndexes: make(map[string]SecondaryIndex),
 		clock: func() Time {
 			now := time.Now()
 			return Time{
@@ -55,6 +57,7 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 				},
 				Autoincrement: aColumn.Autoincrement,
 			}
+			continue
 		}
 		if aColumn.Unique {
 			indexName := uniqueIndexName(name, aColumn.Name)
@@ -64,6 +67,17 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 					Column: aColumn,
 				},
 			}
+			continue
+		}
+		if aColumn.Index {
+			indexName := secondaryIndexName(name, aColumn.Name)
+			aTable.SecondaryIndexes[indexName] = SecondaryIndex{
+				IndexInfo: IndexInfo{
+					Name:   indexName,
+					Column: aColumn,
+				},
+			}
+			continue
 		}
 	}
 	return aTable
@@ -1009,7 +1023,7 @@ func (t *Table) createBTreeIndex(aPager *TransactionalPager, freePage *Page, aCo
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
-	case Int8:
+	case Int8, Timestamp:
 		indexNode := NewIndexNode[int64](true)
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
@@ -1056,7 +1070,7 @@ func (t *Table) newBTreeIndex(aPager *TransactionalPager, rootPageIdx PageIndex,
 			aPager,
 			rootPageIdx,
 		)
-	case Int8:
+	case Int8, Timestamp:
 		return NewUniqueIndex[int64](
 			t.logger,
 			t.txManager,

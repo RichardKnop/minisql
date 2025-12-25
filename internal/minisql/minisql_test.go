@@ -188,6 +188,20 @@ var (
 		},
 	}
 
+	testColumnsWithSecondaryIndex = []Column{
+		{
+			Kind: Int8,
+			Size: 8,
+			Name: "id",
+		},
+		{
+			Kind:  Varchar,
+			Size:  MaxInlineVarchar,
+			Name:  "email",
+			Index: true,
+		},
+	}
+
 	testOverflowColumns = []Column{
 		{
 			Kind: Int8,

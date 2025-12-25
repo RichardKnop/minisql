@@ -28,12 +28,12 @@ func tableNameFromPrimaryKey(indexName string) string {
 	return strings.TrimPrefix(indexName, "pkey__")
 }
 
-func (t *Table) insertPrimaryKey(ctx context.Context, pkValue OptionalValue, rowID RowID) (any, error) {
+func (t *Table) insertPrimaryKey(ctx context.Context, key OptionalValue, rowID RowID) (any, error) {
 	if t.PrimaryKey.Index == nil {
 		return nil, fmt.Errorf("table %s has primary key but no index", t.Name)
 	}
 
-	if !pkValue.Valid {
+	if !key.Valid {
 		if !t.PrimaryKey.Autoincrement {
 			return 0, fmt.Errorf("failed to get value for primary key %s", t.PrimaryKey.Name)
 		}
@@ -43,21 +43,21 @@ func (t *Table) insertPrimaryKey(ctx context.Context, pkValue OptionalValue, row
 		}
 		return newPrimaryKey, nil
 	}
-	castedValue, err := castKeyValue(t.PrimaryKey.Column, pkValue.Value)
+	castedKey, err := castKeyValue(t.PrimaryKey.Column, key.Value)
 	if err != nil {
 		return 0, fmt.Errorf("failed to cast primary key value for %s: %w", t.PrimaryKey.Name, err)
 	}
 
 	t.logger.Sugar().With(
 		"index", t.PrimaryKey.Name,
-		"key", castedValue,
+		"key", castedKey,
 	).Debug("inserting primary key")
 
-	if err := t.PrimaryKey.Index.Insert(ctx, castedValue, rowID); err != nil {
+	if err := t.PrimaryKey.Index.Insert(ctx, castedKey, rowID); err != nil {
 		return 0, fmt.Errorf("failed to insert primary key %s: %w", t.PrimaryKey.Name, err)
 	}
 
-	return castedValue, nil
+	return castedKey, nil
 }
 
 func (t *Table) insertAutoincrementedPrimaryKey(ctx context.Context, rowID RowID) (int64, error) {
@@ -87,24 +87,24 @@ func (t *Table) insertAutoincrementedPrimaryKey(ctx context.Context, rowID RowID
 	return newPrimaryKey, nil
 }
 
-func (t *Table) updatePrimaryKey(ctx context.Context, oldPkValue OptionalValue, aRow Row) error {
+func (t *Table) updatePrimaryKey(ctx context.Context, oldKey OptionalValue, aRow Row) error {
 	if t.PrimaryKey.Index == nil {
-		return fmt.Errorf("table %s has primary key but no index", t.Name)
+		return fmt.Errorf("table %s has primary key but no Btree index instance", t.Name)
 	}
 
-	oldKeyValue, err := castKeyValue(t.PrimaryKey.Column, oldPkValue.Value)
+	castedOldKey, err := castKeyValue(t.PrimaryKey.Column, oldKey.Value)
 	if err != nil {
 		return fmt.Errorf("failed to cast old primary key value for %s: %w", t.PrimaryKey.Name, err)
 	}
 
-	pkValue, ok := aRow.GetValue(t.PrimaryKey.Column.Name)
+	newKey, ok := aRow.GetValue(t.PrimaryKey.Column.Name)
 	if !ok {
 		return nil
 	}
-	if !pkValue.Valid {
+	if !newKey.Valid {
 		return fmt.Errorf("cannot update primary key %s to NULL", t.PrimaryKey.Name)
 	}
-	castedValue, err := castKeyValue(t.PrimaryKey.Column, pkValue.Value)
+	castedKey, err := castKeyValue(t.PrimaryKey.Column, newKey.Value)
 	if err != nil {
 		return fmt.Errorf("failed to cast primary key value for %s: %w", t.PrimaryKey.Name, err)
 	}
@@ -112,10 +112,10 @@ func (t *Table) updatePrimaryKey(ctx context.Context, oldPkValue OptionalValue, 
 
 	// We try to insert new primary key first to avoid leaving table in inconsistent state
 	// If the new primary key is already taken, we return an error without modifying the existing row
-	if err := t.PrimaryKey.Index.Insert(ctx, castedValue, rowID); err != nil {
+	if err := t.PrimaryKey.Index.Insert(ctx, castedKey, rowID); err != nil {
 		return fmt.Errorf("failed to insert new primary key %s: %w", t.PrimaryKey.Name, err)
 	}
-	if err := t.PrimaryKey.Index.Delete(ctx, oldKeyValue, rowID); err != nil {
+	if err := t.PrimaryKey.Index.Delete(ctx, castedOldKey, rowID); err != nil {
 		return fmt.Errorf("failed to delete old primary key %s: %w", t.PrimaryKey.Name, err)
 	}
 
@@ -157,7 +157,7 @@ func castKeyValue(aColumn Column, aValue any) (any, error) {
 		if !ok {
 			return nil, fmt.Errorf("could not cast value for column %s to Time", aColumn.Name)
 		}
-		return timestamp.String(), nil
+		return timestamp.TotalMicroseconds(), nil
 	default:
 		return aValue, nil
 	}
