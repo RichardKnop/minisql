@@ -25,40 +25,7 @@ And create a database instance:
 db, err := sql.Open("minisql", "./my.db")
 ```
 
-## Current Features
-
-I plan to implement more features of traditional relational databases in the future as part of this project simply to learn and discovery how various features I have grown acustomed to over the years are implemented under the hood. However, currently only a very small number of features are implemented:
-
-- simple SQL parser with partial support for basic queries: 
-  - `CREATE TABLE`, `CREATE TABLE IF NOT EXISTS`
-  - `DROP TABLE`
-  - `INSERT` (single row or multi rows via tuple of values separated by comma)
-  - `SELECT` (all fields with `*`, only specific fields or count rows with `COUNT(*)`)
-  - `UPDATE`
-  - `DELETE`
-- `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE`, `TEXT`, `VARCHAR`, `TIMESTAMP` data types supported
-- `PRIMARY KEY` support, only single column, no composite primary keys
-- `AUTOINCREMENT` support, primary key must be of type `INT8` for autoincrement
-- `UNIQUE` index can be specified when creating a table
-- `NULL` and `NOT NULL` support (via null bit mask included in each row/cell)
-- `DEFAULT` support for all columns including `NOW()` for `TIMESTAMP`
-- `BEGIN`, `COMMIT`, `ROLLBACK`, if not specified, each query will be wrapped in auto commit transaction
-- simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis
-- supported operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`
-- `LIMIT` and `OFFSET` clauses for basic pagination
-
-### Data Types And Storage
-
-| Data type    | Description |
-|--------------|-------------|
-| `BOOLEAN`    | 1-byte boolean value (true/false). |
-| `INT4`       | 4-byte signed integer (-2,147,483,648 to 2,147,483,647). |
-| `INT8`       | 8-byte signed integer (-9,223,372,036,854,775,808 to 9,223,372,036,854,775,807). |
-| `REAL`       | 4-byte single-precision floating-point number. |
-| `DOUBLE`     | 8-byte double-precision floating-point number. |
-| `TEXT`       | Variable-length text. If length is <= 255, the text is stored inline, otherwise text is stored in overflow pages (with UTF-8 encoding). |
-| `VARCHAR(n)` | Storage works the same way as `TEXT` but allows limiting length of inserted/updated text to max value. |
-| `TIMESTAMP`  | 8-byte signed integer representing number of microseconds from `2000-01-01 00:00:00 UTC` (`Postgres epoch`). Supported range is from `4713 BC` to `294276 AD` inclusive. |
+## Storage
 
 Each page size is `4096 bytes`. Rows larger than page size are not supported. Therefor, the largest allowed row size is `4066 bytes`. Only exception is root page 0 has first 100 bytes reserved for config.
 
@@ -77,25 +44,9 @@ Each row has an internal row ID which is an unsigned 64 bit integer starting at 
 
 Moreover, each row starts with 64 bit null mask which determines which values are NULL. Because of the NULL bit mask being an unsigned 64 bit integer, there is a limit of `maximum 64 columns per table`.
 
-## Planned features:
+## System Table
 
-- composite unique index
-- date/time functions to make working with `TIMESTAMP` type easier
-- joins such as `INNER`, `LEFT`, `RIGHT`
-- foreign keys
-- support `GROUP BY` and aggregation functions such as `MAX`, `MIN`, `SUM`
-- UPDATE from a SELECT
-- upsert (insert on conflict)
-- rollback journal file
-- more complex WHERE clauses
-- support altering tables, creating and dropping of indexes outside of create table query
-- more sophisticated query planner
-- vacuuming
-- benchmarks
-
-## Examples
-
-When creating a new MiniSQL database, it is initialised with `minisql_schema` system table which holds schema of all tables within the database:
+All tables and indexes are tracked in the system table `minisql_schema`. For empty database, it would contain only its own reference:
 
 ```sh
  type   | name                       | root_page   | sql                                                
@@ -108,22 +59,19 @@ When creating a new MiniSQL database, it is initialised with `minisql_schema` sy
         |                            |             | )
 ```
 
-You can create your own non-system table now:
+Let's say you create a table such as:
 
-```go
-_, err := s.db.Exec(`create table "users" (
+```sql
+`create table "users" (
 	id int8 primary key autoincrement,
 	email varchar(255) unique,
 	name text,
 	age int4,
 	created timestamp default now()
-);`)
-if err != nil {
-	return err
-}
+);
 ```
 
-Now you should see your table in the `minisql_schema`:
+It will be added to the system table as well as its primary key and any unique or secondary indexes.
 
 ```sh
  type   | name                       | root_page   | sql                                                
@@ -145,12 +93,134 @@ Now you should see your table in the `minisql_schema`:
  3      | key__users_email           | 3           | NULL                                               
 ```
 
-There is a new entry for `users` table as well as one for the primary key index.
+## Data Types And Storage
+
+| Data type    | Description |
+|--------------|-------------|
+| `BOOLEAN`    | 1-byte boolean value (true/false). |
+| `INT4`       | 4-byte signed integer (-2,147,483,648 to 2,147,483,647). |
+| `INT8`       | 8-byte signed integer (-9,223,372,036,854,775,808 to 9,223,372,036,854,775,807). |
+| `REAL`       | 4-byte single-precision floating-point number. |
+| `DOUBLE`     | 8-byte double-precision floating-point number. |
+| `TEXT`       | Variable-length text. If length is <= 255, the text is stored inline, otherwise text is stored in overflow pages (with UTF-8 encoding). |
+| `VARCHAR(n)` | Storage works the same way as `TEXT` but allows limiting length of inserted/updated text to max value. |
+| `TIMESTAMP`  | 8-byte signed integer representing number of microseconds from `2000-01-01 00:00:00 UTC` (`Postgres epoch`). Supported range is from `4713 BC` to `294276 AD` inclusive. |
+
+## Supported SQL Features
+
+- `CREATE TABLE`, `CREATE TABLE IF NOT EXISTS`
+- `PRIMARY KEY` support, only single column, no composite primary keys
+- `AUTOINCREMENT` support, primary key must be of type `INT8` for autoincrement
+- `UNIQUE` index can be specified when creating a table
+- `NULL` and `NOT NULL` support (via null bit mask included in each row/cell)
+- `DEFAULT` support for all columns including `NOW()` for `TIMESTAMP`
+- `DROP TABLE`
+- `INSERT` (single row or multi rows via tuple of values separated by comma)
+- `SELECT` (all fields with `*`, only specific fields or count rows with `COUNT(*)`)
+- `UPDATE`
+- `DELETE`
+- simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis
+- supported operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`
+- `LIMIT` and `OFFSET` clauses for basic pagination
+
+For `WHERE`clauses, currently supported is maximum one level of nesting. You can define multiple groups where each group item is joined with `AND` and groups themselves are joined by `OR`. For example, you could create two condition groups such as:
+
+```sh
+(a = 1 and b = 'foo') or (c is null and d in ('bar', 'qux'))
+```
+
+Prepared statements are supported using `?` as a placeholder. For example:
+
+```sql
+insert into users("name", "email") values(?, ?), (?, ?);
+```
+
+## Planned features:
+
+- composite unique index
+- date/time functions to make working with `TIMESTAMP` type easier
+- joins such as `INNER`, `LEFT`, `RIGHT`
+- foreign keys
+- support `GROUP BY` and aggregation functions such as `MAX`, `MIN`, `SUM`
+- UPDATE from a SELECT
+- upsert (insert on conflict)
+- rollback journal file
+- more complex WHERE clauses
+- support altering tables, creating and dropping of indexes outside of create table query
+- more sophisticated query planner
+- vacuuming
+- benchmarks
+
+## Example Usage
+
+Let's start by creating your first table:
+
+```go
+_, err := db.Exec(`create table "users" (
+	id int8 primary key autoincrement,
+	email varchar(255) unique,
+	name text,
+	age int4,
+	created timestamp default now()
+);`)
+if err != nil {
+	return err
+}
+```
+
+Now you should see your table in the `minisql_schema`.
+
+```go
+// type schema struct {
+// 	Type     int
+// 	Name     string
+// 	RootPage int
+// 	SQL      *string
+// }
+
+rows, err := db.QueryContext(context.Background(), `select * from minisql_schema;`)
+if err != nil {
+	return err
+}
+defer rows.Close()
+
+var schemas []schema
+for rows.Next() {
+	var aSchema schema
+	if err := rows.Scan(&aSchema.Type, &aSchema.Name, &aSchema.RootPage, &aSchema.SQL); err != nil {
+		return err
+	}
+	schemas = append(schemas, aSchema)
+}
+if err := rows.Err(); err != nil {
+	return err
+}
+```
+
+```sh
+ type   | name                       | root_page   | sql                                                
+--------+----------------------------+-------------+----------------------------------------------------
+ 1      | minisql_schema             | 0           | create table "minisql_schema" (                    
+        |                            |             | 	type int4 not null,                               
+        |                            |             | 	name varchar(255) not null,                       
+        |                            |             | 	root_page int4,                                   
+        |                            |             | 	sql text                                          
+        |                            |             | );                                                 
+ 1      | users                      | 1           | create table "users" (                             
+        |                            |             | 	id int8 primary key autoincrement,                
+        |                            |             | 	email varchar(255) unique,                               
+        |                            |             | 	name text,                                       
+        |                            |             | 	age int4,                                          
+        |                            |             | 	created timestamp default now()                  
+        |                            |             | );                                                 
+ 2      | pkey__users                | 2           | NULL                                               
+ 3      | key__users_email           | 3           | NULL                                               
+```
 
 Insert test rows:
 
 ```go
-_, err := s.db.ExecContext(context.Background(), `insert into users("email", "name", "age") values('Danny_Mason2966@xqj6f.tech', 'Danny Mason', 35),
+aResult, err := db.ExecContext(context.Background(), `insert into users("email", "name", "age") values('Danny_Mason2966@xqj6f.tech', 'Danny Mason', 35),
 ('Johnathan_Walker250@ptr6k.page', 'Johnathan Walker', 32),
 ('Tyson_Weldon2108@zynuu.video', 'Tyson Weldon', 27),
 ('Mason_Callan9524@bu2lo.edu', 'Mason Callan', 19),
@@ -173,7 +243,7 @@ if err != nil {
 When trying to insert a duplicate primary key, you will get an error:
 
 ```go
-_, err := s.db.ExecContext(context.Background(), `insert into users("id", "name", "email", "age") values(1, 'Danny Mason', 'Danny_Mason2966@xqj6f.tech', 35);`)
+_, err := db.ExecContext(context.Background(), `insert into users("id", "name", "email", "age") values(1, 'Danny Mason', 'Danny_Mason2966@xqj6f.tech', 35);`)
 if err != nil {
 	if errors.Is(err, minisql.ErrDuplicateKey) {
 		// handle duplicate primary key
@@ -182,17 +252,17 @@ if err != nil {
 }
 ```
 
-Select from table:
+Select from the table:
 
 ```go
 // type user struct {
 // 	ID      int64
-// 	Name    string
 // 	Email   string
+// 	Name    string
 // 	Created time.Time
 // }
 
-rows, err := s.db.QueryContext(context.Background(), `select * from users;`)
+rows, err := db.QueryContext(context.Background(), `select * from users;`)
 if err != nil {
 	return err
 }
@@ -229,10 +299,14 @@ Table should have 10 rows now:
  10     | Cristal_Duvall6639@yvu30.press   | Cristal Duvall.         | 27     | 2025-12-21 22:31:35.514831    
 ```
 
-Update rows:
+Let's try using a prepared statement to update a row:
 
 ```go
-_, err := s.db.ExecContext(context.Background(), `update users set age = 36 where id = 1;`)
+stmt, err := db.Prepare(`update users set age = ? where id = ?;`)
+if err != nil {
+	return err
+}
+aResult, err := stmt.Exec(int64(36), int64(1))
 if err != nil {
 	return err
 }
@@ -254,7 +328,7 @@ Select to verify update:
 You can also delete rows:
 
 ```go
-_, err := s.db.ExecContext(context.Background(), `delete from users;`)
+_, err := db.ExecContext(context.Background(), `delete from users;`)
 if err != nil {
 	return err
 }
@@ -262,7 +336,6 @@ rowsAffected, err = aResult.RowsAffected()
 if err != nil {
 	return err
 }
-// continue
 ```
 
 ## Development 
