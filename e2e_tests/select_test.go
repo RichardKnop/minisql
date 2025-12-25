@@ -243,3 +243,10 @@ func (s TestSuite) collectUsers(query string) []user {
 	s.Require().NoError(rows.Err())
 	return users
 }
+
+func (s TestSuite) collectUser(query string) user {
+	var user user
+	err := s.db.QueryRow(query).Scan(&user.ID, &user.Email, &user.Name, &user.Created)
+	s.Require().NoError(err)
+	return user
+}

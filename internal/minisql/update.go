@@ -15,7 +15,7 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 	}
 
 	var err error
-	if stmt, err = stmt.Prepare(Time{}); err != nil {
+	if stmt, err = stmt.Prepare(t.clock()); err != nil {
 		return StatementResult{}, err
 	}
 

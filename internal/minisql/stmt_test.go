@@ -232,19 +232,15 @@ func TestStatement_Prepare_Update(t *testing.T) {
 					Name: "created_at",
 				},
 			},
-			Fields: []Field{
-				{Name: "created_at"},
-			},
 			Updates: map[string]OptionalValue{
 				"created_at": {Value: NewTextPointer([]byte("2025-12-20 03:13:27.674801")), Valid: true},
 			},
 		}
 
 		var err error
-		stmt, err = stmt.Prepare(Time{})
+		stmt, err = stmt.Prepare(now)
 		require.NoError(t, err)
 
-		assert.Equal(t, fieldsFromColumns(stmt.Columns...), stmt.Fields)
 		assert.Equal(t, OptionalValue{
 			Value: now,
 			Valid: true,
@@ -261,9 +257,6 @@ func TestStatement_Prepare_Update(t *testing.T) {
 					Size: 8,
 					Name: "created_at",
 				},
-			},
-			Fields: []Field{
-				{Name: "created_at"},
 			},
 			Updates: map[string]OptionalValue{
 				"created_at": {Value: Function{Name: "UNKNOWN_FUNCTION"}, Valid: true},
@@ -286,9 +279,6 @@ func TestStatement_Prepare_Update(t *testing.T) {
 					Name: "created_at",
 				},
 			},
-			Fields: []Field{
-				{Name: "created_at"},
-			},
 			Updates: map[string]OptionalValue{
 				"created_at": {Value: FunctionNow, Valid: true},
 			},
@@ -298,7 +288,6 @@ func TestStatement_Prepare_Update(t *testing.T) {
 		stmt, err = stmt.Prepare(now)
 		require.NoError(t, err)
 
-		assert.Equal(t, fieldsFromColumns(stmt.Columns...), stmt.Fields)
 		assert.Equal(t, OptionalValue{
 			Value: now,
 			Valid: true,

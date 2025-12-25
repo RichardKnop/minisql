@@ -391,14 +391,16 @@ func (s Statement) prepareUpdate(now Time) (Statement, error) {
 	if len(s.Updates) == 0 {
 		return s, nil
 	}
-	for _, aField := range s.Fields {
-		aColumn, ok := s.ColumnByName(aField.Name)
+
+	for name := range s.Updates {
+		aColumn, ok := s.ColumnByName(name)
 		if !ok {
-			return Statement{}, fmt.Errorf("unknown field %q in table %q", aField.Name, s.TableName)
+			return Statement{}, fmt.Errorf("unknown field %q in table %q", name, s.TableName)
 		}
-		updateValue, ok := s.Updates[aField.Name]
+
+		updateValue, ok := s.Updates[name]
 		if !ok {
-			return Statement{}, fmt.Errorf("missing update value for field %q", aField.Name)
+			return Statement{}, fmt.Errorf("missing update value for field %q", name)
 		}
 
 		if !updateValue.Valid {
@@ -408,7 +410,7 @@ func (s Statement) prepareUpdate(now Time) (Statement, error) {
 		if fn, ok := updateValue.Value.(Function); ok {
 			if fn.Name == FunctionNow.Name {
 				updateValue.Value = now
-				s.Updates[aField.Name] = updateValue
+				s.Updates[name] = updateValue
 			} else {
 				return Statement{}, fmt.Errorf("unsupported function %q in UPDATE", fn.Name)
 			}
@@ -418,10 +420,11 @@ func (s Statement) prepareUpdate(now Time) (Statement, error) {
 				return Statement{}, err
 			}
 			updateValue.Value = timestamp
-			s.Updates[aField.Name] = updateValue
+			s.Updates[name] = updateValue
 		}
 
 	}
+
 	return s, nil
 }
 
@@ -438,6 +441,9 @@ func (s Statement) prepareWhere() (Statement, error) {
 				return Statement{}, fmt.Errorf("unknown field %q in table %q", aCondition.Operand1.Value.(string), s.TableName)
 			}
 			if aColumn.Kind != Timestamp {
+				continue
+			}
+			if aCondition.Operand2.Type == OperandNull {
 				continue
 			}
 			if aCondition.Operand2.Type == OperandList {

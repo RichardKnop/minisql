@@ -14,6 +14,11 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, fmt.Errorf("invalid statement kind for DELETE: %v", stmt.Kind)
 	}
 
+	var err error
+	if stmt, err = stmt.Prepare(t.clock()); err != nil {
+		return StatementResult{}, err
+	}
+
 	if err := stmt.Validate(t); err != nil {
 		return StatementResult{}, err
 	}
