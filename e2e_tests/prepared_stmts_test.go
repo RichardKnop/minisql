@@ -102,7 +102,7 @@ func (s *TestSuite) TestPreparedStmts() {
 		s.Require().Len(users, 3)
 	})
 
-	s.Run("Delete users", func() {
+	s.Run("Delete multiple users", func() {
 		stmt, err := s.db.Prepare(`delete from users where id in (?, ?);`)
 		s.Require().NoError(err)
 
@@ -116,5 +116,20 @@ func (s *TestSuite) TestPreparedStmts() {
 		users := s.collectUsers(`select * from users;`)
 		s.Require().Len(users, 1)
 		s.Equal("Tyson_Weldon2108@zynuu.video", users[0].Email.String)
+	})
+
+	s.Run("Delete last user", func() {
+		stmt, err := s.db.Prepare(`delete from users where id = ?;`)
+		s.Require().NoError(err)
+
+		aResult, err := stmt.Exec(int64(3))
+		s.Require().NoError(err)
+
+		rowsAffected, err := aResult.RowsAffected()
+		s.Require().NoError(err)
+		s.Require().Equal(int64(1), rowsAffected)
+
+		users := s.collectUsers(`select * from users;`)
+		s.Require().Len(users, 0)
 	})
 }

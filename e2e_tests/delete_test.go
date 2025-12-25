@@ -1,15 +1,11 @@
 package e2etests
 
-import (
-	"context"
-)
-
 func (s *TestSuite) TestDelete() {
 	_, err := s.db.Exec(createUsersTableSQL)
 	s.Require().NoError(err)
 
 	// Insert test users
-	aResult, err := s.db.ExecContext(context.Background(), `insert into users("name", "email") values('Danny Mason', 'Danny_Mason2966@xqj6f.tech'),
+	s.execQuery(`insert into users("name", "email") values('Danny Mason', 'Danny_Mason2966@xqj6f.tech'),
 ('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page'),
 ('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video'),
 ('Mason Callan', 'Mason_Callan9524@bu2lo.edu'),
@@ -18,29 +14,17 @@ func (s *TestSuite) TestDelete() {
 ('Harry Johnson', 'Harry_Johnson5515@jcf8v.video'),
 ('Carl Thomson', 'Carl_Thomson4218@kyb7t.host'),
 ('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design'),
-('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press');`)
-	s.Require().NoError(err)
-	rowsAffected, err := aResult.RowsAffected()
-	s.Require().NoError(err)
-	s.Require().Equal(int64(10), rowsAffected)
+('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press');`, 10)
 
 	s.Run("Delete with where matching no rows", func() {
-		aResult, err := s.db.ExecContext(context.Background(), `delete from users where id = 9999;`)
-		s.Require().NoError(err)
-		rowsAffected, err := aResult.RowsAffected()
-		s.Require().NoError(err)
-		s.Require().Equal(int64(0), rowsAffected)
+		s.execQuery(`delete from users where id = 9999;`, 0)
 
 		users := s.collectUsers(`select * from users;`)
 		s.Require().Len(users, 10)
 	})
 
 	s.Run("Delete one row", func() {
-		aResult, err := s.db.ExecContext(context.Background(), `delete from users where id = 9;`)
-		s.Require().NoError(err)
-		rowsAffected, err := aResult.RowsAffected()
-		s.Require().NoError(err)
-		s.Require().Equal(int64(1), rowsAffected)
+		s.execQuery(`delete from users where id = 9;`, 1)
 
 		users := s.collectUsers(`select * from users;`)
 		s.Require().Len(users, 9)
@@ -51,11 +35,7 @@ func (s *TestSuite) TestDelete() {
 	})
 
 	s.Run("Delete multiple rows", func() {
-		aResult, err := s.db.ExecContext(context.Background(), `delete from users where id = 1 or id = 5;`)
-		s.Require().NoError(err)
-		rowsAffected, err := aResult.RowsAffected()
-		s.Require().NoError(err)
-		s.Require().Equal(int64(2), rowsAffected)
+		s.execQuery(`delete from users where id = 1 or id = 5;`, 2)
 
 		users := s.collectUsers(`select * from users;`)
 		s.Require().Len(users, 7)
@@ -66,11 +46,7 @@ func (s *TestSuite) TestDelete() {
 	})
 
 	s.Run("Delete all rows", func() {
-		aResult, err := s.db.ExecContext(context.Background(), `delete from users;`)
-		s.Require().NoError(err)
-		rowsAffected, err := aResult.RowsAffected()
-		s.Require().NoError(err)
-		s.Require().Equal(int64(7), rowsAffected)
+		s.execQuery(`delete from users;`, 7)
 
 		users := s.collectUsers(`select * from users;`)
 		s.Require().Len(users, 0)

@@ -10,7 +10,7 @@ func (s *TestSuite) TestUpdate() {
 	s.Require().NoError(err)
 
 	// Insert test users
-	aResult, err := s.db.ExecContext(context.Background(), `insert into users("name", "email") values('Danny Mason', 'Danny_Mason2966@xqj6f.tech'),
+	s.execQuery(`insert into users("name", "email") values('Danny Mason', 'Danny_Mason2966@xqj6f.tech'),
 ('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page'),
 ('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video'),
 ('Mason Callan', 'Mason_Callan9524@bu2lo.edu'),
@@ -19,11 +19,7 @@ func (s *TestSuite) TestUpdate() {
 ('Harry Johnson', 'Harry_Johnson5515@jcf8v.video'),
 ('Carl Thomson', 'Carl_Thomson4218@kyb7t.host'),
 ('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design'),
-('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press');`)
-	s.Require().NoError(err)
-	rowsAffected, err := aResult.RowsAffected()
-	s.Require().NoError(err)
-	s.Require().Equal(int64(10), rowsAffected)
+('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press');`, 10)
 
 	expectedNames := []sql.NullString{
 		{String: "Danny Mason", Valid: true},
@@ -52,11 +48,7 @@ func (s *TestSuite) TestUpdate() {
 	}
 
 	s.Run("Update with where matching no rows", func() {
-		aResult, err := s.db.ExecContext(context.Background(), `update users set name = 'Updated Name' where id = 9999;`)
-		s.Require().NoError(err)
-		rowsAffected, err := aResult.RowsAffected()
-		s.Require().NoError(err)
-		s.Require().Equal(int64(0), rowsAffected)
+		s.execQuery(`update users set name = 'Updated Name' where id = 9999;`, 0)
 
 		users := s.collectUsers(`select * from users;`)
 		s.Require().Len(users, 10)
@@ -67,11 +59,7 @@ func (s *TestSuite) TestUpdate() {
 	})
 
 	s.Run("Update single row", func() {
-		aResult, err := s.db.ExecContext(context.Background(), `update users set name = 'Tyson Weldon Jr' where id = 3;`)
-		s.Require().NoError(err)
-		rowsAffected, err := aResult.RowsAffected()
-		s.Require().NoError(err)
-		s.Require().Equal(int64(1), rowsAffected)
+		s.execQuery(`update users set name = 'Tyson Weldon Jr' where id = 3;`, 1)
 
 		expectedNames[2].String = "Tyson Weldon Jr"
 
@@ -84,11 +72,7 @@ func (s *TestSuite) TestUpdate() {
 	})
 
 	s.Run("Update multiple rows", func() {
-		aResult, err := s.db.ExecContext(context.Background(), `update users set name = 'N/A' where id = 4 or id = 6;`)
-		s.Require().NoError(err)
-		rowsAffected, err := aResult.RowsAffected()
-		s.Require().NoError(err)
-		s.Require().Equal(int64(2), rowsAffected)
+		s.execQuery(`update users set name = 'N/A' where id = 4 or id = 6;`, 2)
 
 		expectedNames[3].String = "N/A"
 		expectedNames[5].String = "N/A"
@@ -102,11 +86,7 @@ func (s *TestSuite) TestUpdate() {
 	})
 
 	s.Run("Update to NULL and from NULL back", func() {
-		aResult, err := s.db.ExecContext(context.Background(), `update users set name = NULL where id = 9;`)
-		s.Require().NoError(err)
-		rowsAffected, err := aResult.RowsAffected()
-		s.Require().NoError(err)
-		s.Require().Equal(int64(1), rowsAffected)
+		s.execQuery(`update users set name = NULL where id = 9;`, 1)
 
 		expectedNames[8] = sql.NullString{}
 
@@ -117,11 +97,7 @@ func (s *TestSuite) TestUpdate() {
 			s.Equal(expectedEmails[i], aUser.Email)
 		}
 
-		aResult, err = s.db.ExecContext(context.Background(), `update users set name = 'Kaylee Johnson' where id = 9;`)
-		s.Require().NoError(err)
-		rowsAffected, err = aResult.RowsAffected()
-		s.Require().NoError(err)
-		s.Require().Equal(int64(1), rowsAffected)
+		s.execQuery(`update users set name = 'Kaylee Johnson' where id = 9;`, 1)
 
 		expectedNames[8] = sql.NullString{String: "Kaylee Johnson", Valid: true}
 
@@ -141,11 +117,7 @@ func (s *TestSuite) TestUpdate() {
 	})
 
 	s.Run("Updating unique index key to NULL succeeds", func() {
-		aResult, err := s.db.ExecContext(context.Background(), `update users set email = null where id = 3 or id = 7;`)
-		s.Require().NoError(err)
-		rowsAffected, err = aResult.RowsAffected()
-		s.Require().NoError(err)
-		s.Require().Equal(int64(2), rowsAffected)
+		s.execQuery(`update users set email = null where id = 3 or id = 7;`, 2)
 
 		expectedEmails[2] = sql.NullString{}
 		expectedEmails[6] = sql.NullString{}

@@ -67,36 +67,6 @@ func (s *TestSuite) TestEmptyDatabase() {
 	s.assertSchemaTable(aSchema)
 }
 
-var createUsersTableSQL = `create table "users" (
-	id int8 primary key autoincrement,
-	email varchar(255) unique,
-	name text,
-	created timestamp default now()
-);`
-
-var createUsersTableIfNotExistsSQL = `create table if not exists "users" (
-	id int8 primary key autoincrement,
-	email varchar(255) unique,
-	name text,
-	created timestamp default now()
-);`
-
-var createProductsTableSQL = `create table "products" (
-	product_id int8 primary key autoincrement,
-	name text not null,
-	description text,
-	price int4 not null,
-	created timestamp default now()
-);`
-
-var createOrdersTableSQL = `create table "orders" (
-	order_id int8 primary key autoincrement,
-	user_id int8 not null,
-	product_id int4 not null,
-	total_paid int4 not null,
-	created timestamp default now()
-);`
-
 func (s *TestSuite) TestCreateTable() {
 	s.Run("Create users table", func() {
 		aResult, err := s.db.Exec(createUsersTableSQL)
@@ -193,6 +163,9 @@ func (s *TestSuite) TestCreateTable() {
 		// Page numbers will be reversed because we dropped the table previously and
 		// pages were freed up and now reused back from linked list of free pages.
 		s.assertUsersTable(schemas[1], 3, schemas[2], 2, schemas[3], 1)
+		// Products and orders tables should be created as well
+		s.assertProductsTable(schemas[4], 4, schemas[5], 5)
+		s.assertOrdersTable(schemas[6], 6, schemas[7], 7)
 	})
 }
 
@@ -225,6 +198,30 @@ func (s *TestSuite) assertUsersTable(table schema, idx int, primaryKey schema, p
 	s.Equal("key__users__email", uniqueIndex.Name)
 	s.Equal(keyIdx, int(uniqueIndex.RootPage))
 	s.Nil(uniqueIndex.SQL)
+}
+
+func (s *TestSuite) assertProductsTable(table schema, idx int, primaryKey schema, pkIdx int) {
+	s.Equal(minisql.SchemaTable, table.Type)
+	s.Equal("products", table.Name)
+	s.Equal(idx, int(table.RootPage))
+	s.Equal(createProductsTableSQL, *table.SQL)
+
+	s.Equal(minisql.SchemaPrimaryKey, primaryKey.Type)
+	s.Equal("pkey__products", primaryKey.Name)
+	s.Equal(pkIdx, int(primaryKey.RootPage))
+	s.Nil(primaryKey.SQL)
+}
+
+func (s *TestSuite) assertOrdersTable(table schema, idx int, primaryKey schema, pkIdx int) {
+	s.Equal(minisql.SchemaTable, table.Type)
+	s.Equal("orders", table.Name)
+	s.Equal(idx, int(table.RootPage))
+	s.Equal(createOrdersTableSQL, *table.SQL)
+
+	s.Equal(minisql.SchemaPrimaryKey, primaryKey.Type)
+	s.Equal("pkey__orders", primaryKey.Name)
+	s.Equal(pkIdx, int(primaryKey.RootPage))
+	s.Nil(primaryKey.SQL)
 }
 
 func (s *TestSuite) assertSchemaTable(aTable schema) {

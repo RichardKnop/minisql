@@ -8,57 +8,34 @@ import (
 	"github.com/RichardKnop/minisql/internal/minisql"
 )
 
-type user struct {
-	ID      int64
-	Name    sql.NullString
-	Email   sql.NullString
-	Created time.Time
-}
-
 func (s *TestSuite) TestSelect() {
 	_, err := s.db.Exec(createUsersTableSQL)
 	s.Require().NoError(err)
 
 	// First insert one row with explicitely set timestamp for created column
-	aResult, err := s.db.ExecContext(context.Background(), `insert into users("email", "name", "created") 
-values('Danny_Mason2966@xqj6f.tech', 'Danny Mason', '2024-01-01 12:00:00');`)
-	s.Require().NoError(err)
-	rowsAffected, err := aResult.RowsAffected()
-	s.Require().NoError(err)
-	s.Require().Equal(int64(1), rowsAffected)
+	s.execQuery(`insert into users("email", "name", "created") 
+values('Danny_Mason2966@xqj6f.tech', 'Danny Mason', '2024-01-01 12:00:00');`, 1)
 
 	// Next try to specify primary key manually without using autoincrement
-	aResult, err = s.db.ExecContext(context.Background(), `insert into users("id", "email", "name", "created") 
-values(100, 'Johnathan_Walker250@ptr6k.page', 'Johnathan Walker', '2024-01-02 15:30:27');`)
-	s.Require().NoError(err)
-	rowsAffected, err = aResult.RowsAffected()
-	s.Require().NoError(err)
-	s.Require().Equal(int64(1), rowsAffected)
+	s.execQuery(`insert into users("id", "email", "name", "created") 
+values(100, 'Johnathan_Walker250@ptr6k.page', 'Johnathan Walker', '2024-01-02 15:30:27');`, 1)
 
 	// Next insert multiple rows without specifying created column (should default to now())
 	// Also switch order of name and email to ensure columns are mapped correctly
-	aResult, err = s.db.ExecContext(context.Background(), `insert into users("name", "email") values('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video'),
+	s.execQuery(`insert into users("name", "email") values('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video'),
 ('Mason Callan', 'Mason_Callan9524@bu2lo.edu'),
 ('Logan Flynn', 'Logan_Flynn9019@xtwt3.pro'),
 ('Beatrice Uttley', 'Beatrice_Uttley1670@1wa8o.org'),
 ('Harry Johnson', 'Harry_Johnson5515@jcf8v.video'),
 ('Carl Thomson', 'Carl_Thomson4218@kyb7t.host'),
-('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design');`)
-	s.Require().NoError(err)
-	rowsAffected, err = aResult.RowsAffected()
-	s.Require().NoError(err)
-	s.Require().Equal(int64(7), rowsAffected)
+('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design');`, 7)
 
 	// Insert one more row to test using NOW() function for created timestamp
-	aResult, err = s.db.ExecContext(context.Background(), `insert into users("email", "name", "created") 
-values('Cristal_Duvall6639@yvu30.press', 'Cristal Duvall', NOW());`)
-	s.Require().NoError(err)
-	rowsAffected, err = aResult.RowsAffected()
-	s.Require().NoError(err)
-	s.Require().Equal(int64(1), rowsAffected)
+	s.execQuery(`insert into users("email", "name", "created") 
+values('Cristal_Duvall6639@yvu30.press', 'Cristal Duvall', NOW());`, 1)
 
 	// Inserting user with duplicate primary key should fail
-	aResult, err = s.db.ExecContext(context.Background(), `insert into users("id", "email", "name", "created") 
+	aResult, err := s.db.ExecContext(context.Background(), `insert into users("id", "email", "name", "created") 
 values(100, 'Johnathan_Walker250+new@ptr6k.page', 'Johnathan Walker', '2024-01-02 15:30:27');`)
 	s.Require().Error(err)
 	s.ErrorIs(err, minisql.ErrDuplicateKey)
@@ -226,6 +203,67 @@ values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:2
 		s.True(name.Valid)
 		s.Equal("Carl Thomson", name.String)
 	})
+
+	// Let's create more tables and insert additional test data to ensure selects still work correctly
+	_, err = s.db.Exec(createProductsTableSQL)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(createOrdersTableSQL)
+	s.Require().NoError(err)
+
+	s.execQuery(`insert into products("product_id", "name", "description", "price") values
+(25, 'Gaming Laptop', 'High performance laptop for gaming', 1500),
+(26, 'Wireless Mouse', 'Ergonomic wireless mouse', 50),
+(27, 'Mechanical Keyboard', 'RGB backlit mechanical keyboard', 120);`, 3)
+
+	s.execQuery(`insert into orders("user_id", "product_id", "total_paid") values
+(100, 25, 1500),
+(101, 26, 50),
+(102, 27, 120),
+(100, 27, 120);`, 4)
+
+	s.Run("More basic selects from multiple tables", func() {
+		orders := s.collectOrders(`select * from orders where user_id = 100;`)
+		s.Require().Len(orders, 2)
+
+		s.Equal(1, int(orders[0].ID))
+		s.Equal(25, int(orders[0].ProductID))
+		s.Equal(100, int(orders[0].UserID))
+		s.Equal(1500, int(orders[0].TotalPaid))
+
+		s.Equal(4, int(orders[1].ID))
+		s.Equal(27, int(orders[1].ProductID))
+		s.Equal(100, int(orders[1].UserID))
+		s.Equal(120, int(orders[1].TotalPaid))
+
+		orders = s.collectOrders(`select * from orders where product_id = 27;`)
+		s.Require().Len(orders, 2)
+
+		s.Equal(3, int(orders[0].ID))
+		s.Equal(27, int(orders[0].ProductID))
+		s.Equal(102, int(orders[0].UserID))
+		s.Equal(120, int(orders[0].TotalPaid))
+
+		s.Equal(4, int(orders[1].ID))
+		s.Equal(27, int(orders[1].ProductID))
+		s.Equal(100, int(orders[1].UserID))
+		s.Equal(120, int(orders[1].TotalPaid))
+	})
+}
+
+func (s TestSuite) execQuery(query string, expectedRowsAffected int) {
+	aResult, err := s.db.ExecContext(context.Background(), query)
+	s.Require().NoError(err)
+	rowsAffected, err := aResult.RowsAffected()
+	s.Require().NoError(err)
+	s.Require().Equal(expectedRowsAffected, int(rowsAffected))
+}
+
+type user struct {
+	ID      int64
+	Name    sql.NullString
+	Email   sql.NullString
+	Created time.Time
 }
 
 func (s TestSuite) collectUsers(query string) []user {
@@ -249,4 +287,28 @@ func (s TestSuite) collectUser(query string) user {
 	err := s.db.QueryRow(query).Scan(&user.ID, &user.Email, &user.Name, &user.Created)
 	s.Require().NoError(err)
 	return user
+}
+
+type order struct {
+	ID        int64
+	UserID    int64
+	ProductID int64
+	TotalPaid int32
+	Created   time.Time
+}
+
+func (s TestSuite) collectOrders(query string) []order {
+	rows, err := s.db.QueryContext(context.Background(), query)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	var orders []order
+	for rows.Next() {
+		var anOrder order
+		err := rows.Scan(&anOrder.ID, &anOrder.UserID, &anOrder.ProductID, &anOrder.TotalPaid, &anOrder.Created)
+		s.Require().NoError(err)
+		orders = append(orders, anOrder)
+	}
+	s.Require().NoError(rows.Err())
+	return orders
 }
