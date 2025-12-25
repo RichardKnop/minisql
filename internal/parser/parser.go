@@ -310,12 +310,27 @@ func (p *parser) peekWithLength() (string, int) {
 	if p.i >= len(p.sql) {
 		return "", 0
 	}
-	// First check for reserved words
+
+	// First check for reserved words, however we need to be careful here. For example,
+	// we don't want to match "DESC" when the next token is "description".
 	for _, rWord := range reservedWords {
 		token := strings.ToUpper(p.sql[p.i:min(len(p.sql), p.i+len(rWord))])
-		if token == rWord {
-			return token, len(token)
+		if token != rWord {
+			continue
 		}
+
+		// Make sure the next character is not a continuation of an identifier
+		if p.i+len(rWord) < len(p.sql) {
+			var (
+				lastChar = p.sql[p.i+len(rWord)-1]
+				nextChar = p.sql[p.i+len(rWord)]
+			)
+			if identifierCharRegexp.MatchString(string(lastChar)) && identifierCharRegexp.MatchString(string(nextChar)) {
+				break
+			}
+		}
+
+		return token, len(token)
 	}
 	// Next for quoted string literals
 	if p.sql[p.i] == '\'' {

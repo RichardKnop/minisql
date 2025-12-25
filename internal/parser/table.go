@@ -10,6 +10,7 @@ import (
 
 var (
 	errCreateTableNoColumns                 = fmt.Errorf("at CREATE TABLE: no columns specified")
+	errCreateTableExpectedOpeningParens     = fmt.Errorf("at CREATE TABLE: expected opening parens")
 	errCreateTableInvalidColumDef           = fmt.Errorf("at CREATE TABLE: invalid column definition")
 	errCreateTableMultiplePrimaryKeys       = fmt.Errorf("at CREATE TABLE: multiple PRIMARY KEY columns specified")
 	errCreateTablePrimaryKeyTextNotAllowed  = fmt.Errorf("at CREATE TABLE: primary key cannot be of type TEXT")
@@ -41,7 +42,7 @@ func (p *parser) doParseCreateTable() error {
 	case stepCreateTableOpeningParens:
 		openingParens := p.peek()
 		if len(openingParens) != 1 || openingParens != "(" {
-			return fmt.Errorf("at CREATE TABLE: expected opening parens")
+			return errCreateTableExpectedOpeningParens
 		}
 		p.pop()
 		p.step = stepCreateTableColumn

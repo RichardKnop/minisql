@@ -590,6 +590,31 @@ func TestParse_CreateTable(t *testing.T) {
 			},
 			nil,
 		},
+		{
+			"CREATE TABLE with column which part matches reserved work works",
+			"CREATE TABLE foo (id int8 primary key, description text);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name:       "id",
+							Kind:       minisql.Int8,
+							Size:       8,
+							PrimaryKey: true,
+						},
+						{
+							Name: "description",
+							Kind: minisql.Text,
+
+							Nullable: true,
+						},
+					},
+				},
+			},
+			nil,
+		},
 	}
 
 	for _, aTestCase := range testCases {

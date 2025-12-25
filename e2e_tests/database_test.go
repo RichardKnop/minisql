@@ -2,6 +2,7 @@ package e2etests
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"testing"
 
@@ -80,8 +81,24 @@ var createUsersTableIfNotExistsSQL = `create table if not exists "users" (
 	created timestamp default now()
 );`
 
+var createProductsTableSQL = `create table "products" (
+	product_id int8 primary key autoincrement,
+	name text not null,
+	description text,
+	price int4 not null,
+	created timestamp default now()
+);`
+
+var createOrdersTableSQL = `create table "orders" (
+	order_id int8 primary key autoincrement,
+	user_id int8 not null,
+	product_id int4 not null,
+	total_paid int4 not null,
+	created timestamp default now()
+);`
+
 func (s *TestSuite) TestCreateTable() {
-	s.Run("create users table", func() {
+	s.Run("Create users table", func() {
 		aResult, err := s.db.Exec(createUsersTableSQL)
 		s.Require().NoError(err)
 
@@ -89,8 +106,8 @@ func (s *TestSuite) TestCreateTable() {
 		s.Require().NoError(err)
 		s.Require().Equal(int64(0), rowsAffected)
 
-		// There should be 3 rows one for minisql_schema and one for users table
-		// plus one for the users table primary key index
+		// There should be 4 rows one for minisql_schema and one for users table
+		// plus one for the users table primary key index and one for the unique index
 		var count int
 		err = s.db.QueryRow(`select count(*) from minisql_schema;`).Scan(&count)
 		s.Require().NoError(err)
@@ -101,16 +118,16 @@ func (s *TestSuite) TestCreateTable() {
 		s.assertSchemaTable(schemas[0])
 
 		// Check newly created rows for users table and its indexes
-		s.assertUsersTable(schemas[1], schemas[2], schemas[3])
+		s.assertUsersTable(schemas[1], 1, schemas[2], 2, schemas[3], 3)
 	})
 
-	s.Run("create table fails if table already exists", func() {
+	s.Run("Create table fails if table already exists", func() {
 		_, err := s.db.Exec(createUsersTableSQL)
 		s.Require().Error(err)
 		s.Equal("table already exists", err.Error())
 	})
 
-	s.Run("create table with IF NOT EXISTS does not fail if table exists", func() {
+	s.Run("Create table with IF NOT EXISTS does not fail if table exists", func() {
 		aResult, err := s.db.Exec(createUsersTableIfNotExistsSQL)
 		s.Require().NoError(err)
 
@@ -127,10 +144,10 @@ func (s *TestSuite) TestCreateTable() {
 		schemas := s.scanSchemas()
 		s.Require().Equal(4, len(schemas))
 		s.assertSchemaTable(schemas[0])
-		s.assertUsersTable(schemas[1], schemas[2], schemas[3])
+		s.assertUsersTable(schemas[1], 1, schemas[2], 2, schemas[3], 3)
 	})
 
-	s.Run("drop table", func() {
+	s.Run("Drop table", func() {
 		_, err := s.db.Exec(`drop table "users";`)
 		s.Require().NoError(err)
 
@@ -142,6 +159,40 @@ func (s *TestSuite) TestCreateTable() {
 		schemas := s.scanSchemas()
 		s.Require().Equal(1, len(schemas))
 		s.assertSchemaTable(schemas[0])
+	})
+
+	s.Run("Create multi table schema", func() {
+		tx, err := s.db.Begin()
+		s.Require().NoError(err)
+
+		for _, tableSQL := range []string{createUsersTableSQL, createProductsTableSQL, createOrdersTableSQL} {
+			aResult, err := tx.Exec(tableSQL)
+			s.Require().NoError(err)
+			rowsAffected, err := aResult.RowsAffected()
+			s.Require().NoError(err)
+			s.Require().Equal(int64(0), rowsAffected)
+		}
+
+		err = tx.Commit()
+		s.Require().NoError(err)
+
+		// There should be 8 rows now:
+		// - 1 for minisql_schema and one for users table
+		// - 3 for the users table, its primary key index and unique index
+		// - 2 for products table and its primary key index
+		// - 2 for orders table and its primary key index
+		var count int
+		err = s.db.QueryRow(`select count(*) from minisql_schema;`).Scan(&count)
+		s.Require().NoError(err)
+		s.Equal(8, count)
+
+		schemas := s.scanSchemas()
+		s.Require().Equal(8, len(schemas))
+		fmt.Println(schemas)
+		s.assertSchemaTable(schemas[0])
+		// Page numbers will be reversed because we dropped the table previously and
+		// pages were freed up and now reused back from linked list of free pages.
+		s.assertUsersTable(schemas[1], 3, schemas[2], 2, schemas[3], 1)
 	})
 }
 
@@ -159,20 +210,20 @@ func (s *TestSuite) scanSchemas() []schema {
 	return schemas
 }
 
-func (s *TestSuite) assertUsersTable(table, primaryKey, uniqueIndex schema) {
+func (s *TestSuite) assertUsersTable(table schema, idx int, primaryKey schema, pkIdx int, uniqueIndex schema, keyIdx int) {
 	s.Equal(minisql.SchemaTable, table.Type)
 	s.Equal("users", table.Name)
-	s.Equal(1, int(table.RootPage))
+	s.Equal(idx, int(table.RootPage))
 	s.Equal(createUsersTableSQL, *table.SQL)
 
 	s.Equal(minisql.SchemaPrimaryKey, primaryKey.Type)
 	s.Equal("pkey__users", primaryKey.Name)
-	s.Equal(2, int(primaryKey.RootPage))
+	s.Equal(pkIdx, int(primaryKey.RootPage))
 	s.Nil(primaryKey.SQL)
 
 	s.Equal(minisql.SchemaUniqueIndex, uniqueIndex.Type)
 	s.Equal("key__users__email", uniqueIndex.Name)
-	s.Equal(3, int(uniqueIndex.RootPage))
+	s.Equal(keyIdx, int(uniqueIndex.RootPage))
 	s.Nil(uniqueIndex.SQL)
 }
 
