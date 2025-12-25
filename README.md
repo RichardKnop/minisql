@@ -27,7 +27,7 @@ db, err := sql.Open("minisql", "./my.db")
 
 ## Storage
 
-Each page size is `4096 bytes`. Rows larger than page size are not supported. Therefor, the largest allowed row size is `4066 bytes`. Only exception is root page 0 has first 100 bytes reserved for config.
+Each page size is `4096 bytes`. Rows larger than page size are not supported. Therefore, the largest allowed row size is `4066 bytes`. Only exception is root page 0 has first 100 bytes reserved for config.
 
 ```
 4096 (page size) 
@@ -62,7 +62,7 @@ All tables and indexes are tracked in the system table `minisql_schema`. For emp
 Let's say you create a table such as:
 
 ```sql
-`create table "users" (
+create table "users" (
 	id int8 primary key autoincrement,
 	email varchar(255) unique,
 	name text,
@@ -123,7 +123,7 @@ It will be added to the system table as well as its primary key and any unique o
 - supported operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`
 - `LIMIT` and `OFFSET` clauses for basic pagination
 
-For `WHERE`clauses, currently supported is maximum one level of nesting. You can define multiple groups where each group item is joined with `AND` and groups themselves are joined by `OR`. For example, you could create two condition groups such as:
+For `WHERE` clauses, currently supported is maximum one level of nesting. You can define multiple groups where each group item is joined with `AND` and groups themselves are joined by `OR`. For example, you could create two condition groups such as:
 
 ```sh
 (a = 1 and b = 'foo') or (c is null and d in ('bar', 'qux'))
@@ -224,7 +224,7 @@ aResult, err := db.ExecContext(context.Background(), `insert into users("email",
 ('Johnathan_Walker250@ptr6k.page', 'Johnathan Walker', 32),
 ('Tyson_Weldon2108@zynuu.video', 'Tyson Weldon', 27),
 ('Mason_Callan9524@bu2lo.edu', 'Mason Callan', 19),
-('Logan_Flynn9019@xtwt3.pro', 'Logan Flynn',, 42),
+('Logan_Flynn9019@xtwt3.pro', 'Logan Flynn', 42),
 ('Beatrice_Uttley1670@1wa8o.org', 'Beatrice Uttley', 32),
 ('Harry_Johnson5515@jcf8v.video', 'Harry Johnson', 25),
 ('Carl_Thomson4218@kyb7t.host', 'Carl Thomson', 53),
