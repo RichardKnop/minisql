@@ -32,7 +32,7 @@ func TestTable_Delete_UniqueIndex(t *testing.T) {
 		freePage.LeafNode.Header.IsRoot = true
 		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumnsWithUniqueIndex, freePage.Index)
 		return nil
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	indexPager := NewTransactionalPager(
@@ -71,7 +71,7 @@ func TestTable_Delete_UniqueIndex(t *testing.T) {
 			return err
 		}
 		return aTable.Insert(ctx, stmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	checkRows(ctx, t, aTable, rows)
@@ -94,7 +94,7 @@ func TestTable_Delete_UniqueIndex(t *testing.T) {
 			var err error
 			aResult, err = aTable.Delete(ctx, stmt)
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, aResult.RowsAffected)
@@ -109,7 +109,7 @@ func TestTable_Delete_UniqueIndex(t *testing.T) {
 				Kind: Delete,
 			})
 			return err
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 9, aResult.RowsAffected)

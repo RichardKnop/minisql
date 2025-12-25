@@ -31,7 +31,7 @@ func TestIndex_Seek(t *testing.T) {
 			}
 		}
 		return nil
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	/*
@@ -135,7 +135,7 @@ func TestIndex_SeekLastKey(t *testing.T) {
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 		return nil
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, indexPager, 0)
@@ -156,7 +156,7 @@ func TestIndex_SeekLastKey(t *testing.T) {
 				}
 			}
 			return nil
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*

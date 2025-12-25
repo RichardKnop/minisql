@@ -68,17 +68,7 @@ func TestParse_Update(t *testing.T) {
 					},
 					Conditions: minisql.OneOrMore{
 						{
-							{
-								Operand1: minisql.Operand{
-									Type:  minisql.OperandField,
-									Value: "a",
-								},
-								Operator: minisql.Eq,
-								Operand2: minisql.Operand{
-									Type:  minisql.OperandQuotedString,
-									Value: minisql.NewTextPointer([]byte("1")),
-								},
-							},
+							minisql.FieldIsEqual("a", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
 						},
 					},
 				},
@@ -111,17 +101,7 @@ func TestParse_Update(t *testing.T) {
 					},
 					Conditions: minisql.OneOrMore{
 						{
-							{
-								Operand1: minisql.Operand{
-									Type:  minisql.OperandField,
-									Value: "a",
-								},
-								Operator: minisql.Eq,
-								Operand2: minisql.Operand{
-									Type:  minisql.OperandQuotedString,
-									Value: minisql.NewTextPointer([]byte("1")),
-								},
-							},
+							minisql.FieldIsEqual("a", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
 						},
 					},
 				},
@@ -140,17 +120,7 @@ func TestParse_Update(t *testing.T) {
 					},
 					Conditions: minisql.OneOrMore{
 						{
-							{
-								Operand1: minisql.Operand{
-									Type:  minisql.OperandField,
-									Value: "a",
-								},
-								Operator: minisql.Eq,
-								Operand2: minisql.Operand{
-									Type:  minisql.OperandQuotedString,
-									Value: minisql.NewTextPointer([]byte("1")),
-								},
-							},
+							minisql.FieldIsEqual("a", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
 						},
 					},
 				},
@@ -169,17 +139,7 @@ func TestParse_Update(t *testing.T) {
 					},
 					Conditions: minisql.OneOrMore{
 						{
-							{
-								Operand1: minisql.Operand{
-									Type:  minisql.OperandField,
-									Value: "a",
-								},
-								Operator: minisql.Eq,
-								Operand2: minisql.Operand{
-									Type:  minisql.OperandQuotedString,
-									Value: minisql.NewTextPointer([]byte("1")),
-								},
-							},
+							minisql.FieldIsEqual("a", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
 						},
 					},
 				},
@@ -198,17 +158,7 @@ func TestParse_Update(t *testing.T) {
 					},
 					Conditions: minisql.OneOrMore{
 						{
-							{
-								Operand1: minisql.Operand{
-									Type:  minisql.OperandField,
-									Value: "a",
-								},
-								Operator: minisql.Eq,
-								Operand2: minisql.Operand{
-									Type:  minisql.OperandQuotedString,
-									Value: minisql.NewTextPointer([]byte("1")),
-								},
-							},
+							minisql.FieldIsEqual("a", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
 						},
 					},
 				},
@@ -228,17 +178,7 @@ func TestParse_Update(t *testing.T) {
 					},
 					Conditions: minisql.OneOrMore{
 						{
-							{
-								Operand1: minisql.Operand{
-									Type:  minisql.OperandField,
-									Value: "a",
-								},
-								Operator: minisql.Eq,
-								Operand2: minisql.Operand{
-									Type:  minisql.OperandQuotedString,
-									Value: minisql.NewTextPointer([]byte("1")),
-								},
-							},
+							minisql.FieldIsEqual("a", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
 						},
 					},
 				},
@@ -258,28 +198,29 @@ func TestParse_Update(t *testing.T) {
 					},
 					Conditions: minisql.OneOrMore{
 						{
-							{
-								Operand1: minisql.Operand{
-									Type:  minisql.OperandField,
-									Value: "a",
-								},
-								Operator: minisql.Eq,
-								Operand2: minisql.Operand{
-									Type:  minisql.OperandQuotedString,
-									Value: minisql.NewTextPointer([]byte("1")),
-								},
-							},
-							{
-								Operand1: minisql.Operand{
-									Type:  minisql.OperandField,
-									Value: "b",
-								},
-								Operator: minisql.Eq,
-								Operand2: minisql.Operand{
-									Type:  minisql.OperandInteger,
-									Value: int64(789),
-								},
-							},
+							minisql.FieldIsEqual("a", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
+							minisql.FieldIsEqual("b", minisql.OperandInteger, int64(789)),
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"UPDATE with placeholders works",
+			"UPDATE 'a' SET b = 'foo', c = ? WHERE a = ? AND b = 789 ; ",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Update,
+					TableName: "a",
+					Updates: map[string]minisql.OptionalValue{
+						"b": {Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+						"c": {Value: minisql.Placeholder{}, Valid: true},
+					},
+					Conditions: minisql.OneOrMore{
+						{
+							minisql.FieldIsEqual("a", minisql.OperandPlaceholder, nil),
+							minisql.FieldIsEqual("b", minisql.OperandInteger, int64(789)),
 						},
 					},
 				},

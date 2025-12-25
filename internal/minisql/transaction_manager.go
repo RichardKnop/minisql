@@ -28,7 +28,12 @@ func NewTransactionManager(logger *zap.Logger) *TransactionManager {
 	}
 }
 
-func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(ctx context.Context) error, saver PageSaver) error {
+type TxCommitter struct {
+	Saver    PageSaver
+	DDLSaver DDLSaver
+}
+
+func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(ctx context.Context) error, committer TxCommitter) error {
 	// If there is a transaction already in context, use it.
 	// This means tx was manually started with BEGIN
 	// and will stay open until COMMIT/ROLLBACK.
@@ -44,7 +49,7 @@ func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(
 		return err
 	}
 
-	if err := tm.CommitTransaction(ctx, tx, saver); err != nil {
+	if err := tm.CommitTransaction(ctx, tx, committer); err != nil {
 		tm.RollbackTransaction(ctx, tx)
 		return err
 	}
@@ -74,12 +79,17 @@ func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction
 
 var ErrTxConflict = errors.New("transaction conflict detected")
 
-func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transaction, saver PageSaver) error {
+func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transaction, committer TxCommitter) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
 	if tx.Status != TxActive {
 		return fmt.Errorf("transaction %d is not active", tx.ID)
+	}
+
+	// Save DDL changes first (CREATE / DROP TABLE)
+	if tx.DDLChanges.CreateTables != nil || tx.DDLChanges.DropTables != nil {
+		committer.DDLSaver.SaveDDLChanges(ctx, tx.DDLChanges.CreateTables, tx.DDLChanges.DropTables)
 	}
 
 	// Check for conflicts (simplified optimistic concurrency control)
@@ -103,7 +113,7 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 	// No conflicts, apply all writes
 	// First update DB header if modified
 	if header, modified := tx.GetModifiedDBHeader(); modified {
-		saver.SaveHeader(ctx, *header)
+		committer.Saver.SaveHeader(ctx, *header)
 		tm.globalDbHeaderVersion += 1
 
 		pagesToFlush = append(pagesToFlush, 0) // header is first 100 bytes of page 0
@@ -111,7 +121,7 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 	// Then update modified pages
 	for pageIdx, modifiedPage := range tx.GetWriteVersions() {
 		// Write the modified page to base storage
-		saver.SavePage(ctx, pageIdx, modifiedPage)
+		committer.Saver.SavePage(ctx, pageIdx, modifiedPage)
 
 		// Increment page version
 		tm.globalPageVersions[pageIdx] += 1
@@ -129,7 +139,7 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 
 	// Flush modified pages to disk
 	for _, pageIdx := range pagesToFlush {
-		if err := saver.Flush(ctx, pageIdx); err != nil {
+		if err := committer.Saver.Flush(ctx, pageIdx); err != nil {
 			return fmt.Errorf("failed to flush page %d: %w", pageIdx, err)
 		}
 	}

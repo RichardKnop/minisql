@@ -32,7 +32,7 @@ func TestIndex_ScanAll(t *testing.T) {
 			}
 		}
 		return nil
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	/*
@@ -95,7 +95,7 @@ func TestIndex_ScanRange(t *testing.T) {
 			}
 		}
 		return nil
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	/*

@@ -23,6 +23,11 @@ func TxFromContext(ctx context.Context) *Transaction {
 
 type TransactionID uint64
 
+type DDLChanges struct {
+	CreateTables []*Table
+	DropTables   []string
+}
+
 type Transaction struct {
 	ID            TransactionID
 	StartTime     time.Time
@@ -30,6 +35,7 @@ type Transaction struct {
 	WriteSet      map[PageIndex]*Page  // pageIdx -> modified page copy
 	DbHeaderRead  *uint64              // version of DB header when read
 	DbHeaderWrite *DatabaseHeader      // modified DB header
+	DDLChanges    DDLChanges
 	Status        TransactionStatus
 	mu            sync.RWMutex
 }

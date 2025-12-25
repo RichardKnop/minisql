@@ -30,7 +30,7 @@ func TestTable_PlanQuery_UniqueIndex(t *testing.T) {
 		Expected QueryPlan
 	}{
 		{
-			"Sequential scan on table with unique index",
+			"Sequential scan",
 			Statement{
 				Kind: Select,
 			},
@@ -43,7 +43,7 @@ func TestTable_PlanQuery_UniqueIndex(t *testing.T) {
 			},
 		},
 		{
-			"Sequential scan on table with unique key and filters",
+			"Sequential scan with filters",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{

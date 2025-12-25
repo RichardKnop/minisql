@@ -34,7 +34,7 @@ func TestIndex_Insert(t *testing.T) {
 				key++
 			}
 			return nil
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -52,7 +52,7 @@ func TestIndex_Insert(t *testing.T) {
 	t.Run("Insert duplicate key fails", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Insert(ctx, key-1, RowID(key-1+100))
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrDuplicateKey)
 	})
@@ -60,7 +60,7 @@ func TestIndex_Insert(t *testing.T) {
 	t.Run("Insert 4th key, causes a split", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Insert(ctx, key, RowID(key+100))
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 		key++
 
@@ -94,7 +94,7 @@ func TestIndex_Insert(t *testing.T) {
 				key++
 			}
 			return nil
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -131,7 +131,7 @@ func TestIndex_Insert(t *testing.T) {
 				key++
 			}
 			return nil
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -166,7 +166,7 @@ func TestIndex_Insert(t *testing.T) {
 	t.Run("Insert 1 more key, internal split", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Insert(ctx, key, RowID(key+100))
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 		key++
 
@@ -217,7 +217,7 @@ func TestIndex_Insert(t *testing.T) {
 				key++
 			}
 			return nil
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -294,7 +294,7 @@ func TestIndex_Insert_OutOfOrder(t *testing.T) {
 			}
 		}
 		return nil
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	/*

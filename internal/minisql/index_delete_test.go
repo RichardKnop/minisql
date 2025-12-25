@@ -34,7 +34,7 @@ func TestIndex_Delete(t *testing.T) {
 			}
 		}
 		return nil
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	/*
@@ -92,7 +92,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete a key from leftmost leaf", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(1), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -159,7 +159,7 @@ func TestIndex_Delete(t *testing.T) {
 			}
 
 			return anIndex.Delete(ctx, int64(5), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -222,7 +222,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key, first recycled page", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(8), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -282,7 +282,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(19), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -343,7 +343,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(20), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -404,7 +404,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(16), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -465,7 +465,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(15), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -524,7 +524,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(13), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -580,7 +580,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(10), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -634,7 +634,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(9), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -688,7 +688,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(11), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -740,7 +740,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key, 2 pages recycled, only root and leaves left", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(3), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -781,7 +781,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(14), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -822,7 +822,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(6), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -861,7 +861,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(17), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -900,7 +900,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(21), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -937,7 +937,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(2), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		/*
@@ -974,7 +974,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key, only root leaf left", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, int64(18), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 		/*
 			+----------+
@@ -1005,7 +1005,7 @@ func TestIndex_Delete(t *testing.T) {
 			}
 
 			return anIndex.Delete(ctx, int64(7), 0)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		// require.NoError(t, anIndex.print())
@@ -1049,7 +1049,7 @@ func TestIndex_Delete_Random_Shuffle(t *testing.T) {
 			}
 		}
 		return nil
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	// Verify all keys are present
@@ -1064,7 +1064,7 @@ func TestIndex_Delete_Random_Shuffle(t *testing.T) {
 			}
 		}
 		return nil
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	// Verify index is empty
@@ -1102,7 +1102,7 @@ func TestIndex_Delete_Varchar(t *testing.T) {
 			}
 		}
 		return nil
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	// Verify all keys are present
@@ -1117,7 +1117,7 @@ func TestIndex_Delete_Varchar(t *testing.T) {
 			}
 		}
 		return nil
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	// Verify index is empty

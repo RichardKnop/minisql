@@ -33,7 +33,7 @@ func TestTable_Insert(t *testing.T) {
 
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return aTable.Insert(ctx, stmt)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, int(aPager.pages[0].LeafNode.Header.Cells))
@@ -60,7 +60,7 @@ func TestTable_Insert(t *testing.T) {
 
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return aTable.Insert(ctx, stmt)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		assert.Equal(t, 2, int(aPager.pages[0].LeafNode.Header.Cells))
@@ -101,7 +101,7 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, stmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	assert.Equal(t, 3, int(aPager.pages[0].LeafNode.Header.Cells))
@@ -135,7 +135,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, stmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	//require.NoError(t, aTable.print())
@@ -201,7 +201,7 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, stmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	//require.NoError(t, aTable.print())
@@ -269,7 +269,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, stmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	//require.NoError(t, aTable.print())
@@ -371,7 +371,7 @@ func TestTable_Insert_Overflow(t *testing.T) {
 
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return aTable.Insert(ctx, stmt)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		require.Equal(t, 1, int(aPager.TotalPages()))
@@ -387,7 +387,7 @@ func TestTable_Insert_Overflow(t *testing.T) {
 
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return aTable.Insert(ctx, stmt)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		require.Equal(t, 2, int(aPager.TotalPages()))
@@ -406,7 +406,7 @@ func TestTable_Insert_Overflow(t *testing.T) {
 
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return aTable.Insert(ctx, stmt)
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		require.Equal(t, 4, int(aPager.TotalPages()))

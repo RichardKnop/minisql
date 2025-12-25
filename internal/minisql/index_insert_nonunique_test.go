@@ -41,7 +41,7 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 			}
 			insertedKeys = append(insertedKeys, key)
 			return nil
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		var (
@@ -61,7 +61,7 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 			insertedRowIDs = append(insertedRowIDs, rowID)
 			rowID += 1
 			return nil
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		var (
@@ -88,7 +88,7 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 				rowID += 1
 			}
 			return nil
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		var (
@@ -114,7 +114,7 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 			rowID += 1
 			key += 1
 			return nil
-		}, aPager)
+		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 
 		var (
@@ -150,7 +150,7 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 				insertedKeys = append(insertedKeys, key)
 				key += 1
 				return nil
-			}, aPager)
+			}, TxCommitter{aPager, nil})
 			require.NoError(t, err)
 			i += rowsPerKey
 		}

@@ -1,10 +1,147 @@
 package minisql
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
+	t.Parallel()
+
+	var (
+		columns = []Column{
+			{
+				Kind:          Int8,
+				Size:          8,
+				Name:          "id",
+				PrimaryKey:    true,
+				Autoincrement: true,
+			},
+			{
+				Kind:   Varchar,
+				Size:   MaxInlineVarchar,
+				Name:   "email",
+				Unique: true,
+			},
+			{
+				Kind:     Text,
+				Name:     "Name",
+				Nullable: true,
+			},
+			{
+				Kind:            Timestamp,
+				Name:            "Created",
+				DefaultValueNow: true,
+			},
+		}
+		pkIndexName     = "pkey__users"
+		uniqueIndexName = "key__users__email"
+
+		aTable = &Table{
+			PrimaryKey: PrimaryKey{
+				IndexInfo: IndexInfo{
+					Name:   pkIndexName,
+					Column: columns[0],
+				},
+			},
+			UniqueIndexes: map[string]UniqueIndex{
+				uniqueIndexName: {
+					IndexInfo: IndexInfo{
+						Name:   uniqueIndexName,
+						Column: columns[1],
+					},
+				},
+			},
+			Columns: columns,
+		}
+	)
+
+	testCases := []struct {
+		Name     string
+		Stmt     Statement
+		Expected QueryPlan
+	}{
+		{
+			"Sequential scan",
+			Statement{
+				Kind: Select,
+			},
+			QueryPlan{
+				Scans: []Scan{
+					{
+						Type: ScanTypeSequential,
+					},
+				},
+			},
+		},
+		{
+			"Sequential scan with filters",
+			Statement{
+				Kind: Select,
+				Conditions: OneOrMore{
+					{
+						FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte("Richard"))),
+					},
+				},
+			},
+			QueryPlan{
+				Scans: []Scan{
+					{
+						Type: ScanTypeSequential,
+						Filters: OneOrMore{
+							{
+								FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte("Richard"))),
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			"Two index point scans for both primary and unique indexes",
+			Statement{
+				Kind: Select,
+				Conditions: OneOrMore{
+					{
+						FieldIsEqual("id", OperandInteger, int64(42)),
+					},
+					{
+						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+					},
+				},
+			},
+			QueryPlan{
+				Scans: []Scan{
+					{
+						Type:            ScanTypeIndexPoint,
+						IndexName:       pkIndexName,
+						IndexColumnName: "id",
+						IndexKeys:       []any{int64(42)},
+						Filters:         OneOrMore{{}},
+					},
+					{
+						Type:            ScanTypeIndexPoint,
+						IndexName:       uniqueIndexName,
+						IndexColumnName: "email",
+						IndexKeys:       []any{"foo@example.com"},
+						Filters:         OneOrMore{{}},
+					},
+				},
+			},
+		},
+	}
+
+	for _, aTestCase := range testCases {
+		t.Run(aTestCase.Name, func(t *testing.T) {
+			actual, err := aTable.PlanQuery(context.Background(), aTestCase.Stmt)
+			require.NoError(t, err)
+			assert.Equal(t, aTestCase.Expected, actual)
+		})
+	}
+}
 
 func TestTryRangeScan(t *testing.T) {
 	t.Parallel()

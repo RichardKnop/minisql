@@ -51,28 +51,8 @@ func TestParse_Delete(t *testing.T) {
 					TableName: "a",
 					Conditions: minisql.OneOrMore{
 						{
-							{
-								Operand1: minisql.Operand{
-									Type:  minisql.OperandField,
-									Value: "a",
-								},
-								Operator: minisql.Eq,
-								Operand2: minisql.Operand{
-									Type:  minisql.OperandQuotedString,
-									Value: minisql.NewTextPointer([]byte("1")),
-								},
-							},
-							{
-								Operand1: minisql.Operand{
-									Type:  minisql.OperandField,
-									Value: "b",
-								},
-								Operator: minisql.Eq,
-								Operand2: minisql.Operand{
-									Type:  minisql.OperandInteger,
-									Value: int64(789),
-								},
-							},
+							minisql.FieldIsEqual("a", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
+							minisql.FieldIsEqual("b", minisql.OperandInteger, int64(789)),
 						},
 					},
 				},

@@ -26,6 +26,10 @@ type PageSaver interface {
 	Flusher
 }
 
+type DDLSaver interface {
+	SaveDDLChanges(ctx context.Context, createdTables []*Table, droppedTables []string)
+}
+
 type TxPager interface {
 	ReadPage(context.Context, PageIndex) (*Page, error)
 	ModifyPage(context.Context, PageIndex) (*Page, error)

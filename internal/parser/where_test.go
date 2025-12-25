@@ -25,17 +25,7 @@ func TestParse_Where(t *testing.T) {
 			"WHERE b = 1",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "b",
-						},
-						Operator: minisql.Eq,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandInteger,
-							Value: int64(1),
-						},
-					},
+					minisql.FieldIsEqual("b", minisql.OperandInteger, int64(1)),
 				},
 			},
 			nil,
@@ -45,17 +35,7 @@ func TestParse_Where(t *testing.T) {
 			"WHERE b = 1.5",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "b",
-						},
-						Operator: minisql.Eq,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandFloat,
-							Value: float64(1.5),
-						},
-					},
+					minisql.FieldIsEqual("b", minisql.OperandFloat, float64(1.5)),
 				},
 			},
 			nil,
@@ -65,17 +45,7 @@ func TestParse_Where(t *testing.T) {
 			"WHERE b = 'Foo Bar'",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "b",
-						},
-						Operator: minisql.Eq,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandQuotedString,
-							Value: minisql.NewTextPointer([]byte("Foo Bar")),
-						},
-					},
+					minisql.FieldIsEqual("b", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("Foo Bar"))),
 				},
 			},
 			nil,
@@ -85,17 +55,7 @@ func TestParse_Where(t *testing.T) {
 			"WHERE b = ''",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "b",
-						},
-						Operator: minisql.Eq,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandQuotedString,
-							Value: minisql.NewTextPointer([]byte("")),
-						},
-					},
+					minisql.FieldIsEqual("b", minisql.OperandQuotedString, minisql.NewTextPointer([]byte(""))),
 				},
 			},
 			nil,
@@ -105,17 +65,7 @@ func TestParse_Where(t *testing.T) {
 			"WHERE a = b",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "a",
-						},
-						Operator: minisql.Eq,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "b",
-						},
-					},
+					minisql.FieldIsEqual("a", minisql.OperandField, "b"),
 				},
 			},
 			nil,
@@ -125,17 +75,7 @@ func TestParse_Where(t *testing.T) {
 			"WHERE a < '1'",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "a",
-						},
-						Operator: minisql.Lt,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandQuotedString,
-							Value: minisql.NewTextPointer([]byte("1")),
-						},
-					},
+					minisql.FieldIsLess("a", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
 				},
 			},
 			nil,
@@ -145,17 +85,7 @@ func TestParse_Where(t *testing.T) {
 			"WHERE a <= '1'",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "a",
-						},
-						Operator: minisql.Lte,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandQuotedString,
-							Value: minisql.NewTextPointer([]byte("1")),
-						},
-					},
+					minisql.FieldIsLessOrEqual("a", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
 				},
 			},
 			nil,
@@ -165,17 +95,7 @@ func TestParse_Where(t *testing.T) {
 			"WHERE a > 25",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "a",
-						},
-						Operator: minisql.Gt,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandInteger,
-							Value: int64(25),
-						},
-					},
+					minisql.FieldIsGreater("a", minisql.OperandInteger, int64(25)),
 				},
 			},
 			nil,
@@ -185,17 +105,7 @@ func TestParse_Where(t *testing.T) {
 			"WHERE a >= 25",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "a",
-						},
-						Operator: minisql.Gte,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandInteger,
-							Value: int64(25),
-						},
-					},
+					minisql.FieldIsGreaterOrEqual("a", minisql.OperandInteger, int64(25)),
 				},
 			},
 			nil,
@@ -205,17 +115,7 @@ func TestParse_Where(t *testing.T) {
 			"WHERE a != '1'",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "a",
-						},
-						Operator: minisql.Ne,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandQuotedString,
-							Value: minisql.NewTextPointer([]byte("1")),
-						},
-					},
+					minisql.FieldIsNotEqual("a", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
 				},
 			},
 			nil,
@@ -225,16 +125,7 @@ func TestParse_Where(t *testing.T) {
 			"WHERE b IS NULL",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "b",
-						},
-						Operator: minisql.Eq,
-						Operand2: minisql.Operand{
-							Type: minisql.OperandNull,
-						},
-					},
+					minisql.FieldIsNull("b"),
 				},
 			},
 			nil,
@@ -244,16 +135,7 @@ func TestParse_Where(t *testing.T) {
 			"WHERE b IS NOT NULL",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "b",
-						},
-						Operator: minisql.Ne,
-						Operand2: minisql.Operand{
-							Type: minisql.OperandNull,
-						},
-					},
+					minisql.FieldIsNotNull("b"),
 				},
 			},
 			nil,
@@ -263,28 +145,8 @@ func TestParse_Where(t *testing.T) {
 			"WHERE a = '1' AND b = 789",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "a",
-						},
-						Operator: minisql.Eq,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandQuotedString,
-							Value: minisql.NewTextPointer([]byte("1")),
-						},
-					},
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "b",
-						},
-						Operator: minisql.Eq,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandInteger,
-							Value: int64(789),
-						},
-					},
+					minisql.FieldIsEqual("a", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
+					minisql.FieldIsEqual("b", minisql.OperandInteger, int64(789)),
 				},
 			},
 			nil,
@@ -294,39 +156,9 @@ func TestParse_Where(t *testing.T) {
 			"WHERE a != '1' AND b = 2 and c = '3'",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "a",
-						},
-						Operator: minisql.Ne,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandQuotedString,
-							Value: minisql.NewTextPointer([]byte("1")),
-						},
-					},
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "b",
-						},
-						Operator: minisql.Eq,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandInteger,
-							Value: int64(2),
-						},
-					},
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "c",
-						},
-						Operator: minisql.Eq,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandQuotedString,
-							Value: minisql.NewTextPointer([]byte("3")),
-						},
-					},
+					minisql.FieldIsNotEqual("a", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
+					minisql.FieldIsEqual("b", minisql.OperandInteger, int64(2)),
+					minisql.FieldIsEqual("c", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("3"))),
 				},
 			},
 			nil,
@@ -336,30 +168,10 @@ func TestParse_Where(t *testing.T) {
 			"WHERE a != '1' OR b = 2",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "a",
-						},
-						Operator: minisql.Ne,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandQuotedString,
-							Value: minisql.NewTextPointer([]byte("1")),
-						},
-					},
+					minisql.FieldIsNotEqual("a", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
 				},
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "b",
-						},
-						Operator: minisql.Eq,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandInteger,
-							Value: int64(2),
-						},
-					},
+					minisql.FieldIsEqual("b", minisql.OperandInteger, int64(2)),
 				},
 			},
 			nil,
@@ -369,81 +181,63 @@ func TestParse_Where(t *testing.T) {
 			"WHERE a != '1' and b = 2 OR c= '3'",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "a",
-						},
-						Operator: minisql.Ne,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandQuotedString,
-							Value: minisql.NewTextPointer([]byte("1")),
-						},
-					},
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "b",
-						},
-						Operator: minisql.Eq,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandInteger,
-							Value: int64(2),
-						},
-					},
+					minisql.FieldIsNotEqual("a", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
+					minisql.FieldIsEqual("b", minisql.OperandInteger, int64(2)),
 				},
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "c",
-						},
-						Operator: minisql.Eq,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandQuotedString,
-							Value: minisql.NewTextPointer([]byte("3")),
-						},
-					},
+					minisql.FieldIsEqual("c", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("3"))),
 				},
 			},
 			nil,
 		},
 		{
-			"WHERE with IN() condition",
+			"WHERE with IN condition",
 			"WHERE a IN (1, 2, 3)",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "a",
-						},
-						Operator: minisql.In,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandList,
-							Value: []any{int64(1), int64(2), int64(3)},
-						},
-					},
+					minisql.FieldIsInAny("a", int64(1), int64(2), int64(3)),
 				},
 			},
 			nil,
 		},
 		{
-			"WHERE with NOT IN() condition",
+			"WHERE with NOT IN condition",
 			"WHERE a NOT IN ('b', 'c', 'd')",
 			minisql.OneOrMore{
 				{
-					{
-						Operand1: minisql.Operand{
-							Type:  minisql.OperandField,
-							Value: "a",
-						},
-						Operator: minisql.NotIn,
-						Operand2: minisql.Operand{
-							Type:  minisql.OperandList,
-							Value: []any{minisql.NewTextPointer([]byte("b")), minisql.NewTextPointer([]byte("c")), minisql.NewTextPointer([]byte("d"))},
-						},
-					},
+					minisql.FieldIsNotInAny("a", minisql.NewTextPointer([]byte("b")), minisql.NewTextPointer([]byte("c")), minisql.NewTextPointer([]byte("d"))),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with placeholders works",
+			"WHERE a != ? AND b = ? and c = ?",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsNotEqual("a", minisql.OperandPlaceholder, nil),
+					minisql.FieldIsEqual("b", minisql.OperandPlaceholder, nil),
+					minisql.FieldIsEqual("c", minisql.OperandPlaceholder, nil),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with placeholders inside IN works",
+			"WHERE a IN (?, 123, ?)",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsInAny("a", minisql.Placeholder{}, int64(123), minisql.Placeholder{}),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with placeholders inside NOT IN works",
+			"WHERE a NOT IN (?, 123, ?)",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsNotInAny("a", minisql.Placeholder{}, int64(123), minisql.Placeholder{}),
 				},
 			},
 			nil,

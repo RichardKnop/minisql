@@ -48,15 +48,20 @@ func (p *parser) doParseUpdate() error {
 		p.step = stepUpdateValue
 	case stepUpdateValue:
 		specialValue := strings.ToUpper(p.peek())
-		if specialValue == "NULL" {
+		switch specialValue {
+		case "?":
+			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: minisql.Placeholder{}, Valid: true})
+			p.nextUpdateField = ""
+			p.pop()
+		case "NULL":
 			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Valid: false})
 			p.nextUpdateField = ""
 			p.pop()
-		} else if specialValue == "NOW()" {
+		case "NOW()":
 			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: minisql.FunctionNow, Valid: true})
 			p.nextUpdateField = ""
 			p.pop()
-		} else {
+		default:
 			value, ln := p.peekValue()
 			if ln == 0 {
 				return errUpdateExpectedQuotedValueOrInt

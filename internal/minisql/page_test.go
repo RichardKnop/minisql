@@ -44,7 +44,7 @@ func TestTable_PageRecycling(t *testing.T) {
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, stmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	// require.NoError(t, aTable.print())
@@ -62,7 +62,7 @@ func TestTable_PageRecycling(t *testing.T) {
 			Kind: Delete,
 		})
 		return err
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	assert.Equal(t, len(rows), aResult.RowsAffected)
@@ -74,7 +74,7 @@ func TestTable_PageRecycling(t *testing.T) {
 	// Now we reinsert the same rows again
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aTable.Insert(ctx, stmt)
-	}, aPager)
+	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
 	// We should still have the same number of pages in total

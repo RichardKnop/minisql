@@ -36,7 +36,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		tx.ReadSet[3] = 2
 		tx.ReadSet[4] = 1
 
-		err := txManager.CommitTransaction(ctx, tx, pagerMock)
+		err := txManager.CommitTransaction(ctx, tx, TxCommitter{pagerMock, nil})
 		require.NoError(t, err)
 
 		// Global versions should remain unchanged
@@ -79,7 +79,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		pagerMock.On("Flush", ctx, PageIndex(0)).Return(nil).Once()
 		pagerMock.On("Flush", ctx, PageIndex(4)).Return(nil).Once()
 
-		err := txManager.CommitTransaction(ctx, tx, pagerMock)
+		err := txManager.CommitTransaction(ctx, tx, TxCommitter{pagerMock, nil})
 		require.NoError(t, err)
 
 		// Global versions should be updated accordingly
@@ -125,11 +125,11 @@ func TestTransactionManager_Commit(t *testing.T) {
 
 		// Commit the writing transaction first
 		pagerMock.On("Flush", ctx, PageIndex(3)).Return(nil).Once()
-		err := txManager.CommitTransaction(ctx, writeTx, pagerMock)
+		err := txManager.CommitTransaction(ctx, writeTx, TxCommitter{pagerMock, nil})
 		require.NoError(t, err)
 
 		// Now, committing the reading transaction should fail due to conflict
-		err = txManager.CommitTransaction(ctx, readTx, pagerMock)
+		err = txManager.CommitTransaction(ctx, readTx, TxCommitter{pagerMock, nil})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrTxConflict)
 		assert.Equal(t, "transaction conflict detected: tx 1 aborted due to conflict on page 3", err.Error())
@@ -180,11 +180,11 @@ func TestTransactionManager_Commit(t *testing.T) {
 		pagerMock.On("Flush", ctx, PageIndex(4)).Return(nil).Once()
 
 		// Commit the second transaction first
-		err := txManager.CommitTransaction(ctx, writeTx2, pagerMock)
+		err := txManager.CommitTransaction(ctx, writeTx2, TxCommitter{pagerMock, nil})
 		require.NoError(t, err)
 
 		// Now, committing the first transaction should fail due to conflict
-		err = txManager.CommitTransaction(ctx, writeTx1, pagerMock)
+		err = txManager.CommitTransaction(ctx, writeTx1, TxCommitter{pagerMock, nil})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrTxConflict)
 		assert.Equal(t, "transaction conflict detected: tx 1 aborted due to conflict on page 4", err.Error())
@@ -257,7 +257,7 @@ func TestTransactionManager_ExecuteInTransaction(t *testing.T) {
 
 		assert.Len(t, txManager.transactions, 0)
 
-		err := txManager.ExecuteInTransaction(ctx, fn, pagerMock)
+		err := txManager.ExecuteInTransaction(ctx, fn, TxCommitter{pagerMock, nil})
 		require.NoError(t, err)
 
 		assert.Len(t, txManager.transactions, 0)
@@ -280,7 +280,7 @@ func TestTransactionManager_ExecuteInTransaction(t *testing.T) {
 
 		assert.Len(t, txManager.transactions, 1)
 
-		err := txManager.ExecuteInTransaction(ctx, fn, pagerMock)
+		err := txManager.ExecuteInTransaction(ctx, fn, TxCommitter{pagerMock, nil})
 		require.NoError(t, err)
 
 		assert.Len(t, txManager.transactions, 1)
