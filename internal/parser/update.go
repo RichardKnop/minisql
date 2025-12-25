@@ -101,5 +101,6 @@ func (p *parser) setUpdate(field string, value minisql.OptionalValue) {
 	if p.Updates == nil {
 		p.Updates = make(map[string]minisql.OptionalValue)
 	}
+	p.Fields = append(p.Fields, minisql.Field{Name: field})
 	p.Updates[field] = value
 }

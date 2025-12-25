@@ -174,7 +174,9 @@ type Statement struct {
 	IfNotExists bool
 	TableName   string
 	Columns     []Column // use for CREATE TABLE
-	Fields      []Field  // Used for SELECT (i.e. SELECTed field names) and INSERT (INSERTEDed field names)
+	// Used for SELECT (i.e. SELECTed field names) and INSERT (INSERTEDed field names)
+	// and UPDATE (UPDATEDed field names as Updates map is not ordered)
+	Fields      []Field
 	Aliases     map[string]string
 	Inserts     [][]OptionalValue
 	Updates     map[string]OptionalValue
@@ -237,21 +239,33 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 				if len(args) == 0 {
 					return Statement{}, fmt.Errorf("not enough arguments to bind placeholders")
 				}
-				s.Inserts[i][j].Value = args[0]
+				if args[0] == nil {
+					s.Inserts[i][j] = OptionalValue{}
+				} else {
+					s.Inserts[i][j].Value = args[0]
+				}
 				args = args[1:]
 			}
 		}
 	}
 
 	if s.Kind == Update {
-		for field, aValue := range s.Updates {
+		for _, aField := range s.Fields {
+			aValue, ok := s.Updates[aField.Name]
+			if !ok {
+				continue
+			}
 			if _, ok := aValue.Value.(Placeholder); !ok {
 				continue
 			}
 			if len(args) == 0 {
 				return Statement{}, fmt.Errorf("not enough arguments to bind placeholders")
 			}
-			s.Updates[field] = OptionalValue{Value: args[0], Valid: true}
+			if args[0] == nil {
+				s.Updates[aField.Name] = OptionalValue{}
+			} else {
+				s.Updates[aField.Name] = OptionalValue{Value: args[0], Valid: true}
+			}
 			args = args[1:]
 		}
 	}

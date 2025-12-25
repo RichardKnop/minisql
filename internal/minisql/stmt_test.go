@@ -36,9 +36,11 @@ func TestStatement_BindArguments(t *testing.T) {
 	stmt := Statement{
 		Kind:      Update,
 		TableName: "a",
+		Fields:    []Field{{Name: "b"}, {Name: "c"}, {Name: "d"}},
 		Updates: map[string]OptionalValue{
 			"b": {Value: NewTextPointer([]byte("foo")), Valid: true},
 			"c": {Value: Placeholder{}, Valid: true},
+			"d": {Value: Placeholder{}, Valid: true},
 		},
 		Conditions: OneOrMore{
 			{
@@ -49,10 +51,12 @@ func TestStatement_BindArguments(t *testing.T) {
 	}
 
 	var err error
-	stmt, err = stmt.BindArguments(int64(123), "bar")
+	stmt, err = stmt.BindArguments(int64(123), nil, "bar")
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(123), stmt.Updates["c"].Value)
+	assert.Equal(t, OptionalValue{}, stmt.Updates["d"])
+
 	condition := stmt.Conditions[0][0]
 	assert.Equal(t, "bar", condition.Operand2.Value)
 }
@@ -232,6 +236,7 @@ func TestStatement_Prepare_Update(t *testing.T) {
 					Name: "created_at",
 				},
 			},
+			Fields: []Field{{Name: "created_at"}},
 			Updates: map[string]OptionalValue{
 				"created_at": {Value: NewTextPointer([]byte("2025-12-20 03:13:27.674801")), Valid: true},
 			},
@@ -258,6 +263,7 @@ func TestStatement_Prepare_Update(t *testing.T) {
 					Name: "created_at",
 				},
 			},
+			Fields: []Field{{Name: "created_at"}},
 			Updates: map[string]OptionalValue{
 				"created_at": {Value: Function{Name: "UNKNOWN_FUNCTION"}, Valid: true},
 			},
@@ -279,6 +285,7 @@ func TestStatement_Prepare_Update(t *testing.T) {
 					Name: "created_at",
 				},
 			},
+			Fields: []Field{{Name: "created_at"}},
 			Updates: map[string]OptionalValue{
 				"created_at": {Value: FunctionNow, Valid: true},
 			},

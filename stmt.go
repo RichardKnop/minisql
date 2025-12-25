@@ -100,7 +100,7 @@ func toInternalArgs(args []driver.Value) ([]any, error) {
 		//	time.Time
 		switch v := arg.(type) {
 		case nil:
-			return nil, fmt.Errorf("nil argument values are not supported; use IS NULL or IS NOT NULL instead")
+			return nil, nil
 		case int64, float64, bool:
 			internalArgs = append(internalArgs, v)
 		case string:

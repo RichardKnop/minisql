@@ -63,6 +63,7 @@ func TestParse_Update(t *testing.T) {
 				{
 					Kind:      minisql.Update,
 					TableName: "a",
+					Fields:    []minisql.Field{{Name: "b"}},
 					Updates: map[string]minisql.OptionalValue{
 						"b": {Value: minisql.NewTextPointer([]byte("hello")), Valid: true},
 					},
@@ -82,6 +83,7 @@ func TestParse_Update(t *testing.T) {
 				{
 					Kind:      minisql.Update,
 					TableName: "a",
+					Fields:    []minisql.Field{{Name: "b"}},
 					Updates: map[string]minisql.OptionalValue{
 						"b": {Value: false, Valid: true},
 					},
@@ -96,6 +98,7 @@ func TestParse_Update(t *testing.T) {
 				{
 					Kind:      minisql.Update,
 					TableName: "a",
+					Fields:    []minisql.Field{{Name: "b"}},
 					Updates: map[string]minisql.OptionalValue{
 						"b": {Value: int64(25), Valid: true},
 					},
@@ -115,6 +118,7 @@ func TestParse_Update(t *testing.T) {
 				{
 					Kind:      minisql.Update,
 					TableName: "a",
+					Fields:    []minisql.Field{{Name: "b"}},
 					Updates: map[string]minisql.OptionalValue{
 						"b": {Value: float64(3.75), Valid: true},
 					},
@@ -134,6 +138,7 @@ func TestParse_Update(t *testing.T) {
 				{
 					Kind:      minisql.Update,
 					TableName: "a",
+					Fields:    []minisql.Field{{Name: "b"}},
 					Updates: map[string]minisql.OptionalValue{
 						"b": {Valid: false},
 					},
@@ -153,6 +158,7 @@ func TestParse_Update(t *testing.T) {
 				{
 					Kind:      minisql.Update,
 					TableName: "a",
+					Fields:    []minisql.Field{{Name: "b"}},
 					Updates: map[string]minisql.OptionalValue{
 						"b": {Value: minisql.NewTextPointer([]byte("hello\\'world")), Valid: true},
 					},
@@ -172,6 +178,7 @@ func TestParse_Update(t *testing.T) {
 				{
 					Kind:      minisql.Update,
 					TableName: "a",
+					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}},
 					Updates: map[string]minisql.OptionalValue{
 						"b": {Value: minisql.NewTextPointer([]byte("hello")), Valid: true},
 						"c": {Value: minisql.FunctionNow, Valid: true},
@@ -192,6 +199,7 @@ func TestParse_Update(t *testing.T) {
 				{
 					Kind:      minisql.Update,
 					TableName: "a",
+					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}},
 					Updates: map[string]minisql.OptionalValue{
 						"b": {Value: minisql.NewTextPointer([]byte("hello")), Valid: true},
 						"c": {Value: minisql.NewTextPointer([]byte("bye")), Valid: true},
@@ -213,6 +221,7 @@ func TestParse_Update(t *testing.T) {
 				{
 					Kind:      minisql.Update,
 					TableName: "a",
+					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}},
 					Updates: map[string]minisql.OptionalValue{
 						"b": {Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
 						"c": {Value: minisql.Placeholder{}, Valid: true},
