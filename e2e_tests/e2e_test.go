@@ -7,9 +7,11 @@ var createUsersTableSQL = `create table "users" (
 	created timestamp default now()
 );`
 
-var createUsersIndexSQL = `create index "idx_created" on "users" (
+var createUsersTimestampIndexSQL = `create index "idx_created" on "users" (
 	created
 );`
+
+var dropUsersTimestampIndexSQL = `drop index "idx_created";`
 
 var createUsersTableIfNotExistsSQL = `create table if not exists "users" (
 	id int8 primary key autoincrement,

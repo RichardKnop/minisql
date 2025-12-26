@@ -851,8 +851,11 @@ func (d *Database) populateIndex(ctx context.Context, aTable *Table, secondaryIn
 		if !keyValue.Valid {
 			continue // skip NULLs
 		}
-
-		if err := secondaryIndex.Index.Insert(ctx, keyValue.Value, aRow.Key); err != nil {
+		castedKeyValue, err := castKeyValue(secondaryIndex.Column, keyValue.Value)
+		if err != nil {
+			return err
+		}
+		if err := secondaryIndex.Index.Insert(ctx, castedKeyValue, aRow.Key); err != nil {
 			return err
 		}
 	}

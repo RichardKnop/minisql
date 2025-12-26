@@ -132,7 +132,7 @@ func (s *TestSuite) TestCreateTable() {
 	})
 
 	s.Run("Create index", func() {
-		_, err := s.db.Exec(createUsersIndexSQL)
+		_, err := s.db.Exec(createUsersTimestampIndexSQL)
 		s.Require().NoError(err)
 
 		var count int
@@ -143,7 +143,7 @@ func (s *TestSuite) TestCreateTable() {
 		schemas := s.scanSchemas()
 		s.assertSchemaTable(schemas[0])
 		s.assertUsersTable(schemas[1], 1, schemas[2], 2, schemas[3], 3)
-		s.assertIndex(schemas[4], "idx_created", "users", 4, createUsersIndexSQL)
+		s.assertIndex(schemas[4], "idx_created", "users", 4, createUsersTimestampIndexSQL)
 	})
 
 	s.Run("Drop table", func() {
@@ -166,7 +166,7 @@ func (s *TestSuite) TestCreateTable() {
 
 		for _, tableSQL := range []string{
 			createUsersTableSQL,
-			createUsersIndexSQL,
+			createUsersTimestampIndexSQL,
 			createProductsTableSQL,
 			createOrdersTableSQL,
 		} {
@@ -200,7 +200,7 @@ func (s *TestSuite) TestCreateTable() {
 		// Page numbers are coming from the free pages linked list from the database header,
 		// remember we freed pages 1-4 when we dropped the users and then its index previously.
 		s.assertUsersTable(schemas[1], 4, schemas[2], 3, schemas[3], 2)
-		s.assertIndex(schemas[4], "idx_created", "users", 1, createUsersIndexSQL)
+		s.assertIndex(schemas[4], "idx_created", "users", 1, createUsersTimestampIndexSQL)
 
 		// Products and orders tables should be created as well
 		s.assertProductsTable(schemas[5], 5, schemas[6], 6)

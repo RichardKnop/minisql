@@ -11,7 +11,7 @@ import (
 func (s *TestSuite) TestSelect() {
 	_, err := s.db.Exec(createUsersTableSQL)
 	s.Require().NoError(err)
-	_, err = s.db.Exec(createUsersIndexSQL)
+	_, err = s.db.Exec(createUsersTimestampIndexSQL)
 	s.Require().NoError(err)
 
 	// First insert one row with explicitely set timestamp for created column
@@ -145,6 +145,41 @@ values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:2
 	})
 
 	s.Run("Selecting based on timestamp column", func() {
+		twentiethCentury := time.Date(1999, 7, 19, 22, 11, 56, 112456*1000, time.UTC).Format("2006-01-02 15:04:05")
+		users := s.collectUsers(`select * from users where created < '` + twentiethCentury + `';`)
+		s.Require().Empty(users)
+
+		aMinuteAgo := time.Now().Add(-1 * time.Minute).UTC().Format("2006-01-02 15:04:05")
+		users = s.collectUsers(`select * from users where created < '` + aMinuteAgo + `';`)
+		s.Require().Len(users, 2)
+		s.Equal(user{
+			ID:      1,
+			Name:    sql.NullString{String: "Danny Mason", Valid: true},
+			Email:   sql.NullString{String: "Danny_Mason2966@xqj6f.tech", Valid: true},
+			Created: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+		}, users[0])
+		s.Equal(user{
+			ID:      100,
+			Name:    sql.NullString{String: "Johnathan Walker", Valid: true},
+			Email:   sql.NullString{String: "Johnathan_Walker250@ptr6k.page", Valid: true},
+			Created: time.Date(2024, 1, 2, 15, 30, 27, 0, time.UTC),
+		}, users[1])
+
+		aMinuteLater := time.Now().Add(1 * time.Minute).UTC().Format("2006-01-02 15:04:05")
+		expectedIDs := []int64{101, 102, 103, 104, 105, 106, 107, 108}
+		users = s.collectUsers(`select * from users where created > '` + aMinuteAgo + `' and created < '` + aMinuteLater + `';`)
+		s.Require().Len(users, 8)
+		for i := range 8 {
+			s.Equal(expectedIDs[i], users[i].ID)
+		}
+	})
+
+	s.Run("Drop and recreate timestamp index to make sure it gets repopulated", func() {
+		_, err := s.db.Exec(dropUsersTimestampIndexSQL)
+		s.Require().NoError(err)
+		_, err = s.db.Exec(createUsersTimestampIndexSQL)
+		s.Require().NoError(err)
+
 		twentiethCentury := time.Date(1999, 7, 19, 22, 11, 56, 112456*1000, time.UTC).Format("2006-01-02 15:04:05")
 		users := s.collectUsers(`select * from users where created < '` + twentiethCentury + `';`)
 		s.Require().Empty(users)
