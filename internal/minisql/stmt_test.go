@@ -302,7 +302,7 @@ func TestStatement_Prepare_Update(t *testing.T) {
 	})
 }
 
-func TestStatement_PrepareDefaultValues(t *testing.T) {
+func TestStatement_Prepare_CreateTable(t *testing.T) {
 	t.Parallel()
 
 	stmt := Statement{
@@ -327,11 +327,12 @@ func TestStatement_PrepareDefaultValues(t *testing.T) {
 	assert.False(t, ok)
 
 	var err error
-	stmt, err = stmt.PrepareDefaultValues()
+	stmt, err = stmt.Prepare(Time{})
 	require.NoError(t, err)
 
 	_, ok = stmt.Columns[1].DefaultValue.Value.(Time)
 	assert.True(t, ok, "expected default value for 'created' column to be Time")
+	assert.Equal(t, MustParseTimestamp("0001-01-01 00:00:00"), stmt.Columns[1].DefaultValue.Value)
 }
 
 func TestStatement_Validate(t *testing.T) {

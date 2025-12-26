@@ -59,8 +59,6 @@ func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(
 
 func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction {
 	tm.mu.Lock()
-	defer tm.mu.Unlock()
-
 	tx := &Transaction{
 		ID:        tm.nextTxID,
 		StartTime: time.Now(),
@@ -68,9 +66,9 @@ func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction
 		WriteSet:  make(map[PageIndex]*Page),
 		Status:    TxActive,
 	}
-
 	tm.nextTxID++
 	tm.transactions[tx.ID] = tx
+	tm.mu.Unlock()
 
 	tm.logger.Debug("begin transaction", zap.Uint64("tx_id", uint64(tx.ID)))
 

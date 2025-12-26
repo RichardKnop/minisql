@@ -121,9 +121,11 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 
 	t.Run("Insert rows without primary key, autoincrement should generate primary keys", func(t *testing.T) {
 		stmt := Statement{
-			Kind:    Insert,
-			Fields:  fieldsFromColumns(aTable.Columns[1:]...), // exclude primary key column
-			Inserts: make([][]OptionalValue, 0, len(rows)),
+			Kind:      Insert,
+			TableName: aTable.Name,
+			Columns:   aTable.Columns,
+			Fields:    fieldsFromColumns(aTable.Columns[1:]...), // exclude primary key column
+			Inserts:   make([][]OptionalValue, 0, len(rows)),
 		}
 		for _, aRow := range rows {
 			stmt.Inserts = append(stmt.Inserts, aRow.Values[1:]) // exclude primary key value
@@ -144,7 +146,7 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			_, err = aTable.Insert(ctx, stmt)
+			_, err = executeTableStatement(ctx, aTable, stmt, Time{})
 			return err
 		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)

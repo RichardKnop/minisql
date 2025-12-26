@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -28,8 +29,11 @@ type Database struct {
 	txManager *TransactionManager
 	tables    map[string]*Table
 	dbLock    *sync.RWMutex
+	clock     clock
 	logger    *zap.Logger
 }
+
+type clock func() Time
 
 // NewDatabase creates a new database
 func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser Parser, factory PagerFactory, saver PageSaver) (*Database, error) {
@@ -42,6 +46,18 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, name string, aParser P
 		tables:    make(map[string]*Table),
 		dbLock:    new(sync.RWMutex),
 		logger:    logger,
+		clock: func() Time {
+			now := time.Now()
+			return Time{
+				Year:         int32(now.Year()),
+				Month:        int8(now.Month()),
+				Day:          int8(now.Day()),
+				Hour:         int8(now.Hour()),
+				Minutes:      int8(now.Minute()),
+				Seconds:      int8(now.Second()),
+				Microseconds: int32(now.Nanosecond() / 1000),
+			}
+		},
 	}
 
 	if err := aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -351,6 +367,10 @@ func (d *Database) initSecondaryIndex(ctx context.Context, aRow Row) error {
 }
 
 func (d *Database) SaveDDLChanges(ctx context.Context, changes DDLChanges) {
+	if !changes.HasChanges() {
+		return
+	}
+
 	d.dbLock.Lock()
 	defer d.dbLock.Unlock()
 
@@ -405,193 +425,103 @@ func (d *Database) GetDDLSaver() DDLSaver {
 
 // ExecuteStatement executes a single statement and returns the result
 func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (StatementResult, error) {
-	return d.executeStatement(ctx, stmt)
-}
+	tx := TxFromContext(ctx)
+	if tx == nil {
+		return StatementResult{}, fmt.Errorf("statement must be executed from within a transaction")
+	}
 
-// executeStatement will eventually become virtual machine
-func (d *Database) executeStatement(ctx context.Context, stmt Statement) (StatementResult, error) {
+	if !stmt.ReadOnly() && isSystemTable(stmt.TableName) {
+		return StatementResult{}, fmt.Errorf("cannot write to system table %s", SchemaTableName)
+	}
+
 	switch stmt.Kind {
-	case CreateTable:
-		return d.executeCreateTable(ctx, stmt)
-	case DropTable:
-		return d.executeDropTable(ctx, stmt)
-	case CreateIndex:
-		return d.executeCreateIndex(ctx, stmt)
-	case DropIndex:
-		return d.executeDropIndex(ctx, stmt)
-	case Insert:
-		return d.executeInsert(ctx, stmt)
-	case Select:
-		return d.executeSelect(ctx, stmt)
-	case Update:
-		return d.executeUpdate(ctx, stmt)
-	case Delete:
-		return d.executeDelete(ctx, stmt)
-	case BeginTransaction, CommitTransaction, RollbackTransaction:
-		return StatementResult{}, fmt.Errorf("transaction statements should be handled at connection level")
+	case CreateTable, DropTable, CreateIndex, DropIndex:
+		return d.executeDDLStatement(ctx, stmt)
+	case Insert, Select, Update, Delete:
+		if stmt.ReadOnly() {
+			// Allow concurrent reads
+			d.dbLock.RLock()
+			aTable, ok := d.tables[stmt.TableName]
+			if !ok {
+				d.dbLock.RUnlock()
+				return StatementResult{}, errTableDoesNotExist
+			}
+			d.dbLock.RUnlock()
+			return executeTableStatement(ctx, aTable, stmt, d.clock())
+		}
+		// Use lock to limit to only one write operation at a time
+		d.dbLock.Lock()
+		defer d.dbLock.Unlock()
+		aTable, ok := d.tables[stmt.TableName]
+		if !ok {
+			return StatementResult{}, errTableDoesNotExist
+		}
+		return executeTableStatement(ctx, aTable, stmt, d.clock())
 	}
 	return StatementResult{}, errUnrecognizedStatementType
 }
 
-func (d *Database) executeCreateTable(ctx context.Context, stmt Statement) (StatementResult, error) {
-	// Only one CREATE/DROP operation can happen at a time
-	d.dbLock.Lock()
-	defer d.dbLock.Unlock()
-
-	_, err := d.createTable(ctx, stmt)
+func (d *Database) executeDDLStatement(ctx context.Context, stmt Statement) (StatementResult, error) {
+	var err error
+	stmt, err = stmt.Prepare(d.clock())
 	if err != nil {
 		return StatementResult{}, err
 	}
 
-	return StatementResult{}, nil
-}
-
-func (d *Database) executeDropTable(ctx context.Context, stmt Statement) (StatementResult, error) {
-	if isSystemTable(stmt.TableName) {
-		return StatementResult{}, fmt.Errorf("cannot drop system table %s", SchemaTableName)
-	}
-
-	// Only one CREATE/DROP operation can happen at a time
-	d.dbLock.Lock()
-	defer d.dbLock.Unlock()
-
-	// TODO block any writes to the table before dropping
-
-	if err := d.dropTable(ctx, stmt.TableName); err != nil {
+	if err := stmt.Validate(nil); err != nil {
 		return StatementResult{}, err
 	}
 
-	return StatementResult{}, nil
-}
-
-func (d *Database) executeCreateIndex(ctx context.Context, stmt Statement) (StatementResult, error) {
-	// Only allow one write operation at a time
+	// Use lock to limit to only one write operation at a time
 	d.dbLock.Lock()
 	defer d.dbLock.Unlock()
 
-	if err := d.createIndex(ctx, stmt); err != nil {
+	switch stmt.Kind {
+	case CreateTable:
+		_, err := d.createTable(ctx, stmt)
 		return StatementResult{}, err
+	case DropTable:
+		return StatementResult{}, d.dropTable(ctx, stmt.TableName)
+	case CreateIndex:
+		return StatementResult{}, d.createIndex(ctx, stmt)
+	case DropIndex:
+		return StatementResult{}, d.dropIndex(ctx, stmt)
 	}
 
-	return StatementResult{}, nil
+	return StatementResult{}, fmt.Errorf("unrecognized DDL statement type: %v", stmt.Kind)
 }
 
-func (d *Database) executeDropIndex(ctx context.Context, stmt Statement) (StatementResult, error) {
-	// Only allow one write operation at a time
-	d.dbLock.Lock()
-	defer d.dbLock.Unlock()
+func executeTableStatement(ctx context.Context, aTable *Table, stmt Statement, now Time) (StatementResult, error) {
+	stmt.TableName = aTable.Name
+	stmt.Columns = aTable.Columns
 
-	if err := d.dropIndex(ctx, stmt); err != nil {
-		return StatementResult{}, err
-	}
-
-	return StatementResult{}, nil
-}
-
-func (d *Database) executeInsert(ctx context.Context, stmt Statement) (StatementResult, error) {
-	if isSystemTable(stmt.TableName) {
-		return StatementResult{}, fmt.Errorf("inserts into system table %s are not allowed", SchemaTableName)
-	}
-
-	// Only allow one write operation at a time
-	d.dbLock.Lock()
-	defer d.dbLock.Unlock()
-
-	aTable, ok := d.tables[stmt.TableName]
-	if !ok {
-		return StatementResult{}, errTableDoesNotExist
-	}
-
-	aResult, err := aTable.Insert(ctx, stmt)
+	var err error
+	stmt, err = stmt.Prepare(now)
 	if err != nil {
 		return StatementResult{}, err
 	}
 
-	return aResult, nil
-}
-
-func (d *Database) executeSelect(ctx context.Context, stmt Statement) (StatementResult, error) {
-	// Allow concurrent reads
-	d.dbLock.RLock()
-	aTable, ok := d.tables[stmt.TableName]
-	if !ok {
-		d.dbLock.RUnlock()
-		return StatementResult{}, errTableDoesNotExist
-	}
-	d.dbLock.RUnlock()
-
-	aResult, err := aTable.Select(ctx, stmt)
-	if err != nil {
+	if err := stmt.Validate(aTable); err != nil {
 		return StatementResult{}, err
 	}
 
-	return aResult, nil
-}
-
-func (d *Database) executeUpdate(ctx context.Context, stmt Statement) (StatementResult, error) {
-	if isSystemTable(stmt.TableName) {
-		return StatementResult{}, fmt.Errorf("updates to system table %s are not allowed", SchemaTableName)
+	switch stmt.Kind {
+	case Insert:
+		return aTable.Insert(ctx, stmt)
+	case Select:
+		return aTable.Select(ctx, stmt)
+	case Update:
+		return aTable.Update(ctx, stmt)
+	case Delete:
+		return aTable.Delete(ctx, stmt)
 	}
 
-	// Only allow one write operation at a time
-	d.dbLock.Lock()
-	defer d.dbLock.Unlock()
-
-	aTable, ok := d.tables[stmt.TableName]
-	if !ok {
-		return StatementResult{}, errTableDoesNotExist
-	}
-
-	aResult, err := aTable.Update(ctx, stmt)
-	if err != nil {
-		return StatementResult{}, err
-	}
-
-	return aResult, nil
-}
-
-func (d *Database) executeDelete(ctx context.Context, stmt Statement) (StatementResult, error) {
-	if isSystemTable(stmt.TableName) {
-		return StatementResult{}, fmt.Errorf("deletes from system table %s are not allowed", SchemaTableName)
-	}
-
-	// Only allow one write operation at a time
-	d.dbLock.Lock()
-	defer d.dbLock.Unlock()
-
-	aTable, ok := d.tables[stmt.TableName]
-	if !ok {
-		return StatementResult{}, errTableDoesNotExist
-	}
-
-	aResult, err := aTable.Delete(ctx, stmt)
-	if err != nil {
-		return StatementResult{}, err
-	}
-
-	return aResult, nil
+	return StatementResult{}, fmt.Errorf("unrecognized table statement type: %v", stmt.Kind)
 }
 
 // createTable creates a new table with a name and columns
 func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, error) {
-	tx := TxFromContext(ctx)
-	if tx == nil {
-		return nil, fmt.Errorf("create table must be called within a transaction")
-	}
-
-	var err error
-	stmt, err = stmt.PrepareDefaultValues()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := stmt.Validate((nil)); err != nil {
-		return nil, err
-	}
-
-	if len(stmt.CreateTableDDL()) > maximumSchemaSQL {
-		return nil, fmt.Errorf("table definition too long, maximum length is %d", maximumSchemaSQL)
-	}
+	tx := MustTxFromContext(ctx)
 
 	// Table could only exist within this transaction so create it from the system table
 	_, exists, err := d.checkSchemaExists(ctx, SchemaTable, stmt.TableName)
@@ -658,10 +588,7 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 
 // dropTable drops a table and all its data
 func (d *Database) dropTable(ctx context.Context, name string) error {
-	tx := TxFromContext(ctx)
-	if tx == nil {
-		return fmt.Errorf("drop table must be called within a transaction")
-	}
+	tx := MustTxFromContext(ctx)
 
 	// Table could only exist within this transaction so create it from the system table
 	_, exists, err := d.checkSchemaExists(ctx, SchemaTable, name)
@@ -756,22 +683,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 }
 
 func (d *Database) createIndex(ctx context.Context, stmt Statement) error {
-	tx := TxFromContext(ctx)
-	if tx == nil {
-		return fmt.Errorf("create index must be called within a transaction")
-	}
-
-	if err := stmt.Validate((nil)); err != nil {
-		return err
-	}
-
-	if len(stmt.CreateIndexDDL()) > maximumSchemaSQL {
-		return fmt.Errorf("index definition too long, maximum length is %d", maximumSchemaSQL)
-	}
-
-	if len(stmt.Columns) != 1 {
-		return fmt.Errorf("only single-column indexes are supported")
-	}
+	tx := MustTxFromContext(ctx)
 
 	_, exists, err := d.checkSchemaExists(ctx, SchemaSecondaryIndex, stmt.IndexName)
 	if err != nil {
@@ -868,10 +780,7 @@ func (d *Database) populateIndex(ctx context.Context, aTable *Table, secondaryIn
 }
 
 func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
-	tx := TxFromContext(ctx)
-	if tx == nil {
-		return fmt.Errorf("drop index must be called within a transaction")
-	}
+	tx := MustTxFromContext(ctx)
 
 	aSchema, exists, err := d.checkSchemaExists(ctx, SchemaSecondaryIndex, stmt.IndexName)
 	if err != nil {

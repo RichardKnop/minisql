@@ -21,6 +21,13 @@ func TxFromContext(ctx context.Context) *Transaction {
 	return nil
 }
 
+func MustTxFromContext(ctx context.Context) *Transaction {
+	if tx := TxFromContext(ctx); tx != nil {
+		return tx
+	}
+	panic("no transaction in context")
+}
+
 type TransactionID uint64
 
 type DDLChanges struct {

@@ -342,6 +342,10 @@ func (s Statement) ReadOnly() bool {
 	return s.Kind == Select
 }
 
+func (s Statement) IsDDL() bool {
+	return s.Kind == CreateTable || s.Kind == DropTable || s.Kind == CreateIndex || s.Kind == DropIndex
+}
+
 func (s Statement) ColumnByName(name string) (Column, bool) {
 	for i := range s.Columns {
 		if s.Columns[i].Name == name {
@@ -354,6 +358,12 @@ func (s Statement) ColumnByName(name string) (Column, bool) {
 // Prepare performs any necessary preparation on the statement before validation/execution.
 func (s Statement) Prepare(now Time) (Statement, error) {
 	switch s.Kind {
+	case CreateTable:
+		var err error
+		s, err = s.prepareCreateTable()
+		if err != nil {
+			return Statement{}, err
+		}
 	case Insert:
 		var err error
 		s, err = s.prepareInsert(now)
@@ -368,6 +378,39 @@ func (s Statement) Prepare(now Time) (Statement, error) {
 		}
 	}
 	return s.prepareWhere()
+}
+
+// prepareCreateTable validates and prepares default values for columns in CREATE TABLE statements.
+// In case of TIMESTAMP columns, it transforms string default values into Time.
+func (s Statement) prepareCreateTable() (Statement, error) {
+	for i, aColumn := range s.Columns {
+		if !aColumn.DefaultValue.Valid {
+			continue
+		}
+		if aColumn.Kind == Timestamp {
+			// If this is already a Time, accept it as is
+			_, ok := aColumn.DefaultValue.Value.(Time)
+			if ok {
+				return s, nil
+			}
+			// Otherwise, validate and transform to Time
+			_, ok = aColumn.DefaultValue.Value.(TextPointer)
+			if !ok {
+				return s, fmt.Errorf("default value '%s' is not a valid TextPointer", aColumn.DefaultValue.Value)
+			}
+			timestamp, err := ParseTimestamp(aColumn.DefaultValue.Value.(TextPointer).String())
+			if err != nil {
+				return s, fmt.Errorf("default value '%s' is not a valid timestamp: %v", aColumn.DefaultValue.Value, err)
+			}
+			aColumn.DefaultValue.Value = timestamp
+			s.Columns[i] = aColumn
+		}
+
+		if err := isValueValidForColumn(aColumn, aColumn.DefaultValue); err != nil {
+			return s, fmt.Errorf("invalid default value: %w", err)
+		}
+	}
+	return s, nil
 }
 
 // prepareInsert makes sure to add any nullable columns that are missing from the
@@ -542,39 +585,6 @@ func (s Statement) Validate(aTable *Table) error {
 	return nil
 }
 
-// PrepareDefaultValues validates and prepares default values for columns in CREATE TABLE statements.
-// In case of TIMESTAMP columns, it transforms string default values into Time.
-func (s Statement) PrepareDefaultValues() (Statement, error) {
-	for i, aColumn := range s.Columns {
-		if !aColumn.DefaultValue.Valid {
-			continue
-		}
-		if aColumn.Kind == Timestamp {
-			// If this is already a Time, accept it as is
-			_, ok := aColumn.DefaultValue.Value.(Time)
-			if ok {
-				return s, nil
-			}
-			// Otherwise, validate and transform to Time
-			_, ok = aColumn.DefaultValue.Value.(TextPointer)
-			if !ok {
-				return s, fmt.Errorf("default value '%s' is not a valid TextPointer", aColumn.DefaultValue.Value)
-			}
-			timestamp, err := ParseTimestamp(aColumn.DefaultValue.Value.(TextPointer).String())
-			if err != nil {
-				return s, fmt.Errorf("default value '%s' is not a valid timestamp: %v", aColumn.DefaultValue.Value, err)
-			}
-			aColumn.DefaultValue.Value = timestamp
-			s.Columns[i] = aColumn
-		}
-
-		if err := isValueValidForColumn(aColumn, aColumn.DefaultValue); err != nil {
-			return s, fmt.Errorf("invalid default value: %w", err)
-		}
-	}
-	return s, nil
-}
-
 func (s Statement) validateCreateTable() error {
 	if len(s.TableName) == 0 {
 		return fmt.Errorf("table name is required")
@@ -598,6 +608,10 @@ func (s Statement) validateCreateTable() error {
 
 	if !canInlinedRowFitInPage(s.Columns) {
 		return fmt.Errorf("potential row size exceeds maximum allowed %d", UsablePageSize)
+	}
+
+	if len(s.CreateTableDDL()) > maximumSchemaSQL {
+		return fmt.Errorf("table definition too long, maximum length is %d", maximumSchemaSQL)
 	}
 
 	var (
@@ -675,6 +689,10 @@ func (s Statement) validateCreateIndex() error {
 
 	if len(s.Columns) > 1 {
 		return fmt.Errorf("more than one column for index is not supported")
+	}
+
+	if len(s.CreateIndexDDL()) > maximumSchemaSQL {
+		return fmt.Errorf("index definition too long, maximum length is %d", maximumSchemaSQL)
 	}
 
 	return nil
