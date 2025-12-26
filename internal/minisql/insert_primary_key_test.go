@@ -124,11 +124,13 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 			Kind:      Insert,
 			TableName: aTable.Name,
 			Columns:   aTable.Columns,
-			Fields:    fieldsFromColumns(aTable.Columns[1:]...), // exclude primary key column
+			Fields:    fieldsFromColumns(aTable.Columns...),
 			Inserts:   make([][]OptionalValue, 0, len(rows)),
 		}
 		for _, aRow := range rows {
-			stmt.Inserts = append(stmt.Inserts, aRow.Values[1:]) // exclude primary key value
+			// Set primary key value to NULL so we can test autoincrement
+			aRow.Values[0] = OptionalValue{Valid: false}
+			stmt.Inserts = append(stmt.Inserts, aRow.Values)
 		}
 
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -146,7 +148,7 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			_, err = executeTableStatement(ctx, aTable, stmt, Time{})
+			_, err = aTable.Insert(ctx, stmt)
 			return err
 		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)

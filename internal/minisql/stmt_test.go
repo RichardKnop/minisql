@@ -1493,7 +1493,7 @@ func TestStatement_CreateIndexDDL(t *testing.T) {
 	assert.Equal(t, expected, actual)
 }
 
-func TestStatement_InsertForColumn(t *testing.T) {
+func TestStatement_InsertValueForColumn(t *testing.T) {
 	t.Parallel()
 
 	stmt := Statement{
@@ -1526,15 +1526,15 @@ func TestStatement_InsertForColumn(t *testing.T) {
 		},
 	}
 
-	val, ok := stmt.InsertForColumn("email", 5)
+	val, ok := stmt.InsertValueForColumn("email", 5)
 	require.False(t, ok)
 	assert.Equal(t, OptionalValue{}, val)
 
-	val, ok = stmt.InsertForColumn("email", 0)
+	val, ok = stmt.InsertValueForColumn("email", 0)
 	require.True(t, ok)
 	assert.Equal(t, OptionalValue{Value: "john@example.com", Valid: true}, val)
 
-	val, ok = stmt.InsertForColumn("email", 1)
+	val, ok = stmt.InsertValueForColumn("email", 1)
 	require.True(t, ok)
 	assert.Equal(t, OptionalValue{Value: "jane@example.com", Valid: true}, val)
 }

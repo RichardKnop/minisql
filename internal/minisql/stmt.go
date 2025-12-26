@@ -1040,7 +1040,7 @@ func (s Statement) CreateIndexDDL() string {
 	return sb.String()
 }
 
-func (stmt Statement) InsertForColumn(name string, insertIdx int) (OptionalValue, bool) {
+func (stmt Statement) InsertValueForColumn(name string, insertIdx int) (OptionalValue, bool) {
 	fieldIdx := -1
 	for i, aField := range stmt.Fields {
 		if aField.Name == name {

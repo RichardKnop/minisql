@@ -438,25 +438,15 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 	case CreateTable, DropTable, CreateIndex, DropIndex:
 		return d.executeDDLStatement(ctx, stmt)
 	case Insert, Select, Update, Delete:
-		if stmt.ReadOnly() {
-			// Allow concurrent reads
-			d.dbLock.RLock()
-			aTable, ok := d.tables[stmt.TableName]
-			if !ok {
-				d.dbLock.RUnlock()
-				return StatementResult{}, errTableDoesNotExist
-			}
-			d.dbLock.RUnlock()
-			return executeTableStatement(ctx, aTable, stmt, d.clock())
-		}
-		// Use lock to limit to only one write operation at a time
-		d.dbLock.Lock()
-		defer d.dbLock.Unlock()
+		d.dbLock.RLock()
 		aTable, ok := d.tables[stmt.TableName]
 		if !ok {
+			d.dbLock.RUnlock()
 			return StatementResult{}, errTableDoesNotExist
 		}
-		return executeTableStatement(ctx, aTable, stmt, d.clock())
+		d.dbLock.RUnlock()
+
+		return d.executeTableStatement(ctx, aTable, stmt)
 	}
 	return StatementResult{}, errUnrecognizedStatementType
 }
@@ -491,18 +481,24 @@ func (d *Database) executeDDLStatement(ctx context.Context, stmt Statement) (Sta
 	return StatementResult{}, fmt.Errorf("unrecognized DDL statement type: %v", stmt.Kind)
 }
 
-func executeTableStatement(ctx context.Context, aTable *Table, stmt Statement, now Time) (StatementResult, error) {
+func (d *Database) executeTableStatement(ctx context.Context, aTable *Table, stmt Statement) (StatementResult, error) {
 	stmt.TableName = aTable.Name
 	stmt.Columns = aTable.Columns
 
 	var err error
-	stmt, err = stmt.Prepare(now)
+	stmt, err = stmt.Prepare(d.clock())
 	if err != nil {
 		return StatementResult{}, err
 	}
 
 	if err := stmt.Validate(aTable); err != nil {
 		return StatementResult{}, err
+	}
+
+	if !stmt.ReadOnly() {
+		// Use lock to limit to only one write operation at a time
+		d.dbLock.Lock()
+		defer d.dbLock.Unlock()
 	}
 
 	switch stmt.Kind {
