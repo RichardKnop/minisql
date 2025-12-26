@@ -12,6 +12,8 @@ type StatementKind int
 const (
 	CreateTable StatementKind = iota + 1
 	DropTable
+	CreateIndex
+	DropIndex
 	Insert
 	Select
 	Update
@@ -27,6 +29,10 @@ func (s StatementKind) String() string {
 		return "CREATE TABLE"
 	case DropTable:
 		return "DROP TABLE"
+	case CreateIndex:
+		return "CREATE INDEX"
+	case DropIndex:
+		return "DROP INDEX"
 	case Insert:
 		return "INSERT"
 	case Select:
@@ -560,6 +566,10 @@ func (s Statement) PrepareDefaultValues() (Statement, error) {
 func (s Statement) validateCreateTable() error {
 	if len(s.TableName) == 0 {
 		return fmt.Errorf("table name is required")
+	}
+
+	if len(s.TableName) > MaxInlineVarchar {
+		return fmt.Errorf("table name exceeds maximum length of %d", MaxInlineVarchar)
 	}
 
 	if len(s.Conditions) > 0 {

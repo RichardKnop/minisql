@@ -132,31 +132,31 @@ func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 	// First createdtable without any index
 	assert.Equal(t, SchemaTable, SchemaType(mainRows[1].Values[0].Value.(int32)))
 	assert.Equal(t, testTableName, mainRows[1].Values[1].Value.(TextPointer).String())
-	assert.Equal(t, 1, int(mainRows[1].Values[2].Value.(int32)))
+	assert.Equal(t, 1, int(mainRows[1].Values[3].Value.(int32)))
 	// Second created table with primary key
 	assert.Equal(t, SchemaTable, SchemaType(mainRows[2].Values[0].Value.(int32)))
 	assert.Equal(t, testTableName2, mainRows[2].Values[1].Value.(TextPointer).String())
-	assert.Equal(t, 2, int(mainRows[2].Values[2].Value.(int32)))
+	assert.Equal(t, 2, int(mainRows[2].Values[3].Value.(int32)))
 	// Primary key for the second table
 	assert.Equal(t, SchemaPrimaryKey, SchemaType(mainRows[3].Values[0].Value.(int32)))
 	assert.Equal(t, primaryKeyName(testTableName2), mainRows[3].Values[1].Value.(TextPointer).String())
-	assert.Equal(t, 3, int(mainRows[3].Values[2].Value.(int32)))
+	assert.Equal(t, 3, int(mainRows[3].Values[3].Value.(int32)))
 	// Third created table with unique index
 	assert.Equal(t, SchemaTable, SchemaType(mainRows[4].Values[0].Value.(int32)))
 	assert.Equal(t, testTableName3, mainRows[4].Values[1].Value.(TextPointer).String())
-	assert.Equal(t, 4, int(mainRows[4].Values[2].Value.(int32)))
+	assert.Equal(t, 4, int(mainRows[4].Values[3].Value.(int32)))
 	// Unique index for the third table
 	assert.Equal(t, SchemaUniqueIndex, SchemaType(mainRows[5].Values[0].Value.(int32)))
 	assert.Equal(t, uniqueIndexName, mainRows[5].Values[1].Value.(TextPointer).String())
-	assert.Equal(t, 5, int(mainRows[5].Values[2].Value.(int32)))
+	assert.Equal(t, 5, int(mainRows[5].Values[3].Value.(int32)))
 	// Fourth created table with unique index
 	assert.Equal(t, SchemaTable, SchemaType(mainRows[6].Values[0].Value.(int32)))
 	assert.Equal(t, testTableName4, mainRows[6].Values[1].Value.(TextPointer).String())
-	assert.Equal(t, 6, int(mainRows[6].Values[2].Value.(int32)))
+	assert.Equal(t, 6, int(mainRows[6].Values[3].Value.(int32)))
 	// Secondary index for the fourth table
 	assert.Equal(t, SchemaSecondaryIndex, SchemaType(mainRows[7].Values[0].Value.(int32)))
 	assert.Equal(t, secondaryIndexName, mainRows[7].Values[1].Value.(TextPointer).String())
-	assert.Equal(t, 7, int(mainRows[7].Values[2].Value.(int32)))
+	assert.Equal(t, 7, int(mainRows[7].Values[3].Value.(int32)))
 }
 
 func TestDatabase_CreateTable(t *testing.T) {
@@ -197,7 +197,7 @@ func TestDatabase_CreateTable(t *testing.T) {
 	// Created table without any index
 	assert.Equal(t, SchemaTable, SchemaType(mainRows[1].Values[0].Value.(int32)))
 	assert.Equal(t, testTableName, mainRows[1].Values[1].Value.(TextPointer).String())
-	assert.Equal(t, 1, int(mainRows[1].Values[2].Value.(int32)))
+	assert.Equal(t, 1, int(mainRows[1].Values[3].Value.(int32)))
 }
 
 func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
@@ -242,11 +242,11 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 	// Created table with primary key
 	assert.Equal(t, SchemaTable, SchemaType(mainRows[1].Values[0].Value.(int32)))
 	assert.Equal(t, testTableName, mainRows[1].Values[1].Value.(TextPointer).String())
-	assert.Equal(t, 1, int(mainRows[1].Values[2].Value.(int32)))
+	assert.Equal(t, 1, int(mainRows[1].Values[3].Value.(int32)))
 	// Primary key for the created table
 	assert.Equal(t, SchemaPrimaryKey, SchemaType(mainRows[2].Values[0].Value.(int32)))
 	assert.Equal(t, primaryKeyName(testTableName), mainRows[2].Values[1].Value.(TextPointer).String())
-	assert.Equal(t, 2, int(mainRows[2].Values[2].Value.(int32)))
+	assert.Equal(t, 2, int(mainRows[2].Values[3].Value.(int32)))
 }
 
 func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
@@ -293,11 +293,11 @@ func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
 	// Created table with unique index
 	assert.Equal(t, SchemaTable, SchemaType(mainRows[1].Values[0].Value.(int32)))
 	assert.Equal(t, testTableName, mainRows[1].Values[1].Value.(TextPointer).String())
-	assert.Equal(t, 1, int(mainRows[1].Values[2].Value.(int32)))
+	assert.Equal(t, 1, int(mainRows[1].Values[3].Value.(int32)))
 	// Unique index for the created table
 	assert.Equal(t, SchemaUniqueIndex, SchemaType(mainRows[2].Values[0].Value.(int32)))
 	assert.Equal(t, indexName, mainRows[2].Values[1].Value.(TextPointer).String())
-	assert.Equal(t, 2, int(mainRows[2].Values[2].Value.(int32)))
+	assert.Equal(t, 2, int(mainRows[2].Values[3].Value.(int32)))
 }
 
 func TestDatabase_CreateTable_WithSecondaryIndex(t *testing.T) {
@@ -344,11 +344,11 @@ func TestDatabase_CreateTable_WithSecondaryIndex(t *testing.T) {
 	// Created table with secondary index
 	assert.Equal(t, SchemaTable, SchemaType(mainRows[1].Values[0].Value.(int32)))
 	assert.Equal(t, testTableName, mainRows[1].Values[1].Value.(TextPointer).String())
-	assert.Equal(t, 1, int(mainRows[1].Values[2].Value.(int32)))
+	assert.Equal(t, 1, int(mainRows[1].Values[3].Value.(int32)))
 	// Secondary index for the created table
 	assert.Equal(t, SchemaSecondaryIndex, SchemaType(mainRows[2].Values[0].Value.(int32)))
 	assert.Equal(t, indexName, mainRows[2].Values[1].Value.(TextPointer).String())
-	assert.Equal(t, 2, int(mainRows[2].Values[2].Value.(int32)))
+	assert.Equal(t, 2, int(mainRows[2].Values[3].Value.(int32)))
 }
 
 func TestDatabase_DropTable(t *testing.T) {

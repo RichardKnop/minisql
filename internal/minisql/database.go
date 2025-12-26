@@ -15,25 +15,34 @@ var (
 )
 
 var (
-	maximumSchemaSQL = UsablePageSize - (4 + MaxInlineVarchar + 4 + 2*varcharLengthPrefixSize) - RootPageConfigSize
+	// TODO - do we need to limit SQL schemas to fit into a single page?
+	maximumSchemaSQL = UsablePageSize -
+		4 - //  type column
+		2*(varcharLengthPrefixSize+MaxInlineVarchar) - // name and tbl_name columns
+		4 - // root_page column
+		(varcharLengthPrefixSize + 4) - // sql column
+		RootPageConfigSize
 	mainTableColumns = []Column{
 		{
-			Kind:     Int4,
-			Size:     4,
-			Name:     "type",
-			Nullable: false,
+			Kind: Int4,
+			Size: 4,
+			Name: "type",
+		},
+		{
+			Kind: Varchar,
+			Size: MaxInlineVarchar,
+			Name: "name",
 		},
 		{
 			Kind:     Varchar,
 			Size:     MaxInlineVarchar,
-			Name:     "name",
-			Nullable: false,
+			Name:     "tbl_name",
+			Nullable: true,
 		},
 		{
-			Kind:     Int4,
-			Size:     4,
-			Name:     "root_page",
-			Nullable: true,
+			Kind: Int4,
+			Size: 4,
+			Name: "root_page",
 		},
 		{
 			Kind:     Text,
@@ -47,7 +56,8 @@ var (
 	MainTableSQL = fmt.Sprintf(`create table "%s" (
 	type int4 not null,
 	name varchar(255) not null,
-	root_page int4,
+	tbl_name varchar(255),
+	root_page int4 not null,
 	sql text
 );`, SchemaTableName)
 
@@ -139,8 +149,9 @@ func (d *Database) init(ctx context.Context) error {
 				{
 					{Value: int32(SchemaTable), Valid: true},                     // type (only 0 supported now)
 					{Value: NewTextPointer([]byte(mainTable.Name)), Valid: true}, // name
-					{Value: int32(mainTable.GetRootPageIdx()), Valid: true},      // root page
-					{Value: NewTextPointer([]byte(MainTableSQL)), Valid: true},   // sql
+					{}, // tbl_name
+					{Value: int32(mainTable.GetRootPageIdx()), Valid: true},    // root page
+					{Value: NewTextPointer([]byte(MainTableSQL)), Valid: true}, // sql
 				},
 			},
 		}); err != nil {
@@ -179,7 +190,11 @@ func (d *Database) init(ctx context.Context) error {
 		aRow := schemaResults.Rows.Row()
 		switch SchemaType(aRow.Values[0].Value.(int32)) {
 		case SchemaTable:
-			stmts, err := d.parser.Parse(ctx, aRow.Values[3].Value.(TextPointer).String())
+			var (
+				rootPageIdx = PageIndex(aRow.Values[3].Value.(int32))
+				sql         = aRow.Values[4].Value.(TextPointer).String()
+			)
+			stmts, err := d.parser.Parse(ctx, sql)
 			if err != nil {
 				return err
 			}
@@ -192,7 +207,6 @@ func (d *Database) init(ctx context.Context) error {
 			if err := stmt.Validate(nil); err != nil {
 				return err
 			}
-			rootPageIdx := PageIndex(aRow.Values[2].Value.(int32))
 			d.tables[stmt.TableName] = NewTable(
 				d.logger,
 				NewTransactionalPager(
@@ -211,18 +225,18 @@ func (d *Database) init(ctx context.Context) error {
 			).Debug("loaded table")
 		case SchemaPrimaryKey:
 			var (
-				pkName    = aRow.Values[1].Value.(TextPointer).String()
-				tableName = tableNameFromPrimaryKey(pkName)
+				name        = aRow.Values[1].Value.(TextPointer).String()
+				tableName   = aRow.Values[2].Value.(TextPointer).String()
+				rootPageIdx = PageIndex(aRow.Values[3].Value.(int32))
 			)
 			aTable, ok := d.tables[tableName]
 			if !ok {
-				return fmt.Errorf("table %s for primary key index %s does not exist", tableName, pkName)
+				return fmt.Errorf("table %s for primary key index %s does not exist", tableName, name)
 			}
 			primaryKeyPager := NewTransactionalPager(
 				d.factory.ForIndex(aTable.PrimaryKey.Column.Kind, uint64(aTable.PrimaryKey.Column.Size), true),
 				d.txManager,
 			)
-			rootPageIdx := PageIndex(aRow.Values[2].Value.(int32))
 			btreeIndex, err := aTable.newBTreeIndex(primaryKeyPager, rootPageIdx, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name)
 			if err != nil {
 				return err
@@ -237,22 +251,22 @@ func (d *Database) init(ctx context.Context) error {
 			).Debug("loaded primary key index")
 		case SchemaUniqueIndex:
 			var (
-				indexName = aRow.Values[1].Value.(TextPointer).String()
-				tableName = tableNameFromUniqueIndex(indexName)
+				name        = aRow.Values[1].Value.(TextPointer).String()
+				tableName   = aRow.Values[2].Value.(TextPointer).String()
+				rootPageIdx = PageIndex(aRow.Values[3].Value.(int32))
 			)
 			aTable, ok := d.tables[tableName]
 			if !ok {
-				return fmt.Errorf("table %s for unique index %s does not exist", tableName, indexName)
+				return fmt.Errorf("table %s for unique index %s does not exist", tableName, name)
 			}
-			uniqueIndex, ok := aTable.UniqueIndexes[indexName]
+			uniqueIndex, ok := aTable.UniqueIndexes[name]
 			if !ok {
-				return fmt.Errorf("unique index %s does not exist on table %s", indexName, tableName)
+				return fmt.Errorf("unique index %s does not exist on table %s", name, tableName)
 			}
 			indexPager := NewTransactionalPager(
 				d.factory.ForIndex(uniqueIndex.Column.Kind, uint64(uniqueIndex.Column.Size), true),
 				d.txManager,
 			)
-			rootPageIdx := PageIndex(aRow.Values[2].Value.(int32))
 			btreeIndex, err := aTable.newBTreeIndex(indexPager, rootPageIdx, uniqueIndex.Column, uniqueIndex.Name)
 			if err != nil {
 				return err
@@ -260,7 +274,7 @@ func (d *Database) init(ctx context.Context) error {
 
 			// Set unique BTree index on the table instance
 			uniqueIndex.Index = btreeIndex
-			aTable.UniqueIndexes[indexName] = uniqueIndex
+			aTable.UniqueIndexes[name] = uniqueIndex
 
 			d.logger.Sugar().With(
 				"name", uniqueIndex.Name,
@@ -268,22 +282,22 @@ func (d *Database) init(ctx context.Context) error {
 			).Debug("loaded unique index")
 		case SchemaSecondaryIndex:
 			var (
-				indexName = aRow.Values[1].Value.(TextPointer).String()
-				tableName = tableNameFromSecondaryIndex(indexName)
+				name        = aRow.Values[1].Value.(TextPointer).String()
+				tableName   = aRow.Values[2].Value.(TextPointer).String()
+				rootPageIdx = PageIndex(aRow.Values[3].Value.(int32))
 			)
 			aTable, ok := d.tables[tableName]
 			if !ok {
-				return fmt.Errorf("table %s for secondary index %s does not exist", tableName, indexName)
+				return fmt.Errorf("table %s for secondary index %s does not exist", tableName, name)
 			}
-			secondaryIndex, ok := aTable.SecondaryIndexes[indexName]
+			secondaryIndex, ok := aTable.SecondaryIndexes[name]
 			if !ok {
-				return fmt.Errorf("secondary index %s does not exist on table %s", indexName, tableName)
+				return fmt.Errorf("secondary index %s does not exist on table %s", name, tableName)
 			}
 			indexPager := NewTransactionalPager(
 				d.factory.ForIndex(secondaryIndex.Column.Kind, uint64(secondaryIndex.Column.Size), true),
 				d.txManager,
 			)
-			rootPageIdx := PageIndex(aRow.Values[2].Value.(int32))
 			btreeIndex, err := aTable.newBTreeIndex(indexPager, rootPageIdx, secondaryIndex.Column, secondaryIndex.Name)
 			if err != nil {
 				return err
@@ -291,7 +305,7 @@ func (d *Database) init(ctx context.Context) error {
 
 			// Set unique BTree index on the table instance
 			secondaryIndex.Index = btreeIndex
-			aTable.SecondaryIndexes[indexName] = secondaryIndex
+			aTable.SecondaryIndexes[name] = secondaryIndex
 
 			d.logger.Sugar().With(
 				"name", secondaryIndex.Name,
@@ -543,7 +557,7 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 	)
 
 	// Save table record into minisql_schema system table
-	if err := d.insertIntoMainTable(ctx, SchemaTable, stmt.TableName, freePage.Index, stmt.CreateTableDDL()); err != nil {
+	if err := d.insertIntoMainTable(ctx, SchemaTable, stmt.TableName, "", freePage.Index, stmt.CreateTableDDL()); err != nil {
 		return nil, err
 	}
 
@@ -598,7 +612,7 @@ func (d *Database) createPrimaryKey(ctx context.Context, aTable *Table, aColumn 
 		return nil, err
 	}
 
-	if err := d.insertIntoMainTable(ctx, SchemaPrimaryKey, aTable.PrimaryKey.Name, freePage.Index, ""); err != nil {
+	if err := d.insertIntoMainTable(ctx, SchemaPrimaryKey, aTable.PrimaryKey.Name, aTable.Name, freePage.Index, ""); err != nil {
 		return nil, err
 	}
 
@@ -622,7 +636,7 @@ func (d *Database) createUniqueIndex(ctx context.Context, aTable *Table, uniqueI
 		return nil, err
 	}
 
-	if err := d.insertIntoMainTable(ctx, SchemaUniqueIndex, uniqueIndex.Name, freePage.Index, ""); err != nil {
+	if err := d.insertIntoMainTable(ctx, SchemaUniqueIndex, uniqueIndex.Name, aTable.Name, freePage.Index, ""); err != nil {
 		return nil, err
 	}
 
@@ -646,7 +660,7 @@ func (d *Database) createSecondaryIndex(ctx context.Context, aTable *Table, seco
 		return nil, err
 	}
 
-	if err := d.insertIntoMainTable(ctx, SchemaSecondaryIndex, secondaryIndex.Name, freePage.Index, ""); err != nil {
+	if err := d.insertIntoMainTable(ctx, SchemaSecondaryIndex, secondaryIndex.Name, aTable.Name, freePage.Index, ""); err != nil {
 		return nil, err
 	}
 
@@ -747,7 +761,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	return nil
 }
 
-func (d *Database) insertIntoMainTable(ctx context.Context, aType SchemaType, name string, rootIdx PageIndex, ddl string) error {
+func (d *Database) insertIntoMainTable(ctx context.Context, aType SchemaType, name, tableName string, rootIdx PageIndex, ddl string) error {
 	mainTable := d.tables[SchemaTableName]
 	return mainTable.Insert(ctx, Statement{
 		Kind:      Insert,
@@ -758,6 +772,7 @@ func (d *Database) insertIntoMainTable(ctx context.Context, aType SchemaType, na
 			{
 				{Value: int32(aType), Valid: true},
 				{Value: NewTextPointer([]byte(name)), Valid: true},
+				{Value: NewTextPointer([]byte(tableName)), Valid: tableName != ""},
 				{Value: int32(rootIdx), Valid: true},
 				{Value: NewTextPointer([]byte(ddl)), Valid: ddl != ""},
 			},

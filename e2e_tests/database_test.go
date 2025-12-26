@@ -46,8 +46,23 @@ func (s *TestSuite) TearDownTest() {
 type schema struct {
 	Type     minisql.SchemaType
 	Name     string
+	TblName  *string
 	RootPage int
-	SQL      *string
+	Sql      *string
+}
+
+func (s schema) TableName() string {
+	if s.TblName == nil {
+		return ""
+	}
+	return *s.TblName
+}
+
+func (s schema) SQL() string {
+	if s.Sql == nil {
+		return ""
+	}
+	return *s.Sql
 }
 
 func (s *TestSuite) TestEmptyDatabase() {
@@ -61,7 +76,7 @@ func (s *TestSuite) TestEmptyDatabase() {
 	s.Equal(1, count)
 
 	var aSchema schema
-	err = s.db.QueryRow(`select * from minisql_schema;`).Scan(&aSchema.Type, &aSchema.Name, &aSchema.RootPage, &aSchema.SQL)
+	err = s.db.QueryRow(`select * from minisql_schema;`).Scan(&aSchema.Type, &aSchema.Name, &aSchema.TblName, &aSchema.RootPage, &aSchema.Sql)
 	s.Require().NoError(err)
 	s.assertSchemaTable(aSchema)
 }
@@ -174,7 +189,7 @@ func (s *TestSuite) scanSchemas() []schema {
 	s.Require().NoError(err)
 	for rows.Next() {
 		var aSchema schema
-		err := rows.Scan(&aSchema.Type, &aSchema.Name, &aSchema.RootPage, &aSchema.SQL)
+		err := rows.Scan(&aSchema.Type, &aSchema.Name, &aSchema.TblName, &aSchema.RootPage, &aSchema.Sql)
 		s.Require().NoError(err)
 		schemas = append(schemas, aSchema)
 	}
@@ -182,50 +197,58 @@ func (s *TestSuite) scanSchemas() []schema {
 	return schemas
 }
 
-func (s *TestSuite) assertUsersTable(table schema, idx int, primaryKey schema, pkIdx int, uniqueIndex schema, keyIdx int) {
-	s.Equal(minisql.SchemaTable, table.Type)
-	s.Equal("users", table.Name)
-	s.Equal(idx, int(table.RootPage))
-	s.Equal(createUsersTableSQL, *table.SQL)
+func (s *TestSuite) assertSchemaTable(aSchema schema) {
+	s.Equal(minisql.SchemaTable, aSchema.Type)
+	s.Equal(minisql.SchemaTableName, aSchema.Name)
+	s.Empty(aSchema.TableName())
+	s.Equal(0, int(aSchema.RootPage))
+	s.Equal(minisql.MainTableSQL, aSchema.SQL())
+}
+
+func (s *TestSuite) assertUsersTable(aTable schema, idx int, primaryKey schema, pkIdx int, uniqueIndex schema, keyIdx int) {
+	s.Equal(minisql.SchemaTable, aTable.Type)
+	s.Equal("users", aTable.Name)
+	s.Empty(aTable.TableName())
+	s.Equal(idx, int(aTable.RootPage))
+	s.Equal(createUsersTableSQL, aTable.SQL())
 
 	s.Equal(minisql.SchemaPrimaryKey, primaryKey.Type)
 	s.Equal("pkey__users", primaryKey.Name)
+	s.Equal("users", primaryKey.TableName())
 	s.Equal(pkIdx, int(primaryKey.RootPage))
-	s.Nil(primaryKey.SQL)
+	s.Empty(uniqueIndex.SQL())
 
 	s.Equal(minisql.SchemaUniqueIndex, uniqueIndex.Type)
 	s.Equal("key__users__email", uniqueIndex.Name)
+	s.Equal("users", uniqueIndex.TableName())
 	s.Equal(keyIdx, int(uniqueIndex.RootPage))
-	s.Nil(uniqueIndex.SQL)
+	s.Empty(uniqueIndex.SQL())
 }
 
-func (s *TestSuite) assertProductsTable(table schema, idx int, primaryKey schema, pkIdx int) {
-	s.Equal(minisql.SchemaTable, table.Type)
-	s.Equal("products", table.Name)
-	s.Equal(idx, int(table.RootPage))
-	s.Equal(createProductsTableSQL, *table.SQL)
+func (s *TestSuite) assertProductsTable(aTable schema, idx int, primaryKey schema, pkIdx int) {
+	s.Equal(minisql.SchemaTable, aTable.Type)
+	s.Equal("products", aTable.Name)
+	s.Empty(aTable.TableName())
+	s.Equal(idx, int(aTable.RootPage))
+	s.Equal(createProductsTableSQL, aTable.SQL())
 
 	s.Equal(minisql.SchemaPrimaryKey, primaryKey.Type)
 	s.Equal("pkey__products", primaryKey.Name)
+	s.Equal("products", primaryKey.TableName())
 	s.Equal(pkIdx, int(primaryKey.RootPage))
-	s.Nil(primaryKey.SQL)
+	s.Empty(primaryKey.SQL())
 }
 
-func (s *TestSuite) assertOrdersTable(table schema, idx int, primaryKey schema, pkIdx int) {
-	s.Equal(minisql.SchemaTable, table.Type)
-	s.Equal("orders", table.Name)
-	s.Equal(idx, int(table.RootPage))
-	s.Equal(createOrdersTableSQL, *table.SQL)
+func (s *TestSuite) assertOrdersTable(aTable schema, idx int, primaryKey schema, pkIdx int) {
+	s.Equal(minisql.SchemaTable, aTable.Type)
+	s.Equal("orders", aTable.Name)
+	s.Empty(aTable.TableName())
+	s.Equal(idx, int(aTable.RootPage))
+	s.Equal(createOrdersTableSQL, aTable.SQL())
 
 	s.Equal(minisql.SchemaPrimaryKey, primaryKey.Type)
 	s.Equal("pkey__orders", primaryKey.Name)
+	s.Equal("orders", primaryKey.TableName())
 	s.Equal(pkIdx, int(primaryKey.RootPage))
-	s.Nil(primaryKey.SQL)
-}
-
-func (s *TestSuite) assertSchemaTable(aTable schema) {
-	s.Equal(minisql.SchemaTable, aTable.Type)
-	s.Equal(minisql.SchemaTableName, aTable.Name)
-	s.Equal(0, int(aTable.RootPage))
-	s.Equal(minisql.MainTableSQL, *aTable.SQL)
+	s.Empty(primaryKey.SQL())
 }
