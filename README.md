@@ -174,6 +174,7 @@ if err := rows.Err(); err != nil {
 - `NULL` and `NOT NULL` support (via null bit mask included in each row/cell)
 - `DEFAULT` support for all columns including `NOW()` for `TIMESTAMP`
 - `DROP TABLE`
+- `CREATE INDEX`, `DROP INDEX` - only for secondary non unique indexes (primary and unique can be declared as part of `CREATE TABLE`)
 - `INSERT` (single row or multi rows via tuple of values separated by comma)
 - `SELECT` (all fields with `*`, only specific fields or count rows with `COUNT(*)`)
 - `UPDATE`
