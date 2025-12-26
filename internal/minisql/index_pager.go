@@ -17,11 +17,9 @@ func (p *indexPager[T]) GetPage(ctx context.Context, pageIdx PageIndex) (*Page, 
 func (p *indexPager[T]) unmarshal(pageIdx PageIndex, buf []byte) (*Page, error) {
 	idx := 0
 
+	// Note: p.mu is already locked by GetPage caller in pagerImpl
 	// Requesting a new page
-	p.mu.RLock()
-	totalPages := p.totalPages
-	p.mu.RUnlock()
-	if int(pageIdx) == int(totalPages) {
+	if int(pageIdx) == int(p.totalPages) {
 		node := NewIndexNode[T](p.unique)
 		buf[idx] = PageTypeIndex
 		_, err := node.Unmarshal(buf)
@@ -29,10 +27,8 @@ func (p *indexPager[T]) unmarshal(pageIdx PageIndex, buf []byte) (*Page, error) 
 			return nil, err
 		}
 		node.Header.RightChild = RIGHT_CHILD_NOT_SET
-		p.mu.Lock()
 		p.pages = append(p.pages, &Page{Index: pageIdx, IndexNode: node})
 		p.totalPages = uint32(pageIdx + 1)
-		p.mu.Unlock()
 		return p.pages[len(p.pages)-1], nil
 	}
 

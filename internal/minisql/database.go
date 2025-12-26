@@ -924,16 +924,16 @@ func (d *Database) createUniqueIndex(ctx context.Context, aTable *Table, uniqueI
 func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, aTable *Table, secondaryIndex SecondaryIndex) (BTreeIndex, error) {
 	d.logger.Sugar().With("column", secondaryIndex.Column.Name).Debug("creating secondary index")
 
-	aPager := NewTransactionalPager(
-		d.factory.ForTable(aTable.Columns),
+	indexPager := NewTransactionalPager(
+		d.factory.ForIndex(secondaryIndex.Column.Kind, uint64(secondaryIndex.Column.Size), true),
 		d.txManager,
 	)
-	freePage, err := aPager.GetFreePage(ctx)
+	freePage, err := indexPager.GetFreePage(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	createdIndex, err := aTable.createBTreeIndex(aPager, freePage, secondaryIndex.Column, secondaryIndex.Name, false)
+	createdIndex, err := aTable.createBTreeIndex(indexPager, freePage, secondaryIndex.Column, secondaryIndex.Name, false)
 	if err != nil {
 		return nil, err
 	}
@@ -970,6 +970,9 @@ func (d *Database) checkSchemaExists(ctx context.Context, aType SchemaType, name
 		return Schema{}, false, nil
 	}
 	aRow := schemaResults.Rows.Row()
+	if schemaResults.Rows.Next(ctx) {
+		return Schema{}, false, fmt.Errorf("multiple schema entries found for name %s of type %d", name, aType)
+	}
 	if err := schemaResults.Rows.Err(); err != nil {
 		return Schema{}, false, err
 	}

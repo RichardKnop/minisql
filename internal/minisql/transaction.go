@@ -131,13 +131,23 @@ func (tx *Transaction) TrackDBHeaderWrite(header DatabaseHeader) {
 func (tx *Transaction) GetReadVersions() map[PageIndex]uint64 {
 	tx.mu.RLock()
 	defer tx.mu.RUnlock()
-	return tx.ReadSet
+	// Return a copy to avoid concurrent map access
+	readSetCopy := make(map[PageIndex]uint64, len(tx.ReadSet))
+	for k, v := range tx.ReadSet {
+		readSetCopy[k] = v
+	}
+	return readSetCopy
 }
 
 func (tx *Transaction) GetWriteVersions() map[PageIndex]*Page {
 	tx.mu.RLock()
 	defer tx.mu.RUnlock()
-	return tx.WriteSet
+	// Return a copy to avoid concurrent map access
+	writeSetCopy := make(map[PageIndex]*Page, len(tx.WriteSet))
+	for k, v := range tx.WriteSet {
+		writeSetCopy[k] = v
+	}
+	return writeSetCopy
 }
 
 func (tx *Transaction) GetDBHeaderReadVersion() (uint64, bool) {

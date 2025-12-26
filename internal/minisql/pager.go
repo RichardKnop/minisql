@@ -74,16 +74,33 @@ func (p *pagerImpl) Close() error {
 }
 
 func (p *pagerImpl) TotalPages() uint32 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	return p.totalPages
 }
 
 func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler PageUnmarshaler) (*Page, error) {
+	// Check if page already exists in cache
+	p.mu.RLock()
 	if len(p.pages) > int(pageIdx) && p.pages[pageIdx] != nil {
-		return p.pages[pageIdx], nil
+		page := p.pages[pageIdx]
+		p.mu.RUnlock()
+		return page, nil
+	}
+	totalPages := p.totalPages
+	p.mu.RUnlock()
+
+	if int(pageIdx) > int(totalPages) {
+		return nil, fmt.Errorf("cannot skip index when getting page, index: %d, number of pages: %d", pageIdx, totalPages)
 	}
 
-	if int(pageIdx) > int(p.totalPages) {
-		return nil, fmt.Errorf("cannot skip index when getting page, index: %d, number of pages: %d", pageIdx, len(p.pages))
+	// Acquire write lock before any modifications
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Double-check page doesn't exist (in case another goroutine created it)
+	if len(p.pages) > int(pageIdx) && p.pages[pageIdx] != nil {
+		return p.pages[pageIdx], nil
 	}
 
 	buf := make([]byte, p.pageSize)
@@ -123,6 +140,9 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 }
 
 func (p *pagerImpl) GetHeader(ctx context.Context) DatabaseHeader {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
 	return p.dbHeader
 }
 
@@ -141,11 +161,15 @@ func (p *pagerImpl) SavePage(ctx context.Context, pageIdx PageIndex, page *Page)
 }
 
 func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
+	p.mu.RLock()
 	if int(pageIdx) >= len(p.pages) || p.pages[pageIdx] == nil {
+		p.mu.RUnlock()
 		return nil
 	}
 
 	aPage := p.pages[pageIdx]
+	dbHeader := p.dbHeader
+	p.mu.RUnlock()
 
 	buf := make([]byte, p.pageSize)
 	_, err := marshalPage(aPage, buf)
@@ -158,7 +182,7 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 		return err
 	}
 
-	headerBytes, err := p.dbHeader.Marshal()
+	headerBytes, err := dbHeader.Marshal()
 	if err != nil {
 		return err
 	}

@@ -26,24 +26,20 @@ func (p *tablePager) GetPage(ctx context.Context, pageIdx PageIndex) (*Page, err
 func (p *tablePager) unmarshal(pageIdx PageIndex, buf []byte) (*Page, error) {
 	idx := 0
 
+	// Note: p.mu is already locked by GetPage caller in pagerImpl
 	// Requesting a new page
-	p.mu.RLock()
-	totalPages := p.totalPages
-	p.mu.RUnlock()
-	if int(pageIdx) == int(totalPages) {
+	if int(pageIdx) == int(p.totalPages) {
 		// Leaf node
 		leaf := NewLeafNode()
 		_, err := leaf.Unmarshal(p.columns, buf)
 		if err != nil {
 			return nil, err
 		}
-		p.mu.Lock()
 		p.pages = append(p.pages, &Page{
 			Index:    pageIdx,
 			LeafNode: leaf,
 		})
 		p.totalPages = uint32(pageIdx + 1)
-		p.mu.Unlock()
 		return p.pages[len(p.pages)-1], nil
 	}
 
