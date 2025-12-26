@@ -88,8 +88,8 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 	}
 
 	// Save DDL changes first (CREATE / DROP TABLE)
-	if tx.DDLChanges.CreateTables != nil || tx.DDLChanges.DropTables != nil {
-		committer.DDLSaver.SaveDDLChanges(ctx, tx.DDLChanges.CreateTables, tx.DDLChanges.DropTables)
+	if tx.DDLChanges.HasChanges() {
+		committer.DDLSaver.SaveDDLChanges(ctx, tx.DDLChanges)
 	}
 
 	// Check for conflicts (simplified optimistic concurrency control)

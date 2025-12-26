@@ -2,6 +2,7 @@ package e2etests
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"testing"
 
@@ -131,6 +132,21 @@ func (s *TestSuite) TestCreateTable() {
 		s.assertUsersTable(schemas[1], 1, schemas[2], 2, schemas[3], 3)
 	})
 
+	s.Run("Create index", func() {
+		_, err := s.db.Exec(createUsersIndexSQL)
+		s.Require().NoError(err)
+
+		var count int
+		err = s.db.QueryRow(`select count(*) from minisql_schema;`).Scan(&count)
+		s.Require().NoError(err)
+		s.Equal(5, count)
+
+		schemas := s.scanSchemas()
+		s.assertSchemaTable(schemas[0])
+		s.assertUsersTable(schemas[1], 1, schemas[2], 2, schemas[3], 3)
+		s.assertIndex(schemas[4], "idx_created", "users", 4, createUsersIndexSQL)
+	})
+
 	s.Run("Drop table", func() {
 		_, err := s.db.Exec(`drop table "users";`)
 		s.Require().NoError(err)
@@ -143,13 +159,21 @@ func (s *TestSuite) TestCreateTable() {
 		schemas := s.scanSchemas()
 		s.Require().Equal(1, len(schemas))
 		s.assertSchemaTable(schemas[0])
+
+		fmt.Println("Dropped users table successfully")
+		fmt.Println(schemas)
 	})
 
 	s.Run("Create multi table schema", func() {
 		tx, err := s.db.Begin()
 		s.Require().NoError(err)
 
-		for _, tableSQL := range []string{createUsersTableSQL, createProductsTableSQL, createOrdersTableSQL} {
+		for _, tableSQL := range []string{
+			createUsersTableSQL,
+			createUsersIndexSQL,
+			createProductsTableSQL,
+			createOrdersTableSQL,
+		} {
 			aResult, err := tx.Exec(tableSQL)
 			s.Require().NoError(err)
 			rowsAffected, err := aResult.RowsAffected()
@@ -160,26 +184,31 @@ func (s *TestSuite) TestCreateTable() {
 		err = tx.Commit()
 		s.Require().NoError(err)
 
-		// There should be 8 rows now:
+		// There should be 9 rows now:
 		// - 1 for minisql_schema and one for users table
 		// - 3 for the users table, its primary key index and unique index
+		// - 1 for secondary inex on users table
 		// - 2 for products table and its primary key index
 		// - 2 for orders table and its primary key index
 		var count int
 		err = s.db.QueryRow(`select count(*) from minisql_schema;`).Scan(&count)
 		s.Require().NoError(err)
-		s.Equal(8, count)
+		s.Equal(9, count)
 
 		schemas := s.scanSchemas()
-		s.Require().Equal(8, len(schemas))
+		s.Require().Equal(9, len(schemas))
 
+		// System table should be unchanged
 		s.assertSchemaTable(schemas[0])
-		// Page numbers will be reversed because we dropped the table previously and
-		// pages were freed up and now reused back from linked list of free pages.
-		s.assertUsersTable(schemas[1], 3, schemas[2], 2, schemas[3], 1)
+
+		// Page numbers are coming from the free pages linked list from the database header,
+		// remember we freed pages 1-4 when we dropped the users and then its index previously.
+		s.assertUsersTable(schemas[1], 4, schemas[2], 3, schemas[3], 2)
+		s.assertIndex(schemas[4], "idx_created", "users", 1, createUsersIndexSQL)
+
 		// Products and orders tables should be created as well
-		s.assertProductsTable(schemas[4], 4, schemas[5], 5)
-		s.assertOrdersTable(schemas[6], 6, schemas[7], 7)
+		s.assertProductsTable(schemas[5], 5, schemas[6], 6)
+		s.assertOrdersTable(schemas[7], 7, schemas[8], 8)
 	})
 }
 
@@ -223,6 +252,14 @@ func (s *TestSuite) assertUsersTable(aTable schema, idx int, primaryKey schema, 
 	s.Equal("users", uniqueIndex.TableName())
 	s.Equal(keyIdx, int(uniqueIndex.RootPage))
 	s.Empty(uniqueIndex.SQL())
+}
+
+func (s *TestSuite) assertIndex(aIndex schema, name, tableName string, idx int, sql string) {
+	s.Equal(minisql.SchemaSecondaryIndex, aIndex.Type)
+	s.Equal(name, aIndex.Name)
+	s.Equal(tableName, aIndex.TableName())
+	s.Equal(idx, int(aIndex.RootPage))
+	s.Equal(sql, aIndex.SQL())
 }
 
 func (s *TestSuite) assertProductsTable(aTable schema, idx int, primaryKey schema, pkIdx int) {

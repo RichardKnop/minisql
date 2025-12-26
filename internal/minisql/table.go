@@ -69,16 +69,6 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 			}
 			continue
 		}
-		if aColumn.Index {
-			indexName := secondaryIndexName(name, aColumn.Name)
-			aTable.SecondaryIndexes[indexName] = SecondaryIndex{
-				IndexInfo: IndexInfo{
-					Name:   indexName,
-					Column: aColumn,
-				},
-			}
-			continue
-		}
 	}
 	return aTable
 }

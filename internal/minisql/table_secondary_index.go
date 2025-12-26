@@ -3,24 +3,11 @@ package minisql
 import (
 	"context"
 	"fmt"
-	"strings"
 )
 
 type SecondaryIndex struct {
 	IndexInfo
 	Index BTreeIndex
-}
-
-func secondaryIndexName(tableName, columnName string) string {
-	return fmt.Sprintf(
-		"idx__%s__%s",
-		tableName,
-		columnName,
-	)
-}
-
-func tableNameFromSecondaryIndex(indexName string) string {
-	return strings.Split(indexName, "__")[1]
 }
 
 func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, key OptionalValue, rowID RowID) error {

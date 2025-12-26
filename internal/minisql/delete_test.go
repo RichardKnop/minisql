@@ -83,7 +83,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	t.Run("Delete rows with NOT NULL values", func(t *testing.T) {
 		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
 			Kind:       Delete,
-			Conditions: NewOneOrMore(Conditions{FieldIsNotNull("created_at")}),
+			Conditions: NewOneOrMore(Conditions{FieldIsNotNull("created")}),
 		})
 
 		assert.Equal(t, 1, aResult.RowsAffected)

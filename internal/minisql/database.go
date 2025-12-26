@@ -12,6 +12,8 @@ var (
 	errUnrecognizedStatementType = fmt.Errorf("unrecognised statement type")
 	errTableDoesNotExist         = fmt.Errorf("table does not exist")
 	errTableAlreadyExists        = fmt.Errorf("table already exists")
+	errIndexDoesNotExist         = fmt.Errorf("index does not exist")
+	errIndexAlreadyExists        = fmt.Errorf("index already exists")
 )
 
 type Parser interface {
@@ -64,43 +66,9 @@ func (d *Database) init(ctx context.Context) error {
 	).Debug("initializing database")
 
 	if totalPages == 0 {
-		d.logger.Sugar().With(
-			"name", SchemaTableName,
-			"root_page", rooPageIdx,
-		).Debug("creating main schema table")
-
-		// New database, need to create the main schema table
-		mainTable := NewTable(
-			d.logger,
-			NewTransactionalPager(mainTablePager, d.txManager),
-			d.txManager,
-			SchemaTableName,
-			mainTableColumns,
-			rooPageIdx,
-		)
-		d.tables[SchemaTableName] = mainTable
-
-		// And save record of itself
-		_, err := mainTable.Insert(ctx, Statement{
-			Kind:      Insert,
-			TableName: mainTable.Name,
-			Columns:   mainTable.Columns,
-			Fields:    mainTableFields,
-			Inserts: [][]OptionalValue{
-				{
-					{Value: int32(SchemaTable), Valid: true},                     // type (only 0 supported now)
-					{Value: NewTextPointer([]byte(mainTable.Name)), Valid: true}, // name
-					{}, // tbl_name
-					{Value: int32(mainTable.GetRootPageIdx()), Valid: true},    // root page
-					{Value: NewTextPointer([]byte(MainTableSQL)), Valid: true}, // sql
-				},
-			},
-		})
-		if err != nil {
+		if err := d.initEmptyDatabase(ctx, rooPageIdx, mainTablePager); err != nil {
 			return err
 		}
-
-		return nil
 	}
 
 	// Otherwise, main table already exists,
@@ -132,127 +100,21 @@ func (d *Database) init(ctx context.Context) error {
 		aRow := schemaResults.Rows.Row()
 		switch SchemaType(aRow.Values[0].Value.(int32)) {
 		case SchemaTable:
-			var (
-				rootPageIdx = PageIndex(aRow.Values[3].Value.(int32))
-				sql         = aRow.Values[4].Value.(TextPointer).String()
-			)
-			stmts, err := d.parser.Parse(ctx, sql)
-			if err != nil {
+			if err := d.initTable(ctx, aRow); err != nil {
 				return err
 			}
-			if len(stmts) != 1 {
-				return fmt.Errorf("expected one statement when loading table, got %d", len(stmts))
-			}
-			stmt := stmts[0]
-			// Validate CREATE TABLE query is valid, this also parses any default values
-			// and transforms them into TextPointer for text columns or TIme for timestamps.
-			if err := stmt.Validate(nil); err != nil {
-				return err
-			}
-			d.tables[stmt.TableName] = NewTable(
-				d.logger,
-				NewTransactionalPager(
-					d.factory.ForTable(stmt.Columns),
-					d.txManager,
-				),
-				d.txManager,
-				stmt.TableName,
-				stmt.Columns,
-				rootPageIdx,
-			)
-
-			d.logger.Sugar().With(
-				"name", stmt.TableName,
-				"root_page", rootPageIdx,
-			).Debug("loaded table")
 		case SchemaPrimaryKey:
-			var (
-				name        = aRow.Values[1].Value.(TextPointer).String()
-				tableName   = aRow.Values[2].Value.(TextPointer).String()
-				rootPageIdx = PageIndex(aRow.Values[3].Value.(int32))
-			)
-			aTable, ok := d.tables[tableName]
-			if !ok {
-				return fmt.Errorf("table %s for primary key index %s does not exist", tableName, name)
-			}
-			primaryKeyPager := NewTransactionalPager(
-				d.factory.ForIndex(aTable.PrimaryKey.Column.Kind, uint64(aTable.PrimaryKey.Column.Size), true),
-				d.txManager,
-			)
-			btreeIndex, err := aTable.newBTreeIndex(primaryKeyPager, rootPageIdx, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name)
-			if err != nil {
+			if err := d.initPrimaryKey(ctx, aRow); err != nil {
 				return err
 			}
-
-			// Set primary key BTree index on the table instance
-			aTable.PrimaryKey.Index = btreeIndex
-
-			d.logger.Sugar().With(
-				"name", aTable.PrimaryKey.Name,
-				"root_page", rootPageIdx,
-			).Debug("loaded primary key index")
 		case SchemaUniqueIndex:
-			var (
-				name        = aRow.Values[1].Value.(TextPointer).String()
-				tableName   = aRow.Values[2].Value.(TextPointer).String()
-				rootPageIdx = PageIndex(aRow.Values[3].Value.(int32))
-			)
-			aTable, ok := d.tables[tableName]
-			if !ok {
-				return fmt.Errorf("table %s for unique index %s does not exist", tableName, name)
-			}
-			uniqueIndex, ok := aTable.UniqueIndexes[name]
-			if !ok {
-				return fmt.Errorf("unique index %s does not exist on table %s", name, tableName)
-			}
-			indexPager := NewTransactionalPager(
-				d.factory.ForIndex(uniqueIndex.Column.Kind, uint64(uniqueIndex.Column.Size), true),
-				d.txManager,
-			)
-			btreeIndex, err := aTable.newBTreeIndex(indexPager, rootPageIdx, uniqueIndex.Column, uniqueIndex.Name)
-			if err != nil {
+			if err := d.initUniqueIndex(ctx, aRow); err != nil {
 				return err
 			}
-
-			// Set unique BTree index on the table instance
-			uniqueIndex.Index = btreeIndex
-			aTable.UniqueIndexes[name] = uniqueIndex
-
-			d.logger.Sugar().With(
-				"name", uniqueIndex.Name,
-				"root_page", rootPageIdx,
-			).Debug("loaded unique index")
 		case SchemaSecondaryIndex:
-			var (
-				name        = aRow.Values[1].Value.(TextPointer).String()
-				tableName   = aRow.Values[2].Value.(TextPointer).String()
-				rootPageIdx = PageIndex(aRow.Values[3].Value.(int32))
-			)
-			aTable, ok := d.tables[tableName]
-			if !ok {
-				return fmt.Errorf("table %s for secondary index %s does not exist", tableName, name)
-			}
-			secondaryIndex, ok := aTable.SecondaryIndexes[name]
-			if !ok {
-				return fmt.Errorf("secondary index %s does not exist on table %s", name, tableName)
-			}
-			indexPager := NewTransactionalPager(
-				d.factory.ForIndex(secondaryIndex.Column.Kind, uint64(secondaryIndex.Column.Size), true),
-				d.txManager,
-			)
-			btreeIndex, err := aTable.newBTreeIndex(indexPager, rootPageIdx, secondaryIndex.Column, secondaryIndex.Name)
-			if err != nil {
+			if err := d.initSecondaryIndex(ctx, aRow); err != nil {
 				return err
 			}
-
-			// Set unique BTree index on the table instance
-			secondaryIndex.Index = btreeIndex
-			aTable.SecondaryIndexes[name] = secondaryIndex
-
-			d.logger.Sugar().With(
-				"name", secondaryIndex.Name,
-				"root_page", rootPageIdx,
-			).Debug("loaded secondary index")
 		default:
 			return fmt.Errorf("unrecognized schema type %d", aRow.Values[0].Value.(int32))
 		}
@@ -264,15 +126,245 @@ func (d *Database) init(ctx context.Context) error {
 	return nil
 }
 
-func (d *Database) SaveDDLChanges(ctx context.Context, createdTables []*Table, droppedTables []string) {
+func (d *Database) initEmptyDatabase(ctx context.Context, rooPageIdx PageIndex, mainTablePager Pager) error {
+	d.logger.Sugar().With(
+		"name", SchemaTableName,
+		"root_page", rooPageIdx,
+	).Debug("creating main schema table")
+
+	// New database, need to create the main schema table
+	mainTable := NewTable(
+		d.logger,
+		NewTransactionalPager(mainTablePager, d.txManager),
+		d.txManager,
+		SchemaTableName,
+		mainTableColumns,
+		rooPageIdx,
+	)
+	d.tables[SchemaTableName] = mainTable
+
+	// And save record of itself
+	_, err := mainTable.Insert(ctx, Statement{
+		Kind:      Insert,
+		TableName: mainTable.Name,
+		Columns:   mainTable.Columns,
+		Fields:    mainTableFields,
+		Inserts: [][]OptionalValue{
+			{
+				{Value: int32(SchemaTable), Valid: true},                     // type (only 0 supported now)
+				{Value: NewTextPointer([]byte(mainTable.Name)), Valid: true}, // name
+				{}, // tbl_name
+				{Value: int32(mainTable.GetRootPageIdx()), Valid: true},    // root page
+				{Value: NewTextPointer([]byte(MainTableSQL)), Valid: true}, // sql
+			},
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (d *Database) initTable(ctx context.Context, aRow Row) error {
+	var (
+		rootPageIdx = PageIndex(aRow.Values[3].Value.(int32))
+		sql         = aRow.Values[4].Value.(TextPointer).String()
+	)
+
+	// Parse and validate CREATE TABLE query is valid, this also parses any default values
+	// and transforms them into TextPointer for text columns or TIme for timestamps.
+	stmts, err := d.parser.Parse(ctx, sql)
+	if err != nil {
+		return err
+	}
+	if len(stmts) != 1 {
+		return fmt.Errorf("expected one statement when loading table, got %d", len(stmts))
+	}
+	stmt := stmts[0]
+	if err := stmt.Validate(nil); err != nil {
+		return err
+	}
+
+	d.tables[stmt.TableName], err = d.tableFromSQL(ctx, sql, rootPageIdx)
+	if err != nil {
+		return err
+	}
+
+	d.logger.Sugar().With(
+		"name", stmt.TableName,
+		"root_page", rootPageIdx,
+	).Debug("loaded table")
+
+	return nil
+}
+
+func (d *Database) tableFromSQL(ctx context.Context, sql string, rootPageIdx PageIndex) (*Table, error) {
+	stmts, err := d.parser.Parse(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+	if len(stmts) != 1 {
+		return nil, fmt.Errorf("expected one statement when loading table, got %d", len(stmts))
+	}
+	stmt := stmts[0]
+	if err := stmt.Validate(nil); err != nil {
+		return nil, err
+	}
+
+	return NewTable(
+		d.logger,
+		NewTransactionalPager(
+			d.factory.ForTable(stmt.Columns),
+			d.txManager,
+		),
+		d.txManager,
+		stmt.TableName,
+		stmt.Columns,
+		rootPageIdx,
+	), nil
+}
+
+func (d *Database) initPrimaryKey(ctx context.Context, aRow Row) error {
+	// TODO - parse SQL once we store it for primary indexes? Right now it will be NULL
+	var (
+		name        = aRow.Values[1].Value.(TextPointer).String()
+		tableName   = aRow.Values[2].Value.(TextPointer).String()
+		rootPageIdx = PageIndex(aRow.Values[3].Value.(int32))
+	)
+
+	aTable, ok := d.tables[tableName]
+	if !ok {
+		return fmt.Errorf("table %s for primary key index %s does not exist", tableName, name)
+	}
+	indexPager := NewTransactionalPager(
+		d.factory.ForIndex(aTable.PrimaryKey.Column.Kind, uint64(aTable.PrimaryKey.Column.Size), true),
+		d.txManager,
+	)
+	btreeIndex, err := aTable.newBTreeIndex(indexPager, rootPageIdx, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name)
+	if err != nil {
+		return err
+	}
+
+	// Set primary key BTree index on the table instance
+	aTable.PrimaryKey.Index = btreeIndex
+
+	d.logger.Sugar().With(
+		"name", aTable.PrimaryKey.Name,
+		"root_page", rootPageIdx,
+	).Debug("loaded primary key index")
+
+	return nil
+}
+
+func (d *Database) initUniqueIndex(ctx context.Context, aRow Row) error {
+	// TODO - parse SQL once we store it for unique indexes? Right now it will be NULL
+	var (
+		name        = aRow.Values[1].Value.(TextPointer).String()
+		tableName   = aRow.Values[2].Value.(TextPointer).String()
+		rootPageIdx = PageIndex(aRow.Values[3].Value.(int32))
+	)
+
+	aTable, ok := d.tables[tableName]
+	if !ok {
+		return fmt.Errorf("table %s for unique index %s does not exist", tableName, name)
+	}
+	uniqueIndex, ok := aTable.UniqueIndexes[name]
+	if !ok {
+		return fmt.Errorf("unique index %s does not exist on table %s", name, tableName)
+	}
+	indexPager := NewTransactionalPager(
+		d.factory.ForIndex(uniqueIndex.Column.Kind, uint64(uniqueIndex.Column.Size), true),
+		d.txManager,
+	)
+	btreeIndex, err := aTable.newBTreeIndex(indexPager, rootPageIdx, uniqueIndex.Column, uniqueIndex.Name)
+	if err != nil {
+		return err
+	}
+
+	// Set unique BTree index on the table instance
+	uniqueIndex.Index = btreeIndex
+	aTable.UniqueIndexes[name] = uniqueIndex
+
+	d.logger.Sugar().With(
+		"name", uniqueIndex.Name,
+		"root_page", rootPageIdx,
+	).Debug("loaded unique index")
+
+	return nil
+}
+
+func (d *Database) initSecondaryIndex(ctx context.Context, aRow Row) error {
+	var (
+		name        = aRow.Values[1].Value.(TextPointer).String()
+		tableName   = aRow.Values[2].Value.(TextPointer).String()
+		rootPageIdx = PageIndex(aRow.Values[3].Value.(int32))
+		sql         = aRow.Values[4].Value.(TextPointer).String()
+	)
+	aTable, ok := d.tables[tableName]
+	if !ok {
+		return fmt.Errorf("table %s for secondary index %s does not exist", tableName, name)
+	}
+
+	// Parse and validate CREATE INDEX statement to get indexed column
+	stmts, err := d.parser.Parse(ctx, sql)
+	if err != nil {
+		return err
+	}
+	if len(stmts) != 1 {
+		return fmt.Errorf("expected one statement when loading index, got %d", len(stmts))
+	}
+	stmt := stmts[0]
+	if err := stmt.Validate(nil); err != nil {
+		return err
+	}
+
+	indexColumn, ok := aTable.ColumnByName(stmt.Columns[0].Name)
+	if !ok {
+		return fmt.Errorf("column %s does not exist on table %s for secondary index %s", stmt.Columns[0].Name, tableName, name)
+	}
+	secondaryIndex := SecondaryIndex{
+		IndexInfo: IndexInfo{
+			Name:   name,
+			Column: indexColumn,
+		},
+	}
+
+	// Create and set BTree index instance
+	indexPager := NewTransactionalPager(
+		d.factory.ForIndex(secondaryIndex.Column.Kind, uint64(secondaryIndex.Column.Size), true),
+		d.txManager,
+	)
+	btreeIndex, err := aTable.newBTreeIndex(indexPager, rootPageIdx, secondaryIndex.Column, secondaryIndex.Name)
+	if err != nil {
+		return err
+	}
+	secondaryIndex.Index = btreeIndex
+	aTable.SecondaryIndexes[name] = secondaryIndex
+
+	d.logger.Sugar().With(
+		"name", secondaryIndex.Name,
+		"root_page", rootPageIdx,
+	).Debug("loaded secondary index")
+
+	return nil
+}
+
+func (d *Database) SaveDDLChanges(ctx context.Context, changes DDLChanges) {
 	d.dbLock.Lock()
 	defer d.dbLock.Unlock()
 
-	for _, aTable := range createdTables {
+	for _, aTable := range changes.CreateTables {
 		d.tables[aTable.Name] = aTable
 	}
-	for _, tableName := range droppedTables {
+	for _, tableName := range changes.DropTables {
 		delete(d.tables, tableName)
+	}
+	for tableName, index := range changes.CreateIndexes {
+		d.tables[tableName].SecondaryIndexes[index.Name] = index
+	}
+	for tableName, index := range changes.DropIndexes {
+		delete(d.tables[tableName].SecondaryIndexes, index.Name)
 	}
 }
 
@@ -323,6 +415,10 @@ func (d *Database) executeStatement(ctx context.Context, stmt Statement) (Statem
 		return d.executeCreateTable(ctx, stmt)
 	case DropTable:
 		return d.executeDropTable(ctx, stmt)
+	case CreateIndex:
+		return d.executeCreateIndex(ctx, stmt)
+	case DropIndex:
+		return d.executeDropIndex(ctx, stmt)
 	case Insert:
 		return d.executeInsert(ctx, stmt)
 	case Select:
@@ -338,7 +434,7 @@ func (d *Database) executeStatement(ctx context.Context, stmt Statement) (Statem
 }
 
 func (d *Database) executeCreateTable(ctx context.Context, stmt Statement) (StatementResult, error) {
-	// Only one CREATE/DROP TABLE operation can happen at a time
+	// Only one CREATE/DROP operation can happen at a time
 	d.dbLock.Lock()
 	defer d.dbLock.Unlock()
 
@@ -355,13 +451,37 @@ func (d *Database) executeDropTable(ctx context.Context, stmt Statement) (Statem
 		return StatementResult{}, fmt.Errorf("cannot drop system table %s", SchemaTableName)
 	}
 
-	// Only one CREATE/DROP TABLE operation can happen at a time
+	// Only one CREATE/DROP operation can happen at a time
 	d.dbLock.Lock()
 	defer d.dbLock.Unlock()
 
 	// TODO block any writes to the table before dropping
 
 	if err := d.dropTable(ctx, stmt.TableName); err != nil {
+		return StatementResult{}, err
+	}
+
+	return StatementResult{}, nil
+}
+
+func (d *Database) executeCreateIndex(ctx context.Context, stmt Statement) (StatementResult, error) {
+	// Only one CREATE/DROP operation can happen at a time
+	d.dbLock.Lock()
+	defer d.dbLock.Unlock()
+
+	if err := d.createIndex(ctx, stmt); err != nil {
+		return StatementResult{}, err
+	}
+
+	return StatementResult{}, nil
+}
+
+func (d *Database) executeDropIndex(ctx context.Context, stmt Statement) (StatementResult, error) {
+	// Only one CREATE/DROP operation can happen at a time
+	d.dbLock.Lock()
+	defer d.dbLock.Unlock()
+
+	if err := d.dropIndex(ctx, stmt); err != nil {
 		return StatementResult{}, err
 	}
 
@@ -469,8 +589,12 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 		return nil, fmt.Errorf("table definition too long, maximum length is %d", maximumSchemaSQL)
 	}
 
-	_, ok := d.tables[stmt.TableName]
-	if ok {
+	// Table could only exist within this transaction so create it from the system table
+	_, exists, err := d.checkSchemaExists(ctx, SchemaTable, stmt.TableName)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
 		if stmt.IfNotExists {
 			return d.tables[stmt.TableName], nil
 		}
@@ -500,7 +624,7 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 	)
 
 	// Save table record into minisql_schema system table
-	if err := d.insertIntoMainTable(ctx, SchemaTable, stmt.TableName, "", freePage.Index, stmt.CreateTableDDL()); err != nil {
+	if err := d.insertIntoSystemTable(ctx, SchemaTable, stmt.TableName, "", freePage.Index, stmt.CreateTableDDL()); err != nil {
 		return nil, err
 	}
 
@@ -523,91 +647,9 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 		createdTable.UniqueIndexes[uniqueIndex.Name] = uniqueIndex
 	}
 
-	for _, secondaryIndex := range createdTable.SecondaryIndexes {
-		createdIndex, err := d.createSecondaryIndex(ctx, createdTable, secondaryIndex)
-		if err != nil {
-			return nil, err
-		}
-		// Set secondary index on the table instance
-		secondaryIndex.Index = createdIndex
-		createdTable.SecondaryIndexes[secondaryIndex.Name] = secondaryIndex
-	}
-
-	tx.DDLChanges.CreateTables = append(tx.DDLChanges.CreateTables, createdTable)
+	tx.DDLChanges = tx.DDLChanges.CreatedTable(createdTable)
 
 	return createdTable, nil
-}
-
-func (d *Database) createPrimaryKey(ctx context.Context, aTable *Table, aColumn Column) (BTreeIndex, error) {
-	d.logger.Sugar().With("column", aColumn.Name).Debug("creating primary key")
-
-	indexPager := NewTransactionalPager(
-		d.factory.ForIndex(aColumn.Kind, uint64(aColumn.Size), true),
-		d.txManager,
-	)
-	freePage, err := indexPager.GetFreePage(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	createdIndex, err := aTable.createBTreeIndex(indexPager, freePage, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := d.insertIntoMainTable(ctx, SchemaPrimaryKey, aTable.PrimaryKey.Name, aTable.Name, freePage.Index, ""); err != nil {
-		return nil, err
-	}
-
-	return createdIndex, nil
-}
-
-func (d *Database) createUniqueIndex(ctx context.Context, aTable *Table, uniqueIndex UniqueIndex) (BTreeIndex, error) {
-	d.logger.Sugar().With("column", uniqueIndex.Column.Name).Debug("creating unique index")
-
-	indexPager := NewTransactionalPager(
-		d.factory.ForIndex(uniqueIndex.Column.Kind, uint64(uniqueIndex.Column.Size), true),
-		d.txManager,
-	)
-	freePage, err := indexPager.GetFreePage(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	createdIndex, err := aTable.createBTreeIndex(indexPager, freePage, uniqueIndex.Column, uniqueIndex.Name)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := d.insertIntoMainTable(ctx, SchemaUniqueIndex, uniqueIndex.Name, aTable.Name, freePage.Index, ""); err != nil {
-		return nil, err
-	}
-
-	return createdIndex, nil
-}
-
-func (d *Database) createSecondaryIndex(ctx context.Context, aTable *Table, secondaryIndex SecondaryIndex) (BTreeIndex, error) {
-	d.logger.Sugar().With("column", secondaryIndex.Column.Name).Debug("creating secondary index")
-
-	indexPager := NewTransactionalPager(
-		d.factory.ForIndex(secondaryIndex.Column.Kind, uint64(secondaryIndex.Column.Size), true),
-		d.txManager,
-	)
-	freePage, err := indexPager.GetFreePage(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	createdIndex, err := aTable.createBTreeIndex(indexPager, freePage, secondaryIndex.Column, secondaryIndex.Name)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := d.insertIntoMainTable(ctx, SchemaSecondaryIndex, secondaryIndex.Name, aTable.Name, freePage.Index, ""); err != nil {
-		return nil, err
-	}
-
-	return createdIndex, nil
 }
 
 // dropTable drops a table and all its data
@@ -617,10 +659,15 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 		return fmt.Errorf("drop table must be called within a transaction")
 	}
 
-	tableToDelete, ok := d.tables[name]
-	if !ok {
+	// Table could only exist within this transaction so create it from the system table
+	_, exists, err := d.checkSchemaExists(ctx, SchemaTable, name)
+	if err != nil {
+		return err
+	}
+	if !exists {
 		return errTableDoesNotExist
 	}
+	tableToDelete := d.tables[name]
 
 	d.logger.Sugar().With("name", tableToDelete.Name).Debug("dropping table")
 
@@ -644,13 +691,13 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	}
 
 	// Free all table pages
-	tablePager := NewTransactionalPager(
+	aPager := NewTransactionalPager(
 		d.factory.ForTable(tableToDelete.Columns),
 		d.txManager,
 	)
 	// First free pages for the table itself
 	tableToDelete.BFS(ctx, func(page *Page) {
-		if err := tablePager.AddFreePage(ctx, page.Index); err != nil {
+		if err := aPager.AddFreePage(ctx, page.Index); err != nil {
 			d.logger.Sugar().With(
 				"page", page.Index,
 				"error", err,
@@ -662,7 +709,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	// And then free pages for the primary key index if any
 	if tableToDelete.HasPrimaryKey() {
 		tableToDelete.PrimaryKey.Index.BFS(ctx, func(page *Page) {
-			if err := tablePager.AddFreePage(ctx, page.Index); err != nil {
+			if err := aPager.AddFreePage(ctx, page.Index); err != nil {
 				d.logger.Sugar().With(
 					"page", page.Index,
 					"error", err,
@@ -675,7 +722,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	// And then free pages for unique indexes index if any
 	for _, uniqueIndex := range tableToDelete.UniqueIndexes {
 		uniqueIndex.Index.BFS(ctx, func(page *Page) {
-			if err := tablePager.AddFreePage(ctx, page.Index); err != nil {
+			if err := aPager.AddFreePage(ctx, page.Index); err != nil {
 				d.logger.Sugar().With(
 					"page", page.Index,
 					"error", err,
@@ -688,7 +735,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	// And then free pages for secondary indexes index if any
 	for _, secondaryIndex := range tableToDelete.SecondaryIndexes {
 		secondaryIndex.Index.BFS(ctx, func(page *Page) {
-			if err := tablePager.AddFreePage(ctx, page.Index); err != nil {
+			if err := aPager.AddFreePage(ctx, page.Index); err != nil {
 				d.logger.Sugar().With(
 					"page", page.Index,
 					"error", err,
@@ -699,12 +746,285 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 		})
 	}
 
-	tx.DDLChanges.DropTables = append(tx.DDLChanges.DropTables, tableToDelete.Name)
+	tx.DDLChanges = tx.DDLChanges.DroppedTable(tableToDelete.Name)
 
 	return nil
 }
 
-func (d *Database) insertIntoMainTable(ctx context.Context, aType SchemaType, name, tableName string, rootIdx PageIndex, ddl string) error {
+func (d *Database) createIndex(ctx context.Context, stmt Statement) error {
+	tx := TxFromContext(ctx)
+	if tx == nil {
+		return fmt.Errorf("create index must be called within a transaction")
+	}
+
+	if err := stmt.Validate((nil)); err != nil {
+		return err
+	}
+
+	if len(stmt.CreateIndexDDL()) > maximumSchemaSQL {
+		return fmt.Errorf("index definition too long, maximum length is %d", maximumSchemaSQL)
+	}
+
+	if len(stmt.Columns) != 1 {
+		return fmt.Errorf("only single-column indexes are supported")
+	}
+
+	_, exists, err := d.checkSchemaExists(ctx, SchemaSecondaryIndex, stmt.IndexName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return errIndexAlreadyExists
+	}
+
+	// Table could only exist within this transaction so create it from the system table
+	aTableSchema, exists, err := d.checkSchemaExists(ctx, SchemaTable, stmt.TableName)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errTableDoesNotExist
+	}
+	aTable, err := d.tableFromSQL(ctx, aTableSchema.DDL, aTableSchema.RootPage)
+	if err != nil {
+		return err
+	}
+
+	aColumn, ok := aTable.ColumnByName(stmt.Columns[0].Name)
+	if !ok {
+		return fmt.Errorf("column %s does not exist on table %s", stmt.Columns[0].Name, stmt.TableName)
+	}
+
+	for _, info := range aTable.SecondaryIndexes {
+		if info.Name == stmt.IndexName {
+			if stmt.IfNotExists {
+				return nil
+			}
+			return fmt.Errorf("index %s already exists on table %s", stmt.IndexName, stmt.TableName)
+		}
+	}
+
+	d.logger.Sugar().With("name", stmt.IndexName, "table", stmt.TableName).Debug("creating index")
+
+	secondaryIndex := SecondaryIndex{
+		IndexInfo: IndexInfo{
+			Name:   stmt.IndexName,
+			Column: aColumn,
+		},
+	}
+	createdIndex, err := d.createSecondaryIndex(ctx, stmt, aTable, secondaryIndex)
+	if err != nil {
+		return err
+	}
+	secondaryIndex.Index = createdIndex
+
+	tx.DDLChanges = tx.DDLChanges.CreatedIndex(aTable.Name, secondaryIndex)
+
+	return nil
+}
+
+func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
+	tx := TxFromContext(ctx)
+	if tx == nil {
+		return fmt.Errorf("drop index must be called within a transaction")
+	}
+
+	aSchema, exists, err := d.checkSchemaExists(ctx, SchemaSecondaryIndex, stmt.IndexName)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errIndexDoesNotExist
+	}
+	stmts, err := d.parser.Parse(ctx, aSchema.DDL)
+	if err != nil {
+		return err
+	}
+	if len(stmts) != 1 {
+		return fmt.Errorf("expected one statement when loading index, got %d", len(stmts))
+	}
+
+	// Table could only exist within this transaction so create it from the system table
+	aTableSchema, exists, err := d.checkSchemaExists(ctx, SchemaTable, aSchema.TableName)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errTableDoesNotExist
+	}
+	aTable, err := d.tableFromSQL(ctx, aTableSchema.DDL, aTableSchema.RootPage)
+	if err != nil {
+		return err
+	}
+	indexColumn, ok := aTable.ColumnByName(stmts[0].Columns[0].Name)
+	if !ok {
+		return fmt.Errorf("column %s does not exist on table %s for secondary index %s", stmts[0].Columns[0].Name, aSchema.TableName, aSchema.Name)
+	}
+
+	indexPager := NewTransactionalPager(
+		d.factory.ForIndex(indexColumn.Kind, uint64(indexColumn.Size), true),
+		d.txManager,
+	)
+	btreeIndex, err := aTable.newBTreeIndex(indexPager, aSchema.RootPage, indexColumn, aSchema.Name)
+	if err != nil {
+		return err
+	}
+	secondaryIndex := SecondaryIndex{
+		IndexInfo: IndexInfo{
+			Name:   aSchema.Name,
+			Column: indexColumn,
+		},
+		Index: btreeIndex,
+	}
+
+	if err := d.deleteFromMainTable(ctx, aSchema.Type, aSchema.Name); err != nil {
+		return err
+	}
+
+	// Free pages for the index
+	btreeIndex.BFS(ctx, func(page *Page) {
+		if err := indexPager.AddFreePage(ctx, page.Index); err != nil {
+			d.logger.Sugar().With(
+				"page", page.Index,
+				"error", err,
+			).Error("failed to free secondary index page")
+			return
+		}
+		d.logger.Sugar().With("page", page.Index).Debug("freed secondary index page")
+	})
+
+	tx.DDLChanges = tx.DDLChanges.DroppedIndex(aTable.Name, secondaryIndex)
+
+	return nil
+}
+
+type Schema struct {
+	Type      SchemaType
+	Name      string
+	TableName string
+	RootPage  PageIndex
+	DDL       string
+}
+
+func (d *Database) checkSchemaExists(ctx context.Context, aType SchemaType, name string) (Schema, bool, error) {
+	schemaResults, err := d.tables[SchemaTableName].Select(ctx, Statement{
+		Kind:   Select,
+		Fields: mainTableFields,
+		Conditions: OneOrMore{
+			{
+				FieldIsEqual("type", OperandInteger, int64(aType)),
+				FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte(name))),
+			},
+		},
+	})
+	if err != nil {
+		return Schema{}, false, err
+	}
+
+	if !schemaResults.Rows.Next(ctx) {
+		return Schema{}, false, nil
+	}
+	aRow := schemaResults.Rows.Row()
+	if err := schemaResults.Rows.Err(); err != nil {
+		return Schema{}, false, err
+	}
+
+	return scanSchema(aRow), true, nil
+}
+
+func scanSchema(aRow Row) Schema {
+	var (
+		tableName string
+		ddl       string
+	)
+	if aRow.Values[2].Valid {
+		tableName = aRow.Values[2].Value.(TextPointer).String()
+	}
+	if aRow.Values[4].Valid {
+		ddl = aRow.Values[4].Value.(TextPointer).String()
+	}
+	return Schema{
+		Type:      SchemaType(aRow.Values[0].Value.(int32)),
+		Name:      aRow.Values[1].Value.(TextPointer).String(),
+		TableName: tableName,
+		RootPage:  PageIndex(aRow.Values[3].Value.(int32)),
+		DDL:       ddl,
+	}
+}
+
+func (d *Database) createPrimaryKey(ctx context.Context, aTable *Table, aColumn Column) (BTreeIndex, error) {
+	d.logger.Sugar().With("column", aColumn.Name).Debug("creating primary key")
+
+	indexPager := NewTransactionalPager(
+		d.factory.ForIndex(aColumn.Kind, uint64(aColumn.Size), true),
+		d.txManager,
+	)
+	freePage, err := indexPager.GetFreePage(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	createdIndex, err := aTable.createBTreeIndex(indexPager, freePage, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := d.insertIntoSystemTable(ctx, SchemaPrimaryKey, aTable.PrimaryKey.Name, aTable.Name, freePage.Index, ""); err != nil {
+		return nil, err
+	}
+
+	return createdIndex, nil
+}
+
+func (d *Database) createUniqueIndex(ctx context.Context, aTable *Table, uniqueIndex UniqueIndex) (BTreeIndex, error) {
+	d.logger.Sugar().With("column", uniqueIndex.Column.Name).Debug("creating unique index")
+
+	indexPager := NewTransactionalPager(
+		d.factory.ForIndex(uniqueIndex.Column.Kind, uint64(uniqueIndex.Column.Size), true),
+		d.txManager,
+	)
+	freePage, err := indexPager.GetFreePage(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	createdIndex, err := aTable.createBTreeIndex(indexPager, freePage, uniqueIndex.Column, uniqueIndex.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := d.insertIntoSystemTable(ctx, SchemaUniqueIndex, uniqueIndex.Name, aTable.Name, freePage.Index, ""); err != nil {
+		return nil, err
+	}
+
+	return createdIndex, nil
+}
+
+func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, aTable *Table, secondaryIndex SecondaryIndex) (BTreeIndex, error) {
+	d.logger.Sugar().With("column", secondaryIndex.Column.Name).Debug("creating secondary index")
+
+	aPager := NewTransactionalPager(
+		d.factory.ForTable(aTable.Columns),
+		d.txManager,
+	)
+	freePage, err := aPager.GetFreePage(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	createdIndex, err := aTable.createBTreeIndex(aPager, freePage, secondaryIndex.Column, secondaryIndex.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := d.insertIntoSystemTable(ctx, SchemaSecondaryIndex, secondaryIndex.Name, aTable.Name, freePage.Index, stmt.CreateIndexDDL()); err != nil {
+		return nil, err
+	}
+
+	return createdIndex, nil
+}
+
+func (d *Database) insertIntoSystemTable(ctx context.Context, aType SchemaType, name, tableName string, rootIdx PageIndex, ddl string) error {
 	mainTable := d.tables[SchemaTableName]
 	_, err := mainTable.Insert(ctx, Statement{
 		Kind:      Insert,
@@ -726,7 +1046,7 @@ func (d *Database) insertIntoMainTable(ctx context.Context, aType SchemaType, na
 
 func (d *Database) deleteFromMainTable(ctx context.Context, aType SchemaType, name string) error {
 	mainTable := d.tables[SchemaTableName]
-	_, err := mainTable.Delete(ctx, Statement{
+	aResult, err := mainTable.Delete(ctx, Statement{
 		Kind: Delete,
 		Conditions: OneOrMore{
 			{
@@ -735,6 +1055,9 @@ func (d *Database) deleteFromMainTable(ctx context.Context, aType SchemaType, na
 			},
 		},
 	})
+	if aResult.RowsAffected == 0 {
+		return fmt.Errorf("failed to delete from main table: no such entry %s of type %d", name, aType)
+	}
 	return err
 }
 

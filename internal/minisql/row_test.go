@@ -151,7 +151,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		timestampMatch = Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "created_at",
+				Value: "created",
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -162,7 +162,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		timestampMismatch = Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "created_at",
+				Value: "created",
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -536,7 +536,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "created_at",
+							Value: "created",
 						},
 						Operator: Eq,
 						Operand2: Operand{

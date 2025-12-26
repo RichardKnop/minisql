@@ -15,6 +15,7 @@ var (
 	errInvalidStatementKind = fmt.Errorf("invalid statement kind")
 	errEmptyStatementKind   = fmt.Errorf("statement kind cannot be empty")
 	errEmptyTableName       = fmt.Errorf("table name cannot be empty")
+	errEmptyIndexName       = fmt.Errorf("index name cannot be empty")
 )
 
 var reservedWords = []string{
@@ -23,7 +24,8 @@ var reservedWords = []string{
 	// column types
 	"BOOLEAN", "INT4", "INT8", "REAL", "DOUBLE", "TEXT", "VARCHAR(", "TIMESTAMP",
 	// statement types
-	"CREATE TABLE", "DROP TABLE", "SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
+	"CREATE TABLE", "DROP TABLE", "CREATE INDEX", "DROP INDEX",
+	"SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
 	"*", "COUNT(*)", "ORDER BY", "LIMIT", "OFFSET",
 	"PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "DEFAULT", "NOT NULL", "NULL", "UNIQUE",
@@ -49,6 +51,14 @@ const (
 	stepCreateTableColumnDefaultValue
 	stepCreateTableCommaOrClosingParens
 	stepDropTableName
+	stepCreateIndexIfNotExists
+	stepCreateIndexName
+	stepCreateIndexOn
+	stepCreateIndexOnTable
+	stepCreateIndexOpeningParens
+	stepCreateIndexColumn
+	stepCreateIndexCommaOrClosingParens
+	stepDropIndexName
 	stepInsertTable
 	stepInsertFieldsOpeningParens
 	stepInsertFields
@@ -140,6 +150,14 @@ func (p *parser) doParse() ([]minisql.Statement, error) {
 				p.Kind = minisql.DropTable
 				p.pop()
 				p.step = stepDropTableName
+			case "CREATE INDEX":
+				p.Kind = minisql.CreateIndex
+				p.pop()
+				p.step = stepCreateIndexIfNotExists
+			case "DROP INDEX":
+				p.Kind = minisql.DropIndex
+				p.pop()
+				p.step = stepDropIndexName
 			case "SELECT":
 				p.Kind = minisql.Select
 				p.pop()
@@ -188,11 +206,31 @@ func (p *parser) doParse() ([]minisql.Statement, error) {
 			if err := p.doParseCreateTable(); err != nil {
 				return statements, err
 			}
-			// -----------------
-			// DROP TABLE
-			//------------------
+		// -----------------
+		// DROP TABLE
+		//------------------
 		case stepDropTableName:
 			if err := p.doParseDropTable(); err != nil {
+				return statements, err
+			}
+		// -----------------
+		// CREATE INDEX
+		//------------------
+		case stepCreateIndexIfNotExists,
+			stepCreateIndexName,
+			stepCreateIndexOn,
+			stepCreateIndexOnTable,
+			stepCreateIndexOpeningParens,
+			stepCreateIndexColumn,
+			stepCreateIndexCommaOrClosingParens:
+			if err := p.doParseCreateIndex(); err != nil {
+				return statements, err
+			}
+		// -----------------
+		// DROP INDEX
+		//------------------
+		case stepDropIndexName:
+			if err := p.doParseDropIndex(); err != nil {
 				return statements, err
 			}
 		// -----------------
@@ -451,7 +489,17 @@ func (p *parser) validate(stmt minisql.Statement) error {
 	if stmt.Kind == minisql.BeginTransaction || stmt.Kind == minisql.CommitTransaction || stmt.Kind == minisql.RollbackTransaction {
 		return nil
 	}
-	if stmt.TableName == "" {
+	if stmt.Kind == minisql.CreateIndex || stmt.Kind == minisql.DropIndex {
+		if stmt.IndexName == "" {
+			return errEmptyIndexName
+		}
+		if stmt.Kind == minisql.CreateIndex && stmt.TableName == "" {
+			return errEmptyTableName
+		}
+		if stmt.Kind == minisql.CreateIndex && len(stmt.Columns) == 0 {
+			return errCreateIndexNoColumns
+		}
+	} else if stmt.TableName == "" {
 		return errEmptyTableName
 	}
 	if stmt.Kind == minisql.CreateTable {
