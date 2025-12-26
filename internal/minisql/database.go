@@ -898,14 +898,6 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 	return nil
 }
 
-type Schema struct {
-	Type      SchemaType
-	Name      string
-	TableName string
-	RootPage  PageIndex
-	DDL       string
-}
-
 func (d *Database) checkSchemaExists(ctx context.Context, aType SchemaType, name string) (Schema, bool, error) {
 	schemaResults, err := d.tables[SchemaTableName].Select(ctx, Statement{
 		Kind:   Select,
@@ -930,26 +922,6 @@ func (d *Database) checkSchemaExists(ctx context.Context, aType SchemaType, name
 	}
 
 	return scanSchema(aRow), true, nil
-}
-
-func scanSchema(aRow Row) Schema {
-	var (
-		tableName string
-		ddl       string
-	)
-	if aRow.Values[2].Valid {
-		tableName = aRow.Values[2].Value.(TextPointer).String()
-	}
-	if aRow.Values[4].Valid {
-		ddl = aRow.Values[4].Value.(TextPointer).String()
-	}
-	return Schema{
-		Type:      SchemaType(aRow.Values[0].Value.(int32)),
-		Name:      aRow.Values[1].Value.(TextPointer).String(),
-		TableName: tableName,
-		RootPage:  PageIndex(aRow.Values[3].Value.(int32)),
-		DDL:       ddl,
-	}
 }
 
 func (d *Database) createPrimaryKey(ctx context.Context, aTable *Table, aColumn Column) (BTreeIndex, error) {
@@ -1059,8 +1031,4 @@ func (d *Database) deleteFromMainTable(ctx context.Context, aType SchemaType, na
 		return fmt.Errorf("failed to delete from main table: no such entry %s of type %d", name, aType)
 	}
 	return err
-}
-
-func isSystemTable(name string) bool {
-	return name == SchemaTableName
 }
