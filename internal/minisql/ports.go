@@ -27,7 +27,7 @@ type PageSaver interface {
 }
 
 type DDLSaver interface {
-	SaveDDLChanges(ctx context.Context, createdTables []*Table, droppedTables []string)
+	SaveDDLChanges(ctx context.Context, changes DDLChanges)
 }
 
 type TxPager interface {

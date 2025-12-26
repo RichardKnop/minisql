@@ -121,11 +121,11 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 				{
 					Kind: Timestamp,
 					Size: 8,
-					Name: "created_at",
+					Name: "created",
 				},
 			},
 			Fields: []Field{
-				{Name: "created_at"},
+				{Name: "created"},
 			},
 			Inserts: [][]OptionalValue{
 				{
@@ -147,11 +147,11 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 				{
 					Kind: Timestamp,
 					Size: 8,
-					Name: "created_at",
+					Name: "created",
 				},
 			},
 			Fields: []Field{
-				{Name: "created_at"},
+				{Name: "created"},
 			},
 			Inserts: [][]OptionalValue{
 				{
@@ -183,11 +183,11 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 				{
 					Kind: Timestamp,
 					Size: 8,
-					Name: "created_at",
+					Name: "created",
 				},
 			},
 			Fields: []Field{
-				{Name: "created_at"},
+				{Name: "created"},
 			},
 			Inserts: [][]OptionalValue{
 				{
@@ -233,12 +233,12 @@ func TestStatement_Prepare_Update(t *testing.T) {
 				{
 					Kind: Timestamp,
 					Size: 8,
-					Name: "created_at",
+					Name: "created",
 				},
 			},
-			Fields: []Field{{Name: "created_at"}},
+			Fields: []Field{{Name: "created"}},
 			Updates: map[string]OptionalValue{
-				"created_at": {Value: NewTextPointer([]byte("2025-12-20 03:13:27.674801")), Valid: true},
+				"created": {Value: NewTextPointer([]byte("2025-12-20 03:13:27.674801")), Valid: true},
 			},
 		}
 
@@ -249,7 +249,7 @@ func TestStatement_Prepare_Update(t *testing.T) {
 		assert.Equal(t, OptionalValue{
 			Value: now,
 			Valid: true,
-		}, stmt.Updates["created_at"])
+		}, stmt.Updates["created"])
 	})
 
 	t.Run("Unknown functions in UPDATE statements cause error", func(t *testing.T) {
@@ -260,12 +260,12 @@ func TestStatement_Prepare_Update(t *testing.T) {
 				{
 					Kind: Timestamp,
 					Size: 8,
-					Name: "created_at",
+					Name: "created",
 				},
 			},
-			Fields: []Field{{Name: "created_at"}},
+			Fields: []Field{{Name: "created"}},
 			Updates: map[string]OptionalValue{
-				"created_at": {Value: Function{Name: "UNKNOWN_FUNCTION"}, Valid: true},
+				"created": {Value: Function{Name: "UNKNOWN_FUNCTION"}, Valid: true},
 			},
 		}
 
@@ -282,12 +282,12 @@ func TestStatement_Prepare_Update(t *testing.T) {
 				{
 					Kind: Timestamp,
 					Size: 8,
-					Name: "created_at",
+					Name: "created",
 				},
 			},
-			Fields: []Field{{Name: "created_at"}},
+			Fields: []Field{{Name: "created"}},
 			Updates: map[string]OptionalValue{
-				"created_at": {Value: FunctionNow, Valid: true},
+				"created": {Value: FunctionNow, Valid: true},
 			},
 		}
 
@@ -298,7 +298,7 @@ func TestStatement_Prepare_Update(t *testing.T) {
 		assert.Equal(t, OptionalValue{
 			Value: now,
 			Valid: true,
-		}, stmt.Updates["created_at"])
+		}, stmt.Updates["created"])
 	})
 }
 
@@ -317,7 +317,7 @@ func TestStatement_PrepareDefaultValues(t *testing.T) {
 			{
 				Kind:         Timestamp,
 				Size:         8,
-				Name:         "created_at",
+				Name:         "created",
 				DefaultValue: OptionalValue{Value: NewTextPointer([]byte("0001-01-01 00:00:00")), Valid: true},
 			},
 		},
@@ -331,7 +331,7 @@ func TestStatement_PrepareDefaultValues(t *testing.T) {
 	require.NoError(t, err)
 
 	_, ok = stmt.Columns[1].DefaultValue.Value.(Time)
-	assert.True(t, ok, "expected default value for 'created_at' column to be Time")
+	assert.True(t, ok, "expected default value for 'created' column to be Time")
 }
 
 func TestStatement_Validate(t *testing.T) {
@@ -420,7 +420,7 @@ func TestStatement_Validate(t *testing.T) {
 				{
 					Kind:         Timestamp,
 					Size:         8,
-					Name:         "created_at",
+					Name:         "created",
 					DefaultValue: OptionalValue{Value: "0001-01-01 00:00:00", Valid: true},
 				},
 			},
@@ -1423,7 +1423,7 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 				{
 					Kind:            Timestamp,
 					Size:            8,
-					Name:            "created_at",
+					Name:            "created",
 					Nullable:        true,
 					DefaultValueNow: true,
 				},
@@ -1436,7 +1436,7 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 	age int4,
 	verified boolean not null default false,
 	score real,
-	created_at timestamp default now()
+	created timestamp default now()
 );`
 
 		actual := stmt.CreateTableDDL()
@@ -1464,6 +1464,32 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 		actual := stmt.CreateTableDDL()
 		assert.Equal(t, expected, actual)
 	})
+}
+
+func TestStatement_CreateIndexDDL(t *testing.T) {
+	t.Parallel()
+
+	stmt := Statement{
+		Kind:      CreateTable,
+		IndexName: "idx_users_on_foo_bar",
+		TableName: "users",
+		Columns: []Column{
+			{
+				Name: "foo",
+			},
+			{
+				Name: "bar",
+			},
+		},
+	}
+
+	expected := `create index "idx_users_on_foo_bar" on "users" (
+	foo,
+	bar
+);`
+
+	actual := stmt.CreateIndexDDL()
+	assert.Equal(t, expected, actual)
 }
 
 func TestStatement_InsertForColumn(t *testing.T) {

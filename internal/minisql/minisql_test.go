@@ -51,7 +51,7 @@ var (
 		{
 			Kind:         Timestamp,
 			Size:         8,
-			Name:         "created_at",
+			Name:         "created",
 			Nullable:     true,
 			DefaultValue: OptionalValue{Value: MustParseTimestamp("0001-01-01 00:00:00.000000"), Valid: true},
 		},
@@ -95,7 +95,7 @@ var (
 			{
 				Kind:         Timestamp,
 				Size:         8,
-				Name:         "created_at",
+				Name:         "created",
 				Nullable:     true,
 				DefaultValue: OptionalValue{Value: MustParseTimestamp("0001-01-01 00:00:00.000000"), Valid: true},
 			},
@@ -145,7 +145,7 @@ var (
 			{
 				Kind:         Timestamp,
 				Size:         8,
-				Name:         "created_at",
+				Name:         "created",
 				Nullable:     true,
 				DefaultValue: OptionalValue{Value: MustParseTimestamp("0001-01-01 00:00:00.000000"), Valid: true},
 			},
@@ -185,20 +185,6 @@ var (
 			Size:   MaxInlineVarchar,
 			Name:   "email",
 			Unique: true,
-		},
-	}
-
-	testColumnsWithSecondaryIndex = []Column{
-		{
-			Kind: Int8,
-			Size: 8,
-			Name: "id",
-		},
-		{
-			Kind:  Varchar,
-			Size:  MaxInlineVarchar,
-			Name:  "email",
-			Index: true,
 		},
 	}
 

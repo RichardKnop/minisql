@@ -13,7 +13,7 @@ func (p *pagerImpl) ForIndex(kind ColumnKind, keySize uint64, unique bool) Pager
 		return &indexPager[int8]{p, unique}
 	case Int4:
 		return &indexPager[int32]{p, unique}
-	case Int8:
+	case Int8, Timestamp:
 		return &indexPager[int64]{p, unique}
 	case Real:
 		return &indexPager[float32]{p, unique}

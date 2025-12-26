@@ -104,7 +104,6 @@ type Column struct {
 	PrimaryKey      bool
 	Autoincrement   bool
 	Unique          bool
-	Index           bool
 	Nullable        bool
 	DefaultValue    OptionalValue
 	DefaultValueNow bool
@@ -188,6 +187,7 @@ type Statement struct {
 	Kind        StatementKind
 	IfNotExists bool
 	TableName   string
+	IndexName   string
 	Columns     []Column // use for CREATE TABLE
 	// Used for SELECT (i.e. SELECTed field names) and INSERT (INSERTEDed field names)
 	// and UPDATE (UPDATEDed field names as Updates map is not ordered)
@@ -529,6 +529,10 @@ func (s Statement) Validate(aTable *Table) error {
 		if err := s.validateSelect(aTable); err != nil {
 			return err
 		}
+	case CreateIndex:
+		return s.validateCreateIndex()
+	case DropIndex:
+		return s.validateDropIndex()
 	}
 
 	if err := s.validateWhere(); err != nil {
@@ -629,19 +633,6 @@ func (s Statement) validateCreateTable() error {
 			}
 			indexMap[aColumn.Name] = struct{}{}
 		}
-
-		if aColumn.Index {
-			if _, ok := indexMap[aColumn.Name]; ok {
-				return fmt.Errorf("column %s can only have one index", aColumn.Name)
-			}
-			if aColumn.Kind == Text {
-				return fmt.Errorf("secondary index key cannot be of type TEXT")
-			}
-			if aColumn.Kind == Varchar && aColumn.Size > MaxIndexKeySize {
-				return fmt.Errorf("secondary index key of type VARCHAR exceeds max index key size %d", MaxIndexKeySize)
-			}
-			indexMap[aColumn.Name] = struct{}{}
-		}
 	}
 
 	if primaryKeyCount > 1 {
@@ -660,6 +651,38 @@ func (s Statement) validateCreateTable() error {
 		if primaryKeyColumn.Autoincrement && primaryKeyColumn.Kind != Int8 && primaryKeyColumn.Kind != Int4 {
 			return fmt.Errorf("autoincrement primary key must be of type INT4 or INT8")
 		}
+	}
+
+	return nil
+}
+
+func (s Statement) validateCreateIndex() error {
+	if len(s.IndexName) == 0 {
+		return fmt.Errorf("index name is required")
+	}
+
+	if len(s.TableName) == 0 {
+		return fmt.Errorf("table name is required")
+	}
+
+	if len(s.IndexName) > MaxInlineVarchar {
+		return fmt.Errorf("index name exceeds maximum length of %d", MaxInlineVarchar)
+	}
+
+	if len(s.Columns) == 0 {
+		return fmt.Errorf("at least one column is required")
+	}
+
+	if len(s.Columns) > 1 {
+		return fmt.Errorf("more than one column for index is not supported")
+	}
+
+	return nil
+}
+
+func (s Statement) validateDropIndex() error {
+	if len(s.IndexName) == 0 {
+		return fmt.Errorf("index name is required")
 	}
 
 	return nil
@@ -978,6 +1001,19 @@ func (s Statement) CreateTableDDL() string {
 				}
 			}
 		}
+		if i < len(s.Columns)-1 {
+			sb.WriteString(",\n")
+		}
+	}
+	sb.WriteString("\n);")
+	return sb.String()
+}
+
+func (s Statement) CreateIndexDDL() string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("create index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName))
+	for i, col := range s.Columns {
+		sb.WriteString(fmt.Sprintf("	%s", col.Name))
 		if i < len(s.Columns)-1 {
 			sb.WriteString(",\n")
 		}

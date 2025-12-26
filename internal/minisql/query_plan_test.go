@@ -39,7 +39,7 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 				Kind:            Timestamp,
 				Name:            "created",
 				DefaultValueNow: true,
-				Index:           true,
+				// secondary index on this column
 			},
 		}
 		pkIndexName        = "pkey__users"

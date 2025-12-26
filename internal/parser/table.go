@@ -9,8 +9,8 @@ import (
 )
 
 var (
-	errCreateTableNoColumns                 = fmt.Errorf("at CREATE TABLE: no columns specified")
 	errCreateTableExpectedOpeningParens     = fmt.Errorf("at CREATE TABLE: expected opening parens")
+	errCreateTableNoColumns                 = fmt.Errorf("at CREATE TABLE: no columns specified")
 	errCreateTableInvalidColumDef           = fmt.Errorf("at CREATE TABLE: invalid column definition")
 	errCreateTableMultiplePrimaryKeys       = fmt.Errorf("at CREATE TABLE: multiple PRIMARY KEY columns specified")
 	errCreateTablePrimaryKeyTextNotAllowed  = fmt.Errorf("at CREATE TABLE: primary key cannot be of type TEXT")
@@ -34,7 +34,7 @@ func (p *parser) doParseCreateTable() error {
 	case stepCreateTableName:
 		tableName := p.peek()
 		if len(tableName) == 0 {
-			return fmt.Errorf("at CREATE TABLE: expected quoted table name")
+			return fmt.Errorf("at CREATE TABLE: expected table name")
 		}
 		p.TableName = tableName
 		p.pop()
@@ -221,7 +221,7 @@ func (p *parser) doParseDropTable() error {
 	case stepDropTableName:
 		tableName := p.peek()
 		if len(tableName) == 0 {
-			return fmt.Errorf("at DROP TABLE: expected quoted table name")
+			return fmt.Errorf("at DROP TABLE: expected table name")
 		}
 		p.TableName = tableName
 		p.pop()

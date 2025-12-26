@@ -24,8 +24,43 @@ func TxFromContext(ctx context.Context) *Transaction {
 type TransactionID uint64
 
 type DDLChanges struct {
-	CreateTables []*Table
-	DropTables   []string
+	CreateTables  []*Table
+	DropTables    []string
+	CreateIndexes map[string]SecondaryIndex // table name -> index
+	DropIndexes   map[string]SecondaryIndex // table name -> index
+}
+
+func (d DDLChanges) CreatedTable(t *Table) DDLChanges {
+	d.CreateTables = append(d.CreateTables, t)
+	return d
+}
+
+func (d DDLChanges) DroppedTable(tableName string) DDLChanges {
+	d.DropTables = append(d.DropTables, tableName)
+	return d
+}
+
+func (d DDLChanges) CreatedIndex(tableName string, index SecondaryIndex) DDLChanges {
+	if d.CreateIndexes == nil {
+		d.CreateIndexes = make(map[string]SecondaryIndex)
+	}
+	d.CreateIndexes[tableName] = index
+	return d
+}
+
+func (d DDLChanges) DroppedIndex(tableName string, index SecondaryIndex) DDLChanges {
+	if d.DropIndexes == nil {
+		d.DropIndexes = make(map[string]SecondaryIndex)
+	}
+	d.DropIndexes[tableName] = index
+	return d
+}
+
+func (d DDLChanges) HasChanges() bool {
+	return len(d.CreateTables) > 0 ||
+		len(d.DropTables) > 0 ||
+		len(d.CreateIndexes) > 0 ||
+		len(d.DropIndexes) > 0
 }
 
 type Transaction struct {

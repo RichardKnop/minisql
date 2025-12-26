@@ -247,6 +247,7 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 
 				indexKeys[groupIDx] = keys
 			} else if aColumn.Unique && strings.HasPrefix(equalityIndex[groupIDx].Name, "idx__") {
+				// TODO: do not assumme idx__ prefix for secondary indexes
 				// Prefer unique index over secondary index
 				equalityIndex[groupIDx] = info
 				equalityCond[groupIDx] = condIdx

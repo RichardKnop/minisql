@@ -14,7 +14,12 @@ func TestTable_PlanQuery_SingleIndex(t *testing.T) {
 	// We can test both unique and secondary indexes using similar table structures.
 	// Query plan should be the same for both types of indexes in these simple test cases.
 	var (
-		indexName             = "foo"
+		indexName            = "foo"
+		secondaryIndexColumn = Column{
+			Kind: Varchar,
+			Size: MaxInlineVarchar,
+			Name: "email",
+		}
 		aTableWithUniqueIndex = &Table{
 			UniqueIndexes: map[string]UniqueIndex{
 				indexName: {
@@ -31,11 +36,18 @@ func TestTable_PlanQuery_SingleIndex(t *testing.T) {
 				indexName: {
 					IndexInfo: IndexInfo{
 						Name:   indexName,
-						Column: testColumnsWithSecondaryIndex[1],
+						Column: secondaryIndexColumn,
 					},
 				},
 			},
-			Columns: testColumnsWithSecondaryIndex,
+			Columns: []Column{
+				{
+					Kind: Varchar,
+					Size: MaxInlineVarchar,
+					Name: "email",
+				},
+				secondaryIndexColumn,
+			},
 		}
 	)
 
