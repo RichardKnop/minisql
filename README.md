@@ -71,14 +71,14 @@ All tables and indexes are tracked in the system table `minisql_schema`. For emp
 
 ```sh
  type   | name               | table_name         | root_page   | sql                                                
---------+--------------------+--------------------+-------------+---------------------------------------
- 1      | minisql_schema     |                    | 0           | create table "minisql_schema" (       
-        |                    |                    |             | 	type int4 not null,                 
-        |                    |                    |             | 	name varchar(255) not null,         
-        |                    |                    |             | 	table_name varchar(255),            
-        |                    |                    |             | 	root_page int4,                     
-        |                    |                    |             | 	sql text                            
-        |                    |                    |             | )                                     
+--------+--------------------+--------------------+-------------+----------------------------------------
+ 1      | minisql_schema     |                    | 0           | create table "minisql_schema" (        
+        |                    |                    |             | 	type int4 not null,                  
+        |                    |                    |             | 	name varchar(255) not null,          
+        |                    |                    |             | 	table_name varchar(255),             
+        |                    |                    |             | 	root_page int4,                      
+        |                    |                    |             | 	sql text                             
+        |                    |                    |             | )                                      
 ```
 
 Let's say you create a table such as:
@@ -91,29 +91,65 @@ create table "users" (
 	age int4,
 	created timestamp default now()
 );
+create index "idx_created" on "users" (
+	created
+);
 ```
 
-It will be added to the system table as well as its primary key and any unique or secondary indexes.
+It will be added to the system table as well as its primary key and any unique or secondary indexes. Secondary index on `created TIMESTAMP` column created separately will also be added to the system table.
+
+You can check current objects in the `minisql_schema` system table by a simple `SELECT` query.
+
+```go
+// type schema struct {
+// 	Type      int
+// 	Name      string
+// 	TableName *string
+// 	RootPage  int
+// 	Sql       *string
+// }
+
+rows, err := db.QueryContext(context.Background(), `select * from minisql_schema;`)
+if err != nil {
+	return err
+}
+defer rows.Close()
+
+var schemas []schema
+for rows.Next() {
+	var aSchema schema
+	if err := rows.Scan(&aSchema.Type, &aSchema.Name, &aSchema.RootPage, &aSchema.SQL); err != nil {
+		return err
+	}
+	schemas = append(schemas, aSchema)
+}
+if err := rows.Err(); err != nil {
+	return err
+}
+```
 
 ```sh
  type   | name               | table_name         | root_page   | sql                                                
---------+--------------------+--------------------+-------------+---------------------------------------
- 1      | minisql_schema     |                    | 0           | create table "minisql_schema" (       
-        |                    |                    |             | 	type int4 not null,                 
-        |                    |                    |             | 	name varchar(255) not null,         
-        |                    |                    |             | 	table_name varchar(255),            
-        |                    |                    |             | 	root_page int4,                     
-        |                    |                    |             | 	sql text                            
-        |                    |                    |             | )                                     
- 1      | users              |                    | 1           | create table "users" (                
-        |                    |                    |             | 	id int8 primary key autoincrement,  
-        |                    |                    |             | 	email varchar(255) unique,          
-        |                    |                    |             | 	name text,                          
-        |                    |                    |             | 	age int4,                           
-        |                    |                    |             | 	created timestamp default now()     
-        |                    |                    |             | );                                    
- 2      | pkey__users        | users              | 2           | NULL                                  
- 3      | key__users_email   | users              | 3           | NULL                                  
+--------+--------------------+--------------------+-------------+----------------------------------------
+ 1      | minisql_schema     |                    | 0           | create table "minisql_schema" (        
+        |                    |                    |             | 	type int4 not null,                  
+        |                    |                    |             | 	name varchar(255) not null,          
+        |                    |                    |             | 	table_name varchar(255),             
+        |                    |                    |             | 	root_page int4,                      
+        |                    |                    |             | 	sql text                             
+        |                    |                    |             | )                                      
+ 1      | users              |                    | 1           | create table "users" (                 
+        |                    |                    |             | 	id int8 primary key autoincrement,   
+        |                    |                    |             | 	email varchar(255) unique,           
+        |                    |                    |             | 	name text,                           
+        |                    |                    |             | 	age int4,                            
+        |                    |                    |             | 	created timestamp default now()      
+        |                    |                    |             | );                                     
+ 2      | pkey__users        | users              | 2           | NULL                                   
+ 3      | key__users_email   | users              | 3           | NULL                                   
+ 4      | idx_users          | users              | 4           | create index "idx_created" on "users" (             
+        |                    |                    |             | 	created,                             
+        |                    |                    |             | );                                     
 ```
 
 ## Data Types And Storage
@@ -174,7 +210,9 @@ insert into users("name", "email") values(?, ?), (?, ?);
 - vacuuming
 - benchmarks
 
-## Example Usage
+## DDL SQL Commands
+
+### CREATE TABLE
 
 Let's start by creating your first table:
 
@@ -186,40 +224,33 @@ _, err := db.Exec(`create table "users" (
 	age int4,
 	created timestamp default now()
 );`)
-if err != nil {
-	return err
-}
 ```
 
-You can check the table has been created in the `minisql_schema` system table.
+### DROP TABLE
 
 ```go
-// type schema struct {
-// 	Type      int
-// 	Name      string
-// 	TableName *string
-// 	RootPage  int
-// 	Sql       *string
-// }
-
-rows, err := db.QueryContext(context.Background(), `select * from minisql_schema;`)
-if err != nil {
-	return err
-}
-defer rows.Close()
-
-var schemas []schema
-for rows.Next() {
-	var aSchema schema
-	if err := rows.Scan(&aSchema.Type, &aSchema.Name, &aSchema.RootPage, &aSchema.SQL); err != nil {
-		return err
-	}
-	schemas = append(schemas, aSchema)
-}
-if err := rows.Err(); err != nil {
-	return err
-}
+_, err := db.Exec(`drop table "users";`)
 ```
+
+### CREATE INDEX
+
+Currently you can only create secondary non unique indexes. Unique and primary index can be created as part of `CREATE TABLE`.
+
+```go
+_, err := db.Exec(`create index "idx_created" on "users" (created);`)
+```
+
+### DROP INDEX
+
+Currently you can only drop secondary non unique indexes.
+
+```go
+_, err := db.Exec(`drop index "idx_created";`)
+```
+
+## DML Commands
+
+### INSERT
 
 Insert test rows:
 
@@ -266,7 +297,9 @@ if err != nil {
 }
 ```
 
-Select from the table:
+### SELECT
+
+Selecting from the table:
 
 ```go
 // type user struct {
@@ -313,6 +346,17 @@ Table should have 10 rows now:
  10     | Cristal_Duvall6639@yvu30.press   | Cristal Duvall.         | 27     | 2025-12-21 22:31:35.514831    
 ```
 
+You can also count rows in a table:
+
+```go
+var count int
+if err := db.QueryRow(`select count(*) from users;`).Scan(&count); err != nil {
+	return err
+}
+```
+
+### UPDATE
+
 Let's try using a prepared statement to update a row:
 
 ```go
@@ -338,6 +382,8 @@ Select to verify update:
 --------+----------------------------------+-------------------------+--------+-------------------------------
  1      | Danny_Mason2966@xqj6f.tech       | Danny Mason             | 36     | 2025-12-21 22:31:35.514831    
 ```
+
+### DELETE
 
 You can also delete rows:
 
