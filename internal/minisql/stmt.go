@@ -469,13 +469,13 @@ func (s Statement) prepareWhere() (Statement, error) {
 					}
 					s.Conditions[i][j].Operand2.Value.([]any)[k] = timestamp
 				}
-			} else {
-				timestamp, err := parseTimeValue(aCondition.Operand2.Value)
-				if err != nil {
-					return Statement{}, err
-				}
-				s.Conditions[i][j].Operand2.Value = timestamp
+				continue
 			}
+			timestamp, err := parseTimeValue(aCondition.Operand2.Value)
+			if err != nil {
+				return Statement{}, err
+			}
+			s.Conditions[i][j].Operand2.Value = timestamp
 		}
 	}
 	return s, nil

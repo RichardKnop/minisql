@@ -32,13 +32,19 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 				Nullable: true,
 			},
 			{
+				Kind: Timestamp,
+				Name: "dob",
+			},
+			{
 				Kind:            Timestamp,
-				Name:            "Created",
+				Name:            "created",
 				DefaultValueNow: true,
+				Index:           true,
 			},
 		}
-		pkIndexName     = "pkey__users"
-		uniqueIndexName = "key__users__email"
+		pkIndexName        = "pkey__users"
+		uniqueIndexName    = "key__users__email"
+		secondaryIndexName = "idx__users__created"
 
 		aTable = &Table{
 			PrimaryKey: PrimaryKey{
@@ -52,6 +58,14 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 					IndexInfo: IndexInfo{
 						Name:   uniqueIndexName,
 						Column: columns[1],
+					},
+				},
+			},
+			SecondaryIndexes: map[string]SecondaryIndex{
+				secondaryIndexName: {
+					IndexInfo: IndexInfo{
+						Name:   secondaryIndexName,
+						Column: columns[4],
 					},
 				},
 			},
@@ -128,6 +142,133 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 						IndexColumnName: "email",
 						IndexKeys:       []any{"foo@example.com"},
 						Filters:         OneOrMore{{}},
+					},
+				},
+			},
+		},
+		{
+			"Index scan on unique index and range scan on secondary index",
+			Statement{
+				Kind: Select,
+				Conditions: OneOrMore{
+					{
+						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+					},
+					{
+						FieldIsGreaterOrEqual("created", OperandQuotedString, MustParseTimestamp("2025-01-01 00:00:00")),
+					},
+				},
+			},
+			QueryPlan{
+				Scans: []Scan{
+					{
+						Type:            ScanTypeIndexPoint,
+						IndexName:       uniqueIndexName,
+						IndexColumnName: "email",
+						IndexKeys:       []any{"foo@example.com"},
+						Filters:         OneOrMore{{}},
+					},
+					{
+						Type:            ScanTypeIndexRange,
+						IndexName:       secondaryIndexName,
+						IndexColumnName: "created",
+						RangeCondition: RangeCondition{
+							Lower: &RangeBound{
+								Value:     MustParseTimestamp("2025-01-01 00:00:00").TotalMicroseconds(),
+								Inclusive: true,
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			"Primary index priority over unique and secondary indexes",
+			Statement{
+				Kind: Select,
+				Conditions: OneOrMore{
+					{
+						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsGreaterOrEqual("created", OperandQuotedString, MustParseTimestamp("2025-01-01 00:00:00")),
+						FieldIsEqual("id", OperandInteger, int64(42)),
+					},
+				},
+			},
+			QueryPlan{
+				Scans: []Scan{
+					{
+						Type:            ScanTypeIndexPoint,
+						IndexName:       pkIndexName,
+						IndexColumnName: "id",
+						IndexKeys:       []any{int64(42)},
+						Filters: OneOrMore{
+							{
+								FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+								FieldIsGreaterOrEqual("created", OperandQuotedString, MustParseTimestamp("2025-01-01 00:00:00")),
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			"Unique index priority over secondary index",
+			Statement{
+				Kind: Select,
+				Conditions: OneOrMore{
+					{
+						FieldIsEqual("created", OperandQuotedString, MustParseTimestamp("2025-01-01 00:00:00")),
+						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+					},
+				},
+			},
+			QueryPlan{
+				Scans: []Scan{
+					{
+						Type:            ScanTypeIndexPoint,
+						IndexName:       uniqueIndexName,
+						IndexColumnName: "email",
+						IndexKeys:       []any{"foo@example.com"},
+						Filters: OneOrMore{
+							{
+								FieldIsEqual("created", OperandQuotedString, MustParseTimestamp("2025-01-01 00:00:00")),
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			"Combine sequential scans",
+			Statement{
+				Kind: Select,
+				Conditions: OneOrMore{
+					{
+						FieldIsEqual("dob", OperandQuotedString, MustParseTimestamp("1990-01-01 00:00:00")),
+					},
+					{
+						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+					},
+					{
+						FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte("Richard"))),
+					},
+				},
+			},
+			QueryPlan{
+				Scans: []Scan{
+					{
+						Type: ScanTypeSequential,
+						Filters: OneOrMore{
+							{
+								FieldIsEqual("dob", OperandQuotedString, MustParseTimestamp("1990-01-01 00:00:00")),
+							},
+							{
+								FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+							},
+							{
+								FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte("Richard"))),
+							},
+						},
 					},
 				},
 			},
@@ -295,7 +436,8 @@ func TestTryRangeScan(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			aScan, ok := tryRangeScan(indexInfo, aTestCase.Conditions)
+			aScan, ok, err := tryRangeScan(indexInfo, aTestCase.Conditions)
+			require.NoError(t, err)
 			assert.Equal(t, aTestCase.ExpectedOK, ok)
 			if ok {
 				assert.Equal(t, aTestCase.ExpectedScan, aScan)

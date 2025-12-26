@@ -100,11 +100,31 @@ func (t *Table) ColumnByName(name string) (Column, bool) {
 	return Column{}, false
 }
 
+func (t *Table) IndexInfoByColumnName(name string) (IndexInfo, bool) {
+	if t.HasPrimaryKey() && t.PrimaryKey.Column.Name == name {
+		return t.PrimaryKey.IndexInfo, true
+	}
+	for _, index := range t.UniqueIndexes {
+		if index.Column.Name == name {
+			return index.IndexInfo, true
+		}
+	}
+	for _, index := range t.SecondaryIndexes {
+		if index.Column.Name == name {
+			return index.IndexInfo, true
+		}
+	}
+	return IndexInfo{}, false
+}
+
 func (t *Table) IndexByName(name string) (BTreeIndex, bool) {
 	if t.HasPrimaryKey() && t.PrimaryKey.Name == name {
 		return t.PrimaryKey.Index, true
 	}
 	if index, ok := t.UniqueIndexes[name]; ok {
+		return index.Index, true
+	}
+	if index, ok := t.SecondaryIndexes[name]; ok {
 		return index.Index, true
 	}
 	return nil, false

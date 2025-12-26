@@ -3,6 +3,7 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 type ScanType int
@@ -184,10 +185,12 @@ func (p QueryPlan) optimizeOrdering(t *Table) QueryPlan {
 func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 	var (
 		allGroupsHaveIndexCondition = true
-		indexKeys                   = make([][]any, 0, 10)
-		remaining                   = make([]Conditions, 0, len(conditions))
-		groupIndex                  = make(map[int]IndexInfo)
-		indexMap                    = t.IndexMap()
+
+		equalityIndex = make(map[int]IndexInfo)
+		equalityCond  = make(map[int]int)
+		otherIndexes  = make(map[int][]IndexInfo)
+		indexKeys     = make(map[int][]any)
+		indexMap      = t.IndexMap()
 	)
 
 	// Each group is separated by OR, for example:
@@ -195,19 +198,13 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 	// would be 2 groups with 2 conditions each
 	for groupIDx, group := range conditions {
 		// Check if this group contains an index condition
-		var (
-			hasIndexCondition = false
-			remainingForGroup = make(Conditions, 0, 10)
-			indexKeysForGroup = make([]any, 0, 10)
-		)
-		for _, aCondition := range group {
+		for condIdx, aCondition := range group {
 			fieldName, ok := aCondition.Operand1.Value.(string)
 			if !ok {
 				return fmt.Errorf("invalid field name in condition: %v", aCondition.Operand1.Value)
 			}
 			_, ok = indexMap[fieldName]
 			if !ok {
-				remainingForGroup = append(remainingForGroup, aCondition)
 				continue
 			}
 			aColumn, ok := t.ColumnByName(fieldName)
@@ -216,31 +213,56 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 			}
 
 			// If group contains conditions on multiple indexes, we must pick only one.
-			hasIndexCondition = true
-			info, ok := pickIndexInfo(t, fieldName)
+			info, ok := t.IndexInfoByColumnName(fieldName)
 			if !ok {
 				return fmt.Errorf("could not find index info for field: %s", fieldName)
 			}
-			groupIndex[groupIDx] = info
 
-			if isEquality(aCondition) && aCondition.Operand2.Type != OperandNull {
+			// Only consider equality conditions for index scans where right operand is not NULL
+			isEquality := isEquality(aCondition) && aCondition.Operand2.Type != OperandNull
+
+			if !isEquality {
+				otherIndexes[groupIDx] = append(otherIndexes[groupIDx], info)
+				continue
+			}
+
+			if _, ok := equalityIndex[groupIDx]; !ok {
+				equalityIndex[groupIDx] = info
+				equalityCond[groupIDx] = condIdx
 				keys, err := equalityKeys(aColumn, aCondition)
 				if err != nil {
 					return err
 				}
 
-				indexKeysForGroup = append(indexKeysForGroup, keys...)
-			} else {
-				remainingForGroup = append(remainingForGroup, aCondition)
-				continue
+				indexKeys[groupIDx] = keys
+			} else if aColumn.Name == t.PrimaryKey.Column.Name {
+				// Prefer primary key index if available
+				equalityIndex[groupIDx] = info
+				equalityCond[groupIDx] = condIdx
+
+				keys, err := equalityKeys(aColumn, aCondition)
+				if err != nil {
+					return err
+				}
+
+				indexKeys[groupIDx] = keys
+			} else if aColumn.Unique && strings.HasPrefix(equalityIndex[groupIDx].Name, "idx__") {
+				// Prefer unique index over secondary index
+				equalityIndex[groupIDx] = info
+				equalityCond[groupIDx] = condIdx
+
+				keys, err := equalityKeys(aColumn, aCondition)
+				if err != nil {
+					return err
+				}
+
+				indexKeys[groupIDx] = keys
 			}
 		}
-		if !hasIndexCondition {
+		if _, ok := equalityIndex[groupIDx]; !ok && len(otherIndexes[groupIDx]) == 0 {
 			allGroupsHaveIndexCondition = false
 			break
 		}
-		remaining = append(remaining, remainingForGroup)
-		indexKeys = append(indexKeys, indexKeysForGroup)
 	}
 
 	// In case all groups don't contain an index key condition, we cannot do index scan
@@ -252,51 +274,82 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 	// In case we reach here, we can do index scans..
 	// We need to check if we can do range scans instead of point lookups.
 	indexScans := make([]Scan, 0, len(conditions))
+
 	for groupIdx, group := range conditions {
-		rangeScan, ok := tryRangeScan(groupIndex[groupIdx], group)
+		// Try index point scan first
+		equalityIndex, ok := equalityIndex[groupIdx]
 		if ok {
-			indexScans = append(indexScans, rangeScan)
+			filters := make(Conditions, 0, len(group))
+			for condIdx, aCondition := range group {
+				if condIdx != equalityCond[groupIdx] {
+					filters = append(filters, aCondition)
+				}
+			}
+			indexScans = append(indexScans, Scan{
+				Type:            ScanTypeIndexPoint,
+				IndexName:       equalityIndex.Name,
+				IndexColumnName: equalityIndex.Column.Name,
+				IndexKeys:       indexKeys[groupIdx],
+				Filters:         OneOrMore{filters},
+			})
 			continue
 		}
 
-		// Only choose point scan if there are keys to lookup, for example in case of
-		// NOT IN clause, we won't have any keys to lookup even though there is an index condition.
-		if len(indexKeys[groupIdx]) > 0 {
-			indexScans = append(indexScans, Scan{
-				Type:            ScanTypeIndexPoint,
-				IndexName:       groupIndex[groupIdx].Name,
-				IndexColumnName: groupIndex[groupIdx].Column.Name,
-				IndexKeys:       indexKeys[groupIdx],
-				Filters:         OneOrMore{remaining[groupIdx]},
-			})
+		// Try range scans on other indexes
+		foundRangeScan := false
+		for _, idxInfo := range otherIndexes[groupIdx] {
+			rangeScan, ok, err := tryRangeScan(idxInfo, group)
+			if err != nil {
+				return err
+			}
+			if ok {
+				indexScans = append(indexScans, rangeScan)
+				foundRangeScan = true
+				break
+			}
 		}
+
+		if foundRangeScan {
+			continue
+		}
+
+		// Otherwise fall back to sequential scan for this group
+		indexScans = append(indexScans, Scan{
+			Type:    ScanTypeSequential,
+			Filters: OneOrMore{group},
+		})
 	}
+
 	// We could get here and have no index scans available, in that case do not overwrite existing plan.
 	if len(indexScans) > 0 {
 		p.Scans = indexScans
 	}
 
+	// // Combine all sequential scans into one if possible
+	// if len(p.Scans) > 1 {
+	// 	sequentialIdxs := make([]int, 0)
+	// 	for scanIdx, aScan := range p.Scans {
+	// 		if aScan.Type == ScanTypeSequential {
+	// 			sequentialIdxs = append(sequentialIdxs, scanIdx)
+	// 		}
+	// 	}
+	// 	if len(sequentialIdxs) > 1 {
+	// 		combinedConditions := make(OneOrMore, 0)
+	// 		for i := len(sequentialIdxs) - 1; i >= 0; i-- {
+	// 			scanIdx := sequentialIdxs[i]
+	// 			combinedConditions = append(combinedConditions, p.Scans[scanIdx].Filters...)
+	// 			// Remove this scan
+	// 			p.Scans = slices.Delete(p.Scans, scanIdx, scanIdx+1)
+	// 		}
+	// 		// Add combined sequential scan
+	// 		p.Scans = append(p.Scans, Scan{
+	// 			Type:    ScanTypeSequential,
+	// 			Filters: combinedConditions,
+	// 		})
+	// 	}
+	// }
+
 	return nil
-}
-
-// pickIndexInfo chooses index info for a given field name, preferring primary key,
-// then unique indexes, then secondary indexes
-func pickIndexInfo(t *Table, fieldName string) (IndexInfo, bool) {
-	if fieldName == t.PrimaryKey.Column.Name {
-		return t.PrimaryKey.IndexInfo, true
-	}
-	for _, uniqueIndex := range t.UniqueIndexes {
-		if uniqueIndex.Column.Name == fieldName {
-			return uniqueIndex.IndexInfo, true
-		}
-	}
-
-	for _, secondaryIndex := range t.SecondaryIndexes {
-		if secondaryIndex.Column.Name == fieldName {
-			return secondaryIndex.IndexInfo, true
-		}
-	}
-	return IndexInfo{}, false
 }
 
 func isEquality(cond Condition) bool {
@@ -343,7 +396,7 @@ func equalityKeys(aColumn Column, cond Condition) ([]any, error) {
 	return keyValues, nil
 }
 
-func tryRangeScan(indexInfo IndexInfo, filters Conditions) (Scan, bool) {
+func tryRangeScan(indexInfo IndexInfo, filters Conditions) (Scan, bool, error) {
 	var (
 		rangeCondition   = RangeCondition{}
 		remainingFilters = make(Conditions, 0)
@@ -368,9 +421,19 @@ func tryRangeScan(indexInfo IndexInfo, filters Conditions) (Scan, bool) {
 			continue
 		}
 
+		if aCondition.Operator == Eq || aCondition.Operator == Ne {
+			// id = X, id IN (...) - we will be doing index point scan instead so just return
+			return Scan{}, false, nil
+		}
+
+		if aCondition.Operator == In || aCondition.Operator == NotIn {
+			// id != X , id NOT IN (...) - we will be doing a sequential scan so just return
+			return Scan{}, false, nil
+		}
+
 		conditionValue, err := castKeyValue(indexInfo.Column, aCondition.Operand2.Value)
 		if err != nil {
-			return Scan{}, false
+			return Scan{}, false, err
 		}
 
 		switch aCondition.Operator {
@@ -410,20 +473,13 @@ func tryRangeScan(indexInfo IndexInfo, filters Conditions) (Scan, bool) {
 					Inclusive: true,
 				}
 			}
-		case Eq, In:
-			// id = X, id IN (...) - we will be doing index point scan instead so just return
-			return Scan{}, false
-		case Ne, NotIn:
-			// id != X , id NOT IN (...) - we will be doing a sequential scan so just return
-			return Scan{}, false
 		default:
-			// This should not happen, we cover all operators with switch cases above
-			return Scan{}, false
+			return Scan{}, false, fmt.Errorf("invalid operator for range scan: %d", aCondition.Operator)
 		}
 	}
 
 	if rangeCondition.Lower == nil && rangeCondition.Upper == nil {
-		return Scan{}, false
+		return Scan{}, false, nil
 	}
 
 	// Validate range is sensible
@@ -432,7 +488,7 @@ func tryRangeScan(indexInfo IndexInfo, filters Conditions) (Scan, bool) {
 		if cmp > 0 {
 			// Lower > Upper = empty range, no results
 			// Could optimize by returning empty result, but for now just don't use index
-			return Scan{}, false
+			return Scan{}, false, nil
 		}
 	}
 
@@ -446,5 +502,5 @@ func tryRangeScan(indexInfo IndexInfo, filters Conditions) (Scan, bool) {
 	if len(remainingFilters) > 0 {
 		aScan.Filters = OneOrMore{remainingFilters}
 	}
-	return aScan, true
+	return aScan, true, nil
 }
