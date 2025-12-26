@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"maps"
 	"sync"
 	"time"
 )
@@ -107,52 +108,55 @@ func (tx *Transaction) Abort() {
 func (tx *Transaction) TrackRead(pageIdx PageIndex, version uint64) {
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
+
 	tx.ReadSet[pageIdx] = version
 }
 
 func (tx *Transaction) TrackWrite(pageIdx PageIndex, page *Page) {
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
+
 	tx.WriteSet[pageIdx] = page
 }
 
 func (tx *Transaction) TrackDBHeaderRead(version uint64) {
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
+
 	tx.DbHeaderRead = &version
 }
 
 func (tx *Transaction) TrackDBHeaderWrite(header DatabaseHeader) {
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
+
 	tx.DbHeaderWrite = &header
 }
 
 func (tx *Transaction) GetReadVersions() map[PageIndex]uint64 {
 	tx.mu.RLock()
 	defer tx.mu.RUnlock()
+
 	// Return a copy to avoid concurrent map access
 	readSetCopy := make(map[PageIndex]uint64, len(tx.ReadSet))
-	for k, v := range tx.ReadSet {
-		readSetCopy[k] = v
-	}
+	maps.Copy(readSetCopy, tx.ReadSet)
 	return readSetCopy
 }
 
 func (tx *Transaction) GetWriteVersions() map[PageIndex]*Page {
 	tx.mu.RLock()
 	defer tx.mu.RUnlock()
+
 	// Return a copy to avoid concurrent map access
 	writeSetCopy := make(map[PageIndex]*Page, len(tx.WriteSet))
-	for k, v := range tx.WriteSet {
-		writeSetCopy[k] = v
-	}
+	maps.Copy(writeSetCopy, tx.WriteSet)
 	return writeSetCopy
 }
 
 func (tx *Transaction) GetDBHeaderReadVersion() (uint64, bool) {
 	tx.mu.RLock()
 	defer tx.mu.RUnlock()
+
 	if tx.DbHeaderRead == nil {
 		return 0, false
 	}
@@ -162,6 +166,7 @@ func (tx *Transaction) GetDBHeaderReadVersion() (uint64, bool) {
 func (tx *Transaction) GetModifiedPage(pageIdx PageIndex) (*Page, bool) {
 	tx.mu.RLock()
 	defer tx.mu.RUnlock()
+
 	modifiedPage, exists := tx.WriteSet[pageIdx]
 	return modifiedPage, exists
 }
@@ -169,5 +174,6 @@ func (tx *Transaction) GetModifiedPage(pageIdx PageIndex) (*Page, bool) {
 func (tx *Transaction) GetModifiedDBHeader() (*DatabaseHeader, bool) {
 	tx.mu.RLock()
 	defer tx.mu.RUnlock()
+
 	return tx.DbHeaderWrite, tx.DbHeaderWrite != nil
 }
