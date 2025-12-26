@@ -78,28 +78,14 @@ func TestTable_Delete_PrimaryKey(t *testing.T) {
 			},
 		}
 
-		var aResult StatementResult
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			var err error
-			aResult, err = aTable.Delete(ctx, stmt)
-			return err
-		}, TxCommitter{aPager, nil})
-		require.NoError(t, err)
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, stmt)
 
 		assert.Equal(t, 1, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, rows[1:])
 	})
 
 	t.Run("Delete all rows", func(t *testing.T) {
-		var aResult StatementResult
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			var err error
-			aResult, err = aTable.Delete(ctx, Statement{
-				Kind: Delete,
-			})
-			return err
-		}, TxCommitter{aPager, nil})
-		require.NoError(t, err)
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{Kind: Delete})
 
 		assert.Equal(t, 9, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, nil)

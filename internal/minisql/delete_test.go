@@ -44,16 +44,10 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	mustInsert(t, ctx, aTable, txManager, aPager, stmt)
 
 	t.Run("Delete rows with NULL values when no rows match", func(t *testing.T) {
-		var aResult StatementResult
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			var err error
-			aResult, err = aTable.Delete(ctx, Statement{
-				Kind:       Delete,
-				Conditions: NewOneOrMore(Conditions{FieldIsNull("id")}),
-			})
-			return err
-		}, TxCommitter{aPager, nil})
-		require.NoError(t, err)
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+			Kind:       Delete,
+			Conditions: NewOneOrMore(Conditions{FieldIsNull("id")}),
+		})
 
 		assert.Equal(t, 0, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, rows)
@@ -63,67 +57,41 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		id, ok := rows[0].GetValue("id")
 		require.True(t, ok)
 
-		var aResult StatementResult
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			var err error
-			aResult, err = aTable.Delete(ctx, Statement{
-				Kind: Delete,
-				Conditions: OneOrMore{
-					{
-						FieldIsEqual("id", OperandInteger, id.Value.(int64)),
-					},
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+			Kind: Delete,
+			Conditions: OneOrMore{
+				{
+					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
 				},
-			})
-			return err
-		}, TxCommitter{aPager, nil})
-		require.NoError(t, err)
+			},
+		})
 
 		assert.Equal(t, 1, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, rows[1:])
 	})
 
 	t.Run("Delete rows with NULL values", func(t *testing.T) {
-		var aResult StatementResult
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			var err error
-			aResult, err = aTable.Delete(ctx, Statement{
-				Kind:       Delete,
-				Conditions: NewOneOrMore(Conditions{FieldIsNull("age")}),
-			})
-			return err
-		}, TxCommitter{aPager, nil})
-		require.NoError(t, err)
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+			Kind:       Delete,
+			Conditions: NewOneOrMore(Conditions{FieldIsNull("age")}),
+		})
 
 		assert.Equal(t, 1, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, rows[2:])
 	})
 
 	t.Run("Delete rows with NOT NULL values", func(t *testing.T) {
-		var aResult StatementResult
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			var err error
-			aResult, err = aTable.Delete(ctx, Statement{
-				Kind:       Delete,
-				Conditions: NewOneOrMore(Conditions{FieldIsNotNull("created_at")}),
-			})
-			return err
-		}, TxCommitter{aPager, nil})
-		require.NoError(t, err)
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+			Kind:       Delete,
+			Conditions: NewOneOrMore(Conditions{FieldIsNotNull("created_at")}),
+		})
 
 		assert.Equal(t, 1, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, rows[3:])
 	})
 
 	t.Run("Delete all rows", func(t *testing.T) {
-		var aResult StatementResult
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			var err error
-			aResult, err = aTable.Delete(ctx, Statement{
-				Kind: Delete,
-			})
-			return err
-		}, TxCommitter{aPager, nil})
-		require.NoError(t, err)
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{Kind: Delete})
 
 		assert.Equal(t, 2, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, nil)
@@ -188,20 +156,14 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	t.Run("Delete first row to force merging of first two leaves", func(t *testing.T) {
 		ids := rowIDs(rows[0])
 
-		var aResult StatementResult
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			var err error
-			aResult, err = aTable.Delete(ctx, Statement{
-				Kind: Delete,
-				Conditions: OneOrMore{
-					{
-						FieldIsInAny("id", ids...),
-					},
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+			Kind: Delete,
+			Conditions: OneOrMore{
+				{
+					FieldIsInAny("id", ids...),
 				},
-			})
-			return err
-		}, TxCommitter{aPager, nil})
-		require.NoError(t, err)
+			},
+		})
 
 		assert.Equal(t, 1, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, rows[1:])
@@ -240,20 +202,14 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	t.Run("Delete last three rows to force merging of last two leaves", func(t *testing.T) {
 		ids := rowIDs(rows[17], rows[18], rows[19])
 
-		var aResult StatementResult
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			var err error
-			aResult, err = aTable.Delete(ctx, Statement{
-				Kind: Delete,
-				Conditions: OneOrMore{
-					{
-						FieldIsInAny("id", ids...),
-					},
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+			Kind: Delete,
+			Conditions: OneOrMore{
+				{
+					FieldIsInAny("id", ids...),
 				},
-			})
-			return err
-		}, TxCommitter{aPager, nil})
-		require.NoError(t, err)
+			},
+		})
 
 		assert.Equal(t, 3, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, rows[1:17])
@@ -290,20 +246,14 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	t.Run("Keep deleting more rows, another merge", func(t *testing.T) {
 		ids := rowIDs(rows[2], rows[4], rows[6])
 
-		var aResult StatementResult
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			var err error
-			aResult, err = aTable.Delete(ctx, Statement{
-				Kind: Delete,
-				Conditions: OneOrMore{
-					{
-						FieldIsInAny("id", ids...),
-					},
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+			Kind: Delete,
+			Conditions: OneOrMore{
+				{
+					FieldIsInAny("id", ids...),
 				},
-			})
-			return err
-		}, TxCommitter{aPager, nil})
-		require.NoError(t, err)
+			},
+		})
 
 		assert.Equal(t, 3, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, []Row{
@@ -343,20 +293,14 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	t.Run("Keep deleting more rows, no merge", func(t *testing.T) {
 		ids := rowIDs(rows[9], rows[11], rows[13], rows[15])
 
-		var aResult StatementResult
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			var err error
-			aResult, err = aTable.Delete(ctx, Statement{
-				Kind: Delete,
-				Conditions: OneOrMore{
-					{
-						FieldIsInAny("id", ids...),
-					},
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+			Kind: Delete,
+			Conditions: OneOrMore{
+				{
+					FieldIsInAny("id", ids...),
 				},
-			})
-			return err
-		}, TxCommitter{aPager, nil})
-		require.NoError(t, err)
+			},
+		})
 
 		assert.Equal(t, 4, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, []Row{
@@ -389,20 +333,14 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	t.Run("Keep deleting more rows, another merge and borrow", func(t *testing.T) {
 		ids := rowIDs(rows[3], rows[12], rows[5])
 
-		var aResult StatementResult
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			var err error
-			aResult, err = aTable.Delete(ctx, Statement{
-				Kind: Delete,
-				Conditions: OneOrMore{
-					{
-						FieldIsInAny("id", ids...),
-					},
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+			Kind: Delete,
+			Conditions: OneOrMore{
+				{
+					FieldIsInAny("id", ids...),
 				},
-			})
-			return err
-		}, TxCommitter{aPager, nil})
-		require.NoError(t, err)
+			},
+		})
 
 		assert.Equal(t, 3, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, []Row{
@@ -440,20 +378,14 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	t.Run("Delete one more time, we are left with only root leaf node", func(t *testing.T) {
 		ids := rowIDs(rows[14])
 
-		var aResult StatementResult
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			var err error
-			aResult, err = aTable.Delete(ctx, Statement{
-				Kind: Delete,
-				Conditions: OneOrMore{
-					{
-						FieldIsInAny("id", ids...),
-					},
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+			Kind: Delete,
+			Conditions: OneOrMore{
+				{
+					FieldIsInAny("id", ids...),
 				},
-			})
-			return err
-		}, TxCommitter{aPager, nil})
-		require.NoError(t, err)
+			},
+		})
 
 		assert.Equal(t, 1, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, []Row{
@@ -486,20 +418,14 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	t.Run("Delete all remaining rows", func(t *testing.T) {
 		ids := rowIDs(rows[1], rows[7], rows[8], rows[10], rows[16])
 
-		var aResult StatementResult
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			var err error
-			aResult, err = aTable.Delete(ctx, Statement{
-				Kind: Delete,
-				Conditions: OneOrMore{
-					{
-						FieldIsInAny("id", ids...),
-					},
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+			Kind: Delete,
+			Conditions: OneOrMore{
+				{
+					FieldIsInAny("id", ids...),
 				},
-			})
-			return err
-		}, TxCommitter{aPager, nil})
-		require.NoError(t, err)
+			},
+		})
 
 		assert.Equal(t, 5, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, nil)
@@ -553,15 +479,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	checkRows(ctx, t, aTable, rows)
 	assert.Equal(t, 336, int(aPager.TotalPages()))
 
-	var aResult StatementResult
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		var err error
-		aResult, err = aTable.Delete(ctx, Statement{
-			Kind: Delete,
-		})
-		return err
-	}, TxCommitter{aPager, nil})
-	require.NoError(t, err)
+	aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{Kind: Delete})
 
 	assert.Equal(t, len(rows), aResult.RowsAffected)
 
@@ -608,20 +526,14 @@ func TestTable_Delete_Overflow(t *testing.T) {
 	t.Run("Delete inline non overflowing row", func(t *testing.T) {
 		ids := rowIDs(rows[0])
 
-		var aResult StatementResult
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			var err error
-			aResult, err = aTable.Delete(ctx, Statement{
-				Kind: Delete,
-				Conditions: OneOrMore{
-					{
-						FieldIsInAny("id", ids...),
-					},
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+			Kind: Delete,
+			Conditions: OneOrMore{
+				{
+					FieldIsInAny("id", ids...),
 				},
-			})
-			return err
-		}, TxCommitter{aPager, nil})
-		require.NoError(t, err)
+			},
+		})
 
 		assert.Equal(t, 1, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, rows[1:])
@@ -633,20 +545,14 @@ func TestTable_Delete_Overflow(t *testing.T) {
 	t.Run("Delete overflowing rows", func(t *testing.T) {
 		ids := rowIDs(rows[1], rows[2])
 
-		var aResult StatementResult
-		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			var err error
-			aResult, err = aTable.Delete(ctx, Statement{
-				Kind: Delete,
-				Conditions: OneOrMore{
-					{
-						FieldIsInAny("id", ids...),
-					},
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+			Kind: Delete,
+			Conditions: OneOrMore{
+				{
+					FieldIsInAny("id", ids...),
 				},
-			})
-			return err
-		}, TxCommitter{aPager, nil})
-		require.NoError(t, err)
+			},
+		})
 
 		assert.Equal(t, 2, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, nil)
@@ -708,4 +614,16 @@ func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []
 		}
 		assert.Equal(t, actual[i].NullBitmask(), expectedRows[i].NullBitmask(), "row %d null bitmask does not match expected", i)
 	}
+}
+
+func mustDelete(t *testing.T, ctx context.Context, aTable *Table, txManager *TransactionManager, saver PageSaver, stmt Statement) StatementResult {
+	var aResult StatementResult
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		var err error
+		aResult, err = aTable.Delete(ctx, stmt)
+		return err
+	}, TxCommitter{saver, nil})
+	require.NoError(t, err)
+
+	return aResult
 }

@@ -91,8 +91,8 @@ It will be added to the system table as well as its primary key and any unique o
         |                    |                    |             | 	age int4,                           
         |                    |                    |             | 	created timestamp default now()     
         |                    |                    |             | );                                    
- 2      | pkey__users        |                    | 2           | NULL                                  
- 3      | key__users_email   |                    | 3           | NULL                                  
+ 2      | pkey__users        | users              | 2           | NULL                                  
+ 3      | key__users_email   | users              | 3           | NULL                                  
 ```
 
 ## Data Types And Storage
