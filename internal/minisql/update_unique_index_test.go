@@ -65,6 +65,7 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 			freePage,
 			aTable.UniqueIndexes[indexName].Column,
 			aTable.UniqueIndexes[indexName].Name,
+			true,
 		)
 		aTable.UniqueIndexes[indexName] = uniqueIndex
 		if err != nil {

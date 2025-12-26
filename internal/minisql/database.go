@@ -241,7 +241,7 @@ func (d *Database) initPrimaryKey(ctx context.Context, aRow Row) error {
 		d.factory.ForIndex(aTable.PrimaryKey.Column.Kind, uint64(aTable.PrimaryKey.Column.Size), true),
 		d.txManager,
 	)
-	btreeIndex, err := aTable.newBTreeIndex(indexPager, rootPageIdx, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name)
+	btreeIndex, err := aTable.newBTreeIndex(indexPager, rootPageIdx, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name, true)
 	if err != nil {
 		return err
 	}
@@ -277,7 +277,7 @@ func (d *Database) initUniqueIndex(ctx context.Context, aRow Row) error {
 		d.factory.ForIndex(uniqueIndex.Column.Kind, uint64(uniqueIndex.Column.Size), true),
 		d.txManager,
 	)
-	btreeIndex, err := aTable.newBTreeIndex(indexPager, rootPageIdx, uniqueIndex.Column, uniqueIndex.Name)
+	btreeIndex, err := aTable.newBTreeIndex(indexPager, rootPageIdx, uniqueIndex.Column, uniqueIndex.Name, true)
 	if err != nil {
 		return err
 	}
@@ -335,7 +335,7 @@ func (d *Database) initSecondaryIndex(ctx context.Context, aRow Row) error {
 		d.factory.ForIndex(secondaryIndex.Column.Kind, uint64(secondaryIndex.Column.Size), true),
 		d.txManager,
 	)
-	btreeIndex, err := aTable.newBTreeIndex(indexPager, rootPageIdx, secondaryIndex.Column, secondaryIndex.Name)
+	btreeIndex, err := aTable.newBTreeIndex(indexPager, rootPageIdx, secondaryIndex.Column, secondaryIndex.Name, false)
 	if err != nil {
 		return err
 	}
@@ -865,7 +865,7 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 		d.factory.ForIndex(indexColumn.Kind, uint64(indexColumn.Size), true),
 		d.txManager,
 	)
-	btreeIndex, err := aTable.newBTreeIndex(indexPager, aSchema.RootPage, indexColumn, aSchema.Name)
+	btreeIndex, err := aTable.newBTreeIndex(indexPager, aSchema.RootPage, indexColumn, aSchema.Name, false)
 	if err != nil {
 		return err
 	}
@@ -936,7 +936,7 @@ func (d *Database) createPrimaryKey(ctx context.Context, aTable *Table, aColumn 
 		return nil, err
 	}
 
-	createdIndex, err := aTable.createBTreeIndex(indexPager, freePage, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name)
+	createdIndex, err := aTable.createBTreeIndex(indexPager, freePage, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name, true)
 	if err != nil {
 		return nil, err
 	}
@@ -960,7 +960,7 @@ func (d *Database) createUniqueIndex(ctx context.Context, aTable *Table, uniqueI
 		return nil, err
 	}
 
-	createdIndex, err := aTable.createBTreeIndex(indexPager, freePage, uniqueIndex.Column, uniqueIndex.Name)
+	createdIndex, err := aTable.createBTreeIndex(indexPager, freePage, uniqueIndex.Column, uniqueIndex.Name, true)
 	if err != nil {
 		return nil, err
 	}
@@ -984,7 +984,7 @@ func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, aTa
 		return nil, err
 	}
 
-	createdIndex, err := aTable.createBTreeIndex(aPager, freePage, secondaryIndex.Column, secondaryIndex.Name)
+	createdIndex, err := aTable.createBTreeIndex(aPager, freePage, secondaryIndex.Column, secondaryIndex.Name, false)
 	if err != nil {
 		return nil, err
 	}

@@ -61,6 +61,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 			freePage,
 			aTable.PrimaryKey.Column,
 			aTable.PrimaryKey.Name,
+			true,
 		)
 		if err != nil {
 			return err

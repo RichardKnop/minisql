@@ -54,7 +54,13 @@ func TestTable_Insert_PrimaryKey(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		aTable.PrimaryKey.Index, err = aTable.createBTreeIndex(primaryKeyPager, freePage, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name)
+		aTable.PrimaryKey.Index, err = aTable.createBTreeIndex(
+			primaryKeyPager,
+			freePage,
+			aTable.PrimaryKey.Column,
+			aTable.PrimaryKey.Name,
+			true,
+		)
 		if err != nil {
 			return err
 		}
@@ -133,6 +139,7 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 				freePage,
 				aTable.PrimaryKey.Column,
 				aTable.PrimaryKey.Name,
+				true,
 			)
 			if err != nil {
 				return err
