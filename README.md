@@ -49,14 +49,15 @@ Moreover, each row starts with 64 bit null mask which determines which values ar
 All tables and indexes are tracked in the system table `minisql_schema`. For empty database, it would contain only its own reference:
 
 ```sh
- type   | name                       | root_page   | sql                                                
---------+----------------------------+-------------+----------------------------------------------------
- 1      | minisql_schema             | 0           | create table "minisql_schema" (                    
-        |                            |             | 	type int4 not null,                            
-        |                            |             | 	table_name varchar(255) not null,              
-        |                            |             | 	root_page int4,                                
-        |                            |             | 	sql text                              
-        |                            |             | )
+ type   | name               | table_name         | root_page   | sql                                                
+--------+--------------------+--------------------+-------------+---------------------------------------
+ 1      | minisql_schema     |                    | 0           | create table "minisql_schema" (       
+        |                    |                    |             | 	type int4 not null,                 
+        |                    |                    |             | 	name varchar(255) not null,         
+        |                    |                    |             | 	table_name varchar(255),            
+        |                    |                    |             | 	root_page int4,                     
+        |                    |                    |             | 	sql text                            
+        |                    |                    |             | )                                     
 ```
 
 Let's say you create a table such as:
@@ -74,23 +75,24 @@ create table "users" (
 It will be added to the system table as well as its primary key and any unique or secondary indexes.
 
 ```sh
- type   | name                       | root_page   | sql                                                
---------+----------------------------+-------------+----------------------------------------------------
- 1      | minisql_schema             | 0           | create table "minisql_schema" (                    
-        |                            |             | 	type int4 not null,                               
-        |                            |             | 	name varchar(255) not null,                       
-        |                            |             | 	root_page int4,                                   
-        |                            |             | 	sql text                                          
-        |                            |             | );                                                 
- 1      | users                      | 1           | create table "users" (                             
-        |                            |             | 	id int8 primary key autoincrement,                
-        |                            |             | 	email varchar(255) unique,                               
-        |                            |             | 	name text,                                       
-        |                            |             | 	age int4,                                          
-        |                            |             | 	created timestamp default now()                  
-        |                            |             | );                                                 
- 2      | pkey__users                | 2           | NULL                                               
- 3      | key__users_email           | 3           | NULL                                               
+ type   | name               | table_name         | root_page   | sql                                                
+--------+--------------------+--------------------+-------------+---------------------------------------
+ 1      | minisql_schema     |                    | 0           | create table "minisql_schema" (       
+        |                    |                    |             | 	type int4 not null,                 
+        |                    |                    |             | 	name varchar(255) not null,         
+        |                    |                    |             | 	table_name varchar(255),            
+        |                    |                    |             | 	root_page int4,                     
+        |                    |                    |             | 	sql text                            
+        |                    |                    |             | )                                     
+ 1      | users              |                    | 1           | create table "users" (                
+        |                    |                    |             | 	id int8 primary key autoincrement,  
+        |                    |                    |             | 	email varchar(255) unique,          
+        |                    |                    |             | 	name text,                          
+        |                    |                    |             | 	age int4,                           
+        |                    |                    |             | 	created timestamp default now()     
+        |                    |                    |             | );                                    
+ 2      | pkey__users        |                    | 2           | NULL                                  
+ 3      | key__users_email   |                    | 3           | NULL                                  
 ```
 
 ## Data Types And Storage
@@ -168,14 +170,15 @@ if err != nil {
 }
 ```
 
-Now you should see your table in the `minisql_schema`.
+You can check the table has been created in the `minisql_schema` system table.
 
 ```go
 // type schema struct {
-// 	Type     int
-// 	Name     string
-// 	RootPage int
-// 	SQL      *string
+// 	Type      int
+// 	Name      string
+// 	TableName *string
+// 	RootPage  int
+// 	Sql       *string
 // }
 
 rows, err := db.QueryContext(context.Background(), `select * from minisql_schema;`)
@@ -195,26 +198,6 @@ for rows.Next() {
 if err := rows.Err(); err != nil {
 	return err
 }
-```
-
-```sh
- type   | name                       | root_page   | sql                                                
---------+----------------------------+-------------+----------------------------------------------------
- 1      | minisql_schema             | 0           | create table "minisql_schema" (                    
-        |                            |             | 	type int4 not null,                               
-        |                            |             | 	name varchar(255) not null,                       
-        |                            |             | 	root_page int4,                                   
-        |                            |             | 	sql text                                          
-        |                            |             | );                                                 
- 1      | users                      | 1           | create table "users" (                             
-        |                            |             | 	id int8 primary key autoincrement,                
-        |                            |             | 	email varchar(255) unique,                               
-        |                            |             | 	name text,                                       
-        |                            |             | 	age int4,                                          
-        |                            |             | 	created timestamp default now()                  
-        |                            |             | );                                                 
- 2      | pkey__users                | 2           | NULL                                               
- 3      | key__users_email           | 3           | NULL                                               
 ```
 
 Insert test rows:
