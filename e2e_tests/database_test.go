@@ -2,7 +2,6 @@ package e2etests
 
 import (
 	"database/sql"
-	"fmt"
 	"os"
 	"testing"
 
@@ -159,9 +158,6 @@ func (s *TestSuite) TestCreateTable() {
 		schemas := s.scanSchemas()
 		s.Require().Equal(1, len(schemas))
 		s.assertSchemaTable(schemas[0])
-
-		fmt.Println("Dropped users table successfully")
-		fmt.Println(schemas)
 	})
 
 	s.Run("Create multi table schema", func() {
