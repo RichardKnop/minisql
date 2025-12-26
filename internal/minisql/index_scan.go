@@ -35,6 +35,17 @@ func (ui *Index[T]) scanAscending(ctx context.Context, pageIdx PageIndex, callba
 					return err
 				}
 			}
+			if aCell.Overflow != 0 {
+				rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, aCell.Overflow)
+				if err != nil {
+					return err
+				}
+				for _, rowID := range rowIDs {
+					if err := callback(aCell.Key, rowID); err != nil {
+						return err
+					}
+				}
+			}
 		}
 		return nil
 	}
@@ -95,6 +106,17 @@ func (ui *Index[T]) scanDescending(ctx context.Context, pageIdx PageIndex, callb
 			for _, rowID := range aCell.RowIDs {
 				if err := callback(aCell.Key, rowID); err != nil {
 					return err
+				}
+			}
+			if aCell.Overflow != 0 {
+				rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, aCell.Overflow)
+				if err != nil {
+					return err
+				}
+				for _, rowID := range rowIDs {
+					if err := callback(aCell.Key, rowID); err != nil {
+						return err
+					}
 				}
 			}
 		}
