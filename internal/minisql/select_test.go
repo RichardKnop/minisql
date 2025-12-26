@@ -41,7 +41,8 @@ func TestTable_Select(t *testing.T) {
 	}
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		return aTable.Insert(ctx, insertStmt)
+		_, err := aTable.Insert(ctx, insertStmt)
+		return err
 	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
@@ -474,7 +475,8 @@ func TestTable_Select_Overflow(t *testing.T) {
 	}
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		return aTable.Insert(ctx, insertStmt)
+		_, err := aTable.Insert(ctx, insertStmt)
+		return err
 	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 

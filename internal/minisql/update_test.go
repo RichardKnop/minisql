@@ -33,7 +33,8 @@ func TestTable_Update(t *testing.T) {
 	}
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		return aTable.Insert(ctx, insertStmt)
+		_, err := aTable.Insert(ctx, insertStmt)
+		return err
 	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
@@ -214,7 +215,8 @@ func TestTable_Update_Overflow(t *testing.T) {
 	}
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		return aTable.Insert(ctx, insertStmt)
+		_, err := aTable.Insert(ctx, insertStmt)
+		return err
 	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 

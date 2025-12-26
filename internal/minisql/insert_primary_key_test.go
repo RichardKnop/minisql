@@ -58,7 +58,8 @@ func TestTable_Insert_PrimaryKey(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return aTable.Insert(ctx, stmt)
+		_, err = aTable.Insert(ctx, stmt)
+		return err
 	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 
@@ -72,7 +73,8 @@ func TestTable_Insert_PrimaryKey(t *testing.T) {
 		}
 
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return aTable.Insert(ctx, stmt)
+			_, err := aTable.Insert(ctx, stmt)
+			return err
 		}, TxCommitter{aPager, nil})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrDuplicateKey)
@@ -135,7 +137,8 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			return aTable.Insert(ctx, stmt)
+			_, err = aTable.Insert(ctx, stmt)
+			return err
 		}, TxCommitter{aPager, nil})
 		require.NoError(t, err)
 

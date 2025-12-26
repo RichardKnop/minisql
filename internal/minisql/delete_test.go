@@ -41,14 +41,11 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		return aTable.Insert(ctx, stmt)
-	}, TxCommitter{aPager, nil})
-	require.NoError(t, err)
+	mustInsert(t, ctx, aTable, txManager, aPager, stmt)
 
 	t.Run("Delete rows with NULL values when no rows match", func(t *testing.T) {
 		var aResult StatementResult
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
 				Kind:       Delete,
@@ -67,7 +64,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		require.True(t, ok)
 
 		var aResult StatementResult
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
 				Kind: Delete,
@@ -87,7 +84,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 
 	t.Run("Delete rows with NULL values", func(t *testing.T) {
 		var aResult StatementResult
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
 				Kind:       Delete,
@@ -103,7 +100,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 
 	t.Run("Delete rows with NOT NULL values", func(t *testing.T) {
 		var aResult StatementResult
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
 				Kind:       Delete,
@@ -119,7 +116,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 
 	t.Run("Delete all rows", func(t *testing.T) {
 		var aResult StatementResult
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
 				Kind: Delete,
@@ -161,10 +158,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		return aTable.Insert(ctx, stmt)
-	}, TxCommitter{aPager, nil})
-	require.NoError(t, err)
+	mustInsert(t, ctx, aTable, txManager, aPager, stmt)
 
 	/*
 		Initial state of the tree:
@@ -195,7 +189,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[0])
 
 		var aResult StatementResult
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
 				Kind: Delete,
@@ -247,7 +241,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[17], rows[18], rows[19])
 
 		var aResult StatementResult
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
 				Kind: Delete,
@@ -297,7 +291,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[2], rows[4], rows[6])
 
 		var aResult StatementResult
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
 				Kind: Delete,
@@ -350,7 +344,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[9], rows[11], rows[13], rows[15])
 
 		var aResult StatementResult
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
 				Kind: Delete,
@@ -396,7 +390,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[3], rows[12], rows[5])
 
 		var aResult StatementResult
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
 				Kind: Delete,
@@ -447,7 +441,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[14])
 
 		var aResult StatementResult
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
 				Kind: Delete,
@@ -493,7 +487,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		ids := rowIDs(rows[1], rows[7], rows[8], rows[10], rows[16])
 
 		var aResult StatementResult
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
 				Kind: Delete,
@@ -551,10 +545,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		return aTable.Insert(ctx, stmt)
-	}, TxCommitter{aPager, nil})
-	require.NoError(t, err)
+	mustInsert(t, ctx, aTable, txManager, aPager, stmt)
 
 	//fmt.Println("BEFORE")
 	//require.NoError(t, aTable.print())
@@ -563,7 +554,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	assert.Equal(t, 336, int(aPager.TotalPages()))
 
 	var aResult StatementResult
-	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		var err error
 		aResult, err = aTable.Delete(ctx, Statement{
 			Kind: Delete,
@@ -601,19 +592,16 @@ func TestTable_Delete_Overflow(t *testing.T) {
 	)
 
 	// Batch insert test rows
-	insertStmt := Statement{
+	stmt := Statement{
 		Kind:    Insert,
 		Fields:  fieldsFromColumns(testOverflowColumns...),
 		Inserts: [][]OptionalValue{},
 	}
 	for _, aRow := range rows {
-		insertStmt.Inserts = append(insertStmt.Inserts, aRow.Values)
+		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		return aTable.Insert(ctx, insertStmt)
-	}, TxCommitter{aPager, nil})
-	require.NoError(t, err)
+	mustInsert(t, ctx, aTable, txManager, aPager, stmt)
 
 	require.Equal(t, 4, int(aPager.TotalPages()))
 
@@ -621,7 +609,7 @@ func TestTable_Delete_Overflow(t *testing.T) {
 		ids := rowIDs(rows[0])
 
 		var aResult StatementResult
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
 				Kind: Delete,
@@ -646,7 +634,7 @@ func TestTable_Delete_Overflow(t *testing.T) {
 		ids := rowIDs(rows[1], rows[2])
 
 		var aResult StatementResult
-		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
 			aResult, err = aTable.Delete(ctx, Statement{
 				Kind: Delete,

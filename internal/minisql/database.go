@@ -81,7 +81,7 @@ func (d *Database) init(ctx context.Context) error {
 		d.tables[SchemaTableName] = mainTable
 
 		// And save record of itself
-		if err := mainTable.Insert(ctx, Statement{
+		_, err := mainTable.Insert(ctx, Statement{
 			Kind:      Insert,
 			TableName: mainTable.Name,
 			Columns:   mainTable.Columns,
@@ -95,7 +95,8 @@ func (d *Database) init(ctx context.Context) error {
 					{Value: NewTextPointer([]byte(MainTableSQL)), Valid: true}, // sql
 				},
 			},
-		}); err != nil {
+		})
+		if err != nil {
 			return err
 		}
 
@@ -380,11 +381,12 @@ func (d *Database) executeInsert(ctx context.Context, stmt Statement) (Statement
 	}
 	d.dbLock.RUnlock()
 
-	if err := aTable.Insert(ctx, stmt); err != nil {
+	aResult, err := aTable.Insert(ctx, stmt)
+	if err != nil {
 		return StatementResult{}, err
 	}
 
-	return StatementResult{RowsAffected: len(stmt.Inserts)}, nil
+	return aResult, nil
 }
 
 func (d *Database) executeSelect(ctx context.Context, stmt Statement) (StatementResult, error) {
@@ -704,7 +706,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 
 func (d *Database) insertIntoMainTable(ctx context.Context, aType SchemaType, name, tableName string, rootIdx PageIndex, ddl string) error {
 	mainTable := d.tables[SchemaTableName]
-	return mainTable.Insert(ctx, Statement{
+	_, err := mainTable.Insert(ctx, Statement{
 		Kind:      Insert,
 		TableName: mainTable.Name,
 		Columns:   mainTable.Columns,
@@ -719,6 +721,7 @@ func (d *Database) insertIntoMainTable(ctx context.Context, aType SchemaType, na
 			},
 		},
 	})
+	return err
 }
 
 func (d *Database) deleteFromMainTable(ctx context.Context, aType SchemaType, name string) error {

@@ -5,42 +5,42 @@ import (
 	"fmt"
 )
 
-func (t *Table) Insert(ctx context.Context, stmt Statement) error {
+func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, error) {
 	stmt.TableName = t.Name
 	stmt.Columns = t.Columns
 
 	if stmt.Kind != Insert {
-		return fmt.Errorf("invalid statement kind for INSERT: %v", stmt.Kind)
+		return StatementResult{}, fmt.Errorf("invalid statement kind for INSERT: %v", stmt.Kind)
 	}
 
 	var err error
 	if stmt, err = stmt.Prepare(t.clock()); err != nil {
-		return err
+		return StatementResult{}, err
 	}
 
 	if err := stmt.Validate(t); err != nil {
-		return err
+		return StatementResult{}, err
 	}
 
 	aCursor, nextRowID, err := t.SeekNextRowID(ctx, t.GetRootPageIdx())
 	if err != nil {
-		return err
+		return StatementResult{}, err
 	}
 
 	for i, values := range stmt.Inserts {
 		if t.HasPrimaryKey() {
 			if t.PrimaryKey.Index == nil {
-				return fmt.Errorf("table %s has primary key but no Btree index instance", t.Name)
+				return StatementResult{}, fmt.Errorf("table %s has primary key but no Btree index instance", t.Name)
 			}
 
 			pkValue, ok := stmt.InsertForColumn(t.PrimaryKey.Column.Name, i)
 			if !ok {
-				return fmt.Errorf("failed to get value for primary key %s", t.PrimaryKey.Name)
+				return StatementResult{}, fmt.Errorf("failed to get value for primary key %s", t.PrimaryKey.Name)
 			}
 
 			insertedPrimaryKey, err := t.insertPrimaryKey(ctx, pkValue, nextRowID)
 			if err != nil {
-				return err
+				return StatementResult{}, err
 			}
 
 			// Update statement with autoincremented primary key value
@@ -50,31 +50,31 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 
 		for _, uniqueIndex := range t.UniqueIndexes {
 			if uniqueIndex.Index == nil {
-				return fmt.Errorf("table %s has unique index %s but no Btree index instance", t.Name, uniqueIndex.Name)
+				return StatementResult{}, fmt.Errorf("table %s has unique index %s but no Btree index instance", t.Name, uniqueIndex.Name)
 			}
 
 			indexValue, ok := stmt.InsertForColumn(uniqueIndex.Column.Name, i)
 			if !ok {
-				return fmt.Errorf("failed to get value for unique index %s", uniqueIndex.Name)
+				return StatementResult{}, fmt.Errorf("failed to get value for unique index %s", uniqueIndex.Name)
 			}
 
 			if err := t.insertUniqueIndexKey(ctx, uniqueIndex, indexValue, nextRowID); err != nil {
-				return err
+				return StatementResult{}, err
 			}
 		}
 
 		for _, secondaryIndex := range t.SecondaryIndexes {
 			if secondaryIndex.Index == nil {
-				return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
+				return StatementResult{}, fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
 			}
 
 			indexValue, ok := stmt.InsertForColumn(secondaryIndex.Column.Name, i)
 			if !ok {
-				return fmt.Errorf("failed to get value for secondary index %s", secondaryIndex.Name)
+				return StatementResult{}, fmt.Errorf("failed to get value for secondary index %s", secondaryIndex.Name)
 			}
 
 			if err := t.insertSecondaryIndexKey(ctx, secondaryIndex, indexValue, nextRowID); err != nil {
-				return err
+				return StatementResult{}, err
 			}
 		}
 
@@ -86,12 +86,12 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 
 		aPage, err := t.pager.ModifyPage(ctx, aCursor.PageIdx)
 		if err != nil {
-			return fmt.Errorf("insert: %w", err)
+			return StatementResult{}, fmt.Errorf("insert: %w", err)
 		}
 
 		// Must be leaf node
 		if aPage.LeafNode == nil {
-			return fmt.Errorf("trying to insert into non leaf node")
+			return StatementResult{}, fmt.Errorf("trying to insert into non leaf node")
 		}
 
 		t.logger.Sugar().With(
@@ -102,12 +102,12 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 
 		if aCursor.CellIdx < aPage.LeafNode.Header.Cells {
 			if aPage.LeafNode.Cells[aCursor.CellIdx].Key == nextRowID {
-				return fmt.Errorf("duplicate key %d", nextRowID)
+				return StatementResult{}, fmt.Errorf("duplicate key %d", nextRowID)
 			}
 		}
 
 		if err := aCursor.LeafNodeInsert(ctx, nextRowID, aRow); err != nil {
-			return err
+			return StatementResult{}, err
 		}
 
 		if i == len(stmt.Inserts)-1 {
@@ -119,9 +119,10 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) error {
 		// new cursor
 		aCursor, nextRowID, err = t.SeekNextRowID(ctx, t.GetRootPageIdx())
 		if err != nil {
-			return err
+			return StatementResult{}, err
 		}
 	}
 
-	return nil
+	// TODO - set LastInsertId
+	return StatementResult{RowsAffected: len(stmt.Inserts)}, nil
 }

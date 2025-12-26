@@ -65,7 +65,8 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return aTable.Insert(ctx, stmt)
+		_, err = aTable.Insert(ctx, stmt)
+		return err
 	}, TxCommitter{aPager, nil})
 	require.NoError(t, err)
 

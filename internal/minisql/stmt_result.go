@@ -55,6 +55,11 @@ func (i *Iterator) Next(ctx context.Context) bool {
 	return true
 }
 
+func (i *Iterator) Close() error {
+	i.end = true
+	return nil
+}
+
 func (i *Iterator) Err() error {
 	return i.err
 }
@@ -63,4 +68,5 @@ type StatementResult struct {
 	Columns      []Column
 	Rows         Iterator
 	RowsAffected int
+	LastInsertId int64
 }
