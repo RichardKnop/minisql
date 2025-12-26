@@ -44,6 +44,27 @@ Each row has an internal row ID which is an unsigned 64 bit integer starting at 
 
 Moreover, each row starts with 64 bit null mask which determines which values are NULL. Because of the NULL bit mask being an unsigned 64 bit integer, there is a limit of `maximum 64 columns per table`.
 
+## Concurrency
+
+MiniSQL uses `Optimistic Concurrency Control` or `OCC`. It is close to PostgreSQL's [SERIALIZABLE isolation](https://www.postgresql.org/docs/current/transaction-iso.html#XACT-SERIALIZABLE) Transaction manager follows a simple process:
+
+1. Track read versions - Record which version of each page was read
+2. Check at commit time - Verify no pages were modified during the transaction
+3. Abort on conflict - If a page changed, abort with ErrTxConflict
+
+You can use `ErrTxConflict` to control whether to retry because of a tx serialization error or to return error.
+
+SQlite uses a `snapshot isolation` with `MVCC` (`Multi-Version Concurrency Control`). Read how [SQLite handles isolation](https://sqlite.org/isolation.html). I have chosen a basic OCC model for now for its simplicity.
+
+Example of a snapshot isolation:
+
+```
+Time 0: Read TX1 starts, sees version V1
+Time 1: Write TX2 modifies page and commits → creates version V2
+Time 2: TX1 continues reading, still sees V1 (not V2!)
+Time 3: TX1 completes successfully
+```
+
 ## System Table
 
 All tables and indexes are tracked in the system table `minisql_schema`. For empty database, it would contain only its own reference:
@@ -203,7 +224,11 @@ if err := rows.Err(); err != nil {
 Insert test rows:
 
 ```go
-aResult, err := db.ExecContext(context.Background(), `insert into users("email", "name", "age") values('Danny_Mason2966@xqj6f.tech', 'Danny Mason', 35),
+tx, err := s.db.Begin()
+if err != nil {
+	return err
+}
+aResult, err := tx.ExecContext(context.Background(), `insert into users("email", "name", "age") values('Danny_Mason2966@xqj6f.tech', 'Danny Mason', 35),
 ('Johnathan_Walker250@ptr6k.page', 'Johnathan Walker', 32),
 ('Tyson_Weldon2108@zynuu.video', 'Tyson Weldon', 27),
 ('Mason_Callan9524@bu2lo.edu', 'Mason Callan', 19),
@@ -221,6 +246,12 @@ if err != nil {
 	return err
 }
 // rowsAffected = 10
+if err := tx.Commit(); err != nil {
+	if errors.Is(err, minisql.ErrTxConflict) {
+		// transaction conflict, you might want to retry here
+	}
+	return err
+}
 ```
 
 When trying to insert a duplicate primary key, you will get an error:
