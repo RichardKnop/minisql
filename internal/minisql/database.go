@@ -465,7 +465,7 @@ func (d *Database) executeDropTable(ctx context.Context, stmt Statement) (Statem
 }
 
 func (d *Database) executeCreateIndex(ctx context.Context, stmt Statement) (StatementResult, error) {
-	// Only one CREATE/DROP operation can happen at a time
+	// Only allow one write operation at a time
 	d.dbLock.Lock()
 	defer d.dbLock.Unlock()
 
@@ -477,7 +477,7 @@ func (d *Database) executeCreateIndex(ctx context.Context, stmt Statement) (Stat
 }
 
 func (d *Database) executeDropIndex(ctx context.Context, stmt Statement) (StatementResult, error) {
-	// Only one CREATE/DROP operation can happen at a time
+	// Only allow one write operation at a time
 	d.dbLock.Lock()
 	defer d.dbLock.Unlock()
 
@@ -493,13 +493,14 @@ func (d *Database) executeInsert(ctx context.Context, stmt Statement) (Statement
 		return StatementResult{}, fmt.Errorf("inserts into system table %s are not allowed", SchemaTableName)
 	}
 
-	d.dbLock.RLock()
+	// Only allow one write operation at a time
+	d.dbLock.Lock()
+	defer d.dbLock.Unlock()
+
 	aTable, ok := d.tables[stmt.TableName]
 	if !ok {
-		d.dbLock.RUnlock()
 		return StatementResult{}, errTableDoesNotExist
 	}
-	d.dbLock.RUnlock()
 
 	aResult, err := aTable.Insert(ctx, stmt)
 	if err != nil {
@@ -510,6 +511,7 @@ func (d *Database) executeInsert(ctx context.Context, stmt Statement) (Statement
 }
 
 func (d *Database) executeSelect(ctx context.Context, stmt Statement) (StatementResult, error) {
+	// Allow concurrent reads
 	d.dbLock.RLock()
 	aTable, ok := d.tables[stmt.TableName]
 	if !ok {
@@ -531,13 +533,14 @@ func (d *Database) executeUpdate(ctx context.Context, stmt Statement) (Statement
 		return StatementResult{}, fmt.Errorf("updates to system table %s are not allowed", SchemaTableName)
 	}
 
-	d.dbLock.RLock()
+	// Only allow one write operation at a time
+	d.dbLock.Lock()
+	defer d.dbLock.Unlock()
+
 	aTable, ok := d.tables[stmt.TableName]
 	if !ok {
-		d.dbLock.RUnlock()
 		return StatementResult{}, errTableDoesNotExist
 	}
-	d.dbLock.RUnlock()
 
 	aResult, err := aTable.Update(ctx, stmt)
 	if err != nil {
@@ -552,13 +555,14 @@ func (d *Database) executeDelete(ctx context.Context, stmt Statement) (Statement
 		return StatementResult{}, fmt.Errorf("deletes from system table %s are not allowed", SchemaTableName)
 	}
 
-	d.dbLock.RLock()
+	// Only allow one write operation at a time
+	d.dbLock.Lock()
+	defer d.dbLock.Unlock()
+
 	aTable, ok := d.tables[stmt.TableName]
 	if !ok {
-		d.dbLock.RUnlock()
 		return StatementResult{}, errTableDoesNotExist
 	}
-	d.dbLock.RUnlock()
 
 	aResult, err := aTable.Delete(ctx, stmt)
 	if err != nil {
@@ -818,7 +822,44 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement) error {
 	}
 	secondaryIndex.Index = createdIndex
 
+	// Scan table and populate index
+	if err := d.populateIndex(ctx, aTable, secondaryIndex); err != nil {
+		return err
+	}
+
 	tx.DDLChanges = tx.DDLChanges.CreatedIndex(aTable.Name, secondaryIndex)
+
+	return nil
+}
+
+func (d *Database) populateIndex(ctx context.Context, aTable *Table, secondaryIndex SecondaryIndex) error {
+
+	aResult, err := aTable.Select(ctx, Statement{
+		Kind:   Select,
+		Fields: fieldsFromColumns(aTable.Columns...),
+	})
+	if err != nil {
+		return err
+	}
+
+	for aResult.Rows.Next(ctx) {
+		aRow := aResult.Rows.Row()
+		keyValue, ok := aRow.GetValue(secondaryIndex.Column.Name)
+		if !ok {
+			return fmt.Errorf("column %s does not exist on row in table %s", secondaryIndex.Column.Name, aTable.Name)
+		}
+		if !keyValue.Valid {
+			continue // skip NULLs
+		}
+
+		if err := secondaryIndex.Index.Insert(ctx, keyValue.Value, aRow.Key); err != nil {
+			return err
+		}
+	}
+
+	if err := aResult.Rows.Err(); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -898,32 +939,6 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 	return nil
 }
 
-func (d *Database) checkSchemaExists(ctx context.Context, aType SchemaType, name string) (Schema, bool, error) {
-	schemaResults, err := d.tables[SchemaTableName].Select(ctx, Statement{
-		Kind:   Select,
-		Fields: mainTableFields,
-		Conditions: OneOrMore{
-			{
-				FieldIsEqual("type", OperandInteger, int64(aType)),
-				FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte(name))),
-			},
-		},
-	})
-	if err != nil {
-		return Schema{}, false, err
-	}
-
-	if !schemaResults.Rows.Next(ctx) {
-		return Schema{}, false, nil
-	}
-	aRow := schemaResults.Rows.Row()
-	if err := schemaResults.Rows.Err(); err != nil {
-		return Schema{}, false, err
-	}
-
-	return scanSchema(aRow), true, nil
-}
-
 func (d *Database) createPrimaryKey(ctx context.Context, aTable *Table, aColumn Column) (BTreeIndex, error) {
 	d.logger.Sugar().With("column", aColumn.Name).Debug("creating primary key")
 
@@ -994,6 +1009,32 @@ func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, aTa
 	}
 
 	return createdIndex, nil
+}
+
+func (d *Database) checkSchemaExists(ctx context.Context, aType SchemaType, name string) (Schema, bool, error) {
+	schemaResults, err := d.tables[SchemaTableName].Select(ctx, Statement{
+		Kind:   Select,
+		Fields: mainTableFields,
+		Conditions: OneOrMore{
+			{
+				FieldIsEqual("type", OperandInteger, int64(aType)),
+				FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte(name))),
+			},
+		},
+	})
+	if err != nil {
+		return Schema{}, false, err
+	}
+
+	if !schemaResults.Rows.Next(ctx) {
+		return Schema{}, false, nil
+	}
+	aRow := schemaResults.Rows.Row()
+	if err := schemaResults.Rows.Err(); err != nil {
+		return Schema{}, false, err
+	}
+
+	return scanSchema(aRow), true, nil
 }
 
 func (d *Database) insertIntoSystemTable(ctx context.Context, aType SchemaType, name, tableName string, rootIdx PageIndex, ddl string) error {
