@@ -11,6 +11,7 @@ type DBFile interface {
 	io.ReadSeeker
 	io.ReaderAt
 	io.WriterAt
+	io.Closer
 }
 
 type PageUnmarshaler func(pageIdx PageIndex, buf []byte) (*Page, error)
@@ -66,6 +67,10 @@ func NewPager(file DBFile, pageSize int) (*pagerImpl, error) {
 	}
 
 	return aPager, nil
+}
+
+func (p *pagerImpl) Close() error {
+	return p.file.Close()
 }
 
 func (p *pagerImpl) TotalPages() uint32 {

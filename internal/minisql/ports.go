@@ -18,6 +18,7 @@ type Pager interface {
 type Flusher interface {
 	TotalPages() uint32
 	Flush(context.Context, PageIndex) error
+	Close() error
 }
 
 type PageSaver interface {

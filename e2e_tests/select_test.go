@@ -144,12 +144,16 @@ values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:2
 		}
 	})
 
+	var (
+		twentiethCentury = time.Date(1999, 7, 19, 22, 11, 56, 112456*1000, time.UTC).Format("2006-01-02 15:04:05")
+		aMinuteAgo       = time.Now().Add(-1 * time.Minute).UTC().Format("2006-01-02 15:04:05")
+		aMinuteLater     = time.Now().Add(1 * time.Minute).UTC().Format("2006-01-02 15:04:05")
+	)
+
 	s.Run("Selecting based on timestamp column", func() {
-		twentiethCentury := time.Date(1999, 7, 19, 22, 11, 56, 112456*1000, time.UTC).Format("2006-01-02 15:04:05")
 		users := s.collectUsers(`select * from users where created < '` + twentiethCentury + `';`)
 		s.Require().Empty(users)
 
-		aMinuteAgo := time.Now().Add(-1 * time.Minute).UTC().Format("2006-01-02 15:04:05")
 		users = s.collectUsers(`select * from users where created < '` + aMinuteAgo + `';`)
 		s.Require().Len(users, 2)
 		s.Equal(user{
@@ -165,7 +169,6 @@ values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:2
 			Created: time.Date(2024, 1, 2, 15, 30, 27, 0, time.UTC),
 		}, users[1])
 
-		aMinuteLater := time.Now().Add(1 * time.Minute).UTC().Format("2006-01-02 15:04:05")
 		expectedIDs := []int64{101, 102, 103, 104, 105, 106, 107, 108}
 		users = s.collectUsers(`select * from users where created > '` + aMinuteAgo + `' and created < '` + aMinuteLater + `';`)
 		s.Require().Len(users, 8)
@@ -180,11 +183,9 @@ values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:2
 		_, err = s.db.Exec(createUsersTimestampIndexSQL)
 		s.Require().NoError(err)
 
-		twentiethCentury := time.Date(1999, 7, 19, 22, 11, 56, 112456*1000, time.UTC).Format("2006-01-02 15:04:05")
 		users := s.collectUsers(`select * from users where created < '` + twentiethCentury + `';`)
 		s.Require().Empty(users)
 
-		aMinuteAgo := time.Now().Add(-1 * time.Minute).UTC().Format("2006-01-02 15:04:05")
 		users = s.collectUsers(`select * from users where created < '` + aMinuteAgo + `';`)
 		s.Require().Len(users, 2)
 		s.Equal(user{
@@ -200,7 +201,6 @@ values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:2
 			Created: time.Date(2024, 1, 2, 15, 30, 27, 0, time.UTC),
 		}, users[1])
 
-		aMinuteLater := time.Now().Add(1 * time.Minute).UTC().Format("2006-01-02 15:04:05")
 		expectedIDs := []int64{101, 102, 103, 104, 105, 106, 107, 108}
 		users = s.collectUsers(`select * from users where created > '` + aMinuteAgo + `' and created < '` + aMinuteLater + `';`)
 		s.Require().Len(users, 8)

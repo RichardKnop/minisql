@@ -22,7 +22,7 @@ func TestNewDatabase(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 1)
-	assert.Equal(t, testDbName, aDatabase.Name)
+	assert.Equal(t, testDbName, aDatabase.FileName)
 	assert.Equal(t, SchemaTableName, aDatabase.tables[SchemaTableName].Name)
 	assert.Equal(t, PageIndex(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
 	assert.Contains(t, aDatabase.ListTableNames(ctx), SchemaTableName)
@@ -201,7 +201,7 @@ func TestDatabase_CreateTable(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Len(t, aDatabase.tables, 1)
-		assert.Equal(t, testDbName, aDatabase.Name)
+		assert.Equal(t, testDbName, aDatabase.FileName)
 		assert.Equal(t, SchemaTableName, aDatabase.tables[SchemaTableName].Name)
 		assert.Equal(t, PageIndex(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
 		assert.Equal(t, []string{SchemaTableName}, aDatabase.ListTableNames(ctx))
@@ -279,7 +279,7 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Len(t, aDatabase.tables, 1)
-		assert.Equal(t, testDbName, aDatabase.Name)
+		assert.Equal(t, testDbName, aDatabase.FileName)
 		assert.Equal(t, SchemaTableName, aDatabase.tables[SchemaTableName].Name)
 		assert.Equal(t, PageIndex(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
 		assert.Equal(t, []string{SchemaTableName}, aDatabase.ListTableNames(ctx))
@@ -360,7 +360,7 @@ func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Len(t, aDatabase.tables, 1)
-		assert.Equal(t, testDbName, aDatabase.Name)
+		assert.Equal(t, testDbName, aDatabase.FileName)
 		assert.Equal(t, SchemaTableName, aDatabase.tables[SchemaTableName].Name)
 		assert.Equal(t, PageIndex(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
 		assert.Equal(t, []string{SchemaTableName}, aDatabase.ListTableNames(ctx))

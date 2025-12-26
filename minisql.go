@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
-	"io"
 	"os"
 	"sync"
 
@@ -56,14 +55,14 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 		d.parser = parser.New()
 	}
 
-	dbFile, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE, 0600)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database file: %w", err)
-	}
-
 	// Check if database is already open
 	db, exists := d.databases[name]
 	if !exists {
+		dbFile, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE, 0600)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open database file: %w", err)
+		}
+
 		// Create new database instance
 		pager, err := minisql.NewPager(dbFile, minisql.PageSize)
 		if err != nil {
@@ -87,7 +86,6 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 
 	return &Conn{
 		db:     db,
-		dfFile: dbFile,
 		parser: d.parser,
 		logger: d.logger,
 	}, nil
@@ -96,7 +94,6 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 // Conn implements the database/sql/driver.Conn interface.
 type Conn struct {
 	db          *minisql.Database
-	dfFile      io.Closer
 	parser      minisql.Parser
 	transaction *minisql.Transaction
 	logger      *zap.Logger
@@ -129,7 +126,7 @@ func (c *Conn) Close() error {
 		c.transaction = nil
 	}
 
-	return c.dfFile.Close()
+	return c.db.Close()
 }
 
 // Prepare returns a prepared statement, bound to this connection.
