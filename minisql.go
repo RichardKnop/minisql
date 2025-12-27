@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -57,38 +58,56 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 
 	// Check if database is already open
 	db, exists := d.databases[name]
-	if !exists {
-		dbFile, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE, 0600)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open database file: %w", err)
-		}
+	if exists {
+		return &Conn{
+			db:     db,
+			parser: d.parser,
+			logger: d.logger,
+		}, nil
+	}
 
-		// Create new database instance
-		pager, err := minisql.NewPager(dbFile, minisql.PageSize)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create pager: %w", err)
-		}
-
-		db, err = minisql.NewDatabase(
-			context.Background(),
-			d.logger,
-			name,
-			d.parser,
-			pager,
-			pager,
-		)
-		if err != nil {
+	db, err := d.newDB(name)
+	if err != nil {
+		// If journal recovery was performed, try reopening the DB
+		if !errors.Is(err, minisql.ErrRecoveredFromJournal) {
 			return nil, fmt.Errorf("failed to open database: %w", err)
 		}
-
-		d.databases[name] = db
+		db, err = d.newDB(name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to reopen database after recovery: %w", err)
+		}
 	}
+
+	d.databases[name] = db
 
 	return &Conn{
 		db:     db,
 		parser: d.parser,
 		logger: d.logger,
 	}, nil
+}
+
+func (d *Driver) newDB(name string) (*minisql.Database, error) {
+	// Open or create database file
+	dbFile, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database file: %w", err)
+	}
+
+	// Create new database instance
+	pager, err := minisql.NewPager(dbFile, minisql.PageSize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create pager: %w", err)
+	}
+
+	return minisql.NewDatabase(
+		context.Background(),
+		d.logger,
+		name,
+		d.parser,
+		pager,
+		pager,
+	)
 }
 
 // Conn implements the database/sql/driver.Conn interface.

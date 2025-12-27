@@ -11,13 +11,13 @@ import (
 )
 
 func TestTable_Select_UniqueIndex(t *testing.T) {
-	aPager := initTest(t)
+	aPager, dbFile := initTest(t)
 
 	var (
 		ctx        = context.Background()
 		rows       = gen.RowsWithUniqueIndex(38)
 		tablePager = aPager.ForTable(testColumnsWithUniqueIndex)
-		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
+		txManager  = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
 		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		aTable     *Table
 		indexName  = uniqueIndexName(testTableName, "email")

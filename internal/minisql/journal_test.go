@@ -108,8 +108,9 @@ func TestJournal_NoDBHeader(t *testing.T) {
 	})
 
 	t.Run("restore journal without db header", func(t *testing.T) {
-		err := RecoverFromJournal(dbFile.Name(), PageSize)
+		recovered, err := RecoverFromJournal(dbFile.Name(), PageSize)
 		require.NoError(t, err)
+		assert.True(t, recovered)
 
 		restoredDbFile, err := os.Open(dbFile.Name())
 		require.NoError(t, err)

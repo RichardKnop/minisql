@@ -77,6 +77,8 @@ func TestTransactionManager_Commit(t *testing.T) {
 
 		// Setup expectations
 		if txManager.journalEnabled {
+			originalDBHeader := DatabaseHeader{FirstFreePage: 1, FreePageCount: 9}
+			pagerMock.On("GetHeader", ctx).Return(originalDBHeader, nil).Once()
 			originalPage := &Page{Index: PageIndex(4), LeafNode: NewLeafNode()}
 			pagerMock.On("GetPage", ctx, PageIndex(4)).Return(originalPage, nil).Once()
 		}

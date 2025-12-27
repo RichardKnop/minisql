@@ -14,14 +14,14 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		In this test we will be deleting from a root leaf node only tree.
 	*/
 	var (
-		aPager     = initTest(t)
-		ctx        = context.Background()
-		numRows    = 5
-		rows       = gen.MediumRows(numRows)
-		tablePager = aPager.ForTable(testMediumColumns)
-		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
-		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable     = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0)
+		aPager, dbFile = initTest(t)
+		ctx            = context.Background()
+		numRows        = 5
+		rows           = gen.MediumRows(numRows)
+		tablePager     = aPager.ForTable(testMediumColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0)
 	)
 
 	// Set some values to NULL so we can test selecting/filtering on NULLs
@@ -102,14 +102,14 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 
 func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	var (
-		aPager     = initTest(t)
-		ctx        = context.Background()
-		numRows    = 20
-		rows       = gen.MediumRows(numRows)
-		tablePager = aPager.ForTable(testMediumColumns)
-		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
-		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable     = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0)
+		aPager, dbFile = initTest(t)
+		ctx            = context.Background()
+		numRows        = 20
+		rows           = gen.MediumRows(numRows)
+		tablePager     = aPager.ForTable(testMediumColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0)
 	)
 
 	// Batch insert test rows
@@ -444,14 +444,14 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	var (
-		aPager     = initTest(t)
-		ctx        = context.Background()
-		numRows    = 1000
-		rows       = gen.MediumRows(numRows)
-		tablePager = aPager.ForTable(testMediumColumns)
-		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
-		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable     = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0)
+		aPager, dbFile = initTest(t)
+		ctx            = context.Background()
+		numRows        = 1000
+		rows           = gen.MediumRows(numRows)
+		tablePager     = aPager.ForTable(testMediumColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0)
 	)
 	// aTable.maximumICells = 5 // for testing purposes only, normally 340
 
@@ -488,13 +488,13 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 
 func TestTable_Delete_Overflow(t *testing.T) {
 	var (
-		aPager     = initTest(t)
-		ctx        = context.Background()
-		tablePager = aPager.ForTable(testOverflowColumns)
-		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
-		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable     = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0)
-		rows       = gen.OverflowRows(3, []uint32{
+		aPager, dbFile = initTest(t)
+		ctx            = context.Background()
+		tablePager     = aPager.ForTable(testOverflowColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0)
+		rows           = gen.OverflowRows(3, []uint32{
 			MaxInlineVarchar,          // inline text
 			MaxInlineVarchar + 100,    // text overflows to 1 page
 			MaxOverflowPageData + 100, // text overflows to multiple pages

@@ -11,14 +11,13 @@ import (
 
 func TestTable_Update_PrimaryKey(t *testing.T) {
 	var (
-		aPager     = initTest(t)
-		ctx        = context.Background()
-		tablePager = aPager.ForTable(testColumnsWithPrimaryKey)
-		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
-		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
-
-		rows   = gen.RowsWithPrimaryKey(10)
-		aTable *Table
+		aPager, dbFile = initTest(t)
+		ctx            = context.Background()
+		tablePager     = aPager.ForTable(testColumnsWithPrimaryKey)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		rows           = gen.RowsWithPrimaryKey(10)
+		aTable         *Table
 	)
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {

@@ -11,18 +11,18 @@ import (
 
 func TestTable_Insert_UniqueIndex(t *testing.T) {
 	var (
-		aPager       = initTest(t)
-		ctx          = context.Background()
-		tablePager   = aPager.ForTable(testColumnsWithUniqueIndex)
-		txManager    = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
-		txPager      = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		rows         = gen.RowsWithUniqueIndex(100)
-		aTable       *Table
-		indexName    = uniqueIndexName(testTableName, "email")
-		indexPager   = aPager.ForIndex(Varchar, true)
-		txIndexPager = NewTransactionalPager(
+		aPager, dbFile = initTest(t)
+		ctx            = context.Background()
+		tablePager     = aPager.ForTable(testColumnsWithUniqueIndex)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		rows           = gen.RowsWithUniqueIndex(100)
+		aTable         *Table
+		indexName      = uniqueIndexName(testTableName, "email")
+		indexPager     = aPager.ForIndex(Varchar, true)
+		txIndexPager   = NewTransactionalPager(
 			indexPager,
-			NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(indexPager), aPager, nil),
+			NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil),
 			testTableName,
 			indexName,
 		)

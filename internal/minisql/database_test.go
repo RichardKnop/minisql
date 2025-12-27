@@ -15,14 +15,14 @@ const (
 )
 
 func TestNewDatabase(t *testing.T) {
-	aPager := initTest(t)
+	aPager, dbFile := initTest(t)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, nil, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, aPager, aPager)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 1)
-	assert.Equal(t, testDbName, aDatabase.GetFileName())
+	assert.Equal(t, dbFile.Name(), aDatabase.GetFileName())
 	assert.Equal(t, SchemaTableName, aDatabase.tables[SchemaTableName].Name)
 	assert.Equal(t, PageIndex(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
 	assert.Contains(t, aDatabase.ListTableNames(ctx), SchemaTableName)
@@ -30,13 +30,13 @@ func TestNewDatabase(t *testing.T) {
 
 func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 	var (
-		aPager          = initTest(t)
+		aPager, dbFile  = initTest(t)
 		mockParser      = new(MockParser)
 		ctx             = context.Background()
 		uniqueIndexName = uniqueIndexName(testTableName3, "email")
 	)
 
-	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, mockParser, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, aPager, aPager)
 	require.NoError(t, err)
 
 	// Let's create 4 tables:
@@ -73,7 +73,7 @@ func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 	mockParser.On("Parse", mock.Anything, stmt2.CreateTableDDL()).Return([]Statement{stmt2}, nil)
 	mockParser.On("Parse", mock.Anything, stmt3.CreateTableDDL()).Return([]Statement{stmt3}, nil)
 
-	aDatabase, err = NewDatabase(ctx, testLogger, testDbName, mockParser, aPager, aPager)
+	aDatabase, err = NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, aPager, aPager)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 4)
@@ -147,10 +147,10 @@ func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 }
 
 func TestDatabase_CreateTable(t *testing.T) {
-	aPager := initTest(t)
+	aPager, dbFile := initTest(t)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, nil, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, aPager, aPager)
 	require.NoError(t, err)
 
 	t.Run("Create table", func(t *testing.T) {
@@ -201,7 +201,7 @@ func TestDatabase_CreateTable(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Len(t, aDatabase.tables, 1)
-		assert.Equal(t, testDbName, aDatabase.GetFileName())
+		assert.Equal(t, dbFile.Name(), aDatabase.GetFileName())
 		assert.Equal(t, SchemaTableName, aDatabase.tables[SchemaTableName].Name)
 		assert.Equal(t, PageIndex(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
 		assert.Equal(t, []string{SchemaTableName}, aDatabase.ListTableNames(ctx))
@@ -216,10 +216,10 @@ func TestDatabase_CreateTable(t *testing.T) {
 }
 
 func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
-	aPager := initTest(t)
+	aPager, dbFile := initTest(t)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, nil, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, aPager, aPager)
 	require.NoError(t, err)
 
 	t.Run("Create table", func(t *testing.T) {
@@ -279,7 +279,7 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Len(t, aDatabase.tables, 1)
-		assert.Equal(t, testDbName, aDatabase.GetFileName())
+		assert.Equal(t, dbFile.Name(), aDatabase.GetFileName())
 		assert.Equal(t, SchemaTableName, aDatabase.tables[SchemaTableName].Name)
 		assert.Equal(t, PageIndex(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
 		assert.Equal(t, []string{SchemaTableName}, aDatabase.ListTableNames(ctx))
@@ -294,11 +294,11 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 }
 
 func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
-	aPager := initTest(t)
+	aPager, dbFile := initTest(t)
 	indexName := uniqueIndexName(testTableName, "email")
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, nil, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, aPager, aPager)
 	require.NoError(t, err)
 
 	t.Run("Create table", func(t *testing.T) {
@@ -360,7 +360,7 @@ func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Len(t, aDatabase.tables, 1)
-		assert.Equal(t, testDbName, aDatabase.GetFileName())
+		assert.Equal(t, dbFile.Name(), aDatabase.GetFileName())
 		assert.Equal(t, SchemaTableName, aDatabase.tables[SchemaTableName].Name)
 		assert.Equal(t, PageIndex(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
 		assert.Equal(t, []string{SchemaTableName}, aDatabase.ListTableNames(ctx))
@@ -376,12 +376,12 @@ func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
 
 func TestDatabase_CreateIndex(t *testing.T) {
 	var (
-		aPager     = initTest(t)
-		mockParser = new(MockParser)
-		ctx        = context.Background()
+		aPager, dbFile = initTest(t)
+		mockParser     = new(MockParser)
+		ctx            = context.Background()
 	)
 
-	aDatabase, err := NewDatabase(ctx, testLogger, testDbName, mockParser, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, aPager, aPager)
 	require.NoError(t, err)
 
 	// First create a test table
@@ -509,7 +509,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 	mock.AssertExpectationsForObjects(t, mockParser)
 }
 
-func initTest(t *testing.T) *pagerImpl {
+func initTest(t *testing.T) (*pagerImpl, *os.File) {
 	t.Parallel()
 
 	tempFile, err := os.CreateTemp("", testDbName)
@@ -519,7 +519,7 @@ func initTest(t *testing.T) *pagerImpl {
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
 
-	return aPager
+	return aPager, tempFile
 }
 
 func collectMainSchemas(t *testing.T, ctx context.Context, aDatabase *Database) []Schema {

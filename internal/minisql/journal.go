@@ -176,34 +176,34 @@ func (j *RollbackJournal) writeHeader(dbHeaderChanged bool, numPages int) error 
 
 // RecoverFromJournal checks if a journal file exists and recovers the database if needed.
 // This should be called when opening a database.
-func RecoverFromJournal(dbPath string, pageSize int) error {
+func RecoverFromJournal(dbPath string, pageSize int) (bool, error) {
 	journalPath := dbPath + "-journal"
 
 	// Check if journal exists
 	journalFile, err := os.Open(journalPath)
 	if os.IsNotExist(err) {
 		// No journal = clean shutdown, nothing to recover
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("open journal: %w", err)
+		return false, fmt.Errorf("open journal: %w", err)
 	}
 	defer journalFile.Close()
 
 	// Read and validate journal header
 	header, err := readJournalHeader(journalFile)
 	if err != nil {
-		return fmt.Errorf("read journal header: %w", err)
+		return false, fmt.Errorf("read journal header: %w", err)
 	}
 
 	if header.PageSize != uint32(pageSize) {
-		return fmt.Errorf("journal page size mismatch: journal=%d, db=%d", header.PageSize, pageSize)
+		return false, fmt.Errorf("journal page size mismatch: journal=%d, db=%d", header.PageSize, pageSize)
 	}
 
 	// Open database file for writing
 	dbFile, err := os.OpenFile(dbPath, os.O_RDWR, 0644)
 	if err != nil {
-		return fmt.Errorf("open database for recovery: %w", err)
+		return false, fmt.Errorf("open database for recovery: %w", err)
 	}
 	defer dbFile.Close()
 
@@ -211,19 +211,19 @@ func RecoverFromJournal(dbPath string, pageSize int) error {
 	if header.DbHeader {
 		dbHeaderData := make([]byte, RootPageConfigSize)
 		if _, err := io.ReadFull(journalFile, dbHeaderData); err != nil {
-			return fmt.Errorf("read db header: %w", err)
+			return false, fmt.Errorf("read db header: %w", err)
 		}
 
 		// Write original header back to database
 		if _, err := dbFile.WriteAt(dbHeaderData, 0); err != nil {
-			return fmt.Errorf("restore db header: %w", err)
+			return false, fmt.Errorf("restore db header: %w", err)
 		}
 	}
 	for i := uint32(0); i < header.NumPages; i++ {
 		// Read page index
 		indexBuf := make([]byte, 4)
 		if _, err := io.ReadFull(journalFile, indexBuf); err != nil {
-			return fmt.Errorf("read page index %d: %w", i, err)
+			return false, fmt.Errorf("read page index %d: %w", i, err)
 		}
 		pageIdx := unmarshalUint32(indexBuf, 0)
 
@@ -236,7 +236,7 @@ func RecoverFromJournal(dbPath string, pageSize int) error {
 		}
 
 		if _, err := io.ReadFull(journalFile, pageData); err != nil {
-			return fmt.Errorf("read page data %d: %w", i, err)
+			return false, fmt.Errorf("read page data %d: %w", i, err)
 		}
 
 		// Write original page back to database
@@ -245,13 +245,13 @@ func RecoverFromJournal(dbPath string, pageSize int) error {
 			offset += RootPageConfigSize
 		}
 		if _, err := dbFile.WriteAt(pageData, offset); err != nil {
-			return fmt.Errorf("restore page %d: %w", pageIdx, err)
+			return false, fmt.Errorf("restore page %d: %w", pageIdx, err)
 		}
 	}
 
 	// Sync database
 	if err := dbFile.Sync(); err != nil {
-		return fmt.Errorf("sync database after recovery: %w", err)
+		return false, fmt.Errorf("sync database after recovery: %w", err)
 	}
 
 	// Close files before deleting journal
@@ -260,10 +260,10 @@ func RecoverFromJournal(dbPath string, pageSize int) error {
 
 	// Delete journal
 	if err := os.Remove(journalPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("delete journal after recovery: %w", err)
+		return false, fmt.Errorf("delete journal after recovery: %w", err)
 	}
 
-	return nil
+	return true, nil
 }
 
 func readJournalHeader(file *os.File) (*JournalHeader, error) {

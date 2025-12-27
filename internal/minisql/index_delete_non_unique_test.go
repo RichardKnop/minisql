@@ -39,12 +39,12 @@ func (r rowIDsPerKey) AllRowIDs() []RowID {
 
 func TestIndex_NonUnique_Delete(t *testing.T) {
 	var (
-		aPager     = initTest(t)
-		ctx        = context.Background()
-		aColumn    = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager = aPager.ForIndex(aColumn.Kind, true)
-		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(indexPager), aPager, nil)
-		txPager    = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
+		aPager, dbFile = initTest(t)
+		ctx            = context.Background()
+		aColumn        = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager     = aPager.ForIndex(aColumn.Kind, true)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
+		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
 	anIndex, err := NewNonUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, txPager, 0)
 	require.NoError(t, err)

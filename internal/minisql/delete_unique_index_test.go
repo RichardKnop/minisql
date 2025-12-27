@@ -11,14 +11,14 @@ import (
 
 func TestTable_Delete_UniqueIndex(t *testing.T) {
 	var (
-		aPager     = initTest(t)
-		ctx        = context.Background()
-		tablePager = aPager.ForTable(testColumnsWithUniqueIndex)
-		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
-		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		rows       = gen.RowsWithUniqueIndex(10)
-		aTable     *Table
-		indexName  = uniqueIndexName(testTableName, "email")
+		aPager, dbFile = initTest(t)
+		ctx            = context.Background()
+		tablePager     = aPager.ForTable(testColumnsWithUniqueIndex)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		rows           = gen.RowsWithUniqueIndex(10)
+		aTable         *Table
+		indexName      = uniqueIndexName(testTableName, "email")
 	)
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {

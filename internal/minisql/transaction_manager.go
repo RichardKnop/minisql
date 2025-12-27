@@ -34,7 +34,7 @@ func NewTransactionManager(logger *zap.Logger, dbFilePath string, factory TxPage
 		dbFilePath:         dbFilePath,
 		saver:              saver,
 		ddlSaver:           ddlSaver,
-		// journalEnabled:     true,
+		journalEnabled:     JournalEnabled,
 	}
 }
 
