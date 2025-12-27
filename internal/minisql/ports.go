@@ -6,8 +6,10 @@ import (
 
 type PagerFactory interface {
 	ForTable([]Column) Pager
-	ForIndex(kind ColumnKind, keySize uint64, unique bool) Pager
+	ForIndex(kind ColumnKind, unique bool) Pager
 }
+
+type TxPagerFactory func(ctx context.Context, tableName, indexName string) (Pager, error)
 
 type Pager interface {
 	GetPage(context.Context, PageIndex) (*Page, error)

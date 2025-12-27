@@ -6,7 +6,7 @@ type DatabaseHeader struct {
 }
 
 func (h *DatabaseHeader) Size() uint64 {
-	return 100
+	return RootPageConfigSize
 }
 
 func (h *DatabaseHeader) Marshal() ([]byte, error) {

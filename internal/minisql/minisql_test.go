@@ -637,11 +637,11 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				Cells: []Cell{
 					{
 						Key:   1,
-						Value: prefixWithLength(bytes.Repeat([]byte{byte(1)}, 270)),
+						Value: prefixWithLength([]byte("ccc")),
 					},
 					{
 						Key:   2,
-						Value: prefixWithLength(bytes.Repeat([]byte{byte(2)}, 270)),
+						Value: prefixWithLength([]byte("ddd")),
 					},
 				},
 			},
@@ -661,7 +661,7 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				Cells: []Cell{
 					{
 						Key:   5,
-						Value: prefixWithLength(bytes.Repeat([]byte{byte(3)}, 270)),
+						Value: prefixWithLength([]byte("aaa")),
 					},
 				},
 			},
@@ -681,11 +681,11 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				Cells: []Cell{
 					{
 						Key:   12,
-						Value: prefixWithLength(bytes.Repeat([]byte{byte(4)}, 270)),
+						Value: prefixWithLength([]byte("bbb")),
 					},
 					{
 						Key:   18,
-						Value: prefixWithLength(bytes.Repeat([]byte{byte(5)}, 270)),
+						Value: prefixWithLength([]byte("fff")),
 					},
 				},
 			},
@@ -704,7 +704,7 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				Cells: []Cell{
 					{
 						Key:   21,
-						Value: prefixWithLength(bytes.Repeat([]byte{byte(6)}, 270)),
+						Value: prefixWithLength([]byte("ggg")),
 					},
 				},
 			},
@@ -726,9 +726,11 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 	return aRootPage, internalPages, leafPages
 }
 
-func resetMock(aMock *mock.Mock) {
-	aMock.ExpectedCalls = nil
-	aMock.Calls = nil
+func resetMocks(mocks ...*mock.Mock) {
+	for _, aMock := range mocks {
+		aMock.ExpectedCalls = nil
+		aMock.Calls = nil
+	}
 }
 
 func intPtr(i int64) *int64 {

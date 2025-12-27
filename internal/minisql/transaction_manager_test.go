@@ -16,8 +16,8 @@ func TestTransactionManager_Commit(t *testing.T) {
 	t.Run("Read only transaction", func(t *testing.T) {
 		var (
 			ctx       = context.Background()
-			pagerMock = new(MockPageSaver)
-			txManager = NewTransactionManager(zap.NewNop())
+			saverMock = new(MockPageSaver)
+			txManager = NewTransactionManager(zap.NewNop(), testDbName, nil, saverMock, nil)
 		)
 
 		// Setup initial global versions
@@ -36,7 +36,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		tx.ReadSet[3] = 2
 		tx.ReadSet[4] = 1
 
-		err := txManager.CommitTransaction(ctx, tx, TxCommitter{pagerMock, nil})
+		err := txManager.CommitTransaction(ctx, tx)
 		require.NoError(t, err)
 
 		// Global versions should remain unchanged
@@ -45,14 +45,15 @@ func TestTransactionManager_Commit(t *testing.T) {
 		assert.Equal(t, 2, int(txManager.globalPageVersions[3]))
 		assert.Equal(t, 1, int(txManager.globalPageVersions[4]))
 
-		mock.AssertExpectationsForObjects(t, pagerMock)
+		mock.AssertExpectationsForObjects(t, saverMock)
 	})
 
 	t.Run("Write transaction", func(t *testing.T) {
 		var (
 			ctx       = context.Background()
-			pagerMock = new(MockPageSaver)
-			txManager = NewTransactionManager(zap.NewNop())
+			pagerMock = new(MockPager)
+			saverMock = new(MockPageSaver)
+			txManager = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(pagerMock), saverMock, nil)
 		)
 
 		// Setup initial global versions
@@ -72,14 +73,21 @@ func TestTransactionManager_Commit(t *testing.T) {
 		tx.ReadSet[3] = 2
 		tx.ReadSet[4] = 5
 		tx.WriteSet[4] = &Page{Index: PageIndex(4)}
+		tx.WriteInfoSet[4] = WriteInfo{Table: "users", Index: "pk_users"}
 
 		// Setup expectations
-		pagerMock.On("SavePage", ctx, PageIndex(4), tx.WriteSet[4]).Return(nil).Once()
-		pagerMock.On("SaveHeader", ctx, *tx.DbHeaderWrite).Return(nil).Once()
-		pagerMock.On("Flush", ctx, PageIndex(0)).Return(nil).Once()
-		pagerMock.On("Flush", ctx, PageIndex(4)).Return(nil).Once()
+		if txManager.journalEnabled {
+			originalDBHeader := DatabaseHeader{FirstFreePage: 1, FreePageCount: 9}
+			pagerMock.On("GetHeader", ctx).Return(originalDBHeader, nil).Once()
+			originalPage := &Page{Index: PageIndex(4), LeafNode: NewLeafNode()}
+			pagerMock.On("GetPage", ctx, PageIndex(4)).Return(originalPage, nil).Once()
+		}
+		saverMock.On("SavePage", ctx, PageIndex(4), tx.WriteSet[4]).Return(nil).Once()
+		saverMock.On("SaveHeader", ctx, *tx.DbHeaderWrite).Return(nil).Once()
+		saverMock.On("Flush", ctx, PageIndex(0)).Return(nil).Once()
+		saverMock.On("Flush", ctx, PageIndex(4)).Return(nil).Once()
 
-		err := txManager.CommitTransaction(ctx, tx, TxCommitter{pagerMock, nil})
+		err := txManager.CommitTransaction(ctx, tx)
 		require.NoError(t, err)
 
 		// Global versions should be updated accordingly
@@ -88,14 +96,15 @@ func TestTransactionManager_Commit(t *testing.T) {
 		assert.Equal(t, 2, int(txManager.globalPageVersions[3]))
 		assert.Equal(t, 6, int(txManager.globalPageVersions[4]))
 
-		mock.AssertExpectationsForObjects(t, pagerMock)
+		mock.AssertExpectationsForObjects(t, pagerMock, saverMock)
 	})
 
 	t.Run("Read only transaction conflict", func(t *testing.T) {
 		var (
 			ctx       = context.Background()
-			pagerMock = new(MockPageSaver)
-			txManager = NewTransactionManager(zap.NewNop())
+			pagerMock = new(MockPager)
+			saverMock = new(MockPageSaver)
+			txManager = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(pagerMock), saverMock, nil)
 		)
 
 		// Setup initial global versions
@@ -118,18 +127,23 @@ func TestTransactionManager_Commit(t *testing.T) {
 		readTx.ReadSet[4] = 1
 
 		// Let's simulate a write for second tx that will conflict
-		writeTx.WriteSet[3] = &Page{Index: PageIndex(3)}
+		writeTx.WriteSet[3] = &Page{Index: PageIndex(3), LeafNode: NewLeafNode()}
+		writeTx.WriteInfoSet[3] = WriteInfo{Table: "orders", Index: "pk_orders"}
 
 		// Setup expectations
-		pagerMock.On("SavePage", ctx, PageIndex(3), writeTx.WriteSet[3]).Return(nil).Once()
+		if txManager.journalEnabled {
+			originalPage := &Page{Index: PageIndex(3), LeafNode: NewLeafNode()}
+			pagerMock.On("GetPage", ctx, PageIndex(3)).Return(originalPage, nil).Once()
+		}
+		saverMock.On("SavePage", ctx, PageIndex(3), writeTx.WriteSet[3]).Return(nil).Once()
 
 		// Commit the writing transaction first
-		pagerMock.On("Flush", ctx, PageIndex(3)).Return(nil).Once()
-		err := txManager.CommitTransaction(ctx, writeTx, TxCommitter{pagerMock, nil})
+		saverMock.On("Flush", ctx, PageIndex(3)).Return(nil).Once()
+		err := txManager.CommitTransaction(ctx, writeTx)
 		require.NoError(t, err)
 
 		// Now, committing the reading transaction should fail due to conflict
-		err = txManager.CommitTransaction(ctx, readTx, TxCommitter{pagerMock, nil})
+		err = txManager.CommitTransaction(ctx, readTx)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrTxConflict)
 		assert.Equal(t, "transaction conflict detected: tx 1 aborted due to conflict on page 3", err.Error())
@@ -140,14 +154,15 @@ func TestTransactionManager_Commit(t *testing.T) {
 		assert.Equal(t, 3, int(txManager.globalPageVersions[3]))
 		assert.Equal(t, 1, int(txManager.globalPageVersions[4]))
 
-		mock.AssertExpectationsForObjects(t, pagerMock)
+		mock.AssertExpectationsForObjects(t, pagerMock, saverMock)
 	})
 
 	t.Run("Write transaction error", func(t *testing.T) {
 		var (
 			ctx       = context.Background()
-			pagerMock = new(MockPageSaver)
-			txManager = NewTransactionManager(zap.NewNop())
+			pagerMock = new(MockPager)
+			saverMock = new(MockPageSaver)
+			txManager = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(pagerMock), saverMock, nil)
 		)
 
 		// Setup initial global versions
@@ -170,21 +185,27 @@ func TestTransactionManager_Commit(t *testing.T) {
 		writeTx1.ReadSet[3] = 2
 		writeTx1.ReadSet[4] = 5
 		writeTx1.WriteSet[4] = &Page{Index: PageIndex(4)}
+		writeTx1.WriteInfoSet[4] = WriteInfo{Table: "orders", Index: "pk_orders"}
 
 		// Second tx will modify the same page to cause conflict
 		writeTx2.ReadSet[4] = 5
 		writeTx2.WriteSet[4] = &Page{Index: PageIndex(4)}
+		writeTx2.WriteInfoSet[4] = WriteInfo{Table: "orders", Index: "pk_orders"}
 
 		// Setup expectations
-		pagerMock.On("SavePage", ctx, PageIndex(4), writeTx2.WriteSet[4]).Return(nil).Once()
-		pagerMock.On("Flush", ctx, PageIndex(4)).Return(nil).Once()
+		if txManager.journalEnabled {
+			originalPage := &Page{Index: PageIndex(4), LeafNode: NewLeafNode()}
+			pagerMock.On("GetPage", ctx, PageIndex(4)).Return(originalPage, nil).Once()
+		}
+		saverMock.On("SavePage", ctx, PageIndex(4), writeTx2.WriteSet[4]).Return(nil).Once()
+		saverMock.On("Flush", ctx, PageIndex(4)).Return(nil).Once()
 
 		// Commit the second transaction first
-		err := txManager.CommitTransaction(ctx, writeTx2, TxCommitter{pagerMock, nil})
+		err := txManager.CommitTransaction(ctx, writeTx2)
 		require.NoError(t, err)
 
 		// Now, committing the first transaction should fail due to conflict
-		err = txManager.CommitTransaction(ctx, writeTx1, TxCommitter{pagerMock, nil})
+		err = txManager.CommitTransaction(ctx, writeTx1)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrTxConflict)
 		assert.Equal(t, "transaction conflict detected: tx 1 aborted due to conflict on page 4", err.Error())
@@ -195,7 +216,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		assert.Equal(t, 2, int(txManager.globalPageVersions[3]))
 		assert.Equal(t, 6, int(txManager.globalPageVersions[4]))
 
-		mock.AssertExpectationsForObjects(t, pagerMock)
+		mock.AssertExpectationsForObjects(t, pagerMock, saverMock)
 	})
 }
 
@@ -204,8 +225,8 @@ func TestTransactionManager_Rollback(t *testing.T) {
 
 	var (
 		ctx       = context.Background()
-		pagerMock = new(MockPageSaver)
-		txManager = NewTransactionManager(zap.NewNop())
+		saverMock = new(MockPageSaver)
+		txManager = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(nil), saverMock, nil)
 	)
 
 	// Setup initial global versions
@@ -235,15 +256,16 @@ func TestTransactionManager_Rollback(t *testing.T) {
 	assert.Equal(t, 2, int(txManager.globalPageVersions[3]))
 	assert.Equal(t, 5, int(txManager.globalPageVersions[4]))
 
-	mock.AssertExpectationsForObjects(t, pagerMock)
+	mock.AssertExpectationsForObjects(t, saverMock)
 }
 
 func TestTransactionManager_ExecuteInTransaction(t *testing.T) {
 	t.Parallel()
 
 	var (
-		pagerMock = new(MockPageSaver)
-		txManager = NewTransactionManager(zap.NewNop())
+		pagerMock = new(MockPager)
+		saverMock = new(MockPageSaver)
+		txManager = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(pagerMock), saverMock, nil)
 	)
 
 	t.Run("No transaction in context", func(t *testing.T) {
@@ -257,14 +279,14 @@ func TestTransactionManager_ExecuteInTransaction(t *testing.T) {
 
 		assert.Len(t, txManager.transactions, 0)
 
-		err := txManager.ExecuteInTransaction(ctx, fn, TxCommitter{pagerMock, nil})
+		err := txManager.ExecuteInTransaction(ctx, fn)
 		require.NoError(t, err)
 
 		assert.Len(t, txManager.transactions, 0)
 		assert.True(t, fnRan)
 
-		mock.AssertExpectationsForObjects(t, pagerMock)
-		resetMock(&pagerMock.Mock)
+		mock.AssertExpectationsForObjects(t, pagerMock, saverMock)
+		resetMocks(&pagerMock.Mock, &saverMock.Mock)
 	})
 
 	t.Run("Active transaction in context", func(t *testing.T) {
@@ -280,13 +302,13 @@ func TestTransactionManager_ExecuteInTransaction(t *testing.T) {
 
 		assert.Len(t, txManager.transactions, 1)
 
-		err := txManager.ExecuteInTransaction(ctx, fn, TxCommitter{pagerMock, nil})
+		err := txManager.ExecuteInTransaction(ctx, fn)
 		require.NoError(t, err)
 
 		assert.Len(t, txManager.transactions, 1)
 		assert.True(t, fnRan)
 
-		mock.AssertExpectationsForObjects(t, pagerMock)
-		resetMock(&pagerMock.Mock)
+		mock.AssertExpectationsForObjects(t, pagerMock, saverMock)
+		resetMocks(&pagerMock.Mock, &saverMock.Mock)
 	})
 }

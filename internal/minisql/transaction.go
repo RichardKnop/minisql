@@ -71,13 +71,19 @@ func (d DDLChanges) HasChanges() bool {
 		len(d.DropIndexes) > 0
 }
 
+type WriteInfo struct {
+	Table string
+	Index string
+}
+
 type Transaction struct {
 	ID            TransactionID
 	StartTime     time.Time
-	ReadSet       map[PageIndex]uint64 // pageIdx -> version when read
-	WriteSet      map[PageIndex]*Page  // pageIdx -> modified page copy
-	DbHeaderRead  *uint64              // version of DB header when read
-	DbHeaderWrite *DatabaseHeader      // modified DB header
+	ReadSet       map[PageIndex]uint64    // pageIdx -> version when read
+	WriteSet      map[PageIndex]*Page     // pageIdx -> modified page copy
+	WriteInfoSet  map[PageIndex]WriteInfo // pageIdx -> table (+index) name
+	DbHeaderRead  *uint64                 // version of DB header when read
+	DbHeaderWrite *DatabaseHeader         // modified DB header
 	DDLChanges    DDLChanges
 	Status        TransactionStatus
 	mu            sync.RWMutex
@@ -119,6 +125,16 @@ func (tx *Transaction) TrackWrite(pageIdx PageIndex, page *Page) {
 	tx.WriteSet[pageIdx] = page
 }
 
+func (tx *Transaction) TrackWriteInfo(pageIdx PageIndex, table, index string) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+
+	tx.WriteInfoSet[pageIdx] = WriteInfo{
+		Table: table,
+		Index: index,
+	}
+}
+
 func (tx *Transaction) TrackDBHeaderRead(version uint64) {
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
@@ -143,14 +159,23 @@ func (tx *Transaction) GetReadVersions() map[PageIndex]uint64 {
 	return readSetCopy
 }
 
-func (tx *Transaction) GetWriteVersions() map[PageIndex]*Page {
+type WritePage struct {
+	Page  *Page
+	Table string
+}
+
+func (tx *Transaction) GetWriteVersions() (map[PageIndex]*Page, map[PageIndex]WriteInfo) {
 	tx.mu.RLock()
 	defer tx.mu.RUnlock()
 
 	// Return a copy to avoid concurrent map access
 	writeSetCopy := make(map[PageIndex]*Page, len(tx.WriteSet))
 	maps.Copy(writeSetCopy, tx.WriteSet)
-	return writeSetCopy
+
+	writeInfoSetCopy := make(map[PageIndex]WriteInfo, len(tx.WriteInfoSet))
+	maps.Copy(writeInfoSetCopy, tx.WriteInfoSet)
+
+	return writeSetCopy, writeInfoSetCopy
 }
 
 func (tx *Transaction) GetDBHeaderReadVersion() (uint64, bool) {

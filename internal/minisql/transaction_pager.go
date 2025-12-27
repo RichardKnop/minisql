@@ -7,13 +7,16 @@ import (
 
 type TransactionalPager struct {
 	Pager
-	txManager *TransactionManager
+	txManager    *TransactionManager
+	table, index string
 }
 
-func NewTransactionalPager(basePager Pager, txManager *TransactionManager) *TransactionalPager {
+func NewTransactionalPager(basePager Pager, txManager *TransactionManager, table, index string) *TransactionalPager {
 	return &TransactionalPager{
 		Pager:     basePager,
 		txManager: txManager,
+		table:     table,
+		index:     index,
 	}
 }
 
@@ -65,6 +68,7 @@ func (tp *TransactionalPager) ModifyPage(ctx context.Context, pageIdx PageIndex)
 	// Create a deep copy for modification
 	modifiedPage = originalPage.Clone()
 	tx.TrackWrite(pageIdx, modifiedPage)
+	tx.TrackWriteInfo(pageIdx, tp.table, tp.index)
 
 	return modifiedPage, nil
 }

@@ -22,30 +22,46 @@ type Parser interface {
 }
 
 type Database struct {
-	FileName  string
-	parser    Parser
-	factory   PagerFactory
-	saver     PageSaver
-	txManager *TransactionManager
-	tables    map[string]*Table
-	dbLock    *sync.RWMutex
-	clock     clock
-	logger    *zap.Logger
+	dbFilePath string
+	parser     Parser
+	factory    PagerFactory
+	saver      PageSaver
+	txManager  *TransactionManager
+	tables     map[string]*Table
+	dbLock     *sync.RWMutex
+	clock      clock
+	logger     *zap.Logger
 }
 
 type clock func() Time
 
+var JournalEnabled = false
+
+var ErrRecoveredFromJournal = fmt.Errorf("database recovered from journal on startup")
+
 // NewDatabase creates a new database
-func NewDatabase(ctx context.Context, logger *zap.Logger, fileName string, aParser Parser, factory PagerFactory, saver PageSaver) (*Database, error) {
-	aDatabase := &Database{
-		FileName:  fileName,
-		parser:    aParser,
-		factory:   factory,
-		saver:     saver,
-		txManager: NewTransactionManager(logger),
-		tables:    make(map[string]*Table),
-		dbLock:    new(sync.RWMutex),
-		logger:    logger,
+func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aParser Parser, aFactory PagerFactory, saver PageSaver) (*Database, error) {
+	// Recover from journal if it exists (crash recovery)
+	if JournalEnabled {
+		recovered, err := RecoverFromJournal(dbFilePath, PageSize)
+		if err != nil {
+			return nil, fmt.Errorf("journal recovery failed: %w", err)
+		}
+		if recovered {
+			saver.Close()
+			logger.Info("database recovered from journal on startup")
+			return nil, ErrRecoveredFromJournal
+		}
+	}
+
+	db := &Database{
+		dbFilePath: dbFilePath,
+		parser:     aParser,
+		factory:    aFactory,
+		saver:      saver,
+		tables:     make(map[string]*Table),
+		dbLock:     new(sync.RWMutex),
+		logger:     logger,
 		clock: func() Time {
 			now := time.Now()
 			return Time{
@@ -60,13 +76,16 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, fileName string, aPars
 		},
 	}
 
-	if err := aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		return aDatabase.init(ctx)
-	}, TxCommitter{aDatabase.saver, aDatabase}); err != nil {
+	db.txManager = NewTransactionManager(logger, dbFilePath, db.pagerFactory, saver, db)
+	db.txManager.journalEnabled = JournalEnabled
+
+	if err := db.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return db.init(ctx)
+	}); err != nil {
 		return nil, err
 	}
 
-	return aDatabase, nil
+	return db, nil
 }
 
 func (d *Database) Close() error {
@@ -80,10 +99,46 @@ func (d *Database) Reopen(ctx context.Context, factory PagerFactory, saver PageS
 
 	if err := d.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return d.init(ctx)
-	}, TxCommitter{d.saver, d}); err != nil {
+	}); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (d *Database) pagerFactory(ctx context.Context, tableName, indexName string) (Pager, error) {
+	aTable, ok := d.tables[tableName]
+	if !ok {
+		if tx := TxFromContext(ctx); tx != nil {
+			// We could be in a trasaction and table is being created but tx is not yet committed
+			for _, tableBeingCreated := range TxFromContext(ctx).DDLChanges.CreateTables {
+				if tableBeingCreated.Name == tableName {
+					aTable = tableBeingCreated
+				}
+			}
+		}
+		if aTable == nil {
+			return nil, errTableDoesNotExist
+		}
+	}
+	if indexName == "" {
+		return d.factory.ForTable(aTable.Columns), nil
+	}
+
+	aColumn, ok := aTable.IndexColumnByIndexName(indexName)
+	if !ok {
+		if tx := TxFromContext(ctx); tx != nil {
+			// We could be in a trasaction and index is being created but tx is not yet committed
+			for _, secondaryIndex := range TxFromContext(ctx).DDLChanges.CreateIndexes {
+				if secondaryIndex.Name == indexName {
+					aColumn = secondaryIndex.Column
+				}
+			}
+		}
+		if aColumn.Name == "" {
+			return nil, errIndexDoesNotExist
+		}
+	}
+	return d.factory.ForIndex(aColumn.Kind, aColumn.Unique || aColumn.PrimaryKey), nil
 }
 
 func (d *Database) init(ctx context.Context) error {
@@ -94,7 +149,7 @@ func (d *Database) init(ctx context.Context) error {
 	)
 
 	d.logger.Sugar().With(
-		"file_name", d.FileName,
+		"file_name", d.dbFilePath,
 		"total_pages", totalPages,
 	).Debug("initializing database")
 
@@ -106,9 +161,11 @@ func (d *Database) init(ctx context.Context) error {
 
 	// Otherwise, main table already exists,
 	// we need to read all existing tables from the schema table
+	txPager := NewTransactionalPager(mainTablePager, d.txManager, SchemaTableName, "")
+	txPager.table = SchemaTableName
 	mainTable := NewTable(
 		d.logger,
-		NewTransactionalPager(mainTablePager, d.txManager),
+		txPager,
 		d.txManager,
 		SchemaTableName,
 		mainTableColumns,
@@ -179,10 +236,12 @@ func (d *Database) initEmptyDatabase(ctx context.Context, rooPageIdx PageIndex, 
 		"root_page", rooPageIdx,
 	).Debug("creating main schema table")
 
+	txPager := NewTransactionalPager(mainTablePager, d.txManager, SchemaTableName, "")
+
 	// New database, need to create the main schema table
 	mainTable := NewTable(
 		d.logger,
-		NewTransactionalPager(mainTablePager, d.txManager),
+		txPager,
 		d.txManager,
 		SchemaTableName,
 		mainTableColumns,
@@ -254,12 +313,16 @@ func (d *Database) tableFromSQL(ctx context.Context, aSchema Schema) (*Table, er
 		return nil, err
 	}
 
+	tp := NewTransactionalPager(
+		d.factory.ForTable(stmt.Columns),
+		d.txManager,
+		stmt.TableName,
+		"",
+	)
+
 	return NewTable(
 		d.logger,
-		NewTransactionalPager(
-			d.factory.ForTable(stmt.Columns),
-			d.txManager,
-		),
+		tp,
 		d.txManager,
 		stmt.TableName,
 		stmt.Columns,
@@ -274,11 +337,13 @@ func (d *Database) initPrimaryKey(ctx context.Context, aSchema Schema) error {
 	if !ok {
 		return fmt.Errorf("table %s for primary key index %s does not exist", aSchema.TableName, aSchema.Name)
 	}
-	indexPager := NewTransactionalPager(
-		d.factory.ForIndex(aTable.PrimaryKey.Column.Kind, uint64(aTable.PrimaryKey.Column.Size), true),
+	tp := NewTransactionalPager(
+		d.factory.ForIndex(aTable.PrimaryKey.Column.Kind, true),
 		d.txManager,
+		aTable.Name,
+		aSchema.Name,
 	)
-	btreeIndex, err := aTable.newBTreeIndex(indexPager, aSchema.RootPage, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name, true)
+	btreeIndex, err := aTable.newBTreeIndex(tp, aSchema.RootPage, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name, true)
 	if err != nil {
 		return err
 	}
@@ -305,11 +370,13 @@ func (d *Database) initUniqueIndex(ctx context.Context, aSchema Schema) error {
 	if !ok {
 		return fmt.Errorf("unique index %s does not exist on table %s", aSchema.Name, aSchema.TableName)
 	}
-	indexPager := NewTransactionalPager(
-		d.factory.ForIndex(uniqueIndex.Column.Kind, uint64(uniqueIndex.Column.Size), true),
+	tp := NewTransactionalPager(
+		d.factory.ForIndex(uniqueIndex.Column.Kind, true),
 		d.txManager,
+		aTable.Name,
+		aSchema.Name,
 	)
-	btreeIndex, err := aTable.newBTreeIndex(indexPager, aSchema.RootPage, uniqueIndex.Column, uniqueIndex.Name, true)
+	btreeIndex, err := aTable.newBTreeIndex(tp, aSchema.RootPage, uniqueIndex.Column, uniqueIndex.Name, true)
 	if err != nil {
 		return err
 	}
@@ -358,11 +425,13 @@ func (d *Database) initSecondaryIndex(ctx context.Context, aSchema Schema) error
 	}
 
 	// Create and set BTree index instance
-	indexPager := NewTransactionalPager(
-		d.factory.ForIndex(secondaryIndex.Column.Kind, uint64(secondaryIndex.Column.Size), true),
+	tp := NewTransactionalPager(
+		d.factory.ForIndex(secondaryIndex.Column.Kind, true),
 		d.txManager,
+		aTable.Name,
+		aSchema.Name,
 	)
-	btreeIndex, err := aTable.newBTreeIndex(indexPager, aSchema.RootPage, secondaryIndex.Column, secondaryIndex.Name, false)
+	btreeIndex, err := aTable.newBTreeIndex(tp, aSchema.RootPage, secondaryIndex.Column, secondaryIndex.Name, false)
 	if err != nil {
 		return err
 	}
@@ -432,6 +501,11 @@ func (d *Database) GetSaver() PageSaver {
 
 func (d *Database) GetDDLSaver() DDLSaver {
 	return d
+}
+
+// GetFileName returns the database file name
+func (d *Database) GetFileName() string {
+	return d.dbFilePath
 }
 
 // ExecuteStatement executes a single statement and returns the result
@@ -544,11 +618,14 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 
 	d.logger.Sugar().With("name", stmt.TableName).Debug("creating table")
 
-	tablePager := NewTransactionalPager(
+	txPager := NewTransactionalPager(
 		d.factory.ForTable(stmt.Columns),
 		d.txManager,
+		stmt.TableName,
+		"",
 	)
-	freePage, err := tablePager.GetFreePage(ctx)
+
+	freePage, err := txPager.GetFreePage(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -557,7 +634,7 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 
 	createdTable := NewTable(
 		d.logger,
-		tablePager,
+		txPager,
 		d.txManager,
 		stmt.TableName,
 		stmt.Columns,
@@ -634,13 +711,17 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	}
 
 	// Free all table pages
-	aPager := NewTransactionalPager(
+
+	// First free pages for the table itself
+	txPager := NewTransactionalPager(
 		d.factory.ForTable(tableToDelete.Columns),
 		d.txManager,
+		tableToDelete.Name,
+		"",
 	)
-	// First free pages for the table itself
+
 	tableToDelete.BFS(ctx, func(page *Page) {
-		if err := aPager.AddFreePage(ctx, page.Index); err != nil {
+		if err := txPager.AddFreePage(ctx, page.Index); err != nil {
 			d.logger.Sugar().With(
 				"page", page.Index,
 				"error", err,
@@ -651,8 +732,16 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	})
 	// And then free pages for the primary key index if any
 	if tableToDelete.HasPrimaryKey() {
+
+		txPager := NewTransactionalPager(
+			d.factory.ForIndex(tableToDelete.PrimaryKey.Column.Kind, true),
+			d.txManager,
+			tableToDelete.Name,
+			tableToDelete.PrimaryKey.Name,
+		)
+
 		tableToDelete.PrimaryKey.Index.BFS(ctx, func(page *Page) {
-			if err := aPager.AddFreePage(ctx, page.Index); err != nil {
+			if err := txPager.AddFreePage(ctx, page.Index); err != nil {
 				d.logger.Sugar().With(
 					"page", page.Index,
 					"error", err,
@@ -664,8 +753,16 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	}
 	// And then free pages for unique indexes index if any
 	for _, uniqueIndex := range tableToDelete.UniqueIndexes {
+
+		txPager := NewTransactionalPager(
+			d.factory.ForIndex(uniqueIndex.Column.Kind, true),
+			d.txManager,
+			tableToDelete.Name,
+			uniqueIndex.Name,
+		)
+
 		uniqueIndex.Index.BFS(ctx, func(page *Page) {
-			if err := aPager.AddFreePage(ctx, page.Index); err != nil {
+			if err := txPager.AddFreePage(ctx, page.Index); err != nil {
 				d.logger.Sugar().With(
 					"page", page.Index,
 					"error", err,
@@ -677,8 +774,16 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	}
 	// And then free pages for secondary indexes index if any
 	for _, secondaryIndex := range tableToDelete.SecondaryIndexes {
+
+		txPager := NewTransactionalPager(
+			d.factory.ForIndex(secondaryIndex.Column.Kind, false),
+			d.txManager,
+			tableToDelete.Name,
+			secondaryIndex.Name,
+		)
+
 		secondaryIndex.Index.BFS(ctx, func(page *Page) {
-			if err := aPager.AddFreePage(ctx, page.Index); err != nil {
+			if err := txPager.AddFreePage(ctx, page.Index); err != nil {
 				d.logger.Sugar().With(
 					"page", page.Index,
 					"error", err,
@@ -826,11 +931,14 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 		return fmt.Errorf("column %s does not exist on table %s for secondary index %s", stmts[0].Columns[0].Name, aSchema.TableName, aSchema.Name)
 	}
 
-	indexPager := NewTransactionalPager(
-		d.factory.ForIndex(indexColumn.Kind, uint64(indexColumn.Size), true),
+	txPager := NewTransactionalPager(
+		d.factory.ForIndex(indexColumn.Kind, true),
 		d.txManager,
+		aTable.Name,
+		aSchema.Name,
 	)
-	btreeIndex, err := aTable.newBTreeIndex(indexPager, aSchema.RootPage, indexColumn, aSchema.Name, false)
+
+	btreeIndex, err := aTable.newBTreeIndex(txPager, aSchema.RootPage, indexColumn, aSchema.Name, false)
 	if err != nil {
 		return err
 	}
@@ -848,7 +956,7 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 
 	// Free pages for the index
 	btreeIndex.BFS(ctx, func(page *Page) {
-		if err := indexPager.AddFreePage(ctx, page.Index); err != nil {
+		if err := txPager.AddFreePage(ctx, page.Index); err != nil {
 			d.logger.Sugar().With(
 				"page", page.Index,
 				"error", err,
@@ -866,16 +974,19 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 func (d *Database) createPrimaryKey(ctx context.Context, aTable *Table, aColumn Column) (BTreeIndex, error) {
 	d.logger.Sugar().With("column", aColumn.Name).Debug("creating primary key")
 
-	indexPager := NewTransactionalPager(
-		d.factory.ForIndex(aColumn.Kind, uint64(aColumn.Size), true),
+	txPager := NewTransactionalPager(
+		d.factory.ForIndex(aColumn.Kind, true),
 		d.txManager,
+		aTable.Name,
+		aTable.PrimaryKey.Name,
 	)
-	freePage, err := indexPager.GetFreePage(ctx)
+
+	freePage, err := txPager.GetFreePage(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	createdIndex, err := aTable.createBTreeIndex(indexPager, freePage, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name, true)
+	createdIndex, err := aTable.createBTreeIndex(txPager, freePage, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name, true)
 	if err != nil {
 		return nil, err
 	}
@@ -895,16 +1006,19 @@ func (d *Database) createPrimaryKey(ctx context.Context, aTable *Table, aColumn 
 func (d *Database) createUniqueIndex(ctx context.Context, aTable *Table, uniqueIndex UniqueIndex) (BTreeIndex, error) {
 	d.logger.Sugar().With("column", uniqueIndex.Column.Name).Debug("creating unique index")
 
-	indexPager := NewTransactionalPager(
-		d.factory.ForIndex(uniqueIndex.Column.Kind, uint64(uniqueIndex.Column.Size), true),
+	txPager := NewTransactionalPager(
+		d.factory.ForIndex(uniqueIndex.Column.Kind, true),
 		d.txManager,
+		aTable.Name,
+		uniqueIndex.Name,
 	)
-	freePage, err := indexPager.GetFreePage(ctx)
+
+	freePage, err := txPager.GetFreePage(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	createdIndex, err := aTable.createBTreeIndex(indexPager, freePage, uniqueIndex.Column, uniqueIndex.Name, true)
+	createdIndex, err := aTable.createBTreeIndex(txPager, freePage, uniqueIndex.Column, uniqueIndex.Name, true)
 	if err != nil {
 		return nil, err
 	}
@@ -924,16 +1038,19 @@ func (d *Database) createUniqueIndex(ctx context.Context, aTable *Table, uniqueI
 func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, aTable *Table, secondaryIndex SecondaryIndex) (BTreeIndex, error) {
 	d.logger.Sugar().With("column", secondaryIndex.Column.Name).Debug("creating secondary index")
 
-	indexPager := NewTransactionalPager(
-		d.factory.ForIndex(secondaryIndex.Column.Kind, uint64(secondaryIndex.Column.Size), true),
+	txPager := NewTransactionalPager(
+		d.factory.ForIndex(secondaryIndex.Column.Kind, true),
 		d.txManager,
+		aTable.Name,
+		secondaryIndex.Name,
 	)
-	freePage, err := indexPager.GetFreePage(ctx)
+
+	freePage, err := txPager.GetFreePage(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	createdIndex, err := aTable.createBTreeIndex(indexPager, freePage, secondaryIndex.Column, secondaryIndex.Name, false)
+	createdIndex, err := aTable.createBTreeIndex(txPager, freePage, secondaryIndex.Column, secondaryIndex.Name, false)
 	if err != nil {
 		return nil, err
 	}

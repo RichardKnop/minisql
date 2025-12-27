@@ -13,22 +13,20 @@ import (
 func TestTable_PageRecycling(t *testing.T) {
 	t.Parallel()
 
-	tempFile, err := os.CreateTemp("", "testdb")
+	tempFile, err := os.CreateTemp("", testDbName)
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
 	aPager, err := NewPager(tempFile, PageSize)
 	require.NoError(t, err)
-	txManager := NewTransactionManager(zap.NewNop())
-	tablePager := NewTransactionalPager(
-		aPager.ForTable(testMediumColumns),
-		txManager,
-	)
+	tablePager := aPager.ForTable(testMediumColumns)
+	txManager := NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
+	txPager := NewTransactionalPager(tablePager, txManager, testTableName, "")
 
 	var (
 		ctx     = context.Background()
 		numRows = 100
 		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, tablePager, txManager, testTableName, testMediumColumns, 0)
+		aTable  = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0)
 	)
 	aTable.maximumICells = 5 // for testing purposes only, normally 340
 
@@ -42,7 +40,7 @@ func TestTable_PageRecycling(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	mustInsert(t, ctx, aTable, txManager, aPager, stmt)
+	mustInsert(t, ctx, aTable, txManager, stmt)
 
 	// require.NoError(t, aTable.print())
 
@@ -59,7 +57,7 @@ func TestTable_PageRecycling(t *testing.T) {
 			Kind: Delete,
 		})
 		return err
-	}, TxCommitter{aPager, nil})
+	})
 	require.NoError(t, err)
 
 	assert.Equal(t, len(rows), aResult.RowsAffected)
@@ -69,7 +67,7 @@ func TestTable_PageRecycling(t *testing.T) {
 	assert.Equal(t, 46, int(aPager.dbHeader.FreePageCount))
 
 	// Now we reinsert the same rows again
-	mustInsert(t, ctx, aTable, txManager, aPager, stmt)
+	mustInsert(t, ctx, aTable, txManager, stmt)
 
 	// We should still have the same number of pages in total
 	// and no free pages

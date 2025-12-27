@@ -12,7 +12,7 @@ import (
 func TestNewPager_Empty(t *testing.T) {
 	t.Parallel()
 
-	dbFile, err := os.CreateTemp(".", "testdb")
+	dbFile, err := os.CreateTemp(".", testDbName)
 	require.NoError(t, err)
 	defer dbFile.Close()
 	defer os.Remove(dbFile.Name())
@@ -28,7 +28,7 @@ func TestNewPager_Empty(t *testing.T) {
 func TestNewPager_WithDBHeader(t *testing.T) {
 	t.Parallel()
 
-	dbFile, err := os.CreateTemp(".", "testdb")
+	dbFile, err := os.CreateTemp(".", testDbName)
 	require.NoError(t, err)
 	defer dbFile.Close()
 	defer os.Remove(dbFile.Name())
@@ -58,7 +58,7 @@ func TestNewPager_WithDBHeader(t *testing.T) {
 func TestPager_GetPage(t *testing.T) {
 	t.Parallel()
 
-	dbFile, err := os.CreateTemp(".", "testdb")
+	dbFile, err := os.CreateTemp(".", testDbName)
 	require.NoError(t, err)
 	defer dbFile.Close()
 	defer os.Remove(dbFile.Name())

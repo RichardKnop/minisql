@@ -10,7 +10,7 @@ import (
 // TODO - test and optimize
 func (db *Database) Vacuum(ctx context.Context) error {
 	// 1. Create a temporary database file
-	tempFile := db.FileName + ".tmp"
+	tempFile := db.GetFileName() + ".tmp"
 
 	tempDB, err := NewDatabase(ctx, db.logger, tempFile, db.parser, db.factory, db.saver)
 	if err != nil {
@@ -77,12 +77,12 @@ func (db *Database) Vacuum(ctx context.Context) error {
 	}
 
 	// 4. Replace old file with new compacted file
-	os.Remove(db.FileName + ".bak")
-	os.Rename(db.FileName, db.FileName+".bak")
-	os.Rename(tempFile, db.FileName)
+	os.Remove(db.GetFileName() + ".bak")
+	os.Rename(db.GetFileName(), db.GetFileName()+".bak")
+	os.Rename(tempFile, db.GetFileName())
 
 	// 5. Reopen the database
-	dbFile, err := os.OpenFile(db.FileName, os.O_RDWR|os.O_CREATE, 0600)
+	dbFile, err := os.OpenFile(db.GetFileName(), os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to open database file: %w", err)
 	}

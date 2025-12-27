@@ -17,23 +17,28 @@ type TransactionManager struct {
 	globalPageVersions    map[PageIndex]uint64 // pageIdx -> current version
 	globalDbHeaderVersion uint64
 	logger                *zap.Logger
+	dbFilePath            string
+	journalEnabled        bool // TODO - remove once journaling is always on
+	factory               TxPagerFactory
+	saver                 PageSaver
+	ddlSaver              DDLSaver
 }
 
-func NewTransactionManager(logger *zap.Logger) *TransactionManager {
+func NewTransactionManager(logger *zap.Logger, dbFilePath string, factory TxPagerFactory, saver PageSaver, ddlSaver DDLSaver) *TransactionManager {
 	return &TransactionManager{
 		nextTxID:           1,
 		transactions:       make(map[TransactionID]*Transaction),
 		globalPageVersions: make(map[PageIndex]uint64),
 		logger:             logger,
+		factory:            factory,
+		dbFilePath:         dbFilePath,
+		saver:              saver,
+		ddlSaver:           ddlSaver,
+		journalEnabled:     JournalEnabled,
 	}
 }
 
-type TxCommitter struct {
-	Saver    PageSaver
-	DDLSaver DDLSaver
-}
-
-func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(ctx context.Context) error, committer TxCommitter) error {
+func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
 	// If there is a transaction already in context, use it.
 	// This means tx was manually started with BEGIN
 	// and will stay open until COMMIT/ROLLBACK.
@@ -49,7 +54,7 @@ func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(
 		return err
 	}
 
-	if err := tm.CommitTransaction(ctx, tx, committer); err != nil {
+	if err := tm.CommitTransaction(ctx, tx); err != nil {
 		tm.RollbackTransaction(ctx, tx)
 		return err
 	}
@@ -60,11 +65,12 @@ func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(
 func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction {
 	tm.mu.Lock()
 	tx := &Transaction{
-		ID:        tm.nextTxID,
-		StartTime: time.Now(),
-		ReadSet:   make(map[PageIndex]uint64),
-		WriteSet:  make(map[PageIndex]*Page),
-		Status:    TxActive,
+		ID:           tm.nextTxID,
+		StartTime:    time.Now(),
+		ReadSet:      make(map[PageIndex]uint64),
+		WriteSet:     make(map[PageIndex]*Page),
+		WriteInfoSet: make(map[PageIndex]WriteInfo),
+		Status:       TxActive,
 	}
 	tm.nextTxID++
 	tm.transactions[tx.ID] = tx
@@ -77,17 +83,12 @@ func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction
 
 var ErrTxConflict = errors.New("transaction conflict detected")
 
-func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transaction, committer TxCommitter) error {
+func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transaction) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
 	if tx.Status != TxActive {
 		return fmt.Errorf("transaction %d is not active", tx.ID)
-	}
-
-	// Save DDL changes first (CREATE / DROP TABLE)
-	if tx.DDLChanges.HasChanges() {
-		committer.DDLSaver.SaveDDLChanges(ctx, tx.DDLChanges)
 	}
 
 	// Check for conflicts (simplified optimistic concurrency control)
@@ -106,20 +107,96 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
 	}
 
+	// Check if this is a read-only transaction
+	writePages, writeInfo := tx.GetWriteVersions()
+	isReadOnly := len(writePages) == 0 && !tx.DDLChanges.HasChanges()
+
+	// Fast path for read-only transactions - no writes to commit
+	if isReadOnly {
+		tx.Commit()
+		delete(tm.transactions, tx.ID)
+		tm.logger.Debug("commit read-only transaction", zap.Uint64("tx_id", uint64(tx.ID)))
+		return nil
+	}
+
 	pagesToFlush := make([]PageIndex, 0, len(tx.WriteSet))
 
+	// === PHASE 1: Create Rollback Journal ===
+	// Skip journal creation for read-only transactions (no modifications to recover)
+	// Write original page contents to journal before modifying database
+	// This enables crash recovery by restoring original pages
+	var journal *RollbackJournal
+	if tm.journalEnabled && tm.dbFilePath != "" {
+		var err error
+		journal, err = CreateJournal(tm.dbFilePath, PageSize)
+		if err != nil {
+			tx.Abort()
+			return fmt.Errorf("create rollback journal: %w", err)
+		}
+		defer func() {
+			if journal != nil {
+				journal.Close()
+			}
+		}()
+
+		// Write original db header and pages to journal
+		numJournaledPages := 0
+		if len(writePages) != len(writeInfo) {
+			tx.Abort()
+			return fmt.Errorf("internal error: mismatched write pages and info")
+		}
+		_, dbHeaderChanged := tx.GetModifiedDBHeader()
+		if dbHeaderChanged {
+			aPager, err := tm.factory(ctx, SchemaTableName, "")
+			if err != nil {
+				tx.Abort()
+				return fmt.Errorf("get pager for journaling database header: %w", err)
+			}
+
+			originalHeader := aPager.GetHeader(ctx)
+			if err := journal.WriteDBHeaderBefore(ctx, &originalHeader); err != nil {
+				tx.Abort()
+				return fmt.Errorf("write database header to journal: %w", err)
+			}
+		}
+		for pageIdx := range writePages {
+			aPager, err := tm.factory(ctx, writeInfo[pageIdx].Table, writeInfo[pageIdx].Index)
+			if err != nil {
+				tx.Abort()
+				return fmt.Errorf("get pager for journaling page %d: %w", pageIdx, err)
+			}
+			// Read original page from disk
+			originalPage, err := aPager.GetPage(ctx, pageIdx)
+			if err != nil {
+				return fmt.Errorf("read original page %d for journal: %w", pageIdx, err)
+			}
+
+			// Write original page to journal
+			if err := journal.WritePageBefore(ctx, pageIdx, originalPage); err != nil {
+				return fmt.Errorf("journal page %d: %w", pageIdx, err)
+			}
+			numJournaledPages++
+		}
+
+		// Finalize journal header with page count and sync to disk
+		if err := journal.Finalize(dbHeaderChanged, numJournaledPages); err != nil {
+			return fmt.Errorf("finalize journal: %w", err)
+		}
+	}
+
+	// === PHASE 2: Apply Writes to In-Memory Pages ===
 	// No conflicts, apply all writes
 	// First update DB header if modified
 	if header, modified := tx.GetModifiedDBHeader(); modified {
-		committer.Saver.SaveHeader(ctx, *header)
+		tm.saver.SaveHeader(ctx, *header)
 		tm.globalDbHeaderVersion += 1
 
 		pagesToFlush = append(pagesToFlush, 0) // header is first 100 bytes of page 0
 	}
 	// Then update modified pages
-	for pageIdx, modifiedPage := range tx.GetWriteVersions() {
+	for pageIdx, writePage := range writePages {
 		// Write the modified page to base storage
-		committer.Saver.SavePage(ctx, pageIdx, modifiedPage)
+		tm.saver.SavePage(ctx, pageIdx, writePage)
 
 		// Increment page version
 		tm.globalPageVersions[pageIdx] += 1
@@ -127,20 +204,37 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		pagesToFlush = append(pagesToFlush, pageIdx)
 	}
 
+	// === PHASE 3: Flush Modified Pages to Disk ===
+	// If we crash during this phase, journal will restore original pages on recovery
+	for _, pageIdx := range pagesToFlush {
+		if err := tm.saver.Flush(ctx, pageIdx); err != nil {
+			// TODO - do we need to panic here to restart?
+			return fmt.Errorf("failed to flush page %d: %w", pageIdx, err)
+		}
+	}
+
+	// === PHASE 4: Delete Journal (Atomic Commit Point) ===
+	// Once all pages are safely on disk, delete the journal
+	// This is the atomic commit point - after this, the transaction is committed
+	if journal != nil {
+		if err := journal.Delete(); err != nil {
+			// Database is consistent, journal deletion is non-critical
+			tm.logger.Warn("failed to delete journal after commit",
+				zap.Uint64("tx_id", uint64(tx.ID)),
+				zap.Error(err))
+		}
+		journal = nil // Prevent defer from closing again
+	}
+
+	// Save DDL changes first (CREATE / DROP TABLE)
+	if tx.DDLChanges.HasChanges() {
+		tm.ddlSaver.SaveDDLChanges(ctx, tx.DDLChanges)
+	}
+
 	tx.Commit()
 
 	// Clean up transaction
 	delete(tm.transactions, tx.ID)
-
-	// TODO - implement rollback journal file
-	// https://sqlite.org/atomiccommit.html
-
-	// Flush modified pages to disk
-	for _, pageIdx := range pagesToFlush {
-		if err := committer.Saver.Flush(ctx, pageIdx); err != nil {
-			return fmt.Errorf("failed to flush page %d: %w", pageIdx, err)
-		}
-	}
 
 	tm.logger.Debug("commit transaction", zap.Uint64("tx_id", uint64(tx.ID)))
 

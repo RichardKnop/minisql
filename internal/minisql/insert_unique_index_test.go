@@ -11,38 +11,34 @@ import (
 
 func TestTable_Insert_UniqueIndex(t *testing.T) {
 	var (
-		aPager     = initTest(t)
-		ctx        = context.Background()
-		txManager  = NewTransactionManager(zap.NewNop())
-		tablePager = NewTransactionalPager(
-			aPager.ForTable(testColumnsWithUniqueIndex),
-			txManager,
+		aPager, dbFile = initTest(t)
+		ctx            = context.Background()
+		tablePager     = aPager.ForTable(testColumnsWithUniqueIndex)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		rows           = gen.RowsWithUniqueIndex(100)
+		aTable         *Table
+		indexName      = uniqueIndexName(testTableName, "email")
+		indexPager     = aPager.ForIndex(Varchar, true)
+		txIndexPager   = NewTransactionalPager(
+			indexPager,
+			NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil),
+			testTableName,
+			indexName,
 		)
-		rows      = gen.RowsWithUniqueIndex(100)
-		aTable    *Table
-		indexName = uniqueIndexName(testTableName, "email")
 	)
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		freePage, err := tablePager.GetFreePage(ctx)
+		freePage, err := txPager.GetFreePage(ctx)
 		if err != nil {
 			return err
 		}
 		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
-		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumnsWithUniqueIndex, freePage.Index)
+		aTable = NewTable(testLogger, txPager, txManager, testTableName, testColumnsWithUniqueIndex, freePage.Index)
 		return nil
-	}, TxCommitter{aPager, nil})
+	})
 	require.NoError(t, err)
-
-	indexPager := NewTransactionalPager(
-		aPager.ForIndex(
-			aTable.UniqueIndexes[indexName].Column.Kind,
-			uint64(aTable.UniqueIndexes[indexName].Column.Size),
-			true,
-		),
-		aTable.txManager,
-	)
 
 	t.Run("Insert rows with unique index", func(t *testing.T) {
 		stmt := Statement{
@@ -55,13 +51,13 @@ func TestTable_Insert_UniqueIndex(t *testing.T) {
 		}
 
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			freePage, err := indexPager.GetFreePage(ctx)
+			freePage, err := txIndexPager.GetFreePage(ctx)
 			if err != nil {
 				return err
 			}
 			uniqueIndex := aTable.UniqueIndexes[indexName]
 			uniqueIndex.Index, err = aTable.createBTreeIndex(
-				indexPager,
+				txIndexPager,
 				freePage,
 				aTable.UniqueIndexes[indexName].Column,
 				aTable.UniqueIndexes[indexName].Name,
@@ -73,7 +69,7 @@ func TestTable_Insert_UniqueIndex(t *testing.T) {
 			}
 			_, err = aTable.Insert(ctx, stmt)
 			return err
-		}, TxCommitter{aPager, nil})
+		})
 		require.NoError(t, err)
 
 		checkRows(ctx, t, aTable, rows)
@@ -89,7 +85,7 @@ func TestTable_Insert_UniqueIndex(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aTable.Insert(ctx, stmt)
 			return err
-		}, TxCommitter{aPager, nil})
+		})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrDuplicateKey)
 

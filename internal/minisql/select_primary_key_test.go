@@ -11,34 +11,34 @@ import (
 )
 
 func TestTable_Select_PrimaryKey(t *testing.T) {
-	aPager := initTest(t)
+	aPager, dbFile := initTest(t)
 
 	var (
 		ctx        = context.Background()
 		rows       = gen.RowsWithPrimaryKey(38)
-		txManager  = NewTransactionManager(zap.NewNop())
-		tablePager = NewTransactionalPager(
-			aPager.ForTable(testColumnsWithPrimaryKey),
-			txManager,
-		)
-		aTable *Table
+		tablePager = aPager.ForTable(testColumnsWithPrimaryKey)
+		txManager  = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		aTable     *Table
 	)
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		freePage, err := tablePager.GetFreePage(ctx)
+		freePage, err := txPager.GetFreePage(ctx)
 		if err != nil {
 			return err
 		}
 		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
-		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumnsWithPrimaryKey, freePage.Index)
+		aTable = NewTable(testLogger, txPager, txManager, testTableName, testColumnsWithPrimaryKey, freePage.Index)
 		return nil
-	}, TxCommitter{aPager, nil})
+	})
 	require.NoError(t, err)
 
-	primaryKeyPager := NewTransactionalPager(
-		aPager.ForIndex(aTable.PrimaryKey.Column.Kind, uint64(aTable.PrimaryKey.Column.Size), true),
+	txPrimaryKeyPager := NewTransactionalPager(
+		aPager.ForIndex(aTable.PrimaryKey.Column.Kind, true),
 		aTable.txManager,
+		testTableName,
+		aTable.PrimaryKey.Name,
 	)
 
 	// Batch insert test rows
@@ -52,12 +52,12 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 	}
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		freePage, err := primaryKeyPager.GetFreePage(ctx)
+		freePage, err := txPrimaryKeyPager.GetFreePage(ctx)
 		if err != nil {
 			return err
 		}
 		aTable.PrimaryKey.Index, err = aTable.createBTreeIndex(
-			primaryKeyPager,
+			txPrimaryKeyPager,
 			freePage,
 			aTable.PrimaryKey.Column,
 			aTable.PrimaryKey.Name,
@@ -68,7 +68,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		}
 		_, err = aTable.Insert(ctx, stmt)
 		return err
-	}, TxCommitter{aPager, nil})
+	})
 	require.NoError(t, err)
 
 	checkRows(ctx, t, aTable, rows)

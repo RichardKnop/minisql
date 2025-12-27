@@ -11,17 +11,15 @@ import (
 
 func TestIndex_Insert(t *testing.T) {
 	var (
-		aPager     = initTest(t)
-		ctx        = context.Background()
-		key        = int64(1)
-		aColumn    = Column{Name: "test_column", Kind: Int8, Size: 8}
-		txManager  = NewTransactionManager(zap.NewNop())
-		indexPager = NewTransactionalPager(
-			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size), true),
-			txManager,
-		)
+		aPager, dbFile = initTest(t)
+		ctx            = context.Background()
+		key            = int64(1)
+		aColumn        = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager     = aPager.ForIndex(aColumn.Kind, true)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
+		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, indexPager, 0)
+	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, txPager, 0)
 	require.NoError(t, err)
 	anIndex.maximumKeys = 3
 
@@ -34,7 +32,7 @@ func TestIndex_Insert(t *testing.T) {
 				key++
 			}
 			return nil
-		}, TxCommitter{aPager, nil})
+		})
 		require.NoError(t, err)
 
 		/*
@@ -52,7 +50,7 @@ func TestIndex_Insert(t *testing.T) {
 	t.Run("Insert duplicate key fails", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Insert(ctx, key-1, RowID(key-1+100))
-		}, TxCommitter{aPager, nil})
+		})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrDuplicateKey)
 	})
@@ -60,7 +58,7 @@ func TestIndex_Insert(t *testing.T) {
 	t.Run("Insert 4th key, causes a split", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Insert(ctx, key, RowID(key+100))
-		}, TxCommitter{aPager, nil})
+		})
 		require.NoError(t, err)
 		key++
 
@@ -94,7 +92,7 @@ func TestIndex_Insert(t *testing.T) {
 				key++
 			}
 			return nil
-		}, TxCommitter{aPager, nil})
+		})
 		require.NoError(t, err)
 
 		/*
@@ -131,7 +129,7 @@ func TestIndex_Insert(t *testing.T) {
 				key++
 			}
 			return nil
-		}, TxCommitter{aPager, nil})
+		})
 		require.NoError(t, err)
 
 		/*
@@ -166,7 +164,7 @@ func TestIndex_Insert(t *testing.T) {
 	t.Run("Insert 1 more key, internal split", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Insert(ctx, key, RowID(key+100))
-		}, TxCommitter{aPager, nil})
+		})
 		require.NoError(t, err)
 		key++
 
@@ -217,7 +215,7 @@ func TestIndex_Insert(t *testing.T) {
 				key++
 			}
 			return nil
-		}, TxCommitter{aPager, nil})
+		})
 		require.NoError(t, err)
 
 		/*
@@ -273,17 +271,15 @@ func TestIndex_Insert(t *testing.T) {
 
 func TestIndex_Insert_OutOfOrder(t *testing.T) {
 	var (
-		aPager     = initTest(t)
-		ctx        = context.Background()
-		keys       = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
-		aColumn    = Column{Name: "test_column", Kind: Int8, Size: 8}
-		txManager  = NewTransactionManager(zap.NewNop())
-		indexPager = NewTransactionalPager(
-			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size), true),
-			txManager,
-		)
+		aPager, dbFile = initTest(t)
+		ctx            = context.Background()
+		keys           = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
+		aColumn        = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager     = aPager.ForIndex(aColumn.Kind, true)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
+		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, indexPager, 0)
+	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, txPager, 0)
 	require.NoError(t, err)
 	anIndex.maximumKeys = 3
 
@@ -294,7 +290,7 @@ func TestIndex_Insert_OutOfOrder(t *testing.T) {
 			}
 		}
 		return nil
-	}, TxCommitter{aPager, nil})
+	})
 	require.NoError(t, err)
 
 	/*

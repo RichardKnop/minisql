@@ -12,17 +12,15 @@ import (
 )
 
 func TestTable_Select(t *testing.T) {
-	aPager := initTest(t)
+	aPager, dbFile := initTest(t)
 
 	var (
 		ctx        = context.Background()
 		rows       = gen.Rows(38)
-		txManager  = NewTransactionManager(zap.NewNop())
-		tablePager = NewTransactionalPager(
-			aPager.ForTable(testColumns),
-			txManager,
-		)
-		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumns, 0)
+		tablePager = aPager.ForTable(testColumns)
+		txManager  = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		aTable     = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0)
 	)
 
 	// Set some values to NULL so we can test selecting/filtering on NULLs
@@ -43,7 +41,7 @@ func TestTable_Select(t *testing.T) {
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		_, err := aTable.Insert(ctx, insertStmt)
 		return err
-	}, TxCommitter{aPager, nil})
+	})
 	require.NoError(t, err)
 
 	t.Run("Select all rows", func(t *testing.T) {
@@ -449,15 +447,13 @@ func TestTable_Select(t *testing.T) {
 
 func TestTable_Select_Overflow(t *testing.T) {
 	var (
-		aPager     = initTest(t)
-		ctx        = context.Background()
-		txManager  = NewTransactionManager(zap.NewNop())
-		tablePager = NewTransactionalPager(
-			aPager.ForTable(testOverflowColumns),
-			txManager,
-		)
-		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testOverflowColumns, 0)
-		rows   = gen.OverflowRows(3, []uint32{
+		aPager, dbFile = initTest(t)
+		ctx            = context.Background()
+		tablePager     = aPager.ForTable(testOverflowColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0)
+		rows           = gen.OverflowRows(3, []uint32{
 			MaxInlineVarchar,          // inline text
 			MaxInlineVarchar + 100,    // text overflows to 1 page
 			MaxOverflowPageData + 100, // text overflows to multiple pages
@@ -477,7 +473,7 @@ func TestTable_Select_Overflow(t *testing.T) {
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		_, err := aTable.Insert(ctx, insertStmt)
 		return err
-	}, TxCommitter{aPager, nil})
+	})
 	require.NoError(t, err)
 
 	t.Run("Select all rows", func(t *testing.T) {

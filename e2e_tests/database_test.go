@@ -1,47 +1,9 @@
 package e2etests
 
 import (
-	"database/sql"
-	"os"
-	"testing"
-
 	_ "github.com/RichardKnop/minisql"
 	"github.com/RichardKnop/minisql/internal/minisql"
-	"github.com/stretchr/testify/suite"
 )
-
-type TestSuite struct {
-	suite.Suite
-	dbFile *os.File
-	db     *sql.DB
-}
-
-func TestTestSuite(t *testing.T) {
-	suite.Run(t, new(TestSuite))
-}
-
-func (s *TestSuite) SetupSuite() {
-}
-
-func (s *TestSuite) TearDownSuite() {
-}
-
-func (s *TestSuite) SetupTest() {
-	tempFile, err := os.CreateTemp("", "testdb")
-	s.Require().NoError(err)
-	s.dbFile = tempFile
-
-	db, err := sql.Open("minisql", s.dbFile.Name())
-	s.Require().NoError(err)
-	s.db = db
-}
-
-func (s *TestSuite) TearDownTest() {
-	err := s.db.Close()
-	s.Require().NoError(err)
-	err = os.Remove(s.dbFile.Name())
-	s.Require().NoError(err)
-}
 
 type schema struct {
 	Type     minisql.SchemaType
