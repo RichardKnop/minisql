@@ -61,6 +61,7 @@ func NewPager(file DBFile, pageSize int) (*pagerImpl, error) {
 			return nil, err
 		}
 
+		fmt.Println("Unmarshaling DB header from file")
 		if err := UnmarshalDatabaseHeader(buf, &aPager.dbHeader); err != nil {
 			return nil, err
 		}

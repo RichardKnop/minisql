@@ -25,26 +25,41 @@ func init() {
 // Driver implements the database/sql/driver.Driver interface.
 type Driver struct {
 	mu        sync.Mutex
-	databases map[string]*minisql.Database
+	databases map[string]*databaseEntry
 	parser    minisql.Parser
 	logger    *zap.Logger
 }
 
+type databaseEntry struct {
+	db     *minisql.Database
+	config *ConnectionConfig
+}
+
 // Open returns a new connection to the database.
-// The name is a path to a database file.
+// The name is a connection string with optional parameters:
+//   - "./my.db" - simple path
+//   - "./my.db?journal=false" - disable journaling
+//   - "./my.db?log_level=debug" - enable debug logging
+//   - "./my.db?journal=true&log_level=info" - multiple parameters
 func (d *Driver) Open(name string) (driver.Conn, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	// Parse connection string
+	config, err := ParseConnectionString(name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse connection string: %w", err)
+	}
+
 	if d.databases == nil {
-		d.databases = make(map[string]*minisql.Database)
+		d.databases = make(map[string]*databaseEntry)
 	}
 
 	// Initialize logger if not set
 	if d.logger == nil {
-		config := logging.DefaultConfig()
-		config.Level.SetLevel(zap.WarnLevel) // Set to warn by default for driver
-		logger, err := config.Build()
+		logConfig := logging.DefaultConfig()
+		logConfig.Level = config.GetZapLevel()
+		logger, err := logConfig.Build()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create logger: %w", err)
 		}
@@ -55,32 +70,37 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 		d.parser = parser.New()
 	}
 
-	// Check if database is already open
-	_, exists := d.databases[name]
+	// Check if database is already open (use file path as key)
+	entry, exists := d.databases[config.FilePath]
 	if exists {
 		return &Conn{
-			db:     d.databases[name],
+			db:     entry.db,
 			parser: d.parser,
 			logger: d.logger,
 		}, nil
 	}
 
-	if minisql.JournalEnabled {
-		recovered, err := minisql.RecoverFromJournal(name, minisql.PageSize)
+	// Attempt journal recovery if enabled
+	if config.JournalEnabled {
+		recovered, err := minisql.RecoverFromJournal(config.FilePath, minisql.PageSize)
 		if err != nil {
 			return nil, fmt.Errorf("journal recovery failed: %w", err)
 		}
 		if recovered {
-			d.logger.Warn("database recovered from journal on startup", zap.String("db_path", name))
+			d.logger.Warn("database recovered from journal on startup",
+				zap.String("db_path", config.FilePath))
 		}
 	}
 
-	db, err := d.newDB(name)
+	db, err := d.newDB(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	d.databases[name] = db
+	d.databases[config.FilePath] = &databaseEntry{
+		db:     db,
+		config: config,
+	}
 
 	return &Conn{
 		db:     db,
@@ -89,9 +109,9 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 	}, nil
 }
 
-func (d *Driver) newDB(name string) (*minisql.Database, error) {
+func (d *Driver) newDB(config *ConnectionConfig) (*minisql.Database, error) {
 	// Open or create database file
-	dbFile, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE, 0600)
+	dbFile, err := os.OpenFile(config.FilePath, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database file: %w", err)
 	}
@@ -105,10 +125,11 @@ func (d *Driver) newDB(name string) (*minisql.Database, error) {
 	return minisql.NewDatabase(
 		context.Background(),
 		d.logger,
-		name,
+		config.FilePath,
 		d.parser,
 		pager,
 		pager,
+		minisql.WithJournal(config.JournalEnabled),
 	)
 }
 

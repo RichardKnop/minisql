@@ -22,8 +22,44 @@ import (
 And create a database instance:
 
 ```go
+// Simple path
 db, err := sql.Open("minisql", "./my.db")
+
+// With connection parameters
+db, err := sql.Open("minisql", "./my.db?journal=false")
+
+// Multiple parameters
+db, err := sql.Open("minisql", "./my.db?journal=true&log_level=debug")
 ```
+
+## Connection String Parameters
+
+MiniSQL supports optional connection string parameters:
+
+| Parameter | Values | Default | Description |
+|-----------|--------|---------|-------------|
+| `journal` | `true`, `false` | `true` | Enable/disable rollback journal for crash recovery |
+| `log_level` | `debug`, `info`, `warn`, `error` | `warn` | Set logging verbosity level |
+
+**Examples:**
+```go
+// Disable journaling for better performance (no crash recovery)
+db, err := sql.Open("minisql", "./my.db?journal=false")
+
+// Enable debug logging
+db, err := sql.Open("minisql", "./my.db?log_level=debug")
+
+// Combine multiple parameters
+db, err := sql.Open("minisql", "/path/to/db.db?journal=true&log_level=info")
+```
+
+**Note:** Disabling journaling (`journal=false`) improves performance but removes crash recovery protection. If the application crashes during a transaction commit, the database may become corrupted.
+
+##  Write-Ahead Rollback Journal
+
+MiniSQL uses a write-ahead rollback journal by default. Every write transaction, before comitting first writes original version of all modified pages (and database header if applicable) to the journal file (a file with `-journal` suffix created in the same directory as the database file). In case of an error encountered during flushing of pages changed by the transaction to the disk, the database quits and recovers to original state before the transaction from the journal file.
+
+You can disable this behaviour by appending `?journal=false` to the connection string if you value performance over being able to recover from a crash. This might be useful for databases which are not the main source of data and are created each time from the main source when an ephemeral service starts, for example in event sourcing systems.
 
 ## Storage
 

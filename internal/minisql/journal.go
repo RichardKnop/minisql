@@ -59,7 +59,7 @@ func CreateJournal(dbPath string, pageSize uint32) (*RollbackJournal, error) {
 }
 
 // WriteDBHeaderBefore writes the ORIGINAL database header to the journal before modification.
-func (j *RollbackJournal) WriteDBHeaderBefore(ctx context.Context, originalHeader *DatabaseHeader) error {
+func (j *RollbackJournal) WriteDBHeaderBefore(ctx context.Context, originalHeader DatabaseHeader) error {
 	buf, err := originalHeader.Marshal()
 	if err != nil {
 		return fmt.Errorf("marshal database header: %w", err)
