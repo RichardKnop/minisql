@@ -286,6 +286,21 @@ values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:2
 		s.Equal(100, int(orders[1].UserID))
 		s.Equal(120, int(orders[1].TotalPaid))
 	})
+
+	s.Run("Insert a 1000 users", func() {
+		usersToInsert := gen.Users(1000)
+		for _, aUser := range usersToInsert {
+			s.prepareAndExecQuery(`insert into users("email", "name") values(?, ?);`, 1, aUser.Email.String, aUser.Name.String)
+		}
+		s.countRowsInTable("users", 1011) // 10 existing + 1 with NULL email + 1000 new
+	})
+}
+
+func (s TestSuite) countRowsInTable(tableName string, expectedCount int) {
+	var count int
+	err := s.db.QueryRowContext(context.Background(), `select count(*) from `+tableName).Scan(&count)
+	s.Require().NoError(err)
+	s.Equal(expectedCount, count)
 }
 
 func (s TestSuite) execQuery(query string, expectedRowsAffected int) {
@@ -294,6 +309,19 @@ func (s TestSuite) execQuery(query string, expectedRowsAffected int) {
 	rowsAffected, err := aResult.RowsAffected()
 	s.Require().NoError(err)
 	s.Require().Equal(expectedRowsAffected, int(rowsAffected))
+}
+
+func (s TestSuite) prepareAndExecQuery(query string, expectedRowsAffected int, args ...any) {
+	stmt, err := s.db.Prepare(query)
+	s.Require().NoError(err)
+
+	aResult, err := stmt.Exec(args...)
+	s.Require().NoError(err)
+
+	rowsAffected, err := aResult.RowsAffected()
+	s.Require().NoError(err)
+	s.Require().Equal(expectedRowsAffected, int(rowsAffected))
+
 }
 
 type user struct {

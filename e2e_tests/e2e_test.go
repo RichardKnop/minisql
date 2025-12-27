@@ -1,5 +1,12 @@
 package e2etests
 
+import (
+	"database/sql"
+	"time"
+
+	"github.com/brianvoe/gofakeit/v7"
+)
+
 var createUsersTableSQL = `create table "users" (
 	id int8 primary key autoincrement,
 	email varchar(255) unique,
@@ -35,3 +42,45 @@ var createOrdersTableSQL = `create table "orders" (
 	total_paid int4 not null,
 	created timestamp default now()
 );`
+
+type dataGen struct {
+	*gofakeit.Faker
+}
+
+func newDataGen(seed uint64) *dataGen {
+	g := dataGen{
+		Faker: gofakeit.New(seed),
+	}
+
+	return &g
+}
+
+func (g *dataGen) Users(number int) []user {
+	var (
+		emailMap = map[string]struct{}{}
+		users    = make([]user, 0, number)
+	)
+	for range number {
+		aUser := g.User()
+
+		// Ensure unique email
+		_, ok := emailMap[aUser.Email.String]
+		for ok {
+			aUser = g.User()
+			_, ok = emailMap[aUser.Email.String]
+		}
+
+		users = append(users, aUser)
+		emailMap[aUser.Email.String] = struct{}{}
+	}
+	return users
+}
+
+func (g *dataGen) User() user {
+	return user{
+		Email: sql.NullString{String: g.Email(), Valid: true},
+		Name:  sql.NullString{String: g.Name(), Valid: true},
+	}
+}
+
+var gen = newDataGen(uint64(time.Now().Unix()))

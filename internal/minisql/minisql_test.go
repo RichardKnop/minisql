@@ -311,7 +311,9 @@ func (g *dataGen) Rows(number int) []Row {
 
 		aRow.Key = RowID(i)
 		rows = append(rows, aRow)
+
 		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
+		emailMap[aRow.Values[1].Value.(TextPointer).String()] = struct{}{}
 	}
 	return rows
 }
@@ -370,7 +372,9 @@ func (g *dataGen) MediumRows(number int) []Row {
 
 		aRow.Key = RowID(i)
 		rows = append(rows, aRow)
+
 		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
+		emailMap[aRow.Values[1].Value.(TextPointer).String()] = struct{}{}
 	}
 	return rows
 }
@@ -421,7 +425,9 @@ func (g *dataGen) BigRows(number int) []Row {
 
 		aRow.Key = RowID(i)
 		rows = append(rows, aRow)
+
 		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
+		emailMap[aRow.Values[1].Value.(TextPointer).String()] = struct{}{}
 	}
 	return rows
 }
@@ -453,6 +459,8 @@ func (g *dataGen) RowsWithPrimaryKey(number int) []Row {
 
 		aRow.Key = RowID(i)
 		rows = append(rows, aRow)
+
+		emailMap[aRow.Values[1].Value.(TextPointer).String()] = struct{}{}
 	}
 	return rows
 }
@@ -484,6 +492,8 @@ func (g *dataGen) RowsWithUniqueIndex(number int) []Row {
 
 		aRow.Key = RowID(i)
 		rows = append(rows, aRow)
+
+		emailMap[aRow.Values[1].Value.(TextPointer).String()] = struct{}{}
 	}
 	return rows
 }
