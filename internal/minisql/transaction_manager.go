@@ -34,6 +34,7 @@ func NewTransactionManager(logger *zap.Logger, dbFilePath string, factory TxPage
 		dbFilePath:         dbFilePath,
 		saver:              saver,
 		ddlSaver:           ddlSaver,
+		// journalEnabled:     true,
 	}
 }
 
@@ -106,9 +107,22 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
 	}
 
+	// Check if this is a read-only transaction
+	writePages, writeInfo := tx.GetWriteVersions()
+	isReadOnly := len(writePages) == 0 && !tx.DDLChanges.HasChanges()
+
+	// Fast path for read-only transactions - no writes to commit
+	if isReadOnly {
+		tx.Commit()
+		delete(tm.transactions, tx.ID)
+		tm.logger.Debug("commit read-only transaction", zap.Uint64("tx_id", uint64(tx.ID)))
+		return nil
+	}
+
 	pagesToFlush := make([]PageIndex, 0, len(tx.WriteSet))
 
 	// === PHASE 1: Create Rollback Journal ===
+	// Skip journal creation for read-only transactions (no modifications to recover)
 	// Write original page contents to journal before modifying database
 	// This enables crash recovery by restoring original pages
 	var journal *RollbackJournal
@@ -127,7 +141,6 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 
 		// Write original pages to journal
 		numJournaledPages := 0
-		writePages, writeInfo := tx.GetWriteVersions()
 		if len(writePages) != len(writeInfo) {
 			tx.Abort()
 			return fmt.Errorf("internal error: mismatched write pages and info")
@@ -167,7 +180,6 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		pagesToFlush = append(pagesToFlush, 0) // header is first 100 bytes of page 0
 	}
 	// Then update modified pages
-	writePages, _ := tx.GetWriteVersions()
 	for pageIdx, writePage := range writePages {
 		// Write the modified page to base storage
 		tm.saver.SavePage(ctx, pageIdx, writePage)

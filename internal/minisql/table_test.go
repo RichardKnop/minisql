@@ -72,7 +72,7 @@ func TestTable_SeekNextRowID(t *testing.T) {
 		assert.Equal(t, 0, int(rowID))
 
 		mock.AssertExpectationsForObjects(t, pagerMock)
-		resetMock(&pagerMock.Mock)
+		resetMocks(&pagerMock.Mock)
 	})
 
 	t.Run("table with rows", func(t *testing.T) {
@@ -173,7 +173,7 @@ func TestTable_Seek_EmptyTable(t *testing.T) {
 		assert.Equal(t, 0, int(aCursor.CellIdx))
 
 		mock.AssertExpectationsForObjects(t, pagerMock)
-		resetMock(&pagerMock.Mock)
+		resetMocks(&pagerMock.Mock)
 	})
 
 	t.Run("root leaf node single cell", func(t *testing.T) {
@@ -199,7 +199,7 @@ func TestTable_Seek_EmptyTable(t *testing.T) {
 		assert.Equal(t, 1, int(aCursor.CellIdx))
 
 		mock.AssertExpectationsForObjects(t, pagerMock)
-		resetMock(&pagerMock.Mock)
+		resetMocks(&pagerMock.Mock)
 	})
 
 	t.Run("root leaf node full", func(t *testing.T) {

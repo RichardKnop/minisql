@@ -726,9 +726,11 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 	return aRootPage, internalPages, leafPages
 }
 
-func resetMock(aMock *mock.Mock) {
-	aMock.ExpectedCalls = nil
-	aMock.Calls = nil
+func resetMocks(mocks ...*mock.Mock) {
+	for _, aMock := range mocks {
+		aMock.ExpectedCalls = nil
+		aMock.Calls = nil
+	}
 }
 
 func intPtr(i int64) *int64 {

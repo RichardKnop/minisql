@@ -12,5 +12,6 @@ packages:
   github.com/RichardKnop/minisql/internal/minisql:
     interfaces:
       Parser: 
+      Pager:
       PageSaver:
       TxPager:

@@ -17,7 +17,7 @@ func TestCreateJournal(t *testing.T) {
 
 	aJournal, err := CreateJournal(tempFile.Name(), PageSize)
 	require.NoError(t, err)
-	tempFile.Close()
+	aJournal.Close()
 
 	assert.Equal(t, tempFile.Name()+"-journal", aJournal.filepath)
 	assert.Equal(t, PageSize, int(aJournal.pageSize))
