@@ -35,12 +35,18 @@ type Database struct {
 
 type clock func() Time
 
-var JournalEnabled = false
-
 var ErrRecoveredFromJournal = fmt.Errorf("database recovered from journal on startup")
 
+type DatabaseOption func(*Database)
+
+func WithJournal(enabled bool) DatabaseOption {
+	return func(d *Database) {
+		d.txManager.journalEnabled = enabled
+	}
+}
+
 // NewDatabase creates a new database
-func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aParser Parser, aFactory PagerFactory, saver PageSaver) (*Database, error) {
+func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aParser Parser, aFactory PagerFactory, saver PageSaver, opts ...DatabaseOption) (*Database, error) {
 	db := &Database{
 		dbFilePath: dbFilePath,
 		parser:     aParser,
@@ -64,7 +70,10 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aPa
 	}
 
 	db.txManager = NewTransactionManager(logger, dbFilePath, db.pagerFactory, saver, db)
-	db.txManager.journalEnabled = JournalEnabled
+
+	for _, opt := range opts {
+		opt(db)
+	}
 
 	if err := db.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return db.init(ctx)

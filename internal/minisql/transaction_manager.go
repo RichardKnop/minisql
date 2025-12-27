@@ -18,7 +18,7 @@ type TransactionManager struct {
 	globalDbHeaderVersion uint64
 	logger                *zap.Logger
 	dbFilePath            string
-	journalEnabled        bool // TODO - remove once journaling is always on
+	journalEnabled        bool
 	factory               TxPagerFactory
 	saver                 PageSaver
 	ddlSaver              DDLSaver
@@ -34,7 +34,6 @@ func NewTransactionManager(logger *zap.Logger, dbFilePath string, factory TxPage
 		dbFilePath:         dbFilePath,
 		saver:              saver,
 		ddlSaver:           ddlSaver,
-		journalEnabled:     JournalEnabled,
 	}
 }
 
@@ -154,7 +153,7 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 			}
 
 			originalHeader := aPager.GetHeader(ctx)
-			if err := journal.WriteDBHeaderBefore(ctx, &originalHeader); err != nil {
+			if err := journal.WriteDBHeaderBefore(ctx, originalHeader); err != nil {
 				tx.Abort()
 				return fmt.Errorf("write database header to journal: %w", err)
 			}
