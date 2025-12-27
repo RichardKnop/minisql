@@ -41,19 +41,6 @@ var ErrRecoveredFromJournal = fmt.Errorf("database recovered from journal on sta
 
 // NewDatabase creates a new database
 func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aParser Parser, aFactory PagerFactory, saver PageSaver) (*Database, error) {
-	// Recover from journal if it exists (crash recovery)
-	if JournalEnabled {
-		recovered, err := RecoverFromJournal(dbFilePath, PageSize)
-		if err != nil {
-			return nil, fmt.Errorf("journal recovery failed: %w", err)
-		}
-		if recovered {
-			saver.Close()
-			logger.Info("database recovered from journal on startup")
-			return nil, ErrRecoveredFromJournal
-		}
-	}
-
 	db := &Database{
 		dbFilePath: dbFilePath,
 		parser:     aParser,

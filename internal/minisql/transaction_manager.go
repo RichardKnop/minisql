@@ -139,7 +139,7 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 			}
 		}()
 
-		// Write original db header and pages to journal
+		// Write original db header and pages to the journal
 		numJournaledPages := 0
 		if len(writePages) != len(writeInfo) {
 			tx.Abort()
@@ -159,19 +159,17 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 				return fmt.Errorf("write database header to journal: %w", err)
 			}
 		}
+		// Write original pages to the journal
 		for pageIdx := range writePages {
 			aPager, err := tm.factory(ctx, writeInfo[pageIdx].Table, writeInfo[pageIdx].Index)
 			if err != nil {
 				tx.Abort()
 				return fmt.Errorf("get pager for journaling page %d: %w", pageIdx, err)
 			}
-			// Read original page from disk
 			originalPage, err := aPager.GetPage(ctx, pageIdx)
 			if err != nil {
 				return fmt.Errorf("read original page %d for journal: %w", pageIdx, err)
 			}
-
-			// Write original page to journal
 			if err := journal.WritePageBefore(ctx, pageIdx, originalPage); err != nil {
 				return fmt.Errorf("journal page %d: %w", pageIdx, err)
 			}
@@ -205,11 +203,24 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 	}
 
 	// === PHASE 3: Flush Modified Pages to Disk ===
-	// If we crash during this phase, journal will restore original pages on recovery
+	// CRITICAL: If flush fails, the database is in an inconsistent state:
+	// - In-memory pages are modified
+	// - Page versions are incremented
+	// - But disk is not updated
+	// We MUST panic to force restart and journal recovery
 	for _, pageIdx := range pagesToFlush {
 		if err := tm.saver.Flush(ctx, pageIdx); err != nil {
-			// TODO - do we need to panic here to restart?
-			return fmt.Errorf("failed to flush page %d: %w", pageIdx, err)
+			// FATAL: Cannot continue with partially-flushed transaction
+			// In-memory state is corrupted and doesn't match disk
+			// Journal exists and will restore consistency on restart
+			tm.logger.Fatal("FATAL: page flush failed during commit, database corrupted",
+				zap.Uint64("tx_id", uint64(tx.ID)),
+				zap.Uint64("page_idx", uint64(pageIdx)),
+				zap.Error(err),
+				zap.String("action", "forcing restart for journal recovery"))
+
+			panic(fmt.Sprintf("transaction %d: flush page %d failed: %v - restart required for journal recovery",
+				tx.ID, pageIdx, err))
 		}
 	}
 
@@ -226,14 +237,14 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		journal = nil // Prevent defer from closing again
 	}
 
-	// Save DDL changes first (CREATE / DROP TABLE)
+	// === PHASE 5: Finalize Transaction ===
+	// Save DDL changes (CREATE / DROP TABLE)
 	if tx.DDLChanges.HasChanges() {
 		tm.ddlSaver.SaveDDLChanges(ctx, tx.DDLChanges)
 	}
 
+	// Mark transaction as committed and clean up
 	tx.Commit()
-
-	// Clean up transaction
 	delete(tm.transactions, tx.ID)
 
 	tm.logger.Debug("commit transaction", zap.Uint64("tx_id", uint64(tx.ID)))

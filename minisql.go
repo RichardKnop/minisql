@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -57,30 +56,28 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 	}
 
 	// Check if database is already open
-	db, exists := d.databases[name]
+	_, exists := d.databases[name]
 	if exists {
 		return &Conn{
-			db:     db,
+			db:     d.databases[name],
 			parser: d.parser,
 			logger: d.logger,
 		}, nil
 	}
 
+	if minisql.JournalEnabled {
+		recovered, err := minisql.RecoverFromJournal(name, minisql.PageSize)
+		if err != nil {
+			return nil, fmt.Errorf("journal recovery failed: %w", err)
+		}
+		if recovered {
+			d.logger.Warn("database recovered from journal on startup", zap.String("db_path", name))
+		}
+	}
+
 	db, err := d.newDB(name)
 	if err != nil {
-		// If journal recovery was performed, try reopening the DB
-		if !errors.Is(err, minisql.ErrRecoveredFromJournal) {
-			return nil, fmt.Errorf("failed to open database: %w", err)
-		}
-		if db != nil {
-			if err := db.Close(); err != nil {
-				return nil, fmt.Errorf("failed to close recovered database: %w", err)
-			}
-		}
-		db, err = d.newDB(name)
-		if err != nil {
-			return nil, fmt.Errorf("failed to reopen database after recovery: %w", err)
-		}
+		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
 	d.databases[name] = db
