@@ -16,34 +16,33 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 	var (
 		ctx        = context.Background()
 		rows       = gen.RowsWithUniqueIndex(38)
-		txManager  = NewTransactionManager(zap.NewNop())
-		tablePager = NewTransactionalPager(
-			aPager.ForTable(testColumnsWithUniqueIndex),
-			txManager,
-		)
-		aTable    *Table
-		indexName = uniqueIndexName(testTableName, "email")
+		tablePager = aPager.ForTable(testColumnsWithUniqueIndex)
+		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
+		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		aTable     *Table
+		indexName  = uniqueIndexName(testTableName, "email")
 	)
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		freePage, err := tablePager.GetFreePage(ctx)
+		freePage, err := txPager.GetFreePage(ctx)
 		if err != nil {
 			return err
 		}
 		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
-		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumnsWithUniqueIndex, freePage.Index)
+		aTable = NewTable(testLogger, txPager, txManager, testTableName, testColumnsWithUniqueIndex, freePage.Index)
 		return nil
-	}, TxCommitter{aPager, nil})
+	})
 	require.NoError(t, err)
 
-	indexPager := NewTransactionalPager(
-		aPager.ForIndex(
-			aTable.UniqueIndexes[indexName].Column.Kind,
-			uint64(aTable.UniqueIndexes[indexName].Column.Size),
-			true,
-		),
-		aTable.txManager,
+	var (
+		indexPager   = aPager.ForIndex(Varchar, true)
+		txIndexPager = NewTransactionalPager(
+			indexPager,
+			aTable.txManager,
+			testTableName,
+			aTable.UniqueIndexes[indexName].Name,
+		)
 	)
 
 	// Batch insert test rows
@@ -57,13 +56,13 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 	}
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		freePage, err := indexPager.GetFreePage(ctx)
+		freePage, err := txIndexPager.GetFreePage(ctx)
 		if err != nil {
 			return err
 		}
 		uniqueIndex := aTable.UniqueIndexes[indexName]
 		uniqueIndex.Index, err = aTable.createBTreeIndex(
-			indexPager,
+			txIndexPager,
 			freePage,
 			aTable.UniqueIndexes[indexName].Column,
 			aTable.UniqueIndexes[indexName].Name,
@@ -75,7 +74,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 		}
 		_, err = aTable.Insert(ctx, stmt)
 		return err
-	}, TxCommitter{aPager, nil})
+	})
 	require.NoError(t, err)
 
 	checkRows(ctx, t, aTable, rows)

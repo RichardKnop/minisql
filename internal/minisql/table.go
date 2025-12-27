@@ -74,6 +74,23 @@ func (t *Table) ColumnByName(name string) (Column, bool) {
 	return Column{}, false
 }
 
+func (t *Table) IndexColumnByIndexName(name string) (Column, bool) {
+	if t.HasPrimaryKey() && t.PrimaryKey.Name == name {
+		return t.PrimaryKey.Column, true
+	}
+	for _, index := range t.UniqueIndexes {
+		if index.Name == name {
+			return index.Column, true
+		}
+	}
+	for _, index := range t.SecondaryIndexes {
+		if index.Name == name {
+			return index.Column, true
+		}
+	}
+	return Column{}, false
+}
+
 func (t *Table) IndexInfoByColumnName(name string) (IndexInfo, bool) {
 	if t.HasPrimaryKey() && t.PrimaryKey.Column.Name == name {
 		return t.PrimaryKey.IndexInfo, true

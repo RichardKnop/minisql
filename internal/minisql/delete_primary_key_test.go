@@ -13,30 +13,30 @@ func TestTable_Delete_PrimaryKey(t *testing.T) {
 	var (
 		aPager     = initTest(t)
 		ctx        = context.Background()
-		txManager  = NewTransactionManager(zap.NewNop())
-		tablePager = NewTransactionalPager(
-			aPager.ForTable(testColumnsWithPrimaryKey),
-			txManager,
-		)
-		rows   = gen.RowsWithPrimaryKey(10)
-		aTable *Table
+		tablePager = aPager.ForTable(testColumnsWithPrimaryKey)
+		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
+		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		rows       = gen.RowsWithPrimaryKey(10)
+		aTable     *Table
 	)
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		freePage, err := tablePager.GetFreePage(ctx)
+		freePage, err := txPager.GetFreePage(ctx)
 		if err != nil {
 			return err
 		}
 		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
-		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumnsWithPrimaryKey, freePage.Index)
+		aTable = NewTable(testLogger, txPager, txManager, testTableName, testColumnsWithPrimaryKey, freePage.Index)
 		return nil
-	}, TxCommitter{aPager, nil})
+	})
 	require.NoError(t, err)
 
-	primaryKeyPager := NewTransactionalPager(
-		aPager.ForIndex(aTable.PrimaryKey.Column.Kind, uint64(aTable.PrimaryKey.Column.Size), true),
+	txPrimaryKeyPager := NewTransactionalPager(
+		aPager.ForIndex(aTable.PrimaryKey.Column.Kind, true),
 		aTable.txManager,
+		testTableName,
+		aTable.PrimaryKey.Name,
 	)
 
 	// Batch insert test rows
@@ -50,12 +50,12 @@ func TestTable_Delete_PrimaryKey(t *testing.T) {
 	}
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		freePage, err := primaryKeyPager.GetFreePage(ctx)
+		freePage, err := txPrimaryKeyPager.GetFreePage(ctx)
 		if err != nil {
 			return err
 		}
 		aTable.PrimaryKey.Index, err = aTable.createBTreeIndex(
-			primaryKeyPager,
+			txPrimaryKeyPager,
 			freePage,
 			aTable.PrimaryKey.Column,
 			aTable.PrimaryKey.Name,
@@ -66,7 +66,7 @@ func TestTable_Delete_PrimaryKey(t *testing.T) {
 		}
 		_, err = aTable.Insert(ctx, stmt)
 		return err
-	}, TxCommitter{aPager, nil})
+	})
 	require.NoError(t, err)
 
 	checkRows(ctx, t, aTable, rows)

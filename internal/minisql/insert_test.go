@@ -16,12 +16,10 @@ func TestTable_Insert(t *testing.T) {
 		aPager     = initTest(t)
 		ctx        = context.Background()
 		rows       = gen.Rows(2)
-		txManager  = NewTransactionManager(zap.NewNop())
-		tablePager = NewTransactionalPager(
-			aPager.ForTable(testColumns),
-			txManager,
-		)
-		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumns, 0)
+		tablePager = aPager.ForTable(testColumns)
+		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
+		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		aTable     = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0)
 	)
 
 	t.Run("Insert row with all NOT NULL values", func(t *testing.T) {
@@ -31,7 +29,7 @@ func TestTable_Insert(t *testing.T) {
 			Inserts: [][]OptionalValue{rows[0].Values},
 		}
 
-		mustInsert(t, ctx, aTable, txManager, aPager, stmt)
+		mustInsert(t, ctx, aTable, txManager, stmt)
 
 		assert.Equal(t, 1, int(aPager.pages[0].LeafNode.Header.Cells))
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Cells[0].Key))
@@ -55,7 +53,7 @@ func TestTable_Insert(t *testing.T) {
 			Inserts: [][]OptionalValue{rows[1].Values},
 		}
 
-		mustInsert(t, ctx, aTable, txManager, aPager, stmt)
+		mustInsert(t, ctx, aTable, txManager, stmt)
 
 		assert.Equal(t, 2, int(aPager.pages[0].LeafNode.Header.Cells))
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Cells[0].Key))
@@ -77,12 +75,10 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 		aPager     = initTest(t)
 		ctx        = context.Background()
 		rows       = gen.Rows(3)
-		txManager  = NewTransactionManager(zap.NewNop())
-		tablePager = NewTransactionalPager(
-			aPager.ForTable(testColumns),
-			txManager,
-		)
-		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testColumns, 0)
+		tablePager = aPager.ForTable(testColumns)
+		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
+		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		aTable     = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0)
 	)
 
 	stmt := Statement{
@@ -93,7 +89,7 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	mustInsert(t, ctx, aTable, txManager, aPager, stmt)
+	mustInsert(t, ctx, aTable, txManager, stmt)
 
 	assert.Equal(t, 3, int(aPager.pages[0].LeafNode.Header.Cells))
 	assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Cells[0].Key))
@@ -108,12 +104,10 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 		aPager     = initTest(t)
 		ctx        = context.Background()
 		rows       = gen.MediumRows(6)
-		txManager  = NewTransactionManager(zap.NewNop())
-		tablePager = NewTransactionalPager(
-			aPager.ForTable(testMediumColumns),
-			txManager,
-		)
-		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testMediumColumns, 0)
+		tablePager = aPager.ForTable(testMediumColumns)
+		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
+		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		aTable     = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0)
 	)
 
 	stmt := Statement{
@@ -124,7 +118,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	mustInsert(t, ctx, aTable, txManager, aPager, stmt)
+	mustInsert(t, ctx, aTable, txManager, stmt)
 
 	//require.NoError(t, aTable.print())
 
@@ -169,12 +163,10 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 		aPager     = initTest(t)
 		ctx        = context.Background()
 		rows       = gen.BigRows(4)
-		txManager  = NewTransactionManager(zap.NewNop())
-		tablePager = NewTransactionalPager(
-			aPager.ForTable(testBigColumns),
-			txManager,
-		)
-		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testBigColumns, 0)
+		tablePager = aPager.ForTable(testBigColumns)
+		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
+		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		aTable     = NewTable(testLogger, txPager, txManager, testTableName, testBigColumns, 0)
 	)
 
 	// Batch insert test rows
@@ -187,7 +179,7 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	mustInsert(t, ctx, aTable, txManager, aPager, stmt)
+	mustInsert(t, ctx, aTable, txManager, stmt)
 
 	//require.NoError(t, aTable.print())
 
@@ -230,14 +222,12 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 	var (
 		aPager     = initTest(t)
 		ctx        = context.Background()
-		txManager  = NewTransactionManager(zap.NewNop())
-		tablePager = NewTransactionalPager(
-			aPager.ForTable(testBigColumns),
-			txManager,
-		)
-		aTable  = NewTable(testLogger, tablePager, txManager, testTableName, testBigColumns, 0)
-		numRows = aTable.maxICells(0) + 2
-		rows    = gen.BigRows(numRows)
+		tablePager = aPager.ForTable(testBigColumns)
+		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
+		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		aTable     = NewTable(testLogger, txPager, txManager, testTableName, testBigColumns, 0)
+		numRows    = aTable.maxICells(0) + 2
+		rows       = gen.BigRows(numRows)
 	)
 
 	require.Equal(t, 333, numRows)
@@ -252,7 +242,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	mustInsert(t, ctx, aTable, txManager, aPager, stmt)
+	mustInsert(t, ctx, aTable, txManager, stmt)
 
 	//require.NoError(t, aTable.print())
 	checkRows(ctx, t, aTable, rows)
@@ -331,13 +321,11 @@ func TestTable_Insert_Overflow(t *testing.T) {
 	var (
 		aPager     = initTest(t)
 		ctx        = context.Background()
-		txManager  = NewTransactionManager(zap.NewNop())
-		tablePager = NewTransactionalPager(
-			aPager.ForTable(testOverflowColumns),
-			txManager,
-		)
-		aTable = NewTable(testLogger, tablePager, txManager, testTableName, testOverflowColumns, 0)
-		rows   = []Row{
+		tablePager = aPager.ForTable(testOverflowColumns)
+		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)
+		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		aTable     = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0)
+		rows       = []Row{
 			gen.OverflowRow(MaxInlineVarchar),
 			gen.OverflowRow(MaxInlineVarchar + 100),
 			gen.OverflowRow(MaxOverflowPageData + 100),
@@ -351,7 +339,7 @@ func TestTable_Insert_Overflow(t *testing.T) {
 		}
 		stmt.Inserts = append(stmt.Inserts, rows[0].Values)
 
-		mustInsert(t, ctx, aTable, txManager, aPager, stmt)
+		mustInsert(t, ctx, aTable, txManager, stmt)
 
 		require.Equal(t, 1, int(aPager.TotalPages()))
 		assert.NotNil(t, aPager.pages[0].LeafNode)
@@ -364,7 +352,7 @@ func TestTable_Insert_Overflow(t *testing.T) {
 		}
 		stmt.Inserts = append(stmt.Inserts, rows[1].Values)
 
-		mustInsert(t, ctx, aTable, txManager, aPager, stmt)
+		mustInsert(t, ctx, aTable, txManager, stmt)
 
 		require.Equal(t, 2, int(aPager.TotalPages()))
 		assert.NotNil(t, aPager.pages[0].LeafNode)
@@ -380,7 +368,7 @@ func TestTable_Insert_Overflow(t *testing.T) {
 		}
 		stmt.Inserts = append(stmt.Inserts, rows[2].Values)
 
-		mustInsert(t, ctx, aTable, txManager, aPager, stmt)
+		mustInsert(t, ctx, aTable, txManager, stmt)
 
 		require.Equal(t, 4, int(aPager.TotalPages()))
 		assert.NotNil(t, aPager.pages[0].LeafNode)
@@ -396,10 +384,10 @@ func TestTable_Insert_Overflow(t *testing.T) {
 	})
 }
 
-func mustInsert(t *testing.T, ctx context.Context, aTable *Table, txManager *TransactionManager, saver PageSaver, stmt Statement) {
+func mustInsert(t *testing.T, ctx context.Context, aTable *Table, txManager *TransactionManager, stmt Statement) {
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		_, err := aTable.Insert(ctx, stmt)
 		return err
-	}, TxCommitter{saver, nil})
+	})
 	require.NoError(t, err)
 }

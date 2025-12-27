@@ -27,7 +27,7 @@ func (s *TestSuite) TearDownSuite() {
 }
 
 func (s *TestSuite) SetupTest() {
-	tempFile, err := os.CreateTemp("", "testdb")
+	tempFile, err := os.CreateTemp("", "")
 	s.Require().NoError(err)
 	s.dbFile = tempFile
 

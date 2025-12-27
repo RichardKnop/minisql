@@ -42,13 +42,11 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 		aPager     = initTest(t)
 		ctx        = context.Background()
 		aColumn    = Column{Name: "test_column", Kind: Int8, Size: 8}
-		txManager  = NewTransactionManager(zap.NewNop())
-		indexPager = NewTransactionalPager(
-			aPager.ForIndex(aColumn.Kind, uint64(aColumn.Size), true),
-			txManager,
-		)
+		indexPager = aPager.ForIndex(aColumn.Kind, true)
+		txManager  = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(indexPager), aPager, nil)
+		txPager    = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewNonUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, indexPager, 0)
+	anIndex, err := NewNonUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, txPager, 0)
 	require.NoError(t, err)
 
 	var (
@@ -69,7 +67,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 			}
 			insertedKeys = append(insertedKeys, key)
 			return nil
-		}, TxCommitter{aPager, nil})
+		})
 		require.NoError(t, err)
 	})
 
@@ -77,7 +75,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 		// Try deleting one of 4 inline row IDs
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, key, insertedRowIDs[key][2])
-		}, TxCommitter{aPager, nil})
+		})
 		require.NoError(t, err)
 		insertedRowIDs.Remove(key, 2)
 
@@ -97,7 +95,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 				}
 			}
 			return nil
-		}, TxCommitter{aPager, nil})
+		})
 		require.NoError(t, err)
 
 		// Index should be empty now
@@ -121,13 +119,13 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 				rowID += 1
 			}
 			return nil
-		}, TxCommitter{aPager, nil})
+		})
 		require.NoError(t, err)
 
 		// Delete one of the inline row IDs
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			return anIndex.Delete(ctx, key, insertedRowIDs[key][2])
-		}, TxCommitter{aPager, nil})
+		})
 		require.NoError(t, err)
 		insertedRowIDs.Remove(key, 2)
 
@@ -153,7 +151,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 				}
 			}
 			return nil
-		}, TxCommitter{aPager, nil})
+		})
 		require.NoError(t, err)
 
 		// Index should be empty now
@@ -181,7 +179,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 				insertedKeys = append(insertedKeys, key)
 				key += 1
 				return nil
-			}, TxCommitter{aPager, nil})
+			})
 			require.NoError(t, err)
 			i += rowsPerKey
 		}
@@ -203,7 +201,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 			for _, rowID := range rowIDs {
 				err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 					return anIndex.Delete(ctx, key, rowID)
-				}, TxCommitter{aPager, nil})
+				})
 				require.NoError(t, err)
 			}
 		}

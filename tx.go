@@ -13,11 +13,7 @@ type Tx struct {
 }
 
 func (tx Tx) Commit() error {
-	if err := tx.conn.db.GetTransactionManager().CommitTransaction(
-		tx.ctx,
-		tx.tx,
-		minisql.TxCommitter{Saver: tx.conn.db.GetSaver(), DDLSaver: tx.conn.db.GetDDLSaver()},
-	); err != nil {
+	if err := tx.conn.db.GetTransactionManager().CommitTransaction(tx.ctx, tx.tx); err != nil {
 		return err
 	}
 	tx.conn.SetTransaction(nil)

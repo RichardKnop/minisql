@@ -22,7 +22,7 @@ func TestNewDatabase(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 1)
-	assert.Equal(t, testDbName, aDatabase.FileName)
+	assert.Equal(t, testDbName, aDatabase.GetFileName())
 	assert.Equal(t, SchemaTableName, aDatabase.tables[SchemaTableName].Name)
 	assert.Equal(t, PageIndex(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
 	assert.Contains(t, aDatabase.ListTableNames(ctx), SchemaTableName)
@@ -64,7 +64,7 @@ func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aDatabase.ExecuteStatement(ctx, s)
 			return err
-		}, TxCommitter{aDatabase.saver, aDatabase})
+		})
 		require.NoError(t, err)
 	}
 
@@ -162,7 +162,7 @@ func TestDatabase_CreateTable(t *testing.T) {
 		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aDatabase.ExecuteStatement(ctx, stmt)
 			return err
-		}, TxCommitter{aDatabase.saver, aDatabase})
+		})
 		require.NoError(t, err)
 
 		assert.Len(t, aDatabase.tables, 2)
@@ -197,11 +197,11 @@ func TestDatabase_CreateTable(t *testing.T) {
 		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aDatabase.ExecuteStatement(ctx, stmt)
 			return err
-		}, TxCommitter{aDatabase.saver, aDatabase})
+		})
 		require.NoError(t, err)
 
 		assert.Len(t, aDatabase.tables, 1)
-		assert.Equal(t, testDbName, aDatabase.FileName)
+		assert.Equal(t, testDbName, aDatabase.GetFileName())
 		assert.Equal(t, SchemaTableName, aDatabase.tables[SchemaTableName].Name)
 		assert.Equal(t, PageIndex(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
 		assert.Equal(t, []string{SchemaTableName}, aDatabase.ListTableNames(ctx))
@@ -231,7 +231,7 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aDatabase.ExecuteStatement(ctx, stmt)
 			return err
-		}, TxCommitter{aDatabase.saver, aDatabase})
+		})
 		require.NoError(t, err)
 
 		assert.Len(t, aDatabase.tables, 2)
@@ -275,11 +275,11 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aDatabase.ExecuteStatement(ctx, stmt)
 			return err
-		}, TxCommitter{aDatabase.saver, aDatabase})
+		})
 		require.NoError(t, err)
 
 		assert.Len(t, aDatabase.tables, 1)
-		assert.Equal(t, testDbName, aDatabase.FileName)
+		assert.Equal(t, testDbName, aDatabase.GetFileName())
 		assert.Equal(t, SchemaTableName, aDatabase.tables[SchemaTableName].Name)
 		assert.Equal(t, PageIndex(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
 		assert.Equal(t, []string{SchemaTableName}, aDatabase.ListTableNames(ctx))
@@ -310,7 +310,7 @@ func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
 		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aDatabase.ExecuteStatement(ctx, stmt)
 			return err
-		}, TxCommitter{aDatabase.saver, aDatabase})
+		})
 		require.NoError(t, err)
 
 		assert.Len(t, aDatabase.tables, 2)
@@ -356,11 +356,11 @@ func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
 		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aDatabase.ExecuteStatement(ctx, stmt)
 			return err
-		}, TxCommitter{aDatabase.saver, aDatabase})
+		})
 		require.NoError(t, err)
 
 		assert.Len(t, aDatabase.tables, 1)
-		assert.Equal(t, testDbName, aDatabase.FileName)
+		assert.Equal(t, testDbName, aDatabase.GetFileName())
 		assert.Equal(t, SchemaTableName, aDatabase.tables[SchemaTableName].Name)
 		assert.Equal(t, PageIndex(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
 		assert.Equal(t, []string{SchemaTableName}, aDatabase.ListTableNames(ctx))
@@ -396,7 +396,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		_, err := aDatabase.ExecuteStatement(ctx, stmt)
 		return err
-	}, TxCommitter{aDatabase.saver, aDatabase})
+	})
 	require.NoError(t, err)
 
 	t.Run("Create index when table does not exist", func(t *testing.T) {
@@ -409,7 +409,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aDatabase.ExecuteStatement(ctx, createIndexStmt)
 			return err
-		}, TxCommitter{aDatabase.saver, aDatabase})
+		})
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "table does not exist")
 	})
@@ -428,7 +428,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aDatabase.ExecuteStatement(ctx, createIndexStmt)
 			return err
-		}, TxCommitter{aDatabase.saver, aDatabase})
+		})
 		require.NoError(t, err)
 
 		// Verify index exists has been added to the table
@@ -459,7 +459,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aDatabase.ExecuteStatement(ctx, createIndexStmt)
 			return err
-		}, TxCommitter{aDatabase.saver, aDatabase})
+		})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errIndexDoesNotExist)
 	})
@@ -485,7 +485,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aDatabase.ExecuteStatement(ctx, deleteStmt)
 			return err
-		}, TxCommitter{aDatabase.saver, aDatabase})
+		})
 		require.NoError(t, err)
 
 		// Verify index has been removed from the table
@@ -512,7 +512,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 func initTest(t *testing.T) *pagerImpl {
 	t.Parallel()
 
-	tempFile, err := os.CreateTemp("", "testdb")
+	tempFile, err := os.CreateTemp("", testDbName)
 	require.NoError(t, err)
 	t.Cleanup(func() { os.Remove(tempFile.Name()) })
 
@@ -536,4 +536,10 @@ func collectMainSchemas(t *testing.T, ctx context.Context, aDatabase *Database) 
 	}
 	require.NoError(t, schemaResults.Rows.Err())
 	return schemas
+}
+
+func mockPagerFactory(aPager Pager) TxPagerFactory {
+	return func(ctx context.Context, tableName, indexName string) (Pager, error) {
+		return aPager, nil
+	}
 }

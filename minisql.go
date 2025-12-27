@@ -181,7 +181,7 @@ func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 	return &Tx{
 		conn: c,
 		tx:   c.transaction,
-		ctx:  ctx,
+		ctx:  minisql.WithTransaction(ctx, c.transaction),
 	}, nil
 }
 
@@ -278,7 +278,7 @@ func (c *Conn) executeStatement(ctx context.Context, stmt minisql.Statement) (mi
 		var err error
 		result, err = c.db.ExecuteStatement(txCtx, stmt)
 		return err
-	}, minisql.TxCommitter{Saver: c.db.GetSaver(), DDLSaver: c.db.GetDDLSaver()})
+	})
 
 	return result, err
 }
