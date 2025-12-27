@@ -42,6 +42,15 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 			selectedFields = requestedFields
 		}
 
+		// Pre-allocate for WHERE condition fields (estimate: 2 operands per condition)
+		conditionFieldsEstimate := 0
+		for _, conditions := range stmt.Conditions {
+			conditionFieldsEstimate += len(conditions) * 2
+		}
+		if cap(selectedFields) == 0 && conditionFieldsEstimate > 0 {
+			selectedFields = make([]Field, 0, conditionFieldsEstimate)
+		}
+
 		for _, conditions := range stmt.Conditions {
 			for _, cond := range conditions {
 				if cond.Operand1.Type == OperandField {
@@ -134,11 +143,11 @@ func (t *Table) selectCount(ctx context.Context, filteredPipe chan Row, errorsPi
 func (t *Table) selectStreaming(stmt Statement, filteredPipe chan Row, errorsPipe chan error, requestedFields []Field) (StatementResult, error) {
 
 	aResult := StatementResult{
-		Columns: make([]Column, 0, len(requestedFields)),
+		Columns: make([]Column, len(requestedFields)),
 	}
-	for _, aField := range requestedFields {
+	for i, aField := range requestedFields {
 		if colIdx := stmt.ColumnIdx(aField.Name); colIdx >= 0 {
-			aResult.Columns = append(aResult.Columns, t.Columns[colIdx])
+			aResult.Columns[i] = t.Columns[colIdx]
 		}
 	}
 
@@ -234,11 +243,11 @@ func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, unfilteredPipe <-
 	// Create result with materialized rows
 	idx := 0
 	aResult := StatementResult{
-		Columns: make([]Column, 0, len(requestedFields)),
+		Columns: make([]Column, len(requestedFields)),
 	}
-	for _, field := range requestedFields {
+	for i, field := range requestedFields {
 		if colIdx := stmt.ColumnIdx(field.Name); colIdx >= 0 {
-			aResult.Columns = append(aResult.Columns, t.Columns[colIdx])
+			aResult.Columns[i] = t.Columns[colIdx]
 		}
 	}
 
