@@ -72,10 +72,18 @@ func (r Row) Size() uint64 {
 }
 
 func (r Row) OnlyFields(fields ...Field) Row {
+	// Pre-count matching fields to allocate exact capacity
+	matchCount := 0
+	for _, aField := range fields {
+		if _, idx := r.GetColumn(aField.Name); idx >= 0 {
+			matchCount++
+		}
+	}
+
 	filteredRow := Row{
 		Key:     r.Key,
-		Columns: make([]Column, 0, len(fields)),
-		Values:  make([]OptionalValue, 0, len(fields)),
+		Columns: make([]Column, 0, matchCount),
+		Values:  make([]OptionalValue, 0, matchCount),
 	}
 	for _, aField := range fields {
 		aColumn, idx := r.GetColumn(aField.Name)
@@ -161,12 +169,12 @@ func compareValue(kind ColumnKind, v1, v2 OptionalValue) bool {
 
 func (r Row) Clone() Row {
 	aClone := Row{
-		Columns: make([]Column, 0, len(r.Columns)),
-		Values:  make([]OptionalValue, 0, len(r.Values)),
+		Columns: make([]Column, len(r.Columns)),
+		Values:  make([]OptionalValue, len(r.Values)),
 		Key:     r.Key,
 	}
-	aClone.Columns = append(aClone.Columns, r.Columns...)
-	aClone.Values = append(aClone.Values, r.Values...)
+	copy(aClone.Columns, r.Columns)
+	copy(aClone.Values, r.Values)
 	return aClone
 }
 

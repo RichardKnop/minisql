@@ -458,3 +458,10 @@ To run unit tests:
 ```sh
 LOG_LEVEL=info go test ./... -count=1
 ```
+
+### Benchmarking
+
+```sh
+go test -bench=BenchmarkPageAccess -benchtime=100000x ./internal/minisql
+go test -bench=BenchmarkRow -benchmem ./internal/minisql
+```

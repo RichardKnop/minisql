@@ -118,7 +118,9 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		return nil
 	}
 
-	pagesToFlush := make([]PageIndex, 0, len(tx.WriteSet))
+	// Pre-allocate with capacity for all writes + potential header page
+	// This avoids reallocation during append operations
+	pagesToFlush := make([]PageIndex, 0, len(tx.WriteSet)+1)
 
 	// === PHASE 1: Create Rollback Journal ===
 	// Skip journal creation for read-only transactions (no modifications to recover)
