@@ -16,7 +16,7 @@ func TestTable_PageRecycling(t *testing.T) {
 	tempFile, err := os.CreateTemp("", testDbName)
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize)
+	aPager, err := NewPager(tempFile, PageSize, 1000)
 	require.NoError(t, err)
 	tablePager := aPager.ForTable(testMediumColumns)
 	txManager := NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(tablePager), aPager, nil)

@@ -14,6 +14,7 @@ type ConnectionConfig struct {
 	FilePath       string // Database file path
 	JournalEnabled bool   // Enable/disable rollback journal (default: true)
 	LogLevel       string // Log level: debug, info, warn, error (default: warn)
+	MaxCachedPages int    // Maximum number of pages to cache (default: 1000, 0 = use default)
 }
 
 // DefaultConnectionConfig returns default configuration
@@ -22,6 +23,7 @@ func DefaultConnectionConfig(filePath string) *ConnectionConfig {
 		FilePath:       filePath,
 		JournalEnabled: true,
 		LogLevel:       "warn",
+		MaxCachedPages: 1000,
 	}
 }
 
@@ -73,6 +75,18 @@ func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 		default:
 			return nil, fmt.Errorf("invalid log_level parameter: must be 'debug', 'info', 'warn', or 'error', got %q", logLevel)
 		}
+	}
+
+	// Parse max_cached_pages parameter
+	if maxPagesStr := queryParams.Get("max_cached_pages"); maxPagesStr != "" {
+		maxPages, err := strconv.Atoi(maxPagesStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid max_cached_pages parameter: must be a positive integer, got %q", maxPagesStr)
+		}
+		if maxPages < 0 {
+			return nil, fmt.Errorf("invalid max_cached_pages parameter: must be non-negative, got %d", maxPages)
+		}
+		config.MaxCachedPages = maxPages
 	}
 
 	return config, nil

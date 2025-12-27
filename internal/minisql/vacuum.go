@@ -86,7 +86,7 @@ func (db *Database) Vacuum(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to open database file: %w", err)
 	}
-	newPager, err := NewPager(dbFile, PageSize)
+	newPager, err := NewPager(dbFile, PageSize, 1000)
 	if err != nil {
 		return fmt.Errorf("failed to create pager: %w", err)
 	}

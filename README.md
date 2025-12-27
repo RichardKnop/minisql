@@ -40,6 +40,7 @@ MiniSQL supports optional connection string parameters:
 |-----------|--------|---------|-------------|
 | `journal` | `true`, `false` | `true` | Enable/disable rollback journal for crash recovery |
 | `log_level` | `debug`, `info`, `warn`, `error` | `warn` | Set logging verbosity level |
+| `max_cached_pages` | positive integer | `1000` | Maximum number of pages to keep in memory cache |
 
 **Examples:**
 ```go
@@ -49,8 +50,11 @@ db, err := sql.Open("minisql", "./my.db?journal=false")
 // Enable debug logging
 db, err := sql.Open("minisql", "./my.db?log_level=debug")
 
+// Set cache size to 500 pages (~2MB memory)
+db, err := sql.Open("minisql", "./my.db?max_cached_pages=500")
+
 // Combine multiple parameters
-db, err := sql.Open("minisql", "/path/to/db.db?journal=true&log_level=info")
+db, err := sql.Open("minisql", "/path/to/db.db?journal=true&log_level=info&max_cached_pages=2000")
 ```
 
 **Note:** Disabling journaling (`journal=false`) improves performance but removes crash recovery protection. If the application crashes during a transaction commit, the database may become corrupted.
