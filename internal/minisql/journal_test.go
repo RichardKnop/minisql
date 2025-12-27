@@ -65,7 +65,7 @@ func TestJournal_NoDBHeader(t *testing.T) {
 		originalPages = append(originalPages, aPage.Clone())
 	}
 
-	aPager, err := NewPager(dbFile, PageSize)
+	aPager, err := NewPager(dbFile, PageSize, 1000)
 	require.NoError(t, err)
 	aPager.pages = make([]*Page, 0, numPages)
 	aPager.pages = append(aPager.pages, aRootPage)
@@ -100,10 +100,8 @@ func TestJournal_NoDBHeader(t *testing.T) {
 		}
 
 		// Recreate pager to clear page cache and read from disk
-		reopenedDbFile, err := os.Open(dbFile.Name())
-		require.NoError(t, err)
-		defer reopenedDbFile.Close()
-		aPager, err = NewPager(reopenedDbFile, PageSize)
+		dbFile.Seek(0, 0)
+		aPager, err = NewPager(dbFile, PageSize, 1000)
 		require.NoError(t, err)
 
 		modifiedLeafPage, err := aPager.ForTable(columns).GetPage(ctx, leafPages[0].Index)
@@ -116,17 +114,15 @@ func TestJournal_NoDBHeader(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, recovered)
 
-		restoredDbFile, err := os.Open(dbFile.Name())
-		require.NoError(t, err)
-		defer restoredDbFile.Close()
-
-		restoredPager, err := NewPager(restoredDbFile, PageSize)
+		// Recreate pager to clear page cache and read from disk
+		dbFile.Seek(0, 0)
+		aPager, err = NewPager(dbFile, PageSize, 1000)
 		require.NoError(t, err)
 
-		tablePager := restoredPager.ForTable(columns)
+		tablePager := aPager.ForTable(columns)
 
 		// All pages should match original pages
-		assert.Equal(t, uint32(numPages), restoredPager.TotalPages())
+		assert.Equal(t, uint32(numPages), aPager.TotalPages())
 		for _, aPage := range originalPages {
 			restoredPage, err := tablePager.GetPage(ctx, aPage.Index)
 			require.NoError(t, err)
@@ -167,7 +163,7 @@ func TestJournal_WithDBHeader(t *testing.T) {
 		originalPages = append(originalPages, aPage.Clone())
 	}
 
-	aPager, err := NewPager(dbFile, PageSize)
+	aPager, err := NewPager(dbFile, PageSize, 1000)
 	require.NoError(t, err)
 	aPager.pages = make([]*Page, 0, numPages)
 	aPager.pages = append(aPager.pages, aRootPage)
@@ -213,10 +209,8 @@ func TestJournal_WithDBHeader(t *testing.T) {
 		}
 
 		// Recreate pager to clear page cache and read from disk
-		reopenedDbFile, err := os.Open(dbFile.Name())
-		require.NoError(t, err)
-		defer reopenedDbFile.Close()
-		aPager, err = NewPager(reopenedDbFile, PageSize)
+		dbFile.Seek(0, 0)
+		aPager, err = NewPager(dbFile, PageSize, 1000)
 		require.NoError(t, err)
 
 		modifiedLeafPage, err := aPager.ForTable(columns).GetPage(ctx, leafPages[0].Index)
@@ -235,17 +229,15 @@ func TestJournal_WithDBHeader(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, recovered)
 
-		restoredDbFile, err := os.Open(dbFile.Name())
-		require.NoError(t, err)
-		defer restoredDbFile.Close()
-
-		restoredPager, err := NewPager(restoredDbFile, PageSize)
+		// Recreate pager to clear page cache and read from disk
+		dbFile.Seek(0, 0)
+		aPager, err = NewPager(dbFile, PageSize, 1000)
 		require.NoError(t, err)
 
-		tablePager := restoredPager.ForTable(columns)
+		tablePager := aPager.ForTable(columns)
 
 		// All pages should match original pages
-		assert.Equal(t, uint32(numPages), restoredPager.TotalPages())
+		assert.Equal(t, uint32(numPages), aPager.TotalPages())
 		for _, aPage := range originalPages {
 			restoredPage, err := tablePager.GetPage(ctx, aPage.Index)
 			require.NoError(t, err)
@@ -253,7 +245,7 @@ func TestJournal_WithDBHeader(t *testing.T) {
 		}
 
 		// DB header should match original header
-		restoredDBHeader := restoredPager.ForTable(columns).GetHeader(ctx)
+		restoredDBHeader := tablePager.GetHeader(ctx)
 		assert.Equal(t, originalDBHeader, restoredDBHeader)
 	})
 }

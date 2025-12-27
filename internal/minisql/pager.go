@@ -17,11 +17,18 @@ type DBFile interface {
 type PageUnmarshaler func(pageIdx PageIndex, buf []byte) (*Page, error)
 
 type pagerImpl struct {
-	pageSize   int
-	totalPages uint32 // total number of pages
+	pageSize       int
+	totalPages     uint32 // total number of pages
+	maxCachedPages int    // maximum number of pages to keep in cache
 
 	dbHeader DatabaseHeader
-	pages    []*Page
+	// pages is a sparse array where index = PageIndex
+	// nil entries indicate evicted/unloaded pages
+	// Memory overhead: ~8 bytes per total page (e.g., 76MB for 10M pages)
+	pages []*Page
+
+	// LRU tracking: most recently used at the end
+	lruList []PageIndex
 
 	file     DBFile
 	fileSize int64
@@ -30,11 +37,17 @@ type pagerImpl struct {
 }
 
 // New opens the database file and tries to read the root page
-func NewPager(file DBFile, pageSize int) (*pagerImpl, error) {
+// maxCachedPages: maximum number of pages to keep in cache (0 = unlimited)
+func NewPager(file DBFile, pageSize int, maxCachedPages int) (*pagerImpl, error) {
+	if maxCachedPages <= 0 {
+		maxCachedPages = 1000 // default limit
+	}
 	aPager := &pagerImpl{
-		pageSize: pageSize,
-		file:     file,
-		pages:    make([]*Page, 0, 1000),
+		pageSize:       pageSize,
+		maxCachedPages: maxCachedPages,
+		file:           file,
+		pages:          make([]*Page, 0, maxCachedPages),
+		lruList:        make([]PageIndex, 0, maxCachedPages),
 	}
 
 	fileSize, err := aPager.file.Seek(0, io.SeekEnd)
@@ -61,7 +74,6 @@ func NewPager(file DBFile, pageSize int) (*pagerImpl, error) {
 			return nil, err
 		}
 
-		fmt.Println("Unmarshaling DB header from file")
 		if err := UnmarshalDatabaseHeader(buf, &aPager.dbHeader); err != nil {
 			return nil, err
 		}
@@ -86,6 +98,8 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 	if len(p.pages) > int(pageIdx) && p.pages[pageIdx] != nil {
 		page := p.pages[pageIdx]
 		p.mu.RUnlock()
+		// Update LRU tracking
+		p.trackPageAccess(pageIdx)
 		return page, nil
 	}
 	totalPages := p.totalPages
@@ -101,8 +115,12 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 
 	// Double-check page doesn't exist (in case another goroutine created it)
 	if len(p.pages) > int(pageIdx) && p.pages[pageIdx] != nil {
+		p.updateLRU(pageIdx)
 		return p.pages[pageIdx], nil
 	}
+
+	// Evict pages if cache is full BEFORE loading new page
+	p.evictIfNeeded()
 
 	buf := make([]byte, p.pageSize)
 
@@ -115,7 +133,8 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 		}
 
 		if len(p.pages) < int(pageIdx)+1 {
-			// Extend pages slice
+			// Extend sparse array with nil entries to accommodate pageIdx
+			// Maintains invariant: slice index = page index
 			for i := len(p.pages); i < int(pageIdx)+1; i++ {
 				p.pages = append(p.pages, nil)
 			}
@@ -136,6 +155,9 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 			p.pages[pageIdx].InternalNode.Header.IsInternal = true
 		}
 	}
+
+	// Track this page access
+	p.updateLRU(pageIdx)
 
 	return p.pages[pageIdx], nil
 }
@@ -235,4 +257,67 @@ func marshalPage(aPage *Page, buf []byte) ([]byte, error) {
 		return data, nil
 	}
 	return nil, fmt.Errorf("no known node type found")
+}
+
+// updateLRU updates the LRU list for the given page (must be called with lock held)
+func (p *pagerImpl) updateLRU(pageIdx PageIndex) {
+	// Remove pageIdx from current position in LRU list
+	for i, idx := range p.lruList {
+		if idx == pageIdx {
+			p.lruList = append(p.lruList[:i], p.lruList[i+1:]...)
+			break
+		}
+	}
+	// Add to end (most recently used)
+	p.lruList = append(p.lruList, pageIdx)
+}
+
+// trackPageAccess updates LRU tracking (thread-safe version for fast path)
+func (p *pagerImpl) trackPageAccess(pageIdx PageIndex) {
+	p.mu.Lock()
+	p.updateLRU(pageIdx)
+	p.mu.Unlock()
+}
+
+// evictIfNeeded evicts pages if cache is full (must be called with lock held)
+func (p *pagerImpl) evictIfNeeded() {
+	// Count actual cached pages (non-nil entries)
+	cachedCount := 0
+	for _, page := range p.pages {
+		if page != nil {
+			cachedCount += 1
+		}
+	}
+
+	if cachedCount < p.maxCachedPages {
+		return
+	}
+
+	// Find candidate pages to evict from least recently used
+	for _, pageIdx := range p.lruList {
+		// Never evict page 0 (root/header page)
+		if pageIdx == 0 {
+			continue
+		}
+
+		// Only evict if page exists in cache
+		if int(pageIdx) < len(p.pages) && p.pages[pageIdx] != nil {
+			// Evict this page by setting to nil (preserves sparse array structure)
+			// This maintains the invariant: p.pages[i] is always page i (or nil)
+			p.pages[pageIdx] = nil
+			cachedCount -= 1
+
+			// Remove from LRU list
+			for i, idx := range p.lruList {
+				if idx == pageIdx {
+					p.lruList = append(p.lruList[:i], p.lruList[i+1:]...)
+					break
+				}
+			}
+
+			if cachedCount < p.maxCachedPages {
+				return
+			}
+		}
+	}
 }

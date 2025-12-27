@@ -17,7 +17,7 @@ func TestNewPager_Empty(t *testing.T) {
 	defer dbFile.Close()
 	defer os.Remove(dbFile.Name())
 
-	aPager, err := NewPager(dbFile, PageSize)
+	aPager, err := NewPager(dbFile, PageSize, 1000)
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(0), aPager.fileSize)
@@ -36,7 +36,7 @@ func TestNewPager_WithDBHeader(t *testing.T) {
 	aRootLeaf := NewLeafNode()
 	aRootLeaf.Header.Header.IsRoot = true
 
-	aPager, err := NewPager(dbFile, PageSize)
+	aPager, err := NewPager(dbFile, PageSize, 1000)
 	require.NoError(t, err)
 	aPager.dbHeader.FirstFreePage = 125
 	aPager.dbHeader.FreePageCount = 2
@@ -48,7 +48,7 @@ func TestNewPager_WithDBHeader(t *testing.T) {
 
 	// Reset pager to empty the cache
 	dbFile.Seek(0, 0)
-	aPager, err = NewPager(dbFile, PageSize)
+	aPager, err = NewPager(dbFile, PageSize, 1000)
 	require.NoError(t, err)
 	assert.Equal(t, 1, int(aPager.totalPages))
 	assert.Equal(t, PageIndex(125), aPager.dbHeader.FirstFreePage)
@@ -63,7 +63,7 @@ func TestPager_GetPage(t *testing.T) {
 	defer dbFile.Close()
 	defer os.Remove(dbFile.Name())
 
-	aPager, err := NewPager(dbFile, PageSize)
+	aPager, err := NewPager(dbFile, PageSize, 1000)
 	require.NoError(t, err)
 
 	aRootPage, internalPages, leafPages := newTestBtree()
@@ -93,7 +93,7 @@ func TestPager_GetPage(t *testing.T) {
 
 	// Reset pager to empty the cache
 	dbFile.Seek(0, 0)
-	aPager, err = NewPager(dbFile, PageSize)
+	aPager, err = NewPager(dbFile, PageSize, 1000)
 	require.NoError(t, err)
 	assert.Equal(t, 7, int(aPager.totalPages))
 	tablePager = aPager.ForTable(columns)

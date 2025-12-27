@@ -117,7 +117,7 @@ func (d *Driver) newDB(config *ConnectionConfig) (*minisql.Database, error) {
 	}
 
 	// Create new database instance
-	pager, err := minisql.NewPager(dbFile, minisql.PageSize)
+	pager, err := minisql.NewPager(dbFile, minisql.PageSize, config.MaxCachedPages)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pager: %w", err)
 	}

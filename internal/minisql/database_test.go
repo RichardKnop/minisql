@@ -516,7 +516,7 @@ func initTest(t *testing.T) (*pagerImpl, *os.File) {
 	require.NoError(t, err)
 	t.Cleanup(func() { os.Remove(tempFile.Name()) })
 
-	aPager, err := NewPager(tempFile, PageSize)
+	aPager, err := NewPager(tempFile, PageSize, 1000)
 	require.NoError(t, err)
 
 	return aPager, tempFile
