@@ -286,13 +286,42 @@ values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:2
 		s.Equal(100, int(orders[1].UserID))
 		s.Equal(120, int(orders[1].TotalPaid))
 	})
+}
 
-	s.Run("Insert a 1000 users", func() {
-		usersToInsert := gen.Users(1000)
-		for _, aUser := range usersToInsert {
-			s.prepareAndExecQuery(`insert into users("email", "name") values(?, ?);`, 1, aUser.Email.String, aUser.Name.String)
+func (s *TestSuite) TestSelect_ManyRows() {
+	_, err := s.db.Exec(createUsersTableSQL)
+	s.Require().NoError(err)
+	_, err = s.db.Exec(createUsersTimestampIndexSQL)
+	s.Require().NoError(err)
+
+	// Insert 1000 test users
+	usersToInsert := gen.Users(1000)
+	for _, aUser := range usersToInsert {
+		s.prepareAndExecQuery(`insert into users("email", "name") values(?, ?);`, 1, aUser.Email.String, aUser.Name.String)
+	}
+	s.countRowsInTable("users", 1000)
+
+	s.Run("Select with limit offset", func() {
+		users := s.collectUsers(`select * from users limit 45;`)
+		s.Require().Len(users, 45)
+
+		for i := range 45 {
+			s.Equal(int64(i+1), users[i].ID)
 		}
-		s.countRowsInTable("users", 1011) // 10 existing + 1 with NULL email + 1000 new
+
+		users = s.collectUsers(`select * from users offset 925;`)
+		s.Require().Len(users, 75)
+
+		for i := range 75 {
+			s.Equal(int64(925+i+1), users[i].ID)
+		}
+
+		users = s.collectUsers(`select * from users limit 100 offset 400;`)
+		s.Require().Len(users, 100)
+
+		for i := range 100 {
+			s.Equal(int64(400+i+1), users[i].ID)
+		}
 	})
 }
 
