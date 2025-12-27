@@ -11,7 +11,7 @@ import (
 const (
 	JournalMagic      = "minisql\n"
 	JournalVersion    = uint32(1)
-	JournalHeaderSize = 28
+	JournalHeaderSize = 29
 	CommitMagic       = uint32(0xDEADBEEF)
 )
 
@@ -25,12 +25,12 @@ type RollbackJournal struct {
 }
 
 type JournalHeader struct {
-	Magic      [8]byte
-	Version    uint32
-	PageSize   uint32
-	NumPages   uint32
-	Checksum   uint32
-	PageHashes map[PageIndex]uint32 // Optional: per-page checksums
+	Magic    [8]byte
+	Version  uint32
+	PageSize uint32
+	DbHeader bool
+	NumPages uint32
+	Checksum uint32
 }
 
 // CreateJournal creates a new journal file for the transaction.
@@ -50,7 +50,7 @@ func CreateJournal(dbPath string, pageSize uint32) (*RollbackJournal, error) {
 	}
 
 	// Write initial header (will update NumPages later)
-	if err := journal.writeHeader(0); err != nil {
+	if err := journal.writeHeader(false, 0); err != nil {
 		journal.Close()
 		return nil, fmt.Errorf("write journal header: %w", err)
 	}
@@ -58,8 +58,23 @@ func CreateJournal(dbPath string, pageSize uint32) (*RollbackJournal, error) {
 	return journal, nil
 }
 
+// WriteDBHeaderBefore writes the ORIGINAL database header to the journal before modification.
+func (j *RollbackJournal) WriteDBHeaderBefore(ctx context.Context, originalHeader *DatabaseHeader) error {
+	buf, err := originalHeader.Marshal()
+	if err != nil {
+		return fmt.Errorf("marshal database header: %w", err)
+	}
+
+	// Write header at the start of the journal
+	if _, err := j.file.Write(buf); err != nil {
+		return fmt.Errorf("write database header to journal: %w", err)
+	}
+
+	return nil
+}
+
 // WritePageBefore writes the ORIGINAL page content to the journal before modification.
-func (j *RollbackJournal) WritePageBefore(ctx context.Context, pageIdx PageIndex, originalPage *Page, pager Pager) error {
+func (j *RollbackJournal) WritePageBefore(ctx context.Context, pageIdx PageIndex, originalPage *Page) error {
 	// Marshal the original page
 	buf := make([]byte, j.pageSize)
 	_, err := marshalPage(originalPage, buf)
@@ -68,13 +83,19 @@ func (j *RollbackJournal) WritePageBefore(ctx context.Context, pageIdx PageIndex
 	}
 
 	// Write page index (4 bytes)
-	indexBuf := make([]byte, 4)
-	indexBuf = marshalUint32(indexBuf, uint32(pageIdx), 0)
+	indexBuf := marshalUint32(make([]byte, 4), uint32(pageIdx), 0)
 	if _, err := j.file.Write(indexBuf); err != nil {
 		return fmt.Errorf("write page index: %w", err)
 	}
 
 	// Write page content
+	if pageIdx == 0 {
+		if _, err := j.file.Write(buf[0 : j.pageSize-RootPageConfigSize]); err != nil {
+			return fmt.Errorf("write page data: %w", err)
+		}
+		return nil
+	}
+
 	if _, err := j.file.Write(buf); err != nil {
 		return fmt.Errorf("write page data: %w", err)
 	}
@@ -82,28 +103,15 @@ func (j *RollbackJournal) WritePageBefore(ctx context.Context, pageIdx PageIndex
 	return nil
 }
 
-// WriteCommitRecord writes a commit marker to the journal.
-// This indicates that all pages have been written and the transaction can be committed.
-func (j *RollbackJournal) WriteCommitRecord() error {
-	commitBuf := make([]byte, 4)
-	commitBuf = marshalUint32(commitBuf, CommitMagic, 0)
-	if _, err := j.file.Write(commitBuf); err != nil {
-		return fmt.Errorf("write commit record: %w", err)
-	}
-
-	// Sync to ensure commit record is on disk
-	return j.file.Sync()
-}
-
 // Finalize updates the header with final page count and syncs the journal to disk.
-func (j *RollbackJournal) Finalize(numPages int) error {
+func (j *RollbackJournal) Finalize(dbHeaderChanged bool, numPages int) error {
 	// Seek back to header
 	if _, err := j.file.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf("seek to header: %w", err)
 	}
 
 	// Write updated header
-	if err := j.writeHeader(numPages); err != nil {
+	if err := j.writeHeader(dbHeaderChanged, numPages); err != nil {
 		return fmt.Errorf("update header: %w", err)
 	}
 
@@ -128,7 +136,7 @@ func (j *RollbackJournal) Close() error {
 	return j.file.Close()
 }
 
-func (j *RollbackJournal) writeHeader(numPages int) error {
+func (j *RollbackJournal) writeHeader(dbHeaderChanged bool, numPages int) error {
 	header := make([]byte, JournalHeaderSize)
 
 	i := uint64(0)
@@ -144,6 +152,10 @@ func (j *RollbackJournal) writeHeader(numPages int) error {
 	// Page size
 	header = marshalUint32(header, j.pageSize, i)
 	i += 4
+
+	// DB header flag
+	header = marshalBool(header, dbHeaderChanged, i)
+	i += 1
 
 	// Number of pages in journal
 	header = marshalUint32(header, uint32(numPages), i)
@@ -195,7 +207,18 @@ func RecoverFromJournal(dbPath string, pageSize int) error {
 	}
 	defer dbFile.Close()
 
-	// Restore each page from journal
+	// Restore database header and then each page from journal
+	if header.DbHeader {
+		dbHeaderData := make([]byte, RootPageConfigSize)
+		if _, err := io.ReadFull(journalFile, dbHeaderData); err != nil {
+			return fmt.Errorf("read db header: %w", err)
+		}
+
+		// Write original header back to database
+		if _, err := dbFile.WriteAt(dbHeaderData, 0); err != nil {
+			return fmt.Errorf("restore db header: %w", err)
+		}
+	}
 	for i := uint32(0); i < header.NumPages; i++ {
 		// Read page index
 		indexBuf := make([]byte, 4)
@@ -205,13 +228,22 @@ func RecoverFromJournal(dbPath string, pageSize int) error {
 		pageIdx := unmarshalUint32(indexBuf, 0)
 
 		// Read page data
-		pageData := make([]byte, pageSize)
+		var pageData []byte
+		if pageIdx == 0 {
+			pageData = make([]byte, pageSize-RootPageConfigSize)
+		} else {
+			pageData = make([]byte, pageSize)
+		}
+
 		if _, err := io.ReadFull(journalFile, pageData); err != nil {
 			return fmt.Errorf("read page data %d: %w", i, err)
 		}
 
 		// Write original page back to database
 		offset := int64(pageIdx) * int64(pageSize)
+		if pageIdx == 0 {
+			offset += RootPageConfigSize
+		}
 		if _, err := dbFile.WriteAt(pageData, offset); err != nil {
 			return fmt.Errorf("restore page %d: %w", pageIdx, err)
 		}
@@ -251,11 +283,12 @@ func readJournalHeader(file *os.File) (*JournalHeader, error) {
 	copy(h.Magic[:], header[0:8])
 	h.Version = unmarshalUint32(header, 8)
 	h.PageSize = unmarshalUint32(header, 12)
-	h.NumPages = unmarshalUint32(header, 16)
-	h.Checksum = unmarshalUint32(header, 20)
+	h.DbHeader = unmarshalBool(header, 16)
+	h.NumPages = unmarshalUint32(header, 17)
+	h.Checksum = unmarshalUint32(header, 21)
 
 	// Validate checksum
-	expectedChecksum := crc32.ChecksumIEEE(header[0:20])
+	expectedChecksum := crc32.ChecksumIEEE(header[0:21])
 	if h.Checksum != expectedChecksum {
 		return nil, fmt.Errorf("journal header checksum mismatch")
 	}

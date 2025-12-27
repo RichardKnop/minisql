@@ -139,11 +139,25 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 			}
 		}()
 
-		// Write original pages to journal
+		// Write original db header and pages to journal
 		numJournaledPages := 0
 		if len(writePages) != len(writeInfo) {
 			tx.Abort()
 			return fmt.Errorf("internal error: mismatched write pages and info")
+		}
+		_, dbHeaderChanged := tx.GetModifiedDBHeader()
+		if dbHeaderChanged {
+			aPager, err := tm.factory(ctx, SchemaTableName, "")
+			if err != nil {
+				tx.Abort()
+				return fmt.Errorf("get pager for journaling database header: %w", err)
+			}
+
+			originalHeader := aPager.GetHeader(ctx)
+			if err := journal.WriteDBHeaderBefore(ctx, &originalHeader); err != nil {
+				tx.Abort()
+				return fmt.Errorf("write database header to journal: %w", err)
+			}
 		}
 		for pageIdx := range writePages {
 			aPager, err := tm.factory(ctx, writeInfo[pageIdx].Table, writeInfo[pageIdx].Index)
@@ -158,14 +172,14 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 			}
 
 			// Write original page to journal
-			if err := journal.WritePageBefore(ctx, pageIdx, originalPage, aPager); err != nil {
+			if err := journal.WritePageBefore(ctx, pageIdx, originalPage); err != nil {
 				return fmt.Errorf("journal page %d: %w", pageIdx, err)
 			}
 			numJournaledPages++
 		}
 
 		// Finalize journal header with page count and sync to disk
-		if err := journal.Finalize(numJournaledPages); err != nil {
+		if err := journal.Finalize(dbHeaderChanged, numJournaledPages); err != nil {
 			return fmt.Errorf("finalize journal: %w", err)
 		}
 	}
@@ -194,6 +208,7 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 	// If we crash during this phase, journal will restore original pages on recovery
 	for _, pageIdx := range pagesToFlush {
 		if err := tm.saver.Flush(ctx, pageIdx); err != nil {
+			// TODO - do we need to panic here to restart?
 			return fmt.Errorf("failed to flush page %d: %w", pageIdx, err)
 		}
 	}
