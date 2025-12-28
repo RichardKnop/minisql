@@ -9,12 +9,12 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
+func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 	t.Parallel()
 
 	var (
-		indexName = "pkey__users"
-		aTable    = NewTable(zap.NewNop(), nil, nil, "users", testColumnsWithPrimaryKey, 0)
+		indexName = "key__test_table__email"
+		aTable    = NewTable(zap.NewNop(), nil, nil, testTableName, testColumnsWithUniqueIndex, 0)
 	)
 
 	testCases := []struct {
@@ -41,6 +41,52 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
+						FieldIsEqual("id", OperandInteger, int64(42)),
+					},
+				},
+			},
+			QueryPlan{
+				Scans: []Scan{
+					{
+						Type: ScanTypeSequential,
+						Filters: OneOrMore{
+							{
+								FieldIsEqual("id", OperandInteger, int64(42)),
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			"Single index key equality condition but NULL - sequential scan",
+			Statement{
+				Kind: Select,
+				Conditions: OneOrMore{
+					{
+						FieldIsNull("email"),
+					},
+				},
+			},
+			QueryPlan{
+				Scans: []Scan{
+					{
+						Type: ScanTypeSequential,
+						Filters: OneOrMore{
+							{
+								FieldIsNull("email"),
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			"Single index key equality condition - index point scan",
+			Statement{
+				Kind: Select,
+				Conditions: OneOrMore{
+					{
 						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 				},
@@ -48,46 +94,25 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type: ScanTypeSequential,
-						Filters: OneOrMore{
-							{
-								FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
-							},
-						},
+						Type:            ScanTypeIndexPoint,
+						IndexName:       indexName,
+						IndexColumnName: "email",
+						IndexKeys:       []any{"foo@example.com"},
+						Filters:         OneOrMore{{}},
 					},
 				},
 			},
 		},
 		{
-			"Single unique index key equality condition but NULL - sequential scan",
+			"Multiple index key equality conditions - index point scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsNull("id"),
+						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
-				},
-			},
-			QueryPlan{
-				Scans: []Scan{
 					{
-						Type: ScanTypeSequential,
-						Filters: OneOrMore{
-							{
-								FieldIsNull("id"),
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			"Single unique index key equality condition - index point scan",
-			Statement{
-				Kind: Select,
-				Conditions: OneOrMore{
-					{
-						FieldIsEqual("id", OperandInteger, int64(42)),
+						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("bar@example.com"))),
 					},
 				},
 			},
@@ -96,47 +121,22 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 					{
 						Type:            ScanTypeIndexPoint,
 						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(42)},
+						IndexColumnName: "email",
+						IndexKeys:       []any{"foo@example.com"},
+						Filters:         OneOrMore{{}},
+					},
+					{
+						Type:            ScanTypeIndexPoint,
+						IndexName:       indexName,
+						IndexColumnName: "email",
+						IndexKeys:       []any{"bar@example.com"},
 						Filters:         OneOrMore{{}},
 					},
 				},
 			},
 		},
 		{
-			"Multiple primary key equality conditions - index point scan",
-			Statement{
-				Kind: Select,
-				Conditions: OneOrMore{
-					{
-						FieldIsEqual("id", OperandInteger, int64(42)),
-					},
-					{
-						FieldIsEqual("id", OperandInteger, int64(69)),
-					},
-				},
-			},
-			QueryPlan{
-				Scans: []Scan{
-					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(42)},
-						Filters:         OneOrMore{{}},
-					},
-					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(69)},
-						Filters:         OneOrMore{{}},
-					},
-				},
-			},
-		},
-		{
-			"Multiple primary key equality conditions with extra remaining filters for both groups - index point scan",
+			"Multiple index key equality conditions with extra remaining filters for both groups - index point scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
@@ -155,22 +155,22 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 					{
 						Type:            ScanTypeIndexPoint,
 						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(42)},
+						IndexColumnName: "email",
+						IndexKeys:       []any{"foo@example.com"},
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+								FieldIsEqual("id", OperandInteger, int64(42)),
 							},
 						},
 					},
 					{
 						Type:            ScanTypeIndexPoint,
 						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(69)},
+						IndexColumnName: "email",
+						IndexKeys:       []any{"bar@example.com"},
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("bar@example.com"))),
+								FieldIsEqual("id", OperandInteger, int64(69)),
 							},
 						},
 					},
@@ -178,7 +178,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 			},
 		},
 		{
-			"Multiple primary key equality conditions with extra remaining filters for only one group - index point scan",
+			"Multiple index key equality conditions with extra remaining filters for only one group - index point scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
@@ -187,7 +187,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 					{
-						FieldIsEqual("id", OperandInteger, int64(69)),
+						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("bar@example.com"))),
 					},
 				},
 			},
@@ -196,31 +196,31 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 					{
 						Type:            ScanTypeIndexPoint,
 						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(42)},
+						IndexColumnName: "email",
+						IndexKeys:       []any{"foo@example.com"},
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+								FieldIsEqual("id", OperandInteger, int64(42)),
 							},
 						},
 					},
 					{
 						Type:            ScanTypeIndexPoint,
 						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(69)},
+						IndexColumnName: "email",
+						IndexKeys:       []any{"bar@example.com"},
 						Filters:         OneOrMore{{}},
 					},
 				},
 			},
 		},
 		{
-			"Multiple primary keys IN condition - index point scan",
+			"Multiple index keys IN condition - index point scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsInAny("id", int64(42), int64(69)),
+						FieldIsInAny("email", NewTextPointer([]byte("foo@example.com")), NewTextPointer([]byte("bar@example.com"))),
 					},
 				},
 			},
@@ -229,20 +229,20 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 					{
 						Type:            ScanTypeIndexPoint,
 						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(42), int64(69)},
+						IndexColumnName: "email",
+						IndexKeys:       []any{"foo@example.com", "bar@example.com"},
 						Filters:         OneOrMore{{}},
 					},
 				},
 			},
 		},
 		{
-			"Multiple primary keys NOT IN condition - sequential scan",
+			"Multiple index keys NOT IN condition - sequential scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsNotInAny("id", int64(42), int64(69)),
+						FieldIsNotInAny("email", NewTextPointer([]byte("foo@example.com")), NewTextPointer([]byte("bar@example.com"))),
 					},
 				},
 			},
@@ -251,19 +251,19 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 					{
 						Type: ScanTypeSequential,
 						Filters: OneOrMore{{
-							FieldIsNotInAny("id", int64(42), int64(69)),
+							FieldIsNotInAny("email", NewTextPointer([]byte("foo@example.com")), NewTextPointer([]byte("bar@example.com"))),
 						}},
 					},
 				},
 			},
 		},
 		{
-			"Single primary key NOT equal condition - sequential scan",
+			"Single index key NOT equal condition - sequential scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsNotEqual("id", OperandInteger, int64(42)),
+						FieldIsNotEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 				},
 			},
@@ -273,7 +273,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 						Type: ScanTypeSequential,
 						Filters: OneOrMore{
 							{
-								FieldIsNotEqual("id", OperandInteger, int64(42)),
+								FieldIsNotEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 							},
 						},
 					},
@@ -286,7 +286,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				OrderBy: []OrderBy{
 					{
-						Field:     Field{Name: "email"},
+						Field:     Field{Name: "id"},
 						Direction: Desc,
 					},
 				},
@@ -301,19 +301,19 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				SortReverse:  true,
 				OrderBy: []OrderBy{
 					{
-						Field:     Field{Name: "email"},
+						Field:     Field{Name: "id"},
 						Direction: Desc,
 					},
 				},
 			},
 		},
 		{
-			"Ordered by primary key descending - index scan",
+			"Ordered by index key descending - index scan",
 			Statement{
 				Kind: Select,
 				OrderBy: []OrderBy{
 					{
-						Field:     Field{Name: "id"},
+						Field:     Field{Name: "email"},
 						Direction: Desc,
 					},
 				},
@@ -323,31 +323,31 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 					{
 						Type:            ScanTypeIndexAll,
 						IndexName:       indexName,
-						IndexColumnName: "id",
+						IndexColumnName: "email",
 					},
 				},
 				SortReverse: true,
 				OrderBy: []OrderBy{
 					{
-						Field:     Field{Name: "id"},
+						Field:     Field{Name: "email"},
 						Direction: Desc,
 					},
 				},
 			},
 		},
 		{
-			"Multiple primary keys IN condition plus order by - index point scan",
+			"Multiple index keys IN condition plus order by - index point scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsInAny("id", int64(42), int64(69)),
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsInAny("email", NewTextPointer([]byte("foo@example.com")), NewTextPointer([]byte("bar@example.com"))),
+						FieldIsEqual("id", OperandInteger, int64(42)),
 					},
 				},
 				OrderBy: []OrderBy{
 					{
-						Field:     Field{Name: "id"},
+						Field:     Field{Name: "email"},
 						Direction: Desc,
 					},
 				},
@@ -357,10 +357,10 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 					{
 						Type:            ScanTypeIndexPoint,
 						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(42), int64(69)},
+						IndexColumnName: "email",
+						IndexKeys:       []any{"foo@example.com", "bar@example.com"},
 						Filters: OneOrMore{{
-							FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+							FieldIsEqual("id", OperandInteger, int64(42)),
 						}},
 					},
 				},
@@ -368,7 +368,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				SortReverse:  true,
 				OrderBy: []OrderBy{
 					{
-						Field:     Field{Name: "id"},
+						Field:     Field{Name: "email"},
 						Direction: Desc,
 					},
 				},
@@ -380,9 +380,9 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsGreater("id", OperandInteger, int64(42)),
-						FieldIsLessOrEqual("id", OperandInteger, int64(69)),
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsEqual("id", OperandInteger, int64(42)),
+						FieldIsGreater("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsLessOrEqual("email", OperandQuotedString, NewTextPointer([]byte("qux@example.com"))),
 					},
 				},
 			},
@@ -391,19 +391,19 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 					{
 						Type:            ScanTypeIndexRange,
 						IndexName:       indexName,
-						IndexColumnName: "id",
+						IndexColumnName: "email",
 						RangeCondition: RangeCondition{
 							Lower: &RangeBound{
-								Value:     int64(42),
+								Value:     "foo@example.com",
 								Inclusive: false,
 							},
 							Upper: &RangeBound{
-								Value:     int64(69),
+								Value:     "qux@example.com",
 								Inclusive: true,
 							},
 						},
 						Filters: OneOrMore{{
-							FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+							FieldIsEqual("id", OperandInteger, int64(42)),
 						}},
 					},
 				},
@@ -415,11 +415,11 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsGreaterOrEqual("id", OperandInteger, int64(42)),
+						FieldIsGreaterOrEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 					{
-						FieldIsLess("id", OperandInteger, int64(27)),
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsLess("email", OperandQuotedString, NewTextPointer([]byte("qux@example.com"))),
+						FieldIsEqual("id", OperandInteger, int64(42)),
 					},
 				},
 			},
@@ -428,10 +428,10 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 					{
 						Type:            ScanTypeIndexRange,
 						IndexName:       indexName,
-						IndexColumnName: "id",
+						IndexColumnName: "email",
 						RangeCondition: RangeCondition{
 							Lower: &RangeBound{
-								Value:     int64(42),
+								Value:     "foo@example.com",
 								Inclusive: true,
 							},
 						},
@@ -439,32 +439,32 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 					{
 						Type:            ScanTypeIndexRange,
 						IndexName:       indexName,
-						IndexColumnName: "id",
+						IndexColumnName: "email",
 						RangeCondition: RangeCondition{
 							Upper: &RangeBound{
-								Value: int64(27),
+								Value: "qux@example.com",
 							},
 						},
 						Filters: OneOrMore{{
-							FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+							FieldIsEqual("id", OperandInteger, int64(42)),
 						}},
 					},
 				},
 			},
 		},
 		{ // TODO - perhaps we should be ordering by using the index rather than sorting in memory?
-			"A range scan with order by primary key - ordered in memory",
+			"A range scan with order by index key - ordered in memory",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsGreater("id", OperandInteger, int64(42)),
-						FieldIsLessOrEqual("id", OperandInteger, int64(69)),
+						FieldIsGreater("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsLessOrEqual("email", OperandQuotedString, NewTextPointer([]byte("qux@example.com"))),
 					},
 				},
 				OrderBy: []OrderBy{
 					{
-						Field:     Field{Name: "id"},
+						Field:     Field{Name: "email"},
 						Direction: Desc,
 					},
 				},
@@ -474,14 +474,14 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 					{
 						Type:            ScanTypeIndexRange,
 						IndexName:       indexName,
-						IndexColumnName: "id",
+						IndexColumnName: "email",
 						RangeCondition: RangeCondition{
 							Lower: &RangeBound{
-								Value:     int64(42),
+								Value:     "foo@example.com",
 								Inclusive: false,
 							},
 							Upper: &RangeBound{
-								Value:     int64(69),
+								Value:     "qux@example.com",
 								Inclusive: true,
 							},
 						},
@@ -491,7 +491,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				SortReverse:  true,
 				OrderBy: []OrderBy{
 					{
-						Field:     Field{Name: "id"},
+						Field:     Field{Name: "email"},
 						Direction: Desc,
 					},
 				},
@@ -501,6 +501,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
+
 			actual, err := aTable.PlanQuery(context.Background(), aTestCase.Stmt)
 			require.NoError(t, err)
 			assert.Equal(t, aTestCase.Expected, actual)

@@ -3,7 +3,6 @@ package minisql
 import (
 	"context"
 	"fmt"
-	"strings"
 )
 
 type ScanType int
@@ -151,10 +150,8 @@ func (p QueryPlan) optimizeOrdering(t *Table) QueryPlan {
 
 	// Sequential scan
 	if len(p.Scans) == 1 && p.Scans[0].Type == ScanTypeSequential {
-		indexMap := t.IndexMap()
-
 		// Either order ORDER BY indexed column
-		if info, ok := indexMap[orderCol]; ok {
+		if info, ok := t.IndexInfoByColumnName(orderCol); ok {
 			// Use PK index for ordering
 			p.Scans[0].Type = ScanTypeIndexAll
 			p.Scans[0].IndexName = info.Name
@@ -190,7 +187,6 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 		equalityCond  = make(map[int]int)
 		otherIndexes  = make(map[int][]IndexInfo)
 		indexKeys     = make(map[int][]any)
-		indexMap      = t.IndexMap()
 	)
 
 	// Each group is separated by OR, for example:
@@ -203,13 +199,12 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 			if !ok {
 				return fmt.Errorf("invalid field name in condition: %v", aCondition.Operand1.Value)
 			}
-			_, ok = indexMap[fieldName]
-			if !ok {
+			if !t.HasIndexOnColumn(fieldName) {
 				continue
 			}
 			aColumn, ok := t.ColumnByName(fieldName)
 			if !ok {
-				return fmt.Errorf("invalid field name in condition: %s", fieldName)
+				return fmt.Errorf("column not found in condition: %s", fieldName)
 			}
 
 			// If group contains conditions on multiple indexes, we must pick only one.
@@ -246,18 +241,20 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 				}
 
 				indexKeys[groupIDx] = keys
-			} else if aColumn.Unique && strings.HasPrefix(equalityIndex[groupIDx].Name, "idx__") {
-				// TODO: do not assumme idx__ prefix for secondary indexes
-				// Prefer unique index over secondary index
-				equalityIndex[groupIDx] = info
-				equalityCond[groupIDx] = condIdx
+			} else if aColumn.Unique {
+				_, ok := t.SecondaryIndexes[equalityIndex[groupIDx].Name]
+				if ok {
+					// Prefer unique index over secondary index
+					equalityIndex[groupIDx] = info
+					equalityCond[groupIDx] = condIdx
 
-				keys, err := equalityKeys(aColumn, aCondition)
-				if err != nil {
-					return err
+					keys, err := equalityKeys(aColumn, aCondition)
+					if err != nil {
+						return err
+					}
+
+					indexKeys[groupIDx] = keys
 				}
-
-				indexKeys[groupIDx] = keys
 			}
 		}
 		if _, ok := equalityIndex[groupIDx]; !ok && len(otherIndexes[groupIDx]) == 0 {

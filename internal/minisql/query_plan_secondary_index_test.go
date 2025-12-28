@@ -6,50 +6,29 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
-func TestTable_PlanQuery_SingleIndex(t *testing.T) {
+func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 	t.Parallel()
 
-	// We can test both unique and secondary indexes using similar table structures.
-	// Query plan should be the same for both types of indexes in these simple test cases.
 	var (
-		indexName            = "foo"
+		indexName            = "idx__users__email"
 		secondaryIndexColumn = Column{
 			Kind: Varchar,
 			Size: MaxInlineVarchar,
 			Name: "email",
 		}
-		aTableWithUniqueIndex = &Table{
-			UniqueIndexes: map[string]UniqueIndex{
-				indexName: {
-					IndexInfo: IndexInfo{
-						Name:   indexName,
-						Column: testColumnsWithUniqueIndex[1],
-					},
-				},
+		aTable = NewTable(zap.NewNop(), nil, nil, testTableName2, []Column{
+			{
+				Kind: Int8,
+				Size: 8,
+				Name: "id",
 			},
-			Columns: testColumnsWithUniqueIndex,
-		}
-		aTableWithSecondaryIndex = &Table{
-			SecondaryIndexes: map[string]SecondaryIndex{
-				indexName: {
-					IndexInfo: IndexInfo{
-						Name:   indexName,
-						Column: secondaryIndexColumn,
-					},
-				},
-			},
-			Columns: []Column{
-				{
-					Kind: Varchar,
-					Size: MaxInlineVarchar,
-					Name: "email",
-				},
-				secondaryIndexColumn,
-			},
-		}
+			secondaryIndexColumn,
+		}, 0)
 	)
+	aTable.SetSecondaryIndex(indexName, secondaryIndexColumn, nil)
 
 	testCases := []struct {
 		Name     string
@@ -534,16 +513,8 @@ func TestTable_PlanQuery_SingleIndex(t *testing.T) {
 	}
 
 	for _, aTestCase := range testCases {
-		t.Run(aTestCase.Name+"- unique index", func(t *testing.T) {
-			actual, err := aTableWithUniqueIndex.PlanQuery(context.Background(), aTestCase.Stmt)
-			require.NoError(t, err)
-			assert.Equal(t, aTestCase.Expected, actual)
-		})
-	}
-
-	for _, aTestCase := range testCases {
-		t.Run(aTestCase.Name+"- secondary index", func(t *testing.T) {
-			actual, err := aTableWithSecondaryIndex.PlanQuery(context.Background(), aTestCase.Stmt)
+		t.Run(aTestCase.Name, func(t *testing.T) {
+			actual, err := aTable.PlanQuery(context.Background(), aTestCase.Stmt)
 			require.NoError(t, err)
 			assert.Equal(t, aTestCase.Expected, actual)
 		})

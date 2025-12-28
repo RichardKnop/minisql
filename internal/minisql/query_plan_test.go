@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
@@ -45,33 +46,9 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 		pkIndexName        = "pkey__users"
 		uniqueIndexName    = "key__users__email"
 		secondaryIndexName = "idx__users__created"
-
-		aTable = &Table{
-			PrimaryKey: PrimaryKey{
-				IndexInfo: IndexInfo{
-					Name:   pkIndexName,
-					Column: columns[0],
-				},
-			},
-			UniqueIndexes: map[string]UniqueIndex{
-				uniqueIndexName: {
-					IndexInfo: IndexInfo{
-						Name:   uniqueIndexName,
-						Column: columns[1],
-					},
-				},
-			},
-			SecondaryIndexes: map[string]SecondaryIndex{
-				secondaryIndexName: {
-					IndexInfo: IndexInfo{
-						Name:   secondaryIndexName,
-						Column: columns[4],
-					},
-				},
-			},
-			Columns: columns,
-		}
+		aTable             = NewTable(zap.NewNop(), nil, nil, "users", columns, 0)
 	)
+	aTable.SetSecondaryIndex(secondaryIndexName, columns[4], nil)
 
 	testCases := []struct {
 		Name     string

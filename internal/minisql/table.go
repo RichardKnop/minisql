@@ -8,30 +8,39 @@ import (
 )
 
 type Table struct {
-	Name             string
-	Columns          []Column
-	PrimaryKey       PrimaryKey
-	UniqueIndexes    map[string]UniqueIndex
-	SecondaryIndexes map[string]SecondaryIndex
-	rootPageIdx      PageIndex
-	maximumICells    uint32
-	logger           *zap.Logger
-	pager            TxPager
-	txManager        *TransactionManager
+	Name                 string
+	Columns              []Column
+	columnCache          map[string]int // Cache: column name -> index in Columns slice
+	PrimaryKey           PrimaryKey
+	UniqueIndexes        map[string]UniqueIndex
+	SecondaryIndexes     map[string]SecondaryIndex
+	columnIndexInfoCache map[string]IndexInfo
+	rootPageIdx          PageIndex
+	maximumICells        uint32
+	logger               *zap.Logger
+	pager                TxPager
+	txManager            *TransactionManager
 }
 
 func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, name string, columns []Column, rootPageIdx PageIndex) *Table {
 	aTable := &Table{
-		Name:             name,
-		Columns:          columns,
-		rootPageIdx:      rootPageIdx,
-		maximumICells:    InternalNodeMaxCells,
-		logger:           logger,
-		pager:            pager,
-		txManager:        txManager,
-		UniqueIndexes:    make(map[string]UniqueIndex),
-		SecondaryIndexes: make(map[string]SecondaryIndex),
+		Name:                 name,
+		Columns:              columns,
+		columnCache:          make(map[string]int, len(columns)),
+		rootPageIdx:          rootPageIdx,
+		maximumICells:        InternalNodeMaxCells,
+		logger:               logger,
+		pager:                pager,
+		txManager:            txManager,
+		UniqueIndexes:        make(map[string]UniqueIndex),
+		SecondaryIndexes:     make(map[string]SecondaryIndex),
+		columnIndexInfoCache: make(map[string]IndexInfo),
 	}
+	// Build column name -> column index cache
+	for i, aColumn := range columns {
+		aTable.columnCache[aColumn.Name] = i
+	}
+
 	for _, aColumn := range columns {
 		if aColumn.PrimaryKey {
 			aTable.PrimaryKey = PrimaryKey{
@@ -54,7 +63,35 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 			continue
 		}
 	}
+
+	// Build column name -> IndexInfo cache
+	if aTable.HasPrimaryKey() {
+		aTable.columnIndexInfoCache[aTable.PrimaryKey.IndexInfo.Column.Name] = aTable.PrimaryKey.IndexInfo
+	}
+	for _, index := range aTable.UniqueIndexes {
+		aTable.columnIndexInfoCache[index.IndexInfo.Column.Name] = index.IndexInfo
+	}
+	for _, index := range aTable.SecondaryIndexes {
+		aTable.columnIndexInfoCache[index.IndexInfo.Column.Name] = index.IndexInfo
+	}
+
 	return aTable
+}
+
+func (t *Table) SetSecondaryIndex(name string, column Column, index BTreeIndex) {
+	t.SecondaryIndexes[name] = SecondaryIndex{
+		IndexInfo: IndexInfo{
+			Name:   name,
+			Column: column,
+		},
+		Index: index,
+	}
+	t.columnIndexInfoCache[column.Name] = t.SecondaryIndexes[name].IndexInfo
+}
+
+func (t *Table) RemoveSecondaryIndex(name string) {
+	delete(t.SecondaryIndexes, name)
+	delete(t.columnIndexInfoCache, t.SecondaryIndexes[name].Column.Name)
 }
 
 func (t *Table) GetRootPageIdx() PageIndex {
@@ -66,46 +103,36 @@ func (t *Table) HasPrimaryKey() bool {
 }
 
 func (t *Table) ColumnByName(name string) (Column, bool) {
-	for i := range t.Columns {
-		if t.Columns[i].Name == name {
-			return t.Columns[i], true
-		}
+	if idx, ok := t.columnCache[name]; ok {
+		return t.Columns[idx], true
 	}
 	return Column{}, false
 }
 
 func (t *Table) IndexColumnByIndexName(name string) (Column, bool) {
 	if t.HasPrimaryKey() && t.PrimaryKey.Name == name {
-		return t.PrimaryKey.Column, true
+		return t.PrimaryKey.IndexInfo.Column, true
 	}
-	for _, index := range t.UniqueIndexes {
-		if index.Name == name {
-			return index.Column, true
-		}
+	if index, ok := t.UniqueIndexes[name]; ok {
+		return index.IndexInfo.Column, true
 	}
-	for _, index := range t.SecondaryIndexes {
-		if index.Name == name {
-			return index.Column, true
-		}
+	if index, ok := t.SecondaryIndexes[name]; ok {
+		return index.IndexInfo.Column, true
 	}
 	return Column{}, false
 }
 
+func (t *Table) HasIndexOnColumn(name string) bool {
+	_, ok := t.columnIndexInfoCache[name]
+	return ok
+}
+
 func (t *Table) IndexInfoByColumnName(name string) (IndexInfo, bool) {
-	if t.HasPrimaryKey() && t.PrimaryKey.Column.Name == name {
-		return t.PrimaryKey.IndexInfo, true
+	info, ok := t.columnIndexInfoCache[name]
+	if !ok {
+		return IndexInfo{}, false
 	}
-	for _, index := range t.UniqueIndexes {
-		if index.Column.Name == name {
-			return index.IndexInfo, true
-		}
-	}
-	for _, index := range t.SecondaryIndexes {
-		if index.Column.Name == name {
-			return index.IndexInfo, true
-		}
-	}
-	return IndexInfo{}, false
+	return info, true
 }
 
 func (t *Table) IndexByName(name string) (BTreeIndex, bool) {
@@ -119,20 +146,6 @@ func (t *Table) IndexByName(name string) (BTreeIndex, bool) {
 		return index.Index, true
 	}
 	return nil, false
-}
-
-func (t *Table) IndexMap() map[string]IndexInfo {
-	indexMap := make(map[string]IndexInfo)
-	if t.HasPrimaryKey() {
-		indexMap[t.PrimaryKey.Column.Name] = t.PrimaryKey.IndexInfo
-	}
-	for _, index := range t.UniqueIndexes {
-		indexMap[index.Column.Name] = index.IndexInfo
-	}
-	for _, index := range t.SecondaryIndexes {
-		indexMap[index.Column.Name] = index.IndexInfo
-	}
-	return indexMap
 }
 
 // SeekNextRowID returns cursor pointing at the position after the last row ID
