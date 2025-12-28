@@ -20,6 +20,7 @@ type Pager interface {
 type Flusher interface {
 	TotalPages() uint32
 	Flush(context.Context, PageIndex) error
+	FlushBatch(context.Context, []PageIndex) error
 	Close() error
 }
 

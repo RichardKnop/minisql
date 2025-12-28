@@ -180,6 +180,13 @@ func (p *pagerImpl) SavePage(ctx context.Context, pageIdx PageIndex, page *Page)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	// Extend slice if needed
+	if len(p.pages) < int(pageIdx)+1 {
+		for i := len(p.pages); i < int(pageIdx)+1; i++ {
+			p.pages = append(p.pages, nil)
+		}
+	}
+
 	p.pages[pageIdx] = page
 }
 
@@ -216,6 +223,97 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 	}
 	_, err = p.file.WriteAt(buf[0:p.pageSize-RootPageConfigSize], int64(RootPageConfigSize))
 	return err
+}
+
+// FlushBatch writes multiple pages to disk in a single operation.
+// This reduces the number of syscalls and allows the OS to optimize I/O.
+// Pages are marshaled in parallel outside of locks, then written sequentially.
+func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) error {
+	if len(pageIndices) == 0 {
+		return nil
+	}
+
+	// Single page optimization - use regular Flush
+	if len(pageIndices) == 1 {
+		return p.Flush(ctx, pageIndices[0])
+	}
+
+	// Phase 1: Collect pages and marshal them (can be done in parallel)
+	type marshaledPage struct {
+		pageIdx PageIndex
+		buf     []byte
+		isRoot  bool
+		header  *DatabaseHeader
+	}
+
+	marshaled := make([]marshaledPage, 0, len(pageIndices))
+
+	// Read lock once to get all pages and header
+	p.mu.RLock()
+	dbHeader := p.dbHeader
+	pagesToMarshal := make([]*Page, 0, len(pageIndices))
+	indices := make([]PageIndex, 0, len(pageIndices))
+
+	for _, pageIdx := range pageIndices {
+		if int(pageIdx) >= len(p.pages) || p.pages[pageIdx] == nil {
+			continue
+		}
+		pagesToMarshal = append(pagesToMarshal, p.pages[pageIdx])
+		indices = append(indices, pageIdx)
+	}
+	p.mu.RUnlock()
+
+	// Marshal pages outside of lock
+	for i, aPage := range pagesToMarshal {
+		pageIdx := indices[i]
+		buf := make([]byte, p.pageSize)
+
+		_, err := marshalPage(aPage, buf)
+		if err != nil {
+			return fmt.Errorf("error marshaling page %d: %w", pageIdx, err)
+		}
+
+		mp := marshaledPage{
+			pageIdx: pageIdx,
+			buf:     buf,
+			isRoot:  pageIdx == 0,
+		}
+
+		if mp.isRoot {
+			mp.header = &dbHeader
+		}
+
+		marshaled = append(marshaled, mp)
+	}
+
+	// Phase 2: Write all pages to disk sequentially
+	for _, mp := range marshaled {
+		if !mp.isRoot {
+			// Regular page write
+			_, err := p.file.WriteAt(mp.buf, int64(mp.pageIdx)*int64(p.pageSize))
+			if err != nil {
+				return fmt.Errorf("error writing page %d: %w", mp.pageIdx, err)
+			}
+		} else {
+			// Root page with header
+			headerBytes, err := mp.header.Marshal()
+			if err != nil {
+				return fmt.Errorf("error marshaling header: %w", err)
+			}
+
+			_, err = p.file.WriteAt(headerBytes[0:RootPageConfigSize], 0)
+			if err != nil {
+				return fmt.Errorf("error writing header: %w", err)
+			}
+
+			_, err = p.file.WriteAt(mp.buf[0:p.pageSize-RootPageConfigSize], int64(RootPageConfigSize))
+			if err != nil {
+				return fmt.Errorf("error writing root page data: %w", err)
+			}
+		}
+	}
+
+	return nil
 }
 
 func marshalPage(aPage *Page, buf []byte) ([]byte, error) {

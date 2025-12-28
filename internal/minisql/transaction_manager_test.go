@@ -84,8 +84,12 @@ func TestTransactionManager_Commit(t *testing.T) {
 		}
 		saverMock.On("SavePage", ctx, PageIndex(4), tx.WriteSet[4]).Return(nil).Once()
 		saverMock.On("SaveHeader", ctx, *tx.DbHeaderWrite).Return(nil).Once()
-		saverMock.On("Flush", ctx, PageIndex(0)).Return(nil).Once()
-		saverMock.On("Flush", ctx, PageIndex(4)).Return(nil).Once()
+		saverMock.On("FlushBatch", ctx, mock.MatchedBy(func(pages []PageIndex) bool {
+			// Should flush header (page 0) and modified page (page 4)
+			return len(pages) == 2 &&
+				((pages[0] == PageIndex(0) && pages[1] == PageIndex(4)) ||
+					(pages[0] == PageIndex(4) && pages[1] == PageIndex(0)))
+		})).Return(nil).Once()
 
 		err := txManager.CommitTransaction(ctx, tx)
 		require.NoError(t, err)
@@ -138,7 +142,10 @@ func TestTransactionManager_Commit(t *testing.T) {
 		saverMock.On("SavePage", ctx, PageIndex(3), writeTx.WriteSet[3]).Return(nil).Once()
 
 		// Commit the writing transaction first
-		saverMock.On("Flush", ctx, PageIndex(3)).Return(nil).Once()
+		saverMock.On("FlushBatch", ctx, mock.MatchedBy(func(pages []PageIndex) bool {
+			// Should flush only the modified page (page 3)
+			return len(pages) == 1 && pages[0] == PageIndex(3)
+		})).Return(nil).Once()
 		err := txManager.CommitTransaction(ctx, writeTx)
 		require.NoError(t, err)
 
@@ -198,7 +205,10 @@ func TestTransactionManager_Commit(t *testing.T) {
 			pagerMock.On("GetPage", ctx, PageIndex(4)).Return(originalPage, nil).Once()
 		}
 		saverMock.On("SavePage", ctx, PageIndex(4), writeTx2.WriteSet[4]).Return(nil).Once()
-		saverMock.On("Flush", ctx, PageIndex(4)).Return(nil).Once()
+		saverMock.On("FlushBatch", ctx, mock.MatchedBy(func(pages []PageIndex) bool {
+			// Should flush only the modified page (page 4)
+			return len(pages) == 1 && pages[0] == PageIndex(4)
+		})).Return(nil).Once()
 
 		// Commit the second transaction first
 		err := txManager.CommitTransaction(ctx, writeTx2)
