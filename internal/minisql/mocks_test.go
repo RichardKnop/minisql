@@ -423,6 +423,63 @@ func (_c *MockPageSaver_Flush_Call) RunAndReturn(run func(context1 context.Conte
 	return _c
 }
 
+// FlushBatch provides a mock function for the type MockPageSaver
+func (_mock *MockPageSaver) FlushBatch(context1 context.Context, pageIndices []PageIndex) error {
+	ret := _mock.Called(context1, pageIndices)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FlushBatch")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []PageIndex) error); ok {
+		r0 = returnFunc(context1, pageIndices)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockPageSaver_FlushBatch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FlushBatch'
+type MockPageSaver_FlushBatch_Call struct {
+	*mock.Call
+}
+
+// FlushBatch is a helper method to define mock.On call
+//   - context1 context.Context
+//   - pageIndices []PageIndex
+func (_e *MockPageSaver_Expecter) FlushBatch(context1 interface{}, pageIndices interface{}) *MockPageSaver_FlushBatch_Call {
+	return &MockPageSaver_FlushBatch_Call{Call: _e.mock.On("FlushBatch", context1, pageIndices)}
+}
+
+func (_c *MockPageSaver_FlushBatch_Call) Run(run func(context1 context.Context, pageIndices []PageIndex)) *MockPageSaver_FlushBatch_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 []PageIndex
+		if args[1] != nil {
+			arg1 = args[1].([]PageIndex)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockPageSaver_FlushBatch_Call) Return(err error) *MockPageSaver_FlushBatch_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockPageSaver_FlushBatch_Call) RunAndReturn(run func(context1 context.Context, pageIndices []PageIndex) error) *MockPageSaver_FlushBatch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SaveHeader provides a mock function for the type MockPageSaver
 func (_mock *MockPageSaver) SaveHeader(context1 context.Context, databaseHeader DatabaseHeader) {
 	_mock.Called(context1, databaseHeader)

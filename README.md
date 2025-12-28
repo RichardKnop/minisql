@@ -464,4 +464,5 @@ LOG_LEVEL=info go test ./... -count=1
 ```sh
 go test -bench=BenchmarkPageAccess -benchtime=100000x ./internal/minisql
 go test -bench=BenchmarkRow -benchmem ./internal/minisql
+go test -bench=BenchmarkFlush -benchmem -benchtime=5s ./internal/minisql
 ```
