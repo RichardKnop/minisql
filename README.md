@@ -40,7 +40,7 @@ MiniSQL supports optional connection string parameters:
 |-----------|--------|---------|-------------|
 | `journal` | `true`, `false` | `true` | Enable/disable rollback journal for crash recovery |
 | `log_level` | `debug`, `info`, `warn`, `error` | `warn` | Set logging verbosity level |
-| `max_cached_pages` | positive integer | `1000` | Maximum number of pages to keep in memory cache |
+| `max_cached_pages` | positive integer | `2000` | Maximum number of pages to keep in memory cache |
 
 **Examples:**
 ```go
@@ -61,9 +61,7 @@ db, err := sql.Open("minisql", "/path/to/db.db?journal=true&log_level=info&max_c
 
 ##  Write-Ahead Rollback Journal
 
-MiniSQL uses a write-ahead rollback journal by default. Every write transaction, before comitting first writes original version of all modified pages (and database header if applicable) to the journal file (a file with `-journal` suffix created in the same directory as the database file). In case of an error encountered during flushing of pages changed by the transaction to the disk, the database quits and recovers to original state before the transaction from the journal file.
-
-You can disable this behaviour by appending `?journal=false` to the connection string if you value performance over being able to recover from a crash. This might be useful for databases which are not the main source of data and are created each time from the main source when an ephemeral service starts, for example in event sourcing systems.
+MiniSQL uses a [rollback journal](https://sqlite.org/lockingv3.html#rollback) to achieve atomic commit and rollback . Before committing a transaction,a journal file with `-journal` suffix is created in the same directory as the database file. It contains original state of the pages (and database header if applicable) before the transaction began. In case of an error encountered during flushing of pages changed by the transaction to the disk, the database quits and recovers to original state before the transaction from the journal file.
 
 ## Storage
 

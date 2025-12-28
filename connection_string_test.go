@@ -3,6 +3,7 @@ package minisql
 import (
 	"testing"
 
+	"github.com/RichardKnop/minisql/internal/minisql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +25,7 @@ func TestParseConnectionString(t *testing.T) {
 				FilePath:       "./test.db",
 				JournalEnabled: true,
 				LogLevel:       "warn",
-				MaxCachedPages: 1000,
+				MaxCachedPages: minisql.PageCacheSize,
 			},
 			wantErr: false,
 		},
@@ -35,7 +36,7 @@ func TestParseConnectionString(t *testing.T) {
 				FilePath:       "./test.db",
 				JournalEnabled: false,
 				LogLevel:       "warn",
-				MaxCachedPages: 1000,
+				MaxCachedPages: minisql.PageCacheSize,
 			},
 			wantErr: false,
 		},
@@ -46,7 +47,7 @@ func TestParseConnectionString(t *testing.T) {
 				FilePath:       "./test.db",
 				JournalEnabled: true,
 				LogLevel:       "debug",
-				MaxCachedPages: 1000,
+				MaxCachedPages: minisql.PageCacheSize,
 			},
 			wantErr: false,
 		},
@@ -63,12 +64,12 @@ func TestParseConnectionString(t *testing.T) {
 		},
 		{
 			name:    "all parameters",
-			connStr: "./test.db?journal=false&log_level=info&max_cached_pages=2000",
+			connStr: "./test.db?journal=false&log_level=info&max_cached_pages=4000",
 			wantConfig: &ConnectionConfig{
 				FilePath:       "./test.db",
 				JournalEnabled: false,
 				LogLevel:       "info",
-				MaxCachedPages: 2000,
+				MaxCachedPages: 4000,
 			},
 			wantErr: false,
 		},

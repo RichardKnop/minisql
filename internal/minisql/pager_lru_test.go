@@ -186,9 +186,9 @@ func TestPager_UnlimitedCache(t *testing.T) {
 	defer os.Remove(dbFile.Name())
 	defer dbFile.Close()
 
-	// Create pager with 0 max (should default to 1000)
+	// Create pager with 0 max (should default to 2000)
 	aPager, err := NewPager(dbFile, PageSize, 0)
 	require.NoError(t, err)
 
-	assert.Equal(t, 1000, aPager.maxCachedPages, "Should default to 1000 when 0 is passed")
+	assert.Equal(t, PageCacheSize, aPager.maxCachedPages, "Should default to 2000 when 0 is passed")
 }

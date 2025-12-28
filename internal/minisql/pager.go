@@ -7,6 +7,8 @@ import (
 	"sync"
 )
 
+const PageCacheSize = 2000 // default maximum number of pages to keep in memory
+
 type DBFile interface {
 	io.ReadSeeker
 	io.ReaderAt
@@ -43,7 +45,7 @@ type pagerImpl struct {
 // maxCachedPages: maximum number of pages to keep in cache (0 = unlimited)
 func NewPager(file DBFile, pageSize int, maxCachedPages int) (*pagerImpl, error) {
 	if maxCachedPages <= 0 {
-		maxCachedPages = 1000 // default limit
+		maxCachedPages = PageCacheSize
 	}
 	aPager := &pagerImpl{
 		pageSize:       pageSize,

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/RichardKnop/minisql/internal/minisql"
 	"go.uber.org/zap"
 )
 
@@ -23,7 +24,7 @@ func DefaultConnectionConfig(filePath string) *ConnectionConfig {
 		FilePath:       filePath,
 		JournalEnabled: true,
 		LogLevel:       "warn",
-		MaxCachedPages: 1000,
+		MaxCachedPages: minisql.PageCacheSize,
 	}
 }
 
