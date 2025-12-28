@@ -33,6 +33,9 @@ type pagerImpl struct {
 	file     DBFile
 	fileSize int64
 
+	// bufferPool reuses page-sized byte slices to reduce allocations
+	bufferPool *sync.Pool
+
 	mu sync.RWMutex
 }
 
@@ -48,6 +51,11 @@ func NewPager(file DBFile, pageSize int, maxCachedPages int) (*pagerImpl, error)
 		file:           file,
 		pages:          make([]*Page, 0, maxCachedPages),
 		lruList:        make([]PageIndex, 0, maxCachedPages),
+		bufferPool: &sync.Pool{
+			New: func() interface{} {
+				return make([]byte, pageSize)
+			},
+		},
 	}
 
 	fileSize, err := aPager.file.Seek(0, io.SeekEnd)
@@ -122,6 +130,7 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 	// Evict pages if cache is full BEFORE loading new page
 	p.evictIfNeeded()
 
+	// Don't use buffer pool here - the unmarshaled page may hold references to the buffer
 	buf := make([]byte, p.pageSize)
 
 	if int(pageIdx) != int(p.totalPages) {
@@ -201,7 +210,9 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 	dbHeader := p.dbHeader
 	p.mu.RUnlock()
 
-	buf := make([]byte, p.pageSize)
+	buf := p.bufferPool.Get().([]byte)
+	defer p.bufferPool.Put(buf)
+
 	_, err := marshalPage(aPage, buf)
 	if err != nil {
 		return fmt.Errorf("error flushing page %d: %w", aPage.Index, err)
@@ -266,10 +277,11 @@ func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) err
 	// Marshal pages outside of lock
 	for i, aPage := range pagesToMarshal {
 		pageIdx := indices[i]
-		buf := make([]byte, p.pageSize)
+		buf := p.bufferPool.Get().([]byte)
 
 		_, err := marshalPage(aPage, buf)
 		if err != nil {
+			p.bufferPool.Put(buf)
 			return fmt.Errorf("error marshaling page %d: %w", pageIdx, err)
 		}
 
@@ -287,6 +299,13 @@ func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) err
 	}
 
 	// Phase 2: Write all pages to disk sequentially
+	// Return all buffers to pool after we're completely done
+	defer func() {
+		for _, mp := range marshaled {
+			p.bufferPool.Put(mp.buf)
+		}
+	}()
+
 	for _, mp := range marshaled {
 		if !mp.isRoot {
 			// Regular page write

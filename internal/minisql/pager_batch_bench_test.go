@@ -31,10 +31,10 @@ func BenchmarkFlushSequential(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		// Flush pages one at a time (old approach)
-		for j := 0; j < len(pages); j++ {
-			if err := pager.Flush(context.Background(), PageIndex(j)); err != nil {
+		for i := range pages {
+			if err := pager.Flush(context.Background(), PageIndex(i)); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -68,7 +68,7 @@ func BenchmarkFlushBatch(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		// Flush all pages in batch (new approach)
 		if err := pager.FlushBatch(context.Background(), pageIndices); err != nil {
 			b.Fatal(err)
