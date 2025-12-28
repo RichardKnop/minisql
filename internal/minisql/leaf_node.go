@@ -57,6 +57,9 @@ type Cell struct {
 	NullBitmask uint64
 	Key         RowID
 	Value       []byte
+	// Tracks if this cell owns its Value slice, cells are shared until
+	// they are modified ( copy-on-write )
+	isOwned bool
 }
 
 func (c *Cell) Size() uint64 {
@@ -121,10 +124,55 @@ type LeafNode struct {
 	Cells  []Cell
 }
 
+// Clone cretes a shallow copy of the leaf node, sharing value slices
+// until they are about to be modified at which point PrepareModifyCell
+// should be called to clone the value slice for that cell.
 func (n *LeafNode) Clone() *LeafNode {
-	aCopy := NewLeafNode(n.Cells...)
-	aCopy.Header = n.Header
+	aCopy := &LeafNode{
+		Header: n.Header,
+		Cells:  make([]Cell, len(n.Cells)),
+	}
+
+	// Shallow copy - share Value slices
+	for i := range n.Cells {
+		aCopy.Cells[i] = Cell{
+			NullBitmask: n.Cells[i].NullBitmask,
+			Key:         n.Cells[i].Key,
+			Value:       n.Cells[i].Value, // Share the slice!
+			isOwned:     false,            // Mark as shared
+		}
+	}
 	return aCopy
+}
+
+func (n *LeafNode) DeepClone() *LeafNode {
+	aCopy := &LeafNode{
+		Header: n.Header,
+		Cells:  make([]Cell, 0, len(n.Cells)),
+	}
+	aCopy.Cells = append(aCopy.Cells, n.Cells...)
+	for i := range n.Cells {
+		aCopy.Cells[i] = Cell{
+			NullBitmask: n.Cells[i].NullBitmask,
+			Key:         n.Cells[i].Key,
+			Value:       make([]byte, len(n.Cells[i].Value)),
+			isOwned:     true, // Mark as owned
+		}
+		copy(aCopy.Cells[i].Value, n.Cells[i].Value)
+	}
+	return aCopy
+}
+
+// Before modifying a cell:
+func (n *LeafNode) PrepareModifyCell(idx uint32) {
+	if n.Cells[idx].isOwned {
+		return
+	}
+	// Clone the Value slice on first write
+	oldValue := n.Cells[idx].Value
+	n.Cells[idx].Value = make([]byte, len(oldValue))
+	copy(n.Cells[idx].Value, oldValue)
+	n.Cells[idx].isOwned = true
 }
 
 func NewLeafNode(cells ...Cell) *LeafNode {
@@ -215,9 +263,12 @@ func (n *LeafNode) Delete(key RowID) (Cell, bool) {
 	if cellIdx < 0 {
 		return Cell{}, false
 	}
+
+	n.PrepareModifyCell(uint32(cellIdx))
 	aCellToDelete := n.Cells[cellIdx]
 
-	for i := int(cellIdx); i < int(n.Header.Cells)-1; i++ {
+	for i := uint32(cellIdx); i < n.Header.Cells-1; i++ {
+		n.PrepareModifyCell(i + 1)
 		n.Cells[i] = n.Cells[i+1]
 	}
 	n.Cells[int(n.Header.Cells)-1] = Cell{}
@@ -241,7 +292,8 @@ func (n *LeafNode) RemoveLastCell() {
 }
 
 func (n *LeafNode) RemoveFirstCell() {
-	for i := 0; i < int(n.Header.Cells)-1; i++ {
+	for i := uint32(0); i < n.Header.Cells-1; i++ {
+		n.PrepareModifyCell(i + 1)
 		n.Cells[i] = n.Cells[i+1]
 	}
 	n.Cells[n.Header.Cells-1] = Cell{}
@@ -249,7 +301,8 @@ func (n *LeafNode) RemoveFirstCell() {
 }
 
 func (n *LeafNode) PrependCell(aCell Cell) {
-	for i := int(n.Header.Cells); i > 0; i-- {
+	for i := n.Header.Cells; i > 0; i-- {
+		n.PrepareModifyCell(i - 1)
 		n.Cells[i] = n.Cells[i-1]
 	}
 	n.Cells[0] = aCell
