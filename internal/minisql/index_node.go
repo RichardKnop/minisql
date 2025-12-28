@@ -259,6 +259,7 @@ func (c *IndexCell[T]) ReplaceRowID(id, newID RowID) int {
 type IndexNode[T IndexKey] struct {
 	Header IndexNodeHeader
 	Cells  []IndexCell[T] // (PageSize - (5)) / (CellSize + 4 + 8)
+	unique bool
 }
 
 // TODO - this is not used currently
@@ -270,7 +271,8 @@ func NewIndexNode[T IndexKey](unique bool, cells ...IndexCell[T]) *IndexNode[T] 
 		Header: IndexNodeHeader{
 			RightChild: RIGHT_CHILD_NOT_SET,
 		},
-		Cells: make([]IndexCell[T], 0, MinimumIndexCells),
+		Cells:  make([]IndexCell[T], 0, MinimumIndexCells),
+		unique: unique,
 	}
 	for range MinimumIndexCells {
 		aNode.Cells = append(aNode.Cells, NewIndexCell[T](unique))
@@ -426,8 +428,7 @@ func (n *IndexNode[T]) DeleteKeyAndRightChild(idx uint32) error {
 		}
 	}
 
-	unique := n.Cells[int(n.Header.Keys)-1].unique
-	n.Cells[int(n.Header.Keys)-1] = NewIndexCell[T](unique)
+	n.Cells[int(n.Header.Keys)-1] = NewIndexCell[T](n.unique)
 	n.Header.Keys -= 1
 
 	return nil
@@ -453,8 +454,7 @@ func (n *IndexNode[T]) RemoveFirstCell() {
 	for i := 0; i < int(n.Header.Keys)-1; i++ {
 		n.Cells[i] = n.Cells[i+1]
 	}
-	unique := n.Cells[n.Header.Keys-1].unique
-	n.Cells[n.Header.Keys-1] = NewIndexCell[T](unique)
+	n.Cells[n.Header.Keys-1] = NewIndexCell[T](n.unique)
 	n.Header.Keys -= 1
 }
 

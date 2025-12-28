@@ -249,15 +249,15 @@ values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:2
 	s.Require().NoError(err)
 
 	s.execQuery(`insert into products("product_id", "name", "description", "price") values
-(25, 'Gaming Laptop', 'High performance laptop for gaming', 1500),
-(26, 'Wireless Mouse', 'Ergonomic wireless mouse', 50),
-(27, 'Mechanical Keyboard', 'RGB backlit mechanical keyboard', 120);`, 3)
+	(25, 'Gaming Laptop', 'High performance laptop for gaming', 1500),
+	(26, 'Wireless Mouse', 'Ergonomic wireless mouse', 50),
+	(27, 'Mechanical Keyboard', 'RGB backlit mechanical keyboard', 120);`, 3)
 
 	s.execQuery(`insert into orders("user_id", "product_id", "total_paid") values
-(100, 25, 1500),
-(101, 26, 50),
-(102, 27, 120),
-(100, 27, 120);`, 4)
+	(100, 25, 1500),
+	(101, 26, 50),
+	(102, 27, 120),
+	(100, 27, 120);`, 4)
 
 	s.Run("More basic selects from multiple tables", func() {
 		orders := s.collectOrders(`select * from orders where user_id = 100;`)

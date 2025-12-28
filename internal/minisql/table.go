@@ -1046,32 +1046,32 @@ func (t *Table) BFS(ctx context.Context, f callback) error {
 func (t *Table) createBTreeIndex(aPager *TransactionalPager, freePage *Page, aColumn Column, indexName string, unique bool) (BTreeIndex, error) {
 	switch aColumn.Kind {
 	case Boolean:
-		indexNode := NewIndexNode[int8](true)
+		indexNode := NewIndexNode[int8](unique)
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Int4:
-		indexNode := NewIndexNode[int32](true)
+		indexNode := NewIndexNode[int32](unique)
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Int8, Timestamp:
-		indexNode := NewIndexNode[int64](true)
+		indexNode := NewIndexNode[int64](unique)
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Real:
-		indexNode := NewIndexNode[float32](true)
+		indexNode := NewIndexNode[float32](unique)
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Double:
-		indexNode := NewIndexNode[float64](true)
+		indexNode := NewIndexNode[float64](unique)
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	case Varchar:
-		indexNode := NewIndexNode[string](true)
+		indexNode := NewIndexNode[string](unique)
 		indexNode.Header.IsRoot = true
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode

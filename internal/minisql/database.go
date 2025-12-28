@@ -422,7 +422,7 @@ func (d *Database) initSecondaryIndex(ctx context.Context, aSchema Schema) error
 
 	// Create and set BTree index instance
 	tp := NewTransactionalPager(
-		d.factory.ForIndex(secondaryIndex.Column.Kind, true),
+		d.factory.ForIndex(secondaryIndex.Column.Kind, false),
 		d.txManager,
 		aTable.Name,
 		aSchema.Name,
@@ -1035,7 +1035,7 @@ func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, aTa
 	d.logger.Sugar().With("column", secondaryIndex.Column.Name).Debug("creating secondary index")
 
 	txPager := NewTransactionalPager(
-		d.factory.ForIndex(secondaryIndex.Column.Kind, true),
+		d.factory.ForIndex(secondaryIndex.Column.Kind, false),
 		d.txManager,
 		aTable.Name,
 		secondaryIndex.Name,

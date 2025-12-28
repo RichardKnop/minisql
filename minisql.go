@@ -24,10 +24,10 @@ func init() {
 
 // Driver implements the database/sql/driver.Driver interface.
 type Driver struct {
-	mu        sync.Mutex
-	databases map[string]*databaseEntry
-	parser    minisql.Parser
-	logger    *zap.Logger
+	mu      sync.Mutex
+	dbEntry *databaseEntry
+	parser  minisql.Parser
+	logger  *zap.Logger
 }
 
 type databaseEntry struct {
@@ -51,10 +51,6 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 		return nil, fmt.Errorf("failed to parse connection string: %w", err)
 	}
 
-	if d.databases == nil {
-		d.databases = make(map[string]*databaseEntry)
-	}
-
 	// Initialize logger if not set
 	if d.logger == nil {
 		logConfig := logging.DefaultConfig()
@@ -68,16 +64,6 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 
 	if d.parser == nil {
 		d.parser = parser.New()
-	}
-
-	// Check if database is already open (use file path as key)
-	entry, exists := d.databases[config.FilePath]
-	if exists {
-		return &Conn{
-			db:     entry.db,
-			parser: d.parser,
-			logger: d.logger,
-		}, nil
 	}
 
 	// Attempt journal recovery if enabled
@@ -97,7 +83,11 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	d.databases[config.FilePath] = &databaseEntry{
+	if d.dbEntry != nil {
+		d.dbEntry.db.Close()
+	}
+
+	d.dbEntry = &databaseEntry{
 		db:     db,
 		config: config,
 	}
