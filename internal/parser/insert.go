@@ -13,7 +13,7 @@ var (
 	errInsertNoFields                = fmt.Errorf("at INSERT INTO: expected at least one field to insert")
 )
 
-func (p *parser) doParseInsert() error {
+func (p *parserItem) doParseInsert() error {
 	switch p.step {
 	case stepInsertTable:
 		tableName := p.peek()

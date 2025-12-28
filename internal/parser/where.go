@@ -17,7 +17,7 @@ var (
 	errWhereUnknownOperator                      = fmt.Errorf("at WHERE: unknown operator")
 )
 
-func (p *parser) doParseWhere() error {
+func (p *parserItem) doParseWhere() error {
 	switch p.step {
 	case stepWhere:
 		whereOrEnd := p.peek()

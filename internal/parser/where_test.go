@@ -246,12 +246,14 @@ func TestParse_Where(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			aParser := New().setSQL(aTestCase.SQL)
-			aParser.step = stepWhere
+			p := &parserItem{
+				sql:  aTestCase.SQL,
+				step: stepWhere,
+			}
 
 			var err error
-			for aParser.i < len(aParser.sql) {
-				err = aParser.doParseWhere()
+			for p.i < len(p.sql) {
+				err = p.doParseWhere()
 				if err != nil {
 					break
 				}
@@ -262,7 +264,7 @@ func TestParse_Where(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			assert.Equal(t, aTestCase.Expected, aParser.Conditions)
+			assert.Equal(t, aTestCase.Expected, p.Conditions)
 		})
 	}
 }

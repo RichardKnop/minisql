@@ -97,8 +97,10 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 func (t *Table) selectCount(ctx context.Context, filteredPipe chan Row, errorsPipe chan error) (StatementResult, error) {
 	var count int64
 
-	wg := new(sync.WaitGroup)
-	wg.Go(func() {
+	stopChan := make(chan struct{})
+
+	go func() {
+		defer close(stopChan)
 		for {
 			select {
 			case <-ctx.Done():
@@ -110,14 +112,6 @@ func (t *Table) selectCount(ctx context.Context, filteredPipe chan Row, errorsPi
 				count += 1
 			}
 		}
-	})
-
-	stopChan := make(chan struct{})
-	defer close(stopChan)
-
-	go func() {
-		wg.Wait()
-		stopChan <- struct{}{}
 	}()
 
 	select {

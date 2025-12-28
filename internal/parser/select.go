@@ -24,7 +24,7 @@ SELECT select_list
 	    [ LIMIT { count | ALL } ]
 	    [ OFFSET start ]
 */
-func (p *parser) doParseSelect() error {
+func (p *parserItem) doParseSelect() error {
 	switch p.step {
 	case stepSelectField:
 		identifier := p.peek()

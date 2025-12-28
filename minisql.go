@@ -78,13 +78,14 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 		}
 	}
 
+	if d.dbEntry != nil {
+		d.dbEntry.db.Close()
+		d.dbEntry = nil
+	}
+
 	db, err := d.newDB(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
-	if d.dbEntry != nil {
-		d.dbEntry.db.Close()
 	}
 
 	d.dbEntry = &databaseEntry{

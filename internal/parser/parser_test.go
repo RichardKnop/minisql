@@ -29,10 +29,11 @@ func TestParse_Empty(t *testing.T) {
 func TestPeekQuotedStringWithLength(t *testing.T) {
 	t.Parallel()
 
-	aParser := New()
-	aParser.setSQL(" 'Hello, 世界' ")
+	p := &parserItem{
+		sql: "'Hello, 世界'",
+	}
 
-	quotedValue, ln := aParser.peekQuotedStringWithLength()
+	quotedValue, ln := p.peekQuotedStringWithLength()
 	assert.Equal(t, "Hello, 世界", quotedValue)
 	assert.Equal(t, 15, ln)
 }
@@ -62,9 +63,10 @@ func TestPeekIntWithLength(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			aParser := New()
-			aParser.setSQL(aTestCase.SQL)
-			intValue, ln := aParser.peekIntWithLength()
+			p := &parserItem{
+				sql: aTestCase.SQL,
+			}
+			intValue, ln := p.peekIntWithLength()
 			assert.Equal(t, aTestCase.ExpectedValue, intValue)
 			assert.Equal(t, aTestCase.ExpectedLength, ln)
 		})
@@ -82,19 +84,19 @@ func TestPeekIdentifierWithLength(t *testing.T) {
 	}{
 		{
 			"Invalid identifier",
-			" 'foo' ",
+			"'foo'",
 			"",
 			0,
 		},
 		{
 			"Valid identifier",
-			" foobar ",
+			"foobar",
 			"foobar",
 			6,
 		},
 		{
 			"Valid identifier with underscore and digits",
-			" foo_bar123 ",
+			"foo_bar123",
 			"foo_bar123",
 			10,
 		},
@@ -102,9 +104,10 @@ func TestPeekIdentifierWithLength(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			aParser := New()
-			aParser.setSQL(aTestCase.SQL)
-			identifier, ln := aParser.peekIdentifierWithLength()
+			p := &parserItem{
+				sql: aTestCase.SQL,
+			}
+			identifier, ln := p.peekIdentifierWithLength()
 			assert.Equal(t, aTestCase.ExpectedValue, identifier)
 			assert.Equal(t, aTestCase.ExpectedLength, ln)
 		})
