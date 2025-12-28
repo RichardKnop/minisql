@@ -2,17 +2,17 @@ package minisql
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 )
 
 // BenchmarkPageAccess measures page access performance with different cache sizes
-// go test -bench=BenchmarkPageAccess -benchtime=100000x ./internal/minisql 2>&1 | grep -A 20 "Benchmark"
 func BenchmarkPageAccess(b *testing.B) {
 	cacheSizes := []int{10, 50, 100, 500, 1000}
 
 	for _, cacheSize := range cacheSizes {
-		b.Run(string(rune(cacheSize)), func(b *testing.B) {
+		b.Run(fmt.Sprint(cacheSize), func(b *testing.B) {
 			// Create temp file
 			dbFile, err := os.CreateTemp(".", "bench_*.db")
 			if err != nil {
@@ -83,7 +83,7 @@ func BenchmarkSequentialScan(b *testing.B) {
 	cacheSizes := []int{50, 1000}
 
 	for _, cacheSize := range cacheSizes {
-		b.Run(string(rune(cacheSize)), func(b *testing.B) {
+		b.Run(fmt.Sprint(cacheSize), func(b *testing.B) {
 			dbFile, err := os.CreateTemp(".", "bench_*.db")
 			if err != nil {
 				b.Fatal(err)
