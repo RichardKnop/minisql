@@ -133,20 +133,20 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 	// Don't use buffer pool here - the unmarshaled page may hold references to the buffer
 	buf := make([]byte, p.pageSize)
 
+	// Extend sparse array BEFORE unmarshaling to ensure p.pages[pageIdx] is valid
+	// The unmarshaler will store the page at p.pages[pageIdx]
+	if len(p.pages) < int(pageIdx)+1 {
+		for i := len(p.pages); i < int(pageIdx)+1; i++ {
+			p.pages = append(p.pages, nil)
+		}
+	}
+
 	if int(pageIdx) != int(p.totalPages) {
 		// If we are not requesting a new page, read the page from file
 		offset := int64(pageIdx) * int64(p.pageSize)
 		_, err := p.file.ReadAt(buf, offset)
 		if err != nil {
 			return nil, err
-		}
-
-		if len(p.pages) < int(pageIdx)+1 {
-			// Extend sparse array with nil entries to accommodate pageIdx
-			// Maintains invariant: slice index = page index
-			for i := len(p.pages); i < int(pageIdx)+1; i++ {
-				p.pages = append(p.pages, nil)
-			}
 		}
 	}
 

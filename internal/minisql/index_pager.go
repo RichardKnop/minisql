@@ -27,9 +27,9 @@ func (p *indexPager[T]) unmarshal(pageIdx PageIndex, buf []byte) (*Page, error) 
 			return nil, err
 		}
 		node.Header.RightChild = RIGHT_CHILD_NOT_SET
-		p.pages = append(p.pages, &Page{Index: pageIdx, IndexNode: node})
+		p.pages[pageIdx] = &Page{Index: pageIdx, IndexNode: node}
 		p.totalPages = uint32(pageIdx + 1)
-		return p.pages[len(p.pages)-1], nil
+		return p.pages[pageIdx], nil
 	}
 
 	// Existing page

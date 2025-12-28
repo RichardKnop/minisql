@@ -35,12 +35,12 @@ func (p *tablePager) unmarshal(pageIdx PageIndex, buf []byte) (*Page, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.pages = append(p.pages, &Page{
+		p.pages[pageIdx] = &Page{
 			Index:    pageIdx,
 			LeafNode: leaf,
-		})
+		}
 		p.totalPages = uint32(pageIdx + 1)
-		return p.pages[len(p.pages)-1], nil
+		return p.pages[pageIdx], nil
 	}
 
 	if pageIdx == 0 {
