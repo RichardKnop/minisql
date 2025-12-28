@@ -32,6 +32,7 @@ func (c *Cursor) LeafNodeInsert(ctx context.Context, key RowID, aRow Row) error 
 	if c.CellIdx < aPage.LeafNode.Header.Cells {
 		// Need make room for new cell
 		for i := aPage.LeafNode.Header.Cells; i > c.CellIdx; i-- {
+			aPage.LeafNode.PrepareModifyCell(i - 1)
 			aPage.LeafNode.Cells[i] = aPage.LeafNode.Cells[i-1]
 		}
 	}
@@ -106,8 +107,10 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key RowID, aRow Row) e
 				return err
 			}
 		} else if i > c.CellIdx {
+			aSplitPage.LeafNode.PrepareModifyCell(i - 1)
 			destPage.LeafNode.Cells[cellIdx] = aSplitPage.LeafNode.Cells[i-1]
 		} else {
+			aSplitPage.LeafNode.PrepareModifyCell(i)
 			destPage.LeafNode.Cells[cellIdx] = aSplitPage.LeafNode.Cells[i]
 		}
 	}
@@ -203,6 +206,7 @@ func (c *Cursor) saveToCell(ctx context.Context, aNode *LeafNode, cellIdx uint32
 		}
 	}
 
+	aNode.PrepareModifyCell(cellIdx)
 	aCell := &aNode.Cells[cellIdx]
 	aCell.NullBitmask = aRow.NullBitmask()
 	aCell.Key = key
@@ -350,6 +354,7 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 		}
 	}
 
+	aPage.LeafNode.PrepareModifyCell(c.CellIdx)
 	aCell := &aPage.LeafNode.Cells[c.CellIdx]
 
 	rowBuf, err := aRow.Marshal()

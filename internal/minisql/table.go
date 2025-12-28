@@ -293,7 +293,7 @@ func (t *Table) createNewRoot(ctx context.Context, rightChildPageIdx PageIndex) 
 
 	// Copy all node contents to left child
 	if oldRootPage.LeafNode != nil {
-		leftChildPage.LeafNode = oldRootPage.LeafNode.Clone()
+		leftChildPage.LeafNode = oldRootPage.LeafNode.DeepClone()
 		leftChildPage.LeafNode.Header.IsRoot = false
 	} else if oldRootPage.InternalNode != nil {
 		// New pages by default are leafs so we need to reset left child page
@@ -706,8 +706,10 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key RowID) error
 // and removes the key and value from the left neighbor.
 // It also updates the key in the parent node.
 func (t *Table) borrowFromLeftLeaf(aParent *InternalNode, aNode, left *LeafNode, idx uint32) error {
+	left.PrepareModifyCell(left.Header.Cells - 1)
 	aCellToRotate := left.LastCell()
 	left.RemoveLastCell()
+
 	aNode.PrependCell(aCellToRotate)
 
 	aParent.ICells[idx].Key = left.LastCell().Key
@@ -720,8 +722,10 @@ func (t *Table) borrowFromLeftLeaf(aParent *InternalNode, aNode, left *LeafNode,
 // and removes the key and value from the right neighbor.
 // It also updates the key in the parent node.
 func (t *Table) borrowFromRightLeaf(aParent *InternalNode, aNode, right *LeafNode, idx uint32) error {
+	right.PrepareModifyCell(0)
 	aCellToRotate := right.FirstCell()
 	right.RemoveFirstCell()
+
 	aNode.AppendCells(aCellToRotate)
 
 	aParent.ICells[idx].Key = right.FirstCell().Key
@@ -731,6 +735,9 @@ func (t *Table) borrowFromRightLeaf(aParent *InternalNode, aNode, right *LeafNod
 
 // mergeLeaves merges two leaf nodes and deletes the key from the parent node.
 func (t *Table) mergeLeaves(ctx context.Context, aParent, left, right *Page, idx uint32) error {
+	for i := range right.LeafNode.Header.Cells {
+		right.LeafNode.PrepareModifyCell(i)
+	}
 	left.LeafNode.AppendCells(right.LeafNode.Cells[0:right.LeafNode.Header.Cells]...)
 	left.LeafNode.Header.NextLeaf = right.LeafNode.Header.NextLeaf
 
