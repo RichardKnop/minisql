@@ -12,7 +12,7 @@ var (
 	errCreateIndexNoColumns             = fmt.Errorf("at CREATE INDEX: no columns specified")
 )
 
-func (p *parser) doParseCreateIndex() error {
+func (p *parserItem) doParseCreateIndex() error {
 	switch p.step {
 	case stepCreateIndexIfNotExists:
 		ifnotExists := p.peek()
@@ -78,7 +78,7 @@ func (p *parser) doParseCreateIndex() error {
 	return nil
 }
 
-func (p *parser) doParseDropIndex() error {
+func (p *parserItem) doParseDropIndex() error {
 	switch p.step {
 	case stepDropIndexName:
 		indexName := p.peek()

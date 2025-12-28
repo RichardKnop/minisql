@@ -95,6 +95,9 @@ const (
 )
 
 type parser struct {
+}
+
+type parserItem struct {
 	minisql.Statement
 	i               int // where we are in the query
 	sql             string
@@ -107,33 +110,19 @@ func New() *parser {
 }
 
 func (p *parser) Parse(ctx context.Context, sql string) ([]minisql.Statement, error) {
-	sql = strings.Join(strings.Fields(sql), " ")
-	p.reset()
-	p.setSQL(sql)
 
-	p.i = 0
-	p.nextUpdateField = ""
+	item := &parserItem{
+		sql:  strings.Join(strings.Fields(sql), " "),
+		step: stepBeginning,
+	}
+	statements, err := item.doParse()
 
-	statements, err := p.doParse()
+	item.logError(err)
 
-	p.logError(err)
 	return statements, err
 }
 
-func (p *parser) setSQL(sql string) *parser {
-	p.sql = strings.TrimSpace(sql)
-	return p
-}
-
-func (p *parser) reset() {
-	p.Statement = minisql.Statement{}
-	p.sql = ""
-	p.step = stepBeginning
-	p.i = 0
-	p.nextUpdateField = ""
-}
-
-func (p *parser) doParse() ([]minisql.Statement, error) {
+func (p *parserItem) doParse() ([]minisql.Statement, error) {
 	var statements []minisql.Statement
 	for p.i < len(p.sql) {
 		switch p.step {
@@ -327,24 +316,24 @@ func (p *parser) doParse() ([]minisql.Statement, error) {
 	return statements, nil
 }
 
-func (p *parser) peek() string {
+func (p *parserItem) peek() string {
 	peeked, _ := p.peekWithLength()
 	return peeked
 }
 
-func (p *parser) pop() string {
+func (p *parserItem) pop() string {
 	peeked, len := p.peekWithLength()
 	p.i += len
 	p.popWhitespace()
 	return peeked
 }
 
-func (p *parser) popWhitespace() {
+func (p *parserItem) popWhitespace() {
 	for ; p.i < len(p.sql) && p.sql[p.i] == ' '; p.i++ {
 	}
 }
 
-func (p *parser) peekWithLength() (string, int) {
+func (p *parserItem) peekWithLength() (string, int) {
 	if p.i >= len(p.sql) {
 		return "", 0
 	}
@@ -385,7 +374,7 @@ func (p *parser) peekWithLength() (string, int) {
 	return p.peekIdentifierWithLength()
 }
 
-func (p *parser) peekQuotedStringWithLength() (string, int) {
+func (p *parserItem) peekQuotedStringWithLength() (string, int) {
 	if len(p.sql) < p.i || p.sql[p.i] != '\'' {
 		return "", 0
 	}
@@ -397,7 +386,7 @@ func (p *parser) peekQuotedStringWithLength() (string, int) {
 	return "", 0
 }
 
-func (p *parser) peekBooleanWithLength() (bool, int) {
+func (p *parserItem) peekBooleanWithLength() (bool, int) {
 	boolValue := strings.ToUpper(p.peek())
 	if boolValue == "TRUE" || boolValue == "FALSE" {
 		return boolValue == "TRUE", len(boolValue)
@@ -405,7 +394,7 @@ func (p *parser) peekBooleanWithLength() (bool, int) {
 	return false, 0
 }
 
-func (p *parser) peekIntWithLength() (int64, int) {
+func (p *parserItem) peekIntWithLength() (int64, int) {
 	if len(p.sql) < p.i || !unicode.IsDigit(rune(p.sql[p.i])) {
 		return 0, 0
 	}
@@ -426,7 +415,7 @@ func (p *parser) peekIntWithLength() (int64, int) {
 	return int64(intValue), len(p.sql[p.i:len(p.sql)])
 }
 
-func (p *parser) peekNumberWithLength() (float64, int) {
+func (p *parserItem) peekNumberWithLength() (float64, int) {
 	if len(p.sql) < p.i || !unicode.IsDigit(rune(p.sql[p.i])) {
 		return 0.0, 0
 	}
@@ -447,7 +436,7 @@ func (p *parser) peekNumberWithLength() (float64, int) {
 	return floatValue, len(p.sql[p.i:len(p.sql)])
 }
 
-func (p *parser) peekValue() (any, int) {
+func (p *parserItem) peekValue() (any, int) {
 	boolean, ln := p.peekBooleanWithLength()
 	if ln > 0 {
 		return boolean, ln
@@ -468,7 +457,7 @@ func (p *parser) peekValue() (any, int) {
 
 var identifierCharRegexp = regexp.MustCompile(`[\"a-zA-Z_0-9]`)
 
-func (p *parser) peekIdentifierWithLength() (string, int) {
+func (p *parserItem) peekIdentifierWithLength() (string, int) {
 	var i int
 	for i = p.i; i < len(p.sql); i++ {
 		if !identifierCharRegexp.MatchString(string(p.sql[i])) {
@@ -479,7 +468,7 @@ func (p *parser) peekIdentifierWithLength() (string, int) {
 	return strings.Trim(identifier, "\""), len(identifier)
 }
 
-func (p *parser) validate(stmt minisql.Statement) error {
+func (p *parserItem) validate(stmt minisql.Statement) error {
 	if len(stmt.Conditions) == 0 && p.step == stepWhereConditionField {
 		return errEmptyWhereClause
 	}
@@ -545,7 +534,7 @@ func (p *parser) validate(stmt minisql.Statement) error {
 	return nil
 }
 
-func (p *parser) logError(err error) {
+func (p *parserItem) logError(err error) {
 	if err == nil {
 		return
 	}

@@ -20,7 +20,7 @@ var (
 	errCreateTableDefaultValueExpected      = fmt.Errorf("at CREATE TABLE: expected default value after DEFAULT")
 )
 
-func (p *parser) doParseCreateTable() error {
+func (p *parserItem) doParseCreateTable() error {
 	switch p.step {
 	case stepCreateTableIfNotExists:
 		ifnotExists := p.peek()
@@ -216,7 +216,7 @@ func isDefaultValueValid(column minisql.Column, valueToken any) error {
 	return nil
 }
 
-func (p *parser) doParseDropTable() error {
+func (p *parserItem) doParseDropTable() error {
 	switch p.step {
 	case stepDropTableName:
 		tableName := p.peek()

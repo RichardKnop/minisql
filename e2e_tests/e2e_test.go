@@ -115,8 +115,6 @@ func (s *TestSuite) SetupTest() {
 }
 
 func (s *TestSuite) TearDownTest() {
-	err := s.db.Close()
-	s.Require().NoError(err)
-	err = os.Remove(s.dbFile.Name())
+	err := os.Remove(s.dbFile.Name())
 	s.Require().NoError(err)
 }

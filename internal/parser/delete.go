@@ -4,7 +4,7 @@ import (
 	"fmt"
 )
 
-func (p *parser) doParseDelete() error {
+func (p *parserItem) doParseDelete() error {
 	switch p.step {
 	case stepDeleteFromTable:
 		tableName := p.peek()

@@ -14,7 +14,7 @@ var (
 	errNoFieldsToUpdate               = fmt.Errorf("at UPDATE: expected at least one field to update")
 )
 
-func (p *parser) doParseUpdate() error {
+func (p *parserItem) doParseUpdate() error {
 	switch p.step {
 	case stepUpdateTable:
 		tableName := p.peek()
@@ -97,7 +97,7 @@ func (p *parser) doParseUpdate() error {
 	return nil
 }
 
-func (p *parser) setUpdate(field string, value minisql.OptionalValue) {
+func (p *parserItem) setUpdate(field string, value minisql.OptionalValue) {
 	if p.Updates == nil {
 		p.Updates = make(map[string]minisql.OptionalValue)
 	}

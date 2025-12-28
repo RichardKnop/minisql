@@ -280,6 +280,9 @@ func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) err
 	for i, aPage := range pagesToMarshal {
 		pageIdx := indices[i]
 		buf := p.bufferPool.Get().([]byte)
+		for j := range buf {
+			buf[j] = 0
+		}
 
 		_, err := marshalPage(aPage, buf)
 		if err != nil {
