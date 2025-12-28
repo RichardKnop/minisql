@@ -431,11 +431,11 @@ func (d *Database) initSecondaryIndex(ctx context.Context, aSchema Schema) error
 	if err != nil {
 		return err
 	}
-	secondaryIndex.Index = btreeIndex
-	aTable.SecondaryIndexes[aSchema.Name] = secondaryIndex
+
+	aTable.SetSecondaryIndex(aSchema.Name, indexColumn, btreeIndex)
 
 	d.logger.Sugar().With(
-		"name", secondaryIndex.Name,
+		"name", aSchema.Name,
 		"root_page", aSchema.RootPage,
 	).Debug("loaded secondary index")
 
@@ -457,10 +457,10 @@ func (d *Database) SaveDDLChanges(ctx context.Context, changes DDLChanges) {
 		delete(d.tables, tableName)
 	}
 	for tableName, index := range changes.CreateIndexes {
-		d.tables[tableName].SecondaryIndexes[index.Name] = index
+		d.tables[tableName].SetSecondaryIndex(index.Name, index.Column, index.Index)
 	}
 	for tableName, index := range changes.DropIndexes {
-		delete(d.tables[tableName].SecondaryIndexes, index.Name)
+		d.tables[tableName].RemoveSecondaryIndex(index.Name)
 	}
 }
 

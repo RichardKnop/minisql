@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestStatement_NumberPlaceholders(t *testing.T) {
@@ -340,92 +341,84 @@ func TestStatement_Validate(t *testing.T) {
 
 	// Test tables to validate against
 	var (
-		aTable = &Table{
-			Name: testTableName,
-			Columns: []Column{
-				{
-					Kind: Int4,
-					Size: 4,
-					Name: "id",
-				},
-				{
-					Kind: Varchar,
-					Size: MaxInlineVarchar,
-					Name: "email",
-				},
-				{
-					Kind:     Int4,
-					Size:     4,
-					Name:     "age",
-					Nullable: true,
-				},
-				{
-					Kind:     Boolean,
-					Size:     1,
-					Name:     "verified",
-					Nullable: true,
-				},
+		columns = []Column{
+			{
+				Kind: Int4,
+				Size: 4,
+				Name: "id",
+			},
+			{
+				Kind: Varchar,
+				Size: MaxInlineVarchar,
+				Name: "email",
+			},
+			{
+				Kind:     Int4,
+				Size:     4,
+				Name:     "age",
+				Nullable: true,
+			},
+			{
+				Kind:     Boolean,
+				Size:     1,
+				Name:     "verified",
+				Nullable: true,
 			},
 		}
+		aTable = NewTable(zap.NewNop(), nil, nil, testTableName, columns, 0)
 
-		aTableWithPK = &Table{
-			Name: testTableName,
-			Columns: []Column{
-				{
-					Kind:       Int8,
-					Size:       8,
-					Name:       "id",
-					PrimaryKey: true,
-				},
-				{
-					Kind: Varchar,
-					Size: MaxInlineVarchar,
-					Name: "email",
-				},
+		pkColumns = []Column{
+			{
+				Kind:       Int8,
+				Size:       8,
+				Name:       "id",
+				PrimaryKey: true,
+			},
+			{
+				Kind: Varchar,
+				Size: MaxInlineVarchar,
+				Name: "email",
 			},
 		}
+		aTableWithPK = NewTable(zap.NewNop(), nil, nil, testTableName, pkColumns, 0)
 
-		aTableWithAutoincrementPK = &Table{
-			Name: testTableName,
-			Columns: []Column{
-				{
-					Kind:          Int8,
-					Size:          8,
-					Name:          "id",
-					PrimaryKey:    true,
-					Autoincrement: true,
-				},
-				{
-					Kind: Varchar,
-					Size: MaxInlineVarchar,
-					Name: "email",
-				},
+		pkAutoIncColumns = []Column{
+			{
+				Kind:          Int8,
+				Size:          8,
+				Name:          "id",
+				PrimaryKey:    true,
+				Autoincrement: true,
+			},
+			{
+				Kind: Varchar,
+				Size: MaxInlineVarchar,
+				Name: "email",
 			},
 		}
+		aTableWithAutoincrementPK = NewTable(zap.NewNop(), nil, nil, testTableName, pkAutoIncColumns, 0)
 
-		aTableWithDefaultValue = &Table{
-			Name: testTableName,
-			Columns: []Column{
-				{
-					Kind:       Int8,
-					Size:       8,
-					Name:       "id",
-					PrimaryKey: true,
-				},
-				{
-					Kind:         Varchar,
-					Size:         MaxInlineVarchar,
-					Name:         "status",
-					DefaultValue: OptionalValue{Value: "pending", Valid: true},
-				},
-				{
-					Kind:         Timestamp,
-					Size:         8,
-					Name:         "created",
-					DefaultValue: OptionalValue{Value: "0001-01-01 00:00:00", Valid: true},
-				},
+		defaultValueColumns = []Column{
+			{
+				Kind:       Int8,
+				Size:       8,
+				Name:       "id",
+				PrimaryKey: true,
+			},
+			{
+				Kind:         Varchar,
+				Size:         MaxInlineVarchar,
+				Name:         "status",
+				DefaultValue: OptionalValue{Value: "pending", Valid: true},
+			},
+			{
+				Kind:         Timestamp,
+				Size:         8,
+				Name:         "created",
+				DefaultValue: OptionalValue{Value: "0001-01-01 00:00:00", Valid: true},
 			},
 		}
+		aTableWithDefaultValue = NewTable(zap.NewNop(), nil, nil, testTableName, defaultValueColumns, 0)
 	)
 
 	t.Run("CREATE TABLE without table name should fail", func(t *testing.T) {
