@@ -6,8 +6,6 @@ import (
 )
 
 func (s *TestSuite) TestConcurrency() {
-	s.T().Skip()
-
 	_, err := s.db.Exec(createUsersTableSQL)
 	s.Require().NoError(err)
 	_, err = s.db.Exec(createUsersTimestampIndexSQL)
@@ -18,10 +16,21 @@ func (s *TestSuite) TestConcurrency() {
 	for _, aUser := range usersToInsert {
 		s.prepareAndExecQuery(`insert into users("email", "name") values(?, ?);`, 1, aUser.Email.String, aUser.Name.String)
 	}
+
+	// Ensure all auto-commit transactions have completed and flushed
+	// by performing a simple query that forces synchronization
+	var syncCheck int
+	err = s.db.QueryRow(`select count(*) from users`).Scan(&syncCheck)
+	s.Require().NoError(err)
+	s.Equal(1000, syncCheck)
+
 	s.countRowsInTable("users", 1000)
 
 	s.Run("Reinitialise to force unmarshaling from disk", func() {
-		s.dbFile.Close()
+		// Close database connection first to ensure all transactions are committed and flushed
+		err := s.db.Close()
+		s.Require().NoError(err)
+
 		s.db, err = sql.Open("minisql", s.dbFile.Name())
 		s.Require().NoError(err)
 

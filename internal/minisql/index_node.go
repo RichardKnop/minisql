@@ -22,13 +22,6 @@ func indexHeaderSize() uint64 {
 }
 
 func (h *IndexNodeHeader) Marshal(buf []byte) ([]byte, error) {
-	size := h.Size()
-	if uint64(cap(buf)) >= size {
-		buf = buf[:size]
-	} else {
-		buf = make([]byte, size)
-	}
-
 	i := uint64(0)
 	buf[0] = PageTypeIndex
 	i += 1
@@ -48,7 +41,7 @@ func (h *IndexNodeHeader) Marshal(buf []byte) ([]byte, error) {
 	marshalUint32(buf, uint32(h.RightChild), i)
 	i += 4
 
-	return buf[:size], nil
+	return buf[:i], nil
 }
 
 func (h *IndexNodeHeader) Unmarshal(buf []byte) (uint64, error) {
@@ -118,13 +111,6 @@ func keySize[T IndexKey](key T) uint64 {
 }
 
 func (c *IndexCell[T]) Marshal(buf []byte) ([]byte, error) {
-	size := c.Size()
-	if uint64(cap(buf)) >= size {
-		buf = buf[:size]
-	} else {
-		buf = make([]byte, size)
-	}
-
 	i := uint64(0)
 
 	// Marshal the key based on its type
@@ -300,20 +286,13 @@ func (n *IndexNode[T]) Size() uint64 {
 }
 
 func (n *IndexNode[T]) Marshal(buf []byte) ([]byte, error) {
-	size := n.Size()
-	if uint64(cap(buf)) >= size {
-		buf = buf[:size]
-	} else {
-		buf = make([]byte, size)
-	}
-
 	i := uint64(0)
 
-	hbuf, err := n.Header.Marshal(buf[i:])
+	_, err := n.Header.Marshal(buf[i:])
 	if err != nil {
 		return nil, err
 	}
-	i += uint64(len(hbuf))
+	i += n.Header.Size()
 
 	for idx := 0; idx < int(n.Header.Keys); idx++ {
 		cbuf, err := n.Cells[idx].Marshal(buf[i:])

@@ -30,13 +30,6 @@ func (h *IndexOverflowPage) Size() uint64 {
 }
 
 func (n *IndexOverflowPage) Marshal(buf []byte) ([]byte, error) {
-	size := n.Size()
-	if uint64(cap(buf)) >= size {
-		buf = buf[:size]
-	} else {
-		buf = make([]byte, size)
-	}
-
 	i := uint64(0)
 
 	buf[i] = PageTypeIndexOverflow
@@ -53,7 +46,7 @@ func (n *IndexOverflowPage) Marshal(buf []byte) ([]byte, error) {
 		i += 8
 	}
 
-	return buf, nil
+	return buf[:i], nil
 }
 
 func (n *IndexOverflowPage) Unmarshal(buf []byte) error {

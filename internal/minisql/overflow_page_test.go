@@ -55,7 +55,7 @@ func TestOverflowPage_Marshal(t *testing.T) {
 			Data: bytes.Repeat([]byte{'a'}, MaxInlineVarchar),
 		}
 
-		buf := make([]byte, 0, 100)
+		buf := make([]byte, PageSize)
 		data, err := aNode.Marshal(buf)
 		require.NoError(t, err)
 
@@ -75,7 +75,7 @@ func TestOverflowPage_Marshal(t *testing.T) {
 			Data: bytes.Repeat([]byte{'a'}, MaxOverflowPageData),
 		}
 
-		buf := make([]byte, 0, 100)
+		buf := make([]byte, PageSize)
 		data, err := aNode.Marshal(buf)
 		require.NoError(t, err)
 

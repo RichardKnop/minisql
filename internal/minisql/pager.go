@@ -14,6 +14,7 @@ type DBFile interface {
 	io.ReaderAt
 	io.WriterAt
 	io.Closer
+	Sync() error
 }
 
 type PageUnmarshaler func(pageIdx PageIndex, buf []byte) (*Page, error)
@@ -54,7 +55,7 @@ func NewPager(file DBFile, pageSize int, maxCachedPages int) (*pagerImpl, error)
 		pages:          make([]*Page, 0, maxCachedPages),
 		lruList:        make([]PageIndex, 0, maxCachedPages),
 		bufferPool: &sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				return make([]byte, pageSize)
 			},
 		},
@@ -93,6 +94,11 @@ func NewPager(file DBFile, pageSize int, maxCachedPages int) (*pagerImpl, error)
 }
 
 func (p *pagerImpl) Close() error {
+	// Sync file to ensure all buffered writes are persisted to disk
+	// This is critical for data durability - without it, writes may be lost on crash/close
+	if err := p.file.Sync(); err != nil {
+		return fmt.Errorf("failed to sync file before close: %w", err)
+	}
 	return p.file.Close()
 }
 
@@ -214,6 +220,9 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 
 	buf := p.bufferPool.Get().([]byte)
 	defer p.bufferPool.Put(buf)
+	for j := range buf {
+		buf[j] = 0
+	}
 
 	_, err := marshalPage(aPage, buf)
 	if err != nil {
@@ -235,7 +244,11 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 		return err
 	}
 	_, err = p.file.WriteAt(buf[0:p.pageSize-RootPageConfigSize], int64(RootPageConfigSize))
-	return err
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // FlushBatch writes multiple pages to disk in a single operation.

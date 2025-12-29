@@ -15,26 +15,20 @@ func (h *LeafNodeHeader) Size() uint64 {
 }
 
 func (h *LeafNodeHeader) Marshal(buf []byte) ([]byte, error) {
-	size := h.Size()
-	if uint64(cap(buf)) >= size {
-		buf = buf[:size]
-	} else {
-		buf = make([]byte, size)
-	}
-
 	i := uint64(0)
 
-	hbuf, err := h.Header.Marshal(buf[i:])
+	_, err := h.Header.Marshal(buf[i:])
 	if err != nil {
 		return nil, err
 	}
-	i += uint64(len(hbuf))
+	i += h.Header.Size()
 
 	marshalUint32(buf, h.Cells, i)
 	i += 4
 	marshalUint32(buf, uint32(h.NextLeaf), i)
+	i += 4
 
-	return buf[:size], nil
+	return buf[:i], nil
 }
 
 func (h *LeafNodeHeader) Unmarshal(buf []byte) (uint64, error) {
@@ -68,13 +62,6 @@ func (c *Cell) Size() uint64 {
 }
 
 func (c *Cell) Marshal(buf []byte) ([]byte, error) {
-	size := c.Size()
-	if uint64(cap(buf)) >= size {
-		buf = buf[:size]
-	} else {
-		buf = make([]byte, size)
-	}
-
 	i := uint64(0)
 
 	marshalUint64(buf, c.NullBitmask, i)
@@ -83,8 +70,8 @@ func (c *Cell) Marshal(buf []byte) ([]byte, error) {
 	marshalUint64(buf, uint64(c.Key), i)
 	i += 8
 
-	copy(buf[i:], c.Value)
-	i += uint64(len(c.Value))
+	n := copy(buf[i:], c.Value)
+	i += uint64(n)
 
 	return buf[:i], nil
 }
@@ -130,10 +117,14 @@ type LeafNode struct {
 func (n *LeafNode) Clone() *LeafNode {
 	aCopy := &LeafNode{
 		Header: n.Header,
-		Cells:  make([]Cell, len(n.Cells)),
+	}
+
+	if len(n.Cells) == 0 {
+		return aCopy
 	}
 
 	// Shallow copy - share Value slices
+	aCopy.Cells = make([]Cell, len(n.Cells))
 	for i := range n.Cells {
 		aCopy.Cells[i] = Cell{
 			NullBitmask: n.Cells[i].NullBitmask,
@@ -148,9 +139,13 @@ func (n *LeafNode) Clone() *LeafNode {
 func (n *LeafNode) DeepClone() *LeafNode {
 	aCopy := &LeafNode{
 		Header: n.Header,
-		Cells:  make([]Cell, 0, len(n.Cells)),
 	}
-	aCopy.Cells = append(aCopy.Cells, n.Cells...)
+
+	if len(n.Cells) == 0 {
+		return aCopy
+	}
+
+	aCopy.Cells = make([]Cell, len(n.Cells))
 	for i := range n.Cells {
 		aCopy.Cells[i] = Cell{
 			NullBitmask: n.Cells[i].NullBitmask,
@@ -198,22 +193,15 @@ func (n *LeafNode) Size() uint64 {
 }
 
 func (n *LeafNode) Marshal(buf []byte) ([]byte, error) {
-	size := n.Size()
-	if uint64(cap(buf)) >= size {
-		buf = buf[:size]
-	} else {
-		buf = make([]byte, size)
-	}
-
 	i := uint64(0)
 
-	hbuf, err := n.Header.Marshal(buf[i:])
+	_, err := n.Header.Marshal(buf[i:])
 	if err != nil {
 		return nil, err
 	}
-	i += uint64(len(hbuf))
+	i += n.Header.Size()
 
-	for idx := range n.Cells {
+	for idx := range n.Cells[0:n.Header.Cells] {
 		cbuf, err := n.Cells[idx].Marshal(buf[i:])
 		if err != nil {
 			return nil, err
@@ -221,7 +209,7 @@ func (n *LeafNode) Marshal(buf []byte) ([]byte, error) {
 		i += uint64(len(cbuf))
 	}
 
-	return buf[:i], nil
+	return buf, nil
 }
 
 func (n *LeafNode) Unmarshal(columns []Column, buf []byte) (uint64, error) {

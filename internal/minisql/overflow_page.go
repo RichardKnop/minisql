@@ -31,13 +31,6 @@ func (h *OverflowPage) Size() uint64 {
 }
 
 func (n *OverflowPage) Marshal(buf []byte) ([]byte, error) {
-	size := n.Size()
-	if uint64(cap(buf)) >= size {
-		buf = buf[:size]
-	} else {
-		buf = make([]byte, size)
-	}
-
 	i := uint64(0)
 
 	buf[i] = PageTypeOverflow
@@ -52,7 +45,7 @@ func (n *OverflowPage) Marshal(buf []byte) ([]byte, error) {
 	copy(buf[i:], n.Data)
 	i += uint64(len(n.Data))
 
-	return buf, nil
+	return buf[:i], nil
 }
 
 func (n *OverflowPage) Unmarshal(buf []byte) error {
