@@ -464,4 +464,5 @@ go test -bench=BenchmarkPageAccess -benchtime=100000x ./internal/minisql 2>&1 | 
 go test -bench=BenchmarkRow -benchmem ./internal/minisql 2>&1 | grep -E "(Benchmark|B/op)"
 go test -bench=BenchmarkFlush -benchmem -benchtime=5s ./internal/minisql 2>&1 | grep -E "(Benchmark|B/op)"
 go test -bench=BenchmarkFlush -benchmem -benchtime=3s ./internal/minisql 2>&1 | grep -E "(Benchmark|B/op)"
+go test -bench=BenchmarkPageAccess -benchmem ./internal/minisql 2>&1 | grep -E "Benchmark|alloc"
 ```

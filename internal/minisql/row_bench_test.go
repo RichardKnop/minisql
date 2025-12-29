@@ -14,22 +14,19 @@ func BenchmarkRowClone(b *testing.B) {
 		{Name: "created", Kind: Timestamp, Size: 8},
 	}
 
-	row := Row{
-		Key:     RowID(123),
-		Columns: columns,
-		Values: []OptionalValue{
-			{Value: int64(123), Valid: true},
-			{Value: "John Doe", Valid: true},
-			{Value: "john@example.com", Valid: true},
-			{Value: int32(30), Valid: true},
-			{Value: Time{Year: 2024, Month: 1, Day: 1}, Valid: true},
-		},
-	}
+	aRow := NewRowWithValues(columns, []OptionalValue{
+		{Value: int64(123), Valid: true},
+		{Value: "John Doe", Valid: true},
+		{Value: "john@example.com", Valid: true},
+		{Value: int32(30), Valid: true},
+		{Value: Time{Year: 2024, Month: 1, Day: 1}, Valid: true},
+	})
+	aRow.Key = RowID(123)
 
 	b.ResetTimer()
 
 	for b.Loop() {
-		_ = row.Clone()
+		_ = aRow.Clone()
 	}
 }
 
@@ -46,20 +43,17 @@ func BenchmarkRowOnlyFields(b *testing.B) {
 		{Name: "score", Kind: Double, Size: 8},
 	}
 
-	row := Row{
-		Key:     RowID(123),
-		Columns: columns,
-		Values: []OptionalValue{
-			{Value: int64(123), Valid: true},
-			{Value: "John Doe", Valid: true},
-			{Value: "john@example.com", Valid: true},
-			{Value: int32(30), Valid: true},
-			{Value: Time{Year: 2024, Month: 1, Day: 1}, Valid: true},
-			{Value: Time{Year: 2024, Month: 1, Day: 2}, Valid: true},
-			{Value: "active", Valid: true},
-			{Value: float64(95.5), Valid: true},
-		},
-	}
+	aRow := NewRowWithValues(columns, []OptionalValue{
+		{Value: int64(123), Valid: true},
+		{Value: "John Doe", Valid: true},
+		{Value: "john@example.com", Valid: true},
+		{Value: int32(30), Valid: true},
+		{Value: Time{Year: 2024, Month: 1, Day: 1}, Valid: true},
+		{Value: Time{Year: 2024, Month: 1, Day: 2}, Valid: true},
+		{Value: "active", Valid: true},
+		{Value: float64(95.5), Valid: true},
+	})
+	aRow.Key = RowID(123)
 
 	fields := []Field{
 		{Name: "id"},
@@ -69,7 +63,7 @@ func BenchmarkRowOnlyFields(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		_ = row.OnlyFields(fields...)
+		_ = aRow.OnlyFields(fields...)
 	}
 }
 
@@ -83,11 +77,8 @@ func BenchmarkRowOnlyFieldsMany(b *testing.B) {
 		values[i] = OptionalValue{Value: int64(i), Valid: true}
 	}
 
-	row := Row{
-		Key:     RowID(123),
-		Columns: columns,
-		Values:  values,
-	}
+	aRow := NewRowWithValues(columns, values)
+	aRow.Key = RowID(123)
 
 	// Filter to first 10 fields
 	fields := make([]Field, 10)
@@ -97,6 +88,6 @@ func BenchmarkRowOnlyFieldsMany(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		_ = row.OnlyFields(fields...)
+		_ = aRow.OnlyFields(fields...)
 	}
 }
