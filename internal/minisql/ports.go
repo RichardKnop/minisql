@@ -4,6 +4,15 @@ import (
 	"context"
 )
 
+type Parser interface {
+	Parse(context.Context, string) ([]Statement, error)
+}
+
+type LRUCache interface {
+	Get(key string) (any, bool)
+	Put(key string, value any)
+}
+
 type PagerFactory interface {
 	ForTable([]Column) Pager
 	ForIndex(kind ColumnKind, unique bool) Pager

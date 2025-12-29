@@ -1,40 +1,38 @@
-package minisql
+package lrucache
 
 import (
 	"sync"
 )
 
-const defaultMaxCachedStatements = 1000
-
-type statementCacheEntry struct {
-	stmt Statement
-	prev *statementCacheEntry
-	next *statementCacheEntry
-	key  string
+type cacheEntry struct {
+	value any
+	prev  *cacheEntry
+	next  *cacheEntry
+	key   string
 }
 
-type statementCache struct {
-	entries map[string]*statementCacheEntry
-	head    *statementCacheEntry
-	tail    *statementCacheEntry
+type cacheImpl struct {
+	entries map[string]*cacheEntry
+	head    *cacheEntry
+	tail    *cacheEntry
 	maxSize int
 	mu      sync.RWMutex
 }
 
-func newStatementCache(maxSize int) *statementCache {
-	return &statementCache{
-		entries: make(map[string]*statementCacheEntry),
+func New(maxSize int) *cacheImpl {
+	return &cacheImpl{
+		entries: make(map[string]*cacheEntry),
 		maxSize: maxSize,
 	}
 }
 
-func (c *statementCache) get(key string) (Statement, bool) {
+func (c *cacheImpl) Get(key string) (any, bool) {
 	c.mu.RLock()
 	entry, ok := c.entries[key]
 	c.mu.RUnlock()
 
 	if !ok {
-		return Statement{}, false
+		return nil, false
 	}
 
 	// Move to front (most recently used)
@@ -42,24 +40,24 @@ func (c *statementCache) get(key string) (Statement, bool) {
 	c.moveToFront(entry)
 	c.mu.Unlock()
 
-	return entry.stmt, true
+	return entry.value, true
 }
 
-func (c *statementCache) put(key string, stmt Statement) {
+func (c *cacheImpl) Put(key string, value any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	// Check if already exists
 	if entry, ok := c.entries[key]; ok {
-		entry.stmt = stmt
+		entry.value = value
 		c.moveToFront(entry)
 		return
 	}
 
 	// Create new entry
-	entry := &statementCacheEntry{
-		stmt: stmt,
-		key:  key,
+	entry := &cacheEntry{
+		value: value,
+		key:   key,
 	}
 
 	// Add to cache
@@ -72,7 +70,7 @@ func (c *statementCache) put(key string, stmt Statement) {
 	}
 }
 
-func (c *statementCache) moveToFront(entry *statementCacheEntry) {
+func (c *cacheImpl) moveToFront(entry *cacheEntry) {
 	if entry == c.head {
 		return
 	}
@@ -92,7 +90,7 @@ func (c *statementCache) moveToFront(entry *statementCacheEntry) {
 	c.addToFront(entry)
 }
 
-func (c *statementCache) addToFront(entry *statementCacheEntry) {
+func (c *cacheImpl) addToFront(entry *cacheEntry) {
 	entry.next = c.head
 	entry.prev = nil
 
@@ -106,7 +104,7 @@ func (c *statementCache) addToFront(entry *statementCacheEntry) {
 	}
 }
 
-func (c *statementCache) evictLRU() {
+func (c *cacheImpl) evictLRU() {
 	if c.tail == nil {
 		return
 	}

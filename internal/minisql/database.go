@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/RichardKnop/minisql/pkg/lrucache"
 	"go.uber.org/zap"
 )
 
@@ -17,10 +18,6 @@ var (
 	errIndexAlreadyExists        = fmt.Errorf("index already exists")
 )
 
-type Parser interface {
-	Parse(context.Context, string) ([]Statement, error)
-}
-
 type Database struct {
 	dbFilePath string
 	parser     Parser
@@ -29,7 +26,7 @@ type Database struct {
 	txManager  *TransactionManager
 	tables     map[string]*Table
 	dbLock     *sync.RWMutex
-	stmtCache  *statementCache
+	stmtCache  LRUCache
 	clock      clock
 	logger     *zap.Logger
 }
@@ -45,7 +42,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aPa
 		saver:      saver,
 		tables:     make(map[string]*Table),
 		dbLock:     new(sync.RWMutex),
-		stmtCache:  newStatementCache(defaultMaxCachedStatements),
+		stmtCache:  lrucache.New(defaultMaxCachedStatements),
 		logger:     logger,
 		clock: func() Time {
 			now := time.Now()
@@ -81,8 +78,8 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aPa
 // The cache uses LRU eviction when it exceeds the configured maximum size.
 func (d *Database) PrepareStatement(ctx context.Context, query string) (Statement, error) {
 	// Check cache first
-	if stmt, ok := d.stmtCache.get(query); ok {
-		return stmt, nil
+	if stmt, ok := d.stmtCache.Get(query); ok {
+		return stmt.(Statement), nil
 	}
 
 	// Parse the statement
@@ -102,7 +99,7 @@ func (d *Database) PrepareStatement(ctx context.Context, query string) (Statemen
 	stmt := statements[0]
 
 	// Cache the parsed statement
-	d.stmtCache.put(query, stmt)
+	d.stmtCache.Put(query, stmt)
 
 	return stmt, nil
 }

@@ -1,0 +1,149 @@
+package lrucache
+
+import (
+	"fmt"
+	"sync"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+type mockValue struct {
+	data string
+}
+
+// TestLRUCache_HitAndMiss tests basic cache hit and miss behavior
+func TestLRUCache_HitAndMiss(t *testing.T) {
+	t.Parallel()
+
+	cache := New(10)
+
+	// Cache miss
+	value, ok := cache.Get("bogus")
+	assert.False(t, ok)
+	assert.Nil(t, value)
+
+	// Add to cache
+	mockValue := mockValue{"foo"}
+	cache.Put("foo key", mockValue)
+
+	// Cache hit
+	value, ok = cache.Get("foo key")
+	assert.True(t, ok)
+	assert.Equal(t, mockValue, value)
+
+	// Different query is a cache miss
+	value, ok = cache.Get("bar key")
+	assert.False(t, ok)
+	assert.Nil(t, value)
+}
+
+// TestLRUCache_LRUEviction tests that least recently used items are evicted
+func TestLRUCache_LRUEviction(t *testing.T) {
+	t.Parallel()
+
+	cache := New(3) // Small cache for testing
+
+	// Add 3 items
+	cache.Put("foo key", mockValue{"foo"})
+	cache.Put("bar key", mockValue{"bar"})
+	cache.Put("baz key", mockValue{"baz"})
+
+	// All 3 should be in cache
+	_, ok := cache.Get("foo key")
+	assert.True(t, ok)
+	_, ok = cache.Get("bar key")
+	assert.True(t, ok)
+	_, ok = cache.Get("baz key")
+	assert.True(t, ok)
+
+	// Add a 4th item, should evict the least recently used (foo key)
+	cache.Put("qux key", mockValue{"qux"})
+
+	// foo key should be evicted
+	_, ok = cache.Get("foo key")
+	assert.False(t, ok, "foo key should have been evicted as LRU")
+
+	// Others should still be in cache
+	_, ok = cache.Get("bar key")
+	assert.True(t, ok)
+	_, ok = cache.Get("baz key")
+	assert.True(t, ok)
+	_, ok = cache.Get("qux key")
+	assert.True(t, ok)
+
+	// Check cache size stays at 3 and doesn't grow beyond max size
+	assert.Len(t, cache.entries, 3, "Cache should have max size of 3")
+}
+
+// TestLRUCache_LRUOrdering tests that accessing items updates their LRU order
+func TestLRUCache_LRUOrdering(t *testing.T) {
+	t.Parallel()
+
+	cache := New(3)
+
+	// Add 3 items (LRU order: foo -> bar -> baz)
+	cache.Put("foo key", mockValue{"foo"})
+	cache.Put("bar key", mockValue{"bar"})
+	cache.Put("baz key", mockValue{"baz"})
+
+	// Access foo key, making it most recently used (LRU order: bar -> baz -> foo)
+	_, ok := cache.Get("foo key")
+	assert.True(t, ok)
+
+	// Add qux key, should evict bar key (now the LRU)
+	cache.Put("qux key", mockValue{"qux"})
+
+	// bar key should be evicted
+	_, ok = cache.Get("bar key")
+	assert.False(t, ok, "bar key should have been evicted as LRU")
+
+	// foo key should still be in cache (was accessed recently)
+	_, ok = cache.Get("foo key")
+	assert.True(t, ok, "foo key should still be cached")
+
+	// Others should be in cache
+	_, ok = cache.Get("baz key")
+	assert.True(t, ok)
+	_, ok = cache.Get("qux key")
+	assert.True(t, ok)
+}
+
+// TestStatementCache_Concurrent tests thread safety of the cache
+func TestLRUCache_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	var (
+		cache = New(100)
+		wg    sync.WaitGroup
+	)
+
+	// Concurrent writes
+	for i := range 50 {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			key := fmt.Sprintf("foo%d", n)
+			cache.Put(key, mockValue{fmt.Sprintf("value%d", n)})
+		}(i)
+	}
+
+	// Concurrent reads
+	for i := range 50 {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			key := fmt.Sprintf("foo%d", n)
+			cache.Get(key)
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Verify all items are accessible
+	for i := range 50 {
+		key := fmt.Sprintf("foo%d", i)
+		_, ok := cache.Get(key)
+		assert.True(t, ok, "key %s should be in cache", key)
+	}
+}

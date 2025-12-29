@@ -1,5 +1,9 @@
 package minisql
 
+import (
+	"github.com/RichardKnop/minisql/pkg/lrucache"
+)
+
 type DatabaseOption func(*Database)
 
 func WithJournal(enabled bool) DatabaseOption {
@@ -8,10 +12,12 @@ func WithJournal(enabled bool) DatabaseOption {
 	}
 }
 
+const defaultMaxCachedStatements = 1000
+
 func WithMaxCachedStatements(maxStatements int) DatabaseOption {
 	return func(d *Database) {
 		if maxStatements > 0 {
-			d.stmtCache = newStatementCache(maxStatements)
+			d.stmtCache = lrucache.New(maxStatements)
 		}
 	}
 }
