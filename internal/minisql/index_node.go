@@ -259,7 +259,6 @@ func (c *IndexCell[T]) ReplaceRowID(id, newID RowID) int {
 type IndexNode[T IndexKey] struct {
 	Header IndexNodeHeader
 	Cells  []IndexCell[T] // (PageSize - (5)) / (CellSize + 4 + 8)
-	unique bool
 }
 
 // TODO - this is not used currently
@@ -271,15 +270,21 @@ func NewIndexNode[T IndexKey](unique bool, cells ...IndexCell[T]) *IndexNode[T] 
 		Header: IndexNodeHeader{
 			RightChild: RIGHT_CHILD_NOT_SET,
 		},
-		Cells:  make([]IndexCell[T], 0, MinimumIndexCells),
-		unique: unique,
 	}
-	for range MinimumIndexCells {
-		aNode.Cells = append(aNode.Cells, NewIndexCell[T](unique))
-	}
+
 	if len(cells) > 0 {
 		aNode.Header.Keys = uint32(len(cells)) - 1
-		copy(aNode.Cells, cells)
+		aNode.Cells = make([]IndexCell[T], len(cells))
+		for i := range cells {
+			aNode.Cells[i] = cells[i].Clone()
+			aNode.Cells[i].unique = unique
+		}
+		return &aNode
+	}
+
+	aNode.Cells = make([]IndexCell[T], 0, MinimumIndexCells)
+	for range MinimumIndexCells {
+		aNode.Cells = append(aNode.Cells, NewIndexCell[T](unique))
 	}
 	return &aNode
 }
@@ -428,7 +433,7 @@ func (n *IndexNode[T]) DeleteKeyAndRightChild(idx uint32) error {
 		}
 	}
 
-	n.Cells[int(n.Header.Keys)-1] = NewIndexCell[T](n.unique)
+	n.Cells[int(n.Header.Keys)-1] = NewIndexCell[T](n.Cells[int(n.Header.Keys)-1].unique)
 	n.Header.Keys -= 1
 
 	return nil
@@ -454,7 +459,7 @@ func (n *IndexNode[T]) RemoveFirstCell() {
 	for i := 0; i < int(n.Header.Keys)-1; i++ {
 		n.Cells[i] = n.Cells[i+1]
 	}
-	n.Cells[n.Header.Keys-1] = NewIndexCell[T](n.unique)
+	n.Cells[n.Header.Keys-1] = NewIndexCell[T](n.Cells[n.Header.Keys-1].unique)
 	n.Header.Keys -= 1
 }
 
@@ -511,62 +516,50 @@ func marshalIndexNode(anyNode any, buf []byte) ([]byte, error) {
 	}
 }
 
+func (n *IndexNode[T]) Clone() *IndexNode[T] {
+	aCopy := &IndexNode[T]{
+		Header: n.Header,
+	}
+	if n.Header.Keys == 0 {
+		return aCopy
+	}
+	aCopy.Cells = make([]IndexCell[T], n.Header.Keys)
+	for i := range n.Header.Keys {
+		aCopy.Cells[i] = n.Cells[i].Clone()
+	}
+	return aCopy
+}
+
+func (n *IndexCell[T]) Clone() IndexCell[T] {
+	aCopy := IndexCell[T]{
+		Key:          n.Key,
+		InlineRowIDs: n.InlineRowIDs,
+		Overflow:     n.Overflow,
+		Child:        n.Child,
+		unique:       n.unique,
+	}
+	if len(n.RowIDs) == 0 {
+		return aCopy
+	}
+	aCopy.RowIDs = make([]RowID, len(n.RowIDs))
+	copy(aCopy.RowIDs, n.RowIDs)
+	return aCopy
+}
+
 func copyIndexNode(anyNode any) any {
 	switch aNode := anyNode.(type) {
 	case *IndexNode[int8]:
-		aCopy := &IndexNode[int8]{
-			Header: aNode.Header,
-			Cells:  make([]IndexCell[int8], 0, MinimumIndexCells),
-		}
-		for _, aCell := range aNode.Cells {
-			aCopy.Cells = append(aCopy.Cells, aCell)
-		}
-		return aCopy
+		return aNode.Clone()
 	case *IndexNode[int32]:
-		aCopy := &IndexNode[int32]{
-			Header: aNode.Header,
-			Cells:  make([]IndexCell[int32], 0, MinimumIndexCells),
-		}
-		for _, aCell := range aNode.Cells {
-			aCopy.Cells = append(aCopy.Cells, aCell)
-		}
-		return aCopy
+		return aNode.Clone()
 	case *IndexNode[int64]:
-		aCopy := &IndexNode[int64]{
-			Header: aNode.Header,
-			Cells:  make([]IndexCell[int64], 0, MinimumIndexCells),
-		}
-		for _, aCell := range aNode.Cells {
-			aCopy.Cells = append(aCopy.Cells, aCell)
-		}
-		return aCopy
+		return aNode.Clone()
 	case *IndexNode[float32]:
-		aCopy := &IndexNode[float32]{
-			Header: aNode.Header,
-			Cells:  make([]IndexCell[float32], 0, MinimumIndexCells),
-		}
-		for _, aCell := range aNode.Cells {
-			aCopy.Cells = append(aCopy.Cells, aCell)
-		}
-		return aCopy
+		return aNode.Clone()
 	case *IndexNode[float64]:
-		aCopy := &IndexNode[float64]{
-			Header: aNode.Header,
-			Cells:  make([]IndexCell[float64], 0, MinimumIndexCells),
-		}
-		for _, aCell := range aNode.Cells {
-			aCopy.Cells = append(aCopy.Cells, aCell)
-		}
-		return aCopy
+		return aNode.Clone()
 	case *IndexNode[string]:
-		aCopy := &IndexNode[string]{
-			Header: aNode.Header,
-			Cells:  make([]IndexCell[string], 0, MinimumIndexCells),
-		}
-		for _, aCell := range aNode.Cells {
-			aCopy.Cells = append(aCopy.Cells, aCell)
-		}
-		return aCopy
+		return aNode.Clone()
 	default:
 		return nil
 	}

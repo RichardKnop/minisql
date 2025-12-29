@@ -44,8 +44,9 @@ func (p *Page) Clone() *Page {
 	} else if p.IndexOverflowNode != nil {
 		pageCopy.IndexOverflowNode = &IndexOverflowPage{
 			Header: p.IndexOverflowNode.Header,
-			RowIDs: append([]RowID{}, p.IndexOverflowNode.RowIDs...),
+			RowIDs: make([]RowID, len(p.IndexOverflowNode.RowIDs)),
 		}
+		copy(pageCopy.IndexOverflowNode.RowIDs, p.IndexOverflowNode.RowIDs)
 	}
 
 	return pageCopy
