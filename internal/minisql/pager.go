@@ -19,7 +19,7 @@ type DBFile interface {
 	Sync() error
 }
 
-type PageUnmarshaler func(pageIdx PageIndex, buf []byte) (*Page, error)
+type PageUnmarshaler func(totalPages uint32, pageIdx PageIndex, buf []byte) (*Page, error)
 
 type pagerImpl struct {
 	pageSize       int
@@ -130,35 +130,11 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 		return nil, fmt.Errorf("cannot skip index when getting page, index: %d, number of pages: %d", pageIdx, totalPages)
 	}
 
-	// Acquire write lock before any modifications
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	// Double-check page doesn't exist (in case another goroutine created it)
-	if len(p.pages) > int(pageIdx) && p.pages[pageIdx] != nil {
-		p.lruCache.Put(pageIdx, struct{}{}, false)
-		return p.pages[pageIdx], nil
-	}
-
-	// Evict pages if cache is full BEFORE loading new page
-	evickedIdx, evicted := p.lruCache.EvictIfNeeded()
-	if evicted {
-		p.pages[evickedIdx] = nil
-	}
-
-	// Don't use buffer pool here - the unmarshaled page may hold references to the buffer
+	// Perform I/O and unmarshaling OUTSIDE the lock to avoid blocking other page accesses
 	buf := make([]byte, p.pageSize)
 
-	// Extend sparse array BEFORE unmarshaling to ensure p.pages[pageIdx] is valid
-	// The unmarshaler will store the page at p.pages[pageIdx]
-	if len(p.pages) < int(pageIdx)+1 {
-		for i := len(p.pages); i < int(pageIdx)+1; i++ {
-			p.pages = append(p.pages, nil)
-		}
-	}
-
 	if int(pageIdx) != int(p.totalPages) {
-		// If we are not requesting a new page, read the page from file
+		// If we are not requesting a new page, read the page from file (no lock held)
 		offset := int64(pageIdx) * int64(p.pageSize)
 		_, err := p.file.ReadAt(buf, offset)
 		if err != nil {
@@ -166,19 +142,52 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 		}
 	}
 
-	_, err := unmarshaler(pageIdx, buf)
+	// Unmarshal the page (CPU-intensive work, no lock held)
+	newPage, err := unmarshaler(totalPages, pageIdx, buf)
 	if err != nil {
 		return nil, err
 	}
 
+	// Set root flags for page 0
 	if pageIdx == 0 {
-		if p.pages[pageIdx].LeafNode != nil {
-			p.pages[pageIdx].LeafNode.Header.IsRoot = true
+		if newPage.LeafNode != nil {
+			newPage.LeafNode.Header.IsRoot = true
 		}
-		if p.pages[pageIdx].InternalNode != nil {
-			p.pages[pageIdx].InternalNode.Header.IsRoot = true
-			p.pages[pageIdx].InternalNode.Header.IsInternal = true
+		if newPage.InternalNode != nil {
+			newPage.InternalNode.Header.IsRoot = true
+			newPage.InternalNode.Header.IsInternal = true
 		}
+	}
+
+	// Now acquire write lock only for cache update (fast operation)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Double-check page doesn't exist (in case another goroutine created it while we were unmarshaling)
+	if len(p.pages) > int(pageIdx) && p.pages[pageIdx] != nil {
+		p.lruCache.Put(pageIdx, struct{}{}, false)
+		return p.pages[pageIdx], nil
+	}
+
+	// Evict pages if cache is full BEFORE adding new page
+	evickedIdx, evicted := p.lruCache.EvictIfNeeded()
+	if evicted {
+		p.pages[evickedIdx] = nil
+	}
+
+	// Extend sparse array if needed
+	if len(p.pages) < int(pageIdx)+1 {
+		for i := len(p.pages); i < int(pageIdx)+1; i++ {
+			p.pages = append(p.pages, nil)
+		}
+	}
+
+	// Store the unmarshaled page in the cache
+	p.pages[pageIdx] = newPage
+
+	// Update total pages count for new pages
+	if int(pageIdx) == int(p.totalPages) {
+		p.totalPages++
 	}
 
 	// Track this page access
