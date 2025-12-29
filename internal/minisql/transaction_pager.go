@@ -102,7 +102,7 @@ func (tp *TransactionalPager) GetFreePage(ctx context.Context) (*Page, error) {
 
 	// Update header to point to next free page
 	dbHeader.FirstFreePage = freePage.FreePage.NextFreePage
-	dbHeader.FreePageCount--
+	dbHeader.FreePageCount -= 1
 	tx.TrackDBHeaderWrite(dbHeader)
 
 	// Clear the page for reuse
@@ -117,6 +117,7 @@ func (p *Page) Clear() {
 	p.LeafNode = nil
 	p.InternalNode = nil
 	p.IndexNode = nil
+	p.IndexOverflowNode = nil
 }
 
 func (tp *TransactionalPager) AddFreePage(ctx context.Context, pageIdx PageIndex) error {
