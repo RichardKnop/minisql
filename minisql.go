@@ -166,24 +166,14 @@ func (c *Conn) Prepare(query string) (driver.Stmt, error) {
 // context is for the preparation of the statement,
 // it must not store the context within the statement itself.
 func (c *Conn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
-	statements, err := c.parser.Parse(ctx, query)
+	statement, err := c.db.PrepareStatement(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse query: %w", err)
-	}
-
-	if len(statements) == 0 {
-		return nil, fmt.Errorf("no statements in query")
-	}
-
-	// For simplicity, we'll handle single statements
-	// Multi-statement queries could be supported later
-	if len(statements) > 1 {
-		return nil, fmt.Errorf("multiple statements not supported in prepared statements")
+		return nil, err
 	}
 
 	return &Stmt{
 		conn:      c,
-		statement: statements[0],
+		statement: statement,
 	}, nil
 }
 

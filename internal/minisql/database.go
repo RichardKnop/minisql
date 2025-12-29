@@ -29,6 +29,7 @@ type Database struct {
 	txManager  *TransactionManager
 	tables     map[string]*Table
 	dbLock     *sync.RWMutex
+	stmtCache  *statementCache
 	clock      clock
 	logger     *zap.Logger
 }
@@ -45,6 +46,14 @@ func WithJournal(enabled bool) DatabaseOption {
 	}
 }
 
+func WithMaxCachedStatements(maxStatements int) DatabaseOption {
+	return func(d *Database) {
+		if maxStatements > 0 {
+			d.stmtCache = newStatementCache(maxStatements)
+		}
+	}
+}
+
 // NewDatabase creates a new database
 func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aParser Parser, aFactory PagerFactory, saver PageSaver, opts ...DatabaseOption) (*Database, error) {
 	db := &Database{
@@ -54,6 +63,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aPa
 		saver:      saver,
 		tables:     make(map[string]*Table),
 		dbLock:     new(sync.RWMutex),
+		stmtCache:  newStatementCache(DefaultMaxCachedStatements),
 		logger:     logger,
 		clock: func() Time {
 			now := time.Now()
@@ -82,6 +92,37 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aPa
 	}
 
 	return db, nil
+}
+
+// PrepareStatement parses and caches a SQL statement, returning the parsed statement.
+// Subsequent calls with the same SQL string will return the cached statement.
+// The cache uses LRU eviction when it exceeds the configured maximum size.
+func (d *Database) PrepareStatement(ctx context.Context, query string) (Statement, error) {
+	// Check cache first
+	if stmt, ok := d.stmtCache.get(query); ok {
+		return stmt, nil
+	}
+
+	// Parse the statement
+	statements, err := d.parser.Parse(ctx, query)
+	if err != nil {
+		return Statement{}, fmt.Errorf("failed to parse query: %w", err)
+	}
+
+	if len(statements) == 0 {
+		return Statement{}, fmt.Errorf("no statements in query")
+	}
+
+	if len(statements) > 1 {
+		return Statement{}, fmt.Errorf("multiple statements not supported in prepared statements")
+	}
+
+	stmt := statements[0]
+
+	// Cache the parsed statement
+	d.stmtCache.put(query, stmt)
+
+	return stmt, nil
 }
 
 func (d *Database) Close() error {
@@ -135,6 +176,96 @@ func (d *Database) pagerFactory(ctx context.Context, tableName, indexName string
 		}
 	}
 	return d.factory.ForIndex(aColumn.Kind, aColumn.Unique || aColumn.PrimaryKey), nil
+}
+
+func (d *Database) SaveDDLChanges(ctx context.Context, changes DDLChanges) {
+	if !changes.HasChanges() {
+		return
+	}
+
+	d.dbLock.Lock()
+	defer d.dbLock.Unlock()
+
+	for _, aTable := range changes.CreateTables {
+		d.tables[aTable.Name] = aTable
+	}
+	for _, tableName := range changes.DropTables {
+		delete(d.tables, tableName)
+	}
+	for tableName, index := range changes.CreateIndexes {
+		d.tables[tableName].SetSecondaryIndex(index.Name, index.Column, index.Index)
+	}
+	for tableName, index := range changes.DropIndexes {
+		d.tables[tableName].RemoveSecondaryIndex(index.Name)
+	}
+}
+
+// ListTableNames lists names of all tables in the database
+func (d *Database) ListTableNames(ctx context.Context) []string {
+	d.dbLock.RLock()
+	defer d.dbLock.RUnlock()
+
+	tables := make([]string, 0, len(d.tables))
+	for tableName := range d.tables {
+		tables = append(tables, tableName)
+	}
+	return tables
+}
+
+// PrepareStatements parses SQL into a slice of Statement struct
+func (d *Database) PrepareStatements(ctx context.Context, sql string) ([]Statement, error) {
+	stmts, err := d.parser.Parse(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+	return stmts, nil
+}
+
+// GetTransactionManager returns the transaction manager for this database
+func (d *Database) GetTransactionManager() *TransactionManager {
+	return d.txManager
+}
+
+// GetSaver returns the page saver for this database
+func (d *Database) GetSaver() PageSaver {
+	return d.saver
+}
+
+func (d *Database) GetDDLSaver() DDLSaver {
+	return d
+}
+
+// GetFileName returns the database file name
+func (d *Database) GetFileName() string {
+	return d.dbFilePath
+}
+
+// ExecuteStatement executes a single statement and returns the result
+func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (StatementResult, error) {
+	tx := TxFromContext(ctx)
+	if tx == nil {
+		return StatementResult{}, fmt.Errorf("statement must be executed from within a transaction")
+	}
+
+	if !stmt.ReadOnly() && isSystemTable(stmt.TableName) {
+		return StatementResult{}, fmt.Errorf("cannot write to system table %s", SchemaTableName)
+	}
+
+	switch stmt.Kind {
+	case CreateTable, DropTable, CreateIndex, DropIndex:
+		return d.executeDDLStatement(ctx, stmt)
+	case Insert, Select, Update, Delete:
+		d.dbLock.RLock()
+		aTable, ok := d.tables[stmt.TableName]
+		if !ok {
+			d.dbLock.RUnlock()
+			return StatementResult{}, errTableDoesNotExist
+		}
+		d.dbLock.RUnlock()
+
+		return d.executeTableStatement(ctx, aTable, stmt)
+	}
+	return StatementResult{}, errUnrecognizedStatementType
 }
 
 func (d *Database) init(ctx context.Context) error {
@@ -440,96 +571,6 @@ func (d *Database) initSecondaryIndex(ctx context.Context, aSchema Schema) error
 	).Debug("loaded secondary index")
 
 	return nil
-}
-
-func (d *Database) SaveDDLChanges(ctx context.Context, changes DDLChanges) {
-	if !changes.HasChanges() {
-		return
-	}
-
-	d.dbLock.Lock()
-	defer d.dbLock.Unlock()
-
-	for _, aTable := range changes.CreateTables {
-		d.tables[aTable.Name] = aTable
-	}
-	for _, tableName := range changes.DropTables {
-		delete(d.tables, tableName)
-	}
-	for tableName, index := range changes.CreateIndexes {
-		d.tables[tableName].SetSecondaryIndex(index.Name, index.Column, index.Index)
-	}
-	for tableName, index := range changes.DropIndexes {
-		d.tables[tableName].RemoveSecondaryIndex(index.Name)
-	}
-}
-
-// ListTableNames lists names of all tables in the database
-func (d *Database) ListTableNames(ctx context.Context) []string {
-	d.dbLock.RLock()
-	defer d.dbLock.RUnlock()
-
-	tables := make([]string, 0, len(d.tables))
-	for tableName := range d.tables {
-		tables = append(tables, tableName)
-	}
-	return tables
-}
-
-// PrepareStatements parses SQL into a slice of Statement struct
-func (d *Database) PrepareStatements(ctx context.Context, sql string) ([]Statement, error) {
-	stmts, err := d.parser.Parse(ctx, sql)
-	if err != nil {
-		return nil, err
-	}
-	return stmts, nil
-}
-
-// GetTransactionManager returns the transaction manager for this database
-func (d *Database) GetTransactionManager() *TransactionManager {
-	return d.txManager
-}
-
-// GetSaver returns the page saver for this database
-func (d *Database) GetSaver() PageSaver {
-	return d.saver
-}
-
-func (d *Database) GetDDLSaver() DDLSaver {
-	return d
-}
-
-// GetFileName returns the database file name
-func (d *Database) GetFileName() string {
-	return d.dbFilePath
-}
-
-// ExecuteStatement executes a single statement and returns the result
-func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (StatementResult, error) {
-	tx := TxFromContext(ctx)
-	if tx == nil {
-		return StatementResult{}, fmt.Errorf("statement must be executed from within a transaction")
-	}
-
-	if !stmt.ReadOnly() && isSystemTable(stmt.TableName) {
-		return StatementResult{}, fmt.Errorf("cannot write to system table %s", SchemaTableName)
-	}
-
-	switch stmt.Kind {
-	case CreateTable, DropTable, CreateIndex, DropIndex:
-		return d.executeDDLStatement(ctx, stmt)
-	case Insert, Select, Update, Delete:
-		d.dbLock.RLock()
-		aTable, ok := d.tables[stmt.TableName]
-		if !ok {
-			d.dbLock.RUnlock()
-			return StatementResult{}, errTableDoesNotExist
-		}
-		d.dbLock.RUnlock()
-
-		return d.executeTableStatement(ctx, aTable, stmt)
-	}
-	return StatementResult{}, errUnrecognizedStatementType
 }
 
 func (d *Database) executeDDLStatement(ctx context.Context, stmt Statement) (StatementResult, error) {
