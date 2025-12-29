@@ -19,7 +19,7 @@ func TestIndexOverflowPage_Marshal(t *testing.T) {
 			RowIDs: []RowID{1, 2, 3, 4, 5},
 		}
 
-		buf := make([]byte, 0, 100)
+		buf := make([]byte, PageSize)
 		data, err := aNode.Marshal(buf)
 		require.NoError(t, err)
 
@@ -41,7 +41,7 @@ func TestIndexOverflowPage_Marshal(t *testing.T) {
 			aNode.RowIDs = append(aNode.RowIDs, RowID(i+1))
 		}
 
-		buf := make([]byte, 0, 100)
+		buf := make([]byte, PageSize)
 		data, err := aNode.Marshal(buf)
 		require.NoError(t, err)
 

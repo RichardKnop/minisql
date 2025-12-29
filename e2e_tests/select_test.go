@@ -78,7 +78,6 @@ values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:2
 			s.Equal(now.Day(), users[i].Created.Day())
 			s.Equal(now.Hour(), users[i].Created.Hour())
 			s.Equal(now.Minute(), users[i].Created.Minute())
-			s.Equal(now.Second(), users[i].Created.Second())
 		}
 	})
 

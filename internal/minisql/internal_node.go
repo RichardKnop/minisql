@@ -25,13 +25,6 @@ func (h *InternalNodeHeader) Size() (s uint64) {
 }
 
 func (h *InternalNodeHeader) Marshal(buf []byte) ([]byte, error) {
-	size := h.Size()
-	if uint64(cap(buf)) >= size {
-		buf = buf[:size]
-	} else {
-		buf = make([]byte, size)
-	}
-
 	i := uint64(0)
 
 	hbuf, err := h.Header.Marshal(buf[i:])
@@ -50,7 +43,9 @@ func (h *InternalNodeHeader) Marshal(buf []byte) ([]byte, error) {
 	buf[i+6] = byte(h.RightChild >> 16)
 	buf[i+7] = byte(h.RightChild >> 24)
 
-	return buf[:size], nil
+	i += 8
+
+	return buf[:i], nil
 }
 
 func (h *InternalNodeHeader) Unmarshal(buf []byte) (uint64, error) {
@@ -89,13 +84,6 @@ func (c *ICell) Size() uint64 {
 }
 
 func (c *ICell) Marshal(buf []byte) ([]byte, error) {
-	size := c.Size()
-	if uint64(cap(buf)) >= size {
-		buf = buf[:size]
-	} else {
-		buf = make([]byte, size)
-	}
-
 	i := uint64(0)
 
 	buf = marshalUint64(buf, uint64(c.Key), i)
@@ -104,7 +92,7 @@ func (c *ICell) Marshal(buf []byte) ([]byte, error) {
 	buf = marshalUint32(buf, uint32(c.Child), i)
 	i += 4
 
-	return buf[:size], nil
+	return buf[:i], nil
 }
 
 func (c *ICell) Unmarshal(buf []byte) (uint64, error) {
@@ -155,13 +143,6 @@ func (n *InternalNode) Size() uint64 {
 }
 
 func (n *InternalNode) Marshal(buf []byte) ([]byte, error) {
-	size := n.Size()
-	if uint64(cap(buf)) >= size {
-		buf = buf[:size]
-	} else {
-		buf = make([]byte, size)
-	}
-
 	i := uint64(0)
 
 	hbuf, err := n.Header.Marshal(buf[i+0:])

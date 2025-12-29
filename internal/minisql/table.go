@@ -306,13 +306,15 @@ func (t *Table) createNewRoot(ctx context.Context, rightChildPageIdx PageIndex) 
 
 	// Copy all node contents to left child
 	if oldRootPage.LeafNode != nil {
-		leftChildPage.LeafNode = oldRootPage.LeafNode.DeepClone()
+		leftChildPage.LeafNode = NewLeafNode()
+		*leftChildPage.LeafNode = *oldRootPage.LeafNode
 		leftChildPage.LeafNode.Header.IsRoot = false
 	} else if oldRootPage.InternalNode != nil {
 		// New pages by default are leafs so we need to reset left child page
 		// as an internal node here
 		leftChildPage.LeafNode = nil
-		leftChildPage.InternalNode = oldRootPage.InternalNode.Clone()
+		leftChildPage.InternalNode = NewInternalNode()
+		*leftChildPage.InternalNode = *oldRootPage.InternalNode
 		leftChildPage.InternalNode.Header.IsRoot = false
 		// Update parent for all child pages
 		for i := 0; i < int(leftChildPage.InternalNode.Header.KeysNum); i++ {
@@ -765,8 +767,7 @@ func (t *Table) mergeLeaves(ctx context.Context, aParent, left, right *Page, idx
 			return fmt.Errorf("get root page: %w", err)
 		}
 		aRootPage.InternalNode = nil
-		aRootPage.LeafNode = NewLeafNode()
-		*aRootPage.LeafNode = *left.LeafNode
+		aRootPage.LeafNode = left.LeafNode.DeepClone()
 		aRootPage.LeafNode.Header.IsRoot = true
 		aRootPage.LeafNode.Header.Parent = 0
 		aRootPage.LeafNode.Header.NextLeaf = 0
@@ -793,7 +794,7 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 			if err != nil {
 				return fmt.Errorf("rebalance internal: %w", err)
 			}
-			*aRootPage.InternalNode = *firstChildPage.InternalNode
+			aRootPage.InternalNode = firstChildPage.InternalNode.Clone()
 			return t.pager.AddFreePage(ctx, firstChildPage.Index)
 		}
 		return nil

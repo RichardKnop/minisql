@@ -151,6 +151,9 @@ func (c *Cursor) fetchRow(ctx context.Context, advance bool, selectedFields ...F
 	}
 
 	aRow := NewRow(c.Table.Columns)
+	if c.CellIdx > aPage.LeafNode.Header.Cells-1 || len(aPage.LeafNode.Cells) == 0 {
+		return Row{}, fmt.Errorf("cell index %d out of bounds, max %d", c.CellIdx, aPage.LeafNode.Header.Cells-1)
+	}
 	aRow, err = aRow.Unmarshal(aPage.LeafNode.Cells[c.CellIdx], selectedFields...)
 	if err != nil {
 		return Row{}, err
@@ -180,14 +183,14 @@ func (c *Cursor) fetchRow(ctx context.Context, advance bool, selectedFields ...F
 
 	// Otherwise, we try to move the cursor to the next leaf page
 	// But check that the next leaf page actually has cells
-	nextPage, err := c.Table.pager.ReadPage(ctx, aPage.LeafNode.Header.NextLeaf)
-	if err != nil {
-		return Row{}, fmt.Errorf("read next leaf page: %w", err)
-	}
-	if nextPage.LeafNode.Header.Cells == 0 {
-		c.EndOfTable = true
-		return aRow, nil
-	}
+	// nextPage, err := c.Table.pager.ReadPage(ctx, aPage.LeafNode.Header.NextLeaf)
+	// if err != nil {
+	// 	return Row{}, fmt.Errorf("read next leaf page: %w", err)
+	// }
+	// if nextPage.LeafNode.Header.Cells == 0 {
+	// 	c.EndOfTable = true
+	// 	return aRow, nil
+	// }
 
 	c.PageIdx = aPage.LeafNode.Header.NextLeaf
 	c.CellIdx = 0
