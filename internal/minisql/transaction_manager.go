@@ -64,12 +64,11 @@ func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(
 func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction {
 	tm.mu.Lock()
 	tx := &Transaction{
-		ID:           tm.nextTxID,
-		StartTime:    time.Now(),
-		ReadSet:      make(map[PageIndex]uint64),
-		WriteSet:     make(map[PageIndex]*Page),
-		WriteInfoSet: make(map[PageIndex]WriteInfo),
-		Status:       TxActive,
+		ID:        tm.nextTxID,
+		StartTime: time.Now(),
+		ReadSet:   make(map[PageIndex]uint64),
+		WriteSet:  make(map[PageIndex]WriteInfo),
+		Status:    TxActive,
 	}
 	tm.nextTxID++
 	tm.transactions[tx.ID] = tx
@@ -107,8 +106,8 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 	}
 
 	// Check if this is a read-only transaction
-	writePages, writeInfo := tx.GetWriteVersions()
-	isReadOnly := len(writePages) == 0 && !tx.DDLChanges.HasChanges()
+	writeInfos := tx.GetWriteVersions()
+	isReadOnly := len(writeInfos) == 0 && !tx.DDLChanges.HasChanges()
 
 	// Fast path for read-only transactions - no writes to commit
 	if isReadOnly {
@@ -142,10 +141,6 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 
 		// Write original db header and pages to the journal
 		numJournaledPages := 0
-		if len(writePages) != len(writeInfo) {
-			tx.Abort()
-			return fmt.Errorf("internal error: mismatched write pages and info")
-		}
 		_, dbHeaderChanged := tx.GetModifiedDBHeader()
 		if dbHeaderChanged {
 			aPager, err := tm.factory(ctx, SchemaTableName, "")
@@ -161,8 +156,8 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 			}
 		}
 		// Write original pages to the journal
-		for pageIdx := range writePages {
-			aPager, err := tm.factory(ctx, writeInfo[pageIdx].Table, writeInfo[pageIdx].Index)
+		for pageIdx, info := range writeInfos {
+			aPager, err := tm.factory(ctx, info.Table, info.Index)
 			if err != nil {
 				tx.Abort()
 				return fmt.Errorf("get pager for journaling page %d: %w", pageIdx, err)
@@ -193,9 +188,9 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		pagesToFlush = append(pagesToFlush, 0) // header is first 100 bytes of page 0
 	}
 	// Then update modified pages
-	for pageIdx, writePage := range writePages {
+	for pageIdx, info := range writeInfos {
 		// Write the modified page to base storage
-		tm.saver.SavePage(ctx, pageIdx, writePage)
+		tm.saver.SavePage(ctx, pageIdx, info.Page)
 
 		// Increment page version
 		tm.globalPageVersions[pageIdx] += 1

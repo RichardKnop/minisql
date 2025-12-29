@@ -43,6 +43,10 @@ func (s Stmt) NumInput() int {
 //
 // Deprecated: Drivers should implement StmtExecContext instead (or additionally).
 func (s Stmt) Exec(args []driver.Value) (driver.Result, error) {
+	return nil, fmt.Errorf("Exec without context is not supported; use ExecContext instead")
+}
+
+func (s Stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
 	internalArgs, err := toInternalArgs(args)
 	if err != nil {
 		return nil, err
@@ -53,7 +57,7 @@ func (s Stmt) Exec(args []driver.Value) (driver.Result, error) {
 		return nil, err
 	}
 
-	result, err := s.conn.executeStatement(context.Background(), stmtWithArgs)
+	result, err := s.conn.executeStatement(ctx, stmtWithArgs)
 	if err != nil {
 		return nil, err
 	}
@@ -66,6 +70,10 @@ func (s Stmt) Exec(args []driver.Value) (driver.Result, error) {
 //
 // Deprecated: Drivers should implement StmtQueryContext instead (or additionally).
 func (s Stmt) Query(args []driver.Value) (driver.Rows, error) {
+	return nil, fmt.Errorf("Query without context is not supported; use QueryContext instead")
+}
+
+func (s Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
 	internalArgs, err := toInternalArgs(args)
 	if err != nil {
 		return nil, err
@@ -76,7 +84,6 @@ func (s Stmt) Query(args []driver.Value) (driver.Rows, error) {
 		return nil, err
 	}
 
-	ctx := context.Background()
 	result, err := s.conn.executeStatement(ctx, stmtWithArgs)
 	if err != nil {
 		return nil, err
@@ -89,7 +96,7 @@ func (s Stmt) Query(args []driver.Value) (driver.Rows, error) {
 	}, nil
 }
 
-func toInternalArgs(args []driver.Value) ([]any, error) {
+func toInternalArgs(args []driver.NamedValue) ([]any, error) {
 	internalArgs := make([]any, 0, len(args))
 	for _, arg := range args {
 		//	int64
@@ -98,7 +105,7 @@ func toInternalArgs(args []driver.Value) ([]any, error) {
 		//	[]byte
 		//	string
 		//	time.Time
-		switch v := arg.(type) {
+		switch v := arg.Value.(type) {
 		case nil:
 			return nil, nil
 		case int64, float64, bool:
