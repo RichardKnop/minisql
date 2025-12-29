@@ -24,31 +24,38 @@ func (s *TestSuite) TestPreparedStmts() {
 		stmt, err := s.db.Prepare(`select * from users where id = ?;`)
 		s.Require().NoError(err)
 
-		var user user
-		err = stmt.QueryRow(int64(1)).Scan(&user.ID, &user.Email, &user.Name, &user.Created)
-		s.Require().NoError(err)
-		s.Equal(int64(1), user.ID)
-		s.Equal("Danny Mason", user.Name.String)
-		s.Equal("Danny_Mason2966@xqj6f.tech", user.Email.String)
-		s.Equal(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC), user.Created)
+		// Same SELECT prepared statement should be reusable so execute it twice
+		for range 2 {
+			aUser := user{}
+			err = stmt.QueryRow(int64(1)).Scan(&aUser.ID, &aUser.Email, &aUser.Name, &aUser.Created)
+			s.Require().NoError(err)
+
+			s.Equal(int64(1), aUser.ID)
+			s.Equal("Danny Mason", aUser.Name.String)
+			s.Equal("Danny_Mason2966@xqj6f.tech", aUser.Email.String)
+			s.Equal(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC), aUser.Created)
+		}
 	})
 
 	s.Run("Update user", func() {
 		stmt, err := s.db.Prepare(`update users set name = ?, created = now() where id = ?;`)
 		s.Require().NoError(err)
 
-		aResult, err := stmt.Exec("New Name", int64(1))
-		s.Require().NoError(err)
+		// Same UPDATE prepared statement should be reusable so execute it twice
+		for range 2 {
+			aResult, err := stmt.Exec("New Name", int64(1))
+			s.Require().NoError(err)
 
-		rowsAffected, err := aResult.RowsAffected()
-		s.Require().NoError(err)
-		s.Require().Equal(int64(1), rowsAffected)
+			rowsAffected, err := aResult.RowsAffected()
+			s.Require().NoError(err)
+			s.Require().Equal(int64(1), rowsAffected)
 
-		user := s.collectUser(`select * from users where id = 1;`)
-		s.Equal(int64(1), user.ID)
-		s.Equal("New Name", user.Name.String)
-		s.Equal("Danny_Mason2966@xqj6f.tech", user.Email.String)
-		s.NotEqual(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC), user.Created)
+			user := s.collectUser(`select * from users where id = 1;`)
+			s.Equal(int64(1), user.ID)
+			s.Equal("New Name", user.Name.String)
+			s.Equal("Danny_Mason2966@xqj6f.tech", user.Email.String)
+			s.NotEqual(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC), user.Created)
+		}
 	})
 
 	s.Run("Insert multiple users", func() {

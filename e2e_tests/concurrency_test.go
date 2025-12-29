@@ -11,10 +11,37 @@ func (s *TestSuite) TestConcurrency() {
 	_, err = s.db.Exec(createUsersTimestampIndexSQL)
 	s.Require().NoError(err)
 
-	// Insert 1000 test users
-	usersToInsert := gen.Users(1000)
-	for _, aUser := range usersToInsert {
-		s.prepareAndExecQuery(`insert into users("email", "name") values(?, ?);`, 1, aUser.Email.String, aUser.Name.String)
+	// Insert 1000 test users in batches
+	var (
+		usersToInsert = gen.Users(1000)
+		batchSize     = 100
+	)
+	for i := 0; i < len(usersToInsert); i += batchSize {
+		end := i + batchSize
+		if end > len(usersToInsert) {
+			end = len(usersToInsert)
+		}
+
+		if i == len(usersToInsert)-1 {
+			continue
+		}
+
+		tx, err := s.db.Begin()
+		s.Require().NoError(err)
+
+		stmt, err := tx.Prepare(`insert into users("email", "name") values(?, ?);`)
+		s.Require().NoError(err)
+
+		for _, aUser := range usersToInsert[i:end] {
+			_, err := stmt.Exec(aUser.Email.String, aUser.Name.String)
+			s.Require().NoError(err)
+		}
+
+		err = stmt.Close()
+		s.Require().NoError(err)
+
+		err = tx.Commit()
+		s.Require().NoError(err)
 	}
 
 	// Ensure all auto-commit transactions have completed and flushed

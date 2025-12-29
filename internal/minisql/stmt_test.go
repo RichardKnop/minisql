@@ -34,32 +34,67 @@ func TestStatement_NumberPlaceholders(t *testing.T) {
 func TestStatement_BindArguments(t *testing.T) {
 	t.Parallel()
 
-	stmt := Statement{
-		Kind:      Update,
-		TableName: "a",
-		Fields:    []Field{{Name: "b"}, {Name: "c"}, {Name: "d"}},
-		Updates: map[string]OptionalValue{
-			"b": {Value: NewTextPointer([]byte("foo")), Valid: true},
-			"c": {Value: Placeholder{}, Valid: true},
-			"d": {Value: Placeholder{}, Valid: true},
-		},
-		Conditions: OneOrMore{
-			{
-				FieldIsEqual("a", OperandPlaceholder, nil),
-				FieldIsEqual("b", OperandInteger, int64(789)),
+	t.Run("Bind INSERT statement", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Insert,
+			TableName: "a",
+			Fields:    []Field{{Name: "b"}, {Name: "c"}, {Name: "d"}},
+			Inserts: [][]OptionalValue{
+				{
+					{Value: NewTextPointer([]byte("foo")), Valid: true},
+					{Value: Placeholder{}, Valid: true},
+					{Value: Placeholder{}, Valid: true},
+				},
 			},
-		},
-	}
+		}
 
-	var err error
-	stmt, err = stmt.BindArguments(int64(123), nil, "bar")
-	require.NoError(t, err)
+		var err error
+		stmtWithArgs, err := stmt.BindArguments(int64(123), "bar")
+		require.NoError(t, err)
 
-	assert.Equal(t, int64(123), stmt.Updates["c"].Value)
-	assert.Equal(t, OptionalValue{}, stmt.Updates["d"])
+		assert.Equal(t, NewTextPointer([]byte("foo")), stmtWithArgs.Inserts[0][0].Value)
+		assert.Equal(t, int64(123), stmtWithArgs.Inserts[0][1].Value)
+		assert.Equal(t, "bar", stmtWithArgs.Inserts[0][2].Value)
 
-	condition := stmt.Conditions[0][0]
-	assert.Equal(t, "bar", condition.Operand2.Value)
+		// Ensure original statement is unchanged
+		assert.Equal(t, NewTextPointer([]byte("foo")), stmt.Inserts[0][0].Value)
+		assert.Equal(t, Placeholder{}, stmt.Inserts[0][1].Value)
+		assert.Equal(t, Placeholder{}, stmt.Inserts[0][2].Value)
+	})
+
+	t.Run("Bind UPDATE statement", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Update,
+			TableName: "a",
+			Fields:    []Field{{Name: "b"}, {Name: "c"}, {Name: "d"}},
+			Updates: map[string]OptionalValue{
+				"b": {Value: NewTextPointer([]byte("foo")), Valid: true},
+				"c": {Value: Placeholder{}, Valid: true},
+				"d": {Value: Placeholder{}, Valid: true},
+			},
+			Conditions: OneOrMore{
+				{
+					FieldIsEqual("a", OperandPlaceholder, nil),
+					FieldIsEqual("b", OperandInteger, int64(789)),
+				},
+			},
+		}
+
+		var err error
+		stmtWithArgs, err := stmt.BindArguments(int64(123), nil, "bar")
+		require.NoError(t, err)
+
+		assert.Equal(t, int64(123), stmtWithArgs.Updates["c"].Value)
+		assert.Equal(t, OptionalValue{}, stmtWithArgs.Updates["d"])
+		condition := stmtWithArgs.Conditions[0][0]
+		assert.Equal(t, "bar", condition.Operand2.Value)
+
+		// Ensure original statement is unchanged
+		assert.Equal(t, Placeholder{}, stmt.Updates["c"].Value)
+		assert.Equal(t, Placeholder{}, stmt.Updates["d"].Value)
+		originalCondition := stmt.Conditions[0][0]
+		assert.Equal(t, OperandPlaceholder, originalCondition.Operand2.Type)
+	})
 }
 
 func TestStatement_Prepare_Insert(t *testing.T) {

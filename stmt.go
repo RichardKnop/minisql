@@ -48,12 +48,12 @@ func (s Stmt) Exec(args []driver.Value) (driver.Result, error) {
 		return nil, err
 	}
 
-	s.statement, err = s.statement.BindArguments(internalArgs...)
+	stmtWithArgs, err := s.statement.BindArguments(internalArgs...)
 	if err != nil {
 		return nil, err
 	}
 
-	result, err := s.conn.executeStatement(context.Background(), s.statement)
+	result, err := s.conn.executeStatement(context.Background(), stmtWithArgs)
 	if err != nil {
 		return nil, err
 	}
@@ -71,13 +71,13 @@ func (s Stmt) Query(args []driver.Value) (driver.Rows, error) {
 		return nil, err
 	}
 
-	s.statement, err = s.statement.BindArguments(internalArgs...)
+	stmtWithArgs, err := s.statement.BindArguments(internalArgs...)
 	if err != nil {
 		return nil, err
 	}
 
 	ctx := context.Background()
-	result, err := s.conn.executeStatement(ctx, s.statement)
+	result, err := s.conn.executeStatement(ctx, stmtWithArgs)
 	if err != nil {
 		return nil, err
 	}
