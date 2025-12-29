@@ -85,22 +85,28 @@ func (c *Cell) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	c.Key = RowID(unmarshalUint64(buf, offset))
 	offset += 8
 
+	// Pass 1: Calculate total size needed for all column values
+	totalSize := uint64(0)
+	scanOffset := offset
 	for i, aColumn := range columns {
 		if bitwise.IsSet(c.NullBitmask, i) {
 			continue
 		}
 		if aColumn.Kind.IsText() {
-			size := unmarshalInt32(buf, offset)
-			val := make([]byte, size+4)
-			n := copy(val, buf[offset:offset+4+uint64(size)])
-			offset += uint64(n)
-			c.Value = append(c.Value, val...)
+			size := unmarshalInt32(buf, scanOffset)
+			totalSize += 4 + uint64(size)
+			scanOffset += 4 + uint64(size)
 		} else {
-			val := make([]byte, aColumn.Size)
-			n := copy(val, buf[offset:offset+uint64(aColumn.Size)])
-			offset += uint64(n)
-			c.Value = append(c.Value, val...)
+			totalSize += uint64(aColumn.Size)
+			scanOffset += uint64(aColumn.Size)
 		}
+	}
+
+	// Pass 2: Single allocation and copy all data
+	if totalSize > 0 {
+		c.Value = make([]byte, totalSize)
+		copy(c.Value, buf[offset:offset+totalSize])
+		offset += totalSize
 	}
 
 	return offset, nil
