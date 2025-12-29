@@ -31,6 +31,116 @@ func MustTxFromContext(ctx context.Context) *Transaction {
 
 type TransactionID uint64
 
+type WriteInfo struct {
+	*Page
+	Table string
+	Index string
+}
+
+type Transaction struct {
+	ID            TransactionID
+	StartTime     time.Time
+	ReadSet       map[PageIndex]uint64    // pageIdx -> version when read
+	WriteSet      map[PageIndex]WriteInfo // pageIdx -> modified page copy (+ table name, index name)
+	DbHeaderRead  *uint64                 // version of DB header when read
+	DbHeaderWrite *DatabaseHeader         // modified DB header
+	DDLChanges    DDLChanges
+	Status        TransactionStatus
+	mu            sync.RWMutex
+}
+
+type TransactionStatus int
+
+const (
+	TxActive TransactionStatus = iota + 1
+	TxCommitted
+	TxAborted
+)
+
+func (tx *Transaction) Commit() {
+	tx.Status = TxCommitted
+}
+
+// Set status to TxAborted and discard all changes - they're only in memory
+func (tx *Transaction) Abort() {
+	tx.Status = TxAborted
+	tx.WriteSet = nil
+	tx.DbHeaderWrite = nil
+}
+
+func (tx *Transaction) TrackRead(pageIdx PageIndex, version uint64) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+
+	tx.ReadSet[pageIdx] = version
+}
+
+func (tx *Transaction) TrackWrite(pageIdx PageIndex, page *Page, table, index string) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+
+	tx.WriteSet[pageIdx] = WriteInfo{
+		Page:  page,
+		Table: table,
+		Index: index,
+	}
+}
+
+func (tx *Transaction) TrackDBHeaderRead(version uint64) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+
+	tx.DbHeaderRead = &version
+}
+
+func (tx *Transaction) TrackDBHeaderWrite(header DatabaseHeader) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+
+	tx.DbHeaderWrite = &header
+}
+
+func (tx *Transaction) GetReadVersions() map[PageIndex]uint64 {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+
+	// Return a copy to avoid concurrent map access
+	readSetCopy := make(map[PageIndex]uint64, len(tx.ReadSet))
+	maps.Copy(readSetCopy, tx.ReadSet)
+	return readSetCopy
+}
+
+type WritePage struct {
+	Page  *Page
+	Table string
+}
+
+func (tx *Transaction) GetWriteVersions() map[PageIndex]WriteInfo {
+	return tx.WriteSet
+}
+
+func (tx *Transaction) GetDBHeaderReadVersion() (uint64, bool) {
+	if tx.DbHeaderRead == nil {
+		return 0, false
+	}
+	return *tx.DbHeaderRead, true
+}
+
+func (tx *Transaction) GetModifiedPage(pageIdx PageIndex) (*Page, bool) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+
+	modifiedPage, exists := tx.WriteSet[pageIdx]
+	return modifiedPage.Page, exists
+}
+
+func (tx *Transaction) GetModifiedDBHeader() (*DatabaseHeader, bool) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+
+	return tx.DbHeaderWrite, tx.DbHeaderWrite != nil
+}
+
 type DDLChanges struct {
 	CreateTables  []*Table
 	DropTables    []string
@@ -69,136 +179,4 @@ func (d DDLChanges) HasChanges() bool {
 		len(d.DropTables) > 0 ||
 		len(d.CreateIndexes) > 0 ||
 		len(d.DropIndexes) > 0
-}
-
-type WriteInfo struct {
-	Table string
-	Index string
-}
-
-type Transaction struct {
-	ID            TransactionID
-	StartTime     time.Time
-	ReadSet       map[PageIndex]uint64    // pageIdx -> version when read
-	WriteSet      map[PageIndex]*Page     // pageIdx -> modified page copy
-	WriteInfoSet  map[PageIndex]WriteInfo // pageIdx -> table (+index) name
-	DbHeaderRead  *uint64                 // version of DB header when read
-	DbHeaderWrite *DatabaseHeader         // modified DB header
-	DDLChanges    DDLChanges
-	Status        TransactionStatus
-	mu            sync.RWMutex
-}
-
-type TransactionStatus int
-
-const (
-	TxActive TransactionStatus = iota + 1
-	TxCommitted
-	TxAborted
-)
-
-func (tx *Transaction) Commit() {
-	tx.Status = TxCommitted
-}
-
-func (tx *Transaction) Abort() {
-	tx.mu.Lock()
-	defer tx.mu.Unlock()
-
-	tx.Status = TxAborted
-	// Simply discard all changes - they're only in memory
-	tx.WriteSet = make(map[PageIndex]*Page)
-	tx.DbHeaderWrite = nil
-}
-
-func (tx *Transaction) TrackRead(pageIdx PageIndex, version uint64) {
-	tx.mu.Lock()
-	defer tx.mu.Unlock()
-
-	tx.ReadSet[pageIdx] = version
-}
-
-func (tx *Transaction) TrackWrite(pageIdx PageIndex, page *Page) {
-	tx.mu.Lock()
-	defer tx.mu.Unlock()
-
-	tx.WriteSet[pageIdx] = page
-}
-
-func (tx *Transaction) TrackWriteInfo(pageIdx PageIndex, table, index string) {
-	tx.mu.Lock()
-	defer tx.mu.Unlock()
-
-	tx.WriteInfoSet[pageIdx] = WriteInfo{
-		Table: table,
-		Index: index,
-	}
-}
-
-func (tx *Transaction) TrackDBHeaderRead(version uint64) {
-	tx.mu.Lock()
-	defer tx.mu.Unlock()
-
-	tx.DbHeaderRead = &version
-}
-
-func (tx *Transaction) TrackDBHeaderWrite(header DatabaseHeader) {
-	tx.mu.Lock()
-	defer tx.mu.Unlock()
-
-	tx.DbHeaderWrite = &header
-}
-
-func (tx *Transaction) GetReadVersions() map[PageIndex]uint64 {
-	tx.mu.RLock()
-	defer tx.mu.RUnlock()
-
-	// Return a copy to avoid concurrent map access
-	readSetCopy := make(map[PageIndex]uint64, len(tx.ReadSet))
-	maps.Copy(readSetCopy, tx.ReadSet)
-	return readSetCopy
-}
-
-type WritePage struct {
-	Page  *Page
-	Table string
-}
-
-func (tx *Transaction) GetWriteVersions() (map[PageIndex]*Page, map[PageIndex]WriteInfo) {
-	tx.mu.RLock()
-	defer tx.mu.RUnlock()
-
-	// Return a copy to avoid concurrent map access
-	writeSetCopy := make(map[PageIndex]*Page, len(tx.WriteSet))
-	maps.Copy(writeSetCopy, tx.WriteSet)
-
-	writeInfoSetCopy := make(map[PageIndex]WriteInfo, len(tx.WriteInfoSet))
-	maps.Copy(writeInfoSetCopy, tx.WriteInfoSet)
-
-	return writeSetCopy, writeInfoSetCopy
-}
-
-func (tx *Transaction) GetDBHeaderReadVersion() (uint64, bool) {
-	tx.mu.RLock()
-	defer tx.mu.RUnlock()
-
-	if tx.DbHeaderRead == nil {
-		return 0, false
-	}
-	return *tx.DbHeaderRead, true
-}
-
-func (tx *Transaction) GetModifiedPage(pageIdx PageIndex) (*Page, bool) {
-	tx.mu.RLock()
-	defer tx.mu.RUnlock()
-
-	modifiedPage, exists := tx.WriteSet[pageIdx]
-	return modifiedPage, exists
-}
-
-func (tx *Transaction) GetModifiedDBHeader() (*DatabaseHeader, bool) {
-	tx.mu.RLock()
-	defer tx.mu.RUnlock()
-
-	return tx.DbHeaderWrite, tx.DbHeaderWrite != nil
 }

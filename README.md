@@ -460,7 +460,7 @@ LOG_LEVEL=info go test ./... -count=1
 ### Benchmarking
 
 
-Memory:
+Some benchmarking commands I have used just for my own reference.
 
 ```sh
 go test -bench=BenchmarkPageAccess -benchtime=100000x ./internal/minisql 2>&1 | grep -A 20 "Benchmark"
@@ -468,13 +468,22 @@ go test -bench=BenchmarkRow -benchmem ./internal/minisql 2>&1 | grep -E "(Benchm
 go test -bench=BenchmarkFlush -benchmem -benchtime=5s ./internal/minisql 2>&1 | grep -E "(Benchmark|B/op)"
 go test -bench=BenchmarkFlush -benchmem -benchtime=3s ./internal/minisql 2>&1 | grep -E "(Benchmark|B/op)"
 go test -bench=BenchmarkPageAccess -benchmem ./internal/minisql 2>&1 | grep -E "Benchmark|alloc"
-```
 
-CPU:
-
-```sh
 go test -cpuprofile=cpu.prof -bench=BenchmarkConcurrentReads -benchtime=5s ./e2e_tests 2>&1 | tail -15
 go tool pprof -top -cum cpu.prof 2>&1 | head -50
 go tool pprof -list="github.com/RichardKnop/minisql" cpu.prof 2>&1 | grep -E "Total:|ROUTINE|flat|github.com/RichardKnop" | head -100
 go tool pprof -top cpu.prof 2>&1 | grep -E "minisql" | head -30
+
+# CPU profile concurrent workload
+go test -cpuprofile=cpu.prof -bench=BenchmarkConcurrent -benchtime=10s ./e2e_tests
+go tool pprof -top cpu.prof | head -30
+
+# Memory profile
+go test -memprofile=mem.prof -bench=BenchmarkConcurrent -benchtime=10s ./e2e_tests  
+go tool pprof -alloc_space -top mem.prof | head -30
+
+# Mutex contention
+go test -mutexprofile=mutex.prof -bench=BenchmarkConcurrent -benchtime=10s ./e2e_tests
+go tool pprof -top mutex.prof
+
 ```

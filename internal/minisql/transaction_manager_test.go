@@ -72,8 +72,11 @@ func TestTransactionManager_Commit(t *testing.T) {
 		tx.ReadSet[2] = 0
 		tx.ReadSet[3] = 2
 		tx.ReadSet[4] = 5
-		tx.WriteSet[4] = &Page{Index: PageIndex(4)}
-		tx.WriteInfoSet[4] = WriteInfo{Table: "users", Index: "pk_users"}
+		tx.WriteSet[4] = WriteInfo{
+			&Page{Index: PageIndex(4)},
+			"users",
+			"pk_users",
+		}
 
 		// Setup expectations
 		if txManager.journalEnabled {
@@ -82,7 +85,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 			originalPage := &Page{Index: PageIndex(4), LeafNode: NewLeafNode()}
 			pagerMock.On("GetPage", ctx, PageIndex(4)).Return(originalPage, nil).Once()
 		}
-		saverMock.On("SavePage", ctx, PageIndex(4), tx.WriteSet[4]).Return(nil).Once()
+		saverMock.On("SavePage", ctx, PageIndex(4), tx.WriteSet[4].Page).Return(nil).Once()
 		saverMock.On("SaveHeader", ctx, *tx.DbHeaderWrite).Return(nil).Once()
 		saverMock.On("FlushBatch", ctx, mock.MatchedBy(func(pages []PageIndex) bool {
 			// Should flush header (page 0) and modified page (page 4)
@@ -131,15 +134,18 @@ func TestTransactionManager_Commit(t *testing.T) {
 		readTx.ReadSet[4] = 1
 
 		// Let's simulate a write for second tx that will conflict
-		writeTx.WriteSet[3] = &Page{Index: PageIndex(3), LeafNode: NewLeafNode()}
-		writeTx.WriteInfoSet[3] = WriteInfo{Table: "orders", Index: "pk_orders"}
+		writeTx.WriteSet[3] = WriteInfo{
+			&Page{Index: PageIndex(3), LeafNode: NewLeafNode()},
+			"orders",
+			"pk_orders",
+		}
 
 		// Setup expectations
 		if txManager.journalEnabled {
 			originalPage := &Page{Index: PageIndex(3), LeafNode: NewLeafNode()}
 			pagerMock.On("GetPage", ctx, PageIndex(3)).Return(originalPage, nil).Once()
 		}
-		saverMock.On("SavePage", ctx, PageIndex(3), writeTx.WriteSet[3]).Return(nil).Once()
+		saverMock.On("SavePage", ctx, PageIndex(3), writeTx.WriteSet[3].Page).Return(nil).Once()
 
 		// Commit the writing transaction first
 		saverMock.On("FlushBatch", ctx, mock.MatchedBy(func(pages []PageIndex) bool {
@@ -191,20 +197,26 @@ func TestTransactionManager_Commit(t *testing.T) {
 		writeTx1.ReadSet[2] = 0
 		writeTx1.ReadSet[3] = 2
 		writeTx1.ReadSet[4] = 5
-		writeTx1.WriteSet[4] = &Page{Index: PageIndex(4)}
-		writeTx1.WriteInfoSet[4] = WriteInfo{Table: "orders", Index: "pk_orders"}
+		writeTx1.WriteSet[4] = WriteInfo{
+			&Page{Index: PageIndex(4)},
+			"orders",
+			"pk_orders",
+		}
 
 		// Second tx will modify the same page to cause conflict
 		writeTx2.ReadSet[4] = 5
-		writeTx2.WriteSet[4] = &Page{Index: PageIndex(4)}
-		writeTx2.WriteInfoSet[4] = WriteInfo{Table: "orders", Index: "pk_orders"}
+		writeTx2.WriteSet[4] = WriteInfo{
+			&Page{Index: PageIndex(4)},
+			"orders",
+			"pk_orders",
+		}
 
 		// Setup expectations
 		if txManager.journalEnabled {
 			originalPage := &Page{Index: PageIndex(4), LeafNode: NewLeafNode()}
 			pagerMock.On("GetPage", ctx, PageIndex(4)).Return(originalPage, nil).Once()
 		}
-		saverMock.On("SavePage", ctx, PageIndex(4), writeTx2.WriteSet[4]).Return(nil).Once()
+		saverMock.On("SavePage", ctx, PageIndex(4), writeTx2.WriteSet[4].Page).Return(nil).Once()
 		saverMock.On("FlushBatch", ctx, mock.MatchedBy(func(pages []PageIndex) bool {
 			// Should flush only the modified page (page 4)
 			return len(pages) == 1 && pages[0] == PageIndex(4)
@@ -255,7 +267,11 @@ func TestTransactionManager_Rollback(t *testing.T) {
 	tx.ReadSet[2] = 0
 	tx.ReadSet[3] = 2
 	tx.ReadSet[4] = 5
-	tx.WriteSet[4] = &Page{Index: PageIndex(4)}
+	tx.WriteSet[4] = WriteInfo{
+		&Page{Index: PageIndex(4)},
+		"users",
+		"",
+	}
 
 	txManager.RollbackTransaction(ctx, tx)
 	assert.Equal(t, TxAborted, tx.Status)

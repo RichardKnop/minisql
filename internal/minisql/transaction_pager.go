@@ -67,8 +67,7 @@ func (tp *TransactionalPager) ModifyPage(ctx context.Context, pageIdx PageIndex)
 
 	// Create a deep copy for modification
 	modifiedPage = originalPage.Clone()
-	tx.TrackWrite(pageIdx, modifiedPage)
-	tx.TrackWriteInfo(pageIdx, tp.table, tp.index)
+	tx.TrackWrite(pageIdx, modifiedPage, tp.table, tp.index)
 
 	return modifiedPage, nil
 }
