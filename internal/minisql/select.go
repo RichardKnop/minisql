@@ -124,12 +124,10 @@ func (t *Table) selectCount(ctx context.Context, filteredPipe chan Row, errorsPi
 			Columns: []Column{
 				{Name: "COUNT(*)"},
 			},
-			Rows: NewSingleRowIterator(Row{
-				Columns: []Column{
-					{Name: "COUNT(*)"},
-				},
-				Values: []OptionalValue{{Valid: true, Value: count}},
-			}),
+			Rows: NewSingleRowIterator(NewRowWithValues(
+				[]Column{{Name: "COUNT(*)"}},
+				[]OptionalValue{{Valid: true, Value: count}},
+			)),
 		}, nil
 	}
 }
@@ -275,7 +273,8 @@ func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, aScan Scan, s
 		var aRow Row
 
 		if len(selectedFields) == 0 {
-			aRow = Row{Key: rowID, Columns: t.Columns}
+			aRow = NewRowWithValues(t.Columns, nil)
+			aRow.Key = rowID
 		} else {
 			// Fetch the row
 			aRow, err = cursor.fetchRow(ctx, false, selectedFields...)
@@ -295,7 +294,7 @@ func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, aScan Scan, s
 
 		select {
 		case <-ctx.Done():
-			return nil
+			return ctx.Err()
 		case out <- aRow:
 			return nil
 		}
@@ -323,7 +322,8 @@ func (t *Table) indexRangeScan(ctx context.Context, aScan Scan, selectedFields [
 		var aRow Row
 
 		if len(selectedFields) == 0 {
-			aRow = Row{Key: rowID, Columns: t.Columns}
+			aRow = NewRowWithValues(t.Columns, nil)
+			aRow.Key = rowID
 		} else {
 			// Fetch the row
 			aRow, err = cursor.fetchRow(ctx, false, selectedFields...)
@@ -377,7 +377,8 @@ func (t *Table) indexPointScan(ctx context.Context, aScan Scan, selectedFields [
 		var aRow Row
 
 		if len(selectedFields) == 0 {
-			aRow = Row{Key: rowID, Columns: t.Columns}
+			aRow = NewRowWithValues(t.Columns, nil)
+			aRow.Key = rowID
 		} else {
 			// Find the row by ID
 			aCursor, err := t.Seek(ctx, rowID)

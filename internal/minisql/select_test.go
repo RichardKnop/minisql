@@ -289,11 +289,12 @@ func TestTable_Select(t *testing.T) {
 		// Since we are only selecting id, name, filter out other columns and values
 		expected := make([]Row, 0, len(rows))
 		for _, aRow := range rows {
-			expected = append(expected, Row{
-				Key:     aRow.Key,
-				Columns: []Column{aRow.Columns[0], aRow.Columns[3]},
-				Values:  []OptionalValue{aRow.Values[0], aRow.Values[3]},
-			})
+			expectedRow := NewRowWithValues(
+				[]Column{aRow.Columns[0], aRow.Columns[3]},
+				[]OptionalValue{aRow.Values[0], aRow.Values[3]},
+			)
+			expectedRow.Key = aRow.Key
+			expected = append(expected, expectedRow)
 		}
 		actual := collectRows(ctx, aResult)
 		assert.Len(t, actual, len(expected))
@@ -318,11 +319,11 @@ func TestTable_Select(t *testing.T) {
 				continue
 			}
 			// Since we are only selecting id, email, filter out other columns and values
-			expectedRow := Row{
-				Key:     aRow.Key,
-				Columns: []Column{aRow.Columns[0], aRow.Columns[1]},
-				Values:  []OptionalValue{aRow.Values[0], aRow.Values[1]},
-			}
+			expectedRow := NewRowWithValues(
+				[]Column{aRow.Columns[0], aRow.Columns[1]},
+				[]OptionalValue{aRow.Values[0], aRow.Values[1]},
+			)
+			expectedRow.Key = aRow.Key
 			expected = append(expected, expectedRow)
 
 		}
@@ -398,10 +399,10 @@ func TestTable_Select(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, []Row{
-			{
-				Columns: []Column{{Name: "COUNT(*)"}},
-				Values:  []OptionalValue{{Value: int64(len(rows)), Valid: true}},
-			},
+			NewRowWithValues(
+				[]Column{{Name: "COUNT(*)"}},
+				[]OptionalValue{{Value: int64(len(rows)), Valid: true}},
+			),
 		}, collectRows(ctx, aResult))
 	})
 
@@ -437,10 +438,10 @@ func TestTable_Select(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, []Row{
-			{
-				Columns: []Column{{Name: "COUNT(*)"}},
-				Values:  []OptionalValue{{Value: int64(expectedCount), Valid: true}},
-			},
+			NewRowWithValues(
+				[]Column{{Name: "COUNT(*)"}},
+				[]OptionalValue{{Value: int64(expectedCount), Valid: true}},
+			),
 		}, collectRows(ctx, aResult))
 	})
 }

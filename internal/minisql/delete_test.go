@@ -592,8 +592,8 @@ func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []
 
 	require.Len(t, actual, len(expectedRows))
 	for i := range len(expectedRows) {
-		assert.Equal(t, actual[i].Key, expectedRows[i].Key, "row key %d does not match expected", i)
-		assert.Equal(t, actual[i].Columns, expectedRows[i].Columns, "row columns %d does not match expected", i)
+		assert.Equal(t, expectedRows[i].Key, actual[i].Key, "row key %d does not match expected %d", i)
+		assert.Equal(t, expectedRows[i].Columns, actual[i].Columns, "row columns %d does not match expected", i)
 		// Compare values, for text values, we don't want to compare pointers to overflow pages
 		for j, aValue := range expectedRows[i].Values {
 			tp, ok := aValue.Value.(TextPointer)
@@ -604,7 +604,7 @@ func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []
 				assert.Equal(t, actual[i].Values[j], expectedRows[i].Values[j], "row %d value %d does not match expected", i, j)
 			}
 		}
-		assert.Equal(t, actual[i].NullBitmask(), expectedRows[i].NullBitmask(), "row %d null bitmask does not match expected", i)
+		assert.Equal(t, expectedRows[i].NullBitmask(), actual[i].NullBitmask(), "row %d null bitmask does not match expected", i)
 	}
 }
 

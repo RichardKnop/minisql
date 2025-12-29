@@ -262,17 +262,14 @@ func newDataGen(seed uint64) *dataGen {
 }
 
 func (g *dataGen) Row() Row {
-	return Row{
-		Columns: testColumns,
-		Values: []OptionalValue{
-			{Value: g.Int64(), Valid: true},
-			{Value: g.paddedEmail(), Valid: true},
-			{Value: int32(g.IntRange(18, 100)), Valid: true},
-			{Value: g.Bool(), Valid: true},
-			{Value: g.Float32(), Valid: true},
-			{Value: MustParseTimestamp(g.PastDate().Format(timestampFormat)), Valid: true},
-		},
-	}
+	return NewRowWithValues(testColumns, []OptionalValue{
+		{Value: g.Int64(), Valid: true},
+		{Value: g.paddedEmail(), Valid: true},
+		{Value: int32(g.IntRange(18, 100)), Valid: true},
+		{Value: g.Bool(), Valid: true},
+		{Value: g.Float32(), Valid: true},
+		{Value: MustParseTimestamp(g.PastDate().Format(timestampFormat)), Valid: true},
+	})
 }
 
 func (g *dataGen) paddedEmail() TextPointer {
@@ -319,17 +316,15 @@ func (g *dataGen) Rows(number int) []Row {
 }
 
 func (g *dataGen) MediumRow() Row {
-	aRow := Row{
-		Columns: testMediumColumns,
-		Values: []OptionalValue{
-			{Value: g.Int64(), Valid: true},
-			{Value: g.paddedEmail(), Valid: true},
-			{Value: int32(g.IntRange(18, 100)), Valid: true},
-			{Value: g.Bool(), Valid: true},
-			{Value: g.Float32(), Valid: true},
-			{Value: MustParseTimestamp(g.PastDate().Format(timestampFormat)), Valid: true},
-		},
-	}
+	aRow := NewRowWithValues(testMediumColumns, []OptionalValue{
+		{Value: g.Int64(), Valid: true},
+		{Value: g.paddedEmail(), Valid: true},
+		{Value: int32(g.IntRange(18, 100)), Valid: true},
+		{Value: g.Bool(), Valid: true},
+		{Value: g.Float32(), Valid: true},
+		{Value: MustParseTimestamp(g.PastDate().Format(timestampFormat)), Valid: true},
+	})
+
 	for len(aRow.Values) < len(testMediumColumns) {
 		aRow.Values = append(
 			aRow.Values,
@@ -380,17 +375,15 @@ func (g *dataGen) MediumRows(number int) []Row {
 }
 
 func (g *dataGen) BigRow() Row {
-	aRow := Row{
-		Columns: testBigColumns,
-		Values: []OptionalValue{
-			{Value: g.Int64(), Valid: true},
-			{Value: g.paddedEmail(), Valid: true},
-			{Value: int32(g.IntRange(18, 100)), Valid: true},
-			{Value: g.Bool(), Valid: true},
-			{Value: g.Float32(), Valid: true},
-			{Value: MustParseTimestamp(g.PastDate().Format(timestampFormat)), Valid: true},
-		},
-	}
+	aRow := NewRowWithValues(testBigColumns, []OptionalValue{
+		{Value: g.Int64(), Valid: true},
+		{Value: g.paddedEmail(), Valid: true},
+		{Value: int32(g.IntRange(18, 100)), Valid: true},
+		{Value: g.Bool(), Valid: true},
+		{Value: g.Float32(), Valid: true},
+		{Value: MustParseTimestamp(g.PastDate().Format(timestampFormat)), Valid: true},
+	})
+
 	for len(aRow.Values) < len(testBigColumns) {
 		aRow.Values = append(
 			aRow.Values,
@@ -433,13 +426,10 @@ func (g *dataGen) BigRows(number int) []Row {
 }
 
 func (g *dataGen) RowWithPrimaryKey(primaryKey int64) Row {
-	return Row{
-		Columns: testColumnsWithPrimaryKey,
-		Values: []OptionalValue{
-			{Value: primaryKey, Valid: true},
-			{Value: NewTextPointer([]byte(g.Email())), Valid: true},
-		},
-	}
+	return NewRowWithValues(testColumnsWithPrimaryKey, []OptionalValue{
+		{Value: primaryKey, Valid: true},
+		{Value: NewTextPointer([]byte(g.Email())), Valid: true},
+	})
 }
 
 func (g *dataGen) RowsWithPrimaryKey(number int) []Row {
@@ -466,13 +456,10 @@ func (g *dataGen) RowsWithPrimaryKey(number int) []Row {
 }
 
 func (g *dataGen) RowWithUniqueIndex() Row {
-	return Row{
-		Columns: testColumnsWithUniqueIndex,
-		Values: []OptionalValue{
-			{Value: g.Int64(), Valid: true},
-			{Value: NewTextPointer([]byte(g.Email())), Valid: true},
-		},
-	}
+	return NewRowWithValues(testColumnsWithUniqueIndex, []OptionalValue{
+		{Value: g.Int64(), Valid: true},
+		{Value: NewTextPointer([]byte(g.Email())), Valid: true},
+	})
 }
 
 func (g *dataGen) RowsWithUniqueIndex(number int) []Row {
@@ -499,14 +486,11 @@ func (g *dataGen) RowsWithUniqueIndex(number int) []Row {
 }
 
 func (g *dataGen) OverflowRow(textSize uint32) Row {
-	return Row{
-		Columns: testOverflowColumns,
-		Values: []OptionalValue{
-			{Value: g.Int64(), Valid: true},
-			{Value: g.paddedEmail(), Valid: true},
-			{Value: g.textOfLength(textSize), Valid: true},
-		},
-	}
+	return NewRowWithValues(testOverflowColumns, []OptionalValue{
+		{Value: g.Int64(), Valid: true},
+		{Value: g.paddedEmail(), Valid: true},
+		{Value: g.textOfLength(textSize), Valid: true},
+	})
 }
 
 func (g *dataGen) OverflowRows(number int, sizes []uint32) []Row {

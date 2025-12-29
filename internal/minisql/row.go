@@ -19,6 +19,8 @@ type Row struct {
 	Key     RowID
 	Columns []Column
 	Values  []OptionalValue
+
+	columnCache map[string]int
 }
 
 func maxCells(rowSize uint64) uint32 {
@@ -29,7 +31,26 @@ func maxCells(rowSize uint64) uint32 {
 }
 
 func NewRow(columns []Column) Row {
-	return Row{Columns: columns}
+	aRow := Row{
+		Columns:     columns,
+		columnCache: make(map[string]int, len(columns)),
+	}
+	for i, aColumn := range columns {
+		aRow.columnCache[aColumn.Name] = i
+	}
+	return aRow
+}
+
+func NewRowWithValues(columns []Column, values []OptionalValue) Row {
+	aRow := Row{
+		Columns:     columns,
+		Values:      values,
+		columnCache: make(map[string]int, len(columns)),
+	}
+	for i, aColumn := range columns {
+		aRow.columnCache[aColumn.Name] = i
+	}
+	return aRow
 }
 
 // Size calculates a size of a row record excluding null bitmask and row ID
@@ -72,71 +93,43 @@ func (r Row) Size() uint64 {
 }
 
 func (r Row) OnlyFields(fields ...Field) Row {
-	// Pre-count matching fields to allocate exact capacity
-	matchCount := 0
+	filteredRow := Row{
+		Key:         r.Key,
+		Columns:     make([]Column, 0, len(fields)),
+		Values:      make([]OptionalValue, 0, len(fields)),
+		columnCache: make(map[string]int),
+	}
+
 	for _, aField := range fields {
 		if _, idx := r.GetColumn(aField.Name); idx >= 0 {
-			matchCount++
+			filteredRow.Columns = append(filteredRow.Columns, r.Columns[idx])
+			filteredRow.columnCache[aField.Name] = len(filteredRow.Columns) - 1
+			filteredRow.Values = append(filteredRow.Values, r.Values[idx])
 		}
 	}
 
-	filteredRow := Row{
-		Key:     r.Key,
-		Columns: make([]Column, 0, matchCount),
-		Values:  make([]OptionalValue, 0, matchCount),
-	}
-	for _, aField := range fields {
-		aColumn, idx := r.GetColumn(aField.Name)
-		if idx < 0 {
-			continue
-		}
-		filteredRow.Columns = append(filteredRow.Columns, aColumn)
-		filteredRow.Values = append(filteredRow.Values, r.Values[idx])
-	}
 	return filteredRow
 }
 
 func (r Row) GetColumn(name string) (Column, int) {
-	for i, aColumn := range r.Columns {
-		if aColumn.Name == name {
-			return aColumn, i
-		}
+	if idx, ok := r.columnCache[name]; ok {
+		return r.Columns[idx], idx
 	}
 	return Column{}, -1
 }
 
 func (r Row) GetValue(name string) (OptionalValue, bool) {
-	var (
-		found     bool
-		columnIdx = 0
-	)
-	for i, aColumn := range r.Columns {
-		if aColumn.Name == name {
-			found = true
-			columnIdx = i
-			break
-		}
-	}
-	if !found || columnIdx >= len(r.Values) {
+	idx, ok := r.columnCache[name]
+	if !ok || idx >= len(r.Values) {
 		return OptionalValue{}, false
 	}
-	return r.Values[columnIdx], true
+	return r.Values[idx], true
 }
 
 // SetValue returns true if value has changed
 func (r Row) SetValue(name string, value OptionalValue) (Row, bool) {
-	var (
-		found     bool
-		columnIdx = 0
-	)
-	for i, aColumn := range r.Columns {
-		if aColumn.Name == name {
-			found = true
-			columnIdx = i
-			break
-		}
-	}
-	if !found {
+	columnIdx, ok := r.columnCache[name]
+	if !ok {
 		return r, false
 	}
 	if !compareValue(r.Columns[columnIdx].Kind, r.Values[columnIdx], value) {
@@ -168,14 +161,11 @@ func compareValue(kind ColumnKind, v1, v2 OptionalValue) bool {
 }
 
 func (r Row) Clone() Row {
-	aClone := Row{
-		Columns: make([]Column, len(r.Columns)),
-		Values:  make([]OptionalValue, len(r.Values)),
-		Key:     r.Key,
-	}
-	copy(aClone.Columns, r.Columns)
-	copy(aClone.Values, r.Values)
-	return aClone
+	aCopy := NewRow(r.Columns)
+	aCopy.Key = r.Key
+	aCopy.Values = make([]OptionalValue, len(r.Values))
+	copy(aCopy.Values, r.Values)
+	return aCopy
 }
 
 func (r Row) AppendValues(fields []Field, values []OptionalValue) Row {
@@ -289,6 +279,14 @@ func (r Row) Marshal() ([]byte, error) {
 // use column index to access row values so we need to make sure indexes align.
 func (r Row) Unmarshal(aCell Cell, selectedFields ...Field) (Row, error) {
 	r.Key = aCell.Key
+
+	// Initialize column cache if not already present
+	if r.columnCache == nil {
+		r.columnCache = make(map[string]int, len(r.Columns))
+		for i, aColumn := range r.Columns {
+			r.columnCache[aColumn.Name] = i
+		}
+	}
 
 	if len(selectedFields) == 0 {
 		r.Values = make([]OptionalValue, len(r.Columns))
