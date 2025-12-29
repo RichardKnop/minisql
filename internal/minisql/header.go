@@ -14,7 +14,7 @@ func (h *Header) Size() uint64 {
 	return 1 + 1 + 4
 }
 
-func (h *Header) Marshal(buf []byte) ([]byte, error) {
+func (h *Header) Marshal(buf []byte) {
 	i := uint64(0)
 	if h.IsInternal {
 		buf[i] = PageTypeInternal
@@ -35,8 +35,6 @@ func (h *Header) Marshal(buf []byte) ([]byte, error) {
 	buf[i+2] = byte(h.Parent >> 16)
 	buf[i+3] = byte(h.Parent >> 24)
 	i += 4
-
-	return buf[:i], nil
 }
 
 func (h *Header) Unmarshal(buf []byte) (uint64, error) {

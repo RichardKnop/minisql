@@ -30,7 +30,7 @@ func (h *OverflowPage) Size() uint64 {
 	return h.Header.Size() + uint64(len(h.Data))
 }
 
-func (n *OverflowPage) Marshal(buf []byte) ([]byte, error) {
+func (n *OverflowPage) Marshal(buf []byte) error {
 	i := uint64(0)
 
 	buf[i] = PageTypeOverflow
@@ -45,7 +45,7 @@ func (n *OverflowPage) Marshal(buf []byte) ([]byte, error) {
 	copy(buf[i:], n.Data)
 	i += uint64(len(n.Data))
 
-	return buf[:i], nil
+	return nil
 }
 
 func (n *OverflowPage) Unmarshal(buf []byte) error {

@@ -10,14 +10,15 @@ type FreePage struct {
 	// Rest of page is unused
 }
 
-func (n *FreePage) Marshal(buf []byte) ([]byte, error) {
+func (n *FreePage) Marshal(buf []byte) error {
 	i := uint64(0)
 
 	buf[i] = PageTypeFree
 	i += 1
 
 	marshalUint32(buf, uint32(n.NextFreePage), i)
-	return buf, nil
+
+	return nil
 }
 
 func (n *FreePage) Unmarshal(buf []byte) error {

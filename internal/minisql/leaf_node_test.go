@@ -40,11 +40,11 @@ func TestLeafNode_Marshal(t *testing.T) {
 	})
 
 	buf := make([]byte, aNode.Size())
-	data, err := aNode.Marshal(buf)
+	err := aNode.Marshal(buf)
 	require.NoError(t, err)
 
 	recreatedNode := NewLeafNode()
-	_, err = recreatedNode.Unmarshal(columns, data)
+	_, err = recreatedNode.Unmarshal(columns, buf)
 	require.NoError(t, err)
 
 	assert.Equal(t, aNode, recreatedNode)

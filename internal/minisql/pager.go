@@ -241,13 +241,12 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 		buf[j] = 0
 	}
 
-	_, err := marshalPage(aPage, buf)
-	if err != nil {
+	if err := marshalPage(aPage, buf); err != nil {
 		return fmt.Errorf("error flushing page %d: %w", aPage.Index, err)
 	}
 
 	if pageIdx != 0 {
-		_, err = p.file.WriteAt(buf, int64(pageIdx)*int64(p.pageSize))
+		_, err := p.file.WriteAt(buf, int64(pageIdx)*int64(p.pageSize))
 		return err
 	}
 
@@ -314,8 +313,7 @@ func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) err
 			buf[j] = 0
 		}
 
-		_, err := marshalPage(aPage, buf)
-		if err != nil {
+		if err := marshalPage(aPage, buf); err != nil {
 			p.bufferPool.Put(buf)
 			return fmt.Errorf("error marshaling page %d: %w", pageIdx, err)
 		}
@@ -370,43 +368,37 @@ func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) err
 	return p.file.Sync()
 }
 
-func marshalPage(aPage *Page, buf []byte) ([]byte, error) {
+func marshalPage(aPage *Page, buf []byte) error {
 	if aPage.OverflowPage != nil {
-		data, err := aPage.OverflowPage.Marshal(buf)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling overflow node: %w", err)
+		if err := aPage.OverflowPage.Marshal(buf); err != nil {
+			return fmt.Errorf("error marshaling overflow node: %w", err)
 		}
-		return data, nil
+		return nil
 	} else if aPage.FreePage != nil {
-		data, err := aPage.FreePage.Marshal(buf)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling freepage node: %w", err)
+		if err := aPage.FreePage.Marshal(buf); err != nil {
+			return fmt.Errorf("error marshaling freepage node: %w", err)
 		}
-		return data, nil
+		return nil
 	} else if aPage.LeafNode != nil {
-		data, err := aPage.LeafNode.Marshal(buf)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling leaf node: %w", err)
+		if err := aPage.LeafNode.Marshal(buf); err != nil {
+			return fmt.Errorf("error marshaling leaf node: %w", err)
 		}
-		return data, nil
+		return nil
 	} else if aPage.InternalNode != nil {
-		data, err := aPage.InternalNode.Marshal(buf)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling internal node: %w", err)
+		if err := aPage.InternalNode.Marshal(buf); err != nil {
+			return fmt.Errorf("error marshaling internal node: %w", err)
 		}
-		return data, nil
+		return nil
 	} else if aPage.IndexNode != nil {
-		data, err := marshalIndexNode(aPage.IndexNode, buf)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling index node: %w", err)
+		if err := marshalIndexNode(aPage.IndexNode, buf); err != nil {
+			return fmt.Errorf("error marshaling index node: %w", err)
 		}
-		return data, nil
+		return nil
 	} else if aPage.IndexOverflowNode != nil {
-		data, err := aPage.IndexOverflowNode.Marshal(buf)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling index overflow node: %w", err)
+		if err := aPage.IndexOverflowNode.Marshal(buf); err != nil {
+			return fmt.Errorf("error marshaling index overflow node: %w", err)
 		}
-		return data, nil
+		return nil
 	}
-	return nil, fmt.Errorf("no known node type found")
+	return fmt.Errorf("no known node type found")
 }

@@ -29,7 +29,7 @@ func (h *IndexOverflowPage) Size() uint64 {
 	return h.Header.Size() + uint64(h.Header.ItemCount)*8
 }
 
-func (n *IndexOverflowPage) Marshal(buf []byte) ([]byte, error) {
+func (n *IndexOverflowPage) Marshal(buf []byte) error {
 	i := uint64(0)
 
 	buf[i] = PageTypeIndexOverflow
@@ -46,7 +46,7 @@ func (n *IndexOverflowPage) Marshal(buf []byte) ([]byte, error) {
 		i += 8
 	}
 
-	return buf[:i], nil
+	return nil
 }
 
 func (n *IndexOverflowPage) Unmarshal(buf []byte) error {

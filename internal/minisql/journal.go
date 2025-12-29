@@ -77,8 +77,7 @@ func (j *RollbackJournal) WriteDBHeaderBefore(ctx context.Context, originalHeade
 func (j *RollbackJournal) WritePageBefore(ctx context.Context, pageIdx PageIndex, originalPage *Page) error {
 	// Marshal the original page
 	buf := make([]byte, j.pageSize)
-	_, err := marshalPage(originalPage, buf)
-	if err != nil {
+	if err := marshalPage(originalPage, buf); err != nil {
 		return fmt.Errorf("marshal page: %w", err)
 	}
 

@@ -56,11 +56,11 @@ func TestOverflowPage_Marshal(t *testing.T) {
 		}
 
 		buf := make([]byte, PageSize)
-		data, err := aNode.Marshal(buf)
+		err := aNode.Marshal(buf)
 		require.NoError(t, err)
 
 		recreatedNode := new(OverflowPage)
-		err = recreatedNode.Unmarshal(data)
+		err = recreatedNode.Unmarshal(buf)
 		require.NoError(t, err)
 
 		assert.Equal(t, aNode, recreatedNode)
@@ -76,11 +76,11 @@ func TestOverflowPage_Marshal(t *testing.T) {
 		}
 
 		buf := make([]byte, PageSize)
-		data, err := aNode.Marshal(buf)
+		err := aNode.Marshal(buf)
 		require.NoError(t, err)
 
 		recreatedNode := new(OverflowPage)
-		err = recreatedNode.Unmarshal(data)
+		err = recreatedNode.Unmarshal(buf)
 		require.NoError(t, err)
 
 		assert.Equal(t, aNode, recreatedNode)
