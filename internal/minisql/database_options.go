@@ -17,7 +17,7 @@ const defaultMaxCachedStatements = 1000
 func WithMaxCachedStatements(maxStatements int) DatabaseOption {
 	return func(d *Database) {
 		if maxStatements > 0 {
-			d.stmtCache = lrucache.New(maxStatements)
+			d.stmtCache = lrucache.New[string](maxStatements)
 		}
 	}
 }

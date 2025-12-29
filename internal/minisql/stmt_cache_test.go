@@ -17,7 +17,7 @@ func TestDatabase_PrepareStatementCaching(t *testing.T) {
 		mockParser = new(MockParser)
 		db         = &Database{
 			parser:    mockParser,
-			stmtCache: lrucache.New(100),
+			stmtCache: lrucache.New[string](100),
 		}
 	)
 

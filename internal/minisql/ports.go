@@ -8,9 +8,10 @@ type Parser interface {
 	Parse(context.Context, string) ([]Statement, error)
 }
 
-type LRUCache interface {
-	Get(key string) (any, bool)
-	Put(key string, value any)
+type LRUCache[T any] interface {
+	Get(T) (any, bool)
+	Put(T, any, bool)
+	EvictIfNeeded() (T, bool)
 }
 
 type PagerFactory interface {

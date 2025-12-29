@@ -16,7 +16,7 @@ type mockValue struct {
 func TestLRUCache_HitAndMiss(t *testing.T) {
 	t.Parallel()
 
-	cache := New(10)
+	cache := New[string](10)
 
 	// Cache miss
 	value, ok := cache.Get("bogus")
@@ -25,7 +25,7 @@ func TestLRUCache_HitAndMiss(t *testing.T) {
 
 	// Add to cache
 	mockValue := mockValue{"foo"}
-	cache.Put("foo key", mockValue)
+	cache.Put("foo key", mockValue, true)
 
 	// Cache hit
 	value, ok = cache.Get("foo key")
@@ -42,12 +42,12 @@ func TestLRUCache_HitAndMiss(t *testing.T) {
 func TestLRUCache_LRUEviction(t *testing.T) {
 	t.Parallel()
 
-	cache := New(3) // Small cache for testing
+	cache := New[string](3) // Small cache for testing
 
 	// Add 3 items
-	cache.Put("foo key", mockValue{"foo"})
-	cache.Put("bar key", mockValue{"bar"})
-	cache.Put("baz key", mockValue{"baz"})
+	cache.Put("foo key", mockValue{"foo"}, true)
+	cache.Put("bar key", mockValue{"bar"}, true)
+	cache.Put("baz key", mockValue{"baz"}, true)
 
 	// All 3 should be in cache
 	_, ok := cache.Get("foo key")
@@ -58,7 +58,7 @@ func TestLRUCache_LRUEviction(t *testing.T) {
 	assert.True(t, ok)
 
 	// Add a 4th item, should evict the least recently used (foo key)
-	cache.Put("qux key", mockValue{"qux"})
+	cache.Put("qux key", mockValue{"qux"}, true)
 
 	// foo key should be evicted
 	_, ok = cache.Get("foo key")
@@ -80,19 +80,19 @@ func TestLRUCache_LRUEviction(t *testing.T) {
 func TestLRUCache_LRUOrdering(t *testing.T) {
 	t.Parallel()
 
-	cache := New(3)
+	cache := New[string](3)
 
 	// Add 3 items (LRU order: foo -> bar -> baz)
-	cache.Put("foo key", mockValue{"foo"})
-	cache.Put("bar key", mockValue{"bar"})
-	cache.Put("baz key", mockValue{"baz"})
+	cache.Put("foo key", mockValue{"foo"}, true)
+	cache.Put("bar key", mockValue{"bar"}, true)
+	cache.Put("baz key", mockValue{"baz"}, true)
 
 	// Access foo key, making it most recently used (LRU order: bar -> baz -> foo)
 	_, ok := cache.Get("foo key")
 	assert.True(t, ok)
 
 	// Add qux key, should evict bar key (now the LRU)
-	cache.Put("qux key", mockValue{"qux"})
+	cache.Put("qux key", mockValue{"qux"}, true)
 
 	// bar key should be evicted
 	_, ok = cache.Get("bar key")
@@ -114,7 +114,7 @@ func TestLRUCache_Concurrent(t *testing.T) {
 	t.Parallel()
 
 	var (
-		cache = New(100)
+		cache = New[string](100)
 		wg    sync.WaitGroup
 	)
 
@@ -124,7 +124,7 @@ func TestLRUCache_Concurrent(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			key := fmt.Sprintf("foo%d", n)
-			cache.Put(key, mockValue{fmt.Sprintf("value%d", n)})
+			cache.Put(key, mockValue{fmt.Sprintf("value%d", n)}, true)
 		}(i)
 	}
 

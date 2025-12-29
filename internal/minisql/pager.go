@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"sync"
+
+	"github.com/RichardKnop/minisql/pkg/lrucache"
 )
 
 const PageCacheSize = 2000 // default maximum number of pages to keep in memory
@@ -30,8 +32,10 @@ type pagerImpl struct {
 	// Memory overhead: ~8 bytes per total page (e.g., 76MB for 10M pages)
 	pages []*Page
 
+	lruCache LRUCache[PageIndex]
+
 	// LRU tracking: most recently used at the end
-	lruList []PageIndex
+	// lruList []PageIndex
 
 	file     DBFile
 	fileSize int64
@@ -53,7 +57,8 @@ func NewPager(file DBFile, pageSize int, maxCachedPages int) (*pagerImpl, error)
 		maxCachedPages: maxCachedPages,
 		file:           file,
 		pages:          make([]*Page, 0, maxCachedPages),
-		lruList:        make([]PageIndex, 0, maxCachedPages),
+		// lruList:        make([]PageIndex, 0, maxCachedPages),
+		lruCache: lrucache.New[PageIndex](maxCachedPages),
 		bufferPool: &sync.Pool{
 			New: func() any {
 				return make([]byte, pageSize)
@@ -115,7 +120,7 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 		page := p.pages[pageIdx]
 		p.mu.RUnlock()
 		// Update LRU tracking
-		p.trackPageAccess(pageIdx)
+		p.lruCache.Put(pageIdx, struct{}{}, false)
 		return page, nil
 	}
 	totalPages := p.totalPages
@@ -131,12 +136,15 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 
 	// Double-check page doesn't exist (in case another goroutine created it)
 	if len(p.pages) > int(pageIdx) && p.pages[pageIdx] != nil {
-		p.updateLRU(pageIdx)
+		p.lruCache.Put(pageIdx, struct{}{}, false)
 		return p.pages[pageIdx], nil
 	}
 
 	// Evict pages if cache is full BEFORE loading new page
-	p.evictIfNeeded()
+	evickedIdx, evicted := p.lruCache.EvictIfNeeded()
+	if evicted {
+		p.pages[evickedIdx] = nil
+	}
 
 	// Don't use buffer pool here - the unmarshaled page may hold references to the buffer
 	buf := make([]byte, p.pageSize)
@@ -174,7 +182,7 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 	}
 
 	// Track this page access
-	p.updateLRU(pageIdx)
+	p.lruCache.Put(pageIdx, struct{}{}, false)
 
 	return p.pages[pageIdx], nil
 }
@@ -392,67 +400,4 @@ func marshalPage(aPage *Page, buf []byte) ([]byte, error) {
 		return data, nil
 	}
 	return nil, fmt.Errorf("no known node type found")
-}
-
-// updateLRU updates the LRU list for the given page (must be called with lock held)
-func (p *pagerImpl) updateLRU(pageIdx PageIndex) {
-	// Remove pageIdx from current position in LRU list
-	for i, idx := range p.lruList {
-		if idx == pageIdx {
-			p.lruList = append(p.lruList[:i], p.lruList[i+1:]...)
-			break
-		}
-	}
-	// Add to end (most recently used)
-	p.lruList = append(p.lruList, pageIdx)
-}
-
-// trackPageAccess updates LRU tracking (thread-safe version for fast path)
-func (p *pagerImpl) trackPageAccess(pageIdx PageIndex) {
-	p.mu.Lock()
-	p.updateLRU(pageIdx)
-	p.mu.Unlock()
-}
-
-// evictIfNeeded evicts pages if cache is full (must be called with lock held)
-func (p *pagerImpl) evictIfNeeded() {
-	// Count actual cached pages (non-nil entries)
-	cachedCount := 0
-	for _, page := range p.pages {
-		if page != nil {
-			cachedCount += 1
-		}
-	}
-
-	if cachedCount < p.maxCachedPages {
-		return
-	}
-
-	// Find candidate pages to evict from least recently used
-	for _, pageIdx := range p.lruList {
-		// Never evict page 0 (root/header page)
-		if pageIdx == 0 {
-			continue
-		}
-
-		// Only evict if page exists in cache
-		if int(pageIdx) < len(p.pages) && p.pages[pageIdx] != nil {
-			// Evict this page by setting to nil (preserves sparse array structure)
-			// This maintains the invariant: p.pages[i] is always page i (or nil)
-			p.pages[pageIdx] = nil
-			cachedCount -= 1
-
-			// Remove from LRU list
-			for i, idx := range p.lruList {
-				if idx == pageIdx {
-					p.lruList = append(p.lruList[:i], p.lruList[i+1:]...)
-					break
-				}
-			}
-
-			if cachedCount < p.maxCachedPages {
-				return
-			}
-		}
-	}
 }

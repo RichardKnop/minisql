@@ -4,29 +4,29 @@ import (
 	"sync"
 )
 
-type cacheEntry struct {
+type cacheEntry[T comparable] struct {
 	value any
-	prev  *cacheEntry
-	next  *cacheEntry
-	key   string
+	prev  *cacheEntry[T]
+	next  *cacheEntry[T]
+	key   T
 }
 
-type cacheImpl struct {
-	entries map[string]*cacheEntry
-	head    *cacheEntry
-	tail    *cacheEntry
+type cacheImpl[T comparable] struct {
+	entries map[T]*cacheEntry[T]
+	head    *cacheEntry[T]
+	tail    *cacheEntry[T]
 	maxSize int
 	mu      sync.RWMutex
 }
 
-func New(maxSize int) *cacheImpl {
-	return &cacheImpl{
-		entries: make(map[string]*cacheEntry),
+func New[T comparable](maxSize int) *cacheImpl[T] {
+	return &cacheImpl[T]{
+		entries: make(map[T]*cacheEntry[T]),
 		maxSize: maxSize,
 	}
 }
 
-func (c *cacheImpl) Get(key string) (any, bool) {
+func (c *cacheImpl[T]) Get(key T) (any, bool) {
 	c.mu.RLock()
 	entry, ok := c.entries[key]
 	c.mu.RUnlock()
@@ -43,7 +43,7 @@ func (c *cacheImpl) Get(key string) (any, bool) {
 	return entry.value, true
 }
 
-func (c *cacheImpl) Put(key string, value any) {
+func (c *cacheImpl[T]) Put(key T, value any, evict bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -55,7 +55,7 @@ func (c *cacheImpl) Put(key string, value any) {
 	}
 
 	// Create new entry
-	entry := &cacheEntry{
+	entry := &cacheEntry[T]{
 		value: value,
 		key:   key,
 	}
@@ -64,13 +64,38 @@ func (c *cacheImpl) Put(key string, value any) {
 	c.entries[key] = entry
 	c.addToFront(entry)
 
-	// Evict if over capacity
-	if len(c.entries) > c.maxSize {
-		c.evictLRU()
+	if evict {
+		// Evict if over capacity
+		c.EvictIfNeeded()
 	}
 }
 
-func (c *cacheImpl) moveToFront(entry *cacheEntry) {
+func (c *cacheImpl[T]) EvictIfNeeded() (T, bool) {
+	if len(c.entries) <= c.maxSize {
+		var zero T
+		return zero, false
+	}
+
+	if c.tail == nil {
+		var zero T
+		return zero, false
+	}
+
+	oldTail := c.tail
+	c.tail = oldTail.prev
+
+	if c.tail != nil {
+		c.tail.next = nil
+	} else {
+		c.head = nil
+	}
+
+	delete(c.entries, oldTail.key)
+
+	return oldTail.key, true
+}
+
+func (c *cacheImpl[T]) moveToFront(entry *cacheEntry[T]) {
 	if entry == c.head {
 		return
 	}
@@ -90,7 +115,7 @@ func (c *cacheImpl) moveToFront(entry *cacheEntry) {
 	c.addToFront(entry)
 }
 
-func (c *cacheImpl) addToFront(entry *cacheEntry) {
+func (c *cacheImpl[T]) addToFront(entry *cacheEntry[T]) {
 	entry.next = c.head
 	entry.prev = nil
 
@@ -102,21 +127,4 @@ func (c *cacheImpl) addToFront(entry *cacheEntry) {
 	if c.tail == nil {
 		c.tail = entry
 	}
-}
-
-func (c *cacheImpl) evictLRU() {
-	if c.tail == nil {
-		return
-	}
-
-	oldTail := c.tail
-	c.tail = oldTail.prev
-
-	if c.tail != nil {
-		c.tail.next = nil
-	} else {
-		c.head = nil
-	}
-
-	delete(c.entries, oldTail.key)
 }

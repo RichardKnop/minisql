@@ -26,7 +26,7 @@ type Database struct {
 	txManager  *TransactionManager
 	tables     map[string]*Table
 	dbLock     *sync.RWMutex
-	stmtCache  LRUCache
+	stmtCache  LRUCache[string]
 	clock      clock
 	logger     *zap.Logger
 }
@@ -42,7 +42,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aPa
 		saver:      saver,
 		tables:     make(map[string]*Table),
 		dbLock:     new(sync.RWMutex),
-		stmtCache:  lrucache.New(defaultMaxCachedStatements),
+		stmtCache:  lrucache.New[string](defaultMaxCachedStatements),
 		logger:     logger,
 		clock: func() Time {
 			now := time.Now()
@@ -99,7 +99,7 @@ func (d *Database) PrepareStatement(ctx context.Context, query string) (Statemen
 	stmt := statements[0]
 
 	// Cache the parsed statement
-	d.stmtCache.Put(query, stmt)
+	d.stmtCache.Put(query, stmt, true)
 
 	return stmt, nil
 }
