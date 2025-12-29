@@ -642,13 +642,10 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 func TestRow_GetValue(t *testing.T) {
 	t.Parallel()
 
-	aRow := Row{
-		Columns: testColumns,
-		Values: []OptionalValue{
-			{Value: int64(125478), Valid: true},
-			{Value: "test@example.com", Valid: true},
-		},
-	}
+	aRow := NewRowWithValues(testColumns, []OptionalValue{
+		{Value: int64(125478), Valid: true},
+		{Value: "test@example.com", Valid: true},
+	})
 
 	t.Run("found", func(t *testing.T) {
 		value, found := aRow.GetValue("email")
@@ -666,13 +663,10 @@ func TestRow_GetValue(t *testing.T) {
 func TestRow_SetValue(t *testing.T) {
 	t.Parallel()
 
-	aRow := Row{
-		Columns: testColumns,
-		Values: []OptionalValue{
-			{Value: int64(125478), Valid: true},
-			{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
-		},
-	}
+	aRow := NewRowWithValues(testColumns, []OptionalValue{
+		{Value: int64(125478), Valid: true},
+		{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
+	})
 
 	t.Run("changed", func(t *testing.T) {
 		_, changed := aRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("new@example.com")), Valid: true})

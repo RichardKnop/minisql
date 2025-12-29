@@ -69,10 +69,8 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			}
 		}
 
-		aRow := Row{
-			Columns: t.Columns,
-			Values:  make([]OptionalValue, 0, len(t.Columns)),
-		}
+		aRow := NewRow(t.Columns)
+		aRow.Values = make([]OptionalValue, 0, len(t.Columns))
 		aRow = aRow.AppendValues(stmt.Fields, values)
 
 		aPage, err := t.pager.ModifyPage(ctx, aCursor.PageIdx)
