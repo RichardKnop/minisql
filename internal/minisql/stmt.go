@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -244,9 +245,42 @@ func (s Statement) NumPlaceholders() int {
 	return count
 }
 
+func (s Statement) Clone() Statement {
+	stmt := Statement{
+		Kind:        s.Kind,
+		IfNotExists: s.IfNotExists,
+		TableName:   s.TableName,
+		IndexName:   s.IndexName,
+		Columns:     s.Columns,
+		Fields:      s.Fields,
+		Aliases:     s.Aliases,
+		Inserts:     make([][]OptionalValue, len(s.Inserts)),
+		Updates:     make(map[string]OptionalValue, len(s.Updates)),
+		Functions:   s.Functions,
+		Conditions:  make(OneOrMore, len(s.Conditions)),
+		OrderBy:     s.OrderBy,
+		Limit:       s.Limit,
+		Offset:      s.Offset,
+	}
+	for i := range s.Inserts {
+		stmt.Inserts[i] = make([]OptionalValue, len(s.Inserts[i]))
+		copy(stmt.Inserts[i], s.Inserts[i])
+	}
+	maps.Copy(stmt.Updates, s.Updates)
+	for i := range s.Conditions {
+		stmt.Conditions[i] = make([]Condition, len(s.Conditions[i]))
+		copy(stmt.Conditions[i], s.Conditions[i])
+	}
+	return stmt
+}
+
 func (s Statement) BindArguments(args ...any) (Statement, error) {
+	// Clone statement so we can keep using the preparement statement
+	// with different arguments without modifying it
+	stmt := s.Clone()
+
 	if s.Kind == Insert {
-		for i, anInsert := range s.Inserts {
+		for i, anInsert := range stmt.Inserts {
 			for j, aValue := range anInsert {
 				if _, ok := aValue.Value.(Placeholder); !ok {
 					continue
@@ -255,9 +289,9 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 					return Statement{}, fmt.Errorf("not enough arguments to bind placeholders")
 				}
 				if args[0] == nil {
-					s.Inserts[i][j] = OptionalValue{}
+					stmt.Inserts[i][j] = OptionalValue{}
 				} else {
-					s.Inserts[i][j].Value = args[0]
+					stmt.Inserts[i][j].Value = args[0]
 				}
 				args = args[1:]
 			}
@@ -265,8 +299,8 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 	}
 
 	if s.Kind == Update {
-		for _, aField := range s.Fields {
-			aValue, ok := s.Updates[aField.Name]
+		for _, aField := range stmt.Fields {
+			aValue, ok := stmt.Updates[aField.Name]
 			if !ok {
 				continue
 			}
@@ -277,15 +311,15 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 				return Statement{}, fmt.Errorf("not enough arguments to bind placeholders")
 			}
 			if args[0] == nil {
-				s.Updates[aField.Name] = OptionalValue{}
+				stmt.Updates[aField.Name] = OptionalValue{}
 			} else {
-				s.Updates[aField.Name] = OptionalValue{Value: args[0], Valid: true}
+				stmt.Updates[aField.Name] = OptionalValue{Value: args[0], Valid: true}
 			}
 			args = args[1:]
 		}
 	}
 
-	for i, aConditionGroup := range s.Conditions {
+	for i, aConditionGroup := range stmt.Conditions {
 		for j, aCondition := range aConditionGroup {
 			if aCondition.Operand2.Type == OperandPlaceholder {
 				if len(args) == 0 {
@@ -293,7 +327,7 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 				}
 				aCondition.Operand2.Type = operandTypeFromAny(args[0])
 				aCondition.Operand2.Value = args[0]
-				s.Conditions[i][j] = aCondition
+				stmt.Conditions[i][j] = aCondition
 				args = args[1:]
 				continue
 			}
@@ -306,12 +340,12 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 					aCondition.Operand2.Value.([]any)[i] = args[0]
 					args = args[1:]
 				}
-				s.Conditions[i][j] = aCondition
+				stmt.Conditions[i][j] = aCondition
 			}
 		}
 	}
 
-	return s, nil
+	return stmt, nil
 }
 
 func operandTypeFromAny(value any) OperandType {

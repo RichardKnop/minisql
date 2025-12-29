@@ -169,11 +169,11 @@ func (r Row) Clone() Row {
 }
 
 func (r Row) AppendValues(fields []Field, values []OptionalValue) Row {
-	var (
-		found    = false
-		fieldIdx = 0
-	)
 	for _, aColumn := range r.Columns {
+		var (
+			found    = false
+			fieldIdx = 0
+		)
 		for i, aField := range fields {
 			if aField.Name == aColumn.Name {
 				found = true
