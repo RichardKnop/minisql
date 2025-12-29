@@ -4,9 +4,7 @@ import (
 	"sync"
 )
 
-const (
-	DefaultMaxCachedStatements = 1000
-)
+const defaultMaxCachedStatements = 1000
 
 type statementCacheEntry struct {
 	stmt Statement

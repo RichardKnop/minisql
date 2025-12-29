@@ -36,24 +36,6 @@ type Database struct {
 
 type clock func() Time
 
-var ErrRecoveredFromJournal = fmt.Errorf("database recovered from journal on startup")
-
-type DatabaseOption func(*Database)
-
-func WithJournal(enabled bool) DatabaseOption {
-	return func(d *Database) {
-		d.txManager.journalEnabled = enabled
-	}
-}
-
-func WithMaxCachedStatements(maxStatements int) DatabaseOption {
-	return func(d *Database) {
-		if maxStatements > 0 {
-			d.stmtCache = newStatementCache(maxStatements)
-		}
-	}
-}
-
 // NewDatabase creates a new database
 func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aParser Parser, aFactory PagerFactory, saver PageSaver, opts ...DatabaseOption) (*Database, error) {
 	db := &Database{
@@ -63,7 +45,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aPa
 		saver:      saver,
 		tables:     make(map[string]*Table),
 		dbLock:     new(sync.RWMutex),
-		stmtCache:  newStatementCache(DefaultMaxCachedStatements),
+		stmtCache:  newStatementCache(defaultMaxCachedStatements),
 		logger:     logger,
 		clock: func() Time {
 			now := time.Now()
