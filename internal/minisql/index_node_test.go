@@ -32,11 +32,11 @@ func TestIndexNode_Int8_Marshal(t *testing.T) {
 	aNode.Cells[1].Child = 8
 
 	buf := make([]byte, aNode.Size())
-	data, err := aNode.Marshal(buf)
+	err := aNode.Marshal(buf)
 	require.NoError(t, err)
 
 	recreatedNode := NewIndexNode[int64](true)
-	_, err = recreatedNode.Unmarshal(data)
+	_, err = recreatedNode.Unmarshal(buf)
 	require.NoError(t, err)
 
 	assert.Equal(t, aNode, recreatedNode)
@@ -71,11 +71,11 @@ func TestIndexNode_Varchar_Marshal(t *testing.T) {
 	aNode.Cells[1].Child = 8
 
 	buf := make([]byte, aNode.Size())
-	data, err := aNode.Marshal(buf)
+	err := aNode.Marshal(buf)
 	require.NoError(t, err)
 
 	recreatedNode := NewIndexNode[string](true)
-	_, err = recreatedNode.Unmarshal(data)
+	_, err = recreatedNode.Unmarshal(buf)
 	require.NoError(t, err)
 
 	assert.Equal(t, aNode, recreatedNode)

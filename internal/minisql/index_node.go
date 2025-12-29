@@ -21,7 +21,7 @@ func indexHeaderSize() uint64 {
 	return 1 + 1 + 1 + 4 + 4 + 4
 }
 
-func (h *IndexNodeHeader) Marshal(buf []byte) ([]byte, error) {
+func (h *IndexNodeHeader) Marshal(buf []byte) {
 	i := uint64(0)
 	buf[0] = PageTypeIndex
 	i += 1
@@ -40,8 +40,6 @@ func (h *IndexNodeHeader) Marshal(buf []byte) ([]byte, error) {
 
 	marshalUint32(buf, uint32(h.RightChild), i)
 	i += 4
-
-	return buf[:i], nil
 }
 
 func (h *IndexNodeHeader) Unmarshal(buf []byte) (uint64, error) {
@@ -110,7 +108,7 @@ func keySize[T IndexKey](key T) uint64 {
 	return 0
 }
 
-func (c *IndexCell[T]) Marshal(buf []byte) ([]byte, error) {
+func (c *IndexCell[T]) Marshal(buf []byte) {
 	i := uint64(0)
 
 	// Marshal the key based on its type
@@ -136,8 +134,6 @@ func (c *IndexCell[T]) Marshal(buf []byte) ([]byte, error) {
 		i += varcharLengthPrefixSize
 		copy(buf[i:i+uint64(len([]byte(v)))], []byte(v))
 		i += uint64(len([]byte(v)))
-	default:
-		return nil, fmt.Errorf("unsupported key type: %T", v)
 	}
 
 	if c.unique {
@@ -162,8 +158,6 @@ func (c *IndexCell[T]) Marshal(buf []byte) ([]byte, error) {
 
 	marshalUint32(buf, uint32(c.Child), i)
 	i += 4
-
-	return buf[:i], nil
 }
 
 func (c *IndexCell[T]) Unmarshal(buf []byte) (uint64, error) {
@@ -285,24 +279,18 @@ func (n *IndexNode[T]) Size() uint64 {
 	return size
 }
 
-func (n *IndexNode[T]) Marshal(buf []byte) ([]byte, error) {
+func (n *IndexNode[T]) Marshal(buf []byte) error {
 	i := uint64(0)
 
-	_, err := n.Header.Marshal(buf[i:])
-	if err != nil {
-		return nil, err
-	}
+	n.Header.Marshal(buf[i:])
 	i += n.Header.Size()
 
 	for idx := 0; idx < int(n.Header.Keys); idx++ {
-		cbuf, err := n.Cells[idx].Marshal(buf[i:])
-		if err != nil {
-			return nil, err
-		}
-		i += uint64(len(cbuf))
+		n.Cells[idx].Marshal(buf[i:])
+		i += n.Cells[idx].Size()
 	}
 
-	return buf[:i], nil
+	return nil
 }
 
 func (n *IndexNode[T]) Unmarshal(buf []byte) (uint64, error) {
@@ -476,7 +464,7 @@ func (n *IndexNode[T]) setParent(parentIdx PageIndex) {
 	n.Header.Parent = parentIdx
 }
 
-func marshalIndexNode(anyNode any, buf []byte) ([]byte, error) {
+func marshalIndexNode(anyNode any, buf []byte) error {
 	switch aNode := anyNode.(type) {
 	case *IndexNode[int8]:
 		return aNode.Marshal(buf)
@@ -491,7 +479,7 @@ func marshalIndexNode(anyNode any, buf []byte) ([]byte, error) {
 	case *IndexNode[string]:
 		return aNode.Marshal(buf)
 	default:
-		return nil, fmt.Errorf("unknown index node type: %T", aNode)
+		return fmt.Errorf("unknown index node type: %T", aNode)
 	}
 }
 

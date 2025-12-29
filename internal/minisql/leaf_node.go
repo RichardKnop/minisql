@@ -14,21 +14,16 @@ func (h *LeafNodeHeader) Size() uint64 {
 	return h.Header.Size() + 8
 }
 
-func (h *LeafNodeHeader) Marshal(buf []byte) ([]byte, error) {
+func (h *LeafNodeHeader) Marshal(buf []byte) {
 	i := uint64(0)
 
-	_, err := h.Header.Marshal(buf[i:])
-	if err != nil {
-		return nil, err
-	}
+	h.Header.Marshal(buf[i:])
 	i += h.Header.Size()
 
 	marshalUint32(buf, h.Cells, i)
 	i += 4
 	marshalUint32(buf, uint32(h.NextLeaf), i)
 	i += 4
-
-	return buf[:i], nil
 }
 
 func (h *LeafNodeHeader) Unmarshal(buf []byte) (uint64, error) {
@@ -61,7 +56,7 @@ func (c *Cell) Size() uint64 {
 	return 8 + 8 + uint64(len(c.Value))
 }
 
-func (c *Cell) Marshal(buf []byte) ([]byte, error) {
+func (c *Cell) Marshal(buf []byte) {
 	i := uint64(0)
 
 	marshalUint64(buf, c.NullBitmask, i)
@@ -72,8 +67,6 @@ func (c *Cell) Marshal(buf []byte) ([]byte, error) {
 
 	n := copy(buf[i:], c.Value)
 	i += uint64(n)
-
-	return buf[:i], nil
 }
 
 func (c *Cell) Unmarshal(columns []Column, buf []byte) (uint64, error) {
@@ -198,24 +191,18 @@ func (n *LeafNode) Size() uint64 {
 	return size
 }
 
-func (n *LeafNode) Marshal(buf []byte) ([]byte, error) {
+func (n *LeafNode) Marshal(buf []byte) error {
 	i := uint64(0)
 
-	_, err := n.Header.Marshal(buf[i:])
-	if err != nil {
-		return nil, err
-	}
+	n.Header.Marshal(buf[i:])
 	i += n.Header.Size()
 
 	for idx := range n.Cells[0:n.Header.Cells] {
-		cbuf, err := n.Cells[idx].Marshal(buf[i:])
-		if err != nil {
-			return nil, err
-		}
-		i += uint64(len(cbuf))
+		n.Cells[idx].Marshal(buf[i:])
+		i += uint64(n.Cells[idx].Size())
 	}
 
-	return buf, nil
+	return nil
 }
 
 func (n *LeafNode) Unmarshal(columns []Column, buf []byte) (uint64, error) {
@@ -227,10 +214,13 @@ func (n *LeafNode) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	}
 	i += hi
 
+	if cap(n.Cells) < int(n.Header.Cells) {
+		n.Cells = make([]Cell, n.Header.Cells)
+	} else {
+		n.Cells = n.Cells[:n.Header.Cells] // Reuse capacity
+	}
+
 	for idx := 0; idx < int(n.Header.Cells); idx++ {
-		if len(n.Cells) == idx {
-			n.Cells = append(n.Cells, Cell{})
-		}
 		ci, err := n.Cells[idx].Unmarshal(columns, buf[i:])
 		if err != nil {
 			return 0, err
