@@ -248,7 +248,7 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 		return err
 	}
 
-	return nil
+	return p.file.Sync()
 }
 
 // FlushBatch writes multiple pages to disk in a single operation.
@@ -350,7 +350,7 @@ func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) err
 		}
 	}
 
-	return nil
+	return p.file.Sync()
 }
 
 func marshalPage(aPage *Page, buf []byte) ([]byte, error) {
