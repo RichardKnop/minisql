@@ -100,11 +100,11 @@ func (k ColumnKind) IsText() bool {
 }
 
 type Column struct {
-	Kind            ColumnKind
-	Size            uint32
-	PrimaryKey      bool
-	Autoincrement   bool
-	Unique          bool
+	Kind ColumnKind
+	Size uint32
+	// PrimaryKey      bool
+	// Autoincrement   bool
+	// Unique          bool
 	Nullable        bool
 	DefaultValue    OptionalValue
 	DefaultValueNow bool
@@ -185,11 +185,13 @@ var FunctionNow = Function{Name: nowFunctionName}
 type Placeholder struct{}
 
 type Statement struct {
-	Kind        StatementKind
-	IfNotExists bool
-	TableName   string
-	IndexName   string
-	Columns     []Column // use for CREATE TABLE
+	Kind          StatementKind
+	IfNotExists   bool
+	TableName     string
+	IndexName     string
+	Columns       []Column      // use for CREATE TABLE
+	PrimaryKey    PrimaryKey    // use for CREATE TABLE
+	UniqueIndexes []UniqueIndex // use for CREATE TABLE
 	// Used for SELECT (i.e. SELECTed field names) and INSERT (INSERTEDed field names)
 	// and UPDATE (UPDATEDed field names as Updates map is not ordered)
 	Fields      []Field
@@ -648,28 +650,36 @@ func (s Statement) validateCreateTable() error {
 		return fmt.Errorf("table definition too long, maximum length is %d", maximumSchemaSQL)
 	}
 
-	var (
-		primaryKeyCount  = 0
-		primaryKeyColumn Column
-		nameMap          = map[string]struct{}{}
-		indexMap         = map[string]struct{}{}
-	)
-	for _, aColumn := range s.Columns {
-		if _, exists := nameMap[aColumn.Name]; exists {
-			return fmt.Errorf("duplicate column name %s", aColumn.Name)
-		}
-		nameMap[aColumn.Name] = struct{}{}
+	if len(s.PrimaryKey.Columns) > 1 {
+		return fmt.Errorf("composite primary keys are not supported yet")
+	}
 
-		if aColumn.PrimaryKey {
-			if _, ok := indexMap[aColumn.Name]; ok {
-				return fmt.Errorf("column %s can only have one index", aColumn.Name)
-			}
-			primaryKeyColumn = aColumn
-			primaryKeyCount += 1
-			indexMap[aColumn.Name] = struct{}{}
-		}
+	indexMap := map[string]struct{}{}
 
-		if aColumn.Unique {
+	if len(s.PrimaryKey.Columns) == 1 {
+		if _, ok := indexMap[s.PrimaryKey.Columns[0].Name]; ok {
+			return fmt.Errorf("column %s can only have one index", s.PrimaryKey.Columns[0].Name)
+		}
+		if s.PrimaryKey.Columns[0].Nullable {
+			return fmt.Errorf("primary key column cannot be nullable")
+		}
+		if s.PrimaryKey.Columns[0].Kind == Text {
+			return fmt.Errorf("primary key cannot be of type TEXT")
+		}
+		if s.PrimaryKey.Columns[0].Kind == Varchar && s.PrimaryKey.Columns[0].Size > MaxIndexKeySize {
+			return fmt.Errorf("primary key of type VARCHAR exceeds max index key size %d", MaxIndexKeySize)
+		}
+		if s.PrimaryKey.Autoincrement && s.PrimaryKey.Columns[0].Kind != Int8 && s.PrimaryKey.Columns[0].Kind != Int4 {
+			return fmt.Errorf("autoincrement primary key must be of type INT4 or INT8")
+		}
+		indexMap[s.PrimaryKey.Columns[0].Name] = struct{}{}
+	}
+
+	for _, uniqueIndex := range s.UniqueIndexes {
+		if len(uniqueIndex.Columns) > 1 {
+			return fmt.Errorf("composite unique index keys are not supported yet")
+		}
+		for _, aColumn := range uniqueIndex.Columns {
 			if _, ok := indexMap[aColumn.Name]; ok {
 				return fmt.Errorf("column %s can only have one index", aColumn.Name)
 			}
@@ -681,24 +691,7 @@ func (s Statement) validateCreateTable() error {
 			}
 			indexMap[aColumn.Name] = struct{}{}
 		}
-	}
 
-	if primaryKeyCount > 1 {
-		return fmt.Errorf("only one primary key column is supported")
-	}
-	if primaryKeyCount == 1 {
-		if primaryKeyColumn.Nullable {
-			return fmt.Errorf("primary key column cannot be nullable")
-		}
-		if primaryKeyColumn.Kind == Text {
-			return fmt.Errorf("primary key cannot be of type TEXT")
-		}
-		if primaryKeyColumn.Kind == Varchar && primaryKeyColumn.Size > MaxIndexKeySize {
-			return fmt.Errorf("primary key of type VARCHAR exceeds max index key size %d", MaxIndexKeySize)
-		}
-		if primaryKeyColumn.Autoincrement && primaryKeyColumn.Kind != Int8 && primaryKeyColumn.Kind != Int4 {
-			return fmt.Errorf("autoincrement primary key must be of type INT4 or INT8")
-		}
 	}
 
 	return nil
@@ -771,11 +764,23 @@ func (s Statement) validateInsert(aTable *Table) error {
 		return fmt.Errorf("INSERT cannot have WHERE conditions")
 	}
 
+	var (
+		hasPk    bool
+		pkColumn Column
+	)
+	if aTable.HasPrimaryKey() && len(aTable.PrimaryKey.Columns) == 1 {
+		hasPk = true
+		pkColumn = aTable.PrimaryKey.Columns[0]
+	}
+
 	for _, aColumn := range s.Columns {
 		if aColumn.Nullable {
 			continue
 		}
-		if aColumn.PrimaryKey && aColumn.Autoincrement || aColumn.DefaultValue.Valid {
+		if aColumn.DefaultValue.Valid {
+			continue
+		}
+		if hasPk && aColumn.Name == pkColumn.Name && aTable.PrimaryKey.Autoincrement {
 			continue
 		}
 		if !s.HasField(aColumn.Name) {
@@ -792,7 +797,7 @@ func (s Statement) validateInsert(aTable *Table) error {
 			if len(anInsert) != len(s.Fields) {
 				return fmt.Errorf("insert: expected %d values, got %d", len(s.Fields), len(anInsert))
 			}
-			if err := s.validateColumnValue(aColumn, anInsert[i]); err != nil {
+			if err := s.validateColumnValue(aTable, aColumn, anInsert[i]); err != nil {
 				return err
 			}
 		}
@@ -810,7 +815,7 @@ func (s Statement) validateUpdate(aTable *Table) error {
 		if !ok {
 			return fmt.Errorf("unknown field %q in table %q", aField.Name, aTable.Name)
 		}
-		if err := s.validateColumnValue(aColumn, s.Updates[aField.Name]); err != nil {
+		if err := s.validateColumnValue(aTable, aColumn, s.Updates[aField.Name]); err != nil {
 			return err
 		}
 	}
@@ -873,14 +878,18 @@ func (s Statement) validateSelect(aTable *Table) error {
 	return nil
 }
 
-func (s Statement) validateColumnValue(aColumn Column, aValue OptionalValue) error {
+func (s Statement) validateColumnValue(aTable *Table, aColumn Column, aValue OptionalValue) error {
 	if _, ok := aValue.Value.(Placeholder); ok {
 		return fmt.Errorf("unbound placeholder in value for field %q", aColumn.Name)
 	}
-	if !aValue.Valid && aColumn.PrimaryKey && !aColumn.Autoincrement {
+	var isPkColumn bool
+	if aTable.HasPrimaryKey() && len(aTable.PrimaryKey.Columns) == 1 && aColumn.Name == aTable.PrimaryKey.Columns[0].Name {
+		isPkColumn = true
+	}
+	if !aValue.Valid && isPkColumn && !aTable.PrimaryKey.Autoincrement {
 		return fmt.Errorf("primary key on field %q cannot be NULL", aColumn.Name)
 	}
-	if !aValue.Valid && !aColumn.Nullable && !aColumn.PrimaryKey {
+	if !aValue.Valid && !aColumn.Nullable && !isPkColumn {
 		return fmt.Errorf("field %q cannot be NULL", aColumn.Name)
 	}
 	if err := isValueValidForColumn(aColumn, aValue); err != nil {
@@ -1015,18 +1024,30 @@ func (s Statement) validateWhere() error {
 func (s Statement) CreateTableDDL() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("create table \"%s\" (\n", s.TableName))
+
+	var pkColumn string
+	if len(s.PrimaryKey.Columns) == 1 {
+		pkColumn = s.PrimaryKey.Columns[0].Name
+	}
+	uniqueKeys := map[string]struct{}{}
+	for _, uniqueIndex := range s.UniqueIndexes {
+		if len(uniqueIndex.Columns) == 1 {
+			uniqueKeys[uniqueIndex.Columns[0].Name] = struct{}{}
+		}
+	}
+
 	for i, col := range s.Columns {
 		sb.WriteString(fmt.Sprintf("	%s %s", col.Name, col.Kind))
 		if col.Kind == Varchar {
 			sb.WriteString(fmt.Sprintf("(%d)", col.Size))
 		}
-		if col.PrimaryKey {
+		if col.Name == pkColumn {
 			sb.WriteString(" primary key")
-			if col.Autoincrement {
+			if s.PrimaryKey.Autoincrement {
 				sb.WriteString(" autoincrement")
 			}
 		} else {
-			if col.Unique {
+			if _, ok := uniqueKeys[col.Name]; ok {
 				sb.WriteString(" unique")
 			}
 			if !col.Nullable {
@@ -1057,6 +1078,9 @@ func (s Statement) CreateTableDDL() string {
 			sb.WriteString(",\n")
 		}
 	}
+
+	// TODO : add table-level constraints (composite primary keys, unique keys, foreign keys, etc.)
+
 	sb.WriteString("\n);")
 	return sb.String()
 }

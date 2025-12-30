@@ -11,7 +11,7 @@ type UniqueIndex struct {
 	Index BTreeIndex
 }
 
-func uniqueIndexName(tableName, columnName string) string {
+func UniqueIndexName(tableName, columnName string) string {
 	return fmt.Sprintf(
 		"key__%s__%s",
 		tableName,
@@ -33,7 +33,7 @@ func (t *Table) insertUniqueIndexKey(ctx context.Context, uniqueIndex UniqueInde
 		return fmt.Errorf("table %s has unique index %s but no Btree index instance", t.Name, uniqueIndex.Name)
 	}
 
-	castedKey, err := castKeyValue(uniqueIndex.Column, key.Value)
+	castedKey, err := castKeyValue(uniqueIndex.Columns[0], key.Value)
 	if err != nil {
 		return fmt.Errorf("failed to cast key value for unique index  %s: %w", uniqueIndex.Name, err)
 	}
@@ -55,12 +55,12 @@ func (t *Table) updateUniqueIndexKey(ctx context.Context, uniqueIndex UniqueInde
 		return fmt.Errorf("table %s has unique index %s but no Btree index instance", t.Name, uniqueIndex.Name)
 	}
 
-	castedOldKey, err := castKeyValue(uniqueIndex.Column, oldKey.Value)
+	castedOldKey, err := castKeyValue(uniqueIndex.Columns[0], oldKey.Value)
 	if err != nil {
 		return fmt.Errorf("failed to cast old unique index value for %s: %w", uniqueIndex.Name, err)
 	}
 
-	newKey, ok := aRow.GetValue(uniqueIndex.Column.Name)
+	newKey, ok := aRow.GetValue(uniqueIndex.Columns[0].Name)
 	if !ok {
 		return nil
 	}
@@ -68,7 +68,7 @@ func (t *Table) updateUniqueIndexKey(ctx context.Context, uniqueIndex UniqueInde
 
 	// We only need to insert into the index index if the key is not NULL
 	if newKey.Valid {
-		castedKey, err := castKeyValue(uniqueIndex.Column, newKey.Value)
+		castedKey, err := castKeyValue(uniqueIndex.Columns[0], newKey.Value)
 		if err != nil {
 			return fmt.Errorf("failed to cast unique index key for %s: %w", uniqueIndex.Name, err)
 		}

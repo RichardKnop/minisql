@@ -20,7 +20,7 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
 	}
 
-	castedKey, err := castKeyValue(secondaryIndex.Column, key.Value)
+	castedKey, err := castKeyValue(secondaryIndex.Columns[0], key.Value)
 	if err != nil {
 		return fmt.Errorf("failed to cast key value for secondary index  %s: %w", secondaryIndex.Name, err)
 	}
@@ -42,12 +42,12 @@ func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
 	}
 
-	castedOldKey, err := castKeyValue(secondaryIndex.Column, oldKey.Value)
+	castedOldKey, err := castKeyValue(secondaryIndex.Columns[0], oldKey.Value)
 	if err != nil {
 		return fmt.Errorf("failed to cast old secondary index value for %s: %w", secondaryIndex.Name, err)
 	}
 
-	newKey, ok := aRow.GetValue(secondaryIndex.Column.Name)
+	newKey, ok := aRow.GetValue(secondaryIndex.Columns[0].Name)
 	if !ok {
 		return nil
 	}
@@ -55,7 +55,7 @@ func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 
 	// We only need to insert into the index index if the key is not NULL
 	if newKey.Valid {
-		castedKey, err := castKeyValue(secondaryIndex.Column, newKey.Value)
+		castedKey, err := castKeyValue(secondaryIndex.Columns[0], newKey.Value)
 		if err != nil {
 			return fmt.Errorf("failed to cast secondary index key for %s: %w", secondaryIndex.Name, err)
 		}

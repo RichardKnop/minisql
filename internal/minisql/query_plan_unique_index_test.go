@@ -14,7 +14,14 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 
 	var (
 		indexName = "key__test_table__email"
-		aTable    = NewTable(zap.NewNop(), nil, nil, testTableName, testColumnsWithUniqueIndex, 0)
+		aTable    = NewTable(zap.NewNop(), nil, nil, testTableName, testColumns[0:2], 0, WithUniqueIndex(
+			UniqueIndex{
+				IndexInfo: IndexInfo{
+					Name:    indexName,
+					Columns: testColumns[1:2],
+				},
+			},
+		))
 	)
 
 	testCases := []struct {
@@ -94,11 +101,11 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"foo@example.com"},
-						Filters:         OneOrMore{{}},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[1:2],
+						IndexKeys:    []any{"foo@example.com"},
+						Filters:      OneOrMore{{}},
 					},
 				},
 			},
@@ -119,18 +126,18 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"foo@example.com"},
-						Filters:         OneOrMore{{}},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[1:2],
+						IndexKeys:    []any{"foo@example.com"},
+						Filters:      OneOrMore{{}},
 					},
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"bar@example.com"},
-						Filters:         OneOrMore{{}},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[1:2],
+						IndexKeys:    []any{"bar@example.com"},
+						Filters:      OneOrMore{{}},
 					},
 				},
 			},
@@ -153,10 +160,10 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"foo@example.com"},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[1:2],
+						IndexKeys:    []any{"foo@example.com"},
 						Filters: OneOrMore{
 							{
 								FieldIsEqual("id", OperandInteger, int64(42)),
@@ -164,10 +171,10 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 						},
 					},
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"bar@example.com"},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[1:2],
+						IndexKeys:    []any{"bar@example.com"},
 						Filters: OneOrMore{
 							{
 								FieldIsEqual("id", OperandInteger, int64(69)),
@@ -194,10 +201,10 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"foo@example.com"},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[1:2],
+						IndexKeys:    []any{"foo@example.com"},
 						Filters: OneOrMore{
 							{
 								FieldIsEqual("id", OperandInteger, int64(42)),
@@ -205,11 +212,11 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 						},
 					},
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"bar@example.com"},
-						Filters:         OneOrMore{{}},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[1:2],
+						IndexKeys:    []any{"bar@example.com"},
+						Filters:      OneOrMore{{}},
 					},
 				},
 			},
@@ -227,11 +234,11 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"foo@example.com", "bar@example.com"},
-						Filters:         OneOrMore{{}},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[1:2],
+						IndexKeys:    []any{"foo@example.com", "bar@example.com"},
+						Filters:      OneOrMore{{}},
 					},
 				},
 			},
@@ -321,9 +328,9 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexAll,
-						IndexName:       indexName,
-						IndexColumnName: "email",
+						Type:         ScanTypeIndexAll,
+						IndexName:    indexName,
+						IndexColumns: testColumns[1:2],
 					},
 				},
 				SortReverse: true,
@@ -355,10 +362,10 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"foo@example.com", "bar@example.com"},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[1:2],
+						IndexKeys:    []any{"foo@example.com", "bar@example.com"},
 						Filters: OneOrMore{{
 							FieldIsEqual("id", OperandInteger, int64(42)),
 						}},
@@ -389,9 +396,9 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexRange,
-						IndexName:       indexName,
-						IndexColumnName: "email",
+						Type:         ScanTypeIndexRange,
+						IndexName:    indexName,
+						IndexColumns: testColumns[1:2],
 						RangeCondition: RangeCondition{
 							Lower: &RangeBound{
 								Value:     "foo@example.com",
@@ -426,9 +433,9 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexRange,
-						IndexName:       indexName,
-						IndexColumnName: "email",
+						Type:         ScanTypeIndexRange,
+						IndexName:    indexName,
+						IndexColumns: testColumns[1:2],
 						RangeCondition: RangeCondition{
 							Lower: &RangeBound{
 								Value:     "foo@example.com",
@@ -437,9 +444,9 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 						},
 					},
 					{
-						Type:            ScanTypeIndexRange,
-						IndexName:       indexName,
-						IndexColumnName: "email",
+						Type:         ScanTypeIndexRange,
+						IndexName:    indexName,
+						IndexColumns: testColumns[1:2],
 						RangeCondition: RangeCondition{
 							Upper: &RangeBound{
 								Value: "qux@example.com",
@@ -472,9 +479,9 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexRange,
-						IndexName:       indexName,
-						IndexColumnName: "email",
+						Type:         ScanTypeIndexRange,
+						IndexName:    indexName,
+						IndexColumns: testColumns[1:2],
 						RangeCondition: RangeCondition{
 							Lower: &RangeBound{
 								Value:     "foo@example.com",

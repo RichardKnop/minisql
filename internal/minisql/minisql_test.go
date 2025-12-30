@@ -158,36 +158,6 @@ var (
 			bigRowBaseSize)),
 	)
 
-	testColumnsWithPrimaryKey = []Column{
-		{
-			Kind:          Int8,
-			Size:          8,
-			Name:          "id",
-			PrimaryKey:    true,
-			Autoincrement: true,
-		},
-		{
-			Kind:     Varchar,
-			Size:     MaxInlineVarchar,
-			Name:     "email",
-			Nullable: true,
-		},
-	}
-
-	testColumnsWithUniqueIndex = []Column{
-		{
-			Kind: Int8,
-			Size: 8,
-			Name: "id",
-		},
-		{
-			Kind:   Varchar,
-			Size:   MaxInlineVarchar,
-			Name:   "email",
-			Unique: true,
-		},
-	}
-
 	testOverflowColumns = []Column{
 		{
 			Kind: Int8,
@@ -426,7 +396,7 @@ func (g *dataGen) BigRows(number int) []Row {
 }
 
 func (g *dataGen) RowWithPrimaryKey(primaryKey int64) Row {
-	return NewRowWithValues(testColumnsWithPrimaryKey, []OptionalValue{
+	return NewRowWithValues(testColumns[0:2], []OptionalValue{
 		{Value: primaryKey, Valid: true},
 		{Value: NewTextPointer([]byte(g.Email())), Valid: true},
 	})
@@ -456,7 +426,7 @@ func (g *dataGen) RowsWithPrimaryKey(number int) []Row {
 }
 
 func (g *dataGen) RowWithUniqueIndex() Row {
-	return NewRowWithValues(testColumnsWithUniqueIndex, []OptionalValue{
+	return NewRowWithValues(testColumns[0:2], []OptionalValue{
 		{Value: g.Int64(), Valid: true},
 		{Value: NewTextPointer([]byte(g.Email())), Valid: true},
 	})

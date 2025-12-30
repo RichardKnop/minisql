@@ -255,7 +255,7 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 		}
 		// Reinsert primary key if applicable
 		if c.Table.HasPrimaryKey() {
-			pkValue, ok := stmt.Updates[c.Table.PrimaryKey.Column.Name]
+			pkValue, ok := stmt.Updates[c.Table.PrimaryKey.Columns[0].Name]
 			if !ok {
 				return false, fmt.Errorf("failed to get value for primary key %s", c.Table.PrimaryKey.Name)
 			}
@@ -267,7 +267,7 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 		}
 		// Resinsert unique keys if applicable
 		for _, uniqueIndex := range c.Table.UniqueIndexes {
-			indexValue, ok := stmt.Updates[uniqueIndex.Column.Name]
+			indexValue, ok := stmt.Updates[uniqueIndex.Columns[0].Name]
 			if !ok {
 				return false, fmt.Errorf("failed to get value for unique index %s", uniqueIndex.Name)
 			}
@@ -282,7 +282,7 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 		}
 		// Resinsert secondary keys if applicable
 		for _, secondaryIndex := range c.Table.SecondaryIndexes {
-			indexValue, ok := stmt.Updates[secondaryIndex.Column.Name]
+			indexValue, ok := stmt.Updates[secondaryIndex.Columns[0].Name]
 			if !ok {
 				return false, fmt.Errorf("failed to get value for secondary index %s", secondaryIndex.Name)
 			}
@@ -318,9 +318,9 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 
 	if c.Table.HasPrimaryKey() {
 		// Only update primary key if it has changed
-		_, ok := changedValues[c.Table.PrimaryKey.Column.Name]
+		_, ok := changedValues[c.Table.PrimaryKey.Columns[0].Name]
 		if ok {
-			oldIndexKey, ok := oldRow.GetValue(c.Table.PrimaryKey.Column.Name)
+			oldIndexKey, ok := oldRow.GetValue(c.Table.PrimaryKey.Columns[0].Name)
 			if !ok {
 				return false, fmt.Errorf("failed to get old value for primary key %s", c.Table.PrimaryKey.Name)
 			}
@@ -331,9 +331,9 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 	}
 	for _, uniqueIndex := range c.Table.UniqueIndexes {
 		// Only update unique index key if it has changed
-		_, ok := changedValues[uniqueIndex.Column.Name]
+		_, ok := changedValues[uniqueIndex.Columns[0].Name]
 		if ok {
-			oldIndexKey, ok := oldRow.GetValue(uniqueIndex.Column.Name)
+			oldIndexKey, ok := oldRow.GetValue(uniqueIndex.Columns[0].Name)
 			if !ok {
 				return false, fmt.Errorf("failed to get old value for unique index %s", uniqueIndex.Name)
 			}
@@ -344,9 +344,9 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 	}
 	for _, secondaryIndex := range c.Table.SecondaryIndexes {
 		// Only update secondary index key if it has changed
-		_, ok := changedValues[secondaryIndex.Column.Name]
+		_, ok := changedValues[secondaryIndex.Columns[0].Name]
 		if ok {
-			oldIndexKey, ok := oldRow.GetValue(secondaryIndex.Column.Name)
+			oldIndexKey, ok := oldRow.GetValue(secondaryIndex.Columns[0].Name)
 			if !ok {
 				return false, fmt.Errorf("failed to get old value for secondary index %s", secondaryIndex.Name)
 			}
@@ -395,12 +395,12 @@ func (c *Cursor) deletePrimaryKey(ctx context.Context, aRow Row) error {
 		return nil
 	}
 
-	primaryKeyValue, ok := aRow.GetValue(c.Table.PrimaryKey.Column.Name)
+	primaryKeyValue, ok := aRow.GetValue(c.Table.PrimaryKey.Columns[0].Name)
 	if !ok {
 		return fmt.Errorf("primary key %s not found in row", c.Table.PrimaryKey.Name)
 	}
 
-	castedValue, err := castKeyValue(c.Table.PrimaryKey.Column, primaryKeyValue.Value)
+	castedValue, err := castKeyValue(c.Table.PrimaryKey.Columns[0], primaryKeyValue.Value)
 	if err != nil {
 		return fmt.Errorf("failed to cast key value for primary key %s: %w", c.Table.PrimaryKey.Name, err)
 	}
@@ -418,12 +418,12 @@ func (c *Cursor) deleteUniqueIndexKeys(ctx context.Context, aRow Row) error {
 	}
 
 	for _, uniqueIndex := range c.Table.UniqueIndexes {
-		indexValue, ok := aRow.GetValue(uniqueIndex.Column.Name)
+		indexValue, ok := aRow.GetValue(uniqueIndex.Columns[0].Name)
 		if !ok {
 			return fmt.Errorf("unique index key %s not found in row", uniqueIndex.Name)
 		}
 
-		castedValue, err := castKeyValue(uniqueIndex.Column, indexValue.Value)
+		castedValue, err := castKeyValue(uniqueIndex.Columns[0], indexValue.Value)
 		if err != nil {
 			return fmt.Errorf("failed to cast key value for unique index %s: %w", uniqueIndex.Name, err)
 		}
@@ -442,12 +442,12 @@ func (c *Cursor) deleteSecondaryIndexKeys(ctx context.Context, aRow Row) error {
 	}
 
 	for _, secondaryIndex := range c.Table.SecondaryIndexes {
-		indexValue, ok := aRow.GetValue(secondaryIndex.Column.Name)
+		indexValue, ok := aRow.GetValue(secondaryIndex.Columns[0].Name)
 		if !ok {
 			return fmt.Errorf("unique index key %s not found in row", secondaryIndex.Name)
 		}
 
-		castedValue, err := castKeyValue(secondaryIndex.Column, indexValue.Value)
+		castedValue, err := castKeyValue(secondaryIndex.Columns[0], indexValue.Value)
 		if err != nil {
 			return fmt.Errorf("failed to cast key value for secondary index %s: %w", secondaryIndex.Name, err)
 		}

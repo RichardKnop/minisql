@@ -16,11 +16,11 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 	var (
 		ctx        = context.Background()
 		rows       = gen.RowsWithUniqueIndex(38)
-		tablePager = aPager.ForTable(testColumnsWithUniqueIndex)
+		tablePager = aPager.ForTable(testColumns[0:2])
 		txManager  = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
 		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		aTable     *Table
-		indexName  = uniqueIndexName(testTableName, "email")
+		indexName  = UniqueIndexName(testTableName, "email")
 	)
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -30,7 +30,20 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 		}
 		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
-		aTable = NewTable(testLogger, txPager, txManager, testTableName, testColumnsWithUniqueIndex, freePage.Index)
+		aTable = NewTable(
+			testLogger,
+			txPager,
+			txManager,
+			testTableName,
+			testColumns[0:2],
+			freePage.Index,
+			WithUniqueIndex(UniqueIndex{
+				IndexInfo: IndexInfo{
+					Name:    indexName,
+					Columns: testColumns[1:2],
+				},
+			}),
+		)
 		return nil
 	})
 	require.NoError(t, err)
@@ -64,7 +77,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 		uniqueIndex.Index, err = aTable.createBTreeIndex(
 			txIndexPager,
 			freePage,
-			aTable.UniqueIndexes[indexName].Column,
+			aTable.UniqueIndexes[indexName].Columns[0],
 			aTable.UniqueIndexes[indexName].Name,
 			true,
 		)

@@ -14,7 +14,9 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 
 	var (
 		indexName = "pkey__users"
-		aTable    = NewTable(zap.NewNop(), nil, nil, "users", testColumnsWithPrimaryKey, 0)
+		aTable    = NewTable(zap.NewNop(), nil, nil, "users", testColumns[0:2], 0, WithPrimaryKey(
+			NewPrimaryKey(indexName, testColumns[0:1], true),
+		))
 	)
 
 	testCases := []struct {
@@ -94,11 +96,11 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(42)},
-						Filters:         OneOrMore{{}},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[0:1],
+						IndexKeys:    []any{int64(42)},
+						Filters:      OneOrMore{{}},
 					},
 				},
 			},
@@ -119,18 +121,18 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(42)},
-						Filters:         OneOrMore{{}},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[0:1],
+						IndexKeys:    []any{int64(42)},
+						Filters:      OneOrMore{{}},
 					},
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(69)},
-						Filters:         OneOrMore{{}},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[0:1],
+						IndexKeys:    []any{int64(69)},
+						Filters:      OneOrMore{{}},
 					},
 				},
 			},
@@ -153,10 +155,10 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(42)},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[0:1],
+						IndexKeys:    []any{int64(42)},
 						Filters: OneOrMore{
 							{
 								FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
@@ -164,10 +166,10 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 						},
 					},
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(69)},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[0:1],
+						IndexKeys:    []any{int64(69)},
 						Filters: OneOrMore{
 							{
 								FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("bar@example.com"))),
@@ -194,10 +196,10 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(42)},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[0:1],
+						IndexKeys:    []any{int64(42)},
 						Filters: OneOrMore{
 							{
 								FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
@@ -205,11 +207,11 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 						},
 					},
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(69)},
-						Filters:         OneOrMore{{}},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[0:1],
+						IndexKeys:    []any{int64(69)},
+						Filters:      OneOrMore{{}},
 					},
 				},
 			},
@@ -227,11 +229,11 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(42), int64(69)},
-						Filters:         OneOrMore{{}},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[0:1],
+						IndexKeys:    []any{int64(42), int64(69)},
+						Filters:      OneOrMore{{}},
 					},
 				},
 			},
@@ -321,9 +323,9 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexAll,
-						IndexName:       indexName,
-						IndexColumnName: "id",
+						Type:         ScanTypeIndexAll,
+						IndexName:    indexName,
+						IndexColumns: testColumns[0:1],
 					},
 				},
 				SortReverse: true,
@@ -355,10 +357,10 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "id",
-						IndexKeys:       []any{int64(42), int64(69)},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: testColumns[0:1],
+						IndexKeys:    []any{int64(42), int64(69)},
 						Filters: OneOrMore{{
 							FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 						}},
@@ -389,9 +391,9 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexRange,
-						IndexName:       indexName,
-						IndexColumnName: "id",
+						Type:         ScanTypeIndexRange,
+						IndexName:    indexName,
+						IndexColumns: testColumns[0:1],
 						RangeCondition: RangeCondition{
 							Lower: &RangeBound{
 								Value:     int64(42),
@@ -426,9 +428,9 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexRange,
-						IndexName:       indexName,
-						IndexColumnName: "id",
+						Type:         ScanTypeIndexRange,
+						IndexName:    indexName,
+						IndexColumns: testColumns[0:1],
 						RangeCondition: RangeCondition{
 							Lower: &RangeBound{
 								Value:     int64(42),
@@ -437,9 +439,9 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 						},
 					},
 					{
-						Type:            ScanTypeIndexRange,
-						IndexName:       indexName,
-						IndexColumnName: "id",
+						Type:         ScanTypeIndexRange,
+						IndexName:    indexName,
+						IndexColumns: testColumns[0:1],
 						RangeCondition: RangeCondition{
 							Upper: &RangeBound{
 								Value: int64(27),
@@ -472,9 +474,9 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexRange,
-						IndexName:       indexName,
-						IndexColumnName: "id",
+						Type:         ScanTypeIndexRange,
+						IndexName:    indexName,
+						IndexColumns: testColumns[0:1],
 						RangeCondition: RangeCondition{
 							Lower: &RangeBound{
 								Value:     int64(42),

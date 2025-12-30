@@ -7,8 +7,8 @@ import (
 )
 
 type IndexInfo struct {
-	Name   string
-	Column Column
+	Name    string
+	Columns []Column
 }
 
 type PrimaryKey struct {
@@ -17,7 +17,17 @@ type PrimaryKey struct {
 	Index         BTreeIndex
 }
 
-func primaryKeyName(tableName string) string {
+func NewPrimaryKey(indexName string, columns []Column, autoincrement bool) PrimaryKey {
+	return PrimaryKey{
+		IndexInfo: IndexInfo{
+			Name:    indexName,
+			Columns: columns,
+		},
+		Autoincrement: autoincrement,
+	}
+}
+
+func PrimaryKeyName(tableName string) string {
 	return fmt.Sprintf(
 		"pkey__%s",
 		tableName,
@@ -43,7 +53,7 @@ func (t *Table) insertPrimaryKey(ctx context.Context, key OptionalValue, rowID R
 		}
 		return newPrimaryKey, nil
 	}
-	castedKey, err := castKeyValue(t.PrimaryKey.Column, key.Value)
+	castedKey, err := castKeyValue(t.PrimaryKey.Columns[0], key.Value)
 	if err != nil {
 		return 0, fmt.Errorf("failed to cast primary key value for %s: %w", t.PrimaryKey.Name, err)
 	}
@@ -61,7 +71,7 @@ func (t *Table) insertPrimaryKey(ctx context.Context, key OptionalValue, rowID R
 }
 
 func (t *Table) insertAutoincrementedPrimaryKey(ctx context.Context, rowID RowID) (int64, error) {
-	if t.PrimaryKey.Autoincrement && t.PrimaryKey.Column.Kind != Int8 {
+	if t.PrimaryKey.Autoincrement && t.PrimaryKey.Columns[0].Kind != Int8 {
 		return 0, fmt.Errorf("autoincrement primary key %s must be of type INT8", t.PrimaryKey.Name)
 	}
 
@@ -92,19 +102,19 @@ func (t *Table) updatePrimaryKey(ctx context.Context, oldKey OptionalValue, aRow
 		return fmt.Errorf("table %s has primary key but no Btree index instance", t.Name)
 	}
 
-	castedOldKey, err := castKeyValue(t.PrimaryKey.Column, oldKey.Value)
+	castedOldKey, err := castKeyValue(t.PrimaryKey.Columns[0], oldKey.Value)
 	if err != nil {
 		return fmt.Errorf("failed to cast old primary key value for %s: %w", t.PrimaryKey.Name, err)
 	}
 
-	newKey, ok := aRow.GetValue(t.PrimaryKey.Column.Name)
+	newKey, ok := aRow.GetValue(t.PrimaryKey.Columns[0].Name)
 	if !ok {
 		return nil
 	}
 	if !newKey.Valid {
 		return fmt.Errorf("cannot update primary key %s to NULL", t.PrimaryKey.Name)
 	}
-	castedKey, err := castKeyValue(t.PrimaryKey.Column, newKey.Value)
+	castedKey, err := castKeyValue(t.PrimaryKey.Columns[0], newKey.Value)
 	if err != nil {
 		return fmt.Errorf("failed to cast primary key value for %s: %w", t.PrimaryKey.Name, err)
 	}

@@ -121,6 +121,7 @@ func (d *Database) Reopen(ctx context.Context, factory PagerFactory, saver PageS
 	return nil
 }
 
+// TODO - support composite values
 func (d *Database) pagerFactory(ctx context.Context, tableName, indexName string) (Pager, error) {
 	aTable, ok := d.tables[tableName]
 	if !ok {
@@ -140,21 +141,39 @@ func (d *Database) pagerFactory(ctx context.Context, tableName, indexName string
 		return d.factory.ForTable(aTable.Columns), nil
 	}
 
-	aColumn, ok := aTable.IndexColumnByIndexName(indexName)
+	columns, ok := aTable.IndexColumnsByIndexName(indexName)
 	if !ok {
 		if tx := TxFromContext(ctx); tx != nil {
 			// We could be in a trasaction and index is being created but tx is not yet committed
 			for _, secondaryIndex := range TxFromContext(ctx).DDLChanges.CreateIndexes {
 				if secondaryIndex.Name == indexName {
-					aColumn = secondaryIndex.Column
+					columns = secondaryIndex.Columns
 				}
 			}
 		}
-		if aColumn.Name == "" {
+		if len(columns) == 0 {
 			return nil, errIndexDoesNotExist
 		}
 	}
-	return d.factory.ForIndex(aColumn.Kind, aColumn.Unique || aColumn.PrimaryKey), nil
+
+	if len(columns) > 1 {
+		return nil, fmt.Errorf("composite index keys not yet supported")
+	}
+
+	// TODO - support composite indexes
+
+	unique := false
+	if aTable.HasPrimaryKey() && len(aTable.PrimaryKey.Columns) == 1 && aTable.Columns[0].Name == columns[0].Name {
+		unique = true
+	}
+	for _, uniqueIndex := range aTable.UniqueIndexes {
+		if len(uniqueIndex.Columns) == 1 && uniqueIndex.Columns[0].Name == columns[0].Name {
+			unique = true
+			break
+		}
+	}
+
+	return d.factory.ForIndex(columns[0].Kind, unique), nil
 }
 
 func (d *Database) SaveDDLChanges(ctx context.Context, changes DDLChanges) {
@@ -172,7 +191,7 @@ func (d *Database) SaveDDLChanges(ctx context.Context, changes DDLChanges) {
 		delete(d.tables, tableName)
 	}
 	for tableName, index := range changes.CreateIndexes {
-		d.tables[tableName].SetSecondaryIndex(index.Name, index.Column, index.Index)
+		d.tables[tableName].SetSecondaryIndex(index.Name, index.Columns, index.Index)
 	}
 	for tableName, index := range changes.DropIndexes {
 		d.tables[tableName].RemoveSecondaryIndex(index.Name)
@@ -426,6 +445,20 @@ func (d *Database) tableFromSQL(ctx context.Context, aSchema Schema) (*Table, er
 		"",
 	)
 
+	opts := []TableOption{}
+
+	if stmt.PrimaryKey.Name != "" {
+		opts = append(opts, WithPrimaryKey(NewPrimaryKey(
+			stmt.PrimaryKey.Name,
+			stmt.PrimaryKey.Columns,
+			stmt.PrimaryKey.Autoincrement,
+		)))
+	}
+
+	for _, uniqueIndex := range stmt.UniqueIndexes {
+		opts = append(opts, WithUniqueIndex(uniqueIndex))
+	}
+
 	return NewTable(
 		d.logger,
 		tp,
@@ -433,6 +466,7 @@ func (d *Database) tableFromSQL(ctx context.Context, aSchema Schema) (*Table, er
 		stmt.TableName,
 		stmt.Columns,
 		aSchema.RootPage,
+		opts...,
 	), nil
 }
 
@@ -444,12 +478,12 @@ func (d *Database) initPrimaryKey(ctx context.Context, aSchema Schema) error {
 		return fmt.Errorf("table %s for primary key index %s does not exist", aSchema.TableName, aSchema.Name)
 	}
 	tp := NewTransactionalPager(
-		d.factory.ForIndex(aTable.PrimaryKey.Column.Kind, true),
+		d.factory.ForIndex(aTable.PrimaryKey.Columns[0].Kind, true),
 		d.txManager,
 		aTable.Name,
 		aSchema.Name,
 	)
-	btreeIndex, err := aTable.newBTreeIndex(tp, aSchema.RootPage, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name, true)
+	btreeIndex, err := aTable.newBTreeIndex(tp, aSchema.RootPage, aTable.PrimaryKey.Columns[0], aTable.PrimaryKey.Name, true)
 	if err != nil {
 		return err
 	}
@@ -477,12 +511,12 @@ func (d *Database) initUniqueIndex(ctx context.Context, aSchema Schema) error {
 		return fmt.Errorf("unique index %s does not exist on table %s", aSchema.Name, aSchema.TableName)
 	}
 	tp := NewTransactionalPager(
-		d.factory.ForIndex(uniqueIndex.Column.Kind, true),
+		d.factory.ForIndex(uniqueIndex.Columns[0].Kind, true),
 		d.txManager,
 		aTable.Name,
 		aSchema.Name,
 	)
-	btreeIndex, err := aTable.newBTreeIndex(tp, aSchema.RootPage, uniqueIndex.Column, uniqueIndex.Name, true)
+	btreeIndex, err := aTable.newBTreeIndex(tp, aSchema.RootPage, uniqueIndex.Columns[0], uniqueIndex.Name, true)
 	if err != nil {
 		return err
 	}
@@ -525,24 +559,24 @@ func (d *Database) initSecondaryIndex(ctx context.Context, aSchema Schema) error
 	}
 	secondaryIndex := SecondaryIndex{
 		IndexInfo: IndexInfo{
-			Name:   aSchema.Name,
-			Column: indexColumn,
+			Name:    aSchema.Name,
+			Columns: []Column{indexColumn},
 		},
 	}
 
 	// Create and set BTree index instance
 	tp := NewTransactionalPager(
-		d.factory.ForIndex(secondaryIndex.Column.Kind, false),
+		d.factory.ForIndex(secondaryIndex.Columns[0].Kind, false),
 		d.txManager,
 		aTable.Name,
 		aSchema.Name,
 	)
-	btreeIndex, err := aTable.newBTreeIndex(tp, aSchema.RootPage, secondaryIndex.Column, secondaryIndex.Name, false)
+	btreeIndex, err := aTable.newBTreeIndex(tp, aSchema.RootPage, secondaryIndex.Columns[0], secondaryIndex.Name, false)
 	if err != nil {
 		return err
 	}
 
-	aTable.SetSecondaryIndex(aSchema.Name, indexColumn, btreeIndex)
+	aTable.SetSecondaryIndex(aSchema.Name, []Column{indexColumn}, btreeIndex)
 
 	d.logger.Sugar().With(
 		"name", aSchema.Name,
@@ -648,6 +682,20 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 	freePage.LeafNode = NewLeafNode()
 	freePage.LeafNode.Header.IsRoot = true
 
+	opts := []TableOption{}
+
+	if stmt.PrimaryKey.Name != "" {
+		opts = append(opts, WithPrimaryKey(NewPrimaryKey(
+			stmt.PrimaryKey.Name,
+			stmt.PrimaryKey.Columns,
+			stmt.PrimaryKey.Autoincrement,
+		)))
+	}
+
+	for _, uniqueIndex := range stmt.UniqueIndexes {
+		opts = append(opts, WithUniqueIndex(uniqueIndex))
+	}
+
 	createdTable := NewTable(
 		d.logger,
 		txPager,
@@ -655,6 +703,7 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 		stmt.TableName,
 		stmt.Columns,
 		freePage.Index,
+		opts...,
 	)
 
 	// Save table record into minisql_schema system table
@@ -668,7 +717,7 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 	}
 
 	if createdTable.HasPrimaryKey() {
-		createdIndex, err := d.createPrimaryKey(ctx, createdTable, createdTable.PrimaryKey.Column)
+		createdIndex, err := d.createPrimaryKey(ctx, createdTable, createdTable.PrimaryKey.Columns[0])
 		if err != nil {
 			return nil, err
 		}
@@ -750,7 +799,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	if tableToDelete.HasPrimaryKey() {
 
 		txPager := NewTransactionalPager(
-			d.factory.ForIndex(tableToDelete.PrimaryKey.Column.Kind, true),
+			d.factory.ForIndex(tableToDelete.PrimaryKey.Columns[0].Kind, true),
 			d.txManager,
 			tableToDelete.Name,
 			tableToDelete.PrimaryKey.Name,
@@ -771,7 +820,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	for _, uniqueIndex := range tableToDelete.UniqueIndexes {
 
 		txPager := NewTransactionalPager(
-			d.factory.ForIndex(uniqueIndex.Column.Kind, true),
+			d.factory.ForIndex(uniqueIndex.Columns[0].Kind, true),
 			d.txManager,
 			tableToDelete.Name,
 			uniqueIndex.Name,
@@ -792,7 +841,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	for _, secondaryIndex := range tableToDelete.SecondaryIndexes {
 
 		txPager := NewTransactionalPager(
-			d.factory.ForIndex(secondaryIndex.Column.Kind, false),
+			d.factory.ForIndex(secondaryIndex.Columns[0].Kind, false),
 			d.txManager,
 			tableToDelete.Name,
 			secondaryIndex.Name,
@@ -857,8 +906,8 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement) error {
 
 	secondaryIndex := SecondaryIndex{
 		IndexInfo: IndexInfo{
-			Name:   stmt.IndexName,
-			Column: aColumn,
+			Name:    stmt.IndexName,
+			Columns: []Column{aColumn},
 		},
 	}
 	createdIndex, err := d.createSecondaryIndex(ctx, stmt, aTable, secondaryIndex)
@@ -889,14 +938,14 @@ func (d *Database) populateIndex(ctx context.Context, aTable *Table, secondaryIn
 
 	for aResult.Rows.Next(ctx) {
 		aRow := aResult.Rows.Row()
-		keyValue, ok := aRow.GetValue(secondaryIndex.Column.Name)
+		keyValue, ok := aRow.GetValue(secondaryIndex.Columns[0].Name)
 		if !ok {
-			return fmt.Errorf("column %s does not exist on row in table %s", secondaryIndex.Column.Name, aTable.Name)
+			return fmt.Errorf("column %s does not exist on row in table %s", secondaryIndex.Columns[0].Name, aTable.Name)
 		}
 		if !keyValue.Valid {
 			continue // skip NULLs
 		}
-		castedKeyValue, err := castKeyValue(secondaryIndex.Column, keyValue.Value)
+		castedKeyValue, err := castKeyValue(secondaryIndex.Columns[0], keyValue.Value)
 		if err != nil {
 			return err
 		}
@@ -960,8 +1009,8 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 	}
 	secondaryIndex := SecondaryIndex{
 		IndexInfo: IndexInfo{
-			Name:   aSchema.Name,
-			Column: indexColumn,
+			Name:    aSchema.Name,
+			Columns: []Column{indexColumn},
 		},
 		Index: btreeIndex,
 	}
@@ -1002,7 +1051,7 @@ func (d *Database) createPrimaryKey(ctx context.Context, aTable *Table, aColumn 
 		return nil, err
 	}
 
-	createdIndex, err := aTable.createBTreeIndex(txPager, freePage, aTable.PrimaryKey.Column, aTable.PrimaryKey.Name, true)
+	createdIndex, err := aTable.createBTreeIndex(txPager, freePage, aTable.PrimaryKey.Columns[0], aTable.PrimaryKey.Name, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1020,10 +1069,10 @@ func (d *Database) createPrimaryKey(ctx context.Context, aTable *Table, aColumn 
 }
 
 func (d *Database) createUniqueIndex(ctx context.Context, aTable *Table, uniqueIndex UniqueIndex) (BTreeIndex, error) {
-	d.logger.Sugar().With("column", uniqueIndex.Column.Name).Debug("creating unique index")
+	d.logger.Sugar().With("column", uniqueIndex.Columns[0].Name).Debug("creating unique index")
 
 	txPager := NewTransactionalPager(
-		d.factory.ForIndex(uniqueIndex.Column.Kind, true),
+		d.factory.ForIndex(uniqueIndex.Columns[0].Kind, true),
 		d.txManager,
 		aTable.Name,
 		uniqueIndex.Name,
@@ -1034,7 +1083,7 @@ func (d *Database) createUniqueIndex(ctx context.Context, aTable *Table, uniqueI
 		return nil, err
 	}
 
-	createdIndex, err := aTable.createBTreeIndex(txPager, freePage, uniqueIndex.Column, uniqueIndex.Name, true)
+	createdIndex, err := aTable.createBTreeIndex(txPager, freePage, uniqueIndex.Columns[0], uniqueIndex.Name, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1052,10 +1101,10 @@ func (d *Database) createUniqueIndex(ctx context.Context, aTable *Table, uniqueI
 }
 
 func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, aTable *Table, secondaryIndex SecondaryIndex) (BTreeIndex, error) {
-	d.logger.Sugar().With("column", secondaryIndex.Column.Name).Debug("creating secondary index")
+	d.logger.Sugar().With("column", secondaryIndex.Columns[0].Name).Debug("creating secondary index")
 
 	txPager := NewTransactionalPager(
-		d.factory.ForIndex(secondaryIndex.Column.Kind, false),
+		d.factory.ForIndex(secondaryIndex.Columns[0].Kind, false),
 		d.txManager,
 		aTable.Name,
 		secondaryIndex.Name,
@@ -1066,7 +1115,7 @@ func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, aTa
 		return nil, err
 	}
 
-	createdIndex, err := aTable.createBTreeIndex(txPager, freePage, secondaryIndex.Column, secondaryIndex.Name, false)
+	createdIndex, err := aTable.createBTreeIndex(txPager, freePage, secondaryIndex.Columns[0], secondaryIndex.Name, false)
 	if err != nil {
 		return nil, err
 	}
