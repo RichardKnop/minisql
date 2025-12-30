@@ -13,6 +13,18 @@ import (
 func TestParse_CreateTable(t *testing.T) {
 	t.Parallel()
 
+	idColumn := minisql.Column{
+		Name: "id",
+		Kind: minisql.Int8,
+		Size: 8,
+	}
+	emailColumn := minisql.Column{
+		Name:     "email",
+		Kind:     minisql.Varchar,
+		Size:     minisql.MaxInlineVarchar,
+		Nullable: true,
+	}
+
 	testCases := []testCase{
 		{
 			"Empty CREATE TABLE fails",
@@ -340,10 +352,9 @@ func TestParse_CreateTable(t *testing.T) {
 					TableName: "foo",
 					Columns: []minisql.Column{
 						{
-							Name:       "id",
-							Kind:       minisql.Int8,
-							Size:       8,
-							PrimaryKey: true,
+							Name: "id",
+							Kind: minisql.Int8,
+							Size: 8,
 						},
 						{
 							Name:     "bar",
@@ -352,6 +363,11 @@ func TestParse_CreateTable(t *testing.T) {
 							Nullable: true,
 						},
 					},
+					PrimaryKey: minisql.NewPrimaryKey(
+						minisql.PrimaryKeyName("foo"),
+						[]minisql.Column{idColumn},
+						false,
+					),
 				},
 			},
 			nil,
@@ -367,13 +383,16 @@ func TestParse_CreateTable(t *testing.T) {
 					TableName: "foo",
 					Columns: []minisql.Column{
 						{
-							Name:          "id",
-							Kind:          minisql.Int8,
-							Size:          8,
-							PrimaryKey:    true,
-							Autoincrement: true,
+							Name: "id",
+							Kind: minisql.Int8,
+							Size: 8,
 						},
 					},
+					PrimaryKey: minisql.NewPrimaryKey(
+						minisql.PrimaryKeyName("foo"),
+						[]minisql.Column{idColumn},
+						true,
+					),
 				},
 			},
 			nil,
@@ -399,19 +418,23 @@ func TestParse_CreateTable(t *testing.T) {
 		{
 			"CREATE TABLE with unique index key",
 			`CREATE TABLE foo (
-				bar varchar(255) unique
+				email varchar(255) unique
 			);`,
 			[]minisql.Statement{
 				{
 					Kind:      minisql.CreateTable,
 					TableName: "foo",
 					Columns: []minisql.Column{
+						emailColumn,
+					},
+					UniqueIndexes: []minisql.UniqueIndex{
 						{
-							Name:     "bar",
-							Kind:     minisql.Varchar,
-							Size:     minisql.MaxInlineVarchar,
-							Unique:   true,
-							Nullable: true,
+							IndexInfo: minisql.IndexInfo{
+								Name: minisql.UniqueIndexName("foo", emailColumn.Name),
+								Columns: []minisql.Column{
+									emailColumn,
+								},
+							},
 						},
 					},
 				},
@@ -431,20 +454,8 @@ func TestParse_CreateTable(t *testing.T) {
 					Kind:      minisql.CreateTable,
 					TableName: "users",
 					Columns: []minisql.Column{
-						{
-							Name:          "id",
-							Kind:          minisql.Int8,
-							Size:          8,
-							PrimaryKey:    true,
-							Autoincrement: true,
-						},
-						{
-							Name:     "email",
-							Kind:     minisql.Varchar,
-							Size:     minisql.MaxInlineVarchar,
-							Nullable: true,
-							Unique:   true,
-						},
+						idColumn,
+						emailColumn,
 						{
 							Name:     "name",
 							Kind:     minisql.Text,
@@ -458,33 +469,19 @@ func TestParse_CreateTable(t *testing.T) {
 							DefaultValueNow: true,
 						},
 					},
-				},
-			},
-			nil,
-		},
-		{
-			"CREATE TABLE with both primary and unique key",
-			`CREATE TABLE foo (
-				id int8 primary key,
-				bar varchar(255) unique
-			);`,
-			[]minisql.Statement{
-				{
-					Kind:      minisql.CreateTable,
-					TableName: "foo",
-					Columns: []minisql.Column{
+					PrimaryKey: minisql.NewPrimaryKey(
+						minisql.PrimaryKeyName("users"),
+						[]minisql.Column{idColumn},
+						true,
+					),
+					UniqueIndexes: []minisql.UniqueIndex{
 						{
-							Name:       "id",
-							Kind:       minisql.Int8,
-							Size:       8,
-							PrimaryKey: true,
-						},
-						{
-							Name:     "bar",
-							Kind:     minisql.Varchar,
-							Size:     minisql.MaxInlineVarchar,
-							Unique:   true,
-							Nullable: true,
+							IndexInfo: minisql.IndexInfo{
+								Name: minisql.UniqueIndexName("users", emailColumn.Name),
+								Columns: []minisql.Column{
+									emailColumn,
+								},
+							},
 						},
 					},
 				},
@@ -598,12 +595,7 @@ func TestParse_CreateTable(t *testing.T) {
 					Kind:      minisql.CreateTable,
 					TableName: "foo",
 					Columns: []minisql.Column{
-						{
-							Name:       "id",
-							Kind:       minisql.Int8,
-							Size:       8,
-							PrimaryKey: true,
-						},
+						idColumn,
 						{
 							Name: "description",
 							Kind: minisql.Text,
@@ -611,6 +603,11 @@ func TestParse_CreateTable(t *testing.T) {
 							Nullable: true,
 						},
 					},
+					PrimaryKey: minisql.NewPrimaryKey(
+						minisql.PrimaryKeyName("foo"),
+						[]minisql.Column{idColumn},
+						false,
+					),
 				},
 			},
 			nil,

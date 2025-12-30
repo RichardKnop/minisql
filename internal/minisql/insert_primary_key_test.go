@@ -13,7 +13,7 @@ func TestTable_Insert_PrimaryKey(t *testing.T) {
 	var (
 		aPager, dbFile = initTest(t)
 		ctx            = context.Background()
-		tablePager     = aPager.ForTable(testColumnsWithPrimaryKey)
+		tablePager     = aPager.ForTable(testColumns[0:2])
 		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		rows           = gen.RowsWithPrimaryKey(100)
@@ -27,13 +27,21 @@ func TestTable_Insert_PrimaryKey(t *testing.T) {
 		}
 		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
-		aTable = NewTable(testLogger, txPager, txManager, testTableName, testColumnsWithPrimaryKey, freePage.Index)
+		aTable = NewTable(
+			testLogger,
+			txPager,
+			txManager,
+			testTableName,
+			testColumns[0:2],
+			freePage.Index,
+			WithPrimaryKey(NewPrimaryKey("foo", testColumns[0:1], true)),
+		)
 		return nil
 	})
 	require.NoError(t, err)
 
 	txPrimaryKeyPager := NewTransactionalPager(
-		aPager.ForIndex(aTable.PrimaryKey.Column.Kind, true),
+		aPager.ForIndex(aTable.PrimaryKey.Columns[0].Kind, true),
 		aTable.txManager,
 		testTableName,
 		aTable.PrimaryKey.Name,
@@ -57,7 +65,7 @@ func TestTable_Insert_PrimaryKey(t *testing.T) {
 		aTable.PrimaryKey.Index, err = aTable.createBTreeIndex(
 			txPrimaryKeyPager,
 			freePage,
-			aTable.PrimaryKey.Column,
+			aTable.PrimaryKey.Columns[0],
 			aTable.PrimaryKey.Name,
 			true,
 		)
@@ -93,7 +101,7 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 	var (
 		aPager, dbFile = initTest(t)
 		ctx            = context.Background()
-		tablePager     = aPager.ForTable(testColumnsWithPrimaryKey)
+		tablePager     = aPager.ForTable(testColumns[0:2])
 		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		rows           = gen.RowsWithPrimaryKey(1)
@@ -107,13 +115,21 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 		}
 		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
-		aTable = NewTable(testLogger, txPager, txManager, testTableName, testColumnsWithPrimaryKey, freePage.Index)
+		aTable = NewTable(
+			testLogger,
+			txPager,
+			txManager,
+			testTableName,
+			testColumns[0:2],
+			freePage.Index,
+			WithPrimaryKey(NewPrimaryKey("foo", testColumns[0:1], true)),
+		)
 		return nil
 	})
 	require.NoError(t, err)
 
 	txPrimaryKeyPager := NewTransactionalPager(
-		aPager.ForIndex(aTable.PrimaryKey.Column.Kind, true),
+		aPager.ForIndex(aTable.PrimaryKey.Columns[0].Kind, true),
 		aTable.txManager,
 		testTableName,
 		aTable.PrimaryKey.Name,
@@ -141,7 +157,7 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 			aTable.PrimaryKey.Index, err = aTable.createBTreeIndex(
 				txPrimaryKeyPager,
 				freePage,
-				aTable.PrimaryKey.Column,
+				aTable.PrimaryKey.Columns[0],
 				aTable.PrimaryKey.Name,
 				true,
 			)

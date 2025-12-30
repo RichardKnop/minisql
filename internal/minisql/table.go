@@ -22,7 +22,21 @@ type Table struct {
 	txManager            *TransactionManager
 }
 
-func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, name string, columns []Column, rootPageIdx PageIndex) *Table {
+type TableOption func(*Table)
+
+func WithPrimaryKey(pk PrimaryKey) TableOption {
+	return func(t *Table) {
+		t.PrimaryKey = pk
+	}
+}
+
+func WithUniqueIndex(index UniqueIndex) TableOption {
+	return func(t *Table) {
+		t.UniqueIndexes[index.Name] = index
+	}
+}
+
+func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, name string, columns []Column, rootPageIdx PageIndex, opts ...TableOption) *Table {
 	aTable := &Table{
 		Name:                 name,
 		Columns:              columns,
@@ -41,57 +55,39 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 		aTable.columnCache[aColumn.Name] = i
 	}
 
-	for _, aColumn := range columns {
-		if aColumn.PrimaryKey {
-			aTable.PrimaryKey = PrimaryKey{
-				IndexInfo: IndexInfo{
-					Name:   primaryKeyName(name),
-					Column: aColumn,
-				},
-				Autoincrement: aColumn.Autoincrement,
-			}
-			continue
-		}
-		if aColumn.Unique {
-			indexName := uniqueIndexName(name, aColumn.Name)
-			aTable.UniqueIndexes[indexName] = UniqueIndex{
-				IndexInfo: IndexInfo{
-					Name:   indexName,
-					Column: aColumn,
-				},
-			}
-			continue
-		}
+	// Apply options
+	for _, opt := range opts {
+		opt(aTable)
 	}
 
 	// Build column name -> IndexInfo cache
 	if aTable.HasPrimaryKey() {
-		aTable.columnIndexInfoCache[aTable.PrimaryKey.IndexInfo.Column.Name] = aTable.PrimaryKey.IndexInfo
+		aTable.columnIndexInfoCache[aTable.PrimaryKey.Columns[0].Name] = aTable.PrimaryKey.IndexInfo
 	}
 	for _, index := range aTable.UniqueIndexes {
-		aTable.columnIndexInfoCache[index.IndexInfo.Column.Name] = index.IndexInfo
+		aTable.columnIndexInfoCache[index.Columns[0].Name] = index.IndexInfo
 	}
 	for _, index := range aTable.SecondaryIndexes {
-		aTable.columnIndexInfoCache[index.IndexInfo.Column.Name] = index.IndexInfo
+		aTable.columnIndexInfoCache[index.Columns[0].Name] = index.IndexInfo
 	}
 
 	return aTable
 }
 
-func (t *Table) SetSecondaryIndex(name string, column Column, index BTreeIndex) {
+func (t *Table) SetSecondaryIndex(name string, columns []Column, index BTreeIndex) {
 	t.SecondaryIndexes[name] = SecondaryIndex{
 		IndexInfo: IndexInfo{
-			Name:   name,
-			Column: column,
+			Name:    name,
+			Columns: columns,
 		},
 		Index: index,
 	}
-	t.columnIndexInfoCache[column.Name] = t.SecondaryIndexes[name].IndexInfo
+	t.columnIndexInfoCache[columns[0].Name] = t.SecondaryIndexes[name].IndexInfo
 }
 
 func (t *Table) RemoveSecondaryIndex(name string) {
+	delete(t.columnIndexInfoCache, t.SecondaryIndexes[name].Columns[0].Name)
 	delete(t.SecondaryIndexes, name)
-	delete(t.columnIndexInfoCache, t.SecondaryIndexes[name].Column.Name)
 }
 
 func (t *Table) GetRootPageIdx() PageIndex {
@@ -109,17 +105,17 @@ func (t *Table) ColumnByName(name string) (Column, bool) {
 	return Column{}, false
 }
 
-func (t *Table) IndexColumnByIndexName(name string) (Column, bool) {
+func (t *Table) IndexColumnsByIndexName(name string) ([]Column, bool) {
 	if t.HasPrimaryKey() && t.PrimaryKey.Name == name {
-		return t.PrimaryKey.IndexInfo.Column, true
+		return t.PrimaryKey.IndexInfo.Columns, true
 	}
 	if index, ok := t.UniqueIndexes[name]; ok {
-		return index.IndexInfo.Column, true
+		return index.IndexInfo.Columns, true
 	}
 	if index, ok := t.SecondaryIndexes[name]; ok {
-		return index.IndexInfo.Column, true
+		return index.IndexInfo.Columns, true
 	}
-	return Column{}, false
+	return nil, false
 }
 
 func (t *Table) HasIndexOnColumn(name string) bool {

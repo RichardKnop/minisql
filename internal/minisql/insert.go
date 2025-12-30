@@ -24,7 +24,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 				return StatementResult{}, fmt.Errorf("table %s has primary key but no Btree index instance", t.Name)
 			}
 
-			pkValue, ok := stmt.InsertValueForColumn(t.PrimaryKey.Column.Name, insertIdx)
+			pkValue, ok := stmt.InsertValueForColumn(t.PrimaryKey.Columns[0].Name, insertIdx)
 			if !ok {
 				return StatementResult{}, fmt.Errorf("failed to get value for primary key %s", t.PrimaryKey.Name)
 			}
@@ -35,7 +35,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			}
 
 			// Update statement with autoincremented primary key value
-			pkIdx := stmt.ColumnIdx(t.PrimaryKey.Column.Name)
+			pkIdx := stmt.ColumnIdx(t.PrimaryKey.Columns[0].Name)
 			values[pkIdx] = OptionalValue{Value: insertedPrimaryKey, Valid: true}
 		}
 
@@ -44,7 +44,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 				return StatementResult{}, fmt.Errorf("table %s has unique index %s but no Btree index instance", t.Name, uniqueIndex.Name)
 			}
 
-			indexValue, ok := stmt.InsertValueForColumn(uniqueIndex.Column.Name, insertIdx)
+			indexValue, ok := stmt.InsertValueForColumn(uniqueIndex.Columns[0].Name, insertIdx)
 			if !ok {
 				return StatementResult{}, fmt.Errorf("failed to get value for unique index %s", uniqueIndex.Name)
 			}
@@ -59,7 +59,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 				return StatementResult{}, fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
 			}
 
-			indexValue, ok := stmt.InsertValueForColumn(secondaryIndex.Column.Name, insertIdx)
+			indexValue, ok := stmt.InsertValueForColumn(secondaryIndex.Columns[0].Name, insertIdx)
 			if !ok {
 				return StatementResult{}, fmt.Errorf("failed to get value for secondary index %s", secondaryIndex.Name)
 			}

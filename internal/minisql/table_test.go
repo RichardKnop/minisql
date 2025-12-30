@@ -20,28 +20,30 @@ const (
 func TestNewTable_WithPrimaryKey(t *testing.T) {
 	t.Parallel()
 
-	var columns = []Column{
-		{
-			Kind:       Int8,
-			Size:       8,
-			Name:       "id",
-			PrimaryKey: true,
-		},
-		{
-			Kind:     Varchar,
-			Size:     MaxInlineVarchar,
-			Name:     "email",
-			Nullable: true,
-		},
-	}
+	var (
+		columns = []Column{
+			{
+				Kind: Int8,
+				Size: 8,
+				Name: "id",
+			},
+			{
+				Kind:     Varchar,
+				Size:     MaxInlineVarchar,
+				Name:     "email",
+				Nullable: true,
+			},
+		}
+		pk = PrimaryKey{
+			IndexInfo: IndexInfo{
+				Name:    PrimaryKeyName(testTableName),
+				Columns: columns[0:1],
+			},
+		}
+	)
 
-	aTable := NewTable(testLogger, nil, nil, "tablename", columns, 0)
-	assert.Equal(t, PrimaryKey{
-		IndexInfo: IndexInfo{
-			Name:   primaryKeyName("tablename"),
-			Column: columns[0],
-		},
-	}, aTable.PrimaryKey)
+	aTable := NewTable(testLogger, nil, nil, testTableName, columns, 0, WithPrimaryKey(pk))
+	assert.Equal(t, pk, aTable.PrimaryKey)
 }
 
 func TestTable_SeekNextRowID(t *testing.T) {

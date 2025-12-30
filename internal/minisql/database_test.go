@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
@@ -33,7 +34,7 @@ func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 		aPager, dbFile  = initTest(t)
 		mockParser      = new(MockParser)
 		ctx             = context.Background()
-		uniqueIndexName = uniqueIndexName(testTableName3, "email")
+		uniqueIndexName = UniqueIndexName(testTableName3, "email")
 	)
 
 	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, aPager, aPager)
@@ -43,21 +44,29 @@ func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 	// - one without any index
 	// - one with a primary key
 	// - one with a unique index
-	// - one with a secondary index
 	stmt := Statement{
 		Kind:      CreateTable,
 		TableName: testTableName,
 		Columns:   append([]Column{}, testColumns...),
 	}
 	stmt2 := Statement{
-		Kind:      CreateTable,
-		TableName: testTableName2,
-		Columns:   append([]Column{}, testColumnsWithPrimaryKey...),
+		Kind:       CreateTable,
+		TableName:  testTableName2,
+		Columns:    append([]Column{}, testColumns[0:2]...),
+		PrimaryKey: NewPrimaryKey(PrimaryKeyName(testTableName2), testColumns[0:1], true),
 	}
 	stmt3 := Statement{
 		Kind:      CreateTable,
 		TableName: testTableName3,
-		Columns:   append([]Column{}, testColumnsWithUniqueIndex...),
+		Columns:   append([]Column{}, testColumns[0:2]...),
+		UniqueIndexes: []UniqueIndex{
+			{
+				IndexInfo: IndexInfo{
+					Name:    uniqueIndexName,
+					Columns: testColumns[1:2],
+				},
+			},
+		},
 	}
 
 	for _, s := range []Statement{stmt, stmt2, stmt3} {
@@ -88,13 +97,13 @@ func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 	assert.Equal(t, testColumns, aDatabase.tables[testTableName].Columns)
 
 	assert.Equal(t, testTableName2, aDatabase.tables[testTableName2].Name)
-	assert.Equal(t, testColumnsWithPrimaryKey, aDatabase.tables[testTableName2].Columns)
+	assert.Equal(t, testColumns[0:2], aDatabase.tables[testTableName2].Columns)
 	assert.Empty(t, aDatabase.tables[testTableName2].UniqueIndexes)
 	assert.Empty(t, aDatabase.tables[testTableName2].SecondaryIndexes)
 	assert.NotNil(t, aDatabase.tables[testTableName2].PrimaryKey.Index)
 
 	assert.Equal(t, testTableName3, aDatabase.tables[testTableName3].Name)
-	assert.Equal(t, testColumnsWithUniqueIndex, aDatabase.tables[testTableName3].Columns)
+	assert.Equal(t, testColumns[0:2], aDatabase.tables[testTableName3].Columns)
 	assert.Empty(t, aDatabase.tables[testTableName3].PrimaryKey)
 	assert.Empty(t, aDatabase.tables[testTableName3].SecondaryIndexes)
 	assert.Len(t, aDatabase.tables[testTableName3].UniqueIndexes, 1)
@@ -127,7 +136,7 @@ func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 
 	// Primary key for the second table
 	assert.Equal(t, SchemaPrimaryKey, schemas[3].Type)
-	assert.Equal(t, primaryKeyName(testTableName2), schemas[3].Name)
+	assert.Equal(t, PrimaryKeyName(testTableName2), schemas[3].Name)
 	assert.Equal(t, testTableName2, schemas[3].TableName)
 	assert.Equal(t, 3, int(schemas[3].RootPage))
 
@@ -224,9 +233,10 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 
 	t.Run("Create table", func(t *testing.T) {
 		stmt := Statement{
-			Kind:      CreateTable,
-			TableName: testTableName,
-			Columns:   append([]Column{}, testColumnsWithPrimaryKey...),
+			Kind:       CreateTable,
+			TableName:  testTableName,
+			Columns:    append([]Column{}, testColumns[0:2]...),
+			PrimaryKey: NewPrimaryKey(PrimaryKeyName(testTableName), testColumns[0:1], true),
 		}
 		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aDatabase.ExecuteStatement(ctx, stmt)
@@ -241,7 +251,7 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 		}, aDatabase.ListTableNames(ctx))
 
 		assert.Equal(t, testTableName, aDatabase.tables[testTableName].Name)
-		assert.Equal(t, testColumnsWithPrimaryKey, aDatabase.tables[testTableName].Columns)
+		assert.Equal(t, testColumns[0:2], aDatabase.tables[testTableName].Columns)
 		assert.Empty(t, aDatabase.tables[testTableName].UniqueIndexes)
 		assert.Empty(t, aDatabase.tables[testTableName].SecondaryIndexes)
 		assert.NotNil(t, aDatabase.tables[testTableName].PrimaryKey.Index)
@@ -263,7 +273,7 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 
 		// Primary key for the created table
 		assert.Equal(t, SchemaPrimaryKey, schemas[2].Type)
-		assert.Equal(t, primaryKeyName(testTableName), schemas[2].Name)
+		assert.Equal(t, PrimaryKeyName(testTableName), schemas[2].Name)
 		assert.Equal(t, 2, int(schemas[2].RootPage))
 	})
 
@@ -295,7 +305,7 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 
 func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
 	aPager, dbFile := initTest(t)
-	indexName := uniqueIndexName(testTableName, "email")
+	indexName := UniqueIndexName(testTableName, testColumns[1].Name)
 
 	ctx := context.Background()
 	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, aPager, aPager)
@@ -305,7 +315,15 @@ func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
 		stmt := Statement{
 			Kind:      CreateTable,
 			TableName: testTableName,
-			Columns:   append([]Column{}, testColumnsWithUniqueIndex...),
+			Columns:   append([]Column{}, testColumns[0:2]...),
+			UniqueIndexes: []UniqueIndex{
+				{
+					IndexInfo: IndexInfo{
+						Name:    indexName,
+						Columns: testColumns[1:2],
+					},
+				},
+			},
 		}
 		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aDatabase.ExecuteStatement(ctx, stmt)
@@ -320,7 +338,7 @@ func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
 		}, aDatabase.ListTableNames(ctx))
 
 		assert.Equal(t, testTableName, aDatabase.tables[testTableName].Name)
-		assert.Equal(t, testColumnsWithUniqueIndex, aDatabase.tables[testTableName].Columns)
+		assert.Equal(t, testColumns[0:2], aDatabase.tables[testTableName].Columns)
 		assert.Empty(t, aDatabase.tables[testTableName].PrimaryKey)
 		assert.Empty(t, aDatabase.tables[testTableName].SecondaryIndexes)
 		assert.Len(t, aDatabase.tables[testTableName].UniqueIndexes, 1)
@@ -432,7 +450,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify index exists has been added to the table
-		assert.Equal(t, testColumns[len(testColumns)-1], aDatabase.tables[testTableName].SecondaryIndexes["foo_bar"].Column)
+		assert.Equal(t, testColumns[len(testColumns)-1], aDatabase.tables[testTableName].SecondaryIndexes["foo_bar"].Columns[0])
 		assert.Equal(t, "foo_bar", aDatabase.tables[testTableName].SecondaryIndexes["foo_bar"].Name)
 		assert.NotNil(t, aDatabase.tables[testTableName].SecondaryIndexes["foo_bar"].Index)
 		assert.Equal(t, PageIndex(2), aDatabase.tables[testTableName].SecondaryIndexes["foo_bar"].Index.GetRootPageIdx())
@@ -482,6 +500,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 			Kind:      DropIndex,
 			IndexName: "foo_bar",
 		}
+		fmt.Println("FROM HERE")
 		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aDatabase.ExecuteStatement(ctx, deleteStmt)
 			return err

@@ -28,7 +28,7 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 			secondaryIndexColumn,
 		}, 0)
 	)
-	aTable.SetSecondaryIndex(indexName, secondaryIndexColumn, nil)
+	aTable.SetSecondaryIndex(indexName, []Column{secondaryIndexColumn}, nil)
 
 	testCases := []struct {
 		Name     string
@@ -107,11 +107,11 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"foo@example.com"},
-						Filters:         OneOrMore{{}},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: []Column{secondaryIndexColumn},
+						IndexKeys:    []any{"foo@example.com"},
+						Filters:      OneOrMore{{}},
 					},
 				},
 			},
@@ -132,18 +132,18 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"foo@example.com"},
-						Filters:         OneOrMore{{}},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: []Column{secondaryIndexColumn},
+						IndexKeys:    []any{"foo@example.com"},
+						Filters:      OneOrMore{{}},
 					},
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"bar@example.com"},
-						Filters:         OneOrMore{{}},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: []Column{secondaryIndexColumn},
+						IndexKeys:    []any{"bar@example.com"},
+						Filters:      OneOrMore{{}},
 					},
 				},
 			},
@@ -166,10 +166,10 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"foo@example.com"},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: []Column{secondaryIndexColumn},
+						IndexKeys:    []any{"foo@example.com"},
 						Filters: OneOrMore{
 							{
 								FieldIsEqual("id", OperandInteger, int64(42)),
@@ -177,10 +177,10 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 						},
 					},
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"bar@example.com"},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: []Column{secondaryIndexColumn},
+						IndexKeys:    []any{"bar@example.com"},
 						Filters: OneOrMore{
 							{
 								FieldIsEqual("id", OperandInteger, int64(69)),
@@ -207,10 +207,10 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"foo@example.com"},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: []Column{secondaryIndexColumn},
+						IndexKeys:    []any{"foo@example.com"},
 						Filters: OneOrMore{
 							{
 								FieldIsEqual("id", OperandInteger, int64(42)),
@@ -218,11 +218,11 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 						},
 					},
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"bar@example.com"},
-						Filters:         OneOrMore{{}},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: []Column{secondaryIndexColumn},
+						IndexKeys:    []any{"bar@example.com"},
+						Filters:      OneOrMore{{}},
 					},
 				},
 			},
@@ -240,11 +240,11 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"foo@example.com", "bar@example.com"},
-						Filters:         OneOrMore{{}},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: []Column{secondaryIndexColumn},
+						IndexKeys:    []any{"foo@example.com", "bar@example.com"},
+						Filters:      OneOrMore{{}},
 					},
 				},
 			},
@@ -334,9 +334,9 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexAll,
-						IndexName:       indexName,
-						IndexColumnName: "email",
+						Type:         ScanTypeIndexAll,
+						IndexName:    indexName,
+						IndexColumns: []Column{secondaryIndexColumn},
 					},
 				},
 				SortReverse: true,
@@ -368,10 +368,10 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexPoint,
-						IndexName:       indexName,
-						IndexColumnName: "email",
-						IndexKeys:       []any{"foo@example.com", "bar@example.com"},
+						Type:         ScanTypeIndexPoint,
+						IndexName:    indexName,
+						IndexColumns: []Column{secondaryIndexColumn},
+						IndexKeys:    []any{"foo@example.com", "bar@example.com"},
 						Filters: OneOrMore{{
 							FieldIsEqual("id", OperandInteger, int64(42)),
 						}},
@@ -402,9 +402,9 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexRange,
-						IndexName:       indexName,
-						IndexColumnName: "email",
+						Type:         ScanTypeIndexRange,
+						IndexName:    indexName,
+						IndexColumns: []Column{secondaryIndexColumn},
 						RangeCondition: RangeCondition{
 							Lower: &RangeBound{
 								Value:     "foo@example.com",
@@ -439,9 +439,9 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexRange,
-						IndexName:       indexName,
-						IndexColumnName: "email",
+						Type:         ScanTypeIndexRange,
+						IndexName:    indexName,
+						IndexColumns: []Column{secondaryIndexColumn},
 						RangeCondition: RangeCondition{
 							Lower: &RangeBound{
 								Value:     "foo@example.com",
@@ -450,9 +450,9 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 						},
 					},
 					{
-						Type:            ScanTypeIndexRange,
-						IndexName:       indexName,
-						IndexColumnName: "email",
+						Type:         ScanTypeIndexRange,
+						IndexName:    indexName,
+						IndexColumns: []Column{secondaryIndexColumn},
 						RangeCondition: RangeCondition{
 							Upper: &RangeBound{
 								Value: "qux@example.com",
@@ -485,9 +485,9 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type:            ScanTypeIndexRange,
-						IndexName:       indexName,
-						IndexColumnName: "email",
+						Type:         ScanTypeIndexRange,
+						IndexName:    indexName,
+						IndexColumns: []Column{secondaryIndexColumn},
 						RangeCondition: RangeCondition{
 							Lower: &RangeBound{
 								Value:     "foo@example.com",

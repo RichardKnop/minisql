@@ -495,15 +495,6 @@ func (p *parserItem) validate(stmt minisql.Statement) error {
 		if len(stmt.Columns) == 0 {
 			return errCreateTableNoColumns
 		}
-		primareKeysNum := 0
-		for _, aColumn := range stmt.Columns {
-			if aColumn.PrimaryKey {
-				primareKeysNum++
-			}
-		}
-		if primareKeysNum > 1 {
-			return errCreateTableMultiplePrimaryKeys
-		}
 	}
 	for _, aConditionGroup := range stmt.Conditions {
 		for _, aCondition := range aConditionGroup {

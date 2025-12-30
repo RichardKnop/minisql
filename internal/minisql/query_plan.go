@@ -50,12 +50,12 @@ type QueryPlan struct {
 }
 
 type Scan struct {
-	Type            ScanType
-	IndexName       string
-	IndexColumnName string
-	IndexKeys       []any          // Keys to lookup in index
-	RangeCondition  RangeCondition // upper/lower bounds for range scan
-	Filters         OneOrMore      // Additional filters to apply
+	Type           ScanType
+	IndexName      string
+	IndexColumns   []Column
+	IndexKeys      []any          // Keys to lookup in index
+	RangeCondition RangeCondition // upper/lower bounds for range scan
+	Filters        OneOrMore      // Additional filters to apply
 }
 
 /*
@@ -177,7 +177,7 @@ func (p QueryPlan) optimizeOrdering(t *Table) QueryPlan {
 			// Use PK index for ordering
 			p.Scans[0].Type = ScanTypeIndexAll
 			p.Scans[0].IndexName = info.Name
-			p.Scans[0].IndexColumnName = info.Column.Name
+			p.Scans[0].IndexColumns = info.Columns
 			p.SortInMemory = false
 			return p
 		}
@@ -210,6 +210,11 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 		otherIndexes  = make(map[int][]IndexInfo)
 		indexKeys     = make(map[int][]any)
 	)
+
+	uniqueKeys := make(map[string]struct{})
+	for _, uniqueIndex := range t.UniqueIndexes {
+		uniqueKeys[uniqueIndex.Columns[0].Name] = struct{}{}
+	}
 
 	// Each group is separated by OR, for example:
 	// (a = 1 AND b = 2) OR (a = 3 AND b = 4)
@@ -252,7 +257,7 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 				}
 
 				indexKeys[groupIDx] = keys
-			} else if aColumn.Name == t.PrimaryKey.Column.Name {
+			} else if aColumn.Name == t.PrimaryKey.Columns[0].Name {
 				// Prefer primary key index if available
 				equalityIndex[groupIDx] = info
 				equalityCond[groupIDx] = condIdx
@@ -263,7 +268,7 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 				}
 
 				indexKeys[groupIDx] = keys
-			} else if aColumn.Unique {
+			} else if _, ok := uniqueKeys[aColumn.Name]; ok {
 				_, ok := t.SecondaryIndexes[equalityIndex[groupIDx].Name]
 				if ok {
 					// Prefer unique index over secondary index
@@ -306,11 +311,11 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 				}
 			}
 			indexScans = append(indexScans, Scan{
-				Type:            ScanTypeIndexPoint,
-				IndexName:       equalityIndex.Name,
-				IndexColumnName: equalityIndex.Column.Name,
-				IndexKeys:       indexKeys[groupIdx],
-				Filters:         OneOrMore{filters},
+				Type:         ScanTypeIndexPoint,
+				IndexName:    equalityIndex.Name,
+				IndexColumns: equalityIndex.Columns,
+				IndexKeys:    indexKeys[groupIdx],
+				Filters:      OneOrMore{filters},
 			})
 			continue
 		}
@@ -430,7 +435,7 @@ func tryRangeScan(indexInfo IndexInfo, filters Conditions) (Scan, bool, error) {
 		}
 
 		fieldName, ok := aCondition.Operand1.Value.(string)
-		if !ok || fieldName != indexInfo.Column.Name {
+		if !ok || fieldName != indexInfo.Columns[0].Name {
 			remainingFilters = append(remainingFilters, aCondition)
 			continue
 		}
@@ -451,7 +456,7 @@ func tryRangeScan(indexInfo IndexInfo, filters Conditions) (Scan, bool, error) {
 			return Scan{}, false, nil
 		}
 
-		conditionValue, err := castKeyValue(indexInfo.Column, aCondition.Operand2.Value)
+		conditionValue, err := castKeyValue(indexInfo.Columns[0], aCondition.Operand2.Value)
 		if err != nil {
 			return Scan{}, false, err
 		}
@@ -514,10 +519,10 @@ func tryRangeScan(indexInfo IndexInfo, filters Conditions) (Scan, bool, error) {
 
 	// Create range scan plan
 	aScan := Scan{
-		Type:            ScanTypeIndexRange,
-		IndexName:       indexInfo.Name,
-		IndexColumnName: indexInfo.Column.Name,
-		RangeCondition:  rangeCondition,
+		Type:           ScanTypeIndexRange,
+		IndexName:      indexInfo.Name,
+		IndexColumns:   indexInfo.Columns,
+		RangeCondition: rangeCondition,
 	}
 	if len(remainingFilters) > 0 {
 		aScan.Filters = OneOrMore{remainingFilters}

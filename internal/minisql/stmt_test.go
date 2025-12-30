@@ -341,14 +341,12 @@ func TestStatement_Prepare_Update(t *testing.T) {
 func TestStatement_Prepare_CreateTable(t *testing.T) {
 	t.Parallel()
 
-	stmt := Statement{
-		Kind: CreateTable,
-		Columns: []Column{
+	var (
+		columns = []Column{
 			{
-				Kind:       Int8,
-				Size:       8,
-				Name:       "id",
-				PrimaryKey: true,
+				Kind: Int8,
+				Size: 8,
+				Name: "id",
 			},
 			{
 				Kind:         Timestamp,
@@ -356,8 +354,13 @@ func TestStatement_Prepare_CreateTable(t *testing.T) {
 				Name:         "created",
 				DefaultValue: OptionalValue{Value: NewTextPointer([]byte("0001-01-01 00:00:00")), Valid: true},
 			},
-		},
-	}
+		}
+		stmt = Statement{
+			Kind:       CreateTable,
+			Columns:    columns,
+			PrimaryKey: NewPrimaryKey("pkey__tablename", columns[0:1], false),
+		}
+	)
 
 	_, ok := stmt.Columns[1].DefaultValue.Value.(Time)
 	assert.False(t, ok)
@@ -402,43 +405,19 @@ func TestStatement_Validate(t *testing.T) {
 		}
 		aTable = NewTable(zap.NewNop(), nil, nil, testTableName, columns, 0)
 
-		pkColumns = []Column{
-			{
-				Kind:       Int8,
-				Size:       8,
-				Name:       "id",
-				PrimaryKey: true,
-			},
-			{
-				Kind: Varchar,
-				Size: MaxInlineVarchar,
-				Name: "email",
-			},
-		}
-		aTableWithPK = NewTable(zap.NewNop(), nil, nil, testTableName, pkColumns, 0)
+		aTableWithPK = NewTable(zap.NewNop(), nil, nil, testTableName, columns[0:2], 0, WithPrimaryKey(
+			NewPrimaryKey("foo", columns[0:1], false),
+		))
 
-		pkAutoIncColumns = []Column{
-			{
-				Kind:          Int8,
-				Size:          8,
-				Name:          "id",
-				PrimaryKey:    true,
-				Autoincrement: true,
-			},
-			{
-				Kind: Varchar,
-				Size: MaxInlineVarchar,
-				Name: "email",
-			},
-		}
-		aTableWithAutoincrementPK = NewTable(zap.NewNop(), nil, nil, testTableName, pkAutoIncColumns, 0)
+		aTableWithAutoincrementPK = NewTable(zap.NewNop(), nil, nil, testTableName, columns[0:2], 0, WithPrimaryKey(
+			NewPrimaryKey("foo", columns[0:1], true),
+		))
 
 		defaultValueColumns = []Column{
 			{
-				Kind:       Int8,
-				Size:       8,
-				Name:       "id",
-				PrimaryKey: true,
+				Kind: Int8,
+				Size: 8,
+				Name: "id",
 			},
 			{
 				Kind:         Varchar,
@@ -453,7 +432,9 @@ func TestStatement_Validate(t *testing.T) {
 				DefaultValue: OptionalValue{Value: "0001-01-01 00:00:00", Valid: true},
 			},
 		}
-		aTableWithDefaultValue = NewTable(zap.NewNop(), nil, nil, testTableName, defaultValueColumns, 0)
+		aTableWithDefaultValue = NewTable(zap.NewNop(), nil, nil, testTableName, defaultValueColumns, 0, WithPrimaryKey(
+			NewPrimaryKey(PrimaryKeyName(testTableName), defaultValueColumns[0:1], false),
+		))
 	)
 
 	t.Run("CREATE TABLE without table name should fail", func(t *testing.T) {
@@ -501,40 +482,19 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, "potential row size exceeds maximum allowed 4065")
 	})
 
-	t.Run("CREATE TABLE with multiple primary keys should fail", func(t *testing.T) {
-		stmt := Statement{
-			Kind:      CreateTable,
-			TableName: testTableName,
-			Columns: []Column{
-				{
-					Kind:       Int8,
-					PrimaryKey: true,
-					Name:       "id1",
-				},
-				{
-					Kind:       Int8,
-					PrimaryKey: true,
-					Name:       "id2",
-				},
+	t.Run("CREATE TABLE with nullable primary key should fail", func(t *testing.T) {
+		columns := []Column{
+			{
+				Name:     "id",
+				Kind:     Int8,
+				Nullable: true,
 			},
 		}
-
-		err := stmt.Validate(nil)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, "only one primary key column is supported")
-	})
-
-	t.Run("CREATE TABLE with nullable primary key should fail", func(t *testing.T) {
 		stmt := Statement{
-			Kind:      CreateTable,
-			TableName: testTableName,
-			Columns: []Column{
-				{
-					Kind:       Int8,
-					Nullable:   true,
-					PrimaryKey: true,
-				},
-			},
+			Kind:       CreateTable,
+			TableName:  testTableName,
+			Columns:    columns,
+			PrimaryKey: NewPrimaryKey("foo", columns[0:1], false),
 		}
 
 		err := stmt.Validate(nil)
@@ -543,15 +503,17 @@ func TestStatement_Validate(t *testing.T) {
 	})
 
 	t.Run("CREATE TABLE with TEXT primary key should fail", func(t *testing.T) {
-		stmt := Statement{
-			Kind:      CreateTable,
-			TableName: testTableName,
-			Columns: []Column{
-				{
-					Kind:       Text,
-					PrimaryKey: true,
-				},
+		columns := []Column{
+			{
+				Name: "id",
+				Kind: Text,
 			},
+		}
+		stmt := Statement{
+			Kind:       CreateTable,
+			TableName:  testTableName,
+			Columns:    columns,
+			PrimaryKey: NewPrimaryKey("foo", columns[0:1], false),
 		}
 
 		err := stmt.Validate(nil)
@@ -560,16 +522,18 @@ func TestStatement_Validate(t *testing.T) {
 	})
 
 	t.Run("CREATE TABLE with VARCHAR primary key exceeding max size should fail", func(t *testing.T) {
-		stmt := Statement{
-			Kind:      CreateTable,
-			TableName: testTableName,
-			Columns: []Column{
-				{
-					Kind:       Varchar,
-					PrimaryKey: true,
-					Size:       300,
-				},
+		columns := []Column{
+			{
+				Name: "id",
+				Kind: Varchar,
+				Size: 300,
 			},
+		}
+		stmt := Statement{
+			Kind:       CreateTable,
+			TableName:  testTableName,
+			Columns:    columns,
+			PrimaryKey: NewPrimaryKey("foo", columns[0:1], false),
 		}
 
 		err := stmt.Validate(nil)
@@ -578,16 +542,17 @@ func TestStatement_Validate(t *testing.T) {
 	})
 
 	t.Run("CREATE TABLE with autoincrement primary key of invalid type should fail", func(t *testing.T) {
-		stmt := Statement{
-			Kind:      CreateTable,
-			TableName: testTableName,
-			Columns: []Column{
-				{
-					Kind:          Real,
-					PrimaryKey:    true,
-					Autoincrement: true,
-				},
+		columns := []Column{
+			{
+				Name: "id",
+				Kind: Real,
 			},
+		}
+		stmt := Statement{
+			Kind:       CreateTable,
+			TableName:  testTableName,
+			Columns:    columns[0:1],
+			PrimaryKey: NewPrimaryKey("foo", columns[0:1], true),
 		}
 
 		err := stmt.Validate(nil)
@@ -596,33 +561,48 @@ func TestStatement_Validate(t *testing.T) {
 	})
 
 	t.Run("CREATE TABLE with more than one index on a column should fail", func(t *testing.T) {
+		columns := []Column{
+			{
+				Name: "id",
+				Kind: Varchar,
+				Size: MaxInlineVarchar,
+			},
+		}
 		stmt := Statement{
-			Kind:      CreateTable,
-			TableName: testTableName,
-			Columns: []Column{
+			Kind:       CreateTable,
+			TableName:  testTableName,
+			Columns:    columns,
+			PrimaryKey: NewPrimaryKey("pk__users", columns[0:1], false),
+			UniqueIndexes: []UniqueIndex{
 				{
-					Name:       "foo",
-					Kind:       Varchar,
-					Size:       MaxInlineVarchar,
-					PrimaryKey: true,
-					Unique:     true,
+					IndexInfo: IndexInfo{
+						Columns: columns[0:1],
+					},
 				},
 			},
 		}
 
 		err := stmt.Validate(nil)
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "column foo can only have one index")
+		assert.ErrorContains(t, err, "column id can only have one index")
 	})
 
 	t.Run("CREATE TABLE with TEXT unique key should fail", func(t *testing.T) {
+		columns := []Column{
+			{
+				Name: "id",
+				Kind: Text,
+			},
+		}
 		stmt := Statement{
 			Kind:      CreateTable,
 			TableName: testTableName,
-			Columns: []Column{
+			Columns:   columns,
+			UniqueIndexes: []UniqueIndex{
 				{
-					Kind:   Text,
-					Unique: true,
+					IndexInfo: IndexInfo{
+						Columns: columns[0:1],
+					},
 				},
 			},
 		}
@@ -633,14 +613,22 @@ func TestStatement_Validate(t *testing.T) {
 	})
 
 	t.Run("CREATE TABLE with VARCHAR unique key exceeding max size should fail", func(t *testing.T) {
+		columns := []Column{
+			{
+				Name: "id",
+				Kind: Varchar,
+				Size: 300,
+			},
+		}
 		stmt := Statement{
 			Kind:      CreateTable,
 			TableName: testTableName,
-			Columns: []Column{
+			Columns:   columns,
+			UniqueIndexes: []UniqueIndex{
 				{
-					Kind:   Varchar,
-					Unique: true,
-					Size:   300,
+					IndexInfo: IndexInfo{
+						Columns: columns[0:1],
+					},
 				},
 			},
 		}
@@ -663,9 +651,10 @@ func TestStatement_Validate(t *testing.T) {
 
 	t.Run("CREATE TABLE with primary key should succeed", func(t *testing.T) {
 		stmt := Statement{
-			Kind:      CreateTable,
-			TableName: testTableName,
-			Columns:   testColumnsWithPrimaryKey,
+			Kind:       CreateTable,
+			TableName:  testTableName,
+			Columns:    columns[0:2],
+			PrimaryKey: NewPrimaryKey("foo", columns[0:1], false),
 		}
 
 		err := stmt.Validate(nil)
@@ -1397,7 +1386,7 @@ func TestStatement_ValidateColumnValue(t *testing.T) {
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.name, func(t *testing.T) {
 			stmt := Statement{}
-			err := stmt.validateColumnValue(aTestCase.column, aTestCase.insertValue)
+			err := stmt.validateColumnValue(&Table{}, aTestCase.column, aTestCase.insertValue)
 			if aTestCase.err == "" {
 				require.NoError(t, err)
 				return
@@ -1412,49 +1401,55 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 	t.Parallel()
 
 	t.Run("table with all data types and nullable columns", func(t *testing.T) {
+		columns := []Column{
+			{
+				Kind: Int8,
+				Size: 8,
+				Name: "id",
+			},
+			{
+				Kind:     Varchar,
+				Size:     MaxInlineVarchar,
+				Name:     "email",
+				Nullable: true,
+			},
+			{
+				Kind:     Int4,
+				Size:     4,
+				Name:     "age",
+				Nullable: true,
+			},
+			{
+				Kind:         Boolean,
+				Size:         1,
+				Name:         "verified",
+				Nullable:     false,
+				DefaultValue: OptionalValue{Value: false, Valid: true},
+			},
+			{
+				Kind:     Real,
+				Size:     4,
+				Name:     "score",
+				Nullable: true,
+			},
+			{
+				Kind:            Timestamp,
+				Size:            8,
+				Name:            "created",
+				Nullable:        true,
+				DefaultValueNow: true,
+			},
+		}
 		stmt := Statement{
-			Kind:      CreateTable,
-			TableName: "users",
-			Columns: []Column{
+			Kind:       CreateTable,
+			TableName:  "users",
+			Columns:    columns,
+			PrimaryKey: NewPrimaryKey("pk_users", columns[0:1], true),
+			UniqueIndexes: []UniqueIndex{
 				{
-					Kind:          Int8,
-					Size:          8,
-					Name:          "id",
-					PrimaryKey:    true,
-					Autoincrement: true,
-				},
-				{
-					Kind:     Varchar,
-					Size:     MaxInlineVarchar,
-					Name:     "email",
-					Nullable: true,
-					Unique:   true,
-				},
-				{
-					Kind:     Int4,
-					Size:     4,
-					Name:     "age",
-					Nullable: true,
-				},
-				{
-					Kind:         Boolean,
-					Size:         1,
-					Name:         "verified",
-					Nullable:     false,
-					DefaultValue: OptionalValue{Value: false, Valid: true},
-				},
-				{
-					Kind:     Real,
-					Size:     4,
-					Name:     "score",
-					Nullable: true,
-				},
-				{
-					Kind:            Timestamp,
-					Size:            8,
-					Name:            "created",
-					Nullable:        true,
-					DefaultValueNow: true,
+					IndexInfo: IndexInfo{
+						Columns: columns[1:2],
+					},
 				},
 			},
 		}

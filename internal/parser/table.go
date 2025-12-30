@@ -96,10 +96,8 @@ func (p *parserItem) doParseCreateTable() error {
 			p.step = stepCreateTableColumnNullNotNull
 			return nil
 		}
-		for _, col := range p.Columns {
-			if col.PrimaryKey {
-				return errCreateTableMultiplePrimaryKeys
-			}
+		if len(p.PrimaryKey.Columns) > 0 {
+			return errCreateTableMultiplePrimaryKeys
 		}
 		aColumn := p.Columns[len(p.Columns)-1]
 		if aColumn.Kind == minisql.Text {
@@ -109,9 +107,10 @@ func (p *parserItem) doParseCreateTable() error {
 			return errCreateTablePrimaryKeyVarcharTooLarge
 		}
 		if primaryKey == "PRIMARY KEY AUTOINCREMENT" {
-			p.Columns[len(p.Columns)-1].Autoincrement = true
+			p.PrimaryKey.Autoincrement = true
 		}
-		p.Columns[len(p.Columns)-1].PrimaryKey = true
+		p.PrimaryKey.Name = minisql.PrimaryKeyName(p.TableName)
+		p.PrimaryKey.Columns = append(p.PrimaryKey.Columns, p.Columns[len(p.Columns)-1])
 		p.Columns[len(p.Columns)-1].Nullable = false
 		p.pop()
 		p.step = stepCreateTableCommaOrClosingParens
@@ -142,7 +141,12 @@ func (p *parserItem) doParseCreateTable() error {
 		if aColumn.Kind == minisql.Varchar && aColumn.Size > minisql.MaxIndexKeySize {
 			return errCreateTableUniqueVarcharTooLarge
 		}
-		p.Columns[len(p.Columns)-1].Unique = true
+		p.UniqueIndexes = append(p.UniqueIndexes, minisql.UniqueIndex{
+			IndexInfo: minisql.IndexInfo{
+				Name:    minisql.UniqueIndexName(p.TableName, aColumn.Name),
+				Columns: p.Columns[len(p.Columns)-1 : len(p.Columns)],
+			},
+		})
 		p.pop()
 		p.step = stepCreateTableCommaOrClosingParens
 	case stepCreateTableColumnDefaultValue:
