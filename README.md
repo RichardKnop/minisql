@@ -4,13 +4,6 @@
 
 [![Donate Bitcoin](https://img.shields.io/badge/donate-bitcoin-orange.svg)](https://richardknop.github.io/donate/)
 
-Shout out to some great repos and other resources that were invaluable while figuring out how to get this all working together:
-- [Let's Build a Simple Database](https://cstack.github.io/db_tutorial/parts/part1.html)
-- [go-sqldb](https://github.com/auxten/go-sqldb)
-- [sqlparser](https://github.com/marianogappa/sqlparser)
-- [sqlite docs](https://www.sqlite.org/fileformat2.html) (section about file format has been especially useful)
-- [C++ implementation of B+ tree](https://github.com/sayef/bplus-tree)
-
 To use minisql in your Go code, import the driver:
 
 ```go
@@ -236,6 +229,7 @@ if err := rows.Err(); err != nil {
 - simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis
 - supported operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`
 - `LIMIT` and `OFFSET` clauses for basic pagination
+- `ORDER BY` supported for a single column only
 
 For `WHERE` clauses, currently supported is maximum one level of nesting. You can define multiple groups where each group item is joined with `AND` and groups themselves are joined by `OR`. For example, you could create two condition groups such as:
 
@@ -501,3 +495,12 @@ go test -mutexprofile=mutex.prof -bench=BenchmarkConcurrent -benchtime=10s ./e2e
 go tool pprof -top mutex.prof | head -25
 
 ```
+
+## Acknowledgements 
+
+Shout out to some great repos and other resources that were invaluable while figuring out how to get this all working together:
+- [Let's Build a Simple Database](https://cstack.github.io/db_tutorial/parts/part1.html)
+- [go-sqldb](https://github.com/auxten/go-sqldb)
+- [sqlparser](https://github.com/marianogappa/sqlparser)
+- [sqlite docs](https://www.sqlite.org/fileformat2.html) (section about file format has been especially useful)
+- [C++ implementation of B+ tree](https://github.com/sayef/bplus-tree)
