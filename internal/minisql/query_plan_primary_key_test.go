@@ -59,7 +59,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 			},
 		},
 		{
-			"Single unique index key equality condition but NULL - sequential scan",
+			"Single primary key equality condition but NULL - sequential scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
@@ -82,7 +82,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 			},
 		},
 		{
-			"Single unique index key equality condition - index point scan",
+			"Single primary key equality condition - index point scan",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{

@@ -58,48 +58,70 @@ type Scan struct {
 	Filters         OneOrMore      // Additional filters to apply
 }
 
-// FilterRow applies filtering on scanned rows according to filters
-func (s Scan) FilterRow(aRow Row) (bool, error) {
-	ok, err := aRow.CheckOneOrMore(s.Filters)
-	if err != nil {
-		return false, err
-	}
-	return ok, nil
-}
+/*
+PlanQuery creates a query plan based on the statement and table schema.
+This is in no way a sophisticated query planner, but a simple heuristic-based approach
+to determine whether an index scan can be used based on the WHERE conditions.
 
-func (p QueryPlan) Execute(ctx context.Context, t *Table, selectedFields []Field, filteredPipe chan<- Row) error {
-	if len(p.Scans) == 1 {
-		switch p.Scans[0].Type {
-		case ScanTypeIndexAll:
-			return t.indexScanAll(ctx, p, p.Scans[0], selectedFields, filteredPipe)
-		case ScanTypeIndexRange:
-			return t.indexRangeScan(ctx, p.Scans[0], selectedFields, filteredPipe)
-		case ScanTypeIndexPoint:
-			return t.indexPointScan(ctx, p.Scans[0], selectedFields, filteredPipe)
-		case ScanTypeSequential:
-			return t.sequentialScan(ctx, p.Scans[0], selectedFields, filteredPipe)
-		default:
-			return fmt.Errorf("unhandled scan type in single scan: %d", p.Scans[0].Type)
-		}
-	}
-	for _, aScan := range p.Scans {
-		switch aScan.Type {
-		case ScanTypeIndexRange:
-			if err := t.indexRangeScan(ctx, aScan, selectedFields, filteredPipe); err != nil {
-				return err
-			}
-		case ScanTypeIndexPoint:
-			if err := t.indexPointScan(ctx, aScan, selectedFields, filteredPipe); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("unhandled scan type in single scan: %d", aScan.Type)
-		}
-	}
-	return nil
-}
+Consider a table with the following schema:
+CREATE TABLE users (
 
-// PlanQuery creates a query plan based on the statement and table schema
+	id INTEGER PRIMARY KEY,
+	email TEXT UNIQUE,
+	non_indexed_col TEXT,
+	created TIMESTAMP DEFAULT NOW()
+
+);
+CREATE INDEX "idx_created" ON "users" (created);
+
+If we select without a WHERE clause, we default to a sequential scan:
+SELECT * from users;
+
+If a WHERE clause cannot be fully satisfied by an index or combination of indexes,
+we fall back to a sequential scan.
+
+Remeber that if you have multiple conditions separated by OR, if a single one does not use
+an index, we have to do a sequential scan anyway. Also remember that non equality conditions
+using != or NOT IN or conditions comparing to NULL cannot use indexes.
+
+SEQUENTIAL SCANS:
+-----------------
+SELECT * from users WHERE non_indexed_col = 'baz';
+SELECT * from users WHERE id = 1 OR non_indexed_col = 'baz';
+SELECT * FROM users WHERE id = 1 OR id IS NULL;
+SELECT * FROM users WHERE pk NOT IN (1,2,3);
+
+INDEX POINT SCANS:
+------------------
+When there are only equality conditions on indexed columns (primary key or unique indexes),
+we can do index point scans:
+
+SELECT * from users WHERE id = 1; - single point scan on PK index
+SELECT * from users WHERE id IN (1, 2, 3); - single point scan on PK index
+SELECT * from users WHERE email = 'foo@example.com'; - single point scan on unique index
+SELECT * FROM users WHERE id = 1 OR id id = 2 OR email = 'foo@example.com'; - multiple point scans
+
+RANGE SCANS:
+------------
+For >, >=, <, <= conditions on indexed columns, we can do range scans:
+
+SELECT * FROM users WHERE id > 10 AND id < 20 AND non_indexed_col = 'baz'; - range scan on PK index
+
+For OR conditions, we can do multiple range scans if each condition group has a range condition.
+For example, following query can be executed as two range scans, one on PK column and one on secondary index:
+
+SELECT * FROM users WHERE (id >= 10 AND id <= 20) OR created >= '2024-01-01';
+
+When combining range scans with ordering, we currently fall back to in-memory sort:
+
+SELECT * FROM users WHERE id >= 10 AND id <= 20 ORDER BY created DESC;
+
+ORDER BY:
+---------
+SELECT * from users ORDER BY id DESC; - use PK index for ordering
+SELECT * from users ORDER BY created DESC; - use index on created for ordering
+SELECT * from users ORDER BY non_indexed_col; - order in memory
+*/
 func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error) {
 	// By default, assume we are doing a single sequential scan
 	plan := QueryPlan{
@@ -501,4 +523,45 @@ func tryRangeScan(indexInfo IndexInfo, filters Conditions) (Scan, bool, error) {
 		aScan.Filters = OneOrMore{remainingFilters}
 	}
 	return aScan, true, nil
+}
+
+func (p QueryPlan) Execute(ctx context.Context, t *Table, selectedFields []Field, filteredPipe chan<- Row) error {
+	if len(p.Scans) == 1 {
+		switch p.Scans[0].Type {
+		case ScanTypeIndexAll:
+			return t.indexScanAll(ctx, p, p.Scans[0], selectedFields, filteredPipe)
+		case ScanTypeIndexRange:
+			return t.indexRangeScan(ctx, p.Scans[0], selectedFields, filteredPipe)
+		case ScanTypeIndexPoint:
+			return t.indexPointScan(ctx, p.Scans[0], selectedFields, filteredPipe)
+		case ScanTypeSequential:
+			return t.sequentialScan(ctx, p.Scans[0], selectedFields, filteredPipe)
+		default:
+			return fmt.Errorf("unhandled scan type in single scan: %d", p.Scans[0].Type)
+		}
+	}
+	for _, aScan := range p.Scans {
+		switch aScan.Type {
+		case ScanTypeIndexRange:
+			if err := t.indexRangeScan(ctx, aScan, selectedFields, filteredPipe); err != nil {
+				return err
+			}
+		case ScanTypeIndexPoint:
+			if err := t.indexPointScan(ctx, aScan, selectedFields, filteredPipe); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unhandled scan type in single scan: %d", aScan.Type)
+		}
+	}
+	return nil
+}
+
+// FilterRow applies filtering on scanned rows according to filters
+func (s Scan) FilterRow(aRow Row) (bool, error) {
+	ok, err := aRow.CheckOneOrMore(s.Filters)
+	if err != nil {
+		return false, err
+	}
+	return ok, nil
 }
