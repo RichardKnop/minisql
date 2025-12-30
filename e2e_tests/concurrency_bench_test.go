@@ -72,6 +72,10 @@ func BenchmarkConcurrentReads(b *testing.B) {
 	require.NoError(b, err)
 	defer db.Close()
 
+	// Embedded database - use single connection to avoid pool contention
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
 	// Create table
 	_, err = db.Exec(createUsersTableSQL)
 	require.NoError(b, err)
@@ -86,7 +90,7 @@ func BenchmarkConcurrentReads(b *testing.B) {
 	stmt, err := tx.Prepare(`insert into users("email", "name") values(?, ?);`)
 	require.NoError(b, err)
 
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		email := fmt.Sprintf("user%d@example.com", i)
 		name := faker.Name()
 		_, err := stmt.Exec(email, name)
@@ -99,23 +103,22 @@ func BenchmarkConcurrentReads(b *testing.B) {
 	err = tx.Commit()
 	require.NoError(b, err)
 
+	// Prepare statement once and reuse it (avoids connection pool overhead)
+	readStmt, err := db.Prepare(`select * from users where id = ?;`)
+	require.NoError(b, err)
+	defer readStmt.Close()
+
 	b.ResetTimer()
 
 	// Concurrent reads
 	b.RunParallel(func(pb *testing.PB) {
 		i := 1
 		for pb.Next() {
-			stmt, err := db.Prepare(`select * from users where id = ?;`)
-			require.NoError(b, err)
-
 			var id int64
 			var email, name sql.NullString
 			var created sql.NullTime
 
-			err = stmt.QueryRow(int64((i%1000)+1)).Scan(&id, &email, &name, &created)
-			require.NoError(b, err)
-
-			err = stmt.Close()
+			err := readStmt.QueryRow(int64((i%1000)+1)).Scan(&id, &email, &name, &created)
 			require.NoError(b, err)
 
 			i++

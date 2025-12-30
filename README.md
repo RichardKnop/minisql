@@ -32,6 +32,22 @@ db, err := sql.Open("minisql", "./my.db?journal=false")
 db, err := sql.Open("minisql", "./my.db?journal=true&log_level=debug")
 ```
 
+## Connection Pooling
+
+**MiniSQL is an embedded, single-file database (like SQLite).** Always configure your connection pool to use a single connection and serialize all writes through it.
+
+```go
+db.SetMaxOpenConns(1)
+db.SetMaxIdleConns(1)
+```
+
+**Why?** Multiple connections to the same file cause:
+- Lock contention at the OS level
+- Connection pool overhead (97% lock time in benchmarks)
+- No performance benefit (writes are serialized anyway)
+
+This is the same recommendation as SQLite.
+
 ## Connection String Parameters
 
 MiniSQL supports optional connection string parameters:
@@ -469,14 +485,12 @@ go test -bench=BenchmarkFlush -benchmem -benchtime=5s ./internal/minisql 2>&1 | 
 go test -bench=BenchmarkFlush -benchmem -benchtime=3s ./internal/minisql 2>&1 | grep -E "(Benchmark|B/op)"
 go test -bench=BenchmarkPageAccess -benchmem ./internal/minisql 2>&1 | grep -E "Benchmark|alloc"
 
-go test -cpuprofile=cpu.prof -bench=BenchmarkConcurrentReads -benchtime=5s ./e2e_tests 2>&1 | tail -15
-go tool pprof -top -cum cpu.prof 2>&1 | head -50
-go tool pprof -list="github.com/RichardKnop/minisql" cpu.prof 2>&1 | grep -E "Total:|ROUTINE|flat|github.com/RichardKnop" | head -100
-go tool pprof -top cpu.prof 2>&1 | grep -E "minisql" | head -30
-
 # CPU profile concurrent workload
 go test -cpuprofile=cpu.prof -bench=BenchmarkConcurrent -benchtime=10s ./e2e_tests
 go tool pprof -top cpu.prof | head -30
+
+# When CPU profile is dominated by runtime scheduling overhead, look at specific database operations
+go tool pprof -cum -top cpu_reads.prof | grep "minisql" | head -20
 
 # Memory profile
 go test -memprofile=mem.prof -bench=BenchmarkConcurrent -benchtime=10s ./e2e_tests  
@@ -484,6 +498,6 @@ go tool pprof -alloc_space -top mem.prof | head -30
 
 # Mutex contention
 go test -mutexprofile=mutex.prof -bench=BenchmarkConcurrent -benchtime=10s ./e2e_tests
-go tool pprof -top mutex.prof
+go tool pprof -top mutex.prof | head -25
 
 ```

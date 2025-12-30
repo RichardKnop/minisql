@@ -24,15 +24,9 @@ func init() {
 
 // Driver implements the database/sql/driver.Driver interface.
 type Driver struct {
-	mu      sync.Mutex
-	dbEntry *databaseEntry
-	parser  minisql.Parser
-	logger  *zap.Logger
-}
-
-type databaseEntry struct {
-	db     *minisql.Database
-	config *ConnectionConfig
+	mu     sync.Mutex
+	parser minisql.Parser
+	logger *zap.Logger
 }
 
 // Open returns a new connection to the database.
@@ -81,11 +75,6 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 	db, err := d.newDB(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
-	d.dbEntry = &databaseEntry{
-		db:     db,
-		config: config,
 	}
 
 	return &Conn{
