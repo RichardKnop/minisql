@@ -11,11 +11,11 @@ type UniqueIndex struct {
 	Index BTreeIndex
 }
 
-func UniqueIndexName(tableName, columnName string) string {
+func UniqueIndexName(tableName string, columns ...string) string {
 	return fmt.Sprintf(
 		"key__%s__%s",
 		tableName,
-		columnName,
+		strings.Join(columns, "__"),
 	)
 }
 

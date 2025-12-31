@@ -711,7 +711,7 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 		Type:     SchemaTable,
 		Name:     stmt.TableName,
 		RootPage: freePage.Index,
-		DDL:      stmt.CreateTableDDL(),
+		DDL:      stmt.DDL(),
 	}); err != nil {
 		return nil, err
 	}
@@ -1125,7 +1125,7 @@ func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, aTa
 		Name:      secondaryIndex.Name,
 		TableName: aTable.Name,
 		RootPage:  freePage.Index,
-		DDL:       stmt.CreateIndexDDL(),
+		DDL:       stmt.DDL(),
 	}); err != nil {
 		return nil, err
 	}

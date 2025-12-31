@@ -78,9 +78,9 @@ func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 	}
 
 	// Now, let's re-initialize the database to load existing tables
-	mockParser.On("Parse", mock.Anything, stmt.CreateTableDDL()).Return([]Statement{stmt}, nil)
-	mockParser.On("Parse", mock.Anything, stmt2.CreateTableDDL()).Return([]Statement{stmt2}, nil)
-	mockParser.On("Parse", mock.Anything, stmt3.CreateTableDDL()).Return([]Statement{stmt3}, nil)
+	mockParser.On("Parse", mock.Anything, stmt.DDL()).Return([]Statement{stmt}, nil)
+	mockParser.On("Parse", mock.Anything, stmt2.DDL()).Return([]Statement{stmt2}, nil)
+	mockParser.On("Parse", mock.Anything, stmt3.DDL()).Return([]Statement{stmt3}, nil)
 
 	aDatabase, err = NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, aPager, aPager)
 	require.NoError(t, err)
@@ -409,7 +409,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 		Columns:   append([]Column{}, testColumns...),
 	}
 
-	mockParser.On("Parse", mock.Anything, stmt.CreateTableDDL()).Return([]Statement{stmt}, nil)
+	mockParser.On("Parse", mock.Anything, stmt.DDL()).Return([]Statement{stmt}, nil)
 
 	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		_, err := aDatabase.ExecuteStatement(ctx, stmt)
@@ -494,7 +494,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 				},
 			},
 		}
-		mockParser.On("Parse", mock.Anything, createStmt.CreateIndexDDL()).Return([]Statement{createStmt}, nil).Once()
+		mockParser.On("Parse", mock.Anything, createStmt.DDL()).Return([]Statement{createStmt}, nil).Once()
 
 		deleteStmt := Statement{
 			Kind:      DropIndex,

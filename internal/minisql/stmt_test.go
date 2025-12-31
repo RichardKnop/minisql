@@ -1397,45 +1397,58 @@ func TestStatement_ValidateColumnValue(t *testing.T) {
 	}
 }
 
-func TestStatement_CreateTableDDL(t *testing.T) {
+func TestStatement_DDL(t *testing.T) {
 	t.Parallel()
 
-	t.Run("table with all data types and nullable columns", func(t *testing.T) {
+	t.Run("create table with all data types options", func(t *testing.T) {
 		columns := []Column{
+			{
+				Kind: Int4,
+				Size: 4,
+				Name: "a",
+			},
 			{
 				Kind: Int8,
 				Size: 8,
-				Name: "id",
+				Name: "b",
 			},
 			{
-				Kind:     Varchar,
-				Size:     MaxInlineVarchar,
-				Name:     "email",
-				Nullable: true,
+				Kind: Varchar,
+				Size: MaxInlineVarchar,
+				Name: "c",
 			},
 			{
-				Kind:     Int4,
-				Size:     4,
-				Name:     "age",
-				Nullable: true,
+				Kind: Text,
+				Name: "d",
 			},
 			{
 				Kind:         Boolean,
 				Size:         1,
-				Name:         "verified",
+				Name:         "e",
 				Nullable:     false,
 				DefaultValue: OptionalValue{Value: false, Valid: true},
 			},
 			{
 				Kind:     Real,
 				Size:     4,
-				Name:     "score",
+				Name:     "f",
 				Nullable: true,
+			},
+			{
+				Kind:     Real,
+				Size:     4,
+				Name:     "g",
+				Nullable: true,
+			},
+			{
+				Kind: Timestamp,
+				Size: 8,
+				Name: "h",
 			},
 			{
 				Kind:            Timestamp,
 				Size:            8,
-				Name:            "created",
+				Name:            "i",
 				Nullable:        true,
 				DefaultValueNow: true,
 			},
@@ -1448,26 +1461,29 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 			UniqueIndexes: []UniqueIndex{
 				{
 					IndexInfo: IndexInfo{
-						Columns: columns[1:2],
+						Columns: columns[2:3],
 					},
 				},
 			},
 		}
 
 		expected := `create table "users" (
-	id int8 primary key autoincrement,
-	email varchar(255) unique,
-	age int4,
-	verified boolean not null default false,
-	score real,
-	created timestamp default now()
+	a int4 primary key autoincrement,
+	b int8 not null,
+	c varchar(255) unique not null,
+	d text not null,
+	e boolean not null default false,
+	f real,
+	g real,
+	h timestamp not null,
+	i timestamp default now()
 );`
 
-		actual := stmt.CreateTableDDL()
+		actual := stmt.DDL()
 		assert.Equal(t, expected, actual)
 	})
 
-	t.Run("table with special characters in name", func(t *testing.T) {
+	t.Run("create table with special characters in name", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      CreateTable,
 			TableName: "test_table_123",
@@ -1485,35 +1501,185 @@ func TestStatement_CreateTableDDL(t *testing.T) {
 	column_with_underscore int4 not null
 );`
 
-		actual := stmt.CreateTableDDL()
+		actual := stmt.DDL()
 		assert.Equal(t, expected, actual)
 	})
-}
 
-func TestStatement_CreateIndexDDL(t *testing.T) {
-	t.Parallel()
-
-	stmt := Statement{
-		Kind:      CreateTable,
-		IndexName: "idx_users_on_foo_bar",
-		TableName: "users",
-		Columns: []Column{
+	t.Run("create table with composite primary key", func(t *testing.T) {
+		columns := []Column{
 			{
-				Name: "foo",
+				Kind:     Int4,
+				Size:     4,
+				Name:     "bar",
+				Nullable: false,
 			},
 			{
-				Name: "bar",
+				Kind:     Int4,
+				Size:     4,
+				Name:     "baz",
+				Nullable: false,
 			},
-		},
-	}
+		}
+		stmt := Statement{
+			Kind:       CreateTable,
+			TableName:  "foo",
+			Columns:    columns,
+			PrimaryKey: NewPrimaryKey("pk__foo", columns[0:2], false),
+		}
 
-	expected := `create index "idx_users_on_foo_bar" on "users" (
+		expected := `create table "foo" (
+	bar int4 not null,
+	baz int4 not null,
+	primary key (bar, baz)
+);`
+
+		actual := stmt.DDL()
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("create table with composite unique index", func(t *testing.T) {
+		columns := []Column{
+			{
+				Kind:     Int4,
+				Size:     4,
+				Name:     "bar",
+				Nullable: false,
+			},
+			{
+				Kind:     Int4,
+				Size:     4,
+				Name:     "baz",
+				Nullable: false,
+			},
+		}
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: "foo",
+			Columns:   columns,
+			UniqueIndexes: []UniqueIndex{
+				{
+					IndexInfo: IndexInfo{
+						Name:    "key__foo",
+						Columns: columns[0:2],
+					},
+				},
+			},
+		}
+
+		expected := `create table "foo" (
+	bar int4 not null,
+	baz int4 not null,
+	unique (bar, baz)
+);`
+
+		actual := stmt.DDL()
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("create table with multiple composite unique indexes", func(t *testing.T) {
+		columns := []Column{
+			{
+				Kind:     Int4,
+				Size:     4,
+				Name:     "bar",
+				Nullable: false,
+			},
+			{
+				Kind:     Int4,
+				Size:     4,
+				Name:     "baz",
+				Nullable: false,
+			},
+			{
+				Kind:     Varchar,
+				Size:     100,
+				Name:     "lorem",
+				Nullable: false,
+			},
+			{
+				Kind:     Varchar,
+				Size:     100,
+				Name:     "ipsum",
+				Nullable: false,
+			},
+		}
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: "foo",
+			Columns:   columns,
+			UniqueIndexes: []UniqueIndex{
+				{
+					IndexInfo: IndexInfo{
+						Columns: columns[0:2],
+					},
+				},
+				{
+					IndexInfo: IndexInfo{
+						Columns: columns[2:4],
+					},
+				},
+			},
+		}
+
+		expected := `create table "foo" (
+	bar int4 not null,
+	baz int4 not null,
+	lorem varchar(100) not null,
+	ipsum varchar(100) not null,
+	unique (bar, baz),
+	unique (lorem, ipsum)
+);`
+
+		actual := stmt.DDL()
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("create index single column", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateIndex,
+			IndexName: "idx_users_on_foo",
+			TableName: "users",
+			Columns: []Column{
+				{
+					Kind:     Int4,
+					Size:     4,
+					Name:     "foo",
+					Nullable: false,
+				},
+			},
+		}
+
+		expected := `create index "idx_users_on_foo" on "users" (
+	foo
+);`
+
+		actual := stmt.DDL()
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("create index multiple columns", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateIndex,
+			IndexName: "idx_users_on_foo_bar",
+			TableName: "users",
+			Columns: []Column{
+				{
+					Name: "foo",
+				},
+				{
+					Name: "bar",
+				},
+			},
+		}
+
+		expected := `create index "idx_users_on_foo_bar" on "users" (
 	foo,
 	bar
 );`
 
-	actual := stmt.CreateIndexDDL()
-	assert.Equal(t, expected, actual)
+		actual := stmt.DDL()
+		assert.Equal(t, expected, actual)
+	})
 }
 
 func TestStatement_InsertValueForColumn(t *testing.T) {

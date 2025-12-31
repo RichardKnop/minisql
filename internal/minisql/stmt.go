@@ -646,12 +646,16 @@ func (s Statement) validateCreateTable() error {
 		return fmt.Errorf("potential row size exceeds maximum allowed %d", UsablePageSize)
 	}
 
-	if len(s.CreateTableDDL()) > maximumSchemaSQL {
+	if len(s.DDL()) > maximumSchemaSQL {
 		return fmt.Errorf("table definition too long, maximum length is %d", maximumSchemaSQL)
 	}
 
 	if len(s.PrimaryKey.Columns) > 1 {
 		return fmt.Errorf("composite primary keys are not supported yet")
+	}
+
+	if len(s.PrimaryKey.Columns) > 1 && s.PrimaryKey.Autoincrement {
+		return fmt.Errorf("autoincrement primary key cannot be composite")
 	}
 
 	indexMap := map[string]struct{}{}
@@ -718,7 +722,7 @@ func (s Statement) validateCreateIndex() error {
 		return fmt.Errorf("more than one column for index is not supported")
 	}
 
-	if len(s.CreateIndexDDL()) > maximumSchemaSQL {
+	if len(s.DDL()) > maximumSchemaSQL {
 		return fmt.Errorf("index definition too long, maximum length is %d", maximumSchemaSQL)
 	}
 
@@ -1021,7 +1025,18 @@ func (s Statement) validateWhere() error {
 	return nil
 }
 
-func (s Statement) CreateTableDDL() string {
+func (s Statement) DDL() string {
+	switch s.Kind {
+	case CreateTable:
+		return s.createTableDDL()
+	case CreateIndex:
+		return s.createIndexDDL()
+	default:
+		return ""
+	}
+}
+
+func (s Statement) createTableDDL() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("create table \"%s\" (\n", s.TableName))
 
@@ -1078,6 +1093,31 @@ func (s Statement) CreateTableDDL() string {
 			sb.WriteString(",\n")
 		}
 	}
+	if len(s.PrimaryKey.Columns) > 1 {
+		sb.WriteString(",\n")
+		sb.WriteString("	primary key (")
+		for j, aColumn := range s.PrimaryKey.Columns {
+			sb.WriteString(aColumn.Name)
+			if j < len(s.PrimaryKey.Columns)-1 {
+				sb.WriteString(", ")
+			}
+		}
+		sb.WriteString(")")
+	}
+	for _, uniqueIndex := range s.UniqueIndexes {
+		if len(uniqueIndex.Columns) == 1 {
+			continue
+		}
+		sb.WriteString(",\n")
+		sb.WriteString("	unique (")
+		for j, aColumn := range uniqueIndex.Columns {
+			sb.WriteString(aColumn.Name)
+			if j < len(uniqueIndex.Columns)-1 {
+				sb.WriteString(", ")
+			}
+		}
+		sb.WriteString(")")
+	}
 
 	// TODO : add table-level constraints (composite primary keys, unique keys, foreign keys, etc.)
 
@@ -1085,15 +1125,18 @@ func (s Statement) CreateTableDDL() string {
 	return sb.String()
 }
 
-func (s Statement) CreateIndexDDL() string {
+func (s Statement) createIndexDDL() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("create index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName))
+
 	for i, col := range s.Columns {
 		sb.WriteString(fmt.Sprintf("	%s", col.Name))
+
 		if i < len(s.Columns)-1 {
 			sb.WriteString(",\n")
 		}
 	}
+
 	sb.WriteString("\n);")
 	return sb.String()
 }
