@@ -7,8 +7,11 @@ func (p *pagerImpl) ForTable(columns []Column) Pager {
 	}
 }
 
-func (p *pagerImpl) ForIndex(kind ColumnKind, unique bool) Pager {
-	switch kind {
+func (p *pagerImpl) ForIndex(columns []Column, unique bool) Pager {
+	if len(columns) > 1 {
+		return nil // Composite indexes not supported yet
+	}
+	switch columns[0].Kind {
 	case Boolean:
 		return &indexPager[int8]{p, unique}
 	case Int4:

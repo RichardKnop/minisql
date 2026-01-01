@@ -48,7 +48,7 @@ func TestTable_Delete_UniqueIndex(t *testing.T) {
 
 	txIndexPager := NewTransactionalPager(
 		aPager.ForIndex(
-			aTable.UniqueIndexes[indexName].Columns[0].Kind,
+			aTable.UniqueIndexes[indexName].Columns,
 			true,
 		),
 		aTable.txManager,
@@ -75,7 +75,7 @@ func TestTable_Delete_UniqueIndex(t *testing.T) {
 		uniqueIndex.Index, err = aTable.createBTreeIndex(
 			txIndexPager,
 			freePage,
-			aTable.UniqueIndexes[indexName].Columns[0],
+			aTable.UniqueIndexes[indexName].Columns,
 			aTable.UniqueIndexes[indexName].Name,
 			true,
 		)

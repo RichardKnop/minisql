@@ -41,7 +41,7 @@ func TestTable_Delete_PrimaryKey(t *testing.T) {
 	require.NoError(t, err)
 
 	txPrimaryKeyPager := NewTransactionalPager(
-		aPager.ForIndex(aTable.PrimaryKey.Columns[0].Kind, true),
+		aPager.ForIndex(aTable.PrimaryKey.Columns, true),
 		aTable.txManager,
 		testTableName,
 		aTable.PrimaryKey.Name,
@@ -65,7 +65,7 @@ func TestTable_Delete_PrimaryKey(t *testing.T) {
 		aTable.PrimaryKey.Index, err = aTable.createBTreeIndex(
 			txPrimaryKeyPager,
 			freePage,
-			aTable.PrimaryKey.Columns[0],
+			aTable.PrimaryKey.Columns,
 			aTable.PrimaryKey.Name,
 			true,
 		)

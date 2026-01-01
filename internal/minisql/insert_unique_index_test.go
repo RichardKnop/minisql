@@ -19,7 +19,7 @@ func TestTable_Insert_UniqueIndex(t *testing.T) {
 		rows           = gen.RowsWithUniqueIndex(100)
 		aTable         *Table
 		indexName      = UniqueIndexName(testTableName, "email")
-		indexPager     = aPager.ForIndex(Varchar, true)
+		indexPager     = aPager.ForIndex(testColumns[1:2], true)
 		txIndexPager   = NewTransactionalPager(
 			indexPager,
 			NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil),
@@ -72,7 +72,7 @@ func TestTable_Insert_UniqueIndex(t *testing.T) {
 			uniqueIndex.Index, err = aTable.createBTreeIndex(
 				txIndexPager,
 				freePage,
-				aTable.UniqueIndexes[indexName].Columns[0],
+				aTable.UniqueIndexes[indexName].Columns,
 				aTable.UniqueIndexes[indexName].Name,
 				true,
 			)

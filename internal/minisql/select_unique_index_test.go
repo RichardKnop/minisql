@@ -49,7 +49,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 	require.NoError(t, err)
 
 	var (
-		indexPager   = aPager.ForIndex(Varchar, true)
+		indexPager   = aPager.ForIndex(testColumns[1:2], true)
 		txIndexPager = NewTransactionalPager(
 			indexPager,
 			aTable.txManager,
@@ -77,7 +77,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 		uniqueIndex.Index, err = aTable.createBTreeIndex(
 			txIndexPager,
 			freePage,
-			aTable.UniqueIndexes[indexName].Columns[0],
+			aTable.UniqueIndexes[indexName].Columns,
 			aTable.UniqueIndexes[indexName].Name,
 			true,
 		)

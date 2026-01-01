@@ -16,7 +16,7 @@ type LRUCache[T any] interface {
 
 type PagerFactory interface {
 	ForTable([]Column) Pager
-	ForIndex(kind ColumnKind, unique bool) Pager
+	ForIndex(columns []Column, unique bool) Pager
 }
 
 type TxPagerFactory func(ctx context.Context, tableName, indexName string) (Pager, error)

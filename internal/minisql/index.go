@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -11,13 +12,13 @@ import (
 const MaxIndexKeySize = 255
 
 type IndexKey interface {
-	int8 | int32 | int64 | float32 | float64 | string
+	int8 | int32 | int64 | float32 | float64 | string | CompositeKey
 }
 
 type Index[T IndexKey] struct {
 	logger      *zap.Logger
 	Name        string
-	Column      Column
+	Columns     []Column
 	unique      bool
 	rootPageIdx PageIndex
 	pager       TxPager
@@ -26,25 +27,28 @@ type Index[T IndexKey] struct {
 	maximumKeys uint32
 }
 
-func NewUniqueIndex[T IndexKey](logger *zap.Logger, txManager *TransactionManager, name string, aColumn Column, pager TxPager, rootPageIdx PageIndex) (*Index[T], error) {
-	return newIndex[T](true, logger, txManager, name, aColumn, pager, rootPageIdx)
+func NewUniqueIndex[T IndexKey](logger *zap.Logger, txManager *TransactionManager, name string, columns []Column, pager TxPager, rootPageIdx PageIndex) (*Index[T], error) {
+	return newIndex[T](true, logger, txManager, name, columns, pager, rootPageIdx)
 }
 
-func NewNonUniqueIndex[T IndexKey](logger *zap.Logger, txManager *TransactionManager, name string, aColumn Column, pager TxPager, rootPageIdx PageIndex) (*Index[T], error) {
-	return newIndex[T](false, logger, txManager, name, aColumn, pager, rootPageIdx)
+func NewNonUniqueIndex[T IndexKey](logger *zap.Logger, txManager *TransactionManager, name string, columns []Column, pager TxPager, rootPageIdx PageIndex) (*Index[T], error) {
+	return newIndex[T](false, logger, txManager, name, columns, pager, rootPageIdx)
 }
 
-func newIndex[T IndexKey](unique bool, logger *zap.Logger, txManager *TransactionManager, name string, aColumn Column, pager TxPager, rootPageIdx PageIndex) (*Index[T], error) {
-	if aColumn.Kind == Text {
-		return nil, fmt.Errorf("unique index does not support text columns")
-	}
-	if aColumn.Kind == Varchar && aColumn.Size > MaxIndexKeySize {
-		return nil, fmt.Errorf("unique index does not support varchar columns larger than %d", MaxIndexKeySize)
+func newIndex[T IndexKey](unique bool, logger *zap.Logger, txManager *TransactionManager, name string, columns []Column, pager TxPager, rootPageIdx PageIndex) (*Index[T], error) {
+	for _, aColumn := range columns {
+		if aColumn.Kind == Text {
+			return nil, fmt.Errorf("unique index does not support text columns")
+		}
+		if aColumn.Kind == Varchar && aColumn.Size > MaxIndexKeySize {
+			return nil, fmt.Errorf("unique index does not support varchar columns larger than %d", MaxIndexKeySize)
+		}
+		// TODO - check total index size
 	}
 	return &Index[T]{
 		logger:      logger,
 		Name:        name,
-		Column:      aColumn,
+		Columns:     columns,
 		unique:      unique,
 		rootPageIdx: rootPageIdx,
 		pager:       pager,
@@ -129,7 +133,7 @@ func (ui *Index[T]) Insert(ctx context.Context, keyAny any, rowID RowID) error {
 		return fmt.Errorf("split child: %w", err)
 	}
 	i := uint32(0)
-	if aRootNode.Cells[0].Key < key {
+	if compare(aRootNode.Cells[0].Key, key) < 0 {
 		i += 1
 	}
 	childIdx, err := aRootNode.Child(i)
@@ -168,7 +172,7 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 	if !ui.unique {
 		// For non-unique index, find existing key and append row ID in case it exists
 		for cellIdx := uint32(0); cellIdx < aNode.Header.Keys; cellIdx++ {
-			if aNode.Cells[cellIdx].Key != key {
+			if compare(aNode.Cells[cellIdx].Key, key) != 0 {
 				continue
 			}
 			if err := appendRowID(ctx, ui.pager, aNode, cellIdx, rowID); err != nil {
@@ -183,7 +187,7 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 		// Find location to insert new key, shift keys to make space
 		i := int(aNode.Header.Keys) - 1
 		aNode.Cells = append(aNode.Cells, NewIndexCell[T](ui.unique))
-		for i >= 0 && aNode.Cells[i].Key > key {
+		for i >= 0 && compare(aNode.Cells[i].Key, key) > 0 {
 			aNode.Cells[i+1].Key = aNode.Cells[i].Key
 			aNode.Cells[i+1].InlineRowIDs = aNode.Cells[i].InlineRowIDs
 			aNode.Cells[i+1].RowIDs = aNode.Cells[i].RowIDs
@@ -199,7 +203,7 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 
 	// Find the child which is going to have the new key
 	i := int(aNode.Header.Keys) - 1
-	for i >= 0 && aNode.Cells[i].Key > key {
+	for i >= 0 && compare(aNode.Cells[i].Key, key) > 0 {
 		i -= 1
 	}
 
@@ -216,7 +220,7 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 		if err := ui.splitChild(ctx, aPage, childPage, uint32(i+1)); err != nil {
 			return fmt.Errorf("split child: %w", err)
 		}
-		if aNode.Cells[i+1].Key < key {
+		if compare(aNode.Cells[i+1].Key, key) < 0 {
 			i += 1
 		}
 	}
@@ -373,11 +377,11 @@ func (ui *Index[T]) remove(ctx context.Context, aPage *Page, key T, rowID RowID)
 
 	// Find index of the first key greater than or equal to key
 	idx := 0
-	for idx < int(aNode.Header.Keys) && aNode.Cells[idx].Key < key {
+	for idx < int(aNode.Header.Keys) && compare(aNode.Cells[idx].Key, key) < 0 {
 		idx += 1
 	}
 
-	if idx < int(aNode.Header.Keys) && aNode.Cells[idx].Key == key {
+	if idx < int(aNode.Header.Keys) && compare(aNode.Cells[idx].Key, key) == 0 {
 		// If the key is in this node and this is a leaf node
 		if aNode.Header.IsLeaf {
 			// If unique index, just remove the key.
@@ -712,6 +716,70 @@ func (ui *Index[T]) merge(ctx context.Context, aParent, left, right *Page, idx u
 	leftNode.Header.RightChild = rightNode.Header.RightChild
 
 	return parentNode.DeleteKeyAndRightChild(idx)
+}
+
+func compare[T IndexKey](a, b T) int {
+	switch any(a).(type) {
+	case int8:
+		av := any(a).(int8)
+		bv := any(b).(int8)
+		if av < bv {
+			return -1
+		} else if av > bv {
+			return 1
+		}
+		return 0
+	case int32:
+		av := any(a).(int32)
+		bv := any(b).(int32)
+		if av < bv {
+			return -1
+		} else if av > bv {
+			return 1
+		}
+		return 0
+	case int64:
+		av := any(a).(int64)
+		bv := any(b).(int64)
+		if av < bv {
+			return -1
+		} else if av > bv {
+			return 1
+		}
+		return 0
+	case float32:
+		av := any(a).(float32)
+		bv := any(b).(float32)
+		if av < bv {
+			return -1
+		} else if av > bv {
+			return 1
+		}
+		return 0
+	case float64:
+		av := any(a).(float64)
+		bv := any(b).(float64)
+		if av < bv {
+			return -1
+		} else if av > bv {
+			return 1
+		}
+		return 0
+	case string:
+		av := any(a).(string)
+		bv := any(b).(string)
+		if av < bv {
+			return -1
+		} else if av > bv {
+			return 1
+		}
+		return 0
+	case CompositeKey:
+		av := any(a).(CompositeKey)
+		bv := any(b).(CompositeKey)
+		return bytes.Compare(av.Comparison, bv.Comparison)
+	}
+	return -1
 }
 
 func (ui *Index[T]) print() error {

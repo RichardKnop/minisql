@@ -15,11 +15,11 @@ func TestIndex_Seek(t *testing.T) {
 		ctx            = context.Background()
 		keys           = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
 		aColumn        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = aPager.ForIndex(aColumn.Kind, true)
+		indexPager     = aPager.ForIndex([]Column{aColumn}, true)
 		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, txPager, 0)
+	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
 	anIndex.maximumKeys = 3
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -115,7 +115,7 @@ func TestIndex_SeekLastKey(t *testing.T) {
 		ctx            = context.Background()
 		keys           = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
 		aColumn        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = aPager.ForIndex(aColumn.Kind, true)
+		indexPager     = aPager.ForIndex([]Column{aColumn}, true)
 		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
@@ -134,7 +134,7 @@ func TestIndex_SeekLastKey(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, txPager, 0)
+	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
 	require.NoError(t, err)
 	anIndex.maximumKeys = 3
 

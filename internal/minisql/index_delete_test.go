@@ -17,11 +17,11 @@ func TestIndex_Delete(t *testing.T) {
 		ctx            = context.Background()
 		keys           = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
 		aColumn        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = aPager.ForIndex(aColumn.Kind, true)
+		indexPager     = aPager.ForIndex([]Column{aColumn}, true)
 		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, txPager, 0)
+	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
 	require.NoError(t, err)
 	anIndex.maximumKeys = 3
 
@@ -1025,12 +1025,11 @@ func TestIndex_Delete_Random_Shuffle(t *testing.T) {
 		aPager, dbFile = initTest(t)
 		ctx            = context.Background()
 		aColumn        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = aPager.ForIndex(aColumn.Kind, true)
+		indexPager     = aPager.ForIndex([]Column{aColumn}, true)
 		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", aColumn, txPager, 0)
-
+	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
 	// Insert 10000 keys in random order
 	keys := make([]int64, 0, 10000)
 	for i := int64(1); i <= 10000; i++ {
@@ -1072,12 +1071,11 @@ func TestIndex_Delete_Varchar(t *testing.T) {
 		aPager, dbFile = initTest(t)
 		ctx            = context.Background()
 		aColumn        = Column{Name: "test_column", Kind: Varchar, Size: 100}
-		indexPager     = aPager.ForIndex(aColumn.Kind, true)
+		indexPager     = aPager.ForIndex([]Column{aColumn}, true)
 		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewUniqueIndex[string](testLogger, txManager, "test_index", aColumn, txPager, 0)
-
+	anIndex, err := NewUniqueIndex[string](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
 	// Insert 100 keys in random order
 	keys := make([]string, 0, 1000)
 	for i := int64(1); i <= 1000; i++ {

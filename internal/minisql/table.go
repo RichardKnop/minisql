@@ -1053,8 +1053,11 @@ func (t *Table) BFS(ctx context.Context, f callback) error {
 	return nil
 }
 
-func (t *Table) createBTreeIndex(aPager *TransactionalPager, freePage *Page, aColumn Column, indexName string, unique bool) (BTreeIndex, error) {
-	switch aColumn.Kind {
+func (t *Table) createBTreeIndex(aPager *TransactionalPager, freePage *Page, columns []Column, indexName string, unique bool) (BTreeIndex, error) {
+	if len(columns) > 1 {
+		return nil, fmt.Errorf("composite BTree indexes are not supported yet")
+	}
+	switch columns[0].Kind {
 	case Boolean:
 		indexNode := NewIndexNode[int8](unique)
 		indexNode.Header.IsRoot = true
@@ -1086,46 +1089,49 @@ func (t *Table) createBTreeIndex(aPager *TransactionalPager, freePage *Page, aCo
 		indexNode.Header.IsLeaf = true
 		freePage.IndexNode = indexNode
 	default:
-		return nil, fmt.Errorf("unsupported BTree index column type %v for index %s", aColumn.Kind, indexName)
+		return nil, fmt.Errorf("unsupported BTree index column type %v for index %s", columns[0].Kind, indexName)
 	}
 
-	return t.newBTreeIndex(aPager, freePage.Index, aColumn, indexName, unique)
+	return t.newBTreeIndex(aPager, freePage.Index, columns, indexName, unique)
 }
 
-func (t *Table) newBTreeIndex(aPager *TransactionalPager, rootPageIdx PageIndex, aColumn Column, indexName string, unique bool) (BTreeIndex, error) {
-	switch aColumn.Kind {
+func (t *Table) newBTreeIndex(aPager *TransactionalPager, rootPageIdx PageIndex, columns []Column, indexName string, unique bool) (BTreeIndex, error) {
+	if len(columns) > 1 {
+		return nil, fmt.Errorf("composite BTree indexes are not supported yet")
+	}
+	switch columns[0].Kind {
 	case Boolean:
 		if unique {
-			return NewUniqueIndex[int8](t.logger, t.txManager, indexName, aColumn, aPager, rootPageIdx)
+			return NewUniqueIndex[int8](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
 		}
-		return NewNonUniqueIndex[int8](t.logger, t.txManager, indexName, aColumn, aPager, rootPageIdx)
+		return NewNonUniqueIndex[int8](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
 	case Int4:
 		if unique {
-			return NewUniqueIndex[int32](t.logger, t.txManager, indexName, aColumn, aPager, rootPageIdx)
+			return NewUniqueIndex[int32](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
 		}
-		return NewNonUniqueIndex[int32](t.logger, t.txManager, indexName, aColumn, aPager, rootPageIdx)
+		return NewNonUniqueIndex[int32](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
 	case Int8, Timestamp:
 		if unique {
-			return NewUniqueIndex[int64](t.logger, t.txManager, indexName, aColumn, aPager, rootPageIdx)
+			return NewUniqueIndex[int64](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
 		}
-		return NewNonUniqueIndex[int64](t.logger, t.txManager, indexName, aColumn, aPager, rootPageIdx)
+		return NewNonUniqueIndex[int64](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
 	case Real:
 		if unique {
-			return NewUniqueIndex[float32](t.logger, t.txManager, indexName, aColumn, aPager, rootPageIdx)
+			return NewUniqueIndex[float32](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
 		}
-		return NewNonUniqueIndex[float32](t.logger, t.txManager, indexName, aColumn, aPager, rootPageIdx)
+		return NewNonUniqueIndex[float32](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
 	case Double:
 		if unique {
-			return NewUniqueIndex[float64](t.logger, t.txManager, indexName, aColumn, aPager, rootPageIdx)
+			return NewUniqueIndex[float64](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
 		}
-		return NewNonUniqueIndex[float64](t.logger, t.txManager, indexName, aColumn, aPager, rootPageIdx)
+		return NewNonUniqueIndex[float64](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
 	case Varchar:
 		if unique {
-			return NewUniqueIndex[string](t.logger, t.txManager, indexName, aColumn, aPager, rootPageIdx)
+			return NewUniqueIndex[string](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
 		}
-		return NewNonUniqueIndex[string](t.logger, t.txManager, indexName, aColumn, aPager, rootPageIdx)
+		return NewNonUniqueIndex[string](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
 	default:
-		return nil, fmt.Errorf("unsupported BTree index column type %v for index %s", aColumn.Kind, indexName)
+		return nil, fmt.Errorf("unsupported BTree index column type %v for index %s", columns[0].Kind, indexName)
 	}
 }
 

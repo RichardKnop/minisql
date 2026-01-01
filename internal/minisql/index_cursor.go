@@ -59,10 +59,10 @@ func (ui *Index[T]) Seek(ctx context.Context, aPage *Page, keyAny any) (IndexCur
 	i := uint32(0)
 	aNode := aPage.IndexNode.(*IndexNode[T])
 
-	for i < aNode.Header.Keys && key > aNode.Cells[i].Key {
+	for i < aNode.Header.Keys && compare(key, aNode.Cells[i].Key) > 0 {
 		i++
 	}
-	if i < aNode.Header.Keys && key == aNode.Cells[i].Key {
+	if i < aNode.Header.Keys && compare(key, aNode.Cells[i].Key) == 0 {
 		return IndexCursor[T]{
 			Index:   ui,
 			PageIdx: aPage.Index,
