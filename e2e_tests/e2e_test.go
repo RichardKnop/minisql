@@ -58,6 +58,13 @@ func newDataGen(seed uint64) *dataGen {
 	return &g
 }
 
+type user struct {
+	ID      int64
+	Name    sql.NullString
+	Email   sql.NullString
+	Created time.Time
+}
+
 func (g *dataGen) Users(number int) []user {
 	var (
 		emailMap = map[string]struct{}{}
@@ -83,6 +90,44 @@ func (g *dataGen) User() user {
 	return user{
 		Email: sql.NullString{String: g.Email(), Valid: true},
 		Name:  sql.NullString{String: g.Name(), Valid: true},
+	}
+}
+
+type compositeUser struct {
+	FirstName   string
+	LastName    string
+	Email       sql.NullString
+	DateOfBirth sql.NullTime
+	Created     time.Time
+}
+
+func (g *dataGen) CompositeUsers(number int) []compositeUser {
+	var (
+		emailMap = map[string]struct{}{}
+		users    = make([]compositeUser, 0, number)
+	)
+	for range number {
+		aUser := g.CompositeUser()
+
+		// Ensure unique first name + last name combination
+		_, ok := emailMap[aUser.FirstName+aUser.LastName]
+		for ok {
+			aUser = g.CompositeUser()
+			_, ok = emailMap[aUser.FirstName+aUser.LastName]
+		}
+
+		users = append(users, aUser)
+		emailMap[aUser.FirstName+aUser.LastName] = struct{}{}
+	}
+	return users
+}
+
+func (g *dataGen) CompositeUser() compositeUser {
+	return compositeUser{
+		FirstName:   g.FirstName(),
+		LastName:    g.LastName(),
+		Email:       sql.NullString{String: g.Email(), Valid: true},
+		DateOfBirth: sql.NullTime{Time: g.PastDate(), Valid: true},
 	}
 }
 

@@ -42,7 +42,7 @@ func (tp TextPointer) NumberOfPages() uint32 {
 	return tp.Length/MaxOverflowPageData + 1
 }
 
-func (tp *TextPointer) Marshal(buf []byte, i uint64) ([]byte, error) {
+func (tp *TextPointer) Marshal(buf []byte, i uint64) error {
 	// Write length prefix
 	marshalUint32(buf, tp.Length, i)
 	i += 4
@@ -51,13 +51,14 @@ func (tp *TextPointer) Marshal(buf []byte, i uint64) ([]byte, error) {
 		// Write actual text
 		n := copy(buf[i:i+uint64(tp.Length)], tp.Data)
 		i += uint64(n)
-	} else {
-		// Write first overflow page index
-		marshalUint32(buf, uint32(tp.FirstPage), i)
-		i += 4
+		return nil
 	}
 
-	return buf, nil
+	// Write first overflow page index
+	marshalUint32(buf, uint32(tp.FirstPage), i)
+	i += 4
+
+	return nil
 }
 
 func (tp *TextPointer) Unmarshal(buf []byte, i uint64) error {
@@ -70,12 +71,12 @@ func (tp *TextPointer) Unmarshal(buf []byte, i uint64) error {
 		tp.Data = make([]byte, tp.Length)
 		copy(tp.Data, buf[i:i+uint64(tp.Length)])
 		i += uint64(tp.Length)
-	} else {
-		// Read first overflow page index
-		tp.FirstPage = PageIndex(unmarshalUint32(buf, i))
-		i += 4
+		return nil
 	}
 
+	// Read first overflow page index
+	tp.FirstPage = PageIndex(unmarshalUint32(buf, i))
+	i += 4
 	return nil
 }
 

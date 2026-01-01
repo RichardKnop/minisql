@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"bytes"
 	"sort"
 	"strings"
 )
@@ -117,6 +118,10 @@ func compareAny(a, b any) int {
 			return 1
 		}
 		return 0
+
+	case CompositeKey:
+		bVal := b.(CompositeKey)
+		return bytes.Compare(aVal.Comparison, bVal.Comparison)
 
 	default:
 		return 0

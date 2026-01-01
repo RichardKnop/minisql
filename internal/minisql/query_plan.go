@@ -192,6 +192,217 @@ func (p QueryPlan) optimizeOrdering(t *Table) QueryPlan {
 	return p
 }
 
+// indexMatch represents a potential index match for equality conditions
+type indexMatch struct {
+	info                IndexInfo
+	matchedConditions   map[int]bool    // tracks which condition indices were matched
+	keys                []any           // composite key values in column order
+	rangeCondition      *RangeCondition // Set for partial composite index matches
+	hasProperUpperBound bool            // False if range scan lacks upper bound (needs filtering)
+	isPrimaryKey        bool
+	isUnique            bool
+}
+
+// findBestEqualityIndexMatch finds the best index that can be used for equality conditions
+// in the given group. It tries to match composite indexes by finding conditions on multiple
+// columns that form a prefix of the index columns (e.g., for index on (a,b,c), it can match
+// conditions on 'a', 'a AND b', or 'a AND b AND c', but not 'b' or 'a AND c').
+//
+// Priority order: Primary Key > Unique Index > Secondary Index
+// For composite indexes, prefer indexes that match more columns.
+func findBestEqualityIndexMatch(t *Table, group Conditions) *indexMatch {
+	var bestMatch *indexMatch
+
+	// Helper to check if a new match is better than the current best
+	isBetterMatch := func(newMatch *indexMatch) bool {
+		if bestMatch == nil {
+			return true
+		}
+
+		// Always prefer primary key
+		if newMatch.isPrimaryKey && !bestMatch.isPrimaryKey {
+			return true
+		}
+		if !newMatch.isPrimaryKey && bestMatch.isPrimaryKey {
+			return false
+		}
+
+		// Both are PK or both are not PK - compare number of matched columns (more is better)
+		newMatchedCols := len(newMatch.matchedConditions)
+		bestMatchedCols := len(bestMatch.matchedConditions)
+		if newMatchedCols != bestMatchedCols {
+			return newMatchedCols > bestMatchedCols
+		}
+
+		// Same number of columns - prefer by index type (unique over secondary)
+		if newMatch.isUnique && !bestMatch.isUnique {
+			return true
+		}
+		return false
+	}
+
+	// Collect all available indexes
+	var allIndexes []IndexInfo
+	if t.HasPrimaryKey() {
+		allIndexes = append(allIndexes, t.PrimaryKey.IndexInfo)
+	}
+	for _, idx := range t.UniqueIndexes {
+		allIndexes = append(allIndexes, idx.IndexInfo)
+	}
+	for _, idx := range t.SecondaryIndexes {
+		allIndexes = append(allIndexes, idx.IndexInfo)
+	}
+
+	// Try each index
+	for _, indexInfo := range allIndexes {
+		match := tryMatchIndex(t, indexInfo, group)
+		if match != nil && isBetterMatch(match) {
+			bestMatch = match
+		}
+	}
+
+	return bestMatch
+}
+
+// tryMatchIndex attempts to match an index against the conditions in a group.
+// It returns a match if it can find equality conditions for a prefix of the index columns.
+func tryMatchIndex(t *Table, indexInfo IndexInfo, group Conditions) *indexMatch {
+	matchedConditions := make(map[int]bool)
+	var compositeKey []any
+
+	// For composite indexes, we need to match columns in order from left to right
+	for colIdx, indexCol := range indexInfo.Columns {
+		foundMatch := false
+
+		// Look for an equality condition on this column
+		for condIdx, aCondition := range group {
+			// Skip already matched conditions
+			if matchedConditions[condIdx] {
+				continue
+			}
+
+			// Check if this is an equality condition on the current index column
+			if !isEquality(aCondition) {
+				continue
+			}
+
+			if aCondition.Operand1.Type != OperandField {
+				continue
+			}
+
+			fieldName, ok := aCondition.Operand1.Value.(string)
+			if !ok || fieldName != indexCol.Name {
+				continue
+			}
+
+			// Skip NULL comparisons
+			if aCondition.Operand2.Type == OperandNull {
+				continue
+			}
+
+			// We found a match for this column
+			column, ok := t.ColumnByName(fieldName)
+			if !ok {
+				continue
+			}
+
+			keys, err := equalityKeys(column, aCondition)
+			if err != nil {
+				continue
+			}
+
+			// For composite indexes, we currently only support single value equality (not IN)
+			// for non-final columns. The final column can use IN.
+			if colIdx < len(indexInfo.Columns)-1 && len(keys) > 1 {
+				// This is not the last column and we have multiple values (IN clause)
+				// Skip this match as we can't handle it yet
+				continue
+			}
+
+			matchedConditions[condIdx] = true
+			compositeKey = append(compositeKey, keys...)
+			foundMatch = true
+			break
+		}
+
+		// If we couldn't match this column, we can't use this index for a composite key
+		// However, we can still use what we've matched so far if this is a prefix
+		if !foundMatch {
+			break
+		}
+	}
+
+	// No conditions matched this index
+	if len(matchedConditions) == 0 {
+		return nil
+	}
+
+	// Determine index type
+	isPK := t.HasPrimaryKey() && indexInfo.Name == t.PrimaryKey.Name
+	_, isUnique := t.UniqueIndexes[indexInfo.Name]
+
+	// Determine if this is a partial match (prefix of composite index)
+	numMatchedColumns := len(matchedConditions)
+	isPartialMatch := numMatchedColumns > 0 && numMatchedColumns < len(indexInfo.Columns)
+
+	var indexKeys []any
+	var rangeCondition *RangeCondition
+	var hasProperUpperBound bool
+
+	if isPartialMatch {
+		// Partial composite index match - use range scan
+		// For example, index on (a,b,c) with conditions a=1, b=2 should scan range:
+		// Lower: (1, 2) inclusive
+		// Upper: (1, 3) exclusive (or (1, 2, MAX) if we can't increment)
+		matchedCols := indexInfo.Columns[:numMatchedColumns]
+		lowerKey := NewCompositeKey(matchedCols, compositeKey...)
+
+		// Try to create upper bound by incrementing the last matched value
+		lastValue := compositeKey[len(compositeKey)-1]
+		nextValue := incrementValue(lastValue)
+
+		if nextValue != nil {
+			// We can increment - create upper bound with next value
+			upperKeyValues := make([]any, len(compositeKey))
+			copy(upperKeyValues, compositeKey)
+			upperKeyValues[len(upperKeyValues)-1] = nextValue
+			upperKey := NewCompositeKey(matchedCols, upperKeyValues...)
+
+			rangeCondition = &RangeCondition{
+				Lower: &RangeBound{Value: lowerKey, Inclusive: true},
+				Upper: &RangeBound{Value: upperKey, Inclusive: false},
+			}
+			hasProperUpperBound = true
+		} else {
+			// Can't increment (e.g., max value or float) - use only lower bound
+			// WARNING: Without upper bound, we'll scan more entries than needed
+			// and must filter matched conditions during scan
+			rangeCondition = &RangeCondition{
+				Lower: &RangeBound{Value: lowerKey, Inclusive: true},
+			}
+			hasProperUpperBound = false
+		}
+	} else if numMatchedColumns > 1 {
+		// Full composite index match - use point scan
+		// Create composite key with all matched columns
+		matchedCols := indexInfo.Columns[:numMatchedColumns]
+		indexKeys = []any{NewCompositeKey(matchedCols, compositeKey...)}
+	} else {
+		// Single column index - use raw key value(s)
+		indexKeys = compositeKey
+	}
+
+	return &indexMatch{
+		info:                indexInfo,
+		matchedConditions:   matchedConditions,
+		keys:                indexKeys,
+		rangeCondition:      rangeCondition,
+		hasProperUpperBound: hasProperUpperBound,
+		isPrimaryKey:        isPK,
+		isUnique:            isUnique,
+	}
+}
+
 // Check whether we can perform an index scan. Each condition group is separated by OR,
 // and within each group conditions are ANDed together. We can only use an index scan
 // if each group contains at least one primary key equality condition. We also need to
@@ -204,87 +415,61 @@ func (p QueryPlan) optimizeOrdering(t *Table) QueryPlan {
 func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 	var (
 		allGroupsHaveIndexCondition = true
-
-		equalityIndex = make(map[int]IndexInfo)
-		equalityCond  = make(map[int]int)
-		otherIndexes  = make(map[int][]IndexInfo)
-		indexKeys     = make(map[int][]any)
+		equalityMatch               = make(map[int]*indexMatch)
+		otherIndexes                = make(map[int][]IndexInfo)
 	)
-
-	uniqueKeys := make(map[string]struct{})
-	for _, uniqueIndex := range t.UniqueIndexes {
-		uniqueKeys[uniqueIndex.Columns[0].Name] = struct{}{}
-	}
 
 	// Each group is separated by OR, for example:
 	// (a = 1 AND b = 2) OR (a = 3 AND b = 4)
 	// would be 2 groups with 2 conditions each
-	for groupIDx, group := range conditions {
-		// Check if this group contains an index condition
-		for condIdx, aCondition := range group {
+	for groupIdx, group := range conditions {
+		// Try to find the best index match for this group
+		match := findBestEqualityIndexMatch(t, group)
+		if match != nil {
+			equalityMatch[groupIdx] = match
+		}
+
+		// Also collect indexes that could be used for range scans
+		for _, aCondition := range group {
+			if aCondition.Operand1.Type != OperandField {
+				continue
+			}
 			fieldName, ok := aCondition.Operand1.Value.(string)
 			if !ok {
-				return fmt.Errorf("invalid field name in condition: %v", aCondition.Operand1.Value)
+				continue
 			}
 			if !t.HasIndexOnColumn(fieldName) {
 				continue
 			}
-			aColumn, ok := t.ColumnByName(fieldName)
-			if !ok {
-				return fmt.Errorf("column not found in condition: %s", fieldName)
-			}
 
-			// If group contains conditions on multiple indexes, we must pick only one.
 			info, ok := t.IndexInfoByColumnName(fieldName)
 			if !ok {
-				return fmt.Errorf("could not find index info for field: %s", fieldName)
-			}
-
-			// Only consider equality conditions for index scans where right operand is not NULL
-			isEquality := isEquality(aCondition) && aCondition.Operand2.Type != OperandNull
-
-			if !isEquality {
-				otherIndexes[groupIDx] = append(otherIndexes[groupIDx], info)
 				continue
 			}
 
-			if _, ok := equalityIndex[groupIDx]; !ok {
-				equalityIndex[groupIDx] = info
-				equalityCond[groupIDx] = condIdx
-				keys, err := equalityKeys(aColumn, aCondition)
-				if err != nil {
-					return err
-				}
-
-				indexKeys[groupIDx] = keys
-			} else if aColumn.Name == t.PrimaryKey.Columns[0].Name {
-				// Prefer primary key index if available
-				equalityIndex[groupIDx] = info
-				equalityCond[groupIDx] = condIdx
-
-				keys, err := equalityKeys(aColumn, aCondition)
-				if err != nil {
-					return err
-				}
-
-				indexKeys[groupIDx] = keys
-			} else if _, ok := uniqueKeys[aColumn.Name]; ok {
-				_, ok := t.SecondaryIndexes[equalityIndex[groupIDx].Name]
-				if ok {
-					// Prefer unique index over secondary index
-					equalityIndex[groupIDx] = info
-					equalityCond[groupIDx] = condIdx
-
-					keys, err := equalityKeys(aColumn, aCondition)
-					if err != nil {
-						return err
+			// Skip if this condition was already matched for equality
+			if match != nil {
+				alreadyMatched := false
+				for condIdx := range match.matchedConditions {
+					if &group[condIdx] == &aCondition {
+						alreadyMatched = true
+						break
 					}
-
-					indexKeys[groupIDx] = keys
+				}
+				if alreadyMatched {
+					continue
 				}
 			}
+
+			// Check if this could be used for range scan
+			isEq := isEquality(aCondition) && aCondition.Operand2.Type != OperandNull
+			if !isEq {
+				// Add to potential range scan indexes
+				otherIndexes[groupIdx] = append(otherIndexes[groupIdx], info)
+			}
 		}
-		if _, ok := equalityIndex[groupIDx]; !ok && len(otherIndexes[groupIDx]) == 0 {
+
+		if equalityMatch[groupIdx] == nil && len(otherIndexes[groupIdx]) == 0 {
 			allGroupsHaveIndexCondition = false
 			break
 		}
@@ -302,21 +487,47 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 
 	for groupIdx, group := range conditions {
 		// Try index point scan first
-		equalityIndex, ok := equalityIndex[groupIdx]
+		match, ok := equalityMatch[groupIdx]
 		if ok {
 			filters := make(Conditions, 0, len(group))
 			for condIdx, aCondition := range group {
-				if condIdx != equalityCond[groupIdx] {
+				// If we have a range scan without proper upper bound, we must include
+				// the matched conditions as filters since the scan will read extra rows
+				if match.rangeCondition != nil && !match.hasProperUpperBound {
+					// Keep ALL conditions (matched + unmatched) for filtering
+					filters = append(filters, aCondition)
+				} else if !match.matchedConditions[condIdx] {
+					// Only keep unmatched conditions for filtering
 					filters = append(filters, aCondition)
 				}
 			}
-			indexScans = append(indexScans, Scan{
-				Type:         ScanTypeIndexPoint,
-				IndexName:    equalityIndex.Name,
-				IndexColumns: equalityIndex.Columns,
-				IndexKeys:    indexKeys[groupIdx],
-				Filters:      OneOrMore{filters},
-			})
+
+			if match.rangeCondition != nil {
+				// Partial composite index match - use range scan
+				aScan := Scan{
+					Type:           ScanTypeIndexRange,
+					IndexName:      match.info.Name,
+					IndexColumns:   match.info.Columns,
+					RangeCondition: *match.rangeCondition,
+				}
+				if len(filters) > 0 {
+					aScan.Filters = OneOrMore{filters}
+				}
+				indexScans = append(indexScans, aScan)
+			} else {
+				// Full index match - use point scan
+				aScan := Scan{
+					Type:         ScanTypeIndexPoint,
+					IndexName:    match.info.Name,
+					IndexColumns: match.info.Columns,
+					IndexKeys:    match.keys,
+				}
+				if len(filters) > 0 {
+					aScan.Filters = OneOrMore{filters}
+				}
+				indexScans = append(indexScans, aScan)
+			}
+
 			continue
 		}
 
@@ -349,30 +560,6 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 	if len(indexScans) > 0 {
 		p.Scans = indexScans
 	}
-
-	// // Combine all sequential scans into one if possible
-	// if len(p.Scans) > 1 {
-	// 	sequentialIdxs := make([]int, 0)
-	// 	for scanIdx, aScan := range p.Scans {
-	// 		if aScan.Type == ScanTypeSequential {
-	// 			sequentialIdxs = append(sequentialIdxs, scanIdx)
-	// 		}
-	// 	}
-	// 	if len(sequentialIdxs) > 1 {
-	// 		combinedConditions := make(OneOrMore, 0)
-	// 		for i := len(sequentialIdxs) - 1; i >= 0; i-- {
-	// 			scanIdx := sequentialIdxs[i]
-	// 			combinedConditions = append(combinedConditions, p.Scans[scanIdx].Filters...)
-	// 			// Remove this scan
-	// 			p.Scans = slices.Delete(p.Scans, scanIdx, scanIdx+1)
-	// 		}
-	// 		// Add combined sequential scan
-	// 		p.Scans = append(p.Scans, Scan{
-	// 			Type:    ScanTypeSequential,
-	// 			Filters: combinedConditions,
-	// 		})
-	// 	}
-	// }
 
 	return nil
 }
@@ -419,6 +606,39 @@ func equalityKeys(aColumn Column, cond Condition) ([]any, error) {
 	}
 
 	return keyValues, nil
+}
+
+// incrementValue returns the next value after the given value for creating upper bounds in range scans.
+// Returns nil if the value cannot be safely incremented (e.g., max value or unsupported type).
+func incrementValue(val any) any {
+	switch v := val.(type) {
+	case int32:
+		if v == (1<<31)-1 { // max int32
+			return nil
+		}
+		return v + 1
+	case int64:
+		if v == (1<<63)-1 { // max int64
+			return nil
+		}
+		return v + 1
+	case float32:
+		// For floats, we can't simply add 1 as we need the next representable value
+		// For range scans on floats, we'll use exclusive upper bound instead
+		return nil
+	case float64:
+		return nil
+	case string:
+		// For strings, append maximum byte value to get the upper bound for prefix matching
+		// This ensures all strings starting with v are included in the range
+		// Example: "Ralph" + "\xFF" > "Ralph Darren" because 0xFF > 0x44 ('D')
+		return v + "\xFF"
+	case bool:
+		// Boolean can only be false or true, can't increment
+		return nil
+	default:
+		return nil
+	}
 }
 
 func tryRangeScan(indexInfo IndexInfo, filters Conditions) (Scan, bool, error) {

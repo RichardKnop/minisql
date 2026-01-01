@@ -609,7 +609,7 @@ func (s Statement) Validate(aTable *Table) error {
 			return err
 		}
 	case CreateIndex:
-		return s.validateCreateIndex()
+		return s.validateCreateIndex(aTable)
 	case DropIndex:
 		return s.validateDropIndex()
 	}
@@ -626,7 +626,7 @@ func (s Statement) validateCreateTable() error {
 		return fmt.Errorf("table name is required")
 	}
 
-	if len(s.TableName) > MaxInlineVarchar {
+	if utf8.RuneCountInString(s.TableName) > MaxInlineVarchar {
 		return fmt.Errorf("table name exceeds maximum length of %d", MaxInlineVarchar)
 	}
 
@@ -646,62 +646,71 @@ func (s Statement) validateCreateTable() error {
 		return fmt.Errorf("potential row size exceeds maximum allowed %d", UsablePageSize)
 	}
 
-	if len(s.DDL()) > maximumSchemaSQL {
+	if utf8.RuneCountInString(s.DDL()) > maximumSchemaSQL {
 		return fmt.Errorf("table definition too long, maximum length is %d", maximumSchemaSQL)
-	}
-
-	if len(s.PrimaryKey.Columns) > 1 {
-		return fmt.Errorf("composite primary keys are not supported yet")
 	}
 
 	if len(s.PrimaryKey.Columns) > 1 && s.PrimaryKey.Autoincrement {
 		return fmt.Errorf("autoincrement primary key cannot be composite")
 	}
 
+	nameMap := map[string]struct{}{}
+	for _, aColumn := range s.Columns {
+		if _, ok := nameMap[aColumn.Name]; ok {
+			return fmt.Errorf("duplicate column name %q", aColumn.Name)
+		}
+		if len(aColumn.Name) == 0 {
+			return fmt.Errorf("column name cannot be empty")
+		}
+		nameMap[aColumn.Name] = struct{}{}
+	}
+
 	indexMap := map[string]struct{}{}
 
-	if len(s.PrimaryKey.Columns) == 1 {
-		if _, ok := indexMap[s.PrimaryKey.Columns[0].Name]; ok {
-			return fmt.Errorf("column %s can only have one index", s.PrimaryKey.Columns[0].Name)
-		}
-		if s.PrimaryKey.Columns[0].Nullable {
+	if _, ok := indexMap[indexColumnHash(s.PrimaryKey.Columns)]; ok {
+		return fmt.Errorf("columns %s can only have one index", columnNames(s.PrimaryKey.Columns))
+	}
+	indexMap[indexColumnHash(s.PrimaryKey.Columns)] = struct{}{}
+
+	size := uint32(0)
+	for _, aColumn := range s.PrimaryKey.Columns {
+		if aColumn.Nullable {
 			return fmt.Errorf("primary key column cannot be nullable")
 		}
-		if s.PrimaryKey.Columns[0].Kind == Text {
+		if aColumn.Kind == Text {
 			return fmt.Errorf("primary key cannot be of type TEXT")
 		}
-		if s.PrimaryKey.Columns[0].Kind == Varchar && s.PrimaryKey.Columns[0].Size > MaxIndexKeySize {
-			return fmt.Errorf("primary key of type VARCHAR exceeds max index key size %d", MaxIndexKeySize)
-		}
-		if s.PrimaryKey.Autoincrement && s.PrimaryKey.Columns[0].Kind != Int8 && s.PrimaryKey.Columns[0].Kind != Int4 {
-			return fmt.Errorf("autoincrement primary key must be of type INT4 or INT8")
-		}
-		indexMap[s.PrimaryKey.Columns[0].Name] = struct{}{}
+		size += aColumn.Size
+	}
+	if size > MaxIndexKeySize {
+		return fmt.Errorf("primary key size exceeds max index key size %d", MaxIndexKeySize)
+	}
+	if s.PrimaryKey.Autoincrement && s.PrimaryKey.Columns[0].Kind != Int8 && s.PrimaryKey.Columns[0].Kind != Int4 {
+		return fmt.Errorf("autoincrement primary key must be of type INT4 or INT8")
 	}
 
 	for _, uniqueIndex := range s.UniqueIndexes {
-		if len(uniqueIndex.Columns) > 1 {
-			return fmt.Errorf("composite unique index keys are not supported yet")
+		if _, ok := indexMap[indexColumnHash(uniqueIndex.Columns)]; ok {
+			return fmt.Errorf("columns %s can only have one index", columnNames(uniqueIndex.Columns))
 		}
-		for _, aColumn := range uniqueIndex.Columns {
-			if _, ok := indexMap[aColumn.Name]; ok {
-				return fmt.Errorf("column %s can only have one index", aColumn.Name)
-			}
-			if aColumn.Kind == Text {
-				return fmt.Errorf("unique key cannot be of type TEXT")
-			}
-			if aColumn.Kind == Varchar && aColumn.Size > MaxIndexKeySize {
-				return fmt.Errorf("unique key of type VARCHAR exceeds max index key size %d", MaxIndexKeySize)
-			}
-			indexMap[aColumn.Name] = struct{}{}
-		}
+		indexMap[indexColumnHash(uniqueIndex.Columns)] = struct{}{}
 
+		size := uint32(0)
+		for _, aColumn := range uniqueIndex.Columns {
+			if aColumn.Kind == Text {
+				return fmt.Errorf("unique index key cannot be of type TEXT")
+			}
+			size += aColumn.Size
+		}
+		if size > MaxIndexKeySize {
+			return fmt.Errorf("unique index key size exceeds max index key size %d", MaxIndexKeySize)
+		}
 	}
 
 	return nil
 }
 
-func (s Statement) validateCreateIndex() error {
+func (s Statement) validateCreateIndex(aTable *Table) error {
 	if len(s.IndexName) == 0 {
 		return fmt.Errorf("index name is required")
 	}
@@ -710,7 +719,7 @@ func (s Statement) validateCreateIndex() error {
 		return fmt.Errorf("table name is required")
 	}
 
-	if len(s.IndexName) > MaxInlineVarchar {
+	if utf8.RuneCountInString(s.IndexName) > MaxInlineVarchar {
 		return fmt.Errorf("index name exceeds maximum length of %d", MaxInlineVarchar)
 	}
 
@@ -722,7 +731,11 @@ func (s Statement) validateCreateIndex() error {
 		return fmt.Errorf("more than one column for index is not supported")
 	}
 
-	if len(s.DDL()) > maximumSchemaSQL {
+	if aTable.HasIndexOnColumns(s.Columns) {
+		return fmt.Errorf("columns %s can only have one index", columnNames(s.Columns))
+	}
+
+	if utf8.RuneCountInString(s.DDL()) > maximumSchemaSQL {
 		return fmt.Errorf("index definition too long, maximum length is %d", maximumSchemaSQL)
 	}
 
@@ -735,6 +748,17 @@ func (s Statement) validateDropIndex() error {
 	}
 
 	return nil
+}
+
+func columnNames(columns []Column) string {
+	var result strings.Builder
+	for i, aColumn := range columns {
+		if i > 0 {
+			result.WriteString(", ")
+		}
+		result.WriteString(aColumn.Name)
+	}
+	return result.String()
 }
 
 // Check whether a row with the given columns can fit in a page if all columns are inlined
@@ -945,11 +969,11 @@ func isValueValidForColumn(aColumn Column, aValue OptionalValue) error {
 		}
 		switch aColumn.Kind {
 		case Varchar:
-			if len([]byte(aValue.Value.(TextPointer).String())) > int(aColumn.Size) {
+			if utf8.RuneCountInString(aValue.Value.(TextPointer).String()) > int(aColumn.Size) {
 				return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", aColumn.Name, aColumn.Size)
 			}
 		case Text:
-			if len([]byte(aValue.Value.(TextPointer).String())) > MaxOverflowTextSize {
+			if utf8.RuneCountInString(aValue.Value.(TextPointer).String()) > MaxOverflowTextSize {
 				return fmt.Errorf("field %q exceeds maximum TEXT length of %d", aColumn.Name, MaxOverflowTextSize)
 			}
 		}
@@ -1141,23 +1165,26 @@ func (s Statement) createIndexDDL() string {
 	return sb.String()
 }
 
-func (stmt Statement) InsertValueForColumn(name string, insertIdx int) (OptionalValue, bool) {
-	fieldIdx := -1
-	for i, aField := range stmt.Fields {
-		if aField.Name == name {
-			fieldIdx = i
-			break
+func (stmt Statement) InsertValuesForColumns(insertIdx int, columns ...Column) []OptionalValue {
+	values := make([]OptionalValue, 0, len(columns))
+	for _, aColumn := range columns {
+		fieldIdx := -1
+		for i, aField := range stmt.Fields {
+			if aField.Name == aColumn.Name {
+				fieldIdx = i
+				break
+			}
 		}
+		if fieldIdx == -1 {
+			continue
+		}
+		if insertIdx < 0 || insertIdx >= len(stmt.Inserts) {
+			continue
+		}
+		values = append(values, stmt.Inserts[insertIdx][fieldIdx])
 	}
-	if fieldIdx == -1 {
-		return OptionalValue{}, false
-	}
-	if insertIdx < 0 || insertIdx >= len(stmt.Inserts) {
-		return OptionalValue{}, false
-	}
-	value := stmt.Inserts[insertIdx][fieldIdx]
 
-	return value, true
+	return values
 }
 
 func (s Statement) ColumnIdx(name string) int {

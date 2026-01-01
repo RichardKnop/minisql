@@ -366,3 +366,104 @@ func TestIndex_ScanRange(t *testing.T) {
 		assert.Equal(t, []RowID{108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118}, scannedRowIDs)
 	})
 }
+
+func TestIndex_ScanRange_CompositeKey(t *testing.T) {
+	var (
+		aPager, dbFile = initTest(t)
+		ctx            = context.Background()
+		columns        = testCompositeKeyColumns[1:3]
+		keys           = []CompositeKey{
+			NewCompositeKey(columns, "Ralph", "Nia"),
+			NewCompositeKey(columns, "Kataleya", "Xanthi"),
+			NewCompositeKey(columns, "Violet", "Elaina"),
+			NewCompositeKey(columns, "Vanessa", "Eldred"),
+			NewCompositeKey(columns, "Ralph", "Darren"),
+		}
+		indexPager = aPager.ForIndex(columns, true)
+		txManager  = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
+		txPager    = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
+	)
+	anIndex, err := NewUniqueIndex[CompositeKey](testLogger, txManager, "test_index", columns, txPager, 0)
+	require.NoError(t, err)
+
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for i, key := range keys {
+			if err := anIndex.Insert(ctx, key, RowID(i+1)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	t.Run("scan range all", func(t *testing.T) {
+		var scannedKeys []CompositeKey
+		require.NoError(t, anIndex.ScanRange(ctx, RangeCondition{}, func(key any, rowID RowID) error {
+			scannedKeys = append(scannedKeys, key.(CompositeKey))
+			return nil
+		}))
+		assert.Equal(t, []CompositeKey{
+			keys[1], // Kataleya Xanthi
+			keys[4], // Ralph Darren
+			keys[0], // Ralph Nia
+			keys[3], // Vanessa Eldred
+			keys[2], // Violet Elaina
+		}, scannedKeys)
+	})
+
+	t.Run("scan range < Redd Garnett", func(t *testing.T) {
+		var scannedKeys []CompositeKey
+		require.NoError(t, anIndex.ScanRange(ctx, RangeCondition{
+			Upper: &RangeBound{
+				Value:     NewCompositeKey(columns, "Redd", "Garnett"),
+				Inclusive: false,
+			},
+		}, func(key any, rowID RowID) error {
+			scannedKeys = append(scannedKeys, key.(CompositeKey))
+			return nil
+		}))
+		assert.Equal(t, []CompositeKey{
+			keys[1], // Kataleya Xanthi
+			keys[4], // Ralph Darren
+			keys[0], // Ralph Nia
+		}, scannedKeys)
+	})
+
+	t.Run("scan range > Redd Garnett", func(t *testing.T) {
+		var scannedKeys []CompositeKey
+		require.NoError(t, anIndex.ScanRange(ctx, RangeCondition{
+			Lower: &RangeBound{
+				Value:     NewCompositeKey(columns, "Redd", "Garnett"),
+				Inclusive: false,
+			},
+		}, func(key any, rowID RowID) error {
+			scannedKeys = append(scannedKeys, key.(CompositeKey))
+			return nil
+		}))
+		assert.Equal(t, []CompositeKey{
+			keys[3], // Vanessa Eldred
+			keys[2], // Violet Elaina
+		}, scannedKeys)
+	})
+
+	t.Run("scan range partial index match", func(t *testing.T) {
+		var scannedKeys []CompositeKey
+		require.NoError(t, anIndex.ScanRange(ctx, RangeCondition{
+			Lower: &RangeBound{
+				Value:     NewCompositeKey(columns[0:1], "Ralph"),
+				Inclusive: true,
+			},
+			Upper: &RangeBound{
+				Value:     NewCompositeKey(columns[0:1], "Ralph\xFF"),
+				Inclusive: false,
+			},
+		}, func(key any, rowID RowID) error {
+			scannedKeys = append(scannedKeys, key.(CompositeKey))
+			return nil
+		}))
+		assert.Equal(t, []CompositeKey{
+			keys[4], // Ralph Darren
+			keys[0], // Ralph Nia
+		}, scannedKeys)
+	})
+}

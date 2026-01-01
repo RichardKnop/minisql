@@ -49,6 +49,13 @@ const (
 	stepCreateTableColumnNullNotNull
 	stepCreateTableColumnUnique
 	stepCreateTableColumnDefaultValue
+	stepCreateTableConstraint
+	stepCreateTableConstraintPrimaryKey
+	stepCreateTableConstraintUniqueKey
+	stepCreateTableConstraintPrimaryKeyColumn
+	stepCreateTableConstraintUniqueKeyColumn
+	stepCreateTableConstraintPrimaryKeyCommaOrClosingParens
+	stepCreateTableConstraintUniqueKeyCommaOrClosingParens
 	stepCreateTableCommaOrClosingParens
 	stepDropTableName
 	stepCreateIndexIfNotExists
@@ -191,6 +198,13 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 			stepCreateTableColumnNullNotNull,
 			stepCreateTableColumnUnique,
 			stepCreateTableColumnDefaultValue,
+			stepCreateTableConstraint,
+			stepCreateTableConstraintPrimaryKey,
+			stepCreateTableConstraintUniqueKey,
+			stepCreateTableConstraintPrimaryKeyColumn,
+			stepCreateTableConstraintUniqueKeyColumn,
+			stepCreateTableConstraintPrimaryKeyCommaOrClosingParens,
+			stepCreateTableConstraintUniqueKeyCommaOrClosingParens,
 			stepCreateTableCommaOrClosingParens:
 			if err := p.doParseCreateTable(); err != nil {
 				return statements, err

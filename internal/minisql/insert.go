@@ -20,51 +20,41 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 
 	for insertIdx, values := range stmt.Inserts {
 		if t.HasPrimaryKey() {
-			if t.PrimaryKey.Index == nil {
-				return StatementResult{}, fmt.Errorf("table %s has primary key but no Btree index instance", t.Name)
-			}
-
-			pkValue, ok := stmt.InsertValueForColumn(t.PrimaryKey.Columns[0].Name, insertIdx)
-			if !ok {
+			keyParts := stmt.InsertValuesForColumns(insertIdx, t.PrimaryKey.Columns...)
+			if len(keyParts) != len(t.PrimaryKey.Columns) {
 				return StatementResult{}, fmt.Errorf("failed to get value for primary key %s", t.PrimaryKey.Name)
 			}
 
-			insertedPrimaryKey, err := t.insertPrimaryKey(ctx, pkValue, nextRowID)
+			insertedPrimaryKey, err := t.insertPrimaryKey(ctx, keyParts, nextRowID)
 			if err != nil {
 				return StatementResult{}, err
 			}
 
-			// Update statement with autoincremented primary key value
-			pkIdx := stmt.ColumnIdx(t.PrimaryKey.Columns[0].Name)
-			values[pkIdx] = OptionalValue{Value: insertedPrimaryKey, Valid: true}
+			if len(t.PrimaryKey.Columns) == 1 {
+				// Update statement with autoincremented primary key value
+				pkIdx := stmt.ColumnIdx(t.PrimaryKey.Columns[0].Name)
+				values[pkIdx] = OptionalValue{Value: insertedPrimaryKey, Valid: true}
+			}
 		}
 
 		for _, uniqueIndex := range t.UniqueIndexes {
-			if uniqueIndex.Index == nil {
-				return StatementResult{}, fmt.Errorf("table %s has unique index %s but no Btree index instance", t.Name, uniqueIndex.Name)
-			}
-
-			indexValue, ok := stmt.InsertValueForColumn(uniqueIndex.Columns[0].Name, insertIdx)
-			if !ok {
+			keyParts := stmt.InsertValuesForColumns(insertIdx, uniqueIndex.Columns...)
+			if len(keyParts) != len(uniqueIndex.Columns) {
 				return StatementResult{}, fmt.Errorf("failed to get value for unique index %s", uniqueIndex.Name)
 			}
 
-			if err := t.insertUniqueIndexKey(ctx, uniqueIndex, indexValue, nextRowID); err != nil {
+			if err := t.insertUniqueIndexKey(ctx, uniqueIndex, keyParts, nextRowID); err != nil {
 				return StatementResult{}, err
 			}
 		}
 
 		for _, secondaryIndex := range t.SecondaryIndexes {
-			if secondaryIndex.Index == nil {
-				return StatementResult{}, fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
-			}
-
-			indexValue, ok := stmt.InsertValueForColumn(secondaryIndex.Columns[0].Name, insertIdx)
-			if !ok {
+			keyParts := stmt.InsertValuesForColumns(insertIdx, secondaryIndex.Columns...)
+			if len(keyParts) != len(secondaryIndex.Columns) {
 				return StatementResult{}, fmt.Errorf("failed to get value for secondary index %s", secondaryIndex.Name)
 			}
 
-			if err := t.insertSecondaryIndexKey(ctx, secondaryIndex, indexValue, nextRowID); err != nil {
+			if err := t.insertSecondaryIndexKey(ctx, secondaryIndex, keyParts, nextRowID); err != nil {
 				return StatementResult{}, err
 			}
 		}

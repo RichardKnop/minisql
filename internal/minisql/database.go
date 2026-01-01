@@ -156,20 +156,15 @@ func (d *Database) pagerFactory(ctx context.Context, tableName, indexName string
 		}
 	}
 
-	if len(columns) > 1 {
-		return nil, fmt.Errorf("composite index keys not yet supported")
-	}
-
-	// TODO - support composite indexes
-
 	unique := false
-	if aTable.HasPrimaryKey() && len(aTable.PrimaryKey.Columns) == 1 && aTable.Columns[0].Name == columns[0].Name {
+	if aTable.HasPrimaryKey() {
 		unique = true
-	}
-	for _, uniqueIndex := range aTable.UniqueIndexes {
-		if len(uniqueIndex.Columns) == 1 && uniqueIndex.Columns[0].Name == columns[0].Name {
-			unique = true
-			break
+	} else {
+		for _, uniqueIndex := range aTable.UniqueIndexes {
+			if len(uniqueIndex.Columns) == 1 && uniqueIndex.Columns[0].Name == columns[0].Name {
+				unique = true
+				break
+			}
 		}
 	}
 
@@ -549,7 +544,7 @@ func (d *Database) initSecondaryIndex(ctx context.Context, aSchema Schema) error
 		return fmt.Errorf("expected one statement when loading index, got %d", len(stmts))
 	}
 	stmt := stmts[0]
-	if err := stmt.Validate(nil); err != nil {
+	if err := stmt.Validate(aTable); err != nil {
 		return err
 	}
 
@@ -593,7 +588,23 @@ func (d *Database) executeDDLStatement(ctx context.Context, stmt Statement) (Sta
 		return StatementResult{}, err
 	}
 
-	if err := stmt.Validate(nil); err != nil {
+	var aTable *Table
+	if stmt.Kind == CreateIndex {
+		// Table could only exist within this transaction so create it from the system table
+		aTableSchema, exists, err := d.checkSchemaExists(ctx, SchemaTable, stmt.TableName)
+		if err != nil {
+			return StatementResult{}, err
+		}
+		if !exists {
+			return StatementResult{}, errTableDoesNotExist
+		}
+		aTable, err = d.tableFromSQL(ctx, aTableSchema)
+		if err != nil {
+			return StatementResult{}, err
+		}
+	}
+
+	if err := stmt.Validate(aTable); err != nil {
 		return StatementResult{}, err
 	}
 
@@ -608,7 +619,7 @@ func (d *Database) executeDDLStatement(ctx context.Context, stmt Statement) (Sta
 	case DropTable:
 		return StatementResult{}, d.dropTable(ctx, stmt.TableName)
 	case CreateIndex:
-		return StatementResult{}, d.createIndex(ctx, stmt)
+		return StatementResult{}, d.createIndex(ctx, stmt, aTable)
 	case DropIndex:
 		return StatementResult{}, d.dropIndex(ctx, stmt)
 	}
@@ -864,7 +875,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	return nil
 }
 
-func (d *Database) createIndex(ctx context.Context, stmt Statement) error {
+func (d *Database) createIndex(ctx context.Context, stmt Statement, aTable *Table) error {
 	tx := MustTxFromContext(ctx)
 
 	_, exists, err := d.checkSchemaExists(ctx, SchemaSecondaryIndex, stmt.IndexName)
@@ -873,19 +884,6 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement) error {
 	}
 	if exists {
 		return errIndexAlreadyExists
-	}
-
-	// Table could only exist within this transaction so create it from the system table
-	aTableSchema, exists, err := d.checkSchemaExists(ctx, SchemaTable, stmt.TableName)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return errTableDoesNotExist
-	}
-	aTable, err := d.tableFromSQL(ctx, aTableSchema)
-	if err != nil {
-		return err
 	}
 
 	aColumn, ok := aTable.ColumnByName(stmt.Columns[0].Name)

@@ -108,7 +108,7 @@ func keySize[T IndexKey](key T) uint64 {
 	return 0
 }
 
-func (c *IndexCell[T]) Marshal(buf []byte) {
+func (c *IndexCell[T]) Marshal(buf []byte) error {
 	i := uint64(0)
 
 	// Marshal the key based on its type
@@ -134,6 +134,12 @@ func (c *IndexCell[T]) Marshal(buf []byte) {
 		i += varcharLengthPrefixSize
 		copy(buf[i:i+uint64(len([]byte(v)))], []byte(v))
 		i += uint64(len([]byte(v)))
+	case CompositeKey:
+		size := v.Size()
+		if err := v.Marshal(buf, i); err != nil {
+			return err
+		}
+		i += size
 	}
 
 	if c.unique {
@@ -158,9 +164,11 @@ func (c *IndexCell[T]) Marshal(buf []byte) {
 
 	marshalUint32(buf, uint32(c.Child), i)
 	i += 4
+
+	return nil
 }
 
-func (c *IndexCell[T]) Unmarshal(buf []byte) (uint64, error) {
+func (c *IndexCell[T]) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	i := uint64(0)
 
 	// Unmarshal the key based on its type
@@ -187,6 +195,13 @@ func (c *IndexCell[T]) Unmarshal(buf []byte) (uint64, error) {
 		keySize := uint64(length)
 		c.Key = any(string(bytes.Trim(buf[i:i+keySize], "\x00"))).(T)
 		i += keySize
+	case CompositeKey:
+		compositeKey := NewCompositeKey(columns)
+		ci, err := compositeKey.Unmarshal(buf, i)
+		if err != nil {
+			return 0, err
+		}
+		i += ci
 	default:
 		return 0, fmt.Errorf("unsupported column type: %T", v)
 	}
@@ -269,6 +284,13 @@ func NewIndexNode[T IndexKey](unique bool, cells ...IndexCell[T]) *IndexNode[T] 
 	return &aNode
 }
 
+func NewRootIndexNode[T IndexKey](unique bool, cells ...IndexCell[T]) *IndexNode[T] {
+	aNode := NewIndexNode[T](unique, cells...)
+	aNode.Header.IsRoot = true
+	aNode.Header.IsLeaf = true
+	return aNode
+}
+
 func (n *IndexNode[T]) Size() uint64 {
 	size := n.Header.Size()
 
@@ -293,7 +315,7 @@ func (n *IndexNode[T]) Marshal(buf []byte) error {
 	return nil
 }
 
-func (n *IndexNode[T]) Unmarshal(buf []byte) (uint64, error) {
+func (n *IndexNode[T]) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	i := uint64(0)
 
 	hi, err := n.Header.Unmarshal(buf[i:])
@@ -306,7 +328,7 @@ func (n *IndexNode[T]) Unmarshal(buf []byte) (uint64, error) {
 		if len(n.Cells) == idx {
 			n.Cells = append(n.Cells, NewIndexCell[T](n.Cells[0].unique))
 		}
-		ci, err := n.Cells[idx].Unmarshal(buf[i:])
+		ci, err := n.Cells[idx].Unmarshal(columns, buf[i:])
 		if err != nil {
 			return 0, err
 		}
@@ -478,6 +500,8 @@ func marshalIndexNode(anyNode any, buf []byte) error {
 		return aNode.Marshal(buf)
 	case *IndexNode[string]:
 		return aNode.Marshal(buf)
+	case *IndexNode[CompositeKey]:
+		return aNode.Marshal(buf)
 	default:
 		return fmt.Errorf("unknown index node type: %T", aNode)
 	}
@@ -526,6 +550,8 @@ func copyIndexNode(anyNode any) any {
 	case *IndexNode[float64]:
 		return aNode.Clone()
 	case *IndexNode[string]:
+		return aNode.Clone()
+	case *IndexNode[CompositeKey]:
 		return aNode.Clone()
 	default:
 		return nil

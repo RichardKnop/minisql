@@ -40,7 +40,7 @@ func TestTable_Delete_PrimaryKey(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	txPrimaryKeyPager := NewTransactionalPager(
+	txIndexPager := NewTransactionalPager(
 		aPager.ForIndex(aTable.PrimaryKey.Columns, true),
 		aTable.txManager,
 		testTableName,
@@ -58,12 +58,12 @@ func TestTable_Delete_PrimaryKey(t *testing.T) {
 	}
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		freePage, err := txPrimaryKeyPager.GetFreePage(ctx)
+		freePage, err := txIndexPager.GetFreePage(ctx)
 		if err != nil {
 			return err
 		}
 		aTable.PrimaryKey.Index, err = aTable.createBTreeIndex(
-			txPrimaryKeyPager,
+			txIndexPager,
 			freePage,
 			aTable.PrimaryKey.Columns,
 			aTable.PrimaryKey.Name,
@@ -88,6 +88,106 @@ func TestTable_Delete_PrimaryKey(t *testing.T) {
 			Conditions: OneOrMore{
 				{
 					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+				},
+			},
+		}
+
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, stmt)
+
+		assert.Equal(t, 1, aResult.RowsAffected)
+		checkRows(ctx, t, aTable, rows[1:])
+	})
+
+	t.Run("Delete all rows", func(t *testing.T) {
+		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{Kind: Delete})
+
+		assert.Equal(t, 9, aResult.RowsAffected)
+		checkRows(ctx, t, aTable, nil)
+	})
+}
+
+func TestTable_Delete_CompositePrimaryKey(t *testing.T) {
+	var (
+		aPager, dbFile = initTest(t)
+		ctx            = context.Background()
+		tablePager     = aPager.ForTable(testCompositeKeyColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		rows           = gen.RowsWithCompositeKey(10)
+		aTable         *Table
+	)
+
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		freePage, err := txPager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		freePage.LeafNode = NewLeafNode()
+		freePage.LeafNode.Header.IsRoot = true
+		aTable = NewTable(
+			testLogger,
+			txPager,
+			txManager,
+			testTableName,
+			testCompositeKeyColumns,
+			freePage.Index,
+			WithPrimaryKey(NewPrimaryKey("foo", testCompositeKeyColumns[1:3], true)),
+		)
+		return nil
+	})
+	require.NoError(t, err)
+
+	txIndexPager := NewTransactionalPager(
+		aPager.ForIndex(aTable.PrimaryKey.Columns, true),
+		aTable.txManager,
+		testTableName,
+		aTable.PrimaryKey.Name,
+	)
+
+	// Batch insert test rows
+	stmt := Statement{
+		Kind:    Insert,
+		Fields:  fieldsFromColumns(aTable.Columns...),
+		Inserts: make([][]OptionalValue, 0, len(rows)),
+	}
+	for _, aRow := range rows {
+		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	}
+
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		freePage, err := txIndexPager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		aTable.PrimaryKey.Index, err = aTable.createBTreeIndex(
+			txIndexPager,
+			freePage,
+			aTable.PrimaryKey.Columns,
+			aTable.PrimaryKey.Name,
+			true,
+		)
+		if err != nil {
+			return err
+		}
+		_, err = aTable.Insert(ctx, stmt)
+		return err
+	})
+	require.NoError(t, err)
+
+	checkRows(ctx, t, aTable, rows)
+
+	t.Run("Delete single row", func(t *testing.T) {
+		firstName, ok := rows[0].GetValue("first_name")
+		require.True(t, ok)
+		lastName, ok := rows[0].GetValue("last_name")
+		require.True(t, ok)
+
+		stmt := Statement{
+			Kind: Delete,
+			Conditions: OneOrMore{
+				{
+					FieldIsEqual("first_name", OperandQuotedString, firstName.Value),
+					FieldIsEqual("last_name", OperandQuotedString, lastName.Value),
 				},
 			},
 		}

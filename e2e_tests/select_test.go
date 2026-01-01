@@ -36,21 +36,23 @@ values(100, 'Johnathan_Walker250@ptr6k.page', 'Johnathan Walker', '2024-01-02 15
 	s.execQuery(`insert into users("email", "name", "created") 
 values('Cristal_Duvall6639@yvu30.press', 'Cristal Duvall', NOW());`, 1)
 
-	// Inserting user with duplicate primary key should fail
-	aResult, err := s.db.ExecContext(context.Background(), `insert into users("id", "email", "name", "created") 
+	s.Run("Inserting duplicate primary key should fail", func() {
+		aResult, err := s.db.ExecContext(context.Background(), `insert into users("id", "email", "name", "created") 
 values(100, 'Johnathan_Walker250+new@ptr6k.page', 'Johnathan Walker', '2024-01-02 15:30:27');`)
-	s.Require().Error(err)
-	s.ErrorIs(err, minisql.ErrDuplicateKey)
-	s.Equal("failed to insert primary key pkey__users: duplicate key", err.Error())
-	s.Nil(aResult)
+		s.Require().Error(err)
+		s.ErrorIs(err, minisql.ErrDuplicateKey)
+		s.Equal("failed to insert primary key pkey__users: duplicate key", err.Error())
+		s.Nil(aResult)
+	})
 
-	// Inserting user with duplicate unique index key should fail
-	aResult, err = s.db.ExecContext(context.Background(), `insert into users("name", "email", "created") 
+	s.Run("Inserting duplicate unique index key should fail", func() {
+		aResult, err := s.db.ExecContext(context.Background(), `insert into users("name", "email", "created") 
 values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:27');`)
-	s.Require().Error(err)
-	s.ErrorIs(err, minisql.ErrDuplicateKey)
-	s.Equal("failed to insert key for unique index key__users__email: duplicate key", err.Error())
-	s.Nil(aResult)
+		s.Require().Error(err)
+		s.ErrorIs(err, minisql.ErrDuplicateKey)
+		s.Equal("failed to insert key for unique index key__users__email: duplicate key", err.Error())
+		s.Nil(aResult)
+	})
 
 	s.Run("Basic select query", func() {
 		users := s.collectUsers(`select * from users order by id;`)
@@ -301,26 +303,6 @@ func (s TestSuite) execQuery(query string, expectedRowsAffected int) {
 	rowsAffected, err := aResult.RowsAffected()
 	s.Require().NoError(err)
 	s.Require().Equal(expectedRowsAffected, int(rowsAffected))
-}
-
-func (s TestSuite) prepareAndExecQuery(query string, expectedRowsAffected int, args ...any) {
-	stmt, err := s.db.Prepare(query)
-	s.Require().NoError(err)
-
-	aResult, err := stmt.Exec(args...)
-	s.Require().NoError(err)
-
-	rowsAffected, err := aResult.RowsAffected()
-	s.Require().NoError(err)
-	s.Require().Equal(expectedRowsAffected, int(rowsAffected))
-
-}
-
-type user struct {
-	ID      int64
-	Name    sql.NullString
-	Email   sql.NullString
-	Created time.Time
 }
 
 func (s TestSuite) collectUsers(query string) []user {

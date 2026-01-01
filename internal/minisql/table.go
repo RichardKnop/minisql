@@ -3,6 +3,7 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 )
@@ -36,6 +37,12 @@ func WithUniqueIndex(index UniqueIndex) TableOption {
 	}
 }
 
+func WithSecondaryIndex(index SecondaryIndex) TableOption {
+	return func(t *Table) {
+		t.SecondaryIndexes[index.Name] = index
+	}
+}
+
 func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, name string, columns []Column, rootPageIdx PageIndex, opts ...TableOption) *Table {
 	aTable := &Table{
 		Name:                 name,
@@ -62,16 +69,27 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 
 	// Build column name -> IndexInfo cache
 	if aTable.HasPrimaryKey() {
-		aTable.columnIndexInfoCache[aTable.PrimaryKey.Columns[0].Name] = aTable.PrimaryKey.IndexInfo
+		aTable.columnIndexInfoCache[indexColumnHash(aTable.PrimaryKey.Columns)] = aTable.PrimaryKey.IndexInfo
 	}
 	for _, index := range aTable.UniqueIndexes {
-		aTable.columnIndexInfoCache[index.Columns[0].Name] = index.IndexInfo
+		aTable.columnIndexInfoCache[indexColumnHash(index.Columns)] = index.IndexInfo
 	}
 	for _, index := range aTable.SecondaryIndexes {
-		aTable.columnIndexInfoCache[index.Columns[0].Name] = index.IndexInfo
+		aTable.columnIndexInfoCache[indexColumnHash(index.Columns)] = index.IndexInfo
 	}
 
 	return aTable
+}
+
+func indexColumnHash(columns []Column) string {
+	var hash strings.Builder
+	for i, aColumn := range columns {
+		hash.WriteString(aColumn.Name)
+		if i < len(columns)-1 {
+			hash.WriteString("|")
+		}
+	}
+	return hash.String()
 }
 
 func (t *Table) SetSecondaryIndex(name string, columns []Column, index BTreeIndex) {
@@ -82,11 +100,11 @@ func (t *Table) SetSecondaryIndex(name string, columns []Column, index BTreeInde
 		},
 		Index: index,
 	}
-	t.columnIndexInfoCache[columns[0].Name] = t.SecondaryIndexes[name].IndexInfo
+	t.columnIndexInfoCache[indexColumnHash(columns)] = t.SecondaryIndexes[name].IndexInfo
 }
 
 func (t *Table) RemoveSecondaryIndex(name string) {
-	delete(t.columnIndexInfoCache, t.SecondaryIndexes[name].Columns[0].Name)
+	delete(t.columnIndexInfoCache, indexColumnHash(t.SecondaryIndexes[name].Columns))
 	delete(t.SecondaryIndexes, name)
 }
 
@@ -116,6 +134,14 @@ func (t *Table) IndexColumnsByIndexName(name string) ([]Column, bool) {
 		return index.IndexInfo.Columns, true
 	}
 	return nil, false
+}
+
+func (t *Table) HasIndexOnColumns(columns []Column) bool {
+	if len(columns) == 0 {
+		return false
+	}
+	_, ok := t.columnIndexInfoCache[indexColumnHash(columns)]
+	return ok
 }
 
 func (t *Table) HasIndexOnColumn(name string) bool {
@@ -1055,49 +1081,34 @@ func (t *Table) BFS(ctx context.Context, f callback) error {
 
 func (t *Table) createBTreeIndex(aPager *TransactionalPager, freePage *Page, columns []Column, indexName string, unique bool) (BTreeIndex, error) {
 	if len(columns) > 1 {
-		return nil, fmt.Errorf("composite BTree indexes are not supported yet")
+		freePage.IndexNode = NewRootIndexNode[CompositeKey](unique)
+	} else {
+		switch columns[0].Kind {
+		case Boolean:
+			freePage.IndexNode = NewRootIndexNode[int8](unique)
+		case Int4:
+			freePage.IndexNode = NewRootIndexNode[int32](unique)
+		case Int8, Timestamp:
+			freePage.IndexNode = NewRootIndexNode[int64](unique)
+		case Real:
+			freePage.IndexNode = NewRootIndexNode[float32](unique)
+		case Double:
+			freePage.IndexNode = NewRootIndexNode[float64](unique)
+		case Varchar:
+			freePage.IndexNode = NewRootIndexNode[string](unique)
+		default:
+			return nil, fmt.Errorf("unsupported BTree index column type %v for index %s", columns[0].Kind, indexName)
+		}
 	}
-	switch columns[0].Kind {
-	case Boolean:
-		indexNode := NewIndexNode[int8](unique)
-		indexNode.Header.IsRoot = true
-		indexNode.Header.IsLeaf = true
-		freePage.IndexNode = indexNode
-	case Int4:
-		indexNode := NewIndexNode[int32](unique)
-		indexNode.Header.IsRoot = true
-		indexNode.Header.IsLeaf = true
-		freePage.IndexNode = indexNode
-	case Int8, Timestamp:
-		indexNode := NewIndexNode[int64](unique)
-		indexNode.Header.IsRoot = true
-		indexNode.Header.IsLeaf = true
-		freePage.IndexNode = indexNode
-	case Real:
-		indexNode := NewIndexNode[float32](unique)
-		indexNode.Header.IsRoot = true
-		indexNode.Header.IsLeaf = true
-		freePage.IndexNode = indexNode
-	case Double:
-		indexNode := NewIndexNode[float64](unique)
-		indexNode.Header.IsRoot = true
-		indexNode.Header.IsLeaf = true
-		freePage.IndexNode = indexNode
-	case Varchar:
-		indexNode := NewIndexNode[string](unique)
-		indexNode.Header.IsRoot = true
-		indexNode.Header.IsLeaf = true
-		freePage.IndexNode = indexNode
-	default:
-		return nil, fmt.Errorf("unsupported BTree index column type %v for index %s", columns[0].Kind, indexName)
-	}
-
 	return t.newBTreeIndex(aPager, freePage.Index, columns, indexName, unique)
 }
 
 func (t *Table) newBTreeIndex(aPager *TransactionalPager, rootPageIdx PageIndex, columns []Column, indexName string, unique bool) (BTreeIndex, error) {
 	if len(columns) > 1 {
-		return nil, fmt.Errorf("composite BTree indexes are not supported yet")
+		if unique {
+			return NewUniqueIndex[CompositeKey](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
+		}
+		return NewNonUniqueIndex[CompositeKey](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
 	}
 	switch columns[0].Kind {
 	case Boolean:
