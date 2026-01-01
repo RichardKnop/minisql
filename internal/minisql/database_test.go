@@ -2,7 +2,6 @@ package minisql
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"testing"
 
@@ -500,7 +499,6 @@ func TestDatabase_CreateIndex(t *testing.T) {
 			Kind:      DropIndex,
 			IndexName: "foo_bar",
 		}
-		fmt.Println("FROM HERE")
 		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aDatabase.ExecuteStatement(ctx, deleteStmt)
 			return err
