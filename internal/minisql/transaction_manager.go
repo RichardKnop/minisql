@@ -210,14 +210,12 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		// FATAL: Cannot continue with partially-flushed transaction
 		// In-memory state is corrupted and doesn't match disk
 		// Journal exists and will restore consistency on restart
-		tm.logger.Fatal("FATAL: batch flush failed during commit, database corrupted",
-			zap.Uint64("tx_id", uint64(tx.ID)),
-			zap.Int("pages_to_flush", len(pagesToFlush)),
-			zap.Error(err),
-			zap.String("action", "forcing restart for journal recovery"))
-
-		panic(fmt.Sprintf("transaction %d: batch flush of %d pages failed: %v - restart required for journal recovery",
-			tx.ID, len(pagesToFlush), err))
+		tm.logger.Sugar().Panicf(
+			"PANIC: batch flush failed during commit, forcing restart for journal recovery tx_id %d, pages_to_flush %d, error %v",
+			uint64(tx.ID),
+			len(pagesToFlush),
+			err,
+		)
 	}
 
 	// === PHASE 4: Delete Journal (Atomic Commit Point) ===

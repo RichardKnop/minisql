@@ -126,6 +126,19 @@ func (r Row) GetValue(name string) (OptionalValue, bool) {
 	return r.Values[idx], true
 }
 
+func (r Row) GetValuesForColumns(columns []Column) ([]OptionalValue, bool) {
+	values := make([]OptionalValue, 0, len(columns))
+	for _, aColumn := range columns {
+		value, ok := r.GetValue(aColumn.Name)
+		if !ok {
+			return nil, false
+		}
+		values = append(values, value)
+	}
+
+	return values, true
+}
+
 // SetValue returns true if value has changed
 func (r Row) SetValue(name string, value OptionalValue) (Row, bool) {
 	columnIdx, ok := r.columnCache[name]
@@ -255,8 +268,7 @@ func (r Row) Marshal() ([]byte, error) {
 
 			size := textPointer.Size()
 			buf = append(buf, make([]byte, size)...)
-			_, err := textPointer.Marshal(buf, offset)
-			if err != nil {
+			if err := textPointer.Marshal(buf, offset); err != nil {
 				return nil, err
 			}
 			offset += size

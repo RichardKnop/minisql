@@ -173,12 +173,24 @@ func (ui *Index[T]) ScanRange(ctx context.Context, rangeCondition RangeCondition
 			return err
 		}
 
-		aCursor, ok, err := ui.Seek(ctx, aPage, rangeCondition.Lower.Value.(T))
-		if err != nil {
-			return err
-		}
-		if ok {
-			return ui.scanRangeFrom(ctx, aCursor.PageIdx, aCursor.CellIdx, rangeCondition, callback)
+		// If type is CompositeKey and lower bound is a prefix, use SeekWithPrefix
+		cv, isComposite := any(rangeCondition.Lower.Value).(CompositeKey)
+		if isComposite && len(cv.Columns) < len(ui.Columns) {
+			aCursor, ok, err := ui.SeekWithPrefix(ctx, aPage, rangeCondition.Lower.Value, len(cv.Columns))
+			if err != nil {
+				return err
+			}
+			if ok {
+				return ui.scanRangeFrom(ctx, aCursor.PageIdx, aCursor.CellIdx, rangeCondition, callback)
+			}
+		} else {
+			aCursor, ok, err := ui.Seek(ctx, aPage, rangeCondition.Lower.Value.(T))
+			if err != nil {
+				return err
+			}
+			if ok {
+				return ui.scanRangeFrom(ctx, aCursor.PageIdx, aCursor.CellIdx, rangeCondition, callback)
+			}
 		}
 	}
 	// Otherwise, scan from the beginning

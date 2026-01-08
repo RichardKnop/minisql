@@ -521,7 +521,7 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, "primary key cannot be of type TEXT")
 	})
 
-	t.Run("CREATE TABLE with VARCHAR primary key exceeding max size should fail", func(t *testing.T) {
+	t.Run("CREATE TABLE with primary key exceeding max size should fail", func(t *testing.T) {
 		columns := []Column{
 			{
 				Name: "id",
@@ -538,7 +538,7 @@ func TestStatement_Validate(t *testing.T) {
 
 		err := stmt.Validate(nil)
 		require.Error(t, err)
-		assert.ErrorContains(t, err, fmt.Sprintf("primary key of type VARCHAR exceeds max index key size %d", MaxIndexKeySize))
+		assert.ErrorContains(t, err, fmt.Sprintf("primary key size exceeds max index key size %d", MaxIndexKeySize))
 	})
 
 	t.Run("CREATE TABLE with autoincrement primary key of invalid type should fail", func(t *testing.T) {
@@ -584,7 +584,7 @@ func TestStatement_Validate(t *testing.T) {
 
 		err := stmt.Validate(nil)
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "column id can only have one index")
+		assert.ErrorContains(t, err, "id can only have one index")
 	})
 
 	t.Run("CREATE TABLE with TEXT unique key should fail", func(t *testing.T) {
@@ -609,7 +609,7 @@ func TestStatement_Validate(t *testing.T) {
 
 		err := stmt.Validate(nil)
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "unique key cannot be of type TEXT")
+		assert.ErrorContains(t, err, "unique index key cannot be of type TEXT")
 	})
 
 	t.Run("CREATE TABLE with VARCHAR unique key exceeding max size should fail", func(t *testing.T) {
@@ -635,7 +635,19 @@ func TestStatement_Validate(t *testing.T) {
 
 		err := stmt.Validate(nil)
 		require.Error(t, err)
-		assert.ErrorContains(t, err, fmt.Sprintf("unique key of type VARCHAR exceeds max index key size %d", MaxIndexKeySize))
+		assert.ErrorContains(t, err, fmt.Sprintf("unique index key size exceeds max index key size %d", MaxIndexKeySize))
+	})
+
+	t.Run("CREATE TABLE with duplicate column names should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      CreateTable,
+			TableName: testTableName,
+			Columns:   []Column{{Name: "id", Kind: Int8, Size: 8}, {Name: "id", Kind: Int8, Size: 8}},
+		}
+
+		err := stmt.Validate(nil)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "duplicate column name")
 	})
 
 	t.Run("CREATE TABLE should succeed", func(t *testing.T) {
@@ -1682,7 +1694,7 @@ func TestStatement_DDL(t *testing.T) {
 	})
 }
 
-func TestStatement_InsertValueForColumn(t *testing.T) {
+func TestStatement_InsertValuesForColumns(t *testing.T) {
 	t.Parallel()
 
 	stmt := Statement{
@@ -1715,17 +1727,25 @@ func TestStatement_InsertValueForColumn(t *testing.T) {
 		},
 	}
 
-	val, ok := stmt.InsertValueForColumn("email", 5)
-	require.False(t, ok)
-	assert.Equal(t, OptionalValue{}, val)
+	t.Run("invalid insert index", func(t *testing.T) {
+		vals := stmt.InsertValuesForColumns(5, stmt.Columns[1])
+		assert.Empty(t, vals)
+	})
 
-	val, ok = stmt.InsertValueForColumn("email", 0)
-	require.True(t, ok)
-	assert.Equal(t, OptionalValue{Value: "john@example.com", Valid: true}, val)
+	t.Run("value for single column", func(t *testing.T) {
+		vals := stmt.InsertValuesForColumns(0, stmt.Columns[1])
+		assert.Equal(t, []OptionalValue{
+			{Value: "john@example.com", Valid: true},
+		}, vals)
+	})
 
-	val, ok = stmt.InsertValueForColumn("email", 1)
-	require.True(t, ok)
-	assert.Equal(t, OptionalValue{Value: "jane@example.com", Valid: true}, val)
+	t.Run("value for two column", func(t *testing.T) {
+		vals := stmt.InsertValuesForColumns(1, stmt.Columns[0], stmt.Columns[1])
+		assert.Equal(t, []OptionalValue{
+			{Value: int32(2), Valid: true},
+			{Value: "jane@example.com", Valid: true},
+		}, vals)
+	})
 }
 
 func TestStatement_IsSelectAll(t *testing.T) {

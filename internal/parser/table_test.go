@@ -588,7 +588,7 @@ func TestParse_CreateTable(t *testing.T) {
 			nil,
 		},
 		{
-			"CREATE TABLE with column which part matches reserved work works",
+			"CREATE TABLE with column which part matches reserved word works",
 			"CREATE TABLE foo (id int8 primary key, description text);",
 			[]minisql.Statement{
 				{
@@ -597,9 +597,8 @@ func TestParse_CreateTable(t *testing.T) {
 					Columns: []minisql.Column{
 						idColumn,
 						{
-							Name: "description",
-							Kind: minisql.Text,
-
+							Name:     "description",
+							Kind:     minisql.Text,
 							Nullable: true,
 						},
 					},
@@ -608,6 +607,97 @@ func TestParse_CreateTable(t *testing.T) {
 						[]minisql.Column{idColumn},
 						false,
 					),
+				},
+			},
+			nil,
+		},
+		{
+			"CREATE TABLE with composite primary key works",
+			"CREATE TABLE foo (bar varchar(100) not null, baz varchar(100) not null, qux text, primary key(bar, baz));",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name: "bar",
+							Kind: minisql.Varchar,
+							Size: 100,
+						},
+						{
+							Name: "baz",
+							Kind: minisql.Varchar,
+							Size: 100,
+						},
+						{
+							Name:     "qux",
+							Kind:     minisql.Text,
+							Nullable: true,
+						},
+					},
+					PrimaryKey: minisql.NewPrimaryKey(
+						minisql.PrimaryKeyName("foo"),
+						[]minisql.Column{
+							{
+								Name: "bar",
+								Kind: minisql.Varchar,
+								Size: 100,
+							},
+							{
+								Name: "baz",
+								Kind: minisql.Varchar,
+								Size: 100,
+							},
+						},
+						false,
+					),
+				},
+			},
+			nil,
+		},
+		{
+			"CREATE TABLE with composite unique index key works",
+			"CREATE TABLE foo (bar varchar(100) not null, baz varchar(100) not null, qux text, unique (bar, baz));",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateTable,
+					TableName: "foo",
+					Columns: []minisql.Column{
+						{
+							Name: "bar",
+							Kind: minisql.Varchar,
+							Size: 100,
+						},
+						{
+							Name: "baz",
+							Kind: minisql.Varchar,
+							Size: 100,
+						},
+						{
+							Name:     "qux",
+							Kind:     minisql.Text,
+							Nullable: true,
+						},
+					},
+					UniqueIndexes: []minisql.UniqueIndex{
+						{
+							IndexInfo: minisql.IndexInfo{
+								Name: minisql.UniqueIndexName("foo", "bar", "baz"),
+								Columns: []minisql.Column{
+									{
+										Name: "bar",
+										Kind: minisql.Varchar,
+										Size: 100,
+									},
+									{
+										Name: "baz",
+										Kind: minisql.Varchar,
+										Size: 100,
+									},
+								},
+							},
+						},
+					},
 				},
 			},
 			nil,

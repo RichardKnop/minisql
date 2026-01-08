@@ -36,7 +36,7 @@ func TestIndexNode_Int8_Marshal(t *testing.T) {
 	require.NoError(t, err)
 
 	recreatedNode := NewIndexNode[int64](true)
-	_, err = recreatedNode.Unmarshal(buf)
+	_, err = recreatedNode.Unmarshal(nil, buf)
 	require.NoError(t, err)
 
 	assert.Equal(t, aNode, recreatedNode)
@@ -75,7 +75,7 @@ func TestIndexNode_Varchar_Marshal(t *testing.T) {
 	require.NoError(t, err)
 
 	recreatedNode := NewIndexNode[string](true)
-	_, err = recreatedNode.Unmarshal(buf)
+	_, err = recreatedNode.Unmarshal(nil, buf)
 	require.NoError(t, err)
 
 	assert.Equal(t, aNode, recreatedNode)

@@ -565,49 +565,6 @@ func rowIDs(rows ...Row) []any {
 	return ids
 }
 
-func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []Row) {
-	selectResult, err := aTable.Select(ctx, Statement{
-		Kind:   Select,
-		Fields: fieldsFromColumns(aTable.Columns...),
-	})
-	require.NoError(t, err)
-
-	expectedIDMap := map[int64]struct{}{}
-	for _, r := range expectedRows {
-		id, ok := r.GetValue("id")
-		require.True(t, ok)
-		expectedIDMap[id.Value.(int64)] = struct{}{}
-	}
-
-	var actual []Row
-	for selectResult.Rows.Next(ctx) {
-		aRow := selectResult.Rows.Row()
-		actual = append(actual, aRow)
-		if len(expectedIDMap) > 0 {
-			_, ok := expectedIDMap[aRow.Values[0].Value.(int64)]
-			assert.True(t, ok)
-		}
-	}
-	require.NoError(t, selectResult.Rows.Err())
-
-	require.Len(t, actual, len(expectedRows))
-	for i := range len(expectedRows) {
-		assert.Equal(t, expectedRows[i].Key, actual[i].Key, "row key %d does not match expected %d", i)
-		assert.Equal(t, expectedRows[i].Columns, actual[i].Columns, "row columns %d does not match expected", i)
-		// Compare values, for text values, we don't want to compare pointers to overflow pages
-		for j, aValue := range expectedRows[i].Values {
-			tp, ok := aValue.Value.(TextPointer)
-			if ok {
-				assert.Equal(t, int(tp.Length), int(actual[i].Values[j].Value.(TextPointer).Length), "row %d text pointer length %d does not match expected", i, j)
-				assert.Equal(t, tp.Data, actual[i].Values[j].Value.(TextPointer).Data, "row %d text pointer data %d does not match expected", i, j)
-			} else {
-				assert.Equal(t, actual[i].Values[j], expectedRows[i].Values[j], "row %d value %d does not match expected", i, j)
-			}
-		}
-		assert.Equal(t, expectedRows[i].NullBitmask(), actual[i].NullBitmask(), "row %d null bitmask does not match expected", i)
-	}
-}
-
 func mustDelete(t *testing.T, ctx context.Context, aTable *Table, txManager *TransactionManager, saver PageSaver, stmt Statement) StatementResult {
 	var aResult StatementResult
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {

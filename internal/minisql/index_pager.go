@@ -7,7 +7,8 @@ import (
 
 type indexPager[T IndexKey] struct {
 	*pagerImpl
-	unique bool
+	columns []Column
+	unique  bool
 }
 
 func (p *indexPager[T]) GetPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
@@ -21,7 +22,7 @@ func (p *indexPager[T]) unmarshal(totalPages uint32, pageIdx PageIndex, buf []by
 	if uint32(pageIdx) == totalPages {
 		node := NewIndexNode[T](p.unique)
 		buf[idx] = PageTypeIndex
-		_, err := node.Unmarshal(buf)
+		_, err := node.Unmarshal(p.columns, buf)
 		if err != nil {
 			return nil, err
 		}
@@ -33,7 +34,7 @@ func (p *indexPager[T]) unmarshal(totalPages uint32, pageIdx PageIndex, buf []by
 	switch buf[idx] {
 	case PageTypeIndex:
 		node := NewIndexNode[T](p.unique)
-		_, err := node.Unmarshal(buf)
+		_, err := node.Unmarshal(p.columns, buf)
 		if err != nil {
 			return nil, err
 		}

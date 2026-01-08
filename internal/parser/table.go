@@ -47,12 +47,19 @@ func (p *parserItem) doParseCreateTable() error {
 		p.pop()
 		p.step = stepCreateTableColumn
 	case stepCreateTableColumn:
-		identifier := p.peek()
-		if !isIdentifier(identifier) {
+		token := p.peek()
+
+		switch strings.ToUpper(token) {
+		case "PRIMARY KEY", "UNIQUE":
+			p.step = stepCreateTableConstraint
+			return nil
+		}
+
+		if !isIdentifier(token) {
 			return errCreateTableNoColumns
 		}
 		p.Columns = append(p.Columns, minisql.Column{
-			Name: identifier,
+			Name: token,
 		})
 		p.pop()
 		p.step = stepCreateTableColumnDef
@@ -179,8 +186,97 @@ func (p *parserItem) doParseCreateTable() error {
 			Value: defaultValue,
 			Valid: true,
 		}
-	case stepCreateTableCommaOrClosingParens:
+	case stepCreateTableConstraint:
+		token := strings.ToUpper(p.peek())
+		switch token {
+		case "PRIMARY KEY":
+			p.pop()
+			p.step = stepCreateTableConstraintPrimaryKey
+			return nil
+		case "UNIQUE":
+			p.pop()
+			p.step = stepCreateTableConstraintUniqueKey
+			return nil
+		}
+		if token != ")" {
+			return fmt.Errorf("at CREATE TABLE: expected PRIMARY KEY, UNIQUE, or closing parens")
+		}
+		p.pop()
+		p.step = stepStatementEnd
+	case stepCreateTableConstraintPrimaryKey:
+		openingParens := p.peek()
+		if len(openingParens) != 1 || openingParens != "(" {
+			return errCreateTableExpectedOpeningParens
+		}
+		p.pop()
+		p.PrimaryKey.Name = minisql.PrimaryKeyName(p.TableName)
+		p.step = stepCreateTableConstraintPrimaryKeyColumn
+	case stepCreateTableConstraintUniqueKey:
+		openingParens := p.peek()
+		if len(openingParens) != 1 || openingParens != "(" {
+			return errCreateTableExpectedOpeningParens
+		}
+		p.pop()
+		p.UniqueIndexes = append(p.UniqueIndexes, minisql.UniqueIndex{})
+		p.step = stepCreateTableConstraintUniqueKeyColumn
+	case stepCreateTableConstraintPrimaryKeyColumn:
+		columnName := p.peek()
+		if !isIdentifier(columnName) {
+			return fmt.Errorf("at CREATE TABLE: expected comma or closing parens")
+		}
+		p.pop()
+		var aColumn minisql.Column
+		for _, col := range p.Columns {
+			if col.Name == columnName {
+				aColumn = col
+				break
+			}
+		}
+		if aColumn.Name == "" {
+			return fmt.Errorf("at CREATE TABLE: primary key column '%s' does not exist", columnName)
+		}
+		p.PrimaryKey.Columns = append(p.PrimaryKey.Columns, aColumn)
+		p.step = stepCreateTableConstraintPrimaryKeyCommaOrClosingParens
+	case stepCreateTableConstraintUniqueKeyColumn:
+		columnName := p.peek()
+		if !isIdentifier(columnName) {
+			return fmt.Errorf("at CREATE TABLE: expected comma or closing parens")
+		}
+		p.pop()
+		var aColumn minisql.Column
+		for _, col := range p.Columns {
+			if col.Name == columnName {
+				aColumn = col
+				break
+			}
+		}
+		p.UniqueIndexes[len(p.UniqueIndexes)-1].Columns = append(p.UniqueIndexes[len(p.UniqueIndexes)-1].Columns, aColumn)
+		p.step = stepCreateTableConstraintUniqueKeyCommaOrClosingParens
+	case stepCreateTableConstraintPrimaryKeyCommaOrClosingParens:
 		commaOrClosingParens := p.peek()
+		if commaOrClosingParens != "," && commaOrClosingParens != ")" {
+			return fmt.Errorf("at CREATE TABLE: expected comma or closing parens")
+		}
+		p.pop()
+		if commaOrClosingParens == "," {
+			p.step = stepCreateTableConstraintPrimaryKeyColumn
+			return nil
+		}
+		p.step = stepCreateTableConstraint
+	case stepCreateTableConstraintUniqueKeyCommaOrClosingParens:
+		commaOrClosingParens := p.peek()
+		if commaOrClosingParens != "," && commaOrClosingParens != ")" {
+			return fmt.Errorf("at CREATE TABLE: expected comma or closing parens")
+		}
+		p.pop()
+		if commaOrClosingParens == "," {
+			p.step = stepCreateTableConstraintUniqueKeyColumn
+			return nil
+		}
+		p.UniqueIndexes[len(p.UniqueIndexes)-1].Name = minisql.UniqueIndexName(p.TableName, columnNames(p.UniqueIndexes[len(p.UniqueIndexes)-1].Columns)...)
+		p.step = stepCreateTableConstraint
+	case stepCreateTableCommaOrClosingParens:
+		commaOrClosingParens := strings.ToUpper(p.peek())
 		if commaOrClosingParens != "," && commaOrClosingParens != ")" {
 			return fmt.Errorf("at CREATE TABLE: expected comma or closing parens")
 		}
@@ -192,6 +288,14 @@ func (p *parserItem) doParseCreateTable() error {
 		p.step = stepStatementEnd
 	}
 	return nil
+}
+
+func columnNames(columns []minisql.Column) []string {
+	names := make([]string, 0, len(columns))
+	for _, aColumn := range columns {
+		names = append(names, aColumn.Name)
+	}
+	return names
 }
 
 func isDefaultValueValid(column minisql.Column, valueToken any) error {

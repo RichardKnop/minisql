@@ -32,10 +32,7 @@ func (s *TestSuite) TestEmptyDatabase() {
 	s.Require().NoError(err)
 
 	// There should be only one row for the minisql_schema table
-	var count int
-	err = s.db.QueryRow(`select count(*) from minisql_schema;`).Scan(&count)
-	s.Require().NoError(err)
-	s.Equal(1, count)
+	s.countRowsInTable("minisql_schema", 1)
 
 	var aSchema schema
 	err = s.db.QueryRow(`select * from minisql_schema;`).Scan(&aSchema.Type, &aSchema.Name, &aSchema.TblName, &aSchema.RootPage, &aSchema.Sql)
@@ -54,13 +51,10 @@ func (s *TestSuite) TestCreateTable() {
 
 		// There should be 4 rows one for minisql_schema and one for users table
 		// plus one for the users table primary key index and one for the unique index
-		var count int
-		err = s.db.QueryRow(`select count(*) from minisql_schema;`).Scan(&count)
-		s.Require().NoError(err)
-		s.Equal(4, count)
+		s.countRowsInTable("minisql_schema", 4)
 
 		schemas := s.scanSchemas()
-		s.Require().Equal(4, len(schemas))
+		s.Require().Len(schemas, 4)
 		s.assertSchemaTable(schemas[0])
 
 		// Check newly created rows for users table and its indexes
@@ -81,11 +75,8 @@ func (s *TestSuite) TestCreateTable() {
 		s.Require().NoError(err)
 		s.Require().Equal(int64(0), rowsAffected)
 
-		// Nothing should have changed, still the same 3 rows
-		var count int
-		err = s.db.QueryRow(`select count(*) from minisql_schema;`).Scan(&count)
-		s.Require().NoError(err)
-		s.Equal(4, count)
+		// Nothing should have changed, still the main system table and same 3 rows
+		s.countRowsInTable("minisql_schema", 4)
 
 		schemas := s.scanSchemas()
 		s.Require().Equal(4, len(schemas))
@@ -97,10 +88,7 @@ func (s *TestSuite) TestCreateTable() {
 		_, err := s.db.Exec(createUsersTimestampIndexSQL)
 		s.Require().NoError(err)
 
-		var count int
-		err = s.db.QueryRow(`select count(*) from minisql_schema;`).Scan(&count)
-		s.Require().NoError(err)
-		s.Equal(5, count)
+		s.countRowsInTable("minisql_schema", 5)
 
 		schemas := s.scanSchemas()
 		s.assertSchemaTable(schemas[0])
@@ -148,10 +136,7 @@ func (s *TestSuite) TestCreateTable() {
 		// - 1 for secondary inex on users table
 		// - 2 for products table and its primary key index
 		// - 2 for orders table and its primary key index
-		var count int
-		err = s.db.QueryRow(`select count(*) from minisql_schema;`).Scan(&count)
-		s.Require().NoError(err)
-		s.Equal(9, count)
+		s.countRowsInTable("minisql_schema", 9)
 
 		schemas := s.scanSchemas()
 		s.Require().Equal(9, len(schemas))

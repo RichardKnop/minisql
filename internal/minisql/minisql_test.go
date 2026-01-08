@@ -158,25 +158,6 @@ var (
 			bigRowBaseSize)),
 	)
 
-	testOverflowColumns = []Column{
-		{
-			Kind: Int8,
-			Size: 8,
-			Name: "id",
-		},
-		{
-			Kind:     Varchar,
-			Size:     MaxInlineVarchar,
-			Name:     "email",
-			Nullable: true,
-		},
-		{
-			Kind:     Text,
-			Name:     "profile",
-			Nullable: true,
-		},
-	}
-
 	testLogger *zap.Logger
 )
 
@@ -455,6 +436,27 @@ func (g *dataGen) RowsWithUniqueIndex(number int) []Row {
 	return rows
 }
 
+var (
+	testOverflowColumns = []Column{
+		{
+			Kind: Int8,
+			Size: 8,
+			Name: "id",
+		},
+		{
+			Kind:     Varchar,
+			Size:     MaxInlineVarchar,
+			Name:     "email",
+			Nullable: true,
+		},
+		{
+			Kind:     Text,
+			Name:     "profile",
+			Nullable: true,
+		},
+	}
+)
+
 func (g *dataGen) OverflowRow(textSize uint32) Row {
 	return NewRowWithValues(testOverflowColumns, []OptionalValue{
 		{Value: g.Int64(), Valid: true},
@@ -480,6 +482,71 @@ func (g *dataGen) OverflowRows(number int, sizes []uint32) []Row {
 		aRow.Key = RowID(i)
 		rows = append(rows, aRow)
 		idMap[aRow.Values[0].Value.(int64)] = struct{}{}
+	}
+	return rows
+}
+
+var (
+	testCompositeKeyColumns = []Column{
+		{
+			Kind: Int8,
+			Size: 8,
+			Name: "id",
+		},
+		{
+			Kind: Varchar,
+			Size: 100,
+			Name: "first_name",
+		},
+		{
+			Kind: Varchar,
+			Size: 100,
+			Name: "last_name",
+		},
+		{
+			Kind: Varchar,
+			Size: 100,
+			Name: "email",
+		},
+		{
+			Kind: Timestamp,
+			Size: 8,
+			Name: "dob",
+		},
+	}
+)
+
+func (g *dataGen) RowWithCompositeKey() Row {
+	return NewRowWithValues(testCompositeKeyColumns, []OptionalValue{
+		{Value: g.Int64(), Valid: true},
+		{Value: NewTextPointer([]byte(g.FirstName())), Valid: true},
+		{Value: NewTextPointer([]byte(g.LastName())), Valid: true},
+		{Value: NewTextPointer([]byte(g.Email())), Valid: true},
+		{Value: MustParseTimestamp(g.PastDate().Format(timestampFormat)), Valid: true},
+	})
+}
+
+func (g *dataGen) RowsWithCompositeKey(number int) []Row {
+	var (
+		uniqueMap = map[string]struct{}{}
+		rows      = make([]Row, 0, number)
+	)
+	for i := range number {
+		aRow := g.RowWithCompositeKey()
+
+		// Ensure unique composite key
+		uniqueHash := fmt.Sprintf("%s|%s", aRow.Values[1].Value.(TextPointer).String(), aRow.Values[2].Value.(TextPointer).String())
+		_, ok := uniqueMap[uniqueHash]
+		for ok {
+			aRow = g.RowWithCompositeKey()
+			uniqueHash = fmt.Sprintf("%s|%s", aRow.Values[1].Value.(TextPointer).String(), aRow.Values[2].Value.(TextPointer).String())
+			_, ok = uniqueMap[uniqueHash]
+		}
+
+		aRow.Key = RowID(i)
+		rows = append(rows, aRow)
+
+		uniqueMap[uniqueHash] = struct{}{}
 	}
 	return rows
 }

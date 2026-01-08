@@ -15,12 +15,11 @@ func TestTextPointer_Marshal(t *testing.T) {
 		original := NewTextPointer(bytes.Repeat([]byte{'a'}, 100))
 
 		buf := make([]byte, original.Size())
-		data, err := original.Marshal(buf, 0)
+		err := original.Marshal(buf, 0)
 		require.NoError(t, err)
 
 		recreated := TextPointer{}
-		err = recreated.Unmarshal(data, 0)
-		require.NoError(t, err)
+		recreated.Unmarshal(buf, 0)
 
 		assert.Equal(t, original, recreated)
 	})
@@ -30,12 +29,11 @@ func TestTextPointer_Marshal(t *testing.T) {
 		original.FirstPage = 55
 
 		buf := make([]byte, original.Size())
-		data, err := original.Marshal(buf, 0)
+		err := original.Marshal(buf, 0)
 		require.NoError(t, err)
 
 		recreated := TextPointer{}
-		err = recreated.Unmarshal(data, 0)
-		require.NoError(t, err)
+		recreated.Unmarshal(buf, 0)
 
 		expected := original
 		expected.Data = nil // Data is not stored in overflow pointer

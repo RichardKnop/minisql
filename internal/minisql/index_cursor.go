@@ -83,27 +83,41 @@ func (ui *Index[T]) Seek(ctx context.Context, aPage *Page, keyAny any) (IndexCur
 	return ui.Seek(ctx, childPage, key)
 }
 
-// TODO - unused fuction, remove?
-func (ui *Index[T]) SeekFirst(ctx context.Context, aPage *Page) (IndexCursor[T], bool, error) {
-	pageIdx := ui.GetRootPageIdx()
-	aPage, err := ui.pager.ReadPage(ctx, pageIdx)
-	if err != nil {
-		return IndexCursor[T]{}, false, fmt.Errorf("seek first: %w", err)
+func (ui *Index[T]) SeekWithPrefix(ctx context.Context, aPage *Page, prefixAny any, prefixColumns int) (IndexCursor[T], bool, error) {
+	prefix, ok := prefixAny.(T)
+	if !ok {
+		return IndexCursor[T]{}, false, fmt.Errorf("invalid prefix type: %T", prefixAny)
 	}
+	// We can only seek by prefix for CompositeKey types
+	if _, ok := any(prefix).(CompositeKey); !ok {
+		return IndexCursor[T]{}, false, fmt.Errorf("SeekWithPrefix only supports CompositeKey prefix, got: %T", prefixAny)
+	}
+
+	i := uint32(0)
 	aNode := aPage.IndexNode.(*IndexNode[T])
 
-	for !aNode.Header.IsLeaf {
-		pageIdx = aNode.FirstCell().Child
-		aPage, err = ui.pager.ReadPage(ctx, pageIdx)
-		if err != nil {
-			return IndexCursor[T]{}, false, fmt.Errorf("seek first: %w", err)
-		}
+	for i < aNode.Header.Keys && compare(prefixAny.(CompositeKey), any(aNode.Cells[i].Key).(CompositeKey).Prefix(prefixColumns)) > 0 {
+		i++
 	}
-	return IndexCursor[T]{
-		Index:   ui,
-		PageIdx: pageIdx,
-		CellIdx: 0,
-	}, aNode.Header.Keys == 0, nil
+	if i < aNode.Header.Keys && compare(prefixAny.(CompositeKey), any(aNode.Cells[i].Key).(CompositeKey).Prefix(prefixColumns)) == 0 {
+		return IndexCursor[T]{
+			Index:   ui,
+			PageIdx: aPage.Index,
+			CellIdx: uint32(i),
+		}, true, nil
+	}
+	if aNode.Header.IsLeaf {
+		return IndexCursor[T]{}, false, nil
+	}
+	childIdx, err := aNode.Child(uint32(i))
+	if err != nil {
+		return IndexCursor[T]{}, false, fmt.Errorf("get child: %w", err)
+	}
+	childPage, err := ui.pager.ReadPage(ctx, childIdx)
+	if err != nil {
+		return IndexCursor[T]{}, false, fmt.Errorf("get child page: %w", err)
+	}
+	return ui.SeekWithPrefix(ctx, childPage, prefixAny, prefixColumns)
 }
 
 // Used for autoincrement primary keys

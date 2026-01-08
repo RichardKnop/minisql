@@ -371,42 +371,42 @@ func (t *Table) indexPointScan(ctx context.Context, aScan Scan, selectedFields [
 			}
 			return fmt.Errorf("index lookup failed: %w", err)
 		}
-		// Primary keys only have one row ID per key
-		rowID := rowIDs[0]
 
-		var aRow Row
+		for _, rowID := range rowIDs {
+			var aRow Row
 
-		if len(selectedFields) == 0 {
-			aRow = NewRowWithValues(t.Columns, nil)
-			aRow.Key = rowID
-		} else {
-			// Find the row by ID
-			aCursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("find row failed: %w", err)
+			if len(selectedFields) == 0 {
+				aRow = NewRowWithValues(t.Columns, nil)
+				aRow.Key = rowID
+			} else {
+				// Find the row by ID
+				aCursor, err := t.Seek(ctx, rowID)
+				if err != nil {
+					return fmt.Errorf("find row failed: %w", err)
+				}
+
+				// Fetch the row
+				aRow, err = aCursor.fetchRow(ctx, false, selectedFields...)
+				if err != nil {
+					return fmt.Errorf("fetch row failed: %w", err)
+				}
+
+				// Apply remaining filters
+				ok, err := aScan.FilterRow(aRow)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					continue // Skip this row
+				}
 			}
 
-			// Fetch the row
-			aRow, err = aCursor.fetchRow(ctx, false, selectedFields...)
-			if err != nil {
-				return fmt.Errorf("fetch row failed: %w", err)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case out <- aRow:
+				continue
 			}
-
-			// Apply remaining filters
-			ok, err := aScan.FilterRow(aRow)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				continue // Skip this row
-			}
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case out <- aRow:
-			continue
 		}
 	}
 
