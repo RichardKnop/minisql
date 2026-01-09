@@ -218,6 +218,7 @@ if err := rows.Err(); err != nil {
 - `PRIMARY KEY` support, only single column, no composite primary keys
 - `AUTOINCREMENT` support, primary key must be of type `INT8` for autoincrement
 - `UNIQUE` index can be specified when creating a table
+- composite primary key or unique constraint as part of `CREATE TABLE`
 - `NULL` and `NOT NULL` support (via null bit mask included in each row/cell)
 - `DEFAULT` support for all columns including `NOW()` for `TIMESTAMP`
 - `DROP TABLE`
@@ -245,7 +246,6 @@ insert into users("name", "email") values(?, ?), (?, ?);
 
 ## Planned features:
 
-- composite unique index
 - date/time functions to make working with `TIMESTAMP` type easier
 - joins such as `INNER`, `LEFT`, `RIGHT`
 - foreign keys
