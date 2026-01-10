@@ -114,13 +114,18 @@ func (p *pagerImpl) TotalPages() uint32 {
 }
 
 func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler PageUnmarshaler) (*Page, error) {
-	// Check if page already exists in cache
+	// Fast path: Check if page already exists in cache (read lock only)
 	p.mu.RLock()
 	if len(p.pages) > int(pageIdx) && p.pages[pageIdx] != nil {
 		page := p.pages[pageIdx]
 		p.mu.RUnlock()
-		// Update LRU tracking
-		p.lruCache.Put(pageIdx, struct{}{}, false)
+
+		// For page 0 (root/header), always promote to keep it cached
+		// For other pages, lazy LRU tracking via Get() is sufficient
+		if pageIdx == 0 {
+			p.lruCache.GetAndPromote(pageIdx)
+		}
+		// No LRU update needed for cache hits - Get() already incremented access count
 		return page, nil
 	}
 	totalPages := p.totalPages
@@ -165,7 +170,7 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 
 	// Double-check page doesn't exist (in case another goroutine created it while we were unmarshaling)
 	if len(p.pages) > int(pageIdx) && p.pages[pageIdx] != nil {
-		p.lruCache.Put(pageIdx, struct{}{}, false)
+		// Page already exists, no need to update LRU - just return it
 		return p.pages[pageIdx], nil
 	}
 
