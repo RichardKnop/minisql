@@ -10,6 +10,7 @@ type Parser interface {
 
 type LRUCache[T any] interface {
 	Get(T) (any, bool)
+	GetAndPromote(T) (any, bool)
 	Put(T, any, bool)
 	EvictIfNeeded() (T, bool)
 }

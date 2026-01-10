@@ -38,7 +38,8 @@ func TestLRUCache_HitAndMiss(t *testing.T) {
 	assert.Nil(t, value)
 }
 
-// TestLRUCache_LRUEviction tests that least recently used items are evicted
+// TestLRUCache_LRUEviction tests that items are evicted when cache is full
+// With lazy LRU updates, eviction is approximate but still effective
 func TestLRUCache_LRUEviction(t *testing.T) {
 	t.Parallel()
 
@@ -57,23 +58,23 @@ func TestLRUCache_LRUEviction(t *testing.T) {
 	_, ok = cache.Get("baz key")
 	assert.True(t, ok)
 
-	// Add a 4th item, should evict the least recently used (foo key)
+	// Add a 4th item, should evict one of the items
 	cache.Put("qux key", mockValue{"qux"}, true)
 
-	// foo key should be evicted
-	_, ok = cache.Get("foo key")
-	assert.False(t, ok, "foo key should have been evicted as LRU")
+	// Check cache size stays at 3 and doesn't grow beyond max size
+	assert.Len(t, cache.entries, 3, "Cache should have max size of 3")
 
-	// Others should still be in cache
+	// qux should be in cache (just added)
+	_, ok = cache.Get("qux key")
+	assert.True(t, ok)
+
+	// At least one of the original items should have been evicted
+	_, ok = cache.Get("foo key")
+	assert.False(t, ok, "oldest entry should have been evicted")
 	_, ok = cache.Get("bar key")
 	assert.True(t, ok)
 	_, ok = cache.Get("baz key")
 	assert.True(t, ok)
-	_, ok = cache.Get("qux key")
-	assert.True(t, ok)
-
-	// Check cache size stays at 3 and doesn't grow beyond max size
-	assert.Len(t, cache.entries, 3, "Cache should have max size of 3")
 }
 
 // TestLRUCache_LRUOrdering tests that accessing items updates their LRU order
@@ -87,8 +88,8 @@ func TestLRUCache_LRUOrdering(t *testing.T) {
 	cache.Put("bar key", mockValue{"bar"}, true)
 	cache.Put("baz key", mockValue{"baz"}, true)
 
-	// Access foo key, making it most recently used (LRU order: bar -> baz -> foo)
-	_, ok := cache.Get("foo key")
+	// Access foo key with GetAndPromote, making it most recently used (LRU order: bar -> baz -> foo)
+	_, ok := cache.GetAndPromote("foo key")
 	assert.True(t, ok)
 
 	// Add qux key, should evict bar key (now the LRU)
