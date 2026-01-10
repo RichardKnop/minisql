@@ -57,15 +57,16 @@ func NewRowWithValues(columns []Column, values []OptionalValue) Row {
 func (r Row) Size() uint64 {
 	size := uint64(0)
 	for i, aColumn := range r.Columns {
+		// Skip NULL values - they take no space (tracked in bitmask)
+		if !r.Values[i].Valid {
+			continue
+		}
+
 		if !aColumn.Kind.IsText() {
 			size += uint64(aColumn.Size)
 			continue
 		}
 		size += varcharLengthPrefixSize
-
-		if !r.Values[i].Valid {
-			continue
-		}
 
 		s, ok := r.Values[i].Value.(string)
 		if ok {
@@ -95,17 +96,26 @@ func (r Row) Size() uint64 {
 func (r Row) OnlyFields(fields ...Field) Row {
 	filteredRow := Row{
 		Key:         r.Key,
-		Columns:     make([]Column, 0, len(fields)),
-		Values:      make([]OptionalValue, 0, len(fields)),
-		columnCache: make(map[string]int),
+		Columns:     make([]Column, len(fields)),
+		Values:      make([]OptionalValue, len(fields)),
+		columnCache: make(map[string]int, len(fields)),
 	}
 
+	// Pre-allocate exact size and write directly by index
+	outIdx := 0
 	for _, aField := range fields {
 		if _, idx := r.GetColumn(aField.Name); idx >= 0 {
-			filteredRow.Columns = append(filteredRow.Columns, r.Columns[idx])
-			filteredRow.columnCache[aField.Name] = len(filteredRow.Columns) - 1
-			filteredRow.Values = append(filteredRow.Values, r.Values[idx])
+			filteredRow.Columns[outIdx] = r.Columns[idx]
+			filteredRow.columnCache[aField.Name] = outIdx
+			filteredRow.Values[outIdx] = r.Values[idx]
+			outIdx++
 		}
+	}
+
+	// Trim to actual size if some fields weren't found
+	if outIdx < len(fields) {
+		filteredRow.Columns = filteredRow.Columns[:outIdx]
+		filteredRow.Values = filteredRow.Values[:outIdx]
 	}
 
 	return filteredRow
@@ -127,13 +137,14 @@ func (r Row) GetValue(name string) (OptionalValue, bool) {
 }
 
 func (r Row) GetValuesForColumns(columns []Column) ([]OptionalValue, bool) {
-	values := make([]OptionalValue, 0, len(columns))
-	for _, aColumn := range columns {
+	// Pre-allocate exact size and write directly by index
+	values := make([]OptionalValue, len(columns))
+	for i, aColumn := range columns {
 		value, ok := r.GetValue(aColumn.Name)
 		if !ok {
 			return nil, false
 		}
-		values = append(values, value)
+		values[i] = value
 	}
 
 	return values, true
@@ -204,7 +215,9 @@ func (r Row) AppendValues(fields []Field, values []OptionalValue) Row {
 }
 
 func (r Row) Marshal() ([]byte, error) {
-	buf := make([]byte, 0, r.Size())
+	// Single allocation: allocate exact size upfront instead of using append
+	size := r.Size()
+	buf := make([]byte, size)
 
 	offset := uint64(0)
 	for i, aColumn := range r.Columns {
@@ -217,7 +230,6 @@ func (r Row) Marshal() ([]byte, error) {
 			if !ok {
 				return nil, fmt.Errorf("could not cast value to bool")
 			}
-			buf = append(buf, make([]byte, 1)...)
 			marshalBool(buf, value, offset)
 			offset += 1
 		case Int4:
@@ -229,7 +241,6 @@ func (r Row) Marshal() ([]byte, error) {
 				}
 				value = int32(r.Values[i].Value.(int64))
 			}
-			buf = append(buf, make([]byte, 4)...)
 			marshalInt32(buf, value, offset)
 			offset += 4
 		case Int8:
@@ -237,7 +248,6 @@ func (r Row) Marshal() ([]byte, error) {
 			if !ok {
 				return nil, fmt.Errorf("could not cast value for column %s to int64", aColumn.Name)
 			}
-			buf = append(buf, make([]byte, 8)...)
 			marshalInt64(buf, value, offset)
 			offset += 8
 		case Real:
@@ -249,7 +259,6 @@ func (r Row) Marshal() ([]byte, error) {
 				}
 				value = float32(r.Values[i].Value.(float64))
 			}
-			buf = append(buf, make([]byte, 4)...)
 			marshalFloat32(buf, value, offset)
 			offset += 4
 		case Double:
@@ -257,7 +266,6 @@ func (r Row) Marshal() ([]byte, error) {
 			if !ok {
 				return nil, fmt.Errorf("could not cast value for column %s to float64", aColumn.Name)
 			}
-			buf = append(buf, make([]byte, 8)...)
 			marshalFloat64(buf, value, offset)
 			offset += 8
 		case Varchar, Text:
@@ -266,18 +274,15 @@ func (r Row) Marshal() ([]byte, error) {
 				return nil, fmt.Errorf("could not cast value for column %s to text pointer", aColumn.Name)
 			}
 
-			size := textPointer.Size()
-			buf = append(buf, make([]byte, size)...)
 			if err := textPointer.Marshal(buf, offset); err != nil {
 				return nil, err
 			}
-			offset += size
+			offset += textPointer.Size()
 		case Timestamp:
 			value, ok := r.Values[i].Value.(Time)
 			if !ok {
 				return nil, fmt.Errorf("could not cast value for column %s to time", aColumn.Name)
 			}
-			buf = append(buf, make([]byte, 8)...)
 			marshalInt64(buf, value.TotalMicroseconds(), offset)
 			offset += 8
 		}
@@ -304,10 +309,12 @@ func (r Row) Unmarshal(aCell Cell, selectedFields ...Field) (Row, error) {
 		r.Values = make([]OptionalValue, len(r.Columns))
 		return r, nil
 	}
-	r.Values = make([]OptionalValue, 0, len(r.Columns))
+
+	// Pre-allocate exact size and write directly by index instead of append
+	r.Values = make([]OptionalValue, len(r.Columns))
 
 	// Create a set of selected column names for fast lookup
-	selectedSet := make(map[string]bool)
+	selectedSet := make(map[string]bool, len(selectedFields))
 	for _, aField := range selectedFields {
 		selectedSet[aField.Name] = true
 	}
@@ -319,7 +326,7 @@ func (r Row) Unmarshal(aCell Cell, selectedFields ...Field) (Row, error) {
 
 		// If column not selected, skip it but track offset
 		if len(selectedSet) > 0 && !selectedSet[aColumn.Name] {
-			r.Values = append(r.Values, OptionalValue{Valid: false})
+			r.Values[i] = OptionalValue{Valid: false}
 			if !isNull {
 				// Skip over the data without unmarshaling
 				offset += int(r.getColumnSize(aColumn, aCell.Value, offset))
@@ -328,29 +335,29 @@ func (r Row) Unmarshal(aCell Cell, selectedFields ...Field) (Row, error) {
 		}
 
 		if isNull {
-			r.Values = append(r.Values, OptionalValue{Valid: false})
+			r.Values[i] = OptionalValue{Valid: false}
 			continue
 		}
 		switch aColumn.Kind {
 		case Boolean:
 			value := unmarshalBool(aCell.Value, uint64(offset))
-			r.Values = append(r.Values, OptionalValue{Value: value == true, Valid: true})
+			r.Values[i] = OptionalValue{Value: value == true, Valid: true}
 			offset += 1
 		case Int4:
 			value := unmarshalInt32(aCell.Value, uint64(offset))
-			r.Values = append(r.Values, OptionalValue{Value: int32(value), Valid: true})
+			r.Values[i] = OptionalValue{Value: int32(value), Valid: true}
 			offset += 4
 		case Int8:
 			value := unmarshalInt64(aCell.Value, uint64(offset))
-			r.Values = append(r.Values, OptionalValue{Value: int64(value), Valid: true})
+			r.Values[i] = OptionalValue{Value: int64(value), Valid: true}
 			offset += 8
 		case Real:
 			value := unmarshalFloat32(aCell.Value, uint64(offset))
-			r.Values = append(r.Values, OptionalValue{Value: value, Valid: true})
+			r.Values[i] = OptionalValue{Value: value, Valid: true}
 			offset += 4
 		case Double:
 			value := unmarshalFloat64(aCell.Value, uint64(offset))
-			r.Values = append(r.Values, OptionalValue{Value: value, Valid: true})
+			r.Values[i] = OptionalValue{Value: value, Valid: true}
 			offset += 8
 		case Varchar, Text:
 			textPointer := TextPointer{}
@@ -361,10 +368,10 @@ func (r Row) Unmarshal(aCell Cell, selectedFields ...Field) (Row, error) {
 				textPointer.Data = bytes.Trim(textPointer.Data, "\x00")
 			}
 			offset += int(textPointer.Size())
-			r.Values = append(r.Values, OptionalValue{Value: textPointer, Valid: true})
+			r.Values[i] = OptionalValue{Value: textPointer, Valid: true}
 		case Timestamp:
 			value := unmarshalInt64(aCell.Value, uint64(offset))
-			r.Values = append(r.Values, OptionalValue{Value: FromMicroseconds(int64(value)), Valid: true})
+			r.Values[i] = OptionalValue{Value: FromMicroseconds(int64(value)), Valid: true}
 			offset += 8
 		}
 	}
