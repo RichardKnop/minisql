@@ -64,7 +64,9 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	}
 
 	var (
-		filteredPipe = make(chan Row)
+		// Buffered channel reduces goroutine blocking/context switching
+		// Buffer size of 128 is a good balance between memory and performance
+		filteredPipe = make(chan Row, 128)
 		errorsPipe   = make(chan error, len(plan.Scans))
 		wg           = new(sync.WaitGroup)
 	)
@@ -147,7 +149,8 @@ func (t *Table) selectStreaming(stmt Statement, filteredPipe chan Row, errorsPip
 	// any remaining filtering will happen here. In case of a sequential scan,
 	// this will filter all rows.
 	// LIMIT and OFFSET are also applied here.
-	limitedPipe := make(chan Row)
+	// Buffered channel reduces blocking when consumer is slower
+	limitedPipe := make(chan Row, 64)
 	go func(in <-chan Row, out chan<- Row) {
 		defer close(out)
 		var limit, offset int64
@@ -192,10 +195,45 @@ func (t *Table) selectStreaming(stmt Statement, filteredPipe chan Row, errorsPip
 
 func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, unfilteredPipe <-chan Row, errorsPipe chan error, requestedFields []Field) (StatementResult, error) {
 
-	// Collect all rows
+	// Check if we can use heap optimization for LIMIT queries
+	var limit int
+	hasLimit := stmt.Limit.Valid
+	if hasLimit {
+		limit = int(stmt.Limit.Value.(int64))
+	}
+
+	var offset int
+	if stmt.Offset.Valid {
+		offset = int(stmt.Offset.Value.(int64))
+	}
+
+	// For queries with LIMIT (and optional OFFSET), use a heap to keep only top N+offset rows
+	// This is much more memory efficient than collecting all rows
+	// For example: SELECT * FROM large_table ORDER BY col LIMIT 10 OFFSET 5
+	// Only keeps 15 rows in memory instead of potentially millions
 	var allRows []Row
-	for aRow := range unfilteredPipe {
-		allRows = append(allRows, aRow)
+	if hasLimit && len(plan.OrderBy) > 0 {
+		// Use heap-based approach for memory efficiency
+		maxRows := offset + limit
+		h := newRowHeap(plan.OrderBy, maxRows)
+
+		for aRow := range unfilteredPipe {
+			h.PushRow(aRow)
+		}
+
+		allRows = h.ExtractSorted()
+	} else {
+		// No LIMIT or no ORDER BY - collect all rows
+		// Pre-allocate with a reasonable initial capacity
+		allRows = make([]Row, 0, 1024)
+		for aRow := range unfilteredPipe {
+			allRows = append(allRows, aRow)
+		}
+
+		// Sort in memory
+		if err := t.sortRows(allRows, plan.OrderBy); err != nil {
+			return StatementResult{}, err
+		}
 	}
 
 	// Check for errors
@@ -207,29 +245,16 @@ func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, unfilteredPipe <-
 	default:
 	}
 
-	// Sort in memory
-	if err := t.sortRows(allRows, plan.OrderBy); err != nil {
-		return StatementResult{}, err
-	}
-
-	// Apply LIMIT and OFFSET
-	offset := 0
-	limit := len(allRows)
-	if stmt.Offset.Valid {
-		offset = int(stmt.Offset.Value.(int64))
-	}
-	if stmt.Limit.Valid {
-		limit = int(stmt.Limit.Value.(int64))
-	}
-
+	// Apply OFFSET and LIMIT to final result
 	if offset >= len(allRows) {
 		allRows = []Row{}
 	} else {
 		end := offset + limit
-		if end > len(allRows) {
-			end = len(allRows)
+		if hasLimit && end < len(allRows) {
+			allRows = allRows[offset:end]
+		} else {
+			allRows = allRows[offset:]
 		}
-		allRows = allRows[offset:end]
 	}
 
 	// Create result with materialized rows

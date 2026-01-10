@@ -26,7 +26,7 @@ func BenchmarkRow_Marshal(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, err := row.Marshal()
 		if err != nil {
 			b.Fatal(err)
@@ -56,7 +56,7 @@ func BenchmarkRow_MarshalWithNulls(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, err := row.Marshal()
 		if err != nil {
 			b.Fatal(err)
@@ -96,7 +96,7 @@ func BenchmarkRow_Unmarshal(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		r := NewRow(columns)
 		_, err := r.Unmarshal(cell)
 		if err != nil {
@@ -135,7 +135,7 @@ func BenchmarkRow_OnlyFields(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = row.OnlyFields(fields...)
 	}
 }
