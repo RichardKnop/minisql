@@ -165,7 +165,7 @@ defer rows.Close()
 var schemas []schema
 for rows.Next() {
 	var aSchema schema
-	if err := rows.Scan(&aSchema.Type, &aSchema.Name, &aSchema.RootPage, &aSchema.SQL); err != nil {
+	if err := rows.Scan(&aSchema.Type, &aSchema.Name, &aSchema.TableName, &aSchema.RootPage, &aSchema.SQL); err != nil {
 		return err
 	}
 	schemas = append(schemas, aSchema)
