@@ -3,6 +3,9 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"math"
+	"strconv"
+	"strings"
 )
 
 type ScanType int
@@ -37,6 +40,155 @@ type RangeBound struct {
 type RangeCondition struct {
 	Lower *RangeBound // nil = unbounded
 	Upper *RangeBound // nil = unbounded
+}
+
+// IndexStats holds parsed statistics for an index
+type IndexStats struct {
+	NEntry    int64   // Total number of entries in the index
+	NDistinct []int64 // Distinct values for each column prefix
+}
+
+// Selectivity returns the selectivity of the index (0.0 to 1.0)
+// Higher selectivity means more distinct values relative to total entries
+// For composite indexes, uses the final column prefix
+func (s IndexStats) Selectivity() float64 {
+	if s.NEntry == 0 {
+		return 0.0
+	}
+	if len(s.NDistinct) == 0 {
+		return 0.0
+	}
+	// Use the last nDistinct value (most specific prefix)
+	finalDistinct := s.NDistinct[len(s.NDistinct)-1]
+	return float64(finalDistinct) / float64(s.NEntry)
+}
+
+// EstimateRangeRows estimates the number of rows that will match a range condition.
+// Returns the estimated row count, or -1 if estimation isn't possible.
+// Uses uniform distribution assumption for simplicity.
+func (s IndexStats) EstimateRangeRows(rangeCondition RangeCondition, columnIndex int) int64 {
+	if s.NEntry == 0 || len(s.NDistinct) == 0 {
+		return -1 // Can't estimate
+	}
+
+	// For simplicity, assume uniform distribution
+	// This could be enhanced with histogram data in the future
+
+	// Calculate selectivity based on bounds
+	selectivity := estimateRangeSelectivity(rangeCondition)
+
+	return int64(float64(s.NEntry) * selectivity)
+}
+
+const (
+	// Cost thresholds for index vs table scan decision
+	indexScanThreshold = 0.3 // If index scan returns >30% of rows, table scan may be faster
+
+	// Cost threshold for ORDER BY optimization
+	// If filtered result set is larger than this, prefer ORDER BY index to avoid sorting
+	sortCostThreshold = 1000
+)
+
+// estimateRangeSelectivity estimates the selectivity of a range condition.
+// Uses conservative estimates based on whether bounds are present.
+// This assumes uniform distribution and can be enhanced with histogram data.
+func estimateRangeSelectivity(rangeCondition RangeCondition) float64 {
+	// Default estimates based on presence of bounds:
+	// Both bounds: assume 30% selectivity (fairly selective)
+	// One bound: assume 50% selectivity (half the data)
+	// No bounds: 100% (full scan)
+	// This is conservative and can be refined with actual min/max tracking
+
+	if rangeCondition.Lower != nil && rangeCondition.Upper != nil {
+		return 0.3 // Both bounds - estimated 30% of rows
+	}
+	if rangeCondition.Lower != nil || rangeCondition.Upper != nil {
+		return 0.5 // One bound - estimated 50% of rows
+	}
+	return 1.0 // No bounds - full scan
+}
+
+// shouldUseIndexForRange decides if an index scan is better than table scan for a range query.
+// Returns true if the index scan is estimated to be more efficient.
+func shouldUseIndexForRange(stats *IndexStats, rangeCondition RangeCondition) bool {
+	if stats == nil {
+		// No stats - default to using index for range queries
+		return true
+	}
+
+	estimatedRows := stats.EstimateRangeRows(rangeCondition, 0)
+	if estimatedRows < 0 {
+		// Can't estimate - default to using index
+		return true
+	}
+
+	// Compare estimated selectivity against threshold
+	selectivity := float64(estimatedRows) / float64(stats.NEntry)
+	return selectivity <= indexScanThreshold
+}
+
+// estimateSortCost returns a rough cost estimate for sorting N rows.
+// Uses O(n log n) complexity as the baseline.
+func estimateSortCost(numRows int64) float64 {
+	if numRows <= 1 {
+		return 0
+	}
+	// Simple cost model: n * log2(n)
+	n := float64(numRows)
+	return n * math.Log2(n)
+}
+
+// estimateFilteredRows estimates how many rows will remain after applying filters.
+// Returns -1 if estimation is not possible.
+func estimateFilteredRows(filterStats *IndexStats, rangeCondition *RangeCondition) int64 {
+	if filterStats == nil {
+		return -1
+	}
+
+	// For range conditions, use existing range estimation
+	if rangeCondition != nil {
+		return filterStats.EstimateRangeRows(*rangeCondition, 0)
+	}
+
+	// For equality conditions, estimate based on selectivity
+	// This is a simple heuristic: average rows per distinct value
+	if len(filterStats.NDistinct) > 0 && filterStats.NEntry > 0 {
+		distinctValues := filterStats.NDistinct[len(filterStats.NDistinct)-1]
+		if distinctValues > 0 {
+			return filterStats.NEntry / distinctValues
+		}
+	}
+
+	return -1
+}
+
+// parseIndexStats parses a stat string in SQLite format: "nEntry nDistinct1 nDistinct2 ..."
+// Example: "100 50" means 100 entries, 50 distinct values
+// Example: "100 10 50" means 100 entries, 10 distinct col1, 50 distinct (col1,col2)
+func parseIndexStats(statString string) (IndexStats, error) {
+	parts := strings.Fields(statString)
+	if len(parts) < 2 {
+		return IndexStats{}, fmt.Errorf("invalid stat format: %s", statString)
+	}
+
+	nEntry, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return IndexStats{}, fmt.Errorf("invalid nEntry: %w", err)
+	}
+
+	nDistinct := make([]int64, 0, len(parts)-1)
+	for i := 1; i < len(parts); i++ {
+		val, err := strconv.ParseInt(parts[i], 10, 64)
+		if err != nil {
+			return IndexStats{}, fmt.Errorf("invalid nDistinct value at position %d: %w", i, err)
+		}
+		nDistinct = append(nDistinct, val)
+	}
+
+	return IndexStats{
+		NEntry:    nEntry,
+		NDistinct: nDistinct,
+	}, nil
 }
 
 // QueryPlan determines how to execute a query
@@ -135,25 +287,25 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error
 	// If there is no where clause, no need to consider index scans
 	if len(stmt.Conditions) == 0 {
 		// But we might still use index for ordering
-		return plan.optimizeOrdering(t), nil
+		return plan.optimizeOrdering(t, nil), nil
 	}
 
 	// If there are no indexes, we cannot do index scans
-	if !t.HasPrimaryKey() && len(t.UniqueIndexes) == 0 && len(t.SecondaryIndexes) == 0 {
-		// But we might still use index for ordering
-		return plan.optimizeOrdering(t), nil
+	if t.HasNoIndex() {
+		return plan.optimizeOrdering(t, stmt.Conditions), nil
 	}
 
 	// Check if we can do an index scans
-	if err := plan.setIndexScans(t, stmt.Conditions); err != nil {
+	if err := plan.setIndexScans(ctx, t, stmt.Conditions); err != nil {
 		return QueryPlan{}, err
 	}
 
 	// But we might still use index for ordering
-	return plan.optimizeOrdering(t), nil
+	// Pass original conditions so we can restore them if we switch indexes
+	return plan.optimizeOrdering(t, stmt.Conditions), nil
 }
 
-func (p QueryPlan) optimizeOrdering(t *Table) QueryPlan {
+func (p QueryPlan) optimizeOrdering(t *Table, originalConditions OneOrMore) QueryPlan {
 	// No ORDER BY clause
 	if len(p.OrderBy) == 0 {
 		return p
@@ -170,11 +322,16 @@ func (p QueryPlan) optimizeOrdering(t *Table) QueryPlan {
 	var orderCol = p.OrderBy[0].Field.Name
 	p.SortReverse = p.OrderBy[0].Direction == Desc
 
-	// Sequential scan
-	if len(p.Scans) == 1 && p.Scans[0].Type == ScanTypeSequential {
-		// Either order ORDER BY indexed column
+	// If there are no indexes, we must sort in memory
+	if t.HasNoIndex() {
+		p.SortInMemory = true
+		return p
+	}
+
+	// Sequential scan - no filters, just ordering
+	if len(p.Scans) == 1 && p.Scans[0].Type == ScanTypeSequential && len(p.Scans[0].Filters) == 0 {
+		// Use index for ordering if available
 		if info, ok := t.IndexInfoByColumnName(orderCol); ok {
-			// Use PK index for ordering
 			p.Scans[0].Type = ScanTypeIndexAll
 			p.Scans[0].IndexName = info.Name
 			p.Scans[0].IndexColumns = info.Columns
@@ -182,14 +339,121 @@ func (p QueryPlan) optimizeOrdering(t *Table) QueryPlan {
 			return p
 		}
 
-		// TODO: Check for secondary indexes on orderCol
-		// For now, fall through to in-memory sort
+		// No index for ORDER BY column - must sort in memory
 		p.SortInMemory = true
+		return p
 	}
 
-	p.SortInMemory = true
+	// Index scan (point, range, or full) - check if we should switch to ORDER BY index
+	if len(p.Scans) == 1 && p.Scans[0].Type != ScanTypeSequential {
+		currentIndexName := p.Scans[0].IndexName
 
+		// If already using the ORDER BY index, check if sort is needed
+		if orderByInfo, ok := t.IndexInfoByColumnName(orderCol); ok {
+			if currentIndexName == orderByInfo.Name {
+				// Index provides ordering for range scans and full scans
+				// Point scans with multiple keys need sorting (e.g., IN clause)
+				scanType := p.Scans[0].Type
+				needsSort := scanType == ScanTypeIndexPoint && len(p.Scans[0].IndexKeys) > 1
+				p.SortInMemory = needsSort
+				return p
+			}
+
+			// We have filters on one index and ORDER BY on another
+			// Decide: filter index + sort vs. ORDER BY index + filter
+			canUseOrderByIndex := p.canUseOrderByIndexWithFilters(t, orderByInfo)
+			if canUseOrderByIndex {
+				filterStats := p.getFilterIndexStats(t, currentIndexName)
+				shouldSwitch := p.shouldSwitchToOrderByIndex(filterStats)
+
+				if shouldSwitch {
+					// Switch to ORDER BY index and move ALL filters to post-scan filtering
+					p.Scans[0].Type = ScanTypeIndexAll
+					p.Scans[0].IndexName = orderByInfo.Name
+					p.Scans[0].IndexColumns = orderByInfo.Columns
+					p.Scans[0].IndexKeys = nil
+					p.Scans[0].RangeCondition = RangeCondition{}
+					// Restore original conditions as filters (none are satisfied by ORDER BY index)
+					if len(originalConditions) > 0 {
+						p.Scans[0].Filters = originalConditions
+					}
+					p.SortInMemory = false
+					return p
+				}
+			}
+		}
+
+		// Keep current scan, sort in memory
+		p.SortInMemory = true
+		return p
+	}
+
+	// Default: sort in memory
+	p.SortInMemory = true
 	return p
+}
+
+// canUseOrderByIndexWithFilters checks if we can use the ORDER BY index
+// when we have filters (they'd need to be applied in memory)
+func (p QueryPlan) canUseOrderByIndexWithFilters(t *Table, orderByInfo IndexInfo) bool {
+	// For now, only support this optimization for simple cases:
+	// - Single scan
+	// - Filters can be applied in memory (no complex conditions)
+	if len(p.Scans) != 1 {
+		return false
+	}
+
+	// Filters must be applicable as post-scan filters
+	// This is always possible for now (all our conditions support in-memory evaluation)
+	return true
+}
+
+// getFilterIndexStats retrieves statistics for the index being used for filtering
+func (p QueryPlan) getFilterIndexStats(t *Table, indexName string) *IndexStats {
+	if stats, ok := t.indexStats[indexName]; ok {
+		return &stats
+	}
+	return nil
+}
+
+// shouldSwitchToOrderByIndex decides whether to switch from filter index to ORDER BY index
+// based on estimated result set size and sorting cost
+func (p QueryPlan) shouldSwitchToOrderByIndex(filterStats *IndexStats) bool {
+	if filterStats == nil {
+		// No stats - use conservative heuristic
+		// Don't switch for point lookups (likely small result set)
+		if len(p.Scans) == 1 && p.Scans[0].Type == ScanTypeIndexPoint {
+			return false
+		}
+		// For range scans without stats, default to keeping filter index
+		return false
+	}
+
+	// Estimate how many rows the current filter will return
+	var estimatedRows int64 = -1
+
+	scan := p.Scans[0]
+	switch scan.Type {
+	case ScanTypeIndexPoint:
+		// Point lookup - typically returns few rows
+		estimatedRows = estimateFilteredRows(filterStats, nil)
+	case ScanTypeIndexRange:
+		// Range scan - estimate using range condition
+		estimatedRows = estimateFilteredRows(filterStats, &scan.RangeCondition)
+	case ScanTypeIndexAll:
+		// Full index scan - returns all rows (no filtering benefit)
+		estimatedRows = filterStats.NEntry
+	}
+
+	if estimatedRows < 0 {
+		// Can't estimate - be conservative
+		return false
+	}
+
+	// Decision logic:
+	// If filtered result set is large (> threshold), sorting is expensive
+	// Better to use ORDER BY index and filter in memory
+	return estimatedRows > sortCostThreshold
 }
 
 // indexMatch represents a potential index match for equality conditions
@@ -201,6 +465,7 @@ type indexMatch struct {
 	hasProperUpperBound bool            // False if range scan lacks upper bound (needs filtering)
 	isPrimaryKey        bool
 	isUnique            bool
+	stats               *IndexStats // Statistics for selectivity-based comparison
 }
 
 // findBestEqualityIndexMatch finds the best index that can be used for equality conditions
@@ -208,9 +473,10 @@ type indexMatch struct {
 // columns that form a prefix of the index columns (e.g., for index on (a,b,c), it can match
 // conditions on 'a', 'a AND b', or 'a AND b AND c', but not 'b' or 'a AND c').
 //
-// Priority order: Primary Key > Unique Index > Secondary Index
+// When statistics are available (from ANALYZE), uses selectivity to choose the best index.
+// Otherwise falls back to: Primary Key > Unique Index > Secondary Index
 // For composite indexes, prefer indexes that match more columns.
-func findBestEqualityIndexMatch(t *Table, group Conditions) *indexMatch {
+func (t *Table) findBestEqualityIndexMatch(group Conditions) *indexMatch {
 	var bestMatch *indexMatch
 
 	// Helper to check if a new match is better than the current best
@@ -219,6 +485,34 @@ func findBestEqualityIndexMatch(t *Table, group Conditions) *indexMatch {
 			return true
 		}
 
+		// If both have stats, use selectivity-based comparison
+		if newMatch.stats != nil && bestMatch.stats != nil {
+			newSelectivity := newMatch.stats.Selectivity()
+			bestSelectivity := bestMatch.stats.Selectivity()
+
+			// Higher selectivity is better (more distinct values = more selective)
+			if newSelectivity != bestSelectivity {
+				return newSelectivity > bestSelectivity
+			}
+
+			// Same selectivity - prefer more matched columns
+			newMatchedCols := len(newMatch.matchedConditions)
+			bestMatchedCols := len(bestMatch.matchedConditions)
+			if newMatchedCols != bestMatchedCols {
+				return newMatchedCols > bestMatchedCols
+			}
+
+			// Same matched columns - prefer primary key, then unique
+			if newMatch.isPrimaryKey && !bestMatch.isPrimaryKey {
+				return true
+			}
+			if newMatch.isUnique && !bestMatch.isUnique {
+				return true
+			}
+			return false
+		}
+
+		// Fall back to heuristic-based comparison when stats not available
 		// Always prefer primary key
 		if newMatch.isPrimaryKey && !bestMatch.isPrimaryKey {
 			return true
@@ -255,7 +549,7 @@ func findBestEqualityIndexMatch(t *Table, group Conditions) *indexMatch {
 
 	// Try each index
 	for _, indexInfo := range allIndexes {
-		match := tryMatchIndex(t, indexInfo, group)
+		match := t.tryMatchIndex(indexInfo, group)
 		if match != nil && isBetterMatch(match) {
 			bestMatch = match
 		}
@@ -266,7 +560,7 @@ func findBestEqualityIndexMatch(t *Table, group Conditions) *indexMatch {
 
 // tryMatchIndex attempts to match an index against the conditions in a group.
 // It returns a match if it can find equality conditions for a prefix of the index columns.
-func tryMatchIndex(t *Table, indexInfo IndexInfo, group Conditions) *indexMatch {
+func (t *Table) tryMatchIndex(indexInfo IndexInfo, group Conditions) *indexMatch {
 	matchedConditions := make(map[int]bool)
 	var compositeKey []any
 
@@ -392,7 +686,7 @@ func tryMatchIndex(t *Table, indexInfo IndexInfo, group Conditions) *indexMatch 
 		indexKeys = compositeKey
 	}
 
-	return &indexMatch{
+	aMatch := &indexMatch{
 		info:                indexInfo,
 		matchedConditions:   matchedConditions,
 		keys:                indexKeys,
@@ -401,6 +695,14 @@ func tryMatchIndex(t *Table, indexInfo IndexInfo, group Conditions) *indexMatch 
 		isPrimaryKey:        isPK,
 		isUnique:            isUnique,
 	}
+
+	// Load statistics for this index if available
+	stats, hasStats := t.indexStats[indexInfo.Name]
+	if hasStats {
+		aMatch.stats = &stats
+	}
+
+	return aMatch
 }
 
 // Check whether we can perform an index scan. Each condition group is separated by OR,
@@ -412,7 +714,7 @@ func tryMatchIndex(t *Table, indexInfo IndexInfo, group Conditions) *indexMatch 
 //
 // can be executed as an index scan on for keys 1 and 2 with remaining filters
 // (a = 'foo') for 1 and (b = 'bar') for 2.
-func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
+func (p *QueryPlan) setIndexScans(ctx context.Context, t *Table, conditions OneOrMore) error {
 	var (
 		allGroupsHaveIndexCondition = true
 		equalityMatch               = make(map[int]*indexMatch)
@@ -424,7 +726,7 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 	// would be 2 groups with 2 conditions each
 	for groupIdx, group := range conditions {
 		// Try to find the best index match for this group
-		match := findBestEqualityIndexMatch(t, group)
+		match := t.findBestEqualityIndexMatch(group)
 		if match != nil {
 			equalityMatch[groupIdx] = match
 		}
@@ -534,7 +836,13 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 		// Try range scans on other indexes
 		foundRangeScan := false
 		for _, idxInfo := range otherIndexes[groupIdx] {
-			rangeScan, ok, err := tryRangeScan(idxInfo, group)
+			// Get stats for this index if available
+			var stats *IndexStats
+			if indexStats, hasStats := t.indexStats[idxInfo.Name]; hasStats {
+				stats = &indexStats
+			}
+
+			rangeScan, ok, err := tryRangeScan(idxInfo, group, stats)
 			if err != nil {
 				return err
 			}
@@ -641,7 +949,7 @@ func incrementValue(val any) any {
 	}
 }
 
-func tryRangeScan(indexInfo IndexInfo, filters Conditions) (Scan, bool, error) {
+func tryRangeScan(indexInfo IndexInfo, filters Conditions, stats *IndexStats) (Scan, bool, error) {
 	var (
 		rangeCondition   = RangeCondition{}
 		remainingFilters = make(Conditions, 0)
@@ -737,6 +1045,12 @@ func tryRangeScan(indexInfo IndexInfo, filters Conditions) (Scan, bool, error) {
 		}
 	}
 
+	// Check if index scan is cost-effective based on statistics
+	if !shouldUseIndexForRange(stats, rangeCondition) {
+		// Table scan would be more efficient - don't use this index
+		return Scan{}, false, nil
+	}
+
 	// Create range scan plan
 	aScan := Scan{
 		Type:           ScanTypeIndexRange,
@@ -756,7 +1070,7 @@ func (p QueryPlan) Execute(ctx context.Context, t *Table, selectedFields []Field
 		case ScanTypeIndexAll:
 			return t.indexScanAll(ctx, p, p.Scans[0], selectedFields, filteredPipe)
 		case ScanTypeIndexRange:
-			return t.indexRangeScan(ctx, p.Scans[0], selectedFields, filteredPipe)
+			return t.indexRangeScan(ctx, p, p.Scans[0], selectedFields, filteredPipe)
 		case ScanTypeIndexPoint:
 			return t.indexPointScan(ctx, p.Scans[0], selectedFields, filteredPipe)
 		case ScanTypeSequential:
@@ -768,7 +1082,7 @@ func (p QueryPlan) Execute(ctx context.Context, t *Table, selectedFields []Field
 	for _, aScan := range p.Scans {
 		switch aScan.Type {
 		case ScanTypeIndexRange:
-			if err := t.indexRangeScan(ctx, aScan, selectedFields, filteredPipe); err != nil {
+			if err := t.indexRangeScan(ctx, p, aScan, selectedFields, filteredPipe); err != nil {
 				return err
 			}
 		case ScanTypeIndexPoint:

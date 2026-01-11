@@ -449,8 +449,8 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				},
 			},
 		},
-		{ // TODO - perhaps we should be ordering by using the index rather than sorting in memory?
-			"A range scan with order by primary key - ordered in memory",
+		{
+			"A range scan with order by primary key - order via index",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
@@ -484,7 +484,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 						},
 					},
 				},
-				SortInMemory: true,
+				SortInMemory: false,
 				SortReverse:  true,
 				OrderBy: []OrderBy{
 					{

@@ -433,7 +433,7 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 		aTableWithDefaultValue = NewTable(zap.NewNop(), nil, nil, testTableName, defaultValueColumns, 0, WithPrimaryKey(
-			NewPrimaryKey(PrimaryKeyName(testTableName), defaultValueColumns[0:1], false),
+			NewPrimaryKey("pk", defaultValueColumns[0:1], true),
 		))
 	)
 

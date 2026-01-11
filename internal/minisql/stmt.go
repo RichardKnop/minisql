@@ -22,6 +22,7 @@ const (
 	BeginTransaction
 	CommitTransaction
 	RollbackTransaction
+	Analyze
 )
 
 func (s StatementKind) String() string {
@@ -48,6 +49,8 @@ func (s StatementKind) String() string {
 		return "COMMIT TRANSACTION"
 	case RollbackTransaction:
 		return "ROLLBACK TRANSACTION"
+	case Analyze:
+		return "ANALYZE"
 	default:
 		return "UNKNOWN"
 	}
@@ -187,8 +190,9 @@ type Placeholder struct{}
 type Statement struct {
 	Kind          StatementKind
 	IfNotExists   bool
-	TableName     string
-	IndexName     string
+	TableName     string        // for SELECT, INSERT, UPDATE, DELETE, CREATE/DROP TABLE etc
+	IndexName     string        // for CREATE/DROP INDEX
+	Target        string        // for ANALYZE
 	Columns       []Column      // use for CREATE TABLE
 	PrimaryKey    PrimaryKey    // use for CREATE TABLE
 	UniqueIndexes []UniqueIndex // use for CREATE TABLE

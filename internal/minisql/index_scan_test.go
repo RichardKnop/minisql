@@ -204,7 +204,7 @@ func TestIndex_ScanRange(t *testing.T) {
 			scannedKeys   []int64
 			scannedRowIDs []RowID
 		)
-		err := anIndex.ScanRange(ctx, RangeCondition{}, func(key any, rowID RowID) error {
+		err := anIndex.ScanRange(ctx, RangeCondition{}, false, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(int64))
 			scannedRowIDs = append(scannedRowIDs, rowID)
 			return nil
@@ -224,7 +224,7 @@ func TestIndex_ScanRange(t *testing.T) {
 				Value:     int64(18),
 				Inclusive: false,
 			},
-		}, func(key any, rowID RowID) error {
+		}, false, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(int64))
 			scannedRowIDs = append(scannedRowIDs, rowID)
 			return nil
@@ -244,7 +244,7 @@ func TestIndex_ScanRange(t *testing.T) {
 				Value:     int64(18),
 				Inclusive: true,
 			},
-		}, func(key any, rowID RowID) error {
+		}, false, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(int64))
 			scannedRowIDs = append(scannedRowIDs, rowID)
 			return nil
@@ -264,7 +264,7 @@ func TestIndex_ScanRange(t *testing.T) {
 				Value:     int64(18),
 				Inclusive: false,
 			},
-		}, func(key any, rowID RowID) error {
+		}, false, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(int64))
 			scannedRowIDs = append(scannedRowIDs, rowID)
 			return nil
@@ -284,7 +284,7 @@ func TestIndex_ScanRange(t *testing.T) {
 				Value:     int64(18),
 				Inclusive: true,
 			},
-		}, func(key any, rowID RowID) error {
+		}, false, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(int64))
 			scannedRowIDs = append(scannedRowIDs, rowID)
 			return nil
@@ -308,7 +308,7 @@ func TestIndex_ScanRange(t *testing.T) {
 				Value:     int64(18),
 				Inclusive: false,
 			},
-		}, func(key any, rowID RowID) error {
+		}, false, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(int64))
 			scannedRowIDs = append(scannedRowIDs, rowID)
 			return nil
@@ -332,7 +332,7 @@ func TestIndex_ScanRange(t *testing.T) {
 				Value:     int64(18),
 				Inclusive: false,
 			},
-		}, func(key any, rowID RowID) error {
+		}, false, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(int64))
 			scannedRowIDs = append(scannedRowIDs, rowID)
 			return nil
@@ -356,7 +356,7 @@ func TestIndex_ScanRange(t *testing.T) {
 				Value:     int64(18),
 				Inclusive: true,
 			},
-		}, func(key any, rowID RowID) error {
+		}, false, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(int64))
 			scannedRowIDs = append(scannedRowIDs, rowID)
 			return nil
@@ -364,6 +364,71 @@ func TestIndex_ScanRange(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []int64{8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18}, scannedKeys)
 		assert.Equal(t, []RowID{108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118}, scannedRowIDs)
+	})
+
+	t.Run("scan range reverse (7; 18]", func(t *testing.T) {
+		var (
+			scannedKeys   []int64
+			scannedRowIDs []RowID
+		)
+		err := anIndex.ScanRange(ctx, RangeCondition{
+			Lower: &RangeBound{
+				Value:     int64(7),
+				Inclusive: false,
+			},
+			Upper: &RangeBound{
+				Value:     int64(18),
+				Inclusive: true,
+			},
+		}, true, func(key any, rowID RowID) error {
+			scannedKeys = append(scannedKeys, key.(int64))
+			scannedRowIDs = append(scannedRowIDs, rowID)
+			return nil
+		})
+		require.NoError(t, err)
+		// Should be in reverse order
+		assert.Equal(t, []int64{18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8}, scannedKeys)
+		assert.Equal(t, []RowID{118, 117, 116, 115, 114, 113, 112, 111, 110, 109, 108}, scannedRowIDs)
+	})
+
+	t.Run("scan range reverse >= 18", func(t *testing.T) {
+		var (
+			scannedKeys   []int64
+			scannedRowIDs []RowID
+		)
+		err := anIndex.ScanRange(ctx, RangeCondition{
+			Lower: &RangeBound{
+				Value:     int64(18),
+				Inclusive: true,
+			},
+		}, true, func(key any, rowID RowID) error {
+			scannedKeys = append(scannedKeys, key.(int64))
+			scannedRowIDs = append(scannedRowIDs, rowID)
+			return nil
+		})
+		require.NoError(t, err)
+		// Should be in reverse order from max down to 18
+		assert.Equal(t, []int64{21, 20, 19, 18}, scannedKeys)
+	})
+
+	t.Run("scan range reverse < 18", func(t *testing.T) {
+		var (
+			scannedKeys   []int64
+			scannedRowIDs []RowID
+		)
+		err := anIndex.ScanRange(ctx, RangeCondition{
+			Upper: &RangeBound{
+				Value:     int64(18),
+				Inclusive: false,
+			},
+		}, true, func(key any, rowID RowID) error {
+			scannedKeys = append(scannedKeys, key.(int64))
+			scannedRowIDs = append(scannedRowIDs, rowID)
+			return nil
+		})
+		require.NoError(t, err)
+		// Should be in reverse order from 17 down to 1
+		assert.Equal(t, []int64{17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1}, scannedKeys)
 	})
 }
 
@@ -398,7 +463,7 @@ func TestIndex_ScanRange_CompositeKey(t *testing.T) {
 
 	t.Run("scan range all", func(t *testing.T) {
 		var scannedKeys []CompositeKey
-		require.NoError(t, anIndex.ScanRange(ctx, RangeCondition{}, func(key any, rowID RowID) error {
+		require.NoError(t, anIndex.ScanRange(ctx, RangeCondition{}, false, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(CompositeKey))
 			return nil
 		}))
@@ -418,7 +483,7 @@ func TestIndex_ScanRange_CompositeKey(t *testing.T) {
 				Value:     NewCompositeKey(columns, "Redd", "Garnett"),
 				Inclusive: false,
 			},
-		}, func(key any, rowID RowID) error {
+		}, false, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(CompositeKey))
 			return nil
 		}))
@@ -436,7 +501,7 @@ func TestIndex_ScanRange_CompositeKey(t *testing.T) {
 				Value:     NewCompositeKey(columns, "Redd", "Garnett"),
 				Inclusive: false,
 			},
-		}, func(key any, rowID RowID) error {
+		}, false, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(CompositeKey))
 			return nil
 		}))
@@ -457,7 +522,7 @@ func TestIndex_ScanRange_CompositeKey(t *testing.T) {
 				Value:     NewCompositeKey(columns[0:1], "Ralph\xFF"),
 				Inclusive: false,
 			},
-		}, func(key any, rowID RowID) error {
+		}, false, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(CompositeKey))
 			return nil
 		}))

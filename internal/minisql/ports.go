@@ -60,6 +60,6 @@ type BTreeIndex interface {
 	Insert(ctx context.Context, key any, rowID RowID) error
 	Delete(ctx context.Context, key any, rowID RowID) error
 	ScanAll(ctx context.Context, reverse bool, callback indexScanner) error
-	ScanRange(ctx context.Context, rangeCondition RangeCondition, callback indexScanner) error
+	ScanRange(ctx context.Context, rangeCondition RangeCondition, reverse bool, callback indexScanner) error
 	BFS(ctx context.Context, f indexCallback) error
 }

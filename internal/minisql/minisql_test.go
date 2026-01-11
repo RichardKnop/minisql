@@ -551,6 +551,48 @@ func (g *dataGen) RowsWithCompositeKey(number int) []Row {
 	return rows
 }
 
+func (g *dataGen) UniqueCountries(n int) []string {
+	countryMap := map[string]struct{}{}
+	countries := make([]string, 0, n)
+	for len(countries) < n {
+		country := g.Country()
+		_, ok := countryMap[country]
+		if !ok {
+			countryMap[country] = struct{}{}
+			countries = append(countries, country)
+		}
+	}
+	return countries
+}
+
+func (g *dataGen) UniqueCities(n int) []string {
+	cityMap := map[string]struct{}{}
+	cities := make([]string, 0, n)
+	for len(cities) < n {
+		city := g.City()
+		_, ok := cityMap[city]
+		if !ok {
+			cityMap[city] = struct{}{}
+			cities = append(cities, city)
+		}
+	}
+	return cities
+}
+
+func (g *dataGen) UniqueStreets(n int) []string {
+	streetMap := map[string]struct{}{}
+	streets := make([]string, 0, n)
+	for len(streets) < n {
+		street := g.Street()
+		_, ok := streetMap[street]
+		if !ok {
+			streetMap[street] = struct{}{}
+			streets = append(streets, street)
+		}
+	}
+	return streets
+}
+
 func newRootLeafPageWithCells(cells, rowSize int) *Page {
 	aRootLeaf := NewLeafNode()
 	aRootLeaf.Header.Header.IsRoot = true

@@ -330,14 +330,14 @@ func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, aScan Scan, s
 	return nil
 }
 
-func (t *Table) indexRangeScan(ctx context.Context, aScan Scan, selectedFields []Field, out chan<- Row) error {
+func (t *Table) indexRangeScan(ctx context.Context, aPlan QueryPlan, aScan Scan, selectedFields []Field, out chan<- Row) error {
 	anIndex, ok := t.IndexByName(aScan.IndexName)
 	if !ok {
 		return fmt.Errorf("no index found for point scan: %s", aScan.IndexName)
 	}
 
-	// Scan index within range
-	if err := anIndex.ScanRange(ctx, aScan.RangeCondition, func(key any, rowID RowID) error {
+	// Scan index within range (forward or reverse)
+	if err := anIndex.ScanRange(ctx, aScan.RangeCondition, aPlan.SortReverse, func(key any, rowID RowID) error {
 		// Find the row by ID
 		cursor, err := t.Seek(ctx, rowID)
 		if err != nil {
