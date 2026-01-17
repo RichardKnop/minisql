@@ -114,7 +114,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "email",
+							Value: Field{Name: "email"},
 						},
 						Operator: Eq,
 						Operand2: Operand{
@@ -149,7 +149,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "email",
+							Value: Field{Name: "email"},
 						},
 						Operator: In,
 						Operand2: Operand{
@@ -190,7 +190,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "email",
+							Value: Field{Name: "email"},
 						},
 						Operator: NotIn,
 						Operand2: Operand{
@@ -236,7 +236,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "email",
+							Value: Field{Name: "email"},
 						},
 						Operator: Gt,
 						Operand2: Operand{
@@ -274,7 +274,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "email",
+							Value: Field{Name: "email"},
 						},
 						Operator: Lt,
 						Operand2: Operand{
@@ -313,7 +313,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "email",
+							Value: Field{Name: "email"},
 						},
 						Operator: Gte,
 						Operand2: Operand{
@@ -324,7 +324,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "email",
+							Value: Field{Name: "email"},
 						},
 						Operator: Lte,
 						Operand2: Operand{
@@ -365,7 +365,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "id",
+							Value: Field{Name: "id"},
 						},
 						Operator: Eq,
 						Operand2: Operand{
@@ -378,7 +378,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "email",
+							Value: Field{Name: "email"},
 						},
 						Operator: Eq,
 						Operand2: Operand{

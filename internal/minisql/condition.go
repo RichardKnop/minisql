@@ -89,16 +89,10 @@ func IsValidCondition(c Condition) bool {
 	if c.Operand1.Type == 0 {
 		return false
 	}
-	if c.Operand1.Value == 0 {
-		return false
-	}
 	if c.Operator == 0 {
 		return false
 	}
 	if c.Operand2.Type == 0 {
-		return false
-	}
-	if c.Operand2.Value == 0 {
 		return false
 	}
 
@@ -143,7 +137,7 @@ func FieldIsEqual(fieldName string, operandType OperandType, value any) Conditio
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: fieldName,
+			Value: Field{Name: fieldName},
 		},
 		Operator: Eq,
 		Operand2: Operand{
@@ -157,7 +151,7 @@ func FieldIsNotEqual(fieldName string, operandType OperandType, value any) Condi
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: fieldName,
+			Value: Field{Name: fieldName},
 		},
 		Operator: Ne,
 		Operand2: Operand{
@@ -171,7 +165,7 @@ func FieldIsInAny(fieldName string, values ...any) Condition {
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: fieldName,
+			Value: Field{Name: fieldName},
 		},
 		Operator: In,
 		Operand2: Operand{
@@ -185,7 +179,7 @@ func FieldIsNotInAny(fieldName string, values ...any) Condition {
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: fieldName,
+			Value: Field{Name: fieldName},
 		},
 		Operator: NotIn,
 		Operand2: Operand{
@@ -199,7 +193,7 @@ func FieldIsNull(fieldName string) Condition {
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: fieldName,
+			Value: Field{Name: fieldName},
 		},
 		Operator: Eq,
 		Operand2: Operand{
@@ -212,7 +206,7 @@ func FieldIsNotNull(fieldName string) Condition {
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: fieldName,
+			Value: Field{Name: fieldName},
 		},
 		Operator: Ne,
 		Operand2: Operand{
@@ -225,7 +219,7 @@ func FieldIsGreater(fieldName string, operandType OperandType, value any) Condit
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: fieldName,
+			Value: Field{Name: fieldName},
 		},
 		Operator: Gt,
 		Operand2: Operand{
@@ -239,7 +233,7 @@ func FieldIsGreaterOrEqual(fieldName string, operandType OperandType, value any)
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: fieldName,
+			Value: Field{Name: fieldName},
 		},
 		Operator: Gte,
 		Operand2: Operand{
@@ -253,7 +247,7 @@ func FieldIsLess(fieldName string, operandType OperandType, value any) Condition
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: fieldName,
+			Value: Field{Name: fieldName},
 		},
 		Operator: Lt,
 		Operand2: Operand{
@@ -267,7 +261,7 @@ func FieldIsLessOrEqual(fieldName string, operandType OperandType, value any) Co
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: fieldName,
+			Value: Field{Name: fieldName},
 		},
 		Operator: Lte,
 		Operand2: Operand{

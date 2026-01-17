@@ -32,7 +32,7 @@ func (p *parserItem) doParseSelect() error {
 			return errSelectWithoutFields
 		}
 
-		p.Fields = append(p.Fields, minisql.Field{Name: identifier})
+		p.Fields = append(p.Fields, fieldFromIdentifier(identifier))
 		p.pop()
 		maybeFrom := strings.ToUpper(p.peek())
 
@@ -101,7 +101,97 @@ func (p *parserItem) doParseSelect() error {
 		}
 		p.TableName = tableName
 		p.pop()
-		p.step = stepSelectOrderBy
+
+		// Check for optional table alias
+		if strings.ToUpper(p.peek()) == "AS" {
+			p.pop()
+			tableAlias, _ := p.peekIdentifierWithLength()
+			if !isIdentifier(tableAlias) {
+				return fmt.Errorf("at SELECT: expected table alias identifier")
+			}
+			p.TableAlias = tableAlias
+			p.pop()
+		}
+
+		p.step = stepSelectJoin
+	case stepSelectJoin:
+		maybeJoin := strings.ToUpper(p.peek())
+		switch maybeJoin {
+		case "INNER JOIN":
+			p.pop()
+			p.Joins = append(p.Joins, minisql.Join{Type: minisql.Inner})
+			p.step = stepSelectJoinTable
+		case "LEFT JOIN":
+			p.Joins = append(p.Joins, minisql.Join{Type: minisql.Left})
+			p.step = stepSelectJoinTable
+			p.pop()
+		case "RIGHT JOIN":
+			p.Joins = append(p.Joins, minisql.Join{Type: minisql.Right})
+			p.step = stepSelectJoinTable
+			p.pop()
+		default:
+			p.step = stepSelectOrderBy
+			return nil
+		}
+	case stepSelectJoinTable:
+		tableName, _ := p.peekIdentifierWithLength()
+		if !isIdentifier(tableName) {
+			return fmt.Errorf("at JOIN: expected table name identifier")
+		}
+		p.Joins[len(p.Joins)-1].TableName = tableName
+		p.pop()
+
+		// Check for optional table alias
+		if strings.ToUpper(p.peek()) == "AS" {
+			p.pop()
+			tableAlias, _ := p.peekIdentifierWithLength()
+			if !isIdentifier(tableAlias) {
+				return fmt.Errorf("at JOIN: expected table alias identifier")
+			}
+			p.Joins[len(p.Joins)-1].TableAlias = tableAlias
+			p.pop()
+		}
+
+		// Next we expect the JOIN condition
+		if strings.ToUpper(p.peek()) != "ON" {
+			return fmt.Errorf("at JOIN: expected ON")
+		}
+		p.pop()
+
+		p.step = stepSelectJoinConditionField
+	case stepSelectJoinConditionField:
+		identifier := p.peek()
+		if !isIdentifier(identifier) {
+			return fmt.Errorf("at JOIN: expected field")
+		}
+		p.Joins[len(p.Joins)-1].Conditions = append(p.Joins[len(p.Joins)-1].Conditions, minisql.Condition{
+			Operand1: minisql.Operand{
+				Type:  minisql.OperandField,
+				Value: fieldFromIdentifier(identifier),
+			},
+		})
+		p.pop()
+		p.step = stepSelectJoinConditionOperator
+	case stepSelectJoinConditionOperator:
+		if p.peek() != "=" {
+			return fmt.Errorf("at JOIN condition: only '=' operator is supported")
+		}
+		p.Joins[len(p.Joins)-1].Conditions[len(p.Joins[len(p.Joins)-1].Conditions)-1].Operator = minisql.Eq
+		p.pop()
+		p.step = stepSelectJoinConditionValue
+	case stepSelectJoinConditionValue:
+		identifier := p.peek()
+		if !isIdentifier(identifier) {
+			return fmt.Errorf("at JOIN: expected field")
+		}
+		currentJoin := p.Joins[len(p.Joins)-1]
+		currentJoin.Conditions[len(currentJoin.Conditions)-1].Operand2 = minisql.Operand{
+			Type:  minisql.OperandField,
+			Value: fieldFromIdentifier(identifier),
+		}
+		p.Joins[len(p.Joins)-1] = currentJoin
+		p.pop()
+		p.step = stepSelectJoin
 	case stepSelectOrderBy:
 		offsetRWord := p.peek()
 		if strings.ToUpper(offsetRWord) != "ORDER BY" {
@@ -178,4 +268,14 @@ func (p *parserItem) doParseSelect() error {
 		p.step = stepStatementEnd
 	}
 	return nil
+}
+
+func fieldFromIdentifier(identifier string) minisql.Field {
+	if parts := strings.SplitN(identifier, ".", 2); len(parts) == 2 {
+		return minisql.Field{
+			AliasPrefix: parts[0],
+			Name:        parts[1],
+		}
+	}
+	return minisql.Field{Name: identifier}
 }

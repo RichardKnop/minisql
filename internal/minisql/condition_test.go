@@ -20,7 +20,7 @@ func TestIsValidCondition(t *testing.T) {
 			Condition{
 				Operand1: Operand{
 					Type:  OperandField,
-					Value: "a",
+					Value: Field{Name: "a"},
 				},
 				Operator: Eq,
 				Operand2: Operand{
@@ -35,7 +35,7 @@ func TestIsValidCondition(t *testing.T) {
 			Condition{
 				Operand1: Operand{
 					Type:  OperandField,
-					Value: "a",
+					Value: Field{Name: "a"},
 				},
 				Operator: Eq,
 			},
@@ -60,7 +60,7 @@ func TestFieldIsEqual(t *testing.T) {
 		expected := Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "email",
+				Value: Field{Name: "email"},
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -78,7 +78,7 @@ func TestFieldIsEqual(t *testing.T) {
 		expected := Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "verified",
+				Value: Field{Name: "verified"},
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -96,7 +96,7 @@ func TestFieldIsEqual(t *testing.T) {
 		expected := Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "id",
+				Value: Field{Name: "id"},
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -114,7 +114,7 @@ func TestFieldIsEqual(t *testing.T) {
 		expected := Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "score",
+				Value: Field{Name: "score"},
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -132,7 +132,7 @@ func TestFieldIsEqual(t *testing.T) {
 		expected := Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "description",
+				Value: Field{Name: "description"},
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -154,7 +154,7 @@ func TestFieldIsNotEqual(t *testing.T) {
 		expected := Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "email",
+				Value: Field{Name: "email"},
 			},
 			Operator: Ne,
 			Operand2: Operand{
@@ -172,7 +172,7 @@ func TestFieldIsNotEqual(t *testing.T) {
 		expected := Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "verified",
+				Value: Field{Name: "verified"},
 			},
 			Operator: Ne,
 			Operand2: Operand{
@@ -190,7 +190,7 @@ func TestFieldIsNotEqual(t *testing.T) {
 		expected := Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "id",
+				Value: Field{Name: "id"},
 			},
 			Operator: Ne,
 			Operand2: Operand{
@@ -208,7 +208,7 @@ func TestFieldIsNotEqual(t *testing.T) {
 		expected := Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "score",
+				Value: Field{Name: "score"},
 			},
 			Operator: Ne,
 			Operand2: Operand{
@@ -226,7 +226,7 @@ func TestFieldIsNotEqual(t *testing.T) {
 		expected := Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "description",
+				Value: Field{Name: "description"},
 			},
 			Operator: Ne,
 			Operand2: Operand{

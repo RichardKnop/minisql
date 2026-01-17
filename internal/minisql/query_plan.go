@@ -281,8 +281,8 @@ func (t *Table) tryMatchIndex(indexInfo IndexInfo, group Conditions) *indexMatch
 				continue
 			}
 
-			fieldName, ok := aCondition.Operand1.Value.(string)
-			if !ok || fieldName != indexCol.Name {
+			field, ok := aCondition.Operand1.Value.(Field)
+			if !ok || field.Name != indexCol.Name {
 				continue
 			}
 
@@ -292,7 +292,7 @@ func (t *Table) tryMatchIndex(indexInfo IndexInfo, group Conditions) *indexMatch
 			}
 
 			// We found a match for this column
-			column, ok := t.ColumnByName(fieldName)
+			column, ok := t.ColumnByName(field.Name)
 			if !ok {
 				continue
 			}
@@ -433,15 +433,15 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 			if aCondition.Operand1.Type != OperandField {
 				continue
 			}
-			fieldName, ok := aCondition.Operand1.Value.(string)
+			field, ok := aCondition.Operand1.Value.(Field)
 			if !ok {
 				continue
 			}
-			if !t.HasIndexOnColumn(fieldName) {
+			if !t.HasIndexOnColumn(field.Name) {
 				continue
 			}
 
-			info, ok := t.IndexInfoByColumnName(fieldName)
+			info, ok := t.IndexInfoByColumnName(field.Name)
 			if !ok {
 				continue
 			}
@@ -654,13 +654,14 @@ func tryRangeScan(indexInfo IndexInfo, filters Conditions, stats *IndexStats) (S
 
 	// Scan conditions to find range predicates on PK
 	for _, aCondition := range filters {
+		// Left side operand must be a field
 		if aCondition.Operand1.Type != OperandField {
 			remainingFilters = append(remainingFilters, aCondition)
 			continue
 		}
 
-		fieldName, ok := aCondition.Operand1.Value.(string)
-		if !ok || fieldName != indexInfo.Columns[0].Name {
+		field, ok := aCondition.Operand1.Value.(Field)
+		if !ok || field.Name != indexInfo.Columns[0].Name {
 			remainingFilters = append(remainingFilters, aCondition)
 			continue
 		}

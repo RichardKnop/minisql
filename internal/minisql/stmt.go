@@ -151,7 +151,16 @@ func textOverflowFields(columns ...Column) []Field {
 }
 
 type Field struct {
-	Name string
+	AliasPrefix string
+	Name        string
+}
+
+func (f Field) String() string {
+	if f.AliasPrefix != "" {
+		return fmt.Sprintf("%s.%s", f.AliasPrefix, f.Name)
+
+	}
+	return f.Name
 }
 
 type Direction int
@@ -190,7 +199,9 @@ type Placeholder struct{}
 type Statement struct {
 	Kind          StatementKind
 	IfNotExists   bool
-	TableName     string        // for SELECT, INSERT, UPDATE, DELETE, CREATE/DROP TABLE etc
+	TableAlias    string
+	TableName     string // for SELECT, INSERT, UPDATE, DELETE, CREATE/DROP TABLE etc
+	Joins         []Join
 	IndexName     string        // for CREATE/DROP INDEX
 	Target        string        // for ANALYZE
 	Columns       []Column      // use for CREATE TABLE
@@ -208,6 +219,21 @@ type Statement struct {
 	Limit       OptionalValue
 	Offset      OptionalValue
 	fetchedRows int64
+}
+
+type JoinType int
+
+const (
+	Inner JoinType = iota + 1
+	Left
+	Right
+)
+
+type Join struct {
+	Type       JoinType
+	TableName  string
+	TableAlias string
+	Conditions Conditions
 }
 
 // NumPlaceholders returns the number of placeholder parameters (?) in the statement.
@@ -548,9 +574,13 @@ func (s Statement) prepareWhere() (Statement, error) {
 			if !aCondition.Operand1.IsField() || aCondition.Operand2.IsField() {
 				continue
 			}
-			aColumn, ok := s.ColumnByName(aCondition.Operand1.Value.(string))
+			field, ok := aCondition.Operand1.Value.(Field)
 			if !ok {
-				return Statement{}, fmt.Errorf("unknown field %q in table %q", aCondition.Operand1.Value.(string), s.TableName)
+				return Statement{}, fmt.Errorf("invalid field in WHERE condition")
+			}
+			aColumn, ok := s.ColumnByName(field.Name)
+			if !ok {
+				return Statement{}, fmt.Errorf("unknown field %q in table %q", field.Name, s.TableName)
 			}
 			if aColumn.Kind != Timestamp {
 				continue
@@ -882,20 +912,60 @@ func (s Statement) validateSelect(aTable *Table) error {
 			return fmt.Errorf("LIMIT cannot be used with COUNT(*)")
 		}
 	}
-	if s.IsSelectAll() || s.IsSelectCountAll() {
-		return nil
+
+	if !s.IsSelectAll() && !s.IsSelectCountAll() {
+		fieldMap := map[string]struct{}{}
+		for _, aField := range s.Fields {
+			_, ok := aTable.ColumnByName(aField.Name)
+			if !ok {
+				return fmt.Errorf("unknown field %q in table %q", aField.Name, aTable.Name)
+			}
+			if _, exists := fieldMap[aField.String()]; exists {
+				return fmt.Errorf("duplicate field %q in select statement", aField.Name)
+			}
+			fieldMap[aField.String()] = struct{}{}
+		}
 	}
 
-	fieldMap := map[string]struct{}{}
-	for _, aField := range s.Fields {
-		_, ok := aTable.ColumnByName(aField.Name)
-		if !ok {
-			return fmt.Errorf("unknown field %q in table %q", aField.Name, aTable.Name)
+	if len(s.Joins) > 0 {
+		aliasMap := map[string]struct{}{}
+		if s.TableAlias != "" {
+			aliasMap[s.TableAlias] = struct{}{}
 		}
-		if _, exists := fieldMap[aField.Name]; exists {
-			return fmt.Errorf("duplicate field %q in select statement", aField.Name)
+		for _, aJoin := range s.Joins {
+			if aJoin.TableAlias == "" {
+				continue
+			}
+			_, exists := aliasMap[aJoin.TableAlias]
+			if exists {
+				return fmt.Errorf("duplicate table alias %q in JOINs", aJoin.TableAlias)
+			}
+			aliasMap[aJoin.TableAlias] = struct{}{}
+
+			if len(aJoin.Conditions) == 0 {
+				return fmt.Errorf("JOIN must have at least one condition")
+			}
+
+			for _, aCondition := range aJoin.Conditions {
+				if aCondition.Operand1.Type != OperandField {
+					return fmt.Errorf("operand1 in JOIN condition must be a field")
+				}
+				if _, ok := aCondition.Operand1.Value.(Field); !ok {
+					return fmt.Errorf("operand1 in JOIN condition must be a field")
+				}
+				if aCondition.Operand2.Type != OperandField {
+					return fmt.Errorf("operand2 in JOIN condition must be a field")
+				}
+				if _, ok := aCondition.Operand2.Value.(Field); !ok {
+					return fmt.Errorf("operand2 in JOIN condition must be a field")
+				}
+				if !IsValidCondition(aCondition) {
+					return fmt.Errorf("invalid condition in JOIN clause")
+				}
+				// TODO - validate that the fields in the JOIN conditions exist in the respective tables
+			}
 		}
-		fieldMap[aField.Name] = struct{}{}
+		return fmt.Errorf("JOINs are not yet supported")
 	}
 
 	if len(s.OrderBy) > 0 {
@@ -1000,6 +1070,9 @@ func (s Statement) validateWhere() error {
 			if aCondition.Operand1.Type != OperandField {
 				return fmt.Errorf("operand1 in WHERE condition must be a field")
 			}
+			if _, ok := aCondition.Operand1.Value.(Field); !ok {
+				return fmt.Errorf("operand1 in WHERE condition must be a field")
+			}
 			if aCondition.Operand2.Type == OperandPlaceholder {
 				return fmt.Errorf("unbound placeholder in WHERE clause")
 			}
@@ -1030,8 +1103,8 @@ func (s Statement) validateWhere() error {
 			}
 
 			if isEquality(aCondition) {
-				fieldName := aCondition.Operand1.Value.(string)
-				aColumn, ok := s.ColumnByName(fieldName)
+				field := aCondition.Operand1.Value.(Field)
+				aColumn, ok := s.ColumnByName(field.Name)
 				if !ok {
 					return fmt.Errorf("unknown field %q in WHERE clause", aCondition.Operand1.Value.(string))
 				}
@@ -1041,11 +1114,11 @@ func (s Statement) validateWhere() error {
 					return err
 				}
 
-				_, ok2 := equalityMap[fieldName]
+				_, ok2 := equalityMap[field.Name]
 				if !ok2 {
-					equalityMap[fieldName] = args
+					equalityMap[field.Name] = args
 				} else {
-					return fmt.Errorf("conflicting equality conditions for field %q in WHERE clause", fieldName)
+					return fmt.Errorf("conflicting equality conditions for field %q in WHERE clause", field.Name)
 				}
 			}
 		}

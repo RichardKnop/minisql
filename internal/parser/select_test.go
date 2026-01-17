@@ -69,6 +69,19 @@ func TestParse_Select(t *testing.T) {
 			nil,
 		},
 		{
+			"SELECT with table alias works",
+			"SELECT * FROM b as b_alias;",
+			[]minisql.Statement{
+				{
+					Kind:       minisql.Select,
+					TableName:  "b",
+					TableAlias: "b_alias",
+					Fields:     []minisql.Field{{Name: "*"}},
+				},
+			},
+			nil,
+		},
+		{
 			"SELECT COUNT(*) works",
 			"SELECT COUNT(*) FROM b;",
 			[]minisql.Statement{
@@ -408,6 +421,114 @@ func TestParse_Select(t *testing.T) {
 						{
 							minisql.FieldIsNotEqual("a", minisql.OperandPlaceholder, nil),
 							minisql.FieldIsGreater("b", minisql.OperandPlaceholder, nil),
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT with INNER JOIN",
+			"SELECT a.foo, b.bar FROM table_a AS a INNER JOIN table_b AS b ON a.id = b.id;",
+			[]minisql.Statement{
+				{
+					Kind:       minisql.Select,
+					TableName:  "table_a",
+					TableAlias: "a",
+					Fields: []minisql.Field{
+						{AliasPrefix: "a", Name: "foo"},
+						{AliasPrefix: "b", Name: "bar"},
+					},
+					Joins: []minisql.Join{
+						{
+							Type:       minisql.Inner,
+							TableName:  "table_b",
+							TableAlias: "b",
+							Conditions: minisql.Conditions{
+								{
+									Operand1: minisql.Operand{
+										Type:  minisql.OperandField,
+										Value: minisql.Field{AliasPrefix: "a", Name: "id"},
+									},
+									Operator: minisql.Eq,
+									Operand2: minisql.Operand{
+										Type:  minisql.OperandField,
+										Value: minisql.Field{AliasPrefix: "b", Name: "id"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT with LEFT JOIN",
+			"SELECT a.foo, b.bar FROM table_a AS a LEFT JOIN table_b AS b ON a.id = b.id;",
+			[]minisql.Statement{
+				{
+					Kind:       minisql.Select,
+					TableName:  "table_a",
+					TableAlias: "a",
+					Fields: []minisql.Field{
+						{AliasPrefix: "a", Name: "foo"},
+						{AliasPrefix: "b", Name: "bar"},
+					},
+					Joins: []minisql.Join{
+						{
+							Type:       minisql.Left,
+							TableName:  "table_b",
+							TableAlias: "b",
+							Conditions: minisql.Conditions{
+								{
+									Operand1: minisql.Operand{
+										Type:  minisql.OperandField,
+										Value: minisql.Field{AliasPrefix: "a", Name: "id"},
+									},
+									Operator: minisql.Eq,
+									Operand2: minisql.Operand{
+										Type:  minisql.OperandField,
+										Value: minisql.Field{AliasPrefix: "b", Name: "id"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT with RIGHT JOIN",
+			"SELECT a.foo, b.bar FROM table_a AS a RIGHT JOIN table_b AS b ON a.id = b.id;",
+			[]minisql.Statement{
+				{
+					Kind:       minisql.Select,
+					TableName:  "table_a",
+					TableAlias: "a",
+					Fields: []minisql.Field{
+						{AliasPrefix: "a", Name: "foo"},
+						{AliasPrefix: "b", Name: "bar"},
+					},
+					Joins: []minisql.Join{
+						{
+							Type:       minisql.Right,
+							TableName:  "table_b",
+							TableAlias: "b",
+							Conditions: minisql.Conditions{
+								{
+									Operand1: minisql.Operand{
+										Type:  minisql.OperandField,
+										Value: minisql.Field{AliasPrefix: "a", Name: "id"},
+									},
+									Operator: minisql.Eq,
+									Operand2: minisql.Operand{
+										Type:  minisql.OperandField,
+										Value: minisql.Field{AliasPrefix: "b", Name: "id"},
+									},
+								},
+							},
 						},
 					},
 				},

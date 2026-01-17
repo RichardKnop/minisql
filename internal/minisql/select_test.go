@@ -105,7 +105,7 @@ func TestTable_Select(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "email",
+							Value: Field{Name: "email"},
 						},
 						Operator: Eq,
 						Operand2: Operand{
@@ -133,7 +133,7 @@ func TestTable_Select(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "id",
+							Value: Field{Name: "id"},
 						},
 						Operator: Eq,
 						Operand2: Operand{
@@ -163,7 +163,7 @@ func TestTable_Select(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "id",
+							Value: Field{Name: "id"},
 						},
 						Operator: In,
 						Operand2: Operand{
@@ -199,7 +199,7 @@ func TestTable_Select(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "id",
+							Value: Field{Name: "id"},
 						},
 						Operator: NotIn,
 						Operand2: Operand{

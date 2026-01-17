@@ -63,7 +63,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		idMatch = Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "id",
+				Value: Field{Name: "id"},
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -74,7 +74,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		idMismatch = Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "id",
+				Value: Field{Name: "id"},
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -85,7 +85,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		emailMatch = Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "email",
+				Value: Field{Name: "email"},
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -96,7 +96,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		emailMismatch = Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "email",
+				Value: Field{Name: "email"},
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -107,7 +107,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		ageMatch = Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "age",
+				Value: Field{Name: "age"},
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -118,7 +118,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		ageMismatch = Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "age",
+				Value: Field{Name: "age"},
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -129,7 +129,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		verifiedMatch = Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "verified",
+				Value: Field{Name: "verified"},
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -140,7 +140,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		verifiedMismatch = Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "verified",
+				Value: Field{Name: "verified"},
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -151,7 +151,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		timestampMatch = Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "created",
+				Value: Field{Name: "created"},
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -162,7 +162,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		timestampMismatch = Condition{
 			Operand1: Operand{
 				Type:  OperandField,
-				Value: "created",
+				Value: Field{Name: "created"},
 			},
 			Operator: Eq,
 			Operand2: Operand{
@@ -336,7 +336,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "age",
+							Value: Field{Name: "age"},
 						},
 						Operator: Ne,
 						Operand2: Operand{
@@ -356,7 +356,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "age",
+							Value: Field{Name: "age"},
 						},
 						Operator: Ne,
 						Operand2: Operand{
@@ -376,7 +376,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "age",
+							Value: Field{Name: "age"},
 						},
 						Operator: Gt,
 						Operand2: Operand{
@@ -396,7 +396,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "age",
+							Value: Field{Name: "age"},
 						},
 						Operator: Gt,
 						Operand2: Operand{
@@ -416,7 +416,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "age",
+							Value: Field{Name: "age"},
 						},
 						Operator: Lt,
 						Operand2: Operand{
@@ -436,7 +436,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "age",
+							Value: Field{Name: "age"},
 						},
 						Operator: Lt,
 						Operand2: Operand{
@@ -456,7 +456,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "age",
+							Value: Field{Name: "age"},
 						},
 						Operator: Gte,
 						Operand2: Operand{
@@ -476,7 +476,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "age",
+							Value: Field{Name: "age"},
 						},
 						Operator: Gte,
 						Operand2: Operand{
@@ -496,7 +496,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "age",
+							Value: Field{Name: "age"},
 						},
 						Operator: Lte,
 						Operand2: Operand{
@@ -516,7 +516,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "age",
+							Value: Field{Name: "age"},
 						},
 						Operator: Lte,
 						Operand2: Operand{
@@ -536,7 +536,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "created",
+							Value: Field{Name: "created"},
 						},
 						Operator: Eq,
 						Operand2: Operand{
@@ -556,7 +556,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "id",
+							Value: Field{Name: "id"},
 						},
 						Operator: In,
 						Operand2: Operand{
@@ -576,7 +576,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "id",
+							Value: Field{Name: "id"},
 						},
 						Operator: In,
 						Operand2: Operand{
@@ -596,7 +596,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "id",
+							Value: Field{Name: "id"},
 						},
 						Operator: NotIn,
 						Operand2: Operand{
@@ -616,7 +616,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "id",
+							Value: Field{Name: "id"},
 						},
 						Operator: NotIn,
 						Operand2: Operand{

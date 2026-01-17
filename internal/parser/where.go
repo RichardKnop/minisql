@@ -48,7 +48,7 @@ func (p *parserItem) doParseWhere() error {
 		p.Statement.Conditions = p.Statement.Conditions.Append(minisql.Condition{
 			Operand1: minisql.Operand{
 				Type:  minisql.OperandField,
-				Value: identifier,
+				Value: fieldFromIdentifier(identifier),
 			},
 		})
 		p.pop()
@@ -146,7 +146,7 @@ func (p *parserItem) doParseWhere() error {
 		} else if isIdentifier(placeholderOrField) {
 			currentCondition.Operand2 = minisql.Operand{
 				Type:  minisql.OperandField,
-				Value: placeholderOrField,
+				Value: fieldFromIdentifier(placeholderOrField),
 			}
 			p.Conditions.UpdateLast(currentCondition)
 			p.pop()

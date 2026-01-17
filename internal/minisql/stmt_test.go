@@ -1120,6 +1120,39 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, `LIMIT must be a non-negative integer`)
 	})
 
+	t.Run("SELECT with duplicate table alias should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:       Select,
+			TableName:  aTable.Name,
+			TableAlias: "t1",
+			Joins: []Join{
+				{
+					TableName:  "other_table",
+					TableAlias: "t1", // Duplicate alias
+					Conditions: Conditions{
+						{
+							Operand1: Operand{
+								Type:  OperandField,
+								Value: Field{AliasPrefix: "t1", Name: "id"},
+							},
+							Operator: Eq,
+							Operand2: Operand{
+								Type:  OperandField,
+								Value: Field{AliasPrefix: "t2", Name: "other_id"},
+							},
+						},
+					},
+				},
+			},
+			Columns: aTable.Columns,
+			Fields:  []Field{{Name: "id"}, {Name: "email"}},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `duplicate table alias "t1" in JOINs`)
+	})
+
 	t.Run("SELECT with invalid offset should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
@@ -1150,7 +1183,7 @@ func TestStatement_Validate(t *testing.T) {
 						Operator: Eq,
 						Operand2: Operand{
 							Type:  OperandField,
-							Value: "id",
+							Value: Field{Name: "id"},
 						},
 					},
 				},
@@ -1173,7 +1206,7 @@ func TestStatement_Validate(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "id",
+							Value: Field{Name: "id"},
 						},
 						Operator: Eq,
 						Operand2: Operand{
@@ -1200,7 +1233,7 @@ func TestStatement_Validate(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "id",
+							Value: Field{Name: "id"},
 						},
 						Operator: NotIn,
 						Operand2: Operand{
@@ -1231,7 +1264,7 @@ func TestStatement_Validate(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "id",
+							Value: Field{Name: "id"},
 						},
 						Operator: In,
 						Operand2: Operand{
@@ -1259,7 +1292,7 @@ func TestStatement_Validate(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "id",
+							Value: Field{Name: "id"},
 						},
 						Operator: Eq,
 						Operand2: Operand{
@@ -1270,7 +1303,7 @@ func TestStatement_Validate(t *testing.T) {
 					{
 						Operand1: Operand{
 							Type:  OperandField,
-							Value: "id",
+							Value: Field{Name: "id"},
 						},
 						Operator: Eq,
 						Operand2: Operand{

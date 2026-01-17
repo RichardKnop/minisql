@@ -185,12 +185,12 @@ func TestTryRangeScan_WithStats(t *testing.T) {
 		// Build range conditions: age >= 25 AND age <= 50
 		filters := Conditions{
 			{
-				Operand1: Operand{Type: OperandField, Value: "age"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "age"}},
 				Operator: Gte,
 				Operand2: Operand{Type: OperandInteger, Value: int32(25)},
 			},
 			{
-				Operand1: Operand{Type: OperandField, Value: "age"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "age"}},
 				Operator: Lte,
 				Operand2: Operand{Type: OperandInteger, Value: int32(50)},
 			},
@@ -209,12 +209,12 @@ func TestTryRangeScan_WithStats(t *testing.T) {
 		// Build range conditions: age >= 25 AND age <= 50
 		filters := Conditions{
 			{
-				Operand1: Operand{Type: OperandField, Value: "age"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "age"}},
 				Operator: Gte,
 				Operand2: Operand{Type: OperandInteger, Value: int32(25)},
 			},
 			{
-				Operand1: Operand{Type: OperandField, Value: "age"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "age"}},
 				Operator: Lte,
 				Operand2: Operand{Type: OperandInteger, Value: int32(50)},
 			},
@@ -238,7 +238,7 @@ func TestTryRangeScan_WithStats(t *testing.T) {
 		// Build range condition: age >= 50 (one bound = 50% selectivity)
 		filters := Conditions{
 			{
-				Operand1: Operand{Type: OperandField, Value: "age"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "age"}},
 				Operator: Gte,
 				Operand2: Operand{Type: OperandInteger, Value: int32(50)},
 			},
@@ -261,7 +261,7 @@ func TestTryRangeScan_WithStats(t *testing.T) {
 
 		filters := Conditions{
 			{
-				Operand1: Operand{Type: OperandField, Value: "age"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "age"}},
 				Operator: Gte,
 				Operand2: Operand{Type: OperandInteger, Value: int32(25)},
 			},
