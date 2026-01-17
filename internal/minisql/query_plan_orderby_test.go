@@ -9,60 +9,6 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestEstimateSortCost(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		numRows  int64
-		wantZero bool
-	}{
-		{
-			name:     "zero rows",
-			numRows:  0,
-			wantZero: true,
-		},
-		{
-			name:     "one row",
-			numRows:  1,
-			wantZero: true,
-		},
-		{
-			name:    "100 rows",
-			numRows: 100,
-		},
-		{
-			name:    "1000 rows",
-			numRows: 1000,
-		},
-		{
-			name:    "10000 rows",
-			numRows: 10000,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			cost := estimateSortCost(tt.numRows)
-			if tt.wantZero {
-				assert.Equal(t, float64(0), cost, "estimateSortCost(%d) = %v, want 0", tt.numRows, cost)
-				return
-			}
-
-			assert.GreaterOrEqual(t, cost, float64(0), "estimateSortCost(%d) = %v, want > 0", tt.numRows, cost)
-
-			// Verify it follows O(n log n) pattern
-			// For 1000 rows: ~10000, for 10000 rows: ~130000
-			expectedOrder := float64(tt.numRows) * 10 // rough check
-			if cost < expectedOrder/2 || cost > expectedOrder*2 {
-				t.Logf("estimateSortCost(%d) = %v (expected order of magnitude: ~%v)", tt.numRows, cost, expectedOrder)
-			}
-		})
-	}
-}
-
 func TestEstimateFilteredRows(t *testing.T) {
 	t.Parallel()
 

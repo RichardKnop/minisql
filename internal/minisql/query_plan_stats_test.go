@@ -4,7 +4,146 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// TestParseIndexStats tests the stat string parsing
+func TestParseIndexStats(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		statString  string
+		expected    IndexStats
+		expectError bool
+	}{
+		{
+			name:       "single column index",
+			statString: "1000 500",
+			expected: IndexStats{
+				NEntry:    1000,
+				NDistinct: []int64{500},
+			},
+			expectError: false,
+		},
+		{
+			name:       "composite index",
+			statString: "1000 10 50 800",
+			expected: IndexStats{
+				NEntry:    1000,
+				NDistinct: []int64{10, 50, 800},
+			},
+			expectError: false,
+		},
+		{
+			name:        "invalid format - too few parts",
+			statString:  "1000",
+			expectError: true,
+		},
+		{
+			name:        "invalid format - non-numeric nEntry",
+			statString:  "abc 500",
+			expectError: true,
+		},
+		{
+			name:        "invalid format - non-numeric nDistinct",
+			statString:  "1000 abc",
+			expectError: true,
+		},
+		{
+			name:        "empty string",
+			statString:  "",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stats, err := parseIndexStats(tt.statString)
+			if tt.expectError {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected.NEntry, stats.NEntry)
+			assert.Equal(t, tt.expected.NDistinct, stats.NDistinct)
+		})
+	}
+}
+
+// TestIndexStats_Selectivity tests the selectivity calculation
+func TestIndexStats_Selectivity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		stats     IndexStats
+		expected  float64
+		tolerance float64
+	}{
+		{
+			name: "single column 50% selectivity",
+			stats: IndexStats{
+				NEntry:    1000,
+				NDistinct: []int64{500},
+			},
+			expected:  0.5,
+			tolerance: 0.01,
+		},
+		{
+			name: "single column 100% selectivity",
+			stats: IndexStats{
+				NEntry:    1000,
+				NDistinct: []int64{1000},
+			},
+			expected:  1.0,
+			tolerance: 0.01,
+		},
+		{
+			name: "single column 1% selectivity",
+			stats: IndexStats{
+				NEntry:    1000,
+				NDistinct: []int64{10},
+			},
+			expected:  0.01,
+			tolerance: 0.001,
+		},
+		{
+			name: "composite index - uses final prefix",
+			stats: IndexStats{
+				NEntry:    1000,
+				NDistinct: []int64{10, 50, 800},
+			},
+			expected:  0.8, // Uses last value: 800/1000
+			tolerance: 0.01,
+		},
+		{
+			name: "zero entries",
+			stats: IndexStats{
+				NEntry:    0,
+				NDistinct: []int64{0},
+			},
+			expected:  0.0,
+			tolerance: 0.0,
+		},
+		{
+			name: "no distinct values",
+			stats: IndexStats{
+				NEntry:    1000,
+				NDistinct: []int64{},
+			},
+			expected:  0.0,
+			tolerance: 0.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			selectivity := tt.stats.Selectivity()
+			assert.InDelta(t, tt.expected, selectivity, tt.tolerance)
+		})
+	}
+}
 
 func TestIndexStats_EstimateRangeRows(t *testing.T) {
 	t.Parallel()
