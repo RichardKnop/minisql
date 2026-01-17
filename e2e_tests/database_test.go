@@ -96,6 +96,12 @@ func (s *TestSuite) TestCreateTable() {
 		s.assertIndex(schemas[4], "idx_created", "users", 4, createUsersTimestampIndexSQL)
 	})
 
+	s.Run("Cannot drop system table", func() {
+		_, err := s.db.Exec(`drop table "minisql_schema";`)
+		s.Require().Error(err)
+		s.ErrorContains(err, "cannot write to system table ")
+	})
+
 	s.Run("Drop table", func() {
 		_, err := s.db.Exec(`drop table "users";`)
 		s.Require().NoError(err)

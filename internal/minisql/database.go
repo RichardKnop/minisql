@@ -241,7 +241,7 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 	}
 
 	if !stmt.ReadOnly() && isSystemTable(stmt.TableName) {
-		return StatementResult{}, fmt.Errorf("cannot write to system table %s", SchemaTableName)
+		return StatementResult{}, fmt.Errorf("cannot write to system table %s", stmt.TableName)
 	}
 
 	switch stmt.Kind {
