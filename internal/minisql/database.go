@@ -321,6 +321,21 @@ func (d *Database) init(ctx context.Context) error {
 		}
 	}
 
+	stats, err := d.listStats(ctx, "")
+	if err != nil {
+		return err
+	}
+	for _, s := range stats {
+		if s.IndexName == "" {
+			continue
+		}
+		indexStats, err := parseIndexStats(s.StatValue)
+		if err != nil {
+			return err
+		}
+		d.tables[s.TableName].indexStats[s.IndexName] = indexStats
+	}
+
 	return nil
 }
 
@@ -354,14 +369,12 @@ func (d *Database) initEmptyDatabase(ctx context.Context, rooPageIdx PageIndex, 
 	d.logger.Sugar().With(
 		"name", SchemaTableName,
 		"root_page", rooPageIdx,
-	).Debug("creating main schema table")
-
-	txPager := NewTransactionalPager(mainTablePager, d.txManager, SchemaTableName, "")
+	).Debug("creating system schema table")
 
 	// New database, need to create the main schema table
 	mainTable := NewTable(
 		d.logger,
-		txPager,
+		NewTransactionalPager(mainTablePager, d.txManager, SchemaTableName, ""),
 		d.txManager,
 		SchemaTableName,
 		mainTableColumns,
@@ -377,7 +390,7 @@ func (d *Database) initEmptyDatabase(ctx context.Context, rooPageIdx PageIndex, 
 		Fields:    mainTableFields,
 		Inserts: [][]OptionalValue{
 			{
-				{Value: int32(SchemaTable), Valid: true},                     // type (only 0 supported now)
+				{Value: int32(SchemaTable), Valid: true},
 				{Value: NewTextPointer([]byte(mainTable.Name)), Valid: true}, // name
 				{}, // tbl_name
 				{Value: int32(mainTable.GetRootPageIdx()), Valid: true},    // root page
@@ -622,6 +635,8 @@ func (d *Database) executeDDLStatement(ctx context.Context, stmt Statement) (Sta
 		return StatementResult{}, d.createIndex(ctx, stmt, aTable)
 	case DropIndex:
 		return StatementResult{}, d.dropIndex(ctx, stmt)
+	case Analyze:
+		return StatementResult{}, d.Analyze(ctx, stmt.TableName)
 	}
 
 	return StatementResult{}, fmt.Errorf("unrecognized DDL statement type: %v", stmt.Kind)

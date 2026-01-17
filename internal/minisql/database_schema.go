@@ -6,6 +6,7 @@ import (
 
 const (
 	SchemaTableName    = "minisql_schema"
+	StatsTableName     = "minisql_stats"
 	MaxColumns         = 64
 	RootPageConfigSize = 100
 )
@@ -35,6 +36,7 @@ var (
 		4 - // root_page column
 		(varcharLengthPrefixSize + 4) - // sql column
 		RootPageConfigSize
+
 	mainTableColumns = []Column{
 		{
 			Kind: Int4,
@@ -63,9 +65,7 @@ var (
 			Nullable: true,
 		},
 	}
-)
 
-var (
 	MainTableSQL = fmt.Sprintf(`create table "%s" (
 	type int4 not null,
 	name varchar(255) not null,
@@ -98,5 +98,5 @@ func scanSchema(aRow Row) Schema {
 }
 
 func isSystemTable(name string) bool {
-	return name == SchemaTableName
+	return name == SchemaTableName || name == StatsTableName
 }

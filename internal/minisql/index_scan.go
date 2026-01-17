@@ -165,7 +165,11 @@ func (ui *Index[T]) scanDescending(ctx context.Context, pageIdx PageIndex, callb
 }
 
 // ScanRange scans keys within the specified range using in-order traversal with range checks.
-func (ui *Index[T]) ScanRange(ctx context.Context, rangeCondition RangeCondition, callback indexScanner) error {
+func (ui *Index[T]) ScanRange(ctx context.Context, rangeCondition RangeCondition, reverse bool, callback indexScanner) error {
+	if reverse {
+		return ui.scanRangeReverse(ctx, rangeCondition, callback)
+	}
+
 	// If lower bound exists, seek to it
 	if rangeCondition.Lower != nil {
 		aPage, err := ui.pager.ReadPage(ctx, ui.GetRootPageIdx())
@@ -195,6 +199,12 @@ func (ui *Index[T]) ScanRange(ctx context.Context, rangeCondition RangeCondition
 	}
 	// Otherwise, scan from the beginning
 	return ui.scanRangeRecursive(ctx, ui.GetRootPageIdx(), rangeCondition, callback)
+}
+
+// scanRangeReverse scans keys within the specified range in reverse order (descending).
+func (ui *Index[T]) scanRangeReverse(ctx context.Context, rangeCondition RangeCondition, callback indexScanner) error {
+	// Simply use recursive reverse scan from root - range checks happen at each step
+	return ui.scanRangeRecursiveReverse(ctx, ui.GetRootPageIdx(), rangeCondition, callback)
 }
 
 // scanRangeFrom scans in in-order traversal starting from a given page and cell index (for B-tree).
@@ -402,6 +412,83 @@ func (ui *Index[T]) scanRangeRecursive(ctx context.Context, pageIdx PageIndex, r
 	if !aNode.Header.IsLeaf && aNode.Header.RightChild != 0 {
 		if err := ui.scanRangeRecursive(ctx, aNode.Header.RightChild, rangeCondition, callback); err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+// scanRangeFromReverse does not actually exist - we use scanRangeRecursiveReverse directly
+
+// scanRangeRecursiveReverse traverses the tree in reverse in-order, applying range checks at each step.
+func (ui *Index[T]) scanRangeRecursiveReverse(ctx context.Context, pageIdx PageIndex, rangeCondition RangeCondition, callback indexScanner) error {
+	aPage, err := ui.pager.ReadPage(ctx, pageIdx)
+	if err != nil {
+		return err
+	}
+	aNode := aPage.IndexNode.(*IndexNode[T])
+
+	// Visit rightmost child first
+	if !aNode.Header.IsLeaf && aNode.Header.RightChild != 0 {
+		if err := ui.scanRangeRecursiveReverse(ctx, aNode.Header.RightChild, rangeCondition, callback); err != nil {
+			return err
+		}
+	}
+
+	// Visit keys in reverse order
+	for i := int(aNode.Header.Keys) - 1; i >= 0; i-- {
+		var (
+			aCell = aNode.Cells[i]
+			key   = aCell.Key
+		)
+
+		// Check if this key should be included
+		includeKey := true
+		if rangeCondition.Upper != nil {
+			cmp := compareAny(key, rangeCondition.Upper.Value.(T))
+			if cmp > 0 || (cmp == 0 && !rangeCondition.Upper.Inclusive) {
+				includeKey = false
+			}
+		}
+		if rangeCondition.Lower != nil {
+			cmp := compareAny(key, rangeCondition.Lower.Value.(T))
+			if cmp < 0 || (cmp == 0 && !rangeCondition.Lower.Inclusive) {
+				// Key is below lower bound, all remaining keys will be too
+				// Visit left child first, then stop
+				if !aNode.Header.IsLeaf && aNode.Cells[i].Child != 0 {
+					if err := ui.scanRangeRecursiveReverse(ctx, aNode.Cells[i].Child, rangeCondition, callback); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+		}
+
+		// Emit key if it's within range
+		if includeKey {
+			for _, rowID := range aCell.RowIDs {
+				if err := callback(key, rowID); err != nil {
+					return err
+				}
+			}
+			if aCell.Overflow != 0 {
+				rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, aCell.Overflow)
+				if err != nil {
+					return err
+				}
+				for _, rowID := range rowIDs {
+					if err := callback(key, rowID); err != nil {
+						return err
+					}
+				}
+			}
+		}
+
+		// Always visit left child (child contains keys less than current key)
+		if !aNode.Header.IsLeaf && aNode.Cells[i].Child != 0 {
+			if err := ui.scanRangeRecursiveReverse(ctx, aNode.Cells[i].Child, rangeCondition, callback); err != nil {
+				return err
+			}
 		}
 	}
 

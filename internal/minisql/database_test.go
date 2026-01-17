@@ -436,11 +436,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 			Kind:      CreateIndex,
 			IndexName: "foo_bar",
 			TableName: testTableName,
-			Columns: []Column{
-				{
-					Name: "created",
-				},
-			},
+			Columns:   []Column{{Name: "created"}},
 		}
 		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			_, err := aDatabase.ExecuteStatement(ctx, createIndexStmt)
@@ -466,6 +462,21 @@ func TestDatabase_CreateIndex(t *testing.T) {
 		assert.Equal(t, "foo_bar", schemas[2].Name)
 		assert.Equal(t, testTableName, schemas[2].TableName)
 		assert.Equal(t, 2, int(schemas[2].RootPage))
+	})
+
+	t.Run("Cannot create index with the same name", func(t *testing.T) {
+		createIndexStmt := Statement{
+			Kind:      CreateIndex,
+			IndexName: "foo_bar",
+			TableName: testTableName,
+			Columns:   []Column{{Name: "created"}},
+		}
+		err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			_, err := aDatabase.ExecuteStatement(ctx, createIndexStmt)
+			return err
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errIndexAlreadyExists)
 	})
 
 	t.Run("Drop index when index does not exist", func(t *testing.T) {

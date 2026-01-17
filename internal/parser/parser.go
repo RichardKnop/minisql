@@ -31,7 +31,7 @@ var reservedWords = []string{
 	"PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "DEFAULT", "NOT NULL", "NULL", "UNIQUE",
 	"IS NULL", "IS NOT NULL", "TRUE", "FALSE", "NOW()",
 	"IF NOT EXISTS", "WHERE", "FROM", "SET", "ASC", "DESC", "AS",
-	"BEGIN", "COMMIT", "ROLLBACK",
+	"BEGIN", "COMMIT", "ROLLBACK", "ANALYZE",
 	";",
 }
 
@@ -98,6 +98,7 @@ const (
 	stepWhereConditionListValue
 	stepWhereConditionListValueCommaOrEnd
 	stepWhereOperator
+	stepAnalyze
 	stepStatementEnd
 )
 
@@ -182,6 +183,10 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 				p.Kind = minisql.RollbackTransaction
 				p.pop()
 				p.step = stepStatementEnd
+			case "ANALYZE":
+				p.Kind = minisql.Analyze
+				p.pop()
+				p.step = stepAnalyze
 			default:
 				return statements, errInvalidStatementKind
 			}
@@ -296,6 +301,13 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 			stepWhereConditionListValueCommaOrEnd,
 			stepWhereOperator:
 			if err := p.doParseWhere(); err != nil {
+				return statements, err
+			}
+		// -----------------
+		// ANALYZE
+		//------------------
+		case stepAnalyze:
+			if err := p.doParseAnalyze(); err != nil {
 				return statements, err
 			}
 		case stepStatementEnd:
@@ -502,7 +514,7 @@ func (p *parserItem) validate(stmt minisql.Statement) error {
 		if stmt.Kind == minisql.CreateIndex && len(stmt.Columns) == 0 {
 			return errCreateIndexNoColumns
 		}
-	} else if stmt.TableName == "" {
+	} else if stmt.TableName == "" && stmt.Kind != minisql.Analyze {
 		return errEmptyTableName
 	}
 	if stmt.Kind == minisql.CreateTable {

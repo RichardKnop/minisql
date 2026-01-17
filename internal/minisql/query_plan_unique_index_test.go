@@ -454,8 +454,8 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				},
 			},
 		},
-		{ // TODO - perhaps we should be ordering by using the index rather than sorting in memory?
-			"A range scan with order by index key - ordered in memory",
+		{
+			"A range scan with order by index key - order via index",
 			Statement{
 				Kind: Select,
 				Conditions: OneOrMore{
@@ -489,7 +489,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 						},
 					},
 				},
-				SortInMemory: true,
+				SortInMemory: false,
 				SortReverse:  true,
 				OrderBy: []OrderBy{
 					{

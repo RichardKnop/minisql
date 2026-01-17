@@ -141,7 +141,25 @@ values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:2
 		s.Require().Len(users, 10)
 
 		expectedIDs := []int64{108, 107, 106, 105, 104, 103, 102, 101, 100, 1}
-		for i := 9; i >= 0; i-- {
+		for i := range expectedIDs {
+			s.Equal(expectedIDs[i], users[i].ID)
+		}
+	})
+
+	s.Run("Range scan with order by", func() {
+		users := s.collectUsers(`select * from users where id > 1 and id <= 107 order by id;`)
+		s.Require().Len(users, 8)
+
+		expectedIDs := []int64{100, 101, 102, 103, 104, 105, 106, 107}
+		for i := range expectedIDs {
+			s.Equal(expectedIDs[i], users[i].ID)
+		}
+
+		users = s.collectUsers(`select * from users where id > 1 and id <= 107 order by id desc;`)
+		s.Require().Len(users, 8)
+
+		expectedIDs = []int64{107, 106, 105, 104, 103, 102, 101, 100}
+		for i := range expectedIDs {
 			s.Equal(expectedIDs[i], users[i].ID)
 		}
 	})

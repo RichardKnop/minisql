@@ -47,10 +47,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 		// Table with composite secondary index on (first_name, last_name)
 		compositeSecondaryIndexName = "idx_name"
 		tableWithCompositeSecondary = NewTable(
-			zap.NewNop(), nil, nil, "users",
-			compositeColumns,
-			0,
-			WithPrimaryKey(NewPrimaryKey("pkey__users", compositeColumns[0:1], true)),
+			zap.NewNop(), nil, nil, "users", compositeColumns, 0,
 			WithSecondaryIndex(SecondaryIndex{
 				IndexInfo: IndexInfo{
 					Name:    compositeSecondaryIndexName,

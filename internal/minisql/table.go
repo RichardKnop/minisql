@@ -21,6 +21,7 @@ type Table struct {
 	logger               *zap.Logger
 	pager                TxPager
 	txManager            *TransactionManager
+	indexStats           map[string]IndexStats
 }
 
 type TableOption func(*Table)
@@ -56,6 +57,7 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 		UniqueIndexes:        make(map[string]UniqueIndex),
 		SecondaryIndexes:     make(map[string]SecondaryIndex),
 		columnIndexInfoCache: make(map[string]IndexInfo),
+		indexStats:           make(map[string]IndexStats),
 	}
 	// Build column name -> column index cache
 	for i, aColumn := range columns {
@@ -110,6 +112,10 @@ func (t *Table) RemoveSecondaryIndex(name string) {
 
 func (t *Table) GetRootPageIdx() PageIndex {
 	return t.rootPageIdx
+}
+
+func (t *Table) HasNoIndex() bool {
+	return !t.HasPrimaryKey() && len(t.UniqueIndexes) == 0 && len(t.SecondaryIndexes) == 0
 }
 
 func (t *Table) HasPrimaryKey() bool {
