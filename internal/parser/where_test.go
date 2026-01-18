@@ -65,7 +65,7 @@ func TestParse_Where(t *testing.T) {
 			"WHERE a = b",
 			minisql.OneOrMore{
 				{
-					minisql.FieldIsEqual("a", minisql.OperandField, "b"),
+					minisql.FieldIsEqual("a", minisql.OperandField, minisql.Field{Name: "b"}),
 				},
 			},
 			nil,

@@ -179,7 +179,7 @@ func TestQueryPlan_OptimizeOrdering_WithFilters(t *testing.T) {
 			Conditions: OneOrMore{
 				Conditions{
 					{
-						Operand1: Operand{Type: OperandField, Value: "status"},
+						Operand1: Operand{Type: OperandField, Value: Field{Name: "status"}},
 						Operator: Eq,
 						Operand2: Operand{Type: OperandInteger, Value: int32(1)},
 					},
@@ -245,7 +245,7 @@ func TestQueryPlan_OptimizeOrdering_WithFilters(t *testing.T) {
 			Conditions: OneOrMore{
 				Conditions{
 					{
-						Operand1: Operand{Type: OperandField, Value: "status"},
+						Operand1: Operand{Type: OperandField, Value: Field{Name: "status"}},
 						Operator: Eq,
 						Operand2: Operand{Type: OperandInteger, Value: int32(1)},
 					},
@@ -309,7 +309,7 @@ func TestQueryPlan_OptimizeOrdering_WithFilters(t *testing.T) {
 			Conditions: OneOrMore{
 				Conditions{
 					{
-						Operand1: Operand{Type: OperandField, Value: "status"},
+						Operand1: Operand{Type: OperandField, Value: Field{Name: "status"}},
 						Operator: Eq,
 						Operand2: Operand{Type: OperandInteger, Value: int32(1)},
 					},

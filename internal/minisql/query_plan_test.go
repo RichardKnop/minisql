@@ -32,12 +32,12 @@ func TestTable_findBestEqualityIndexMatch_WithoutStats(t *testing.T) {
 		conditions := Conditions{
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "id"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
 				Operand2: Operand{Type: OperandInteger, Value: int32(1)},
 			},
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "email"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "email"}},
 				Operand2: Operand{Type: OperandQuotedString, Value: NewTextPointer([]byte("test@example.com"))},
 			},
 		}
@@ -61,12 +61,12 @@ func TestTable_findBestEqualityIndexMatch_WithoutStats(t *testing.T) {
 		conditions := Conditions{
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "email"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "email"}},
 				Operand2: Operand{Type: OperandQuotedString, Value: NewTextPointer([]byte("test@example.com"))},
 			},
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "status"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "status"}},
 				Operand2: Operand{Type: OperandQuotedString, Value: NewTextPointer([]byte("active"))},
 			},
 		}
@@ -97,12 +97,12 @@ func TestTable_findBestEqualityIndexMatch_WithoutStats(t *testing.T) {
 		conditions := Conditions{
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "a"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "a"}},
 				Operand2: Operand{Type: OperandInteger, Value: int32(1)},
 			},
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "b"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "b"}},
 				Operand2: Operand{Type: OperandInteger, Value: int32(2)},
 			},
 		}
@@ -149,12 +149,12 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 		conditions := Conditions{
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "id"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
 				Operand2: Operand{Type: OperandInteger, Value: int32(1)},
 			},
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "status"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "status"}},
 				Operand2: Operand{Type: OperandQuotedString, Value: NewTextPointer([]byte("active"))},
 			},
 		}
@@ -193,12 +193,12 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 		conditions := Conditions{
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "id"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
 				Operand2: Operand{Type: OperandInteger, Value: int32(1)},
 			},
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "email"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "email"}},
 				Operand2: Operand{Type: OperandQuotedString, Value: NewTextPointer([]byte("test@example.com"))},
 			},
 		}
@@ -243,12 +243,12 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 		conditions := Conditions{
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "a"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "a"}},
 				Operand2: Operand{Type: OperandInteger, Value: int32(1)},
 			},
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "b"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "b"}},
 				Operand2: Operand{Type: OperandInteger, Value: int32(2)},
 			},
 		}
@@ -284,12 +284,12 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 		conditions := Conditions{
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "id"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
 				Operand2: Operand{Type: OperandInteger, Value: int32(1)},
 			},
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "status"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "status"}},
 				Operand2: Operand{Type: OperandQuotedString, Value: NewTextPointer([]byte("active"))},
 			},
 		}
@@ -327,12 +327,12 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 		conditions := Conditions{
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "email"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "email"}},
 				Operand2: Operand{Type: OperandQuotedString, Value: NewTextPointer([]byte("test@example.com"))},
 			},
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "status"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "status"}},
 				Operand2: Operand{Type: OperandQuotedString, Value: NewTextPointer([]byte("active"))},
 			},
 		}
@@ -377,12 +377,12 @@ func TestTable_findBestEqualityIndexMatch_MixedStats(t *testing.T) {
 		conditions := Conditions{
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "id"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
 				Operand2: Operand{Type: OperandInteger, Value: int32(1)},
 			},
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "status"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "status"}},
 				Operand2: Operand{Type: OperandQuotedString, Value: NewTextPointer([]byte("active"))},
 			},
 		}
@@ -409,12 +409,12 @@ func TestTable_findBestEqualityIndexMatch_MixedStats(t *testing.T) {
 		conditions := Conditions{
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "id"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
 				Operand2: Operand{Type: OperandInteger, Value: int32(1)},
 			},
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "status"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "status"}},
 				Operand2: Operand{Type: OperandQuotedString, Value: NewTextPointer([]byte("active"))},
 			},
 		}
@@ -446,7 +446,7 @@ func TestTable_findBestEqualityIndexMatch_EdgeCases(t *testing.T) {
 		conditions := Conditions{
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "nonexistent"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "nonexistent"}},
 				Operand2: Operand{Type: OperandQuotedString, Value: NewTextPointer([]byte("value"))},
 			},
 		}
@@ -479,12 +479,12 @@ func TestTable_findBestEqualityIndexMatch_EdgeCases(t *testing.T) {
 		conditions := Conditions{
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "id"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
 				Operand2: Operand{Type: OperandInteger, Value: int32(1)},
 			},
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "email"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "email"}},
 				Operand2: Operand{Type: OperandQuotedString, Value: NewTextPointer([]byte("test@example.com"))},
 			},
 		}
@@ -521,7 +521,7 @@ func TestTable_findBestEqualityIndexMatch_EdgeCases(t *testing.T) {
 		conditions := Conditions{
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "email"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "email"}},
 				Operand2: Operand{Type: OperandQuotedString, Value: NewTextPointer([]byte("test@example.com"))},
 			},
 		}
@@ -565,17 +565,17 @@ func TestTable_findBestEqualityIndexMatch_EdgeCases(t *testing.T) {
 		conditions := Conditions{
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "category"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "category"}},
 				Operand2: Operand{Type: OperandInteger, Value: int32(1)},
 			},
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "status"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "status"}},
 				Operand2: Operand{Type: OperandInteger, Value: int32(2)},
 			},
 			{
 				Operator: Eq,
-				Operand1: Operand{Type: OperandField, Value: "priority"},
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "priority"}},
 				Operand2: Operand{Type: OperandInteger, Value: int32(3)},
 			},
 		}

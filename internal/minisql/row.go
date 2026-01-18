@@ -473,7 +473,7 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 	if valueOperand.Type == OperandField {
 		return false, fmt.Errorf("cannot compare column value against field operand")
 	}
-	name := fmt.Sprint(fieldOperand.Value)
+	name := fmt.Sprint(fieldOperand.Value.(Field).Name)
 	aColumn, idx := r.GetColumn(name)
 	if idx < 0 {
 		return false, fmt.Errorf("row does not contain column '%s'", name)
@@ -582,12 +582,12 @@ func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, err
 		return true, nil
 	}
 
-	name1 := fmt.Sprint(field1.Value)
+	name1 := fmt.Sprint(field1.Value.(Field).Name)
 	aColumn1, idx1 := r.GetColumn(name1)
 	if idx1 < 0 {
 		return false, fmt.Errorf("row does not contain column '%s'", name1)
 	}
-	name2 := fmt.Sprint(field2.Value)
+	name2 := fmt.Sprint(field2.Value.(Field).Name)
 	aColumn2, idx2 := r.GetColumn(name2)
 	if idx2 < 0 {
 		return false, fmt.Errorf("row does not contain column '%s'", name2)

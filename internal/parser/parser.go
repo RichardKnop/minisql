@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -16,6 +17,13 @@ var (
 	errEmptyStatementKind   = fmt.Errorf("statement kind cannot be empty")
 	errEmptyTableName       = fmt.Errorf("table name cannot be empty")
 	errEmptyIndexName       = fmt.Errorf("index name cannot be empty")
+)
+
+var (
+	identifierCharRegexp = regexp.MustCompile(`[\"a-zA-Z_0-9]`)
+	// Matches valid identifiers including qualified names (e.g., table.column, schema.table.column)
+	// Supports both quoted ("my table") and unquoted (table_name) segments
+	identifierRegexp = regexp.MustCompile(`^(\"[a-zA-Z_][a-zA-Z_0-9]*\"|[a-zA-Z_][a-zA-Z_0-9]*)(\.(\"[a-zA-Z_][a-zA-Z_0-9]*\"|[a-zA-Z_][a-zA-Z_0-9]*))*`)
 )
 
 var reservedWords = []string{
@@ -32,6 +40,7 @@ var reservedWords = []string{
 	"IS NULL", "IS NOT NULL", "TRUE", "FALSE", "NOW()",
 	"IF NOT EXISTS", "WHERE", "FROM", "SET", "ASC", "DESC", "AS",
 	"BEGIN", "COMMIT", "ROLLBACK", "ANALYZE",
+	"INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "ON",
 	";",
 }
 
@@ -86,6 +95,11 @@ const (
 	stepSelectFrom
 	stepSelectComma
 	stepSelectFromTable
+	stepSelectJoin
+	stepSelectJoinTable
+	stepSelectJoinConditionField
+	stepSelectJoinConditionOperator
+	stepSelectJoinConditionValue
 	stepSelectOrderBy
 	stepSelectOrderByField
 	stepSelectOrderByComma
@@ -263,6 +277,11 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 			stepSelectComma,
 			stepSelectFrom,
 			stepSelectFromTable,
+			stepSelectJoin,
+			stepSelectJoinTable,
+			stepSelectJoinConditionField,
+			stepSelectJoinConditionOperator,
+			stepSelectJoinConditionValue,
 			stepSelectOrderBy,
 			stepSelectOrderByField,
 			stepSelectOrderByComma,
@@ -358,7 +377,6 @@ func (p *parserItem) popWhitespace() {
 	for ; p.i < len(p.sql) && p.sql[p.i] == ' '; p.i++ {
 	}
 }
-
 func (p *parserItem) peekWithLength() (string, int) {
 	if p.i >= len(p.sql) {
 		return "", 0
@@ -385,10 +403,12 @@ func (p *parserItem) peekWithLength() (string, int) {
 
 		return token, len(token)
 	}
+
 	// Next for quoted string literals
 	if p.sql[p.i] == '\'' {
 		return p.peekQuotedStringWithLength()
 	}
+
 	// Next for numbers (floats or integers)
 	if unicode.IsDigit(rune(p.sql[p.i])) {
 		_, ln := p.peekNumberWithLength()
@@ -396,6 +416,7 @@ func (p *parserItem) peekWithLength() (string, int) {
 			return p.sql[p.i : p.i+ln], ln
 		}
 	}
+
 	// And finally for identifiers
 	return p.peekIdentifierWithLength()
 }
@@ -481,17 +502,19 @@ func (p *parserItem) peekValue() (any, int) {
 	return nil, 0
 }
 
-var identifierCharRegexp = regexp.MustCompile(`[\"a-zA-Z_0-9]`)
-
 func (p *parserItem) peekIdentifierWithLength() (string, int) {
-	var i int
-	for i = p.i; i < len(p.sql); i++ {
-		if !identifierCharRegexp.MatchString(string(p.sql[i])) {
-			break
-		}
+	if p.i >= len(p.sql) {
+		return "", 0
 	}
-	identifier := p.sql[p.i:i]
-	return strings.Trim(identifier, "\""), len(identifier)
+
+	match := identifierRegexp.FindString(p.sql[p.i:])
+	if match == "" {
+		return "", 0
+	}
+
+	// Remove quotes but preserve the dot-separated structure
+	identifier := strings.ReplaceAll(match, "\"", "")
+	return identifier, len(match)
 }
 
 func (p *parserItem) validate(stmt minisql.Statement) error {
@@ -527,10 +550,10 @@ func (p *parserItem) validate(stmt minisql.Statement) error {
 			if aCondition.Operator == 0 {
 				return errWhereWithoutOperator
 			}
-			if aCondition.Operand1.Value == "" && aCondition.Operand1.Type == minisql.OperandField {
+			if aCondition.Operand1.Type == minisql.OperandField && aCondition.Operand1.Value.(minisql.Field).Name == "" {
 				return fmt.Errorf("at WHERE: condition with empty left side operand")
 			}
-			if aCondition.Operand2.Value == "" && aCondition.Operand2.Type == minisql.OperandField {
+			if aCondition.Operand2.Type == minisql.OperandField && aCondition.Operand2.Value.(minisql.Field).Name == "" {
 				return fmt.Errorf("at WHERE: condition with empty right side operand")
 			}
 		}
@@ -560,13 +583,9 @@ func (p *parserItem) logError(err error) {
 	fmt.Println(err)
 }
 
-var identifierRegexp = regexp.MustCompile(`(\"[a-zA-Z_][a-zA-Z_0-9]*\"|[a-zA-Z_][a-zA-Z_0-9]*)`)
-
 func isIdentifier(s string) bool {
-	for _, rw := range reservedWords {
-		if strings.ToUpper(s) == rw {
-			return false
-		}
+	if slices.Contains(reservedWords, strings.ToUpper(s)) {
+		return false
 	}
 	return identifierRegexp.MatchString(s)
 }

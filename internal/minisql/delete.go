@@ -27,10 +27,10 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 	for _, conditions := range stmt.Conditions {
 		for _, cond := range conditions {
 			if cond.Operand1.Type == OperandField {
-				selectedFields = append(selectedFields, Field{Name: cond.Operand1.Value.(string)})
+				selectedFields = append(selectedFields, cond.Operand1.Value.(Field))
 			}
 			if cond.Operand2.Type == OperandField {
-				selectedFields = append(selectedFields, Field{Name: cond.Operand2.Value.(string)})
+				selectedFields = append(selectedFields, cond.Operand2.Value.(Field))
 			}
 		}
 	}
