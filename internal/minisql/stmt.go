@@ -199,8 +199,8 @@ type Placeholder struct{}
 type Statement struct {
 	Kind          StatementKind
 	IfNotExists   bool
-	TableAlias    string
 	TableName     string // for SELECT, INSERT, UPDATE, DELETE, CREATE/DROP TABLE etc
+	TableAlias    string
 	Joins         []Join
 	IndexName     string        // for CREATE/DROP INDEX
 	Target        string        // for ANALYZE
@@ -219,21 +219,6 @@ type Statement struct {
 	Limit       OptionalValue
 	Offset      OptionalValue
 	fetchedRows int64
-}
-
-type JoinType int
-
-const (
-	Inner JoinType = iota + 1
-	Left
-	Right
-)
-
-type Join struct {
-	Type       JoinType
-	TableName  string
-	TableAlias string
-	Conditions Conditions
 }
 
 // NumPlaceholders returns the number of placeholder parameters (?) in the statement.

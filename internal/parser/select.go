@@ -119,14 +119,14 @@ func (p *parserItem) doParseSelect() error {
 		switch maybeJoin {
 		case "INNER JOIN":
 			p.pop()
-			p.Joins = append(p.Joins, minisql.Join{Type: minisql.Inner})
+			p.joinInProgress.Type = minisql.Inner
 			p.step = stepSelectJoinTable
 		case "LEFT JOIN":
-			p.Joins = append(p.Joins, minisql.Join{Type: minisql.Left})
+			p.joinInProgress.Type = minisql.Left
 			p.step = stepSelectJoinTable
 			p.pop()
 		case "RIGHT JOIN":
-			p.Joins = append(p.Joins, minisql.Join{Type: minisql.Right})
+			p.joinInProgress.Type = minisql.Right
 			p.step = stepSelectJoinTable
 			p.pop()
 		default:
@@ -138,7 +138,7 @@ func (p *parserItem) doParseSelect() error {
 		if !isIdentifier(tableName) {
 			return fmt.Errorf("at JOIN: expected table name identifier")
 		}
-		p.Joins[len(p.Joins)-1].TableName = tableName
+		p.joinInProgress.TableName = tableName
 		p.pop()
 
 		// Check for optional table alias
@@ -148,7 +148,7 @@ func (p *parserItem) doParseSelect() error {
 			if !isIdentifier(tableAlias) {
 				return fmt.Errorf("at JOIN: expected table alias identifier")
 			}
-			p.Joins[len(p.Joins)-1].TableAlias = tableAlias
+			p.joinInProgress.TableAlias = tableAlias
 			p.pop()
 		}
 
@@ -164,7 +164,7 @@ func (p *parserItem) doParseSelect() error {
 		if !isIdentifier(identifier) {
 			return fmt.Errorf("at JOIN: expected field")
 		}
-		p.Joins[len(p.Joins)-1].Conditions = append(p.Joins[len(p.Joins)-1].Conditions, minisql.Condition{
+		p.joinInProgress.Conditions = append(p.joinInProgress.Conditions, minisql.Condition{
 			Operand1: minisql.Operand{
 				Type:  minisql.OperandField,
 				Value: fieldFromIdentifier(identifier),
@@ -176,7 +176,7 @@ func (p *parserItem) doParseSelect() error {
 		if p.peek() != "=" {
 			return fmt.Errorf("at JOIN condition: only '=' operator is supported")
 		}
-		p.Joins[len(p.Joins)-1].Conditions[len(p.Joins[len(p.Joins)-1].Conditions)-1].Operator = minisql.Eq
+		p.joinInProgress.Conditions[len(p.joinInProgress.Conditions)-1].Operator = minisql.Eq
 		p.pop()
 		p.step = stepSelectJoinConditionValue
 	case stepSelectJoinConditionValue:
@@ -184,12 +184,22 @@ func (p *parserItem) doParseSelect() error {
 		if !isIdentifier(identifier) {
 			return fmt.Errorf("at JOIN: expected field")
 		}
-		currentJoin := p.Joins[len(p.Joins)-1]
-		currentJoin.Conditions[len(currentJoin.Conditions)-1].Operand2 = minisql.Operand{
+		p.joinInProgress.Conditions[len(p.joinInProgress.Conditions)-1].Operand2 = minisql.Operand{
 			Type:  minisql.OperandField,
 			Value: fieldFromIdentifier(identifier),
 		}
-		p.Joins[len(p.Joins)-1] = currentJoin
+		var err error
+		p.Statement, err = p.AddJoin(
+			p.joinInProgress.Type,
+			p.joinInProgress.FromTableAlias(),
+			p.joinInProgress.TableName,
+			p.joinInProgress.TableAlias,
+			p.joinInProgress.Conditions,
+		)
+		if err != nil {
+			return err
+		}
+		p.joinInProgress = minisql.Join{}
 		p.pop()
 		p.step = stepSelectJoin
 	case stepSelectOrderBy:
