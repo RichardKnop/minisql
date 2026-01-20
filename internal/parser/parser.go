@@ -125,6 +125,7 @@ type parserItem struct {
 	sql             string
 	step            step
 	nextUpdateField string
+	joinInProgress  minisql.Join
 }
 
 func New() *parser {

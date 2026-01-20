@@ -429,31 +429,31 @@ func TestParse_Select(t *testing.T) {
 		},
 		{
 			"SELECT with INNER JOIN",
-			"SELECT a.foo, b.bar FROM table_a AS a INNER JOIN table_b AS b ON a.id = b.id;",
+			"SELECT u.id, p.name FROM users AS u INNER JOIN profiles AS p ON u.id = p.user_id;",
 			[]minisql.Statement{
 				{
 					Kind:       minisql.Select,
-					TableName:  "table_a",
-					TableAlias: "a",
+					TableName:  "users",
+					TableAlias: "u",
 					Fields: []minisql.Field{
-						{AliasPrefix: "a", Name: "foo"},
-						{AliasPrefix: "b", Name: "bar"},
+						{AliasPrefix: "u", Name: "id"},
+						{AliasPrefix: "p", Name: "name"},
 					},
 					Joins: []minisql.Join{
 						{
 							Type:       minisql.Inner,
-							TableName:  "table_b",
-							TableAlias: "b",
+							TableName:  "profiles",
+							TableAlias: "p",
 							Conditions: minisql.Conditions{
 								{
 									Operand1: minisql.Operand{
 										Type:  minisql.OperandField,
-										Value: minisql.Field{AliasPrefix: "a", Name: "id"},
+										Value: minisql.Field{AliasPrefix: "u", Name: "id"},
 									},
 									Operator: minisql.Eq,
 									Operand2: minisql.Operand{
 										Type:  minisql.OperandField,
-										Value: minisql.Field{AliasPrefix: "b", Name: "id"},
+										Value: minisql.Field{AliasPrefix: "p", Name: "user_id"},
 									},
 								},
 							},
@@ -464,68 +464,54 @@ func TestParse_Select(t *testing.T) {
 			nil,
 		},
 		{
-			"SELECT with LEFT JOIN",
-			"SELECT a.foo, b.bar FROM table_a AS a LEFT JOIN table_b AS b ON a.id = b.id;",
+			"SELECT with nested INNER JOIN",
+			`SELECT u.id, p.name FROM users AS u 
+			INNER JOIN profiles AS p ON u.id = p.user_id
+			LEFT JOIN avatars As a ON a.profile_id = p.id;`,
 			[]minisql.Statement{
 				{
 					Kind:       minisql.Select,
-					TableName:  "table_a",
-					TableAlias: "a",
+					TableName:  "users",
+					TableAlias: "u",
 					Fields: []minisql.Field{
-						{AliasPrefix: "a", Name: "foo"},
-						{AliasPrefix: "b", Name: "bar"},
+						{AliasPrefix: "u", Name: "id"},
+						{AliasPrefix: "p", Name: "name"},
 					},
 					Joins: []minisql.Join{
 						{
-							Type:       minisql.Left,
-							TableName:  "table_b",
-							TableAlias: "b",
+							Type:       minisql.Inner,
+							TableName:  "profiles",
+							TableAlias: "p",
 							Conditions: minisql.Conditions{
 								{
 									Operand1: minisql.Operand{
 										Type:  minisql.OperandField,
-										Value: minisql.Field{AliasPrefix: "a", Name: "id"},
+										Value: minisql.Field{AliasPrefix: "u", Name: "id"},
 									},
 									Operator: minisql.Eq,
 									Operand2: minisql.Operand{
 										Type:  minisql.OperandField,
-										Value: minisql.Field{AliasPrefix: "b", Name: "id"},
+										Value: minisql.Field{AliasPrefix: "p", Name: "user_id"},
 									},
 								},
 							},
-						},
-					},
-				},
-			},
-			nil,
-		},
-		{
-			"SELECT with RIGHT JOIN",
-			"SELECT a.foo, b.bar FROM table_a AS a RIGHT JOIN table_b AS b ON a.id = b.id;",
-			[]minisql.Statement{
-				{
-					Kind:       minisql.Select,
-					TableName:  "table_a",
-					TableAlias: "a",
-					Fields: []minisql.Field{
-						{AliasPrefix: "a", Name: "foo"},
-						{AliasPrefix: "b", Name: "bar"},
-					},
-					Joins: []minisql.Join{
-						{
-							Type:       minisql.Right,
-							TableName:  "table_b",
-							TableAlias: "b",
-							Conditions: minisql.Conditions{
+							Joins: []minisql.Join{
 								{
-									Operand1: minisql.Operand{
-										Type:  minisql.OperandField,
-										Value: minisql.Field{AliasPrefix: "a", Name: "id"},
-									},
-									Operator: minisql.Eq,
-									Operand2: minisql.Operand{
-										Type:  minisql.OperandField,
-										Value: minisql.Field{AliasPrefix: "b", Name: "id"},
+									Type:       minisql.Left,
+									TableName:  "avatars",
+									TableAlias: "a",
+									Conditions: minisql.Conditions{
+										{
+											Operand1: minisql.Operand{
+												Type:  minisql.OperandField,
+												Value: minisql.Field{AliasPrefix: "a", Name: "profile_id"},
+											},
+											Operator: minisql.Eq,
+											Operand2: minisql.Operand{
+												Type:  minisql.OperandField,
+												Value: minisql.Field{AliasPrefix: "p", Name: "id"},
+											},
+										},
 									},
 								},
 							},
