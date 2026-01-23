@@ -36,6 +36,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 			testTableName,
 			testColumns[0:2],
 			freePage.Index,
+			nil,
 			WithPrimaryKey(NewPrimaryKey("foo", testColumns[0:1], true)),
 		)
 		return nil

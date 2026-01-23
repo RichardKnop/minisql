@@ -50,6 +50,7 @@ type QueryPlan struct {
 }
 
 type Scan struct {
+	TableName      string // Name of the table to scan
 	Type           ScanType
 	IndexName      string
 	IndexColumns   []Column
@@ -126,8 +127,9 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error
 	// By default, assume we are doing a single sequential scan
 	plan := QueryPlan{
 		Scans: []Scan{{
-			Type:    ScanTypeSequential,
-			Filters: stmt.Conditions,
+			TableName: t.Name,
+			Type:      ScanTypeSequential,
+			Filters:   stmt.Conditions,
 		}},
 		OrderBy: stmt.OrderBy,
 	}
@@ -504,6 +506,7 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 			if match.rangeCondition != nil {
 				// Partial composite index match - use range scan
 				aScan := Scan{
+					TableName:      t.Name,
 					Type:           ScanTypeIndexRange,
 					IndexName:      match.info.Name,
 					IndexColumns:   match.info.Columns,
@@ -516,6 +519,7 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 			} else {
 				// Full index match - use point scan
 				aScan := Scan{
+					TableName:    t.Name,
 					Type:         ScanTypeIndexPoint,
 					IndexName:    match.info.Name,
 					IndexColumns: match.info.Columns,
@@ -539,7 +543,7 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 				stats = &indexStats
 			}
 
-			rangeScan, ok, err := tryRangeScan(idxInfo, group, stats)
+			rangeScan, ok, err := tryRangeScan(t.Name, idxInfo, group, stats)
 			if err != nil {
 				return err
 			}
@@ -556,8 +560,9 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 
 		// Otherwise fall back to sequential scan for this group
 		indexScans = append(indexScans, Scan{
-			Type:    ScanTypeSequential,
-			Filters: OneOrMore{group},
+			TableName: t.Name,
+			Type:      ScanTypeSequential,
+			Filters:   OneOrMore{group},
 		})
 	}
 
@@ -646,7 +651,7 @@ func incrementValue(val any) any {
 	}
 }
 
-func tryRangeScan(indexInfo IndexInfo, filters Conditions, stats *IndexStats) (Scan, bool, error) {
+func tryRangeScan(tableName string, indexInfo IndexInfo, filters Conditions, stats *IndexStats) (Scan, bool, error) {
 	var (
 		rangeCondition   = RangeCondition{}
 		remainingFilters = make(Conditions, 0)
@@ -751,6 +756,7 @@ func tryRangeScan(indexInfo IndexInfo, filters Conditions, stats *IndexStats) (S
 
 	// Create range scan plan
 	aScan := Scan{
+		TableName:      tableName,
 		Type:           ScanTypeIndexRange,
 		IndexName:      indexInfo.Name,
 		IndexColumns:   indexInfo.Columns,
@@ -762,8 +768,14 @@ func tryRangeScan(indexInfo IndexInfo, filters Conditions, stats *IndexStats) (S
 	return aScan, true, nil
 }
 
-func (p QueryPlan) Execute(ctx context.Context, t *Table, selectedFields []Field, filteredPipe chan<- Row) error {
+func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selectedFields []Field, filteredPipe chan<- Row) error {
 	if len(p.Scans) == 1 {
+		// Get table for this scan
+		t, ok := provider.GetTable(ctx, p.Scans[0].TableName)
+		if !ok {
+			return fmt.Errorf("%w: %s", errTableDoesNotExist, p.Scans[0].TableName)
+		}
+
 		switch p.Scans[0].Type {
 		case ScanTypeIndexAll:
 			return t.indexScanAll(ctx, p, p.Scans[0], selectedFields, filteredPipe)
@@ -778,6 +790,12 @@ func (p QueryPlan) Execute(ctx context.Context, t *Table, selectedFields []Field
 		}
 	}
 	for _, aScan := range p.Scans {
+		// Get table for this scan
+		t, ok := provider.GetTable(ctx, aScan.TableName)
+		if !ok {
+			return fmt.Errorf("%w: %s", errTableDoesNotExist, aScan.TableName)
+		}
+
 		switch aScan.Type {
 		case ScanTypeIndexRange:
 			if err := t.indexRangeScan(ctx, p, aScan, selectedFields, filteredPipe); err != nil {

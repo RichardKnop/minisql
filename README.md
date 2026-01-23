@@ -467,6 +467,8 @@ To run unit tests:
 LOG_LEVEL=info go test ./... -count=1
 ```
 
+Setting the `LOG_LEVEL` to `info` makes sure to supress debug logs and makes potential error messages in tests easier to read and debug.
+
 ### Benchmarking
 
 

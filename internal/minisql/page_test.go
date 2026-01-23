@@ -26,7 +26,7 @@ func TestTable_PageRecycling(t *testing.T) {
 		ctx     = context.Background()
 		numRows = 100
 		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0)
+		aTable  = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
 	)
 	aTable.maximumICells = 5 // for testing purposes only, normally 340
 

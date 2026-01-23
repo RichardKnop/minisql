@@ -403,13 +403,13 @@ func TestStatement_Validate(t *testing.T) {
 				Nullable: true,
 			},
 		}
-		aTable = NewTable(zap.NewNop(), nil, nil, testTableName, columns, 0)
+		aTable = NewTable(zap.NewNop(), nil, nil, testTableName, columns, 0, nil)
 
-		aTableWithPK = NewTable(zap.NewNop(), nil, nil, testTableName, columns[0:2], 0, WithPrimaryKey(
+		aTableWithPK = NewTable(zap.NewNop(), nil, nil, testTableName, columns[0:2], 0, nil, WithPrimaryKey(
 			NewPrimaryKey("foo", columns[0:1], false),
 		))
 
-		aTableWithAutoincrementPK = NewTable(zap.NewNop(), nil, nil, testTableName, columns[0:2], 0, WithPrimaryKey(
+		aTableWithAutoincrementPK = NewTable(zap.NewNop(), nil, nil, testTableName, columns[0:2], 0, nil, WithPrimaryKey(
 			NewPrimaryKey("foo", columns[0:1], true),
 		))
 
@@ -432,7 +432,7 @@ func TestStatement_Validate(t *testing.T) {
 				DefaultValue: OptionalValue{Value: "0001-01-01 00:00:00", Valid: true},
 			},
 		}
-		aTableWithDefaultValue = NewTable(zap.NewNop(), nil, nil, testTableName, defaultValueColumns, 0, WithPrimaryKey(
+		aTableWithDefaultValue = NewTable(zap.NewNop(), nil, nil, testTableName, defaultValueColumns, 0, nil, WithPrimaryKey(
 			NewPrimaryKey("pk", defaultValueColumns[0:1], true),
 		))
 	)

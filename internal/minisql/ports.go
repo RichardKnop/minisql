@@ -8,6 +8,11 @@ type Parser interface {
 	Parse(context.Context, string) ([]Statement, error)
 }
 
+// TableProvider provides thread-safe access to tables
+type TableProvider interface {
+	GetTable(ctx context.Context, name string) (*Table, bool)
+}
+
 type LRUCache[T any] interface {
 	Get(T) (any, bool)
 	GetAndPromote(T) (any, bool)

@@ -33,7 +33,7 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 
 	// Execute scans based on plan
 	wg.Go(func() {
-		if err := plan.Execute(ctx, t, selectedFields, filteredPipe); err != nil {
+		if err := plan.Execute(ctx, t.provider, selectedFields, filteredPipe); err != nil {
 			errorsPipe <- err
 		}
 	})

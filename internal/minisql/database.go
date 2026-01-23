@@ -19,16 +19,17 @@ var (
 )
 
 type Database struct {
-	dbFilePath string
-	parser     Parser
-	factory    PagerFactory
-	saver      PageSaver
-	txManager  *TransactionManager
-	tables     map[string]*Table
-	dbLock     *sync.RWMutex
-	stmtCache  LRUCache[string]
-	clock      clock
-	logger     *zap.Logger
+	dbFilePath     string
+	parser         Parser
+	factory        PagerFactory
+	saver          PageSaver
+	txManager      *TransactionManager
+	tables         map[string]*Table
+	dbLock         *sync.RWMutex
+	stmtCache      LRUCache[string]
+	clock          clock
+	logger         *zap.Logger
+	lockedProvider TableProvider
 }
 
 type clock func() Time
@@ -57,6 +58,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aPa
 			}
 		},
 	}
+	db.lockedProvider = &lockedTableProvider{db: db}
 
 	db.txManager = NewTransactionManager(logger, dbFilePath, db.pagerFactory, saver, db)
 
@@ -76,6 +78,40 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aPa
 // PrepareStatement parses and caches a SQL statement, returning the parsed statement.
 // Subsequent calls with the same SQL string will return the cached statement.
 // The cache uses LRU eviction when it exceeds the configured maximum size.
+// GetTable retrieves a table by name in a thread-safe manner.
+// This is the public API for external callers.
+func (d *Database) GetTable(ctx context.Context, name string) (*Table, bool) {
+	d.dbLock.RLock()
+	defer d.dbLock.RUnlock()
+	table, exists := d.tables[name]
+	if !exists {
+		return nil, false
+	}
+	return table, true
+}
+
+// lockedTableProvider is a TableProvider wrapper that assumes locks are already held.
+// Used internally when the database lock is already acquired.
+type lockedTableProvider struct {
+	db *Database
+}
+
+func (p *lockedTableProvider) GetTable(ctx context.Context, name string) (*Table, bool) {
+	aTable, ok := p.db.tables[name]
+	if ok {
+		return aTable, true
+	}
+	if tx := TxFromContext(ctx); tx != nil {
+		// We could be in a trasaction and table is being created but tx is not yet committed
+		for _, tableBeingCreated := range TxFromContext(ctx).DDLChanges.CreateTables {
+			if tableBeingCreated.Name == name {
+				return tableBeingCreated, true
+			}
+		}
+	}
+	return nil, false
+}
+
 func (d *Database) PrepareStatement(ctx context.Context, query string) (Statement, error) {
 	// Check cache first
 	if stmt, ok := d.stmtCache.Get(query); ok {
@@ -123,19 +159,9 @@ func (d *Database) Reopen(ctx context.Context, factory PagerFactory, saver PageS
 
 // TODO - support composite values
 func (d *Database) pagerFactory(ctx context.Context, tableName, indexName string) (Pager, error) {
-	aTable, ok := d.tables[tableName]
+	aTable, ok := d.lockedProvider.GetTable(ctx, tableName)
 	if !ok {
-		if tx := TxFromContext(ctx); tx != nil {
-			// We could be in a trasaction and table is being created but tx is not yet committed
-			for _, tableBeingCreated := range TxFromContext(ctx).DDLChanges.CreateTables {
-				if tableBeingCreated.Name == tableName {
-					aTable = tableBeingCreated
-				}
-			}
-		}
-		if aTable == nil {
-			return nil, errTableDoesNotExist
-		}
+		return nil, fmt.Errorf("%w: %s", errTableDoesNotExist, tableName)
 	}
 	if indexName == "" {
 		return d.factory.ForTable(aTable.Columns), nil
@@ -252,7 +278,7 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 		aTable, ok := d.tables[stmt.TableName]
 		if !ok {
 			d.dbLock.RUnlock()
-			return StatementResult{}, errTableDoesNotExist
+			return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, stmt.TableName)
 		}
 		d.dbLock.RUnlock()
 
@@ -290,6 +316,7 @@ func (d *Database) init(ctx context.Context) error {
 		SchemaTableName,
 		mainTableColumns,
 		rooPageIdx,
+		d.lockedProvider,
 	)
 	d.tables[mainTable.Name] = mainTable
 
@@ -379,6 +406,7 @@ func (d *Database) initEmptyDatabase(ctx context.Context, rooPageIdx PageIndex, 
 		SchemaTableName,
 		mainTableColumns,
 		rooPageIdx,
+		d.lockedProvider,
 	)
 	d.tables[SchemaTableName] = mainTable
 
@@ -474,6 +502,7 @@ func (d *Database) tableFromSQL(ctx context.Context, aSchema Schema) (*Table, er
 		stmt.TableName,
 		stmt.Columns,
 		aSchema.RootPage,
+		d.lockedProvider,
 		opts...,
 	), nil
 }
@@ -609,7 +638,7 @@ func (d *Database) executeDDLStatement(ctx context.Context, stmt Statement) (Sta
 			return StatementResult{}, err
 		}
 		if !exists {
-			return StatementResult{}, errTableDoesNotExist
+			return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, stmt.TableName)
 		}
 		aTable, err = d.tableFromSQL(ctx, aTableSchema)
 		if err != nil {
@@ -729,6 +758,7 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 		stmt.TableName,
 		stmt.Columns,
 		freePage.Index,
+		d.lockedProvider,
 		opts...,
 	)
 
@@ -776,7 +806,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 		return err
 	}
 	if !exists {
-		return errTableDoesNotExist
+		return fmt.Errorf("%w: %s", errTableDoesNotExist, name)
 	}
 	tableToDelete := d.tables[name]
 
@@ -998,7 +1028,7 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 		return err
 	}
 	if !exists {
-		return errTableDoesNotExist
+		return fmt.Errorf("%w: %s", errTableDoesNotExist, aSchema.TableName)
 	}
 	aTable, err := d.tableFromSQL(ctx, aTableSchema)
 	if err != nil {
