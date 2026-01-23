@@ -43,6 +43,7 @@ func TestTryRangeScan(t *testing.T) {
 				FieldIsGreater("id", OperandInteger, int64(10)),
 			},
 			Scan{
+				TableName:    "users",
 				Type:         ScanTypeIndexRange,
 				IndexName:    indexName,
 				IndexColumns: testColumns[0:1],
@@ -60,6 +61,7 @@ func TestTryRangeScan(t *testing.T) {
 				FieldIsGreaterOrEqual("id", OperandInteger, int64(10)),
 			},
 			Scan{
+				TableName:    "users",
 				Type:         ScanTypeIndexRange,
 				IndexName:    indexName,
 				IndexColumns: testColumns[0:1],
@@ -78,6 +80,7 @@ func TestTryRangeScan(t *testing.T) {
 				FieldIsLess("id", OperandInteger, int64(10)),
 			},
 			Scan{
+				TableName:    "users",
 				Type:         ScanTypeIndexRange,
 				IndexName:    indexName,
 				IndexColumns: testColumns[0:1],
@@ -95,6 +98,7 @@ func TestTryRangeScan(t *testing.T) {
 				FieldIsLessOrEqual("id", OperandInteger, int64(10)),
 			},
 			Scan{
+				TableName:    "users",
 				Type:         ScanTypeIndexRange,
 				IndexName:    indexName,
 				IndexColumns: testColumns[0:1],
@@ -114,6 +118,7 @@ func TestTryRangeScan(t *testing.T) {
 				FieldIsGreater("id", OperandInteger, int64(5)),
 			},
 			Scan{
+				TableName:    "users",
 				Type:         ScanTypeIndexRange,
 				IndexName:    indexName,
 				IndexColumns: testColumns[0:1],
@@ -137,6 +142,7 @@ func TestTryRangeScan(t *testing.T) {
 				FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte("foo"))),
 			},
 			Scan{
+				TableName:    "users",
 				Type:         ScanTypeIndexRange,
 				IndexName:    indexName,
 				IndexColumns: testColumns[0:1],
@@ -159,7 +165,7 @@ func TestTryRangeScan(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			aScan, ok, err := tryRangeScan(indexInfo, aTestCase.Conditions, nil)
+			aScan, ok, err := tryRangeScan("users", indexInfo, aTestCase.Conditions, nil)
 			require.NoError(t, err)
 			assert.Equal(t, aTestCase.ExpectedOK, ok)
 			if ok {
@@ -197,7 +203,7 @@ func TestTryRangeScan_WithStats(t *testing.T) {
 		}
 
 		// No statistics - should default to using range scan
-		scan, ok, err := tryRangeScan(indexInfo, filters, nil)
+		scan, ok, err := tryRangeScan("users", indexInfo, filters, nil)
 		require.NoError(t, err)
 		assert.True(t, ok, "expected range scan to be used without stats")
 		assert.Equal(t, ScanTypeIndexRange, scan.Type)
@@ -226,7 +232,7 @@ func TestTryRangeScan_WithStats(t *testing.T) {
 			NDistinct: []int64{500},
 		}
 
-		scan, ok, err := tryRangeScan(indexInfo, filters, stats)
+		scan, ok, err := tryRangeScan("users", indexInfo, filters, stats)
 		require.NoError(t, err)
 		assert.True(t, ok, "expected range scan to be used without stats")
 		assert.Equal(t, ScanTypeIndexRange, scan.Type)
@@ -250,7 +256,7 @@ func TestTryRangeScan_WithStats(t *testing.T) {
 			NDistinct: []int64{500},
 		}
 
-		_, ok, err := tryRangeScan(indexInfo, filters, stats)
+		_, ok, err := tryRangeScan("users", indexInfo, filters, stats)
 		require.NoError(t, err)
 		// Should reject range scan due to low selectivity
 		assert.False(t, ok, "expected range scan to be rejected with non-selective stats, got scan type")
@@ -273,7 +279,7 @@ func TestTryRangeScan_WithStats(t *testing.T) {
 			NDistinct: []int64{},
 		}
 
-		scan, ok, err := tryRangeScan(indexInfo, filters, stats)
+		scan, ok, err := tryRangeScan("users", indexInfo, filters, stats)
 		require.NoError(t, err)
 		assert.True(t, ok, "expected range scan to be used with empty stats (default behavior)")
 		assert.Equal(t, ScanTypeIndexRange, scan.Type)

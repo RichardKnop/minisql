@@ -26,6 +26,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 			zap.NewNop(), nil, nil, "users",
 			compositeColumns,
 			0,
+			nil,
 			WithPrimaryKey(NewPrimaryKey(compositePKIndexName, compositeColumns[1:3], false)),
 		)
 
@@ -35,6 +36,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 			zap.NewNop(), nil, nil, "users",
 			compositeColumns,
 			0,
+			nil,
 			WithPrimaryKey(NewPrimaryKey("pkey__users", compositeColumns[0:1], true)),
 			WithUniqueIndex(UniqueIndex{
 				IndexInfo: IndexInfo{
@@ -47,7 +49,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 		// Table with composite secondary index on (first_name, last_name)
 		compositeSecondaryIndexName = "idx_name"
 		tableWithCompositeSecondary = NewTable(
-			zap.NewNop(), nil, nil, "users", compositeColumns, 0,
+			zap.NewNop(), nil, nil, "users", compositeColumns, 0, nil,
 			WithSecondaryIndex(SecondaryIndex{
 				IndexInfo: IndexInfo{
 					Name:    compositeSecondaryIndexName,
@@ -78,6 +80,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
+						TableName:    "users",
 						Type:         ScanTypeIndexPoint,
 						IndexName:    compositePKIndexName,
 						IndexColumns: compositeColumns[1:3],
@@ -102,6 +105,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
+						TableName:    "users",
 						Type:         ScanTypeIndexRange,
 						IndexName:    compositePKIndexName,
 						IndexColumns: compositeColumns[1:3],
@@ -133,7 +137,8 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type: ScanTypeSequential,
+						TableName: "users",
+						Type:      ScanTypeSequential,
 						Filters: OneOrMore{
 							{
 								FieldIsEqual("last_name", OperandQuotedString, NewTextPointer([]byte("Doe"))),
@@ -159,6 +164,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
+						TableName:    "users",
 						Type:         ScanTypeIndexPoint,
 						IndexName:    compositePKIndexName,
 						IndexColumns: compositeColumns[1:3],
@@ -193,6 +199,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
+						TableName:    "users",
 						Type:         ScanTypeIndexPoint,
 						IndexName:    compositePKIndexName,
 						IndexColumns: compositeColumns[1:3],
@@ -201,6 +208,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 						},
 					},
 					{
+						TableName:    "users",
 						Type:         ScanTypeIndexPoint,
 						IndexName:    compositePKIndexName,
 						IndexColumns: compositeColumns[1:3],
@@ -226,6 +234,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
+						TableName:    "users",
 						Type:         ScanTypeIndexPoint,
 						IndexName:    compositeUniqueIndexName,
 						IndexColumns: compositeColumns[1:3],
@@ -251,6 +260,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
+						TableName:    "users",
 						Type:         ScanTypeIndexPoint,
 						IndexName:    compositeSecondaryIndexName,
 						IndexColumns: compositeColumns[1:3],
@@ -267,6 +277,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 				zap.NewNop(), nil, nil, "users",
 				compositeColumns,
 				0,
+				nil,
 				WithPrimaryKey(NewPrimaryKey("pkey__users", compositeColumns[0:1], true)),
 				WithUniqueIndex(UniqueIndex{
 					IndexInfo: IndexInfo{
@@ -288,6 +299,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
+						TableName:    "users",
 						Type:         ScanTypeIndexPoint,
 						IndexName:    "pkey__users",
 						IndexColumns: compositeColumns[0:1],
@@ -309,6 +321,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 					zap.NewNop(), nil, nil, "users",
 					compositeColumns,
 					0,
+					nil,
 					WithUniqueIndex(UniqueIndex{
 						IndexInfo: IndexInfo{
 							Name:    "idx_unique_name",
@@ -338,6 +351,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
+						TableName:    "users",
 						Type:         ScanTypeIndexPoint,
 						IndexName:    "idx_unique_name",
 						IndexColumns: compositeColumns[1:3],
@@ -355,6 +369,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 					zap.NewNop(), nil, nil, "users",
 					compositeColumns,
 					0,
+					nil,
 				)
 				t.SetSecondaryIndex("idx_first_name", compositeColumns[1:2], nil)
 				t.SetSecondaryIndex("idx_full_name", compositeColumns[1:3], nil)
@@ -372,6 +387,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
+						TableName:    "users",
 						Type:         ScanTypeIndexPoint,
 						IndexName:    "idx_full_name",
 						IndexColumns: compositeColumns[1:3],

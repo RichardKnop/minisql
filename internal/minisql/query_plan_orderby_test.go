@@ -79,7 +79,7 @@ func TestQueryPlan_OptimizeOrdering_NoFilters(t *testing.T) {
 		{Name: "name", Kind: Varchar, Size: 100},
 	}
 
-	table := NewTable(logger, nil, nil, "users", columns, 0,
+	table := NewTable(logger, nil, nil, "users", columns, 0, nil,
 		WithPrimaryKey(NewPrimaryKey("pk_id", columns[0:1], false)),
 	)
 
@@ -143,7 +143,7 @@ func TestQueryPlan_OptimizeOrdering_WithFilters(t *testing.T) {
 			{Name: "created_at", Kind: Int8, Size: 8},
 		}
 
-		table := NewTable(logger, nil, nil, "users", columns, 0)
+		table := NewTable(logger, nil, nil, "users", columns, 0, nil)
 
 		// Create secondary index on status
 		table.SecondaryIndexes["idx_status"] = SecondaryIndex{
@@ -209,7 +209,7 @@ func TestQueryPlan_OptimizeOrdering_WithFilters(t *testing.T) {
 			{Name: "created_at", Kind: Int8, Size: 8},
 		}
 
-		table := NewTable(logger, nil, nil, "users", columns, 0)
+		table := NewTable(logger, nil, nil, "users", columns, 0, nil)
 
 		// Create secondary index on status
 		table.SecondaryIndexes["idx_status"] = SecondaryIndex{
@@ -278,7 +278,7 @@ func TestQueryPlan_OptimizeOrdering_WithFilters(t *testing.T) {
 			{Name: "created_at", Kind: Int8, Size: 8},
 		}
 
-		table := NewTable(logger, nil, nil, "users", columns, 0)
+		table := NewTable(logger, nil, nil, "users", columns, 0, nil)
 
 		// Create secondary index on status
 		table.SecondaryIndexes["idx_status"] = SecondaryIndex{

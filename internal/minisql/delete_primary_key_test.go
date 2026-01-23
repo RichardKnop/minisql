@@ -34,6 +34,7 @@ func TestTable_Delete_PrimaryKey(t *testing.T) {
 			testTableName,
 			testColumns[0:2],
 			freePage.Index,
+			nil,
 			WithPrimaryKey(NewPrimaryKey("foo", testColumns[0:1], true)),
 		)
 		return nil
@@ -131,6 +132,7 @@ func TestTable_Delete_CompositePrimaryKey(t *testing.T) {
 			testTableName,
 			testCompositeKeyColumns,
 			freePage.Index,
+			nil,
 			WithPrimaryKey(NewPrimaryKey("foo", testCompositeKeyColumns[1:3], true)),
 		)
 		return nil

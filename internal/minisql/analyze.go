@@ -40,6 +40,7 @@ func (d *Database) Analyze(ctx context.Context, target string) error {
 	if err != nil {
 		return err
 	}
+
 	var statsTable *Table
 	if !exists {
 		// Create stats table if it doesn't exist

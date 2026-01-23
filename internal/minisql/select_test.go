@@ -20,7 +20,7 @@ func TestTable_Select(t *testing.T) {
 		tablePager = aPager.ForTable(testColumns)
 		txManager  = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
 		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable     = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0)
+		aTable     = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0, nil)
 	)
 
 	// Set some values to NULL so we can test selecting/filtering on NULLs
@@ -453,7 +453,7 @@ func TestTable_Select_Overflow(t *testing.T) {
 		tablePager     = aPager.ForTable(testOverflowColumns)
 		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0)
+		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0, nil)
 		rows           = gen.OverflowRows(3, []uint32{
 			MaxInlineVarchar,          // inline text
 			MaxInlineVarchar + 100,    // text overflows to 1 page

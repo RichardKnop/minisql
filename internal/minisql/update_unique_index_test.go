@@ -35,6 +35,7 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 			testTableName,
 			testColumns[0:2],
 			freePage.Index,
+			nil,
 			WithUniqueIndex(UniqueIndex{
 				IndexInfo: IndexInfo{
 					Name:    indexName,
@@ -217,6 +218,7 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 			testTableName,
 			testCompositeKeyColumns,
 			freePage.Index,
+			nil,
 			WithUniqueIndex(UniqueIndex{
 				IndexInfo: IndexInfo{
 					Name:    indexName,

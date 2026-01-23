@@ -157,9 +157,10 @@ func TestDatabase_Analyze_CompositeIndex(t *testing.T) {
 		cities     = gen.UniqueCities(10)
 		streets    = gen.UniqueStreets(100)
 		insertStmt = Statement{
-			Kind:    Insert,
-			Fields:  fieldsFromColumns(columns...),
-			Inserts: [][]OptionalValue{},
+			Kind:      Insert,
+			TableName: testTableName,
+			Fields:    fieldsFromColumns(columns...),
+			Inserts:   [][]OptionalValue{},
 		}
 		cityIdx = 0
 	)

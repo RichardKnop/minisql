@@ -17,7 +17,7 @@ func TestTable_Update(t *testing.T) {
 		tablePager     = aPager.ForTable(testColumns)
 		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0)
+		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0, nil)
 	)
 
 	// Batch insert test rows
@@ -188,7 +188,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 		tablePager     = aPager.ForTable(testOverflowColumns)
 		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0)
+		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0, nil)
 		rows           = gen.OverflowRows(3, []uint32{
 			MaxInlineVarchar,          // inline text
 			MaxInlineVarchar + 100,    // text overflows to 1 page

@@ -19,7 +19,7 @@ func TestTable_Insert(t *testing.T) {
 		tablePager     = aPager.ForTable(testColumns)
 		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0)
+		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0, nil)
 	)
 
 	t.Run("Insert row with all NOT NULL values", func(t *testing.T) {
@@ -78,7 +78,7 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 		tablePager     = aPager.ForTable(testColumns)
 		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0)
+		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0, nil)
 	)
 
 	stmt := Statement{
@@ -107,7 +107,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 		tablePager     = aPager.ForTable(testMediumColumns)
 		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0)
+		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
 	)
 
 	stmt := Statement{
@@ -166,7 +166,7 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 		tablePager     = aPager.ForTable(testBigColumns)
 		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testBigColumns, 0)
+		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testBigColumns, 0, nil)
 	)
 
 	// Batch insert test rows
@@ -225,7 +225,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		tablePager     = aPager.ForTable(testBigColumns)
 		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testBigColumns, 0)
+		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testBigColumns, 0, nil)
 		numRows        = aTable.maxICells(0) + 2
 		rows           = gen.BigRows(numRows)
 	)
@@ -324,7 +324,7 @@ func TestTable_Insert_Overflow(t *testing.T) {
 		tablePager     = aPager.ForTable(testOverflowColumns)
 		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0)
+		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0, nil)
 		rows           = []Row{
 			gen.OverflowRow(MaxInlineVarchar),
 			gen.OverflowRow(MaxInlineVarchar + 100),

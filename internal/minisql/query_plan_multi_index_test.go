@@ -43,7 +43,7 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 		pkIndexName        = "pkey__users"
 		uniqueIndexName    = "key__users__email"
 		secondaryIndexName = "idx__users__created"
-		aTable             = NewTable(zap.NewNop(), nil, nil, "users", columns, 0, WithPrimaryKey(
+		aTable             = NewTable(zap.NewNop(), nil, nil, "users", columns, 0, nil, WithPrimaryKey(
 			NewPrimaryKey(pkIndexName, columns[0:1], true),
 		), WithUniqueIndex(
 			UniqueIndex{
@@ -69,7 +69,8 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type: ScanTypeSequential,
+						TableName: "users",
+						Type:      ScanTypeSequential,
 					},
 				},
 			},
@@ -87,7 +88,8 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type: ScanTypeSequential,
+						TableName: "users",
+						Type:      ScanTypeSequential,
 						Filters: OneOrMore{
 							{
 								FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte("Richard"))),
@@ -113,12 +115,14 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
+						TableName:    "users",
 						Type:         ScanTypeIndexPoint,
 						IndexName:    pkIndexName,
 						IndexColumns: columns[0:1],
 						IndexKeys:    []any{int64(42)},
 					},
 					{
+						TableName:    "users",
 						Type:         ScanTypeIndexPoint,
 						IndexName:    uniqueIndexName,
 						IndexColumns: columns[1:2],
@@ -143,12 +147,14 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
+						TableName:    "users",
 						Type:         ScanTypeIndexPoint,
 						IndexName:    uniqueIndexName,
 						IndexColumns: columns[1:2],
 						IndexKeys:    []any{"foo@example.com"},
 					},
 					{
+						TableName:    "users",
 						Type:         ScanTypeIndexRange,
 						IndexName:    secondaryIndexName,
 						IndexColumns: columns[4:5],
@@ -177,6 +183,7 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
+						TableName:    "users",
 						Type:         ScanTypeIndexPoint,
 						IndexName:    pkIndexName,
 						IndexColumns: columns[0:1],
@@ -205,6 +212,7 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
+						TableName:    "users",
 						Type:         ScanTypeIndexPoint,
 						IndexName:    uniqueIndexName,
 						IndexColumns: columns[1:2],
@@ -237,7 +245,8 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 			QueryPlan{
 				Scans: []Scan{
 					{
-						Type: ScanTypeSequential,
+						TableName: "users",
+						Type:      ScanTypeSequential,
 						Filters: OneOrMore{
 							{
 								FieldIsEqual("dob", OperandQuotedString, MustParseTimestamp("1990-01-01 00:00:00")),

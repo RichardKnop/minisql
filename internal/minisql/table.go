@@ -22,6 +22,7 @@ type Table struct {
 	pager                TxPager
 	txManager            *TransactionManager
 	indexStats           map[string]IndexStats
+	provider             TableProvider // Access to other tables for JOIN operations
 }
 
 type TableOption func(*Table)
@@ -44,7 +45,7 @@ func WithSecondaryIndex(index SecondaryIndex) TableOption {
 	}
 }
 
-func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, name string, columns []Column, rootPageIdx PageIndex, opts ...TableOption) *Table {
+func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, name string, columns []Column, rootPageIdx PageIndex, provider TableProvider, opts ...TableOption) *Table {
 	aTable := &Table{
 		Name:                 name,
 		Columns:              columns,
@@ -58,7 +59,14 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 		SecondaryIndexes:     make(map[string]SecondaryIndex),
 		columnIndexInfoCache: make(map[string]IndexInfo),
 		indexStats:           make(map[string]IndexStats),
+		provider:             provider,
 	}
+
+	// If no provider is given, create a simple single-table provider for testing
+	if provider == nil {
+		aTable.provider = &singleTableProvider{table: aTable}
+	}
+
 	// Build column name -> column index cache
 	for i, aColumn := range columns {
 		aTable.columnCache[aColumn.Name] = i
@@ -92,6 +100,18 @@ func indexColumnHash(columns []Column) string {
 		}
 	}
 	return hash.String()
+}
+
+// singleTableProvider is a simple TableProvider for single-table scenarios (e.g., tests)
+type singleTableProvider struct {
+	table *Table
+}
+
+func (p *singleTableProvider) GetTable(ctx context.Context, name string) (*Table, bool) {
+	if p.table != nil && p.table.Name == name {
+		return p.table, true
+	}
+	return nil, false
 }
 
 func (t *Table) SetSecondaryIndex(name string, columns []Column, index BTreeIndex) {
