@@ -1120,7 +1120,40 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, `LIMIT must be a non-negative integer`)
 	})
 
-	t.Run("SELECT with duplicate table alias should fail", func(t *testing.T) {
+	t.Run("SELECT with duplicate table name in JOIN should fail", func(t *testing.T) {
+		stmt := Statement{
+			Kind:       Select,
+			TableName:  aTable.Name,
+			TableAlias: "t1",
+			Joins: []Join{
+				{
+					TableName:  aTable.Name, // Duplicate table name
+					TableAlias: "t2",
+					Conditions: Conditions{
+						{
+							Operand1: Operand{
+								Type:  OperandField,
+								Value: Field{AliasPrefix: "t1", Name: "id"},
+							},
+							Operator: Eq,
+							Operand2: Operand{
+								Type:  OperandField,
+								Value: Field{AliasPrefix: "t2", Name: "other_id"},
+							},
+						},
+					},
+				},
+			},
+			Columns: aTable.Columns,
+			Fields:  []Field{{Name: "id"}, {Name: "email"}},
+		}
+
+		err := stmt.Validate(aTable)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `duplicate table name "test_table" in JOINs`)
+	})
+
+	t.Run("SELECT with duplicate table alias in JOIN should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
 			TableName:  aTable.Name,

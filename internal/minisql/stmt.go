@@ -913,16 +913,29 @@ func (s Statement) validateSelect(aTable *Table) error {
 	}
 
 	if len(s.Joins) > 0 {
-		aliasMap := map[string]struct{}{}
-		if s.TableAlias != "" {
-			aliasMap[s.TableAlias] = struct{}{}
+		var (
+			tableMap = map[string]struct{}{
+				aTable.Name: {},
+			}
+			aliasMap = map[string]struct{}{}
+		)
+		if s.TableAlias == "" {
+			return fmt.Errorf("table must have alias when query contains JOIN")
 		}
+		aliasMap[s.TableAlias] = struct{}{}
 		for _, aJoin := range s.Joins {
 			if aJoin.TableAlias == "" {
-				continue
+				return fmt.Errorf("JOIN must have a table alias")
 			}
-			_, exists := aliasMap[aJoin.TableAlias]
-			if exists {
+
+			_, ok := tableMap[aJoin.TableName]
+			if ok {
+				return fmt.Errorf("duplicate table name %q in JOINs", aJoin.TableName)
+			}
+			tableMap[aJoin.TableName] = struct{}{}
+
+			_, ok = aliasMap[aJoin.TableAlias]
+			if ok {
 				return fmt.Errorf("duplicate table alias %q in JOINs", aJoin.TableAlias)
 			}
 			aliasMap[aJoin.TableAlias] = struct{}{}
