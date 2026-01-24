@@ -81,7 +81,7 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte("Richard"))),
+						FieldIsEqual(Field{Name: "name"}, OperandQuotedString, NewTextPointer([]byte("Richard"))),
 					},
 				},
 			},
@@ -92,7 +92,7 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 						Type:      ScanTypeSequential,
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte("Richard"))),
+								FieldIsEqual(Field{Name: "name"}, OperandQuotedString, NewTextPointer([]byte("Richard"))),
 							},
 						},
 					},
@@ -105,10 +105,10 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("id", OperandInteger, int64(42)),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 					},
 					{
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 				},
 			},
@@ -137,10 +137,10 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 					{
-						FieldIsGreaterOrEqual("created", OperandQuotedString, MustParseTimestamp("2025-01-01 00:00:00")),
+						FieldIsGreaterOrEqual(Field{Name: "created"}, OperandQuotedString, MustParseTimestamp("2025-01-01 00:00:00")),
 					},
 				},
 			},
@@ -174,9 +174,9 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
-						FieldIsGreaterOrEqual("created", OperandQuotedString, MustParseTimestamp("2025-01-01 00:00:00")),
-						FieldIsEqual("id", OperandInteger, int64(42)),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsGreaterOrEqual(Field{Name: "created"}, OperandQuotedString, MustParseTimestamp("2025-01-01 00:00:00")),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 					},
 				},
 			},
@@ -190,8 +190,8 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 						IndexKeys:    []any{int64(42)},
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
-								FieldIsGreaterOrEqual("created", OperandQuotedString, MustParseTimestamp("2025-01-01 00:00:00")),
+								FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+								FieldIsGreaterOrEqual(Field{Name: "created"}, OperandQuotedString, MustParseTimestamp("2025-01-01 00:00:00")),
 							},
 						},
 					},
@@ -204,8 +204,8 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("created", OperandQuotedString, MustParseTimestamp("2025-01-01 00:00:00")),
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsEqual(Field{Name: "created"}, OperandQuotedString, MustParseTimestamp("2025-01-01 00:00:00")),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 				},
 			},
@@ -219,7 +219,7 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 						IndexKeys:    []any{"foo@example.com"},
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("created", OperandQuotedString, MustParseTimestamp("2025-01-01 00:00:00")),
+								FieldIsEqual(Field{Name: "created"}, OperandQuotedString, MustParseTimestamp("2025-01-01 00:00:00")),
 							},
 						},
 					},
@@ -232,13 +232,13 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("dob", OperandQuotedString, MustParseTimestamp("1990-01-01 00:00:00")),
+						FieldIsEqual(Field{Name: "dob"}, OperandQuotedString, MustParseTimestamp("1990-01-01 00:00:00")),
 					},
 					{
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 					{
-						FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte("Richard"))),
+						FieldIsEqual(Field{Name: "name"}, OperandQuotedString, NewTextPointer([]byte("Richard"))),
 					},
 				},
 			},
@@ -249,13 +249,13 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 						Type:      ScanTypeSequential,
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("dob", OperandQuotedString, MustParseTimestamp("1990-01-01 00:00:00")),
+								FieldIsEqual(Field{Name: "dob"}, OperandQuotedString, MustParseTimestamp("1990-01-01 00:00:00")),
 							},
 							{
-								FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+								FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 							},
 							{
-								FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte("Richard"))),
+								FieldIsEqual(Field{Name: "name"}, OperandQuotedString, NewTextPointer([]byte("Richard"))),
 							},
 						},
 					},

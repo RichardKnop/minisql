@@ -91,7 +91,7 @@ func TestTable_Update_PrimaryKey(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
 				},
 			},
 		}
@@ -120,7 +120,7 @@ func TestTable_Update_PrimaryKey(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
 				},
 			},
 		}
@@ -153,7 +153,7 @@ func TestTable_Update_PrimaryKey(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
 				},
 			},
 		}
@@ -267,8 +267,8 @@ func TestTable_Update_CompositePrimaryKey(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("first_name", OperandQuotedString, firstName.Value.(TextPointer)),
-					FieldIsEqual("last_name", OperandQuotedString, lastName.Value.(TextPointer)),
+					FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, firstName.Value.(TextPointer)),
+					FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, lastName.Value.(TextPointer)),
 				},
 			},
 		}
@@ -300,8 +300,8 @@ func TestTable_Update_CompositePrimaryKey(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("first_name", OperandQuotedString, firstName.Value.(TextPointer)),
-					FieldIsEqual("last_name", OperandQuotedString, lastName.Value.(TextPointer)),
+					FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, firstName.Value.(TextPointer)),
+					FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, lastName.Value.(TextPointer)),
 				},
 			},
 		}
@@ -340,8 +340,8 @@ func TestTable_Update_CompositePrimaryKey(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("first_name", OperandQuotedString, firstName.Value),
-					FieldIsEqual("last_name", OperandQuotedString, lastName.Value),
+					FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, firstName.Value),
+					FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, lastName.Value),
 				},
 			},
 		}

@@ -104,9 +104,18 @@ func (r Row) OnlyFields(fields ...Field) Row {
 	// Pre-allocate exact size and write directly by index
 	outIdx := 0
 	for _, aField := range fields {
-		if _, idx := r.GetColumn(aField.Name); idx >= 0 {
+		// For fields with an alias prefix, look for "alias.name" format
+		// For fields without, look for just "name"
+		var lookupName string
+		if aField.AliasPrefix != "" {
+			lookupName = aField.AliasPrefix + "." + aField.Name
+		} else {
+			lookupName = aField.Name
+		}
+
+		if _, idx := r.GetColumn(lookupName); idx >= 0 {
 			filteredRow.Columns[outIdx] = r.Columns[idx]
-			filteredRow.columnCache[aField.Name] = outIdx
+			filteredRow.columnCache[aField.Name] = outIdx // Store without prefix for Scan
 			filteredRow.Values[outIdx] = r.Values[idx]
 			outIdx++
 		}
@@ -574,7 +583,7 @@ func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, err
 	if !field1.IsField() {
 		return false, fmt.Errorf("field 1 operand invalid, type '%d'", field1.Type)
 	}
-	if field2.IsField() {
+	if !field2.IsField() {
 		return false, fmt.Errorf("field 2 operand invalid, type '%d'", field2.Type)
 	}
 
@@ -582,12 +591,22 @@ func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, err
 		return true, nil
 	}
 
-	name1 := fmt.Sprint(field1.Value.(Field).Name)
+	// Extract field names with alias prefix for JOIN support
+	f1 := field1.Value.(Field)
+	name1 := f1.Name
+	if f1.AliasPrefix != "" {
+		name1 = f1.AliasPrefix + "." + f1.Name
+	}
 	aColumn1, idx1 := r.GetColumn(name1)
 	if idx1 < 0 {
 		return false, fmt.Errorf("row does not contain column '%s'", name1)
 	}
-	name2 := fmt.Sprint(field2.Value.(Field).Name)
+
+	f2 := field2.Value.(Field)
+	name2 := f2.Name
+	if f2.AliasPrefix != "" {
+		name2 = f2.AliasPrefix + "." + f2.Name
+	}
 	aColumn2, idx2 := r.GetColumn(name2)
 	if idx2 < 0 {
 		return false, fmt.Errorf("row does not contain column '%s'", name2)

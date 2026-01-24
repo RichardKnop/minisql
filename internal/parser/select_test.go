@@ -283,9 +283,9 @@ func TestParse_Select(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "a"}, {Name: "c"}, {Name: "d"}},
 					Conditions: minisql.OneOrMore{
 						{
-							minisql.FieldIsNotEqual("a", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
-							minisql.FieldIsEqual("b", minisql.OperandInteger, int64(2)),
-							minisql.FieldIsEqual("c", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("Foo Bar"))),
+							minisql.FieldIsNotEqual(minisql.Field{Name: "a"}, minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1"))),
+							minisql.FieldIsEqual(minisql.Field{Name: "b"}, minisql.OperandInteger, int64(2)),
+							minisql.FieldIsEqual(minisql.Field{Name: "c"}, minisql.OperandQuotedString, minisql.NewTextPointer([]byte("Foo Bar"))),
 						},
 					},
 				},
@@ -302,7 +302,7 @@ func TestParse_Select(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "a"}, {Name: "c"}, {Name: "d"}},
 					Conditions: minisql.OneOrMore{
 						{
-							minisql.FieldIsEqual("a", minisql.OperandInteger, int64(2)),
+							minisql.FieldIsEqual(minisql.Field{Name: "a"}, minisql.OperandInteger, int64(2)),
 						},
 					},
 					Limit: minisql.OptionalValue{Value: int64(10), Valid: true},
@@ -320,7 +320,7 @@ func TestParse_Select(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "a"}, {Name: "c"}, {Name: "d"}},
 					Conditions: minisql.OneOrMore{
 						{
-							minisql.FieldIsEqual("a", minisql.OperandInteger, int64(2)),
+							minisql.FieldIsEqual(minisql.Field{Name: "a"}, minisql.OperandInteger, int64(2)),
 						},
 					},
 					Offset: minisql.OptionalValue{Value: int64(10), Valid: true},
@@ -338,7 +338,7 @@ func TestParse_Select(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "a"}, {Name: "c"}, {Name: "d"}},
 					Conditions: minisql.OneOrMore{
 						{
-							minisql.FieldIsEqual("a", minisql.OperandInteger, int64(2)),
+							minisql.FieldIsEqual(minisql.Field{Name: "a"}, minisql.OperandInteger, int64(2)),
 						},
 					},
 					Limit:  minisql.OptionalValue{Value: int64(10), Valid: true},
@@ -357,7 +357,7 @@ func TestParse_Select(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "a"}, {Name: "c"}, {Name: "d"}},
 					Conditions: minisql.OneOrMore{
 						{
-							minisql.FieldIsEqual("a", minisql.OperandInteger, int64(2)),
+							minisql.FieldIsEqual(minisql.Field{Name: "a"}, minisql.OperandInteger, int64(2)),
 						},
 					},
 					OrderBy: []minisql.OrderBy{
@@ -384,8 +384,8 @@ func TestParse_Select(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "*"}},
 					Conditions: minisql.OneOrMore{
 						{
-							minisql.FieldIsEqual("b", minisql.OperandQuotedString, minisql.NewTextPointer([]byte("c"))),
-							minisql.FieldIsNotNull("d"),
+							minisql.FieldIsEqual(minisql.Field{Name: "b"}, minisql.OperandQuotedString, minisql.NewTextPointer([]byte("c"))),
+							minisql.FieldIsNotNull(minisql.Field{Name: "d"}),
 						},
 					},
 				},
@@ -402,7 +402,7 @@ func TestParse_Select(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "*"}},
 					Conditions: minisql.OneOrMore{
 						{
-							minisql.FieldIsNull("b"),
+							minisql.FieldIsNull(minisql.Field{Name: "b"}),
 						},
 					},
 				},
@@ -419,8 +419,8 @@ func TestParse_Select(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "a"}, {Name: "c"}, {Name: "d"}},
 					Conditions: minisql.OneOrMore{
 						{
-							minisql.FieldIsNotEqual("a", minisql.OperandPlaceholder, nil),
-							minisql.FieldIsGreater("b", minisql.OperandPlaceholder, nil),
+							minisql.FieldIsNotEqual(minisql.Field{Name: "a"}, minisql.OperandPlaceholder, nil),
+							minisql.FieldIsGreater(minisql.Field{Name: "b"}, minisql.OperandPlaceholder, nil),
 						},
 					},
 				},
@@ -445,18 +445,64 @@ func TestParse_Select(t *testing.T) {
 							TableName:  "profiles",
 							TableAlias: "p",
 							Conditions: minisql.Conditions{
-								{
-									Operand1: minisql.Operand{
-										Type:  minisql.OperandField,
-										Value: minisql.Field{AliasPrefix: "u", Name: "id"},
+								minisql.FieldIsEqual(
+									minisql.Field{
+										AliasPrefix: "u",
+										Name:        "id",
 									},
-									Operator: minisql.Eq,
-									Operand2: minisql.Operand{
-										Type:  minisql.OperandField,
-										Value: minisql.Field{AliasPrefix: "p", Name: "user_id"},
+									minisql.OperandField,
+									minisql.Field{
+										AliasPrefix: "p",
+										Name:        "user_id",
 									},
-								},
+								),
 							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT with INNER JOIN and WHERE clause",
+			`SELECT u.id, p.name FROM users AS u
+			INNER JOIN profiles AS p ON u.id = p.user_id
+			WHERE u.dob > '1999-01-01 00:00:00';`,
+			[]minisql.Statement{
+				{
+					Kind:       minisql.Select,
+					TableName:  "users",
+					TableAlias: "u",
+					Fields: []minisql.Field{
+						{AliasPrefix: "u", Name: "id"},
+						{AliasPrefix: "p", Name: "name"},
+					},
+					Joins: []minisql.Join{
+						{
+							Type:       minisql.Inner,
+							TableName:  "profiles",
+							TableAlias: "p",
+							Conditions: minisql.Conditions{
+								minisql.FieldIsEqual(
+									minisql.Field{
+										AliasPrefix: "u",
+										Name:        "id",
+									},
+									minisql.OperandField,
+									minisql.Field{
+										AliasPrefix: "p",
+										Name:        "user_id",
+									},
+								),
+							},
+						},
+					},
+					Conditions: minisql.OneOrMore{
+						{
+							minisql.FieldIsGreater(minisql.Field{
+								AliasPrefix: "u",
+								Name:        "dob",
+							}, minisql.OperandQuotedString, minisql.NewTextPointer([]byte("1999-01-01 00:00:00"))),
 						},
 					},
 				},
@@ -483,17 +529,17 @@ func TestParse_Select(t *testing.T) {
 							TableName:  "profiles",
 							TableAlias: "p",
 							Conditions: minisql.Conditions{
-								{
-									Operand1: minisql.Operand{
-										Type:  minisql.OperandField,
-										Value: minisql.Field{AliasPrefix: "u", Name: "id"},
+								minisql.FieldIsEqual(
+									minisql.Field{
+										AliasPrefix: "u",
+										Name:        "id",
 									},
-									Operator: minisql.Eq,
-									Operand2: minisql.Operand{
-										Type:  minisql.OperandField,
-										Value: minisql.Field{AliasPrefix: "p", Name: "user_id"},
+									minisql.OperandField,
+									minisql.Field{
+										AliasPrefix: "p",
+										Name:        "user_id",
 									},
-								},
+								),
 							},
 							Joins: []minisql.Join{
 								{
@@ -501,17 +547,17 @@ func TestParse_Select(t *testing.T) {
 									TableName:  "avatars",
 									TableAlias: "a",
 									Conditions: minisql.Conditions{
-										{
-											Operand1: minisql.Operand{
-												Type:  minisql.OperandField,
-												Value: minisql.Field{AliasPrefix: "a", Name: "profile_id"},
+										minisql.FieldIsEqual(
+											minisql.Field{
+												AliasPrefix: "a",
+												Name:        "profile_id",
 											},
-											Operator: minisql.Eq,
-											Operand2: minisql.Operand{
-												Type:  minisql.OperandField,
-												Value: minisql.Field{AliasPrefix: "p", Name: "id"},
+											minisql.OperandField,
+											minisql.Field{
+												AliasPrefix: "p",
+												Name:        "id",
 											},
-										},
+										),
 									},
 								},
 							},

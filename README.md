@@ -404,6 +404,10 @@ if err := db.QueryRow(`select count(*) from users;`).Scan(&count); err != nil {
 }
 ```
 
+#### INNER JOIN (star schema)
+
+There is an experimental support for `INNER JOIN`, however it only supports star schema joins, i.e. one or more tables joined with the base table. Nested joins and other types of joins such as `LEFT`, `RIGHT` are not supported yet. Furthermore, this functionhality is not well optimised yet and query planner might use inefficient plans for select queries with inner joins.
+
 ### UPDATE
 
 Let's try using a prepared statement to update a row:

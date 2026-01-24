@@ -28,7 +28,7 @@ func TestDatabase_PrepareStatementCaching(t *testing.T) {
 		TableName: "users",
 		Conditions: OneOrMore{
 			{
-				FieldIsEqual("id", OperandPlaceholder, nil),
+				FieldIsEqual(Field{Name: "id"}, OperandPlaceholder, nil),
 			},
 		},
 	}
@@ -39,7 +39,7 @@ func TestDatabase_PrepareStatementCaching(t *testing.T) {
 		TableName: "posts",
 		Conditions: OneOrMore{
 			{
-				FieldIsEqual("user_id", OperandPlaceholder, nil),
+				FieldIsEqual(Field{Name: "user_id"}, OperandPlaceholder, nil),
 			},
 		},
 	}

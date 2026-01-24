@@ -104,7 +104,7 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("email", OperandInteger, email1.Value.(TextPointer)),
+					FieldIsEqual(Field{Name: "email"}, OperandInteger, email1.Value.(TextPointer)),
 				},
 			},
 		}
@@ -133,7 +133,7 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("email", OperandInteger, email.Value.(TextPointer)),
+					FieldIsEqual(Field{Name: "email"}, OperandInteger, email.Value.(TextPointer)),
 				},
 			},
 		}
@@ -166,7 +166,7 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("email", OperandInteger, email.Value.(TextPointer)),
+					FieldIsEqual(Field{Name: "email"}, OperandInteger, email.Value.(TextPointer)),
 				},
 			},
 		}
@@ -293,8 +293,8 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("first_name", OperandInteger, firstName.Value),
-					FieldIsEqual("last_name", OperandInteger, lastName.Value),
+					FieldIsEqual(Field{Name: "first_name"}, OperandInteger, firstName.Value),
+					FieldIsEqual(Field{Name: "last_name"}, OperandInteger, lastName.Value),
 				},
 			},
 		}
@@ -326,8 +326,8 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("first_name", OperandInteger, firstName.Value),
-					FieldIsEqual("last_name", OperandInteger, lastName.Value),
+					FieldIsEqual(Field{Name: "first_name"}, OperandInteger, firstName.Value),
+					FieldIsEqual(Field{Name: "last_name"}, OperandInteger, lastName.Value),
 				},
 			},
 		}
@@ -366,8 +366,8 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("first_name", OperandInteger, firstName.Value),
-					FieldIsEqual("last_name", OperandInteger, lastName.Value),
+					FieldIsEqual(Field{Name: "first_name"}, OperandInteger, firstName.Value),
+					FieldIsEqual(Field{Name: "last_name"}, OperandInteger, lastName.Value),
 				},
 			},
 		}

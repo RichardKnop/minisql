@@ -204,7 +204,7 @@ func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.Name
 	}
 
 	if len(statements) == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("no statements in query")
 	}
 
 	var totalRowsAffected int64

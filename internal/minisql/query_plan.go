@@ -39,9 +39,20 @@ type RangeCondition struct {
 	Upper *RangeBound // nil = unbounded
 }
 
+// JoinPlan represents a join operation between two scans
+type JoinPlan struct {
+	Type            JoinType
+	LeftScanIndex   int        // Index into Scans array (outer table)
+	RightScanIndex  int        // Index into Scans array (inner table)
+	Conditions      Conditions // ON clause conditions
+	OuterJoinColumn string     // Column name in outer table for index lookup optimization
+	InnerJoinColumn string     // Column name in inner table for index lookup optimization
+}
+
 // QueryPlan determines how to execute a query
 type QueryPlan struct {
 	Scans []Scan
+	Joins []JoinPlan // JOIN operations to perform
 
 	// Ordering
 	OrderBy      []OrderBy
@@ -51,6 +62,7 @@ type QueryPlan struct {
 
 type Scan struct {
 	TableName      string // Name of the table to scan
+	TableAlias     string // Alias of the table (for JOINs)
 	Type           ScanType
 	IndexName      string
 	IndexColumns   []Column
@@ -124,7 +136,12 @@ SELECT * from users ORDER BY created DESC; - use index on created for ordering
 SELECT * from users ORDER BY non_indexed_col; - order in memory
 */
 func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error) {
-	// By default, assume we are doing a single sequential scan
+	// Handle multi-table queries (JOINs)
+	if len(stmt.Joins) > 0 {
+		return t.planJoinQuery(ctx, stmt)
+	}
+
+	// Single table query - use existing logic
 	plan := QueryPlan{
 		Scans: []Scan{{
 			TableName: t.Name,
@@ -769,6 +786,11 @@ func tryRangeScan(tableName string, indexInfo IndexInfo, filters Conditions, sta
 }
 
 func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selectedFields []Field, filteredPipe chan<- Row) error {
+	// Handle JOIN queries
+	if len(p.Joins) > 0 {
+		return p.executeNestedLoopJoin(ctx, provider, selectedFields, filteredPipe)
+	}
+
 	if len(p.Scans) == 1 {
 		// Get table for this scan
 		t, ok := provider.GetTable(ctx, p.Scans[0].TableName)

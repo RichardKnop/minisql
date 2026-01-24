@@ -373,7 +373,7 @@ func (d *Database) listSchemas(ctx context.Context) ([]Schema, error) {
 		Fields: mainTableFields,
 		Conditions: OneOrMore{
 			{
-				FieldIsNotEqual("name", OperandQuotedString, NewTextPointer([]byte(mainTable.Name))), // skip main table itself
+				FieldIsNotEqual(Field{Name: "name"}, OperandQuotedString, NewTextPointer([]byte(mainTable.Name))), // skip main table itself
 			},
 		},
 	})
@@ -1186,8 +1186,8 @@ func (d *Database) checkSchemaExists(ctx context.Context, aType SchemaType, name
 		Fields: mainTableFields,
 		Conditions: OneOrMore{
 			{
-				FieldIsEqual("type", OperandInteger, int64(aType)),
-				FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte(name))),
+				FieldIsEqual(Field{Name: "type"}, OperandInteger, int64(aType)),
+				FieldIsEqual(Field{Name: "name"}, OperandQuotedString, NewTextPointer([]byte(name))),
 			},
 		},
 	})
@@ -1235,8 +1235,8 @@ func (d *Database) deleteSchema(ctx context.Context, aType SchemaType, name stri
 		Kind: Delete,
 		Conditions: OneOrMore{
 			{
-				FieldIsEqual("type", OperandInteger, int64(aType)),
-				FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte(name))),
+				FieldIsEqual(Field{Name: "type"}, OperandInteger, int64(aType)),
+				FieldIsEqual(Field{Name: "name"}, OperandQuotedString, NewTextPointer([]byte(name))),
 			},
 		},
 	})
