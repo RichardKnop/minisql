@@ -186,18 +186,6 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 				p.Kind = minisql.Delete
 				p.pop()
 				p.step = stepDeleteFromTable
-			case "BEGIN":
-				p.Kind = minisql.BeginTransaction
-				p.pop()
-				p.step = stepStatementEnd
-			case "COMMIT":
-				p.Kind = minisql.CommitTransaction
-				p.pop()
-				p.step = stepStatementEnd
-			case "ROLLBACK":
-				p.Kind = minisql.RollbackTransaction
-				p.pop()
-				p.step = stepStatementEnd
 			case "ANALYZE":
 				p.Kind = minisql.Analyze
 				p.pop()
@@ -524,9 +512,6 @@ func (p *parserItem) validate(stmt minisql.Statement) error {
 	}
 	if stmt.Kind == 0 {
 		return errEmptyStatementKind
-	}
-	if stmt.Kind == minisql.BeginTransaction || stmt.Kind == minisql.CommitTransaction || stmt.Kind == minisql.RollbackTransaction {
-		return nil
 	}
 	if stmt.Kind == minisql.CreateIndex || stmt.Kind == minisql.DropIndex {
 		if stmt.IndexName == "" {
