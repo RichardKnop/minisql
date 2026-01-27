@@ -13,8 +13,13 @@ func (t *Table) sortRows(rows []Row, orderBy []OrderBy) error {
 
 	sort.Slice(rows, func(i, j int) bool {
 		for _, clause := range orderBy {
-			valI, foundI := rows[i].GetValue(clause.Field.Name)
-			valJ, foundJ := rows[j].GetValue(clause.Field.Name)
+			// Use alias prefix for JOIN queries where columns are prefixed (e.g., "u.name")
+			colName := clause.Field.Name
+			if clause.Field.AliasPrefix != "" {
+				colName = clause.Field.AliasPrefix + "." + clause.Field.Name
+			}
+			valI, foundI := rows[i].GetValue(colName)
+			valJ, foundJ := rows[j].GetValue(colName)
 
 			if !foundI || !foundJ {
 				continue

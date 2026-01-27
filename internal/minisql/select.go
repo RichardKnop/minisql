@@ -275,7 +275,8 @@ func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, unfilteredPipe <-
 		row := allRows[idx]
 		idx++
 
-		return row, nil
+		// Filter to only requested fields (important for JOINs where rows have all columns)
+		return row.OnlyFields(requestedFields...), nil
 	})
 
 	return aResult, nil

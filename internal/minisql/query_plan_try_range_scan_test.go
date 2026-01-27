@@ -24,7 +24,7 @@ func TestTryRangeScan(t *testing.T) {
 		{
 			"Equality operator does not qualify for range scan",
 			Conditions{
-				FieldIsEqual("id", OperandInteger, int64(10)),
+				FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(10)),
 			},
 			Scan{},
 			false,
@@ -32,7 +32,7 @@ func TestTryRangeScan(t *testing.T) {
 		{
 			"Not equal operator",
 			Conditions{
-				FieldIsNotEqual("id", OperandInteger, int64(42)),
+				FieldIsNotEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 			},
 			Scan{},
 			false,
@@ -40,7 +40,7 @@ func TestTryRangeScan(t *testing.T) {
 		{
 			"Range scan with lower bound only",
 			Conditions{
-				FieldIsGreater("id", OperandInteger, int64(10)),
+				FieldIsGreater(Field{Name: "id"}, OperandInteger, int64(10)),
 			},
 			Scan{
 				TableName:    "users",
@@ -58,7 +58,7 @@ func TestTryRangeScan(t *testing.T) {
 		{
 			"Range scan with lower bound only (inclusive)",
 			Conditions{
-				FieldIsGreaterOrEqual("id", OperandInteger, int64(10)),
+				FieldIsGreaterOrEqual(Field{Name: "id"}, OperandInteger, int64(10)),
 			},
 			Scan{
 				TableName:    "users",
@@ -77,7 +77,7 @@ func TestTryRangeScan(t *testing.T) {
 		{
 			"Range scan with upper bound only",
 			Conditions{
-				FieldIsLess("id", OperandInteger, int64(10)),
+				FieldIsLess(Field{Name: "id"}, OperandInteger, int64(10)),
 			},
 			Scan{
 				TableName:    "users",
@@ -95,7 +95,7 @@ func TestTryRangeScan(t *testing.T) {
 		{
 			"Range scan with upper bound only (inclusive)",
 			Conditions{
-				FieldIsLessOrEqual("id", OperandInteger, int64(10)),
+				FieldIsLessOrEqual(Field{Name: "id"}, OperandInteger, int64(10)),
 			},
 			Scan{
 				TableName:    "users",
@@ -114,8 +114,8 @@ func TestTryRangeScan(t *testing.T) {
 		{
 			"Range scan with with both lower and upper bounds",
 			Conditions{
-				FieldIsLessOrEqual("id", OperandInteger, int64(10)),
-				FieldIsGreater("id", OperandInteger, int64(5)),
+				FieldIsLessOrEqual(Field{Name: "id"}, OperandInteger, int64(10)),
+				FieldIsGreater(Field{Name: "id"}, OperandInteger, int64(5)),
 			},
 			Scan{
 				TableName:    "users",
@@ -137,9 +137,9 @@ func TestTryRangeScan(t *testing.T) {
 		{
 			"Range scan with with both lower and upper bounds and remaining filters",
 			Conditions{
-				FieldIsLessOrEqual("id", OperandInteger, int64(10)),
-				FieldIsGreater("id", OperandInteger, int64(5)),
-				FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte("foo"))),
+				FieldIsLessOrEqual(Field{Name: "id"}, OperandInteger, int64(10)),
+				FieldIsGreater(Field{Name: "id"}, OperandInteger, int64(5)),
+				FieldIsEqual(Field{Name: "name"}, OperandQuotedString, NewTextPointer([]byte("foo"))),
 			},
 			Scan{
 				TableName:    "users",
@@ -156,7 +156,7 @@ func TestTryRangeScan(t *testing.T) {
 					},
 				},
 				Filters: OneOrMore{{
-					FieldIsEqual("name", OperandQuotedString, NewTextPointer([]byte("foo"))),
+					FieldIsEqual(Field{Name: "name"}, OperandQuotedString, NewTextPointer([]byte("foo"))),
 				}},
 			},
 			true,

@@ -44,7 +44,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 				},
 			},
@@ -55,7 +55,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 						Type:      ScanTypeSequential,
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+								FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 							},
 						},
 					},
@@ -68,7 +68,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsNull("id"),
+						FieldIsNull(Field{Name: "id"}),
 					},
 				},
 			},
@@ -79,7 +79,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 						Type:      ScanTypeSequential,
 						Filters: OneOrMore{
 							{
-								FieldIsNull("id"),
+								FieldIsNull(Field{Name: "id"}),
 							},
 						},
 					},
@@ -92,7 +92,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("id", OperandInteger, int64(42)),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 					},
 				},
 			},
@@ -114,10 +114,10 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("id", OperandInteger, int64(42)),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 					},
 					{
-						FieldIsEqual("id", OperandInteger, int64(69)),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(69)),
 					},
 				},
 			},
@@ -146,12 +146,12 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("id", OperandInteger, int64(42)),
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 					{
-						FieldIsEqual("id", OperandInteger, int64(69)),
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("bar@example.com"))),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(69)),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("bar@example.com"))),
 					},
 				},
 			},
@@ -165,7 +165,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 						IndexKeys:    []any{int64(42)},
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+								FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 							},
 						},
 					},
@@ -177,7 +177,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 						IndexKeys:    []any{int64(69)},
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("bar@example.com"))),
+								FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("bar@example.com"))),
 							},
 						},
 					},
@@ -190,11 +190,11 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("id", OperandInteger, int64(42)),
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 					{
-						FieldIsEqual("id", OperandInteger, int64(69)),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(69)),
 					},
 				},
 			},
@@ -208,7 +208,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 						IndexKeys:    []any{int64(42)},
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+								FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 							},
 						},
 					},
@@ -228,7 +228,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsInAny("id", int64(42), int64(69)),
+						FieldIsInAny(Field{Name: "id"}, int64(42), int64(69)),
 					},
 				},
 			},
@@ -250,7 +250,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsNotInAny("id", int64(42), int64(69)),
+						FieldIsNotInAny(Field{Name: "id"}, int64(42), int64(69)),
 					},
 				},
 			},
@@ -260,7 +260,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 						TableName: "users",
 						Type:      ScanTypeSequential,
 						Filters: OneOrMore{{
-							FieldIsNotInAny("id", int64(42), int64(69)),
+							FieldIsNotInAny(Field{Name: "id"}, int64(42), int64(69)),
 						}},
 					},
 				},
@@ -272,7 +272,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsNotEqual("id", OperandInteger, int64(42)),
+						FieldIsNotEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 					},
 				},
 			},
@@ -283,7 +283,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 						Type:      ScanTypeSequential,
 						Filters: OneOrMore{
 							{
-								FieldIsNotEqual("id", OperandInteger, int64(42)),
+								FieldIsNotEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 							},
 						},
 					},
@@ -353,8 +353,8 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsInAny("id", int64(42), int64(69)),
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsInAny(Field{Name: "id"}, int64(42), int64(69)),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 				},
 				OrderBy: []OrderBy{
@@ -373,7 +373,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 						IndexColumns: testColumns[0:1],
 						IndexKeys:    []any{int64(42), int64(69)},
 						Filters: OneOrMore{{
-							FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+							FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 						}},
 					},
 				},
@@ -393,9 +393,9 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsGreater("id", OperandInteger, int64(42)),
-						FieldIsLessOrEqual("id", OperandInteger, int64(69)),
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsGreater(Field{Name: "id"}, OperandInteger, int64(42)),
+						FieldIsLessOrEqual(Field{Name: "id"}, OperandInteger, int64(69)),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 				},
 			},
@@ -417,7 +417,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 							},
 						},
 						Filters: OneOrMore{{
-							FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+							FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 						}},
 					},
 				},
@@ -429,11 +429,11 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsGreaterOrEqual("id", OperandInteger, int64(42)),
+						FieldIsGreaterOrEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 					},
 					{
-						FieldIsLess("id", OperandInteger, int64(27)),
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsLess(Field{Name: "id"}, OperandInteger, int64(27)),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 				},
 			},
@@ -462,7 +462,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 							},
 						},
 						Filters: OneOrMore{{
-							FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+							FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 						}},
 					},
 				},
@@ -474,8 +474,8 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsGreater("id", OperandInteger, int64(42)),
-						FieldIsLessOrEqual("id", OperandInteger, int64(69)),
+						FieldIsGreater(Field{Name: "id"}, OperandInteger, int64(42)),
+						FieldIsLessOrEqual(Field{Name: "id"}, OperandInteger, int64(69)),
 					},
 				},
 				OrderBy: []OrderBy{

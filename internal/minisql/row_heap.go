@@ -31,8 +31,13 @@ func (h *rowHeap) Less(i, j int) bool {
 	// For a min-heap that keeps largest elements, we reverse the comparison
 	// This way, the smallest element is at the top and gets popped first
 	for _, clause := range h.orderBy {
-		valI, foundI := h.rows[i].GetValue(clause.Field.Name)
-		valJ, foundJ := h.rows[j].GetValue(clause.Field.Name)
+		// Use alias prefix for JOIN queries where columns are prefixed (e.g., "u.name")
+		colName := clause.Field.Name
+		if clause.Field.AliasPrefix != "" {
+			colName = clause.Field.AliasPrefix + "." + clause.Field.Name
+		}
+		valI, foundI := h.rows[i].GetValue(colName)
+		valJ, foundJ := h.rows[j].GetValue(colName)
 
 		if !foundI || !foundJ {
 			continue
@@ -82,8 +87,13 @@ func (h *rowHeap) PushRow(row Row) {
 		shouldReplace := false
 
 		for _, clause := range h.orderBy {
-			valRoot, foundRoot := h.rows[0].GetValue(clause.Field.Name)
-			valNew, foundNew := row.GetValue(clause.Field.Name)
+			// Use alias prefix for JOIN queries where columns are prefixed (e.g., "u.name")
+			colName := clause.Field.Name
+			if clause.Field.AliasPrefix != "" {
+				colName = clause.Field.AliasPrefix + "." + clause.Field.Name
+			}
+			valRoot, foundRoot := h.rows[0].GetValue(colName)
+			valNew, foundNew := row.GetValue(colName)
 
 			if !foundRoot || !foundNew {
 				continue

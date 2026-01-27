@@ -72,8 +72,8 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("first_name", OperandQuotedString, NewTextPointer([]byte("John"))),
-						FieldIsEqual("last_name", OperandQuotedString, NewTextPointer([]byte("Doe"))),
+						FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, NewTextPointer([]byte("John"))),
+						FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, NewTextPointer([]byte("Doe"))),
 					},
 				},
 			},
@@ -98,7 +98,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("first_name", OperandQuotedString, NewTextPointer([]byte("John"))),
+						FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, NewTextPointer([]byte("John"))),
 					},
 				},
 			},
@@ -130,7 +130,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("last_name", OperandQuotedString, NewTextPointer([]byte("Doe"))),
+						FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, NewTextPointer([]byte("Doe"))),
 					},
 				},
 			},
@@ -141,7 +141,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 						Type:      ScanTypeSequential,
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("last_name", OperandQuotedString, NewTextPointer([]byte("Doe"))),
+								FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, NewTextPointer([]byte("Doe"))),
 							},
 						},
 					},
@@ -155,9 +155,9 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("first_name", OperandQuotedString, NewTextPointer([]byte("John"))),
-						FieldIsEqual("last_name", OperandQuotedString, NewTextPointer([]byte("Doe"))),
-						FieldIsEqual("age", OperandInteger, int64(30)),
+						FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, NewTextPointer([]byte("John"))),
+						FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, NewTextPointer([]byte("Doe"))),
+						FieldIsEqual(Field{Name: "age"}, OperandInteger, int64(30)),
 					},
 				},
 			},
@@ -173,7 +173,7 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 						},
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("age", OperandInteger, int64(30)),
+								FieldIsEqual(Field{Name: "age"}, OperandInteger, int64(30)),
 							},
 						},
 					},
@@ -187,12 +187,12 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("first_name", OperandQuotedString, NewTextPointer([]byte("John"))),
-						FieldIsEqual("last_name", OperandQuotedString, NewTextPointer([]byte("Doe"))),
+						FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, NewTextPointer([]byte("John"))),
+						FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, NewTextPointer([]byte("Doe"))),
 					},
 					{
-						FieldIsEqual("first_name", OperandQuotedString, NewTextPointer([]byte("Jane"))),
-						FieldIsEqual("last_name", OperandQuotedString, NewTextPointer([]byte("Smith"))),
+						FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, NewTextPointer([]byte("Jane"))),
+						FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, NewTextPointer([]byte("Smith"))),
 					},
 				},
 			},
@@ -226,8 +226,8 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("first_name", OperandQuotedString, NewTextPointer([]byte("John"))),
-						FieldIsEqual("last_name", OperandQuotedString, NewTextPointer([]byte("Doe"))),
+						FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, NewTextPointer([]byte("John"))),
+						FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, NewTextPointer([]byte("Doe"))),
 					},
 				},
 			},
@@ -252,8 +252,8 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("first_name", OperandQuotedString, NewTextPointer([]byte("John"))),
-						FieldIsEqual("last_name", OperandQuotedString, NewTextPointer([]byte("Doe"))),
+						FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, NewTextPointer([]byte("John"))),
+						FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, NewTextPointer([]byte("Doe"))),
 					},
 				},
 			},
@@ -290,9 +290,9 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("id", OperandInteger, int64(42)),
-						FieldIsEqual("first_name", OperandQuotedString, NewTextPointer([]byte("John"))),
-						FieldIsEqual("last_name", OperandQuotedString, NewTextPointer([]byte("Doe"))),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
+						FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, NewTextPointer([]byte("John"))),
+						FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, NewTextPointer([]byte("Doe"))),
 					},
 				},
 			},
@@ -306,8 +306,8 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 						IndexKeys:    []any{int64(42)},
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("first_name", OperandQuotedString, NewTextPointer([]byte("John"))),
-								FieldIsEqual("last_name", OperandQuotedString, NewTextPointer([]byte("Doe"))),
+								FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, NewTextPointer([]byte("John"))),
+								FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, NewTextPointer([]byte("Doe"))),
 							},
 						},
 					},
@@ -343,8 +343,8 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("first_name", OperandQuotedString, NewTextPointer([]byte("John"))),
-						FieldIsEqual("last_name", OperandQuotedString, NewTextPointer([]byte("Doe"))),
+						FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, NewTextPointer([]byte("John"))),
+						FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, NewTextPointer([]byte("Doe"))),
 					},
 				},
 			},
@@ -379,8 +379,8 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("first_name", OperandQuotedString, NewTextPointer([]byte("John"))),
-						FieldIsEqual("last_name", OperandQuotedString, NewTextPointer([]byte("Doe"))),
+						FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, NewTextPointer([]byte("John"))),
+						FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, NewTextPointer([]byte("Doe"))),
 					},
 				},
 			},

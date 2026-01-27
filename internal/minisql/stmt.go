@@ -563,6 +563,13 @@ func (s Statement) prepareWhere() (Statement, error) {
 			if !ok {
 				return Statement{}, fmt.Errorf("invalid field in WHERE condition")
 			}
+
+			// Skip validation for fields from joined tables (have alias prefix)
+			// They will be validated during query planning
+			if field.AliasPrefix != "" && field.AliasPrefix != s.TableAlias {
+				continue
+			}
+
 			aColumn, ok := s.ColumnByName(field.Name)
 			if !ok {
 				return Statement{}, fmt.Errorf("unknown field %q in table %q", field.Name, s.TableName)
@@ -899,16 +906,20 @@ func (s Statement) validateSelect(aTable *Table) error {
 	}
 
 	if !s.IsSelectAll() && !s.IsSelectCountAll() {
-		fieldMap := map[string]struct{}{}
-		for _, aField := range s.Fields {
-			_, ok := aTable.ColumnByName(aField.Name)
-			if !ok {
-				return fmt.Errorf("unknown field %q in table %q", aField.Name, aTable.Name)
+		// Skip field validation for JOINs - fields come from multiple tables
+		// and will be validated during execution when all tables are available
+		if len(s.Joins) == 0 {
+			fieldMap := map[string]struct{}{}
+			for _, aField := range s.Fields {
+				_, ok := aTable.ColumnByName(aField.Name)
+				if !ok {
+					return fmt.Errorf("unknown field %q in table %q", aField.Name, aTable.Name)
+				}
+				if _, exists := fieldMap[aField.String()]; exists {
+					return fmt.Errorf("duplicate field %q in select statement", aField.Name)
+				}
+				fieldMap[aField.String()] = struct{}{}
 			}
-			if _, exists := fieldMap[aField.String()]; exists {
-				return fmt.Errorf("duplicate field %q in select statement", aField.Name)
-			}
-			fieldMap[aField.String()] = struct{}{}
 		}
 	}
 
@@ -963,7 +974,8 @@ func (s Statement) validateSelect(aTable *Table) error {
 				// TODO - validate that the fields in the JOIN conditions exist in the respective tables
 			}
 		}
-		return fmt.Errorf("JOINs are not yet supported")
+		// JOIN validation complete - fields will be validated during execution
+		return nil
 	}
 
 	if len(s.OrderBy) > 0 {
@@ -1102,9 +1114,16 @@ func (s Statement) validateWhere() error {
 
 			if isEquality(aCondition) {
 				field := aCondition.Operand1.Value.(Field)
+
+				// Skip validation for fields from joined tables (have alias prefix)
+				// They will be validated during query planning
+				if field.AliasPrefix != "" && field.AliasPrefix != s.TableAlias {
+					continue
+				}
+
 				aColumn, ok := s.ColumnByName(field.Name)
 				if !ok {
-					return fmt.Errorf("unknown field %q in WHERE clause", aCondition.Operand1.Value.(string))
+					return fmt.Errorf("unknown field %q in WHERE clause", field.Name)
 				}
 
 				args, err := equalityKeys(aColumn, aCondition)

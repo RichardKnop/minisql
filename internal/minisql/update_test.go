@@ -83,7 +83,7 @@ func TestTable_Update(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
 				},
 			},
 		}
@@ -124,7 +124,7 @@ func TestTable_Update(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
 				},
 			},
 		}
@@ -234,7 +234,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
 				},
 			},
 		}
@@ -286,7 +286,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
 				},
 			},
 		}
@@ -339,7 +339,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
 				},
 			},
 		}
@@ -391,7 +391,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
 				},
 			},
 		}
