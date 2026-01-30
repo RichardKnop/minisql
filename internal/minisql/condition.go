@@ -133,11 +133,11 @@ func (o OneOrMore) UpdateLast(aCondition Condition) {
 	o[len(o)-1][len(o[len(o)-1])-1] = aCondition
 }
 
-func FieldIsEqual(fieldName string, operandType OperandType, value any) Condition {
+func FieldIsEqual(field Field, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: Field{Name: fieldName},
+			Value: field,
 		},
 		Operator: Eq,
 		Operand2: Operand{
@@ -147,11 +147,11 @@ func FieldIsEqual(fieldName string, operandType OperandType, value any) Conditio
 	}
 }
 
-func FieldIsNotEqual(fieldName string, operandType OperandType, value any) Condition {
+func FieldIsNotEqual(field Field, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: Field{Name: fieldName},
+			Value: field,
 		},
 		Operator: Ne,
 		Operand2: Operand{
@@ -161,11 +161,11 @@ func FieldIsNotEqual(fieldName string, operandType OperandType, value any) Condi
 	}
 }
 
-func FieldIsInAny(fieldName string, values ...any) Condition {
+func FieldIsInAny(field Field, values ...any) Condition {
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: Field{Name: fieldName},
+			Value: field,
 		},
 		Operator: In,
 		Operand2: Operand{
@@ -175,11 +175,11 @@ func FieldIsInAny(fieldName string, values ...any) Condition {
 	}
 }
 
-func FieldIsNotInAny(fieldName string, values ...any) Condition {
+func FieldIsNotInAny(field Field, values ...any) Condition {
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: Field{Name: fieldName},
+			Value: field,
 		},
 		Operator: NotIn,
 		Operand2: Operand{
@@ -189,11 +189,11 @@ func FieldIsNotInAny(fieldName string, values ...any) Condition {
 	}
 }
 
-func FieldIsNull(fieldName string) Condition {
+func FieldIsNull(field Field) Condition {
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: Field{Name: fieldName},
+			Value: field,
 		},
 		Operator: Eq,
 		Operand2: Operand{
@@ -202,11 +202,11 @@ func FieldIsNull(fieldName string) Condition {
 	}
 }
 
-func FieldIsNotNull(fieldName string) Condition {
+func FieldIsNotNull(field Field) Condition {
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: Field{Name: fieldName},
+			Value: field,
 		},
 		Operator: Ne,
 		Operand2: Operand{
@@ -215,11 +215,11 @@ func FieldIsNotNull(fieldName string) Condition {
 	}
 }
 
-func FieldIsGreater(fieldName string, operandType OperandType, value any) Condition {
+func FieldIsGreater(field Field, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: Field{Name: fieldName},
+			Value: field,
 		},
 		Operator: Gt,
 		Operand2: Operand{
@@ -229,11 +229,11 @@ func FieldIsGreater(fieldName string, operandType OperandType, value any) Condit
 	}
 }
 
-func FieldIsGreaterOrEqual(fieldName string, operandType OperandType, value any) Condition {
+func FieldIsGreaterOrEqual(field Field, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: Field{Name: fieldName},
+			Value: field,
 		},
 		Operator: Gte,
 		Operand2: Operand{
@@ -243,11 +243,11 @@ func FieldIsGreaterOrEqual(fieldName string, operandType OperandType, value any)
 	}
 }
 
-func FieldIsLess(fieldName string, operandType OperandType, value any) Condition {
+func FieldIsLess(field Field, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: Field{Name: fieldName},
+			Value: field,
 		},
 		Operator: Lt,
 		Operand2: Operand{
@@ -257,11 +257,11 @@ func FieldIsLess(fieldName string, operandType OperandType, value any) Condition
 	}
 }
 
-func FieldIsLessOrEqual(fieldName string, operandType OperandType, value any) Condition {
+func FieldIsLessOrEqual(field Field, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
 			Type:  OperandField,
-			Value: Field{Name: fieldName},
+			Value: field,
 		},
 		Operator: Lte,
 		Operand2: Operand{

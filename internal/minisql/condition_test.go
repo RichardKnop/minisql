@@ -55,7 +55,7 @@ func TestFieldIsEqual(t *testing.T) {
 	t.Parallel()
 
 	t.Run("string field with quoted string value", func(t *testing.T) {
-		condition := FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("john@example.com")))
+		condition := FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("john@example.com")))
 
 		expected := Condition{
 			Operand1: Operand{
@@ -73,7 +73,7 @@ func TestFieldIsEqual(t *testing.T) {
 	})
 
 	t.Run("boolean field with boolean value", func(t *testing.T) {
-		condition := FieldIsEqual("verified", OperandBoolean, true)
+		condition := FieldIsEqual(Field{Name: "verified"}, OperandBoolean, true)
 
 		expected := Condition{
 			Operand1: Operand{
@@ -91,7 +91,7 @@ func TestFieldIsEqual(t *testing.T) {
 	})
 
 	t.Run("integer field with integer value", func(t *testing.T) {
-		condition := FieldIsEqual("id", OperandInteger, int64(25))
+		condition := FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(25))
 
 		expected := Condition{
 			Operand1: Operand{
@@ -109,7 +109,7 @@ func TestFieldIsEqual(t *testing.T) {
 	})
 
 	t.Run("float field with float value", func(t *testing.T) {
-		condition := FieldIsEqual("score", OperandFloat, 95.5)
+		condition := FieldIsEqual(Field{Name: "score"}, OperandFloat, 95.5)
 
 		expected := Condition{
 			Operand1: Operand{
@@ -127,7 +127,7 @@ func TestFieldIsEqual(t *testing.T) {
 	})
 
 	t.Run("field with null value", func(t *testing.T) {
-		condition := FieldIsEqual("description", OperandNull, nil)
+		condition := FieldIsEqual(Field{Name: "description"}, OperandNull, nil)
 
 		expected := Condition{
 			Operand1: Operand{
@@ -149,7 +149,7 @@ func TestFieldIsNotEqual(t *testing.T) {
 	t.Parallel()
 
 	t.Run("string field with quoted string value", func(t *testing.T) {
-		condition := FieldIsNotEqual("email", OperandQuotedString, NewTextPointer([]byte("john@example.com")))
+		condition := FieldIsNotEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("john@example.com")))
 
 		expected := Condition{
 			Operand1: Operand{
@@ -167,7 +167,7 @@ func TestFieldIsNotEqual(t *testing.T) {
 	})
 
 	t.Run("boolean field with boolean value", func(t *testing.T) {
-		condition := FieldIsNotEqual("verified", OperandBoolean, true)
+		condition := FieldIsNotEqual(Field{Name: "verified"}, OperandBoolean, true)
 
 		expected := Condition{
 			Operand1: Operand{
@@ -185,7 +185,7 @@ func TestFieldIsNotEqual(t *testing.T) {
 	})
 
 	t.Run("integer field with integer value", func(t *testing.T) {
-		condition := FieldIsNotEqual("id", OperandInteger, int64(25))
+		condition := FieldIsNotEqual(Field{Name: "id"}, OperandInteger, int64(25))
 
 		expected := Condition{
 			Operand1: Operand{
@@ -203,7 +203,7 @@ func TestFieldIsNotEqual(t *testing.T) {
 	})
 
 	t.Run("float field with float value", func(t *testing.T) {
-		condition := FieldIsNotEqual("score", OperandFloat, 95.5)
+		condition := FieldIsNotEqual(Field{Name: "score"}, OperandFloat, 95.5)
 
 		expected := Condition{
 			Operand1: Operand{
@@ -221,7 +221,7 @@ func TestFieldIsNotEqual(t *testing.T) {
 	})
 
 	t.Run("field with null value", func(t *testing.T) {
-		condition := FieldIsNotEqual("description", OperandNull, nil)
+		condition := FieldIsNotEqual(Field{Name: "description"}, OperandNull, nil)
 
 		expected := Condition{
 			Operand1: Operand{

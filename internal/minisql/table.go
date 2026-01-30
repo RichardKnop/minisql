@@ -27,6 +27,42 @@ type Table struct {
 
 type TableOption func(*Table)
 
+// estimateRowCount returns an approximate row count for the table
+// Uses index statistics if available, otherwise does a quick sequential scan estimate
+func (t *Table) estimateRowCount(ctx context.Context) int64 {
+	// First try to use statistics if available
+	if stats, ok := t.indexStats["_table"]; ok {
+		return stats.NEntry // For table stats, this represents row count
+	}
+
+	// Try primary key statistics
+	if t.PrimaryKey.Name != "" {
+		if stats, ok := t.indexStats[t.PrimaryKey.Name]; ok {
+			return stats.NEntry
+		}
+	}
+
+	// Fall back to quick estimation by counting
+	// This is still better than no optimization
+	count := int64(0)
+	rowChan := make(chan Row, 100)
+	go func() {
+		defer close(rowChan)
+		// Use empty scan to count all rows
+		scan := Scan{
+			TableName: t.Name,
+			Type:      ScanTypeSequential,
+		}
+		_ = t.sequentialScan(ctx, scan, []Field{}, rowChan)
+	}()
+
+	for range rowChan {
+		count++
+	}
+
+	return count
+}
+
 func WithPrimaryKey(pk PrimaryKey) TableOption {
 	return func(t *Table) {
 		t.PrimaryKey = pk

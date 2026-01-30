@@ -141,7 +141,7 @@ func (d *Database) deleteOldStats(ctx context.Context, statsTable *Table, tableN
 		TableName: StatsTableName,
 		Conditions: OneOrMore{
 			{
-				FieldIsEqual("tbl", OperandQuotedString, NewTextPointer([]byte(tableName))),
+				FieldIsEqual(Field{Name: "tbl"}, OperandQuotedString, NewTextPointer([]byte(tableName))),
 			},
 		},
 	})
@@ -325,7 +325,7 @@ func (d *Database) listStats(ctx context.Context, tableName string) ([]Stats, er
 	if tableName != "" {
 		stmt.Conditions = OneOrMore{
 			{
-				FieldIsEqual("tbl", OperandQuotedString, NewTextPointer([]byte(tableName))),
+				FieldIsEqual(Field{Name: "tbl"}, OperandQuotedString, NewTextPointer([]byte(tableName))),
 			},
 		}
 	}

@@ -223,6 +223,16 @@ func (p *parserItem) doParseSelect() error {
 			return fmt.Errorf(`at ORDER BY: cannot order by "*"`)
 		}
 		p.pop()
+
+		// Parse field name and optional alias prefix (e.g., "u.name" -> prefix="u", name="name")
+		var fieldName, aliasPrefix string
+		if dotIndex := strings.Index(identifier, "."); dotIndex != -1 {
+			aliasPrefix = identifier[:dotIndex]
+			fieldName = identifier[dotIndex+1:]
+		} else {
+			fieldName = identifier
+		}
+
 		// Start with default direction as ASC
 		theDirection := minisql.Asc
 		if direction := strings.ToUpper(p.peek()); direction == "ASC" || direction == "DESC" {
@@ -232,7 +242,7 @@ func (p *parserItem) doParseSelect() error {
 			p.pop()
 		}
 		p.OrderBy = append(p.OrderBy, minisql.OrderBy{
-			Field:     minisql.Field{Name: identifier},
+			Field:     minisql.Field{Name: fieldName, AliasPrefix: aliasPrefix},
 			Direction: theDirection,
 		})
 		p.step = stepSelectOrderByComma

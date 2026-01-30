@@ -44,7 +44,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	t.Run("Delete rows with NULL values when no rows match", func(t *testing.T) {
 		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
 			Kind:       Delete,
-			Conditions: NewOneOrMore(Conditions{FieldIsNull("id")}),
+			Conditions: NewOneOrMore(Conditions{FieldIsNull(Field{Name: "id"})}),
 		})
 
 		assert.Equal(t, 0, aResult.RowsAffected)
@@ -59,7 +59,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("id", OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
 				},
 			},
 		})
@@ -71,7 +71,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	t.Run("Delete rows with NULL values", func(t *testing.T) {
 		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
 			Kind:       Delete,
-			Conditions: NewOneOrMore(Conditions{FieldIsNull("age")}),
+			Conditions: NewOneOrMore(Conditions{FieldIsNull(Field{Name: "age"})}),
 		})
 
 		assert.Equal(t, 1, aResult.RowsAffected)
@@ -81,7 +81,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	t.Run("Delete rows with NOT NULL values", func(t *testing.T) {
 		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
 			Kind:       Delete,
-			Conditions: NewOneOrMore(Conditions{FieldIsNotNull("created")}),
+			Conditions: NewOneOrMore(Conditions{FieldIsNotNull(Field{Name: "created"})}),
 		})
 
 		assert.Equal(t, 1, aResult.RowsAffected)
@@ -156,7 +156,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
-					FieldIsInAny("id", ids...),
+					FieldIsInAny(Field{Name: "id"}, ids...),
 				},
 			},
 		})
@@ -202,7 +202,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
-					FieldIsInAny("id", ids...),
+					FieldIsInAny(Field{Name: "id"}, ids...),
 				},
 			},
 		})
@@ -246,7 +246,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
-					FieldIsInAny("id", ids...),
+					FieldIsInAny(Field{Name: "id"}, ids...),
 				},
 			},
 		})
@@ -293,7 +293,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
-					FieldIsInAny("id", ids...),
+					FieldIsInAny(Field{Name: "id"}, ids...),
 				},
 			},
 		})
@@ -333,7 +333,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
-					FieldIsInAny("id", ids...),
+					FieldIsInAny(Field{Name: "id"}, ids...),
 				},
 			},
 		})
@@ -378,7 +378,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
-					FieldIsInAny("id", ids...),
+					FieldIsInAny(Field{Name: "id"}, ids...),
 				},
 			},
 		})
@@ -418,7 +418,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
-					FieldIsInAny("id", ids...),
+					FieldIsInAny(Field{Name: "id"}, ids...),
 				},
 			},
 		})
@@ -522,7 +522,7 @@ func TestTable_Delete_Overflow(t *testing.T) {
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
-					FieldIsInAny("id", ids...),
+					FieldIsInAny(Field{Name: "id"}, ids...),
 				},
 			},
 		})
@@ -541,7 +541,7 @@ func TestTable_Delete_Overflow(t *testing.T) {
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
-					FieldIsInAny("id", ids...),
+					FieldIsInAny(Field{Name: "id"}, ids...),
 				},
 			},
 		})

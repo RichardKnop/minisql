@@ -229,7 +229,7 @@ func TestTable_Select(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
 			Fields:     fieldsFromColumns(aTable.Columns...),
-			Conditions: OneOrMore{{FieldIsNull("id")}},
+			Conditions: OneOrMore{{FieldIsNull(Field{Name: "id"})}},
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)
@@ -242,7 +242,7 @@ func TestTable_Select(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
 			Fields:     fieldsFromColumns(aTable.Columns...),
-			Conditions: OneOrMore{{FieldIsNull("age")}},
+			Conditions: OneOrMore{{FieldIsNull(Field{Name: "age"})}},
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)
@@ -258,7 +258,7 @@ func TestTable_Select(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
 			Fields:     fieldsFromColumns(aTable.Columns...),
-			Conditions: OneOrMore{{FieldIsNotNull("age")}},
+			Conditions: OneOrMore{{FieldIsNotNull(Field{Name: "age"})}},
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)
@@ -306,7 +306,7 @@ func TestTable_Select(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
 			Fields:     []Field{{Name: "id"}, {Name: "email"}},
-			Conditions: OneOrMore{{FieldIsNotNull("age")}},
+			Conditions: OneOrMore{{FieldIsNotNull(Field{Name: "age"})}},
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)
@@ -431,7 +431,7 @@ func TestTable_Select(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
 			Fields:     []Field{{Name: "COUNT(*)"}},
-			Conditions: OneOrMore{{FieldIsGreater("id", OperandInteger, middleID)}},
+			Conditions: OneOrMore{{FieldIsGreater(Field{Name: "id"}, OperandInteger, middleID)}},
 		}
 
 		aResult, err := aTable.Select(ctx, stmt)

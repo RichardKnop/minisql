@@ -22,8 +22,8 @@ func TestStatement_NumberPlaceholders(t *testing.T) {
 		},
 		Conditions: OneOrMore{
 			{
-				FieldIsEqual("a", OperandPlaceholder, nil),
-				FieldIsEqual("b", OperandInteger, int64(789)),
+				FieldIsEqual(Field{Name: "a"}, OperandPlaceholder, nil),
+				FieldIsEqual(Field{Name: "b"}, OperandInteger, int64(789)),
 			},
 		},
 	}
@@ -74,8 +74,8 @@ func TestStatement_BindArguments(t *testing.T) {
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual("a", OperandPlaceholder, nil),
-					FieldIsEqual("b", OperandInteger, int64(789)),
+					FieldIsEqual(Field{Name: "a"}, OperandPlaceholder, nil),
+					FieldIsEqual(Field{Name: "b"}, OperandInteger, int64(789)),
 				},
 			},
 		}

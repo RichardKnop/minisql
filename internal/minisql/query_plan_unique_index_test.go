@@ -49,7 +49,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("id", OperandInteger, int64(42)),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 					},
 				},
 			},
@@ -60,7 +60,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 						Type:      ScanTypeSequential,
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("id", OperandInteger, int64(42)),
+								FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 							},
 						},
 					},
@@ -73,7 +73,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsNull("email"),
+						FieldIsNull(Field{Name: "email"}),
 					},
 				},
 			},
@@ -84,7 +84,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 						Type:      ScanTypeSequential,
 						Filters: OneOrMore{
 							{
-								FieldIsNull("email"),
+								FieldIsNull(Field{Name: "email"}),
 							},
 						},
 					},
@@ -97,7 +97,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 				},
 			},
@@ -119,10 +119,10 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 					{
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("bar@example.com"))),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("bar@example.com"))),
 					},
 				},
 			},
@@ -151,12 +151,12 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("id", OperandInteger, int64(42)),
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 					{
-						FieldIsEqual("id", OperandInteger, int64(69)),
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("bar@example.com"))),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(69)),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("bar@example.com"))),
 					},
 				},
 			},
@@ -170,7 +170,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 						IndexKeys:    []any{"foo@example.com"},
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("id", OperandInteger, int64(42)),
+								FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 							},
 						},
 					},
@@ -182,7 +182,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 						IndexKeys:    []any{"bar@example.com"},
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("id", OperandInteger, int64(69)),
+								FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(69)),
 							},
 						},
 					},
@@ -195,11 +195,11 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("id", OperandInteger, int64(42)),
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 					{
-						FieldIsEqual("email", OperandQuotedString, NewTextPointer([]byte("bar@example.com"))),
+						FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("bar@example.com"))),
 					},
 				},
 			},
@@ -213,7 +213,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 						IndexKeys:    []any{"foo@example.com"},
 						Filters: OneOrMore{
 							{
-								FieldIsEqual("id", OperandInteger, int64(42)),
+								FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 							},
 						},
 					},
@@ -233,7 +233,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsInAny("email", NewTextPointer([]byte("foo@example.com")), NewTextPointer([]byte("bar@example.com"))),
+						FieldIsInAny(Field{Name: "email"}, NewTextPointer([]byte("foo@example.com")), NewTextPointer([]byte("bar@example.com"))),
 					},
 				},
 			},
@@ -255,7 +255,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsNotInAny("email", NewTextPointer([]byte("foo@example.com")), NewTextPointer([]byte("bar@example.com"))),
+						FieldIsNotInAny(Field{Name: "email"}, NewTextPointer([]byte("foo@example.com")), NewTextPointer([]byte("bar@example.com"))),
 					},
 				},
 			},
@@ -265,7 +265,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 						TableName: testTableName,
 						Type:      ScanTypeSequential,
 						Filters: OneOrMore{{
-							FieldIsNotInAny("email", NewTextPointer([]byte("foo@example.com")), NewTextPointer([]byte("bar@example.com"))),
+							FieldIsNotInAny(Field{Name: "email"}, NewTextPointer([]byte("foo@example.com")), NewTextPointer([]byte("bar@example.com"))),
 						}},
 					},
 				},
@@ -277,7 +277,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsNotEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsNotEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 				},
 			},
@@ -288,7 +288,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 						Type:      ScanTypeSequential,
 						Filters: OneOrMore{
 							{
-								FieldIsNotEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+								FieldIsNotEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 							},
 						},
 					},
@@ -358,8 +358,8 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsInAny("email", NewTextPointer([]byte("foo@example.com")), NewTextPointer([]byte("bar@example.com"))),
-						FieldIsEqual("id", OperandInteger, int64(42)),
+						FieldIsInAny(Field{Name: "email"}, NewTextPointer([]byte("foo@example.com")), NewTextPointer([]byte("bar@example.com"))),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 					},
 				},
 				OrderBy: []OrderBy{
@@ -378,7 +378,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 						IndexColumns: testColumns[1:2],
 						IndexKeys:    []any{"foo@example.com", "bar@example.com"},
 						Filters: OneOrMore{{
-							FieldIsEqual("id", OperandInteger, int64(42)),
+							FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 						}},
 					},
 				},
@@ -398,9 +398,9 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsEqual("id", OperandInteger, int64(42)),
-						FieldIsGreater("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
-						FieldIsLessOrEqual("email", OperandQuotedString, NewTextPointer([]byte("qux@example.com"))),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
+						FieldIsGreater(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsLessOrEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("qux@example.com"))),
 					},
 				},
 			},
@@ -422,7 +422,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 							},
 						},
 						Filters: OneOrMore{{
-							FieldIsEqual("id", OperandInteger, int64(42)),
+							FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 						}},
 					},
 				},
@@ -434,11 +434,11 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsGreaterOrEqual("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsGreaterOrEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
 					},
 					{
-						FieldIsLess("email", OperandQuotedString, NewTextPointer([]byte("qux@example.com"))),
-						FieldIsEqual("id", OperandInteger, int64(42)),
+						FieldIsLess(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("qux@example.com"))),
+						FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 					},
 				},
 			},
@@ -467,7 +467,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 							},
 						},
 						Filters: OneOrMore{{
-							FieldIsEqual("id", OperandInteger, int64(42)),
+							FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
 						}},
 					},
 				},
@@ -479,8 +479,8 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				Kind: Select,
 				Conditions: OneOrMore{
 					{
-						FieldIsGreater("email", OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
-						FieldIsLessOrEqual("email", OperandQuotedString, NewTextPointer([]byte("qux@example.com"))),
+						FieldIsGreater(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						FieldIsLessOrEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("qux@example.com"))),
 					},
 				},
 				OrderBy: []OrderBy{
