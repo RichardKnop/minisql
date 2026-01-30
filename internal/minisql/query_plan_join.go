@@ -36,11 +36,28 @@ func (t *Table) planJoinQuery(ctx context.Context, stmt Statement) (QueryPlan, e
 			return QueryPlan{}, fmt.Errorf("%w: %s", errTableDoesNotExist, join.TableName)
 		}
 
-		// Extract join column names from ON conditions
-		baseJoinCol, joinJoinCol := extractJoinColumns(join.Conditions, stmt.TableAlias, join.TableAlias)
+		// Extract join column pairs from ON conditions
+		// This now supports multiple conditions like: ON b.a_id = a.id AND b.other_id = a.other_id
+		joinColumnPairs, err := extractJoinColumnPairs(
+			join.Conditions,
+			stmt.TableAlias,
+			join.TableAlias,
+			t,           // base table for validation
+			joinedTable, // join table for validation
+		)
+		if err != nil {
+			return QueryPlan{}, err
+		}
 
-		// Check for index on joined table's join column
-		joinTableIndex := joinedTable.findIndexOnColumn(joinJoinCol)
+		// Extract column names for index lookup
+		joinTableColumns := make([]string, len(joinColumnPairs))
+		for i, pair := range joinColumnPairs {
+			joinTableColumns[i] = pair.JoinTableColumn.Name
+		}
+
+		// Check for index on joined table's join columns
+		// This supports both single column and composite indexes
+		joinTableIndex := joinedTable.findIndexOnColumns(joinTableColumns)
 
 		// Determine scan strategy for this join
 		// For star schema, base table is always outer (left), joined tables are inner (right)
@@ -51,7 +68,7 @@ func (t *Table) planJoinQuery(ctx context.Context, stmt Statement) (QueryPlan, e
 		)
 
 		if joinTableIndex != nil {
-			// Joined table has index on join column - use index nested loop join
+			// Joined table has index on join columns - use index nested loop join
 			innerScanType = ScanTypeIndexPoint
 			innerIndexInfo = joinTableIndex
 		} else {
@@ -71,7 +88,7 @@ func (t *Table) planJoinQuery(ctx context.Context, stmt Statement) (QueryPlan, e
 		if innerScanType == ScanTypeIndexPoint && innerIndexInfo != nil {
 			joinScan.IndexName = innerIndexInfo.Name
 			joinScan.IndexColumns = innerIndexInfo.Columns
-			// The actual key value will be set per base row during execution
+			// The actual key value (joinScan.IndexKeys) will be set at execution time
 		}
 
 		// Add scan to plan
@@ -80,22 +97,28 @@ func (t *Table) planJoinQuery(ctx context.Context, stmt Statement) (QueryPlan, e
 		// Create join plan entry
 		// In star schema, left side is always the base table (scan index 0)
 		// Right side is the current joined table
+		// For backward compatibility and index lookup, we use the first pair's columns
+		// The full Conditions will still be evaluated during join execution
 		plan.Joins = append(plan.Joins, JoinPlan{
 			Type:            join.Type,
 			LeftScanIndex:   0, // Base table is always scan index 0
 			RightScanIndex:  len(plan.Scans) - 1,
 			Conditions:      join.Conditions,
-			OuterJoinColumn: baseJoinCol,
-			InnerJoinColumn: joinJoinCol,
+			OuterJoinColumn: joinColumnPairs[0].BaseTableColumn.Name,
+			InnerJoinColumn: joinColumnPairs[0].JoinTableColumn.Name,
+			JoinColumnPairs: joinColumnPairs, // Store all pairs for composite key support
 		})
 	}
 
 	return plan, nil
 }
 
-// extractJoinColumns extracts the column names from JOIN ON conditions
-// Returns (baseTableColumn, joinTableColumn)
-func extractJoinColumns(conditions Conditions, baseAlias, joinAlias string) (string, string) {
+// extractJoinColumnPairs extracts all column pairs from JOIN ON conditions
+// and validates that the columns exist in both tables
+// Supports multiple conditions like: ON b.a_id = a.id AND b.other_id = a.other_id
+func extractJoinColumnPairs(conditions Conditions, baseAlias, joinAlias string, baseTable, joinTable *Table) ([]JoinColumnPair, error) {
+	var pairs []JoinColumnPair
+
 	for _, cond := range conditions {
 		if cond.Operator != Eq {
 			continue
@@ -113,15 +136,35 @@ func extractJoinColumns(conditions Conditions, baseAlias, joinAlias string) (str
 		}
 
 		// Match aliases to determine which field belongs to which table
+		var baseField, joinField Field
 		if field1.AliasPrefix == baseAlias && field2.AliasPrefix == joinAlias {
-			return field1.Name, field2.Name
+			baseField, joinField = field1, field2
+		} else if field1.AliasPrefix == joinAlias && field2.AliasPrefix == baseAlias {
+			baseField, joinField = field2, field1
+		} else {
+			// Not a valid join condition between these two tables
+			continue
 		}
-		if field1.AliasPrefix == joinAlias && field2.AliasPrefix == baseAlias {
-			return field2.Name, field1.Name
+
+		// Validate that columns exist in both tables
+		if _, ok := baseTable.ColumnByName(baseField.Name); !ok {
+			return nil, fmt.Errorf("column %s does not exist in base table %s", baseField.Name, baseTable.Name)
 		}
+		if _, ok := joinTable.ColumnByName(joinField.Name); !ok {
+			return nil, fmt.Errorf("column %s does not exist in join table %s", joinField.Name, joinTable.Name)
+		}
+
+		pairs = append(pairs, JoinColumnPair{
+			BaseTableColumn: baseField,
+			JoinTableColumn: joinField,
+		})
 	}
 
-	return "", ""
+	if len(pairs) == 0 {
+		return nil, fmt.Errorf("could not extract valid join columns from conditions")
+	}
+
+	return pairs, nil
 }
 
 // findIndexOnColumn finds an index (primary key, unique, or secondary) on the given column
@@ -151,6 +194,60 @@ func (t *Table) findIndexOnColumn(columnName string) *IndexInfo {
 	// Check secondary indexes
 	for name, idx := range t.SecondaryIndexes {
 		if len(idx.Columns) == 1 && idx.Columns[0].Name == columnName {
+			return &IndexInfo{
+				Name:    name,
+				Columns: idx.Columns,
+			}
+		}
+	}
+
+	return nil
+}
+
+// findIndexOnColumns finds an index (primary key, unique, or secondary) that matches the given columns
+// This supports both single column and composite indexes
+// The columns must match the index prefix (first N columns of the index)
+func (t *Table) findIndexOnColumns(columnNames []string) *IndexInfo {
+	if len(columnNames) == 0 {
+		return nil
+	}
+
+	// Helper function to check if index columns match the requested columns
+	matchesColumns := func(indexCols []Column) bool {
+		// Index must have at least as many columns as requested
+		if len(indexCols) < len(columnNames) {
+			return false
+		}
+		// Check if the first N columns of the index match the requested columns
+		for i, colName := range columnNames {
+			if indexCols[i].Name != colName {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Check primary key
+	if matchesColumns(t.PrimaryKey.Columns) {
+		return &IndexInfo{
+			Name:    t.PrimaryKey.Name,
+			Columns: t.PrimaryKey.Columns,
+		}
+	}
+
+	// Check unique indexes
+	for name, idx := range t.UniqueIndexes {
+		if matchesColumns(idx.Columns) {
+			return &IndexInfo{
+				Name:    name,
+				Columns: idx.Columns,
+			}
+		}
+	}
+
+	// Check secondary indexes
+	for name, idx := range t.SecondaryIndexes {
+		if matchesColumns(idx.Columns) {
 			return &IndexInfo{
 				Name:    name,
 				Columns: idx.Columns,
@@ -339,27 +436,54 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 		go func() {
 			defer close(innerRowChan)
 
-			// Get join key value from current row
-			// For first join, column is not prefixed; for subsequent joins, it's prefixed with base table alias
-			var joinKeyValue OptionalValue
-			var ok bool
+			// Build index keys from join column pairs
+			// For composite indexes, we need multiple key values
+			var joinKeyValues []any
 
-			if joinIndex == 0 {
-				// First join - column not yet prefixed
-				joinKeyValue, ok = currentRow.GetValue(join.OuterJoinColumn)
+			if len(join.JoinColumnPairs) > 0 {
+				// Use JoinColumnPairs for composite key support
+				joinKeyValues = make([]any, len(join.JoinColumnPairs))
+				for i, pair := range join.JoinColumnPairs {
+					var keyValue OptionalValue
+					var ok bool
+
+					if joinIndex == 0 {
+						// First join - column not yet prefixed
+						keyValue, ok = currentRow.GetValue(pair.BaseTableColumn.Name)
+					} else {
+						// Subsequent join - column is prefixed with base table alias
+						prefixedCol := baseTableAlias + "." + pair.BaseTableColumn.Name
+						keyValue, ok = currentRow.GetValue(prefixedCol)
+					}
+
+					if !ok || !keyValue.Valid {
+						return // No match possible if any join key is NULL or missing
+					}
+					joinKeyValues[i] = keyValue.Value
+				}
 			} else {
-				// Subsequent join - column is prefixed with base table alias
-				prefixedCol := baseTableAlias + "." + join.OuterJoinColumn
-				joinKeyValue, ok = currentRow.GetValue(prefixedCol)
+				// Backward compatibility: single column join
+				var joinKeyValue OptionalValue
+				var ok bool
+
+				if joinIndex == 0 {
+					// First join - column not yet prefixed
+					joinKeyValue, ok = currentRow.GetValue(join.OuterJoinColumn)
+				} else {
+					// Subsequent join - column is prefixed with base table alias
+					prefixedCol := baseTableAlias + "." + join.OuterJoinColumn
+					joinKeyValue, ok = currentRow.GetValue(prefixedCol)
+				}
+
+				if !ok || !joinKeyValue.Valid {
+					return // No match possible if join key is NULL or missing
+				}
+				joinKeyValues = []any{joinKeyValue.Value}
 			}
 
-			if !ok || !joinKeyValue.Valid {
-				return // No match possible if join key is NULL or missing
-			}
-
-			// Create a modified scan with the specific key value
+			// Create a modified scan with the specific key values
 			indexScan := innerScan
-			indexScan.IndexKeys = []any{joinKeyValue.Value}
+			indexScan.IndexKeys = joinKeyValues
 
 			// Use index scan to find matching rows
 			if err := innerTable.indexPointScan(ctx, indexScan, innerFields, innerRowChan); err != nil {

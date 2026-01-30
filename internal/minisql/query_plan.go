@@ -39,14 +39,21 @@ type RangeCondition struct {
 	Upper *RangeBound // nil = unbounded
 }
 
+// JoinColumnPair represents a pair of columns used in a JOIN ON condition
+type JoinColumnPair struct {
+	BaseTableColumn Field
+	JoinTableColumn Field
+}
+
 // JoinPlan represents a join operation between two scans
 type JoinPlan struct {
 	Type            JoinType
-	LeftScanIndex   int        // Index into Scans array (outer table)
-	RightScanIndex  int        // Index into Scans array (inner table)
-	Conditions      Conditions // ON clause conditions
-	OuterJoinColumn string     // Column name in outer table for index lookup optimization
-	InnerJoinColumn string     // Column name in inner table for index lookup optimization
+	LeftScanIndex   int              // Index into Scans array (outer table)
+	RightScanIndex  int              // Index into Scans array (inner table)
+	Conditions      Conditions       // ON clause conditions
+	OuterJoinColumn string           // Column name in outer table for index lookup optimization (first column for backward compat)
+	InnerJoinColumn string           // Column name in inner table for index lookup optimization (first column for backward compat)
+	JoinColumnPairs []JoinColumnPair // All join column pairs for composite index support
 }
 
 // QueryPlan determines how to execute a query
