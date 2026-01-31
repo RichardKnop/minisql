@@ -189,3 +189,242 @@ func TestPushDownFilters(t *testing.T) {
 		assert.Len(t, joinFilters["p"], 0, "Join table should have no filters")
 	})
 }
+
+func TestExtractJoinColumnPairs(t *testing.T) {
+	t.Parallel()
+
+	// Create mock tables for validation
+	baseTable := &Table{
+		Name: "table_a",
+		Columns: []Column{
+			{Name: "id", Kind: Int4, Size: 4},
+			{Name: "other_id", Kind: Int4, Size: 4},
+			{Name: "name", Kind: Varchar, Size: 255},
+		},
+		columnCache: map[string]int{
+			"id":       0,
+			"other_id": 1,
+			"name":     2,
+		},
+	}
+
+	joinTable := &Table{
+		Name: "table_b",
+		Columns: []Column{
+			{Name: "id", Kind: Int4, Size: 4},
+			{Name: "a_id", Kind: Int4, Size: 4},
+			{Name: "other_id", Kind: Int4, Size: 4},
+			{Name: "value", Kind: Varchar, Size: 255},
+		},
+		columnCache: map[string]int{
+			"id":       0,
+			"a_id":     1,
+			"other_id": 2,
+			"value":    3,
+		},
+	}
+
+	t.Run("Single join condition", func(t *testing.T) {
+		// ON b.a_id = a.id
+		conditions := Conditions{
+			FieldIsEqual(
+				Field{AliasPrefix: "b", Name: "a_id"},
+				OperandField,
+				Field{AliasPrefix: "a", Name: "id"},
+			),
+		}
+
+		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
+
+		assert.NoError(t, err)
+		assert.Len(t, pairs, 1, "Should extract one column pair")
+		assert.Equal(t, "id", pairs[0].BaseTableColumn.Name)
+		assert.Equal(t, "a", pairs[0].BaseTableColumn.AliasPrefix)
+		assert.Equal(t, "a_id", pairs[0].JoinTableColumn.Name)
+		assert.Equal(t, "b", pairs[0].JoinTableColumn.AliasPrefix)
+	})
+
+	t.Run("Multiple join conditions (composite key)", func(t *testing.T) {
+		// ON b.a_id = a.id AND b.other_id = a.other_id
+		conditions := Conditions{
+			FieldIsEqual(
+				Field{AliasPrefix: "b", Name: "a_id"},
+				OperandField,
+				Field{AliasPrefix: "a", Name: "id"},
+			),
+			FieldIsEqual(
+				Field{AliasPrefix: "b", Name: "other_id"},
+				OperandField,
+				Field{AliasPrefix: "a", Name: "other_id"},
+			),
+		}
+
+		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
+
+		assert.NoError(t, err)
+		assert.Len(t, pairs, 2, "Should extract two column pairs")
+		
+		// First pair
+		assert.Equal(t, "id", pairs[0].BaseTableColumn.Name)
+		assert.Equal(t, "a", pairs[0].BaseTableColumn.AliasPrefix)
+		assert.Equal(t, "a_id", pairs[0].JoinTableColumn.Name)
+		assert.Equal(t, "b", pairs[0].JoinTableColumn.AliasPrefix)
+		
+		// Second pair
+		assert.Equal(t, "other_id", pairs[1].BaseTableColumn.Name)
+		assert.Equal(t, "a", pairs[1].BaseTableColumn.AliasPrefix)
+		assert.Equal(t, "other_id", pairs[1].JoinTableColumn.Name)
+		assert.Equal(t, "b", pairs[1].JoinTableColumn.AliasPrefix)
+	})
+
+	t.Run("Reversed field order - should handle correctly", func(t *testing.T) {
+		// ON a.id = b.a_id (reversed from typical order)
+		conditions := Conditions{
+			FieldIsEqual(
+				Field{AliasPrefix: "a", Name: "id"},
+				OperandField,
+				Field{AliasPrefix: "b", Name: "a_id"},
+			),
+		}
+
+		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
+
+		assert.NoError(t, err)
+		assert.Len(t, pairs, 1, "Should extract one column pair")
+		assert.Equal(t, "id", pairs[0].BaseTableColumn.Name)
+		assert.Equal(t, "a_id", pairs[0].JoinTableColumn.Name)
+	})
+
+	t.Run("Mixed valid and invalid conditions", func(t *testing.T) {
+		// ON b.a_id = a.id AND b.value > 'test' AND b.other_id = a.other_id
+		// Should extract only the equality conditions with fields on both sides
+		conditions := Conditions{
+			FieldIsEqual(
+				Field{AliasPrefix: "b", Name: "a_id"},
+				OperandField,
+				Field{AliasPrefix: "a", Name: "id"},
+			),
+			FieldIsGreater(
+				Field{AliasPrefix: "b", Name: "value"},
+				OperandQuotedString,
+				NewTextPointer([]byte("test")),
+			),
+			FieldIsEqual(
+				Field{AliasPrefix: "b", Name: "other_id"},
+				OperandField,
+				Field{AliasPrefix: "a", Name: "other_id"},
+			),
+		}
+
+		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
+
+		assert.NoError(t, err)
+		assert.Len(t, pairs, 2, "Should extract only the two valid join conditions")
+		assert.Equal(t, "id", pairs[0].BaseTableColumn.Name)
+		assert.Equal(t, "a_id", pairs[0].JoinTableColumn.Name)
+		assert.Equal(t, "other_id", pairs[1].BaseTableColumn.Name)
+		assert.Equal(t, "other_id", pairs[1].JoinTableColumn.Name)
+	})
+
+	t.Run("Error - no valid join conditions", func(t *testing.T) {
+		// Only non-equality or non-field conditions
+		conditions := Conditions{
+			FieldIsGreater(
+				Field{AliasPrefix: "b", Name: "value"},
+				OperandQuotedString,
+				NewTextPointer([]byte("test")),
+			),
+		}
+
+		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "could not extract valid join columns")
+		assert.Nil(t, pairs)
+	})
+
+	t.Run("Error - base table column does not exist", func(t *testing.T) {
+		// ON b.a_id = a.nonexistent_column
+		conditions := Conditions{
+			FieldIsEqual(
+				Field{AliasPrefix: "b", Name: "a_id"},
+				OperandField,
+				Field{AliasPrefix: "a", Name: "nonexistent_column"},
+			),
+		}
+
+		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "column nonexistent_column does not exist in base table")
+		assert.Nil(t, pairs)
+	})
+
+	t.Run("Error - join table column does not exist", func(t *testing.T) {
+		// ON b.nonexistent_column = a.id
+		conditions := Conditions{
+			FieldIsEqual(
+				Field{AliasPrefix: "b", Name: "nonexistent_column"},
+				OperandField,
+				Field{AliasPrefix: "a", Name: "id"},
+			),
+		}
+
+		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "column nonexistent_column does not exist in join table")
+		assert.Nil(t, pairs)
+	})
+
+	t.Run("Ignore conditions between wrong tables", func(t *testing.T) {
+		// ON b.a_id = c.id (c is not part of this join)
+		// Should return error as no valid conditions found
+		conditions := Conditions{
+			FieldIsEqual(
+				Field{AliasPrefix: "b", Name: "a_id"},
+				OperandField,
+				Field{AliasPrefix: "c", Name: "id"},
+			),
+		}
+
+		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "could not extract valid join columns")
+		assert.Nil(t, pairs)
+	})
+
+	t.Run("Empty conditions", func(t *testing.T) {
+		conditions := Conditions{}
+
+		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "could not extract valid join columns")
+		assert.Nil(t, pairs)
+	})
+
+	t.Run("Multiple conditions with one invalid column", func(t *testing.T) {
+		// ON b.a_id = a.id AND b.invalid = a.other_id
+		// Should fail validation on the second condition
+		conditions := Conditions{
+			FieldIsEqual(
+				Field{AliasPrefix: "b", Name: "a_id"},
+				OperandField,
+				Field{AliasPrefix: "a", Name: "id"},
+			),
+			FieldIsEqual(
+				Field{AliasPrefix: "b", Name: "invalid"},
+				OperandField,
+				Field{AliasPrefix: "a", Name: "other_id"},
+			),
+		}
+
+		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "column invalid does not exist in join table")
+		assert.Nil(t, pairs)
+	})
+}
