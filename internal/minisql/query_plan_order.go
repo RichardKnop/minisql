@@ -7,8 +7,8 @@ func (p QueryPlan) optimizeOrdering(t *Table, originalConditions OneOrMore) Quer
 	}
 
 	if len(p.OrderBy) > 1 {
-		// TODO - Multiple ORDER BY columns (revisit later)
-		// Always need in-memory sort for now
+		// Multiple ORDER BY columns: a single-column index cannot satisfy the full sort,
+		// so we always fall back to an in-memory sort using all ORDER BY clauses.
 		p.SortInMemory = true
 		return p
 	}

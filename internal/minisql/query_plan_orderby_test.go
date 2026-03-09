@@ -126,6 +126,26 @@ func TestQueryPlan_OptimizeOrdering_NoFilters(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, plan.SortInMemory, "expected SortInMemory = true when ORDER BY uses non-indexed column")
 	})
+
+	t.Run("ORDER BY multiple columns - always sort in memory", func(t *testing.T) {
+		t.Parallel()
+
+		stmt := Statement{
+			Conditions: OneOrMore{},
+			OrderBy: []OrderBy{
+				{Field: Field{Name: "id"}, Direction: Asc},
+				{Field: Field{Name: "name"}, Direction: Desc},
+			},
+		}
+
+		plan, err := table.PlanQuery(ctx, stmt)
+		require.NoError(t, err)
+		// Multi-column ORDER BY always uses in-memory sort; a single-column index
+		// cannot satisfy the full sort key.
+		assert.True(t, plan.SortInMemory, "expected SortInMemory = true for multi-column ORDER BY")
+		// Both ORDER BY clauses must be propagated to the plan.
+		assert.Len(t, plan.OrderBy, 2)
+	})
 }
 
 func TestQueryPlan_OptimizeOrdering_WithFilters(t *testing.T) {
