@@ -15,6 +15,64 @@ func TestParse_Select(t *testing.T) {
 
 	testCases := []testCase{
 		{
+			"SELECT DISTINCT works",
+			"SELECT DISTINCT a FROM b;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Distinct:  true,
+					Fields:    []minisql.Field{{Name: "a"}},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT DISTINCT multiple fields works",
+			"SELECT DISTINCT a, c FROM b;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Distinct:  true,
+					Fields:    []minisql.Field{{Name: "a"}, {Name: "c"}},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT DISTINCT * works",
+			"SELECT DISTINCT * FROM b;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Distinct:  true,
+					Fields:    []minisql.Field{{Name: "*"}},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT DISTINCT with ORDER BY works",
+			"SELECT DISTINCT a FROM b ORDER BY a;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Distinct:  true,
+					Fields:    []minisql.Field{{Name: "a"}},
+					OrderBy: []minisql.OrderBy{
+						{
+							Field:     minisql.Field{Name: "a"},
+							Direction: minisql.Asc,
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
 			"SELECT without FROM fails",
 			"SELECT",
 			nil,

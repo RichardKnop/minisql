@@ -41,6 +41,7 @@ var reservedWords = []string{
 	"IF NOT EXISTS", "WHERE", "FROM", "SET", "ASC", "DESC", "AS",
 	"BEGIN", "COMMIT", "ROLLBACK", "ANALYZE",
 	"INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "ON",
+	"DISTINCT",
 	";",
 }
 
