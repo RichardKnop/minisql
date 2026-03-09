@@ -389,6 +389,101 @@ func TestTable_Select(t *testing.T) {
 		assert.Equal(t, expected, collectRows(ctx, aResult))
 	})
 
+	t.Run("Select with multi-column order by (age ASC, email ASC)", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(aTable.Columns...),
+			OrderBy: []OrderBy{
+				{Field: Field{Name: "age"}, Direction: Asc},
+				{Field: Field{Name: "email"}, Direction: Asc},
+			},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		expected := make([]Row, len(rows))
+		copy(expected, rows)
+		sort.SliceStable(expected, func(i, j int) bool {
+			ageI, _ := expected[i].GetValue("age")
+			ageJ, _ := expected[j].GetValue("age")
+			cmp := compareValues(ageI, ageJ)
+			if cmp != 0 {
+				return cmp < 0
+			}
+			emailI, _ := expected[i].GetValue("email")
+			emailJ, _ := expected[j].GetValue("email")
+			return strings.Compare(emailI.Value.(TextPointer).String(), emailJ.Value.(TextPointer).String()) < 0
+		})
+
+		assert.Equal(t, expected, collectRows(ctx, aResult))
+	})
+
+	t.Run("Select with multi-column order by (age ASC, email DESC)", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(aTable.Columns...),
+			OrderBy: []OrderBy{
+				{Field: Field{Name: "age"}, Direction: Asc},
+				{Field: Field{Name: "email"}, Direction: Desc},
+			},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		expected := make([]Row, len(rows))
+		copy(expected, rows)
+		sort.SliceStable(expected, func(i, j int) bool {
+			ageI, _ := expected[i].GetValue("age")
+			ageJ, _ := expected[j].GetValue("age")
+			cmp := compareValues(ageI, ageJ)
+			if cmp != 0 {
+				return cmp < 0
+			}
+			emailI, _ := expected[i].GetValue("email")
+			emailJ, _ := expected[j].GetValue("email")
+			return strings.Compare(emailI.Value.(TextPointer).String(), emailJ.Value.(TextPointer).String()) > 0
+		})
+
+		assert.Equal(t, expected, collectRows(ctx, aResult))
+	})
+
+	t.Run("Select with three-column order by", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: fieldsFromColumns(aTable.Columns...),
+			OrderBy: []OrderBy{
+				{Field: Field{Name: "age"}, Direction: Asc},
+				{Field: Field{Name: "verified"}, Direction: Desc},
+				{Field: Field{Name: "email"}, Direction: Asc},
+			},
+		}
+
+		aResult, err := aTable.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		expected := make([]Row, len(rows))
+		copy(expected, rows)
+		sort.SliceStable(expected, func(i, j int) bool {
+			ageI, _ := expected[i].GetValue("age")
+			ageJ, _ := expected[j].GetValue("age")
+			if cmp := compareValues(ageI, ageJ); cmp != 0 {
+				return cmp < 0
+			}
+			verI, _ := expected[i].GetValue("verified")
+			verJ, _ := expected[j].GetValue("verified")
+			if cmp := compareValues(verI, verJ); cmp != 0 {
+				return cmp > 0 // DESC
+			}
+			emailI, _ := expected[i].GetValue("email")
+			emailJ, _ := expected[j].GetValue("email")
+			return strings.Compare(emailI.Value.(TextPointer).String(), emailJ.Value.(TextPointer).String()) < 0
+		})
+
+		assert.Equal(t, expected, collectRows(ctx, aResult))
+	})
+
 	t.Run("Count all rows", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
