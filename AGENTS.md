@@ -337,6 +337,8 @@ Parser files mirror engine files: `parser/select.go` ↔ `internal/minisql/selec
 - **No `database/sql` connection pooling** — always `db.SetMaxOpenConns(1)` / `db.SetMaxIdleConns(1)`.
 - **WHERE clause nesting depth**: currently limited to one level of AND/OR nesting (see `OneOrMore` type in `stmt.go`).
 - **INNER JOIN topology**: only star-schema (multiple tables joining to one base table). Nested joins are parsed but not fully executed.
+- **Multi-column `ORDER BY` index optimisation**: when all `ORDER BY` directions are the same (all ASC or all DESC) and a composite secondary index exists whose columns match the `ORDER BY` columns exactly (same order), the planner uses that index and avoids an in-memory sort. Mixed directions (e.g., `a ASC, b DESC`) always fall back to an in-memory sort because the index scan direction is a single bit (`SortReverse`) with no per-column direction support.
+- **Multi-column `CREATE INDEX`**: supported — a composite `BTreeIndex[CompositeKey]` is created. The index is usable for ORDER BY optimisation (see above) and for multi-column unique constraints.
 
 ---
 

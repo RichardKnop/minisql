@@ -219,6 +219,15 @@ func (t *Table) IndexInfoByColumnName(name string) (IndexInfo, bool) {
 	return info, true
 }
 
+// IndexInfoByColumns looks up an index whose columns (in order) exactly match the given slice.
+func (t *Table) IndexInfoByColumns(columns []Column) (IndexInfo, bool) {
+	info, ok := t.columnIndexInfoCache[indexColumnHash(columns)]
+	if !ok {
+		return IndexInfo{}, false
+	}
+	return info, true
+}
+
 func (t *Table) IndexByName(name string) (BTreeIndex, bool) {
 	if t.HasPrimaryKey() && t.PrimaryKey.Name == name {
 		return t.PrimaryKey.Index, true
