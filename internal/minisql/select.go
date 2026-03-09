@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -160,7 +161,19 @@ func (t *Table) selectStreaming(stmt Statement, filteredPipe chan Row, errorsPip
 		if stmt.Offset.Valid {
 			offset = stmt.Offset.Value.(int64)
 		}
+		var seen map[string]struct{}
+		if stmt.Distinct {
+			seen = make(map[string]struct{})
+		}
 		for aRow := range in {
+			projected := aRow.OnlyFields(requestedFields...)
+			if stmt.Distinct {
+				key := rowDistinctKey(projected)
+				if _, dup := seen[key]; dup {
+					continue
+				}
+				seen[key] = struct{}{}
+			}
 			if stmt.Limit.Valid && limit == 0 {
 				return
 			}
@@ -171,7 +184,7 @@ func (t *Table) selectStreaming(stmt Statement, filteredPipe chan Row, errorsPip
 			if stmt.Limit.Valid {
 				limit -= 1
 			}
-			out <- aRow.OnlyFields(requestedFields...)
+			out <- projected
 		}
 	}(filteredPipe, limitedPipe)
 
@@ -208,11 +221,11 @@ func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, unfilteredPipe <-
 	}
 
 	// For queries with LIMIT (and optional OFFSET), use a heap to keep only top N+offset rows
-	// This is much more memory efficient than collecting all rows
-	// For example: SELECT * FROM large_table ORDER BY col LIMIT 10 OFFSET 5
-	// Only keeps 15 rows in memory instead of potentially millions
+	// This is much more memory efficient than collecting all rows.
+	// However, when DISTINCT is enabled we must see all rows before deduplication, so the
+	// heap optimisation cannot be used in that case.
 	var allRows []Row
-	if hasLimit && len(plan.OrderBy) > 0 {
+	if hasLimit && len(plan.OrderBy) > 0 && !stmt.Distinct {
 		// Use heap-based approach for memory efficiency
 		maxRows := offset + limit
 		h := newRowHeap(plan.OrderBy, maxRows)
@@ -243,6 +256,11 @@ func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, unfilteredPipe <-
 			return StatementResult{}, err
 		}
 	default:
+	}
+
+	// Apply DISTINCT deduplication before OFFSET/LIMIT
+	if stmt.Distinct {
+		allRows = deduplicateRows(allRows, requestedFields)
 	}
 
 	// Apply OFFSET and LIMIT to final result
@@ -437,6 +455,58 @@ func (t *Table) indexPointScan(ctx context.Context, aScan Scan, selectedFields [
 	}
 
 	return nil
+}
+
+// rowDistinctKey builds a string key from a projected row's values for DISTINCT deduplication.
+// Each value is encoded with a type prefix so that different types with the same printed
+// representation (e.g. int64(1) and float64(1)) are never considered equal.
+func rowDistinctKey(row Row) string {
+	var b strings.Builder
+	for i, v := range row.Values {
+		if i > 0 {
+			b.WriteByte('\x1f') // ASCII unit separator
+		}
+		if !v.Valid {
+			b.WriteString("null")
+			continue
+		}
+		switch val := v.Value.(type) {
+		case TextPointer:
+			fmt.Fprintf(&b, "t%d:%s", val.Length, val.String())
+		case Time:
+			fmt.Fprintf(&b, "ts:%d", val.Microseconds)
+		case bool:
+			fmt.Fprintf(&b, "b:%t", val)
+		case int64:
+			fmt.Fprintf(&b, "i64:%d", val)
+		case int32:
+			fmt.Fprintf(&b, "i32:%d", val)
+		case float64:
+			fmt.Fprintf(&b, "f64:%v", val)
+		case float32:
+			fmt.Fprintf(&b, "f32:%v", val)
+		default:
+			fmt.Fprintf(&b, "?:%v", val)
+		}
+	}
+	return b.String()
+}
+
+// deduplicateRows removes duplicate rows based on their projected values for the given fields.
+// It preserves the first occurrence of each unique row and maintains input order.
+func deduplicateRows(rows []Row, fields []Field) []Row {
+	seen := make(map[string]struct{}, len(rows))
+	out := make([]Row, 0, len(rows))
+	for _, row := range rows {
+		projected := row.OnlyFields(fields...)
+		key := rowDistinctKey(projected)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, row)
+	}
+	return out
 }
 
 func (t *Table) sequentialScan(ctx context.Context, aScan Scan, selectedFields []Field, out chan<- Row) error {

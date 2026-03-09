@@ -27,6 +27,12 @@ SELECT select_list
 func (p *parserItem) doParseSelect() error {
 	switch p.step {
 	case stepSelectField:
+		// Handle optional DISTINCT keyword before the field list
+		if len(p.Fields) == 0 && strings.ToUpper(p.peek()) == "DISTINCT" {
+			p.Distinct = true
+			p.pop()
+		}
+
 		identifier := p.peek()
 		if !isIdentifier(identifier) && identifier != "*" && strings.ToUpper(identifier) != "COUNT(*)" {
 			return errSelectWithoutFields

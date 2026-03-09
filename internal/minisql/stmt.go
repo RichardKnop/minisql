@@ -209,6 +209,7 @@ type Statement struct {
 	UniqueIndexes []UniqueIndex // use for CREATE TABLE
 	// Used for SELECT (i.e. SELECTed field names) and INSERT (INSERTEDed field names)
 	// and UPDATE (UPDATEDed field names as Updates map is not ordered)
+	Distinct    bool
 	Fields      []Field
 	Aliases     map[string]string
 	Inserts     [][]OptionalValue
@@ -269,6 +270,7 @@ func (s Statement) Clone() Statement {
 		TableName:   s.TableName,
 		IndexName:   s.IndexName,
 		Columns:     s.Columns,
+		Distinct:    s.Distinct,
 		Fields:      s.Fields,
 		Aliases:     s.Aliases,
 		Inserts:     make([][]OptionalValue, len(s.Inserts)),

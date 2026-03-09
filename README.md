@@ -225,6 +225,7 @@ if err := rows.Err(); err != nil {
 - `CREATE INDEX`, `DROP INDEX` - only for secondary non unique indexes (primary and unique can be declared as part of `CREATE TABLE`)
 - `INSERT` (single row or multi rows via tuple of values separated by comma)
 - `SELECT` (all fields with `*`, only specific fields or count rows with `COUNT(*)`)
+- `SELECT DISTINCT`
 - `UPDATE`
 - `DELETE`
 - simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis
