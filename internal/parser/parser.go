@@ -39,7 +39,7 @@ var reservedWords = []string{
 	"PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "DEFAULT", "NOT NULL", "NULL", "UNIQUE",
 	"IS NULL", "IS NOT NULL", "TRUE", "FALSE", "NOW()",
 	"IF NOT EXISTS", "WHERE", "FROM", "SET", "ASC", "DESC", "AS",
-	"BEGIN", "COMMIT", "ROLLBACK", "ANALYZE",
+	"BEGIN", "COMMIT", "ROLLBACK", "ANALYZE", "VACUUM",
 	"INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "ON",
 	"DISTINCT",
 	";",
@@ -191,6 +191,10 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 				p.Kind = minisql.Analyze
 				p.pop()
 				p.step = stepAnalyze
+			case "VACUUM":
+				p.Kind = minisql.Vacuum
+				p.pop()
+				p.step = stepStatementEnd
 			default:
 				return statements, errInvalidStatementKind
 			}
@@ -341,7 +345,10 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 		}
 	}
 
-	if p.step != stepStatementEnd {
+	// Also handle statements (e.g. VACUUM) that are valid at EOF without a
+	// trailing semicolon: they set p.step = stepStatementEnd before the loop
+	// ends but are not yet in the slice.
+	if p.step != stepStatementEnd || p.Statement.Kind != 0 {
 		if err := p.validate(p.Statement); err != nil {
 			return nil, err
 		}
@@ -524,7 +531,7 @@ func (p *parserItem) validate(stmt minisql.Statement) error {
 		if stmt.Kind == minisql.CreateIndex && len(stmt.Columns) == 0 {
 			return errCreateIndexNoColumns
 		}
-	} else if stmt.TableName == "" && stmt.Kind != minisql.Analyze {
+	} else if stmt.TableName == "" && stmt.Kind != minisql.Analyze && stmt.Kind != minisql.Vacuum {
 		return errEmptyTableName
 	}
 	if stmt.Kind == minisql.CreateTable {
