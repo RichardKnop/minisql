@@ -20,12 +20,29 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 	}
 
 	if len(keys) > 1 {
-		return fmt.Errorf("composite unique indexes are not supported yet")
+		// Composite secondary index: all key columns must be non-NULL
+		keyValues := make([]any, 0, len(keys))
+		for i, key := range keys {
+			if !key.Valid {
+				return nil // skip if any column is NULL
+			}
+			castedKey, err := castKeyValue(secondaryIndex.Columns[i], key.Value)
+			if err != nil {
+				return fmt.Errorf("failed to cast key value for secondary index %s: %w", secondaryIndex.Name, err)
+			}
+			keyValues = append(keyValues, castedKey)
+		}
+		ck := NewCompositeKey(secondaryIndex.Columns, keyValues...)
+		t.logger.Sugar().With("index", secondaryIndex.Name, "key", ck).Debug("inserting secondary index key")
+		if err := secondaryIndex.Index.Insert(ctx, ck, rowID); err != nil {
+			return fmt.Errorf("failed to insert key for secondary index %s: %w", secondaryIndex.Name, err)
+		}
+		return nil
 	}
 
 	key := keys[0]
 
-	// We only need to insert into the unique index if the key is not NULL
+	// We only need to insert into the index if the key is not NULL
 	if !key.Valid {
 		return nil
 	}

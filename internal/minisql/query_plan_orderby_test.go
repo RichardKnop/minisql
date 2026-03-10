@@ -127,7 +127,7 @@ func TestQueryPlan_OptimizeOrdering_NoFilters(t *testing.T) {
 		assert.True(t, plan.SortInMemory, "expected SortInMemory = true when ORDER BY uses non-indexed column")
 	})
 
-	t.Run("ORDER BY multiple columns - always sort in memory", func(t *testing.T) {
+	t.Run("ORDER BY multiple columns mixed direction - sort in memory", func(t *testing.T) {
 		t.Parallel()
 
 		stmt := Statement{
@@ -140,9 +140,9 @@ func TestQueryPlan_OptimizeOrdering_NoFilters(t *testing.T) {
 
 		plan, err := table.PlanQuery(ctx, stmt)
 		require.NoError(t, err)
-		// Multi-column ORDER BY always uses in-memory sort; a single-column index
-		// cannot satisfy the full sort key.
-		assert.True(t, plan.SortInMemory, "expected SortInMemory = true for multi-column ORDER BY")
+		// Mixed ASC/DESC cannot be satisfied by a composite index (scan direction is a
+		// single bit), and no single-column index covers the full sort key.
+		assert.True(t, plan.SortInMemory, "expected SortInMemory = true for mixed-direction multi-column ORDER BY")
 		// Both ORDER BY clauses must be propagated to the plan.
 		assert.Len(t, plan.OrderBy, 2)
 	})
@@ -348,5 +348,145 @@ func TestQueryPlan_OptimizeOrdering_WithFilters(t *testing.T) {
 
 		// Should sort in memory
 		assert.True(t, plan.SortInMemory, "expected SortInMemory = true without stats")
+	})
+}
+
+func TestQueryPlan_CompositeIndexForOrdering(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	logger := zap.NewNop()
+
+	// Table with three columns: id (pk), level, score
+	columns := []Column{
+		{Name: "id", Kind: Int8, Size: 8},
+		{Name: "level", Kind: Int4, Size: 4},
+		{Name: "score", Kind: Int4, Size: 4},
+	}
+
+	newTableWithCompositeIndex := func() *Table {
+		tbl := NewTable(logger, nil, nil, "results", columns, 0, nil,
+			WithPrimaryKey(NewPrimaryKey("pk_id", columns[0:1], false)),
+		)
+		// Composite secondary index on (level, score)
+		tbl.SecondaryIndexes["idx_level_score"] = SecondaryIndex{
+			IndexInfo: IndexInfo{
+				Name:    "idx_level_score",
+				Columns: []Column{columns[1], columns[2]},
+			},
+		}
+		// Rebuild cache so the planner can find the composite index
+		tbl.columnIndexInfoCache = make(map[string]IndexInfo)
+		tbl.columnIndexInfoCache[indexColumnHash(tbl.PrimaryKey.Columns)] = tbl.PrimaryKey.IndexInfo
+		for _, idx := range tbl.SecondaryIndexes {
+			tbl.columnIndexInfoCache[indexColumnHash(idx.Columns)] = idx.IndexInfo
+		}
+		return tbl
+	}
+
+	t.Run("ORDER BY matches composite index ASC ASC - use index, no sort", func(t *testing.T) {
+		t.Parallel()
+
+		tbl := newTableWithCompositeIndex()
+		stmt := Statement{
+			Conditions: OneOrMore{},
+			OrderBy: []OrderBy{
+				{Field: Field{Name: "level"}, Direction: Asc},
+				{Field: Field{Name: "score"}, Direction: Asc},
+			},
+		}
+
+		plan, err := tbl.PlanQuery(ctx, stmt)
+		require.NoError(t, err)
+
+		assert.False(t, plan.SortInMemory, "expected SortInMemory = false when composite index covers ORDER BY")
+		assert.False(t, plan.SortReverse, "expected SortReverse = false for ASC ORDER BY")
+		assert.Equal(t, ScanTypeIndexAll, plan.Scans[0].Type)
+		assert.Equal(t, "idx_level_score", plan.Scans[0].IndexName)
+		assert.Len(t, plan.OrderBy, 2)
+	})
+
+	t.Run("ORDER BY matches composite index DESC DESC - use index reversed, no sort", func(t *testing.T) {
+		t.Parallel()
+
+		tbl := newTableWithCompositeIndex()
+		stmt := Statement{
+			Conditions: OneOrMore{},
+			OrderBy: []OrderBy{
+				{Field: Field{Name: "level"}, Direction: Desc},
+				{Field: Field{Name: "score"}, Direction: Desc},
+			},
+		}
+
+		plan, err := tbl.PlanQuery(ctx, stmt)
+		require.NoError(t, err)
+
+		assert.False(t, plan.SortInMemory, "expected SortInMemory = false when composite index covers ORDER BY")
+		assert.True(t, plan.SortReverse, "expected SortReverse = true for DESC ORDER BY")
+		assert.Equal(t, ScanTypeIndexAll, plan.Scans[0].Type)
+		assert.Equal(t, "idx_level_score", plan.Scans[0].IndexName)
+	})
+
+	t.Run("ORDER BY mixed directions - cannot use composite index, sort in memory", func(t *testing.T) {
+		t.Parallel()
+
+		tbl := newTableWithCompositeIndex()
+		stmt := Statement{
+			Conditions: OneOrMore{},
+			OrderBy: []OrderBy{
+				{Field: Field{Name: "level"}, Direction: Asc},
+				{Field: Field{Name: "score"}, Direction: Desc},
+			},
+		}
+
+		plan, err := tbl.PlanQuery(ctx, stmt)
+		require.NoError(t, err)
+
+		assert.True(t, plan.SortInMemory, "expected SortInMemory = true for mixed-direction ORDER BY")
+		assert.Equal(t, ScanTypeSequential, plan.Scans[0].Type, "expected sequential scan when index cannot be used")
+	})
+
+	t.Run("ORDER BY columns in wrong order - no matching composite index, sort in memory", func(t *testing.T) {
+		t.Parallel()
+
+		tbl := newTableWithCompositeIndex()
+		// Index is (level, score) but ORDER BY is (score, level) — different order, no match
+		stmt := Statement{
+			Conditions: OneOrMore{},
+			OrderBy: []OrderBy{
+				{Field: Field{Name: "score"}, Direction: Asc},
+				{Field: Field{Name: "level"}, Direction: Asc},
+			},
+		}
+
+		plan, err := tbl.PlanQuery(ctx, stmt)
+		require.NoError(t, err)
+
+		assert.True(t, plan.SortInMemory, "expected SortInMemory = true when column order does not match composite index")
+		assert.Equal(t, ScanTypeSequential, plan.Scans[0].Type)
+	})
+
+	t.Run("ORDER BY subset of composite index columns - no match, sort in memory", func(t *testing.T) {
+		t.Parallel()
+
+		tbl := newTableWithCompositeIndex()
+		// Index is (level, score) but ORDER BY only has (level) — prefix-only, single column path handles this
+		// For multi-column ORDER BY: ordering only on level is handled by single-column path, not this path.
+		// Use a different pair (level only with score via multi-column would need exactly 1 element — skip).
+		// Instead test three-column ORDER BY that has no matching 3-column composite index.
+		stmt := Statement{
+			Conditions: OneOrMore{},
+			OrderBy: []OrderBy{
+				{Field: Field{Name: "id"}, Direction: Asc},
+				{Field: Field{Name: "level"}, Direction: Asc},
+				{Field: Field{Name: "score"}, Direction: Asc},
+			},
+		}
+
+		plan, err := tbl.PlanQuery(ctx, stmt)
+		require.NoError(t, err)
+
+		// No 3-column composite index exists
+		assert.True(t, plan.SortInMemory, "expected SortInMemory = true when no composite index matches all ORDER BY columns")
 	})
 }

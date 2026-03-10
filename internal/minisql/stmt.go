@@ -755,10 +755,6 @@ func (s Statement) validateCreateIndex(aTable *Table) error {
 		return fmt.Errorf("at least one column is required")
 	}
 
-	if len(s.Columns) > 1 {
-		return fmt.Errorf("more than one column for index is not supported")
-	}
-
 	if aTable.HasIndexOnColumns(s.Columns) {
 		return fmt.Errorf("columns %s can only have one index", columnNames(s.Columns))
 	}

@@ -931,9 +931,14 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, aTable *Tabl
 		return errIndexAlreadyExists
 	}
 
-	aColumn, ok := aTable.ColumnByName(stmt.Columns[0].Name)
-	if !ok {
-		return fmt.Errorf("column %s does not exist on table %s", stmt.Columns[0].Name, stmt.TableName)
+	// Resolve all index columns from the table schema (preserving order)
+	indexColumns := make([]Column, 0, len(stmt.Columns))
+	for _, stmtCol := range stmt.Columns {
+		col, ok := aTable.ColumnByName(stmtCol.Name)
+		if !ok {
+			return fmt.Errorf("column %s does not exist on table %s", stmtCol.Name, stmt.TableName)
+		}
+		indexColumns = append(indexColumns, col)
 	}
 
 	for _, info := range aTable.SecondaryIndexes {
@@ -950,7 +955,7 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, aTable *Tabl
 	secondaryIndex := SecondaryIndex{
 		IndexInfo: IndexInfo{
 			Name:    stmt.IndexName,
-			Columns: []Column{aColumn},
+			Columns: indexColumns,
 		},
 	}
 	createdIndex, err := d.createSecondaryIndex(ctx, stmt, aTable, secondaryIndex)
@@ -981,19 +986,48 @@ func (d *Database) populateIndex(ctx context.Context, aTable *Table, secondaryIn
 
 	for aResult.Rows.Next(ctx) {
 		aRow := aResult.Rows.Row()
-		keyValue, ok := aRow.GetValue(secondaryIndex.Columns[0].Name)
-		if !ok {
-			return fmt.Errorf("column %s does not exist on row in table %s", secondaryIndex.Columns[0].Name, aTable.Name)
-		}
-		if !keyValue.Valid {
-			continue // skip NULLs
-		}
-		castedKeyValue, err := castKeyValue(secondaryIndex.Columns[0], keyValue.Value)
-		if err != nil {
-			return err
-		}
-		if err := secondaryIndex.Index.Insert(ctx, castedKeyValue, aRow.Key); err != nil {
-			return err
+		if len(secondaryIndex.Columns) > 1 {
+			// Composite secondary index: build a CompositeKey from all index columns
+			allValid := true
+			keyValues := make([]any, 0, len(secondaryIndex.Columns))
+			for _, col := range secondaryIndex.Columns {
+				keyValue, ok := aRow.GetValue(col.Name)
+				if !ok {
+					return fmt.Errorf("column %s does not exist on row in table %s", col.Name, aTable.Name)
+				}
+				if !keyValue.Valid {
+					allValid = false
+					break
+				}
+				castedKeyValue, err := castKeyValue(col, keyValue.Value)
+				if err != nil {
+					return err
+				}
+				keyValues = append(keyValues, castedKeyValue)
+			}
+			if !allValid {
+				continue // skip rows where any index column is NULL
+			}
+			ck := NewCompositeKey(secondaryIndex.Columns, keyValues...)
+			if err := secondaryIndex.Index.Insert(ctx, ck, aRow.Key); err != nil {
+				return err
+			}
+		} else {
+			// Single-column secondary index
+			keyValue, ok := aRow.GetValue(secondaryIndex.Columns[0].Name)
+			if !ok {
+				return fmt.Errorf("column %s does not exist on row in table %s", secondaryIndex.Columns[0].Name, aTable.Name)
+			}
+			if !keyValue.Valid {
+				continue // skip NULLs
+			}
+			castedKeyValue, err := castKeyValue(secondaryIndex.Columns[0], keyValue.Value)
+			if err != nil {
+				return err
+			}
+			if err := secondaryIndex.Index.Insert(ctx, castedKeyValue, aRow.Key); err != nil {
+				return err
+			}
 		}
 	}
 
