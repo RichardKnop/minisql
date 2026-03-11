@@ -83,11 +83,11 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aPa
 func (d *Database) GetTable(ctx context.Context, name string) (*Table, bool) {
 	d.dbLock.RLock()
 	defer d.dbLock.RUnlock()
-	table, exists := d.tables[name]
+	aTable, exists := d.tables[name]
 	if !exists {
 		return nil, false
 	}
-	return table, true
+	return aTable, true
 }
 
 // lockedTableProvider is a TableProvider wrapper that assumes locks are already held.
@@ -149,7 +149,16 @@ func (d *Database) Reopen(ctx context.Context, factory PagerFactory, saver PageS
 	d.saver = saver
 	d.tables = make(map[string]*Table)
 
-	if err := d.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	// Preserve journal setting, then create a fresh transaction manager for the
+	// new file.  The old manager's global page versions are no longer valid after
+	// a file swap, and its saver points to the closed old file.
+	journalEnabled := d.txManager.journalEnabled
+	d.txManager = NewTransactionManager(d.logger, d.dbFilePath, d.pagerFactory, saver, d)
+	d.txManager.journalEnabled = journalEnabled
+
+	// Use a fresh context so init runs in a brand-new transaction on the new
+	// transaction manager, with no entanglement with any outer transaction.
+	if err := d.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
 		return d.init(ctx)
 	}); err != nil {
 		return err
@@ -271,16 +280,18 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 	}
 
 	switch stmt.Kind {
+	case Vacuum:
+		// VACUUM manages its own locking and creates a fresh transaction
+		// manager on completion, so it must not go through the normal DDL
+		// path (which would deadlock by re-acquiring dbLock).
+		return StatementResult{}, d.Vacuum(ctx)
 	case CreateTable, DropTable, CreateIndex, DropIndex:
 		return d.executeDDLStatement(ctx, stmt)
 	case Insert, Select, Update, Delete:
-		d.dbLock.RLock()
-		aTable, ok := d.tables[stmt.TableName]
+		aTable, ok := d.GetTable(ctx, stmt.TableName)
 		if !ok {
-			d.dbLock.RUnlock()
 			return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, stmt.TableName)
 		}
-		d.dbLock.RUnlock()
 
 		return d.executeTableStatement(ctx, aTable, stmt)
 	}
@@ -348,7 +359,10 @@ func (d *Database) init(ctx context.Context) error {
 		}
 	}
 
-	stats, err := d.listStats(ctx, "")
+	// Use the lock-free variant: init is called either from NewDatabase
+	// (single-threaded) or from Reopen (which holds dbLock.Lock()), so
+	// calling the locking listStats here would deadlock.
+	stats, err := d.listStatsNoLock(ctx, "")
 	if err != nil {
 		return err
 	}

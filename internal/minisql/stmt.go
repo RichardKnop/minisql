@@ -23,6 +23,7 @@ const (
 	CommitTransaction
 	RollbackTransaction
 	Analyze
+	Vacuum
 )
 
 func (s StatementKind) String() string {
@@ -51,6 +52,8 @@ func (s StatementKind) String() string {
 		return "ROLLBACK TRANSACTION"
 	case Analyze:
 		return "ANALYZE"
+	case Vacuum:
+		return "VACUUM"
 	default:
 		return "UNKNOWN"
 	}

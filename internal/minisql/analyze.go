@@ -309,6 +309,17 @@ type Stats struct {
 	StatValue string
 }
 
+// listStatsNoLock reads stats without acquiring dbLock.  The caller must
+// ensure exclusive or at least read access to d.tables (e.g. by holding
+// dbLock, or by being in a single-threaded init path).
+func (d *Database) listStatsNoLock(ctx context.Context, tableName string) ([]Stats, error) {
+	statsTable, ok := d.tables[StatsTableName]
+	if !ok {
+		return nil, nil
+	}
+	return d.scanStatsTable(ctx, statsTable, tableName)
+}
+
 func (d *Database) listStats(ctx context.Context, tableName string) ([]Stats, error) {
 	d.dbLock.RLock()
 	statsTable, ok := d.tables[StatsTableName]
@@ -317,6 +328,10 @@ func (d *Database) listStats(ctx context.Context, tableName string) ([]Stats, er
 		return nil, nil
 	}
 	d.dbLock.RUnlock()
+	return d.scanStatsTable(ctx, statsTable, tableName)
+}
+
+func (d *Database) scanStatsTable(ctx context.Context, statsTable *Table, tableName string) ([]Stats, error) {
 
 	stmt := Statement{
 		Kind:   Select,
