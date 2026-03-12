@@ -37,7 +37,7 @@ var reservedWords = []string{
 	// statement other
 	"*", "COUNT(*)", "ORDER BY", "LIMIT", "OFFSET",
 	"PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "DEFAULT", "NOT NULL", "NULL", "UNIQUE",
-	"IS NULL", "IS NOT NULL", "TRUE", "FALSE", "NOW()",
+	"IS NULL", "IS NOT NULL", "NOT LIKE", "LIKE", "TRUE", "FALSE", "NOW()",
 	"IF NOT EXISTS", "WHERE", "FROM", "SET", "ASC", "DESC", "AS",
 	"BEGIN", "COMMIT", "ROLLBACK", "ANALYZE", "VACUUM",
 	"INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "ON",

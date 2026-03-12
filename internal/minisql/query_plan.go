@@ -711,6 +711,11 @@ func tryRangeScan(tableName string, indexInfo IndexInfo, filters Conditions, sta
 			return Scan{}, false, nil
 		}
 
+		if aCondition.Operator == Like || aCondition.Operator == NotLike {
+			// LIKE / NOT LIKE requires a full sequential scan — no range bound possible
+			return Scan{}, false, nil
+		}
+
 		conditionValue, err := castKeyValue(indexInfo.Columns[0], aCondition.Operand2.Value)
 		if err != nil {
 			return Scan{}, false, err
