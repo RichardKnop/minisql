@@ -105,6 +105,18 @@ func (p *parserItem) doParseWhere() error {
 			currentCondition.Operator = minisql.Like
 		case "NOT LIKE":
 			currentCondition.Operator = minisql.NotLike
+		case "BETWEEN":
+			currentCondition.Operator = minisql.Between
+			currentCondition.Operand2 = minisql.Operand{
+				Type:  minisql.OperandList,
+				Value: []any{},
+			}
+		case "NOT BETWEEN":
+			currentCondition.Operator = minisql.NotBetween
+			currentCondition.Operand2 = minisql.Operand{
+				Type:  minisql.OperandList,
+				Value: []any{},
+			}
 		default:
 			return errWhereUnknownOperator
 		}
@@ -112,6 +124,10 @@ func (p *parserItem) doParseWhere() error {
 		p.pop()
 		if currentCondition.Operator == minisql.In || currentCondition.Operator == minisql.NotIn {
 			p.step = stepWhereConditionListValue
+			return nil
+		}
+		if currentCondition.Operator == minisql.Between || currentCondition.Operator == minisql.NotBetween {
+			p.step = stepWhereBetweenLow
 			return nil
 		}
 		p.step = stepWhereConditionValue
@@ -158,6 +174,54 @@ func (p *parserItem) doParseWhere() error {
 		}
 
 		return errWhereExpectedIdentifierPlaceholderOrValue
+	case stepWhereBetweenLow:
+		currentCondition, _ := p.Conditions.LastCondition()
+		value, ln := p.peekValue()
+		if ln != 0 {
+			if _, ok := value.(string); ok {
+				value = minisql.NewTextPointer([]byte(value.(string)))
+			}
+			currentCondition.Operand2.Value = append(currentCondition.Operand2.Value.([]any), value)
+			p.Conditions.UpdateLast(currentCondition)
+			p.pop()
+			p.step = stepWhereBetweenAnd
+			return nil
+		}
+		if p.peek() == "?" {
+			currentCondition.Operand2.Value = append(currentCondition.Operand2.Value.([]any), minisql.Placeholder{})
+			p.Conditions.UpdateLast(currentCondition)
+			p.pop()
+			p.step = stepWhereBetweenAnd
+			return nil
+		}
+		return fmt.Errorf("at WHERE BETWEEN: expected value or placeholder for lower bound")
+	case stepWhereBetweenAnd:
+		if strings.ToUpper(p.peek()) != "AND" {
+			return fmt.Errorf("at WHERE BETWEEN: expected AND between bounds")
+		}
+		p.pop()
+		p.step = stepWhereBetweenHigh
+	case stepWhereBetweenHigh:
+		currentCondition, _ := p.Conditions.LastCondition()
+		value, ln := p.peekValue()
+		if ln != 0 {
+			if _, ok := value.(string); ok {
+				value = minisql.NewTextPointer([]byte(value.(string)))
+			}
+			currentCondition.Operand2.Value = append(currentCondition.Operand2.Value.([]any), value)
+			p.Conditions.UpdateLast(currentCondition)
+			p.pop()
+			p.step = stepWhereOperator
+			return nil
+		}
+		if p.peek() == "?" {
+			currentCondition.Operand2.Value = append(currentCondition.Operand2.Value.([]any), minisql.Placeholder{})
+			p.Conditions.UpdateLast(currentCondition)
+			p.pop()
+			p.step = stepWhereOperator
+			return nil
+		}
+		return fmt.Errorf("at WHERE BETWEEN: expected value or placeholder for upper bound")
 	case stepWhereConditionListValue:
 		currentCondition, _ := p.Conditions.LastCondition()
 		p.step = stepWhereConditionListValueCommaOrEnd

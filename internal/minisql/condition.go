@@ -27,6 +27,10 @@ const (
 	Like
 	// NotLike -> "NOT LIKE"
 	NotLike
+	// Between -> "BETWEEN ... AND ..."
+	Between
+	// NotBetween -> "NOT BETWEEN ... AND ..."
+	NotBetween
 )
 
 func (o Operator) String() string {
@@ -51,6 +55,10 @@ func (o Operator) String() string {
 		return "LIKE"
 	case NotLike:
 		return "NOT LIKE"
+	case Between:
+		return "BETWEEN"
+	case NotBetween:
+		return "NOT BETWEEN"
 	default:
 		return "Unknown"
 	}
@@ -275,6 +283,34 @@ func FieldIsLike(field Field, operandType OperandType, value any) Condition {
 		Operand2: Operand{
 			Type:  operandType,
 			Value: value,
+		},
+	}
+}
+
+func FieldIsBetween(field Field, low, high any) Condition {
+	return Condition{
+		Operand1: Operand{
+			Type:  OperandField,
+			Value: field,
+		},
+		Operator: Between,
+		Operand2: Operand{
+			Type:  OperandList,
+			Value: []any{low, high},
+		},
+	}
+}
+
+func FieldIsNotBetween(field Field, low, high any) Condition {
+	return Condition{
+		Operand1: Operand{
+			Type:  OperandField,
+			Value: field,
+		},
+		Operator: NotBetween,
+		Operand2: Operand{
+			Type:  OperandList,
+			Value: []any{low, high},
 		},
 	}
 }
@@ -619,4 +655,79 @@ func isInListTimestamp(value, list any) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// isBetween* functions check whether value falls within [low, high] inclusive.
+// They reuse the existing compare* functions to avoid duplicating comparison logic.
+
+func isBetweenInt4(value, low, high any) (bool, error) {
+	geq, err := compareInt4(value, low, Gte)
+	if err != nil {
+		return false, err
+	}
+	leq, err := compareInt4(value, high, Lte)
+	if err != nil {
+		return false, err
+	}
+	return geq && leq, nil
+}
+
+func isBetweenInt8(value, low, high any) (bool, error) {
+	geq, err := compareInt8(value, low, Gte)
+	if err != nil {
+		return false, err
+	}
+	leq, err := compareInt8(value, high, Lte)
+	if err != nil {
+		return false, err
+	}
+	return geq && leq, nil
+}
+
+func isBetweenReal(value, low, high any) (bool, error) {
+	geq, err := compareReal(value, low, Gte)
+	if err != nil {
+		return false, err
+	}
+	leq, err := compareReal(value, high, Lte)
+	if err != nil {
+		return false, err
+	}
+	return geq && leq, nil
+}
+
+func isBetweenDouble(value, low, high any) (bool, error) {
+	geq, err := compareDouble(value, low, Gte)
+	if err != nil {
+		return false, err
+	}
+	leq, err := compareDouble(value, high, Lte)
+	if err != nil {
+		return false, err
+	}
+	return geq && leq, nil
+}
+
+func isBetweenText(value, low, high any) (bool, error) {
+	geq, err := compareText(value, low, Gte)
+	if err != nil {
+		return false, err
+	}
+	leq, err := compareText(value, high, Lte)
+	if err != nil {
+		return false, err
+	}
+	return geq && leq, nil
+}
+
+func isBetweenTimestamp(value, low, high any) (bool, error) {
+	geq, err := compareTimestamp(value, low, Gte)
+	if err != nil {
+		return false, err
+	}
+	leq, err := compareTimestamp(value, high, Lte)
+	if err != nil {
+		return false, err
+	}
+	return geq && leq, nil
 }
