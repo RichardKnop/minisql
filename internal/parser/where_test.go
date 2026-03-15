@@ -242,6 +242,57 @@ func TestParse_Where(t *testing.T) {
 			},
 			nil,
 		},
+		{
+			"WHERE with LIKE and quoted string",
+			"WHERE name LIKE 'foo%'",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsLike(minisql.Field{Name: "name"}, minisql.OperandQuotedString, minisql.NewTextPointer([]byte("foo%"))),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with NOT LIKE and quoted string",
+			"WHERE name NOT LIKE '%bar'",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsNotLike(minisql.Field{Name: "name"}, minisql.OperandQuotedString, minisql.NewTextPointer([]byte("%bar"))),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with LIKE and placeholder",
+			"WHERE name LIKE ?",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsLike(minisql.Field{Name: "name"}, minisql.OperandPlaceholder, nil),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with NOT LIKE and placeholder",
+			"WHERE name NOT LIKE ?",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsNotLike(minisql.Field{Name: "name"}, minisql.OperandPlaceholder, nil),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with LIKE combined with AND",
+			"WHERE name LIKE 'foo%' AND email LIKE '%@example.com'",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsLike(minisql.Field{Name: "name"}, minisql.OperandQuotedString, minisql.NewTextPointer([]byte("foo%"))),
+					minisql.FieldIsLike(minisql.Field{Name: "email"}, minisql.OperandQuotedString, minisql.NewTextPointer([]byte("%@example.com"))),
+				},
+			},
+			nil,
+		},
 	}
 
 	for _, aTestCase := range testCases {

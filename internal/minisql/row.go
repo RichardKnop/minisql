@@ -557,6 +557,10 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 		return false, nil // NULL cannot be compared to non-NULL value
 	}
 
+	if (operator == Like || operator == NotLike) && aColumn.Kind != Varchar && aColumn.Kind != Text {
+		return false, fmt.Errorf("LIKE / NOT LIKE operator only supported for TEXT and VARCHAR columns")
+	}
+
 	switch aColumn.Kind {
 	case Boolean:
 		return compareBoolean(fieldValue.Value.(bool), valueOperand.Value.(bool), operator)

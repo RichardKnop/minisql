@@ -101,6 +101,10 @@ func (p *parserItem) doParseWhere() error {
 			currentCondition.Operator = minisql.Lte
 		case "!=":
 			currentCondition.Operator = minisql.Ne
+		case "LIKE":
+			currentCondition.Operator = minisql.Like
+		case "NOT LIKE":
+			currentCondition.Operator = minisql.NotLike
 		default:
 			return errWhereUnknownOperator
 		}

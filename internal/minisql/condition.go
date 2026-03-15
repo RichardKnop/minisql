@@ -23,6 +23,10 @@ const (
 	In
 	// NotIn -> "NOT IN (...)"
 	NotIn
+	// Like -> "LIKE"
+	Like
+	// NotLike -> "NOT LIKE"
+	NotLike
 )
 
 func (o Operator) String() string {
@@ -43,6 +47,10 @@ func (o Operator) String() string {
 		return "IN"
 	case NotIn:
 		return "NOT IN"
+	case Like:
+		return "LIKE"
+	case NotLike:
+		return "NOT LIKE"
 	default:
 		return "Unknown"
 	}
@@ -257,6 +265,34 @@ func FieldIsLess(field Field, operandType OperandType, value any) Condition {
 	}
 }
 
+func FieldIsLike(field Field, operandType OperandType, value any) Condition {
+	return Condition{
+		Operand1: Operand{
+			Type:  OperandField,
+			Value: field,
+		},
+		Operator: Like,
+		Operand2: Operand{
+			Type:  operandType,
+			Value: value,
+		},
+	}
+}
+
+func FieldIsNotLike(field Field, operandType OperandType, value any) Condition {
+	return Condition{
+		Operand1: Operand{
+			Type:  OperandField,
+			Value: field,
+		},
+		Operator: NotLike,
+		Operand2: Operand{
+			Type:  operandType,
+			Value: value,
+		},
+	}
+}
+
 func FieldIsLessOrEqual(field Field, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
@@ -269,6 +305,45 @@ func FieldIsLessOrEqual(field Field, operandType OperandType, value any) Conditi
 			Value: value,
 		},
 	}
+}
+
+// likeMatch reports whether str matches the SQL LIKE pattern.
+// '%' matches any sequence of zero or more characters.
+// '_' matches exactly one character.
+// Matching is case-sensitive and byte-level (consistent with compareText).
+func likeMatch(pattern, str string) bool {
+	for len(pattern) > 0 {
+		switch pattern[0] {
+		case '%':
+			// Collapse consecutive '%' wildcards.
+			for len(pattern) > 0 && pattern[0] == '%' {
+				pattern = pattern[1:]
+			}
+			if len(pattern) == 0 {
+				return true // trailing '%' matches anything
+			}
+			// Try to match the remaining pattern at every position in str.
+			for i := 0; i <= len(str); i++ {
+				if likeMatch(pattern, str[i:]) {
+					return true
+				}
+			}
+			return false
+		case '_':
+			if len(str) == 0 {
+				return false // '_' requires exactly one character
+			}
+			pattern = pattern[1:]
+			str = str[1:]
+		default:
+			if len(str) == 0 || pattern[0] != str[0] {
+				return false
+			}
+			pattern = pattern[1:]
+			str = str[1:]
+		}
+	}
+	return len(str) == 0
 }
 
 func compareBoolean(value1, value2 any, operator Operator) (bool, error) {
@@ -425,6 +500,10 @@ func compareText(value1, value2 any, operator Operator) (bool, error) {
 		return theValue1.String() >= theValue2.String(), nil
 	case Lte:
 		return theValue1.String() <= theValue2.String(), nil
+	case Like:
+		return likeMatch(theValue2.String(), theValue1.String()), nil
+	case NotLike:
+		return !likeMatch(theValue2.String(), theValue1.String()), nil
 	}
 	return false, fmt.Errorf("unknown operator '%s'", operator)
 }
