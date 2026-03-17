@@ -1,3 +1,6 @@
 ./minisql
 db
+coverage.out
+coverage.html
+test-output.txt
 
