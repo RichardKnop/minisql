@@ -1138,11 +1138,8 @@ func (s Statement) validateWhere() error {
 					return err
 				}
 
-				_, ok2 := equalityMap[field.Name]
-				if !ok2 {
+				if _, ok2 := equalityMap[field.Name]; !ok2 {
 					equalityMap[field.Name] = args
-				} else {
-					return fmt.Errorf("conflicting equality conditions for field %q in WHERE clause", field.Name)
 				}
 			}
 		}

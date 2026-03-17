@@ -34,13 +34,13 @@ func TestParse_Delete(t *testing.T) {
 			"DELETE with empty WHERE fails",
 			"DELETE FROM 'a' WHERE",
 			nil,
-			errEmptyWhereClause,
+			errWhereExpectedField,
 		},
 		{
 			"DELETE with WHERE with field but no operator fails",
 			"DELETE FROM 'a' WHERE b",
 			nil,
-			errWhereWithoutOperator,
+			errWhereUnknownOperator,
 		},
 		{
 			"DELETE with multiple conditions works",

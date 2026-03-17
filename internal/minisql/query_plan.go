@@ -590,8 +590,17 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 		})
 	}
 
-	// We could get here and have no index scans available, in that case do not overwrite existing plan.
-	if len(indexScans) > 0 {
+	// Only override the default plan if at least one scan uses a real index.
+	// When all groups fall back to sequential scan (no index usable), keep the
+	// default single sequential scan which already holds the full DNF filter.
+	hasRealIndexScan := false
+	for _, scan := range indexScans {
+		if scan.Type != ScanTypeSequential {
+			hasRealIndexScan = true
+			break
+		}
+	}
+	if len(indexScans) > 0 && hasRealIndexScan {
 		p.Scans = indexScans
 	}
 

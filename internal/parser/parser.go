@@ -107,15 +107,6 @@ const (
 	stepSelectLimit
 	stepSelectOffset
 	stepWhere
-	stepWhereConditionField
-	stepWhereConditionOperator
-	stepWhereConditionValue
-	stepWhereConditionListValue
-	stepWhereConditionListValueCommaOrEnd
-	stepWhereBetweenLow
-	stepWhereBetweenAnd
-	stepWhereBetweenHigh
-	stepWhereOperator
 	stepAnalyze
 	stepStatementEnd
 )
@@ -309,16 +300,7 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 		// -----------------
 		// WHERE
 		//------------------
-		case stepWhere,
-			stepWhereConditionField,
-			stepWhereConditionOperator,
-			stepWhereConditionValue,
-			stepWhereConditionListValue,
-			stepWhereConditionListValueCommaOrEnd,
-			stepWhereBetweenLow,
-			stepWhereBetweenAnd,
-			stepWhereBetweenHigh,
-			stepWhereOperator:
+		case stepWhere:
 			if err := p.doParseWhere(); err != nil {
 				return statements, err
 			}
@@ -521,7 +503,7 @@ func (p *parserItem) peekIdentifierWithLength() (string, int) {
 }
 
 func (p *parserItem) validate(stmt minisql.Statement) error {
-	if len(stmt.Conditions) == 0 && p.step == stepWhereConditionField {
+	if len(stmt.Conditions) == 0 && p.step == stepWhere {
 		return errEmptyWhereClause
 	}
 	if stmt.Kind == 0 {

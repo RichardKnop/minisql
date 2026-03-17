@@ -344,6 +344,84 @@ func TestParse_Where(t *testing.T) {
 			},
 			nil,
 		},
+		// ----- Nested / parenthesised conditions -----
+		{
+			"WHERE with parenthesised OR inside AND — distributes to DNF",
+			"WHERE (a = 1 OR b = 2) AND c = 3",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsEqual(minisql.Field{Name: "a"}, minisql.OperandInteger, int64(1)),
+					minisql.FieldIsEqual(minisql.Field{Name: "c"}, minisql.OperandInteger, int64(3)),
+				},
+				{
+					minisql.FieldIsEqual(minisql.Field{Name: "b"}, minisql.OperandInteger, int64(2)),
+					minisql.FieldIsEqual(minisql.Field{Name: "c"}, minisql.OperandInteger, int64(3)),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with AND inside parenthesised OR",
+			"WHERE a = 1 OR (b = 2 AND c = 3)",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsEqual(minisql.Field{Name: "a"}, minisql.OperandInteger, int64(1)),
+				},
+				{
+					minisql.FieldIsEqual(minisql.Field{Name: "b"}, minisql.OperandInteger, int64(2)),
+					minisql.FieldIsEqual(minisql.Field{Name: "c"}, minisql.OperandInteger, int64(3)),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with double-nested parentheses",
+			"WHERE ((a = 1 OR b = 2)) AND c = 3",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsEqual(minisql.Field{Name: "a"}, minisql.OperandInteger, int64(1)),
+					minisql.FieldIsEqual(minisql.Field{Name: "c"}, minisql.OperandInteger, int64(3)),
+				},
+				{
+					minisql.FieldIsEqual(minisql.Field{Name: "b"}, minisql.OperandInteger, int64(2)),
+					minisql.FieldIsEqual(minisql.Field{Name: "c"}, minisql.OperandInteger, int64(3)),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with three-way cross-product via nested parens",
+			"WHERE (a = 1 OR b = 2) AND (c = 3 OR d = 4)",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsEqual(minisql.Field{Name: "a"}, minisql.OperandInteger, int64(1)),
+					minisql.FieldIsEqual(minisql.Field{Name: "c"}, minisql.OperandInteger, int64(3)),
+				},
+				{
+					minisql.FieldIsEqual(minisql.Field{Name: "a"}, minisql.OperandInteger, int64(1)),
+					minisql.FieldIsEqual(minisql.Field{Name: "d"}, minisql.OperandInteger, int64(4)),
+				},
+				{
+					minisql.FieldIsEqual(minisql.Field{Name: "b"}, minisql.OperandInteger, int64(2)),
+					minisql.FieldIsEqual(minisql.Field{Name: "c"}, minisql.OperandInteger, int64(3)),
+				},
+				{
+					minisql.FieldIsEqual(minisql.Field{Name: "b"}, minisql.OperandInteger, int64(2)),
+					minisql.FieldIsEqual(minisql.Field{Name: "d"}, minisql.OperandInteger, int64(4)),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with redundant outer parentheses around single condition",
+			"WHERE (a = 1)",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsEqual(minisql.Field{Name: "a"}, minisql.OperandInteger, int64(1)),
+				},
+			},
+			nil,
+		},
 	}
 
 	for _, aTestCase := range testCases {

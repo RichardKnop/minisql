@@ -323,13 +323,13 @@ func TestParse_Select(t *testing.T) {
 			"SELECT with empty WHERE fails",
 			"SELECT a, c, d FROM b WHERE",
 			nil,
-			errEmptyWhereClause,
+			errWhereExpectedField,
 		},
 		{
 			"SELECT with WHERE with only operand fails",
 			"SELECT a, c, d FROM b WHERE a",
 			nil,
-			errWhereWithoutOperator,
+			errWhereUnknownOperator,
 		},
 		{
 			"SELECT with WHERE with multiple conditions using AND works",

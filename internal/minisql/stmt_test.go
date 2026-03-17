@@ -1314,7 +1314,7 @@ func TestStatement_Validate(t *testing.T) {
 		assert.ErrorContains(t, err, `mixed operand types in WHERE condition list`)
 	})
 
-	t.Run("SELECT with conflicting equality conditions should fail", func(t *testing.T) {
+	t.Run("SELECT with same-field equality conditions in one AND group is valid (unsatisfiable but not an error)", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
 			TableName: aTable.Name,
@@ -1348,9 +1348,11 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
+		// Contradictory equality conditions in one AND group are unsatisfiable but
+		// not a validation error — they naturally return zero rows when evaluated.
+		// DNF expansion of nested WHERE clauses can legitimately produce such groups.
 		err := stmt.Validate(aTable)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, `conflicting equality conditions for field "id" in WHERE clause`)
+		require.NoError(t, err)
 	})
 }
 
