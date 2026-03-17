@@ -34,7 +34,7 @@ func (p *parserItem) doParseCreateTable() error {
 	case stepCreateTableName:
 		tableName := p.peek()
 		if len(tableName) == 0 {
-			return fmt.Errorf("at CREATE TABLE: expected table name")
+			return p.errorf("at CREATE TABLE: expected table name")
 		}
 		p.TableName = tableName
 		p.pop()
@@ -42,7 +42,7 @@ func (p *parserItem) doParseCreateTable() error {
 	case stepCreateTableOpeningParens:
 		openingParens := p.peek()
 		if len(openingParens) != 1 || openingParens != "(" {
-			return errCreateTableExpectedOpeningParens
+			return p.wrapErr(errCreateTableExpectedOpeningParens)
 		}
 		p.pop()
 		p.step = stepCreateTableColumn
@@ -56,7 +56,7 @@ func (p *parserItem) doParseCreateTable() error {
 		}
 
 		if !isIdentifier(token) {
-			return errCreateTableNoColumns
+			return p.wrapErr(errCreateTableNoColumns)
 		}
 		p.Columns = append(p.Columns, minisql.Column{
 			Name: token,
@@ -67,7 +67,7 @@ func (p *parserItem) doParseCreateTable() error {
 		columnDef := p.peek()
 		aColumn, ok := isColumnDef(columnDef)
 		if !ok {
-			return errCreateTableInvalidColumDef
+			return p.wrapErr(errCreateTableInvalidColumDef)
 		}
 		p.pop()
 		p.Columns[len(p.Columns)-1].Kind = aColumn.Kind
@@ -81,19 +81,19 @@ func (p *parserItem) doParseCreateTable() error {
 		sizeToken := p.peek()
 		size, err := strconv.Atoi(sizeToken)
 		if err != nil {
-			return fmt.Errorf("at CREATE TABLE: varchar size '%s' must be an integer", sizeToken)
+			return p.errorf("at CREATE TABLE: varchar size '%s' must be an integer", sizeToken)
 		}
 		if size <= 0 {
-			return fmt.Errorf("at CREATE TABLE: varchar size must be a positive integer")
+			return p.errorf("at CREATE TABLE: varchar size must be a positive integer")
 		}
 		if size > minisql.MaxOverflowTextSize {
-			return fmt.Errorf("at CREATE TABLE: varchar size must be > 0 and <= %d", minisql.MaxOverflowTextSize)
+			return p.errorf("at CREATE TABLE: varchar size must be > 0 and <= %d", minisql.MaxOverflowTextSize)
 		}
 		p.pop()
 		p.Columns[len(p.Columns)-1].Size = uint32(size)
 		closingParens := p.peek()
 		if closingParens != ")" {
-			return fmt.Errorf("at CREATE TABLE: expecting closing parenthesis after varchar size")
+			return p.errorf("at CREATE TABLE: expecting closing parenthesis after varchar size")
 		}
 		p.pop()
 		p.step = stepCreateTableColumnPrimaryKey
@@ -104,14 +104,14 @@ func (p *parserItem) doParseCreateTable() error {
 			return nil
 		}
 		if len(p.PrimaryKey.Columns) > 0 {
-			return errCreateTableMultiplePrimaryKeys
+			return p.wrapErr(errCreateTableMultiplePrimaryKeys)
 		}
 		aColumn := p.Columns[len(p.Columns)-1]
 		if aColumn.Kind == minisql.Text {
-			return errCreateTablePrimaryKeyTextNotAllowed
+			return p.wrapErr(errCreateTablePrimaryKeyTextNotAllowed)
 		}
 		if aColumn.Kind == minisql.Varchar && aColumn.Size > minisql.MaxIndexKeySize {
-			return errCreateTablePrimaryKeyVarcharTooLarge
+			return p.wrapErr(errCreateTablePrimaryKeyVarcharTooLarge)
 		}
 		if primaryKey == "PRIMARY KEY AUTOINCREMENT" {
 			p.PrimaryKey.Autoincrement = true
@@ -143,10 +143,10 @@ func (p *parserItem) doParseCreateTable() error {
 		}
 		aColumn := p.Columns[len(p.Columns)-1]
 		if aColumn.Kind == minisql.Text {
-			return errCreateTableUniqueTextNotAllowed
+			return p.wrapErr(errCreateTableUniqueTextNotAllowed)
 		}
 		if aColumn.Kind == minisql.Varchar && aColumn.Size > minisql.MaxIndexKeySize {
-			return errCreateTableUniqueVarcharTooLarge
+			return p.wrapErr(errCreateTableUniqueVarcharTooLarge)
 		}
 		p.UniqueIndexes = append(p.UniqueIndexes, minisql.UniqueIndex{
 			IndexInfo: minisql.IndexInfo{
@@ -165,7 +165,7 @@ func (p *parserItem) doParseCreateTable() error {
 		p.pop()
 		if strings.ToUpper(p.peek()) == "NOW()" {
 			if p.Columns[len(p.Columns)-1].Kind != minisql.Timestamp {
-				return fmt.Errorf("at CREATE TABLE: NOW() default value is only valid for TIMESTAMP columns")
+				return p.errorf("at CREATE TABLE: NOW() default value is only valid for TIMESTAMP columns")
 			}
 			p.Columns[len(p.Columns)-1].DefaultValueNow = true
 			p.pop()
@@ -173,7 +173,7 @@ func (p *parserItem) doParseCreateTable() error {
 		}
 		defaultValue, n := p.peekValue()
 		if n == 0 {
-			return errCreateTableDefaultValueExpected
+			return p.wrapErr(errCreateTableDefaultValueExpected)
 		}
 		if err := isDefaultValueValid(p.Columns[len(p.Columns)-1], defaultValue); err != nil {
 			return err
@@ -199,14 +199,14 @@ func (p *parserItem) doParseCreateTable() error {
 			return nil
 		}
 		if token != ")" {
-			return fmt.Errorf("at CREATE TABLE: expected PRIMARY KEY, UNIQUE, or closing parens")
+			return p.errorf("at CREATE TABLE: expected PRIMARY KEY, UNIQUE, or closing parens")
 		}
 		p.pop()
 		p.step = stepStatementEnd
 	case stepCreateTableConstraintPrimaryKey:
 		openingParens := p.peek()
 		if len(openingParens) != 1 || openingParens != "(" {
-			return errCreateTableExpectedOpeningParens
+			return p.wrapErr(errCreateTableExpectedOpeningParens)
 		}
 		p.pop()
 		p.PrimaryKey.Name = minisql.PrimaryKeyName(p.TableName)
@@ -214,7 +214,7 @@ func (p *parserItem) doParseCreateTable() error {
 	case stepCreateTableConstraintUniqueKey:
 		openingParens := p.peek()
 		if len(openingParens) != 1 || openingParens != "(" {
-			return errCreateTableExpectedOpeningParens
+			return p.wrapErr(errCreateTableExpectedOpeningParens)
 		}
 		p.pop()
 		p.UniqueIndexes = append(p.UniqueIndexes, minisql.UniqueIndex{})
@@ -222,7 +222,7 @@ func (p *parserItem) doParseCreateTable() error {
 	case stepCreateTableConstraintPrimaryKeyColumn:
 		columnName := p.peek()
 		if !isIdentifier(columnName) {
-			return fmt.Errorf("at CREATE TABLE: expected comma or closing parens")
+			return p.errorf("at CREATE TABLE: expected comma or closing parens")
 		}
 		p.pop()
 		var aColumn minisql.Column
@@ -233,14 +233,14 @@ func (p *parserItem) doParseCreateTable() error {
 			}
 		}
 		if aColumn.Name == "" {
-			return fmt.Errorf("at CREATE TABLE: primary key column '%s' does not exist", columnName)
+			return p.errorf("at CREATE TABLE: primary key column '%s' does not exist", columnName)
 		}
 		p.PrimaryKey.Columns = append(p.PrimaryKey.Columns, aColumn)
 		p.step = stepCreateTableConstraintPrimaryKeyCommaOrClosingParens
 	case stepCreateTableConstraintUniqueKeyColumn:
 		columnName := p.peek()
 		if !isIdentifier(columnName) {
-			return fmt.Errorf("at CREATE TABLE: expected comma or closing parens")
+			return p.errorf("at CREATE TABLE: expected comma or closing parens")
 		}
 		p.pop()
 		var aColumn minisql.Column
@@ -255,7 +255,7 @@ func (p *parserItem) doParseCreateTable() error {
 	case stepCreateTableConstraintPrimaryKeyCommaOrClosingParens:
 		commaOrClosingParens := p.peek()
 		if commaOrClosingParens != "," && commaOrClosingParens != ")" {
-			return fmt.Errorf("at CREATE TABLE: expected comma or closing parens")
+			return p.errorf("at CREATE TABLE: expected comma or closing parens")
 		}
 		p.pop()
 		if commaOrClosingParens == "," {
@@ -266,7 +266,7 @@ func (p *parserItem) doParseCreateTable() error {
 	case stepCreateTableConstraintUniqueKeyCommaOrClosingParens:
 		commaOrClosingParens := p.peek()
 		if commaOrClosingParens != "," && commaOrClosingParens != ")" {
-			return fmt.Errorf("at CREATE TABLE: expected comma or closing parens")
+			return p.errorf("at CREATE TABLE: expected comma or closing parens")
 		}
 		p.pop()
 		if commaOrClosingParens == "," {
@@ -278,7 +278,7 @@ func (p *parserItem) doParseCreateTable() error {
 	case stepCreateTableCommaOrClosingParens:
 		commaOrClosingParens := strings.ToUpper(p.peek())
 		if commaOrClosingParens != "," && commaOrClosingParens != ")" {
-			return fmt.Errorf("at CREATE TABLE: expected comma or closing parens")
+			return p.errorf("at CREATE TABLE: expected comma or closing parens")
 		}
 		p.pop()
 		if commaOrClosingParens == "," {
@@ -329,7 +329,7 @@ func (p *parserItem) doParseDropTable() error {
 	case stepDropTableName:
 		tableName := p.peek()
 		if len(tableName) == 0 {
-			return fmt.Errorf("at DROP TABLE: expected table name")
+			return p.errorf("at DROP TABLE: expected table name")
 		}
 		p.TableName = tableName
 		p.pop()

@@ -35,7 +35,7 @@ func (p *parserItem) doParseSelect() error {
 
 		identifier := p.peek()
 		if !isIdentifier(identifier) && identifier != "*" && strings.ToUpper(identifier) != "COUNT(*)" {
-			return errSelectWithoutFields
+			return p.wrapErr(errSelectWithoutFields)
 		}
 
 		p.Fields = append(p.Fields, fieldFromIdentifier(identifier))
@@ -45,10 +45,10 @@ func (p *parserItem) doParseSelect() error {
 		// Handle * for selecting all rows
 		if identifier == "*" {
 			if len(p.Fields) > 1 {
-				return errCannotCombineAsterisk
+				return p.wrapErr(errCannotCombineAsterisk)
 			}
 			if maybeFrom != "FROM" {
-				return errExpectedFrom
+				return p.wrapErr(errExpectedFrom)
 			}
 			p.step = stepSelectFrom
 			return nil
@@ -57,10 +57,10 @@ func (p *parserItem) doParseSelect() error {
 		// Handle COUNT(*) special case
 		if identifier == "COUNT(*)" {
 			if len(p.Fields) > 1 {
-				return errCannotCombineCountAsterisk
+				return p.wrapErr(errCannotCombineCountAsterisk)
 			}
 			if maybeFrom != "FROM" {
-				return errExpectedFrom
+				return p.wrapErr(errExpectedFrom)
 			}
 			p.step = stepSelectFrom
 			return nil
@@ -72,7 +72,7 @@ func (p *parserItem) doParseSelect() error {
 			p.pop()
 			alias := p.peek()
 			if !isIdentifier(alias) {
-				return fmt.Errorf(`at SELECT: expected field alias for "identifier as"`)
+				return p.errorf(`at SELECT: expected field alias for "identifier as"`)
 			}
 			if p.Aliases == nil {
 				p.Aliases = make(map[string]string)
@@ -89,21 +89,21 @@ func (p *parserItem) doParseSelect() error {
 	case stepSelectComma:
 		commaRWord := p.peek()
 		if commaRWord != "," {
-			return fmt.Errorf("at SELECT: expected comma or FROM")
+			return p.errorf("at SELECT: expected comma or FROM")
 		}
 		p.pop()
 		p.step = stepSelectField
 	case stepSelectFrom:
 		from := strings.ToUpper(p.peek())
 		if from != "FROM" {
-			return errExpectedFrom
+			return p.wrapErr(errExpectedFrom)
 		}
 		p.pop()
 		p.step = stepSelectFromTable
 	case stepSelectFromTable:
 		tableName, _ := p.peekIdentifierWithLength()
 		if !isIdentifier(tableName) {
-			return errSelectExpectedTableName
+			return p.wrapErr(errSelectExpectedTableName)
 		}
 		p.TableName = tableName
 		p.pop()
@@ -113,7 +113,7 @@ func (p *parserItem) doParseSelect() error {
 			p.pop()
 			tableAlias, _ := p.peekIdentifierWithLength()
 			if !isIdentifier(tableAlias) {
-				return fmt.Errorf("at SELECT: expected table alias identifier")
+				return p.errorf("at SELECT: expected table alias identifier")
 			}
 			p.TableAlias = tableAlias
 			p.pop()
@@ -142,7 +142,7 @@ func (p *parserItem) doParseSelect() error {
 	case stepSelectJoinTable:
 		tableName, _ := p.peekIdentifierWithLength()
 		if !isIdentifier(tableName) {
-			return fmt.Errorf("at JOIN: expected table name identifier")
+			return p.errorf("at JOIN: expected table name identifier")
 		}
 		p.joinInProgress.TableName = tableName
 		p.pop()
@@ -152,7 +152,7 @@ func (p *parserItem) doParseSelect() error {
 			p.pop()
 			tableAlias, _ := p.peekIdentifierWithLength()
 			if !isIdentifier(tableAlias) {
-				return fmt.Errorf("at JOIN: expected table alias identifier")
+				return p.errorf("at JOIN: expected table alias identifier")
 			}
 			p.joinInProgress.TableAlias = tableAlias
 			p.pop()
@@ -160,7 +160,7 @@ func (p *parserItem) doParseSelect() error {
 
 		// Next we expect the JOIN condition
 		if strings.ToUpper(p.peek()) != "ON" {
-			return fmt.Errorf("at JOIN: expected ON")
+			return p.errorf("at JOIN: expected ON")
 		}
 		p.pop()
 
@@ -168,7 +168,7 @@ func (p *parserItem) doParseSelect() error {
 	case stepSelectJoinConditionField:
 		identifier := p.peek()
 		if !isIdentifier(identifier) {
-			return fmt.Errorf("at JOIN: expected field")
+			return p.errorf("at JOIN: expected field")
 		}
 		p.joinInProgress.Conditions = append(p.joinInProgress.Conditions, minisql.Condition{
 			Operand1: minisql.Operand{
@@ -180,7 +180,7 @@ func (p *parserItem) doParseSelect() error {
 		p.step = stepSelectJoinConditionOperator
 	case stepSelectJoinConditionOperator:
 		if p.peek() != "=" {
-			return fmt.Errorf("at JOIN condition: only '=' operator is supported")
+			return p.errorf("at JOIN condition: only '=' operator is supported")
 		}
 		p.joinInProgress.Conditions[len(p.joinInProgress.Conditions)-1].Operator = minisql.Eq
 		p.pop()
@@ -188,7 +188,7 @@ func (p *parserItem) doParseSelect() error {
 	case stepSelectJoinConditionValue:
 		identifier := p.peek()
 		if !isIdentifier(identifier) {
-			return fmt.Errorf("at JOIN: expected field")
+			return p.errorf("at JOIN: expected field")
 		}
 		p.joinInProgress.Conditions[len(p.joinInProgress.Conditions)-1].Operand2 = minisql.Operand{
 			Type:  minisql.OperandField,
@@ -220,13 +220,13 @@ func (p *parserItem) doParseSelect() error {
 		identifier := p.peek()
 		if !isIdentifier(identifier) {
 			if len(p.OrderBy) == 0 {
-				return fmt.Errorf(`at ORDER BY: expected identifier`)
+				return p.errorf(`at ORDER BY: expected identifier`)
 			}
 			p.step = stepSelectLimit
 			return nil
 		}
 		if identifier == "*" {
-			return fmt.Errorf(`at ORDER BY: cannot order by "*"`)
+			return p.errorf(`at ORDER BY: cannot order by "*"`)
 		}
 		p.pop()
 
@@ -269,7 +269,7 @@ func (p *parserItem) doParseSelect() error {
 		p.pop()
 		limitValue, n := p.peekIntWithLength()
 		if n == 0 {
-			return fmt.Errorf("at SELECT: expected integer value for LIMIT")
+			return p.errorf("at SELECT: expected integer value for LIMIT")
 		}
 		p.Limit = minisql.OptionalValue{Value: limitValue, Valid: true}
 		p.pop()
@@ -287,7 +287,7 @@ func (p *parserItem) doParseSelect() error {
 		p.pop()
 		offsetValue, n := p.peekIntWithLength()
 		if n == 0 {
-			return fmt.Errorf("at SELECT: expected integer value for OFFSET")
+			return p.errorf("at SELECT: expected integer value for OFFSET")
 		}
 		p.Offset = minisql.OptionalValue{Value: offsetValue, Valid: true}
 		p.pop()

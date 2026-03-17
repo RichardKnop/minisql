@@ -18,7 +18,7 @@ func (p *parserItem) doParseInsert() error {
 	case stepInsertTable:
 		tableName := p.peek()
 		if len(tableName) == 0 {
-			return fmt.Errorf("at INSERT INTO: expected quoted table name")
+			return p.errorf("at INSERT INTO: expected table name")
 		}
 		p.TableName = tableName
 		p.pop()
@@ -26,14 +26,14 @@ func (p *parserItem) doParseInsert() error {
 	case stepInsertFieldsOpeningParens:
 		openingParens := p.peek()
 		if len(openingParens) != 1 || openingParens != "(" {
-			return fmt.Errorf("at INSERT INTO: expected opening parens")
+			return p.errorf("at INSERT INTO: expected opening parens")
 		}
 		p.pop()
 		p.step = stepInsertFields
 	case stepInsertFields:
 		identifier := p.peek()
 		if !isIdentifier(identifier) {
-			return errInsertNoFields
+			return p.wrapErr(errInsertNoFields)
 		}
 		p.Fields = append(p.Fields, minisql.Field{Name: identifier})
 		p.pop()
@@ -41,7 +41,7 @@ func (p *parserItem) doParseInsert() error {
 	case stepInsertFieldsCommaOrClosingParens:
 		commaOrClosingParens := p.peek()
 		if commaOrClosingParens != "," && commaOrClosingParens != ")" {
-			return fmt.Errorf("at INSERT INTO: expected comma or closing parens")
+			return p.errorf("at INSERT INTO: expected comma or closing parens")
 		}
 		p.pop()
 		if commaOrClosingParens == "," {
@@ -52,14 +52,14 @@ func (p *parserItem) doParseInsert() error {
 	case stepInsertValuesRWord:
 		valuesRWord := p.peek()
 		if strings.ToUpper(valuesRWord) != "VALUES" {
-			return fmt.Errorf("at INSERT INTO: expected 'VALUES'")
+			return p.errorf("at INSERT INTO: expected VALUES")
 		}
 		p.pop()
 		p.step = stepInsertValuesOpeningParens
 	case stepInsertValuesOpeningParens:
 		openingParens := p.peek()
 		if openingParens != "(" {
-			return fmt.Errorf("at INSERT INTO: expected opening parens")
+			return p.errorf("at INSERT INTO: expected opening parens")
 		}
 		p.Inserts = append(p.Inserts, []minisql.OptionalValue{})
 		p.pop()
@@ -97,11 +97,11 @@ func (p *parserItem) doParseInsert() error {
 			p.step = stepInsertValuesCommaOrClosingParens
 			return nil
 		}
-		return fmt.Errorf("at INSERT INTO: expected quoted value or int value")
+		return p.errorf("at INSERT INTO: expected value")
 	case stepInsertValuesCommaOrClosingParens:
 		commaOrClosingParens := p.peek()
 		if commaOrClosingParens != "," && commaOrClosingParens != ")" {
-			return fmt.Errorf("at INSERT INTO: expected comma or closing parens")
+			return p.errorf("at INSERT INTO: expected comma or closing parens")
 		}
 		p.pop()
 		if commaOrClosingParens == "," {
@@ -110,7 +110,7 @@ func (p *parserItem) doParseInsert() error {
 		}
 		currentInsertRow := p.Inserts[len(p.Inserts)-1]
 		if len(currentInsertRow) < len(p.Fields) {
-			return errInsertFieldValueCountMismatch
+			return p.wrapErr(errInsertFieldValueCountMismatch)
 		}
 		p.step = stepInsertValuesCommaBeforeOpeningParens
 	case stepInsertValuesCommaBeforeOpeningParens:
@@ -120,7 +120,7 @@ func (p *parserItem) doParseInsert() error {
 			return nil
 		}
 		if commaOrEnd != "," {
-			return fmt.Errorf("at INSERT INTO: expected comma")
+			return p.errorf("at INSERT INTO: expected comma")
 		}
 		p.pop()
 		p.step = stepInsertValuesOpeningParens

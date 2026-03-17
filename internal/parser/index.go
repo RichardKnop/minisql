@@ -26,7 +26,7 @@ func (p *parserItem) doParseCreateIndex() error {
 	case stepCreateIndexName:
 		indexName := p.peek()
 		if !isIdentifier(indexName) {
-			return fmt.Errorf("at CREATE INDEX: expected index name")
+			return p.errorf("at CREATE INDEX: expected index name")
 		}
 		p.IndexName = indexName
 		p.pop()
@@ -34,14 +34,14 @@ func (p *parserItem) doParseCreateIndex() error {
 	case stepCreateIndexOn:
 		onToken := p.peek()
 		if strings.ToUpper(onToken) != "ON" {
-			return fmt.Errorf("at CREATE INDEX: expected ON")
+			return p.errorf("at CREATE INDEX: expected ON")
 		}
 		p.pop()
 		p.step = stepCreateIndexOnTable
 	case stepCreateIndexOnTable:
 		tableName := p.peek()
 		if !isIdentifier(tableName) {
-			return fmt.Errorf("at CREATE INDEX: expected table name")
+			return p.errorf("at CREATE INDEX: expected table name")
 		}
 		p.TableName = tableName
 		p.pop()
@@ -49,14 +49,14 @@ func (p *parserItem) doParseCreateIndex() error {
 	case stepCreateIndexOpeningParens:
 		openingParens := p.peek()
 		if len(openingParens) != 1 || openingParens != "(" {
-			return errCreateIndexExpectedOpeningParens
+			return p.wrapErr(errCreateIndexExpectedOpeningParens)
 		}
 		p.pop()
 		p.step = stepCreateIndexColumn
 	case stepCreateIndexColumn:
 		identifier := p.peek()
 		if !isIdentifier(identifier) {
-			return errCreateIndexNoColumns
+			return p.wrapErr(errCreateIndexNoColumns)
 		}
 		p.Columns = append(p.Columns, minisql.Column{
 			Name: identifier,
@@ -66,7 +66,7 @@ func (p *parserItem) doParseCreateIndex() error {
 	case stepCreateIndexCommaOrClosingParens:
 		commaOrClosingParens := p.peek()
 		if commaOrClosingParens != "," && commaOrClosingParens != ")" {
-			return fmt.Errorf("at CREATE INDEX: expected comma or closing parens")
+			return p.errorf("at CREATE INDEX: expected comma or closing parens")
 		}
 		p.pop()
 		if commaOrClosingParens == "," {
@@ -83,7 +83,7 @@ func (p *parserItem) doParseDropIndex() error {
 	case stepDropIndexName:
 		indexName := p.peek()
 		if len(indexName) == 0 {
-			return fmt.Errorf("at DROP INDEX: expected index name")
+			return p.errorf("at DROP INDEX: expected index name")
 		}
 		p.IndexName = indexName
 		p.pop()

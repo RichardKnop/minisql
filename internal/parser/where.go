@@ -37,16 +37,16 @@ func (p *parserItem) doParseWhere() error {
 	}
 
 	if whereRWord != "WHERE" {
-		return fmt.Errorf("expected WHERE")
+		return p.errorf("at WHERE: expected WHERE keyword")
 	}
 	if len(p.OrderBy) > 0 {
-		return fmt.Errorf("at WHERE: ORDER BY must be after WHERE clause")
+		return p.errorf("at WHERE: ORDER BY must be after WHERE clause")
 	}
 	if p.Offset.Valid || p.Limit.Valid {
-		return fmt.Errorf("at WHERE: OFFSET / LIMIT must be after WHERE clause")
+		return p.errorf("at WHERE: OFFSET / LIMIT must be after WHERE clause")
 	}
 	if len(p.Conditions) > 0 {
-		return fmt.Errorf("at WHERE: multiple WHERE clauses are not supported")
+		return p.errorf("at WHERE: multiple WHERE clauses are not supported")
 	}
 
 	p.pop() // consume "WHERE"
@@ -125,7 +125,7 @@ func (p *parserItem) parsePrimaryCondExpr() (*minisql.ConditionNode, error) {
 			return nil, err
 		}
 		if p.peek() != ")" {
-			return nil, fmt.Errorf("at WHERE: expected closing parenthesis")
+			return nil, p.errorf("at WHERE: expected closing parenthesis")
 		}
 		p.pop() // consume ")"
 		return node, nil
@@ -137,7 +137,7 @@ func (p *parserItem) parsePrimaryCondExpr() (*minisql.ConditionNode, error) {
 func (p *parserItem) parseLeafCondition() (*minisql.ConditionNode, error) {
 	identifier := p.peek()
 	if !isIdentifier(identifier) {
-		return nil, errWhereExpectedField
+		return nil, p.wrapErr(errWhereExpectedField)
 	}
 	p.pop()
 
@@ -235,7 +235,7 @@ func (p *parserItem) parseLeafCondition() (*minisql.ConditionNode, error) {
 			return nil, err
 		}
 	default:
-		return nil, errWhereUnknownOperator
+		return nil, p.wrapErr(errWhereUnknownOperator)
 	}
 
 	return &minisql.ConditionNode{Leaf: &cond}, nil
@@ -275,7 +275,7 @@ func (p *parserItem) parseCondScalarValue(cond *minisql.Condition) error {
 		p.pop()
 		return nil
 	}
-	return errWhereExpectedIdentifierPlaceholderOrValue
+	return p.wrapErr(errWhereExpectedIdentifierPlaceholderOrValue)
 }
 
 // parseCondListValues parses the comma-separated values inside IN (...).
@@ -294,7 +294,7 @@ func (p *parserItem) parseCondListValues(cond *minisql.Condition) error {
 			cond.Operand2.Value = append(cond.Operand2.Value.([]any), minisql.Placeholder{})
 			p.pop()
 		} else {
-			return errWhereExpectedPlaceholderOrValue
+			return p.wrapErr(errWhereExpectedPlaceholderOrValue)
 		}
 
 		next := p.peek()
@@ -306,7 +306,7 @@ func (p *parserItem) parseCondListValues(cond *minisql.Condition) error {
 			p.pop()
 			continue
 		}
-		return fmt.Errorf("at WHERE IN (...): expected , or )")
+		return p.errorf("at WHERE IN (...): expected , or )")
 	}
 }
 
@@ -327,12 +327,12 @@ func (p *parserItem) parseCondBetweenValues(cond *minisql.Condition) error {
 		cond.Operand2.Value = append(cond.Operand2.Value.([]any), minisql.Placeholder{})
 		p.pop()
 	} else {
-		return fmt.Errorf("at WHERE BETWEEN: expected value or placeholder for lower bound")
+		return p.errorf("at WHERE BETWEEN: expected value or placeholder for lower bound")
 	}
 
 	// Consume the syntactic AND.
 	if strings.ToUpper(p.peek()) != "AND" {
-		return fmt.Errorf("at WHERE BETWEEN: expected AND between bounds")
+		return p.errorf("at WHERE BETWEEN: expected AND between bounds")
 	}
 	p.pop()
 
@@ -349,7 +349,7 @@ func (p *parserItem) parseCondBetweenValues(cond *minisql.Condition) error {
 		cond.Operand2.Value = append(cond.Operand2.Value.([]any), minisql.Placeholder{})
 		p.pop()
 	} else {
-		return fmt.Errorf("at WHERE BETWEEN: expected value or placeholder for upper bound")
+		return p.errorf("at WHERE BETWEEN: expected value or placeholder for upper bound")
 	}
 
 	return nil

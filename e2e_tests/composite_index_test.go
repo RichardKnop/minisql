@@ -110,7 +110,7 @@ func (s *TestSuite) TestCompositeIndex() {
 	})
 }
 
-func (s TestSuite) collectCompositeUsers(query string) []compositeUser {
+func (s *TestSuite) collectCompositeUsers(query string) []compositeUser {
 	rows, err := s.db.QueryContext(context.Background(), query)
 	s.Require().NoError(err)
 	defer rows.Close()
@@ -124,11 +124,4 @@ func (s TestSuite) collectCompositeUsers(query string) []compositeUser {
 	}
 	s.Require().NoError(rows.Err())
 	return users
-}
-
-func (s TestSuite) collectCompositeUser(query string) compositeUser {
-	var user compositeUser
-	err := s.db.QueryRow(query).Scan(&user.FirstName, &user.LastName, &user.Email, &user.DateOfBirth, &user.Created)
-	s.Require().NoError(err)
-	return user
 }
