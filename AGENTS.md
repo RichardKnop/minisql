@@ -5,7 +5,7 @@
 MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLite. It implements a hand-written state-machine SQL parser, a B+ tree storage engine with 4 KB pages, an LRU page cache, a rollback journal for crash recovery, and optimistic concurrency control (OCC). It registers itself as a `database/sql` driver.
 
 **Module:** `github.com/RichardKnop/minisql`
-**Go version:** 1.25
+**Go version:** 1.26
 **Not production-ready.** Treat it as a research/learning project.
 
 ---
