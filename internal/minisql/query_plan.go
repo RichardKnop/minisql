@@ -716,6 +716,11 @@ func tryRangeScan(tableName string, indexInfo IndexInfo, filters Conditions, sta
 			return Scan{}, false, nil
 		}
 
+		if aCondition.Operator == Between || aCondition.Operator == NotBetween {
+			// BETWEEN / NOT BETWEEN uses sequential scan for now
+			return Scan{}, false, nil
+		}
+
 		conditionValue, err := castKeyValue(indexInfo.Columns[0], aCondition.Operand2.Value)
 		if err != nil {
 			return Scan{}, false, err

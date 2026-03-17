@@ -1261,3 +1261,92 @@ func TestCompareText(t *testing.T) {
 		})
 	}
 }
+
+func TestIsBetweenInt4(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		value   int64
+		low     int64
+		high    int64
+		want    bool
+		wantErr bool
+	}{
+		{"value in range", 5, 1, 10, true, false},
+		{"value at lower bound", 1, 1, 10, true, false},
+		{"value at upper bound", 10, 1, 10, true, false},
+		{"value below lower bound", 0, 1, 10, false, false},
+		{"value above upper bound", 11, 1, 10, false, false},
+		{"negative range", -5, -10, -1, true, false},
+		{"single value range", 5, 5, 5, true, false},
+		{"single value range no match", 4, 5, 5, false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := isBetweenInt4(tt.value, tt.low, tt.high)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIsBetweenInt8(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value int64
+		low   int64
+		high  int64
+		want  bool
+	}{
+		{"value in range", 500, 100, 1000, true},
+		{"value at lower bound", 100, 100, 1000, true},
+		{"value at upper bound", 1000, 100, 1000, true},
+		{"value below", 99, 100, 1000, false},
+		{"value above", 1001, 100, 1000, false},
+		{"large range", 9223372036854775806, 0, 9223372036854775807, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := isBetweenInt8(tt.value, tt.low, tt.high)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIsBetweenText(t *testing.T) {
+	t.Parallel()
+
+	mkPtr := func(s string) TextPointer { return NewTextPointer([]byte(s)) }
+
+	tests := []struct {
+		name  string
+		value string
+		low   string
+		high  string
+		want  bool
+	}{
+		{"value in range", "mango", "apple", "zebra", true},
+		{"value at lower bound", "apple", "apple", "zebra", true},
+		{"value at upper bound", "zebra", "apple", "zebra", true},
+		{"value below lower", "aardvark", "apple", "zebra", false},
+		{"value above upper", "zoo", "apple", "zebra", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := isBetweenText(mkPtr(tt.value), mkPtr(tt.low), mkPtr(tt.high))
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

@@ -354,14 +354,20 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 				continue
 			}
 			if aCondition.Operand2.Type == OperandList {
-				for i, value := range aCondition.Operand2.Value.([]any) {
+				origList := aCondition.Operand2.Value.([]any)
+				newList := make([]any, len(origList))
+				copy(newList, origList)
+				for k, value := range newList {
 					if _, ok := value.(Placeholder); !ok {
 						continue
 					}
-					aCondition.Operand2.Type = operandTypeFromAny(args[0])
-					aCondition.Operand2.Value.([]any)[i] = args[0]
+					if len(args) == 0 {
+						return Statement{}, fmt.Errorf("not enough arguments to bind placeholders")
+					}
+					newList[k] = args[0]
 					args = args[1:]
 				}
+				aCondition.Operand2.Value = newList
 				stmt.Conditions[i][j] = aCondition
 			}
 		}

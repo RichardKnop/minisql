@@ -548,8 +548,43 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 				return false, fmt.Errorf("unknown column kind '%s'", aColumn.Kind)
 			}
 
+		case Between, NotBetween:
+			list, ok := valueOperand.Value.([]any)
+			if !ok || len(list) != 2 {
+				return false, fmt.Errorf("BETWEEN requires exactly 2 bounds")
+			}
+			var (
+				inRange bool
+				err     error
+			)
+			switch aColumn.Kind {
+			case Boolean:
+				return false, fmt.Errorf("BETWEEN operator not supported for boolean columns")
+			case Int4:
+				inRange, err = isBetweenInt4(int64(fieldValue.Value.(int32)), list[0], list[1])
+			case Int8:
+				inRange, err = isBetweenInt8(fieldValue.Value, list[0], list[1])
+			case Real:
+				inRange, err = isBetweenReal(float64(fieldValue.Value.(float32)), list[0], list[1])
+			case Double:
+				inRange, err = isBetweenDouble(fieldValue.Value, list[0], list[1])
+			case Varchar, Text:
+				inRange, err = isBetweenText(fieldValue.Value, list[0], list[1])
+			case Timestamp:
+				inRange, err = isBetweenTimestamp(fieldValue.Value, list[0], list[1])
+			default:
+				return false, fmt.Errorf("unknown column kind '%s'", aColumn.Kind)
+			}
+			if err != nil {
+				return false, err
+			}
+			if operator == Between {
+				return inRange, nil
+			}
+			return !inRange, nil
+
 		default:
-			return false, fmt.Errorf("only 'IN' and 'NOT IN' operators supported when comparing against list")
+			return false, fmt.Errorf("only 'IN', 'NOT IN', 'BETWEEN', and 'NOT BETWEEN' operators supported when comparing against list")
 		}
 	}
 

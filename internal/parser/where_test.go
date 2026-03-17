@@ -293,6 +293,57 @@ func TestParse_Where(t *testing.T) {
 			},
 			nil,
 		},
+		{
+			"WHERE with BETWEEN integer bounds",
+			"WHERE age BETWEEN 18 AND 65",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsBetween(minisql.Field{Name: "age"}, int64(18), int64(65)),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with NOT BETWEEN integer bounds",
+			"WHERE age NOT BETWEEN 18 AND 65",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsNotBetween(minisql.Field{Name: "age"}, int64(18), int64(65)),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with BETWEEN string bounds",
+			"WHERE name BETWEEN 'A' AND 'M'",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsBetween(minisql.Field{Name: "name"}, minisql.NewTextPointer([]byte("A")), minisql.NewTextPointer([]byte("M"))),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with BETWEEN placeholders",
+			"WHERE age BETWEEN ? AND ?",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsBetween(minisql.Field{Name: "age"}, minisql.Placeholder{}, minisql.Placeholder{}),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with BETWEEN combined with AND",
+			"WHERE age BETWEEN 18 AND 65 AND name = 'Alice'",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsBetween(minisql.Field{Name: "age"}, int64(18), int64(65)),
+					minisql.FieldIsEqual(minisql.Field{Name: "name"}, minisql.OperandQuotedString, minisql.NewTextPointer([]byte("Alice"))),
+				},
+			},
+			nil,
+		},
 	}
 
 	for _, aTestCase := range testCases {
