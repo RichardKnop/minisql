@@ -1,0 +1,25 @@
+# Agent OS Standards Index
+
+parser:
+  peek-pop-errors: Cursor peek/pop helpers, which to use, and error message format
+  reserved-words: SQL keyword tokenizer rules and how to add new keywords
+  state-machine: Two-level dispatch pattern for statement sub-parsers
+  where-recursive-descent: WHERE clause recursive-descent parser and DNF normalisation
+
+query-execution:
+  dnf-scans-fanout: OR groups in DNF each become one Scan; residual Scan.Filters applied post-index
+  index-selection: Operator eligibility, index priority, composite prefix matching, override guard
+  plan-pipeline: Channel-based scan→consumer pipeline; streaming vs in-memory sort paths
+  sort-path: ORDER BY path selection; heap optimisation for LIMIT; DISTINCT materialisation
+
+storage-engine:
+  occ-transactions: OCC ReadSet/WriteSet lifecycle; transaction travels via context, never as parameter
+  page-layout: 4KB page tagged-union, page 0 special handling, usable space
+  pager-cache: Sparse page array + LRU; I/O and unmarshal outside the lock
+  rollback-journal: Write-before protocol, CRC32 integrity, crash recovery
+
+testing:
+  datagen: Row generator helpers, uniqueness guarantees, naming convention for new entity types
+  e2e-suite: TestSuite setup/teardown lifecycle, SQL fixture placement, sub-test vs method rules
+  row-size-presets: testColumns/testMediumColumns/testBigColumns — when to use each
+  unit-test-setup: initTest helper, TransactionalPager wiring, ExecuteInTransaction requirement
