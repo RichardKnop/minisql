@@ -229,20 +229,14 @@ if err := rows.Err(); err != nil {
 - `UPDATE`
 - `DELETE`
 - simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis
-- supported operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`
-- `LIMIT` and `OFFSET` clauses for basic pagination
-- `ORDER BY` supported for a single column only
+- supported operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`, `LIKE`, `NOT LIKE`, `BETWEEN`
 - `LIKE`, `NOT LIKE` pattern matching
   - The percent sign `%` wildcard matches any sequence of zero or more characters.
   - The underscore `_` wildcard matches any single character.
 - `BETWEEN` for cleaner and more readable range conditions
+- `LIMIT` and `OFFSET` clauses for basic pagination
+- `ORDER BY` supported for a single column only
 - `VACUUM` similar to SQLite, rebuilds the database file, repacking it into a minimal amount of disk space
-
-For `WHERE` clauses, currently supported is maximum one level of nesting. You can define multiple groups where each group item is joined with `AND` and groups themselves are joined by `OR`. For example, you could create two condition groups such as:
-
-```sh
-(a = 1 and b = 'foo') or (c is null and d in ('bar', 'qux'))
-```
 
 Prepared statements are supported using `?` as a placeholder. For example:
 

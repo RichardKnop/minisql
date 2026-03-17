@@ -22,18 +22,8 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 
 	t.logger.Sugar().With("query type", "DELETE", "plan", plan).Debug("query plan")
 
-	// We need to select any fields used in WHERE conditions to filter rows to delete.
-	var selectedFields []Field
-	for _, conditions := range stmt.Conditions {
-		for _, cond := range conditions {
-			if cond.Operand1.Type == OperandField {
-				selectedFields = append(selectedFields, cond.Operand1.Value.(Field))
-			}
-			if cond.Operand2.Type == OperandField {
-				selectedFields = append(selectedFields, cond.Operand2.Value.(Field))
-			}
-		}
-	}
+	// Always select all columns so the full row is available for index cleanup on delete.
+	selectedFields := fieldsFromColumns(t.Columns...)
 
 	var (
 		filteredPipe = make(chan Row)

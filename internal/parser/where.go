@@ -11,274 +11,346 @@ var (
 	errEmptyWhereClause                          = fmt.Errorf("at WHERE: empty WHERE clause")
 	errWhereWithoutOperator                      = fmt.Errorf("at WHERE: condition without operator")
 	errWhereExpectedField                        = fmt.Errorf("at WHERE: expected field")
-	errWhereExpectedAndOr                        = fmt.Errorf("expected one of AND / OR")
 	errWhereExpectedPlaceholderOrValue           = fmt.Errorf("at WHERE: expected placeholder or value")
 	errWhereExpectedIdentifierPlaceholderOrValue = fmt.Errorf("at WHERE: expected identifier, placeholder or value")
 	errWhereUnknownOperator                      = fmt.Errorf("at WHERE: unknown operator")
 )
 
+// doParseWhere handles the stepWhere step. It parses the optional WHERE clause
+// using a recursive-descent parser that builds a ConditionNode tree, then
+// normalises the tree to DNF (OneOrMore) so all downstream code is unchanged.
 func (p *parserItem) doParseWhere() error {
-	switch p.step {
-	case stepWhere:
-		whereOrEnd := p.peek()
-		if whereOrEnd == ";" {
-			p.step = stepStatementEnd
-			return nil
+	whereOrEnd := p.peek()
+
+	// No WHERE clause — move on.
+	if whereOrEnd == ";" {
+		p.step = stepStatementEnd
+		return nil
+	}
+
+	whereRWord := strings.ToUpper(whereOrEnd)
+
+	// ORDER BY / LIMIT / OFFSET appearing before WHERE (i.e. no WHERE clause).
+	if whereRWord == "ORDER BY" || whereRWord == "LIMIT" || whereRWord == "OFFSET" {
+		p.step = stepSelectOrderBy
+		return nil
+	}
+
+	if whereRWord != "WHERE" {
+		return fmt.Errorf("expected WHERE")
+	}
+	if len(p.OrderBy) > 0 {
+		return fmt.Errorf("at WHERE: ORDER BY must be after WHERE clause")
+	}
+	if p.Offset.Valid || p.Limit.Valid {
+		return fmt.Errorf("at WHERE: OFFSET / LIMIT must be after WHERE clause")
+	}
+	if len(p.Conditions) > 0 {
+		return fmt.Errorf("at WHERE: multiple WHERE clauses are not supported")
+	}
+
+	p.pop() // consume "WHERE"
+
+	node, err := p.parseCondExpr()
+	if err != nil {
+		return err
+	}
+	p.Conditions = node.ToDNF()
+
+	// Determine the next parser step.
+	next := strings.ToUpper(p.peek())
+	if next == "ORDER BY" || next == "LIMIT" || next == "OFFSET" {
+		p.step = stepSelectOrderBy
+	} else {
+		p.step = stepStatementEnd
+	}
+	return nil
+}
+
+// parseCondExpr parses an OR expression (lowest precedence):
+//
+//	andExpr ('OR' andExpr)*
+func (p *parserItem) parseCondExpr() (*minisql.ConditionNode, error) {
+	left, err := p.parseAndExpr()
+	if err != nil {
+		return nil, err
+	}
+	for strings.ToUpper(p.peek()) == "OR" {
+		p.pop()
+		right, err := p.parseAndExpr()
+		if err != nil {
+			return nil, err
 		}
-		whereRWord := strings.ToUpper(whereOrEnd)
-		if whereRWord != "WHERE" {
-			return fmt.Errorf("expected WHERE")
+		left = &minisql.ConditionNode{
+			Left:  left,
+			Op:    minisql.LogicOpOr,
+			Right: right,
 		}
-		if len(p.OrderBy) > 0 {
-			return fmt.Errorf("at WHERE: ORDER BY must be after WHERE clause")
+	}
+	return left, nil
+}
+
+// parseAndExpr parses an AND expression:
+//
+//	primaryExpr ('AND' primaryExpr)*
+//
+// Note: the syntactic AND inside BETWEEN x AND y is consumed inside
+// parseCondBetweenValues, so it is never seen by this loop.
+func (p *parserItem) parseAndExpr() (*minisql.ConditionNode, error) {
+	left, err := p.parsePrimaryCondExpr()
+	if err != nil {
+		return nil, err
+	}
+	for strings.ToUpper(p.peek()) == "AND" {
+		p.pop()
+		right, err := p.parsePrimaryCondExpr()
+		if err != nil {
+			return nil, err
 		}
-		if p.Offset.Valid || p.Limit.Valid {
-			return fmt.Errorf("at WHERE: OFFSET / LIMIT must be after WHERE clause")
+		left = &minisql.ConditionNode{
+			Left:  left,
+			Op:    minisql.LogicOpAnd,
+			Right: right,
 		}
-		if len(p.Conditions) > 0 {
-			return fmt.Errorf("at WHERE: multiple WHERE clauses are not supported")
+	}
+	return left, nil
+}
+
+// parsePrimaryCondExpr parses a parenthesised group or a single leaf condition.
+func (p *parserItem) parsePrimaryCondExpr() (*minisql.ConditionNode, error) {
+	if p.peek() == "(" {
+		p.pop() // consume "("
+		node, err := p.parseCondExpr()
+		if err != nil {
+			return nil, err
+		}
+		if p.peek() != ")" {
+			return nil, fmt.Errorf("at WHERE: expected closing parenthesis")
+		}
+		p.pop() // consume ")"
+		return node, nil
+	}
+	return p.parseLeafCondition()
+}
+
+// parseLeafCondition parses a single WHERE condition: field op value.
+func (p *parserItem) parseLeafCondition() (*minisql.ConditionNode, error) {
+	identifier := p.peek()
+	if !isIdentifier(identifier) {
+		return nil, errWhereExpectedField
+	}
+	p.pop()
+
+	cond := minisql.Condition{
+		Operand1: minisql.Operand{
+			Type:  minisql.OperandField,
+			Value: fieldFromIdentifier(identifier),
+		},
+	}
+
+	op := strings.ToUpper(p.peek())
+	switch op {
+	case "IS NULL":
+		cond.Operator = minisql.Eq
+		cond.Operand2 = minisql.Operand{Type: minisql.OperandNull}
+		p.pop()
+	case "IS NOT NULL":
+		cond.Operator = minisql.Ne
+		cond.Operand2 = minisql.Operand{Type: minisql.OperandNull}
+		p.pop()
+	case "IN (":
+		cond.Operator = minisql.In
+		cond.Operand2 = minisql.Operand{Type: minisql.OperandList, Value: []any{}}
+		p.pop()
+		if err := p.parseCondListValues(&cond); err != nil {
+			return nil, err
+		}
+	case "NOT IN (":
+		cond.Operator = minisql.NotIn
+		cond.Operand2 = minisql.Operand{Type: minisql.OperandList, Value: []any{}}
+		p.pop()
+		if err := p.parseCondListValues(&cond); err != nil {
+			return nil, err
+		}
+	case "BETWEEN":
+		cond.Operator = minisql.Between
+		cond.Operand2 = minisql.Operand{Type: minisql.OperandList, Value: []any{}}
+		p.pop()
+		if err := p.parseCondBetweenValues(&cond); err != nil {
+			return nil, err
+		}
+	case "NOT BETWEEN":
+		cond.Operator = minisql.NotBetween
+		cond.Operand2 = minisql.Operand{Type: minisql.OperandList, Value: []any{}}
+		p.pop()
+		if err := p.parseCondBetweenValues(&cond); err != nil {
+			return nil, err
+		}
+	case "=":
+		cond.Operator = minisql.Eq
+		p.pop()
+		if err := p.parseCondScalarValue(&cond); err != nil {
+			return nil, err
+		}
+	case ">":
+		cond.Operator = minisql.Gt
+		p.pop()
+		if err := p.parseCondScalarValue(&cond); err != nil {
+			return nil, err
+		}
+	case ">=":
+		cond.Operator = minisql.Gte
+		p.pop()
+		if err := p.parseCondScalarValue(&cond); err != nil {
+			return nil, err
+		}
+	case "<":
+		cond.Operator = minisql.Lt
+		p.pop()
+		if err := p.parseCondScalarValue(&cond); err != nil {
+			return nil, err
+		}
+	case "<=":
+		cond.Operator = minisql.Lte
+		p.pop()
+		if err := p.parseCondScalarValue(&cond); err != nil {
+			return nil, err
+		}
+	case "!=":
+		cond.Operator = minisql.Ne
+		p.pop()
+		if err := p.parseCondScalarValue(&cond); err != nil {
+			return nil, err
+		}
+	case "LIKE":
+		cond.Operator = minisql.Like
+		p.pop()
+		if err := p.parseCondScalarValue(&cond); err != nil {
+			return nil, err
+		}
+	case "NOT LIKE":
+		cond.Operator = minisql.NotLike
+		p.pop()
+		if err := p.parseCondScalarValue(&cond); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, errWhereUnknownOperator
+	}
+
+	return &minisql.ConditionNode{Leaf: &cond}, nil
+}
+
+// parseCondScalarValue parses a scalar value (literal, placeholder, or field identifier)
+// and assigns it to cond.Operand2.
+func (p *parserItem) parseCondScalarValue(cond *minisql.Condition) error {
+	value, ln := p.peekValue()
+	if ln != 0 {
+		cond.Operand2 = minisql.Operand{
+			Type:  minisql.OperandQuotedString,
+			Value: value,
+		}
+		if _, ok := value.(bool); ok {
+			cond.Operand2.Type = minisql.OperandBoolean
+		} else if _, ok := value.(int64); ok {
+			cond.Operand2.Type = minisql.OperandInteger
+		} else if _, ok := value.(float64); ok {
+			cond.Operand2.Type = minisql.OperandFloat
+		} else if _, ok := value.(string); ok {
+			cond.Operand2.Value = minisql.NewTextPointer([]byte(value.(string)))
 		}
 		p.pop()
-		p.step = stepWhereConditionField
-	case stepWhereConditionField:
-		identifier := p.peek()
-		if !isIdentifier(identifier) {
-			return errWhereExpectedField
-		}
-		p.Statement.Conditions = p.Statement.Conditions.Append(minisql.Condition{
-			Operand1: minisql.Operand{
-				Type:  minisql.OperandField,
-				Value: fieldFromIdentifier(identifier),
-			},
-		})
+		return nil
+	}
+	if p.peek() == "?" {
+		cond.Operand2 = minisql.Operand{Type: minisql.OperandPlaceholder}
 		p.pop()
-		p.step = stepWhereConditionOperator
-	case stepWhereConditionOperator:
-		var (
-			operatorOrNullComparison = p.peek()
-			currentCondition, _      = p.Conditions.LastCondition()
-		)
-		switch strings.ToUpper(operatorOrNullComparison) {
-		case "IS NULL":
-			currentCondition.Operator = minisql.Eq
-			currentCondition.Operand2 = minisql.Operand{
-				Type: minisql.OperandNull,
-			}
-			p.step = stepWhereOperator
-			p.Conditions.UpdateLast(currentCondition)
-			p.pop()
-			return nil
-		case "IS NOT NULL":
-			currentCondition.Operator = minisql.Ne
-			currentCondition.Operand2 = minisql.Operand{
-				Type: minisql.OperandNull,
-			}
-			p.step = stepWhereOperator
-			p.Conditions.UpdateLast(currentCondition)
-			p.pop()
-			return nil
-		case "IN (":
-			currentCondition.Operator = minisql.In
-			currentCondition.Operand2 = minisql.Operand{
-				Type:  minisql.OperandList,
-				Value: []any{},
-			}
-		case "NOT IN (":
-			currentCondition.Operator = minisql.NotIn
-			currentCondition.Operand2 = minisql.Operand{
-				Type:  minisql.OperandList,
-				Value: []any{},
-			}
-		case "=":
-			currentCondition.Operator = minisql.Eq
-		case ">":
-			currentCondition.Operator = minisql.Gt
-		case ">=":
-			currentCondition.Operator = minisql.Gte
-		case "<":
-			currentCondition.Operator = minisql.Lt
-		case "<=":
-			currentCondition.Operator = minisql.Lte
-		case "!=":
-			currentCondition.Operator = minisql.Ne
-		case "LIKE":
-			currentCondition.Operator = minisql.Like
-		case "NOT LIKE":
-			currentCondition.Operator = minisql.NotLike
-		case "BETWEEN":
-			currentCondition.Operator = minisql.Between
-			currentCondition.Operand2 = minisql.Operand{
-				Type:  minisql.OperandList,
-				Value: []any{},
-			}
-		case "NOT BETWEEN":
-			currentCondition.Operator = minisql.NotBetween
-			currentCondition.Operand2 = minisql.Operand{
-				Type:  minisql.OperandList,
-				Value: []any{},
-			}
-		default:
-			return errWhereUnknownOperator
-		}
-		p.Conditions.UpdateLast(currentCondition)
-		p.pop()
-		if currentCondition.Operator == minisql.In || currentCondition.Operator == minisql.NotIn {
-			p.step = stepWhereConditionListValue
-			return nil
-		}
-		if currentCondition.Operator == minisql.Between || currentCondition.Operator == minisql.NotBetween {
-			p.step = stepWhereBetweenLow
-			return nil
-		}
-		p.step = stepWhereConditionValue
-	case stepWhereConditionValue:
-		var currentCondition, _ = p.Conditions.LastCondition()
-		p.step = stepWhereOperator
-
-		value, ln := p.peekValue()
-		if ln != 0 {
-			currentCondition.Operand2 = minisql.Operand{
-				Type:  minisql.OperandQuotedString,
-				Value: value,
-			}
-			if _, ok := value.(bool); ok {
-				currentCondition.Operand2.Type = minisql.OperandBoolean
-			} else if _, ok := value.(int64); ok {
-				currentCondition.Operand2.Type = minisql.OperandInteger
-			} else if _, ok := value.(float64); ok {
-				currentCondition.Operand2.Type = minisql.OperandFloat
-			} else if _, ok := value.(string); ok {
-				currentCondition.Operand2.Value = minisql.NewTextPointer([]byte(value.(string)))
-			}
-			p.Conditions.UpdateLast(currentCondition)
-			p.pop()
-			return nil
-		}
-
-		placeholderOrField := p.peek()
-		if placeholderOrField == "?" {
-			currentCondition.Operand2 = minisql.Operand{
-				Type: minisql.OperandPlaceholder,
-			}
-			p.Conditions.UpdateLast(currentCondition)
-			p.pop()
-			return nil
-		} else if isIdentifier(placeholderOrField) {
-			currentCondition.Operand2 = minisql.Operand{
-				Type:  minisql.OperandField,
-				Value: fieldFromIdentifier(placeholderOrField),
-			}
-			p.Conditions.UpdateLast(currentCondition)
-			p.pop()
-			return nil
-		}
-
-		return errWhereExpectedIdentifierPlaceholderOrValue
-	case stepWhereBetweenLow:
-		currentCondition, _ := p.Conditions.LastCondition()
-		value, ln := p.peekValue()
-		if ln != 0 {
-			if _, ok := value.(string); ok {
-				value = minisql.NewTextPointer([]byte(value.(string)))
-			}
-			currentCondition.Operand2.Value = append(currentCondition.Operand2.Value.([]any), value)
-			p.Conditions.UpdateLast(currentCondition)
-			p.pop()
-			p.step = stepWhereBetweenAnd
-			return nil
-		}
-		if p.peek() == "?" {
-			currentCondition.Operand2.Value = append(currentCondition.Operand2.Value.([]any), minisql.Placeholder{})
-			p.Conditions.UpdateLast(currentCondition)
-			p.pop()
-			p.step = stepWhereBetweenAnd
-			return nil
-		}
-		return fmt.Errorf("at WHERE BETWEEN: expected value or placeholder for lower bound")
-	case stepWhereBetweenAnd:
-		if strings.ToUpper(p.peek()) != "AND" {
-			return fmt.Errorf("at WHERE BETWEEN: expected AND between bounds")
+		return nil
+	}
+	if identifier := p.peek(); isIdentifier(identifier) {
+		cond.Operand2 = minisql.Operand{
+			Type:  minisql.OperandField,
+			Value: fieldFromIdentifier(identifier),
 		}
 		p.pop()
-		p.step = stepWhereBetweenHigh
-	case stepWhereBetweenHigh:
-		currentCondition, _ := p.Conditions.LastCondition()
+		return nil
+	}
+	return errWhereExpectedIdentifierPlaceholderOrValue
+}
+
+// parseCondListValues parses the comma-separated values inside IN (...).
+// The opening "(" is already consumed as part of the "IN (" token.
+func (p *parserItem) parseCondListValues(cond *minisql.Condition) error {
+	for {
 		value, ln := p.peekValue()
 		if ln != 0 {
-			if _, ok := value.(string); ok {
-				value = minisql.NewTextPointer([]byte(value.(string)))
+			v := value
+			if _, ok := v.(string); ok {
+				v = minisql.NewTextPointer([]byte(v.(string)))
 			}
-			currentCondition.Operand2.Value = append(currentCondition.Operand2.Value.([]any), value)
-			p.Conditions.UpdateLast(currentCondition)
+			cond.Operand2.Value = append(cond.Operand2.Value.([]any), v)
 			p.pop()
-			p.step = stepWhereOperator
-			return nil
-		}
-		if p.peek() == "?" {
-			currentCondition.Operand2.Value = append(currentCondition.Operand2.Value.([]any), minisql.Placeholder{})
-			p.Conditions.UpdateLast(currentCondition)
+		} else if p.peek() == "?" {
+			cond.Operand2.Value = append(cond.Operand2.Value.([]any), minisql.Placeholder{})
 			p.pop()
-			p.step = stepWhereOperator
-			return nil
+		} else {
+			return errWhereExpectedPlaceholderOrValue
 		}
-		return fmt.Errorf("at WHERE BETWEEN: expected value or placeholder for upper bound")
-	case stepWhereConditionListValue:
-		currentCondition, _ := p.Conditions.LastCondition()
-		p.step = stepWhereConditionListValueCommaOrEnd
 
-		value, ln := p.peekValue()
-		if ln != 0 {
-			if _, ok := value.(string); ok {
-				value = minisql.NewTextPointer([]byte(value.(string)))
-			}
-			currentCondition.Operand2.Value = append(currentCondition.Operand2.Value.([]any), value)
-			p.Conditions.UpdateLast(currentCondition)
+		next := p.peek()
+		if next == ")" {
 			p.pop()
 			return nil
 		}
-
-		if p.peek() == "?" {
-			currentCondition.Operand2.Value = append(currentCondition.Operand2.Value.([]any), minisql.Placeholder{})
-			p.Conditions.UpdateLast(currentCondition)
+		if next == "," {
 			p.pop()
-			return nil
-		}
-
-		return errWhereExpectedPlaceholderOrValue
-
-	case stepWhereConditionListValueCommaOrEnd:
-		switch strings.ToUpper(p.peek()) {
-		case ",":
-			p.pop()
-			p.step = stepWhereConditionListValue
-			return nil
-		case ")":
-			p.pop()
-			p.step = stepWhereOperator
-			return nil
+			continue
 		}
 		return fmt.Errorf("at WHERE IN (...): expected , or )")
-	case stepWhereOperator:
-		rWord := strings.ToUpper(p.peek())
-		lastCondition, ok := p.Conditions.LastCondition()
-		if ok && minisql.IsValidCondition(lastCondition) {
-			if rWord == ";" {
-				p.step = stepStatementEnd
-				return nil
-			}
-		}
-		if rWord == "ORDER BY" || rWord == "LIMIT" || rWord == "OFFSET" {
-			p.step = stepSelectOrderBy
-			return nil
-		}
-		if rWord != "AND" && rWord != "OR" {
-			return errWhereExpectedAndOr
-		}
-		if rWord == "OR" {
-			p.Conditions = append(p.Conditions, make(minisql.Conditions, 0, 1))
-		}
-		p.pop()
-		p.step = stepWhereConditionField
 	}
+}
+
+// parseCondBetweenValues parses "low AND high" for BETWEEN / NOT BETWEEN.
+// Consumes the syntactic AND between the bounds so it is not treated as a
+// logical AND by the outer parseAndExpr.
+func (p *parserItem) parseCondBetweenValues(cond *minisql.Condition) error {
+	// Parse low bound.
+	value, ln := p.peekValue()
+	if ln != 0 {
+		v := value
+		if _, ok := v.(string); ok {
+			v = minisql.NewTextPointer([]byte(v.(string)))
+		}
+		cond.Operand2.Value = append(cond.Operand2.Value.([]any), v)
+		p.pop()
+	} else if p.peek() == "?" {
+		cond.Operand2.Value = append(cond.Operand2.Value.([]any), minisql.Placeholder{})
+		p.pop()
+	} else {
+		return fmt.Errorf("at WHERE BETWEEN: expected value or placeholder for lower bound")
+	}
+
+	// Consume the syntactic AND.
+	if strings.ToUpper(p.peek()) != "AND" {
+		return fmt.Errorf("at WHERE BETWEEN: expected AND between bounds")
+	}
+	p.pop()
+
+	// Parse high bound.
+	value, ln = p.peekValue()
+	if ln != 0 {
+		v := value
+		if _, ok := v.(string); ok {
+			v = minisql.NewTextPointer([]byte(v.(string)))
+		}
+		cond.Operand2.Value = append(cond.Operand2.Value.([]any), v)
+		p.pop()
+	} else if p.peek() == "?" {
+		cond.Operand2.Value = append(cond.Operand2.Value.([]any), minisql.Placeholder{})
+		p.pop()
+	} else {
+		return fmt.Errorf("at WHERE BETWEEN: expected value or placeholder for upper bound")
+	}
+
 	return nil
 }

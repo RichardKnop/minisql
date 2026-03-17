@@ -48,13 +48,13 @@ func TestParse_Update(t *testing.T) {
 			"Incomplete UPDATE due to no WHERE clause fails",
 			"UPDATE 'a' SET b = 'hello' WHERE",
 			nil,
-			errEmptyWhereClause,
+			errWhereExpectedField,
 		},
 		{
 			"Incomplete UPDATE due incomplete WHERE clause fails",
 			"UPDATE 'a' SET b = 'hello' WHERE a",
 			nil,
-			errWhereWithoutOperator,
+			errWhereUnknownOperator,
 		},
 		{
 			"UPDATE works",
