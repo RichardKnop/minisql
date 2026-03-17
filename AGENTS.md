@@ -246,6 +246,23 @@ mockParser.AssertExpectations(t)
 
 ---
 
+## Agent OS Standards
+
+Tribal knowledge, design decisions, and gotchas for specific subsystems are documented in `agent-os/standards/`. Before working in any of the areas below, read the relevant standard(s).
+
+**Index:** `agent-os/standards/index.yml`
+
+| Area | Standards |
+|---|---|
+| SQL Parser | reserved words, state machine, WHERE recursive-descent, peek/pop cursor |
+| Query Execution | plan pipeline, index selection, DNF fanout, sort path |
+| Storage Engine | page layout, pager cache, OCC transactions, rollback journal |
+| Testing | e2e suite, unit test setup, dataGen, row size presets |
+
+Standards explain the *why* behind non-obvious patterns. Code conventions (formatting, error handling, etc.) remain in this file.
+
+---
+
 ## Coding Conventions
 
 ### Error handling
