@@ -89,6 +89,8 @@ MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLi
 
 ### Run all tests
 ```bash
+make test
+# or directly:
 LOG_LEVEL=info go test ./... -count=1
 ```
 `LOG_LEVEL=info` suppresses verbose debug output; errors are still visible. Use `warn` for even quieter output.
@@ -108,8 +110,19 @@ LOG_LEVEL=warn go test ./internal/minisql/... -run TestTable_Select -count=1 -v
 
 ### Build
 ```bash
+make build
+# or directly:
 go build -v ./...
 ```
+
+### Coverage
+```bash
+make coverage
+```
+Runs tests with `-coverprofile`, prints a per-function summary to stdout, and writes `coverage.html` (open in a browser for the full annotated report).
+
+**Baseline (March 2026):** `internal/minisql` 70.1%, `internal/parser` 87.4%, total 70.8%.
+**CI threshold:** 70% total — CI fails if coverage drops below this. Raise `COVERAGE_THRESHOLD` in `Makefile` and `.github/workflows/go.yml` as coverage improves toward the 80% target.
 
 ### Regenerate mocks (after changing an interface in `ports.go`)
 ```bash
