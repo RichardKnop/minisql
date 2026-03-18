@@ -1350,3 +1350,407 @@ func TestIsBetweenText(t *testing.T) {
 		})
 	}
 }
+
+func TestIsBetweenReal(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		value   float64
+		low     float64
+		high    float64
+		want    bool
+		wantErr bool
+	}{
+		{"value in range", 5.5, 1.0, 10.0, true, false},
+		{"value at lower bound", 1.0, 1.0, 10.0, true, false},
+		{"value at upper bound", 10.0, 1.0, 10.0, true, false},
+		{"value below lower bound", 0.9, 1.0, 10.0, false, false},
+		{"value above upper bound", 10.1, 1.0, 10.0, false, false},
+		{"negative range", -5.0, -10.0, -1.0, true, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := isBetweenReal(tt.value, tt.low, tt.high)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIsBetweenDouble(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value float64
+		low   float64
+		high  float64
+		want  bool
+	}{
+		{"value in range", 5.5, 1.0, 10.0, true},
+		{"value at lower bound", 1.0, 1.0, 10.0, true},
+		{"value at upper bound", 10.0, 1.0, 10.0, true},
+		{"value below lower bound", 0.99, 1.0, 10.0, false},
+		{"value above upper bound", 10.01, 1.0, 10.0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := isBetweenDouble(tt.value, tt.low, tt.high)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIsBetweenTimestamp(t *testing.T) {
+	t.Parallel()
+
+	t1 := MustParseTimestamp("2020-01-01 00:00:00")
+	t2 := MustParseTimestamp("2021-06-15 12:00:00")
+	t3 := MustParseTimestamp("2022-12-31 23:59:59")
+
+	tests := []struct {
+		name  string
+		value Time
+		low   Time
+		high  Time
+		want  bool
+	}{
+		{"value in range", t2, t1, t3, true},
+		{"value at lower bound", t1, t1, t3, true},
+		{"value at upper bound", t3, t1, t3, true},
+		{"value below lower bound", t1, t2, t3, false},
+		{"value above upper bound", t3, t1, t2, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := isBetweenTimestamp(tt.value, tt.low, tt.high)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIsInListInt4(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		value   any
+		list    any
+		want    bool
+		wantErr bool
+	}{
+		{"found in list", int64(5), []any{int64(1), int64(5), int64(10)}, true, false},
+		{"not found in list", int64(7), []any{int64(1), int64(5), int64(10)}, false, false},
+		{"empty list", int64(5), []any{}, false, false},
+		{"single element match", int64(42), []any{int64(42)}, true, false},
+		{"negative value found", int64(-5), []any{int64(-10), int64(-5), int64(0)}, true, false},
+		{"invalid value type", "not an int", []any{int64(1)}, false, true},
+		{"invalid list type", int64(1), "not a list", false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := isInListInt4(tt.value, tt.list)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIsInListReal(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		value   any
+		list    any
+		want    bool
+		wantErr bool
+	}{
+		{"found in list", float64(5.5), []any{float64(1.1), float64(5.5), float64(10.0)}, true, false},
+		{"not found in list", float64(7.7), []any{float64(1.1), float64(5.5), float64(10.0)}, false, false},
+		{"empty list", float64(5.5), []any{}, false, false},
+		{"invalid value type", "not a float", []any{float64(1.0)}, false, true},
+		{"invalid list type", float64(1.0), "not a list", false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := isInListReal(tt.value, tt.list)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIsInListDouble(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		value   any
+		list    any
+		want    bool
+		wantErr bool
+	}{
+		{"found in list", float64(5.5), []any{float64(1.1), float64(5.5), float64(10.0)}, true, false},
+		{"not found in list", float64(7.7), []any{float64(1.1), float64(5.5), float64(10.0)}, false, false},
+		{"empty list", float64(5.5), []any{}, false, false},
+		{"invalid value type", "not a float", []any{float64(1.0)}, false, true},
+		{"invalid list type", float64(1.0), "not a list", false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := isInListDouble(tt.value, tt.list)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIsInListTimestamp(t *testing.T) {
+	t.Parallel()
+
+	t1 := MustParseTimestamp("2020-01-01 00:00:00")
+	t2 := MustParseTimestamp("2021-06-15 12:00:00")
+	t3 := MustParseTimestamp("2022-12-31 23:59:59")
+
+	tests := []struct {
+		name    string
+		value   any
+		list    any
+		want    bool
+		wantErr bool
+	}{
+		{"found in list", t2, []any{t1, t2, t3}, true, false},
+		{"not found in list", t3, []any{t1, t2}, false, false},
+		{"empty list", t1, []any{}, false, false},
+		{"invalid value type", "not a time", []any{t1}, false, true},
+		{"invalid list type", t1, "not a list", false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := isInListTimestamp(tt.value, tt.list)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestCompareTimestamp(t *testing.T) {
+	t.Parallel()
+
+	t1 := MustParseTimestamp("2020-01-01 00:00:00")
+	t2 := MustParseTimestamp("2021-06-15 12:00:00")
+	t3 := MustParseTimestamp("2021-06-15 12:00:00")
+
+	tests := []struct {
+		name     string
+		a        any
+		b        any
+		operator Operator
+		want     bool
+		wantErr  bool
+	}{
+		{"equal timestamps", t2, t3, Eq, true, false},
+		{"not equal", t1, t2, Eq, false, false},
+		{"not equal op", t1, t2, Ne, true, false},
+		{"greater than", t2, t1, Gt, true, false},
+		{"less than", t1, t2, Lt, true, false},
+		{"greater or equal same", t2, t3, Gte, true, false},
+		{"less or equal same", t2, t3, Lte, true, false},
+		{"unknown operator", t1, t2, Operator(999), false, true},
+		{"invalid value1 type", "bad", t2, Eq, false, true},
+		{"invalid value2 type", t1, "bad", Eq, false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := compareTimestamp(tt.a, tt.b, tt.operator)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestOperatorString(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		op   Operator
+		want string
+	}{
+		{Eq, "="},
+		{Ne, "!="},
+		{Gt, ">"},
+		{Lt, "<"},
+		{Gte, ">="},
+		{Lte, "<="},
+		{In, "IN"},
+		{NotIn, "NOT IN"},
+		{Like, "LIKE"},
+		{NotLike, "NOT LIKE"},
+		{Between, "BETWEEN"},
+		{NotBetween, "NOT BETWEEN"},
+		{Operator(999), "Unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.op.String())
+		})
+	}
+}
+
+func TestConditionOperands(t *testing.T) {
+	t.Parallel()
+
+	c := Condition{
+		Operand1: Operand{Type: OperandField, Value: Field{Name: "age"}},
+		Operator: Gt,
+		Operand2: Operand{Type: OperandInteger, Value: int64(18)},
+	}
+
+	ops := c.Operands()
+	require.Len(t, ops, 2)
+	assert.Equal(t, c.Operand1, ops[0])
+	assert.Equal(t, c.Operand2, ops[1])
+}
+
+func TestOneOrMoreLastCondition(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty returns false", func(t *testing.T) {
+		var o OneOrMore
+		_, ok := o.LastCondition()
+		assert.False(t, ok)
+	})
+
+	t.Run("empty inner group returns false", func(t *testing.T) {
+		o := OneOrMore{Conditions{}}
+		_, ok := o.LastCondition()
+		assert.False(t, ok)
+	})
+
+	t.Run("returns last condition", func(t *testing.T) {
+		c1 := FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(1))
+		c2 := FieldIsEqual(Field{Name: "name"}, OperandQuotedString, NewTextPointer([]byte("alice")))
+		o := OneOrMore{Conditions{c1, c2}}
+		got, ok := o.LastCondition()
+		require.True(t, ok)
+		assert.Equal(t, c2, got)
+	})
+}
+
+func TestOneOrMoreAppend(t *testing.T) {
+	t.Parallel()
+
+	t.Run("append to empty creates group", func(t *testing.T) {
+		var o OneOrMore
+		c := FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(1))
+		o = o.Append(c)
+		require.Len(t, o, 1)
+		require.Len(t, o[0], 1)
+		assert.Equal(t, c, o[0][0])
+	})
+
+	t.Run("append to existing group", func(t *testing.T) {
+		c1 := FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(1))
+		c2 := FieldIsEqual(Field{Name: "name"}, OperandQuotedString, NewTextPointer([]byte("alice")))
+		o := OneOrMore{Conditions{c1}}
+		o = o.Append(c2)
+		require.Len(t, o, 1)
+		require.Len(t, o[0], 2)
+		assert.Equal(t, c2, o[0][1])
+	})
+}
+
+func TestOneOrMoreUpdateLast(t *testing.T) {
+	t.Parallel()
+
+	c1 := FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(1))
+	c2 := FieldIsEqual(Field{Name: "name"}, OperandQuotedString, NewTextPointer([]byte("alice")))
+	o := OneOrMore{Conditions{c1}}
+	o.UpdateLast(c2)
+	got, ok := o.LastCondition()
+	require.True(t, ok)
+	assert.Equal(t, c2, got)
+}
+
+func TestFieldIsLike(t *testing.T) {
+	t.Parallel()
+
+	c := FieldIsLike(Field{Name: "name"}, OperandQuotedString, NewTextPointer([]byte("ali%")))
+	assert.Equal(t, Like, c.Operator)
+	assert.Equal(t, OperandField, c.Operand1.Type)
+	assert.Equal(t, OperandQuotedString, c.Operand2.Type)
+}
+
+func TestFieldIsNotLike(t *testing.T) {
+	t.Parallel()
+
+	c := FieldIsNotLike(Field{Name: "name"}, OperandQuotedString, NewTextPointer([]byte("ali%")))
+	assert.Equal(t, NotLike, c.Operator)
+	assert.Equal(t, OperandField, c.Operand1.Type)
+	assert.Equal(t, OperandQuotedString, c.Operand2.Type)
+}
+
+func TestFieldIsBetween(t *testing.T) {
+	t.Parallel()
+
+	c := FieldIsBetween(Field{Name: "age"}, int64(18), int64(65))
+	assert.Equal(t, Between, c.Operator)
+	assert.Equal(t, OperandField, c.Operand1.Type)
+	assert.Equal(t, OperandList, c.Operand2.Type)
+	vals, ok := c.Operand2.Value.([]any)
+	require.True(t, ok)
+	require.Len(t, vals, 2)
+	assert.Equal(t, int64(18), vals[0])
+	assert.Equal(t, int64(65), vals[1])
+}
+
+func TestFieldIsNotBetween(t *testing.T) {
+	t.Parallel()
+
+	c := FieldIsNotBetween(Field{Name: "age"}, int64(18), int64(65))
+	assert.Equal(t, NotBetween, c.Operator)
+	assert.Equal(t, OperandField, c.Operand1.Type)
+	assert.Equal(t, OperandList, c.Operand2.Type)
+	vals, ok := c.Operand2.Value.([]any)
+	require.True(t, ok)
+	require.Len(t, vals, 2)
+	assert.Equal(t, int64(18), vals[0])
+	assert.Equal(t, int64(65), vals[1])
+}

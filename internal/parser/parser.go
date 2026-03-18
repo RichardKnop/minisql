@@ -35,7 +35,7 @@ var reservedWords = []string{
 	"CREATE TABLE", "DROP TABLE", "CREATE INDEX", "DROP INDEX",
 	"SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
-	"*", "COUNT(*)", "ORDER BY", "LIMIT", "OFFSET",
+	"*", "COUNT(*)", "SUM(", "AVG(", "MIN(", "MAX(", "ORDER BY", "LIMIT", "OFFSET",
 	"PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "DEFAULT", "NOT NULL", "NULL", "UNIQUE",
 	"IS NULL", "IS NOT NULL", "NOT BETWEEN", "NOT LIKE", "BETWEEN", "LIKE", "TRUE", "FALSE", "NOW()",
 	"IF NOT EXISTS", "WHERE", "FROM", "SET", "ASC", "DESC", "AS",
