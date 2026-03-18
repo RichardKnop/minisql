@@ -15,6 +15,22 @@ var (
 	errExpectedFrom               = fmt.Errorf("at SELECT: expected FROM")
 )
 
+// aggregateKindFromToken maps the reserved-word token (e.g. "SUM(") to its AggregateKind.
+func aggregateKindFromToken(upper string) minisql.AggregateKind {
+	switch upper {
+	case "SUM(":
+		return minisql.AggregateSum
+	case "AVG(":
+		return minisql.AggregateAvg
+	case "MIN(":
+		return minisql.AggregateMin
+	case "MAX(":
+		return minisql.AggregateMax
+	default:
+		return 0
+	}
+}
+
 /*
 SELECT select_list
 
@@ -34,11 +50,53 @@ func (p *parserItem) doParseSelect() error {
 		}
 
 		identifier := p.peek()
-		if !isIdentifier(identifier) && identifier != "*" && strings.ToUpper(identifier) != "COUNT(*)" {
+		upperIdent := strings.ToUpper(identifier)
+		isAggFunc := aggregateKindFromToken(upperIdent) != 0
+
+		if !isIdentifier(identifier) && identifier != "*" && upperIdent != "COUNT(*)" && !isAggFunc {
 			return p.wrapErr(errSelectWithoutFields)
 		}
 
+		// Handle aggregate function calls: SUM(col), AVG(col), MIN(col), MAX(col)
+		if isAggFunc {
+			aggKind := aggregateKindFromToken(upperIdent)
+			p.pop() // consume "SUM(" etc.
+			colName := p.peek()
+			if !isIdentifier(colName) {
+				return p.errorf("at SELECT: expected column name in %s", strings.TrimSuffix(upperIdent, "("))
+			}
+			p.pop() // consume column name
+			if p.peek() != ")" {
+				return p.errorf("at SELECT: expected ')' after column name in %s", strings.TrimSuffix(upperIdent, "("))
+			}
+			p.pop() // consume ")"
+
+			// Build synthetic field name e.g. "SUM(price)"
+			funcName := strings.TrimSuffix(upperIdent, "(")
+			fieldName := funcName + "(" + colName + ")"
+
+			// Keep Aggregates parallel to Fields.
+			// If this is the first aggregate, backfill zeros for any regular fields already added.
+			for len(p.Aggregates) < len(p.Fields) {
+				p.Aggregates = append(p.Aggregates, minisql.AggregateExpr{})
+			}
+			p.Fields = append(p.Fields, minisql.Field{Name: fieldName})
+			p.Aggregates = append(p.Aggregates, minisql.AggregateExpr{Kind: aggKind, Column: colName})
+
+			maybeFrom := strings.ToUpper(p.peek())
+			if maybeFrom == "FROM" {
+				p.step = stepSelectFrom
+				return nil
+			}
+			p.step = stepSelectComma
+			return nil
+		}
+
 		p.Fields = append(p.Fields, fieldFromIdentifier(identifier))
+		// If we are in aggregate mode (Aggregates already has entries), keep the slice parallel.
+		if len(p.Aggregates) > 0 {
+			p.Aggregates = append(p.Aggregates, minisql.AggregateExpr{})
+		}
 		p.pop()
 		maybeFrom := strings.ToUpper(p.peek())
 
@@ -55,7 +113,7 @@ func (p *parserItem) doParseSelect() error {
 		}
 
 		// Handle COUNT(*) special case
-		if identifier == "COUNT(*)" {
+		if upperIdent == "COUNT(*)" {
 			if len(p.Fields) > 1 {
 				return p.wrapErr(errCannotCombineCountAsterisk)
 			}

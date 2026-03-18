@@ -37,6 +37,18 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	if stmt.IsSelectAll() {
 		requestedFields = fieldsFromColumns(t.Columns...)
 		selectedFields = requestedFields
+	} else if stmt.IsSelectAggregate() {
+		// For aggregate queries, fetch the actual source columns (not the synthetic output names).
+		colSet := make(map[string]struct{})
+		for _, agg := range stmt.Aggregates {
+			if agg.Column != "" {
+				colSet[agg.Column] = struct{}{}
+			}
+		}
+		for colName := range colSet {
+			requestedFields = append(requestedFields, Field{Name: colName})
+		}
+		selectedFields = requestedFields
 	} else {
 		if !stmt.IsSelectCountAll() {
 			requestedFields = stmt.Fields
@@ -82,6 +94,11 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		wg.Wait()
 		close(filteredPipe)
 	}()
+
+	// Aggregate queries (SUM, AVG, MIN, MAX) always materialise all rows.
+	if stmt.IsSelectAggregate() {
+		return t.selectAggregate(ctx, stmt, filteredPipe, errorsPipe)
+	}
 
 	// If we are sorting in memory, it means we are doing sequential scan as we need to
 	// gather all rows first to be able to determine correct order.
@@ -133,6 +150,151 @@ func (t *Table) selectCount(ctx context.Context, filteredPipe chan Row, errorsPi
 			)),
 		}, nil
 	}
+}
+
+// aggState holds the running accumulator for a single aggregate expression.
+type aggState struct {
+	count    int64
+	sumI     int64   // integer accumulator (Int4 / Int8 source columns)
+	sumF     float64 // float accumulator (Real / Double source columns)
+	useIntSum bool
+	min      OptionalValue
+	max      OptionalValue
+	hasValue bool // true once a non-NULL value has been seen
+}
+
+func (t *Table) selectAggregate(ctx context.Context, stmt Statement, filteredPipe chan Row, errorsPipe chan error) (StatementResult, error) {
+	states := make([]aggState, len(stmt.Aggregates))
+
+	// Determine whether integer or float accumulation should be used for SUM/AVG.
+	for i, agg := range stmt.Aggregates {
+		if agg.Kind != AggregateSum && agg.Kind != AggregateAvg {
+			continue
+		}
+		if col, ok := stmt.ColumnByName(agg.Column); ok {
+			states[i].useIntSum = col.Kind == Int4 || col.Kind == Int8
+		}
+	}
+
+	drainDone := make(chan struct{})
+	go func() {
+		defer close(drainDone)
+		for aRow := range filteredPipe {
+			for i, agg := range stmt.Aggregates {
+				switch agg.Kind {
+				case AggregateCount:
+					states[i].count++
+
+				case AggregateSum, AggregateAvg:
+					val, ok := aRow.GetValue(agg.Column)
+					if !ok || !val.Valid {
+						continue // SQL aggregate functions ignore NULLs
+					}
+					states[i].count++
+					states[i].hasValue = true
+					if states[i].useIntSum {
+						switch v := val.Value.(type) {
+						case int64:
+							states[i].sumI += v
+						case int32:
+							states[i].sumI += int64(v)
+						}
+					} else {
+						switch v := val.Value.(type) {
+						case float64:
+							states[i].sumF += v
+						case float32:
+							states[i].sumF += float64(v)
+						}
+					}
+
+				case AggregateMin:
+					val, ok := aRow.GetValue(agg.Column)
+					if !ok || !val.Valid {
+						continue
+					}
+					if !states[i].hasValue || compareValues(val, states[i].min) < 0 {
+						states[i].min = val
+						states[i].hasValue = true
+					}
+
+				case AggregateMax:
+					val, ok := aRow.GetValue(agg.Column)
+					if !ok || !val.Valid {
+						continue
+					}
+					if !states[i].hasValue || compareValues(val, states[i].max) > 0 {
+						states[i].max = val
+						states[i].hasValue = true
+					}
+				}
+			}
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return StatementResult{}, fmt.Errorf("context done: %w", ctx.Err())
+	case err := <-errorsPipe:
+		return StatementResult{}, err
+	case <-drainDone:
+	}
+
+	// Build result columns and a single result row.
+	resultColumns := make([]Column, len(stmt.Aggregates))
+	resultValues := make([]OptionalValue, len(stmt.Aggregates))
+
+	for i, agg := range stmt.Aggregates {
+		fieldName := stmt.Fields[i].Name // e.g. "SUM(price)"
+		switch agg.Kind {
+		case AggregateCount:
+			resultColumns[i] = Column{Name: fieldName, Kind: Int8}
+			resultValues[i] = OptionalValue{Valid: true, Value: states[i].count}
+
+		case AggregateSum:
+			if !states[i].hasValue {
+				resultColumns[i] = Column{Name: fieldName, Kind: Int8}
+				resultValues[i] = OptionalValue{} // NULL — no non-NULL rows
+			} else if states[i].useIntSum {
+				resultColumns[i] = Column{Name: fieldName, Kind: Int8}
+				resultValues[i] = OptionalValue{Valid: true, Value: states[i].sumI}
+			} else {
+				resultColumns[i] = Column{Name: fieldName, Kind: Double}
+				resultValues[i] = OptionalValue{Valid: true, Value: states[i].sumF}
+			}
+
+		case AggregateAvg:
+			resultColumns[i] = Column{Name: fieldName, Kind: Double}
+			if !states[i].hasValue || states[i].count == 0 {
+				resultValues[i] = OptionalValue{} // NULL
+			} else if states[i].useIntSum {
+				resultValues[i] = OptionalValue{Valid: true, Value: float64(states[i].sumI) / float64(states[i].count)}
+			} else {
+				resultValues[i] = OptionalValue{Valid: true, Value: states[i].sumF / float64(states[i].count)}
+			}
+
+		case AggregateMin:
+			if col, ok := stmt.ColumnByName(agg.Column); ok {
+				resultColumns[i] = Column{Name: fieldName, Kind: col.Kind, Size: col.Size}
+			}
+			if states[i].hasValue {
+				resultValues[i] = states[i].min
+			}
+
+		case AggregateMax:
+			if col, ok := stmt.ColumnByName(agg.Column); ok {
+				resultColumns[i] = Column{Name: fieldName, Kind: col.Kind, Size: col.Size}
+			}
+			if states[i].hasValue {
+				resultValues[i] = states[i].max
+			}
+		}
+	}
+
+	return StatementResult{
+		Columns: resultColumns,
+		Rows: NewSingleRowIterator(NewRowWithValues(resultColumns, resultValues)),
+	}, nil
 }
 
 func (t *Table) selectStreaming(stmt Statement, filteredPipe chan Row, errorsPipe chan error, requestedFields []Field) (StatementResult, error) {
