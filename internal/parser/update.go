@@ -19,7 +19,7 @@ func (p *parserItem) doParseUpdate() error {
 	case stepUpdateTable:
 		tableName := p.peek()
 		if len(tableName) == 0 {
-			return fmt.Errorf("at UPDATE: expected quoted table name")
+			return p.errorf("at UPDATE: expected table name")
 		}
 		p.TableName = tableName
 		p.pop()
@@ -27,14 +27,14 @@ func (p *parserItem) doParseUpdate() error {
 	case stepUpdateSet:
 		setRWord := p.peek()
 		if strings.ToUpper(setRWord) != "SET" {
-			return errUpdateExpectetSet
+			return p.wrapErr(errUpdateExpectetSet)
 		}
 		p.pop()
 		p.step = stepUpdateField
 	case stepUpdateField:
 		identifier := p.peek()
 		if !isIdentifier(identifier) {
-			return fmt.Errorf("at UPDATE: expected at least one field to update")
+			return p.wrapErr(errNoFieldsToUpdate)
 		}
 		p.nextUpdateField = identifier
 		p.pop()
@@ -42,7 +42,7 @@ func (p *parserItem) doParseUpdate() error {
 	case stepUpdateEquals:
 		equalsRWord := p.peek()
 		if equalsRWord != "=" {
-			return errUpdateExpectedEquals
+			return p.wrapErr(errUpdateExpectedEquals)
 		}
 		p.pop()
 		p.step = stepUpdateValue
@@ -64,7 +64,7 @@ func (p *parserItem) doParseUpdate() error {
 		default:
 			value, ln := p.peekValue()
 			if ln == 0 {
-				return errUpdateExpectedQuotedValueOrInt
+				return p.wrapErr(errUpdateExpectedQuotedValueOrInt)
 			}
 			var updateValue minisql.OptionalValue
 			if strValue, ok := value.(string); ok {
@@ -89,7 +89,7 @@ func (p *parserItem) doParseUpdate() error {
 			return nil
 		}
 		if commaOrEnd != "," {
-			return fmt.Errorf("at UPDATE: expected ','")
+			return p.errorf("at UPDATE: expected ','")
 		}
 		p.pop()
 		p.step = stepUpdateField

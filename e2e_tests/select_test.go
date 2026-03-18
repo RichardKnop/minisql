@@ -308,14 +308,14 @@ values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:2
 	})
 }
 
-func (s TestSuite) countRowsInTable(tableName string, expectedCount int) {
+func (s *TestSuite) countRowsInTable(tableName string, expectedCount int) {
 	var count int
 	err := s.db.QueryRowContext(context.Background(), `select count(*) from `+tableName).Scan(&count)
 	s.Require().NoError(err)
 	s.Equal(expectedCount, count)
 }
 
-func (s TestSuite) execQuery(query string, expectedRowsAffected int) {
+func (s *TestSuite) execQuery(query string, expectedRowsAffected int) {
 	aResult, err := s.db.ExecContext(context.Background(), query)
 	s.Require().NoError(err)
 	rowsAffected, err := aResult.RowsAffected()
@@ -323,7 +323,7 @@ func (s TestSuite) execQuery(query string, expectedRowsAffected int) {
 	s.Require().Equal(expectedRowsAffected, int(rowsAffected))
 }
 
-func (s TestSuite) collectUsers(query string) []user {
+func (s *TestSuite) collectUsers(query string) []user {
 	rows, err := s.db.QueryContext(context.Background(), query)
 	s.Require().NoError(err)
 	defer rows.Close()
@@ -339,7 +339,7 @@ func (s TestSuite) collectUsers(query string) []user {
 	return users
 }
 
-func (s TestSuite) collectUser(query string) user {
+func (s *TestSuite) collectUser(query string) user {
 	var user user
 	err := s.db.QueryRow(query).Scan(&user.ID, &user.Email, &user.Name, &user.Created)
 	s.Require().NoError(err)
@@ -354,7 +354,7 @@ type order struct {
 	Created   time.Time
 }
 
-func (s TestSuite) collectOrders(query string) []order {
+func (s *TestSuite) collectOrders(query string) []order {
 	rows, err := s.db.QueryContext(context.Background(), query)
 	s.Require().NoError(err)
 	defer rows.Close()

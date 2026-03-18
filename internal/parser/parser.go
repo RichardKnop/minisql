@@ -134,9 +134,6 @@ func (p *parser) Parse(ctx context.Context, sql string) ([]minisql.Statement, er
 		step: stepBeginning,
 	}
 	statements, err := item.doParse()
-
-	item.logError(err)
-
 	return statements, err
 }
 
@@ -190,7 +187,7 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 				p.pop()
 				p.step = stepStatementEnd
 			default:
-				return statements, errInvalidStatementKind
+				return statements, p.wrapErr(errInvalidStatementKind)
 			}
 		// -----------------
 		// CREATE TABLE
@@ -314,7 +311,7 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 		case stepStatementEnd:
 			semicolon := p.peek()
 			if semicolon != ";" && len(semicolon) != 0 {
-				return statements, fmt.Errorf("expected semicolon")
+				return statements, p.errorf("at STATEMENT: expected semicolon")
 			}
 			if semicolon == ";" {
 				p.pop()
@@ -554,15 +551,6 @@ func (p *parserItem) validate(stmt minisql.Statement) error {
 		return errNoFieldsToUpdate
 	}
 	return nil
-}
-
-func (p *parserItem) logError(err error) {
-	if err == nil {
-		return
-	}
-	fmt.Println(p.sql)
-	fmt.Println(strings.Repeat(" ", p.i) + "^")
-	fmt.Println(err)
 }
 
 func isIdentifier(s string) bool {

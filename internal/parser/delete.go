@@ -1,15 +1,11 @@
 package parser
 
-import (
-	"fmt"
-)
-
 func (p *parserItem) doParseDelete() error {
 	switch p.step {
 	case stepDeleteFromTable:
 		tableName := p.peek()
 		if len(tableName) == 0 {
-			return fmt.Errorf("at DELETE FROM: expected quoted table name")
+			return p.errorf("at DELETE FROM: expected table name")
 		}
 		p.TableName = tableName
 		p.pop()
