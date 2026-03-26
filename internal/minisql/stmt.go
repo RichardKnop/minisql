@@ -59,6 +59,44 @@ func (s StatementKind) String() string {
 	}
 }
 
+// AggregateKind identifies the type of aggregate function.
+type AggregateKind int
+
+const (
+	AggregateCount AggregateKind = iota + 1 // COUNT(*)
+	AggregateSum                             // SUM(col)
+	AggregateAvg                             // AVG(col)
+	AggregateMin                             // MIN(col)
+	AggregateMax                             // MAX(col)
+)
+
+func (k AggregateKind) String() string {
+	switch k {
+	case AggregateCount:
+		return "COUNT"
+	case AggregateSum:
+		return "SUM"
+	case AggregateAvg:
+		return "AVG"
+	case AggregateMin:
+		return "MIN"
+	case AggregateMax:
+		return "MAX"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+// AggregateExpr describes a single aggregate function call in a SELECT list.
+// Parallel to Fields: Fields[i] holds the synthetic output column name (e.g. "SUM(price)"),
+// Aggregates[i] holds the kind and source column.
+// A zero-value AggregateExpr (Kind == 0) means the corresponding field is not an aggregate.
+// Aggregates is only populated when the query contains at least one aggregate function.
+type AggregateExpr struct {
+	Kind   AggregateKind
+	Column string // source column name; empty for COUNT(*)
+}
+
 type ColumnKind int
 
 const (
@@ -214,6 +252,7 @@ type Statement struct {
 	// and UPDATE (UPDATEDed field names as Updates map is not ordered)
 	Distinct    bool
 	Fields      []Field
+	Aggregates  []AggregateExpr // parallel to Fields; only populated when query uses aggregate functions
 	Aliases     map[string]string
 	Inserts     [][]OptionalValue
 	Updates     map[string]OptionalValue
@@ -275,6 +314,7 @@ func (s Statement) Clone() Statement {
 		Columns:     s.Columns,
 		Distinct:    s.Distinct,
 		Fields:      s.Fields,
+		Aggregates:  s.Aggregates, // slice of value types, safe to share
 		Aliases:     s.Aliases,
 		Inserts:     make([][]OptionalValue, len(s.Inserts)),
 		Updates:     make(map[string]OptionalValue, len(s.Updates)),
@@ -912,6 +952,35 @@ func (s Statement) validateSelect(aTable *Table) error {
 		}
 	}
 
+	// Aggregate function validation (SUM, AVG, MIN, MAX).
+	if s.IsSelectAggregate() {
+		for i, aField := range s.Fields {
+			agg := s.Aggregates[i]
+			if agg.Kind == 0 {
+				// Non-aggregate column in SELECT without GROUP BY is not allowed.
+				return fmt.Errorf("non-aggregate column %q must appear in GROUP BY", aField.Name)
+			}
+			if agg.Column == "" {
+				continue // COUNT(*) has no source column to validate
+			}
+			aColumn, ok := aTable.ColumnByName(agg.Column)
+			if !ok {
+				return fmt.Errorf("unknown column %q referenced in %s", agg.Column, agg.Kind)
+			}
+			if agg.Kind == AggregateSum || agg.Kind == AggregateAvg {
+				switch aColumn.Kind {
+				case Int4, Int8, Real, Double:
+					// OK — numeric column
+				default:
+					return fmt.Errorf("column %q must be numeric for %s", agg.Column, agg.Kind)
+				}
+			}
+		}
+		// ORDER BY for aggregate queries is allowed but not validated against the schema
+		// because the ORDER BY field may be a synthetic aggregate result name.
+		return nil
+	}
+
 	if !s.IsSelectAll() && !s.IsSelectCountAll() {
 		// Skip field validation for JOINs - fields come from multiple tables
 		// and will be validated during execution when all tables are available
@@ -1300,4 +1369,16 @@ func (s Statement) IsSelectCountAll() bool {
 
 func (s Statement) IsSelectAll() bool {
 	return s.ReadOnly() && len(s.Fields) == 1 && s.Fields[0].Name == "*"
+}
+
+// IsSelectAggregate returns true when the SELECT list contains at least one
+// aggregate function (SUM, AVG, MIN, MAX).  COUNT(*) alone uses the legacy
+// IsSelectCountAll path and does NOT set this flag.
+func (s Statement) IsSelectAggregate() bool {
+	for _, agg := range s.Aggregates {
+		if agg.Kind != 0 {
+			return true
+		}
+	}
+	return false
 }
