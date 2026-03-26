@@ -12,6 +12,8 @@ const (
 	ScanTypeIndexAll                       // Full index scan
 	ScanTypeIndexPoint                     // Index lookup for specific key(s)
 	ScanTypeIndexRange                     // Index range scan
+	ScanTypeIndexFirst                     // Seek to first (smallest) key in index — used for MIN optimisation
+	ScanTypeIndexLast                      // Seek to last (largest) key in index — used for MAX optimisation
 )
 
 func (st ScanType) String() string {
@@ -24,6 +26,10 @@ func (st ScanType) String() string {
 		return "index_point"
 	case ScanTypeIndexRange:
 		return "index_range"
+	case ScanTypeIndexFirst:
+		return "index_first"
+	case ScanTypeIndexLast:
+		return "index_last"
 	default:
 		return "unknown"
 	}
@@ -146,6 +152,14 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error
 	// Handle multi-table queries (JOINs)
 	if len(stmt.Joins) > 0 {
 		return t.planJoinQuery(ctx, stmt)
+	}
+
+	// MIN/MAX index endpoint optimisation:
+	// When the query is a single MIN(col) or MAX(col) with no WHERE clause and no GROUP BY,
+	// and an index exists on that column, we can satisfy it by reading just the first or
+	// last entry in the index — O(log n) instead of O(n).
+	if plan, ok := t.tryMinMaxIndexPlan(stmt); ok {
+		return plan, nil
 	}
 
 	// Single table query - use existing logic
@@ -831,6 +845,10 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 			return t.indexRangeScan(ctx, p, p.Scans[0], selectedFields, filteredPipe)
 		case ScanTypeIndexPoint:
 			return t.indexPointScan(ctx, p.Scans[0], selectedFields, filteredPipe)
+		case ScanTypeIndexFirst:
+			return t.indexEndpointScan(ctx, p.Scans[0], selectedFields, filteredPipe, false)
+		case ScanTypeIndexLast:
+			return t.indexEndpointScan(ctx, p.Scans[0], selectedFields, filteredPipe, true)
 		case ScanTypeSequential:
 			return t.sequentialScan(ctx, p.Scans[0], selectedFields, filteredPipe)
 		default:
@@ -867,4 +885,45 @@ func (s Scan) FilterRow(aRow Row) (bool, error) {
 		return false, err
 	}
 	return ok, nil
+}
+
+// tryMinMaxIndexPlan attempts to use an index endpoint scan for a query of the
+// form SELECT MIN(col) FROM t  or  SELECT MAX(col) FROM t  with no WHERE clause
+// and no GROUP BY.  Returns the plan and true if the optimisation applies.
+func (t *Table) tryMinMaxIndexPlan(stmt Statement) (QueryPlan, bool) {
+	// Must be a single aggregate, MIN or MAX, with no WHERE clause.
+	// GROUP BY is not yet in the Statement struct; when it is added this guard
+	// should also check len(stmt.GroupBy) == 0.
+	if len(stmt.Aggregates) != 1 {
+		return QueryPlan{}, false
+	}
+	agg := stmt.Aggregates[0]
+	if agg.Kind != AggregateMin && agg.Kind != AggregateMax {
+		return QueryPlan{}, false
+	}
+	if len(stmt.Conditions) != 0 {
+		return QueryPlan{}, false
+	}
+	if agg.Column == "" {
+		return QueryPlan{}, false
+	}
+
+	info, ok := t.IndexInfoByColumnName(agg.Column)
+	if !ok {
+		return QueryPlan{}, false
+	}
+
+	scanType := ScanTypeIndexFirst
+	if agg.Kind == AggregateMax {
+		scanType = ScanTypeIndexLast
+	}
+
+	return QueryPlan{
+		Scans: []Scan{{
+			TableName:    t.Name,
+			Type:         scanType,
+			IndexName:    info.Name,
+			IndexColumns: info.Columns,
+		}},
+	}, true
 }
