@@ -95,6 +95,10 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		close(filteredPipe)
 	}()
 
+	if stmt.IsSelectCountAll() {
+		return t.selectCount(ctx, filteredPipe, errorsPipe)
+	}
+
 	// Aggregate queries (SUM, AVG, MIN, MAX) always materialise all rows.
 	if stmt.IsSelectAggregate() {
 		return t.selectAggregate(ctx, stmt, filteredPipe, errorsPipe)
@@ -104,10 +108,6 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	// gather all rows first to be able to determine correct order.
 	if plan.SortInMemory {
 		return t.selectWithSort(stmt, plan, filteredPipe, errorsPipe, requestedFields)
-	}
-
-	if stmt.IsSelectCountAll() {
-		return t.selectCount(ctx, filteredPipe, errorsPipe)
 	}
 
 	// Stream results (already ordered or no ordering needed)
@@ -616,6 +616,53 @@ func (t *Table) indexPointScan(ctx context.Context, aScan Scan, selectedFields [
 		}
 	}
 
+	return nil
+}
+
+// errStopScan is a sentinel returned by an index scan callback to stop iteration after the
+// first row has been delivered.  It is never surfaced to callers.
+var errStopScan = fmt.Errorf("stop scan")
+
+// indexEndpointScan fetches exactly one row from either end of the given index:
+// the first (smallest) entry when reverse=false (MIN), or the last (largest) entry
+// when reverse=true (MAX).  It uses the index's in-order traversal, stopping as
+// soon as the first qualifying row has been sent to out.
+func (t *Table) indexEndpointScan(ctx context.Context, aScan Scan, selectedFields []Field, out chan<- Row, reverse bool) error {
+	anIndex, ok := t.IndexByName(aScan.IndexName)
+	if !ok {
+		return fmt.Errorf("no index found for endpoint scan: %s", aScan.IndexName)
+	}
+
+	err := anIndex.ScanAll(ctx, reverse, func(key any, rowID RowID) error {
+		cursor, err := t.Seek(ctx, rowID)
+		if err != nil {
+			return fmt.Errorf("find row failed: %w", err)
+		}
+
+		var aRow Row
+		if len(selectedFields) == 0 {
+			aRow = NewRowWithValues(t.Columns, nil)
+			aRow.Key = rowID
+		} else {
+			aRow, err = cursor.fetchRow(ctx, false, selectedFields...)
+			if err != nil {
+				return fmt.Errorf("fetch row failed: %w", err)
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case out <- aRow:
+		}
+
+		// Stop after the first qualifying row.
+		return errStopScan
+	})
+
+	if err != nil && !errors.Is(err, errStopScan) {
+		return err
+	}
 	return nil
 }
 

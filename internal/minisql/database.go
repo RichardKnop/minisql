@@ -46,7 +46,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, aPa
 		stmtCache:  lrucache.New[string](defaultMaxCachedStatements),
 		logger:     logger,
 		clock: func() Time {
-			now := time.Now()
+			now := time.Now().UTC()
 			return Time{
 				Year:         int32(now.Year()),
 				Month:        int8(now.Month()),

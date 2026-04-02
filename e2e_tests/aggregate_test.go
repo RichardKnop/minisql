@@ -193,6 +193,97 @@ func (s *TestSuite) TestAggregateOnFloatColumn() {
 	})
 }
 
+// TestAggregateMinMaxWithIndex verifies that MIN/MAX on an indexed column produces
+// correct results via the index endpoint optimisation (ScanTypeIndexFirst/Last).
+func (s *TestSuite) TestAggregateMinMaxWithIndex() {
+	// Create a table where the column being aggregated has a secondary index.
+	_, err := s.db.Exec(`create table "scores" (
+	id    int8 primary key autoincrement,
+	value int4 not null
+);`)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`create index "idx_scores_value" on "scores" (value);`)
+	s.Require().NoError(err)
+
+	// Insert rows in non-sorted order to ensure we're not just reading insertion order.
+	s.execQuery(`insert into scores(value) values(30),(10),(50),(20),(40);`, 5)
+
+	s.Run("MIN uses index endpoint and returns smallest value", func() {
+		rows, err := s.db.QueryContext(context.Background(), `select MIN(value) from scores;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		var min int64
+		s.Require().NoError(rows.Scan(&min))
+		s.Equal(int64(10), min)
+		s.False(rows.Next())
+		s.Require().NoError(rows.Err())
+	})
+
+	s.Run("MAX uses index endpoint and returns largest value", func() {
+		rows, err := s.db.QueryContext(context.Background(), `select MAX(value) from scores;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		var max int64
+		s.Require().NoError(rows.Scan(&max))
+		s.Equal(int64(50), max)
+		s.False(rows.Next())
+		s.Require().NoError(rows.Err())
+	})
+
+	s.Run("MIN on primary key uses index endpoint", func() {
+		rows, err := s.db.QueryContext(context.Background(), `select MIN(id) from scores;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		var min int64
+		s.Require().NoError(rows.Scan(&min))
+		s.Equal(int64(1), min)
+		s.False(rows.Next())
+		s.Require().NoError(rows.Err())
+	})
+
+	s.Run("MAX on primary key uses index endpoint", func() {
+		rows, err := s.db.QueryContext(context.Background(), `select MAX(id) from scores;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		var max int64
+		s.Require().NoError(rows.Scan(&max))
+		s.Equal(int64(5), max)
+		s.False(rows.Next())
+		s.Require().NoError(rows.Err())
+	})
+
+	s.Run("MIN on empty table via index returns NULL", func() {
+		_, err := s.db.Exec(`create table "empty_scores" (
+		id    int8 primary key autoincrement,
+		value int4 not null
+	);`)
+		s.Require().NoError(err)
+
+		_, err = s.db.Exec(`create index "idx_empty_scores_value" on "empty_scores" (value);`)
+		s.Require().NoError(err)
+
+		rows, err := s.db.QueryContext(context.Background(), `select MIN(value) from empty_scores;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		var min *int64
+		s.Require().NoError(rows.Scan(&min))
+		s.Nil(min)
+		s.False(rows.Next())
+		s.Require().NoError(rows.Err())
+	})
+}
+
 func (s *TestSuite) TestAggregateAVGFractional() {
 	_, err := s.db.Exec(`create table "nums" (
 	id int8 primary key autoincrement,
