@@ -95,6 +95,10 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		close(filteredPipe)
 	}()
 
+	if stmt.IsSelectCountAll() {
+		return t.selectCount(ctx, filteredPipe, errorsPipe)
+	}
+
 	// Aggregate queries (SUM, AVG, MIN, MAX) always materialise all rows.
 	if stmt.IsSelectAggregate() {
 		return t.selectAggregate(ctx, stmt, filteredPipe, errorsPipe)
@@ -104,10 +108,6 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	// gather all rows first to be able to determine correct order.
 	if plan.SortInMemory {
 		return t.selectWithSort(stmt, plan, filteredPipe, errorsPipe, requestedFields)
-	}
-
-	if stmt.IsSelectCountAll() {
-		return t.selectCount(ctx, filteredPipe, errorsPipe)
 	}
 
 	// Stream results (already ordered or no ordering needed)

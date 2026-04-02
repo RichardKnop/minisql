@@ -28,8 +28,10 @@ func tableForMinMax(t *testing.T) *Table {
 func TestTable_PlanQuery_MinMaxOptimisation(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
-	tbl := tableForMinMax(t)
+	var (
+		ctx = context.Background()
+		tbl = tableForMinMax(t)
+	)
 
 	t.Run("MIN on indexed column uses ScanTypeIndexFirst", func(t *testing.T) {
 		t.Parallel()
