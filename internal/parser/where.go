@@ -59,9 +59,12 @@ func (p *parserItem) doParseWhere() error {
 
 	// Determine the next parser step.
 	next := strings.ToUpper(p.peek())
-	if next == "ORDER BY" || next == "LIMIT" || next == "OFFSET" {
+	switch next {
+	case "GROUP BY":
+		p.step = stepSelectGroupBy
+	case "ORDER BY", "LIMIT", "OFFSET":
 		p.step = stepSelectOrderBy
-	} else {
+	default:
 		p.step = stepStatementEnd
 	}
 	return nil

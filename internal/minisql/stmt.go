@@ -64,10 +64,10 @@ type AggregateKind int
 
 const (
 	AggregateCount AggregateKind = iota + 1 // COUNT(*)
-	AggregateSum                             // SUM(col)
-	AggregateAvg                             // AVG(col)
-	AggregateMin                             // MIN(col)
-	AggregateMax                             // MAX(col)
+	AggregateSum                            // SUM(col)
+	AggregateAvg                            // AVG(col)
+	AggregateMin                            // MIN(col)
+	AggregateMax                            // MAX(col)
 )
 
 func (k AggregateKind) String() string {
@@ -109,6 +109,10 @@ const (
 	Text
 	Timestamp
 )
+
+func (k ColumnKind) IsInt() bool {
+	return k == Int4 || k == Int8
+}
 
 func (k ColumnKind) String() string {
 	switch k {
@@ -253,6 +257,7 @@ type Statement struct {
 	Distinct    bool
 	Fields      []Field
 	Aggregates  []AggregateExpr // parallel to Fields; only populated when query uses aggregate functions
+	GroupBy     []Field         // columns in GROUP BY clause; only populated for grouped queries
 	Aliases     map[string]string
 	Inserts     [][]OptionalValue
 	Updates     map[string]OptionalValue
@@ -954,11 +959,20 @@ func (s Statement) validateSelect(aTable *Table) error {
 
 	// Aggregate function validation (SUM, AVG, MIN, MAX).
 	if s.IsSelectAggregate() {
+		// Build a set of GROUP BY column names for O(1) lookup.
+		groupBySet := make(map[string]struct{}, len(s.GroupBy))
+		for _, f := range s.GroupBy {
+			groupBySet[f.Name] = struct{}{}
+		}
+
 		for i, aField := range s.Fields {
 			agg := s.Aggregates[i]
 			if agg.Kind == 0 {
-				// Non-aggregate column in SELECT without GROUP BY is not allowed.
-				return fmt.Errorf("non-aggregate column %q must appear in GROUP BY", aField.Name)
+				// Non-aggregate column must appear in GROUP BY.
+				if _, ok := groupBySet[aField.Name]; !ok {
+					return fmt.Errorf("non-aggregate column %q must appear in GROUP BY", aField.Name)
+				}
+				continue
 			}
 			if agg.Column == "" {
 				continue // COUNT(*) has no source column to validate
@@ -976,6 +990,14 @@ func (s Statement) validateSelect(aTable *Table) error {
 				}
 			}
 		}
+
+		// Validate GROUP BY columns exist in the table schema.
+		for _, f := range s.GroupBy {
+			if _, ok := aTable.ColumnByName(f.Name); !ok {
+				return fmt.Errorf("unknown GROUP BY column %q in table %q", f.Name, aTable.Name)
+			}
+		}
+
 		// ORDER BY for aggregate queries is allowed but not validated against the schema
 		// because the ORDER BY field may be a synthetic aggregate result name.
 		return nil
@@ -1381,4 +1403,9 @@ func (s Statement) IsSelectAggregate() bool {
 		}
 	}
 	return false
+}
+
+// IsSelectGroupBy returns true when the SELECT has a GROUP BY clause.
+func (s Statement) IsSelectGroupBy() bool {
+	return len(s.GroupBy) > 0
 }

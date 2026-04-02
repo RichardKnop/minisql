@@ -39,7 +39,11 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		selectedFields = requestedFields
 	} else if stmt.IsSelectAggregate() {
 		// For aggregate queries, fetch the actual source columns (not the synthetic output names).
+		// For GROUP BY queries also include the GROUP BY columns.
 		colSet := make(map[string]struct{})
+		for _, f := range stmt.GroupBy {
+			colSet[f.Name] = struct{}{}
+		}
 		for _, agg := range stmt.Aggregates {
 			if agg.Column != "" {
 				colSet[agg.Column] = struct{}{}
@@ -99,6 +103,11 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return t.selectCount(ctx, filteredPipe, errorsPipe)
 	}
 
+	// Grouped aggregate queries (GROUP BY) materialise all rows and group them.
+	if stmt.IsSelectGroupBy() {
+		return t.selectGroupBy(ctx, stmt, filteredPipe, errorsPipe)
+	}
+
 	// Aggregate queries (SUM, AVG, MIN, MAX) always materialise all rows.
 	if stmt.IsSelectAggregate() {
 		return t.selectAggregate(ctx, stmt, filteredPipe, errorsPipe)
@@ -117,10 +126,9 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 func (t *Table) selectCount(ctx context.Context, filteredPipe chan Row, errorsPipe chan error) (StatementResult, error) {
 	var count int64
 
-	stopChan := make(chan struct{})
-
+	drainDone := make(chan struct{})
 	go func() {
-		defer close(stopChan)
+		defer close(drainDone)
 		for {
 			select {
 			case <-ctx.Done():
@@ -139,7 +147,7 @@ func (t *Table) selectCount(ctx context.Context, filteredPipe chan Row, errorsPi
 		return StatementResult{}, fmt.Errorf("context done: %w", ctx.Err())
 	case err := <-errorsPipe:
 		return StatementResult{}, err
-	case <-stopChan:
+	case <-drainDone:
 		return StatementResult{
 			Columns: []Column{
 				{Name: "COUNT(*)"},
@@ -274,7 +282,7 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, filteredPip
 			}
 
 		case AggregateMin:
-			if col, ok := stmt.ColumnByName(agg.Column); ok {
+			if col, ok := t.ColumnByName(agg.Column); ok {
 				resultColumns[i] = Column{Name: fieldName, Kind: col.Kind, Size: col.Size}
 			}
 			if states[i].hasValue {
@@ -282,7 +290,7 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, filteredPip
 			}
 
 		case AggregateMax:
-			if col, ok := stmt.ColumnByName(agg.Column); ok {
+			if col, ok := t.ColumnByName(agg.Column); ok {
 				resultColumns[i] = Column{Name: fieldName, Kind: col.Kind, Size: col.Size}
 			}
 			if states[i].hasValue {
@@ -294,6 +302,230 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, filteredPip
 	return StatementResult{
 		Columns: resultColumns,
 		Rows:    NewSingleRowIterator(NewRowWithValues(resultColumns, resultValues)),
+	}, nil
+}
+
+// groupState holds per-group accumulators for a GROUP BY query.
+type groupState struct {
+	groupValues []OptionalValue // values of the GROUP BY columns for this group
+	aggStates   []aggState
+}
+
+func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, filteredPipe chan Row, errorsPipe chan error) (StatementResult, error) {
+	// Determine integer vs float accumulation mode for SUM/AVG per aggregate.
+	useIntSum := make([]bool, len(stmt.Aggregates))
+	for i, agg := range stmt.Aggregates {
+		if agg.Kind != AggregateSum && agg.Kind != AggregateAvg {
+			continue
+		}
+		if col, ok := stmt.ColumnByName(agg.Column); ok {
+			useIntSum[i] = col.Kind.IsInt()
+		}
+	}
+
+	// Build a name→index map for GROUP BY fields (for looking up values after scan).
+	groupByIdx := make(map[string]int, len(stmt.GroupBy))
+	for i, f := range stmt.GroupBy {
+		groupByIdx[f.Name] = i
+	}
+
+	// groups maps a group key string to its accumulated state.
+	// groupOrder preserves insertion order so output is deterministic.
+	groups := make(map[string]*groupState)
+	groupOrder := make([]string, 0)
+
+	drainDone := make(chan struct{})
+	go func() {
+		defer close(drainDone)
+		for aRow := range filteredPipe {
+			// Compute group key from the GROUP BY columns.
+			groupRow := aRow.OnlyFields(stmt.GroupBy...)
+			key := rowDistinctKey(groupRow)
+
+			gs, exists := groups[key]
+			if !exists {
+				states := make([]aggState, len(stmt.Aggregates))
+				for i := range states {
+					states[i].useIntSum = useIntSum[i]
+				}
+				gs = &groupState{
+					groupValues: make([]OptionalValue, len(stmt.GroupBy)),
+					aggStates:   states,
+				}
+				// Record the group column values from this first row.
+				copy(gs.groupValues, groupRow.Values)
+				groups[key] = gs
+				groupOrder = append(groupOrder, key)
+			}
+
+			// Accumulate aggregates for this group.
+			for i, agg := range stmt.Aggregates {
+				switch agg.Kind {
+				case 0:
+					// Non-aggregate GROUP BY column — no accumulation needed.
+				case AggregateCount:
+					gs.aggStates[i].count += 1
+				case AggregateSum, AggregateAvg:
+					val, ok := aRow.GetValue(agg.Column)
+					if !ok || !val.Valid {
+						continue
+					}
+					gs.aggStates[i].count += 1
+					gs.aggStates[i].hasValue = true
+					if gs.aggStates[i].useIntSum {
+						switch v := val.Value.(type) {
+						case int64:
+							gs.aggStates[i].sumI += v
+						case int32:
+							gs.aggStates[i].sumI += int64(v)
+						}
+					} else {
+						switch v := val.Value.(type) {
+						case float64:
+							gs.aggStates[i].sumF += v
+						case float32:
+							gs.aggStates[i].sumF += float64(v)
+						}
+					}
+				case AggregateMin:
+					val, ok := aRow.GetValue(agg.Column)
+					if !ok || !val.Valid {
+						continue
+					}
+					if !gs.aggStates[i].hasValue || compareValues(val, gs.aggStates[i].min) < 0 {
+						gs.aggStates[i].min = val
+						gs.aggStates[i].hasValue = true
+					}
+				case AggregateMax:
+					val, ok := aRow.GetValue(agg.Column)
+					if !ok || !val.Valid {
+						continue
+					}
+					if !gs.aggStates[i].hasValue || compareValues(val, gs.aggStates[i].max) > 0 {
+						gs.aggStates[i].max = val
+						gs.aggStates[i].hasValue = true
+					}
+				}
+			}
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return StatementResult{}, fmt.Errorf("context done: %w", ctx.Err())
+	case err := <-errorsPipe:
+		return StatementResult{}, err
+	case <-drainDone:
+	}
+
+	// Build result column metadata.
+	resultColumns := make([]Column, len(stmt.Fields))
+	for i, aField := range stmt.Fields {
+		agg := stmt.Aggregates[i]
+		switch agg.Kind {
+		case 0:
+			// GROUP BY column — use the actual table column type.
+			if col, ok := t.ColumnByName(aField.Name); ok {
+				resultColumns[i] = col
+			}
+		case AggregateCount:
+			resultColumns[i] = Column{Name: aField.Name, Kind: Int8}
+		case AggregateSum:
+			if useIntSum[i] {
+				resultColumns[i] = Column{Name: aField.Name, Kind: Int8}
+			} else {
+				resultColumns[i] = Column{Name: aField.Name, Kind: Double}
+			}
+		case AggregateAvg:
+			resultColumns[i] = Column{Name: aField.Name, Kind: Double}
+		case AggregateMin, AggregateMax:
+			if col, ok := t.ColumnByName(agg.Column); ok {
+				resultColumns[i] = Column{Name: aField.Name, Kind: col.Kind, Size: col.Size}
+			}
+		}
+	}
+
+	// Build one result row per group.
+	resultRows := make([]Row, 0, len(groupOrder))
+	for _, key := range groupOrder {
+		gs := groups[key]
+		values := make([]OptionalValue, len(stmt.Fields))
+		for i, agg := range stmt.Aggregates {
+			switch agg.Kind {
+			case 0:
+				// Look up the group column value by field name.
+				if idx, ok := groupByIdx[stmt.Fields[i].Name]; ok {
+					values[i] = gs.groupValues[idx]
+				}
+			case AggregateCount:
+				values[i] = OptionalValue{Valid: true, Value: gs.aggStates[i].count}
+			case AggregateSum:
+				st := gs.aggStates[i]
+				if st.hasValue {
+					if st.useIntSum {
+						values[i] = OptionalValue{Valid: true, Value: st.sumI}
+					} else {
+						values[i] = OptionalValue{Valid: true, Value: st.sumF}
+					}
+				}
+			case AggregateAvg:
+				st := gs.aggStates[i]
+				if st.hasValue && st.count > 0 {
+					if st.useIntSum {
+						values[i] = OptionalValue{Valid: true, Value: float64(st.sumI) / float64(st.count)}
+					} else {
+						values[i] = OptionalValue{Valid: true, Value: st.sumF / float64(st.count)}
+					}
+				}
+			case AggregateMin:
+				if gs.aggStates[i].hasValue {
+					values[i] = gs.aggStates[i].min
+				}
+			case AggregateMax:
+				if gs.aggStates[i].hasValue {
+					values[i] = gs.aggStates[i].max
+				}
+			}
+		}
+		resultRows = append(resultRows, NewRowWithValues(resultColumns, values))
+	}
+
+	// Apply ORDER BY if specified.
+	if len(stmt.OrderBy) > 0 {
+		if err := t.sortRows(resultRows, stmt.OrderBy); err != nil {
+			return StatementResult{}, err
+		}
+	}
+
+	// Apply OFFSET.
+	if stmt.Offset.Valid {
+		offset := int(stmt.Offset.Value.(int64))
+		if offset >= len(resultRows) {
+			resultRows = []Row{}
+		} else {
+			resultRows = resultRows[offset:]
+		}
+	}
+
+	// Apply LIMIT.
+	if stmt.Limit.Valid {
+		limit := int(stmt.Limit.Value.(int64))
+		if limit < len(resultRows) {
+			resultRows = resultRows[:limit]
+		}
+	}
+
+	idx := 0
+	return StatementResult{
+		Columns: resultColumns,
+		Rows: NewIterator(func(ctx context.Context) (Row, error) {
+			if idx >= len(resultRows) {
+				return Row{}, ErrNoMoreRows
+			}
+			row := resultRows[idx]
+			idx++
+			return row, nil
+		}),
 	}, nil
 }
 
