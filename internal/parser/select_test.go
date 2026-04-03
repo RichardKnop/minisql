@@ -103,10 +103,25 @@ func TestParse_Select(t *testing.T) {
 			errExpectedFrom,
 		},
 		{
-			"SELECT a, COUNT(*) works fails",
+			// COUNT(*) combined with other fields is allowed by the parser (for GROUP BY queries).
+			// Semantic validation (non-aggregate column must appear in GROUP BY) happens at execution time.
+			"SELECT a, COUNT(*) parses successfully",
 			"SELECT a, COUNT(*) FROM b;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "b",
+					Fields: []minisql.Field{
+						{Name: "a"},
+						{Name: "COUNT(*)"},
+					},
+					Aggregates: []minisql.AggregateExpr{
+						{},
+						{Kind: minisql.AggregateCount},
+					},
+				},
+			},
 			nil,
-			errCannotCombineCountAsterisk,
 		},
 		{
 			"SELECT COUNT(*), a works fails",
@@ -620,6 +635,127 @@ func TestParse_Select(t *testing.T) {
 								},
 							},
 						},
+					},
+				},
+			},
+			nil,
+		},
+	}
+
+	for _, aTestCase := range testCases {
+		t.Run(aTestCase.Name, func(t *testing.T) {
+			aStatement, err := New().Parse(context.Background(), aTestCase.SQL)
+			if aTestCase.Err != nil {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, aTestCase.Err)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, aTestCase.Expected, aStatement)
+		})
+	}
+}
+
+func TestParse_SelectGroupBy(t *testing.T) {
+	t.Parallel()
+
+	testCases := []testCase{
+		{
+			"GROUP BY single column",
+			"SELECT user_id, SUM(total) FROM orders GROUP BY user_id;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "orders",
+					Fields: []minisql.Field{
+						{Name: "user_id"},
+						{Name: "SUM(total)"},
+					},
+					Aggregates: []minisql.AggregateExpr{
+						{},
+						{Kind: minisql.AggregateSum, Column: "total"},
+					},
+					GroupBy: []minisql.Field{{Name: "user_id"}},
+				},
+			},
+			nil,
+		},
+		{
+			"GROUP BY multiple columns",
+			"SELECT a, b, COUNT(*) FROM t GROUP BY a, b;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "t",
+					Fields: []minisql.Field{
+						{Name: "a"},
+						{Name: "b"},
+						{Name: "COUNT(*)"},
+					},
+					Aggregates: []minisql.AggregateExpr{
+						{},
+						{},
+						{Kind: minisql.AggregateCount},
+					},
+					GroupBy: []minisql.Field{{Name: "a"}, {Name: "b"}},
+				},
+			},
+			nil,
+		},
+		{
+			"GROUP BY with ORDER BY",
+			"SELECT user_id, SUM(total) FROM orders GROUP BY user_id ORDER BY user_id;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "orders",
+					Fields: []minisql.Field{
+						{Name: "user_id"},
+						{Name: "SUM(total)"},
+					},
+					Aggregates: []minisql.AggregateExpr{
+						{},
+						{Kind: minisql.AggregateSum, Column: "total"},
+					},
+					GroupBy: []minisql.Field{{Name: "user_id"}},
+					OrderBy: []minisql.OrderBy{
+						{Field: minisql.Field{Name: "user_id"}, Direction: minisql.Asc},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"GROUP BY with LIMIT",
+			"SELECT user_id, COUNT(*) FROM orders GROUP BY user_id LIMIT 5;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "orders",
+					Fields: []minisql.Field{
+						{Name: "user_id"},
+						{Name: "COUNT(*)"},
+					},
+					Aggregates: []minisql.AggregateExpr{
+						{},
+						{Kind: minisql.AggregateCount},
+					},
+					GroupBy: []minisql.Field{{Name: "user_id"}},
+					Limit:   minisql.OptionalValue{Valid: true, Value: int64(5)},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT without GROUP BY still works (aggregate-only)",
+			"SELECT SUM(price) FROM items;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "items",
+					Fields:    []minisql.Field{{Name: "SUM(price)"}},
+					Aggregates: []minisql.AggregateExpr{
+						{Kind: minisql.AggregateSum, Column: "price"},
 					},
 				},
 			},

@@ -891,9 +891,10 @@ func (s Scan) FilterRow(aRow Row) (bool, error) {
 // form SELECT MIN(col) FROM t  or  SELECT MAX(col) FROM t  with no WHERE clause
 // and no GROUP BY.  Returns the plan and true if the optimisation applies.
 func (t *Table) tryMinMaxIndexPlan(stmt Statement) (QueryPlan, bool) {
-	// Must be a single aggregate, MIN or MAX, with no WHERE clause.
-	// GROUP BY is not yet in the Statement struct; when it is added this guard
-	// should also check len(stmt.GroupBy) == 0.
+	// Must be a single aggregate, MIN or MAX, with no WHERE clause and no GROUP BY.
+	if len(stmt.GroupBy) != 0 {
+		return QueryPlan{}, false
+	}
 	if len(stmt.Aggregates) != 1 {
 		return QueryPlan{}, false
 	}

@@ -3,6 +3,7 @@ package e2etests
 import (
 	"context"
 	"math"
+	"sort"
 )
 
 func (s *TestSuite) TestAggregateWithoutGroupBy() {
@@ -304,4 +305,198 @@ func (s *TestSuite) TestAggregateAVGFractional() {
 	// AVG(1,2) = 1.5, not 1 (integer truncation must not occur)
 	s.InDelta(1.5, avg, 0.001)
 	s.False(math.IsNaN(avg))
+}
+
+func (s *TestSuite) TestGroupBy() {
+	_, err := s.db.Exec(createOrdersTableSQL)
+	s.Require().NoError(err)
+
+	// user_id=1: total_paid 10, 20  → sum=30, count=2
+	// user_id=2: total_paid 30, 40  → sum=70, count=2
+	// user_id=3: total_paid 50      → sum=50, count=1
+	s.execQuery(`insert into orders(user_id, product_id, total_paid) values
+(1, 1, 10),
+(1, 2, 20),
+(2, 1, 30),
+(2, 3, 40),
+(3, 2, 50);`, 5)
+
+	s.Run("SUM grouped by user_id", func() {
+		rows, err := s.db.QueryContext(context.Background(), `select user_id, SUM(total_paid) from orders GROUP BY user_id;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type row struct {
+			userID int64
+			sum    int64
+		}
+		var got []row
+		for rows.Next() {
+			var r row
+			s.Require().NoError(rows.Scan(&r.userID, &r.sum))
+			got = append(got, r)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(got, 3)
+
+		// Sort by user_id for deterministic comparison.
+		sort.Slice(got, func(i, j int) bool { return got[i].userID < got[j].userID })
+		s.Equal(int64(1), got[0].userID)
+		s.Equal(int64(30), got[0].sum)
+		s.Equal(int64(2), got[1].userID)
+		s.Equal(int64(70), got[1].sum)
+		s.Equal(int64(3), got[2].userID)
+		s.Equal(int64(50), got[2].sum)
+	})
+
+	s.Run("COUNT grouped by user_id", func() {
+		rows, err := s.db.QueryContext(context.Background(), `select user_id, COUNT(*) from orders GROUP BY user_id;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type row struct {
+			userID int64
+			count  int64
+		}
+		var got []row
+		for rows.Next() {
+			var r row
+			s.Require().NoError(rows.Scan(&r.userID, &r.count))
+			got = append(got, r)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(got, 3)
+
+		sort.Slice(got, func(i, j int) bool { return got[i].userID < got[j].userID })
+		s.Equal(int64(1), got[0].userID)
+		s.Equal(int64(2), got[0].count)
+		s.Equal(int64(2), got[1].userID)
+		s.Equal(int64(2), got[1].count)
+		s.Equal(int64(3), got[2].userID)
+		s.Equal(int64(1), got[2].count)
+	})
+
+	s.Run("MIN and MAX grouped by user_id", func() {
+		rows, err := s.db.QueryContext(context.Background(), `select user_id, MIN(total_paid), MAX(total_paid) from orders GROUP BY user_id;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type row struct {
+			userID int64
+			min    int64
+			max    int64
+		}
+		var got []row
+		for rows.Next() {
+			var r row
+			s.Require().NoError(rows.Scan(&r.userID, &r.min, &r.max))
+			got = append(got, r)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(got, 3)
+
+		sort.Slice(got, func(i, j int) bool { return got[i].userID < got[j].userID })
+		s.Equal(int64(10), got[0].min)
+		s.Equal(int64(20), got[0].max)
+		s.Equal(int64(30), got[1].min)
+		s.Equal(int64(40), got[1].max)
+		s.Equal(int64(50), got[2].min)
+		s.Equal(int64(50), got[2].max)
+	})
+
+	s.Run("AVG grouped by user_id", func() {
+		rows, err := s.db.QueryContext(context.Background(), `select user_id, AVG(total_paid) from orders GROUP BY user_id;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type row struct {
+			userID int64
+			avg    float64
+		}
+		var got []row
+		for rows.Next() {
+			var r row
+			s.Require().NoError(rows.Scan(&r.userID, &r.avg))
+			got = append(got, r)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(got, 3)
+
+		sort.Slice(got, func(i, j int) bool { return got[i].userID < got[j].userID })
+		s.InDelta(15.0, got[0].avg, 0.001) // (10+20)/2
+		s.InDelta(35.0, got[1].avg, 0.001) // (30+40)/2
+		s.InDelta(50.0, got[2].avg, 0.001) // 50/1
+	})
+
+	s.Run("GROUP BY with WHERE filter", func() {
+		// Only rows with total_paid >= 20: user_id=1 has 20, user_id=2 has 30+40, user_id=3 has 50
+		rows, err := s.db.QueryContext(context.Background(), `select user_id, SUM(total_paid) from orders where total_paid >= 20 GROUP BY user_id;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type row struct {
+			userID int64
+			sum    int64
+		}
+		var got []row
+		for rows.Next() {
+			var r row
+			s.Require().NoError(rows.Scan(&r.userID, &r.sum))
+			got = append(got, r)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(got, 3)
+
+		sort.Slice(got, func(i, j int) bool { return got[i].userID < got[j].userID })
+		s.Equal(int64(20), got[0].sum)  // user 1: only 20 passes filter
+		s.Equal(int64(70), got[1].sum)  // user 2: 30+40
+		s.Equal(int64(50), got[2].sum)  // user 3: 50
+	})
+
+	s.Run("GROUP BY with ORDER BY", func() {
+		rows, err := s.db.QueryContext(context.Background(), `select user_id, SUM(total_paid) from orders GROUP BY user_id ORDER BY user_id DESC;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		var userIDs []int64
+		for rows.Next() {
+			var uid int64
+			var sum int64
+			s.Require().NoError(rows.Scan(&uid, &sum))
+			userIDs = append(userIDs, uid)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(userIDs, 3)
+		// Should be ordered DESC: 3, 2, 1
+		s.Equal(int64(3), userIDs[0])
+		s.Equal(int64(2), userIDs[1])
+		s.Equal(int64(1), userIDs[2])
+	})
+
+	s.Run("GROUP BY with LIMIT", func() {
+		rows, err := s.db.QueryContext(context.Background(), `select user_id, SUM(total_paid) from orders GROUP BY user_id ORDER BY user_id ASC LIMIT 2;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type row struct {
+			userID int64
+			sum    int64
+		}
+		var got []row
+		for rows.Next() {
+			var r row
+			s.Require().NoError(rows.Scan(&r.userID, &r.sum))
+			got = append(got, r)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(got, 2)
+		s.Equal(int64(1), got[0].userID)
+		s.Equal(int64(2), got[1].userID)
+	})
+
+	s.Run("non-aggregate column without GROUP BY is rejected", func() {
+		_, err := s.db.QueryContext(context.Background(), `select user_id, SUM(total_paid) from orders;`)
+		s.Require().Error(err)
+		s.Contains(err.Error(), "non-aggregate column")
+	})
 }

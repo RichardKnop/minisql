@@ -8,11 +8,10 @@ import (
 )
 
 var (
-	errSelectWithoutFields        = fmt.Errorf("at SELECT: expected field to SELECT")
-	errSelectExpectedTableName    = fmt.Errorf("at SELECT: expected table name identifier")
-	errCannotCombineAsterisk      = fmt.Errorf(`at SELECT: cannot combine "*" with other fields`)
-	errCannotCombineCountAsterisk = fmt.Errorf(`at SELECT: cannot combine "COUNT(*)" with other fields`)
-	errExpectedFrom               = fmt.Errorf("at SELECT: expected FROM")
+	errSelectWithoutFields     = fmt.Errorf("at SELECT: expected field to SELECT")
+	errSelectExpectedTableName = fmt.Errorf("at SELECT: expected table name identifier")
+	errCannotCombineAsterisk   = fmt.Errorf(`at SELECT: cannot combine "*" with other fields`)
+	errExpectedFrom            = fmt.Errorf("at SELECT: expected FROM")
 )
 
 // aggregateKindFromToken maps the reserved-word token (e.g. "SUM(") to its AggregateKind.
@@ -115,7 +114,21 @@ func (p *parserItem) doParseSelect() error {
 		// Handle COUNT(*) special case
 		if upperIdent == "COUNT(*)" {
 			if len(p.Fields) > 1 {
-				return p.wrapErr(errCannotCombineCountAsterisk)
+				// COUNT(*) combined with other fields — treat as aggregate.
+				// Validation in validateSelect ensures a GROUP BY is present.
+				if len(p.Aggregates) < len(p.Fields)-1 {
+					for len(p.Aggregates) < len(p.Fields)-1 {
+						p.Aggregates = append(p.Aggregates, minisql.AggregateExpr{})
+					}
+				}
+				p.Aggregates = append(p.Aggregates, minisql.AggregateExpr{Kind: minisql.AggregateCount})
+				maybeFromInner := strings.ToUpper(p.peek())
+				if maybeFromInner == "FROM" {
+					p.step = stepSelectFrom
+					return nil
+				}
+				p.step = stepSelectComma
+				return nil
 			}
 			if maybeFrom != "FROM" {
 				return p.wrapErr(errExpectedFrom)
@@ -194,7 +207,7 @@ func (p *parserItem) doParseSelect() error {
 			p.step = stepSelectJoinTable
 			p.pop()
 		default:
-			p.step = stepSelectOrderBy
+			p.step = stepSelectGroupBy
 			return nil
 		}
 	case stepSelectJoinTable:
@@ -266,6 +279,31 @@ func (p *parserItem) doParseSelect() error {
 		p.joinInProgress = minisql.Join{}
 		p.pop()
 		p.step = stepSelectJoin
+	case stepSelectGroupBy:
+		if strings.ToUpper(p.peek()) != "GROUP BY" {
+			p.step = stepSelectOrderBy
+			return nil
+		}
+		p.pop() // consume "GROUP BY"
+		p.step = stepSelectGroupByComma
+	case stepSelectGroupByComma:
+		// Each invocation parses one column name and then checks for a following comma.
+		identifier := p.peek()
+		if !isIdentifier(identifier) {
+			if len(p.GroupBy) == 0 {
+				return p.errorf("at GROUP BY: expected column name")
+			}
+			p.step = stepSelectOrderBy
+			return nil
+		}
+		p.pop()
+		p.GroupBy = append(p.GroupBy, minisql.Field{Name: identifier})
+		if p.peek() == "," {
+			p.pop() // consume ","
+			// Stay in stepSelectGroupByComma to parse the next column.
+		} else {
+			p.step = stepSelectOrderBy
+		}
 	case stepSelectOrderBy:
 		offsetRWord := p.peek()
 		if strings.ToUpper(offsetRWord) != "ORDER BY" {
