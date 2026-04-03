@@ -236,6 +236,7 @@ if err := rows.Err(); err != nil {
 - `BETWEEN` for cleaner and more readable range conditions
 - `LIMIT` and `OFFSET` clauses for basic pagination
 - `ORDER BY` supported for a single column only
+- `GROUP BY` for simple select queries (for now only without joins) and aggregate functions `COUNT`, `MAX`, `MIN`, `SUM`, `AVG`
 - `VACUUM` similar to SQLite, rebuilds the database file, repacking it into a minimal amount of disk space
 
 Prepared statements are supported using `?` as a placeholder. For example:
