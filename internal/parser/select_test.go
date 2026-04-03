@@ -776,3 +776,144 @@ func TestParse_SelectGroupBy(t *testing.T) {
 		})
 	}
 }
+
+func TestParse_SelectHaving(t *testing.T) {
+	t.Parallel()
+
+	testCases := []testCase{
+		{
+			"HAVING with SUM aggregate",
+			"SELECT user_id, SUM(total) FROM orders GROUP BY user_id HAVING SUM(total) > 100;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "orders",
+					Fields: []minisql.Field{
+						{Name: "user_id"},
+						{Name: "SUM(total)"},
+					},
+					Aggregates: []minisql.AggregateExpr{
+						{},
+						{Kind: minisql.AggregateSum, Column: "total"},
+					},
+					GroupBy: []minisql.Field{{Name: "user_id"}},
+					Having: minisql.OneOrMore{
+						{minisql.FieldIsGreater(minisql.Field{Name: "SUM(total)"}, minisql.OperandInteger, int64(100))},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"HAVING with COUNT(*)",
+			"SELECT user_id, COUNT(*) FROM orders GROUP BY user_id HAVING COUNT(*) >= 2;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "orders",
+					Fields: []minisql.Field{
+						{Name: "user_id"},
+						{Name: "COUNT(*)"},
+					},
+					Aggregates: []minisql.AggregateExpr{
+						{},
+						{Kind: minisql.AggregateCount},
+					},
+					GroupBy: []minisql.Field{{Name: "user_id"}},
+					Having: minisql.OneOrMore{
+						{minisql.FieldIsGreaterOrEqual(minisql.Field{Name: "COUNT(*)"}, minisql.OperandInteger, int64(2))},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"HAVING with GROUP BY column",
+			"SELECT user_id, SUM(total) FROM orders GROUP BY user_id HAVING user_id > 1;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "orders",
+					Fields: []minisql.Field{
+						{Name: "user_id"},
+						{Name: "SUM(total)"},
+					},
+					Aggregates: []minisql.AggregateExpr{
+						{},
+						{Kind: minisql.AggregateSum, Column: "total"},
+					},
+					GroupBy: []minisql.Field{{Name: "user_id"}},
+					Having: minisql.OneOrMore{
+						{minisql.FieldIsGreater(minisql.Field{Name: "user_id"}, minisql.OperandInteger, int64(1))},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"HAVING with ORDER BY",
+			"SELECT user_id, SUM(total) FROM orders GROUP BY user_id HAVING SUM(total) > 50 ORDER BY user_id;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "orders",
+					Fields: []minisql.Field{
+						{Name: "user_id"},
+						{Name: "SUM(total)"},
+					},
+					Aggregates: []minisql.AggregateExpr{
+						{},
+						{Kind: minisql.AggregateSum, Column: "total"},
+					},
+					GroupBy: []minisql.Field{{Name: "user_id"}},
+					Having: minisql.OneOrMore{
+						{minisql.FieldIsGreater(minisql.Field{Name: "SUM(total)"}, minisql.OperandInteger, int64(50))},
+					},
+					OrderBy: []minisql.OrderBy{
+						{Field: minisql.Field{Name: "user_id"}, Direction: minisql.Asc},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE and HAVING together",
+			"SELECT user_id, SUM(total) FROM orders WHERE total > 0 GROUP BY user_id HAVING SUM(total) > 50;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "orders",
+					Fields: []minisql.Field{
+						{Name: "user_id"},
+						{Name: "SUM(total)"},
+					},
+					Aggregates: []minisql.AggregateExpr{
+						{},
+						{Kind: minisql.AggregateSum, Column: "total"},
+					},
+					GroupBy: []minisql.Field{{Name: "user_id"}},
+					Conditions: minisql.OneOrMore{
+						{minisql.FieldIsGreater(minisql.Field{Name: "total"}, minisql.OperandInteger, int64(0))},
+					},
+					Having: minisql.OneOrMore{
+						{minisql.FieldIsGreater(minisql.Field{Name: "SUM(total)"}, minisql.OperandInteger, int64(50))},
+					},
+				},
+			},
+			nil,
+		},
+	}
+
+	for _, aTestCase := range testCases {
+		t.Run(aTestCase.Name, func(t *testing.T) {
+			aStatement, err := New().Parse(context.Background(), aTestCase.SQL)
+			if aTestCase.Err != nil {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, aTestCase.Err)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, aTestCase.Expected, aStatement)
+		})
+	}
+}

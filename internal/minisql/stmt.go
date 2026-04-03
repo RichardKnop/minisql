@@ -258,6 +258,7 @@ type Statement struct {
 	Fields      []Field
 	Aggregates  []AggregateExpr // parallel to Fields; only populated when query uses aggregate functions
 	GroupBy     []Field         // columns in GROUP BY clause; only populated for grouped queries
+	Having      OneOrMore       // HAVING conditions; only populated for grouped queries
 	Aliases     map[string]string
 	Inserts     [][]OptionalValue
 	Updates     map[string]OptionalValue
@@ -957,6 +958,41 @@ func (s Statement) validateSelect(aTable *Table) error {
 		}
 	}
 
+	// GROUP BY cannot be combined with JOINs (not yet supported).
+	if len(s.GroupBy) > 0 && len(s.Joins) > 0 {
+		return fmt.Errorf("GROUP BY cannot be combined with JOIN")
+	}
+
+	// HAVING requires GROUP BY.
+	if len(s.Having) > 0 && len(s.GroupBy) == 0 {
+		return fmt.Errorf("HAVING requires GROUP BY")
+	}
+
+	// HAVING condition fields must be aggregate functions or GROUP BY columns.
+	if len(s.Having) > 0 {
+		groupBySet := make(map[string]struct{}, len(s.GroupBy))
+		for _, f := range s.GroupBy {
+			groupBySet[f.Name] = struct{}{}
+		}
+		for _, group := range s.Having {
+			for _, cond := range group {
+				if !cond.Operand1.IsField() {
+					continue
+				}
+				field, ok := cond.Operand1.Value.(Field)
+				if !ok {
+					continue
+				}
+				if isHavingAggregateRef(field.Name) {
+					continue
+				}
+				if _, ok := groupBySet[field.Name]; !ok {
+					return fmt.Errorf("HAVING references %q which is not a GROUP BY column or aggregate function", field.Name)
+				}
+			}
+		}
+	}
+
 	// Aggregate function validation (SUM, AVG, MIN, MAX).
 	if s.IsSelectAggregate() {
 		// Build a set of GROUP BY column names for O(1) lookup.
@@ -1408,4 +1444,19 @@ func (s Statement) IsSelectAggregate() bool {
 // IsSelectGroupBy returns true when the SELECT has a GROUP BY clause.
 func (s Statement) IsSelectGroupBy() bool {
 	return len(s.GroupBy) > 0
+}
+
+// isHavingAggregateRef reports whether name is a synthetic aggregate column
+// reference as produced by the parser (e.g. "SUM(price)", "COUNT(*)").
+func isHavingAggregateRef(name string) bool {
+	upper := strings.ToUpper(name)
+	if upper == "COUNT(*)" {
+		return true
+	}
+	for _, prefix := range []string{"SUM(", "AVG(", "MIN(", "MAX("} {
+		if strings.HasPrefix(upper, prefix) {
+			return true
+		}
+	}
+	return false
 }

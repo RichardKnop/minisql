@@ -293,7 +293,7 @@ func (p *parserItem) doParseSelect() error {
 			if len(p.GroupBy) == 0 {
 				return p.errorf("at GROUP BY: expected column name")
 			}
-			p.step = stepSelectOrderBy
+			p.step = stepSelectHaving
 			return nil
 		}
 		p.pop()
@@ -302,7 +302,24 @@ func (p *parserItem) doParseSelect() error {
 			p.pop() // consume ","
 			// Stay in stepSelectGroupByComma to parse the next column.
 		} else {
+			p.step = stepSelectHaving
+		}
+	case stepSelectHaving:
+		if strings.ToUpper(p.peek()) != "HAVING" {
 			p.step = stepSelectOrderBy
+			return nil
+		}
+		p.pop() // consume "HAVING"
+		node, err := p.parseCondExpr()
+		if err != nil {
+			return err
+		}
+		p.Having = node.ToDNF()
+		next := strings.ToUpper(p.peek())
+		if next == "ORDER BY" || next == "LIMIT" || next == "OFFSET" {
+			p.step = stepSelectOrderBy
+		} else {
+			p.step = stepStatementEnd
 		}
 	case stepSelectOrderBy:
 		offsetRWord := p.peek()

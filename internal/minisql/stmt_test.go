@@ -1831,3 +1831,216 @@ func TestStatement_IsSelectAll(t *testing.T) {
 	assert.True(t, stmt.IsSelectAll())
 	assert.False(t, stmt2.IsSelectAll())
 }
+
+func TestOperandTypeFromAny(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, OperandInteger, operandTypeFromAny(int64(1)))
+	assert.Equal(t, OperandInteger, operandTypeFromAny(int32(1)))
+	assert.Equal(t, OperandFloat, operandTypeFromAny(float64(1.0)))
+	assert.Equal(t, OperandFloat, operandTypeFromAny(float32(1.0)))
+	assert.Equal(t, OperandBoolean, operandTypeFromAny(true))
+	assert.Equal(t, OperandBoolean, operandTypeFromAny(false))
+	assert.Equal(t, OperandQuotedString, operandTypeFromAny("hello"))
+	assert.Equal(t, OperandQuotedString, operandTypeFromAny(NewTextPointer([]byte("hi"))))
+	assert.Equal(t, OperandType(0), operandTypeFromAny(nil))
+	assert.Equal(t, OperandType(0), operandTypeFromAny([]byte{1, 2}))
+}
+
+func TestStatement_PrepareWhere(t *testing.T) {
+	t.Parallel()
+
+	cols := []Column{
+		{Kind: Int8, Name: "id", Size: 8},
+		{Kind: Timestamp, Name: "created", Size: 8},
+	}
+
+	t.Run("non-timestamp condition is unchanged", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: "t",
+			Columns:   cols,
+			Fields:    []Field{{Name: "id"}},
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
+						Operator: Eq,
+						Operand2: Operand{Type: OperandInteger, Value: int64(42)},
+					},
+				},
+			},
+		}
+		result, err := stmt.prepareWhere()
+		require.NoError(t, err)
+		assert.Equal(t, int64(42), result.Conditions[0][0].Operand2.Value)
+	})
+
+	t.Run("timestamp condition value is parsed from TextPointer", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: "t",
+			Columns:   cols,
+			Fields:    []Field{{Name: "created"}},
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{Type: OperandField, Value: Field{Name: "created"}},
+						Operator: Eq,
+						Operand2: Operand{
+							Type:  OperandQuotedString,
+							Value: NewTextPointer([]byte("2024-01-15 10:30:00")),
+						},
+					},
+				},
+			},
+		}
+		result, err := stmt.prepareWhere()
+		require.NoError(t, err)
+		_, ok := result.Conditions[0][0].Operand2.Value.(Time)
+		assert.True(t, ok, "expected Time value after prepareWhere")
+	})
+
+	t.Run("unknown field returns error", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: "t",
+			Columns:   cols,
+			Fields:    []Field{{Name: "id"}},
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{Type: OperandField, Value: Field{Name: "bogus"}},
+						Operator: Eq,
+						Operand2: Operand{Type: OperandInteger, Value: int64(1)},
+					},
+				},
+			},
+		}
+		_, err := stmt.prepareWhere()
+		assert.Error(t, err)
+	})
+
+	t.Run("IS NULL on timestamp is allowed without parsing", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: "t",
+			Columns:   cols,
+			Fields:    []Field{{Name: "created"}},
+			Conditions: OneOrMore{
+				{
+					{
+						Operand1: Operand{Type: OperandField, Value: Field{Name: "created"}},
+						Operator: Eq,
+						Operand2: Operand{Type: OperandNull},
+					},
+				},
+			},
+		}
+		result, err := stmt.prepareWhere()
+		require.NoError(t, err)
+		assert.Equal(t, OperandNull, result.Conditions[0][0].Operand2.Type)
+	})
+}
+
+func TestStatement_IsSelectGroupBy(t *testing.T) {
+	t.Parallel()
+
+	t.Run("true when GroupBy is populated", func(t *testing.T) {
+		stmt := Statement{
+			Kind:    Select,
+			GroupBy: []Field{{Name: "category"}},
+		}
+		assert.True(t, stmt.IsSelectGroupBy())
+	})
+
+	t.Run("false when GroupBy is empty", func(t *testing.T) {
+		stmt := Statement{Kind: Select}
+		assert.False(t, stmt.IsSelectGroupBy())
+	})
+}
+
+func TestStatement_ValidateHaving(t *testing.T) {
+	t.Parallel()
+
+	cols := []Column{
+		{Kind: Int8, Name: "id", Size: 8},
+		{Kind: Varchar, Name: "category", Size: MaxInlineVarchar},
+		{Kind: Double, Name: "price", Size: 8},
+	}
+	tbl := NewTable(zap.NewNop(), nil, nil, "products", cols, 0, nil)
+
+	havingCond := func(fieldName string) OneOrMore {
+		return OneOrMore{
+			{
+				{
+					Operand1: Operand{Type: OperandField, Value: Field{Name: fieldName}},
+					Operator: Gt,
+					Operand2: Operand{Type: OperandFloat, Value: float64(100)},
+				},
+			},
+		}
+	}
+
+	t.Run("HAVING with aggregate function is valid", func(t *testing.T) {
+		stmt := Statement{
+			Kind:       Select,
+			Fields:     []Field{{Name: "category"}, {Name: "SUM(price)"}},
+			Aggregates: []AggregateExpr{{}, {Kind: AggregateSum, Column: "price"}},
+			GroupBy:    []Field{{Name: "category"}},
+			Having:     havingCond("SUM(price)"),
+		}
+		err := stmt.Validate(tbl)
+		require.NoError(t, err)
+	})
+
+	t.Run("HAVING with COUNT(*) is valid", func(t *testing.T) {
+		stmt := Statement{
+			Kind:       Select,
+			Fields:     []Field{{Name: "category"}, {Name: "COUNT(*)"}},
+			Aggregates: []AggregateExpr{{}, {Kind: AggregateCount}},
+			GroupBy:    []Field{{Name: "category"}},
+			Having:     havingCond("COUNT(*)"),
+		}
+		err := stmt.Validate(tbl)
+		require.NoError(t, err)
+	})
+
+	t.Run("HAVING referencing GROUP BY column is valid", func(t *testing.T) {
+		stmt := Statement{
+			Kind:       Select,
+			Fields:     []Field{{Name: "category"}, {Name: "SUM(price)"}},
+			Aggregates: []AggregateExpr{{}, {Kind: AggregateSum, Column: "price"}},
+			GroupBy:    []Field{{Name: "category"}},
+			Having:     havingCond("category"),
+		}
+		err := stmt.Validate(tbl)
+		require.NoError(t, err)
+	})
+
+	t.Run("HAVING referencing non-GROUP BY plain column is rejected", func(t *testing.T) {
+		stmt := Statement{
+			Kind:       Select,
+			Fields:     []Field{{Name: "category"}, {Name: "SUM(price)"}},
+			Aggregates: []AggregateExpr{{}, {Kind: AggregateSum, Column: "price"}},
+			GroupBy:    []Field{{Name: "category"}},
+			// "price" is not in GROUP BY and not an aggregate reference
+			Having: havingCond("price"),
+		}
+		err := stmt.Validate(tbl)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `"price"`)
+	})
+
+	t.Run("HAVING with AVG is valid", func(t *testing.T) {
+		stmt := Statement{
+			Kind:       Select,
+			Fields:     []Field{{Name: "category"}, {Name: "AVG(price)"}},
+			Aggregates: []AggregateExpr{{}, {Kind: AggregateAvg, Column: "price"}},
+			GroupBy:    []Field{{Name: "category"}},
+			Having:     havingCond("AVG(price)"),
+		}
+		err := stmt.Validate(tbl)
+		require.NoError(t, err)
+	})
+}

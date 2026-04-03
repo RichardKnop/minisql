@@ -500,3 +500,152 @@ func (s *TestSuite) TestGroupBy() {
 		s.Contains(err.Error(), "non-aggregate column")
 	})
 }
+
+func (s *TestSuite) TestHaving() {
+	_, err := s.db.Exec(createOrdersTableSQL)
+	s.Require().NoError(err)
+
+	// user_id=1: total_paid 10, 20  → sum=30, count=2
+	// user_id=2: total_paid 30, 40  → sum=70, count=2
+	// user_id=3: total_paid 50      → sum=50, count=1
+	s.execQuery(`insert into orders(user_id, product_id, total_paid) values
+(1, 1, 10),
+(1, 2, 20),
+(2, 1, 30),
+(2, 3, 40),
+(3, 2, 50);`, 5)
+
+	s.Run("HAVING filters groups by aggregate", func() {
+		// Only groups where SUM(total_paid) > 40: user_id=2 (70) and user_id=3 (50).
+		rows, err := s.db.QueryContext(context.Background(), `select user_id, SUM(total_paid) from orders GROUP BY user_id HAVING SUM(total_paid) > 40;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type row struct {
+			userID int64
+			sum    int64
+		}
+		var got []row
+		for rows.Next() {
+			var r row
+			s.Require().NoError(rows.Scan(&r.userID, &r.sum))
+			got = append(got, r)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(got, 2)
+
+		sort.Slice(got, func(i, j int) bool { return got[i].userID < got[j].userID })
+		s.Equal(int64(2), got[0].userID)
+		s.Equal(int64(70), got[0].sum)
+		s.Equal(int64(3), got[1].userID)
+		s.Equal(int64(50), got[1].sum)
+	})
+
+	s.Run("HAVING filters groups by COUNT", func() {
+		// Only groups with COUNT(*) >= 2: user_id=1 and user_id=2.
+		rows, err := s.db.QueryContext(context.Background(), `select user_id, COUNT(*) from orders GROUP BY user_id HAVING COUNT(*) >= 2;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type row struct {
+			userID int64
+			count  int64
+		}
+		var got []row
+		for rows.Next() {
+			var r row
+			s.Require().NoError(rows.Scan(&r.userID, &r.count))
+			got = append(got, r)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(got, 2)
+
+		sort.Slice(got, func(i, j int) bool { return got[i].userID < got[j].userID })
+		s.Equal(int64(1), got[0].userID)
+		s.Equal(int64(2), got[0].count)
+		s.Equal(int64(2), got[1].userID)
+		s.Equal(int64(2), got[1].count)
+	})
+
+	s.Run("HAVING on GROUP BY column", func() {
+		// Only groups where user_id > 1.
+		rows, err := s.db.QueryContext(context.Background(), `select user_id, SUM(total_paid) from orders GROUP BY user_id HAVING user_id > 1;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type row struct {
+			userID int64
+			sum    int64
+		}
+		var got []row
+		for rows.Next() {
+			var r row
+			s.Require().NoError(rows.Scan(&r.userID, &r.sum))
+			got = append(got, r)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(got, 2)
+
+		sort.Slice(got, func(i, j int) bool { return got[i].userID < got[j].userID })
+		s.Equal(int64(2), got[0].userID)
+		s.Equal(int64(3), got[1].userID)
+	})
+
+	s.Run("WHERE and HAVING together", func() {
+		// WHERE removes total_paid=10 first; then GROUP BY:
+		// user_id=1: 20 → sum=20, user_id=2: 30+40 → sum=70, user_id=3: 50 → sum=50
+		// HAVING SUM > 30 keeps user_id=2 (70) and user_id=3 (50).
+		rows, err := s.db.QueryContext(context.Background(), `select user_id, SUM(total_paid) from orders where total_paid > 10 GROUP BY user_id HAVING SUM(total_paid) > 30;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type row struct {
+			userID int64
+			sum    int64
+		}
+		var got []row
+		for rows.Next() {
+			var r row
+			s.Require().NoError(rows.Scan(&r.userID, &r.sum))
+			got = append(got, r)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(got, 2)
+
+		sort.Slice(got, func(i, j int) bool { return got[i].userID < got[j].userID })
+		s.Equal(int64(2), got[0].userID)
+		s.Equal(int64(70), got[0].sum)
+		s.Equal(int64(3), got[1].userID)
+		s.Equal(int64(50), got[1].sum)
+	})
+
+	s.Run("HAVING that matches no groups returns empty result", func() {
+		rows, err := s.db.QueryContext(context.Background(), `select user_id, SUM(total_paid) from orders GROUP BY user_id HAVING SUM(total_paid) > 9999;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+		s.False(rows.Next())
+		s.Require().NoError(rows.Err())
+	})
+
+	s.Run("HAVING without GROUP BY is rejected", func() {
+		_, err := s.db.QueryContext(context.Background(), `select SUM(total_paid) from orders HAVING SUM(total_paid) > 10;`)
+		s.Require().Error(err)
+		s.Contains(err.Error(), "HAVING requires GROUP BY")
+	})
+}
+
+func (s *TestSuite) TestGroupByWithJoinRejected() {
+	_, err := s.db.Exec(createOrdersTableSQL)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(createUsersTableSQL)
+	s.Require().NoError(err)
+
+	_, err = s.db.QueryContext(context.Background(), `
+		select o.user_id, SUM(o.total_paid)
+		from orders as o
+		inner join users as u on u.id = o.user_id
+		GROUP BY o.user_id;`)
+	s.Require().Error(err)
+	s.Contains(err.Error(), "GROUP BY cannot be combined with JOIN")
+}
