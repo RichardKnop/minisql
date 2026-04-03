@@ -445,7 +445,7 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, filteredPipe 
 		}
 	}
 
-	// Build one result row per group.
+	// Build one result row per group, applying HAVING filter.
 	resultRows := make([]Row, 0, len(groupOrder))
 	for _, key := range groupOrder {
 		gs := groups[key]
@@ -487,7 +487,20 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, filteredPipe 
 				}
 			}
 		}
-		resultRows = append(resultRows, NewRowWithValues(resultColumns, values))
+		resultRow := NewRowWithValues(resultColumns, values)
+
+		// Apply HAVING filter against the computed aggregate row.
+		if len(stmt.Having) > 0 {
+			ok, err := resultRow.CheckOneOrMore(stmt.Having)
+			if err != nil {
+				return StatementResult{}, fmt.Errorf("HAVING: %w", err)
+			}
+			if !ok {
+				continue
+			}
+		}
+
+		resultRows = append(resultRows, resultRow)
 	}
 
 	// Apply ORDER BY if specified.

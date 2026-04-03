@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -676,5 +677,178 @@ func TestRow_SetValue(t *testing.T) {
 	t.Run("not changed", func(t *testing.T) {
 		_, changed := aRow.SetValue("id", OptionalValue{Value: int64(125478), Valid: true})
 		assert.False(t, changed)
+	})
+}
+
+func TestMarshalUnmarshalInt8(t *testing.T) {
+	t.Parallel()
+
+	cases := []int8{0, 1, -1, 127, -128}
+	for _, v := range cases {
+		buf := make([]byte, 1)
+		marshalInt8(buf, v, 0)
+		got := unmarshalInt8(buf, 0)
+		assert.Equal(t, v, got)
+	}
+}
+
+func TestMarshalUnmarshalFloat64(t *testing.T) {
+	t.Parallel()
+
+	cases := []float64{0.0, 1.5, -1.5, math.MaxFloat64, -math.MaxFloat64, math.Pi}
+	for _, v := range cases {
+		buf := make([]byte, 8)
+		marshalFloat64(buf, v, 0)
+		got := unmarshalFloat64(buf, 0)
+		assert.Equal(t, v, got)
+	}
+}
+
+func TestRow_CompareFields(t *testing.T) {
+	t.Parallel()
+
+	cols := []Column{
+		{Kind: Int8, Name: "x", Size: 8},
+		{Kind: Int8, Name: "y", Size: 8},
+		{Kind: Int4, Name: "z", Size: 4},
+	}
+	aRow := NewRowWithValues(cols, []OptionalValue{
+		{Value: int64(10), Valid: true},
+		{Value: int64(10), Valid: true},
+		{Value: int32(5), Valid: true},
+	})
+
+	field := func(name string) Operand {
+		return Operand{Type: OperandField, Value: Field{Name: name}}
+	}
+
+	t.Run("equal fields match", func(t *testing.T) {
+		ok, err := aRow.compareFields(field("x"), field("y"), Eq)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("different kind fields do not match", func(t *testing.T) {
+		ok, err := aRow.compareFields(field("x"), field("z"), Eq)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("error on invalid field1 operand type", func(t *testing.T) {
+		nonField := Operand{Type: OperandInteger, Value: int64(1)}
+		_, err := aRow.compareFields(nonField, field("y"), Eq)
+		assert.Error(t, err)
+	})
+
+	t.Run("error on invalid field2 operand type", func(t *testing.T) {
+		nonField := Operand{Type: OperandInteger, Value: int64(1)}
+		_, err := aRow.compareFields(field("x"), nonField, Eq)
+		assert.Error(t, err)
+	})
+
+	t.Run("error when column not found", func(t *testing.T) {
+		_, err := aRow.compareFields(field("missing"), field("y"), Eq)
+		assert.Error(t, err)
+	})
+}
+
+func TestRow_CheckCondition(t *testing.T) {
+	t.Parallel()
+
+	cols := []Column{
+		{Kind: Int8, Name: "a", Size: 8},
+		{Kind: Int8, Name: "b", Size: 8},
+	}
+	aRow := NewRowWithValues(cols, []OptionalValue{
+		{Value: int64(5), Valid: true},
+		{Value: int64(5), Valid: true},
+	})
+
+	t.Run("both fields equal", func(t *testing.T) {
+		cond := Condition{
+			Operand1: Operand{Type: OperandField, Value: Field{Name: "a"}},
+			Operator: Eq,
+			Operand2: Operand{Type: OperandField, Value: Field{Name: "b"}},
+		}
+		ok, err := aRow.checkCondition(cond)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("both literals equal", func(t *testing.T) {
+		cond := Condition{
+			Operand1: Operand{Type: OperandInteger, Value: int64(7)},
+			Operator: Eq,
+			Operand2: Operand{Type: OperandInteger, Value: int64(7)},
+		}
+		ok, err := aRow.checkCondition(cond)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("both literals not equal", func(t *testing.T) {
+		cond := Condition{
+			Operand1: Operand{Type: OperandInteger, Value: int64(7)},
+			Operator: Eq,
+			Operand2: Operand{Type: OperandInteger, Value: int64(8)},
+		}
+		ok, err := aRow.checkCondition(cond)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("right-side field, left-side literal", func(t *testing.T) {
+		cond := Condition{
+			Operand1: Operand{Type: OperandInteger, Value: int64(5)},
+			Operator: Eq,
+			Operand2: Operand{Type: OperandField, Value: Field{Name: "a"}},
+		}
+		ok, err := aRow.checkCondition(cond)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+}
+
+func TestRow_CompareFieldValue_IsNull(t *testing.T) {
+	t.Parallel()
+
+	cols := []Column{
+		{Kind: Int8, Name: "x", Size: 8, Nullable: true},
+	}
+
+	t.Run("IS NULL matches null field", func(t *testing.T) {
+		row := NewRowWithValues(cols, []OptionalValue{{Valid: false}})
+		cond := Condition{
+			Operand1: Operand{Type: OperandField, Value: Field{Name: "x"}},
+			Operator: Eq,
+			Operand2: Operand{Type: OperandNull},
+		}
+		ok, err := row.checkCondition(cond)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("IS NULL does not match non-null field", func(t *testing.T) {
+		row := NewRowWithValues(cols, []OptionalValue{{Value: int64(1), Valid: true}})
+		cond := Condition{
+			Operand1: Operand{Type: OperandField, Value: Field{Name: "x"}},
+			Operator: Eq,
+			Operand2: Operand{Type: OperandNull},
+		}
+		ok, err := row.checkCondition(cond)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("IS NOT NULL matches non-null field", func(t *testing.T) {
+		row := NewRowWithValues(cols, []OptionalValue{{Value: int64(1), Valid: true}})
+		cond := Condition{
+			Operand1: Operand{Type: OperandField, Value: Field{Name: "x"}},
+			Operator: Ne,
+			Operand2: Operand{Type: OperandNull},
+		}
+		ok, err := row.checkCondition(cond)
+		require.NoError(t, err)
+		assert.True(t, ok)
 	})
 }

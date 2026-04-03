@@ -30,8 +30,15 @@ func (p *parserItem) doParseWhere() error {
 
 	whereRWord := strings.ToUpper(whereOrEnd)
 
-	// ORDER BY / LIMIT / OFFSET appearing before WHERE (i.e. no WHERE clause).
-	if whereRWord == "ORDER BY" || whereRWord == "LIMIT" || whereRWord == "OFFSET" {
+	// GROUP BY / HAVING / ORDER BY / LIMIT / OFFSET appearing before WHERE means no WHERE clause.
+	switch whereRWord {
+	case "GROUP BY":
+		p.step = stepSelectGroupBy
+		return nil
+	case "HAVING":
+		p.step = stepSelectHaving
+		return nil
+	case "ORDER BY", "LIMIT", "OFFSET":
 		p.step = stepSelectOrderBy
 		return nil
 	}
@@ -62,6 +69,8 @@ func (p *parserItem) doParseWhere() error {
 	switch next {
 	case "GROUP BY":
 		p.step = stepSelectGroupBy
+	case "HAVING":
+		p.step = stepSelectHaving
 	case "ORDER BY", "LIMIT", "OFFSET":
 		p.step = stepSelectOrderBy
 	default:
@@ -136,13 +145,36 @@ func (p *parserItem) parsePrimaryCondExpr() (*minisql.ConditionNode, error) {
 	return p.parseLeafCondition()
 }
 
-// parseLeafCondition parses a single WHERE condition: field op value.
+// parseLeafCondition parses a single WHERE/HAVING condition: field op value.
+// In HAVING clauses the left-side "field" may be a synthetic aggregate result
+// column name such as "SUM(total_paid)" or "COUNT(*)".
 func (p *parserItem) parseLeafCondition() (*minisql.ConditionNode, error) {
 	identifier := p.peek()
-	if !isIdentifier(identifier) {
-		return nil, p.wrapErr(errWhereExpectedField)
+	upperIdent := strings.ToUpper(identifier)
+
+	// Handle aggregate function references (HAVING SUM(col) > x, etc.).
+	if aggKind := aggregateKindFromToken(upperIdent); aggKind != 0 {
+		p.pop() // consume e.g. "SUM("
+		colName := p.peek()
+		if !isIdentifier(colName) {
+			return nil, p.errorf("at HAVING: expected column name in %s", strings.TrimSuffix(upperIdent, "("))
+		}
+		p.pop()
+		if p.peek() != ")" {
+			return nil, p.errorf("at HAVING: expected ')' after column name in %s", strings.TrimSuffix(upperIdent, "("))
+		}
+		p.pop()
+		funcName := strings.TrimSuffix(upperIdent, "(")
+		identifier = funcName + "(" + colName + ")" // e.g. "SUM(total_paid)"
+	} else if upperIdent == "COUNT(*)" {
+		p.pop()
+		identifier = "COUNT(*)"
+	} else {
+		if !isIdentifier(identifier) {
+			return nil, p.wrapErr(errWhereExpectedField)
+		}
+		p.pop()
 	}
-	p.pop()
 
 	cond := minisql.Condition{
 		Operand1: minisql.Operand{
