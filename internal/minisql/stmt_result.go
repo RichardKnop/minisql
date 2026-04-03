@@ -5,6 +5,7 @@ import (
 	"errors"
 )
 
+// Iterator ...
 type Iterator struct {
 	rowFunc func(ctx context.Context) (Row, error)
 	nextRow Row
@@ -12,13 +13,15 @@ type Iterator struct {
 	err     error
 }
 
+// NewIterator ...
 func NewIterator(rowFunc func(ctx context.Context) (Row, error)) Iterator {
 	return Iterator{
 		rowFunc: rowFunc,
 	}
 }
 
-func NewSingleRowIterator(aRow Row) Iterator {
+// NewSingleRowIterator ...
+func NewSingleRowIterator(row Row) Iterator {
 	i := Iterator{}
 	end := false
 	i.rowFunc = func(ctx context.Context) (Row, error) {
@@ -26,15 +29,17 @@ func NewSingleRowIterator(aRow Row) Iterator {
 			return Row{}, ErrNoMoreRows
 		}
 		end = true
-		return aRow, nil
+		return row, nil
 	}
 	return i
 }
 
+// Row ...
 func (i *Iterator) Row() Row {
 	return i.nextRow
 }
 
+// Next ...
 func (i *Iterator) Next(ctx context.Context) bool {
 	if i.err != nil {
 		return false
@@ -42,7 +47,7 @@ func (i *Iterator) Next(ctx context.Context) bool {
 	if i.end {
 		return false
 	}
-	aRow, err := i.rowFunc(ctx)
+	row, err := i.rowFunc(ctx)
 	if err != nil {
 		if errors.Is(err, ErrNoMoreRows) {
 			i.end = true
@@ -51,19 +56,22 @@ func (i *Iterator) Next(ctx context.Context) bool {
 		i.err = err
 		return false
 	}
-	i.nextRow = aRow
+	i.nextRow = row
 	return true
 }
 
+// Close ...
 func (i *Iterator) Close() error {
 	i.end = true
 	return nil
 }
 
+// Err ...
 func (i *Iterator) Err() error {
 	return i.err
 }
 
+// StatementResult ...
 type StatementResult struct {
 	Columns      []Column
 	Rows         Iterator

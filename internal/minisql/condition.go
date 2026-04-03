@@ -1,9 +1,11 @@
 package minisql
 
 import (
+	"errors"
 	"fmt"
 )
 
+// Operator represents a SQL comparison operator used in WHERE conditions.
 type Operator int
 
 const (
@@ -64,9 +66,12 @@ func (o Operator) String() string {
 	}
 }
 
+// OperandType classifies the value on either side of a condition operator.
 type OperandType int
 
+// OperandType constants define the kinds of operand values.
 const (
+	// OperandField means the operand is a table column name.
 	OperandField OperandType = iota + 1
 	OperandPlaceholder
 	OperandNull
@@ -77,6 +82,7 @@ const (
 	OperandList
 )
 
+// Operand holds a typed value on one side of a condition expression.
 type Operand struct {
 	Type  OperandType
 	Value any
@@ -87,6 +93,7 @@ func (o Operand) IsField() bool {
 	return o.Type == OperandField
 }
 
+// Condition represents a single predicate: operand1 operator operand2.
 type Condition struct {
 	// Operand1 is the left hand side operand
 	Operand1 Operand
@@ -96,6 +103,7 @@ type Condition struct {
 	Operand2 Operand
 }
 
+// Operands returns both operands of the condition as a slice.
 func (c Condition) Operands() []Operand {
 	return []Operand{c.Operand1, c.Operand2}
 }
@@ -115,6 +123,7 @@ func IsValidCondition(c Condition) bool {
 	return true
 }
 
+// Conditions is a slice of Condition values joined by AND within a single OR group.
 type Conditions []Condition
 
 // OneOrMore contains a slice of multiple groups of singular condition, each
@@ -122,10 +131,12 @@ type Conditions []Condition
 // is joined by AND with other conditions in the same slice.
 type OneOrMore []Conditions
 
+// NewOneOrMore creates a new OneOrMore from the given condition groups.
 func NewOneOrMore(conditionGroups ...Conditions) OneOrMore {
 	return OneOrMore(conditionGroups)
 }
 
+// LastCondition returns the last condition in the last group, if any.
 func (o OneOrMore) LastCondition() (Condition, bool) {
 	if len(o) == 0 {
 		return Condition{}, false
@@ -137,18 +148,21 @@ func (o OneOrMore) LastCondition() (Condition, bool) {
 	return Condition{}, false
 }
 
-func (o OneOrMore) Append(aCondition Condition) OneOrMore {
+// Append adds a condition to the last group, creating a new group if empty.
+func (o OneOrMore) Append(cond Condition) OneOrMore {
 	if len(o) == 0 {
 		o = append(o, make(Conditions, 0, 1))
 	}
-	o[len(o)-1] = append(o[len(o)-1], aCondition)
+	o[len(o)-1] = append(o[len(o)-1], cond)
 	return o
 }
 
-func (o OneOrMore) UpdateLast(aCondition Condition) {
-	o[len(o)-1][len(o[len(o)-1])-1] = aCondition
+// UpdateLast replaces the last condition in the last group.
+func (o OneOrMore) UpdateLast(cond Condition) {
+	o[len(o)-1][len(o[len(o)-1])-1] = cond
 }
 
+// FieldIsEqual creates a field = value condition.
 func FieldIsEqual(field Field, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
@@ -163,6 +177,7 @@ func FieldIsEqual(field Field, operandType OperandType, value any) Condition {
 	}
 }
 
+// FieldIsNotEqual creates a field != value condition.
 func FieldIsNotEqual(field Field, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
@@ -177,6 +192,7 @@ func FieldIsNotEqual(field Field, operandType OperandType, value any) Condition 
 	}
 }
 
+// FieldIsInAny creates a field IN (values...) condition.
 func FieldIsInAny(field Field, values ...any) Condition {
 	return Condition{
 		Operand1: Operand{
@@ -191,6 +207,7 @@ func FieldIsInAny(field Field, values ...any) Condition {
 	}
 }
 
+// FieldIsNotInAny creates a field NOT IN (values...) condition.
 func FieldIsNotInAny(field Field, values ...any) Condition {
 	return Condition{
 		Operand1: Operand{
@@ -205,6 +222,7 @@ func FieldIsNotInAny(field Field, values ...any) Condition {
 	}
 }
 
+// FieldIsNull creates a field IS NULL condition.
 func FieldIsNull(field Field) Condition {
 	return Condition{
 		Operand1: Operand{
@@ -218,6 +236,7 @@ func FieldIsNull(field Field) Condition {
 	}
 }
 
+// FieldIsNotNull creates a field IS NOT NULL condition.
 func FieldIsNotNull(field Field) Condition {
 	return Condition{
 		Operand1: Operand{
@@ -231,6 +250,7 @@ func FieldIsNotNull(field Field) Condition {
 	}
 }
 
+// FieldIsGreater creates a field > value condition.
 func FieldIsGreater(field Field, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
@@ -245,6 +265,7 @@ func FieldIsGreater(field Field, operandType OperandType, value any) Condition {
 	}
 }
 
+// FieldIsGreaterOrEqual creates a field >= value condition.
 func FieldIsGreaterOrEqual(field Field, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
@@ -259,6 +280,7 @@ func FieldIsGreaterOrEqual(field Field, operandType OperandType, value any) Cond
 	}
 }
 
+// FieldIsLess creates a field < value condition.
 func FieldIsLess(field Field, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
@@ -273,6 +295,7 @@ func FieldIsLess(field Field, operandType OperandType, value any) Condition {
 	}
 }
 
+// FieldIsLike creates a field LIKE value condition.
 func FieldIsLike(field Field, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
@@ -287,6 +310,7 @@ func FieldIsLike(field Field, operandType OperandType, value any) Condition {
 	}
 }
 
+// FieldIsBetween creates a field BETWEEN low AND high condition.
 func FieldIsBetween(field Field, low, high any) Condition {
 	return Condition{
 		Operand1: Operand{
@@ -301,6 +325,7 @@ func FieldIsBetween(field Field, low, high any) Condition {
 	}
 }
 
+// FieldIsNotBetween creates a field NOT BETWEEN low AND high condition.
 func FieldIsNotBetween(field Field, low, high any) Condition {
 	return Condition{
 		Operand1: Operand{
@@ -315,6 +340,7 @@ func FieldIsNotBetween(field Field, low, high any) Condition {
 	}
 }
 
+// FieldIsNotLike creates a field NOT LIKE value condition.
 func FieldIsNotLike(field Field, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
@@ -329,6 +355,7 @@ func FieldIsNotLike(field Field, operandType OperandType, value any) Condition {
 	}
 }
 
+// FieldIsLessOrEqual creates a field <= value condition.
 func FieldIsLessOrEqual(field Field, operandType OperandType, value any) Condition {
 	return Condition{
 		Operand1: Operand{
@@ -358,13 +385,13 @@ func compareBoolean(value1, value2 any, operator Operator) (bool, error) {
 	case Ne:
 		return theValue1 != theValue2, nil
 	case Gt:
-		return false, fmt.Errorf("cannot compare boolean values with '>'")
+		return false, errors.New("cannot compare boolean values with '>'")
 	case Lt:
-		return false, fmt.Errorf("cannot compare boolean values with '<'")
+		return false, errors.New("cannot compare boolean values with '<'")
 	case Gte:
-		return false, fmt.Errorf("cannot compare boolean values with '>='")
+		return false, errors.New("cannot compare boolean values with '>='")
 	case Lte:
-		return false, fmt.Errorf("cannot compare boolean values with '<='")
+		return false, errors.New("cannot compare boolean values with '<='")
 	}
 	return false, fmt.Errorf("unknown operator '%s'", operator)
 }

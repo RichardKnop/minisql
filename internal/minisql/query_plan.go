@@ -5,15 +5,23 @@ import (
 	"fmt"
 )
 
+// ScanType ...
 type ScanType int
 
+// ScanType constants define the available index and table scan strategies.
 const (
-	ScanTypeSequential ScanType = iota + 1 // Full table scan
-	ScanTypeIndexAll                       // Full index scan
-	ScanTypeIndexPoint                     // Index lookup for specific key(s)
-	ScanTypeIndexRange                     // Index range scan
-	ScanTypeIndexFirst                     // Seek to first (smallest) key in index — used for MIN optimisation
-	ScanTypeIndexLast                      // Seek to last (largest) key in index — used for MAX optimisation
+	// ScanTypeSequential is a full table scan.
+	ScanTypeSequential ScanType = iota + 1
+	// ScanTypeIndexAll is a full index scan.
+	ScanTypeIndexAll
+	// ScanTypeIndexPoint is an index lookup for specific key(s).
+	ScanTypeIndexPoint
+	// ScanTypeIndexRange is an index range scan.
+	ScanTypeIndexRange
+	// ScanTypeIndexFirst seeks to the first (smallest) key in the index — used for MIN optimisation.
+	ScanTypeIndexFirst
+	// ScanTypeIndexLast seeks to the last (largest) key in the index — used for MAX optimisation.
+	ScanTypeIndexLast
 )
 
 func (st ScanType) String() string {
@@ -35,11 +43,13 @@ func (st ScanType) String() string {
 	}
 }
 
+// RangeBound ...
 type RangeBound struct {
 	Value     any
 	Inclusive bool // true for >= or <=, false for > or <
 }
 
+// RangeCondition ...
 type RangeCondition struct {
 	Lower *RangeBound // nil = unbounded
 	Upper *RangeBound // nil = unbounded
@@ -73,6 +83,7 @@ type QueryPlan struct {
 	SortReverse  bool
 }
 
+// Scan ...
 type Scan struct {
 	TableName      string // Name of the table to scan
 	TableAlias     string // Alias of the table (for JOINs)
@@ -106,7 +117,7 @@ SELECT * from users;
 If a WHERE clause cannot be fully satisfied by an index or combination of indexes,
 we fall back to a sequential scan.
 
-Remeber that if you have multiple conditions separated by OR, if a single one does not use
+Remember that if you have multiple conditions separated by OR, if a single one does not use
 an index, we have to do a sequential scan anyway. Also remember that non equality conditions
 using != or NOT IN or conditions comparing to NULL cannot use indexes.
 
@@ -306,28 +317,28 @@ func (t *Table) tryMatchIndex(indexInfo IndexInfo, group Conditions) *indexMatch
 		foundMatch := false
 
 		// Look for an equality condition on this column
-		for condIdx, aCondition := range group {
+		for condIdx, cond := range group {
 			// Skip already matched conditions
 			if matchedConditions[condIdx] {
 				continue
 			}
 
 			// Check if this is an equality condition on the current index column
-			if !isEquality(aCondition) {
+			if !isEquality(cond) {
 				continue
 			}
 
-			if aCondition.Operand1.Type != OperandField {
+			if cond.Operand1.Type != OperandField {
 				continue
 			}
 
-			field, ok := aCondition.Operand1.Value.(Field)
+			field, ok := cond.Operand1.Value.(Field)
 			if !ok || field.Name != indexCol.Name {
 				continue
 			}
 
 			// Skip NULL comparisons
-			if aCondition.Operand2.Type == OperandNull {
+			if cond.Operand2.Type == OperandNull {
 				continue
 			}
 
@@ -337,7 +348,7 @@ func (t *Table) tryMatchIndex(indexInfo IndexInfo, group Conditions) *indexMatch
 				continue
 			}
 
-			keys, err := equalityKeys(column, aCondition)
+			keys, err := equalityKeys(column, cond)
 			if err != nil {
 				continue
 			}
@@ -380,7 +391,8 @@ func (t *Table) tryMatchIndex(indexInfo IndexInfo, group Conditions) *indexMatch
 	var rangeCondition *RangeCondition
 	var hasProperUpperBound bool
 
-	if isPartialMatch {
+	switch {
+	case isPartialMatch:
 		// Partial composite index match - use range scan
 		// For example, index on (a,b,c) with conditions a=1, b=2 should scan range:
 		// Lower: (1, 2) inclusive
@@ -413,17 +425,17 @@ func (t *Table) tryMatchIndex(indexInfo IndexInfo, group Conditions) *indexMatch
 			}
 			hasProperUpperBound = false
 		}
-	} else if numMatchedColumns > 1 {
+	case numMatchedColumns > 1:
 		// Full composite index match - use point scan
 		// Create composite key with all matched columns
 		matchedCols := indexInfo.Columns[:numMatchedColumns]
 		indexKeys = []any{NewCompositeKey(matchedCols, compositeKey...)}
-	} else {
+	default:
 		// Single column index - use raw key value(s)
 		indexKeys = compositeKey
 	}
 
-	aMatch := &indexMatch{
+	match := &indexMatch{
 		info:                indexInfo,
 		matchedConditions:   matchedConditions,
 		keys:                indexKeys,
@@ -436,10 +448,10 @@ func (t *Table) tryMatchIndex(indexInfo IndexInfo, group Conditions) *indexMatch
 	// Load statistics for this index if available
 	stats, hasStats := t.indexStats[indexInfo.Name]
 	if hasStats {
-		aMatch.stats = &stats
+		match.stats = &stats
 	}
 
-	return aMatch
+	return match
 }
 
 // Check whether we can perform an index scan. Each condition group is separated by OR,
@@ -469,11 +481,11 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 		}
 
 		// Also collect indexes that could be used for range scans
-		for _, aCondition := range group {
-			if aCondition.Operand1.Type != OperandField {
+		for _, cond := range group {
+			if cond.Operand1.Type != OperandField {
 				continue
 			}
-			field, ok := aCondition.Operand1.Value.(Field)
+			field, ok := cond.Operand1.Value.(Field)
 			if !ok {
 				continue
 			}
@@ -490,7 +502,7 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 			if match != nil {
 				alreadyMatched := false
 				for condIdx := range match.matchedConditions {
-					if &group[condIdx] == &aCondition {
+					if &group[condIdx] == &cond {
 						alreadyMatched = true
 						break
 					}
@@ -501,7 +513,7 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 			}
 
 			// Check if this could be used for range scan
-			isEq := isEquality(aCondition) && aCondition.Operand2.Type != OperandNull
+			isEq := isEquality(cond) && cond.Operand2.Type != OperandNull
 			if !isEq {
 				// Add to potential range scan indexes
 				otherIndexes[groupIdx] = append(otherIndexes[groupIdx], info)
@@ -529,21 +541,21 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 		match, ok := equalityMatch[groupIdx]
 		if ok {
 			filters := make(Conditions, 0, len(group))
-			for condIdx, aCondition := range group {
+			for condIdx, cond := range group {
 				// If we have a range scan without proper upper bound, we must include
 				// the matched conditions as filters since the scan will read extra rows
 				if match.rangeCondition != nil && !match.hasProperUpperBound {
 					// Keep ALL conditions (matched + unmatched) for filtering
-					filters = append(filters, aCondition)
+					filters = append(filters, cond)
 				} else if !match.matchedConditions[condIdx] {
 					// Only keep unmatched conditions for filtering
-					filters = append(filters, aCondition)
+					filters = append(filters, cond)
 				}
 			}
 
 			if match.rangeCondition != nil {
 				// Partial composite index match - use range scan
-				aScan := Scan{
+				scan := Scan{
 					TableName:      t.Name,
 					Type:           ScanTypeIndexRange,
 					IndexName:      match.info.Name,
@@ -551,12 +563,12 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 					RangeCondition: *match.rangeCondition,
 				}
 				if len(filters) > 0 {
-					aScan.Filters = OneOrMore{filters}
+					scan.Filters = OneOrMore{filters}
 				}
-				indexScans = append(indexScans, aScan)
+				indexScans = append(indexScans, scan)
 			} else {
 				// Full index match - use point scan
-				aScan := Scan{
+				scan := Scan{
 					TableName:    t.Name,
 					Type:         ScanTypeIndexPoint,
 					IndexName:    match.info.Name,
@@ -564,9 +576,9 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 					IndexKeys:    match.keys,
 				}
 				if len(filters) > 0 {
-					aScan.Filters = OneOrMore{filters}
+					scan.Filters = OneOrMore{filters}
 				}
-				indexScans = append(indexScans, aScan)
+				indexScans = append(indexScans, scan)
 			}
 
 			continue
@@ -640,12 +652,12 @@ func isEquality(cond Condition) bool {
 	return true
 }
 
-func equalityKeys(aColumn Column, cond Condition) ([]any, error) {
+func equalityKeys(col Column, cond Condition) ([]any, error) {
 	if cond.Operator == Eq {
 		if cond.Operand2.Type == OperandNull {
 			return []any{cond.Operand2.Value}, nil
 		}
-		keyValue, err := castKeyValue(aColumn, cond.Operand2.Value)
+		keyValue, err := castKeyValue(col, cond.Operand2.Value)
 		if err != nil {
 			return nil, err
 		}
@@ -655,7 +667,7 @@ func equalityKeys(aColumn Column, cond Condition) ([]any, error) {
 	// TODO what if NULL is included in list?
 	keyValues := make([]any, 0, len(cond.Operand2.Value.([]any)))
 	for _, rawValue := range cond.Operand2.Value.([]any) {
-		keyValue, err := castKeyValue(aColumn, rawValue)
+		keyValue, err := castKeyValue(col, rawValue)
 		if err != nil {
 			return nil, err
 		}
@@ -705,51 +717,51 @@ func tryRangeScan(tableName string, indexInfo IndexInfo, filters Conditions, sta
 	)
 
 	// Scan conditions to find range predicates on PK
-	for _, aCondition := range filters {
+	for _, cond := range filters {
 		// Left side operand must be a field
-		if aCondition.Operand1.Type != OperandField {
-			remainingFilters = append(remainingFilters, aCondition)
+		if cond.Operand1.Type != OperandField {
+			remainingFilters = append(remainingFilters, cond)
 			continue
 		}
 
-		field, ok := aCondition.Operand1.Value.(Field)
+		field, ok := cond.Operand1.Value.(Field)
 		if !ok || field.Name != indexInfo.Columns[0].Name {
-			remainingFilters = append(remainingFilters, aCondition)
+			remainingFilters = append(remainingFilters, cond)
 			continue
 		}
 
 		// Can't use index if comparing to another field
-		if aCondition.Operand2.Type == OperandField {
-			remainingFilters = append(remainingFilters, aCondition)
+		if cond.Operand2.Type == OperandField {
+			remainingFilters = append(remainingFilters, cond)
 			continue
 		}
 
-		if aCondition.Operator == Eq || aCondition.Operator == Ne {
+		if cond.Operator == Eq || cond.Operator == Ne {
 			// id = X, id IN (...) - we will be doing index point scan instead so just return
 			return Scan{}, false, nil
 		}
 
-		if aCondition.Operator == In || aCondition.Operator == NotIn {
+		if cond.Operator == In || cond.Operator == NotIn {
 			// id != X , id NOT IN (...) - we will be doing a sequential scan so just return
 			return Scan{}, false, nil
 		}
 
-		if aCondition.Operator == Like || aCondition.Operator == NotLike {
+		if cond.Operator == Like || cond.Operator == NotLike {
 			// LIKE / NOT LIKE requires a full sequential scan — no range bound possible
 			return Scan{}, false, nil
 		}
 
-		if aCondition.Operator == Between || aCondition.Operator == NotBetween {
+		if cond.Operator == Between || cond.Operator == NotBetween {
 			// BETWEEN / NOT BETWEEN uses sequential scan for now
 			return Scan{}, false, nil
 		}
 
-		conditionValue, err := castKeyValue(indexInfo.Columns[0], aCondition.Operand2.Value)
+		conditionValue, err := castKeyValue(indexInfo.Columns[0], cond.Operand2.Value)
 		if err != nil {
 			return Scan{}, false, err
 		}
 
-		switch aCondition.Operator {
+		switch cond.Operator {
 		case Gt:
 			// id > X
 			if rangeCondition.Lower == nil ||
@@ -787,7 +799,7 @@ func tryRangeScan(tableName string, indexInfo IndexInfo, filters Conditions, sta
 				}
 			}
 		default:
-			return Scan{}, false, fmt.Errorf("invalid operator for range scan: %d", aCondition.Operator)
+			return Scan{}, false, fmt.Errorf("invalid operator for range scan: %d", cond.Operator)
 		}
 	}
 
@@ -812,7 +824,7 @@ func tryRangeScan(tableName string, indexInfo IndexInfo, filters Conditions, sta
 	}
 
 	// Create range scan plan
-	aScan := Scan{
+	scan := Scan{
 		TableName:      tableName,
 		Type:           ScanTypeIndexRange,
 		IndexName:      indexInfo.Name,
@@ -820,11 +832,12 @@ func tryRangeScan(tableName string, indexInfo IndexInfo, filters Conditions, sta
 		RangeCondition: rangeCondition,
 	}
 	if len(remainingFilters) > 0 {
-		aScan.Filters = OneOrMore{remainingFilters}
+		scan.Filters = OneOrMore{remainingFilters}
 	}
-	return aScan, true, nil
+	return scan, true, nil
 }
 
+// Execute ...
 func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selectedFields []Field, filteredPipe chan<- Row) error {
 	// Handle JOIN queries
 	if len(p.Joins) > 0 {
@@ -855,32 +868,32 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 			return fmt.Errorf("unhandled scan type in single scan: %d", p.Scans[0].Type)
 		}
 	}
-	for _, aScan := range p.Scans {
+	for _, scan := range p.Scans {
 		// Get table for this scan
-		t, ok := provider.GetTable(ctx, aScan.TableName)
+		t, ok := provider.GetTable(ctx, scan.TableName)
 		if !ok {
-			return fmt.Errorf("%w: %s", errTableDoesNotExist, aScan.TableName)
+			return fmt.Errorf("%w: %s", errTableDoesNotExist, scan.TableName)
 		}
 
-		switch aScan.Type {
+		switch scan.Type {
 		case ScanTypeIndexRange:
-			if err := t.indexRangeScan(ctx, p, aScan, selectedFields, filteredPipe); err != nil {
+			if err := t.indexRangeScan(ctx, p, scan, selectedFields, filteredPipe); err != nil {
 				return err
 			}
 		case ScanTypeIndexPoint:
-			if err := t.indexPointScan(ctx, aScan, selectedFields, filteredPipe); err != nil {
+			if err := t.indexPointScan(ctx, scan, selectedFields, filteredPipe); err != nil {
 				return err
 			}
 		default:
-			return fmt.Errorf("unhandled scan type in single scan: %d", aScan.Type)
+			return fmt.Errorf("unhandled scan type in single scan: %d", scan.Type)
 		}
 	}
 	return nil
 }
 
 // FilterRow applies filtering on scanned rows according to filters
-func (s Scan) FilterRow(aRow Row) (bool, error) {
-	ok, err := aRow.CheckOneOrMore(s.Filters)
+func (s Scan) FilterRow(row Row) (bool, error) {
+	ok, err := row.CheckOneOrMore(s.Filters)
 	if err != nil {
 		return false, err
 	}

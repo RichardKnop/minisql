@@ -4,7 +4,9 @@ package minisql
 type LogicOp int
 
 const (
+	// LogicOpAnd represents the SQL AND logical operator.
 	LogicOpAnd LogicOp = iota + 1
+	// LogicOpOr represents the SQL OR logical operator.
 	LogicOpOr
 )
 

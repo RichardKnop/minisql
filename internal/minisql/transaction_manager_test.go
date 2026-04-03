@@ -17,11 +17,11 @@ func TestTransactionManager_Commit(t *testing.T) {
 		var (
 			ctx       = context.Background()
 			saverMock = new(MockPageSaver)
-			txManager = NewTransactionManager(zap.NewNop(), testDbName, nil, saverMock, nil)
+			txManager = NewTransactionManager(zap.NewNop(), testDBName, nil, saverMock, nil)
 		)
 
 		// Setup initial global versions
-		txManager.globalDbHeaderVersion = 4
+		txManager.globalDBHeaderVersion = 4
 		txManager.globalPageVersions[2] = 0
 		txManager.globalPageVersions[3] = 2
 		txManager.globalPageVersions[4] = 1
@@ -30,8 +30,8 @@ func TestTransactionManager_Commit(t *testing.T) {
 		assert.Equal(t, TxActive, tx.Status)
 
 		// Let's simulate some reads but no writes
-		tx.DbHeaderRead = new(uint64)
-		*tx.DbHeaderRead = 4
+		tx.DBHeaderRead = new(uint64)
+		*tx.DBHeaderRead = 4
 		tx.ReadSet[2] = 0
 		tx.ReadSet[3] = 2
 		tx.ReadSet[4] = 1
@@ -40,7 +40,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		require.NoError(t, err)
 
 		// Global versions should remain unchanged
-		assert.Equal(t, 4, int(txManager.globalDbHeaderVersion))
+		assert.Equal(t, 4, int(txManager.globalDBHeaderVersion))
 		assert.Equal(t, 0, int(txManager.globalPageVersions[2]))
 		assert.Equal(t, 2, int(txManager.globalPageVersions[3]))
 		assert.Equal(t, 1, int(txManager.globalPageVersions[4]))
@@ -53,11 +53,11 @@ func TestTransactionManager_Commit(t *testing.T) {
 			ctx       = context.Background()
 			pagerMock = new(MockPager)
 			saverMock = new(MockPageSaver)
-			txManager = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(pagerMock), saverMock, nil)
+			txManager = NewTransactionManager(zap.NewNop(), testDBName, mockPagerFactory(pagerMock), saverMock, nil)
 		)
 
 		// Setup initial global versions
-		txManager.globalDbHeaderVersion = 3
+		txManager.globalDBHeaderVersion = 3
 		txManager.globalPageVersions[2] = 0
 		txManager.globalPageVersions[3] = 2
 		txManager.globalPageVersions[4] = 5
@@ -66,9 +66,9 @@ func TestTransactionManager_Commit(t *testing.T) {
 		assert.Equal(t, TxActive, tx.Status)
 
 		// Let's simulate some reads and writes
-		tx.DbHeaderRead = new(uint64)
-		*tx.DbHeaderRead = 3
-		tx.DbHeaderWrite = &DatabaseHeader{FirstFreePage: 2, FreePageCount: 10}
+		tx.DBHeaderRead = new(uint64)
+		*tx.DBHeaderRead = 3
+		tx.DBHeaderWrite = &DatabaseHeader{FirstFreePage: 2, FreePageCount: 10}
 		tx.ReadSet[2] = 0
 		tx.ReadSet[3] = 2
 		tx.ReadSet[4] = 5
@@ -86,7 +86,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 			pagerMock.On("GetPage", ctx, PageIndex(4)).Return(originalPage, nil).Once()
 		}
 		saverMock.On("SavePage", ctx, PageIndex(4), tx.WriteSet[4].Page).Return(nil).Once()
-		saverMock.On("SaveHeader", ctx, *tx.DbHeaderWrite).Return(nil).Once()
+		saverMock.On("SaveHeader", ctx, *tx.DBHeaderWrite).Return(nil).Once()
 		saverMock.On("FlushBatch", ctx, mock.MatchedBy(func(pages []PageIndex) bool {
 			// Should flush header (page 0) and modified page (page 4)
 			return len(pages) == 2 &&
@@ -98,7 +98,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		require.NoError(t, err)
 
 		// Global versions should be updated accordingly
-		assert.Equal(t, 4, int(txManager.globalDbHeaderVersion))
+		assert.Equal(t, 4, int(txManager.globalDBHeaderVersion))
 		assert.Equal(t, 0, int(txManager.globalPageVersions[2]))
 		assert.Equal(t, 2, int(txManager.globalPageVersions[3]))
 		assert.Equal(t, 6, int(txManager.globalPageVersions[4]))
@@ -111,11 +111,11 @@ func TestTransactionManager_Commit(t *testing.T) {
 			ctx       = context.Background()
 			pagerMock = new(MockPager)
 			saverMock = new(MockPageSaver)
-			txManager = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(pagerMock), saverMock, nil)
+			txManager = NewTransactionManager(zap.NewNop(), testDBName, mockPagerFactory(pagerMock), saverMock, nil)
 		)
 
 		// Setup initial global versions
-		txManager.globalDbHeaderVersion = 4
+		txManager.globalDBHeaderVersion = 4
 		txManager.globalPageVersions[2] = 0
 		txManager.globalPageVersions[3] = 2
 		txManager.globalPageVersions[4] = 1
@@ -127,8 +127,8 @@ func TestTransactionManager_Commit(t *testing.T) {
 		assert.Equal(t, TxActive, writeTx.Status)
 
 		// Let's simulate some reads for first tx
-		readTx.DbHeaderRead = new(uint64)
-		*readTx.DbHeaderRead = 4
+		readTx.DBHeaderRead = new(uint64)
+		*readTx.DBHeaderRead = 4
 		readTx.ReadSet[2] = 0
 		readTx.ReadSet[3] = 2
 		readTx.ReadSet[4] = 1
@@ -162,7 +162,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		assert.Equal(t, "transaction conflict detected: tx 1 aborted due to conflict on page 3", err.Error())
 
 		// Writing transaction should have updated page version, no other changes expected
-		assert.Equal(t, 4, int(txManager.globalDbHeaderVersion))
+		assert.Equal(t, 4, int(txManager.globalDBHeaderVersion))
 		assert.Equal(t, 0, int(txManager.globalPageVersions[2]))
 		assert.Equal(t, 3, int(txManager.globalPageVersions[3]))
 		assert.Equal(t, 1, int(txManager.globalPageVersions[4]))
@@ -175,11 +175,11 @@ func TestTransactionManager_Commit(t *testing.T) {
 			ctx       = context.Background()
 			pagerMock = new(MockPager)
 			saverMock = new(MockPageSaver)
-			txManager = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(pagerMock), saverMock, nil)
+			txManager = NewTransactionManager(zap.NewNop(), testDBName, mockPagerFactory(pagerMock), saverMock, nil)
 		)
 
 		// Setup initial global versions
-		txManager.globalDbHeaderVersion = 3
+		txManager.globalDBHeaderVersion = 3
 		txManager.globalPageVersions[2] = 0
 		txManager.globalPageVersions[3] = 2
 		txManager.globalPageVersions[4] = 5
@@ -191,9 +191,9 @@ func TestTransactionManager_Commit(t *testing.T) {
 		assert.Equal(t, TxActive, writeTx2.Status)
 
 		// Let's simulate some reads and a write for first tx
-		writeTx1.DbHeaderRead = new(uint64)
-		*writeTx1.DbHeaderRead = 3
-		writeTx1.DbHeaderWrite = &DatabaseHeader{FirstFreePage: 2, FreePageCount: 10}
+		writeTx1.DBHeaderRead = new(uint64)
+		*writeTx1.DBHeaderRead = 3
+		writeTx1.DBHeaderWrite = &DatabaseHeader{FirstFreePage: 2, FreePageCount: 10}
 		writeTx1.ReadSet[2] = 0
 		writeTx1.ReadSet[3] = 2
 		writeTx1.ReadSet[4] = 5
@@ -233,7 +233,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		assert.Equal(t, "transaction conflict detected: tx 1 aborted due to conflict on page 4", err.Error())
 
 		// Second transaction should have updated page version, no other changes expected
-		assert.Equal(t, 3, int(txManager.globalDbHeaderVersion))
+		assert.Equal(t, 3, int(txManager.globalDBHeaderVersion))
 		assert.Equal(t, 0, int(txManager.globalPageVersions[2]))
 		assert.Equal(t, 2, int(txManager.globalPageVersions[3]))
 		assert.Equal(t, 6, int(txManager.globalPageVersions[4]))
@@ -248,11 +248,11 @@ func TestTransactionManager_Rollback(t *testing.T) {
 	var (
 		ctx       = context.Background()
 		saverMock = new(MockPageSaver)
-		txManager = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(nil), saverMock, nil)
+		txManager = NewTransactionManager(zap.NewNop(), testDBName, mockPagerFactory(nil), saverMock, nil)
 	)
 
 	// Setup initial global versions
-	txManager.globalDbHeaderVersion = 3
+	txManager.globalDBHeaderVersion = 3
 	txManager.globalPageVersions[2] = 0
 	txManager.globalPageVersions[3] = 2
 	txManager.globalPageVersions[4] = 5
@@ -261,9 +261,9 @@ func TestTransactionManager_Rollback(t *testing.T) {
 	assert.Equal(t, TxActive, tx.Status)
 
 	// Let's simulate some reads and writes
-	tx.DbHeaderRead = new(uint64)
-	*tx.DbHeaderRead = 3
-	tx.DbHeaderWrite = &DatabaseHeader{FirstFreePage: 2, FreePageCount: 10}
+	tx.DBHeaderRead = new(uint64)
+	*tx.DBHeaderRead = 3
+	tx.DBHeaderWrite = &DatabaseHeader{FirstFreePage: 2, FreePageCount: 10}
 	tx.ReadSet[2] = 0
 	tx.ReadSet[3] = 2
 	tx.ReadSet[4] = 5
@@ -277,7 +277,7 @@ func TestTransactionManager_Rollback(t *testing.T) {
 	assert.Equal(t, TxAborted, tx.Status)
 
 	// Global versions should remain unchanged
-	assert.Equal(t, 3, int(txManager.globalDbHeaderVersion))
+	assert.Equal(t, 3, int(txManager.globalDBHeaderVersion))
 	assert.Equal(t, 0, int(txManager.globalPageVersions[2]))
 	assert.Equal(t, 2, int(txManager.globalPageVersions[3]))
 	assert.Equal(t, 5, int(txManager.globalPageVersions[4]))
@@ -291,7 +291,7 @@ func TestTransactionManager_ExecuteInTransaction(t *testing.T) {
 	var (
 		pagerMock = new(MockPager)
 		saverMock = new(MockPageSaver)
-		txManager = NewTransactionManager(zap.NewNop(), testDbName, mockPagerFactory(pagerMock), saverMock, nil)
+		txManager = NewTransactionManager(zap.NewNop(), testDBName, mockPagerFactory(pagerMock), saverMock, nil)
 	)
 
 	t.Run("No transaction in context", func(t *testing.T) {

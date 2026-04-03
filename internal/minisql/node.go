@@ -29,8 +29,8 @@ func (n *InternalNode) IndexOfChild(key RowID) uint32 {
 
 // IndexOfPage returns index of child which contains page number
 func (n *InternalNode) IndexOfPage(pageIdx PageIndex) (uint32, error) {
-	for idx, aCell := range n.ICells {
-		if aCell.Child == pageIdx {
+	for idx, cell := range n.ICells {
+		if cell.Child == pageIdx {
 			return uint32(idx), nil
 		}
 	}
@@ -55,6 +55,7 @@ func (n *InternalNode) Child(childIdx uint32) (PageIndex, error) {
 	return n.ICells[childIdx].Child, nil
 }
 
+// SetChild ...
 func (n *InternalNode) SetChild(idx uint32, childPage PageIndex) error {
 	keysNum := n.Header.KeysNum
 	if idx > keysNum {
@@ -70,14 +71,17 @@ func (n *InternalNode) SetChild(idx uint32, childPage PageIndex) error {
 	return nil
 }
 
+// AtLeastHalfFull ...
 func (n *InternalNode) AtLeastHalfFull(maxIcells int) bool {
 	return int(n.Header.KeysNum) >= (maxIcells+1)/2
 }
 
+// MoreThanHalfFull ...
 func (n *InternalNode) MoreThanHalfFull(maxIcells int) bool {
 	return int(n.Header.KeysNum) > (maxIcells+1)/2
 }
 
+// GetRightChildByIndex ...
 func (n *InternalNode) GetRightChildByIndex(idx uint32) PageIndex {
 	if idx == n.Header.KeysNum-1 {
 		return n.Header.RightChild
@@ -86,7 +90,7 @@ func (n *InternalNode) GetRightChildByIndex(idx uint32) PageIndex {
 	return n.ICells[idx+1].Child
 }
 
-// Removes key from plus the right child pointer
+// DeleteKeyAndRightChild removes the key at idx plus the right child pointer from the internal node.
 func (n *InternalNode) DeleteKeyAndRightChild(idx uint32) error {
 	if n.Header.KeysNum == 0 {
 		return nil
@@ -111,14 +115,17 @@ func (n *InternalNode) DeleteKeyAndRightChild(idx uint32) error {
 	return nil
 }
 
+// FirstCell ...
 func (n *InternalNode) FirstCell() ICell {
 	return n.ICells[0]
 }
 
+// LastCell ...
 func (n *InternalNode) LastCell() ICell {
 	return n.ICells[n.Header.KeysNum-1]
 }
 
+// RemoveFirstCell ...
 func (n *InternalNode) RemoveFirstCell() {
 	for i := 0; i < int(n.Header.KeysNum)-1; i++ {
 		n.ICells[i] = n.ICells[i+1]
@@ -127,6 +134,7 @@ func (n *InternalNode) RemoveFirstCell() {
 	n.Header.KeysNum -= 1
 }
 
+// RemoveLastCell ...
 func (n *InternalNode) RemoveLastCell() {
 	idx := n.Header.KeysNum - 1
 	n.Header.RightChild = n.ICells[idx].Child
@@ -134,21 +142,24 @@ func (n *InternalNode) RemoveLastCell() {
 	n.Header.KeysNum -= 1
 }
 
-func (n *InternalNode) PrependCell(aCell ICell) {
+// PrependCell ...
+func (n *InternalNode) PrependCell(cell ICell) {
 	for i := int(n.Header.KeysNum) - 1; i > 0; i-- {
 		n.ICells[i] = n.ICells[i-1]
 	}
-	n.ICells[0] = aCell
+	n.ICells[0] = cell
 	n.Header.KeysNum += 1
 }
 
+// AppendCells ...
 func (n *InternalNode) AppendCells(cells ...ICell) {
-	for _, aCell := range cells {
-		n.ICells[n.Header.KeysNum] = aCell
+	for _, cell := range cells {
+		n.ICells[n.Header.KeysNum] = cell
 		n.Header.KeysNum += 1
 	}
 }
 
+// Keys ...
 func (n *InternalNode) Keys() []RowID {
 	keys := make([]RowID, 0, n.Header.KeysNum)
 	for idx := range n.Header.KeysNum {
@@ -157,12 +168,13 @@ func (n *InternalNode) Keys() []RowID {
 	return keys
 }
 
+// Children ...
 func (n *InternalNode) Children() []PageIndex {
 	children := make([]PageIndex, 0, n.Header.KeysNum)
 	for idx := range n.Header.KeysNum {
 		children = append(children, n.ICells[idx].Child)
 	}
-	if n.Header.RightChild != RIGHT_CHILD_NOT_SET {
+	if n.Header.RightChild != RightChildNotSet {
 		children = append(children, n.Header.RightChild)
 	}
 	return children

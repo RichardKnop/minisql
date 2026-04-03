@@ -5,6 +5,7 @@ import (
 	"fmt"
 )
 
+// SecondaryIndex ...
 type SecondaryIndex struct {
 	IndexInfo
 	Index BTreeIndex
@@ -64,7 +65,7 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 	return nil
 }
 
-func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, aRow Row) error {
+func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, row Row) error {
 	if secondaryIndex.Index == nil {
 		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
 	}
@@ -74,7 +75,7 @@ func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 	}
 
 	if len(oldKeyParts) > 1 {
-		return t.updateCompositeSecondaryIndexKey(ctx, secondaryIndex, oldKeyParts, aRow)
+		return t.updateCompositeSecondaryIndexKey(ctx, secondaryIndex, oldKeyParts, row)
 	}
 
 	oldKey := oldKeyParts[0]
@@ -84,11 +85,11 @@ func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 		return fmt.Errorf("failed to cast old secondary index value for %s: %w", secondaryIndex.Name, err)
 	}
 
-	newKey, ok := aRow.GetValue(secondaryIndex.Columns[0].Name)
+	newKey, ok := row.GetValue(secondaryIndex.Columns[0].Name)
 	if !ok {
 		return nil
 	}
-	rowID := aRow.Key
+	rowID := row.Key
 
 	// We only need to insert into the index index if the key is not NULL
 	if newKey.Valid {
@@ -110,7 +111,7 @@ func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 	return nil
 }
 
-func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, aRow Row) error {
+func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, row Row) error {
 	if secondaryIndex.Index == nil {
 		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
 	}
@@ -134,8 +135,8 @@ func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryI
 	// Check if new key should be in the index (all columns non-NULL)
 	newKeyInIndex := true
 	newKeyValues := make([]any, 0, len(oldKeyParts))
-	for _, aColumn := range secondaryIndex.Columns {
-		keyValue, ok := aRow.GetValue(aColumn.Name)
+	for _, col := range secondaryIndex.Columns {
+		keyValue, ok := row.GetValue(col.Name)
 		if !ok {
 			return fmt.Errorf("failed to get value for new secondary index %s", secondaryIndex.Name)
 		}
@@ -143,14 +144,14 @@ func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryI
 			newKeyInIndex = false
 			break
 		}
-		castedKey, err := castKeyValue(aColumn, keyValue.Value)
+		castedKey, err := castKeyValue(col, keyValue.Value)
 		if err != nil {
 			return fmt.Errorf("failed to cast new secondary index value for %s: %w", secondaryIndex.Name, err)
 		}
 		newKeyValues = append(newKeyValues, castedKey)
 	}
 
-	rowID := aRow.Key
+	rowID := row.Key
 
 	// Insert new key if all columns are non-NULL
 	if newKeyInIndex {

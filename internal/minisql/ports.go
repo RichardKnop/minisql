@@ -4,6 +4,7 @@ import (
 	"context"
 )
 
+// Parser ...
 type Parser interface {
 	Parse(context.Context, string) ([]Statement, error)
 }
@@ -13,6 +14,7 @@ type TableProvider interface {
 	GetTable(ctx context.Context, name string) (*Table, bool)
 }
 
+// LRUCache ...
 type LRUCache[T any] interface {
 	Get(T) (any, bool)
 	GetAndPromote(T) (any, bool)
@@ -20,19 +22,23 @@ type LRUCache[T any] interface {
 	EvictIfNeeded() (T, bool)
 }
 
+// PagerFactory ...
 type PagerFactory interface {
 	ForTable([]Column) Pager
 	ForIndex(columns []Column, unique bool) Pager
 }
 
+// TxPagerFactory ...
 type TxPagerFactory func(ctx context.Context, tableName, indexName string) (Pager, error)
 
+// Pager ...
 type Pager interface {
 	GetPage(context.Context, PageIndex) (*Page, error)
 	GetHeader(context.Context) DatabaseHeader
 	TotalPages() uint32
 }
 
+// Flusher ...
 type Flusher interface {
 	TotalPages() uint32
 	Flush(context.Context, PageIndex) error
@@ -40,16 +46,19 @@ type Flusher interface {
 	Close() error
 }
 
+// PageSaver ...
 type PageSaver interface {
 	SavePage(context.Context, PageIndex, *Page)
 	SaveHeader(context.Context, DatabaseHeader)
 	Flusher
 }
 
+// DDLSaver ...
 type DDLSaver interface {
 	SaveDDLChanges(ctx context.Context, changes DDLChanges)
 }
 
+// TxPager ...
 type TxPager interface {
 	ReadPage(context.Context, PageIndex) (*Page, error)
 	ModifyPage(context.Context, PageIndex) (*Page, error)
@@ -58,6 +67,7 @@ type TxPager interface {
 	GetOverflowPage(context.Context, PageIndex) (*Page, error)
 }
 
+// BTreeIndex ...
 type BTreeIndex interface {
 	GetRootPageIdx() PageIndex
 	FindRowIDs(ctx context.Context, key any) ([]RowID, error)

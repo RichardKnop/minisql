@@ -1,10 +1,9 @@
 package parser
 
 func (p *parserItem) doParseDelete() error {
-	switch p.step {
-	case stepDeleteFromTable:
+	if p.step == stepDeleteFromTable {
 		tableName := p.peek()
-		if len(tableName) == 0 {
+		if tableName == "" {
 			return p.errorf("at DELETE FROM: expected table name")
 		}
 		p.TableName = tableName

@@ -104,14 +104,14 @@ func TestTable_Delete_UniqueIndex(t *testing.T) {
 			},
 		}
 
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, stmt)
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, stmt)
 
 		assert.Equal(t, 1, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, rows[1:])
 	})
 
 	t.Run("Delete all rows", func(t *testing.T) {
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{Kind: Delete})
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{Kind: Delete})
 
 		assert.Equal(t, 9, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, nil)
@@ -179,13 +179,18 @@ func TestTable_Delete_CompositeUniqueIndex(t *testing.T) {
 			return err
 		}
 		uniqueIndex := aTable.UniqueIndexes[indexName]
-		uniqueIndex.Index, err = aTable.createBTreeIndex(
+		var idx BTreeIndex
+		idx, err = aTable.createBTreeIndex(
 			txIndexPager,
 			freePage,
 			aTable.UniqueIndexes[indexName].Columns,
 			aTable.UniqueIndexes[indexName].Name,
 			true,
 		)
+		if err != nil {
+			return err
+		}
+		uniqueIndex.Index = idx
 		aTable.UniqueIndexes[indexName] = uniqueIndex
 		_, err = aTable.Insert(ctx, stmt)
 		return err
@@ -210,14 +215,14 @@ func TestTable_Delete_CompositeUniqueIndex(t *testing.T) {
 			},
 		}
 
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, stmt)
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, stmt)
 
 		assert.Equal(t, 1, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, rows[1:])
 	})
 
 	t.Run("Delete all rows", func(t *testing.T) {
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{Kind: Delete})
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{Kind: Delete})
 
 		assert.Equal(t, 9, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, nil)

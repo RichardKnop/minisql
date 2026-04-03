@@ -21,6 +21,7 @@ type cacheImpl[T comparable] struct {
 	mu      sync.RWMutex
 }
 
+// New creates a new LRU cache with the given maximum number of entries.
 func New[T comparable](maxSize int) *cacheImpl[T] {
 	return &cacheImpl[T]{
 		entries: make(map[T]*cacheEntry[T]),
@@ -67,6 +68,7 @@ func (c *cacheImpl[T]) GetAndPromote(key T) (any, bool) {
 	return entry.value, true
 }
 
+// Put inserts or updates an entry; if evict is true and the cache is full, the LRU entry is evicted first.
 func (c *cacheImpl[T]) Put(key T, value any, evict bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -98,6 +100,7 @@ func (c *cacheImpl[T]) Put(key T, value any, evict bool) {
 	c.addToFront(entry)
 }
 
+// EvictIfNeeded evicts the least-recently-used entry when the cache is at capacity.
 func (c *cacheImpl[T]) EvictIfNeeded() (T, bool) {
 	if len(c.entries) < c.maxSize {
 		var zero T

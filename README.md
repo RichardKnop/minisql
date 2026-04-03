@@ -212,54 +212,37 @@ if err := rows.Err(); err != nil {
 | `VARCHAR(n)` | Storage works the same way as `TEXT` but allows limiting length of inserted/updated text to max value. |
 | `TIMESTAMP`  | 8-byte signed integer representing number of microseconds from `2000-01-01 00:00:00 UTC` (`Postgres epoch`). Supported range is from `4713 BC` to `294276 AD` inclusive. |
 
-## Supported SQL Features
+## SQL Features
 
-- `CREATE TABLE`, `CREATE TABLE IF NOT EXISTS`
-- `PRIMARY KEY` support, only single column, no composite primary keys
-- `AUTOINCREMENT` support, primary key must be of type `INT8` for autoincrement
-- `UNIQUE` index can be specified when creating a table
-- composite primary key or unique constraint as part of `CREATE TABLE`
-- `NULL` and `NOT NULL` support (via null bit mask included in each row/cell)
-- `DEFAULT` support for all columns including `NOW()` for `TIMESTAMP`
-- `DROP TABLE`
-- `CREATE INDEX`, `DROP INDEX` - only for secondary non unique indexes (primary and unique can be declared as part of `CREATE TABLE`)
-- `INSERT` (single row or multi rows via tuple of values separated by comma)
-- `SELECT` (all fields with `*`, only specific fields or count rows with `COUNT(*)`)
-- `SELECT DISTINCT`
-- `UPDATE`
-- `DELETE`
-- simple `WHERE` conditions with `AND` and `OR`, no support for more complex nested conditions using parenthesis
-- supported operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`, `LIKE`, `NOT LIKE`, `BETWEEN`
-- `LIKE`, `NOT LIKE` pattern matching
-  - The percent sign `%` wildcard matches any sequence of zero or more characters.
-  - The underscore `_` wildcard matches any single character.
-- `BETWEEN` for cleaner and more readable range conditions
-- `LIMIT` and `OFFSET` clauses for basic pagination
-- `ORDER BY` supported for a single column only
-- `GROUP BY` and `HAVING` for simple select queries without joins
-- `COUNT`, `MAX`, `MIN`, `SUM`, `AVG` aggregate functions
-- `VACUUM` similar to SQLite, rebuilds the database file, repacking it into a minimal amount of disk space
+| Feature | Notes |
+|---------|-------|
+| `CREATE TABLE`, `CREATE TABLE IF NOT EXISTS` | |
+| `PRIMARY KEY` | Single column only; no composite primary keys |
+| `AUTOINCREMENT` | Primary key must be of type `INT8` |
+| `UNIQUE` | Can be specified when creating a table |
+| Composite primary key or unique constraint | As part of `CREATE TABLE` |
+| `NULL` and `NOT NULL` | Via null bit mask included in each row/cell |
+| `DEFAULT` | Supported for all columns, including `NOW()` for `TIMESTAMP` |
+| `DROP TABLE` | |
+| `CREATE INDEX`, `DROP INDEX` | Secondary non-unique indexes only; primary and unique indexes are declared as part of `CREATE TABLE` |
+| `INSERT` | Single row or multiple rows via a tuple of values separated by commas |
+| `SELECT` | All fields with `*`, specific fields, or row count with `COUNT(*)` |
+| `SELECT DISTINCT` | |
+| `INNER JOIN` | Star schema only — one or more tables joined with the base table |
+| `UPDATE` | |
+| `DELETE` | |
+| `WHERE` | Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`, `LIKE`, `NOT LIKE`, `BETWEEN` |
+| `LIKE`, `NOT LIKE` | `%` matches any sequence of zero or more characters; `_` matches any single character |
+| `LIMIT` and `OFFSET` | Basic pagination |
+| `ORDER BY` | Single column only |
+| `GROUP BY` and `HAVING` | Aggregate functions: `COUNT`, `MAX`, `MIN`, `SUM`, `AVG` |
+| `VACUUM` | Rebuilds the database file, repacking it into a minimal amount of disk space (similar to SQLite) |
 
 Prepared statements are supported using `?` as a placeholder. For example:
 
 ```sql
 insert into users("name", "email") values(?, ?), (?, ?);
 ```
-
-## Planned features:
-
-- date/time functions to make working with `TIMESTAMP` type easier
-- joins such as `INNER`, `LEFT`, `RIGHT`
-- foreign keys
-- support `GROUP BY` and aggregation functions such as `MAX`, `MIN`, `SUM`
-- UPDATE from a SELECT
-- upsert (insert on conflict)
-- rollback journal file
-- more complex WHERE clauses
-- support altering tables, creating and dropping of indexes outside of create table query
-- more sophisticated query planner
-- vacuuming
-- benchmarks
 
 ## DDL SQL Commands
 
@@ -408,7 +391,7 @@ if err := db.QueryRow(`select count(*) from users;`).Scan(&count); err != nil {
 
 #### INNER JOIN (star schema)
 
-There is an experimental support for `INNER JOIN`, however it only supports star schema joins, i.e. one or more tables joined with the base table. Nested joins and other types of joins such as `LEFT`, `RIGHT` are not supported yet. Furthermore, this functionhality is not well optimised yet and query planner might use inefficient plans for select queries with inner joins.
+There is an experimental support for `INNER JOIN`, however it only supports star schema joins, i.e. one or more tables joined with the base table. Nested joins and other types of joins such as `LEFT`, `RIGHT` are not supported yet.
 
 ### UPDATE
 

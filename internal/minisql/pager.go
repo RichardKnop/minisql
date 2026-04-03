@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -9,8 +10,10 @@ import (
 	"github.com/RichardKnop/minisql/pkg/lrucache"
 )
 
-const PageCacheSize = 2000 // default maximum number of pages to keep in memory
+// PageCacheSize is the default maximum number of pages to keep in memory.
+const PageCacheSize = 2000
 
+// DBFile ...
 type DBFile interface {
 	io.ReadSeeker
 	io.ReaderAt
@@ -19,6 +22,7 @@ type DBFile interface {
 	Sync() error
 }
 
+// PageUnmarshaler ...
 type PageUnmarshaler func(totalPages uint32, pageIdx PageIndex, buf []byte) (*Page, error)
 
 type pagerImpl struct {
@@ -46,13 +50,13 @@ type pagerImpl struct {
 	mu sync.RWMutex
 }
 
-// New opens the database file and tries to read the root page
-// maxCachedPages: maximum number of pages to keep in cache (0 = unlimited)
-func NewPager(file DBFile, pageSize int, maxCachedPages int) (*pagerImpl, error) {
+// NewPager opens the database file and initialises the pager.
+// maxCachedPages sets the maximum number of pages to keep in cache (0 = use default).
+func NewPager(file DBFile, pageSize, maxCachedPages int) (*pagerImpl, error) {
 	if maxCachedPages <= 0 {
 		maxCachedPages = PageCacheSize
 	}
-	aPager := &pagerImpl{
+	pager := &pagerImpl{
 		pageSize:       pageSize,
 		maxCachedPages: maxCachedPages,
 		file:           file,
@@ -66,11 +70,11 @@ func NewPager(file DBFile, pageSize int, maxCachedPages int) (*pagerImpl, error)
 		},
 	}
 
-	fileSize, err := aPager.file.Seek(0, io.SeekEnd)
+	fileSize, err := pager.file.Seek(0, io.SeekEnd)
 	if err != nil {
 		return nil, err
 	}
-	aPager.fileSize = fileSize
+	pager.fileSize = fileSize
 
 	// Basic check to verify file size is a multiple of page size (4096B)
 	if fileSize%int64(pageSize) != 0 {
@@ -78,26 +82,27 @@ func NewPager(file DBFile, pageSize int, maxCachedPages int) (*pagerImpl, error)
 	}
 
 	totalPages := fileSize / int64(pageSize)
-	aPager.totalPages = uint32(totalPages)
+	pager.totalPages = uint32(totalPages)
 
 	// If file is not empty, read the DB header from the first page
 	// DB header is always located at the start of the first page
 	// Rest of the first page is used as a normal page
-	if aPager.totalPages > 0 {
+	if pager.totalPages > 0 {
 		buf := make([]byte, RootPageConfigSize)
-		_, err := aPager.file.ReadAt(buf, 0)
+		_, err := pager.file.ReadAt(buf, 0)
 		if err != nil {
 			return nil, err
 		}
 
-		if err := UnmarshalDatabaseHeader(buf, &aPager.dbHeader); err != nil {
+		if err := UnmarshalDatabaseHeader(buf, &pager.dbHeader); err != nil {
 			return nil, err
 		}
 	}
 
-	return aPager, nil
+	return pager, nil
 }
 
+// Close ...
 func (p *pagerImpl) Close() error {
 	// Sync file to ensure all buffered writes are persisted to disk
 	// This is critical for data durability - without it, writes may be lost on crash/close
@@ -107,12 +112,14 @@ func (p *pagerImpl) Close() error {
 	return p.file.Close()
 }
 
+// TotalPages ...
 func (p *pagerImpl) TotalPages() uint32 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.totalPages
 }
 
+// GetPage ...
 func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler PageUnmarshaler) (*Page, error) {
 	// Fast path: Check if page already exists in cache (read lock only)
 	p.mu.RLock()
@@ -201,6 +208,7 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 	return p.pages[pageIdx], nil
 }
 
+// GetHeader ...
 func (p *pagerImpl) GetHeader(ctx context.Context) DatabaseHeader {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -208,6 +216,7 @@ func (p *pagerImpl) GetHeader(ctx context.Context) DatabaseHeader {
 	return p.dbHeader
 }
 
+// SaveHeader ...
 func (p *pagerImpl) SaveHeader(ctx context.Context, header DatabaseHeader) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -215,6 +224,7 @@ func (p *pagerImpl) SaveHeader(ctx context.Context, header DatabaseHeader) {
 	p.dbHeader = header
 }
 
+// SavePage ...
 func (p *pagerImpl) SavePage(ctx context.Context, pageIdx PageIndex, page *Page) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -229,6 +239,7 @@ func (p *pagerImpl) SavePage(ctx context.Context, pageIdx PageIndex, page *Page)
 	p.pages[pageIdx] = page
 }
 
+// Flush ...
 func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 	p.mu.RLock()
 	if int(pageIdx) >= len(p.pages) || p.pages[pageIdx] == nil {
@@ -236,7 +247,7 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 		return nil
 	}
 
-	aPage := p.pages[pageIdx]
+	page := p.pages[pageIdx]
 	dbHeader := p.dbHeader
 	p.mu.RUnlock()
 
@@ -246,8 +257,8 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 		buf[j] = 0
 	}
 
-	if err := marshalPage(aPage, buf); err != nil {
-		return fmt.Errorf("error flushing page %d: %w", aPage.Index, err)
+	if err := marshalPage(page, buf); err != nil {
+		return fmt.Errorf("error flushing page %d: %w", page.Index, err)
 	}
 
 	if pageIdx != 0 {
@@ -311,14 +322,14 @@ func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) err
 	p.mu.RUnlock()
 
 	// Marshal pages outside of lock
-	for i, aPage := range pagesToMarshal {
+	for i, page := range pagesToMarshal {
 		pageIdx := indices[i]
 		buf := p.bufferPool.Get().([]byte)
 		for j := range buf {
 			buf[j] = 0
 		}
 
-		if err := marshalPage(aPage, buf); err != nil {
+		if err := marshalPage(page, buf); err != nil {
 			p.bufferPool.Put(buf)
 			return fmt.Errorf("error marshaling page %d: %w", pageIdx, err)
 		}
@@ -373,37 +384,34 @@ func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) err
 	return p.file.Sync()
 }
 
-func marshalPage(aPage *Page, buf []byte) error {
-	if aPage.OverflowPage != nil {
-		if err := aPage.OverflowPage.Marshal(buf); err != nil {
+func marshalPage(page *Page, buf []byte) error {
+	switch {
+	case page.OverflowPage != nil:
+		if err := page.OverflowPage.Marshal(buf); err != nil {
 			return fmt.Errorf("error marshaling overflow node: %w", err)
 		}
-		return nil
-	} else if aPage.FreePage != nil {
-		if err := aPage.FreePage.Marshal(buf); err != nil {
+	case page.FreePage != nil:
+		if err := page.FreePage.Marshal(buf); err != nil {
 			return fmt.Errorf("error marshaling freepage node: %w", err)
 		}
-		return nil
-	} else if aPage.LeafNode != nil {
-		if err := aPage.LeafNode.Marshal(buf); err != nil {
+	case page.LeafNode != nil:
+		if err := page.LeafNode.Marshal(buf); err != nil {
 			return fmt.Errorf("error marshaling leaf node: %w", err)
 		}
-		return nil
-	} else if aPage.InternalNode != nil {
-		if err := aPage.InternalNode.Marshal(buf); err != nil {
+	case page.InternalNode != nil:
+		if err := page.InternalNode.Marshal(buf); err != nil {
 			return fmt.Errorf("error marshaling internal node: %w", err)
 		}
-		return nil
-	} else if aPage.IndexNode != nil {
-		if err := marshalIndexNode(aPage.IndexNode, buf); err != nil {
+	case page.IndexNode != nil:
+		if err := marshalIndexNode(page.IndexNode, buf); err != nil {
 			return fmt.Errorf("error marshaling index node: %w", err)
 		}
-		return nil
-	} else if aPage.IndexOverflowNode != nil {
-		if err := aPage.IndexOverflowNode.Marshal(buf); err != nil {
+	case page.IndexOverflowNode != nil:
+		if err := page.IndexOverflowNode.Marshal(buf); err != nil {
 			return fmt.Errorf("error marshaling index overflow node: %w", err)
 		}
-		return nil
+	default:
+		return errors.New("no known node type found")
 	}
-	return fmt.Errorf("no known node type found")
+	return nil
 }

@@ -20,6 +20,7 @@ func TestIndex_Seek(t *testing.T) {
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
 	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
+	require.NoError(t, err)
 	anIndex.maximumKeys = 3
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {

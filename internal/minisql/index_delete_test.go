@@ -51,7 +51,6 @@ func TestIndex_Delete(t *testing.T) {
 
 	checkIndexKeys(ctx, t, anIndex, keys)
 
-	// require.NoError(t, anIndex.print())
 
 	var (
 		rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -110,7 +109,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		// require.NoError(t, anIndex.print())
 
 		var (
 			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -153,7 +151,7 @@ func TestIndex_Delete(t *testing.T) {
 	t.Run("Delete another key, no pages recyclet yet", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			if err := anIndex.Delete(ctx, int64(4), 0); err != nil {
-				return nil
+				return err
 			}
 
 			return anIndex.Delete(ctx, int64(5), 0)
@@ -177,7 +175,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		//require.NoError(t, anIndex.print())
 
 		var (
 			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -240,7 +237,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		// require.NoError(t, anIndex.print())
 
 		var (
 			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -300,7 +296,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		//require.NoError(t, anIndex.print())
 
 		var (
 			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -361,7 +356,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		//require.NoError(t, anIndex.print())
 
 		var (
 			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -422,7 +416,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 17, 18, 21}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		//require.NoError(t, anIndex.print())
 
 		var (
 			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -483,7 +476,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 17, 18, 21}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		// require.NoError(t, anIndex.print())
 
 		var (
 			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -542,7 +534,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 14, 17, 18, 21}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		// require.NoError(t, anIndex.print())
 
 		var (
 			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -560,7 +551,7 @@ func TestIndex_Delete(t *testing.T) {
 
 		// Root node
 		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9}, []PageIndex{5, 6})
-		//Internal nodes
+		// Internal nodes
 		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
 		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{11, 14, 18}, []PageIndex{2, 7, 11, 8})
 		// Leaf nodes
@@ -598,7 +589,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 9, 11, 12, 14, 17, 18, 21}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		// require.NoError(t, anIndex.print())
 
 		var (
 			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -615,7 +605,7 @@ func TestIndex_Delete(t *testing.T) {
 
 		// Root node
 		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{9}, []PageIndex{5, 6})
-		//Internal nodes
+		// Internal nodes
 		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
 		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{14, 18}, []PageIndex{2, 11, 8})
 		// Leaf nodes
@@ -652,7 +642,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 11, 12, 14, 17, 18, 21}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		// require.NoError(t, anIndex.print())
 
 		var (
 			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -669,7 +658,7 @@ func TestIndex_Delete(t *testing.T) {
 
 		// Root node
 		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{11}, []PageIndex{5, 6})
-		//Internal nodes
+		// Internal nodes
 		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
 		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{14, 18}, []PageIndex{2, 11, 8})
 		// Leaf nodes
@@ -706,7 +695,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 12, 14, 17, 18, 21}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		// require.NoError(t, anIndex.print())
 
 		var (
 			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -722,7 +710,7 @@ func TestIndex_Delete(t *testing.T) {
 
 		// Root node
 		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{12}, []PageIndex{5, 6})
-		//Internal nodes
+		// Internal nodes
 		assertIndexNode(t, internal1, false, false, PageIndex(0), []int64{3}, []PageIndex{1, 9})
 		assertIndexNode(t, internal2, false, false, PageIndex(0), []int64{18}, []PageIndex{2, 8})
 		// Leaf nodes
@@ -754,7 +742,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 6, 7, 12, 14, 17, 18, 21}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		// require.NoError(t, anIndex.print())
 
 		var (
 			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -795,7 +782,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 6, 7, 12, 17, 18, 21}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		// require.NoError(t, anIndex.print())
 
 		var (
 			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -836,7 +822,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 7, 12, 17, 18, 21}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		// require.NoError(t, anIndex.print())
 
 		var (
 			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -875,7 +860,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 7, 12, 18, 21}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		// require.NoError(t, anIndex.print())
 
 		var (
 			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -914,7 +898,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 7, 12, 18}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		// require.NoError(t, anIndex.print())
 
 		var (
 			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -951,7 +934,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{7, 12, 18}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		// require.NoError(t, anIndex.print())
 
 		var (
 			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -983,7 +965,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{7, 12}
 		checkIndexKeys(ctx, t, anIndex, expectedKeys)
 
-		// require.NoError(t, anIndex.print())
 
 		var (
 			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -1006,7 +987,6 @@ func TestIndex_Delete(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		// require.NoError(t, anIndex.print())
 
 		var (
 			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -1030,6 +1010,7 @@ func TestIndex_Delete_Random_Shuffle(t *testing.T) {
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
 	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
+	require.NoError(t, err)
 	// Insert 10000 keys in random order
 	keys := make([]int64, 0, 10000)
 	for i := int64(1); i <= 10000; i++ {
@@ -1076,6 +1057,7 @@ func TestIndex_Delete_Varchar(t *testing.T) {
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
 	anIndex, err := NewUniqueIndex[string](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
+	require.NoError(t, err)
 	// Insert 100 keys in random order
 	keys := make([]string, 0, 1000)
 	for i := int64(1); i <= 1000; i++ {

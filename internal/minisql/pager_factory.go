@@ -4,6 +4,7 @@ import (
 	"fmt"
 )
 
+// ForTable ...
 func (p *pagerImpl) ForTable(columns []Column) Pager {
 	return &tablePager{
 		pagerImpl: p,
@@ -11,6 +12,7 @@ func (p *pagerImpl) ForTable(columns []Column) Pager {
 	}
 }
 
+// ForIndex ...
 func (p *pagerImpl) ForIndex(columns []Column, unique bool) Pager {
 	if len(columns) > 1 {
 		return &indexPager[CompositeKey]{p, columns, unique}

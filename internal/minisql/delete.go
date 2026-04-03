@@ -6,6 +6,7 @@ import (
 	"sync"
 )
 
+// Delete ...
 func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, error) {
 	stmt.TableName = t.Name
 	stmt.Columns = t.Columns
@@ -43,7 +44,7 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 		close(filteredPipe)
 	}()
 
-	aResult := StatementResult{
+	result := StatementResult{
 		Columns: t.Columns,
 	}
 
@@ -54,13 +55,13 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 		// with rows that are still being read because delete can cause
 		// nodes to be split or merged which can cause cells to move around.
 		rows := make([]Row, 0, 100)
-		for aRow := range in {
-			rows = append(rows, aRow)
+		for row := range in {
+			rows = append(rows, row)
 		}
-		for _, aRow := range rows {
+		for _, row := range rows {
 			// Row locations can change after each delete, so we seek again for each key
 			// to make sure we have the correct cursor.
-			aCursor, err := t.Seek(ctx, aRow.Key)
+			cursor, err := t.Seek(ctx, row.Key)
 			if err != nil {
 				errorsPipe <- err
 				return
@@ -69,30 +70,30 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 			if len(selectedFields) < len(t.Columns) {
 				// Load full row before delete, this is so we have all indexed values available
 				// for proper index cleanup as well as any overflow data that needs to be freed.
-				fullRow, err := aCursor.fetchRow(ctx, false, fieldsFromColumns(t.Columns...)...)
+				fullRow, err := cursor.fetchRow(ctx, false, fieldsFromColumns(t.Columns...)...)
 				if err != nil {
 					errorsPipe <- err
 					return
 				}
-				aRow = fullRow
+				row = fullRow
 			}
 
-			if err := aCursor.delete(ctx, aRow); err != nil {
+			if err := cursor.delete(ctx, row); err != nil {
 				errorsPipe <- err
 				return
 			}
 
-			aResult.RowsAffected += 1
+			result.RowsAffected += 1
 		}
 	}(filteredPipe)
 
 	select {
 	case <-ctx.Done():
-		return aResult, fmt.Errorf("context done: %w", ctx.Err())
+		return result, fmt.Errorf("context done: %w", ctx.Err())
 	case err := <-errorsPipe:
-		return aResult, err
+		return result, err
 	case <-stopChan:
-		t.logger.Sugar().Debugf("deleted %d rows", aResult.RowsAffected)
-		return aResult, nil
+		t.logger.Sugar().Debugf("deleted %d rows", result.RowsAffected)
+		return result, nil
 	}
 }

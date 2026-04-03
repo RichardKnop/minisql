@@ -2,19 +2,23 @@ package minisql
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math"
 
 	"github.com/RichardKnop/minisql/pkg/bitwise"
 )
 
+// OptionalValue ...
 type OptionalValue struct {
 	Value any
 	Valid bool
 }
 
+// RowID ...
 type RowID uint64
 
+// Row ...
 type Row struct {
 	Key     RowID
 	Columns []Column
@@ -30,40 +34,42 @@ func maxCells(rowSize uint64) uint32 {
 	return uint32((PageSize - headerSize()) / (rowSize + 8 + 8))
 }
 
+// NewRow ...
 func NewRow(columns []Column) Row {
-	aRow := Row{
+	row := Row{
 		Columns:     columns,
 		columnCache: make(map[string]int, len(columns)),
 	}
-	for i, aColumn := range columns {
-		aRow.columnCache[aColumn.Name] = i
+	for i, col := range columns {
+		row.columnCache[col.Name] = i
 	}
-	return aRow
+	return row
 }
 
+// NewRowWithValues ...
 func NewRowWithValues(columns []Column, values []OptionalValue) Row {
-	aRow := Row{
+	row := Row{
 		Columns:     columns,
 		Values:      values,
 		columnCache: make(map[string]int, len(columns)),
 	}
-	for i, aColumn := range columns {
-		aRow.columnCache[aColumn.Name] = i
+	for i, col := range columns {
+		row.columnCache[col.Name] = i
 	}
-	return aRow
+	return row
 }
 
 // Size calculates a size of a row record excluding null bitmask and row ID
 func (r Row) Size() uint64 {
 	size := uint64(0)
-	for i, aColumn := range r.Columns {
+	for i, col := range r.Columns {
 		// Skip NULL values - they take no space (tracked in bitmask)
 		if !r.Values[i].Valid {
 			continue
 		}
 
-		if !aColumn.Kind.IsText() {
-			size += uint64(aColumn.Size)
+		if !col.Kind.IsText() {
+			size += uint64(col.Size)
 			continue
 		}
 		size += varcharLengthPrefixSize
@@ -93,6 +99,7 @@ func (r Row) Size() uint64 {
 	return size
 }
 
+// OnlyFields ...
 func (r Row) OnlyFields(fields ...Field) Row {
 	filteredRow := Row{
 		Key:         r.Key,
@@ -103,19 +110,19 @@ func (r Row) OnlyFields(fields ...Field) Row {
 
 	// Pre-allocate exact size and write directly by index
 	outIdx := 0
-	for _, aField := range fields {
+	for _, field := range fields {
 		// For fields with an alias prefix, look for "alias.name" format
 		// For fields without, look for just "name"
 		var lookupName string
-		if aField.AliasPrefix != "" {
-			lookupName = aField.AliasPrefix + "." + aField.Name
+		if field.AliasPrefix != "" {
+			lookupName = field.AliasPrefix + "." + field.Name
 		} else {
-			lookupName = aField.Name
+			lookupName = field.Name
 		}
 
 		if _, idx := r.GetColumn(lookupName); idx >= 0 {
 			filteredRow.Columns[outIdx] = r.Columns[idx]
-			filteredRow.columnCache[aField.Name] = outIdx // Store without prefix for Scan
+			filteredRow.columnCache[field.Name] = outIdx // Store without prefix for Scan
 			filteredRow.Values[outIdx] = r.Values[idx]
 			outIdx++
 		}
@@ -130,6 +137,7 @@ func (r Row) OnlyFields(fields ...Field) Row {
 	return filteredRow
 }
 
+// GetColumn ...
 func (r Row) GetColumn(name string) (Column, int) {
 	if idx, ok := r.columnCache[name]; ok {
 		return r.Columns[idx], idx
@@ -137,6 +145,7 @@ func (r Row) GetColumn(name string) (Column, int) {
 	return Column{}, -1
 }
 
+// GetValue ...
 func (r Row) GetValue(name string) (OptionalValue, bool) {
 	idx, ok := r.columnCache[name]
 	if !ok || idx >= len(r.Values) {
@@ -145,11 +154,12 @@ func (r Row) GetValue(name string) (OptionalValue, bool) {
 	return r.Values[idx], true
 }
 
+// GetValuesForColumns ...
 func (r Row) GetValuesForColumns(columns []Column) ([]OptionalValue, bool) {
 	// Pre-allocate exact size and write directly by index
 	values := make([]OptionalValue, len(columns))
-	for i, aColumn := range columns {
-		value, ok := r.GetValue(aColumn.Name)
+	for i, col := range columns {
+		value, ok := r.GetValue(col.Name)
 		if !ok {
 			return nil, false
 		}
@@ -193,22 +203,24 @@ func compareValue(kind ColumnKind, v1, v2 OptionalValue) bool {
 	return tp1.IsEqual(tp2)
 }
 
+// Clone ...
 func (r Row) Clone() Row {
-	aCopy := NewRow(r.Columns)
-	aCopy.Key = r.Key
-	aCopy.Values = make([]OptionalValue, len(r.Values))
-	copy(aCopy.Values, r.Values)
-	return aCopy
+	rowCopy := NewRow(r.Columns)
+	rowCopy.Key = r.Key
+	rowCopy.Values = make([]OptionalValue, len(r.Values))
+	copy(rowCopy.Values, r.Values)
+	return rowCopy
 }
 
+// AppendValues ...
 func (r Row) AppendValues(fields []Field, values []OptionalValue) Row {
-	for _, aColumn := range r.Columns {
+	for _, col := range r.Columns {
 		var (
 			found    = false
 			fieldIdx = 0
 		)
-		for i, aField := range fields {
-			if aField.Name == aColumn.Name {
+		for i, field := range fields {
+			if field.Name == col.Name {
 				found = true
 				fieldIdx = i
 				break
@@ -223,21 +235,22 @@ func (r Row) AppendValues(fields []Field, values []OptionalValue) Row {
 	return r
 }
 
+// Marshal ...
 func (r Row) Marshal() ([]byte, error) {
 	// Single allocation: allocate exact size upfront instead of using append
 	size := r.Size()
 	buf := make([]byte, size)
 
 	offset := uint64(0)
-	for i, aColumn := range r.Columns {
+	for i, col := range r.Columns {
 		if !r.Values[i].Valid {
 			continue // NULL values take no space (tracked in bitmask)
 		}
-		switch aColumn.Kind {
+		switch col.Kind {
 		case Boolean:
 			value, ok := r.Values[i].Value.(bool)
 			if !ok {
-				return nil, fmt.Errorf("could not cast value to bool")
+				return nil, errors.New("could not cast value to bool")
 			}
 			marshalBool(buf, value, offset)
 			offset += 1
@@ -246,7 +259,7 @@ func (r Row) Marshal() ([]byte, error) {
 			if !ok {
 				_, ok = r.Values[i].Value.(int64)
 				if !ok {
-					return nil, fmt.Errorf("could not cast value for column %s to either int64 or int32", aColumn.Name)
+					return nil, fmt.Errorf("could not cast value for column %s to either int64 or int32", col.Name)
 				}
 				value = int32(r.Values[i].Value.(int64))
 			}
@@ -255,7 +268,7 @@ func (r Row) Marshal() ([]byte, error) {
 		case Int8:
 			value, ok := r.Values[i].Value.(int64)
 			if !ok {
-				return nil, fmt.Errorf("could not cast value for column %s to int64", aColumn.Name)
+				return nil, fmt.Errorf("could not cast value for column %s to int64", col.Name)
 			}
 			marshalInt64(buf, value, offset)
 			offset += 8
@@ -264,7 +277,7 @@ func (r Row) Marshal() ([]byte, error) {
 			if !ok {
 				_, ok = r.Values[i].Value.(float64)
 				if !ok {
-					return nil, fmt.Errorf("could not cast value for column %s to either float64 or float32", aColumn.Name)
+					return nil, fmt.Errorf("could not cast value for column %s to either float64 or float32", col.Name)
 				}
 				value = float32(r.Values[i].Value.(float64))
 			}
@@ -273,14 +286,14 @@ func (r Row) Marshal() ([]byte, error) {
 		case Double:
 			value, ok := r.Values[i].Value.(float64)
 			if !ok {
-				return nil, fmt.Errorf("could not cast value for column %s to float64", aColumn.Name)
+				return nil, fmt.Errorf("could not cast value for column %s to float64", col.Name)
 			}
 			marshalFloat64(buf, value, offset)
 			offset += 8
 		case Varchar, Text:
 			textPointer, ok := r.Values[i].Value.(TextPointer)
 			if !ok {
-				return nil, fmt.Errorf("could not cast value for column %s to text pointer", aColumn.Name)
+				return nil, fmt.Errorf("could not cast value for column %s to text pointer", col.Name)
 			}
 
 			if err := textPointer.Marshal(buf, offset); err != nil {
@@ -290,7 +303,7 @@ func (r Row) Marshal() ([]byte, error) {
 		case Timestamp:
 			value, ok := r.Values[i].Value.(Time)
 			if !ok {
-				return nil, fmt.Errorf("could not cast value for column %s to time", aColumn.Name)
+				return nil, fmt.Errorf("could not cast value for column %s to time", col.Name)
 			}
 			marshalInt64(buf, value.TotalMicroseconds(), offset)
 			offset += 8
@@ -300,17 +313,16 @@ func (r Row) Marshal() ([]byte, error) {
 	return buf, nil
 }
 
-// For any columns not selected, we skip unmarshaling them but we include
-// empty OptionalValue in the Values slice to maintain alignment (some functions)
-// use column index to access row values so we need to make sure indexes align.
-func (r Row) Unmarshal(aCell Cell, selectedFields ...Field) (Row, error) {
-	r.Key = aCell.Key
+// Unmarshal decodes cell into a Row. For columns not in selectedFields, an empty
+// OptionalValue is inserted to maintain index alignment.
+func (r Row) Unmarshal(cell Cell, selectedFields ...Field) (Row, error) {
+	r.Key = cell.Key
 
 	// Initialize column cache if not already present
 	if r.columnCache == nil {
 		r.columnCache = make(map[string]int, len(r.Columns))
-		for i, aColumn := range r.Columns {
-			r.columnCache[aColumn.Name] = i
+		for i, col := range r.Columns {
+			r.columnCache[col.Name] = i
 		}
 	}
 
@@ -324,21 +336,21 @@ func (r Row) Unmarshal(aCell Cell, selectedFields ...Field) (Row, error) {
 
 	// Create a set of selected column names for fast lookup
 	selectedSet := make(map[string]bool, len(selectedFields))
-	for _, aField := range selectedFields {
-		selectedSet[aField.Name] = true
+	for _, field := range selectedFields {
+		selectedSet[field.Name] = true
 	}
 
 	offset := 0
-	for i, aColumn := range r.Columns {
+	for i, col := range r.Columns {
 		// Check if column is NULL
-		isNull := bitwise.IsSet(aCell.NullBitmask, i)
+		isNull := bitwise.IsSet(cell.NullBitmask, i)
 
 		// If column not selected, skip it but track offset
-		if len(selectedSet) > 0 && !selectedSet[aColumn.Name] {
+		if len(selectedSet) > 0 && !selectedSet[col.Name] {
 			r.Values[i] = OptionalValue{Valid: false}
 			if !isNull {
 				// Skip over the data without unmarshaling
-				offset += int(r.getColumnSize(aColumn, aCell.Value, offset))
+				offset += int(r.getColumnSize(col, cell.Value, offset))
 			}
 			continue
 		}
@@ -347,30 +359,30 @@ func (r Row) Unmarshal(aCell Cell, selectedFields ...Field) (Row, error) {
 			r.Values[i] = OptionalValue{Valid: false}
 			continue
 		}
-		switch aColumn.Kind {
+		switch col.Kind {
 		case Boolean:
-			value := unmarshalBool(aCell.Value, uint64(offset))
-			r.Values[i] = OptionalValue{Value: value == true, Valid: true}
+			value := unmarshalBool(cell.Value, uint64(offset))
+			r.Values[i] = OptionalValue{Value: value, Valid: true}
 			offset += 1
 		case Int4:
-			value := unmarshalInt32(aCell.Value, uint64(offset))
+			value := unmarshalInt32(cell.Value, uint64(offset))
 			r.Values[i] = OptionalValue{Value: int32(value), Valid: true}
 			offset += 4
 		case Int8:
-			value := unmarshalInt64(aCell.Value, uint64(offset))
+			value := unmarshalInt64(cell.Value, uint64(offset))
 			r.Values[i] = OptionalValue{Value: int64(value), Valid: true}
 			offset += 8
 		case Real:
-			value := unmarshalFloat32(aCell.Value, uint64(offset))
+			value := unmarshalFloat32(cell.Value, uint64(offset))
 			r.Values[i] = OptionalValue{Value: value, Valid: true}
 			offset += 4
 		case Double:
-			value := unmarshalFloat64(aCell.Value, uint64(offset))
+			value := unmarshalFloat64(cell.Value, uint64(offset))
 			r.Values[i] = OptionalValue{Value: value, Valid: true}
 			offset += 8
 		case Varchar, Text:
 			textPointer := TextPointer{}
-			if err := textPointer.Unmarshal(aCell.Value, uint64(offset)); err != nil {
+			if err := textPointer.Unmarshal(cell.Value, uint64(offset)); err != nil {
 				return Row{}, err
 			}
 			if textPointer.IsInline() {
@@ -379,7 +391,7 @@ func (r Row) Unmarshal(aCell Cell, selectedFields ...Field) (Row, error) {
 			offset += int(textPointer.Size())
 			r.Values[i] = OptionalValue{Value: textPointer, Valid: true}
 		case Timestamp:
-			value := unmarshalInt64(aCell.Value, uint64(offset))
+			value := unmarshalInt64(cell.Value, uint64(offset))
 			r.Values[i] = OptionalValue{Value: FromMicroseconds(int64(value)), Valid: true}
 			offset += 8
 		}
@@ -417,8 +429,8 @@ func (r Row) CheckOneOrMore(conditions OneOrMore) (bool, error) {
 		return true, nil
 	}
 
-	for _, aConditionGroup := range conditions {
-		ok, err := r.CheckConditions(aConditionGroup)
+	for _, condGroup := range conditions {
+		ok, err := r.CheckConditions(condGroup)
 		if err != nil {
 			return false, err
 		}
@@ -430,14 +442,15 @@ func (r Row) CheckOneOrMore(conditions OneOrMore) (bool, error) {
 	return false, nil
 }
 
-func (r Row) CheckConditions(aConditionGroup Conditions) (bool, error) {
-	if len(aConditionGroup) == 0 {
+// CheckConditions ...
+func (r Row) CheckConditions(condGroup Conditions) (bool, error) {
+	if len(condGroup) == 0 {
 		return true, nil
 	}
 
 	groupConditionResult := true
-	for _, aCondition := range aConditionGroup {
-		ok, err := r.checkCondition(aCondition)
+	for _, cond := range condGroup {
+		ok, err := r.checkCondition(cond)
 		if err != nil {
 			return false, err
 		}
@@ -455,24 +468,24 @@ func (r Row) CheckConditions(aConditionGroup Conditions) (bool, error) {
 	return false, nil
 }
 
-func (r Row) checkCondition(aCondition Condition) (bool, error) {
+func (r Row) checkCondition(cond Condition) (bool, error) {
 	// left side is field, right side is literal value
-	if aCondition.Operand1.IsField() && !aCondition.Operand2.IsField() {
-		return r.compareFieldValue(aCondition.Operand1, aCondition.Operand2, aCondition.Operator)
+	if cond.Operand1.IsField() && !cond.Operand2.IsField() {
+		return r.compareFieldValue(cond.Operand1, cond.Operand2, cond.Operator)
 	}
 
 	// left side is literal value, right side is field
-	if aCondition.Operand2.IsField() && !aCondition.Operand1.IsField() {
-		return r.compareFieldValue(aCondition.Operand2, aCondition.Operand1, aCondition.Operator)
+	if cond.Operand2.IsField() && !cond.Operand1.IsField() {
+		return r.compareFieldValue(cond.Operand2, cond.Operand1, cond.Operator)
 	}
 
 	// both left and right are fields, compare 2 row values
-	if aCondition.Operand1.IsField() && aCondition.Operand2.IsField() {
-		return r.compareFields(aCondition.Operand1, aCondition.Operand2, aCondition.Operator)
+	if cond.Operand1.IsField() && cond.Operand2.IsField() {
+		return r.compareFields(cond.Operand1, cond.Operand2, cond.Operator)
 	}
 
 	// both left and right are literal values, compare them
-	return aCondition.Operand1.Value == aCondition.Operand2.Value, nil
+	return cond.Operand1.Value == cond.Operand2.Value, nil
 }
 
 func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Operator) (bool, error) {
@@ -480,14 +493,14 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 		return false, fmt.Errorf("field operand invalid, type '%d'", fieldOperand.Type)
 	}
 	if valueOperand.Type == OperandField {
-		return false, fmt.Errorf("cannot compare column value against field operand")
+		return false, errors.New("cannot compare column value against field operand")
 	}
-	name := fmt.Sprint(fieldOperand.Value.(Field).Name)
-	aColumn, idx := r.GetColumn(name)
+	name := fieldOperand.Value.(Field).Name
+	col, idx := r.GetColumn(name)
 	if idx < 0 {
 		return false, fmt.Errorf("row does not contain column '%s'", name)
 	}
-	fieldValue, ok := r.GetValue(aColumn.Name)
+	fieldValue, ok := r.GetValue(col.Name)
 	if !ok {
 		return false, fmt.Errorf("row does not have '%s' column", name)
 	}
@@ -500,14 +513,14 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 		case Ne:
 			return fieldValue.Valid, nil
 		default:
-			return false, fmt.Errorf("only '=' and '!=' operators supported when comparing against NULL")
+			return false, errors.New("only '=' and '!=' operators supported when comparing against NULL")
 		}
 	case OperandList:
 		switch operator {
 		case In, NotIn:
-			switch aColumn.Kind {
+			switch col.Kind {
 			case Boolean:
-				return false, fmt.Errorf("IN / NOT IN operator not supported for boolean columns")
+				return false, errors.New("IN / NOT IN operator not supported for boolean columns")
 			case Int4:
 				foundInList, err := isInListInt4(fieldValue.Value, valueOperand.Value)
 				if operator == In {
@@ -545,21 +558,21 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 				}
 				return !foundInList, err
 			default:
-				return false, fmt.Errorf("unknown column kind '%s'", aColumn.Kind)
+				return false, fmt.Errorf("unknown column kind '%s'", col.Kind)
 			}
 
 		case Between, NotBetween:
 			list, ok := valueOperand.Value.([]any)
 			if !ok || len(list) != 2 {
-				return false, fmt.Errorf("BETWEEN requires exactly 2 bounds")
+				return false, errors.New("BETWEEN requires exactly 2 bounds")
 			}
 			var (
 				inRange bool
 				err     error
 			)
-			switch aColumn.Kind {
+			switch col.Kind {
 			case Boolean:
-				return false, fmt.Errorf("BETWEEN operator not supported for boolean columns")
+				return false, errors.New("BETWEEN operator not supported for boolean columns")
 			case Int4:
 				inRange, err = isBetweenInt4(int64(fieldValue.Value.(int32)), list[0], list[1])
 			case Int8:
@@ -573,7 +586,7 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 			case Timestamp:
 				inRange, err = isBetweenTimestamp(fieldValue.Value, list[0], list[1])
 			default:
-				return false, fmt.Errorf("unknown column kind '%s'", aColumn.Kind)
+				return false, fmt.Errorf("unknown column kind '%s'", col.Kind)
 			}
 			if err != nil {
 				return false, err
@@ -584,7 +597,7 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 			return !inRange, nil
 
 		default:
-			return false, fmt.Errorf("only 'IN', 'NOT IN', 'BETWEEN', and 'NOT BETWEEN' operators supported when comparing against list")
+			return false, errors.New("only 'IN', 'NOT IN', 'BETWEEN', and 'NOT BETWEEN' operators supported when comparing against list")
 		}
 	}
 
@@ -592,11 +605,11 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 		return false, nil // NULL cannot be compared to non-NULL value
 	}
 
-	if (operator == Like || operator == NotLike) && aColumn.Kind != Varchar && aColumn.Kind != Text {
-		return false, fmt.Errorf("LIKE / NOT LIKE operator only supported for TEXT and VARCHAR columns")
+	if (operator == Like || operator == NotLike) && col.Kind != Varchar && col.Kind != Text {
+		return false, errors.New("LIKE / NOT LIKE operator only supported for TEXT and VARCHAR columns")
 	}
 
-	switch aColumn.Kind {
+	switch col.Kind {
 	case Boolean:
 		return compareBoolean(fieldValue.Value.(bool), valueOperand.Value.(bool), operator)
 	case Int4:
@@ -614,7 +627,7 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 	case Timestamp:
 		return compareTimestamp(fieldValue.Value, valueOperand.Value, operator)
 	default:
-		return false, fmt.Errorf("unknown column kind '%s'", aColumn.Kind)
+		return false, fmt.Errorf("unknown column kind '%s'", col.Kind)
 	}
 }
 

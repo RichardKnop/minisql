@@ -11,7 +11,6 @@ type rowHeap struct {
 	rows    []Row
 	orderBy []OrderBy
 	maxSize int
-	table   *Table // needed for comparison logic
 }
 
 func newRowHeap(orderBy []OrderBy, maxSize int) *rowHeap {
@@ -63,10 +62,12 @@ func (h *rowHeap) Swap(i, j int) {
 	h.rows[i], h.rows[j] = h.rows[j], h.rows[i]
 }
 
+// Push ...
 func (h *rowHeap) Push(x interface{}) {
 	h.rows = append(h.rows, x.(Row))
 }
 
+// Pop ...
 func (h *rowHeap) Pop() interface{} {
 	old := h.rows
 	n := len(old)

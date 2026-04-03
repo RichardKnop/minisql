@@ -1,5 +1,6 @@
 package minisql
 
+// Result ...
 type Result struct {
 	rowsAffected int64
 }

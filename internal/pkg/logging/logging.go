@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+// DefaultConfig returns a production-ready zap logger configuration.
 func DefaultConfig() zap.Config {
 	logConf := zap.NewProductionConfig()
 	logConf.Sampling = nil
@@ -19,6 +20,7 @@ func DefaultConfig() zap.Config {
 	return logConf
 }
 
+// ParseLevel converts a string log level name or integer to a zapcore.Level.
 func ParseLevel(l string) (zapcore.Level, error) {
 	l = strings.ToLower(strings.TrimSpace(l))
 	switch l {

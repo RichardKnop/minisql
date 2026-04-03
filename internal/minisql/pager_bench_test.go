@@ -38,7 +38,7 @@ func BenchmarkPageAccess(b *testing.B) {
 			for i := range numPages {
 				leafNode := NewLeafNode()
 				if i == 0 {
-					leafNode.Header.Header.IsRoot = true
+					leafNode.Header.IsRoot = true
 				}
 				aPager.pages = append(aPager.pages, &Page{
 					Index:    PageIndex(i),
@@ -107,7 +107,7 @@ func BenchmarkSequentialScan(b *testing.B) {
 			for i := range numPages {
 				leafNode := NewLeafNode()
 				if i == 0 {
-					leafNode.Header.Header.IsRoot = true
+					leafNode.Header.IsRoot = true
 				}
 				aPager.pages = append(aPager.pages, &Page{
 					Index:    PageIndex(i),

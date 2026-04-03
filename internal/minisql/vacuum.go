@@ -27,9 +27,9 @@ import (
 //
 // VACUUM must not be called from inside an explicit user transaction; doing so
 // returns an error.
-func (db *Database) Vacuum(ctx context.Context) error {
-	tempFile := db.GetFileName() + ".tmp"
-	backupFile := db.GetFileName() + ".bak"
+func (d *Database) Vacuum(ctx context.Context) error {
+	tempFile := d.GetFileName() + ".tmp"
+	backupFile := d.GetFileName() + ".bak"
 
 	// Ensure the temp file is removed on any early error.
 	vacuumDone := false
@@ -46,7 +46,7 @@ func (db *Database) Vacuum(ctx context.Context) error {
 	// Use context.Background() so the temp DB's own initialisation runs in a
 	// fresh transaction on its own TransactionManager, completely independent
 	// of any outer transaction that the caller may have placed on ctx.
-	f, err := os.OpenFile(tempFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	f, err := os.OpenFile(tempFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("vacuum: create temp file: %w", err)
 	}
@@ -57,22 +57,22 @@ func (db *Database) Vacuum(ctx context.Context) error {
 		return fmt.Errorf("vacuum: create temp pager: %w", err)
 	}
 
-	tempDB, err := NewDatabase(context.Background(), db.logger, tempFile, db.parser, tempPager, tempPager)
+	tempDB, err := NewDatabase(context.Background(), d.logger, tempFile, d.parser, tempPager, tempPager)
 	if err != nil {
 		return fmt.Errorf("vacuum: init temp database: %w", err)
 	}
 
 	// --- PHASE 2: Acquire exclusive lock — blocks all concurrent operations. ---
-	db.dbLock.Lock()
-	defer db.dbLock.Unlock()
+	d.dbLock.Lock()
+	defer d.dbLock.Unlock()
 
 	// --- PHASE 3: Read all schema records from the live DB. ---
-	// listSchemas accesses db.tables directly and calls mainTable.Select(),
+	// listSchemas accesses d.tables directly and calls mainTable.Select(),
 	// both of which bypass the dbLock, so no deadlock occurs here.
 	var schemas []Schema
-	if err := db.txManager.ExecuteInTransaction(ctx, func(txCtx context.Context) error {
+	if err := d.txManager.ExecuteInTransaction(ctx, func(txCtx context.Context) error {
 		var err error
-		schemas, err = db.listSchemas(txCtx)
+		schemas, err = d.listSchemas(txCtx)
 		return err
 	}); err != nil {
 		return fmt.Errorf("vacuum: list schemas: %w", err)
@@ -83,56 +83,56 @@ func (db *Database) Vacuum(ctx context.Context) error {
 	// DB's transaction manager.
 	tempCtx := context.Background()
 
-	for _, aSchema := range schemas {
-		if aSchema.Type != SchemaTable {
+	for _, schema := range schemas {
+		if schema.Type != SchemaTable {
 			continue
 		}
-		stmts, err := db.parser.Parse(tempCtx, aSchema.DDL)
+		stmts, err := d.parser.Parse(tempCtx, schema.DDL)
 		if err != nil {
-			return fmt.Errorf("vacuum: parse table DDL for %q: %w", aSchema.Name, err)
+			return fmt.Errorf("vacuum: parse table DDL for %q: %w", schema.Name, err)
 		}
 		if err := tempDB.txManager.ExecuteInTransaction(tempCtx, func(txCtx context.Context) error {
 			_, err := tempDB.ExecuteStatement(txCtx, stmts[0])
 			return err
 		}); err != nil {
-			return fmt.Errorf("vacuum: recreate table %q: %w", aSchema.Name, err)
+			return fmt.Errorf("vacuum: recreate table %q: %w", schema.Name, err)
 		}
 	}
 
-	for _, aSchema := range schemas {
-		if aSchema.Type != SchemaSecondaryIndex {
+	for _, schema := range schemas {
+		if schema.Type != SchemaSecondaryIndex {
 			continue
 		}
-		stmts, err := db.parser.Parse(tempCtx, aSchema.DDL)
+		stmts, err := d.parser.Parse(tempCtx, schema.DDL)
 		if err != nil {
-			return fmt.Errorf("vacuum: parse index DDL for table %q: %w", aSchema.TableName, err)
+			return fmt.Errorf("vacuum: parse index DDL for table %q: %w", schema.TableName, err)
 		}
 		if err := tempDB.txManager.ExecuteInTransaction(tempCtx, func(txCtx context.Context) error {
 			_, err := tempDB.ExecuteStatement(txCtx, stmts[0])
 			return err
 		}); err != nil {
-			return fmt.Errorf("vacuum: recreate index for table %q: %w", aSchema.TableName, err)
+			return fmt.Errorf("vacuum: recreate index for table %q: %w", schema.TableName, err)
 		}
 	}
 
 	// --- PHASE 5: Copy all rows from each live table into the temp DB. ---
-	for _, aSchema := range schemas {
-		if aSchema.Type != SchemaTable {
+	for _, schema := range schemas {
+		if schema.Type != SchemaTable {
 			continue
 		}
 
-		liveTable, ok := db.tables[aSchema.Name]
+		liveTable, ok := d.tables[schema.Name]
 		if !ok {
-			return fmt.Errorf("vacuum: live table %q not found", aSchema.Name)
+			return fmt.Errorf("vacuum: live table %q not found", schema.Name)
 		}
-		tempTable, ok := tempDB.tables[aSchema.Name]
+		tempTable, ok := tempDB.tables[schema.Name]
 		if !ok {
-			return fmt.Errorf("vacuum: temp table %q not found", aSchema.Name)
+			return fmt.Errorf("vacuum: temp table %q not found", schema.Name)
 		}
 
 		// Read all rows from the live table in a single read transaction.
 		var rows []Row
-		if err := db.txManager.ExecuteInTransaction(ctx, func(txCtx context.Context) error {
+		if err := d.txManager.ExecuteInTransaction(ctx, func(txCtx context.Context) error {
 			result, err := liveTable.Select(txCtx, Statement{
 				Kind:   Select,
 				Fields: fieldsFromColumns(liveTable.Columns...),
@@ -145,21 +145,21 @@ func (db *Database) Vacuum(ctx context.Context) error {
 			}
 			return result.Rows.Err()
 		}); err != nil {
-			return fmt.Errorf("vacuum: read table %q: %w", aSchema.Name, err)
+			return fmt.Errorf("vacuum: read table %q: %w", schema.Name, err)
 		}
 
 		// Insert each row into the temp table.  Each insert is its own
 		// transaction so a failure on one row doesn't silently roll back others.
-		for _, aRow := range rows {
+		for _, row := range rows {
 			if err := tempDB.txManager.ExecuteInTransaction(tempCtx, func(txCtx context.Context) error {
 				_, err := tempTable.Insert(txCtx, Statement{
 					Kind:    Insert,
 					Fields:  fieldsFromColumns(tempTable.Columns...),
-					Inserts: [][]OptionalValue{aRow.Values},
+					Inserts: [][]OptionalValue{row.Values},
 				})
 				return err
 			}); err != nil {
-				return fmt.Errorf("vacuum: insert row into temp table %q: %w", aSchema.Name, err)
+				return fmt.Errorf("vacuum: insert row into temp table %q: %w", schema.Name, err)
 			}
 		}
 	}
@@ -168,7 +168,7 @@ func (db *Database) Vacuum(ctx context.Context) error {
 	if err := tempDB.Close(); err != nil {
 		return fmt.Errorf("vacuum: close temp database: %w", err)
 	}
-	if err := db.Close(); err != nil {
+	if err := d.Close(); err != nil {
 		return fmt.Errorf("vacuum: close live database: %w", err)
 	}
 
@@ -178,13 +178,13 @@ func (db *Database) Vacuum(ctx context.Context) error {
 
 	// Move the live file to the backup path.  If this fails, the live file is
 	// untouched and no data is lost.
-	if err := os.Rename(db.GetFileName(), backupFile); err != nil {
+	if err := os.Rename(d.GetFileName(), backupFile); err != nil {
 		return fmt.Errorf("vacuum: rename live to backup: %w", err)
 	}
 
 	// Move the temp file into the live path.  On failure, restore from backup.
-	if err := os.Rename(tempFile, db.GetFileName()); err != nil {
-		if restoreErr := os.Rename(backupFile, db.GetFileName()); restoreErr != nil {
+	if err := os.Rename(tempFile, d.GetFileName()); err != nil {
+		if restoreErr := os.Rename(backupFile, d.GetFileName()); restoreErr != nil {
 			return fmt.Errorf(
 				"vacuum: swap failed (%w) and restore also failed (%v): "+
 					"original database is in %s", err, restoreErr, backupFile)
@@ -197,7 +197,7 @@ func (db *Database) Vacuum(ctx context.Context) error {
 	vacuumDone = true
 
 	// --- PHASE 8: Reopen the database with the compacted file. ---
-	newFile, err := os.OpenFile(db.GetFileName(), os.O_RDWR|os.O_CREATE, 0600)
+	newFile, err := os.OpenFile(d.GetFileName(), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return fmt.Errorf("vacuum: reopen database file: %w", err)
 	}
@@ -208,9 +208,9 @@ func (db *Database) Vacuum(ctx context.Context) error {
 		return fmt.Errorf("vacuum: create new pager: %w", err)
 	}
 
-	// Reopen replaces db.txManager with a fresh instance so stale page version
+	// Reopen replaces d.txManager with a fresh instance so stale page version
 	// numbers from the old file cannot cause spurious OCC conflicts.
-	if err := db.Reopen(tempCtx, newPager, newPager); err != nil {
+	if err := d.Reopen(tempCtx, newPager, newPager); err != nil {
 		return fmt.Errorf("vacuum: reopen database: %w", err)
 	}
 

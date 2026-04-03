@@ -19,7 +19,7 @@ func TestTextPointer_Marshal(t *testing.T) {
 		require.NoError(t, err)
 
 		recreated := TextPointer{}
-		recreated.Unmarshal(buf, 0)
+		require.NoError(t, recreated.Unmarshal(buf, 0))
 
 		assert.Equal(t, original, recreated)
 	})
@@ -33,7 +33,7 @@ func TestTextPointer_Marshal(t *testing.T) {
 		require.NoError(t, err)
 
 		recreated := TextPointer{}
-		recreated.Unmarshal(buf, 0)
+		require.NoError(t, recreated.Unmarshal(buf, 0))
 
 		expected := original
 		expected.Data = nil // Data is not stored in overflow pointer

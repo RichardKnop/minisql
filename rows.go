@@ -9,6 +9,7 @@ import (
 	"github.com/RichardKnop/minisql/internal/minisql"
 )
 
+// Rows ...
 type Rows struct {
 	columns []minisql.Column
 	iter    minisql.Iterator
@@ -57,11 +58,14 @@ func (r Rows) Next(dest []driver.Value) error {
 	for i := range dest {
 		if !aRow.Values[i].Valid {
 			dest[i] = nil
-		} else if tp, ok := aRow.Values[i].Value.(minisql.TextPointer); ok {
-			dest[i] = string(tp.Data)
-		} else if timestamp, ok := aRow.Values[i].Value.(minisql.Time); ok {
-			dest[i] = timestamp.GoTime()
-		} else {
+			continue
+		}
+		switch v := aRow.Values[i].Value.(type) {
+		case minisql.TextPointer:
+			dest[i] = string(v.Data)
+		case minisql.Time:
+			dest[i] = v.GoTime()
+		default:
 			dest[i] = aRow.Values[i].Value
 		}
 	}

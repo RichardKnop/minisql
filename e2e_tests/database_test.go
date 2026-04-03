@@ -10,7 +10,7 @@ type schema struct {
 	Name     string
 	TblName  *string
 	RootPage int
-	Sql      *string
+	sqlText  *string
 }
 
 func (s schema) TableName() string {
@@ -20,11 +20,12 @@ func (s schema) TableName() string {
 	return *s.TblName
 }
 
+// SQL returns the SQL definition stored in this schema row.
 func (s schema) SQL() string {
-	if s.Sql == nil {
+	if s.sqlText == nil {
 		return ""
 	}
-	return *s.Sql
+	return *s.sqlText
 }
 
 func (s *TestSuite) TestEmptyDatabase() {
@@ -35,7 +36,7 @@ func (s *TestSuite) TestEmptyDatabase() {
 	s.countRowsInTable("minisql_schema", 1)
 
 	var aSchema schema
-	err = s.db.QueryRow(`select * from minisql_schema;`).Scan(&aSchema.Type, &aSchema.Name, &aSchema.TblName, &aSchema.RootPage, &aSchema.Sql)
+	err = s.db.QueryRow(`select * from minisql_schema;`).Scan(&aSchema.Type, &aSchema.Name, &aSchema.TblName, &aSchema.RootPage, &aSchema.sqlText)
 	s.Require().NoError(err)
 	s.assertSchemaTable(aSchema)
 }
@@ -167,7 +168,7 @@ func (s *TestSuite) scanSchemas() []schema {
 	s.Require().NoError(err)
 	for rows.Next() {
 		var aSchema schema
-		err := rows.Scan(&aSchema.Type, &aSchema.Name, &aSchema.TblName, &aSchema.RootPage, &aSchema.Sql)
+		err := rows.Scan(&aSchema.Type, &aSchema.Name, &aSchema.TblName, &aSchema.RootPage, &aSchema.sqlText)
 		s.Require().NoError(err)
 		schemas = append(schemas, aSchema)
 	}

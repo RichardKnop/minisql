@@ -6,6 +6,7 @@ import (
 	"sync"
 )
 
+// Update executes an UPDATE statement on the table and returns the result.
 func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, error) {
 	stmt.TableName = t.Name
 	stmt.Columns = t.Columns
@@ -42,7 +43,7 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 		close(filteredPipe)
 	}()
 
-	aResult := StatementResult{
+	result := StatementResult{
 		Columns: t.Columns,
 	}
 
@@ -54,23 +55,24 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 	go func(in <-chan Row, out chan<- []Row) {
 		defer close(out)
 		cantUpdateInPlace := make([]Row, 0, 10)
-		for aRow := range in {
-			size := aRow.Size()
+		for row := range in {
+			size := row.Size()
 			// We will calculate new size after update
 			newSize := size
 
 			indexChanges := false
 			for colName, newValue := range stmt.Updates {
-				aColumn, _ := stmt.ColumnByName(colName)
-				oldValue, _ := aRow.GetValue(colName)
+				col, _ := stmt.ColumnByName(colName)
+				oldValue, _ := row.GetValue(colName)
 
-				if t.HasIndexOnColumn(colName) && !compareValue(aColumn.Kind, oldValue, newValue) {
+				if t.HasIndexOnColumn(colName) && !compareValue(col.Kind, oldValue, newValue) {
 					// Updating indexed column, can't update in place
 					indexChanges = true
 					break
 				}
 
-				if aColumn.Kind.IsText() {
+				switch {
+				case col.Kind.IsText():
 					if oldValue.Valid {
 						newSize -= uint64(oldValue.Value.(TextPointer).Size())
 					}
@@ -78,12 +80,12 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 						newSize += uint64(newValue.Value.(TextPointer).Size())
 					}
 					continue
-				} else if !oldValue.Valid && newValue.Valid {
+				case !oldValue.Valid && newValue.Valid:
 					// NULL -> NOT NULL
-					newSize += uint64(aColumn.Size)
-				} else if oldValue.Valid && !newValue.Valid {
+					newSize += uint64(col.Size)
+				case oldValue.Valid && !newValue.Valid:
 					// NOT NULL -> NULL
-					newSize -= uint64(aColumn.Size)
+					newSize -= uint64(col.Size)
 				}
 			}
 
@@ -91,12 +93,12 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 			// we can update in place, just send it to output channel directly.
 			if !indexChanges && newSize <= size {
 				// Can update in place
-				out <- []Row{aRow}
+				out <- []Row{row}
 				continue
 			}
 
 			// Otherwise collect rows and send them all once reading from filtered pipe is done.
-			cantUpdateInPlace = append(cantUpdateInPlace, aRow)
+			cantUpdateInPlace = append(cantUpdateInPlace, row)
 		}
 		if len(cantUpdateInPlace) > 0 {
 			out <- cantUpdateInPlace
@@ -106,24 +108,24 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 	go func(in <-chan []Row) {
 		defer close(stopChan)
 		for rowChunk := range in {
-			for _, aRow := range rowChunk {
+			for _, row := range rowChunk {
 				// Row locations can change after each update in case row grows larger
 				// and causes a page split (for example setting NULL values),
 				// so we seek again for each key to make sure we have the correct cursor.
-				aCursor, err := t.Seek(ctx, aRow.Key)
+				cursor, err := t.Seek(ctx, row.Key)
 				if err != nil {
 					errorsPipe <- err
 					return
 				}
 
-				changed, err := aCursor.update(ctx, stmt, aRow)
+				changed, err := cursor.update(ctx, stmt, row)
 				if err != nil {
 					errorsPipe <- err
 					return
 				}
 
 				if changed {
-					aResult.RowsAffected += 1
+					result.RowsAffected += 1
 				}
 			}
 		}
@@ -131,11 +133,11 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 
 	select {
 	case err := <-errorsPipe:
-		return aResult, err
+		return result, err
 	case <-ctx.Done():
-		return aResult, fmt.Errorf("context done: %w", ctx.Err())
+		return result, fmt.Errorf("context done: %w", ctx.Err())
 	case <-stopChan:
-		t.logger.Sugar().Debugf("updated %d rows", aResult.RowsAffected)
-		return aResult, nil
+		t.logger.Sugar().Debugf("updated %d rows", result.RowsAffected)
+		return result, nil
 	}
 }

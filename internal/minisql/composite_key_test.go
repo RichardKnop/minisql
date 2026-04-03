@@ -47,7 +47,7 @@ func TestCompositeKey_MarshalAllTypes(t *testing.T) {
 
 	ck := NewCompositeKey(columns, true, int32(42), int64(99), float32(1.5), float64(3.14), int64(1000000))
 
-	// Size: 1 + 4 + 8 + 4 + 8 + 8 = 33
+	// expected size in bytes: boolean(1) + int32(4) + int64(8) + float32(4) + float64(8) + timestamp(8) = 33
 	assert.Equal(t, uint64(1+4+8+4+8+8), ck.Size())
 
 	buf := make([]byte, ck.Size())

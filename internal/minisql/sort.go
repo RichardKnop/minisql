@@ -57,60 +57,60 @@ func compareValues(a, b OptionalValue) int {
 }
 
 func compareAny(a, b any) int {
-	switch aVal := a.(type) {
+	switch val := a.(type) {
 	case bool:
 		bVal := b.(bool)
-		if aVal == bVal {
+		if val == bVal {
 			return 0
 		}
-		if aVal {
+		if val {
 			return 1
 		}
 		return -1
 
 	case int32:
 		bVal := b.(int32)
-		if aVal < bVal {
+		if val < bVal {
 			return -1
-		} else if aVal > bVal {
+		} else if val > bVal {
 			return 1
 		}
 		return 0
 
 	case int64:
 		bVal := b.(int64)
-		if aVal < bVal {
+		if val < bVal {
 			return -1
-		} else if aVal > bVal {
+		} else if val > bVal {
 			return 1
 		}
 		return 0
 
 	case float32:
 		bVal := b.(float32)
-		if aVal < bVal {
+		if val < bVal {
 			return -1
-		} else if aVal > bVal {
+		} else if val > bVal {
 			return 1
 		}
 		return 0
 
 	case float64:
 		bVal := b.(float64)
-		if aVal < bVal {
+		if val < bVal {
 			return -1
-		} else if aVal > bVal {
+		} else if val > bVal {
 			return 1
 		}
 		return 0
 
 	case string:
 		bVal := b.(string)
-		return strings.Compare(aVal, bVal)
+		return strings.Compare(val, bVal)
 
 	case TextPointer:
 		bVal := b.(TextPointer)
-		return strings.Compare(aVal.String(), bVal.String())
+		return strings.Compare(val.String(), bVal.String())
 
 	case Time:
 		var (
@@ -126,7 +126,7 @@ func compareAny(a, b any) int {
 
 	case CompositeKey:
 		bVal := b.(CompositeKey)
-		return bytes.Compare(aVal.Comparison, bVal.Comparison)
+		return bytes.Compare(val.Comparison, bVal.Comparison)
 
 	default:
 		return 0

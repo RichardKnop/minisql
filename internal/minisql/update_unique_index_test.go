@@ -181,11 +181,11 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 		assert.Equal(t, 1, aResult.RowsAffected)
 
 		// Prepare expected rows with one updated row
-		for i, aRow := range expected {
+		for i := range expected {
 			if i != 0 {
 				continue
 			}
-			aRow, _ = aRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("newemail@example.com")), Valid: true})
+			expected[i], _ = expected[i].SetValue("email", OptionalValue{Value: NewTextPointer([]byte("newemail@example.com")), Valid: true})
 		}
 
 		checkRows(ctx, t, aTable, expected)
@@ -382,12 +382,12 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 		assert.Equal(t, 1, aResult.RowsAffected)
 
 		// Prepare expected rows with one updated row
-		for i, aRow := range expected {
+		for i := range expected {
 			if i != 0 {
 				continue
 			}
-			aRow, _ = aRow.SetValue("first_name", OptionalValue{Value: NewTextPointer([]byte(newFirstName)), Valid: true})
-			aRow, _ = aRow.SetValue("last_name", OptionalValue{Value: NewTextPointer([]byte(newLastName)), Valid: true})
+			expected[i], _ = expected[i].SetValue("first_name", OptionalValue{Value: NewTextPointer([]byte(newFirstName)), Valid: true})
+			expected[i], _ = expected[i].SetValue("last_name", OptionalValue{Value: NewTextPointer([]byte(newLastName)), Valid: true})
 		}
 
 		checkRows(ctx, t, aTable, expected)

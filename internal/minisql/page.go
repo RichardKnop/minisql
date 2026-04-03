@@ -1,6 +1,7 @@
 package minisql
 
 const (
+	// PageSize ...
 	PageSize = 4096 // 4 kilobytes
 
 	// UsablePageSize returns the usable size of a page after accounting for headers
@@ -8,8 +9,10 @@ const (
 	UsablePageSize = PageSize - 7 - 8 - 8 - 8
 )
 
+// PageIndex ...
 type PageIndex uint32
 
+// Page ...
 type Page struct {
 	Index             PageIndex
 	OverflowPage      *OverflowPage
@@ -20,28 +23,29 @@ type Page struct {
 	IndexOverflowNode *IndexOverflowPage
 }
 
-// Create a deep copy of the page
+// Clone creates a deep copy of the page.
 func (p *Page) Clone() *Page {
 	pageCopy := &Page{
 		Index: p.Index,
 	}
 
-	if p.LeafNode != nil {
+	switch {
+	case p.LeafNode != nil:
 		pageCopy.LeafNode = p.LeafNode.Clone()
-	} else if p.InternalNode != nil {
+	case p.InternalNode != nil:
 		pageCopy.InternalNode = p.InternalNode.Clone()
-	} else if p.FreePage != nil {
+	case p.FreePage != nil:
 		pageCopy.FreePage = &FreePage{
 			NextFreePage: p.FreePage.NextFreePage,
 		}
-	} else if p.OverflowPage != nil {
+	case p.OverflowPage != nil:
 		pageCopy.OverflowPage = &OverflowPage{
 			Header: p.OverflowPage.Header,
 			Data:   p.OverflowPage.Data,
 		}
-	} else if p.IndexNode != nil {
+	case p.IndexNode != nil:
 		pageCopy.IndexNode = copyIndexNode(p.IndexNode)
-	} else if p.IndexOverflowNode != nil {
+	case p.IndexOverflowNode != nil:
 		pageCopy.IndexOverflowNode = &IndexOverflowPage{
 			Header: p.IndexOverflowNode.Header,
 			RowIDs: make([]RowID, len(p.IndexOverflowNode.RowIDs)),

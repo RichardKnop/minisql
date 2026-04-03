@@ -384,9 +384,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 
 		// We expect all rows sorted by ID ascending
 		expected := make([]Row, 0, len(rows))
-		for _, aRow := range rows {
-			expected = append(expected, aRow)
-		}
+		expected = append(expected, rows...)
 		sort.Slice(expected, func(i, j int) bool {
 			id1, _ := expected[i].GetValue("id")
 			id2, _ := expected[j].GetValue("id")
@@ -412,9 +410,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 
 		// We expect all rows sorted by ID descending
 		expected := make([]Row, 0, len(rows))
-		for _, aRow := range rows {
-			expected = append(expected, aRow)
-		}
+		expected = append(expected, rows...)
 		sort.Slice(expected, func(i, j int) bool {
 			id1, _ := expected[i].GetValue("id")
 			id2, _ := expected[j].GetValue("id")

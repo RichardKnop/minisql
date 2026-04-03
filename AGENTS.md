@@ -108,6 +108,13 @@ LOG_LEVEL=warn go test ./e2e_tests/... -run TestTestSuite/TestSelectDistinct -co
 LOG_LEVEL=warn go test ./internal/minisql/... -run TestTable_Select -count=1 -v
 ```
 
+### Lint
+```bash
+make lint
+# or directly:
+golangci-lint run ./...
+```
+
 ### Build
 ```bash
 make build
@@ -149,11 +156,10 @@ go tool pprof -alloc_space -top mem.prof | head -30
 
 ## CI
 
-GitHub Actions runs on every push and PR to `main`:
-1. `go build -v ./...` — must pass
-2. `go test -v ./...` — must pass
+GitHub Actions runs on every push and PR to `main` with two parallel jobs:
 
-There is no linter step in CI. There is no Makefile.
+1. **lint** — `golangci-lint run ./...` using `.golangci.yml`. Must pass.
+2. **build** — `go build -v ./...` + `go test ./...` + coverage threshold check. Must pass.
 
 ---
 
@@ -278,26 +284,149 @@ Standards explain the *why* behind non-obvious patterns. Code conventions (forma
 
 ## Coding Conventions
 
+The style baseline is **[Effective Go](https://go.dev/doc/effective_go)** and the **[Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)** wiki. The rules below add project-specific detail on top of those guides. All rules are enforced by `golangci-lint` (see `.golangci.yml`); run `make lint` before pushing.
+
+---
+
+### Naming
+
+**No `a`/`an` prefixes on local variables.** This pattern (`aRow`, `aColumn`, `aField`) is not idiomatic Go and was a historical accident. Use plain descriptive names.
+
+```go
+// wrong
+for aRow := range filteredPipe { ... }
+aColumn, ok := t.ColumnByName(name)
+
+// correct
+for row := range filteredPipe { ... }
+col, ok := t.ColumnByName(name)
+```
+
+**Receiver names** are one or two lowercase letters derived from the type name. They must be consistent across all methods of a type.
+
+```go
+func (t *Table) Insert(...)  { ... }  // not "tbl", not "this", not "self"
+func (p *parserItem) peek()  { ... }
+func (ck CompositeKey) Size() { ... }
+```
+
+**Abbreviations** follow Go conventions: `id` not `ID` inside names, but `ID` when it is a standalone exported name (`UserID`, `ErrInvalidID`). Acronyms are all-caps: `SQL`, `URL`, `HTTP`.
+
+**Error variable names:** exported errors are `ErrXxx`; unexported are `errXxx`.
+
+---
+
+### Comments / Godoc
+
+Every **exported** identifier must have a godoc comment beginning with the identifier's name.
+
+```go
+// Row holds all column values for a single database row.
+type Row struct { ... }
+
+// NewRow returns an empty Row with the given column schema.
+func NewRow(columns []Column) Row { ... }
+```
+
+Unexported helpers benefit from comments too, but it is not enforced by the linter.
+
+---
+
 ### Error handling
 
-- **Sentinel errors** are `var`-declared at package level and wrapped with `%w`:
-  ```go
-  var ErrDuplicateKey = fmt.Errorf("duplicate key")
-  return fmt.Errorf("failed to insert primary key %s: %w", name, ErrDuplicateKey)
-  ```
-- Callers check with `errors.Is(err, minisql.ErrDuplicateKey)`.
-- **Public** errors: `ErrDuplicateKey`, `ErrTxConflict`, `ErrNoMoreRows`.
-- **Private** package-level errors: `errTableDoesNotExist`, `errIndexDoesNotExist`, etc.
+**Static error values** use `errors.New`, not `fmt.Errorf` (reserve `fmt.Errorf` for formatting or wrapping):
+
+```go
+// wrong — fmt.Errorf without format args or %w
+var errTableDoesNotExist = fmt.Errorf("table does not exist")
+
+// correct
+var errTableDoesNotExist = errors.New("table does not exist")
+```
+
+**Wrapping** uses `%w` so callers can use `errors.Is` / `errors.As`:
+
+```go
+// wrong — drops the error chain
+return fmt.Errorf("seek row: %v", err)
+
+// correct
+return fmt.Errorf("seek row: %w", err)
+```
+
+**Error strings** are lower-case and have no trailing punctuation (enforced by revive `error-strings` rule):
+
+```go
+// wrong
+return errors.New("Table does not exist.")
+
+// correct
+return errors.New("table does not exist")
+```
+
+**Sentinel errors:** public errors are `ErrXxx`; unexported are `errXxx`. Callers check with `errors.Is`.
+
+---
+
+### Early returns
+
+Prefer early returns over nested conditionals. Each guard clause should handle the error / edge case and return immediately.
+
+```go
+// wrong — pyramids
+func foo() error {
+    if ok {
+        if err == nil {
+            // actual logic
+        }
+    }
+    return nil
+}
+
+// correct
+func foo() error {
+    if !ok {
+        return errors.New("not ok")
+    }
+    if err != nil {
+        return fmt.Errorf("foo: %w", err)
+    }
+    // actual logic
+    return nil
+}
+```
+
+---
 
 ### Context
 
-- `context.Context` is always the first argument.
+- `context.Context` is always the **first** argument (enforced by revive `context-as-argument` rule).
 - Transactions are stored in the context: `TxFromContext(ctx)` / `WithTransaction(ctx, tx)`.
 - Pass `ctx` through every layer without modification (except when injecting a transaction).
+
+---
+
+### Tests
+
+**`require` vs `assert`:** use `require` (fail-fast) when the test cannot safely continue if the assertion fails (e.g. a nil pointer would follow). Use `assert` (continue) for independent property checks.
+
+```go
+result, err := t.Select(ctx, stmt)
+require.NoError(t, err)          // can't continue if err != nil
+assert.Len(t, rows, 3)           // independent check, test can still report others
+assert.Equal(t, "alice", rows[0])
+```
+
+**`t.Parallel()`** should be called at the top of every test and subtest that does not write shared state.
+
+**Table-driven tests** are preferred when the same logic is exercised with multiple inputs. Use `t.Run` with a descriptive name for each case. For a single scenario with distinct setup, a named subtest is fine.
+
+---
 
 ### Channel-based pipelines (SELECT)
 
 SELECT uses a producer/consumer goroutine pipeline:
+
 ```go
 filteredPipe := make(chan Row, 128)  // buffered — reduces goroutine blocking
 errorsPipe   := make(chan error, N)
@@ -310,18 +439,24 @@ wg.Go(func() {
 go func() { wg.Wait(); close(filteredPipe) }()
 
 // Consumer (selectStreaming or selectWithSort)
-for aRow := range filteredPipe { ... }
+for row := range filteredPipe { ... }
 ```
 
 When adding filtering/transformation stages, insert them as goroutines between `filteredPipe` and the consumer.
+
+---
 
 ### Row projection
 
 `row.OnlyFields(fields...)` returns a new `Row` with only the requested columns. Always call it just before sending a row to the caller — scan phases should fetch all fields needed by WHERE conditions, not just the SELECT list.
 
+---
+
 ### Statement result / iterator
 
 `StatementResult.Rows` is a lazy `Iterator`. Do not materialise all rows into a slice unless you need to sort or deduplicate them. The streaming path (`selectStreaming`) never loads all rows into memory.
+
+---
 
 ### NULL handling
 
@@ -329,10 +464,14 @@ When adding filtering/transformation stages, insert them as goroutines between `
 - `OptionalValue{Valid: false}` represents NULL.
 - Indexes do not store NULL keys; equality conditions on NULL use `IS NULL` / `IS NOT NULL`, not `=`.
 
+---
+
 ### Text storage
 
 - `TextPointer` wraps `[]byte`. Always use `TextPointer.String()` for logical comparison; never compare `TextPointer.Data` bytes directly (inline vs overflow representations differ).
 - VARCHAR ≤ 255 bytes is stored inline. Larger TEXT uses overflow pages.
+
+---
 
 ### Transactions
 
@@ -385,4 +524,4 @@ refactor: extract query plan ordering into separate file
 docs: update README planned features list
 ```
 
-PRs target `main`. The CI gate is `go build ./...` + `go test ./...`.
+PRs target `main`. The CI gate is `golangci-lint` + `go build ./...` + `go test ./...`.

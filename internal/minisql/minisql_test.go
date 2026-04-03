@@ -595,7 +595,7 @@ func (g *dataGen) UniqueStreets(n int) []string {
 
 func newRootLeafPageWithCells(cells, rowSize int) *Page {
 	aRootLeaf := NewLeafNode()
-	aRootLeaf.Header.Header.IsRoot = true
+	aRootLeaf.Header.IsRoot = true
 	aRootLeaf.Header.Cells = uint32(cells)
 
 	for i := range cells {
@@ -796,6 +796,3 @@ func resetMocks(mocks ...*mock.Mock) {
 	}
 }
 
-func intPtr(i int64) *int64 {
-	return &i
-}

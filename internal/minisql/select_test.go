@@ -3,7 +3,6 @@ package minisql
 import (
 	"context"
 	"sort"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -350,13 +349,11 @@ func TestTable_Select(t *testing.T) {
 
 		// We expect all rows sorted by email ascending
 		expected := make([]Row, 0, len(rows))
-		for _, aRow := range rows {
-			expected = append(expected, aRow)
-		}
+		expected = append(expected, rows...)
 		sort.Slice(expected, func(i, j int) bool {
 			email1, _ := expected[i].GetValue("email")
 			email2, _ := expected[j].GetValue("email")
-			return strings.Compare(email1.Value.(TextPointer).String(), email2.Value.(TextPointer).String()) < 0
+			return email1.Value.(TextPointer).String() < email2.Value.(TextPointer).String()
 		})
 		assert.Equal(t, expected, collectRows(ctx, aResult))
 	})
@@ -378,13 +375,11 @@ func TestTable_Select(t *testing.T) {
 
 		// We expect all rows sorted by email descending
 		expected := make([]Row, 0, len(rows))
-		for _, aRow := range rows {
-			expected = append(expected, aRow)
-		}
+		expected = append(expected, rows...)
 		sort.Slice(expected, func(i, j int) bool {
 			email1, _ := expected[i].GetValue("email")
 			email2, _ := expected[j].GetValue("email")
-			return strings.Compare(email1.Value.(TextPointer).String(), email2.Value.(TextPointer).String()) > 0
+			return email1.Value.(TextPointer).String() > email2.Value.(TextPointer).String()
 		})
 		assert.Equal(t, expected, collectRows(ctx, aResult))
 	})
@@ -413,7 +408,7 @@ func TestTable_Select(t *testing.T) {
 			}
 			emailI, _ := expected[i].GetValue("email")
 			emailJ, _ := expected[j].GetValue("email")
-			return strings.Compare(emailI.Value.(TextPointer).String(), emailJ.Value.(TextPointer).String()) < 0
+			return emailI.Value.(TextPointer).String() < emailJ.Value.(TextPointer).String()
 		})
 
 		assert.Equal(t, expected, collectRows(ctx, aResult))
@@ -443,7 +438,7 @@ func TestTable_Select(t *testing.T) {
 			}
 			emailI, _ := expected[i].GetValue("email")
 			emailJ, _ := expected[j].GetValue("email")
-			return strings.Compare(emailI.Value.(TextPointer).String(), emailJ.Value.(TextPointer).String()) > 0
+			return emailI.Value.(TextPointer).String() > emailJ.Value.(TextPointer).String()
 		})
 
 		assert.Equal(t, expected, collectRows(ctx, aResult))
@@ -478,7 +473,7 @@ func TestTable_Select(t *testing.T) {
 			}
 			emailI, _ := expected[i].GetValue("email")
 			emailJ, _ := expected[j].GetValue("email")
-			return strings.Compare(emailI.Value.(TextPointer).String(), emailJ.Value.(TextPointer).String()) < 0
+			return emailI.Value.(TextPointer).String() < emailJ.Value.(TextPointer).String()
 		})
 
 		assert.Equal(t, expected, collectRows(ctx, aResult))
@@ -504,9 +499,7 @@ func TestTable_Select(t *testing.T) {
 	t.Run("Count rows with condition", func(t *testing.T) {
 		// Pick one of middle IDs and prepared expected count
 		expected := make([]Row, 0, len(rows))
-		for _, aRow := range rows {
-			expected = append(expected, aRow)
-		}
+		expected = append(expected, rows...)
 		sort.Slice(expected, func(i, j int) bool {
 			id1, _ := expected[i].GetValue("id")
 			id2, _ := expected[j].GetValue("id")

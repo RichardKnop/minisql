@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -137,11 +138,12 @@ func extractJoinColumnPairs(conditions Conditions, baseAlias, joinAlias string, 
 
 		// Match aliases to determine which field belongs to which table
 		var baseField, joinField Field
-		if field1.AliasPrefix == baseAlias && field2.AliasPrefix == joinAlias {
+		switch {
+		case field1.AliasPrefix == baseAlias && field2.AliasPrefix == joinAlias:
 			baseField, joinField = field1, field2
-		} else if field1.AliasPrefix == joinAlias && field2.AliasPrefix == baseAlias {
+		case field1.AliasPrefix == joinAlias && field2.AliasPrefix == baseAlias:
 			baseField, joinField = field2, field1
-		} else {
+		default:
 			// Not a valid join condition between these two tables
 			continue
 		}
@@ -161,47 +163,10 @@ func extractJoinColumnPairs(conditions Conditions, baseAlias, joinAlias string, 
 	}
 
 	if len(pairs) == 0 {
-		return nil, fmt.Errorf("could not extract valid join columns from conditions")
+		return nil, errors.New("could not extract valid join columns from conditions")
 	}
 
 	return pairs, nil
-}
-
-// findIndexOnColumn finds an index (primary key, unique, or secondary) on the given column
-func (t *Table) findIndexOnColumn(columnName string) *IndexInfo {
-	if columnName == "" {
-		return nil
-	}
-
-	// Check primary key
-	if len(t.PrimaryKey.Columns) == 1 && t.PrimaryKey.Columns[0].Name == columnName {
-		return &IndexInfo{
-			Name:    t.PrimaryKey.Name,
-			Columns: t.PrimaryKey.Columns,
-		}
-	}
-
-	// Check unique indexes
-	for name, idx := range t.UniqueIndexes {
-		if len(idx.Columns) == 1 && idx.Columns[0].Name == columnName {
-			return &IndexInfo{
-				Name:    name,
-				Columns: idx.Columns,
-			}
-		}
-	}
-
-	// Check secondary indexes
-	for name, idx := range t.SecondaryIndexes {
-		if len(idx.Columns) == 1 && idx.Columns[0].Name == columnName {
-			return &IndexInfo{
-				Name:    name,
-				Columns: idx.Columns,
-			}
-		}
-	}
-
-	return nil
 }
 
 // findIndexOnColumns finds an index (primary key, unique, or secondary) that matches the given columns
@@ -349,7 +314,7 @@ func getConditionTableAlias(condition Condition, baseTableAlias string, joins []
 // executeNestedLoopJoin performs nested loop join execution for multi-table queries
 func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProvider, selectedFields []Field, filteredPipe chan<- Row) error {
 	if len(p.Joins) == 0 {
-		return fmt.Errorf("no joins to execute")
+		return errors.New("no joins to execute")
 	}
 
 	// For star schema, we process joins sequentially

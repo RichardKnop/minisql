@@ -9,6 +9,7 @@ import (
 	"github.com/RichardKnop/minisql/internal/minisql"
 )
 
+// Stmt ...
 type Stmt struct {
 	conn      *Conn
 	statement minisql.Statement
@@ -46,6 +47,7 @@ func (s Stmt) Exec(args []driver.Value) (driver.Result, error) {
 	return nil, fmt.Errorf("Exec without context is not supported; use ExecContext instead")
 }
 
+// ExecContext ...
 func (s Stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
 	internalArgs, err := toInternalArgs(args)
 	if err != nil {
@@ -73,6 +75,7 @@ func (s Stmt) Query(args []driver.Value) (driver.Rows, error) {
 	return nil, fmt.Errorf("Query without context is not supported; use QueryContext instead")
 }
 
+// QueryContext ...
 func (s Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
 	internalArgs, err := toInternalArgs(args)
 	if err != nil {
@@ -98,13 +101,8 @@ func (s Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (drive
 
 func toInternalArgs(args []driver.NamedValue) ([]any, error) {
 	internalArgs := make([]any, 0, len(args))
+	// Supported argument types: int64, float64, bool, []byte, string, time.Time
 	for _, arg := range args {
-		//	int64
-		//	float64
-		//	bool
-		//	[]byte
-		//	string
-		//	time.Time
 		switch v := arg.Value.(type) {
 		case nil:
 			return nil, nil

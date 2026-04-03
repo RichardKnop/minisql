@@ -11,6 +11,7 @@ type indexPager[T IndexKey] struct {
 	unique  bool
 }
 
+// GetPage ...
 func (p *indexPager[T]) GetPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
 	return p.pagerImpl.GetPage(ctx, pageIdx, p.unmarshal)
 }
@@ -26,7 +27,7 @@ func (p *indexPager[T]) unmarshal(totalPages uint32, pageIdx PageIndex, buf []by
 		if err != nil {
 			return nil, err
 		}
-		node.Header.RightChild = RIGHT_CHILD_NOT_SET
+		node.Header.RightChild = RightChildNotSet
 		return &Page{Index: pageIdx, IndexNode: node}, nil
 	}
 
@@ -41,13 +42,13 @@ func (p *indexPager[T]) unmarshal(totalPages uint32, pageIdx PageIndex, buf []by
 		return &Page{Index: pageIdx, IndexNode: node}, nil
 	case PageTypeFree:
 		// Free page
-		aFreePage := new(FreePage)
-		if err := aFreePage.Unmarshal(buf[idx:]); err != nil {
+		freePage := new(FreePage)
+		if err := freePage.Unmarshal(buf[idx:]); err != nil {
 			return nil, err
 		}
 		return &Page{
 			Index:    pageIdx,
-			FreePage: aFreePage,
+			FreePage: freePage,
 		}, nil
 	case PageTypeIndexOverflow:
 		// Index overflow page

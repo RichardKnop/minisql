@@ -14,7 +14,7 @@ func (s *TestSuite) TestSelect() {
 	_, err = s.db.Exec(createUsersTimestampIndexSQL)
 	s.Require().NoError(err)
 
-	// First insert one row with explicitely set timestamp for created column
+	// First insert one row with explicitly set timestamp for created column
 	s.execQuery(`insert into users("email", "name", "created") 
 values('Danny_Mason2966@xqj6f.tech', 'Danny Mason', '2024-01-01 12:00:00');`, 1)
 

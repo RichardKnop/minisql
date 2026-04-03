@@ -29,7 +29,7 @@ func TestTable_Insert(t *testing.T) {
 			Inserts: [][]OptionalValue{rows[0].Values},
 		}
 
-		mustInsert(t, ctx, aTable, txManager, stmt)
+		mustInsert(ctx, t, aTable, txManager, stmt)
 
 		assert.Equal(t, 1, int(aPager.pages[0].LeafNode.Header.Cells))
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Cells[0].Key))
@@ -53,7 +53,7 @@ func TestTable_Insert(t *testing.T) {
 			Inserts: [][]OptionalValue{rows[1].Values},
 		}
 
-		mustInsert(t, ctx, aTable, txManager, stmt)
+		mustInsert(ctx, t, aTable, txManager, stmt)
 
 		assert.Equal(t, 2, int(aPager.pages[0].LeafNode.Header.Cells))
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Cells[0].Key))
@@ -89,7 +89,7 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	mustInsert(t, ctx, aTable, txManager, stmt)
+	mustInsert(ctx, t, aTable, txManager, stmt)
 
 	assert.Equal(t, 3, int(aPager.pages[0].LeafNode.Header.Cells))
 	assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Cells[0].Key))
@@ -118,9 +118,8 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	mustInsert(t, ctx, aTable, txManager, stmt)
+	mustInsert(ctx, t, aTable, txManager, stmt)
 
-	//require.NoError(t, aTable.print())
 
 	assert.Equal(t, 1, int(aPager.pages[0].InternalNode.Header.KeysNum))
 	assert.True(t, aPager.pages[0].InternalNode.Header.IsRoot)
@@ -179,9 +178,8 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	mustInsert(t, ctx, aTable, txManager, stmt)
+	mustInsert(ctx, t, aTable, txManager, stmt)
 
-	//require.NoError(t, aTable.print())
 
 	// Assert root node
 	aRootPage := aPager.pages[0]
@@ -242,9 +240,8 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	mustInsert(t, ctx, aTable, txManager, stmt)
+	mustInsert(ctx, t, aTable, txManager, stmt)
 
-	//require.NoError(t, aTable.print())
 	checkRows(ctx, t, aTable, rows)
 
 	// Assert root node
@@ -339,7 +336,7 @@ func TestTable_Insert_Overflow(t *testing.T) {
 		}
 		stmt.Inserts = append(stmt.Inserts, rows[0].Values)
 
-		mustInsert(t, ctx, aTable, txManager, stmt)
+		mustInsert(ctx, t, aTable, txManager, stmt)
 
 		require.Equal(t, 1, int(aPager.TotalPages()))
 		assert.NotNil(t, aPager.pages[0].LeafNode)
@@ -352,7 +349,7 @@ func TestTable_Insert_Overflow(t *testing.T) {
 		}
 		stmt.Inserts = append(stmt.Inserts, rows[1].Values)
 
-		mustInsert(t, ctx, aTable, txManager, stmt)
+		mustInsert(ctx, t, aTable, txManager, stmt)
 
 		require.Equal(t, 2, int(aPager.TotalPages()))
 		assert.NotNil(t, aPager.pages[0].LeafNode)
@@ -368,7 +365,7 @@ func TestTable_Insert_Overflow(t *testing.T) {
 		}
 		stmt.Inserts = append(stmt.Inserts, rows[2].Values)
 
-		mustInsert(t, ctx, aTable, txManager, stmt)
+		mustInsert(ctx, t, aTable, txManager, stmt)
 
 		require.Equal(t, 4, int(aPager.TotalPages()))
 		assert.NotNil(t, aPager.pages[0].LeafNode)
@@ -384,7 +381,7 @@ func TestTable_Insert_Overflow(t *testing.T) {
 	})
 }
 
-func mustInsert(t *testing.T, ctx context.Context, aTable *Table, txManager *TransactionManager, stmt Statement) {
+func mustInsert(ctx context.Context, t *testing.T, aTable *Table, txManager *TransactionManager, stmt Statement) {
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		_, err := aTable.Insert(ctx, stmt)
 		return err

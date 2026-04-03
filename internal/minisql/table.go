@@ -2,12 +2,14 @@ package minisql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"go.uber.org/zap"
 )
 
+// Table ...
 type Table struct {
 	Name                 string
 	Columns              []Column
@@ -25,64 +27,33 @@ type Table struct {
 	provider             TableProvider // Access to other tables for JOIN operations
 }
 
+// TableOption ...
 type TableOption func(*Table)
 
-// estimateRowCount returns an approximate row count for the table
-// Uses index statistics if available, otherwise does a quick sequential scan estimate
-func (t *Table) estimateRowCount(ctx context.Context) int64 {
-	// First try to use statistics if available
-	if stats, ok := t.indexStats["_table"]; ok {
-		return stats.NEntry // For table stats, this represents row count
-	}
-
-	// Try primary key statistics
-	if t.PrimaryKey.Name != "" {
-		if stats, ok := t.indexStats[t.PrimaryKey.Name]; ok {
-			return stats.NEntry
-		}
-	}
-
-	// Fall back to quick estimation by counting
-	// This is still better than no optimization
-	count := int64(0)
-	rowChan := make(chan Row, 100)
-	go func() {
-		defer close(rowChan)
-		// Use empty scan to count all rows
-		scan := Scan{
-			TableName: t.Name,
-			Type:      ScanTypeSequential,
-		}
-		_ = t.sequentialScan(ctx, scan, []Field{}, rowChan)
-	}()
-
-	for range rowChan {
-		count++
-	}
-
-	return count
-}
-
+// WithPrimaryKey ...
 func WithPrimaryKey(pk PrimaryKey) TableOption {
 	return func(t *Table) {
 		t.PrimaryKey = pk
 	}
 }
 
+// WithUniqueIndex ...
 func WithUniqueIndex(index UniqueIndex) TableOption {
 	return func(t *Table) {
 		t.UniqueIndexes[index.Name] = index
 	}
 }
 
+// WithSecondaryIndex ...
 func WithSecondaryIndex(index SecondaryIndex) TableOption {
 	return func(t *Table) {
 		t.SecondaryIndexes[index.Name] = index
 	}
 }
 
+// NewTable ...
 func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, name string, columns []Column, rootPageIdx PageIndex, provider TableProvider, opts ...TableOption) *Table {
-	aTable := &Table{
+	table := &Table{
 		Name:                 name,
 		Columns:              columns,
 		columnCache:          make(map[string]int, len(columns)),
@@ -100,37 +71,37 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 
 	// If no provider is given, create a simple single-table provider for testing
 	if provider == nil {
-		aTable.provider = &singleTableProvider{table: aTable}
+		table.provider = &singleTableProvider{table: table}
 	}
 
 	// Build column name -> column index cache
-	for i, aColumn := range columns {
-		aTable.columnCache[aColumn.Name] = i
+	for i, col := range columns {
+		table.columnCache[col.Name] = i
 	}
 
 	// Apply options
 	for _, opt := range opts {
-		opt(aTable)
+		opt(table)
 	}
 
 	// Build column name -> IndexInfo cache
-	if aTable.HasPrimaryKey() {
-		aTable.columnIndexInfoCache[indexColumnHash(aTable.PrimaryKey.Columns)] = aTable.PrimaryKey.IndexInfo
+	if table.HasPrimaryKey() {
+		table.columnIndexInfoCache[indexColumnHash(table.PrimaryKey.Columns)] = table.PrimaryKey.IndexInfo
 	}
-	for _, index := range aTable.UniqueIndexes {
-		aTable.columnIndexInfoCache[indexColumnHash(index.Columns)] = index.IndexInfo
+	for _, index := range table.UniqueIndexes {
+		table.columnIndexInfoCache[indexColumnHash(index.Columns)] = index.IndexInfo
 	}
-	for _, index := range aTable.SecondaryIndexes {
-		aTable.columnIndexInfoCache[indexColumnHash(index.Columns)] = index.IndexInfo
+	for _, index := range table.SecondaryIndexes {
+		table.columnIndexInfoCache[indexColumnHash(index.Columns)] = index.IndexInfo
 	}
 
-	return aTable
+	return table
 }
 
 func indexColumnHash(columns []Column) string {
 	var hash strings.Builder
-	for i, aColumn := range columns {
-		hash.WriteString(aColumn.Name)
+	for i, col := range columns {
+		hash.WriteString(col.Name)
 		if i < len(columns)-1 {
 			hash.WriteString("|")
 		}
@@ -143,6 +114,7 @@ type singleTableProvider struct {
 	table *Table
 }
 
+// GetTable ...
 func (p *singleTableProvider) GetTable(ctx context.Context, name string) (*Table, bool) {
 	if p.table != nil && p.table.Name == name {
 		return p.table, true
@@ -150,6 +122,7 @@ func (p *singleTableProvider) GetTable(ctx context.Context, name string) (*Table
 	return nil, false
 }
 
+// SetSecondaryIndex ...
 func (t *Table) SetSecondaryIndex(name string, columns []Column, index BTreeIndex) {
 	t.SecondaryIndexes[name] = SecondaryIndex{
 		IndexInfo: IndexInfo{
@@ -161,23 +134,28 @@ func (t *Table) SetSecondaryIndex(name string, columns []Column, index BTreeInde
 	t.columnIndexInfoCache[indexColumnHash(columns)] = t.SecondaryIndexes[name].IndexInfo
 }
 
+// RemoveSecondaryIndex ...
 func (t *Table) RemoveSecondaryIndex(name string) {
 	delete(t.columnIndexInfoCache, indexColumnHash(t.SecondaryIndexes[name].Columns))
 	delete(t.SecondaryIndexes, name)
 }
 
+// GetRootPageIdx ...
 func (t *Table) GetRootPageIdx() PageIndex {
 	return t.rootPageIdx
 }
 
+// HasNoIndex ...
 func (t *Table) HasNoIndex() bool {
 	return !t.HasPrimaryKey() && len(t.UniqueIndexes) == 0 && len(t.SecondaryIndexes) == 0
 }
 
+// HasPrimaryKey ...
 func (t *Table) HasPrimaryKey() bool {
 	return t.PrimaryKey.Name != ""
 }
 
+// ColumnByName ...
 func (t *Table) ColumnByName(name string) (Column, bool) {
 	if idx, ok := t.columnCache[name]; ok {
 		return t.Columns[idx], true
@@ -185,19 +163,21 @@ func (t *Table) ColumnByName(name string) (Column, bool) {
 	return Column{}, false
 }
 
+// IndexColumnsByIndexName ...
 func (t *Table) IndexColumnsByIndexName(name string) ([]Column, bool) {
 	if t.HasPrimaryKey() && t.PrimaryKey.Name == name {
-		return t.PrimaryKey.IndexInfo.Columns, true
+		return t.PrimaryKey.Columns, true
 	}
 	if index, ok := t.UniqueIndexes[name]; ok {
-		return index.IndexInfo.Columns, true
+		return index.Columns, true
 	}
 	if index, ok := t.SecondaryIndexes[name]; ok {
-		return index.IndexInfo.Columns, true
+		return index.Columns, true
 	}
 	return nil, false
 }
 
+// HasIndexOnColumns ...
 func (t *Table) HasIndexOnColumns(columns []Column) bool {
 	if len(columns) == 0 {
 		return false
@@ -206,11 +186,13 @@ func (t *Table) HasIndexOnColumns(columns []Column) bool {
 	return ok
 }
 
+// HasIndexOnColumn ...
 func (t *Table) HasIndexOnColumn(name string) bool {
 	_, ok := t.columnIndexInfoCache[name]
 	return ok
 }
 
+// IndexInfoByColumnName ...
 func (t *Table) IndexInfoByColumnName(name string) (IndexInfo, bool) {
 	info, ok := t.columnIndexInfoCache[name]
 	if !ok {
@@ -228,6 +210,7 @@ func (t *Table) IndexInfoByColumns(columns []Column) (IndexInfo, bool) {
 	return info, true
 }
 
+// IndexByName ...
 func (t *Table) IndexByName(name string) (BTreeIndex, bool) {
 	if t.HasPrimaryKey() && t.PrimaryKey.Name == name {
 		return t.PrimaryKey.Index, true
@@ -244,17 +227,17 @@ func (t *Table) IndexByName(name string) (BTreeIndex, bool) {
 // SeekNextRowID returns cursor pointing at the position after the last row ID
 // plus a new row ID to insert
 func (t *Table) SeekNextRowID(ctx context.Context, pageIdx PageIndex) (*Cursor, RowID, error) {
-	aPage, err := t.pager.ReadPage(ctx, pageIdx)
+	page, err := t.pager.ReadPage(ctx, pageIdx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("seek next row ID: %w", err)
 	}
-	if aPage.LeafNode == nil {
-		return t.SeekNextRowID(ctx, aPage.InternalNode.Header.RightChild)
+	if page.LeafNode == nil {
+		return t.SeekNextRowID(ctx, page.InternalNode.Header.RightChild)
 	}
-	if aPage.LeafNode.Header.NextLeaf != 0 {
-		return t.SeekNextRowID(ctx, aPage.LeafNode.Header.NextLeaf)
+	if page.LeafNode.Header.NextLeaf != 0 {
+		return t.SeekNextRowID(ctx, page.LeafNode.Header.NextLeaf)
 	}
-	maxKey, err := t.GetMaxKey(ctx, aPage)
+	maxKey, err := t.GetMaxKey(ctx, page)
 	nextRowID := maxKey
 	if err == nil {
 		nextRowID = maxKey + 1
@@ -262,20 +245,20 @@ func (t *Table) SeekNextRowID(ctx context.Context, pageIdx PageIndex) (*Cursor, 
 	return &Cursor{
 		Table:   t,
 		PageIdx: pageIdx,
-		CellIdx: aPage.LeafNode.Header.Cells,
+		CellIdx: page.LeafNode.Header.Cells,
 	}, nextRowID, nil
 }
 
-// SeelFirst returns cursor pointing at the first row in the table
+// SeekFirst returns a cursor pointing at the first row in the table.
 func (t *Table) SeekFirst(ctx context.Context) (*Cursor, error) {
 	pageIdx := t.GetRootPageIdx()
-	aPage, err := t.pager.ReadPage(ctx, pageIdx)
+	page, err := t.pager.ReadPage(ctx, pageIdx)
 	if err != nil {
 		return nil, fmt.Errorf("seek first: %w", err)
 	}
-	for aPage.LeafNode == nil {
-		pageIdx = aPage.InternalNode.ICells[0].Child
-		aPage, err = t.pager.ReadPage(ctx, pageIdx)
+	for page.LeafNode == nil {
+		pageIdx = page.InternalNode.ICells[0].Child
+		page, err = t.pager.ReadPage(ctx, pageIdx)
 		if err != nil {
 			return nil, fmt.Errorf("seek first: %w", err)
 		}
@@ -284,50 +267,50 @@ func (t *Table) SeekFirst(ctx context.Context) (*Cursor, error) {
 		Table:      t,
 		PageIdx:    pageIdx,
 		CellIdx:    0,
-		EndOfTable: aPage.LeafNode.Header.Cells == 0,
+		EndOfTable: page.LeafNode.Header.Cells == 0,
 	}, nil
 }
 
 // SeekLast returns cursor pointing at the last row in the table
 func (t *Table) SeekLast(ctx context.Context, pageIdx PageIndex) (*Cursor, error) {
-	aPage, err := t.pager.ReadPage(ctx, pageIdx)
+	page, err := t.pager.ReadPage(ctx, pageIdx)
 	if err != nil {
 		return nil, fmt.Errorf("seek next row ID: %w", err)
 	}
-	if aPage.LeafNode == nil {
-		return t.SeekLast(ctx, aPage.InternalNode.Header.RightChild)
+	if page.LeafNode == nil {
+		return t.SeekLast(ctx, page.InternalNode.Header.RightChild)
 	}
-	if aPage.LeafNode.Header.NextLeaf != 0 {
-		return t.SeekLast(ctx, aPage.LeafNode.Header.NextLeaf)
+	if page.LeafNode.Header.NextLeaf != 0 {
+		return t.SeekLast(ctx, page.LeafNode.Header.NextLeaf)
 	}
 	return &Cursor{
 		Table:   t,
 		PageIdx: pageIdx,
-		CellIdx: aPage.LeafNode.Header.Cells - 1,
+		CellIdx: page.LeafNode.Header.Cells - 1,
 	}, nil
 }
 
 // Seek the cursor for a key, if it does not exist then return the cursor
 // for the page and cell where it should be inserted
 func (t *Table) Seek(ctx context.Context, key RowID) (*Cursor, error) {
-	aRootPage, err := t.pager.ReadPage(ctx, t.GetRootPageIdx())
+	rootPage, err := t.pager.ReadPage(ctx, t.GetRootPageIdx())
 	if err != nil {
 		return nil, fmt.Errorf("seek: %w", err)
 	}
-	if aRootPage.LeafNode != nil {
-		return t.leafNodeSeek(t.GetRootPageIdx(), aRootPage, key)
-	} else if aRootPage.InternalNode != nil {
-		return t.internalNodeSeek(ctx, aRootPage, key)
+	if rootPage.LeafNode != nil {
+		return t.leafNodeSeek(t.GetRootPageIdx(), rootPage, key)
+	} else if rootPage.InternalNode != nil {
+		return t.internalNodeSeek(ctx, rootPage, key)
 	}
-	return nil, fmt.Errorf("root page type")
+	return nil, errors.New("root page type")
 }
 
-func (t *Table) leafNodeSeek(pageIdx PageIndex, aPage *Page, key RowID) (*Cursor, error) {
+func (t *Table) leafNodeSeek(pageIdx PageIndex, page *Page, key RowID) (*Cursor, error) {
 	var (
 		minIdx uint32
-		maxIdx = aPage.LeafNode.Header.Cells
+		maxIdx = page.LeafNode.Header.Cells
 
-		aCursor = Cursor{
+		cursor = Cursor{
 			Table:   t,
 			PageIdx: pageIdx,
 		}
@@ -336,10 +319,10 @@ func (t *Table) leafNodeSeek(pageIdx PageIndex, aPage *Page, key RowID) (*Cursor
 	// Search the Btree
 	for i := maxIdx; i != minIdx; {
 		index := (minIdx + i) / 2
-		keyIdx := aPage.LeafNode.Cells[index].Key
+		keyIdx := page.LeafNode.Cells[index].Key
 		if key == keyIdx {
-			aCursor.CellIdx = index
-			return &aCursor, nil
+			cursor.CellIdx = index
+			return &cursor, nil
 		}
 		if key < keyIdx {
 			i = index
@@ -348,27 +331,27 @@ func (t *Table) leafNodeSeek(pageIdx PageIndex, aPage *Page, key RowID) (*Cursor
 		}
 	}
 
-	aCursor.CellIdx = minIdx
+	cursor.CellIdx = minIdx
 
-	return &aCursor, nil
+	return &cursor, nil
 }
 
-func (t *Table) internalNodeSeek(ctx context.Context, aPage *Page, key RowID) (*Cursor, error) {
-	childIdx := aPage.InternalNode.IndexOfChild(key)
-	childPageIdx, err := aPage.InternalNode.Child(childIdx)
+func (t *Table) internalNodeSeek(ctx context.Context, page *Page, key RowID) (*Cursor, error) {
+	childIdx := page.InternalNode.IndexOfChild(key)
+	childPageIdx, err := page.InternalNode.Child(childIdx)
 	if err != nil {
 		return nil, err
 	}
 
-	aChildPage, err := t.pager.ReadPage(ctx, childPageIdx)
+	childPage, err := t.pager.ReadPage(ctx, childPageIdx)
 	if err != nil {
 		return nil, fmt.Errorf("internal node seek: %w", err)
 	}
 
-	if aChildPage.InternalNode != nil {
-		return t.internalNodeSeek(ctx, aChildPage, key)
+	if childPage.InternalNode != nil {
+		return t.internalNodeSeek(ctx, childPage, key)
 	}
-	return t.leafNodeSeek(childPageIdx, aChildPage, key)
+	return t.leafNodeSeek(childPageIdx, childPage, key)
 }
 
 // Handle splitting the root.
@@ -411,18 +394,18 @@ func (t *Table) createNewRoot(ctx context.Context, rightChildPageIdx PageIndex) 
 		leftChildPage.InternalNode.Header.IsRoot = false
 		// Update parent for all child pages
 		for i := 0; i < int(leftChildPage.InternalNode.Header.KeysNum); i++ {
-			aChildPage, err := t.pager.ModifyPage(ctx, leftChildPage.InternalNode.ICells[i].Child)
+			childPage, err := t.pager.ModifyPage(ctx, leftChildPage.InternalNode.ICells[i].Child)
 			if err != nil {
 				return nil, fmt.Errorf("get child page: %w", err)
 			}
-			aChildPage.setParent(leftChildPage.Index)
+			childPage.setParent(leftChildPage.Index)
 		}
 		// Don't forget right child
-		aChildPage, err := t.pager.ModifyPage(ctx, leftChildPage.InternalNode.Header.RightChild)
+		childPage, err := t.pager.ModifyPage(ctx, leftChildPage.InternalNode.Header.RightChild)
 		if err != nil {
 			return nil, fmt.Errorf("get right child page: %w", err)
 		}
-		aChildPage.setParent(leftChildPage.Index)
+		childPage.setParent(leftChildPage.Index)
 	}
 
 	// Change root node to a new internal node
@@ -450,37 +433,37 @@ func (t *Table) createNewRoot(ctx context.Context, rightChildPageIdx PageIndex) 
 	return leftChildPage, nil
 }
 
-// Add a new child/key pair to parent that corresponds to child
+// InternalNodeInsert adds a new child/key pair to the parent internal node corresponding to the given child page.
 func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPageIdx PageIndex) error {
-	aParentPage, err := t.pager.ModifyPage(ctx, parentPageIdx)
+	parentPage, err := t.pager.ModifyPage(ctx, parentPageIdx)
 	if err != nil {
 		return fmt.Errorf("internal node insert: %w", err)
 	}
 
-	aChildPage, err := t.pager.ModifyPage(ctx, childPageIdx)
+	childPage, err := t.pager.ModifyPage(ctx, childPageIdx)
 	if err != nil {
 		return fmt.Errorf("internal node insert: %w", err)
 	}
-	aChildPage.setParent(parentPageIdx)
+	childPage.setParent(parentPageIdx)
 
-	childMaxKey, err := t.GetMaxKey(ctx, aChildPage)
+	childMaxKey, err := t.GetMaxKey(ctx, childPage)
 	if err != nil {
 		return fmt.Errorf("internal node insert: %w", err)
 	}
 	var (
-		index            = aParentPage.InternalNode.IndexOfChild(childMaxKey)
-		originalKeyCount = aParentPage.InternalNode.Header.KeysNum
+		index            = parentPage.InternalNode.IndexOfChild(childMaxKey)
+		originalKeyCount = parentPage.InternalNode.Header.KeysNum
 	)
 
-	if aParentPage.InternalNode.Header.KeysNum >= uint32(t.maxICells(parentPageIdx)) {
+	if parentPage.InternalNode.Header.KeysNum >= uint32(t.maxICells(parentPageIdx)) {
 		return t.InternalNodeSplitInsert(ctx, parentPageIdx, childPageIdx)
 	}
 
 	/*
-	  An internal node with a right child of RIGHT_CHILD_NOT_SET is empty
+	  An internal node with a right child of RightChildNotSet is empty
 	*/
-	if aParentPage.InternalNode.Header.RightChild == RIGHT_CHILD_NOT_SET {
-		aParentPage.InternalNode.Header.RightChild = childPageIdx
+	if parentPage.InternalNode.Header.RightChild == RightChildNotSet {
+		parentPage.InternalNode.Header.RightChild = childPageIdx
 		return nil
 	}
 
@@ -490,9 +473,9 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 	  and immediately calling internal_node_split_and_insert has the effect
 	  of creating a new key at (max_cells + 1) with an uninitialized value
 	*/
-	aParentPage.InternalNode.Header.KeysNum += 1
+	parentPage.InternalNode.Header.KeysNum += 1
 
-	rightChildPageIdx := aParentPage.InternalNode.Header.RightChild
+	rightChildPageIdx := parentPage.InternalNode.Header.RightChild
 	rightChildPage, err := t.pager.ModifyPage(ctx, rightChildPageIdx)
 	if err != nil {
 		return fmt.Errorf("internal node insert: %w", err)
@@ -504,34 +487,37 @@ func (t *Table) InternalNodeInsert(ctx context.Context, parentPageIdx, childPage
 	}
 	if childMaxKey > rightChildMaxKey {
 		// Replace right child
-		aParentPage.InternalNode.SetChild(originalKeyCount, rightChildPageIdx)
-		aParentPage.InternalNode.ICells[originalKeyCount].Key = rightChildMaxKey
-		aParentPage.InternalNode.Header.RightChild = childPageIdx
+		if err := parentPage.InternalNode.SetChild(originalKeyCount, rightChildPageIdx); err != nil {
+			return fmt.Errorf("internal node insert: %w", err)
+		}
+		parentPage.InternalNode.ICells[originalKeyCount].Key = rightChildMaxKey
+		parentPage.InternalNode.Header.RightChild = childPageIdx
 		return nil
 	}
 
 	// Make room for the new cell
 	for i := originalKeyCount; i > index; i-- {
-		aParentPage.InternalNode.ICells[i] = aParentPage.InternalNode.ICells[i-1]
+		parentPage.InternalNode.ICells[i] = parentPage.InternalNode.ICells[i-1]
 	}
-	aParentPage.InternalNode.SetChild(index, childPageIdx)
-	aParentPage.InternalNode.ICells[index].Key = childMaxKey
+	if err := parentPage.InternalNode.SetChild(index, childPageIdx); err != nil {
+		return fmt.Errorf("internal node insert: %w", err)
+	}
+	parentPage.InternalNode.ICells[index].Key = childMaxKey
 
 	return nil
 }
 
-// Splits internal node. First, create a sibling node to store (n-1)/2 keys,
-// move these keys from the original internal node to the sibling. Second,
-// update original node's parent to reflect its new max key after splitting.
-// Insert the sibling node into the parent, this could cause parent
-// to be split as well. If the original node is root, create new root.
+// InternalNodeSplitInsert splits an internal node and inserts the child.
+// It creates a sibling to hold (n-1)/2 keys, updates the parent's max key,
+// inserts the sibling into the parent (possibly triggering further splits),
+// and creates a new root if the original node was the root.
 func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageIdx PageIndex) error {
-	aSplitPage, err := t.pager.ModifyPage(ctx, pageIdx)
+	splitPage, err := t.pager.ModifyPage(ctx, pageIdx)
 	if err != nil {
 		return fmt.Errorf("internal node split insert: %w", err)
 	}
-	splittingRoot := aSplitPage.InternalNode.Header.IsRoot
-	oldMaxKey, err := t.GetMaxKey(ctx, aSplitPage)
+	splittingRoot := splitPage.InternalNode.Header.IsRoot
+	oldMaxKey, err := t.GetMaxKey(ctx, splitPage)
 	if err != nil {
 		return fmt.Errorf("internal node split insert: %w", err)
 	}
@@ -547,17 +533,17 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 
 	// Create a new page, it will be on the same level as original node and to the right of it
 	// Use recycled page if available, otherwise create new one
-	aNewPage, err := t.pager.GetFreePage(ctx)
+	newPage, err := t.pager.GetFreePage(ctx)
 	if err != nil {
 		return fmt.Errorf("get new page: %w", err)
 	}
 	// Make sure the new page is an internal node
-	aNewPage.InternalNode = NewInternalNode()
-	aNewPage.LeafNode = nil
+	newPage.InternalNode = NewInternalNode()
+	newPage.LeafNode = nil
 
 	t.logger.Sugar().With(
 		"page_index", int(pageIdx),
-		"new_page_index", int(aNewPage.Index),
+		"new_page_index", int(newPage.Index),
 	).Debug("internal node split insert")
 
 	if splittingRoot {
@@ -566,42 +552,42 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 		   to the new root's left child, new_page_num will already point to
 		   the new root's right child
 		*/
-		aSplitPage, err = t.createNewRoot(ctx, aNewPage.Index)
+		splitPage, err = t.createNewRoot(ctx, newPage.Index)
 		if err != nil {
 			return fmt.Errorf("create new root: %w", err)
 		}
 	}
-	aNewPage.InternalNode.Header.Parent = aSplitPage.InternalNode.Header.Parent
+	newPage.InternalNode.Header.Parent = splitPage.InternalNode.Header.Parent
 
 	maxICells := t.maxICells(pageIdx)
 
 	// First put right child into new node and set right child of old node to invalid page number
-	aNewPage.InternalNode.Header.RightChild = aSplitPage.InternalNode.Header.RightChild
-	newPageRightChild, err := t.pager.ModifyPage(ctx, aNewPage.InternalNode.Header.RightChild)
+	newPage.InternalNode.Header.RightChild = splitPage.InternalNode.Header.RightChild
+	newPageRightChild, err := t.pager.ModifyPage(ctx, newPage.InternalNode.Header.RightChild)
 	if err != nil {
 		return fmt.Errorf("internal node split insert: %w", err)
 	}
-	newPageRightChild.setParent(aNewPage.Index)
-	aSplitPage.InternalNode.Header.RightChild = RIGHT_CHILD_NOT_SET
+	newPageRightChild.setParent(newPage.Index)
+	splitPage.InternalNode.Header.RightChild = RightChildNotSet
 
 	// For each key until you get to the middle key, move the key and the child to the new node
 	for i := maxICells - 1; i > maxICells/2; i-- {
-		if err := t.InternalNodeInsert(ctx, aNewPage.Index, aSplitPage.InternalNode.ICells[i].Child); err != nil {
+		if err := t.InternalNodeInsert(ctx, newPage.Index, splitPage.InternalNode.ICells[i].Child); err != nil {
 			return fmt.Errorf("internal node split insert: %w", err)
 		}
-		aSplitPage.InternalNode.ICells[i] = ICell{}
-		aSplitPage.InternalNode.Header.KeysNum -= 1
+		splitPage.InternalNode.ICells[i] = ICell{}
+		splitPage.InternalNode.Header.KeysNum -= 1
 	}
 
 	// Set child before middle key, which is now the highest key, to be node's right child,
 	// and decrement number of keys
-	aSplitPage.InternalNode.Header.RightChild, err = aSplitPage.InternalNode.Child(aSplitPage.InternalNode.Header.KeysNum - 1)
+	splitPage.InternalNode.Header.RightChild, err = splitPage.InternalNode.Child(splitPage.InternalNode.Header.KeysNum - 1)
 	if err != nil {
 		return fmt.Errorf("internal node split insert: %w", err)
 	}
-	aSplitPage.InternalNode.RemoveLastCell()
+	splitPage.InternalNode.RemoveLastCell()
 
-	maxAfterSplit, err := t.GetMaxKey(ctx, aSplitPage)
+	maxAfterSplit, err := t.GetMaxKey(ctx, splitPage)
 	if err != nil {
 		return fmt.Errorf("internal node split insert: %w", err)
 	}
@@ -614,33 +600,34 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 		}
 		childPage.setParent(pageIdx)
 	} else {
-		if err := t.InternalNodeInsert(ctx, aNewPage.Index, childPageIdx); err != nil {
+		if err := t.InternalNodeInsert(ctx, newPage.Index, childPageIdx); err != nil {
 			return fmt.Errorf("internal node split insert: %w", err)
 		}
-		childPage.setParent(aNewPage.Index)
+		childPage.setParent(newPage.Index)
 	}
 
-	aParentPage, err := t.pager.ModifyPage(ctx, aSplitPage.InternalNode.Header.Parent)
+	parentPage, err := t.pager.ModifyPage(ctx, splitPage.InternalNode.Header.Parent)
 	if err != nil {
 		return fmt.Errorf("internal node split insert: %w", err)
 	}
-	aParentPage.InternalNode.ICells[aParentPage.InternalNode.IndexOfChild(oldMaxKey)].Key = maxAfterSplit
+	parentPage.InternalNode.ICells[parentPage.InternalNode.IndexOfChild(oldMaxKey)].Key = maxAfterSplit
 
 	if splittingRoot {
 		return nil
 	}
 
-	return t.InternalNodeInsert(ctx, aSplitPage.InternalNode.Header.Parent, aNewPage.Index)
+	return t.InternalNodeInsert(ctx, splitPage.InternalNode.Header.Parent, newPage.Index)
 }
 
-func (t *Table) GetMaxKey(ctx context.Context, aPage *Page) (RowID, error) {
-	if aPage.LeafNode != nil {
-		if aPage.LeafNode.Header.Cells == 0 {
-			return 0, fmt.Errorf("get max key: leaf node has no cells")
+// GetMaxKey ...
+func (t *Table) GetMaxKey(ctx context.Context, page *Page) (RowID, error) {
+	if page.LeafNode != nil {
+		if page.LeafNode.Header.Cells == 0 {
+			return 0, errors.New("get max key: leaf node has no cells")
 		}
-		return aPage.LeafNode.Cells[aPage.LeafNode.Header.Cells-1].Key, nil
+		return page.LeafNode.Cells[page.LeafNode.Header.Cells-1].Key, nil
 	}
-	rightChild, err := t.pager.ReadPage(ctx, aPage.InternalNode.Header.RightChild)
+	rightChild, err := t.pager.ReadPage(ctx, page.InternalNode.Header.RightChild)
 	if err != nil {
 		return 0, err
 	}
@@ -651,59 +638,59 @@ func (t *Table) GetMaxKey(ctx context.Context, aPage *Page) (RowID, error) {
 // have located the leaf that contains the key and pass its page and cell index here.
 // The deletion process starts at the leaf and then recursively bubbles up the tree.
 func (t *Table) DeleteKey(ctx context.Context, pageIdx PageIndex, key RowID) error {
-	aPage, err := t.pager.ModifyPage(ctx, pageIdx)
+	page, err := t.pager.ModifyPage(ctx, pageIdx)
 	if err != nil {
 		return fmt.Errorf("delete key: %w", err)
 	}
 
-	if aPage.LeafNode == nil {
-		return fmt.Errorf("DeleteKey called on non-leaf node")
+	if page.LeafNode == nil {
+		return errors.New("DeleteKey called on non-leaf node")
 	}
 
 	// Remove key
-	cellToDelete, ok := aPage.LeafNode.Delete(key)
+	cellToDelete, ok := page.LeafNode.Delete(key)
 
 	// Remove any overflow pages
 	if overflowFields := textOverflowFields(t.Columns...); len(overflowFields) > 0 && ok {
-		aRow := NewRow(t.Columns)
-		aRow, err = aRow.Unmarshal(cellToDelete, overflowFields...)
+		row := NewRow(t.Columns)
+		row, err = row.Unmarshal(cellToDelete, overflowFields...)
 		if err != nil {
 			return err
 		}
-		if err := t.freeOverflowPages(ctx, aRow); err != nil {
+		if err := t.freeOverflowPages(ctx, row); err != nil {
 			return err
 		}
 	}
 
 	// Check for underflow
-	if aPage.LeafNode.AtLeastHalfFull() {
+	if page.LeafNode.AtLeastHalfFull() {
 		return nil
 	}
 
 	// Rebalance leaf node
-	if err := t.rebalanceLeaf(ctx, aPage, key); err != nil {
+	if err := t.rebalanceLeaf(ctx, page, key); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (t *Table) freeOverflowPages(ctx context.Context, aRow Row, onlyForColumns ...Column) error {
-	columns := aRow.Columns
+func (t *Table) freeOverflowPages(ctx context.Context, row Row, onlyForColumns ...Column) error {
+	columns := row.Columns
 	if onlyForColumns != nil {
 		columns = onlyForColumns
 	}
-	for _, aColumn := range columns {
-		if !aColumn.Kind.IsText() {
+	for _, col := range columns {
+		if !col.Kind.IsText() {
 			continue
 		}
-		value, ok := aRow.GetValue(aColumn.Name)
+		value, ok := row.GetValue(col.Name)
 		if !ok || !value.Valid {
 			continue
 		}
 		textPointer, ok := value.Value.(TextPointer)
 		if !ok {
-			return fmt.Errorf("expected TextPointer value for text column %s", aColumn.Name)
+			return fmt.Errorf("expected TextPointer value for text column %s", col.Name)
 		}
 		if textPointer.IsInline() {
 			continue
@@ -731,30 +718,30 @@ func (t *Table) freeOverflowPages(ctx context.Context, aRow Row, onlyForColumns 
 	return nil
 }
 
-func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key RowID) error {
-	aLeafNode := aPage.LeafNode
+func (t *Table) rebalanceLeaf(ctx context.Context, page *Page, key RowID) error {
+	leafNode := page.LeafNode
 
-	if aLeafNode.Header.IsRoot {
+	if leafNode.Header.IsRoot {
 		return nil
 	}
 
-	aParentPage, err := t.pager.ModifyPage(ctx, aLeafNode.Header.Parent)
+	parentPage, err := t.pager.ModifyPage(ctx, leafNode.Header.Parent)
 	if err != nil {
 		return fmt.Errorf("rebalance leaf: %w", err)
 	}
-	myPositionInParent := aParentPage.InternalNode.IndexOfChild(key)
+	myPositionInParent := parentPage.InternalNode.IndexOfChild(key)
 
 	var (
 		left  *Page
 		right *Page
 	)
 	if myPositionInParent > 0 {
-		left, err = t.pager.ModifyPage(ctx, aParentPage.InternalNode.ICells[myPositionInParent-1].Child)
+		left, err = t.pager.ModifyPage(ctx, parentPage.InternalNode.ICells[myPositionInParent-1].Child)
 		if err != nil {
 			return fmt.Errorf("rebalance leaf: %w", err)
 		}
 	} else {
-		right, err = t.pager.ModifyPage(ctx, aParentPage.InternalNode.GetRightChildByIndex(myPositionInParent))
+		right, err = t.pager.ModifyPage(ctx, parentPage.InternalNode.GetRightChildByIndex(myPositionInParent))
 		if err != nil {
 			return fmt.Errorf("rebalance leaf: %w", err)
 		}
@@ -762,8 +749,8 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key RowID) error
 
 	if right != nil && right.LeafNode.CanBorrowFirst() {
 		return t.borrowFromRightLeaf(
-			aParentPage.InternalNode,
-			aLeafNode,
+			parentPage.InternalNode,
+			leafNode,
 			right.LeafNode,
 			myPositionInParent,
 		)
@@ -771,18 +758,18 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key RowID) error
 
 	if left != nil && left.LeafNode.CanBorrowLast() {
 		return t.borrowFromLeftLeaf(
-			aParentPage.InternalNode,
-			aLeafNode,
+			parentPage.InternalNode,
+			leafNode,
 			left.LeafNode,
 			myPositionInParent-1,
 		)
 	}
 
-	if right != nil && aLeafNode.CanMergeWith(right.LeafNode) {
+	if right != nil && leafNode.CanMergeWith(right.LeafNode) {
 		if err := t.mergeLeaves(
 			ctx,
-			aParentPage,
-			aPage,
+			parentPage,
+			page,
 			right,
 			myPositionInParent,
 		); err != nil {
@@ -792,18 +779,18 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key RowID) error
 		return t.pager.AddFreePage(ctx, right.Index)
 	}
 
-	if left != nil && aLeafNode.CanMergeWith(left.LeafNode) {
+	if left != nil && leafNode.CanMergeWith(left.LeafNode) {
 		if err := t.mergeLeaves(
 			ctx,
-			aParentPage,
+			parentPage,
 			left,
-			aPage,
+			page,
 			myPositionInParent-1,
 		); err != nil {
 			return err
 		}
 
-		return t.pager.AddFreePage(ctx, aPage.Index)
+		return t.pager.AddFreePage(ctx, page.Index)
 	}
 
 	return nil
@@ -813,14 +800,14 @@ func (t *Table) rebalanceLeaf(ctx context.Context, aPage *Page, key RowID) error
 // It inserts the last key and value from the left neighbor into the given node,
 // and removes the key and value from the left neighbor.
 // It also updates the key in the parent node.
-func (t *Table) borrowFromLeftLeaf(aParent *InternalNode, aNode, left *LeafNode, idx uint32) error {
+func (t *Table) borrowFromLeftLeaf(parent *InternalNode, node, left *LeafNode, idx uint32) error {
 	left.PrepareModifyCell(left.Header.Cells - 1)
-	aCellToRotate := left.LastCell()
+	cellToRotate := left.LastCell()
 	left.RemoveLastCell()
 
-	aNode.PrependCell(aCellToRotate)
+	node.PrependCell(cellToRotate)
 
-	aParent.ICells[idx].Key = left.LastCell().Key
+	parent.ICells[idx].Key = left.LastCell().Key
 
 	return nil
 }
@@ -829,20 +816,20 @@ func (t *Table) borrowFromLeftLeaf(aParent *InternalNode, aNode, left *LeafNode,
 // It inserts the first key and value from the right neighbor into the given node,
 // and removes the key and value from the right neighbor.
 // It also updates the key in the parent node.
-func (t *Table) borrowFromRightLeaf(aParent *InternalNode, aNode, right *LeafNode, idx uint32) error {
+func (t *Table) borrowFromRightLeaf(parent *InternalNode, node, right *LeafNode, idx uint32) error {
 	right.PrepareModifyCell(0)
-	aCellToRotate := right.FirstCell()
+	cellToRotate := right.FirstCell()
 	right.RemoveFirstCell()
 
-	aNode.AppendCells(aCellToRotate)
+	node.AppendCells(cellToRotate)
 
-	aParent.ICells[idx].Key = right.FirstCell().Key
+	parent.ICells[idx].Key = right.FirstCell().Key
 
 	return nil
 }
 
 // mergeLeaves merges two leaf nodes and deletes the key from the parent node.
-func (t *Table) mergeLeaves(ctx context.Context, aParent, left, right *Page, idx uint32) error {
+func (t *Table) mergeLeaves(ctx context.Context, parent, left, right *Page, idx uint32) error {
 	for i := range right.LeafNode.Header.Cells {
 		right.LeafNode.PrepareModifyCell(i)
 	}
@@ -850,55 +837,55 @@ func (t *Table) mergeLeaves(ctx context.Context, aParent, left, right *Page, idx
 	left.LeafNode.Header.NextLeaf = right.LeafNode.Header.NextLeaf
 
 	// Remove key from parent plus the right child pointer
-	if err := aParent.InternalNode.DeleteKeyAndRightChild(idx); err != nil {
+	if err := parent.InternalNode.DeleteKeyAndRightChild(idx); err != nil {
 		return err
 	}
 
-	if aParent.InternalNode.Header.IsRoot && aParent.InternalNode.Header.KeysNum == 0 {
-		aRootPage, err := t.pager.ModifyPage(ctx, t.GetRootPageIdx())
+	if parent.InternalNode.Header.IsRoot && parent.InternalNode.Header.KeysNum == 0 {
+		rootPage, err := t.pager.ModifyPage(ctx, t.GetRootPageIdx())
 		if err != nil {
 			return fmt.Errorf("get root page: %w", err)
 		}
-		aRootPage.InternalNode = nil
-		aRootPage.LeafNode = left.LeafNode.DeepClone()
-		aRootPage.LeafNode.Header.IsRoot = true
-		aRootPage.LeafNode.Header.Parent = 0
-		aRootPage.LeafNode.Header.NextLeaf = 0
+		rootPage.InternalNode = nil
+		rootPage.LeafNode = left.LeafNode.DeepClone()
+		rootPage.LeafNode.Header.IsRoot = true
+		rootPage.LeafNode.Header.Parent = 0
+		rootPage.LeafNode.Header.NextLeaf = 0
 		return t.pager.AddFreePage(ctx, left.Index)
 	}
 
 	// Check for underflow
-	if aParent.InternalNode.AtLeastHalfFull(t.maxICells(aParent.Index)) {
+	if parent.InternalNode.AtLeastHalfFull(t.maxICells(parent.Index)) {
 		return nil
 	}
 
-	return t.rebalanceInternal(ctx, aParent)
+	return t.rebalanceInternal(ctx, parent)
 }
 
-func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
-	aNode := aPage.InternalNode
-	if aNode.Header.IsRoot {
-		if aNode.Header.KeysNum == 0 {
-			aRootPage, err := t.pager.ModifyPage(ctx, t.GetRootPageIdx())
+func (t *Table) rebalanceInternal(ctx context.Context, page *Page) error {
+	node := page.InternalNode
+	if node.Header.IsRoot {
+		if node.Header.KeysNum == 0 {
+			rootPage, err := t.pager.ModifyPage(ctx, t.GetRootPageIdx())
 			if err != nil {
 				return fmt.Errorf("rebalance internal: %w", err)
 			}
-			firstChildPage, err := t.pager.ModifyPage(ctx, aNode.ICells[0].Child)
+			firstChildPage, err := t.pager.ModifyPage(ctx, node.ICells[0].Child)
 			if err != nil {
 				return fmt.Errorf("rebalance internal: %w", err)
 			}
-			aRootPage.InternalNode = firstChildPage.InternalNode.Clone()
+			rootPage.InternalNode = firstChildPage.InternalNode.Clone()
 			return t.pager.AddFreePage(ctx, firstChildPage.Index)
 		}
 		return nil
 	}
 
-	aParentPage, err := t.pager.ModifyPage(ctx, aNode.Header.Parent)
+	parentPage, err := t.pager.ModifyPage(ctx, node.Header.Parent)
 	if err != nil {
 		return fmt.Errorf("rebalance internal: %w", err)
 	}
 
-	myPositionInParent, err := aParentPage.InternalNode.IndexOfPage(aPage.Index)
+	myPositionInParent, err := parentPage.InternalNode.IndexOfPage(page.Index)
 	if err != nil {
 		return fmt.Errorf("rebalance internal: %w", err)
 	}
@@ -908,12 +895,12 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 		right *Page
 	)
 	if myPositionInParent > 0 {
-		left, err = t.pager.ModifyPage(ctx, aParentPage.InternalNode.ICells[myPositionInParent-1].Child)
+		left, err = t.pager.ModifyPage(ctx, parentPage.InternalNode.ICells[myPositionInParent-1].Child)
 		if err != nil {
 			return fmt.Errorf("get left internal page: %w", err)
 		}
 	} else {
-		right, err = t.pager.ModifyPage(ctx, aParentPage.InternalNode.GetRightChildByIndex(myPositionInParent))
+		right, err = t.pager.ModifyPage(ctx, parentPage.InternalNode.GetRightChildByIndex(myPositionInParent))
 		if err != nil {
 			return fmt.Errorf("get right internal page: %w", err)
 		}
@@ -922,8 +909,8 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 	if right != nil && right.InternalNode.MoreThanHalfFull(t.maxICells(right.Index)) {
 		if err := t.borrowFromRightInternal(
 			ctx,
-			aParentPage,
-			aPage,
+			parentPage,
+			page,
 			right,
 			myPositionInParent,
 		); err != nil {
@@ -935,8 +922,8 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 	if left != nil && left.InternalNode.MoreThanHalfFull(t.maxICells(left.Index)) {
 		if err := t.borrowFromLeftInternal(
 			ctx,
-			aParentPage,
-			aPage,
+			parentPage,
+			page,
 			left,
 			myPositionInParent-1,
 		); err != nil {
@@ -945,11 +932,11 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 		return nil
 	}
 
-	if right != nil && int(right.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= t.maxICells(right.Index) {
+	if right != nil && int(right.InternalNode.Header.KeysNum+node.Header.KeysNum) <= t.maxICells(right.Index) {
 		if err := t.mergeInternalNodes(
 			ctx,
-			aParentPage,
-			aPage,
+			parentPage,
+			page,
 			right,
 			myPositionInParent,
 		); err != nil {
@@ -959,18 +946,18 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 		return t.pager.AddFreePage(ctx, right.Index)
 	}
 
-	if left != nil && int(left.InternalNode.Header.KeysNum+aNode.Header.KeysNum) <= t.maxICells(left.Index) {
+	if left != nil && int(left.InternalNode.Header.KeysNum+node.Header.KeysNum) <= t.maxICells(left.Index) {
 		if err := t.mergeInternalNodes(
 			ctx,
-			aParentPage,
+			parentPage,
 			left,
-			aPage,
+			page,
 			myPositionInParent-1,
 		); err != nil {
 			return fmt.Errorf("merge internal node with left: %w", err)
 		}
 
-		return t.pager.AddFreePage(ctx, aPage.Index)
+		return t.pager.AddFreePage(ctx, page.Index)
 	}
 
 	return nil
@@ -980,19 +967,19 @@ func (t *Table) rebalanceInternal(ctx context.Context, aPage *Page) error {
 // It inserts the last key and value from the left neighbor into the given node,
 // and removes the key and value from the left neighbor.
 // It also updates the key in the parent node.
-func (t *Table) borrowFromLeftInternal(ctx context.Context, aParent, aPage, left *Page, idx uint32) error {
-	aPage.InternalNode.PrependCell(ICell{
-		Key:   aParent.InternalNode.ICells[idx-1].Key,
+func (t *Table) borrowFromLeftInternal(ctx context.Context, parent, page, left *Page, idx uint32) error {
+	page.InternalNode.PrependCell(ICell{
+		Key:   parent.InternalNode.ICells[idx-1].Key,
 		Child: left.InternalNode.Header.RightChild,
 	})
 
-	aParent.InternalNode.ICells[idx-1].Key = left.InternalNode.LastCell().Key
+	parent.InternalNode.ICells[idx-1].Key = left.InternalNode.LastCell().Key
 
 	childPage, err := t.pager.ModifyPage(ctx, left.InternalNode.Header.RightChild)
 	if err != nil {
 		return fmt.Errorf("get child page: %w", err)
 	}
-	childPage.setParent(aPage.Index)
+	childPage.setParent(page.Index)
 
 	left.InternalNode.RemoveLastCell()
 
@@ -1003,20 +990,20 @@ func (t *Table) borrowFromLeftInternal(ctx context.Context, aParent, aPage, left
 // It inserts the first key and value from the right neighbor into the given node,
 // and removes the key and value from the right neighbor.
 // It also updates the key in the parent node.
-func (t *Table) borrowFromRightInternal(ctx context.Context, aParent, aPage, right *Page, idx uint32) error {
-	aPage.InternalNode.AppendCells(ICell{
-		Child: aPage.InternalNode.Header.RightChild,
-		Key:   aParent.InternalNode.ICells[idx].Key,
+func (t *Table) borrowFromRightInternal(ctx context.Context, parent, page, right *Page, idx uint32) error {
+	page.InternalNode.AppendCells(ICell{
+		Child: page.InternalNode.Header.RightChild,
+		Key:   parent.InternalNode.ICells[idx].Key,
 	})
-	aPage.InternalNode.Header.RightChild = right.InternalNode.FirstCell().Child
+	page.InternalNode.Header.RightChild = right.InternalNode.FirstCell().Child
 
-	childPage, err := t.pager.ModifyPage(ctx, aPage.InternalNode.Header.RightChild)
+	childPage, err := t.pager.ModifyPage(ctx, page.InternalNode.Header.RightChild)
 	if err != nil {
 		return fmt.Errorf("get child page: %w", err)
 	}
-	childPage.setParent(aPage.Index)
+	childPage.setParent(page.Index)
 
-	aParent.InternalNode.ICells[idx].Key = right.InternalNode.FirstCell().Key
+	parent.InternalNode.ICells[idx].Key = right.InternalNode.FirstCell().Key
 
 	right.InternalNode.RemoveFirstCell()
 
@@ -1024,12 +1011,12 @@ func (t *Table) borrowFromRightInternal(ctx context.Context, aParent, aPage, rig
 }
 
 // mergeInternalNodes merges two internal nodes and deletes the key from the parent node.
-func (t *Table) mergeInternalNodes(ctx context.Context, aParent, left, right *Page, idx uint32) error {
+func (t *Table) mergeInternalNodes(ctx context.Context, parent, left, right *Page, idx uint32) error {
 	var (
 		leftCells = left.InternalNode.Header.KeysNum
 		leftIndex = left.Index
 	)
-	if aParent.InternalNode.Header.IsRoot && aParent.InternalNode.Header.KeysNum == 1 {
+	if parent.InternalNode.Header.IsRoot && parent.InternalNode.Header.KeysNum == 1 {
 		leftIndex = t.GetRootPageIdx()
 	}
 
@@ -1065,20 +1052,20 @@ func (t *Table) mergeInternalNodes(ctx context.Context, aParent, left, right *Pa
 	left.InternalNode.Header.RightChild = right.InternalNode.Header.RightChild
 
 	// Remove key from parent plus the right child pointer
-	if err := aParent.InternalNode.DeleteKeyAndRightChild(idx); err != nil {
+	if err := parent.InternalNode.DeleteKeyAndRightChild(idx); err != nil {
 		return err
 	}
 
 	// If root has no keys, make left the new root
-	if aParent.InternalNode.Header.IsRoot && aParent.InternalNode.Header.KeysNum == 0 {
-		aRootPage, err := t.pager.ModifyPage(ctx, t.GetRootPageIdx())
+	if parent.InternalNode.Header.IsRoot && parent.InternalNode.Header.KeysNum == 0 {
+		rootPage, err := t.pager.ModifyPage(ctx, t.GetRootPageIdx())
 		if err != nil {
 			return fmt.Errorf("get root page: %w", err)
 		}
-		*aRootPage.InternalNode = *left.InternalNode
-		aRootPage.LeafNode = nil
-		aRootPage.InternalNode.Header.IsRoot = true
-		aRootPage.InternalNode.Header.Parent = 0
+		*rootPage.InternalNode = *left.InternalNode
+		rootPage.LeafNode = nil
+		rootPage.InternalNode.Header.IsRoot = true
+		rootPage.InternalNode.Header.Parent = 0
 		for idx := range leftCells {
 			childPage, err := t.pager.ModifyPage(ctx, left.InternalNode.ICells[idx].Child)
 			if err != nil {
@@ -1091,11 +1078,11 @@ func (t *Table) mergeInternalNodes(ctx context.Context, aParent, left, right *Pa
 	}
 
 	// Check for underflow
-	if aParent.InternalNode.AtLeastHalfFull(t.maxICells(aParent.Index)) {
+	if parent.InternalNode.AtLeastHalfFull(t.maxICells(parent.Index)) {
 		return nil
 	}
 
-	return t.rebalanceInternal(ctx, aParent)
+	return t.rebalanceInternal(ctx, parent)
 }
 
 func (t *Table) maxICells(pageIdx PageIndex) int {
@@ -1108,6 +1095,7 @@ func (t *Table) maxICells(pageIdx PageIndex) int {
 
 type callback func(page *Page)
 
+// BFS ...
 func (t *Table) BFS(ctx context.Context, f callback) error {
 	rootPage, err := t.pager.ReadPage(ctx, t.GetRootPageIdx())
 	if err != nil {
@@ -1131,18 +1119,18 @@ func (t *Table) BFS(ctx context.Context, f callback) error {
 		if current.InternalNode != nil {
 			for i := range current.InternalNode.Header.KeysNum {
 				iCell := current.InternalNode.ICells[i]
-				aPage, err := t.pager.ReadPage(ctx, iCell.Child)
+				page, err := t.pager.ReadPage(ctx, iCell.Child)
 				if err != nil {
 					return err
 				}
-				queue = append(queue, aPage)
+				queue = append(queue, page)
 			}
-			if current.InternalNode.Header.RightChild != RIGHT_CHILD_NOT_SET {
-				aPage, err := t.pager.ReadPage(ctx, current.InternalNode.Header.RightChild)
+			if current.InternalNode.Header.RightChild != RightChildNotSet {
+				page, err := t.pager.ReadPage(ctx, current.InternalNode.Header.RightChild)
 				if err != nil {
 					return err
 				}
-				queue = append(queue, aPage)
+				queue = append(queue, page)
 			}
 		}
 	}
@@ -1150,7 +1138,7 @@ func (t *Table) BFS(ctx context.Context, f callback) error {
 	return nil
 }
 
-func (t *Table) createBTreeIndex(aPager *TransactionalPager, freePage *Page, columns []Column, indexName string, unique bool) (BTreeIndex, error) {
+func (t *Table) createBTreeIndex(pager *TransactionalPager, freePage *Page, columns []Column, indexName string, unique bool) (BTreeIndex, error) {
 	if len(columns) > 1 {
 		freePage.IndexNode = NewRootIndexNode[CompositeKey](unique)
 	} else {
@@ -1171,70 +1159,49 @@ func (t *Table) createBTreeIndex(aPager *TransactionalPager, freePage *Page, col
 			return nil, fmt.Errorf("unsupported BTree index column type %v for index %s", columns[0].Kind, indexName)
 		}
 	}
-	return t.newBTreeIndex(aPager, freePage.Index, columns, indexName, unique)
+	return t.newBTreeIndex(pager, freePage.Index, columns, indexName, unique)
 }
 
-func (t *Table) newBTreeIndex(aPager *TransactionalPager, rootPageIdx PageIndex, columns []Column, indexName string, unique bool) (BTreeIndex, error) {
+func (t *Table) newBTreeIndex(pager *TransactionalPager, rootPageIdx PageIndex, columns []Column, indexName string, unique bool) (BTreeIndex, error) {
 	if len(columns) > 1 {
 		if unique {
-			return NewUniqueIndex[CompositeKey](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
+			return NewUniqueIndex[CompositeKey](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
 		}
-		return NewNonUniqueIndex[CompositeKey](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
+		return NewNonUniqueIndex[CompositeKey](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
 	}
 	switch columns[0].Kind {
 	case Boolean:
 		if unique {
-			return NewUniqueIndex[int8](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
+			return NewUniqueIndex[int8](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
 		}
-		return NewNonUniqueIndex[int8](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
+		return NewNonUniqueIndex[int8](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
 	case Int4:
 		if unique {
-			return NewUniqueIndex[int32](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
+			return NewUniqueIndex[int32](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
 		}
-		return NewNonUniqueIndex[int32](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
+		return NewNonUniqueIndex[int32](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
 	case Int8, Timestamp:
 		if unique {
-			return NewUniqueIndex[int64](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
+			return NewUniqueIndex[int64](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
 		}
-		return NewNonUniqueIndex[int64](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
+		return NewNonUniqueIndex[int64](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
 	case Real:
 		if unique {
-			return NewUniqueIndex[float32](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
+			return NewUniqueIndex[float32](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
 		}
-		return NewNonUniqueIndex[float32](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
+		return NewNonUniqueIndex[float32](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
 	case Double:
 		if unique {
-			return NewUniqueIndex[float64](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
+			return NewUniqueIndex[float64](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
 		}
-		return NewNonUniqueIndex[float64](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
+		return NewNonUniqueIndex[float64](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
 	case Varchar:
 		if unique {
-			return NewUniqueIndex[string](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
+			return NewUniqueIndex[string](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
 		}
-		return NewNonUniqueIndex[string](t.logger, t.txManager, indexName, columns, aPager, rootPageIdx)
+		return NewNonUniqueIndex[string](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
 	default:
 		return nil, fmt.Errorf("unsupported BTree index column type %v for index %s", columns[0].Kind, indexName)
 	}
 }
 
-func (t *Table) print() error {
-	return t.BFS(context.Background(), func(aPage *Page) {
-		if aPage.InternalNode != nil {
-			fmt.Println("Internal node,",
-				"page:", aPage.Index,
-				"root:", aPage.InternalNode.Header.IsRoot,
-				"number of keys:", aPage.InternalNode.Header.KeysNum,
-				"parent:", aPage.InternalNode.Header.Parent)
-			fmt.Println("Keys:", aPage.InternalNode.Keys())
-			fmt.Println("Children:", aPage.InternalNode.Children())
-		} else {
-			fmt.Println("Leaf node,",
-				"page:", aPage.Index,
-				"number of cells:", aPage.LeafNode.Header.Cells,
-				"parent:", aPage.LeafNode.Header.Parent,
-				"next leaf:", aPage.LeafNode.Header.NextLeaf)
-			fmt.Println("Keys:", aPage.LeafNode.Keys())
-		}
-		fmt.Println("---------")
-	})
-}
