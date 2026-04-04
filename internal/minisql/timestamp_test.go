@@ -488,6 +488,30 @@ func TestParseTimestamp(t *testing.T) {
 	}
 }
 
+func TestTime_GoTime(t *testing.T) {
+	t.Parallel()
+
+	ts := Time{
+		Year:         2024,
+		Month:        3,
+		Day:          15,
+		Hour:         10,
+		Minutes:      30,
+		Seconds:      45,
+		Microseconds: 123456,
+	}
+
+	got := ts.GoTime()
+
+	assert.Equal(t, 2024, got.Year())
+	assert.Equal(t, 3, int(got.Month()))
+	assert.Equal(t, 15, got.Day())
+	assert.Equal(t, 10, got.Hour())
+	assert.Equal(t, 30, got.Minute())
+	assert.Equal(t, 45, got.Second())
+	assert.Equal(t, 123456*1000, got.Nanosecond())
+}
+
 func TestIsLeapYear(t *testing.T) {
 	t.Parallel()
 

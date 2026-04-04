@@ -587,3 +587,24 @@ func TestTable_findBestEqualityIndexMatch_EdgeCases(t *testing.T) {
 		assert.Equal(t, 3, len(match.matchedConditions))
 	})
 }
+
+func TestScanType_String(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		st   ScanType
+		want string
+	}{
+		{ScanTypeSequential, "sequential"},
+		{ScanTypeIndexAll, "index_all"},
+		{ScanTypeIndexPoint, "index_point"},
+		{ScanTypeIndexRange, "index_range"},
+		{ScanTypeIndexFirst, "index_first"},
+		{ScanTypeIndexLast, "index_last"},
+		{ScanType(99), "unknown"},
+	}
+
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, tc.st.String(), "ScanType(%d)", tc.st)
+	}
+}

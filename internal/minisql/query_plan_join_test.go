@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPushDownFilters(t *testing.T) {
@@ -426,5 +427,213 @@ func TestExtractJoinColumnPairs(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "column invalid does not exist in join table")
 		assert.Nil(t, pairs)
+	})
+}
+
+func TestNullRowForColumns(t *testing.T) {
+	t.Parallel()
+
+	cols := []Column{
+		{Name: "id", Kind: Int8, Size: 8},
+		{Name: "name", Kind: Varchar, Size: 50},
+		{Name: "age", Kind: Int4, Size: 4},
+	}
+
+	row := nullRowForColumns(cols)
+
+	require.Len(t, row.Values, len(cols))
+	for i, v := range row.Values {
+		assert.False(t, v.Valid, "column %d (%s) should be NULL", i, cols[i].Name)
+	}
+	assert.Len(t, row.Columns, len(cols))
+}
+
+func TestCombineRows(t *testing.T) {
+	t.Parallel()
+
+	outerCols := []Column{
+		{Name: "id", Kind: Int8, Size: 8},
+		{Name: "name", Kind: Varchar, Size: 50},
+	}
+	innerCols := []Column{
+		{Name: "id", Kind: Int8, Size: 8},
+		{Name: "amount", Kind: Int8, Size: 8},
+	}
+
+	outerRow := NewRowWithValues(outerCols, []OptionalValue{
+		{Value: int64(1), Valid: true},
+		{Value: NewTextPointer([]byte("Alice")), Valid: true},
+	})
+	innerRow := NewRowWithValues(innerCols, []OptionalValue{
+		{Value: int64(10), Valid: true},
+		{Value: int64(200), Valid: true},
+	})
+
+	combined := combineRows(outerRow, innerRow, "u", "o")
+
+	require.Len(t, combined.Columns, 4)
+	assert.Equal(t, "u.id", combined.Columns[0].Name)
+	assert.Equal(t, "u.name", combined.Columns[1].Name)
+	assert.Equal(t, "o.id", combined.Columns[2].Name)
+	assert.Equal(t, "o.amount", combined.Columns[3].Name)
+
+	// Values are accessible by prefixed name
+	v, ok := combined.GetValue("u.id")
+	require.True(t, ok)
+	assert.Equal(t, int64(1), v.Value)
+
+	v, ok = combined.GetValue("o.amount")
+	require.True(t, ok)
+	assert.Equal(t, int64(200), v.Value)
+}
+
+func TestCombineRows_NullInner(t *testing.T) {
+	t.Parallel()
+
+	outerCols := []Column{{Name: "id", Kind: Int8, Size: 8}}
+	innerCols := []Column{{Name: "user_id", Kind: Int8, Size: 8}}
+
+	outer := NewRowWithValues(outerCols, []OptionalValue{{Value: int64(1), Valid: true}})
+	nullInner := nullRowForColumns(innerCols)
+
+	combined := combineRows(outer, nullInner, "u", "o")
+
+	require.Len(t, combined.Columns, 2)
+	v, ok := combined.GetValue("o.user_id")
+	require.True(t, ok)
+	assert.False(t, v.Valid, "inner column should be NULL")
+}
+
+func TestCombineRowsProgressive(t *testing.T) {
+	t.Parallel()
+
+	// Simulate a row already combined from base + first join
+	existingCols := []Column{
+		{Name: "u.id", Kind: Int8, Size: 8},
+		{Name: "o.amount", Kind: Int8, Size: 8},
+	}
+	existingRow := NewRowWithValues(existingCols, []OptionalValue{
+		{Value: int64(1), Valid: true},
+		{Value: int64(100), Valid: true},
+	})
+
+	newCols := []Column{{Name: "status", Kind: Varchar, Size: 20}}
+	newRow := NewRowWithValues(newCols, []OptionalValue{
+		{Value: NewTextPointer([]byte("shipped")), Valid: true},
+	})
+
+	combined := combineRowsProgressive(existingRow, newRow, "s")
+
+	require.Len(t, combined.Columns, 3)
+	assert.Equal(t, "u.id", combined.Columns[0].Name)
+	assert.Equal(t, "o.amount", combined.Columns[1].Name)
+	assert.Equal(t, "s.status", combined.Columns[2].Name)
+
+	v, ok := combined.GetValue("s.status")
+	require.True(t, ok)
+	assert.True(t, v.Valid)
+}
+
+func TestEvaluateJoinConditions(t *testing.T) {
+	t.Parallel()
+
+	cols := []Column{
+		{Name: "u.id", Kind: Int8, Size: 8},
+		{Name: "o.user_id", Kind: Int8, Size: 8},
+	}
+	row := NewRowWithValues(cols, []OptionalValue{
+		{Value: int64(42), Valid: true},
+		{Value: int64(42), Valid: true},
+	})
+
+	t.Run("no conditions always matches", func(t *testing.T) {
+		ok, err := evaluateJoinConditions(row, OneOrMore{})
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("matching equality condition", func(t *testing.T) {
+		cond := FieldIsEqual(
+			Field{AliasPrefix: "u", Name: "id"},
+			OperandField,
+			Field{AliasPrefix: "o", Name: "user_id"},
+		)
+		ok, err := evaluateJoinConditions(row, OneOrMore{{cond}})
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("non-matching equality condition", func(t *testing.T) {
+		mismatchCols := []Column{
+			{Name: "u.id", Kind: Int8, Size: 8},
+			{Name: "o.user_id", Kind: Int8, Size: 8},
+		}
+		mismatchRow := NewRowWithValues(mismatchCols, []OptionalValue{
+			{Value: int64(1), Valid: true},
+			{Value: int64(99), Valid: true},
+		})
+		cond := FieldIsEqual(
+			Field{AliasPrefix: "u", Name: "id"},
+			OperandField,
+			Field{AliasPrefix: "o", Name: "user_id"},
+		)
+		ok, err := evaluateJoinConditions(mismatchRow, OneOrMore{{cond}})
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+}
+
+func TestFindIndexOnColumns(t *testing.T) {
+	t.Parallel()
+
+	tbl := &Table{
+		PrimaryKey: PrimaryKey{
+			IndexInfo: IndexInfo{
+				Name:    "pk_users",
+				Columns: []Column{{Name: "id", Kind: Int8, Size: 8}},
+			},
+		},
+		UniqueIndexes: map[string]UniqueIndex{
+			"uq_email": {
+				IndexInfo: IndexInfo{
+					Columns: []Column{{Name: "email", Kind: Varchar, Size: 255}},
+				},
+			},
+		},
+		SecondaryIndexes: map[string]SecondaryIndex{
+			"idx_created": {
+				IndexInfo: IndexInfo{
+					Columns: []Column{{Name: "created", Kind: Timestamp, Size: 8}},
+				},
+			},
+		},
+	}
+
+	t.Run("finds primary key index", func(t *testing.T) {
+		info := tbl.findIndexOnColumns([]string{"id"})
+		require.NotNil(t, info)
+		assert.Equal(t, "pk_users", info.Name)
+	})
+
+	t.Run("finds unique index", func(t *testing.T) {
+		info := tbl.findIndexOnColumns([]string{"email"})
+		require.NotNil(t, info)
+		assert.Equal(t, "uq_email", info.Name)
+	})
+
+	t.Run("finds secondary index", func(t *testing.T) {
+		info := tbl.findIndexOnColumns([]string{"created"})
+		require.NotNil(t, info)
+		assert.Equal(t, "idx_created", info.Name)
+	})
+
+	t.Run("returns nil for unknown column", func(t *testing.T) {
+		info := tbl.findIndexOnColumns([]string{"nonexistent"})
+		assert.Nil(t, info)
+	})
+
+	t.Run("returns nil for empty input", func(t *testing.T) {
+		info := tbl.findIndexOnColumns(nil)
+		assert.Nil(t, info)
 	})
 }
