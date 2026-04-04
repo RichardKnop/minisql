@@ -177,6 +177,44 @@ func TestParse_Insert(t *testing.T) {
 			},
 			nil,
 		},
+		{
+			"INSERT ON CONFLICT DO NOTHING with semicolon works",
+			"INSERT INTO 'a' (b, c) VALUES (1, 'foo') ON CONFLICT DO NOTHING;",
+			[]minisql.Statement{
+				{
+					Kind:           minisql.Insert,
+					TableName:      "a",
+					Fields:         []minisql.Field{{Name: "b"}, {Name: "c"}},
+					ConflictAction: minisql.ConflictActionDoNothing,
+					Inserts: [][]minisql.OptionalValue{
+						{
+							{Value: int64(1), Valid: true},
+							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"INSERT ON CONFLICT DO NOTHING without semicolon works",
+			"INSERT INTO 'a' (b, c) VALUES (1, 'foo') ON CONFLICT DO NOTHING",
+			[]minisql.Statement{
+				{
+					Kind:           minisql.Insert,
+					TableName:      "a",
+					Fields:         []minisql.Field{{Name: "b"}, {Name: "c"}},
+					ConflictAction: minisql.ConflictActionDoNothing,
+					Inserts: [][]minisql.OptionalValue{
+						{
+							{Value: int64(1), Valid: true},
+							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+						},
+					},
+				},
+			},
+			nil,
+		},
 	}
 
 	for _, aTestCase := range testCases {

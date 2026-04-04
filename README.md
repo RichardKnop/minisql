@@ -229,6 +229,7 @@ if err := rows.Err(); err != nil {
 | `DROP TABLE` | |
 | `CREATE INDEX`, `DROP INDEX` | Secondary non-unique indexes only; primary and unique indexes are declared as part of `CREATE TABLE` |
 | `INSERT` | Single row or multiple rows via a tuple of values separated by commas |
+| `ON CONFLICT` | Currently only `DO NOTHING` supported |
 | `SELECT` | All fields with `*`, specific fields, or row count with `COUNT(*)` |
 | `SELECT DISTINCT` | |
 | `INNER JOIN` | Star schema only — one or more tables joined with the base table |
