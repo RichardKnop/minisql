@@ -2,7 +2,7 @@ package parser
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"regexp"
 	"slices"
 	"strconv"
@@ -13,10 +13,10 @@ import (
 )
 
 var (
-	errInvalidStatementKind = fmt.Errorf("invalid statement kind")
-	errEmptyStatementKind   = fmt.Errorf("statement kind cannot be empty")
-	errEmptyTableName       = fmt.Errorf("table name cannot be empty")
-	errEmptyIndexName       = fmt.Errorf("index name cannot be empty")
+	errInvalidStatementKind = errors.New("invalid statement kind")
+	errEmptyStatementKind   = errors.New("statement kind cannot be empty")
+	errEmptyTableName       = errors.New("table name cannot be empty")
+	errEmptyIndexName       = errors.New("index name cannot be empty")
 )
 
 var (
@@ -126,10 +126,12 @@ type parserItem struct {
 	joinInProgress  minisql.Join
 }
 
+// New returns a new SQL parser.
 func New() *parser {
 	return new(parser)
 }
 
+// Parse parses the given SQL string and returns a slice of statements.
 func (p *parser) Parse(ctx context.Context, sql string) ([]minisql.Statement, error) {
 
 	item := &parserItem{
@@ -316,7 +318,7 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 			}
 		case stepStatementEnd:
 			semicolon := p.peek()
-			if semicolon != ";" && len(semicolon) != 0 {
+			if semicolon != ";" && semicolon != "" {
 				return statements, p.errorf("at STATEMENT: expected semicolon")
 			}
 			if semicolon == ";" {
@@ -339,7 +341,7 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 	// Also handle statements (e.g. VACUUM) that are valid at EOF without a
 	// trailing semicolon: they set p.step = stepStatementEnd before the loop
 	// ends but are not yet in the slice.
-	if p.step != stepStatementEnd || p.Statement.Kind != 0 {
+	if p.step != stepStatementEnd || p.Kind != 0 {
 		if err := p.validate(p.Statement); err != nil {
 			return nil, err
 		}
@@ -355,14 +357,15 @@ func (p *parserItem) peek() string {
 }
 
 func (p *parserItem) pop() string {
-	peeked, len := p.peekWithLength()
-	p.i += len
+	peeked, n := p.peekWithLength()
+	p.i += n
 	p.popWhitespace()
 	return peeked
 }
 
 func (p *parserItem) popWhitespace() {
-	for ; p.i < len(p.sql) && p.sql[p.i] == ' '; p.i++ {
+	for p.i < len(p.sql) && p.sql[p.i] == ' ' {
+		p.i++
 	}
 }
 func (p *parserItem) peekWithLength() (string, int) {
@@ -530,16 +533,16 @@ func (p *parserItem) validate(stmt minisql.Statement) error {
 			return errCreateTableNoColumns
 		}
 	}
-	for _, aConditionGroup := range stmt.Conditions {
-		for _, aCondition := range aConditionGroup {
-			if aCondition.Operator == 0 {
+	for _, condGroup := range stmt.Conditions {
+		for _, cond := range condGroup {
+			if cond.Operator == 0 {
 				return errWhereWithoutOperator
 			}
-			if aCondition.Operand1.Type == minisql.OperandField && aCondition.Operand1.Value.(minisql.Field).Name == "" {
-				return fmt.Errorf("at WHERE: condition with empty left side operand")
+			if cond.Operand1.Type == minisql.OperandField && cond.Operand1.Value.(minisql.Field).Name == "" {
+				return errors.New("at WHERE: condition with empty left side operand")
 			}
-			if aCondition.Operand2.Type == minisql.OperandField && aCondition.Operand2.Value.(minisql.Field).Name == "" {
-				return fmt.Errorf("at WHERE: condition with empty right side operand")
+			if cond.Operand2.Type == minisql.OperandField && cond.Operand2.Value.(minisql.Field).Name == "" {
+				return errors.New("at WHERE: condition with empty right side operand")
 			}
 		}
 	}

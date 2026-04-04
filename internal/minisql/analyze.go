@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -26,6 +27,7 @@ var (
 		},
 	}
 
+	// StatsTableSQL is the DDL used to create the internal statistics table.
 	StatsTableSQL = fmt.Sprintf(`create table "%s" (
 	tbl varchar(255),
 	idx varchar(255),
@@ -35,6 +37,7 @@ var (
 	statsTableFields = fieldsFromColumns(statsTableColumns...)
 )
 
+// Analyze gathers statistics for all tables (or a specific target) and stores them in the stats table.
 func (d *Database) Analyze(ctx context.Context, target string) error {
 	_, exists, err := d.checkSchemaExists(ctx, SchemaTable, StatsTableSQL)
 	if err != nil {
@@ -55,7 +58,7 @@ func (d *Database) Analyze(ctx context.Context, target string) error {
 	} else {
 		statsTable, exists = d.tables[StatsTableName]
 		if !exists {
-			return fmt.Errorf("stats table not found")
+			return errors.New("stats table not found")
 		}
 	}
 
@@ -148,7 +151,7 @@ func (d *Database) deleteOldStats(ctx context.Context, statsTable *Table, tableN
 	return err
 }
 
-func (d *Database) analyzeTable(ctx context.Context, statsTable *Table, table *Table) error {
+func (d *Database) analyzeTable(ctx context.Context, statsTable, table *Table) error {
 	// Count total rows by scanning the table
 	rowCount := int64(0)
 	cursor, err := table.SeekFirst(ctx)
@@ -183,7 +186,7 @@ func (d *Database) analyzeTable(ctx context.Context, statsTable *Table, table *T
 	return err
 }
 
-func (d *Database) analyzeIndex(ctx context.Context, statsTable *Table, tableName string, indexName string, index BTreeIndex, isUnique bool) error {
+func (d *Database) analyzeIndex(ctx context.Context, statsTable *Table, tableName, indexName string, index BTreeIndex, isUnique bool) error {
 	// Get the index columns to determine if this is a composite index
 	var indexColumns []Column
 	table := d.tables[tableName]
@@ -303,6 +306,7 @@ func buildPrefixKey(values []any) string {
 	return result.String()
 }
 
+// Stats holds a single row from the internal statistics table.
 type Stats struct {
 	TableName string
 	IndexName string
@@ -361,13 +365,13 @@ func (d *Database) scanStatsTable(ctx context.Context, statsTable *Table, tableN
 	return stats, nil
 }
 
-func scanStats(aRow Row) Stats {
+func scanStats(row Row) Stats {
 	s := Stats{
-		TableName: aRow.Values[0].Value.(TextPointer).String(),
-		StatValue: aRow.Values[2].Value.(TextPointer).String(),
+		TableName: row.Values[0].Value.(TextPointer).String(),
+		StatValue: row.Values[2].Value.(TextPointer).String(),
 	}
-	if aRow.Values[1].Valid {
-		s.IndexName = aRow.Values[1].Value.(TextPointer).String()
+	if row.Values[1].Valid {
+		s.IndexName = row.Values[1].Value.(TextPointer).String()
 	}
 	return s
 }

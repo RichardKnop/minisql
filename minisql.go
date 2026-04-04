@@ -86,7 +86,7 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 
 func (d *Driver) newDB(config *ConnectionConfig) (*minisql.Database, error) {
 	// Open or create database file
-	dbFile, err := os.OpenFile(config.FilePath, os.O_RDWR|os.O_CREATE, 0600)
+	dbFile, err := os.OpenFile(config.FilePath, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database file: %w", err)
 	}
@@ -117,6 +117,7 @@ type Conn struct {
 	mu          sync.RWMutex
 }
 
+// Ping ...
 func (c *Conn) Ping(ctx context.Context) error {
 	// TODO - implement a real ping?
 	return nil
@@ -252,18 +253,21 @@ func (c *Conn) QueryContext(ctx context.Context, query string, args []driver.Nam
 	}, nil
 }
 
+// SetTransaction ...
 func (c *Conn) SetTransaction(tx *minisql.Transaction) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.transaction = tx
 }
 
+// HasActiveTransaction ...
 func (c *Conn) HasActiveTransaction() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.transaction != nil
 }
 
+// TransactionContext ...
 func (c *Conn) TransactionContext(ctx context.Context) context.Context {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -8,9 +9,12 @@ import (
 	"unicode/utf8"
 )
 
+// StatementKind ...
 type StatementKind int
 
+// StatementKind constants enumerate the supported SQL statement types.
 const (
+	// CreateTable ...
 	CreateTable StatementKind = iota + 1
 	DropTable
 	CreateIndex
@@ -62,12 +66,18 @@ func (s StatementKind) String() string {
 // AggregateKind identifies the type of aggregate function.
 type AggregateKind int
 
+// AggregateKind constants enumerate the supported aggregate functions.
 const (
+	// AggregateCount ...
 	AggregateCount AggregateKind = iota + 1 // COUNT(*)
-	AggregateSum                            // SUM(col)
-	AggregateAvg                            // AVG(col)
-	AggregateMin                            // MIN(col)
-	AggregateMax                            // MAX(col)
+	// AggregateSum ...
+	AggregateSum // SUM(col)
+	// AggregateAvg is the AVG aggregate function.
+	AggregateAvg // AVG(col)
+	// AggregateMin is the MIN aggregate function.
+	AggregateMin // MIN(col)
+	// AggregateMax is the MAX aggregate function.
+	AggregateMax // MAX(col)
 )
 
 func (k AggregateKind) String() string {
@@ -97,9 +107,12 @@ type AggregateExpr struct {
 	Column string // source column name; empty for COUNT(*)
 }
 
+// ColumnKind ...
 type ColumnKind int
 
+// ColumnKind constants enumerate the supported column data types.
 const (
+	// Boolean ...
 	Boolean ColumnKind = iota + 1
 	Int4
 	Int8
@@ -110,6 +123,7 @@ const (
 	Timestamp
 )
 
+// IsInt ...
 func (k ColumnKind) IsInt() bool {
 	return k == Int4 || k == Int8
 }
@@ -137,6 +151,7 @@ func (k ColumnKind) String() string {
 	}
 }
 
+// IsText ...
 func (k ColumnKind) IsText() bool {
 	if k == Varchar {
 		return true
@@ -147,6 +162,7 @@ func (k ColumnKind) IsText() bool {
 	return false
 }
 
+// Column ...
 type Column struct {
 	Kind ColumnKind
 	Size uint32
@@ -161,40 +177,41 @@ type Column struct {
 
 func fieldsFromColumns(columns ...Column) []Field {
 	fields := make([]Field, 0, len(columns))
-	for _, aColumn := range columns {
-		fields = append(fields, Field{Name: aColumn.Name})
+	for _, col := range columns {
+		fields = append(fields, Field{Name: col.Name})
 	}
 	return fields
 }
 
 func textOverflowColumns(columns ...Column) []Column {
 	overflowColumns := make([]Column, 0, len(columns))
-	for _, aColumn := range columns {
-		if !aColumn.Kind.IsText() {
+	for _, col := range columns {
+		if !col.Kind.IsText() {
 			continue
 		}
-		if aColumn.Kind == Varchar && aColumn.Size <= MaxInlineVarchar {
+		if col.Kind == Varchar && col.Size <= MaxInlineVarchar {
 			continue
 		}
-		overflowColumns = append(overflowColumns, aColumn)
+		overflowColumns = append(overflowColumns, col)
 	}
 	return overflowColumns
 }
 
 func textOverflowFields(columns ...Column) []Field {
 	overflowFields := make([]Field, 0, len(columns))
-	for _, aColumn := range columns {
-		if !aColumn.Kind.IsText() {
+	for _, col := range columns {
+		if !col.Kind.IsText() {
 			continue
 		}
-		if aColumn.Kind == Varchar && aColumn.Size <= MaxInlineVarchar {
+		if col.Kind == Varchar && col.Size <= MaxInlineVarchar {
 			continue
 		}
-		overflowFields = append(overflowFields, Field{Name: aColumn.Name})
+		overflowFields = append(overflowFields, Field{Name: col.Name})
 	}
 	return overflowFields
 }
 
+// Field ...
 type Field struct {
 	AliasPrefix string
 	Name        string
@@ -208,10 +225,14 @@ func (f Field) String() string {
 	return f.Name
 }
 
+// Direction ...
 type Direction int
 
+// Direction constants define the sort order for ORDER BY clauses.
 const (
+	// Asc ...
 	Asc Direction = iota + 1
+	// Desc is the descending sort direction.
 	Desc
 )
 
@@ -226,21 +247,26 @@ func (d Direction) String() string {
 	}
 }
 
+// OrderBy ...
 type OrderBy struct {
 	Field     Field
 	Direction Direction
 }
 
+// Function ...
 type Function struct {
 	Name string
 }
 
 const nowFunctionName = "NOW()"
 
+// FunctionNow ...
 var FunctionNow = Function{Name: nowFunctionName}
 
+// Placeholder ...
 type Placeholder struct{}
 
+// Statement ...
 type Statement struct {
 	Kind          StatementKind
 	IfNotExists   bool
@@ -267,7 +293,6 @@ type Statement struct {
 	OrderBy     []OrderBy
 	Limit       OptionalValue
 	Offset      OptionalValue
-	fetchedRows int64
 }
 
 // NumPlaceholders returns the number of placeholder parameters (?) in the statement.
@@ -276,8 +301,8 @@ func (s Statement) NumPlaceholders() int {
 
 	if s.Kind == Insert {
 		for _, anInsert := range s.Inserts {
-			for _, aValue := range anInsert {
-				if _, ok := aValue.Value.(Placeholder); ok {
+			for _, val := range anInsert {
+				if _, ok := val.Value.(Placeholder); ok {
 					count += 1
 				}
 			}
@@ -285,21 +310,21 @@ func (s Statement) NumPlaceholders() int {
 	}
 
 	if s.Kind == Update {
-		for _, aValue := range s.Updates {
-			if _, ok := aValue.Value.(Placeholder); ok {
+		for _, val := range s.Updates {
+			if _, ok := val.Value.(Placeholder); ok {
 				count += 1
 			}
 		}
 	}
 
-	for _, aConditionGroup := range s.Conditions {
-		for _, aCondition := range aConditionGroup {
-			if aCondition.Operand2.Type == OperandPlaceholder {
+	for _, condGroup := range s.Conditions {
+		for _, cond := range condGroup {
+			if cond.Operand2.Type == OperandPlaceholder {
 				count += 1
 				continue
 			}
-			if aCondition.Operand2.Type == OperandList {
-				for _, value := range aCondition.Operand2.Value.([]any) {
+			if cond.Operand2.Type == OperandList {
+				for _, value := range cond.Operand2.Value.([]any) {
 					if _, ok := value.(Placeholder); ok {
 						count += 1
 					}
@@ -311,6 +336,7 @@ func (s Statement) NumPlaceholders() int {
 	return count
 }
 
+// Clone ...
 func (s Statement) Clone() Statement {
 	stmt := Statement{
 		Kind:        s.Kind,
@@ -342,6 +368,7 @@ func (s Statement) Clone() Statement {
 	return stmt
 }
 
+// BindArguments ...
 func (s Statement) BindArguments(args ...any) (Statement, error) {
 	// Clone statement so we can keep using the preparement statement
 	// with different arguments without modifying it
@@ -349,12 +376,12 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 
 	if s.Kind == Insert {
 		for i, anInsert := range stmt.Inserts {
-			for j, aValue := range anInsert {
-				if _, ok := aValue.Value.(Placeholder); !ok {
+			for j, val := range anInsert {
+				if _, ok := val.Value.(Placeholder); !ok {
 					continue
 				}
 				if len(args) == 0 {
-					return Statement{}, fmt.Errorf("not enough arguments to bind placeholders")
+					return Statement{}, errors.New("not enough arguments to bind placeholders")
 				}
 				if args[0] == nil {
 					stmt.Inserts[i][j] = OptionalValue{}
@@ -367,40 +394,40 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 	}
 
 	if s.Kind == Update {
-		for _, aField := range stmt.Fields {
-			aValue, ok := stmt.Updates[aField.Name]
+		for _, field := range stmt.Fields {
+			val, ok := stmt.Updates[field.Name]
 			if !ok {
 				continue
 			}
-			if _, ok := aValue.Value.(Placeholder); !ok {
+			if _, ok := val.Value.(Placeholder); !ok {
 				continue
 			}
 			if len(args) == 0 {
-				return Statement{}, fmt.Errorf("not enough arguments to bind placeholders")
+				return Statement{}, errors.New("not enough arguments to bind placeholders")
 			}
 			if args[0] == nil {
-				stmt.Updates[aField.Name] = OptionalValue{}
+				stmt.Updates[field.Name] = OptionalValue{}
 			} else {
-				stmt.Updates[aField.Name] = OptionalValue{Value: args[0], Valid: true}
+				stmt.Updates[field.Name] = OptionalValue{Value: args[0], Valid: true}
 			}
 			args = args[1:]
 		}
 	}
 
-	for i, aConditionGroup := range stmt.Conditions {
-		for j, aCondition := range aConditionGroup {
-			if aCondition.Operand2.Type == OperandPlaceholder {
+	for i, condGroup := range stmt.Conditions {
+		for j, cond := range condGroup {
+			if cond.Operand2.Type == OperandPlaceholder {
 				if len(args) == 0 {
-					return Statement{}, fmt.Errorf("not enough arguments to bind placeholders")
+					return Statement{}, errors.New("not enough arguments to bind placeholders")
 				}
-				aCondition.Operand2.Type = operandTypeFromAny(args[0])
-				aCondition.Operand2.Value = args[0]
-				stmt.Conditions[i][j] = aCondition
+				cond.Operand2.Type = operandTypeFromAny(args[0])
+				cond.Operand2.Value = args[0]
+				stmt.Conditions[i][j] = cond
 				args = args[1:]
 				continue
 			}
-			if aCondition.Operand2.Type == OperandList {
-				origList := aCondition.Operand2.Value.([]any)
+			if cond.Operand2.Type == OperandList {
+				origList := cond.Operand2.Value.([]any)
 				newList := make([]any, len(origList))
 				copy(newList, origList)
 				for k, value := range newList {
@@ -408,13 +435,13 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 						continue
 					}
 					if len(args) == 0 {
-						return Statement{}, fmt.Errorf("not enough arguments to bind placeholders")
+						return Statement{}, errors.New("not enough arguments to bind placeholders")
 					}
 					newList[k] = args[0]
 					args = args[1:]
 				}
-				aCondition.Operand2.Value = newList
-				stmt.Conditions[i][j] = aCondition
+				cond.Operand2.Value = newList
+				stmt.Conditions[i][j] = cond
 			}
 		}
 	}
@@ -437,6 +464,7 @@ func operandTypeFromAny(value any) OperandType {
 	}
 }
 
+// HasField ...
 func (s Statement) HasField(name string) bool {
 	for _, field := range s.Fields {
 		if field.Name == name {
@@ -446,14 +474,17 @@ func (s Statement) HasField(name string) bool {
 	return false
 }
 
+// ReadOnly ...
 func (s Statement) ReadOnly() bool {
 	return s.Kind == Select
 }
 
+// IsDDL ...
 func (s Statement) IsDDL() bool {
 	return s.Kind == CreateTable || s.Kind == DropTable || s.Kind == CreateIndex || s.Kind == DropIndex
 }
 
+// ColumnByName ...
 func (s Statement) ColumnByName(name string) (Column, bool) {
 	for i := range s.Columns {
 		if s.Columns[i].Name == name {
@@ -491,30 +522,30 @@ func (s Statement) Prepare(now Time) (Statement, error) {
 // prepareCreateTable validates and prepares default values for columns in CREATE TABLE statements.
 // In case of TIMESTAMP columns, it transforms string default values into Time.
 func (s Statement) prepareCreateTable() (Statement, error) {
-	for i, aColumn := range s.Columns {
-		if !aColumn.DefaultValue.Valid {
+	for i, col := range s.Columns {
+		if !col.DefaultValue.Valid {
 			continue
 		}
-		if aColumn.Kind == Timestamp {
+		if col.Kind == Timestamp {
 			// If this is already a Time, accept it as is
-			_, ok := aColumn.DefaultValue.Value.(Time)
+			_, ok := col.DefaultValue.Value.(Time)
 			if ok {
 				return s, nil
 			}
 			// Otherwise, validate and transform to Time
-			_, ok = aColumn.DefaultValue.Value.(TextPointer)
+			_, ok = col.DefaultValue.Value.(TextPointer)
 			if !ok {
-				return s, fmt.Errorf("default value '%s' is not a valid TextPointer", aColumn.DefaultValue.Value)
+				return s, fmt.Errorf("default value '%s' is not a valid TextPointer", col.DefaultValue.Value)
 			}
-			timestamp, err := ParseTimestamp(aColumn.DefaultValue.Value.(TextPointer).String())
+			timestamp, err := ParseTimestamp(col.DefaultValue.Value.(TextPointer).String())
 			if err != nil {
-				return s, fmt.Errorf("default value '%s' is not a valid timestamp: %v", aColumn.DefaultValue.Value, err)
+				return s, fmt.Errorf("default value '%s' is not a valid timestamp: %w", col.DefaultValue.Value, err)
 			}
-			aColumn.DefaultValue.Value = timestamp
-			s.Columns[i] = aColumn
+			col.DefaultValue.Value = timestamp
+			s.Columns[i] = col
 		}
 
-		if err := isValueValidForColumn(aColumn, aColumn.DefaultValue); err != nil {
+		if err := isValueValidForColumn(col, col.DefaultValue); err != nil {
 			return s, fmt.Errorf("invalid default value: %w", err)
 		}
 	}
@@ -524,14 +555,14 @@ func (s Statement) prepareCreateTable() (Statement, error) {
 // prepareInsert makes sure to add any nullable columns that are missing from the
 // insert statement, setting them to NULL. It also converts timestamp string values to int64.
 func (s Statement) prepareInsert(now Time) (Statement, error) {
-	for i, aColumn := range s.Columns {
-		if !s.HasField(aColumn.Name) {
-			s.Fields = slices.Insert(s.Fields, i, Field{Name: aColumn.Name})
+	for i, col := range s.Columns {
+		if !s.HasField(col.Name) {
+			s.Fields = slices.Insert(s.Fields, i, Field{Name: col.Name})
 			for j := range s.Inserts {
 				var value OptionalValue
-				if aColumn.DefaultValue.Valid {
-					value = aColumn.DefaultValue
-				} else if aColumn.DefaultValueNow {
+				if col.DefaultValue.Valid {
+					value = col.DefaultValue
+				} else if col.DefaultValueNow {
 					value = OptionalValue{Valid: true, Value: now}
 				}
 				s.Inserts[j] = slices.Insert(s.Inserts[j], i, value)
@@ -552,7 +583,7 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 				}
 			}
 
-			if aColumn.Kind != Timestamp {
+			if col.Kind != Timestamp {
 				continue
 			}
 
@@ -573,7 +604,7 @@ func (s Statement) prepareUpdate(now Time) (Statement, error) {
 	}
 
 	for name := range s.Updates {
-		aColumn, ok := s.ColumnByName(name)
+		col, ok := s.ColumnByName(name)
 		if !ok {
 			return Statement{}, fmt.Errorf("unknown field %q in table %q", name, s.TableName)
 		}
@@ -594,7 +625,7 @@ func (s Statement) prepareUpdate(now Time) (Statement, error) {
 			} else {
 				return Statement{}, fmt.Errorf("unsupported function %q in UPDATE", fn.Name)
 			}
-		} else if aColumn.Kind == Timestamp {
+		} else if col.Kind == Timestamp {
 			timestamp, err := parseTimeValue(updateValue.Value)
 			if err != nil {
 				return Statement{}, err
@@ -610,15 +641,15 @@ func (s Statement) prepareUpdate(now Time) (Statement, error) {
 
 // prepareWhere converts timestamp string values in WHERE conditions to Time.
 func (s Statement) prepareWhere() (Statement, error) {
-	for i, aConditionGroup := range s.Conditions {
-		for j, aCondition := range aConditionGroup {
+	for i, condGroup := range s.Conditions {
+		for j, cond := range condGroup {
 			// We only want to continue if left operand is a field and right operand is not a field.
-			if !aCondition.Operand1.IsField() || aCondition.Operand2.IsField() {
+			if !cond.Operand1.IsField() || cond.Operand2.IsField() {
 				continue
 			}
-			field, ok := aCondition.Operand1.Value.(Field)
+			field, ok := cond.Operand1.Value.(Field)
 			if !ok {
-				return Statement{}, fmt.Errorf("invalid field in WHERE condition")
+				return Statement{}, errors.New("invalid field in WHERE condition")
 			}
 
 			// Skip validation for fields from joined tables (have alias prefix)
@@ -627,18 +658,18 @@ func (s Statement) prepareWhere() (Statement, error) {
 				continue
 			}
 
-			aColumn, ok := s.ColumnByName(field.Name)
+			col, ok := s.ColumnByName(field.Name)
 			if !ok {
 				return Statement{}, fmt.Errorf("unknown field %q in table %q", field.Name, s.TableName)
 			}
-			if aColumn.Kind != Timestamp {
+			if col.Kind != Timestamp {
 				continue
 			}
-			if aCondition.Operand2.Type == OperandNull {
+			if cond.Operand2.Type == OperandNull {
 				continue
 			}
-			if aCondition.Operand2.Type == OperandList {
-				for k, value := range aCondition.Operand2.Value.([]any) {
+			if cond.Operand2.Type == OperandList {
+				for k, value := range cond.Operand2.Value.([]any) {
 					timestamp, err := parseTimeValue(value)
 					if err != nil {
 						return Statement{}, err
@@ -647,7 +678,7 @@ func (s Statement) prepareWhere() (Statement, error) {
 				}
 				continue
 			}
-			timestamp, err := parseTimeValue(aCondition.Operand2.Value)
+			timestamp, err := parseTimeValue(cond.Operand2.Value)
 			if err != nil {
 				return Statement{}, err
 			}
@@ -664,35 +695,36 @@ func parseTimeValue(value any) (Time, error) {
 	}
 	tp, ok := value.(TextPointer)
 	if !ok {
-		return Time{}, fmt.Errorf("timestamp field expects TextPointer value")
+		return Time{}, errors.New("timestamp field expects TextPointer value")
 	}
 	timestamp, err := ParseTimestamp(tp.String())
 	if err != nil {
-		return Time{}, fmt.Errorf("invalid timestamp format for field: %v", err)
+		return Time{}, fmt.Errorf("invalid timestamp format for field: %w", err)
 	}
 	return timestamp, nil
 }
 
-func (s Statement) Validate(aTable *Table) error {
+// Validate ...
+func (s Statement) Validate(table *Table) error {
 	switch s.Kind {
 	case CreateTable:
 		if err := s.validateCreateTable(); err != nil {
 			return err
 		}
 	case Insert:
-		if err := s.validateInsert(aTable); err != nil {
+		if err := s.validateInsert(table); err != nil {
 			return err
 		}
 	case Update:
-		if err := s.validateUpdate(aTable); err != nil {
+		if err := s.validateUpdate(table); err != nil {
 			return err
 		}
 	case Select:
-		if err := s.validateSelect(aTable); err != nil {
+		if err := s.validateSelect(table); err != nil {
 			return err
 		}
 	case CreateIndex:
-		return s.validateCreateIndex(aTable)
+		return s.validateCreateIndex(table)
 	case DropIndex:
 		return s.validateDropIndex()
 	}
@@ -705,8 +737,8 @@ func (s Statement) Validate(aTable *Table) error {
 }
 
 func (s Statement) validateCreateTable() error {
-	if len(s.TableName) == 0 {
-		return fmt.Errorf("table name is required")
+	if s.TableName == "" {
+		return errors.New("table name is required")
 	}
 
 	if utf8.RuneCountInString(s.TableName) > MaxInlineVarchar {
@@ -714,11 +746,11 @@ func (s Statement) validateCreateTable() error {
 	}
 
 	if len(s.Conditions) > 0 {
-		return fmt.Errorf("CREATE TABLE cannot have WHERE conditions")
+		return errors.New("CREATE TABLE cannot have WHERE conditions")
 	}
 
 	if len(s.Columns) == 0 {
-		return fmt.Errorf("at least one column is required")
+		return errors.New("at least one column is required")
 	}
 
 	if len(s.Columns) > MaxColumns {
@@ -734,18 +766,18 @@ func (s Statement) validateCreateTable() error {
 	}
 
 	if len(s.PrimaryKey.Columns) > 1 && s.PrimaryKey.Autoincrement {
-		return fmt.Errorf("autoincrement primary key cannot be composite")
+		return errors.New("autoincrement primary key cannot be composite")
 	}
 
 	nameMap := map[string]struct{}{}
-	for _, aColumn := range s.Columns {
-		if _, ok := nameMap[aColumn.Name]; ok {
-			return fmt.Errorf("duplicate column name %q", aColumn.Name)
+	for _, col := range s.Columns {
+		if _, ok := nameMap[col.Name]; ok {
+			return fmt.Errorf("duplicate column name %q", col.Name)
 		}
-		if len(aColumn.Name) == 0 {
-			return fmt.Errorf("column name cannot be empty")
+		if col.Name == "" {
+			return errors.New("column name cannot be empty")
 		}
-		nameMap[aColumn.Name] = struct{}{}
+		nameMap[col.Name] = struct{}{}
 	}
 
 	indexMap := map[string]struct{}{}
@@ -756,20 +788,20 @@ func (s Statement) validateCreateTable() error {
 	indexMap[indexColumnHash(s.PrimaryKey.Columns)] = struct{}{}
 
 	size := uint32(0)
-	for _, aColumn := range s.PrimaryKey.Columns {
-		if aColumn.Nullable {
-			return fmt.Errorf("primary key column cannot be nullable")
+	for _, col := range s.PrimaryKey.Columns {
+		if col.Nullable {
+			return errors.New("primary key column cannot be nullable")
 		}
-		if aColumn.Kind == Text {
-			return fmt.Errorf("primary key cannot be of type TEXT")
+		if col.Kind == Text {
+			return errors.New("primary key cannot be of type TEXT")
 		}
-		size += aColumn.Size
+		size += col.Size
 	}
 	if size > MaxIndexKeySize {
 		return fmt.Errorf("primary key size exceeds max index key size %d", MaxIndexKeySize)
 	}
 	if s.PrimaryKey.Autoincrement && s.PrimaryKey.Columns[0].Kind != Int8 && s.PrimaryKey.Columns[0].Kind != Int4 {
-		return fmt.Errorf("autoincrement primary key must be of type INT4 or INT8")
+		return errors.New("autoincrement primary key must be of type INT4 or INT8")
 	}
 
 	for _, uniqueIndex := range s.UniqueIndexes {
@@ -779,11 +811,11 @@ func (s Statement) validateCreateTable() error {
 		indexMap[indexColumnHash(uniqueIndex.Columns)] = struct{}{}
 
 		size := uint32(0)
-		for _, aColumn := range uniqueIndex.Columns {
-			if aColumn.Kind == Text {
-				return fmt.Errorf("unique index key cannot be of type TEXT")
+		for _, col := range uniqueIndex.Columns {
+			if col.Kind == Text {
+				return errors.New("unique index key cannot be of type TEXT")
 			}
-			size += aColumn.Size
+			size += col.Size
 		}
 		if size > MaxIndexKeySize {
 			return fmt.Errorf("unique index key size exceeds max index key size %d", MaxIndexKeySize)
@@ -793,13 +825,13 @@ func (s Statement) validateCreateTable() error {
 	return nil
 }
 
-func (s Statement) validateCreateIndex(aTable *Table) error {
-	if len(s.IndexName) == 0 {
-		return fmt.Errorf("index name is required")
+func (s Statement) validateCreateIndex(table *Table) error {
+	if s.IndexName == "" {
+		return errors.New("index name is required")
 	}
 
-	if len(s.TableName) == 0 {
-		return fmt.Errorf("table name is required")
+	if s.TableName == "" {
+		return errors.New("table name is required")
 	}
 
 	if utf8.RuneCountInString(s.IndexName) > MaxInlineVarchar {
@@ -807,10 +839,10 @@ func (s Statement) validateCreateIndex(aTable *Table) error {
 	}
 
 	if len(s.Columns) == 0 {
-		return fmt.Errorf("at least one column is required")
+		return errors.New("at least one column is required")
 	}
 
-	if aTable.HasIndexOnColumns(s.Columns) {
+	if table.HasIndexOnColumns(s.Columns) {
 		return fmt.Errorf("columns %s can only have one index", columnNames(s.Columns))
 	}
 
@@ -822,8 +854,8 @@ func (s Statement) validateCreateIndex(aTable *Table) error {
 }
 
 func (s Statement) validateDropIndex() error {
-	if len(s.IndexName) == 0 {
-		return fmt.Errorf("index name is required")
+	if s.IndexName == "" {
+		return errors.New("index name is required")
 	}
 
 	return nil
@@ -831,11 +863,11 @@ func (s Statement) validateDropIndex() error {
 
 func columnNames(columns []Column) string {
 	var result strings.Builder
-	for i, aColumn := range columns {
+	for i, col := range columns {
 		if i > 0 {
 			result.WriteString(", ")
 		}
-		result.WriteString(aColumn.Name)
+		result.WriteString(col.Name)
 	}
 	return result.String()
 }
@@ -843,13 +875,13 @@ func columnNames(columns []Column) string {
 // Check whether a row with the given columns can fit in a page if all columns are inlined
 func canInlinedRowFitInPage(columns []Column) bool {
 	remaining := UsablePageSize
-	for _, aColumn := range columns {
-		if aColumn.Kind.IsText() {
+	for _, col := range columns {
+		if col.Kind.IsText() {
 			// For TEXT and VARCHAR, assume each column has maximum inline size
 			// and will take 4+255 bytes each (length prefix + max varchar inline size)
 			remaining -= (varcharLengthPrefixSize + MaxInlineVarchar)
 		} else {
-			remaining -= int(aColumn.Size)
+			remaining -= int(col.Size)
 		}
 		if remaining < 0 {
 			return false
@@ -858,53 +890,53 @@ func canInlinedRowFitInPage(columns []Column) bool {
 	return true
 }
 
-func (s Statement) validateInsert(aTable *Table) error {
+func (s Statement) validateInsert(table *Table) error {
 	if len(s.Inserts) == 0 {
-		return fmt.Errorf("at least one row to insert is required")
+		return errors.New("at least one row to insert is required")
 	}
 
-	if len(s.Columns) != len(aTable.Columns) {
-		return fmt.Errorf("insert: expected %d columns, got %d", len(aTable.Columns), len(s.Columns))
+	if len(s.Columns) != len(table.Columns) {
+		return fmt.Errorf("insert: expected %d columns, got %d", len(table.Columns), len(s.Columns))
 	}
 
 	if len(s.Conditions) > 0 {
-		return fmt.Errorf("INSERT cannot have WHERE conditions")
+		return errors.New("INSERT cannot have WHERE conditions")
 	}
 
 	var (
 		hasPk    bool
 		pkColumn Column
 	)
-	if aTable.HasPrimaryKey() && len(aTable.PrimaryKey.Columns) == 1 {
+	if table.HasPrimaryKey() && len(table.PrimaryKey.Columns) == 1 {
 		hasPk = true
-		pkColumn = aTable.PrimaryKey.Columns[0]
+		pkColumn = table.PrimaryKey.Columns[0]
 	}
 
-	for _, aColumn := range s.Columns {
-		if aColumn.Nullable {
+	for _, col := range s.Columns {
+		if col.Nullable {
 			continue
 		}
-		if aColumn.DefaultValue.Valid {
+		if col.DefaultValue.Valid {
 			continue
 		}
-		if hasPk && aColumn.Name == pkColumn.Name && aTable.PrimaryKey.Autoincrement {
+		if hasPk && col.Name == pkColumn.Name && table.PrimaryKey.Autoincrement {
 			continue
 		}
-		if !s.HasField(aColumn.Name) {
-			return fmt.Errorf("missing required field %q", aColumn.Name)
+		if !s.HasField(col.Name) {
+			return fmt.Errorf("missing required field %q", col.Name)
 		}
 	}
 
-	for i, aField := range s.Fields {
-		aColumn, ok := aTable.ColumnByName(aField.Name)
+	for i, field := range s.Fields {
+		col, ok := table.ColumnByName(field.Name)
 		if !ok {
-			return fmt.Errorf("unknown field %q in table %q", aField.Name, aTable.Name)
+			return fmt.Errorf("unknown field %q in table %q", field.Name, table.Name)
 		}
 		for _, anInsert := range s.Inserts {
 			if len(anInsert) != len(s.Fields) {
 				return fmt.Errorf("insert: expected %d values, got %d", len(s.Fields), len(anInsert))
 			}
-			if err := s.validateColumnValue(aTable, aColumn, anInsert[i]); err != nil {
+			if err := s.validateColumnValue(table, col, anInsert[i]); err != nil {
 				return err
 			}
 		}
@@ -913,59 +945,59 @@ func (s Statement) validateInsert(aTable *Table) error {
 	return nil
 }
 
-func (s Statement) validateUpdate(aTable *Table) error {
+func (s Statement) validateUpdate(table *Table) error {
 	if len(s.Updates) == 0 {
-		return fmt.Errorf("at least one field to update is required")
+		return errors.New("at least one field to update is required")
 	}
-	for _, aField := range s.Fields {
-		aColumn, ok := aTable.ColumnByName(aField.Name)
+	for _, field := range s.Fields {
+		col, ok := table.ColumnByName(field.Name)
 		if !ok {
-			return fmt.Errorf("unknown field %q in table %q", aField.Name, aTable.Name)
+			return fmt.Errorf("unknown field %q in table %q", field.Name, table.Name)
 		}
-		if err := s.validateColumnValue(aTable, aColumn, s.Updates[aField.Name]); err != nil {
+		if err := s.validateColumnValue(table, col, s.Updates[field.Name]); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s Statement) validateSelect(aTable *Table) error {
+func (s Statement) validateSelect(table *Table) error {
 	if len(s.Fields) == 0 {
-		return fmt.Errorf("at least one field to select is required")
+		return errors.New("at least one field to select is required")
 	}
 	if s.Limit.Valid {
 		limitValue, ok := s.Limit.Value.(int64)
 		if !ok || limitValue < 0 {
-			return fmt.Errorf("LIMIT must be a non-negative integer")
+			return errors.New("LIMIT must be a non-negative integer")
 		}
 	}
 	if s.Offset.Valid {
 		offsetValue, ok := s.Offset.Value.(int64)
 		if !ok || offsetValue < 0 {
-			return fmt.Errorf("OFFSET must be a non-negative integer")
+			return errors.New("OFFSET must be a non-negative integer")
 		}
 	}
 
 	if s.IsSelectCountAll() {
 		if len(s.OrderBy) > 0 {
-			return fmt.Errorf("ORDER BY cannot be used with COUNT(*)")
+			return errors.New("ORDER BY cannot be used with COUNT(*)")
 		}
 		if s.Offset.Valid {
-			return fmt.Errorf("OFFSET cannot be used with COUNT(*)")
+			return errors.New("OFFSET cannot be used with COUNT(*)")
 		}
 		if s.Limit.Valid {
-			return fmt.Errorf("LIMIT cannot be used with COUNT(*)")
+			return errors.New("LIMIT cannot be used with COUNT(*)")
 		}
 	}
 
 	// GROUP BY cannot be combined with JOINs (not yet supported).
 	if len(s.GroupBy) > 0 && len(s.Joins) > 0 {
-		return fmt.Errorf("GROUP BY cannot be combined with JOIN")
+		return errors.New("GROUP BY cannot be combined with JOIN")
 	}
 
 	// HAVING requires GROUP BY.
 	if len(s.Having) > 0 && len(s.GroupBy) == 0 {
-		return fmt.Errorf("HAVING requires GROUP BY")
+		return errors.New("HAVING requires GROUP BY")
 	}
 
 	// HAVING condition fields must be aggregate functions or GROUP BY columns.
@@ -1001,24 +1033,24 @@ func (s Statement) validateSelect(aTable *Table) error {
 			groupBySet[f.Name] = struct{}{}
 		}
 
-		for i, aField := range s.Fields {
+		for i, field := range s.Fields {
 			agg := s.Aggregates[i]
 			if agg.Kind == 0 {
 				// Non-aggregate column must appear in GROUP BY.
-				if _, ok := groupBySet[aField.Name]; !ok {
-					return fmt.Errorf("non-aggregate column %q must appear in GROUP BY", aField.Name)
+				if _, ok := groupBySet[field.Name]; !ok {
+					return fmt.Errorf("non-aggregate column %q must appear in GROUP BY", field.Name)
 				}
 				continue
 			}
 			if agg.Column == "" {
 				continue // COUNT(*) has no source column to validate
 			}
-			aColumn, ok := aTable.ColumnByName(agg.Column)
+			col, ok := table.ColumnByName(agg.Column)
 			if !ok {
 				return fmt.Errorf("unknown column %q referenced in %s", agg.Column, agg.Kind)
 			}
 			if agg.Kind == AggregateSum || agg.Kind == AggregateAvg {
-				switch aColumn.Kind {
+				switch col.Kind {
 				case Int4, Int8, Real, Double:
 					// OK — numeric column
 				default:
@@ -1029,8 +1061,8 @@ func (s Statement) validateSelect(aTable *Table) error {
 
 		// Validate GROUP BY columns exist in the table schema.
 		for _, f := range s.GroupBy {
-			if _, ok := aTable.ColumnByName(f.Name); !ok {
-				return fmt.Errorf("unknown GROUP BY column %q in table %q", f.Name, aTable.Name)
+			if _, ok := table.ColumnByName(f.Name); !ok {
+				return fmt.Errorf("unknown GROUP BY column %q in table %q", f.Name, table.Name)
 			}
 		}
 
@@ -1044,15 +1076,15 @@ func (s Statement) validateSelect(aTable *Table) error {
 		// and will be validated during execution when all tables are available
 		if len(s.Joins) == 0 {
 			fieldMap := map[string]struct{}{}
-			for _, aField := range s.Fields {
-				_, ok := aTable.ColumnByName(aField.Name)
+			for _, field := range s.Fields {
+				_, ok := table.ColumnByName(field.Name)
 				if !ok {
-					return fmt.Errorf("unknown field %q in table %q", aField.Name, aTable.Name)
+					return fmt.Errorf("unknown field %q in table %q", field.Name, table.Name)
 				}
-				if _, exists := fieldMap[aField.String()]; exists {
-					return fmt.Errorf("duplicate field %q in select statement", aField.Name)
+				if _, exists := fieldMap[field.String()]; exists {
+					return fmt.Errorf("duplicate field %q in select statement", field.Name)
 				}
-				fieldMap[aField.String()] = struct{}{}
+				fieldMap[field.String()] = struct{}{}
 			}
 		}
 	}
@@ -1060,50 +1092,50 @@ func (s Statement) validateSelect(aTable *Table) error {
 	if len(s.Joins) > 0 {
 		var (
 			tableMap = map[string]struct{}{
-				aTable.Name: {},
+				table.Name: {},
 			}
 			aliasMap = map[string]struct{}{}
 		)
 		if s.TableAlias == "" {
-			return fmt.Errorf("table must have alias when query contains JOIN")
+			return errors.New("table must have alias when query contains JOIN")
 		}
 		aliasMap[s.TableAlias] = struct{}{}
-		for _, aJoin := range s.Joins {
-			if aJoin.TableAlias == "" {
-				return fmt.Errorf("JOIN must have a table alias")
+		for _, join := range s.Joins {
+			if join.TableAlias == "" {
+				return errors.New("JOIN must have a table alias")
 			}
 
-			_, ok := tableMap[aJoin.TableName]
+			_, ok := tableMap[join.TableName]
 			if ok {
-				return fmt.Errorf("duplicate table name %q in JOINs", aJoin.TableName)
+				return fmt.Errorf("duplicate table name %q in JOINs", join.TableName)
 			}
-			tableMap[aJoin.TableName] = struct{}{}
+			tableMap[join.TableName] = struct{}{}
 
-			_, ok = aliasMap[aJoin.TableAlias]
+			_, ok = aliasMap[join.TableAlias]
 			if ok {
-				return fmt.Errorf("duplicate table alias %q in JOINs", aJoin.TableAlias)
+				return fmt.Errorf("duplicate table alias %q in JOINs", join.TableAlias)
 			}
-			aliasMap[aJoin.TableAlias] = struct{}{}
+			aliasMap[join.TableAlias] = struct{}{}
 
-			if len(aJoin.Conditions) == 0 {
-				return fmt.Errorf("JOIN must have at least one condition")
+			if len(join.Conditions) == 0 {
+				return errors.New("JOIN must have at least one condition")
 			}
 
-			for _, aCondition := range aJoin.Conditions {
-				if aCondition.Operand1.Type != OperandField {
-					return fmt.Errorf("operand1 in JOIN condition must be a field")
+			for _, cond := range join.Conditions {
+				if cond.Operand1.Type != OperandField {
+					return errors.New("operand1 in JOIN condition must be a field")
 				}
-				if _, ok := aCondition.Operand1.Value.(Field); !ok {
-					return fmt.Errorf("operand1 in JOIN condition must be a field")
+				if _, ok := cond.Operand1.Value.(Field); !ok {
+					return errors.New("operand1 in JOIN condition must be a field")
 				}
-				if aCondition.Operand2.Type != OperandField {
-					return fmt.Errorf("operand2 in JOIN condition must be a field")
+				if cond.Operand2.Type != OperandField {
+					return errors.New("operand2 in JOIN condition must be a field")
 				}
-				if _, ok := aCondition.Operand2.Value.(Field); !ok {
-					return fmt.Errorf("operand2 in JOIN condition must be a field")
+				if _, ok := cond.Operand2.Value.(Field); !ok {
+					return errors.New("operand2 in JOIN condition must be a field")
 				}
-				if !IsValidCondition(aCondition) {
-					return fmt.Errorf("invalid condition in JOIN clause")
+				if !IsValidCondition(cond) {
+					return errors.New("invalid condition in JOIN clause")
 				}
 				// TODO - validate that the fields in the JOIN conditions exist in the respective tables
 			}
@@ -1114,7 +1146,7 @@ func (s Statement) validateSelect(aTable *Table) error {
 
 	if len(s.OrderBy) > 0 {
 		for _, anOrderBy := range s.OrderBy {
-			_, ok := aTable.ColumnByName(anOrderBy.Field.Name)
+			_, ok := table.ColumnByName(anOrderBy.Field.Name)
 			if !ok {
 				return fmt.Errorf("unknown field %q in ORDER BY clause", anOrderBy.Field.Name)
 			}
@@ -1124,130 +1156,130 @@ func (s Statement) validateSelect(aTable *Table) error {
 	return nil
 }
 
-func (s Statement) validateColumnValue(aTable *Table, aColumn Column, aValue OptionalValue) error {
-	if _, ok := aValue.Value.(Placeholder); ok {
-		return fmt.Errorf("unbound placeholder in value for field %q", aColumn.Name)
+func (s Statement) validateColumnValue(table *Table, col Column, val OptionalValue) error {
+	if _, ok := val.Value.(Placeholder); ok {
+		return fmt.Errorf("unbound placeholder in value for field %q", col.Name)
 	}
 	var isPkColumn bool
-	if aTable.HasPrimaryKey() && len(aTable.PrimaryKey.Columns) == 1 && aColumn.Name == aTable.PrimaryKey.Columns[0].Name {
+	if table.HasPrimaryKey() && len(table.PrimaryKey.Columns) == 1 && col.Name == table.PrimaryKey.Columns[0].Name {
 		isPkColumn = true
 	}
-	if !aValue.Valid && isPkColumn && !aTable.PrimaryKey.Autoincrement {
-		return fmt.Errorf("primary key on field %q cannot be NULL", aColumn.Name)
+	if !val.Valid && isPkColumn && !table.PrimaryKey.Autoincrement {
+		return fmt.Errorf("primary key on field %q cannot be NULL", col.Name)
 	}
-	if !aValue.Valid && !aColumn.Nullable && !isPkColumn {
-		return fmt.Errorf("field %q cannot be NULL", aColumn.Name)
+	if !val.Valid && !col.Nullable && !isPkColumn {
+		return fmt.Errorf("field %q cannot be NULL", col.Name)
 	}
-	if err := isValueValidForColumn(aColumn, aValue); err != nil {
+	if err := isValueValidForColumn(col, val); err != nil {
 		return fmt.Errorf("invalid field value: %w", err)
 	}
 	return nil
 }
 
-func isValueValidForColumn(aColumn Column, aValue OptionalValue) error {
-	if !aValue.Valid {
+func isValueValidForColumn(col Column, val OptionalValue) error {
+	if !val.Valid {
 		return nil
 	}
-	switch aColumn.Kind {
+	switch col.Kind {
 	case Boolean:
-		_, ok := aValue.Value.(bool)
+		_, ok := val.Value.(bool)
 		if !ok {
-			return fmt.Errorf("expects BOOLEAN value for %q", aColumn.Name)
+			return fmt.Errorf("expects BOOLEAN value for %q", col.Name)
 		}
 	case Int4:
-		_, ok := aValue.Value.(int64)
+		_, ok := val.Value.(int64)
 		if !ok {
-			_, ok2 := aValue.Value.(int32)
+			_, ok2 := val.Value.(int32)
 			if !ok2 {
-				return fmt.Errorf("expects INT4 value for %q", aColumn.Name)
+				return fmt.Errorf("expects INT4 value for %q", col.Name)
 			}
 		}
 	case Int8:
-		_, ok := aValue.Value.(int64)
+		_, ok := val.Value.(int64)
 		if !ok {
-			return fmt.Errorf("expects INT8 value for %q", aColumn.Name)
+			return fmt.Errorf("expects INT8 value for %q", col.Name)
 		}
 	case Real:
-		_, ok := aValue.Value.(float64)
+		_, ok := val.Value.(float64)
 		if !ok {
-			_, ok2 := aValue.Value.(float32)
+			_, ok2 := val.Value.(float32)
 			if !ok2 {
-				return fmt.Errorf("expects REAL value for %q", aColumn.Name)
+				return fmt.Errorf("expects REAL value for %q", col.Name)
 			}
 		}
 	case Double:
-		_, ok := aValue.Value.(float64)
+		_, ok := val.Value.(float64)
 		if !ok {
-			return fmt.Errorf("expects DOUBLE value for %q", aColumn.Name)
+			return fmt.Errorf("expects DOUBLE value for %q", col.Name)
 		}
 	case Varchar, Text:
-		tp, ok := aValue.Value.(TextPointer)
+		tp, ok := val.Value.(TextPointer)
 		if !ok {
-			return fmt.Errorf("expects a text value for %q", aColumn.Name)
+			return fmt.Errorf("expects a text value for %q", col.Name)
 		}
-		switch aColumn.Kind {
+		switch col.Kind {
 		case Varchar:
-			if utf8.RuneCountInString(aValue.Value.(TextPointer).String()) > int(aColumn.Size) {
-				return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", aColumn.Name, aColumn.Size)
+			if utf8.RuneCountInString(val.Value.(TextPointer).String()) > int(col.Size) {
+				return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", col.Name, col.Size)
 			}
 		case Text:
-			if utf8.RuneCountInString(aValue.Value.(TextPointer).String()) > MaxOverflowTextSize {
-				return fmt.Errorf("field %q exceeds maximum TEXT length of %d", aColumn.Name, MaxOverflowTextSize)
+			if utf8.RuneCountInString(val.Value.(TextPointer).String()) > MaxOverflowTextSize {
+				return fmt.Errorf("field %q exceeds maximum TEXT length of %d", col.Name, MaxOverflowTextSize)
 			}
 		}
 		if !utf8.ValidString(tp.String()) {
-			return fmt.Errorf("expects valid UTF-8 string for %q", aColumn.Name)
+			return fmt.Errorf("expects valid UTF-8 string for %q", col.Name)
 		}
 	case Timestamp:
-		_, ok := aValue.Value.(Time)
+		_, ok := val.Value.(Time)
 		if !ok {
-			return fmt.Errorf("expects time value for %q", aColumn.Name)
+			return fmt.Errorf("expects time value for %q", col.Name)
 		}
 	}
 	return nil
 }
 
 func (s Statement) validateWhere() error {
-	for _, aConditionGroup := range s.Conditions {
+	for _, condGroup := range s.Conditions {
 		equalityMap := map[string][]any{}
-		for _, aCondition := range aConditionGroup {
-			if aCondition.Operand1.Type != OperandField {
-				return fmt.Errorf("operand1 in WHERE condition must be a field")
+		for _, cond := range condGroup {
+			if cond.Operand1.Type != OperandField {
+				return errors.New("operand1 in WHERE condition must be a field")
 			}
-			if _, ok := aCondition.Operand1.Value.(Field); !ok {
-				return fmt.Errorf("operand1 in WHERE condition must be a field")
+			if _, ok := cond.Operand1.Value.(Field); !ok {
+				return errors.New("operand1 in WHERE condition must be a field")
 			}
-			if aCondition.Operand2.Type == OperandPlaceholder {
-				return fmt.Errorf("unbound placeholder in WHERE clause")
+			if cond.Operand2.Type == OperandPlaceholder {
+				return errors.New("unbound placeholder in WHERE clause")
 			}
-			if !IsValidCondition(aCondition) {
-				return fmt.Errorf("invalid condition in WHERE clause")
+			if !IsValidCondition(cond) {
+				return errors.New("invalid condition in WHERE clause")
 			}
-			if aCondition.Operand1.Type == OperandList {
-				return fmt.Errorf("operand1 in WHERE condition cannot be a list")
+			if cond.Operand1.Type == OperandList {
+				return errors.New("operand1 in WHERE condition cannot be a list")
 			}
-			if aCondition.Operand2.Type == OperandList {
+			if cond.Operand2.Type == OperandList {
 				var valueType string
-				for _, value := range aCondition.Operand2.Value.([]any) {
+				for _, value := range cond.Operand2.Value.([]any) {
 					if _, ok := value.(Placeholder); ok {
-						return fmt.Errorf("unbound placeholder in WHERE clause")
+						return errors.New("unbound placeholder in WHERE clause")
 					}
 					if valueType == "" {
 						valueType = fmt.Sprintf("%T", value)
 						_, ok := value.(bool)
 						if ok {
-							return fmt.Errorf("IN / NOT IN operator not supported for boolean columns")
+							return errors.New("IN / NOT IN operator not supported for boolean columns")
 						}
 						continue
 					}
 					if fmt.Sprintf("%T", value) != valueType {
-						return fmt.Errorf("mixed operand types in WHERE condition list")
+						return errors.New("mixed operand types in WHERE condition list")
 					}
 				}
 			}
 
-			if isEquality(aCondition) {
-				field := aCondition.Operand1.Value.(Field)
+			if isEquality(cond) {
+				field := cond.Operand1.Value.(Field)
 
 				// Skip validation for fields from joined tables (have alias prefix)
 				// They will be validated during query planning
@@ -1255,12 +1287,12 @@ func (s Statement) validateWhere() error {
 					continue
 				}
 
-				aColumn, ok := s.ColumnByName(field.Name)
+				col, ok := s.ColumnByName(field.Name)
 				if !ok {
 					return fmt.Errorf("unknown field %q in WHERE clause", field.Name)
 				}
 
-				args, err := equalityKeys(aColumn, aCondition)
+				args, err := equalityKeys(col, cond)
 				if err != nil {
 					return err
 				}
@@ -1274,6 +1306,7 @@ func (s Statement) validateWhere() error {
 	return nil
 }
 
+// DDL ...
 func (s Statement) DDL() string {
 	switch s.Kind {
 	case CreateTable:
@@ -1287,7 +1320,7 @@ func (s Statement) DDL() string {
 
 func (s Statement) createTableDDL() string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("create table \"%s\" (\n", s.TableName))
+	fmt.Fprintf(&sb, "create table \"%s\" (\n", s.TableName)
 
 	var pkColumn string
 	if len(s.PrimaryKey.Columns) == 1 {
@@ -1301,9 +1334,9 @@ func (s Statement) createTableDDL() string {
 	}
 
 	for i, col := range s.Columns {
-		sb.WriteString(fmt.Sprintf("	%s %s", col.Name, col.Kind))
+		fmt.Fprintf(&sb, "	%s %s", col.Name, col.Kind)
 		if col.Kind == Varchar {
-			sb.WriteString(fmt.Sprintf("(%d)", col.Size))
+			fmt.Fprintf(&sb, "(%d)", col.Size)
 		}
 		if col.Name == pkColumn {
 			sb.WriteString(" primary key")
@@ -1328,13 +1361,13 @@ func (s Statement) createTableDDL() string {
 						sb.WriteString(" default false")
 					}
 				case Int4, Int8:
-					sb.WriteString(fmt.Sprintf(" default %d", col.DefaultValue.Value.(int64)))
+					fmt.Fprintf(&sb, " default %d", col.DefaultValue.Value.(int64))
 				case Real, Double:
-					sb.WriteString(fmt.Sprintf(" default %f", col.DefaultValue.Value.(float64)))
+					fmt.Fprintf(&sb, " default %f", col.DefaultValue.Value.(float64))
 				case Varchar, Text:
-					sb.WriteString(fmt.Sprintf(" default '%s'", col.DefaultValue.Value.(TextPointer).String()))
+					fmt.Fprintf(&sb, " default '%s'", col.DefaultValue.Value.(TextPointer).String())
 				case Timestamp:
-					sb.WriteString(fmt.Sprintf(" default '%s'", col.DefaultValue.Value.(Time).String()))
+					fmt.Fprintf(&sb, " default '%s'", col.DefaultValue.Value.(Time).String())
 				}
 			}
 		}
@@ -1345,8 +1378,8 @@ func (s Statement) createTableDDL() string {
 	if len(s.PrimaryKey.Columns) > 1 {
 		sb.WriteString(",\n")
 		sb.WriteString("	primary key (")
-		for j, aColumn := range s.PrimaryKey.Columns {
-			sb.WriteString(aColumn.Name)
+		for j, col := range s.PrimaryKey.Columns {
+			sb.WriteString(col.Name)
 			if j < len(s.PrimaryKey.Columns)-1 {
 				sb.WriteString(", ")
 			}
@@ -1359,8 +1392,8 @@ func (s Statement) createTableDDL() string {
 		}
 		sb.WriteString(",\n")
 		sb.WriteString("	unique (")
-		for j, aColumn := range uniqueIndex.Columns {
-			sb.WriteString(aColumn.Name)
+		for j, col := range uniqueIndex.Columns {
+			sb.WriteString(col.Name)
 			if j < len(uniqueIndex.Columns)-1 {
 				sb.WriteString(", ")
 			}
@@ -1376,10 +1409,10 @@ func (s Statement) createTableDDL() string {
 
 func (s Statement) createIndexDDL() string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("create index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName))
+	fmt.Fprintf(&sb, "create index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName)
 
 	for i, col := range s.Columns {
-		sb.WriteString(fmt.Sprintf("	%s", col.Name))
+		fmt.Fprintf(&sb, "	%s", col.Name)
 
 		if i < len(s.Columns)-1 {
 			sb.WriteString(",\n")
@@ -1390,12 +1423,13 @@ func (s Statement) createIndexDDL() string {
 	return sb.String()
 }
 
-func (stmt Statement) InsertValuesForColumns(insertIdx int, columns ...Column) []OptionalValue {
+// InsertValuesForColumns ...
+func (s Statement) InsertValuesForColumns(insertIdx int, columns ...Column) []OptionalValue {
 	values := make([]OptionalValue, 0, len(columns))
-	for _, aColumn := range columns {
+	for _, col := range columns {
 		fieldIdx := -1
-		for i, aField := range stmt.Fields {
-			if aField.Name == aColumn.Name {
+		for i, field := range s.Fields {
+			if field.Name == col.Name {
 				fieldIdx = i
 				break
 			}
@@ -1403,28 +1437,31 @@ func (stmt Statement) InsertValuesForColumns(insertIdx int, columns ...Column) [
 		if fieldIdx == -1 {
 			continue
 		}
-		if insertIdx < 0 || insertIdx >= len(stmt.Inserts) {
+		if insertIdx < 0 || insertIdx >= len(s.Inserts) {
 			continue
 		}
-		values = append(values, stmt.Inserts[insertIdx][fieldIdx])
+		values = append(values, s.Inserts[insertIdx][fieldIdx])
 	}
 
 	return values
 }
 
+// ColumnIdx ...
 func (s Statement) ColumnIdx(name string) int {
-	for i, aColumn := range s.Columns {
-		if aColumn.Name == name {
+	for i, col := range s.Columns {
+		if col.Name == name {
 			return i
 		}
 	}
 	return -1
 }
 
+// IsSelectCountAll ...
 func (s Statement) IsSelectCountAll() bool {
 	return s.ReadOnly() && len(s.Fields) == 1 && strings.ToUpper(s.Fields[0].Name) == "COUNT(*)"
 }
 
+// IsSelectAll ...
 func (s Statement) IsSelectAll() bool {
 	return s.ReadOnly() && len(s.Fields) == 1 && s.Fields[0].Name == "*"
 }

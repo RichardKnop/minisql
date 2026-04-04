@@ -249,11 +249,11 @@ func TestTable_Update_Overflow(t *testing.T) {
 		assert.Equal(t, 1, aResult.RowsAffected)
 
 		// Prepare expected rows with one updated row
-		for i, aRow := range expected {
+		for i := range expected {
 			if i != 0 {
 				continue
 			}
-			aRow, _ = aRow.SetValue("profile", OptionalValue{Value: updatedOverflowText, Valid: true})
+			expected[i], _ = expected[i].SetValue("profile", OptionalValue{Value: updatedOverflowText, Valid: true})
 		}
 
 		checkRows(ctx, t, aTable, expected)
@@ -301,11 +301,11 @@ func TestTable_Update_Overflow(t *testing.T) {
 		assert.Equal(t, 1, aResult.RowsAffected)
 
 		// Prepare expected rows with second updated row
-		for i, aRow := range expected {
+		for i := range expected {
 			if i != 1 {
 				continue
 			}
-			aRow, _ = aRow.SetValue("profile", OptionalValue{Value: updatedInlineText, Valid: true})
+			expected[i], _ = expected[i].SetValue("profile", OptionalValue{Value: updatedInlineText, Valid: true})
 		}
 
 		checkRows(ctx, t, aTable, expected)
@@ -354,11 +354,11 @@ func TestTable_Update_Overflow(t *testing.T) {
 		assert.Equal(t, 1, aResult.RowsAffected)
 
 		// Prepare expected rows with third updated row
-		for i, aRow := range expected {
+		for i := range expected {
 			if i != 2 {
 				continue
 			}
-			aRow, _ = aRow.SetValue("profile", OptionalValue{Value: updatedShrunkOverflowText, Valid: true})
+			expected[i], _ = expected[i].SetValue("profile", OptionalValue{Value: updatedShrunkOverflowText, Valid: true})
 		}
 
 		checkRows(ctx, t, aTable, expected)
@@ -405,12 +405,12 @@ func TestTable_Update_Overflow(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 1, aResult.RowsAffected)
 
-		// Prepare expected rows with third updated row
-		for i, aRow := range expected {
+		// Prepare expected rows with first updated row (re-expanded)
+		for i := range expected {
 			if i != 0 {
 				continue
 			}
-			aRow, _ = aRow.SetValue("profile", OptionalValue{Value: expandedOverflowText, Valid: true})
+			expected[i], _ = expected[i].SetValue("profile", OptionalValue{Value: expandedOverflowText, Valid: true})
 		}
 
 		checkRows(ctx, t, aTable, expected)

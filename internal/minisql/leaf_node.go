@@ -4,16 +4,19 @@ import (
 	"github.com/RichardKnop/minisql/pkg/bitwise"
 )
 
+// LeafNodeHeader ...
 type LeafNodeHeader struct {
 	Header
 	Cells    uint32
 	NextLeaf PageIndex
 }
 
+// Size ...
 func (h *LeafNodeHeader) Size() uint64 {
 	return h.Header.Size() + 8
 }
 
+// Marshal ...
 func (h *LeafNodeHeader) Marshal(buf []byte) {
 	i := uint64(0)
 
@@ -26,6 +29,7 @@ func (h *LeafNodeHeader) Marshal(buf []byte) {
 	i += 4
 }
 
+// Unmarshal ...
 func (h *LeafNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 	i := uint64(0)
 
@@ -42,6 +46,7 @@ func (h *LeafNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 	return h.Size(), nil
 }
 
+// Cell ...
 type Cell struct {
 	NullBitmask uint64
 	Key         RowID
@@ -51,11 +56,13 @@ type Cell struct {
 	isOwned bool
 }
 
+// Size ...
 func (c *Cell) Size() uint64 {
 	// 8 bytes for null bitmask, 8 bytes for key
 	return 8 + 8 + uint64(len(c.Value))
 }
 
+// Marshal ...
 func (c *Cell) Marshal(buf []byte) {
 	i := uint64(0)
 
@@ -69,6 +76,7 @@ func (c *Cell) Marshal(buf []byte) {
 	i += uint64(n)
 }
 
+// Unmarshal ...
 func (c *Cell) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	offset := uint64(0)
 
@@ -81,17 +89,17 @@ func (c *Cell) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	// Pass 1: Calculate total size needed for all column values
 	totalSize := uint64(0)
 	scanOffset := offset
-	for i, aColumn := range columns {
+	for i, col := range columns {
 		if bitwise.IsSet(c.NullBitmask, i) {
 			continue
 		}
-		if aColumn.Kind.IsText() {
+		if col.Kind.IsText() {
 			size := unmarshalInt32(buf, scanOffset)
 			totalSize += 4 + uint64(size)
 			scanOffset += 4 + uint64(size)
 		} else {
-			totalSize += uint64(aColumn.Size)
-			scanOffset += uint64(aColumn.Size)
+			totalSize += uint64(col.Size)
+			scanOffset += uint64(col.Size)
 		}
 	}
 
@@ -105,6 +113,7 @@ func (c *Cell) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	return offset, nil
 }
 
+// LeafNode ...
 type LeafNode struct {
 	Header LeafNodeHeader
 	Cells  []Cell
@@ -114,50 +123,51 @@ type LeafNode struct {
 // until they are about to be modified at which point PrepareModifyCell
 // should be called to clone the value slice for that cell.
 func (n *LeafNode) Clone() *LeafNode {
-	aCopy := &LeafNode{
+	nodeCopy := &LeafNode{
 		Header: n.Header,
 	}
 
 	if len(n.Cells) == 0 {
-		return aCopy
+		return nodeCopy
 	}
 
 	// Shallow copy - share Value slices
-	aCopy.Cells = make([]Cell, len(n.Cells))
+	nodeCopy.Cells = make([]Cell, len(n.Cells))
 	for i := range n.Cells {
-		aCopy.Cells[i] = Cell{
+		nodeCopy.Cells[i] = Cell{
 			NullBitmask: n.Cells[i].NullBitmask,
 			Key:         n.Cells[i].Key,
 			Value:       n.Cells[i].Value, // Share the slice!
 			isOwned:     false,            // Mark as shared
 		}
 	}
-	return aCopy
+	return nodeCopy
 }
 
+// DeepClone ...
 func (n *LeafNode) DeepClone() *LeafNode {
-	aCopy := &LeafNode{
+	nodeCopy := &LeafNode{
 		Header: n.Header,
 	}
 
 	if len(n.Cells) == 0 {
-		return aCopy
+		return nodeCopy
 	}
 
-	aCopy.Cells = make([]Cell, len(n.Cells))
+	nodeCopy.Cells = make([]Cell, len(n.Cells))
 	for i := range n.Cells {
-		aCopy.Cells[i] = Cell{
+		nodeCopy.Cells[i] = Cell{
 			NullBitmask: n.Cells[i].NullBitmask,
 			Key:         n.Cells[i].Key,
 			Value:       make([]byte, len(n.Cells[i].Value)),
 			isOwned:     true, // Mark as owned
 		}
-		copy(aCopy.Cells[i].Value, n.Cells[i].Value)
+		copy(nodeCopy.Cells[i].Value, n.Cells[i].Value)
 	}
-	return aCopy
+	return nodeCopy
 }
 
-// Before modifying a cell:
+// PrepareModifyCell ensures the cell at idx is copy-on-write safe before modification.
 func (n *LeafNode) PrepareModifyCell(idx uint32) {
 	if n.Cells[idx].isOwned {
 		return
@@ -169,17 +179,19 @@ func (n *LeafNode) PrepareModifyCell(idx uint32) {
 	n.Cells[idx].isOwned = true
 }
 
+// NewLeafNode ...
 func NewLeafNode(cells ...Cell) *LeafNode {
-	aNode := LeafNode{
+	node := LeafNode{
 		Cells: make([]Cell, 0, len(cells)),
 	}
 	if len(cells) > 0 {
-		aNode.Header.Cells = uint32(len(cells))
-		aNode.Cells = append(aNode.Cells, cells...)
+		node.Header.Cells = uint32(len(cells))
+		node.Cells = append(node.Cells, cells...)
 	}
-	return &aNode
+	return &node
 }
 
+// Size ...
 func (n *LeafNode) Size() uint64 {
 	size := uint64(0)
 	size += n.Header.Size()
@@ -191,6 +203,7 @@ func (n *LeafNode) Size() uint64 {
 	return size
 }
 
+// Marshal ...
 func (n *LeafNode) Marshal(buf []byte) error {
 	i := uint64(0)
 
@@ -205,6 +218,7 @@ func (n *LeafNode) Marshal(buf []byte) error {
 	return nil
 }
 
+// Unmarshal ...
 func (n *LeafNode) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	i := uint64(0)
 
@@ -231,6 +245,7 @@ func (n *LeafNode) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	return i, nil
 }
 
+// Delete ...
 func (n *LeafNode) Delete(key RowID) (Cell, bool) {
 	if n.Header.Cells == 0 {
 		return Cell{}, false
@@ -249,7 +264,7 @@ func (n *LeafNode) Delete(key RowID) (Cell, bool) {
 	}
 
 	n.PrepareModifyCell(uint32(cellIdx))
-	aCellToDelete := n.Cells[cellIdx]
+	cellToDelete := n.Cells[cellIdx]
 
 	for i := uint32(cellIdx); i < n.Header.Cells-1; i++ {
 		n.PrepareModifyCell(i + 1)
@@ -259,22 +274,26 @@ func (n *LeafNode) Delete(key RowID) (Cell, bool) {
 
 	n.Header.Cells -= 1
 
-	return aCellToDelete, true
+	return cellToDelete, true
 }
 
+// FirstCell ...
 func (n *LeafNode) FirstCell() Cell {
 	return n.Cells[0]
 }
 
+// LastCell ...
 func (n *LeafNode) LastCell() Cell {
 	return n.Cells[n.Header.Cells-1]
 }
 
+// RemoveLastCell ...
 func (n *LeafNode) RemoveLastCell() {
 	n.Cells[n.Header.Cells-1] = Cell{}
 	n.Header.Cells -= 1
 }
 
+// RemoveFirstCell ...
 func (n *LeafNode) RemoveFirstCell() {
 	for i := uint32(0); i < n.Header.Cells-1; i++ {
 		n.PrepareModifyCell(i + 1)
@@ -284,22 +303,25 @@ func (n *LeafNode) RemoveFirstCell() {
 	n.Header.Cells -= 1
 }
 
-func (n *LeafNode) PrependCell(aCell Cell) {
+// PrependCell ...
+func (n *LeafNode) PrependCell(cell Cell) {
 	for i := n.Header.Cells; i > 0; i-- {
 		n.PrepareModifyCell(i - 1)
 		n.Cells[i] = n.Cells[i-1]
 	}
-	n.Cells[0] = aCell
+	n.Cells[0] = cell
 	n.Header.Cells += 1
 }
 
+// AppendCells ...
 func (n *LeafNode) AppendCells(cells ...Cell) {
-	for _, aCell := range cells {
-		n.Cells[n.Header.Cells] = aCell
+	for _, cell := range cells {
+		n.Cells[n.Header.Cells] = cell
 		n.Header.Cells += 1
 	}
 }
 
+// Keys ...
 func (n *LeafNode) Keys() []RowID {
 	keys := make([]RowID, 0, n.Header.Cells)
 	for idx := range n.Header.Cells {
@@ -308,6 +330,7 @@ func (n *LeafNode) Keys() []RowID {
 	return keys
 }
 
+// MaxSpace ...
 func (n *LeafNode) MaxSpace() uint64 {
 	maxSpace := PageSize - headerSize()
 	if n.Header.IsRoot {
@@ -316,6 +339,7 @@ func (n *LeafNode) MaxSpace() uint64 {
 	return maxSpace
 }
 
+// TakenSpace ...
 func (n *LeafNode) TakenSpace() uint64 {
 	takenPageSize := uint64(0)
 	for i := uint32(0); i < n.Header.Cells; i++ {
@@ -324,27 +348,33 @@ func (n *LeafNode) TakenSpace() uint64 {
 	return takenPageSize
 }
 
+// AvailableSpace ...
 func (n *LeafNode) AvailableSpace() uint64 {
 	return n.MaxSpace() - n.TakenSpace()
 }
 
-func (n *LeafNode) HasSpaceForRow(aRow Row) bool {
-	return aRow.Size()+8+8 <= n.AvailableSpace()
+// HasSpaceForRow ...
+func (n *LeafNode) HasSpaceForRow(row Row) bool {
+	return row.Size()+8+8 <= n.AvailableSpace()
 }
 
+// AtLeastHalfFull ...
 func (n *LeafNode) AtLeastHalfFull() bool {
 	return n.AvailableSpace() < n.MaxSpace()/2
 }
 
+// CanMergeWith ...
 func (n *LeafNode) CanMergeWith(n2 *LeafNode) bool {
 	return n2.TakenSpace() <= n.AvailableSpace()
 }
 
+// CanBorrowFirst ...
 func (n *LeafNode) CanBorrowFirst() bool {
 	firstCellSize := n.Cells[0].Size()
 	return n.AvailableSpace()+firstCellSize < n.MaxSpace()/2
 }
 
+// CanBorrowLast ...
 func (n *LeafNode) CanBorrowLast() bool {
 	lastCellSize := n.Cells[n.Header.Cells-1].Size()
 	return n.AvailableSpace()+lastCellSize < n.MaxSpace()/2

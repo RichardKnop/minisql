@@ -38,9 +38,9 @@ func (s *TestSuite) TestAggregateWithoutGroupBy() {
 		defer rows.Close()
 
 		s.Require().True(rows.Next())
-		var min int64
-		s.Require().NoError(rows.Scan(&min))
-		s.Equal(int64(10), min)
+		var minVal int64
+		s.Require().NoError(rows.Scan(&minVal))
+		s.Equal(int64(10), minVal)
 		s.False(rows.Next())
 		s.Require().NoError(rows.Err())
 	})
@@ -51,9 +51,9 @@ func (s *TestSuite) TestAggregateWithoutGroupBy() {
 		defer rows.Close()
 
 		s.Require().True(rows.Next())
-		var max int64
-		s.Require().NoError(rows.Scan(&max))
-		s.Equal(int64(50), max)
+		var maxVal int64
+		s.Require().NoError(rows.Scan(&maxVal))
+		s.Equal(int64(50), maxVal)
 		s.False(rows.Next())
 		s.Require().NoError(rows.Err())
 	})
@@ -124,7 +124,7 @@ func (s *TestSuite) TestAggregateWithoutGroupBy() {
 	})
 
 	s.Run("Non-aggregate column without GROUP BY is rejected", func() {
-		_, err := s.db.QueryContext(context.Background(), `select user_id, SUM(total_paid) from orders;`)
+		_, err := s.db.Exec(`select user_id, SUM(total_paid) from orders;`)
 		s.Require().Error(err)
 		s.Contains(err.Error(), "non-aggregate column")
 	})
@@ -133,7 +133,7 @@ func (s *TestSuite) TestAggregateWithoutGroupBy() {
 		_, err := s.db.Exec(createUsersTableSQL)
 		s.Require().NoError(err)
 
-		_, err = s.db.QueryContext(context.Background(), `select SUM(name) from users;`)
+		_, err = s.db.Exec(`select SUM(name) from users;`)
 		s.Require().Error(err)
 		s.Contains(err.Error(), "must be numeric")
 	})
@@ -216,9 +216,9 @@ func (s *TestSuite) TestAggregateMinMaxWithIndex() {
 		defer rows.Close()
 
 		s.Require().True(rows.Next())
-		var min int64
-		s.Require().NoError(rows.Scan(&min))
-		s.Equal(int64(10), min)
+		var minVal int64
+		s.Require().NoError(rows.Scan(&minVal))
+		s.Equal(int64(10), minVal)
 		s.False(rows.Next())
 		s.Require().NoError(rows.Err())
 	})
@@ -229,9 +229,9 @@ func (s *TestSuite) TestAggregateMinMaxWithIndex() {
 		defer rows.Close()
 
 		s.Require().True(rows.Next())
-		var max int64
-		s.Require().NoError(rows.Scan(&max))
-		s.Equal(int64(50), max)
+		var maxVal int64
+		s.Require().NoError(rows.Scan(&maxVal))
+		s.Equal(int64(50), maxVal)
 		s.False(rows.Next())
 		s.Require().NoError(rows.Err())
 	})
@@ -242,9 +242,9 @@ func (s *TestSuite) TestAggregateMinMaxWithIndex() {
 		defer rows.Close()
 
 		s.Require().True(rows.Next())
-		var min int64
-		s.Require().NoError(rows.Scan(&min))
-		s.Equal(int64(1), min)
+		var minVal int64
+		s.Require().NoError(rows.Scan(&minVal))
+		s.Equal(int64(1), minVal)
 		s.False(rows.Next())
 		s.Require().NoError(rows.Err())
 	})
@@ -255,9 +255,9 @@ func (s *TestSuite) TestAggregateMinMaxWithIndex() {
 		defer rows.Close()
 
 		s.Require().True(rows.Next())
-		var max int64
-		s.Require().NoError(rows.Scan(&max))
-		s.Equal(int64(5), max)
+		var maxVal int64
+		s.Require().NoError(rows.Scan(&maxVal))
+		s.Equal(int64(5), maxVal)
 		s.False(rows.Next())
 		s.Require().NoError(rows.Err())
 	})
@@ -277,9 +277,9 @@ func (s *TestSuite) TestAggregateMinMaxWithIndex() {
 		defer rows.Close()
 
 		s.Require().True(rows.Next())
-		var min *int64
-		s.Require().NoError(rows.Scan(&min))
-		s.Nil(min)
+		var minVal *int64
+		s.Require().NoError(rows.Scan(&minVal))
+		s.Nil(minVal)
 		s.False(rows.Next())
 		s.Require().NoError(rows.Err())
 	})
@@ -495,7 +495,7 @@ func (s *TestSuite) TestGroupBy() {
 	})
 
 	s.Run("non-aggregate column without GROUP BY is rejected", func() {
-		_, err := s.db.QueryContext(context.Background(), `select user_id, SUM(total_paid) from orders;`)
+		_, err := s.db.Exec(`select user_id, SUM(total_paid) from orders;`)
 		s.Require().Error(err)
 		s.Contains(err.Error(), "non-aggregate column")
 	})
@@ -628,7 +628,7 @@ func (s *TestSuite) TestHaving() {
 	})
 
 	s.Run("HAVING without GROUP BY is rejected", func() {
-		_, err := s.db.QueryContext(context.Background(), `select SUM(total_paid) from orders HAVING SUM(total_paid) > 10;`)
+		_, err := s.db.Exec(`select SUM(total_paid) from orders HAVING SUM(total_paid) > 10;`)
 		s.Require().Error(err)
 		s.Contains(err.Error(), "HAVING requires GROUP BY")
 	})
@@ -641,7 +641,7 @@ func (s *TestSuite) TestGroupByWithJoinRejected() {
 	_, err = s.db.Exec(createUsersTableSQL)
 	s.Require().NoError(err)
 
-	_, err = s.db.QueryContext(context.Background(), `
+	_, err = s.db.Exec(`
 		select o.user_id, SUM(o.total_paid)
 		from orders as o
 		inner join users as u on u.id = o.user_id

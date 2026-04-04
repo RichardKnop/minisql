@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	testDbName = "test_db"
+	testDBName = "test_db"
 )
 
 func TestNewDatabase(t *testing.T) {
@@ -118,7 +118,7 @@ func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 	mock.AssertExpectationsForObjects(t, mockParser)
 
 	// Check system schema table contents
-	schemas := collectMainSchemas(t, ctx, aDatabase)
+	schemas := collectMainSchemas(ctx, t, aDatabase)
 	assert.Len(t, schemas, 6)
 
 	// First created table without any index
@@ -188,7 +188,7 @@ func TestDatabase_CreateTable(t *testing.T) {
 		assert.Len(t, aPager.pages, 2)
 
 		// Check system schema table contents
-		schemas := collectMainSchemas(t, ctx, aDatabase)
+		schemas := collectMainSchemas(ctx, t, aDatabase)
 		assert.Len(t, schemas, 2)
 
 		// Created table without any index
@@ -218,7 +218,7 @@ func TestDatabase_CreateTable(t *testing.T) {
 		assertFreePages(t, tablePager, []PageIndex{1})
 
 		// Check system table contents
-		schemas := collectMainSchemas(t, ctx, aDatabase)
+		schemas := collectMainSchemas(ctx, t, aDatabase)
 		assert.Len(t, schemas, 1)
 	})
 }
@@ -262,7 +262,7 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 		assert.Len(t, aPager.pages, 3)
 
 		// Check system schema table contents
-		schemas := collectMainSchemas(t, ctx, aDatabase)
+		schemas := collectMainSchemas(ctx, t, aDatabase)
 		assert.Len(t, schemas, 3)
 
 		// Created table with primary key
@@ -297,7 +297,7 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 		assertFreePages(t, tablePager, []PageIndex{2, 1})
 
 		// Check system table contents
-		schemas := collectMainSchemas(t, ctx, aDatabase)
+		schemas := collectMainSchemas(ctx, t, aDatabase)
 		assert.Len(t, schemas, 1)
 	})
 }
@@ -351,7 +351,7 @@ func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
 		assert.Len(t, aPager.pages, 3)
 
 		// Check system table contents
-		schemas := collectMainSchemas(t, ctx, aDatabase)
+		schemas := collectMainSchemas(ctx, t, aDatabase)
 		assert.Len(t, schemas, 3)
 
 		// Created table with unique index
@@ -386,7 +386,7 @@ func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
 		assertFreePages(t, tablePager, []PageIndex{2, 1})
 
 		// Check system table contents
-		schemas := collectMainSchemas(t, ctx, aDatabase)
+		schemas := collectMainSchemas(ctx, t, aDatabase)
 		assert.Len(t, schemas, 1)
 	})
 }
@@ -454,7 +454,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 		assert.Len(t, aPager.pages, 3)
 
 		// Check system table contents
-		schemas := collectMainSchemas(t, ctx, aDatabase)
+		schemas := collectMainSchemas(ctx, t, aDatabase)
 		assert.Len(t, schemas, 3)
 
 		// Created table without any index
@@ -527,7 +527,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 		assertFreePages(t, tablePager, []PageIndex{2})
 
 		// Check system table contents
-		schemas := collectMainSchemas(t, ctx, aDatabase)
+		schemas := collectMainSchemas(ctx, t, aDatabase)
 		assert.Len(t, schemas, 2)
 
 		assert.Equal(t, SchemaTable, schemas[0].Type)
@@ -540,7 +540,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 func initTest(t *testing.T) (*pagerImpl, *os.File) {
 	t.Parallel()
 
-	tempFile, err := os.CreateTemp("", testDbName)
+	tempFile, err := os.CreateTemp("", testDBName)
 	require.NoError(t, err)
 	t.Cleanup(func() { os.Remove(tempFile.Name()) })
 
@@ -550,7 +550,7 @@ func initTest(t *testing.T) (*pagerImpl, *os.File) {
 	return aPager, tempFile
 }
 
-func collectMainSchemas(t *testing.T, ctx context.Context, aDatabase *Database) []Schema {
+func collectMainSchemas(ctx context.Context, t *testing.T, aDatabase *Database) []Schema {
 	mainTable := aDatabase.tables[SchemaTableName]
 	schemaResults, err := mainTable.Select(ctx, Statement{
 		Kind:   Select,

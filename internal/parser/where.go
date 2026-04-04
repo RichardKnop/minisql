@@ -1,19 +1,19 @@
 package parser
 
 import (
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
 )
 
 var (
-	errEmptyWhereClause                          = fmt.Errorf("at WHERE: empty WHERE clause")
-	errWhereWithoutOperator                      = fmt.Errorf("at WHERE: condition without operator")
-	errWhereExpectedField                        = fmt.Errorf("at WHERE: expected field")
-	errWhereExpectedPlaceholderOrValue           = fmt.Errorf("at WHERE: expected placeholder or value")
-	errWhereExpectedIdentifierPlaceholderOrValue = fmt.Errorf("at WHERE: expected identifier, placeholder or value")
-	errWhereUnknownOperator                      = fmt.Errorf("at WHERE: unknown operator")
+	errEmptyWhereClause                          = errors.New("at WHERE: empty WHERE clause")
+	errWhereWithoutOperator                      = errors.New("at WHERE: condition without operator")
+	errWhereExpectedField                        = errors.New("at WHERE: expected field")
+	errWhereExpectedPlaceholderOrValue           = errors.New("at WHERE: expected placeholder or value")
+	errWhereExpectedIdentifierPlaceholderOrValue = errors.New("at WHERE: expected identifier, placeholder or value")
+	errWhereUnknownOperator                      = errors.New("at WHERE: unknown operator")
 )
 
 // doParseWhere handles the stepWhere step. It parses the optional WHERE clause
@@ -285,14 +285,15 @@ func (p *parserItem) parseCondScalarValue(cond *minisql.Condition) error {
 			Type:  minisql.OperandQuotedString,
 			Value: value,
 		}
-		if _, ok := value.(bool); ok {
+		switch v := value.(type) {
+		case bool:
 			cond.Operand2.Type = minisql.OperandBoolean
-		} else if _, ok := value.(int64); ok {
+		case int64:
 			cond.Operand2.Type = minisql.OperandInteger
-		} else if _, ok := value.(float64); ok {
+		case float64:
 			cond.Operand2.Type = minisql.OperandFloat
-		} else if _, ok := value.(string); ok {
-			cond.Operand2.Value = minisql.NewTextPointer([]byte(value.(string)))
+		case string:
+			cond.Operand2.Value = minisql.NewTextPointer([]byte(v))
 		}
 		p.pop()
 		return nil
@@ -318,17 +319,18 @@ func (p *parserItem) parseCondScalarValue(cond *minisql.Condition) error {
 func (p *parserItem) parseCondListValues(cond *minisql.Condition) error {
 	for {
 		value, ln := p.peekValue()
-		if ln != 0 {
+		switch {
+		case ln != 0:
 			v := value
 			if _, ok := v.(string); ok {
 				v = minisql.NewTextPointer([]byte(v.(string)))
 			}
 			cond.Operand2.Value = append(cond.Operand2.Value.([]any), v)
 			p.pop()
-		} else if p.peek() == "?" {
+		case p.peek() == "?":
 			cond.Operand2.Value = append(cond.Operand2.Value.([]any), minisql.Placeholder{})
 			p.pop()
-		} else {
+		default:
 			return p.wrapErr(errWhereExpectedPlaceholderOrValue)
 		}
 
@@ -351,17 +353,18 @@ func (p *parserItem) parseCondListValues(cond *minisql.Condition) error {
 func (p *parserItem) parseCondBetweenValues(cond *minisql.Condition) error {
 	// Parse low bound.
 	value, ln := p.peekValue()
-	if ln != 0 {
+	switch {
+	case ln != 0:
 		v := value
 		if _, ok := v.(string); ok {
 			v = minisql.NewTextPointer([]byte(v.(string)))
 		}
 		cond.Operand2.Value = append(cond.Operand2.Value.([]any), v)
 		p.pop()
-	} else if p.peek() == "?" {
+	case p.peek() == "?":
 		cond.Operand2.Value = append(cond.Operand2.Value.([]any), minisql.Placeholder{})
 		p.pop()
-	} else {
+	default:
 		return p.errorf("at WHERE BETWEEN: expected value or placeholder for lower bound")
 	}
 
@@ -373,17 +376,18 @@ func (p *parserItem) parseCondBetweenValues(cond *minisql.Condition) error {
 
 	// Parse high bound.
 	value, ln = p.peekValue()
-	if ln != 0 {
+	switch {
+	case ln != 0:
 		v := value
 		if _, ok := v.(string); ok {
 			v = minisql.NewTextPointer([]byte(v.(string)))
 		}
 		cond.Operand2.Value = append(cond.Operand2.Value.([]any), v)
 		p.pop()
-	} else if p.peek() == "?" {
+	case p.peek() == "?":
 		cond.Operand2.Value = append(cond.Operand2.Value.([]any), minisql.Placeholder{})
 		p.pop()
-	} else {
+	default:
 		return p.errorf("at WHERE BETWEEN: expected value or placeholder for upper bound")
 	}
 

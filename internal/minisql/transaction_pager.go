@@ -2,15 +2,18 @@ package minisql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
+// TransactionalPager wraps a base Pager and routes reads and writes through the current transaction.
 type TransactionalPager struct {
 	Pager
 	txManager    *TransactionManager
 	table, index string
 }
 
+// NewTransactionalPager creates a TransactionalPager for the given table and index names.
 func NewTransactionalPager(basePager Pager, txManager *TransactionManager, table, index string) *TransactionalPager {
 	return &TransactionalPager{
 		Pager:     basePager,
@@ -20,6 +23,7 @@ func NewTransactionalPager(basePager Pager, txManager *TransactionManager, table
 	}
 }
 
+// ReadPage returns the page at pageIdx, returning the in-progress write copy if it exists.
 func (tp *TransactionalPager) ReadPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
 	tx := TxFromContext(ctx)
 	if tx == nil {
@@ -47,10 +51,11 @@ func (tp *TransactionalPager) ReadPage(ctx context.Context, pageIdx PageIndex) (
 	return page, nil
 }
 
+// ModifyPage returns a writable copy of the page at pageIdx, creating one if it doesn't exist in the write set.
 func (tp *TransactionalPager) ModifyPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
 	tx := TxFromContext(ctx)
 	if tx == nil {
-		return nil, fmt.Errorf("cannot modify page outside transaction")
+		return nil, errors.New("cannot modify page outside transaction")
 	}
 
 	// Check if we already have a copy in write set
@@ -72,10 +77,11 @@ func (tp *TransactionalPager) ModifyPage(ctx context.Context, pageIdx PageIndex)
 	return modifiedPage, nil
 }
 
+// GetFreePage returns a free page from the free list, or allocates a new one.
 func (tp *TransactionalPager) GetFreePage(ctx context.Context) (*Page, error) {
 	tx := TxFromContext(ctx)
 	if tx == nil {
-		return nil, fmt.Errorf("cannot get free page outside transaction")
+		return nil, errors.New("cannot get free page outside transaction")
 	}
 
 	dbHeader := tp.readDBHeader(ctx)
@@ -110,6 +116,7 @@ func (tp *TransactionalPager) GetFreePage(ctx context.Context) (*Page, error) {
 	return freePage, nil
 }
 
+// Clear resets all node pointers on the page, preparing it for reuse.
 func (p *Page) Clear() {
 	p.OverflowPage = nil
 	p.FreePage = nil
@@ -119,14 +126,15 @@ func (p *Page) Clear() {
 	p.IndexOverflowNode = nil
 }
 
+// AddFreePage marks pageIdx as a free page and prepends it to the free list.
 func (tp *TransactionalPager) AddFreePage(ctx context.Context, pageIdx PageIndex) error {
 	tx := TxFromContext(ctx)
 	if tx == nil {
-		return fmt.Errorf("cannot add free page outside transaction")
+		return errors.New("cannot add free page outside transaction")
 	}
 
 	if pageIdx == 0 {
-		return fmt.Errorf("cannot free page 0 (header page)")
+		return errors.New("cannot free page 0 (header page)")
 	}
 
 	// Get the page to mark as free
@@ -173,10 +181,11 @@ func (tp *TransactionalPager) readDBHeader(ctx context.Context) DatabaseHeader {
 	return dbHeader
 }
 
+// GetOverflowPage returns a writable copy of the overflow page at pageIdx.
 func (tp *TransactionalPager) GetOverflowPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
 	tx := TxFromContext(ctx)
 	if tx == nil {
-		return nil, fmt.Errorf("cannot get overflow page outside transaction")
+		return nil, errors.New("cannot get overflow page outside transaction")
 	}
 
 	overflowPage, err := tp.ModifyPage(ctx, pageIdx)

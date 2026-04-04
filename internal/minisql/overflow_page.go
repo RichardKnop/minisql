@@ -5,50 +5,57 @@ import (
 )
 
 const (
+	// MaxInlineVarchar ...
 	MaxInlineVarchar    = 255          // Store up to 255 bytes inline
+	// MaxOverflowPageData ...
 	MaxOverflowPageData = 4096 - 1 - 8 // Page size - page type byte - OverflowPageHeader size
-	// Limit maximum size of a text to 16 overflow pages
+	// MaxOverflowTextSize limits the maximum size of a text value to 16 overflow pages.
 	MaxOverflowTextSize     = MaxOverflowPageData * 16
 	varcharLengthPrefixSize = 4
 )
 
+// OverflowPageHeader ...
 type OverflowPageHeader struct {
 	NextPage PageIndex // 0 if last page
 	DataSize uint32    // Actual data size in this page
 }
 
+// Size ...
 func (h *OverflowPageHeader) Size() uint64 {
 	return 1 + 4 + 4
 }
 
+// OverflowPage ...
 type OverflowPage struct {
 	Header OverflowPageHeader
 	Data   []byte
 }
 
+// Size ...
 func (h *OverflowPage) Size() uint64 {
 	return h.Header.Size() + uint64(len(h.Data))
 }
 
-func (n *OverflowPage) Marshal(buf []byte) error {
+// Marshal ...
+func (h *OverflowPage) Marshal(buf []byte) error {
 	i := uint64(0)
 
 	buf[i] = PageTypeOverflow
 	i += 1
 
-	marshalUint32(buf, uint32(n.Header.NextPage), i)
+	marshalUint32(buf, uint32(h.Header.NextPage), i)
 	i += 4
 
-	marshalUint32(buf, n.Header.DataSize, i)
+	marshalUint32(buf, h.Header.DataSize, i)
 	i += 4
 
-	copy(buf[i:], n.Data)
-	i += uint64(len(n.Data))
+	copy(buf[i:], h.Data)
 
 	return nil
 }
 
-func (n *OverflowPage) Unmarshal(buf []byte) error {
+// Unmarshal ...
+func (h *OverflowPage) Unmarshal(buf []byte) error {
 	i := uint64(0)
 
 	if buf[i] != PageTypeOverflow {
@@ -56,15 +63,14 @@ func (n *OverflowPage) Unmarshal(buf []byte) error {
 	}
 	i += 1
 
-	n.Header.NextPage = PageIndex(unmarshalUint32(buf, i))
+	h.Header.NextPage = PageIndex(unmarshalUint32(buf, i))
 	i += 4
 
-	n.Header.DataSize = unmarshalUint32(buf, i)
+	h.Header.DataSize = unmarshalUint32(buf, i)
 	i += 4
 
-	n.Data = make([]byte, n.Header.DataSize)
-	copy(n.Data, buf[i:i+uint64(n.Header.DataSize)])
-	i += uint64(n.Header.DataSize)
+	h.Data = make([]byte, h.Header.DataSize)
+	copy(h.Data, buf[i:i+uint64(h.Header.DataSize)])
 
 	return nil
 }

@@ -39,10 +39,10 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	mustInsert(t, ctx, aTable, txManager, stmt)
+	mustInsert(ctx, t, aTable, txManager, stmt)
 
 	t.Run("Delete rows with NULL values when no rows match", func(t *testing.T) {
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
 			Kind:       Delete,
 			Conditions: NewOneOrMore(Conditions{FieldIsNull(Field{Name: "id"})}),
 		})
@@ -55,7 +55,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		id, ok := rows[0].GetValue("id")
 		require.True(t, ok)
 
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -69,7 +69,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	})
 
 	t.Run("Delete rows with NULL values", func(t *testing.T) {
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
 			Kind:       Delete,
 			Conditions: NewOneOrMore(Conditions{FieldIsNull(Field{Name: "age"})}),
 		})
@@ -79,7 +79,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	})
 
 	t.Run("Delete rows with NOT NULL values", func(t *testing.T) {
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
 			Kind:       Delete,
 			Conditions: NewOneOrMore(Conditions{FieldIsNotNull(Field{Name: "created"})}),
 		})
@@ -89,7 +89,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	})
 
 	t.Run("Delete all rows", func(t *testing.T) {
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{Kind: Delete})
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{Kind: Delete})
 
 		assert.Equal(t, 2, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, nil)
@@ -122,7 +122,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	mustInsert(t, ctx, aTable, txManager, stmt)
+	mustInsert(ctx, t, aTable, txManager, stmt)
 
 	/*
 		Initial state of the tree:
@@ -136,7 +136,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		+-------+  +-------+  +-------+  +---------+  +----------+  +----------------+
 	*/
 
-	//require.NoError(t, aTable.print())
 
 	// Check the root page
 	assert.Equal(t, 5, int(aPager.pages[0].InternalNode.Header.KeysNum))
@@ -152,7 +151,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	t.Run("Delete first row to force merging of first two leaves", func(t *testing.T) {
 		ids := rowIDs(rows[0])
 
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -174,7 +173,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+-----------+     +-------+    +---------+    +----------+     +----------------+
 		*/
 
-		//require.NoError(t, aTable.print())
 
 		// Check the root page
 		assert.Equal(t, 4, int(aPager.pages[0].InternalNode.Header.KeysNum))
@@ -198,7 +196,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	t.Run("Delete last three rows to force merging of last two leaves", func(t *testing.T) {
 		ids := rowIDs(rows[17], rows[18], rows[19])
 
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -220,7 +218,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+-----------+     +-------+    +---------+    +----------------+
 		*/
 
-		//require.NoError(t, aTable.print())
 
 		// Check the root page
 		assert.Equal(t, 3, int(aPager.pages[0].InternalNode.Header.KeysNum))
@@ -242,7 +239,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	t.Run("Keep deleting more rows, another merge", func(t *testing.T) {
 		ids := rowIDs(rows[2], rows[4], rows[6])
 
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -268,7 +265,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+-----------+      +---------+      +----------------+
 		*/
 
-		//require.NoError(t, aTable.print())
 
 		// Check the root page
 		assert.Equal(t, 2, int(aPager.pages[0].InternalNode.Header.KeysNum))
@@ -289,7 +285,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	t.Run("Keep deleting more rows, no merge", func(t *testing.T) {
 		ids := rowIDs(rows[9], rows[11], rows[13], rows[15])
 
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -315,7 +311,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+--------+           +--------+          +----------+
 		*/
 
-		//require.NoError(t, aTable.print())
 
 		// Check the root page
 		assert.Equal(t, 2, int(aPager.pages[0].InternalNode.Header.KeysNum))
@@ -329,7 +324,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	t.Run("Keep deleting more rows, another merge and borrow", func(t *testing.T) {
 		ids := rowIDs(rows[3], rows[12], rows[5])
 
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -354,7 +349,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		 +-------+                +----------+
 		*/
 
-		//require.NoError(t, aTable.print())
 
 		// Check the root page
 		assert.Equal(t, 1, int(aPager.pages[0].InternalNode.Header.KeysNum))
@@ -374,7 +368,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	t.Run("Delete one more time, we are left with only root leaf node", func(t *testing.T) {
 		ids := rowIDs(rows[14])
 
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -395,7 +389,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		   +-----------------+
 		*/
 
-		//require.NoError(t, aTable.print())
 
 		assert.Nil(t, aPager.pages[0].InternalNode)
 		assert.Equal(t, 5, int(aPager.pages[0].LeafNode.Header.Cells))
@@ -414,7 +407,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	t.Run("Delete all remaining rows", func(t *testing.T) {
 		ids := rowIDs(rows[1], rows[7], rows[8], rows[10], rows[16])
 
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -426,7 +419,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		assert.Equal(t, 5, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, nil)
 
-		//require.NoError(t, aTable.print())
 
 		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Header.Cells))
 	})
@@ -453,7 +445,7 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
 	)
-	// aTable.maximumICells = 5 // for testing purposes only, normally 340
+	// maximumICells is normally ~340; set to 5 in production code to stress-test splits.
 
 	// Batch insert test rows
 	stmt := Statement{
@@ -465,20 +457,16 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	mustInsert(t, ctx, aTable, txManager, stmt)
+	mustInsert(ctx, t, aTable, txManager, stmt)
 
-	//fmt.Println("BEFORE")
-	//require.NoError(t, aTable.print())
 
 	checkRows(ctx, t, aTable, rows)
 	assert.Equal(t, 336, int(aPager.TotalPages()))
 
-	aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{Kind: Delete})
+	aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{Kind: Delete})
 
 	assert.Equal(t, len(rows), aResult.RowsAffected)
 
-	//fmt.Println("AFTER")
-	//require.NoError(t, aTable.print())
 
 	checkRows(ctx, t, aTable, nil)
 
@@ -511,14 +499,14 @@ func TestTable_Delete_Overflow(t *testing.T) {
 		stmt.Inserts = append(stmt.Inserts, aRow.Values)
 	}
 
-	mustInsert(t, ctx, aTable, txManager, stmt)
+	mustInsert(ctx, t, aTable, txManager, stmt)
 
 	require.Equal(t, 4, int(aPager.TotalPages()))
 
 	t.Run("Delete inline non overflowing row", func(t *testing.T) {
 		ids := rowIDs(rows[0])
 
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -537,7 +525,7 @@ func TestTable_Delete_Overflow(t *testing.T) {
 	t.Run("Delete overflowing rows", func(t *testing.T) {
 		ids := rowIDs(rows[1], rows[2])
 
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -565,7 +553,7 @@ func rowIDs(rows ...Row) []any {
 	return ids
 }
 
-func mustDelete(t *testing.T, ctx context.Context, aTable *Table, txManager *TransactionManager, saver PageSaver, stmt Statement) StatementResult {
+func mustDelete(ctx context.Context, t *testing.T, aTable *Table, txManager *TransactionManager, saver PageSaver, stmt Statement) StatementResult {
 	var aResult StatementResult
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		var err error

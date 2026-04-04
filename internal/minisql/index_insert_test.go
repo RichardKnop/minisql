@@ -41,7 +41,6 @@ func TestIndex_Insert(t *testing.T) {
 			+----------+
 		*/
 
-		// require.NoError(t, anIndex.print())
 
 		rootNode := aPager.pages[0].IndexNode.(*IndexNode[int64])
 		assertIndexNode(t, rootNode, true, true, 0, []int64{1, 2, 3}, nil)
@@ -72,7 +71,6 @@ func TestIndex_Insert(t *testing.T) {
 						+-----+         +--------+
 		*/
 
-		// require.NoError(t, anIndex.print())
 
 		rootNode := aPager.pages[0].IndexNode.(*IndexNode[int64])
 		leftChild := aPager.pages[1].IndexNode.(*IndexNode[int64])
@@ -105,7 +103,6 @@ func TestIndex_Insert(t *testing.T) {
 						+-----+          +-----+        +--------+
 		*/
 
-		//require.NoError(t, anIndex.print())
 
 		var (
 			rootNode    = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -142,7 +139,6 @@ func TestIndex_Insert(t *testing.T) {
 						+-----+      +-----+   +-----+      +---------+
 		*/
 
-		//require.NoError(t, anIndex.print())
 
 		var (
 			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -182,7 +178,6 @@ func TestIndex_Insert(t *testing.T) {
 							+-----+         +-----+        +-----+         +-------------+
 		*/
 
-		//require.NoError(t, anIndex.print())
 
 		var (
 			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -232,7 +227,6 @@ func TestIndex_Insert(t *testing.T) {
 						+-----+        +-----+  +-----+    +-----+   +-----+  +-----+   +----------+
 		*/
 
-		//require.NoError(t, anIndex.print())
 
 		var (
 			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
@@ -309,7 +303,6 @@ func TestIndex_Insert_OutOfOrder(t *testing.T) {
 
 	checkIndexKeys(ctx, t, anIndex, keys)
 
-	// require.NoError(t, anIndex.print())
 
 	var (
 		rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])

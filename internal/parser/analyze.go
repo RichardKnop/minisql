@@ -1,10 +1,9 @@
 package parser
 
 func (p *parserItem) doParseAnalyze() error {
-	switch p.step {
-	case stepAnalyze:
+	if p.step == stepAnalyze {
 		name := p.peek()
-		if len(name) > 0 && isIdentifier(name) {
+		if name != "" && isIdentifier(name) {
 			p.Target = name
 			p.pop()
 		}

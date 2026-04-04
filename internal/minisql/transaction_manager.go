@@ -10,12 +10,13 @@ import (
 	"go.uber.org/zap"
 )
 
+// TransactionManager coordinates optimistic concurrency control for the database.
 type TransactionManager struct {
 	mu                    sync.RWMutex
 	nextTxID              TransactionID
 	transactions          map[TransactionID]*Transaction
 	globalPageVersions    map[PageIndex]uint64 // pageIdx -> current version
-	globalDbHeaderVersion uint64
+	globalDBHeaderVersion uint64
 	logger                *zap.Logger
 	dbFilePath            string
 	journalEnabled        bool
@@ -24,6 +25,7 @@ type TransactionManager struct {
 	ddlSaver              DDLSaver
 }
 
+// NewTransactionManager creates and returns a new TransactionManager.
 func NewTransactionManager(logger *zap.Logger, dbFilePath string, factory TxPagerFactory, saver PageSaver, ddlSaver DDLSaver) *TransactionManager {
 	return &TransactionManager{
 		nextTxID:           1,
@@ -37,6 +39,7 @@ func NewTransactionManager(logger *zap.Logger, dbFilePath string, factory TxPage
 	}
 }
 
+// ExecuteInTransaction runs fn within a transaction, committing on success or rolling back on failure.
 func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
 	// If there is a transaction already in context, use it.
 	// This means tx was manually started with BEGIN
@@ -61,6 +64,7 @@ func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(
 	return nil
 }
 
+// BeginTransaction starts a new transaction and registers it with the manager.
 func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction {
 	tm.mu.Lock()
 	tx := &Transaction{
@@ -79,8 +83,10 @@ func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction
 	return tx
 }
 
+// ErrTxConflict is returned when an optimistic concurrency check fails at commit time.
 var ErrTxConflict = errors.New("transaction conflict detected")
 
+// CommitTransaction validates the write set for conflicts and, if clean, persists all changes.
 func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transaction) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
@@ -99,7 +105,7 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		}
 	}
 	readDBHeaderVersion, exists := tx.GetDBHeaderReadVersion()
-	if exists && tm.globalDbHeaderVersion > readDBHeaderVersion {
+	if exists && tm.globalDBHeaderVersion > readDBHeaderVersion {
 		// DB header was modified by another transaction
 		tx.Abort()
 		return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
@@ -135,7 +141,7 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		}
 		defer func() {
 			if journal != nil {
-				journal.Close()
+				_ = journal.Close()
 			}
 		}()
 
@@ -143,13 +149,13 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		numJournaledPages := 0
 		_, dbHeaderChanged := tx.GetModifiedDBHeader()
 		if dbHeaderChanged {
-			aPager, err := tm.factory(ctx, SchemaTableName, "")
+			pager, err := tm.factory(ctx, SchemaTableName, "")
 			if err != nil {
 				tx.Abort()
 				return fmt.Errorf("get pager for journaling database header: %w", err)
 			}
 
-			originalHeader := aPager.GetHeader(ctx)
+			originalHeader := pager.GetHeader(ctx)
 			if err := journal.WriteDBHeaderBefore(ctx, originalHeader); err != nil {
 				tx.Abort()
 				return fmt.Errorf("write database header to journal: %w", err)
@@ -157,12 +163,12 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		}
 		// Write original pages to the journal
 		for pageIdx, info := range writeInfos {
-			aPager, err := tm.factory(ctx, info.Table, info.Index)
+			pager, err := tm.factory(ctx, info.Table, info.Index)
 			if err != nil {
 				tx.Abort()
 				return fmt.Errorf("get pager for journaling page %d: %w", pageIdx, err)
 			}
-			originalPage, err := aPager.GetPage(ctx, pageIdx)
+			originalPage, err := pager.GetPage(ctx, pageIdx)
 			if err != nil {
 				return fmt.Errorf("read original page %d for journal: %w", pageIdx, err)
 			}
@@ -183,7 +189,7 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 	// First update DB header if modified
 	if header, modified := tx.GetModifiedDBHeader(); modified {
 		tm.saver.SaveHeader(ctx, *header)
-		tm.globalDbHeaderVersion += 1
+		tm.globalDBHeaderVersion += 1
 
 		pagesToFlush = append(pagesToFlush, 0) // header is first 100 bytes of page 0
 	}
@@ -246,6 +252,7 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 	return nil
 }
 
+// RollbackTransaction aborts the transaction and discards all in-memory changes.
 func (tm *TransactionManager) RollbackTransaction(ctx context.Context, tx *Transaction) {
 	tx.Abort()
 
@@ -257,13 +264,15 @@ func (tm *TransactionManager) RollbackTransaction(ctx context.Context, tx *Trans
 	tm.logger.Debug("rollback transaction", zap.Uint64("tx_id", uint64(tx.ID)))
 }
 
+// GlobalDBHeaderVersion returns the current committed version of the database header.
 func (tm *TransactionManager) GlobalDBHeaderVersion(ctx context.Context) uint64 {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
-	return tm.globalDbHeaderVersion
+	return tm.globalDBHeaderVersion
 }
 
+// GlobalPageVersion returns the current committed version of the given page.
 func (tm *TransactionManager) GlobalPageVersion(ctx context.Context, pageIdx PageIndex) uint64 {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()

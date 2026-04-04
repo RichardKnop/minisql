@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -9,15 +10,15 @@ import (
 )
 
 var (
-	errCreateTableExpectedOpeningParens     = fmt.Errorf("at CREATE TABLE: expected opening parens")
-	errCreateTableNoColumns                 = fmt.Errorf("at CREATE TABLE: no columns specified")
-	errCreateTableInvalidColumDef           = fmt.Errorf("at CREATE TABLE: invalid column definition")
-	errCreateTableMultiplePrimaryKeys       = fmt.Errorf("at CREATE TABLE: multiple PRIMARY KEY columns specified")
-	errCreateTablePrimaryKeyTextNotAllowed  = fmt.Errorf("at CREATE TABLE: primary key cannot be of type TEXT")
+	errCreateTableExpectedOpeningParens     = errors.New("at CREATE TABLE: expected opening parens")
+	errCreateTableNoColumns                 = errors.New("at CREATE TABLE: no columns specified")
+	errCreateTableInvalidColumDef           = errors.New("at CREATE TABLE: invalid column definition")
+	errCreateTableMultiplePrimaryKeys       = errors.New("at CREATE TABLE: multiple PRIMARY KEY columns specified")
+	errCreateTablePrimaryKeyTextNotAllowed  = errors.New("at CREATE TABLE: primary key cannot be of type TEXT")
 	errCreateTablePrimaryKeyVarcharTooLarge = fmt.Errorf("at CREATE TABLE: primary key of type VARCHAR exceeds max index key size %d", minisql.MaxIndexKeySize)
-	errCreateTableUniqueTextNotAllowed      = fmt.Errorf("at CREATE TABLE: unique key cannot be of type TEXT")
+	errCreateTableUniqueTextNotAllowed      = errors.New("at CREATE TABLE: unique key cannot be of type TEXT")
 	errCreateTableUniqueVarcharTooLarge     = fmt.Errorf("at CREATE TABLE: unique key of type VARCHAR exceeds max index key size %d", minisql.MaxIndexKeySize)
-	errCreateTableDefaultValueExpected      = fmt.Errorf("at CREATE TABLE: expected default value after DEFAULT")
+	errCreateTableDefaultValueExpected      = errors.New("at CREATE TABLE: expected default value after DEFAULT")
 )
 
 func (p *parserItem) doParseCreateTable() error {
@@ -33,7 +34,7 @@ func (p *parserItem) doParseCreateTable() error {
 		p.step = stepCreateTableName
 	case stepCreateTableName:
 		tableName := p.peek()
-		if len(tableName) == 0 {
+		if tableName == "" {
 			return p.errorf("at CREATE TABLE: expected table name")
 		}
 		p.TableName = tableName
@@ -65,16 +66,16 @@ func (p *parserItem) doParseCreateTable() error {
 		p.step = stepCreateTableColumnDef
 	case stepCreateTableColumnDef:
 		columnDef := p.peek()
-		aColumn, ok := isColumnDef(columnDef)
+		col, ok := isColumnDef(columnDef)
 		if !ok {
 			return p.wrapErr(errCreateTableInvalidColumDef)
 		}
 		p.pop()
-		p.Columns[len(p.Columns)-1].Kind = aColumn.Kind
-		if aColumn.Kind == minisql.Varchar {
+		p.Columns[len(p.Columns)-1].Kind = col.Kind
+		if col.Kind == minisql.Varchar {
 			p.step = stepCreateTableVarcharLength
 		} else {
-			p.Columns[len(p.Columns)-1].Size = aColumn.Size
+			p.Columns[len(p.Columns)-1].Size = col.Size
 			p.step = stepCreateTableColumnPrimaryKey
 		}
 	case stepCreateTableVarcharLength:
@@ -106,11 +107,11 @@ func (p *parserItem) doParseCreateTable() error {
 		if len(p.PrimaryKey.Columns) > 0 {
 			return p.wrapErr(errCreateTableMultiplePrimaryKeys)
 		}
-		aColumn := p.Columns[len(p.Columns)-1]
-		if aColumn.Kind == minisql.Text {
+		col := p.Columns[len(p.Columns)-1]
+		if col.Kind == minisql.Text {
 			return p.wrapErr(errCreateTablePrimaryKeyTextNotAllowed)
 		}
-		if aColumn.Kind == minisql.Varchar && aColumn.Size > minisql.MaxIndexKeySize {
+		if col.Kind == minisql.Varchar && col.Size > minisql.MaxIndexKeySize {
 			return p.wrapErr(errCreateTablePrimaryKeyVarcharTooLarge)
 		}
 		if primaryKey == "PRIMARY KEY AUTOINCREMENT" {
@@ -141,16 +142,16 @@ func (p *parserItem) doParseCreateTable() error {
 		if unique != "UNIQUE" {
 			return nil
 		}
-		aColumn := p.Columns[len(p.Columns)-1]
-		if aColumn.Kind == minisql.Text {
+		col := p.Columns[len(p.Columns)-1]
+		if col.Kind == minisql.Text {
 			return p.wrapErr(errCreateTableUniqueTextNotAllowed)
 		}
-		if aColumn.Kind == minisql.Varchar && aColumn.Size > minisql.MaxIndexKeySize {
+		if col.Kind == minisql.Varchar && col.Size > minisql.MaxIndexKeySize {
 			return p.wrapErr(errCreateTableUniqueVarcharTooLarge)
 		}
 		p.UniqueIndexes = append(p.UniqueIndexes, minisql.UniqueIndex{
 			IndexInfo: minisql.IndexInfo{
-				Name:    minisql.UniqueIndexName(p.TableName, aColumn.Name),
+				Name:    minisql.UniqueIndexName(p.TableName, col.Name),
 				Columns: p.Columns[len(p.Columns)-1 : len(p.Columns)],
 			},
 		})
@@ -225,17 +226,17 @@ func (p *parserItem) doParseCreateTable() error {
 			return p.errorf("at CREATE TABLE: expected comma or closing parens")
 		}
 		p.pop()
-		var aColumn minisql.Column
+		var foundCol minisql.Column
 		for _, col := range p.Columns {
 			if col.Name == columnName {
-				aColumn = col
+				foundCol = col
 				break
 			}
 		}
-		if aColumn.Name == "" {
+		if foundCol.Name == "" {
 			return p.errorf("at CREATE TABLE: primary key column '%s' does not exist", columnName)
 		}
-		p.PrimaryKey.Columns = append(p.PrimaryKey.Columns, aColumn)
+		p.PrimaryKey.Columns = append(p.PrimaryKey.Columns, foundCol)
 		p.step = stepCreateTableConstraintPrimaryKeyCommaOrClosingParens
 	case stepCreateTableConstraintUniqueKeyColumn:
 		columnName := p.peek()
@@ -243,14 +244,14 @@ func (p *parserItem) doParseCreateTable() error {
 			return p.errorf("at CREATE TABLE: expected comma or closing parens")
 		}
 		p.pop()
-		var aColumn minisql.Column
+		var foundCol minisql.Column
 		for _, col := range p.Columns {
 			if col.Name == columnName {
-				aColumn = col
+				foundCol = col
 				break
 			}
 		}
-		p.UniqueIndexes[len(p.UniqueIndexes)-1].Columns = append(p.UniqueIndexes[len(p.UniqueIndexes)-1].Columns, aColumn)
+		p.UniqueIndexes[len(p.UniqueIndexes)-1].Columns = append(p.UniqueIndexes[len(p.UniqueIndexes)-1].Columns, foundCol)
 		p.step = stepCreateTableConstraintUniqueKeyCommaOrClosingParens
 	case stepCreateTableConstraintPrimaryKeyCommaOrClosingParens:
 		commaOrClosingParens := p.peek()
@@ -292,8 +293,8 @@ func (p *parserItem) doParseCreateTable() error {
 
 func columnNames(columns []minisql.Column) []string {
 	names := make([]string, 0, len(columns))
-	for _, aColumn := range columns {
-		names = append(names, aColumn.Name)
+	for _, col := range columns {
+		names = append(names, col.Name)
 	}
 	return names
 }
@@ -325,10 +326,9 @@ func isDefaultValueValid(column minisql.Column, valueToken any) error {
 }
 
 func (p *parserItem) doParseDropTable() error {
-	switch p.step {
-	case stepDropTableName:
+	if p.step == stepDropTableName {
 		tableName := p.peek()
-		if len(tableName) == 0 {
+		if tableName == "" {
 			return p.errorf("at DROP TABLE: expected table name")
 		}
 		p.TableName = tableName

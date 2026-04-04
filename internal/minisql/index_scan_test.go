@@ -47,7 +47,6 @@ func TestIndex_ScanAll(t *testing.T) {
 			  +---+    +-------+  +-----------+    +----+   +-----+  +---------+   +---------+         +---------+
 	*/
 
-	// require.NoError(t, anIndex.print())
 
 	t.Run("scan in ascending order", func(t *testing.T) {
 		var (
@@ -126,7 +125,6 @@ func TestIndex_ScanAll_NonUnique(t *testing.T) {
 			  +---+    +-------+  +-----------+    +----+   +-----+  +---------+   +---------+         +---------+
 	*/
 
-	// require.NoError(t, anIndex.print())
 
 	t.Run("scan in ascending order", func(t *testing.T) {
 		var (
@@ -197,7 +195,6 @@ func TestIndex_ScanRange(t *testing.T) {
 			  +---+    +-------+  +-----------+    +----+   +-----+  +---------+   +---------+         +---------+
 	*/
 
-	// require.NoError(t, anIndex.print())
 
 	t.Run("scan range all", func(t *testing.T) {
 		var (

@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -8,10 +9,10 @@ import (
 )
 
 var (
-	errSelectWithoutFields     = fmt.Errorf("at SELECT: expected field to SELECT")
-	errSelectExpectedTableName = fmt.Errorf("at SELECT: expected table name identifier")
+	errSelectWithoutFields     = errors.New("at SELECT: expected field to SELECT")
+	errSelectExpectedTableName = errors.New("at SELECT: expected table name identifier")
 	errCannotCombineAsterisk   = fmt.Errorf(`at SELECT: cannot combine "*" with other fields`)
-	errExpectedFrom            = fmt.Errorf("at SELECT: expected FROM")
+	errExpectedFrom            = errors.New("at SELECT: expected FROM")
 )
 
 // aggregateKindFromToken maps the reserved-word token (e.g. "SUM(") to its AggregateKind.
@@ -150,7 +151,6 @@ func (p *parserItem) doParseSelect() error {
 			}
 			p.Aliases[identifier] = alias
 			p.pop()
-			maybeFrom = p.peek()
 		case "FROM":
 			p.step = stepSelectFrom
 			return nil

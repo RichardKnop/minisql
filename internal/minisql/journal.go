@@ -2,16 +2,22 @@ package minisql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
 	"os"
 )
 
+// Journal header constants define magic bytes, version, and size of the rollback journal header.
 const (
+	// JournalMagic ...
 	JournalMagic      = "minisql\n"
+	// JournalVersion ...
 	JournalVersion    = uint32(1)
+	// JournalHeaderSize is the byte size of the journal file header.
 	JournalHeaderSize = 29
+	// CommitMagic is a sentinel value written at the end of a journal to confirm a clean commit.
 	CommitMagic       = uint32(0xDEADBEEF)
 )
 
@@ -24,11 +30,12 @@ type RollbackJournal struct {
 	pageSize uint32
 }
 
+// JournalHeader ...
 type JournalHeader struct {
 	Magic    [8]byte
 	Version  uint32
 	PageSize uint32
-	DbHeader bool
+	DBHeader bool
 	NumPages uint32
 	Checksum uint32
 }
@@ -38,7 +45,7 @@ func CreateJournal(dbPath string, pageSize uint32) (*RollbackJournal, error) {
 	journalPath := dbPath + "-journal"
 
 	// Create journal file (truncate if exists)
-	file, err := os.OpenFile(journalPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	file, err := os.OpenFile(journalPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("create journal file: %w", err)
 	}
@@ -51,7 +58,7 @@ func CreateJournal(dbPath string, pageSize uint32) (*RollbackJournal, error) {
 
 	// Write initial header (will update NumPages later)
 	if err := journal.writeHeader(false, 0); err != nil {
-		journal.Close()
+		_ = journal.Close() // best-effort cleanup on error path
 		return nil, fmt.Errorf("write journal header: %w", err)
 	}
 
@@ -131,6 +138,7 @@ func (j *RollbackJournal) Delete() error {
 	return nil
 }
 
+// Close ...
 func (j *RollbackJournal) Close() error {
 	return j.file.Close()
 }
@@ -200,14 +208,14 @@ func RecoverFromJournal(dbPath string, pageSize int) (bool, error) {
 	}
 
 	// Open database file for writing
-	dbFile, err := os.OpenFile(dbPath, os.O_RDWR, 0644)
+	dbFile, err := os.OpenFile(dbPath, os.O_RDWR, 0o644)
 	if err != nil {
 		return false, fmt.Errorf("open database for recovery: %w", err)
 	}
 	defer dbFile.Close()
 
 	// Restore database header and then each page from journal
-	if header.DbHeader {
+	if header.DBHeader {
 		dbHeaderData := make([]byte, RootPageConfigSize)
 		if _, err := io.ReadFull(journalFile, dbHeaderData); err != nil {
 			return false, fmt.Errorf("read db header: %w", err)
@@ -282,14 +290,14 @@ func readJournalHeader(file *os.File) (*JournalHeader, error) {
 	copy(h.Magic[:], header[0:8])
 	h.Version = unmarshalUint32(header, 8)
 	h.PageSize = unmarshalUint32(header, 12)
-	h.DbHeader = unmarshalBool(header, 16)
+	h.DBHeader = unmarshalBool(header, 16)
 	h.NumPages = unmarshalUint32(header, 17)
 	h.Checksum = unmarshalUint32(header, 21)
 
 	// Validate checksum
 	expectedChecksum := crc32.ChecksumIEEE(header[0:21])
 	if h.Checksum != expectedChecksum {
-		return nil, fmt.Errorf("journal header checksum mismatch")
+		return nil, errors.New("journal header checksum mismatch")
 	}
 
 	return h, nil

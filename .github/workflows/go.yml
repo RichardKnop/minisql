@@ -10,6 +10,26 @@ on:
     branches: ["main"]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    strategy:
+      matrix:
+        go-version: ["1.26.x"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.11.3
+
   build:
     runs-on: ubuntu-latest
     permissions:
@@ -22,10 +42,10 @@ jobs:
       matrix:
         go-version: ["1.26.x"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go-version }}
 
@@ -61,7 +81,7 @@ jobs:
 
       - name: Post coverage comment on PR
         if: ${{ !cancelled() }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |

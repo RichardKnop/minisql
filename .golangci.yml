@@ -1,0 +1,100 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck      # unchecked errors
+    - errorlint     # incorrect error-wrapping (use %w, errors.Is, errors.As)
+    - gocritic      # style, diagnostics, performance
+    - govet         # go vet passes
+    - misspell      # common spelling mistakes in comments/strings
+    - nilerr        # returns nil despite checking err != nil
+    - revive        # comprehensive replacement for golint
+    - staticcheck   # SA*, S*, QF* checks
+    - unused        # unused code
+
+  settings:
+    errcheck:
+      exclude-functions:
+        # Intentionally-ignored close/cleanup calls (deferred, best-effort).
+        - (io.Closer).Close
+        - (io.WriteCloser).Close
+        - (*os.File).Close
+        - (*os.File).Seek
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - (*database/sql.DB).Close
+        - os.Remove
+        # Print functions: ignoring write errors is conventional.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Print
+        - fmt.Println
+
+    errorlint:
+      errorf: true
+      comparison: true
+
+    staticcheck:
+      checks:
+        - "all"
+        - "-SA6002"   # sync.Pool with []byte is acceptable; *[]byte refactor is not worth the churn
+        - "-ST1000"   # package-level doc comments can be added incrementally
+        - "-ST1016"   # receiver-name consistency enforced by revive instead
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+      disabled-checks:
+        - unnamedResult
+        - appendAssign   # false positives with preallocated slices
+        - docStub        # flags "// Name ..." stub comments; replace stubs with real docs gradually
+
+    revive:
+      rules:
+        # Require godoc comments on all exported symbols.
+        - name: exported
+          arguments:
+            - "checkPrivateReceivers"
+            - "sayRepetitiveInsteadOfStutters"
+        # Error strings must not be capitalised or end with punctuation.
+        - name: error-strings
+        # The error return value must be the last return value.
+        - name: error-return
+        # Naming conventions (exported errors ErrXxx, etc.).
+        - name: var-naming
+        # Superfluous else after return/continue/break/goto.
+        - name: indent-error-flow
+        - name: superfluous-else
+        # Empty code blocks are almost always a bug.
+        - name: empty-block
+        # Unreachable code after return.
+        - name: unreachable-code
+        # context.Context should be the first parameter.
+        - name: context-as-argument
+        # Receiver names must be consistent within a type.
+        - name: receiver-naming
+
+  exclusions:
+    rules:
+      # Test files: relax godoc and context-as-argument requirements.
+      - path: "_test\\.go"
+        linters: [revive]
+        text: "exported func|should be the first parameter"
+
+      # Auto-generated mocks: ignore everything.
+      - path: "mocks_test\\.go"
+        linters: [revive, errcheck, gocritic, staticcheck, unused]
+
+      # The e2e suite testify methods appear unused to static analysis.
+      - path: "e2e_tests/"
+        linters: [unused]
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

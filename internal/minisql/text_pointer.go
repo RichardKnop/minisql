@@ -6,14 +6,15 @@ import (
 	"fmt"
 )
 
-// Stored in the main row, text of length <= MaxInlineVarchar is stored inline,
-// oterwise we point to an overflow page.
+// TextPointer is stored in the main row; text of length <= MaxInlineVarchar is stored inline,
+// otherwise it points to an overflow page.
 type TextPointer struct {
 	Length    uint32    // Total size of text
 	FirstPage PageIndex // First overflow page (if not inline)
 	Data      []byte
 }
 
+// NewTextPointer ...
 func NewTextPointer(data []byte) TextPointer {
 	return TextPointer{
 		Length: uint32(len(data)),
@@ -21,6 +22,7 @@ func NewTextPointer(data []byte) TextPointer {
 	}
 }
 
+// Size ...
 func (tp TextPointer) Size() uint64 {
 	if tp.IsInline() {
 		// 4 bytes length prefix + data
@@ -30,6 +32,7 @@ func (tp TextPointer) Size() uint64 {
 	return varcharLengthPrefixSize + 4
 }
 
+// IsInline ...
 func (tp TextPointer) IsInline() bool {
 	return tp.Length <= MaxInlineVarchar
 }
@@ -38,10 +41,12 @@ func (tp TextPointer) String() string {
 	return string(tp.Data)
 }
 
+// NumberOfPages ...
 func (tp TextPointer) NumberOfPages() uint32 {
 	return tp.Length/MaxOverflowPageData + 1
 }
 
+// Marshal ...
 func (tp *TextPointer) Marshal(buf []byte, i uint64) error {
 	// Write length prefix
 	marshalUint32(buf, tp.Length, i)
@@ -61,6 +66,7 @@ func (tp *TextPointer) Marshal(buf []byte, i uint64) error {
 	return nil
 }
 
+// Unmarshal ...
 func (tp *TextPointer) Unmarshal(buf []byte, i uint64) error {
 	// Read length prefix
 	tp.Length = unmarshalUint32(buf, i)
@@ -80,6 +86,7 @@ func (tp *TextPointer) Unmarshal(buf []byte, i uint64) error {
 	return nil
 }
 
+// IsEqual ...
 func (tp TextPointer) IsEqual(tp2 TextPointer) bool {
 	if string(tp.Data) != string(tp2.Data) {
 		return false
@@ -96,20 +103,20 @@ func (tp TextPointer) IsEqual(tp2 TextPointer) bool {
 	return true
 }
 
-func (r Row) storeOverflowTexts(ctx context.Context, aPager TxPager) (Row, error) {
-	for i, aColumn := range r.Columns {
-		if !aColumn.Kind.IsText() {
+func (r Row) storeOverflowTexts(ctx context.Context, pager TxPager) (Row, error) {
+	for i, col := range r.Columns {
+		if !col.Kind.IsText() {
 			continue
 		}
-		value, ok := r.GetValue(aColumn.Name)
+		value, ok := r.GetValue(col.Name)
 		if !ok || !value.Valid {
 			continue
 		}
 		textPointer, ok := value.Value.(TextPointer)
 		if !ok {
-			return r, fmt.Errorf("expected TextPointer value for text column %s", aColumn.Name)
+			return r, fmt.Errorf("expected TextPointer value for text column %s", col.Name)
 		}
-		if err := textPointer.storeOverflowText(ctx, aPager); err != nil {
+		if err := textPointer.storeOverflowText(ctx, pager); err != nil {
 			return r, err
 		}
 		r.Values[i] = OptionalValue{
@@ -120,7 +127,7 @@ func (r Row) storeOverflowTexts(ctx context.Context, aPager TxPager) (Row, error
 	return r, nil
 }
 
-func (tp *TextPointer) storeOverflowText(ctx context.Context, aPager TxPager) error {
+func (tp *TextPointer) storeOverflowText(ctx context.Context, pager TxPager) error {
 	if tp.IsInline() {
 		return nil
 	}
@@ -136,7 +143,7 @@ func (tp *TextPointer) storeOverflowText(ctx context.Context, aPager TxPager) er
 	// Store text in overflow pages
 	var previousPage *Page
 	for i := range numPages {
-		freePage, err := aPager.GetFreePage(ctx)
+		freePage, err := pager.GetFreePage(ctx)
 		if err != nil {
 			return fmt.Errorf("allocate overflow page: %w", err)
 		}
@@ -160,21 +167,21 @@ func (tp *TextPointer) storeOverflowText(ctx context.Context, aPager TxPager) er
 	return nil
 }
 
-func (r Row) readOverflowTexts(ctx context.Context, aPager TxPager) (Row, error) {
+func (r Row) readOverflowTexts(ctx context.Context, pager TxPager) (Row, error) {
 	if len(r.Values) == 0 {
 		return r, nil
 	}
-	for _, aColumn := range r.Columns {
-		if !aColumn.Kind.IsText() {
+	for _, col := range r.Columns {
+		if !col.Kind.IsText() {
 			continue
 		}
-		value, ok := r.GetValue(aColumn.Name)
+		value, ok := r.GetValue(col.Name)
 		if !ok || !value.Valid {
 			continue
 		}
 		textPointer, ok := value.Value.(TextPointer)
 		if !ok {
-			return Row{}, fmt.Errorf("expected TextPointer value for text column %s", aColumn.Name)
+			return Row{}, fmt.Errorf("expected TextPointer value for text column %s", col.Name)
 		}
 		if textPointer.IsInline() {
 			continue
@@ -186,7 +193,7 @@ func (r Row) readOverflowTexts(ctx context.Context, aPager TxPager) (Row, error)
 			remainingSize  = textPointer.Length
 		)
 		for remainingSize > 0 {
-			overflowPage, err := aPager.ReadPage(ctx, currentPageIdx)
+			overflowPage, err := pager.ReadPage(ctx, currentPageIdx)
 			if err != nil {
 				return Row{}, fmt.Errorf("read overflow page %d: %w", currentPageIdx, err)
 			}
@@ -199,7 +206,7 @@ func (r Row) readOverflowTexts(ctx context.Context, aPager TxPager) (Row, error)
 			currentPageIdx = overflowPage.OverflowPage.Header.NextPage
 		}
 		textPointer.Data = bytes.Trim(overflowData, "\x00")
-		r, _ = r.SetValue(aColumn.Name, OptionalValue{Value: textPointer, Valid: true})
+		r, _ = r.SetValue(col.Name, OptionalValue{Value: textPointer, Valid: true})
 	}
 	return r, nil
 }

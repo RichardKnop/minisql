@@ -102,7 +102,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 		rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
 		assert.Equal(t, 0, int(rootNode.Header.Keys))
 
-		actualKeys, actualRowIDs := collectAllKeysAndRowIDs(t, anIndex, ctx)
+		actualKeys, actualRowIDs := collectAllKeysAndRowIDs(ctx, t, anIndex)
 		require.Empty(t, actualKeys)
 		require.Empty(t, actualRowIDs)
 	})
@@ -158,7 +158,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 		rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
 		assert.Equal(t, 0, int(rootNode.Header.Keys))
 
-		actualKeys, actualRowIDs := collectAllKeysAndRowIDs(t, anIndex, ctx)
+		actualKeys, actualRowIDs := collectAllKeysAndRowIDs(ctx, t, anIndex)
 		require.Empty(t, actualKeys)
 		require.Empty(t, actualRowIDs)
 	})
@@ -186,7 +186,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 
 		expectedKeys := insertedKeys
 		expectedRowIDs := insertedRowIDs.AllRowIDs()
-		actualKeys, actualRowIDs := collectAllKeysAndRowIDs(t, anIndex, ctx)
+		actualKeys, actualRowIDs := collectAllKeysAndRowIDs(ctx, t, anIndex)
 		require.Len(t, actualKeys, len(expectedKeys))
 		require.Len(t, actualRowIDs, len(expectedRowIDs))
 		assert.ElementsMatch(t, expectedKeys, actualKeys)
@@ -206,7 +206,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 			}
 		}
 
-		actualKeys, actualRowIDs = collectAllKeysAndRowIDs(t, anIndex, ctx)
+		actualKeys, actualRowIDs = collectAllKeysAndRowIDs(ctx, t, anIndex)
 		require.Empty(t, actualKeys)
 		require.Empty(t, actualRowIDs)
 

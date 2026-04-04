@@ -5,21 +5,29 @@ import (
 )
 
 const (
+	// SchemaTableName is the internal table used to store schema metadata.
 	SchemaTableName    = "minisql_schema"
+	// StatsTableName ...
 	StatsTableName     = "minisql_stats"
+	// MaxColumns ...
 	MaxColumns         = 64
+	// RootPageConfigSize is the number of bytes reserved for the root page config header.
 	RootPageConfigSize = 100
 )
 
+// SchemaType identifies the kind of object recorded in the schema table.
 type SchemaType int
 
+// SchemaType constants identify the kind of object recorded in the schema table.
 const (
+	// SchemaTable identifies a user table entry in the schema.
 	SchemaTable SchemaType = iota + 1
 	SchemaPrimaryKey
 	SchemaUniqueIndex
 	SchemaSecondaryIndex
 )
 
+// Schema represents a single row in the internal schema metadata table.
 type Schema struct {
 	Type      SchemaType
 	Name      string
@@ -66,6 +74,7 @@ var (
 		},
 	}
 
+	// MainTableSQL is the DDL used to create the internal schema metadata table.
 	MainTableSQL = fmt.Sprintf(`create table "%s" (
 	type int4 not null,
 	name varchar(255) not null,
@@ -77,22 +86,22 @@ var (
 	mainTableFields = fieldsFromColumns(mainTableColumns...)
 )
 
-func scanSchema(aRow Row) Schema {
+func scanSchema(row Row) Schema {
 	var (
 		tableName string
 		ddl       string
 	)
-	if aRow.Values[2].Valid {
-		tableName = aRow.Values[2].Value.(TextPointer).String()
+	if row.Values[2].Valid {
+		tableName = row.Values[2].Value.(TextPointer).String()
 	}
-	if aRow.Values[4].Valid {
-		ddl = aRow.Values[4].Value.(TextPointer).String()
+	if row.Values[4].Valid {
+		ddl = row.Values[4].Value.(TextPointer).String()
 	}
 	return Schema{
-		Type:      SchemaType(aRow.Values[0].Value.(int32)),
-		Name:      aRow.Values[1].Value.(TextPointer).String(),
+		Type:      SchemaType(row.Values[0].Value.(int32)),
+		Name:      row.Values[1].Value.(TextPointer).String(),
 		TableName: tableName,
-		RootPage:  PageIndex(aRow.Values[3].Value.(int32)),
+		RootPage:  PageIndex(row.Values[3].Value.(int32)),
 		DDL:       ddl,
 	}
 }

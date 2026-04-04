@@ -5,12 +5,19 @@ import (
 	"fmt"
 )
 
+// PageType constants identify the type of data stored in a database page.
 const (
+	// PageTypeLeaf ...
 	PageTypeLeaf byte = iota
+	// PageTypeInternal identifies an internal (non-leaf) B+ tree node page.
 	PageTypeInternal
+	// PageTypeOverflow identifies a text overflow page.
 	PageTypeOverflow
+	// PageTypeIndex identifies an index B+ tree node page.
 	PageTypeIndex
+	// PageTypeFree identifies a free (unused) page available for reuse.
 	PageTypeFree
+	// PageTypeIndexOverflow identifies an index overflow page for large row ID lists.
 	PageTypeIndexOverflow
 )
 
@@ -19,6 +26,7 @@ type tablePager struct {
 	columns []Column
 }
 
+// GetPage ...
 func (p *tablePager) GetPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
 	return p.pagerImpl.GetPage(ctx, pageIdx, p.unmarshal)
 }
@@ -65,13 +73,13 @@ func (p *tablePager) unmarshal(totalPages uint32, pageIdx PageIndex, buf []byte)
 		}, nil
 	case PageTypeFree:
 		// Free page
-		aFreePage := new(FreePage)
-		if err := aFreePage.Unmarshal(buf[idx:]); err != nil {
+		freePage := new(FreePage)
+		if err := freePage.Unmarshal(buf[idx:]); err != nil {
 			return nil, err
 		}
 		return &Page{
 			Index:    pageIdx,
-			FreePage: aFreePage,
+			FreePage: freePage,
 		}, nil
 	}
 

@@ -93,14 +93,14 @@ func TestTable_Delete_PrimaryKey(t *testing.T) {
 			},
 		}
 
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, stmt)
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, stmt)
 
 		assert.Equal(t, 1, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, rows[1:])
 	})
 
 	t.Run("Delete all rows", func(t *testing.T) {
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{Kind: Delete})
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{Kind: Delete})
 
 		assert.Equal(t, 9, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, nil)
@@ -194,14 +194,14 @@ func TestTable_Delete_CompositePrimaryKey(t *testing.T) {
 			},
 		}
 
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, stmt)
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, stmt)
 
 		assert.Equal(t, 1, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, rows[1:])
 	})
 
 	t.Run("Delete all rows", func(t *testing.T) {
-		aResult := mustDelete(t, ctx, aTable, txManager, aPager, Statement{Kind: Delete})
+		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{Kind: Delete})
 
 		assert.Equal(t, 9, aResult.RowsAffected)
 		checkRows(ctx, t, aTable, nil)

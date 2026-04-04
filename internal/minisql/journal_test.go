@@ -12,13 +12,13 @@ import (
 func TestCreateJournal(t *testing.T) {
 	t.Parallel()
 
-	tempFile, err := os.CreateTemp("", testDbName)
+	tempFile, err := os.CreateTemp("", testDBName)
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
 
 	aJournal, err := CreateJournal(tempFile.Name(), PageSize)
 	require.NoError(t, err)
-	aJournal.Close()
+	require.NoError(t, aJournal.Close())
 
 	assert.Equal(t, tempFile.Name()+"-journal", aJournal.filepath)
 	assert.Equal(t, PageSize, int(aJournal.pageSize))
@@ -26,21 +26,21 @@ func TestCreateJournal(t *testing.T) {
 	// Reopen journal file to verify initial header
 	journalFile, err := os.Open(aJournal.filepath)
 	require.NoError(t, err)
-	defer aJournal.Close()
+	defer func() { _ = aJournal.Close() }()
 	header, err := readJournalHeader(journalFile)
 	require.NoError(t, err)
 
 	assert.Equal(t, []byte(JournalMagic), header.Magic[:])
 	assert.Equal(t, JournalVersion, header.Version)
 	assert.Equal(t, uint32(PageSize), header.PageSize)
-	assert.False(t, header.DbHeader)
+	assert.False(t, header.DBHeader)
 	assert.Equal(t, 0, int(header.NumPages))
 }
 
 func TestJournal_NoDBHeader(t *testing.T) {
 	t.Parallel()
 
-	dbFile, err := os.CreateTemp("", testDbName)
+	dbFile, err := os.CreateTemp("", testDBName)
 	require.NoError(t, err)
 	defer os.Remove(dbFile.Name())
 
@@ -134,7 +134,7 @@ func TestJournal_NoDBHeader(t *testing.T) {
 func TestJournal_WithDBHeader(t *testing.T) {
 	t.Parallel()
 
-	dbFile, err := os.CreateTemp("", testDbName)
+	dbFile, err := os.CreateTemp("", testDBName)
 	require.NoError(t, err)
 	defer os.Remove(dbFile.Name())
 

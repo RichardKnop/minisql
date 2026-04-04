@@ -72,7 +72,7 @@ func TestDatabase_Analyze(t *testing.T) {
 		Fields:  fieldsFromColumns(testBigColumns...),
 		Inserts: [][]OptionalValue{},
 	}
-	// Make each 10 rows have the same timestmap so we can test distinct keys
+	// Make each 10 rows have the same timestamp so we can test distinct keys
 	now := time.Now().Add(-time.Hour)
 	for i, aRow := range rows {
 		if i > 0 && i%10 == 0 {
@@ -82,7 +82,7 @@ func TestDatabase_Analyze(t *testing.T) {
 		insertStmt.Inserts = append(insertStmt.Inserts, aRow.Values)
 	}
 
-	mustInsert(t, ctx, aDatabase.tables[testTableName], aDatabase.txManager, insertStmt)
+	mustInsert(ctx, t, aDatabase.tables[testTableName], aDatabase.txManager, insertStmt)
 
 	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aDatabase.Analyze(ctx, testTableName)
@@ -179,7 +179,7 @@ func TestDatabase_Analyze_CompositeIndex(t *testing.T) {
 		insertStmt.Inserts = append(insertStmt.Inserts, values)
 	}
 
-	mustInsert(t, ctx, aDatabase.tables[testTableName], aDatabase.txManager, insertStmt)
+	mustInsert(ctx, t, aDatabase.tables[testTableName], aDatabase.txManager, insertStmt)
 
 	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		return aDatabase.Analyze(ctx, testTableName)

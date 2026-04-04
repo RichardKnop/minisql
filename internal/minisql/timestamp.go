@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -55,6 +56,7 @@ type Time struct {
 	Microseconds int32
 }
 
+// GoTime converts the custom Time value to a standard library time.Time.
 func (t Time) GoTime() time.Time {
 	return time.Date(
 		int(t.Year),
@@ -89,6 +91,7 @@ func (t Time) String() string {
 	)
 }
 
+// FromMicroseconds constructs a Time from microseconds since 2000-01-01 00:00:00 UTC.
 func FromMicroseconds(microseconds int64) Time {
 	if microseconds == 0 {
 		return Time{
@@ -139,16 +142,16 @@ func FromMicroseconds(microseconds int64) Time {
 		t.Month = int8(month)
 
 		t.Day = int8(absMicroseconds/microsecondsInDay) + 1
-		absMicroseconds = absMicroseconds % microsecondsInDay
+		absMicroseconds %= microsecondsInDay
 
 		t.Hour = int8(absMicroseconds / microsecondsInHour)
-		absMicroseconds = absMicroseconds % microsecondsInHour
+		absMicroseconds %= microsecondsInHour
 
 		t.Minutes = int8(absMicroseconds / microsecondsInMinute)
-		absMicroseconds = absMicroseconds % microsecondsInMinute
+		absMicroseconds %= microsecondsInMinute
 
 		t.Seconds = int8(absMicroseconds / microsecondsInSecond)
-		absMicroseconds = absMicroseconds % microsecondsInSecond
+		absMicroseconds %= microsecondsInSecond
 
 		t.Microseconds = int32(absMicroseconds)
 		return t
@@ -207,16 +210,16 @@ func FromMicroseconds(microseconds int64) Time {
 		return t
 	}
 	t.Day = int8(daysInThisMonth - int(absMicroseconds/microsecondsInDay))
-	absMicroseconds = absMicroseconds % microsecondsInDay
+	absMicroseconds %= microsecondsInDay
 
 	t.Hour = int8(23 - int(absMicroseconds/microsecondsInHour))
-	absMicroseconds = absMicroseconds % microsecondsInHour
+	absMicroseconds %= microsecondsInHour
 
 	t.Minutes = int8(59 - int(absMicroseconds/microsecondsInMinute))
-	absMicroseconds = absMicroseconds % microsecondsInMinute
+	absMicroseconds %= microsecondsInMinute
 
 	t.Seconds = int8(59 - int(absMicroseconds/microsecondsInSecond))
-	absMicroseconds = absMicroseconds % microsecondsInSecond
+	absMicroseconds %= microsecondsInSecond
 
 	t.Microseconds = int32(1_000_000 - int(absMicroseconds))
 	if t.Microseconds == 1_000_000 {
@@ -225,8 +228,8 @@ func FromMicroseconds(microseconds int64) Time {
 	return t
 }
 
-// Microseconds count since 2000-01-01 00:00:00 UTC
-// Negative values represent dates before 2000-01-01 00:00:00 UTC
+// TotalMicroseconds returns the microsecond count since 2000-01-01 00:00:00 UTC.
+// Negative values represent dates before 2000-01-01 00:00:00 UTC.
 func (t Time) TotalMicroseconds() int64 {
 	var (
 		leapYear = isLeapYear(int(t.Year))
@@ -290,6 +293,7 @@ func (t Time) TotalMicroseconds() int64 {
 	return total
 }
 
+// MustParseTimestamp parses a timestamp string and panics on error.
 func MustParseTimestamp(timestampStr string) Time {
 	t, err := ParseTimestamp(timestampStr)
 	if err != nil {
@@ -298,9 +302,10 @@ func MustParseTimestamp(timestampStr string) Time {
 	return t
 }
 
+// ParseTimestamp parses a PostgreSQL-style timestamp string into a Time value.
 func ParseTimestamp(timestampStr string) (Time, error) {
-	if len(timestampStr) == 0 {
-		return Time{}, fmt.Errorf("empty timestamp string")
+	if timestampStr == "" {
+		return Time{}, errors.New("empty timestamp string")
 	}
 	if len(timestampStr) < miniumTimestampLength {
 		return Time{}, fmt.Errorf("timestamp string too short: %s", timestampStr)
@@ -418,16 +423,16 @@ func isValidDate(leapYear bool, month, day int) error {
 
 func isValidTime(hour, minutes, seconds, microseconds int) error {
 	if hour < 0 || hour > 23 {
-		return fmt.Errorf("invalid hour")
+		return errors.New("invalid hour")
 	}
 	if minutes < 0 || minutes > 59 {
-		return fmt.Errorf("invalid minutes")
+		return errors.New("invalid minutes")
 	}
 	if seconds < 0 || seconds > 59 {
-		return fmt.Errorf("invalid seconds")
+		return errors.New("invalid seconds")
 	}
 	if microseconds < 0 || microseconds > 999999 {
-		return fmt.Errorf("invalid microseconds")
+		return errors.New("invalid microseconds")
 	}
 	return nil
 }

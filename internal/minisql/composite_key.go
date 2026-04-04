@@ -1,5 +1,6 @@
 package minisql
 
+// CompositeKey holds the column definitions and values for a multi-column index key.
 type CompositeKey struct {
 	Columns []Column
 	Values  []any
@@ -7,6 +8,7 @@ type CompositeKey struct {
 	Comparison []byte
 }
 
+// NewCompositeKey constructs a CompositeKey from the given columns and values.
 func NewCompositeKey(columns []Column, values ...any) CompositeKey {
 	ck := CompositeKey{
 		Columns: columns,
@@ -18,10 +20,11 @@ func NewCompositeKey(columns []Column, values ...any) CompositeKey {
 	return ck
 }
 
+// Size returns the serialised byte size of the composite key.
 func (ck CompositeKey) Size() uint64 {
 	size := 0
-	for i, aColumn := range ck.Columns {
-		switch aColumn.Kind {
+	for i, col := range ck.Columns {
+		switch col.Kind {
 		case Boolean:
 			size += 1
 		case Int4:
@@ -39,6 +42,7 @@ func (ck CompositeKey) Size() uint64 {
 	return uint64(size)
 }
 
+// Prefix returns a CompositeKey containing only the first n columns' comparison bytes.
 func (ck CompositeKey) Prefix(columns int) CompositeKey {
 	if columns > len(ck.Columns) {
 		columns = len(ck.Columns)
@@ -65,10 +69,11 @@ func (ck CompositeKey) Prefix(columns int) CompositeKey {
 	return CompositeKey{Comparison: ck.Comparison[:offset]}
 }
 
+// Marshal serialises the composite key into buf starting at offset i.
 func (ck *CompositeKey) Marshal(buf []byte, i uint64) error {
 	offset := uint64(0)
-	for j, aColumn := range ck.Columns {
-		switch aColumn.Kind {
+	for j, col := range ck.Columns {
+		switch col.Kind {
 		case Boolean:
 			marshalBool(buf, ck.Values[j].(bool), offset)
 			offset += 1
@@ -96,6 +101,7 @@ func (ck *CompositeKey) Marshal(buf []byte, i uint64) error {
 	return nil
 }
 
+// Unmarshal deserialises a composite key from buf starting at offset i, returning bytes consumed.
 func (ck *CompositeKey) Unmarshal(buf []byte, i uint64) (uint64, error) {
 	var (
 		offset     = uint64(0)
@@ -104,8 +110,8 @@ func (ck *CompositeKey) Unmarshal(buf []byte, i uint64) (uint64, error) {
 	// We don't know the size of the composite key upfront, so allocate a largest possible buffer.
 	// We limit max combined size to MaxInlineVarchar plus add potential lenghth prefixes.
 	comparison := make([]byte, MaxInlineVarchar*uint64(len(ck.Columns)*varcharLengthPrefixSize))
-	for _, aColumn := range ck.Columns {
-		switch aColumn.Kind {
+	for _, col := range ck.Columns {
+		switch col.Kind {
 		case Boolean:
 			ck.Values = append(ck.Values, unmarshalBool(buf, offset))
 			copy(comparison[compOffset:compOffset+1], buf[offset:offset+1])
@@ -148,8 +154,8 @@ func (ck *CompositeKey) Unmarshal(buf []byte, i uint64) (uint64, error) {
 func (ck *CompositeKey) generateComparison() {
 	offset := uint64(0)
 
-	for j, aColumn := range ck.Columns {
-		switch aColumn.Kind {
+	for j, col := range ck.Columns {
+		switch col.Kind {
 		case Boolean:
 			buf := make([]byte, 1)
 			ck.Comparison = append(ck.Comparison, buf...)

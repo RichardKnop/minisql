@@ -4,26 +4,28 @@ import (
 	"math"
 )
 
+// InternalNode capacity constants derived from page and header sizes.
+// Page size: 4096, Header size: 6 (base) + 8 (internal), ICell size: 12.
 const (
-	// Page size: 4096
-	// Header size: 6 (base header) + 8 (internal header)
-	// ICell size: 12
-	// (4096 - 6 - 8) / 12
+	// InternalNodeMaxCells is (4096 - 6 - 8) / 12.
 	InternalNodeMaxCells = 340
-	// (4096 - 6 - 8 - 100) / 12
+	// RootInternalNodeMaxCells is (4096 - 6 - 8 - 100) / 12.
 	RootInternalNodeMaxCells = 331
 )
 
+// InternalNodeHeader ...
 type InternalNodeHeader struct {
 	Header
 	KeysNum    uint32
 	RightChild PageIndex
 }
 
+// Size ...
 func (h *InternalNodeHeader) Size() (s uint64) {
 	return h.Header.Size() + 8
 }
 
+// Marshal ...
 func (h *InternalNodeHeader) Marshal(buf []byte) {
 	i := uint64(0)
 
@@ -43,6 +45,7 @@ func (h *InternalNodeHeader) Marshal(buf []byte) {
 	i += 8
 }
 
+// Unmarshal ...
 func (h *InternalNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 	i := uint64(0)
 
@@ -67,27 +70,31 @@ func (h *InternalNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 	return h.Size(), nil
 }
 
+// ICell ...
 type ICell struct {
 	Key   RowID
 	Child PageIndex
 }
 
+// ICellSize is the serialised byte size of an ICell (8-byte key + 4-byte child pointer).
 const ICellSize = 12 // (8+4)
 
+// Size ...
 func (c *ICell) Size() uint64 {
 	return ICellSize
 }
 
+// Marshal ...
 func (c *ICell) Marshal(buf []byte) {
 	i := uint64(0)
 
 	buf = marshalUint64(buf, uint64(c.Key), i)
 	i += 8
 
-	buf = marshalUint32(buf, uint32(c.Child), i)
-	i += 4
+	marshalUint32(buf, uint32(c.Child), i)
 }
 
+// Unmarshal ...
 func (c *ICell) Unmarshal(buf []byte) (uint64, error) {
 	i := uint64(0)
 
@@ -100,33 +107,38 @@ func (c *ICell) Unmarshal(buf []byte) (uint64, error) {
 	return c.Size(), nil
 }
 
+// InternalNode ...
 type InternalNode struct {
 	Header InternalNodeHeader
 	ICells [InternalNodeMaxCells]ICell
 }
 
+// Clone ...
 func (n *InternalNode) Clone() *InternalNode {
-	aCopy := NewInternalNode()
-	copy(aCopy.ICells[:], n.ICells[:])
-	aCopy.Header = n.Header
-	return aCopy
+	nodeCopy := NewInternalNode()
+	copy(nodeCopy.ICells[:], n.ICells[:])
+	nodeCopy.Header = n.Header
+	return nodeCopy
 }
 
-const RIGHT_CHILD_NOT_SET = math.MaxUint32
+// RightChildNotSet is the sentinel value indicating an internal node has no right child yet.
+const RightChildNotSet = math.MaxUint32
 
+// NewInternalNode ...
 func NewInternalNode() *InternalNode {
-	aNode := InternalNode{
+	node := InternalNode{
 		Header: InternalNodeHeader{
 			Header: Header{
 				IsInternal: true,
 			},
-			RightChild: RIGHT_CHILD_NOT_SET,
+			RightChild: RightChildNotSet,
 		},
 		ICells: [InternalNodeMaxCells]ICell{},
 	}
-	return &aNode
+	return &node
 }
 
+// Size ...
 func (n *InternalNode) Size() uint64 {
 	size := n.Header.Size()
 	for idx := range n.ICells {
@@ -135,6 +147,7 @@ func (n *InternalNode) Size() uint64 {
 	return size
 }
 
+// Marshal ...
 func (n *InternalNode) Marshal(buf []byte) error {
 	i := uint64(0)
 
@@ -149,6 +162,7 @@ func (n *InternalNode) Marshal(buf []byte) error {
 	return nil
 }
 
+// Unmarshal ...
 func (n *InternalNode) Unmarshal(buf []byte) (uint64, error) {
 	i := uint64(0)
 

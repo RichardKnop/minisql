@@ -1,15 +1,15 @@
 package parser
 
 import (
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
 )
 
 var (
-	errCreateIndexExpectedOpeningParens = fmt.Errorf("at CREATE INDEX: expected opening parens")
-	errCreateIndexNoColumns             = fmt.Errorf("at CREATE INDEX: no columns specified")
+	errCreateIndexExpectedOpeningParens = errors.New("at CREATE INDEX: expected opening parens")
+	errCreateIndexNoColumns             = errors.New("at CREATE INDEX: no columns specified")
 )
 
 func (p *parserItem) doParseCreateIndex() error {
@@ -79,10 +79,9 @@ func (p *parserItem) doParseCreateIndex() error {
 }
 
 func (p *parserItem) doParseDropIndex() error {
-	switch p.step {
-	case stepDropIndexName:
+	if p.step == stepDropIndexName {
 		indexName := p.peek()
-		if len(indexName) == 0 {
+		if indexName == "" {
 			return p.errorf("at DROP INDEX: expected index name")
 		}
 		p.IndexName = indexName

@@ -1,24 +1,24 @@
 package parser
 
 import (
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
 )
 
 var (
-	errUpdateExpectetSet              = fmt.Errorf("at UPDATE: expected 'SET'")
-	errUpdateExpectedEquals           = fmt.Errorf("at UPDATE: expected '='")
-	errUpdateExpectedQuotedValueOrInt = fmt.Errorf("at UPDATE: expected quoted value or int")
-	errNoFieldsToUpdate               = fmt.Errorf("at UPDATE: expected at least one field to update")
+	errUpdateExpectetSet              = errors.New("at UPDATE: expected 'SET'")
+	errUpdateExpectedEquals           = errors.New("at UPDATE: expected '='")
+	errUpdateExpectedQuotedValueOrInt = errors.New("at UPDATE: expected quoted value or int")
+	errNoFieldsToUpdate               = errors.New("at UPDATE: expected at least one field to update")
 )
 
 func (p *parserItem) doParseUpdate() error {
 	switch p.step {
 	case stepUpdateTable:
 		tableName := p.peek()
-		if len(tableName) == 0 {
+		if tableName == "" {
 			return p.errorf("at UPDATE: expected table name")
 		}
 		p.TableName = tableName

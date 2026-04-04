@@ -4,12 +4,13 @@ import (
 	"fmt"
 )
 
-// Free page structure - reuse the existing page structure
+// FreePage reuses the existing page structure for tracking free (unused) pages.
 type FreePage struct {
 	NextFreePage PageIndex // Points to next free page, 0 if last
 	// Rest of page is unused
 }
 
+// Marshal ...
 func (n *FreePage) Marshal(buf []byte) error {
 	i := uint64(0)
 
@@ -21,6 +22,7 @@ func (n *FreePage) Marshal(buf []byte) error {
 	return nil
 }
 
+// Unmarshal ...
 func (n *FreePage) Unmarshal(buf []byte) error {
 	i := uint64(0)
 

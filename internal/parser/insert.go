@@ -1,23 +1,23 @@
 package parser
 
 import (
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
 )
 
 var (
-	errNoRowsToInsert                = fmt.Errorf("at INSERT INTO: need at least one row to insert")
-	errInsertFieldValueCountMismatch = fmt.Errorf("at INSERT INTO: value count doesn't match field count")
-	errInsertNoFields                = fmt.Errorf("at INSERT INTO: expected at least one field to insert")
+	errNoRowsToInsert                = errors.New("at INSERT INTO: need at least one row to insert")
+	errInsertFieldValueCountMismatch = errors.New("at INSERT INTO: value count doesn't match field count")
+	errInsertNoFields                = errors.New("at INSERT INTO: expected at least one field to insert")
 )
 
 func (p *parserItem) doParseInsert() error {
 	switch p.step {
 	case stepInsertTable:
 		tableName := p.peek()
-		if len(tableName) == 0 {
+		if tableName == "" {
 			return p.errorf("at INSERT INTO: expected table name")
 		}
 		p.TableName = tableName

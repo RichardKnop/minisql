@@ -1,17 +1,24 @@
 package minisql
 
 import (
+	"errors"
 	"fmt"
 )
 
+// JoinType ...
 type JoinType int
 
+// JoinType constants enumerate the supported JOIN varieties.
 const (
+	// Inner ...
 	Inner JoinType = iota + 1
+	// Left is a LEFT JOIN.
 	Left
+	// Right is a RIGHT JOIN.
 	Right
 )
 
+// Join ...
 type Join struct {
 	Type       JoinType
 	TableName  string
@@ -20,21 +27,22 @@ type Join struct {
 	Joins      []Join
 }
 
-func (s Statement) AddJoin(aType JoinType, fromTableAlias, toTable, toTableAlias string, conditions Conditions) (Statement, error) {
+// AddJoin ...
+func (s Statement) AddJoin(joinType JoinType, fromTableAlias, toTable, toTableAlias string, conditions Conditions) (Statement, error) {
 	if s.Kind != Select {
-		return Statement{}, fmt.Errorf("joins can only be added to SELECT statements")
+		return Statement{}, errors.New("joins can only be added to SELECT statements")
 	}
 
 	if s.TableAlias == "" {
-		return Statement{}, fmt.Errorf("cannot add join to statement without table alias")
+		return Statement{}, errors.New("cannot add join to statement without table alias")
 	}
 
 	if toTable == "" {
-		return Statement{}, fmt.Errorf("toTable cannot be empty")
+		return Statement{}, errors.New("toTable cannot be empty")
 	}
 
 	if toTableAlias == "" {
-		return Statement{}, fmt.Errorf("toTableAlias cannot be empty")
+		return Statement{}, errors.New("toTableAlias cannot be empty")
 	}
 
 	if len(s.Joins) == 0 {
@@ -42,7 +50,7 @@ func (s Statement) AddJoin(aType JoinType, fromTableAlias, toTable, toTableAlias
 			return Statement{}, fmt.Errorf("join from table alias %q does not match statement table alias %q", fromTableAlias, s.TableAlias)
 		}
 		s.Joins = append(s.Joins, Join{
-			Type:       aType,
+			Type:       joinType,
 			TableName:  toTable,
 			TableAlias: toTableAlias,
 			Conditions: conditions,
@@ -52,7 +60,7 @@ func (s Statement) AddJoin(aType JoinType, fromTableAlias, toTable, toTableAlias
 
 	if fromTableAlias == s.TableAlias {
 		s.Joins = append(s.Joins, Join{
-			Type:       aType,
+			Type:       joinType,
 			TableName:  toTable,
 			TableAlias: toTableAlias,
 			Conditions: conditions,
@@ -61,7 +69,7 @@ func (s Statement) AddJoin(aType JoinType, fromTableAlias, toTable, toTableAlias
 	}
 
 	for i := range s.Joins {
-		updatedJoin, added, err := s.Joins[i].addJoin(aType, fromTableAlias, toTable, toTableAlias, conditions)
+		updatedJoin, added, err := s.Joins[i].addJoin(joinType, fromTableAlias, toTable, toTableAlias, conditions)
 		if err != nil {
 			return Statement{}, err
 		}
@@ -74,13 +82,13 @@ func (s Statement) AddJoin(aType JoinType, fromTableAlias, toTable, toTableAlias
 	return s, fmt.Errorf("could not find from table alias %q in existing joins", fromTableAlias)
 }
 
-func (j Join) addJoin(aType JoinType, fromTableAlias, toTable, toTaableAlias string, conditions Conditions) (Join, bool, error) {
+func (j Join) addJoin(joinType JoinType, fromTableAlias, toTable, toTaableAlias string, conditions Conditions) (Join, bool, error) {
 	if len(j.Joins) == 0 {
 		if fromTableAlias != j.TableAlias {
 			return Join{}, false, nil
 		}
 		j.Joins = append(j.Joins, Join{
-			Type:       aType,
+			Type:       joinType,
 			TableName:  toTable,
 			TableAlias: toTaableAlias,
 			Conditions: conditions,
@@ -90,7 +98,7 @@ func (j Join) addJoin(aType JoinType, fromTableAlias, toTable, toTaableAlias str
 
 	if fromTableAlias == j.TableAlias {
 		j.Joins = append(j.Joins, Join{
-			Type:       aType,
+			Type:       joinType,
 			TableName:  toTable,
 			TableAlias: toTaableAlias,
 			Conditions: conditions,
@@ -99,7 +107,7 @@ func (j Join) addJoin(aType JoinType, fromTableAlias, toTable, toTaableAlias str
 	}
 
 	for i := range j.Joins {
-		updatedJoin, added, err := j.Joins[i].addJoin(aType, fromTableAlias, toTable, toTaableAlias, conditions)
+		updatedJoin, added, err := j.Joins[i].addJoin(joinType, fromTableAlias, toTable, toTaableAlias, conditions)
 		if err != nil {
 			return Join{}, false, err
 		}
@@ -111,6 +119,7 @@ func (j Join) addJoin(aType JoinType, fromTableAlias, toTable, toTaableAlias str
 	return Join{}, false, nil
 }
 
+// FromTableAlias ...
 func (j Join) FromTableAlias() string {
 	if len(j.Conditions) == 0 || j.TableAlias == "" {
 		return ""

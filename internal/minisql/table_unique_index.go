@@ -6,11 +6,13 @@ import (
 	"strings"
 )
 
+// UniqueIndex ...
 type UniqueIndex struct {
 	IndexInfo
 	Index BTreeIndex
 }
 
+// UniqueIndexName ...
 func UniqueIndexName(tableName string, columns ...string) string {
 	return fmt.Sprintf(
 		"key__%s__%s",
@@ -97,7 +99,7 @@ func (t *Table) insertUniqueCompositeIndexKey(ctx context.Context, uniqueIndex U
 	return nil
 }
 
-func (t *Table) updateUniqueIndexKey(ctx context.Context, uniqueIndex UniqueIndex, oldKeyParts []OptionalValue, aRow Row) error {
+func (t *Table) updateUniqueIndexKey(ctx context.Context, uniqueIndex UniqueIndex, oldKeyParts []OptionalValue, row Row) error {
 	if uniqueIndex.Index == nil {
 		return fmt.Errorf("table %s has unique index %s but no Btree index instance", t.Name, uniqueIndex.Name)
 	}
@@ -107,7 +109,7 @@ func (t *Table) updateUniqueIndexKey(ctx context.Context, uniqueIndex UniqueInde
 	}
 
 	if len(uniqueIndex.Columns) > 1 {
-		return t.updateCompositeUniqueIndexKey(ctx, uniqueIndex, oldKeyParts, aRow)
+		return t.updateCompositeUniqueIndexKey(ctx, uniqueIndex, oldKeyParts, row)
 	}
 
 	oldKey := oldKeyParts[0]
@@ -117,11 +119,11 @@ func (t *Table) updateUniqueIndexKey(ctx context.Context, uniqueIndex UniqueInde
 		return fmt.Errorf("failed to cast old unique index value for %s: %w", uniqueIndex.Name, err)
 	}
 
-	newKey, ok := aRow.GetValue(uniqueIndex.Columns[0].Name)
+	newKey, ok := row.GetValue(uniqueIndex.Columns[0].Name)
 	if !ok {
 		return nil
 	}
-	rowID := aRow.Key
+	rowID := row.Key
 
 	// We only need to insert into the index index if the key is not NULL
 	if newKey.Valid {
@@ -143,7 +145,7 @@ func (t *Table) updateUniqueIndexKey(ctx context.Context, uniqueIndex UniqueInde
 	return nil
 }
 
-func (t *Table) updateCompositeUniqueIndexKey(ctx context.Context, uniqueIndex UniqueIndex, oldKeyParts []OptionalValue, aRow Row) error {
+func (t *Table) updateCompositeUniqueIndexKey(ctx context.Context, uniqueIndex UniqueIndex, oldKeyParts []OptionalValue, row Row) error {
 	if uniqueIndex.Index == nil {
 		return fmt.Errorf("table %s has unique index %s but no Btree index instance", t.Name, uniqueIndex.Name)
 	}
@@ -166,8 +168,8 @@ func (t *Table) updateCompositeUniqueIndexKey(ctx context.Context, uniqueIndex U
 	// Check if new key should be in the index (all columns non-NULL)
 	newKeyInIndex := true
 	newKeyValues := make([]any, 0, len(oldKeyParts))
-	for _, aColumn := range uniqueIndex.Columns {
-		keyValue, ok := aRow.GetValue(aColumn.Name)
+	for _, col := range uniqueIndex.Columns {
+		keyValue, ok := row.GetValue(col.Name)
 		if !ok {
 			return fmt.Errorf("failed to get value for new unique index %s", uniqueIndex.Name)
 		}
@@ -175,14 +177,14 @@ func (t *Table) updateCompositeUniqueIndexKey(ctx context.Context, uniqueIndex U
 			newKeyInIndex = false
 			break
 		}
-		castedKey, err := castKeyValue(aColumn, keyValue.Value)
+		castedKey, err := castKeyValue(col, keyValue.Value)
 		if err != nil {
 			return fmt.Errorf("failed to cast new unique index value for %s: %w", uniqueIndex.Name, err)
 		}
 		newKeyValues = append(newKeyValues, castedKey)
 	}
 
-	rowID := aRow.Key
+	rowID := row.Key
 
 	// Insert new key if all columns are non-NULL
 	if newKeyInIndex {

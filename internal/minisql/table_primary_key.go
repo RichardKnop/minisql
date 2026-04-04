@@ -2,21 +2,25 @@ package minisql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
 
+// IndexInfo ...
 type IndexInfo struct {
 	Name    string
 	Columns []Column
 }
 
+// PrimaryKey ...
 type PrimaryKey struct {
 	IndexInfo
 	Autoincrement bool
 	Index         BTreeIndex
 }
 
+// NewPrimaryKey ...
 func NewPrimaryKey(indexName string, columns []Column, autoincrement bool) PrimaryKey {
 	return PrimaryKey{
 		IndexInfo: IndexInfo{
@@ -27,6 +31,7 @@ func NewPrimaryKey(indexName string, columns []Column, autoincrement bool) Prima
 	}
 }
 
+// PrimaryKeyName ...
 func PrimaryKeyName(tableName string) string {
 	return fmt.Sprintf(
 		"pkey__%s",
@@ -91,7 +96,7 @@ func (t *Table) insertAutoincrementedPrimaryKey(ctx context.Context, rowID RowID
 	}
 	lastPrimaryKey, ok := lastKey.(int64)
 	if !ok {
-		return 0, fmt.Errorf("failed to cast last primary key value for autoincrement")
+		return 0, errors.New("failed to cast last primary key value for autoincrement")
 	}
 	newPrimaryKey := lastPrimaryKey + 1
 
@@ -137,7 +142,7 @@ func (t *Table) insertCompositePrimaryKey(ctx context.Context, keyParts []Option
 	return ck, nil
 }
 
-func (t *Table) updatePrimaryKey(ctx context.Context, oldKeyParts []OptionalValue, aRow Row) error {
+func (t *Table) updatePrimaryKey(ctx context.Context, oldKeyParts []OptionalValue, row Row) error {
 	if t.PrimaryKey.Index == nil {
 		return fmt.Errorf("table %s has primary key but no Btree index instance", t.Name)
 	}
@@ -147,7 +152,7 @@ func (t *Table) updatePrimaryKey(ctx context.Context, oldKeyParts []OptionalValu
 	}
 
 	if len(t.PrimaryKey.Columns) > 1 {
-		return t.updateCompositePrimaryKey(ctx, oldKeyParts, aRow)
+		return t.updateCompositePrimaryKey(ctx, oldKeyParts, row)
 	}
 
 	oldKey := oldKeyParts[0]
@@ -157,7 +162,7 @@ func (t *Table) updatePrimaryKey(ctx context.Context, oldKeyParts []OptionalValu
 		return fmt.Errorf("failed to cast old primary key value for %s: %w", t.PrimaryKey.Name, err)
 	}
 
-	newKey, ok := aRow.GetValue(t.PrimaryKey.Columns[0].Name)
+	newKey, ok := row.GetValue(t.PrimaryKey.Columns[0].Name)
 	if !ok {
 		return nil
 	}
@@ -168,7 +173,7 @@ func (t *Table) updatePrimaryKey(ctx context.Context, oldKeyParts []OptionalValu
 	if err != nil {
 		return fmt.Errorf("failed to cast new primary key value for %s: %w", t.PrimaryKey.Name, err)
 	}
-	rowID := aRow.Key
+	rowID := row.Key
 
 	// We try to insert new primary key first to avoid leaving table in inconsistent state
 	// If the new primary key is already taken, we return an error without modifying the existing row
@@ -182,7 +187,7 @@ func (t *Table) updatePrimaryKey(ctx context.Context, oldKeyParts []OptionalValu
 	return nil
 }
 
-func (t *Table) updateCompositePrimaryKey(ctx context.Context, oldKeyParts []OptionalValue, aRow Row) error {
+func (t *Table) updateCompositePrimaryKey(ctx context.Context, oldKeyParts []OptionalValue, row Row) error {
 	if t.PrimaryKey.Index == nil {
 		return fmt.Errorf("table %s has primary key but no index", t.Name)
 	}
@@ -200,15 +205,15 @@ func (t *Table) updateCompositePrimaryKey(ctx context.Context, oldKeyParts []Opt
 	}
 
 	newKeyValues := make([]any, 0, len(oldKeyParts))
-	for _, aColumn := range t.PrimaryKey.Columns {
-		keyValue, ok := aRow.GetValue(aColumn.Name)
+	for _, col := range t.PrimaryKey.Columns {
+		keyValue, ok := row.GetValue(col.Name)
 		if !ok {
 			return fmt.Errorf("failed to get value for new composite primary key %s", t.PrimaryKey.Name)
 		}
 		if !keyValue.Valid {
 			return fmt.Errorf("cannot update composite primary key %s to part NULL", t.PrimaryKey.Name)
 		}
-		castedKey, err := castKeyValue(aColumn, keyValue.Value)
+		castedKey, err := castKeyValue(col, keyValue.Value)
 		if err != nil {
 			return fmt.Errorf("failed to cast new composite primary key value for %s: %w", t.PrimaryKey.Name, err)
 		}
@@ -218,7 +223,7 @@ func (t *Table) updateCompositePrimaryKey(ctx context.Context, oldKeyParts []Opt
 	var (
 		oldCK = NewCompositeKey(t.PrimaryKey.Columns, oldKeyValues...)
 		ck    = NewCompositeKey(t.PrimaryKey.Columns, newKeyValues...)
-		rowID = aRow.Key
+		rowID = row.Key
 	)
 
 	// We try to insert new primary key first to avoid leaving table in inconsistent state
@@ -235,41 +240,41 @@ func (t *Table) updateCompositePrimaryKey(ctx context.Context, oldKeyParts []Opt
 
 // castKeyValue casts an index key value to the appropriate type based on the column kind
 // parser returns all numbers as int64 or float64, but index keys can be int4 (int32) or real (float32)
-func castKeyValue(aColumn Column, aValue any) (any, error) {
-	switch aColumn.Kind {
+func castKeyValue(col Column, val any) (any, error) {
+	switch col.Kind {
 	case Int4:
-		value, ok := aValue.(int32)
+		value, ok := val.(int32)
 		if !ok {
-			_, ok = aValue.(int64)
+			_, ok = val.(int64)
 			if !ok {
-				return nil, fmt.Errorf("could not cast value for column %s to either int64 or int32", aColumn.Name)
+				return nil, fmt.Errorf("could not cast value for column %s to either int64 or int32", col.Name)
 			}
-			value = int32(aValue.(int64))
+			value = int32(val.(int64))
 		}
 		return value, nil
 	case Real:
-		value, ok := aValue.(float32)
+		value, ok := val.(float32)
 		if !ok {
-			_, ok = aValue.(float64)
+			_, ok = val.(float64)
 			if !ok {
-				return nil, fmt.Errorf("could not cast value for column %s to either float64 or float32", aColumn.Name)
+				return nil, fmt.Errorf("could not cast value for column %s to either float64 or float32", col.Name)
 			}
-			value = float32(aValue.(float64))
+			value = float32(val.(float64))
 		}
 		return value, nil
 	case Varchar:
-		tp, ok := aValue.(TextPointer)
+		tp, ok := val.(TextPointer)
 		if !ok {
-			return nil, fmt.Errorf("could not cast value for column %s to TextPointer", aColumn.Name)
+			return nil, fmt.Errorf("could not cast value for column %s to TextPointer", col.Name)
 		}
 		return tp.String(), nil
 	case Timestamp:
-		timestamp, ok := aValue.(Time)
+		timestamp, ok := val.(Time)
 		if !ok {
-			return nil, fmt.Errorf("could not cast value for column %s to Time", aColumn.Name)
+			return nil, fmt.Errorf("could not cast value for column %s to Time", col.Name)
 		}
 		return timestamp.TotalMicroseconds(), nil
 	default:
-		return aValue, nil
+		return val, nil
 	}
 }

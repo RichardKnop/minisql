@@ -2,9 +2,11 @@ package minisql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
+// Insert ...
 func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, error) {
 	stmt.TableName = t.Name
 	stmt.Columns = t.Columns
@@ -13,7 +15,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, fmt.Errorf("invalid statement kind for INSERT: %v", stmt.Kind)
 	}
 
-	aCursor, nextRowID, err := t.SeekNextRowID(ctx, t.GetRootPageIdx())
+	cursor, nextRowID, err := t.SeekNextRowID(ctx, t.GetRootPageIdx())
 	if err != nil {
 		return StatementResult{}, err
 	}
@@ -59,32 +61,32 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			}
 		}
 
-		aRow := NewRow(t.Columns)
-		aRow = aRow.AppendValues(stmt.Fields, values)
+		row := NewRow(t.Columns)
+		row = row.AppendValues(stmt.Fields, values)
 
-		aPage, err := t.pager.ModifyPage(ctx, aCursor.PageIdx)
+		page, err := t.pager.ModifyPage(ctx, cursor.PageIdx)
 		if err != nil {
 			return StatementResult{}, fmt.Errorf("insert: %w", err)
 		}
 
 		// Must be leaf node
-		if aPage.LeafNode == nil {
-			return StatementResult{}, fmt.Errorf("trying to insert into non leaf node")
+		if page.LeafNode == nil {
+			return StatementResult{}, errors.New("trying to insert into non leaf node")
 		}
 
 		t.logger.Sugar().With(
-			"page_index", int(aCursor.PageIdx),
-			"cell_index", int(aCursor.CellIdx),
+			"page_index", int(cursor.PageIdx),
+			"cell_index", int(cursor.CellIdx),
 			"row_id", int(nextRowID),
 		).Debug("inserting row")
 
-		if aCursor.CellIdx < aPage.LeafNode.Header.Cells {
-			if aPage.LeafNode.Cells[aCursor.CellIdx].Key == nextRowID {
+		if cursor.CellIdx < page.LeafNode.Header.Cells {
+			if page.LeafNode.Cells[cursor.CellIdx].Key == nextRowID {
 				return StatementResult{}, fmt.Errorf("duplicate key %d", nextRowID)
 			}
 		}
 
-		if err := aCursor.LeafNodeInsert(ctx, nextRowID, aRow); err != nil {
+		if err := cursor.LeafNodeInsert(ctx, nextRowID, row); err != nil {
 			return StatementResult{}, err
 		}
 
@@ -95,7 +97,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 		// Try to advance cursor to next position, if there is still space in the
 		// current page, just increment cell index, otherwise call Seek to get
 		// new cursor
-		aCursor, nextRowID, err = t.SeekNextRowID(ctx, t.GetRootPageIdx())
+		cursor, nextRowID, err = t.SeekNextRowID(ctx, t.GetRootPageIdx())
 		if err != nil {
 			return StatementResult{}, err
 		}

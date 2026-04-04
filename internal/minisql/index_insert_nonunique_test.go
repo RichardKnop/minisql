@@ -153,7 +153,7 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 			i += rowsPerKey
 		}
 
-		actualKeys, actualRowIDs := collectAllKeysAndRowIDs(t, anIndex, ctx)
+		actualKeys, actualRowIDs := collectAllKeysAndRowIDs(ctx, t, anIndex)
 		require.Len(t, actualKeys, len(insertedKeys))
 		require.Len(t, actualRowIDs, len(insertedRowIDs))
 		assert.ElementsMatch(t, insertedKeys, actualKeys)
@@ -161,12 +161,12 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 	})
 }
 
-func collectAllKeysAndRowIDs[T IndexKey](t *testing.T, anIndex *Index[T], ctx context.Context) ([]T, []RowID) {
+func collectAllKeysAndRowIDs[T IndexKey](ctx context.Context, t *testing.T, anIndex *Index[T]) ([]T, []RowID) {
 	var (
 		actualKeys   = make([]T, 0, 10)
 		actualRowIDs = make([]RowID, 0, 10)
 	)
-	anIndex.BFS(ctx, func(aPage *Page) {
+	require.NoError(t, anIndex.BFS(ctx, func(aPage *Page) {
 		aNode := aPage.IndexNode.(*IndexNode[T])
 		for cellIdx := uint32(0); cellIdx < aNode.Header.Keys; cellIdx++ {
 			aCell := aNode.Cells[cellIdx]
@@ -178,6 +178,6 @@ func collectAllKeysAndRowIDs[T IndexKey](t *testing.T, anIndex *Index[T], ctx co
 				actualRowIDs = append(actualRowIDs, overflowRowIDs...)
 			}
 		}
-	})
+	}))
 	return actualKeys, actualRowIDs
 }

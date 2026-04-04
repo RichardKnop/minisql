@@ -4,16 +4,19 @@ import (
 	"fmt"
 )
 
+// Header ...
 type Header struct {
 	IsInternal bool
 	IsRoot     bool
 	Parent     PageIndex
 }
 
+// Size ...
 func (h *Header) Size() uint64 {
 	return 1 + 1 + 4
 }
 
+// Marshal ...
 func (h *Header) Marshal(buf []byte) {
 	i := uint64(0)
 	if h.IsInternal {
@@ -37,6 +40,7 @@ func (h *Header) Marshal(buf []byte) {
 	i += 4
 }
 
+// Unmarshal ...
 func (h *Header) Unmarshal(buf []byte) (uint64, error) {
 	if buf[0] != PageTypeLeaf && buf[0] != PageTypeInternal {
 		return 0, fmt.Errorf("unrecognised page type byte %d", buf[0])

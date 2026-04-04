@@ -5,6 +5,7 @@ import (
 	"fmt"
 )
 
+// Cursor is a position within a table's B+ tree used to traverse or modify rows.
 type Cursor struct {
 	Table      *Table
 	PageIdx    PageIndex
@@ -12,56 +13,56 @@ type Cursor struct {
 	EndOfTable bool
 }
 
-func (c *Cursor) LeafNodeInsert(ctx context.Context, key RowID, aRow Row) error {
-	aPage, err := c.Table.pager.ModifyPage(ctx, c.PageIdx)
+// LeafNodeInsert inserts a row at the cursor's current position, splitting the leaf node if necessary.
+func (c *Cursor) LeafNodeInsert(ctx context.Context, key RowID, row Row) error {
+	page, err := c.Table.pager.ModifyPage(ctx, c.PageIdx)
 	if err != nil {
 		return fmt.Errorf("get page: %w", err)
 	}
-	if aPage.LeafNode == nil {
+	if page.LeafNode == nil {
 		return fmt.Errorf("error inserting row to a non leaf node, key %d", key)
 	}
 
-	if !aPage.LeafNode.HasSpaceForRow(aRow) {
+	if !page.LeafNode.HasSpaceForRow(row) {
 		// Split leaf node
-		if err := c.LeafNodeSplitInsert(ctx, key, aRow); err != nil {
+		if err := c.LeafNodeSplitInsert(ctx, key, row); err != nil {
 			return fmt.Errorf("leaf node split insert: %w", err)
 		}
 		return nil
 	}
 
-	if c.CellIdx < aPage.LeafNode.Header.Cells {
+	if c.CellIdx < page.LeafNode.Header.Cells {
 		// Need make room for new cell
-		for i := aPage.LeafNode.Header.Cells; i > c.CellIdx; i-- {
-			aPage.LeafNode.PrepareModifyCell(i - 1)
-			aPage.LeafNode.Cells[i] = aPage.LeafNode.Cells[i-1]
+		for i := page.LeafNode.Header.Cells; i > c.CellIdx; i-- {
+			page.LeafNode.PrepareModifyCell(i - 1)
+			page.LeafNode.Cells[i] = page.LeafNode.Cells[i-1]
 		}
 	}
 
-	if err := c.saveToCell(ctx, aPage.LeafNode, c.CellIdx, key, aRow); err != nil {
+	if err := c.saveToCell(ctx, page.LeafNode, c.CellIdx, key, row); err != nil {
 		return err
 	}
-	aPage.LeafNode.Header.Cells += 1
+	page.LeafNode.Header.Cells += 1
 
 	return nil
 }
 
-// Create a new node and move half the cells over.
-// Insert the new value in one of the two nodes.
-// Update parent or create a new parent.
-func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key RowID, aRow Row) error {
-	aPager := c.Table.pager
+// LeafNodeSplitInsert creates a new leaf node, moves half the cells over, inserts the new value,
+// and updates or creates a parent internal node.
+func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key RowID, row Row) error {
+	pager := c.Table.pager
 
-	aSplitPage, err := aPager.ModifyPage(ctx, c.PageIdx)
+	splitPage, err := pager.ModifyPage(ctx, c.PageIdx)
 	if err != nil {
 		return fmt.Errorf("get page: %w", err)
 	}
 
-	originalMaxKey, err := c.Table.GetMaxKey(ctx, aSplitPage)
+	originalMaxKey, err := c.Table.GetMaxKey(ctx, splitPage)
 	if err != nil {
 		return fmt.Errorf("get original max key: %w", err)
 	}
 	// Use recycled page if available, otherwise create new one
-	aNewPage, err := aPager.GetFreePage(ctx)
+	newPage, err := pager.GetFreePage(ctx)
 	if err != nil {
 		return fmt.Errorf("get new page: %w", err)
 	}
@@ -69,20 +70,20 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key RowID, aRow Row) e
 	c.Table.logger.Sugar().With(
 		"key", int(key),
 		"old_max_key", int(originalMaxKey),
-		"new_page_index", int(aNewPage.Index),
+		"new_page_index", int(newPage.Index),
 	).Debug("leaf node split insert")
 
-	aNewPage.LeafNode = NewLeafNode()
-	aNewPage.LeafNode.Header.Parent = aSplitPage.LeafNode.Header.Parent
+	newPage.LeafNode = NewLeafNode()
+	newPage.LeafNode.Header.Parent = splitPage.LeafNode.Header.Parent
 
-	aNewPage.LeafNode.Header.NextLeaf = aSplitPage.LeafNode.Header.NextLeaf
-	aSplitPage.LeafNode.Header.NextLeaf = aNewPage.Index
+	newPage.LeafNode.Header.NextLeaf = splitPage.LeafNode.Header.NextLeaf
+	splitPage.LeafNode.Header.NextLeaf = newPage.Index
 
 	// All existing keys plus new key should should be divided
 	// evenly between old (left) and new (right) nodes.
 	// Starting from the right, move each key to correct position.
 	var (
-		leafNodeMaxCells = uint32(aSplitPage.LeafNode.Header.Cells)
+		leafNodeMaxCells = uint32(splitPage.LeafNode.Header.Cells)
 		rightSplitCount  = (leafNodeMaxCells + 1) / 2
 		leftSplitCount   = leafNodeMaxCells + 1 - rightSplitCount
 	)
@@ -96,105 +97,106 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key RowID, aRow Row) e
 		)
 
 		if !isLeft {
-			destPage = aNewPage // right
+			destPage = newPage // right
 		} else {
-			destPage = aSplitPage // left
+			destPage = splitPage // left
 		}
 		cellIdx := i % leftSplitCount
 
-		if i == c.CellIdx {
-			if err := c.saveToCell(ctx, destPage.LeafNode, cellIdx, key, aRow); err != nil {
+		switch {
+		case i == c.CellIdx:
+			if err := c.saveToCell(ctx, destPage.LeafNode, cellIdx, key, row); err != nil {
 				return err
 			}
-		} else if i > c.CellIdx {
-			aSplitPage.LeafNode.PrepareModifyCell(i - 1)
-			destPage.LeafNode.Cells[cellIdx] = aSplitPage.LeafNode.Cells[i-1]
-		} else {
-			aSplitPage.LeafNode.PrepareModifyCell(i)
-			destPage.LeafNode.Cells[cellIdx] = aSplitPage.LeafNode.Cells[i]
+		case i > c.CellIdx:
+			splitPage.LeafNode.PrepareModifyCell(i - 1)
+			destPage.LeafNode.Cells[cellIdx] = splitPage.LeafNode.Cells[i-1]
+		default:
+			splitPage.LeafNode.PrepareModifyCell(i)
+			destPage.LeafNode.Cells[cellIdx] = splitPage.LeafNode.Cells[i]
 		}
 	}
 
 	// Update cell count on both leaf nodes
-	aSplitPage.LeafNode.Header.Cells = leftSplitCount
-	aNewPage.LeafNode.Header.Cells = rightSplitCount
+	splitPage.LeafNode.Header.Cells = leftSplitCount
+	newPage.LeafNode.Header.Cells = rightSplitCount
 
-	if aSplitPage.LeafNode.Header.IsRoot {
-		_, err := c.Table.createNewRoot(ctx, aNewPage.Index)
+	if splitPage.LeafNode.Header.IsRoot {
+		_, err := c.Table.createNewRoot(ctx, newPage.Index)
 		return err
 	}
 
-	parentPageIdx := aSplitPage.LeafNode.Header.Parent
-	aParentPage, err := aPager.ModifyPage(ctx, parentPageIdx)
+	parentPageIdx := splitPage.LeafNode.Header.Parent
+	parentPage, err := pager.ModifyPage(ctx, parentPageIdx)
 	if err != nil {
 		return fmt.Errorf("get parent page %w", err)
 	}
 
 	// If we won't need to split the internal node,
 	// update parent to reflect new max key
-	oldChildIdx := aParentPage.InternalNode.IndexOfChild(originalMaxKey)
-	if int(oldChildIdx) < c.Table.maxICells(aSplitPage.Index) {
-		oldPageNewMaxKey, err := c.Table.GetMaxKey(ctx, aSplitPage)
+	oldChildIdx := parentPage.InternalNode.IndexOfChild(originalMaxKey)
+	if int(oldChildIdx) < c.Table.maxICells(splitPage.Index) {
+		oldPageNewMaxKey, err := c.Table.GetMaxKey(ctx, splitPage)
 		if err != nil {
 			return fmt.Errorf("get old page max key %w", err)
 		}
-		aParentPage.InternalNode.ICells[oldChildIdx].Key = oldPageNewMaxKey
+		parentPage.InternalNode.ICells[oldChildIdx].Key = oldPageNewMaxKey
 	}
 
-	return c.Table.InternalNodeInsert(ctx, parentPageIdx, aNewPage.Index)
+	return c.Table.InternalNodeInsert(ctx, parentPageIdx, newPage.Index)
 }
 
 func (c *Cursor) fetchRow(ctx context.Context, advance bool, selectedFields ...Field) (Row, error) {
-	aPage, err := c.Table.pager.ReadPage(ctx, c.PageIdx)
+	page, err := c.Table.pager.ReadPage(ctx, c.PageIdx)
 	if err != nil {
 		return Row{}, fmt.Errorf("read page: %w", err)
 	}
 
-	aRow := NewRow(c.Table.Columns)
-	if c.CellIdx > aPage.LeafNode.Header.Cells-1 || len(aPage.LeafNode.Cells) == 0 {
-		return Row{}, fmt.Errorf("cell index %d out of bounds, max %d", c.CellIdx, aPage.LeafNode.Header.Cells-1)
+	row := NewRow(c.Table.Columns)
+	if c.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
+		return Row{}, fmt.Errorf("cell index %d out of bounds, max %d", c.CellIdx, page.LeafNode.Header.Cells-1)
 	}
-	aRow, err = aRow.Unmarshal(aPage.LeafNode.Cells[c.CellIdx], selectedFields...)
+	row, err = row.Unmarshal(page.LeafNode.Cells[c.CellIdx], selectedFields...)
 	if err != nil {
 		return Row{}, err
 	}
-	aRow.Key = aPage.LeafNode.Cells[c.CellIdx].Key
+	row.Key = page.LeafNode.Cells[c.CellIdx].Key
 
-	aRow, err = aRow.readOverflowTexts(ctx, c.Table.pager)
+	row, err = row.readOverflowTexts(ctx, c.Table.pager)
 	if err != nil {
 		return Row{}, fmt.Errorf("read overflow texts: %w", err)
 	}
 
 	if !advance {
-		return aRow, nil
+		return row, nil
 	}
 
 	// There are still more cells in the page, move cursor to next cell and return
-	if c.CellIdx < aPage.LeafNode.Header.Cells-1 {
+	if c.CellIdx < page.LeafNode.Header.Cells-1 {
 		c.CellIdx += 1
-		return aRow, nil
+		return row, nil
 	}
 
 	// If there is no leaf page to the right, set end of table flag and return
-	if aPage.LeafNode.Header.NextLeaf == 0 {
+	if page.LeafNode.Header.NextLeaf == 0 {
 		c.EndOfTable = true
-		return aRow, nil
+		return row, nil
 	}
 
-	c.PageIdx = aPage.LeafNode.Header.NextLeaf
+	c.PageIdx = page.LeafNode.Header.NextLeaf
 	c.CellIdx = 0
 
-	return aRow, nil
+	return row, nil
 }
 
-func (c *Cursor) saveToCell(ctx context.Context, aNode *LeafNode, cellIdx uint32, key RowID, aRow Row) error {
+func (c *Cursor) saveToCell(ctx context.Context, node *LeafNode, cellIdx uint32, key RowID, row Row) error {
 	var err error
-	aRow, err = aRow.storeOverflowTexts(ctx, c.Table.pager)
+	row, err = row.storeOverflowTexts(ctx, c.Table.pager)
 	if err != nil {
 		return fmt.Errorf("store overflow texts: %w", err)
 	}
 
-	rowBuf, err := aRow.Marshal()
+	rowBuf, err := row.Marshal()
 	if err != nil {
 		return fmt.Errorf("save to cell: %w", err)
 	}
@@ -202,35 +204,35 @@ func (c *Cursor) saveToCell(ctx context.Context, aNode *LeafNode, cellIdx uint32
 	// When splitting nodes, we will be iterating over all cells from last cell to first,
 	// and assigning them to either the original node or the new node. Thus, we expand the
 	// cell slice here as it will be filled from end to start.
-	if cellIdx >= uint32(len(aNode.Cells)) {
-		for i := uint32(len(aNode.Cells)); i <= cellIdx; i++ {
-			aNode.Cells = append(aNode.Cells, Cell{})
+	if cellIdx >= uint32(len(node.Cells)) {
+		for i := uint32(len(node.Cells)); i <= cellIdx; i++ {
+			node.Cells = append(node.Cells, Cell{})
 		}
 	}
 
-	aNode.PrepareModifyCell(cellIdx)
-	aCell := &aNode.Cells[cellIdx]
-	aCell.NullBitmask = aRow.NullBitmask()
-	aCell.Key = key
-	aCell.Value = rowBuf
+	node.PrepareModifyCell(cellIdx)
+	cell := &node.Cells[cellIdx]
+	cell.NullBitmask = row.NullBitmask()
+	cell.Key = key
+	cell.Value = rowBuf
 
 	return nil
 }
 
-func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, error) {
+func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, error) {
 	var (
-		oldRow        = aRow.Clone()
+		oldRow        = row.Clone()
 		changedValues = map[string]Column{}
 	)
 	for name, value := range stmt.Updates {
-		aColumn, idx := aRow.GetColumn(name)
+		col, idx := row.GetColumn(name)
 		if idx < 0 {
 			return false, fmt.Errorf("column '%s' not found", name)
 		}
 		var changed bool
-		aRow, changed = aRow.SetValue(name, value)
+		row, changed = row.SetValue(name, value)
 		if changed {
-			changedValues[name] = aColumn
+			changedValues[name] = col
 		}
 	}
 
@@ -239,7 +241,7 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 		return false, nil
 	}
 
-	aPage, err := c.Table.pager.ModifyPage(ctx, c.PageIdx)
+	page, err := c.Table.pager.ModifyPage(ctx, c.PageIdx)
 	if err != nil {
 		return false, fmt.Errorf("update: %w", err)
 	}
@@ -248,7 +250,7 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 	// we need to delete the old row and re-insert the new row. This will likely cause
 	// a split, but that's better than trying to move rows around in the page. Since we
 	// use internal row IDs as keys, we will reinsert to the same page.
-	if aRow.Size() > aPage.LeafNode.AvailableSpace()-oldRow.Size() {
+	if row.Size() > page.LeafNode.AvailableSpace()-oldRow.Size() {
 		// Delete the row
 		if err := c.delete(ctx, oldRow); err != nil {
 			return false, fmt.Errorf("update delete old row: %w", err)
@@ -256,15 +258,15 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 		// Reinsert primary key if applicable
 		if c.Table.HasPrimaryKey() {
 			pkValues := make([]OptionalValue, 0, len(c.Table.PrimaryKey.Columns))
-			for _, aColumn := range c.Table.PrimaryKey.Columns {
-				pkValue, ok := stmt.Updates[aColumn.Name]
+			for _, col := range c.Table.PrimaryKey.Columns {
+				pkValue, ok := stmt.Updates[col.Name]
 				if !ok {
 					return false, fmt.Errorf("failed to get value for primary key %s", c.Table.PrimaryKey.Name)
 				}
 				pkValues = append(pkValues, pkValue)
 			}
 
-			_, err := c.Table.insertPrimaryKey(ctx, pkValues, aRow.Key)
+			_, err := c.Table.insertPrimaryKey(ctx, pkValues, row.Key)
 			if err != nil {
 				return false, err
 			}
@@ -272,34 +274,34 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 		// Resinsert unique keys if applicable
 		for _, uniqueIndex := range c.Table.UniqueIndexes {
 			indexValues := make([]OptionalValue, 0, len(uniqueIndex.Columns))
-			for _, aColumn := range uniqueIndex.Columns {
-				indexValue, ok := stmt.Updates[aColumn.Name]
+			for _, col := range uniqueIndex.Columns {
+				indexValue, ok := stmt.Updates[col.Name]
 				if !ok {
 					return false, fmt.Errorf("failed to get value for unique index %s", uniqueIndex.Name)
 				}
 				indexValues = append(indexValues, indexValue)
 			}
 
-			if err := c.Table.insertUniqueIndexKey(ctx, uniqueIndex, indexValues, aRow.Key); err != nil {
+			if err := c.Table.insertUniqueIndexKey(ctx, uniqueIndex, indexValues, row.Key); err != nil {
 				return false, err
 			}
 		}
 		// Reinsert with the same row ID
-		if err := c.LeafNodeInsert(ctx, aRow.Key, aRow); err != nil {
+		if err := c.LeafNodeInsert(ctx, row.Key, row); err != nil {
 			return false, fmt.Errorf("update re-insert new row: %w", err)
 		}
 		// Resinsert secondary keys if applicable
 		for _, secondaryIndex := range c.Table.SecondaryIndexes {
 			indexValues := make([]OptionalValue, 0, len(secondaryIndex.Columns))
-			for _, aColumn := range secondaryIndex.Columns {
-				indexValue, ok := stmt.Updates[aColumn.Name]
+			for _, col := range secondaryIndex.Columns {
+				indexValue, ok := stmt.Updates[col.Name]
 				if !ok {
 					return false, fmt.Errorf("failed to get value for secondary index %s", secondaryIndex.Name)
 				}
 				indexValues = append(indexValues, indexValue)
 			}
 
-			if err := c.Table.insertSecondaryIndexKey(ctx, secondaryIndex, indexValues, aRow.Key); err != nil {
+			if err := c.Table.insertSecondaryIndexKey(ctx, secondaryIndex, indexValues, row.Key); err != nil {
 				return false, err
 			}
 		}
@@ -311,19 +313,19 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 		// TODO - a more efficient implementation would be to try to reuse existing overflow pages
 		// if possible. For example if text size didn't change much and fits into existing overflow pages.
 		changedColumns := make([]Column, 0, len(changedValues))
-		for _, aColumn := range overflowColumns {
-			_, ok := changedValues[aColumn.Name]
+		for _, col := range overflowColumns {
+			_, ok := changedValues[col.Name]
 			if !ok {
 				continue
 			}
-			changedColumns = append(changedColumns, aColumn)
+			changedColumns = append(changedColumns, col)
 		}
 		if err := c.Table.freeOverflowPages(ctx, oldRow, changedColumns...); err != nil {
 			return false, err
 		}
 	}
 
-	aRow, err = aRow.storeOverflowTexts(ctx, c.Table.pager)
+	row, err = row.storeOverflowTexts(ctx, c.Table.pager)
 	if err != nil {
 		return false, fmt.Errorf("store overflow texts: %w", err)
 	}
@@ -331,8 +333,8 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 	if c.Table.HasPrimaryKey() {
 		// Only update primary key if it has changed
 		var changed bool
-		for _, aColumn := range c.Table.PrimaryKey.Columns {
-			if _, ok := changedValues[aColumn.Name]; ok {
+		for _, col := range c.Table.PrimaryKey.Columns {
+			if _, ok := changedValues[col.Name]; ok {
 				changed = true
 				break
 			}
@@ -342,7 +344,7 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 			if !ok || len(oldIndexKeys) != len(c.Table.PrimaryKey.Columns) {
 				return false, fmt.Errorf("failed to get old value for primary key %s", c.Table.PrimaryKey.Name)
 			}
-			if err := c.Table.updatePrimaryKey(ctx, oldIndexKeys, aRow); err != nil {
+			if err := c.Table.updatePrimaryKey(ctx, oldIndexKeys, row); err != nil {
 				return false, err
 			}
 		}
@@ -350,8 +352,8 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 	for _, uniqueIndex := range c.Table.UniqueIndexes {
 		// Only update unique index key if it has changed
 		var changed bool
-		for _, aColumn := range uniqueIndex.Columns {
-			if _, ok := changedValues[aColumn.Name]; ok {
+		for _, col := range uniqueIndex.Columns {
+			if _, ok := changedValues[col.Name]; ok {
 				changed = true
 				break
 			}
@@ -361,7 +363,7 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 			if !ok || len(oldIndexKeys) != len(uniqueIndex.Columns) {
 				return false, fmt.Errorf("failed to get old value for unique index %s", uniqueIndex.Name)
 			}
-			if err := c.Table.updateUniqueIndexKey(ctx, uniqueIndex, oldIndexKeys, aRow); err != nil {
+			if err := c.Table.updateUniqueIndexKey(ctx, uniqueIndex, oldIndexKeys, row); err != nil {
 				return false, err
 			}
 		}
@@ -369,8 +371,8 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 	for _, secondaryIndex := range c.Table.SecondaryIndexes {
 		// Only update secondary index key if it has changed
 		var changed bool
-		for _, aColumn := range secondaryIndex.Columns {
-			if _, ok := changedValues[aColumn.Name]; ok {
+		for _, col := range secondaryIndex.Columns {
+			if _, ok := changedValues[col.Name]; ok {
 				changed = true
 				break
 			}
@@ -380,56 +382,56 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, aRow Row) (bool, er
 			if !ok || len(oldIndexKeys) != len(secondaryIndex.Columns) {
 				return false, fmt.Errorf("failed to get old value for secondary index %s", secondaryIndex.Name)
 			}
-			if err := c.Table.updateSecondaryIndexKey(ctx, secondaryIndex, oldIndexKeys, aRow); err != nil {
+			if err := c.Table.updateSecondaryIndexKey(ctx, secondaryIndex, oldIndexKeys, row); err != nil {
 				return false, err
 			}
 		}
 	}
 
-	aPage.LeafNode.PrepareModifyCell(c.CellIdx)
-	aCell := &aPage.LeafNode.Cells[c.CellIdx]
+	page.LeafNode.PrepareModifyCell(c.CellIdx)
+	cell := &page.LeafNode.Cells[c.CellIdx]
 
-	rowBuf, err := aRow.Marshal()
+	rowBuf, err := row.Marshal()
 	if err != nil {
 		return false, fmt.Errorf("update: %w", err)
 	}
 
-	aCell.NullBitmask = aRow.NullBitmask()
-	aCell.Value = rowBuf
+	cell.NullBitmask = row.NullBitmask()
+	cell.Value = rowBuf
 
 	return true, nil
 }
 
-func (c *Cursor) delete(ctx context.Context, aRow Row) error {
-	if err := c.deletePrimaryKey(ctx, aRow); err != nil {
+func (c *Cursor) delete(ctx context.Context, row Row) error {
+	if err := c.deletePrimaryKey(ctx, row); err != nil {
 		return fmt.Errorf("delete primary key: %w", err)
 	}
 
-	if err := c.deleteUniqueIndexKeys(ctx, aRow); err != nil {
+	if err := c.deleteUniqueIndexKeys(ctx, row); err != nil {
 		return fmt.Errorf("delete unique index keys: %w", err)
 	}
 
-	if err := c.deleteSecondaryIndexKeys(ctx, aRow); err != nil {
+	if err := c.deleteSecondaryIndexKeys(ctx, row); err != nil {
 		return fmt.Errorf("delete secondary index keys: %w", err)
 	}
 
-	if err := c.Table.DeleteKey(ctx, c.PageIdx, aRow.Key); err != nil {
+	if err := c.Table.DeleteKey(ctx, c.PageIdx, row.Key); err != nil {
 		return fmt.Errorf("failed to delete key: %w", err)
 	}
 
 	return nil
 }
 
-func (c *Cursor) deletePrimaryKey(ctx context.Context, aRow Row) error {
+func (c *Cursor) deletePrimaryKey(ctx context.Context, row Row) error {
 	if !c.Table.HasPrimaryKey() {
 		return nil
 	}
 
 	if len(c.Table.PrimaryKey.Columns) > 1 {
-		return c.deleteCompositePrimaryKey(ctx, aRow)
+		return c.deleteCompositePrimaryKey(ctx, row)
 	}
 
-	primaryKeyValue, ok := aRow.GetValue(c.Table.PrimaryKey.Columns[0].Name)
+	primaryKeyValue, ok := row.GetValue(c.Table.PrimaryKey.Columns[0].Name)
 	if !ok {
 		return fmt.Errorf("primary key %s not found in row", c.Table.PrimaryKey.Name)
 	}
@@ -439,15 +441,15 @@ func (c *Cursor) deletePrimaryKey(ctx context.Context, aRow Row) error {
 		return fmt.Errorf("failed to cast key value for primary key %s: %w", c.Table.PrimaryKey.Name, err)
 	}
 
-	if err := c.Table.PrimaryKey.Index.Delete(ctx, castedValue, aRow.Key); err != nil {
+	if err := c.Table.PrimaryKey.Index.Delete(ctx, castedValue, row.Key); err != nil {
 		return fmt.Errorf("failed to delete primary key %s: %w", c.Table.PrimaryKey.Name, err)
 	}
 
 	return nil
 }
 
-func (c *Cursor) deleteCompositePrimaryKey(ctx context.Context, aRow Row) error {
-	keyParts, ok := aRow.GetValuesForColumns(c.Table.PrimaryKey.Columns)
+func (c *Cursor) deleteCompositePrimaryKey(ctx context.Context, row Row) error {
+	keyParts, ok := row.GetValuesForColumns(c.Table.PrimaryKey.Columns)
 	if !ok || len(keyParts) != len(c.Table.PrimaryKey.Columns) {
 		return fmt.Errorf("failed to get value for primary key %s", c.Table.PrimaryKey.Name)
 	}
@@ -465,26 +467,26 @@ func (c *Cursor) deleteCompositePrimaryKey(ctx context.Context, aRow Row) error 
 	}
 
 	ck := NewCompositeKey(c.Table.PrimaryKey.Columns[0:len(keyValues)], keyValues...)
-	if err := c.Table.PrimaryKey.Index.Delete(ctx, ck, aRow.Key); err != nil {
+	if err := c.Table.PrimaryKey.Index.Delete(ctx, ck, row.Key); err != nil {
 		return fmt.Errorf("failed to delete primary key %s: %w", c.Table.PrimaryKey.Name, err)
 	}
 	return nil
 }
 
-func (c *Cursor) deleteUniqueIndexKeys(ctx context.Context, aRow Row) error {
+func (c *Cursor) deleteUniqueIndexKeys(ctx context.Context, row Row) error {
 	if len(c.Table.UniqueIndexes) == 0 {
 		return nil
 	}
 
 	for _, uniqueIndex := range c.Table.UniqueIndexes {
 		if len(uniqueIndex.Columns) > 1 {
-			if err := c.deleteCompositeUniqueIndexKey(ctx, aRow, uniqueIndex); err != nil {
+			if err := c.deleteCompositeUniqueIndexKey(ctx, row, uniqueIndex); err != nil {
 				return err
 			}
 			continue
 		}
 
-		indexValue, ok := aRow.GetValue(uniqueIndex.Columns[0].Name)
+		indexValue, ok := row.GetValue(uniqueIndex.Columns[0].Name)
 		if !ok {
 			return fmt.Errorf("unique index key %s not found in row", uniqueIndex.Name)
 		}
@@ -494,7 +496,7 @@ func (c *Cursor) deleteUniqueIndexKeys(ctx context.Context, aRow Row) error {
 			return fmt.Errorf("failed to cast key value for unique index %s: %w", uniqueIndex.Name, err)
 		}
 
-		if err := uniqueIndex.Index.Delete(ctx, castedValue, aRow.Key); err != nil {
+		if err := uniqueIndex.Index.Delete(ctx, castedValue, row.Key); err != nil {
 			return fmt.Errorf("failed to delete unique index key %s: %w", uniqueIndex.Name, err)
 		}
 	}
@@ -502,8 +504,8 @@ func (c *Cursor) deleteUniqueIndexKeys(ctx context.Context, aRow Row) error {
 	return nil
 }
 
-func (c *Cursor) deleteCompositeUniqueIndexKey(ctx context.Context, aRow Row, uniqueIndex UniqueIndex) error {
-	keyParts, ok := aRow.GetValuesForColumns(uniqueIndex.Columns)
+func (c *Cursor) deleteCompositeUniqueIndexKey(ctx context.Context, row Row, uniqueIndex UniqueIndex) error {
+	keyParts, ok := row.GetValuesForColumns(uniqueIndex.Columns)
 	if !ok || len(keyParts) != len(uniqueIndex.Columns) {
 		return fmt.Errorf("failed to get value for unique index key %s", uniqueIndex.Name)
 	}
@@ -522,27 +524,27 @@ func (c *Cursor) deleteCompositeUniqueIndexKey(ctx context.Context, aRow Row, un
 	}
 
 	ck := NewCompositeKey(uniqueIndex.Columns, keyValues...)
-	if err := uniqueIndex.Index.Delete(ctx, ck, aRow.Key); err != nil {
+	if err := uniqueIndex.Index.Delete(ctx, ck, row.Key); err != nil {
 		return fmt.Errorf("failed to delete unique index key %s: %w", uniqueIndex.Name, err)
 	}
 
 	return nil
 }
 
-func (c *Cursor) deleteSecondaryIndexKeys(ctx context.Context, aRow Row) error {
+func (c *Cursor) deleteSecondaryIndexKeys(ctx context.Context, row Row) error {
 	if len(c.Table.SecondaryIndexes) == 0 {
 		return nil
 	}
 
 	for _, secondaryIndex := range c.Table.SecondaryIndexes {
 		if len(secondaryIndex.Columns) > 1 {
-			if err := c.deleteCompositeSecondaryIndexKey(ctx, aRow, secondaryIndex); err != nil {
+			if err := c.deleteCompositeSecondaryIndexKey(ctx, row, secondaryIndex); err != nil {
 				return err
 			}
 			continue
 		}
 
-		indexValue, ok := aRow.GetValue(secondaryIndex.Columns[0].Name)
+		indexValue, ok := row.GetValue(secondaryIndex.Columns[0].Name)
 		if !ok {
 			return fmt.Errorf("unique index key %s not found in row", secondaryIndex.Name)
 		}
@@ -552,7 +554,7 @@ func (c *Cursor) deleteSecondaryIndexKeys(ctx context.Context, aRow Row) error {
 			return fmt.Errorf("failed to cast key value for secondary index %s: %w", secondaryIndex.Name, err)
 		}
 
-		if err := secondaryIndex.Index.Delete(ctx, castedValue, aRow.Key); err != nil {
+		if err := secondaryIndex.Index.Delete(ctx, castedValue, row.Key); err != nil {
 			return fmt.Errorf("failed to delete secondary index key %s: %w", secondaryIndex.Name, err)
 		}
 	}
@@ -560,8 +562,8 @@ func (c *Cursor) deleteSecondaryIndexKeys(ctx context.Context, aRow Row) error {
 	return nil
 }
 
-func (c *Cursor) deleteCompositeSecondaryIndexKey(ctx context.Context, aRow Row, secondaryIndex SecondaryIndex) error {
-	keyParts, ok := aRow.GetValuesForColumns(secondaryIndex.Columns)
+func (c *Cursor) deleteCompositeSecondaryIndexKey(ctx context.Context, row Row, secondaryIndex SecondaryIndex) error {
+	keyParts, ok := row.GetValuesForColumns(secondaryIndex.Columns)
 	if !ok || len(keyParts) != len(secondaryIndex.Columns) {
 		return fmt.Errorf("failed to get value for secondary index key %s", secondaryIndex.Name)
 	}
@@ -580,7 +582,7 @@ func (c *Cursor) deleteCompositeSecondaryIndexKey(ctx context.Context, aRow Row,
 	}
 
 	ck := NewCompositeKey(secondaryIndex.Columns, keyValues...)
-	if err := secondaryIndex.Index.Delete(ctx, ck, aRow.Key); err != nil {
+	if err := secondaryIndex.Index.Delete(ctx, ck, row.Key); err != nil {
 		return fmt.Errorf("failed to delete secondary index key %s: %w", secondaryIndex.Name, err)
 	}
 
