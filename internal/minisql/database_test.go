@@ -15,10 +15,10 @@ const (
 )
 
 func TestNewDatabase(t *testing.T) {
-	aPager, dbFile := initTest(t)
+	pager, dbFile := initTest(t)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 1)
@@ -30,13 +30,13 @@ func TestNewDatabase(t *testing.T) {
 
 func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 	var (
-		aPager, dbFile  = initTest(t)
+		pager, dbFile  = initTest(t)
 		mockParser      = new(MockParser)
 		ctx             = context.Background()
 		uniqueIndexName = UniqueIndexName(testTableName3, "email")
 	)
 
-	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager)
 	require.NoError(t, err)
 
 	// Let's create 4 tables:
@@ -81,7 +81,7 @@ func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 	mockParser.On("Parse", mock.Anything, stmt2.DDL()).Return([]Statement{stmt2}, nil)
 	mockParser.On("Parse", mock.Anything, stmt3.DDL()).Return([]Statement{stmt3}, nil)
 
-	aDatabase, err = NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, aPager, aPager)
+	aDatabase, err = NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 4)
@@ -155,10 +155,10 @@ func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 }
 
 func TestDatabase_CreateTable(t *testing.T) {
-	aPager, dbFile := initTest(t)
+	pager, dbFile := initTest(t)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager)
 	require.NoError(t, err)
 
 	t.Run("Create table", func(t *testing.T) {
@@ -185,7 +185,7 @@ func TestDatabase_CreateTable(t *testing.T) {
 		assert.Equal(t, PageIndex(1), aDatabase.tables[testTableName].GetRootPageIdx())
 
 		// Root page plus a new page for table, should be 2 in total
-		assert.Len(t, aPager.pages, 2)
+		assert.Len(t, pager.pages, 2)
 
 		// Check system schema table contents
 		schemas := collectMainSchemas(ctx, t, aDatabase)
@@ -224,10 +224,10 @@ func TestDatabase_CreateTable(t *testing.T) {
 }
 
 func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
-	aPager, dbFile := initTest(t)
+	pager, dbFile := initTest(t)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager)
 	require.NoError(t, err)
 
 	t.Run("Create table", func(t *testing.T) {
@@ -259,7 +259,7 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 		assert.Equal(t, PageIndex(0), aDatabase.tables[SchemaTableName].GetRootPageIdx())
 		assert.Equal(t, PageIndex(2), aDatabase.tables[testTableName].PrimaryKey.Index.GetRootPageIdx())
 		// Root page plus a new page for table and index, should be 3 in total
-		assert.Len(t, aPager.pages, 3)
+		assert.Len(t, pager.pages, 3)
 
 		// Check system schema table contents
 		schemas := collectMainSchemas(ctx, t, aDatabase)
@@ -303,11 +303,11 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 }
 
 func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
-	aPager, dbFile := initTest(t)
+	pager, dbFile := initTest(t)
 	indexName := UniqueIndexName(testTableName, testColumns[1].Name)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager)
 	require.NoError(t, err)
 
 	t.Run("Create table", func(t *testing.T) {
@@ -348,7 +348,7 @@ func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
 		assert.Equal(t, PageIndex(2), aDatabase.tables[testTableName].UniqueIndexes[indexName].Index.GetRootPageIdx())
 
 		// Root page plus a new page for table and index, should be 3 in total
-		assert.Len(t, aPager.pages, 3)
+		assert.Len(t, pager.pages, 3)
 
 		// Check system table contents
 		schemas := collectMainSchemas(ctx, t, aDatabase)
@@ -393,12 +393,12 @@ func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
 
 func TestDatabase_CreateIndex(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		mockParser     = new(MockParser)
 		ctx            = context.Background()
 	)
 
-	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager)
 	require.NoError(t, err)
 
 	// First create a test table
@@ -451,7 +451,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 		assert.Equal(t, PageIndex(2), aDatabase.tables[testTableName].SecondaryIndexes["foo_bar"].Index.GetRootPageIdx())
 
 		// Root page plus a page for the test table, plus a new page for index, should be 3 in total
-		assert.Len(t, aPager.pages, 3)
+		assert.Len(t, pager.pages, 3)
 
 		// Check system table contents
 		schemas := collectMainSchemas(ctx, t, aDatabase)
@@ -521,7 +521,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 
 		// Root page plus a page for the test table, we should be back to 2 in total
 		// Third page should have been freed
-		assert.Len(t, aPager.pages, 3)
+		assert.Len(t, pager.pages, 3)
 
 		tablePager := aDatabase.factory.ForTable(testColumns)
 		assertFreePages(t, tablePager, []PageIndex{2})
@@ -544,10 +544,10 @@ func initTest(t *testing.T) (*pagerImpl, *os.File) {
 	require.NoError(t, err)
 	t.Cleanup(func() { os.Remove(tempFile.Name()) })
 
-	aPager, err := NewPager(tempFile, PageSize, 1000)
+	pager, err := NewPager(tempFile, PageSize, 1000)
 	require.NoError(t, err)
 
-	return aPager, tempFile
+	return pager, tempFile
 }
 
 func collectMainSchemas(ctx context.Context, t *testing.T, aDatabase *Database) []Schema {
@@ -566,8 +566,8 @@ func collectMainSchemas(ctx context.Context, t *testing.T, aDatabase *Database) 
 	return schemas
 }
 
-func mockPagerFactory(aPager Pager) TxPagerFactory {
+func mockPagerFactory(pager Pager) TxPagerFactory {
 	return func(ctx context.Context, tableName, indexName string) (Pager, error) {
-		return aPager, nil
+		return pager, nil
 	}
 }

@@ -21,7 +21,7 @@ func TestTable_findBestEqualityIndexMatch_WithoutStats(t *testing.T) {
 	}
 
 	t.Run("primary key beats unique index", func(t *testing.T) {
-		aTable := NewTable(
+		table := NewTable(
 			zap.NewNop(), nil, nil, "users", columns, 0, nil,
 			WithPrimaryKey(NewPrimaryKey("pk_id", columns[0:1], false)),
 			WithUniqueIndex(UniqueIndex{
@@ -42,14 +42,14 @@ func TestTable_findBestEqualityIndexMatch_WithoutStats(t *testing.T) {
 			},
 		}
 
-		match := aTable.findBestEqualityIndexMatch(conditions)
+		match := table.findBestEqualityIndexMatch(conditions)
 		require.NotNil(t, match)
 		assert.Equal(t, "pk_id", match.info.Name)
 		assert.True(t, match.isPrimaryKey)
 	})
 
 	t.Run("unique index beats secondary index", func(t *testing.T) {
-		aTable := NewTable(
+		table := NewTable(
 			zap.NewNop(), nil, nil, "users", columns, 0, nil,
 			WithUniqueIndex(UniqueIndex{
 				IndexInfo: IndexInfo{Name: "idx_email", Columns: columns[1:2]},
@@ -71,7 +71,7 @@ func TestTable_findBestEqualityIndexMatch_WithoutStats(t *testing.T) {
 			},
 		}
 
-		match := aTable.findBestEqualityIndexMatch(conditions)
+		match := table.findBestEqualityIndexMatch(conditions)
 		require.NotNil(t, match)
 		assert.Equal(t, "idx_email", match.info.Name)
 		assert.True(t, match.isUnique)
@@ -85,7 +85,7 @@ func TestTable_findBestEqualityIndexMatch_WithoutStats(t *testing.T) {
 		}
 
 		// Two secondary indexes - one matches 2 columns, one matches 1
-		aTable := NewTable(
+		table := NewTable(
 			zap.NewNop(), nil, nil, "test", compositeColumns, 0, nil,
 			WithSecondaryIndex(SecondaryIndex{
 				IndexInfo: IndexInfo{Name: "idx_ab", Columns: compositeColumns[0:2]},
@@ -107,7 +107,7 @@ func TestTable_findBestEqualityIndexMatch_WithoutStats(t *testing.T) {
 			},
 		}
 
-		match := aTable.findBestEqualityIndexMatch(conditions)
+		match := table.findBestEqualityIndexMatch(conditions)
 		require.NotNil(t, match)
 		assert.Equal(t, "idx_ab", match.info.Name)
 		assert.Equal(t, 2, len(match.matchedConditions))
@@ -126,7 +126,7 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 	}
 
 	t.Run("higher selectivity wins - secondary beats primary", func(t *testing.T) {
-		aTable := NewTable(
+		table := NewTable(
 			zap.NewNop(), nil, nil, "users", columns, 0, nil,
 			WithPrimaryKey(NewPrimaryKey("pk_id", columns[0:1], false)),
 			WithSecondaryIndex(SecondaryIndex{
@@ -135,7 +135,7 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 		)
 
 		// Set up stats: email has 95% selectivity, status has only 5% selectivity
-		aTable.indexStats = map[string]IndexStats{
+		table.indexStats = map[string]IndexStats{
 			"pk_id": {
 				NEntry:    1000,
 				NDistinct: []int64{50}, // 5% selectivity - low!
@@ -159,7 +159,7 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 			},
 		}
 
-		match := aTable.findBestEqualityIndexMatch(conditions)
+		match := table.findBestEqualityIndexMatch(conditions)
 		require.NotNil(t, match)
 		// Despite being a secondary index, idx_status should win due to higher selectivity
 		assert.Equal(t, "idx_status", match.info.Name)
@@ -169,7 +169,7 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 	})
 
 	t.Run("higher selectivity wins - unique beats primary", func(t *testing.T) {
-		aTable := NewTable(
+		table := NewTable(
 			zap.NewNop(), nil, nil, "users", columns, 0, nil,
 			WithPrimaryKey(NewPrimaryKey("pk_id", columns[0:1], false)),
 			WithUniqueIndex(UniqueIndex{
@@ -179,7 +179,7 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 
 		// Primary key has low selectivity (many duplicates somehow)
 		// Unique index has perfect selectivity
-		aTable.indexStats = map[string]IndexStats{
+		table.indexStats = map[string]IndexStats{
 			"pk_id": {
 				NEntry:    1000,
 				NDistinct: []int64{100}, // 10% selectivity
@@ -203,7 +203,7 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 			},
 		}
 
-		match := aTable.findBestEqualityIndexMatch(conditions)
+		match := table.findBestEqualityIndexMatch(conditions)
 		require.NotNil(t, match)
 		assert.Equal(t, "idx_email", match.info.Name)
 		assert.True(t, match.isUnique)
@@ -218,7 +218,7 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 			{Kind: Int4, Size: 4, Name: "c"},
 		}
 
-		aTable := NewTable(
+		table := NewTable(
 			zap.NewNop(), nil, nil, "test", compositeColumns, 0, nil,
 			WithSecondaryIndex(SecondaryIndex{
 				IndexInfo: IndexInfo{Name: "idx_ab", Columns: compositeColumns[0:2]},
@@ -229,7 +229,7 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 		)
 
 		// Both have same selectivity
-		aTable.indexStats = map[string]IndexStats{
+		table.indexStats = map[string]IndexStats{
 			"idx_ab": {
 				NEntry:    1000,
 				NDistinct: []int64{100, 500}, // 50% final selectivity
@@ -253,7 +253,7 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 			},
 		}
 
-		match := aTable.findBestEqualityIndexMatch(conditions)
+		match := table.findBestEqualityIndexMatch(conditions)
 		require.NotNil(t, match)
 		// Same selectivity, but idx_ab matches more columns
 		assert.Equal(t, "idx_ab", match.info.Name)
@@ -261,7 +261,7 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 	})
 
 	t.Run("same selectivity and columns - prefer primary key", func(t *testing.T) {
-		aTable := NewTable(
+		table := NewTable(
 			zap.NewNop(), nil, nil, "users", columns, 0, nil,
 			WithPrimaryKey(NewPrimaryKey("pk_id", columns[0:1], false)),
 			WithSecondaryIndex(SecondaryIndex{
@@ -270,7 +270,7 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 		)
 
 		// Identical selectivity
-		aTable.indexStats = map[string]IndexStats{
+		table.indexStats = map[string]IndexStats{
 			"pk_id": {
 				NEntry:    1000,
 				NDistinct: []int64{500}, // 50% selectivity
@@ -294,7 +294,7 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 			},
 		}
 
-		match := aTable.findBestEqualityIndexMatch(conditions)
+		match := table.findBestEqualityIndexMatch(conditions)
 		require.NotNil(t, match)
 		// Same selectivity, prefer primary key
 		assert.Equal(t, "pk_id", match.info.Name)
@@ -302,7 +302,7 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 	})
 
 	t.Run("same selectivity and columns - prefer unique over secondary", func(t *testing.T) {
-		aTable := NewTable(
+		table := NewTable(
 			zap.NewNop(), nil, nil, "users", columns, 0, nil,
 			WithUniqueIndex(UniqueIndex{
 				IndexInfo: IndexInfo{Name: "idx_email", Columns: columns[1:2]},
@@ -313,7 +313,7 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 		)
 
 		// Identical selectivity
-		aTable.indexStats = map[string]IndexStats{
+		table.indexStats = map[string]IndexStats{
 			"idx_email": {
 				NEntry:    1000,
 				NDistinct: []int64{500}, // 50% selectivity
@@ -337,7 +337,7 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 			},
 		}
 
-		match := aTable.findBestEqualityIndexMatch(conditions)
+		match := table.findBestEqualityIndexMatch(conditions)
 		require.NotNil(t, match)
 		// Same selectivity, prefer unique index
 		assert.Equal(t, "idx_email", match.info.Name)
@@ -357,7 +357,7 @@ func TestTable_findBestEqualityIndexMatch_MixedStats(t *testing.T) {
 	}
 
 	t.Run("only one index has stats - falls back to heuristic comparison", func(t *testing.T) {
-		aTable := NewTable(
+		table := NewTable(
 			zap.NewNop(), nil, nil, "users", columns, 0, nil,
 			WithPrimaryKey(NewPrimaryKey("pk_id", columns[0:1], false)),
 			WithSecondaryIndex(SecondaryIndex{
@@ -366,7 +366,7 @@ func TestTable_findBestEqualityIndexMatch_MixedStats(t *testing.T) {
 		)
 
 		// Only one index has stats
-		aTable.indexStats = map[string]IndexStats{
+		table.indexStats = map[string]IndexStats{
 			"idx_status": {
 				NEntry:    1000,
 				NDistinct: []int64{950}, // 95% selectivity
@@ -387,7 +387,7 @@ func TestTable_findBestEqualityIndexMatch_MixedStats(t *testing.T) {
 			},
 		}
 
-		match := aTable.findBestEqualityIndexMatch(conditions)
+		match := table.findBestEqualityIndexMatch(conditions)
 		require.NotNil(t, match)
 		// Without both having stats, fall back to heuristic: PK wins
 		assert.Equal(t, "pk_id", match.info.Name)
@@ -395,7 +395,7 @@ func TestTable_findBestEqualityIndexMatch_MixedStats(t *testing.T) {
 	})
 
 	t.Run("no indexes have stats - use heuristic", func(t *testing.T) {
-		aTable := NewTable(
+		table := NewTable(
 			zap.NewNop(), nil, nil, "users", columns, 0, nil,
 			WithPrimaryKey(NewPrimaryKey("pk_id", columns[0:1], false)),
 			WithSecondaryIndex(SecondaryIndex{
@@ -404,7 +404,7 @@ func TestTable_findBestEqualityIndexMatch_MixedStats(t *testing.T) {
 		)
 
 		// No stats at all
-		aTable.indexStats = map[string]IndexStats{}
+		table.indexStats = map[string]IndexStats{}
 
 		conditions := Conditions{
 			{
@@ -419,7 +419,7 @@ func TestTable_findBestEqualityIndexMatch_MixedStats(t *testing.T) {
 			},
 		}
 
-		match := aTable.findBestEqualityIndexMatch(conditions)
+		match := table.findBestEqualityIndexMatch(conditions)
 		require.NotNil(t, match)
 		// Fall back to heuristic: PK wins
 		assert.Equal(t, "pk_id", match.info.Name)
@@ -437,7 +437,7 @@ func TestTable_findBestEqualityIndexMatch_EdgeCases(t *testing.T) {
 	}
 
 	t.Run("no matching index returns nil", func(t *testing.T) {
-		aTable := NewTable(
+		table := NewTable(
 			zap.NewNop(), nil, nil, "users", columns, 0, nil,
 			WithPrimaryKey(NewPrimaryKey("pk_id", columns[0:1], false)),
 		)
@@ -451,12 +451,12 @@ func TestTable_findBestEqualityIndexMatch_EdgeCases(t *testing.T) {
 			},
 		}
 
-		match := aTable.findBestEqualityIndexMatch(conditions)
+		match := table.findBestEqualityIndexMatch(conditions)
 		assert.Nil(t, match)
 	})
 
 	t.Run("zero selectivity handled gracefully", func(t *testing.T) {
-		aTable := NewTable(
+		table := NewTable(
 			zap.NewNop(), nil, nil, "users", columns, 0, nil,
 			WithPrimaryKey(NewPrimaryKey("pk_id", columns[0:1], false)),
 			WithSecondaryIndex(SecondaryIndex{
@@ -465,7 +465,7 @@ func TestTable_findBestEqualityIndexMatch_EdgeCases(t *testing.T) {
 		)
 
 		// Edge case: zero entries
-		aTable.indexStats = map[string]IndexStats{
+		table.indexStats = map[string]IndexStats{
 			"pk_id": {
 				NEntry:    0,
 				NDistinct: []int64{0}, // 0/0 = NaN, should be handled
@@ -489,14 +489,14 @@ func TestTable_findBestEqualityIndexMatch_EdgeCases(t *testing.T) {
 			},
 		}
 
-		match := aTable.findBestEqualityIndexMatch(conditions)
+		match := table.findBestEqualityIndexMatch(conditions)
 		require.NotNil(t, match)
 		// Should prefer the one with valid selectivity
 		assert.Equal(t, "idx_email", match.info.Name)
 	})
 
 	t.Run("perfect selectivity comparison", func(t *testing.T) {
-		aTable := NewTable(
+		table := NewTable(
 			zap.NewNop(), nil, nil, "users", columns, 0, nil,
 			WithUniqueIndex(UniqueIndex{
 				IndexInfo: IndexInfo{Name: "idx_email_1", Columns: columns[1:2]},
@@ -507,7 +507,7 @@ func TestTable_findBestEqualityIndexMatch_EdgeCases(t *testing.T) {
 		)
 
 		// Both have 100% selectivity
-		aTable.indexStats = map[string]IndexStats{
+		table.indexStats = map[string]IndexStats{
 			"idx_email_1": {
 				NEntry:    1000,
 				NDistinct: []int64{1000}, // 100% selectivity
@@ -526,7 +526,7 @@ func TestTable_findBestEqualityIndexMatch_EdgeCases(t *testing.T) {
 			},
 		}
 
-		match := aTable.findBestEqualityIndexMatch(conditions)
+		match := table.findBestEqualityIndexMatch(conditions)
 		require.NotNil(t, match)
 		// Same selectivity, prefer unique
 		assert.Equal(t, "idx_email_1", match.info.Name)
@@ -540,7 +540,7 @@ func TestTable_findBestEqualityIndexMatch_EdgeCases(t *testing.T) {
 			{Kind: Int4, Size: 4, Name: "priority"},
 		}
 
-		aTable := NewTable(
+		table := NewTable(
 			zap.NewNop(), nil, nil, "tasks", compositeColumns, 0, nil,
 			WithSecondaryIndex(SecondaryIndex{
 				IndexInfo: IndexInfo{Name: "idx_composite", Columns: compositeColumns[0:3]},
@@ -551,7 +551,7 @@ func TestTable_findBestEqualityIndexMatch_EdgeCases(t *testing.T) {
 		)
 
 		// Composite has better final selectivity
-		aTable.indexStats = map[string]IndexStats{
+		table.indexStats = map[string]IndexStats{
 			"idx_composite": {
 				NEntry:    1000,
 				NDistinct: []int64{10, 50, 800}, // Final: 80% selectivity
@@ -580,7 +580,7 @@ func TestTable_findBestEqualityIndexMatch_EdgeCases(t *testing.T) {
 			},
 		}
 
-		match := aTable.findBestEqualityIndexMatch(conditions)
+		match := table.findBestEqualityIndexMatch(conditions)
 		require.NotNil(t, match)
 		// Composite index has better selectivity (80% vs 1%)
 		assert.Equal(t, "idx_composite", match.info.Name)

@@ -11,14 +11,14 @@ import (
 
 func TestIndex_NonUnique_Insert(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
-		aColumn        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = aPager.ForIndex([]Column{aColumn}, false)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
+		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager     = pager.ForIndex([]Column{col}, false)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewNonUniqueIndex[int64](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
+	idx, err := NewNonUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
 
 	var (
@@ -31,7 +31,7 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 	t.Run("Insert max inline row IDs, should not overflow", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for range MaxInlineRowIDs {
-				if err := anIndex.Insert(ctx, key, rowID); err != nil {
+				if err := idx.Insert(ctx, key, rowID); err != nil {
 					return err
 				}
 				insertedRowIDs = append(insertedRowIDs, rowID)
@@ -43,7 +43,7 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 		require.NoError(t, err)
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
+			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
 		)
 
 		assert.Equal(t, 4, int(rootNode.Cells[0].InlineRowIDs))
@@ -53,7 +53,7 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 
 	t.Run("When inline row IDs are maxed, create an overflow page", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			if err := anIndex.Insert(ctx, key, rowID); err != nil {
+			if err := idx.Insert(ctx, key, rowID); err != nil {
 				return err
 			}
 			insertedRowIDs = append(insertedRowIDs, rowID)
@@ -63,8 +63,8 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 		require.NoError(t, err)
 
 		var (
-			rootNode     = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			overflowNode = aPager.pages[rootNode.Cells[0].Overflow].IndexOverflowNode
+			rootNode     = pager.pages[0].IndexNode.(*IndexNode[int64])
+			overflowNode = pager.pages[rootNode.Cells[0].Overflow].IndexOverflowNode
 		)
 
 		assert.Equal(t, 4, int(rootNode.Cells[0].InlineRowIDs))
@@ -79,7 +79,7 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 	t.Run("Max out the overflow page", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for range MaxOverflowRowIDsPerPage - 1 {
-				if err := anIndex.Insert(ctx, key, rowID); err != nil {
+				if err := idx.Insert(ctx, key, rowID); err != nil {
 					return err
 				}
 				insertedRowIDs = append(insertedRowIDs, rowID)
@@ -90,8 +90,8 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 		require.NoError(t, err)
 
 		var (
-			rootNode     = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			overflowNode = aPager.pages[rootNode.Cells[0].Overflow].IndexOverflowNode
+			rootNode     = pager.pages[0].IndexNode.(*IndexNode[int64])
+			overflowNode = pager.pages[rootNode.Cells[0].Overflow].IndexOverflowNode
 		)
 
 		assert.Equal(t, 4, int(rootNode.Cells[0].InlineRowIDs))
@@ -105,7 +105,7 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 
 	t.Run("When last overflow page is maxed out, create a new one", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			if err := anIndex.Insert(ctx, key, rowID); err != nil {
+			if err := idx.Insert(ctx, key, rowID); err != nil {
 				return err
 			}
 			insertedRowIDs = append(insertedRowIDs, rowID)
@@ -116,9 +116,9 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 		require.NoError(t, err)
 
 		var (
-			rootNode        = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			overflowNode    = aPager.pages[rootNode.Cells[0].Overflow].IndexOverflowNode
-			newOverflowNode = aPager.pages[overflowNode.Header.NextPage].IndexOverflowNode
+			rootNode        = pager.pages[0].IndexNode.(*IndexNode[int64])
+			overflowNode    = pager.pages[rootNode.Cells[0].Overflow].IndexOverflowNode
+			newOverflowNode = pager.pages[overflowNode.Header.NextPage].IndexOverflowNode
 		)
 
 		assert.Equal(t, 4, int(rootNode.Cells[0].InlineRowIDs))
@@ -139,7 +139,7 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 			rowsPerKey := gen.Number(1, 1000)
 			err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 				for range rowsPerKey {
-					if err := anIndex.Insert(ctx, key, rowID); err != nil {
+					if err := idx.Insert(ctx, key, rowID); err != nil {
 						return err
 					}
 					insertedRowIDs = append(insertedRowIDs, rowID)
@@ -153,7 +153,7 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 			i += rowsPerKey
 		}
 
-		actualKeys, actualRowIDs := collectAllKeysAndRowIDs(ctx, t, anIndex)
+		actualKeys, actualRowIDs := collectAllKeysAndRowIDs(ctx, t, idx)
 		require.Len(t, actualKeys, len(insertedKeys))
 		require.Len(t, actualRowIDs, len(insertedRowIDs))
 		assert.ElementsMatch(t, insertedKeys, actualKeys)
@@ -161,19 +161,19 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 	})
 }
 
-func collectAllKeysAndRowIDs[T IndexKey](ctx context.Context, t *testing.T, anIndex *Index[T]) ([]T, []RowID) {
+func collectAllKeysAndRowIDs[T IndexKey](ctx context.Context, t *testing.T, idx *Index[T]) ([]T, []RowID) {
 	var (
 		actualKeys   = make([]T, 0, 10)
 		actualRowIDs = make([]RowID, 0, 10)
 	)
-	require.NoError(t, anIndex.BFS(ctx, func(aPage *Page) {
-		aNode := aPage.IndexNode.(*IndexNode[T])
-		for cellIdx := uint32(0); cellIdx < aNode.Header.Keys; cellIdx++ {
-			aCell := aNode.Cells[cellIdx]
-			actualKeys = append(actualKeys, aCell.Key)
-			actualRowIDs = append(actualRowIDs, aCell.RowIDs...)
-			if aCell.Overflow != 0 {
-				overflowRowIDs, err := readOverflowRowIDs[T](ctx, anIndex.pager, aCell.Overflow)
+	require.NoError(t, idx.BFS(ctx, func(page *Page) {
+		node := page.IndexNode.(*IndexNode[T])
+		for cellIdx := uint32(0); cellIdx < node.Header.Keys; cellIdx++ {
+			cell := node.Cells[cellIdx]
+			actualKeys = append(actualKeys, cell.Key)
+			actualRowIDs = append(actualRowIDs, cell.RowIDs...)
+			if cell.Overflow != 0 {
+				overflowRowIDs, err := readOverflowRowIDs[T](ctx, idx.pager, cell.Overflow)
 				require.NoError(t, err)
 				actualRowIDs = append(actualRowIDs, overflowRowIDs...)
 			}

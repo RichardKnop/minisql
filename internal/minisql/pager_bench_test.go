@@ -22,7 +22,7 @@ func BenchmarkPageAccess(b *testing.B) {
 			defer dbFile.Close()
 
 			// Create pager
-			aPager, err := NewPager(dbFile, PageSize, cacheSize)
+			pager, err := NewPager(dbFile, PageSize, cacheSize)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -40,28 +40,28 @@ func BenchmarkPageAccess(b *testing.B) {
 				if i == 0 {
 					leafNode.Header.IsRoot = true
 				}
-				aPager.pages = append(aPager.pages, &Page{
+				pager.pages = append(pager.pages, &Page{
 					Index:    PageIndex(i),
 					LeafNode: leafNode,
 				})
 			}
-			aPager.totalPages = uint32(numPages)
+			pager.totalPages = uint32(numPages)
 
 			// Flush all pages to disk
 			for i := range numPages {
-				if err := aPager.Flush(ctx, PageIndex(i)); err != nil {
+				if err := pager.Flush(ctx, PageIndex(i)); err != nil {
 					b.Fatal(err)
 				}
 			}
 
 			// Reset pager with specific cache size
 			dbFile.Seek(0, 0)
-			aPager, err = NewPager(dbFile, PageSize, cacheSize)
+			pager, err = NewPager(dbFile, PageSize, cacheSize)
 			if err != nil {
 				b.Fatal(err)
 			}
 
-			tablePager := aPager.ForTable(columns)
+			tablePager := pager.ForTable(columns)
 
 			b.ResetTimer()
 
@@ -91,7 +91,7 @@ func BenchmarkSequentialScan(b *testing.B) {
 			defer os.Remove(dbFile.Name())
 			defer dbFile.Close()
 
-			aPager, err := NewPager(dbFile, PageSize, cacheSize)
+			pager, err := NewPager(dbFile, PageSize, cacheSize)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -109,26 +109,26 @@ func BenchmarkSequentialScan(b *testing.B) {
 				if i == 0 {
 					leafNode.Header.IsRoot = true
 				}
-				aPager.pages = append(aPager.pages, &Page{
+				pager.pages = append(pager.pages, &Page{
 					Index:    PageIndex(i),
 					LeafNode: leafNode,
 				})
 			}
-			aPager.totalPages = uint32(numPages)
+			pager.totalPages = uint32(numPages)
 
 			for i := range numPages {
-				if err := aPager.Flush(ctx, PageIndex(i)); err != nil {
+				if err := pager.Flush(ctx, PageIndex(i)); err != nil {
 					b.Fatal(err)
 				}
 			}
 
 			dbFile.Seek(0, 0)
-			aPager, err = NewPager(dbFile, PageSize, cacheSize)
+			pager, err = NewPager(dbFile, PageSize, cacheSize)
 			if err != nil {
 				b.Fatal(err)
 			}
 
-			tablePager := aPager.ForTable(columns)
+			tablePager := pager.ForTable(columns)
 
 			b.ResetTimer()
 

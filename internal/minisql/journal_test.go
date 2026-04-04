@@ -53,32 +53,32 @@ func TestJournal_NoDBHeader(t *testing.T) {
 				Name: "foo",
 			},
 		}
-		aRootPage, internalPages, leafPages = newTestBtree()
+		rootPage, internalPages, leafPages = newTestBtree()
 		numPages                            = 1 + len(internalPages) + len(leafPages)
 		originalPages                       = make([]*Page, 0, numPages)
 	)
-	originalPages = append(originalPages, aRootPage.Clone())
-	for _, aPage := range internalPages {
-		originalPages = append(originalPages, aPage.Clone())
+	originalPages = append(originalPages, rootPage.Clone())
+	for _, page := range internalPages {
+		originalPages = append(originalPages, page.Clone())
 	}
-	for _, aPage := range leafPages {
-		originalPages = append(originalPages, aPage.Clone())
+	for _, page := range leafPages {
+		originalPages = append(originalPages, page.Clone())
 	}
 
-	aPager, err := NewPager(dbFile, PageSize, 1000)
+	pager, err := NewPager(dbFile, PageSize, 1000)
 	require.NoError(t, err)
-	aPager.pages = make([]*Page, 0, numPages)
-	aPager.pages = append(aPager.pages, aRootPage)
-	aPager.pages = append(aPager.pages, internalPages...)
-	aPager.pages = append(aPager.pages, leafPages...)
-	aPager.totalPages = uint32(numPages)
+	pager.pages = make([]*Page, 0, numPages)
+	pager.pages = append(pager.pages, rootPage)
+	pager.pages = append(pager.pages, internalPages...)
+	pager.pages = append(pager.pages, leafPages...)
+	pager.totalPages = uint32(numPages)
 
 	t.Run("create journal without db header change", func(t *testing.T) {
 		aJournal, err := CreateJournal(dbFile.Name(), PageSize)
 		require.NoError(t, err)
 
-		for _, aPage := range originalPages {
-			err = aJournal.WritePageBefore(context.Background(), aPage.Index, aPage)
+		for _, page := range originalPages {
+			err = aJournal.WritePageBefore(context.Background(), page.Index, page)
 			require.NoError(t, err)
 		}
 
@@ -94,17 +94,17 @@ func TestJournal_NoDBHeader(t *testing.T) {
 		// Modify one leaf page
 		leafPages[0].LeafNode.Cells[0].Value = prefixWithLength([]byte("xyz"))
 		// Flush pages
-		for _, aPage := range aPager.pages {
-			err = aPager.Flush(ctx, aPage.Index)
+		for _, page := range pager.pages {
+			err = pager.Flush(ctx, page.Index)
 			require.NoError(t, err)
 		}
 
 		// Recreate pager to clear page cache and read from disk
 		dbFile.Seek(0, 0)
-		aPager, err = NewPager(dbFile, PageSize, 1000)
+		pager, err = NewPager(dbFile, PageSize, 1000)
 		require.NoError(t, err)
 
-		modifiedLeafPage, err := aPager.ForTable(columns).GetPage(ctx, leafPages[0].Index)
+		modifiedLeafPage, err := pager.ForTable(columns).GetPage(ctx, leafPages[0].Index)
 		require.NoError(t, err)
 		assert.Equal(t, prefixWithLength([]byte("xyz")), modifiedLeafPage.LeafNode.Cells[0].Value)
 	})
@@ -116,17 +116,17 @@ func TestJournal_NoDBHeader(t *testing.T) {
 
 		// Recreate pager to clear page cache and read from disk
 		dbFile.Seek(0, 0)
-		aPager, err = NewPager(dbFile, PageSize, 1000)
+		pager, err = NewPager(dbFile, PageSize, 1000)
 		require.NoError(t, err)
 
-		tablePager := aPager.ForTable(columns)
+		tablePager := pager.ForTable(columns)
 
 		// All pages should match original pages
-		assert.Equal(t, uint32(numPages), aPager.TotalPages())
-		for _, aPage := range originalPages {
-			restoredPage, err := tablePager.GetPage(ctx, aPage.Index)
+		assert.Equal(t, uint32(numPages), pager.TotalPages())
+		for _, page := range originalPages {
+			restoredPage, err := tablePager.GetPage(ctx, page.Index)
 			require.NoError(t, err)
-			assert.Equal(t, aPage, restoredPage)
+			assert.Equal(t, page, restoredPage)
 		}
 	})
 }
@@ -147,7 +147,7 @@ func TestJournal_WithDBHeader(t *testing.T) {
 				Name: "foo",
 			},
 		}
-		aRootPage, internalPages, leafPages = newTestBtree()
+		rootPage, internalPages, leafPages = newTestBtree()
 		numPages                            = 1 + len(internalPages) + len(leafPages)
 		originalPages                       = make([]*Page, 0, numPages)
 		originalDBHeader                    = DatabaseHeader{
@@ -155,21 +155,21 @@ func TestJournal_WithDBHeader(t *testing.T) {
 			FreePageCount: 100,
 		}
 	)
-	originalPages = append(originalPages, aRootPage.Clone())
-	for _, aPage := range internalPages {
-		originalPages = append(originalPages, aPage.Clone())
+	originalPages = append(originalPages, rootPage.Clone())
+	for _, page := range internalPages {
+		originalPages = append(originalPages, page.Clone())
 	}
-	for _, aPage := range leafPages {
-		originalPages = append(originalPages, aPage.Clone())
+	for _, page := range leafPages {
+		originalPages = append(originalPages, page.Clone())
 	}
 
-	aPager, err := NewPager(dbFile, PageSize, 1000)
+	pager, err := NewPager(dbFile, PageSize, 1000)
 	require.NoError(t, err)
-	aPager.pages = make([]*Page, 0, numPages)
-	aPager.pages = append(aPager.pages, aRootPage)
-	aPager.pages = append(aPager.pages, internalPages...)
-	aPager.pages = append(aPager.pages, leafPages...)
-	aPager.totalPages = uint32(numPages)
+	pager.pages = make([]*Page, 0, numPages)
+	pager.pages = append(pager.pages, rootPage)
+	pager.pages = append(pager.pages, internalPages...)
+	pager.pages = append(pager.pages, leafPages...)
+	pager.totalPages = uint32(numPages)
 
 	t.Run("create journal with changes including db header", func(t *testing.T) {
 		aJournal, err := CreateJournal(dbFile.Name(), PageSize)
@@ -178,8 +178,8 @@ func TestJournal_WithDBHeader(t *testing.T) {
 		err = aJournal.WriteDBHeaderBefore(ctx, originalDBHeader)
 		require.NoError(t, err)
 
-		for _, aPage := range originalPages {
-			err = aJournal.WritePageBefore(context.Background(), aPage.Index, aPage)
+		for _, page := range originalPages {
+			err = aJournal.WritePageBefore(context.Background(), page.Index, page)
 			require.NoError(t, err)
 		}
 
@@ -196,28 +196,28 @@ func TestJournal_WithDBHeader(t *testing.T) {
 		leafPages[0].LeafNode.Cells[0].Value = prefixWithLength([]byte("xyz"))
 
 		// Modify db header
-		aPager.SaveHeader(ctx, DatabaseHeader{
+		pager.SaveHeader(ctx, DatabaseHeader{
 			FirstFreePage: 84,
 			FreePageCount: 200,
 		})
 		require.NoError(t, err)
 
 		// Flush pages - this will also flush page 0 with modified db header
-		for _, aPage := range aPager.pages {
-			err = aPager.Flush(ctx, aPage.Index)
+		for _, page := range pager.pages {
+			err = pager.Flush(ctx, page.Index)
 			require.NoError(t, err)
 		}
 
 		// Recreate pager to clear page cache and read from disk
 		dbFile.Seek(0, 0)
-		aPager, err = NewPager(dbFile, PageSize, 1000)
+		pager, err = NewPager(dbFile, PageSize, 1000)
 		require.NoError(t, err)
 
-		modifiedLeafPage, err := aPager.ForTable(columns).GetPage(ctx, leafPages[0].Index)
+		modifiedLeafPage, err := pager.ForTable(columns).GetPage(ctx, leafPages[0].Index)
 		require.NoError(t, err)
 		assert.Equal(t, prefixWithLength([]byte("xyz")), modifiedLeafPage.LeafNode.Cells[0].Value)
 
-		modifiedDBHeader := aPager.ForTable(columns).GetHeader(ctx)
+		modifiedDBHeader := pager.ForTable(columns).GetHeader(ctx)
 		assert.Equal(t, DatabaseHeader{
 			FirstFreePage: 84,
 			FreePageCount: 200,
@@ -231,17 +231,17 @@ func TestJournal_WithDBHeader(t *testing.T) {
 
 		// Recreate pager to clear page cache and read from disk
 		dbFile.Seek(0, 0)
-		aPager, err = NewPager(dbFile, PageSize, 1000)
+		pager, err = NewPager(dbFile, PageSize, 1000)
 		require.NoError(t, err)
 
-		tablePager := aPager.ForTable(columns)
+		tablePager := pager.ForTable(columns)
 
 		// All pages should match original pages
-		assert.Equal(t, uint32(numPages), aPager.TotalPages())
-		for _, aPage := range originalPages {
-			restoredPage, err := tablePager.GetPage(ctx, aPage.Index)
+		assert.Equal(t, uint32(numPages), pager.TotalPages())
+		for _, page := range originalPages {
+			restoredPage, err := tablePager.GetPage(ctx, page.Index)
 			require.NoError(t, err)
-			assert.Equal(t, aPage, restoredPage)
+			assert.Equal(t, page, restoredPage)
 		}
 
 		// DB header should match original header

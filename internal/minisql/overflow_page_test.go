@@ -45,7 +45,7 @@ func TestOverflowPage_Marshal(t *testing.T) {
 	t.Parallel()
 
 	t.Run("inline data", func(t *testing.T) {
-		aNode := &OverflowPage{
+		node := &OverflowPage{
 			Header: OverflowPageHeader{
 				NextPage: 42,
 				DataSize: MaxInlineVarchar,
@@ -54,18 +54,18 @@ func TestOverflowPage_Marshal(t *testing.T) {
 		}
 
 		buf := make([]byte, PageSize)
-		err := aNode.Marshal(buf)
+		err := node.Marshal(buf)
 		require.NoError(t, err)
 
 		recreatedNode := new(OverflowPage)
 		err = recreatedNode.Unmarshal(buf)
 		require.NoError(t, err)
 
-		assert.Equal(t, aNode, recreatedNode)
+		assert.Equal(t, node, recreatedNode)
 	})
 
 	t.Run("overflows to next page", func(t *testing.T) {
-		aNode := &OverflowPage{
+		node := &OverflowPage{
 			Header: OverflowPageHeader{
 				NextPage: 42,
 				DataSize: MaxOverflowPageData,
@@ -74,13 +74,13 @@ func TestOverflowPage_Marshal(t *testing.T) {
 		}
 
 		buf := make([]byte, PageSize)
-		err := aNode.Marshal(buf)
+		err := node.Marshal(buf)
 		require.NoError(t, err)
 
 		recreatedNode := new(OverflowPage)
 		err = recreatedNode.Unmarshal(buf)
 		require.NoError(t, err)
 
-		assert.Equal(t, aNode, recreatedNode)
+		assert.Equal(t, node, recreatedNode)
 	})
 }

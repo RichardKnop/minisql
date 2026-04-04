@@ -43,7 +43,7 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 		pkIndexName        = "pkey__users"
 		uniqueIndexName    = "key__users__email"
 		secondaryIndexName = "idx__users__created"
-		aTable             = NewTable(zap.NewNop(), nil, nil, "users", columns, 0, nil, WithPrimaryKey(
+		table             = NewTable(zap.NewNop(), nil, nil, "users", columns, 0, nil, WithPrimaryKey(
 			NewPrimaryKey(pkIndexName, columns[0:1], true),
 		), WithUniqueIndex(
 			UniqueIndex{
@@ -54,7 +54,7 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 			},
 		))
 	)
-	aTable.SetSecondaryIndex(secondaryIndexName, columns[4:5], nil)
+	table.SetSecondaryIndex(secondaryIndexName, columns[4:5], nil)
 
 	testCases := []struct {
 		Name     string
@@ -266,7 +266,7 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			actual, err := aTable.PlanQuery(context.Background(), aTestCase.Stmt)
+			actual, err := table.PlanQuery(context.Background(), aTestCase.Stmt)
 			require.NoError(t, err)
 			assert.Equal(t, aTestCase.Expected, actual)
 		})

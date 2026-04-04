@@ -14,14 +14,14 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		In this test we will be deleting from a root leaf node only tree.
 	*/
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
 		numRows        = 5
 		rows           = gen.MediumRows(numRows)
-		tablePager     = aPager.ForTable(testMediumColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager     = pager.ForTable(testMediumColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
+		table         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
 	)
 
 	// Set some values to NULL so we can test selecting/filtering on NULLs
@@ -35,27 +35,27 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 		Fields:  fieldsFromColumns(testMediumColumns...),
 		Inserts: [][]OptionalValue{},
 	}
-	for _, aRow := range rows {
-		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	for _, row := range rows {
+		stmt.Inserts = append(stmt.Inserts, row.Values)
 	}
 
-	mustInsert(ctx, t, aTable, txManager, stmt)
+	mustInsert(ctx, t, table, txManager, stmt)
 
 	t.Run("Delete rows with NULL values when no rows match", func(t *testing.T) {
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
+		result := mustDelete(ctx, t, table, txManager, pager, Statement{
 			Kind:       Delete,
 			Conditions: NewOneOrMore(Conditions{FieldIsNull(Field{Name: "id"})}),
 		})
 
-		assert.Equal(t, 0, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, rows)
+		assert.Equal(t, 0, result.RowsAffected)
+		checkRows(ctx, t, table, rows)
 	})
 
 	t.Run("Delete one row", func(t *testing.T) {
 		id, ok := rows[0].GetValue("id")
 		require.True(t, ok)
 
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
+		result := mustDelete(ctx, t, table, txManager, pager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -64,52 +64,52 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 			},
 		})
 
-		assert.Equal(t, 1, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, rows[1:])
+		assert.Equal(t, 1, result.RowsAffected)
+		checkRows(ctx, t, table, rows[1:])
 	})
 
 	t.Run("Delete rows with NULL values", func(t *testing.T) {
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
+		result := mustDelete(ctx, t, table, txManager, pager, Statement{
 			Kind:       Delete,
 			Conditions: NewOneOrMore(Conditions{FieldIsNull(Field{Name: "age"})}),
 		})
 
-		assert.Equal(t, 1, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, rows[2:])
+		assert.Equal(t, 1, result.RowsAffected)
+		checkRows(ctx, t, table, rows[2:])
 	})
 
 	t.Run("Delete rows with NOT NULL values", func(t *testing.T) {
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
+		result := mustDelete(ctx, t, table, txManager, pager, Statement{
 			Kind:       Delete,
 			Conditions: NewOneOrMore(Conditions{FieldIsNotNull(Field{Name: "created"})}),
 		})
 
-		assert.Equal(t, 1, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, rows[3:])
+		assert.Equal(t, 1, result.RowsAffected)
+		checkRows(ctx, t, table, rows[3:])
 	})
 
 	t.Run("Delete all rows", func(t *testing.T) {
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{Kind: Delete})
+		result := mustDelete(ctx, t, table, txManager, pager, Statement{Kind: Delete})
 
-		assert.Equal(t, 2, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, nil)
+		assert.Equal(t, 2, result.RowsAffected)
+		checkRows(ctx, t, table, nil)
 	})
 
 	// Root page is never recycled
-	assert.Equal(t, 0, int(aPager.dbHeader.FirstFreePage))
-	assert.Equal(t, 0, int(aPager.dbHeader.FreePageCount))
+	assert.Equal(t, 0, int(pager.dbHeader.FirstFreePage))
+	assert.Equal(t, 0, int(pager.dbHeader.FreePageCount))
 }
 
 func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
 		numRows        = 20
 		rows           = gen.MediumRows(numRows)
-		tablePager     = aPager.ForTable(testMediumColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager     = pager.ForTable(testMediumColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
+		table         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
 	)
 
 	// Batch insert test rows
@@ -118,11 +118,11 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		Fields:  fieldsFromColumns(testMediumColumns...),
 		Inserts: [][]OptionalValue{},
 	}
-	for _, aRow := range rows {
-		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	for _, row := range rows {
+		stmt.Inserts = append(stmt.Inserts, row.Values)
 	}
 
-	mustInsert(ctx, t, aTable, txManager, stmt)
+	mustInsert(ctx, t, table, txManager, stmt)
 
 	/*
 		Initial state of the tree:
@@ -138,20 +138,20 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 
 	// Check the root page
-	assert.Equal(t, 5, int(aPager.pages[0].InternalNode.Header.KeysNum))
-	assert.Equal(t, []RowID{2, 5, 8, 11, 14}, aPager.pages[0].InternalNode.Keys())
+	assert.Equal(t, 5, int(pager.pages[0].InternalNode.Header.KeysNum))
+	assert.Equal(t, []RowID{2, 5, 8, 11, 14}, pager.pages[0].InternalNode.Keys())
 	// Check the leaf pages
-	assert.Equal(t, []RowID{0, 1, 2}, aPager.pages[2].LeafNode.Keys())
-	assert.Equal(t, []RowID{3, 4, 5}, aPager.pages[1].LeafNode.Keys())
-	assert.Equal(t, []RowID{6, 7, 8}, aPager.pages[3].LeafNode.Keys())
-	assert.Equal(t, []RowID{9, 10, 11}, aPager.pages[4].LeafNode.Keys())
-	assert.Equal(t, []RowID{12, 13, 14}, aPager.pages[5].LeafNode.Keys())
-	assert.Equal(t, []RowID{15, 16, 17, 18, 19}, aPager.pages[6].LeafNode.Keys())
+	assert.Equal(t, []RowID{0, 1, 2}, pager.pages[2].LeafNode.Keys())
+	assert.Equal(t, []RowID{3, 4, 5}, pager.pages[1].LeafNode.Keys())
+	assert.Equal(t, []RowID{6, 7, 8}, pager.pages[3].LeafNode.Keys())
+	assert.Equal(t, []RowID{9, 10, 11}, pager.pages[4].LeafNode.Keys())
+	assert.Equal(t, []RowID{12, 13, 14}, pager.pages[5].LeafNode.Keys())
+	assert.Equal(t, []RowID{15, 16, 17, 18, 19}, pager.pages[6].LeafNode.Keys())
 
 	t.Run("Delete first row to force merging of first two leaves", func(t *testing.T) {
 		ids := rowIDs(rows[0])
 
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
+		result := mustDelete(ctx, t, table, txManager, pager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -160,8 +160,8 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			},
 		})
 
-		assert.Equal(t, 1, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, rows[1:])
+		assert.Equal(t, 1, result.RowsAffected)
+		checkRows(ctx, t, table, rows[1:])
 
 		/*
 				          +----------------------------------------------+
@@ -175,28 +175,28 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 
 		// Check the root page
-		assert.Equal(t, 4, int(aPager.pages[0].InternalNode.Header.KeysNum))
-		assert.Equal(t, []RowID{5, 8, 11, 14}, aPager.pages[0].InternalNode.Keys())
+		assert.Equal(t, 4, int(pager.pages[0].InternalNode.Header.KeysNum))
+		assert.Equal(t, []RowID{5, 8, 11, 14}, pager.pages[0].InternalNode.Keys())
 		// Check the leaf pages
-		assert.Equal(t, []RowID{1, 2, 3, 4, 5}, aPager.pages[2].LeafNode.Keys())
+		assert.Equal(t, []RowID{1, 2, 3, 4, 5}, pager.pages[2].LeafNode.Keys())
 		// leafs[1] has been merged into leafs[0]
-		assert.Equal(t, []RowID{6, 7, 8}, aPager.pages[3].LeafNode.Keys())
-		assert.Equal(t, []RowID{9, 10, 11}, aPager.pages[4].LeafNode.Keys())
-		assert.Equal(t, []RowID{12, 13, 14}, aPager.pages[5].LeafNode.Keys())
-		assert.Equal(t, []RowID{15, 16, 17, 18, 19}, aPager.pages[6].LeafNode.Keys())
+		assert.Equal(t, []RowID{6, 7, 8}, pager.pages[3].LeafNode.Keys())
+		assert.Equal(t, []RowID{9, 10, 11}, pager.pages[4].LeafNode.Keys())
+		assert.Equal(t, []RowID{12, 13, 14}, pager.pages[5].LeafNode.Keys())
+		assert.Equal(t, []RowID{15, 16, 17, 18, 19}, pager.pages[6].LeafNode.Keys())
 		// Check that leafs[1] is now a free page
-		assert.NotNil(t, aPager.pages[1].FreePage)
-		assert.Nil(t, aPager.pages[1].LeafNode)
-		assert.Nil(t, aPager.pages[1].InternalNode)
-		assert.Equal(t, 0, int(aPager.pages[1].FreePage.NextFreePage))
-		assert.Equal(t, int(aPager.pages[1].Index), int(aPager.dbHeader.FirstFreePage))
-		assert.Equal(t, 1, int(aPager.dbHeader.FreePageCount))
+		assert.NotNil(t, pager.pages[1].FreePage)
+		assert.Nil(t, pager.pages[1].LeafNode)
+		assert.Nil(t, pager.pages[1].InternalNode)
+		assert.Equal(t, 0, int(pager.pages[1].FreePage.NextFreePage))
+		assert.Equal(t, int(pager.pages[1].Index), int(pager.dbHeader.FirstFreePage))
+		assert.Equal(t, 1, int(pager.dbHeader.FreePageCount))
 	})
 
 	t.Run("Delete last three rows to force merging of last two leaves", func(t *testing.T) {
 		ids := rowIDs(rows[17], rows[18], rows[19])
 
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
+		result := mustDelete(ctx, t, table, txManager, pager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -205,8 +205,8 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			},
 		})
 
-		assert.Equal(t, 3, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, rows[1:17])
+		assert.Equal(t, 3, result.RowsAffected)
+		checkRows(ctx, t, table, rows[1:17])
 
 		/*
 				          +------------------------------------+
@@ -220,26 +220,26 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 
 		// Check the root page
-		assert.Equal(t, 3, int(aPager.pages[0].InternalNode.Header.KeysNum))
-		assert.Equal(t, []RowID{5, 8, 11}, aPager.pages[0].InternalNode.Keys())
+		assert.Equal(t, 3, int(pager.pages[0].InternalNode.Header.KeysNum))
+		assert.Equal(t, []RowID{5, 8, 11}, pager.pages[0].InternalNode.Keys())
 		// Check the leaf pages
-		assert.Equal(t, []RowID{1, 2, 3, 4, 5}, aPager.pages[2].LeafNode.Keys())
-		assert.Equal(t, []RowID{6, 7, 8}, aPager.pages[3].LeafNode.Keys())
-		assert.Equal(t, []RowID{9, 10, 11}, aPager.pages[4].LeafNode.Keys())
-		assert.Equal(t, []RowID{12, 13, 14, 15, 16}, aPager.pages[5].LeafNode.Keys())
+		assert.Equal(t, []RowID{1, 2, 3, 4, 5}, pager.pages[2].LeafNode.Keys())
+		assert.Equal(t, []RowID{6, 7, 8}, pager.pages[3].LeafNode.Keys())
+		assert.Equal(t, []RowID{9, 10, 11}, pager.pages[4].LeafNode.Keys())
+		assert.Equal(t, []RowID{12, 13, 14, 15, 16}, pager.pages[5].LeafNode.Keys())
 		// Check that leafs[6] is now a free page
-		assert.NotNil(t, aPager.pages[6].FreePage)
-		assert.Nil(t, aPager.pages[6].LeafNode)
-		assert.Nil(t, aPager.pages[6].InternalNode)
-		assert.Equal(t, int(aPager.pages[1].Index), int(aPager.pages[6].FreePage.NextFreePage))
-		assert.Equal(t, int(aPager.pages[6].Index), int(aPager.dbHeader.FirstFreePage))
-		assert.Equal(t, 2, int(aPager.dbHeader.FreePageCount))
+		assert.NotNil(t, pager.pages[6].FreePage)
+		assert.Nil(t, pager.pages[6].LeafNode)
+		assert.Nil(t, pager.pages[6].InternalNode)
+		assert.Equal(t, int(pager.pages[1].Index), int(pager.pages[6].FreePage.NextFreePage))
+		assert.Equal(t, int(pager.pages[6].Index), int(pager.dbHeader.FirstFreePage))
+		assert.Equal(t, 2, int(pager.dbHeader.FreePageCount))
 	})
 
 	t.Run("Keep deleting more rows, another merge", func(t *testing.T) {
 		ids := rowIDs(rows[2], rows[4], rows[6])
 
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
+		result := mustDelete(ctx, t, table, txManager, pager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -248,8 +248,8 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			},
 		})
 
-		assert.Equal(t, 3, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, []Row{
+		assert.Equal(t, 3, result.RowsAffected)
+		checkRows(ctx, t, table, []Row{
 			rows[1], rows[3], rows[5], rows[7], rows[8],
 			rows[9], rows[10], rows[11],
 			rows[12], rows[13], rows[14], rows[15], rows[16],
@@ -267,25 +267,25 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 
 		// Check the root page
-		assert.Equal(t, 2, int(aPager.pages[0].InternalNode.Header.KeysNum))
-		assert.Equal(t, []RowID{8, 11}, aPager.pages[0].InternalNode.Keys())
+		assert.Equal(t, 2, int(pager.pages[0].InternalNode.Header.KeysNum))
+		assert.Equal(t, []RowID{8, 11}, pager.pages[0].InternalNode.Keys())
 		// Check the leaf pages
-		assert.Equal(t, []RowID{1, 3, 5, 7, 8}, aPager.pages[2].LeafNode.Keys())
-		assert.Equal(t, []RowID{9, 10, 11}, aPager.pages[4].LeafNode.Keys())
-		assert.Equal(t, []RowID{12, 13, 14, 15, 16}, aPager.pages[5].LeafNode.Keys())
+		assert.Equal(t, []RowID{1, 3, 5, 7, 8}, pager.pages[2].LeafNode.Keys())
+		assert.Equal(t, []RowID{9, 10, 11}, pager.pages[4].LeafNode.Keys())
+		assert.Equal(t, []RowID{12, 13, 14, 15, 16}, pager.pages[5].LeafNode.Keys())
 		// Check that leafs[3] is now a free page
-		assert.NotNil(t, aPager.pages[3].FreePage)
-		assert.Nil(t, aPager.pages[3].LeafNode)
-		assert.Nil(t, aPager.pages[3].InternalNode)
-		assert.Equal(t, int(aPager.pages[6].Index), int(aPager.pages[3].FreePage.NextFreePage))
-		assert.Equal(t, int(aPager.pages[3].Index), int(aPager.dbHeader.FirstFreePage))
-		assert.Equal(t, 3, int(aPager.dbHeader.FreePageCount))
+		assert.NotNil(t, pager.pages[3].FreePage)
+		assert.Nil(t, pager.pages[3].LeafNode)
+		assert.Nil(t, pager.pages[3].InternalNode)
+		assert.Equal(t, int(pager.pages[6].Index), int(pager.pages[3].FreePage.NextFreePage))
+		assert.Equal(t, int(pager.pages[3].Index), int(pager.dbHeader.FirstFreePage))
+		assert.Equal(t, 3, int(pager.dbHeader.FreePageCount))
 	})
 
 	t.Run("Keep deleting more rows, no merge", func(t *testing.T) {
 		ids := rowIDs(rows[9], rows[11], rows[13], rows[15])
 
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
+		result := mustDelete(ctx, t, table, txManager, pager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -294,8 +294,8 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			},
 		})
 
-		assert.Equal(t, 4, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, []Row{
+		assert.Equal(t, 4, result.RowsAffected)
+		checkRows(ctx, t, table, []Row{
 			rows[1], rows[3], rows[5],
 			rows[7], rows[8], rows[10],
 			rows[12], rows[14], rows[16],
@@ -313,18 +313,18 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 
 		// Check the root page
-		assert.Equal(t, 2, int(aPager.pages[0].InternalNode.Header.KeysNum))
-		assert.Equal(t, []RowID{5, 11}, aPager.pages[0].InternalNode.Keys())
+		assert.Equal(t, 2, int(pager.pages[0].InternalNode.Header.KeysNum))
+		assert.Equal(t, []RowID{5, 11}, pager.pages[0].InternalNode.Keys())
 		// Check the leaf pages
-		assert.Equal(t, []RowID{1, 3, 5}, aPager.pages[2].LeafNode.Keys())
-		assert.Equal(t, []RowID{7, 8, 10}, aPager.pages[4].LeafNode.Keys())
-		assert.Equal(t, []RowID{12, 14, 16}, aPager.pages[5].LeafNode.Keys())
+		assert.Equal(t, []RowID{1, 3, 5}, pager.pages[2].LeafNode.Keys())
+		assert.Equal(t, []RowID{7, 8, 10}, pager.pages[4].LeafNode.Keys())
+		assert.Equal(t, []RowID{12, 14, 16}, pager.pages[5].LeafNode.Keys())
 	})
 
 	t.Run("Keep deleting more rows, another merge and borrow", func(t *testing.T) {
 		ids := rowIDs(rows[3], rows[12], rows[5])
 
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
+		result := mustDelete(ctx, t, table, txManager, pager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -333,8 +333,8 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			},
 		})
 
-		assert.Equal(t, 3, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, []Row{
+		assert.Equal(t, 3, result.RowsAffected)
+		checkRows(ctx, t, table, []Row{
 			rows[1], rows[7], rows[8],
 			rows[10], rows[14], rows[16],
 		})
@@ -351,24 +351,24 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 
 		// Check the root page
-		assert.Equal(t, 1, int(aPager.pages[0].InternalNode.Header.KeysNum))
-		assert.Equal(t, []RowID{8}, aPager.pages[0].InternalNode.Keys())
+		assert.Equal(t, 1, int(pager.pages[0].InternalNode.Header.KeysNum))
+		assert.Equal(t, []RowID{8}, pager.pages[0].InternalNode.Keys())
 		// Check the leaf pages
-		assert.Equal(t, []RowID{1, 7, 8}, aPager.pages[2].LeafNode.Keys())
-		assert.Equal(t, []RowID{10, 14, 16}, aPager.pages[5].LeafNode.Keys())
+		assert.Equal(t, []RowID{1, 7, 8}, pager.pages[2].LeafNode.Keys())
+		assert.Equal(t, []RowID{10, 14, 16}, pager.pages[5].LeafNode.Keys())
 		// Check that leafs[4] is now a free page
-		assert.NotNil(t, aPager.pages[4].FreePage)
-		assert.Nil(t, aPager.pages[4].LeafNode)
-		assert.Nil(t, aPager.pages[4].InternalNode)
-		assert.Equal(t, int(aPager.pages[3].Index), int(aPager.pages[4].FreePage.NextFreePage))
-		assert.Equal(t, int(aPager.pages[4].Index), int(aPager.dbHeader.FirstFreePage))
-		assert.Equal(t, 4, int(aPager.dbHeader.FreePageCount))
+		assert.NotNil(t, pager.pages[4].FreePage)
+		assert.Nil(t, pager.pages[4].LeafNode)
+		assert.Nil(t, pager.pages[4].InternalNode)
+		assert.Equal(t, int(pager.pages[3].Index), int(pager.pages[4].FreePage.NextFreePage))
+		assert.Equal(t, int(pager.pages[4].Index), int(pager.dbHeader.FirstFreePage))
+		assert.Equal(t, 4, int(pager.dbHeader.FreePageCount))
 	})
 
 	t.Run("Delete one more time, we are left with only root leaf node", func(t *testing.T) {
 		ids := rowIDs(rows[14])
 
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
+		result := mustDelete(ctx, t, table, txManager, pager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -377,8 +377,8 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			},
 		})
 
-		assert.Equal(t, 1, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, []Row{
+		assert.Equal(t, 1, result.RowsAffected)
+		checkRows(ctx, t, table, []Row{
 			rows[1], rows[7], rows[8],
 			rows[10], rows[16],
 		})
@@ -390,24 +390,24 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		*/
 
 
-		assert.Nil(t, aPager.pages[0].InternalNode)
-		assert.Equal(t, 5, int(aPager.pages[0].LeafNode.Header.Cells))
-		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Header.Parent))
-		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Header.NextLeaf))
-		assert.Equal(t, []RowID{1, 7, 8, 10, 16}, aPager.pages[0].LeafNode.Keys())
+		assert.Nil(t, pager.pages[0].InternalNode)
+		assert.Equal(t, 5, int(pager.pages[0].LeafNode.Header.Cells))
+		assert.Equal(t, 0, int(pager.pages[0].LeafNode.Header.Parent))
+		assert.Equal(t, 0, int(pager.pages[0].LeafNode.Header.NextLeaf))
+		assert.Equal(t, []RowID{1, 7, 8, 10, 16}, pager.pages[0].LeafNode.Keys())
 		// Check there are two more free pages (6 in total now)
-		assert.NotNil(t, aPager.pages[5].FreePage)
-		assert.Nil(t, aPager.pages[5].LeafNode)
-		assert.Nil(t, aPager.pages[5].InternalNode)
-		assert.Equal(t, int(aPager.pages[2].Index), int(aPager.pages[5].FreePage.NextFreePage))
-		assert.Equal(t, int(aPager.pages[5].Index), int(aPager.dbHeader.FirstFreePage))
-		assert.Equal(t, 6, int(aPager.dbHeader.FreePageCount))
+		assert.NotNil(t, pager.pages[5].FreePage)
+		assert.Nil(t, pager.pages[5].LeafNode)
+		assert.Nil(t, pager.pages[5].InternalNode)
+		assert.Equal(t, int(pager.pages[2].Index), int(pager.pages[5].FreePage.NextFreePage))
+		assert.Equal(t, int(pager.pages[5].Index), int(pager.dbHeader.FirstFreePage))
+		assert.Equal(t, 6, int(pager.dbHeader.FreePageCount))
 	})
 
 	t.Run("Delete all remaining rows", func(t *testing.T) {
 		ids := rowIDs(rows[1], rows[7], rows[8], rows[10], rows[16])
 
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
+		result := mustDelete(ctx, t, table, txManager, pager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -416,34 +416,34 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			},
 		})
 
-		assert.Equal(t, 5, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, nil)
+		assert.Equal(t, 5, result.RowsAffected)
+		checkRows(ctx, t, table, nil)
 
 
-		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Header.Cells))
+		assert.Equal(t, 0, int(pager.pages[0].LeafNode.Header.Cells))
 	})
 
-	assert.Equal(t, 7, int(aPager.TotalPages()))
+	assert.Equal(t, 7, int(pager.TotalPages()))
 	// Root page cannot be recycled so there should still be just 6 free pages
-	assert.NotNil(t, aPager.pages[5].FreePage)
-	assert.Nil(t, aPager.pages[5].LeafNode)
-	assert.Nil(t, aPager.pages[5].InternalNode)
-	assert.Nil(t, aPager.pages[5].OverflowPage)
-	assert.Equal(t, int(aPager.pages[2].Index), int(aPager.pages[5].FreePage.NextFreePage))
-	assert.Equal(t, int(aPager.pages[5].Index), int(aPager.dbHeader.FirstFreePage))
-	assert.Equal(t, 6, int(aPager.dbHeader.FreePageCount))
+	assert.NotNil(t, pager.pages[5].FreePage)
+	assert.Nil(t, pager.pages[5].LeafNode)
+	assert.Nil(t, pager.pages[5].InternalNode)
+	assert.Nil(t, pager.pages[5].OverflowPage)
+	assert.Equal(t, int(pager.pages[2].Index), int(pager.pages[5].FreePage.NextFreePage))
+	assert.Equal(t, int(pager.pages[5].Index), int(pager.dbHeader.FirstFreePage))
+	assert.Equal(t, 6, int(pager.dbHeader.FreePageCount))
 }
 
 func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
 		numRows        = 1000
 		rows           = gen.MediumRows(numRows)
-		tablePager     = aPager.ForTable(testMediumColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager     = pager.ForTable(testMediumColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
+		table         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
 	)
 	// maximumICells is normally ~340; set to 5 in production code to stress-test splits.
 
@@ -453,35 +453,35 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 		Fields:  fieldsFromColumns(testMediumColumns...),
 		Inserts: [][]OptionalValue{},
 	}
-	for _, aRow := range rows {
-		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	for _, row := range rows {
+		stmt.Inserts = append(stmt.Inserts, row.Values)
 	}
 
-	mustInsert(ctx, t, aTable, txManager, stmt)
+	mustInsert(ctx, t, table, txManager, stmt)
 
 
-	checkRows(ctx, t, aTable, rows)
-	assert.Equal(t, 336, int(aPager.TotalPages()))
+	checkRows(ctx, t, table, rows)
+	assert.Equal(t, 336, int(pager.TotalPages()))
 
-	aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{Kind: Delete})
+	result := mustDelete(ctx, t, table, txManager, pager, Statement{Kind: Delete})
 
-	assert.Equal(t, len(rows), aResult.RowsAffected)
+	assert.Equal(t, len(rows), result.RowsAffected)
 
 
-	checkRows(ctx, t, aTable, nil)
+	checkRows(ctx, t, table, nil)
 
-	assert.Equal(t, 336, int(aPager.TotalPages()))
-	assert.Equal(t, 335, int(aPager.dbHeader.FreePageCount))
+	assert.Equal(t, 336, int(pager.TotalPages()))
+	assert.Equal(t, 335, int(pager.dbHeader.FreePageCount))
 }
 
 func TestTable_Delete_Overflow(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
-		tablePager     = aPager.ForTable(testOverflowColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager     = pager.ForTable(testOverflowColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0, nil)
+		table         = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0, nil)
 		rows           = gen.OverflowRows(3, []uint32{
 			MaxInlineVarchar,          // inline text
 			MaxInlineVarchar + 100,    // text overflows to 1 page
@@ -495,18 +495,18 @@ func TestTable_Delete_Overflow(t *testing.T) {
 		Fields:  fieldsFromColumns(testOverflowColumns...),
 		Inserts: [][]OptionalValue{},
 	}
-	for _, aRow := range rows {
-		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	for _, row := range rows {
+		stmt.Inserts = append(stmt.Inserts, row.Values)
 	}
 
-	mustInsert(ctx, t, aTable, txManager, stmt)
+	mustInsert(ctx, t, table, txManager, stmt)
 
-	require.Equal(t, 4, int(aPager.TotalPages()))
+	require.Equal(t, 4, int(pager.TotalPages()))
 
 	t.Run("Delete inline non overflowing row", func(t *testing.T) {
 		ids := rowIDs(rows[0])
 
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
+		result := mustDelete(ctx, t, table, txManager, pager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -515,17 +515,17 @@ func TestTable_Delete_Overflow(t *testing.T) {
 			},
 		})
 
-		assert.Equal(t, 1, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, rows[1:])
+		assert.Equal(t, 1, result.RowsAffected)
+		checkRows(ctx, t, table, rows[1:])
 
-		require.Equal(t, 4, int(aPager.TotalPages()))
+		require.Equal(t, 4, int(pager.TotalPages()))
 		assertFreePages(t, tablePager, nil)
 	})
 
 	t.Run("Delete overflowing rows", func(t *testing.T) {
 		ids := rowIDs(rows[1], rows[2])
 
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{
+		result := mustDelete(ctx, t, table, txManager, pager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
@@ -534,10 +534,10 @@ func TestTable_Delete_Overflow(t *testing.T) {
 			},
 		})
 
-		assert.Equal(t, 2, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, nil)
+		assert.Equal(t, 2, result.RowsAffected)
+		checkRows(ctx, t, table, nil)
 
-		require.Equal(t, 4, int(aPager.TotalPages()))
+		require.Equal(t, 4, int(pager.TotalPages()))
 		assertFreePages(t, tablePager, []PageIndex{3, 2, 1})
 	})
 }
@@ -553,14 +553,14 @@ func rowIDs(rows ...Row) []any {
 	return ids
 }
 
-func mustDelete(ctx context.Context, t *testing.T, aTable *Table, txManager *TransactionManager, saver PageSaver, stmt Statement) StatementResult {
-	var aResult StatementResult
+func mustDelete(ctx context.Context, t *testing.T, table *Table, txManager *TransactionManager, saver PageSaver, stmt Statement) StatementResult {
+	var result StatementResult
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		var err error
-		aResult, err = aTable.Delete(ctx, stmt)
+		result, err = table.Delete(ctx, stmt)
 		return err
 	})
 	require.NoError(t, err)
 
-	return aResult
+	return result
 }

@@ -14,7 +14,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 
 	var (
 		indexName = "pkey__users"
-		aTable    = NewTable(zap.NewNop(), nil, nil, "users", testColumns[0:2], 0, nil, WithPrimaryKey(
+		table    = NewTable(zap.NewNop(), nil, nil, "users", testColumns[0:2], 0, nil, WithPrimaryKey(
 			NewPrimaryKey(indexName, testColumns[0:1], true),
 		))
 	)
@@ -518,7 +518,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			actual, err := aTable.PlanQuery(context.Background(), aTestCase.Stmt)
+			actual, err := table.PlanQuery(context.Background(), aTestCase.Stmt)
 			require.NoError(t, err)
 			assert.Equal(t, aTestCase.Expected, actual)
 		})

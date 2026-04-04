@@ -12,7 +12,7 @@ func TestRow_Marshal(t *testing.T) {
 	t.Parallel()
 
 	t.Run("unmarshal all values", func(t *testing.T) {
-		aRow := gen.Row()
+		row := gen.Row()
 
 		// 8 for int8
 		// 4+255 for varchar/text
@@ -20,22 +20,22 @@ func TestRow_Marshal(t *testing.T) {
 		// 1 for boolean
 		// 4 for real
 		// 8 for timestamp
-		assert.Equal(t, uint64(8+(varcharLengthPrefixSize+MaxInlineVarchar)+4+1+4+8), aRow.Size())
+		assert.Equal(t, uint64(8+(varcharLengthPrefixSize+MaxInlineVarchar)+4+1+4+8), row.Size())
 
-		data, err := aRow.Marshal()
+		data, err := row.Marshal()
 		require.NoError(t, err)
 
 		actual := NewRow(testColumns)
-		actual, err = actual.Unmarshal(Cell{Value: data}, fieldsFromColumns(aRow.Columns...)...)
+		actual, err = actual.Unmarshal(Cell{Value: data}, fieldsFromColumns(row.Columns...)...)
 		require.NoError(t, err)
 
-		assert.Equal(t, aRow, actual)
+		assert.Equal(t, row, actual)
 	})
 
 	t.Run("unmarshal partial values", func(t *testing.T) {
-		aRow := gen.Row()
+		row := gen.Row()
 
-		data, err := aRow.Marshal()
+		data, err := row.Marshal()
 		require.NoError(t, err)
 
 		selectedFields := fieldsFromColumns(testColumns[0:2]...)
@@ -44,8 +44,8 @@ func TestRow_Marshal(t *testing.T) {
 		partialRow, err = partialRow.Unmarshal(Cell{Value: data}, selectedFields...)
 		require.NoError(t, err)
 
-		assert.Equal(t, aRow.Values[0], partialRow.Values[0])
-		assert.Equal(t, aRow.Values[1], partialRow.Values[1])
+		assert.Equal(t, row.Values[0], partialRow.Values[0])
+		assert.Equal(t, row.Values[1], partialRow.Values[1])
 		assert.False(t, partialRow.Values[2].Valid)
 		assert.False(t, partialRow.Values[3].Valid)
 		assert.False(t, partialRow.Values[4].Valid)
@@ -56,7 +56,7 @@ func TestRow_Marshal(t *testing.T) {
 func TestRow_CheckOneOrMore(t *testing.T) {
 	t.Parallel()
 
-	aRow := gen.Row()
+	row := gen.Row()
 	aRowWithNulls := gen.Row()
 	aRowWithNulls.Values[4] = OptionalValue{} // 5th column to NULL
 
@@ -69,7 +69,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandInteger,
-				Value: aRow.Values[0].Value.(int64),
+				Value: row.Values[0].Value.(int64),
 			},
 		}
 		idMismatch = Condition{
@@ -80,7 +80,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandInteger,
-				Value: aRow.Values[0].Value.(int64) + 1,
+				Value: row.Values[0].Value.(int64) + 1,
 			},
 		}
 		emailMatch = Condition{
@@ -91,7 +91,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandQuotedString,
-				Value: aRow.Values[1].Value,
+				Value: row.Values[1].Value,
 			},
 		}
 		emailMismatch = Condition{
@@ -102,7 +102,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandQuotedString,
-				Value: NewTextPointer([]byte(aRow.Values[1].Value.(TextPointer).String() + "bogus")),
+				Value: NewTextPointer([]byte(row.Values[1].Value.(TextPointer).String() + "bogus")),
 			},
 		}
 		ageMatch = Condition{
@@ -113,7 +113,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandInteger,
-				Value: int64(aRow.Values[2].Value.(int32)),
+				Value: int64(row.Values[2].Value.(int32)),
 			},
 		}
 		ageMismatch = Condition{
@@ -124,7 +124,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandInteger,
-				Value: int64(aRow.Values[2].Value.(int32) + 1),
+				Value: int64(row.Values[2].Value.(int32) + 1),
 			},
 		}
 		verifiedMatch = Condition{
@@ -135,7 +135,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandBoolean,
-				Value: aRow.Values[3].Value.(bool),
+				Value: row.Values[3].Value.(bool),
 			},
 		}
 		verifiedMismatch = Condition{
@@ -146,7 +146,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandBoolean,
-				Value: !aRow.Values[3].Value.(bool),
+				Value: !row.Values[3].Value.(bool),
 			},
 		}
 		timestampMatch = Condition{
@@ -157,7 +157,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandQuotedString,
-				Value: aRow.Values[5].Value.(Time),
+				Value: row.Values[5].Value.(Time),
 			},
 		}
 		timestampMismatch = Condition{
@@ -181,13 +181,13 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 	}{
 		{
 			"row matches if conditions are empty",
-			aRow,
+			row,
 			OneOrMore{},
 			true,
 		},
 		{
 			"row matches if condition comparing with integer is true",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					idMatch,
@@ -197,7 +197,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row does not match if condition comparing with integer is false",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					idMismatch,
@@ -207,7 +207,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row matches if condition comparing with quoted string is true",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					emailMatch,
@@ -217,7 +217,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row does not match if condition comparing with quoted string is false",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					emailMismatch,
@@ -227,7 +227,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row matches if condition comparing with boolean is true",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					verifiedMatch,
@@ -237,7 +237,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row does not match if condition comparing with boolean is false",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					verifiedMismatch,
@@ -247,7 +247,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row matches if condition comparing with timestamp is true",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					timestampMatch,
@@ -257,7 +257,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row does not match if condition comparing with timestamp is false",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					timestampMismatch,
@@ -267,7 +267,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row matches if all conditions are true",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					idMatch,
@@ -278,7 +278,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row does not match if not all conditions are true",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					idMatch,
@@ -289,7 +289,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row matches if all condition groups are true",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					idMatch,
@@ -303,7 +303,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row matches if at least one of condition groups is true",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					idMatch,
@@ -317,7 +317,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row does not match if all condition groups are false",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					idMatch,
@@ -331,7 +331,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row matches if != condition evaluates as true",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					{
@@ -351,7 +351,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row does not match if != condition evaluates as false",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					{
@@ -362,7 +362,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Ne,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(aRow.Values[2].Value.(int32)),
+							Value: int64(row.Values[2].Value.(int32)),
 						},
 					},
 				},
@@ -371,7 +371,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row matches if > condition evaluates as true",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					{
@@ -391,7 +391,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row does not match if > condition evaluates as false",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					{
@@ -402,7 +402,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Gt,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(aRow.Values[2].Value.(int32)),
+							Value: int64(row.Values[2].Value.(int32)),
 						},
 					},
 				},
@@ -411,7 +411,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row matches if < condition evaluates as true",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					{
@@ -431,7 +431,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row does not match if < condition evaluates as false",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					{
@@ -451,7 +451,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row matches if >= condition evaluates as true",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					{
@@ -462,7 +462,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Gte,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(aRow.Values[2].Value.(int32)),
+							Value: int64(row.Values[2].Value.(int32)),
 						},
 					},
 				},
@@ -471,7 +471,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row does not match if >= condition evaluates as false",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					{
@@ -491,7 +491,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row matches if <= condition evaluates as true",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					{
@@ -502,7 +502,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Lte,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(aRow.Values[2].Value.(int32)),
+							Value: int64(row.Values[2].Value.(int32)),
 						},
 					},
 				},
@@ -511,7 +511,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row does not match if <= condition evaluates as false",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					{
@@ -522,7 +522,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Lte,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(aRow.Values[2].Value.(int32)) - 1,
+							Value: int64(row.Values[2].Value.(int32)) - 1,
 						},
 					},
 				},
@@ -551,7 +551,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row matches if IN condition evaluates as true",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					{
@@ -562,7 +562,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: In,
 						Operand2: Operand{
 							Type:  OperandList,
-							Value: []any{aRow.Values[0].Value.(int64) - 1, aRow.Values[0].Value.(int64), aRow.Values[0].Value.(int64) + 1},
+							Value: []any{row.Values[0].Value.(int64) - 1, row.Values[0].Value.(int64), row.Values[0].Value.(int64) + 1},
 						},
 					},
 				},
@@ -571,7 +571,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row does not match if IN condition evaluates as false",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					{
@@ -582,7 +582,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: In,
 						Operand2: Operand{
 							Type:  OperandList,
-							Value: []any{aRow.Values[0].Value.(int64) - 1, aRow.Values[0].Value.(int64) - 2, aRow.Values[0].Value.(int64) + 1},
+							Value: []any{row.Values[0].Value.(int64) - 1, row.Values[0].Value.(int64) - 2, row.Values[0].Value.(int64) + 1},
 						},
 					},
 				},
@@ -591,7 +591,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row matches if NOT IN condition evaluates as true",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					{
@@ -602,7 +602,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: NotIn,
 						Operand2: Operand{
 							Type:  OperandList,
-							Value: []any{aRow.Values[0].Value.(int64) - 1, aRow.Values[0].Value.(int64) - 2, aRow.Values[0].Value.(int64) + 1},
+							Value: []any{row.Values[0].Value.(int64) - 1, row.Values[0].Value.(int64) - 2, row.Values[0].Value.(int64) + 1},
 						},
 					},
 				},
@@ -611,7 +611,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 		},
 		{
 			"row does not match if NOT IN condition evaluates as false",
-			aRow,
+			row,
 			OneOrMore{
 				{
 					{
@@ -622,7 +622,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: NotIn,
 						Operand2: Operand{
 							Type:  OperandList,
-							Value: []any{aRow.Values[0].Value.(int64) - 1, aRow.Values[0].Value.(int64), aRow.Values[0].Value.(int64) + 1},
+							Value: []any{row.Values[0].Value.(int64) - 1, row.Values[0].Value.(int64), row.Values[0].Value.(int64) + 1},
 						},
 					},
 				},
@@ -643,19 +643,19 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 func TestRow_GetValue(t *testing.T) {
 	t.Parallel()
 
-	aRow := NewRowWithValues(testColumns, []OptionalValue{
+	row := NewRowWithValues(testColumns, []OptionalValue{
 		{Value: int64(125478), Valid: true},
 		{Value: "test@example.com", Valid: true},
 	})
 
 	t.Run("found", func(t *testing.T) {
-		value, found := aRow.GetValue("email")
+		value, found := row.GetValue("email")
 		assert.True(t, found)
 		assert.Equal(t, OptionalValue{Value: "test@example.com", Valid: true}, value)
 	})
 
 	t.Run("not found", func(t *testing.T) {
-		value, found := aRow.GetValue("bogus")
+		value, found := row.GetValue("bogus")
 		assert.False(t, found)
 		assert.Equal(t, OptionalValue{Value: nil, Valid: false}, value)
 	})
@@ -664,18 +664,18 @@ func TestRow_GetValue(t *testing.T) {
 func TestRow_SetValue(t *testing.T) {
 	t.Parallel()
 
-	aRow := NewRowWithValues(testColumns, []OptionalValue{
+	row := NewRowWithValues(testColumns, []OptionalValue{
 		{Value: int64(125478), Valid: true},
 		{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
 	})
 
 	t.Run("changed", func(t *testing.T) {
-		_, changed := aRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("new@example.com")), Valid: true})
+		_, changed := row.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("new@example.com")), Valid: true})
 		assert.True(t, changed)
 	})
 
 	t.Run("not changed", func(t *testing.T) {
-		_, changed := aRow.SetValue("id", OptionalValue{Value: int64(125478), Valid: true})
+		_, changed := row.SetValue("id", OptionalValue{Value: int64(125478), Valid: true})
 		assert.False(t, changed)
 	})
 }
@@ -712,7 +712,7 @@ func TestRow_CompareFields(t *testing.T) {
 		{Kind: Int8, Name: "y", Size: 8},
 		{Kind: Int4, Name: "z", Size: 4},
 	}
-	aRow := NewRowWithValues(cols, []OptionalValue{
+	row := NewRowWithValues(cols, []OptionalValue{
 		{Value: int64(10), Valid: true},
 		{Value: int64(10), Valid: true},
 		{Value: int32(5), Valid: true},
@@ -723,31 +723,31 @@ func TestRow_CompareFields(t *testing.T) {
 	}
 
 	t.Run("equal fields match", func(t *testing.T) {
-		ok, err := aRow.compareFields(field("x"), field("y"), Eq)
+		ok, err := row.compareFields(field("x"), field("y"), Eq)
 		require.NoError(t, err)
 		assert.True(t, ok)
 	})
 
 	t.Run("different kind fields do not match", func(t *testing.T) {
-		ok, err := aRow.compareFields(field("x"), field("z"), Eq)
+		ok, err := row.compareFields(field("x"), field("z"), Eq)
 		require.NoError(t, err)
 		assert.False(t, ok)
 	})
 
 	t.Run("error on invalid field1 operand type", func(t *testing.T) {
 		nonField := Operand{Type: OperandInteger, Value: int64(1)}
-		_, err := aRow.compareFields(nonField, field("y"), Eq)
+		_, err := row.compareFields(nonField, field("y"), Eq)
 		assert.Error(t, err)
 	})
 
 	t.Run("error on invalid field2 operand type", func(t *testing.T) {
 		nonField := Operand{Type: OperandInteger, Value: int64(1)}
-		_, err := aRow.compareFields(field("x"), nonField, Eq)
+		_, err := row.compareFields(field("x"), nonField, Eq)
 		assert.Error(t, err)
 	})
 
 	t.Run("error when column not found", func(t *testing.T) {
-		_, err := aRow.compareFields(field("missing"), field("y"), Eq)
+		_, err := row.compareFields(field("missing"), field("y"), Eq)
 		assert.Error(t, err)
 	})
 }
@@ -759,7 +759,7 @@ func TestRow_CheckCondition(t *testing.T) {
 		{Kind: Int8, Name: "a", Size: 8},
 		{Kind: Int8, Name: "b", Size: 8},
 	}
-	aRow := NewRowWithValues(cols, []OptionalValue{
+	row := NewRowWithValues(cols, []OptionalValue{
 		{Value: int64(5), Valid: true},
 		{Value: int64(5), Valid: true},
 	})
@@ -770,7 +770,7 @@ func TestRow_CheckCondition(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{Type: OperandField, Value: Field{Name: "b"}},
 		}
-		ok, err := aRow.checkCondition(cond)
+		ok, err := row.checkCondition(cond)
 		require.NoError(t, err)
 		assert.True(t, ok)
 	})
@@ -781,7 +781,7 @@ func TestRow_CheckCondition(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{Type: OperandInteger, Value: int64(7)},
 		}
-		ok, err := aRow.checkCondition(cond)
+		ok, err := row.checkCondition(cond)
 		require.NoError(t, err)
 		assert.True(t, ok)
 	})
@@ -792,7 +792,7 @@ func TestRow_CheckCondition(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{Type: OperandInteger, Value: int64(8)},
 		}
-		ok, err := aRow.checkCondition(cond)
+		ok, err := row.checkCondition(cond)
 		require.NoError(t, err)
 		assert.False(t, ok)
 	})
@@ -803,7 +803,7 @@ func TestRow_CheckCondition(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{Type: OperandField, Value: Field{Name: "a"}},
 		}
-		ok, err := aRow.checkCondition(cond)
+		ok, err := row.checkCondition(cond)
 		require.NoError(t, err)
 		assert.True(t, ok)
 	})

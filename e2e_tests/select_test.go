@@ -37,21 +37,21 @@ values(100, 'Johnathan_Walker250@ptr6k.page', 'Johnathan Walker', '2024-01-02 15
 values('Cristal_Duvall6639@yvu30.press', 'Cristal Duvall', NOW());`, 1)
 
 	s.Run("Inserting duplicate primary key should fail", func() {
-		aResult, err := s.db.ExecContext(context.Background(), `insert into users("id", "email", "name", "created") 
+		result, err := s.db.ExecContext(context.Background(), `insert into users("id", "email", "name", "created") 
 values(100, 'Johnathan_Walker250+new@ptr6k.page', 'Johnathan Walker', '2024-01-02 15:30:27');`)
 		s.Require().Error(err)
 		s.ErrorIs(err, minisql.ErrDuplicateKey)
 		s.Equal("failed to insert primary key pkey__users: duplicate key", err.Error())
-		s.Nil(aResult)
+		s.Nil(result)
 	})
 
 	s.Run("Inserting duplicate unique index key should fail", func() {
-		aResult, err := s.db.ExecContext(context.Background(), `insert into users("name", "email", "created") 
+		result, err := s.db.ExecContext(context.Background(), `insert into users("name", "email", "created") 
 values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:27');`)
 		s.Require().Error(err)
 		s.ErrorIs(err, minisql.ErrDuplicateKey)
 		s.Equal("failed to insert key for unique index key__users__email: duplicate key", err.Error())
-		s.Nil(aResult)
+		s.Nil(result)
 	})
 
 	s.Run("Basic select query", func() {
@@ -231,9 +231,9 @@ values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:2
 
 	s.Run("Selecting based on NULL values", func() {
 		// Insert a user with NULL email
-		aResult, err := s.db.ExecContext(context.Background(), `insert into users("name") values('Null Email User');`)
+		result, err := s.db.ExecContext(context.Background(), `insert into users("name") values('Null Email User');`)
 		s.Require().NoError(err)
-		rowsAffected, err := aResult.RowsAffected()
+		rowsAffected, err := result.RowsAffected()
 		s.Require().NoError(err)
 		s.Require().Equal(int64(1), rowsAffected)
 
@@ -316,9 +316,9 @@ func (s *TestSuite) countRowsInTable(tableName string, expectedCount int) {
 }
 
 func (s *TestSuite) execQuery(query string, expectedRowsAffected int) {
-	aResult, err := s.db.ExecContext(context.Background(), query)
+	result, err := s.db.ExecContext(context.Background(), query)
 	s.Require().NoError(err)
-	rowsAffected, err := aResult.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
 	s.Require().NoError(err)
 	s.Require().Equal(expectedRowsAffected, int(rowsAffected))
 }

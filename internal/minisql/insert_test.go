@@ -13,13 +13,13 @@ import (
 
 func TestTable_Insert(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
 		rows           = gen.Rows(2)
-		tablePager     = aPager.ForTable(testColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager     = pager.ForTable(testColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0, nil)
+		table         = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0, nil)
 	)
 
 	t.Run("Insert row with all NOT NULL values", func(t *testing.T) {
@@ -29,14 +29,14 @@ func TestTable_Insert(t *testing.T) {
 			Inserts: [][]OptionalValue{rows[0].Values},
 		}
 
-		mustInsert(ctx, t, aTable, txManager, stmt)
+		mustInsert(ctx, t, table, txManager, stmt)
 
-		assert.Equal(t, 1, int(aPager.pages[0].LeafNode.Header.Cells))
-		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Cells[0].Key))
+		assert.Equal(t, 1, int(pager.pages[0].LeafNode.Header.Cells))
+		assert.Equal(t, 0, int(pager.pages[0].LeafNode.Cells[0].Key))
 
-		aCursor, err := aTable.SeekLast(ctx, 0)
+		cursor, err := table.SeekLast(ctx, 0)
 		require.NoError(t, err)
-		actualRow, err := aCursor.fetchRow(ctx, false, fieldsFromColumns(testColumns...)...)
+		actualRow, err := cursor.fetchRow(ctx, false, fieldsFromColumns(testColumns...)...)
 		require.NoError(t, err)
 
 		require.NoError(t, err)
@@ -53,15 +53,15 @@ func TestTable_Insert(t *testing.T) {
 			Inserts: [][]OptionalValue{rows[1].Values},
 		}
 
-		mustInsert(ctx, t, aTable, txManager, stmt)
+		mustInsert(ctx, t, table, txManager, stmt)
 
-		assert.Equal(t, 2, int(aPager.pages[0].LeafNode.Header.Cells))
-		assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Cells[0].Key))
-		assert.Equal(t, 1, int(aPager.pages[0].LeafNode.Cells[1].Key))
+		assert.Equal(t, 2, int(pager.pages[0].LeafNode.Header.Cells))
+		assert.Equal(t, 0, int(pager.pages[0].LeafNode.Cells[0].Key))
+		assert.Equal(t, 1, int(pager.pages[0].LeafNode.Cells[1].Key))
 
-		aCursor, err := aTable.SeekLast(ctx, 0)
+		cursor, err := table.SeekLast(ctx, 0)
 		require.NoError(t, err)
-		actualRow, err := aCursor.fetchRow(ctx, false, fieldsFromColumns(testColumns...)...)
+		actualRow, err := cursor.fetchRow(ctx, false, fieldsFromColumns(testColumns...)...)
 		require.NoError(t, err)
 
 		assert.Equal(t, rows[1], actualRow)
@@ -72,64 +72,64 @@ func TestTable_Insert(t *testing.T) {
 
 func TestTable_Insert_MultiInsert(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
 		rows           = gen.Rows(3)
-		tablePager     = aPager.ForTable(testColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager     = pager.ForTable(testColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0, nil)
+		table         = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0, nil)
 	)
 
 	stmt := Statement{
 		Kind:   Insert,
 		Fields: fieldsFromColumns(testColumns...),
 	}
-	for _, aRow := range rows {
-		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	for _, row := range rows {
+		stmt.Inserts = append(stmt.Inserts, row.Values)
 	}
 
-	mustInsert(ctx, t, aTable, txManager, stmt)
+	mustInsert(ctx, t, table, txManager, stmt)
 
-	assert.Equal(t, 3, int(aPager.pages[0].LeafNode.Header.Cells))
-	assert.Equal(t, 0, int(aPager.pages[0].LeafNode.Cells[0].Key))
-	assert.Equal(t, 1, int(aPager.pages[0].LeafNode.Cells[1].Key))
-	assert.Equal(t, 2, int(aPager.pages[0].LeafNode.Cells[2].Key))
+	assert.Equal(t, 3, int(pager.pages[0].LeafNode.Header.Cells))
+	assert.Equal(t, 0, int(pager.pages[0].LeafNode.Cells[0].Key))
+	assert.Equal(t, 1, int(pager.pages[0].LeafNode.Cells[1].Key))
+	assert.Equal(t, 2, int(pager.pages[0].LeafNode.Cells[2].Key))
 
-	checkRows(ctx, t, aTable, rows)
+	checkRows(ctx, t, table, rows)
 }
 
 func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
 		rows           = gen.MediumRows(6)
-		tablePager     = aPager.ForTable(testMediumColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager     = pager.ForTable(testMediumColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
+		table         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
 	)
 
 	stmt := Statement{
 		Kind:   Insert,
 		Fields: fieldsFromColumns(testMediumColumns...),
 	}
-	for _, aRow := range rows {
-		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	for _, row := range rows {
+		stmt.Inserts = append(stmt.Inserts, row.Values)
 	}
 
-	mustInsert(ctx, t, aTable, txManager, stmt)
+	mustInsert(ctx, t, table, txManager, stmt)
 
 
-	assert.Equal(t, 1, int(aPager.pages[0].InternalNode.Header.KeysNum))
-	assert.True(t, aPager.pages[0].InternalNode.Header.IsRoot)
-	assert.True(t, aPager.pages[0].InternalNode.Header.IsInternal)
-	assert.Equal(t, 1, int(aPager.pages[0].InternalNode.Header.RightChild))
-	assert.Equal(t, 2, int(aPager.pages[0].InternalNode.ICells[0].Child))
-	assert.Equal(t, 2, int(aPager.pages[0].InternalNode.ICells[0].Key))
+	assert.Equal(t, 1, int(pager.pages[0].InternalNode.Header.KeysNum))
+	assert.True(t, pager.pages[0].InternalNode.Header.IsRoot)
+	assert.True(t, pager.pages[0].InternalNode.Header.IsInternal)
+	assert.Equal(t, 1, int(pager.pages[0].InternalNode.Header.RightChild))
+	assert.Equal(t, 2, int(pager.pages[0].InternalNode.ICells[0].Child))
+	assert.Equal(t, 2, int(pager.pages[0].InternalNode.ICells[0].Key))
 
 	// Assert left leaf
-	leftLeaf := aPager.pages[2]
+	leftLeaf := pager.pages[2]
 	assert.False(t, leftLeaf.LeafNode.Header.IsRoot)
 	assert.False(t, leftLeaf.LeafNode.Header.IsInternal)
 	assert.Equal(t, 0, int(leftLeaf.LeafNode.Header.Parent))
@@ -142,7 +142,7 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 	assert.Equal(t, 2, int(leftLeaf.LeafNode.Cells[2].Key))
 
 	// Assert right leaf
-	rightLeaf := aPager.pages[1]
+	rightLeaf := pager.pages[1]
 	assert.False(t, rightLeaf.LeafNode.Header.IsRoot)
 	assert.False(t, rightLeaf.LeafNode.Header.IsInternal)
 	assert.Equal(t, 0, int(rightLeaf.LeafNode.Header.Parent))
@@ -154,18 +154,18 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 	assert.Equal(t, 4, int(rightLeaf.LeafNode.Cells[1].Key))
 	assert.Equal(t, 5, int(rightLeaf.LeafNode.Cells[2].Key))
 
-	assert.Equal(t, 3, int(aPager.TotalPages()))
+	assert.Equal(t, 3, int(pager.TotalPages()))
 }
 
 func TestTable_Insert_SplitLeaf(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
 		rows           = gen.BigRows(4)
-		tablePager     = aPager.ForTable(testBigColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager     = pager.ForTable(testBigColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testBigColumns, 0, nil)
+		table         = NewTable(testLogger, txPager, txManager, testTableName, testBigColumns, 0, nil)
 	)
 
 	// Batch insert test rows
@@ -174,28 +174,28 @@ func TestTable_Insert_SplitLeaf(t *testing.T) {
 		Fields:  fieldsFromColumns(testBigColumns...),
 		Inserts: [][]OptionalValue{},
 	}
-	for _, aRow := range rows {
-		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	for _, row := range rows {
+		stmt.Inserts = append(stmt.Inserts, row.Values)
 	}
 
-	mustInsert(ctx, t, aTable, txManager, stmt)
+	mustInsert(ctx, t, table, txManager, stmt)
 
 
 	// Assert root node
-	aRootPage := aPager.pages[0]
-	assert.Equal(t, 3, int(aRootPage.InternalNode.Header.KeysNum))
-	assert.True(t, aRootPage.InternalNode.Header.IsRoot)
-	assert.True(t, aRootPage.InternalNode.Header.IsInternal)
-	assert.Equal(t, 4, int(aRootPage.InternalNode.Header.RightChild))
-	assert.Equal(t, 2, int(aRootPage.InternalNode.ICells[0].Child))
-	assert.Equal(t, 0, int(aRootPage.InternalNode.ICells[0].Key))
-	assert.Equal(t, 1, int(aRootPage.InternalNode.ICells[1].Child))
-	assert.Equal(t, 1, int(aRootPage.InternalNode.ICells[1].Key))
-	assert.Equal(t, 3, int(aRootPage.InternalNode.ICells[2].Child))
-	assert.Equal(t, 2, int(aRootPage.InternalNode.ICells[2].Key))
+	rootPage := pager.pages[0]
+	assert.Equal(t, 3, int(rootPage.InternalNode.Header.KeysNum))
+	assert.True(t, rootPage.InternalNode.Header.IsRoot)
+	assert.True(t, rootPage.InternalNode.Header.IsInternal)
+	assert.Equal(t, 4, int(rootPage.InternalNode.Header.RightChild))
+	assert.Equal(t, 2, int(rootPage.InternalNode.ICells[0].Child))
+	assert.Equal(t, 0, int(rootPage.InternalNode.ICells[0].Key))
+	assert.Equal(t, 1, int(rootPage.InternalNode.ICells[1].Child))
+	assert.Equal(t, 1, int(rootPage.InternalNode.ICells[1].Key))
+	assert.Equal(t, 3, int(rootPage.InternalNode.ICells[2].Child))
+	assert.Equal(t, 2, int(rootPage.InternalNode.ICells[2].Key))
 
 	// Assert leaf nodes // in order from left to right
-	leafs := aPager.pages[1:]
+	leafs := pager.pages[1:]
 	leafs[0], leafs[1] = leafs[1], leafs[0] // switch 1st and 2nd leaf as a result of split
 	for i, aLeaf := range leafs {
 		assert.False(t, aLeaf.LeafNode.Header.IsRoot)
@@ -218,13 +218,13 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		each inheriting half of leaf nodes.
 	*/
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
-		tablePager     = aPager.ForTable(testBigColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager     = pager.ForTable(testBigColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testBigColumns, 0, nil)
-		numRows        = aTable.maxICells(0) + 2
+		table         = NewTable(testLogger, txPager, txManager, testTableName, testBigColumns, 0, nil)
+		numRows        = table.maxICells(0) + 2
 		rows           = gen.BigRows(numRows)
 	)
 
@@ -236,28 +236,28 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		Fields:  fieldsFromColumns(testBigColumns...),
 		Inserts: [][]OptionalValue{},
 	}
-	for _, aRow := range rows {
-		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	for _, row := range rows {
+		stmt.Inserts = append(stmt.Inserts, row.Values)
 	}
 
-	mustInsert(ctx, t, aTable, txManager, stmt)
+	mustInsert(ctx, t, table, txManager, stmt)
 
-	checkRows(ctx, t, aTable, rows)
+	checkRows(ctx, t, table, rows)
 
 	// Assert root node
-	aRootPage := aPager.pages[0]
-	assert.Equal(t, 1, int(aRootPage.InternalNode.Header.KeysNum))
-	assert.True(t, aRootPage.InternalNode.Header.IsRoot)
-	assert.True(t, aRootPage.InternalNode.Header.IsInternal)
-	assert.Equal(t, 1, int(aRootPage.InternalNode.Header.KeysNum))
-	assert.Equal(t, 334, int(aRootPage.InternalNode.Header.RightChild))
-	assert.Equal(t, 335, int(aRootPage.InternalNode.ICells[0].Child))
-	assert.Equal(t, 165, int(aRootPage.InternalNode.ICells[0].Key))
+	rootPage := pager.pages[0]
+	assert.Equal(t, 1, int(rootPage.InternalNode.Header.KeysNum))
+	assert.True(t, rootPage.InternalNode.Header.IsRoot)
+	assert.True(t, rootPage.InternalNode.Header.IsInternal)
+	assert.Equal(t, 1, int(rootPage.InternalNode.Header.KeysNum))
+	assert.Equal(t, 334, int(rootPage.InternalNode.Header.RightChild))
+	assert.Equal(t, 335, int(rootPage.InternalNode.ICells[0].Child))
+	assert.Equal(t, 165, int(rootPage.InternalNode.ICells[0].Key))
 
 	// New left internal node should have 166 children (165 keys + right child page).
 	// First two pages should be switched (2, 1) as a result of root leaf split
 	// but after that it continues as 3, 4, ... 165. Keys are 0, 1, ... 164
-	aNewLeftInternal := aPager.pages[335]
+	aNewLeftInternal := pager.pages[335]
 	assert.Equal(t, 165, int(aNewLeftInternal.InternalNode.Header.KeysNum))
 	assert.False(t, aNewLeftInternal.InternalNode.Header.IsRoot)
 	assert.True(t, aNewLeftInternal.InternalNode.Header.IsInternal)
@@ -276,7 +276,7 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 
 	// New right internal node will have 167 children (166 keys + right child page).
 	// Children go from 167, 168, ... 333 and keys from 166, 167, ... 331
-	aNewRightInternal := aPager.pages[334]
+	aNewRightInternal := pager.pages[334]
 	assert.Equal(t, 166, int(aNewRightInternal.InternalNode.Header.KeysNum))
 	assert.False(t, aNewRightInternal.InternalNode.Header.IsRoot)
 	assert.True(t, aNewRightInternal.InternalNode.Header.IsInternal)
@@ -297,9 +297,9 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 
 	// 333 leafs nodes should have been created, each with 1 cell,
 	// plust root internal node and two new internal nodes
-	require.Equal(t, 336, int(aPager.TotalPages()))
+	require.Equal(t, 336, int(pager.TotalPages()))
 
-	leafs := aPager.pages[1:334]
+	leafs := pager.pages[1:334]
 	require.Len(t, leafs, 333)
 
 	leafs[0], leafs[1] = leafs[1], leafs[0] // switch 1st and 2nd leaf as a result of split
@@ -316,12 +316,12 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 
 func TestTable_Insert_Overflow(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
-		tablePager     = aPager.ForTable(testOverflowColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager     = pager.ForTable(testOverflowColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable         = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0, nil)
+		table         = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0, nil)
 		rows           = []Row{
 			gen.OverflowRow(MaxInlineVarchar),
 			gen.OverflowRow(MaxInlineVarchar + 100),
@@ -336,10 +336,10 @@ func TestTable_Insert_Overflow(t *testing.T) {
 		}
 		stmt.Inserts = append(stmt.Inserts, rows[0].Values)
 
-		mustInsert(ctx, t, aTable, txManager, stmt)
+		mustInsert(ctx, t, table, txManager, stmt)
 
-		require.Equal(t, 1, int(aPager.TotalPages()))
-		assert.NotNil(t, aPager.pages[0].LeafNode)
+		require.Equal(t, 1, int(pager.TotalPages()))
+		assert.NotNil(t, pager.pages[0].LeafNode)
 	})
 
 	t.Run("Now insert a text that will overflow to a single page", func(t *testing.T) {
@@ -349,13 +349,13 @@ func TestTable_Insert_Overflow(t *testing.T) {
 		}
 		stmt.Inserts = append(stmt.Inserts, rows[1].Values)
 
-		mustInsert(ctx, t, aTable, txManager, stmt)
+		mustInsert(ctx, t, table, txManager, stmt)
 
-		require.Equal(t, 2, int(aPager.TotalPages()))
-		assert.NotNil(t, aPager.pages[0].LeafNode)
-		assert.NotNil(t, aPager.pages[1].OverflowPage)
-		assert.Equal(t, 0, int(aPager.pages[1].OverflowPage.Header.NextPage))
-		assert.Equal(t, 355, int(aPager.pages[1].OverflowPage.Header.DataSize))
+		require.Equal(t, 2, int(pager.TotalPages()))
+		assert.NotNil(t, pager.pages[0].LeafNode)
+		assert.NotNil(t, pager.pages[1].OverflowPage)
+		assert.Equal(t, 0, int(pager.pages[1].OverflowPage.Header.NextPage))
+		assert.Equal(t, 355, int(pager.pages[1].OverflowPage.Header.DataSize))
 	})
 
 	t.Run("Now insert a text that will overflow to a 2 pages", func(t *testing.T) {
@@ -365,34 +365,34 @@ func TestTable_Insert_Overflow(t *testing.T) {
 		}
 		stmt.Inserts = append(stmt.Inserts, rows[2].Values)
 
-		mustInsert(ctx, t, aTable, txManager, stmt)
+		mustInsert(ctx, t, table, txManager, stmt)
 
-		require.Equal(t, 4, int(aPager.TotalPages()))
-		assert.NotNil(t, aPager.pages[0].LeafNode)
-		assert.NotNil(t, aPager.pages[1].OverflowPage)
-		assert.NotNil(t, aPager.pages[2].OverflowPage)
-		assert.NotNil(t, aPager.pages[3].OverflowPage)
+		require.Equal(t, 4, int(pager.TotalPages()))
+		assert.NotNil(t, pager.pages[0].LeafNode)
+		assert.NotNil(t, pager.pages[1].OverflowPage)
+		assert.NotNil(t, pager.pages[2].OverflowPage)
+		assert.NotNil(t, pager.pages[3].OverflowPage)
 
-		assert.Equal(t, aPager.pages[3].Index, aPager.pages[2].OverflowPage.Header.NextPage)
-		assert.Equal(t, 0, int(aPager.pages[3].OverflowPage.Header.NextPage))
+		assert.Equal(t, pager.pages[3].Index, pager.pages[2].OverflowPage.Header.NextPage)
+		assert.Equal(t, 0, int(pager.pages[3].OverflowPage.Header.NextPage))
 
-		assert.Equal(t, MaxOverflowPageData, int(aPager.pages[2].OverflowPage.Header.DataSize))
-		assert.Equal(t, 100, int(aPager.pages[3].OverflowPage.Header.DataSize))
+		assert.Equal(t, MaxOverflowPageData, int(pager.pages[2].OverflowPage.Header.DataSize))
+		assert.Equal(t, 100, int(pager.pages[3].OverflowPage.Header.DataSize))
 	})
 }
 
-func mustInsert(ctx context.Context, t *testing.T, aTable *Table, txManager *TransactionManager, stmt Statement) {
+func mustInsert(ctx context.Context, t *testing.T, table *Table, txManager *TransactionManager, stmt Statement) {
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		_, err := aTable.Insert(ctx, stmt)
+		_, err := table.Insert(ctx, stmt)
 		return err
 	})
 	require.NoError(t, err)
 }
 
-func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []Row) {
-	selectResult, err := aTable.Select(ctx, Statement{
+func checkRows(ctx context.Context, t *testing.T, table *Table, expectedRows []Row) {
+	selectResult, err := table.Select(ctx, Statement{
 		Kind:   Select,
-		Fields: fieldsFromColumns(aTable.Columns...),
+		Fields: fieldsFromColumns(table.Columns...),
 	})
 	require.NoError(t, err)
 
@@ -405,10 +405,10 @@ func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []
 
 	var actual []Row
 	for selectResult.Rows.Next(ctx) {
-		aRow := selectResult.Rows.Row()
-		actual = append(actual, aRow)
+		row := selectResult.Rows.Row()
+		actual = append(actual, row)
 		if len(expectedIDMap) > 0 {
-			_, ok := expectedIDMap[aRow.Values[0].Value.(int64)]
+			_, ok := expectedIDMap[row.Values[0].Value.(int64)]
 			assert.True(t, ok)
 		}
 	}
@@ -419,8 +419,8 @@ func checkRows(ctx context.Context, t *testing.T, aTable *Table, expectedRows []
 		assert.Equal(t, expectedRows[i].Key, actual[i].Key, "row key %d does not match expected %d", i)
 		assert.Equal(t, expectedRows[i].Columns, actual[i].Columns, "row columns %d does not match expected", i)
 		// Compare values, for text values, we don't want to compare pointers to overflow pages
-		for j, aValue := range expectedRows[i].Values {
-			tp, ok := aValue.Value.(TextPointer)
+		for j, val := range expectedRows[i].Values {
+			tp, ok := val.Value.(TextPointer)
 			if ok {
 				assert.Equal(t, int(tp.Length), int(actual[i].Values[j].Value.(TextPointer).Length), "row %d text pointer length %d does not match expected", i, j)
 				assert.Equal(t, tp.Data, actual[i].Values[j].Value.(TextPointer).Data, "row %d text pointer data %d does not match expected", i, j)

@@ -403,7 +403,7 @@ func TestStatement_Validate(t *testing.T) {
 				Nullable: true,
 			},
 		}
-		aTable = NewTable(zap.NewNop(), nil, nil, testTableName, columns, 0, nil)
+		table = NewTable(zap.NewNop(), nil, nil, testTableName, columns, 0, nil)
 
 		aTableWithPK = NewTable(zap.NewNop(), nil, nil, testTableName, columns[0:2], 0, nil, WithPrimaryKey(
 			NewPrimaryKey("foo", columns[0:1], false),
@@ -676,8 +676,8 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("INSERT with wrong number of columns should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns[1:], // Missing the "id" column
+			TableName: table.Name,
+			Columns:   table.Columns[1:], // Missing the "id" column
 			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
@@ -689,7 +689,7 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "insert: expected 4 columns, got 3")
 	})
@@ -697,8 +697,8 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("INSERT with missing required field should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "id"}},
 			Inserts: [][]OptionalValue{
 				{
@@ -707,7 +707,7 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `missing required field "email"`)
 	})
@@ -769,8 +769,8 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("INSERT with NULL for non-nullable column should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
@@ -782,7 +782,7 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `field "id" cannot be NULL`)
 	})
@@ -790,8 +790,8 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("INSERT with unbound placeholder should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
@@ -803,7 +803,7 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `unbound placeholder in value for field "verified"`)
 	})
@@ -811,8 +811,8 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("INSERT with NULL for nullable column should succeed", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
@@ -824,15 +824,15 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.NoError(t, err)
 	})
 
 	t.Run("INSERT with valid values should succeed", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
@@ -844,15 +844,15 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.NoError(t, err)
 	})
 
 	t.Run("INSERT with unknown field should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "bogus"}},
 			Inserts: [][]OptionalValue{
 				{
@@ -863,7 +863,7 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `unknown field "bogus" in table "test_table"`)
 	})
@@ -871,8 +871,8 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("INSERT with invalid UTF-8 string should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
@@ -884,7 +884,7 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `expects valid UTF-8 string for "email"`)
 	})
@@ -892,8 +892,8 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("INSERT with text exceeding maximum VARCHAR length should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Insert,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "id"}, {Name: "email"}},
 			Inserts: [][]OptionalValue{
 				{
@@ -903,7 +903,7 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `field "email" exceeds maximum VARCHAR length of 255`)
 	})
@@ -911,15 +911,15 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("UPDATE with unknown field should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Update,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "unknown_field"}},
 			Updates: map[string]OptionalValue{
 				"unknown_field": {Valid: false},
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `unknown field "unknown_field" in table "test_table"`)
 	})
@@ -927,15 +927,15 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("UPDATE with invalid UTF-8 string should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Update,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "email"}},
 			Updates: map[string]OptionalValue{
 				"email": {Value: NewTextPointer([]byte{0xff, 0xfe, 0xfd}), Valid: true}, // invalid UTF-8,
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `expects valid UTF-8 string for "email"`)
 	})
@@ -943,15 +943,15 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("UPDATE with NULL to non-nullable column should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Update,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "email"}},
 			Updates: map[string]OptionalValue{
 				"email": {}, // NULL for non-nullable email
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `field "email" cannot be NULL`)
 	})
@@ -959,15 +959,15 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("UPDATE with unbound placeholder should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Update,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "age"}},
 			Updates: map[string]OptionalValue{
 				"age": {Value: Placeholder{}, Valid: true}, // ? (unbound placeholder)
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `unbound placeholder in value for field "age"`)
 	})
@@ -975,23 +975,23 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("UPDATE with NULL to nullable column should succeed", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Update,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "age"}},
 			Updates: map[string]OptionalValue{
 				"age": {Valid: false}, // NULL for nullable age
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.NoError(t, err)
 	})
 
 	t.Run("UPDATE with valid value should succeed", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Update,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "email"}, {Name: "age"}},
 			Updates: map[string]OptionalValue{
 				"email": {Value: NewTextPointer([]byte("new@example.com")), Valid: true},
@@ -999,19 +999,19 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.NoError(t, err)
 	})
 
 	t.Run("SELECT with no fields should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{}, // No fields specified
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `at least one field to select is required`)
 	})
@@ -1019,12 +1019,12 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("SELECT with duplicate should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "id"}},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `duplicate field "id" in select statement`)
 	})
@@ -1032,12 +1032,12 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("SELECT with unknown field should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "unknown_field"}},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `unknown field "unknown_field" in table "test_table"`)
 	})
@@ -1045,8 +1045,8 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("SELECT with unknown field in ORDER BY should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "id"}, {Name: "email"}},
 			OrderBy: []OrderBy{
 				{
@@ -1055,7 +1055,7 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `unknown field "unknown_field" in ORDER BY clause`)
 	})
@@ -1063,8 +1063,8 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("SELECT COUNT(*) with ORDER BY should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "COUNT(*)"}},
 			OrderBy: []OrderBy{
 				{
@@ -1073,7 +1073,7 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `ORDER BY cannot be used with COUNT(*)`)
 	})
@@ -1081,13 +1081,13 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("SELECT COUNT(*) with OFFSET should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "COUNT(*)"}},
 			Offset:    OptionalValue{Value: int64(100), Valid: true},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `OFFSET cannot be used with COUNT(*)`)
 	})
@@ -1095,13 +1095,13 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("SELECT COUNT(*) with LIMIT should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "COUNT(*)"}},
 			Limit:     OptionalValue{Value: int64(100), Valid: true},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `LIMIT cannot be used with COUNT(*)`)
 	})
@@ -1109,13 +1109,13 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("SELECT with invalid LIMIT should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "id"}, {Name: "email"}},
 			Limit:     OptionalValue{Value: int64(-5), Valid: true},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `LIMIT must be a non-negative integer`)
 	})
@@ -1123,11 +1123,11 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("SELECT with duplicate table name in JOIN should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
-			TableName:  aTable.Name,
+			TableName:  table.Name,
 			TableAlias: "t1",
 			Joins: []Join{
 				{
-					TableName:  aTable.Name, // Duplicate table name
+					TableName:  table.Name, // Duplicate table name
 					TableAlias: "t2",
 					Conditions: Conditions{
 						{
@@ -1144,11 +1144,11 @@ func TestStatement_Validate(t *testing.T) {
 					},
 				},
 			},
-			Columns: aTable.Columns,
+			Columns: table.Columns,
 			Fields:  []Field{{Name: "id"}, {Name: "email"}},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `duplicate table name "test_table" in JOINs`)
 	})
@@ -1156,7 +1156,7 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("SELECT with duplicate table alias in JOIN should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:       Select,
-			TableName:  aTable.Name,
+			TableName:  table.Name,
 			TableAlias: "t1",
 			Joins: []Join{
 				{
@@ -1177,11 +1177,11 @@ func TestStatement_Validate(t *testing.T) {
 					},
 				},
 			},
-			Columns: aTable.Columns,
+			Columns: table.Columns,
 			Fields:  []Field{{Name: "id"}, {Name: "email"}},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `duplicate table alias "t1" in JOINs`)
 	})
@@ -1189,13 +1189,13 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("SELECT with invalid offset should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
+			TableName: table.Name,
+			Columns:   table.Columns,
 			Fields:    []Field{{Name: "id"}, {Name: "email"}},
 			Offset:    OptionalValue{Value: int64(-5), Valid: true},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `OFFSET must be a non-negative integer`)
 	})
@@ -1203,9 +1203,9 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("SELECT with non field left operand should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
-			Fields:    fieldsFromColumns(aTable.Columns...),
+			TableName: table.Name,
+			Columns:   table.Columns,
+			Fields:    fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -1223,7 +1223,7 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `operand1 in WHERE condition must be a field`)
 	})
@@ -1231,9 +1231,9 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("SELECT with unbound placeholder should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
-			Fields:    fieldsFromColumns(aTable.Columns...),
+			TableName: table.Name,
+			Columns:   table.Columns,
+			Fields:    fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -1250,7 +1250,7 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `unbound placeholder in WHERE clause`)
 	})
@@ -1258,9 +1258,9 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("SELECT with unbound placeholder in list condition should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
-			Fields:    fieldsFromColumns(aTable.Columns...),
+			TableName: table.Name,
+			Columns:   table.Columns,
+			Fields:    fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -1281,7 +1281,7 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `unbound placeholder in WHERE clause`)
 	})
@@ -1289,9 +1289,9 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("SELECT with inconsistent argument list for IN should fail", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
-			Fields:    fieldsFromColumns(aTable.Columns...),
+			TableName: table.Name,
+			Columns:   table.Columns,
+			Fields:    fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -1309,7 +1309,7 @@ func TestStatement_Validate(t *testing.T) {
 			},
 		}
 
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, `mixed operand types in WHERE condition list`)
 	})
@@ -1317,9 +1317,9 @@ func TestStatement_Validate(t *testing.T) {
 	t.Run("SELECT with same-field equality conditions in one AND group is valid (unsatisfiable but not an error)", func(t *testing.T) {
 		stmt := Statement{
 			Kind:      Select,
-			TableName: aTable.Name,
-			Columns:   aTable.Columns,
-			Fields:    fieldsFromColumns(aTable.Columns...),
+			TableName: table.Name,
+			Columns:   table.Columns,
+			Fields:    fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -1351,7 +1351,7 @@ func TestStatement_Validate(t *testing.T) {
 		// Contradictory equality conditions in one AND group are unsatisfiable but
 		// not a validation error — they naturally return zero rows when evaluated.
 		// DNF expansion of nested WHERE clauses can legitimately produce such groups.
-		err := stmt.Validate(aTable)
+		err := stmt.Validate(table)
 		require.NoError(t, err)
 	})
 }

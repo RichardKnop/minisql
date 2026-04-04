@@ -11,15 +11,15 @@ import (
 )
 
 func TestTable_Select_UniqueIndex(t *testing.T) {
-	aPager, dbFile := initTest(t)
+	pager, dbFile := initTest(t)
 
 	var (
 		ctx        = context.Background()
 		rows       = gen.RowsWithUniqueIndex(38)
-		tablePager = aPager.ForTable(testColumns[0:2])
-		txManager  = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager = pager.ForTable(testColumns[0:2])
+		txManager  = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable     *Table
+		table     *Table
 		indexName  = UniqueIndexName(testTableName, "email")
 	)
 
@@ -30,7 +30,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 		}
 		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
-		aTable = NewTable(
+		table = NewTable(
 			testLogger,
 			txPager,
 			txManager,
@@ -50,23 +50,23 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 	require.NoError(t, err)
 
 	var (
-		indexPager   = aPager.ForIndex(testColumns[1:2], true)
+		indexPager   = pager.ForIndex(testColumns[1:2], true)
 		txIndexPager = NewTransactionalPager(
 			indexPager,
-			aTable.txManager,
+			table.txManager,
 			testTableName,
-			aTable.UniqueIndexes[indexName].Name,
+			table.UniqueIndexes[indexName].Name,
 		)
 	)
 
 	// Batch insert test rows
 	stmt := Statement{
 		Kind:    Insert,
-		Fields:  fieldsFromColumns(aTable.Columns...),
+		Fields:  fieldsFromColumns(table.Columns...),
 		Inserts: make([][]OptionalValue, 0, len(rows)),
 	}
-	for _, aRow := range rows {
-		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	for _, row := range rows {
+		stmt.Inserts = append(stmt.Inserts, row.Values)
 	}
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -74,42 +74,42 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		uniqueIndex := aTable.UniqueIndexes[indexName]
-		uniqueIndex.Index, err = aTable.createBTreeIndex(
+		uniqueIndex := table.UniqueIndexes[indexName]
+		uniqueIndex.Index, err = table.createBTreeIndex(
 			txIndexPager,
 			freePage,
-			aTable.UniqueIndexes[indexName].Columns,
-			aTable.UniqueIndexes[indexName].Name,
+			table.UniqueIndexes[indexName].Columns,
+			table.UniqueIndexes[indexName].Name,
 			true,
 		)
-		aTable.UniqueIndexes[indexName] = uniqueIndex
+		table.UniqueIndexes[indexName] = uniqueIndex
 		if err != nil {
 			return err
 		}
-		_, err = aTable.Insert(ctx, stmt)
+		_, err = table.Insert(ctx, stmt)
 		return err
 	})
 	require.NoError(t, err)
 
-	checkRows(ctx, t, aTable, rows)
+	checkRows(ctx, t, table, rows)
 
 	t.Run("Select all rows", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		assert.Equal(t, rows, collectRows(ctx, aResult))
+		assert.Equal(t, rows, collectRows(ctx, result))
 	})
 
 	t.Run("Select single row by unique index key - index scan", func(t *testing.T) {
 		email := rows[5].Values[1].Value.(TextPointer)
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -127,10 +127,10 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		actual := collectRows(ctx, aResult)
+		actual := collectRows(ctx, result)
 		assert.Len(t, actual, 1)
 		assert.Equal(t, rows[5], actual[0])
 	})
@@ -144,7 +144,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 		}
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -162,18 +162,18 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
 		// We expect rows 5, 11, 12, and 33
 		expected := make([]Row, 0, len(emails))
-		for i, aRow := range rows {
+		for i, row := range rows {
 			if i != 5 && i != 11 && i != 12 && i != 33 {
 				continue
 			}
-			expected = append(expected, aRow)
+			expected = append(expected, row)
 		}
-		assert.Equal(t, expected, collectRows(ctx, aResult))
+		assert.Equal(t, expected, collectRows(ctx, result))
 	})
 
 	t.Run("Select rows where unique key is NOT IN - sequential scan", func(t *testing.T) {
@@ -185,7 +185,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 		}
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -203,18 +203,18 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
 		// We expect all rows other than 5, 11, 12, and 33
 		expected := make([]Row, 0, len(emails))
-		for i, aRow := range rows {
+		for i, row := range rows {
 			if i == 5 || i == 11 || i == 12 || i == 33 {
 				continue
 			}
-			expected = append(expected, aRow)
+			expected = append(expected, row)
 		}
-		actual := collectRows(ctx, aResult)
+		actual := collectRows(ctx, result)
 
 		assert.Equal(t, expected, actual)
 	})
@@ -231,7 +231,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 		email := rowsOrderedByEmail[10].Values[1].Value.(TextPointer)
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -249,18 +249,18 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
 		// We expect rows 12 and onwards
 		expected := make([]Row, 0, len(rowsOrderedByEmail)-11)
-		for i, aRow := range rowsOrderedByEmail {
+		for i, row := range rowsOrderedByEmail {
 			if i < 11 {
 				continue
 			}
-			expected = append(expected, aRow)
+			expected = append(expected, row)
 		}
-		actual := collectRows(ctx, aResult)
+		actual := collectRows(ctx, result)
 		assert.Len(t, actual, len(expected))
 		assert.Equal(t, expected, actual)
 	})
@@ -269,7 +269,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 		email := rowsOrderedByEmail[30].Values[1].Value.(TextPointer)
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -287,18 +287,18 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
 		// We expect rows until 30
 		expected := make([]Row, 0, len(rowsOrderedByEmail)-9)
-		for i, aRow := range rowsOrderedByEmail {
+		for i, row := range rowsOrderedByEmail {
 			if i >= 30 {
 				continue
 			}
-			expected = append(expected, aRow)
+			expected = append(expected, row)
 		}
-		actual := collectRows(ctx, aResult)
+		actual := collectRows(ctx, result)
 		assert.Len(t, actual, len(expected))
 		assert.Equal(t, expected, actual)
 	})
@@ -308,7 +308,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 		email2 := rowsOrderedByEmail[30].Values[1].Value.(TextPointer)
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -337,18 +337,18 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
 		// We expect all rows between 10 and 30 inclusive
 		expected := make([]Row, 0, len(rowsOrderedByEmail)-9)
-		for i, aRow := range rowsOrderedByEmail {
+		for i, row := range rowsOrderedByEmail {
 			if i < 10 || i > 30 {
 				continue
 			}
-			expected = append(expected, aRow)
+			expected = append(expected, row)
 		}
-		actual := collectRows(ctx, aResult)
+		actual := collectRows(ctx, result)
 		assert.Len(t, actual, len(expected))
 		assert.Equal(t, expected, actual)
 	})
@@ -360,7 +360,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 		)
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -391,17 +391,17 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
 		expected := []Row{rows[5].Clone(), rows[15].Clone()}
-		assert.Equal(t, expected, collectRows(ctx, aResult))
+		assert.Equal(t, expected, collectRows(ctx, result))
 	})
 
 	t.Run("Select with order by sort with index asc", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			OrderBy: []OrderBy{
 				{
 					Field:     Field{Name: "email"},
@@ -410,11 +410,11 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
 		// We expect all rows sorted by email ascending
-		assert.Equal(t, rowsOrderedByEmail, collectRows(ctx, aResult))
+		assert.Equal(t, rowsOrderedByEmail, collectRows(ctx, result))
 	})
 
 	rowsOrderedByEmailDesc := make([]Row, len(rows))
@@ -428,7 +428,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 	t.Run("Select with order by sort with index desc", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			OrderBy: []OrderBy{
 				{
 					Field:     Field{Name: "email"},
@@ -437,10 +437,10 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
 		// We expect all rows sorted by ID descending
-		assert.Equal(t, rowsOrderedByEmailDesc, collectRows(ctx, aResult))
+		assert.Equal(t, rowsOrderedByEmailDesc, collectRows(ctx, result))
 	})
 }

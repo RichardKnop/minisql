@@ -11,22 +11,22 @@ import (
 
 func TestIndex_Insert(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
 		key            = int64(1)
-		aColumn        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = aPager.ForIndex([]Column{aColumn}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
+		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager     = pager.ForIndex([]Column{col}, true)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
+	idx, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
-	anIndex.maximumKeys = 3
+	idx.maximumKeys = 3
 
 	t.Run("Insert first three keys into root node", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for i := 0; i < 3; i++ {
-				if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
+				if err := idx.Insert(ctx, key, RowID(key+100)); err != nil {
 					return err
 				}
 				key++
@@ -42,13 +42,13 @@ func TestIndex_Insert(t *testing.T) {
 		*/
 
 
-		rootNode := aPager.pages[0].IndexNode.(*IndexNode[int64])
+		rootNode := pager.pages[0].IndexNode.(*IndexNode[int64])
 		assertIndexNode(t, rootNode, true, true, 0, []int64{1, 2, 3}, nil)
 	})
 
 	t.Run("Insert duplicate key fails", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Insert(ctx, key-1, RowID(key-1+100))
+			return idx.Insert(ctx, key-1, RowID(key-1+100))
 		})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrDuplicateKey)
@@ -56,7 +56,7 @@ func TestIndex_Insert(t *testing.T) {
 
 	t.Run("Insert 4th key, causes a split", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Insert(ctx, key, RowID(key+100))
+			return idx.Insert(ctx, key, RowID(key+100))
 		})
 		require.NoError(t, err)
 		key++
@@ -72,9 +72,9 @@ func TestIndex_Insert(t *testing.T) {
 		*/
 
 
-		rootNode := aPager.pages[0].IndexNode.(*IndexNode[int64])
-		leftChild := aPager.pages[1].IndexNode.(*IndexNode[int64])
-		rightChild := aPager.pages[2].IndexNode.(*IndexNode[int64])
+		rootNode := pager.pages[0].IndexNode.(*IndexNode[int64])
+		leftChild := pager.pages[1].IndexNode.(*IndexNode[int64])
+		rightChild := pager.pages[2].IndexNode.(*IndexNode[int64])
 
 		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{2}, []PageIndex{1, 2})
 		assertIndexNode(t, leftChild, false, true, PageIndex(0), []int64{1}, nil)
@@ -84,7 +84,7 @@ func TestIndex_Insert(t *testing.T) {
 	t.Run("Insert 2 more keys, another split", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for i := 0; i < 2; i++ {
-				if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
+				if err := idx.Insert(ctx, key, RowID(key+100)); err != nil {
 					return err
 				}
 				key++
@@ -105,10 +105,10 @@ func TestIndex_Insert(t *testing.T) {
 
 
 		var (
-			rootNode    = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			leftChild   = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			middleChild = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			rightChild  = aPager.pages[3].IndexNode.(*IndexNode[int64])
+			rootNode    = pager.pages[0].IndexNode.(*IndexNode[int64])
+			leftChild   = pager.pages[1].IndexNode.(*IndexNode[int64])
+			middleChild = pager.pages[2].IndexNode.(*IndexNode[int64])
+			rightChild  = pager.pages[3].IndexNode.(*IndexNode[int64])
 		)
 
 		assertIndexNode(t, rootNode, true, false, PageIndex(0), []int64{2, 4}, []PageIndex{1, 2, 3})
@@ -120,7 +120,7 @@ func TestIndex_Insert(t *testing.T) {
 	t.Run("Insert 2 more keys, another split", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for i := 0; i < 2; i++ {
-				if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
+				if err := idx.Insert(ctx, key, RowID(key+100)); err != nil {
 					return err
 				}
 				key++
@@ -141,11 +141,11 @@ func TestIndex_Insert(t *testing.T) {
 
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			leaf1    = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2    = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf3    = aPager.pages[3].IndexNode.(*IndexNode[int64])
-			leaf4    = aPager.pages[4].IndexNode.(*IndexNode[int64])
+			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
+			leaf1    = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2    = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf3    = pager.pages[3].IndexNode.(*IndexNode[int64])
+			leaf4    = pager.pages[4].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -159,7 +159,7 @@ func TestIndex_Insert(t *testing.T) {
 
 	t.Run("Insert 1 more key, internal split", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Insert(ctx, key, RowID(key+100))
+			return idx.Insert(ctx, key, RowID(key+100))
 		})
 		require.NoError(t, err)
 		key++
@@ -180,13 +180,13 @@ func TestIndex_Insert(t *testing.T) {
 
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-			leaf1     = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2     = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf3     = aPager.pages[3].IndexNode.(*IndexNode[int64])
-			leaf4     = aPager.pages[4].IndexNode.(*IndexNode[int64])
+			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
+			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
+			internal2 = pager.pages[6].IndexNode.(*IndexNode[int64])
+			leaf1     = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2     = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf3     = pager.pages[3].IndexNode.(*IndexNode[int64])
+			leaf4     = pager.pages[4].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -204,7 +204,7 @@ func TestIndex_Insert(t *testing.T) {
 	t.Run("Keep inserting more keys", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for i := 0; i < 5; i++ {
-				if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
+				if err := idx.Insert(ctx, key, RowID(key+100)); err != nil {
 					return err
 				}
 				key++
@@ -229,17 +229,17 @@ func TestIndex_Insert(t *testing.T) {
 
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-			internal3 = aPager.pages[9].IndexNode.(*IndexNode[int64])
-			leaf1     = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2     = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf3     = aPager.pages[3].IndexNode.(*IndexNode[int64])
-			leaf4     = aPager.pages[4].IndexNode.(*IndexNode[int64])
-			leaf5     = aPager.pages[7].IndexNode.(*IndexNode[int64])
-			leaf6     = aPager.pages[8].IndexNode.(*IndexNode[int64])
-			leaf7     = aPager.pages[10].IndexNode.(*IndexNode[int64])
+			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
+			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
+			internal2 = pager.pages[6].IndexNode.(*IndexNode[int64])
+			internal3 = pager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1     = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2     = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf3     = pager.pages[3].IndexNode.(*IndexNode[int64])
+			leaf4     = pager.pages[4].IndexNode.(*IndexNode[int64])
+			leaf5     = pager.pages[7].IndexNode.(*IndexNode[int64])
+			leaf6     = pager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf7     = pager.pages[10].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -260,26 +260,26 @@ func TestIndex_Insert(t *testing.T) {
 
 	expectedKeys := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}
 
-	checkIndexKeys(ctx, t, anIndex, expectedKeys)
+	checkIndexKeys(ctx, t, idx, expectedKeys)
 }
 
 func TestIndex_Insert_OutOfOrder(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
 		keys           = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
-		aColumn        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = aPager.ForIndex([]Column{aColumn}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
+		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager     = pager.ForIndex([]Column{col}, true)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
+	idx, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
-	anIndex.maximumKeys = 3
+	idx.maximumKeys = 3
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
-			if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
+			if err := idx.Insert(ctx, key, RowID(key+100)); err != nil {
 				return err
 			}
 		}
@@ -301,25 +301,25 @@ func TestIndex_Insert_OutOfOrder(t *testing.T) {
 			  +---+    +-------+  +-----------+    +----+   +-----+  +---------+   +---------+         +---------+
 	*/
 
-	checkIndexKeys(ctx, t, anIndex, keys)
+	checkIndexKeys(ctx, t, idx, keys)
 
 
 	var (
-		rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-		internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-		internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-		internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+		rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
+		internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
+		internal2 = pager.pages[6].IndexNode.(*IndexNode[int64])
+		internal3 = pager.pages[10].IndexNode.(*IndexNode[int64])
 		// leaves of first internal node
-		leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-		leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
-		leaf3 = aPager.pages[4].IndexNode.(*IndexNode[int64])
+		leaf1 = pager.pages[1].IndexNode.(*IndexNode[int64])
+		leaf2 = pager.pages[9].IndexNode.(*IndexNode[int64])
+		leaf3 = pager.pages[4].IndexNode.(*IndexNode[int64])
 		// leaves of second internal node
-		leaf4 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-		leaf5 = aPager.pages[7].IndexNode.(*IndexNode[int64])
-		leaf6 = aPager.pages[11].IndexNode.(*IndexNode[int64])
+		leaf4 = pager.pages[2].IndexNode.(*IndexNode[int64])
+		leaf5 = pager.pages[7].IndexNode.(*IndexNode[int64])
+		leaf6 = pager.pages[11].IndexNode.(*IndexNode[int64])
 		// leaves of third node
-		leaf7 = aPager.pages[3].IndexNode.(*IndexNode[int64])
-		leaf8 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+		leaf7 = pager.pages[3].IndexNode.(*IndexNode[int64])
+		leaf8 = pager.pages[8].IndexNode.(*IndexNode[int64])
 	)
 
 	// Root node
@@ -339,24 +339,24 @@ func TestIndex_Insert_OutOfOrder(t *testing.T) {
 	assertIndexNode(t, leaf8, false, true, PageIndex(10), []int64{20, 21}, nil)
 }
 
-func assertIndexNode(t *testing.T, aNode *IndexNode[int64], isRoot, isLeaf bool, parent PageIndex, keys []int64, children []PageIndex) {
+func assertIndexNode(t *testing.T, node *IndexNode[int64], isRoot, isLeaf bool, parent PageIndex, keys []int64, children []PageIndex) {
 	if isRoot {
-		assert.True(t, aNode.Header.IsRoot, "should be a root node")
+		assert.True(t, node.Header.IsRoot, "should be a root node")
 	} else {
-		assert.False(t, aNode.Header.IsRoot, "should not be a root node")
+		assert.False(t, node.Header.IsRoot, "should not be a root node")
 	}
 	if isLeaf {
-		assert.True(t, aNode.Header.IsLeaf, "should be a leaf node")
+		assert.True(t, node.Header.IsLeaf, "should be a leaf node")
 	} else {
-		assert.False(t, aNode.Header.IsLeaf, "should not be a leaf node")
+		assert.False(t, node.Header.IsLeaf, "should not be a leaf node")
 	}
-	assert.Equal(t, parent, aNode.Header.Parent, "parent index mismatch")
-	assert.Equal(t, len(keys), int(aNode.Header.Keys), "number of keys mismatch")
-	assert.Equal(t, keys, aNode.Keys(), "keys mismatch")
-	assert.Equal(t, children, aNode.Children(), "children mismatch")
+	assert.Equal(t, parent, node.Header.Parent, "parent index mismatch")
+	assert.Equal(t, len(keys), int(node.Header.Keys), "number of keys mismatch")
+	assert.Equal(t, keys, node.Keys(), "keys mismatch")
+	assert.Equal(t, children, node.Children(), "children mismatch")
 	expectedRowIDs := make([]RowID, len(keys))
 	for i := range keys {
 		expectedRowIDs[i] = RowID(keys[i] + 100)
 	}
-	assert.Equal(t, expectedRowIDs, aNode.RowIDs(), "row IDs mismatch")
+	assert.Equal(t, expectedRowIDs, node.RowIDs(), "row IDs mismatch")
 }

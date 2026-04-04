@@ -13,7 +13,7 @@ func TestLeafNode_Marshal(t *testing.T) {
 	t.Parallel()
 
 	var (
-		aNode   = NewLeafNode()
+		node   = NewLeafNode()
 		columns = []Column{
 			{
 				Kind: Varchar,
@@ -22,7 +22,7 @@ func TestLeafNode_Marshal(t *testing.T) {
 		}
 	)
 
-	aNode.Header = LeafNodeHeader{
+	node.Header = LeafNodeHeader{
 		Header: Header{
 			IsInternal: false,
 			IsRoot:     false,
@@ -31,7 +31,7 @@ func TestLeafNode_Marshal(t *testing.T) {
 		Cells:    2,
 		NextLeaf: 4,
 	}
-	aNode.Cells = append(aNode.Cells, Cell{
+	node.Cells = append(node.Cells, Cell{
 		Key:   1,
 		Value: prefixWithLength(bytes.Repeat([]byte{'a'}, 230)),
 	}, Cell{
@@ -39,18 +39,18 @@ func TestLeafNode_Marshal(t *testing.T) {
 		NullBitmask: bitwise.Set(uint64(0), 0),
 	})
 
-	buf := make([]byte, aNode.Size())
-	err := aNode.Marshal(buf)
+	buf := make([]byte, node.Size())
+	err := node.Marshal(buf)
 	require.NoError(t, err)
 
 	recreatedNode := NewLeafNode()
 	_, err = recreatedNode.Unmarshal(columns, buf)
 	require.NoError(t, err)
 
-	assert.Equal(t, aNode, recreatedNode)
+	assert.Equal(t, node, recreatedNode)
 
-	for idx := 0; idx < len(aNode.Cells); idx++ {
-		assert.Equal(t, aNode.Cells[idx], recreatedNode.Cells[idx])
+	for idx := 0; idx < len(node.Cells); idx++ {
+		assert.Equal(t, node.Cells[idx], recreatedNode.Cells[idx])
 	}
 }
 

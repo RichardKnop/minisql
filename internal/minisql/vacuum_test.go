@@ -40,10 +40,10 @@ func newVacuumTestDB(t *testing.T, aParser Parser) (*Database, string) {
 		os.Remove(f.Name() + ".bak")
 	})
 
-	aPager, err := NewPager(f, PageSize, PageCacheSize)
+	pager, err := NewPager(f, PageSize, PageCacheSize)
 	require.NoError(t, err)
 
-	db, err := NewDatabase(context.Background(), testLogger, f.Name(), aParser, aPager, aPager)
+	db, err := NewDatabase(context.Background(), testLogger, f.Name(), aParser, pager, pager)
 	require.NoError(t, err)
 
 	return db, f.Name()

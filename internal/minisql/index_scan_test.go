@@ -11,21 +11,21 @@ import (
 
 func TestIndex_ScanAll(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
 		keys           = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
-		aColumn        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = aPager.ForIndex([]Column{aColumn}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
+		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager     = pager.ForIndex([]Column{col}, true)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
+	idx, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
-	anIndex.maximumKeys = 3
+	idx.maximumKeys = 3
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
-			if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
+			if err := idx.Insert(ctx, key, RowID(key+100)); err != nil {
 				return err
 			}
 		}
@@ -53,7 +53,7 @@ func TestIndex_ScanAll(t *testing.T) {
 			scannedKeys   []int64
 			scannedRowIDs []RowID
 		)
-		err := anIndex.ScanAll(ctx, false, func(key any, rowID RowID) error {
+		err := idx.ScanAll(ctx, false, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(int64))
 			scannedRowIDs = append(scannedRowIDs, rowID)
 			return nil
@@ -68,7 +68,7 @@ func TestIndex_ScanAll(t *testing.T) {
 			scannedKeys   []int64
 			scannedRowIDs []RowID
 		)
-		err := anIndex.ScanAll(ctx, true, func(key any, rowID RowID) error {
+		err := idx.ScanAll(ctx, true, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(int64))
 			scannedRowIDs = append(scannedRowIDs, rowID)
 			return nil
@@ -81,27 +81,27 @@ func TestIndex_ScanAll(t *testing.T) {
 
 func TestIndex_ScanAll_NonUnique(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
 		keys           = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
-		aColumn        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = aPager.ForIndex([]Column{aColumn}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
+		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager     = pager.ForIndex([]Column{col}, true)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewNonUniqueIndex[int64](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
+	idx, err := NewNonUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
-	anIndex.maximumKeys = 3
+	idx.maximumKeys = 3
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
-			if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
+			if err := idx.Insert(ctx, key, RowID(key+100)); err != nil {
 				return err
 			}
 			// Insert a duplicate key to test non-unique index scanning of all row IDs for a key
 			if key == 21 {
 				for i := 1; i <= 5; i++ {
-					if err := anIndex.Insert(ctx, key, RowID(key+100+int64(i))); err != nil {
+					if err := idx.Insert(ctx, key, RowID(key+100+int64(i))); err != nil {
 						return err
 					}
 				}
@@ -131,7 +131,7 @@ func TestIndex_ScanAll_NonUnique(t *testing.T) {
 			scannedKeys   []int64
 			scannedRowIDs []RowID
 		)
-		err := anIndex.ScanAll(ctx, false, func(key any, rowID RowID) error {
+		err := idx.ScanAll(ctx, false, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(int64))
 			scannedRowIDs = append(scannedRowIDs, rowID)
 			return nil
@@ -146,7 +146,7 @@ func TestIndex_ScanAll_NonUnique(t *testing.T) {
 			scannedKeys   []int64
 			scannedRowIDs []RowID
 		)
-		err := anIndex.ScanAll(ctx, true, func(key any, rowID RowID) error {
+		err := idx.ScanAll(ctx, true, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(int64))
 			scannedRowIDs = append(scannedRowIDs, rowID)
 			return nil
@@ -159,21 +159,21 @@ func TestIndex_ScanAll_NonUnique(t *testing.T) {
 
 func TestIndex_ScanRange(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
 		keys           = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
-		aColumn        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = aPager.ForIndex([]Column{aColumn}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
+		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager     = pager.ForIndex([]Column{col}, true)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
+	idx, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
-	anIndex.maximumKeys = 3
+	idx.maximumKeys = 3
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
-			if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
+			if err := idx.Insert(ctx, key, RowID(key+100)); err != nil {
 				return err
 			}
 		}
@@ -201,7 +201,7 @@ func TestIndex_ScanRange(t *testing.T) {
 			scannedKeys   []int64
 			scannedRowIDs []RowID
 		)
-		err := anIndex.ScanRange(ctx, RangeCondition{}, false, func(key any, rowID RowID) error {
+		err := idx.ScanRange(ctx, RangeCondition{}, false, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(int64))
 			scannedRowIDs = append(scannedRowIDs, rowID)
 			return nil
@@ -216,7 +216,7 @@ func TestIndex_ScanRange(t *testing.T) {
 			scannedKeys   []int64
 			scannedRowIDs []RowID
 		)
-		err := anIndex.ScanRange(ctx, RangeCondition{
+		err := idx.ScanRange(ctx, RangeCondition{
 			Upper: &RangeBound{
 				Value:     int64(18),
 				Inclusive: false,
@@ -236,7 +236,7 @@ func TestIndex_ScanRange(t *testing.T) {
 			scannedKeys   []int64
 			scannedRowIDs []RowID
 		)
-		err := anIndex.ScanRange(ctx, RangeCondition{
+		err := idx.ScanRange(ctx, RangeCondition{
 			Upper: &RangeBound{
 				Value:     int64(18),
 				Inclusive: true,
@@ -256,7 +256,7 @@ func TestIndex_ScanRange(t *testing.T) {
 			scannedKeys   []int64
 			scannedRowIDs []RowID
 		)
-		err := anIndex.ScanRange(ctx, RangeCondition{
+		err := idx.ScanRange(ctx, RangeCondition{
 			Lower: &RangeBound{
 				Value:     int64(18),
 				Inclusive: false,
@@ -276,7 +276,7 @@ func TestIndex_ScanRange(t *testing.T) {
 			scannedKeys   []int64
 			scannedRowIDs []RowID
 		)
-		err := anIndex.ScanRange(ctx, RangeCondition{
+		err := idx.ScanRange(ctx, RangeCondition{
 			Lower: &RangeBound{
 				Value:     int64(18),
 				Inclusive: true,
@@ -296,7 +296,7 @@ func TestIndex_ScanRange(t *testing.T) {
 			scannedKeys   []int64
 			scannedRowIDs []RowID
 		)
-		err := anIndex.ScanRange(ctx, RangeCondition{
+		err := idx.ScanRange(ctx, RangeCondition{
 			Lower: &RangeBound{
 				Value:     int64(7),
 				Inclusive: false,
@@ -320,7 +320,7 @@ func TestIndex_ScanRange(t *testing.T) {
 			scannedKeys   []int64
 			scannedRowIDs []RowID
 		)
-		err := anIndex.ScanRange(ctx, RangeCondition{
+		err := idx.ScanRange(ctx, RangeCondition{
 			Lower: &RangeBound{
 				Value:     int64(7),
 				Inclusive: true,
@@ -344,7 +344,7 @@ func TestIndex_ScanRange(t *testing.T) {
 			scannedKeys   []int64
 			scannedRowIDs []RowID
 		)
-		err := anIndex.ScanRange(ctx, RangeCondition{
+		err := idx.ScanRange(ctx, RangeCondition{
 			Lower: &RangeBound{
 				Value:     int64(7),
 				Inclusive: false,
@@ -368,7 +368,7 @@ func TestIndex_ScanRange(t *testing.T) {
 			scannedKeys   []int64
 			scannedRowIDs []RowID
 		)
-		err := anIndex.ScanRange(ctx, RangeCondition{
+		err := idx.ScanRange(ctx, RangeCondition{
 			Lower: &RangeBound{
 				Value:     int64(7),
 				Inclusive: false,
@@ -393,7 +393,7 @@ func TestIndex_ScanRange(t *testing.T) {
 			scannedKeys   []int64
 			scannedRowIDs []RowID
 		)
-		err := anIndex.ScanRange(ctx, RangeCondition{
+		err := idx.ScanRange(ctx, RangeCondition{
 			Lower: &RangeBound{
 				Value:     int64(18),
 				Inclusive: true,
@@ -413,7 +413,7 @@ func TestIndex_ScanRange(t *testing.T) {
 			scannedKeys   []int64
 			scannedRowIDs []RowID
 		)
-		err := anIndex.ScanRange(ctx, RangeCondition{
+		err := idx.ScanRange(ctx, RangeCondition{
 			Upper: &RangeBound{
 				Value:     int64(18),
 				Inclusive: false,
@@ -431,7 +431,7 @@ func TestIndex_ScanRange(t *testing.T) {
 
 func TestIndex_ScanRange_CompositeKey(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
 		columns        = testCompositeKeyColumns[1:3]
 		keys           = []CompositeKey{
@@ -441,16 +441,16 @@ func TestIndex_ScanRange_CompositeKey(t *testing.T) {
 			NewCompositeKey(columns, "Vanessa", "Eldred"),
 			NewCompositeKey(columns, "Ralph", "Darren"),
 		}
-		indexPager = aPager.ForIndex(columns, true)
-		txManager  = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
+		indexPager = pager.ForIndex(columns, true)
+		txManager  = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
 		txPager    = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewUniqueIndex[CompositeKey](testLogger, txManager, "test_index", columns, txPager, 0)
+	idx, err := NewUniqueIndex[CompositeKey](testLogger, txManager, "test_index", columns, txPager, 0)
 	require.NoError(t, err)
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for i, key := range keys {
-			if err := anIndex.Insert(ctx, key, RowID(i+1)); err != nil {
+			if err := idx.Insert(ctx, key, RowID(i+1)); err != nil {
 				return err
 			}
 		}
@@ -460,7 +460,7 @@ func TestIndex_ScanRange_CompositeKey(t *testing.T) {
 
 	t.Run("scan range all", func(t *testing.T) {
 		var scannedKeys []CompositeKey
-		require.NoError(t, anIndex.ScanRange(ctx, RangeCondition{}, false, func(key any, rowID RowID) error {
+		require.NoError(t, idx.ScanRange(ctx, RangeCondition{}, false, func(key any, rowID RowID) error {
 			scannedKeys = append(scannedKeys, key.(CompositeKey))
 			return nil
 		}))
@@ -475,7 +475,7 @@ func TestIndex_ScanRange_CompositeKey(t *testing.T) {
 
 	t.Run("scan range < Redd Garnett", func(t *testing.T) {
 		var scannedKeys []CompositeKey
-		require.NoError(t, anIndex.ScanRange(ctx, RangeCondition{
+		require.NoError(t, idx.ScanRange(ctx, RangeCondition{
 			Upper: &RangeBound{
 				Value:     NewCompositeKey(columns, "Redd", "Garnett"),
 				Inclusive: false,
@@ -493,7 +493,7 @@ func TestIndex_ScanRange_CompositeKey(t *testing.T) {
 
 	t.Run("scan range > Redd Garnett", func(t *testing.T) {
 		var scannedKeys []CompositeKey
-		require.NoError(t, anIndex.ScanRange(ctx, RangeCondition{
+		require.NoError(t, idx.ScanRange(ctx, RangeCondition{
 			Lower: &RangeBound{
 				Value:     NewCompositeKey(columns, "Redd", "Garnett"),
 				Inclusive: false,
@@ -510,7 +510,7 @@ func TestIndex_ScanRange_CompositeKey(t *testing.T) {
 
 	t.Run("scan range partial index match", func(t *testing.T) {
 		var scannedKeys []CompositeKey
-		require.NoError(t, anIndex.ScanRange(ctx, RangeCondition{
+		require.NoError(t, idx.ScanRange(ctx, RangeCondition{
 			Lower: &RangeBound{
 				Value:     NewCompositeKey(columns[0:1], "Ralph"),
 				Inclusive: true,

@@ -11,13 +11,13 @@ import (
 
 func TestTable_Update_UniqueIndex(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
-		tablePager     = aPager.ForTable(testColumns[0:2])
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager     = pager.ForTable(testColumns[0:2])
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		rows           = gen.RowsWithUniqueIndex(10)
-		aTable         *Table
+		table         *Table
 		indexName      = UniqueIndexName(testTableName, "email")
 	)
 
@@ -28,7 +28,7 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 		}
 		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
-		aTable = NewTable(
+		table = NewTable(
 			testLogger,
 			txPager,
 			txManager,
@@ -48,23 +48,23 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 	require.NoError(t, err)
 
 	txIndexPager := NewTransactionalPager(
-		aPager.ForIndex(
-			aTable.UniqueIndexes[indexName].Columns,
+		pager.ForIndex(
+			table.UniqueIndexes[indexName].Columns,
 			true,
 		),
-		aTable.txManager,
+		table.txManager,
 		testTableName,
-		aTable.UniqueIndexes[indexName].Name,
+		table.UniqueIndexes[indexName].Name,
 	)
 
 	// Batch insert test rows
 	stmt := Statement{
 		Kind:    Insert,
-		Fields:  fieldsFromColumns(aTable.Columns...),
+		Fields:  fieldsFromColumns(table.Columns...),
 		Inserts: make([][]OptionalValue, 0, len(rows)),
 	}
-	for _, aRow := range rows {
-		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	for _, row := range rows {
+		stmt.Inserts = append(stmt.Inserts, row.Values)
 	}
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -72,24 +72,24 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		uniqueIndex := aTable.UniqueIndexes[indexName]
-		uniqueIndex.Index, err = aTable.createBTreeIndex(
+		uniqueIndex := table.UniqueIndexes[indexName]
+		uniqueIndex.Index, err = table.createBTreeIndex(
 			txIndexPager,
 			freePage,
-			aTable.UniqueIndexes[indexName].Columns,
-			aTable.UniqueIndexes[indexName].Name,
+			table.UniqueIndexes[indexName].Columns,
+			table.UniqueIndexes[indexName].Name,
 			true,
 		)
-		aTable.UniqueIndexes[indexName] = uniqueIndex
+		table.UniqueIndexes[indexName] = uniqueIndex
 		if err != nil {
 			return err
 		}
-		_, err = aTable.Insert(ctx, stmt)
+		_, err = table.Insert(ctx, stmt)
 		return err
 	})
 	require.NoError(t, err)
 
-	checkRows(ctx, t, aTable, rows)
+	checkRows(ctx, t, table, rows)
 
 	t.Run("Duplicate unique index key error", func(t *testing.T) {
 		email1, ok := rows[0].GetValue("email")
@@ -109,17 +109,17 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 			},
 		}
 
-		var aResult StatementResult
+		var result StatementResult
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
-			aResult, err = aTable.Update(ctx, stmt)
+			result, err = table.Update(ctx, stmt)
 			return err
 		})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrDuplicateKey)
-		assert.Equal(t, 0, aResult.RowsAffected)
+		assert.Equal(t, 0, result.RowsAffected)
 
-		checkRows(ctx, t, aTable, rows)
+		checkRows(ctx, t, table, rows)
 	})
 
 	t.Run("Update unique index key no change", func(t *testing.T) {
@@ -138,21 +138,21 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 			},
 		}
 
-		var aResult StatementResult
+		var result StatementResult
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
-			aResult, err = aTable.Update(ctx, stmt)
+			result, err = table.Update(ctx, stmt)
 			return err
 		})
 		require.NoError(t, err)
-		assert.Equal(t, 0, aResult.RowsAffected)
+		assert.Equal(t, 0, result.RowsAffected)
 
-		checkRows(ctx, t, aTable, rows)
+		checkRows(ctx, t, table, rows)
 	})
 
 	expected := make([]Row, 0, len(rows))
-	for _, aRow := range rows {
-		expected = append(expected, aRow.Clone())
+	for _, row := range rows {
+		expected = append(expected, row.Clone())
 	}
 
 	t.Run("Update unique index key", func(t *testing.T) {
@@ -171,14 +171,14 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 			},
 		}
 
-		var aResult StatementResult
+		var result StatementResult
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
-			aResult, err = aTable.Update(ctx, stmt)
+			result, err = table.Update(ctx, stmt)
 			return err
 		})
 		require.NoError(t, err)
-		assert.Equal(t, 1, aResult.RowsAffected)
+		assert.Equal(t, 1, result.RowsAffected)
 
 		// Prepare expected rows with one updated row
 		for i := range expected {
@@ -188,19 +188,19 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 			expected[i], _ = expected[i].SetValue("email", OptionalValue{Value: NewTextPointer([]byte("newemail@example.com")), Valid: true})
 		}
 
-		checkRows(ctx, t, aTable, expected)
+		checkRows(ctx, t, table, expected)
 	})
 }
 
 func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
-		tablePager     = aPager.ForTable(testCompositeKeyColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager     = pager.ForTable(testCompositeKeyColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		rows           = gen.RowsWithCompositeKey(10)
-		aTable         *Table
+		table         *Table
 		indexName      = UniqueIndexName(testTableName, "email")
 	)
 
@@ -211,7 +211,7 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 		}
 		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
-		aTable = NewTable(
+		table = NewTable(
 			testLogger,
 			txPager,
 			txManager,
@@ -231,23 +231,23 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 	require.NoError(t, err)
 
 	txIndexPager := NewTransactionalPager(
-		aPager.ForIndex(
-			aTable.UniqueIndexes[indexName].Columns,
+		pager.ForIndex(
+			table.UniqueIndexes[indexName].Columns,
 			true,
 		),
-		aTable.txManager,
+		table.txManager,
 		testTableName,
-		aTable.UniqueIndexes[indexName].Name,
+		table.UniqueIndexes[indexName].Name,
 	)
 
 	// Batch insert test rows
 	stmt := Statement{
 		Kind:    Insert,
-		Fields:  fieldsFromColumns(aTable.Columns...),
+		Fields:  fieldsFromColumns(table.Columns...),
 		Inserts: make([][]OptionalValue, 0, len(rows)),
 	}
-	for _, aRow := range rows {
-		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	for _, row := range rows {
+		stmt.Inserts = append(stmt.Inserts, row.Values)
 	}
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -255,24 +255,24 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		uniqueIndex := aTable.UniqueIndexes[indexName]
-		uniqueIndex.Index, err = aTable.createBTreeIndex(
+		uniqueIndex := table.UniqueIndexes[indexName]
+		uniqueIndex.Index, err = table.createBTreeIndex(
 			txIndexPager,
 			freePage,
-			aTable.UniqueIndexes[indexName].Columns,
-			aTable.UniqueIndexes[indexName].Name,
+			table.UniqueIndexes[indexName].Columns,
+			table.UniqueIndexes[indexName].Name,
 			true,
 		)
-		aTable.UniqueIndexes[indexName] = uniqueIndex
+		table.UniqueIndexes[indexName] = uniqueIndex
 		if err != nil {
 			return err
 		}
-		_, err = aTable.Insert(ctx, stmt)
+		_, err = table.Insert(ctx, stmt)
 		return err
 	})
 	require.NoError(t, err)
 
-	checkRows(ctx, t, aTable, rows)
+	checkRows(ctx, t, table, rows)
 
 	t.Run("Duplicate unique index key error", func(t *testing.T) {
 		firstName, ok := rows[0].GetValue("first_name")
@@ -299,17 +299,17 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 			},
 		}
 
-		var aResult StatementResult
+		var result StatementResult
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
-			aResult, err = aTable.Update(ctx, stmt)
+			result, err = table.Update(ctx, stmt)
 			return err
 		})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrDuplicateKey)
-		assert.Equal(t, 0, aResult.RowsAffected)
+		assert.Equal(t, 0, result.RowsAffected)
 
-		checkRows(ctx, t, aTable, rows)
+		checkRows(ctx, t, table, rows)
 	})
 
 	t.Run("Update unique index key no change", func(t *testing.T) {
@@ -332,21 +332,21 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 			},
 		}
 
-		var aResult StatementResult
+		var result StatementResult
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
-			aResult, err = aTable.Update(ctx, stmt)
+			result, err = table.Update(ctx, stmt)
 			return err
 		})
 		require.NoError(t, err)
-		assert.Equal(t, 0, aResult.RowsAffected)
+		assert.Equal(t, 0, result.RowsAffected)
 
-		checkRows(ctx, t, aTable, rows)
+		checkRows(ctx, t, table, rows)
 	})
 
 	expected := make([]Row, 0, len(rows))
-	for _, aRow := range rows {
-		expected = append(expected, aRow.Clone())
+	for _, row := range rows {
+		expected = append(expected, row.Clone())
 	}
 
 	t.Run("Update unique index key", func(t *testing.T) {
@@ -372,14 +372,14 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 			},
 		}
 
-		var aResult StatementResult
+		var result StatementResult
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			var err error
-			aResult, err = aTable.Update(ctx, stmt)
+			result, err = table.Update(ctx, stmt)
 			return err
 		})
 		require.NoError(t, err)
-		assert.Equal(t, 1, aResult.RowsAffected)
+		assert.Equal(t, 1, result.RowsAffected)
 
 		// Prepare expected rows with one updated row
 		for i := range expected {
@@ -390,6 +390,6 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 			expected[i], _ = expected[i].SetValue("last_name", OptionalValue{Value: NewTextPointer([]byte(newLastName)), Valid: true})
 		}
 
-		checkRows(ctx, t, aTable, expected)
+		checkRows(ctx, t, table, expected)
 	})
 }

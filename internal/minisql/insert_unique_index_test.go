@@ -11,18 +11,18 @@ import (
 
 func TestTable_Insert_UniqueIndex(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
-		tablePager     = aPager.ForTable(testColumns[0:2])
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager     = pager.ForTable(testColumns[0:2])
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		rows           = gen.RowsWithUniqueIndex(10)
-		aTable         *Table
+		table         *Table
 		indexName      = UniqueIndexName(testTableName, "email")
-		indexPager     = aPager.ForIndex(testColumns[1:2], true)
+		indexPager     = pager.ForIndex(testColumns[1:2], true)
 		txIndexPager   = NewTransactionalPager(
 			indexPager,
-			NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil),
+			NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil),
 			testTableName,
 			indexName,
 		)
@@ -35,7 +35,7 @@ func TestTable_Insert_UniqueIndex(t *testing.T) {
 		}
 		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
-		aTable = NewTable(
+		table = NewTable(
 			testLogger,
 			txPager,
 			txManager,
@@ -57,11 +57,11 @@ func TestTable_Insert_UniqueIndex(t *testing.T) {
 	t.Run("Insert rows with unique index", func(t *testing.T) {
 		stmt := Statement{
 			Kind:    Insert,
-			Fields:  fieldsFromColumns(aTable.Columns...),
+			Fields:  fieldsFromColumns(table.Columns...),
 			Inserts: make([][]OptionalValue, 0, len(rows)),
 		}
-		for _, aRow := range rows {
-			stmt.Inserts = append(stmt.Inserts, aRow.Values)
+		for _, row := range rows {
+			stmt.Inserts = append(stmt.Inserts, row.Values)
 		}
 
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -69,58 +69,58 @@ func TestTable_Insert_UniqueIndex(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			uniqueIndex := aTable.UniqueIndexes[indexName]
-			uniqueIndex.Index, err = aTable.createBTreeIndex(
+			uniqueIndex := table.UniqueIndexes[indexName]
+			uniqueIndex.Index, err = table.createBTreeIndex(
 				txIndexPager,
 				freePage,
-				aTable.UniqueIndexes[indexName].Columns,
-				aTable.UniqueIndexes[indexName].Name,
+				table.UniqueIndexes[indexName].Columns,
+				table.UniqueIndexes[indexName].Name,
 				true,
 			)
-			aTable.UniqueIndexes[indexName] = uniqueIndex
+			table.UniqueIndexes[indexName] = uniqueIndex
 			if err != nil {
 				return err
 			}
-			_, err = aTable.Insert(ctx, stmt)
+			_, err = table.Insert(ctx, stmt)
 			return err
 		})
 		require.NoError(t, err)
 
-		checkRows(ctx, t, aTable, rows)
+		checkRows(ctx, t, table, rows)
 	})
 
 	t.Run("Try to insert duplicate primary key", func(t *testing.T) {
 		stmt := Statement{
 			Kind:    Insert,
-			Fields:  fieldsFromColumns(aTable.Columns...),
+			Fields:  fieldsFromColumns(table.Columns...),
 			Inserts: [][]OptionalValue{rows[0].Values},
 		}
 
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			_, err := aTable.Insert(ctx, stmt)
+			_, err := table.Insert(ctx, stmt)
 			return err
 		})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrDuplicateKey)
 
-		checkRows(ctx, t, aTable, rows)
+		checkRows(ctx, t, table, rows)
 	})
 }
 
 func TestTable_Insert_CompositeUniqueIndex(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
-		tablePager     = aPager.ForTable(testCompositeKeyColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager     = pager.ForTable(testCompositeKeyColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		rows           = gen.RowsWithCompositeKey(10)
-		aTable         *Table
+		table         *Table
 		indexName      = UniqueIndexName(testTableName, "email")
-		indexPager     = aPager.ForIndex(testCompositeKeyColumns[1:3], true)
+		indexPager     = pager.ForIndex(testCompositeKeyColumns[1:3], true)
 		txIndexPager   = NewTransactionalPager(
 			indexPager,
-			NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil),
+			NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil),
 			testTableName,
 			indexName,
 		)
@@ -133,7 +133,7 @@ func TestTable_Insert_CompositeUniqueIndex(t *testing.T) {
 		}
 		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
-		aTable = NewTable(
+		table = NewTable(
 			testLogger,
 			txPager,
 			txManager,
@@ -155,11 +155,11 @@ func TestTable_Insert_CompositeUniqueIndex(t *testing.T) {
 	t.Run("Insert rows with unique index", func(t *testing.T) {
 		stmt := Statement{
 			Kind:    Insert,
-			Fields:  fieldsFromColumns(aTable.Columns...),
+			Fields:  fieldsFromColumns(table.Columns...),
 			Inserts: make([][]OptionalValue, 0, len(rows)),
 		}
-		for _, aRow := range rows {
-			stmt.Inserts = append(stmt.Inserts, aRow.Values)
+		for _, row := range rows {
+			stmt.Inserts = append(stmt.Inserts, row.Values)
 		}
 
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -167,40 +167,40 @@ func TestTable_Insert_CompositeUniqueIndex(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			uniqueIndex := aTable.UniqueIndexes[indexName]
-			uniqueIndex.Index, err = aTable.createBTreeIndex(
+			uniqueIndex := table.UniqueIndexes[indexName]
+			uniqueIndex.Index, err = table.createBTreeIndex(
 				txIndexPager,
 				freePage,
-				aTable.UniqueIndexes[indexName].Columns,
-				aTable.UniqueIndexes[indexName].Name,
+				table.UniqueIndexes[indexName].Columns,
+				table.UniqueIndexes[indexName].Name,
 				true,
 			)
-			aTable.UniqueIndexes[indexName] = uniqueIndex
+			table.UniqueIndexes[indexName] = uniqueIndex
 			if err != nil {
 				return err
 			}
-			_, err = aTable.Insert(ctx, stmt)
+			_, err = table.Insert(ctx, stmt)
 			return err
 		})
 		require.NoError(t, err)
 
-		checkRows(ctx, t, aTable, rows)
+		checkRows(ctx, t, table, rows)
 	})
 
 	t.Run("Try to insert duplicate primary key", func(t *testing.T) {
 		stmt := Statement{
 			Kind:    Insert,
-			Fields:  fieldsFromColumns(aTable.Columns...),
+			Fields:  fieldsFromColumns(table.Columns...),
 			Inserts: [][]OptionalValue{rows[0].Values},
 		}
 
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			_, err := aTable.Insert(ctx, stmt)
+			_, err := table.Insert(ctx, stmt)
 			return err
 		})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrDuplicateKey)
 
-		checkRows(ctx, t, aTable, rows)
+		checkRows(ctx, t, table, rows)
 	})
 }
