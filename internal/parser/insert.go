@@ -119,11 +119,24 @@ func (p *parserItem) doParseInsert() error {
 			p.step = stepStatementEnd
 			return nil
 		}
+		if strings.ToUpper(commaOrEnd) == "ON CONFLICT" {
+			p.pop()
+			p.step = stepInsertOnConflictDo
+			return nil
+		}
 		if commaOrEnd != "," {
-			return p.errorf("at INSERT INTO: expected comma")
+			return p.errorf("at INSERT INTO: expected comma or ON CONFLICT")
 		}
 		p.pop()
 		p.step = stepInsertValuesOpeningParens
+	case stepInsertOnConflictDo:
+		doNothing := p.peek()
+		if strings.ToUpper(doNothing) != "DO NOTHING" {
+			return p.errorf("at INSERT INTO ON CONFLICT: expected DO NOTHING")
+		}
+		p.ConflictAction = minisql.ConflictActionDoNothing
+		p.pop()
+		p.step = stepStatementEnd
 	}
 	return nil
 }

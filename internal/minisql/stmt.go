@@ -9,6 +9,16 @@ import (
 	"unicode/utf8"
 )
 
+// ConflictAction describes what to do when an INSERT violates a uniqueness constraint.
+type ConflictAction int
+
+const (
+	// ConflictActionNone is the default: propagate the error.
+	ConflictActionNone ConflictAction = iota
+	// ConflictActionDoNothing silently skips the offending row.
+	ConflictActionDoNothing
+)
+
 // StatementKind ...
 type StatementKind int
 
@@ -286,8 +296,9 @@ type Statement struct {
 	GroupBy     []Field         // columns in GROUP BY clause; only populated for grouped queries
 	Having      OneOrMore       // HAVING conditions; only populated for grouped queries
 	Aliases     map[string]string
-	Inserts     [][]OptionalValue
-	Updates     map[string]OptionalValue
+	ConflictAction ConflictAction   // INSERT ON CONFLICT action
+	Inserts        [][]OptionalValue
+	Updates        map[string]OptionalValue
 	Functions   map[string]Function // NOW(), etc.
 	Conditions  OneOrMore           // used for WHERE
 	OrderBy     []OrderBy
@@ -339,10 +350,11 @@ func (s Statement) NumPlaceholders() int {
 // Clone ...
 func (s Statement) Clone() Statement {
 	stmt := Statement{
-		Kind:        s.Kind,
-		IfNotExists: s.IfNotExists,
-		TableName:   s.TableName,
-		IndexName:   s.IndexName,
+		Kind:           s.Kind,
+		IfNotExists:    s.IfNotExists,
+		TableName:      s.TableName,
+		IndexName:      s.IndexName,
+		ConflictAction: s.ConflictAction,
 		Columns:     s.Columns,
 		Distinct:    s.Distinct,
 		Fields:      s.Fields,

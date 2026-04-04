@@ -40,7 +40,8 @@ var reservedWords = []string{
 	"IS NULL", "IS NOT NULL", "NOT BETWEEN", "NOT LIKE", "BETWEEN", "LIKE", "TRUE", "FALSE", "NOW()",
 	"IF NOT EXISTS", "WHERE", "FROM", "SET", "ASC", "DESC", "AS",
 	"BEGIN", "COMMIT", "ROLLBACK", "ANALYZE", "VACUUM",
-	"INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "ON",
+	"INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "ON CONFLICT", "ON",
+	"DO NOTHING",
 	"DISTINCT",
 	";",
 }
@@ -85,6 +86,7 @@ const (
 	stepInsertValues
 	stepInsertValuesCommaOrClosingParens
 	stepInsertValuesCommaBeforeOpeningParens
+	stepInsertOnConflictDo
 	stepUpdateTable
 	stepUpdateSet
 	stepUpdateField
@@ -256,7 +258,8 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 			stepInsertValuesOpeningParens,
 			stepInsertValues,
 			stepInsertValuesCommaOrClosingParens,
-			stepInsertValuesCommaBeforeOpeningParens:
+			stepInsertValuesCommaBeforeOpeningParens,
+			stepInsertOnConflictDo:
 			if err := p.doParseInsert(); err != nil {
 				return statements, err
 			}

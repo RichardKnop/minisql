@@ -20,7 +20,18 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, err
 	}
 
+	rowsInserted := 0
 	for insertIdx, values := range stmt.Inserts {
+		if stmt.ConflictAction == ConflictActionDoNothing {
+			conflict, err := t.hasInsertConflict(ctx, stmt, insertIdx)
+			if err != nil {
+				return StatementResult{}, err
+			}
+			if conflict {
+				continue
+			}
+		}
+
 		if t.HasPrimaryKey() {
 			keyParts := stmt.InsertValuesForColumns(insertIdx, t.PrimaryKey.Columns...)
 			if len(keyParts) != len(t.PrimaryKey.Columns) {
@@ -90,6 +101,8 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			return StatementResult{}, err
 		}
 
+		rowsInserted++
+
 		if insertIdx == len(stmt.Inserts)-1 {
 			break
 		}
@@ -104,5 +117,79 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 	}
 
 	// TODO - set LastInsertId
-	return StatementResult{RowsAffected: len(stmt.Inserts)}, nil
+	return StatementResult{RowsAffected: rowsInserted}, nil
+}
+
+// hasInsertConflict returns true if inserting the row at insertIdx would violate
+// a primary key or unique index constraint.
+func (t *Table) hasInsertConflict(ctx context.Context, stmt Statement, insertIdx int) (bool, error) {
+	if t.HasPrimaryKey() && t.PrimaryKey.Index != nil {
+		keyParts := stmt.InsertValuesForColumns(insertIdx, t.PrimaryKey.Columns...)
+		if len(keyParts) == len(t.PrimaryKey.Columns) {
+			key, err := buildIndexLookupKey(t.PrimaryKey.Columns, keyParts)
+			if err != nil {
+				return false, err
+			}
+			// key is nil when any part is NULL; for autoincrement that means the
+			// value will be auto-generated and cannot conflict — skip the check.
+			if key != nil {
+				rowIDs, err := t.PrimaryKey.Index.FindRowIDs(ctx, key)
+				if err != nil && !errors.Is(err, ErrNotFound) {
+					return false, err
+				}
+				if len(rowIDs) > 0 {
+					return true, nil
+				}
+			}
+		}
+	}
+
+	for _, uniqueIndex := range t.UniqueIndexes {
+		if uniqueIndex.Index == nil {
+			continue
+		}
+		keyParts := stmt.InsertValuesForColumns(insertIdx, uniqueIndex.Columns...)
+		if len(keyParts) != len(uniqueIndex.Columns) {
+			continue
+		}
+		key, err := buildIndexLookupKey(uniqueIndex.Columns, keyParts)
+		if err != nil {
+			return false, err
+		}
+		if key == nil {
+			// NULL values don't participate in unique constraint checks
+			continue
+		}
+		rowIDs, err := uniqueIndex.Index.FindRowIDs(ctx, key)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return false, err
+		}
+		if len(rowIDs) > 0 {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// buildIndexLookupKey builds the key value used to probe a BTree index.
+// Returns nil if any key part is NULL (NULL values are not indexed).
+func buildIndexLookupKey(columns []Column, keyParts []OptionalValue) (any, error) {
+	for _, kp := range keyParts {
+		if !kp.Valid {
+			return nil, nil
+		}
+	}
+	if len(columns) == 1 {
+		return castKeyValue(columns[0], keyParts[0].Value)
+	}
+	keyValues := make([]any, 0, len(keyParts))
+	for i, kp := range keyParts {
+		castedKey, err := castKeyValue(columns[i], kp.Value)
+		if err != nil {
+			return nil, err
+		}
+		keyValues = append(keyValues, castedKey)
+	}
+	return NewCompositeKey(columns, keyValues...), nil
 }
