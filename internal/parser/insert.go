@@ -130,13 +130,93 @@ func (p *parserItem) doParseInsert() error {
 		p.pop()
 		p.step = stepInsertValuesOpeningParens
 	case stepInsertOnConflictDo:
-		doNothing := p.peek()
-		if strings.ToUpper(doNothing) != "DO NOTHING" {
-			return p.errorf("at INSERT INTO ON CONFLICT: expected DO NOTHING")
+		switch strings.ToUpper(p.peek()) {
+		case "DO NOTHING":
+			p.ConflictAction = minisql.ConflictActionDoNothing
+			p.pop()
+			p.step = stepStatementEnd
+		case "DO UPDATE":
+			p.ConflictAction = minisql.ConflictActionDoUpdate
+			p.pop()
+			p.step = stepInsertOnConflictUpdateSet
+		default:
+			return p.errorf("at INSERT INTO ON CONFLICT: expected DO NOTHING or DO UPDATE")
 		}
-		p.ConflictAction = minisql.ConflictActionDoNothing
+	case stepInsertOnConflictUpdateSet:
+		if strings.ToUpper(p.peek()) != "SET" {
+			return p.errorf("at INSERT INTO ON CONFLICT DO UPDATE: expected SET")
+		}
 		p.pop()
-		p.step = stepStatementEnd
+		p.step = stepInsertOnConflictUpdateField
+	case stepInsertOnConflictUpdateField:
+		identifier := p.peek()
+		if !isIdentifier(identifier) {
+			return p.errorf("at INSERT INTO ON CONFLICT DO UPDATE SET: expected field name")
+		}
+		p.nextUpdateField = identifier
+		p.pop()
+		p.step = stepInsertOnConflictUpdateEquals
+	case stepInsertOnConflictUpdateEquals:
+		if p.peek() != "=" {
+			return p.errorf("at INSERT INTO ON CONFLICT DO UPDATE SET: expected '='")
+		}
+		p.pop()
+		p.step = stepInsertOnConflictUpdateValue
+	case stepInsertOnConflictUpdateValue:
+		token := p.peek()
+		// EXCLUDED.column_name — reference to the proposed (rejected) row's value.
+		if strings.HasPrefix(strings.ToUpper(token), "EXCLUDED.") {
+			colName := token[len("EXCLUDED."):]
+			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{
+				Value: minisql.ExcludedRef{Column: colName},
+				Valid: true,
+			})
+			p.nextUpdateField = ""
+			p.pop()
+			p.step = stepInsertOnConflictUpdateComma
+			return nil
+		}
+		specialValue := strings.ToUpper(token)
+		switch specialValue {
+		case "?":
+			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: minisql.Placeholder{}, Valid: true})
+			p.nextUpdateField = ""
+			p.pop()
+		case "NULL":
+			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Valid: false})
+			p.nextUpdateField = ""
+			p.pop()
+		case "NOW()":
+			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: minisql.FunctionNow, Valid: true})
+			p.nextUpdateField = ""
+			p.pop()
+		default:
+			value, ln := p.peekValue()
+			if ln == 0 {
+				return p.errorf("at INSERT INTO ON CONFLICT DO UPDATE SET: expected value")
+			}
+			var v minisql.OptionalValue
+			if strValue, ok := value.(string); ok {
+				v = minisql.OptionalValue{Value: minisql.NewTextPointer([]byte(strValue)), Valid: true}
+			} else {
+				v = minisql.OptionalValue{Value: value, Valid: true}
+			}
+			p.setUpdate(p.nextUpdateField, v)
+			p.nextUpdateField = ""
+			p.pop()
+		}
+		p.step = stepInsertOnConflictUpdateComma
+	case stepInsertOnConflictUpdateComma:
+		commaOrEnd := p.peek()
+		if commaOrEnd == ";" || commaOrEnd == "" {
+			p.step = stepStatementEnd
+			return nil
+		}
+		if commaOrEnd != "," {
+			return p.errorf("at INSERT INTO ON CONFLICT DO UPDATE SET: expected ',' or end of statement")
+		}
+		p.pop()
+		p.step = stepInsertOnConflictUpdateField
 	}
 	return nil
 }

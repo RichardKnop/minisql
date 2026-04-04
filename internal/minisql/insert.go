@@ -22,12 +22,38 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 
 	rowsInserted := 0
 	for insertIdx, values := range stmt.Inserts {
-		if stmt.ConflictAction == ConflictActionDoNothing {
+		switch stmt.ConflictAction {
+		case ConflictActionDoNothing:
 			conflict, err := t.hasInsertConflict(ctx, stmt, insertIdx)
 			if err != nil {
 				return StatementResult{}, err
 			}
 			if conflict {
+				continue
+			}
+		case ConflictActionDoUpdate:
+			conflict, rowID, err := t.findInsertConflict(ctx, stmt, insertIdx)
+			if err != nil {
+				return StatementResult{}, err
+			}
+			if conflict {
+				cursor, err := t.Seek(ctx, rowID)
+				if err != nil {
+					return StatementResult{}, fmt.Errorf("insert on conflict do update seek: %w", err)
+				}
+				existingRow, err := cursor.fetchRow(ctx, false, fieldsFromColumns(t.Columns...)...)
+				if err != nil {
+					return StatementResult{}, fmt.Errorf("insert on conflict do update read: %w", err)
+				}
+				// Resolve any EXCLUDED.col references against the current proposed row.
+				resolvedStmt := stmt.resolveExcludedRefs(insertIdx)
+				changed, err := cursor.update(ctx, resolvedStmt, existingRow)
+				if err != nil {
+					return StatementResult{}, fmt.Errorf("insert on conflict do update: %w", err)
+				}
+				if changed {
+					rowsInserted += 1
+				}
 				continue
 			}
 		}
@@ -170,6 +196,55 @@ func (t *Table) hasInsertConflict(ctx context.Context, stmt Statement, insertIdx
 	}
 
 	return false, nil
+}
+
+// findInsertConflict is like hasInsertConflict but also returns the RowID of the
+// conflicting row so the caller can seek and update it.
+func (t *Table) findInsertConflict(ctx context.Context, stmt Statement, insertIdx int) (bool, RowID, error) {
+	if t.HasPrimaryKey() && t.PrimaryKey.Index != nil {
+		keyParts := stmt.InsertValuesForColumns(insertIdx, t.PrimaryKey.Columns...)
+		if len(keyParts) == len(t.PrimaryKey.Columns) {
+			key, err := buildIndexLookupKey(t.PrimaryKey.Columns, keyParts)
+			if err != nil {
+				return false, 0, err
+			}
+			if key != nil {
+				rowIDs, err := t.PrimaryKey.Index.FindRowIDs(ctx, key)
+				if err != nil && !errors.Is(err, ErrNotFound) {
+					return false, 0, err
+				}
+				if len(rowIDs) > 0 {
+					return true, rowIDs[0], nil
+				}
+			}
+		}
+	}
+
+	for _, uniqueIndex := range t.UniqueIndexes {
+		if uniqueIndex.Index == nil {
+			continue
+		}
+		keyParts := stmt.InsertValuesForColumns(insertIdx, uniqueIndex.Columns...)
+		if len(keyParts) != len(uniqueIndex.Columns) {
+			continue
+		}
+		key, err := buildIndexLookupKey(uniqueIndex.Columns, keyParts)
+		if err != nil {
+			return false, 0, err
+		}
+		if key == nil {
+			continue
+		}
+		rowIDs, err := uniqueIndex.Index.FindRowIDs(ctx, key)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return false, 0, err
+		}
+		if len(rowIDs) > 0 {
+			return true, rowIDs[0], nil
+		}
+	}
+
+	return false, 0, nil
 }
 
 // buildIndexLookupKey builds the key value used to probe a BTree index.

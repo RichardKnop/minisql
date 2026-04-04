@@ -261,7 +261,8 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 			for _, col := range c.Table.PrimaryKey.Columns {
 				pkValue, ok := stmt.Updates[col.Name]
 				if !ok {
-					return false, fmt.Errorf("failed to get value for primary key %s", c.Table.PrimaryKey.Name)
+					// Column not being updated — use the existing row value.
+					pkValue, _ = oldRow.GetValue(col.Name)
 				}
 				pkValues = append(pkValues, pkValue)
 			}
@@ -277,7 +278,8 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 			for _, col := range uniqueIndex.Columns {
 				indexValue, ok := stmt.Updates[col.Name]
 				if !ok {
-					return false, fmt.Errorf("failed to get value for unique index %s", uniqueIndex.Name)
+					// Column not being updated — use the existing row value.
+					indexValue, _ = oldRow.GetValue(col.Name)
 				}
 				indexValues = append(indexValues, indexValue)
 			}
@@ -296,7 +298,8 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 			for _, col := range secondaryIndex.Columns {
 				indexValue, ok := stmt.Updates[col.Name]
 				if !ok {
-					return false, fmt.Errorf("failed to get value for secondary index %s", secondaryIndex.Name)
+					// Column not being updated — use the existing row value.
+					indexValue, _ = oldRow.GetValue(col.Name)
 				}
 				indexValues = append(indexValues, indexValue)
 			}
