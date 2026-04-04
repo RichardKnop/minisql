@@ -12,15 +12,15 @@ import (
 func TestTable_Insert_UniqueIndex(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		tablePager     = pager.ForTable(testColumns[0:2])
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		rows           = gen.RowsWithUniqueIndex(10)
+		ctx           = context.Background()
+		tablePager    = pager.ForTable(testColumns[0:2])
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
+		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		rows          = gen.RowsWithUniqueIndex(10)
 		table         *Table
-		indexName      = UniqueIndexName(testTableName, "email")
-		indexPager     = pager.ForIndex(testColumns[1:2], true)
-		txIndexPager   = NewTransactionalPager(
+		indexName     = UniqueIndexName(testTableName, "email")
+		indexPager    = pager.ForIndex(testColumns[1:2], true)
+		txIndexPager  = NewTransactionalPager(
 			indexPager,
 			NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil),
 			testTableName,
@@ -110,15 +110,15 @@ func TestTable_Insert_UniqueIndex(t *testing.T) {
 func TestTable_Insert_CompositeUniqueIndex(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		tablePager     = pager.ForTable(testCompositeKeyColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		rows           = gen.RowsWithCompositeKey(10)
+		ctx           = context.Background()
+		tablePager    = pager.ForTable(testCompositeKeyColumns)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
+		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		rows          = gen.RowsWithCompositeKey(10)
 		table         *Table
-		indexName      = UniqueIndexName(testTableName, "email")
-		indexPager     = pager.ForIndex(testCompositeKeyColumns[1:3], true)
-		txIndexPager   = NewTransactionalPager(
+		indexName     = UniqueIndexName(testTableName, "email")
+		indexPager    = pager.ForIndex(testCompositeKeyColumns[1:3], true)
+		txIndexPager  = NewTransactionalPager(
 			indexPager,
 			NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil),
 			testTableName,

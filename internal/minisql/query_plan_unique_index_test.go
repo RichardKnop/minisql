@@ -14,7 +14,7 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 
 	var (
 		indexName = "key__test_table__email"
-		table    = NewTable(zap.NewNop(), nil, nil, testTableName, testColumns[0:2], 0, nil, WithUniqueIndex(
+		table     = NewTable(zap.NewNop(), nil, nil, testTableName, testColumns[0:2], 0, nil, WithUniqueIndex(
 			UniqueIndex{
 				IndexInfo: IndexInfo{
 					Name:    indexName,
@@ -523,7 +523,6 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-
 			actual, err := table.PlanQuery(context.Background(), aTestCase.Stmt)
 			require.NoError(t, err)
 			assert.Equal(t, aTestCase.Expected, actual)

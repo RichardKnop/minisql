@@ -7,7 +7,7 @@ import (
 
 const (
 	// MaxInlineRowIDs ...
-	MaxInlineRowIDs          = 4
+	MaxInlineRowIDs = 4
 	// MaxOverflowRowIDsPerPage ...
 	MaxOverflowRowIDsPerPage = 510 // (4096 - 1 - 8 ) / 8
 	rowIDsLengthPrefixSize   = 4

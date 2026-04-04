@@ -1204,4 +1204,3 @@ func (t *Table) newBTreeIndex(pager *TransactionalPager, rootPageIdx PageIndex, 
 		return nil, fmt.Errorf("unsupported BTree index column type %v for index %s", columns[0].Kind, indexName)
 	}
 }
-

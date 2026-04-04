@@ -589,7 +589,6 @@ func (d *Database) initUniqueIndex(ctx context.Context, schema Schema) error {
 }
 
 func (d *Database) initSecondaryIndex(ctx context.Context, schema Schema) error {
-
 	table, ok := d.tables[schema.TableName]
 	if !ok {
 		return fmt.Errorf("table %s for secondary index %s does not exist", schema.TableName, schema.Name)
@@ -993,7 +992,6 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, table *Table
 }
 
 func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryIndex SecondaryIndex) error {
-
 	result, err := table.Select(ctx, Statement{
 		Kind:   Select,
 		Fields: fieldsFromColumns(table.Columns...),

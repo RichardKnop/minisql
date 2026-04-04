@@ -27,7 +27,7 @@ func (p QueryPlan) optimizeOrdering(t *Table, originalConditions OneOrMore) Quer
 	}
 
 	// Single column ORDER BY
-	var orderCol = p.OrderBy[0].Field.Name
+	orderCol := p.OrderBy[0].Field.Name
 	p.SortReverse = p.OrderBy[0].Direction == Desc
 
 	// If there are no indexes, we must sort in memory

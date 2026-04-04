@@ -6,7 +6,7 @@ import (
 
 const (
 	// MaxInlineVarchar ...
-	MaxInlineVarchar    = 255          // Store up to 255 bytes inline
+	MaxInlineVarchar = 255 // Store up to 255 bytes inline
 	// MaxOverflowPageData ...
 	MaxOverflowPageData = 4096 - 1 - 8 // Page size - page type byte - OverflowPageHeader size
 	// MaxOverflowTextSize limits the maximum size of a text value to 16 overflow pages.

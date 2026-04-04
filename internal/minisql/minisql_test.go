@@ -436,26 +436,24 @@ func (g *dataGen) RowsWithUniqueIndex(number int) []Row {
 	return rows
 }
 
-var (
-	testOverflowColumns = []Column{
-		{
-			Kind: Int8,
-			Size: 8,
-			Name: "id",
-		},
-		{
-			Kind:     Varchar,
-			Size:     MaxInlineVarchar,
-			Name:     "email",
-			Nullable: true,
-		},
-		{
-			Kind:     Text,
-			Name:     "profile",
-			Nullable: true,
-		},
-	}
-)
+var testOverflowColumns = []Column{
+	{
+		Kind: Int8,
+		Size: 8,
+		Name: "id",
+	},
+	{
+		Kind:     Varchar,
+		Size:     MaxInlineVarchar,
+		Name:     "email",
+		Nullable: true,
+	},
+	{
+		Kind:     Text,
+		Name:     "profile",
+		Nullable: true,
+	},
+}
 
 func (g *dataGen) OverflowRow(textSize uint32) Row {
 	return NewRowWithValues(testOverflowColumns, []OptionalValue{
@@ -486,35 +484,33 @@ func (g *dataGen) OverflowRows(number int, sizes []uint32) []Row {
 	return rows
 }
 
-var (
-	testCompositeKeyColumns = []Column{
-		{
-			Kind: Int8,
-			Size: 8,
-			Name: "id",
-		},
-		{
-			Kind: Varchar,
-			Size: 100,
-			Name: "first_name",
-		},
-		{
-			Kind: Varchar,
-			Size: 100,
-			Name: "last_name",
-		},
-		{
-			Kind: Varchar,
-			Size: 100,
-			Name: "email",
-		},
-		{
-			Kind: Timestamp,
-			Size: 8,
-			Name: "dob",
-		},
-	}
-)
+var testCompositeKeyColumns = []Column{
+	{
+		Kind: Int8,
+		Size: 8,
+		Name: "id",
+	},
+	{
+		Kind: Varchar,
+		Size: 100,
+		Name: "first_name",
+	},
+	{
+		Kind: Varchar,
+		Size: 100,
+		Name: "last_name",
+	},
+	{
+		Kind: Varchar,
+		Size: 100,
+		Name: "email",
+	},
+	{
+		Kind: Timestamp,
+		Size: 8,
+		Name: "dob",
+	},
+}
 
 func (g *dataGen) RowWithCompositeKey() Row {
 	return NewRowWithValues(testCompositeKeyColumns, []OptionalValue{
@@ -795,4 +791,3 @@ func resetMocks(mocks ...*mock.Mock) {
 		aMock.Calls = nil
 	}
 }
-

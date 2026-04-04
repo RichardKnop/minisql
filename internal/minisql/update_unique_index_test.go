@@ -12,13 +12,13 @@ import (
 func TestTable_Update_UniqueIndex(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		tablePager     = pager.ForTable(testColumns[0:2])
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		rows           = gen.RowsWithUniqueIndex(10)
+		ctx           = context.Background()
+		tablePager    = pager.ForTable(testColumns[0:2])
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
+		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		rows          = gen.RowsWithUniqueIndex(10)
 		table         *Table
-		indexName      = UniqueIndexName(testTableName, "email")
+		indexName     = UniqueIndexName(testTableName, "email")
 	)
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -195,13 +195,13 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		tablePager     = pager.ForTable(testCompositeKeyColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		rows           = gen.RowsWithCompositeKey(10)
+		ctx           = context.Background()
+		tablePager    = pager.ForTable(testCompositeKeyColumns)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
+		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		rows          = gen.RowsWithCompositeKey(10)
 		table         *Table
-		indexName      = UniqueIndexName(testTableName, "email")
+		indexName     = UniqueIndexName(testTableName, "email")
 	)
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {

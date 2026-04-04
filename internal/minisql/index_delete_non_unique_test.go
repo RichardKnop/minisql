@@ -40,11 +40,11 @@ func (r rowIDsPerKey) AllRowIDs() []RowID {
 func TestIndex_NonUnique_Delete(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = pager.ForIndex([]Column{col}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
-		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
+		ctx           = context.Background()
+		col           = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager    = pager.ForIndex([]Column{col}, true)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
+		txPager       = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
 	idx, err := NewNonUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
@@ -79,9 +79,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 		require.NoError(t, err)
 		insertedRowIDs.Remove(key, 2)
 
-		var (
-			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
-		)
+		rootNode := pager.pages[0].IndexNode.(*IndexNode[int64])
 
 		assert.Equal(t, 3, int(rootNode.Cells[0].InlineRowIDs))
 		assert.Equal(t, []RowID{101, 102, 104}, rootNode.Cells[0].RowIDs)

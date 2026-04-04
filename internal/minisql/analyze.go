@@ -336,7 +336,6 @@ func (d *Database) listStats(ctx context.Context, tableName string) ([]Stats, er
 }
 
 func (d *Database) scanStatsTable(ctx context.Context, statsTable *Table, tableName string) ([]Stats, error) {
-
 	stmt := Statement{
 		Kind:   Select,
 		Fields: statsTableFields,

@@ -12,12 +12,12 @@ import (
 func TestIndex_ScanAll(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		keys           = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
-		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = pager.ForIndex([]Column{col}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
-		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
+		ctx           = context.Background()
+		keys          = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
+		col           = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager    = pager.ForIndex([]Column{col}, true)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
+		txPager       = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
 	idx, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
@@ -46,7 +46,6 @@ func TestIndex_ScanAll(t *testing.T) {
 			  | 1 |    | 3 , 4 |  | 6 , 7 , 8 |    | 10 |   |  12 |  | 14 , 15 |   | 17 , 18 |         | 20 , 21 |
 			  +---+    +-------+  +-----------+    +----+   +-----+  +---------+   +---------+         +---------+
 	*/
-
 
 	t.Run("scan in ascending order", func(t *testing.T) {
 		var (
@@ -82,12 +81,12 @@ func TestIndex_ScanAll(t *testing.T) {
 func TestIndex_ScanAll_NonUnique(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		keys           = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
-		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = pager.ForIndex([]Column{col}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
-		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
+		ctx           = context.Background()
+		keys          = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
+		col           = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager    = pager.ForIndex([]Column{col}, true)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
+		txPager       = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
 	idx, err := NewNonUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
@@ -125,7 +124,6 @@ func TestIndex_ScanAll_NonUnique(t *testing.T) {
 			  +---+    +-------+  +-----------+    +----+   +-----+  +---------+   +---------+         +---------+
 	*/
 
-
 	t.Run("scan in ascending order", func(t *testing.T) {
 		var (
 			scannedKeys   []int64
@@ -160,12 +158,12 @@ func TestIndex_ScanAll_NonUnique(t *testing.T) {
 func TestIndex_ScanRange(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		keys           = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
-		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = pager.ForIndex([]Column{col}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
-		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
+		ctx           = context.Background()
+		keys          = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
+		col           = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager    = pager.ForIndex([]Column{col}, true)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
+		txPager       = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
 	idx, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
@@ -194,7 +192,6 @@ func TestIndex_ScanRange(t *testing.T) {
 			  | 1 |    | 3 , 4 |  | 6 , 7 , 8 |    | 10 |   |  12 |  | 14 , 15 |   | 17 , 18 |         | 20 , 21 |
 			  +---+    +-------+  +-----------+    +----+   +-----+  +---------+   +---------+         +---------+
 	*/
-
 
 	t.Run("scan range all", func(t *testing.T) {
 		var (
@@ -432,9 +429,9 @@ func TestIndex_ScanRange(t *testing.T) {
 func TestIndex_ScanRange_CompositeKey(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		columns        = testCompositeKeyColumns[1:3]
-		keys           = []CompositeKey{
+		ctx           = context.Background()
+		columns       = testCompositeKeyColumns[1:3]
+		keys          = []CompositeKey{
 			NewCompositeKey(columns, "Ralph", "Nia"),
 			NewCompositeKey(columns, "Kataleya", "Xanthi"),
 			NewCompositeKey(columns, "Violet", "Elaina"),

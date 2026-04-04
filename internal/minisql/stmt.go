@@ -230,7 +230,6 @@ type Field struct {
 func (f Field) String() string {
 	if f.AliasPrefix != "" {
 		return fmt.Sprintf("%s.%s", f.AliasPrefix, f.Name)
-
 	}
 	return f.Name
 }
@@ -290,20 +289,20 @@ type Statement struct {
 	UniqueIndexes []UniqueIndex // use for CREATE TABLE
 	// Used for SELECT (i.e. SELECTed field names) and INSERT (INSERTEDed field names)
 	// and UPDATE (UPDATEDed field names as Updates map is not ordered)
-	Distinct    bool
-	Fields      []Field
-	Aggregates  []AggregateExpr // parallel to Fields; only populated when query uses aggregate functions
-	GroupBy     []Field         // columns in GROUP BY clause; only populated for grouped queries
-	Having      OneOrMore       // HAVING conditions; only populated for grouped queries
-	Aliases     map[string]string
-	ConflictAction ConflictAction   // INSERT ON CONFLICT action
+	Distinct       bool
+	Fields         []Field
+	Aggregates     []AggregateExpr // parallel to Fields; only populated when query uses aggregate functions
+	GroupBy        []Field         // columns in GROUP BY clause; only populated for grouped queries
+	Having         OneOrMore       // HAVING conditions; only populated for grouped queries
+	Aliases        map[string]string
+	ConflictAction ConflictAction // INSERT ON CONFLICT action
 	Inserts        [][]OptionalValue
 	Updates        map[string]OptionalValue
-	Functions   map[string]Function // NOW(), etc.
-	Conditions  OneOrMore           // used for WHERE
-	OrderBy     []OrderBy
-	Limit       OptionalValue
-	Offset      OptionalValue
+	Functions      map[string]Function // NOW(), etc.
+	Conditions     OneOrMore           // used for WHERE
+	OrderBy        []OrderBy
+	Limit          OptionalValue
+	Offset         OptionalValue
 }
 
 // NumPlaceholders returns the number of placeholder parameters (?) in the statement.
@@ -355,18 +354,18 @@ func (s Statement) Clone() Statement {
 		TableName:      s.TableName,
 		IndexName:      s.IndexName,
 		ConflictAction: s.ConflictAction,
-		Columns:     s.Columns,
-		Distinct:    s.Distinct,
-		Fields:      s.Fields,
-		Aggregates:  s.Aggregates, // slice of value types, safe to share
-		Aliases:     s.Aliases,
-		Inserts:     make([][]OptionalValue, len(s.Inserts)),
-		Updates:     make(map[string]OptionalValue, len(s.Updates)),
-		Functions:   s.Functions,
-		Conditions:  make(OneOrMore, len(s.Conditions)),
-		OrderBy:     s.OrderBy,
-		Limit:       s.Limit,
-		Offset:      s.Offset,
+		Columns:        s.Columns,
+		Distinct:       s.Distinct,
+		Fields:         s.Fields,
+		Aggregates:     s.Aggregates, // slice of value types, safe to share
+		Aliases:        s.Aliases,
+		Inserts:        make([][]OptionalValue, len(s.Inserts)),
+		Updates:        make(map[string]OptionalValue, len(s.Updates)),
+		Functions:      s.Functions,
+		Conditions:     make(OneOrMore, len(s.Conditions)),
+		OrderBy:        s.OrderBy,
+		Limit:          s.Limit,
+		Offset:         s.Offset,
 	}
 	for i := range s.Inserts {
 		stmt.Inserts[i] = make([]OptionalValue, len(s.Inserts[i]))

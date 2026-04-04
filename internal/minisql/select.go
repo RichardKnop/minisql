@@ -8,10 +8,8 @@ import (
 	"sync"
 )
 
-var (
-	// ErrNoMoreRows ...
-	ErrNoMoreRows = errors.New("no more rows")
-)
+// ErrNoMoreRows ...
+var ErrNoMoreRows = errors.New("no more rows")
 
 // Select ...
 func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, error) {
@@ -548,7 +546,6 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, filteredPipe 
 }
 
 func (t *Table) selectStreaming(stmt Statement, filteredPipe chan Row, errorsPipe chan error, requestedFields []Field) (StatementResult, error) {
-
 	result := StatementResult{
 		Columns: make([]Column, len(requestedFields)),
 	}
@@ -619,7 +616,6 @@ func (t *Table) selectStreaming(stmt Statement, filteredPipe chan Row, errorsPip
 }
 
 func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, unfilteredPipe <-chan Row, errorsPipe chan error, requestedFields []Field) (StatementResult, error) {
-
 	// Check if we can use heap optimization for LIMIT queries
 	var limit int
 	hasLimit := stmt.Limit.Valid

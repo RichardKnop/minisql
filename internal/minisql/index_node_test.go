@@ -10,9 +10,7 @@ import (
 func TestIndexNode_Int8_Marshal(t *testing.T) {
 	t.Parallel()
 
-	var (
-		node = NewIndexNode[int64](true)
-	)
+	node := NewIndexNode[int64](true)
 
 	// Populate with values that don't necessarily make sense, we are
 	// just testing marshal/unmarshal of non zero values
@@ -49,9 +47,7 @@ func TestIndexNode_Int8_Marshal(t *testing.T) {
 func TestIndexNode_Varchar_Marshal(t *testing.T) {
 	t.Parallel()
 
-	var (
-		node = NewIndexNode[string](true)
-	)
+	node := NewIndexNode[string](true)
 
 	// Populate with values that don't necessarily make sense, we are
 	// just testing marshal/unmarshal of non zero values

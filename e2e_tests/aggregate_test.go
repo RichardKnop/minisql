@@ -448,9 +448,9 @@ func (s *TestSuite) TestGroupBy() {
 		s.Require().Len(got, 3)
 
 		sort.Slice(got, func(i, j int) bool { return got[i].userID < got[j].userID })
-		s.Equal(int64(20), got[0].sum)  // user 1: only 20 passes filter
-		s.Equal(int64(70), got[1].sum)  // user 2: 30+40
-		s.Equal(int64(50), got[2].sum)  // user 3: 50
+		s.Equal(int64(20), got[0].sum) // user 1: only 20 passes filter
+		s.Equal(int64(70), got[1].sum) // user 2: 30+40
+		s.Equal(int64(50), got[2].sum) // user 3: 50
 	})
 
 	s.Run("GROUP BY with ORDER BY", func() {

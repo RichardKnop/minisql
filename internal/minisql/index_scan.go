@@ -233,7 +233,7 @@ func (ui *Index[T]) scanRangeFrom(
 
 		var (
 			cell = node.Cells[i]
-			key   = cell.Key
+			key  = cell.Key
 		)
 
 		// Range checks
@@ -320,7 +320,7 @@ func (ui *Index[T]) scanRangeFrom(
 		for idx := parentCellIdx; idx < int(parentNode.Header.Keys); idx++ {
 			var (
 				cell = parentNode.Cells[idx]
-				key   = cell.Key
+				key  = cell.Key
 			)
 
 			for _, rowID := range cell.RowIDs {
@@ -371,7 +371,7 @@ func (ui *Index[T]) scanRangeRecursive(ctx context.Context, pageIdx PageIndex, r
 
 		var (
 			cell = node.Cells[i]
-			key   = cell.Key
+			key  = cell.Key
 		)
 
 		// Range checks
@@ -439,7 +439,7 @@ func (ui *Index[T]) scanRangeRecursiveReverse(ctx context.Context, pageIdx PageI
 	for i := int(node.Header.Keys) - 1; i >= 0; i-- {
 		var (
 			cell = node.Cells[i]
-			key   = cell.Key
+			key  = cell.Key
 		)
 
 		// Check if this key should be included

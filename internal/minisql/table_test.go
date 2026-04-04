@@ -53,13 +53,13 @@ func TestTable_SeekNextRowID(t *testing.T) {
 		ctx       = context.Background()
 		pagerMock = new(MockTxPager)
 		txManager = NewTransactionManager(zap.NewNop(), testDBName, nil, nil, nil)
-		table    = NewTable(testLogger, pagerMock, txManager, testTableName, testColumns, 0, nil)
+		table     = NewTable(testLogger, pagerMock, txManager, testTableName, testColumns, 0, nil)
 	)
 
 	t.Run("empty table", func(t *testing.T) {
 		var (
 			cells, rowSize = 0, 270
-			rootPage      = newRootLeafPageWithCells(cells, rowSize)
+			rootPage       = newRootLeafPageWithCells(cells, rowSize)
 		)
 
 		pagerMock.On("ReadPage", mock.Anything, PageIndex(0)).Return(rootPage, nil).Once()
@@ -105,7 +105,7 @@ func TestTable_SeekFirst(t *testing.T) {
 		ctx       = context.Background()
 		pagerMock = new(MockTxPager)
 		txManager = NewTransactionManager(zap.NewNop(), testDBName, nil, nil, nil)
-		table    = NewTable(testLogger, pagerMock, txManager, testTableName, testColumns, 0, nil)
+		table     = NewTable(testLogger, pagerMock, txManager, testTableName, testColumns, 0, nil)
 	)
 	rootPage, internalPages, leafPages := newTestBtree()
 
@@ -131,7 +131,7 @@ func TestTable_SeekLast(t *testing.T) {
 		ctx       = context.Background()
 		pagerMock = new(MockTxPager)
 		txManager = NewTransactionManager(zap.NewNop(), testDBName, nil, nil, nil)
-		table    = NewTable(testLogger, pagerMock, txManager, testTableName, testColumns, 0, nil)
+		table     = NewTable(testLogger, pagerMock, txManager, testTableName, testColumns, 0, nil)
 	)
 	rootPage, internalPages, leafPages := newTestBtree()
 
@@ -157,13 +157,13 @@ func TestTable_Seek_EmptyTable(t *testing.T) {
 		ctx       = context.Background()
 		pagerMock = new(MockTxPager)
 		txManager = NewTransactionManager(zap.NewNop(), testDBName, nil, nil, nil)
-		table    = NewTable(testLogger, pagerMock, txManager, testTableName, testColumns, 0, nil)
+		table     = NewTable(testLogger, pagerMock, txManager, testTableName, testColumns, 0, nil)
 	)
 
 	t.Run("empty table", func(t *testing.T) {
 		var (
 			cells, rowSize = 0, 270
-			rootPage      = newRootLeafPageWithCells(cells, rowSize)
+			rootPage       = newRootLeafPageWithCells(cells, rowSize)
 		)
 
 		pagerMock.On("ReadPage", mock.Anything, table.GetRootPageIdx()).Return(rootPage, nil).Once()
@@ -181,7 +181,7 @@ func TestTable_Seek_EmptyTable(t *testing.T) {
 	t.Run("root leaf node single cell", func(t *testing.T) {
 		var (
 			cells, rowSize = 1, 270
-			rootPage      = newRootLeafPageWithCells(cells, rowSize)
+			rootPage       = newRootLeafPageWithCells(cells, rowSize)
 		)
 
 		pagerMock.On("ReadPage", mock.Anything, table.GetRootPageIdx()).Return(rootPage, nil)
@@ -206,7 +206,7 @@ func TestTable_Seek_EmptyTable(t *testing.T) {
 
 	t.Run("root leaf node full", func(t *testing.T) {
 		var (
-			cells     = maxCells(testRowSize)
+			cells    = maxCells(testRowSize)
 			rootPage = newRootLeafPageWithCells(int(cells), int(testRowSize))
 		)
 		pagerMock.On("ReadPage", mock.Anything, table.GetRootPageIdx()).Return(rootPage, nil)
@@ -238,7 +238,7 @@ func TestTable_Seek_RootLeafNode_BiggerTree(t *testing.T) {
 		ctx       = context.Background()
 		pagerMock = new(MockTxPager)
 		txManager = NewTransactionManager(zap.NewNop(), testDBName, nil, nil, nil)
-		table    = NewTable(testLogger, pagerMock, txManager, testTableName, testColumns, 0, nil)
+		table     = NewTable(testLogger, pagerMock, txManager, testTableName, testColumns, 0, nil)
 	)
 	rootPage, internalPages, leafPages := newTestBtree()
 
@@ -324,9 +324,9 @@ func TestTable_CreateNewRoot(t *testing.T) {
 		ctx           = context.Background()
 		pagerMock     = new(MockTxPager)
 		txManager     = NewTransactionManager(zap.NewNop(), testDBName, nil, nil, nil)
-		table        = NewTable(testLogger, pagerMock, txManager, testTableName, testColumns, 0, nil)
+		table         = NewTable(testLogger, pagerMock, txManager, testTableName, testColumns, 0, nil)
 		cells         = maxCells(testRowSize)
-		rootPage     = newRootLeafPageWithCells(int(cells), int(testRowSize))
+		rootPage      = newRootLeafPageWithCells(int(cells), int(testRowSize))
 		newRightChild = &Page{Index: 1, LeafNode: NewLeafNode()}
 		newLeftChild  = &Page{Index: 2, LeafNode: NewLeafNode()}
 	)
@@ -360,7 +360,7 @@ func TestTable_InternalNodeInsert(t *testing.T) {
 		pagerMock                   = new(MockTxPager)
 		_, internalPages, leafPages = newTestBtree()
 		txManager                   = NewTransactionManager(zap.NewNop(), testDBName, nil, nil, nil)
-		table                      = NewTable(testLogger, pagerMock, txManager, testTableName, testColumns, 0, nil)
+		table                       = NewTable(testLogger, pagerMock, txManager, testTableName, testColumns, 0, nil)
 		aNewLeaf                    = NewLeafNode()
 	)
 	aNewLeaf.Header.Cells = 1

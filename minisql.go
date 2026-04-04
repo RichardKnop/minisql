@@ -295,9 +295,11 @@ func (c *Conn) executeStatement(ctx context.Context, stmt minisql.Statement) (mi
 }
 
 // Ensure interfaces are implemented
-var _ driver.Driver = (*Driver)(nil)
-var _ driver.Conn = (*Conn)(nil)
-var _ driver.ConnPrepareContext = (*Conn)(nil)
-var _ driver.ConnBeginTx = (*Conn)(nil)
-var _ driver.ExecerContext = (*Conn)(nil)
-var _ driver.QueryerContext = (*Conn)(nil)
+var (
+	_ driver.Driver             = (*Driver)(nil)
+	_ driver.Conn               = (*Conn)(nil)
+	_ driver.ConnPrepareContext = (*Conn)(nil)
+	_ driver.ConnBeginTx        = (*Conn)(nil)
+	_ driver.ExecerContext      = (*Conn)(nil)
+	_ driver.QueryerContext     = (*Conn)(nil)
+)

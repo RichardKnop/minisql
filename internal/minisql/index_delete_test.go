@@ -14,12 +14,12 @@ import (
 func TestIndex_Delete(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		keys           = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
-		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = pager.ForIndex([]Column{col}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
-		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
+		ctx           = context.Background()
+		keys          = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
+		col           = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager    = pager.ForIndex([]Column{col}, true)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
+		txPager       = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
 	idx, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
@@ -50,7 +50,6 @@ func TestIndex_Delete(t *testing.T) {
 	*/
 
 	checkIndexKeys(ctx, t, idx, keys)
-
 
 	var (
 		rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
@@ -108,7 +107,6 @@ func TestIndex_Delete(t *testing.T) {
 
 		expectedKeys := []int64{2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
-
 
 		var (
 			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
@@ -175,7 +173,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
 
-
 		var (
 			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
 			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
@@ -237,7 +234,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
 
-
 		var (
 			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
 			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
@@ -295,7 +291,6 @@ func TestIndex_Delete(t *testing.T) {
 
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
-
 
 		var (
 			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
@@ -356,7 +351,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
 
-
 		var (
 			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
 			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
@@ -415,7 +409,6 @@ func TestIndex_Delete(t *testing.T) {
 
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 17, 18, 21}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
-
 
 		var (
 			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
@@ -476,7 +469,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 17, 18, 21}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
 
-
 		var (
 			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
 			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
@@ -534,7 +526,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 14, 17, 18, 21}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
 
-
 		var (
 			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
 			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
@@ -589,7 +580,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 9, 11, 12, 14, 17, 18, 21}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
 
-
 		var (
 			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
 			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
@@ -641,7 +631,6 @@ func TestIndex_Delete(t *testing.T) {
 
 		expectedKeys := []int64{2, 3, 6, 7, 11, 12, 14, 17, 18, 21}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
-
 
 		var (
 			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
@@ -695,7 +684,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 3, 6, 7, 12, 14, 17, 18, 21}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
 
-
 		var (
 			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
 			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
@@ -742,7 +730,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 6, 7, 12, 14, 17, 18, 21}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
 
-
 		var (
 			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
 			leaf1    = pager.pages[1].IndexNode.(*IndexNode[int64])
@@ -781,7 +768,6 @@ func TestIndex_Delete(t *testing.T) {
 
 		expectedKeys := []int64{2, 6, 7, 12, 17, 18, 21}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
-
 
 		var (
 			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
@@ -822,7 +808,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 7, 12, 17, 18, 21}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
 
-
 		var (
 			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
 			leaf1    = pager.pages[1].IndexNode.(*IndexNode[int64])
@@ -859,7 +844,6 @@ func TestIndex_Delete(t *testing.T) {
 
 		expectedKeys := []int64{2, 7, 12, 18, 21}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
-
 
 		var (
 			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
@@ -898,7 +882,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{2, 7, 12, 18}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
 
-
 		var (
 			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
 			leaf1    = pager.pages[1].IndexNode.(*IndexNode[int64])
@@ -934,7 +917,6 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{7, 12, 18}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
 
-
 		var (
 			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
 			leaf1    = pager.pages[1].IndexNode.(*IndexNode[int64])
@@ -965,10 +947,7 @@ func TestIndex_Delete(t *testing.T) {
 		expectedKeys := []int64{7, 12}
 		checkIndexKeys(ctx, t, idx, expectedKeys)
 
-
-		var (
-			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
-		)
+		rootNode := pager.pages[0].IndexNode.(*IndexNode[int64])
 
 		// Root node
 		assertIndexNode(t, rootNode, true, true, 0, []int64{7, 12}, nil)
@@ -987,10 +966,7 @@ func TestIndex_Delete(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-
-		var (
-			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
-		)
+		rootNode := pager.pages[0].IndexNode.(*IndexNode[int64])
 
 		// Root node
 		assertIndexNode(t, rootNode, true, true, 0, nil, nil)
@@ -1003,11 +979,11 @@ func TestIndex_Delete(t *testing.T) {
 func TestIndex_Delete_Random_Shuffle(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = pager.ForIndex([]Column{col}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
-		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
+		ctx           = context.Background()
+		col           = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager    = pager.ForIndex([]Column{col}, true)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
+		txPager       = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
 	idx, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
@@ -1050,11 +1026,11 @@ func TestIndex_Delete_Random_Shuffle(t *testing.T) {
 func TestIndex_Delete_Varchar(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		col        = Column{Name: "test_column", Kind: Varchar, Size: 100}
-		indexPager     = pager.ForIndex([]Column{col}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
-		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
+		ctx           = context.Background()
+		col           = Column{Name: "test_column", Kind: Varchar, Size: 100}
+		indexPager    = pager.ForIndex([]Column{col}, true)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
+		txPager       = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
 	idx, err := NewUniqueIndex[string](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
