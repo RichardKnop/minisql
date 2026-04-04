@@ -11,7 +11,7 @@ func TestInternalNode_IndexOfChild(t *testing.T) {
 	t.Parallel()
 
 	// Root node has only 1 key so there will only be 2 children
-	aRootPage, internalPages, _ := newTestBtree()
+	rootPage, internalPages, _ := newTestBtree()
 
 	testCases := []struct {
 		Name     string
@@ -22,37 +22,37 @@ func TestInternalNode_IndexOfChild(t *testing.T) {
 		// Root page
 		{
 			Name:     "1 is in the left child subtree of root page",
-			Page:     aRootPage,
+			Page:     rootPage,
 			Key:      1,
 			ChildIdx: 0,
 		},
 		{
 			Name:     "2 is in the left child subtree of root page",
-			Page:     aRootPage,
+			Page:     rootPage,
 			Key:      2,
 			ChildIdx: 0,
 		},
 		{
 			Name:     "5 is in the left child subtree of root page",
-			Page:     aRootPage,
+			Page:     rootPage,
 			Key:      5,
 			ChildIdx: 0,
 		},
 		{
 			Name:     "12 is in the right child subtree of root page",
-			Page:     aRootPage,
+			Page:     rootPage,
 			Key:      12,
 			ChildIdx: 1,
 		},
 		{
 			Name:     "18 is in the right child subtree of root page",
-			Page:     aRootPage,
+			Page:     rootPage,
 			Key:      18,
 			ChildIdx: 1,
 		},
 		{
 			Name:     "21 is in the right child subtree of root page",
-			Page:     aRootPage,
+			Page:     rootPage,
 			Key:      21,
 			ChildIdx: 1,
 		},
@@ -107,7 +107,7 @@ func TestInternalNode_IndexOfChild(t *testing.T) {
 func TestInternalNode_Child(t *testing.T) {
 	t.Parallel()
 
-	aNode := &InternalNode{
+	node := &InternalNode{
 		Header: InternalNodeHeader{
 			KeysNum:    2,
 			RightChild: 3,
@@ -146,7 +146,7 @@ func TestInternalNode_Child(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			pageIdx, err := aNode.Child(aTestCase.ChildIdx)
+			pageIdx, err := node.Child(aTestCase.ChildIdx)
 			require.NoError(t, err)
 			assert.Equal(t, int(aTestCase.PageIdx), int(pageIdx))
 		})

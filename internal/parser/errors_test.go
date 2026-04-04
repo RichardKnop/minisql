@@ -2,7 +2,6 @@ package parser
 
 import (
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -66,7 +65,7 @@ func TestParseError_Error(t *testing.T) {
 func TestParseError_Unwrap(t *testing.T) {
 	t.Parallel()
 
-	sentinel := fmt.Errorf("some sentinel error")
+	sentinel := errors.New("some sentinel error")
 	pe := &ParseError{
 		Pos:  5,
 		Near: "token",
@@ -79,7 +78,7 @@ func TestParseError_Unwrap(t *testing.T) {
 	})
 
 	t.Run("errors.Is does not match unrelated error", func(t *testing.T) {
-		other := fmt.Errorf("other error")
+		other := errors.New("other error")
 		assert.False(t, errors.Is(pe, other))
 	})
 
@@ -178,7 +177,7 @@ func TestParserItem_errorf(t *testing.T) {
 func TestParserItem_wrapErr(t *testing.T) {
 	t.Parallel()
 
-	sentinel := fmt.Errorf("at WHERE: expected field")
+	sentinel := errors.New("at WHERE: expected field")
 	p := &parserItem{
 		sql: "WHERE 123 = foo",
 		i:   6,

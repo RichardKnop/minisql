@@ -10,7 +10,7 @@ import (
 func TestInternalNode_Marshal(t *testing.T) {
 	t.Parallel()
 
-	aNode := &InternalNode{
+	node := &InternalNode{
 		Header: InternalNodeHeader{
 			Header: Header{
 				IsInternal: false,
@@ -28,13 +28,13 @@ func TestInternalNode_Marshal(t *testing.T) {
 		},
 	}
 
-	buf := make([]byte, aNode.Size())
-	err := aNode.Marshal(buf)
+	buf := make([]byte, node.Size())
+	err := node.Marshal(buf)
 	require.NoError(t, err)
 
 	recreatedNode := new(InternalNode)
 	_, err = recreatedNode.Unmarshal(buf)
 	require.NoError(t, err)
 
-	assert.Equal(t, aNode, recreatedNode)
+	assert.Equal(t, node, recreatedNode)
 }

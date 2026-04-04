@@ -11,15 +11,15 @@ import (
 )
 
 func TestTable_Select_PrimaryKey(t *testing.T) {
-	aPager, dbFile := initTest(t)
+	pager, dbFile := initTest(t)
 
 	var (
 		ctx        = context.Background()
 		rows       = gen.RowsWithPrimaryKey(38)
-		tablePager = aPager.ForTable(testColumns[0:2])
-		txManager  = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager = pager.ForTable(testColumns[0:2])
+		txManager  = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		aTable     *Table
+		table     *Table
 	)
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -29,7 +29,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		}
 		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
-		aTable = NewTable(
+		table = NewTable(
 			testLogger,
 			txPager,
 			txManager,
@@ -44,20 +44,20 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 	require.NoError(t, err)
 
 	txPrimaryKeyPager := NewTransactionalPager(
-		aPager.ForIndex(aTable.PrimaryKey.Columns, true),
-		aTable.txManager,
+		pager.ForIndex(table.PrimaryKey.Columns, true),
+		table.txManager,
 		testTableName,
-		aTable.PrimaryKey.Name,
+		table.PrimaryKey.Name,
 	)
 
 	// Batch insert test rows
 	stmt := Statement{
 		Kind:    Insert,
-		Fields:  fieldsFromColumns(aTable.Columns...),
+		Fields:  fieldsFromColumns(table.Columns...),
 		Inserts: make([][]OptionalValue, 0, len(rows)),
 	}
-	for _, aRow := range rows {
-		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	for _, row := range rows {
+		stmt.Inserts = append(stmt.Inserts, row.Values)
 	}
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -65,40 +65,40 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		aTable.PrimaryKey.Index, err = aTable.createBTreeIndex(
+		table.PrimaryKey.Index, err = table.createBTreeIndex(
 			txPrimaryKeyPager,
 			freePage,
-			aTable.PrimaryKey.Columns,
-			aTable.PrimaryKey.Name,
+			table.PrimaryKey.Columns,
+			table.PrimaryKey.Name,
 			true,
 		)
 		if err != nil {
 			return err
 		}
-		_, err = aTable.Insert(ctx, stmt)
+		_, err = table.Insert(ctx, stmt)
 		return err
 	})
 	require.NoError(t, err)
 
-	checkRows(ctx, t, aTable, rows)
+	checkRows(ctx, t, table, rows)
 
 	t.Run("Select all rows", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		assert.Equal(t, rows, collectRows(ctx, aResult))
+		assert.Equal(t, rows, collectRows(ctx, result))
 	})
 
 	t.Run("Select single row by primary key - index scan", func(t *testing.T) {
 		id := rowIDs(rows[5])[0]
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -116,10 +116,10 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
-		actual := collectRows(ctx, aResult)
+		actual := collectRows(ctx, result)
 		assert.Len(t, actual, 1)
 		assert.Equal(t, rows[5], actual[0])
 	})
@@ -128,7 +128,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		ids := rowIDs(rows[5], rows[11], rows[12], rows[33])
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -146,25 +146,25 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
 		// We expect rows 5, 11, 12, and 33
 		expected := make([]Row, 0, len(ids))
-		for i, aRow := range rows {
+		for i, row := range rows {
 			if i != 5 && i != 11 && i != 12 && i != 33 {
 				continue
 			}
-			expected = append(expected, aRow)
+			expected = append(expected, row)
 		}
-		assert.Equal(t, expected, collectRows(ctx, aResult))
+		assert.Equal(t, expected, collectRows(ctx, result))
 	})
 
 	t.Run("Select rows where primary key is NOT IN - sequential scan", func(t *testing.T) {
 		ids := rowIDs(rows[5], rows[11], rows[12], rows[33])
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -182,25 +182,25 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
 		// We expect all rows other than 5, 11, 12, and 33
 		expected := make([]Row, 0, len(ids))
-		for i, aRow := range rows {
+		for i, row := range rows {
 			if i == 5 || i == 11 || i == 12 || i == 33 {
 				continue
 			}
-			expected = append(expected, aRow)
+			expected = append(expected, row)
 		}
-		assert.Equal(t, expected, collectRows(ctx, aResult))
+		assert.Equal(t, expected, collectRows(ctx, result))
 	})
 
 	t.Run("Select rows by range with lower bound - range scan", func(t *testing.T) {
 		id := rowIDs(rows[10])[0]
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -218,18 +218,18 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
 		// We expect rows 12 and onwards
 		expected := make([]Row, 0, len(rows)-11)
-		for i, aRow := range rows {
+		for i, row := range rows {
 			if i < 11 {
 				continue
 			}
-			expected = append(expected, aRow)
+			expected = append(expected, row)
 		}
-		actual := collectRows(ctx, aResult)
+		actual := collectRows(ctx, result)
 		assert.Len(t, actual, len(expected))
 		assert.Equal(t, expected, actual)
 	})
@@ -238,7 +238,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		id := rowIDs(rows[30])[0]
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -256,18 +256,18 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
 		// We expect rows until 30
 		expected := make([]Row, 0, len(rows)-9)
-		for i, aRow := range rows {
+		for i, row := range rows {
 			if i >= 30 {
 				continue
 			}
-			expected = append(expected, aRow)
+			expected = append(expected, row)
 		}
-		actual := collectRows(ctx, aResult)
+		actual := collectRows(ctx, result)
 		assert.Len(t, actual, len(expected))
 		assert.Equal(t, expected, actual)
 	})
@@ -277,7 +277,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		id2 := rowIDs(rows[30])[0]
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -306,18 +306,18 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
 		// We expect all rows between 10 and 30 inclusive
 		expected := make([]Row, 0, len(rows)-9)
-		for i, aRow := range rows {
+		for i, row := range rows {
 			if i < 10 || i > 30 {
 				continue
 			}
-			expected = append(expected, aRow)
+			expected = append(expected, row)
 		}
-		actual := collectRows(ctx, aResult)
+		actual := collectRows(ctx, result)
 		assert.Len(t, actual, len(expected))
 		assert.Equal(t, expected, actual)
 	})
@@ -329,7 +329,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		)
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			Conditions: OneOrMore{
 				{
 					{
@@ -360,17 +360,17 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
 		expected := []Row{rows[5].Clone(), rows[15].Clone()}
-		assert.Equal(t, expected, collectRows(ctx, aResult))
+		assert.Equal(t, expected, collectRows(ctx, result))
 	})
 
 	t.Run("Select with order by sort with index asc", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			OrderBy: []OrderBy{
 				{
 					Field:     Field{Name: "id"},
@@ -379,7 +379,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
 		// We expect all rows sorted by ID ascending
@@ -390,13 +390,13 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 			id2, _ := expected[j].GetValue("id")
 			return id1.Value.(int64) < id2.Value.(int64)
 		})
-		assert.Equal(t, expected, collectRows(ctx, aResult))
+		assert.Equal(t, expected, collectRows(ctx, result))
 	})
 
 	t.Run("Select with order by sort with index desc", func(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
-			Fields: fieldsFromColumns(aTable.Columns...),
+			Fields: fieldsFromColumns(table.Columns...),
 			OrderBy: []OrderBy{
 				{
 					Field:     Field{Name: "id"},
@@ -405,7 +405,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 			},
 		}
 
-		aResult, err := aTable.Select(ctx, stmt)
+		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
 
 		// We expect all rows sorted by ID descending
@@ -416,6 +416,6 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 			id2, _ := expected[j].GetValue("id")
 			return id1.Value.(int64) > id2.Value.(int64)
 		})
-		assert.Equal(t, expected, collectRows(ctx, aResult))
+		assert.Equal(t, expected, collectRows(ctx, result))
 	})
 }

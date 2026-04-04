@@ -12,13 +12,13 @@ import (
 
 func TestDatabase_Analyze(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		mockParser     = new(MockParser)
 		ctx            = context.Background()
 		rows           = gen.Rows(100)
 	)
 
-	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager)
 	require.NoError(t, err)
 
 	// Create a test table
@@ -74,12 +74,12 @@ func TestDatabase_Analyze(t *testing.T) {
 	}
 	// Make each 10 rows have the same timestamp so we can test distinct keys
 	now := time.Now().Add(-time.Hour)
-	for i, aRow := range rows {
+	for i, row := range rows {
 		if i > 0 && i%10 == 0 {
 			now = now.Add(time.Minute)
 		}
-		aRow.Values[5].Value = MustParseTimestamp(now.Format(timestampFormat))
-		insertStmt.Inserts = append(insertStmt.Inserts, aRow.Values)
+		row.Values[5].Value = MustParseTimestamp(now.Format(timestampFormat))
+		insertStmt.Inserts = append(insertStmt.Inserts, row.Values)
 	}
 
 	mustInsert(ctx, t, aDatabase.tables[testTableName], aDatabase.txManager, insertStmt)
@@ -118,7 +118,7 @@ func TestDatabase_Analyze(t *testing.T) {
 
 func TestDatabase_Analyze_CompositeIndex(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		mockParser     = new(MockParser)
 		ctx            = context.Background()
 		columns        = []Column{
@@ -128,7 +128,7 @@ func TestDatabase_Analyze_CompositeIndex(t *testing.T) {
 		}
 	)
 
-	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, aPager, aPager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager)
 	require.NoError(t, err)
 
 	// Create a test table

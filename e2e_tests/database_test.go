@@ -35,18 +35,18 @@ func (s *TestSuite) TestEmptyDatabase() {
 	// There should be only one row for the minisql_schema table
 	s.countRowsInTable("minisql_schema", 1)
 
-	var aSchema schema
-	err = s.db.QueryRow(`select * from minisql_schema;`).Scan(&aSchema.Type, &aSchema.Name, &aSchema.TblName, &aSchema.RootPage, &aSchema.sqlText)
+	var schema schema
+	err = s.db.QueryRow(`select * from minisql_schema;`).Scan(&schema.Type, &schema.Name, &schema.TblName, &schema.RootPage, &schema.sqlText)
 	s.Require().NoError(err)
-	s.assertSchemaTable(aSchema)
+	s.assertSchemaTable(schema)
 }
 
 func (s *TestSuite) TestCreateTable() {
 	s.Run("Create users table", func() {
-		aResult, err := s.db.Exec(createUsersTableSQL)
+		result, err := s.db.Exec(createUsersTableSQL)
 		s.Require().NoError(err)
 
-		rowsAffected, err := aResult.RowsAffected()
+		rowsAffected, err := result.RowsAffected()
 		s.Require().NoError(err)
 		s.Require().Equal(int64(0), rowsAffected)
 
@@ -69,10 +69,10 @@ func (s *TestSuite) TestCreateTable() {
 	})
 
 	s.Run("Create table with IF NOT EXISTS does not fail if table exists", func() {
-		aResult, err := s.db.Exec(createUsersTableIfNotExistsSQL)
+		result, err := s.db.Exec(createUsersTableIfNotExistsSQL)
 		s.Require().NoError(err)
 
-		rowsAffected, err := aResult.RowsAffected()
+		rowsAffected, err := result.RowsAffected()
 		s.Require().NoError(err)
 		s.Require().Equal(int64(0), rowsAffected)
 
@@ -127,9 +127,9 @@ func (s *TestSuite) TestCreateTable() {
 			createProductsTableSQL,
 			createOrdersTableSQL,
 		} {
-			aResult, err := tx.Exec(tableSQL)
+			result, err := tx.Exec(tableSQL)
 			s.Require().NoError(err)
-			rowsAffected, err := aResult.RowsAffected()
+			rowsAffected, err := result.RowsAffected()
 			s.Require().NoError(err)
 			s.Require().Equal(int64(0), rowsAffected)
 		}
@@ -167,29 +167,29 @@ func (s *TestSuite) scanSchemas() []schema {
 	rows, err := s.db.Query(`select * from minisql_schema;`)
 	s.Require().NoError(err)
 	for rows.Next() {
-		var aSchema schema
-		err := rows.Scan(&aSchema.Type, &aSchema.Name, &aSchema.TblName, &aSchema.RootPage, &aSchema.sqlText)
+		var schema schema
+		err := rows.Scan(&schema.Type, &schema.Name, &schema.TblName, &schema.RootPage, &schema.sqlText)
 		s.Require().NoError(err)
-		schemas = append(schemas, aSchema)
+		schemas = append(schemas, schema)
 	}
 	s.Require().NoError(rows.Err())
 	return schemas
 }
 
-func (s *TestSuite) assertSchemaTable(aSchema schema) {
-	s.Equal(minisql.SchemaTable, aSchema.Type)
-	s.Equal(minisql.SchemaTableName, aSchema.Name)
-	s.Empty(aSchema.TableName())
-	s.Equal(0, int(aSchema.RootPage))
-	s.Equal(minisql.MainTableSQL, aSchema.SQL())
+func (s *TestSuite) assertSchemaTable(schema schema) {
+	s.Equal(minisql.SchemaTable, schema.Type)
+	s.Equal(minisql.SchemaTableName, schema.Name)
+	s.Empty(schema.TableName())
+	s.Equal(0, int(schema.RootPage))
+	s.Equal(minisql.MainTableSQL, schema.SQL())
 }
 
-func (s *TestSuite) assertUsersTable(aTable schema, idx int, primaryKey schema, pkIdx int, uniqueIndex schema, keyIdx int) {
-	s.Equal(minisql.SchemaTable, aTable.Type)
-	s.Equal("users", aTable.Name)
-	s.Empty(aTable.TableName())
-	s.Equal(idx, int(aTable.RootPage))
-	s.Equal(createUsersTableSQL, aTable.SQL())
+func (s *TestSuite) assertUsersTable(table schema, idx int, primaryKey schema, pkIdx int, uniqueIndex schema, keyIdx int) {
+	s.Equal(minisql.SchemaTable, table.Type)
+	s.Equal("users", table.Name)
+	s.Empty(table.TableName())
+	s.Equal(idx, int(table.RootPage))
+	s.Equal(createUsersTableSQL, table.SQL())
 
 	s.Equal(minisql.SchemaPrimaryKey, primaryKey.Type)
 	s.Equal("pkey__users", primaryKey.Name)
@@ -204,20 +204,20 @@ func (s *TestSuite) assertUsersTable(aTable schema, idx int, primaryKey schema, 
 	s.Empty(uniqueIndex.SQL())
 }
 
-func (s *TestSuite) assertIndex(aIndex schema, name, tableName string, idx int, sql string) {
-	s.Equal(minisql.SchemaSecondaryIndex, aIndex.Type)
-	s.Equal(name, aIndex.Name)
-	s.Equal(tableName, aIndex.TableName())
-	s.Equal(idx, int(aIndex.RootPage))
-	s.Equal(sql, aIndex.SQL())
+func (s *TestSuite) assertIndex(indexSchema schema, name, tableName string, idx int, sql string) {
+	s.Equal(minisql.SchemaSecondaryIndex, indexSchema.Type)
+	s.Equal(name, indexSchema.Name)
+	s.Equal(tableName, indexSchema.TableName())
+	s.Equal(idx, int(indexSchema.RootPage))
+	s.Equal(sql, indexSchema.SQL())
 }
 
-func (s *TestSuite) assertProductsTable(aTable schema, idx int, primaryKey schema, pkIdx int) {
-	s.Equal(minisql.SchemaTable, aTable.Type)
-	s.Equal("products", aTable.Name)
-	s.Empty(aTable.TableName())
-	s.Equal(idx, int(aTable.RootPage))
-	s.Equal(createProductsTableSQL, aTable.SQL())
+func (s *TestSuite) assertProductsTable(table schema, idx int, primaryKey schema, pkIdx int) {
+	s.Equal(minisql.SchemaTable, table.Type)
+	s.Equal("products", table.Name)
+	s.Empty(table.TableName())
+	s.Equal(idx, int(table.RootPage))
+	s.Equal(createProductsTableSQL, table.SQL())
 
 	s.Equal(minisql.SchemaPrimaryKey, primaryKey.Type)
 	s.Equal("pkey__products", primaryKey.Name)
@@ -226,12 +226,12 @@ func (s *TestSuite) assertProductsTable(aTable schema, idx int, primaryKey schem
 	s.Empty(primaryKey.SQL())
 }
 
-func (s *TestSuite) assertOrdersTable(aTable schema, idx int, primaryKey schema, pkIdx int) {
-	s.Equal(minisql.SchemaTable, aTable.Type)
-	s.Equal("orders", aTable.Name)
-	s.Empty(aTable.TableName())
-	s.Equal(idx, int(aTable.RootPage))
-	s.Equal(createOrdersTableSQL, aTable.SQL())
+func (s *TestSuite) assertOrdersTable(table schema, idx int, primaryKey schema, pkIdx int) {
+	s.Equal(minisql.SchemaTable, table.Type)
+	s.Equal("orders", table.Name)
+	s.Empty(table.TableName())
+	s.Equal(idx, int(table.RootPage))
+	s.Equal(createOrdersTableSQL, table.SQL())
 
 	s.Equal(minisql.SchemaPrimaryKey, primaryKey.Type)
 	s.Equal("pkey__orders", primaryKey.Name)

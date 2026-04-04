@@ -11,13 +11,13 @@ import (
 
 func TestTable_Delete_UniqueIndex(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
-		tablePager     = aPager.ForTable(testColumns[0:2])
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager     = pager.ForTable(testColumns[0:2])
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		rows           = gen.RowsWithUniqueIndex(10)
-		aTable         *Table
+		table         *Table
 		indexName      = UniqueIndexName(testTableName, "email")
 	)
 
@@ -28,7 +28,7 @@ func TestTable_Delete_UniqueIndex(t *testing.T) {
 		}
 		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
-		aTable = NewTable(
+		table = NewTable(
 			testLogger,
 			txPager,
 			txManager,
@@ -48,23 +48,23 @@ func TestTable_Delete_UniqueIndex(t *testing.T) {
 	require.NoError(t, err)
 
 	txIndexPager := NewTransactionalPager(
-		aPager.ForIndex(
-			aTable.UniqueIndexes[indexName].Columns,
+		pager.ForIndex(
+			table.UniqueIndexes[indexName].Columns,
 			true,
 		),
-		aTable.txManager,
-		aTable.Name,
-		aTable.UniqueIndexes[indexName].Name,
+		table.txManager,
+		table.Name,
+		table.UniqueIndexes[indexName].Name,
 	)
 
 	// Batch insert test rows
 	stmt := Statement{
 		Kind:    Insert,
-		Fields:  fieldsFromColumns(aTable.Columns...),
+		Fields:  fieldsFromColumns(table.Columns...),
 		Inserts: make([][]OptionalValue, 0, len(rows)),
 	}
-	for _, aRow := range rows {
-		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	for _, row := range rows {
+		stmt.Inserts = append(stmt.Inserts, row.Values)
 	}
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -72,24 +72,24 @@ func TestTable_Delete_UniqueIndex(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		uniqueIndex := aTable.UniqueIndexes[indexName]
-		uniqueIndex.Index, err = aTable.createBTreeIndex(
+		uniqueIndex := table.UniqueIndexes[indexName]
+		uniqueIndex.Index, err = table.createBTreeIndex(
 			txIndexPager,
 			freePage,
-			aTable.UniqueIndexes[indexName].Columns,
-			aTable.UniqueIndexes[indexName].Name,
+			table.UniqueIndexes[indexName].Columns,
+			table.UniqueIndexes[indexName].Name,
 			true,
 		)
-		aTable.UniqueIndexes[indexName] = uniqueIndex
+		table.UniqueIndexes[indexName] = uniqueIndex
 		if err != nil {
 			return err
 		}
-		_, err = aTable.Insert(ctx, stmt)
+		_, err = table.Insert(ctx, stmt)
 		return err
 	})
 	require.NoError(t, err)
 
-	checkRows(ctx, t, aTable, rows)
+	checkRows(ctx, t, table, rows)
 
 	t.Run("Delete single row", func(t *testing.T) {
 		email, ok := rows[0].GetValue("email")
@@ -104,29 +104,29 @@ func TestTable_Delete_UniqueIndex(t *testing.T) {
 			},
 		}
 
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, stmt)
+		result := mustDelete(ctx, t, table, txManager, pager, stmt)
 
-		assert.Equal(t, 1, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, rows[1:])
+		assert.Equal(t, 1, result.RowsAffected)
+		checkRows(ctx, t, table, rows[1:])
 	})
 
 	t.Run("Delete all rows", func(t *testing.T) {
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{Kind: Delete})
+		result := mustDelete(ctx, t, table, txManager, pager, Statement{Kind: Delete})
 
-		assert.Equal(t, 9, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, nil)
+		assert.Equal(t, 9, result.RowsAffected)
+		checkRows(ctx, t, table, nil)
 	})
 }
 
 func TestTable_Delete_CompositeUniqueIndex(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
-		tablePager     = aPager.ForTable(testCompositeKeyColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), aPager, nil)
+		tablePager     = pager.ForTable(testCompositeKeyColumns)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		rows           = gen.RowsWithCompositeKey(10)
-		aTable         *Table
+		table         *Table
 		indexName      = UniqueIndexName(testTableName, "first_name", "last_name")
 	)
 
@@ -137,7 +137,7 @@ func TestTable_Delete_CompositeUniqueIndex(t *testing.T) {
 		}
 		freePage.LeafNode = NewLeafNode()
 		freePage.LeafNode.Header.IsRoot = true
-		aTable = NewTable(
+		table = NewTable(
 			testLogger,
 			txPager,
 			txManager,
@@ -157,20 +157,20 @@ func TestTable_Delete_CompositeUniqueIndex(t *testing.T) {
 	require.NoError(t, err)
 
 	txIndexPager := NewTransactionalPager(
-		aPager.ForIndex(aTable.UniqueIndexes[indexName].Columns, true),
-		aTable.txManager,
+		pager.ForIndex(table.UniqueIndexes[indexName].Columns, true),
+		table.txManager,
 		testTableName,
-		aTable.UniqueIndexes[indexName].Name,
+		table.UniqueIndexes[indexName].Name,
 	)
 
 	// Batch insert test rows
 	stmt := Statement{
 		Kind:    Insert,
-		Fields:  fieldsFromColumns(aTable.Columns...),
+		Fields:  fieldsFromColumns(table.Columns...),
 		Inserts: make([][]OptionalValue, 0, len(rows)),
 	}
-	for _, aRow := range rows {
-		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	for _, row := range rows {
+		stmt.Inserts = append(stmt.Inserts, row.Values)
 	}
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -178,26 +178,26 @@ func TestTable_Delete_CompositeUniqueIndex(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		uniqueIndex := aTable.UniqueIndexes[indexName]
+		uniqueIndex := table.UniqueIndexes[indexName]
 		var idx BTreeIndex
-		idx, err = aTable.createBTreeIndex(
+		idx, err = table.createBTreeIndex(
 			txIndexPager,
 			freePage,
-			aTable.UniqueIndexes[indexName].Columns,
-			aTable.UniqueIndexes[indexName].Name,
+			table.UniqueIndexes[indexName].Columns,
+			table.UniqueIndexes[indexName].Name,
 			true,
 		)
 		if err != nil {
 			return err
 		}
 		uniqueIndex.Index = idx
-		aTable.UniqueIndexes[indexName] = uniqueIndex
-		_, err = aTable.Insert(ctx, stmt)
+		table.UniqueIndexes[indexName] = uniqueIndex
+		_, err = table.Insert(ctx, stmt)
 		return err
 	})
 	require.NoError(t, err)
 
-	checkRows(ctx, t, aTable, rows)
+	checkRows(ctx, t, table, rows)
 
 	t.Run("Delete single row", func(t *testing.T) {
 		firstName, ok := rows[0].GetValue("first_name")
@@ -215,16 +215,16 @@ func TestTable_Delete_CompositeUniqueIndex(t *testing.T) {
 			},
 		}
 
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, stmt)
+		result := mustDelete(ctx, t, table, txManager, pager, stmt)
 
-		assert.Equal(t, 1, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, rows[1:])
+		assert.Equal(t, 1, result.RowsAffected)
+		checkRows(ctx, t, table, rows[1:])
 	})
 
 	t.Run("Delete all rows", func(t *testing.T) {
-		aResult := mustDelete(ctx, t, aTable, txManager, aPager, Statement{Kind: Delete})
+		result := mustDelete(ctx, t, table, txManager, pager, Statement{Kind: Delete})
 
-		assert.Equal(t, 9, aResult.RowsAffected)
-		checkRows(ctx, t, aTable, nil)
+		assert.Equal(t, 9, result.RowsAffected)
+		checkRows(ctx, t, table, nil)
 	})
 }

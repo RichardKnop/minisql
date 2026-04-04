@@ -57,11 +57,11 @@ func (s *TestSuite) TestCompositeIndex() {
 		s.Require().NoError(err)
 		defer stmt.Close()
 
-		aResult, err := stmt.Exec("Winfield", "Wolfe")
+		result, err := stmt.Exec("Winfield", "Wolfe")
 		s.Require().Error(err)
 		s.ErrorIs(err, minisql.ErrDuplicateKey)
 		s.Equal("failed to insert primary key pkey__users: duplicate key", err.Error())
-		s.Nil(aResult)
+		s.Nil(result)
 	})
 
 	s.Run("Select with partial composite key", func() {

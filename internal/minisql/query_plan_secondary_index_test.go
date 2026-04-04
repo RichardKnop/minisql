@@ -19,7 +19,7 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 			Size: MaxInlineVarchar,
 			Name: "email",
 		}
-		aTable = NewTable(zap.NewNop(), nil, nil, testTableName2, []Column{
+		table = NewTable(zap.NewNop(), nil, nil, testTableName2, []Column{
 			{
 				Kind: Int8,
 				Size: 8,
@@ -28,7 +28,7 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 			secondaryIndexColumn,
 		}, 0, nil)
 	)
-	aTable.SetSecondaryIndex(indexName, []Column{secondaryIndexColumn}, nil)
+	table.SetSecondaryIndex(indexName, []Column{secondaryIndexColumn}, nil)
 
 	testCases := []struct {
 		Name     string
@@ -529,7 +529,7 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			actual, err := aTable.PlanQuery(context.Background(), aTestCase.Stmt)
+			actual, err := table.PlanQuery(context.Background(), aTestCase.Stmt)
 			require.NoError(t, err)
 			assert.Equal(t, aTestCase.Expected, actual)
 		})

@@ -16,19 +16,19 @@ func TestTable_PageRecycling(t *testing.T) {
 	tempFile, err := os.CreateTemp("", testDBName)
 	require.NoError(t, err)
 	defer os.Remove(tempFile.Name())
-	aPager, err := NewPager(tempFile, PageSize, 1000)
+	pager, err := NewPager(tempFile, PageSize, 1000)
 	require.NoError(t, err)
-	tablePager := aPager.ForTable(testMediumColumns)
-	txManager := NewTransactionManager(zap.NewNop(), testDBName, mockPagerFactory(tablePager), aPager, nil)
+	tablePager := pager.ForTable(testMediumColumns)
+	txManager := NewTransactionManager(zap.NewNop(), testDBName, mockPagerFactory(tablePager), pager, nil)
 	txPager := NewTransactionalPager(tablePager, txManager, testTableName, "")
 
 	var (
 		ctx     = context.Background()
 		numRows = 100
 		rows    = gen.MediumRows(numRows)
-		aTable  = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
+		table  = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
 	)
-	aTable.maximumICells = 5 // for testing purposes only, normally 340
+	table.maximumICells = 5 // for testing purposes only, normally 340
 
 	// Batch insert test rows
 	stmt := Statement{
@@ -36,43 +36,43 @@ func TestTable_PageRecycling(t *testing.T) {
 		Fields:  fieldsFromColumns(testMediumColumns...),
 		Inserts: [][]OptionalValue{},
 	}
-	for _, aRow := range rows {
-		stmt.Inserts = append(stmt.Inserts, aRow.Values)
+	for _, row := range rows {
+		stmt.Inserts = append(stmt.Inserts, row.Values)
 	}
 
-	mustInsert(ctx, t, aTable, txManager, stmt)
+	mustInsert(ctx, t, table, txManager, stmt)
 
 
-	assert.Equal(t, 47, int(aPager.TotalPages()))
-	assert.Equal(t, 0, int(aPager.dbHeader.FreePageCount))
-	checkRows(ctx, t, aTable, rows)
+	assert.Equal(t, 47, int(pager.TotalPages()))
+	assert.Equal(t, 0, int(pager.dbHeader.FreePageCount))
+	checkRows(ctx, t, table, rows)
 
 	// Now delete all rows, this will free up 46 pages
 	// but the root page will remain in use
-	var aResult StatementResult
+	var result StatementResult
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		var err error
-		aResult, err = aTable.Delete(ctx, Statement{
+		result, err = table.Delete(ctx, Statement{
 			Kind: Delete,
 		})
 		return err
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, len(rows), aResult.RowsAffected)
+	assert.Equal(t, len(rows), result.RowsAffected)
 
-	checkRows(ctx, t, aTable, nil)
-	assert.Equal(t, 47, int(aPager.TotalPages()))
-	assert.Equal(t, 46, int(aPager.dbHeader.FreePageCount))
+	checkRows(ctx, t, table, nil)
+	assert.Equal(t, 47, int(pager.TotalPages()))
+	assert.Equal(t, 46, int(pager.dbHeader.FreePageCount))
 
 	// Now we reinsert the same rows again
-	mustInsert(ctx, t, aTable, txManager, stmt)
+	mustInsert(ctx, t, table, txManager, stmt)
 
 	// We should still have the same number of pages in total
 	// and no free pages
-	assert.Equal(t, 47, int(aPager.TotalPages()))
-	assert.Equal(t, 0, int(aPager.dbHeader.FreePageCount))
-	checkRows(ctx, t, aTable, rows)
+	assert.Equal(t, 47, int(pager.TotalPages()))
+	assert.Equal(t, 0, int(pager.dbHeader.FreePageCount))
+	checkRows(ctx, t, table, rows)
 }
 
 func TestPage_Clone(t *testing.T) {

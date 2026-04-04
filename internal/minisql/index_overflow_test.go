@@ -11,7 +11,7 @@ func TestIndexOverflowPage_Marshal(t *testing.T) {
 	t.Parallel()
 
 	t.Run("inline data", func(t *testing.T) {
-		aNode := &IndexOverflowPage{
+		node := &IndexOverflowPage{
 			Header: IndexOverflowPageHeader{
 				NextPage:  0,
 				ItemCount: 5,
@@ -20,35 +20,35 @@ func TestIndexOverflowPage_Marshal(t *testing.T) {
 		}
 
 		buf := make([]byte, PageSize)
-		err := aNode.Marshal(buf)
+		err := node.Marshal(buf)
 		require.NoError(t, err)
 
 		recreatedNode := new(IndexOverflowPage)
 		err = recreatedNode.Unmarshal(buf)
 		require.NoError(t, err)
 
-		assert.Equal(t, aNode, recreatedNode)
+		assert.Equal(t, node, recreatedNode)
 	})
 
 	t.Run("overflows to next page", func(t *testing.T) {
-		aNode := &IndexOverflowPage{
+		node := &IndexOverflowPage{
 			Header: IndexOverflowPageHeader{
 				NextPage:  42,
 				ItemCount: MaxOverflowRowIDsPerPage,
 			},
 		}
 		for i := range MaxOverflowRowIDsPerPage {
-			aNode.RowIDs = append(aNode.RowIDs, RowID(i+1))
+			node.RowIDs = append(node.RowIDs, RowID(i+1))
 		}
 
 		buf := make([]byte, PageSize)
-		err := aNode.Marshal(buf)
+		err := node.Marshal(buf)
 		require.NoError(t, err)
 
 		recreatedNode := new(IndexOverflowPage)
 		err = recreatedNode.Unmarshal(buf)
 		require.NoError(t, err)
 
-		assert.Equal(t, aNode, recreatedNode)
+		assert.Equal(t, node, recreatedNode)
 	})
 }

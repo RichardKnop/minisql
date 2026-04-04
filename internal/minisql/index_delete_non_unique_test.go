@@ -39,14 +39,14 @@ func (r rowIDsPerKey) AllRowIDs() []RowID {
 
 func TestIndex_NonUnique_Delete(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
-		aColumn        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = aPager.ForIndex([]Column{aColumn}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
+		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager     = pager.ForIndex([]Column{col}, true)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewNonUniqueIndex[int64](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
+	idx, err := NewNonUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
 
 	var (
@@ -59,7 +59,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 	t.Run("Insert max inline row IDs, should not overflow", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for range MaxInlineRowIDs {
-				if err := anIndex.Insert(ctx, key, rowID); err != nil {
+				if err := idx.Insert(ctx, key, rowID); err != nil {
 					return err
 				}
 				insertedRowIDs.Append(key, rowID)
@@ -74,13 +74,13 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 	t.Run("Delete inline row IDs from cell with no overflow", func(t *testing.T) {
 		// Try deleting one of 4 inline row IDs
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, key, insertedRowIDs[key][2])
+			return idx.Delete(ctx, key, insertedRowIDs[key][2])
 		})
 		require.NoError(t, err)
 		insertedRowIDs.Remove(key, 2)
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
+			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
 		)
 
 		assert.Equal(t, 3, int(rootNode.Cells[0].InlineRowIDs))
@@ -90,7 +90,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 		// Now delete the rest
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for _, rowID := range insertedRowIDs.RowIDs(key) {
-				if err := anIndex.Delete(ctx, key, rowID); err != nil {
+				if err := idx.Delete(ctx, key, rowID); err != nil {
 					return err
 				}
 			}
@@ -99,10 +99,10 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 		require.NoError(t, err)
 
 		// Index should be empty now
-		rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
+		rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
 		assert.Equal(t, 0, int(rootNode.Header.Keys))
 
-		actualKeys, actualRowIDs := collectAllKeysAndRowIDs(ctx, t, anIndex)
+		actualKeys, actualRowIDs := collectAllKeysAndRowIDs(ctx, t, idx)
 		require.Empty(t, actualKeys)
 		require.Empty(t, actualRowIDs)
 	})
@@ -112,7 +112,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 	t.Run("Delete from maxed out overflow page", func(t *testing.T) {
 		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for range MaxInlineRowIDs + MaxOverflowRowIDsPerPage {
-				if err := anIndex.Insert(ctx, key, rowID); err != nil {
+				if err := idx.Insert(ctx, key, rowID); err != nil {
 					return err
 				}
 				insertedRowIDs.Append(key, rowID)
@@ -124,14 +124,14 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 
 		// Delete one of the inline row IDs
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, key, insertedRowIDs[key][2])
+			return idx.Delete(ctx, key, insertedRowIDs[key][2])
 		})
 		require.NoError(t, err)
 		insertedRowIDs.Remove(key, 2)
 
 		var (
-			rootNode     = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			overflowNode = aPager.pages[rootNode.Cells[0].Overflow].IndexOverflowNode
+			rootNode     = pager.pages[0].IndexNode.(*IndexNode[int64])
+			overflowNode = pager.pages[rootNode.Cells[0].Overflow].IndexOverflowNode
 		)
 
 		assert.Equal(t, 4, int(rootNode.Cells[0].InlineRowIDs))
@@ -146,7 +146,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 		// Now delete the rest
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 			for _, rowID := range insertedRowIDs.RowIDs(key) {
-				if err := anIndex.Delete(ctx, key, rowID); err != nil {
+				if err := idx.Delete(ctx, key, rowID); err != nil {
 					return err
 				}
 			}
@@ -155,10 +155,10 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 		require.NoError(t, err)
 
 		// Index should be empty now
-		rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
+		rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
 		assert.Equal(t, 0, int(rootNode.Header.Keys))
 
-		actualKeys, actualRowIDs := collectAllKeysAndRowIDs(ctx, t, anIndex)
+		actualKeys, actualRowIDs := collectAllKeysAndRowIDs(ctx, t, idx)
 		require.Empty(t, actualKeys)
 		require.Empty(t, actualRowIDs)
 	})
@@ -170,7 +170,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 			rowsPerKey := gen.Number(1, 1000)
 			err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 				for range rowsPerKey {
-					if err := anIndex.Insert(ctx, key, rowID); err != nil {
+					if err := idx.Insert(ctx, key, rowID); err != nil {
 						return err
 					}
 					insertedRowIDs.Append(key, rowID)
@@ -186,7 +186,7 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 
 		expectedKeys := insertedKeys
 		expectedRowIDs := insertedRowIDs.AllRowIDs()
-		actualKeys, actualRowIDs := collectAllKeysAndRowIDs(ctx, t, anIndex)
+		actualKeys, actualRowIDs := collectAllKeysAndRowIDs(ctx, t, idx)
 		require.Len(t, actualKeys, len(expectedKeys))
 		require.Len(t, actualRowIDs, len(expectedRowIDs))
 		assert.ElementsMatch(t, expectedKeys, actualKeys)
@@ -200,19 +200,19 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 
 			for _, rowID := range rowIDs {
 				err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-					return anIndex.Delete(ctx, key, rowID)
+					return idx.Delete(ctx, key, rowID)
 				})
 				require.NoError(t, err)
 			}
 		}
 
-		actualKeys, actualRowIDs = collectAllKeysAndRowIDs(ctx, t, anIndex)
+		actualKeys, actualRowIDs = collectAllKeysAndRowIDs(ctx, t, idx)
 		require.Empty(t, actualKeys)
 		require.Empty(t, actualRowIDs)
 
 		// Check that all pages other than root index node have been freed
-		for i := 1; i < len(aPager.pages); i++ {
-			assert.NotNil(t, aPager.pages[i].FreePage)
+		for i := 1; i < len(pager.pages); i++ {
+			assert.NotNil(t, pager.pages[i].FreePage)
 		}
 	})
 }

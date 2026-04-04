@@ -165,11 +165,11 @@ func TestTryRangeScan(t *testing.T) {
 
 	for _, aTestCase := range testCases {
 		t.Run(aTestCase.Name, func(t *testing.T) {
-			aScan, ok, err := tryRangeScan("users", indexInfo, aTestCase.Conditions, nil)
+			scan, ok, err := tryRangeScan("users", indexInfo, aTestCase.Conditions, nil)
 			require.NoError(t, err)
 			assert.Equal(t, aTestCase.ExpectedOK, ok)
 			if ok {
-				assert.Equal(t, aTestCase.ExpectedScan, aScan)
+				assert.Equal(t, aTestCase.ExpectedScan, scan)
 			}
 		})
 	}

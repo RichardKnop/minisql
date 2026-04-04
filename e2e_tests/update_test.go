@@ -110,10 +110,10 @@ func (s *TestSuite) TestUpdate() {
 	})
 
 	s.Run("Updating primary key to NULL fails", func() {
-		aResult, err := s.db.ExecContext(context.Background(), `update users set id = null;`)
+		result, err := s.db.ExecContext(context.Background(), `update users set id = null;`)
 		s.Require().Error(err)
 		s.ErrorContains(err, "cannot update primary key pkey__users to NULL")
-		s.Nil(aResult)
+		s.Nil(result)
 	})
 
 	s.Run("Updating unique index key to NULL succeeds", func() {

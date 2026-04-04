@@ -14,19 +14,19 @@ func BenchmarkRowClone(b *testing.B) {
 		{Name: "created", Kind: Timestamp, Size: 8},
 	}
 
-	aRow := NewRowWithValues(columns, []OptionalValue{
+	row := NewRowWithValues(columns, []OptionalValue{
 		{Value: int64(123), Valid: true},
 		{Value: "John Doe", Valid: true},
 		{Value: "john@example.com", Valid: true},
 		{Value: int32(30), Valid: true},
 		{Value: Time{Year: 2024, Month: 1, Day: 1}, Valid: true},
 	})
-	aRow.Key = RowID(123)
+	row.Key = RowID(123)
 
 	b.ResetTimer()
 
 	for b.Loop() {
-		_ = aRow.Clone()
+		_ = row.Clone()
 	}
 }
 
@@ -43,7 +43,7 @@ func BenchmarkRowOnlyFields(b *testing.B) {
 		{Name: "score", Kind: Double, Size: 8},
 	}
 
-	aRow := NewRowWithValues(columns, []OptionalValue{
+	row := NewRowWithValues(columns, []OptionalValue{
 		{Value: int64(123), Valid: true},
 		{Value: "John Doe", Valid: true},
 		{Value: "john@example.com", Valid: true},
@@ -53,7 +53,7 @@ func BenchmarkRowOnlyFields(b *testing.B) {
 		{Value: "active", Valid: true},
 		{Value: float64(95.5), Valid: true},
 	})
-	aRow.Key = RowID(123)
+	row.Key = RowID(123)
 
 	fields := []Field{
 		{Name: "id"},
@@ -63,7 +63,7 @@ func BenchmarkRowOnlyFields(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		_ = aRow.OnlyFields(fields...)
+		_ = row.OnlyFields(fields...)
 	}
 }
 
@@ -77,8 +77,8 @@ func BenchmarkRowOnlyFieldsMany(b *testing.B) {
 		values[i] = OptionalValue{Value: int64(i), Valid: true}
 	}
 
-	aRow := NewRowWithValues(columns, values)
-	aRow.Key = RowID(123)
+	row := NewRowWithValues(columns, values)
+	row.Key = RowID(123)
 
 	// Filter to first 10 fields
 	fields := make([]Field, 10)
@@ -88,6 +88,6 @@ func BenchmarkRowOnlyFieldsMany(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		_ = aRow.OnlyFields(fields...)
+		_ = row.OnlyFields(fields...)
 	}
 }

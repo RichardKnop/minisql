@@ -5,10 +5,10 @@ func (s *TestSuite) TestTransaction() {
 		tx, err := s.db.Begin()
 		s.Require().NoError(err)
 
-		aResult, err := tx.Exec(createUsersTableSQL)
+		result, err := tx.Exec(createUsersTableSQL)
 		s.Require().NoError(err)
 
-		rowsAffected, err := aResult.RowsAffected()
+		rowsAffected, err := result.RowsAffected()
 		s.Require().NoError(err)
 		s.Require().Equal(int64(0), rowsAffected)
 
@@ -32,10 +32,10 @@ func (s *TestSuite) TestTransaction() {
 		tx, err := s.db.Begin()
 		s.Require().NoError(err)
 
-		aResult, err := tx.Exec(createUsersTableSQL)
+		result, err := tx.Exec(createUsersTableSQL)
 		s.Require().NoError(err)
 
-		rowsAffected, err := aResult.RowsAffected()
+		rowsAffected, err := result.RowsAffected()
 		s.Require().NoError(err)
 		s.Require().Equal(int64(0), rowsAffected)
 
@@ -57,10 +57,10 @@ func (s *TestSuite) TestTransaction() {
 		tx, err := s.db.Begin()
 		s.Require().NoError(err)
 
-		aResult, err := tx.Exec(`drop table "users";`)
+		result, err := tx.Exec(`drop table "users";`)
 		s.Require().NoError(err)
 
-		rowsAffected, err := aResult.RowsAffected()
+		rowsAffected, err := result.RowsAffected()
 		s.Require().NoError(err)
 		s.Require().Equal(int64(0), rowsAffected)
 
@@ -83,10 +83,10 @@ func (s *TestSuite) TestTransaction() {
 		tx, err := s.db.Begin()
 		s.Require().NoError(err)
 
-		aResult, err := tx.Exec(`drop table "users";`)
+		result, err := tx.Exec(`drop table "users";`)
 		s.Require().NoError(err)
 
-		rowsAffected, err := aResult.RowsAffected()
+		rowsAffected, err := result.RowsAffected()
 		s.Require().NoError(err)
 		s.Require().Equal(int64(0), rowsAffected)
 

@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -23,28 +24,28 @@ func TestParseTimestamp(t *testing.T) {
 			"invalid-timestamp",
 			Time{},
 			0,
-			fmt.Errorf("timestamp string too short: invalid-timestamp"),
+			errors.New("timestamp string too short: invalid-timestamp"),
 		},
 		{
 			"timestamp below minimum",
 			"4714-01-01 00:00:00.000000 BC",
 			Time{},
 			0,
-			fmt.Errorf("year < -4713 in timestamp: 4714-01-01 00:00:00.000000 BC"),
+			errors.New("year < -4713 in timestamp: 4714-01-01 00:00:00.000000 BC"),
 		},
 		{
 			"timestamp beyond maximum",
 			"294277-01-01 00:00:00.000000",
 			Time{},
 			0,
-			fmt.Errorf("year > 294276 in timestamp: 294277-01-01 00:00:00.000000"),
+			errors.New("year > 294276 in timestamp: 294277-01-01 00:00:00.000000"),
 		},
 		{
 			"0 is not a valid year in gregorian calendar",
 			"0000-01-01 00:00:00.000000",
 			Time{},
 			0,
-			fmt.Errorf("there is no year 0 in gregorian calendar: 0000-01-01 00:00:00.000000"),
+			errors.New("there is no year 0 in gregorian calendar: 0000-01-01 00:00:00.000000"),
 		},
 		{
 			"earliest valid timestamp",
@@ -164,7 +165,7 @@ func TestParseTimestamp(t *testing.T) {
 				Microseconds: 123456,
 			},
 			762525296123456,
-			fmt.Errorf("invalid day: 29 for month: 2: 1999-02-29 12:34:56.123456"),
+			errors.New("invalid day: 29 for month: 2: 1999-02-29 12:34:56.123456"),
 		},
 		{
 			"One year before epoch start",

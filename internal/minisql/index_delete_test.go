@@ -13,21 +13,21 @@ import (
 
 func TestIndex_Delete(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
 		keys           = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
-		aColumn        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = aPager.ForIndex([]Column{aColumn}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
+		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager     = pager.ForIndex([]Column{col}, true)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
+	idx, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
-	anIndex.maximumKeys = 3
+	idx.maximumKeys = 3
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
-			if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
+			if err := idx.Insert(ctx, key, RowID(key+100)); err != nil {
 				return err
 			}
 		}
@@ -49,25 +49,25 @@ func TestIndex_Delete(t *testing.T) {
 			  +---+    +-------+  +-----------+    +----+   +-----+  +---------+   +---------+         +---------+
 	*/
 
-	checkIndexKeys(ctx, t, anIndex, keys)
+	checkIndexKeys(ctx, t, idx, keys)
 
 
 	var (
-		rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-		internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-		internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-		internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+		rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
+		internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
+		internal2 = pager.pages[6].IndexNode.(*IndexNode[int64])
+		internal3 = pager.pages[10].IndexNode.(*IndexNode[int64])
 		// leaves of first internal node
-		leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-		leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
-		leaf3 = aPager.pages[4].IndexNode.(*IndexNode[int64])
+		leaf1 = pager.pages[1].IndexNode.(*IndexNode[int64])
+		leaf2 = pager.pages[9].IndexNode.(*IndexNode[int64])
+		leaf3 = pager.pages[4].IndexNode.(*IndexNode[int64])
 		// leaves of second internal node
-		leaf4 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-		leaf5 = aPager.pages[7].IndexNode.(*IndexNode[int64])
-		leaf6 = aPager.pages[11].IndexNode.(*IndexNode[int64])
+		leaf4 = pager.pages[2].IndexNode.(*IndexNode[int64])
+		leaf5 = pager.pages[7].IndexNode.(*IndexNode[int64])
+		leaf6 = pager.pages[11].IndexNode.(*IndexNode[int64])
 		// leaves of third node
-		leaf7 = aPager.pages[3].IndexNode.(*IndexNode[int64])
-		leaf8 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+		leaf7 = pager.pages[3].IndexNode.(*IndexNode[int64])
+		leaf8 = pager.pages[8].IndexNode.(*IndexNode[int64])
 	)
 
 	// Root node
@@ -88,7 +88,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete a key from leftmost leaf", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(1), 0)
+			return idx.Delete(ctx, int64(1), 0)
 		})
 		require.NoError(t, err)
 
@@ -107,25 +107,25 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-			internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
+			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
+			internal2 = pager.pages[6].IndexNode.(*IndexNode[int64])
+			internal3 = pager.pages[10].IndexNode.(*IndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
-			leaf3 = aPager.pages[4].IndexNode.(*IndexNode[int64])
+			leaf1 = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2 = pager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf3 = pager.pages[4].IndexNode.(*IndexNode[int64])
 			// leaves of second internal node
-			leaf4 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf5 = aPager.pages[7].IndexNode.(*IndexNode[int64])
-			leaf6 = aPager.pages[11].IndexNode.(*IndexNode[int64])
+			leaf4 = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf5 = pager.pages[7].IndexNode.(*IndexNode[int64])
+			leaf6 = pager.pages[11].IndexNode.(*IndexNode[int64])
 			// leaves of third node
-			leaf7 = aPager.pages[3].IndexNode.(*IndexNode[int64])
-			leaf8 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf7 = pager.pages[3].IndexNode.(*IndexNode[int64])
+			leaf8 = pager.pages[8].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -150,11 +150,11 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, no pages recyclet yet", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			if err := anIndex.Delete(ctx, int64(4), 0); err != nil {
+			if err := idx.Delete(ctx, int64(4), 0); err != nil {
 				return err
 			}
 
-			return anIndex.Delete(ctx, int64(5), 0)
+			return idx.Delete(ctx, int64(5), 0)
 		})
 		require.NoError(t, err)
 
@@ -173,25 +173,25 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-			internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
+			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
+			internal2 = pager.pages[6].IndexNode.(*IndexNode[int64])
+			internal3 = pager.pages[10].IndexNode.(*IndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
-			leaf3 = aPager.pages[4].IndexNode.(*IndexNode[int64])
+			leaf1 = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2 = pager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf3 = pager.pages[4].IndexNode.(*IndexNode[int64])
 			// leaves of second internal node
-			leaf4 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf5 = aPager.pages[7].IndexNode.(*IndexNode[int64])
-			leaf6 = aPager.pages[11].IndexNode.(*IndexNode[int64])
+			leaf4 = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf5 = pager.pages[7].IndexNode.(*IndexNode[int64])
+			leaf6 = pager.pages[11].IndexNode.(*IndexNode[int64])
 			// leaves of third node
-			leaf7 = aPager.pages[3].IndexNode.(*IndexNode[int64])
-			leaf8 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf7 = pager.pages[3].IndexNode.(*IndexNode[int64])
+			leaf8 = pager.pages[8].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -216,7 +216,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, first recycled page", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(8), 0)
+			return idx.Delete(ctx, int64(8), 0)
 		})
 		require.NoError(t, err)
 
@@ -235,24 +235,24 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-			internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
+			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
+			internal2 = pager.pages[6].IndexNode.(*IndexNode[int64])
+			internal3 = pager.pages[10].IndexNode.(*IndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2 = pager.pages[9].IndexNode.(*IndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[7].IndexNode.(*IndexNode[int64])
-			leaf5 = aPager.pages[11].IndexNode.(*IndexNode[int64])
+			leaf3 = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf4 = pager.pages[7].IndexNode.(*IndexNode[int64])
+			leaf5 = pager.pages[11].IndexNode.(*IndexNode[int64])
 			// leaves of third node
-			leaf6 = aPager.pages[3].IndexNode.(*IndexNode[int64])
-			leaf7 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf6 = pager.pages[3].IndexNode.(*IndexNode[int64])
+			leaf7 = pager.pages[8].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -275,7 +275,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(19), 0)
+			return idx.Delete(ctx, int64(19), 0)
 		})
 		require.NoError(t, err)
 
@@ -294,24 +294,24 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-			internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
+			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
+			internal2 = pager.pages[6].IndexNode.(*IndexNode[int64])
+			internal3 = pager.pages[10].IndexNode.(*IndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2 = pager.pages[9].IndexNode.(*IndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[7].IndexNode.(*IndexNode[int64])
+			leaf3 = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf4 = pager.pages[7].IndexNode.(*IndexNode[int64])
 			// leaves of third node
-			leaf5 = aPager.pages[11].IndexNode.(*IndexNode[int64])
-			leaf6 = aPager.pages[3].IndexNode.(*IndexNode[int64])
-			leaf7 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf5 = pager.pages[11].IndexNode.(*IndexNode[int64])
+			leaf6 = pager.pages[3].IndexNode.(*IndexNode[int64])
+			leaf7 = pager.pages[8].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -335,7 +335,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(20), 0)
+			return idx.Delete(ctx, int64(20), 0)
 		})
 		require.NoError(t, err)
 
@@ -354,24 +354,24 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-			internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
+			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
+			internal2 = pager.pages[6].IndexNode.(*IndexNode[int64])
+			internal3 = pager.pages[10].IndexNode.(*IndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2 = pager.pages[9].IndexNode.(*IndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[7].IndexNode.(*IndexNode[int64])
+			leaf3 = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf4 = pager.pages[7].IndexNode.(*IndexNode[int64])
 			// leaves of third node
-			leaf5 = aPager.pages[11].IndexNode.(*IndexNode[int64])
-			leaf6 = aPager.pages[3].IndexNode.(*IndexNode[int64])
-			leaf7 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf5 = pager.pages[11].IndexNode.(*IndexNode[int64])
+			leaf6 = pager.pages[3].IndexNode.(*IndexNode[int64])
+			leaf7 = pager.pages[8].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -395,7 +395,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(16), 0)
+			return idx.Delete(ctx, int64(16), 0)
 		})
 		require.NoError(t, err)
 
@@ -414,24 +414,24 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 17, 18, 21}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-			internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
+			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
+			internal2 = pager.pages[6].IndexNode.(*IndexNode[int64])
+			internal3 = pager.pages[10].IndexNode.(*IndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2 = pager.pages[9].IndexNode.(*IndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[7].IndexNode.(*IndexNode[int64])
+			leaf3 = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf4 = pager.pages[7].IndexNode.(*IndexNode[int64])
 			// leaves of third node
-			leaf5 = aPager.pages[11].IndexNode.(*IndexNode[int64])
-			leaf6 = aPager.pages[3].IndexNode.(*IndexNode[int64])
-			leaf7 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf5 = pager.pages[11].IndexNode.(*IndexNode[int64])
+			leaf6 = pager.pages[3].IndexNode.(*IndexNode[int64])
+			leaf7 = pager.pages[8].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -455,7 +455,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(15), 0)
+			return idx.Delete(ctx, int64(15), 0)
 		})
 		require.NoError(t, err)
 
@@ -474,23 +474,23 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 17, 18, 21}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
-			internal3 = aPager.pages[10].IndexNode.(*IndexNode[int64])
+			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
+			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
+			internal2 = pager.pages[6].IndexNode.(*IndexNode[int64])
+			internal3 = pager.pages[10].IndexNode.(*IndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2 = pager.pages[9].IndexNode.(*IndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[7].IndexNode.(*IndexNode[int64])
+			leaf3 = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf4 = pager.pages[7].IndexNode.(*IndexNode[int64])
 			// leaves of third node
-			leaf5 = aPager.pages[11].IndexNode.(*IndexNode[int64])
-			leaf6 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf5 = pager.pages[11].IndexNode.(*IndexNode[int64])
+			leaf6 = pager.pages[8].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -513,7 +513,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(13), 0)
+			return idx.Delete(ctx, int64(13), 0)
 		})
 		require.NoError(t, err)
 
@@ -532,21 +532,21 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{2, 3, 6, 7, 9, 10, 11, 12, 14, 17, 18, 21}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
+			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
+			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
+			internal2 = pager.pages[6].IndexNode.(*IndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2 = pager.pages[9].IndexNode.(*IndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[7].IndexNode.(*IndexNode[int64])
-			leaf5 = aPager.pages[11].IndexNode.(*IndexNode[int64])
-			leaf6 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf3 = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf4 = pager.pages[7].IndexNode.(*IndexNode[int64])
+			leaf5 = pager.pages[11].IndexNode.(*IndexNode[int64])
+			leaf6 = pager.pages[8].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -568,7 +568,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(10), 0)
+			return idx.Delete(ctx, int64(10), 0)
 		})
 		require.NoError(t, err)
 
@@ -587,20 +587,20 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{2, 3, 6, 7, 9, 11, 12, 14, 17, 18, 21}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
+			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
+			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
+			internal2 = pager.pages[6].IndexNode.(*IndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2 = pager.pages[9].IndexNode.(*IndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[11].IndexNode.(*IndexNode[int64])
-			leaf5 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf3 = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf4 = pager.pages[11].IndexNode.(*IndexNode[int64])
+			leaf5 = pager.pages[8].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -621,7 +621,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, no page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(9), 0)
+			return idx.Delete(ctx, int64(9), 0)
 		})
 		require.NoError(t, err)
 
@@ -640,20 +640,20 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{2, 3, 6, 7, 11, 12, 14, 17, 18, 21}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
+			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
+			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
+			internal2 = pager.pages[6].IndexNode.(*IndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2 = pager.pages[9].IndexNode.(*IndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[11].IndexNode.(*IndexNode[int64])
-			leaf5 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf3 = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf4 = pager.pages[11].IndexNode.(*IndexNode[int64])
+			leaf5 = pager.pages[8].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -674,7 +674,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, page recycled", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(11), 0)
+			return idx.Delete(ctx, int64(11), 0)
 		})
 		require.NoError(t, err)
 
@@ -693,19 +693,19 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{2, 3, 6, 7, 12, 14, 17, 18, 21}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode  = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			internal1 = aPager.pages[5].IndexNode.(*IndexNode[int64])
-			internal2 = aPager.pages[6].IndexNode.(*IndexNode[int64])
+			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
+			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
+			internal2 = pager.pages[6].IndexNode.(*IndexNode[int64])
 			// leaves of first internal node
-			leaf1 = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2 = aPager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf1 = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2 = pager.pages[9].IndexNode.(*IndexNode[int64])
 			// leaves of second internal node
-			leaf3 = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4 = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			leaf3 = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf4 = pager.pages[8].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -725,7 +725,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, 2 pages recycled, only root and leaves left", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(3), 0)
+			return idx.Delete(ctx, int64(3), 0)
 		})
 		require.NoError(t, err)
 
@@ -740,15 +740,15 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{2, 6, 7, 12, 14, 17, 18, 21}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			leaf1    = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2    = aPager.pages[9].IndexNode.(*IndexNode[int64])
-			leaf3    = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4    = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
+			leaf1    = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2    = pager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf3    = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf4    = pager.pages[8].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -765,7 +765,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(14), 0)
+			return idx.Delete(ctx, int64(14), 0)
 		})
 		require.NoError(t, err)
 
@@ -780,15 +780,15 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{2, 6, 7, 12, 17, 18, 21}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			leaf1    = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2    = aPager.pages[9].IndexNode.(*IndexNode[int64])
-			leaf3    = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf4    = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
+			leaf1    = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2    = pager.pages[9].IndexNode.(*IndexNode[int64])
+			leaf3    = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf4    = pager.pages[8].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -805,7 +805,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(6), 0)
+			return idx.Delete(ctx, int64(6), 0)
 		})
 		require.NoError(t, err)
 
@@ -820,14 +820,14 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{2, 7, 12, 17, 18, 21}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			leaf1    = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2    = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf3    = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
+			leaf1    = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2    = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf3    = pager.pages[8].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -843,7 +843,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(17), 0)
+			return idx.Delete(ctx, int64(17), 0)
 		})
 		require.NoError(t, err)
 
@@ -858,14 +858,14 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{2, 7, 12, 18, 21}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			leaf1    = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2    = aPager.pages[2].IndexNode.(*IndexNode[int64])
-			leaf3    = aPager.pages[8].IndexNode.(*IndexNode[int64])
+			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
+			leaf1    = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2    = pager.pages[2].IndexNode.(*IndexNode[int64])
+			leaf3    = pager.pages[8].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -881,7 +881,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(21), 0)
+			return idx.Delete(ctx, int64(21), 0)
 		})
 		require.NoError(t, err)
 
@@ -896,13 +896,13 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{2, 7, 12, 18}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			leaf1    = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2    = aPager.pages[2].IndexNode.(*IndexNode[int64])
+			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
+			leaf1    = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2    = pager.pages[2].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -917,7 +917,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(2), 0)
+			return idx.Delete(ctx, int64(2), 0)
 		})
 		require.NoError(t, err)
 
@@ -932,13 +932,13 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{7, 12, 18}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
-			leaf1    = aPager.pages[1].IndexNode.(*IndexNode[int64])
-			leaf2    = aPager.pages[2].IndexNode.(*IndexNode[int64])
+			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
+			leaf1    = pager.pages[1].IndexNode.(*IndexNode[int64])
+			leaf2    = pager.pages[2].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -953,7 +953,7 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete another key, only root leaf left", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			return anIndex.Delete(ctx, int64(18), 0)
+			return idx.Delete(ctx, int64(18), 0)
 		})
 		require.NoError(t, err)
 		/*
@@ -963,11 +963,11 @@ func TestIndex_Delete(t *testing.T) {
 		*/
 
 		expectedKeys := []int64{7, 12}
-		checkIndexKeys(ctx, t, anIndex, expectedKeys)
+		checkIndexKeys(ctx, t, idx, expectedKeys)
 
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
+			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -979,17 +979,17 @@ func TestIndex_Delete(t *testing.T) {
 
 	t.Run("Delete remaining keys, empty root leaf left", func(t *testing.T) {
 		err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			if err := anIndex.Delete(ctx, int64(12), 0); err != nil {
+			if err := idx.Delete(ctx, int64(12), 0); err != nil {
 				return err
 			}
 
-			return anIndex.Delete(ctx, int64(7), 0)
+			return idx.Delete(ctx, int64(7), 0)
 		})
 		require.NoError(t, err)
 
 
 		var (
-			rootNode = aPager.pages[0].IndexNode.(*IndexNode[int64])
+			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
 		)
 
 		// Root node
@@ -1002,14 +1002,14 @@ func TestIndex_Delete(t *testing.T) {
 
 func TestIndex_Delete_Random_Shuffle(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
-		aColumn        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = aPager.ForIndex([]Column{aColumn}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
+		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager     = pager.ForIndex([]Column{col}, true)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
+	idx, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
 	// Insert 10000 keys in random order
 	keys := make([]int64, 0, 10000)
@@ -1020,7 +1020,7 @@ func TestIndex_Delete_Random_Shuffle(t *testing.T) {
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
-			if err := anIndex.Insert(ctx, key, RowID(key+100)); err != nil {
+			if err := idx.Insert(ctx, key, RowID(key+100)); err != nil {
 				return err
 			}
 		}
@@ -1029,13 +1029,13 @@ func TestIndex_Delete_Random_Shuffle(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all keys are present
-	checkIndexKeys(ctx, t, anIndex, keys)
+	checkIndexKeys(ctx, t, idx, keys)
 
 	// Delete all keys in random order
 	rand.Shuffle(len(keys), func(i, j int) { keys[i], keys[j] = keys[j], keys[i] })
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
-			if err := anIndex.Delete(ctx, key, 0); err != nil {
+			if err := idx.Delete(ctx, key, 0); err != nil {
 				return err
 			}
 		}
@@ -1044,34 +1044,34 @@ func TestIndex_Delete_Random_Shuffle(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify index is empty
-	checkIndexKeys(ctx, t, anIndex, nil)
+	checkIndexKeys(ctx, t, idx, nil)
 }
 
 func TestIndex_Delete_Varchar(t *testing.T) {
 	var (
-		aPager, dbFile = initTest(t)
+		pager, dbFile = initTest(t)
 		ctx            = context.Background()
-		aColumn        = Column{Name: "test_column", Kind: Varchar, Size: 100}
-		indexPager     = aPager.ForIndex([]Column{aColumn}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), aPager, nil)
+		col        = Column{Name: "test_column", Kind: Varchar, Size: 100}
+		indexPager     = pager.ForIndex([]Column{col}, true)
+		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
 		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
-	anIndex, err := NewUniqueIndex[string](testLogger, txManager, "test_index", []Column{aColumn}, txPager, 0)
+	idx, err := NewUniqueIndex[string](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
 	// Insert 100 keys in random order
 	keys := make([]string, 0, 1000)
 	for i := int64(1); i <= 1000; i++ {
-		aKey := fmt.Sprintf("key_%d: %s", i, gen.Sentence(10))
-		if len(aKey) > 100 {
-			aKey = aKey[:100]
+		key := fmt.Sprintf("key_%d: %s", i, gen.Sentence(10))
+		if len(key) > 100 {
+			key = key[:100]
 		}
-		keys = append(keys, aKey)
+		keys = append(keys, key)
 	}
 	rand.Shuffle(len(keys), func(i, j int) { keys[i], keys[j] = keys[j], keys[i] })
 
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for i, key := range keys {
-			if err := anIndex.Insert(ctx, key, RowID(i+100)); err != nil {
+			if err := idx.Insert(ctx, key, RowID(i+100)); err != nil {
 				return err
 			}
 		}
@@ -1080,13 +1080,13 @@ func TestIndex_Delete_Varchar(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all keys are present
-	checkIndexVarcharKeys(ctx, t, anIndex, keys)
+	checkIndexVarcharKeys(ctx, t, idx, keys)
 
 	// Delete all keys in random order
 	rand.Shuffle(len(keys), func(i, j int) { keys[i], keys[j] = keys[j], keys[i] })
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, key := range keys {
-			if err := anIndex.Delete(ctx, key, 0); err != nil {
+			if err := idx.Delete(ctx, key, 0); err != nil {
 				return err
 			}
 		}
@@ -1095,11 +1095,11 @@ func TestIndex_Delete_Varchar(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify index is empty
-	checkIndexVarcharKeys(ctx, t, anIndex, nil)
+	checkIndexVarcharKeys(ctx, t, idx, nil)
 }
 
-func assertFreePages(t *testing.T, aPager Pager, expectedFreePages []PageIndex) {
-	dbHeader := aPager.GetHeader(context.Background())
+func assertFreePages(t *testing.T, pager Pager, expectedFreePages []PageIndex) {
+	dbHeader := pager.GetHeader(context.Background())
 
 	assert.Equal(t, len(expectedFreePages), int(dbHeader.FreePageCount))
 
@@ -1108,7 +1108,7 @@ func assertFreePages(t *testing.T, aPager Pager, expectedFreePages []PageIndex) 
 
 	for currentFreePageID != 0 {
 		actualFreePages = append(actualFreePages, currentFreePageID)
-		currentFreePage, err := aPager.GetPage(context.Background(), currentFreePageID)
+		currentFreePage, err := pager.GetPage(context.Background(), currentFreePageID)
 		require.NoError(t, err)
 		currentFreePageID = currentFreePage.FreePage.NextFreePage
 	}

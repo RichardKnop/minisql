@@ -338,18 +338,18 @@ func TestStatement_AddJoin(t *testing.T) {
 func TestJoin_FromTableAlias(t *testing.T) {
 	t.Parallel()
 
-	aJoin := Join{
+	join := Join{
 		TableName:  "posts",
 		TableAlias: "p",
 	}
-	assert.Empty(t, aJoin.FromTableAlias())
+	assert.Empty(t, join.FromTableAlias())
 
-	aJoin.Conditions = Conditions{
+	join.Conditions = Conditions{
 		{
 			Operand1: Operand{Type: OperandField, Value: Field{AliasPrefix: "u", Name: "id"}},
 			Operator: Eq,
 			Operand2: Operand{Type: OperandField, Value: Field{AliasPrefix: "p", Name: "user_id"}},
 		},
 	}
-	assert.Equal(t, "u", aJoin.FromTableAlias())
+	assert.Equal(t, "u", join.FromTableAlias())
 }
