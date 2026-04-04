@@ -361,6 +361,20 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 	default:
 	}
 
+	// RIGHT JOIN: emit right-table rows that had no matching base row.
+	hasRightJoin := false
+	for _, j := range p.Joins {
+		if j.Type == Right {
+			hasRightJoin = true
+			break
+		}
+	}
+	if hasRightJoin {
+		if err := p.executeRightJoinPass(ctx, provider, filteredPipe); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -466,6 +480,7 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 	}
 
 	// For each matching inner row, combine and continue with next join
+	matched := false
 	for innerRow := range innerRowChan {
 		select {
 		case err := <-innerErrChan:
@@ -495,6 +510,7 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 		}
 
 		if matches {
+			matched = true
 			// Continue with next join (or output if this was the last join)
 			if err := p.executeJoinsForRow(ctx, provider, combinedRow, baseTableAlias, joinIndex+1, filteredPipe); err != nil {
 				return err
@@ -509,7 +525,193 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 	default:
 	}
 
+	// LEFT JOIN: if no inner row matched, emit the base row with NULL-filled inner columns
+	if !matched && join.Type == Left {
+		nullInner := nullRowForColumns(innerTable.Columns)
+		var combinedRow Row
+		if joinIndex == 0 {
+			combinedRow = combineRows(currentRow, nullInner, baseTableAlias, innerScan.TableAlias)
+		} else {
+			combinedRow = combineRowsProgressive(currentRow, nullInner, innerScan.TableAlias)
+		}
+		if err := p.executeJoinsForRow(ctx, provider, combinedRow, baseTableAlias, joinIndex+1, filteredPipe); err != nil {
+			return err
+		}
+	}
+
 	return nil
+}
+
+// executeRightJoinPass scans each RIGHT JOIN's inner table and emits rows that
+// had no matching base-table row. The combined row has NULL values for the base
+// table and all other joined tables, and the actual values only for the right
+// (unmatched) table.
+func (p QueryPlan) executeRightJoinPass(ctx context.Context, provider TableProvider, filteredPipe chan<- Row) error {
+	baseScan := p.Scans[0]
+	baseTable, ok := provider.GetTable(ctx, baseScan.TableName)
+	if !ok {
+		return fmt.Errorf("%w: %s", errTableDoesNotExist, baseScan.TableName)
+	}
+	baseFields := fieldsFromColumns(baseTable.Columns...)
+
+	for joinIndex, join := range p.Joins {
+		if join.Type != Right {
+			continue
+		}
+
+		innerScan := p.Scans[join.RightScanIndex]
+		innerTable, ok := provider.GetTable(ctx, innerScan.TableName)
+		if !ok {
+			return fmt.Errorf("%w: %s", errTableDoesNotExist, innerScan.TableName)
+		}
+		innerFields := fieldsFromColumns(innerTable.Columns...)
+
+		// Scan right (inner) table as outer loop
+		rightRowChan := make(chan Row, 100)
+		rightErrChan := make(chan error, 1)
+		go func() {
+			defer close(rightRowChan)
+			if err := innerTable.sequentialScan(ctx, innerScan, innerFields, rightRowChan); err != nil {
+				rightErrChan <- err
+			}
+		}()
+
+		joinConditions := OneOrMore{}
+		if len(join.Conditions) > 0 {
+			joinConditions = append(joinConditions, join.Conditions)
+		}
+
+		for rightRow := range rightRowChan {
+			select {
+			case err := <-rightErrChan:
+				return err
+			default:
+			}
+
+			// Check whether any base row matches this right row.
+			// We build a temporary combined row to evaluate join conditions.
+			anyMatch := false
+			baseRowChan := make(chan Row, 100)
+			baseErrChan := make(chan error, 1)
+			go func() {
+				defer close(baseRowChan)
+				if err := baseTable.sequentialScan(ctx, baseScan, baseFields, baseRowChan); err != nil {
+					baseErrChan <- err
+				}
+			}()
+
+			for baseRow := range baseRowChan {
+				select {
+				case err := <-baseErrChan:
+					return err
+				default:
+				}
+
+				// After finding match, drain the channel to let the goroutine finish
+				if anyMatch {
+					continue
+				}
+
+				probe := combineRows(baseRow, rightRow, baseScan.TableAlias, innerScan.TableAlias)
+				matches, err := evaluateJoinConditions(probe, joinConditions)
+				if err != nil {
+					return err
+				}
+				if matches {
+					anyMatch = true
+				}
+			}
+			select {
+			case err := <-baseErrChan:
+				return err
+			default:
+			}
+
+			if anyMatch {
+				continue
+			}
+
+			// No base row matched — build combined row with NULLs for all tables
+			// except the current right-join table which gets the actual row values.
+			combined, err := p.buildRightJoinNullRow(ctx, provider, rightRow, joinIndex)
+			if err != nil {
+				return err
+			}
+
+			select {
+			case filteredPipe <- combined:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+
+		select {
+		case err := <-rightErrChan:
+			return err
+		default:
+		}
+	}
+
+	return nil
+}
+
+// buildRightJoinNullRow constructs a combined row for an unmatched RIGHT JOIN row.
+// All tables except the one at joinIndex are NULL-filled; the table at joinIndex
+// contains the actual rightRow values. Column order matches what the main join
+// loop would produce so that selected fields resolve correctly.
+func (p QueryPlan) buildRightJoinNullRow(ctx context.Context, provider TableProvider, rightRow Row, joinIndex int) (Row, error) {
+	baseScan := p.Scans[0]
+	baseTable, ok := provider.GetTable(ctx, baseScan.TableName)
+	if !ok {
+		return Row{}, fmt.Errorf("%w: %s", errTableDoesNotExist, baseScan.TableName)
+	}
+
+	// Build the combined row scan-by-scan (base first, then each join in order).
+	// joinIndex==0 is special: first combine is combineRows, subsequent ones use combineRowsProgressive.
+
+	// Determine the row for the first join slot
+	join0 := p.Joins[0]
+	join0Scan := p.Scans[join0.RightScanIndex]
+
+	var firstInnerRow Row
+	if joinIndex == 0 {
+		firstInnerRow = rightRow
+	} else {
+		join0Table, ok := provider.GetTable(ctx, join0Scan.TableName)
+		if !ok {
+			return Row{}, fmt.Errorf("%w: %s", errTableDoesNotExist, join0Scan.TableName)
+		}
+		firstInnerRow = nullRowForColumns(join0Table.Columns)
+	}
+
+	combined := combineRows(nullRowForColumns(baseTable.Columns), firstInnerRow, baseScan.TableAlias, join0Scan.TableAlias)
+
+	for i := 1; i < len(p.Joins); i++ {
+		ji := p.Joins[i]
+		jiScan := p.Scans[ji.RightScanIndex]
+
+		var innerRow Row
+		if i == joinIndex {
+			innerRow = rightRow
+		} else {
+			jiTable, ok := provider.GetTable(ctx, jiScan.TableName)
+			if !ok {
+				return Row{}, fmt.Errorf("%w: %s", errTableDoesNotExist, jiScan.TableName)
+			}
+			innerRow = nullRowForColumns(jiTable.Columns)
+		}
+
+		combined = combineRowsProgressive(combined, innerRow, jiScan.TableAlias)
+	}
+
+	return combined, nil
+}
+
+// nullRowForColumns returns a Row where every value is NULL (Valid: false).
+// Used to pad the outer side when a LEFT/RIGHT JOIN finds no matching row.
+func nullRowForColumns(columns []Column) Row {
+	values := make([]OptionalValue, len(columns))
+	return NewRowWithValues(columns, values)
 }
 
 // combineRows concatenates columns and values from outer and inner rows (first join)

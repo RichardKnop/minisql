@@ -232,7 +232,7 @@ if err := rows.Err(); err != nil {
 | `ON CONFLICT` | Both `DO NOTHING` and `DO UPDATE` supported (with `EXCLUDED` pseudo table syntax for updating) |
 | `SELECT` | All fields with `*`, specific fields, or row count with `COUNT(*)` |
 | `SELECT DISTINCT` | |
-| `INNER JOIN` | Star schema only — one or more tables joined with the base table |
+| `JOIN` | `INNER`, `LEFT` and `RIGHT` joins supported. Star schema only — one or more tables joined with the base table |
 | `UPDATE` | |
 | `DELETE` | |
 | `WHERE` | Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`, `LIKE`, `NOT LIKE`, `BETWEEN` |
