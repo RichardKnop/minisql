@@ -12,12 +12,12 @@ import (
 func TestIndex_Insert(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		key            = int64(1)
-		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = pager.ForIndex([]Column{col}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
-		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
+		ctx           = context.Background()
+		key           = int64(1)
+		col           = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager    = pager.ForIndex([]Column{col}, true)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
+		txPager       = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
 	idx, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
@@ -40,7 +40,6 @@ func TestIndex_Insert(t *testing.T) {
 			|  1, 2, 3 |
 			+----------+
 		*/
-
 
 		rootNode := pager.pages[0].IndexNode.(*IndexNode[int64])
 		assertIndexNode(t, rootNode, true, true, 0, []int64{1, 2, 3}, nil)
@@ -70,7 +69,6 @@ func TestIndex_Insert(t *testing.T) {
 						|  1  |         |  3, 4  |
 						+-----+         +--------+
 		*/
-
 
 		rootNode := pager.pages[0].IndexNode.(*IndexNode[int64])
 		leftChild := pager.pages[1].IndexNode.(*IndexNode[int64])
@@ -102,7 +100,6 @@ func TestIndex_Insert(t *testing.T) {
 						|  1  |          |  3  |        |  5, 6  |
 						+-----+          +-----+        +--------+
 		*/
-
 
 		var (
 			rootNode    = pager.pages[0].IndexNode.(*IndexNode[int64])
@@ -138,7 +135,6 @@ func TestIndex_Insert(t *testing.T) {
 						|  1  |      |  3  |   |  5  |      |  7 , 8  |
 						+-----+      +-----+   +-----+      +---------+
 		*/
-
 
 		var (
 			rootNode = pager.pages[0].IndexNode.(*IndexNode[int64])
@@ -177,7 +173,6 @@ func TestIndex_Insert(t *testing.T) {
 							|  1  |         |  3  |        |  5  |         |  7 , 8 , 9  |
 							+-----+         +-----+        +-----+         +-------------+
 		*/
-
 
 		var (
 			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
@@ -227,7 +222,6 @@ func TestIndex_Insert(t *testing.T) {
 						+-----+        +-----+  +-----+    +-----+   +-----+  +-----+   +----------+
 		*/
 
-
 		var (
 			rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])
 			internal1 = pager.pages[5].IndexNode.(*IndexNode[int64])
@@ -266,12 +260,12 @@ func TestIndex_Insert(t *testing.T) {
 func TestIndex_Insert_OutOfOrder(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		keys           = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
-		col        = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager     = pager.ForIndex([]Column{col}, true)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
-		txPager        = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
+		ctx           = context.Background()
+		keys          = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
+		col           = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager    = pager.ForIndex([]Column{col}, true)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
+		txPager       = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
 	idx, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
@@ -302,7 +296,6 @@ func TestIndex_Insert_OutOfOrder(t *testing.T) {
 	*/
 
 	checkIndexKeys(ctx, t, idx, keys)
-
 
 	var (
 		rootNode  = pager.pages[0].IndexNode.(*IndexNode[int64])

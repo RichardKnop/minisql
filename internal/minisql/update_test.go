@@ -12,11 +12,11 @@ import (
 func TestTable_Update(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		rows           = gen.Rows(38)
-		tablePager     = pager.ForTable(testColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		ctx           = context.Background()
+		rows          = gen.Rows(38)
+		tablePager    = pager.ForTable(testColumns)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
+		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		table         = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0, nil)
 	)
 
@@ -184,12 +184,12 @@ func TestTable_Update(t *testing.T) {
 func TestTable_Update_Overflow(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		tablePager     = pager.ForTable(testOverflowColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		ctx           = context.Background()
+		tablePager    = pager.ForTable(testOverflowColumns)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
+		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		table         = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0, nil)
-		rows           = gen.OverflowRows(3, []uint32{
+		rows          = gen.OverflowRows(3, []uint32{
 			MaxInlineVarchar,          // inline text
 			MaxInlineVarchar + 100,    // text overflows to 1 page
 			MaxOverflowPageData + 100, // text overflows to multiple pages

@@ -263,13 +263,13 @@ func TestExtractJoinColumnPairs(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Len(t, pairs, 2, "Should extract two column pairs")
-		
+
 		// First pair
 		assert.Equal(t, "id", pairs[0].BaseTableColumn.Name)
 		assert.Equal(t, "a", pairs[0].BaseTableColumn.AliasPrefix)
 		assert.Equal(t, "a_id", pairs[0].JoinTableColumn.Name)
 		assert.Equal(t, "b", pairs[0].JoinTableColumn.AliasPrefix)
-		
+
 		// Second pair
 		assert.Equal(t, "other_id", pairs[1].BaseTableColumn.Name)
 		assert.Equal(t, "a", pairs[1].BaseTableColumn.AliasPrefix)

@@ -6,11 +6,11 @@ import (
 
 const (
 	// SchemaTableName is the internal table used to store schema metadata.
-	SchemaTableName    = "minisql_schema"
+	SchemaTableName = "minisql_schema"
 	// StatsTableName ...
-	StatsTableName     = "minisql_stats"
+	StatsTableName = "minisql_stats"
 	// MaxColumns ...
-	MaxColumns         = 64
+	MaxColumns = 64
 	// RootPageConfigSize is the number of bytes reserved for the root page config header.
 	RootPageConfigSize = 100
 )

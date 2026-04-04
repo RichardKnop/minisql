@@ -13,7 +13,7 @@ func TestLeafNode_Marshal(t *testing.T) {
 	t.Parallel()
 
 	var (
-		node   = NewLeafNode()
+		node    = NewLeafNode()
 		columns = []Column{
 			{
 				Kind: Varchar,

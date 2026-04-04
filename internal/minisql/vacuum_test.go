@@ -96,8 +96,8 @@ func insertRowInDB(t *testing.T, db *Database, tableName string, id int64, name 
 
 	err := db.txManager.ExecuteInTransaction(ctx, func(txCtx context.Context) error {
 		_, err := tbl.Insert(txCtx, Statement{
-			Kind:    Insert,
-			Fields:  fieldsFromColumns(tbl.Columns...),
+			Kind:   Insert,
+			Fields: fieldsFromColumns(tbl.Columns...),
 			Inserts: [][]OptionalValue{{
 				{Value: id, Valid: true},
 				{Value: NewTextPointer([]byte(name)), Valid: true},

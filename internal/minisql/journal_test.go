@@ -54,8 +54,8 @@ func TestJournal_NoDBHeader(t *testing.T) {
 			},
 		}
 		rootPage, internalPages, leafPages = newTestBtree()
-		numPages                            = 1 + len(internalPages) + len(leafPages)
-		originalPages                       = make([]*Page, 0, numPages)
+		numPages                           = 1 + len(internalPages) + len(leafPages)
+		originalPages                      = make([]*Page, 0, numPages)
 	)
 	originalPages = append(originalPages, rootPage.Clone())
 	for _, page := range internalPages {
@@ -148,9 +148,9 @@ func TestJournal_WithDBHeader(t *testing.T) {
 			},
 		}
 		rootPage, internalPages, leafPages = newTestBtree()
-		numPages                            = 1 + len(internalPages) + len(leafPages)
-		originalPages                       = make([]*Page, 0, numPages)
-		originalDBHeader                    = DatabaseHeader{
+		numPages                           = 1 + len(internalPages) + len(leafPages)
+		originalPages                      = make([]*Page, 0, numPages)
+		originalDBHeader                   = DatabaseHeader{
 			FirstFreePage: 42,
 			FreePageCount: 100,
 		}

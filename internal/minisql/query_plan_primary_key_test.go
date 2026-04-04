@@ -14,7 +14,7 @@ func TestTable_PlanQuery_PrimaryKey(t *testing.T) {
 
 	var (
 		indexName = "pkey__users"
-		table    = NewTable(zap.NewNop(), nil, nil, "users", testColumns[0:2], 0, nil, WithPrimaryKey(
+		table     = NewTable(zap.NewNop(), nil, nil, "users", testColumns[0:2], 0, nil, WithPrimaryKey(
 			NewPrimaryKey(indexName, testColumns[0:1], true),
 		))
 	)

@@ -13,9 +13,9 @@ import (
 func TestDatabase_Analyze(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		mockParser     = new(MockParser)
-		ctx            = context.Background()
-		rows           = gen.Rows(100)
+		mockParser    = new(MockParser)
+		ctx           = context.Background()
+		rows          = gen.Rows(100)
 	)
 
 	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager)
@@ -119,9 +119,9 @@ func TestDatabase_Analyze(t *testing.T) {
 func TestDatabase_Analyze_CompositeIndex(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		mockParser     = new(MockParser)
-		ctx            = context.Background()
-		columns        = []Column{
+		mockParser    = new(MockParser)
+		ctx           = context.Background()
+		columns       = []Column{
 			{Kind: Varchar, Size: 50, Name: "country"},
 			{Kind: Varchar, Size: 100, Name: "city"},
 			{Kind: Varchar, Size: 100, Name: "street"},

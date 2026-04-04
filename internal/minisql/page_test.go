@@ -26,7 +26,7 @@ func TestTable_PageRecycling(t *testing.T) {
 		ctx     = context.Background()
 		numRows = 100
 		rows    = gen.MediumRows(numRows)
-		table  = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
+		table   = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
 	)
 	table.maximumICells = 5 // for testing purposes only, normally 340
 
@@ -41,7 +41,6 @@ func TestTable_PageRecycling(t *testing.T) {
 	}
 
 	mustInsert(ctx, t, table, txManager, stmt)
-
 
 	assert.Equal(t, 47, int(pager.TotalPages()))
 	assert.Equal(t, 0, int(pager.dbHeader.FreePageCount))

@@ -462,7 +462,7 @@ func (ui *Index[T]) remove(ctx context.Context, page *Page, key T, rowID RowID) 
 func (ui *Index[T]) removeFromInternal(ctx context.Context, page *Page, idx int, rowID RowID) error {
 	var (
 		node = page.IndexNode.(*IndexNode[T])
-		key   = node.Cells[idx].Key
+		key  = node.Cells[idx].Key
 	)
 
 	leftChildPage, err := ui.pager.ModifyPage(ctx, node.Cells[idx].Child)
@@ -614,7 +614,7 @@ func (ui *Index[T]) fill(ctx context.Context, parent, page *Page, idx int) error
 func (ui *Index[T]) borrowFromLeft(ctx context.Context, parent, page, left *Page, idx uint32) error {
 	var (
 		parentNode = parent.IndexNode.(*IndexNode[T])
-		node      = page.IndexNode.(*IndexNode[T])
+		node       = page.IndexNode.(*IndexNode[T])
 		leftNode   = left.IndexNode.(*IndexNode[T])
 	)
 
@@ -649,7 +649,7 @@ func (ui *Index[T]) borrowFromLeft(ctx context.Context, parent, page, left *Page
 func (ui *Index[T]) borrowFromRight(ctx context.Context, parent, page, right *Page, idx uint32) error {
 	var (
 		parentNode = parent.IndexNode.(*IndexNode[T])
-		node      = page.IndexNode.(*IndexNode[T])
+		node       = page.IndexNode.(*IndexNode[T])
 		rightNode  = right.IndexNode.(*IndexNode[T])
 	)
 
@@ -790,4 +790,3 @@ func compare[T IndexKey](a, b T) int {
 	}
 	return -1
 }
-

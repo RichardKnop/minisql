@@ -30,7 +30,7 @@ func TestNewDatabase(t *testing.T) {
 
 func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 	var (
-		pager, dbFile  = initTest(t)
+		pager, dbFile   = initTest(t)
 		mockParser      = new(MockParser)
 		ctx             = context.Background()
 		uniqueIndexName = UniqueIndexName(testTableName3, "email")
@@ -394,8 +394,8 @@ func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
 func TestDatabase_CreateIndex(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		mockParser     = new(MockParser)
-		ctx            = context.Background()
+		mockParser    = new(MockParser)
+		ctx           = context.Background()
 	)
 
 	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager)

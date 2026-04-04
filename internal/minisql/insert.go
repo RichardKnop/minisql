@@ -101,7 +101,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			return StatementResult{}, err
 		}
 
-		rowsInserted++
+		rowsInserted += 1
 
 		if insertIdx == len(stmt.Inserts)-1 {
 			break

@@ -65,7 +65,6 @@ func (s *TestSuite) TestConcurrency() {
 	})
 
 	s.Run("Concurrently run select queries", func() {
-
 		workerPool := make(chan struct{}, 20) // limit concurrency to 20 goroutines
 		for range 20 {
 			workerPool <- struct{}{}
@@ -97,6 +96,5 @@ func (s *TestSuite) TestConcurrency() {
 		}
 
 		wg.Wait()
-
 	})
 }

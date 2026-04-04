@@ -43,7 +43,7 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 		pkIndexName        = "pkey__users"
 		uniqueIndexName    = "key__users__email"
 		secondaryIndexName = "idx__users__created"
-		table             = NewTable(zap.NewNop(), nil, nil, "users", columns, 0, nil, WithPrimaryKey(
+		table              = NewTable(zap.NewNop(), nil, nil, "users", columns, 0, nil, WithPrimaryKey(
 			NewPrimaryKey(pkIndexName, columns[0:1], true),
 		), WithUniqueIndex(
 			UniqueIndex{

@@ -15,12 +15,12 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	*/
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		numRows        = 5
-		rows           = gen.MediumRows(numRows)
-		tablePager     = pager.ForTable(testMediumColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		ctx           = context.Background()
+		numRows       = 5
+		rows          = gen.MediumRows(numRows)
+		tablePager    = pager.ForTable(testMediumColumns)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
+		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		table         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
 	)
 
@@ -103,12 +103,12 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		numRows        = 20
-		rows           = gen.MediumRows(numRows)
-		tablePager     = pager.ForTable(testMediumColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		ctx           = context.Background()
+		numRows       = 20
+		rows          = gen.MediumRows(numRows)
+		tablePager    = pager.ForTable(testMediumColumns)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
+		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		table         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
 	)
 
@@ -135,7 +135,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		| 0,1,2 |  | 3,4,5 |  | 6,7,8 |  | 9,10,11 |  | 12,13,14 |  | 15,16,17,18,19 |
 		+-------+  +-------+  +-------+  +---------+  +----------+  +----------------+
 	*/
-
 
 	// Check the root page
 	assert.Equal(t, 5, int(pager.pages[0].InternalNode.Header.KeysNum))
@@ -172,7 +171,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			| 1,2,3,4,5 |     | 6,7,8 |    | 9,10,11 |    | 12,13,14 |     | 15,16,17,18,19 |
 			+-----------+     +-------+    +---------+    +----------+     +----------------+
 		*/
-
 
 		// Check the root page
 		assert.Equal(t, 4, int(pager.pages[0].InternalNode.Header.KeysNum))
@@ -217,7 +215,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			| 1,2,3,4,5 |     | 6,7,8 |    | 9,10,11 |    | 12,13,14,15,16 |
 			+-----------+     +-------+    +---------+    +----------------+
 		*/
-
 
 		// Check the root page
 		assert.Equal(t, 3, int(pager.pages[0].InternalNode.Header.KeysNum))
@@ -265,7 +262,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+-----------+      +---------+      +----------------+
 		*/
 
-
 		// Check the root page
 		assert.Equal(t, 2, int(pager.pages[0].InternalNode.Header.KeysNum))
 		assert.Equal(t, []RowID{8, 11}, pager.pages[0].InternalNode.Keys())
@@ -311,7 +307,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 			+--------+           +--------+          +----------+
 		*/
 
-
 		// Check the root page
 		assert.Equal(t, 2, int(pager.pages[0].InternalNode.Header.KeysNum))
 		assert.Equal(t, []RowID{5, 11}, pager.pages[0].InternalNode.Keys())
@@ -348,7 +343,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		 | 1,7,8 |                | 10,14,16 |
 		 +-------+                +----------+
 		*/
-
 
 		// Check the root page
 		assert.Equal(t, 1, int(pager.pages[0].InternalNode.Header.KeysNum))
@@ -389,7 +383,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		   +-----------------+
 		*/
 
-
 		assert.Nil(t, pager.pages[0].InternalNode)
 		assert.Equal(t, 5, int(pager.pages[0].LeafNode.Header.Cells))
 		assert.Equal(t, 0, int(pager.pages[0].LeafNode.Header.Parent))
@@ -419,7 +412,6 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 		assert.Equal(t, 5, result.RowsAffected)
 		checkRows(ctx, t, table, nil)
 
-
 		assert.Equal(t, 0, int(pager.pages[0].LeafNode.Header.Cells))
 	})
 
@@ -437,12 +429,12 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		numRows        = 1000
-		rows           = gen.MediumRows(numRows)
-		tablePager     = pager.ForTable(testMediumColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		ctx           = context.Background()
+		numRows       = 1000
+		rows          = gen.MediumRows(numRows)
+		tablePager    = pager.ForTable(testMediumColumns)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
+		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		table         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
 	)
 	// maximumICells is normally ~340; set to 5 in production code to stress-test splits.
@@ -459,14 +451,12 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 
 	mustInsert(ctx, t, table, txManager, stmt)
 
-
 	checkRows(ctx, t, table, rows)
 	assert.Equal(t, 336, int(pager.TotalPages()))
 
 	result := mustDelete(ctx, t, table, txManager, pager, Statement{Kind: Delete})
 
 	assert.Equal(t, len(rows), result.RowsAffected)
-
 
 	checkRows(ctx, t, table, nil)
 
@@ -477,12 +467,12 @@ func TestTable_Delete_InternalNodeRebalancing(t *testing.T) {
 func TestTable_Delete_Overflow(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		tablePager     = pager.ForTable(testOverflowColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		ctx           = context.Background()
+		tablePager    = pager.ForTable(testOverflowColumns)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
+		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
 		table         = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0, nil)
-		rows           = gen.OverflowRows(3, []uint32{
+		rows          = gen.OverflowRows(3, []uint32{
 			MaxInlineVarchar,          // inline text
 			MaxInlineVarchar + 100,    // text overflows to 1 page
 			MaxOverflowPageData + 100, // text overflows to multiple pages

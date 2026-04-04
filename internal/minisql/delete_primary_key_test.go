@@ -12,11 +12,11 @@ import (
 func TestTable_Delete_PrimaryKey(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		tablePager     = pager.ForTable(testColumns[0:2])
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		rows           = gen.RowsWithPrimaryKey(10)
+		ctx           = context.Background()
+		tablePager    = pager.ForTable(testColumns[0:2])
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
+		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		rows          = gen.RowsWithPrimaryKey(10)
 		table         *Table
 	)
 
@@ -110,11 +110,11 @@ func TestTable_Delete_PrimaryKey(t *testing.T) {
 func TestTable_Delete_CompositePrimaryKey(t *testing.T) {
 	var (
 		pager, dbFile = initTest(t)
-		ctx            = context.Background()
-		tablePager     = pager.ForTable(testCompositeKeyColumns)
-		txManager      = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager        = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		rows           = gen.RowsWithCompositeKey(10)
+		ctx           = context.Background()
+		tablePager    = pager.ForTable(testCompositeKeyColumns)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
+		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		rows          = gen.RowsWithCompositeKey(10)
 		table         *Table
 	)
 

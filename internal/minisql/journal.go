@@ -12,13 +12,13 @@ import (
 // Journal header constants define magic bytes, version, and size of the rollback journal header.
 const (
 	// JournalMagic ...
-	JournalMagic      = "minisql\n"
+	JournalMagic = "minisql\n"
 	// JournalVersion ...
-	JournalVersion    = uint32(1)
+	JournalVersion = uint32(1)
 	// JournalHeaderSize is the byte size of the journal file header.
 	JournalHeaderSize = 29
 	// CommitMagic is a sentinel value written at the end of a journal to confirm a clean commit.
-	CommitMagic       = uint32(0xDEADBEEF)
+	CommitMagic = uint32(0xDEADBEEF)
 )
 
 // RollbackJournal implements a write-ahead rollback journal for crash recovery.

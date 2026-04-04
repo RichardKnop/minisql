@@ -19,7 +19,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		tablePager = pager.ForTable(testColumns[0:2])
 		txManager  = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
 		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		table     *Table
+		table      *Table
 	)
 
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
