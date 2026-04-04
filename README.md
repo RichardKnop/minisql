@@ -77,7 +77,7 @@ MiniSQL uses a [rollback journal](https://sqlite.org/lockingv3.html#rollback) to
 
 ## Storage
 
-Each page size is `4096 bytes`. Rows larger than page size are not supported. Therefore, the largest allowed row size is `4066 bytes`. Only exception is root page 0 has first 100 bytes reserved for config.
+Each page size is `4096 bytes`. Rows larger than page size are not supported. Therefore, the largest allowed inline row size is `4065 bytes` (with exception of root page 0 which has first 100 bytes reserved for config). Variable text colums can use overflow pages and are not limited by page size.
 
 ```
 4096 (page size) 
@@ -229,7 +229,7 @@ if err := rows.Err(); err != nil {
 | `DROP TABLE` | |
 | `CREATE INDEX`, `DROP INDEX` | Secondary non-unique indexes only; primary and unique indexes are declared as part of `CREATE TABLE` |
 | `INSERT` | Single row or multiple rows via a tuple of values separated by commas |
-| `ON CONFLICT` | Currently only `DO NOTHING` supported |
+| `ON CONFLICT` | Both `DO NOTHING` and `DO UPDATE` supported (with `EXCLUDED` pseudo table syntax for updating) |
 | `SELECT` | All fields with `*`, specific fields, or row count with `COUNT(*)` |
 | `SELECT DISTINCT` | |
 | `INNER JOIN` | Star schema only — one or more tables joined with the base table |

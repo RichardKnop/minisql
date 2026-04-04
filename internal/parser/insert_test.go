@@ -215,6 +215,185 @@ func TestParse_Insert(t *testing.T) {
 			},
 			nil,
 		},
+		{
+			"INSERT ON CONFLICT DO UPDATE SET single column with semicolon works",
+			"INSERT INTO 'a' (b, c) VALUES (1, 'foo') ON CONFLICT DO UPDATE SET c = 'bar';",
+			[]minisql.Statement{
+				{
+					Kind:           minisql.Insert,
+					TableName:      "a",
+					Fields:         []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "c"}},
+					ConflictAction: minisql.ConflictActionDoUpdate,
+					Inserts: [][]minisql.OptionalValue{
+						{
+							{Value: int64(1), Valid: true},
+							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+						},
+					},
+					Updates: map[string]minisql.OptionalValue{
+						"c": {Value: minisql.NewTextPointer([]byte("bar")), Valid: true},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"INSERT ON CONFLICT DO UPDATE SET single column without semicolon works",
+			"INSERT INTO 'a' (b, c) VALUES (1, 'foo') ON CONFLICT DO UPDATE SET c = 'bar'",
+			[]minisql.Statement{
+				{
+					Kind:           minisql.Insert,
+					TableName:      "a",
+					Fields:         []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "c"}},
+					ConflictAction: minisql.ConflictActionDoUpdate,
+					Inserts: [][]minisql.OptionalValue{
+						{
+							{Value: int64(1), Valid: true},
+							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+						},
+					},
+					Updates: map[string]minisql.OptionalValue{
+						"c": {Value: minisql.NewTextPointer([]byte("bar")), Valid: true},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"INSERT ON CONFLICT DO UPDATE SET multiple columns works",
+			"INSERT INTO 'a' (b, c) VALUES (1, 'foo') ON CONFLICT DO UPDATE SET b = 2, c = NULL;",
+			[]minisql.Statement{
+				{
+					Kind:           minisql.Insert,
+					TableName:      "a",
+					Fields:         []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "b"}, {Name: "c"}},
+					ConflictAction: minisql.ConflictActionDoUpdate,
+					Inserts: [][]minisql.OptionalValue{
+						{
+							{Value: int64(1), Valid: true},
+							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+						},
+					},
+					Updates: map[string]minisql.OptionalValue{
+						"b": {Value: int64(2), Valid: true},
+						"c": {Valid: false},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"INSERT ON CONFLICT DO UPDATE SET with placeholder works",
+			"INSERT INTO 'a' (b, c) VALUES (1, 'foo') ON CONFLICT DO UPDATE SET c = ?;",
+			[]minisql.Statement{
+				{
+					Kind:           minisql.Insert,
+					TableName:      "a",
+					Fields:         []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "c"}},
+					ConflictAction: minisql.ConflictActionDoUpdate,
+					Inserts: [][]minisql.OptionalValue{
+						{
+							{Value: int64(1), Valid: true},
+							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+						},
+					},
+					Updates: map[string]minisql.OptionalValue{
+						"c": {Value: minisql.Placeholder{}, Valid: true},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"INSERT ON CONFLICT DO UPDATE SET with NOW() works",
+			"INSERT INTO 'a' (b, c) VALUES (1, 'foo') ON CONFLICT DO UPDATE SET c = NOW();",
+			[]minisql.Statement{
+				{
+					Kind:           minisql.Insert,
+					TableName:      "a",
+					Fields:         []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "c"}},
+					ConflictAction: minisql.ConflictActionDoUpdate,
+					Inserts: [][]minisql.OptionalValue{
+						{
+							{Value: int64(1), Valid: true},
+							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+						},
+					},
+					Updates: map[string]minisql.OptionalValue{
+						"c": {Value: minisql.FunctionNow, Valid: true},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"INSERT ON CONFLICT DO UPDATE SET EXCLUDED.col works",
+			"INSERT INTO 'a' (b, c) VALUES (1, 'foo') ON CONFLICT DO UPDATE SET c = EXCLUDED.c;",
+			[]minisql.Statement{
+				{
+					Kind:           minisql.Insert,
+					TableName:      "a",
+					Fields:         []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "c"}},
+					ConflictAction: minisql.ConflictActionDoUpdate,
+					Inserts: [][]minisql.OptionalValue{
+						{
+							{Value: int64(1), Valid: true},
+							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+						},
+					},
+					Updates: map[string]minisql.OptionalValue{
+						"c": {Value: minisql.ExcludedRef{Column: "c"}, Valid: true},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"INSERT ON CONFLICT DO UPDATE SET multiple EXCLUDED.col works",
+			"INSERT INTO 'a' (b, c) VALUES (1, 'foo') ON CONFLICT DO UPDATE SET b = EXCLUDED.b, c = EXCLUDED.c;",
+			[]minisql.Statement{
+				{
+					Kind:           minisql.Insert,
+					TableName:      "a",
+					Fields:         []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "b"}, {Name: "c"}},
+					ConflictAction: minisql.ConflictActionDoUpdate,
+					Inserts: [][]minisql.OptionalValue{
+						{
+							{Value: int64(1), Valid: true},
+							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+						},
+					},
+					Updates: map[string]minisql.OptionalValue{
+						"b": {Value: minisql.ExcludedRef{Column: "b"}, Valid: true},
+						"c": {Value: minisql.ExcludedRef{Column: "c"}, Valid: true},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"INSERT ON CONFLICT DO UPDATE SET mixed EXCLUDED.col and literal works",
+			"INSERT INTO 'a' (b, c) VALUES (1, 'foo') ON CONFLICT DO UPDATE SET b = EXCLUDED.b, c = 'override';",
+			[]minisql.Statement{
+				{
+					Kind:           minisql.Insert,
+					TableName:      "a",
+					Fields:         []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "b"}, {Name: "c"}},
+					ConflictAction: minisql.ConflictActionDoUpdate,
+					Inserts: [][]minisql.OptionalValue{
+						{
+							{Value: int64(1), Valid: true},
+							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+						},
+					},
+					Updates: map[string]minisql.OptionalValue{
+						"b": {Value: minisql.ExcludedRef{Column: "b"}, Valid: true},
+						"c": {Value: minisql.NewTextPointer([]byte("override")), Valid: true},
+					},
+				},
+			},
+			nil,
+		},
 	}
 
 	for _, aTestCase := range testCases {

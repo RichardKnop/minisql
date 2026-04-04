@@ -17,6 +17,8 @@ const (
 	ConflictActionNone ConflictAction = iota
 	// ConflictActionDoNothing silently skips the offending row.
 	ConflictActionDoNothing
+	// ConflictActionDoUpdate applies the SET assignments to the conflicting row.
+	ConflictActionDoUpdate
 )
 
 // StatementKind ...
@@ -275,6 +277,13 @@ var FunctionNow = Function{Name: nowFunctionName}
 // Placeholder ...
 type Placeholder struct{}
 
+// ExcludedRef represents a reference to EXCLUDED.column_name inside an
+// ON CONFLICT DO UPDATE SET clause.  At upsert time it resolves to the value
+// that was proposed for insertion but rejected due to the conflict.
+type ExcludedRef struct {
+	Column string
+}
+
 // Statement ...
 type Statement struct {
 	Kind          StatementKind
@@ -312,6 +321,14 @@ func (s Statement) NumPlaceholders() int {
 	if s.Kind == Insert {
 		for _, anInsert := range s.Inserts {
 			for _, val := range anInsert {
+				if _, ok := val.Value.(Placeholder); ok {
+					count += 1
+				}
+			}
+		}
+		// Also count placeholders in the DO UPDATE SET clause.
+		if s.ConflictAction == ConflictActionDoUpdate {
+			for _, val := range s.Updates {
 				if _, ok := val.Value.(Placeholder); ok {
 					count += 1
 				}
@@ -398,6 +415,28 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 					stmt.Inserts[i][j] = OptionalValue{}
 				} else {
 					stmt.Inserts[i][j].Value = args[0]
+				}
+				args = args[1:]
+			}
+		}
+		// Bind DO UPDATE SET placeholders in field order.
+		if s.ConflictAction == ConflictActionDoUpdate {
+			insertFieldCount := len(stmt.Fields) - len(stmt.Updates)
+			for _, field := range stmt.Fields[insertFieldCount:] {
+				val, ok := stmt.Updates[field.Name]
+				if !ok {
+					continue
+				}
+				if _, ok := val.Value.(Placeholder); !ok {
+					continue
+				}
+				if len(args) == 0 {
+					return Statement{}, errors.New("not enough arguments to bind placeholders")
+				}
+				if args[0] == nil {
+					stmt.Updates[field.Name] = OptionalValue{}
+				} else {
+					stmt.Updates[field.Name] = OptionalValue{Value: args[0], Valid: true}
 				}
 				args = args[1:]
 			}
@@ -566,6 +605,19 @@ func (s Statement) prepareCreateTable() (Statement, error) {
 // prepareInsert makes sure to add any nullable columns that are missing from the
 // insert statement, setting them to NULL. It also converts timestamp string values to int64.
 func (s Statement) prepareInsert(now Time) (Statement, error) {
+	// For ON CONFLICT DO UPDATE, the DO UPDATE SET field names are appended to
+	// s.Fields by setUpdate(). Strip them before expanding column defaults so
+	// that the slices.Insert calls below only operate on the INSERT fields.
+	// They are re-appended at the end.
+	var updateFields []Field
+	if s.ConflictAction == ConflictActionDoUpdate && len(s.Updates) > 0 {
+		insertFieldCount := len(s.Fields) - len(s.Updates)
+		if insertFieldCount >= 0 {
+			updateFields = slices.Clone(s.Fields[insertFieldCount:])
+			s.Fields = s.Fields[:insertFieldCount]
+		}
+	}
+
 	for i, col := range s.Columns {
 		if !s.HasField(col.Name) {
 			s.Fields = slices.Insert(s.Fields, i, Field{Name: col.Name})
@@ -606,6 +658,44 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 		}
 
 	}
+
+	// Re-append the DO UPDATE SET fields that were stripped at the start.
+	if len(updateFields) > 0 {
+		s.Fields = append(s.Fields, updateFields...)
+	}
+
+	// Resolve function values and timestamp strings in the DO UPDATE SET clause.
+	// prepareUpdate is only called for Kind==Update, so we do it explicitly here.
+	if s.ConflictAction == ConflictActionDoUpdate {
+		for name, val := range s.Updates {
+			if !val.Valid {
+				continue
+			}
+			// ExcludedRef is resolved at execution time — leave it alone.
+			if _, ok := val.Value.(ExcludedRef); ok {
+				continue
+			}
+			if fn, ok := val.Value.(Function); ok {
+				if fn.Name != FunctionNow.Name {
+					return Statement{}, fmt.Errorf("unsupported function %q in ON CONFLICT DO UPDATE", fn.Name)
+				}
+				val.Value = now
+				s.Updates[name] = val
+				continue
+			}
+			col, ok := s.ColumnByName(name)
+			if !ok || col.Kind != Timestamp {
+				continue
+			}
+			timestamp, err := parseTimeValue(val.Value)
+			if err != nil {
+				return Statement{}, fmt.Errorf("invalid timestamp in ON CONFLICT DO UPDATE SET %s: %w", name, err)
+			}
+			val.Value = timestamp
+			s.Updates[name] = val
+		}
+	}
+
 	return s, nil
 }
 
@@ -938,18 +1028,36 @@ func (s Statement) validateInsert(table *Table) error {
 		}
 	}
 
+	// For ON CONFLICT DO UPDATE the DO UPDATE SET fields are appended to s.Fields
+	// after the INSERT fields. Only the INSERT portion should be validated here.
+	insertFieldCount := len(s.Fields) - len(s.Updates)
+
 	for i, field := range s.Fields {
+		if i >= insertFieldCount {
+			break
+		}
 		col, ok := table.ColumnByName(field.Name)
 		if !ok {
 			return fmt.Errorf("unknown field %q in table %q", field.Name, table.Name)
 		}
 		for _, anInsert := range s.Inserts {
-			if len(anInsert) != len(s.Fields) {
-				return fmt.Errorf("insert: expected %d values, got %d", len(s.Fields), len(anInsert))
+			if len(anInsert) != insertFieldCount {
+				return fmt.Errorf("insert: expected %d values, got %d", insertFieldCount, len(anInsert))
 			}
 			if err := s.validateColumnValue(table, col, anInsert[i]); err != nil {
 				return err
 			}
+		}
+	}
+
+	// Validate EXCLUDED.col references: the referenced column must exist in the table.
+	for _, val := range s.Updates {
+		ref, ok := val.Value.(ExcludedRef)
+		if !ok {
+			continue
+		}
+		if _, exists := table.ColumnByName(ref.Column); !exists {
+			return fmt.Errorf("EXCLUDED.%s: column %q does not exist in table %q", ref.Column, ref.Column, table.Name)
 		}
 	}
 
@@ -1432,6 +1540,57 @@ func (s Statement) createIndexDDL() string {
 
 	sb.WriteString("\n);")
 	return sb.String()
+}
+
+// insertValueForColumnName returns the proposed INSERT value for the named
+// column at the given row index. Only the INSERT portion of s.Fields is
+// searched (DO UPDATE SET fields at the tail are excluded).
+func (s Statement) insertValueForColumnName(insertIdx int, colName string) (OptionalValue, bool) {
+	if insertIdx < 0 || insertIdx >= len(s.Inserts) {
+		return OptionalValue{}, false
+	}
+	insertFieldCount := len(s.Fields) - len(s.Updates)
+	for i, field := range s.Fields[:insertFieldCount] {
+		if field.Name == colName {
+			if i >= len(s.Inserts[insertIdx]) {
+				return OptionalValue{}, false
+			}
+			return s.Inserts[insertIdx][i], true
+		}
+	}
+	return OptionalValue{}, false
+}
+
+// resolveExcludedRefs returns a copy of the statement where every ExcludedRef
+// value in Updates has been replaced with the corresponding proposed INSERT
+// value for the row at insertIdx. Statements without ExcludedRef values are
+// returned unchanged (no allocation).
+func (s Statement) resolveExcludedRefs(insertIdx int) Statement {
+	if s.ConflictAction != ConflictActionDoUpdate {
+		return s
+	}
+	hasRef := false
+	for _, val := range s.Updates {
+		if _, ok := val.Value.(ExcludedRef); ok {
+			hasRef = true
+			break
+		}
+	}
+	if !hasRef {
+		return s
+	}
+	resolved := maps.Clone(s.Updates)
+	for colName, val := range resolved {
+		ref, ok := val.Value.(ExcludedRef)
+		if !ok {
+			continue
+		}
+		if proposed, found := s.insertValueForColumnName(insertIdx, ref.Column); found {
+			resolved[colName] = proposed
+		}
+	}
+	s.Updates = resolved
+	return s
 }
 
 // InsertValuesForColumns ...

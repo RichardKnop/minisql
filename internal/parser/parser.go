@@ -41,7 +41,7 @@ var reservedWords = []string{
 	"IF NOT EXISTS", "WHERE", "FROM", "SET", "ASC", "DESC", "AS",
 	"BEGIN", "COMMIT", "ROLLBACK", "ANALYZE", "VACUUM",
 	"INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "ON CONFLICT", "ON",
-	"DO NOTHING",
+	"DO UPDATE", "DO NOTHING",
 	"DISTINCT",
 	";",
 }
@@ -87,6 +87,11 @@ const (
 	stepInsertValuesCommaOrClosingParens
 	stepInsertValuesCommaBeforeOpeningParens
 	stepInsertOnConflictDo
+	stepInsertOnConflictUpdateSet
+	stepInsertOnConflictUpdateField
+	stepInsertOnConflictUpdateEquals
+	stepInsertOnConflictUpdateValue
+	stepInsertOnConflictUpdateComma
 	stepUpdateTable
 	stepUpdateSet
 	stepUpdateField
@@ -259,7 +264,12 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 			stepInsertValues,
 			stepInsertValuesCommaOrClosingParens,
 			stepInsertValuesCommaBeforeOpeningParens,
-			stepInsertOnConflictDo:
+			stepInsertOnConflictDo,
+			stepInsertOnConflictUpdateSet,
+			stepInsertOnConflictUpdateField,
+			stepInsertOnConflictUpdateEquals,
+			stepInsertOnConflictUpdateValue,
+			stepInsertOnConflictUpdateComma:
 			if err := p.doParseInsert(); err != nil {
 				return statements, err
 			}
@@ -553,8 +563,11 @@ func (p *parserItem) validate(stmt minisql.Statement) error {
 		return errNoRowsToInsert
 	}
 	if stmt.Kind == minisql.Insert {
+		// Fields contains INSERT column names first, then DO UPDATE SET column names
+		// (appended by setUpdate). Only the INSERT portion must match the row values.
+		insertFieldCount := len(stmt.Fields) - len(stmt.Updates)
 		for _, i := range stmt.Inserts {
-			if len(i) != len(stmt.Fields) {
+			if len(i) != insertFieldCount {
 				return errInsertFieldValueCountMismatch
 			}
 		}
