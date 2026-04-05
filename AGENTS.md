@@ -476,6 +476,15 @@ When adding filtering/transformation stages, insert them as goroutines between `
 
 ---
 
+### Database header
+
+- The first `RootPageConfigSize` bytes of page `0` are the on-disk MiniSQL database header.
+- Current header contract: magic `minisql\0`, format version `1`, page size `4096`, first free page, free page count, then reserved bytes.
+- Opening a database now requires a valid header magic/version/page size; old header layouts are intentionally rejected during the unstable pre-1.0 period.
+- When changing the header format, update both `internal/minisql/config.go` and the storage-engine standards/docs in the same change.
+
+---
+
 ### Text storage
 
 - `TextPointer` wraps `[]byte`. Always use `TextPointer.String()` for logical comparison; never compare `TextPointer.Data` bytes directly (inline vs overflow representations differ).

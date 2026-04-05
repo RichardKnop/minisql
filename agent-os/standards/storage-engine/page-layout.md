@@ -1,6 +1,6 @@
 ---
 name: Page Layout
-description: 4KB page tagged-union structure, page 0 special handling, and usable space calculation
+description: 4KB page tagged-union structure, page 0 database header, and usable space calculation
 type: standard
 ---
 
@@ -25,7 +25,27 @@ All marshal/unmarshal and `Clone` code switches on which field is set. Never set
 
 ## Page 0 (root page)
 
-Page 0 is special: its first `RootPageConfigSize` bytes hold the `DatabaseHeader`. The rest of the page is a normal B+ tree node. `Flush` writes the header separately before writing the rest of the page content.
+Page 0 is special: its first `RootPageConfigSize` bytes hold the on-disk `DatabaseHeader`. The rest of the page is a normal B+ tree node. `Flush` writes the header separately before writing the rest of the page content.
+
+## Database header format
+
+The current database header layout is:
+
+| Offset | Size | Field |
+|---|---:|---|
+| `0` | `8` | magic (`minisql\0`) |
+| `8` | `4` | file format version (`1`) |
+| `12` | `4` | page size (`4096`) |
+| `16` | `4` | first free page |
+| `20` | `4` | free page count |
+| `24` | `76` | reserved |
+
+Rules:
+
+- New database files must always write the full header, not just the free-list fields.
+- Opening a database requires valid header magic, version, and page size.
+- The reserved bytes are part of the format contract; do not reuse them casually.
+- If the header format changes, update docs/tests/standards in the same change.
 
 ## Usable space
 
