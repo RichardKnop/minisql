@@ -59,7 +59,7 @@ func (s *TestSuite) TestLeftJoin() {
 		want := []result{
 			{1, "Alice", int64p(1), int64p(100)},
 			{1, "Alice", int64p(2), int64p(200)},
-			{2, "Bob", nil, nil},   // no orders
+			{2, "Bob", nil, nil}, // no orders
 			{3, "Charlie", int64p(3), int64p(150)},
 		}
 

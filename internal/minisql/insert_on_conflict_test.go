@@ -315,8 +315,8 @@ func TestTable_Insert_OnConflictDoUpdate_ExcludedRef_UniqueIndex(t *testing.T) {
 		// rows[1] and rows[2] both conflict. Each should get their own proposed id.
 		newID1, newID2 := int64(101), int64(102)
 		stmt := Statement{
-			Kind:  Insert,
-			Fields: append(fieldsFromColumns(table.Columns...), Field{Name: "id"}),
+			Kind:           Insert,
+			Fields:         append(fieldsFromColumns(table.Columns...), Field{Name: "id"}),
 			ConflictAction: ConflictActionDoUpdate,
 			Inserts: [][]OptionalValue{
 				{{Value: newID1, Valid: true}, rows[1].Values[1]},
