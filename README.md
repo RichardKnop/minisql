@@ -94,6 +94,27 @@ Each row has an internal row ID which is an unsigned 64 bit integer starting at 
 
 Moreover, each row starts with 64 bit null mask which determines which values are NULL. Because of the NULL bit mask being an unsigned 64 bit integer, there is a limit of `maximum 64 columns per table`.
 
+### Database Header Format
+
+The first `100` bytes of page `0` are reserved for the MiniSQL database header. This is part of the on-disk file format.
+
+Current header fields:
+
+| Offset | Size | Field | Description |
+|---|---:|---|---|
+| `0` | `8` | magic | `minisql\0` file signature |
+| `8` | `4` | format version | Current value: `1` |
+| `12` | `4` | page size | Current value: `4096` |
+| `16` | `4` | first free page | Head of the free-page linked list |
+| `20` | `4` | free page count | Number of free pages currently tracked |
+| `24` | `76` | reserved | Reserved for future file-format metadata |
+
+Notes:
+
+- MiniSQL now requires the header magic/version/page size to be present when opening a database file.
+- The remaining bytes are reserved so the header can grow without immediately changing the page layout again.
+- The rest of page `0` after the first `100` bytes is used as a normal root B+ tree page.
+
 ## Concurrency
 
 MiniSQL uses `Optimistic Concurrency Control` or `OCC`. It is close to PostgreSQL's [SERIALIZABLE isolation](https://www.postgresql.org/docs/current/transaction-iso.html#XACT-SERIALIZABLE) Transaction manager follows a simple process:

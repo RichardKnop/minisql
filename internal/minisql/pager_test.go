@@ -131,3 +131,22 @@ func TestPager_GetPage(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, leafPages[3], page)
 }
+
+func TestNewPager_InvalidDatabaseHeader(t *testing.T) {
+	t.Parallel()
+
+	dbFile, err := os.CreateTemp(".", testDBName)
+	require.NoError(t, err)
+	defer dbFile.Close()
+	defer os.Remove(dbFile.Name())
+
+	buf := make([]byte, PageSize)
+	copy(buf, []byte("notmini!"))
+	buf[databaseHeaderMetadataSize] = 1
+	_, err = dbFile.Write(buf)
+	require.NoError(t, err)
+
+	_, err = NewPager(dbFile, PageSize, 1000)
+	require.Error(t, err)
+	assert.Equal(t, "invalid database header magic", err.Error())
+}

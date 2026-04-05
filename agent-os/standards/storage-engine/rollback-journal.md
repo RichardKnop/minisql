@@ -1,6 +1,6 @@
 ---
 name: Rollback Journal
-description: Write-before protocol, CRC32 integrity, crash recovery, and context.Background() rule for VACUUM
+description: Write-before protocol, journal-header CRC32 integrity, crash recovery, and context.Background() rule for VACUUM
 type: standard
 ---
 
@@ -11,14 +11,15 @@ A rollback journal (`{dbpath}-journal`) is written before any page modification 
 ## Protocol
 
 1. **Before modifying** any page, write the **original** bytes to the journal via `WritePageBefore`.
-2. Write a journal header with CRC32 checksum and commit magic (`0xDEADBEEF`) when the transaction commits.
+2. Finalize the journal header with page count and `Sync()` it to disk before flushing modified database pages.
 3. On crash recovery, if the journal file exists and has a valid header/checksum, replay it to restore original page content.
 4. Delete the journal file after successful recovery or after a clean commit.
 
 ## Integrity
 
 - Journal header contains: magic string `"minisql\n"`, version, page size, number of pages, CRC32 checksum.
-- Commit magic `0xDEADBEEF` marks the journal as fully written — an incomplete journal (no commit magic) is discarded, not replayed.
+- The current implementation validates the journal header fields and header CRC32 only.
+- The current implementation does not yet persist a separate commit magic marker; keep standards in sync with code until that changes.
 
 ## Rules
 
