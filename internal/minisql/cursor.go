@@ -225,6 +225,18 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 		changedValues = map[string]Column{}
 	)
 	for name, value := range stmt.Updates {
+		// Evaluate arithmetic expressions against the current row before applying.
+		if expr, ok := value.Value.(*Expr); ok {
+			result, err := expr.Eval(row)
+			if err != nil {
+				return false, fmt.Errorf("evaluating expression for column %q: %w", name, err)
+			}
+			if result == nil {
+				value = OptionalValue{Valid: false}
+			} else {
+				value = OptionalValue{Value: result, Valid: true}
+			}
+		}
 		col, idx := row.GetColumn(name)
 		if idx < 0 {
 			return false, fmt.Errorf("column '%s' not found", name)

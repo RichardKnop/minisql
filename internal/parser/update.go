@@ -61,20 +61,45 @@ func (p *parserItem) doParseUpdate() error {
 			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: minisql.FunctionNow, Valid: true})
 			p.nextUpdateField = ""
 			p.pop()
+		case "TRUE":
+			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: true, Valid: true})
+			p.nextUpdateField = ""
+			p.pop()
+		case "FALSE":
+			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: false, Valid: true})
+			p.nextUpdateField = ""
+			p.pop()
 		default:
-			value, ln := p.peekValue()
-			if ln == 0 {
+			// Quoted string literals are not arithmetic expressions — handle them
+			// with the existing peekValue path to preserve text type.
+			if p.i < len(p.sql) && p.sql[p.i] == '\'' {
+				value, ln := p.peekValue()
+				if ln == 0 {
+					return p.wrapErr(errUpdateExpectedQuotedValueOrInt)
+				}
+				strValue := value.(string)
+				p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: minisql.NewTextPointer([]byte(strValue)), Valid: true})
+				p.nextUpdateField = ""
+				p.pop()
+				break
+			}
+			// Everything else (numeric literals, column refs, arithmetic) goes
+			// through the expression parser.
+			expr, err := p.parseExpr()
+			if err != nil {
 				return p.wrapErr(errUpdateExpectedQuotedValueOrInt)
 			}
 			var updateValue minisql.OptionalValue
-			if strValue, ok := value.(string); ok {
-				updateValue = minisql.OptionalValue{Value: minisql.NewTextPointer([]byte(strValue)), Valid: true}
+			// Plain numeric literal — no expression overhead needed.
+			if expr.Column == "" && expr.Left == nil {
+				updateValue = minisql.OptionalValue{Value: expr.Literal, Valid: true}
 			} else {
-				updateValue = minisql.OptionalValue{Value: value, Valid: true}
+				// Column reference or binary expression — store as *Expr for
+				// runtime evaluation against the current row.
+				updateValue = minisql.OptionalValue{Value: expr, Valid: true}
 			}
 			p.setUpdate(p.nextUpdateField, updateValue)
 			p.nextUpdateField = ""
-			p.pop()
 		}
 		maybeWhere := p.peek()
 		if strings.ToUpper(maybeWhere) == "WHERE" {

@@ -227,11 +227,32 @@ func textOverflowFields(columns ...Column) []Field {
 type Field struct {
 	AliasPrefix string
 	Name        string
+	// Alias is the output column name when an AS clause is used on a computed
+	// expression (e.g. SELECT price * 1.1 AS discounted).
+	Alias string
+	// Expr is non-nil when the field is a computed arithmetic expression rather
+	// than a plain column reference.
+	Expr *Expr
 }
 
 func (f Field) String() string {
 	if f.AliasPrefix != "" {
 		return fmt.Sprintf("%s.%s", f.AliasPrefix, f.Name)
+	}
+	return f.Name
+}
+
+// OutputName returns the name to use for this field in result column metadata.
+// For computed expressions it returns the Alias (if set) or the expression string.
+func (f Field) OutputName() string {
+	if f.Expr != nil {
+		if f.Alias != "" {
+			return f.Alias
+		}
+		return f.Expr.String()
+	}
+	if f.Alias != "" {
+		return f.Alias
 	}
 	return f.Name
 }
@@ -719,6 +740,12 @@ func (s Statement) prepareUpdate(now Time) (Statement, error) {
 			continue
 		}
 
+		// Arithmetic expressions are evaluated at execution time against the row —
+		// skip all static type preparation for them.
+		if _, ok := updateValue.Value.(*Expr); ok {
+			continue
+		}
+
 		if fn, ok := updateValue.Value.(Function); ok {
 			if fn.Name == FunctionNow.Name {
 				updateValue.Value = now
@@ -1073,7 +1100,12 @@ func (s Statement) validateUpdate(table *Table) error {
 		if !ok {
 			return fmt.Errorf("unknown field %q in table %q", field.Name, table.Name)
 		}
-		if err := s.validateColumnValue(table, col, s.Updates[field.Name]); err != nil {
+		updateVal := s.Updates[field.Name]
+		// Arithmetic expressions are evaluated at execution time — skip static type validation.
+		if _, isExpr := updateVal.Value.(*Expr); isExpr {
+			continue
+		}
+		if err := s.validateColumnValue(table, col, updateVal); err != nil {
 			return err
 		}
 	}
@@ -1196,6 +1228,11 @@ func (s Statement) validateSelect(table *Table) error {
 		if len(s.Joins) == 0 {
 			fieldMap := map[string]struct{}{}
 			for _, field := range s.Fields {
+				// Computed expression fields (e.g. price * 1.1) are not table columns —
+				// their source columns are validated at execution time via exprSourceFields.
+				if field.Expr != nil {
+					continue
+				}
 				_, ok := table.ColumnByName(field.Name)
 				if !ok {
 					return fmt.Errorf("unknown field %q in table %q", field.Name, table.Name)

@@ -251,3 +251,115 @@ func TestParse_Update(t *testing.T) {
 		})
 	}
 }
+
+func TestParse_UpdateArithmetic(t *testing.T) {
+	t.Parallel()
+
+	testCases := []testCase{
+		{
+			"UPDATE SET col = col + 1 (column plus literal)",
+			"UPDATE 'products' SET count = count + 1;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Update,
+					TableName: "products",
+					Fields:    []minisql.Field{{Name: "count"}},
+					Updates: map[string]minisql.OptionalValue{
+						"count": {
+							Value: &minisql.Expr{
+								Left:  &minisql.Expr{Column: "count"},
+								Right: &minisql.Expr{Literal: int64(1)},
+								Op:    minisql.ArithAdd,
+							},
+							Valid: true,
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"UPDATE SET col = col * 1.1 (column times float literal)",
+			"UPDATE 'products' SET price = price * 1.1;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Update,
+					TableName: "products",
+					Fields:    []minisql.Field{{Name: "price"}},
+					Updates: map[string]minisql.OptionalValue{
+						"price": {
+							Value: &minisql.Expr{
+								Left:  &minisql.Expr{Column: "price"},
+								Right: &minisql.Expr{Literal: float64(1.1)},
+								Op:    minisql.ArithMul,
+							},
+							Valid: true,
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"UPDATE SET col = col - col2 (column minus column)",
+			"UPDATE 'orders' SET diff = total - discount;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Update,
+					TableName: "orders",
+					Fields:    []minisql.Field{{Name: "diff"}},
+					Updates: map[string]minisql.OptionalValue{
+						"diff": {
+							Value: &minisql.Expr{
+								Left:  &minisql.Expr{Column: "total"},
+								Right: &minisql.Expr{Column: "discount"},
+								Op:    minisql.ArithSub,
+							},
+							Valid: true,
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"UPDATE SET col = a + b * c (operator precedence: * before +)",
+			"UPDATE 't' SET x = a + b * c;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Update,
+					TableName: "t",
+					Fields:    []minisql.Field{{Name: "x"}},
+					Updates: map[string]minisql.OptionalValue{
+						"x": {
+							Value: &minisql.Expr{
+								Left: &minisql.Expr{Column: "a"},
+								Right: &minisql.Expr{
+									Left:  &minisql.Expr{Column: "b"},
+									Right: &minisql.Expr{Column: "c"},
+									Op:    minisql.ArithMul,
+								},
+								Op: minisql.ArithAdd,
+							},
+							Valid: true,
+						},
+					},
+				},
+			},
+			nil,
+		},
+	}
+
+	for _, aTestCase := range testCases {
+		t.Run(aTestCase.Name, func(t *testing.T) {
+			aStatement, err := New().Parse(context.Background(), aTestCase.SQL)
+			if aTestCase.Err != nil {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, aTestCase.Err)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, aTestCase.Expected, aStatement)
+		})
+	}
+}
