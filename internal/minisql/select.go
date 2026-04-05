@@ -57,7 +57,11 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	default:
 		if !stmt.IsSelectCountAll() {
 			requestedFields = stmt.Fields
-			selectedFields = requestedFields
+			// For selectedFields, replace computed expression fields with the
+			// underlying column references they read from (so the scan fetches
+			// the right data from disk).  Plain column fields pass through
+			// unchanged.
+			selectedFields = exprSourceFields(requestedFields)
 		}
 
 		// Pre-allocate for WHERE condition fields (estimate: 2 operands per condition)
@@ -550,7 +554,10 @@ func (t *Table) selectStreaming(stmt Statement, filteredPipe chan Row, errorsPip
 		Columns: make([]Column, len(requestedFields)),
 	}
 	for i, field := range requestedFields {
-		if colIdx := stmt.ColumnIdx(field.Name); colIdx >= 0 {
+		if field.Expr != nil {
+			// Computed column: synthesise metadata from the output name.
+			result.Columns[i] = Column{Name: field.OutputName()}
+		} else if colIdx := stmt.ColumnIdx(field.Name); colIdx >= 0 {
 			result.Columns[i] = t.Columns[colIdx]
 		}
 	}
@@ -575,7 +582,15 @@ func (t *Table) selectStreaming(stmt Statement, filteredPipe chan Row, errorsPip
 			seen = make(map[string]struct{})
 		}
 		for row := range in {
-			projected := row.OnlyFields(requestedFields...)
+			projected, err := projectRow(row, requestedFields)
+			if err != nil {
+				// Send error and stop — the error channel is checked by the caller.
+				select {
+				case out <- Row{}:
+				default:
+				}
+				return
+			}
 			if stmt.Distinct {
 				key := rowDistinctKey(projected)
 				if _, dup := seen[key]; dup {
@@ -689,7 +704,9 @@ func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, unfilteredPipe <-
 		Columns: make([]Column, len(requestedFields)),
 	}
 	for i, field := range requestedFields {
-		if colIdx := stmt.ColumnIdx(field.Name); colIdx >= 0 {
+		if field.Expr != nil {
+			result.Columns[i] = Column{Name: field.OutputName()}
+		} else if colIdx := stmt.ColumnIdx(field.Name); colIdx >= 0 {
 			result.Columns[i] = t.Columns[colIdx]
 		}
 	}
@@ -702,7 +719,7 @@ func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, unfilteredPipe <-
 		idx += 1
 
 		// Filter to only requested fields (important for JOINs where rows have all columns)
-		return row.OnlyFields(requestedFields...), nil
+		return projectRow(row, requestedFields)
 	})
 
 	return result, nil
@@ -910,6 +927,77 @@ func (t *Table) indexEndpointScan(ctx context.Context, scan Scan, selectedFields
 		return err
 	}
 	return nil
+}
+
+// projectRow returns a new row containing only the requested fields.
+// For plain column fields it performs a name lookup on the source row.
+// For computed expression fields it evaluates the Expr and stores the result
+// in a synthetic column named by Field.OutputName().
+func projectRow(row Row, fields []Field) (Row, error) {
+	// Fast path: no expression fields — delegate to the existing helper.
+	hasExpr := false
+	for _, f := range fields {
+		if f.Expr != nil {
+			hasExpr = true
+			break
+		}
+	}
+	if !hasExpr {
+		return row.OnlyFields(fields...), nil
+	}
+
+	columns := make([]Column, 0, len(fields))
+	values := make([]OptionalValue, 0, len(fields))
+
+	for _, f := range fields {
+		if f.Expr != nil {
+			result, err := f.Expr.Eval(row)
+			if err != nil {
+				return Row{}, fmt.Errorf("evaluating expression %q: %w", f.OutputName(), err)
+			}
+			columns = append(columns, Column{Name: f.OutputName()})
+			if result == nil {
+				values = append(values, OptionalValue{Valid: false})
+			} else {
+				values = append(values, OptionalValue{Value: result, Valid: true})
+			}
+		} else {
+			var lookupName string
+			if f.AliasPrefix != "" {
+				lookupName = f.AliasPrefix + "." + f.Name
+			} else {
+				lookupName = f.Name
+			}
+			col, idx := row.GetColumn(lookupName)
+			if idx >= 0 {
+				columns = append(columns, col)
+				values = append(values, row.Values[idx])
+			} else {
+				// Column not found — keep zero-value column with the requested name.
+				columns = append(columns, Column{Name: f.Name})
+				values = append(values, OptionalValue{Valid: false})
+			}
+		}
+	}
+
+	return NewRowWithValues(columns, values), nil
+}
+
+// exprSourceFields replaces each computed expression field with the underlying
+// column fields it references, so the table scan fetches the right data from disk.
+// Plain column fields are passed through unchanged.
+func exprSourceFields(fields []Field) []Field {
+	result := make([]Field, 0, len(fields))
+	for _, f := range fields {
+		if f.Expr == nil {
+			result = append(result, f)
+		} else {
+			for _, colName := range f.Expr.Columns() {
+				result = append(result, Field{Name: colName})
+			}
+		}
+	}
+	return result
 }
 
 // rowDistinctKey builds a string key from a projected row's values for DISTINCT deduplication.

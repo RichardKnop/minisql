@@ -209,7 +209,7 @@ func TestParse_Select(t *testing.T) {
 				{
 					Kind:      minisql.Select,
 					TableName: "b",
-					Fields:    []minisql.Field{{Name: "a"}, {Name: "b"}, {Name: "c"}},
+					Fields:    []minisql.Field{{Name: "a", Alias: "z"}, {Name: "b", Alias: "y"}, {Name: "c"}},
 					Aliases: map[string]string{
 						"a": "z",
 						"b": "y",
@@ -897,6 +897,116 @@ func TestParse_SelectHaving(t *testing.T) {
 					},
 					Having: minisql.OneOrMore{
 						{minisql.FieldIsGreater(minisql.Field{Name: "SUM(total)"}, minisql.OperandInteger, int64(50))},
+					},
+				},
+			},
+			nil,
+		},
+	}
+
+	for _, aTestCase := range testCases {
+		t.Run(aTestCase.Name, func(t *testing.T) {
+			aStatement, err := New().Parse(context.Background(), aTestCase.SQL)
+			if aTestCase.Err != nil {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, aTestCase.Err)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, aTestCase.Expected, aStatement)
+		})
+	}
+}
+
+func TestParse_SelectArithmetic(t *testing.T) {
+	t.Parallel()
+
+	testCases := []testCase{
+		{
+			"SELECT col * literal produces computed field",
+			"SELECT price * 1.1 FROM products;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "products",
+					Fields: []minisql.Field{
+						{
+							Name: "price * 1.1",
+							Expr: &minisql.Expr{
+								Left:  &minisql.Expr{Column: "price"},
+								Right: &minisql.Expr{Literal: float64(1.1)},
+								Op:    minisql.ArithMul,
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT col * literal AS alias sets alias on field",
+			"SELECT price * 1.1 AS discounted FROM products;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "products",
+					Fields: []minisql.Field{
+						{
+							Name:  "price * 1.1",
+							Alias: "discounted",
+							Expr: &minisql.Expr{
+								Left:  &minisql.Expr{Column: "price"},
+								Right: &minisql.Expr{Literal: float64(1.1)},
+								Op:    minisql.ArithMul,
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT a + b mixed with plain field",
+			"SELECT id, a + b FROM t;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "t",
+					Fields: []minisql.Field{
+						{Name: "id"},
+						{
+							Name: "a + b",
+							Expr: &minisql.Expr{
+								Left:  &minisql.Expr{Column: "a"},
+								Right: &minisql.Expr{Column: "b"},
+								Op:    minisql.ArithAdd,
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT operator precedence: a + b * c",
+			"SELECT a + b * c FROM t;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "t",
+					Fields: []minisql.Field{
+						{
+							Name: "a + (b * c)",
+							Expr: &minisql.Expr{
+								Left: &minisql.Expr{Column: "a"},
+								Right: &minisql.Expr{
+									Left:  &minisql.Expr{Column: "b"},
+									Right: &minisql.Expr{Column: "c"},
+									Op:    minisql.ArithMul,
+								},
+								Op: minisql.ArithAdd,
+							},
+						},
 					},
 				},
 			},

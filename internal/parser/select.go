@@ -92,16 +92,14 @@ func (p *parserItem) doParseSelect() error {
 			return nil
 		}
 
-		p.Fields = append(p.Fields, fieldFromIdentifier(identifier))
-		// If we are in aggregate mode (Aggregates already has entries), keep the slice parallel.
-		if len(p.Aggregates) > 0 {
-			p.Aggregates = append(p.Aggregates, minisql.AggregateExpr{})
-		}
-		p.pop()
-		maybeFrom := strings.ToUpper(p.peek())
-
-		// Handle * for selecting all rows
+		// Handle * for selecting all rows — consume immediately before expression parsing.
 		if identifier == "*" {
+			p.Fields = append(p.Fields, fieldFromIdentifier(identifier))
+			if len(p.Aggregates) > 0 {
+				p.Aggregates = append(p.Aggregates, minisql.AggregateExpr{})
+			}
+			p.pop()
+			maybeFrom := strings.ToUpper(p.peek())
 			if len(p.Fields) > 1 {
 				return p.wrapErr(errCannotCombineAsterisk)
 			}
@@ -112,45 +110,79 @@ func (p *parserItem) doParseSelect() error {
 			return nil
 		}
 
-		// Handle COUNT(*) special case
+		// Handle COUNT(*) special case — consume immediately.
 		if upperIdent == "COUNT(*)" {
+			p.Fields = append(p.Fields, minisql.Field{Name: identifier})
+			p.pop()
+			if len(p.Aggregates) > 0 {
+				p.Aggregates = append(p.Aggregates, minisql.AggregateExpr{})
+			}
 			if len(p.Fields) > 1 {
-				// COUNT(*) combined with other fields — treat as aggregate.
-				// Validation in validateSelect ensures a GROUP BY is present.
 				if len(p.Aggregates) < len(p.Fields)-1 {
 					for len(p.Aggregates) < len(p.Fields)-1 {
 						p.Aggregates = append(p.Aggregates, minisql.AggregateExpr{})
 					}
 				}
 				p.Aggregates = append(p.Aggregates, minisql.AggregateExpr{Kind: minisql.AggregateCount})
-				maybeFromInner := strings.ToUpper(p.peek())
-				if maybeFromInner == "FROM" {
+				if strings.ToUpper(p.peek()) == "FROM" {
 					p.step = stepSelectFrom
 					return nil
 				}
 				p.step = stepSelectComma
 				return nil
 			}
-			if maybeFrom != "FROM" {
+			if strings.ToUpper(p.peek()) != "FROM" {
 				return p.wrapErr(errExpectedFrom)
 			}
 			p.step = stepSelectFrom
 			return nil
 		}
 
-		// Otherwise we expect an AS alias, FROM or comma and next field
-		switch maybeFrom {
+		// Normal field or arithmetic expression.
+		// Do NOT pop the identifier first — parseExpr() consumes it and any
+		// following operators so that "price * 1.1" is parsed as one expression.
+		expr, err := p.parseExpr()
+		if err != nil {
+			return p.wrapErr(errSelectWithoutFields)
+		}
+
+		var field minisql.Field
+		if expr.Column != "" && expr.Left == nil {
+			// Plain column reference — preserve existing alias-prefix behaviour.
+			field = fieldFromIdentifier(expr.Column)
+		} else {
+			// Computed expression — use the expression string as a placeholder name.
+			field = minisql.Field{Name: expr.String(), Expr: expr}
+		}
+
+		if len(p.Aggregates) > 0 {
+			p.Aggregates = append(p.Aggregates, minisql.AggregateExpr{})
+		}
+		p.Fields = append(p.Fields, field)
+
+		maybeNext := strings.ToUpper(p.peek())
+		switch maybeNext {
 		case "AS":
 			p.pop()
 			alias := p.peek()
 			if !isIdentifier(alias) {
 				return p.errorf(`at SELECT: expected field alias for "identifier as"`)
 			}
-			if p.Aliases == nil {
-				p.Aliases = make(map[string]string)
+			// Store alias on the field itself (works for both plain and computed fields).
+			p.Fields[len(p.Fields)-1].Alias = alias
+			// Also keep the Aliases map for backward compatibility with plain fields.
+			if field.Expr == nil {
+				if p.Aliases == nil {
+					p.Aliases = make(map[string]string)
+				}
+				p.Aliases[identifier] = alias
 			}
-			p.Aliases[identifier] = alias
 			p.pop()
+			// After consuming the alias, FROM may follow directly (last field in list).
+			if strings.ToUpper(p.peek()) == "FROM" {
+				p.step = stepSelectFrom
+				return nil
+			}
 		case "FROM":
 			p.step = stepSelectFrom
 			return nil
