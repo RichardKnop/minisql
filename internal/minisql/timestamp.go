@@ -23,6 +23,7 @@ const (
 	microsecondsInHour   = 60 * microsecondsInMinute
 	microsecondsInDay    = 24 * microsecondsInHour
 	microsecondsInYear   = 365 * microsecondsInDay
+	maxFractionalDigits  = 6
 )
 
 var (
@@ -43,7 +44,7 @@ func init() {
 	}
 }
 
-// Time is a custom type implementing PostgreSQL like TIMESTAMP type
+// Time is a custom type implementing a PostgreSQL-like TIMESTAMP type without timezone.
 // low value 4713 BC
 // high value 294276 AD
 type Time struct {
@@ -93,139 +94,18 @@ func (t Time) String() string {
 
 // FromMicroseconds constructs a Time from microseconds since 2000-01-01 00:00:00 UTC.
 func FromMicroseconds(microseconds int64) Time {
-	if microseconds == 0 {
-		return Time{
-			Year:         2000,
-			Month:        1,
-			Day:          1,
-			Hour:         0,
-			Minutes:      0,
-			Seconds:      0,
-			Microseconds: 0,
-		}
+	days, microsecondsOfDay := splitMicrosecondsIntoDays(microseconds)
+	year, month, day := dateFromEpochDays(days)
+
+	return Time{
+		Year:         year,
+		Month:        int8(month),
+		Day:          int8(day),
+		Hour:         int8(microsecondsOfDay / microsecondsInHour),
+		Minutes:      int8((microsecondsOfDay % microsecondsInHour) / microsecondsInMinute),
+		Seconds:      int8((microsecondsOfDay % microsecondsInMinute) / microsecondsInSecond),
+		Microseconds: int32(microsecondsOfDay % microsecondsInSecond),
 	}
-
-	var t Time
-	if microseconds > 0 {
-		// Forward from 2000-01-01
-		absMicroseconds := microseconds
-		year := int32(2000)
-		for {
-			leapYear := isLeapYear(int(year))
-			var yearMicroseconds int64
-			if leapYear {
-				yearMicroseconds = microsecondsInYear + microsecondsInDay
-			} else {
-				yearMicroseconds = microsecondsInYear
-			}
-			if absMicroseconds >= yearMicroseconds {
-				absMicroseconds -= yearMicroseconds
-				year += 1
-			} else {
-				break
-			}
-		}
-		t.Year = year
-
-		leapYear := isLeapYear(int(t.Year))
-		month := 1
-		for {
-			daysInThisMonth := daysInMonth(leapYear, month)
-			monthMicroseconds := int64(daysInThisMonth) * microsecondsInDay
-			if absMicroseconds >= monthMicroseconds {
-				absMicroseconds -= monthMicroseconds
-				month += 1
-			} else {
-				break
-			}
-		}
-		t.Month = int8(month)
-
-		t.Day = int8(absMicroseconds/microsecondsInDay) + 1
-		absMicroseconds %= microsecondsInDay
-
-		t.Hour = int8(absMicroseconds / microsecondsInHour)
-		absMicroseconds %= microsecondsInHour
-
-		t.Minutes = int8(absMicroseconds / microsecondsInMinute)
-		absMicroseconds %= microsecondsInMinute
-
-		t.Seconds = int8(absMicroseconds / microsecondsInSecond)
-		absMicroseconds %= microsecondsInSecond
-
-		t.Microseconds = int32(absMicroseconds)
-		return t
-	}
-
-	// Backward from 2000-01-01
-	absMicroseconds := -microseconds
-	year := int32(1999)
-	for {
-		leapYear := isLeapYear(int(year))
-		var yearMicroseconds int64
-		if leapYear {
-			yearMicroseconds = microsecondsInYear + microsecondsInDay
-		} else {
-			yearMicroseconds = microsecondsInYear
-		}
-		if absMicroseconds >= yearMicroseconds {
-			absMicroseconds -= yearMicroseconds
-			if absMicroseconds > 0 {
-				year -= 1
-			}
-		} else {
-			break
-		}
-	}
-	t.Year = year
-
-	if absMicroseconds == 0 {
-		t.Month = 1
-		t.Day = 1
-		t.Hour = 0
-		t.Minutes = 0
-		t.Seconds = 0
-		t.Microseconds = 0
-		return t
-	}
-
-	leapYear := isLeapYear(int(t.Year))
-	month := 12
-	for {
-		daysInThisMonth := daysInMonth(leapYear, month)
-		monthMicroseconds := int64(daysInThisMonth) * microsecondsInDay
-		if absMicroseconds >= monthMicroseconds {
-			absMicroseconds -= monthMicroseconds
-			month -= 1
-		} else {
-			break
-		}
-	}
-	t.Month = int8(month)
-
-	// Days, hours, minutes, seconds, microseconds are counted from the end of the month backwards
-	daysInThisMonth := daysInMonth(leapYear, month)
-	if absMicroseconds == microsecondsInDay {
-		t.Day = int8(daysInThisMonth)
-		return t
-	}
-	t.Day = int8(daysInThisMonth - int(absMicroseconds/microsecondsInDay))
-	absMicroseconds %= microsecondsInDay
-
-	t.Hour = int8(23 - int(absMicroseconds/microsecondsInHour))
-	absMicroseconds %= microsecondsInHour
-
-	t.Minutes = int8(59 - int(absMicroseconds/microsecondsInMinute))
-	absMicroseconds %= microsecondsInMinute
-
-	t.Seconds = int8(59 - int(absMicroseconds/microsecondsInSecond))
-	absMicroseconds %= microsecondsInSecond
-
-	t.Microseconds = int32(1_000_000 - int(absMicroseconds))
-	if t.Microseconds == 1_000_000 {
-		t.Microseconds = 0
-	}
-	return t
 }
 
 // TotalMicroseconds returns the microsecond count since 2000-01-01 00:00:00 UTC.
@@ -310,18 +190,24 @@ func ParseTimestamp(timestampStr string) (Time, error) {
 	if len(timestampStr) < miniumTimestampLength {
 		return Time{}, fmt.Errorf("timestamp string too short: %s", timestampStr)
 	}
-	if len(timestampStr) > maximumTimestampLength {
-		return Time{}, fmt.Errorf("timestamp string too long: %s", timestampStr)
-	}
 	bc := false
 	if strings.HasSuffix(timestampStr, " BC") {
 		bc = true
 		timestampStr = strings.TrimSuffix(timestampStr, " BC")
 	}
 
-	parts := strings.Split(timestampStr, " ")
+	parts := strings.Fields(timestampStr)
+	if len(parts) == 3 && isTimezoneToken(parts[2]) {
+		return Time{}, fmt.Errorf("timestamp with timezone is not supported: %s %s", strings.Join(parts[:2], " "), parts[2])
+	}
 	if len(parts) != 2 {
 		return Time{}, fmt.Errorf("timestamp string invalid format (parts): %s", timestampStr)
+	}
+	if containsTimezoneMarker(parts[1]) {
+		return Time{}, fmt.Errorf("timestamp with timezone is not supported: %s", timestampStr)
+	}
+	if len(timestampStr) > maximumTimestampLength {
+		return Time{}, fmt.Errorf("timestamp string too long: %s", timestampStr)
 	}
 
 	// Parse date parts
@@ -386,7 +272,7 @@ func ParseTimestamp(timestampStr string) (Time, error) {
 	}
 	var microseconds int
 	if len(secParts) == 2 {
-		microseconds, err = strconv.Atoi(secParts[1])
+		microseconds, err = parseFractionalMicroseconds(secParts[1])
 		if err != nil {
 			return Time{}, fmt.Errorf("timestamp string invalid format (microseconds part): %s", timestampStr)
 		}
@@ -435,6 +321,112 @@ func isValidTime(hour, minutes, seconds, microseconds int) error {
 		return errors.New("invalid microseconds")
 	}
 	return nil
+}
+
+func parseFractionalMicroseconds(part string) (int, error) {
+	if part == "" || len(part) > maxFractionalDigits {
+		return 0, errors.New("invalid microseconds")
+	}
+
+	value, err := strconv.Atoi(part)
+	if err != nil {
+		return 0, err
+	}
+
+	for i := len(part); i < maxFractionalDigits; i++ {
+		value *= 10
+	}
+
+	return value, nil
+}
+
+func splitMicrosecondsIntoDays(microseconds int64) (int64, int64) {
+	days := microseconds / microsecondsInDay
+	remainder := microseconds % microsecondsInDay
+	if remainder < 0 {
+		days -= 1
+		remainder += microsecondsInDay
+	}
+	return days, remainder
+}
+
+func dateFromEpochDays(days int64) (int32, int, int) {
+	if days >= 0 {
+		return dateFromEpochDaysForward(days)
+	}
+	return dateFromEpochDaysBackward(days)
+}
+
+func dateFromEpochDaysForward(days int64) (int32, int, int) {
+	year := int32(2000)
+	for {
+		yearDays := int64(daysInYear(int(year)))
+		if days < yearDays {
+			break
+		}
+		days -= yearDays
+		year++
+	}
+
+	month := 1
+	for {
+		monthDays := int64(daysInMonth(isLeapYear(int(year)), month))
+		if days < monthDays {
+			break
+		}
+		days -= monthDays
+		month++
+	}
+
+	return year, month, int(days) + 1
+}
+
+func dateFromEpochDaysBackward(days int64) (int32, int, int) {
+	remainingDays := -days
+	year := int32(1999)
+	for {
+		yearDays := int64(daysInYear(int(year)))
+		if remainingDays <= yearDays {
+			break
+		}
+		remainingDays -= yearDays
+		year--
+	}
+
+	month := 12
+	for {
+		monthDays := int64(daysInMonth(isLeapYear(int(year)), month))
+		if remainingDays <= monthDays {
+			break
+		}
+		remainingDays -= monthDays
+		month--
+	}
+
+	day := daysInMonth(isLeapYear(int(year)), month) - int(remainingDays) + 1
+	return year, month, day
+}
+
+func containsTimezoneMarker(timePart string) bool {
+	if strings.HasSuffix(timePart, "Z") || strings.HasSuffix(timePart, "z") {
+		return true
+	}
+	return strings.ContainsAny(timePart, "+-")
+}
+
+func daysInYear(year int) int {
+	if isLeapYear(year) {
+		return 366
+	}
+	return 365
+}
+
+func isTimezoneToken(token string) bool {
+	upper := strings.ToUpper(token)
+	if upper == "Z" || upper == "UTC" || upper == "GMT" {
+		return true
+	}
+	return strings.ContainsAny(token, "+-")
 }
 
 // isLeapYear returns true if the given year is a leap year

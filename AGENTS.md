@@ -466,6 +466,16 @@ When adding filtering/transformation stages, insert them as goroutines between `
 
 ---
 
+### TIMESTAMP semantics
+
+- `TIMESTAMP` is a timestamp-without-time-zone type stored as microseconds since `2000-01-01 00:00:00 UTC`.
+- The implementation uses the proleptic Gregorian calendar across the full supported range.
+- Timezone-qualified literals such as `Z`, `UTC`, or `+01:00` are rejected; do not silently normalize them.
+- `NOW()` is evaluated in UTC and stored as a timezone-naive timestamp value.
+- Fractional seconds accept 1 to 6 digits and are scaled to microseconds.
+
+---
+
 ### Text storage
 
 - `TextPointer` wraps `[]byte`. Always use `TextPointer.String()` for logical comparison; never compare `TextPointer.Data` bytes directly (inline vs overflow representations differ).

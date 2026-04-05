@@ -488,6 +488,102 @@ func TestParseTimestamp(t *testing.T) {
 	}
 }
 
+func TestParseTimestamp_FractionalSecondsScaleToMicroseconds(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input                string
+		expectedMicroseconds int32
+		expectedString       string
+	}{
+		{input: "2024-03-15 10:30:45.1", expectedMicroseconds: 100000, expectedString: "2024-03-15 10:30:45.100000"},
+		{input: "2024-03-15 10:30:45.12", expectedMicroseconds: 120000, expectedString: "2024-03-15 10:30:45.120000"},
+		{input: "2024-03-15 10:30:45.123", expectedMicroseconds: 123000, expectedString: "2024-03-15 10:30:45.123000"},
+		{input: "2024-03-15 10:30:45.1234", expectedMicroseconds: 123400, expectedString: "2024-03-15 10:30:45.123400"},
+		{input: "2024-03-15 10:30:45.12345", expectedMicroseconds: 123450, expectedString: "2024-03-15 10:30:45.123450"},
+		{input: "2024-03-15 10:30:45.123456", expectedMicroseconds: 123456, expectedString: "2024-03-15 10:30:45.123456"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			actual, err := ParseTimestamp(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedMicroseconds, actual.Microseconds)
+			assert.Equal(t, tt.expectedString, actual.String())
+			assert.Equal(t, actual, FromMicroseconds(actual.TotalMicroseconds()))
+		})
+	}
+}
+
+func TestParseTimestamp_RejectsTimezoneInformation(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		"2024-03-15 10:30:45Z",
+		"2024-03-15 10:30:45.123456Z",
+		"2024-03-15 10:30:45+01:00",
+		"2024-03-15 10:30:45.123456-05:30",
+		"2024-03-15 10:30:45 UTC",
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			_, err := ParseTimestamp(input)
+			require.Error(t, err)
+			assert.Equal(t, fmt.Sprintf("timestamp with timezone is not supported: %s", input), err.Error())
+		})
+	}
+}
+
+func TestTime_RoundTripCalendarSamples(t *testing.T) {
+	t.Parallel()
+
+	years := []int32{-4712, -4000, -1, 0, 1, 4, 100, 400, 1582, 1900, 1999, 2000, 2004, 2100, 2400, 9999, 17500, 294276}
+	times := []struct {
+		hour, minutes, seconds int8
+		microseconds           int32
+	}{
+		{hour: 0, minutes: 0, seconds: 0, microseconds: 0},
+		{hour: 12, minutes: 34, seconds: 56, microseconds: 123456},
+		{hour: 23, minutes: 59, seconds: 59, microseconds: 999999},
+	}
+
+	for _, year := range years {
+		leapYear := isLeapYear(int(year))
+		for month := 1; month <= 12; month++ {
+			days := daysInMonth(leapYear, month)
+			dayCandidates := []int8{1, int8(days)}
+			if days > 1 {
+				middle := int8((days + 1) / 2)
+				if middle != 1 && middle != int8(days) {
+					dayCandidates = append(dayCandidates, middle)
+				}
+			}
+
+			for _, day := range dayCandidates {
+				for _, timePart := range times {
+					expected := Time{
+						Year:         year,
+						Month:        int8(month),
+						Day:          day,
+						Hour:         timePart.hour,
+						Minutes:      timePart.minutes,
+						Seconds:      timePart.seconds,
+						Microseconds: timePart.microseconds,
+					}
+
+					actual := FromMicroseconds(expected.TotalMicroseconds())
+					assert.Equal(t, expected, actual)
+
+					reparsed, err := ParseTimestamp(expected.String())
+					require.NoError(t, err)
+					assert.Equal(t, expected, reparsed)
+				}
+			}
+		}
+	}
+}
+
 func TestTime_GoTime(t *testing.T) {
 	t.Parallel()
 

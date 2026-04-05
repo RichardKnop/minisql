@@ -215,6 +215,42 @@ if err := rows.Err(); err != nil {
 | `VARCHAR(n)` | Storage works the same way as `TEXT` but allows limiting length of inserted/updated text to max value. |
 | `TIMESTAMP`  | 8-byte signed integer representing number of microseconds from `2000-01-01 00:00:00 UTC` (`Postgres epoch`). Supported range is from `4713 BC` to `294276 AD` inclusive. |
 
+## TIMESTAMP Spec
+
+MiniSQL `TIMESTAMP` is a timestamp-without-time-zone type. It stores a calendar date and wall-clock time with microsecond precision, but it does not store or interpret any timezone offset.
+
+- Storage format: signed 64-bit integer counting microseconds since `2000-01-01 00:00:00 UTC` (the PostgreSQL epoch).
+- Precision: microseconds. Fractional seconds from 1 to 6 digits are accepted and are scaled to microseconds.
+- Calendar model: proleptic Gregorian calendar for the full supported range.
+- Supported range: `4713-01-01 00:00:00 BC` through `294276-12-31 23:59:59.999999`.
+- BC handling: input and output use PostgreSQL-style ` BC` suffix. Internally, astronomical year numbering is used (`1 BC` = year `0`, `2 BC` = year `-1`).
+- `NOW()`: evaluated in UTC and stored as a timezone-naive timestamp value.
+
+Accepted literal forms:
+
+- `YYYY-MM-DD HH:MM:SS`
+- `YYYY-MM-DD HH:MM:SS.f`
+- `YYYY-MM-DD HH:MM:SS.ff`
+- `YYYY-MM-DD HH:MM:SS.ffffff`
+- Any of the above with trailing ` BC`
+
+Examples:
+
+```sql
+'2024-03-15 10:30:45'
+'2024-03-15 10:30:45.1'
+'2024-03-15 10:30:45.123456'
+'0001-12-31 23:59:59.999999 BC'
+```
+
+Important behavior and current non-goals:
+
+- Timezone-qualified values are rejected. Examples: `Z`, `UTC`, `GMT`, `+01:00`, `-05:30`.
+- Leap seconds are not supported. Seconds must be in the range `00` to `59`.
+- Year `0000` is rejected in input. Use `0001 ... BC` for 1 BC.
+- MiniSQL does not currently support `TIMESTAMP WITH TIME ZONE`.
+- String formatting normalizes fractional precision to either no fractional part or exactly 6 fractional digits.
+
 ## SQL Features
 
 | Feature | Notes |
