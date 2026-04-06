@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"slices"
@@ -89,6 +90,10 @@ func (d *Database) IntegrityCheck(ctx context.Context) (IntegrityReport, error) 
 			Message: fmt.Sprintf("page %d is not reachable from any table/index root and is not on the free list", pageIdx),
 			Page:    pageIndexPtr(pageIdx),
 		})
+	}
+
+	for _, table := range tables {
+		report = d.checkTableIndexConsistency(ctx, report, table)
 	}
 
 	return report, nil
@@ -666,5 +671,216 @@ func indexNodeChildren(node any) []PageIndex {
 		return n.Children()
 	default:
 		return nil
+	}
+}
+
+func (d *Database) checkTableIndexConsistency(ctx context.Context, report IntegrityReport, table *Table) IntegrityReport {
+	if table.HasPrimaryKey() && table.PrimaryKey.Index != nil {
+		report = checkIndexConsistency(ctx, report, table, indexConsistencyTarget{
+			name:    table.PrimaryKey.Name,
+			kind:    "primary key",
+			columns: table.PrimaryKey.Columns,
+			index:   table.PrimaryKey.Index,
+		})
+	}
+	for _, index := range table.UniqueIndexes {
+		if index.Index == nil {
+			continue
+		}
+		report = checkIndexConsistency(ctx, report, table, indexConsistencyTarget{
+			name:    index.Name,
+			kind:    "unique index",
+			columns: index.Columns,
+			index:   index.Index,
+		})
+	}
+	for _, index := range table.SecondaryIndexes {
+		if index.Index == nil {
+			continue
+		}
+		report = checkIndexConsistency(ctx, report, table, indexConsistencyTarget{
+			name:    index.Name,
+			kind:    "secondary index",
+			columns: index.Columns,
+			index:   index.Index,
+		})
+	}
+
+	return report
+}
+
+type indexConsistencyTarget struct {
+	name    string
+	kind    string
+	columns []Column
+	index   BTreeIndex
+}
+
+type integrityIndexEntries map[string]map[RowID]int
+
+func checkIndexConsistency(ctx context.Context, report IntegrityReport, table *Table, target indexConsistencyTarget) IntegrityReport {
+	objectName := fmt.Sprintf("%s %s on table %s", target.kind, target.name, table.Name)
+
+	actual, duplicateEntries, err := scanIndexEntries(ctx, target.index)
+	if err != nil {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_scan_failed",
+			Message: fmt.Sprintf("failed to scan %s: %v", objectName, err),
+			Object:  target.name,
+		})
+		return report
+	}
+
+	for entryID, count := range duplicateEntries {
+		if count <= 1 {
+			continue
+		}
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_duplicate_entry",
+			Message: fmt.Sprintf("%s contains duplicate entry %s (%d occurrences)", objectName, entryID, count),
+			Object:  target.name,
+		})
+	}
+
+	report, err = streamCheckExpectedIndexEntries(ctx, report, table, target, actual)
+	if err != nil {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "table_scan_failed",
+			Message: fmt.Sprintf("failed to scan table %s for integrity verification against %s: %v", table.Name, objectName, err),
+			Object:  target.name,
+		})
+		return report
+	}
+
+	for keyID, actualRowIDs := range actual {
+		for rowID, count := range actualRowIDs {
+			if count <= 0 {
+				continue
+			}
+			report.Issues = append(report.Issues, IntegrityIssue{
+				Code:    "index_orphan_entry",
+				Message: fmt.Sprintf("%s contains row %d for unexpected key %s", objectName, rowID, keyID),
+				Object:  target.name,
+			})
+		}
+	}
+
+	return report
+}
+
+func streamCheckExpectedIndexEntries(ctx context.Context, report IntegrityReport, table *Table, target indexConsistencyTarget, actual integrityIndexEntries) (IntegrityReport, error) {
+	cursor, err := table.SeekFirst(ctx)
+	if err != nil {
+		return report, err
+	}
+
+	fields := fieldsFromColumns(table.Columns...)
+	for !cursor.EndOfTable {
+		row, err := cursor.fetchRow(ctx, true, fields...)
+		if err != nil {
+			return report, err
+		}
+
+		keyID, indexed, err := integrityKeyIDFromRow(row, target.columns, target.kind == "primary key")
+		if err != nil {
+			report.Issues = append(report.Issues, IntegrityIssue{
+				Code:    "index_expected_entries_failed",
+				Message: fmt.Sprintf("failed to derive expected entry for %s on row %d: %v", target.name, row.Key, err),
+				Object:  target.name,
+			})
+			continue
+		}
+		if !indexed {
+			continue
+		}
+
+		rowIDs := actual[keyID]
+		if rowIDs[row.Key] > 0 {
+			rowIDs[row.Key]--
+			if rowIDs[row.Key] == 0 {
+				delete(rowIDs, row.Key)
+				if len(rowIDs) == 0 {
+					delete(actual, keyID)
+				}
+			}
+			continue
+		}
+
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_missing_entry",
+			Message: fmt.Sprintf("%s %s on table %s is missing row %d for key %s", target.kind, target.name, table.Name, row.Key, keyID),
+			Object:  target.name,
+		})
+	}
+	return report, nil
+}
+
+func scanIndexEntries(ctx context.Context, index BTreeIndex) (integrityIndexEntries, map[string]int, error) {
+	entries := make(integrityIndexEntries)
+	entryCounts := make(map[string]int)
+	if err := index.ScanAll(ctx, false, func(key any, rowID RowID) error {
+		keyID := integrityKeyID(key)
+		addIntegrityEntry(entries, keyID, rowID)
+		entryCounts[fmt.Sprintf("%s|%d", keyID, rowID)]++
+		return nil
+	}); err != nil {
+		return nil, nil, err
+	}
+	return entries, entryCounts, nil
+}
+
+func addIntegrityEntry(entries integrityIndexEntries, keyID string, rowID RowID) {
+	rowIDs, ok := entries[keyID]
+	if !ok {
+		rowIDs = make(map[RowID]int)
+		entries[keyID] = rowIDs
+	}
+	rowIDs[rowID]++
+}
+
+func integrityKeyIDFromRow(row Row, columns []Column, required bool) (string, bool, error) {
+	keyParts, ok := row.GetValuesForColumns(columns)
+	if !ok {
+		return "", false, fmt.Errorf("failed to get values for columns %s", columnNames(columns))
+	}
+
+	if len(columns) == 1 {
+		if !keyParts[0].Valid {
+			if required {
+				return "", false, fmt.Errorf("required key column %s is NULL", columns[0].Name)
+			}
+			return "", false, nil
+		}
+		keyValue, err := castKeyValue(columns[0], keyParts[0].Value)
+		if err != nil {
+			return "", false, err
+		}
+		return integrityKeyID(keyValue), true, nil
+	}
+
+	keyValues := make([]any, 0, len(columns))
+	for i, keyPart := range keyParts {
+		if !keyPart.Valid {
+			if required {
+				return "", false, fmt.Errorf("required key column %s is NULL", columns[i].Name)
+			}
+			return "", false, nil
+		}
+		keyValue, err := castKeyValue(columns[i], keyPart.Value)
+		if err != nil {
+			return "", false, err
+		}
+		keyValues = append(keyValues, keyValue)
+	}
+
+	return integrityKeyID(NewCompositeKey(columns, keyValues...)), true, nil
+}
+
+func integrityKeyID(key any) string {
+	switch value := key.(type) {
+	case CompositeKey:
+		return "composite:" + hex.EncodeToString(value.Comparison)
+	default:
+		return fmt.Sprintf("%T:%v", key, key)
 	}
 }
