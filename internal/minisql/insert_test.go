@@ -8,18 +8,13 @@ import (
 	"github.com/RichardKnop/minisql/pkg/bitwise"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
 
 func TestTable_Insert(t *testing.T) {
+	table, txManager, pager := newTestTable(t, testColumns)
 	var (
-		pager, dbFile = initTest(t)
-		ctx           = context.Background()
-		rows          = gen.Rows(2)
-		tablePager    = pager.ForTable(testColumns)
-		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		table         = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0, nil)
+		ctx  = context.Background()
+		rows = gen.Rows(2)
 	)
 
 	t.Run("Insert row with all NOT NULL values", func(t *testing.T) {
@@ -71,14 +66,10 @@ func TestTable_Insert(t *testing.T) {
 }
 
 func TestTable_Insert_MultiInsert(t *testing.T) {
+	table, txManager, pager := newTestTable(t, testColumns)
 	var (
-		pager, dbFile = initTest(t)
-		ctx           = context.Background()
-		rows          = gen.Rows(3)
-		tablePager    = pager.ForTable(testColumns)
-		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		table         = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0, nil)
+		ctx  = context.Background()
+		rows = gen.Rows(3)
 	)
 
 	stmt := Statement{
@@ -100,14 +91,10 @@ func TestTable_Insert_MultiInsert(t *testing.T) {
 }
 
 func TestTable_Insert_SplitRootLeaf(t *testing.T) {
+	table, txManager, pager := newTestTable(t, testMediumColumns)
 	var (
-		pager, dbFile = initTest(t)
-		ctx           = context.Background()
-		rows          = gen.MediumRows(6)
-		tablePager    = pager.ForTable(testMediumColumns)
-		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		table         = NewTable(testLogger, txPager, txManager, testTableName, testMediumColumns, 0, nil)
+		ctx  = context.Background()
+		rows = gen.MediumRows(6)
 	)
 
 	stmt := Statement{
@@ -157,14 +144,10 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 }
 
 func TestTable_Insert_SplitLeaf(t *testing.T) {
+	table, txManager, pager := newTestTable(t, testBigColumns)
 	var (
-		pager, dbFile = initTest(t)
-		ctx           = context.Background()
-		rows          = gen.BigRows(4)
-		tablePager    = pager.ForTable(testBigColumns)
-		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		table         = NewTable(testLogger, txPager, txManager, testTableName, testBigColumns, 0, nil)
+		ctx  = context.Background()
+		rows = gen.BigRows(4)
 	)
 
 	// Batch insert test rows
@@ -215,15 +198,11 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		row should cause the root node to split into two child internal nodes,
 		each inheriting half of leaf nodes.
 	*/
+	table, txManager, pager := newTestTable(t, testBigColumns)
 	var (
-		pager, dbFile = initTest(t)
-		ctx           = context.Background()
-		tablePager    = pager.ForTable(testBigColumns)
-		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		table         = NewTable(testLogger, txPager, txManager, testTableName, testBigColumns, 0, nil)
-		numRows       = table.maxICells(0) + 2
-		rows          = gen.BigRows(numRows)
+		ctx     = context.Background()
+		numRows = table.maxICells(0) + 2
+		rows    = gen.BigRows(numRows)
 	)
 
 	require.Equal(t, 333, numRows)
@@ -313,14 +292,10 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 }
 
 func TestTable_Insert_Overflow(t *testing.T) {
+	table, txManager, pager := newTestTable(t, testOverflowColumns)
 	var (
-		pager, dbFile = initTest(t)
-		ctx           = context.Background()
-		tablePager    = pager.ForTable(testOverflowColumns)
-		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		table         = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0, nil)
-		rows          = []Row{
+		ctx  = context.Background()
+		rows = []Row{
 			gen.OverflowRow(MaxInlineVarchar),
 			gen.OverflowRow(MaxInlineVarchar + 100),
 			gen.OverflowRow(MaxOverflowPageData + 100),
@@ -379,53 +354,3 @@ func TestTable_Insert_Overflow(t *testing.T) {
 	})
 }
 
-func mustInsert(ctx context.Context, t *testing.T, table *Table, txManager *TransactionManager, stmt Statement) {
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		_, err := table.Insert(ctx, stmt)
-		return err
-	})
-	require.NoError(t, err)
-}
-
-func checkRows(ctx context.Context, t *testing.T, table *Table, expectedRows []Row) {
-	selectResult, err := table.Select(ctx, Statement{
-		Kind:   Select,
-		Fields: fieldsFromColumns(table.Columns...),
-	})
-	require.NoError(t, err)
-
-	expectedIDMap := map[int64]struct{}{}
-	for _, r := range expectedRows {
-		id, ok := r.GetValue("id")
-		require.True(t, ok)
-		expectedIDMap[id.Value.(int64)] = struct{}{}
-	}
-
-	var actual []Row
-	for selectResult.Rows.Next(ctx) {
-		row := selectResult.Rows.Row()
-		actual = append(actual, row)
-		if len(expectedIDMap) > 0 {
-			_, ok := expectedIDMap[row.Values[0].Value.(int64)]
-			assert.True(t, ok)
-		}
-	}
-	require.NoError(t, selectResult.Rows.Err())
-
-	require.Len(t, actual, len(expectedRows))
-	for i := range len(expectedRows) {
-		assert.Equal(t, expectedRows[i].Key, actual[i].Key, "row key %d does not match expected %d", i)
-		assert.Equal(t, expectedRows[i].Columns, actual[i].Columns, "row columns %d does not match expected", i)
-		// Compare values, for text values, we don't want to compare pointers to overflow pages
-		for j, val := range expectedRows[i].Values {
-			tp, ok := val.Value.(TextPointer)
-			if ok {
-				assert.Equal(t, int(tp.Length), int(actual[i].Values[j].Value.(TextPointer).Length), "row %d text pointer length %d does not match expected", i, j)
-				assert.Equal(t, tp.Data, actual[i].Values[j].Value.(TextPointer).Data, "row %d text pointer data %d does not match expected", i, j)
-			} else {
-				assert.Equal(t, actual[i].Values[j], expectedRows[i].Values[j], "row %d value %d does not match expected", i, j)
-			}
-		}
-		assert.Equal(t, expectedRows[i].NullBitmask(), actual[i].NullBitmask(), "row %d null bitmask does not match expected", i)
-	}
-}

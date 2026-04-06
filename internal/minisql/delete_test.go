@@ -543,14 +543,3 @@ func rowIDs(rows ...Row) []any {
 	return ids
 }
 
-func mustDelete(ctx context.Context, t *testing.T, table *Table, txManager *TransactionManager, saver PageSaver, stmt Statement) StatementResult {
-	var result StatementResult
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		var err error
-		result, err = table.Delete(ctx, stmt)
-		return err
-	})
-	require.NoError(t, err)
-
-	return result
-}

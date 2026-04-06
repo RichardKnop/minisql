@@ -5,3 +5,4 @@ coverage.html
 test-output.txt
 .claude/settings.local.json
 .claude/worktrees/
+.vscode/

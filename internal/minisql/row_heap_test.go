@@ -5,6 +5,8 @@ import (
 )
 
 func TestRowHeap_Basic(t *testing.T) {
+	t.Parallel()
+
 	orderBy := []OrderBy{
 		{Field: Field{Name: "score"}, Direction: Asc},
 	}
@@ -42,6 +44,8 @@ func TestRowHeap_Basic(t *testing.T) {
 }
 
 func TestRowHeap_Descending(t *testing.T) {
+	t.Parallel()
+
 	orderBy := []OrderBy{
 		{Field: Field{Name: "score"}, Direction: Desc},
 	}
@@ -78,6 +82,8 @@ func TestRowHeap_Descending(t *testing.T) {
 }
 
 func TestRowHeap_LessThanMaxSize(t *testing.T) {
+	t.Parallel()
+
 	orderBy := []OrderBy{
 		{Field: Field{Name: "score"}, Direction: Asc},
 	}

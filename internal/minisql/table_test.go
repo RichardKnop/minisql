@@ -12,7 +12,6 @@ import (
 )
 
 const (
-	testTableName  = "test_table"
 	testTableName2 = "test_table_2"
 	testTableName3 = "test_table_3"
 )

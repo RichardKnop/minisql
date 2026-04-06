@@ -7,19 +7,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
 
 func TestTable_Select(t *testing.T) {
-	pager, dbFile := initTest(t)
-
+	table, txManager, _ := newTestTable(t, testColumns)
 	var (
-		ctx        = context.Background()
-		rows       = gen.Rows(38)
-		tablePager = pager.ForTable(testColumns)
-		txManager  = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		table      = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0, nil)
+		ctx  = context.Background()
+		rows = gen.Rows(38)
 	)
 
 	// Set some values to NULL so we can test selecting/filtering on NULLs
@@ -535,14 +529,10 @@ func TestTable_Select(t *testing.T) {
 }
 
 func TestTable_Select_Overflow(t *testing.T) {
+	table, txManager, _ := newTestTable(t, testOverflowColumns)
 	var (
-		pager, dbFile = initTest(t)
-		ctx           = context.Background()
-		tablePager    = pager.ForTable(testOverflowColumns)
-		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		table         = NewTable(testLogger, txPager, txManager, testTableName, testOverflowColumns, 0, nil)
-		rows          = gen.OverflowRows(3, []uint32{
+		ctx  = context.Background()
+		rows = gen.OverflowRows(3, []uint32{
 			MaxInlineVarchar,          // inline text
 			MaxInlineVarchar + 100,    // text overflows to 1 page
 			MaxOverflowPageData + 100, // text overflows to multiple pages
