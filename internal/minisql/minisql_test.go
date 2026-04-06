@@ -2,16 +2,26 @@ package minisql
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/brianvoe/gofakeit/v7"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/RichardKnop/minisql/internal/pkg/logging"
+)
+
+const (
+	testDBName    = "test_db"
+	testTableName = "test_table"
+	// testTableName2 / testTableName3 are used only in table_test.go so they stay there.
 )
 
 var (
@@ -789,5 +799,109 @@ func resetMocks(mocks ...*mock.Mock) {
 	for _, aMock := range mocks {
 		aMock.ExpectedCalls = nil
 		aMock.Calls = nil
+	}
+}
+
+// initTest creates a temp DB file + pager for a single test function.
+// It calls t.Parallel() and registers cleanup automatically.
+func initTest(t *testing.T) (*pagerImpl, *os.File) {
+	t.Helper()
+	t.Parallel()
+
+	tempFile, err := os.CreateTemp("", testDBName)
+	require.NoError(t, err)
+	t.Cleanup(func() { os.Remove(tempFile.Name()) })
+
+	pager, err := NewPager(tempFile, PageSize, 1000)
+	require.NoError(t, err)
+
+	return pager, tempFile
+}
+
+// mockPagerFactory returns a TxPagerFactory that always returns the given pager.
+func mockPagerFactory(pager Pager) TxPagerFactory {
+	return func(_ context.Context, _, _ string) (Pager, error) {
+		return pager, nil
+	}
+}
+
+// newTestTable creates a Table wired to a fresh transactional pager, calling
+// initTest internally (which calls t.Parallel()).  It returns the table, its
+// transaction manager, and the underlying pager (useful for low-level assertions).
+// Options are forwarded to NewTable.
+func newTestTable(t *testing.T, columns []Column, opts ...TableOption) (*Table, *TransactionManager, *pagerImpl) {
+	t.Helper()
+	pager, dbFile := initTest(t)
+	tablePager := pager.ForTable(columns)
+	txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
+	txPager := NewTransactionalPager(tablePager, txManager, testTableName, "")
+	table := NewTable(testLogger, txPager, txManager, testTableName, columns, 0, nil, opts...)
+	return table, txManager, pager
+}
+
+// mustInsert runs an INSERT inside a transaction and fails the test on any error.
+func mustInsert(ctx context.Context, t *testing.T, table *Table, txManager *TransactionManager, stmt Statement) {
+	t.Helper()
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		_, err := table.Insert(ctx, stmt)
+		return err
+	})
+	require.NoError(t, err)
+}
+
+// mustDelete runs a DELETE inside a transaction and fails the test on any error.
+func mustDelete(ctx context.Context, t *testing.T, table *Table, txManager *TransactionManager, _ PageSaver, stmt Statement) StatementResult {
+	t.Helper()
+	var result StatementResult
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = table.Delete(ctx, stmt)
+		return err
+	})
+	require.NoError(t, err)
+	return result
+}
+
+// checkRows selects all rows from table and asserts they match expectedRows (order-preserving).
+func checkRows(ctx context.Context, t *testing.T, table *Table, expectedRows []Row) {
+	t.Helper()
+	selectResult, err := table.Select(ctx, Statement{
+		Kind:   Select,
+		Fields: fieldsFromColumns(table.Columns...),
+	})
+	require.NoError(t, err)
+
+	expectedIDMap := map[int64]struct{}{}
+	for _, r := range expectedRows {
+		id, ok := r.GetValue("id")
+		require.True(t, ok)
+		expectedIDMap[id.Value.(int64)] = struct{}{}
+	}
+
+	var actual []Row
+	for selectResult.Rows.Next(ctx) {
+		row := selectResult.Rows.Row()
+		actual = append(actual, row)
+		if len(expectedIDMap) > 0 {
+			_, ok := expectedIDMap[row.Values[0].Value.(int64)]
+			assert.True(t, ok)
+		}
+	}
+	require.NoError(t, selectResult.Rows.Err())
+
+	require.Len(t, actual, len(expectedRows))
+	for i := range len(expectedRows) {
+		assert.Equal(t, expectedRows[i].Key, actual[i].Key, "row key %d does not match expected %d", i)
+		assert.Equal(t, expectedRows[i].Columns, actual[i].Columns, "row columns %d does not match expected", i)
+		for j, val := range expectedRows[i].Values {
+			tp, ok := val.Value.(TextPointer)
+			if ok {
+				assert.Equal(t, int(tp.Length), int(actual[i].Values[j].Value.(TextPointer).Length), "row %d text pointer length %d does not match expected", i, j)
+				assert.Equal(t, tp.Data, actual[i].Values[j].Value.(TextPointer).Data, "row %d text pointer data %d does not match expected", i, j)
+			} else {
+				assert.Equal(t, actual[i].Values[j], expectedRows[i].Values[j], "row %d value %d does not match expected", i, j)
+			}
+		}
+		assert.Equal(t, expectedRows[i].NullBitmask(), actual[i].NullBitmask(), "row %d null bitmask does not match expected", i)
 	}
 }

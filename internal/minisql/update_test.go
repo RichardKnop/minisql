@@ -9,15 +9,12 @@ import (
 	"go.uber.org/zap"
 )
 
+
 func TestTable_Update(t *testing.T) {
+	table, txManager, _ := newTestTable(t, testColumns)
 	var (
-		pager, dbFile = initTest(t)
-		ctx           = context.Background()
-		rows          = gen.Rows(38)
-		tablePager    = pager.ForTable(testColumns)
-		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-		txPager       = NewTransactionalPager(tablePager, txManager, testTableName, "")
-		table         = NewTable(testLogger, txPager, txManager, testTableName, testColumns, 0, nil)
+		ctx  = context.Background()
+		rows = gen.Rows(38)
 	)
 
 	// Batch insert test rows
@@ -182,8 +179,8 @@ func TestTable_Update(t *testing.T) {
 }
 
 func TestTable_Update_Overflow(t *testing.T) {
+	pager, dbFile := initTest(t)
 	var (
-		pager, dbFile = initTest(t)
 		ctx           = context.Background()
 		tablePager    = pager.ForTable(testOverflowColumns)
 		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)

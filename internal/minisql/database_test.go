@@ -2,7 +2,6 @@ package minisql
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,9 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const (
-	testDBName = "test_db"
-)
 
 func TestNewDatabase(t *testing.T) {
 	pager, dbFile := initTest(t)
@@ -537,19 +533,6 @@ func TestDatabase_CreateIndex(t *testing.T) {
 	mock.AssertExpectationsForObjects(t, mockParser)
 }
 
-func initTest(t *testing.T) (*pagerImpl, *os.File) {
-	t.Parallel()
-
-	tempFile, err := os.CreateTemp("", testDBName)
-	require.NoError(t, err)
-	t.Cleanup(func() { os.Remove(tempFile.Name()) })
-
-	pager, err := NewPager(tempFile, PageSize, 1000)
-	require.NoError(t, err)
-
-	return pager, tempFile
-}
-
 func collectMainSchemas(ctx context.Context, t *testing.T, aDatabase *Database) []Schema {
 	mainTable := aDatabase.tables[SchemaTableName]
 	schemaResults, err := mainTable.Select(ctx, Statement{
@@ -566,8 +549,3 @@ func collectMainSchemas(ctx context.Context, t *testing.T, aDatabase *Database) 
 	return schemas
 }
 
-func mockPagerFactory(pager Pager) TxPagerFactory {
-	return func(ctx context.Context, tableName, indexName string) (Pager, error) {
-		return pager, nil
-	}
-}
