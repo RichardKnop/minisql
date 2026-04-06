@@ -17,8 +17,6 @@ const (
 	JournalVersion = uint32(1)
 	// JournalHeaderSize is the byte size of the journal file header.
 	JournalHeaderSize = 29
-	// CommitMagic is a sentinel value written at the end of a journal to confirm a clean commit.
-	CommitMagic = uint32(0xDEADBEEF)
 )
 
 // RollbackJournal implements a write-ahead rollback journal for crash recovery.
@@ -109,7 +107,7 @@ func (j *RollbackJournal) WritePageBefore(ctx context.Context, pageIdx PageIndex
 	return nil
 }
 
-// Finalize updates the header with final page count and syncs the journal to disk.
+// Finalize updates the header with the final durable rollback metadata and syncs the journal to disk.
 func (j *RollbackJournal) Finalize(dbHeaderChanged bool, numPages int) error {
 	// Seek back to header
 	if _, err := j.file.Seek(0, io.SeekStart); err != nil {
@@ -121,7 +119,8 @@ func (j *RollbackJournal) Finalize(dbHeaderChanged bool, numPages int) error {
 		return fmt.Errorf("update header: %w", err)
 	}
 
-	// Sync journal to disk - CRITICAL for crash recovery
+	// Sync journal to disk - CRITICAL for crash recovery. A journal is only
+	// considered complete once this finalized header is durable.
 	if err := j.file.Sync(); err != nil {
 		return fmt.Errorf("sync journal: %w", err)
 	}
@@ -261,6 +260,11 @@ func RecoverFromJournal(dbPath string, pageSize int) (bool, error) {
 		return false, fmt.Errorf("sync database after recovery: %w", err)
 	}
 
+	// Reject journals whose actual size does not match the finalized header/body.
+	if err := validateJournalEOF(journalFile); err != nil {
+		return false, err
+	}
+
 	// Close files before deleting journal
 	journalFile.Close()
 	dbFile.Close()
@@ -301,4 +305,19 @@ func readJournalHeader(file *os.File) (*JournalHeader, error) {
 	}
 
 	return h, nil
+}
+
+func validateJournalEOF(file *os.File) error {
+	var extra [1]byte
+	n, err := file.Read(extra[:])
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("validate journal length: %w", err)
+	}
+	if n != 0 {
+		return errors.New("journal contains trailing data beyond finalized contents")
+	}
+	return nil
 }

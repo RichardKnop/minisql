@@ -2,6 +2,8 @@ package minisql
 
 import (
 	"context"
+	"hash/crc32"
+	"io"
 	"os"
 	"testing"
 
@@ -247,5 +249,224 @@ func TestJournal_WithDBHeader(t *testing.T) {
 		// DB header should match original header
 		restoredDBHeader := tablePager.GetHeader(ctx)
 		assert.Equal(t, originalDBHeader, restoredDBHeader)
+	})
+}
+
+func TestReadJournalHeader_Validation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("truncated header returns error", func(t *testing.T) {
+		tempFile, err := os.CreateTemp("", testDBName)
+		require.NoError(t, err)
+		defer os.Remove(tempFile.Name())
+
+		_, err = tempFile.Write([]byte("short"))
+		require.NoError(t, err)
+		_, err = tempFile.Seek(0, io.SeekStart)
+		require.NoError(t, err)
+
+		_, err = readJournalHeader(tempFile)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "read header")
+	})
+
+	t.Run("invalid magic returns error", func(t *testing.T) {
+		tempFile, err := os.CreateTemp("", testDBName)
+		require.NoError(t, err)
+		defer os.Remove(tempFile.Name())
+
+		header := make([]byte, JournalHeaderSize)
+		copy(header[0:8], []byte("invalid\n"))
+		marshalUint32(header, JournalVersion, 8)
+		marshalUint32(header, PageSize, 12)
+		marshalBool(header, false, 16)
+		marshalUint32(header, 0, 17)
+		marshalUint32(header, crc32.ChecksumIEEE(header[0:21]), 21)
+
+		_, err = tempFile.Write(header)
+		require.NoError(t, err)
+		_, err = tempFile.Seek(0, io.SeekStart)
+		require.NoError(t, err)
+
+		_, err = readJournalHeader(tempFile)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "invalid journal magic")
+	})
+
+	t.Run("checksum mismatch returns error", func(t *testing.T) {
+		tempFile, err := os.CreateTemp("", testDBName)
+		require.NoError(t, err)
+		defer os.Remove(tempFile.Name())
+
+		header := make([]byte, JournalHeaderSize)
+		copy(header[0:8], []byte(JournalMagic))
+		marshalUint32(header, JournalVersion, 8)
+		marshalUint32(header, PageSize, 12)
+		marshalBool(header, false, 16)
+		marshalUint32(header, 1, 17)
+		marshalUint32(header, 12345, 21)
+
+		_, err = tempFile.Write(header)
+		require.NoError(t, err)
+		_, err = tempFile.Seek(0, io.SeekStart)
+		require.NoError(t, err)
+
+		_, err = readJournalHeader(tempFile)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "checksum mismatch")
+	})
+}
+
+func TestRecoverFromJournal_ErrorCases(t *testing.T) {
+	t.Parallel()
+
+	t.Run("page size mismatch returns error", func(t *testing.T) {
+		dbFile, err := os.CreateTemp("", testDBName)
+		require.NoError(t, err)
+		defer os.Remove(dbFile.Name())
+
+		journal, err := CreateJournal(dbFile.Name(), PageSize)
+		require.NoError(t, err)
+		require.NoError(t, journal.Close())
+
+		recovered, err := RecoverFromJournal(dbFile.Name(), PageSize/2)
+		require.Error(t, err)
+		assert.False(t, recovered)
+		assert.ErrorContains(t, err, "journal page size mismatch")
+	})
+
+	t.Run("truncated journal body returns error", func(t *testing.T) {
+		dbFile, err := os.CreateTemp("", testDBName)
+		require.NoError(t, err)
+		defer os.Remove(dbFile.Name())
+
+		journalPath := dbFile.Name() + "-journal"
+		journalFile, err := os.OpenFile(journalPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+		require.NoError(t, err)
+		defer os.Remove(journalPath)
+
+		header := make([]byte, JournalHeaderSize)
+		copy(header[0:8], []byte(JournalMagic))
+		marshalUint32(header, JournalVersion, 8)
+		marshalUint32(header, PageSize, 12)
+		marshalBool(header, false, 16)
+		marshalUint32(header, 1, 17)
+		marshalUint32(header, crc32.ChecksumIEEE(header[0:21]), 21)
+
+		_, err = journalFile.Write(header)
+		require.NoError(t, err)
+		_, err = journalFile.Write(marshalUint32(make([]byte, 4), 0, 0))
+		require.NoError(t, err)
+		// Deliberately omit page body
+		require.NoError(t, journalFile.Close())
+
+		recovered, err := RecoverFromJournal(dbFile.Name(), PageSize)
+		require.Error(t, err)
+		assert.False(t, recovered)
+		assert.ErrorContains(t, err, "read page data")
+		_, statErr := os.Stat(journalPath)
+		assert.NoError(t, statErr, "journal should remain for inspection after failed recovery")
+	})
+
+	t.Run("trailing journal data returns error", func(t *testing.T) {
+		dbFile, err := os.CreateTemp("", testDBName)
+		require.NoError(t, err)
+		defer os.Remove(dbFile.Name())
+
+		journal, err := CreateJournal(dbFile.Name(), PageSize)
+		require.NoError(t, err)
+		require.NoError(t, journal.Finalize(false, 0))
+		_, err = journal.file.Write([]byte{0xAA})
+		require.NoError(t, err)
+		require.NoError(t, journal.Close())
+		defer os.Remove(dbFile.Name() + "-journal")
+
+		recovered, err := RecoverFromJournal(dbFile.Name(), PageSize)
+		require.Error(t, err)
+		assert.False(t, recovered)
+		assert.ErrorContains(t, err, "trailing data")
+		_, statErr := os.Stat(dbFile.Name() + "-journal")
+		assert.NoError(t, statErr, "journal should remain for inspection after failed recovery")
+	})
+
+	t.Run("truncated db header payload returns error", func(t *testing.T) {
+		dbFile, err := os.CreateTemp("", testDBName)
+		require.NoError(t, err)
+		defer os.Remove(dbFile.Name())
+
+		journalPath := dbFile.Name() + "-journal"
+		journalFile, err := os.OpenFile(journalPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+		require.NoError(t, err)
+		defer os.Remove(journalPath)
+
+		header := make([]byte, JournalHeaderSize)
+		copy(header[0:8], []byte(JournalMagic))
+		marshalUint32(header, JournalVersion, 8)
+		marshalUint32(header, PageSize, 12)
+		marshalBool(header, true, 16)
+		marshalUint32(header, 0, 17)
+		marshalUint32(header, crc32.ChecksumIEEE(header[0:21]), 21)
+
+		_, err = journalFile.Write(header)
+		require.NoError(t, err)
+		_, err = journalFile.Write(make([]byte, RootPageConfigSize/2))
+		require.NoError(t, err)
+		require.NoError(t, journalFile.Close())
+
+		recovered, err := RecoverFromJournal(dbFile.Name(), PageSize)
+		require.Error(t, err)
+		assert.False(t, recovered)
+		assert.ErrorContains(t, err, "read db header")
+	})
+
+	t.Run("missing database file returns error", func(t *testing.T) {
+		dbFile, err := os.CreateTemp("", testDBName)
+		require.NoError(t, err)
+		dbPath := dbFile.Name()
+		require.NoError(t, dbFile.Close())
+		require.NoError(t, os.Remove(dbPath))
+
+		journal, err := CreateJournal(dbPath, PageSize)
+		require.NoError(t, err)
+		require.NoError(t, journal.Close())
+		defer os.Remove(dbPath + "-journal")
+
+		recovered, err := RecoverFromJournal(dbPath, PageSize)
+		require.Error(t, err)
+		assert.False(t, recovered)
+		assert.ErrorContains(t, err, "open database for recovery")
+	})
+}
+
+func TestValidateJournalEOF(t *testing.T) {
+	t.Parallel()
+
+	t.Run("clean eof is accepted", func(t *testing.T) {
+		tempFile, err := os.CreateTemp("", testDBName)
+		require.NoError(t, err)
+		defer os.Remove(tempFile.Name())
+
+		_, err = tempFile.Write([]byte("ok"))
+		require.NoError(t, err)
+		_, err = tempFile.Seek(2, io.SeekStart)
+		require.NoError(t, err)
+
+		err = validateJournalEOF(tempFile)
+		require.NoError(t, err)
+	})
+
+	t.Run("extra bytes are rejected", func(t *testing.T) {
+		tempFile, err := os.CreateTemp("", testDBName)
+		require.NoError(t, err)
+		defer os.Remove(tempFile.Name())
+
+		_, err = tempFile.Write([]byte("extra"))
+		require.NoError(t, err)
+		_, err = tempFile.Seek(4, io.SeekStart)
+		require.NoError(t, err)
+
+		err = validateJournalEOF(tempFile)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "trailing data")
 	})
 }
