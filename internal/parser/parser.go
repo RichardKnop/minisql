@@ -17,6 +17,7 @@ var (
 	errEmptyStatementKind   = errors.New("statement kind cannot be empty")
 	errEmptyTableName       = errors.New("table name cannot be empty")
 	errEmptyIndexName       = errors.New("index name cannot be empty")
+	errEmptyPragmaName      = errors.New("pragma name cannot be empty")
 )
 
 var (
@@ -42,6 +43,7 @@ var reservedWords = []string{
 	"IS NULL", "IS NOT NULL", "NOT BETWEEN", "NOT LIKE", "BETWEEN", "LIKE", "TRUE", "FALSE", "NOW()",
 	"IF NOT EXISTS", "WHERE", "FROM", "SET", "ASC", "DESC", "AS",
 	"BEGIN", "COMMIT", "ROLLBACK", "ANALYZE", "VACUUM",
+	"PRAGMA",
 	"INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "ON CONFLICT", "ON",
 	"DO UPDATE", "DO NOTHING",
 	"DISTINCT",
@@ -120,6 +122,7 @@ const (
 	stepSelectOffset
 	stepWhere
 	stepAnalyze
+	stepPragma
 	stepStatementEnd
 )
 
@@ -200,6 +203,10 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 				p.Kind = minisql.Vacuum
 				p.pop()
 				p.step = stepStatementEnd
+			case "PRAGMA":
+				p.Kind = minisql.Pragma
+				p.pop()
+				p.step = stepPragma
 			default:
 				return statements, p.wrapErr(errInvalidStatementKind)
 			}
@@ -329,6 +336,10 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 		//------------------
 		case stepAnalyze:
 			if err := p.doParseAnalyze(); err != nil {
+				return statements, err
+			}
+		case stepPragma:
+			if err := p.doParsePragma(); err != nil {
 				return statements, err
 			}
 		case stepStatementEnd:
@@ -540,7 +551,7 @@ func (p *parserItem) validate(stmt minisql.Statement) error {
 		if stmt.Kind == minisql.CreateIndex && len(stmt.Columns) == 0 {
 			return errCreateIndexNoColumns
 		}
-	} else if stmt.TableName == "" && stmt.Kind != minisql.Analyze && stmt.Kind != minisql.Vacuum {
+	} else if stmt.TableName == "" && stmt.Kind != minisql.Analyze && stmt.Kind != minisql.Vacuum && stmt.Kind != minisql.Pragma {
 		return errEmptyTableName
 	}
 	if stmt.Kind == minisql.CreateTable {

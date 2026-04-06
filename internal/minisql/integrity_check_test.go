@@ -49,6 +49,41 @@ func TestDatabase_QuickCheck(t *testing.T) {
 		assert.Contains(t, issueCodes(report), "free_list_page_not_free")
 	})
 
+	t.Run("free list head out of range is reported", func(t *testing.T) {
+		pager, dbFile := initTest(t)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		require.NoError(t, err)
+
+		pager.dbHeader.FirstFreePage = PageIndex(99)
+
+		report, err := db.QuickCheck(context.Background())
+		require.NoError(t, err)
+		assert.False(t, report.Ok())
+		assert.Contains(t, issueCodes(report), "free_list_head_out_of_range")
+	})
+
+	t.Run("free list cycle is reported", func(t *testing.T) {
+		pager, dbFile := initTest(t)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		require.NoError(t, err)
+
+		for len(pager.pages) <= 1 {
+			pager.pages = append(pager.pages, nil)
+		}
+		pager.pages[1] = &Page{
+			Index:    1,
+			FreePage: &FreePage{NextFreePage: 1},
+		}
+		pager.totalPages = 2
+		pager.dbHeader.FirstFreePage = 1
+		pager.dbHeader.FreePageCount = 1
+
+		report, err := db.QuickCheck(context.Background())
+		require.NoError(t, err)
+		assert.False(t, report.Ok())
+		assert.Contains(t, issueCodes(report), "free_list_cycle")
+	})
+
 	t.Run("invalid table root page type is reported", func(t *testing.T) {
 		pager, dbFile := initTest(t)
 		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
@@ -64,6 +99,125 @@ func TestDatabase_QuickCheck(t *testing.T) {
 		assert.False(t, report.Ok())
 		assert.Contains(t, issueCodes(report), "table_root_invalid_type")
 	})
+
+	t.Run("table root out of range is reported", func(t *testing.T) {
+		pager, dbFile := initTest(t)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		require.NoError(t, err)
+
+		db.tables["users"] = NewTable(
+			testLogger,
+			NewTransactionalPager(pager.ForTable(testColumns[:1]), db.txManager, "users", ""),
+			db.txManager,
+			"users",
+			testColumns[:1],
+			5,
+			db.lockedProvider,
+		)
+
+		report, err := db.QuickCheck(context.Background())
+		require.NoError(t, err)
+		assert.False(t, report.Ok())
+		assert.Contains(t, issueCodes(report), "table_root_out_of_range")
+	})
+
+	t.Run("index roots are checked", func(t *testing.T) {
+		pager, dbFile := initTest(t)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		require.NoError(t, err)
+
+		addQuickCheckTestTableWithSecondaryIndex(db, pager, testTableName, 1, "test_table_email_idx", 2)
+
+		report, err := db.QuickCheck(context.Background())
+		require.NoError(t, err)
+		assert.True(t, report.Ok())
+		assert.GreaterOrEqual(t, report.CheckedRootPages, 3)
+	})
+}
+
+func TestDatabase_IntegrityCheck(t *testing.T) {
+	t.Parallel()
+
+	t.Run("orphan page is reported", func(t *testing.T) {
+		pager, dbFile := initTest(t)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		require.NoError(t, err)
+
+		orphanPageIdx := PageIndex(1)
+		for len(pager.pages) <= int(orphanPageIdx) {
+			pager.pages = append(pager.pages, nil)
+		}
+		pager.pages[orphanPageIdx] = &Page{
+			Index: orphanPageIdx,
+			LeafNode: &LeafNode{
+				Header: LeafNodeHeader{
+					Header: Header{IsRoot: true},
+				},
+			},
+		}
+		pager.totalPages = 2
+
+		report, err := db.IntegrityCheck(context.Background())
+		require.NoError(t, err)
+		assert.False(t, report.Ok())
+		assert.Contains(t, issueCodes(report), "orphan_page")
+	})
+
+	t.Run("page reachable from multiple objects is reported", func(t *testing.T) {
+		pager, dbFile := initTest(t)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		require.NoError(t, err)
+
+		addQuickCheckTestTable(db, pager, "users", 1)
+		addQuickCheckTestTable(db, pager, "orders", 1)
+
+		report, err := db.IntegrityCheck(context.Background())
+		require.NoError(t, err)
+		assert.False(t, report.Ok())
+		assert.Contains(t, issueCodes(report), "page_reachable_from_multiple_objects")
+	})
+
+	t.Run("table page out of range is reported", func(t *testing.T) {
+		pager, dbFile := initTest(t)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		require.NoError(t, err)
+
+		rootPageIdx := PageIndex(1)
+		addQuickCheckTestTable(db, pager, "users", rootPageIdx)
+		pager.pages[rootPageIdx] = &Page{
+			Index: rootPageIdx,
+			InternalNode: &InternalNode{
+				Header: InternalNodeHeader{
+					Header: Header{IsRoot: true},
+					KeysNum: 1,
+					RightChild: RightChildNotSet,
+				},
+				ICells: [InternalNodeMaxCells]ICell{
+					{Child: 99},
+				},
+			},
+		}
+		pager.totalPages = 2
+
+		report, err := db.IntegrityCheck(context.Background())
+		require.NoError(t, err)
+		assert.False(t, report.Ok())
+		assert.Contains(t, issueCodes(report), "table_internal_missing_right_child")
+		assert.Contains(t, issueCodes(report), "table_page_out_of_range")
+	})
+
+	t.Run("index pages are traversed", func(t *testing.T) {
+		pager, dbFile := initTest(t)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		require.NoError(t, err)
+
+		addQuickCheckTestTableWithSecondaryIndex(db, pager, testTableName, 1, "test_table_email_idx", 2)
+
+		report, err := db.IntegrityCheck(context.Background())
+		require.NoError(t, err)
+		assert.True(t, report.Ok())
+		assert.Greater(t, report.CheckedLivePages, 0)
+	})
 }
 
 func issueCodes(report IntegrityReport) []string {
@@ -75,6 +229,14 @@ func issueCodes(report IntegrityReport) []string {
 }
 
 func addQuickCheckTestTable(db *Database, pager *pagerImpl, name string, rootPageIdx PageIndex) *Table {
+	return addQuickCheckTestTableWithColumns(db, pager, name, rootPageIdx, []Column{{
+		Kind: Int8,
+		Size: 8,
+		Name: "id",
+	}})
+}
+
+func addQuickCheckTestTableWithColumns(db *Database, pager *pagerImpl, name string, rootPageIdx PageIndex, columns []Column) *Table {
 	for len(pager.pages) <= int(rootPageIdx) {
 		pager.pages = append(pager.pages, nil)
 	}
@@ -92,11 +254,6 @@ func addQuickCheckTestTable(db *Database, pager *pagerImpl, name string, rootPag
 		pager.totalPages = uint32(rootPageIdx) + 1
 	}
 
-	columns := []Column{{
-		Kind: Int8,
-		Size: 8,
-		Name: "id",
-	}}
 	table := NewTable(
 		testLogger,
 		NewTransactionalPager(pager.ForTable(columns), db.txManager, name, ""),
@@ -107,5 +264,50 @@ func addQuickCheckTestTable(db *Database, pager *pagerImpl, name string, rootPag
 		db.lockedProvider,
 	)
 	db.tables[name] = table
+	return table
+}
+
+func addQuickCheckTestTableWithSecondaryIndex(db *Database, pager *pagerImpl, tableName string, tableRootPageIdx PageIndex, indexName string, indexRootPageIdx PageIndex) *Table {
+	columns := []Column{
+		{
+			Kind: Int8,
+			Size: 8,
+			Name: "id",
+		},
+		{
+			Kind:     Varchar,
+			Size:     MaxInlineVarchar,
+			Name:     "email",
+			Nullable: true,
+		},
+	}
+	table := addQuickCheckTestTableWithColumns(db, pager, tableName, tableRootPageIdx, columns)
+
+	for len(pager.pages) <= int(indexRootPageIdx) {
+		pager.pages = append(pager.pages, nil)
+	}
+	indexNode := NewIndexNode[string](false)
+	indexNode.Header.IsRoot = true
+	indexNode.Header.IsLeaf = true
+	pager.pages[indexRootPageIdx] = &Page{
+		Index:     indexRootPageIdx,
+		IndexNode: indexNode,
+	}
+	if pager.totalPages <= uint32(indexRootPageIdx) {
+		pager.totalPages = uint32(indexRootPageIdx) + 1
+	}
+
+	index, err := NewNonUniqueIndex[string](
+		testLogger,
+		db.txManager,
+		indexName,
+		columns[1:2],
+		NewTransactionalPager(pager.ForIndex(columns[1:2], false), db.txManager, tableName, indexName),
+		indexRootPageIdx,
+	)
+	if err != nil {
+		panic(err)
+	}
+	table.SetSecondaryIndex(indexName, columns[1:2], index)
 	return table
 }

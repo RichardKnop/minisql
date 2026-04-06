@@ -298,6 +298,9 @@ Important behavior and current non-goals:
 | `ORDER BY` | Single column only |
 | `GROUP BY` and `HAVING` | Aggregate functions: `COUNT`, `MAX`, `MIN`, `SUM`, `AVG` |
 | `VACUUM` | Rebuilds the database file, repacking it into a minimal amount of disk space (similar to SQLite) |
+| `PRAGMA quick_check` | A cheap structural health check of the open database. |
+| `PRAGMA integrity_check` | A deeper structural walk of the database file, only do offline when database is not being used by clients |
+
 
 Prepared statements are supported using `?` as a placeholder. For example:
 
