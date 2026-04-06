@@ -40,6 +40,7 @@ const (
 	RollbackTransaction
 	Analyze
 	Vacuum
+	Pragma
 )
 
 func (s StatementKind) String() string {
@@ -70,6 +71,8 @@ func (s StatementKind) String() string {
 		return "ANALYZE"
 	case Vacuum:
 		return "VACUUM"
+	case Pragma:
+		return "PRAGMA"
 	default:
 		return "UNKNOWN"
 	}
@@ -314,6 +317,7 @@ type Statement struct {
 	Joins         []Join
 	IndexName     string        // for CREATE/DROP INDEX
 	Target        string        // for ANALYZE
+	PragmaName    string        // for PRAGMA
 	Columns       []Column      // use for CREATE TABLE
 	PrimaryKey    PrimaryKey    // use for CREATE TABLE
 	UniqueIndexes []UniqueIndex // use for CREATE TABLE
@@ -391,6 +395,7 @@ func (s Statement) Clone() Statement {
 		IfNotExists:    s.IfNotExists,
 		TableName:      s.TableName,
 		IndexName:      s.IndexName,
+		PragmaName:     s.PragmaName,
 		ConflictAction: s.ConflictAction,
 		Columns:        s.Columns,
 		Distinct:       s.Distinct,
@@ -547,7 +552,7 @@ func (s Statement) HasField(name string) bool {
 
 // ReadOnly ...
 func (s Statement) ReadOnly() bool {
-	return s.Kind == Select
+	return s.Kind == Select || s.Kind == Pragma
 }
 
 // IsDDL ...
@@ -855,12 +860,21 @@ func (s Statement) Validate(table *Table) error {
 		return s.validateCreateIndex(table)
 	case DropIndex:
 		return s.validateDropIndex()
+	case Pragma:
+		return s.validatePragma()
 	}
 
 	if err := s.validateWhere(); err != nil {
 		return err
 	}
 
+	return nil
+}
+
+func (s Statement) validatePragma() error {
+	if s.PragmaName == "" {
+		return errors.New("pragma name is required")
+	}
 	return nil
 }
 

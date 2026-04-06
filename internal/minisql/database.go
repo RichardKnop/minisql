@@ -289,6 +289,8 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 		// manager on completion, so it must not go through the normal DDL
 		// path (which would deadlock by re-acquiring dbLock).
 		return StatementResult{}, d.Vacuum(ctx)
+	case Pragma:
+		return d.executePragmaStatement(ctx, stmt)
 	case CreateTable, DropTable, CreateIndex, DropIndex:
 		return d.executeDDLStatement(ctx, stmt)
 	case Insert, Select, Update, Delete:
