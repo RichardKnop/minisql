@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -217,6 +218,116 @@ func TestDatabase_IntegrityCheck(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, report.Ok())
 		assert.Greater(t, report.CheckedLivePages, 0)
+	})
+
+	t.Run("missing unique index entry is reported", func(t *testing.T) {
+		pager, dbFile := initTest(t)
+		mockParser := new(MockParser)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), mockParser, pager, pager)
+		require.NoError(t, err)
+
+		createTableStmt := Statement{
+			Kind:      CreateTable,
+			TableName: testTableName,
+			Columns:   append([]Column{}, testColumns[:2]...),
+			UniqueIndexes: []UniqueIndex{
+				{
+					IndexInfo: IndexInfo{
+						Name:    UniqueIndexName(testTableName, "email"),
+						Columns: testColumns[1:2],
+					},
+				},
+			},
+		}
+		mockParser.EXPECT().Parse(mock.Anything, createTableStmt.DDL()).Return([]Statement{createTableStmt}, nil).Once()
+
+		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
+			_, err := db.ExecuteStatement(ctx, createTableStmt)
+			return err
+		})
+		require.NoError(t, err)
+
+		insertStmt := Statement{
+			Kind:      Insert,
+			TableName: testTableName,
+			Fields: []Field{
+				{Name: "email"},
+			},
+			Inserts: [][]OptionalValue{{
+				{Value: NewTextPointer([]byte("alice@example.com")), Valid: true},
+			}},
+		}
+		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
+			_, err := db.tables[testTableName].Insert(ctx, insertStmt)
+			return err
+		})
+		require.NoError(t, err)
+
+		uniqueIndex := db.tables[testTableName].UniqueIndexes[UniqueIndexName(testTableName, "email")]
+		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
+			return uniqueIndex.Index.Delete(ctx, "alice@example.com", 1)
+		})
+		require.NoError(t, err)
+
+		report, err := db.IntegrityCheck(context.Background())
+		require.NoError(t, err)
+		assert.Contains(t, issueCodes(report), "index_missing_entry")
+	})
+
+	t.Run("orphan secondary index entry is reported", func(t *testing.T) {
+		pager, dbFile := initTest(t)
+		mockParser := new(MockParser)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), mockParser, pager, pager)
+		require.NoError(t, err)
+
+		createTableStmt := Statement{
+			Kind:      CreateTable,
+			TableName: testTableName,
+			Columns:   append([]Column{}, testColumns[:2]...),
+		}
+		createIndexStmt := Statement{
+			Kind:      CreateIndex,
+			TableName: testTableName,
+			IndexName: "idx_email",
+			Columns:   testColumns[1:2],
+		}
+		mockParser.EXPECT().Parse(mock.Anything, createTableStmt.DDL()).Return([]Statement{createTableStmt}, nil).Once()
+
+		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
+			_, err := db.ExecuteStatement(ctx, createTableStmt)
+			if err != nil {
+				return err
+			}
+			_, err = db.ExecuteStatement(ctx, createIndexStmt)
+			return err
+		})
+		require.NoError(t, err)
+
+		insertStmt := Statement{
+			Kind:      Insert,
+			TableName: testTableName,
+			Fields: []Field{
+				{Name: "email"},
+			},
+			Inserts: [][]OptionalValue{{
+				{Value: NewTextPointer([]byte("alice@example.com")), Valid: true},
+			}},
+		}
+		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
+			_, err := db.tables[testTableName].Insert(ctx, insertStmt)
+			return err
+		})
+		require.NoError(t, err)
+
+		secondaryIndex := db.tables[testTableName].SecondaryIndexes["idx_email"]
+		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
+			return secondaryIndex.Index.Insert(ctx, "ghost@example.com", 999)
+		})
+		require.NoError(t, err)
+
+		report, err := db.IntegrityCheck(context.Background())
+		require.NoError(t, err)
+		assert.Contains(t, issueCodes(report), "index_orphan_entry")
 	})
 }
 
