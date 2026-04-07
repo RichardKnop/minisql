@@ -29,10 +29,10 @@ type TransactionManager struct {
 type commitPhase string
 
 const (
-	commitPhaseBeforeJournalFinalize    commitPhase = "before_journal_finalize"
-	commitPhaseAfterJournalFinalize     commitPhase = "after_journal_finalize"
-	commitPhaseBeforeFlush              commitPhase = "before_flush"
-	commitPhaseAfterFlushBeforeDelete   commitPhase = "after_flush_before_delete"
+	commitPhaseBeforeJournalFinalize  commitPhase = "before_journal_finalize"
+	commitPhaseAfterJournalFinalize   commitPhase = "after_journal_finalize"
+	commitPhaseBeforeFlush            commitPhase = "before_flush"
+	commitPhaseAfterFlushBeforeDelete commitPhase = "after_flush_before_delete"
 )
 
 // NewTransactionManager creates and returns a new TransactionManager.
