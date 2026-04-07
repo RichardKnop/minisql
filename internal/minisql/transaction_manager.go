@@ -23,7 +23,17 @@ type TransactionManager struct {
 	factory               TxPagerFactory
 	saver                 PageSaver
 	ddlSaver              DDLSaver
+	commitHook            func(commitPhase)
 }
+
+type commitPhase string
+
+const (
+	commitPhaseBeforeJournalFinalize    commitPhase = "before_journal_finalize"
+	commitPhaseAfterJournalFinalize     commitPhase = "after_journal_finalize"
+	commitPhaseBeforeFlush              commitPhase = "before_flush"
+	commitPhaseAfterFlushBeforeDelete   commitPhase = "after_flush_before_delete"
+)
 
 // NewTransactionManager creates and returns a new TransactionManager.
 func NewTransactionManager(logger *zap.Logger, dbFilePath string, factory TxPagerFactory, saver PageSaver, ddlSaver DDLSaver) *TransactionManager {
@@ -179,9 +189,11 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		}
 
 		// Finalize journal header with page count and sync to disk
+		tm.runCommitHook(commitPhaseBeforeJournalFinalize)
 		if err := journal.Finalize(dbHeaderChanged, numJournaledPages); err != nil {
 			return fmt.Errorf("finalize journal: %w", err)
 		}
+		tm.runCommitHook(commitPhaseAfterJournalFinalize)
 	}
 
 	// === PHASE 2: Apply Writes to In-Memory Pages ===
@@ -212,6 +224,7 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 	// We MUST panic to force restart and journal recovery
 	//
 	// Use batch flush to reduce syscalls and improve I/O performance
+	tm.runCommitHook(commitPhaseBeforeFlush)
 	if err := tm.saver.FlushBatch(ctx, pagesToFlush); err != nil {
 		// FATAL: Cannot continue with partially-flushed transaction
 		// In-memory state is corrupted and doesn't match disk
@@ -227,6 +240,7 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 	// === PHASE 4: Delete Journal (Atomic Commit Point) ===
 	// Once all pages are safely on disk, delete the journal
 	// This is the atomic commit point - after this, the transaction is committed
+	tm.runCommitHook(commitPhaseAfterFlushBeforeDelete)
 	if journal != nil {
 		if err := journal.Delete(); err != nil {
 			// Database is consistent, journal deletion is non-critical
@@ -250,6 +264,12 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 	tm.logger.Debug("commit transaction", zap.Uint64("tx_id", uint64(tx.ID)))
 
 	return nil
+}
+
+func (tm *TransactionManager) runCommitHook(phase commitPhase) {
+	if tm.commitHook != nil {
+		tm.commitHook(phase)
+	}
 }
 
 // RollbackTransaction aborts the transaction and discards all in-memory changes.
