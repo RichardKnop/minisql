@@ -126,8 +126,7 @@ const (
 	stepStatementEnd
 )
 
-type parser struct {
-}
+type parser struct{}
 
 type parserItem struct {
 	minisql.Statement
@@ -145,7 +144,6 @@ func New() *parser {
 
 // Parse parses the given SQL string and returns a slice of statements.
 func (p *parser) Parse(ctx context.Context, sql string) ([]minisql.Statement, error) {
-
 	item := &parserItem{
 		sql:  strings.Join(strings.Fields(sql), " "),
 		step: stepBeginning,
@@ -394,6 +392,7 @@ func (p *parserItem) popWhitespace() {
 		p.i++
 	}
 }
+
 func (p *parserItem) peekWithLength() (string, int) {
 	if p.i >= len(p.sql) {
 		return "", 0
