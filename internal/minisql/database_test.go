@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-
 func TestNewDatabase(t *testing.T) {
 	pager, dbFile := initTest(t)
 
@@ -548,4 +547,3 @@ func collectMainSchemas(ctx context.Context, t *testing.T, aDatabase *Database) 
 	require.NoError(t, schemaResults.Rows.Err())
 	return schemas
 }
-

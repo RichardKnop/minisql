@@ -353,4 +353,3 @@ func TestTable_Insert_Overflow(t *testing.T) {
 		assert.Equal(t, 100, int(pager.pages[3].OverflowPage.Header.DataSize))
 	})
 }
-

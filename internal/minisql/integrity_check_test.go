@@ -189,8 +189,8 @@ func TestDatabase_IntegrityCheck(t *testing.T) {
 			Index: rootPageIdx,
 			InternalNode: &InternalNode{
 				Header: InternalNodeHeader{
-					Header: Header{IsRoot: true},
-					KeysNum: 1,
+					Header:     Header{IsRoot: true},
+					KeysNum:    1,
 					RightChild: RightChildNotSet,
 				},
 				ICells: [InternalNodeMaxCells]ICell{

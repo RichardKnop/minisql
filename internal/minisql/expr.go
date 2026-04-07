@@ -11,9 +11,9 @@ type ArithOp int
 // ArithOp constants.
 const (
 	ArithAdd ArithOp = iota + 1 // +
-	ArithSub                     // -
-	ArithMul                     // *
-	ArithDiv                     // /
+	ArithSub                    // -
+	ArithMul                    // *
+	ArithDiv                    // /
 )
 
 func (op ArithOp) String() string {
@@ -37,8 +37,8 @@ func (op ArithOp) String() string {
 //   - Literal != nil:         a numeric literal (int64 or float64)
 //   - Left != nil && Op != 0: a binary operation
 type Expr struct {
-	Column  string  // column reference, may include alias prefix ("u.price")
-	Literal any     // int64 or float64
+	Column  string // column reference, may include alias prefix ("u.price")
+	Literal any    // int64 or float64
 	Left    *Expr
 	Right   *Expr
 	Op      ArithOp

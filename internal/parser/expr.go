@@ -111,4 +111,3 @@ func (p *parserItem) parseFactor() (*minisql.Expr, error) {
 
 	return nil, fmt.Errorf("unexpected token %q in arithmetic expression", token)
 }
-
