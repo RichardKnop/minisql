@@ -73,7 +73,22 @@ db, err := sql.Open("minisql", "/path/to/db.db?journal=true&log_level=info&max_c
 
 ##  Write-Ahead Rollback Journal
 
-MiniSQL uses a [rollback journal](https://sqlite.org/lockingv3.html#rollback) to achieve atomic commit and rollback . Before committing a transaction,a journal file with `-journal` suffix is created in the same directory as the database file. It contains original state of the pages (and database header if applicable) before the transaction began. In case of an error encountered during flushing of pages changed by the transaction to the disk, the database quits and recovers to original state before the transaction from the journal file.
+MiniSQL uses a [rollback journal](https://sqlite.org/lockingv3.html#rollback) to achieve atomic commit and rollback. Before committing a transaction, a journal file with `-journal` suffix is created in the same directory as the database file. It contains the original state of modified pages, and the original database header if the transaction changes it.
+
+Current recovery protocol:
+
+1. Write original page/header bytes into `{dbpath}-journal`.
+2. Finalize the journal header with the final page count and `Sync()` it to disk.
+3. Only then flush modified database pages to disk.
+4. Delete the journal after a clean commit.
+
+On startup, if a journal file exists, MiniSQL treats the finalized journal header as the completeness signal for recovery. Recovery only proceeds when:
+
+- the journal header magic/version/checksum are valid
+- the journal page size matches the database page size
+- the journal body is exactly as long as the finalized header says it should be
+
+If the journal is truncated, corrupt, or contains trailing bytes beyond the finalized contents, recovery fails closed and the journal file is left in place for inspection.
 
 ## Storage
 
@@ -299,7 +314,7 @@ Important behavior and current non-goals:
 | `GROUP BY` and `HAVING` | Aggregate functions: `COUNT`, `MAX`, `MIN`, `SUM`, `AVG` |
 | `VACUUM` | Rebuilds the database file, repacking it into a minimal amount of disk space (similar to SQLite) |
 | `PRAGMA quick_check` | A cheap structural health check of the open database. |
-| `PRAGMA integrity_check` | A deeper structural walk of the database file, only do offline when database is not being used by clients |
+| `PRAGMA integrity_check` | A deeper structural and logical check: page graph, overflow chains, and table/index consistency. Prefer offline use for large databases |
 
 
 Prepared statements are supported using `?` as a placeholder. For example:

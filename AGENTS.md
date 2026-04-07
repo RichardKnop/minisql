@@ -482,6 +482,7 @@ When adding filtering/transformation stages, insert them as goroutines between `
 - Current header contract: magic `minisql\0`, format version `1`, page size `4096`, first free page, free page count, then reserved bytes.
 - Opening a database now requires a valid header magic/version/page size; old header layouts are intentionally rejected during the unstable pre-1.0 period.
 - When changing the header format, update both `internal/minisql/config.go` and the storage-engine standards/docs in the same change.
+- Rollback-journal completeness currently relies on the finalized journal header plus exact file-length validation; there is no separate commit-magic/footer marker. Keep code, tests, README, and standards aligned if that protocol changes.
 
 ---
 
