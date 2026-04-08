@@ -32,16 +32,21 @@ func (op ArithOp) String() string {
 }
 
 // Expr is an arithmetic expression tree node.
-// Exactly one interpretation is active:
-//   - Column != "":           a column reference (read value from the row)
-//   - Literal != nil:         a numeric literal (int64 or float64)
-//   - Left != nil && Op != 0: a binary operation
+// Exactly one interpretation is active (checked in priority order):
+//   - FuncName != "":          a built-in function call (Args holds the arguments)
+//   - IsNull:                  an explicit NULL literal
+//   - Column != "":            a column reference (read value from the row)
+//   - Literal != nil:          a scalar literal (int64, float64, bool, TextPointer)
+//   - Left != nil && Op != 0:  a binary arithmetic operation
 type Expr struct {
-	Column  string // column reference, may include alias prefix ("u.price")
-	Literal any    // int64 or float64
-	Left    *Expr
-	Right   *Expr
-	Op      ArithOp
+	FuncName string  // built-in function name, e.g. "COALESCE", "NULLIF"
+	Args     []*Expr // function arguments (used when FuncName != "")
+	IsNull   bool    // true when this node represents an explicit SQL NULL literal
+	Column   string  // column reference, may include alias prefix ("u.price")
+	Literal  any     // int64, float64, bool, or TextPointer
+	Left     *Expr
+	Right    *Expr
+	Op       ArithOp
 }
 
 // String returns a human-readable representation suitable for use as a default column name.
@@ -52,6 +57,16 @@ func (e *Expr) String() string {
 func (e *Expr) str(nested bool) string {
 	if e == nil {
 		return ""
+	}
+	if e.FuncName != "" {
+		argStrs := make([]string, len(e.Args))
+		for i, arg := range e.Args {
+			argStrs[i] = arg.str(false)
+		}
+		return e.FuncName + "(" + strings.Join(argStrs, ", ") + ")"
+	}
+	if e.IsNull {
+		return "NULL"
 	}
 	if e.Column != "" {
 		return e.Column
@@ -71,6 +86,16 @@ func (e *Expr) Columns() []string {
 	if e == nil {
 		return nil
 	}
+	if e.FuncName != "" {
+		var cols []string
+		for _, arg := range e.Args {
+			cols = append(cols, arg.Columns()...)
+		}
+		return cols
+	}
+	if e.IsNull {
+		return nil
+	}
 	if e.Column != "" {
 		return []string{e.Column}
 	}
@@ -88,6 +113,16 @@ func (e *Expr) Columns() []string {
 // Returns float64 when either operand is float64.
 func (e *Expr) Eval(row Row) (any, error) {
 	if e == nil {
+		return nil, nil
+	}
+
+	// Function call
+	if e.FuncName != "" {
+		return e.evalFunc(row)
+	}
+
+	// Explicit NULL literal
+	if e.IsNull {
 		return nil, nil
 	}
 
@@ -167,6 +202,48 @@ func (e *Expr) Eval(row Row) (any, error) {
 		return lf / rf, nil
 	default:
 		return nil, fmt.Errorf("unknown arithmetic operator %d", e.Op)
+	}
+}
+
+// evalFunc evaluates a built-in function call against the given row.
+func (e *Expr) evalFunc(row Row) (any, error) {
+	switch e.FuncName {
+	case "COALESCE":
+		if len(e.Args) == 0 {
+			return nil, fmt.Errorf("COALESCE requires at least 1 argument")
+		}
+		for _, arg := range e.Args {
+			val, err := arg.Eval(row)
+			if err != nil {
+				return nil, err
+			}
+			if val != nil {
+				return val, nil
+			}
+		}
+		return nil, nil // all arguments were NULL
+	case "NULLIF":
+		if len(e.Args) != 2 {
+			return nil, fmt.Errorf("NULLIF requires exactly 2 arguments, got %d", len(e.Args))
+		}
+		a, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if a == nil {
+			// For example: NULLIF(NULL, x) = NULL
+			return nil, nil
+		}
+		b, err := e.Args[1].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if equalAny(a, b) {
+			return nil, nil // equal → return NULL
+		}
+		return a, nil
+	default:
+		return nil, fmt.Errorf("unknown function %q", e.FuncName)
 	}
 }
 

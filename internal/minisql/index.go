@@ -1,7 +1,6 @@
 package minisql
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -728,65 +727,5 @@ func (ui *Index[T]) merge(ctx context.Context, parent, left, right *Page, idx ui
 }
 
 func compare[T IndexKey](a, b T) int {
-	switch any(a).(type) {
-	case int8:
-		av := any(a).(int8)
-		bv := any(b).(int8)
-		if av < bv {
-			return -1
-		} else if av > bv {
-			return 1
-		}
-		return 0
-	case int32:
-		av := any(a).(int32)
-		bv := any(b).(int32)
-		if av < bv {
-			return -1
-		} else if av > bv {
-			return 1
-		}
-		return 0
-	case int64:
-		av := any(a).(int64)
-		bv := any(b).(int64)
-		if av < bv {
-			return -1
-		} else if av > bv {
-			return 1
-		}
-		return 0
-	case float32:
-		av := any(a).(float32)
-		bv := any(b).(float32)
-		if av < bv {
-			return -1
-		} else if av > bv {
-			return 1
-		}
-		return 0
-	case float64:
-		av := any(a).(float64)
-		bv := any(b).(float64)
-		if av < bv {
-			return -1
-		} else if av > bv {
-			return 1
-		}
-		return 0
-	case string:
-		av := any(a).(string)
-		bv := any(b).(string)
-		if av < bv {
-			return -1
-		} else if av > bv {
-			return 1
-		}
-		return 0
-	case CompositeKey:
-		av := any(a).(CompositeKey)
-		bv := any(b).(CompositeKey)
-		return bytes.Compare(av.Comparison, bv.Comparison)
-	}
-	return -1
+	return compareAny(any(a), any(b))
 }

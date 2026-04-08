@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
 )
@@ -90,7 +91,13 @@ func (p *parserItem) parseFactor() (*minisql.Expr, error) {
 		return expr, nil
 	}
 
-	// Numeric literal
+	// NULL literal
+	if token == "NULL" {
+		p.pop()
+		return &minisql.Expr{IsNull: true}, nil
+	}
+
+	// Scalar literals: integer, float, string, boolean
 	value, ln := p.peekValue()
 	if ln > 0 {
 		switch v := value.(type) {
@@ -100,14 +107,64 @@ func (p *parserItem) parseFactor() (*minisql.Expr, error) {
 		case float64:
 			p.pop()
 			return &minisql.Expr{Literal: v}, nil
+		case string:
+			p.pop()
+			return &minisql.Expr{Literal: minisql.NewTextPointer([]byte(v))}, nil
+		case bool:
+			p.pop()
+			return &minisql.Expr{Literal: v}, nil
 		}
 	}
 
-	// Column reference (possibly alias-prefixed, e.g. "u.price")
+	// Function call or column reference
 	if isIdentifier(token) {
+		upperToken := strings.ToUpper(token)
+		if isBuiltinFunction(upperToken) {
+			return p.parseFuncCall(upperToken)
+		}
 		p.pop()
 		return &minisql.Expr{Column: token}, nil
 	}
 
 	return nil, fmt.Errorf("unexpected token %q in arithmetic expression", token)
+}
+
+// parseFuncCall parses FUNCNAME(arg, arg, ...) after the caller has confirmed
+// the token is a known built-in function name (already upper-cased).
+func (p *parserItem) parseFuncCall(funcName string) (*minisql.Expr, error) {
+	p.pop() // consume function name
+	if p.peek() != "(" {
+		return nil, fmt.Errorf("expected '(' after %s", funcName)
+	}
+	p.pop() // consume "("
+
+	var args []*minisql.Expr
+	for {
+		if p.peek() == ")" {
+			p.pop()
+			break
+		}
+		if len(args) > 0 {
+			if p.peek() != "," {
+				return nil, fmt.Errorf("expected ',' or ')' in %s() arguments", funcName)
+			}
+			p.pop() // consume ","
+		}
+		arg, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, arg)
+	}
+	return &minisql.Expr{FuncName: funcName, Args: args}, nil
+}
+
+// isBuiltinFunction reports whether name (upper-cased) is a recognised scalar
+// function that can appear inside an arithmetic expression.
+func isBuiltinFunction(name string) bool {
+	switch name {
+	case "COALESCE", "NULLIF":
+		return true
+	}
+	return false
 }

@@ -228,3 +228,149 @@ func TestExpr_Eval_NilExpr(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, res)
 }
+
+func TestExpr_Eval_NullLiteral(t *testing.T) {
+	t.Parallel()
+
+	row := NewRow(nil)
+	res, err := (&Expr{IsNull: true}).Eval(row)
+	require.NoError(t, err)
+	assert.Nil(t, res)
+}
+
+func TestExpr_String_FuncCall(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "COALESCE(a, b)", (&Expr{
+		FuncName: "COALESCE",
+		Args:     []*Expr{{Column: "a"}, {Column: "b"}},
+	}).String())
+	assert.Equal(t, "NULLIF(x, 0)", (&Expr{
+		FuncName: "NULLIF",
+		Args:     []*Expr{{Column: "x"}, {Literal: int64(0)}},
+	}).String())
+	assert.Equal(t, "NULL", (&Expr{IsNull: true}).String())
+}
+
+func TestExpr_Columns_FuncCall(t *testing.T) {
+	t.Parallel()
+
+	expr := &Expr{
+		FuncName: "COALESCE",
+		Args:     []*Expr{{Column: "a"}, {Column: "b"}, {Literal: int64(0)}},
+	}
+	assert.Equal(t, []string{"a", "b"}, expr.Columns())
+}
+
+func TestExpr_Eval_COALESCE(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns first non-null", func(t *testing.T) {
+		t.Parallel()
+		row := NewRowWithValues(
+			[]Column{{Name: "a", Kind: Int8}, {Name: "b", Kind: Int8}},
+			[]OptionalValue{{Valid: false}, {Value: int64(42), Valid: true}},
+		)
+		res, err := (&Expr{
+			FuncName: "COALESCE",
+			Args:     []*Expr{{Column: "a"}, {Column: "b"}},
+		}).Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, int64(42), res)
+	})
+
+	t.Run("returns first arg when non-null", func(t *testing.T) {
+		t.Parallel()
+		row := rowWithInt("x", 7)
+		res, err := (&Expr{
+			FuncName: "COALESCE",
+			Args:     []*Expr{{Column: "x"}, {Literal: int64(99)}},
+		}).Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, int64(7), res)
+	})
+
+	t.Run("all null returns null", func(t *testing.T) {
+		t.Parallel()
+		row := rowWithNull("x")
+		res, err := (&Expr{
+			FuncName: "COALESCE",
+			Args:     []*Expr{{Column: "x"}, {IsNull: true}},
+		}).Eval(row)
+		require.NoError(t, err)
+		assert.Nil(t, res)
+	})
+
+	t.Run("literal fallback", func(t *testing.T) {
+		t.Parallel()
+		row := rowWithNull("x")
+		res, err := (&Expr{
+			FuncName: "COALESCE",
+			Args:     []*Expr{{Column: "x"}, {Literal: int64(0)}},
+		}).Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), res)
+	})
+
+	t.Run("error when no args", func(t *testing.T) {
+		t.Parallel()
+		row := NewRow(nil)
+		_, err := (&Expr{FuncName: "COALESCE", Args: nil}).Eval(row)
+		assert.ErrorContains(t, err, "at least 1 argument")
+	})
+}
+
+func TestExpr_Eval_NULLIF(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns null when equal", func(t *testing.T) {
+		t.Parallel()
+		row := rowWithInt("x", 5)
+		res, err := (&Expr{
+			FuncName: "NULLIF",
+			Args:     []*Expr{{Column: "x"}, {Literal: int64(5)}},
+		}).Eval(row)
+		require.NoError(t, err)
+		assert.Nil(t, res)
+	})
+
+	t.Run("returns first when not equal", func(t *testing.T) {
+		t.Parallel()
+		row := rowWithInt("x", 5)
+		res, err := (&Expr{
+			FuncName: "NULLIF",
+			Args:     []*Expr{{Column: "x"}, {Literal: int64(0)}},
+		}).Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, int64(5), res)
+	})
+
+	t.Run("first arg null returns null", func(t *testing.T) {
+		t.Parallel()
+		row := rowWithNull("x")
+		res, err := (&Expr{
+			FuncName: "NULLIF",
+			Args:     []*Expr{{Column: "x"}, {Literal: int64(0)}},
+		}).Eval(row)
+		require.NoError(t, err)
+		assert.Nil(t, res)
+	})
+
+	t.Run("second arg null never equal", func(t *testing.T) {
+		t.Parallel()
+		row := rowWithInt("x", 5)
+		res, err := (&Expr{
+			FuncName: "NULLIF",
+			Args:     []*Expr{{Column: "x"}, {IsNull: true}},
+		}).Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, int64(5), res) // NULL != 5 → return 5
+	})
+
+	t.Run("error when wrong arg count", func(t *testing.T) {
+		t.Parallel()
+		row := NewRow(nil)
+		_, err := (&Expr{FuncName: "NULLIF", Args: []*Expr{{Literal: int64(1)}}}).Eval(row)
+		assert.ErrorContains(t, err, "exactly 2 arguments")
+	})
+}
