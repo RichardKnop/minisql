@@ -664,12 +664,83 @@ func (t *Table) DeleteKey(ctx context.Context, pageIdx PageIndex, key RowID) err
 
 	// Check for underflow
 	if page.LeafNode.AtLeastHalfFull() {
-		return nil
+		return t.updateParentMaxKey(ctx, page)
 	}
 
 	// Rebalance leaf node
 	if err := t.rebalanceLeaf(ctx, page, key); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func (t *Table) updateParentMaxKey(ctx context.Context, page *Page) error {
+	if page == nil {
+		return nil
+	}
+
+	var parentIdx PageIndex
+	switch {
+	case page.LeafNode != nil:
+		if page.LeafNode.Header.IsRoot {
+			return nil
+		}
+		parentIdx = page.LeafNode.Header.Parent
+	case page.InternalNode != nil:
+		if page.InternalNode.Header.IsRoot {
+			return nil
+		}
+		parentIdx = page.InternalNode.Header.Parent
+	default:
+		return nil
+	}
+
+	parentPage, err := t.pager.ModifyPage(ctx, parentIdx)
+	if err != nil {
+		return fmt.Errorf("update parent max key: %w", err)
+	}
+
+	position, err := parentPage.InternalNode.IndexOfPage(page.Index)
+	if err != nil {
+		return fmt.Errorf("update parent max key: %w", err)
+	}
+	if position < parentPage.InternalNode.Header.KeysNum {
+		maxKey, err := t.GetMaxKey(ctx, page)
+		if err != nil {
+			return fmt.Errorf("update parent max key: %w", err)
+		}
+		if parentPage.InternalNode.ICells[position].Key == maxKey {
+			return nil
+		}
+		parentPage.InternalNode.ICells[position].Key = maxKey
+		return t.updateParentMaxKey(ctx, parentPage)
+	}
+
+	return t.updateParentMaxKey(ctx, parentPage)
+}
+
+func (t *Table) refreshInternalNodeKeys(ctx context.Context, page *Page) error {
+	if page == nil || page.InternalNode == nil {
+		return nil
+	}
+
+	for i := uint32(0); i < page.InternalNode.Header.KeysNum; i++ {
+		childIdx, err := page.InternalNode.Child(i)
+		if err != nil {
+			return fmt.Errorf("refresh internal node keys: %w", err)
+		}
+
+		childPage, err := t.pager.ReadPage(ctx, childIdx)
+		if err != nil {
+			return fmt.Errorf("refresh internal node keys: %w", err)
+		}
+
+		maxKey, err := t.GetMaxKey(ctx, childPage)
+		if err != nil {
+			return fmt.Errorf("refresh internal node keys: %w", err)
+		}
+		page.InternalNode.ICells[i].Key = maxKey
 	}
 
 	return nil
@@ -729,7 +800,10 @@ func (t *Table) rebalanceLeaf(ctx context.Context, page *Page, key RowID) error 
 	if err != nil {
 		return fmt.Errorf("rebalance leaf: %w", err)
 	}
-	myPositionInParent := parentPage.InternalNode.IndexOfChild(key)
+	myPositionInParent, err := parentPage.InternalNode.IndexOfPage(page.Index)
+	if err != nil {
+		return fmt.Errorf("rebalance leaf: %w", err)
+	}
 
 	var (
 		left  *Page
@@ -748,21 +822,33 @@ func (t *Table) rebalanceLeaf(ctx context.Context, page *Page, key RowID) error 
 	}
 
 	if right != nil && right.LeafNode.CanBorrowFirst() {
-		return t.borrowFromRightLeaf(
+		if err := t.borrowFromRightLeaf(
 			parentPage.InternalNode,
 			leafNode,
 			right.LeafNode,
 			myPositionInParent,
-		)
+		); err != nil {
+			return err
+		}
+		if err := t.refreshInternalNodeKeys(ctx, parentPage); err != nil {
+			return err
+		}
+		return t.updateParentMaxKey(ctx, parentPage)
 	}
 
 	if left != nil && left.LeafNode.CanBorrowLast() {
-		return t.borrowFromLeftLeaf(
+		if err := t.borrowFromLeftLeaf(
 			parentPage.InternalNode,
 			leafNode,
 			left.LeafNode,
 			myPositionInParent-1,
-		)
+		); err != nil {
+			return err
+		}
+		if err := t.refreshInternalNodeKeys(ctx, parentPage); err != nil {
+			return err
+		}
+		return t.updateParentMaxKey(ctx, parentPage)
 	}
 
 	if right != nil && leafNode.CanMergeWith(right.LeafNode) {
@@ -776,7 +862,13 @@ func (t *Table) rebalanceLeaf(ctx context.Context, page *Page, key RowID) error 
 			return err
 		}
 
-		return t.pager.AddFreePage(ctx, right.Index)
+		if err := t.pager.AddFreePage(ctx, right.Index); err != nil {
+			return err
+		}
+		if err := t.refreshInternalNodeKeys(ctx, parentPage); err != nil {
+			return err
+		}
+		return t.updateParentMaxKey(ctx, parentPage)
 	}
 
 	if left != nil && leafNode.CanMergeWith(left.LeafNode) {
@@ -790,7 +882,13 @@ func (t *Table) rebalanceLeaf(ctx context.Context, page *Page, key RowID) error 
 			return err
 		}
 
-		return t.pager.AddFreePage(ctx, page.Index)
+		if err := t.pager.AddFreePage(ctx, page.Index); err != nil {
+			return err
+		}
+		if err := t.refreshInternalNodeKeys(ctx, parentPage); err != nil {
+			return err
+		}
+		return t.updateParentMaxKey(ctx, parentPage)
 	}
 
 	return nil
@@ -823,7 +921,7 @@ func (t *Table) borrowFromRightLeaf(parent *InternalNode, node, right *LeafNode,
 
 	node.AppendCells(cellToRotate)
 
-	parent.ICells[idx].Key = right.FirstCell().Key
+	parent.ICells[idx].Key = node.LastCell().Key
 
 	return nil
 }
@@ -839,6 +937,9 @@ func (t *Table) mergeLeaves(ctx context.Context, parent, left, right *Page, idx 
 	// Remove key from parent plus the right child pointer
 	if err := parent.InternalNode.DeleteKeyAndRightChild(idx); err != nil {
 		return err
+	}
+	if err := t.refreshInternalNodeKeys(ctx, parent); err != nil {
+		return fmt.Errorf("merge leaves: %w", err)
 	}
 
 	if parent.InternalNode.Header.IsRoot && parent.InternalNode.Header.KeysNum == 0 {
@@ -856,7 +957,7 @@ func (t *Table) mergeLeaves(ctx context.Context, parent, left, right *Page, idx 
 
 	// Check for underflow
 	if parent.InternalNode.AtLeastHalfFull(t.maxICells(parent.Index)) {
-		return nil
+		return t.updateParentMaxKey(ctx, parent)
 	}
 
 	return t.rebalanceInternal(ctx, parent)
@@ -870,11 +971,31 @@ func (t *Table) rebalanceInternal(ctx context.Context, page *Page) error {
 			if err != nil {
 				return fmt.Errorf("rebalance internal: %w", err)
 			}
-			firstChildPage, err := t.pager.ModifyPage(ctx, node.ICells[0].Child)
+			firstChildPage, err := t.pager.ModifyPage(ctx, node.Header.RightChild)
 			if err != nil {
 				return fmt.Errorf("rebalance internal: %w", err)
 			}
-			rootPage.InternalNode = firstChildPage.InternalNode.Clone()
+			switch {
+			case firstChildPage.InternalNode != nil:
+				rootPage.InternalNode = firstChildPage.InternalNode.Clone()
+				rootPage.InternalNode.Header.IsRoot = true
+				rootPage.InternalNode.Header.Parent = 0
+				rootPage.LeafNode = nil
+				for _, childIdx := range rootPage.InternalNode.Children() {
+					childPage, err := t.pager.ModifyPage(ctx, childIdx)
+					if err != nil {
+						return fmt.Errorf("rebalance internal: %w", err)
+					}
+					childPage.setParent(t.GetRootPageIdx())
+				}
+			case firstChildPage.LeafNode != nil:
+				rootPage.InternalNode = nil
+				rootPage.LeafNode = firstChildPage.LeafNode.DeepClone()
+				rootPage.LeafNode.Header.IsRoot = true
+				rootPage.LeafNode.Header.Parent = 0
+			default:
+				return fmt.Errorf("rebalance internal: invalid child page type %d", firstChildPage.Index)
+			}
 			return t.pager.AddFreePage(ctx, firstChildPage.Index)
 		}
 		return nil
@@ -916,7 +1037,10 @@ func (t *Table) rebalanceInternal(ctx context.Context, page *Page) error {
 		); err != nil {
 			return fmt.Errorf("borrow from right internal: %w", err)
 		}
-		return nil
+		if err := t.refreshInternalNodeKeys(ctx, parentPage); err != nil {
+			return err
+		}
+		return t.updateParentMaxKey(ctx, parentPage)
 	}
 
 	if left != nil && left.InternalNode.MoreThanHalfFull(t.maxICells(left.Index)) {
@@ -929,10 +1053,13 @@ func (t *Table) rebalanceInternal(ctx context.Context, page *Page) error {
 		); err != nil {
 			return fmt.Errorf("borrow from left internal: %w", err)
 		}
-		return nil
+		if err := t.refreshInternalNodeKeys(ctx, parentPage); err != nil {
+			return err
+		}
+		return t.updateParentMaxKey(ctx, parentPage)
 	}
 
-	if right != nil && int(right.InternalNode.Header.KeysNum+node.Header.KeysNum) <= t.maxICells(right.Index) {
+	if right != nil && int(right.InternalNode.Header.KeysNum+node.Header.KeysNum+1) <= t.maxICells(right.Index) {
 		if err := t.mergeInternalNodes(
 			ctx,
 			parentPage,
@@ -943,10 +1070,16 @@ func (t *Table) rebalanceInternal(ctx context.Context, page *Page) error {
 			return fmt.Errorf("merge internal node with right: %w", err)
 		}
 
-		return t.pager.AddFreePage(ctx, right.Index)
+		if err := t.pager.AddFreePage(ctx, right.Index); err != nil {
+			return err
+		}
+		if err := t.refreshInternalNodeKeys(ctx, parentPage); err != nil {
+			return err
+		}
+		return t.updateParentMaxKey(ctx, parentPage)
 	}
 
-	if left != nil && int(left.InternalNode.Header.KeysNum+node.Header.KeysNum) <= t.maxICells(left.Index) {
+	if left != nil && int(left.InternalNode.Header.KeysNum+node.Header.KeysNum+1) <= t.maxICells(left.Index) {
 		if err := t.mergeInternalNodes(
 			ctx,
 			parentPage,
@@ -957,7 +1090,13 @@ func (t *Table) rebalanceInternal(ctx context.Context, page *Page) error {
 			return fmt.Errorf("merge internal node with left: %w", err)
 		}
 
-		return t.pager.AddFreePage(ctx, page.Index)
+		if err := t.pager.AddFreePage(ctx, page.Index); err != nil {
+			return err
+		}
+		if err := t.refreshInternalNodeKeys(ctx, parentPage); err != nil {
+			return err
+		}
+		return t.updateParentMaxKey(ctx, parentPage)
 	}
 
 	return nil
@@ -969,11 +1108,9 @@ func (t *Table) rebalanceInternal(ctx context.Context, page *Page) error {
 // It also updates the key in the parent node.
 func (t *Table) borrowFromLeftInternal(ctx context.Context, parent, page, left *Page, idx uint32) error {
 	page.InternalNode.PrependCell(ICell{
-		Key:   parent.InternalNode.ICells[idx-1].Key,
+		Key:   parent.InternalNode.ICells[idx].Key,
 		Child: left.InternalNode.Header.RightChild,
 	})
-
-	parent.InternalNode.ICells[idx-1].Key = left.InternalNode.LastCell().Key
 
 	childPage, err := t.pager.ModifyPage(ctx, left.InternalNode.Header.RightChild)
 	if err != nil {
@@ -982,6 +1119,18 @@ func (t *Table) borrowFromLeftInternal(ctx context.Context, parent, page, left *
 	childPage.setParent(page.Index)
 
 	left.InternalNode.RemoveLastCell()
+
+	leftMax, err := t.GetMaxKey(ctx, left)
+	if err != nil {
+		return fmt.Errorf("borrow from left internal: %w", err)
+	}
+	parent.InternalNode.ICells[idx].Key = leftMax
+	if err := t.refreshInternalNodeKeys(ctx, page); err != nil {
+		return fmt.Errorf("borrow from left internal: %w", err)
+	}
+	if err := t.refreshInternalNodeKeys(ctx, left); err != nil {
+		return fmt.Errorf("borrow from left internal: %w", err)
+	}
 
 	return nil
 }
@@ -1003,19 +1152,26 @@ func (t *Table) borrowFromRightInternal(ctx context.Context, parent, page, right
 	}
 	childPage.setParent(page.Index)
 
-	parent.InternalNode.ICells[idx].Key = right.InternalNode.FirstCell().Key
-
 	right.InternalNode.RemoveFirstCell()
+
+	pageMax, err := t.GetMaxKey(ctx, page)
+	if err != nil {
+		return fmt.Errorf("borrow from right internal: %w", err)
+	}
+	parent.InternalNode.ICells[idx].Key = pageMax
+	if err := t.refreshInternalNodeKeys(ctx, page); err != nil {
+		return fmt.Errorf("borrow from right internal: %w", err)
+	}
+	if err := t.refreshInternalNodeKeys(ctx, right); err != nil {
+		return fmt.Errorf("borrow from right internal: %w", err)
+	}
 
 	return nil
 }
 
 // mergeInternalNodes merges two internal nodes and deletes the key from the parent node.
 func (t *Table) mergeInternalNodes(ctx context.Context, parent, left, right *Page, idx uint32) error {
-	var (
-		leftCells = left.InternalNode.Header.KeysNum
-		leftIndex = left.Index
-	)
+	leftIndex := left.Index
 	if parent.InternalNode.Header.IsRoot && parent.InternalNode.Header.KeysNum == 1 {
 		leftIndex = t.GetRootPageIdx()
 	}
@@ -1055,6 +1211,12 @@ func (t *Table) mergeInternalNodes(ctx context.Context, parent, left, right *Pag
 	if err := parent.InternalNode.DeleteKeyAndRightChild(idx); err != nil {
 		return err
 	}
+	if err := t.refreshInternalNodeKeys(ctx, left); err != nil {
+		return fmt.Errorf("merge internal nodes: %w", err)
+	}
+	if err := t.refreshInternalNodeKeys(ctx, parent); err != nil {
+		return fmt.Errorf("merge internal nodes: %w", err)
+	}
 
 	// If root has no keys, make left the new root
 	if parent.InternalNode.Header.IsRoot && parent.InternalNode.Header.KeysNum == 0 {
@@ -1062,24 +1224,23 @@ func (t *Table) mergeInternalNodes(ctx context.Context, parent, left, right *Pag
 		if err != nil {
 			return fmt.Errorf("get root page: %w", err)
 		}
-		*rootPage.InternalNode = *left.InternalNode
+		rootPage.InternalNode = left.InternalNode.Clone()
 		rootPage.LeafNode = nil
 		rootPage.InternalNode.Header.IsRoot = true
 		rootPage.InternalNode.Header.Parent = 0
-		for idx := range leftCells {
-			childPage, err := t.pager.ModifyPage(ctx, left.InternalNode.ICells[idx].Child)
+		for _, childIdx := range rootPage.InternalNode.Children() {
+			childPage, err := t.pager.ModifyPage(ctx, childIdx)
 			if err != nil {
 				return fmt.Errorf("get child page: %w", err)
 			}
-			childPage.setParent(0)
+			childPage.setParent(t.GetRootPageIdx())
 		}
-		oldRightChildPage.setParent(leftIndex)
 		return t.pager.AddFreePage(ctx, left.Index)
 	}
 
 	// Check for underflow
 	if parent.InternalNode.AtLeastHalfFull(t.maxICells(parent.Index)) {
-		return nil
+		return t.updateParentMaxKey(ctx, parent)
 	}
 
 	return t.rebalanceInternal(ctx, parent)

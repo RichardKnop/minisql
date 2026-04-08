@@ -299,7 +299,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 		/*
 			           +----------------------------+
-			           |        5,         11,      |
+			           |        5,         10,      |
 			           +----------------------------+
 			          /              /               \
 			+--------+           +--------+          +----------+
@@ -309,7 +309,7 @@ func TestTable_Delete_LeafNodeRebalancing(t *testing.T) {
 
 		// Check the root page
 		assert.Equal(t, 2, int(pager.pages[0].InternalNode.Header.KeysNum))
-		assert.Equal(t, []RowID{5, 11}, pager.pages[0].InternalNode.Keys())
+		assert.Equal(t, []RowID{5, 10}, pager.pages[0].InternalNode.Keys())
 		// Check the leaf pages
 		assert.Equal(t, []RowID{1, 3, 5}, pager.pages[2].LeafNode.Keys())
 		assert.Equal(t, []RowID{7, 8, 10}, pager.pages[4].LeafNode.Keys())
