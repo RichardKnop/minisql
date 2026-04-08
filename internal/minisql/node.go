@@ -144,7 +144,7 @@ func (n *InternalNode) RemoveLastCell() {
 
 // PrependCell ...
 func (n *InternalNode) PrependCell(cell ICell) {
-	for i := int(n.Header.KeysNum) - 1; i > 0; i-- {
+	for i := int(n.Header.KeysNum); i > 0; i-- {
 		n.ICells[i] = n.ICells[i-1]
 	}
 	n.ICells[0] = cell
