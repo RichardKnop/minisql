@@ -1,5 +1,7 @@
 package e2etests
 
+import "time"
+
 // ── String functions ─────────────────────────────────────────────────────────
 
 func (s *TestSuite) TestStringFunctions_UPPER_LOWER() {
@@ -375,4 +377,114 @@ func (s *TestSuite) TestNumericFunctions_UpdateWithABS() {
 	err = s.db.QueryRow(`select amount from "adjustments"`).Scan(&amount)
 	s.Require().NoError(err)
 	s.Equal(int64(50), amount)
+}
+
+// ── Date/time functions ───────────────────────────────────────────────────────
+
+func (s *TestSuite) TestDateTimeFunctions_NOW_InSelect() {
+	_, err := s.db.Exec(createUsersTableSQL)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`insert into "users" (email, name) values ('h@example.com', 'H')`)
+	s.Require().NoError(err)
+
+	before := time.Now().UTC()
+	var result time.Time
+	err = s.db.QueryRow(`select NOW() from "users"`).Scan(&result)
+	after := time.Now().UTC()
+	s.Require().NoError(err)
+
+	s.False(result.Before(before.Truncate(time.Second)), "NOW() returned time before query")
+	s.False(result.After(after.Add(time.Second)), "NOW() returned time after query")
+}
+
+func (s *TestSuite) TestDateTimeFunctions_DATE_TRUNC() {
+	_, err := s.db.Exec(createUsersTableSQL)
+	s.Require().NoError(err)
+
+	stmt, err := s.db.Prepare(`insert into "users" (email, name, created) values ('i@example.com', 'I', ?)`)
+	s.Require().NoError(err)
+	_, err = stmt.Exec("2024-06-15 14:32:45")
+	s.Require().NoError(err)
+
+	var truncated time.Time
+	err = s.db.QueryRow(`select DATE_TRUNC('day', created) from "users"`).Scan(&truncated)
+	s.Require().NoError(err)
+	s.Equal("2024-06-15 00:00:00", truncated.UTC().Format("2006-01-02 15:04:05"))
+}
+
+func (s *TestSuite) TestDateTimeFunctions_DATE_TRUNC_Month() {
+	_, err := s.db.Exec(createUsersTableSQL)
+	s.Require().NoError(err)
+
+	stmt, err := s.db.Prepare(`insert into "users" (email, name, created) values ('j@example.com', 'J', ?)`)
+	s.Require().NoError(err)
+	_, err = stmt.Exec("2024-06-15 14:32:45")
+	s.Require().NoError(err)
+
+	var truncated time.Time
+	err = s.db.QueryRow(`select DATE_TRUNC('month', created) from "users"`).Scan(&truncated)
+	s.Require().NoError(err)
+	s.Equal("2024-06-01 00:00:00", truncated.UTC().Format("2006-01-02 15:04:05"))
+}
+
+func (s *TestSuite) TestDateTimeFunctions_EXTRACT() {
+	_, err := s.db.Exec(createUsersTableSQL)
+	s.Require().NoError(err)
+
+	stmt, err := s.db.Prepare(`insert into "users" (email, name, created) values ('k@example.com', 'K', ?)`)
+	s.Require().NoError(err)
+	_, err = stmt.Exec("2024-06-15 14:32:45")
+	s.Require().NoError(err)
+
+	var year, month, day, hour, minute, second int64
+	err = s.db.QueryRow(`select
+		EXTRACT('year',   created),
+		EXTRACT('month',  created),
+		EXTRACT('day',    created),
+		EXTRACT('hour',   created),
+		EXTRACT('minute', created),
+		EXTRACT('second', created)
+		from "users"`).Scan(&year, &month, &day, &hour, &minute, &second)
+	s.Require().NoError(err)
+	s.Equal(int64(2024), year)
+	s.Equal(int64(6), month)
+	s.Equal(int64(15), day)
+	s.Equal(int64(14), hour)
+	s.Equal(int64(32), minute)
+	s.Equal(int64(45), second)
+}
+
+func (s *TestSuite) TestDateTimeFunctions_DATE_PART() {
+	_, err := s.db.Exec(createUsersTableSQL)
+	s.Require().NoError(err)
+
+	stmt, err := s.db.Prepare(`insert into "users" (email, name, created) values ('l@example.com', 'L', ?)`)
+	s.Require().NoError(err)
+	_, err = stmt.Exec("2024-06-15 14:32:45")
+	s.Require().NoError(err)
+
+	var year int64
+	err = s.db.QueryRow(`select DATE_PART('year', created) from "users"`).Scan(&year)
+	s.Require().NoError(err)
+	s.Equal(int64(2024), year)
+}
+
+func (s *TestSuite) TestDateTimeFunctions_TO_TIMESTAMP() {
+	_, err := s.db.Exec(createUsersTableSQL)
+	s.Require().NoError(err)
+
+	stmt, err := s.db.Prepare(`insert into "users" (email, name, created) values ('m@example.com', 'M', ?)`)
+	s.Require().NoError(err)
+	_, err = stmt.Exec("2024-01-01 00:00:00")
+	s.Require().NoError(err)
+
+	// Use TO_TIMESTAMP in UPDATE SET
+	_, err = s.db.Exec(`update "users" set created = TO_TIMESTAMP('2025-06-01 12:00:00')`)
+	s.Require().NoError(err)
+
+	var created time.Time
+	err = s.db.QueryRow(`select created from "users"`).Scan(&created)
+	s.Require().NoError(err)
+	s.Equal("2025-06-01 12:00:00", created.UTC().Format("2006-01-02 15:04:05"))
 }
