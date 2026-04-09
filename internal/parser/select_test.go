@@ -1165,3 +1165,165 @@ func TestParse_SelectScalarFunctions(t *testing.T) {
 		})
 	}
 }
+
+func TestParse_SelectCaseWhen(t *testing.T) {
+	t.Parallel()
+
+	testCases := []testCase{
+		{
+			"searched CASE with ELSE",
+			"SELECT CASE WHEN score >= 90 THEN 1 ELSE 0 END FROM t;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "t",
+					Fields: []minisql.Field{
+						{
+							Name: "CASE WHEN score >= 90 THEN 1 ELSE 0 END",
+							Expr: &minisql.Expr{
+								CaseClauses: []minisql.CaseWhen{
+									{
+										Cond: &minisql.ConditionNode{
+											Leaf: &minisql.Condition{
+												Operand1: minisql.Operand{
+													Type:  minisql.OperandField,
+													Value: minisql.Field{Name: "score"},
+												},
+												Operator: minisql.Gte,
+												Operand2: minisql.Operand{
+													Type:  minisql.OperandInteger,
+													Value: int64(90),
+												},
+											},
+										},
+										Then: &minisql.Expr{Literal: int64(1)},
+									},
+								},
+								CaseElse: &minisql.Expr{Literal: int64(0)},
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"searched CASE without ELSE",
+			"SELECT CASE WHEN active = TRUE THEN 1 END FROM t;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "t",
+					Fields: []minisql.Field{
+						{
+							Name: "CASE WHEN active = true THEN 1 END",
+							Expr: &minisql.Expr{
+								CaseClauses: []minisql.CaseWhen{
+									{
+										Cond: &minisql.ConditionNode{
+											Leaf: &minisql.Condition{
+												Operand1: minisql.Operand{
+													Type:  minisql.OperandField,
+													Value: minisql.Field{Name: "active"},
+												},
+												Operator: minisql.Eq,
+												Operand2: minisql.Operand{
+													Type:  minisql.OperandBoolean,
+													Value: true,
+												},
+											},
+										},
+										Then: &minisql.Expr{Literal: int64(1)},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"searched CASE with AS alias",
+			"SELECT CASE WHEN score >= 90 THEN 1 ELSE 0 END AS grade FROM t;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "t",
+					Fields: []minisql.Field{
+						{
+							Name:  "CASE WHEN score >= 90 THEN 1 ELSE 0 END",
+							Alias: "grade",
+							Expr: &minisql.Expr{
+								CaseClauses: []minisql.CaseWhen{
+									{
+										Cond: &minisql.ConditionNode{
+											Leaf: &minisql.Condition{
+												Operand1: minisql.Operand{
+													Type:  minisql.OperandField,
+													Value: minisql.Field{Name: "score"},
+												},
+												Operator: minisql.Gte,
+												Operand2: minisql.Operand{
+													Type:  minisql.OperandInteger,
+													Value: int64(90),
+												},
+											},
+										},
+										Then: &minisql.Expr{Literal: int64(1)},
+									},
+								},
+								CaseElse: &minisql.Expr{Literal: int64(0)},
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"simple CASE",
+			"SELECT CASE status WHEN 1 THEN 'active' WHEN 2 THEN 'pending' ELSE 'other' END FROM t;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "t",
+					Fields: []minisql.Field{
+						{
+							Name: "CASE status WHEN 1 THEN active WHEN 2 THEN pending ELSE other END",
+							Expr: &minisql.Expr{
+								CaseInput: &minisql.Expr{Column: "status"},
+								CaseClauses: []minisql.CaseWhen{
+									{
+										When: &minisql.Expr{Literal: int64(1)},
+										Then: &minisql.Expr{Literal: minisql.NewTextPointer([]byte("active"))},
+									},
+									{
+										When: &minisql.Expr{Literal: int64(2)},
+										Then: &minisql.Expr{Literal: minisql.NewTextPointer([]byte("pending"))},
+									},
+								},
+								CaseElse: &minisql.Expr{Literal: minisql.NewTextPointer([]byte("other"))},
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+	}
+
+	for _, aTestCase := range testCases {
+		t.Run(aTestCase.Name, func(t *testing.T) {
+			t.Parallel()
+			aStatement, err := New().Parse(context.Background(), aTestCase.SQL)
+			if aTestCase.Err != nil {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, aTestCase.Err)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, aTestCase.Expected, aStatement)
+		})
+	}
+}

@@ -33,14 +33,28 @@ func (op ArithOp) String() string {
 	}
 }
 
+// CaseWhen holds one WHEN/THEN branch of a CASE expression.
+// Exactly one of Cond (searched CASE) or When (simple CASE) is set.
+type CaseWhen struct {
+	Cond *ConditionNode // searched CASE: WHEN <condition>
+	When *Expr          // simple CASE: WHEN <value> (compared to parent CaseInput)
+	Then *Expr          // THEN <result>
+}
+
 // Expr is an arithmetic expression tree node.
 // Exactly one interpretation is active (checked in priority order):
+//   - CaseClauses != nil:      a CASE WHEN expression
 //   - FuncName != "":          a built-in function call (Args holds the arguments)
 //   - IsNull:                  an explicit NULL literal
 //   - Column != "":            a column reference (read value from the row)
 //   - Literal != nil:          a scalar literal (int64, float64, bool, TextPointer)
 //   - Left != nil && Op != 0:  a binary arithmetic operation
 type Expr struct {
+	// CASE expression fields (CaseClauses != nil means this is a CASE expression)
+	CaseInput   *Expr      // simple CASE operand; nil for searched CASE
+	CaseClauses []CaseWhen // WHEN/THEN pairs; non-nil marks this as a CASE expr
+	CaseElse    *Expr      // ELSE branch; nil means ELSE NULL
+
 	FuncName string  // built-in function name, e.g. "COALESCE", "NULLIF"
 	Args     []*Expr // function arguments (used when FuncName != "")
 	IsNull   bool    // true when this node represents an explicit SQL NULL literal
@@ -60,6 +74,30 @@ func (e *Expr) str(nested bool) string {
 	if e == nil {
 		return ""
 	}
+	if e.CaseClauses != nil {
+		var b strings.Builder
+		b.WriteString("CASE")
+		if e.CaseInput != nil {
+			b.WriteString(" ")
+			b.WriteString(e.CaseInput.str(false))
+		}
+		for _, cl := range e.CaseClauses {
+			b.WriteString(" WHEN ")
+			if cl.Cond != nil {
+				b.WriteString(cl.Cond.String())
+			} else {
+				b.WriteString(cl.When.str(false))
+			}
+			b.WriteString(" THEN ")
+			b.WriteString(cl.Then.str(false))
+		}
+		if e.CaseElse != nil {
+			b.WriteString(" ELSE ")
+			b.WriteString(e.CaseElse.str(false))
+		}
+		b.WriteString(" END")
+		return b.String()
+	}
 	if e.FuncName != "" {
 		argStrs := make([]string, len(e.Args))
 		for i, arg := range e.Args {
@@ -74,6 +112,9 @@ func (e *Expr) str(nested bool) string {
 		return e.Column
 	}
 	if e.Literal != nil {
+		if tp, ok := e.Literal.(TextPointer); ok {
+			return string(tp.Data)
+		}
 		return fmt.Sprintf("%v", e.Literal)
 	}
 	inner := e.Left.str(true) + " " + e.Op.String() + " " + e.Right.str(true)
@@ -87,6 +128,21 @@ func (e *Expr) str(nested bool) string {
 func (e *Expr) Columns() []string {
 	if e == nil {
 		return nil
+	}
+	if e.CaseClauses != nil {
+		var cols []string
+		cols = append(cols, e.CaseInput.Columns()...)
+		for _, cl := range e.CaseClauses {
+			if cl.Cond != nil {
+				cols = append(cols, cl.Cond.Columns()...)
+			}
+			if cl.When != nil {
+				cols = append(cols, cl.When.Columns()...)
+			}
+			cols = append(cols, cl.Then.Columns()...)
+		}
+		cols = append(cols, e.CaseElse.Columns()...)
+		return cols
 	}
 	if e.FuncName != "" {
 		var cols []string
@@ -116,6 +172,11 @@ func (e *Expr) Columns() []string {
 func (e *Expr) Eval(row Row) (any, error) {
 	if e == nil {
 		return nil, nil
+	}
+
+	// CASE expression
+	if e.CaseClauses != nil {
+		return e.evalCase(row)
 	}
 
 	// Function call
@@ -205,6 +266,47 @@ func (e *Expr) Eval(row Row) (any, error) {
 	default:
 		return nil, fmt.Errorf("unknown arithmetic operator %d", e.Op)
 	}
+}
+
+// evalCase evaluates a CASE WHEN expression against the given row.
+func (e *Expr) evalCase(row Row) (any, error) {
+	// For simple CASE, evaluate the input expression once.
+	var inputVal any
+	if e.CaseInput != nil {
+		var err error
+		inputVal, err = e.CaseInput.Eval(row)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	for _, clause := range e.CaseClauses {
+		var matched bool
+		if e.CaseInput != nil {
+			// Simple CASE: compare input to WHEN value.
+			whenVal, err := clause.When.Eval(row)
+			if err != nil {
+				return nil, err
+			}
+			matched = equalAny(inputVal, whenVal)
+		} else {
+			// Searched CASE: evaluate WHEN condition against the row.
+			var err error
+			matched, err = row.CheckOneOrMore(clause.Cond.ToDNF())
+			if err != nil {
+				return nil, err
+			}
+		}
+		if matched {
+			return clause.Then.Eval(row)
+		}
+	}
+
+	// No WHEN matched — return ELSE value (or NULL if no ELSE).
+	if e.CaseElse != nil {
+		return e.CaseElse.Eval(row)
+	}
+	return nil, nil
 }
 
 // evalFunc evaluates a built-in function call against the given row.

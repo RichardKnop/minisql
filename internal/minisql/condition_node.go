@@ -1,5 +1,9 @@
 package minisql
 
+import (
+	"fmt"
+)
+
 // LogicOp represents a boolean logic operator (AND or OR) used in a ConditionNode.
 type LogicOp int
 
@@ -23,6 +27,69 @@ type ConditionNode struct {
 // IsLeaf returns true if this is a leaf node.
 func (n *ConditionNode) IsLeaf() bool {
 	return n.Leaf != nil
+}
+
+// String returns a human-readable representation of the condition tree,
+// used as a fallback column name for CASE expressions without AS aliases.
+func (n *ConditionNode) String() string {
+	if n == nil {
+		return ""
+	}
+	if n.IsLeaf() {
+		l := n.Leaf
+		var op1 string
+		if l.Operand1.Type == OperandField {
+			if f, ok := l.Operand1.Value.(Field); ok {
+				op1 = f.Name
+			}
+		} else {
+			op1 = fmt.Sprintf("%v", l.Operand1.Value)
+		}
+		if l.Operand2.Type == OperandNull {
+			if l.Operator == Eq {
+				return op1 + " IS NULL"
+			}
+			return op1 + " IS NOT NULL"
+		}
+		var op2 string
+		if l.Operand2.Type == OperandField {
+			if f, ok := l.Operand2.Value.(Field); ok {
+				op2 = f.Name
+			}
+		} else {
+			op2 = fmt.Sprintf("%v", l.Operand2.Value)
+		}
+		return op1 + " " + l.Operator.String() + " " + op2
+	}
+	switch n.Op {
+	case LogicOpAnd:
+		return n.Left.String() + " AND " + n.Right.String()
+	case LogicOpOr:
+		return "(" + n.Left.String() + " OR " + n.Right.String() + ")"
+	}
+	return ""
+}
+
+// Columns returns all column names referenced in the condition tree.
+func (n *ConditionNode) Columns() []string {
+	if n == nil {
+		return nil
+	}
+	if n.IsLeaf() {
+		var cols []string
+		if n.Leaf.Operand1.Type == OperandField {
+			if f, ok := n.Leaf.Operand1.Value.(Field); ok {
+				cols = append(cols, f.Name)
+			}
+		}
+		if n.Leaf.Operand2.Type == OperandField {
+			if f, ok := n.Leaf.Operand2.Value.(Field); ok {
+				cols = append(cols, f.Name)
+			}
+		}
+		return cols
+	}
+	return append(n.Left.Columns(), n.Right.Columns()...)
 }
 
 // ToDNF converts the condition tree to Disjunctive Normal Form.

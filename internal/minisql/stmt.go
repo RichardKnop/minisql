@@ -1350,6 +1350,10 @@ func isValueValidForColumn(col Column, val OptionalValue) error {
 	if !val.Valid {
 		return nil
 	}
+	// Skip validation for expression values — these are evaluated at execution time.
+	if _, isExpr := val.Value.(*Expr); isExpr {
+		return nil
+	}
 	switch col.Kind {
 	case Boolean:
 		_, ok := val.Value.(bool)

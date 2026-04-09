@@ -1,6 +1,8 @@
 package e2etests
 
-import "time"
+import (
+	"time"
+)
 
 // ── String functions ─────────────────────────────────────────────────────────
 

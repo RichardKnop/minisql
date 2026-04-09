@@ -65,6 +65,13 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 				col, _ := stmt.ColumnByName(colName)
 				oldValue, _ := row.GetValue(colName)
 
+				// Expression values are evaluated at execution time — their actual value
+				// and size are unknown statically, so we must use the full update path.
+				if _, isExpr := newValue.Value.(*Expr); isExpr {
+					indexChanges = true
+					break
+				}
+
 				if t.HasIndexOnColumn(colName) && !compareValue(col.Kind, oldValue, newValue) {
 					// Updating indexed column, can't update in place
 					indexChanges = true

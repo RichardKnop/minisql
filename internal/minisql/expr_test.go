@@ -984,3 +984,167 @@ func TestExpr_Eval_TO_TIMESTAMP(t *testing.T) {
 		assert.ErrorContains(t, err, "TO_TIMESTAMP")
 	})
 }
+
+// ── CASE WHEN ────────────────────────────────────────────────────────────────
+
+// caseRow builds a row with an int8 column "score" and a text column "status".
+func caseRow(score int64, status string) Row {
+	return NewRowWithValues(
+		[]Column{
+			{Name: "score", Kind: Int8},
+			{Name: "status", Kind: Text},
+		},
+		[]OptionalValue{
+			{Value: score, Valid: true},
+			{Value: NewTextPointer([]byte(status)), Valid: true},
+		},
+	)
+}
+
+func TestExpr_Eval_CaseWhen_Searched(t *testing.T) {
+	t.Parallel()
+
+	// CASE WHEN score >= 90 THEN 'A' WHEN score >= 70 THEN 'B' ELSE 'C' END
+	caseExpr := &Expr{
+		CaseClauses: []CaseWhen{
+			{
+				Cond: &ConditionNode{Leaf: &Condition{
+					Operand1: Operand{Type: OperandField, Value: Field{Name: "score"}},
+					Operator: Gte,
+					Operand2: Operand{Type: OperandInteger, Value: int64(90)},
+				}},
+				Then: textExpr("A"),
+			},
+			{
+				Cond: &ConditionNode{Leaf: &Condition{
+					Operand1: Operand{Type: OperandField, Value: Field{Name: "score"}},
+					Operator: Gte,
+					Operand2: Operand{Type: OperandInteger, Value: int64(70)},
+				}},
+				Then: textExpr("B"),
+			},
+		},
+		CaseElse: textExpr("C"),
+	}
+
+	t.Run("first clause matches", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, "A", evalText(t, caseExpr, caseRow(95, "")))
+	})
+
+	t.Run("second clause matches", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, "B", evalText(t, caseExpr, caseRow(75, "")))
+	})
+
+	t.Run("else branch", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, "C", evalText(t, caseExpr, caseRow(50, "")))
+	})
+}
+
+func TestExpr_Eval_CaseWhen_SearchedNoElse(t *testing.T) {
+	t.Parallel()
+
+	// CASE WHEN score >= 90 THEN 'A' END  (no ELSE → returns NULL when unmatched)
+	caseExpr := &Expr{
+		CaseClauses: []CaseWhen{
+			{
+				Cond: &ConditionNode{Leaf: &Condition{
+					Operand1: Operand{Type: OperandField, Value: Field{Name: "score"}},
+					Operator: Gte,
+					Operand2: Operand{Type: OperandInteger, Value: int64(90)},
+				}},
+				Then: textExpr("A"),
+			},
+		},
+	}
+
+	v, err := caseExpr.Eval(caseRow(50, ""))
+	require.NoError(t, err)
+	assert.Nil(t, v, "unmatched CASE without ELSE should return NULL")
+}
+
+func TestExpr_Eval_CaseWhen_Simple(t *testing.T) {
+	t.Parallel()
+
+	// CASE status WHEN 'active' THEN 1 WHEN 'pending' THEN 2 ELSE 0 END
+	caseExpr := &Expr{
+		CaseInput: &Expr{Column: "status"},
+		CaseClauses: []CaseWhen{
+			{When: textExpr("active"), Then: &Expr{Literal: int64(1)}},
+			{When: textExpr("pending"), Then: &Expr{Literal: int64(2)}},
+		},
+		CaseElse: &Expr{Literal: int64(0)},
+	}
+
+	t.Run("first value matches", func(t *testing.T) {
+		t.Parallel()
+		v, err := caseExpr.Eval(caseRow(0, "active"))
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), v)
+	})
+
+	t.Run("second value matches", func(t *testing.T) {
+		t.Parallel()
+		v, err := caseExpr.Eval(caseRow(0, "pending"))
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), v)
+	})
+
+	t.Run("else branch", func(t *testing.T) {
+		t.Parallel()
+		v, err := caseExpr.Eval(caseRow(0, "inactive"))
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), v)
+	})
+}
+
+func TestExpr_Eval_CaseWhen_String(t *testing.T) {
+	t.Parallel()
+
+	// Searched CASE: CASE WHEN score >= 90 THEN A ELSE C END
+	e := &Expr{
+		CaseClauses: []CaseWhen{
+			{
+				Cond: &ConditionNode{Leaf: &Condition{
+					Operand1: Operand{Type: OperandField, Value: Field{Name: "score"}},
+					Operator: Gte,
+					Operand2: Operand{Type: OperandInteger, Value: int64(90)},
+				}},
+				Then: textExpr("A"),
+			},
+		},
+		CaseElse: textExpr("C"),
+	}
+	assert.Equal(t, "CASE WHEN score >= 90 THEN A ELSE C END", e.String())
+
+	// Simple CASE: CASE status WHEN active THEN 1 END
+	e2 := &Expr{
+		CaseInput: &Expr{Column: "status"},
+		CaseClauses: []CaseWhen{
+			{When: textExpr("active"), Then: &Expr{Literal: int64(1)}},
+		},
+	}
+	assert.Equal(t, "CASE status WHEN active THEN 1 END", e2.String())
+}
+
+func TestExpr_Eval_CaseWhen_Columns(t *testing.T) {
+	t.Parallel()
+
+	// CASE WHEN score >= 90 THEN grade ELSE 'F' END
+	e := &Expr{
+		CaseClauses: []CaseWhen{
+			{
+				Cond: &ConditionNode{Leaf: &Condition{
+					Operand1: Operand{Type: OperandField, Value: Field{Name: "score"}},
+					Operator: Gte,
+					Operand2: Operand{Type: OperandInteger, Value: int64(90)},
+				}},
+				Then: &Expr{Column: "grade"},
+			},
+		},
+		CaseElse: textExpr("F"),
+	}
+	assert.Equal(t, []string{"score", "grade"}, e.Columns())
+}

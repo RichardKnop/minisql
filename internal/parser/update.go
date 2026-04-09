@@ -91,7 +91,7 @@ func (p *parserItem) doParseUpdate() error {
 			}
 			var updateValue minisql.OptionalValue
 			// Plain numeric/bool literal — no expression overhead needed.
-			if expr.FuncName == "" && !expr.IsNull && expr.Column == "" && expr.Left == nil {
+			if expr.FuncName == "" && !expr.IsNull && expr.Column == "" && expr.Left == nil && expr.CaseClauses == nil {
 				updateValue = minisql.OptionalValue{Value: expr.Literal, Valid: true}
 			} else {
 				// Column reference, binary expression, or function call — store as
