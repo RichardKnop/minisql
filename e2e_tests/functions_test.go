@@ -261,3 +261,118 @@ func (s *TestSuite) TestFunctions_COALESCE_WithAlias() {
 	s.Require().NoError(err)
 	s.Equal(int64(99), effective)
 }
+
+// ── Numeric functions ─────────────────────────────────────────────────────────
+
+func (s *TestSuite) TestNumericFunctions_ABS() {
+	_, err := s.db.Exec(`create table "readings" (
+		id int8 primary key autoincrement,
+		delta int8 not null
+	)`)
+	s.Require().NoError(err)
+
+	istmt, err := s.db.Prepare(`insert into "readings" (delta) values (?)`)
+	s.Require().NoError(err)
+	_, err = istmt.Exec(int64(-42))
+	s.Require().NoError(err)
+	_, err = istmt.Exec(int64(17))
+	s.Require().NoError(err)
+
+	rows, err := s.db.Query(`select ABS(delta) from "readings" order by id`)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	var vals []int64
+	for rows.Next() {
+		var v int64
+		s.Require().NoError(rows.Scan(&v))
+		vals = append(vals, v)
+	}
+	s.Require().NoError(rows.Err())
+	s.Require().Len(vals, 2)
+	s.Equal(int64(42), vals[0])
+	s.Equal(int64(17), vals[1])
+}
+
+func (s *TestSuite) TestNumericFunctions_FLOOR_CEIL() {
+	_, err := s.db.Exec(`create table "prices" (
+		id int8 primary key autoincrement,
+		amount double not null
+	)`)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`insert into "prices" (amount) values (9.99)`)
+	s.Require().NoError(err)
+
+	var floored, ceiled float64
+	err = s.db.QueryRow(`select FLOOR(amount), CEIL(amount) from "prices"`).Scan(&floored, &ceiled)
+	s.Require().NoError(err)
+	s.Equal(float64(9), floored)
+	s.Equal(float64(10), ceiled)
+}
+
+func (s *TestSuite) TestNumericFunctions_ROUND() {
+	_, err := s.db.Exec(`create table "measurements" (
+		id int8 primary key autoincrement,
+		value double not null
+	)`)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`insert into "measurements" (value) values (3.14159)`)
+	s.Require().NoError(err)
+
+	var rounded, rounded2 float64
+	err = s.db.QueryRow(`select ROUND(value), ROUND(value, 2) from "measurements"`).Scan(&rounded, &rounded2)
+	s.Require().NoError(err)
+	s.Equal(float64(3), rounded)
+	s.InDelta(float64(3.14), rounded2, 1e-9)
+}
+
+func (s *TestSuite) TestNumericFunctions_MOD() {
+	_, err := s.db.Exec(`create table "numbers" (
+		id int8 primary key autoincrement,
+		val int8 not null
+	)`)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`insert into "numbers" (val) values (10)`)
+	s.Require().NoError(err)
+	_, err = s.db.Exec(`insert into "numbers" (val) values (9)`)
+	s.Require().NoError(err)
+
+	rows, err := s.db.Query(`select MOD(val, 3) from "numbers" order by id`)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	var vals []int64
+	for rows.Next() {
+		var v int64
+		s.Require().NoError(rows.Scan(&v))
+		vals = append(vals, v)
+	}
+	s.Require().NoError(rows.Err())
+	s.Require().Len(vals, 2)
+	s.Equal(int64(1), vals[0]) // 10 % 3 = 1
+	s.Equal(int64(0), vals[1]) // 9  % 3 = 0
+}
+
+func (s *TestSuite) TestNumericFunctions_UpdateWithABS() {
+	_, err := s.db.Exec(`create table "adjustments" (
+		id int8 primary key autoincrement,
+		amount int8 not null
+	)`)
+	s.Require().NoError(err)
+
+	istmt, err := s.db.Prepare(`insert into "adjustments" (amount) values (?)`)
+	s.Require().NoError(err)
+	_, err = istmt.Exec(int64(-50))
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`update "adjustments" set amount = ABS(amount)`)
+	s.Require().NoError(err)
+
+	var amount int64
+	err = s.db.QueryRow(`select amount from "adjustments"`).Scan(&amount)
+	s.Require().NoError(err)
+	s.Equal(int64(50), amount)
+}
