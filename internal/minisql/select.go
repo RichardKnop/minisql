@@ -347,7 +347,7 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, filteredPipe 
 		for row := range filteredPipe {
 			// Compute group key from the GROUP BY columns.
 			groupRow := row.OnlyFields(stmt.GroupBy...)
-			key := rowDistinctKey(groupRow)
+			key := groupRow.rowDistinctKey()
 
 			gs, exists := groups[key]
 			if !exists {
@@ -592,7 +592,7 @@ func (t *Table) selectStreaming(stmt Statement, filteredPipe chan Row, errorsPip
 				return
 			}
 			if stmt.Distinct {
-				key := rowDistinctKey(projected)
+				key := projected.rowDistinctKey()
 				if _, dup := seen[key]; dup {
 					continue
 				}
@@ -1003,9 +1003,9 @@ func exprSourceFields(fields []Field) []Field {
 // rowDistinctKey builds a string key from a projected row's values for DISTINCT deduplication.
 // Each value is encoded with a type prefix so that different types with the same printed
 // representation (e.g. int64(1) and float64(1)) are never considered equal.
-func rowDistinctKey(row Row) string {
+func (r Row) rowDistinctKey() string {
 	var b strings.Builder
-	for i, v := range row.Values {
+	for i, v := range r.Values {
 		if i > 0 {
 			b.WriteByte('\x1f') // ASCII unit separator
 		}
@@ -1042,7 +1042,7 @@ func deduplicateRows(rows []Row, fields []Field) []Row {
 	out := make([]Row, 0, len(rows))
 	for _, row := range rows {
 		projected := row.OnlyFields(fields...)
-		key := rowDistinctKey(projected)
+		key := projected.rowDistinctKey()
 		if _, dup := seen[key]; dup {
 			continue
 		}

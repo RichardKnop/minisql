@@ -1027,3 +1027,141 @@ func TestParse_SelectArithmetic(t *testing.T) {
 		})
 	}
 }
+
+func TestParse_SelectScalarFunctions(t *testing.T) {
+	t.Parallel()
+
+	testCases := []testCase{
+		{
+			"COALESCE with two column args",
+			"SELECT COALESCE(a, b) FROM t;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "t",
+					Fields: []minisql.Field{
+						{
+							Name: "COALESCE(a, b)",
+							Expr: &minisql.Expr{
+								FuncName: "COALESCE",
+								Args: []*minisql.Expr{
+									{Column: "a"},
+									{Column: "b"},
+								},
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"COALESCE with literal fallback",
+			"SELECT COALESCE(score, 0) FROM t;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "t",
+					Fields: []minisql.Field{
+						{
+							Name: "COALESCE(score, 0)",
+							Expr: &minisql.Expr{
+								FuncName: "COALESCE",
+								Args: []*minisql.Expr{
+									{Column: "score"},
+									{Literal: int64(0)},
+								},
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"COALESCE with NULL literal",
+			"SELECT COALESCE(a, NULL, b) FROM t;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "t",
+					Fields: []minisql.Field{
+						{
+							Name: "COALESCE(a, NULL, b)",
+							Expr: &minisql.Expr{
+								FuncName: "COALESCE",
+								Args: []*minisql.Expr{
+									{Column: "a"},
+									{IsNull: true},
+									{Column: "b"},
+								},
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"COALESCE with alias",
+			"SELECT COALESCE(name, 'unknown') AS display_name FROM t;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "t",
+					Fields: []minisql.Field{
+						{
+							Name:  "COALESCE(name, unknown)",
+							Alias: "display_name",
+							Expr: &minisql.Expr{
+								FuncName: "COALESCE",
+								Args: []*minisql.Expr{
+									{Column: "name"},
+									{Literal: minisql.NewTextPointer([]byte("unknown"))},
+								},
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"NULLIF with column and literal",
+			"SELECT NULLIF(status, 0) FROM t;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "t",
+					Fields: []minisql.Field{
+						{
+							Name: "NULLIF(status, 0)",
+							Expr: &minisql.Expr{
+								FuncName: "NULLIF",
+								Args: []*minisql.Expr{
+									{Column: "status"},
+									{Literal: int64(0)},
+								},
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+	}
+
+	for _, aTestCase := range testCases {
+		t.Run(aTestCase.Name, func(t *testing.T) {
+			t.Parallel()
+			aStatement, err := New().Parse(context.Background(), aTestCase.SQL)
+			if aTestCase.Err != nil {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, aTestCase.Err)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, aTestCase.Expected, aStatement)
+		})
+	}
+}

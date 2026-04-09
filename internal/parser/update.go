@@ -90,12 +90,12 @@ func (p *parserItem) doParseUpdate() error {
 				return p.wrapErr(errUpdateExpectedQuotedValueOrInt)
 			}
 			var updateValue minisql.OptionalValue
-			// Plain numeric literal — no expression overhead needed.
-			if expr.Column == "" && expr.Left == nil {
+			// Plain numeric/bool literal — no expression overhead needed.
+			if expr.FuncName == "" && !expr.IsNull && expr.Column == "" && expr.Left == nil {
 				updateValue = minisql.OptionalValue{Value: expr.Literal, Valid: true}
 			} else {
-				// Column reference or binary expression — store as *Expr for
-				// runtime evaluation against the current row.
+				// Column reference, binary expression, or function call — store as
+				// *Expr for runtime evaluation against the current row.
 				updateValue = minisql.OptionalValue{Value: expr, Valid: true}
 			}
 			p.setUpdate(p.nextUpdateField, updateValue)

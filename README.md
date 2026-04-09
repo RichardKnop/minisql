@@ -312,6 +312,8 @@ Important behavior and current non-goals:
 | `LIMIT` and `OFFSET` | Basic pagination |
 | `ORDER BY` | Single column only |
 | `GROUP BY` and `HAVING` | Aggregate functions: `COUNT`, `MAX`, `MIN`, `SUM`, `AVG` |
+| Arithmetic expressions | `+`, `-`, `*`, `/` in `SELECT` and `UPDATE SET` (e.g. `price * 1.1`, `count + 1`) |
+| Scalar functions | `COALESCE(a, b, ...)` returns first non-NULL argument; `NULLIF(a, b)` returns NULL when `a = b`, else `a`. Both usable in `SELECT`, `UPDATE SET`, and nested inside arithmetic |
 | `VACUUM` | Rebuilds the database file, repacking it into a minimal amount of disk space (similar to SQLite) |
 | `PRAGMA quick_check` | A cheap structural health check of the open database. |
 | `PRAGMA integrity_check` | A deeper structural and logical check: page graph, overflow chains, and table/index consistency. Prefer offline use for large databases |
