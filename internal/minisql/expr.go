@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -439,6 +440,148 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 			buf.WriteString(s)
 		}
 		return NewTextPointer([]byte(buf.String())), nil
+
+	// ── Numeric functions ────────────────────────────────────────────────────
+
+	case "ABS":
+		if len(e.Args) != 1 {
+			return nil, fmt.Errorf("ABS requires exactly 1 argument")
+		}
+		v, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if v == nil {
+			return nil, nil
+		}
+		switch n := v.(type) {
+		case int32:
+			if n < 0 {
+				return -n, nil
+			}
+			return n, nil
+		case int64:
+			if n < 0 {
+				return -n, nil
+			}
+			return n, nil
+		case float32:
+			if n < 0 {
+				return -n, nil
+			}
+			return n, nil
+		case float64:
+			if n < 0 {
+				return -n, nil
+			}
+			return n, nil
+		default:
+			return nil, fmt.Errorf("ABS: argument must be numeric, got %T", v)
+		}
+
+	case "FLOOR", "CEIL":
+		if len(e.Args) != 1 {
+			return nil, fmt.Errorf("%s requires exactly 1 argument", e.FuncName)
+		}
+		v, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if v == nil {
+			return nil, nil
+		}
+		// Integer inputs are already whole numbers — return as-is.
+		if n, ok := toInt64(v); ok {
+			return n, nil
+		}
+		f, ferr := toFloat64(v)
+		if ferr != nil {
+			return nil, fmt.Errorf("%s: argument must be numeric, got %T", e.FuncName, v)
+		}
+		if e.FuncName == "FLOOR" {
+			return math.Floor(f), nil
+		}
+		return math.Ceil(f), nil
+
+	case "ROUND":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			return nil, fmt.Errorf("ROUND requires 1 or 2 arguments")
+		}
+		v, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if v == nil {
+			return nil, nil
+		}
+		d := int64(0)
+		if len(e.Args) == 2 {
+			dv, err := e.Args[1].Eval(row)
+			if err != nil {
+				return nil, err
+			}
+			if dv == nil {
+				return nil, nil
+			}
+			var ok bool
+			d, ok = toInt64(dv)
+			if !ok {
+				return nil, fmt.Errorf("ROUND: decimal places must be an integer, got %T", dv)
+			}
+		}
+		// Integer inputs: rounding has no effect regardless of d.
+		if n, ok := toInt64(v); ok {
+			return n, nil
+		}
+		f, ferr := toFloat64(v)
+		if ferr != nil {
+			return nil, fmt.Errorf("ROUND: argument must be numeric, got %T", v)
+		}
+		if d == 0 {
+			return math.Round(f), nil
+		}
+		factor := math.Pow(10, float64(d))
+		return math.Round(f*factor) / factor, nil
+
+	case "MOD":
+		if len(e.Args) != 2 {
+			return nil, fmt.Errorf("MOD requires exactly 2 arguments")
+		}
+		av, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if av == nil {
+			return nil, nil
+		}
+		bv, err := e.Args[1].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if bv == nil {
+			return nil, nil
+		}
+		// Integer fast-path.
+		ai, aIsInt := toInt64(av)
+		bi, bIsInt := toInt64(bv)
+		if aIsInt && bIsInt {
+			if bi == 0 {
+				return nil, fmt.Errorf("MOD: division by zero")
+			}
+			return ai % bi, nil
+		}
+		af, aerr := toFloat64(av)
+		bf, berr := toFloat64(bv)
+		if aerr != nil {
+			return nil, fmt.Errorf("MOD: argument 1 must be numeric, got %T", av)
+		}
+		if berr != nil {
+			return nil, fmt.Errorf("MOD: argument 2 must be numeric, got %T", bv)
+		}
+		if bf == 0 {
+			return nil, fmt.Errorf("MOD: division by zero")
+		}
+		return math.Mod(af, bf), nil
 
 	default:
 		return nil, fmt.Errorf("unknown function %q", e.FuncName)

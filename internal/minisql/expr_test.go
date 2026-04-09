@@ -629,3 +629,208 @@ func TestExpr_Eval_StringFunctions_NestInArithmetic(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(6), v)
 }
+
+func TestExpr_Eval_ABS(t *testing.T) {
+	t.Parallel()
+
+	row := NewRow(nil)
+
+	cases := []struct {
+		name string
+		arg  any
+		want any
+	}{
+		{"positive int64", int64(5), int64(5)},
+		{"negative int64", int64(-5), int64(5)},
+		{"zero int64", int64(0), int64(0)},
+		{"positive float64", float64(3.14), float64(3.14)},
+		{"negative float64", float64(-3.14), float64(3.14)},
+		{"positive int32", int32(7), int32(7)},
+		{"negative int32", int32(-7), int32(7)},
+		{"positive float32", float32(1.5), float32(1.5)},
+		{"negative float32", float32(-1.5), float32(1.5)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e := &Expr{FuncName: "ABS", Args: []*Expr{{Literal: tc.arg}}}
+			v, err := e.Eval(row)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, v)
+		})
+	}
+
+	t.Run("null propagates", func(t *testing.T) {
+		t.Parallel()
+		v, err := (&Expr{FuncName: "ABS", Args: []*Expr{{IsNull: true}}}).Eval(row)
+		require.NoError(t, err)
+		assert.Nil(t, v)
+	})
+
+	t.Run("wrong arg count", func(t *testing.T) {
+		t.Parallel()
+		_, err := (&Expr{FuncName: "ABS", Args: nil}).Eval(row)
+		assert.ErrorContains(t, err, "exactly 1 argument")
+	})
+}
+
+func TestExpr_Eval_FLOOR_CEIL(t *testing.T) {
+	t.Parallel()
+
+	row := NewRow(nil)
+
+	t.Run("FLOOR float", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "FLOOR", Args: []*Expr{{Literal: float64(3.9)}}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, float64(3), v)
+	})
+
+	t.Run("CEIL float", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "CEIL", Args: []*Expr{{Literal: float64(3.1)}}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, float64(4), v)
+	})
+
+	t.Run("FLOOR integer is unchanged", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "FLOOR", Args: []*Expr{{Literal: int64(5)}}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, int64(5), v)
+	})
+
+	t.Run("CEIL integer is unchanged", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "CEIL", Args: []*Expr{{Literal: int64(5)}}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, int64(5), v)
+	})
+
+	t.Run("FLOOR negative float", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "FLOOR", Args: []*Expr{{Literal: float64(-2.3)}}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, float64(-3), v)
+	})
+
+	t.Run("CEIL negative float", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "CEIL", Args: []*Expr{{Literal: float64(-2.7)}}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, float64(-2), v)
+	})
+
+	t.Run("null propagates", func(t *testing.T) {
+		t.Parallel()
+		v, err := (&Expr{FuncName: "FLOOR", Args: []*Expr{{IsNull: true}}}).Eval(row)
+		require.NoError(t, err)
+		assert.Nil(t, v)
+	})
+}
+
+func TestExpr_Eval_ROUND(t *testing.T) {
+	t.Parallel()
+
+	row := NewRow(nil)
+
+	t.Run("round to nearest integer", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "ROUND", Args: []*Expr{{Literal: float64(3.5)}}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, float64(4), v)
+	})
+
+	t.Run("round down", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "ROUND", Args: []*Expr{{Literal: float64(3.4)}}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, float64(3), v)
+	})
+
+	t.Run("round to 2 decimal places", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "ROUND", Args: []*Expr{{Literal: float64(3.14159)}, {Literal: int64(2)}}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.InDelta(t, float64(3.14), v, 1e-9)
+	})
+
+	t.Run("integer input is unchanged", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "ROUND", Args: []*Expr{{Literal: int64(7)}, {Literal: int64(2)}}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, int64(7), v)
+	})
+
+	t.Run("null propagates", func(t *testing.T) {
+		t.Parallel()
+		v, err := (&Expr{FuncName: "ROUND", Args: []*Expr{{IsNull: true}}}).Eval(row)
+		require.NoError(t, err)
+		assert.Nil(t, v)
+	})
+
+	t.Run("wrong arg count", func(t *testing.T) {
+		t.Parallel()
+		_, err := (&Expr{FuncName: "ROUND", Args: nil}).Eval(row)
+		assert.ErrorContains(t, err, "1 or 2 arguments")
+	})
+}
+
+func TestExpr_Eval_MOD(t *testing.T) {
+	t.Parallel()
+
+	row := NewRow(nil)
+
+	t.Run("integer modulo", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "MOD", Args: []*Expr{{Literal: int64(10)}, {Literal: int64(3)}}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), v)
+	})
+
+	t.Run("exact division gives zero", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "MOD", Args: []*Expr{{Literal: int64(9)}, {Literal: int64(3)}}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), v)
+	})
+
+	t.Run("float modulo", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "MOD", Args: []*Expr{{Literal: float64(10.5)}, {Literal: float64(3.0)}}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.InDelta(t, float64(1.5), v, 1e-9)
+	})
+
+	t.Run("division by zero errors", func(t *testing.T) {
+		t.Parallel()
+		_, err := (&Expr{FuncName: "MOD", Args: []*Expr{{Literal: int64(5)}, {Literal: int64(0)}}}).Eval(row)
+		assert.ErrorContains(t, err, "division by zero")
+	})
+
+	t.Run("null propagates", func(t *testing.T) {
+		t.Parallel()
+		v, err := (&Expr{FuncName: "MOD", Args: []*Expr{{IsNull: true}, {Literal: int64(3)}}}).Eval(row)
+		require.NoError(t, err)
+		assert.Nil(t, v)
+	})
+
+	t.Run("wrong arg count", func(t *testing.T) {
+		t.Parallel()
+		_, err := (&Expr{FuncName: "MOD", Args: []*Expr{{Literal: int64(1)}}}).Eval(row)
+		assert.ErrorContains(t, err, "exactly 2 arguments")
+	})
+}

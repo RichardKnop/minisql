@@ -169,7 +169,11 @@ func isBuiltinFunction(name string) bool {
 		"LENGTH",
 		"SUBSTR",
 		"REPLACE",
-		"CONCAT":
+		"CONCAT",
+		"ABS",
+		"FLOOR", "CEIL",
+		"ROUND",
+		"MOD":
 		return true
 	}
 	return false
