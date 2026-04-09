@@ -314,6 +314,7 @@ Important behavior and current non-goals:
 | `GROUP BY` and `HAVING` | Aggregate functions: `COUNT`, `MAX`, `MIN`, `SUM`, `AVG` |
 | Arithmetic expressions | `+`, `-`, `*`, `/` in `SELECT` and `UPDATE SET` (e.g. `price * 1.1`, `count + 1`) |
 | Scalar functions | `COALESCE(a, b, ...)` returns first non-NULL argument; `NULLIF(a, b)` returns NULL when `a = b`, else `a`. Both usable in `SELECT`, `UPDATE SET`, and nested inside arithmetic |
+| String functions | `UPPER(s)`, `LOWER(s)` — case conversion; `TRIM(s[, chars])`, `LTRIM(s[, chars])`, `RTRIM(s[, chars])` — strip whitespace or custom characters; `LENGTH(s)` — byte length; `SUBSTR(s, start[, len])` — 1-based substring; `REPLACE(s, from, to)` — replace all occurrences; `CONCAT(a, b, ...)` — concatenate (NULLs skipped). All usable in `SELECT`, `UPDATE SET`, and composable with each other and arithmetic |
 | `VACUUM` | Rebuilds the database file, repacking it into a minimal amount of disk space (similar to SQLite) |
 | `PRAGMA quick_check` | A cheap structural health check of the open database. |
 | `PRAGMA integrity_check` | A deeper structural and logical check: page graph, overflow chains, and table/index consistency. Prefer offline use for large databases |

@@ -1,5 +1,126 @@
 package e2etests
 
+// ── String functions ─────────────────────────────────────────────────────────
+
+func (s *TestSuite) TestStringFunctions_UPPER_LOWER() {
+	_, err := s.db.Exec(createUsersTableSQL)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`insert into "users" (email, name) values ('alice@example.com', 'Alice Smith')`)
+	s.Require().NoError(err)
+
+	var upper, lower string
+	err = s.db.QueryRow(`select UPPER(name), LOWER(name) from "users"`).Scan(&upper, &lower)
+	s.Require().NoError(err)
+	s.Equal("ALICE SMITH", upper)
+	s.Equal("alice smith", lower)
+}
+
+func (s *TestSuite) TestStringFunctions_TRIM() {
+	_, err := s.db.Exec(`create table "notes" (
+		id int8 primary key autoincrement,
+		body text not null
+	)`)
+	s.Require().NoError(err)
+
+	stmt, err := s.db.Prepare(`insert into "notes" (body) values (?)`)
+	s.Require().NoError(err)
+	_, err = stmt.Exec("  hello world  ")
+	s.Require().NoError(err)
+
+	var trimmed, ltrimmed, rtrimmed string
+	err = s.db.QueryRow(`select TRIM(body), LTRIM(body), RTRIM(body) from "notes"`).Scan(&trimmed, &ltrimmed, &rtrimmed)
+	s.Require().NoError(err)
+	s.Equal("hello world", trimmed)
+	s.Equal("hello world  ", ltrimmed)
+	s.Equal("  hello world", rtrimmed)
+}
+
+func (s *TestSuite) TestStringFunctions_LENGTH() {
+	_, err := s.db.Exec(createUsersTableSQL)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`insert into "users" (email, name) values ('bob@example.com', 'Bob')`)
+	s.Require().NoError(err)
+
+	var length int64
+	err = s.db.QueryRow(`select LENGTH(name) from "users"`).Scan(&length)
+	s.Require().NoError(err)
+	s.Equal(int64(3), length)
+}
+
+func (s *TestSuite) TestStringFunctions_SUBSTR() {
+	_, err := s.db.Exec(createUsersTableSQL)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`insert into "users" (email, name) values ('carol@example.com', 'Carol')`)
+	s.Require().NoError(err)
+
+	var sub2, sub2len3 string
+	err = s.db.QueryRow(`select SUBSTR(name, 2), SUBSTR(name, 2, 3) from "users"`).Scan(&sub2, &sub2len3)
+	s.Require().NoError(err)
+	s.Equal("arol", sub2)
+	s.Equal("aro", sub2len3)
+}
+
+func (s *TestSuite) TestStringFunctions_REPLACE() {
+	_, err := s.db.Exec(createUsersTableSQL)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`insert into "users" (email, name) values ('dave@example.com', 'Dave')`)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`update "users" set email = REPLACE(email, 'example.com', 'test.org')`)
+	s.Require().NoError(err)
+
+	var email string
+	err = s.db.QueryRow(`select email from "users"`).Scan(&email)
+	s.Require().NoError(err)
+	s.Equal("dave@test.org", email)
+}
+
+func (s *TestSuite) TestStringFunctions_CONCAT() {
+	_, err := s.db.Exec(createUsersTableSQL)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`insert into "users" (email, name) values ('eve@example.com', 'Eve')`)
+	s.Require().NoError(err)
+
+	var full string
+	err = s.db.QueryRow(`select CONCAT(name, ' <', email, '>') from "users"`).Scan(&full)
+	s.Require().NoError(err)
+	s.Equal("Eve <eve@example.com>", full)
+}
+
+func (s *TestSuite) TestStringFunctions_CONCAT_SkipsNulls() {
+	_, err := s.db.Exec(createUsersTableSQL)
+	s.Require().NoError(err)
+
+	// name is NULL
+	_, err = s.db.Exec(`insert into "users" (email, name) values ('frank@example.com', NULL)`)
+	s.Require().NoError(err)
+
+	var result string
+	err = s.db.QueryRow(`select CONCAT('user:', email) from "users"`).Scan(&result)
+	s.Require().NoError(err)
+	s.Equal("user:frank@example.com", result)
+}
+
+func (s *TestSuite) TestStringFunctions_NestedFunctions() {
+	_, err := s.db.Exec(createUsersTableSQL)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`insert into "users" (email, name) values ('grace@example.com', '  Grace  ')`)
+	s.Require().NoError(err)
+
+	var result string
+	err = s.db.QueryRow(`select UPPER(TRIM(name)) from "users"`).Scan(&result)
+	s.Require().NoError(err)
+	s.Equal("GRACE", result)
+}
+
+// ── NULL-handling functions ───────────────────────────────────────────────────
+
 func (s *TestSuite) TestFunctions_COALESCE_SelectFallbackToLiteral() {
 	_, err := s.db.Exec(`create table "scores" (
 		id int8 primary key autoincrement,
@@ -121,8 +242,8 @@ func (s *TestSuite) TestFunctions_NULLIF_SelectReturnsNullOnMatch() {
 	}
 	s.Require().NoError(rows.Err())
 	s.Require().Len(results, 2)
-	s.Nil(results[0])                  // hits=0 → NULLIF returns NULL
-	s.Equal(int64(42), *results[1])    // hits=42 → returned as-is
+	s.Nil(results[0])               // hits=0 → NULLIF returns NULL
+	s.Equal(int64(42), *results[1]) // hits=42 → returned as-is
 }
 
 func (s *TestSuite) TestFunctions_COALESCE_WithAlias() {

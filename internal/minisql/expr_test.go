@@ -374,3 +374,258 @@ func TestExpr_Eval_NULLIF(t *testing.T) {
 		assert.ErrorContains(t, err, "exactly 2 arguments")
 	})
 }
+
+// rowWithText returns a single-column row containing a TEXT value.
+func rowWithText(name, val string) Row {
+	return NewRowWithValues(
+		[]Column{{Name: name, Kind: Text}},
+		[]OptionalValue{{Value: NewTextPointer([]byte(val)), Valid: true}},
+	)
+}
+
+// textExpr builds a literal TextPointer expression.
+func textExpr(s string) *Expr {
+	return &Expr{Literal: NewTextPointer([]byte(s))}
+}
+
+// evalText is a test helper: evaluates expr, asserts no error and returns the
+// string content of the resulting TextPointer.
+func evalText(t *testing.T, e *Expr, row Row) string {
+	t.Helper()
+	v, err := e.Eval(row)
+	require.NoError(t, err)
+	tp, ok := v.(TextPointer)
+	require.True(t, ok, "expected TextPointer result, got %T", v)
+	return string(tp.Data)
+}
+
+func TestExpr_Eval_UPPER_LOWER(t *testing.T) {
+	t.Parallel()
+
+	row := rowWithText("name", "Hello World")
+
+	t.Run("UPPER", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "UPPER", Args: []*Expr{{Column: "name"}}}
+		assert.Equal(t, "HELLO WORLD", evalText(t, e, row))
+	})
+
+	t.Run("LOWER", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "LOWER", Args: []*Expr{{Column: "name"}}}
+		assert.Equal(t, "hello world", evalText(t, e, row))
+	})
+
+	t.Run("UPPER null propagates", func(t *testing.T) {
+		t.Parallel()
+		nullRow := NewRowWithValues([]Column{{Name: "name", Kind: Text}}, []OptionalValue{{Valid: false}})
+		v, err := (&Expr{FuncName: "UPPER", Args: []*Expr{{Column: "name"}}}).Eval(nullRow)
+		require.NoError(t, err)
+		assert.Nil(t, v)
+	})
+
+	t.Run("UPPER on literal", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "UPPER", Args: []*Expr{textExpr("hello")}}
+		assert.Equal(t, "HELLO", evalText(t, e, NewRow(nil)))
+	})
+
+	t.Run("wrong arg count", func(t *testing.T) {
+		t.Parallel()
+		_, err := (&Expr{FuncName: "UPPER", Args: nil}).Eval(NewRow(nil))
+		assert.ErrorContains(t, err, "exactly 1 argument")
+	})
+}
+
+func TestExpr_Eval_TRIM(t *testing.T) {
+	t.Parallel()
+
+	t.Run("TRIM whitespace", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "TRIM", Args: []*Expr{textExpr("  hello  ")}}
+		assert.Equal(t, "hello", evalText(t, e, NewRow(nil)))
+	})
+
+	t.Run("LTRIM whitespace", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "LTRIM", Args: []*Expr{textExpr("  hello  ")}}
+		assert.Equal(t, "hello  ", evalText(t, e, NewRow(nil)))
+	})
+
+	t.Run("RTRIM whitespace", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "RTRIM", Args: []*Expr{textExpr("  hello  ")}}
+		assert.Equal(t, "  hello", evalText(t, e, NewRow(nil)))
+	})
+
+	t.Run("TRIM custom cutset", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "TRIM", Args: []*Expr{textExpr("xxhelloxx"), textExpr("x")}}
+		assert.Equal(t, "hello", evalText(t, e, NewRow(nil)))
+	})
+
+	t.Run("TRIM null propagates", func(t *testing.T) {
+		t.Parallel()
+		v, err := (&Expr{FuncName: "TRIM", Args: []*Expr{{IsNull: true}}}).Eval(NewRow(nil))
+		require.NoError(t, err)
+		assert.Nil(t, v)
+	})
+
+	t.Run("already trimmed string is unchanged", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "TRIM", Args: []*Expr{textExpr("hello")}}
+		assert.Equal(t, "hello", evalText(t, e, NewRow(nil)))
+	})
+}
+
+func TestExpr_Eval_LENGTH(t *testing.T) {
+	t.Parallel()
+
+	t.Run("byte length of ASCII string", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "LENGTH", Args: []*Expr{textExpr("hello")}}
+		v, err := e.Eval(NewRow(nil))
+		require.NoError(t, err)
+		assert.Equal(t, int64(5), v)
+	})
+
+	t.Run("empty string has length 0", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "LENGTH", Args: []*Expr{textExpr("")}}
+		v, err := e.Eval(NewRow(nil))
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), v)
+	})
+
+	t.Run("null propagates", func(t *testing.T) {
+		t.Parallel()
+		v, err := (&Expr{FuncName: "LENGTH", Args: []*Expr{{IsNull: true}}}).Eval(NewRow(nil))
+		require.NoError(t, err)
+		assert.Nil(t, v)
+	})
+
+	t.Run("from column", func(t *testing.T) {
+		t.Parallel()
+		row := rowWithText("s", "abcde")
+		e := &Expr{FuncName: "LENGTH", Args: []*Expr{{Column: "s"}}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, int64(5), v)
+	})
+}
+
+func TestExpr_Eval_SUBSTR(t *testing.T) {
+	t.Parallel()
+
+	t.Run("from start to end", func(t *testing.T) {
+		t.Parallel()
+		// SUBSTR('hello', 2) = 'ello'
+		e := &Expr{FuncName: "SUBSTR", Args: []*Expr{textExpr("hello"), {Literal: int64(2)}}}
+		assert.Equal(t, "ello", evalText(t, e, NewRow(nil)))
+	})
+
+	t.Run("with length", func(t *testing.T) {
+		t.Parallel()
+		// SUBSTR('hello', 2, 3) = 'ell'
+		e := &Expr{FuncName: "SUBSTR", Args: []*Expr{textExpr("hello"), {Literal: int64(2)}, {Literal: int64(3)}}}
+		assert.Equal(t, "ell", evalText(t, e, NewRow(nil)))
+	})
+
+	t.Run("start at 1", func(t *testing.T) {
+		t.Parallel()
+		// SUBSTR('hello', 1, 3) = 'hel'
+		e := &Expr{FuncName: "SUBSTR", Args: []*Expr{textExpr("hello"), {Literal: int64(1)}, {Literal: int64(3)}}}
+		assert.Equal(t, "hel", evalText(t, e, NewRow(nil)))
+	})
+
+	t.Run("start beyond end returns empty", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "SUBSTR", Args: []*Expr{textExpr("hi"), {Literal: int64(10)}}}
+		assert.Equal(t, "", evalText(t, e, NewRow(nil)))
+	})
+
+	t.Run("length exceeds string returns remainder", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "SUBSTR", Args: []*Expr{textExpr("hello"), {Literal: int64(3)}, {Literal: int64(100)}}}
+		assert.Equal(t, "llo", evalText(t, e, NewRow(nil)))
+	})
+
+	t.Run("null propagates", func(t *testing.T) {
+		t.Parallel()
+		v, err := (&Expr{FuncName: "SUBSTR", Args: []*Expr{{IsNull: true}, {Literal: int64(1)}}}).Eval(NewRow(nil))
+		require.NoError(t, err)
+		assert.Nil(t, v)
+	})
+}
+
+func TestExpr_Eval_REPLACE(t *testing.T) {
+	t.Parallel()
+
+	t.Run("replaces all occurrences", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "REPLACE", Args: []*Expr{textExpr("aabbaa"), textExpr("aa"), textExpr("x")}}
+		assert.Equal(t, "xbbx", evalText(t, e, NewRow(nil)))
+	})
+
+	t.Run("no match returns original", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "REPLACE", Args: []*Expr{textExpr("hello"), textExpr("z"), textExpr("x")}}
+		assert.Equal(t, "hello", evalText(t, e, NewRow(nil)))
+	})
+
+	t.Run("null propagates", func(t *testing.T) {
+		t.Parallel()
+		v, err := (&Expr{FuncName: "REPLACE", Args: []*Expr{{IsNull: true}, textExpr("a"), textExpr("b")}}).Eval(NewRow(nil))
+		require.NoError(t, err)
+		assert.Nil(t, v)
+	})
+}
+
+func TestExpr_Eval_CONCAT(t *testing.T) {
+	t.Parallel()
+
+	t.Run("concatenates strings", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "CONCAT", Args: []*Expr{textExpr("hello"), textExpr(", "), textExpr("world")}}
+		assert.Equal(t, "hello, world", evalText(t, e, NewRow(nil)))
+	})
+
+	t.Run("skips null args", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "CONCAT", Args: []*Expr{textExpr("a"), {IsNull: true}, textExpr("b")}}
+		assert.Equal(t, "ab", evalText(t, e, NewRow(nil)))
+	})
+
+	t.Run("all null returns empty string", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "CONCAT", Args: []*Expr{{IsNull: true}, {IsNull: true}}}
+		assert.Equal(t, "", evalText(t, e, NewRow(nil)))
+	})
+
+	t.Run("from columns", func(t *testing.T) {
+		t.Parallel()
+		row := NewRowWithValues(
+			[]Column{{Name: "first", Kind: Text}, {Name: "last", Kind: Text}},
+			[]OptionalValue{
+				{Value: NewTextPointer([]byte("John")), Valid: true},
+				{Value: NewTextPointer([]byte("Doe")), Valid: true},
+			},
+		)
+		e := &Expr{FuncName: "CONCAT", Args: []*Expr{{Column: "first"}, textExpr(" "), {Column: "last"}}}
+		assert.Equal(t, "John Doe", evalText(t, e, row))
+	})
+}
+
+func TestExpr_Eval_StringFunctions_NestInArithmetic(t *testing.T) {
+	t.Parallel()
+
+	// LENGTH('hello') + 1 = 6
+	e := &Expr{
+		Left:  &Expr{FuncName: "LENGTH", Args: []*Expr{textExpr("hello")}},
+		Right: &Expr{Literal: int64(1)},
+		Op:    ArithAdd,
+	}
+	v, err := e.Eval(NewRow(nil))
+	require.NoError(t, err)
+	assert.Equal(t, int64(6), v)
+}
