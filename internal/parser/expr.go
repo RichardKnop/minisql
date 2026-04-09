@@ -163,7 +163,13 @@ func (p *parserItem) parseFuncCall(funcName string) (*minisql.Expr, error) {
 // function that can appear inside an arithmetic expression.
 func isBuiltinFunction(name string) bool {
 	switch name {
-	case "COALESCE", "NULLIF":
+	case "COALESCE", "NULLIF",
+		"UPPER", "LOWER",
+		"TRIM", "LTRIM", "RTRIM",
+		"LENGTH",
+		"SUBSTR",
+		"REPLACE",
+		"CONCAT":
 		return true
 	}
 	return false

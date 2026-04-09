@@ -242,9 +242,219 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 			return nil, nil // equal → return NULL
 		}
 		return a, nil
+	// ── String functions ────────────────────────────────────────────────────
+
+	case "UPPER", "LOWER":
+		if len(e.Args) != 1 {
+			return nil, fmt.Errorf("%s requires exactly 1 argument", e.FuncName)
+		}
+		v, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if v == nil {
+			return nil, nil
+		}
+		s, ok := toStringVal(v)
+		if !ok {
+			return nil, fmt.Errorf("%s: argument must be a string, got %T", e.FuncName, v)
+		}
+		if e.FuncName == "UPPER" {
+			return NewTextPointer([]byte(strings.ToUpper(s))), nil
+		}
+		return NewTextPointer([]byte(strings.ToLower(s))), nil
+
+	case "TRIM", "LTRIM", "RTRIM":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			return nil, fmt.Errorf("%s requires 1 or 2 arguments", e.FuncName)
+		}
+		v, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if v == nil {
+			return nil, nil
+		}
+		s, ok := toStringVal(v)
+		if !ok {
+			return nil, fmt.Errorf("%s: argument 1 must be a string, got %T", e.FuncName, v)
+		}
+		cutset := " \t\n\r"
+		if len(e.Args) == 2 {
+			cv, err := e.Args[1].Eval(row)
+			if err != nil {
+				return nil, err
+			}
+			if cv == nil {
+				return nil, nil
+			}
+			cs, ok := toStringVal(cv)
+			if !ok {
+				return nil, fmt.Errorf("%s: argument 2 must be a string, got %T", e.FuncName, cv)
+			}
+			cutset = cs
+		}
+		var result string
+		switch e.FuncName {
+		case "TRIM":
+			result = strings.Trim(s, cutset)
+		case "LTRIM":
+			result = strings.TrimLeft(s, cutset)
+		default: // RTRIM
+			result = strings.TrimRight(s, cutset)
+		}
+		return NewTextPointer([]byte(result)), nil
+
+	case "LENGTH":
+		if len(e.Args) != 1 {
+			return nil, fmt.Errorf("LENGTH requires exactly 1 argument")
+		}
+		v, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if v == nil {
+			return nil, nil
+		}
+		s, ok := toStringVal(v)
+		if !ok {
+			return nil, fmt.Errorf("LENGTH: argument must be a string, got %T", v)
+		}
+		return int64(len(s)), nil
+
+	case "SUBSTR":
+		if len(e.Args) < 2 || len(e.Args) > 3 {
+			return nil, fmt.Errorf("SUBSTR requires 2 or 3 arguments")
+		}
+		sv, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if sv == nil {
+			return nil, nil
+		}
+		s, ok := toStringVal(sv)
+		if !ok {
+			return nil, fmt.Errorf("SUBSTR: argument 1 must be a string, got %T", sv)
+		}
+		startVal, err := e.Args[1].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if startVal == nil {
+			return nil, nil
+		}
+		start, ok := toInt64(startVal)
+		if !ok {
+			return nil, fmt.Errorf("SUBSTR: start must be an integer, got %T", startVal)
+		}
+		// SQL uses 1-based indexing; clamp to valid range.
+		start-- // convert to 0-based
+		if start < 0 {
+			start = 0
+		}
+		b := []byte(s)
+		if int(start) >= len(b) {
+			return NewTextPointer([]byte{}), nil
+		}
+		if len(e.Args) == 3 {
+			lenVal, err := e.Args[2].Eval(row)
+			if err != nil {
+				return nil, err
+			}
+			if lenVal == nil {
+				return nil, nil
+			}
+			length, ok := toInt64(lenVal)
+			if !ok {
+				return nil, fmt.Errorf("SUBSTR: length must be an integer, got %T", lenVal)
+			}
+			if length < 0 {
+				length = 0
+			}
+			end := start + length
+			if end > int64(len(b)) {
+				end = int64(len(b))
+			}
+			return NewTextPointer(b[start:end]), nil
+		}
+		return NewTextPointer(b[start:]), nil
+
+	case "REPLACE":
+		if len(e.Args) != 3 {
+			return nil, fmt.Errorf("REPLACE requires exactly 3 arguments")
+		}
+		sv, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if sv == nil {
+			return nil, nil
+		}
+		s, ok := toStringVal(sv)
+		if !ok {
+			return nil, fmt.Errorf("REPLACE: argument 1 must be a string, got %T", sv)
+		}
+		fromVal, err := e.Args[1].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if fromVal == nil {
+			return nil, nil
+		}
+		from, ok := toStringVal(fromVal)
+		if !ok {
+			return nil, fmt.Errorf("REPLACE: argument 2 must be a string, got %T", fromVal)
+		}
+		toVal, err := e.Args[2].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if toVal == nil {
+			return nil, nil
+		}
+		to, ok := toStringVal(toVal)
+		if !ok {
+			return nil, fmt.Errorf("REPLACE: argument 3 must be a string, got %T", toVal)
+		}
+		return NewTextPointer([]byte(strings.ReplaceAll(s, from, to))), nil
+
+	case "CONCAT":
+		if len(e.Args) == 0 {
+			return nil, fmt.Errorf("CONCAT requires at least 1 argument")
+		}
+		var buf strings.Builder
+		for i, arg := range e.Args {
+			v, err := arg.Eval(row)
+			if err != nil {
+				return nil, err
+			}
+			if v == nil {
+				continue // skip NULLs (PostgreSQL semantics)
+			}
+			s, ok := toStringVal(v)
+			if !ok {
+				return nil, fmt.Errorf("CONCAT: argument %d must be a string, got %T", i+1, v)
+			}
+			buf.WriteString(s)
+		}
+		return NewTextPointer([]byte(buf.String())), nil
+
 	default:
 		return nil, fmt.Errorf("unknown function %q", e.FuncName)
 	}
+}
+
+// toStringVal extracts the string content from a TextPointer or plain string value.
+// Returns false if v is neither type.
+func toStringVal(v any) (string, bool) {
+	switch s := v.(type) {
+	case TextPointer:
+		return string(s.Data), true
+	case string:
+		return s, true
+	}
+	return "", false
 }
 
 // toInt64 returns an int64 if v is an integer type (int32 or int64), otherwise false.
