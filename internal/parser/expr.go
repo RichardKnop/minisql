@@ -97,6 +97,12 @@ func (p *parserItem) parseFactor() (*minisql.Expr, error) {
 		return &minisql.Expr{IsNull: true}, nil
 	}
 
+	// NOW() is tokenised as a single reserved-word — no argument list to parse.
+	if token == "NOW()" {
+		p.pop()
+		return &minisql.Expr{FuncName: "NOW"}, nil
+	}
+
 	// Scalar literals: integer, float, string, boolean
 	value, ln := p.peekValue()
 	if ln > 0 {
@@ -173,7 +179,10 @@ func isBuiltinFunction(name string) bool {
 		"ABS",
 		"FLOOR", "CEIL",
 		"ROUND",
-		"MOD":
+		"MOD",
+		"DATE_TRUNC",
+		"EXTRACT", "DATE_PART",
+		"TO_TIMESTAMP":
 		return true
 	}
 	return false

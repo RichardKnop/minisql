@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -832,5 +833,154 @@ func TestExpr_Eval_MOD(t *testing.T) {
 		t.Parallel()
 		_, err := (&Expr{FuncName: "MOD", Args: []*Expr{{Literal: int64(1)}}}).Eval(row)
 		assert.ErrorContains(t, err, "exactly 2 arguments")
+	})
+}
+
+// rowWithTimestamp returns a single-column row containing a TIMESTAMP value.
+func rowWithTimestamp(name string, ts Time) Row {
+	return NewRowWithValues(
+		[]Column{{Name: name, Kind: Timestamp}},
+		[]OptionalValue{{Value: ts, Valid: true}},
+	)
+}
+
+func TestExpr_Eval_NOW(t *testing.T) {
+	t.Parallel()
+
+	before := time.Now().UTC()
+	v, err := (&Expr{FuncName: "NOW"}).Eval(NewRow(nil))
+	after := time.Now().UTC()
+
+	require.NoError(t, err)
+	ts, ok := v.(Time)
+	require.True(t, ok, "expected Time result, got %T", v)
+
+	// The returned timestamp should be between before and after.
+	got := ts.GoTime()
+	assert.False(t, got.Before(before), "NOW() returned time before call")
+	assert.False(t, got.After(after), "NOW() returned time after call")
+}
+
+func TestExpr_Eval_DATE_TRUNC(t *testing.T) {
+	t.Parallel()
+
+	ts := MustParseTimestamp("2024-06-15 14:32:45.123456")
+	row := rowWithTimestamp("ts", ts)
+
+	cases := []struct {
+		unit string
+		want Time
+	}{
+		{"year", MustParseTimestamp("2024-01-01 00:00:00")},
+		{"month", MustParseTimestamp("2024-06-01 00:00:00")},
+		{"day", MustParseTimestamp("2024-06-15 00:00:00")},
+		{"hour", MustParseTimestamp("2024-06-15 14:00:00")},
+		{"minute", MustParseTimestamp("2024-06-15 14:32:00")},
+		{"second", MustParseTimestamp("2024-06-15 14:32:45")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.unit, func(t *testing.T) {
+			t.Parallel()
+			e := &Expr{
+				FuncName: "DATE_TRUNC",
+				Args:     []*Expr{textExpr(tc.unit), {Column: "ts"}},
+			}
+			v, err := e.Eval(row)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, v)
+		})
+	}
+
+	t.Run("unknown unit errors", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "DATE_TRUNC", Args: []*Expr{textExpr("week"), {Column: "ts"}}}
+		_, err := e.Eval(row)
+		assert.ErrorContains(t, err, "unknown unit")
+	})
+
+	t.Run("null timestamp propagates", func(t *testing.T) {
+		t.Parallel()
+		nullRow := NewRowWithValues([]Column{{Name: "ts", Kind: Timestamp}}, []OptionalValue{{Valid: false}})
+		e := &Expr{FuncName: "DATE_TRUNC", Args: []*Expr{textExpr("day"), {Column: "ts"}}}
+		v, err := e.Eval(nullRow)
+		require.NoError(t, err)
+		assert.Nil(t, v)
+	})
+}
+
+func TestExpr_Eval_EXTRACT(t *testing.T) {
+	t.Parallel()
+
+	ts := MustParseTimestamp("2024-06-15 14:32:45.123456")
+	row := rowWithTimestamp("ts", ts)
+
+	cases := []struct {
+		field string
+		want  int64
+	}{
+		{"year", 2024},
+		{"month", 6},
+		{"day", 15},
+		{"hour", 14},
+		{"minute", 32},
+		{"second", 45},
+		{"microsecond", 123456},
+	}
+	for _, tc := range cases {
+		t.Run("EXTRACT "+tc.field, func(t *testing.T) {
+			t.Parallel()
+			e := &Expr{FuncName: "EXTRACT", Args: []*Expr{textExpr(tc.field), {Column: "ts"}}}
+			v, err := e.Eval(row)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, v)
+		})
+		t.Run("DATE_PART "+tc.field, func(t *testing.T) {
+			t.Parallel()
+			e := &Expr{FuncName: "DATE_PART", Args: []*Expr{textExpr(tc.field), {Column: "ts"}}}
+			v, err := e.Eval(row)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, v)
+		})
+	}
+
+	t.Run("unknown field errors", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "EXTRACT", Args: []*Expr{textExpr("quarter"), {Column: "ts"}}}
+		_, err := e.Eval(row)
+		assert.ErrorContains(t, err, "unknown field")
+	})
+
+	t.Run("null propagates", func(t *testing.T) {
+		t.Parallel()
+		nullRow := NewRowWithValues([]Column{{Name: "ts", Kind: Timestamp}}, []OptionalValue{{Valid: false}})
+		e := &Expr{FuncName: "EXTRACT", Args: []*Expr{textExpr("year"), {Column: "ts"}}}
+		v, err := e.Eval(nullRow)
+		require.NoError(t, err)
+		assert.Nil(t, v)
+	})
+}
+
+func TestExpr_Eval_TO_TIMESTAMP(t *testing.T) {
+	t.Parallel()
+
+	t.Run("parses valid timestamp string", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "TO_TIMESTAMP", Args: []*Expr{textExpr("2024-03-20 10:15:30")}}
+		v, err := e.Eval(NewRow(nil))
+		require.NoError(t, err)
+		assert.Equal(t, MustParseTimestamp("2024-03-20 10:15:30"), v)
+	})
+
+	t.Run("null propagates", func(t *testing.T) {
+		t.Parallel()
+		v, err := (&Expr{FuncName: "TO_TIMESTAMP", Args: []*Expr{{IsNull: true}}}).Eval(NewRow(nil))
+		require.NoError(t, err)
+		assert.Nil(t, v)
+	})
+
+	t.Run("invalid string errors", func(t *testing.T) {
+		t.Parallel()
+		_, err := (&Expr{FuncName: "TO_TIMESTAMP", Args: []*Expr{textExpr("not-a-date")}}).Eval(NewRow(nil))
+		assert.ErrorContains(t, err, "TO_TIMESTAMP")
 	})
 }

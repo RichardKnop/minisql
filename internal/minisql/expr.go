@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 )
 
 // ArithOp identifies the arithmetic operator in a binary Expr node.
@@ -582,6 +583,134 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 			return nil, fmt.Errorf("MOD: division by zero")
 		}
 		return math.Mod(af, bf), nil
+
+	// ── Date/time functions ──────────────────────────────────────────────────
+
+	case "NOW":
+		if len(e.Args) != 0 {
+			return nil, fmt.Errorf("NOW takes no arguments")
+		}
+		now := time.Now().UTC()
+		return Time{
+			Year:         int32(now.Year()),
+			Month:        int8(now.Month()),
+			Day:          int8(now.Day()),
+			Hour:         int8(now.Hour()),
+			Minutes:      int8(now.Minute()),
+			Seconds:      int8(now.Second()),
+			Microseconds: int32(now.Nanosecond() / 1000),
+		}, nil
+
+	case "DATE_TRUNC":
+		if len(e.Args) != 2 {
+			return nil, fmt.Errorf("DATE_TRUNC requires exactly 2 arguments")
+		}
+		unitVal, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if unitVal == nil {
+			return nil, nil
+		}
+		unit, ok := toStringVal(unitVal)
+		if !ok {
+			return nil, fmt.Errorf("DATE_TRUNC: first argument must be a string, got %T", unitVal)
+		}
+		tsVal, err := e.Args[1].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if tsVal == nil {
+			return nil, nil
+		}
+		ts, ok := tsVal.(Time)
+		if !ok {
+			return nil, fmt.Errorf("DATE_TRUNC: second argument must be a timestamp, got %T", tsVal)
+		}
+		switch strings.ToLower(unit) {
+		case "year":
+			return Time{Year: ts.Year, Month: 1, Day: 1}, nil
+		case "month":
+			return Time{Year: ts.Year, Month: ts.Month, Day: 1}, nil
+		case "day":
+			return Time{Year: ts.Year, Month: ts.Month, Day: ts.Day}, nil
+		case "hour":
+			return Time{Year: ts.Year, Month: ts.Month, Day: ts.Day, Hour: ts.Hour}, nil
+		case "minute":
+			return Time{Year: ts.Year, Month: ts.Month, Day: ts.Day, Hour: ts.Hour, Minutes: ts.Minutes}, nil
+		case "second":
+			return Time{Year: ts.Year, Month: ts.Month, Day: ts.Day, Hour: ts.Hour, Minutes: ts.Minutes, Seconds: ts.Seconds}, nil
+		default:
+			return nil, fmt.Errorf("DATE_TRUNC: unknown unit %q (want year/month/day/hour/minute/second)", unit)
+		}
+
+	case "EXTRACT", "DATE_PART":
+		if len(e.Args) != 2 {
+			return nil, fmt.Errorf("%s requires exactly 2 arguments", e.FuncName)
+		}
+		fieldVal, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if fieldVal == nil {
+			return nil, nil
+		}
+		field, ok := toStringVal(fieldVal)
+		if !ok {
+			return nil, fmt.Errorf("%s: first argument must be a string, got %T", e.FuncName, fieldVal)
+		}
+		tsVal, err := e.Args[1].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if tsVal == nil {
+			return nil, nil
+		}
+		ts, ok := tsVal.(Time)
+		if !ok {
+			return nil, fmt.Errorf("%s: second argument must be a timestamp, got %T", e.FuncName, tsVal)
+		}
+		switch strings.ToLower(field) {
+		case "year":
+			return int64(ts.Year), nil
+		case "month":
+			return int64(ts.Month), nil
+		case "day":
+			return int64(ts.Day), nil
+		case "hour":
+			return int64(ts.Hour), nil
+		case "minute":
+			return int64(ts.Minutes), nil
+		case "second":
+			return int64(ts.Seconds), nil
+		case "microsecond":
+			return int64(ts.Microseconds), nil
+		case "epoch":
+			return ts.TotalMicroseconds() / microsecondsInSecond, nil
+		default:
+			return nil, fmt.Errorf("%s: unknown field %q (want year/month/day/hour/minute/second/microsecond/epoch)", e.FuncName, field)
+		}
+
+	case "TO_TIMESTAMP":
+		if len(e.Args) != 1 {
+			return nil, fmt.Errorf("TO_TIMESTAMP requires exactly 1 argument")
+		}
+		v, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if v == nil {
+			return nil, nil
+		}
+		s, ok := toStringVal(v)
+		if !ok {
+			return nil, fmt.Errorf("TO_TIMESTAMP: argument must be a string, got %T", v)
+		}
+		t, err := ParseTimestamp(s)
+		if err != nil {
+			return nil, fmt.Errorf("TO_TIMESTAMP: %w", err)
+		}
+		return t, nil
 
 	default:
 		return nil, fmt.Errorf("unknown function %q", e.FuncName)
