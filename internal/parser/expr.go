@@ -97,6 +97,12 @@ func (p *parserItem) parseFactor() (*minisql.Expr, error) {
 		return &minisql.Expr{IsNull: true}, nil
 	}
 
+	// CASE expression
+	if strings.ToUpper(token) == "CASE" {
+		p.pop()
+		return p.parseCaseExpr()
+	}
+
 	// NOW() is tokenised as a single reserved-word — no argument list to parse.
 	if token == "NOW()" {
 		p.pop()
@@ -163,6 +169,83 @@ func (p *parserItem) parseFuncCall(funcName string) (*minisql.Expr, error) {
 		args = append(args, arg)
 	}
 	return &minisql.Expr{FuncName: funcName, Args: args}, nil
+}
+
+// parseCaseExpr parses a CASE expression after the CASE keyword has been consumed.
+// Supports both forms:
+//
+//	Searched: CASE WHEN cond THEN result [WHEN ...] [ELSE result] END
+//	Simple:   CASE expr WHEN value THEN result [WHEN ...] [ELSE result] END
+func (p *parserItem) parseCaseExpr() (*minisql.Expr, error) {
+	var caseInput *minisql.Expr
+
+	// If the next token is not WHEN, this is a simple CASE with an input expression.
+	if strings.ToUpper(p.peek()) != "WHEN" {
+		var err error
+		caseInput, err = p.parseExpr()
+		if err != nil {
+			return nil, fmt.Errorf("CASE: expected expression after CASE: %w", err)
+		}
+	}
+
+	clauses := make([]minisql.CaseWhen, 0)
+	for strings.ToUpper(p.peek()) == "WHEN" {
+		p.pop() // consume WHEN
+
+		var clause minisql.CaseWhen
+		if caseInput == nil {
+			// Searched CASE: parse a boolean condition.
+			cond, err := p.parseCondExpr()
+			if err != nil {
+				return nil, fmt.Errorf("CASE: expected condition after WHEN: %w", err)
+			}
+			clause.Cond = cond
+		} else {
+			// Simple CASE: parse a value to compare against the input.
+			val, err := p.parseExpr()
+			if err != nil {
+				return nil, fmt.Errorf("CASE: expected value after WHEN: %w", err)
+			}
+			clause.When = val
+		}
+
+		if strings.ToUpper(p.peek()) != "THEN" {
+			return nil, fmt.Errorf("CASE: expected THEN after WHEN clause")
+		}
+		p.pop() // consume THEN
+
+		then, err := p.parseExpr()
+		if err != nil {
+			return nil, fmt.Errorf("CASE: expected expression after THEN: %w", err)
+		}
+		clause.Then = then
+		clauses = append(clauses, clause)
+	}
+
+	if len(clauses) == 0 {
+		return nil, fmt.Errorf("CASE expression requires at least one WHEN clause")
+	}
+
+	var caseElse *minisql.Expr
+	if strings.ToUpper(p.peek()) == "ELSE" {
+		p.pop() // consume ELSE
+		var err error
+		caseElse, err = p.parseExpr()
+		if err != nil {
+			return nil, fmt.Errorf("CASE: expected expression after ELSE: %w", err)
+		}
+	}
+
+	if strings.ToUpper(p.peek()) != "END" {
+		return nil, fmt.Errorf("CASE: expected END to close expression")
+	}
+	p.pop() // consume END
+
+	return &minisql.Expr{
+		CaseInput:   caseInput,
+		CaseClauses: clauses,
+		CaseElse:    caseElse,
+	}, nil
 }
 
 // isBuiltinFunction reports whether name (upper-cased) is a recognised scalar
