@@ -3,6 +3,7 @@ package parser
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
@@ -47,6 +48,7 @@ var reservedWords = []string{
 	"INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "ON CONFLICT", "ON",
 	"DO UPDATE", "DO NOTHING",
 	"DISTINCT",
+	"UNION ALL", "UNION",
 	";",
 }
 
@@ -341,6 +343,38 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 				return statements, err
 			}
 		case stepStatementEnd:
+			// For SELECT statements, intercept UNION / UNION ALL before requiring a semicolon.
+			if p.Kind == minisql.Select {
+				next := strings.ToUpper(p.peek())
+				if next == "UNION ALL" || next == "UNION" {
+					all := next == "UNION ALL"
+					p.pop() // consume "UNION [ALL]"
+					// Parse the right-hand SELECT from the remaining SQL.
+					rest := &parserItem{
+						sql:  p.sql[p.i:],
+						step: stepBeginning,
+					}
+					unionStmts, err := rest.doParse()
+					if err != nil {
+						return statements, fmt.Errorf("UNION: %w", err)
+					}
+					if len(unionStmts) != 1 {
+						return statements, p.errorf("at UNION: expected exactly one SELECT after UNION")
+					}
+					p.Unions = append(p.Unions, minisql.UnionClause{
+						All:  all,
+						Stmt: unionStmts[0],
+					})
+					// Advance past everything rest consumed.
+					p.i += rest.i
+					if err := p.validate(p.Statement); err != nil {
+						return nil, err
+					}
+					statements = append(statements, p.Statement)
+					// rest consumed all remaining SQL (including any trailing semicolons).
+					return statements, nil
+				}
+			}
 			semicolon := p.peek()
 			if semicolon != ";" && semicolon != "" {
 				return statements, p.errorf("at STATEMENT: expected semicolon")

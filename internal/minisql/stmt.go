@@ -308,6 +308,12 @@ type ExcludedRef struct {
 	Column string
 }
 
+// UnionClause represents a UNION or UNION ALL branch appended to a SELECT statement.
+type UnionClause struct {
+	All  bool      // true = UNION ALL (keep duplicates); false = UNION (deduplicate)
+	Stmt Statement // the chained SELECT
+}
+
 // Statement ...
 type Statement struct {
 	Kind          StatementKind
@@ -337,6 +343,9 @@ type Statement struct {
 	OrderBy        []OrderBy
 	Limit          OptionalValue
 	Offset         OptionalValue
+	// Unions holds the UNION / UNION ALL branches chained to this SELECT.
+	// Only populated on SELECT statements.
+	Unions []UnionClause
 }
 
 // NumPlaceholders returns the number of placeholder parameters (?) in the statement.
@@ -418,6 +427,12 @@ func (s Statement) Clone() Statement {
 	for i := range s.Conditions {
 		stmt.Conditions[i] = make([]Condition, len(s.Conditions[i]))
 		copy(stmt.Conditions[i], s.Conditions[i])
+	}
+	if len(s.Unions) > 0 {
+		stmt.Unions = make([]UnionClause, len(s.Unions))
+		for i, u := range s.Unions {
+			stmt.Unions[i] = UnionClause{All: u.All, Stmt: u.Stmt.Clone()}
+		}
 	}
 	return stmt
 }
