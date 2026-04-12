@@ -39,10 +39,11 @@ func ParseLevel(l string) (zapcore.Level, error) {
 	case "fatal":
 		return zapcore.FatalLevel, nil
 	default:
+		// ParseInt with bitSize=8 guarantees the result fits in int8.
 		level, err := strconv.ParseInt(l, 10, 8)
 		if err != nil {
 			return 0, err
 		}
-		return zapcore.Level(level), nil
+		return zapcore.Level(int8(level)), nil
 	}
 }

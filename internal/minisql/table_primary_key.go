@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -245,11 +246,14 @@ func castKeyValue(col Column, val any) (any, error) {
 	case Int4:
 		value, ok := val.(int32)
 		if !ok {
-			_, ok = val.(int64)
-			if !ok {
+			n, ok2 := val.(int64)
+			if !ok2 {
 				return nil, fmt.Errorf("could not cast value for column %s to either int64 or int32", col.Name)
 			}
-			value = int32(val.(int64))
+			if n < math.MinInt32 || n > math.MaxInt32 {
+				return nil, fmt.Errorf("value %d overflows INT4 for column %s", n, col.Name)
+			}
+			value = int32(n)
 		}
 		return value, nil
 	case Real:

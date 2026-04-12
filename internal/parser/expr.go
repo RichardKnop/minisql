@@ -103,6 +103,16 @@ func (p *parserItem) parseFactor() (*minisql.Expr, error) {
 		return p.parseCaseExpr()
 	}
 
+	// CAST expression: CAST(expr AS type)
+	if strings.ToUpper(token) == "CAST" {
+		p.pop()
+		if p.peek() != "(" {
+			return nil, fmt.Errorf("CAST: expected '('")
+		}
+		p.pop() // consume "("
+		return p.parseCastExpr()
+	}
+
 	// NOW() is tokenised as a single reserved-word — no argument list to parse.
 	if token == "NOW()" {
 		p.pop()
@@ -246,6 +256,67 @@ func (p *parserItem) parseCaseExpr() (*minisql.Expr, error) {
 		CaseClauses: clauses,
 		CaseElse:    caseElse,
 	}, nil
+}
+
+// parseCastExpr parses the body of a CAST expression after "CAST(" has been consumed.
+// Grammar: expr AS type_name ")"
+// Supported type names: BOOLEAN, INT4, INT8, REAL, DOUBLE, TEXT, VARCHAR[(n)], TIMESTAMP.
+func (p *parserItem) parseCastExpr() (*minisql.Expr, error) {
+	inner, err := p.parseExpr()
+	if err != nil {
+		return nil, fmt.Errorf("CAST: %w", err)
+	}
+
+	if strings.ToUpper(p.peek()) != "AS" {
+		return nil, fmt.Errorf("CAST: expected AS, got %q", p.peek())
+	}
+	p.pop() // consume "AS"
+
+	typeToken := strings.ToUpper(p.peek())
+	var targetKind minisql.ColumnKind
+	switch typeToken {
+	case "BOOLEAN":
+		targetKind = minisql.Boolean
+		p.pop()
+	case "INT4":
+		targetKind = minisql.Int4
+		p.pop()
+	case "INT8":
+		targetKind = minisql.Int8
+		p.pop()
+	case "REAL":
+		targetKind = minisql.Real
+		p.pop()
+	case "DOUBLE":
+		targetKind = minisql.Double
+		p.pop()
+	case "TEXT":
+		targetKind = minisql.Text
+		p.pop()
+	case "TIMESTAMP":
+		targetKind = minisql.Timestamp
+		p.pop()
+	case "VARCHAR(":
+		// CAST(x AS VARCHAR(n)) — consume type token, optional length, and inner ")"
+		targetKind = minisql.Varchar
+		p.pop() // consume "VARCHAR("
+		_, hasLen := p.peekIntWithLength()
+		if hasLen > 0 {
+			p.pop() // consume length number
+		}
+		if p.peek() == ")" {
+			p.pop() // consume inner ")"
+		}
+	default:
+		return nil, fmt.Errorf("CAST: unknown target type %q (want BOOLEAN, INT4, INT8, REAL, DOUBLE, TEXT, VARCHAR, TIMESTAMP)", typeToken)
+	}
+
+	if p.peek() != ")" {
+		return nil, fmt.Errorf("CAST: expected ')', got %q", p.peek())
+	}
+	p.pop() // consume outer ")"
+
+	return &minisql.Expr{CastExpr: inner, CastTargetType: targetKind}, nil
 }
 
 // isBuiltinFunction reports whether name (upper-cased) is a recognised scalar
