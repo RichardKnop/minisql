@@ -30,7 +30,7 @@ func (p *parserItem) doParseWhere() error {
 
 	whereRWord := strings.ToUpper(whereOrEnd)
 
-	// GROUP BY / HAVING / ORDER BY / LIMIT / OFFSET appearing before WHERE means no WHERE clause.
+	// GROUP BY / HAVING / ORDER BY / LIMIT / OFFSET / UNION appearing before WHERE means no WHERE clause.
 	switch whereRWord {
 	case "GROUP BY":
 		p.step = stepSelectGroupBy
@@ -40,6 +40,9 @@ func (p *parserItem) doParseWhere() error {
 		return nil
 	case "ORDER BY", "LIMIT", "OFFSET":
 		p.step = stepSelectOrderBy
+		return nil
+	case "UNION ALL", "UNION":
+		p.step = stepStatementEnd
 		return nil
 	}
 

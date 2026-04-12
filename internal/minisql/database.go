@@ -294,6 +294,11 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 	case CreateTable, DropTable, CreateIndex, DropIndex:
 		return d.executeDDLStatement(ctx, stmt)
 	case Insert, Select, Update, Delete:
+		// SELECT with UNION / UNION ALL branches is handled by the union executor.
+		if stmt.Kind == Select && len(stmt.Unions) > 0 {
+			return d.executeUnion(ctx, stmt)
+		}
+
 		table, ok := d.GetTable(ctx, stmt.TableName)
 		if !ok {
 			return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, stmt.TableName)
@@ -722,6 +727,100 @@ func (d *Database) executeTableStatement(ctx context.Context, table *Table, stmt
 	}
 
 	return StatementResult{}, fmt.Errorf("unrecognized table statement type: %v", stmt.Kind)
+}
+
+// flattenUnionChain traverses a linked chain of UnionClause nodes (built by the parser)
+// and returns two parallel slices: the SELECT statements in left-to-right order, and the
+// All flag for each join between adjacent statements (len(alls) == len(stmts)-1).
+func flattenUnionChain(stmt Statement) ([]Statement, []bool) {
+	stmts := make([]Statement, 0, 4)
+	alls := make([]bool, 0, 3)
+	cur := stmt
+	for {
+		base := cur
+		base.Unions = nil
+		stmts = append(stmts, base)
+		if len(cur.Unions) == 0 {
+			break
+		}
+		alls = append(alls, cur.Unions[0].All)
+		cur = cur.Unions[0].Stmt
+	}
+	return stmts, alls
+}
+
+// executeUnion handles SELECT … UNION [ALL] SELECT … chains.
+// It executes each SELECT independently and merges the results:
+//   - UNION ALL: concatenate all rows from both sides (duplicates kept).
+//   - UNION:     concatenate then deduplicate (like DISTINCT across the union).
+//
+// Column metadata is taken from the first SELECT; all branches must produce the
+// same number of columns (validated at execution time by the query engine).
+func (d *Database) executeUnion(ctx context.Context, stmt Statement) (StatementResult, error) {
+	stmts, alls := flattenUnionChain(stmt)
+
+	var allRows []Row
+	var resultColumns []Column
+
+	for i, s := range stmts {
+		table, ok := d.GetTable(ctx, s.TableName)
+		if !ok {
+			return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, s.TableName)
+		}
+
+		result, err := d.executeTableStatement(ctx, table, s)
+		if err != nil {
+			return StatementResult{}, err
+		}
+
+		if i == 0 {
+			resultColumns = result.Columns
+		}
+
+		// Drain the iterator for this branch.
+		var branchRows []Row
+		for result.Rows.Next(ctx) {
+			branchRows = append(branchRows, result.Rows.Row())
+		}
+		if err := result.Rows.Err(); err != nil {
+			return StatementResult{}, err
+		}
+
+		switch {
+		case i == 0:
+			// First branch: use its rows as the base.
+			allRows = branchRows
+		case alls[i-1]:
+			// UNION ALL: append without deduplication.
+			allRows = append(allRows, branchRows...)
+		default:
+			// UNION: append then deduplicate the entire running set.
+			allRows = append(allRows, branchRows...)
+			seen := make(map[string]struct{}, len(allRows))
+			deduped := make([]Row, 0, len(allRows))
+			for _, row := range allRows {
+				key := row.rowDistinctKey()
+				if _, dup := seen[key]; !dup {
+					seen[key] = struct{}{}
+					deduped = append(deduped, row)
+				}
+			}
+			allRows = deduped
+		}
+	}
+
+	idx := 0
+	return StatementResult{
+		Columns: resultColumns,
+		Rows: NewIterator(func(ctx context.Context) (Row, error) {
+			if idx >= len(allRows) {
+				return Row{}, ErrNoMoreRows
+			}
+			row := allRows[idx]
+			idx++
+			return row, nil
+		}),
+	}, nil
 }
 
 // createTable creates a new table with a name and columns
