@@ -3,6 +3,7 @@ package minisql
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -45,6 +46,7 @@ type CaseWhen struct {
 // Exactly one interpretation is active (checked in priority order):
 //   - CaseClauses != nil:      a CASE WHEN expression
 //   - FuncName != "":          a built-in function call (Args holds the arguments)
+//   - CastExpr != nil:         a CAST(expr AS type) expression
 //   - IsNull:                  an explicit NULL literal
 //   - Column != "":            a column reference (read value from the row)
 //   - Literal != nil:          a scalar literal (int64, float64, bool, TextPointer)
@@ -57,12 +59,17 @@ type Expr struct {
 
 	FuncName string  // built-in function name, e.g. "COALESCE", "NULLIF"
 	Args     []*Expr // function arguments (used when FuncName != "")
-	IsNull   bool    // true when this node represents an explicit SQL NULL literal
-	Column   string  // column reference, may include alias prefix ("u.price")
-	Literal  any     // int64, float64, bool, or TextPointer
-	Left     *Expr
-	Right    *Expr
-	Op       ArithOp
+
+	// CAST expression (CastExpr != nil means this is a CAST expression)
+	CastExpr       *Expr      // the expression to cast
+	CastTargetType ColumnKind // the target type (never 0 when CastExpr is set)
+
+	IsNull  bool    // true when this node represents an explicit SQL NULL literal
+	Column  string  // column reference, may include alias prefix ("u.price")
+	Literal any     // int64, float64, bool, or TextPointer
+	Left    *Expr
+	Right   *Expr
+	Op      ArithOp
 }
 
 // String returns a human-readable representation suitable for use as a default column name.
@@ -104,6 +111,9 @@ func (e *Expr) str(nested bool) string {
 			argStrs[i] = arg.str(false)
 		}
 		return e.FuncName + "(" + strings.Join(argStrs, ", ") + ")"
+	}
+	if e.CastExpr != nil {
+		return "CAST(" + e.CastExpr.str(false) + " AS " + e.CastTargetType.String() + ")"
 	}
 	if e.IsNull {
 		return "NULL"
@@ -151,6 +161,9 @@ func (e *Expr) Columns() []string {
 		}
 		return cols
 	}
+	if e.CastExpr != nil {
+		return e.CastExpr.Columns()
+	}
 	if e.IsNull {
 		return nil
 	}
@@ -182,6 +195,11 @@ func (e *Expr) Eval(row Row) (any, error) {
 	// Function call
 	if e.FuncName != "" {
 		return e.evalFunc(row)
+	}
+
+	// CAST expression
+	if e.CastExpr != nil {
+		return e.evalCast(row)
 	}
 
 	// Explicit NULL literal
@@ -266,6 +284,229 @@ func (e *Expr) Eval(row Row) (any, error) {
 	default:
 		return nil, fmt.Errorf("unknown arithmetic operator %d", e.Op)
 	}
+}
+
+// evalCast evaluates CAST(expr AS type) against the given row.
+// NULL propagates: a NULL inner expression produces nil.
+// Coercion rules follow SQLite semantics: truncation for float→int, decimal strings for
+// numeric→text, leading-digit parsing for text→int/float.
+func (e *Expr) evalCast(row Row) (any, error) {
+	val, err := e.CastExpr.Eval(row)
+	if err != nil {
+		return nil, err
+	}
+	if val == nil {
+		return nil, nil // NULL propagates
+	}
+
+	switch e.CastTargetType {
+	case Boolean:
+		return castToBool(val)
+	case Int4, Int8:
+		n, err := castToInt64(val)
+		if err != nil {
+			return nil, err
+		}
+		if e.CastTargetType == Int4 {
+			if n > math.MaxInt32 || n < math.MinInt32 {
+				return nil, fmt.Errorf("CAST: value %d overflows INT4", n)
+			}
+			return int32(n), nil
+		}
+		return n, nil
+	case Real:
+		f, err := castToFloat64(val)
+		if err != nil {
+			return nil, err
+		}
+		return float32(f), nil
+	case Double:
+		return castToFloat64(val)
+	case Text, Varchar:
+		return castToTextPointer(val)
+	case Timestamp:
+		return castToTimestamp(val)
+	default:
+		return nil, fmt.Errorf("CAST: unsupported target type %v", e.CastTargetType)
+	}
+}
+
+func castToBool(v any) (bool, error) {
+	switch n := v.(type) {
+	case bool:
+		return n, nil
+	case int64:
+		return n != 0, nil
+	case int32:
+		return n != 0, nil
+	case float64:
+		return n != 0, nil
+	case float32:
+		return n != 0, nil
+	case TextPointer:
+		s := string(n.Data)
+		// SQLite: non-empty string that starts with a non-zero digit → true
+		i, ok := toInt64(s)
+		if ok {
+			return i != 0, nil
+		}
+		f, ok2 := toFloat64FromString(s)
+		if ok2 {
+			return f != 0, nil
+		}
+		return false, nil
+	default:
+		return false, fmt.Errorf("CAST: cannot convert %T to BOOLEAN", v)
+	}
+}
+
+func castToInt64(v any) (int64, error) {
+	switch n := v.(type) {
+	case int64:
+		return n, nil
+	case int32:
+		return int64(n), nil
+	case float64:
+		return int64(n), nil // truncate toward zero (SQLite)
+	case float32:
+		return int64(n), nil
+	case bool:
+		if n {
+			return 1, nil
+		}
+		return 0, nil
+	case TextPointer:
+		s := string(n.Data)
+		if i, ok := toInt64FromString(s); ok {
+			return i, nil
+		}
+		// SQLite: leading float digits are accepted (e.g. "3.9" → 3)
+		if f, ok := toFloat64FromString(s); ok {
+			return int64(f), nil
+		}
+		return 0, nil // no leading digits → 0 (SQLite semantics)
+	default:
+		return 0, fmt.Errorf("CAST: cannot convert %T to integer", v)
+	}
+}
+
+func castToFloat64(v any) (float64, error) {
+	switch n := v.(type) {
+	case float64:
+		return n, nil
+	case float32:
+		return float64(n), nil
+	case int64:
+		return float64(n), nil
+	case int32:
+		return float64(n), nil
+	case bool:
+		if n {
+			return 1.0, nil
+		}
+		return 0.0, nil
+	case TextPointer:
+		s := string(n.Data)
+		f, ok := toFloat64FromString(s)
+		if !ok {
+			return 0.0, nil // no leading digits → 0.0 (SQLite semantics)
+		}
+		return f, nil
+	default:
+		return 0, fmt.Errorf("CAST: cannot convert %T to float", v)
+	}
+}
+
+func castToTextPointer(v any) (TextPointer, error) {
+	switch n := v.(type) {
+	case TextPointer:
+		return n, nil
+	case int64:
+		return NewTextPointer([]byte(fmt.Sprintf("%d", n))), nil
+	case int32:
+		return NewTextPointer([]byte(fmt.Sprintf("%d", n))), nil
+	case float64:
+		return NewTextPointer([]byte(strconv.FormatFloat(n, 'f', -1, 64))), nil
+	case float32:
+		return NewTextPointer([]byte(strconv.FormatFloat(float64(n), 'f', -1, 32))), nil
+	case bool:
+		if n {
+			return NewTextPointer([]byte("1")), nil
+		}
+		return NewTextPointer([]byte("0")), nil
+	case Time:
+		return NewTextPointer([]byte(n.GoTime().UTC().Format("2006-01-02 15:04:05"))), nil
+	default:
+		return TextPointer{}, fmt.Errorf("CAST: cannot convert %T to text", v)
+	}
+}
+
+func castToTimestamp(v any) (Time, error) {
+	switch n := v.(type) {
+	case Time:
+		return n, nil
+	case TextPointer:
+		t, err := ParseTimestamp(string(n.Data))
+		if err != nil {
+			return Time{}, fmt.Errorf("CAST: %w", err)
+		}
+		return t, nil
+	default:
+		return Time{}, fmt.Errorf("CAST: cannot convert %T to TIMESTAMP", v)
+	}
+}
+
+// toInt64FromString parses the leading integer from a string (SQLite semantics).
+// Returns (0, false) when there are no leading digits.
+func toInt64FromString(s string) (int64, bool) {
+	s = strings.TrimSpace(s)
+	end := 0
+	if end < len(s) && (s[end] == '+' || s[end] == '-') {
+		end++
+	}
+	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+		end++
+	}
+	if end == 0 || (end == 1 && (s[0] == '+' || s[0] == '-')) {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(s[:end], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// toFloat64FromString parses the leading float from a string (SQLite semantics).
+// Returns (0, false) when there are no leading digits.
+func toFloat64FromString(s string) (float64, bool) {
+	s = strings.TrimSpace(s)
+	// Find the end of the leading numeric portion.
+	end := 0
+	if end < len(s) && (s[end] == '+' || s[end] == '-') {
+		end++
+	}
+	for end < len(s) && (s[end] >= '0' && s[end] <= '9' || s[end] == '.') {
+		end++
+	}
+	// Optional exponent
+	if end < len(s) && (s[end] == 'e' || s[end] == 'E') {
+		end++
+		if end < len(s) && (s[end] == '+' || s[end] == '-') {
+			end++
+		}
+		for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+			end++
+		}
+	}
+	if end == 0 {
+		return 0, false
+	}
+	f, err := strconv.ParseFloat(s[:end], 64)
+	if err != nil {
+		return 0, false
+	}
+	return f, true
 }
 
 // evalCase evaluates a CASE WHEN expression against the given row.

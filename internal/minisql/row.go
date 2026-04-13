@@ -257,11 +257,14 @@ func (r Row) Marshal() ([]byte, error) {
 		case Int4:
 			value, ok := r.Values[i].Value.(int32)
 			if !ok {
-				_, ok = r.Values[i].Value.(int64)
-				if !ok {
+				n, ok2 := r.Values[i].Value.(int64)
+				if !ok2 {
 					return nil, fmt.Errorf("could not cast value for column %s to either int64 or int32", col.Name)
 				}
-				value = int32(r.Values[i].Value.(int64))
+				if n < math.MinInt32 || n > math.MaxInt32 {
+					return nil, fmt.Errorf("value %d overflows INT4 for column %s", n, col.Name)
+				}
+				value = int32(n)
 			}
 			marshalInt32(buf, value, offset)
 			offset += 4

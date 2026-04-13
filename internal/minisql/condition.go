@@ -3,6 +3,7 @@ package minisql
 import (
 	"errors"
 	"fmt"
+	"math"
 )
 
 // Operator represents a SQL comparison operator used in WHERE conditions.
@@ -396,28 +397,45 @@ func compareBoolean(value1, value2 any, operator Operator) (bool, error) {
 	return false, fmt.Errorf("unknown operator '%s'", operator)
 }
 
-func compareInt4(value1, value2 any, operator Operator) (bool, error) {
-	theValue1, ok := value1.(int64)
-	if !ok {
-		return false, fmt.Errorf("value '%v' cannot be cast as int64", value1)
+func toInt64ForInt4(v any) (int64, error) {
+	switch n := v.(type) {
+	case int64:
+		return n, nil
+	case int32:
+		return int64(n), nil
+	default:
+		return 0, fmt.Errorf("value '%v' cannot be cast as int32 or int64", v)
 	}
-	theValue2, ok := value2.(int64)
-	if !ok {
-		return false, fmt.Errorf("operand value '%v' cannot be cast as int64", value2)
+}
+
+func compareInt4(value1, value2 any, operator Operator) (bool, error) {
+	theValue1, err := toInt64ForInt4(value1)
+	if err != nil {
+		return false, err
+	}
+	theValue2, err := toInt64ForInt4(value2)
+	if err != nil {
+		return false, err
+	}
+	// Validate that both values are within the INT4 range before comparing.
+	for _, v := range []int64{theValue1, theValue2} {
+		if v < math.MinInt32 || v > math.MaxInt32 {
+			return false, fmt.Errorf("value %d is out of INT4 range", v)
+		}
 	}
 	switch operator {
 	case Eq:
-		return int32(theValue1) == int32(theValue2), nil
+		return theValue1 == theValue2, nil
 	case Ne:
-		return int32(theValue1) != int32(theValue2), nil
+		return theValue1 != theValue2, nil
 	case Gt:
-		return int32(theValue1) > int32(theValue2), nil
+		return theValue1 > theValue2, nil
 	case Lt:
-		return int32(theValue1) < int32(theValue2), nil
+		return theValue1 < theValue2, nil
 	case Gte:
-		return int32(theValue1) >= int32(theValue2), nil
+		return theValue1 >= theValue2, nil
 	case Lte:
-		return int32(theValue1) <= int32(theValue2), nil
+		return theValue1 <= theValue2, nil
 	}
 	return false, fmt.Errorf("unknown operator '%s'", operator)
 }

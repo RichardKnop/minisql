@@ -3,6 +3,7 @@ package minisql
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -281,6 +282,21 @@ func ParseTimestamp(timestampStr string) (Time, error) {
 	// Validate time
 	if err := isValidTime(hours, minutes, seconds, microseconds); err != nil {
 		return Time{}, fmt.Errorf("invalid time in timestamp %s: %w", timestampStr, err)
+	}
+
+	// Explicit range guards so static analysis can verify the narrowing casts below are safe.
+	// These ranges are a superset of the domain-valid ranges enforced by isValidDate/isValidTime
+	// above, so they will never trigger for well-formed input.
+	if year < math.MinInt32 || year > math.MaxInt32 {
+		return Time{}, fmt.Errorf("year %d overflows int32", year)
+	}
+	for name, v := range map[string]int{"month": month, "day": day, "hour": hours, "minute": minutes, "second": seconds} {
+		if v < math.MinInt8 || v > math.MaxInt8 {
+			return Time{}, fmt.Errorf("%s %d overflows int8", name, v)
+		}
+	}
+	if microseconds < 0 || microseconds > math.MaxInt32 {
+		return Time{}, fmt.Errorf("microseconds %d overflows int32", microseconds)
 	}
 
 	return Time{
