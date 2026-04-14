@@ -122,10 +122,14 @@ func (e *Expr) str(nested bool) string {
 		return e.Column
 	}
 	if e.Literal != nil {
-		if tp, ok := e.Literal.(TextPointer); ok {
-			return string(tp.Data)
+		switch v := e.Literal.(type) {
+		case TextPointer:
+			return string(v.Data)
+		case Interval:
+			return v.String()
+		default:
+			return fmt.Sprintf("%v", e.Literal)
 		}
-		return fmt.Sprintf("%v", e.Literal)
 	}
 	inner := e.Left.str(true) + " " + e.Op.String() + " " + e.Right.str(true)
 	if nested {
@@ -245,6 +249,54 @@ func (e *Expr) Eval(row Row) (any, error) {
 	// NULL propagation
 	if leftVal == nil || rightVal == nil {
 		return nil, nil
+	}
+
+	// Timestamp ± Interval → Timestamp
+	if lt, lok := leftVal.(Time); lok {
+		if ri, rok := rightVal.(Interval); rok {
+			if e.Op != ArithAdd && e.Op != ArithSub {
+				return nil, fmt.Errorf("operator %s is not defined for timestamp and interval", e.Op)
+			}
+			sign := int32(1)
+			if e.Op == ArithSub {
+				sign = -1
+			}
+			return lt.AddInterval(ri, sign), nil
+		}
+	}
+	// Interval + Timestamp → Timestamp (addition is commutative)
+	if li, lok := leftVal.(Interval); lok {
+		if rt, rok := rightVal.(Time); rok {
+			if e.Op != ArithAdd {
+				return nil, fmt.Errorf("operator %s is not defined for interval and timestamp", e.Op)
+			}
+			return rt.AddInterval(li, 1), nil
+		}
+	}
+	// Interval ± Interval → Interval
+	if li, lok := leftVal.(Interval); lok {
+		if ri, rok := rightVal.(Interval); rok {
+			if e.Op != ArithAdd && e.Op != ArithSub {
+				return nil, fmt.Errorf("operator %s is not defined for interval and interval", e.Op)
+			}
+			sign := int32(1)
+			if e.Op == ArithSub {
+				sign = -1
+			}
+			return Interval{
+				Months: li.Months + sign*ri.Months,
+				Micros: li.Micros + int64(sign)*ri.Micros,
+			}, nil
+		}
+	}
+	// Timestamp - Timestamp → Interval (fixed-duration difference only)
+	if lt, lok := leftVal.(Time); lok {
+		if rt, rok := rightVal.(Time); rok {
+			if e.Op != ArithSub {
+				return nil, fmt.Errorf("operator %s is not defined for two timestamps", e.Op)
+			}
+			return Interval{Micros: lt.TotalMicroseconds() - rt.TotalMicroseconds()}, nil
+		}
 	}
 
 	lf, err := toFloat64(leftVal)
