@@ -103,6 +103,12 @@ func (p *parserItem) parseFactor() (*minisql.Expr, error) {
 		return p.parseCaseExpr()
 	}
 
+	// INTERVAL literal: INTERVAL 'n unit [n unit ...]'
+	if strings.ToUpper(token) == "INTERVAL" {
+		p.pop()
+		return p.parseIntervalLiteral()
+	}
+
 	// CAST expression: CAST(expr AS type)
 	if strings.ToUpper(token) == "CAST" {
 		p.pop()
@@ -317,6 +323,26 @@ func (p *parserItem) parseCastExpr() (*minisql.Expr, error) {
 	p.pop() // consume outer ")"
 
 	return &minisql.Expr{CastExpr: inner, CastTargetType: targetKind}, nil
+}
+
+// parseIntervalLiteral parses the body of an INTERVAL expression after the
+// INTERVAL keyword has been consumed.  The next token must be a quoted string
+// containing one or more "value unit" pairs, e.g. '3 days' or '1 year 2 months'.
+func (p *parserItem) parseIntervalLiteral() (*minisql.Expr, error) {
+	value, ln := p.peekValue()
+	if ln == 0 {
+		return nil, fmt.Errorf("INTERVAL: expected quoted string")
+	}
+	s, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("INTERVAL: expected quoted string, got %T", value)
+	}
+	p.pop()
+	iv, err := minisql.ParseIntervalString(s)
+	if err != nil {
+		return nil, fmt.Errorf("INTERVAL: %w", err)
+	}
+	return &minisql.Expr{Literal: iv}, nil
 }
 
 // isBuiltinFunction reports whether name (upper-cased) is a recognised scalar
