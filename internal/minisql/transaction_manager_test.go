@@ -2,7 +2,6 @@ package minisql
 
 import (
 	"context"
-	"errors"
 	"os"
 	"testing"
 
@@ -81,12 +80,6 @@ func TestTransactionManager_Commit(t *testing.T) {
 		}
 
 		// Setup expectations
-		if txManager.journalEnabled {
-			originalDBHeader := DatabaseHeader{FirstFreePage: 1, FreePageCount: 9}
-			pagerMock.On("GetHeader", ctx).Return(originalDBHeader, nil).Once()
-			originalPage := &Page{Index: PageIndex(4), LeafNode: NewLeafNode()}
-			pagerMock.On("GetPage", ctx, PageIndex(4)).Return(originalPage, nil).Once()
-		}
 		saverMock.On("SavePage", ctx, PageIndex(4), tx.WriteSet[4].Page).Return(nil).Once()
 		saverMock.On("SaveHeader", ctx, *tx.DBHeaderWrite).Return(nil).Once()
 		saverMock.On("FlushBatch", ctx, mock.MatchedBy(func(pages []PageIndex) bool {
@@ -143,10 +136,6 @@ func TestTransactionManager_Commit(t *testing.T) {
 		}
 
 		// Setup expectations
-		if txManager.journalEnabled {
-			originalPage := &Page{Index: PageIndex(3), LeafNode: NewLeafNode()}
-			pagerMock.On("GetPage", ctx, PageIndex(3)).Return(originalPage, nil).Once()
-		}
 		saverMock.On("SavePage", ctx, PageIndex(3), writeTx.WriteSet[3].Page).Return(nil).Once()
 
 		// Commit the writing transaction first
@@ -214,10 +203,6 @@ func TestTransactionManager_Commit(t *testing.T) {
 		}
 
 		// Setup expectations
-		if txManager.journalEnabled {
-			originalPage := &Page{Index: PageIndex(4), LeafNode: NewLeafNode()}
-			pagerMock.On("GetPage", ctx, PageIndex(4)).Return(originalPage, nil).Once()
-		}
 		saverMock.On("SavePage", ctx, PageIndex(4), writeTx2.WriteSet[4].Page).Return(nil).Once()
 		saverMock.On("FlushBatch", ctx, mock.MatchedBy(func(pages []PageIndex) bool {
 			// Should flush only the modified page (page 4)
@@ -242,237 +227,6 @@ func TestTransactionManager_Commit(t *testing.T) {
 
 		mock.AssertExpectationsForObjects(t, pagerMock, saverMock)
 	})
-}
-
-func TestTransactionManager_CommitRecoveryWindows(t *testing.T) {
-	t.Parallel()
-
-	t.Run("crash before journal finalize leaves incomplete journal and original data", func(t *testing.T) {
-		env := newCommitRecoveryEnv(t)
-		env.txManager.commitHook = func(phase commitPhase) {
-			if phase == commitPhaseBeforeJournalFinalize {
-				panic("simulated crash before finalize")
-			}
-		}
-
-		require.PanicsWithValue(t, "simulated crash before finalize", func() {
-			_ = env.txManager.CommitTransaction(context.Background(), env.newWriteTx())
-		})
-
-		page := env.readLeafPage(t)
-		assert.Equal(t, env.originalValue, string(readCellValue(t, page)))
-
-		recovered, err := RecoverFromJournal(env.dbFile.Name(), PageSize)
-		require.Error(t, err)
-		assert.False(t, recovered)
-		assert.ErrorContains(t, err, "trailing data")
-	})
-
-	t.Run("crash after journal finalize but before flush replays original data", func(t *testing.T) {
-		env := newCommitRecoveryEnv(t)
-		env.txManager.commitHook = func(phase commitPhase) {
-			if phase == commitPhaseAfterJournalFinalize {
-				panic("simulated crash after finalize")
-			}
-		}
-
-		require.PanicsWithValue(t, "simulated crash after finalize", func() {
-			_ = env.txManager.CommitTransaction(context.Background(), env.newWriteTx())
-		})
-
-		page := env.readLeafPage(t)
-		assert.Equal(t, env.originalValue, string(readCellValue(t, page)))
-
-		recovered, err := RecoverFromJournal(env.dbFile.Name(), PageSize)
-		require.NoError(t, err)
-		assert.True(t, recovered)
-		page = env.readLeafPage(t)
-		assert.Equal(t, env.originalValue, string(readCellValue(t, page)))
-	})
-
-	t.Run("partial flush failure replays original data", func(t *testing.T) {
-		env := newCommitRecoveryEnv(t)
-		env.txManager.saver = &faultInjectingSaver{
-			PageSaver:    env.pager,
-			flushPageCnt: 1,
-			flushErr:     errors.New("simulated partial flush failure"),
-		}
-
-		require.Panics(t, func() {
-			_ = env.txManager.CommitTransaction(context.Background(), env.newWriteTx())
-		})
-
-		page := env.readLeafPage(t)
-		assert.Equal(t, env.modifiedValue, string(readCellValue(t, page)))
-
-		recovered, err := RecoverFromJournal(env.dbFile.Name(), PageSize)
-		require.NoError(t, err)
-		assert.True(t, recovered)
-		page = env.readLeafPage(t)
-		assert.Equal(t, env.originalValue, string(readCellValue(t, page)))
-	})
-
-	t.Run("crash before flush replays original data", func(t *testing.T) {
-		env := newCommitRecoveryEnv(t)
-		env.txManager.commitHook = func(phase commitPhase) {
-			if phase == commitPhaseBeforeFlush {
-				panic("simulated crash before flush")
-			}
-		}
-
-		require.PanicsWithValue(t, "simulated crash before flush", func() {
-			_ = env.txManager.CommitTransaction(context.Background(), env.newWriteTx())
-		})
-
-		page := env.readLeafPage(t)
-		assert.Equal(t, env.originalValue, string(readCellValue(t, page)))
-
-		recovered, err := RecoverFromJournal(env.dbFile.Name(), PageSize)
-		require.NoError(t, err)
-		assert.True(t, recovered)
-		page = env.readLeafPage(t)
-		assert.Equal(t, env.originalValue, string(readCellValue(t, page)))
-	})
-
-	t.Run("crash after flush before journal delete rolls back committed pages", func(t *testing.T) {
-		env := newCommitRecoveryEnv(t)
-		env.txManager.commitHook = func(phase commitPhase) {
-			if phase == commitPhaseAfterFlushBeforeDelete {
-				panic("simulated crash after flush")
-			}
-		}
-
-		require.PanicsWithValue(t, "simulated crash after flush", func() {
-			_ = env.txManager.CommitTransaction(context.Background(), env.newWriteTx())
-		})
-
-		page := env.readLeafPage(t)
-		assert.Equal(t, env.modifiedValue, string(readCellValue(t, page)))
-
-		recovered, err := RecoverFromJournal(env.dbFile.Name(), PageSize)
-		require.NoError(t, err)
-		assert.True(t, recovered)
-		page = env.readLeafPage(t)
-		assert.Equal(t, env.originalValue, string(readCellValue(t, page)))
-	})
-}
-
-type commitRecoveryEnv struct {
-	dbFile        *os.File
-	pager         *pagerImpl
-	txManager     *TransactionManager
-	columns       []Column
-	leafPageIdx   PageIndex
-	originalValue string
-	modifiedValue string
-}
-
-func newCommitRecoveryEnv(t *testing.T) *commitRecoveryEnv {
-	t.Helper()
-
-	dbFile, err := os.CreateTemp("", testDBName)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = dbFile.Close()
-		_ = os.Remove(dbFile.Name())
-		_ = os.Remove(dbFile.Name() + "-journal")
-	})
-
-	columns := []Column{{
-		Kind: Varchar,
-		Size: MaxInlineVarchar,
-		Name: "foo",
-	}}
-	rootPage, _, leafPages := newTestBtree()
-	require.NotEmpty(t, leafPages)
-
-	pager, err := NewPager(dbFile, PageSize, 1000)
-	require.NoError(t, err)
-	pager.pages = make([]*Page, 0, 1+len(leafPages))
-	pager.pages = append(pager.pages, rootPage.Clone())
-	for _, page := range leafPages {
-		pager.pages = append(pager.pages, page.Clone())
-	}
-	pager.totalPages = uint32(len(pager.pages))
-
-	for _, page := range pager.pages {
-		require.NoError(t, pager.Flush(context.Background(), page.Index))
-	}
-
-	tablePager := pager.ForTable(columns)
-	txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
-	txManager.journalEnabled = true
-
-	env := &commitRecoveryEnv{
-		dbFile:      dbFile,
-		pager:       pager,
-		txManager:   txManager,
-		columns:     columns,
-		leafPageIdx: leafPages[0].Index,
-	}
-	page := env.readLeafPage(t)
-	env.originalValue = string(readCellValue(t, page))
-	env.modifiedValue = "crash-window-test"
-	return env
-}
-
-func (e *commitRecoveryEnv) newWriteTx() *Transaction {
-	tx := e.txManager.BeginTransaction(context.Background())
-	modifiedPage := e.mustCloneLeafPage()
-	modifiedPage.LeafNode.Cells[0].Value = prefixWithLength([]byte(e.modifiedValue))
-	tx.WriteSet[e.leafPageIdx] = WriteInfo{
-		Page:  modifiedPage,
-		Table: "users",
-	}
-	return tx
-}
-
-func (e *commitRecoveryEnv) mustCloneLeafPage() *Page {
-	page, err := e.pager.ForTable(e.columns).GetPage(context.Background(), e.leafPageIdx)
-	if err != nil {
-		panic(err)
-	}
-	return page.Clone()
-}
-
-func (e *commitRecoveryEnv) readLeafPage(t *testing.T) *Page {
-	t.Helper()
-	file, err := os.OpenFile(e.dbFile.Name(), os.O_RDWR, 0o600)
-	require.NoError(t, err)
-	defer file.Close()
-
-	pager, err := NewPager(file, PageSize, 1000)
-	require.NoError(t, err)
-	page, err := pager.ForTable(e.columns).GetPage(context.Background(), e.leafPageIdx)
-	require.NoError(t, err)
-	return page
-}
-
-func readCellValue(t *testing.T, page *Page) []byte {
-	t.Helper()
-	require.NotNil(t, page.LeafNode)
-	require.NotEmpty(t, page.LeafNode.Cells)
-	value := page.LeafNode.Cells[0].Value
-	require.GreaterOrEqual(t, len(value), 4)
-	return value[4:]
-}
-
-type faultInjectingSaver struct {
-	PageSaver
-	flushPageCnt int
-	flushErr     error
-}
-
-func (s *faultInjectingSaver) FlushBatch(ctx context.Context, pageIndices []PageIndex) error {
-	for i, pageIdx := range pageIndices {
-		if s.flushPageCnt >= 0 && i >= s.flushPageCnt {
-			break
-		}
-		if err := s.Flush(ctx, pageIdx); err != nil {
-			return err
-		}
-	}
-	return s.flushErr
 }
 
 func TestTransactionManager_Rollback(t *testing.T) {
@@ -516,6 +270,359 @@ func TestTransactionManager_Rollback(t *testing.T) {
 	assert.Equal(t, 5, int(txManager.globalPageVersions[4]))
 
 	mock.AssertExpectationsForObjects(t, saverMock)
+}
+
+func TestTransactionManager_WAL_Commit(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Read only transaction", func(t *testing.T) {
+		t.Parallel()
+
+		env := newWALCommitEnv(t)
+		ctx := context.Background()
+
+		txManager := env.txManager
+		txManager.globalDBHeaderVersion = 4
+		txManager.globalPageVersions[2] = 0
+		txManager.globalPageVersions[3] = 2
+
+		tx := txManager.BeginTransaction(ctx)
+		tx.DBHeaderRead = new(uint64)
+		*tx.DBHeaderRead = 4
+		tx.ReadSet[2] = 0
+		tx.ReadSet[3] = 2
+
+		err := txManager.CommitTransaction(ctx, tx)
+		require.NoError(t, err)
+		assert.Equal(t, TxCommitted, tx.Status)
+
+		// No WAL frames should have been written.
+		assert.Equal(t, int64(0), env.wal.FrameCount())
+		// Global versions unchanged.
+		assert.Equal(t, uint64(4), txManager.globalDBHeaderVersion)
+		assert.Equal(t, uint64(0), txManager.globalPageVersions[2])
+		assert.Equal(t, uint64(2), txManager.globalPageVersions[3])
+
+		mock.AssertExpectationsForObjects(t, env.saverMock)
+	})
+
+	t.Run("Write transaction", func(t *testing.T) {
+		t.Parallel()
+
+		env := newWALCommitEnv(t)
+		ctx := context.Background()
+
+		txManager := env.txManager
+		txManager.globalDBHeaderVersion = 3
+		txManager.globalPageVersions[4] = 5
+
+		tx := txManager.BeginTransaction(ctx)
+		tx.ReadSet[4] = 5
+		tx.WriteSet[4] = WriteInfo{
+			Page:  &Page{Index: PageIndex(4), LeafNode: NewLeafNode()},
+			Table: "users",
+			Index: "pk_users",
+		}
+
+		// SavePage must be called to update in-memory cache; FlushBatch must NOT be called.
+		env.saverMock.On("SavePage", ctx, PageIndex(4), tx.WriteSet[4].Page).Return(nil).Once()
+
+		err := txManager.CommitTransaction(ctx, tx)
+		require.NoError(t, err)
+		assert.Equal(t, TxCommitted, tx.Status)
+
+		// One WAL frame should have been written for page 4.
+		assert.Equal(t, int64(1), env.wal.FrameCount())
+		// Page 4 version incremented.
+		assert.Equal(t, uint64(6), txManager.globalPageVersions[4])
+		// WAL index has page 4.
+		assert.True(t, env.walIndex.Has(PageIndex(4)))
+
+		mock.AssertExpectationsForObjects(t, env.saverMock)
+	})
+
+	t.Run("Write transaction with header change", func(t *testing.T) {
+		t.Parallel()
+
+		env := newWALCommitEnv(t)
+		ctx := context.Background()
+
+		txManager := env.txManager
+		txManager.globalDBHeaderVersion = 1
+
+		tx := txManager.BeginTransaction(ctx)
+		tx.DBHeaderRead = new(uint64)
+		*tx.DBHeaderRead = 1
+		tx.DBHeaderWrite = &DatabaseHeader{FirstFreePage: 5, FreePageCount: 3}
+		tx.WriteSet[2] = WriteInfo{
+			Page:  &Page{Index: PageIndex(2), LeafNode: NewLeafNode()},
+			Table: "orders",
+			Index: "pk_orders",
+		}
+
+		env.saverMock.On("SaveHeader", ctx, *tx.DBHeaderWrite).Return(nil).Once()
+		env.saverMock.On("SavePage", ctx, PageIndex(2), tx.WriteSet[2].Page).Return(nil).Once()
+		// Page 0 frame needed (header changed): only GetPage is called to read
+		// the current B-tree content; GetHeader is NOT called because the new
+		// header is already in tx.DBHeaderWrite.
+		env.pagerMock.On("GetPage", ctx, PageIndex(0)).Return(&Page{Index: 0, LeafNode: NewLeafNode()}, nil).Once()
+
+		err := txManager.CommitTransaction(ctx, tx)
+		require.NoError(t, err)
+
+		assert.Equal(t, int64(2), env.wal.FrameCount())
+		assert.Equal(t, uint64(2), txManager.globalDBHeaderVersion)
+		assert.Equal(t, uint64(1), txManager.globalPageVersions[2])
+		assert.True(t, env.walIndex.Has(PageIndex(0)))
+		assert.True(t, env.walIndex.Has(PageIndex(2)))
+
+		mock.AssertExpectationsForObjects(t, env.pagerMock, env.saverMock)
+	})
+
+	t.Run("OCC conflict aborts transaction", func(t *testing.T) {
+		t.Parallel()
+
+		env := newWALCommitEnv(t)
+		ctx := context.Background()
+
+		txManager := env.txManager
+		txManager.globalPageVersions[5] = 3
+
+		txA := txManager.BeginTransaction(ctx)
+		txA.ReadSet[5] = 3
+		txA.WriteSet[5] = WriteInfo{
+			Page:  &Page{Index: PageIndex(5), LeafNode: NewLeafNode()},
+			Table: "items",
+		}
+
+		txB := txManager.BeginTransaction(ctx)
+		txB.ReadSet[5] = 3
+		txB.WriteSet[5] = WriteInfo{
+			Page:  &Page{Index: PageIndex(5), LeafNode: NewLeafNode()},
+			Table: "items",
+		}
+
+		// Commit txB first — succeeds.
+		env.saverMock.On("SavePage", ctx, PageIndex(5), txB.WriteSet[5].Page).Return(nil).Once()
+		require.NoError(t, txManager.CommitTransaction(ctx, txB))
+		assert.Equal(t, uint64(4), txManager.globalPageVersions[5])
+
+		// txA now conflicts (page 5 version changed to 4, but txA read at version 3).
+		err := txManager.CommitTransaction(ctx, txA)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrTxConflict)
+		assert.Equal(t, TxAborted, txA.Status)
+
+		// Only one WAL frame (for txB).
+		assert.Equal(t, int64(1), env.wal.FrameCount())
+
+		mock.AssertExpectationsForObjects(t, env.saverMock)
+	})
+}
+
+func TestTransactionManager_WAL_CrashRecovery(t *testing.T) {
+	t.Parallel()
+
+	t.Run("crash before WAL append leaves no committed frames", func(t *testing.T) {
+		t.Parallel()
+
+		env := newWALCommitEnv(t)
+		ctx := context.Background()
+
+		env.txManager.commitHook = func(phase commitPhase) {
+			if phase == commitPhaseBeforeWALAppend {
+				panic("crash before WAL append")
+			}
+		}
+
+		tx := env.txManager.BeginTransaction(ctx)
+		tx.WriteSet[7] = WriteInfo{
+			Page:  &Page{Index: PageIndex(7), LeafNode: NewLeafNode()},
+			Table: "foo",
+		}
+		env.saverMock.On("SavePage", ctx, PageIndex(7), mock.Anything).Maybe()
+
+		require.PanicsWithValue(t, "crash before WAL append", func() {
+			_ = env.txManager.CommitTransaction(ctx, tx)
+		})
+
+		// No frames committed to WAL.
+		assert.Equal(t, int64(0), env.wal.FrameCount())
+	})
+
+	t.Run("crash after WAL append leaves committed frame recoverable", func(t *testing.T) {
+		t.Parallel()
+
+		env := newWALCommitEnv(t)
+		ctx := context.Background()
+
+		env.txManager.commitHook = func(phase commitPhase) {
+			if phase == commitPhaseAfterWALAppend {
+				panic("crash after WAL append")
+			}
+		}
+
+		tx := env.txManager.BeginTransaction(ctx)
+		tx.WriteSet[8] = WriteInfo{
+			Page:  &Page{Index: PageIndex(8), LeafNode: NewLeafNode()},
+			Table: "bar",
+		}
+		// SavePage would be called in the in-memory update step (after the hook
+		// that panics), so it must NOT be called.
+		env.saverMock.AssertNotCalled(t, "SavePage")
+
+		require.PanicsWithValue(t, "crash after WAL append", func() {
+			_ = env.txManager.CommitTransaction(ctx, tx)
+		})
+
+		// One WAL frame was written (the append succeeded before the panic).
+		assert.Equal(t, int64(1), env.wal.FrameCount())
+
+		// Reading back WAL frames confirms page 8 is present.
+		frames, err := env.wal.ReadAllFrames()
+		require.NoError(t, err)
+		require.Len(t, frames, 1)
+		assert.Equal(t, PageIndex(8), frames[0].PageIndex)
+	})
+}
+
+// walCommitEnv holds all resources needed for a WAL commit test.
+type walCommitEnv struct {
+	dbFile    *os.File
+	wal       *WAL
+	walIndex  *WALIndex
+	pagerMock *MockPager
+	saverMock *MockPageSaver
+	txManager *TransactionManager
+}
+
+func newWALCommitEnv(t *testing.T) *walCommitEnv {
+	t.Helper()
+
+	dbFile, err := os.CreateTemp("", testDBName)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = dbFile.Close()
+		_ = os.Remove(dbFile.Name())
+	})
+
+	wal, err := CreateWAL(dbFile.Name(), PageSize)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = wal.Close()
+		_ = os.Remove(dbFile.Name() + "-wal")
+	})
+
+	walIndex := NewWALIndex()
+	pagerMock := new(MockPager)
+	saverMock := new(MockPageSaver)
+
+	txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(pagerMock), saverMock, nil)
+	txManager.wal = wal
+	txManager.walIndex = walIndex
+
+	return &walCommitEnv{
+		dbFile:    dbFile,
+		wal:       wal,
+		walIndex:  walIndex,
+		pagerMock: pagerMock,
+		saverMock: saverMock,
+		txManager: txManager,
+	}
+}
+
+func TestTransactionManager_CheckpointWAL(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ErrNotWALMode when WAL not enabled", func(t *testing.T) {
+		t.Parallel()
+
+		dbFile, err := os.CreateTemp("", testDBName)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_ = dbFile.Close()
+			_ = os.Remove(dbFile.Name())
+		})
+
+		pager, err := NewPager(dbFile, PageSize, 100)
+		require.NoError(t, err)
+		txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), nil, pager, nil)
+		// WAL not enabled.
+
+		err = txManager.CheckpointWAL(dbFile)
+		require.ErrorIs(t, err, ErrNotWALMode)
+	})
+
+	t.Run("Checkpoint flushes WAL frames to DB file and resets index", func(t *testing.T) {
+		t.Parallel()
+
+		// Build environment: a real DB file, a real WAL, write some pages, then checkpoint.
+		dbFile, err := os.CreateTemp("", testDBName)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_ = dbFile.Close()
+			_ = os.Remove(dbFile.Name())
+		})
+
+		// Allocate space for a few pages so WAL checkpoint can write into the file.
+		const numPages = 4
+		blankData := make([]byte, int(PageSize)*numPages)
+		_, err = dbFile.Write(blankData)
+		require.NoError(t, err)
+
+		wal, err := CreateWAL(dbFile.Name(), PageSize)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_ = wal.Close()
+			_ = os.Remove(dbFile.Name() + "-wal")
+		})
+
+		walIndex := NewWALIndex()
+		saverMock := new(MockPageSaver)
+		txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), nil, saverMock, nil)
+		txManager.wal = wal
+		txManager.walIndex = walIndex
+
+		ctx := context.Background()
+
+		// Write one transaction with a modified page so a WAL frame is appended.
+		tx := txManager.BeginTransaction(ctx)
+		tx.WriteSet[2] = WriteInfo{
+			Page:  &Page{Index: PageIndex(2), LeafNode: NewLeafNode()},
+			Table: "t1",
+		}
+		saverMock.On("SavePage", ctx, PageIndex(2), tx.WriteSet[2].Page).Return(nil).Once()
+		require.NoError(t, txManager.CommitTransaction(ctx, tx))
+
+		// One frame must be present before checkpoint.
+		assert.Equal(t, int64(1), wal.FrameCount())
+		assert.True(t, walIndex.Has(PageIndex(2)))
+
+		// Checkpoint: should succeed and reset state.
+		require.NoError(t, txManager.CheckpointWAL(dbFile))
+
+		// WAL file should be empty after checkpoint+truncate.
+		assert.Equal(t, int64(0), wal.FrameCount())
+		// WAL index should be cleared.
+		assert.False(t, walIndex.Has(PageIndex(2)))
+
+		mock.AssertExpectationsForObjects(t, saverMock)
+	})
+
+	t.Run("Checkpoint with no frames is a no-op", func(t *testing.T) {
+		t.Parallel()
+
+		env := newWALCommitEnv(t)
+		// No transactions committed — WAL is empty.
+		assert.Equal(t, int64(0), env.wal.FrameCount())
+
+		err := env.txManager.CheckpointWAL(env.dbFile)
+		require.NoError(t, err)
+
+		// Still empty; index still clear.
+		assert.Equal(t, int64(0), env.wal.FrameCount())
+		assert.False(t, env.walIndex.Has(PageIndex(1)))
+	})
 }
 
 func TestTransactionManager_ExecuteInTransaction(t *testing.T) {

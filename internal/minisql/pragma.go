@@ -34,6 +34,11 @@ func (d *Database) executePragmaStatement(ctx context.Context, stmt Statement) (
 			return StatementResult{}, err
 		}
 		return integrityReportResult("integrity_check", report), nil
+	case "wal_checkpoint":
+		if err := d.Checkpoint(ctx); err != nil {
+			return StatementResult{}, fmt.Errorf("WAL checkpoint failed: %w", err)
+		}
+		return walCheckpointResult(), nil
 	default:
 		return StatementResult{}, fmt.Errorf("%w: %s", errUnknownPragma, stmt.PragmaName)
 	}
@@ -80,6 +85,20 @@ func integrityIssueRow(checkName string, issue IntegrityIssue) Row {
 		row.Values[3] = OptionalValue{Value: NewTextPointer([]byte(issue.Object)), Valid: true}
 	}
 	return row
+}
+
+var walCheckpointResultColumns = []Column{
+	{Kind: Text, Name: "status"},
+}
+
+func walCheckpointResult() StatementResult {
+	row := NewRowWithValues(walCheckpointResultColumns, []OptionalValue{
+		{Value: NewTextPointer([]byte("ok")), Valid: true},
+	})
+	return StatementResult{
+		Columns: walCheckpointResultColumns,
+		Rows:    rowsIterator([]Row{row}),
+	}
 }
 
 func rowsIterator(rows []Row) Iterator {

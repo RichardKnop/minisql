@@ -47,6 +47,11 @@ type pagerImpl struct {
 	// bufferPool reuses page-sized byte slices to reduce allocations
 	bufferPool *sync.Pool
 
+	// On a cache miss the pager checks the index before reading from the
+	// DB file so readers always see the latest committed version of every page
+	// even before a checkpoint.
+	walIndex *WALIndex
+
 	mu sync.RWMutex
 }
 
@@ -102,6 +107,21 @@ func NewPager(file DBFile, pageSize, maxCachedPages int) (*pagerImpl, error) {
 	return pager, nil
 }
 
+// SetWALIndex wires a WAL index into the pager.  Once set, cache misses in
+// GetPage check the index before falling back to a DB-file read.
+//
+// When the DB file is empty (WAL-only mode, totalPages == 0), totalPages is
+// initialised to max(WAL page index) + 1 so that new-page allocation via
+// TotalPages() never clobbers existing WAL pages.
+func (p *pagerImpl) SetWALIndex(walIndex *WALIndex) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.walIndex = walIndex
+	if p.totalPages == 0 && walIndex != nil && walIndex.Size() > 0 {
+		p.totalPages = uint32(walIndex.MaxPageIndex()) + 1
+	}
+}
+
 // Close ...
 func (p *pagerImpl) Close() error {
 	// Sync file to ensure all buffered writes are persisted to disk
@@ -136,8 +156,71 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 		return page, nil
 	}
 	totalPages := p.totalPages
+	wi := p.walIndex
 	p.mu.RUnlock()
 
+	// WAL check: on a cache miss, look up the WAL index before touching the DB
+	// file.  WAL pages may not yet be on disk (checkpoint pending), so this check
+	// must happen before the totalPages boundary guard.  The index is populated on
+	// every WAL commit and always contains the most-recently-committed version of
+	// a page.
+	if wi != nil {
+		if walData, ok := wi.Lookup(pageIdx); ok {
+			newPage, err := unmarshaler(totalPages, pageIdx, walData)
+			if err != nil {
+				return nil, fmt.Errorf("unmarshal page %d from WAL index: %w", pageIdx, err)
+			}
+
+			if pageIdx == 0 {
+				if newPage.LeafNode != nil {
+					newPage.LeafNode.Header.IsRoot = true
+				}
+				if newPage.InternalNode != nil {
+					newPage.InternalNode.Header.IsRoot = true
+					newPage.InternalNode.Header.IsInternal = true
+				}
+			}
+
+			p.mu.Lock()
+			defer p.mu.Unlock()
+
+			// Another goroutine may have populated the cache while we read the WAL.
+			if len(p.pages) > int(pageIdx) && p.pages[pageIdx] != nil {
+				return p.pages[pageIdx], nil
+			}
+
+			// For page 0 WAL hits, sync the in-memory DB header so GetHeader()
+			// returns the latest value even before a checkpoint.
+			if pageIdx == 0 {
+				var hdr DatabaseHeader
+				if err := UnmarshalDatabaseHeader(walData[0:RootPageConfigSize], &hdr); err == nil {
+					p.dbHeader = hdr
+				}
+			}
+
+			evictedIdx, evicted := p.lruCache.EvictIfNeeded()
+			if evicted {
+				p.pages[evictedIdx] = nil
+			}
+
+			if len(p.pages) < int(pageIdx)+1 {
+				for i := len(p.pages); i < int(pageIdx)+1; i++ {
+					p.pages = append(p.pages, nil)
+				}
+			}
+
+			p.pages[pageIdx] = newPage
+
+			if int(pageIdx) == int(p.totalPages) {
+				p.totalPages++
+			}
+
+			p.lruCache.Put(pageIdx, struct{}{}, false)
+			return p.pages[pageIdx], nil
+		}
+	}
+
+	// Not in WAL: enforce the on-disk boundary before attempting a file read.
 	if int(pageIdx) > int(totalPages) {
 		return nil, fmt.Errorf("cannot skip index when getting page, index: %d, number of pages: %d", pageIdx, totalPages)
 	}

@@ -14,7 +14,7 @@ func TestDatabase_QuickCheck(t *testing.T) {
 
 	t.Run("healthy database has no issues", func(t *testing.T) {
 		pager, dbFile := initTest(t)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager, nil)
 		require.NoError(t, err)
 
 		report, err := db.QuickCheck(context.Background())
@@ -25,7 +25,7 @@ func TestDatabase_QuickCheck(t *testing.T) {
 
 	t.Run("free page count mismatch is reported", func(t *testing.T) {
 		pager, dbFile := initTest(t)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager, nil)
 		require.NoError(t, err)
 
 		pager.dbHeader.FreePageCount = 1
@@ -38,7 +38,7 @@ func TestDatabase_QuickCheck(t *testing.T) {
 
 	t.Run("invalid free list entry is reported", func(t *testing.T) {
 		pager, dbFile := initTest(t)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager, nil)
 		require.NoError(t, err)
 		userTable := addQuickCheckTestTable(db, pager, "users", 1)
 		pager.dbHeader.FirstFreePage = userTable.GetRootPageIdx()
@@ -52,7 +52,7 @@ func TestDatabase_QuickCheck(t *testing.T) {
 
 	t.Run("free list head out of range is reported", func(t *testing.T) {
 		pager, dbFile := initTest(t)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager, nil)
 		require.NoError(t, err)
 
 		pager.dbHeader.FirstFreePage = PageIndex(99)
@@ -65,7 +65,7 @@ func TestDatabase_QuickCheck(t *testing.T) {
 
 	t.Run("free list cycle is reported", func(t *testing.T) {
 		pager, dbFile := initTest(t)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager, nil)
 		require.NoError(t, err)
 
 		for len(pager.pages) <= 1 {
@@ -87,7 +87,7 @@ func TestDatabase_QuickCheck(t *testing.T) {
 
 	t.Run("invalid table root page type is reported", func(t *testing.T) {
 		pager, dbFile := initTest(t)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager, nil)
 		require.NoError(t, err)
 
 		pager.pages[0] = &Page{
@@ -103,7 +103,7 @@ func TestDatabase_QuickCheck(t *testing.T) {
 
 	t.Run("table root out of range is reported", func(t *testing.T) {
 		pager, dbFile := initTest(t)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager, nil)
 		require.NoError(t, err)
 
 		db.tables["users"] = NewTable(
@@ -124,7 +124,7 @@ func TestDatabase_QuickCheck(t *testing.T) {
 
 	t.Run("index roots are checked", func(t *testing.T) {
 		pager, dbFile := initTest(t)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager, nil)
 		require.NoError(t, err)
 
 		addQuickCheckTestTableWithSecondaryIndex(db, pager, testTableName, 1, "test_table_email_idx", 2)
@@ -141,7 +141,7 @@ func TestDatabase_IntegrityCheck(t *testing.T) {
 
 	t.Run("orphan page is reported", func(t *testing.T) {
 		pager, dbFile := initTest(t)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager, nil)
 		require.NoError(t, err)
 
 		orphanPageIdx := PageIndex(1)
@@ -166,7 +166,7 @@ func TestDatabase_IntegrityCheck(t *testing.T) {
 
 	t.Run("page reachable from multiple objects is reported", func(t *testing.T) {
 		pager, dbFile := initTest(t)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager, nil)
 		require.NoError(t, err)
 
 		addQuickCheckTestTable(db, pager, "users", 1)
@@ -180,7 +180,7 @@ func TestDatabase_IntegrityCheck(t *testing.T) {
 
 	t.Run("table page out of range is reported", func(t *testing.T) {
 		pager, dbFile := initTest(t)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager, nil)
 		require.NoError(t, err)
 
 		rootPageIdx := PageIndex(1)
@@ -209,7 +209,7 @@ func TestDatabase_IntegrityCheck(t *testing.T) {
 
 	t.Run("index pages are traversed", func(t *testing.T) {
 		pager, dbFile := initTest(t)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager, nil)
 		require.NoError(t, err)
 
 		addQuickCheckTestTableWithSecondaryIndex(db, pager, testTableName, 1, "test_table_email_idx", 2)
@@ -223,7 +223,7 @@ func TestDatabase_IntegrityCheck(t *testing.T) {
 	t.Run("missing unique index entry is reported", func(t *testing.T) {
 		pager, dbFile := initTest(t)
 		mockParser := new(MockParser)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), mockParser, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), mockParser, pager, pager, nil)
 		require.NoError(t, err)
 
 		createTableStmt := Statement{
@@ -277,7 +277,7 @@ func TestDatabase_IntegrityCheck(t *testing.T) {
 	t.Run("orphan secondary index entry is reported", func(t *testing.T) {
 		pager, dbFile := initTest(t)
 		mockParser := new(MockParser)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), mockParser, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), mockParser, pager, pager, nil)
 		require.NoError(t, err)
 
 		createTableStmt := Statement{

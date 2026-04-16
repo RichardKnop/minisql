@@ -15,8 +15,7 @@ import (
 func NewMockParser(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockParser {
+}) *MockParser {
 	mock := &MockParser{}
 	mock.Mock.Test(t)
 
@@ -111,8 +110,7 @@ func (_c *MockParser_Parse_Call) RunAndReturn(run func(context1 context.Context,
 func NewMockPager(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockPager {
+}) *MockPager {
 	mock := &MockPager{}
 	mock.Mock.Test(t)
 
@@ -302,8 +300,7 @@ func (_c *MockPager_TotalPages_Call) RunAndReturn(run func() uint32) *MockPager_
 func NewMockPageSaver(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockPageSaver {
+}) *MockPageSaver {
 	mock := &MockPageSaver{}
 	mock.Mock.Test(t)
 
@@ -427,8 +424,8 @@ func (_c *MockPageSaver_Flush_Call) RunAndReturn(run func(context1 context.Conte
 }
 
 // FlushBatch provides a mock function for the type MockPageSaver
-func (_mock *MockPageSaver) FlushBatch(context1 context.Context, pageIndices []PageIndex) error {
-	ret := _mock.Called(context1, pageIndices)
+func (_mock *MockPageSaver) FlushBatch(context1 context.Context, pageIndexs []PageIndex) error {
+	ret := _mock.Called(context1, pageIndexs)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FlushBatch")
@@ -436,7 +433,7 @@ func (_mock *MockPageSaver) FlushBatch(context1 context.Context, pageIndices []P
 
 	var r0 error
 	if returnFunc, ok := ret.Get(0).(func(context.Context, []PageIndex) error); ok {
-		r0 = returnFunc(context1, pageIndices)
+		r0 = returnFunc(context1, pageIndexs)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -450,12 +447,12 @@ type MockPageSaver_FlushBatch_Call struct {
 
 // FlushBatch is a helper method to define mock.On call
 //   - context1 context.Context
-//   - pageIndices []PageIndex
-func (_e *MockPageSaver_Expecter) FlushBatch(context1 interface{}, pageIndices interface{}) *MockPageSaver_FlushBatch_Call {
-	return &MockPageSaver_FlushBatch_Call{Call: _e.mock.On("FlushBatch", context1, pageIndices)}
+//   - pageIndexs []PageIndex
+func (_e *MockPageSaver_Expecter) FlushBatch(context1 interface{}, pageIndexs interface{}) *MockPageSaver_FlushBatch_Call {
+	return &MockPageSaver_FlushBatch_Call{Call: _e.mock.On("FlushBatch", context1, pageIndexs)}
 }
 
-func (_c *MockPageSaver_FlushBatch_Call) Run(run func(context1 context.Context, pageIndices []PageIndex)) *MockPageSaver_FlushBatch_Call {
+func (_c *MockPageSaver_FlushBatch_Call) Run(run func(context1 context.Context, pageIndexs []PageIndex)) *MockPageSaver_FlushBatch_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -478,7 +475,7 @@ func (_c *MockPageSaver_FlushBatch_Call) Return(err error) *MockPageSaver_FlushB
 	return _c
 }
 
-func (_c *MockPageSaver_FlushBatch_Call) RunAndReturn(run func(context1 context.Context, pageIndices []PageIndex) error) *MockPageSaver_FlushBatch_Call {
+func (_c *MockPageSaver_FlushBatch_Call) RunAndReturn(run func(context1 context.Context, pageIndexs []PageIndex) error) *MockPageSaver_FlushBatch_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -581,6 +578,46 @@ func (_c *MockPageSaver_SavePage_Call) RunAndReturn(run func(context1 context.Co
 	return _c
 }
 
+// SetWALIndex provides a mock function for the type MockPageSaver
+func (_mock *MockPageSaver) SetWALIndex(wALIndex *WALIndex) {
+	_mock.Called(wALIndex)
+	return
+}
+
+// MockPageSaver_SetWALIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetWALIndex'
+type MockPageSaver_SetWALIndex_Call struct {
+	*mock.Call
+}
+
+// SetWALIndex is a helper method to define mock.On call
+//   - wALIndex *WALIndex
+func (_e *MockPageSaver_Expecter) SetWALIndex(wALIndex interface{}) *MockPageSaver_SetWALIndex_Call {
+	return &MockPageSaver_SetWALIndex_Call{Call: _e.mock.On("SetWALIndex", wALIndex)}
+}
+
+func (_c *MockPageSaver_SetWALIndex_Call) Run(run func(wALIndex *WALIndex)) *MockPageSaver_SetWALIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 *WALIndex
+		if args[0] != nil {
+			arg0 = args[0].(*WALIndex)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockPageSaver_SetWALIndex_Call) Return() *MockPageSaver_SetWALIndex_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockPageSaver_SetWALIndex_Call) RunAndReturn(run func(wALIndex *WALIndex)) *MockPageSaver_SetWALIndex_Call {
+	_c.Run(run)
+	return _c
+}
+
 // TotalPages provides a mock function for the type MockPageSaver
 func (_mock *MockPageSaver) TotalPages() uint32 {
 	ret := _mock.Called()
@@ -630,8 +667,7 @@ func (_c *MockPageSaver_TotalPages_Call) RunAndReturn(run func() uint32) *MockPa
 func NewMockTxPager(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockTxPager {
+}) *MockTxPager {
 	mock := &MockTxPager{}
 	mock.Mock.Test(t)
 

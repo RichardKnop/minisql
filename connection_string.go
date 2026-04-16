@@ -10,21 +10,25 @@ import (
 	"go.uber.org/zap"
 )
 
-// ConnectionConfig holds parsed connection string parameters
+// DefaultWALCheckpointThreshold is the number of WAL frames that triggers an
+// automatic checkpoint when WAL mode is enabled.
+const DefaultWALCheckpointThreshold = 1000
+
+// ConnectionConfig holds parsed connection string parameters.
 type ConnectionConfig struct {
-	FilePath       string // Database file path
-	JournalEnabled bool   // Enable/disable rollback journal (default: true)
-	LogLevel       string // Log level: debug, info, warn, error (default: warn)
-	MaxCachedPages int    // Maximum number of pages to cache (default: 1000, 0 = use default)
+	FilePath               string // Database file path
+	WALCheckpointThreshold int    // Auto-checkpoint threshold in WAL frames (default: 1000)
+	LogLevel               string // Log level: debug, info, warn, error (default: warn)
+	MaxCachedPages         int    // Maximum number of pages to cache (default: 2000, 0 = use default)
 }
 
-// DefaultConnectionConfig returns default configuration
+// DefaultConnectionConfig returns default configuration.
 func DefaultConnectionConfig(filePath string) *ConnectionConfig {
 	return &ConnectionConfig{
-		FilePath:       filePath,
-		JournalEnabled: true,
-		LogLevel:       "warn",
-		MaxCachedPages: minisql.PageCacheSize,
+		FilePath:               filePath,
+		WALCheckpointThreshold: DefaultWALCheckpointThreshold,
+		LogLevel:               "warn",
+		MaxCachedPages:         minisql.PageCacheSize,
 	}
 }
 
@@ -33,14 +37,15 @@ func DefaultConnectionConfig(filePath string) *ConnectionConfig {
 // Format: /path/to/database.db?param1=value1&param2=value2
 //
 // Supported parameters:
-//   - journal=true|false  : Enable/disable rollback journal (default: true)
+//   - wal_checkpoint_threshold=N     : Auto-checkpoint after N WAL frames (default: 1000; 0 = disabled)
 //   - log_level=debug|info|warn|error : Set logging level (default: warn)
+//   - max_cached_pages=N             : Page cache size in pages (default: 2000)
 //
 // Examples:
-//   - "./my.db"                          : Default settings
-//   - "./my.db?journal=false"            : Disable journaling
-//   - "./my.db?log_level=debug"          : Enable debug logging
-//   - "./my.db?journal=true&log_level=info" : Both settings
+//   - "./my.db"                                  : Default settings
+//   - "./my.db?log_level=debug"                  : Enable debug logging
+//   - "./my.db?wal_checkpoint_threshold=500"     : Auto-checkpoint every 500 frames
+//   - "./my.db?log_level=info&max_cached_pages=500" : Multiple parameters
 func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 	// Split on first '?' to separate path from query params
 	parts := strings.SplitN(connStr, "?", 2)
@@ -58,13 +63,13 @@ func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 		return nil, fmt.Errorf("invalid connection string query parameters: %w", err)
 	}
 
-	// Parse journal parameter
-	if journalStr := queryParams.Get("journal"); journalStr != "" {
-		journal, err := strconv.ParseBool(journalStr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid journal parameter: must be 'true' or 'false', got %q", journalStr)
+	// Parse wal_checkpoint_threshold parameter
+	if threshStr := queryParams.Get("wal_checkpoint_threshold"); threshStr != "" {
+		thresh, err := strconv.Atoi(threshStr)
+		if err != nil || thresh < 0 {
+			return nil, fmt.Errorf("invalid wal_checkpoint_threshold parameter: must be a non-negative integer, got %q", threshStr)
 		}
-		config.JournalEnabled = journal
+		config.WALCheckpointThreshold = thresh
 	}
 
 	// Parse log_level parameter
@@ -93,7 +98,7 @@ func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 	return config, nil
 }
 
-// GetZapLevel converts log level string to zap.Level
+// GetZapLevel converts log level string to zap.Level.
 func (c *ConnectionConfig) GetZapLevel() zap.AtomicLevel {
 	switch c.LogLevel {
 	case "debug":

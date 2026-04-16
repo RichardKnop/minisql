@@ -7,13 +7,6 @@ import (
 // DatabaseOption is a functional option for configuring a Database.
 type DatabaseOption func(*Database)
 
-// WithJournal enables or disables the rollback journal for crash recovery.
-func WithJournal(enabled bool) DatabaseOption {
-	return func(d *Database) {
-		d.txManager.journalEnabled = enabled
-	}
-}
-
 const defaultMaxCachedStatements = 1000
 
 // WithMaxCachedStatements configures the maximum number of prepared statements to keep in the LRU cache.

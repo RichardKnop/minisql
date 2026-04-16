@@ -75,7 +75,7 @@ func TestDatabase_ExecutePragmaStatement(t *testing.T) {
 
 	t.Run("quick_check returns ok row on healthy database", func(t *testing.T) {
 		pager, dbFile := initTest(t)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager, nil)
 		require.NoError(t, err)
 
 		var result StatementResult
@@ -93,7 +93,7 @@ func TestDatabase_ExecutePragmaStatement(t *testing.T) {
 
 	t.Run("integrity_check returns issues as rows", func(t *testing.T) {
 		pager, dbFile := initTest(t)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager, nil)
 		require.NoError(t, err)
 
 		orphanPageIdx := PageIndex(1)
@@ -124,7 +124,7 @@ func TestDatabase_ExecutePragmaStatement(t *testing.T) {
 
 	t.Run("unknown pragma returns error", func(t *testing.T) {
 		pager, dbFile := initTest(t)
-		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), nil, pager, pager, nil)
 		require.NoError(t, err)
 
 		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {

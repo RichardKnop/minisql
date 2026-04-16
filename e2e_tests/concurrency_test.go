@@ -60,6 +60,8 @@ func (s *TestSuite) TestConcurrency() {
 
 		s.db, err = sql.Open("minisql", s.dbFile.Name())
 		s.Require().NoError(err)
+		s.db.SetMaxOpenConns(1)
+		s.db.SetMaxIdleConns(1)
 
 		s.countRowsInTable("users", 1000)
 	})

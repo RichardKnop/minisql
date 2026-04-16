@@ -32,9 +32,9 @@ type Driver struct {
 // Open returns a new connection to the database.
 // The name is a connection string with optional parameters:
 //   - "./my.db" - simple path
-//   - "./my.db?journal=false" - disable journaling
+//   - "./my.db?wal_checkpoint_threshold=500" - auto-checkpoint after 500 WAL frames
 //   - "./my.db?log_level=debug" - enable debug logging
-//   - "./my.db?journal=true&log_level=info" - multiple parameters
+//   - "./my.db?wal_checkpoint_threshold=500&log_level=info" - multiple parameters
 func (d *Driver) Open(name string) (driver.Conn, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -60,18 +60,6 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 		d.parser = parser.New()
 	}
 
-	// Attempt journal recovery if enabled
-	if config.JournalEnabled {
-		recovered, err := minisql.RecoverFromJournal(config.FilePath, minisql.PageSize)
-		if err != nil {
-			return nil, fmt.Errorf("journal recovery failed: %w", err)
-		}
-		if recovered {
-			d.logger.Warn("database recovered from journal on startup",
-				zap.String("db_path", config.FilePath))
-		}
-	}
-
 	db, err := d.newDB(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
@@ -91,10 +79,23 @@ func (d *Driver) newDB(config *ConnectionConfig) (*minisql.Database, error) {
 		return nil, fmt.Errorf("failed to open database file: %w", err)
 	}
 
-	// Create new database instance
 	pager, err := minisql.NewPager(dbFile, minisql.PageSize, config.MaxCachedPages)
 	if err != nil {
+		_ = dbFile.Close()
 		return nil, fmt.Errorf("failed to create pager: %w", err)
+	}
+
+	walIndex := minisql.NewWALIndex()
+	wal, recovered, err := minisql.OpenWALAndRebuildIndex(config.FilePath, minisql.PageSize, walIndex)
+	if err != nil {
+		_ = dbFile.Close()
+		return nil, fmt.Errorf("failed to initialise WAL: %w", err)
+	}
+
+	if recovered {
+		d.logger.Warn("WAL replay: uncommitted-to-disk frames found and replayed into WAL index",
+			zap.String("db_path", config.FilePath),
+			zap.Int("frames_in_index", walIndex.Size()))
 	}
 
 	return minisql.NewDatabase(
@@ -104,7 +105,12 @@ func (d *Driver) newDB(config *ConnectionConfig) (*minisql.Database, error) {
 		d.parser,
 		pager,
 		pager,
-		minisql.WithJournal(config.JournalEnabled),
+		&minisql.WALConfig{
+			WAL:                 wal,
+			Index:               walIndex,
+			DBFile:              dbFile,
+			CheckpointThreshold: config.WALCheckpointThreshold,
+		},
 	)
 }
 
