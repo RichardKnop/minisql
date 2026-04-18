@@ -93,6 +93,7 @@ type Scan struct {
 	IndexKeys      []any          // Keys to lookup in index
 	RangeCondition RangeCondition // upper/lower bounds for range scan
 	Filters        OneOrMore      // Additional filters to apply
+	CoveringIndex  bool           // true = all needed columns are in the index; skip table row fetch
 }
 
 /*
@@ -170,6 +171,7 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error
 	// and an index exists on that column, we can satisfy it by reading just the first or
 	// last entry in the index — O(log n) instead of O(n).
 	if plan, ok := t.tryMinMaxIndexPlan(stmt); ok {
+		plan.markCoveringIndexes(stmt)
 		return plan, nil
 	}
 
@@ -186,7 +188,9 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error
 	// If there is no where clause, no need to consider index scans
 	if len(stmt.Conditions) == 0 {
 		// But we might still use index for ordering
-		return plan.optimizeOrdering(t, nil), nil
+		result := plan.optimizeOrdering(t, nil)
+		result.markCoveringIndexes(stmt)
+		return result, nil
 	}
 
 	// If there are no indexes, we cannot do index scans
@@ -201,7 +205,9 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error
 
 	// But we might still use index for ordering
 	// Pass original conditions so we can restore them if we switch indexes
-	return plan.optimizeOrdering(t, stmt.Conditions), nil
+	result := plan.optimizeOrdering(t, stmt.Conditions)
+	result.markCoveringIndexes(stmt)
+	return result, nil
 }
 
 // indexMatch represents a potential index match for equality conditions
