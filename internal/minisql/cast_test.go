@@ -21,12 +21,12 @@ func TestToInt64FromString(t *testing.T) {
 		{"123", 123, true},
 		{"-5", -5, true},
 		{"+10", 10, true},
-		{"42abc", 42, true},  // leading digits only
-		{"  7  ", 7, true},   // whitespace trimmed
-		{"abc", 0, false},    // no leading digits
-		{"", 0, false},       // empty string
-		{"-", 0, false},      // sign only
-		{"+", 0, false},      // sign only
+		{"42abc", 42, true}, // leading digits only
+		{"  7  ", 7, true},  // whitespace trimmed
+		{"abc", 0, false},   // no leading digits
+		{"", 0, false},      // empty string
+		{"-", 0, false},     // sign only
+		{"+", 0, false},     // sign only
 	}
 	for _, tc := range cases {
 		n, ok := toInt64FromString(tc.input)
@@ -50,10 +50,10 @@ func TestToFloat64FromString(t *testing.T) {
 		{"3.14", 3.14, true},
 		{"-2.5", -2.5, true},
 		{"1e3", 1000, true},
-		{"3.7x", 3.7, true},   // trailing non-numeric ignored
-		{"  9  ", 9, true},    // whitespace trimmed
-		{"abc", 0, false},     // no leading digits
-		{"", 0, false},        // empty string
+		{"3.7x", 3.7, true}, // trailing non-numeric ignored
+		{"  9  ", 9, true},  // whitespace trimmed
+		{"abc", 0, false},   // no leading digits
+		{"", 0, false},      // empty string
 	}
 	for _, tc := range cases {
 		f, ok := toFloat64FromString(tc.input)
@@ -110,9 +110,9 @@ func TestCastToInt64(t *testing.T) {
 		{float32(4.1), 4},
 		{true, 1},
 		{false, 0},
-		{NewTextPointer([]byte("123abc")), 123},  // leading digits
-		{NewTextPointer([]byte("3.9")), 3},       // leading float digits → truncate
-		{NewTextPointer([]byte("abc")), 0},       // no leading digits → 0
+		{NewTextPointer([]byte("123abc")), 123}, // leading digits
+		{NewTextPointer([]byte("3.9")), 3},      // leading float digits → truncate
+		{NewTextPointer([]byte("abc")), 0},      // no leading digits → 0
 	}
 	for _, tc := range cases {
 		got, err := castToInt64(tc.input)

@@ -64,9 +64,9 @@ type Expr struct {
 	CastExpr       *Expr      // the expression to cast
 	CastTargetType ColumnKind // the target type (never 0 when CastExpr is set)
 
-	IsNull  bool    // true when this node represents an explicit SQL NULL literal
-	Column  string  // column reference, may include alias prefix ("u.price")
-	Literal any     // int64, float64, bool, or TextPointer
+	IsNull  bool   // true when this node represents an explicit SQL NULL literal
+	Column  string // column reference, may include alias prefix ("u.price")
+	Literal any    // int64, float64, bool, or TextPointer
 	Left    *Expr
 	Right   *Expr
 	Op      ArithOp
