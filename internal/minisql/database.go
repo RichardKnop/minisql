@@ -19,12 +19,24 @@ var (
 	errIndexAlreadyExists        = errors.New("index already exists")
 )
 
+// WALConfig bundles the Write-Ahead Log objects that NewDatabase needs.
+// Pass nil when creating in-memory/test databases that do not require WAL.
+type WALConfig struct {
+	WAL                 *WAL
+	Index               *WALIndex
+	DBFile              DBFile
+	CheckpointThreshold int
+}
+
 // Database is the top-level embedded SQL database instance.
 type Database struct {
 	dbFilePath     string
 	parser         Parser
 	factory        PagerFactory
 	saver          PageSaver
+	wal            *WAL
+	walIndex       *WALIndex
+	walDBFile      DBFile
 	txManager      *TransactionManager
 	tables         map[string]*Table
 	dbLock         *sync.RWMutex
@@ -36,8 +48,10 @@ type Database struct {
 
 type clock func() Time
 
-// NewDatabase creates a new database
-func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, parser Parser, factory PagerFactory, saver PageSaver, opts ...DatabaseOption) (*Database, error) {
+// NewDatabase creates a new database.
+// walCfg wires in the Write-Ahead Log; pass nil for in-memory/test databases
+// that do not require WAL (commits fall back to writing directly to the pager).
+func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, parser Parser, factory PagerFactory, saver PageSaver, walCfg *WALConfig, opts ...DatabaseOption) (*Database, error) {
 	db := &Database{
 		dbFilePath: dbFilePath,
 		parser:     parser,
@@ -63,6 +77,19 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, par
 	db.lockedProvider = &lockedTableProvider{db: db}
 
 	db.txManager = NewTransactionManager(logger, dbFilePath, db.pagerFactory, saver, db)
+
+	if walCfg != nil {
+		db.wal = walCfg.WAL
+		db.walIndex = walCfg.Index
+		db.walDBFile = walCfg.DBFile
+		db.txManager.wal = walCfg.WAL
+		db.txManager.walIndex = walCfg.Index
+		db.txManager.checkpointThreshold = walCfg.CheckpointThreshold
+		db.txManager.SetCheckpointFunc(func() error {
+			return db.Checkpoint(context.Background())
+		})
+		saver.SetWALIndex(walCfg.Index)
+	}
 
 	for _, opt := range opts {
 		opt(db)
@@ -142,7 +169,41 @@ func (d *Database) PrepareStatement(ctx context.Context, query string) (Statemen
 
 // Close flushes and closes the underlying page storage.
 func (d *Database) Close() error {
+	// Passive checkpoint on close (mirrors SQLite behaviour): if there are
+	// committed WAL frames that have not yet been written to the DB file, flush
+	// them now so the DB file is a complete snapshot.  This limits WAL growth
+	// across restarts and makes crash recovery trivially fast on the next open.
+	// We log but do not fail on checkpoint error — the WAL is still valid and
+	// will be replayed on the next open if the checkpoint is incomplete.
+	if d.wal != nil && d.walDBFile != nil && d.wal.FrameCount() > 0 {
+		if err := d.Checkpoint(context.Background()); err != nil {
+			d.logger.Warn("checkpoint on close failed; WAL will be replayed on next open",
+				zap.Error(err))
+		}
+	}
+
+	// Close the WAL file before the DB file.
+	if d.wal != nil {
+		if err := d.wal.Close(); err != nil {
+			d.logger.Warn("failed to close WAL on database close", zap.Error(err))
+		}
+		d.wal = nil
+	}
 	return d.saver.Close()
+}
+
+// Checkpoint checkpoints the WAL into the database file and truncates the WAL.
+// It is a no-op when no WAL is configured.
+//
+// Checkpoint blocks new WAL writers until it completes.  Readers are not
+// blocked: they continue to use the (now being reset) WAL index, which is
+// fine because the pager cache still holds the correct pages and the DB file
+// is being written with the same data.
+func (d *Database) Checkpoint(_ context.Context) error {
+	if d.wal == nil || d.walDBFile == nil {
+		return nil
+	}
+	return d.txManager.CheckpointWAL(d.walDBFile)
 }
 
 // Reopen replaces the pager and transaction manager with fresh instances backed by the given factory and saver.
@@ -151,12 +212,20 @@ func (d *Database) Reopen(ctx context.Context, factory PagerFactory, saver PageS
 	d.saver = saver
 	d.tables = make(map[string]*Table)
 
-	// Preserve journal setting, then create a fresh transaction manager for the
-	// new file.  The old manager's global page versions are no longer valid after
-	// a file swap, and its saver points to the closed old file.
-	journalEnabled := d.txManager.journalEnabled
+	// Preserve WAL settings then create a fresh transaction manager for the new
+	// file.  The old manager's global page versions are no longer valid after a
+	// file swap, and its saver points to the closed old file.
+	var (
+		checkpointThreshold = d.txManager.checkpointThreshold
+		checkpointFn        = d.txManager.checkpointFn
+	)
 	d.txManager = NewTransactionManager(d.logger, d.dbFilePath, d.pagerFactory, saver, d)
-	d.txManager.journalEnabled = journalEnabled
+	if d.wal != nil {
+		d.txManager.wal = d.wal
+		d.txManager.walIndex = d.walIndex
+		d.txManager.checkpointThreshold = checkpointThreshold
+		d.txManager.SetCheckpointFunc(checkpointFn)
+	}
 
 	// Use a fresh context so init runs in a brand-new transaction on the new
 	// transaction manager, with no entanglement with any outer transaction.
@@ -321,7 +390,12 @@ func (d *Database) init(ctx context.Context) error {
 		"total_pages", totalPages,
 	).Debug("initializing database")
 
-	if totalPages == 0 {
+	// Only initialise an empty database when BOTH the DB file has no pages AND
+	// the WAL index has no data.  In WAL-only mode the DB file stays at 0 bytes
+	// (writes are only in the WAL), so checking totalPages alone would
+	// incorrectly re-initialise an existing database after a reopen.
+	walEmpty := d.walIndex == nil || d.walIndex.Size() == 0
+	if totalPages == 0 && walEmpty {
 		if err := d.initEmptyDatabase(ctx, rooPageIdx, mainTablePager); err != nil {
 			return err
 		}

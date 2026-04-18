@@ -156,11 +156,18 @@ func (s *TestSuite) SetupTest() {
 
 	db, err := sql.Open("minisql", s.dbFile.Name())
 	s.Require().NoError(err)
+	// MiniSQL is a single-file embedded database; multiple concurrent connections
+	// to the same file share a WAL that is not concurrency-safe across handles.
+	// Always use a single connection.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	s.db = db
 }
 
 func (s *TestSuite) TearDownTest() {
 	s.Require().NoError(s.db.Close())
-	err := os.Remove(s.dbFile.Name())
-	s.Require().NoError(err)
+	s.Require().NoError(os.Remove(s.dbFile.Name()))
+	// WAL file must also be removed so that a recycled temp-file name does not
+	// pick up a stale WAL from a previous test.
+	_ = os.Remove(s.dbFile.Name() + "-wal")
 }

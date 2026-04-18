@@ -57,7 +57,7 @@ func (d *Database) Vacuum(ctx context.Context) error {
 		return fmt.Errorf("vacuum: create temp pager: %w", err)
 	}
 
-	tempDB, err := NewDatabase(context.Background(), d.logger, tempFile, d.parser, tempPager, tempPager)
+	tempDB, err := NewDatabase(context.Background(), d.logger, tempFile, d.parser, tempPager, tempPager, nil)
 	if err != nil {
 		return fmt.Errorf("vacuum: init temp database: %w", err)
 	}

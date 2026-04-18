@@ -13,7 +13,7 @@ func TestNewDatabase(t *testing.T) {
 	pager, dbFile := initTest(t)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager, nil)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 1)
@@ -31,7 +31,7 @@ func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 		uniqueIndexName = UniqueIndexName(testTableName3, "email")
 	)
 
-	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager, nil)
 	require.NoError(t, err)
 
 	// Let's create 4 tables:
@@ -76,7 +76,7 @@ func TestNewDatabase_MultipleTablesWithIndexes(t *testing.T) {
 	mockParser.On("Parse", mock.Anything, stmt2.DDL()).Return([]Statement{stmt2}, nil)
 	mockParser.On("Parse", mock.Anything, stmt3.DDL()).Return([]Statement{stmt3}, nil)
 
-	aDatabase, err = NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager)
+	aDatabase, err = NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager, nil)
 	require.NoError(t, err)
 
 	assert.Len(t, aDatabase.tables, 4)
@@ -153,7 +153,7 @@ func TestDatabase_CreateTable(t *testing.T) {
 	pager, dbFile := initTest(t)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager, nil)
 	require.NoError(t, err)
 
 	t.Run("Create table", func(t *testing.T) {
@@ -222,7 +222,7 @@ func TestDatabase_CreateTable_WithPrimaryKey(t *testing.T) {
 	pager, dbFile := initTest(t)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager, nil)
 	require.NoError(t, err)
 
 	t.Run("Create table", func(t *testing.T) {
@@ -302,7 +302,7 @@ func TestDatabase_CreateTable_WithUniqueIndex(t *testing.T) {
 	indexName := UniqueIndexName(testTableName, testColumns[1].Name)
 
 	ctx := context.Background()
-	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager, nil)
 	require.NoError(t, err)
 
 	t.Run("Create table", func(t *testing.T) {
@@ -393,7 +393,7 @@ func TestDatabase_CreateIndex(t *testing.T) {
 		ctx           = context.Background()
 	)
 
-	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager, nil)
 	require.NoError(t, err)
 
 	// First create a test table

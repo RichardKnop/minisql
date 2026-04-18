@@ -133,9 +133,11 @@ values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:2
 	})
 
 	s.Run("Reinitialise to force unmarshaling from disk", func() {
-		s.dbFile.Close()
+		s.Require().NoError(s.db.Close())
 		s.db, err = sql.Open("minisql", s.dbFile.Name())
 		s.Require().NoError(err)
+		s.db.SetMaxOpenConns(1)
+		s.db.SetMaxIdleConns(1)
 
 		users := s.collectUsers(`select * from users order by id desc;`)
 		s.Require().Len(users, 10)

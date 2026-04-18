@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLite. It implements a hand-written state-machine SQL parser, a B+ tree storage engine with 4 KB pages, an LRU page cache, a rollback journal for crash recovery, and optimistic concurrency control (OCC). It registers itself as a `database/sql` driver.
+MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLite. It implements a hand-written state-machine SQL parser, a B+ tree storage engine with 4 KB pages, an LRU page cache, a Write-Ahead Log (WAL) for crash recovery, and optimistic concurrency control (OCC). It registers itself as a `database/sql` driver.
 
 **Module:** `github.com/RichardKnop/minisql`
 **Go version:** 1.26
@@ -44,7 +44,8 @@ MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLi
 │   │   ├── transaction_manager.go  # OCC manager: read-set tracking, conflict detection
 │   │   ├── index.go        # B+ tree index (primary, unique, secondary)
 │   │   ├── cursor.go       # Row cursor for B+ tree traversal
-│   │   ├── journal.go      # Write-ahead rollback journal
+│   │   ├── wal.go          # Write-Ahead Log: append frames, replay, checkpoint
+│   │   ├── wal_index.go    # In-memory WAL index: page→latest-bytes map
 │   │   ├── analyze.go      # ANALYZE statement: build index statistics
 │   │   ├── config.go       # Database config constants (page size, limits, …)
 │   │   └── mocks_test.go   # Auto-generated mocks (do not edit by hand)
@@ -275,7 +276,7 @@ Tribal knowledge, design decisions, and gotchas for specific subsystems are docu
 |---|---|
 | SQL Parser | reserved words, state machine, WHERE recursive-descent, peek/pop cursor |
 | Query Execution | plan pipeline, index selection, DNF fanout, sort path |
-| Storage Engine | page layout, pager cache, OCC transactions, rollback journal |
+| Storage Engine | page layout, pager cache, OCC transactions, WAL |
 | Testing | e2e suite, unit test setup, dataGen, row size presets |
 
 Standards explain the *why* behind non-obvious patterns. Code conventions (formatting, error handling, etc.) remain in this file.
@@ -482,7 +483,7 @@ When adding filtering/transformation stages, insert them as goroutines between `
 - Current header contract: magic `minisql\0`, format version `1`, page size `4096`, first free page, free page count, then reserved bytes.
 - Opening a database now requires a valid header magic/version/page size; old header layouts are intentionally rejected during the unstable pre-1.0 period.
 - When changing the header format, update both `internal/minisql/config.go` and the storage-engine standards/docs in the same change.
-- Rollback-journal completeness currently relies on the finalized journal header plus exact file-length validation; there is no separate commit-magic/footer marker. Keep code, tests, README, and standards aligned if that protocol changes.
+- WAL commits write frames to `{dbpath}-wal` and update the in-memory WAL index; the main database file is only written during a checkpoint. Keep code, tests, README, and standards aligned if the WAL protocol changes.
 
 ---
 

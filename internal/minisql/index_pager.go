@@ -19,7 +19,9 @@ func (p *indexPager[T]) GetPage(ctx context.Context, pageIdx PageIndex) (*Page, 
 func (p *indexPager[T]) unmarshal(totalPages uint32, pageIdx PageIndex, buf []byte) (*Page, error) {
 	idx := 0
 
-	// Requesting a new page
+	// Requesting a new page: pageIdx == totalPages means the page does not exist
+	// on disk or in the WAL yet.  The buf is all-zeros (no file read was
+	// performed for truly new pages).
 	if uint32(pageIdx) == totalPages {
 		node := NewIndexNode[T](p.unique)
 		buf[idx] = PageTypeIndex

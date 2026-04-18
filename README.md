@@ -22,10 +22,10 @@ And create a database instance:
 db, err := sql.Open("minisql", "./my.db")
 
 // With connection parameters
-db, err := sql.Open("minisql", "./my.db?journal=false")
+db, err := sql.Open("minisql", "./my.db?log_level=debug")
 
 // Multiple parameters
-db, err := sql.Open("minisql", "./my.db?journal=true&log_level=debug")
+db, err := sql.Open("minisql", "./my.db?log_level=debug&max_cached_pages=500")
 ```
 
 ## Connection Pooling
@@ -50,45 +50,45 @@ MiniSQL supports optional connection string parameters:
 
 | Parameter | Values | Default | Description |
 |-----------|--------|---------|-------------|
-| `journal` | `true`, `false` | `true` | Enable/disable rollback journal for crash recovery |
+| `wal_checkpoint_threshold` | non-negative integer | `1000` | Auto-checkpoint after N WAL frames (0 = disabled) |
 | `log_level` | `debug`, `info`, `warn`, `error` | `warn` | Set logging verbosity level |
 | `max_cached_pages` | positive integer | `2000` | Maximum number of pages to keep in memory cache |
 
 **Examples:**
 ```go
-// Disable journaling for better performance (no crash recovery)
-db, err := sql.Open("minisql", "./my.db?journal=false")
-
 // Enable debug logging
 db, err := sql.Open("minisql", "./my.db?log_level=debug")
 
 // Set cache size to 500 pages (~2MB memory)
 db, err := sql.Open("minisql", "./my.db?max_cached_pages=500")
 
+// Disable auto-checkpoint (manual checkpoint only)
+db, err := sql.Open("minisql", "./my.db?wal_checkpoint_threshold=0")
+
 // Combine multiple parameters
-db, err := sql.Open("minisql", "/path/to/db.db?journal=true&log_level=info&max_cached_pages=2000")
+db, err := sql.Open("minisql", "/path/to/db.db?log_level=info&max_cached_pages=2000")
 ```
 
-**Note:** Disabling journaling (`journal=false`) improves performance but removes crash recovery protection. If the application crashes during a transaction commit, the database may become corrupted.
+## Write-Ahead Log (WAL)
 
-##  Write-Ahead Rollback Journal
+MiniSQL uses a Write-Ahead Log (`{dbpath}-wal`) for crash recovery and atomic commits. All page modifications are appended to the WAL before the main database file is updated.
 
-MiniSQL uses a [rollback journal](https://sqlite.org/lockingv3.html#rollback) to achieve atomic commit and rollback. Before committing a transaction, a journal file with `-journal` suffix is created in the same directory as the database file. It contains the original state of modified pages, and the original database header if the transaction changes it.
+Commit protocol:
 
-Current recovery protocol:
+1. Serialise all modified pages as WAL frames and `Sync()` the WAL file to disk.
+2. The in-memory WAL index is updated so subsequent reads see the new pages immediately.
+3. The main database file is **not written** during a commit — it is updated only during a checkpoint.
 
-1. Write original page/header bytes into `{dbpath}-journal`.
-2. Finalize the journal header with the final page count and `Sync()` it to disk.
-3. Only then flush modified database pages to disk.
-4. Delete the journal after a clean commit.
+On startup, if a WAL file exists, MiniSQL replays all valid committed frames into the in-memory WAL index so the data is visible immediately without a checkpoint.
 
-On startup, if a journal file exists, MiniSQL treats the finalized journal header as the completeness signal for recovery. Recovery only proceeds when:
+Checkpoint (`PRAGMA wal_checkpoint`):
 
-- the journal header magic/version/checksum are valid
-- the journal page size matches the database page size
-- the journal body is exactly as long as the finalized header says it should be
+1. Copies every WAL page into the main database file.
+2. `Sync()`s the database file.
+3. Truncates the WAL file to its header (32 bytes).
+4. Resets the in-memory WAL index.
 
-If the journal is truncated, corrupt, or contains trailing bytes beyond the finalized contents, recovery fails closed and the journal file is left in place for inspection.
+An automatic checkpoint is triggered after `wal_checkpoint_threshold` WAL frames (default 1000). Set `wal_checkpoint_threshold=0` to disable auto-checkpoint and run `PRAGMA wal_checkpoint` manually.
 
 ## Storage
 

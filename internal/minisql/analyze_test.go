@@ -18,7 +18,7 @@ func TestDatabase_Analyze(t *testing.T) {
 		rows          = gen.Rows(100)
 	)
 
-	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager, nil)
 	require.NoError(t, err)
 
 	// Create a test table
@@ -128,7 +128,7 @@ func TestDatabase_Analyze_CompositeIndex(t *testing.T) {
 		}
 	)
 
-	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager)
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager, nil)
 	require.NoError(t, err)
 
 	// Create a test table

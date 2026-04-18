@@ -50,6 +50,7 @@ type Flusher interface {
 type PageSaver interface {
 	SavePage(context.Context, PageIndex, *Page)
 	SaveHeader(context.Context, DatabaseHeader)
+	SetWALIndex(*WALIndex)
 	Flusher
 }
 

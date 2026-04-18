@@ -19,20 +19,24 @@ type TransactionManager struct {
 	globalDBHeaderVersion uint64
 	logger                *zap.Logger
 	dbFilePath            string
-	journalEnabled        bool
-	factory               TxPagerFactory
-	saver                 PageSaver
-	ddlSaver              DDLSaver
-	commitHook            func(commitPhase)
+	// WAL fields (non-nil when a WAL is configured)
+	walWriteMu          sync.Mutex   // serialises WAL appends — only one writer at a time
+	wal                 *WAL
+	walIndex            *WALIndex
+	checkpointThreshold int          // auto-checkpoint after this many WAL frames (0 = disabled)
+	checkpointFn        func() error // called by runAutoCheckpoint; set via SetCheckpointFunc
+	factory             TxPagerFactory
+	saver               PageSaver
+	ddlSaver            DDLSaver
+	commitHook          func(commitPhase)
 }
 
 type commitPhase string
 
 const (
-	commitPhaseBeforeJournalFinalize  commitPhase = "before_journal_finalize"
-	commitPhaseAfterJournalFinalize   commitPhase = "after_journal_finalize"
-	commitPhaseBeforeFlush            commitPhase = "before_flush"
-	commitPhaseAfterFlushBeforeDelete commitPhase = "after_flush_before_delete"
+	// WAL commit phases
+	commitPhaseBeforeWALAppend commitPhase = "before_wal_append"
+	commitPhaseAfterWALAppend  commitPhase = "after_wal_append"
 )
 
 // NewTransactionManager creates and returns a new TransactionManager.
@@ -48,6 +52,59 @@ func NewTransactionManager(logger *zap.Logger, dbFilePath string, factory TxPage
 		ddlSaver:           ddlSaver,
 	}
 }
+
+// SetCheckpointFunc registers a callback that is invoked by runAutoCheckpoint
+// when the WAL frame count exceeds checkpointThreshold.  Typically set to
+// Database.Checkpoint so the auto-checkpoint path mirrors the manual one.
+func (tm *TransactionManager) SetCheckpointFunc(fn func() error) {
+	tm.checkpointFn = fn
+}
+
+// CheckpointWAL checkpoints the WAL into dbFile, then truncates it.
+//
+// Checkpoint sequence (all under walWriteMu so no concurrent writers can
+// interleave):
+//  1. Write every unique page in the WAL to its correct offset in dbFile.
+//  2. fsync dbFile.
+//  3. Truncate the WAL file and write fresh salts (invalidates stale frames).
+//  4. Reset the in-memory WAL index (under tm.mu).
+//
+// Returns ErrNotWALMode if no WAL is configured.
+func (tm *TransactionManager) CheckpointWAL(dbFile DBFile) error {
+	if tm.wal == nil {
+		return ErrNotWALMode
+	}
+
+	tm.walWriteMu.Lock()
+	defer tm.walWriteMu.Unlock()
+
+	framesBefore := tm.wal.FrameCount()
+
+	if err := tm.wal.Checkpoint(dbFile); err != nil {
+		return fmt.Errorf("WAL checkpoint: %w", err)
+	}
+
+	if err := tm.wal.Truncate(); err != nil {
+		return fmt.Errorf("WAL truncate after checkpoint: %w", err)
+	}
+
+	// Reset the WAL index so subsequent cache misses read from the (now
+	// up-to-date) DB file rather than stale WAL entries.
+	tm.mu.Lock()
+	if tm.walIndex != nil {
+		tm.walIndex.Reset()
+	}
+	tm.mu.Unlock()
+
+	tm.logger.Info("WAL checkpoint completed",
+		zap.Int64("frames_checkpointed", framesBefore))
+
+	return nil
+}
+
+// ErrNotWALMode is returned when a WAL-specific operation is called on a
+// transaction manager that is not in WAL mode.
+var ErrNotWALMode = errors.New("WAL mode is not enabled")
 
 // ExecuteInTransaction runs fn within a transaction, committing on success or rolling back on failure.
 func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
@@ -97,7 +154,18 @@ func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction
 var ErrTxConflict = errors.New("transaction conflict detected")
 
 // CommitTransaction validates the write set for conflicts and, if clean, persists all changes.
+// When a WAL is configured it uses the WAL commit path; otherwise it writes directly to the pager
+// (used by unit tests that do not set up a WAL file).
 func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transaction) error {
+	if tm.wal != nil {
+		return tm.commitWithWAL(ctx, tx)
+	}
+	return tm.commitDirect(ctx, tx)
+}
+
+// commitDirect is the non-WAL commit path: OCC check then write pages straight to the pager.
+// Used only when WAL mode has not been enabled (e.g. in unit tests that do not set up a WAL).
+func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
@@ -105,27 +173,22 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		return fmt.Errorf("transaction %d is not active", tx.ID)
 	}
 
-	// Check for conflicts (simplified optimistic concurrency control)
+	// OCC conflict check
 	for pageIdx, readVersion := range tx.GetReadVersions() {
-		currentVersion := tm.globalPageVersions[pageIdx]
-		if currentVersion > readVersion {
-			// Page was modified by another transaction
+		if tm.globalPageVersions[pageIdx] > readVersion {
 			tx.Abort()
 			return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", ErrTxConflict, tx.ID, pageIdx)
 		}
 	}
-	readDBHeaderVersion, exists := tx.GetDBHeaderReadVersion()
-	if exists && tm.globalDBHeaderVersion > readDBHeaderVersion {
-		// DB header was modified by another transaction
-		tx.Abort()
-		return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
+	if readDBHeaderVersion, exists := tx.GetDBHeaderReadVersion(); exists {
+		if tm.globalDBHeaderVersion > readDBHeaderVersion {
+			tx.Abort()
+			return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
+		}
 	}
 
-	// Check if this is a read-only transaction
 	writeInfos := tx.GetWriteVersions()
 	isReadOnly := len(writeInfos) == 0 && !tx.DDLChanges.HasChanges()
-
-	// Fast path for read-only transactions - no writes to commit
 	if isReadOnly {
 		tx.Commit()
 		delete(tm.transactions, tx.ID)
@@ -133,142 +196,275 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 		return nil
 	}
 
-	// Pre-allocate with capacity for all writes + potential header page
-	// This avoids reallocation during append operations
 	pagesToFlush := make([]PageIndex, 0, len(tx.WriteSet)+1)
 
-	// === PHASE 1: Create Rollback Journal ===
-	// Skip journal creation for read-only transactions (no modifications to recover)
-	// Write original page contents to journal before modifying database
-	// This enables crash recovery by restoring original pages
-	var journal *RollbackJournal
-	if tm.journalEnabled && tm.dbFilePath != "" {
-		var err error
-		journal, err = CreateJournal(tm.dbFilePath, PageSize)
-		if err != nil {
-			tx.Abort()
-			return fmt.Errorf("create rollback journal: %w", err)
-		}
-		defer func() {
-			if journal != nil {
-				_ = journal.Close()
-			}
-		}()
-
-		// Write original db header and pages to the journal
-		numJournaledPages := 0
-		_, dbHeaderChanged := tx.GetModifiedDBHeader()
-		if dbHeaderChanged {
-			pager, err := tm.factory(ctx, SchemaTableName, "")
-			if err != nil {
-				tx.Abort()
-				return fmt.Errorf("get pager for journaling database header: %w", err)
-			}
-
-			originalHeader := pager.GetHeader(ctx)
-			if err := journal.WriteDBHeaderBefore(ctx, originalHeader); err != nil {
-				tx.Abort()
-				return fmt.Errorf("write database header to journal: %w", err)
-			}
-		}
-		// Write original pages to the journal
-		for pageIdx, info := range writeInfos {
-			pager, err := tm.factory(ctx, info.Table, info.Index)
-			if err != nil {
-				tx.Abort()
-				return fmt.Errorf("get pager for journaling page %d: %w", pageIdx, err)
-			}
-			originalPage, err := pager.GetPage(ctx, pageIdx)
-			if err != nil {
-				return fmt.Errorf("read original page %d for journal: %w", pageIdx, err)
-			}
-			if err := journal.WritePageBefore(ctx, pageIdx, originalPage); err != nil {
-				return fmt.Errorf("journal page %d: %w", pageIdx, err)
-			}
-			numJournaledPages++
-		}
-
-		// Finalize journal header with page count and sync to disk
-		tm.runCommitHook(commitPhaseBeforeJournalFinalize)
-		if err := journal.Finalize(dbHeaderChanged, numJournaledPages); err != nil {
-			return fmt.Errorf("finalize journal: %w", err)
-		}
-		tm.runCommitHook(commitPhaseAfterJournalFinalize)
-	}
-
-	// === PHASE 2: Apply Writes to In-Memory Pages ===
-	// No conflicts, apply all writes
-	// First update DB header if modified
+	// Apply DB header write first.
 	if header, modified := tx.GetModifiedDBHeader(); modified {
 		tm.saver.SaveHeader(ctx, *header)
 		tm.globalDBHeaderVersion += 1
-
-		pagesToFlush = append(pagesToFlush, 0) // header is first 100 bytes of page 0
+		pagesToFlush = append(pagesToFlush, 0)
 	}
-	// Then update modified pages
+	// Apply page writes.
 	for pageIdx, info := range writeInfos {
-		// Write the modified page to base storage
 		tm.saver.SavePage(ctx, pageIdx, info.Page)
-
-		// Increment page version
 		tm.globalPageVersions[pageIdx] += 1
-
 		pagesToFlush = append(pagesToFlush, pageIdx)
 	}
 
-	// === PHASE 3: Flush Modified Pages to Disk ===
-	// CRITICAL: If flush fails, the database is in an inconsistent state:
-	// - In-memory pages are modified
-	// - Page versions are incremented
-	// - But disk is not updated
-	// We MUST panic to force restart and journal recovery
-	//
-	// Use batch flush to reduce syscalls and improve I/O performance
-	tm.runCommitHook(commitPhaseBeforeFlush)
+	// Flush to disk.  Panic on failure: in-memory state is already ahead of disk.
 	if err := tm.saver.FlushBatch(ctx, pagesToFlush); err != nil {
-		// FATAL: Cannot continue with partially-flushed transaction
-		// In-memory state is corrupted and doesn't match disk
-		// Journal exists and will restore consistency on restart
 		tm.logger.Sugar().Panicf(
-			"PANIC: batch flush failed during commit, forcing restart for journal recovery tx_id %d, pages_to_flush %d, error %v",
-			uint64(tx.ID),
-			len(pagesToFlush),
-			err,
+			"PANIC: batch flush failed during commit, tx_id %d, pages_to_flush %d, error %v",
+			uint64(tx.ID), len(pagesToFlush), err,
 		)
 	}
 
-	// === PHASE 4: Delete Journal (Atomic Commit Point) ===
-	// Once all pages are safely on disk, delete the journal
-	// This is the atomic commit point - after this, the transaction is committed
-	tm.runCommitHook(commitPhaseAfterFlushBeforeDelete)
-	if journal != nil {
-		if err := journal.Delete(); err != nil {
-			// Database is consistent, journal deletion is non-critical
-			tm.logger.Warn("failed to delete journal after commit",
-				zap.Uint64("tx_id", uint64(tx.ID)),
-				zap.Error(err))
-		}
-		journal = nil // Prevent defer from closing again
-	}
-
-	// === PHASE 5: Finalize Transaction ===
-	// Save DDL changes (CREATE / DROP TABLE)
 	if tx.DDLChanges.HasChanges() {
 		tm.ddlSaver.SaveDDLChanges(ctx, tx.DDLChanges)
 	}
 
-	// Mark transaction as committed and clean up
 	tx.Commit()
 	delete(tm.transactions, tx.ID)
-
 	tm.logger.Debug("commit transaction", zap.Uint64("tx_id", uint64(tx.ID)))
-
 	return nil
 }
 
 func (tm *TransactionManager) runCommitHook(phase commitPhase) {
 	if tm.commitHook != nil {
 		tm.commitHook(phase)
+	}
+}
+
+// commitWithWAL is the WAL-based commit path.
+//
+// Concurrency design:
+//   - walWriteMu serialises writers so only one transaction appends to the WAL
+//     at a time.  This prevents interleaved frames and ensures the OCC check
+//     remains valid until the WAL append completes.
+//   - tm.mu is held only briefly: once to perform the OCC check (after
+//     acquiring walWriteMu) and once to update globalPageVersions and the
+//     in-memory pager cache after a successful WAL append.
+//   - WAL I/O happens outside tm.mu so readers are never blocked by write I/O.
+func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction) error {
+	// === FAST PATH: read-only transactions ===
+	// Validate under tm.mu and return immediately — no WAL involvement needed.
+	tm.mu.Lock()
+	if tx.Status != TxActive {
+		tm.mu.Unlock()
+		return fmt.Errorf("transaction %d is not active", tx.ID)
+	}
+	writeInfos := tx.GetWriteVersions()
+	isReadOnly := len(writeInfos) == 0 && !tx.DDLChanges.HasChanges()
+	if isReadOnly {
+		for pageIdx, readVersion := range tx.GetReadVersions() {
+			if tm.globalPageVersions[pageIdx] > readVersion {
+				tx.Abort()
+				tm.mu.Unlock()
+				return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", ErrTxConflict, tx.ID, pageIdx)
+			}
+		}
+		if readDBHeaderVersion, exists := tx.GetDBHeaderReadVersion(); exists {
+			if tm.globalDBHeaderVersion > readDBHeaderVersion {
+				tx.Abort()
+				tm.mu.Unlock()
+				return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
+			}
+		}
+		tx.Commit()
+		delete(tm.transactions, tx.ID)
+		tm.mu.Unlock()
+		tm.logger.Debug("commit read-only transaction (WAL)", zap.Uint64("tx_id", uint64(tx.ID)))
+		return nil
+	}
+	tm.mu.Unlock()
+
+	// === WRITE PATH ===
+
+	// Step 1: Acquire WAL write mutex to serialise writers.
+	// Steps 2–5 are protected by this mutex so the OCC check remains valid
+	// until the WAL append completes.  We release it explicitly before steps
+	// 6–7 so that a triggered auto-checkpoint can re-acquire it without
+	// deadlocking.
+	tm.walWriteMu.Lock()
+
+	// Step 2: OCC check (under tm.mu, after acquiring walWriteMu).
+	tm.mu.Lock()
+	for pageIdx, readVersion := range tx.GetReadVersions() {
+		if tm.globalPageVersions[pageIdx] > readVersion {
+			tx.Abort()
+			tm.mu.Unlock()
+			tm.walWriteMu.Unlock()
+			return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", ErrTxConflict, tx.ID, pageIdx)
+		}
+	}
+	if readDBHeaderVersion, exists := tx.GetDBHeaderReadVersion(); exists {
+		if tm.globalDBHeaderVersion > readDBHeaderVersion {
+			tx.Abort()
+			tm.mu.Unlock()
+			tm.walWriteMu.Unlock()
+			return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
+		}
+	}
+	tm.mu.Unlock()
+
+	// Step 3: Serialise modified pages into WAL frames (outside both locks).
+	walPages, err := tm.serializeWritesForWAL(ctx, tx)
+	if err != nil {
+		tx.Abort()
+		tm.walWriteMu.Unlock()
+		return fmt.Errorf("serialize writes for WAL tx %d: %w", tx.ID, err)
+	}
+
+	// Step 4: Append to WAL (I/O outside tm.mu; walWriteMu held).
+	if len(walPages) > 0 {
+		tm.runCommitHook(commitPhaseBeforeWALAppend)
+		if err := tm.wal.AppendTransaction(walPages); err != nil {
+			tx.Abort()
+			tm.walWriteMu.Unlock()
+			return fmt.Errorf("WAL append tx %d: %w", tx.ID, err)
+		}
+		tm.runCommitHook(commitPhaseAfterWALAppend)
+	}
+
+	// Step 5: Update in-memory state (under tm.mu).
+	tm.mu.Lock()
+	if header, modified := tx.GetModifiedDBHeader(); modified {
+		tm.saver.SaveHeader(ctx, *header)
+		tm.globalDBHeaderVersion++
+	}
+	for pageIdx, info := range writeInfos {
+		tm.saver.SavePage(ctx, pageIdx, info.Page)
+		tm.globalPageVersions[pageIdx]++
+	}
+	if tx.DDLChanges.HasChanges() {
+		tm.ddlSaver.SaveDDLChanges(ctx, tx.DDLChanges)
+	}
+	tx.Commit()
+	delete(tm.transactions, tx.ID)
+	tm.mu.Unlock()
+
+	// Release walWriteMu before steps 6–7 so a triggered auto-checkpoint can
+	// acquire it without deadlocking.
+	tm.walWriteMu.Unlock()
+
+	// Step 6: Update WAL index so subsequent reads see the latest committed data.
+	for _, wp := range walPages {
+		tm.walIndex.Update(wp.Index, wp.Data)
+	}
+
+	tm.logger.Debug("commit transaction (WAL)", zap.Uint64("tx_id", uint64(tx.ID)))
+
+	// Step 7: Trigger auto-checkpoint if the WAL has grown past the threshold.
+	tm.runAutoCheckpoint(ctx)
+
+	return nil
+}
+
+// serializeWritesForWAL converts the transaction's write set into WAL frames.
+// Page 0 receives special treatment: its WAL frame must combine the DB-header
+// bytes (first RootPageConfigSize bytes) with the B-tree content of page 0.
+func (tm *TransactionManager) serializeWritesForWAL(ctx context.Context, tx *Transaction) ([]WALPage, error) {
+	writeInfos := tx.GetWriteVersions()
+	header, dbHeaderModified := tx.GetModifiedDBHeader()
+
+	page0Info, page0Modified := writeInfos[0]
+	needPage0Frame := dbHeaderModified || page0Modified
+
+	pages := make([]WALPage, 0, len(writeInfos)+1)
+
+	if needPage0Frame {
+		var p0 *Page
+		if page0Modified {
+			p0 = page0Info.Page
+		}
+		frame, err := tm.serializePage0ForWAL(ctx, p0, header, dbHeaderModified)
+		if err != nil {
+			return nil, fmt.Errorf("serialize page 0 for WAL: %w", err)
+		}
+		pages = append(pages, WALPage{Index: 0, Data: frame})
+	}
+
+	for pageIdx, info := range writeInfos {
+		if pageIdx == 0 {
+			continue // already included above
+		}
+		buf := make([]byte, PageSize)
+		if err := marshalPage(info.Page, buf); err != nil {
+			return nil, fmt.Errorf("marshal page %d for WAL: %w", pageIdx, err)
+		}
+		pages = append(pages, WALPage{Index: pageIdx, Data: buf})
+	}
+
+	return pages, nil
+}
+
+// serializePage0ForWAL builds the full-page (PageSize bytes) WAL frame for
+// page 0 by merging the DB-header portion with the B-tree portion.
+//
+//   - page0 is the modified B-tree page (nil if only the header changed).
+//   - header is the modified DB header (nil / dbHeaderModified=false if only
+//     the B-tree changed).
+func (tm *TransactionManager) serializePage0ForWAL(ctx context.Context, page0 *Page, header *DatabaseHeader, dbHeaderModified bool) ([]byte, error) {
+	frame := make([]byte, PageSize)
+
+	// --- Header portion (bytes 0 .. RootPageConfigSize-1) ---
+	var hdr DatabaseHeader
+	if dbHeaderModified {
+		hdr = *header
+	} else {
+		// Reads the current in-memory header from the pager cache.
+		pager, err := tm.factory(ctx, SchemaTableName, "")
+		if err != nil {
+			return nil, fmt.Errorf("get pager for page 0 header: %w", err)
+		}
+		hdr = pager.GetHeader(ctx)
+	}
+	headerBytes, err := hdr.Marshal()
+	if err != nil {
+		return nil, fmt.Errorf("marshal DB header for WAL page 0: %w", err)
+	}
+	copy(frame[0:RootPageConfigSize], headerBytes[0:RootPageConfigSize])
+
+	// --- B-tree portion (bytes RootPageConfigSize .. PageSize-1) ---
+	var btreePage *Page
+	if page0 != nil {
+		btreePage = page0
+	} else {
+		// Only the header changed; read the current page 0 B-tree from cache.
+		pager, err := tm.factory(ctx, SchemaTableName, "")
+		if err != nil {
+			return nil, fmt.Errorf("get pager for page 0 B-tree: %w", err)
+		}
+		btreePage, err = pager.GetPage(ctx, 0)
+		if err != nil {
+			return nil, fmt.Errorf("read page 0 B-tree for WAL: %w", err)
+		}
+	}
+	pageBuf := make([]byte, PageSize)
+	if err := marshalPage(btreePage, pageBuf); err != nil {
+		return nil, fmt.Errorf("marshal page 0 B-tree for WAL: %w", err)
+	}
+	copy(frame[RootPageConfigSize:], pageBuf[0:PageSize-RootPageConfigSize])
+
+	return frame, nil
+}
+
+// runAutoCheckpoint triggers a WAL checkpoint when the frame count exceeds the
+// configured threshold.  The checkpoint is performed via checkpointFn (set by
+// SetCheckpointFunc).  If no function is registered the call is a no-op.
+// Failures are logged but do not propagate — the commit already succeeded.
+func (tm *TransactionManager) runAutoCheckpoint(_ context.Context) {
+	if tm.checkpointThreshold <= 0 || tm.wal == nil || tm.checkpointFn == nil {
+		return
+	}
+	if tm.wal.FrameCount() < int64(tm.checkpointThreshold) {
+		return
+	}
+	if err := tm.checkpointFn(); err != nil {
+		tm.logger.Warn("WAL auto-checkpoint failed",
+			zap.Int64("frame_count", tm.wal.FrameCount()),
+			zap.Int("threshold", tm.checkpointThreshold),
+			zap.Error(err))
 	}
 }
 
