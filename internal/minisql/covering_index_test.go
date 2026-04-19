@@ -130,14 +130,14 @@ func TestCoveringIndexEligible(t *testing.T) {
 			want:         false,
 		},
 		{
-			name: "nil Fields without aggregate - not eligible",
-			stmt: Statement{Kind: Select},
+			name:         "nil Fields without aggregate - not eligible",
+			stmt:         Statement{Kind: Select},
 			indexColumns: emailCol,
 			want:         false,
 		},
 		{
-			name: "SELECT pk column covered by pk index - eligible",
-			stmt: Statement{Kind: Select, Fields: []Field{{Name: "id"}}},
+			name:         "SELECT pk column covered by pk index - eligible",
+			stmt:         Statement{Kind: Select, Fields: []Field{{Name: "id"}}},
 			indexColumns: idCol,
 			want:         true,
 		},

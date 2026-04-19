@@ -20,7 +20,7 @@ type TransactionManager struct {
 	logger                *zap.Logger
 	dbFilePath            string
 	// WAL fields (non-nil when a WAL is configured)
-	walWriteMu          sync.Mutex   // serialises WAL appends — only one writer at a time
+	walWriteMu          sync.Mutex // serialises WAL appends — only one writer at a time
 	wal                 *WAL
 	walIndex            *WALIndex
 	checkpointThreshold int          // auto-checkpoint after this many WAL frames (0 = disabled)

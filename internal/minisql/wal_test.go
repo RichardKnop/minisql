@@ -229,8 +229,8 @@ func TestWAL_ReadAllFrames_PartialTransactionDiscarded(t *testing.T) {
 	frameSize := WALFrameHeaderSize + int(PageSize)
 	crashBuf := make([]byte, frameSize)
 	fh := crashBuf[:WALFrameHeaderSize]
-	marshalUint32(fh, 1, 0)    // pageIndex = 1
-	marshalUint32(fh, 0, 4)    // commitSize = 0 (no commit)
+	marshalUint32(fh, 1, 0) // pageIndex = 1
+	marshalUint32(fh, 0, 4) // commitSize = 0 (no commit)
 	marshalUint32(fh, w.salt1, 8)
 	marshalUint32(fh, w.salt2, 12)
 	crc1 := crc32.ChecksumIEEE(fh[0:16])
