@@ -46,13 +46,18 @@ type WriteInfo struct {
 type Transaction struct {
 	ID            TransactionID
 	StartTime     time.Time
-	ReadSet       map[PageIndex]uint64    // pageIdx -> version when read
+	ReadSet       map[PageIndex]uint64    // pageIdx -> version when read; nil when ReadOnly
 	WriteSet      map[PageIndex]WriteInfo // pageIdx -> modified page copy (+ table name, index name)
-	DBHeaderRead  *uint64                 // version of DB header when read
+	DBHeaderRead  *uint64                 // version of DB header when read; nil when ReadOnly
 	DBHeaderWrite *DatabaseHeader         // modified DB header
 	DDLChanges    DDLChanges
 	Status        TransactionStatus
-	mu            sync.RWMutex
+	// ReadOnly marks a transaction that will never write.  When true, TrackRead
+	// is a no-op, the ReadSet is never allocated, and conflict validation is
+	// skipped at commit time.  This eliminates per-page map writes and mutex
+	// acquisitions on read-heavy queries (e.g. COUNT(*), full-table scans).
+	ReadOnly bool
+	mu       sync.RWMutex
 }
 
 // TransactionStatus represents the lifecycle state of a transaction.
@@ -81,11 +86,17 @@ func (tx *Transaction) Abort() {
 }
 
 // TrackRead records that the given page was read at the given version.
+// It is a no-op for read-only transactions.
 func (tx *Transaction) TrackRead(pageIdx PageIndex, version uint64) {
+	if tx.ReadOnly {
+		return
+	}
 	tx.mu.Lock()
-	defer tx.mu.Unlock()
-
+	if tx.ReadSet == nil {
+		tx.ReadSet = make(map[PageIndex]uint64, 16)
+	}
 	tx.ReadSet[pageIdx] = version
+	tx.mu.Unlock()
 }
 
 // TrackWrite records a modified page in the transaction write set.
@@ -101,7 +112,11 @@ func (tx *Transaction) TrackWrite(pageIdx PageIndex, page *Page, table, index st
 }
 
 // TrackDBHeaderRead records the version of the database header when it was read.
+// It is a no-op for read-only transactions.
 func (tx *Transaction) TrackDBHeaderRead(version uint64) {
+	if tx.ReadOnly {
+		return
+	}
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
 

@@ -72,7 +72,8 @@ type WAL struct {
 	pageSize   uint32
 	salt1      uint32
 	salt2      uint32
-	nextOffset int64 // byte offset at which the next frame will be written
+	nextOffset int64  // byte offset at which the next frame will be written
+	writeBuf   []byte // reusable write buffer; grown on demand, never shrunk
 }
 
 // CreateWAL creates a new WAL file (truncating any existing file at that path).
@@ -146,7 +147,11 @@ func (w *WAL) AppendTransaction(pages []WALPage) error {
 
 	commitSize := uint32(len(pages))
 	frameSize := int(WALFrameHeaderSize) + int(w.pageSize)
-	buf := make([]byte, frameSize*len(pages))
+	need := frameSize * len(pages)
+	if cap(w.writeBuf) < need {
+		w.writeBuf = make([]byte, need)
+	}
+	buf := w.writeBuf[:need]
 
 	for i, page := range pages {
 		if uint32(len(page.Data)) != w.pageSize {
@@ -269,18 +274,70 @@ func (w *WAL) ReadAllFrames() ([]WALReadFrame, error) {
 // appears in multiple transactions) and then fsyncs the database file.
 // Callers should call Truncate after a successful checkpoint.
 func (w *WAL) Checkpoint(dbFile DBFile) error {
-	frames, err := w.ReadAllFrames()
-	if err != nil {
-		return fmt.Errorf("read WAL frames for checkpoint: %w", err)
-	}
-	if len(frames) == 0 {
-		return nil
+	// Build a latest-page map directly from the WAL file without an intermediate
+	// []WALReadFrame slice.  A single shared read buffer (pageData) is reused for
+	// every frame; we only allocate a fresh 4 KB slice when we need to keep (or
+	// overwrite) the data for a given page index.
+	if _, err := w.file.Seek(WALFileHeaderSize, io.SeekStart); err != nil {
+		return fmt.Errorf("seek to first WAL frame for checkpoint: %w", err)
 	}
 
-	// Collect the latest data per page index (later frame wins).
-	latest := make(map[PageIndex][]byte, len(frames))
-	for _, f := range frames {
-		latest[f.PageIndex] = f.Data
+	latest := make(map[PageIndex][]byte)
+	fhBuf := make([]byte, WALFrameHeaderSize)
+	pageData := make([]byte, w.pageSize)
+	var pending []PageIndex // page indices in the current uncommitted group
+
+	for {
+		if _, err := io.ReadFull(w.file, fhBuf); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				break
+			}
+			return fmt.Errorf("read WAL frame header for checkpoint: %w", err)
+		}
+		if _, err := io.ReadFull(w.file, pageData); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				break
+			}
+			return fmt.Errorf("read WAL frame data for checkpoint: %w", err)
+		}
+
+		// Salt validation
+		if unmarshalUint32(fhBuf, 8) != w.salt1 || unmarshalUint32(fhBuf, 12) != w.salt2 {
+			break
+		}
+		if crc32.ChecksumIEEE(fhBuf[0:16]) != unmarshalUint32(fhBuf, 16) {
+			break
+		}
+		if crc32.ChecksumIEEE(pageData) != unmarshalUint32(fhBuf, 20) {
+			break
+		}
+
+		pageIdx := PageIndex(unmarshalUint32(fhBuf, 0))
+		commitSize := unmarshalUint32(fhBuf, 4)
+
+		// Store page data: reuse an existing buffer for this page if one exists,
+		// otherwise allocate a fresh one.
+		buf, exists := latest[pageIdx]
+		if !exists {
+			buf = make([]byte, w.pageSize)
+		}
+		copy(buf, pageData)
+		latest[pageIdx] = buf
+		pending = append(pending, pageIdx)
+
+		if commitSize > 0 {
+			// Commit frame: all pending frames are confirmed; reset tracking slice.
+			pending = pending[:0]
+		}
+	}
+
+	// Discard pages that belong to an uncommitted trailing group.
+	for _, idx := range pending {
+		delete(latest, idx)
+	}
+
+	if len(latest) == 0 {
+		return nil
 	}
 
 	// Write each page to the correct offset in the database file.

@@ -6,6 +6,19 @@ import (
 	"fmt"
 )
 
+// chanRowCallback wraps a buffered channel as a row callback.
+// The goroutine sending to the channel must close it when done.
+func chanRowCallback(ctx context.Context, ch chan<- Row) func(Row) error {
+	return func(row Row) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case ch <- row:
+			return nil
+		}
+	}
+}
+
 // planJoinQuery creates an optimized query plan for JOINs
 // (supports star schema: multiple tables joining to base table)
 // Optimizations:
@@ -334,7 +347,7 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 
 	go func() {
 		defer close(baseRowChan)
-		if err := baseTable.sequentialScan(ctx, baseScan, baseFields, baseRowChan); err != nil {
+		if err := baseTable.sequentialScan(ctx, baseScan, baseFields, chanRowCallback(ctx, baseRowChan)); err != nil {
 			baseErrChan <- err
 		}
 	}()
@@ -465,7 +478,7 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 			indexScan.IndexKeys = joinKeyValues
 
 			// Use index scan to find matching rows
-			if err := innerTable.indexPointScan(ctx, indexScan, innerFields, innerRowChan); err != nil {
+			if err := innerTable.indexPointScan(ctx, indexScan, innerFields, chanRowCallback(ctx, innerRowChan)); err != nil {
 				innerErrChan <- err
 			}
 		}()
@@ -473,7 +486,7 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 		// Standard nested loop: sequential scan of inner table
 		go func() {
 			defer close(innerRowChan)
-			if err := innerTable.sequentialScan(ctx, innerScan, innerFields, innerRowChan); err != nil {
+			if err := innerTable.sequentialScan(ctx, innerScan, innerFields, chanRowCallback(ctx, innerRowChan)); err != nil {
 				innerErrChan <- err
 			}
 		}()
@@ -571,7 +584,7 @@ func (p QueryPlan) executeRightJoinPass(ctx context.Context, provider TableProvi
 		rightErrChan := make(chan error, 1)
 		go func() {
 			defer close(rightRowChan)
-			if err := innerTable.sequentialScan(ctx, innerScan, innerFields, rightRowChan); err != nil {
+			if err := innerTable.sequentialScan(ctx, innerScan, innerFields, chanRowCallback(ctx, rightRowChan)); err != nil {
 				rightErrChan <- err
 			}
 		}()
@@ -595,7 +608,7 @@ func (p QueryPlan) executeRightJoinPass(ctx context.Context, provider TableProvi
 			baseErrChan := make(chan error, 1)
 			go func() {
 				defer close(baseRowChan)
-				if err := baseTable.sequentialScan(ctx, baseScan, baseFields, baseRowChan); err != nil {
+				if err := baseTable.sequentialScan(ctx, baseScan, baseFields, chanRowCallback(ctx, baseRowChan)); err != nil {
 					baseErrChan <- err
 				}
 			}()

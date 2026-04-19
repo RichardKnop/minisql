@@ -289,13 +289,21 @@ func (c *Conn) executeStatement(ctx context.Context, stmt minisql.Statement) (mi
 		return c.db.ExecuteStatement(ctx, stmt)
 	}
 
-	// Execute in auto-commit transaction
+	// Execute in auto-commit transaction.  Use a read-only transaction for
+	// SELECT statements so that per-page read tracking is skipped entirely,
+	// eliminating per-page map writes and mutex acquisitions.
 	var result minisql.StatementResult
-	err := c.db.GetTransactionManager().ExecuteInTransaction(ctx, func(txCtx context.Context) error {
+	txFn := func(txCtx context.Context) error {
 		var err error
 		result, err = c.db.ExecuteStatement(txCtx, stmt)
 		return err
-	})
+	}
+	var err error
+	if stmt.Kind == minisql.Select {
+		err = c.db.GetTransactionManager().ExecuteReadOnlyTransaction(ctx, txFn)
+	} else {
+		err = c.db.GetTransactionManager().ExecuteInTransaction(ctx, txFn)
+	}
 
 	return result, err
 }

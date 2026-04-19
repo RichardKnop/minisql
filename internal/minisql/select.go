@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 
 	"go.uber.org/zap"
 )
@@ -95,84 +94,51 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 	}
 
-	var (
-		// Buffered channel reduces goroutine blocking/context switching
-		// Buffer size of 128 is a good balance between memory and performance
-		filteredPipe = make(chan Row, 128)
-		errorsPipe   = make(chan error, len(plan.Scans))
-		wg           = new(sync.WaitGroup)
-	)
-
-	// Execute scans based on plan
-	wg.Go(func() {
-		if err := plan.Execute(ctx, t.provider, selectedFields, filteredPipe); err != nil {
-			errorsPipe <- err
-		}
-	})
-	go func() {
-		wg.Wait()
-		close(filteredPipe)
-	}()
+	// Execute the plan synchronously — no goroutines or channels needed.
+	// plan.Execute calls out for every matching row on the caller's goroutine.
+	// JOIN queries still use an internal goroutine inside plan.Execute but
+	// the rows are forwarded to the callback before Execute returns.
+	var rows []Row
+	if err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
+		rows = append(rows, row)
+		return nil
+	}); err != nil {
+		return StatementResult{}, err
+	}
 
 	if stmt.IsSelectCountAll() {
-		return t.selectCount(ctx, filteredPipe, errorsPipe)
+		return t.selectCount(rows)
 	}
 
 	// Grouped aggregate queries (GROUP BY) materialise all rows and group them.
 	if stmt.IsSelectGroupBy() {
-		return t.selectGroupBy(ctx, stmt, filteredPipe, errorsPipe)
+		return t.selectGroupBy(ctx, stmt, rows)
 	}
 
 	// Aggregate queries (SUM, AVG, MIN, MAX) always materialise all rows.
 	if stmt.IsSelectAggregate() {
-		return t.selectAggregate(ctx, stmt, filteredPipe, errorsPipe)
+		return t.selectAggregate(ctx, stmt, rows)
 	}
 
 	// If we are sorting in memory, it means we are doing sequential scan as we need to
 	// gather all rows first to be able to determine correct order.
 	if plan.SortInMemory {
-		return t.selectWithSort(stmt, plan, filteredPipe, errorsPipe, requestedFields)
+		return t.selectWithSort(stmt, plan, rows, requestedFields)
 	}
 
 	// Stream results (already ordered or no ordering needed)
-	return t.selectStreaming(stmt, filteredPipe, errorsPipe, requestedFields)
+	return t.selectStreaming(stmt, rows, requestedFields)
 }
 
-func (t *Table) selectCount(ctx context.Context, filteredPipe chan Row, errorsPipe chan error) (StatementResult, error) {
-	var count int64
-
-	drainDone := make(chan struct{})
-	go func() {
-		defer close(drainDone)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case _, open := <-filteredPipe:
-				if !open {
-					return
-				}
-				count += 1
-			}
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return StatementResult{}, fmt.Errorf("context done: %w", ctx.Err())
-	case err := <-errorsPipe:
-		return StatementResult{}, err
-	case <-drainDone:
-		return StatementResult{
-			Columns: []Column{
-				{Name: "COUNT(*)"},
-			},
-			Rows: NewSingleRowIterator(NewRowWithValues(
-				[]Column{{Name: "COUNT(*)"}},
-				[]OptionalValue{{Valid: true, Value: count}},
-			)),
-		}, nil
-	}
+func (t *Table) selectCount(rows []Row) (StatementResult, error) {
+	count := int64(len(rows))
+	return StatementResult{
+		Columns: []Column{{Name: "COUNT(*)"}},
+		Rows: NewSingleRowIterator(NewRowWithValues(
+			[]Column{{Name: "COUNT(*)"}},
+			[]OptionalValue{{Valid: true, Value: count}},
+		)),
+	}, nil
 }
 
 // countAllLeafWalk counts every row in the table by walking the B+ tree leaf
@@ -229,7 +195,7 @@ type aggState struct {
 	hasValue  bool // true once a non-NULL value has been seen
 }
 
-func (t *Table) selectAggregate(ctx context.Context, stmt Statement, filteredPipe chan Row, errorsPipe chan error) (StatementResult, error) {
+func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row) (StatementResult, error) {
 	states := make([]aggState, len(stmt.Aggregates))
 
 	// Determine whether integer or float accumulation should be used for SUM/AVG.
@@ -242,69 +208,58 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, filteredPip
 		}
 	}
 
-	drainDone := make(chan struct{})
-	go func() {
-		defer close(drainDone)
-		for row := range filteredPipe {
-			for i, agg := range stmt.Aggregates {
-				switch agg.Kind {
-				case AggregateCount:
-					states[i].count += 1
+	for _, row := range rows {
+		for i, agg := range stmt.Aggregates {
+			switch agg.Kind {
+			case AggregateCount:
+				states[i].count += 1
 
-				case AggregateSum, AggregateAvg:
-					val, ok := row.GetValue(agg.Column)
-					if !ok || !val.Valid {
-						continue // SQL aggregate functions ignore NULLs
+			case AggregateSum, AggregateAvg:
+				val, ok := row.GetValue(agg.Column)
+				if !ok || !val.Valid {
+					continue // SQL aggregate functions ignore NULLs
+				}
+				states[i].count += 1
+				states[i].hasValue = true
+				if states[i].useIntSum {
+					switch v := val.Value.(type) {
+					case int64:
+						states[i].sumI += v
+					case int32:
+						states[i].sumI += int64(v)
 					}
-					states[i].count += 1
+				} else {
+					switch v := val.Value.(type) {
+					case float64:
+						states[i].sumF += v
+					case float32:
+						states[i].sumF += float64(v)
+					}
+				}
+
+			case AggregateMin:
+				val, ok := row.GetValue(agg.Column)
+				if !ok || !val.Valid {
+					continue
+				}
+				if !states[i].hasValue || compareValues(val, states[i].min) < 0 {
+					states[i].min = val
 					states[i].hasValue = true
-					if states[i].useIntSum {
-						switch v := val.Value.(type) {
-						case int64:
-							states[i].sumI += v
-						case int32:
-							states[i].sumI += int64(v)
-						}
-					} else {
-						switch v := val.Value.(type) {
-						case float64:
-							states[i].sumF += v
-						case float32:
-							states[i].sumF += float64(v)
-						}
-					}
+				}
 
-				case AggregateMin:
-					val, ok := row.GetValue(agg.Column)
-					if !ok || !val.Valid {
-						continue
-					}
-					if !states[i].hasValue || compareValues(val, states[i].min) < 0 {
-						states[i].min = val
-						states[i].hasValue = true
-					}
-
-				case AggregateMax:
-					val, ok := row.GetValue(agg.Column)
-					if !ok || !val.Valid {
-						continue
-					}
-					if !states[i].hasValue || compareValues(val, states[i].max) > 0 {
-						states[i].max = val
-						states[i].hasValue = true
-					}
+			case AggregateMax:
+				val, ok := row.GetValue(agg.Column)
+				if !ok || !val.Valid {
+					continue
+				}
+				if !states[i].hasValue || compareValues(val, states[i].max) > 0 {
+					states[i].max = val
+					states[i].hasValue = true
 				}
 			}
 		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return StatementResult{}, fmt.Errorf("context done: %w", ctx.Err())
-	case err := <-errorsPipe:
-		return StatementResult{}, err
-	case <-drainDone:
 	}
+	_ = ctx // ctx kept for signature compat; no blocking ops remain
 
 	// Build result columns and a single result row.
 	resultColumns := make([]Column, len(stmt.Aggregates))
@@ -371,7 +326,7 @@ type groupState struct {
 	aggStates   []aggState
 }
 
-func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, filteredPipe chan Row, errorsPipe chan error) (StatementResult, error) {
+func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (StatementResult, error) {
 	// Determine integer vs float accumulation mode for SUM/AVG per aggregate.
 	useIntSum := make([]bool, len(stmt.Aggregates))
 	for i, agg := range stmt.Aggregates {
@@ -394,89 +349,78 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, filteredPipe 
 	groups := make(map[string]*groupState)
 	groupOrder := make([]string, 0)
 
-	drainDone := make(chan struct{})
-	go func() {
-		defer close(drainDone)
-		for row := range filteredPipe {
-			// Compute group key from the GROUP BY columns.
-			groupRow := row.OnlyFields(stmt.GroupBy...)
-			key := groupRow.rowDistinctKey()
+	for _, row := range rows {
+		// Compute group key from the GROUP BY columns.
+		groupRow := row.OnlyFields(stmt.GroupBy...)
+		key := groupRow.rowDistinctKey()
 
-			gs, exists := groups[key]
-			if !exists {
-				states := make([]aggState, len(stmt.Aggregates))
-				for i := range states {
-					states[i].useIntSum = useIntSum[i]
-				}
-				gs = &groupState{
-					groupValues: make([]OptionalValue, len(stmt.GroupBy)),
-					aggStates:   states,
-				}
-				// Record the group column values from this first row.
-				copy(gs.groupValues, groupRow.Values)
-				groups[key] = gs
-				groupOrder = append(groupOrder, key)
+		gs, exists := groups[key]
+		if !exists {
+			states := make([]aggState, len(stmt.Aggregates))
+			for i := range states {
+				states[i].useIntSum = useIntSum[i]
 			}
+			gs = &groupState{
+				groupValues: make([]OptionalValue, len(stmt.GroupBy)),
+				aggStates:   states,
+			}
+			// Record the group column values from this first row.
+			copy(gs.groupValues, groupRow.Values)
+			groups[key] = gs
+			groupOrder = append(groupOrder, key)
+		}
 
-			// Accumulate aggregates for this group.
-			for i, agg := range stmt.Aggregates {
-				switch agg.Kind {
-				case 0:
-					// Non-aggregate GROUP BY column — no accumulation needed.
-				case AggregateCount:
-					gs.aggStates[i].count += 1
-				case AggregateSum, AggregateAvg:
-					val, ok := row.GetValue(agg.Column)
-					if !ok || !val.Valid {
-						continue
+		// Accumulate aggregates for this group.
+		for i, agg := range stmt.Aggregates {
+			switch agg.Kind {
+			case 0:
+				// Non-aggregate GROUP BY column — no accumulation needed.
+			case AggregateCount:
+				gs.aggStates[i].count += 1
+			case AggregateSum, AggregateAvg:
+				val, ok := row.GetValue(agg.Column)
+				if !ok || !val.Valid {
+					continue
+				}
+				gs.aggStates[i].count += 1
+				gs.aggStates[i].hasValue = true
+				if gs.aggStates[i].useIntSum {
+					switch v := val.Value.(type) {
+					case int64:
+						gs.aggStates[i].sumI += v
+					case int32:
+						gs.aggStates[i].sumI += int64(v)
 					}
-					gs.aggStates[i].count += 1
+				} else {
+					switch v := val.Value.(type) {
+					case float64:
+						gs.aggStates[i].sumF += v
+					case float32:
+						gs.aggStates[i].sumF += float64(v)
+					}
+				}
+			case AggregateMin:
+				val, ok := row.GetValue(agg.Column)
+				if !ok || !val.Valid {
+					continue
+				}
+				if !gs.aggStates[i].hasValue || compareValues(val, gs.aggStates[i].min) < 0 {
+					gs.aggStates[i].min = val
 					gs.aggStates[i].hasValue = true
-					if gs.aggStates[i].useIntSum {
-						switch v := val.Value.(type) {
-						case int64:
-							gs.aggStates[i].sumI += v
-						case int32:
-							gs.aggStates[i].sumI += int64(v)
-						}
-					} else {
-						switch v := val.Value.(type) {
-						case float64:
-							gs.aggStates[i].sumF += v
-						case float32:
-							gs.aggStates[i].sumF += float64(v)
-						}
-					}
-				case AggregateMin:
-					val, ok := row.GetValue(agg.Column)
-					if !ok || !val.Valid {
-						continue
-					}
-					if !gs.aggStates[i].hasValue || compareValues(val, gs.aggStates[i].min) < 0 {
-						gs.aggStates[i].min = val
-						gs.aggStates[i].hasValue = true
-					}
-				case AggregateMax:
-					val, ok := row.GetValue(agg.Column)
-					if !ok || !val.Valid {
-						continue
-					}
-					if !gs.aggStates[i].hasValue || compareValues(val, gs.aggStates[i].max) > 0 {
-						gs.aggStates[i].max = val
-						gs.aggStates[i].hasValue = true
-					}
+				}
+			case AggregateMax:
+				val, ok := row.GetValue(agg.Column)
+				if !ok || !val.Valid {
+					continue
+				}
+				if !gs.aggStates[i].hasValue || compareValues(val, gs.aggStates[i].max) > 0 {
+					gs.aggStates[i].max = val
+					gs.aggStates[i].hasValue = true
 				}
 			}
 		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return StatementResult{}, fmt.Errorf("context done: %w", ctx.Err())
-	case err := <-errorsPipe:
-		return StatementResult{}, err
-	case <-drainDone:
 	}
+	_ = ctx // ctx kept for signature compat; no blocking ops remain
 
 	// Build result column metadata.
 	resultColumns := make([]Column, len(stmt.Fields))
@@ -602,88 +546,66 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, filteredPipe 
 	}, nil
 }
 
-func (t *Table) selectStreaming(stmt Statement, filteredPipe chan Row, errorsPipe chan error, requestedFields []Field) (StatementResult, error) {
+func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields []Field) (StatementResult, error) {
 	result := StatementResult{
 		Columns: make([]Column, len(requestedFields)),
 	}
 	for i, field := range requestedFields {
 		if field.Expr != nil {
-			// Computed column: synthesise metadata from the output name.
 			result.Columns[i] = Column{Name: field.OutputName()}
 		} else if colIdx := stmt.ColumnIdx(field.Name); colIdx >= 0 {
 			result.Columns[i] = t.Columns[colIdx]
 		}
 	}
 
-	// Filter rows according to the WHERE conditions. In case of an index scan,
-	// any remaining filtering will happen here. In case of a sequential scan,
-	// this will filter all rows.
-	// LIMIT and OFFSET are also applied here.
-	// Buffered channel reduces blocking when consumer is slower
-	limitedPipe := make(chan Row, 64)
-	go func(in <-chan Row, out chan<- Row) {
-		defer close(out)
-		var limit, offset int64
-		if stmt.Limit.Valid {
-			limit = stmt.Limit.Value.(int64)
+	var (
+		limit, offset int64
+		hasLimit      = stmt.Limit.Valid
+		hasOffset     = stmt.Offset.Valid
+	)
+	if hasLimit {
+		limit = stmt.Limit.Value.(int64)
+	}
+	if hasOffset {
+		offset = stmt.Offset.Value.(int64)
+	}
+
+	var seen map[string]struct{}
+	if stmt.Distinct {
+		seen = make(map[string]struct{})
+	}
+
+	projected := make([]Row, 0, len(scanned))
+	for _, row := range scanned {
+		p, err := projectRow(row, requestedFields)
+		if err != nil {
+			return StatementResult{}, err
 		}
-		if stmt.Offset.Valid {
-			offset = stmt.Offset.Value.(int64)
-		}
-		var seen map[string]struct{}
 		if stmt.Distinct {
-			seen = make(map[string]struct{})
-		}
-		for row := range in {
-			projected, err := projectRow(row, requestedFields)
-			if err != nil {
-				// Send error and stop — the error channel is checked by the caller.
-				select {
-				case out <- Row{}:
-				default:
-				}
-				return
-			}
-			if stmt.Distinct {
-				key := projected.rowDistinctKey()
-				if _, dup := seen[key]; dup {
-					continue
-				}
-				seen[key] = struct{}{}
-			}
-			if stmt.Limit.Valid && limit == 0 {
-				return
-			}
-			if stmt.Offset.Valid && offset > 0 {
-				offset -= 1
+			key := p.rowDistinctKey()
+			if _, dup := seen[key]; dup {
 				continue
 			}
-			if stmt.Limit.Valid {
-				limit -= 1
-			}
-			out <- projected
+			seen[key] = struct{}{}
 		}
-	}(filteredPipe, limitedPipe)
-
-	result.Rows = NewIterator(func(ctx context.Context) (Row, error) {
-		select {
-		case <-ctx.Done():
-			return Row{}, fmt.Errorf("context done: %w", ctx.Err())
-		case err := <-errorsPipe:
-			return Row{}, err
-		case row, open := <-limitedPipe:
-			if !open {
-				return Row{}, ErrNoMoreRows
-			}
-
-			return row, nil
+		if hasOffset && offset > 0 {
+			offset--
+			continue
 		}
-	})
+		projected = append(projected, p)
+		if hasLimit {
+			limit--
+			if limit == 0 {
+				break
+			}
+		}
+	}
 
+	result.Rows = NewSliceIterator(projected)
 	return result, nil
 }
 
-func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, unfilteredPipe <-chan Row, errorsPipe chan error, requestedFields []Field) (StatementResult, error) {
+func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, allRows []Row, requestedFields []Field) (StatementResult, error) {
 	// Check if we can use heap optimization for LIMIT queries
 	var limit int
 	hasLimit := stmt.Limit.Valid
@@ -696,42 +618,20 @@ func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, unfilteredPipe <-
 		offset = int(stmt.Offset.Value.(int64))
 	}
 
-	// For queries with LIMIT (and optional OFFSET), use a heap to keep only top N+offset rows
-	// This is much more memory efficient than collecting all rows.
+	// For queries with LIMIT (and optional OFFSET), use a heap to keep only top N+offset rows.
 	// However, when DISTINCT is enabled we must see all rows before deduplication, so the
 	// heap optimisation cannot be used in that case.
-	var allRows []Row
 	if hasLimit && len(plan.OrderBy) > 0 && !stmt.Distinct {
-		// Use heap-based approach for memory efficiency
 		maxRows := offset + limit
 		h := newRowHeap(plan.OrderBy, maxRows)
-
-		for row := range unfilteredPipe {
+		for _, row := range allRows {
 			h.PushRow(row)
 		}
-
 		allRows = h.ExtractSorted()
 	} else {
-		// No LIMIT or no ORDER BY - collect all rows
-		// Pre-allocate with a reasonable initial capacity
-		allRows = make([]Row, 0, 1024)
-		for row := range unfilteredPipe {
-			allRows = append(allRows, row)
-		}
-
-		// Sort in memory
 		if err := t.sortRows(allRows, plan.OrderBy); err != nil {
 			return StatementResult{}, err
 		}
-	}
-
-	// Check for errors
-	select {
-	case err := <-errorsPipe:
-		if err != nil {
-			return StatementResult{}, err
-		}
-	default:
 	}
 
 	// Apply DISTINCT deduplication before OFFSET/LIMIT
@@ -778,7 +678,7 @@ func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, unfilteredPipe <-
 	return result, nil
 }
 
-func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, selectedFields []Field, out chan<- Row) error {
+func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, selectedFields []Field, out func(Row) error) error {
 	idx, ok := t.IndexByName(scan.IndexName)
 	if !ok {
 		return fmt.Errorf("no index found for point scan: %s", scan.IndexName)
@@ -831,12 +731,10 @@ func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, se
 			}
 		}
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case out <- row:
-			return nil
+		if err := ctx.Err(); err != nil {
+			return err
 		}
+		return out(row)
 	}); err != nil {
 		return err
 	}
@@ -844,7 +742,7 @@ func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, se
 	return nil
 }
 
-func (t *Table) indexRangeScan(ctx context.Context, aPlan QueryPlan, scan Scan, selectedFields []Field, out chan<- Row) error {
+func (t *Table) indexRangeScan(ctx context.Context, aPlan QueryPlan, scan Scan, selectedFields []Field, out func(Row) error) error {
 	idx, ok := t.IndexByName(scan.IndexName)
 	if !ok {
 		return fmt.Errorf("no index found for point scan: %s", scan.IndexName)
@@ -897,12 +795,10 @@ func (t *Table) indexRangeScan(ctx context.Context, aPlan QueryPlan, scan Scan, 
 			}
 		}
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case out <- row:
-			return nil
+		if err := ctx.Err(); err != nil {
+			return err
 		}
+		return out(row)
 	}); err != nil {
 		return err
 	}
@@ -910,7 +806,7 @@ func (t *Table) indexRangeScan(ctx context.Context, aPlan QueryPlan, scan Scan, 
 	return nil
 }
 
-func (t *Table) indexPointScan(ctx context.Context, scan Scan, selectedFields []Field, out chan<- Row) error {
+func (t *Table) indexPointScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
 	idx, ok := t.IndexByName(scan.IndexName)
 	if !ok {
 		return fmt.Errorf("no index found for point scan: %s", scan.IndexName)
@@ -972,11 +868,11 @@ func (t *Table) indexPointScan(ctx context.Context, scan Scan, selectedFields []
 				}
 			}
 
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case out <- row:
-				continue
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := out(row); err != nil {
+				return err
 			}
 		}
 	}
@@ -992,7 +888,7 @@ var errStopScan = errors.New("stop scan")
 // the first (smallest) entry when reverse=false (MIN), or the last (largest) entry
 // when reverse=true (MAX).  It uses the index's in-order traversal, stopping as
 // soon as the first qualifying row has been sent to out.
-func (t *Table) indexEndpointScan(ctx context.Context, scan Scan, selectedFields []Field, out chan<- Row, reverse bool) error {
+func (t *Table) indexEndpointScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error, reverse bool) error {
 	idx, ok := t.IndexByName(scan.IndexName)
 	if !ok {
 		return fmt.Errorf("no index found for endpoint scan: %s", scan.IndexName)
@@ -1021,10 +917,11 @@ func (t *Table) indexEndpointScan(ctx context.Context, scan Scan, selectedFields
 			}
 		}
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case out <- row:
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := out(row); err != nil {
+			return err
 		}
 
 		// Stop after the first qualifying row.
@@ -1160,7 +1057,7 @@ func deduplicateRows(rows []Row, fields []Field) []Row {
 	return out
 }
 
-func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []Field, out chan<- Row) error {
+func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
 	cursor, err := t.SeekFirst(ctx)
 	if err != nil {
 		return err
@@ -1173,6 +1070,10 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
 
 	for !cursor.EndOfTable {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		row, err := cursor.fetchRow(ctx, true, selectedFields...)
 		if err != nil {
 			return err
@@ -1187,11 +1088,8 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 			continue // Skip this row
 		}
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case out <- row:
-			continue
+		if err := out(row); err != nil {
+			return err
 		}
 	}
 

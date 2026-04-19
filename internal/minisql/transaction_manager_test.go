@@ -33,9 +33,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		// Let's simulate some reads but no writes
 		tx.DBHeaderRead = new(uint64)
 		*tx.DBHeaderRead = 4
-		tx.ReadSet[2] = 0
-		tx.ReadSet[3] = 2
-		tx.ReadSet[4] = 1
+		tx.ReadSet = map[PageIndex]uint64{2: 0, 3: 2, 4: 1}
 
 		err := txManager.CommitTransaction(ctx, tx)
 		require.NoError(t, err)
@@ -70,9 +68,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		tx.DBHeaderRead = new(uint64)
 		*tx.DBHeaderRead = 3
 		tx.DBHeaderWrite = &DatabaseHeader{FirstFreePage: 2, FreePageCount: 10}
-		tx.ReadSet[2] = 0
-		tx.ReadSet[3] = 2
-		tx.ReadSet[4] = 5
+		tx.ReadSet = map[PageIndex]uint64{2: 0, 3: 2, 4: 5}
 		tx.WriteSet[4] = WriteInfo{
 			&Page{Index: PageIndex(4)},
 			"users",
@@ -124,9 +120,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		// Let's simulate some reads for first tx
 		readTx.DBHeaderRead = new(uint64)
 		*readTx.DBHeaderRead = 4
-		readTx.ReadSet[2] = 0
-		readTx.ReadSet[3] = 2
-		readTx.ReadSet[4] = 1
+		readTx.ReadSet = map[PageIndex]uint64{2: 0, 3: 2, 4: 1}
 
 		// Let's simulate a write for second tx that will conflict
 		writeTx.WriteSet[3] = WriteInfo{
@@ -185,9 +179,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		writeTx1.DBHeaderRead = new(uint64)
 		*writeTx1.DBHeaderRead = 3
 		writeTx1.DBHeaderWrite = &DatabaseHeader{FirstFreePage: 2, FreePageCount: 10}
-		writeTx1.ReadSet[2] = 0
-		writeTx1.ReadSet[3] = 2
-		writeTx1.ReadSet[4] = 5
+		writeTx1.ReadSet = map[PageIndex]uint64{2: 0, 3: 2, 4: 5}
 		writeTx1.WriteSet[4] = WriteInfo{
 			&Page{Index: PageIndex(4)},
 			"orders",
@@ -195,7 +187,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		}
 
 		// Second tx will modify the same page to cause conflict
-		writeTx2.ReadSet[4] = 5
+		writeTx2.ReadSet = map[PageIndex]uint64{4: 5}
 		writeTx2.WriteSet[4] = WriteInfo{
 			&Page{Index: PageIndex(4)},
 			"orders",
@@ -251,9 +243,7 @@ func TestTransactionManager_Rollback(t *testing.T) {
 	tx.DBHeaderRead = new(uint64)
 	*tx.DBHeaderRead = 3
 	tx.DBHeaderWrite = &DatabaseHeader{FirstFreePage: 2, FreePageCount: 10}
-	tx.ReadSet[2] = 0
-	tx.ReadSet[3] = 2
-	tx.ReadSet[4] = 5
+	tx.ReadSet = map[PageIndex]uint64{2: 0, 3: 2, 4: 5}
 	tx.WriteSet[4] = WriteInfo{
 		&Page{Index: PageIndex(4)},
 		"users",
@@ -289,8 +279,7 @@ func TestTransactionManager_WAL_Commit(t *testing.T) {
 		tx := txManager.BeginTransaction(ctx)
 		tx.DBHeaderRead = new(uint64)
 		*tx.DBHeaderRead = 4
-		tx.ReadSet[2] = 0
-		tx.ReadSet[3] = 2
+		tx.ReadSet = map[PageIndex]uint64{2: 0, 3: 2}
 
 		err := txManager.CommitTransaction(ctx, tx)
 		require.NoError(t, err)
@@ -317,7 +306,7 @@ func TestTransactionManager_WAL_Commit(t *testing.T) {
 		txManager.globalPageVersions[4] = 5
 
 		tx := txManager.BeginTransaction(ctx)
-		tx.ReadSet[4] = 5
+		tx.ReadSet = map[PageIndex]uint64{4: 5}
 		tx.WriteSet[4] = WriteInfo{
 			Page:  &Page{Index: PageIndex(4), LeafNode: NewLeafNode()},
 			Table: "users",
@@ -389,14 +378,14 @@ func TestTransactionManager_WAL_Commit(t *testing.T) {
 		txManager.globalPageVersions[5] = 3
 
 		txA := txManager.BeginTransaction(ctx)
-		txA.ReadSet[5] = 3
+		txA.ReadSet = map[PageIndex]uint64{5: 3}
 		txA.WriteSet[5] = WriteInfo{
 			Page:  &Page{Index: PageIndex(5), LeafNode: NewLeafNode()},
 			Table: "items",
 		}
 
 		txB := txManager.BeginTransaction(ctx)
-		txB.ReadSet[5] = 3
+		txB.ReadSet = map[PageIndex]uint64{5: 3}
 		txB.WriteSet[5] = WriteInfo{
 			Page:  &Page{Index: PageIndex(5), LeafNode: NewLeafNode()},
 			Table: "items",

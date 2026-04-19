@@ -843,15 +843,31 @@ func tryRangeScan(tableName string, indexInfo IndexInfo, filters Conditions, sta
 	return scan, true, nil
 }
 
-// Execute ...
-func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selectedFields []Field, filteredPipe chan<- Row) error {
-	// Handle JOIN queries
+// Execute runs the query plan, calling out for every row produced.
+// out receives each row synchronously on the caller's goroutine; no internal
+// goroutines or channels are created.  JOIN queries are the exception: they
+// still drive executeNestedLoopJoin in a helper goroutine internally so that
+// the nested-loop logic can use a channel, but the rows are forwarded to out
+// before Execute returns.
+func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selectedFields []Field, out func(Row) error) error {
+	// Handle JOIN queries: executeNestedLoopJoin still uses chan<- Row internally,
+	// so we bridge it with a goroutine + channel and forward rows to the callback.
 	if len(p.Joins) > 0 {
-		return p.executeNestedLoopJoin(ctx, provider, selectedFields, filteredPipe)
+		ch := make(chan Row, 128)
+		var joinErr error
+		go func() {
+			defer close(ch)
+			joinErr = p.executeNestedLoopJoin(ctx, provider, selectedFields, ch)
+		}()
+		for row := range ch {
+			if err := out(row); err != nil {
+				return err
+			}
+		}
+		return joinErr
 	}
 
 	if len(p.Scans) == 1 {
-		// Get table for this scan
 		t, ok := provider.GetTable(ctx, p.Scans[0].TableName)
 		if !ok {
 			return fmt.Errorf("%w: %s", errTableDoesNotExist, p.Scans[0].TableName)
@@ -859,23 +875,22 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 
 		switch p.Scans[0].Type {
 		case ScanTypeIndexAll:
-			return t.indexScanAll(ctx, p, p.Scans[0], selectedFields, filteredPipe)
+			return t.indexScanAll(ctx, p, p.Scans[0], selectedFields, out)
 		case ScanTypeIndexRange:
-			return t.indexRangeScan(ctx, p, p.Scans[0], selectedFields, filteredPipe)
+			return t.indexRangeScan(ctx, p, p.Scans[0], selectedFields, out)
 		case ScanTypeIndexPoint:
-			return t.indexPointScan(ctx, p.Scans[0], selectedFields, filteredPipe)
+			return t.indexPointScan(ctx, p.Scans[0], selectedFields, out)
 		case ScanTypeIndexFirst:
-			return t.indexEndpointScan(ctx, p.Scans[0], selectedFields, filteredPipe, false)
+			return t.indexEndpointScan(ctx, p.Scans[0], selectedFields, out, false)
 		case ScanTypeIndexLast:
-			return t.indexEndpointScan(ctx, p.Scans[0], selectedFields, filteredPipe, true)
+			return t.indexEndpointScan(ctx, p.Scans[0], selectedFields, out, true)
 		case ScanTypeSequential:
-			return t.sequentialScan(ctx, p.Scans[0], selectedFields, filteredPipe)
+			return t.sequentialScan(ctx, p.Scans[0], selectedFields, out)
 		default:
 			return fmt.Errorf("unhandled scan type in single scan: %d", p.Scans[0].Type)
 		}
 	}
 	for _, scan := range p.Scans {
-		// Get table for this scan
 		t, ok := provider.GetTable(ctx, scan.TableName)
 		if !ok {
 			return fmt.Errorf("%w: %s", errTableDoesNotExist, scan.TableName)
@@ -883,11 +898,11 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 
 		switch scan.Type {
 		case ScanTypeIndexRange:
-			if err := t.indexRangeScan(ctx, p, scan, selectedFields, filteredPipe); err != nil {
+			if err := t.indexRangeScan(ctx, p, scan, selectedFields, out); err != nil {
 				return err
 			}
 		case ScanTypeIndexPoint:
-			if err := t.indexPointScan(ctx, scan, selectedFields, filteredPipe); err != nil {
+			if err := t.indexPointScan(ctx, scan, selectedFields, out); err != nil {
 				return err
 			}
 		default:
