@@ -6,3 +6,6 @@ test-output.txt
 .claude/settings.local.json
 .claude/worktrees/
 .vscode/
+benchmarks/raw.txt
+benchmarks/charts/
+chart
