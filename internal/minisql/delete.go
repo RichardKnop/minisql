@@ -3,7 +3,6 @@ package minisql
 import (
 	"context"
 	"fmt"
-	"sync"
 )
 
 // Delete ...
@@ -26,74 +25,46 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 	// Always select all columns so the full row is available for index cleanup on delete.
 	selectedFields := fieldsFromColumns(t.Columns...)
 
-	var (
-		filteredPipe = make(chan Row)
-		errorsPipe   = make(chan error, 1)
-		stopChan     = make(chan bool)
-		wg           = new(sync.WaitGroup)
-	)
-
-	// Execute scans based on plan
-	wg.Go(func() {
-		if err := plan.Execute(ctx, t.provider, selectedFields, filteredPipe); err != nil {
-			errorsPipe <- err
-		}
-	})
-	go func() {
-		wg.Wait()
-		close(filteredPipe)
-	}()
-
 	result := StatementResult{
 		Columns: t.Columns,
 	}
 
-	go func(in <-chan Row) {
-		defer close(stopChan)
-		// When deleting multiple rows, we first collect them all
-		// and then delete them one by one. This is to avoid conflict
-		// with rows that are still being read because delete can cause
-		// nodes to be split or merged which can cause cells to move around.
-		rows := make([]Row, 0, 100)
-		for row := range in {
-			rows = append(rows, row)
-		}
-		for _, row := range rows {
-			// Row locations can change after each delete, so we seek again for each key
-			// to make sure we have the correct cursor.
-			cursor, err := t.Seek(ctx, row.Key)
-			if err != nil {
-				errorsPipe <- err
-				return
-			}
-
-			if len(selectedFields) < len(t.Columns) {
-				// Load full row before delete, this is so we have all indexed values available
-				// for proper index cleanup as well as any overflow data that needs to be freed.
-				fullRow, err := cursor.fetchRow(ctx, false, fieldsFromColumns(t.Columns...)...)
-				if err != nil {
-					errorsPipe <- err
-					return
-				}
-				row = fullRow
-			}
-
-			if err := cursor.delete(ctx, row); err != nil {
-				errorsPipe <- err
-				return
-			}
-
-			result.RowsAffected += 1
-		}
-	}(filteredPipe)
-
-	select {
-	case <-ctx.Done():
-		return result, fmt.Errorf("context done: %w", ctx.Err())
-	case err := <-errorsPipe:
+	// Collect all rows first, then delete. We must collect before deleting because
+	// a delete can cause B-tree node splits/merges that move cells around, which
+	// would corrupt an in-progress scan.
+	var rows []Row
+	if err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
+		rows = append(rows, row)
+		return nil
+	}); err != nil {
 		return result, err
-	case <-stopChan:
-		t.logger.Sugar().Debugf("deleted %d rows", result.RowsAffected)
-		return result, nil
 	}
+
+	for _, row := range rows {
+		// Row locations can change after each delete, so we seek again for each key
+		// to make sure we have the correct cursor.
+		cursor, err := t.Seek(ctx, row.Key)
+		if err != nil {
+			return result, err
+		}
+
+		if len(selectedFields) < len(t.Columns) {
+			// Load full row before delete, this is so we have all indexed values available
+			// for proper index cleanup as well as any overflow data that needs to be freed.
+			fullRow, err := cursor.fetchRow(ctx, false, fieldsFromColumns(t.Columns...)...)
+			if err != nil {
+				return result, err
+			}
+			row = fullRow
+		}
+
+		if err := cursor.delete(ctx, row); err != nil {
+			return result, err
+		}
+
+		result.RowsAffected += 1
+	}
+
+	t.logger.Sugar().Debugf("deleted %d rows", result.RowsAffected)
+	return result, nil
 }

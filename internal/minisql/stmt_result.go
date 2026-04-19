@@ -20,6 +20,19 @@ func NewIterator(rowFunc func(ctx context.Context) (Row, error)) Iterator {
 	}
 }
 
+// NewSliceIterator returns an Iterator that yields rows from rows in order.
+func NewSliceIterator(rows []Row) Iterator {
+	idx := 0
+	return NewIterator(func(ctx context.Context) (Row, error) {
+		if idx >= len(rows) {
+			return Row{}, ErrNoMoreRows
+		}
+		row := rows[idx]
+		idx++
+		return row, nil
+	})
+}
+
 // NewSingleRowIterator ...
 func NewSingleRowIterator(row Row) Iterator {
 	i := Iterator{}

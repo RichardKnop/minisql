@@ -38,40 +38,34 @@ func TestWALIndex_Lookup_NotFound(t *testing.T) {
 	assert.Nil(t, got)
 }
 
-func TestWALIndex_Update_ReturnsCopy(t *testing.T) {
+func TestWALIndex_Update_TakesOwnership(t *testing.T) {
 	t.Parallel()
 
+	// Update takes ownership of the slice.  Verify the stored bytes are exactly
+	// what was passed in (zero-copy path — no defensive copy on store).
 	wi := NewWALIndex()
 
 	original := makeTestPage(0x01)
 	wi.Update(PageIndex(0), original)
 
-	// Mutate the original slice after storing.
-	original[0] = 0xFF
-
 	got, ok := wi.Lookup(PageIndex(0))
 	require.True(t, ok)
-	// The stored copy must be unaffected by the mutation.
 	assert.Equal(t, byte(0x01), got[0])
 }
 
-func TestWALIndex_Lookup_ReturnsCopy(t *testing.T) {
+func TestWALIndex_Lookup_DirectReference(t *testing.T) {
 	t.Parallel()
 
+	// Lookup returns a direct reference (zero-copy).  Callers are obligated to
+	// treat the returned slice as read-only.  Verify the bytes are correct.
 	wi := NewWALIndex()
 
-	wi.Update(PageIndex(1), makeTestPage(0x02))
+	data := makeTestPage(0x02)
+	wi.Update(PageIndex(1), data)
 
 	got, ok := wi.Lookup(PageIndex(1))
 	require.True(t, ok)
-
-	// Mutate the returned slice.
-	got[0] = 0xFF
-
-	// A second lookup must be unaffected.
-	got2, ok := wi.Lookup(PageIndex(1))
-	require.True(t, ok)
-	assert.Equal(t, byte(0x02), got2[0])
+	assert.Equal(t, byte(0x02), got[0])
 }
 
 func TestWALIndex_Update_OverwriteExisting(t *testing.T) {
@@ -166,22 +160,19 @@ func TestWALIndex_Rebuild_Empty(t *testing.T) {
 	assert.Equal(t, 0, wi.Size())
 }
 
-func TestWALIndex_Rebuild_ReturnsCopy(t *testing.T) {
+func TestWALIndex_Rebuild_TakesOwnership(t *testing.T) {
 	t.Parallel()
 
+	// Rebuild takes ownership of f.Data slices.  Verify bytes are stored correctly.
 	wi := NewWALIndex()
 
 	data := makeTestPage(0x42)
 	frames := []WALReadFrame{{PageIndex: 7, Data: data}}
 	wi.Rebuild(frames)
 
-	// Mutate source data after rebuild.
-	data[0] = 0xFF
-	frames[0].Data[1] = 0xFE
-
 	got, ok := wi.Lookup(PageIndex(7))
 	require.True(t, ok)
-	assert.Equal(t, byte(0x42), got[0], "stored copy must be independent of source slice")
+	assert.Equal(t, byte(0x42), got[0])
 	assert.Equal(t, byte(0x42), got[1])
 }
 

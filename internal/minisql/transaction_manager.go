@@ -106,6 +106,30 @@ func (tm *TransactionManager) CheckpointWAL(dbFile DBFile) error {
 // transaction manager that is not in WAL mode.
 var ErrNotWALMode = errors.New("WAL mode is not enabled")
 
+// ExecuteReadOnlyTransaction runs fn within a read-only transaction.  Read
+// tracking is disabled so no ReadSet is built and conflict validation is
+// skipped at commit time.  fn must not perform any writes.
+func (tm *TransactionManager) ExecuteReadOnlyTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
+	if TxFromContext(ctx) != nil {
+		return fn(ctx)
+	}
+
+	tx := tm.BeginReadOnlyTransaction(ctx)
+	ctx = WithTransaction(ctx, tx)
+
+	if err := fn(ctx); err != nil {
+		tm.RollbackTransaction(ctx, tx)
+		return err
+	}
+
+	if err := tm.CommitTransaction(ctx, tx); err != nil {
+		tm.RollbackTransaction(ctx, tx)
+		return err
+	}
+
+	return nil
+}
+
 // ExecuteInTransaction runs fn within a transaction, committing on success or rolling back on failure.
 func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
 	// If there is a transaction already in context, use it.
@@ -137,9 +161,10 @@ func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction
 	tx := &Transaction{
 		ID:        tm.nextTxID,
 		StartTime: time.Now(),
-		ReadSet:   make(map[PageIndex]uint64),
 		WriteSet:  make(map[PageIndex]WriteInfo),
 		Status:    TxActive,
+		// ReadSet is lazily allocated in TrackRead to avoid the map allocation
+		// for read-only transactions.
 	}
 	tm.nextTxID++
 	tm.transactions[tx.ID] = tx
@@ -147,6 +172,15 @@ func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction
 
 	tm.logger.Debug("begin transaction", zap.Uint64("tx_id", uint64(tx.ID)))
 
+	return tx
+}
+
+// BeginReadOnlyTransaction starts a read-only transaction.  TrackRead calls
+// are no-ops, so the ReadSet is never allocated.  Conflict validation is
+// skipped at commit time.  Use this for SELECT queries.
+func (tm *TransactionManager) BeginReadOnlyTransaction(ctx context.Context) *Transaction {
+	tx := tm.BeginTransaction(ctx)
+	tx.ReadOnly = true
 	return tx
 }
 
@@ -173,17 +207,19 @@ func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction)
 		return fmt.Errorf("transaction %d is not active", tx.ID)
 	}
 
-	// OCC conflict check
-	for pageIdx, readVersion := range tx.GetReadVersions() {
-		if tm.globalPageVersions[pageIdx] > readVersion {
-			tx.Abort()
-			return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", ErrTxConflict, tx.ID, pageIdx)
+	// OCC conflict check (skip for ReadOnly transactions — ReadSet is never populated).
+	if !tx.ReadOnly {
+		for pageIdx, readVersion := range tx.GetReadVersions() {
+			if tm.globalPageVersions[pageIdx] > readVersion {
+				tx.Abort()
+				return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", ErrTxConflict, tx.ID, pageIdx)
+			}
 		}
-	}
-	if readDBHeaderVersion, exists := tx.GetDBHeaderReadVersion(); exists {
-		if tm.globalDBHeaderVersion > readDBHeaderVersion {
-			tx.Abort()
-			return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
+		if readDBHeaderVersion, exists := tx.GetDBHeaderReadVersion(); exists {
+			if tm.globalDBHeaderVersion > readDBHeaderVersion {
+				tx.Abort()
+				return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
+			}
 		}
 	}
 
@@ -256,18 +292,22 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 	writeInfos := tx.GetWriteVersions()
 	isReadOnly := len(writeInfos) == 0 && !tx.DDLChanges.HasChanges()
 	if isReadOnly {
-		for pageIdx, readVersion := range tx.GetReadVersions() {
-			if tm.globalPageVersions[pageIdx] > readVersion {
-				tx.Abort()
-				tm.mu.Unlock()
-				return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", ErrTxConflict, tx.ID, pageIdx)
+		// For read-only transactions (ReadOnly flag set), the ReadSet was never
+		// populated, so there is nothing to validate — skip the conflict check.
+		if !tx.ReadOnly {
+			for pageIdx, readVersion := range tx.GetReadVersions() {
+				if tm.globalPageVersions[pageIdx] > readVersion {
+					tx.Abort()
+					tm.mu.Unlock()
+					return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", ErrTxConflict, tx.ID, pageIdx)
+				}
 			}
-		}
-		if readDBHeaderVersion, exists := tx.GetDBHeaderReadVersion(); exists {
-			if tm.globalDBHeaderVersion > readDBHeaderVersion {
-				tx.Abort()
-				tm.mu.Unlock()
-				return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
+			if readDBHeaderVersion, exists := tx.GetDBHeaderReadVersion(); exists {
+				if tm.globalDBHeaderVersion > readDBHeaderVersion {
+					tx.Abort()
+					tm.mu.Unlock()
+					return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
+				}
 			}
 		}
 		tx.Commit()

@@ -33,32 +33,26 @@ func NewWALIndex() *WALIndex {
 }
 
 // Update records the latest raw page bytes for pageIdx.
-// A defensive copy of data is stored so the caller may reuse or free its slice.
-// If a prior entry exists for pageIdx it is overwritten (later write wins).
+// Update takes ownership of data — the caller must not read or write the slice
+// after this call.  If a prior entry exists for pageIdx it is overwritten
+// (later write wins).
 func (wi *WALIndex) Update(pageIdx PageIndex, data []byte) {
-	cp := make([]byte, len(data))
-	copy(cp, data)
-
 	wi.mu.Lock()
-	wi.pages[pageIdx] = cp
+	wi.pages[pageIdx] = data
 	wi.mu.Unlock()
 }
 
 // Lookup returns the raw page bytes for pageIdx if the page has a committed
-// WAL entry that has not yet been checkpointed.  The returned slice is a
-// defensive copy; callers may modify it freely.
+// WAL entry that has not yet been checkpointed.  The returned slice is a direct
+// reference into the index — callers must treat it as read-only and must not
+// hold it across a Reset call (which replaces the map) if mutations are
+// possible.  In practice the pager unmarshals the bytes immediately and does
+// not retain the slice, making this safe.
 func (wi *WALIndex) Lookup(pageIdx PageIndex) ([]byte, bool) {
 	wi.mu.RLock()
 	data, ok := wi.pages[pageIdx]
 	wi.mu.RUnlock()
-
-	if !ok {
-		return nil, false
-	}
-
-	cp := make([]byte, len(data))
-	copy(cp, data)
-	return cp, true
+	return data, ok
 }
 
 // Has reports whether pageIdx has a committed WAL entry in the index.
@@ -107,12 +101,13 @@ func (wi *WALIndex) Reset() {
 // WAL.ReadAllFrames: all entries are already validated and belong to committed
 // transactions.  When the same page appears multiple times, the last occurrence
 // wins (matching WAL semantics — later frames are more recent).
+//
+// Rebuild takes ownership of each f.Data slice — callers must not use the
+// slices after this call returns.
 func (wi *WALIndex) Rebuild(frames []WALReadFrame) {
 	pages := make(map[PageIndex][]byte, len(frames))
 	for _, f := range frames {
-		cp := make([]byte, len(f.Data))
-		copy(cp, f.Data)
-		pages[f.PageIndex] = cp
+		pages[f.PageIndex] = f.Data // take ownership
 	}
 
 	wi.mu.Lock()
