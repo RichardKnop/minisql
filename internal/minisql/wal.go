@@ -182,8 +182,8 @@ func (w *WAL) AppendTransaction(pages []WALPage) error {
 		return fmt.Errorf("write WAL frames: %w", err)
 	}
 
-	// fsync is critical: the commit is only durable once the file is synced.
-	if err := w.file.Sync(); err != nil {
+	// fsync ensures the commit is durable before returning.
+	if err := syscallFsync(w.file); err != nil {
 		return fmt.Errorf("sync WAL after append: %w", err)
 	}
 
@@ -291,7 +291,7 @@ func (w *WAL) Checkpoint(dbFile DBFile) error {
 		}
 	}
 
-	if err := dbFile.Sync(); err != nil {
+	if err := fastSync(dbFile); err != nil {
 		return fmt.Errorf("sync database after WAL checkpoint: %w", err)
 	}
 
@@ -314,7 +314,7 @@ func (w *WAL) Truncate() error {
 		return fmt.Errorf("rewrite WAL header after truncate: %w", err)
 	}
 
-	if err := w.file.Sync(); err != nil {
+	if err := syscallFsync(w.file); err != nil {
 		return fmt.Errorf("sync WAL after truncate: %w", err)
 	}
 
