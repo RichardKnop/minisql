@@ -20,6 +20,12 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, fmt.Errorf("invalid statement kind for SELECT: %v", stmt.Kind)
 	}
 
+	// Fast path: COUNT(*) with no WHERE clause and no JOIN — walk leaf page
+	// headers without deserialising any row data.
+	if stmt.IsSelectCountAll() && len(stmt.Conditions) == 0 && len(stmt.Joins) == 0 {
+		return t.countAllLeafWalk(ctx)
+	}
+
 	// Create query plan
 	plan, err := t.PlanQuery(ctx, stmt)
 	if err != nil {
@@ -163,6 +169,49 @@ func (t *Table) selectCount(ctx context.Context, filteredPipe chan Row, errorsPi
 			)),
 		}, nil
 	}
+}
+
+// countAllLeafWalk counts every row in the table by walking the B+ tree leaf
+// page chain and summing Header.Cells on each page.  No row data is read or
+// deserialised, making this O(leaf pages) instead of O(rows).
+//
+// This is only valid for COUNT(*) with no WHERE clause and no JOIN.
+func (t *Table) countAllLeafWalk(ctx context.Context) (StatementResult, error) {
+	cursor, err := t.SeekFirst(ctx)
+	if err != nil {
+		return StatementResult{}, fmt.Errorf("count all: %w", err)
+	}
+
+	var count int64
+	pageIdx := cursor.PageIdx
+	for {
+		select {
+		case <-ctx.Done():
+			return StatementResult{}, ctx.Err()
+		default:
+		}
+
+		page, err := t.pager.ReadPage(ctx, pageIdx)
+		if err != nil {
+			return StatementResult{}, fmt.Errorf("count all: read page %d: %w", pageIdx, err)
+		}
+		count += int64(page.LeafNode.Header.Cells)
+
+		if page.LeafNode.Header.NextLeaf == 0 {
+			break
+		}
+		pageIdx = page.LeafNode.Header.NextLeaf
+	}
+
+	return StatementResult{
+		Columns: []Column{
+			{Name: "COUNT(*)"},
+		},
+		Rows: NewSingleRowIterator(NewRowWithValues(
+			[]Column{{Name: "COUNT(*)"}},
+			[]OptionalValue{{Valid: true, Value: count}},
+		)),
+	}, nil
 }
 
 // aggState holds the running accumulator for a single aggregate expression.
