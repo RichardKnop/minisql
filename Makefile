@@ -38,20 +38,12 @@ bench:
 	go test -tags bench -bench=$(BENCH) -benchmem -count=$(BENCH_COUNT) \
 		-run '^$$' ./benchmarks/ | tee benchmarks/raw.txt
 
-# bench-report: append parsed results to benchmarks/RESULTS.md.
-# Requires benchstat: go install golang.org/x/perf/cmd/benchstat@latest
+# bench-report: append a formatted Markdown table to benchmarks/RESULTS.md.
 bench-report:
 	@if [ ! -f benchmarks/raw.txt ]; then \
 		echo "No raw.txt found — run 'make bench' first."; exit 1; \
 	fi
-	@echo "" >> benchmarks/RESULTS.md
-	@echo "### $$(date -u '+%Y-%m-%d %H:%M UTC')" >> benchmarks/RESULTS.md
-	@echo "" >> benchmarks/RESULTS.md
-	@echo '```' >> benchmarks/RESULTS.md
-	@benchstat benchmarks/raw.txt >> benchmarks/RESULTS.md 2>/dev/null || \
-		cat benchmarks/raw.txt >> benchmarks/RESULTS.md
-	@echo '```' >> benchmarks/RESULTS.md
-	@echo "Results appended to benchmarks/RESULTS.md"
+	go run ./benchmarks/cmd/report/ -out $(CURDIR)/benchmarks/RESULTS.md benchmarks/raw.txt
 
 # bench-chart: generate PNG bar charts from benchmarks/raw.txt.
 # Charts are written to benchmarks/charts/.
