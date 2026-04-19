@@ -399,6 +399,12 @@ func (s Statement) NumPlaceholders() int {
 
 // Clone ...
 func (s Statement) Clone() Statement {
+	// Fields must be deep-copied: prepareInsert uses slices.Insert which can
+	// modify the backing array in-place when cap > len (Go's append-growth
+	// policy typically leaves spare capacity), corrupting the original slice.
+	fields := make([]Field, len(s.Fields))
+	copy(fields, s.Fields)
+
 	stmt := Statement{
 		Kind:           s.Kind,
 		IfNotExists:    s.IfNotExists,
@@ -408,7 +414,7 @@ func (s Statement) Clone() Statement {
 		ConflictAction: s.ConflictAction,
 		Columns:        s.Columns,
 		Distinct:       s.Distinct,
-		Fields:         s.Fields,
+		Fields:         fields,
 		Aggregates:     s.Aggregates, // slice of value types, safe to share
 		Aliases:        s.Aliases,
 		Inserts:        make([][]OptionalValue, len(s.Inserts)),

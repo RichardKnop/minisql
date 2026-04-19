@@ -316,7 +316,11 @@ func (n *LeafNode) PrependCell(cell Cell) {
 // AppendCells ...
 func (n *LeafNode) AppendCells(cells ...Cell) {
 	for _, cell := range cells {
-		n.Cells[n.Header.Cells] = cell
+		if int(n.Header.Cells) < len(n.Cells) {
+			n.Cells[n.Header.Cells] = cell
+		} else {
+			n.Cells = append(n.Cells, cell)
+		}
 		n.Header.Cells += 1
 	}
 }
