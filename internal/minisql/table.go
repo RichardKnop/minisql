@@ -98,6 +98,15 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 	return table
 }
 
+// newRow creates a Row pre-wired with this table's shared column cache,
+// avoiding a per-row map allocation in hot scan paths.
+func (t *Table) newRow() Row {
+	return Row{
+		Columns:     t.Columns,
+		columnCache: t.columnCache,
+	}
+}
+
 func indexColumnHash(columns []Column) string {
 	var hash strings.Builder
 	for i, col := range columns {
@@ -652,7 +661,7 @@ func (t *Table) DeleteKey(ctx context.Context, pageIdx PageIndex, key RowID) err
 
 	// Remove any overflow pages
 	if overflowFields := textOverflowFields(t.Columns...); len(overflowFields) > 0 && ok {
-		row := NewRow(t.Columns)
+		row := t.newRow()
 		row, err = row.Unmarshal(cellToDelete, overflowFields...)
 		if err != nil {
 			return err

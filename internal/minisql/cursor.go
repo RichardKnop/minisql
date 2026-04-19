@@ -152,7 +152,7 @@ func (c *Cursor) fetchRow(ctx context.Context, advance bool, selectedFields ...F
 		return Row{}, fmt.Errorf("read page: %w", err)
 	}
 
-	row := NewRow(c.Table.Columns)
+	row := c.Table.newRow()
 	if c.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
 		return Row{}, fmt.Errorf("cell index %d out of bounds, max %d", c.CellIdx, page.LeafNode.Header.Cells-1)
 	}
