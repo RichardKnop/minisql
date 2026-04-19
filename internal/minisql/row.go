@@ -205,9 +205,12 @@ func compareValue(kind ColumnKind, v1, v2 OptionalValue) bool {
 
 // Clone ...
 func (r Row) Clone() Row {
-	rowCopy := NewRow(r.Columns)
-	rowCopy.Key = r.Key
-	rowCopy.Values = make([]OptionalValue, len(r.Values))
+	rowCopy := Row{
+		Key:         r.Key,
+		Columns:     r.Columns,
+		columnCache: r.columnCache,
+		Values:      make([]OptionalValue, len(r.Values)),
+	}
 	copy(rowCopy.Values, r.Values)
 	return rowCopy
 }
@@ -337,19 +340,13 @@ func (r Row) Unmarshal(cell Cell, selectedFields ...Field) (Row, error) {
 	// Pre-allocate exact size and write directly by index instead of append
 	r.Values = make([]OptionalValue, len(r.Columns))
 
-	// Create a set of selected column names for fast lookup
-	selectedSet := make(map[string]bool, len(selectedFields))
-	for _, field := range selectedFields {
-		selectedSet[field.Name] = true
-	}
-
 	offset := 0
 	for i, col := range r.Columns {
 		// Check if column is NULL
 		isNull := bitwise.IsSet(cell.NullBitmask, i)
 
-		// If column not selected, skip it but track offset
-		if len(selectedSet) > 0 && !selectedSet[col.Name] {
+		// If column not selected, skip it but track offset (inline linear search, zero allocation)
+		if !isColumnSelected(col.Name, selectedFields) {
 			r.Values[i] = OptionalValue{Valid: false}
 			if !isNull {
 				// Skip over the data without unmarshaling
@@ -401,6 +398,17 @@ func (r Row) Unmarshal(cell Cell, selectedFields ...Field) (Row, error) {
 	}
 
 	return r, nil
+}
+
+// isColumnSelected reports whether colName appears in selectedFields.
+// It uses a linear scan so that callers avoid allocating a map for small field lists.
+func isColumnSelected(colName string, selectedFields []Field) bool {
+	for j := range selectedFields {
+		if selectedFields[j].Name == colName {
+			return true
+		}
+	}
+	return false
 }
 
 func (r Row) getColumnSize(col Column, data []byte, offset int) uint64 {
