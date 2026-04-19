@@ -124,9 +124,7 @@ func (p *pagerImpl) SetWALIndex(walIndex *WALIndex) {
 
 // Close ...
 func (p *pagerImpl) Close() error {
-	// Sync file to ensure all buffered writes are persisted to disk
-	// This is critical for data durability - without it, writes may be lost on crash/close
-	if err := p.file.Sync(); err != nil {
+	if err := fastSync(p.file); err != nil {
 		return fmt.Errorf("failed to sync file before close: %w", err)
 	}
 	return p.file.Close()
@@ -363,7 +361,7 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 		return err
 	}
 
-	return p.file.Sync()
+	return fastSync(p.file)
 }
 
 // FlushBatch writes multiple pages to disk in a single operation.
@@ -464,7 +462,7 @@ func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) err
 		}
 	}
 
-	return p.file.Sync()
+	return fastSync(p.file)
 }
 
 func marshalPage(page *Page, buf []byte) error {
