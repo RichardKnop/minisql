@@ -152,6 +152,43 @@ func TestCoveringIndexEligible(t *testing.T) {
 	}
 }
 
+func TestRowFromIndexKey(t *testing.T) {
+	t.Parallel()
+
+	idCol := Column{Kind: Int8, Size: 8, Name: "id"}
+	emailCol := Column{Kind: Varchar, Size: MaxInlineVarchar, Name: "email", Nullable: true}
+
+	t.Run("single-column index key", func(t *testing.T) {
+		t.Parallel()
+		rowID := RowID(42)
+		row := rowFromIndexKey(int64(99), []Column{idCol}, rowID)
+		assert.Equal(t, rowID, row.Key)
+		assert.Equal(t, []Column{idCol}, row.Columns)
+		require.Len(t, row.Values, 1)
+		assert.Equal(t, int64(99), row.Values[0].Value)
+		assert.True(t, row.Values[0].Valid)
+	})
+
+	t.Run("composite key", func(t *testing.T) {
+		t.Parallel()
+		rowID := RowID(7)
+		// CompositeKey.generateComparison expects Varchar values as plain string.
+		ck := NewCompositeKey(
+			[]Column{idCol, emailCol},
+			int64(5),
+			"a@b.com",
+		)
+		row := rowFromIndexKey(ck, []Column{idCol, emailCol}, rowID)
+		assert.Equal(t, rowID, row.Key)
+		assert.Equal(t, []Column{idCol, emailCol}, row.Columns)
+		require.Len(t, row.Values, 2)
+		assert.Equal(t, int64(5), row.Values[0].Value)
+		assert.True(t, row.Values[0].Valid)
+		assert.Equal(t, "a@b.com", row.Values[1].Value)
+		assert.True(t, row.Values[1].Valid)
+	})
+}
+
 func TestMarkCoveringIndexes(t *testing.T) {
 	t.Parallel()
 

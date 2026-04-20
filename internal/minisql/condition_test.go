@@ -1754,3 +1754,48 @@ func TestFieldIsNotBetween(t *testing.T) {
 	assert.Equal(t, int64(18), vals[0])
 	assert.Equal(t, int64(65), vals[1])
 }
+
+func TestToInt64ForInt4(t *testing.T) {
+	t.Parallel()
+
+	t.Run("int64 value passes through", func(t *testing.T) {
+		got, err := toInt64ForInt4(int64(42))
+		require.NoError(t, err)
+		assert.Equal(t, int64(42), got)
+	})
+
+	t.Run("int32 value is widened to int64", func(t *testing.T) {
+		got, err := toInt64ForInt4(int32(-7))
+		require.NoError(t, err)
+		assert.Equal(t, int64(-7), got)
+	})
+
+	t.Run("wrong type returns error", func(t *testing.T) {
+		_, err := toInt64ForInt4("not a number")
+		assert.Error(t, err)
+	})
+}
+
+func TestCompareInt4_TypeErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		v1, v2  any
+		op      Operator
+		wantErr bool
+	}{
+		{"out of range v1", int64(1 << 32), int64(1), Eq, true},
+		{"out of range v2", int64(1), int64(1 << 32), Eq, true},
+		{"bad type v1", "x", int64(1), Eq, true},
+		{"bad type v2", int64(1), "x", Eq, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := compareInt4(tt.v1, tt.v2, tt.op)
+			assert.Error(t, err)
+		})
+	}
+}
