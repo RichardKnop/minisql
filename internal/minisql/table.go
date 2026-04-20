@@ -98,13 +98,8 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 	return table
 }
 
-// newRow creates a Row pre-wired with this table's shared column cache,
-// avoiding a per-row map allocation in hot scan paths.
 func (t *Table) newRow() Row {
-	return Row{
-		Columns:     t.Columns,
-		columnCache: t.columnCache,
-	}
+	return Row{Columns: t.Columns}
 }
 
 func indexColumnHash(columns []Column) string {

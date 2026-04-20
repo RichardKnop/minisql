@@ -847,7 +847,12 @@ func rowWithTimestamp(name string, ts Time) Row {
 func TestExpr_Eval_NOW(t *testing.T) {
 	t.Parallel()
 
-	before := time.Now().UTC()
+	// Truncate to microsecond precision: Time stores only microseconds, so GoTime()
+	// always returns a time whose nanosecond field is a multiple of 1000.  A
+	// nanosecond-precision `before` (e.g. .123456789) would compare as after the
+	// truncated result (.123456000), causing a spurious "returned time before call"
+	// failure.
+	before := time.Now().UTC().Truncate(time.Microsecond)
 	v, err := (&Expr{FuncName: "NOW"}).Eval(NewRow(nil))
 	after := time.Now().UTC()
 

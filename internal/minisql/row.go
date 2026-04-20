@@ -23,8 +23,6 @@ type Row struct {
 	Key     RowID
 	Columns []Column
 	Values  []OptionalValue
-
-	columnCache map[string]int
 }
 
 func maxCells(rowSize uint64) uint32 {
@@ -36,27 +34,12 @@ func maxCells(rowSize uint64) uint32 {
 
 // NewRow ...
 func NewRow(columns []Column) Row {
-	row := Row{
-		Columns:     columns,
-		columnCache: make(map[string]int, len(columns)),
-	}
-	for i, col := range columns {
-		row.columnCache[col.Name] = i
-	}
-	return row
+	return Row{Columns: columns}
 }
 
 // NewRowWithValues ...
 func NewRowWithValues(columns []Column, values []OptionalValue) Row {
-	row := Row{
-		Columns:     columns,
-		Values:      values,
-		columnCache: make(map[string]int, len(columns)),
-	}
-	for i, col := range columns {
-		row.columnCache[col.Name] = i
-	}
-	return row
+	return Row{Columns: columns, Values: values}
 }
 
 // Size calculates a size of a row record excluding null bitmask and row ID
@@ -99,13 +82,15 @@ func (r Row) Size() uint64 {
 	return size
 }
 
-// OnlyFields ...
+// OnlyFields returns a new Row containing only the specified fields.
+// The result is accessed positionally (Values[i]) by all downstream consumers
+// (Rows.Next, rowDistinctKey, selectGroupBy, deduplicateRows).  Name-based
+// lookups via GetColumn/GetValue fall back to a linear scan if needed.
 func (r Row) OnlyFields(fields ...Field) Row {
 	filteredRow := Row{
-		Key:         r.Key,
-		Columns:     make([]Column, len(fields)),
-		Values:      make([]OptionalValue, len(fields)),
-		columnCache: make(map[string]int, len(fields)),
+		Key:     r.Key,
+		Columns: make([]Column, len(fields)),
+		Values:  make([]OptionalValue, len(fields)),
 	}
 
 	// Pre-allocate exact size and write directly by index
@@ -122,7 +107,6 @@ func (r Row) OnlyFields(fields ...Field) Row {
 
 		if _, idx := r.GetColumn(lookupName); idx >= 0 {
 			filteredRow.Columns[outIdx] = r.Columns[idx]
-			filteredRow.columnCache[field.Name] = outIdx // Store without prefix for Scan
 			filteredRow.Values[outIdx] = r.Values[idx]
 			outIdx++
 		}
@@ -137,21 +121,27 @@ func (r Row) OnlyFields(fields ...Field) Row {
 	return filteredRow
 }
 
-// GetColumn ...
+// GetColumn returns the column and its index for the given name via linear scan.
 func (r Row) GetColumn(name string) (Column, int) {
-	if idx, ok := r.columnCache[name]; ok {
-		return r.Columns[idx], idx
+	for i, col := range r.Columns {
+		if col.Name == name {
+			return col, i
+		}
 	}
 	return Column{}, -1
 }
 
-// GetValue ...
+// GetValue returns the value for the given column name via linear scan.
 func (r Row) GetValue(name string) (OptionalValue, bool) {
-	idx, ok := r.columnCache[name]
-	if !ok || idx >= len(r.Values) {
-		return OptionalValue{}, false
+	for i, col := range r.Columns {
+		if col.Name == name {
+			if i >= len(r.Values) {
+				return OptionalValue{}, false
+			}
+			return r.Values[i], true
+		}
 	}
-	return r.Values[idx], true
+	return OptionalValue{}, false
 }
 
 // GetValuesForColumns ...
@@ -171,13 +161,14 @@ func (r Row) GetValuesForColumns(columns []Column) ([]OptionalValue, bool) {
 
 // SetValue returns true if value has changed
 func (r Row) SetValue(name string, value OptionalValue) (Row, bool) {
-	columnIdx, ok := r.columnCache[name]
-	if !ok {
-		return r, false
-	}
-	if !compareValue(r.Columns[columnIdx].Kind, r.Values[columnIdx], value) {
-		r.Values[columnIdx] = value
-		return r, true
+	for i, col := range r.Columns {
+		if col.Name == name {
+			if !compareValue(col.Kind, r.Values[i], value) {
+				r.Values[i] = value
+				return r, true
+			}
+			return r, false
+		}
 	}
 	return r, false
 }
@@ -206,10 +197,9 @@ func compareValue(kind ColumnKind, v1, v2 OptionalValue) bool {
 // Clone ...
 func (r Row) Clone() Row {
 	rowCopy := Row{
-		Key:         r.Key,
-		Columns:     r.Columns,
-		columnCache: r.columnCache,
-		Values:      make([]OptionalValue, len(r.Values)),
+		Key:     r.Key,
+		Columns: r.Columns,
+		Values:  make([]OptionalValue, len(r.Values)),
 	}
 	copy(rowCopy.Values, r.Values)
 	return rowCopy
@@ -323,14 +313,6 @@ func (r Row) Marshal() ([]byte, error) {
 // OptionalValue is inserted to maintain index alignment.
 func (r Row) Unmarshal(cell Cell, selectedFields ...Field) (Row, error) {
 	r.Key = cell.Key
-
-	// Initialize column cache if not already present
-	if r.columnCache == nil {
-		r.columnCache = make(map[string]int, len(r.Columns))
-		for i, col := range r.Columns {
-			r.columnCache[col.Name] = i
-		}
-	}
 
 	if len(selectedFields) == 0 {
 		r.Values = make([]OptionalValue, len(r.Columns))
