@@ -532,6 +532,72 @@ func TestDatabase_CreateIndex(t *testing.T) {
 	mock.AssertExpectationsForObjects(t, mockParser)
 }
 
+func TestDatabase_GetTable(t *testing.T) {
+	pager, dbFile := initTest(t)
+
+	ctx := context.Background()
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager, nil)
+	require.NoError(t, err)
+
+	stmt := Statement{
+		Kind:      CreateTable,
+		TableName: testTableName,
+		Columns:   append([]Column{}, testColumns...),
+	}
+	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		_, err := aDatabase.ExecuteStatement(ctx, stmt)
+		return err
+	})
+	require.NoError(t, err)
+
+	t.Run("existing table is returned", func(t *testing.T) {
+		table, ok := aDatabase.GetTable(ctx, testTableName)
+		assert.True(t, ok)
+		require.NotNil(t, table)
+		assert.Equal(t, testTableName, table.Name)
+	})
+
+	t.Run("missing table returns false", func(t *testing.T) {
+		table, ok := aDatabase.GetTable(ctx, "no_such_table")
+		assert.False(t, ok)
+		assert.Nil(t, table)
+	})
+}
+
+func TestDatabase_Checkpoint_NoWAL(t *testing.T) {
+	pager, dbFile := initTest(t)
+
+	ctx := context.Background()
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager, nil)
+	require.NoError(t, err)
+
+	// Without a WAL configured Checkpoint must be a no-op and return nil.
+	assert.Nil(t, aDatabase.wal)
+	err = aDatabase.Checkpoint(ctx)
+	assert.NoError(t, err)
+}
+
+func TestWithMaxCachedStatements(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("positive value replaces default cache", func(t *testing.T) {
+		pager, dbFile := initTest(t)
+		aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager, nil,
+			WithMaxCachedStatements(50))
+		require.NoError(t, err)
+		assert.NotNil(t, aDatabase.stmtCache)
+	})
+
+	t.Run("zero is ignored, cache still allocated by default", func(t *testing.T) {
+		pager, dbFile := initTest(t)
+		aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager, nil,
+			WithMaxCachedStatements(0))
+		require.NoError(t, err)
+		// Default cache was allocated before the option ran; should still be non-nil.
+		assert.NotNil(t, aDatabase.stmtCache)
+	})
+}
+
 func collectMainSchemas(ctx context.Context, t *testing.T, aDatabase *Database) []Schema {
 	mainTable := aDatabase.tables[SchemaTableName]
 	schemaResults, err := mainTable.Select(ctx, Statement{
