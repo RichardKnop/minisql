@@ -133,12 +133,28 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			break
 		}
 
-		// Try to advance cursor to next position, if there is still space in the
-		// current page, just increment cell index, otherwise call Seek to get
-		// new cursor
-		cursor, nextRowID, err = t.SeekNextRowID(ctx, t.GetRootPageIdx())
+		// Advance the cursor for the next insert without re-traversing the tree.
+		//
+		// Invariant: before every insert, the cursor points at the rightmost
+		// leaf, which always has NextLeaf == 0.  After a split, LeafNodeSplitInsert
+		// sets splitPage.NextLeaf = newPage.Index, so NextLeaf becomes non-zero.
+		// Reading the page back is a write-set hit (O(1) map lookup) — no I/O.
+		afterPage, err := t.pager.ReadPage(ctx, cursor.PageIdx)
 		if err != nil {
-			return StatementResult{}, err
+			return StatementResult{}, fmt.Errorf("insert: read page after insert: %w", err)
+		}
+		if afterPage.LeafNode != nil && afterPage.LeafNode.Header.NextLeaf == 0 {
+			// No split: this page is still the rightmost leaf.
+			// Position the cursor past the last cell that was just written.
+			cursor.CellIdx = afterPage.LeafNode.Header.Cells
+			nextRowID++
+		} else {
+			// A split created a new right sibling — this page is no longer
+			// rightmost. Find the actual rightmost leaf via a full seek.
+			cursor, nextRowID, err = t.SeekNextRowID(ctx, t.GetRootPageIdx())
+			if err != nil {
+				return StatementResult{}, err
+			}
 		}
 	}
 
