@@ -10,6 +10,15 @@ import (
 	"go.uber.org/zap"
 )
 
+// pageDataPool is a package-level pool for PageSize-byte slices used during WAL
+// serialization. A single pool is shared across all TransactionManagers (there
+// is normally only one per database). Buffers returned to the pool via
+// WALIndex.Update are safe to reuse: walWriteMu serialises all writers, so by
+// the time a buffer is recycled the pager has finished unmarshalling it.
+var pageDataPool = sync.Pool{
+	New: func() any { return make([]byte, PageSize) },
+}
+
 // TransactionManager coordinates optimistic concurrency control for the database.
 type TransactionManager struct {
 	mu                    sync.RWMutex
@@ -388,8 +397,11 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 	tm.walWriteMu.Unlock()
 
 	// Step 6: Update WAL index so subsequent reads see the latest committed data.
+	// Recycle old page buffers that are displaced by newer commits.
 	for _, wp := range walPages {
-		tm.walIndex.Update(wp.Index, wp.Data)
+		if old := tm.walIndex.Update(wp.Index, wp.Data); old != nil {
+			pageDataPool.Put(old)
+		}
 	}
 
 	tm.logger.Debug("commit transaction (WAL)", zap.Uint64("tx_id", uint64(tx.ID)))
@@ -428,8 +440,9 @@ func (tm *TransactionManager) serializeWritesForWAL(ctx context.Context, tx *Tra
 		if pageIdx == 0 {
 			continue // already included above
 		}
-		buf := make([]byte, PageSize)
+		buf := pageDataPool.Get().([]byte)
 		if err := marshalPage(info.Page, buf); err != nil {
+			pageDataPool.Put(buf)
 			return nil, fmt.Errorf("marshal page %d for WAL: %w", pageIdx, err)
 		}
 		pages = append(pages, WALPage{Index: pageIdx, Data: buf})
@@ -480,11 +493,13 @@ func (tm *TransactionManager) serializePage0ForWAL(ctx context.Context, page0 *P
 			return nil, fmt.Errorf("read page 0 B-tree for WAL: %w", err)
 		}
 	}
-	pageBuf := make([]byte, PageSize)
+	pageBuf := pageDataPool.Get().([]byte)
 	if err := marshalPage(btreePage, pageBuf); err != nil {
+		pageDataPool.Put(pageBuf)
 		return nil, fmt.Errorf("marshal page 0 B-tree for WAL: %w", err)
 	}
 	copy(frame[RootPageConfigSize:], pageBuf[0:PageSize-RootPageConfigSize])
+	pageDataPool.Put(pageBuf)
 
 	return frame, nil
 }

@@ -32,14 +32,17 @@ func NewWALIndex() *WALIndex {
 	}
 }
 
-// Update records the latest raw page bytes for pageIdx.
+// Update records the latest raw page bytes for pageIdx and returns the
+// previous buffer (if any) so the caller can recycle it.
 // Update takes ownership of data — the caller must not read or write the slice
 // after this call.  If a prior entry exists for pageIdx it is overwritten
 // (later write wins).
-func (wi *WALIndex) Update(pageIdx PageIndex, data []byte) {
+func (wi *WALIndex) Update(pageIdx PageIndex, data []byte) []byte {
 	wi.mu.Lock()
+	old := wi.pages[pageIdx]
 	wi.pages[pageIdx] = data
 	wi.mu.Unlock()
+	return old
 }
 
 // Lookup returns the raw page bytes for pageIdx if the page has a committed
