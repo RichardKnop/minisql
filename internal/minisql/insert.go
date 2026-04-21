@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"go.uber.org/zap"
 )
 
 // Insert ...
@@ -111,11 +113,11 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			return StatementResult{}, errors.New("trying to insert into non leaf node")
 		}
 
-		t.logger.Sugar().With(
-			"page_index", int(cursor.PageIdx),
-			"cell_index", int(cursor.CellIdx),
-			"row_id", int(nextRowID),
-		).Debug("inserting row")
+		t.logger.Debug("inserting row",
+			zap.Int("page_index", int(cursor.PageIdx)),
+			zap.Int("cell_index", int(cursor.CellIdx)),
+			zap.Int("row_id", int(nextRowID)),
+		)
 
 		if cursor.CellIdx < page.LeafNode.Header.Cells {
 			if page.LeafNode.Cells[cursor.CellIdx].Key == nextRowID {

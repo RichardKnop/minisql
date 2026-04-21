@@ -1,3 +1,46 @@
+### 2026-04-21 09:30 UTC
+
+Replace `Sugar().With(...).Debug(...)` with zero-allocation typed zap fields in all hot-path logging:
+- `insert.go`: `Sugar().With(...).Debug("inserting row")` → `logger.Debug("inserting row", zap.Int(...))`
+- `cursor.go`: `LeafNodeSplitInsert` split log
+- `table.go`: `createNewRoot` and `internalNodeSplitInsert` logs
+- `table_primary_key.go`: primary key insert/autoincrement logs (3 call sites)
+- `table_secondary_index.go`, `table_unique_index.go`: index insert logs
+- `delete.go`, `update.go`, `select.go`: query-plan and row-count logs
+- zap's `Sugar().With()` allocates a field buffer + clones the logger even when the debug level is disabled; the typed API (`zap.Int`, `zap.String`, `zap.Any`) stack-allocates `zap.Field` structs and short-circuits immediately on disabled levels
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| Delete_ByPK | 165.68 µs/op | 60.69 µs/op | 2.7× |
+| Insert_SingleRow | 101.25 µs/op | 48.99 µs/op | 2.1× |
+| Insert_Batch | 722.73 µs/op | 281.12 µs/op | 2.6× |
+| Select_PointScan | 5.70 µs/op | 4.32 µs/op | **1.32×** |
+| Select_FullScan | 9.83 ms/op | 6.23 ms/op | **1.58×** |
+| Select_CountStar | 37.47 µs/op | 10.91 µs/op | 3.4× |
+| Select_IndexRangeScan | 1006 µs/op | 908 µs/op | **1.11×** |
+| Select_RangeScan (no index) | 3.98 ms/op | 1.00 ms/op | 3.97× |
+| Txn_NInserts | 375.35 µs/op | 154.69 µs/op | 2.4× |
+| Update_ByPK | 59.04 µs/op | 44.99 µs/op | **1.31×** |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 84.4 KiB | 447 B |
+| Insert_SingleRow | 61.8 KiB | 312 B |
+| Insert_Batch | 438 KiB | 31.1 KiB |
+| Select_PointScan | 4.3 KiB | 679 B |
+| Select_FullScan | 9.6 MiB | 1.3 MiB |
+| Select_CountStar | 5.8 KiB | 400 B |
+| Select_IndexRangeScan | 835 KiB | 85.9 KiB |
+| Select_RangeScan (no index) | 2.1 MiB | 85.9 KiB |
+| Txn_NInserts | 253 KiB | 15.9 KiB |
+| Update_ByPK | 12.7 KiB | 263 B |
+
+---
+
 ### 2026-04-20 10:00 UTC
 
 Remove `Row.columnCache` entirely — replace with O(n) linear scan in `GetColumn`/`GetValue`/`SetValue`:

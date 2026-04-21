@@ -3,6 +3,8 @@ package minisql
 import (
 	"context"
 	"fmt"
+
+	"go.uber.org/zap"
 )
 
 // Delete ...
@@ -20,7 +22,7 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, err
 	}
 
-	t.logger.Sugar().With("query type", "DELETE", "plan", plan).Debug("query plan")
+	t.logger.Debug("query plan", zap.String("query type", "DELETE"), zap.Any("plan", plan))
 
 	// Always select all columns so the full row is available for index cleanup on delete.
 	selectedFields := fieldsFromColumns(t.Columns...)
@@ -65,6 +67,6 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 		result.RowsAffected += 1
 	}
 
-	t.logger.Sugar().Debugf("deleted %d rows", result.RowsAffected)
+	t.logger.Debug("deleted rows", zap.Int("count", result.RowsAffected))
 	return result, nil
 }
