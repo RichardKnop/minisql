@@ -28,7 +28,7 @@ func NewSliceIterator(rows []Row) Iterator {
 			return Row{}, ErrNoMoreRows
 		}
 		row := rows[idx]
-		idx++
+		idx += 1
 		return row, nil
 	})
 }

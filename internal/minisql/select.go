@@ -540,7 +540,7 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 				return Row{}, ErrNoMoreRows
 			}
 			row := resultRows[idx]
-			idx++
+			idx += 1
 			return row, nil
 		}),
 	}, nil

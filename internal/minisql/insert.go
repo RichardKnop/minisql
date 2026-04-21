@@ -147,7 +147,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			// No split: this page is still the rightmost leaf.
 			// Position the cursor past the last cell that was just written.
 			cursor.CellIdx = afterPage.LeafNode.Header.Cells
-			nextRowID++
+			nextRowID += 1
 		} else {
 			// A split created a new right sibling — this page is no longer
 			// rightmost. Find the actual rightmost leaf via a full seek.

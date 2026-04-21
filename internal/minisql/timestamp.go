@@ -381,7 +381,7 @@ func dateFromEpochDaysForward(days int64) (int32, int, int) {
 			break
 		}
 		days -= yearDays
-		year++
+		year += 1
 	}
 
 	month := 1
@@ -391,7 +391,7 @@ func dateFromEpochDaysForward(days int64) (int32, int, int) {
 			break
 		}
 		days -= monthDays
-		month++
+		month += 1
 	}
 
 	return year, month, int(days) + 1

@@ -158,7 +158,7 @@ func (tp *TransactionalPager) AddFreePage(ctx context.Context, pageIdx PageIndex
 
 	// Update header
 	dbHeader.FirstFreePage = pageIdx
-	dbHeader.FreePageCount++
+	dbHeader.FreePageCount += 1
 	tx.TrackDBHeaderWrite(dbHeader)
 
 	return nil

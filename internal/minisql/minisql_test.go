@@ -181,7 +181,7 @@ func appendUntilSize(columns []Column, targetSize int) []Column {
 			Name:     fmt.Sprintf("test_varchar_%d", i),
 			Nullable: true,
 		})
-		i++
+		i += 1
 		size += varcharLengthPrefixSize + MaxInlineVarchar
 	}
 	if size > targetSize {

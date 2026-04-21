@@ -166,7 +166,7 @@ func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction
 		// ReadSet is lazily allocated in TrackRead to avoid the map allocation
 		// for read-only transactions.
 	}
-	tm.nextTxID++
+	tm.nextTxID += 1
 	tm.transactions[tx.ID] = tx
 	tm.mu.Unlock()
 
@@ -374,7 +374,7 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 	}
 	for pageIdx, info := range writeInfos {
 		tm.saver.SavePage(ctx, pageIdx, info.Page)
-		tm.globalPageVersions[pageIdx]++
+		tm.globalPageVersions[pageIdx] += 1
 	}
 	if tx.DDLChanges.HasChanges() {
 		tm.ddlSaver.SaveDDLChanges(ctx, tx.DDLChanges)

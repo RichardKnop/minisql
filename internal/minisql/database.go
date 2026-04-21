@@ -891,7 +891,7 @@ func (d *Database) executeUnion(ctx context.Context, stmt Statement) (StatementR
 				return Row{}, ErrNoMoreRows
 			}
 			row := allRows[idx]
-			idx++
+			idx += 1
 			return row, nil
 		}),
 	}, nil

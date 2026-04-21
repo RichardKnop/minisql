@@ -85,7 +85,7 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 				return err
 			}
 			if changed {
-				result.RowsAffected++
+				result.RowsAffected += 1
 			}
 			return nil
 		}
@@ -110,7 +110,7 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 
 		if changed {
-			result.RowsAffected++
+			result.RowsAffected += 1
 		}
 	}
 

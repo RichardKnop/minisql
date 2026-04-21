@@ -64,7 +64,7 @@ func (ui *Index[T]) Seek(ctx context.Context, page *Page, keyAny any) (IndexCurs
 	node := page.IndexNode.(*IndexNode[T])
 
 	for i < node.Header.Keys && compare(key, node.Cells[i].Key) > 0 {
-		i++
+		i += 1
 	}
 	if i < node.Header.Keys && compare(key, node.Cells[i].Key) == 0 {
 		return IndexCursor[T]{
@@ -102,7 +102,7 @@ func (ui *Index[T]) SeekWithPrefix(ctx context.Context, page *Page, prefixAny an
 	node := page.IndexNode.(*IndexNode[T])
 
 	for i < node.Header.Keys && compare(prefixAny.(CompositeKey), any(node.Cells[i].Key).(CompositeKey).Prefix(prefixColumns)) > 0 {
-		i++
+		i += 1
 	}
 	if i < node.Header.Keys && compare(prefixAny.(CompositeKey), any(node.Cells[i].Key).(CompositeKey).Prefix(prefixColumns)) == 0 {
 		return IndexCursor[T]{

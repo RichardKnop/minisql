@@ -514,10 +514,10 @@ func toInt64FromString(s string) (int64, bool) {
 	s = strings.TrimSpace(s)
 	end := 0
 	if end < len(s) && (s[end] == '+' || s[end] == '-') {
-		end++
+		end += 1
 	}
 	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
-		end++
+		end += 1
 	}
 	if end == 0 || (end == 1 && (s[0] == '+' || s[0] == '-')) {
 		return 0, false
@@ -536,19 +536,19 @@ func toFloat64FromString(s string) (float64, bool) {
 	// Find the end of the leading numeric portion.
 	end := 0
 	if end < len(s) && (s[end] == '+' || s[end] == '-') {
-		end++
+		end += 1
 	}
 	for end < len(s) && (s[end] >= '0' && s[end] <= '9' || s[end] == '.') {
-		end++
+		end += 1
 	}
 	// Optional exponent
 	if end < len(s) && (s[end] == 'e' || s[end] == 'E') {
-		end++
+		end += 1
 		if end < len(s) && (s[end] == '+' || s[end] == '-') {
-			end++
+			end += 1
 		}
 		for end < len(s) && s[end] >= '0' && s[end] <= '9' {
-			end++
+			end += 1
 		}
 	}
 	if end == 0 {

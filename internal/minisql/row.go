@@ -108,7 +108,7 @@ func (r Row) OnlyFields(fields ...Field) Row {
 		if _, idx := r.GetColumn(lookupName); idx >= 0 {
 			filteredRow.Columns[outIdx] = r.Columns[idx]
 			filteredRow.Values[outIdx] = r.Values[idx]
-			outIdx++
+			outIdx += 1
 		}
 	}
 

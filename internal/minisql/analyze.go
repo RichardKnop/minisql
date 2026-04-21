@@ -164,7 +164,7 @@ func (d *Database) analyzeTable(ctx context.Context, statsTable, table *Table) e
 		if err != nil {
 			return err
 		}
-		rowCount++
+		rowCount += 1
 	}
 
 	// Store stat in format: "rowCount"
@@ -226,7 +226,7 @@ func (d *Database) analyzeIndex(ctx context.Context, statsTable *Table, tableNam
 	// The index is a generic type, need to handle different key types
 	// For simplicity, use ScanAll which works for all index types
 	if scanErr := index.ScanAll(ctx, false, func(key any, rowID RowID) error {
-		entryCount++
+		entryCount += 1
 
 		// Handle composite keys by tracking each prefix
 		if ck, isComposite := key.(CompositeKey); isComposite && numColumns > 1 {

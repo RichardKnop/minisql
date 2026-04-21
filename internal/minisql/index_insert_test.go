@@ -29,7 +29,7 @@ func TestIndex_Insert(t *testing.T) {
 				if err := idx.Insert(ctx, key, RowID(key+100)); err != nil {
 					return err
 				}
-				key++
+				key += 1
 			}
 			return nil
 		})
@@ -58,7 +58,7 @@ func TestIndex_Insert(t *testing.T) {
 			return idx.Insert(ctx, key, RowID(key+100))
 		})
 		require.NoError(t, err)
-		key++
+		key += 1
 
 		/*
 						        +-----+
@@ -85,7 +85,7 @@ func TestIndex_Insert(t *testing.T) {
 				if err := idx.Insert(ctx, key, RowID(key+100)); err != nil {
 					return err
 				}
-				key++
+				key += 1
 			}
 			return nil
 		})
@@ -120,7 +120,7 @@ func TestIndex_Insert(t *testing.T) {
 				if err := idx.Insert(ctx, key, RowID(key+100)); err != nil {
 					return err
 				}
-				key++
+				key += 1
 			}
 			return nil
 		})
@@ -158,7 +158,7 @@ func TestIndex_Insert(t *testing.T) {
 			return idx.Insert(ctx, key, RowID(key+100))
 		})
 		require.NoError(t, err)
-		key++
+		key += 1
 
 		/*
 									        +--------------------+
@@ -202,7 +202,7 @@ func TestIndex_Insert(t *testing.T) {
 				if err := idx.Insert(ctx, key, RowID(key+100)); err != nil {
 					return err
 				}
-				key++
+				key += 1
 			}
 			return nil
 		})
