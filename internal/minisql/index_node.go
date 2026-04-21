@@ -67,8 +67,9 @@ func (h *IndexNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 // IndexCell holds a single key entry within an index node, along with its associated row IDs and child pointer.
 type IndexCell[T IndexKey] struct {
 	Key          T
-	InlineRowIDs uint32 // only for non-unique indexes
-	RowIDs       []RowID
+	UniqueRowID  RowID     // only for unique indexes, stored inline without heap allocation
+	InlineRowIDs uint32    // only for non-unique indexes
+	RowIDs       []RowID   // only for non-unique indexes
 	Overflow     PageIndex // 0 if not used (only for non-unique indexes)
 	Child        PageIndex
 	unique       bool // true for non-unique index cells
@@ -76,15 +77,18 @@ type IndexCell[T IndexKey] struct {
 
 // NewIndexCell ...
 func NewIndexCell[T IndexKey](unique bool) IndexCell[T] {
-	return IndexCell[T]{
-		unique: unique,
-		RowIDs: make([]RowID, 0, 1),
+	c := IndexCell[T]{unique: unique}
+	if !unique {
+		// Pre-allocate RowIDs slice only for non-unique cells.
+		// Unique cells use inlineRowID instead (no heap allocation needed).
+		c.RowIDs = make([]RowID, 0, 1)
 	}
+	return c
 }
 
 // Size ...
 func (c *IndexCell[T]) Size() uint64 {
-	// Key size  + child pointer size
+	// Key size + child pointer size
 	size := keySize(c.Key) + 4
 	if c.unique {
 		// Single row ID
@@ -150,8 +154,8 @@ func (c *IndexCell[T]) Marshal(buf []byte) error {
 	}
 
 	if c.unique {
-		// Single row ID
-		marshalUint64(buf, uint64(c.RowIDs[0]), i)
+		// Single row ID stored inline — no slice allocation.
+		marshalUint64(buf, uint64(c.UniqueRowID), i)
 		i += 8
 	} else {
 		// Row IDs length prefix
@@ -215,7 +219,8 @@ func (c *IndexCell[T]) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	}
 
 	if c.unique {
-		c.RowIDs = []RowID{RowID(unmarshalUint64(buf, i))}
+		// Store directly in UniqueRowID — no heap allocation.
+		c.UniqueRowID = RowID(unmarshalUint64(buf, i))
 		i += 8
 	} else {
 		c.InlineRowIDs = unmarshalUint32(buf, i)
@@ -403,7 +408,11 @@ func (n *IndexNode[T]) Keys() []T {
 func (n *IndexNode[T]) RowIDs() []RowID {
 	rowIDs := make([]RowID, 0, n.Header.Keys)
 	for i := range n.Header.Keys {
-		rowIDs = append(rowIDs, n.Cells[i].RowIDs...)
+		if n.Cells[i].unique {
+			rowIDs = append(rowIDs, n.Cells[i].UniqueRowID)
+		} else {
+			rowIDs = append(rowIDs, n.Cells[i].RowIDs...)
+		}
 	}
 	return rowIDs
 }
@@ -557,12 +566,14 @@ func (c *IndexCell[T]) Clone() IndexCell[T] {
 		Overflow:     c.Overflow,
 		Child:        c.Child,
 		unique:       c.unique,
+		UniqueRowID:  c.UniqueRowID, // zero for non-unique; populated for unique
 	}
-	if len(c.RowIDs) == 0 {
-		return nodeCopy
+	// For unique cells, RowIDs is nil — UniqueRowID already copied above.
+	// For non-unique cells, deep-copy the RowIDs slice.
+	if len(c.RowIDs) > 0 {
+		nodeCopy.RowIDs = make([]RowID, len(c.RowIDs))
+		copy(nodeCopy.RowIDs, c.RowIDs)
 	}
-	nodeCopy.RowIDs = make([]RowID, len(c.RowIDs))
-	copy(nodeCopy.RowIDs, c.RowIDs)
 	return nodeCopy
 }
 

@@ -34,8 +34,10 @@ func TestParseIntervalString(t *testing.T) {
 		{"500 microseconds", Interval{Micros: 500}},
 		{"-1 day", Interval{Micros: -msInDay}},
 		{"-2 months", Interval{Months: -2}},
-		{"1 year 2 months 3 days 4 hours 5 minutes 6 seconds",
-			Interval{Months: 14, Micros: 3*msInDay + 4*msInHour + 5*msInMin + 6*msInSec}},
+		{
+			"1 year 2 months 3 days 4 hours 5 minutes 6 seconds",
+			Interval{Months: 14, Micros: 3*msInDay + 4*msInHour + 5*msInMin + 6*msInSec},
+		},
 	}
 	for _, tc := range cases {
 		iv, err := ParseIntervalString(tc.input)

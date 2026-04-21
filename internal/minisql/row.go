@@ -205,7 +205,6 @@ func (r Row) Clone() Row {
 	return rowCopy
 }
 
-
 // Marshal ...
 func (r Row) Marshal() ([]byte, error) {
 	// Single allocation: allocate exact size upfront instead of using append

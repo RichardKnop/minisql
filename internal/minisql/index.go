@@ -81,8 +81,12 @@ func (ui *Index[T]) Insert(ctx context.Context, keyAny any, rowID RowID) error {
 	if rootNode.Header.Keys == 0 {
 		rootNode.Cells = append(rootNode.Cells, NewIndexCell[T](ui.unique))
 		rootNode.Cells[0].Key = key
-		rootNode.Cells[0].InlineRowIDs = 1
-		rootNode.Cells[0].RowIDs = append(rootNode.Cells[0].RowIDs, rowID)
+		if ui.unique {
+			rootNode.Cells[0].UniqueRowID = rowID
+		} else {
+			rootNode.Cells[0].InlineRowIDs = 1
+			rootNode.Cells[0].RowIDs = append(rootNode.Cells[0].RowIDs, rowID)
+		}
 		rootNode.Header.IsRoot = true
 		rootNode.Header.IsLeaf = true
 		rootNode.Header.Keys += 1
@@ -197,12 +201,17 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 			node.Cells[i+1].Key = node.Cells[i].Key
 			node.Cells[i+1].InlineRowIDs = node.Cells[i].InlineRowIDs
 			node.Cells[i+1].RowIDs = node.Cells[i].RowIDs
+			node.Cells[i+1].UniqueRowID = node.Cells[i].UniqueRowID
 			node.Cells[i+1].Overflow = node.Cells[i].Overflow
 			i -= 1
 		}
 		node.Cells[i+1].Key = key
-		node.Cells[i+1].InlineRowIDs = 1
-		node.Cells[i+1].RowIDs = []RowID{rowID}
+		if ui.unique {
+			node.Cells[i+1].UniqueRowID = rowID
+		} else {
+			node.Cells[i+1].InlineRowIDs = 1
+			node.Cells[i+1].RowIDs = []RowID{rowID}
+		}
 		node.Header.Keys += 1
 		return nil
 	}
@@ -288,6 +297,7 @@ func (ui *Index[T]) splitChild(ctx context.Context, parentPage, splitPage *Page,
 		parentNode.Cells[j+1].Key = parentNode.Cells[j].Key
 		parentNode.Cells[j+1].InlineRowIDs = parentNode.Cells[j].InlineRowIDs
 		parentNode.Cells[j+1].RowIDs = parentNode.Cells[j].RowIDs
+		parentNode.Cells[j+1].UniqueRowID = parentNode.Cells[j].UniqueRowID
 		parentNode.Cells[j+1].Overflow = parentNode.Cells[j].Overflow
 	}
 	parentNode.Header.Keys += 1
@@ -297,6 +307,7 @@ func (ui *Index[T]) splitChild(ctx context.Context, parentPage, splitPage *Page,
 	parentNode.Cells[indexInParent].Key = cellToMoveToParent.Key
 	parentNode.Cells[indexInParent].InlineRowIDs = cellToMoveToParent.InlineRowIDs
 	parentNode.Cells[indexInParent].RowIDs = cellToMoveToParent.RowIDs
+	parentNode.Cells[indexInParent].UniqueRowID = cellToMoveToParent.UniqueRowID
 	parentNode.Cells[indexInParent].Overflow = cellToMoveToParent.Overflow
 	splitNode.Cells[leftCount] = NewIndexCell[T](ui.unique)
 
@@ -490,6 +501,7 @@ func (ui *Index[T]) removeFromInternal(ctx context.Context, page *Page, idx int,
 		node.Cells[idx].Key = predecessor.Key
 		node.Cells[idx].InlineRowIDs = predecessor.InlineRowIDs
 		node.Cells[idx].RowIDs = predecessor.RowIDs
+		node.Cells[idx].UniqueRowID = predecessor.UniqueRowID
 		node.Cells[idx].Overflow = predecessor.Overflow
 		if err := ui.remove(ctx, leftChildPage, predecessor.Key, rowID); err != nil {
 			return fmt.Errorf("remove predecessor key: %w", err)
@@ -503,6 +515,7 @@ func (ui *Index[T]) removeFromInternal(ctx context.Context, page *Page, idx int,
 		node.Cells[idx].Key = successor.Key
 		node.Cells[idx].InlineRowIDs = successor.InlineRowIDs
 		node.Cells[idx].RowIDs = successor.RowIDs
+		node.Cells[idx].UniqueRowID = successor.UniqueRowID
 		node.Cells[idx].Overflow = successor.Overflow
 		if err := ui.remove(ctx, rightChildPage, successor.Key, rowID); err != nil {
 			return fmt.Errorf("remove successor key: %w", err)
@@ -621,6 +634,7 @@ func (ui *Index[T]) borrowFromLeft(ctx context.Context, parent, page, left *Page
 		Key:          parentNode.Cells[idx-1].Key,
 		InlineRowIDs: parentNode.Cells[idx-1].InlineRowIDs,
 		RowIDs:       parentNode.Cells[idx-1].RowIDs,
+		UniqueRowID:  parentNode.Cells[idx-1].UniqueRowID,
 		Overflow:     parentNode.Cells[idx-1].Overflow,
 		Child:        leftNode.Header.RightChild,
 		unique:       ui.unique,
@@ -637,6 +651,7 @@ func (ui *Index[T]) borrowFromLeft(ctx context.Context, parent, page, left *Page
 	parentNode.Cells[idx-1].Key = leftNode.LastCell().Key
 	parentNode.Cells[idx-1].InlineRowIDs = leftNode.LastCell().InlineRowIDs
 	parentNode.Cells[idx-1].RowIDs = leftNode.LastCell().RowIDs
+	parentNode.Cells[idx-1].UniqueRowID = leftNode.LastCell().UniqueRowID
 	parentNode.Cells[idx-1].Overflow = leftNode.LastCell().Overflow
 
 	leftNode.RemoveLastCell()
@@ -656,6 +671,7 @@ func (ui *Index[T]) borrowFromRight(ctx context.Context, parent, page, right *Pa
 		Key:          parentNode.Cells[idx].Key,
 		InlineRowIDs: parentNode.Cells[idx].InlineRowIDs,
 		RowIDs:       parentNode.Cells[idx].RowIDs,
+		UniqueRowID:  parentNode.Cells[idx].UniqueRowID,
 		Overflow:     parentNode.Cells[idx].Overflow,
 		Child:        node.Header.RightChild,
 		unique:       ui.unique,
@@ -673,6 +689,7 @@ func (ui *Index[T]) borrowFromRight(ctx context.Context, parent, page, right *Pa
 	parentNode.Cells[idx].Key = rightNode.FirstCell().Key
 	parentNode.Cells[idx].InlineRowIDs = rightNode.FirstCell().InlineRowIDs
 	parentNode.Cells[idx].RowIDs = rightNode.FirstCell().RowIDs
+	parentNode.Cells[idx].UniqueRowID = rightNode.FirstCell().UniqueRowID
 	parentNode.Cells[idx].Overflow = rightNode.FirstCell().Overflow
 
 	rightNode.RemoveFirstCell()
@@ -717,6 +734,7 @@ func (ui *Index[T]) merge(ctx context.Context, parent, left, right *Page, idx ui
 		Key:          parentNode.Cells[idx].Key,
 		InlineRowIDs: parentNode.Cells[idx].InlineRowIDs,
 		RowIDs:       parentNode.Cells[idx].RowIDs,
+		UniqueRowID:  parentNode.Cells[idx].UniqueRowID,
 		Overflow:     parentNode.Cells[idx].Overflow,
 		unique:       ui.unique,
 	}
