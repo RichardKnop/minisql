@@ -76,9 +76,15 @@ func BenchmarkSelect_Limit(b *testing.B) {
 				query = `SELECT id, name, age, email FROM bench_rows LIMIT 10`
 			}
 
+			stmt, err := db.Prepare(query)
+			if err != nil {
+				b.Fatalf("prepare: %v", err)
+			}
+			defer stmt.Close()
+
 			b.ResetTimer()
 			for range b.N {
-				rows, err := db.Query(query)
+				rows, err := stmt.Query()
 				if err != nil {
 					b.Fatalf("query: %v", err)
 				}
