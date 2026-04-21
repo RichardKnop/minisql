@@ -30,19 +30,25 @@ func (ui *Index[T]) scanAscending(ctx context.Context, pageIdx PageIndex, callba
 		// Leaf node: just visit all keys in order
 		for i := uint32(0); i < node.Header.Keys; i++ {
 			cell := node.Cells[i]
-			for _, rowID := range cell.RowIDs {
-				if err := callback(cell.Key, rowID); err != nil {
+			if cell.unique {
+				if err := callback(cell.Key, cell.UniqueRowID); err != nil {
 					return err
 				}
-			}
-			if cell.Overflow != 0 {
-				rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
-				if err != nil {
-					return err
-				}
-				for _, rowID := range rowIDs {
+			} else {
+				for _, rowID := range cell.RowIDs {
 					if err := callback(cell.Key, rowID); err != nil {
 						return err
+					}
+				}
+				if cell.Overflow != 0 {
+					rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
+					if err != nil {
+						return err
+					}
+					for _, rowID := range rowIDs {
+						if err := callback(cell.Key, rowID); err != nil {
+							return err
+						}
 					}
 				}
 			}
@@ -62,19 +68,25 @@ func (ui *Index[T]) scanAscending(ctx context.Context, pageIdx PageIndex, callba
 		}
 
 		// Visit the key itself
-		for _, rowID := range cell.RowIDs {
-			if err := callback(cell.Key, rowID); err != nil {
+		if cell.unique {
+			if err := callback(cell.Key, cell.UniqueRowID); err != nil {
 				return err
 			}
-		}
-		if cell.Overflow != 0 {
-			rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
-			if err != nil {
-				return err
-			}
-			for _, rowID := range rowIDs {
+		} else {
+			for _, rowID := range cell.RowIDs {
 				if err := callback(cell.Key, rowID); err != nil {
 					return err
+				}
+			}
+			if cell.Overflow != 0 {
+				rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
+				if err != nil {
+					return err
+				}
+				for _, rowID := range rowIDs {
+					if err := callback(cell.Key, rowID); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -103,19 +115,25 @@ func (ui *Index[T]) scanDescending(ctx context.Context, pageIdx PageIndex, callb
 		// Leaf node: visit all keys in reverse order
 		for i := int(node.Header.Keys) - 1; i >= 0; i-- {
 			cell := node.Cells[i]
-			for _, rowID := range cell.RowIDs {
-				if err := callback(cell.Key, rowID); err != nil {
+			if cell.unique {
+				if err := callback(cell.Key, cell.UniqueRowID); err != nil {
 					return err
 				}
-			}
-			if cell.Overflow != 0 {
-				rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
-				if err != nil {
-					return err
-				}
-				for _, rowID := range rowIDs {
+			} else {
+				for _, rowID := range cell.RowIDs {
 					if err := callback(cell.Key, rowID); err != nil {
 						return err
+					}
+				}
+				if cell.Overflow != 0 {
+					rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
+					if err != nil {
+						return err
+					}
+					for _, rowID := range rowIDs {
+						if err := callback(cell.Key, rowID); err != nil {
+							return err
+						}
 					}
 				}
 			}
@@ -136,19 +154,25 @@ func (ui *Index[T]) scanDescending(ctx context.Context, pageIdx PageIndex, callb
 		cell := node.Cells[i]
 
 		// Visit the key
-		for _, rowID := range cell.RowIDs {
-			if err := callback(cell.Key, rowID); err != nil {
+		if cell.unique {
+			if err := callback(cell.Key, cell.UniqueRowID); err != nil {
 				return err
 			}
-		}
-		if cell.Overflow != 0 {
-			rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
-			if err != nil {
-				return err
-			}
-			for _, rowID := range rowIDs {
+		} else {
+			for _, rowID := range cell.RowIDs {
 				if err := callback(cell.Key, rowID); err != nil {
 					return err
+				}
+			}
+			if cell.Overflow != 0 {
+				rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
+				if err != nil {
+					return err
+				}
+				for _, rowID := range rowIDs {
+					if err := callback(cell.Key, rowID); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -251,19 +275,25 @@ func (ui *Index[T]) scanRangeFrom(
 		}
 
 		// Key is within range
-		for _, rowID := range cell.RowIDs {
-			if err := callback(key, rowID); err != nil {
+		if cell.unique {
+			if err := callback(key, cell.UniqueRowID); err != nil {
 				return err
 			}
-		}
-		if cell.Overflow != 0 {
-			rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
-			if err != nil {
-				return err
-			}
-			for _, rowID := range rowIDs {
+		} else {
+			for _, rowID := range cell.RowIDs {
 				if err := callback(key, rowID); err != nil {
 					return err
+				}
+			}
+			if cell.Overflow != 0 {
+				rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
+				if err != nil {
+					return err
+				}
+				for _, rowID := range rowIDs {
+					if err := callback(key, rowID); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -323,19 +353,25 @@ func (ui *Index[T]) scanRangeFrom(
 				key  = cell.Key
 			)
 
-			for _, rowID := range cell.RowIDs {
-				if err := callback(key, rowID); err != nil {
+			if cell.unique {
+				if err := callback(key, cell.UniqueRowID); err != nil {
 					return err
 				}
-			}
-			if cell.Overflow != 0 {
-				rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
-				if err != nil {
-					return err
-				}
-				for _, rowID := range rowIDs {
+			} else {
+				for _, rowID := range cell.RowIDs {
 					if err := callback(key, rowID); err != nil {
 						return err
+					}
+				}
+				if cell.Overflow != 0 {
+					rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
+					if err != nil {
+						return err
+					}
+					for _, rowID := range rowIDs {
+						if err := callback(key, rowID); err != nil {
+							return err
+						}
 					}
 				}
 			}
@@ -390,19 +426,25 @@ func (ui *Index[T]) scanRangeRecursive(ctx context.Context, pageIdx PageIndex, r
 		}
 
 		// Key is within range
-		for _, rowID := range cell.RowIDs {
-			if err := callback(key, rowID); err != nil {
+		if cell.unique {
+			if err := callback(key, cell.UniqueRowID); err != nil {
 				return err
 			}
-		}
-		if cell.Overflow != 0 {
-			rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
-			if err != nil {
-				return err
-			}
-			for _, rowID := range rowIDs {
+		} else {
+			for _, rowID := range cell.RowIDs {
 				if err := callback(key, rowID); err != nil {
 					return err
+				}
+			}
+			if cell.Overflow != 0 {
+				rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
+				if err != nil {
+					return err
+				}
+				for _, rowID := range rowIDs {
+					if err := callback(key, rowID); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -466,19 +508,25 @@ func (ui *Index[T]) scanRangeRecursiveReverse(ctx context.Context, pageIdx PageI
 
 		// Emit key if it's within range
 		if includeKey {
-			for _, rowID := range cell.RowIDs {
-				if err := callback(key, rowID); err != nil {
+			if cell.unique {
+				if err := callback(key, cell.UniqueRowID); err != nil {
 					return err
 				}
-			}
-			if cell.Overflow != 0 {
-				rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
-				if err != nil {
-					return err
-				}
-				for _, rowID := range rowIDs {
+			} else {
+				for _, rowID := range cell.RowIDs {
 					if err := callback(key, rowID); err != nil {
 						return err
+					}
+				}
+				if cell.Overflow != 0 {
+					rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
+					if err != nil {
+						return err
+					}
+					for _, rowID := range rowIDs {
+						if err := callback(key, rowID); err != nil {
+							return err
+						}
 					}
 				}
 			}

@@ -548,7 +548,7 @@ Setting the `LOG_LEVEL` to `info` makes sure to supress debug logs and makes pot
 
 ### Benchmarking & Profiling
 
-See the [benchmarks/README.md](https://github.com/RichardKnop/minisql/blob/main/benchmarks/RESULTS.md).
+See the [benchmarks/README.md](https://github.com/RichardKnop/minisql/blob/main/benchmarks/README.md) and [benchmarks/RESULTS.md](https://github.com/RichardKnop/minisql/blob/main/benchmarks/RESULTS.md).
 
 ## Acknowledgements 
 

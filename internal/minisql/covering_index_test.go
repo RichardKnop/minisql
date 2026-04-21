@@ -19,8 +19,10 @@ var coveringIndexTestColumns = []Column{
 func TestCoveringIndexEligible(t *testing.T) {
 	t.Parallel()
 
-	emailCol := coveringIndexTestColumns[1:2] // [email]
-	idCol := coveringIndexTestColumns[0:1]    // [id]
+	var (
+		emailCol = coveringIndexTestColumns[1:2] // [email]
+		idCol    = coveringIndexTestColumns[0:1] // [id]
+	)
 
 	tests := []struct {
 		name         string
@@ -155,8 +157,10 @@ func TestCoveringIndexEligible(t *testing.T) {
 func TestRowFromIndexKey(t *testing.T) {
 	t.Parallel()
 
-	idCol := Column{Kind: Int8, Size: 8, Name: "id"}
-	emailCol := Column{Kind: Varchar, Size: MaxInlineVarchar, Name: "email", Nullable: true}
+	var (
+		idCol    = Column{Kind: Int8, Size: 8, Name: "id"}
+		emailCol = Column{Kind: Varchar, Size: MaxInlineVarchar, Name: "email", Nullable: true}
+	)
 
 	t.Run("single-column index key", func(t *testing.T) {
 		t.Parallel()
@@ -192,13 +196,14 @@ func TestRowFromIndexKey(t *testing.T) {
 func TestMarkCoveringIndexes(t *testing.T) {
 	t.Parallel()
 
-	indexName := "key__test_table__email"
-	emailCol := coveringIndexTestColumns[1:2]
-
-	table := NewTable(zap.NewNop(), nil, nil, testTableName, coveringIndexTestColumns, 0, nil,
-		WithUniqueIndex(UniqueIndex{
-			IndexInfo: IndexInfo{Name: indexName, Columns: emailCol},
-		}),
+	var (
+		indexName = "key__test_table__email"
+		emailCol  = coveringIndexTestColumns[1:2]
+		table     = NewTable(zap.NewNop(), nil, nil, testTableName, coveringIndexTestColumns, 0, nil,
+			WithUniqueIndex(UniqueIndex{
+				IndexInfo: IndexInfo{Name: indexName, Columns: emailCol},
+			}),
+		)
 	)
 
 	t.Run("SELECT indexed column sets CoveringIndex", func(t *testing.T) {

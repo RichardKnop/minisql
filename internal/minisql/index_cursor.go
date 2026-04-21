@@ -46,6 +46,10 @@ func (ui *Index[T]) FindRowIDs(ctx context.Context, keyAny any) ([]RowID, error)
 		return nil, fmt.Errorf("invalid cell index: %d", cursor.CellIdx)
 	}
 
+	if node.Cells[cursor.CellIdx].unique {
+		return []RowID{node.Cells[cursor.CellIdx].UniqueRowID}, nil
+	}
+
 	if len(node.Cells[cursor.CellIdx].RowIDs) == 0 {
 		return nil, fmt.Errorf("no row IDs for key: %v", key)
 	}

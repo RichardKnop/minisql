@@ -15,7 +15,8 @@ import (
 func NewMockParser(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockParser {
+},
+) *MockParser {
 	mock := &MockParser{}
 	mock.Mock.Test(t)
 
@@ -110,7 +111,8 @@ func (_c *MockParser_Parse_Call) RunAndReturn(run func(context1 context.Context,
 func NewMockPager(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockPager {
+},
+) *MockPager {
 	mock := &MockPager{}
 	mock.Mock.Test(t)
 
@@ -300,7 +302,8 @@ func (_c *MockPager_TotalPages_Call) RunAndReturn(run func() uint32) *MockPager_
 func NewMockPageSaver(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockPageSaver {
+},
+) *MockPageSaver {
 	mock := &MockPageSaver{}
 	mock.Mock.Test(t)
 
@@ -667,7 +670,8 @@ func (_c *MockPageSaver_TotalPages_Call) RunAndReturn(run func() uint32) *MockPa
 func NewMockTxPager(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockTxPager {
+},
+) *MockTxPager {
 	mock := &MockTxPager{}
 	mock.Mock.Test(t)
 

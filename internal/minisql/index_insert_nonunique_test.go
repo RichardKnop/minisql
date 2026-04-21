@@ -169,6 +169,10 @@ func collectAllKeysAndRowIDs[T IndexKey](ctx context.Context, t *testing.T, idx 
 		for cellIdx := uint32(0); cellIdx < node.Header.Keys; cellIdx++ {
 			cell := node.Cells[cellIdx]
 			actualKeys = append(actualKeys, cell.Key)
+			if cell.unique {
+				actualRowIDs = append(actualRowIDs, cell.UniqueRowID)
+				continue
+			}
 			actualRowIDs = append(actualRowIDs, cell.RowIDs...)
 			if cell.Overflow != 0 {
 				overflowRowIDs, err := readOverflowRowIDs[T](ctx, idx.pager, cell.Overflow)
