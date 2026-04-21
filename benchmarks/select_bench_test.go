@@ -58,6 +58,56 @@ func BenchmarkSelect_PointScan(b *testing.B) {
 	}
 }
 
+// BenchmarkSelect_Limit measures a sequential scan with LIMIT — exercises the
+// early-termination streaming path that stops scanning once the limit is reached.
+func BenchmarkSelect_Limit(b *testing.B) {
+	const limit = 10
+	for _, d := range drivers {
+		b.Run(d.name, func(b *testing.B) {
+			db, cleanup := openDB(b, d)
+			defer cleanup()
+			seedRows(b, db, d, seedN)
+
+			var query string
+			switch d.name {
+			case "minisql":
+				query = `select id, name, age, email from "bench_rows" limit 10`
+			default:
+				query = `SELECT id, name, age, email FROM bench_rows LIMIT 10`
+			}
+
+			b.ResetTimer()
+			for range b.N {
+				rows, err := db.Query(query)
+				if err != nil {
+					b.Fatalf("query: %v", err)
+				}
+				n := 0
+				for rows.Next() {
+					var (
+						rowID int64
+						name  string
+						age   int
+						email string
+					)
+					if err := rows.Scan(&rowID, &name, &age, &email); err != nil {
+						rows.Close()
+						b.Fatalf("scan: %v", err)
+					}
+					n++
+				}
+				rows.Close()
+				if err := rows.Err(); err != nil {
+					b.Fatalf("rows err: %v", err)
+				}
+				if n != limit {
+					b.Fatalf("expected %d rows, got %d", limit, n)
+				}
+			}
+		})
+	}
+}
+
 // BenchmarkSelect_FullScan measures a sequential full-table scan with no WHERE
 // clause.
 func BenchmarkSelect_FullScan(b *testing.B) {

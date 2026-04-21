@@ -92,10 +92,31 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 	}
 
-	// Execute the plan synchronously — no goroutines or channels needed.
-	// plan.Execute calls out for every matching row on the caller's goroutine.
-	// JOIN queries still use an internal goroutine inside plan.Execute but
-	// the rows are forwarded to the callback before Execute returns.
+	// Fast path: streaming queries WITH a LIMIT that require no sort, no GROUP BY,
+	// and no aggregates, and have no JOINs.  A LIMIT lets us stop the scan the
+	// moment enough projected rows have been collected — avoiding a full table read.
+	// The projected slice is pre-sized to exactly the LIMIT so there are zero
+	// reallocs and no wasted capacity.
+	//
+	// Queries without a LIMIT are excluded: without early termination the only
+	// saving would be eliminating the raw-rows intermediate buffer, which is not
+	// worth the dynamic-growth reallocs that replace the old exact-sized allocation.
+	//
+	// JOIN queries are excluded because plan.Execute launches a goroutine internally;
+	// returning errLimitReached from the callback while that goroutine is still
+	// writing to the channel would leak the goroutine.
+	if stmt.Limit.Valid &&
+		!stmt.IsSelectCountAll() &&
+		!stmt.IsSelectGroupBy() &&
+		!stmt.IsSelectAggregate() &&
+		!plan.SortInMemory &&
+		len(plan.Joins) == 0 {
+		return t.selectStreamingDirect(ctx, stmt, plan, selectedFields, requestedFields)
+	}
+
+	// Materialising path: buffer every matching row, then dispatch.
+	// Required for COUNT (needs a total), GROUP BY, aggregates, ORDER BY (sort),
+	// and JOIN (goroutine-based execution inside plan.Execute).
 	var rows []Row
 	if err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
 		rows = append(rows, row)
@@ -124,7 +145,7 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return t.selectWithSort(stmt, plan, rows, requestedFields)
 	}
 
-	// Stream results (already ordered or no ordering needed)
+	// JOIN streaming: already buffered above, project during iteration.
 	return t.selectStreaming(stmt, rows, requestedFields)
 }
 
@@ -542,6 +563,98 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 			return row, nil
 		}),
 	}, nil
+}
+
+// errLimitReached is a sentinel returned from the plan.Execute callback to stop
+// scanning as soon as the requested LIMIT of projected rows has been reached.
+// It is consumed inside selectStreamingDirect and never surfaced to callers.
+var errLimitReached = errors.New("select: limit reached")
+
+// selectStreamingDirect executes the query plan and projects each row inline,
+// without building an intermediate []Row buffer of all matching rows.
+//
+// It is only called for non-JOIN queries that do not require a full
+// materialisation (no ORDER BY that needs sorting, no GROUP BY, no aggregates).
+// For such queries this eliminates one full-table allocation and one extra pass
+// over the data compared with the collect-then-project approach.
+//
+// Early termination: when LIMIT is set the plan scan stops as soon as the
+// required number of projected rows has been collected, via errLimitReached.
+// This is safe for all non-JOIN scan types because their inner loops propagate
+// callback errors immediately.
+func (t *Table) selectStreamingDirect(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	selectedFields []Field,
+	requestedFields []Field,
+) (StatementResult, error) {
+	result := StatementResult{
+		Columns: make([]Column, len(requestedFields)),
+	}
+	for i, field := range requestedFields {
+		if field.Expr != nil {
+			result.Columns[i] = Column{Name: field.OutputName()}
+		} else if colIdx := stmt.ColumnIdx(field.Name); colIdx >= 0 {
+			result.Columns[i] = t.Columns[colIdx]
+		}
+	}
+
+	var (
+		remaining int64
+		offset    int64
+		hasLimit  = stmt.Limit.Valid
+		hasOffset = stmt.Offset.Valid
+	)
+	if hasLimit {
+		remaining = stmt.Limit.Value.(int64)
+	}
+	if hasOffset {
+		offset = stmt.Offset.Value.(int64)
+	}
+
+	var seen map[string]struct{}
+	if stmt.Distinct {
+		seen = make(map[string]struct{})
+	}
+
+	// Pre-size projected slice to exactly the LIMIT so append never reallocates.
+	// selectStreamingDirect is only called when stmt.Limit.Valid is true, so
+	// hasLimit is always true here and remaining holds the requested row count.
+	projected := make([]Row, 0, int(remaining))
+
+	err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
+		p, projErr := projectRow(row, requestedFields)
+		if projErr != nil {
+			return projErr
+		}
+		if stmt.Distinct {
+			key := p.rowDistinctKey()
+			if _, dup := seen[key]; dup {
+				return nil
+			}
+			seen[key] = struct{}{}
+		}
+		if hasOffset && offset > 0 {
+			offset--
+			return nil
+		}
+		projected = append(projected, p)
+		if hasLimit {
+			remaining--
+			if remaining == 0 {
+				return errLimitReached
+			}
+		}
+		return nil
+	})
+
+	if err != nil && !errors.Is(err, errLimitReached) {
+		return StatementResult{}, err
+	}
+
+	result.Rows = NewSliceIterator(projected)
+	return result, nil
 }
 
 func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields []Field) (StatementResult, error) {

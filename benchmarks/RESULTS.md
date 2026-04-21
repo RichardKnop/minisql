@@ -1,3 +1,26 @@
+### 2026-04-21 12:00 UTC
+
+Step 4 — Lazy streaming early termination for SELECT … LIMIT:
+- For SELECT queries with a LIMIT that have no ORDER BY, no GROUP BY, no aggregates, and no JOINs, `selectStreamingDirect` projects each row inline during `plan.Execute` and stops the scan as soon as the LIMIT is satisfied (via `errLimitReached` sentinel propagated through all non-JOIN scan types).
+- The projected slice is pre-sized to exactly the LIMIT so there are zero reallocs.
+- Queries **without** a LIMIT are unaffected — they continue using the collect-then-project path, which is better for those cases because it can pre-size the slice to the exact row count.
+- JOIN queries are also excluded (plan.Execute uses an internal goroutine; returning an error from the callback mid-stream would leak it).
+- New `BenchmarkSelect_Limit` benchmark added to measure LIMIT 10 on a 10K-row table.
+
+Key result: `SELECT … LIMIT 10` on a 10K-row table drops from ~6.5 ms (full scan) to **~110 µs** — approximately **59× faster**.
+
+#### New Benchmark: Select_Limit (LIMIT 10, table has 10K rows)
+
+| | minisql | sqlite | ratio |
+|---|---|---|---|
+| Select_Limit | 110.27 µs/op | 13.36 µs/op | 8.3× |
+| Memory | 32.7 KiB | 1.67 KiB | |
+| Allocs | 2333 | 103 | |
+
+#### Other benchmarks: no change from Phase 3 baseline (non-LIMIT paths unchanged)
+
+---
+
 ### 2026-04-21 11:00 UTC
 
 Phase 3 — WAL page buffer pooling via `sync.Pool`:
