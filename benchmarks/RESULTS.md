@@ -1,3 +1,44 @@
+### 2026-04-21 11:00 UTC
+
+Phase 3 — WAL page buffer pooling via `sync.Pool`:
+- `pageDataPool sync.Pool` at package level in `transaction_manager.go` pools `[]byte` slices of `PageSize` (4 KB)
+- `serializeWritesForWAL`: replaces `make([]byte, PageSize)` per dirty page with `pageDataPool.Get()`
+- `serializePage0ForWAL`: uses pool for temporary `pageBuf` (copied into the combined frame, then returned)
+- `WALIndex.Update` now returns old `[]byte` (if any); `commitWithWAL` recycles displaced buffers back to pool
+- Net effect: reduces GC-visible heap allocations for dirty-page serialization on every commit
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| Delete_ByPK | 214.83 µs/op | 174.67 µs/op | 1.2× |
+| Insert_SingleRow | 106.35 µs/op | 47.81 µs/op | 2.2× |
+| Insert_Batch | 612.52 µs/op | 221.60 µs/op | 2.8× |
+| Select_PointScan | 4.43 µs/op | 3.32 µs/op | **1.33×** |
+| Select_FullScan | 6.56 ms/op | 5.09 ms/op | **1.29×** |
+| Select_CountStar | 32.64 µs/op | 9.57 µs/op | 3.4× |
+| Select_IndexRangeScan | 751 µs/op | 756 µs/op | **0.99×** ✓ parity with SQLite |
+| Select_RangeScan (no index) | 3.07 ms/op | 867 µs/op | 3.5× |
+| Txn_NInserts | 356.71 µs/op | 138.21 µs/op | 2.6× |
+| Update_ByPK | 57.47 µs/op | 38.87 µs/op | **1.48×** |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 80.9 KiB | 437 B |
+| Insert_SingleRow | 42.6 KiB | 304 B |
+| Insert_Batch | 406 KiB | 31.0 KiB |
+| Select_PointScan | 4.3 KiB | 664 B |
+| Select_FullScan | 9.6 MiB | 1.3 MiB |
+| Select_CountStar | 5.8 KiB | 391 B |
+| Select_IndexRangeScan | 836 KiB | 85.9 KiB |
+| Select_RangeScan (no index) | 2.1 MiB | 85.9 KiB |
+| Txn_NInserts | 228 KiB | 15.8 KiB |
+| Update_ByPK | 8.9 KiB | 257 B |
+
+---
+
 ### 2026-04-21 09:30 UTC
 
 Replace `Sugar().With(...).Debug(...)` with zero-allocation typed zap fields in all hot-path logging:
