@@ -3,6 +3,8 @@ package minisql
 import (
 	"context"
 	"fmt"
+
+	"go.uber.org/zap"
 )
 
 // Update executes an UPDATE statement on the table and returns the result.
@@ -20,7 +22,7 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, err
 	}
 
-	t.logger.Sugar().With("query type", "UPDATE", "plan", plan).Debug("query plan")
+	t.logger.Debug("query plan", zap.String("query type", "UPDATE"), zap.Any("plan", plan))
 
 	selectedFields := fieldsFromColumns(t.Columns...)
 
@@ -114,6 +116,6 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 	}
 
-	t.logger.Sugar().Debugf("updated %d rows", result.RowsAffected)
+	t.logger.Debug("updated rows", zap.Int("count", result.RowsAffected))
 	return result, nil
 }

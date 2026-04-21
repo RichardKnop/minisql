@@ -3,6 +3,8 @@ package minisql
 import (
 	"context"
 	"fmt"
+
+	"go.uber.org/zap"
 )
 
 // SecondaryIndex ...
@@ -34,7 +36,10 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 			keyValues = append(keyValues, castedKey)
 		}
 		ck := NewCompositeKey(secondaryIndex.Columns, keyValues...)
-		t.logger.Sugar().With("index", secondaryIndex.Name, "key", ck).Debug("inserting secondary index key")
+		t.logger.Debug("inserting secondary index key",
+			zap.String("index", secondaryIndex.Name),
+			zap.Any("key", ck),
+		)
 		if err := secondaryIndex.Index.Insert(ctx, ck, rowID); err != nil {
 			return fmt.Errorf("failed to insert key for secondary index %s: %w", secondaryIndex.Name, err)
 		}
@@ -53,10 +58,10 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 		return fmt.Errorf("failed to cast key value for secondary index  %s: %w", secondaryIndex.Name, err)
 	}
 
-	t.logger.Sugar().With(
-		"index", secondaryIndex.Name,
-		"key", castedKey,
-	).Debug("inserting secondary index key")
+	t.logger.Debug("inserting secondary index key",
+		zap.String("index", secondaryIndex.Name),
+		zap.Any("key", castedKey),
+	)
 
 	if err := secondaryIndex.Index.Insert(ctx, castedKey, rowID); err != nil {
 		return fmt.Errorf("failed to insert key for secondary index %s: %w", secondaryIndex.Name, err)

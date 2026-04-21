@@ -33,9 +33,7 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, err
 	}
 
-	if t.logger.Core().Enabled(zap.DebugLevel) {
-		t.logger.Sugar().With("query type", "SELECT", "plan", plan).Debug("query plan")
-	}
+	t.logger.Debug("query plan", zap.String("query type", "SELECT"), zap.Any("plan", plan))
 
 	// Only fetch fields included in the SELECT query or fields needed for WHERE conditions
 	// TODO - handle * plus other fields, for example SELECT *, a, b FROM table WHERE c = 1

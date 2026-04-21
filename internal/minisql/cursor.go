@@ -3,6 +3,8 @@ package minisql
 import (
 	"context"
 	"fmt"
+
+	"go.uber.org/zap"
 )
 
 // Cursor is a position within a table's B+ tree used to traverse or modify rows.
@@ -67,11 +69,11 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key RowID, row Row) er
 		return fmt.Errorf("get new page: %w", err)
 	}
 
-	c.Table.logger.Sugar().With(
-		"key", int(key),
-		"old_max_key", int(originalMaxKey),
-		"new_page_index", int(newPage.Index),
-	).Debug("leaf node split insert")
+	c.Table.logger.Debug("leaf node split insert",
+		zap.Int("key", int(key)),
+		zap.Int("old_max_key", int(originalMaxKey)),
+		zap.Int("new_page_index", int(newPage.Index)),
+	)
 
 	newPage.LeafNode = NewLeafNode()
 	newPage.LeafNode.Header.Parent = splitPage.LeafNode.Header.Parent

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 // UniqueIndex ...
@@ -50,10 +52,10 @@ func (t *Table) insertUniqueIndexKey(ctx context.Context, uniqueIndex UniqueInde
 		return fmt.Errorf("failed to cast key value for unique index  %s: %w", uniqueIndex.Name, err)
 	}
 
-	t.logger.Sugar().With(
-		"index", uniqueIndex.Name,
-		"key", castedKey,
-	).Debug("inserting unique index key")
+	t.logger.Debug("inserting unique index key",
+		zap.String("index", uniqueIndex.Name),
+		zap.Any("key", castedKey),
+	)
 
 	if err := uniqueIndex.Index.Insert(ctx, castedKey, rowID); err != nil {
 		return fmt.Errorf("failed to insert key for unique index %s: %w", uniqueIndex.Name, err)
@@ -87,10 +89,10 @@ func (t *Table) insertUniqueCompositeIndexKey(ctx context.Context, uniqueIndex U
 
 	ck := NewCompositeKey(uniqueIndex.Columns[0:len(keyValues)], keyValues...)
 
-	t.logger.Sugar().With(
-		"index", uniqueIndex.Name,
-		"key", ck,
-	).Debug("inserting unique index key")
+	t.logger.Debug("inserting unique index key",
+		zap.String("index", uniqueIndex.Name),
+		zap.Any("key", ck),
+	)
 
 	if err := uniqueIndex.Index.Insert(ctx, ck, rowID); err != nil {
 		return fmt.Errorf("failed to insert key for unique index %s: %w", uniqueIndex.Name, err)
