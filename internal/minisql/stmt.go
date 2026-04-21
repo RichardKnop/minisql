@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -399,11 +398,17 @@ func (s Statement) NumPlaceholders() int {
 
 // Clone ...
 func (s Statement) Clone() Statement {
-	// Fields must be deep-copied: prepareInsert uses slices.Insert which can
-	// modify the backing array in-place when cap > len (Go's append-growth
-	// policy typically leaves spare capacity), corrupting the original slice.
-	fields := make([]Field, len(s.Fields))
-	copy(fields, s.Fields)
+	// For INSERT, Fields are always fully rebuilt by prepareInsert — share the
+	// reference to avoid an allocation that immediately becomes dead.
+	// For all other kinds, deep-copy so that downstream mutations (e.g. BindArguments
+	// filling Placeholder values) don't corrupt the prepared statement.
+	var fields []Field
+	if s.Kind == Insert {
+		fields = s.Fields
+	} else {
+		fields = make([]Field, len(s.Fields))
+		copy(fields, s.Fields)
+	}
 
 	stmt := Statement{
 		Kind:           s.Kind,
@@ -418,7 +423,6 @@ func (s Statement) Clone() Statement {
 		Aggregates:     s.Aggregates, // slice of value types, safe to share
 		Aliases:        s.Aliases,
 		Inserts:        make([][]OptionalValue, len(s.Inserts)),
-		Updates:        make(map[string]OptionalValue, len(s.Updates)),
 		Functions:      s.Functions,
 		Conditions:     make(OneOrMore, len(s.Conditions)),
 		OrderBy:        s.OrderBy,
@@ -429,7 +433,11 @@ func (s Statement) Clone() Statement {
 		stmt.Inserts[i] = make([]OptionalValue, len(s.Inserts[i]))
 		copy(stmt.Inserts[i], s.Inserts[i])
 	}
-	maps.Copy(stmt.Updates, s.Updates)
+	// Only allocate the Updates map when there is actually something to copy.
+	if len(s.Updates) > 0 {
+		stmt.Updates = make(map[string]OptionalValue, len(s.Updates))
+		maps.Copy(stmt.Updates, s.Updates)
+	}
 	for i := range s.Conditions {
 		stmt.Conditions[i] = make([]Condition, len(s.Conditions[i]))
 		copy(stmt.Conditions[i], s.Conditions[i])
@@ -652,63 +660,87 @@ func (s Statement) prepareCreateTable() (Statement, error) {
 // prepareInsert makes sure to add any nullable columns that are missing from the
 // insert statement, setting them to NULL. It also converts timestamp string values to int64.
 func (s Statement) prepareInsert(now Time) (Statement, error) {
-	// For ON CONFLICT DO UPDATE, the DO UPDATE SET field names are appended to
-	// s.Fields by setUpdate(). Strip them before expanding column defaults so
-	// that the slices.Insert calls below only operate on the INSERT fields.
-	// They are re-appended at the end.
-	var updateFields []Field
+	nCols := len(s.Columns)
+
+	// How many of s.Fields belong to the INSERT side (vs. the appended DO UPDATE
+	// SET fields that setUpdate() tacks on at the end).
+	nInsertFields := len(s.Fields)
 	if s.ConflictAction == ConflictActionDoUpdate && len(s.Updates) > 0 {
-		insertFieldCount := len(s.Fields) - len(s.Updates)
-		if insertFieldCount >= 0 {
-			updateFields = slices.Clone(s.Fields[insertFieldCount:])
-			s.Fields = s.Fields[:insertFieldCount]
+		if n := len(s.Fields) - len(s.Updates); n >= 0 {
+			nInsertFields = n
 		}
 	}
+	nUpdateFields := len(s.Fields) - nInsertFields
 
+	// Build colFieldIdx: for each table column (by position), the index into the
+	// original s.Fields where that column appears, or -1 if it was omitted.
+	// One O(C²) pass, but C ≤ 64 so it is effectively O(1).
+	colFieldIdx := make([]int, nCols)
+	for i := range colFieldIdx {
+		colFieldIdx[i] = -1
+	}
 	for i, col := range s.Columns {
-		if !s.HasField(col.Name) {
-			s.Fields = slices.Insert(s.Fields, i, Field{Name: col.Name})
-			for j := range s.Inserts {
-				var value OptionalValue
-				if col.DefaultValue.Valid {
-					value = col.DefaultValue
-				} else if col.DefaultValueNow {
-					value = OptionalValue{Valid: true, Value: now}
-				}
-				s.Inserts[j] = slices.Insert(s.Inserts[j], i, value)
+		for k := 0; k < nInsertFields; k++ {
+			if s.Fields[k].Name == col.Name {
+				colFieldIdx[i] = k
+				break
 			}
 		}
-
-		fieldIdx := i
-		for j := range s.Inserts {
-			if !s.Inserts[j][fieldIdx].Valid {
-				continue
-			}
-
-			if fn, ok := s.Inserts[j][fieldIdx].Value.(Function); ok {
-				if fn.Name == FunctionNow.Name {
-					s.Inserts[j][fieldIdx].Value = now
-				} else {
-					return Statement{}, fmt.Errorf("unsupported function %q in INSERT", fn.Name)
-				}
-			}
-
-			if col.Kind != Timestamp {
-				continue
-			}
-
-			timestamp, err := parseTimeValue(s.Inserts[j][fieldIdx].Value)
-			if err != nil {
-				return Statement{}, err
-			}
-			s.Inserts[j][fieldIdx].Value = timestamp
-		}
-
 	}
 
-	// Re-append the DO UPDATE SET fields that were stripped at the start.
-	if len(updateFields) > 0 {
-		s.Fields = append(s.Fields, updateFields...)
+	// Rebuild Fields in table-column order with a single allocation.
+	// Append the DO UPDATE SET fields (if any) at the end.
+	newFields := make([]Field, nCols, nCols+nUpdateFields)
+	for i, col := range s.Columns {
+		if k := colFieldIdx[i]; k >= 0 {
+			newFields[i] = s.Fields[k]
+		} else {
+			newFields[i] = Field{Name: col.Name}
+		}
+	}
+	if nUpdateFields > 0 {
+		newFields = append(newFields, s.Fields[nInsertFields:]...)
+	}
+	s.Fields = newFields
+
+	// Rebuild each insert row in column order, applying defaults and resolving
+	// NOW() / timestamp values inline — one allocation per row.
+	for j := range s.Inserts {
+		newRow := make([]OptionalValue, nCols)
+		for i, col := range s.Columns {
+			k := colFieldIdx[i]
+			var val OptionalValue
+			if k >= 0 {
+				val = s.Inserts[j][k]
+			} else {
+				// Column was omitted — apply table default.
+				if col.DefaultValue.Valid {
+					val = col.DefaultValue
+				} else if col.DefaultValueNow {
+					val = OptionalValue{Valid: true, Value: now}
+				}
+				newRow[i] = val
+				continue
+			}
+
+			if val.Valid {
+				if fn, ok := val.Value.(Function); ok {
+					if fn.Name == FunctionNow.Name {
+						val.Value = now
+					} else {
+						return Statement{}, fmt.Errorf("unsupported function %q in INSERT", fn.Name)
+					}
+				} else if col.Kind == Timestamp {
+					timestamp, err := parseTimeValue(val.Value)
+					if err != nil {
+						return Statement{}, err
+					}
+					val.Value = timestamp
+				}
+			}
+			newRow[i] = val
+		}
+		s.Inserts[j] = newRow
 	}
 
 	// Resolve function values and timestamp strings in the DO UPDATE SET clause.
