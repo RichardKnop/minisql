@@ -1,3 +1,23 @@
+### 2026-04-21 13:00 UTC
+
+Step 5 — `AppendValues` O(C²) → O(C) per row using pre-built field-position map:
+- `AppendValues` performed a nested loop: for each column it linearly scanned `stmt.Fields` to find the matching field, giving O(C²) per row and multiple `append` growth allocations for the Values slice.
+- Replaced with: a `fieldPositions map[string]int` (field-name → index in the values slice) built **once** per `Insert()` call before the row loop. Per row, a single `make([]OptionalValue, C)` + O(C) map lookups fills `rowValues` in column order.
+- `NewRow` + `AppendValues` calls replaced with `NewRowWithValues(t.Columns, rowValues)`.
+- For DO UPDATE: `stmt.Fields` has update-clause fields appended after insert fields; the map only covers the first `len(values)` fields to avoid out-of-range accesses.
+- Primary win: **allocation count per row** — `append` growing from nil allocates ~3× for a 4-column row; `make([]OptionalValue, N)` is always 1 allocation.
+
+#### Alloc reductions (stable across 5 runs)
+
+| Benchmark | Phase 3 allocs | Step 5 allocs | Δ per row |
+|---|---|---|---|
+| Insert_Batch (100 rows) | 4577 | 4418 | −1.6/row |
+| Txn_NInserts (50 rows) | 2487 | 2411 | −1.5/row |
+
+Note: timing numbers are within M1 benchmark noise (±15%). The allocation reduction directly reduces GC pressure for high-throughput insert workloads.
+
+---
+
 ### 2026-04-21 12:00 UTC
 
 Step 4 — Lazy streaming early termination for SELECT … LIMIT:
@@ -199,4 +219,74 @@ WAL allocation optimizations + read-only transaction fast path:
 | Select_RangeScan | 2.4 MiB | 85.9 KiB |
 | Txn_NInserts | 414 KiB | 15.9 KiB |
 | Update_ByPK | 15.3 KiB | 263 B |
+
+### 2026-04-21 17:39 UTC
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| Delete_ByPK | 311.04 µs/op | 92.14 µs/op | 3.4× |
+| Insert_SingleRow | 117.64 µs/op | 48.31 µs/op | 2.4× |
+| Insert_Batch | 750.45 µs/op | 255.71 µs/op | 2.9× |
+| Select_PointScan | 6.46 µs/op | 4.15 µs/op | 1.6× |
+| Select_Limit | 125.02 µs/op | 13.81 µs/op | 9.1× |
+| Select_FullScan | 9.14 ms/op | 6.63 ms/op | 1.4× |
+| Select_CountStar | 34.79 µs/op | 10.86 µs/op | 3.2× |
+| Select_IndexRangeScan | 1.02 ms/op | 877.43 µs/op | 1.2× |
+| Select_RangeScan | 3.88 ms/op | 1.47 ms/op | 2.6× |
+| Txn_NInserts | 402.56 µs/op | 157.73 µs/op | 2.6× |
+| Update_ByPK | 60.49 µs/op | 42.91 µs/op | 1.4× |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 81.0 KiB | 447 B |
+| Insert_SingleRow | 42.4 KiB | 311 B |
+| Insert_Batch | 398.3 KiB | 31.0 KiB |
+| Select_PointScan | 4.4 KiB | 679 B |
+| Select_Limit | 31.9 KiB | 1.7 KiB |
+| Select_FullScan | 9.6 MiB | 1.3 MiB |
+| Select_CountStar | 5.8 KiB | 400 B |
+| Select_IndexRangeScan | 836.3 KiB | 85.9 KiB |
+| Select_RangeScan | 2.1 MiB | 85.9 KiB |
+| Txn_NInserts | 225.4 KiB | 15.8 KiB |
+| Update_ByPK | 8.9 KiB | 263 B |
+
+
+### 2026-04-21 17:39 UTC
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| Delete_ByPK | 311.04 µs/op | 92.14 µs/op | 3.4× |
+| Insert_SingleRow | 117.64 µs/op | 48.31 µs/op | 2.4× |
+| Insert_Batch | 750.45 µs/op | 255.71 µs/op | 2.9× |
+| Select_PointScan | 6.46 µs/op | 4.15 µs/op | 1.6× |
+| Select_Limit | 125.02 µs/op | 13.81 µs/op | 9.1× |
+| Select_FullScan | 9.14 ms/op | 6.63 ms/op | 1.4× |
+| Select_CountStar | 34.79 µs/op | 10.86 µs/op | 3.2× |
+| Select_IndexRangeScan | 1.02 ms/op | 877.43 µs/op | 1.2× |
+| Select_RangeScan | 3.88 ms/op | 1.47 ms/op | 2.6× |
+| Txn_NInserts | 402.56 µs/op | 157.73 µs/op | 2.6× |
+| Update_ByPK | 60.49 µs/op | 42.91 µs/op | 1.4× |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 81.0 KiB | 447 B |
+| Insert_SingleRow | 42.4 KiB | 311 B |
+| Insert_Batch | 398.3 KiB | 31.0 KiB |
+| Select_PointScan | 4.4 KiB | 679 B |
+| Select_Limit | 31.9 KiB | 1.7 KiB |
+| Select_FullScan | 9.6 MiB | 1.3 MiB |
+| Select_CountStar | 5.8 KiB | 400 B |
+| Select_IndexRangeScan | 836.3 KiB | 85.9 KiB |
+| Select_RangeScan | 2.1 MiB | 85.9 KiB |
+| Txn_NInserts | 225.4 KiB | 15.8 KiB |
+| Update_ByPK | 8.9 KiB | 263 B |
+
 

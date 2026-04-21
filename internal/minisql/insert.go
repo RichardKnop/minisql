@@ -22,6 +22,25 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, err
 	}
 
+	// Build a field-name → values-index map once for the whole Insert call.
+	//
+	// After prepareInsert, stmt.Fields covers every table column (in some order)
+	// followed by any ON CONFLICT DO UPDATE SET fields.  The values slice for each
+	// row only covers the insert portion (len == len(t.Columns)).  We cap the map
+	// at len(values) to exclude the update fields whose indices would be out of
+	// range for values.
+	//
+	// The map lets us assemble row.Values in column order with one O(C) pass per
+	// row instead of an O(C²) nested scan.
+	nInsertFields := len(t.Columns) // same as len(values) after prepareInsert
+	fieldPositions := make(map[string]int, nInsertFields)
+	for i, f := range stmt.Fields {
+		if i >= nInsertFields {
+			break // stop before any appended DO UPDATE fields
+		}
+		fieldPositions[f.Name] = i
+	}
+
 	rowsInserted := 0
 	for insertIdx, values := range stmt.Inserts {
 		switch stmt.ConflictAction {
@@ -100,8 +119,16 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			}
 		}
 
-		row := NewRow(t.Columns)
-		row = row.AppendValues(stmt.Fields, values)
+		// Build row values in column order using the pre-computed field-position map.
+		// One allocation (the rowValues slice) and O(C) map lookups.
+		rowValues := make([]OptionalValue, len(t.Columns))
+		for i, col := range t.Columns {
+			if fi, ok := fieldPositions[col.Name]; ok {
+				rowValues[i] = values[fi]
+			}
+			// else: leave as OptionalValue{} = NULL (zero value)
+		}
+		row := NewRowWithValues(t.Columns, rowValues)
 
 		page, err := t.pager.ModifyPage(ctx, cursor.PageIdx)
 		if err != nil {

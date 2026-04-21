@@ -205,28 +205,6 @@ func (r Row) Clone() Row {
 	return rowCopy
 }
 
-// AppendValues ...
-func (r Row) AppendValues(fields []Field, values []OptionalValue) Row {
-	for _, col := range r.Columns {
-		var (
-			found    = false
-			fieldIdx = 0
-		)
-		for i, field := range fields {
-			if field.Name == col.Name {
-				found = true
-				fieldIdx = i
-				break
-			}
-		}
-		if found {
-			r.Values = append(r.Values, values[fieldIdx])
-		} else {
-			r.Values = append(r.Values, OptionalValue{})
-		}
-	}
-	return r
-}
 
 // Marshal ...
 func (r Row) Marshal() ([]byte, error) {
