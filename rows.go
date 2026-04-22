@@ -20,16 +20,16 @@ type Rows struct {
 // columns of the result is inferred from the length of the
 // slice. If a particular column name isn't known, an empty
 // string should be returned for that entry.
-func (r Rows) Columns() []string {
-	names := make([]string, 0, len(r.columns))
-	for _, aColumn := range r.columns {
-		names = append(names, aColumn.Name)
+func (r *Rows) Columns() []string {
+	names := make([]string, len(r.columns))
+	for i, col := range r.columns {
+		names[i] = col.Name
 	}
 	return names
 }
 
 // Close closes the rows iterator.
-func (r Rows) Close() error {
+func (r *Rows) Close() error {
 	return r.iter.Close()
 }
 
@@ -42,7 +42,7 @@ func (r Rows) Close() error {
 // The dest should not be written to outside of Next. Care
 // should be taken when closing Rows not to modify
 // a buffer held in dest.
-func (r Rows) Next(dest []driver.Value) error {
+func (r *Rows) Next(dest []driver.Value) error {
 	if !r.iter.Next(r.ctx) {
 		if err := r.iter.Err(); err != nil {
 			return err
@@ -50,23 +50,24 @@ func (r Rows) Next(dest []driver.Value) error {
 		return io.EOF
 	}
 
-	aRow := r.iter.Row()
-	if len(aRow.Values) != len(dest) {
-		return fmt.Errorf("expected %d values, got %d", len(dest), len(aRow.Values))
+	row := r.iter.Row()
+	if len(row.Values) != len(dest) {
+		return fmt.Errorf("expected %d values, got %d", len(dest), len(row.Values))
 	}
 
 	for i := range dest {
-		if !aRow.Values[i].Valid {
+		if !row.Values[i].Valid {
 			dest[i] = nil
 			continue
 		}
-		switch v := aRow.Values[i].Value.(type) {
+
+		switch v := row.Values[i].Value.(type) {
 		case minisql.TextPointer:
-			dest[i] = string(v.Data)
+			dest[i] = v.String()
 		case minisql.Time:
 			dest[i] = v.GoTime()
 		default:
-			dest[i] = aRow.Values[i].Value
+			dest[i] = row.Values[i].Value
 		}
 	}
 

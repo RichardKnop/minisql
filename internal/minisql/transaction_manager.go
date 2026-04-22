@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -34,6 +35,9 @@ type TransactionManager struct {
 	walIndex            *WALIndex
 	checkpointThreshold int          // auto-checkpoint after this many WAL frames (0 = disabled)
 	checkpointFn        func() error // called by runAutoCheckpoint; set via SetCheckpointFunc
+	autoCheckpointBusy  atomic.Bool  // true while an async auto-checkpoint is running
+	autoCheckpointStop  atomic.Bool  // true after shutdown; prevents new auto-checkpoints
+	autoCheckpointWG    sync.WaitGroup
 	factory             TxPagerFactory
 	saver               PageSaver
 	ddlSaver            DDLSaver
@@ -67,6 +71,13 @@ func NewTransactionManager(logger *zap.Logger, dbFilePath string, factory TxPage
 // Database.Checkpoint so the auto-checkpoint path mirrors the manual one.
 func (tm *TransactionManager) SetCheckpointFunc(fn func() error) {
 	tm.checkpointFn = fn
+}
+
+// StopAutoCheckpoint prevents new asynchronous auto-checkpoints from starting
+// and waits for any in-flight auto-checkpoint to finish.
+func (tm *TransactionManager) StopAutoCheckpoint() {
+	tm.autoCheckpointStop.Store(true)
+	tm.autoCheckpointWG.Wait()
 }
 
 // CheckpointWAL checkpoints the WAL into dbFile, then truncates it.
@@ -505,22 +516,43 @@ func (tm *TransactionManager) serializePage0ForWAL(ctx context.Context, page0 *P
 }
 
 // runAutoCheckpoint triggers a WAL checkpoint when the frame count exceeds the
-// configured threshold.  The checkpoint is performed via checkpointFn (set by
-// SetCheckpointFunc).  If no function is registered the call is a no-op.
+// configured threshold. The checkpoint runs asynchronously via checkpointFn
+// (set by SetCheckpointFunc), and at most one auto-checkpoint may run at a
+// time. If no function is registered the call is a no-op.
+//
 // Failures are logged but do not propagate — the commit already succeeded.
 func (tm *TransactionManager) runAutoCheckpoint(_ context.Context) {
 	if tm.checkpointThreshold <= 0 || tm.wal == nil || tm.checkpointFn == nil {
 		return
 	}
-	if tm.wal.FrameCount() < int64(tm.checkpointThreshold) {
+	if tm.autoCheckpointStop.Load() {
 		return
 	}
-	if err := tm.checkpointFn(); err != nil {
-		tm.logger.Warn("WAL auto-checkpoint failed",
-			zap.Int64("frame_count", tm.wal.FrameCount()),
-			zap.Int("threshold", tm.checkpointThreshold),
-			zap.Error(err))
+	frameCount := tm.wal.FrameCount()
+	if frameCount < int64(tm.checkpointThreshold) {
+		return
 	}
+
+	// Keep commit path non-blocking and avoid concurrent checkpoint storms.
+	if !tm.autoCheckpointBusy.CompareAndSwap(false, true) {
+		return
+	}
+
+	checkpointFn := tm.checkpointFn
+	tm.autoCheckpointWG.Add(1)
+	go func(triggerFrameCount int64) {
+		defer tm.autoCheckpointWG.Done()
+		defer tm.autoCheckpointBusy.Store(false)
+		if tm.autoCheckpointStop.Load() {
+			return
+		}
+		if err := checkpointFn(); err != nil {
+			tm.logger.Warn("WAL auto-checkpoint failed",
+				zap.Int64("frame_count", triggerFrameCount),
+				zap.Int("threshold", tm.checkpointThreshold),
+				zap.Error(err))
+		}
+	}(frameCount)
 }
 
 // RollbackTransaction aborts the transaction and discards all in-memory changes.

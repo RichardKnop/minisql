@@ -169,6 +169,11 @@ func (d *Database) PrepareStatement(ctx context.Context, query string) (Statemen
 
 // Close flushes and closes the underlying page storage.
 func (d *Database) Close() error {
+	// Prevent background auto-checkpoint goroutines from racing with close.
+	if d.txManager != nil {
+		d.txManager.StopAutoCheckpoint()
+	}
+
 	// Passive checkpoint on close (mirrors SQLite behaviour): if there are
 	// committed WAL frames that have not yet been written to the DB file, flush
 	// them now so the DB file is a complete snapshot.  This limits WAL growth
@@ -208,6 +213,11 @@ func (d *Database) Checkpoint(_ context.Context) error {
 
 // Reopen replaces the pager and transaction manager with fresh instances backed by the given factory and saver.
 func (d *Database) Reopen(ctx context.Context, factory PagerFactory, saver PageSaver) error {
+	// Stop any background auto-checkpoint work tied to the old saver/file.
+	if d.txManager != nil {
+		d.txManager.StopAutoCheckpoint()
+	}
+
 	d.factory = factory
 	d.saver = saver
 	d.tables = make(map[string]*Table)

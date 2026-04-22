@@ -3,7 +3,9 @@ package minisql
 import (
 	"context"
 	"os"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -406,6 +408,67 @@ func TestTransactionManager_WAL_Commit(t *testing.T) {
 		assert.Equal(t, int64(1), env.wal.FrameCount())
 
 		mock.AssertExpectationsForObjects(t, env.saverMock)
+	})
+
+	t.Run("Auto-checkpoint runs asynchronously and single-flight", func(t *testing.T) {
+		t.Parallel()
+
+		env := newWALCommitEnv(t)
+		ctx := context.Background()
+
+		env.txManager.checkpointThreshold = 1
+
+		started := make(chan struct{}, 1)
+		release := make(chan struct{})
+		var checkpointCalls atomic.Int32
+		env.txManager.SetCheckpointFunc(func() error {
+			checkpointCalls.Add(1)
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+			return nil
+		})
+
+		makeWriteTx := func(pageIdx PageIndex) *Transaction {
+			tx := env.txManager.BeginTransaction(ctx)
+			tx.WriteSet[pageIdx] = WriteInfo{
+				Page:  &Page{Index: pageIdx, LeafNode: NewLeafNode()},
+				Table: "t",
+				Index: "pk_t",
+			}
+			env.saverMock.On("SavePage", ctx, pageIdx, tx.WriteSet[pageIdx].Page).Return(nil).Once()
+			return tx
+		}
+
+		// First commit should return even though checkpoint function is blocked.
+		tx1 := makeWriteTx(10)
+		done1 := make(chan error, 1)
+		go func() {
+			done1 <- env.txManager.CommitTransaction(ctx, tx1)
+		}()
+
+		select {
+		case <-started:
+		case <-time.After(1 * time.Second):
+			t.Fatal("auto-checkpoint did not start")
+		}
+
+		select {
+		case err := <-done1:
+			require.NoError(t, err)
+		case <-time.After(1 * time.Second):
+			t.Fatal("commit blocked waiting for auto-checkpoint")
+		}
+
+		// While first checkpoint is still running, a second commit should not start
+		// another checkpoint.
+		tx2 := makeWriteTx(11)
+		require.NoError(t, env.txManager.CommitTransaction(ctx, tx2))
+		assert.Equal(t, int32(1), checkpointCalls.Load(), "auto-checkpoint should be single-flight")
+
+		close(release)
 	})
 }
 
