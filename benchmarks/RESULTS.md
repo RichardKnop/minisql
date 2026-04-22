@@ -1,3 +1,37 @@
+### 2026-04-22 00:42 UTC
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| Delete_ByPK | 181.79 µs/op | 72.17 µs/op | 2.5× |
+| Insert_SingleRow | 85.55 µs/op | 53.05 µs/op | 1.6× |
+| Insert_Batch | 564.62 µs/op | 217.97 µs/op | 2.6× |
+| Select_PointScan | 4.51 µs/op | 3.22 µs/op | 1.4× |
+| Select_Limit | 7.33 µs/op | 7.62 µs/op | 1.0× |
+| Select_FullScan | 4.95 ms/op | 5.06 ms/op | 1.0× |
+| Select_CountStar | 31.86 µs/op | 9.33 µs/op | 3.4× |
+| Select_IndexRangeScan | 721.36 µs/op | 733.11 µs/op | 1.0× |
+| Select_RangeScan | 2.74 ms/op | 852.27 µs/op | 3.2× |
+| Txn_NInserts | 322.02 µs/op | 135.54 µs/op | 2.4× |
+| Update_ByPK | 60.76 µs/op | 37.64 µs/op | 1.6× |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 82.4 KiB | 447 B |
+| Insert_SingleRow | 46.0 KiB | 311 B |
+| Insert_Batch | 366.3 KiB | 31.0 KiB |
+| Select_PointScan | 4.5 KiB | 679 B |
+| Select_Limit | 6.3 KiB | 1.7 KiB |
+| Select_FullScan | 5.7 MiB | 1.3 MiB |
+| Select_CountStar | 5.8 KiB | 400 B |
+| Select_IndexRangeScan | 772.3 KiB | 85.9 KiB |
+| Select_RangeScan | 2.0 MiB | 85.9 KiB |
+| Txn_NInserts | 209.3 KiB | 15.8 KiB |
+| Update_ByPK | 8.9 KiB | 263 B |
+
 ### 2026-04-22 00:03 UTC
 
 #### Timing
@@ -31,8 +65,6 @@
 | Select_RangeScan | 2.0 MiB | 85.9 KiB |
 | Txn_NInserts | 209.1 KiB | 15.8 KiB |
 | Update_ByPK | 9.0 KiB | 263 B |
-
----
 
 ### 2026-04-21 22:32 UTC
 
@@ -82,8 +114,6 @@
 | Select_RangeScan | 2.1 MiB | 85.9 KiB |
 | Txn_NInserts | 209.3 KiB | 15.8 KiB |
 | Update_ByPK | 9.0 KiB | 263 B |
-
----
 
 ### 2026-04-21 18:43 UTC
 

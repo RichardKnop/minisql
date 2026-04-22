@@ -492,6 +492,12 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 		}()
 	}
 
+	joinConditions := OneOrMore{}
+	if len(join.Conditions) > 0 {
+		joinConditions = append(joinConditions, join.Conditions)
+	}
+	var joinFilter func(Row) (bool, error)
+
 	// For each matching inner row, combine and continue with next join
 	matched := false
 	for innerRow := range innerRowChan {
@@ -511,15 +517,17 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 			combinedRow = combineRowsProgressive(currentRow, innerRow, innerScan.TableAlias)
 		}
 
-		// Evaluate JOIN conditions
-		joinConditions := OneOrMore{}
-		if len(join.Conditions) > 0 {
-			joinConditions = append(joinConditions, join.Conditions)
+		if joinFilter == nil {
+			joinFilter = compileRowFilterForColumns(combinedRow.Columns, joinConditions)
 		}
 
-		matches, err := evaluateJoinConditions(combinedRow, joinConditions)
-		if err != nil {
-			return err
+		matches := true
+		if joinFilter != nil {
+			var err error
+			matches, err = joinFilter(combinedRow)
+			if err != nil {
+				return err
+			}
 		}
 
 		if matches {
@@ -593,6 +601,7 @@ func (p QueryPlan) executeRightJoinPass(ctx context.Context, provider TableProvi
 		if len(join.Conditions) > 0 {
 			joinConditions = append(joinConditions, join.Conditions)
 		}
+		var joinFilter func(Row) (bool, error)
 
 		for rightRow := range rightRowChan {
 			select {
@@ -626,9 +635,16 @@ func (p QueryPlan) executeRightJoinPass(ctx context.Context, provider TableProvi
 				}
 
 				probe := combineRows(baseRow, rightRow, baseScan.TableAlias, innerScan.TableAlias)
-				matches, err := evaluateJoinConditions(probe, joinConditions)
-				if err != nil {
-					return err
+				if joinFilter == nil {
+					joinFilter = compileRowFilterForColumns(probe.Columns, joinConditions)
+				}
+				matches := true
+				if joinFilter != nil {
+					var err error
+					matches, err = joinFilter(probe)
+					if err != nil {
+						return err
+					}
 				}
 				if matches {
 					anyMatch = true
@@ -773,14 +789,4 @@ func combineRowsProgressive(existingRow, newRow Row, newTableAlias string) Row {
 	combinedValues = append(combinedValues, newRow.Values...)
 
 	return NewRowWithValues(combinedColumns, combinedValues)
-}
-
-// evaluateJoinConditions checks if a combined row satisfies all JOIN conditions
-func evaluateJoinConditions(row Row, conditions OneOrMore) (bool, error) {
-	if len(conditions) == 0 {
-		return true, nil // No conditions means match all (cross product)
-	}
-
-	// Use existing CheckOneOrMore logic
-	return row.CheckOneOrMore(conditions)
 }

@@ -912,15 +912,6 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 	return nil
 }
 
-// FilterRow applies filtering on scanned rows according to filters
-func (s Scan) FilterRow(row Row) (bool, error) {
-	ok, err := row.CheckOneOrMore(s.Filters)
-	if err != nil {
-		return false, err
-	}
-	return ok, nil
-}
-
 // tryMinMaxIndexPlan attempts to use an index endpoint scan for a query of the
 // form SELECT MIN(col) FROM t  or  SELECT MAX(col) FROM t  with no WHERE clause
 // and no GROUP BY.  Returns the plan and true if the optimisation applies.

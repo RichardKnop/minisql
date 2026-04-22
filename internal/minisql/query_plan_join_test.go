@@ -534,7 +534,7 @@ func TestCombineRowsProgressive(t *testing.T) {
 	assert.True(t, v.Valid)
 }
 
-func TestEvaluateJoinConditions(t *testing.T) {
+func TestCompileJoinConditions(t *testing.T) {
 	t.Parallel()
 
 	cols := []Column{
@@ -547,9 +547,8 @@ func TestEvaluateJoinConditions(t *testing.T) {
 	})
 
 	t.Run("no conditions always matches", func(t *testing.T) {
-		ok, err := evaluateJoinConditions(row, OneOrMore{})
-		require.NoError(t, err)
-		assert.True(t, ok)
+		filter := compileRowFilterForColumns(row.Columns, OneOrMore{})
+		assert.Nil(t, filter)
 	})
 
 	t.Run("matching equality condition", func(t *testing.T) {
@@ -558,7 +557,9 @@ func TestEvaluateJoinConditions(t *testing.T) {
 			OperandField,
 			Field{AliasPrefix: "o", Name: "user_id"},
 		)
-		ok, err := evaluateJoinConditions(row, OneOrMore{{cond}})
+		filter := compileRowFilterForColumns(row.Columns, OneOrMore{{cond}})
+		require.NotNil(t, filter)
+		ok, err := filter(row)
 		require.NoError(t, err)
 		assert.True(t, ok)
 	})
@@ -577,7 +578,9 @@ func TestEvaluateJoinConditions(t *testing.T) {
 			OperandField,
 			Field{AliasPrefix: "o", Name: "user_id"},
 		)
-		ok, err := evaluateJoinConditions(mismatchRow, OneOrMore{{cond}})
+		filter := compileRowFilterForColumns(mismatchRow.Columns, OneOrMore{{cond}})
+		require.NotNil(t, filter)
+		ok, err := filter(mismatchRow)
 		require.NoError(t, err)
 		assert.False(t, ok)
 	})
