@@ -1,3 +1,39 @@
+### 2026-04-22 00:03 UTC
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| Delete_ByPK | 201.27 µs/op | 143.77 µs/op | 1.4× |
+| Insert_SingleRow | 88.20 µs/op | 45.46 µs/op | 1.9× |
+| Insert_Batch | 587.77 µs/op | 222.94 µs/op | 2.6× |
+| Select_PointScan | 4.44 µs/op | 3.31 µs/op | 1.3× |
+| Select_Limit | 7.39 µs/op | 7.94 µs/op | 0.9× |
+| Select_FullScan | 5.04 ms/op | 5.55 ms/op | 0.9× |
+| Select_CountStar | 32.68 µs/op | 9.66 µs/op | 3.4× |
+| Select_IndexRangeScan | 728.41 µs/op | 747.02 µs/op | 1.0× |
+| Select_RangeScan | 2.83 ms/op | 928.63 µs/op | 3.0× |
+| Txn_NInserts | 341.37 µs/op | 140.91 µs/op | 2.4× |
+| Update_ByPK | 61.60 µs/op | 40.56 µs/op | 1.5× |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 82.4 KiB | 447 B |
+| Insert_SingleRow | 46.8 KiB | 311 B |
+| Insert_Batch | 366.1 KiB | 31.0 KiB |
+| Select_PointScan | 4.5 KiB | 679 B |
+| Select_Limit | 6.3 KiB | 1.7 KiB |
+| Select_FullScan | 5.7 MiB | 1.3 MiB |
+| Select_CountStar | 5.8 KiB | 400 B |
+| Select_IndexRangeScan | 772.4 KiB | 85.9 KiB |
+| Select_RangeScan | 2.0 MiB | 85.9 KiB |
+| Txn_NInserts | 209.1 KiB | 15.8 KiB |
+| Update_ByPK | 9.0 KiB | 263 B |
+
+---
+
 ### 2026-04-21 22:32 UTC
 
 `IndexCell.UniqueRowID` inline storage — eliminate heap-allocated `[]RowID` slice for unique index cells:

@@ -149,6 +149,10 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key RowID, row Row) er
 }
 
 func (c *Cursor) fetchRow(ctx context.Context, advance bool, selectedFields ...Field) (Row, error) {
+	return c.fetchRowWithMask(ctx, advance, selectedColumnsMask(c.Table.Columns, selectedFields))
+}
+
+func (c *Cursor) fetchRowWithMask(ctx context.Context, advance bool, selectedMask []bool) (Row, error) {
 	page, err := c.Table.pager.ReadPage(ctx, c.PageIdx)
 	if err != nil {
 		return Row{}, fmt.Errorf("read page: %w", err)
@@ -158,7 +162,7 @@ func (c *Cursor) fetchRow(ctx context.Context, advance bool, selectedFields ...F
 	if c.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
 		return Row{}, fmt.Errorf("cell index %d out of bounds, max %d", c.CellIdx, page.LeafNode.Header.Cells-1)
 	}
-	row, err = row.Unmarshal(page.LeafNode.Cells[c.CellIdx], selectedFields...)
+	row, err = row.UnmarshalWithMask(page.LeafNode.Cells[c.CellIdx], selectedMask)
 	if err != nil {
 		return Row{}, err
 	}

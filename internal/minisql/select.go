@@ -92,21 +92,18 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 	}
 
-	// Fast path: streaming queries WITH a LIMIT that require no sort, no GROUP BY,
-	// and no aggregates, and have no JOINs.  A LIMIT lets us stop the scan the
-	// moment enough projected rows have been collected — avoiding a full table read.
-	// The projected slice is pre-sized to exactly the LIMIT so there are zero
-	// reallocs and no wasted capacity.
+	// Fast path: streaming queries that require no sort, no GROUP BY, and no
+	// aggregates, and have no JOINs. This avoids materializing an intermediate
+	// []Row buffer from the plan scan.
 	//
-	// Queries without a LIMIT are excluded: without early termination the only
-	// saving would be eliminating the raw-rows intermediate buffer, which is not
-	// worth the dynamic-growth reallocs that replace the old exact-sized allocation.
+	// With LIMIT, scanning can stop early once enough rows are projected.
+	// Without LIMIT, we still benefit by eliminating one full intermediate
+	// allocation (rows), even though projected rows keep growing dynamically.
 	//
 	// JOIN queries are excluded because plan.Execute launches a goroutine internally;
 	// returning errLimitReached from the callback while that goroutine is still
 	// writing to the channel would leak the goroutine.
-	if stmt.Limit.Valid &&
-		!stmt.IsSelectCountAll() &&
+	if !stmt.IsSelectCountAll() &&
 		!stmt.IsSelectGroupBy() &&
 		!stmt.IsSelectAggregate() &&
 		!plan.SortInMemory &&
@@ -618,10 +615,14 @@ func (t *Table) selectStreamingDirect(
 		seen = make(map[string]struct{})
 	}
 
-	// Pre-size projected slice to exactly the LIMIT so append never reallocates.
-	// selectStreamingDirect is only called when stmt.Limit.Valid is true, so
-	// hasLimit is always true here and remaining holds the requested row count.
-	projected := make([]Row, 0, int(remaining))
+	// When LIMIT is present, pre-size to exactly the limit so append never reallocates.
+	// Without LIMIT, start empty and grow as needed.
+	var projected []Row
+	if hasLimit {
+		projected = make([]Row, 0, int(remaining))
+	} else {
+		projected = make([]Row, 0)
+	}
 
 	err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
 		p, projErr := projectRow(row, requestedFields)
@@ -794,6 +795,11 @@ func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, se
 	if !ok {
 		return fmt.Errorf("no index found for point scan: %s", scan.IndexName)
 	}
+	var (
+		selectedMask   = selectedColumnsMask(t.Columns, selectedFields)
+		tableFilter    = compileScanFilter(t.Columns, scan.Filters)
+		coveringFilter = compileScanFilter(scan.IndexColumns, scan.Filters)
+	)
 
 	// Scan index in order (or reverse order)
 	if err := idx.ScanAll(ctx, aPlan.SortReverse, func(key any, rowID RowID) error {
@@ -814,26 +820,28 @@ func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, se
 				row.Key = rowID
 			} else {
 				var err error
-				row, err = cursor.fetchRow(ctx, false, selectedFields...)
+				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
 				if err != nil {
 					return fmt.Errorf("fetch row failed: %w", err)
 				}
 
 				// Apply remaining filters
-				ok, err := scan.FilterRow(row)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return nil // Skip this row
+				if tableFilter != nil {
+					ok, err := tableFilter(row)
+					if err != nil {
+						return err
+					}
+					if !ok {
+						return nil // Skip this row
+					}
 				}
 			}
 		}
 
 		// For covering index scans, filters still need to be applied
 		// (all filter columns are guaranteed to be in the index).
-		if scan.CoveringIndex && len(scan.Filters) > 0 {
-			ok, err := scan.FilterRow(row)
+		if scan.CoveringIndex && coveringFilter != nil {
+			ok, err := coveringFilter(row)
 			if err != nil {
 				return err
 			}
@@ -858,6 +866,9 @@ func (t *Table) indexRangeScan(ctx context.Context, aPlan QueryPlan, scan Scan, 
 	if !ok {
 		return fmt.Errorf("no index found for point scan: %s", scan.IndexName)
 	}
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	coveringFilter := compileScanFilter(scan.IndexColumns, scan.Filters)
 
 	// Scan index within range (forward or reverse)
 	if err := idx.ScanRange(ctx, scan.RangeCondition, aPlan.SortReverse, func(key any, rowID RowID) error {
@@ -878,26 +889,28 @@ func (t *Table) indexRangeScan(ctx context.Context, aPlan QueryPlan, scan Scan, 
 				row.Key = rowID
 			} else {
 				var err error
-				row, err = cursor.fetchRow(ctx, false, selectedFields...)
+				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
 				if err != nil {
 					return fmt.Errorf("fetch row failed: %w", err)
 				}
 
 				// Apply remaining filters
-				ok, err := scan.FilterRow(row)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return nil // Skip this row
+				if tableFilter != nil {
+					ok, err := tableFilter(row)
+					if err != nil {
+						return err
+					}
+					if !ok {
+						return nil // Skip this row
+					}
 				}
 			}
 		}
 
 		// For covering index scans, filters still need to be applied
 		// (all filter columns are guaranteed to be in the index).
-		if scan.CoveringIndex && len(scan.Filters) > 0 {
-			ok, err := scan.FilterRow(row)
+		if scan.CoveringIndex && coveringFilter != nil {
+			ok, err := coveringFilter(row)
 			if err != nil {
 				return err
 			}
@@ -922,6 +935,9 @@ func (t *Table) indexPointScan(ctx context.Context, scan Scan, selectedFields []
 	if !ok {
 		return fmt.Errorf("no index found for point scan: %s", scan.IndexName)
 	}
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	coveringFilter := compileScanFilter(scan.IndexColumns, scan.Filters)
 
 	// Lookup each primary key value
 	for _, indexValue := range scan.IndexKeys {
@@ -952,25 +968,27 @@ func (t *Table) indexPointScan(ctx context.Context, scan Scan, selectedFields []
 				}
 
 				// Fetch the row
-				row, err = cursor.fetchRow(ctx, false, selectedFields...)
+				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
 				if err != nil {
 					return fmt.Errorf("fetch row failed: %w", err)
 				}
 
 				// Apply remaining filters
-				ok, err := scan.FilterRow(row)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					continue // Skip this row
+				if tableFilter != nil {
+					ok, err := tableFilter(row)
+					if err != nil {
+						return err
+					}
+					if !ok {
+						continue // Skip this row
+					}
 				}
 			}
 
 			// For covering index scans, filters still need to be applied
 			// (all filter columns are guaranteed to be in the index).
-			if scan.CoveringIndex && len(scan.Filters) > 0 {
-				ok, err := scan.FilterRow(row)
+			if scan.CoveringIndex && coveringFilter != nil {
+				ok, err := coveringFilter(row)
 				if err != nil {
 					return err
 				}
@@ -1004,6 +1022,7 @@ func (t *Table) indexEndpointScan(ctx context.Context, scan Scan, selectedFields
 	if !ok {
 		return fmt.Errorf("no index found for endpoint scan: %s", scan.IndexName)
 	}
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
 
 	err := idx.ScanAll(ctx, reverse, func(key any, rowID RowID) error {
 		var row Row
@@ -1021,7 +1040,7 @@ func (t *Table) indexEndpointScan(ctx context.Context, scan Scan, selectedFields
 				row = NewRowWithValues(t.Columns, nil)
 				row.Key = rowID
 			} else {
-				row, err = cursor.fetchRow(ctx, false, selectedFields...)
+				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
 				if err != nil {
 					return fmt.Errorf("fetch row failed: %w", err)
 				}
@@ -1173,6 +1192,8 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 	if err != nil {
 		return err
 	}
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
 
 	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
 	if err != nil {
@@ -1185,18 +1206,20 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 			return err
 		}
 
-		row, err := cursor.fetchRow(ctx, true, selectedFields...)
+		row, err := cursor.fetchRowWithMask(ctx, true, selectedMask)
 		if err != nil {
 			return err
 		}
 
 		// Apply remaining filters
-		ok, err := scan.FilterRow(row)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			continue // Skip this row
+		if tableFilter != nil {
+			ok, err := tableFilter(row)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue // Skip this row
+			}
 		}
 
 		if err := out(row); err != nil {
@@ -1205,4 +1228,17 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 	}
 
 	return nil
+}
+
+func compileScanFilter(columns []Column, filters OneOrMore) func(Row) (bool, error) {
+	if len(filters) == 0 {
+		return nil
+	}
+	columnIndexes := make(map[string]int, len(columns))
+	for i := range columns {
+		columnIndexes[columns[i].Name] = i
+	}
+	return func(row Row) (bool, error) {
+		return row.CheckOneOrMoreWithColumnIndexes(filters, columnIndexes)
+	}
 }
