@@ -464,6 +464,19 @@ func (r Row) CheckOneOrMoreWithColumnIndexes(conditions OneOrMore, columnIndexes
 	return false, nil
 }
 
+func compileRowFilterForColumns(columns []Column, conditions OneOrMore) func(Row) (bool, error) {
+	if len(conditions) == 0 {
+		return nil
+	}
+	columnIndexes := make(map[string]int, len(columns))
+	for i := range columns {
+		columnIndexes[columns[i].Name] = i
+	}
+	return func(row Row) (bool, error) {
+		return row.CheckOneOrMoreWithColumnIndexes(conditions, columnIndexes)
+	}
+}
+
 // CheckConditions ...
 func (r Row) CheckConditions(condGroup Conditions) (bool, error) {
 	if len(condGroup) == 0 {
