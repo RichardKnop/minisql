@@ -528,6 +528,34 @@ func TestTable_Select(t *testing.T) {
 	})
 }
 
+func TestCompileScanFilter(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil when no filters", func(t *testing.T) {
+		f := compileScanFilter(testColumns, nil)
+		assert.Nil(t, f)
+	})
+
+	t.Run("evaluates with precompiled column indexes", func(t *testing.T) {
+		row := gen.Row()
+		filters := OneOrMore{
+			{
+				{
+					Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
+					Operator: Eq,
+					Operand2: Operand{Type: OperandInteger, Value: row.Values[0].Value.(int64)},
+				},
+			},
+		}
+		f := compileScanFilter(testColumns, filters)
+		require.NotNil(t, f)
+
+		ok, err := f(row)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+}
+
 func TestTable_Select_Overflow(t *testing.T) {
 	table, txManager, _ := newTestTable(t, testOverflowColumns)
 	var (

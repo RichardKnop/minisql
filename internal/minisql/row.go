@@ -87,6 +87,11 @@ func (r Row) Size() uint64 {
 // (Rows.Next, rowDistinctKey, selectGroupBy, deduplicateRows).  Name-based
 // lookups via GetColumn/GetValue fall back to a linear scan if needed.
 func (r Row) OnlyFields(fields ...Field) Row {
+	// Fast path: requested fields already match the row layout exactly.
+	if rowMatchesRequestedFieldsInOrder(r, fields) {
+		return r
+	}
+
 	filteredRow := Row{
 		Key:     r.Key,
 		Columns: make([]Column, len(fields)),
@@ -119,6 +124,21 @@ func (r Row) OnlyFields(fields ...Field) Row {
 	}
 
 	return filteredRow
+}
+
+func rowMatchesRequestedFieldsInOrder(row Row, fields []Field) bool {
+	if len(fields) != len(row.Columns) {
+		return false
+	}
+	for i, f := range fields {
+		if f.Expr != nil || f.AliasPrefix != "" {
+			return false
+		}
+		if f.Name != row.Columns[i].Name {
+			return false
+		}
+	}
+	return true
 }
 
 // GetColumn returns the column and its index for the given name via linear scan.
@@ -289,9 +309,16 @@ func (r Row) Marshal() ([]byte, error) {
 // Unmarshal decodes cell into a Row. For columns not in selectedFields, an empty
 // OptionalValue is inserted to maintain index alignment.
 func (r Row) Unmarshal(cell Cell, selectedFields ...Field) (Row, error) {
+	return r.UnmarshalWithMask(cell, selectedColumnsMask(r.Columns, selectedFields))
+}
+
+// UnmarshalWithMask decodes cell into a Row using a precomputed column-selection mask.
+// selectedMask must have len == len(r.Columns). A nil/empty mask means "no fields selected"
+// (keys only; values remain zero-value placeholders).
+func (r Row) UnmarshalWithMask(cell Cell, selectedMask []bool) (Row, error) {
 	r.Key = cell.Key
 
-	if len(selectedFields) == 0 {
+	if len(selectedMask) == 0 {
 		r.Values = make([]OptionalValue, len(r.Columns))
 		return r, nil
 	}
@@ -304,8 +331,8 @@ func (r Row) Unmarshal(cell Cell, selectedFields ...Field) (Row, error) {
 		// Check if column is NULL
 		isNull := bitwise.IsSet(cell.NullBitmask, i)
 
-		// If column not selected, skip it but track offset (inline linear search, zero allocation)
-		if !isColumnSelected(col.Name, selectedFields) {
+		// If column not selected, skip it but track offset.
+		if !selectedMask[i] {
 			r.Values[i] = OptionalValue{Valid: false}
 			if !isNull {
 				// Skip over the data without unmarshaling
@@ -359,15 +386,20 @@ func (r Row) Unmarshal(cell Cell, selectedFields ...Field) (Row, error) {
 	return r, nil
 }
 
-// isColumnSelected reports whether colName appears in selectedFields.
-// It uses a linear scan so that callers avoid allocating a map for small field lists.
-func isColumnSelected(colName string, selectedFields []Field) bool {
-	for j := range selectedFields {
-		if selectedFields[j].Name == colName {
-			return true
-		}
+func selectedColumnsMask(columns []Column, selectedFields []Field) []bool {
+	if len(selectedFields) == 0 {
+		return nil
 	}
-	return false
+	mask := make([]bool, len(columns))
+	selected := make(map[string]struct{}, len(selectedFields))
+	for _, f := range selectedFields {
+		selected[f.Name] = struct{}{}
+	}
+	for i := range columns {
+		_, ok := selected[columns[i].Name]
+		mask[i] = ok
+	}
+	return mask
 }
 
 func (r Row) getColumnSize(col Column, data []byte, offset int) uint64 {
@@ -412,6 +444,26 @@ func (r Row) CheckOneOrMore(conditions OneOrMore) (bool, error) {
 	return false, nil
 }
 
+// CheckOneOrMoreWithColumnIndexes is like CheckOneOrMore but uses pre-resolved
+// column indexes for field lookups to avoid repeated linear scans by name.
+func (r Row) CheckOneOrMoreWithColumnIndexes(conditions OneOrMore, columnIndexes map[string]int) (bool, error) {
+	if len(conditions) == 0 {
+		return true, nil
+	}
+
+	for _, condGroup := range conditions {
+		ok, err := r.checkConditionsWithColumnIndexes(condGroup, columnIndexes)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 // CheckConditions ...
 func (r Row) CheckConditions(condGroup Conditions) (bool, error) {
 	if len(condGroup) == 0 {
@@ -438,6 +490,24 @@ func (r Row) CheckConditions(condGroup Conditions) (bool, error) {
 	return false, nil
 }
 
+func (r Row) checkConditionsWithColumnIndexes(condGroup Conditions, columnIndexes map[string]int) (bool, error) {
+	if len(condGroup) == 0 {
+		return true, nil
+	}
+
+	for _, cond := range condGroup {
+		ok, err := r.checkConditionWithColumnIndexes(cond, columnIndexes)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
 func (r Row) checkCondition(cond Condition) (bool, error) {
 	// left side is field, right side is literal value
 	if cond.Operand1.IsField() && !cond.Operand2.IsField() {
@@ -452,6 +522,26 @@ func (r Row) checkCondition(cond Condition) (bool, error) {
 	// both left and right are fields, compare 2 row values
 	if cond.Operand1.IsField() && cond.Operand2.IsField() {
 		return r.compareFields(cond.Operand1, cond.Operand2, cond.Operator)
+	}
+
+	// both left and right are literal values, compare them
+	return cond.Operand1.Value == cond.Operand2.Value, nil
+}
+
+func (r Row) checkConditionWithColumnIndexes(cond Condition, columnIndexes map[string]int) (bool, error) {
+	// left side is field, right side is literal value
+	if cond.Operand1.IsField() && !cond.Operand2.IsField() {
+		return r.compareFieldValueWithColumnIndexes(cond.Operand1, cond.Operand2, cond.Operator, columnIndexes)
+	}
+
+	// left side is literal value, right side is field
+	if cond.Operand2.IsField() && !cond.Operand1.IsField() {
+		return r.compareFieldValueWithColumnIndexes(cond.Operand2, cond.Operand1, cond.Operator, columnIndexes)
+	}
+
+	// both left and right are fields, compare 2 row values
+	if cond.Operand1.IsField() && cond.Operand2.IsField() {
+		return r.compareFieldsWithColumnIndexes(cond.Operand1, cond.Operand2, cond.Operator, columnIndexes)
 	}
 
 	// both left and right are literal values, compare them
@@ -601,6 +691,150 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 	}
 }
 
+func (r Row) compareFieldValueWithColumnIndexes(fieldOperand, valueOperand Operand, operator Operator, columnIndexes map[string]int) (bool, error) {
+	if fieldOperand.Type != OperandField {
+		return false, fmt.Errorf("field operand invalid, type '%d'", fieldOperand.Type)
+	}
+	if valueOperand.Type == OperandField {
+		return false, errors.New("cannot compare column value against field operand")
+	}
+
+	field := fieldOperand.Value.(Field)
+	name := field.Name
+	colIdx, ok := columnIndexes[name]
+	if !ok {
+		return false, fmt.Errorf("row does not contain column '%s'", name)
+	}
+	col := r.Columns[colIdx]
+	if colIdx >= len(r.Values) {
+		return false, fmt.Errorf("row does not have '%s' column", name)
+	}
+	fieldValue := r.Values[colIdx]
+
+	switch valueOperand.Type {
+	case OperandNull:
+		switch operator {
+		case Eq:
+			return !fieldValue.Valid, nil
+		case Ne:
+			return fieldValue.Valid, nil
+		default:
+			return false, errors.New("only '=' and '!=' operators supported when comparing against NULL")
+		}
+	case OperandList:
+		switch operator {
+		case In, NotIn:
+			switch col.Kind {
+			case Boolean:
+				return false, errors.New("IN / NOT IN operator not supported for boolean columns")
+			case Int4:
+				foundInList, err := isInListInt4(fieldValue.Value, valueOperand.Value)
+				if operator == In {
+					return foundInList, err
+				}
+				return !foundInList, err
+			case Int8:
+				foundInList, err := isInListInt8(fieldValue.Value, valueOperand.Value)
+				if operator == In {
+					return foundInList, err
+				}
+				return !foundInList, err
+			case Real:
+				foundInList, err := isInListReal(fieldValue.Value, valueOperand.Value)
+				if operator == In {
+					return foundInList, err
+				}
+				return !foundInList, err
+			case Double:
+				foundInList, err := isInListDouble(fieldValue.Value, valueOperand.Value)
+				if operator == In {
+					return foundInList, err
+				}
+				return !foundInList, err
+			case Varchar, Text:
+				foundInList, err := isInListText(fieldValue.Value, valueOperand.Value)
+				if operator == In {
+					return foundInList, err
+				}
+				return !foundInList, err
+			case Timestamp:
+				foundInList, err := isInListTimestamp(fieldValue.Value, valueOperand.Value)
+				if operator == In {
+					return foundInList, err
+				}
+				return !foundInList, err
+			default:
+				return false, fmt.Errorf("unknown column kind '%s'", col.Kind)
+			}
+
+		case Between, NotBetween:
+			list, ok := valueOperand.Value.([]any)
+			if !ok || len(list) != 2 {
+				return false, errors.New("BETWEEN requires exactly 2 bounds")
+			}
+			var (
+				inRange bool
+				err     error
+			)
+			switch col.Kind {
+			case Boolean:
+				return false, errors.New("BETWEEN operator not supported for boolean columns")
+			case Int4:
+				inRange, err = isBetweenInt4(int64(fieldValue.Value.(int32)), list[0], list[1])
+			case Int8:
+				inRange, err = isBetweenInt8(fieldValue.Value, list[0], list[1])
+			case Real:
+				inRange, err = isBetweenReal(float64(fieldValue.Value.(float32)), list[0], list[1])
+			case Double:
+				inRange, err = isBetweenDouble(fieldValue.Value, list[0], list[1])
+			case Varchar, Text:
+				inRange, err = isBetweenText(fieldValue.Value, list[0], list[1])
+			case Timestamp:
+				inRange, err = isBetweenTimestamp(fieldValue.Value, list[0], list[1])
+			default:
+				return false, fmt.Errorf("unknown column kind '%s'", col.Kind)
+			}
+			if err != nil {
+				return false, err
+			}
+			if operator == Between {
+				return inRange, nil
+			}
+			return !inRange, nil
+
+		default:
+			return false, errors.New("only 'IN', 'NOT IN', 'BETWEEN', and 'NOT BETWEEN' operators supported when comparing against list")
+		}
+	}
+
+	if !fieldValue.Valid {
+		return false, nil // NULL cannot be compared to non-NULL value
+	}
+
+	if (operator == Like || operator == NotLike) && col.Kind != Varchar && col.Kind != Text {
+		return false, errors.New("LIKE / NOT LIKE operator only supported for TEXT and VARCHAR columns")
+	}
+
+	switch col.Kind {
+	case Boolean:
+		return compareBoolean(fieldValue.Value.(bool), valueOperand.Value.(bool), operator)
+	case Int4:
+		return compareInt4(int64(fieldValue.Value.(int32)), valueOperand.Value.(int64), operator)
+	case Int8:
+		return compareInt8(fieldValue.Value.(int64), valueOperand.Value.(int64), operator)
+	case Real:
+		return compareReal(float64(fieldValue.Value.(float32)), valueOperand.Value.(float64), operator)
+	case Double:
+		return compareDouble(fieldValue.Value.(float64), valueOperand.Value.(float64), operator)
+	case Varchar, Text:
+		return compareText(fieldValue.Value, valueOperand.Value, operator)
+	case Timestamp:
+		return compareTimestamp(fieldValue.Value, valueOperand.Value, operator)
+	default:
+		return false, fmt.Errorf("unknown column kind '%s'", col.Kind)
+	}
+}
+
 func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, error) {
 	if !field1.IsField() {
 		return false, fmt.Errorf("field 1 operand invalid, type '%d'", field1.Type)
@@ -664,6 +898,70 @@ func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, err
 		return compareTimestamp(value1.Value, value2.Value, operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", aColumn1.Kind)
+	}
+}
+
+func (r Row) compareFieldsWithColumnIndexes(field1, field2 Operand, operator Operator, columnIndexes map[string]int) (bool, error) {
+	if !field1.IsField() {
+		return false, fmt.Errorf("field 1 operand invalid, type '%d'", field1.Type)
+	}
+	if !field2.IsField() {
+		return false, fmt.Errorf("field 2 operand invalid, type '%d'", field2.Type)
+	}
+
+	if field1.Value == field2.Value {
+		return true, nil
+	}
+
+	f1 := field1.Value.(Field)
+	name1 := f1.Name
+	if f1.AliasPrefix != "" {
+		name1 = f1.AliasPrefix + "." + f1.Name
+	}
+	idx1, ok := columnIndexes[name1]
+	if !ok {
+		return false, fmt.Errorf("row does not contain column '%s'", name1)
+	}
+
+	f2 := field2.Value.(Field)
+	name2 := f2.Name
+	if f2.AliasPrefix != "" {
+		name2 = f2.AliasPrefix + "." + f2.Name
+	}
+	idx2, ok := columnIndexes[name2]
+	if !ok {
+		return false, fmt.Errorf("row does not contain column '%s'", name2)
+	}
+
+	col1 := r.Columns[idx1]
+	col2 := r.Columns[idx2]
+	if col1.Kind != col2.Kind {
+		return false, nil
+	}
+	if idx1 >= len(r.Values) || idx2 >= len(r.Values) {
+		return false, errors.New("row values out of bounds for field comparison")
+	}
+
+	value1 := r.Values[idx1]
+	value2 := r.Values[idx2]
+
+	switch col1.Kind {
+	case Boolean:
+		return compareBoolean(value1.Value, value2.Value, operator)
+	case Int4:
+		return compareInt4(value1.Value, value2.Value, operator)
+	case Int8:
+		return compareInt8(value1.Value, value2.Value, operator)
+	case Real:
+		return compareReal(value1.Value, value2.Value, operator)
+	case Double:
+		return compareDouble(value1.Value, value2.Value, operator)
+	case Varchar, Text:
+		return compareText(value1.Value, value2.Value, operator)
+	case Timestamp:
+		return compareTimestamp(value1.Value, value2.Value, operator)
+	default:
+		return false, fmt.Errorf("unknown column kind '%s'", col1.Kind)
 	}
 }
 

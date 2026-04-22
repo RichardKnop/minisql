@@ -8,6 +8,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRow_OnlyFields_FastPathExactMatch(t *testing.T) {
+	t.Parallel()
+
+	row := gen.Row()
+	fields := fieldsFromColumns(row.Columns...)
+
+	got := row.OnlyFields(fields...)
+	require.NotEmpty(t, got.Columns)
+	require.NotEmpty(t, row.Columns)
+	assert.Equal(t, row, got)
+	assert.Equal(t, &row.Columns[0], &got.Columns[0], "fast path should reuse column slice")
+	assert.Equal(t, &row.Values[0], &got.Values[0], "fast path should reuse value slice")
+}
+
+func TestSelectedColumnsMask(t *testing.T) {
+	t.Parallel()
+
+	mask := selectedColumnsMask(testColumns, []Field{
+		{Name: "id"},
+		{Name: "verified"},
+	})
+	require.Len(t, mask, len(testColumns))
+	assert.True(t, mask[0])  // id
+	assert.False(t, mask[1]) // email
+	assert.False(t, mask[2]) // age
+	assert.True(t, mask[3])  // verified
+	assert.False(t, mask[4]) // score
+	assert.False(t, mask[5]) // created
+
+	assert.Nil(t, selectedColumnsMask(testColumns, nil))
+}
+
 func TestRow_Marshal(t *testing.T) {
 	t.Parallel()
 
@@ -51,6 +83,29 @@ func TestRow_Marshal(t *testing.T) {
 		assert.False(t, partialRow.Values[4].Valid)
 		assert.False(t, partialRow.Values[5].Valid)
 	})
+}
+
+func TestRow_UnmarshalWithMask(t *testing.T) {
+	t.Parallel()
+
+	row := gen.Row()
+	data, err := row.Marshal()
+	require.NoError(t, err)
+
+	mask := selectedColumnsMask(testColumns, []Field{
+		{Name: "id"},
+		{Name: "age"},
+	})
+	actual := NewRow(testColumns)
+	actual, err = actual.UnmarshalWithMask(Cell{Value: data}, mask)
+	require.NoError(t, err)
+
+	assert.Equal(t, row.Values[0], actual.Values[0]) // id
+	assert.False(t, actual.Values[1].Valid)          // email skipped
+	assert.Equal(t, row.Values[2], actual.Values[2]) // age
+	assert.False(t, actual.Values[3].Valid)
+	assert.False(t, actual.Values[4].Valid)
+	assert.False(t, actual.Values[5].Valid)
 }
 
 func TestRow_CheckOneOrMore(t *testing.T) {
@@ -638,6 +693,172 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			assert.Equal(t, aTestCase.Expected, actual)
 		})
 	}
+}
+
+func TestRow_CheckOneOrMoreWithColumnIndexes(t *testing.T) {
+	t.Parallel()
+
+	row := gen.Row()
+	conditions := OneOrMore{
+		{
+			{
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
+				Operator: Eq,
+				Operand2: Operand{Type: OperandInteger, Value: row.Values[0].Value.(int64)},
+			},
+			{
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "age"}},
+				Operator: Gte,
+				Operand2: Operand{Type: OperandInteger, Value: int64(row.Values[2].Value.(int32))},
+			},
+		},
+	}
+
+	columnIndexes := map[string]int{
+		"id":       0,
+		"email":    1,
+		"age":      2,
+		"verified": 3,
+		"score":    4,
+		"created":  5,
+	}
+
+	got, err := row.CheckOneOrMoreWithColumnIndexes(conditions, columnIndexes)
+	require.NoError(t, err)
+
+	want, err := row.CheckOneOrMore(conditions)
+	require.NoError(t, err)
+
+	assert.Equal(t, want, got)
+}
+
+func TestRow_CompareFieldValueWithColumnIndexes_Errors(t *testing.T) {
+	t.Parallel()
+
+	row := NewRowWithValues(
+		[]Column{
+			{Name: "id", Kind: Int8, Size: 8},
+			{Name: "age", Kind: Int4, Size: 4},
+			{Name: "verified", Kind: Boolean, Size: 1},
+		},
+		[]OptionalValue{
+			{Value: int64(10), Valid: true},
+			{Value: int32(5), Valid: true},
+			{Value: true, Valid: true},
+		},
+	)
+	columnIndexes := map[string]int{
+		"id":       0,
+		"age":      1,
+		"verified": 2,
+	}
+
+	t.Run("invalid field operand type", func(t *testing.T) {
+		_, err := row.compareFieldValueWithColumnIndexes(
+			Operand{Type: OperandInteger, Value: int64(1)},
+			Operand{Type: OperandInteger, Value: int64(1)},
+			Eq,
+			columnIndexes,
+		)
+		assert.Error(t, err)
+	})
+
+	t.Run("value operand cannot be field", func(t *testing.T) {
+		_, err := row.compareFieldValueWithColumnIndexes(
+			Operand{Type: OperandField, Value: Field{Name: "id"}},
+			Operand{Type: OperandField, Value: Field{Name: "age"}},
+			Eq,
+			columnIndexes,
+		)
+		assert.Error(t, err)
+	})
+
+	t.Run("missing column index", func(t *testing.T) {
+		_, err := row.compareFieldValueWithColumnIndexes(
+			Operand{Type: OperandField, Value: Field{Name: "missing"}},
+			Operand{Type: OperandInteger, Value: int64(1)},
+			Eq,
+			columnIndexes,
+		)
+		assert.Error(t, err)
+	})
+
+	t.Run("row values out of bounds", func(t *testing.T) {
+		shortValuesRow := NewRowWithValues(row.Columns, []OptionalValue{{Value: int64(10), Valid: true}})
+		_, err := shortValuesRow.compareFieldValueWithColumnIndexes(
+			Operand{Type: OperandField, Value: Field{Name: "age"}},
+			Operand{Type: OperandInteger, Value: int64(5)},
+			Eq,
+			columnIndexes,
+		)
+		assert.Error(t, err)
+	})
+
+	t.Run("null comparison with unsupported operator", func(t *testing.T) {
+		_, err := row.compareFieldValueWithColumnIndexes(
+			Operand{Type: OperandField, Value: Field{Name: "id"}},
+			Operand{Type: OperandNull},
+			Gt,
+			columnIndexes,
+		)
+		assert.Error(t, err)
+	})
+
+	t.Run("IN not supported for boolean", func(t *testing.T) {
+		_, err := row.compareFieldValueWithColumnIndexes(
+			Operand{Type: OperandField, Value: Field{Name: "verified"}},
+			Operand{Type: OperandList, Value: []any{true, false}},
+			In,
+			columnIndexes,
+		)
+		assert.Error(t, err)
+	})
+}
+
+func TestRow_CompareFieldsWithColumnIndexes_Errors(t *testing.T) {
+	t.Parallel()
+
+	cols := []Column{
+		{Name: "a", Kind: Int8, Size: 8},
+		{Name: "b", Kind: Int8, Size: 8},
+		{Name: "c", Kind: Int4, Size: 4},
+	}
+	row := NewRowWithValues(cols, []OptionalValue{
+		{Value: int64(1), Valid: true},
+		{Value: int64(2), Valid: true},
+		{Value: int32(3), Valid: true},
+	})
+	columnIndexes := map[string]int{"a": 0, "b": 1, "c": 2}
+
+	field := func(name string) Operand {
+		return Operand{Type: OperandField, Value: Field{Name: name}}
+	}
+
+	t.Run("invalid field1 operand", func(t *testing.T) {
+		_, err := row.compareFieldsWithColumnIndexes(Operand{Type: OperandInteger, Value: int64(1)}, field("b"), Eq, columnIndexes)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid field2 operand", func(t *testing.T) {
+		_, err := row.compareFieldsWithColumnIndexes(field("a"), Operand{Type: OperandInteger, Value: int64(1)}, Eq, columnIndexes)
+		assert.Error(t, err)
+	})
+
+	t.Run("missing first column", func(t *testing.T) {
+		_, err := row.compareFieldsWithColumnIndexes(field("missing"), field("b"), Eq, columnIndexes)
+		assert.Error(t, err)
+	})
+
+	t.Run("missing second column", func(t *testing.T) {
+		_, err := row.compareFieldsWithColumnIndexes(field("a"), field("missing"), Eq, columnIndexes)
+		assert.Error(t, err)
+	})
+
+	t.Run("row values out of bounds", func(t *testing.T) {
+		shortValuesRow := NewRowWithValues(cols, []OptionalValue{{Value: int64(1), Valid: true}})
+		_, err := shortValuesRow.compareFieldsWithColumnIndexes(field("a"), field("b"), Eq, columnIndexes)
+		assert.Error(t, err)
+	})
 }
 
 func TestRow_GetValue(t *testing.T) {
