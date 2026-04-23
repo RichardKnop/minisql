@@ -1,3 +1,34 @@
+### 2026-04-22 (latest)
+
+`AppendCells` pre-growth + `Clone` extra capacity + `insert.go` fieldPositions map elimination:
+- `IndexNode.AppendCells`: replaced per-cell `NewIndexCell`+append loop with a single bulk pre-grow, eliminating O(N) slice reallocations when many cells are moved at once (common during B+ tree splits/merges).
+- `IndexNode.Clone`: allocate `Header.Keys+4` capacity instead of exact `Header.Keys`, so `splitChild` median-key append and `AppendCells` don't immediately trigger a reallocation.
+- `insert.go`: eliminated `fieldPositions` map when `prepareInsert` has been called (detected by `len(values) == len(t.Columns)`); falls back to map for direct-call paths (tests).
+
+The `AppendCells` and `Clone` changes benefit the delete and update paths heavily — delete rebalancing (`merge`/`fill`/`borrowFromLeft/Right`) moves many cells at once, previously triggering repeated slice reallocations.
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| Delete_ByPK | 81.5 µs/op | 88.3 µs/op | **0.9×** |
+| Insert_SingleRow | 70.1 µs/op | 41.5 µs/op | 1.7× |
+| Insert_Batch | 590.0 µs/op | 222.0 µs/op | 2.7× |
+| Select_PointScan | 4.5 µs/op | 3.3 µs/op | 1.4× |
+| Select_Limit | 7.5 µs/op | 7.8 µs/op | 1.0× |
+| Select_FullScan | 5.1 ms/op | 5.1 ms/op | 1.0× |
+| Select_CountStar | 33.7 µs/op | 9.7 µs/op | 3.5× |
+| Select_IndexRangeScan | 722.0 µs/op | 736.0 µs/op | 1.0× |
+| Select_RangeScan | 2.83 ms/op | 869.0 µs/op | 3.3× |
+| Txn_NInserts | 343.0 µs/op | 137.6 µs/op | 2.5× |
+| Update_ByPK | 51.5 µs/op | 62.0 µs/op | **0.8×** |
+
+#### Memory (B/op)
+
+_(not measured this run)_
+
+---
+
 ### 2026-04-22 00:42 UTC
 
 #### Timing

@@ -22,24 +22,9 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, err
 	}
 
-	// Build a field-name → values-index map once for the whole Insert call.
-	//
-	// After prepareInsert, stmt.Fields covers every table column (in some order)
-	// followed by any ON CONFLICT DO UPDATE SET fields.  The values slice for each
-	// row only covers the insert portion (len == len(t.Columns)).  We cap the map
-	// at len(values) to exclude the update fields whose indices would be out of
-	// range for values.
-	//
-	// The map lets us assemble row.Values in column order with one O(C) pass per
-	// row instead of an O(C²) nested scan.
-	nInsertFields := len(t.Columns) // same as len(values) after prepareInsert
-	fieldPositions := make(map[string]int, nInsertFields)
-	for i, f := range stmt.Fields {
-		if i >= nInsertFields {
-			break // stop before any appended DO UPDATE fields
-		}
-		fieldPositions[f.Name] = i
-	}
+	// After prepareInsert, stmt.Fields[i].Name == t.Columns[i].Name for i < len(t.Columns),
+	// so stmt.Inserts[insertIdx][i] directly corresponds to t.Columns[i].
+	// No map is needed — values[i] is already the value for t.Columns[i].
 
 	rowsInserted := 0
 	for insertIdx, values := range stmt.Inserts {
@@ -119,14 +104,24 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			}
 		}
 
-		// Build row values in column order using the pre-computed field-position map.
-		// One allocation (the rowValues slice) and O(C) map lookups.
+		// Assemble row values in table-column order.
+		// Fast path: after prepareInsert, values[i] == value for t.Columns[i] — just copy.
+		// Slow path: direct Insert call without prepareInsert — use field-name lookup.
 		rowValues := make([]OptionalValue, len(t.Columns))
-		for i, col := range t.Columns {
-			if fi, ok := fieldPositions[col.Name]; ok {
-				rowValues[i] = values[fi]
+		if len(values) == len(t.Columns) {
+			// prepareInsert was called; values are already in column order.
+			copy(rowValues, values)
+		} else {
+			// Direct call without prepareInsert; resolve by field name.
+			fieldPositions := make(map[string]int, len(stmt.Fields))
+			for i, f := range stmt.Fields {
+				fieldPositions[f.Name] = i
 			}
-			// else: leave as OptionalValue{} = NULL (zero value)
+			for i, col := range t.Columns {
+				if fi, ok := fieldPositions[col.Name]; ok && fi < len(values) {
+					rowValues[i] = values[fi]
+				}
+			}
 		}
 		row := NewRowWithValues(t.Columns, rowValues)
 

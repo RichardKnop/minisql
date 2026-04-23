@@ -509,10 +509,18 @@ func (n *IndexNode[T]) PrependCell(cell IndexCell[T]) {
 
 // AppendCells ...
 func (n *IndexNode[T]) AppendCells(cells ...IndexCell[T]) {
-	for _, cell := range cells {
-		if len(n.Cells) <= int(n.Header.Keys) {
-			n.Cells = append(n.Cells, NewIndexCell[T](n.Cells[0].unique))
+	needed := int(n.Header.Keys) + len(cells)
+	if needed > len(n.Cells) {
+		// Grow the slice in one shot instead of one cell at a time.
+		n.Cells = append(n.Cells, make([]IndexCell[T], needed-len(n.Cells))...)
+		if len(n.Cells) > 0 {
+			unique := n.Cells[0].unique
+			for i := int(n.Header.Keys); i < len(n.Cells); i++ {
+				n.Cells[i].unique = unique
+			}
 		}
+	}
+	for _, cell := range cells {
 		n.Cells[n.Header.Keys] = cell
 		n.Header.Keys += 1
 	}
@@ -551,7 +559,10 @@ func (n *IndexNode[T]) Clone() *IndexNode[T] {
 	if n.Header.Keys == 0 {
 		return nodeCopy
 	}
-	nodeCopy.Cells = make([]IndexCell[T], n.Header.Keys)
+	// Allocate a few extra slots so that splitChild (which appends one median key
+	// to the parent) and AppendCells (which appends up to rightCount cells to the
+	// new right child) don't immediately trigger a slice reallocation.
+	nodeCopy.Cells = make([]IndexCell[T], n.Header.Keys, n.Header.Keys+4)
 	for i := range n.Header.Keys {
 		nodeCopy.Cells[i] = n.Cells[i].Clone()
 	}
