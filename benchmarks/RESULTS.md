@@ -1,3 +1,31 @@
+### 2026-04-23 (latest)
+
+Skip `GlobalPageVersion` for read-only transactions:
+- `TransactionalPager.ReadPage`: `GlobalPageVersion` (RLock + map lookup + RUnlock on the transaction manager) was called on every single page read, even for read-only transactions where the version is passed straight to `TrackRead` which is a no-op for read-only. Moved the call inside `if !tx.ReadOnly` so it is skipped entirely for SELECT queries.
+- Benefit scales with the number of pages read per query: COUNT(*) scans ~180 leaf pages (15% faster), IndexRangeScan touches hundreds of index + table pages (8% faster, now beats SQLite), FullScan reads ~180 leaf pages (now beats SQLite).
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| Delete_ByPK | 81.5 µs/op | 88.3 µs/op | **0.9×** |
+| Insert_SingleRow | 70.1 µs/op | 41.5 µs/op | 1.7× |
+| Insert_Batch | 590.0 µs/op | 222.0 µs/op | 2.7× |
+| Select_PointScan | 4.5 µs/op | 3.4 µs/op | 1.35× |
+| Select_Limit | 7.2 µs/op | 7.8 µs/op | **0.93×** |
+| Select_FullScan | 5.0 ms/op | 5.1 ms/op | **0.97×** |
+| Select_CountStar | 28.6 µs/op | 9.6 µs/op | 3.0× |
+| Select_IndexRangeScan | 684 µs/op | 748 µs/op | **0.91×** |
+| Select_RangeScan | 2.67 ms/op | 875 µs/op | 3.1× |
+| Txn_NInserts | 343.0 µs/op | 137.6 µs/op | 2.5× |
+| Update_ByPK | 51.5 µs/op | 62.0 µs/op | **0.8×** |
+
+#### Memory (B/op)
+
+_(not measured this run)_
+
+---
+
 ### 2026-04-22 (latest)
 
 `AppendCells` pre-growth + `Clone` extra capacity + `insert.go` fieldPositions map elimination:
