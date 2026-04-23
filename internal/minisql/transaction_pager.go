@@ -37,16 +37,17 @@ func (tp *TransactionalPager) ReadPage(ctx context.Context, pageIdx PageIndex) (
 		return modifiedPage, nil
 	}
 
-	// Read from base pager and track in read set
-	currentVersion := tp.txManager.GlobalPageVersion(ctx, pageIdx)
-
 	page, err := tp.GetPage(ctx, pageIdx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Track this read in our read set
-	tx.TrackRead(pageIdx, currentVersion)
+	// TrackRead is a no-op for read-only transactions, so skip the GlobalPageVersion
+	// mutex acquisition entirely — it would compute a value that is immediately discarded.
+	if !tx.ReadOnly {
+		currentVersion := tp.txManager.GlobalPageVersion(ctx, pageIdx)
+		tx.TrackRead(pageIdx, currentVersion)
+	}
 
 	return page, nil
 }
