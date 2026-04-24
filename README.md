@@ -132,24 +132,38 @@ Notes:
 
 ## Concurrency
 
-MiniSQL uses `Optimistic Concurrency Control` or `OCC`. It is close to PostgreSQL's [SERIALIZABLE isolation](https://www.postgresql.org/docs/current/transaction-iso.html#XACT-SERIALIZABLE) Transaction manager follows a simple process:
+MiniSQL implements two complementary concurrency control mechanisms:
 
-1. Track read versions - Record which version of each page was read
-2. Check at commit time - Verify no pages were modified during the transaction
-3. Abort on conflict - If a page changed, abort with ErrTxConflict
+### Write Transactions — Optimistic Concurrency Control (OCC)
 
-You can use `ErrTxConflict` to control whether to retry because of a tx serialization error or to return error.
+Write transactions use `Optimistic Concurrency Control`. The transaction manager follows a simple process:
 
-SQlite uses a `snapshot isolation` with `MVCC` (`Multi-Version Concurrency Control`). Read how [SQLite handles isolation](https://sqlite.org/isolation.html). I have chosen a basic OCC model for now for its simplicity.
+1. Track read versions — Record the page version at the time each page is first read (captured before the LRU cache read to avoid TOCTOU races with concurrent commits).
+2. Check at commit time — Verify no pages were modified between the first read and the commit.
+3. Abort on conflict — If any tracked page has a newer version at commit time, abort with `ErrTxConflict`.
 
-Example of a snapshot isolation:
+You can use `ErrTxConflict` to decide whether to retry or surface the error to the caller.
+
+### Read-Only Transactions — Snapshot Isolation (MVCC)
+
+Read-only transactions use in-memory `MVCC` (`Multi-Version Concurrency Control`) to provide snapshot isolation: a reader sees the database exactly as it was at the moment `BeginReadOnlyTransaction` was called, regardless of writes that commit afterward.
+
+This is similar to how [SQLite handles isolation](https://sqlite.org/isolation.html). Under the hood:
+
+- A monotonically increasing `commitSeq` counter is incremented on every write commit.
+- Each read-only transaction captures the current `commitSeq` as its `SnapshotSeq` at start time.
+- At write commit time, the pre-modification copy of each modified page is saved in an in-memory version history (`pageVersionHistory`).
+- When a snapshot reader accesses a page whose cached version is newer than its `SnapshotSeq`, it retrieves the appropriate historical version from the version history.
+- Historical versions are garbage-collected once all snapshot readers that needed them have committed.
 
 ```
-Time 0: Read TX1 starts, sees version V1
-Time 1: Write TX2 modifies page and commits → creates version V2
-Time 2: TX1 continues reading, still sees V1 (not V2!)
-Time 3: TX1 completes successfully
+Time 0: Read TX1 starts — SnapshotSeq = 1
+Time 1: Write TX2 modifies page, commits — commitSeq advances to 2; old page saved in version history
+Time 2: TX1 reads the page → sees the historical version at seq 1, not TX2's change
+Time 3: TX1 commits; version history for seq 1 is GC'd
 ```
+
+Checkpoint (WAL truncation) is blocked while any snapshot reader is active, since old page versions are held only in the in-memory version history rather than the WAL.
 
 ## System Table
 

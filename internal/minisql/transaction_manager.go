@@ -4,11 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 )
+
+// pageVersion is one historical snapshot of a page stored in the version
+// history for MVCC snapshot isolation.  It is valid for read transactions
+// whose SnapshotSeq <= validUntilSeq.
+type pageVersion struct {
+	validUntilSeq uint64
+	page          *Page
+}
 
 // pageDataPool is a package-level pool for PageSize-byte slices used during WAL
 // serialization. A single pool is shared across all TransactionManagers (there
@@ -28,6 +37,24 @@ type TransactionManager struct {
 	globalDBHeaderVersion uint64
 	logger                *zap.Logger
 	dbFilePath            string
+
+	// MVCC snapshot isolation fields.
+	//
+	// commitSeq is a monotonically increasing counter incremented on every write
+	// commit.  Read-only transactions record their SnapshotSeq = commitSeq at
+	// Begin time; writes committed after that point are invisible to them.
+	//
+	// pageLastCommittedSeq tracks the commitSeq at which each page was last
+	// written to the shared page cache (via SavePage).  ReadPage compares this
+	// against tx.SnapshotSeq to decide whether the cached version is safe to use.
+	//
+	// pageVersionHistory stores old *Page versions for active snapshot readers.
+	// Each entry is valid for reads where snapshotSeq <= entry.validUntilSeq.
+	// Entries are GC'd when no active reader needs them any more.
+	commitSeq            uint64
+	pageLastCommittedSeq map[PageIndex]uint64
+	pageVersionHistory   map[PageIndex][]pageVersion
+
 	// WAL fields (non-nil when a WAL is configured)
 	walWriteMu          sync.Mutex // serialises WAL appends — only one writer at a time
 	wal                 *WAL
@@ -51,14 +78,16 @@ const (
 // NewTransactionManager creates and returns a new TransactionManager.
 func NewTransactionManager(logger *zap.Logger, dbFilePath string, factory TxPagerFactory, saver PageSaver, ddlSaver DDLSaver) *TransactionManager {
 	return &TransactionManager{
-		nextTxID:           1,
-		transactions:       make(map[TransactionID]*Transaction),
-		globalPageVersions: make(map[PageIndex]uint64),
-		logger:             logger,
-		factory:            factory,
-		dbFilePath:         dbFilePath,
-		saver:              saver,
-		ddlSaver:           ddlSaver,
+		nextTxID:             1,
+		transactions:         make(map[TransactionID]*Transaction),
+		globalPageVersions:   make(map[PageIndex]uint64),
+		pageLastCommittedSeq: make(map[PageIndex]uint64),
+		pageVersionHistory:   make(map[PageIndex][]pageVersion),
+		logger:               logger,
+		factory:              factory,
+		dbFilePath:           dbFilePath,
+		saver:                saver,
+		ddlSaver:             ddlSaver,
 	}
 }
 
@@ -79,9 +108,22 @@ func (tm *TransactionManager) SetCheckpointFunc(fn func() error) {
 //  4. Reset the in-memory WAL index (under tm.mu).
 //
 // Returns ErrNotWALMode if no WAL is configured.
+// Returns ErrCheckpointBlockedByReaders if any read-only snapshot transaction
+// is currently active.  Callers should retry after the readers have finished.
 func (tm *TransactionManager) CheckpointWAL(dbFile DBFile) error {
 	if tm.wal == nil {
 		return ErrNotWALMode
+	}
+
+	// Block the checkpoint while snapshot readers are active.  After a successful
+	// checkpoint the WAL index is reset and the DB file holds the latest version,
+	// so any reader that started before this checkpoint could see wrong data if
+	// we proceeded.
+	tm.mu.RLock()
+	blocked := tm.hasActiveSnapshotReadersLocked()
+	tm.mu.RUnlock()
+	if blocked {
+		return ErrCheckpointBlockedByReaders
 	}
 
 	tm.walWriteMu.Lock()
@@ -184,17 +226,146 @@ func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction
 	return tx
 }
 
-// BeginReadOnlyTransaction starts a read-only transaction.  TrackRead calls
-// are no-ops, so the ReadSet is never allocated.  Conflict validation is
-// skipped at commit time.  Use this for SELECT queries.
+// BeginReadOnlyTransaction starts a read-only transaction with snapshot
+// isolation.  The transaction sees a consistent snapshot of the database as
+// of the moment it begins: any write committed after this call is invisible
+// to it.  TrackRead calls are no-ops; conflict validation is skipped at
+// commit time.  Read-only transactions never return ErrTxConflict.
+//
+// SnapshotSeq is captured inside tm.mu so it is atomic with the transaction
+// registration — preventing a race where a write commits between the map
+// insert and the seq capture.
 func (tm *TransactionManager) BeginReadOnlyTransaction(ctx context.Context) *Transaction {
-	tx := tm.BeginTransaction(ctx)
-	tx.ReadOnly = true
+	tm.mu.Lock()
+	tx := &Transaction{
+		ID:          tm.nextTxID,
+		StartTime:   time.Now(),
+		WriteSet:    make(map[PageIndex]WriteInfo),
+		Status:      TxActive,
+		ReadOnly:    true,
+		SnapshotSeq: tm.commitSeq,
+	}
+	tm.nextTxID++
+	tm.transactions[tx.ID] = tx
+	tm.mu.Unlock()
+
+	tm.logger.Debug("begin read-only transaction",
+		zap.Uint64("tx_id", uint64(tx.ID)),
+		zap.Uint64("snapshot_seq", tx.SnapshotSeq),
+	)
 	return tx
 }
 
 // ErrTxConflict is returned when an optimistic concurrency check fails at commit time.
 var ErrTxConflict = errors.New("transaction conflict detected")
+
+// ErrCheckpointBlockedByReaders is returned when a checkpoint cannot proceed
+// because one or more read-only transactions hold snapshots that predate the
+// current commitSeq.  Callers should retry after the readers have finished.
+var ErrCheckpointBlockedByReaders = errors.New("checkpoint blocked: active snapshot readers")
+
+// ---- MVCC helpers ----
+
+// minActiveSnapshotSeqLocked returns the minimum SnapshotSeq across all active
+// read-only transactions, or math.MaxUint64 when none exist.
+// Caller must hold tm.mu (read or write lock).
+func (tm *TransactionManager) minActiveSnapshotSeqLocked() uint64 {
+	minSeq := uint64(math.MaxUint64)
+	for _, tx := range tm.transactions {
+		if tx.ReadOnly && tx.Status == TxActive && tx.SnapshotSeq < minSeq {
+			minSeq = tx.SnapshotSeq
+		}
+	}
+	return minSeq
+}
+
+// hasActiveSnapshotReadersLocked reports whether any read-only transaction is
+// currently active.  Caller must hold tm.mu (read or write lock).
+func (tm *TransactionManager) hasActiveSnapshotReadersLocked() bool {
+	for _, tx := range tm.transactions {
+		if tx.ReadOnly && tx.Status == TxActive {
+			return true
+		}
+	}
+	return false
+}
+
+// appendPageVersionLocked adds an old page snapshot to the version history for
+// pageIdx.  validUntilSeq is the highest SnapshotSeq for which this version
+// should be served (i.e., the commitSeq of the write that replaced it minus 1).
+// Entries are appended in monotonically increasing validUntilSeq order because
+// commits are serialised.  Caller must hold tm.mu write lock.
+func (tm *TransactionManager) appendPageVersionLocked(pageIdx PageIndex, validUntilSeq uint64, page *Page) {
+	tm.pageVersionHistory[pageIdx] = append(tm.pageVersionHistory[pageIdx], pageVersion{
+		validUntilSeq: validUntilSeq,
+		page:          page,
+	})
+}
+
+// trimPageVersionHistoryLocked removes version-history entries that are no
+// longer needed by any active snapshot reader.  Should be called after a
+// transaction is removed from tm.transactions.  Caller must hold tm.mu write lock.
+func (tm *TransactionManager) trimPageVersionHistoryLocked() {
+	minSnap := tm.minActiveSnapshotSeqLocked()
+	if minSnap == math.MaxUint64 {
+		// No active readers — discard all history immediately.
+		tm.pageVersionHistory = make(map[PageIndex][]pageVersion)
+		return
+	}
+	// Remove entries whose validUntilSeq is strictly less than minSnap: every
+	// active reader has SnapshotSeq >= minSnap, so they will never need a version
+	// that was superseded before minSnap.
+	for pageIdx, versions := range tm.pageVersionHistory {
+		lo := 0
+		for lo < len(versions) && versions[lo].validUntilSeq < minSnap {
+			lo++
+		}
+		if lo > 0 {
+			tm.pageVersionHistory[pageIdx] = versions[lo:]
+		}
+	}
+}
+
+// PageLastCommittedSeq returns the commitSeq at which pageIdx was last updated
+// in the shared page cache.  Used by ReadPage to decide whether the cached
+// version is safe to serve to a snapshot reader.
+func (tm *TransactionManager) PageLastCommittedSeq(pageIdx PageIndex) uint64 {
+	tm.mu.RLock()
+	seq := tm.pageLastCommittedSeq[pageIdx]
+	tm.mu.RUnlock()
+	return seq
+}
+
+// PageVersionAtSnapshot returns the *Page that was current for the given
+// snapshotSeq by binary-searching the version history.  ok is false when no
+// suitable entry exists (page either predates any WAL write or was newly
+// allocated after the snapshot).
+func (tm *TransactionManager) PageVersionAtSnapshot(pageIdx PageIndex, snapshotSeq uint64) (*Page, bool) {
+	tm.mu.RLock()
+	versions := tm.pageVersionHistory[pageIdx]
+	tm.mu.RUnlock()
+
+	if len(versions) == 0 {
+		return nil, false
+	}
+
+	// Versions are ordered by validUntilSeq ascending.  We want the entry with
+	// the smallest validUntilSeq that is still >= snapshotSeq — that is the
+	// version which was current at snapshotSeq.
+	lo, hi := 0, len(versions)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if versions[mid].validUntilSeq < snapshotSeq {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo < len(versions) {
+		return versions[lo].page, true
+	}
+	return nil, false
+}
 
 // CommitTransaction validates the write set for conflicts and, if clean, persists all changes.
 // When a WAL is configured it uses the WAL commit path; otherwise it writes directly to the pager
@@ -237,9 +408,15 @@ func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction)
 	if isReadOnly {
 		tx.Commit()
 		delete(tm.transactions, tx.ID)
+		tm.trimPageVersionHistoryLocked()
 		tm.logger.Debug("commit read-only transaction", zap.Uint64("tx_id", uint64(tx.ID)))
 		return nil
 	}
+
+	// Advance the commit sequence for MVCC snapshot isolation.
+	tm.commitSeq++
+	newSeq := tm.commitSeq
+	minSnap := tm.minActiveSnapshotSeqLocked()
 
 	pagesToFlush := make([]PageIndex, 0, len(tx.WriteSet)+1)
 
@@ -249,9 +426,15 @@ func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction)
 		tm.globalDBHeaderVersion += 1
 		pagesToFlush = append(pagesToFlush, 0)
 	}
-	// Apply page writes.
+	// Apply page writes.  For each page, save the old version into the history
+	// before overwriting the cache so active snapshot readers can still see the
+	// pre-commit state.
 	for pageIdx, info := range writeInfos {
+		if minSnap < newSeq && info.OriginalPage != nil {
+			tm.appendPageVersionLocked(pageIdx, newSeq-1, info.OriginalPage)
+		}
 		tm.saver.SavePage(ctx, pageIdx, info.Page)
+		tm.pageLastCommittedSeq[pageIdx] = newSeq
 		tm.globalPageVersions[pageIdx] += 1
 		pagesToFlush = append(pagesToFlush, pageIdx)
 	}
@@ -321,6 +504,7 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 		}
 		tx.Commit()
 		delete(tm.transactions, tx.ID)
+		tm.trimPageVersionHistoryLocked()
 		tm.mu.Unlock()
 		tm.logger.Debug("commit read-only transaction (WAL)", zap.Uint64("tx_id", uint64(tx.ID)))
 		return nil
@@ -381,8 +565,16 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 		tm.saver.SaveHeader(ctx, *header)
 		tm.globalDBHeaderVersion++
 	}
+	// Advance commit sequence and save old page versions for snapshot readers.
+	tm.commitSeq++
+	newSeq := tm.commitSeq
+	minSnap := tm.minActiveSnapshotSeqLocked()
 	for pageIdx, info := range writeInfos {
+		if minSnap < newSeq && info.OriginalPage != nil {
+			tm.appendPageVersionLocked(pageIdx, newSeq-1, info.OriginalPage)
+		}
 		tm.saver.SavePage(ctx, pageIdx, info.Page)
+		tm.pageLastCommittedSeq[pageIdx] = newSeq
 		tm.globalPageVersions[pageIdx] += 1
 	}
 	if tx.DDLChanges.HasChanges() {
@@ -506,8 +698,10 @@ func (tm *TransactionManager) serializePage0ForWAL(ctx context.Context, page0 *P
 
 // runAutoCheckpoint triggers a WAL checkpoint when the frame count exceeds the
 // configured threshold.  The checkpoint is performed via checkpointFn (set by
-// SetCheckpointFunc).  If no function is registered the call is a no-op.
-// Failures are logged but do not propagate — the commit already succeeded.
+// SetCheckpointFunc).  If no function is registered, or if snapshot readers
+// are active, the call is a no-op (the checkpoint will be attempted on the
+// next commit once the readers have finished).  Failures are logged but do not
+// propagate — the commit already succeeded.
 func (tm *TransactionManager) runAutoCheckpoint(_ context.Context) {
 	if tm.checkpointThreshold <= 0 || tm.wal == nil || tm.checkpointFn == nil {
 		return
@@ -515,11 +709,22 @@ func (tm *TransactionManager) runAutoCheckpoint(_ context.Context) {
 	if tm.wal.FrameCount() < int64(tm.checkpointThreshold) {
 		return
 	}
+	// Skip if snapshot readers are active; they will be unblocked by the next
+	// commit that reduces minActiveSnapshotSeq.
+	tm.mu.RLock()
+	blocked := tm.hasActiveSnapshotReadersLocked()
+	tm.mu.RUnlock()
+	if blocked {
+		tm.logger.Debug("auto-checkpoint deferred: active snapshot readers")
+		return
+	}
 	if err := tm.checkpointFn(); err != nil {
-		tm.logger.Warn("WAL auto-checkpoint failed",
-			zap.Int64("frame_count", tm.wal.FrameCount()),
-			zap.Int("threshold", tm.checkpointThreshold),
-			zap.Error(err))
+		if !errors.Is(err, ErrCheckpointBlockedByReaders) {
+			tm.logger.Warn("WAL auto-checkpoint failed",
+				zap.Int64("frame_count", tm.wal.FrameCount()),
+				zap.Int("threshold", tm.checkpointThreshold),
+				zap.Error(err))
+		}
 	}
 }
 
@@ -527,9 +732,10 @@ func (tm *TransactionManager) runAutoCheckpoint(_ context.Context) {
 func (tm *TransactionManager) RollbackTransaction(ctx context.Context, tx *Transaction) {
 	tx.Abort()
 
-	// Clean up transaction
+	// Clean up transaction and GC any version history that is no longer needed.
 	tm.mu.Lock()
 	delete(tm.transactions, tx.ID)
+	tm.trimPageVersionHistoryLocked()
 	tm.mu.Unlock()
 
 	tm.logger.Debug("rollback transaction", zap.Uint64("tx_id", uint64(tx.ID)))
