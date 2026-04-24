@@ -73,6 +73,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 			&Page{Index: PageIndex(4)},
 			"users",
 			"pk_users",
+			nil,
 		}
 
 		// Setup expectations
@@ -127,6 +128,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 			&Page{Index: PageIndex(3), LeafNode: NewLeafNode()},
 			"orders",
 			"pk_orders",
+			nil,
 		}
 
 		// Setup expectations
@@ -184,6 +186,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 			&Page{Index: PageIndex(4)},
 			"orders",
 			"pk_orders",
+			nil,
 		}
 
 		// Second tx will modify the same page to cause conflict
@@ -192,6 +195,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 			&Page{Index: PageIndex(4)},
 			"orders",
 			"pk_orders",
+			nil,
 		}
 
 		// Setup expectations
@@ -248,6 +252,7 @@ func TestTransactionManager_Rollback(t *testing.T) {
 		&Page{Index: PageIndex(4)},
 		"users",
 		"",
+		nil,
 	}
 
 	txManager.RollbackTransaction(ctx, tx)

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLite. It implements a hand-written state-machine SQL parser, a B+ tree storage engine with 4 KB pages, an LRU page cache, a Write-Ahead Log (WAL) for crash recovery, and optimistic concurrency control (OCC). It registers itself as a `database/sql` driver.
+MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLite. It implements a hand-written state-machine SQL parser, a B+ tree storage engine with 4 KB pages, an LRU page cache, a Write-Ahead Log (WAL) for crash recovery, optimistic concurrency control (OCC) for write transactions, and in-memory MVCC snapshot isolation for read-only transactions. It registers itself as a `database/sql` driver.
 
 **Module:** `github.com/RichardKnop/minisql`
 **Go version:** 1.26
@@ -41,7 +41,7 @@ MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLi
 │   │   ├── pager.go        # In-memory page cache + LRU eviction
 │   │   ├── page.go         # Page: LeafNode / InternalNode / OverflowPage
 │   │   ├── transaction.go  # Transaction struct + context helpers
-│   │   ├── transaction_manager.go  # OCC manager: read-set tracking, conflict detection
+│   │   ├── transaction_manager.go  # OCC (write txns) + MVCC snapshot isolation (read-only txns)
 │   │   ├── index.go        # B+ tree index (primary, unique, secondary)
 │   │   ├── cursor.go       # Row cursor for B+ tree traversal
 │   │   ├── wal.go          # Write-Ahead Log: append frames, replay, checkpoint
@@ -496,9 +496,21 @@ When adding filtering/transformation stages, insert them as goroutines between `
 
 ### Transactions
 
-- Read operations: call `txPager.ReadPage()` — tracked in the read-set.
-- Write operations: call `txPager.ModifyPage()` — page is copied into the write-set.
-- All Table methods run inside a transaction context supplied by `TransactionManager.ExecuteInTransaction`.
+MiniSQL uses two complementary concurrency mechanisms:
+
+**Write transactions — Optimistic Concurrency Control (OCC)**
+- `txPager.ReadPage()` captures the global page version *before* reading the LRU cache (important: version is read first to avoid a TOCTOU race with concurrent commits), then records it in the read-set.
+- `txPager.ModifyPage()` clones the page into the write-set.  It also performs early conflict detection: if the page was previously read and the global version has advanced since then, it returns `ErrTxConflict` immediately rather than waiting for commit-time validation.
+- At commit time, each read-set version is checked against the current global page version; any mismatch returns `ErrTxConflict`.
+- All Table methods run inside a write transaction context supplied by `TransactionManager.ExecuteInTransaction`.
+
+**Read-only transactions — Snapshot Isolation (MVCC)**
+- `BeginReadOnlyTransaction` captures `tm.commitSeq` as the transaction's `SnapshotSeq` (under `tm.mu` to prevent races with concurrent commits).
+- `ReadPage` for read-only transactions checks `pageLastCommittedSeq[pageIdx]` against `tx.SnapshotSeq`. If the cached page was committed after the snapshot, it retrieves the historical version from `pageVersionHistory` instead.
+- At write commit time, the pre-modification page (`WriteInfo.OriginalPage`) is saved in `pageVersionHistory` with `validUntilSeq = commitSeq - 1` if any snapshot readers need it.
+- `trimPageVersionHistoryLocked` GC's historical versions no longer needed by any active reader (called on each commit/rollback).
+- Checkpoint (WAL truncation) is blocked while snapshot readers are active (`ErrCheckpointBlockedByReaders`).
+- Use `ExecuteReadOnlyTransaction` for the read-only wrapper; `BeginReadOnlyTransaction` + `CommitTransaction` manually if you need the snapshot seq.
 
 ---
 

@@ -38,8 +38,9 @@ type TransactionID uint64
 // WriteInfo holds a modified page together with the table and index names it belongs to.
 type WriteInfo struct {
 	*Page
-	Table string
-	Index string
+	Table        string
+	Index        string
+	OriginalPage *Page // page as it was before modification; nil for newly-allocated pages
 }
 
 // Transaction tracks the read and write sets for optimistic concurrency control.
@@ -57,7 +58,11 @@ type Transaction struct {
 	// skipped at commit time.  This eliminates per-page map writes and mutex
 	// acquisitions on read-heavy queries (e.g. COUNT(*), full-table scans).
 	ReadOnly bool
-	mu       sync.RWMutex
+	// SnapshotSeq is the value of TransactionManager.commitSeq at the moment
+	// this read-only transaction was registered.  Any write committed after
+	// this point is invisible to the transaction.  Always 0 for write transactions.
+	SnapshotSeq uint64
+	mu          sync.RWMutex
 }
 
 // TransactionStatus represents the lifecycle state of a transaction.
@@ -100,14 +105,18 @@ func (tx *Transaction) TrackRead(pageIdx PageIndex, version uint64) {
 }
 
 // TrackWrite records a modified page in the transaction write set.
-func (tx *Transaction) TrackWrite(pageIdx PageIndex, page *Page, table, index string) {
+// originalPage is the page as it was before modification; it is stored for
+// MVCC snapshot reads and must not be nil for pages that existed prior to
+// this transaction (use nil for newly-allocated pages).
+func (tx *Transaction) TrackWrite(pageIdx PageIndex, page, originalPage *Page, table, index string) {
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
 
 	tx.WriteSet[pageIdx] = WriteInfo{
-		Page:  page,
-		Table: table,
-		Index: index,
+		Page:         page,
+		Table:        table,
+		Index:        index,
+		OriginalPage: originalPage,
 	}
 }
 
@@ -129,6 +138,18 @@ func (tx *Transaction) TrackDBHeaderWrite(header DatabaseHeader) {
 	defer tx.mu.Unlock()
 
 	tx.DBHeaderWrite = &header
+}
+
+// GetReadVersion returns the version recorded when the given page was read, if any.
+func (tx *Transaction) GetReadVersion(pageIdx PageIndex) (uint64, bool) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+
+	if tx.ReadSet == nil {
+		return 0, false
+	}
+	v, ok := tx.ReadSet[pageIdx]
+	return v, ok
 }
 
 // GetReadVersions returns a copy of the page read-version map.

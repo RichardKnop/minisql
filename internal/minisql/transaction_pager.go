@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"go.uber.org/zap"
 )
 
 // TransactionalPager wraps a base Pager and routes reads and writes through the current transaction.
@@ -24,6 +26,18 @@ func NewTransactionalPager(basePager Pager, txManager *TransactionManager, table
 }
 
 // ReadPage returns the page at pageIdx, returning the in-progress write copy if it exists.
+//
+// For read-only (snapshot) transactions the method enforces snapshot isolation:
+//   - If the page was last committed at or before tx.SnapshotSeq, the shared
+//     page cache is safe to use — no concurrent write has touched it since the
+//     snapshot started.
+//   - Otherwise the method retrieves the historical version from the
+//     TransactionManager's page-version history (saved at commit time by the
+//     writer that superseded the page).
+//   - If no historical version is found (the page was newly allocated after
+//     the snapshot), the cached version is returned as a safe fallback; this
+//     should not occur during normal B+ tree traversal because pre-snapshot
+//     pointer chains never reference post-snapshot pages.
 func (tp *TransactionalPager) ReadPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
 	tx := TxFromContext(ctx)
 	if tx == nil {
@@ -31,10 +45,22 @@ func (tp *TransactionalPager) ReadPage(ctx context.Context, pageIdx PageIndex) (
 		return tp.GetPage(ctx, pageIdx)
 	}
 
-	// Check if we have a modified version in our write set
-	modifiedPage, exists := tx.GetModifiedPage(pageIdx)
-	if exists {
+	// Check if we have a modified version in our write set (always empty for read-only txns)
+	if modifiedPage, exists := tx.GetModifiedPage(pageIdx); exists {
 		return modifiedPage, nil
+	}
+
+	// For write transactions the page version must be captured BEFORE reading
+	// the page content from the LRU cache to avoid a TOCTOU race: if a commit
+	// lands between GetPage (pager mutex) and GlobalPageVersion (txManager
+	// mutex), we would record a version that is newer than the page content we
+	// actually read.  By snapshotting the version first, any interleaved commit
+	// causes readVersion < the post-commit version seen at ModifyPage time,
+	// which the OCC check will catch.  Read-only transactions skip this to
+	// avoid the mutex acquisition (the version is never used for them).
+	var readVersion uint64
+	if !tx.ReadOnly {
+		readVersion = tp.txManager.GlobalPageVersion(ctx, pageIdx)
 	}
 
 	page, err := tp.GetPage(ctx, pageIdx)
@@ -42,13 +68,34 @@ func (tp *TransactionalPager) ReadPage(ctx context.Context, pageIdx PageIndex) (
 		return nil, err
 	}
 
-	// TrackRead is a no-op for read-only transactions, so skip the GlobalPageVersion
-	// mutex acquisition entirely — it would compute a value that is immediately discarded.
 	if !tx.ReadOnly {
-		currentVersion := tp.txManager.GlobalPageVersion(ctx, pageIdx)
-		tx.TrackRead(pageIdx, currentVersion)
+		tx.TrackRead(pageIdx, readVersion)
+		return page, nil
 	}
 
+	// Read-only snapshot path: check whether the cached version is safe for
+	// this snapshot.
+	lastCommitted := tp.txManager.PageLastCommittedSeq(pageIdx)
+	if lastCommitted <= tx.SnapshotSeq {
+		// The cache was last updated at or before our snapshot — safe to use.
+		return page, nil
+	}
+
+	// The cache is newer than our snapshot.  Retrieve the historical version.
+	if historical, ok := tp.txManager.PageVersionAtSnapshot(pageIdx, tx.SnapshotSeq); ok {
+		return historical, nil
+	}
+
+	// No historical version found.  This can only happen for pages that were
+	// newly allocated (by a split, overflow, or free-list add) after our snapshot
+	// started.  Under correct snapshot pointer-following the caller should never
+	// reach a post-snapshot page, but if it does we return the cache version as a
+	// best-effort fallback and log a warning so it can be investigated.
+	tp.txManager.logger.Warn("snapshot gap: no historical version for page, using cache",
+		zap.Uint64("page_idx", uint64(pageIdx)),
+		zap.Uint64("snapshot_seq", tx.SnapshotSeq),
+		zap.Uint64("last_committed_seq", lastCommitted),
+	)
 	return page, nil
 }
 
@@ -71,9 +118,24 @@ func (tp *TransactionalPager) ModifyPage(ctx context.Context, pageIdx PageIndex)
 		return nil, err
 	}
 
-	// Create a deep copy for modification
+	// Early conflict detection: if this page was already read by this transaction
+	// and the page has since been updated by a concurrent commit, fail fast with
+	// ErrTxConflict rather than letting the stale cursor position produce a
+	// confusing "duplicate key" error later.
+	if !tx.ReadOnly {
+		if readVersion, ok := tx.GetReadVersion(pageIdx); ok {
+			currentVersion := tp.txManager.GlobalPageVersion(ctx, pageIdx)
+			if currentVersion != readVersion {
+				return nil, ErrTxConflict
+			}
+		}
+	}
+
+	// Create a deep copy for modification.  Keep a reference to originalPage so
+	// the transaction manager can store it in the version history at commit time
+	// for any concurrent snapshot readers.
 	modifiedPage = originalPage.Clone()
-	tx.TrackWrite(pageIdx, modifiedPage, tp.table, tp.index)
+	tx.TrackWrite(pageIdx, modifiedPage, originalPage, tp.table, tp.index)
 
 	return modifiedPage, nil
 }
