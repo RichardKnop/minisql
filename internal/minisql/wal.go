@@ -8,6 +8,7 @@ import (
 	"hash/crc32"
 	"io"
 	"os"
+	"sort"
 )
 
 // WAL file-format constants.
@@ -340,12 +341,43 @@ func (w *WAL) Checkpoint(dbFile DBFile) error {
 		return nil
 	}
 
-	// Write each page to the correct offset in the database file.
-	for pageIdx, data := range latest {
-		offset := int64(pageIdx) * int64(w.pageSize)
-		if _, err := dbFile.WriteAt(data, offset); err != nil {
-			return fmt.Errorf("checkpoint page %d: %w", pageIdx, err)
+	// Sort page indices so that consecutive pages can be coalesced into a single
+	// WriteAt call, replacing one syscall per page with one syscall per contiguous
+	// run.  For append-heavy workloads new leaf pages are allocated sequentially, so
+	// most pages end up in a single run.
+	pageIndices := make([]PageIndex, 0, len(latest))
+	for idx := range latest {
+		pageIndices = append(pageIndices, idx)
+	}
+	sort.Slice(pageIndices, func(i, j int) bool { return pageIndices[i] < pageIndices[j] })
+
+	psz := int64(w.pageSize)
+	i := 0
+	for i < len(pageIndices) {
+		// Extend the run while pages are consecutive.
+		j := i + 1
+		for j < len(pageIndices) && pageIndices[j] == pageIndices[j-1]+1 {
+			j++
 		}
+
+		var buf []byte
+		if j == i+1 {
+			// Single page — use its buffer directly (no copy).
+			buf = latest[pageIndices[i]]
+		} else {
+			// Multiple consecutive pages — concatenate into one buffer.
+			runLen := j - i
+			buf = make([]byte, int64(runLen)*psz)
+			for k := 0; k < runLen; k++ {
+				copy(buf[int64(k)*psz:], latest[pageIndices[i+k]])
+			}
+		}
+
+		offset := int64(pageIndices[i]) * psz
+		if _, err := dbFile.WriteAt(buf, offset); err != nil {
+			return fmt.Errorf("checkpoint pages %d..%d: %w", pageIndices[i], pageIndices[j-1], err)
+		}
+		i = j
 	}
 
 	if err := fastSync(dbFile); err != nil {
