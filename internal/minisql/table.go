@@ -614,7 +614,14 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 	if err != nil {
 		return fmt.Errorf("internal node split insert: %w", err)
 	}
-	parentPage.InternalNode.ICells[parentPage.InternalNode.IndexOfChild(oldMaxKey)].Key = maxAfterSplit
+	// Update the parent's key for the split (left) page from oldMaxKey to maxAfterSplit.
+	// IndexOfChild returns KeysNum when splitPage is the parent's right child (no explicit ICell key).
+	// In that case, the InternalNodeInsert call below will handle the demotion naturally:
+	// newPage (with the larger keys) replaces the right child slot and splitPage gets
+	// an ICell with key=maxAfterSplit.
+	if idx := parentPage.InternalNode.IndexOfChild(oldMaxKey); idx < parentPage.InternalNode.Header.KeysNum {
+		parentPage.InternalNode.ICells[idx].Key = maxAfterSplit
+	}
 
 	if splittingRoot {
 		return nil
