@@ -44,6 +44,10 @@ type Database struct {
 	clock          clock
 	logger         *zap.Logger
 	lockedProvider TableProvider
+	// rowCounts stores the total row count for each user table, kept up to date
+	// by insert/delete operations so that COUNT(*) can be served in O(1).
+	rowCounts   map[string]int64
+	rowCountsMu sync.RWMutex
 }
 
 type clock func() Time
@@ -58,6 +62,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, par
 		factory:    factory,
 		saver:      saver,
 		tables:     make(map[string]*Table),
+		rowCounts:  make(map[string]int64),
 		dbLock:     new(sync.RWMutex),
 		stmtCache:  lrucache.New[string](defaultMaxCachedStatements),
 		logger:     logger,
@@ -77,6 +82,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, par
 	db.lockedProvider = &lockedTableProvider{db: db}
 
 	db.txManager = NewTransactionManager(logger, dbFilePath, db.pagerFactory, saver, db)
+	db.txManager.SetRowCountApplier(db.applyRowCountDeltas)
 
 	if walCfg != nil {
 		db.wal = walCfg.WAL
@@ -212,6 +218,11 @@ func (d *Database) Reopen(ctx context.Context, factory PagerFactory, saver PageS
 	d.saver = saver
 	d.tables = make(map[string]*Table)
 
+	// Reset the row-count cache; init() will repopulate it via leaf walks.
+	d.rowCountsMu.Lock()
+	d.rowCounts = make(map[string]int64)
+	d.rowCountsMu.Unlock()
+
 	// Preserve WAL settings then create a fresh transaction manager for the new
 	// file.  The old manager's global page versions are no longer valid after a
 	// file swap, and its saver points to the closed old file.
@@ -220,6 +231,7 @@ func (d *Database) Reopen(ctx context.Context, factory PagerFactory, saver PageS
 		checkpointFn        = d.txManager.checkpointFn
 	)
 	d.txManager = NewTransactionManager(d.logger, d.dbFilePath, d.pagerFactory, saver, d)
+	d.txManager.SetRowCountApplier(d.applyRowCountDeltas)
 	if d.wal != nil {
 		d.txManager.wal = d.wal
 		d.txManager.walIndex = d.walIndex
@@ -277,6 +289,57 @@ func (d *Database) pagerFactory(ctx context.Context, tableName, indexName string
 	return d.factory.ForIndex(columns, unique), nil
 }
 
+// applyRowCountDeltas applies committed insert/delete row-count changes to the
+// in-memory cache.  Only entries that already exist in rowCounts (i.e. user
+// tables) are updated; system tables are not tracked and are silently ignored.
+func (d *Database) applyRowCountDeltas(deltas map[string]int64) {
+	d.rowCountsMu.Lock()
+	for name, delta := range deltas {
+		if _, tracked := d.rowCounts[name]; tracked {
+			d.rowCounts[name] += delta
+		}
+	}
+	d.rowCountsMu.Unlock()
+}
+
+// rowCountGetter returns a closure that reads the cached row count for
+// tableName from this Database's rowCounts map.
+func (d *Database) rowCountGetter(tableName string) func() int64 {
+	return func() int64 {
+		d.rowCountsMu.RLock()
+		n := d.rowCounts[tableName]
+		d.rowCountsMu.RUnlock()
+		return n
+	}
+}
+
+// initTableRowCount counts the rows in table via a B+ tree leaf walk and
+// stores the result in d.rowCounts[tableName].  It also wires up the O(1)
+// getter on the table so future COUNT(*) calls bypass the walk entirely.
+func (d *Database) initTableRowCount(ctx context.Context, tableName string, table *Table) {
+	// getRowCount is nil at this point, so countAllLeafWalk falls back to the
+	// leaf walk — exactly what we want for the initial population.
+	result, err := table.countAllLeafWalk(ctx)
+	if err != nil {
+		d.logger.Warn("failed to initialise row count; COUNT(*) will fall back to leaf walk",
+			zap.String("table", tableName), zap.Error(err))
+		return
+	}
+	var count int64
+	if result.Rows.Next(ctx) {
+		row := result.Rows.Row()
+		if len(row.Values) > 0 {
+			if n, ok := row.Values[0].Value.(int64); ok {
+				count = n
+			}
+		}
+	}
+	d.rowCountsMu.Lock()
+	d.rowCounts[tableName] = count
+	d.rowCountsMu.Unlock()
+	table.getRowCount = d.rowCountGetter(tableName)
+}
+
 // SaveDDLChanges applies committed DDL changes (table/index creates and drops) to the in-memory schema.
 func (d *Database) SaveDDLChanges(ctx context.Context, changes DDLChanges) {
 	if !changes.HasChanges() {
@@ -288,9 +351,18 @@ func (d *Database) SaveDDLChanges(ctx context.Context, changes DDLChanges) {
 
 	for _, table := range changes.CreateTables {
 		d.tables[table.Name] = table
+		// New tables start with zero rows.
+		tableName := table.Name
+		d.rowCountsMu.Lock()
+		d.rowCounts[tableName] = 0
+		d.rowCountsMu.Unlock()
+		table.getRowCount = d.rowCountGetter(tableName)
 	}
 	for _, tableName := range changes.DropTables {
 		delete(d.tables, tableName)
+		d.rowCountsMu.Lock()
+		delete(d.rowCounts, tableName)
+		d.rowCountsMu.Unlock()
 	}
 	for tableName, index := range changes.CreateIndexes {
 		d.tables[tableName].SetSecondaryIndex(index.Name, index.Columns, index.Index)
@@ -426,6 +498,10 @@ func (d *Database) init(ctx context.Context) error {
 		case SchemaTable:
 			if err := d.initTable(ctx, schema); err != nil {
 				return err
+			}
+			// Populate row-count cache so COUNT(*) can be answered in O(1).
+			if table, ok := d.tables[schema.Name]; ok {
+				d.initTableRowCount(ctx, schema.Name, table)
 			}
 		case SchemaPrimaryKey:
 			if err := d.initPrimaryKey(ctx, schema); err != nil {

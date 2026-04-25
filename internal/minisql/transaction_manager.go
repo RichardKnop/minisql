@@ -65,6 +65,7 @@ type TransactionManager struct {
 	saver               PageSaver
 	ddlSaver            DDLSaver
 	commitHook          func(commitPhase)
+	rowCountApplier     func(map[string]int64) // called after each successful write commit
 }
 
 type commitPhase string
@@ -96,6 +97,14 @@ func NewTransactionManager(logger *zap.Logger, dbFilePath string, factory TxPage
 // Database.Checkpoint so the auto-checkpoint path mirrors the manual one.
 func (tm *TransactionManager) SetCheckpointFunc(fn func() error) {
 	tm.checkpointFn = fn
+}
+
+// SetRowCountApplier registers a callback that is invoked after each
+// successful write commit with the net row-count deltas for the transaction.
+// The Database uses this to keep in-memory row counts up to date so that
+// COUNT(*) queries can be answered in O(1) without a leaf-page walk.
+func (tm *TransactionManager) SetRowCountApplier(fn func(map[string]int64)) {
+	tm.rowCountApplier = fn
 }
 
 // CheckpointWAL checkpoints the WAL into dbFile, then truncates it.
@@ -451,6 +460,11 @@ func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction)
 		tm.ddlSaver.SaveDDLChanges(ctx, tx.DDLChanges)
 	}
 
+	if tm.rowCountApplier != nil {
+		if deltas := tx.RowCountDeltas(); len(deltas) > 0 {
+			tm.rowCountApplier(deltas)
+		}
+	}
 	tx.Commit()
 	delete(tm.transactions, tx.ID)
 	tm.logger.Debug("commit transaction", zap.Uint64("tx_id", uint64(tx.ID)))
@@ -579,6 +593,11 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 	}
 	if tx.DDLChanges.HasChanges() {
 		tm.ddlSaver.SaveDDLChanges(ctx, tx.DDLChanges)
+	}
+	if tm.rowCountApplier != nil {
+		if deltas := tx.RowCountDeltas(); len(deltas) > 0 {
+			tm.rowCountApplier(deltas)
+		}
 	}
 	tx.Commit()
 	delete(tm.transactions, tx.ID)

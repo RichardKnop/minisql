@@ -25,6 +25,10 @@ type Table struct {
 	txManager            *TransactionManager
 	indexStats           map[string]IndexStats
 	provider             TableProvider // Access to other tables for JOIN operations
+	// getRowCount returns the cached total row count for this table in O(1).
+	// It is nil for system tables and for tables loaded before the row-count
+	// cache has been initialised.  When nil, COUNT(*) falls back to a leaf walk.
+	getRowCount func() int64
 }
 
 // TableOption ...
@@ -48,6 +52,15 @@ func WithUniqueIndex(index UniqueIndex) TableOption {
 func WithSecondaryIndex(index SecondaryIndex) TableOption {
 	return func(t *Table) {
 		t.SecondaryIndexes[index.Name] = index
+	}
+}
+
+// WithRowCountGetter sets an O(1) row-count accessor on the table.
+// When set, COUNT(*) with no WHERE clause returns the value directly
+// instead of performing a leaf-page walk.
+func WithRowCountGetter(fn func() int64) TableOption {
+	return func(t *Table) {
+		t.getRowCount = fn
 	}
 }
 
