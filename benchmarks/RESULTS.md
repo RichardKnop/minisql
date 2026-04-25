@@ -1,5 +1,52 @@
 ### 2026-04-25 (latest)
 
+Two-phase unmarshal (late materialization) for sequential scan:
+- `sequentialScan` in `select.go` now splits decoding into two phases when a WHERE predicate references a strict subset of the selected columns.
+- Phase 1 decodes only the filter columns and evaluates the predicate. Rows that fail are discarded immediately, skipping all allocations for the remaining (often expensive) columns.
+- Phase 2 decodes the full selected-column set only for rows that pass the predicate. The page is still in the LRU cache at this point, so no extra I/O occurs.
+- Three new helpers in `select.go`: `filterOnlyMask` (builds WHERE-column mask from scan filters), `masksEqual`, `maskHasTrue`.
+- **Select_RangeScan: 3.58 ms → 2.44 ms (1.47× faster)** — ratio vs SQLite: 3.44× → 2.12×. Allocs drop from 46,392 → 21,015 per op (55% fewer); memory 2.0 MiB → 1.68 MiB (16% less).
+- Benchmarks without a WHERE predicate (FullScan, CountStar) and index-based scans (IndexRangeScan, PointScan) are unaffected; their code paths do not enter the two-phase branch.
+- Note: write-path benchmarks (Delete, Insert, Update) show elevated timings in this run due to high machine variance; they are not affected by this change and should be compared against the 2026-04-25 (previous) entry.
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| Delete_ByPK | 202 µs/op | 126 µs/op | 1.60× † |
+| Insert_SingleRow | 81.0 µs/op | 50.2 µs/op | 1.61× |
+| Insert_Batch | 748.7 µs/op | 259.3 µs/op | 2.89× |
+| Select_PointScan | 5.8 µs/op | 4.0 µs/op | 1.47× |
+| Select_Limit | 10.1 µs/op | 9.4 µs/op | 1.08× |
+| Select_FullScan | 6.58 ms/op | 6.39 ms/op | 1.03× |
+| Select_CountStar | 20.2 µs/op | 11.8 µs/op | 1.71× |
+| Select_IndexRangeScan | 968.7 µs/op | 982.4 µs/op | **0.99×** |
+| **Select_RangeScan** | **2.44 ms/op** | **1.15 ms/op** | **2.12×** |
+| Txn_NInserts | 417.7 µs/op | 186.8 µs/op | 2.24× |
+| Update_ByPK | 71.1 µs/op | 46.2 µs/op | 1.54× |
+
+† Delete_ByPK and sqlite write-path outliers in first benchmark iteration indicate machine load; use 2026-04-25 (previous) for clean write-path reference.
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 52.4 KiB | 447 B |
+| Insert_SingleRow | 22.8 KiB | 312 B |
+| Insert_Batch | 360.7 KiB | 31.1 KiB |
+| Select_PointScan | 4.6 KiB | 679 B |
+| Select_Limit | 6.5 KiB | 1.7 KiB |
+| Select_FullScan | 5.7 MiB | 1.3 MiB |
+| Select_CountStar | 5.9 KiB | 400 B |
+| Select_IndexRangeScan | 774.6 KiB | 85.9 KiB |
+| **Select_RangeScan** | **1.68 MiB** | **85.9 KiB** |
+| Txn_NInserts | 205.2 KiB | 15.8 KiB |
+| Update_ByPK | 9.3 KiB | 263 B |
+
+---
+
+### 2026-04-25 (previous)
+
 O(1) COUNT(*) via in-memory row-count cache:
 - Added `rowCounts map[string]int64` to `Database`, one entry per user table. Initialised at startup from a single leaf-page walk per table; kept up to date on every committed INSERT/DELETE via a `rowCountApplier` callback on `TransactionManager`.
 - `Transaction` accumulates `rowCountDeltas` during execution; applied atomically at commit time, discarded on rollback. DO UPDATE upserts (which replace an existing row) are correctly excluded from the delta.
