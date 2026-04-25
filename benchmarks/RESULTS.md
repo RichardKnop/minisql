@@ -1,3 +1,46 @@
+### 2026-04-25 (latest)
+
+O(1) COUNT(*) via in-memory row-count cache:
+- Added `rowCounts map[string]int64` to `Database`, one entry per user table. Initialised at startup from a single leaf-page walk per table; kept up to date on every committed INSERT/DELETE via a `rowCountApplier` callback on `TransactionManager`.
+- `Transaction` accumulates `rowCountDeltas` during execution; applied atomically at commit time, discarded on rollback. DO UPDATE upserts (which replace an existing row) are correctly excluded from the delta.
+- `countAllLeafWalk` in `select.go` now returns the cached count in O(1) when the getter is set; falls back to the original leaf walk for system tables and any table without an initialised counter.
+- **Select_CountStar: 36.9 µs → 20.0 µs (1.84× faster)** — ratio vs SQLite drops from 3.14× to 1.87×. The remaining gap is the Go query framework overhead (transaction begin/end, SQL parsing, result marshalling) — not the counting itself.
+- Note: this benchmark run exhibited higher machine variance than usual (one Insert_SingleRow/sqlite outlier at 111 µs, one Delete_ByPK/minisql outlier at 160 µs); write-path numbers should be compared with the previous entry's cleaner run rather than taken at face value here.
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| Delete_ByPK | 76.6 µs/op | 62.5 µs/op | 1.23× |
+| Insert_SingleRow | 94.1 µs/op | 56.0 µs/op | 1.68× |
+| Insert_Batch | 787.7 µs/op | 309.7 µs/op | 2.54× |
+| Select_PointScan | 6.0 µs/op | 4.0 µs/op | 1.49× |
+| Select_Limit | 9.9 µs/op | 10.4 µs/op | **0.95×** |
+| Select_FullScan | 6.94 ms/op | 6.36 ms/op | 1.09× |
+| **Select_CountStar** | **20.0 µs/op** | **10.7 µs/op** | **1.87×** |
+| Select_IndexRangeScan | 948.9 µs/op | 863.4 µs/op | 1.10× |
+| Select_RangeScan | 3.58 ms/op | 1.04 ms/op | 3.44× |
+| Txn_NInserts | 438.9 µs/op | 182.8 µs/op | 2.40× |
+| Update_ByPK | 73.7 µs/op | 53.2 µs/op | 1.39× |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 27.6 KiB | 447 B |
+| Insert_SingleRow | 22.9 KiB | 312 B |
+| Insert_Batch | 360.7 KiB | 31.1 KiB |
+| Select_PointScan | 4.6 KiB | 679 B |
+| Select_Limit | 6.5 KiB | 1.7 KiB |
+| Select_FullScan | 5.7 MiB | 1.3 MiB |
+| Select_CountStar | 5.9 KiB | 400 B |
+| Select_IndexRangeScan | 771.4 KiB | 85.9 KiB |
+| Select_RangeScan | 2.0 MiB | 85.9 KiB |
+| Txn_NInserts | 204.4 KiB | 15.9 KiB |
+| Update_ByPK | 9.0 KiB | 263 B |
+
+---
+
 ### 2026-04-24 (latest)
 
 Checkpoint write coalescing in `wal.go` — `WAL.Checkpoint` now sorts page indices and coalesces consecutive runs into a single `WriteAt` call:

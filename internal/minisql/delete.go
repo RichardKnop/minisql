@@ -68,5 +68,13 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 	}
 
 	t.logger.Debug("deleted rows", zap.Int("count", result.RowsAffected))
+
+	// Update the in-memory row-count cache (only for user tables).
+	if t.getRowCount != nil && result.RowsAffected > 0 {
+		if tx := TxFromContext(ctx); tx != nil {
+			tx.AddRowCountDelta(t.Name, -int64(result.RowsAffected))
+		}
+	}
+
 	return result, nil
 }

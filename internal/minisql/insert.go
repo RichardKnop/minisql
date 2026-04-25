@@ -27,6 +27,9 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 	// No map is needed — values[i] is already the value for t.Columns[i].
 
 	rowsInserted := 0
+	// newRowsInserted counts only actual new rows added to the table (not DO UPDATE
+	// hits, which update existing rows without changing the total count).
+	newRowsInserted := 0
 	for insertIdx, values := range stmt.Inserts {
 		switch stmt.ConflictAction {
 		case ConflictActionDoNothing:
@@ -59,6 +62,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 				}
 				if changed {
 					rowsInserted += 1
+					// Row count unchanged — DO UPDATE replaces an existing row.
 				}
 				continue
 			}
@@ -152,6 +156,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 
 		rowsInserted += 1
+		newRowsInserted += 1
 
 		if insertIdx == len(stmt.Inserts)-1 {
 			break
@@ -179,6 +184,14 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			if err != nil {
 				return StatementResult{}, err
 			}
+		}
+	}
+
+	// Update the in-memory row-count cache (only for tables that have a getter,
+	// i.e. user tables managed by the Database — system tables are excluded).
+	if t.getRowCount != nil && newRowsInserted > 0 {
+		if tx := TxFromContext(ctx); tx != nil {
+			tx.AddRowCountDelta(t.Name, int64(newRowsInserted))
 		}
 	}
 

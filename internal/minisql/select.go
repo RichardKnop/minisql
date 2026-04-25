@@ -157,36 +157,44 @@ func (t *Table) selectCount(rows []Row) (StatementResult, error) {
 	}, nil
 }
 
-// countAllLeafWalk counts every row in the table by walking the B+ tree leaf
-// page chain and summing Header.Cells on each page.  No row data is read or
-// deserialised, making this O(leaf pages) instead of O(rows).
+// countAllLeafWalk counts every row in the table.
+//
+// Fast path: if a row-count getter has been registered (set by the Database
+// after loading the table), returns the cached count in O(1) without any I/O.
+//
+// Fallback: walks the B+ tree leaf page chain and sums Header.Cells on each
+// page — O(leaf pages), no row data read or deserialised.
 //
 // This is only valid for COUNT(*) with no WHERE clause and no JOIN.
 func (t *Table) countAllLeafWalk(ctx context.Context) (StatementResult, error) {
-	cursor, err := t.SeekFirst(ctx)
-	if err != nil {
-		return StatementResult{}, fmt.Errorf("count all: %w", err)
-	}
-
 	var count int64
-	pageIdx := cursor.PageIdx
-	for {
-		select {
-		case <-ctx.Done():
-			return StatementResult{}, ctx.Err()
-		default:
-		}
-
-		page, err := t.pager.ReadPage(ctx, pageIdx)
+	if t.getRowCount != nil {
+		count = t.getRowCount()
+	} else {
+		cursor, err := t.SeekFirst(ctx)
 		if err != nil {
-			return StatementResult{}, fmt.Errorf("count all: read page %d: %w", pageIdx, err)
+			return StatementResult{}, fmt.Errorf("count all: %w", err)
 		}
-		count += int64(page.LeafNode.Header.Cells)
 
-		if page.LeafNode.Header.NextLeaf == 0 {
-			break
+		pageIdx := cursor.PageIdx
+		for {
+			select {
+			case <-ctx.Done():
+				return StatementResult{}, ctx.Err()
+			default:
+			}
+
+			page, err := t.pager.ReadPage(ctx, pageIdx)
+			if err != nil {
+				return StatementResult{}, fmt.Errorf("count all: read page %d: %w", pageIdx, err)
+			}
+			count += int64(page.LeafNode.Header.Cells)
+
+			if page.LeafNode.Header.NextLeaf == 0 {
+				break
+			}
+			pageIdx = page.LeafNode.Header.NextLeaf
 		}
-		pageIdx = page.LeafNode.Header.NextLeaf
 	}
 
 	return StatementResult{

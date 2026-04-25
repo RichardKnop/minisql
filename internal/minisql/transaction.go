@@ -62,7 +62,11 @@ type Transaction struct {
 	// this read-only transaction was registered.  Any write committed after
 	// this point is invisible to the transaction.  Always 0 for write transactions.
 	SnapshotSeq uint64
-	mu          sync.RWMutex
+	// rowCountDeltas accumulates net row-count changes during this transaction,
+	// keyed by table name.  Applied to the Database row-count cache only on
+	// successful commit; discarded on rollback.
+	rowCountDeltas map[string]int64
+	mu             sync.RWMutex
 }
 
 // TransactionStatus represents the lifecycle state of a transaction.
@@ -88,6 +92,29 @@ func (tx *Transaction) Abort() {
 	tx.Status = TxAborted
 	tx.WriteSet = nil
 	tx.DBHeaderWrite = nil
+	tx.rowCountDeltas = nil
+}
+
+// AddRowCountDelta records a net row-count change for the named table.
+// It is a no-op for read-only transactions.
+func (tx *Transaction) AddRowCountDelta(table string, delta int64) {
+	if tx.ReadOnly || delta == 0 {
+		return
+	}
+	tx.mu.Lock()
+	if tx.rowCountDeltas == nil {
+		tx.rowCountDeltas = make(map[string]int64, 1)
+	}
+	tx.rowCountDeltas[table] += delta
+	tx.mu.Unlock()
+}
+
+// RowCountDeltas returns the accumulated row-count deltas.  The returned map
+// must not be modified by the caller.
+func (tx *Transaction) RowCountDeltas() map[string]int64 {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+	return tx.rowCountDeltas
 }
 
 // TrackRead records that the given page was read at the given version.
