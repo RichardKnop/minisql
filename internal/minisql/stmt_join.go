@@ -20,11 +20,11 @@ const (
 
 // Join ...
 type Join struct {
-	Type       JoinType
 	TableName  string
 	TableAlias string
 	Conditions Conditions
 	Joins      []Join
+	Type       JoinType
 }
 
 // AddJoin ...

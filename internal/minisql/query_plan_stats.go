@@ -8,8 +8,8 @@ import (
 
 // IndexStats holds parsed statistics for an index
 type IndexStats struct {
-	NEntry    int64   // Total number of entries in the index
-	NDistinct []int64 // Distinct values for each column prefix
+	NDistinct []int64
+	NEntry    int64
 }
 
 // parseIndexStats parses a stat string in SQLite format: "nEntry nDistinct1 nDistinct2 ..."

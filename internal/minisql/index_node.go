@@ -3,6 +3,7 @@ package minisql
 import (
 	"bytes"
 	"fmt"
+	"unsafe"
 )
 
 // IndexNodeHeader ...
@@ -67,12 +68,12 @@ func (h *IndexNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 // IndexCell holds a single key entry within an index node, along with its associated row IDs and child pointer.
 type IndexCell[T IndexKey] struct {
 	Key          T
-	UniqueRowID  RowID     // only for unique indexes, stored inline without heap allocation
-	InlineRowIDs uint32    // only for non-unique indexes
-	RowIDs       []RowID   // only for non-unique indexes
-	Overflow     PageIndex // 0 if not used (only for non-unique indexes)
+	RowIDs       []RowID
+	UniqueRowID  RowID
+	InlineRowIDs uint32
+	Overflow     PageIndex
 	Child        PageIndex
-	unique       bool // true for non-unique index cells
+	unique       bool
 }
 
 // NewIndexCell ...
@@ -100,22 +101,20 @@ func (c *IndexCell[T]) Size() uint64 {
 	return size
 }
 
+// keySize returns the serialised byte size of a single index key.
+// For fixed-size numeric types, unsafe.Sizeof is a compile-time constant that
+// the Go compiler folds away — no type switch needed at runtime.
+// String and CompositeKey require runtime inspection for their variable sizes.
 func keySize[T IndexKey](key T) uint64 {
 	switch v := any(key).(type) {
-	case int8:
-		return 1
-	case int32:
-		return 4
-	case int64:
-		return 8
-	case float32:
-		return 4
-	case float64:
-		return 8
 	case string:
 		return varcharLengthPrefixSize + uint64(len(v))
+	case CompositeKey:
+		return v.Size()
+	default:
+		// int8, int32, int64, float32, float64 — all fixed-size; Sizeof is constant.
+		return uint64(unsafe.Sizeof(key))
 	}
-	return 0
 }
 
 // Marshal ...
@@ -267,8 +266,8 @@ func (c *IndexCell[T]) ReplaceRowID(id, newID RowID) int {
 
 // IndexNode is a B+ tree node used by the index, containing a header and a slice of index cells.
 type IndexNode[T IndexKey] struct {
+	Cells  []IndexCell[T]
 	Header IndexNodeHeader
-	Cells  []IndexCell[T] // (PageSize - (5)) / (CellSize + 4 + 8)
 }
 
 // MinimumIndexCells is the minimum number of cells required in an index node.

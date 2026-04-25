@@ -1,12 +1,52 @@
 ### 2026-04-25 (latest)
 
-Benchmark suite refactoring — replaced `Txn_NInserts` (structurally identical to `Insert_Batch`) with two new, distinct insert benchmarks:
-- **`Insert_PreparedBatch`**: prepare statement once with `db.Prepare` outside the loop; reuse it inside each transaction via `tx.Stmt(stmt)`. Isolates per-row execution cost by eliminating per-transaction prepare overhead.
-- **`Insert_MultiValues`**: single `INSERT INTO … VALUES (…),(…),…` statement with 100 row tuples. Minimises round-trips and parser overhead by batching the entire payload into one statement execution.
-- For minisql: `Insert_Batch` ≈ `Insert_PreparedBatch` (632 vs 695 µs) — re-preparing per transaction is cheap. `Insert_MultiValues` is notably faster at 554 µs, saving ~12% vs batch with repeated prepares.
-- For SQLite: all three batch patterns converge (233–253 µs) — it optimises them uniformly. `Insert_MultiValues` saves slightly more memory (25.2 KiB vs 31.0 KiB) due to fewer result sets.
-- `Txn_NInserts` row removed from all tables; `Insert_PreparedBatch` and `Insert_MultiValues` rows added.
-- Run 3× on Apple M1 Max; numbers below are the best (warmest) iteration.
+Zero-copy cell reads + struct alignment + CompositeKey pre-allocation:
+- **`LeafNode.Unmarshal` cell sub-slicing**: cell `Value` fields now reference the page buffer directly instead of `make+copy`. The existing copy-on-write mechanism (`isOwned` flag + `PrepareModifyCell`) handles write safety unchanged. Eliminates one heap allocation per cell per cache miss — a leaf page with 50–200 cells previously triggered 50–200 allocations here; now zero.
+- **`CompositeKey.generateComparison` pre-allocation**: replaced iterative `append` with a single `make([]byte, comparisonSize())` followed by direct writes. A new `comparisonSize()` helper computes the exact comparison-buffer size (which intentionally excludes the Varchar length prefix, unlike `Size()`). Eliminates up to N temporary 4–8 byte buffers per composite key construction.
+- **Struct field alignment** (`fieldalignment -fix`): reordered fields in ~30 structs across `internal/minisql/` to eliminate padding. Largest savings: `pagerImpl` (56 bytes), `TransactionManager` (72 bytes), `WAL` (24 bytes). GC scan spans reduced for `Cell`, `LeafNode`, `IndexNode[T]`.
+- **Select_RangeScan: 2.39 ms → 1.60 ms (1.49× faster)** — ratio vs SQLite: 2.32× → 1.85×. Directly driven by cell sub-slicing; RangeScan reads many rows from many pages, maximising the per-cell allocation savings.
+- **Select_FullScan: 6.92 ms → 5.04 ms (1.37× faster)** — now at par with SQLite (1.0×). Same mechanism.
+- **Select_IndexRangeScan: 903 µs → 725 µs (1.25× faster)** — now faster than SQLite (0.97×).
+- **Insert_SingleRow: 103.8 µs → 86.0 µs (1.21× faster)** — struct layout improvements reduce per-transaction overhead.
+- Memory (B/op) for read paths is broadly unchanged: the saved per-cell allocations are offset by the page buffer itself staying live longer (pinned by sub-slice references until page eviction).
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| Delete_ByPK | 186.6 µs/op | 193.6 µs/op | **0.96×** |
+| Insert_SingleRow | 86.0 µs/op | 50.9 µs/op | 1.69× |
+| Insert_Batch | 567.5 µs/op | 222.9 µs/op | 2.55× |
+| Insert_PreparedBatch | 580.1 µs/op | 221.7 µs/op | 2.62× |
+| Insert_MultiValues | 490.0 µs/op | 170.0 µs/op | 2.88× |
+| Select_PointScan | 4.6 µs/op | 3.3 µs/op | 1.38× |
+| Select_Limit | 7.4 µs/op | 7.8 µs/op | **0.95×** |
+| **Select_FullScan** | **5.04 ms/op** | **5.07 ms/op** | **1.00×** |
+| Select_CountStar | 17.0 µs/op | 9.5 µs/op | 1.79× |
+| **Select_IndexRangeScan** | **724.5 µs/op** | **744.5 µs/op** | **0.97×** |
+| **Select_RangeScan** | **1.60 ms/op** | **864.0 µs/op** | **1.85×** |
+| Update_ByPK | 63.3 µs/op | 49.6 µs/op | 1.28× |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 48.3 KiB | 446 B |
+| Insert_SingleRow | 21.3 KiB | 311 B |
+| Insert_Batch | 351.9 KiB | 31.0 KiB |
+| Insert_PreparedBatch | 351.9 KiB | 31.0 KiB |
+| Insert_MultiValues | 318.0 KiB | 25.2 KiB |
+| Select_PointScan | 4.6 KiB | 679 B |
+| Select_Limit | 6.4 KiB | 1.7 KiB |
+| Select_FullScan | 5.7 MiB | 1.3 MiB |
+| Select_CountStar | 5.9 KiB | 400 B |
+| Select_IndexRangeScan | 756.5 KiB | 85.9 KiB |
+| Select_RangeScan | 1.6 MiB | 85.9 KiB |
+| Update_ByPK | 9.2 KiB | 263 B |
+
+---
+
+### 2026-04-25 (benchmark refactoring)
 
 #### Timing
 

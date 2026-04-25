@@ -11,24 +11,21 @@ import (
 
 // Table ...
 type Table struct {
-	Name                 string
-	Columns              []Column
-	columnCache          map[string]int // Cache: column name -> index in Columns slice
 	PrimaryKey           PrimaryKey
+	provider             TableProvider
+	pager                TxPager
+	columnIndexInfoCache map[string]IndexInfo
 	UniqueIndexes        map[string]UniqueIndex
 	SecondaryIndexes     map[string]SecondaryIndex
-	columnIndexInfoCache map[string]IndexInfo
-	rootPageIdx          PageIndex
-	maximumICells        uint32
 	logger               *zap.Logger
-	pager                TxPager
+	columnCache          map[string]int
 	txManager            *TransactionManager
 	indexStats           map[string]IndexStats
-	provider             TableProvider // Access to other tables for JOIN operations
-	// getRowCount returns the cached total row count for this table in O(1).
-	// It is nil for system tables and for tables loaded before the row-count
-	// cache has been initialised.  When nil, COUNT(*) falls back to a leaf walk.
-	getRowCount func() int64
+	getRowCount          func() int64
+	Name                 string
+	Columns              []Column
+	rootPageIdx          PageIndex
+	maximumICells        uint32
 }
 
 // TableOption ...

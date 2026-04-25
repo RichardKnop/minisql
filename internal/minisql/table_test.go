@@ -250,9 +250,9 @@ func TestTable_Seek_RootLeafNode_BiggerTree(t *testing.T) {
 	pagerMock.On("ReadPage", mock.Anything, PageIndex(6)).Return(leafPages[3], nil)
 
 	testCases := []struct {
+		Cursor *Cursor
 		Name   string
 		Key    uint64
-		Cursor *Cursor
 	}{
 		{
 			Name: "Cursor to key 1",

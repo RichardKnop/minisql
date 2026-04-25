@@ -9,9 +9,9 @@ import (
 // TextPointer is stored in the main row; text of length <= MaxInlineVarchar is stored inline,
 // otherwise it points to an overflow page.
 type TextPointer struct {
-	Length    uint32    // Total size of text
-	FirstPage PageIndex // First overflow page (if not inline)
 	Data      []byte
+	Length    uint32
+	FirstPage PageIndex
 }
 
 // NewTextPointer ...

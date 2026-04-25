@@ -11,13 +11,13 @@ func TestIsValidCondition(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name      string
 		condition Condition
+		name      string
 		isValid   bool
 	}{
 		{
-			"valid condition with integer operand",
-			Condition{
+			name: "valid condition with integer operand",
+			condition: Condition{
 				Operand1: Operand{
 					Type:  OperandField,
 					Value: Field{Name: "a"},
@@ -28,18 +28,18 @@ func TestIsValidCondition(t *testing.T) {
 					Value: int64(10),
 				},
 			},
-			true,
+			isValid: true,
 		},
 		{
-			"invalid condition with missing operand",
-			Condition{
+			name: "invalid condition with missing operand",
+			condition: Condition{
 				Operand1: Operand{
 					Type:  OperandField,
 					Value: Field{Name: "a"},
 				},
 				Operator: Eq,
 			},
-			false,
+			isValid: false,
 		},
 	}
 
@@ -244,9 +244,9 @@ func TestCompareBoolean(t *testing.T) {
 
 	tests := []struct {
 		name     string
+		operator Operator
 		a        bool
 		b        bool
-		operator Operator
 		want     bool
 		wantErr  bool
 	}{
@@ -1443,19 +1443,19 @@ func TestIsInListInt4(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
 		value   any
 		list    any
+		name    string
 		want    bool
 		wantErr bool
 	}{
-		{"found in list", int64(5), []any{int64(1), int64(5), int64(10)}, true, false},
-		{"not found in list", int64(7), []any{int64(1), int64(5), int64(10)}, false, false},
-		{"empty list", int64(5), []any{}, false, false},
-		{"single element match", int64(42), []any{int64(42)}, true, false},
-		{"negative value found", int64(-5), []any{int64(-10), int64(-5), int64(0)}, true, false},
-		{"invalid value type", "not an int", []any{int64(1)}, false, true},
-		{"invalid list type", int64(1), "not a list", false, true},
+		{name: "found in list", value: int64(5), list: []any{int64(1), int64(5), int64(10)}, want: true},
+		{name: "not found in list", value: int64(7), list: []any{int64(1), int64(5), int64(10)}, want: false},
+		{name: "empty list", value: int64(5), list: []any{}, want: false},
+		{name: "single element match", value: int64(42), list: []any{int64(42)}, want: true},
+		{name: "negative value found", value: int64(-5), list: []any{int64(-10), int64(-5), int64(0)}, want: true},
+		{name: "invalid value type", value: "not an int", list: []any{int64(1)}, wantErr: true},
+		{name: "invalid list type", value: int64(1), list: "not a list", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -1475,17 +1475,17 @@ func TestIsInListReal(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
 		value   any
 		list    any
+		name    string
 		want    bool
 		wantErr bool
 	}{
-		{"found in list", float64(5.5), []any{float64(1.1), float64(5.5), float64(10.0)}, true, false},
-		{"not found in list", float64(7.7), []any{float64(1.1), float64(5.5), float64(10.0)}, false, false},
-		{"empty list", float64(5.5), []any{}, false, false},
-		{"invalid value type", "not a float", []any{float64(1.0)}, false, true},
-		{"invalid list type", float64(1.0), "not a list", false, true},
+		{name: "found in list", value: float64(5.5), list: []any{float64(1.1), float64(5.5), float64(10.0)}, want: true},
+		{name: "not found in list", value: float64(7.7), list: []any{float64(1.1), float64(5.5), float64(10.0)}, want: false},
+		{name: "empty list", value: float64(5.5), list: []any{}, want: false},
+		{name: "invalid value type", value: "not a float", list: []any{float64(1.0)}, wantErr: true},
+		{name: "invalid list type", value: float64(1.0), list: "not a list", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -1505,17 +1505,17 @@ func TestIsInListDouble(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
 		value   any
 		list    any
+		name    string
 		want    bool
 		wantErr bool
 	}{
-		{"found in list", float64(5.5), []any{float64(1.1), float64(5.5), float64(10.0)}, true, false},
-		{"not found in list", float64(7.7), []any{float64(1.1), float64(5.5), float64(10.0)}, false, false},
-		{"empty list", float64(5.5), []any{}, false, false},
-		{"invalid value type", "not a float", []any{float64(1.0)}, false, true},
-		{"invalid list type", float64(1.0), "not a list", false, true},
+		{name: "found in list", value: float64(5.5), list: []any{float64(1.1), float64(5.5), float64(10.0)}, want: true},
+		{name: "not found in list", value: float64(7.7), list: []any{float64(1.1), float64(5.5), float64(10.0)}, want: false},
+		{name: "empty list", value: float64(5.5), list: []any{}, want: false},
+		{name: "invalid value type", value: "not a float", list: []any{float64(1.0)}, wantErr: true},
+		{name: "invalid list type", value: float64(1.0), list: "not a list", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -1539,17 +1539,17 @@ func TestIsInListTimestamp(t *testing.T) {
 	t3 := MustParseTimestamp("2022-12-31 23:59:59")
 
 	tests := []struct {
-		name    string
 		value   any
 		list    any
+		name    string
 		want    bool
 		wantErr bool
 	}{
-		{"found in list", t2, []any{t1, t2, t3}, true, false},
-		{"not found in list", t3, []any{t1, t2}, false, false},
-		{"empty list", t1, []any{}, false, false},
-		{"invalid value type", "not a time", []any{t1}, false, true},
-		{"invalid list type", t1, "not a list", false, true},
+		{name: "found in list", value: t2, list: []any{t1, t2, t3}, want: true},
+		{name: "not found in list", value: t3, list: []any{t1, t2}, want: false},
+		{name: "empty list", value: t1, list: []any{}, want: false},
+		{name: "invalid value type", value: "not a time", list: []any{t1}, wantErr: true},
+		{name: "invalid list type", value: t1, list: "not a list", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -1573,23 +1573,23 @@ func TestCompareTimestamp(t *testing.T) {
 	t3 := MustParseTimestamp("2021-06-15 12:00:00")
 
 	tests := []struct {
-		name     string
 		a        any
 		b        any
+		name     string
 		operator Operator
 		want     bool
 		wantErr  bool
 	}{
-		{"equal timestamps", t2, t3, Eq, true, false},
-		{"not equal", t1, t2, Eq, false, false},
-		{"not equal op", t1, t2, Ne, true, false},
-		{"greater than", t2, t1, Gt, true, false},
-		{"less than", t1, t2, Lt, true, false},
-		{"greater or equal same", t2, t3, Gte, true, false},
-		{"less or equal same", t2, t3, Lte, true, false},
-		{"unknown operator", t1, t2, Operator(999), false, true},
-		{"invalid value1 type", "bad", t2, Eq, false, true},
-		{"invalid value2 type", t1, "bad", Eq, false, true},
+		{name: "equal timestamps", a: t2, b: t3, operator: Eq, want: true},
+		{name: "not equal", a: t1, b: t2, operator: Eq, want: false},
+		{name: "not equal op", a: t1, b: t2, operator: Ne, want: true},
+		{name: "greater than", a: t2, b: t1, operator: Gt, want: true},
+		{name: "less than", a: t1, b: t2, operator: Lt, want: true},
+		{name: "greater or equal same", a: t2, b: t3, operator: Gte, want: true},
+		{name: "less or equal same", a: t2, b: t3, operator: Lte, want: true},
+		{name: "unknown operator", a: t1, b: t2, operator: Operator(999), wantErr: true},
+		{name: "invalid value1 type", a: "bad", b: t2, operator: Eq, wantErr: true},
+		{name: "invalid value2 type", a: t1, b: "bad", operator: Eq, wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -1609,22 +1609,22 @@ func TestOperatorString(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		op   Operator
 		want string
+		op   Operator
 	}{
-		{Eq, "="},
-		{Ne, "!="},
-		{Gt, ">"},
-		{Lt, "<"},
-		{Gte, ">="},
-		{Lte, "<="},
-		{In, "IN"},
-		{NotIn, "NOT IN"},
-		{Like, "LIKE"},
-		{NotLike, "NOT LIKE"},
-		{Between, "BETWEEN"},
-		{NotBetween, "NOT BETWEEN"},
-		{Operator(999), "Unknown"},
+		{want: "=", op: Eq},
+		{want: "!=", op: Ne},
+		{want: ">", op: Gt},
+		{want: "<", op: Lt},
+		{want: ">=", op: Gte},
+		{want: "<=", op: Lte},
+		{want: "IN", op: In},
+		{want: "NOT IN", op: NotIn},
+		{want: "LIKE", op: Like},
+		{want: "NOT LIKE", op: NotLike},
+		{want: "BETWEEN", op: Between},
+		{want: "NOT BETWEEN", op: NotBetween},
+		{want: "Unknown", op: Operator(999)},
 	}
 
 	for _, tt := range tests {
@@ -1780,15 +1780,16 @@ func TestCompareInt4_TypeErrors(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
+		v1      any
+		v2      any
 		name    string
-		v1, v2  any
 		op      Operator
 		wantErr bool
 	}{
-		{"out of range v1", int64(1 << 32), int64(1), Eq, true},
-		{"out of range v2", int64(1), int64(1 << 32), Eq, true},
-		{"bad type v1", "x", int64(1), Eq, true},
-		{"bad type v2", int64(1), "x", Eq, true},
+		{name: "out of range v1", v1: int64(1 << 32), v2: int64(1), op: Eq, wantErr: true},
+		{name: "out of range v2", v1: int64(1), v2: int64(1 << 32), op: Eq, wantErr: true},
+		{name: "bad type v1", v1: "x", v2: int64(1), op: Eq, wantErr: true},
+		{name: "bad type v2", v1: int64(1), v2: "x", op: Eq, wantErr: true},
 	}
 
 	for _, tt := range tests {

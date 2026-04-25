@@ -48,12 +48,10 @@ func (h *LeafNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 
 // Cell ...
 type Cell struct {
+	Value       []byte
 	NullBitmask uint64
 	Key         RowID
-	Value       []byte
-	// Tracks if this cell owns its Value slice, cells are shared until
-	// they are modified ( copy-on-write )
-	isOwned bool
+	isOwned     bool
 }
 
 // Size ...
@@ -103,10 +101,10 @@ func (c *Cell) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 		}
 	}
 
-	// Pass 2: Single allocation and copy all data
+	// Pass 2: Sub-slice directly into page buffer — zero allocation, zero copy.
+	// isOwned stays false; PrepareModifyCell copies on first write (COW).
 	if totalSize > 0 {
-		c.Value = make([]byte, totalSize)
-		copy(c.Value, buf[offset:offset+totalSize])
+		c.Value = buf[offset : offset+totalSize]
 		offset += totalSize
 	}
 
@@ -115,8 +113,8 @@ func (c *Cell) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 
 // LeafNode ...
 type LeafNode struct {
-	Header LeafNodeHeader
 	Cells  []Cell
+	Header LeafNodeHeader
 }
 
 // Clone cretes a shallow copy of the leaf node, sharing value slices

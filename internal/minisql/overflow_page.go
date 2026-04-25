@@ -27,8 +27,8 @@ func (h *OverflowPageHeader) Size() uint64 {
 
 // OverflowPage ...
 type OverflowPage struct {
-	Header OverflowPageHeader
 	Data   []byte
+	Header OverflowPageHeader
 }
 
 // Size ...

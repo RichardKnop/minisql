@@ -637,19 +637,19 @@ func TestExpr_Eval_ABS(t *testing.T) {
 	row := NewRow(nil)
 
 	cases := []struct {
-		name string
 		arg  any
 		want any
+		name string
 	}{
-		{"positive int64", int64(5), int64(5)},
-		{"negative int64", int64(-5), int64(5)},
-		{"zero int64", int64(0), int64(0)},
-		{"positive float64", float64(3.14), float64(3.14)},
-		{"negative float64", float64(-3.14), float64(3.14)},
-		{"positive int32", int32(7), int32(7)},
-		{"negative int32", int32(-7), int32(7)},
-		{"positive float32", float32(1.5), float32(1.5)},
-		{"negative float32", float32(-1.5), float32(1.5)},
+		{name: "positive int64", arg: int64(5), want: int64(5)},
+		{name: "negative int64", arg: int64(-5), want: int64(5)},
+		{name: "zero int64", arg: int64(0), want: int64(0)},
+		{name: "positive float64", arg: float64(3.14), want: float64(3.14)},
+		{name: "negative float64", arg: float64(-3.14), want: float64(3.14)},
+		{name: "positive int32", arg: int32(7), want: int32(7)},
+		{name: "negative int32", arg: int32(-7), want: int32(7)},
+		{name: "positive float32", arg: float32(1.5), want: float32(1.5)},
+		{name: "negative float32", arg: float32(-1.5), want: float32(1.5)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

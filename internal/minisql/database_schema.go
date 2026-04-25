@@ -29,11 +29,11 @@ const (
 
 // Schema represents a single row in the internal schema metadata table.
 type Schema struct {
-	Type      SchemaType
 	Name      string
 	TableName string
-	RootPage  PageIndex
 	DDL       string
+	Type      SchemaType
+	RootPage  PageIndex
 }
 
 var (

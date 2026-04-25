@@ -1,9 +1,11 @@
 package minisql
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 )
@@ -18,14 +20,14 @@ type IndexKey interface {
 
 // Index ...
 type Index[T IndexKey] struct {
+	pager       TxPager
 	logger      *zap.Logger
+	txManager   *TransactionManager
 	Name        string
 	Columns     []Column
-	unique      bool
 	rootPageIdx PageIndex
-	pager       TxPager
-	txManager   *TransactionManager
 	maximumKeys uint32
+	unique      bool
 }
 
 // NewUniqueIndex ...
@@ -824,6 +826,58 @@ func (ui *Index[T]) merge(ctx context.Context, parent, left, right *Page, idx ui
 	return parentNode.DeleteKeyAndRightChild(idx)
 }
 
+// compare compares two index keys of the same type without routing through
+// compareAny.  Inlining the type switch here eliminates the external function
+// call and lets the Go compiler inline compare[T] into its call sites.
+// a and b are always the same concrete type because T is a single-type
+// instantiation of IndexKey — the cross-type branches in compareAny are never
+// reachable here.
 func compare[T IndexKey](a, b T) int {
-	return compareAny(any(a), any(b))
+	switch va := any(a).(type) {
+	case int8:
+		vb := any(b).(int8)
+		if va < vb {
+			return -1
+		} else if va > vb {
+			return 1
+		}
+		return 0
+	case int32:
+		vb := any(b).(int32)
+		if va < vb {
+			return -1
+		} else if va > vb {
+			return 1
+		}
+		return 0
+	case int64:
+		vb := any(b).(int64)
+		if va < vb {
+			return -1
+		} else if va > vb {
+			return 1
+		}
+		return 0
+	case float32:
+		vb := any(b).(float32)
+		if va < vb {
+			return -1
+		} else if va > vb {
+			return 1
+		}
+		return 0
+	case float64:
+		vb := any(b).(float64)
+		if va < vb {
+			return -1
+		} else if va > vb {
+			return 1
+		}
+		return 0
+	case string:
+		return strings.Compare(va, any(b).(string))
+	case CompositeKey:
+		return bytes.Compare(va.Comparison, any(b).(CompositeKey).Comparison)
+	}
+	return 0
 }

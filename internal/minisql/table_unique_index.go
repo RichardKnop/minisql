@@ -10,8 +10,8 @@ import (
 
 // UniqueIndex ...
 type UniqueIndex struct {
-	IndexInfo
 	Index BTreeIndex
+	IndexInfo
 }
 
 // UniqueIndexName ...

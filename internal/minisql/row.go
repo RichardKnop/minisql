@@ -20,9 +20,9 @@ type RowID uint64
 
 // Row ...
 type Row struct {
-	Key     RowID
 	Columns []Column
 	Values  []OptionalValue
+	Key     RowID
 }
 
 func maxCells(rowSize uint64) uint32 {

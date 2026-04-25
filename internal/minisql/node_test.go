@@ -14,8 +14,8 @@ func TestInternalNode_IndexOfChild(t *testing.T) {
 	rootPage, internalPages, _ := newTestBtree()
 
 	testCases := []struct {
-		Name     string
 		Page     *Page
+		Name     string
 		Key      RowID
 		ChildIdx uint32
 	}{

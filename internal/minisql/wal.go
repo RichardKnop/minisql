@@ -47,14 +47,14 @@ const (
 // WALPage holds the page index and raw serialised content for one page to be
 // appended to the WAL.
 type WALPage struct {
+	Data  []byte
 	Index PageIndex
-	Data  []byte // must be exactly pageSize bytes
 }
 
 // WALReadFrame is a single validated, committed frame returned by ReadAllFrames.
 type WALReadFrame struct {
+	Data      []byte
 	PageIndex PageIndex
-	Data      []byte // raw page bytes (pageSize bytes)
 }
 
 // WAL is a write-ahead log providing crash-safe durability for the database.
@@ -70,11 +70,11 @@ type WALReadFrame struct {
 type WAL struct {
 	file       *os.File
 	filepath   string
+	writeBuf   []byte
+	nextOffset int64
 	pageSize   uint32
 	salt1      uint32
 	salt2      uint32
-	nextOffset int64  // byte offset at which the next frame will be written
-	writeBuf   []byte // reusable write buffer; grown on demand, never shrunk
 }
 
 // CreateWAL creates a new WAL file (truncating any existing file at that path).

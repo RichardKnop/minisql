@@ -9,8 +9,8 @@ import (
 
 // SecondaryIndex ...
 type SecondaryIndex struct {
-	IndexInfo
 	Index BTreeIndex
+	IndexInfo
 }
 
 func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, keys []OptionalValue, rowID RowID) error {

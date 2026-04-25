@@ -26,8 +26,8 @@ func (h *IndexOverflowPageHeader) Size() uint64 {
 
 // IndexOverflowPage ...
 type IndexOverflowPage struct {
-	Header IndexOverflowPageHeader
 	RowIDs []RowID
+	Header IndexOverflowPageHeader
 }
 
 // Size ...

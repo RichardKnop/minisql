@@ -85,8 +85,8 @@ const (
 
 // Operand holds a typed value on one side of a condition expression.
 type Operand struct {
-	Type  OperandType
 	Value any
+	Type  OperandType
 }
 
 // IsField determines whether the operand is a literal or a field name
@@ -96,12 +96,9 @@ func (o Operand) IsField() bool {
 
 // Condition represents a single predicate: operand1 operator operand2.
 type Condition struct {
-	// Operand1 is the left hand side operand
 	Operand1 Operand
-	// Operator is e.g. "=", ">"
-	Operator Operator
-	// Operand2 is the right hand side operand
 	Operand2 Operand
+	Operator Operator
 }
 
 // Operands returns both operands of the condition as a slice.

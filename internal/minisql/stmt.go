@@ -117,8 +117,8 @@ func (k AggregateKind) String() string {
 // A zero-value AggregateExpr (Kind == 0) means the corresponding field is not an aggregate.
 // Aggregates is only populated when the query contains at least one aggregate function.
 type AggregateExpr struct {
+	Column string
 	Kind   AggregateKind
-	Column string // source column name; empty for COUNT(*)
 }
 
 // ColumnKind ...
@@ -178,15 +178,12 @@ func (k ColumnKind) IsText() bool {
 
 // Column ...
 type Column struct {
-	Kind ColumnKind
-	Size uint32
-	// PrimaryKey      bool
-	// Autoincrement   bool
-	// Unique          bool
-	Nullable        bool
 	DefaultValue    OptionalValue
-	DefaultValueNow bool
 	Name            string
+	Kind            ColumnKind
+	Size            uint32
+	Nullable        bool
+	DefaultValueNow bool
 }
 
 func fieldsFromColumns(columns ...Column) []Field {
@@ -227,14 +224,10 @@ func textOverflowFields(columns ...Column) []Field {
 
 // Field ...
 type Field struct {
+	Expr        *Expr
 	AliasPrefix string
 	Name        string
-	// Alias is the output column name when an AS clause is used on a computed
-	// expression (e.g. SELECT price * 1.1 AS discounted).
-	Alias string
-	// Expr is non-nil when the field is a computed arithmetic expression rather
-	// than a plain column reference.
-	Expr *Expr
+	Alias       string
 }
 
 func (f Field) String() string {
@@ -309,42 +302,38 @@ type ExcludedRef struct {
 
 // UnionClause represents a UNION or UNION ALL branch appended to a SELECT statement.
 type UnionClause struct {
-	All  bool      // true = UNION ALL (keep duplicates); false = UNION (deduplicate)
-	Stmt Statement // the chained SELECT
+	Stmt Statement
+	All  bool
 }
 
 // Statement ...
 type Statement struct {
-	Kind          StatementKind
-	IfNotExists   bool
-	TableName     string // for SELECT, INSERT, UPDATE, DELETE, CREATE/DROP TABLE etc
-	TableAlias    string
-	Joins         []Join
-	IndexName     string        // for CREATE/DROP INDEX
-	Target        string        // for ANALYZE
-	PragmaName    string        // for PRAGMA
-	Columns       []Column      // use for CREATE TABLE
-	PrimaryKey    PrimaryKey    // use for CREATE TABLE
-	UniqueIndexes []UniqueIndex // use for CREATE TABLE
-	// Used for SELECT (i.e. SELECTed field names) and INSERT (INSERTEDed field names)
-	// and UPDATE (UPDATEDed field names as Updates map is not ordered)
-	Distinct       bool
-	Fields         []Field
-	Aggregates     []AggregateExpr // parallel to Fields; only populated when query uses aggregate functions
-	GroupBy        []Field         // columns in GROUP BY clause; only populated for grouped queries
-	Having         OneOrMore       // HAVING conditions; only populated for grouped queries
+	PrimaryKey     PrimaryKey
 	Aliases        map[string]string
-	ConflictAction ConflictAction // INSERT ON CONFLICT action
-	Inserts        [][]OptionalValue
+	Functions      map[string]Function
 	Updates        map[string]OptionalValue
-	Functions      map[string]Function // NOW(), etc.
-	Conditions     OneOrMore           // used for WHERE
-	OrderBy        []OrderBy
-	Limit          OptionalValue
 	Offset         OptionalValue
-	// Unions holds the UNION / UNION ALL branches chained to this SELECT.
-	// Only populated on SELECT statements.
-	Unions []UnionClause
+	Limit          OptionalValue
+	TableName      string
+	TableAlias     string
+	IndexName      string
+	Target         string
+	PragmaName     string
+	Fields         []Field
+	Inserts        [][]OptionalValue
+	Aggregates     []AggregateExpr
+	GroupBy        []Field
+	Having         OneOrMore
+	Unions         []UnionClause
+	Joins          []Join
+	OrderBy        []OrderBy
+	UniqueIndexes  []UniqueIndex
+	Columns        []Column
+	Conditions     OneOrMore
+	Kind           StatementKind
+	ConflictAction ConflictAction
+	IfNotExists    bool
+	Distinct       bool
 }
 
 // NumPlaceholders returns the number of placeholder parameters (?) in the statement.

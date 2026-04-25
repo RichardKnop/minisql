@@ -151,40 +151,49 @@ func (ck *CompositeKey) Unmarshal(buf []byte, i uint64) (uint64, error) {
 	return offset, nil
 }
 
+// comparisonSize returns the byte length of the comparison buffer, which intentionally
+// excludes the length prefix for Varchar columns (unlike Size() which includes it).
+func (ck CompositeKey) comparisonSize() uint64 {
+	size := uint64(0)
+	for i, col := range ck.Columns {
+		switch col.Kind {
+		case Boolean:
+			size += 1
+		case Int4, Real:
+			size += 4
+		case Int8, Timestamp, Double:
+			size += 8
+		case Varchar:
+			size += uint64(len(ck.Values[i].(string)))
+		}
+	}
+	return size
+}
+
 func (ck *CompositeKey) generateComparison() {
+	ck.Comparison = make([]byte, ck.comparisonSize())
 	offset := uint64(0)
 
 	for j, col := range ck.Columns {
 		switch col.Kind {
 		case Boolean:
-			buf := make([]byte, 1)
-			ck.Comparison = append(ck.Comparison, buf...)
 			marshalBool(ck.Comparison, ck.Values[j].(bool), offset)
 			offset += 1
 		case Int4:
-			buf := make([]byte, 4)
-			ck.Comparison = append(ck.Comparison, buf...)
 			marshalInt32(ck.Comparison, ck.Values[j].(int32), offset)
-
 			offset += 4
 		case Int8, Timestamp:
-			buf := make([]byte, 8)
-			ck.Comparison = append(ck.Comparison, buf...)
 			marshalInt64(ck.Comparison, ck.Values[j].(int64), offset)
 			offset += 8
 		case Real:
-			buf := make([]byte, 4)
-			ck.Comparison = append(ck.Comparison, buf...)
 			marshalFloat32(ck.Comparison, ck.Values[j].(float32), offset)
 			offset += 4
 		case Double:
-			buf := make([]byte, 8)
-			ck.Comparison = append(ck.Comparison, buf...)
 			marshalFloat64(ck.Comparison, ck.Values[j].(float64), offset)
 			offset += 8
 		case Varchar:
-			data := []byte(ck.Values[j].(string))
-			ck.Comparison = append(ck.Comparison, data...)
+			data := ck.Values[j].(string)
+			copy(ck.Comparison[offset:], data)
 			offset += uint64(len(data))
 		}
 	}

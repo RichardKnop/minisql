@@ -52,24 +52,19 @@ type CaseWhen struct {
 //   - Literal != nil:          a scalar literal (int64, float64, bool, TextPointer)
 //   - Left != nil && Op != 0:  a binary arithmetic operation
 type Expr struct {
-	// CASE expression fields (CaseClauses != nil means this is a CASE expression)
-	CaseInput   *Expr      // simple CASE operand; nil for searched CASE
-	CaseClauses []CaseWhen // WHEN/THEN pairs; non-nil marks this as a CASE expr
-	CaseElse    *Expr      // ELSE branch; nil means ELSE NULL
-
-	FuncName string  // built-in function name, e.g. "COALESCE", "NULLIF"
-	Args     []*Expr // function arguments (used when FuncName != "")
-
-	// CAST expression (CastExpr != nil means this is a CAST expression)
-	CastExpr       *Expr      // the expression to cast
-	CastTargetType ColumnKind // the target type (never 0 when CastExpr is set)
-
-	IsNull  bool   // true when this node represents an explicit SQL NULL literal
-	Column  string // column reference, may include alias prefix ("u.price")
-	Literal any    // int64, float64, bool, or TextPointer
-	Left    *Expr
-	Right   *Expr
-	Op      ArithOp
+	Literal        any
+	Right          *Expr
+	CaseElse       *Expr
+	CaseInput      *Expr
+	Left           *Expr
+	CastExpr       *Expr
+	FuncName       string
+	Column         string
+	Args           []*Expr
+	CaseClauses    []CaseWhen
+	CastTargetType ColumnKind
+	Op             ArithOp
+	IsNull         bool
 }
 
 // String returns a human-readable representation suitable for use as a default column name.

@@ -18,12 +18,12 @@ type IntegrityIssue struct {
 
 // IntegrityReport summarises the result of an integrity check.
 type IntegrityReport struct {
-	TotalPages        uint32
+	Issues            []IntegrityIssue
 	CheckedRootPages  int
 	CheckedFreePages  int
 	CheckedLivePages  int
+	TotalPages        uint32
 	FreeListPageCount uint32
-	Issues            []IntegrityIssue
 }
 
 // Ok returns true when the integrity check found no issues.
@@ -710,10 +710,10 @@ func (d *Database) checkTableIndexConsistency(ctx context.Context, report Integr
 }
 
 type indexConsistencyTarget struct {
+	index   BTreeIndex
 	name    string
 	kind    string
 	columns []Column
-	index   BTreeIndex
 }
 
 type integrityIndexEntries map[string]map[RowID]int

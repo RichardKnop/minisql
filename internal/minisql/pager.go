@@ -26,33 +26,17 @@ type DBFile interface {
 type PageUnmarshaler func(totalPages uint32, pageIdx PageIndex, buf []byte) (*Page, error)
 
 type pagerImpl struct {
+	lruCache       LRUCache[PageIndex]
+	file           DBFile
+	bufferPool     *sync.Pool
+	walIndex       *WALIndex
+	pages          []*Page
 	pageSize       int
-	totalPages     uint32 // total number of pages
-	maxCachedPages int    // maximum number of pages to keep in cache
-
-	dbHeader DatabaseHeader
-	// pages is a sparse array where index = PageIndex
-	// nil entries indicate evicted/unloaded pages
-	// Memory overhead: ~8 bytes per total page (e.g., 76MB for 10M pages)
-	pages []*Page
-
-	lruCache LRUCache[PageIndex]
-
-	// LRU tracking: most recently used at the end
-	// lruList []PageIndex
-
-	file     DBFile
-	fileSize int64
-
-	// bufferPool reuses page-sized byte slices to reduce allocations
-	bufferPool *sync.Pool
-
-	// On a cache miss the pager checks the index before reading from the
-	// DB file so readers always see the latest committed version of every page
-	// even before a checkpoint.
-	walIndex *WALIndex
-
-	mu sync.RWMutex
+	maxCachedPages int
+	fileSize       int64
+	mu             sync.RWMutex
+	dbHeader       DatabaseHeader
+	totalPages     uint32
 }
 
 // NewPager opens the database file and initialises the pager.
@@ -334,9 +318,7 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 
 	buf := p.bufferPool.Get().([]byte)
 	defer p.bufferPool.Put(buf)
-	for j := range buf {
-		buf[j] = 0
-	}
+	clear(buf)
 
 	if err := marshalPage(page, buf); err != nil {
 		return fmt.Errorf("error flushing page %d: %w", page.Index, err)
@@ -379,10 +361,10 @@ func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) err
 
 	// Phase 1: Collect pages and marshal them (can be done in parallel)
 	type marshaledPage struct {
-		pageIdx PageIndex
-		buf     []byte
-		isRoot  bool
 		header  *DatabaseHeader
+		buf     []byte
+		pageIdx PageIndex
+		isRoot  bool
 	}
 
 	marshaled := make([]marshaledPage, 0, len(pageIndices))
@@ -406,9 +388,7 @@ func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) err
 	for i, page := range pagesToMarshal {
 		pageIdx := indices[i]
 		buf := p.bufferPool.Get().([]byte)
-		for j := range buf {
-			buf[j] = 0
-		}
+		clear(buf)
 
 		if err := marshalPage(page, buf); err != nil {
 			p.bufferPool.Put(buf)

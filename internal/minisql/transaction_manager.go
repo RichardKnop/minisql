@@ -15,8 +15,8 @@ import (
 // history for MVCC snapshot isolation.  It is valid for read transactions
 // whose SnapshotSeq <= validUntilSeq.
 type pageVersion struct {
-	validUntilSeq uint64
 	page          *Page
+	validUntilSeq uint64
 }
 
 // pageDataPool is a package-level pool for PageSize-byte slices used during WAL
@@ -30,42 +30,26 @@ var pageDataPool = sync.Pool{
 
 // TransactionManager coordinates optimistic concurrency control for the database.
 type TransactionManager struct {
-	mu                    sync.RWMutex
-	nextTxID              TransactionID
-	transactions          map[TransactionID]*Transaction
-	globalPageVersions    map[PageIndex]uint64 // pageIdx -> current version
-	globalDBHeaderVersion uint64
+	saver                 PageSaver
+	ddlSaver              DDLSaver
+	factory               TxPagerFactory
+	checkpointFn          func() error
+	rowCountApplier       func(map[string]int64)
 	logger                *zap.Logger
+	globalPageVersions    map[PageIndex]uint64
+	pageLastCommittedSeq  map[PageIndex]uint64
+	pageVersionHistory    map[PageIndex][]pageVersion
+	commitHook            func(commitPhase)
+	wal                   *WAL
+	walIndex              *WALIndex
+	transactions          map[TransactionID]*Transaction
 	dbFilePath            string
-
-	// MVCC snapshot isolation fields.
-	//
-	// commitSeq is a monotonically increasing counter incremented on every write
-	// commit.  Read-only transactions record their SnapshotSeq = commitSeq at
-	// Begin time; writes committed after that point are invisible to them.
-	//
-	// pageLastCommittedSeq tracks the commitSeq at which each page was last
-	// written to the shared page cache (via SavePage).  ReadPage compares this
-	// against tx.SnapshotSeq to decide whether the cached version is safe to use.
-	//
-	// pageVersionHistory stores old *Page versions for active snapshot readers.
-	// Each entry is valid for reads where snapshotSeq <= entry.validUntilSeq.
-	// Entries are GC'd when no active reader needs them any more.
-	commitSeq            uint64
-	pageLastCommittedSeq map[PageIndex]uint64
-	pageVersionHistory   map[PageIndex][]pageVersion
-
-	// WAL fields (non-nil when a WAL is configured)
-	walWriteMu          sync.Mutex // serialises WAL appends — only one writer at a time
-	wal                 *WAL
-	walIndex            *WALIndex
-	checkpointThreshold int          // auto-checkpoint after this many WAL frames (0 = disabled)
-	checkpointFn        func() error // called by runAutoCheckpoint; set via SetCheckpointFunc
-	factory             TxPagerFactory
-	saver               PageSaver
-	ddlSaver            DDLSaver
-	commitHook          func(commitPhase)
-	rowCountApplier     func(map[string]int64) // called after each successful write commit
+	commitSeq             uint64
+	checkpointThreshold   int
+	nextTxID              TransactionID
+	globalDBHeaderVersion uint64
+	mu                    sync.RWMutex
+	walWriteMu            sync.Mutex
 }
 
 type commitPhase string

@@ -149,9 +149,9 @@ func TestIndexStats_EstimateRangeRows(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
+		rangeCondition RangeCondition
 		name           string
 		stats          IndexStats
-		rangeCondition RangeCondition
 		want           int64
 	}{
 		{
@@ -224,8 +224,8 @@ func TestEstimateRangeSelectivity(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name           string
 		rangeCondition RangeCondition
+		name           string
 		want           float64
 	}{
 		{
@@ -271,9 +271,9 @@ func TestShouldUseIndexForRange(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name           string
-		stats          *IndexStats
 		rangeCondition RangeCondition
+		stats          *IndexStats
+		name           string
 		want           bool
 	}{
 		{

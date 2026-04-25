@@ -30,24 +30,22 @@ type WALConfig struct {
 
 // Database is the top-level embedded SQL database instance.
 type Database struct {
-	dbFilePath     string
+	walDBFile      DBFile
 	parser         Parser
 	factory        PagerFactory
 	saver          PageSaver
-	wal            *WAL
-	walIndex       *WALIndex
-	walDBFile      DBFile
-	txManager      *TransactionManager
-	tables         map[string]*Table
-	dbLock         *sync.RWMutex
+	lockedProvider TableProvider
 	stmtCache      LRUCache[string]
+	tables         map[string]*Table
+	txManager      *TransactionManager
+	dbLock         *sync.RWMutex
+	walIndex       *WALIndex
 	clock          clock
 	logger         *zap.Logger
-	lockedProvider TableProvider
-	// rowCounts stores the total row count for each user table, kept up to date
-	// by insert/delete operations so that COUNT(*) can be served in O(1).
-	rowCounts   map[string]int64
-	rowCountsMu sync.RWMutex
+	wal            *WAL
+	rowCounts      map[string]int64
+	dbFilePath     string
+	rowCountsMu    sync.RWMutex
 }
 
 type clock func() Time
