@@ -1200,8 +1200,21 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 	if err != nil {
 		return err
 	}
-	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+
+	fullMask := selectedColumnsMask(t.Columns, selectedFields)
 	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+
+	// Two-phase unmarshal: if the WHERE filter references only a strict subset of the
+	// selected columns, decode just the filter columns in phase 1 and check the
+	// predicate before decoding the remaining (potentially expensive) columns in phase 2.
+	// Rows that fail the predicate are discarded after the cheap phase-1 decode, avoiding
+	// TextPointer / overflow allocations for every non-matching row.
+	filterMask := fullMask
+	twoPhase := tableFilter != nil
+	if twoPhase {
+		filterMask = filterOnlyMask(t.Columns, scan.Filters)
+		twoPhase = maskHasTrue(filterMask) && !masksEqual(filterMask, fullMask)
+	}
 
 	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
 	if err != nil {
@@ -1214,20 +1227,75 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 			return err
 		}
 
-		row, err := cursor.fetchRowWithMask(ctx, true, selectedMask)
+		if !twoPhase {
+			// ── Single-phase path (original behaviour) ────────────────────────
+			row, err := cursor.fetchRowWithMask(ctx, true, fullMask)
+			if err != nil {
+				return err
+			}
+			if tableFilter != nil {
+				ok, err := tableFilter(row)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					continue
+				}
+			}
+			if err := out(row); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// ── Two-phase path ────────────────────────────────────────────────────
+		// Re-read page when the cursor crossed a page boundary.
+		if page.Index != cursor.PageIdx {
+			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
+			if err != nil {
+				return fmt.Errorf("sequential scan: %w", err)
+			}
+		}
+
+		// Snapshot the current cell before advancing the cursor so phase 2
+		// can unmarshal from the same cell without a second ReadPage call.
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+
+		// Advance cursor (mirrors fetchRowWithMask advance logic).
+		switch {
+		case cursor.CellIdx < page.LeafNode.Header.Cells-1:
+			cursor.CellIdx += 1
+		case page.LeafNode.Header.NextLeaf == 0:
+			cursor.EndOfTable = true
+		default:
+			cursor.PageIdx = page.LeafNode.Header.NextLeaf
+			cursor.CellIdx = 0
+		}
+
+		// Phase 1: decode only the columns needed to evaluate the predicate.
+		filterRow := t.newRow()
+		filterRow, err = filterRow.UnmarshalWithMask(cell, filterMask)
 		if err != nil {
 			return err
 		}
 
-		// Apply remaining filters
-		if tableFilter != nil {
-			ok, err := tableFilter(row)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				continue // Skip this row
-			}
+		ok, err := tableFilter(filterRow)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue // Non-matching row: skip the expensive phase-2 decode.
+		}
+
+		// Phase 2: decode all selected columns (cell data is still valid in cache).
+		row := t.newRow()
+		row, err = row.UnmarshalWithMask(cell, fullMask)
+		if err != nil {
+			return err
+		}
+		row, err = row.readOverflowTexts(ctx, t.pager)
+		if err != nil {
+			return fmt.Errorf("sequential scan read overflow: %w", err)
 		}
 
 		if err := out(row); err != nil {
@@ -1236,6 +1304,51 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 	}
 
 	return nil
+}
+
+// filterOnlyMask returns a column-selection mask that includes only the columns
+// referenced in the given filter conditions (the WHERE predicate columns).
+func filterOnlyMask(columns []Column, filters OneOrMore) []bool {
+	filterCols := make(map[string]struct{})
+	for _, group := range filters {
+		for _, cond := range group {
+			if cond.Operand1.Type == OperandField {
+				filterCols[cond.Operand1.Value.(Field).Name] = struct{}{}
+			}
+			if cond.Operand2.Type == OperandField {
+				filterCols[cond.Operand2.Value.(Field).Name] = struct{}{}
+			}
+		}
+	}
+	mask := make([]bool, len(columns))
+	for i, col := range columns {
+		_, ok := filterCols[col.Name]
+		mask[i] = ok
+	}
+	return mask
+}
+
+// masksEqual reports whether two column-selection masks are identical.
+func masksEqual(a, b []bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// maskHasTrue reports whether any entry in the mask is true.
+func maskHasTrue(mask []bool) bool {
+	for _, b := range mask {
+		if b {
+			return true
+		}
+	}
+	return false
 }
 
 func compileScanFilter(columns []Column, filters OneOrMore) func(Row) (bool, error) {
