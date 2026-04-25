@@ -14,13 +14,13 @@ type PageIndex uint32
 
 // Page ...
 type Page struct {
-	Index             PageIndex
+	IndexNode         any
 	OverflowPage      *OverflowPage
 	FreePage          *FreePage
 	InternalNode      *InternalNode
 	LeafNode          *LeafNode
-	IndexNode         any
 	IndexOverflowNode *IndexOverflowPage
+	Index             PageIndex
 }
 
 // Clone creates a deep copy of the page.

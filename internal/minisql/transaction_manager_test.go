@@ -70,10 +70,9 @@ func TestTransactionManager_Commit(t *testing.T) {
 		tx.DBHeaderWrite = &DatabaseHeader{FirstFreePage: 2, FreePageCount: 10}
 		tx.ReadSet = map[PageIndex]uint64{2: 0, 3: 2, 4: 5}
 		tx.WriteSet[4] = WriteInfo{
-			&Page{Index: PageIndex(4)},
-			"users",
-			"pk_users",
-			nil,
+			Page:  &Page{Index: PageIndex(4)},
+			Table: "users",
+			Index: "pk_users",
 		}
 
 		// Setup expectations
@@ -125,10 +124,9 @@ func TestTransactionManager_Commit(t *testing.T) {
 
 		// Let's simulate a write for second tx that will conflict
 		writeTx.WriteSet[3] = WriteInfo{
-			&Page{Index: PageIndex(3), LeafNode: NewLeafNode()},
-			"orders",
-			"pk_orders",
-			nil,
+			Page:  &Page{Index: PageIndex(3), LeafNode: NewLeafNode()},
+			Table: "orders",
+			Index: "pk_orders",
 		}
 
 		// Setup expectations
@@ -183,19 +181,17 @@ func TestTransactionManager_Commit(t *testing.T) {
 		writeTx1.DBHeaderWrite = &DatabaseHeader{FirstFreePage: 2, FreePageCount: 10}
 		writeTx1.ReadSet = map[PageIndex]uint64{2: 0, 3: 2, 4: 5}
 		writeTx1.WriteSet[4] = WriteInfo{
-			&Page{Index: PageIndex(4)},
-			"orders",
-			"pk_orders",
-			nil,
+			Page:  &Page{Index: PageIndex(4)},
+			Table: "orders",
+			Index: "pk_orders",
 		}
 
 		// Second tx will modify the same page to cause conflict
 		writeTx2.ReadSet = map[PageIndex]uint64{4: 5}
 		writeTx2.WriteSet[4] = WriteInfo{
-			&Page{Index: PageIndex(4)},
-			"orders",
-			"pk_orders",
-			nil,
+			Page:  &Page{Index: PageIndex(4)},
+			Table: "orders",
+			Index: "pk_orders",
 		}
 
 		// Setup expectations
@@ -249,10 +245,8 @@ func TestTransactionManager_Rollback(t *testing.T) {
 	tx.DBHeaderWrite = &DatabaseHeader{FirstFreePage: 2, FreePageCount: 10}
 	tx.ReadSet = map[PageIndex]uint64{2: 0, 3: 2, 4: 5}
 	tx.WriteSet[4] = WriteInfo{
-		&Page{Index: PageIndex(4)},
-		"users",
-		"",
-		nil,
+		Page:  &Page{Index: PageIndex(4)},
+		Table: "users",
 	}
 
 	txManager.RollbackTransaction(ctx, tx)

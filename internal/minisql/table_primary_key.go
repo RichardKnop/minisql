@@ -18,9 +18,9 @@ type IndexInfo struct {
 
 // PrimaryKey ...
 type PrimaryKey struct {
+	Index BTreeIndex
 	IndexInfo
 	Autoincrement bool
-	Index         BTreeIndex
 }
 
 // NewPrimaryKey ...

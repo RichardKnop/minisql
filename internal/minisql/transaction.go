@@ -38,35 +38,25 @@ type TransactionID uint64
 // WriteInfo holds a modified page together with the table and index names it belongs to.
 type WriteInfo struct {
 	*Page
+	OriginalPage *Page
 	Table        string
 	Index        string
-	OriginalPage *Page // page as it was before modification; nil for newly-allocated pages
 }
 
 // Transaction tracks the read and write sets for optimistic concurrency control.
 type Transaction struct {
-	ID            TransactionID
-	StartTime     time.Time
-	ReadSet       map[PageIndex]uint64    // pageIdx -> version when read; nil when ReadOnly
-	WriteSet      map[PageIndex]WriteInfo // pageIdx -> modified page copy (+ table name, index name)
-	DBHeaderRead  *uint64                 // version of DB header when read; nil when ReadOnly
-	DBHeaderWrite *DatabaseHeader         // modified DB header
-	DDLChanges    DDLChanges
-	Status        TransactionStatus
-	// ReadOnly marks a transaction that will never write.  When true, TrackRead
-	// is a no-op, the ReadSet is never allocated, and conflict validation is
-	// skipped at commit time.  This eliminates per-page map writes and mutex
-	// acquisitions on read-heavy queries (e.g. COUNT(*), full-table scans).
-	ReadOnly bool
-	// SnapshotSeq is the value of TransactionManager.commitSeq at the moment
-	// this read-only transaction was registered.  Any write committed after
-	// this point is invisible to the transaction.  Always 0 for write transactions.
-	SnapshotSeq uint64
-	// rowCountDeltas accumulates net row-count changes during this transaction,
-	// keyed by table name.  Applied to the Database row-count cache only on
-	// successful commit; discarded on rollback.
+	DDLChanges     DDLChanges
+	StartTime      time.Time
+	ReadSet        map[PageIndex]uint64
+	WriteSet       map[PageIndex]WriteInfo
+	DBHeaderRead   *uint64
+	DBHeaderWrite  *DatabaseHeader
 	rowCountDeltas map[string]int64
+	ID             TransactionID
+	Status         TransactionStatus
+	SnapshotSeq    uint64
 	mu             sync.RWMutex
+	ReadOnly       bool
 }
 
 // TransactionStatus represents the lifecycle state of a transaction.
@@ -228,10 +218,10 @@ func (tx *Transaction) GetModifiedDBHeader() (*DatabaseHeader, bool) {
 
 // DDLChanges accumulates schema modifications made within a single transaction.
 type DDLChanges struct {
+	CreateIndexes map[string]SecondaryIndex
+	DropIndexes   map[string]SecondaryIndex
 	CreateTables  []*Table
 	DropTables    []string
-	CreateIndexes map[string]SecondaryIndex // table name -> index
-	DropIndexes   map[string]SecondaryIndex // table name -> index
 }
 
 // CreatedTable records a table creation in the DDL change set.

@@ -13,9 +13,9 @@ func TestEstimateFilteredRows(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name           string
 		stats          *IndexStats
 		rangeCondition *RangeCondition
+		name           string
 		want           int64
 	}{
 		{

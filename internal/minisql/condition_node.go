@@ -18,10 +18,10 @@ const (
 // Leaf nodes (Leaf != nil) hold a single Condition.
 // Branch nodes (Left != nil) join two sub-expressions with a logical operator.
 type ConditionNode struct {
-	Leaf  *Condition     // non-nil for leaf nodes
-	Left  *ConditionNode // non-nil for branch nodes
-	Op    LogicOp        // logical operator for branch nodes
-	Right *ConditionNode // non-nil for branch nodes
+	Leaf  *Condition
+	Left  *ConditionNode
+	Right *ConditionNode
+	Op    LogicOp
 }
 
 // IsLeaf returns true if this is a leaf node.

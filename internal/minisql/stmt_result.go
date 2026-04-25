@@ -7,10 +7,10 @@ import (
 
 // Iterator ...
 type Iterator struct {
+	err     error
 	rowFunc func(ctx context.Context) (Row, error)
 	nextRow Row
 	end     bool
-	err     error
 }
 
 // NewIterator ...
@@ -86,8 +86,8 @@ func (i *Iterator) Err() error {
 
 // StatementResult ...
 type StatementResult struct {
-	Columns      []Column
 	Rows         Iterator
+	Columns      []Column
 	RowsAffected int
 	LastInsertId int64
 }

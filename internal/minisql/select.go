@@ -210,13 +210,13 @@ func (t *Table) countAllLeafWalk(ctx context.Context) (StatementResult, error) {
 
 // aggState holds the running accumulator for a single aggregate expression.
 type aggState struct {
-	count     int64
-	sumI      int64   // integer accumulator (Int4 / Int8 source columns)
-	sumF      float64 // float accumulator (Real / Double source columns)
-	useIntSum bool
 	min       OptionalValue
 	max       OptionalValue
-	hasValue  bool // true once a non-NULL value has been seen
+	count     int64
+	sumI      int64
+	sumF      float64
+	useIntSum bool
+	hasValue  bool
 }
 
 func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row) (StatementResult, error) {

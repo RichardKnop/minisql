@@ -493,8 +493,8 @@ func TestParseTimestamp_FractionalSecondsScaleToMicroseconds(t *testing.T) {
 
 	tests := []struct {
 		input                string
-		expectedMicroseconds int32
 		expectedString       string
+		expectedMicroseconds int32
 	}{
 		{input: "2024-03-15 10:30:45.1", expectedMicroseconds: 100000, expectedString: "2024-03-15 10:30:45.100000"},
 		{input: "2024-03-15 10:30:45.12", expectedMicroseconds: 120000, expectedString: "2024-03-15 10:30:45.120000"},

@@ -71,19 +71,19 @@ func TestInterval_String(t *testing.T) {
 	hour := int64(microsecondsInHour)
 
 	cases := []struct {
-		iv       Interval
 		expected string
+		iv       Interval
 	}{
-		{Interval{}, "INTERVAL '0 seconds'"},
-		{Interval{Months: 12}, "INTERVAL '1 year'"},
-		{Interval{Months: 24}, "INTERVAL '2 years'"},
-		{Interval{Months: 3}, "INTERVAL '3 months'"},
-		{Interval{Months: 14}, "INTERVAL '1 year 2 months'"},
-		{Interval{Micros: day}, "INTERVAL '1 day'"},
-		{Interval{Micros: 3 * day}, "INTERVAL '3 days'"},
-		{Interval{Micros: hour}, "INTERVAL '1 hour'"},
-		{Interval{Micros: -day}, "INTERVAL '-1 day'"},
-		{Interval{Months: -6}, "INTERVAL '-6 months'"},
+		{expected: "INTERVAL '0 seconds'", iv: Interval{}},
+		{expected: "INTERVAL '1 year'", iv: Interval{Months: 12}},
+		{expected: "INTERVAL '2 years'", iv: Interval{Months: 24}},
+		{expected: "INTERVAL '3 months'", iv: Interval{Months: 3}},
+		{expected: "INTERVAL '1 year 2 months'", iv: Interval{Months: 14}},
+		{expected: "INTERVAL '1 day'", iv: Interval{Micros: day}},
+		{expected: "INTERVAL '3 days'", iv: Interval{Micros: 3 * day}},
+		{expected: "INTERVAL '1 hour'", iv: Interval{Micros: hour}},
+		{expected: "INTERVAL '-1 day'", iv: Interval{Micros: -day}},
+		{expected: "INTERVAL '-6 months'", iv: Interval{Months: -6}},
 	}
 	for _, tc := range cases {
 		assert.Equal(t, tc.expected, tc.iv.String(), "iv=%+v", tc.iv)

@@ -63,13 +63,13 @@ type JoinColumnPair struct {
 
 // JoinPlan represents a join operation between two scans
 type JoinPlan struct {
+	OuterJoinColumn string
+	InnerJoinColumn string
+	Conditions      Conditions
+	JoinColumnPairs []JoinColumnPair
 	Type            JoinType
-	LeftScanIndex   int              // Index into Scans array (outer table)
-	RightScanIndex  int              // Index into Scans array (inner table)
-	Conditions      Conditions       // ON clause conditions
-	OuterJoinColumn string           // Column name in outer table for index lookup optimization (first column for backward compat)
-	InnerJoinColumn string           // Column name in inner table for index lookup optimization (first column for backward compat)
-	JoinColumnPairs []JoinColumnPair // All join column pairs for composite index support
+	LeftScanIndex   int
+	RightScanIndex  int
 }
 
 // QueryPlan determines how to execute a query
@@ -85,15 +85,15 @@ type QueryPlan struct {
 
 // Scan ...
 type Scan struct {
-	TableName      string // Name of the table to scan
-	TableAlias     string // Alias of the table (for JOINs)
-	Type           ScanType
+	RangeCondition RangeCondition
+	TableName      string
+	TableAlias     string
 	IndexName      string
 	IndexColumns   []Column
-	IndexKeys      []any          // Keys to lookup in index
-	RangeCondition RangeCondition // upper/lower bounds for range scan
-	Filters        OneOrMore      // Additional filters to apply
-	CoveringIndex  bool           // true = all needed columns are in the index; skip table row fetch
+	IndexKeys      []any
+	Filters        OneOrMore
+	Type           ScanType
+	CoveringIndex  bool
 }
 
 /*
@@ -212,14 +212,14 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error
 
 // indexMatch represents a potential index match for equality conditions
 type indexMatch struct {
+	matchedConditions   map[int]bool
+	rangeCondition      *RangeCondition
+	stats               *IndexStats
 	info                IndexInfo
-	matchedConditions   map[int]bool    // tracks which condition indices were matched
-	keys                []any           // composite key values in column order
-	rangeCondition      *RangeCondition // Set for partial composite index matches
-	hasProperUpperBound bool            // False if range scan lacks upper bound (needs filtering)
+	keys                []any
+	hasProperUpperBound bool
 	isPrimaryKey        bool
 	isUnique            bool
-	stats               *IndexStats // Statistics for selectivity-based comparison
 }
 
 // findBestEqualityIndexMatch finds the best index that can be used for equality conditions

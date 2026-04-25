@@ -21,8 +21,8 @@ import (
 // The pager (Phase 4) calls Lookup before reading the DB file so readers
 // always see the latest committed version of every page.
 type WALIndex struct {
-	mu    sync.RWMutex
 	pages map[PageIndex][]byte
+	mu    sync.RWMutex
 }
 
 // NewWALIndex creates an empty WALIndex.

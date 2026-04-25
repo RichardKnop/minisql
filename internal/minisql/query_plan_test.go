@@ -592,16 +592,16 @@ func TestScanType_String(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		st   ScanType
 		want string
+		st   ScanType
 	}{
-		{ScanTypeSequential, "sequential"},
-		{ScanTypeIndexAll, "index_all"},
-		{ScanTypeIndexPoint, "index_point"},
-		{ScanTypeIndexRange, "index_range"},
-		{ScanTypeIndexFirst, "index_first"},
-		{ScanTypeIndexLast, "index_last"},
-		{ScanType(99), "unknown"},
+		{want: "sequential", st: ScanTypeSequential},
+		{want: "index_all", st: ScanTypeIndexAll},
+		{want: "index_point", st: ScanTypeIndexPoint},
+		{want: "index_range", st: ScanTypeIndexRange},
+		{want: "index_first", st: ScanTypeIndexFirst},
+		{want: "index_last", st: ScanTypeIndexLast},
+		{want: "unknown", st: ScanType(99)},
 	}
 
 	for _, tc := range cases {
