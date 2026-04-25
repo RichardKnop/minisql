@@ -1,5 +1,51 @@
 ### 2026-04-25 (latest)
 
+Benchmark suite refactoring — replaced `Txn_NInserts` (structurally identical to `Insert_Batch`) with two new, distinct insert benchmarks:
+- **`Insert_PreparedBatch`**: prepare statement once with `db.Prepare` outside the loop; reuse it inside each transaction via `tx.Stmt(stmt)`. Isolates per-row execution cost by eliminating per-transaction prepare overhead.
+- **`Insert_MultiValues`**: single `INSERT INTO … VALUES (…),(…),…` statement with 100 row tuples. Minimises round-trips and parser overhead by batching the entire payload into one statement execution.
+- For minisql: `Insert_Batch` ≈ `Insert_PreparedBatch` (632 vs 695 µs) — re-preparing per transaction is cheap. `Insert_MultiValues` is notably faster at 554 µs, saving ~12% vs batch with repeated prepares.
+- For SQLite: all three batch patterns converge (233–253 µs) — it optimises them uniformly. `Insert_MultiValues` saves slightly more memory (25.2 KiB vs 31.0 KiB) due to fewer result sets.
+- `Txn_NInserts` row removed from all tables; `Insert_PreparedBatch` and `Insert_MultiValues` rows added.
+- Run 3× on Apple M1 Max; numbers below are the best (warmest) iteration.
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| Delete_ByPK | 308.2 µs/op | 104.7 µs/op | 2.94× |
+| Insert_SingleRow | 103.8 µs/op | 47.3 µs/op | 2.19× |
+| Insert_Batch | 632.1 µs/op | 253.0 µs/op | 2.50× |
+| Insert_PreparedBatch | 695.0 µs/op | 233.1 µs/op | 2.98× |
+| Insert_MultiValues | 554.4 µs/op | 233.1 µs/op | 2.38× |
+| Select_PointScan | 5.7 µs/op | 4.1 µs/op | 1.40× |
+| Select_Limit | 10.2 µs/op | 9.6 µs/op | 1.06× |
+| Select_FullScan | 6.92 ms/op | 6.85 ms/op | 1.01× |
+| Select_CountStar | 20.0 µs/op | 10.5 µs/op | 1.90× |
+| Select_IndexRangeScan | 903.0 µs/op | 884.0 µs/op | 1.02× |
+| Select_RangeScan | 2.39 ms/op | 1.03 ms/op | 2.32× |
+| Update_ByPK | 70.9 µs/op | 52.5 µs/op | 1.35× |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 51.5 KiB | 447 B |
+| Insert_SingleRow | 22.4 KiB | 311 B |
+| Insert_Batch | 360.2 KiB | 31.0 KiB |
+| Insert_PreparedBatch | 359.6 KiB | 31.0 KiB |
+| Insert_MultiValues | 326.3 KiB | 25.2 KiB |
+| Select_PointScan | 4.6 KiB | 679 B |
+| Select_Limit | 6.5 KiB | 1.7 KiB |
+| Select_FullScan | 5.7 MiB | 1.3 MiB |
+| Select_CountStar | 5.9 KiB | 400 B |
+| Select_IndexRangeScan | 774.6 KiB | 85.9 KiB |
+| Select_RangeScan | 1.6 MiB | 85.9 KiB |
+| Update_ByPK | 9.3 KiB | 263 B |
+
+---
+
+### 2026-04-25 (two-phase unmarshal)
+
 Two-phase unmarshal (late materialization) for sequential scan:
 - `sequentialScan` in `select.go` now splits decoding into two phases when a WHERE predicate references a strict subset of the selected columns.
 - Phase 1 decodes only the filter columns and evaluates the predicate. Rows that fail are discarded immediately, skipping all allocations for the remaining (often expensive) columns.
@@ -7,7 +53,7 @@ Two-phase unmarshal (late materialization) for sequential scan:
 - Three new helpers in `select.go`: `filterOnlyMask` (builds WHERE-column mask from scan filters), `masksEqual`, `maskHasTrue`.
 - **Select_RangeScan: 3.58 ms → 2.44 ms (1.47× faster)** — ratio vs SQLite: 3.44× → 2.12×. Allocs drop from 46,392 → 21,015 per op (55% fewer); memory 2.0 MiB → 1.68 MiB (16% less).
 - Benchmarks without a WHERE predicate (FullScan, CountStar) and index-based scans (IndexRangeScan, PointScan) are unaffected; their code paths do not enter the two-phase branch.
-- Note: write-path benchmarks (Delete, Insert, Update) show elevated timings in this run due to high machine variance; they are not affected by this change and should be compared against the 2026-04-25 (previous) entry.
+- Note: write-path benchmarks (Delete, Insert, Update) show elevated timings in this run due to high machine variance; they are not affected by this change and should be compared against the 2026-04-25 (O(1) COUNT) entry.
 
 #### Timing
 
@@ -22,10 +68,9 @@ Two-phase unmarshal (late materialization) for sequential scan:
 | Select_CountStar | 20.2 µs/op | 11.8 µs/op | 1.71× |
 | Select_IndexRangeScan | 968.7 µs/op | 982.4 µs/op | **0.99×** |
 | **Select_RangeScan** | **2.44 ms/op** | **1.15 ms/op** | **2.12×** |
-| Txn_NInserts | 417.7 µs/op | 186.8 µs/op | 2.24× |
 | Update_ByPK | 71.1 µs/op | 46.2 µs/op | 1.54× |
 
-† Delete_ByPK and sqlite write-path outliers in first benchmark iteration indicate machine load; use 2026-04-25 (previous) for clean write-path reference.
+† Delete_ByPK and sqlite write-path outliers in first benchmark iteration indicate machine load; use 2026-04-25 (O(1) COUNT) for clean write-path reference.
 
 #### Memory (B/op)
 
@@ -40,12 +85,11 @@ Two-phase unmarshal (late materialization) for sequential scan:
 | Select_CountStar | 5.9 KiB | 400 B |
 | Select_IndexRangeScan | 774.6 KiB | 85.9 KiB |
 | **Select_RangeScan** | **1.68 MiB** | **85.9 KiB** |
-| Txn_NInserts | 205.2 KiB | 15.8 KiB |
 | Update_ByPK | 9.3 KiB | 263 B |
 
 ---
 
-### 2026-04-25 (previous)
+### 2026-04-25 (O(1) COUNT)
 
 O(1) COUNT(*) via in-memory row-count cache:
 - Added `rowCounts map[string]int64` to `Database`, one entry per user table. Initialised at startup from a single leaf-page walk per table; kept up to date on every committed INSERT/DELETE via a `rowCountApplier` callback on `TransactionManager`.
@@ -67,7 +111,6 @@ O(1) COUNT(*) via in-memory row-count cache:
 | **Select_CountStar** | **20.0 µs/op** | **10.7 µs/op** | **1.87×** |
 | Select_IndexRangeScan | 948.9 µs/op | 863.4 µs/op | 1.10× |
 | Select_RangeScan | 3.58 ms/op | 1.04 ms/op | 3.44× |
-| Txn_NInserts | 438.9 µs/op | 182.8 µs/op | 2.40× |
 | Update_ByPK | 73.7 µs/op | 53.2 µs/op | 1.39× |
 
 #### Memory (B/op)
@@ -83,12 +126,11 @@ O(1) COUNT(*) via in-memory row-count cache:
 | Select_CountStar | 5.9 KiB | 400 B |
 | Select_IndexRangeScan | 771.4 KiB | 85.9 KiB |
 | Select_RangeScan | 2.0 MiB | 85.9 KiB |
-| Txn_NInserts | 204.4 KiB | 15.9 KiB |
 | Update_ByPK | 9.0 KiB | 263 B |
 
 ---
 
-### 2026-04-24 (latest)
+### 2026-04-24 (WAL checkpoint coalescing)
 
 Checkpoint write coalescing in `wal.go` — `WAL.Checkpoint` now sorts page indices and coalesces consecutive runs into a single `WriteAt` call:
 - Previously, checkpoint made one `WriteAt` syscall per dirty page (~150-200 calls per checkpoint). Now, runs of consecutive pages are concatenated into a single buffer and written in one call — reducing per-checkpoint syscall count from ~150 to 1-few.
@@ -109,7 +151,6 @@ Checkpoint write coalescing in `wal.go` — `WAL.Checkpoint` now sorts page indi
 | Select_CountStar | 36.9 µs/op | 11.7 µs/op | 3.14× |
 | Select_IndexRangeScan | 944.9 µs/op | 1.04 ms/op | **0.91×** |
 | Select_RangeScan | 3.85 ms/op | 1.06 ms/op | 3.63× |
-| Txn_NInserts | 536.5 µs/op | 241.2 µs/op | 2.22× |
 | Update_ByPK | 110.6 µs/op | 66.4 µs/op | 1.67× |
 
 #### Memory (B/op)
@@ -125,12 +166,11 @@ Checkpoint write coalescing in `wal.go` — `WAL.Checkpoint` now sorts page indi
 | Select_CountStar | 5.9 KiB | 400 B |
 | Select_IndexRangeScan | 771.4 KiB | 85.9 KiB |
 | Select_RangeScan | 2.0 MiB | 85.9 KiB |
-| Txn_NInserts | 204.1 KiB | 15.9 KiB |
 | Update_ByPK | 9.0 KiB | 263 B |
 
 ---
 
-### 2026-04-24 (previous)
+### 2026-04-24 (write-path B-tree optimisation)
 
 Write-path optimisation — `ReadPage` for B-tree traversal in index.go + `InternalNodeSplitInsert` bug fix in table.go:
 - `insertNotFull`, `remove`, `getPred`, and `getSucc` in `index.go` now use `ReadPage` for traversal, upgrading to `ModifyPage` only at the node actually written. Fewer pages enter the transaction write set, reducing WAL frame count per commit.
@@ -153,7 +193,6 @@ Write-path optimisation — `ReadPage` for B-tree traversal in index.go + `Inter
 | Select_CountStar | 32.7 µs/op | 9.9 µs/op | 3.31× |
 | Select_IndexRangeScan | 711.5 µs/op | 763.6 µs/op | **0.93×** |
 | Select_RangeScan | 2.72 ms/op | 870.1 µs/op | 3.13× |
-| Txn_NInserts | 381.9 µs/op | 148.7 µs/op | 2.57× |
 | Update_ByPK | 52.1 µs/op | 55.5 µs/op | **0.94×** |
 
 #### Memory (B/op)
@@ -169,18 +208,17 @@ Write-path optimisation — `ReadPage` for B-tree traversal in index.go + `Inter
 | Select_CountStar | 5.9 KiB | 400 B |
 | Select_IndexRangeScan | 771.2 KiB | 85.9 KiB |
 | Select_RangeScan | 2.0 MiB | 85.9 KiB |
-| Txn_NInserts | 192.7 KiB | 15.9 KiB |
 | Update_ByPK | 9.0 KiB | 263 B |
 
 ---
 
-### 2026-04-24 (previous)
+### 2026-04-24 (snapshot isolation MVCC)
 
 Snapshot isolation (MVCC) for read-only transactions + TOCTOU fix in `ReadPage`:
 - Read-only transactions now provide true snapshot isolation: any write committed after `BeginReadOnlyTransaction` is invisible to the reader. Old page versions are stored in-memory (`pageVersionHistory`) at write-commit time and GC'd once all readers that need them have committed.
 - Fixed a pre-existing TOCTOU race in `ReadPage` for write transactions: the page version was captured *after* `GetPage` (pager mutex) rather than *before*, meaning a commit landing between the two could cause the writer to track a stale read-version and miss a conflict. Version is now captured first.
 - Added early conflict detection in `ModifyPage`: if a write transaction previously read a page whose global version has since advanced, `ModifyPage` returns `ErrTxConflict` immediately instead of producing a misleading "duplicate key" error.
-- Write-path benchmarks (Insert, Delete, Update, Txn) see a small regression (~1–2×) vs. the previous entry due to the version-before-read change; read-path benchmarks are broadly unchanged.
+- Write-path benchmarks (Insert, Delete, Update) see a small regression (~1–2×) vs. the previous entry due to the version-before-read change; read-path benchmarks are broadly unchanged.
 
 #### Timing
 
@@ -195,7 +233,6 @@ Snapshot isolation (MVCC) for read-only transactions + TOCTOU fix in `ReadPage`:
 | Select_CountStar | 32.0 µs/op | 9.6 µs/op | 3.3× |
 | Select_IndexRangeScan | 716.8 µs/op | 743.8 µs/op | **0.96×** |
 | Select_RangeScan | 2.68 ms/op | 874.2 µs/op | 3.1× |
-| Txn_NInserts | 326.0 µs/op | 142.3 µs/op | 2.3× |
 | Update_ByPK | 66.1 µs/op | 39.0 µs/op | 1.7× |
 
 #### Memory (B/op)
@@ -211,5 +248,4 @@ Snapshot isolation (MVCC) for read-only transactions + TOCTOU fix in `ReadPage`:
 | Select_CountStar | 5.9 KiB | 400 B |
 | Select_IndexRangeScan | 772.4 KiB | 85.9 KiB |
 | Select_RangeScan | 2.1 MiB | 85.9 KiB |
-| Txn_NInserts | 200.8 KiB | 15.8 KiB |
 | Update_ByPK | 9.0 KiB | 263 B |

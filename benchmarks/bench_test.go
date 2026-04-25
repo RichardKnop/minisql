@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	_ "github.com/RichardKnop/minisql"
@@ -21,7 +22,25 @@ type dbDriver struct {
 	afterOpen     func(db *sql.DB) error
 	createTable   string
 	insertRow     string // uses ? placeholders; col order: (name, age, email)
-	insertRowNoID string // insert without providing id
+	insertRowNoID string // insert without providing id (single row)
+	// insertMultiRows(n) returns an INSERT with n value tuples, each (name, age, email).
+	insertMultiRows func(n int) string
+}
+
+// buildMultiValueInsert constructs an INSERT statement with n value tuples
+// each containing 3 ? placeholders, using the provided header
+// (everything up to and including "values").
+func buildMultiValueInsert(header string, n int) string {
+	var b strings.Builder
+	b.WriteString(header)
+	b.WriteString(" values ")
+	for i := range n {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString("(?, ?, ?)")
+	}
+	return b.String()
 }
 
 var drivers = []dbDriver{
@@ -36,8 +55,11 @@ var drivers = []dbDriver{
 			age   int4,
 			email varchar(255)
 		)`,
-		insertRow:     `insert into "bench_rows" (name, age, email) values (?, ?, ?)`,
-		insertRowNoID: `insert into "bench_rows" (name, age, email) values (?, ?, ?)`,
+		insertRow:       `insert into "bench_rows" (name, age, email) values (?, ?, ?)`,
+		insertRowNoID:   `insert into "bench_rows" (name, age, email) values (?, ?, ?)`,
+		insertMultiRows: func(n int) string {
+			return buildMultiValueInsert(`insert into "bench_rows" (name, age, email)`, n)
+		},
 	},
 	{
 		name:       "sqlite",
@@ -52,6 +74,9 @@ var drivers = []dbDriver{
 		)`,
 		insertRow:     `INSERT INTO bench_rows (name, age, email) VALUES (?, ?, ?)`,
 		insertRowNoID: `INSERT INTO bench_rows (name, age, email) VALUES (?, ?, ?)`,
+		insertMultiRows: func(n int) string {
+			return buildMultiValueInsert(`INSERT INTO bench_rows (name, age, email)`, n)
+		},
 	},
 }
 
