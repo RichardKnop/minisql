@@ -81,6 +81,12 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key RowID, row Row) er
 	newPage.LeafNode.Header.NextLeaf = splitPage.LeafNode.Header.NextLeaf
 	splitPage.LeafNode.Header.NextLeaf = newPage.Index
 
+	// Keep the rightmost-page hint current: if the new page is the last leaf
+	// (NextLeaf == 0), it becomes the new rightmost page for future inserts.
+	if newPage.LeafNode.Header.NextLeaf == 0 {
+		c.Table.rightmostTablePage.Store(int64(newPage.Index))
+	}
+
 	// All existing keys plus new key should should be divided
 	// evenly between old (left) and new (right) nodes.
 	// Starting from the right, move each key to correct position.

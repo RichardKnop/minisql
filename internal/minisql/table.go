@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"go.uber.org/zap"
 )
@@ -22,10 +23,15 @@ type Table struct {
 	txManager            *TransactionManager
 	indexStats           map[string]IndexStats
 	getRowCount          func() int64
-	Name                 string
-	Columns              []Column
-	rootPageIdx          PageIndex
-	maximumICells        uint32
+	// rightmostTablePage caches the last leaf page index for SeekNextRowID so that
+	// sequential (autoincrement) inserts skip the O(log N) root→leaf traversal.
+	// lastTxIDTablePage guards against stale hints from rolled-back transactions.
+	rightmostTablePage atomic.Int64
+	lastTxIDTablePage  atomic.Uint64
+	Name               string
+	Columns            []Column
+	rootPageIdx        PageIndex
+	maximumICells      uint32
 }
 
 // TableOption ...
@@ -78,6 +84,8 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 		indexStats:           make(map[string]IndexStats),
 		provider:             provider,
 	}
+
+	table.rightmostTablePage.Store(-1)
 
 	// If no provider is given, create a simple single-table provider for testing
 	if provider == nil {
@@ -241,6 +249,38 @@ func (t *Table) IndexByName(name string) (BTreeIndex, bool) {
 // SeekNextRowID returns cursor pointing at the position after the last row ID
 // plus a new row ID to insert
 func (t *Table) SeekNextRowID(ctx context.Context, pageIdx PageIndex) (*Cursor, RowID, error) {
+	// Fast path: skip the root→leaf traversal when we already know the last leaf.
+	// Only applies at the root entry point (not during internal recursion) and
+	// only when running inside a transaction — without a transaction context we
+	// cannot guard against stale hints from rolled-back transactions.
+	if pageIdx == t.rootPageIdx {
+		if tx := TxFromContext(ctx); tx != nil {
+			// Per-transaction guard: invalidate the hint when a new transaction starts
+			// so that a stale page left behind by a rolled-back transaction is never reused.
+			if uint64(tx.ID) != t.lastTxIDTablePage.Load() {
+				t.rightmostTablePage.Store(-1)
+				t.lastTxIDTablePage.Store(uint64(tx.ID))
+			}
+			if cached := t.rightmostTablePage.Load(); cached >= 0 {
+				page, err := t.pager.ReadPage(ctx, PageIndex(cached))
+				if err == nil && page.LeafNode != nil && page.LeafNode.Header.NextLeaf == 0 {
+					maxKey, err := t.GetMaxKey(ctx, page)
+					nextRowID := maxKey
+					if err == nil {
+						nextRowID = maxKey + 1
+					}
+					return &Cursor{
+						Table:   t,
+						PageIdx: PageIndex(cached),
+						CellIdx: page.LeafNode.Header.Cells,
+					}, nextRowID, nil
+				}
+				// Stale or no longer the last leaf — fall through.
+				t.rightmostTablePage.Store(-1)
+			}
+		}
+	}
+
 	page, err := t.pager.ReadPage(ctx, pageIdx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("seek next row ID: %w", err)
@@ -256,6 +296,8 @@ func (t *Table) SeekNextRowID(ctx context.Context, pageIdx PageIndex) (*Cursor, 
 	if err == nil {
 		nextRowID = maxKey + 1
 	}
+	// Warm the cache: this is the confirmed last leaf.
+	t.rightmostTablePage.Store(int64(pageIdx))
 	return &Cursor{
 		Table:   t,
 		PageIdx: pageIdx,
@@ -689,7 +731,7 @@ func (t *Table) DeleteKey(ctx context.Context, pageIdx PageIndex, key RowID) err
 	}
 
 	// Rebalance leaf node
-	if err := t.rebalanceLeaf(ctx, page, key); err != nil {
+	if err := t.rebalanceLeaf(ctx, page); err != nil {
 		return err
 	}
 
@@ -810,7 +852,7 @@ func (t *Table) freeOverflowPages(ctx context.Context, row Row, onlyForColumns .
 	return nil
 }
 
-func (t *Table) rebalanceLeaf(ctx context.Context, page *Page, key RowID) error {
+func (t *Table) rebalanceLeaf(ctx context.Context, page *Page) error {
 	leafNode := page.LeafNode
 
 	if leafNode.Header.IsRoot {

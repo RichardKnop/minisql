@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"go.uber.org/zap"
 )
@@ -20,14 +21,16 @@ type IndexKey interface {
 
 // Index ...
 type Index[T IndexKey] struct {
-	pager       TxPager
-	logger      *zap.Logger
-	txManager   *TransactionManager
-	Name        string
-	Columns     []Column
-	rootPageIdx PageIndex
-	maximumKeys uint32
-	unique      bool
+	pager         TxPager
+	logger        *zap.Logger
+	txManager     *TransactionManager
+	Name          string
+	Columns       []Column
+	rightmostLeaf atomic.Int64  // cached rightmost leaf page index; -1 = invalid/unpopulated
+	lastTxID      atomic.Uint64 // transaction that last wrote rightmostLeaf; 0 = none
+	rootPageIdx   PageIndex
+	maximumKeys   uint32
+	unique        bool
 }
 
 // NewUniqueIndex ...
@@ -50,7 +53,7 @@ func newIndex[T IndexKey](unique bool, logger *zap.Logger, txManager *Transactio
 		}
 		// TODO - check total index size
 	}
-	return &Index[T]{
+	idx := &Index[T]{
 		logger:      logger,
 		Name:        name,
 		Columns:     columns,
@@ -58,7 +61,9 @@ func newIndex[T IndexKey](unique bool, logger *zap.Logger, txManager *Transactio
 		rootPageIdx: rootPageIdx,
 		pager:       pager,
 		txManager:   txManager,
-	}, nil
+	}
+	idx.rightmostLeaf.Store(-1)
+	return idx, nil
 }
 
 // GetRootPageIdx ...
@@ -71,6 +76,19 @@ func (ui *Index[T]) Insert(ctx context.Context, keyAny any, rowID RowID) error {
 	key, ok := keyAny.(T)
 	if !ok {
 		return fmt.Errorf("invalid key type: %T", keyAny)
+	}
+
+	// Invalidate the rightmost-leaf cache when a new transaction begins.
+	// After a rollback (explicit or OCC conflict), the tree reverts to its
+	// pre-transaction state but rightmostLeaf may still point to a stale page
+	// from the aborted transaction.  Checking the transaction ID here ensures
+	// each new transaction starts with a cold cache rather than a potentially
+	// wrong hint from a previous (possibly rolled-back) transaction.
+	if tx := TxFromContext(ctx); tx != nil {
+		if uint64(tx.ID) != ui.lastTxID.Load() {
+			ui.rightmostLeaf.Store(-1)
+			ui.lastTxID.Store(uint64(tx.ID))
+		}
 	}
 
 	// Start with a read-only peek at the root — only upgrade to ModifyPage when we know
@@ -99,6 +117,8 @@ func (ui *Index[T]) Insert(ctx context.Context, keyAny any, rowID RowID) error {
 		rootNode.Header.IsRoot = true
 		rootNode.Header.IsLeaf = true
 		rootNode.Header.Keys += 1
+		// Seed the cache: the root leaf is the rightmost (and only) leaf.
+		ui.rightmostLeaf.Store(int64(ui.GetRootPageIdx()))
 		return nil
 	}
 
@@ -115,7 +135,33 @@ func (ui *Index[T]) Insert(ctx context.Context, keyAny any, rowID RowID) error {
 
 	// Root is not full — insertNotFull will upgrade only the pages it actually writes.
 	if ui.hasSpaceForKey(rootNode, key) {
-		return ui.insertNotFull(ctx, ui.GetRootPageIdx(), key, rowID)
+		// Fast path: when root has room and we hold a rightmost-leaf hint, skip the
+		// tree traversal for strictly-increasing (autoincrement) keys.
+		// The root-has-space guard is essential: a full root triggers a proactive split
+		// in the normal path that restructures the tree; the fast path cannot replicate
+		// that, so it must only fire when no root split is required.
+		if cached := ui.rightmostLeaf.Load(); cached >= 0 {
+			inserted, err := ui.tryInsertIntoRightmostLeaf(ctx, PageIndex(cached), key, rowID)
+			if err != nil {
+				return err
+			}
+			if inserted {
+				return nil
+			}
+			// Miss (leaf full, stale, or key out-of-order): invalidate and fall through.
+			ui.rightmostLeaf.Store(-1)
+		}
+
+		leafIdx, isRightmost, err := ui.insertNotFull(ctx, ui.GetRootPageIdx(), key, rowID)
+		if err != nil {
+			return err
+		}
+		if isRightmost {
+			ui.rightmostLeaf.Store(int64(leafIdx))
+		} else {
+			ui.rightmostLeaf.Store(-1)
+		}
+		return nil
 	}
 
 	// Root is full, need to split — upgrade root to write set now.
@@ -164,10 +210,65 @@ func (ui *Index[T]) Insert(ctx context.Context, keyAny any, rowID RowID) error {
 	if err != nil {
 		return fmt.Errorf("get child: %w", err)
 	}
-	if err := ui.insertNotFull(ctx, childIdx, key, rowID); err != nil {
+	// isRightmostAtRoot: after split the root has exactly 1 key; going to child
+	// index 1 (== Keys) means we took the rightmost branch at the root level.
+	isRightmostAtRoot := i == rootNode.Header.Keys
+	leafIdx, isRightmostBelow, err := ui.insertNotFull(ctx, childIdx, key, rowID)
+	if err != nil {
 		return fmt.Errorf("insert not full: %w", err)
 	}
+	if isRightmostAtRoot && isRightmostBelow {
+		ui.rightmostLeaf.Store(int64(leafIdx))
+	} else {
+		ui.rightmostLeaf.Store(-1)
+	}
 	return nil
+}
+
+// tryInsertIntoRightmostLeaf attempts to insert key directly into the cached
+// rightmost leaf without traversing the tree. It succeeds when:
+//   - the cached page is still a valid leaf node of the correct type,
+//   - key is strictly greater than the last key in the leaf (monotonic insert), and
+//   - the leaf has room for one more key.
+//
+// Returns (true, nil) on success, (false, nil) on any cache miss, and
+// (false, err) on an unexpected I/O error.
+func (ui *Index[T]) tryInsertIntoRightmostLeaf(ctx context.Context, leafIdx PageIndex, key T, rowID RowID) (bool, error) {
+	leafPage, err := ui.pager.ReadPage(ctx, leafIdx)
+	if err != nil {
+		return false, fmt.Errorf("read cached rightmost leaf %d: %w", leafIdx, err)
+	}
+	leafNode, ok := leafPage.IndexNode.(*IndexNode[T])
+	if !ok || leafNode == nil || !leafNode.Header.IsLeaf || leafNode.Header.Keys == 0 {
+		return false, nil // stale or wrong type
+	}
+	// Key must land after the current last key (rightmost position).
+	if compare(leafNode.LastCell().Key, key) >= 0 {
+		return false, nil // out-of-order or duplicate
+	}
+	if !ui.hasSpaceForKey(leafNode, key) {
+		return false, nil // leaf is full — caller will fall back to a split
+	}
+
+	// Upgrade to write set and re-read the node (COW).
+	leafPage, err = ui.pager.ModifyPage(ctx, leafIdx)
+	if err != nil {
+		return false, fmt.Errorf("modify cached rightmost leaf %d: %w", leafIdx, err)
+	}
+	leafNode = leafPage.IndexNode.(*IndexNode[T])
+
+	// Append at the end — no shifting required since key > all existing keys.
+	i := int(leafNode.Header.Keys)
+	leafNode.Cells = append(leafNode.Cells, NewIndexCell[T](ui.unique))
+	leafNode.Cells[i].Key = key
+	if ui.unique {
+		leafNode.Cells[i].UniqueRowID = rowID
+	} else {
+		leafNode.Cells[i].InlineRowIDs = 1
+		leafNode.Cells[i].RowIDs = []RowID{rowID}
+	}
+	leafNode.Header.Keys++
+	return true, nil
 }
 
 func (ui *Index[T]) hasSpaceForKey(node *IndexNode[T], key T) bool {
@@ -187,11 +288,16 @@ func (ui *Index[T]) atLeastHalfFull(node *IndexNode[T]) bool {
 // ErrDuplicateKey ...
 var ErrDuplicateKey = errors.New("duplicate key")
 
-func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T, rowID RowID) error {
+// insertNotFull inserts key/rowID into the subtree rooted at pageIdx.
+// It returns the leaf page index where the key landed, a bool indicating
+// whether every traversal step in this call chose the rightmost child
+// (so the caller can determine if the leaf is the global rightmost), and
+// any error.
+func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T, rowID RowID) (PageIndex, bool, error) {
 	// Read the page first — only upgrade to ModifyPage when we know we will write.
 	page, err := ui.pager.ReadPage(ctx, pageIdx)
 	if err != nil {
-		return fmt.Errorf("get page: %w", err)
+		return 0, false, fmt.Errorf("get page: %w", err)
 	}
 	node := page.IndexNode.(*IndexNode[T])
 
@@ -204,13 +310,14 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 			// Upgrade to write set before modifying.
 			page, err = ui.pager.ModifyPage(ctx, pageIdx)
 			if err != nil {
-				return fmt.Errorf("modify page for append row ID: %w", err)
+				return 0, false, fmt.Errorf("modify page for append row ID: %w", err)
 			}
 			node = page.IndexNode.(*IndexNode[T])
 			if err := appendRowID(ctx, ui.pager, node, cellIdx, rowID); err != nil {
-				return fmt.Errorf("error appending row ID to existing key: %w", err)
+				return 0, false, fmt.Errorf("error appending row ID to existing key: %w", err)
 			}
-			return nil
+			// Appending to an existing key — not a rightmost-leaf insert.
+			return pageIdx, false, nil
 		}
 		// Otherwise fall through to insert a new key and row ID.
 	}
@@ -219,7 +326,7 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 		// Upgrade to write set before inserting into the leaf.
 		page, err = ui.pager.ModifyPage(ctx, pageIdx)
 		if err != nil {
-			return fmt.Errorf("modify leaf page for insert: %w", err)
+			return 0, false, fmt.Errorf("modify leaf page for insert: %w", err)
 		}
 		node = page.IndexNode.(*IndexNode[T])
 
@@ -242,7 +349,10 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 			node.Cells[i+1].RowIDs = []RowID{rowID}
 		}
 		node.Header.Keys += 1
-		return nil
+		// The leaf itself is trivially "rightmost at leaf level"; whether it is the
+		// global rightmost depends on the path taken above (callers check their own
+		// level's direction and AND it with this return value).
+		return pageIdx, true, nil
 	}
 
 	// Internal node — find the child that will receive the new key.
@@ -253,13 +363,13 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 
 	childIdx, err := node.Child(uint32(i + 1))
 	if err != nil {
-		return fmt.Errorf("get child: %w", err)
+		return 0, false, fmt.Errorf("get child: %w", err)
 	}
 
 	// Peek at the child with ReadPage to decide if a split is needed.
 	childPage, err := ui.pager.ReadPage(ctx, childIdx)
 	if err != nil {
-		return fmt.Errorf("get child page: %w", err)
+		return 0, false, fmt.Errorf("get child page: %w", err)
 	}
 	childNode := childPage.IndexNode.(*IndexNode[T])
 
@@ -267,15 +377,15 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 		// Child is full — upgrade both parent and child to write set before splitting.
 		page, err = ui.pager.ModifyPage(ctx, pageIdx)
 		if err != nil {
-			return fmt.Errorf("modify parent page for split: %w", err)
+			return 0, false, fmt.Errorf("modify parent page for split: %w", err)
 		}
 		node = page.IndexNode.(*IndexNode[T])
 		childPage, err = ui.pager.ModifyPage(ctx, childIdx)
 		if err != nil {
-			return fmt.Errorf("modify child page for split: %w", err)
+			return 0, false, fmt.Errorf("modify child page for split: %w", err)
 		}
 		if err := ui.splitChild(ctx, page, childPage, uint32(i+1)); err != nil {
-			return fmt.Errorf("split child: %w", err)
+			return 0, false, fmt.Errorf("split child: %w", err)
 		}
 		if compare(node.Cells[i+1].Key, key) < 0 {
 			i += 1
@@ -283,11 +393,14 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 		// Re-read the child index from the now-updated parent node.
 		childIdx, err = node.Child(uint32(i + 1))
 		if err != nil {
-			return fmt.Errorf("get child after split: %w", err)
+			return 0, false, fmt.Errorf("get child after split: %w", err)
 		}
 	}
 
-	return ui.insertNotFull(ctx, childIdx, key, rowID)
+	// isRightmostAtThisLevel: we chose node.Child(Keys) — the RightChild pointer.
+	isRightmostAtThisLevel := uint32(i+1) == node.Header.Keys
+	leafIdx, isRightmostBelow, err := ui.insertNotFull(ctx, childIdx, key, rowID)
+	return leafIdx, isRightmostAtThisLevel && isRightmostBelow, err
 }
 
 // Split a child node into two nodes and move the median key up to the parent node
@@ -377,6 +490,10 @@ func (ui *Index[T]) Delete(ctx context.Context, keyAny any, rowID RowID) error {
 	if !ok {
 		return fmt.Errorf("invalid key type: %T", keyAny)
 	}
+
+	// Invalidate the rightmost-leaf cache: a delete may trigger merges or borrows
+	// that restructure the rightmost path, making the cached page index stale.
+	ui.rightmostLeaf.Store(-1)
 
 	// Start with a read-only peek at the root; remove will upgrade pages as needed.
 	rootPage, err := ui.pager.ReadPage(ctx, ui.GetRootPageIdx())
