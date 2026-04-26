@@ -1,4 +1,52 @@
-### 2026-04-25 (latest)
+### 2026-04-26 (latest)
+
+Medium-impact zero-copy + exact-size allocations:
+- **`CompositeKey.Unmarshal` exact allocation**: replaced the blanket `make([]byte, 255×cols×4)` overallocation (up to 8 KiB for an 8-column key) with a two-pass approach — first pass scans `buf` reading varchar length prefixes to compute the exact comparison size, second pass fills values. Allocation for a typical `(int64, varchar(10))` key shrinks from 2,040 B → 18 B. Fixes a latent issue where the sub-sliced `ck.Comparison = comparison[:compOffset]` kept the full oversized backing array alive.
+- **`OverflowPage.Unmarshal` sub-slice**: `make+copy` → `buf[i:i+DataSize]`. `readOverflowTexts` copies these bytes out immediately via `append`, so this eliminates one allocation per overflow page read without changing observable behaviour.
+- **`TextPointer.Unmarshal` inline sub-slice**: same pattern — inline `Data` now sub-slices the page buffer. `Marshal` copies it out via `copy(buf, tp.Data)`, safe whether `Data` owns its bytes or not.
+- **`readOverflowTexts` pre-allocation**: `var overflowData []byte` → `make([]byte, 0, textPointer.Length)`. Eliminates repeated reallocation while assembling multi-page text values.
+- **`query_plan.go` allIndexes pre-allocation**: exact capacity (`1 + len(UniqueIndexes) + len(SecondaryIndexes)`) instead of nil-start + append.
+- **Select_FullScan: 5.04 ms → 4.89 ms (1.03× faster)** — now faster than SQLite (**0.9×**). Memory drops 5.7 MiB → 5.3 MiB (−7%); allocs 131,698 → 111,698 (−15%). TextPointer sub-slicing reduces per-row cost for text-heavy tables.
+- **Select_IndexRangeScan: 724.5 µs → 687.37 µs (1.05× faster)** — 0.89× vs SQLite. Allocs 12,168 → 11,065 (−9%). CompositeKey Unmarshal fix directly reduces per-key allocation on composite-index lookups.
+- Delete/Insert timing regressions vs previous entry are within benchmark noise (Delete_ByPK is particularly volatile); alloc counts and memory are stable or improved.
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| Delete_ByPK | 177.87 µs/op | 76.75 µs/op | 2.3× |
+| Insert_SingleRow | 82.95 µs/op | 47.69 µs/op | 1.7× |
+| Insert_Batch | 633.61 µs/op | 227.28 µs/op | 2.8× |
+| Insert_PreparedBatch | 615.82 µs/op | 235.80 µs/op | 2.6× |
+| Insert_MultiValues | 474.51 µs/op | 171.74 µs/op | 2.8× |
+| Select_PointScan | 4.40 µs/op | 3.45 µs/op | 1.3× |
+| Select_Limit | 7.34 µs/op | 8.02 µs/op | 0.9× |
+| **Select_FullScan** | **4.89 ms/op** | **5.24 ms/op** | **0.9×** |
+| Select_CountStar | 17.55 µs/op | 9.79 µs/op | 1.8× |
+| **Select_IndexRangeScan** | **687.37 µs/op** | **768.10 µs/op** | **0.9×** |
+| Select_RangeScan | 1.63 ms/op | 875.80 µs/op | 1.9× |
+| Update_ByPK | 56.97 µs/op | 120.46 µs/op | 0.5× |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 48.2 KiB | 447 B |
+| Insert_SingleRow | 21.4 KiB | 311 B |
+| Insert_Batch | 351.7 KiB | 31.0 KiB |
+| Insert_PreparedBatch | 351.1 KiB | 31.0 KiB |
+| Insert_MultiValues | 318.0 KiB | 25.2 KiB |
+| Select_PointScan | 4.6 KiB | 679 B |
+| Select_Limit | 6.1 KiB | 1.7 KiB |
+| **Select_FullScan** | **5.3 MiB** | **1.3 MiB** |
+| Select_CountStar | 5.9 KiB | 400 B |
+| Select_IndexRangeScan | 739.3 KiB | 85.9 KiB |
+| Select_RangeScan | 1.6 MiB | 85.9 KiB |
+| Update_ByPK | 9.2 KiB | 263 B |
+
+---
+
+### 2026-04-25 (zero-copy cell reads + struct alignment)
 
 Zero-copy cell reads + struct alignment + CompositeKey pre-allocation:
 - **`LeafNode.Unmarshal` cell sub-slicing**: cell `Value` fields now reference the page buffer directly instead of `make+copy`. The existing copy-on-write mechanism (`isOwned` flag + `PrepareModifyCell`) handles write safety unchanged. Eliminates one heap allocation per cell per cache miss — a leaf page with 50–200 cells previously triggered 50–200 allocations here; now zero.

@@ -55,8 +55,8 @@ var drivers = []dbDriver{
 			age   int4,
 			email varchar(255)
 		)`,
-		insertRow:       `insert into "bench_rows" (name, age, email) values (?, ?, ?)`,
-		insertRowNoID:   `insert into "bench_rows" (name, age, email) values (?, ?, ?)`,
+		insertRow:     `insert into "bench_rows" (name, age, email) values (?, ?, ?)`,
+		insertRowNoID: `insert into "bench_rows" (name, age, email) values (?, ?, ?)`,
 		insertMultiRows: func(n int) string {
 			return buildMultiValueInsert(`insert into "bench_rows" (name, age, email)`, n)
 		},
