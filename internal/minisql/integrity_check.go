@@ -835,7 +835,7 @@ func addIntegrityEntry(entries integrityIndexEntries, keyID string, rowID RowID)
 		rowIDs = make(map[RowID]int)
 		entries[keyID] = rowIDs
 	}
-	rowIDs[rowID]++
+	rowIDs[rowID] += 1
 }
 
 func integrityKeyIDFromRow(row Row, columns []Column, required bool) (string, bool, error) {

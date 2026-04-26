@@ -292,7 +292,7 @@ func (t *Table) findBestEqualityIndexMatch(group Conditions) *indexMatch {
 	// Collect all available indexes
 	indexCap := len(t.UniqueIndexes) + len(t.SecondaryIndexes)
 	if t.HasPrimaryKey() {
-		indexCap++
+		indexCap += 1
 	}
 	allIndexes := make([]IndexInfo, 0, indexCap)
 	if t.HasPrimaryKey() {

@@ -357,7 +357,7 @@ func (w *WAL) Checkpoint(dbFile DBFile) error {
 		// Extend the run while pages are consecutive.
 		j := i + 1
 		for j < len(pageIndices) && pageIndices[j] == pageIndices[j-1]+1 {
-			j++
+			j += 1
 		}
 
 		var buf []byte

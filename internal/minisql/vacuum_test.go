@@ -79,7 +79,7 @@ func countRowsInDB(t *testing.T, db *Database, tableName string) int {
 		}
 		for result.Rows.Next(txCtx) {
 			_ = result.Rows.Row()
-			count++
+			count += 1
 		}
 		return result.Rows.Err()
 	})
