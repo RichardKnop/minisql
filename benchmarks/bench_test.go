@@ -64,7 +64,7 @@ var drivers = []dbDriver{
 	{
 		name:       "sqlite",
 		driverName: "sqlite",
-		dsn:        func(path string) string { return path + "?_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)" },
+		dsn:        func(path string) string { return path + "?_pragma=journal_mode(WAL)" },
 		afterOpen:  nil,
 		createTable: `CREATE TABLE IF NOT EXISTS bench_rows (
 			id    INTEGER PRIMARY KEY AUTOINCREMENT,

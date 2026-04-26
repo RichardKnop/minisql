@@ -319,6 +319,7 @@ type Statement struct {
 	IndexName      string
 	Target         string
 	PragmaName     string
+	PragmaValue    string
 	Fields         []Field
 	Inserts        [][]OptionalValue
 	Aggregates     []AggregateExpr
@@ -405,6 +406,7 @@ func (s Statement) Clone() Statement {
 		TableName:      s.TableName,
 		IndexName:      s.IndexName,
 		PragmaName:     s.PragmaName,
+		PragmaValue:    s.PragmaValue,
 		ConflictAction: s.ConflictAction,
 		Columns:        s.Columns,
 		Distinct:       s.Distinct,

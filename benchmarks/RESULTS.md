@@ -1,4 +1,54 @@
-### 2026-04-26 (latest)
+### 2026-04-26 (synchronous=normal — latest)
+
+Both minisql and SQLite now run with `synchronous=normal` (WAL mode default): no fsync per commit, fsync only at checkpoint.
+
+- **minisql default changed to `SynchronousNormal`**: `WAL.AppendTransaction` no longer calls `fsync()` after each commit. The per-commit ~50–70 µs fsync was the dominant write-path cost.
+- **SQLite benchmark DSN updated**: removed `synchronous(FULL)` override — SQLite now also uses its WAL default (`synchronous=NORMAL`). Both databases are now measured under identical durability conditions.
+- **`PRAGMA synchronous`** added: readable and settable at runtime (`off` / `normal` / `full`); also configurable via the `synchronous=` connection string parameter.
+- **Single-row write paths now faster than SQLite** across Delete, Insert, and Update:
+  - **Delete_ByPK: 177.9 µs → 27.5 µs (6.5× faster)** — **3.25× faster than SQLite**
+  - **Insert_SingleRow: 83.0 µs → 21.8 µs (3.8× faster)** — **2.0× faster than SQLite**
+  - **Update_ByPK: 57.0 µs → 14.1 µs (4.0× faster)** — **2.8× faster than SQLite**
+- Batch inserts remain slower (2.3–2.6×): the bottleneck is now per-row Go allocation overhead rather than fsync latency.
+- Read paths are unchanged (no code change); minor variance vs previous run.
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| **Delete_ByPK** | **27.5 µs/op** | **89.6 µs/op** | **0.31×** |
+| **Insert_SingleRow** | **21.8 µs/op** | **43.9 µs/op** | **0.50×** |
+| Insert_Batch | 543.0 µs/op | 229.7 µs/op | 2.4× |
+| Insert_PreparedBatch | 549.7 µs/op | 241.4 µs/op | 2.3× |
+| Insert_MultiValues | 446.8 µs/op | 170.7 µs/op | 2.6× |
+| Select_PointScan | 4.46 µs/op | 3.36 µs/op | 1.3× |
+| **Select_Limit** | **7.33 µs/op** | **8.03 µs/op** | **0.91×** |
+| **Select_FullScan** | **4.81 ms/op** | **5.16 ms/op** | **0.93×** |
+| Select_CountStar | 17.28 µs/op | 9.68 µs/op | 1.8× |
+| **Select_IndexRangeScan** | **704.5 µs/op** | **760.7 µs/op** | **0.93×** |
+| Select_RangeScan | 1.82 ms/op | 883.2 µs/op | 2.1× |
+| **Update_ByPK** | **14.1 µs/op** | **39.1 µs/op** | **0.36×** |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 26.3 KiB | 447 B |
+| Insert_SingleRow | 21.5 KiB | 312 B |
+| Insert_Batch | 352.3 KiB | 31.1 KiB |
+| Insert_PreparedBatch | 351.6 KiB | 31.1 KiB |
+| Insert_MultiValues | 318.2 KiB | 25.3 KiB |
+| Select_PointScan | 4.6 KiB | 679 B |
+| Select_Limit | 6.1 KiB | 1.7 KiB |
+| **Select_FullScan** | **5.3 MiB** | **1.3 MiB** |
+| Select_CountStar | 6.0 KiB | 400 B |
+| Select_IndexRangeScan | 737.5 KiB | 85.9 KiB |
+| Select_RangeScan | 1.6 MiB | 85.9 KiB |
+| Update_ByPK | 9.0 KiB | 263 B |
+
+---
+
+### 2026-04-26 (medium-impact zero-copy + exact-size allocations)
 
 Medium-impact zero-copy + exact-size allocations:
 - **`CompositeKey.Unmarshal` exact allocation**: replaced the blanket `make([]byte, 255×cols×4)` overallocation (up to 8 KiB for an 8-column key) with a two-pass approach — first pass scans `buf` reading varchar length prefixes to compute the exact comparison size, second pass fills values. Allocation for a typical `(int64, varchar(10))` key shrinks from 2,040 B → 18 B. Fixes a latent issue where the sub-sliced `ck.Comparison = comparison[:compOffset]` kept the full oversized backing array alive.

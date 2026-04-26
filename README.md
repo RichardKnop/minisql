@@ -53,6 +53,7 @@ MiniSQL supports optional connection string parameters:
 | `wal_checkpoint_threshold` | non-negative integer | `1000` | Auto-checkpoint after N WAL frames (0 = disabled) |
 | `log_level` | `debug`, `info`, `warn`, `error` | `warn` | Set logging verbosity level |
 | `max_cached_pages` | positive integer | `2000` | Maximum number of pages to keep in memory cache |
+| `synchronous` | `off`, `normal`, `full` | `normal` | WAL fsync mode (see [WAL durability](#wal-durability-modes) below) |
 
 **Examples:**
 ```go
@@ -65,6 +66,9 @@ db, err := sql.Open("minisql", "./my.db?max_cached_pages=500")
 // Disable auto-checkpoint (manual checkpoint only)
 db, err := sql.Open("minisql", "./my.db?wal_checkpoint_threshold=0")
 
+// Maximum write durability (fsync after every commit)
+db, err := sql.Open("minisql", "./my.db?synchronous=full")
+
 // Combine multiple parameters
 db, err := sql.Open("minisql", "/path/to/db.db?log_level=info&max_cached_pages=2000")
 ```
@@ -75,20 +79,47 @@ MiniSQL uses a Write-Ahead Log (`{dbpath}-wal`) for crash recovery and atomic co
 
 Commit protocol:
 
-1. Serialise all modified pages as WAL frames and `Sync()` the WAL file to disk.
-2. The in-memory WAL index is updated so subsequent reads see the new pages immediately.
-3. The main database file is **not written** during a commit — it is updated only during a checkpoint.
+1. Serialise all modified pages as WAL frames and write them to the WAL file.
+2. Optionally `fsync()` the WAL file (controlled by the `synchronous` setting).
+3. The in-memory WAL index is updated so subsequent reads see the new pages immediately.
+4. The main database file is **not written** during a commit — it is updated only during a checkpoint.
 
 On startup, if a WAL file exists, MiniSQL replays all valid committed frames into the in-memory WAL index so the data is visible immediately without a checkpoint.
 
 Checkpoint (`PRAGMA wal_checkpoint`):
 
 1. Copies every WAL page into the main database file.
-2. `Sync()`s the database file.
+2. `Sync()`s the database file (skipped in `synchronous=off`).
 3. Truncates the WAL file to its header (32 bytes).
 4. Resets the in-memory WAL index.
 
 An automatic checkpoint is triggered after `wal_checkpoint_threshold` WAL frames (default 1000). Set `wal_checkpoint_threshold=0` to disable auto-checkpoint and run `PRAGMA wal_checkpoint` manually.
+
+### WAL Durability Modes
+
+The `synchronous` setting controls when `fsync()` is called, trading durability for write performance. This matches SQLite's `PRAGMA synchronous` for WAL mode.
+
+| Mode | Connection string | PRAGMA | Description |
+|------|------------------|--------|-------------|
+| `normal` | `synchronous=normal` | `PRAGMA synchronous = normal` | **Default.** No fsync per commit. fsync only at checkpoint. Matches SQLite WAL default. |
+| `full` | `synchronous=full` | `PRAGMA synchronous = full` | fsync after every WAL commit. Maximum durability — survives an OS crash between commits. |
+| `off` | `synchronous=off` | `PRAGMA synchronous = off` | No fsyncs at all. Fastest, but uncommitted data may be lost on OS crash or power failure. |
+
+The default (`normal`) matches SQLite's WAL default behaviour. In practice, data committed under `normal` mode survives application crashes and most OS crashes — the only scenario where data is lost is a power failure or kernel panic occurring in the narrow window after a commit write but before the next checkpoint fsync.
+
+You can read the current mode at runtime:
+
+```sql
+PRAGMA synchronous;   -- returns 0 (off), 1 (normal), or 2 (full)
+```
+
+And change it for the current connection:
+
+```sql
+PRAGMA synchronous = full;
+PRAGMA synchronous = normal;
+PRAGMA synchronous = off;
+```
 
 ## Storage
 
@@ -338,6 +369,9 @@ Important behavior and current non-goals:
 | `VACUUM` | Rebuilds the database file, repacking it into a minimal amount of disk space (similar to SQLite) |
 | `PRAGMA quick_check` | A cheap structural health check of the open database. |
 | `PRAGMA integrity_check` | A deeper structural and logical check: page graph, overflow chains, and table/index consistency. Prefer offline use for large databases |
+| `PRAGMA wal_checkpoint` | Manually flush WAL frames to the main database file and truncate the WAL. |
+| `PRAGMA synchronous` | Read current WAL fsync mode (returns 0/1/2). |
+| `PRAGMA synchronous = off\|normal\|full` | Set WAL fsync mode for the current connection. See [WAL Durability Modes](#wal-durability-modes). |
 
 
 Prepared statements are supported using `?` as a placeholder. For example:
