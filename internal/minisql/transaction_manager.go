@@ -238,7 +238,7 @@ func (tm *TransactionManager) BeginReadOnlyTransaction(ctx context.Context) *Tra
 		ReadOnly:    true,
 		SnapshotSeq: tm.commitSeq,
 	}
-	tm.nextTxID++
+	tm.nextTxID += 1
 	tm.transactions[tx.ID] = tx
 	tm.mu.Unlock()
 
@@ -311,7 +311,7 @@ func (tm *TransactionManager) trimPageVersionHistoryLocked() {
 	for pageIdx, versions := range tm.pageVersionHistory {
 		lo := 0
 		for lo < len(versions) && versions[lo].validUntilSeq < minSnap {
-			lo++
+			lo += 1
 		}
 		if lo > 0 {
 			tm.pageVersionHistory[pageIdx] = versions[lo:]
@@ -407,7 +407,7 @@ func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction)
 	}
 
 	// Advance the commit sequence for MVCC snapshot isolation.
-	tm.commitSeq++
+	tm.commitSeq += 1
 	newSeq := tm.commitSeq
 	minSnap := tm.minActiveSnapshotSeqLocked()
 
@@ -561,10 +561,10 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 	tm.mu.Lock()
 	if header, modified := tx.GetModifiedDBHeader(); modified {
 		tm.saver.SaveHeader(ctx, *header)
-		tm.globalDBHeaderVersion++
+		tm.globalDBHeaderVersion += 1
 	}
 	// Advance commit sequence and save old page versions for snapshot readers.
-	tm.commitSeq++
+	tm.commitSeq += 1
 	newSeq := tm.commitSeq
 	minSnap := tm.minActiveSnapshotSeqLocked()
 	for pageIdx, info := range writeInfos {

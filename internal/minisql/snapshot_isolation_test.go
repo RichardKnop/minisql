@@ -263,7 +263,7 @@ func TestSnapshotIsolation_ConcurrentReadWrite(t *testing.T) {
 			for i := 0; i < rounds; i++ {
 				idMu.Lock()
 				id := nextID
-				nextID++
+				nextID += 1
 				idMu.Unlock()
 
 				err := txManager.ExecuteInTransaction(ctx, func(wCtx context.Context) error {

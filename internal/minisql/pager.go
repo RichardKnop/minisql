@@ -194,7 +194,7 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 			p.pages[pageIdx] = newPage
 
 			if int(pageIdx) == int(p.totalPages) {
-				p.totalPages++
+				p.totalPages += 1
 			}
 
 			p.lruCache.Put(pageIdx, struct{}{}, false)
@@ -264,7 +264,7 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 
 	// Update total pages count for new pages
 	if int(pageIdx) == int(p.totalPages) {
-		p.totalPages++
+		p.totalPages += 1
 	}
 
 	// Track this page access
