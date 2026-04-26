@@ -25,10 +25,17 @@ const (
 // automatic checkpoint when WAL mode is enabled.
 const DefaultWALCheckpointThreshold = 1000
 
+// DefaultWALWriteBufferSize is the default write-buffer size for WAL frame
+// batching (64 KiB ≈ 16 full-page frames).  A larger buffer reduces WriteAt
+// syscall overhead for high-frequency single-row-per-transaction workloads at
+// the cost of slightly higher data-loss exposure on unclean shutdown.
+const DefaultWALWriteBufferSize = 64 * 1024
+
 // ConnectionConfig holds parsed connection string parameters.
 type ConnectionConfig struct {
 	FilePath               string          // Database file path
 	WALCheckpointThreshold int             // Auto-checkpoint threshold in WAL frames (default: 1000)
+	WALWriteBufferSize     int             // WAL write-buffer size in bytes (default: 64 KiB; 0 = flush every commit)
 	LogLevel               string          // Log level: debug, info, warn, error (default: warn)
 	MaxCachedPages         int             // Maximum number of pages to cache (default: 2000, 0 = use default)
 	Synchronous            SynchronousMode // WAL fsync mode: off, normal (default), full
@@ -39,6 +46,7 @@ func DefaultConnectionConfig(filePath string) *ConnectionConfig {
 	return &ConnectionConfig{
 		FilePath:               filePath,
 		WALCheckpointThreshold: DefaultWALCheckpointThreshold,
+		WALWriteBufferSize:     DefaultWALWriteBufferSize,
 		LogLevel:               "warn",
 		MaxCachedPages:         minisql.PageCacheSize,
 		Synchronous:            SynchronousNormal,
@@ -51,16 +59,18 @@ func DefaultConnectionConfig(filePath string) *ConnectionConfig {
 //
 // Supported parameters:
 //   - wal_checkpoint_threshold=N        : Auto-checkpoint after N WAL frames (default: 1000; 0 = disabled)
+//   - wal_write_buffer_size=N           : WAL write-buffer in bytes (default: 65536; 0 = flush every commit)
 //   - log_level=debug|info|warn|error   : Set logging level (default: warn)
 //   - max_cached_pages=N                : Page cache size in pages (default: 2000)
 //   - synchronous=off|normal|full       : WAL fsync mode (default: normal, matching SQLite WAL default)
 //
 // Examples:
-//   - "./my.db"                                  : Default settings
-//   - "./my.db?log_level=debug"                  : Enable debug logging
-//   - "./my.db?wal_checkpoint_threshold=500"     : Auto-checkpoint every 500 frames
-//   - "./my.db?synchronous=full"                 : fsync on every commit (maximum durability)
-//   - "./my.db?log_level=info&max_cached_pages=500" : Multiple parameters
+//   - "./my.db"                                       : Default settings
+//   - "./my.db?log_level=debug"                       : Enable debug logging
+//   - "./my.db?wal_checkpoint_threshold=500"          : Auto-checkpoint every 500 frames
+//   - "./my.db?wal_write_buffer_size=0"               : Disable write batching (flush every commit)
+//   - "./my.db?synchronous=full"                      : fsync on every commit (maximum durability)
+//   - "./my.db?log_level=info&max_cached_pages=500"   : Multiple parameters
 func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 	// Split on first '?' to separate path from query params
 	parts := strings.SplitN(connStr, "?", 2)
@@ -85,6 +95,15 @@ func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 			return nil, fmt.Errorf("invalid wal_checkpoint_threshold parameter: must be a non-negative integer, got %q", threshStr)
 		}
 		config.WALCheckpointThreshold = thresh
+	}
+
+	// Parse wal_write_buffer_size parameter
+	if bufSizeStr := queryParams.Get("wal_write_buffer_size"); bufSizeStr != "" {
+		bufSize, err := strconv.Atoi(bufSizeStr)
+		if err != nil || bufSize < 0 {
+			return nil, fmt.Errorf("invalid wal_write_buffer_size parameter: must be a non-negative integer, got %q", bufSizeStr)
+		}
+		config.WALWriteBufferSize = bufSize
 	}
 
 	// Parse log_level parameter

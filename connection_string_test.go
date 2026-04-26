@@ -24,6 +24,7 @@ func TestParseConnectionString(t *testing.T) {
 			wantConfig: &ConnectionConfig{
 				FilePath:               "./test.db",
 				WALCheckpointThreshold: DefaultWALCheckpointThreshold,
+				WALWriteBufferSize:     DefaultWALWriteBufferSize,
 				LogLevel:               "warn",
 				MaxCachedPages:         minisql.PageCacheSize,
 				Synchronous:            SynchronousNormal,
@@ -36,6 +37,7 @@ func TestParseConnectionString(t *testing.T) {
 			wantConfig: &ConnectionConfig{
 				FilePath:               "./test.db",
 				WALCheckpointThreshold: DefaultWALCheckpointThreshold,
+				WALWriteBufferSize:     DefaultWALWriteBufferSize,
 				LogLevel:               "debug",
 				MaxCachedPages:         minisql.PageCacheSize,
 				Synchronous:            SynchronousNormal,
@@ -48,6 +50,7 @@ func TestParseConnectionString(t *testing.T) {
 			wantConfig: &ConnectionConfig{
 				FilePath:               "./test.db",
 				WALCheckpointThreshold: DefaultWALCheckpointThreshold,
+				WALWriteBufferSize:     DefaultWALWriteBufferSize,
 				LogLevel:               "warn",
 				MaxCachedPages:         500,
 				Synchronous:            SynchronousNormal,
@@ -60,6 +63,33 @@ func TestParseConnectionString(t *testing.T) {
 			wantConfig: &ConnectionConfig{
 				FilePath:               "./test.db",
 				WALCheckpointThreshold: 500,
+				WALWriteBufferSize:     DefaultWALWriteBufferSize,
+				LogLevel:               "warn",
+				MaxCachedPages:         minisql.PageCacheSize,
+				Synchronous:            SynchronousNormal,
+			},
+			wantErr: false,
+		},
+		{
+			name:    "custom write buffer size",
+			connStr: "./test.db?wal_write_buffer_size=131072",
+			wantConfig: &ConnectionConfig{
+				FilePath:               "./test.db",
+				WALCheckpointThreshold: DefaultWALCheckpointThreshold,
+				WALWriteBufferSize:     131072,
+				LogLevel:               "warn",
+				MaxCachedPages:         minisql.PageCacheSize,
+				Synchronous:            SynchronousNormal,
+			},
+			wantErr: false,
+		},
+		{
+			name:    "zero write buffer size disables batching",
+			connStr: "./test.db?wal_write_buffer_size=0",
+			wantConfig: &ConnectionConfig{
+				FilePath:               "./test.db",
+				WALCheckpointThreshold: DefaultWALCheckpointThreshold,
+				WALWriteBufferSize:     0,
 				LogLevel:               "warn",
 				MaxCachedPages:         minisql.PageCacheSize,
 				Synchronous:            SynchronousNormal,
@@ -72,6 +102,7 @@ func TestParseConnectionString(t *testing.T) {
 			wantConfig: &ConnectionConfig{
 				FilePath:               "./test.db",
 				WALCheckpointThreshold: 200,
+				WALWriteBufferSize:     DefaultWALWriteBufferSize,
 				LogLevel:               "info",
 				MaxCachedPages:         4000,
 				Synchronous:            SynchronousNormal,
@@ -84,6 +115,7 @@ func TestParseConnectionString(t *testing.T) {
 			wantConfig: &ConnectionConfig{
 				FilePath:               "./test.db",
 				WALCheckpointThreshold: 0,
+				WALWriteBufferSize:     DefaultWALWriteBufferSize,
 				LogLevel:               "warn",
 				MaxCachedPages:         minisql.PageCacheSize,
 				Synchronous:            SynchronousNormal,
@@ -96,6 +128,7 @@ func TestParseConnectionString(t *testing.T) {
 			wantConfig: &ConnectionConfig{
 				FilePath:               "./test.db",
 				WALCheckpointThreshold: DefaultWALCheckpointThreshold,
+				WALWriteBufferSize:     DefaultWALWriteBufferSize,
 				LogLevel:               "warn",
 				MaxCachedPages:         minisql.PageCacheSize,
 				Synchronous:            SynchronousFull,
@@ -108,6 +141,7 @@ func TestParseConnectionString(t *testing.T) {
 			wantConfig: &ConnectionConfig{
 				FilePath:               "./test.db",
 				WALCheckpointThreshold: DefaultWALCheckpointThreshold,
+				WALWriteBufferSize:     DefaultWALWriteBufferSize,
 				LogLevel:               "warn",
 				MaxCachedPages:         minisql.PageCacheSize,
 				Synchronous:            SynchronousNormal,
@@ -120,6 +154,7 @@ func TestParseConnectionString(t *testing.T) {
 			wantConfig: &ConnectionConfig{
 				FilePath:               "./test.db",
 				WALCheckpointThreshold: DefaultWALCheckpointThreshold,
+				WALWriteBufferSize:     DefaultWALWriteBufferSize,
 				LogLevel:               "warn",
 				MaxCachedPages:         minisql.PageCacheSize,
 				Synchronous:            SynchronousOff,
@@ -137,6 +172,18 @@ func TestParseConnectionString(t *testing.T) {
 			connStr:     "./test.db?wal_checkpoint_threshold=abc",
 			wantErr:     true,
 			errContains: "invalid wal_checkpoint_threshold",
+		},
+		{
+			name:        "invalid wal_write_buffer_size - negative",
+			connStr:     "./test.db?wal_write_buffer_size=-1",
+			wantErr:     true,
+			errContains: "invalid wal_write_buffer_size",
+		},
+		{
+			name:        "invalid wal_write_buffer_size - not a number",
+			connStr:     "./test.db?wal_write_buffer_size=abc",
+			wantErr:     true,
+			errContains: "invalid wal_write_buffer_size",
 		},
 		{
 			name:        "invalid max_cached_pages - negative",

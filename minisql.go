@@ -110,6 +110,7 @@ func (d *Driver) newDB(config *ConnectionConfig) (*minisql.Database, error) {
 			Index:               walIndex,
 			DBFile:              dbFile,
 			CheckpointThreshold: config.WALCheckpointThreshold,
+			WALWriteBufferSize:  config.WALWriteBufferSize,
 			Synchronous:         config.Synchronous,
 		},
 	)

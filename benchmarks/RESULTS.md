@@ -1,4 +1,56 @@
-### 2026-04-26 (rightmost-leaf cache — latest)
+### 2026-04-26 (WAL write frame batching — latest)
+
+WAL write-frame batching — frames from multiple transactions accumulated in a 64 KiB in-process buffer before a single `WriteAt` to the OS page cache:
+- **`WAL.pendingBuf`** replaces the old `writeBuf` scratch buffer. `AppendTransaction` serialises frames directly into `pendingBuf[pendingLen:]` and flushes (one `WriteAt`) only when `pendingLen >= flushThreshold` (default 64 KiB), `flushThreshold == 0` (opt-out), or `SynchronousFull`. A 64 KiB buffer holds ~16 full-page frames, so ~8–16 single-row transactions share one syscall instead of one each.
+- `Checkpoint`, `Truncate`, and `Close` all flush pending bytes before acting, so no frames are ever lost on clean shutdown. `Close` also fsyncs (unless `SynchronousOff`) so a graceful close is always durable.
+- `FrameCount()` adds `pendingLen` to the on-disk count so auto-checkpoint fires at the correct threshold even with buffered-but-unflushed frames.
+- **`wal_write_buffer_size=N`** connection-string parameter; default 65536; 0 disables batching (flush every commit). Enabled by default for all production databases opened via a connection string; raw `CreateWAL` callers (unit tests) keep `flushThreshold = 0` so existing tests are unaffected.
+- **Insert_SingleRow: 28.9 µs → 19.2 µs (1.5× faster, now 2.3× faster than SQLite, ratio 0.43×)**
+- **Update_ByPK: 18.5 µs → 11.0 µs (1.7× faster, now 3.3× faster than SQLite, ratio 0.30×)**
+- **Delete_ByPK: ~52 µs → 29.8 µs (1.7× faster, 2.7× faster than SQLite†, ratio 0.37×)**
+- Insert_Batch/PreparedBatch/MultiValues: 10–19% faster in absolute terms; ratio vs SQLite unchanged (2.1–2.2×) — batch transactions already exceed the 64 KiB threshold and flush per-transaction; the absolute improvement is machine/thermal state.
+- Read paths also faster in absolute terms; both databases improved similarly, confirming machine state rather than code change.
+- Delete_ByPK allocs/op: 131 → 117 (11% reduction) — the pending buffer grows to steady-state once and stops reallocating, eliminating the occasional `make([]byte, need)` in the hot path.
+
+† SQLite Delete run 1 was a warm-up outlier (186 µs vs 78–80 µs in runs 2–3); ratio computed from runs 2–3.
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| **Delete_ByPK** | **29.8 µs/op** | **79.8 µs/op†** | **0.37×** |
+| **Insert_SingleRow** | **19.2 µs/op** | **44.4 µs/op** | **0.43×** |
+| Insert_Batch | 473.3 µs/op | 225.6 µs/op | 2.1× |
+| Insert_PreparedBatch | 482.8 µs/op | 227.5 µs/op | 2.1× |
+| Insert_MultiValues | 380.2 µs/op | 169.7 µs/op | 2.2× |
+| Select_PointScan | 4.72 µs/op | 3.37 µs/op | 1.4× |
+| **Select_Limit** | **7.37 µs/op** | **8.04 µs/op** | **0.92×** |
+| **Select_FullScan** | **4.76 ms/op** | **5.19 ms/op** | **0.92×** |
+| Select_CountStar | 17.3 µs/op | 9.73 µs/op | 1.8× |
+| **Select_IndexRangeScan** | **705.4 µs/op** | **751.8 µs/op** | **0.94×** |
+| Select_RangeScan | 1.65 ms/op | 0.87 ms/op | 1.9× |
+| **Update_ByPK** | **11.0 µs/op** | **36.4 µs/op** | **0.30×** |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 30.9 KiB | 447 B |
+| Insert_SingleRow | 21.5 KiB | 311 B |
+| Insert_Batch | 352.4 KiB | 31.0 KiB |
+| Insert_PreparedBatch | 352.0 KiB | 31.0 KiB |
+| Insert_MultiValues | 318.8 KiB | 25.2 KiB |
+| Select_PointScan | 4.6 KiB | 679 B |
+| Select_Limit | 6.1 KiB | 1.7 KiB |
+| Select_FullScan | 5.3 MiB | 1.3 MiB |
+| Select_CountStar | 6.0 KiB | 400 B |
+| Select_IndexRangeScan | 739.3 KiB | 85.9 KiB |
+| Select_RangeScan | 1.6 MiB | 85.9 KiB |
+| Update_ByPK | 9.1 KiB | 263 B |
+
+---
+
+### 2026-04-26 (rightmost-leaf cache)
 
 Rightmost-leaf cache optimization for B+ tree insertions:
 - **`Index[T]`**: added `rightmostLeaf atomic.Int64` (−1 = cold) and `lastTxID atomic.Uint64`. On each `Insert`, if `tx.ID != lastTxID` the cache is invalidated (guards against stale hints after rollback/OCC conflict). Fast path inside `hasSpaceForKey(root)` reads the cached leaf and appends directly when `key > lastKey` and the leaf has space, bypassing the O(log N) root→leaf traversal. `insertNotFull` returns `(PageIndex, bool, error)` where the bool tracks "every level chose the rightmost child" — only when the full path was rightmost is the cache updated; non-rightmost inserts unconditionally cold-start the cache.

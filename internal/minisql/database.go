@@ -26,6 +26,7 @@ type WALConfig struct {
 	Index               *WALIndex
 	DBFile              DBFile
 	CheckpointThreshold int
+	WALWriteBufferSize  int // bytes to buffer before flushing; 0 = flush every commit
 	Synchronous         SynchronousMode
 }
 
@@ -96,6 +97,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, par
 		saver.SetWALIndex(walCfg.Index)
 		if walCfg.WAL != nil {
 			walCfg.WAL.SetSynchronous(walCfg.Synchronous)
+			walCfg.WAL.SetWriteBufferSize(walCfg.WALWriteBufferSize)
 		}
 	}
 
