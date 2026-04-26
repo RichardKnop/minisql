@@ -42,11 +42,11 @@ func TestTable_PageRecycling(t *testing.T) {
 
 	mustInsert(ctx, t, table, txManager, stmt)
 
-	assert.Equal(t, 47, int(pager.TotalPages()))
+	assert.Equal(t, 27, int(pager.TotalPages()))
 	assert.Equal(t, 0, int(pager.dbHeader.FreePageCount))
 	checkRows(ctx, t, table, rows)
 
-	// Now delete all rows, this will free up 46 pages
+	// Now delete all rows, this will free up 26 pages
 	// but the root page will remain in use
 	var result StatementResult
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -61,15 +61,15 @@ func TestTable_PageRecycling(t *testing.T) {
 	assert.Equal(t, len(rows), result.RowsAffected)
 
 	checkRows(ctx, t, table, nil)
-	assert.Equal(t, 47, int(pager.TotalPages()))
-	assert.Equal(t, 46, int(pager.dbHeader.FreePageCount))
+	assert.Equal(t, 27, int(pager.TotalPages()))
+	assert.Equal(t, 26, int(pager.dbHeader.FreePageCount))
 
 	// Now we reinsert the same rows again
 	mustInsert(ctx, t, table, txManager, stmt)
 
 	// We should still have the same number of pages in total
 	// and no free pages
-	assert.Equal(t, 47, int(pager.TotalPages()))
+	assert.Equal(t, 27, int(pager.TotalPages()))
 	assert.Equal(t, 0, int(pager.dbHeader.FreePageCount))
 	checkRows(ctx, t, table, rows)
 }
