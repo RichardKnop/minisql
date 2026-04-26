@@ -651,7 +651,6 @@ func (n *IndexNode[T]) AvailableSpace() uint64 {
 	return n.freeBytes
 }
 
-
 // HasSpaceForKey ...
 func (n *IndexNode[T]) HasSpaceForKey(key T) bool {
 	// In case of a unique index we need space for key + rowID + child pointer
