@@ -548,6 +548,137 @@ func TestRecoverFromWAL(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Write-buffer batching tests
+// ---------------------------------------------------------------------------
+
+func TestWAL_WriteBuffering_AccumulatesUntilThreshold(t *testing.T) {
+	t.Parallel()
+
+	tmp, err := os.CreateTemp("", testDBName)
+	require.NoError(t, err)
+	defer os.Remove(tmp.Name())
+	defer os.Remove(tmp.Name() + "-wal")
+
+	w, err := CreateWAL(tmp.Name(), PageSize)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, w.Close()) }()
+
+	frameSize := WALFrameHeaderSize + int(PageSize)
+	// Buffer exactly two frames before flushing.
+	w.flushThreshold = 2 * frameSize
+
+	// First transaction: below threshold — frames stay in the buffer.
+	require.NoError(t, w.AppendTransaction([]WALPage{{Index: 1, Data: makeTestPage(0x01)}}))
+	assert.Equal(t, frameSize, w.pendingLen, "frame should be buffered, not yet flushed")
+	assert.Equal(t, int64(WALFileHeaderSize), w.nextOffset, "no bytes written to file yet")
+
+	// FrameCount must include the pending frame.
+	assert.Equal(t, int64(1), w.FrameCount())
+
+	// ReadAllFrames reads from the file — pending frame is not there yet.
+	frames, err := w.ReadAllFrames()
+	require.NoError(t, err)
+	assert.Empty(t, frames, "frames should not be on disk until threshold is reached")
+
+	// Second transaction: crosses threshold — both frames are flushed together.
+	require.NoError(t, w.AppendTransaction([]WALPage{{Index: 2, Data: makeTestPage(0x02)}}))
+	assert.Equal(t, 0, w.pendingLen, "buffer should be empty after auto-flush")
+
+	frames, err = w.ReadAllFrames()
+	require.NoError(t, err)
+	require.Len(t, frames, 2)
+	assert.Equal(t, PageIndex(1), frames[0].PageIndex)
+	assert.Equal(t, PageIndex(2), frames[1].PageIndex)
+}
+
+func TestWAL_WriteBuffering_ExplicitFlush(t *testing.T) {
+	t.Parallel()
+
+	tmp, err := os.CreateTemp("", testDBName)
+	require.NoError(t, err)
+	defer os.Remove(tmp.Name())
+	defer os.Remove(tmp.Name() + "-wal")
+
+	w, err := CreateWAL(tmp.Name(), PageSize)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, w.Close()) }()
+
+	w.flushThreshold = 1 << 20 // 1 MiB — won't auto-flush in this test
+
+	require.NoError(t, w.AppendTransaction([]WALPage{{Index: 0, Data: makeTestPage(0xAA)}}))
+	assert.Greater(t, w.pendingLen, 0, "frame should be buffered")
+
+	// Explicit flush makes the frame visible on disk.
+	require.NoError(t, w.Flush())
+	assert.Equal(t, 0, w.pendingLen)
+
+	frames, err := w.ReadAllFrames()
+	require.NoError(t, err)
+	require.Len(t, frames, 1)
+	assert.Equal(t, PageIndex(0), frames[0].PageIndex)
+	assert.Equal(t, makeTestPage(0xAA), frames[0].Data)
+}
+
+func TestWAL_WriteBuffering_CheckpointFlushes(t *testing.T) {
+	t.Parallel()
+
+	tmp, err := os.CreateTemp("", testDBName)
+	require.NoError(t, err)
+	defer os.Remove(tmp.Name())
+	defer os.Remove(tmp.Name() + "-wal")
+
+	w, err := CreateWAL(tmp.Name(), PageSize)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, w.Close()) }()
+
+	w.flushThreshold = 1 << 20 // large — won't auto-flush
+
+	page0 := makeTestPage(0xCC)
+	require.NoError(t, w.AppendTransaction([]WALPage{{Index: 0, Data: page0}}))
+	assert.Greater(t, w.pendingLen, 0)
+
+	dbFile, err := os.OpenFile(tmp.Name(), os.O_RDWR|os.O_CREATE, 0o644)
+	require.NoError(t, err)
+	defer dbFile.Close()
+	require.NoError(t, dbFile.Truncate(int64(PageSize)))
+
+	// Checkpoint must flush pending frames before writing to the DB file.
+	require.NoError(t, w.Checkpoint(dbFile))
+	assert.Equal(t, 0, w.pendingLen, "checkpoint must flush the write buffer")
+
+	buf := make([]byte, PageSize)
+	_, err = dbFile.ReadAt(buf, 0)
+	require.NoError(t, err)
+	assert.Equal(t, page0, buf, "checkpoint must have written the buffered page")
+}
+
+func TestWAL_WriteBuffering_SynchronousFullBypassesBuffer(t *testing.T) {
+	t.Parallel()
+
+	tmp, err := os.CreateTemp("", testDBName)
+	require.NoError(t, err)
+	defer os.Remove(tmp.Name())
+	defer os.Remove(tmp.Name() + "-wal")
+
+	w, err := CreateWAL(tmp.Name(), PageSize)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, w.Close()) }()
+
+	w.flushThreshold = 1 << 20 // large — would buffer in Normal mode
+	w.SetSynchronous(SynchronousFull)
+
+	require.NoError(t, w.AppendTransaction([]WALPage{{Index: 0, Data: makeTestPage(0xDD)}}))
+
+	// SynchronousFull must flush + fsync immediately, bypassing the buffer.
+	assert.Equal(t, 0, w.pendingLen, "SynchronousFull must flush immediately")
+
+	frames, err := w.ReadAllFrames()
+	require.NoError(t, err)
+	require.Len(t, frames, 1)
+	assert.Equal(t, PageIndex(0), frames[0].PageIndex)
+}
+
 func TestRecoverFromWAL_NoFile(t *testing.T) {
 	t.Parallel()
 

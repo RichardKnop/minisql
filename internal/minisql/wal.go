@@ -86,15 +86,25 @@ type WALReadFrame struct {
 //
 // Periodically, or on clean open, committed frames are copied back to the main
 // DB file via Checkpoint and the WAL is truncated.
+//
+// Write buffering: when flushThreshold > 0 frames from multiple transactions
+// are accumulated in pendingBuf and written to the file in a single WriteAt
+// once pendingLen >= flushThreshold.  This reduces syscall overhead for
+// high-frequency single-row-per-transaction workloads.  flushThreshold == 0
+// (the default) flushes after every AppendTransaction, preserving the previous
+// behaviour.  SynchronousFull always flushes immediately regardless of the
+// threshold.
 type WAL struct {
-	file         *os.File
-	filepath     string
-	writeBuf     []byte
-	nextOffset   int64
-	pageSize     uint32
-	salt1        uint32
-	salt2        uint32
-	synchronous  atomic.Int32 // SynchronousMode; default SynchronousNormal
+	file           *os.File
+	filepath       string
+	pendingBuf     []byte // write-buffer accumulating frames not yet sent to the OS
+	pendingLen     int    // valid bytes in pendingBuf
+	flushThreshold int    // flush when pendingLen >= this; 0 = flush every commit
+	nextOffset     int64
+	pageSize       uint32
+	salt1          uint32
+	salt2          uint32
+	synchronous    atomic.Int32 // SynchronousMode; default SynchronousNormal
 }
 
 // Synchronous returns the current synchronous mode.
@@ -106,6 +116,36 @@ func (w *WAL) Synchronous() SynchronousMode {
 // the next WAL commit (AppendTransaction call).
 func (w *WAL) SetSynchronous(mode SynchronousMode) {
 	w.synchronous.Store(int32(mode))
+}
+
+// SetWriteBufferSize sets the target size for write batching.  When > 0,
+// AppendTransaction accumulates serialised frames up to this many bytes before
+// issuing a WriteAt to the OS.  0 (the default) disables buffering and
+// flushes after every AppendTransaction, matching the previous behaviour.
+// SynchronousFull always flushes immediately regardless of this setting.
+func (w *WAL) SetWriteBufferSize(n int) {
+	w.flushThreshold = n
+}
+
+// Flush writes any buffered WAL frames to the OS page cache.  It is a no-op
+// when there is nothing pending.  Called automatically by Checkpoint, Truncate,
+// and Close; callers that need strict write-order guarantees can call it
+// explicitly.
+func (w *WAL) Flush() error {
+	return w.flush()
+}
+
+// flush is the unexported implementation of Flush.
+func (w *WAL) flush() error {
+	if w.pendingLen == 0 {
+		return nil
+	}
+	if _, err := w.file.WriteAt(w.pendingBuf[:w.pendingLen], w.nextOffset); err != nil {
+		return fmt.Errorf("flush WAL write buffer: %w", err)
+	}
+	w.nextOffset += int64(w.pendingLen)
+	w.pendingLen = 0
+	return nil
 }
 
 // CreateWAL creates a new WAL file (truncating any existing file at that path).
@@ -171,9 +211,12 @@ func OpenWAL(dbPath string, pageSize uint32) (*WAL, error) {
 	return w, nil
 }
 
-// AppendTransaction writes all modified pages as WAL frames and syncs the file.
-// The last frame is marked as a commit frame (CommitSize = len(pages)).
-// pages must be non-empty; each Data slice must be exactly pageSize bytes.
+// AppendTransaction serialises all modified pages as WAL frames into the write
+// buffer and, when the buffer reaches the flush threshold (or when
+// SynchronousFull mode is active), writes it to the OS page cache in a single
+// WriteAt call.  The last frame is marked as a commit frame
+// (CommitSize = len(pages)).  pages must be non-empty; each Data slice must
+// be exactly pageSize bytes.
 func (w *WAL) AppendTransaction(pages []WALPage) error {
 	if len(pages) == 0 {
 		return errors.New("cannot append empty transaction to WAL")
@@ -182,11 +225,16 @@ func (w *WAL) AppendTransaction(pages []WALPage) error {
 	commitSize := uint32(len(pages))
 	frameSize := int(WALFrameHeaderSize) + int(w.pageSize)
 	need := frameSize * len(pages)
-	if cap(w.writeBuf) < need {
-		w.writeBuf = make([]byte, need)
-	}
-	buf := w.writeBuf[:need]
 
+	// Grow the pending buffer if it cannot accommodate the new frames.
+	if w.pendingLen+need > cap(w.pendingBuf) {
+		grown := make([]byte, w.pendingLen+need)
+		copy(grown, w.pendingBuf[:w.pendingLen])
+		w.pendingBuf = grown
+	}
+
+	// Serialise frames directly into the pending buffer after any existing data.
+	buf := w.pendingBuf[w.pendingLen : w.pendingLen+need]
 	for i, page := range pages {
 		if uint32(len(page.Data)) != w.pageSize {
 			return fmt.Errorf("WAL page %d: data length %d != page size %d", page.Index, len(page.Data), w.pageSize)
@@ -201,7 +249,6 @@ func (w *WAL) AppendTransaction(pages []WALPage) error {
 			cs = commitSize
 		}
 
-		// Frame header fields
 		marshalUint32(fh, uint32(page.Index), 0)
 		marshalUint32(fh, cs, 4)
 		marshalUint32(fh, w.salt1, 8)
@@ -213,23 +260,25 @@ func (w *WAL) AppendTransaction(pages []WALPage) error {
 		crc2 := crc32.ChecksumIEEE(page.Data)
 		marshalUint32(fh, crc2, 20)
 
-		// Page data immediately follows the frame header
 		copy(buf[base+WALFrameHeaderSize:base+frameSize], page.Data)
 	}
+	w.pendingLen += need
 
-	if _, err := w.file.WriteAt(buf, w.nextOffset); err != nil {
-		return fmt.Errorf("write WAL frames: %w", err)
-	}
-
-	// fsync is only required in FULL mode.  In NORMAL mode the OS write cache
-	// is sufficient between commits; durability is recovered at checkpoint.
-	if SynchronousMode(w.synchronous.Load()) == SynchronousFull {
-		if err := syscallFsync(w.file); err != nil {
-			return fmt.Errorf("sync WAL after append: %w", err)
+	// Flush when: no buffering configured (threshold == 0), buffer reached the
+	// threshold, or the synchronous mode demands immediate durability.
+	sync := SynchronousMode(w.synchronous.Load())
+	if sync == SynchronousFull || w.flushThreshold == 0 || w.pendingLen >= w.flushThreshold {
+		if err := w.flush(); err != nil {
+			return err
+		}
+		// fsync is only required in FULL mode.  In NORMAL mode the OS write cache
+		// is sufficient between commits; durability is recovered at checkpoint.
+		if sync == SynchronousFull {
+			if err := syscallFsync(w.file); err != nil {
+				return fmt.Errorf("sync WAL after append: %w", err)
+			}
 		}
 	}
-
-	w.nextOffset += int64(len(buf))
 	return nil
 }
 
@@ -311,6 +360,11 @@ func (w *WAL) ReadAllFrames() ([]WALReadFrame, error) {
 // appears in multiple transactions) and then fsyncs the database file.
 // Callers should call Truncate after a successful checkpoint.
 func (w *WAL) Checkpoint(dbFile DBFile) error {
+	// Flush any buffered frames so the WAL file is authoritative before we read it.
+	if err := w.flush(); err != nil {
+		return fmt.Errorf("flush pending WAL frames before checkpoint: %w", err)
+	}
+
 	// Build a latest-page map directly from the WAL file without an intermediate
 	// []WALReadFrame slice.  A single shared read buffer (pageData) is reused for
 	// every frame; we only allocate a fresh 4 KB slice when we need to keep (or
@@ -429,6 +483,11 @@ func (w *WAL) Checkpoint(dbFile DBFile) error {
 // The file header is rewritten with fresh salts so that any unreachable frames
 // left behind by a partial truncation are automatically invalidated.
 func (w *WAL) Truncate() error {
+	// Safety flush: Checkpoint should have flushed already, but guard defensively.
+	if err := w.flush(); err != nil {
+		return fmt.Errorf("flush pending WAL frames before truncate: %w", err)
+	}
+
 	if err := w.file.Truncate(WALFileHeaderSize); err != nil {
 		return fmt.Errorf("truncate WAL file: %w", err)
 	}
@@ -463,18 +522,29 @@ func (w *WAL) Delete() error {
 	return nil
 }
 
-// Close closes the underlying WAL file handle without removing it.
+// Close flushes any pending frames, fsyncs (unless SynchronousOff), and closes
+// the WAL file.  On clean shutdown this guarantees all committed transactions
+// are durable before the file handle is released.
 func (w *WAL) Close() error {
+	if err := w.flush(); err != nil {
+		_ = w.file.Close()
+		return fmt.Errorf("flush pending WAL frames on close: %w", err)
+	}
+	if SynchronousMode(w.synchronous.Load()) != SynchronousOff {
+		if err := syscallFsync(w.file); err != nil {
+			_ = w.file.Close()
+			return fmt.Errorf("sync WAL on close: %w", err)
+		}
+	}
 	return w.file.Close()
 }
 
-// FrameCount returns the total number of frame slots written since the last
-// Truncate (including both committed and uncommitted frames).
+// FrameCount returns the total number of frame slots since the last Truncate,
+// including frames that are buffered but not yet flushed to the file.
 func (w *WAL) FrameCount() int64 {
-	var (
-		frameSize = int64(WALFrameHeaderSize) + int64(w.pageSize)
-		available = w.nextOffset - WALFileHeaderSize
-	)
+	frameSize := int64(WALFrameHeaderSize) + int64(w.pageSize)
+	// nextOffset counts only flushed frames; add pendingLen for buffered ones.
+	available := w.nextOffset - WALFileHeaderSize + int64(w.pendingLen)
 	if available <= 0 {
 		return 0
 	}
