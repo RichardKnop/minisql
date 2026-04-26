@@ -270,9 +270,10 @@ type IndexNode[T IndexKey] struct {
 	Header IndexNodeHeader
 }
 
-// MinimumIndexCells is the minimum number of cells required in an index node.
-// TODO - this is not used currently
-const MinimumIndexCells = 4
+// indexCellsPrealloc is the initial Cells slice capacity for a new IndexNode.
+// Sized to avoid most slice reallocations during sequential-insert workloads
+// without bloating memory for small or short-lived nodes.
+const indexCellsPrealloc = 32
 
 // NewIndexNode creates a new IndexNode with the given uniqueness flag and optional initial cells.
 func NewIndexNode[T IndexKey](unique bool, cells ...IndexCell[T]) *IndexNode[T] {
@@ -292,9 +293,12 @@ func NewIndexNode[T IndexKey](unique bool, cells ...IndexCell[T]) *IndexNode[T] 
 		return &node
 	}
 
-	node.Cells = make([]IndexCell[T], 0, MinimumIndexCells)
-	for range MinimumIndexCells {
-		node.Cells = append(node.Cells, NewIndexCell[T](unique))
+	// Pre-fill 4 cells so tests and Unmarshal can access Cells[0..3] directly.
+	// The capacity is set larger to avoid reallocations on the first insert
+	// (old cap==len==4 caused an immediate realloc on every first insert).
+	node.Cells = make([]IndexCell[T], 4, indexCellsPrealloc)
+	for i := range 4 {
+		node.Cells[i] = NewIndexCell[T](unique)
 	}
 	return &node
 }
