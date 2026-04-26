@@ -69,8 +69,9 @@ func (h *OverflowPage) Unmarshal(buf []byte) error {
 	h.Header.DataSize = unmarshalUint32(buf, i)
 	i += 4
 
-	h.Data = make([]byte, h.Header.DataSize)
-	copy(h.Data, buf[i:i+uint64(h.Header.DataSize)])
+	// Sub-slice page buffer directly — zero allocation, zero copy.
+	// Callers only read h.Data (readOverflowTexts appends it); nothing mutates it after unmarshal.
+	h.Data = buf[i : i+uint64(h.Header.DataSize)]
 
 	return nil
 }

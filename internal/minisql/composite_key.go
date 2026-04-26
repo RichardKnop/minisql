@@ -103,13 +103,34 @@ func (ck *CompositeKey) Marshal(buf []byte, i uint64) error {
 
 // Unmarshal deserialises a composite key from buf starting at offset i, returning bytes consumed.
 func (ck *CompositeKey) Unmarshal(buf []byte, i uint64) (uint64, error) {
+	// Pass 1: scan buf to compute the exact comparison size so we allocate precisely.
+	// For fixed-width types the size is known from the column schema; for Varchar we
+	// read the length prefix from buf (4 bytes ahead of the data).
+	compSize := uint64(0)
+	scanOff := uint64(0)
+	for _, col := range ck.Columns {
+		switch col.Kind {
+		case Boolean:
+			compSize += 1
+			scanOff += 1
+		case Int4, Real:
+			compSize += 4
+			scanOff += 4
+		case Int8, Timestamp, Double:
+			compSize += 8
+			scanOff += 8
+		case Varchar:
+			length := uint64(unmarshalUint32(buf, scanOff))
+			compSize += length
+			scanOff += 4 + length
+		}
+	}
+
+	comparison := make([]byte, compSize)
 	var (
 		offset     = uint64(0)
 		compOffset = uint64(0)
 	)
-	// We don't know the size of the composite key upfront, so allocate a largest possible buffer.
-	// We limit max combined size to MaxInlineVarchar plus add potential lenghth prefixes.
-	comparison := make([]byte, MaxInlineVarchar*uint64(len(ck.Columns)*varcharLengthPrefixSize))
 	for _, col := range ck.Columns {
 		switch col.Kind {
 		case Boolean:

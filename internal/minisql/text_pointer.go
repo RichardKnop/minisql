@@ -73,9 +73,9 @@ func (tp *TextPointer) Unmarshal(buf []byte, i uint64) error {
 	i += 4
 
 	if tp.IsInline() {
-		// Read actual text
-		tp.Data = make([]byte, tp.Length)
-		copy(tp.Data, buf[i:i+uint64(tp.Length)])
+		// Sub-slice page buffer directly — zero allocation, zero copy.
+		// Inline text is read-only after unmarshal; Marshal copies it out via copy().
+		tp.Data = buf[i : i+uint64(tp.Length)]
 		i += uint64(tp.Length)
 		return nil
 	}
@@ -186,9 +186,10 @@ func (r Row) readOverflowTexts(ctx context.Context, pager TxPager) (Row, error) 
 		if textPointer.IsInline() {
 			continue
 		}
-		// Read overflow data
+		// Read overflow data; pre-allocate to the known total length to avoid
+		// repeated reallocation as overflow pages are appended.
 		var (
-			overflowData   []byte
+			overflowData   = make([]byte, 0, textPointer.Length)
 			currentPageIdx = textPointer.FirstPage
 			remainingSize  = textPointer.Length
 		)
