@@ -34,6 +34,50 @@ func TestParse_Pragma(t *testing.T) {
 			SQL:  "PRAGMA;",
 			Err:  errEmptyPragmaName,
 		},
+		{
+			Name: "PRAGMA synchronous read",
+			SQL:  "PRAGMA synchronous;",
+			Expected: []minisql.Statement{{
+				Kind:       minisql.Pragma,
+				PragmaName: "synchronous",
+			}},
+		},
+		{
+			Name: "PRAGMA synchronous = normal",
+			SQL:  "PRAGMA synchronous = normal;",
+			Expected: []minisql.Statement{{
+				Kind:        minisql.Pragma,
+				PragmaName:  "synchronous",
+				PragmaValue: "normal",
+			}},
+		},
+		{
+			Name: "PRAGMA synchronous = full",
+			SQL:  "PRAGMA synchronous = full;",
+			Expected: []minisql.Statement{{
+				Kind:        minisql.Pragma,
+				PragmaName:  "synchronous",
+				PragmaValue: "full",
+			}},
+		},
+		{
+			Name: "PRAGMA synchronous = off",
+			SQL:  "PRAGMA synchronous = off;",
+			Expected: []minisql.Statement{{
+				Kind:        minisql.Pragma,
+				PragmaName:  "synchronous",
+				PragmaValue: "off",
+			}},
+		},
+		{
+			Name: "PRAGMA synchronous = 2 (numeric)",
+			SQL:  "PRAGMA synchronous = 2;",
+			Expected: []minisql.Statement{{
+				Kind:        minisql.Pragma,
+				PragmaName:  "synchronous",
+				PragmaValue: "2",
+			}},
+		},
 	}
 
 	for _, testCase := range testCases {

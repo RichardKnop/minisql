@@ -10,16 +10,28 @@ import (
 	"go.uber.org/zap"
 )
 
+// SynchronousMode re-exports the internal type so callers can use it without
+// importing the internal package.
+type SynchronousMode = minisql.SynchronousMode
+
+// Synchronous mode constants.
+const (
+	SynchronousOff    = minisql.SynchronousOff
+	SynchronousNormal = minisql.SynchronousNormal
+	SynchronousFull   = minisql.SynchronousFull
+)
+
 // DefaultWALCheckpointThreshold is the number of WAL frames that triggers an
 // automatic checkpoint when WAL mode is enabled.
 const DefaultWALCheckpointThreshold = 1000
 
 // ConnectionConfig holds parsed connection string parameters.
 type ConnectionConfig struct {
-	FilePath               string // Database file path
-	WALCheckpointThreshold int    // Auto-checkpoint threshold in WAL frames (default: 1000)
-	LogLevel               string // Log level: debug, info, warn, error (default: warn)
-	MaxCachedPages         int    // Maximum number of pages to cache (default: 2000, 0 = use default)
+	FilePath               string          // Database file path
+	WALCheckpointThreshold int             // Auto-checkpoint threshold in WAL frames (default: 1000)
+	LogLevel               string          // Log level: debug, info, warn, error (default: warn)
+	MaxCachedPages         int             // Maximum number of pages to cache (default: 2000, 0 = use default)
+	Synchronous            SynchronousMode // WAL fsync mode: off, normal (default), full
 }
 
 // DefaultConnectionConfig returns default configuration.
@@ -29,6 +41,7 @@ func DefaultConnectionConfig(filePath string) *ConnectionConfig {
 		WALCheckpointThreshold: DefaultWALCheckpointThreshold,
 		LogLevel:               "warn",
 		MaxCachedPages:         minisql.PageCacheSize,
+		Synchronous:            SynchronousNormal,
 	}
 }
 
@@ -37,14 +50,16 @@ func DefaultConnectionConfig(filePath string) *ConnectionConfig {
 // Format: /path/to/database.db?param1=value1&param2=value2
 //
 // Supported parameters:
-//   - wal_checkpoint_threshold=N     : Auto-checkpoint after N WAL frames (default: 1000; 0 = disabled)
-//   - log_level=debug|info|warn|error : Set logging level (default: warn)
-//   - max_cached_pages=N             : Page cache size in pages (default: 2000)
+//   - wal_checkpoint_threshold=N        : Auto-checkpoint after N WAL frames (default: 1000; 0 = disabled)
+//   - log_level=debug|info|warn|error   : Set logging level (default: warn)
+//   - max_cached_pages=N                : Page cache size in pages (default: 2000)
+//   - synchronous=off|normal|full       : WAL fsync mode (default: normal, matching SQLite WAL default)
 //
 // Examples:
 //   - "./my.db"                                  : Default settings
 //   - "./my.db?log_level=debug"                  : Enable debug logging
 //   - "./my.db?wal_checkpoint_threshold=500"     : Auto-checkpoint every 500 frames
+//   - "./my.db?synchronous=full"                 : fsync on every commit (maximum durability)
 //   - "./my.db?log_level=info&max_cached_pages=500" : Multiple parameters
 func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 	// Split on first '?' to separate path from query params
@@ -93,6 +108,20 @@ func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 			return nil, fmt.Errorf("invalid max_cached_pages parameter: must be non-negative, got %d", maxPages)
 		}
 		config.MaxCachedPages = maxPages
+	}
+
+	// Parse synchronous parameter
+	if syncStr := queryParams.Get("synchronous"); syncStr != "" {
+		switch strings.ToLower(syncStr) {
+		case "off", "0":
+			config.Synchronous = SynchronousOff
+		case "normal", "1":
+			config.Synchronous = SynchronousNormal
+		case "full", "2":
+			config.Synchronous = SynchronousFull
+		default:
+			return nil, fmt.Errorf("invalid synchronous parameter: expected off, normal, or full, got %q", syncStr)
+		}
 	}
 
 	return config, nil

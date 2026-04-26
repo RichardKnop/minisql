@@ -26,6 +26,7 @@ type WALConfig struct {
 	Index               *WALIndex
 	DBFile              DBFile
 	CheckpointThreshold int
+	Synchronous         SynchronousMode
 }
 
 // Database is the top-level embedded SQL database instance.
@@ -93,6 +94,9 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, par
 			return db.Checkpoint(context.Background())
 		})
 		saver.SetWALIndex(walCfg.Index)
+		if walCfg.WAL != nil {
+			walCfg.WAL.SetSynchronous(walCfg.Synchronous)
+		}
 	}
 
 	for _, opt := range opts {

@@ -494,6 +494,24 @@ When adding filtering/transformation stages, insert them as goroutines between `
 
 ---
 
+### WAL durability modes
+
+The `synchronous` setting on `WAL` controls when `fsync()` is called. It matches SQLite's `PRAGMA synchronous` for WAL mode.
+
+| Mode | Value | Behaviour |
+|------|-------|-----------|
+| `SynchronousNormal` | 1 | **Default.** No fsync per commit; fsync only at checkpoint. |
+| `SynchronousFull` | 2 | fsync after every WAL commit (maximum durability). |
+| `SynchronousOff` | 0 | No fsyncs anywhere. Fastest; data loss possible on OS crash. |
+
+- Configured at open time via the `synchronous=normal|full|off` connection string parameter.
+- Changeable at runtime via `PRAGMA synchronous = normal|full|off` (takes effect on the next commit).
+- Read at runtime via `PRAGMA synchronous` (returns 0/1/2).
+- Implementation: `WAL.synchronous` is an `atomic.Int32`. `AppendTransaction` reads it on each call; no lock needed.
+- `WALConfig.Synchronous` (in `database.go`) carries the startup value from the connection string into `NewDatabase`, which calls `wal.SetSynchronous(walCfg.Synchronous)`.
+
+---
+
 ### Transactions
 
 MiniSQL uses two complementary concurrency mechanisms:

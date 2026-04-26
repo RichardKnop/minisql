@@ -69,6 +69,54 @@ func (s *TestSuite) TestPragma_IntegrityCheck() {
 	s.Equal([]string{"check", "code", "page", "object", "message"}, columns)
 }
 
+func (s *TestSuite) TestPragma_Synchronous_ReadDefault() {
+	rows, err := s.db.QueryContext(context.Background(), `PRAGMA synchronous;`)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	s.Require().NoError(err)
+	s.Equal([]string{"synchronous"}, columns)
+
+	s.Require().True(rows.Next())
+	var mode int32
+	s.Require().NoError(rows.Scan(&mode))
+	// Default is SynchronousNormal = 1
+	s.Equal(int32(1), mode)
+}
+
+func (s *TestSuite) TestPragma_Synchronous_SetFull() {
+	_, err := s.db.Exec(`PRAGMA synchronous = full;`)
+	s.Require().NoError(err)
+
+	rows, err := s.db.QueryContext(context.Background(), `PRAGMA synchronous;`)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	s.Require().True(rows.Next())
+	var mode int32
+	s.Require().NoError(rows.Scan(&mode))
+	s.Equal(int32(2), mode)
+}
+
+func (s *TestSuite) TestPragma_Synchronous_SetNormal() {
+	// Set to full first, then back to normal
+	_, err := s.db.Exec(`PRAGMA synchronous = full;`)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`PRAGMA synchronous = normal;`)
+	s.Require().NoError(err)
+
+	rows, err := s.db.QueryContext(context.Background(), `PRAGMA synchronous;`)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	s.Require().True(rows.Next())
+	var mode int32
+	s.Require().NoError(rows.Scan(&mode))
+	s.Equal(int32(1), mode)
+}
+
 func (s *TestSuite) collectPragmaResults(query string) []pragmaResult {
 	rows, err := s.db.QueryContext(context.Background(), query)
 	s.Require().NoError(err)

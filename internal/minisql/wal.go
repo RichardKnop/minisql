@@ -9,6 +9,25 @@ import (
 	"io"
 	"os"
 	"sort"
+	"sync/atomic"
+)
+
+// SynchronousMode controls when the WAL file is fsynced to disk.
+//
+// The values mirror SQLite's PRAGMA synchronous settings for WAL mode:
+//
+//   - SynchronousOff    (0): no fsyncs at all — maximum performance, no durability guarantee.
+//   - SynchronousNormal (1): fsync only at checkpoint, not on every commit — SQLite WAL default.
+//   - SynchronousFull   (2): fsync on every WAL commit — maximum durability.
+type SynchronousMode int32
+
+const (
+	// SynchronousOff skips all fsyncs. Fastest, but data loss is possible on crash.
+	SynchronousOff SynchronousMode = 0
+	// SynchronousNormal fsyncs only at checkpoint (SQLite WAL default).
+	SynchronousNormal SynchronousMode = 1
+	// SynchronousFull fsyncs after every WAL commit for maximum durability.
+	SynchronousFull SynchronousMode = 2
 )
 
 // WAL file-format constants.
@@ -68,13 +87,25 @@ type WALReadFrame struct {
 // Periodically, or on clean open, committed frames are copied back to the main
 // DB file via Checkpoint and the WAL is truncated.
 type WAL struct {
-	file       *os.File
-	filepath   string
-	writeBuf   []byte
-	nextOffset int64
-	pageSize   uint32
-	salt1      uint32
-	salt2      uint32
+	file         *os.File
+	filepath     string
+	writeBuf     []byte
+	nextOffset   int64
+	pageSize     uint32
+	salt1        uint32
+	salt2        uint32
+	synchronous  atomic.Int32 // SynchronousMode; default SynchronousNormal
+}
+
+// Synchronous returns the current synchronous mode.
+func (w *WAL) Synchronous() SynchronousMode {
+	return SynchronousMode(w.synchronous.Load())
+}
+
+// SetSynchronous changes the synchronous mode.  The new value takes effect on
+// the next WAL commit (AppendTransaction call).
+func (w *WAL) SetSynchronous(mode SynchronousMode) {
+	w.synchronous.Store(int32(mode))
 }
 
 // CreateWAL creates a new WAL file (truncating any existing file at that path).
@@ -91,6 +122,7 @@ func CreateWAL(dbPath string, pageSize uint32) (*WAL, error) {
 		filepath: walPath,
 		pageSize: pageSize,
 	}
+	w.synchronous.Store(int32(SynchronousNormal))
 
 	if err := w.refreshSalts(); err != nil {
 		_ = file.Close()
@@ -123,6 +155,7 @@ func OpenWAL(dbPath string, pageSize uint32) (*WAL, error) {
 		filepath: walPath,
 		pageSize: pageSize,
 	}
+	w.synchronous.Store(int32(SynchronousNormal))
 
 	if err := w.readFileHeader(); err != nil {
 		return nil, errors.Join(fmt.Errorf("read WAL file header: %w", err), file.Close())
@@ -188,9 +221,12 @@ func (w *WAL) AppendTransaction(pages []WALPage) error {
 		return fmt.Errorf("write WAL frames: %w", err)
 	}
 
-	// fsync ensures the commit is durable before returning.
-	if err := syscallFsync(w.file); err != nil {
-		return fmt.Errorf("sync WAL after append: %w", err)
+	// fsync is only required in FULL mode.  In NORMAL mode the OS write cache
+	// is sufficient between commits; durability is recovered at checkpoint.
+	if SynchronousMode(w.synchronous.Load()) == SynchronousFull {
+		if err := syscallFsync(w.file); err != nil {
+			return fmt.Errorf("sync WAL after append: %w", err)
+		}
 	}
 
 	w.nextOffset += int64(len(buf))
@@ -380,8 +416,10 @@ func (w *WAL) Checkpoint(dbFile DBFile) error {
 		i = j
 	}
 
-	if err := fastSync(dbFile); err != nil {
-		return fmt.Errorf("sync database after WAL checkpoint: %w", err)
+	if SynchronousMode(w.synchronous.Load()) != SynchronousOff {
+		if err := fastSync(dbFile); err != nil {
+			return fmt.Errorf("sync database after WAL checkpoint: %w", err)
+		}
 	}
 
 	return nil
@@ -403,8 +441,10 @@ func (w *WAL) Truncate() error {
 		return fmt.Errorf("rewrite WAL header after truncate: %w", err)
 	}
 
-	if err := syscallFsync(w.file); err != nil {
-		return fmt.Errorf("sync WAL after truncate: %w", err)
+	if SynchronousMode(w.synchronous.Load()) != SynchronousOff {
+		if err := syscallFsync(w.file); err != nil {
+			return fmt.Errorf("sync WAL after truncate: %w", err)
+		}
 	}
 
 	w.nextOffset = WALFileHeaderSize
