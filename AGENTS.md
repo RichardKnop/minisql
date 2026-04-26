@@ -276,7 +276,7 @@ Tribal knowledge, design decisions, and gotchas for specific subsystems are docu
 |---|---|
 | SQL Parser | reserved words, state machine, WHERE recursive-descent, peek/pop cursor |
 | Query Execution | plan pipeline, index selection, DNF fanout, sort path |
-| Storage Engine | page layout, pager cache, OCC transactions, WAL |
+| Storage Engine | page layout, pager cache, OCC transactions, WAL, biased leaf split |
 | Testing | e2e suite, unit test setup, dataGen, row size presets |
 
 Standards explain the *why* behind non-obvious patterns. Code conventions (formatting, error handling, etc.) remain in this file.

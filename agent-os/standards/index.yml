@@ -13,13 +13,14 @@ query-execution:
   sort-path: ORDER BY path selection; heap optimisation for LIMIT; DISTINCT materialisation
 
 storage-engine:
+  biased-leaf-split: Sequential-insert optimisation in LeafNodeSplitInsert; even-split pre-alloc rule; update size-check underflow hazard
   occ-transactions: OCC ReadSet/WriteSet lifecycle; transaction travels via context, never as parameter
   page-layout: 4KB page tagged-union, page 0 special handling, usable space
   pager-cache: Sparse page array + LRU; I/O and unmarshal outside the lock
+  rightmost-leaf-cache: Per-transaction hint for sequential inserts; lastTxID guard, split invalidation
   rollback-journal: Write-before protocol, CRC32 integrity, crash recovery
   snapshot-isolation: Read-only snapshot semantics, pageVersionHistory lifecycle, TOCTOU rule, checkpoint blocking
   wal: WAL frame format, append/replay/checkpoint lifecycle, fsync modes
-  rightmost-leaf-cache: Per-transaction hint for sequential inserts; lastTxID guard, split invalidation
   wal-write-buffering: pendingBuf accumulation, flush triggers, flushThreshold=0 for tests, flush-before-checkpoint rule
 
 testing:
