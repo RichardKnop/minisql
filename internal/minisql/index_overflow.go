@@ -99,9 +99,10 @@ func (h *IndexOverflowPage) RemoveLastRowID() RowID {
 func appendRowID[T IndexKey](ctx context.Context, pager TxPager, node *IndexNode[T], cellIdx uint32, rowID RowID) error {
 	cell := node.Cells[cellIdx]
 	if cell.Overflow == 0 && len(cell.RowIDs) < MaxInlineRowIDs {
-		// Just append to inline row IDs
+		// Just append to inline row IDs; each inline RowID is 8 bytes.
 		node.Cells[cellIdx].RowIDs = append(node.Cells[cellIdx].RowIDs, rowID)
 		node.Cells[cellIdx].InlineRowIDs += 1
+		node.freeBytes -= 8
 		return nil
 	}
 	if cell.Overflow == 0 && len(cell.RowIDs) == MaxInlineRowIDs {
@@ -165,10 +166,11 @@ func removeRowID[T IndexKey](ctx context.Context, pager TxPager, node *IndexNode
 		return fmt.Errorf("row ID %d not found for key %v", rowID, key)
 	}
 	if node.Cells[cellIdx].Overflow == 0 {
-		// No overflow page, just remove inline row ID
+		// No overflow page, just remove inline row ID; each inline RowID is 8 bytes.
 		if node.Cells[cellIdx].RemoveRowID(rowID) < 0 {
 			return fmt.Errorf("row ID %d not found for key %v", rowID, key)
 		}
+		node.freeBytes += 8
 		return nil
 	}
 	// Otherwise, we need to find the row in overflow pages, remove it,

@@ -28,6 +28,7 @@ func TestIndexNode_Int8_Unique_Marshal(t *testing.T) {
 	node.Cells[1].Key = int64(126)
 	node.Cells[1].UniqueRowID = 126
 	node.Cells[1].Child = 8
+	node.freeBytes = node.MaxSpace() - node.TakenSpace()
 
 	buf := make([]byte, node.Size())
 	err := node.Marshal(buf)
@@ -67,6 +68,7 @@ func TestIndexNode_Int8_Marshal(t *testing.T) {
 	node.Cells[1].RowIDs = []RowID{127, 128, 129}
 	node.Cells[1].InlineRowIDs = 3
 	node.Cells[1].Child = 8
+	node.freeBytes = node.MaxSpace() - node.TakenSpace()
 
 	buf := make([]byte, node.Size())
 	err := node.Marshal(buf)
@@ -104,6 +106,7 @@ func TestIndexNode_Varchar_Unique_Marshal(t *testing.T) {
 	node.Cells[1].Key = "bar qux"
 	node.Cells[1].UniqueRowID = 126
 	node.Cells[1].Child = 8
+	node.freeBytes = node.MaxSpace() - node.TakenSpace()
 
 	buf := make([]byte, node.Size())
 	err := node.Marshal(buf)
@@ -148,6 +151,7 @@ func TestIndexNode_Varchar_Marshal(t *testing.T) {
 	node.Cells[1].RowIDs = []RowID{126, 127}
 	node.Cells[1].InlineRowIDs = 2
 	node.Cells[1].Child = 8
+	node.freeBytes = node.MaxSpace() - node.TakenSpace()
 
 	buf := make([]byte, node.Size())
 	err := node.Marshal(buf)

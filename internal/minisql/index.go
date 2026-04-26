@@ -118,6 +118,7 @@ func (ui *Index[T]) Insert(ctx context.Context, keyAny any, rowID RowID) error {
 		rootNode.Header.IsRoot = true
 		rootNode.Header.IsLeaf = true
 		rootNode.Header.Keys += 1
+		rootNode.freeBytes -= rootNode.Cells[0].Size()
 		// Seed the cache: the root leaf is the rightmost (and only) leaf.
 		ui.rightmostLeaf.Store(int64(ui.GetRootPageIdx()))
 		return nil
@@ -269,6 +270,7 @@ func (ui *Index[T]) tryInsertIntoRightmostLeaf(ctx context.Context, leafIdx Page
 		leafNode.Cells[i].RowIDs = []RowID{rowID}
 	}
 	leafNode.Header.Keys++
+	leafNode.freeBytes -= leafNode.Cells[i].Size()
 	return true, nil
 }
 
@@ -349,6 +351,7 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 			node.Cells[pos].RowIDs = []RowID{rowID}
 		}
 		node.Header.Keys += 1
+		node.freeBytes -= node.Cells[pos].Size()
 		// The leaf itself is trivially "rightmost at leaf level"; whether it is the
 		// global rightmost depends on the path taken above (callers check their own
 		// level's direction and AND it with this return value).
@@ -456,6 +459,7 @@ func (ui *Index[T]) splitChild(ctx context.Context, parentPage, splitPage *Page,
 		parentNode.Cells[j+1].Overflow = parentNode.Cells[j].Overflow
 	}
 	parentNode.Header.Keys += 1
+	parentNode.freeBytes -= cellToMoveToParent.Size()
 	if len(parentNode.Cells) < int(indexInParent) {
 		parentNode.Cells = append(parentNode.Cells, NewIndexCell[T](ui.unique))
 	}
@@ -846,11 +850,22 @@ func (ui *Index[T]) borrowFromLeft(ctx context.Context, parent, page, left *Page
 		childPage.IndexNode.(*IndexNode[T]).setParent(page.Index)
 	}
 
-	parentNode.Cells[idx-1].Key = leftNode.LastCell().Key
-	parentNode.Cells[idx-1].InlineRowIDs = leftNode.LastCell().InlineRowIDs
-	parentNode.Cells[idx-1].RowIDs = leftNode.LastCell().RowIDs
-	parentNode.Cells[idx-1].UniqueRowID = leftNode.LastCell().UniqueRowID
-	parentNode.Cells[idx-1].Overflow = leftNode.LastCell().Overflow
+	// Capture size before the in-place key replacement; then delta-adjust
+	// freeBytes. For fixed-width types (int64 etc.) old == new, so this is
+	// effectively a no-op arithmetic-wise, but avoids the O(n) recompute.
+	oldCellSize := parentNode.Cells[idx-1].Size()
+	last := leftNode.LastCell()
+	parentNode.Cells[idx-1].Key = last.Key
+	parentNode.Cells[idx-1].InlineRowIDs = last.InlineRowIDs
+	parentNode.Cells[idx-1].RowIDs = last.RowIDs
+	parentNode.Cells[idx-1].UniqueRowID = last.UniqueRowID
+	parentNode.Cells[idx-1].Overflow = last.Overflow
+	newCellSize := parentNode.Cells[idx-1].Size()
+	if newCellSize > oldCellSize {
+		parentNode.freeBytes -= newCellSize - oldCellSize
+	} else {
+		parentNode.freeBytes += oldCellSize - newCellSize
+	}
 
 	leftNode.RemoveLastCell()
 
@@ -884,11 +899,20 @@ func (ui *Index[T]) borrowFromRight(ctx context.Context, parent, page, right *Pa
 		childPage.IndexNode.(*IndexNode[T]).setParent(page.Index)
 	}
 
-	parentNode.Cells[idx].Key = rightNode.FirstCell().Key
-	parentNode.Cells[idx].InlineRowIDs = rightNode.FirstCell().InlineRowIDs
-	parentNode.Cells[idx].RowIDs = rightNode.FirstCell().RowIDs
-	parentNode.Cells[idx].UniqueRowID = rightNode.FirstCell().UniqueRowID
-	parentNode.Cells[idx].Overflow = rightNode.FirstCell().Overflow
+	// Capture size before the in-place key replacement; delta-adjust freeBytes.
+	oldCellSize := parentNode.Cells[idx].Size()
+	first := rightNode.FirstCell()
+	parentNode.Cells[idx].Key = first.Key
+	parentNode.Cells[idx].InlineRowIDs = first.InlineRowIDs
+	parentNode.Cells[idx].RowIDs = first.RowIDs
+	parentNode.Cells[idx].UniqueRowID = first.UniqueRowID
+	parentNode.Cells[idx].Overflow = first.Overflow
+	newCellSize := parentNode.Cells[idx].Size()
+	if newCellSize > oldCellSize {
+		parentNode.freeBytes -= newCellSize - oldCellSize
+	} else {
+		parentNode.freeBytes += oldCellSize - newCellSize
+	}
 
 	rightNode.RemoveFirstCell()
 

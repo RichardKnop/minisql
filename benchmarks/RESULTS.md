@@ -1,4 +1,54 @@
-### 2026-04-26 (binary search within index nodes — latest)
+### 2026-04-26 (O(1) free-space cache in IndexNode — latest)
+
+Added a `freeBytes uint64` field to `IndexNode[T]` (in-memory only, not serialized). Maintained on every mutating operation so `AvailableSpace()` / `HasSpaceForKey()` / `AtLeastHalfFull()` / `SplitInHalves()` all return in O(1) instead of O(n):
+- **`AvailableSpace()`** now returns `n.freeBytes` directly (was: `MaxSpace() - TakenSpace()`, an O(n) cell-size sum).
+- **`SplitInHalves()`** uses `(n.MaxSpace() - n.freeBytes)` instead of `TakenSpace()` for non-unique midpoint search.
+- `freeBytes` is initialized in `NewIndexNode` (= `MaxSpace()`) and recomputed in `Unmarshal` (accumulates bytes consumed per cell, which equals `cell.Size()`).
+- `Clone()` copies `freeBytes`; all mutating node methods (`AppendCells`, `PrependCell`, `RemoveLastCell`, `RemoveFirstCell`, `DeleteKeyAndRightChild`) maintain it incrementally.
+- `borrowFromLeft` / `borrowFromRight` apply an O(1) size delta to the parent (instead of a full O(n) recompute) to handle variable-width key types (varchar, CompositeKey) correctly.
+- **Insert_Batch: 407.3 µs → 349.3 µs (1.17× faster, ratio vs SQLite 1.8× → 1.55×)** — `hasSpaceForKey` is called on every internal node and the leaf; O(1) free-space check directly reduces per-insert overhead.
+- **Insert_PreparedBatch: 405.9 µs → 347.6 µs (1.17× faster, ratio 1.8× → 1.54×)**
+- **Insert_MultiValues: 317.9 µs → 260.4 µs (1.22× faster, ratio 1.9× → 1.50×)**
+- Insert_SingleRow: unchanged (17.9 µs) — single-row-per-transaction workload benefits less as OCC/WAL overhead dominates.
+- Delete_ByPK: 22.2 µs → 26.4 µs (slight regression; allocs 103 → 116) — cause not fully identified; delete is still 2.7× faster than SQLite.
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| **Delete_ByPK** | **26.4 µs/op** | **70.2 µs/op** | **0.37×** |
+| **Insert_SingleRow** | **17.9 µs/op** | **41.9 µs/op** | **0.43×** |
+| **Insert_Batch** | **349.3 µs/op** | **225.2 µs/op** | **1.55×** |
+| **Insert_PreparedBatch** | **347.6 µs/op** | **225.9 µs/op** | **1.54×** |
+| **Insert_MultiValues** | **260.4 µs/op** | **173.3 µs/op** | **1.50×** |
+| Select_PointScan | 4.31 µs/op | 3.43 µs/op | 1.3× |
+| **Select_Limit** | **7.59 µs/op** | **7.70 µs/op** | **0.99×** |
+| **Select_FullScan** | **4.80 ms/op** | **5.08 ms/op** | **0.94×** |
+| Select_CountStar | 17.0 µs/op | 9.86 µs/op | 1.7× |
+| **Select_IndexRangeScan** | **703.5 µs/op** | **770.8 µs/op** | **0.91×** |
+| Select_RangeScan | 1.77 ms/op | 0.86 ms/op | 2.1× |
+| **Update_ByPK** | **10.7 µs/op** | **36.4 µs/op** | **0.29×** |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 30.2 KiB | 447 B |
+| Insert_SingleRow | 21.5 KiB | 311 B |
+| Insert_Batch | 356.1 KiB | 31.0 KiB |
+| Insert_PreparedBatch | 355.7 KiB | 31.0 KiB |
+| Insert_MultiValues | 322.0 KiB | 25.2 KiB |
+| Select_PointScan | 4.6 KiB | 679 B |
+| Select_Limit | 6.1 KiB | 1.7 KiB |
+| Select_FullScan | 5.3 MiB | 1.3 MiB |
+| Select_CountStar | 6.0 KiB | 400 B |
+| Select_IndexRangeScan | 739.3 KiB | 85.9 KiB |
+| Select_RangeScan | 1.6 MiB | 85.9 KiB |
+| Update_ByPK | 9.1 KiB | 263 B |
+
+---
+
+### 2026-04-26 (binary search within index nodes)
 
 Replaced all linear scans over `IndexNode.Cells` with `sort.Search` (binary search) in `index.go` and `index_cursor.go`:
 - **`insertNotFull` — non-unique duplicate key check**: forward linear scan → binary search lower-bound + equality check.
