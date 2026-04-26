@@ -266,8 +266,9 @@ func (c *IndexCell[T]) ReplaceRowID(id, newID RowID) int {
 
 // IndexNode is a B+ tree node used by the index, containing a header and a slice of index cells.
 type IndexNode[T IndexKey] struct {
-	Cells  []IndexCell[T]
-	Header IndexNodeHeader
+	Cells     []IndexCell[T]
+	Header    IndexNodeHeader
+	freeBytes uint64 // cached free space in bytes; maintained on every insert/delete
 }
 
 // indexCellsPrealloc is the initial Cells slice capacity for a new IndexNode.
@@ -286,10 +287,15 @@ func NewIndexNode[T IndexKey](unique bool, cells ...IndexCell[T]) *IndexNode[T] 
 	if len(cells) > 0 {
 		node.Header.Keys = uint32(len(cells)) - 1
 		node.Cells = make([]IndexCell[T], len(cells))
+		takenSpace := uint64(0)
 		for i := range cells {
 			node.Cells[i] = cells[i].Clone()
 			node.Cells[i].unique = unique
+			if uint32(i) < node.Header.Keys {
+				takenSpace += node.Cells[i].Size()
+			}
 		}
+		node.freeBytes = node.MaxSpace() - takenSpace
 		return &node
 	}
 
@@ -300,6 +306,7 @@ func NewIndexNode[T IndexKey](unique bool, cells ...IndexCell[T]) *IndexNode[T] 
 	for i := range 4 {
 		node.Cells[i] = NewIndexCell[T](unique)
 	}
+	node.freeBytes = node.MaxSpace()
 	return &node
 }
 
@@ -349,6 +356,7 @@ func (n *IndexNode[T]) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	}
 	i += hi
 
+	takenSpace := uint64(0)
 	for idx := 0; idx < int(n.Header.Keys); idx++ {
 		if len(n.Cells) == idx {
 			n.Cells = append(n.Cells, NewIndexCell[T](n.Cells[0].unique))
@@ -358,7 +366,9 @@ func (n *IndexNode[T]) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 			return 0, err
 		}
 		i += ci
+		takenSpace += ci
 	}
+	n.freeBytes = n.MaxSpace() - takenSpace
 
 	return i, nil
 }
@@ -445,6 +455,8 @@ func (n *IndexNode[T]) DeleteKeyAndRightChild(idx uint32) error {
 		return fmt.Errorf("index %d out of range for keys %d", idx, n.Header.Keys)
 	}
 
+	removedSize := n.Cells[idx].Size()
+
 	if idx == n.Header.Keys-1 {
 		n.Header.RightChild = n.Cells[idx].Child
 	} else {
@@ -455,6 +467,7 @@ func (n *IndexNode[T]) DeleteKeyAndRightChild(idx uint32) error {
 	}
 
 	n.Cells[int(n.Header.Keys)-1] = NewIndexCell[T](n.Cells[int(n.Header.Keys)-1].unique)
+	n.freeBytes += removedSize
 	n.Header.Keys -= 1
 
 	return nil
@@ -481,10 +494,12 @@ func (n *IndexNode[T]) LastCell() IndexCell[T] {
 
 // RemoveFirstCell ...
 func (n *IndexNode[T]) RemoveFirstCell() {
+	removedSize := n.Cells[0].Size()
 	for i := 0; i < int(n.Header.Keys)-1; i++ {
 		n.Cells[i] = n.Cells[i+1]
 	}
 	n.Cells[n.Header.Keys-1] = NewIndexCell[T](n.Cells[n.Header.Keys-1].unique)
+	n.freeBytes += removedSize
 	n.Header.Keys -= 1
 }
 
@@ -493,6 +508,7 @@ func (n *IndexNode[T]) RemoveLastCell() IndexCell[T] {
 	idx := n.Header.Keys - 1
 	n.Header.RightChild = n.Cells[idx].Child
 	cellToRemove := n.Cells[idx]
+	n.freeBytes += cellToRemove.Size()
 	n.Cells[idx] = NewIndexCell[T](cellToRemove.unique)
 	n.Header.Keys -= 1
 	return cellToRemove
@@ -507,6 +523,7 @@ func (n *IndexNode[T]) PrependCell(cell IndexCell[T]) {
 		n.Cells[i+1] = n.Cells[i]
 	}
 	n.Cells[0] = cell
+	n.freeBytes -= cell.Size()
 	n.Header.Keys += 1
 }
 
@@ -524,6 +541,7 @@ func (n *IndexNode[T]) AppendCells(cells ...IndexCell[T]) {
 		}
 	}
 	for _, cell := range cells {
+		n.freeBytes -= cell.Size()
 		n.Cells[n.Header.Keys] = cell
 		n.Header.Keys += 1
 	}
@@ -557,7 +575,8 @@ func marshalIndexNode(anyNode any, buf []byte) error {
 // Clone ...
 func (n *IndexNode[T]) Clone() *IndexNode[T] {
 	nodeCopy := &IndexNode[T]{
-		Header: n.Header,
+		Header:    n.Header,
+		freeBytes: n.freeBytes,
 	}
 	if n.Header.Keys == 0 {
 		return nodeCopy
@@ -627,10 +646,11 @@ func (n *IndexNode[T]) TakenSpace() uint64 {
 	return takenPageSize
 }
 
-// AvailableSpace ...
+// AvailableSpace returns the number of free bytes in this node (O(1) via cached freeBytes).
 func (n *IndexNode[T]) AvailableSpace() uint64 {
-	return n.MaxSpace() - n.TakenSpace()
+	return n.freeBytes
 }
+
 
 // HasSpaceForKey ...
 func (n *IndexNode[T]) HasSpaceForKey(key T) bool {
@@ -649,7 +669,7 @@ func (n *IndexNode[T]) AtLeastHalfFull() bool {
 // SplitInHalves ...
 func (n *IndexNode[T]) SplitInHalves(unique bool) (uint32, uint32) {
 	if !unique {
-		halfSpace := int(n.TakenSpace() / 2)
+		halfSpace := int((n.MaxSpace() - n.freeBytes) / 2)
 		for i := uint32(0); i < n.Header.Keys; i++ {
 			halfSpace -= int(n.Cells[i].Size())
 			if halfSpace < 0 {
