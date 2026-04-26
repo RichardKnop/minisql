@@ -1,4 +1,52 @@
-### 2026-04-26 (WAL write frame batching — latest)
+### 2026-04-26 (IndexNode cell pre-sizing — latest)
+
+IndexNode `Cells` slice capacity increased from 4 to 32, eliminating most slice reallocations during sequential insert / rebalance workloads:
+- **`NewIndexNode`**: changed `make([]IndexCell[T], 4, 4)` to `make([]IndexCell[T], 4, 32)`. With `cap==len==4`, the very first `append` (insert) triggered an immediate reallocation to cap=8 and then up to cap=256 across 6 steps to fill a full int64 leaf. With cap=32, no reallocation occurs for the first 28 insertions; a full leaf needs 3 reallocs (32→64→128→256) instead of 6.
+- Renamed exported `MinimumIndexCells = 4` to unexported `indexCellsPrealloc = 32` (the old constant had a stale TODO and was only used internally).
+- **Delete_ByPK: 29.8 µs → 23.5 µs (1.27× faster)** — rebalancing creates new nodes via `NewIndexNode`; fewer reallocations means fewer intermediate backing-array allocations on the hot delete path.
+- **Delete_ByPK allocs/op: 117 → 103 (−12%)** — directly reflects the eliminated backing-array reallocations during node creation in the rebalancing code.
+- Insert_SingleRow and Update_ByPK unchanged (within noise): single-row-per-transaction inserts don't create new nodes frequently enough for the capacity change to register.
+- SQLite Delete numbers show high run-to-run variance (83 / 113 / 120 µs across 3 runs); ratio computed from 3-run average.
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| **Delete_ByPK** | **23.5 µs/op** | **105.4 µs/op†** | **0.22×** |
+| **Insert_SingleRow** | **19.0 µs/op** | **44.3 µs/op** | **0.43×** |
+| Insert_Batch | 492.2 µs/op | 222.6 µs/op | 2.2× |
+| Insert_PreparedBatch | 490.7 µs/op | 219.3 µs/op | 2.2× |
+| Insert_MultiValues | 405.3 µs/op | 166.7 µs/op | 2.4× |
+| Select_PointScan | 4.49 µs/op | 3.31 µs/op | 1.4× |
+| **Select_Limit** | **7.39 µs/op** | **7.82 µs/op** | **0.94×** |
+| **Select_FullScan** | **4.71 ms/op** | **5.02 ms/op** | **0.94×** |
+| Select_CountStar | 17.1 µs/op | 9.60 µs/op | 1.8× |
+| **Select_IndexRangeScan** | **680.7 µs/op** | **740.3 µs/op** | **0.92×** |
+| Select_RangeScan | 1.67 ms/op | 0.86 ms/op | 1.9× |
+| **Update_ByPK** | **10.6 µs/op** | **38.2 µs/op** | **0.28×** |
+
+† SQLite Delete shows high run-to-run variance (83 / 113 / 120 µs); 3-run average used.
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 25.3 KiB | 447 B |
+| Insert_SingleRow | 21.5 KiB | 312 B |
+| Insert_Batch | 356.1 KiB | 31.1 KiB |
+| Insert_PreparedBatch | 355.4 KiB | 31.1 KiB |
+| Insert_MultiValues | 322.3 KiB | 25.3 KiB |
+| Select_PointScan | 4.6 KiB | 679 B |
+| Select_Limit | 6.1 KiB | 1.7 KiB |
+| Select_FullScan | 5.3 MiB | 1.3 MiB |
+| Select_CountStar | 5.9 KiB | 400 B |
+| Select_IndexRangeScan | 737.1 KiB | 85.9 KiB |
+| Select_RangeScan | 1.6 MiB | 85.9 KiB |
+| Update_ByPK | 9.0 KiB | 263 B |
+
+---
+
+### 2026-04-26 (WAL write frame batching — previous)
 
 WAL write-frame batching — frames from multiple transactions accumulated in a 64 KiB in-process buffer before a single `WriteAt` to the OS page cache:
 - **`WAL.pendingBuf`** replaces the old `writeBuf` scratch buffer. `AppendTransaction` serialises frames directly into `pendingBuf[pendingLen:]` and flushes (one `WriteAt`) only when `pendingLen >= flushThreshold` (default 64 KiB), `flushThreshold == 0` (opt-out), or `SynchronousFull`. A 64 KiB buffer holds ~16 full-page frames, so ~8–16 single-row transactions share one syscall instead of one each.
