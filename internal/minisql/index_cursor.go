@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 )
 
 // IndexCursor holds a position within an index, grouping page and cell index.
@@ -64,23 +65,23 @@ func (ui *Index[T]) Seek(ctx context.Context, page *Page, keyAny any) (IndexCurs
 		return IndexCursor[T]{}, false, fmt.Errorf("invalid key type: %T", keyAny)
 	}
 
-	i := uint32(0)
 	node := page.IndexNode.(*IndexNode[T])
 
-	for i < node.Header.Keys && compare(key, node.Cells[i].Key) > 0 {
-		i += 1
-	}
-	if i < node.Header.Keys && compare(key, node.Cells[i].Key) == 0 {
+	// Binary search: first position where Cells[pos].Key >= key.
+	pos := sort.Search(int(node.Header.Keys), func(i int) bool {
+		return compare(node.Cells[i].Key, key) >= 0
+	})
+	if pos < int(node.Header.Keys) && compare(node.Cells[pos].Key, key) == 0 {
 		return IndexCursor[T]{
 			Index:   ui,
 			PageIdx: page.Index,
-			CellIdx: uint32(i),
+			CellIdx: uint32(pos),
 		}, true, nil
 	}
 	if node.Header.IsLeaf {
 		return IndexCursor[T]{}, false, nil
 	}
-	childIdx, err := node.Child(uint32(i))
+	childIdx, err := node.Child(uint32(pos))
 	if err != nil {
 		return IndexCursor[T]{}, false, fmt.Errorf("get child: %w", err)
 	}

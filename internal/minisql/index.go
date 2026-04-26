@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync/atomic"
 
@@ -302,18 +303,18 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 	node := page.IndexNode.(*IndexNode[T])
 
 	if !ui.unique {
-		// For non-unique index, check for an existing key to append the row ID.
-		for cellIdx := uint32(0); cellIdx < node.Header.Keys; cellIdx++ {
-			if compare(node.Cells[cellIdx].Key, key) != 0 {
-				continue
-			}
+		// For non-unique index, binary-search for an existing key to append the row ID.
+		pos := sort.Search(int(node.Header.Keys), func(i int) bool {
+			return compare(node.Cells[i].Key, key) >= 0
+		})
+		if pos < int(node.Header.Keys) && compare(node.Cells[pos].Key, key) == 0 {
 			// Upgrade to write set before modifying.
 			page, err = ui.pager.ModifyPage(ctx, pageIdx)
 			if err != nil {
 				return 0, false, fmt.Errorf("modify page for append row ID: %w", err)
 			}
 			node = page.IndexNode.(*IndexNode[T])
-			if err := appendRowID(ctx, ui.pager, node, cellIdx, rowID); err != nil {
+			if err := appendRowID(ctx, ui.pager, node, uint32(pos), rowID); err != nil {
 				return 0, false, fmt.Errorf("error appending row ID to existing key: %w", err)
 			}
 			// Appending to an existing key — not a rightmost-leaf insert.
@@ -330,23 +331,22 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 		}
 		node = page.IndexNode.(*IndexNode[T])
 
-		// Find location to insert new key, shift keys to make space.
-		i := int(node.Header.Keys) - 1
+		// Binary search for the insertion position.
+		pos := sort.Search(int(node.Header.Keys), func(i int) bool {
+			return compare(node.Cells[i].Key, key) >= 0
+		})
+		// Extend the slice by one, then shift cells [pos, Keys-1] right to make room.
 		node.Cells = append(node.Cells, NewIndexCell[T](ui.unique))
-		for i >= 0 && compare(node.Cells[i].Key, key) > 0 {
-			node.Cells[i+1].Key = node.Cells[i].Key
-			node.Cells[i+1].InlineRowIDs = node.Cells[i].InlineRowIDs
-			node.Cells[i+1].RowIDs = node.Cells[i].RowIDs
-			node.Cells[i+1].UniqueRowID = node.Cells[i].UniqueRowID
-			node.Cells[i+1].Overflow = node.Cells[i].Overflow
-			i -= 1
+		for j := int(node.Header.Keys) - 1; j >= pos; j-- {
+			node.Cells[j+1] = node.Cells[j]
 		}
-		node.Cells[i+1].Key = key
+		node.Cells[pos] = NewIndexCell[T](ui.unique)
+		node.Cells[pos].Key = key
 		if ui.unique {
-			node.Cells[i+1].UniqueRowID = rowID
+			node.Cells[pos].UniqueRowID = rowID
 		} else {
-			node.Cells[i+1].InlineRowIDs = 1
-			node.Cells[i+1].RowIDs = []RowID{rowID}
+			node.Cells[pos].InlineRowIDs = 1
+			node.Cells[pos].RowIDs = []RowID{rowID}
 		}
 		node.Header.Keys += 1
 		// The leaf itself is trivially "rightmost at leaf level"; whether it is the
@@ -355,13 +355,13 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 		return pageIdx, true, nil
 	}
 
-	// Internal node — find the child that will receive the new key.
-	i := int(node.Header.Keys) - 1
-	for i >= 0 && compare(node.Cells[i].Key, key) > 0 {
-		i -= 1
-	}
+	// Internal node — binary search for the child that will receive the new key.
+	// pos = first index where Cells[pos].Key > key; child to descend into is pos.
+	pos := sort.Search(int(node.Header.Keys), func(i int) bool {
+		return compare(node.Cells[i].Key, key) > 0
+	})
 
-	childIdx, err := node.Child(uint32(i + 1))
+	childIdx, err := node.Child(uint32(pos))
 	if err != nil {
 		return 0, false, fmt.Errorf("get child: %w", err)
 	}
@@ -384,21 +384,21 @@ func (ui *Index[T]) insertNotFull(ctx context.Context, pageIdx PageIndex, key T,
 		if err != nil {
 			return 0, false, fmt.Errorf("modify child page for split: %w", err)
 		}
-		if err := ui.splitChild(ctx, page, childPage, uint32(i+1)); err != nil {
+		if err := ui.splitChild(ctx, page, childPage, uint32(pos)); err != nil {
 			return 0, false, fmt.Errorf("split child: %w", err)
 		}
-		if compare(node.Cells[i+1].Key, key) < 0 {
-			i += 1
+		if compare(node.Cells[pos].Key, key) < 0 {
+			pos += 1
 		}
 		// Re-read the child index from the now-updated parent node.
-		childIdx, err = node.Child(uint32(i + 1))
+		childIdx, err = node.Child(uint32(pos))
 		if err != nil {
 			return 0, false, fmt.Errorf("get child after split: %w", err)
 		}
 	}
 
 	// isRightmostAtThisLevel: we chose node.Child(Keys) — the RightChild pointer.
-	isRightmostAtThisLevel := uint32(i+1) == node.Header.Keys
+	isRightmostAtThisLevel := uint32(pos) == node.Header.Keys
 	leafIdx, isRightmostBelow, err := ui.insertNotFull(ctx, childIdx, key, rowID)
 	return leafIdx, isRightmostAtThisLevel && isRightmostBelow, err
 }
@@ -564,11 +564,10 @@ func (ui *Index[T]) Delete(ctx context.Context, keyAny any, rowID RowID) error {
 func (ui *Index[T]) remove(ctx context.Context, page *Page, key T, rowID RowID) error {
 	node := page.IndexNode.(*IndexNode[T])
 
-	// Find index of the first key greater than or equal to key.
-	idx := 0
-	for idx < int(node.Header.Keys) && compare(node.Cells[idx].Key, key) < 0 {
-		idx += 1
-	}
+	// Binary search for the first index where Cells[idx].Key >= key.
+	idx := sort.Search(int(node.Header.Keys), func(i int) bool {
+		return compare(node.Cells[i].Key, key) >= 0
+	})
 
 	if idx < int(node.Header.Keys) && compare(node.Cells[idx].Key, key) == 0 {
 		// Key is in this node.

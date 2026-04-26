@@ -1,4 +1,57 @@
-### 2026-04-26 (IndexNode cell pre-sizing — latest)
+### 2026-04-26 (binary search within index nodes — latest)
+
+Replaced all linear scans over `IndexNode.Cells` with `sort.Search` (binary search) in `index.go` and `index_cursor.go`:
+- **`insertNotFull` — non-unique duplicate key check**: forward linear scan → binary search lower-bound + equality check.
+- **`insertNotFull` — leaf insertion position**: backward linear scan + field-by-field shift → binary search + backward struct-copy shift.
+- **`insertNotFull` — internal node child selection**: backward linear scan → binary search (first index where `Cells[i].Key > key`).
+- **`remove` — key search**: forward linear scan → binary search lower-bound.
+- **`Seek` (index_cursor.go)**: forward linear scan → binary search lower-bound.
+- The table B+ tree (`InternalNode.IndexOfChild`, `leafNodeSeek`) was already using binary search; no change there.
+- **Insert_Batch: 492.2 µs → 407.3 µs (1.21× faster, ratio vs SQLite 2.2× → 1.8×)** — each of the 100 rows per transaction searches an internal or leaf node; binary search directly cuts per-insert comparison count.
+- **Insert_PreparedBatch: 490.7 µs → 405.9 µs (1.21× faster, ratio 2.2× → 1.8×)**
+- **Insert_MultiValues: 405.3 µs → 317.9 µs (1.27× faster, ratio 2.4× → 1.9×)**
+- Insert_SingleRow improved ~5% (19.0 µs → 18.0 µs) — modest benefit since single-row-per-transaction workloads don't accumulate many keys per node before the next transaction starts fresh.
+- Read, Update, Delete paths see small improvements consistent with fewer comparisons during tree traversal.
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| **Delete_ByPK** | **22.2 µs/op** | **82.3 µs/op†** | **0.27×** |
+| **Insert_SingleRow** | **18.0 µs/op** | **41.0 µs/op** | **0.44×** |
+| **Insert_Batch** | **407.3 µs/op** | **223.2 µs/op** | **1.8×** |
+| **Insert_PreparedBatch** | **405.9 µs/op** | **221.4 µs/op** | **1.8×** |
+| **Insert_MultiValues** | **317.9 µs/op** | **170.3 µs/op** | **1.9×** |
+| Select_PointScan | 4.33 µs/op | 3.33 µs/op | 1.3× |
+| **Select_Limit** | **7.55 µs/op** | **7.92 µs/op** | **0.95×** |
+| **Select_FullScan** | **4.73 ms/op** | **5.08 ms/op** | **0.93×** |
+| Select_CountStar | 17.4 µs/op | 9.60 µs/op | 1.8× |
+| **Select_IndexRangeScan** | **683.8 µs/op** | **737.2 µs/op** | **0.93×** |
+| Select_RangeScan | 1.72 ms/op | 0.88 ms/op | 2.0× |
+| **Update_ByPK** | **10.5 µs/op** | **36.5 µs/op** | **0.29×** |
+
+† SQLite Delete continues to show run-to-run variance (63 / 79 / 105 µs); 3-run average used.
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 25.3 KiB | 447 B |
+| Insert_SingleRow | 21.5 KiB | 312 B |
+| Insert_Batch | 356.2 KiB | 31.1 KiB |
+| Insert_PreparedBatch | 355.6 KiB | 31.1 KiB |
+| Insert_MultiValues | 322.7 KiB | 25.3 KiB |
+| Select_PointScan | 4.6 KiB | 679 B |
+| Select_Limit | 6.1 KiB | 1.7 KiB |
+| Select_FullScan | 5.3 MiB | 1.3 MiB |
+| Select_CountStar | 5.9 KiB | 400 B |
+| Select_IndexRangeScan | 737.1 KiB | 85.9 KiB |
+| Select_RangeScan | 1.6 MiB | 85.9 KiB |
+| Update_ByPK | 9.0 KiB | 263 B |
+
+---
+
+### 2026-04-26 (IndexNode cell pre-sizing)
 
 IndexNode `Cells` slice capacity increased from 4 to 32, eliminating most slice reallocations during sequential insert / rebalance workloads:
 - **`NewIndexNode`**: changed `make([]IndexCell[T], 4, 4)` to `make([]IndexCell[T], 4, 32)`. With `cap==len==4`, the very first `append` (insert) triggered an immediate reallocation to cap=8 and then up to cap=256 across 6 steps to fill a full int64 leaf. With cap=32, no reallocation occurs for the first 28 insertions; a full leaf needs 3 reallocs (32→64→128→256) instead of 6.
