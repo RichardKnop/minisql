@@ -112,33 +112,35 @@ func TestTable_Insert_SplitRootLeaf(t *testing.T) {
 	assert.True(t, pager.pages[0].InternalNode.Header.IsInternal)
 	assert.Equal(t, 1, int(pager.pages[0].InternalNode.Header.RightChild))
 	assert.Equal(t, 2, int(pager.pages[0].InternalNode.ICells[0].Child))
-	assert.Equal(t, 2, int(pager.pages[0].InternalNode.ICells[0].Key))
+	// Biased split: new key (5) > old max key (4), so all 5 existing cells stay on the left
+	// and only the new key goes to the right; parent separator = max key of left page = 4.
+	assert.Equal(t, 4, int(pager.pages[0].InternalNode.ICells[0].Key))
 
-	// Assert left leaf
+	// Assert left leaf: biased split keeps all 5 existing cells on the left
 	leftLeaf := pager.pages[2]
 	assert.False(t, leftLeaf.LeafNode.Header.IsRoot)
 	assert.False(t, leftLeaf.LeafNode.Header.IsInternal)
 	assert.Equal(t, 0, int(leftLeaf.LeafNode.Header.Parent))
-	assert.Equal(t, 3, int(leftLeaf.LeafNode.Header.Cells))
+	assert.Equal(t, 5, int(leftLeaf.LeafNode.Header.Cells))
 	assert.Equal(t, 1, int(leftLeaf.LeafNode.Header.NextLeaf))
 
-	// // Assert keys in the left leaf
+	// Assert keys in the left leaf
 	assert.Equal(t, 0, int(leftLeaf.LeafNode.Cells[0].Key))
 	assert.Equal(t, 1, int(leftLeaf.LeafNode.Cells[1].Key))
 	assert.Equal(t, 2, int(leftLeaf.LeafNode.Cells[2].Key))
+	assert.Equal(t, 3, int(leftLeaf.LeafNode.Cells[3].Key))
+	assert.Equal(t, 4, int(leftLeaf.LeafNode.Cells[4].Key))
 
-	// Assert right leaf
+	// Assert right leaf: biased split puts only the new key on the right
 	rightLeaf := pager.pages[1]
 	assert.False(t, rightLeaf.LeafNode.Header.IsRoot)
 	assert.False(t, rightLeaf.LeafNode.Header.IsInternal)
 	assert.Equal(t, 0, int(rightLeaf.LeafNode.Header.Parent))
-	assert.Equal(t, 3, int(rightLeaf.LeafNode.Header.Cells))
+	assert.Equal(t, 1, int(rightLeaf.LeafNode.Header.Cells))
 	assert.Equal(t, 0, int(rightLeaf.LeafNode.Header.NextLeaf))
 
-	// // Assert keys in the right leaf
-	assert.Equal(t, 3, int(rightLeaf.LeafNode.Cells[0].Key))
-	assert.Equal(t, 4, int(rightLeaf.LeafNode.Cells[1].Key))
-	assert.Equal(t, 5, int(rightLeaf.LeafNode.Cells[2].Key))
+	// Assert key in the right leaf
+	assert.Equal(t, 5, int(rightLeaf.LeafNode.Cells[0].Key))
 
 	assert.Equal(t, 3, int(pager.TotalPages()))
 }

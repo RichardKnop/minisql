@@ -87,41 +87,59 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key RowID, row Row) er
 		c.Table.rightmostTablePage.Store(int64(newPage.Index))
 	}
 
-	// All existing keys plus new key should should be divided
-	// evenly between old (left) and new (right) nodes.
-	// Starting from the right, move each key to correct position.
 	var (
 		leafNodeMaxCells = uint32(splitPage.LeafNode.Header.Cells)
-		rightSplitCount  = (leafNodeMaxCells + 1) / 2
-		leftSplitCount   = leafNodeMaxCells + 1 - rightSplitCount
+		rightSplitCount  uint32
+		leftSplitCount   uint32
 	)
-	for i := leafNodeMaxCells; ; i-- {
-		if i+1 == 0 {
-			break
-		}
-		var (
-			destPage *Page
-			isLeft   = i < leftSplitCount
-		)
 
-		if !isLeft {
-			destPage = newPage // right
-		} else {
-			destPage = splitPage // left
+	if key > originalMaxKey {
+		// Biased split: new key is the greatest; pack all existing cells on the left page
+		// and place only the new key on the right page. Table RowIDs are engine-managed
+		// and strictly monotone-increasing, so this is always safe for table row storage.
+		leftSplitCount = leafNodeMaxCells
+		rightSplitCount = 1
+		if err := c.saveToCell(ctx, newPage.LeafNode, 0, key, row); err != nil {
+			return err
 		}
-		cellIdx := i % leftSplitCount
-
-		switch {
-		case i == c.CellIdx:
-			if err := c.saveToCell(ctx, destPage.LeafNode, cellIdx, key, row); err != nil {
-				return err
+	} else {
+		// Even split: divide existing keys plus new key evenly between left and right nodes.
+		// Starting from the right, move each key to the correct position.
+		rightSplitCount = (leafNodeMaxCells + 1) / 2
+		leftSplitCount = leafNodeMaxCells + 1 - rightSplitCount
+		// Pre-allocate right-page cells so the copy loop can assign directly by index
+		// without relying on saveToCell being called first.
+		for uint32(len(newPage.LeafNode.Cells)) < rightSplitCount {
+			newPage.LeafNode.Cells = append(newPage.LeafNode.Cells, Cell{})
+		}
+		for i := leafNodeMaxCells; ; i-- {
+			if i+1 == 0 {
+				break
 			}
-		case i > c.CellIdx:
-			splitPage.LeafNode.PrepareModifyCell(i - 1)
-			destPage.LeafNode.Cells[cellIdx] = splitPage.LeafNode.Cells[i-1]
-		default:
-			splitPage.LeafNode.PrepareModifyCell(i)
-			destPage.LeafNode.Cells[cellIdx] = splitPage.LeafNode.Cells[i]
+			var (
+				destPage *Page
+				isLeft   = i < leftSplitCount
+			)
+
+			if !isLeft {
+				destPage = newPage // right
+			} else {
+				destPage = splitPage // left
+			}
+			cellIdx := i % leftSplitCount
+
+			switch {
+			case i == c.CellIdx:
+				if err := c.saveToCell(ctx, destPage.LeafNode, cellIdx, key, row); err != nil {
+					return err
+				}
+			case i > c.CellIdx:
+				splitPage.LeafNode.PrepareModifyCell(i - 1)
+				destPage.LeafNode.Cells[cellIdx] = splitPage.LeafNode.Cells[i-1]
+			default:
+				splitPage.LeafNode.PrepareModifyCell(i)
+				destPage.LeafNode.Cells[cellIdx] = splitPage.LeafNode.Cells[i]
+			}
 		}
 	}
 
@@ -274,7 +292,7 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 	// we need to delete the old row and re-insert the new row. This will likely cause
 	// a split, but that's better than trying to move rows around in the page. Since we
 	// use internal row IDs as keys, we will reinsert to the same page.
-	if row.Size() > page.LeafNode.AvailableSpace()-oldRow.Size() {
+	if row.Size() > page.LeafNode.AvailableSpace()+oldRow.Size() {
 		// Delete the row
 		if err := c.delete(ctx, oldRow); err != nil {
 			return false, fmt.Errorf("update delete old row: %w", err)

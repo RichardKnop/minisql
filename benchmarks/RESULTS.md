@@ -1,4 +1,57 @@
-### 2026-04-26 (O(1) free-space cache in IndexNode — latest)
+### 2026-04-26 (biased leaf splits for sequential inserts — latest)
+
+Three changes in this entry:
+
+**1. Biased leaf splits** (`cursor.go` `LeafNodeSplitInsert`): when the new key is greater than all existing keys (sequential insert), pack all existing cells on the left page and place only the new key on the right page. Table RowIDs are engine-managed and strictly monotone-increasing, so this is always safe. Result: O(1) key placement vs O(n) cell shuffle for the common case; fully packed leaf pages (5.3× fewer pages for sequential workloads).
+- **Insert_Batch: 349.3 µs → 315.0 µs (1.11× faster, ratio vs SQLite 1.55× → 1.42×)** — rightmost-leaf cache was already skipping tree traversal for 99/100 rows; biased split also eliminates the O(n) cell-copy on every split boundary.
+- **Insert_PreparedBatch: 347.6 µs → 316.6 µs (1.10× faster, ratio 1.54× → 1.44×)**
+- **Insert_MultiValues: 260.4 µs → 226.5 µs (1.15× faster, ratio 1.50× → 1.36×)**
+- Insert_SingleRow: 17.9 µs → 16.6 µs (1.08× faster) — modest benefit since OCC/WAL overhead dominates.
+
+**2. Bug fix — uint64 underflow in in-place update check** (`cursor.go` `Cursor.update`): the condition `row.Size() > page.LeafNode.AvailableSpace()-oldRow.Size()` could wrap around to a huge number when `AvailableSpace() < oldRow.Size()` (a page fully packed by biased splits has only ~11 bytes free vs ~53 bytes for a typical row). Changed to `row.Size() > page.LeafNode.AvailableSpace()+oldRow.Size()` — correct semantics: trigger delete-and-reinsert when the net size increase exceeds available space. This bug was latent with even-split pages (always ~half full, so AvailableSpace ≈ 2000 > oldRow.Size()) and was exposed by biased splits.
+- **Update_ByPK: 26.4 µs → 10.2 µs (2.6× faster, ratio 0.37× → 0.22×)** — fully packed pages mean delete-and-reinsert is now triggered correctly (instead of always in-place); the shorter in-place path dominates the benchmark.
+
+**3. Bug fix — unallocated Cells slice in even-split** (`cursor.go` `LeafNodeSplitInsert`): the even-split loop directly indexed `newPage.LeafNode.Cells[cellIdx]` before `saveToCell` could extend the slice, panicking when the new key was not in the rightmost position. Pre-allocate `newPage.LeafNode.Cells` to `rightSplitCount` empty cells before the loop. This bug was latent because even-split was only triggered by sequential inserts (where the new key is always rightmost, so `saveToCell` ran first), and was exposed by the update delete-and-reinsert path introduced by fix #2.
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| **Delete_ByPK** | **22.1 µs/op** | **107.5 µs/op†** | **0.21×** |
+| **Insert_SingleRow** | **16.6 µs/op** | **41.7 µs/op** | **0.40×** |
+| **Insert_Batch** | **315.0 µs/op** | **222.3 µs/op** | **1.42×** |
+| **Insert_PreparedBatch** | **316.6 µs/op** | **220.3 µs/op** | **1.44×** |
+| **Insert_MultiValues** | **226.5 µs/op** | **167.0 µs/op** | **1.36×** |
+| Select_PointScan | 4.35 µs/op | 3.29 µs/op | 1.32× |
+| **Select_Limit** | **7.36 µs/op** | **7.72 µs/op** | **0.95×** |
+| **Select_FullScan** | **4.64 ms/op** | **5.01 ms/op** | **0.93×** |
+| Select_CountStar | 17.0 µs/op | 9.65 µs/op | 1.76× |
+| **Select_IndexRangeScan** | **708.3 µs/op** | **742.8 µs/op** | **0.95×** |
+| Select_RangeScan | 1.79 ms/op | 852.6 µs/op | 2.10× |
+| **Update_ByPK** | **10.2 µs/op** | **46.8 µs/op** | **0.22×** |
+
+† SQLite Delete shows run-to-run variance; single run used.
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 23.6 KiB | 447 B |
+| Insert_SingleRow | 18.5 KiB | 312 B |
+| Insert_Batch | 302.4 KiB | 31.1 KiB |
+| Insert_PreparedBatch | 301.8 KiB | 31.1 KiB |
+| Insert_MultiValues | 268.2 KiB | 25.2 KiB |
+| Select_PointScan | 4.6 KiB | 679 B |
+| Select_Limit | 6.1 KiB | 1.7 KiB |
+| Select_FullScan | 5.3 MiB | 1.3 MiB |
+| Select_CountStar | 5.9 KiB | 400 B |
+| Select_IndexRangeScan | 737.2 KiB | 85.9 KiB |
+| Select_RangeScan | 1.6 MiB | 85.9 KiB |
+| Update_ByPK | 8.3 KiB | 257 B |
+
+---
+
+### 2026-04-26 (O(1) free-space cache in IndexNode — previous)
 
 Added a `freeBytes uint64` field to `IndexNode[T]` (in-memory only, not serialized). Maintained on every mutating operation so `AvailableSpace()` / `HasSpaceForKey()` / `AtLeastHalfFull()` / `SplitInHalves()` all return in O(1) instead of O(n):
 - **`AvailableSpace()`** now returns `n.freeBytes` directly (was: `MaxSpace() - TakenSpace()`, an O(n) cell-size sum).
