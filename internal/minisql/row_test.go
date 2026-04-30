@@ -212,7 +212,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandQuotedString,
-				Value: row.Values[5].Value.(Time),
+				Value: row.Values[5].Value.(TimestampMicros),
 			},
 		}
 		timestampMismatch = Condition{
@@ -223,7 +223,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandQuotedString,
-				Value: MustParseTimestamp("1000-01-01 00:00:00 BC"),
+				Value: MustParseTimestampMicros("1000-01-01 00:00:00 BC"),
 			},
 		}
 	)
@@ -597,7 +597,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Eq,
 						Operand2: Operand{
 							Type:  OperandQuotedString,
-							Value: MustParseTimestamp("2000-01-01 00:00:00"),
+							Value: MustParseTimestampMicros("2000-01-01 00:00:00"),
 						},
 					},
 				},

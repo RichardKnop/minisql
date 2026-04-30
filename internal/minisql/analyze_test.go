@@ -78,7 +78,7 @@ func TestDatabase_Analyze(t *testing.T) {
 		if i > 0 && i%10 == 0 {
 			now = now.Add(time.Minute)
 		}
-		row.Values[5].Value = MustParseTimestamp(now.Format(timestampFormat))
+		row.Values[5].Value = MustParseTimestampMicros(now.Format(timestampFormat))
 		insertStmt.Inserts = append(insertStmt.Inserts, row.Values)
 	}
 

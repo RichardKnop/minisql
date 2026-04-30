@@ -837,7 +837,7 @@ func TestExpr_Eval_MOD(t *testing.T) {
 }
 
 // rowWithTimestamp returns a single-column row containing a TIMESTAMP value.
-func rowWithTimestamp(name string, ts Time) Row {
+func rowWithTimestamp(name string, ts TimestampMicros) Row {
 	return NewRowWithValues(
 		[]Column{{Name: name, Kind: Timestamp}},
 		[]OptionalValue{{Value: ts, Valid: true}},
@@ -857,11 +857,11 @@ func TestExpr_Eval_NOW(t *testing.T) {
 	after := time.Now().UTC()
 
 	require.NoError(t, err)
-	ts, ok := v.(Time)
-	require.True(t, ok, "expected Time result, got %T", v)
+	ts, ok := v.(TimestampMicros)
+	require.True(t, ok, "expected TimestampMicros result, got %T", v)
 
 	// The returned timestamp should be between before and after.
-	got := ts.GoTime()
+	got := FromMicroseconds(int64(ts)).GoTime()
 	assert.False(t, got.Before(before), "NOW() returned time before call")
 	assert.False(t, got.After(after), "NOW() returned time after call")
 }
@@ -869,19 +869,19 @@ func TestExpr_Eval_NOW(t *testing.T) {
 func TestExpr_Eval_DATE_TRUNC(t *testing.T) {
 	t.Parallel()
 
-	ts := MustParseTimestamp("2024-06-15 14:32:45.123456")
+	ts := MustParseTimestampMicros("2024-06-15 14:32:45.123456")
 	row := rowWithTimestamp("ts", ts)
 
 	cases := []struct {
 		unit string
-		want Time
+		want TimestampMicros
 	}{
-		{"year", MustParseTimestamp("2024-01-01 00:00:00")},
-		{"month", MustParseTimestamp("2024-06-01 00:00:00")},
-		{"day", MustParseTimestamp("2024-06-15 00:00:00")},
-		{"hour", MustParseTimestamp("2024-06-15 14:00:00")},
-		{"minute", MustParseTimestamp("2024-06-15 14:32:00")},
-		{"second", MustParseTimestamp("2024-06-15 14:32:45")},
+		{"year", MustParseTimestampMicros("2024-01-01 00:00:00")},
+		{"month", MustParseTimestampMicros("2024-06-01 00:00:00")},
+		{"day", MustParseTimestampMicros("2024-06-15 00:00:00")},
+		{"hour", MustParseTimestampMicros("2024-06-15 14:00:00")},
+		{"minute", MustParseTimestampMicros("2024-06-15 14:32:00")},
+		{"second", MustParseTimestampMicros("2024-06-15 14:32:45")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.unit, func(t *testing.T) {
@@ -916,7 +916,7 @@ func TestExpr_Eval_DATE_TRUNC(t *testing.T) {
 func TestExpr_Eval_EXTRACT(t *testing.T) {
 	t.Parallel()
 
-	ts := MustParseTimestamp("2024-06-15 14:32:45.123456")
+	ts := MustParseTimestampMicros("2024-06-15 14:32:45.123456")
 	row := rowWithTimestamp("ts", ts)
 
 	cases := []struct {
@@ -973,7 +973,7 @@ func TestExpr_Eval_TO_TIMESTAMP(t *testing.T) {
 		e := &Expr{FuncName: "TO_TIMESTAMP", Args: []*Expr{textExpr("2024-03-20 10:15:30")}}
 		v, err := e.Eval(NewRow(nil))
 		require.NoError(t, err)
-		assert.Equal(t, MustParseTimestamp("2024-03-20 10:15:30"), v)
+		assert.Equal(t, MustParseTimestampMicros("2024-03-20 10:15:30"), v)
 	})
 
 	t.Run("null propagates", func(t *testing.T) {

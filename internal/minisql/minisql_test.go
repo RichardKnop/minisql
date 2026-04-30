@@ -63,7 +63,7 @@ var (
 			Size:         8,
 			Name:         "created",
 			Nullable:     true,
-			DefaultValue: OptionalValue{Value: MustParseTimestamp("0001-01-01 00:00:00.000000"), Valid: true},
+			DefaultValue: OptionalValue{Value: MustParseTimestampMicros("0001-01-01 00:00:00.000000"), Valid: true},
 		},
 	}
 	testRowSize = uint64(8 + 4 + 255 + 4 + 1 + 4 + 8) // calculated size of testColumns
@@ -107,7 +107,7 @@ var (
 				Size:         8,
 				Name:         "created",
 				Nullable:     true,
-				DefaultValue: OptionalValue{Value: MustParseTimestamp("0001-01-01 00:00:00.000000"), Valid: true},
+				DefaultValue: OptionalValue{Value: MustParseTimestampMicros("0001-01-01 00:00:00.000000"), Valid: true},
 			},
 		},
 		int((PageSize-uint32(RootPageConfigSize)-
@@ -157,7 +157,7 @@ var (
 				Size:         8,
 				Name:         "created",
 				Nullable:     true,
-				DefaultValue: OptionalValue{Value: MustParseTimestamp("0001-01-01 00:00:00.000000"), Valid: true},
+				DefaultValue: OptionalValue{Value: MustParseTimestampMicros("0001-01-01 00:00:00.000000"), Valid: true},
 			},
 		},
 		int((PageSize - uint32(RootPageConfigSize) -
@@ -229,7 +229,7 @@ func (g *dataGen) Row() Row {
 		{Value: int32(g.IntRange(18, 100)), Valid: true},
 		{Value: g.Bool(), Valid: true},
 		{Value: g.Float32(), Valid: true},
-		{Value: MustParseTimestamp(g.PastDate().Format(timestampFormat)), Valid: true},
+		{Value: MustParseTimestampMicros(g.PastDate().Format(timestampFormat)), Valid: true},
 	})
 }
 
@@ -283,7 +283,7 @@ func (g *dataGen) MediumRow() Row {
 		{Value: int32(g.IntRange(18, 100)), Valid: true},
 		{Value: g.Bool(), Valid: true},
 		{Value: g.Float32(), Valid: true},
-		{Value: MustParseTimestamp(g.PastDate().Format(timestampFormat)), Valid: true},
+		{Value: MustParseTimestampMicros(g.PastDate().Format(timestampFormat)), Valid: true},
 	})
 
 	for len(row.Values) < len(testMediumColumns) {
@@ -342,7 +342,7 @@ func (g *dataGen) BigRow() Row {
 		{Value: int32(g.IntRange(18, 100)), Valid: true},
 		{Value: g.Bool(), Valid: true},
 		{Value: g.Float32(), Valid: true},
-		{Value: MustParseTimestamp(g.PastDate().Format(timestampFormat)), Valid: true},
+		{Value: MustParseTimestampMicros(g.PastDate().Format(timestampFormat)), Valid: true},
 	})
 
 	for len(row.Values) < len(testBigColumns) {
@@ -528,7 +528,7 @@ func (g *dataGen) RowWithCompositeKey() Row {
 		{Value: NewTextPointer([]byte(g.FirstName())), Valid: true},
 		{Value: NewTextPointer([]byte(g.LastName())), Valid: true},
 		{Value: NewTextPointer([]byte(g.Email())), Valid: true},
-		{Value: MustParseTimestamp(g.PastDate().Format(timestampFormat)), Valid: true},
+		{Value: MustParseTimestampMicros(g.PastDate().Format(timestampFormat)), Valid: true},
 	})
 }
 

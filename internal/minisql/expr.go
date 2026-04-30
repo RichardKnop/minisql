@@ -246,8 +246,8 @@ func (e *Expr) Eval(row Row) (any, error) {
 		return nil, nil
 	}
 
-	// Timestamp ± Interval → Timestamp
-	if lt, lok := leftVal.(Time); lok {
+	// Timestamp ± Interval → Timestamp (stored as TimestampMicros)
+	if lt, lok := leftVal.(TimestampMicros); lok {
 		if ri, rok := rightVal.(Interval); rok {
 			if e.Op != ArithAdd && e.Op != ArithSub {
 				return nil, fmt.Errorf("operator %s is not defined for timestamp and interval", e.Op)
@@ -256,16 +256,16 @@ func (e *Expr) Eval(row Row) (any, error) {
 			if e.Op == ArithSub {
 				sign = -1
 			}
-			return lt.AddInterval(ri, sign), nil
+			return TimestampMicros(FromMicroseconds(int64(lt)).AddInterval(ri, sign).TotalMicroseconds()), nil
 		}
 	}
 	// Interval + Timestamp → Timestamp (addition is commutative)
 	if li, lok := leftVal.(Interval); lok {
-		if rt, rok := rightVal.(Time); rok {
+		if rt, rok := rightVal.(TimestampMicros); rok {
 			if e.Op != ArithAdd {
 				return nil, fmt.Errorf("operator %s is not defined for interval and timestamp", e.Op)
 			}
-			return rt.AddInterval(li, 1), nil
+			return TimestampMicros(FromMicroseconds(int64(rt)).AddInterval(li, 1).TotalMicroseconds()), nil
 		}
 	}
 	// Interval ± Interval → Interval
@@ -285,12 +285,12 @@ func (e *Expr) Eval(row Row) (any, error) {
 		}
 	}
 	// Timestamp - Timestamp → Interval (fixed-duration difference only)
-	if lt, lok := leftVal.(Time); lok {
-		if rt, rok := rightVal.(Time); rok {
+	if lt, lok := leftVal.(TimestampMicros); lok {
+		if rt, rok := rightVal.(TimestampMicros); rok {
 			if e.Op != ArithSub {
 				return nil, fmt.Errorf("operator %s is not defined for two timestamps", e.Op)
 			}
-			return Interval{Micros: lt.TotalMicroseconds() - rt.TotalMicroseconds()}, nil
+			return Interval{Micros: int64(lt) - int64(rt)}, nil
 		}
 	}
 
@@ -488,18 +488,18 @@ func castToTextPointer(v any) (TextPointer, error) {
 	}
 }
 
-func castToTimestamp(v any) (Time, error) {
+func castToTimestamp(v any) (TimestampMicros, error) {
 	switch n := v.(type) {
-	case Time:
+	case TimestampMicros:
 		return n, nil
 	case TextPointer:
 		t, err := ParseTimestamp(string(n.Data))
 		if err != nil {
-			return Time{}, fmt.Errorf("CAST: %w", err)
+			return 0, fmt.Errorf("CAST: %w", err)
 		}
-		return t, nil
+		return TimestampMicros(t.TotalMicroseconds()), nil
 	default:
-		return Time{}, fmt.Errorf("CAST: cannot convert %T to TIMESTAMP", v)
+		return 0, fmt.Errorf("CAST: cannot convert %T to TIMESTAMP", v)
 	}
 }
 
@@ -981,7 +981,7 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 			return nil, fmt.Errorf("NOW takes no arguments")
 		}
 		now := time.Now().UTC()
-		return Time{
+		return TimestampMicros(Time{
 			Year:         int32(now.Year()),
 			Month:        int8(now.Month()),
 			Day:          int8(now.Day()),
@@ -989,7 +989,7 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 			Minutes:      int8(now.Minute()),
 			Seconds:      int8(now.Second()),
 			Microseconds: int32(now.Nanosecond() / 1000),
-		}, nil
+		}.TotalMicroseconds()), nil
 
 	case "DATE_TRUNC":
 		if len(e.Args) != 2 {
@@ -1013,23 +1013,24 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 		if tsVal == nil {
 			return nil, nil
 		}
-		ts, ok := tsVal.(Time)
+		tsMicrosRaw, ok := tsVal.(TimestampMicros)
 		if !ok {
 			return nil, fmt.Errorf("DATE_TRUNC: second argument must be a timestamp, got %T", tsVal)
 		}
+		ts := FromMicroseconds(int64(tsMicrosRaw))
 		switch strings.ToLower(unit) {
 		case "year":
-			return Time{Year: ts.Year, Month: 1, Day: 1}, nil
+			return TimestampMicros(Time{Year: ts.Year, Month: 1, Day: 1}.TotalMicroseconds()), nil
 		case "month":
-			return Time{Year: ts.Year, Month: ts.Month, Day: 1}, nil
+			return TimestampMicros(Time{Year: ts.Year, Month: ts.Month, Day: 1}.TotalMicroseconds()), nil
 		case "day":
-			return Time{Year: ts.Year, Month: ts.Month, Day: ts.Day}, nil
+			return TimestampMicros(Time{Year: ts.Year, Month: ts.Month, Day: ts.Day}.TotalMicroseconds()), nil
 		case "hour":
-			return Time{Year: ts.Year, Month: ts.Month, Day: ts.Day, Hour: ts.Hour}, nil
+			return TimestampMicros(Time{Year: ts.Year, Month: ts.Month, Day: ts.Day, Hour: ts.Hour}.TotalMicroseconds()), nil
 		case "minute":
-			return Time{Year: ts.Year, Month: ts.Month, Day: ts.Day, Hour: ts.Hour, Minutes: ts.Minutes}, nil
+			return TimestampMicros(Time{Year: ts.Year, Month: ts.Month, Day: ts.Day, Hour: ts.Hour, Minutes: ts.Minutes}.TotalMicroseconds()), nil
 		case "second":
-			return Time{Year: ts.Year, Month: ts.Month, Day: ts.Day, Hour: ts.Hour, Minutes: ts.Minutes, Seconds: ts.Seconds}, nil
+			return TimestampMicros(Time{Year: ts.Year, Month: ts.Month, Day: ts.Day, Hour: ts.Hour, Minutes: ts.Minutes, Seconds: ts.Seconds}.TotalMicroseconds()), nil
 		default:
 			return nil, fmt.Errorf("DATE_TRUNC: unknown unit %q (want year/month/day/hour/minute/second)", unit)
 		}
@@ -1056,10 +1057,11 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 		if tsVal == nil {
 			return nil, nil
 		}
-		ts, ok := tsVal.(Time)
+		tsMicrosRaw, ok := tsVal.(TimestampMicros)
 		if !ok {
 			return nil, fmt.Errorf("%s: second argument must be a timestamp, got %T", e.FuncName, tsVal)
 		}
+		ts := FromMicroseconds(int64(tsMicrosRaw))
 		switch strings.ToLower(field) {
 		case "year":
 			return int64(ts.Year), nil
@@ -1076,7 +1078,7 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 		case "microsecond":
 			return int64(ts.Microseconds), nil
 		case "epoch":
-			return ts.TotalMicroseconds() / microsecondsInSecond, nil
+			return int64(tsMicrosRaw) / microsecondsInSecond, nil
 		default:
 			return nil, fmt.Errorf("%s: unknown field %q (want year/month/day/hour/minute/second/microsecond/epoch)", e.FuncName, field)
 		}
@@ -1100,7 +1102,7 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 		if err != nil {
 			return nil, fmt.Errorf("TO_TIMESTAMP: %w", err)
 		}
-		return t, nil
+		return TimestampMicros(t.TotalMicroseconds()), nil
 
 	default:
 		return nil, fmt.Errorf("unknown function %q", e.FuncName)

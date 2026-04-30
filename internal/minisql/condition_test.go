@@ -1412,15 +1412,15 @@ func TestIsBetweenDouble(t *testing.T) {
 func TestIsBetweenTimestamp(t *testing.T) {
 	t.Parallel()
 
-	t1 := MustParseTimestamp("2020-01-01 00:00:00")
-	t2 := MustParseTimestamp("2021-06-15 12:00:00")
-	t3 := MustParseTimestamp("2022-12-31 23:59:59")
+	t1 := MustParseTimestampMicros("2020-01-01 00:00:00")
+	t2 := MustParseTimestampMicros("2021-06-15 12:00:00")
+	t3 := MustParseTimestampMicros("2022-12-31 23:59:59")
 
 	tests := []struct {
 		name  string
-		value Time
-		low   Time
-		high  Time
+		value TimestampMicros
+		low   TimestampMicros
+		high  TimestampMicros
 		want  bool
 	}{
 		{"value in range", t2, t1, t3, true},
@@ -1534,9 +1534,9 @@ func TestIsInListDouble(t *testing.T) {
 func TestIsInListTimestamp(t *testing.T) {
 	t.Parallel()
 
-	t1 := MustParseTimestamp("2020-01-01 00:00:00")
-	t2 := MustParseTimestamp("2021-06-15 12:00:00")
-	t3 := MustParseTimestamp("2022-12-31 23:59:59")
+	t1 := MustParseTimestampMicros("2020-01-01 00:00:00")
+	t2 := MustParseTimestampMicros("2021-06-15 12:00:00")
+	t3 := MustParseTimestampMicros("2022-12-31 23:59:59")
 
 	tests := []struct {
 		value   any
@@ -1568,9 +1568,9 @@ func TestIsInListTimestamp(t *testing.T) {
 func TestCompareTimestamp(t *testing.T) {
 	t.Parallel()
 
-	t1 := MustParseTimestamp("2020-01-01 00:00:00")
-	t2 := MustParseTimestamp("2021-06-15 12:00:00")
-	t3 := MustParseTimestamp("2021-06-15 12:00:00")
+	t1 := MustParseTimestampMicros("2020-01-01 00:00:00")
+	t2 := MustParseTimestampMicros("2021-06-15 12:00:00")
+	t3 := MustParseTimestampMicros("2021-06-15 12:00:00")
 
 	tests := []struct {
 		a        any

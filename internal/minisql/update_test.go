@@ -75,7 +75,7 @@ func TestTable_Update(t *testing.T) {
 			Kind: Update,
 			Updates: map[string]OptionalValue{
 				"email":   {Value: NewTextPointer([]byte("updatedsingle@foo.bar")), Valid: true},
-				"created": {Value: MustParseTimestamp("2000-01-01 00:00:00"), Valid: true},
+				"created": {Value: MustParseTimestampMicros("2000-01-01 00:00:00"), Valid: true},
 			},
 			Conditions: OneOrMore{
 				{
@@ -99,7 +99,7 @@ func TestTable_Update(t *testing.T) {
 			expectedRow := row.Clone()
 			if i == 5 {
 				expectedRow, _ = expectedRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("updatedsingle@foo.bar")), Valid: true})
-				expectedRow, _ = expectedRow.SetValue("created", OptionalValue{Value: MustParseTimestamp("2000-01-01 00:00:00"), Valid: true})
+				expectedRow, _ = expectedRow.SetValue("created", OptionalValue{Value: MustParseTimestampMicros("2000-01-01 00:00:00"), Valid: true})
 				rows[i] = expectedRow
 			}
 
