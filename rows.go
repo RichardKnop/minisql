@@ -63,8 +63,8 @@ func (r Rows) Next(dest []driver.Value) error {
 		switch v := aRow.Values[i].Value.(type) {
 		case minisql.TextPointer:
 			dest[i] = string(v.Data)
-		case minisql.Time:
-			dest[i] = v.GoTime()
+		case minisql.TimestampMicros:
+			dest[i] = minisql.FromMicroseconds(int64(v)).GoTime()
 		default:
 			dest[i] = aRow.Values[i].Value
 		}

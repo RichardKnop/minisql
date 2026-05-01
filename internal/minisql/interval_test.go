@@ -203,8 +203,8 @@ func TestAddInterval_Compound(t *testing.T) {
 func TestExpr_TimestampMinusTimestamp(t *testing.T) {
 	t.Parallel()
 
-	ts1 := MustParseTimestamp("2024-01-04 00:00:00")
-	ts2 := MustParseTimestamp("2024-01-01 00:00:00")
+	ts1 := MustParseTimestampMicros("2024-01-04 00:00:00")
+	ts2 := MustParseTimestampMicros("2024-01-01 00:00:00")
 	expr := &Expr{
 		Left:  &Expr{Literal: ts1},
 		Right: &Expr{Literal: ts2},

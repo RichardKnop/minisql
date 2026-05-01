@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+// TimestampMicros is the in-memory representation of a TIMESTAMP column value.
+// It stores microseconds since 2000-01-01 00:00:00 UTC as a named int64 so
+// that it is distinguishable from numeric int64 values in type switches, while
+// still fitting inline in an any interface word — no heap allocation.
+type TimestampMicros int64
+
 const (
 	timestampFormat = "2006-01-02 15:04:05.999999"
 	// 2024-06-15 12:34:56
@@ -181,6 +187,11 @@ func MustParseTimestamp(timestampStr string) Time {
 		panic(err)
 	}
 	return t
+}
+
+// MustParseTimestampMicros parses a timestamp string into a TimestampMicros and panics on error.
+func MustParseTimestampMicros(timestampStr string) TimestampMicros {
+	return TimestampMicros(MustParseTimestamp(timestampStr).TotalMicroseconds())
 }
 
 // ParseTimestamp parses a PostgreSQL-style timestamp string into a Time value.

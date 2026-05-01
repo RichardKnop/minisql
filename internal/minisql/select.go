@@ -1159,8 +1159,6 @@ func (r Row) rowDistinctKey() string {
 		switch val := v.Value.(type) {
 		case TextPointer:
 			fmt.Fprintf(&b, "t%d:%s", val.Length, val.String())
-		case Time:
-			fmt.Fprintf(&b, "ts:%d", val.Microseconds)
 		case bool:
 			fmt.Fprintf(&b, "b:%t", val)
 		case int64:

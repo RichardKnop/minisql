@@ -113,10 +113,10 @@ func TestCompareAny(t *testing.T) {
 		assert.Equal(t, 1, compareAny(world, hello1))
 	})
 
-	t.Run("Time", func(t *testing.T) {
+	t.Run("TimestampMicros", func(t *testing.T) {
 		t.Parallel()
-		t1 := MustParseTimestamp("2020-01-01 00:00:00")
-		t2 := MustParseTimestamp("2021-01-01 00:00:00")
+		t1 := MustParseTimestampMicros("2020-01-01 00:00:00")
+		t2 := MustParseTimestampMicros("2021-01-01 00:00:00")
 		assert.Equal(t, 0, compareAny(t1, t1))
 		assert.Equal(t, -1, compareAny(t1, t2))
 		assert.Equal(t, 1, compareAny(t2, t1))

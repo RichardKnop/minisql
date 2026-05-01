@@ -275,11 +275,11 @@ func castKeyValue(col Column, val any) (any, error) {
 		}
 		return tp.String(), nil
 	case Timestamp:
-		timestamp, ok := val.(Time)
+		micros, ok := val.(TimestampMicros)
 		if !ok {
-			return nil, fmt.Errorf("could not cast value for column %s to Time", col.Name)
+			return nil, fmt.Errorf("could not cast value for column %s to timestamp", col.Name)
 		}
-		return timestamp.TotalMicroseconds(), nil
+		return int64(micros), nil
 	default:
 		return val, nil
 	}

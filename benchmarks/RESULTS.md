@@ -1,4 +1,49 @@
-### 2026-04-26 (biased leaf splits for sequential inserts — latest)
+### 2026-04-29 (TimestampMicros named-type refactor — latest)
+
+`type TimestampMicros int64` replaces `Time` (13-byte struct) as the in-memory representation for all TIMESTAMP column values:
+- A 13-byte `Time` struct boxed into `any` always requires a separate heap allocation (the struct exceeds the 8-byte inline data word). `TimestampMicros` is a named `int64` — 8 bytes, stores inline in the `any` data word with zero extra allocation.
+- The named type is distinct from bare `int64` in type switches, so timestamp arithmetic in `expr.go` (`DATE_TRUNC`, `EXTRACT`, interval math) can still dispatch correctly.
+- All internal paths (`row.go` marshal/unmarshal, `condition.go` comparisons, `stmt.go` parsing, `table_primary_key.go` index key casting) operate on `int64` directly; conversion to `Time` happens only at output boundaries (`rows.go` driver → `time.Time`, DDL string rendering).
+- The benchmark table (`bench_rows`) has no TIMESTAMP columns, so the allocation saving is not reflected in these numbers. Impact is measurable in workloads with TIMESTAMP columns — one fewer heap allocation per TIMESTAMP value per row scanned.
+- Timing differences vs the previous entry are within machine run-to-run variance (the M1 Max exhibits thermal variance of ±15% on short write-path benchmarks across separate runs). Delete_ByPK shows higher variance than usual; no code path touched by this refactor affects the delete benchmark.
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| **Delete_ByPK** | **38.7 µs/op** | **72.2 µs/op** | **0.54×** |
+| **Insert_SingleRow** | **19.9 µs/op** | **43.0 µs/op** | **0.46×** |
+| **Insert_Batch** | **334.5 µs/op** | **247.7 µs/op** | **1.35×** |
+| **Insert_PreparedBatch** | **344.9 µs/op** | **254.8 µs/op** | **1.35×** |
+| **Insert_MultiValues** | **238.6 µs/op** | **198.6 µs/op** | **1.20×** |
+| Select_PointScan | 4.39 µs/op | 3.34 µs/op | 1.31× |
+| **Select_Limit** | **7.36 µs/op** | **8.00 µs/op** | **0.92×** |
+| **Select_FullScan** | **4.75 ms/op** | **5.05 ms/op** | **0.94×** |
+| Select_CountStar | 17.4 µs/op | 9.67 µs/op | 1.80× |
+| **Select_IndexRangeScan** | **715.6 µs/op** | **752.7 µs/op** | **0.95×** |
+| Select_RangeScan | 1.68 ms/op | 885.7 µs/op | 1.90× |
+| **Update_ByPK** | **11.8 µs/op** | **38.8 µs/op** | **0.30×** |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 32.7 KiB | 447 B |
+| Insert_SingleRow | 18.6 KiB | 311 B |
+| Insert_Batch | 301.6 KiB | 31.0 KiB |
+| Insert_PreparedBatch | 301.2 KiB | 31.0 KiB |
+| Insert_MultiValues | 268.2 KiB | 25.2 KiB |
+| Select_PointScan | 4.6 KiB | 679 B |
+| Select_Limit | 6.1 KiB | 1.7 KiB |
+| Select_FullScan | 5.3 MiB | 1.3 MiB |
+| Select_CountStar | 6.0 KiB | 400 B |
+| Select_IndexRangeScan | 738.5 KiB | 85.9 KiB |
+| Select_RangeScan | 1.6 MiB | 85.9 KiB |
+| Update_ByPK | 8.4 KiB | 263 B |
+
+---
+
+### 2026-04-26 (biased leaf splits for sequential inserts — previous)
 
 Three changes in this entry:
 

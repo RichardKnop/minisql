@@ -623,12 +623,12 @@ func (s Statement) prepareCreateTable() (Statement, error) {
 			continue
 		}
 		if col.Kind == Timestamp {
-			// If this is already a Time, accept it as is
-			_, ok := col.DefaultValue.Value.(Time)
+			// If this is already a TimestampMicros value, accept it as is
+			_, ok := col.DefaultValue.Value.(TimestampMicros)
 			if ok {
 				return s, nil
 			}
-			// Otherwise, validate and transform to Time
+			// Otherwise, validate and transform TextPointer → TimestampMicros
 			_, ok = col.DefaultValue.Value.(TextPointer)
 			if !ok {
 				return s, fmt.Errorf("default value '%s' is not a valid TextPointer", col.DefaultValue.Value)
@@ -637,7 +637,7 @@ func (s Statement) prepareCreateTable() (Statement, error) {
 			if err != nil {
 				return s, fmt.Errorf("default value '%s' is not a valid timestamp: %w", col.DefaultValue.Value, err)
 			}
-			col.DefaultValue.Value = timestamp
+			col.DefaultValue.Value = TimestampMicros(timestamp.TotalMicroseconds())
 			s.Columns[i] = col
 		}
 
@@ -708,7 +708,7 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 				if col.DefaultValue.Valid {
 					val = col.DefaultValue
 				} else if col.DefaultValueNow {
-					val = OptionalValue{Valid: true, Value: now}
+					val = OptionalValue{Valid: true, Value: TimestampMicros(now.TotalMicroseconds())}
 				}
 				newRow[i] = val
 				continue
@@ -717,7 +717,7 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 			if val.Valid {
 				if fn, ok := val.Value.(Function); ok {
 					if fn.Name == FunctionNow.Name {
-						val.Value = now
+						val.Value = TimestampMicros(now.TotalMicroseconds())
 					} else {
 						return Statement{}, fmt.Errorf("unsupported function %q in INSERT", fn.Name)
 					}
@@ -749,7 +749,7 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 				if fn.Name != FunctionNow.Name {
 					return Statement{}, fmt.Errorf("unsupported function %q in ON CONFLICT DO UPDATE", fn.Name)
 				}
-				val.Value = now
+				val.Value = TimestampMicros(now.TotalMicroseconds())
 				s.Updates[name] = val
 				continue
 			}
@@ -797,7 +797,7 @@ func (s Statement) prepareUpdate(now Time) (Statement, error) {
 
 		if fn, ok := updateValue.Value.(Function); ok {
 			if fn.Name == FunctionNow.Name {
-				updateValue.Value = now
+				updateValue.Value = TimestampMicros(now.TotalMicroseconds())
 				s.Updates[name] = updateValue
 			} else {
 				return Statement{}, fmt.Errorf("unsupported function %q in UPDATE", fn.Name)
@@ -865,20 +865,19 @@ func (s Statement) prepareWhere() (Statement, error) {
 	return s, nil
 }
 
-func parseTimeValue(value any) (Time, error) {
-	_, ok := value.(Time)
-	if ok {
-		return value.(Time), nil
+func parseTimeValue(value any) (TimestampMicros, error) {
+	if micros, ok := value.(TimestampMicros); ok {
+		return micros, nil
 	}
 	tp, ok := value.(TextPointer)
 	if !ok {
-		return Time{}, errors.New("timestamp field expects TextPointer value")
+		return 0, errors.New("timestamp field expects TextPointer value")
 	}
 	timestamp, err := ParseTimestamp(tp.String())
 	if err != nil {
-		return Time{}, fmt.Errorf("invalid timestamp format for field: %w", err)
+		return 0, fmt.Errorf("invalid timestamp format for field: %w", err)
 	}
-	return timestamp, nil
+	return TimestampMicros(timestamp.TotalMicroseconds()), nil
 }
 
 // Validate ...
@@ -1449,9 +1448,9 @@ func isValueValidForColumn(col Column, val OptionalValue) error {
 			return fmt.Errorf("expects valid UTF-8 string for %q", col.Name)
 		}
 	case Timestamp:
-		_, ok := val.Value.(Time)
+		_, ok := val.Value.(TimestampMicros)
 		if !ok {
-			return fmt.Errorf("expects time value for %q", col.Name)
+			return fmt.Errorf("expects timestamp value for %q", col.Name)
 		}
 	}
 	return nil
@@ -1585,7 +1584,7 @@ func (s Statement) createTableDDL() string {
 				case Varchar, Text:
 					fmt.Fprintf(&sb, " default '%s'", col.DefaultValue.Value.(TextPointer).String())
 				case Timestamp:
-					fmt.Fprintf(&sb, " default '%s'", col.DefaultValue.Value.(Time).String())
+					fmt.Fprintf(&sb, " default '%s'", FromMicroseconds(int64(col.DefaultValue.Value.(TimestampMicros))).String())
 				}
 			}
 		}

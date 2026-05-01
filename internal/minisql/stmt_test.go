@@ -204,7 +204,7 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 		assert.Equal(t, [][]OptionalValue{
 			{
 				{
-					Value: now,
+					Value: TimestampMicros(now.TotalMicroseconds()),
 					Valid: true,
 				},
 			},
@@ -240,7 +240,7 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 		assert.Equal(t, [][]OptionalValue{
 			{
 				{
-					Value: now,
+					Value: TimestampMicros(now.TotalMicroseconds()),
 					Valid: true,
 				},
 			},
@@ -283,7 +283,7 @@ func TestStatement_Prepare_Update(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, OptionalValue{
-			Value: now,
+			Value: TimestampMicros(now.TotalMicroseconds()),
 			Valid: true,
 		}, stmt.Updates["created"])
 	})
@@ -332,7 +332,7 @@ func TestStatement_Prepare_Update(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, OptionalValue{
-			Value: now,
+			Value: TimestampMicros(now.TotalMicroseconds()),
 			Valid: true,
 		}, stmt.Updates["created"])
 	})
@@ -362,16 +362,16 @@ func TestStatement_Prepare_CreateTable(t *testing.T) {
 		}
 	)
 
-	_, ok := stmt.Columns[1].DefaultValue.Value.(Time)
+	_, ok := stmt.Columns[1].DefaultValue.Value.(TimestampMicros)
 	assert.False(t, ok)
 
 	var err error
 	stmt, err = stmt.Prepare(Time{})
 	require.NoError(t, err)
 
-	_, ok = stmt.Columns[1].DefaultValue.Value.(Time)
-	assert.True(t, ok, "expected default value for 'created' column to be Time")
-	assert.Equal(t, MustParseTimestamp("0001-01-01 00:00:00"), stmt.Columns[1].DefaultValue.Value)
+	_, ok = stmt.Columns[1].DefaultValue.Value.(TimestampMicros)
+	assert.True(t, ok, "expected default value for 'created' column to be TimestampMicros")
+	assert.Equal(t, MustParseTimestampMicros("0001-01-01 00:00:00"), stmt.Columns[1].DefaultValue.Value)
 }
 
 func TestStatement_Validate(t *testing.T) {
@@ -1453,12 +1453,12 @@ func TestStatement_ValidateColumnValue(t *testing.T) {
 			"invalid TIMESTAMP value",
 			Column{Kind: Timestamp, Name: "foo"},
 			OptionalValue{Value: int32(25), Valid: true},
-			`expects time value for "foo"`,
+			`expects timestamp value for "foo"`,
 		},
 		{
 			"valid TIMESTAMP value",
 			Column{Kind: Timestamp, Name: "foo"},
-			OptionalValue{Value: MustParseTimestamp("2000-01-01 00:00:00"), Valid: true},
+			OptionalValue{Value: MustParseTimestampMicros("2000-01-01 00:00:00"), Valid: true},
 			"",
 		},
 	}
@@ -1897,8 +1897,8 @@ func TestStatement_PrepareWhere(t *testing.T) {
 		}
 		result, err := stmt.prepareWhere()
 		require.NoError(t, err)
-		_, ok := result.Conditions[0][0].Operand2.Value.(Time)
-		assert.True(t, ok, "expected Time value after prepareWhere")
+		_, ok := result.Conditions[0][0].Operand2.Value.(TimestampMicros)
+		assert.True(t, ok, "expected TimestampMicros value after prepareWhere")
 	})
 
 	t.Run("unknown field returns error", func(t *testing.T) {

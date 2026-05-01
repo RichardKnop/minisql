@@ -294,11 +294,11 @@ func (r Row) Marshal() ([]byte, error) {
 			}
 			offset += textPointer.Size()
 		case Timestamp:
-			value, ok := r.Values[i].Value.(Time)
+			value, ok := r.Values[i].Value.(TimestampMicros)
 			if !ok {
-				return nil, fmt.Errorf("could not cast value for column %s to time", col.Name)
+				return nil, fmt.Errorf("could not cast value for column %s to timestamp", col.Name)
 			}
-			marshalInt64(buf, value.TotalMicroseconds(), offset)
+			marshalInt64(buf, int64(value), offset)
 			offset += 8
 		}
 	}
@@ -378,7 +378,7 @@ func (r Row) UnmarshalWithMask(cell Cell, selectedMask []bool) (Row, error) {
 			r.Values[i] = OptionalValue{Value: textPointer, Valid: true}
 		case Timestamp:
 			value := unmarshalInt64(cell.Value, uint64(offset))
-			r.Values[i] = OptionalValue{Value: FromMicroseconds(int64(value)), Valid: true}
+			r.Values[i] = OptionalValue{Value: TimestampMicros(value), Valid: true}
 			offset += 8
 		}
 	}

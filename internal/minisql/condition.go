@@ -548,27 +548,27 @@ func compareText(value1, value2 any, operator Operator) (bool, error) {
 }
 
 func compareTimestamp(value1, value2 any, operator Operator) (bool, error) {
-	theValue1, ok := value1.(Time)
+	theValue1, ok := value1.(TimestampMicros)
 	if !ok {
-		return false, fmt.Errorf("value '%v' cannot be cast as Time", value1)
+		return false, fmt.Errorf("value '%v' cannot be cast as TimestampMicros", value1)
 	}
-	theValue2, ok := value2.(Time)
+	theValue2, ok := value2.(TimestampMicros)
 	if !ok {
-		return false, fmt.Errorf("operand value '%v' cannot be cast as Time", value2)
+		return false, fmt.Errorf("operand value '%v' cannot be cast as TimestampMicros", value2)
 	}
 	switch operator {
 	case Eq:
-		return theValue1.TotalMicroseconds() == theValue2.TotalMicroseconds(), nil
+		return theValue1 == theValue2, nil
 	case Ne:
-		return theValue1.TotalMicroseconds() != theValue2.TotalMicroseconds(), nil
+		return theValue1 != theValue2, nil
 	case Gt:
-		return theValue1.TotalMicroseconds() > theValue2.TotalMicroseconds(), nil
+		return theValue1 > theValue2, nil
 	case Lt:
-		return theValue1.TotalMicroseconds() < theValue2.TotalMicroseconds(), nil
+		return theValue1 < theValue2, nil
 	case Gte:
-		return theValue1.TotalMicroseconds() >= theValue2.TotalMicroseconds(), nil
+		return theValue1 >= theValue2, nil
 	case Lte:
-		return theValue1.TotalMicroseconds() <= theValue2.TotalMicroseconds(), nil
+		return theValue1 <= theValue2, nil
 	}
 	return false, fmt.Errorf("unknown operator '%s'", operator)
 }
@@ -679,9 +679,9 @@ func isInListText(value, list any) (bool, error) {
 }
 
 func isInListTimestamp(value, list any) (bool, error) {
-	_, ok := value.(Time)
+	_, ok := value.(TimestampMicros)
 	if !ok {
-		return false, fmt.Errorf("value '%v' cannot be cast as Time", value)
+		return false, fmt.Errorf("value '%v' cannot be cast as TimestampMicros", value)
 	}
 	theList, ok := list.([]any)
 	if !ok {
