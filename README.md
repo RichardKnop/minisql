@@ -348,7 +348,7 @@ Important behavior and current non-goals:
 | `ON CONFLICT` | Both `DO NOTHING` and `DO UPDATE` supported (with `EXCLUDED` pseudo table syntax for updating) |
 | `SELECT` | All fields with `*`, specific fields, or row count with `COUNT(*)` |
 | `SELECT DISTINCT` | |
-| `JOIN` | `INNER`, `LEFT` and `RIGHT` joins supported. Star schema only — one or more tables joined with the base table |
+| `JOIN` | `INNER`, `LEFT` and `RIGHT` joins supported |
 | `UPDATE` | |
 | `DELETE` | |
 | `WHERE` | Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`, `LIKE`, `NOT LIKE`, `BETWEEN` |
