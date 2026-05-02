@@ -3,7 +3,15 @@
 [![CI Status](https://github.com/RichardKnop/minisql/actions/workflows/go.yml/badge.svg)](https://github.com/RichardKnop/minisql/actions/workflows/go.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/RichardKnop/minisql)](https://goreportcard.com/report/github.com/RichardKnop/minisql)
 
-`MiniSQL` is an embedded single file database written in Golang, inspired by `SQLite` (however borrowing some features from other databases as well). It originally started as a research project aimed at learning about internals of relational databases. Over time it has progressed and grown to its current form. It is a very early stage project and it might contain bugs and is not battle tested. Please employ caution when using this database.
+`MiniSQL` is an embedded single file database written in Golang, inspired by `SQLite`. It is not a clone of `SQLite` in Go, it is an alternative solution which borrows ideas from other databases as well. It can differentiate itself from `SQLite` in several areas: 
+
+1. **Pure Go, zero CGO** — already a differentiator.
+2. **MVCC snapshot isolation** — true MVCC for reads already implemented.
+3. **Parallel query execution** — SQLite is single-threaded; MiniSQL can parallelize full table scans.
+4. **Modern API surface** — idiomatic Go, context-aware, `database/sql` compatible.
+5. **JSON as a first-class type** — native JSONB (not an extension) - not implemented yet.
+
+This is an early stage project and it might contain bugs and is not battle tested. Please employ caution when using this database.
 
 [![Donate Bitcoin](https://img.shields.io/badge/donate-bitcoin-orange.svg)](https://richardknop.github.io/donate/)
 
@@ -30,19 +38,10 @@ db, err := sql.Open("minisql", "./my.db?log_level=debug&max_cached_pages=500")
 
 ## Connection Pooling
 
-**MiniSQL is an embedded, single-file database (like SQLite).** Always configure your connection pool to use a single connection and serialize all writes through it.
+**MiniSQL is an embedded, single-file database (similar to SQLite).** However, it can support multiple connections for reads so it is not necessary to set max connections to 1, it depends on your workloads:
 
-```go
-db.SetMaxOpenConns(1)
-db.SetMaxIdleConns(1)
-```
-
-**Why?** Multiple connections to the same file cause:
-- Lock contention at the OS level
-- Connection pool overhead (97% lock time in benchmarks)
-- No performance benefit (writes are serialized anyway)
-
-This is the same recommendation as SQLite.
+- Write-heavy workloads: SetMaxOpenConns(1) still makes sense — writes serialize internally on dbLock anyway, multiple connections just add OCC conflict noise without throughput gain.                                                                                              
+ - Read-heavy or mixed workloads: multiple connections are beneficial — read-only transactions run concurrently via MVCC snapshot isolation without holding the database lock.
 
 ## Connection String Parameters
 
