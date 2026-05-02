@@ -19,112 +19,134 @@ func chanRowCallback(ctx context.Context, ch chan<- Row) func(Row) error {
 	}
 }
 
-// planJoinQuery creates an optimized query plan for JOINs
-// (supports star schema: multiple tables joining to base table)
+// planJoinQuery creates an optimized query plan for JOINs.
+// Supports arbitrary join topologies (star schema, chain joins, and mixed).
 // Optimizations:
-// 1. Choose smaller table as outer table to minimize inner scans
-// 2. Use index on inner table join column when available (index nested loop join)
-// For star schema, the base table is scanned once, and each joined table is optimized independently
+// 1. Use index on inner table join column when available (index nested loop join).
+// 2. Push single-table WHERE conditions into individual table scans.
 func (t *Table) planJoinQuery(ctx context.Context, stmt Statement) (QueryPlan, error) {
-	// Push down WHERE conditions to individual table scans
 	baseTableFilters, joinTableFilters := pushDownFilters(stmt.Conditions, stmt.TableAlias, stmt.Joins)
 
-	// Initialize plan with base table scan
 	plan := QueryPlan{
 		Scans: []Scan{{
 			TableName:  t.Name,
 			TableAlias: stmt.TableAlias,
-			Type:       ScanTypeSequential, // Base table is always scanned sequentially
+			Type:       ScanTypeSequential,
 			Filters:    baseTableFilters,
 		}},
-		Joins:        make([]JoinPlan, 0, len(stmt.Joins)),
+		Joins:        make([]JoinPlan, 0),
 		OrderBy:      stmt.OrderBy,
-		SortInMemory: len(stmt.OrderBy) > 0, // Always sort in memory for JOINs with ORDER BY
+		SortInMemory: len(stmt.OrderBy) > 0,
 	}
 
-	// Process each join independently (star schema: all join to base table)
-	for _, join := range stmt.Joins {
-		// Get the joined table
+	// scanIndexByAlias maps each table alias to its scan slot index.
+	// Used to resolve LeftScanIndex for arbitrary join topologies.
+	scanIndexByAlias := map[string]int{stmt.TableAlias: 0}
+
+	if err := t.flattenJoinTree(ctx, &plan, stmt.Joins, scanIndexByAlias, joinTableFilters); err != nil {
+		return QueryPlan{}, err
+	}
+
+	return plan, nil
+}
+
+// flattenJoinTree recursively walks the join tree in DFS order and appends one
+// Scan and one JoinPlan entry per join node. LeftScanIndex is set to the scan
+// slot of the table the join is FROM (resolved via scanIndexByAlias), so chain
+// joins (a→b→c) produce correct LeftScanIndex values instead of always 0.
+func (t *Table) flattenJoinTree(
+	ctx context.Context,
+	plan *QueryPlan,
+	joins []Join,
+	scanIndexByAlias map[string]int,
+	joinTableFilters map[string]OneOrMore,
+) error {
+	for _, join := range joins {
+		fromAlias := join.FromTableAlias()
+		leftScanIndex, ok := scanIndexByAlias[fromAlias]
+		if !ok {
+			return fmt.Errorf("join references unknown table alias %q", fromAlias)
+		}
+
+		// Resolve the table on the left (from) side for column validation.
+		var fromTable *Table
+		fromScan := plan.Scans[leftScanIndex]
+		if leftScanIndex == 0 {
+			fromTable = t
+		} else {
+			fromTable, ok = t.provider.GetTable(ctx, fromScan.TableName)
+			if !ok {
+				return fmt.Errorf("%w: %s", errTableDoesNotExist, fromScan.TableName)
+			}
+		}
+
 		joinedTable, ok := t.provider.GetTable(ctx, join.TableName)
 		if !ok {
-			return QueryPlan{}, fmt.Errorf("%w: %s", errTableDoesNotExist, join.TableName)
+			return fmt.Errorf("%w: %s", errTableDoesNotExist, join.TableName)
 		}
 
-		// Extract join column pairs from ON conditions
-		// This now supports multiple conditions like: ON b.a_id = a.id AND b.other_id = a.other_id
 		joinColumnPairs, err := extractJoinColumnPairs(
 			join.Conditions,
-			stmt.TableAlias,
+			fromAlias,
 			join.TableAlias,
-			t,           // base table for validation
-			joinedTable, // join table for validation
+			fromTable,
+			joinedTable,
 		)
 		if err != nil {
-			return QueryPlan{}, err
+			return err
 		}
 
-		// Extract column names for index lookup
 		joinTableColumns := make([]string, len(joinColumnPairs))
 		for i, pair := range joinColumnPairs {
 			joinTableColumns[i] = pair.JoinTableColumn.Name
 		}
 
-		// Check for index on joined table's join columns
-		// This supports both single column and composite indexes
 		joinTableIndex := joinedTable.findIndexOnColumns(joinTableColumns)
 
-		// Determine scan strategy for this join
-		// For star schema, base table is always outer (left), joined tables are inner (right)
-		// We can optimize by using index on joined table if available
 		var (
 			innerScanType  ScanType
 			innerIndexInfo *IndexInfo
 		)
-
 		if joinTableIndex != nil {
-			// Joined table has index on join columns - use index nested loop join
 			innerScanType = ScanTypeIndexPoint
 			innerIndexInfo = joinTableIndex
 		} else {
-			// No index available - use sequential scan
 			innerScanType = ScanTypeSequential
 		}
 
-		// Create scan for joined table
 		joinScan := Scan{
 			TableName:  join.TableName,
 			TableAlias: join.TableAlias,
 			Type:       innerScanType,
 			Filters:    joinTableFilters[join.TableAlias],
 		}
-
-		// For index scan, set up the index info
 		if innerScanType == ScanTypeIndexPoint && innerIndexInfo != nil {
 			joinScan.IndexName = innerIndexInfo.Name
 			joinScan.IndexColumns = innerIndexInfo.Columns
-			// The actual key value (joinScan.IndexKeys) will be set at execution time
 		}
 
-		// Add scan to plan
 		plan.Scans = append(plan.Scans, joinScan)
+		rightScanIndex := len(plan.Scans) - 1
+		scanIndexByAlias[join.TableAlias] = rightScanIndex
 
-		// Create join plan entry
-		// In star schema, left side is always the base table (scan index 0)
-		// Right side is the current joined table
-		// For backward compatibility and index lookup, we use the first pair's columns
-		// The full Conditions will still be evaluated during join execution
 		plan.Joins = append(plan.Joins, JoinPlan{
 			Type:            join.Type,
-			LeftScanIndex:   0, // Base table is always scan index 0
-			RightScanIndex:  len(plan.Scans) - 1,
+			LeftScanIndex:   leftScanIndex,
+			RightScanIndex:  rightScanIndex,
 			Conditions:      join.Conditions,
 			OuterJoinColumn: joinColumnPairs[0].BaseTableColumn.Name,
 			InnerJoinColumn: joinColumnPairs[0].JoinTableColumn.Name,
-			JoinColumnPairs: joinColumnPairs, // Store all pairs for composite key support
+			JoinColumnPairs: joinColumnPairs,
 		})
-	}
 
-	return plan, nil
+		// Recurse for joins that hang off this join (chain joins).
+		if len(join.Joins) > 0 {
+			if err := t.flattenJoinTree(ctx, plan, join.Joins, scanIndexByAlias, joinTableFilters); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // extractJoinColumnPairs extracts all column pairs from JOIN ON conditions
@@ -236,49 +258,51 @@ func (t *Table) findIndexOnColumns(columnNames []string) *IndexInfo {
 	return nil
 }
 
-// pushDownFilters separates WHERE conditions by table alias, pushing filters to appropriate scans
-func pushDownFilters(conditions OneOrMore, baseTableAlias string, joins []Join) (OneOrMore, map[string]OneOrMore) {
-	var (
-		baseFilters = OneOrMore{}
-		joinFilters = make(map[string]OneOrMore)
-	)
+// collectJoinAliases recursively gathers every table alias from a join tree into dst.
+func collectJoinAliases(joins []Join, dst map[string]struct{}) {
+	for _, j := range joins {
+		dst[j.TableAlias] = struct{}{}
+		collectJoinAliases(j.Joins, dst)
+	}
+}
 
-	// Initialize map for each joined table
-	for _, join := range joins {
-		joinFilters[join.TableAlias] = OneOrMore{}
+// pushDownFilters separates WHERE conditions by table alias, pushing filters to
+// the appropriate per-table scan. Handles arbitrary join topologies by collecting
+// all join aliases recursively before distributing conditions.
+func pushDownFilters(conditions OneOrMore, baseTableAlias string, joins []Join) (OneOrMore, map[string]OneOrMore) {
+	allJoinAliases := make(map[string]struct{})
+	collectJoinAliases(joins, allJoinAliases)
+
+	baseFilters := OneOrMore{}
+	joinFilters := make(map[string]OneOrMore, len(allJoinAliases))
+	for alias := range allJoinAliases {
+		joinFilters[alias] = OneOrMore{}
 	}
 
-	// Distribute conditions to appropriate tables, preserving OR group structure
 	for _, group := range conditions {
-		// Create new groups for each table
 		baseGroup := Conditions{}
-		joinGroups := make(map[string]Conditions)
-		for _, join := range joins {
-			joinGroups[join.TableAlias] = Conditions{}
+		joinGroups := make(map[string]Conditions, len(allJoinAliases))
+		for alias := range allJoinAliases {
+			joinGroups[alias] = Conditions{}
 		}
 
-		// Distribute conditions within this group
 		for _, condition := range group {
-			// Check which table this condition belongs to
-			tableAlias := getConditionTableAlias(condition, baseTableAlias, joins)
-
+			tableAlias := getConditionTableAlias(condition, baseTableAlias, allJoinAliases)
 			if tableAlias == baseTableAlias {
 				baseGroup = append(baseGroup, condition)
 			} else if _, exists := joinGroups[tableAlias]; exists {
 				joinGroups[tableAlias] = append(joinGroups[tableAlias], condition)
 			} else {
-				// Cross-table condition or unknown - keep in base for now
 				baseGroup = append(baseGroup, condition)
 			}
 		}
 
-		// Add non-empty groups to the respective filters
 		if len(baseGroup) > 0 {
 			baseFilters = append(baseFilters, baseGroup)
 		}
-		for alias, group := range joinGroups {
-			if len(group) > 0 {
-				joinFilters[alias] = append(joinFilters[alias], group)
+		for alias, grp := range joinGroups {
+			if len(grp) > 0 {
+				joinFilters[alias] = append(joinFilters[alias], grp)
 			}
 		}
 	}
@@ -286,41 +310,36 @@ func pushDownFilters(conditions OneOrMore, baseTableAlias string, joins []Join) 
 	return baseFilters, joinFilters
 }
 
-// getConditionTableAlias determines which table a condition belongs to based on field prefix
-func getConditionTableAlias(condition Condition, baseTableAlias string, joins []Join) string {
-	// Check operand1
+// getConditionTableAlias determines which table alias a condition belongs to.
+// allJoinAliases is the complete set of join table aliases (all depths).
+func getConditionTableAlias(condition Condition, baseTableAlias string, allJoinAliases map[string]struct{}) string {
+	checkAlias := func(prefix string) (string, bool) {
+		if prefix == "" {
+			return "", false
+		}
+		if prefix == baseTableAlias {
+			return baseTableAlias, true
+		}
+		if _, ok := allJoinAliases[prefix]; ok {
+			return prefix, true
+		}
+		return "", false
+	}
+
 	if condition.Operand1.Type == OperandField {
 		if field, ok := condition.Operand1.Value.(Field); ok {
-			if field.AliasPrefix != "" {
-				if field.AliasPrefix == baseTableAlias {
-					return baseTableAlias
-				}
-				for _, join := range joins {
-					if field.AliasPrefix == join.TableAlias {
-						return join.TableAlias
-					}
-				}
+			if alias, found := checkAlias(field.AliasPrefix); found {
+				return alias
 			}
 		}
 	}
-
-	// Check operand2 as well (for field-to-field comparisons)
 	if condition.Operand2.Type == OperandField {
 		if field, ok := condition.Operand2.Value.(Field); ok {
-			if field.AliasPrefix != "" {
-				if field.AliasPrefix == baseTableAlias {
-					return baseTableAlias
-				}
-				for _, join := range joins {
-					if field.AliasPrefix == join.TableAlias {
-						return join.TableAlias
-					}
-				}
+			if alias, found := checkAlias(field.AliasPrefix); found {
+				return alias
 			}
 		}
 	}
-
-	// If no alias prefix found, assume base table
 	return baseTableAlias
 }
 
@@ -362,7 +381,7 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 		}
 
 		// Execute all joins for this base row
-		if err := p.executeJoinsForRow(ctx, provider, baseRow, baseScan.TableAlias, 0, filteredPipe); err != nil {
+		if err := p.executeJoinsForRow(ctx, provider, baseRow, 0, filteredPipe); err != nil {
 			return err
 		}
 	}
@@ -391,11 +410,14 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 	return nil
 }
 
-// executeJoinsForRow recursively executes joins for a given row
-// For star schema, all joins are against the base table
-// joinIndex indicates which join we're currently processing
-func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvider, currentRow Row, baseTableAlias string, joinIndex int, filteredPipe chan<- Row) error {
-	// Base case: all joins processed, send the row
+// executeJoinsForRow recursively executes joins for a given row.
+// joinIndex indicates which join in p.Joins is being processed.
+// At joinIndex == 0, currentRow is the raw base-table row (column names not yet
+// alias-prefixed). For joinIndex > 0 it is an already-combined row whose column
+// names carry alias prefixes (e.g. "a.id", "b.name"). The from-side alias for
+// each join is resolved from p.Scans[join.LeftScanIndex].TableAlias, enabling
+// correct key lookup for both star-schema and chain joins.
+func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvider, currentRow Row, joinIndex int, filteredPipe chan<- Row) error {
 	if joinIndex >= len(p.Joins) {
 		select {
 		case filteredPipe <- currentRow:
@@ -405,85 +427,66 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 		return nil
 	}
 
-	// Get current join
 	join := p.Joins[joinIndex]
 	innerScan := p.Scans[join.RightScanIndex]
+	fromAlias := p.Scans[join.LeftScanIndex].TableAlias
 
-	// Get inner table
 	innerTable, ok := provider.GetTable(ctx, innerScan.TableName)
 	if !ok {
 		return fmt.Errorf("%w: %s", errTableDoesNotExist, innerScan.TableName)
 	}
 
-	// Get fields for inner table
 	innerFields := fieldsFromColumns(innerTable.Columns...)
-
-	// Create channel for inner rows
 	innerRowChan := make(chan Row, 100)
 	innerErrChan := make(chan error, 1)
 
-	// Scan inner table - use index if available
 	if innerScan.Type == ScanTypeIndexPoint && join.InnerJoinColumn != "" {
-		// Index nested loop join: look up matching rows using index
 		go func() {
 			defer close(innerRowChan)
 
-			// Build index keys from join column pairs
-			// For composite indexes, we need multiple key values
 			var joinKeyValues []any
 
 			if len(join.JoinColumnPairs) > 0 {
-				// Use JoinColumnPairs for composite key support
 				joinKeyValues = make([]any, len(join.JoinColumnPairs))
 				for i, pair := range join.JoinColumnPairs {
-					var keyValue OptionalValue
-					var ok bool
-
+					var (
+						keyValue OptionalValue
+						ok       bool
+					)
 					if joinIndex == 0 {
-						// First join - column not yet prefixed
+						// currentRow is the unmodified base-table row — no alias prefix yet.
 						keyValue, ok = currentRow.GetValue(pair.BaseTableColumn.Name)
 					} else {
-						// Subsequent join - column is prefixed with base table alias
-						prefixedCol := baseTableAlias + "." + pair.BaseTableColumn.Name
-						keyValue, ok = currentRow.GetValue(prefixedCol)
+						keyValue, ok = currentRow.GetValue(fromAlias + "." + pair.BaseTableColumn.Name)
 					}
-
 					if !ok || !keyValue.Valid {
-						return // No match possible if any join key is NULL or missing
+						return
 					}
 					joinKeyValues[i] = keyValue.Value
 				}
 			} else {
-				// Backward compatibility: single column join
-				var joinKeyValue OptionalValue
-				var ok bool
-
+				var (
+					keyValue OptionalValue
+					ok       bool
+				)
 				if joinIndex == 0 {
-					// First join - column not yet prefixed
-					joinKeyValue, ok = currentRow.GetValue(join.OuterJoinColumn)
+					keyValue, ok = currentRow.GetValue(join.OuterJoinColumn)
 				} else {
-					// Subsequent join - column is prefixed with base table alias
-					prefixedCol := baseTableAlias + "." + join.OuterJoinColumn
-					joinKeyValue, ok = currentRow.GetValue(prefixedCol)
+					keyValue, ok = currentRow.GetValue(fromAlias + "." + join.OuterJoinColumn)
 				}
-
-				if !ok || !joinKeyValue.Valid {
-					return // No match possible if join key is NULL or missing
+				if !ok || !keyValue.Valid {
+					return
 				}
-				joinKeyValues = []any{joinKeyValue.Value}
+				joinKeyValues = []any{keyValue.Value}
 			}
 
-			// Create a modified scan with the specific key values
 			indexScan := innerScan
 			indexScan.IndexKeys = joinKeyValues
-
-			// Use index scan to find matching rows
 			if err := innerTable.indexPointScan(ctx, indexScan, innerFields, chanRowCallback(ctx, innerRowChan)); err != nil {
 				innerErrChan <- err
 			}
 		}()
 	} else {
-		// Standard nested loop: sequential scan of inner table
 		go func() {
 			defer close(innerRowChan)
 			if err := innerTable.sequentialScan(ctx, innerScan, innerFields, chanRowCallback(ctx, innerRowChan)); err != nil {
@@ -498,7 +501,6 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 	}
 	var joinFilter func(Row) (bool, error)
 
-	// For each matching inner row, combine and continue with next join
 	matched := false
 	for innerRow := range innerRowChan {
 		select {
@@ -507,13 +509,10 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 		default:
 		}
 
-		// Combine current row with inner row
 		var combinedRow Row
 		if joinIndex == 0 {
-			// First join - combine base row with inner row
-			combinedRow = combineRows(currentRow, innerRow, baseTableAlias, innerScan.TableAlias)
+			combinedRow = combineRows(currentRow, innerRow, fromAlias, innerScan.TableAlias)
 		} else {
-			// Subsequent join - current row is already combined, add inner row
 			combinedRow = combineRowsProgressive(currentRow, innerRow, innerScan.TableAlias)
 		}
 
@@ -532,30 +531,28 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 
 		if matches {
 			matched = true
-			// Continue with next join (or output if this was the last join)
-			if err := p.executeJoinsForRow(ctx, provider, combinedRow, baseTableAlias, joinIndex+1, filteredPipe); err != nil {
+			if err := p.executeJoinsForRow(ctx, provider, combinedRow, joinIndex+1, filteredPipe); err != nil {
 				return err
 			}
 		}
 	}
 
-	// Check for errors from inner scan
 	select {
 	case err := <-innerErrChan:
 		return err
 	default:
 	}
 
-	// LEFT JOIN: if no inner row matched, emit the base row with NULL-filled inner columns
+	// LEFT JOIN: emit the outer row with NULL-filled inner columns when nothing matched.
 	if !matched && join.Type == Left {
 		nullInner := nullRowForColumns(innerTable.Columns)
 		var combinedRow Row
 		if joinIndex == 0 {
-			combinedRow = combineRows(currentRow, nullInner, baseTableAlias, innerScan.TableAlias)
+			combinedRow = combineRows(currentRow, nullInner, fromAlias, innerScan.TableAlias)
 		} else {
 			combinedRow = combineRowsProgressive(currentRow, nullInner, innerScan.TableAlias)
 		}
-		if err := p.executeJoinsForRow(ctx, provider, combinedRow, baseTableAlias, joinIndex+1, filteredPipe); err != nil {
+		if err := p.executeJoinsForRow(ctx, provider, combinedRow, joinIndex+1, filteredPipe); err != nil {
 			return err
 		}
 	}

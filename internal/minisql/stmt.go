@@ -880,6 +880,52 @@ func parseTimeValue(value any) (TimestampMicros, error) {
 	return TimestampMicros(timestamp.TotalMicroseconds()), nil
 }
 
+// validateJoinTree recursively checks every join node in the join tree for:
+// duplicate table names, duplicate aliases, missing aliases, missing conditions,
+// and invalid condition operand types. tableMap and aliasMap accumulate seen
+// values across the entire tree so duplicates at any depth are caught.
+func validateJoinTree(joins []Join, tableMap, aliasMap map[string]struct{}) error {
+	for _, join := range joins {
+		if join.TableAlias == "" {
+			return errors.New("JOIN must have a table alias")
+		}
+		if _, ok := tableMap[join.TableName]; ok {
+			return fmt.Errorf("duplicate table name %q in JOINs", join.TableName)
+		}
+		tableMap[join.TableName] = struct{}{}
+		if _, ok := aliasMap[join.TableAlias]; ok {
+			return fmt.Errorf("duplicate table alias %q in JOINs", join.TableAlias)
+		}
+		aliasMap[join.TableAlias] = struct{}{}
+		if len(join.Conditions) == 0 {
+			return errors.New("JOIN must have at least one condition")
+		}
+		for _, cond := range join.Conditions {
+			if cond.Operand1.Type != OperandField {
+				return errors.New("operand1 in JOIN condition must be a field")
+			}
+			if _, ok := cond.Operand1.Value.(Field); !ok {
+				return errors.New("operand1 in JOIN condition must be a field")
+			}
+			if cond.Operand2.Type != OperandField {
+				return errors.New("operand2 in JOIN condition must be a field")
+			}
+			if _, ok := cond.Operand2.Value.(Field); !ok {
+				return errors.New("operand2 in JOIN condition must be a field")
+			}
+			if !IsValidCondition(cond) {
+				return errors.New("invalid condition in JOIN clause")
+			}
+		}
+		if len(join.Joins) > 0 {
+			if err := validateJoinTree(join.Joins, tableMap, aliasMap); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // Validate ...
 func (s Statement) Validate(table *Table) error {
 	switch s.Kind {
@@ -1303,57 +1349,16 @@ func (s Statement) validateSelect(table *Table) error {
 	}
 
 	if len(s.Joins) > 0 {
-		var (
-			tableMap = map[string]struct{}{
-				table.Name: {},
-			}
-			aliasMap = map[string]struct{}{}
-		)
+		tableMap := map[string]struct{}{table.Name: {}}
+		aliasMap := map[string]struct{}{}
 		if s.TableAlias == "" {
 			return errors.New("table must have alias when query contains JOIN")
 		}
 		aliasMap[s.TableAlias] = struct{}{}
-		for _, join := range s.Joins {
-			if join.TableAlias == "" {
-				return errors.New("JOIN must have a table alias")
-			}
-
-			_, ok := tableMap[join.TableName]
-			if ok {
-				return fmt.Errorf("duplicate table name %q in JOINs", join.TableName)
-			}
-			tableMap[join.TableName] = struct{}{}
-
-			_, ok = aliasMap[join.TableAlias]
-			if ok {
-				return fmt.Errorf("duplicate table alias %q in JOINs", join.TableAlias)
-			}
-			aliasMap[join.TableAlias] = struct{}{}
-
-			if len(join.Conditions) == 0 {
-				return errors.New("JOIN must have at least one condition")
-			}
-
-			for _, cond := range join.Conditions {
-				if cond.Operand1.Type != OperandField {
-					return errors.New("operand1 in JOIN condition must be a field")
-				}
-				if _, ok := cond.Operand1.Value.(Field); !ok {
-					return errors.New("operand1 in JOIN condition must be a field")
-				}
-				if cond.Operand2.Type != OperandField {
-					return errors.New("operand2 in JOIN condition must be a field")
-				}
-				if _, ok := cond.Operand2.Value.(Field); !ok {
-					return errors.New("operand2 in JOIN condition must be a field")
-				}
-				if !IsValidCondition(cond) {
-					return errors.New("invalid condition in JOIN clause")
-				}
-				// TODO - validate that the fields in the JOIN conditions exist in the respective tables
-			}
+		if err := validateJoinTree(s.Joins, tableMap, aliasMap); err != nil {
+			return err
 		}
-		// JOIN validation complete - fields will be validated during execution
+		// Field-level validation deferred to execution (columns span multiple tables).
 		return nil
 	}
 
