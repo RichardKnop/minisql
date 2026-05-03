@@ -339,6 +339,7 @@ Important behavior and current non-goals:
 | `PRIMARY KEY` | Single column only; no composite primary keys |
 | `AUTOINCREMENT` | Primary key must be of type `INT8` |
 | `UNIQUE` | Can be specified when creating a table |
+| `CHECK` | Constraints to test values whenever they are inserted or updated in a column |
 | Composite primary key or unique constraint | As part of `CREATE TABLE` |
 | `NULL` and `NOT NULL` | Via null bit mask included in each row/cell |
 | `DEFAULT` | Supported for all columns, including `NOW()` for `TIMESTAMP` |

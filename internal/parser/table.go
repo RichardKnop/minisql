@@ -156,10 +156,11 @@ func (p *parserItem) doParseCreateTable() error {
 			},
 		})
 		p.pop()
-		p.step = stepCreateTableCommaOrClosingParens
+		// Allow DEFAULT and CHECK to follow UNIQUE.
+		p.step = stepCreateTableColumnDefaultValue
 	case stepCreateTableColumnDefaultValue:
 		defaultRWord := p.peek()
-		p.step = stepCreateTableCommaOrClosingParens
+		p.step = stepCreateTableColumnCheck
 		if defaultRWord != "DEFAULT" {
 			return nil
 		}
@@ -187,6 +188,29 @@ func (p *parserItem) doParseCreateTable() error {
 			Value: defaultValue,
 			Valid: true,
 		}
+	case stepCreateTableColumnCheck:
+		checkRWord := strings.ToUpper(p.peek())
+		p.step = stepCreateTableCommaOrClosingParens
+		if checkRWord != "CHECK" {
+			return nil
+		}
+		p.pop() // consume "CHECK"
+		if p.peek() != "(" {
+			return p.errorf("at CREATE TABLE: expected '(' after CHECK")
+		}
+		p.pop() // consume "("
+		startPos := p.i
+		node, err := p.parseCondExpr()
+		if err != nil {
+			return err
+		}
+		if p.peek() != ")" {
+			return p.errorf("at CREATE TABLE: expected ')' after CHECK expression")
+		}
+		rawExpr := strings.TrimSpace(p.sql[startPos:p.i])
+		p.pop() // consume ")"
+		p.Columns[len(p.Columns)-1].Check = rawExpr
+		p.Columns[len(p.Columns)-1].CheckCond = node
 	case stepCreateTableConstraint:
 		token := strings.ToUpper(p.peek())
 		switch token {

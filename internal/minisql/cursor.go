@@ -283,6 +283,10 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 		return false, nil
 	}
 
+	if err := validateCheckConstraints(c.Table.Columns, row); err != nil {
+		return false, err
+	}
+
 	page, err := c.Table.pager.ModifyPage(ctx, c.PageIdx)
 	if err != nil {
 		return false, fmt.Errorf("update: %w", err)
