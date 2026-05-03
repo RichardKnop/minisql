@@ -346,11 +346,12 @@ Important behavior and current non-goals:
 | `CREATE INDEX`, `DROP INDEX` | Secondary non-unique indexes only; primary and unique indexes are declared as part of `CREATE TABLE` |
 | `INSERT` | Single row or multiple rows via a tuple of values separated by commas |
 | `ON CONFLICT` | Both `DO NOTHING` and `DO UPDATE` supported (with `EXCLUDED` pseudo table syntax for updating) |
-| `SELECT` | All fields with `*`, specific fields, or row count with `COUNT(*)` |
+| `SELECT` | All fields with `*`, specific fields, or row count with `COUNT(*)`, |
 | `SELECT DISTINCT` | |
 | `JOIN` | `INNER`, `LEFT` and `RIGHT` joins supported |
 | `UPDATE` | |
 | `DELETE` | |
+| `RETURNING` | Can be used to return columns from `INSERT` or `DELETE` queries, common use case is to return auto incremented primary key |
 | `WHERE` | Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`, `LIKE`, `NOT LIKE`, `BETWEEN` |
 | `LIKE`, `NOT LIKE` | `%` matches any sequence of zero or more characters; `_` matches any single character |
 | `LIMIT` and `OFFSET` | Basic pagination |

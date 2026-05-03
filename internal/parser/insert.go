@@ -115,8 +115,13 @@ func (p *parserItem) doParseInsert() error {
 		p.step = stepInsertValuesCommaBeforeOpeningParens
 	case stepInsertValuesCommaBeforeOpeningParens:
 		commaOrEnd := p.peek()
-		if commaOrEnd == ";" {
+		if commaOrEnd == ";" || commaOrEnd == "" {
 			p.step = stepStatementEnd
+			return nil
+		}
+		if strings.ToUpper(commaOrEnd) == "RETURNING" {
+			p.pop()
+			p.step = stepReturningField
 			return nil
 		}
 		if strings.ToUpper(commaOrEnd) == "ON CONFLICT" {
@@ -210,6 +215,11 @@ func (p *parserItem) doParseInsert() error {
 		commaOrEnd := p.peek()
 		if commaOrEnd == ";" || commaOrEnd == "" {
 			p.step = stepStatementEnd
+			return nil
+		}
+		if strings.ToUpper(commaOrEnd) == "RETURNING" {
+			p.pop()
+			p.step = stepReturningField
 			return nil
 		}
 		if commaOrEnd != "," {

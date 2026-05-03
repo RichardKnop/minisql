@@ -111,7 +111,7 @@ func toInternalArgs(args []driver.NamedValue) ([]any, error) {
 		case string:
 			internalArgs = append(internalArgs, minisql.NewTextPointer([]byte(v)))
 		case time.Time:
-			internalArgs = append(internalArgs, minisql.Time{
+			t := minisql.Time{
 				Year:         int32(v.Year()),
 				Month:        int8(v.Month()),
 				Day:          int8(v.Day()),
@@ -119,7 +119,8 @@ func toInternalArgs(args []driver.NamedValue) ([]any, error) {
 				Minutes:      int8(v.Minute()),
 				Seconds:      int8(v.Second()),
 				Microseconds: int32(v.Nanosecond() / 1000),
-			})
+			}
+			internalArgs = append(internalArgs, minisql.TimestampMicros(t.TotalMicroseconds()))
 		default:
 			return nil, fmt.Errorf("unsupported argument type: %T", arg)
 		}

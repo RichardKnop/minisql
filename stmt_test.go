@@ -74,7 +74,7 @@ func TestToInternalArgs(t *testing.T) {
 		assert.Equal(t, "hello", tp.String())
 	})
 
-	t.Run("time.Time is converted to internal Time struct", func(t *testing.T) {
+	t.Run("time.Time is converted to TimestampMicros", func(t *testing.T) {
 		t.Parallel()
 
 		ts := time.Date(2024, 6, 15, 12, 34, 56, 123000, time.UTC)
@@ -82,10 +82,8 @@ func TestToInternalArgs(t *testing.T) {
 		got, err := toInternalArgs(args)
 		require.NoError(t, err)
 		require.Len(t, got, 1)
-		// We can't import internal/minisql.Time directly from the root package test,
-		// so we just verify a non-nil value was produced with the correct concrete type name.
 		assert.NotNil(t, got[0])
-		assert.Equal(t, "minisql.Time", fmt.Sprintf("%T", got[0]))
+		assert.Equal(t, "minisql.TimestampMicros", fmt.Sprintf("%T", got[0]))
 	})
 
 	t.Run("multiple args of different types", func(t *testing.T) {

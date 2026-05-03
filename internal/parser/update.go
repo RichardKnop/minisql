@@ -109,8 +109,13 @@ func (p *parserItem) doParseUpdate() error {
 		p.step = stepUpdateComma
 	case stepUpdateComma:
 		commaOrEnd := p.peek()
-		if commaOrEnd == ";" {
+		if commaOrEnd == ";" || commaOrEnd == "" {
 			p.step = stepStatementEnd
+			return nil
+		}
+		if strings.ToUpper(commaOrEnd) == "RETURNING" {
+			p.pop()
+			p.step = stepReturningField
 			return nil
 		}
 		if commaOrEnd != "," {

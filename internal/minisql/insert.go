@@ -30,6 +30,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 	// newRowsInserted counts only actual new rows added to the table (not DO UPDATE
 	// hits, which update existing rows without changing the total count).
 	newRowsInserted := 0
+	var returningRows []Row
 	for insertIdx, values := range stmt.Inserts {
 		switch stmt.ConflictAction {
 		case ConflictActionDoNothing:
@@ -129,6 +130,16 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 		row := NewRowWithValues(t.Columns, rowValues)
 
+		// Collect the row for RETURNING before it is inserted (values are already
+		// final at this point, including any autoincrement PK that was resolved above).
+		if len(stmt.ReturningFields) > 0 {
+			projected, err := projectReturning(row, stmt.ReturningFields)
+			if err != nil {
+				return StatementResult{}, err
+			}
+			returningRows = append(returningRows, projected)
+		}
+
 		page, err := t.pager.ModifyPage(ctx, cursor.PageIdx)
 		if err != nil {
 			return StatementResult{}, fmt.Errorf("insert: %w", err)
@@ -195,8 +206,12 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 	}
 
-	// TODO - set LastInsertId
-	return StatementResult{RowsAffected: rowsInserted}, nil
+	result := StatementResult{RowsAffected: rowsInserted}
+	if len(stmt.ReturningFields) > 0 {
+		result.Columns = returningColumns(stmt.ReturningFields, t.Columns)
+		result.Rows = NewSliceIterator(returningRows)
+	}
+	return result, nil
 }
 
 // hasInsertConflict returns true if inserting the row at insertIdx would violate
