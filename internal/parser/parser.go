@@ -49,6 +49,7 @@ var reservedWords = []string{
 	"DO UPDATE", "DO NOTHING",
 	"DISTINCT",
 	"UNION ALL", "UNION",
+	"RETURNING",
 	";",
 }
 
@@ -125,6 +126,8 @@ const (
 	stepWhere
 	stepAnalyze
 	stepPragma
+	stepReturningField
+	stepReturningComma
 	stepStatementEnd
 )
 
@@ -342,6 +345,13 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 			if err := p.doParsePragma(); err != nil {
 				return statements, err
 			}
+		// -----------------
+		// RETURNING
+		//------------------
+		case stepReturningField, stepReturningComma:
+			if err := p.doParseReturning(); err != nil {
+				return statements, err
+			}
 		case stepStatementEnd:
 			// For SELECT statements, intercept UNION / UNION ALL before requiring a semicolon.
 			if p.Kind == minisql.Select {
@@ -373,6 +383,14 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 					statements = append(statements, p.Statement)
 					// rest consumed all remaining SQL (including any trailing semicolons).
 					return statements, nil
+				}
+			}
+			// RETURNING can follow any DML statement (INSERT, UPDATE, DELETE).
+			if p.Kind == minisql.Insert || p.Kind == minisql.Update || p.Kind == minisql.Delete {
+				if strings.ToUpper(p.peek()) == "RETURNING" {
+					p.pop()
+					p.step = stepReturningField
+					continue
 				}
 			}
 			semicolon := p.peek()

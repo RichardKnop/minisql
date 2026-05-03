@@ -203,10 +203,6 @@ func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 
 // ExecContext executes a query that doesn't return rows.
 func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	if len(args) > 0 {
-		return nil, fmt.Errorf("query arguments not yet supported")
-	}
-
 	statements, err := c.parser.Parse(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse query: %w", err)
@@ -216,9 +212,20 @@ func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.Name
 		return nil, fmt.Errorf("no statements in query")
 	}
 
+	internalArgs, err := toInternalArgs(args)
+	if err != nil {
+		return nil, err
+	}
+
 	var totalRowsAffected int64
 
 	for _, stmt := range statements {
+		if len(internalArgs) > 0 {
+			stmt, err = stmt.BindArguments(internalArgs...)
+			if err != nil {
+				return nil, err
+			}
+		}
 		result, err := c.executeStatement(ctx, stmt)
 		if err != nil {
 			return nil, err
@@ -231,10 +238,6 @@ func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.Name
 
 // QueryContext executes a query that may return rows.
 func (c *Conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	if len(args) > 0 {
-		return nil, fmt.Errorf("query arguments not yet supported")
-	}
-
 	statements, err := c.parser.Parse(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse query: %w", err)
@@ -248,7 +251,19 @@ func (c *Conn) QueryContext(ctx context.Context, query string, args []driver.Nam
 		return nil, fmt.Errorf("multiple statements not supported")
 	}
 
+	internalArgs, err := toInternalArgs(args)
+	if err != nil {
+		return nil, err
+	}
+
 	stmt := statements[0]
+	if len(internalArgs) > 0 {
+		stmt, err = stmt.BindArguments(internalArgs...)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	result, err := c.executeStatement(ctx, stmt)
 	if err != nil {
 		return nil, err

@@ -23,14 +23,15 @@ func (p *parserItem) doParseWhere() error {
 	whereOrEnd := p.peek()
 
 	// No WHERE clause — move on.
-	if whereOrEnd == ";" {
+	if whereOrEnd == ";" || whereOrEnd == "" {
 		p.step = stepStatementEnd
 		return nil
 	}
 
 	whereRWord := strings.ToUpper(whereOrEnd)
 
-	// GROUP BY / HAVING / ORDER BY / LIMIT / OFFSET / UNION appearing before WHERE means no WHERE clause.
+	// GROUP BY / HAVING / ORDER BY / LIMIT / OFFSET / UNION / RETURNING appearing
+	// before WHERE means no WHERE clause.
 	switch whereRWord {
 	case "GROUP BY":
 		p.step = stepSelectGroupBy
@@ -43,6 +44,10 @@ func (p *parserItem) doParseWhere() error {
 		return nil
 	case "UNION ALL", "UNION":
 		p.step = stepStatementEnd
+		return nil
+	case "RETURNING":
+		p.pop()
+		p.step = stepReturningField
 		return nil
 	}
 
@@ -76,6 +81,9 @@ func (p *parserItem) doParseWhere() error {
 		p.step = stepSelectHaving
 	case "ORDER BY", "LIMIT", "OFFSET":
 		p.step = stepSelectOrderBy
+	case "RETURNING":
+		p.pop()
+		p.step = stepReturningField
 	default:
 		p.step = stepStatementEnd
 	}

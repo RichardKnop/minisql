@@ -34,7 +34,10 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 	// affects indexed columns. If not, and the row size does not increase, we update
 	// rows in-place as we encounter them. Otherwise we collect all rows first and
 	// update them afterwards to avoid conflicts with B-tree structural changes.
-	var cantUpdateInPlace []Row
+	var (
+		cantUpdateInPlace []Row
+		updatedKeys       []RowID // tracked only when RETURNING is requested
+	)
 
 	if err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
 		size := row.Size()
@@ -88,6 +91,9 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 			}
 			if changed {
 				result.RowsAffected += 1
+				if len(stmt.ReturningFields) > 0 {
+					updatedKeys = append(updatedKeys, row.Key)
+				}
 			}
 			return nil
 		}
@@ -113,9 +119,35 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 
 		if changed {
 			result.RowsAffected += 1
+			if len(stmt.ReturningFields) > 0 {
+				updatedKeys = append(updatedKeys, row.Key)
+			}
 		}
 	}
 
 	t.logger.Debug("updated rows", zap.Int("count", result.RowsAffected))
+
+	if len(stmt.ReturningFields) > 0 {
+		allFields := fieldsFromColumns(t.Columns...)
+		returningRows := make([]Row, 0, len(updatedKeys))
+		for _, key := range updatedKeys {
+			cursor, err := t.Seek(ctx, key)
+			if err != nil {
+				return result, err
+			}
+			row, err := cursor.fetchRow(ctx, false, allFields...)
+			if err != nil {
+				return result, err
+			}
+			projected, err := projectReturning(row, stmt.ReturningFields)
+			if err != nil {
+				return result, err
+			}
+			returningRows = append(returningRows, projected)
+		}
+		result.Columns = returningColumns(stmt.ReturningFields, t.Columns)
+		result.Rows = NewSliceIterator(returningRows)
+	}
+
 	return result, nil
 }

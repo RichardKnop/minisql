@@ -331,10 +331,11 @@ type Statement struct {
 	UniqueIndexes  []UniqueIndex
 	Columns        []Column
 	Conditions     OneOrMore
-	Kind           StatementKind
-	ConflictAction ConflictAction
-	IfNotExists    bool
-	Distinct       bool
+	ReturningFields []Field
+	Kind            StatementKind
+	ConflictAction  ConflictAction
+	IfNotExists     bool
+	Distinct        bool
 }
 
 // NumPlaceholders returns the number of placeholder parameters (?) in the statement.
@@ -401,24 +402,30 @@ func (s Statement) Clone() Statement {
 	}
 
 	stmt := Statement{
-		Kind:           s.Kind,
-		IfNotExists:    s.IfNotExists,
-		TableName:      s.TableName,
-		IndexName:      s.IndexName,
-		PragmaName:     s.PragmaName,
-		PragmaValue:    s.PragmaValue,
-		ConflictAction: s.ConflictAction,
-		Columns:        s.Columns,
-		Distinct:       s.Distinct,
-		Fields:         fields,
-		Aggregates:     s.Aggregates, // slice of value types, safe to share
-		Aliases:        s.Aliases,
-		Inserts:        make([][]OptionalValue, len(s.Inserts)),
-		Functions:      s.Functions,
-		Conditions:     make(OneOrMore, len(s.Conditions)),
-		OrderBy:        s.OrderBy,
-		Limit:          s.Limit,
-		Offset:         s.Offset,
+		Kind:            s.Kind,
+		IfNotExists:     s.IfNotExists,
+		TableName:       s.TableName,
+		TableAlias:      s.TableAlias,
+		IndexName:       s.IndexName,
+		Target:          s.Target,
+		PragmaName:      s.PragmaName,
+		PragmaValue:     s.PragmaValue,
+		ConflictAction:  s.ConflictAction,
+		Columns:         s.Columns,
+		Distinct:        s.Distinct,
+		Fields:          fields,
+		Aggregates:      s.Aggregates, // slice of value types, safe to share
+		Aliases:         s.Aliases,
+		Inserts:         make([][]OptionalValue, len(s.Inserts)),
+		Functions:       s.Functions,
+		Conditions:      make(OneOrMore, len(s.Conditions)),
+		GroupBy:         s.GroupBy,
+		Having:          s.Having,
+		Joins:           s.Joins,
+		OrderBy:         s.OrderBy,
+		Limit:           s.Limit,
+		Offset:          s.Offset,
+		ReturningFields: s.ReturningFields,
 	}
 	for i := range s.Inserts {
 		stmt.Inserts[i] = make([]OptionalValue, len(s.Inserts[i]))

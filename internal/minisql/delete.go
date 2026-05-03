@@ -76,5 +76,18 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 	}
 
+	if len(stmt.ReturningFields) > 0 {
+		returningRows := make([]Row, 0, len(rows))
+		for _, row := range rows {
+			projected, err := projectReturning(row, stmt.ReturningFields)
+			if err != nil {
+				return result, err
+			}
+			returningRows = append(returningRows, projected)
+		}
+		result.Columns = returningColumns(stmt.ReturningFields, t.Columns)
+		result.Rows = NewSliceIterator(returningRows)
+	}
+
 	return result, nil
 }
