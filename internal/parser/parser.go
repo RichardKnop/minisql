@@ -42,6 +42,7 @@ var reservedWords = []string{
 	"*", "COUNT(*)", "SUM(", "AVG(", "MIN(", "MAX(", "GROUP BY", "HAVING", "ORDER BY", "LIMIT", "OFFSET",
 	"PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "DEFAULT", "NOT NULL", "NULL", "UNIQUE",
 	"IS NULL", "IS NOT NULL", "NOT BETWEEN", "NOT LIKE", "BETWEEN", "LIKE", "TRUE", "FALSE", "NOW()",
+	"CHECK",
 	"IF NOT EXISTS", "WHERE", "FROM", "SET", "ASC", "DESC", "AS",
 	"BEGIN", "COMMIT", "ROLLBACK", "ANALYZE", "VACUUM",
 	"PRAGMA",
@@ -67,6 +68,7 @@ const (
 	stepCreateTableColumnNullNotNull
 	stepCreateTableColumnUnique
 	stepCreateTableColumnDefaultValue
+	stepCreateTableColumnCheck
 	stepCreateTableConstraint
 	stepCreateTableConstraintPrimaryKey
 	stepCreateTableConstraintUniqueKey
@@ -226,6 +228,7 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 			stepCreateTableColumnNullNotNull,
 			stepCreateTableColumnUnique,
 			stepCreateTableColumnDefaultValue,
+			stepCreateTableColumnCheck,
 			stepCreateTableConstraint,
 			stepCreateTableConstraintPrimaryKey,
 			stepCreateTableConstraintUniqueKey,

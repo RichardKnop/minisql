@@ -179,7 +179,9 @@ func (k ColumnKind) IsText() bool {
 // Column ...
 type Column struct {
 	DefaultValue    OptionalValue
+	CheckCond       *ConditionNode // parsed CHECK expression (nil if no CHECK constraint)
 	Name            string
+	Check           string // raw SQL text of CHECK expression, e.g. "age > 0"
 	Kind            ColumnKind
 	Size            uint32
 	Nullable        bool
@@ -1598,6 +1600,9 @@ func (s Statement) createTableDDL() string {
 				case Timestamp:
 					fmt.Fprintf(&sb, " default '%s'", FromMicroseconds(int64(col.DefaultValue.Value.(TimestampMicros))).String())
 				}
+			}
+			if col.Check != "" {
+				fmt.Fprintf(&sb, " check (%s)", col.Check)
 			}
 		}
 		if i < len(s.Columns)-1 {
