@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	internalminisql "github.com/RichardKnop/minisql/internal/minisql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -132,4 +133,38 @@ func TestResultRowsAffected(t *testing.T) {
 	n, err := r.RowsAffected()
 	require.NoError(t, err)
 	assert.Equal(t, int64(7), n)
+}
+
+func TestStmtCloseNumInputAndUnsupportedLegacyMethods(t *testing.T) {
+	t.Parallel()
+
+	stmt := Stmt{
+		statement: internalminisql.Statement{
+			Kind:      internalminisql.Select,
+			TableName: "users",
+			Fields:    []internalminisql.Field{{Name: "*"}},
+			Conditions: internalminisql.OneOrMore{
+				{
+					internalminisql.FieldIsEqual(
+						internalminisql.Field{Name: "id"},
+						internalminisql.OperandPlaceholder,
+						internalminisql.Placeholder{},
+					),
+				},
+			},
+		},
+	}
+
+	require.NoError(t, stmt.Close())
+	assert.Equal(t, 1, stmt.NumInput())
+
+	result, err := stmt.Exec(nil)
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "Exec without context is not supported")
+
+	rows, err := stmt.Query(nil)
+	require.Error(t, err)
+	assert.Nil(t, rows)
+	assert.Contains(t, err.Error(), "Query without context is not supported")
 }

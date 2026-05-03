@@ -436,6 +436,8 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 		return StatementResult{}, d.Vacuum(ctx)
 	case Pragma:
 		return d.executePragmaStatement(ctx, stmt)
+	case Explain:
+		return d.executeExplain(ctx, stmt)
 	case CreateTable, DropTable, CreateIndex, DropIndex:
 		return d.executeDDLStatement(ctx, stmt)
 	case Insert, Select, Update, Delete:

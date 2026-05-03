@@ -36,6 +36,7 @@ var reservedWords = []string{
 	// column types
 	"BOOLEAN", "INT4", "INT8", "REAL", "DOUBLE", "TEXT", "VARCHAR(", "TIMESTAMP",
 	// statement types
+	"EXPLAIN ANALYZE", "EXPLAIN",
 	"CREATE TABLE", "DROP TABLE", "CREATE INDEX", "DROP INDEX",
 	"SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
@@ -212,6 +213,14 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 				p.Kind = minisql.Pragma
 				p.pop()
 				p.step = stepPragma
+			case "EXPLAIN ANALYZE":
+				if err := p.parseExplain(true); err != nil {
+					return statements, err
+				}
+			case "EXPLAIN":
+				if err := p.parseExplain(false); err != nil {
+					return statements, err
+				}
 			default:
 				return statements, p.wrapErr(errInvalidStatementKind)
 			}
@@ -605,7 +614,11 @@ func (p *parserItem) validate(stmt minisql.Statement) error {
 		if stmt.Kind == minisql.CreateIndex && len(stmt.Columns) == 0 {
 			return errCreateIndexNoColumns
 		}
-	} else if stmt.TableName == "" && stmt.Kind != minisql.Analyze && stmt.Kind != minisql.Vacuum && stmt.Kind != minisql.Pragma {
+	} else if stmt.TableName == "" &&
+		stmt.Kind != minisql.Analyze &&
+		stmt.Kind != minisql.Vacuum &&
+		stmt.Kind != minisql.Pragma &&
+		stmt.Kind != minisql.Explain {
 		return errEmptyTableName
 	}
 	if stmt.Kind == minisql.CreateTable {

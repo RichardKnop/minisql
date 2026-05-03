@@ -40,6 +40,7 @@ const (
 	Analyze
 	Vacuum
 	Pragma
+	Explain
 )
 
 func (s StatementKind) String() string {
@@ -72,6 +73,8 @@ func (s StatementKind) String() string {
 		return "VACUUM"
 	case Pragma:
 		return "PRAGMA"
+	case Explain:
+		return "EXPLAIN"
 	default:
 		return "UNKNOWN"
 	}
@@ -310,38 +313,44 @@ type UnionClause struct {
 
 // Statement ...
 type Statement struct {
-	PrimaryKey     PrimaryKey
-	Aliases        map[string]string
-	Functions      map[string]Function
-	Updates        map[string]OptionalValue
-	Offset         OptionalValue
-	Limit          OptionalValue
-	TableName      string
-	TableAlias     string
-	IndexName      string
-	Target         string
-	PragmaName     string
-	PragmaValue    string
-	Fields         []Field
-	Inserts        [][]OptionalValue
-	Aggregates     []AggregateExpr
-	GroupBy        []Field
-	Having         OneOrMore
-	Unions         []UnionClause
-	Joins          []Join
-	OrderBy        []OrderBy
-	UniqueIndexes  []UniqueIndex
-	Columns        []Column
-	Conditions     OneOrMore
-	ReturningFields []Field
-	Kind            StatementKind
-	ConflictAction  ConflictAction
-	IfNotExists     bool
-	Distinct        bool
+	PrimaryKey       PrimaryKey
+	Aliases          map[string]string
+	Functions        map[string]Function
+	Updates          map[string]OptionalValue
+	Offset           OptionalValue
+	Limit            OptionalValue
+	TableName        string
+	TableAlias       string
+	IndexName        string
+	Target           string
+	PragmaName       string
+	PragmaValue      string
+	Fields           []Field
+	Inserts          [][]OptionalValue
+	Aggregates       []AggregateExpr
+	GroupBy          []Field
+	Having           OneOrMore
+	Unions           []UnionClause
+	Joins            []Join
+	OrderBy          []OrderBy
+	UniqueIndexes    []UniqueIndex
+	Columns          []Column
+	Conditions       OneOrMore
+	ReturningFields  []Field
+	ExplainStatement *Statement
+	Kind             StatementKind
+	ConflictAction   ConflictAction
+	IfNotExists      bool
+	ExplainAnalyze   bool
+	Distinct         bool
 }
 
 // NumPlaceholders returns the number of placeholder parameters (?) in the statement.
 func (s Statement) NumPlaceholders() int {
+	if s.Kind == Explain && s.ExplainStatement != nil {
+		return s.ExplainStatement.NumPlaceholders()
+	}
+
 	count := 0
 
 	if s.Kind == Insert {
@@ -428,6 +437,7 @@ func (s Statement) Clone() Statement {
 		Limit:           s.Limit,
 		Offset:          s.Offset,
 		ReturningFields: s.ReturningFields,
+		ExplainAnalyze:  s.ExplainAnalyze,
 	}
 	for i := range s.Inserts {
 		stmt.Inserts[i] = make([]OptionalValue, len(s.Inserts[i]))
@@ -448,6 +458,10 @@ func (s Statement) Clone() Statement {
 			stmt.Unions[i] = UnionClause{All: u.All, Stmt: u.Stmt.Clone()}
 		}
 	}
+	if s.ExplainStatement != nil {
+		inner := s.ExplainStatement.Clone()
+		stmt.ExplainStatement = &inner
+	}
 	return stmt
 }
 
@@ -456,6 +470,15 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 	// Clone statement so we can keep using the preparement statement
 	// with different arguments without modifying it
 	stmt := s.Clone()
+
+	if s.Kind == Explain && stmt.ExplainStatement != nil {
+		inner, err := stmt.ExplainStatement.BindArguments(args...)
+		if err != nil {
+			return Statement{}, err
+		}
+		stmt.ExplainStatement = &inner
+		return stmt, nil
+	}
 
 	if s.Kind == Insert {
 		for i, anInsert := range stmt.Inserts {
@@ -581,7 +604,7 @@ func (s Statement) HasField(name string) bool {
 
 // ReadOnly ...
 func (s Statement) ReadOnly() bool {
-	return s.Kind == Select || s.Kind == Pragma
+	return s.Kind == Select || s.Kind == Pragma || s.Kind == Explain
 }
 
 // IsDDL ...

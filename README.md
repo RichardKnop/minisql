@@ -349,6 +349,7 @@ Important behavior and current non-goals:
 | `ON CONFLICT` | Both `DO NOTHING` and `DO UPDATE` supported (with `EXCLUDED` pseudo table syntax for updating) |
 | `SELECT` | All fields with `*`, specific fields, or row count with `COUNT(*)`, |
 | `SELECT DISTINCT` | |
+| `EXPLAIN`, `EXPLAIN ANALYZE` | Query plan inspection for `SELECT` statements. `EXPLAIN ANALYZE` also executes the query and returns actual row counts and timing |
 | `JOIN` | `INNER`, `LEFT` and `RIGHT` joins supported |
 | `UPDATE` | |
 | `DELETE` | |
@@ -522,6 +523,47 @@ You can also count rows in a table:
 ```go
 var count int
 if err := db.QueryRow(`select count(*) from users;`).Scan(&count); err != nil {
+	return err
+}
+```
+
+You can inspect the query plan for a `SELECT` with `EXPLAIN`. The result columns are `step`, `operation`, `detail`, `rows_estimated`, `rows_actual`, and `duration_us`. For plain `EXPLAIN`, actual rows and duration are `NULL`; `EXPLAIN ANALYZE` executes the query and fills those fields.
+
+```go
+type explainStep struct {
+	Step          int64
+	Operation     string
+	Detail        string
+	RowsEstimated sql.NullInt64
+	RowsActual    sql.NullInt64
+	DurationUS    sql.NullInt64
+}
+
+rows, err := db.QueryContext(context.Background(), `
+	EXPLAIN ANALYZE
+	SELECT * FROM users WHERE age >= 30 ORDER BY created DESC;
+`)
+if err != nil {
+	return err
+}
+defer rows.Close()
+
+var plan []explainStep
+for rows.Next() {
+	var step explainStep
+	if err := rows.Scan(
+		&step.Step,
+		&step.Operation,
+		&step.Detail,
+		&step.RowsEstimated,
+		&step.RowsActual,
+		&step.DurationUS,
+	); err != nil {
+		return err
+	}
+	plan = append(plan, step)
+}
+if err := rows.Err(); err != nil {
 	return err
 }
 ```
