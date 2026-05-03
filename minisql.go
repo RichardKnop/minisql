@@ -316,7 +316,7 @@ func (c *Conn) executeStatement(ctx context.Context, stmt minisql.Statement) (mi
 		return err
 	}
 	var err error
-	if stmt.Kind == minisql.Select {
+	if stmt.Kind == minisql.Select || stmt.Kind == minisql.Explain {
 		err = c.db.GetTransactionManager().ExecuteReadOnlyTransaction(ctx, txFn)
 	} else {
 		err = c.db.GetTransactionManager().ExecuteInTransaction(ctx, txFn)
