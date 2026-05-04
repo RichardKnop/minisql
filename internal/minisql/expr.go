@@ -741,7 +741,7 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 			return nil, fmt.Errorf("SUBSTR: start must be an integer, got %T", startVal)
 		}
 		// SQL uses 1-based indexing; clamp to valid range.
-		start-- // convert to 0-based
+		start -= 1 // convert to 0-based
 		if start < 0 {
 			start = 0
 		}

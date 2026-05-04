@@ -212,7 +212,7 @@ func (s *TestSuite) TestStarSchemaJoin() {
 			var name, email, city string
 			err := rows.Scan(&userID, &name, &email, &orderID, &amount, &city)
 			s.Require().NoError(err)
-			count++
+			count += 1
 			// All rows should be for Alice (user_id = 1)
 			s.Assert().Equal(int64(1), userID)
 			s.Assert().Equal("Alice", name)
@@ -352,7 +352,7 @@ func (s *TestSuite) TestStarSchemaLargeResult() {
 		var rating int64
 		err := rows.Scan(&name, &product, &rating)
 		s.Require().NoError(err)
-		count++
+		count += 1
 		s.Assert().Equal("Alice", name)
 	}
 

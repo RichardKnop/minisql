@@ -441,6 +441,15 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 	case CreateTable, DropTable, CreateIndex, DropIndex:
 		return d.executeDDLStatement(ctx, stmt)
 	case Insert, Select, Update, Delete:
+		// Pre-evaluate any non-correlated scalar subqueries in the WHERE clause.
+		if len(stmt.Conditions) > 0 {
+			resolved, err := d.resolveSubqueries(ctx, stmt.Conditions)
+			if err != nil {
+				return StatementResult{}, err
+			}
+			stmt.Conditions = resolved
+		}
+
 		// SELECT with UNION / UNION ALL branches is handled by the union executor.
 		if stmt.Kind == Select && len(stmt.Unions) > 0 {
 			return d.executeUnion(ctx, stmt)

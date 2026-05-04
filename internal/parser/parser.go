@@ -453,7 +453,7 @@ func (p *parserItem) pop() string {
 
 func (p *parserItem) popWhitespace() {
 	for p.i < len(p.sql) && p.sql[p.i] == ' ' {
-		p.i++
+		p.i += 1
 	}
 }
 

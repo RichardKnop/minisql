@@ -121,7 +121,7 @@ func BenchmarkConcurrentReads(b *testing.B) {
 			err := readStmt.QueryRow(int64((i%1000)+1)).Scan(&id, &email, &name, &created)
 			require.NoError(b, err)
 
-			i++
+			i += 1
 		}
 	})
 }
