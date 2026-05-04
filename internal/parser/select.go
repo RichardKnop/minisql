@@ -83,6 +83,17 @@ func (p *parserItem) doParseSelect() error {
 			p.Fields = append(p.Fields, minisql.Field{Name: fieldName})
 			p.Aggregates = append(p.Aggregates, minisql.AggregateExpr{Kind: aggKind, Column: colName})
 
+			// Optional alias: SUM(price) AS total
+			if strings.ToUpper(p.peek()) == "AS" {
+				p.pop()
+				alias := p.peek()
+				if !isIdentifier(alias) {
+					return p.errorf("at SELECT: expected alias after aggregate function")
+				}
+				p.Fields[len(p.Fields)-1].Alias = alias
+				p.pop()
+			}
+
 			maybeFrom := strings.ToUpper(p.peek())
 			if maybeFrom == "FROM" {
 				p.step = stepSelectFrom
@@ -124,12 +135,32 @@ func (p *parserItem) doParseSelect() error {
 					}
 				}
 				p.Aggregates = append(p.Aggregates, minisql.AggregateExpr{Kind: minisql.AggregateCount})
+				// Optional alias: COUNT(*) AS cnt
+				if strings.ToUpper(p.peek()) == "AS" {
+					p.pop()
+					alias := p.peek()
+					if !isIdentifier(alias) {
+						return p.errorf("at SELECT: expected alias after COUNT(*)")
+					}
+					p.Fields[len(p.Fields)-1].Alias = alias
+					p.pop()
+				}
 				if strings.ToUpper(p.peek()) == "FROM" {
 					p.step = stepSelectFrom
 					return nil
 				}
 				p.step = stepSelectComma
 				return nil
+			}
+			// Optional alias: COUNT(*) AS cnt (single-field case)
+			if strings.ToUpper(p.peek()) == "AS" {
+				p.pop()
+				alias := p.peek()
+				if !isIdentifier(alias) {
+					return p.errorf("at SELECT: expected alias after COUNT(*)")
+				}
+				p.Fields[len(p.Fields)-1].Alias = alias
+				p.pop()
 			}
 			if strings.ToUpper(p.peek()) != "FROM" {
 				return p.wrapErr(errExpectedFrom)
@@ -204,6 +235,31 @@ func (p *parserItem) doParseSelect() error {
 		p.pop()
 		p.step = stepSelectFromTable
 	case stepSelectFromTable:
+		// Derived table: FROM (SELECT ...) alias
+		if p.peek() == "(" {
+			p.pop() // consume "("
+			if strings.ToUpper(p.peek()) != "SELECT" {
+				return p.errorf("at SELECT FROM: expected SELECT inside parentheses")
+			}
+			subStmt, err := p.parseSubquery()
+			if err != nil {
+				return err
+			}
+			p.FromSubquery = subStmt
+			// Alias is required for derived tables.
+			if strings.ToUpper(p.peek()) == "AS" {
+				p.pop()
+			}
+			alias, _ := p.peekIdentifierWithLength()
+			if !isIdentifier(alias) {
+				return p.errorf("at SELECT FROM: expected alias after derived table subquery")
+			}
+			p.FromSubqueryAlias = alias
+			p.pop()
+			p.step = stepSelectJoin
+			break
+		}
+
 		tableName, _ := p.peekIdentifierWithLength()
 		if !isIdentifier(tableName) {
 			return p.wrapErr(errSelectExpectedTableName)
