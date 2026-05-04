@@ -351,7 +351,7 @@ Important behavior and current non-goals:
 | `CREATE INDEX`, `DROP INDEX` | Secondary non-unique indexes only; primary and unique indexes are declared as part of `CREATE TABLE` |
 | `INSERT` | Single row or multiple rows via a tuple of values separated by commas |
 | `ON CONFLICT` | Both `DO NOTHING` and `DO UPDATE` supported (with `EXCLUDED` pseudo table syntax for updating) |
-| `SELECT` | All fields with `*`, specific fields, or row count with `COUNT(*)`, |
+| `SELECT` | All fields with `*`, specific fields, or row count with `COUNT(*)`, derived tables support |
 | `SELECT DISTINCT` | |
 | `EXPLAIN`, `EXPLAIN ANALYZE` | Query plan inspection for `SELECT` statements. `EXPLAIN ANALYZE` also executes the query and returns actual row counts and timing |
 | `JOIN` | `INNER`, `LEFT` and `RIGHT` joins supported |
