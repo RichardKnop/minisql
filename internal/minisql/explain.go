@@ -42,6 +42,11 @@ func (d *Database) executeExplain(ctx context.Context, stmt Statement) (Statemen
 		return StatementResult{}, fmt.Errorf("%w: got %s", errExplainUnsupportedStatement, inner.Kind)
 	}
 
+	// Derived table: FROM (subquery) alias — delegate to specialised handler.
+	if inner.FromSubquery != nil {
+		return d.executeExplainDerivedTable(ctx, inner, stmt.ExplainAnalyze)
+	}
+
 	table, ok := d.GetTable(ctx, inner.TableName)
 	if !ok {
 		return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, inner.TableName)
@@ -55,6 +60,13 @@ func (d *Database) executeExplain(ctx context.Context, stmt Statement) (Statemen
 	if err != nil {
 		return StatementResult{}, err
 	}
+
+	// Resolve WHERE subqueries before Validate so validateWhere never sees *Statement operands.
+	inner.Conditions, err = d.resolveSubqueries(ctx, inner.Conditions)
+	if err != nil {
+		return StatementResult{}, err
+	}
+
 	if err := inner.Validate(table); err != nil {
 		return StatementResult{}, err
 	}
@@ -73,6 +85,97 @@ func (d *Database) executeExplain(ctx context.Context, stmt Statement) (Statemen
 	}
 
 	return buildExplainResult(plan, table, metrics), nil
+}
+
+// executeExplainDerivedTable handles EXPLAIN [ANALYZE] SELECT … FROM (subquery) alias.
+// It materialises the inner subquery, builds a virtual table, and explains the outer
+// query — emitting a leading "derived_table" step followed by the outer plan steps.
+func (d *Database) executeExplainDerivedTable(ctx context.Context, inner Statement, analyze bool) (StatementResult, error) {
+	start := time.Now()
+	innerResult, err := d.ExecuteStatement(ctx, *inner.FromSubquery)
+	if err != nil {
+		return StatementResult{}, fmt.Errorf("derived table %q: %w", inner.FromSubqueryAlias, err)
+	}
+	var innerRows []Row
+	for innerResult.Rows.Next(ctx) {
+		innerRows = append(innerRows, innerResult.Rows.Row())
+	}
+	if err := innerResult.Rows.Err(); err != nil {
+		return StatementResult{}, fmt.Errorf("derived table %q: reading rows: %w", inner.FromSubqueryAlias, err)
+	}
+	innerDuration := time.Since(start).Microseconds()
+
+	vt := newVirtualTable(d.logger, inner.FromSubqueryAlias, innerResult.Columns, innerRows)
+
+	outer := stripDerivedTableAliasPrefix(inner, inner.FromSubqueryAlias)
+	outer.FromSubquery = nil
+	outer.TableName = inner.FromSubqueryAlias
+	outer.Columns = vt.Columns
+
+	outer, err = outer.Prepare(d.clock())
+	if err != nil {
+		return StatementResult{}, err
+	}
+
+	// Resolve any WHERE subqueries before Validate so validateWhere never sees *Statement operands.
+	outer.Conditions, err = d.resolveSubqueries(ctx, outer.Conditions)
+	if err != nil {
+		return StatementResult{}, err
+	}
+
+	if err := outer.Validate(vt); err != nil {
+		return StatementResult{}, err
+	}
+
+	plan, err := vt.PlanQuery(ctx, outer)
+	if err != nil {
+		return StatementResult{}, err
+	}
+
+	// Build the leading derived_table step (always step 1).
+	derivedStep := explainRow{
+		operation: "derived_table",
+		detail:    "alias=" + inner.FromSubqueryAlias,
+	}
+	if analyze {
+		derivedStep.actual = OptionalValue{Valid: true, Value: int64(len(innerRows))}
+		derivedStep.duration = OptionalValue{Valid: true, Value: innerDuration}
+	}
+
+	planRows := plan.explainRows(vt)
+	allRows := append([]explainRow{derivedStep}, planRows...)
+
+	var outerMetrics map[int]explainMetric
+	if analyze {
+		outerMetrics, err = vt.analyzePlan(ctx, outer, plan)
+		if err != nil {
+			return StatementResult{}, err
+		}
+	}
+
+	resultRows := make([]Row, 0, len(allRows))
+	for idx, row := range allRows {
+		step := idx + 1
+		// Outer plan metrics are 1-based (from analyzePlan); idx maps directly to plan step.
+		if analyze && idx > 0 {
+			if metric, ok := outerMetrics[idx]; ok {
+				row.actual = OptionalValue{Valid: true, Value: metric.rows}
+				row.duration = OptionalValue{Valid: true, Value: metric.durationUS}
+			}
+		}
+		resultRows = append(resultRows, NewRowWithValues(explainColumns, []OptionalValue{
+			{Valid: true, Value: int64(step)},
+			{Valid: true, Value: NewTextPointer([]byte(row.operation))},
+			{Valid: true, Value: NewTextPointer([]byte(row.detail))},
+			row.estimated,
+			row.actual,
+			row.duration,
+		}))
+	}
+	return StatementResult{
+		Columns: explainColumns,
+		Rows:    NewSliceIterator(resultRows),
+	}, nil
 }
 
 func buildExplainResult(plan QueryPlan, table *Table, metrics map[int]explainMetric) StatementResult {
