@@ -336,13 +336,15 @@ type Statement struct {
 	UniqueIndexes    []UniqueIndex
 	Columns          []Column
 	Conditions       OneOrMore
-	ReturningFields  []Field
-	ExplainStatement *Statement
-	Kind             StatementKind
-	ConflictAction   ConflictAction
-	IfNotExists      bool
-	ExplainAnalyze   bool
-	Distinct         bool
+	ReturningFields    []Field
+	ExplainStatement   *Statement
+	FromSubquery       *Statement // non-nil when FROM clause is a derived table
+	FromSubqueryAlias  string     // alias for the derived table (e.g. "t" in FROM (...) t)
+	Kind               StatementKind
+	ConflictAction     ConflictAction
+	IfNotExists        bool
+	ExplainAnalyze     bool
+	Distinct           bool
 }
 
 // NumPlaceholders returns the number of placeholder parameters (?) in the statement.
@@ -413,31 +415,32 @@ func (s Statement) Clone() Statement {
 	}
 
 	stmt := Statement{
-		Kind:            s.Kind,
-		IfNotExists:     s.IfNotExists,
-		TableName:       s.TableName,
-		TableAlias:      s.TableAlias,
-		IndexName:       s.IndexName,
-		Target:          s.Target,
-		PragmaName:      s.PragmaName,
-		PragmaValue:     s.PragmaValue,
-		ConflictAction:  s.ConflictAction,
-		Columns:         s.Columns,
-		Distinct:        s.Distinct,
-		Fields:          fields,
-		Aggregates:      s.Aggregates, // slice of value types, safe to share
-		Aliases:         s.Aliases,
-		Inserts:         make([][]OptionalValue, len(s.Inserts)),
-		Functions:       s.Functions,
-		Conditions:      make(OneOrMore, len(s.Conditions)),
-		GroupBy:         s.GroupBy,
-		Having:          s.Having,
-		Joins:           s.Joins,
-		OrderBy:         s.OrderBy,
-		Limit:           s.Limit,
-		Offset:          s.Offset,
-		ReturningFields: s.ReturningFields,
-		ExplainAnalyze:  s.ExplainAnalyze,
+		Kind:              s.Kind,
+		IfNotExists:       s.IfNotExists,
+		TableName:         s.TableName,
+		TableAlias:        s.TableAlias,
+		IndexName:         s.IndexName,
+		Target:            s.Target,
+		PragmaName:        s.PragmaName,
+		PragmaValue:       s.PragmaValue,
+		ConflictAction:    s.ConflictAction,
+		Columns:           s.Columns,
+		Distinct:          s.Distinct,
+		Fields:            fields,
+		Aggregates:        s.Aggregates, // slice of value types, safe to share
+		Aliases:           s.Aliases,
+		Inserts:           make([][]OptionalValue, len(s.Inserts)),
+		Functions:         s.Functions,
+		Conditions:        make(OneOrMore, len(s.Conditions)),
+		GroupBy:           s.GroupBy,
+		Having:            s.Having,
+		Joins:             s.Joins,
+		OrderBy:           s.OrderBy,
+		Limit:             s.Limit,
+		Offset:            s.Offset,
+		ReturningFields:   s.ReturningFields,
+		ExplainAnalyze:    s.ExplainAnalyze,
+		FromSubqueryAlias: s.FromSubqueryAlias,
 	}
 	for i := range s.Inserts {
 		stmt.Inserts[i] = make([]OptionalValue, len(s.Inserts[i]))
@@ -470,6 +473,10 @@ func (s Statement) Clone() Statement {
 	if s.ExplainStatement != nil {
 		inner := s.ExplainStatement.Clone()
 		stmt.ExplainStatement = &inner
+	}
+	if s.FromSubquery != nil {
+		inner := s.FromSubquery.Clone()
+		stmt.FromSubquery = &inner
 	}
 	return stmt
 }

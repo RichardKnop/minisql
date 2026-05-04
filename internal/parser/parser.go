@@ -615,6 +615,7 @@ func (p *parserItem) validate(stmt minisql.Statement) error {
 			return errCreateIndexNoColumns
 		}
 	} else if stmt.TableName == "" &&
+		stmt.FromSubquery == nil &&
 		stmt.Kind != minisql.Analyze &&
 		stmt.Kind != minisql.Vacuum &&
 		stmt.Kind != minisql.Pragma &&

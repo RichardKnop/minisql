@@ -23,7 +23,9 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 
 	// Fast path: COUNT(*) with no WHERE clause and no JOIN — walk leaf page
 	// headers without deserialising any row data.
-	if stmt.IsSelectCountAll() && len(stmt.Conditions) == 0 && len(stmt.Joins) == 0 {
+	// Virtual tables (derived FROM subqueries) must skip this and go through
+	// the normal materialising path so the in-memory rows are counted instead.
+	if stmt.IsSelectCountAll() && len(stmt.Conditions) == 0 && len(stmt.Joins) == 0 && t.virtualRows == nil {
 		return t.countAllLeafWalk(ctx)
 	}
 
@@ -290,7 +292,7 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row)
 	resultValues := make([]OptionalValue, len(stmt.Aggregates))
 
 	for i, agg := range stmt.Aggregates {
-		fieldName := stmt.Fields[i].Name // e.g. "SUM(price)"
+		fieldName := stmt.Fields[i].OutputName() // respects AS alias
 		switch agg.Kind {
 		case AggregateCount:
 			resultColumns[i] = Column{Name: fieldName, Kind: Int8}
@@ -450,25 +452,27 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 	resultColumns := make([]Column, len(stmt.Fields))
 	for i, field := range stmt.Fields {
 		agg := stmt.Aggregates[i]
+		colName := field.OutputName() // respects AS alias
 		switch agg.Kind {
 		case 0:
 			// GROUP BY column — use the actual table column type.
 			if col, ok := t.ColumnByName(field.Name); ok {
 				resultColumns[i] = col
+				resultColumns[i].Name = colName
 			}
 		case AggregateCount:
-			resultColumns[i] = Column{Name: field.Name, Kind: Int8}
+			resultColumns[i] = Column{Name: colName, Kind: Int8}
 		case AggregateSum:
 			if useIntSum[i] {
-				resultColumns[i] = Column{Name: field.Name, Kind: Int8}
+				resultColumns[i] = Column{Name: colName, Kind: Int8}
 			} else {
-				resultColumns[i] = Column{Name: field.Name, Kind: Double}
+				resultColumns[i] = Column{Name: colName, Kind: Double}
 			}
 		case AggregateAvg:
-			resultColumns[i] = Column{Name: field.Name, Kind: Double}
+			resultColumns[i] = Column{Name: colName, Kind: Double}
 		case AggregateMin, AggregateMax:
 			if col, ok := t.ColumnByName(agg.Column); ok {
-				resultColumns[i] = Column{Name: field.Name, Kind: col.Kind, Size: col.Size}
+				resultColumns[i] = Column{Name: colName, Kind: col.Kind, Size: col.Size}
 			}
 		}
 	}
@@ -1194,6 +1198,9 @@ func deduplicateRows(rows []Row, fields []Field) []Row {
 }
 
 func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
+	if t.virtualRows != nil {
+		return t.virtualSequentialScan(ctx, scan, out)
+	}
 	cursor, err := t.SeekFirst(ctx)
 	if err != nil {
 		return err
@@ -1360,4 +1367,29 @@ func compileScanFilter(columns []Column, filters OneOrMore) func(Row) (bool, err
 	return func(row Row) (bool, error) {
 		return row.CheckOneOrMoreWithColumnIndexes(filters, columnIndexes)
 	}
+}
+
+// virtualSequentialScan iterates the table's in-memory virtualRows, applies the
+// scan filter, and calls out for each matching row.  It is only called when
+// t.virtualRows != nil (derived-table virtual tables).
+func (t *Table) virtualSequentialScan(ctx context.Context, scan Scan, out func(Row) error) error {
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	for _, row := range t.virtualRows {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if tableFilter != nil {
+			ok, err := tableFilter(row)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
+		}
+		if err := out(row); err != nil {
+			return err
+		}
+	}
+	return nil
 }

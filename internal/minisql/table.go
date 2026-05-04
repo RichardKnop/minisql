@@ -23,6 +23,10 @@ type Table struct {
 	txManager            *TransactionManager
 	indexStats           map[string]IndexStats
 	getRowCount          func() int64
+	// virtualRows is non-nil only for derived-table virtual tables created by
+	// executeSelectFromDerivedTable. When set, sequentialScan iterates these
+	// in-memory rows instead of reading from the B+ tree pager.
+	virtualRows []Row
 	// rightmostTablePage caches the last leaf page index for SeekNextRowID so that
 	// sequential (autoincrement) inserts skip the O(log N) root→leaf traversal.
 	// lastTxIDTablePage guards against stale hints from rolled-back transactions.

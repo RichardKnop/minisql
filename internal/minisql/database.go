@@ -455,6 +455,11 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 			return d.executeUnion(ctx, stmt)
 		}
 
+		// SELECT … FROM (subquery) alias — derived table.
+		if stmt.Kind == Select && stmt.FromSubquery != nil {
+			return d.executeSelectFromDerivedTable(ctx, stmt)
+		}
+
 		table, ok := d.GetTable(ctx, stmt.TableName)
 		if !ok {
 			return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, stmt.TableName)
