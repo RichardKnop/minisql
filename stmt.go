@@ -12,6 +12,7 @@ import (
 // Stmt ...
 type Stmt struct {
 	conn      *Conn
+	query     string
 	statement minisql.Statement
 }
 
@@ -48,7 +49,12 @@ func (s Stmt) Exec(args []driver.Value) (driver.Result, error) {
 }
 
 // ExecContext ...
-func (s Stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
+func (s Stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (result driver.Result, err error) {
+	start := time.Now()
+	defer func() {
+		s.conn.logSlowQuery(s.query, time.Since(start), err)
+	}()
+
 	internalArgs, err := toInternalArgs(args)
 	if err != nil {
 		return nil, err
@@ -59,12 +65,12 @@ func (s Stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver
 		return nil, err
 	}
 
-	result, err := s.conn.executeStatement(ctx, stmtWithArgs)
+	stmtResult, err := s.conn.executeStatement(ctx, stmtWithArgs)
 	if err != nil {
 		return nil, err
 	}
 
-	return Result{rowsAffected: int64(result.RowsAffected)}, nil
+	return Result{rowsAffected: int64(stmtResult.RowsAffected)}, nil
 }
 
 // Query executes a query that may return rows, such as a
@@ -76,7 +82,12 @@ func (s Stmt) Query(args []driver.Value) (driver.Rows, error) {
 }
 
 // QueryContext ...
-func (s Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+func (s Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (rows driver.Rows, err error) {
+	start := time.Now()
+	defer func() {
+		s.conn.logSlowQuery(s.query, time.Since(start), err)
+	}()
+
 	internalArgs, err := toInternalArgs(args)
 	if err != nil {
 		return nil, err

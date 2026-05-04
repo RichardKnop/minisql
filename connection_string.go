@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
 	"go.uber.org/zap"
@@ -38,6 +39,7 @@ type ConnectionConfig struct {
 	WALWriteBufferSize     int             // WAL write-buffer size in bytes (default: 64 KiB; 0 = flush every commit)
 	LogLevel               string          // Log level: debug, info, warn, error (default: warn)
 	MaxCachedPages         int             // Maximum number of pages to cache (default: 2000, 0 = use default)
+	SlowQueryThreshold     time.Duration   // Log queries at WARN when elapsed time meets or exceeds this duration (0 = disabled)
 	Synchronous            SynchronousMode // WAL fsync mode: off, normal (default), full
 }
 
@@ -62,6 +64,7 @@ func DefaultConnectionConfig(filePath string) *ConnectionConfig {
 //   - wal_write_buffer_size=N           : WAL write-buffer in bytes (default: 65536; 0 = flush every commit)
 //   - log_level=debug|info|warn|error   : Set logging level (default: warn)
 //   - max_cached_pages=N                : Page cache size in pages (default: 2000)
+//   - slow_query_threshold=50ms         : Log queries taking at least this long (0 = disabled)
 //   - synchronous=off|normal|full       : WAL fsync mode (default: normal, matching SQLite WAL default)
 //
 // Examples:
@@ -127,6 +130,15 @@ func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 			return nil, fmt.Errorf("invalid max_cached_pages parameter: must be non-negative, got %d", maxPages)
 		}
 		config.MaxCachedPages = maxPages
+	}
+
+	// Parse slow_query_threshold parameter
+	if thresholdStr := queryParams.Get("slow_query_threshold"); thresholdStr != "" {
+		threshold, err := time.ParseDuration(thresholdStr)
+		if err != nil || threshold < 0 {
+			return nil, fmt.Errorf("invalid slow_query_threshold parameter: must be a non-negative duration, got %q", thresholdStr)
+		}
+		config.SlowQueryThreshold = threshold
 	}
 
 	// Parse synchronous parameter

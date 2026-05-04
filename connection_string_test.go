@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"testing"
+	"time"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
 	"github.com/stretchr/testify/assert"
@@ -98,13 +99,14 @@ func TestParseConnectionString(t *testing.T) {
 		},
 		{
 			name:    "all parameters",
-			connStr: "./test.db?wal_checkpoint_threshold=200&log_level=info&max_cached_pages=4000",
+			connStr: "./test.db?wal_checkpoint_threshold=200&log_level=info&max_cached_pages=4000&slow_query_threshold=75ms",
 			wantConfig: &ConnectionConfig{
 				FilePath:               "./test.db",
 				WALCheckpointThreshold: 200,
 				WALWriteBufferSize:     DefaultWALWriteBufferSize,
 				LogLevel:               "info",
 				MaxCachedPages:         4000,
+				SlowQueryThreshold:     75 * time.Millisecond,
 				Synchronous:            SynchronousNormal,
 			},
 			wantErr: false,
@@ -202,6 +204,18 @@ func TestParseConnectionString(t *testing.T) {
 			connStr:     "./test.db?log_level=verbose",
 			wantErr:     true,
 			errContains: "invalid log_level parameter",
+		},
+		{
+			name:        "invalid slow query threshold",
+			connStr:     "./test.db?slow_query_threshold=soon",
+			wantErr:     true,
+			errContains: "invalid slow_query_threshold parameter",
+		},
+		{
+			name:        "negative slow query threshold",
+			connStr:     "./test.db?slow_query_threshold=-1ms",
+			wantErr:     true,
+			errContains: "invalid slow_query_threshold parameter",
 		},
 		{
 			name:        "invalid synchronous value",

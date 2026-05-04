@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
 	"github.com/RichardKnop/minisql/internal/parser"
@@ -66,9 +67,10 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 	}
 
 	return &Conn{
-		db:     db,
-		parser: d.parser,
-		logger: d.logger,
+		db:                 db,
+		parser:             d.parser,
+		logger:             d.logger,
+		slowQueryThreshold: config.SlowQueryThreshold,
 	}, nil
 }
 
@@ -118,11 +120,12 @@ func (d *Driver) newDB(config *ConnectionConfig) (*minisql.Database, error) {
 
 // Conn implements the database/sql/driver.Conn interface.
 type Conn struct {
-	db          *minisql.Database
-	parser      minisql.Parser
-	transaction *minisql.Transaction
-	logger      *zap.Logger
-	mu          sync.RWMutex
+	db                 *minisql.Database
+	parser             minisql.Parser
+	transaction        *minisql.Transaction
+	logger             *zap.Logger
+	mu                 sync.RWMutex
+	slowQueryThreshold time.Duration
 }
 
 // Ping ...
@@ -171,6 +174,7 @@ func (c *Conn) PrepareContext(ctx context.Context, query string) (driver.Stmt, e
 
 	return &Stmt{
 		conn:      c,
+		query:     query,
 		statement: statement,
 	}, nil
 }
@@ -202,7 +206,12 @@ func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 }
 
 // ExecContext executes a query that doesn't return rows.
-func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (result driver.Result, err error) {
+	start := time.Now()
+	defer func() {
+		c.logSlowQuery(query, time.Since(start), err)
+	}()
+
 	statements, err := c.parser.Parse(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse query: %w", err)
@@ -237,7 +246,12 @@ func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.Name
 }
 
 // QueryContext executes a query that may return rows.
-func (c *Conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+func (c *Conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (rows driver.Rows, err error) {
+	start := time.Now()
+	defer func() {
+		c.logSlowQuery(query, time.Since(start), err)
+	}()
+
 	statements, err := c.parser.Parse(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse query: %w", err)
@@ -323,6 +337,22 @@ func (c *Conn) executeStatement(ctx context.Context, stmt minisql.Statement) (mi
 	}
 
 	return result, err
+}
+
+func (c *Conn) logSlowQuery(query string, elapsed time.Duration, err error) {
+	if c.slowQueryThreshold <= 0 || elapsed < c.slowQueryThreshold || c.logger == nil {
+		return
+	}
+
+	fields := []zap.Field{
+		zap.String("query", query),
+		zap.Duration("duration", elapsed),
+		zap.Duration("threshold", c.slowQueryThreshold),
+	}
+	if err != nil {
+		fields = append(fields, zap.Error(err))
+	}
+	c.logger.Warn("slow query", fields...)
 }
 
 // Ensure interfaces are implemented

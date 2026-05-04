@@ -52,6 +52,7 @@ MiniSQL supports optional connection string parameters:
 | `wal_checkpoint_threshold` | non-negative integer | `1000` | Auto-checkpoint after N WAL frames (0 = disabled) |
 | `log_level` | `debug`, `info`, `warn`, `error` | `warn` | Set logging verbosity level |
 | `max_cached_pages` | positive integer | `2000` | Maximum number of pages to keep in memory cache |
+| `slow_query_threshold` | Go duration, e.g. `50ms`, `2s` | `0` | Log queries taking at least this long at WARN level (0 = disabled) |
 | `synchronous` | `off`, `normal`, `full` | `normal` | WAL fsync mode (see [WAL durability](#wal-durability-modes) below) |
 
 **Examples:**
@@ -67,6 +68,9 @@ db, err := sql.Open("minisql", "./my.db?wal_checkpoint_threshold=0")
 
 // Maximum write durability (fsync after every commit)
 db, err := sql.Open("minisql", "./my.db?synchronous=full")
+
+// Log queries that take at least 50ms
+db, err := sql.Open("minisql", "./my.db?slow_query_threshold=50ms")
 
 // Combine multiple parameters
 db, err := sql.Open("minisql", "/path/to/db.db?log_level=info&max_cached_pages=2000")
