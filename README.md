@@ -358,7 +358,7 @@ Important behavior and current non-goals:
 | `UPDATE` | |
 | `DELETE` | |
 | `RETURNING` | Can be used to return columns from `INSERT` or `DELETE` queries, common use case is to return auto incremented primary key |
-| `WHERE` | Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`, `LIKE`, `NOT LIKE`, `BETWEEN`, support for non-correlated scalar subqueries |
+| `WHERE` | Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`, `LIKE`, `NOT LIKE`, `BETWEEN`, support for SELECT only non-correlated scalar subqueries |
 | `LIKE`, `NOT LIKE` | `%` matches any sequence of zero or more characters; `_` matches any single character |
 | `LIMIT` and `OFFSET` | Basic pagination |
 | `ORDER BY` | Single column only |
