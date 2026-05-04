@@ -126,7 +126,7 @@ func (s *TestSuite) TestInnerJoin() {
 			expected := expectedResults[i]
 			s.Equal(expected.username, username, "Row %d: user_name mismatch", i)
 			s.Equal(expected.amount, amount, "Row %d: amount mismatch", i)
-			i++
+			i += 1
 		}
 
 		s.Require().NoError(rows.Err())
@@ -170,7 +170,7 @@ func (s *TestSuite) TestInnerJoin() {
 			s.Equal(expected.userID, userID, "Row %d: user_id mismatch", i)
 			s.Equal(expected.username, username, "Row %d: user_name mismatch", i)
 			s.Equal(expected.amount, amount, "Row %d: amount mismatch", i)
-			i++
+			i += 1
 		}
 		rows.Close()
 		s.Require().NoError(rows.Err())
@@ -211,7 +211,7 @@ func (s *TestSuite) TestInnerJoin() {
 			expected := expectedByAmount[i]
 			s.Equal(expected.username, username, "Row %d: user_name mismatch", i)
 			s.Equal(expected.amount, amount, "Row %d: amount mismatch", i)
-			i++
+			i += 1
 		}
 		rows.Close()
 		s.Require().NoError(rows.Err())
@@ -252,7 +252,7 @@ func (s *TestSuite) TestInnerJoin() {
 			expected := expectedByMultiple[i]
 			s.Equal(expected.username, username, "Row %d: user_name mismatch", i)
 			s.Equal(expected.amount, amount, "Row %d: amount mismatch", i)
-			i++
+			i += 1
 		}
 		rows.Close()
 		s.Require().NoError(rows.Err())
@@ -334,7 +334,7 @@ func (s *TestSuite) TestInnerJoin_WithSecondaryIndex() {
 		s.Equal(expected.username, username, "Row %d: user_name mismatch", i)
 		s.Equal(expected.orderID, orderID, "Row %d: order_id mismatch", i)
 		s.Equal(expected.amount, amount, "Row %d: amount mismatch", i)
-		i++
+		i += 1
 	}
 
 	s.Require().NoError(rows.Err())

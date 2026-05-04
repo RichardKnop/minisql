@@ -451,6 +451,15 @@ func (s Statement) Clone() Statement {
 	for i := range s.Conditions {
 		stmt.Conditions[i] = make([]Condition, len(s.Conditions[i]))
 		copy(stmt.Conditions[i], s.Conditions[i])
+		// Deep-copy subquery operands so parallel bind calls don't race.
+		for j, cond := range stmt.Conditions[i] {
+			if cond.Operand2.Type == OperandSubquery {
+				if sub, ok := cond.Operand2.Value.(*Statement); ok {
+					cloned := sub.Clone()
+					stmt.Conditions[i][j].Operand2.Value = &cloned
+				}
+			}
+		}
 	}
 	if len(s.Unions) > 0 {
 		stmt.Unions = make([]UnionClause, len(s.Unions))

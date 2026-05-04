@@ -417,7 +417,7 @@ func dateFromEpochDaysBackward(days int64) (int32, int, int) {
 			break
 		}
 		remainingDays -= yearDays
-		year--
+		year -= 1
 	}
 
 	month := 12
@@ -427,7 +427,7 @@ func dateFromEpochDaysBackward(days int64) (int32, int, int) {
 			break
 		}
 		remainingDays -= monthDays
-		month--
+		month -= 1
 	}
 
 	day := daysInMonth(isLeapYear(int(year)), month) - int(remainingDays) + 1

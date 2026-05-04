@@ -100,7 +100,7 @@ func BenchmarkSelect_Limit(b *testing.B) {
 						rows.Close()
 						b.Fatalf("scan: %v", err)
 					}
-					n++
+					n += 1
 				}
 				rows.Close()
 				if err := rows.Err(); err != nil {
@@ -149,7 +149,7 @@ func BenchmarkSelect_FullScan(b *testing.B) {
 						rows.Close()
 						b.Fatalf("scan: %v", err)
 					}
-					n++
+					n += 1
 				}
 				rows.Close()
 				if err := rows.Err(); err != nil {

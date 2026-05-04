@@ -128,7 +128,7 @@ func (c *cacheImpl[T]) EvictIfNeeded() (T, bool) {
 		// Reset its access count and check the next one
 		atomic.StoreUint32(&victim.accessCount, 0)
 		victim = victim.prev
-		attempts++
+		attempts += 1
 	}
 
 	// If all checked entries were accessed, just evict the tail anyway

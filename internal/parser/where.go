@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -287,8 +288,8 @@ func (p *parserItem) parseLeafCondition() (*minisql.ConditionNode, error) {
 	return &minisql.ConditionNode{Leaf: &cond}, nil
 }
 
-// parseCondScalarValue parses a scalar value (literal, placeholder, or field identifier)
-// and assigns it to cond.Operand2.
+// parseCondScalarValue parses a scalar value (literal, placeholder, field
+// identifier, or scalar subquery) and assigns it to cond.Operand2.
 func (p *parserItem) parseCondScalarValue(cond *minisql.Condition) error {
 	value, ln := p.peekValue()
 	if ln != 0 {
@@ -314,6 +315,19 @@ func (p *parserItem) parseCondScalarValue(cond *minisql.Condition) error {
 		p.pop()
 		return nil
 	}
+	// Scalar subquery: col = (SELECT ...)
+	if p.peek() == "(" {
+		p.pop() // consume "("
+		if strings.ToUpper(p.peek()) != "SELECT" {
+			return p.errorf("at WHERE: expected SELECT after '(' for scalar subquery")
+		}
+		subStmt, err := p.parseSubquery()
+		if err != nil {
+			return err
+		}
+		cond.Operand2 = minisql.Operand{Type: minisql.OperandSubquery, Value: subStmt}
+		return nil
+	}
 	if identifier := p.peek(); isIdentifier(identifier) {
 		cond.Operand2 = minisql.Operand{
 			Type:  minisql.OperandField,
@@ -325,9 +339,65 @@ func (p *parserItem) parseCondScalarValue(cond *minisql.Condition) error {
 	return p.wrapErr(errWhereExpectedIdentifierPlaceholderOrValue)
 }
 
+// parseSubquery extracts the SQL from p.i to the matching closing paren,
+// parses it as a SELECT statement, and returns the parsed *Statement.
+// p.i must be positioned at the start of the SELECT keyword when called.
+// The closing ")" is consumed before returning.
+func (p *parserItem) parseSubquery() (*minisql.Statement, error) {
+	// Find the matching ")" by scanning character-by-character, respecting
+	// single-quoted strings and nested parentheses.
+	var (
+		depth   = 1
+		scanI   = p.i
+		inQuote = false
+	)
+	for scanI < len(p.sql) {
+		ch := p.sql[scanI]
+		if ch == '\'' {
+			inQuote = !inQuote
+		} else if !inQuote {
+			if ch == '(' {
+				depth += 1
+			} else if ch == ')' {
+				depth -= 1
+				if depth == 0 {
+					break
+				}
+			}
+		}
+		scanI += 1
+	}
+	if depth != 0 {
+		return nil, p.errorf("at WHERE: unclosed parenthesis in subquery")
+	}
+	subSQL := strings.TrimSpace(p.sql[p.i:scanI])
+	p.i = scanI + 1 // skip ")"
+	p.popWhitespace()
+
+	stmts, err := New().Parse(context.Background(), subSQL)
+	if err != nil {
+		return nil, p.errorf("at WHERE: subquery parse error: %v", err)
+	}
+	if len(stmts) != 1 || stmts[0].Kind != minisql.Select {
+		return nil, p.errorf("at WHERE: subquery must be a single SELECT statement")
+	}
+	return &stmts[0], nil
+}
+
 // parseCondListValues parses the comma-separated values inside IN (...).
 // The opening "(" is already consumed as part of the "IN (" token.
+// If the first token is SELECT, the entire list is treated as a subquery.
 func (p *parserItem) parseCondListValues(cond *minisql.Condition) error {
+	// IN (SELECT ...) — list subquery
+	if strings.ToUpper(p.peek()) == "SELECT" {
+		subStmt, err := p.parseSubquery()
+		if err != nil {
+			return err
+		}
+		cond.Operand2 = minisql.Operand{Type: minisql.OperandSubquery, Value: subStmt}
+		return nil
+	}
+
 	for {
 		value, ln := p.peekValue()
 		switch {
