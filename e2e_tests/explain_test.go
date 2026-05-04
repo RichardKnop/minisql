@@ -60,6 +60,67 @@ func (s *TestSuite) TestExplainUnsupportedStatement() {
 	s.True(strings.Contains(err.Error(), "got INSERT"))
 }
 
+func (s *TestSuite) TestExplainSelectWithWhereSubquery() {
+	s.execQuery(createUsersTableSQL, 0)
+	s.execQuery(createOrdersTableSQL, 0)
+	s.execQuery(`insert into users("email", "name") values
+('alice@example.com', 'Alice'),
+('bob@example.com', 'Bob'),
+('carol@example.com', 'Carol');`, 3)
+	s.execQuery(`insert into orders(user_id, product_id, total_paid) values (1, 1, 100), (1, 2, 200), (2, 1, 50);`, 3)
+
+	// IN subquery: EXPLAIN should resolve the subquery and produce a valid plan.
+	rows := s.collectExplain(`EXPLAIN SELECT * FROM users WHERE id IN (SELECT user_id FROM orders);`)
+	s.Require().NotEmpty(rows)
+	s.Equal(int64(1), rows[0].Step)
+	// Planner may choose index_point (per-key) or sequential scan; either is valid.
+	s.NotEmpty(rows[0].Operation)
+	s.Contains(rows[0].Detail, "table=users")
+}
+
+func (s *TestSuite) TestExplainSelectDerivedTable() {
+	s.execQuery(createUsersTableSQL, 0)
+	s.execQuery(`insert into users("email", "name") values
+('alice@example.com', 'Alice'),
+('bob@example.com', 'Bob');`, 2)
+
+	rows := s.collectExplain(`EXPLAIN SELECT t.name FROM (SELECT id, name FROM users) t;`)
+	s.Require().Len(rows, 2)
+
+	s.Equal(int64(1), rows[0].Step)
+	s.Equal("derived_table", rows[0].Operation)
+	s.Contains(rows[0].Detail, "alias=t")
+	s.False(rows[0].RowsEstimated.Valid)
+	s.False(rows[0].RowsActual.Valid)
+
+	s.Equal(int64(2), rows[1].Step)
+	s.NotEmpty(rows[1].Operation)
+	s.Contains(rows[1].Detail, "table=t")
+}
+
+func (s *TestSuite) TestExplainAnalyzeDerivedTable() {
+	s.execQuery(createUsersTableSQL, 0)
+	s.execQuery(`insert into users("email", "name") values
+('alice@example.com', 'Alice'),
+('bob@example.com', 'Bob'),
+('carol@example.com', 'Carol');`, 3)
+
+	rows := s.collectExplain(`EXPLAIN ANALYZE SELECT t.name FROM (SELECT id, name FROM users) t;`)
+	s.Require().Len(rows, 2)
+
+	s.Equal(int64(1), rows[0].Step)
+	s.Equal("derived_table", rows[0].Operation)
+	s.Contains(rows[0].Detail, "alias=t")
+	s.True(rows[0].RowsActual.Valid)
+	s.Equal(int64(3), rows[0].RowsActual.Int64)
+	s.True(rows[0].DurationUS.Valid)
+
+	s.Equal(int64(2), rows[1].Step)
+	s.True(rows[1].RowsActual.Valid)
+	s.Equal(int64(3), rows[1].RowsActual.Int64)
+	s.True(rows[1].DurationUS.Valid)
+}
+
 func (s *TestSuite) collectExplain(query string) []explainResult {
 	rows, err := s.db.QueryContext(context.Background(), query)
 	s.Require().NoError(err)
