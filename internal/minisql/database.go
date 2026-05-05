@@ -115,7 +115,11 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, par
 }
 
 // GetTable retrieves a table by name in a thread-safe manner.
+// CTE virtual tables registered in the context shadow real tables of the same name.
 func (d *Database) GetTable(ctx context.Context, name string) (*Table, bool) {
+	if t, ok := cteFromContext(ctx, name); ok {
+		return t, true
+	}
 	d.dbLock.RLock()
 	defer d.dbLock.RUnlock()
 	table, exists := d.tables[name]
@@ -133,6 +137,9 @@ type lockedTableProvider struct {
 
 // GetTable retrieves a table by name without acquiring the database lock.
 func (p *lockedTableProvider) GetTable(ctx context.Context, name string) (*Table, bool) {
+	if t, ok := cteFromContext(ctx, name); ok {
+		return t, true
+	}
 	table, ok := p.db.tables[name]
 	if ok {
 		return table, true
@@ -441,6 +448,13 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 	case CreateTable, DropTable, CreateIndex, DropIndex:
 		return d.executeDDLStatement(ctx, stmt)
 	case Insert, Select, Update, Delete:
+		// WITH … SELECT — CTE statement. Route before resolveSubqueries because
+		// the outer WHERE may reference CTE names that only become resolvable
+		// after the CTE virtual tables are materialised.
+		if stmt.Kind == Select && len(stmt.CTEs) > 0 {
+			return d.executeCTESelect(ctx, stmt)
+		}
+
 		// Pre-evaluate any non-correlated scalar subqueries in the WHERE clause.
 		if len(stmt.Conditions) > 0 {
 			resolved, err := d.resolveSubqueries(ctx, stmt.Conditions)

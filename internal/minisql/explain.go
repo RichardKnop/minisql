@@ -47,6 +47,11 @@ func (d *Database) executeExplain(ctx context.Context, stmt Statement) (Statemen
 		return d.executeExplainDerivedTable(ctx, inner, stmt.ExplainAnalyze)
 	}
 
+	// WITH … SELECT — CTE statement.
+	if len(inner.CTEs) > 0 {
+		return d.executeExplainCTEs(ctx, inner, stmt.ExplainAnalyze)
+	}
+
 	table, ok := d.GetTable(ctx, inner.TableName)
 	if !ok {
 		return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, inner.TableName)
@@ -85,6 +90,118 @@ func (d *Database) executeExplain(ctx context.Context, stmt Statement) (Statemen
 	}
 
 	return buildExplainResult(plan, table, metrics), nil
+}
+
+// executeExplainCTEs handles EXPLAIN [ANALYZE] WITH … SELECT statements.
+// Each CTE is materialised in order, emitting a "cte" step per CTE followed
+// by the outer query's plan steps.
+func (d *Database) executeExplainCTEs(ctx context.Context, inner Statement, analyze bool) (StatementResult, error) {
+	type cteStep struct {
+		name     string
+		rowCount int64
+		duration int64
+	}
+
+	registry := make(map[string]*Table, len(inner.CTEs))
+	var cteSteps []cteStep
+
+	for _, cte := range inner.CTEs {
+		start := time.Now()
+		cteCtx := ctxWithCTERegistry(ctx, registry)
+		result, err := d.ExecuteStatement(cteCtx, *cte.Body)
+		if err != nil {
+			return StatementResult{}, fmt.Errorf("CTE %q: %w", cte.Name, err)
+		}
+		var rows []Row
+		for result.Rows.Next(cteCtx) {
+			rows = append(rows, result.Rows.Row())
+		}
+		if err := result.Rows.Err(); err != nil {
+			return StatementResult{}, fmt.Errorf("CTE %q: reading rows: %w", cte.Name, err)
+		}
+		dur := time.Since(start).Microseconds()
+		vt := newVirtualTable(d.logger, cte.Name, result.Columns, rows)
+		vt.provider = d.lockedProvider
+		registry[cte.Name] = vt
+		cteSteps = append(cteSteps, cteStep{name: cte.Name, rowCount: int64(len(rows)), duration: dur})
+	}
+
+	mainCtx := ctxWithCTERegistry(ctx, registry)
+	mainStmt := inner
+	mainStmt.CTEs = nil
+
+	mainTable, ok := d.GetTable(mainCtx, mainStmt.TableName)
+	if !ok {
+		return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, mainStmt.TableName)
+	}
+	mainStmt.Columns = mainTable.Columns
+
+	var err error
+	mainStmt, err = mainStmt.Prepare(d.clock())
+	if err != nil {
+		return StatementResult{}, err
+	}
+
+	mainStmt.Conditions, err = d.resolveSubqueries(mainCtx, mainStmt.Conditions)
+	if err != nil {
+		return StatementResult{}, err
+	}
+
+	if err := mainStmt.Validate(mainTable); err != nil {
+		return StatementResult{}, err
+	}
+
+	plan, err := mainTable.PlanQuery(mainCtx, mainStmt)
+	if err != nil {
+		return StatementResult{}, err
+	}
+
+	// Build CTE steps (always first) then outer plan steps.
+	numCTEs := len(cteSteps)
+	planRows := plan.explainRows(mainTable)
+	allRows := make([]explainRow, 0, numCTEs+len(planRows))
+	for _, cs := range cteSteps {
+		row := explainRow{operation: "cte", detail: "name=" + cs.name}
+		if analyze {
+			row.actual = OptionalValue{Valid: true, Value: cs.rowCount}
+			row.duration = OptionalValue{Valid: true, Value: cs.duration}
+		}
+		allRows = append(allRows, row)
+	}
+	allRows = append(allRows, planRows...)
+
+	var outerMetrics map[int]explainMetric
+	if analyze {
+		outerMetrics, err = mainTable.analyzePlan(mainCtx, mainStmt, plan)
+		if err != nil {
+			return StatementResult{}, err
+		}
+	}
+
+	resultRows := make([]Row, 0, len(allRows))
+	for idx, row := range allRows {
+		step := idx + 1
+		// Outer plan metrics are 1-based; shift past the CTE steps.
+		if analyze && idx >= numCTEs {
+			planStep := idx - numCTEs + 1
+			if metric, ok := outerMetrics[planStep]; ok {
+				row.actual = OptionalValue{Valid: true, Value: metric.rows}
+				row.duration = OptionalValue{Valid: true, Value: metric.durationUS}
+			}
+		}
+		resultRows = append(resultRows, NewRowWithValues(explainColumns, []OptionalValue{
+			{Valid: true, Value: int64(step)},
+			{Valid: true, Value: NewTextPointer([]byte(row.operation))},
+			{Valid: true, Value: NewTextPointer([]byte(row.detail))},
+			row.estimated,
+			row.actual,
+			row.duration,
+		}))
+	}
+	return StatementResult{
+		Columns: explainColumns,
+		Rows:    NewSliceIterator(resultRows),
+	}, nil
 }
 
 // executeExplainDerivedTable handles EXPLAIN [ANALYZE] SELECT … FROM (subquery) alias.

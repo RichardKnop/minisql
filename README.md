@@ -353,6 +353,7 @@ Important behavior and current non-goals:
 | `ON CONFLICT` | Both `DO NOTHING` and `DO UPDATE` supported (with `EXCLUDED` pseudo table syntax for updating) |
 | `SELECT` | All fields with `*`, specific fields, or row count with `COUNT(*)`, derived tables support |
 | `SELECT DISTINCT` | |
+| `WITH` | Basic support for `CTEs`, SELECT only currently |
 | `EXPLAIN`, `EXPLAIN ANALYZE` | Query plan inspection for `SELECT` statements. `EXPLAIN ANALYZE` also executes the query and returns actual row counts and timing |
 | `JOIN` | `INNER`, `LEFT` and `RIGHT` joins supported |
 | `UPDATE` | |
