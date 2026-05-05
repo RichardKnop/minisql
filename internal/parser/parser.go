@@ -52,6 +52,7 @@ var reservedWords = []string{
 	"DISTINCT",
 	"UNION ALL", "UNION",
 	"RETURNING",
+	"WITH",
 	";",
 }
 
@@ -131,6 +132,9 @@ const (
 	stepPragma
 	stepReturningField
 	stepReturningComma
+	stepWithCTEName
+	stepWithCTEAs
+	stepWithCTECommaOrSelect
 	stepStatementEnd
 )
 
@@ -138,11 +142,12 @@ type parser struct{}
 
 type parserItem struct {
 	minisql.Statement
-	i               int // where we are in the query
-	sql             string
-	step            step
-	nextUpdateField string
-	joinInProgress  minisql.Join
+	i                 int // where we are in the query
+	sql               string
+	step              step
+	nextUpdateField   string
+	joinInProgress    minisql.Join
+	cteNameInProgress string
 }
 
 // New returns a new SQL parser.
@@ -185,6 +190,9 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 				p.Kind = minisql.DropIndex
 				p.pop()
 				p.step = stepDropIndexName
+			case "WITH":
+				p.pop()
+				p.step = stepWithCTEName
 			case "SELECT":
 				p.Kind = minisql.Select
 				p.pop()
@@ -362,6 +370,21 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 		//------------------
 		case stepReturningField, stepReturningComma:
 			if err := p.doParseReturning(); err != nil {
+				return statements, err
+			}
+		// -----------------
+		// WITH (CTE)
+		//------------------
+		case stepWithCTEName:
+			if err := p.doParseWithCTEName(); err != nil {
+				return statements, err
+			}
+		case stepWithCTEAs:
+			if err := p.doParseWithCTEAs(); err != nil {
+				return statements, err
+			}
+		case stepWithCTECommaOrSelect:
+			if err := p.doParseWithCTECommaOrSelect(); err != nil {
 				return statements, err
 			}
 		case stepStatementEnd:

@@ -142,6 +142,9 @@ type singleTableProvider struct {
 
 // GetTable ...
 func (p *singleTableProvider) GetTable(ctx context.Context, name string) (*Table, bool) {
+	if vt, ok := cteFromContext(ctx, name); ok {
+		return vt, true
+	}
 	if p.table != nil && p.table.Name == name {
 		return p.table, true
 	}

@@ -311,6 +311,12 @@ type UnionClause struct {
 	All  bool
 }
 
+// CTE represents a single Common Table Expression.
+type CTE struct {
+	Name string
+	Body *Statement
+}
+
 // Statement ...
 type Statement struct {
 	PrimaryKey       PrimaryKey
@@ -340,6 +346,7 @@ type Statement struct {
 	ExplainStatement   *Statement
 	FromSubquery       *Statement // non-nil when FROM clause is a derived table
 	FromSubqueryAlias  string     // alias for the derived table (e.g. "t" in FROM (...) t)
+	CTEs               []CTE      // non-nil for WITH … SELECT statements
 	Kind               StatementKind
 	ConflictAction     ConflictAction
 	IfNotExists        bool
@@ -395,6 +402,10 @@ func (s Statement) NumPlaceholders() int {
 				}
 			}
 		}
+	}
+
+	for _, cte := range s.CTEs {
+		count += cte.Body.NumPlaceholders()
 	}
 
 	return count
@@ -478,6 +489,13 @@ func (s Statement) Clone() Statement {
 		inner := s.FromSubquery.Clone()
 		stmt.FromSubquery = &inner
 	}
+	if len(s.CTEs) > 0 {
+		stmt.CTEs = make([]CTE, len(s.CTEs))
+		for i, cte := range s.CTEs {
+			inner := cte.Body.Clone()
+			stmt.CTEs[i] = CTE{Name: cte.Name, Body: &inner}
+		}
+	}
 	return stmt
 }
 
@@ -494,6 +512,20 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 		}
 		stmt.ExplainStatement = &inner
 		return stmt, nil
+	}
+
+	// Bind CTE body placeholders first (they appear before main query in SQL).
+	for i, cte := range stmt.CTEs {
+		n := cte.Body.NumPlaceholders()
+		if len(args) < n {
+			return Statement{}, errors.New("not enough arguments to bind CTE placeholders")
+		}
+		bound, err := cte.Body.BindArguments(args[:n]...)
+		if err != nil {
+			return Statement{}, err
+		}
+		stmt.CTEs[i].Body = &bound
+		args = args[n:]
 	}
 
 	if s.Kind == Insert {
