@@ -510,7 +510,11 @@ func scanDetail(scan Scan) string {
 }
 
 func joinDetail(plan QueryPlan, join JoinPlan) string {
-	parts := []string{"type=" + joinTypeString(join.Type)}
+	algo := "nested_loop"
+	if join.Algorithm == JoinAlgorithmHash {
+		algo = "hash"
+	}
+	parts := []string{"type=" + joinTypeString(join.Type), "algorithm=" + algo}
 	if join.LeftScanIndex >= 0 && join.LeftScanIndex < len(plan.Scans) {
 		parts = append(parts, "left="+plan.Scans[join.LeftScanIndex].TableAlias)
 	}

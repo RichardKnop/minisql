@@ -67,6 +67,25 @@ type JoinColumnPair struct {
 	JoinTableColumn Field
 }
 
+// JoinAlgorithm selects the execution strategy for a single join.
+type JoinAlgorithm int
+
+const (
+	// JoinAlgorithmNestedLoop uses the existing nested-loop strategy: either an
+	// index point-lookup on the inner table (when an index exists) or a full
+	// sequential scan of the inner table for every outer row.
+	JoinAlgorithmNestedLoop JoinAlgorithm = iota
+	// JoinAlgorithmHash builds an in-memory hash table from the inner (build)
+	// side once, then probes it for every outer row.  O(N+M) instead of O(N×M).
+	// Only chosen when no index exists on the inner join column.
+	JoinAlgorithmHash
+)
+
+// hashJoinMaxBuildRows is the maximum inner-table row count for which the
+// planner chooses hash join.  Beyond this threshold the build-side hash table
+// may consume excessive RAM, so we fall back to nested-loop.
+const hashJoinMaxBuildRows = int64(1_000_000)
+
 // JoinPlan represents a join operation between two scans
 type JoinPlan struct {
 	OuterJoinColumn string
@@ -76,6 +95,7 @@ type JoinPlan struct {
 	Type            JoinType
 	LeftScanIndex   int
 	RightScanIndex  int
+	Algorithm       JoinAlgorithm
 }
 
 // QueryPlan determines how to execute a query
