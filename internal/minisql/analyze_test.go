@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,25 +94,39 @@ func TestDatabase_Analyze(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Len(t, stats, 4)
-	assert.Equal(t, Stats{
-		TableName: testTableName,
-		StatValue: "100",
-	}, stats[0])
-	assert.Equal(t, Stats{
-		TableName: testTableName,
-		IndexName: "pkey__test_table",
-		StatValue: "100 100",
-	}, stats[1])
+
+	// Table-level stat has no index name and just the row count.
+	assert.Equal(t, Stats{TableName: testTableName, StatValue: "100"}, stats[0])
+
+	// PK on id (Int8) — numeric, so a histogram suffix is appended.
+	assert.Equal(t, testTableName, stats[1].TableName)
+	assert.Equal(t, "pkey__test_table", stats[1].IndexName)
+	assert.True(t, strings.HasPrefix(stats[1].StatValue, "100 100"), "pk stat should start with '100 100'")
+	pkStats, err := parseIndexStats(stats[1].StatValue)
+	require.NoError(t, err)
+	assert.Equal(t, int64(100), pkStats.NEntry)
+	assert.Equal(t, []int64{100}, pkStats.NDistinct)
+	assert.NotNil(t, pkStats.Hist, "PK on Int8 column should have a histogram")
+	assert.Equal(t, histogramBuckets+1, len(pkStats.Hist.Bounds))
+
+	// Unique index on email (Varchar) — no histogram for text columns.
 	assert.Equal(t, Stats{
 		TableName: testTableName,
 		IndexName: "key__test_table__email",
 		StatValue: "100 100",
 	}, stats[2])
-	assert.Equal(t, Stats{
-		TableName: testTableName,
-		IndexName: "idx_created",
-		StatValue: "100 10",
-	}, stats[3])
+
+	// Secondary index on created (Timestamp) — numeric, so a histogram suffix is appended.
+	assert.Equal(t, testTableName, stats[3].TableName)
+	assert.Equal(t, "idx_created", stats[3].IndexName)
+	assert.True(t, strings.HasPrefix(stats[3].StatValue, "100 10"), "created stat should start with '100 10'")
+	createdStats, err := parseIndexStats(stats[3].StatValue)
+	require.NoError(t, err)
+	assert.Equal(t, int64(100), createdStats.NEntry)
+	assert.Equal(t, []int64{10}, createdStats.NDistinct)
+	assert.NotNil(t, createdStats.Hist, "Timestamp index should have a histogram")
+	// 10 distinct timestamps — histogram has at most 10 distinct boundaries.
+	assert.GreaterOrEqual(t, len(createdStats.Hist.Bounds), 2)
 
 	mock.AssertExpectationsForObjects(t, mockParser)
 }

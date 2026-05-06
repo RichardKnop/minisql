@@ -1444,12 +1444,12 @@ func intersectTwoSortedSets(a, b []RowID) []RowID {
 			if len(result) == 0 || result[len(result)-1] != a[i] {
 				result = append(result, a[i])
 			}
-			i++
-			j++
+			i += 1
+			j += 1
 		case a[i] < b[j]:
-			i++
+			i += 1
 		default:
-			j++
+			j += 1
 		}
 	}
 	if len(result) == 0 {
