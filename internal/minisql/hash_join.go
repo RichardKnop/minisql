@@ -35,7 +35,7 @@ func buildHashBuckets(ctx context.Context, plan QueryPlan, provider TableProvide
 			innerColumns: innerTable.Columns,
 		}
 		innerFields := fieldsFromColumns(innerTable.Columns...)
-		if err := innerTable.sequentialScan(ctx, innerScan, innerFields, func(row Row) error {
+		if err := runTableScan(ctx, plan, innerTable, innerScan, innerFields, func(row Row) error {
 			key := buildSideHashKey(join, row)
 			if key == "" {
 				return nil // NULL join key — never matches

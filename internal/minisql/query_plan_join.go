@@ -24,16 +24,12 @@ func chanRowCallback(ctx context.Context, ch chan<- Row) func(Row) error {
 // Optimizations:
 // 1. Use index on inner table join column when available (index nested loop join).
 // 2. Push single-table WHERE conditions into individual table scans.
+// 3. Use index scans for pushed-down conditions when a matching index exists.
 func (t *Table) planJoinQuery(ctx context.Context, stmt Statement) (QueryPlan, error) {
 	baseTableFilters, joinTableFilters := pushDownFilters(stmt.Conditions, stmt.TableAlias, stmt.Joins)
 
 	plan := QueryPlan{
-		Scans: []Scan{{
-			TableName:  t.Name,
-			TableAlias: stmt.TableAlias,
-			Type:       ScanTypeSequential,
-			Filters:    baseTableFilters,
-		}},
+		Scans:        []Scan{planJoinTableScan(t, t.Name, stmt.TableAlias, baseTableFilters)},
 		Joins:        make([]JoinPlan, 0),
 		OrderBy:      stmt.OrderBy,
 		SortInMemory: len(stmt.OrderBy) > 0,
@@ -131,15 +127,25 @@ func (t *Table) flattenJoinTree(
 			}
 		}
 
-		joinScan := Scan{
-			TableName:  join.TableName,
-			TableAlias: join.TableAlias,
-			Type:       innerScanType,
-			Filters:    joinTableFilters[join.TableAlias],
-		}
-		if innerScanType == ScanTypeIndexPoint && innerIndexInfo != nil {
-			joinScan.IndexName = innerIndexInfo.Name
-			joinScan.IndexColumns = innerIndexInfo.Columns
+		var joinScan Scan
+		if innerScanType == ScanTypeSequential {
+			// No index on the join column: try to accelerate the scan using an index
+			// on any pushed-down WHERE condition (e.g. salary > 80000 on the build
+			// side of a hash join).
+			joinScan = planJoinTableScan(joinedTable, join.TableName, join.TableAlias, joinTableFilters[join.TableAlias])
+		} else {
+			// Index nested-loop join: the join key drives the index point scan;
+			// pushed-down filters are applied as post-lookup row filters.
+			joinScan = Scan{
+				TableName:  join.TableName,
+				TableAlias: join.TableAlias,
+				Type:       innerScanType,
+				Filters:    joinTableFilters[join.TableAlias],
+			}
+			if innerScanType == ScanTypeIndexPoint && innerIndexInfo != nil {
+				joinScan.IndexName = innerIndexInfo.Name
+				joinScan.IndexColumns = innerIndexInfo.Columns
+			}
 		}
 
 		plan.Scans = append(plan.Scans, joinScan)
@@ -284,6 +290,52 @@ func collectJoinAliases(joins []Join, dst map[string]struct{}) {
 	}
 }
 
+// planJoinTableScan returns an optimized Scan for a table participating in a JOIN.
+// It tries index selection on the pushed-down conditions. When index selection
+// produces exactly one scan (the common case: single AND group in WHERE), that
+// index scan is returned. Otherwise the conditions are kept as sequential-scan
+// post-filters to avoid the complexity of unioning multiple OR-group index scans
+// inside the JOIN execution path.
+func planJoinTableScan(t *Table, tableName, tableAlias string, conditions OneOrMore) Scan {
+	defaultScan := Scan{
+		TableName:  tableName,
+		TableAlias: tableAlias,
+		Type:       ScanTypeSequential,
+		Filters:    conditions,
+	}
+	if len(conditions) == 0 || t.HasNoIndex() {
+		return defaultScan
+	}
+	tempPlan := &QueryPlan{Scans: []Scan{defaultScan}}
+	if err := tempPlan.setIndexScans(t, conditions); err != nil {
+		return defaultScan
+	}
+	if len(tempPlan.Scans) != 1 {
+		// Multiple OR groups each with an index — keep sequential for simplicity.
+		return defaultScan
+	}
+	scan := tempPlan.Scans[0]
+	scan.TableAlias = tableAlias
+	return scan
+}
+
+// runTableScan dispatches a single-table scan to the appropriate method based on
+// the scan type. Used in the JOIN execution path where the scan type may have been
+// optimized to an index scan by planJoinTableScan.
+// plan is forwarded to index range scans (which need the sort-direction hint).
+func runTableScan(ctx context.Context, plan QueryPlan, t *Table, scan Scan, fields []Field, out func(Row) error) error {
+	switch scan.Type {
+	case ScanTypeIndexPoint:
+		return t.indexPointScan(ctx, scan, fields, out)
+	case ScanTypeIndexRange:
+		return t.indexRangeScan(ctx, plan, scan, fields, out)
+	case ScanTypeIndexIntersect:
+		return t.indexIntersectScan(ctx, scan, fields, out)
+	default:
+		return t.sequentialScan(ctx, scan, fields, out)
+	}
+}
+
 // pushDownFilters separates WHERE conditions by table alias, pushing filters to
 // the appropriate per-table scan. Handles arbitrary join topologies by collecting
 // all join aliases recursively before distributing conditions.
@@ -387,7 +439,7 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 
 	go func() {
 		defer close(baseRowChan)
-		if err := baseTable.sequentialScan(ctx, baseScan, baseFields, chanRowCallback(ctx, baseRowChan)); err != nil {
+		if err := runTableScan(ctx, p, baseTable, baseScan, baseFields, chanRowCallback(ctx, baseRowChan)); err != nil {
 			baseErrChan <- err
 		}
 	}()
