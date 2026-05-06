@@ -42,6 +42,11 @@ func (d *Database) executeExplain(ctx context.Context, stmt Statement) (Statemen
 		return StatementResult{}, fmt.Errorf("%w: got %s", errExplainUnsupportedStatement, inner.Kind)
 	}
 
+	// UNION/UNION ALL would require explaining multiple SELECT plans; not yet supported.
+	if len(inner.Unions) > 0 {
+		return StatementResult{}, errors.New("EXPLAIN does not support UNION queries; run EXPLAIN on each SELECT separately")
+	}
+
 	// Derived table: FROM (subquery) alias — delegate to specialised handler.
 	if inner.FromSubquery != nil {
 		return d.executeExplainDerivedTable(ctx, inner, stmt.ExplainAnalyze)
@@ -89,7 +94,7 @@ func (d *Database) executeExplain(ctx context.Context, stmt Statement) (Statemen
 		}
 	}
 
-	return buildExplainResult(plan, table, metrics), nil
+	return buildExplainResult(ctx, plan, table, d.lockedProvider, metrics), nil
 }
 
 // executeExplainCTEs handles EXPLAIN [ANALYZE] WITH … SELECT statements.
@@ -158,7 +163,7 @@ func (d *Database) executeExplainCTEs(ctx context.Context, inner Statement, anal
 
 	// Build CTE steps (always first) then outer plan steps.
 	numCTEs := len(cteSteps)
-	planRows := plan.explainRows(mainTable)
+	planRows := plan.explainRows(ctx, mainTable, d.lockedProvider)
 	allRows := make([]explainRow, 0, numCTEs+len(planRows))
 	for _, cs := range cteSteps {
 		row := explainRow{operation: "cte", detail: "name=" + cs.name}
@@ -259,7 +264,7 @@ func (d *Database) executeExplainDerivedTable(ctx context.Context, inner Stateme
 		derivedStep.duration = OptionalValue{Valid: true, Value: innerDuration}
 	}
 
-	planRows := plan.explainRows(vt)
+	planRows := plan.explainRows(ctx, vt, d.lockedProvider)
 	allRows := append([]explainRow{derivedStep}, planRows...)
 
 	var outerMetrics map[int]explainMetric
@@ -295,8 +300,8 @@ func (d *Database) executeExplainDerivedTable(ctx context.Context, inner Stateme
 	}, nil
 }
 
-func buildExplainResult(plan QueryPlan, table *Table, metrics map[int]explainMetric) StatementResult {
-	rows := plan.explainRows(table)
+func buildExplainResult(ctx context.Context, plan QueryPlan, table *Table, provider TableProvider, metrics map[int]explainMetric) StatementResult {
+	rows := plan.explainRows(ctx, table, provider)
 	resultRows := make([]Row, 0, len(rows))
 	for idx, row := range rows {
 		step := idx + 1
@@ -319,13 +324,21 @@ func buildExplainResult(plan QueryPlan, table *Table, metrics map[int]explainMet
 	}
 }
 
-func (p QueryPlan) explainRows(table *Table) []explainRow {
+func (p QueryPlan) explainRows(ctx context.Context, table *Table, provider TableProvider) []explainRow {
 	rows := make([]explainRow, 0, len(p.Scans)+len(p.Joins)+1)
 	for _, scan := range p.Scans {
+		// Use the scan's own table for row-count estimates so join table scans
+		// are not incorrectly estimated using the base table's statistics.
+		scanTable := table
+		if provider != nil && scan.TableName != "" && scan.TableName != table.Name {
+			if t, ok := provider.GetTable(ctx, scan.TableName); ok {
+				scanTable = t
+			}
+		}
 		rows = append(rows, explainRow{
 			operation: scanOperation(scan),
 			detail:    scanDetail(scan),
-			estimated: estimateScanRows(table, scan),
+			estimated: estimateScanRows(scanTable, scan),
 		})
 	}
 	for _, join := range p.Joins {

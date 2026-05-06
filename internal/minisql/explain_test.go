@@ -353,7 +353,7 @@ func TestBuildExplainResult_PlainPlan(t *testing.T) {
 		},
 	}
 
-	result := buildExplainResult(plan, table, nil)
+	result := buildExplainResult(context.Background(), plan, table, nil, nil)
 	require.Equal(t, explainColumns, result.Columns)
 	require.True(t, result.Rows.Next(context.Background()))
 
