@@ -413,6 +413,8 @@ func (t *Table) executeExplainScan(ctx context.Context, plan QueryPlan, scan Sca
 		return t.indexEndpointScan(ctx, scan, selectedFields, out, true)
 	case ScanTypeSequential:
 		return t.sequentialScan(ctx, scan, selectedFields, out)
+	case ScanTypeIndexIntersect:
+		return t.indexIntersectScan(ctx, scan, selectedFields, out)
 	default:
 		return fmt.Errorf("unhandled scan type in EXPLAIN ANALYZE: %d", scan.Type)
 	}
@@ -468,6 +470,20 @@ func scanOperation(scan Scan) string {
 }
 
 func scanDetail(scan Scan) string {
+	if scan.Type == ScanTypeIndexIntersect {
+		subParts := make([]string, 0, len(scan.SubScans))
+		for _, sub := range scan.SubScans {
+			subParts = append(subParts, sub.IndexName)
+		}
+		parts := []string{
+			"table=" + scan.TableName,
+			"indexes=" + strings.Join(subParts, "+"),
+		}
+		if len(scan.Filters) > 0 {
+			parts = append(parts, fmt.Sprintf("filters=%d", conditionCount(scan.Filters)))
+		}
+		return strings.Join(parts, " ")
+	}
 	parts := []string{"table=" + scan.TableName}
 	if scan.TableAlias != "" && scan.TableAlias != scan.TableName {
 		parts = append(parts, "alias="+scan.TableAlias)
@@ -589,6 +605,22 @@ func estimateScanRows(table *Table, scan Scan) OptionalValue {
 			if estimated >= 0 {
 				return OptionalValue{Valid: true, Value: estimated}
 			}
+		}
+	case ScanTypeIndexIntersect:
+		// Estimate as the minimum across sub-scans (intersection can only shrink the result).
+		var minEstimate int64 = -1
+		for _, sub := range scan.SubScans {
+			est := estimateScanRows(table, sub)
+			if !est.Valid {
+				continue
+			}
+			v := est.Value.(int64)
+			if minEstimate < 0 || v < minEstimate {
+				minEstimate = v
+			}
+		}
+		if minEstimate >= 0 {
+			return OptionalValue{Valid: true, Value: minEstimate}
 		}
 	}
 	return OptionalValue{}

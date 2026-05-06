@@ -22,6 +22,10 @@ const (
 	ScanTypeIndexFirst
 	// ScanTypeIndexLast seeks to the last (largest) key in the index — used for MAX optimisation.
 	ScanTypeIndexLast
+	// ScanTypeIndexIntersect runs each sub-scan to collect RowID sets, intersects them in
+	// memory, then fetches only the surviving rows.  Used for AND conditions where two or
+	// more independent indexes are available.
+	ScanTypeIndexIntersect
 )
 
 func (st ScanType) String() string {
@@ -38,6 +42,8 @@ func (st ScanType) String() string {
 		return "index_first"
 	case ScanTypeIndexLast:
 		return "index_last"
+	case ScanTypeIndexIntersect:
+		return "index_intersect"
 	default:
 		return "unknown"
 	}
@@ -92,8 +98,11 @@ type Scan struct {
 	IndexColumns   []Column
 	IndexKeys      []any
 	Filters        OneOrMore
-	Type           ScanType
-	CoveringIndex  bool
+	// SubScans holds the child index scans for ScanTypeIndexIntersect.
+	// Each child is executed to collect RowIDs; surviving rows are fetched after intersection.
+	SubScans  []Scan
+	Type      ScanType
+	CoveringIndex bool
 }
 
 /*
@@ -464,6 +473,135 @@ func (t *Table) tryMatchIndex(indexInfo IndexInfo, group Conditions) *indexMatch
 	return match
 }
 
+// shouldUseIntersection reports whether multi-index intersection is worth attempting for the
+// given primary match.  Unique / PK single-key point lookups already return ≤ 1 row, so
+// paying the intersection overhead yields no benefit.
+func shouldUseIntersection(match *indexMatch) bool {
+	if match.rangeCondition != nil {
+		// Range scan as primary — intersection can reduce the result set further.
+		return true
+	}
+	// Single-key PK or unique point lookup returns at most one row.
+	if (match.isUnique || match.isPrimaryKey) && len(match.keys) == 1 {
+		return false
+	}
+	return true
+}
+
+// buildSubScanFromMatch constructs the Scan for the primary match (no post-filters; those
+// are handled at the parent intersection level).
+func buildSubScanFromMatch(tableName string, match *indexMatch) Scan {
+	if match.rangeCondition != nil {
+		return Scan{
+			TableName:      tableName,
+			Type:           ScanTypeIndexRange,
+			IndexName:      match.info.Name,
+			IndexColumns:   match.info.Columns,
+			RangeCondition: *match.rangeCondition,
+		}
+	}
+	return Scan{
+		TableName:    tableName,
+		Type:         ScanTypeIndexPoint,
+		IndexName:    match.info.Name,
+		IndexColumns: match.info.Columns,
+		IndexKeys:    match.keys,
+	}
+}
+
+// conditionsForColumn returns conditions whose left operand is the named field.
+func conditionsForColumn(group Conditions, colName string) Conditions {
+	var result Conditions
+	for _, cond := range group {
+		if cond.Operand1.Type != OperandField {
+			continue
+		}
+		f, ok := cond.Operand1.Value.(Field)
+		if !ok || f.Name != colName {
+			continue
+		}
+		result = append(result, cond)
+	}
+	return result
+}
+
+// findAdditionalIndexScans looks for index scans for conditions in group that are NOT
+// already covered by primaryMatch.  It returns the extra sub-scans and a set of covered
+// condition indices (indices into group).  Each additional index is used at most once.
+func (t *Table) findAdditionalIndexScans(group Conditions, primaryMatch *indexMatch) ([]Scan, map[int]bool) {
+	var scans []Scan
+	covered := make(map[int]bool)
+	usedIndexes := map[string]bool{primaryMatch.info.Name: true}
+
+	for condIdx, cond := range group {
+		if primaryMatch.matchedConditions[condIdx] {
+			continue
+		}
+		if cond.Operand1.Type != OperandField {
+			continue
+		}
+		field, ok := cond.Operand1.Value.(Field)
+		if !ok {
+			continue
+		}
+		if !t.HasIndexOnColumn(field.Name) {
+			continue
+		}
+		idxInfo, ok := t.IndexInfoByColumnName(field.Name)
+		if !ok || usedIndexes[idxInfo.Name] {
+			continue
+		}
+
+		if isEquality(cond) && cond.Operand2.Type != OperandNull {
+			col, ok := t.ColumnByName(field.Name)
+			if !ok {
+				continue
+			}
+			keys, err := equalityKeys(col, cond)
+			if err != nil {
+				continue
+			}
+			scans = append(scans, Scan{
+				TableName:    t.Name,
+				Type:         ScanTypeIndexPoint,
+				IndexName:    idxInfo.Name,
+				IndexColumns: idxInfo.Columns,
+				IndexKeys:    keys,
+			})
+			covered[condIdx] = true
+			usedIndexes[idxInfo.Name] = true
+			continue
+		}
+
+		// Try a range scan using only the conditions for this column.
+		colConds := conditionsForColumn(group, field.Name)
+		if len(colConds) == 0 {
+			continue
+		}
+		var stats *IndexStats
+		if s, ok := t.indexStats[idxInfo.Name]; ok {
+			stats = &s
+		}
+		rangeScan, built, err := tryRangeScan(t.Name, idxInfo, colConds, stats)
+		if err != nil || !built {
+			continue
+		}
+		rangeScan.Filters = nil // The intersection parent handles remaining filters.
+		scans = append(scans, rangeScan)
+		// Mark all conditions for this column as covered.
+		for ci, c := range group {
+			if c.Operand1.Type == OperandField {
+				if f, ok2 := c.Operand1.Value.(Field); ok2 && f.Name == field.Name {
+					covered[ci] = true
+				}
+			}
+		}
+		usedIndexes[idxInfo.Name] = true
+	}
+
+	return scans, covered
+}
+
 // Check whether we can perform an index scan. Each condition group is separated by OR,
 // and within each group conditions are ANDed together. We can only use an index scan
 // if each group contains at least one primary key equality condition. We also need to
@@ -547,24 +685,60 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 	indexScans := make([]Scan, 0, len(conditions))
 
 	for groupIdx, group := range conditions {
-		// Try index point scan first
+		// Try equality-based index first (point scan or partial composite range scan).
 		match, ok := equalityMatch[groupIdx]
 		if ok {
+			// Try multi-index intersection when the primary match is not already a
+			// single-row lookup (unique / PK with one key).
+			if shouldUseIntersection(match) {
+				additionalScans, additionalCovered := t.findAdditionalIndexScans(group, match)
+				if len(additionalScans) > 0 {
+					primarySubScan := buildSubScanFromMatch(t.Name, match)
+					subScans := append([]Scan{primarySubScan}, additionalScans...)
+
+					// Collect the complete set of covered condition indices.
+					allCovered := make(map[int]bool)
+					for k := range match.matchedConditions {
+						allCovered[k] = true
+					}
+					for k := range additionalCovered {
+						allCovered[k] = true
+					}
+
+					// Any condition not covered by any sub-scan becomes a post-filter.
+					var remaining Conditions
+					for condIdx, cond := range group {
+						if !allCovered[condIdx] {
+							remaining = append(remaining, cond)
+						}
+					}
+
+					intersectScan := Scan{
+						TableName: t.Name,
+						Type:      ScanTypeIndexIntersect,
+						SubScans:  subScans,
+					}
+					if len(remaining) > 0 {
+						intersectScan.Filters = OneOrMore{remaining}
+					}
+					indexScans = append(indexScans, intersectScan)
+					continue
+				}
+			}
+
+			// Single-index path (existing behaviour).
 			filters := make(Conditions, 0, len(group))
 			for condIdx, cond := range group {
 				// If we have a range scan without proper upper bound, we must include
-				// the matched conditions as filters since the scan will read extra rows
+				// the matched conditions as filters since the scan will read extra rows.
 				if match.rangeCondition != nil && !match.hasProperUpperBound {
-					// Keep ALL conditions (matched + unmatched) for filtering
 					filters = append(filters, cond)
 				} else if !match.matchedConditions[condIdx] {
-					// Only keep unmatched conditions for filtering
 					filters = append(filters, cond)
 				}
 			}
 
 			if match.rangeCondition != nil {
-				// Partial composite index match - use range scan
 				scan := Scan{
 					TableName:      t.Name,
 					Type:           ScanTypeIndexRange,
@@ -577,7 +751,6 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 				}
 				indexScans = append(indexScans, scan)
 			} else {
-				// Full index match - use point scan
 				scan := Scan{
 					TableName:    t.Name,
 					Type:         ScanTypeIndexPoint,
@@ -594,23 +767,82 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 			continue
 		}
 
-		// Try range scans on other indexes
+		// No equality match — try range scans.  When two or more indexes are
+		// available for different columns, build an intersection scan.
 		foundRangeScan := false
+		var (
+			rangeSubScans    []Scan
+			usedRangeIndexes = make(map[string]bool)
+		)
 		for _, idxInfo := range otherIndexes[groupIdx] {
-			// Get stats for this index if available
+			if usedRangeIndexes[idxInfo.Name] {
+				continue
+			}
 			var stats *IndexStats
 			if indexStats, hasStats := t.indexStats[idxInfo.Name]; hasStats {
 				stats = &indexStats
 			}
-
-			rangeScan, ok, err := tryRangeScan(t.Name, idxInfo, group, stats)
+			colConds := conditionsForColumn(group, idxInfo.Columns[0].Name)
+			if len(colConds) == 0 {
+				continue
+			}
+			rangeScan, built, err := tryRangeScan(t.Name, idxInfo, colConds, stats)
 			if err != nil {
 				return err
 			}
-			if ok {
+			if built {
+				rangeScan.Filters = nil // Intersection parent handles remaining filters.
+				rangeSubScans = append(rangeSubScans, rangeScan)
+				usedRangeIndexes[idxInfo.Name] = true
+			}
+		}
+
+		switch {
+		case len(rangeSubScans) >= 2:
+			// Multi-range intersection.
+			covered := make(map[int]bool)
+			for _, rs := range rangeSubScans {
+				colName := rs.IndexColumns[0].Name
+				for condIdx, cond := range group {
+					if cond.Operand1.Type == OperandField {
+						if f, ok2 := cond.Operand1.Value.(Field); ok2 && f.Name == colName {
+							covered[condIdx] = true
+						}
+					}
+				}
+			}
+			var remaining Conditions
+			for condIdx, cond := range group {
+				if !covered[condIdx] {
+					remaining = append(remaining, cond)
+				}
+			}
+			intersectScan := Scan{
+				TableName: t.Name,
+				Type:      ScanTypeIndexIntersect,
+				SubScans:  rangeSubScans,
+			}
+			if len(remaining) > 0 {
+				intersectScan.Filters = OneOrMore{remaining}
+			}
+			indexScans = append(indexScans, intersectScan)
+			foundRangeScan = true
+
+		case len(rangeSubScans) == 1:
+			// Single range scan — re-run with the full group so remaining conditions
+			// are captured as post-filters (original behaviour).
+			idxInfo := otherIndexes[groupIdx][0]
+			var stats *IndexStats
+			if indexStats, hasStats := t.indexStats[idxInfo.Name]; hasStats {
+				stats = &indexStats
+			}
+			rangeScan, built, err := tryRangeScan(t.Name, idxInfo, group, stats)
+			if err != nil {
+				return err
+			}
+			if built {
 				indexScans = append(indexScans, rangeScan)
 				foundRangeScan = true
-				break
 			}
 		}
 
@@ -618,7 +850,7 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 			continue
 		}
 
-		// Otherwise fall back to sequential scan for this group
+		// Otherwise fall back to sequential scan for this group.
 		indexScans = append(indexScans, Scan{
 			TableName: t.Name,
 			Type:      ScanTypeSequential,
@@ -888,6 +1120,8 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 			return t.indexEndpointScan(ctx, p.Scans[0], selectedFields, out, false)
 		case ScanTypeIndexLast:
 			return t.indexEndpointScan(ctx, p.Scans[0], selectedFields, out, true)
+		case ScanTypeIndexIntersect:
+			return t.indexIntersectScan(ctx, p.Scans[0], selectedFields, out)
 		case ScanTypeSequential:
 			return t.sequentialScan(ctx, p.Scans[0], selectedFields, out)
 		default:
@@ -909,8 +1143,12 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 			if err := t.indexPointScan(ctx, scan, selectedFields, out); err != nil {
 				return err
 			}
+		case ScanTypeIndexIntersect:
+			if err := t.indexIntersectScan(ctx, scan, selectedFields, out); err != nil {
+				return err
+			}
 		default:
-			return fmt.Errorf("unhandled scan type in single scan: %d", scan.Type)
+			return fmt.Errorf("unhandled scan type in multi scan: %d", scan.Type)
 		}
 	}
 	return nil
