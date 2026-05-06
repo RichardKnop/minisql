@@ -54,6 +54,7 @@ MiniSQL supports optional connection string parameters:
 | `max_cached_pages` | positive integer | `2000` | Maximum number of pages to keep in memory cache |
 | `slow_query_threshold` | Go duration, e.g. `50ms`, `2s` | `0` | Log queries taking at least this long at WARN level (0 = disabled) |
 | `synchronous` | `off`, `normal`, `full` | `normal` | WAL fsync mode (see [WAL durability](#wal-durability-modes) below) |
+| `parallel_scan` | `on`, `off` | `off` | Enable concurrent leaf-page scanning for full table scans (see [Parallel Full Table Scan](#parallel-full-table-scan) below) |
 
 **Examples:**
 ```go
@@ -71,6 +72,9 @@ db, err := sql.Open("minisql", "./my.db?synchronous=full")
 
 // Log queries that take at least 50ms
 db, err := sql.Open("minisql", "./my.db?slow_query_threshold=50ms")
+
+// Enable parallel full table scans
+db, err := sql.Open("minisql", "./my.db?parallel_scan=on")
 
 // Combine multiple parameters
 db, err := sql.Open("minisql", "/path/to/db.db?log_level=info&max_cached_pages=2000")
@@ -123,6 +127,33 @@ PRAGMA synchronous = full;
 PRAGMA synchronous = normal;
 PRAGMA synchronous = off;
 ```
+
+## Parallel Full Table Scan
+
+When a query requires a full table scan (no usable index, or explicit sequential scan), MiniSQL normally reads leaf pages one at a time in a single goroutine. **Parallel scan** splits the leaf-page chain across up to `runtime.NumCPU()` goroutines so that multiple pages are decoded and filtered concurrently.
+
+Parallel scan is **off by default** because it adds overhead for small tables and single-CPU environments. It is most beneficial for large tables on multi-core machines running filter-heavy queries that touch many pages.
+
+**Note:** Parallel scan does **not** guarantee row-ID ordering. Queries that rely on insertion order without an explicit `ORDER BY` may observe a different row sequence.
+
+Enable at connection open time via the connection string:
+
+```go
+db, err := sql.Open("minisql", "./my.db?parallel_scan=on")
+```
+
+Or toggle at runtime with PRAGMA (affects all existing tables on the connection immediately):
+
+```sql
+PRAGMA parallel_scan = on;
+PRAGMA parallel_scan;     -- returns 0 (off) or 1 (on)
+PRAGMA parallel_scan = off;
+```
+
+| Mode | Connection string | PRAGMA | Description |
+|------|------------------|--------|-------------|
+| off | _(default)_ | `PRAGMA parallel_scan = off` | Single-goroutine sequential leaf scan. Best for small tables or single-CPU environments. |
+| on | `parallel_scan=on` | `PRAGMA parallel_scan = on` | Leaf pages partitioned across `runtime.NumCPU()` goroutines. Rows delivered in arrival order (not row-ID order). |
 
 ## Storage
 
@@ -379,6 +410,8 @@ Important behavior and current non-goals:
 | `PRAGMA wal_checkpoint` | Manually flush WAL frames to the main database file and truncate the WAL. |
 | `PRAGMA synchronous` | Read current WAL fsync mode (returns 0/1/2). |
 | `PRAGMA synchronous = off\|normal\|full` | Set WAL fsync mode for the current connection. See [WAL Durability Modes](#wal-durability-modes). |
+| `PRAGMA parallel_scan` | Read current parallel scan state (returns 0 = off, 1 = on). |
+| `PRAGMA parallel_scan = on\|off` | Enable or disable concurrent leaf-page scanning for full table scans. See [Parallel Full Table Scan](#parallel-full-table-scan). |
 
 
 Prepared statements are supported using `?` as a placeholder. For example:

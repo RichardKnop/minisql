@@ -1201,6 +1201,9 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 	if t.virtualRows != nil {
 		return t.virtualSequentialScan(ctx, scan, out)
 	}
+	if t.parallelScan {
+		return t.parallelSequentialScan(ctx, scan, selectedFields, out)
+	}
 	cursor, err := t.SeekFirst(ctx)
 	if err != nil {
 		return err

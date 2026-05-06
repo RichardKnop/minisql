@@ -41,6 +41,8 @@ func (d *Database) executePragmaStatement(ctx context.Context, stmt Statement) (
 		return walCheckpointResult(), nil
 	case "synchronous":
 		return d.executeSynchronousPragma(stmt)
+	case "parallel_scan":
+		return d.executeParallelScanPragma(stmt)
 	default:
 		return StatementResult{}, fmt.Errorf("%w: %s", errUnknownPragma, stmt.PragmaName)
 	}
@@ -65,6 +67,57 @@ func (d *Database) executeSynchronousPragma(stmt Statement) (StatementResult, er
 		d.wal.SetSynchronous(mode)
 	}
 	return synchronousResult(mode), nil
+}
+
+var parallelScanResultColumns = []Column{
+	{Kind: Int4, Size: 4, Name: "parallel_scan"},
+}
+
+func (d *Database) executeParallelScanPragma(stmt Statement) (StatementResult, error) {
+	if stmt.PragmaValue == "" {
+		// Read: return current state.
+		d.dbLock.RLock()
+		enabled := d.parallelScan
+		d.dbLock.RUnlock()
+		return boolPragmaResult(parallelScanResultColumns, enabled), nil
+	}
+
+	enabled, err := parseBoolPragma(stmt.PragmaValue)
+	if err != nil {
+		return StatementResult{}, err
+	}
+
+	d.dbLock.Lock()
+	d.parallelScan = enabled
+	for _, table := range d.tables {
+		table.parallelScan = enabled
+	}
+	d.dbLock.Unlock()
+
+	return boolPragmaResult(parallelScanResultColumns, enabled), nil
+}
+
+func parseBoolPragma(s string) (bool, error) {
+	switch s {
+	case "on", "1", "true":
+		return true, nil
+	case "off", "0", "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid boolean pragma value %q: expected on or off", s)
+	}
+}
+
+func boolPragmaResult(cols []Column, enabled bool) StatementResult {
+	v := int32(0)
+	if enabled {
+		v = 1
+	}
+	row := NewRowWithValues(cols, []OptionalValue{{Value: v, Valid: true}})
+	return StatementResult{
+		Columns: cols,
+		Rows:    rowsIterator([]Row{row}),
+	}
 }
 
 func parseSynchronousMode(s string) (SynchronousMode, error) {
