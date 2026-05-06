@@ -1393,3 +1393,167 @@ func (t *Table) virtualSequentialScan(ctx context.Context, scan Scan, out func(R
 	}
 	return nil
 }
+
+// collectRowIDsFromScan runs a sub-scan and collects all RowIDs it produces without
+// fetching table rows.  Supported sub-scan types: ScanTypeIndexPoint and ScanTypeIndexRange.
+func (t *Table) collectRowIDsFromScan(ctx context.Context, scan Scan) ([]RowID, error) {
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return nil, fmt.Errorf("no index found for intersect sub-scan: %s", scan.IndexName)
+	}
+	switch scan.Type {
+	case ScanTypeIndexPoint:
+		var rowIDs []RowID
+		for _, key := range scan.IndexKeys {
+			ids, err := idx.FindRowIDs(ctx, key)
+			if err != nil {
+				if errors.Is(err, ErrNotFound) {
+					continue
+				}
+				return nil, fmt.Errorf("intersect point lookup: %w", err)
+			}
+			rowIDs = append(rowIDs, ids...)
+		}
+		return rowIDs, nil
+	case ScanTypeIndexRange:
+		var rowIDs []RowID
+		if err := idx.ScanRange(ctx, scan.RangeCondition, false, func(_ any, rowID RowID) error {
+			rowIDs = append(rowIDs, rowID)
+			return nil
+		}); err != nil {
+			return nil, fmt.Errorf("intersect range scan: %w", err)
+		}
+		return rowIDs, nil
+	default:
+		return nil, fmt.Errorf("unsupported sub-scan type for intersect: %s", scan.Type)
+	}
+}
+
+// intersectTwoSortedSets returns the sorted intersection of two already-sorted RowID slices.
+// Returns nil when the intersection is empty.
+func intersectTwoSortedSets(a, b []RowID) []RowID {
+	if len(a) == 0 || len(b) == 0 {
+		return nil
+	}
+	result := make([]RowID, 0, min(len(a), len(b)))
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		switch {
+		case a[i] == b[j]:
+			// Skip duplicates within the same set.
+			if len(result) == 0 || result[len(result)-1] != a[i] {
+				result = append(result, a[i])
+			}
+			i++
+			j++
+		case a[i] < b[j]:
+			i++
+		default:
+			j++
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// intersectSortedRowIDs sorts each input slice and returns their intersection.
+func intersectSortedRowIDs(sets [][]RowID) []RowID {
+	if len(sets) == 0 {
+		return nil
+	}
+	for i := range sets {
+		sortRowIDs(sets[i])
+	}
+	result := sets[0]
+	for _, next := range sets[1:] {
+		result = intersectTwoSortedSets(result, next)
+		if len(result) == 0 {
+			return nil
+		}
+	}
+	return result
+}
+
+// sortRowIDs sorts a RowID slice in-place.
+func sortRowIDs(ids []RowID) {
+	// Insertion sort for small slices; falls back to std sort for large ones.
+	if len(ids) < 16 {
+		for i := 1; i < len(ids); i++ {
+			v := ids[i]
+			j := i
+			for j > 0 && ids[j-1] > v {
+				ids[j] = ids[j-1]
+				j--
+			}
+			ids[j] = v
+		}
+		return
+	}
+	// Standard sort for larger slices.
+	for i := 1; i < len(ids); i++ {
+		for j := i; j > 0 && ids[j-1] > ids[j]; j-- {
+			ids[j-1], ids[j] = ids[j], ids[j-1]
+		}
+	}
+}
+
+// indexIntersectScan executes a ScanTypeIndexIntersect plan:
+//  1. Collect RowID sets from each sub-scan.
+//  2. Intersect all sets in memory.
+//  3. Fetch the surviving rows and apply any remaining post-filters.
+func (t *Table) indexIntersectScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
+	sets := make([][]RowID, 0, len(scan.SubScans))
+	for _, sub := range scan.SubScans {
+		ids, err := t.collectRowIDsFromScan(ctx, sub)
+		if err != nil {
+			return err
+		}
+		sets = append(sets, ids)
+	}
+
+	surviving := intersectSortedRowIDs(sets)
+	if len(surviving) == 0 {
+		return nil
+	}
+
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+
+	for _, rowID := range surviving {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		var row Row
+		if len(selectedFields) == 0 {
+			row = NewRowWithValues(t.Columns, nil)
+			row.Key = rowID
+		} else {
+			cursor, err := t.Seek(ctx, rowID)
+			if err != nil {
+				return fmt.Errorf("intersect seek: %w", err)
+			}
+			row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
+			if err != nil {
+				return fmt.Errorf("intersect fetch: %w", err)
+			}
+		}
+
+		if tableFilter != nil {
+			ok, err := tableFilter(row)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
+		}
+
+		if err := out(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
