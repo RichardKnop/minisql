@@ -64,7 +64,7 @@ func TestJoinDetail(t *testing.T) {
 		t.Parallel()
 		join := JoinPlan{Type: Right, LeftScanIndex: -1, RightScanIndex: 99}
 		detail := joinDetail(plan, join)
-		assert.Equal(t, "type=right", detail)
+		assert.Equal(t, "type=right algorithm=nested_loop", detail)
 	})
 }
 

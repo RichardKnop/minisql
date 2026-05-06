@@ -62,6 +62,15 @@ func WithSecondaryIndex(index SecondaryIndex) TableOption {
 	}
 }
 
+// estimatedRowCount returns the tracked row count, or -1 if no row-count
+// accessor has been wired up (e.g. in unit tests that build tables directly).
+func (t *Table) estimatedRowCount() int64 {
+	if t.getRowCount == nil {
+		return -1
+	}
+	return t.getRowCount()
+}
+
 // WithRowCountGetter sets an O(1) row-count accessor on the table.
 // When set, COUNT(*) with no WHERE clause returns the value directly
 // instead of performing a leaf-page walk.

@@ -106,12 +106,29 @@ func (t *Table) flattenJoinTree(
 		var (
 			innerScanType  ScanType
 			innerIndexInfo *IndexInfo
+			algorithm      JoinAlgorithm
 		)
 		if joinTableIndex != nil {
+			// Index exists — use indexed nested-loop join.
 			innerScanType = ScanTypeIndexPoint
 			innerIndexInfo = joinTableIndex
+			algorithm = JoinAlgorithmNestedLoop
 		} else {
 			innerScanType = ScanTypeSequential
+			// No index on the inner join column.  Hash join is O(N+M) vs O(N×M)
+			// for nested-loop, so prefer it unless the build side is too large to
+			// materialise in memory or the join type requires nested-loop (RIGHT JOIN
+			// needs an unmatched-row pass that is harder to do with a hash table).
+			if join.Type != Right {
+				buildRows := joinedTable.estimatedRowCount()
+				if buildRows < 0 || buildRows <= hashJoinMaxBuildRows {
+					algorithm = JoinAlgorithmHash
+				} else {
+					algorithm = JoinAlgorithmNestedLoop
+				}
+			} else {
+				algorithm = JoinAlgorithmNestedLoop
+			}
 		}
 
 		joinScan := Scan{
@@ -137,6 +154,7 @@ func (t *Table) flattenJoinTree(
 			OuterJoinColumn: joinColumnPairs[0].BaseTableColumn.Name,
 			InnerJoinColumn: joinColumnPairs[0].JoinTableColumn.Name,
 			JoinColumnPairs: joinColumnPairs,
+			Algorithm:       algorithm,
 		})
 
 		// Recurse for joins that hang off this join (chain joins).
@@ -343,23 +361,26 @@ func getConditionTableAlias(condition Condition, baseTableAlias string, allJoinA
 	return baseTableAlias
 }
 
-// executeNestedLoopJoin performs nested loop join execution for multi-table queries
+// executeNestedLoopJoin performs join execution for multi-table queries.
+// Hash joins build their hash table once here; nested-loop joins probe the
+// inner table per outer row inside executeJoinsForRow.
 func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProvider, selectedFields []Field, filteredPipe chan<- Row) error {
 	if len(p.Joins) == 0 {
 		return errors.New("no joins to execute")
 	}
 
-	// For star schema, we process joins sequentially
-	// Start with base table (scan 0), then join each additional table
+	// Build hash tables for all hash-join entries (O(inner) each, done once).
+	hashTables, err := buildHashBuckets(ctx, p, provider)
+	if err != nil {
+		return err
+	}
 
-	// Get base table
 	baseScan := p.Scans[0]
 	baseTable, ok := provider.GetTable(ctx, baseScan.TableName)
 	if !ok {
 		return fmt.Errorf("%w: %s", errTableDoesNotExist, baseScan.TableName)
 	}
 
-	// Scan base table
 	baseRowChan := make(chan Row, 100)
 	baseErrChan := make(chan error, 1)
 	baseFields := fieldsFromColumns(baseTable.Columns...)
@@ -371,22 +392,17 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 		}
 	}()
 
-	// Process each base row through all joins
 	for baseRow := range baseRowChan {
-		// Check for errors
 		select {
 		case err := <-baseErrChan:
 			return err
 		default:
 		}
-
-		// Execute all joins for this base row
-		if err := p.executeJoinsForRow(ctx, provider, baseRow, 0, filteredPipe); err != nil {
+		if err := p.executeJoinsForRow(ctx, provider, baseRow, 0, filteredPipe, hashTables); err != nil {
 			return err
 		}
 	}
 
-	// Check for final errors
 	select {
 	case err := <-baseErrChan:
 		return err
@@ -417,7 +433,8 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 // names carry alias prefixes (e.g. "a.id", "b.name"). The from-side alias for
 // each join is resolved from p.Scans[join.LeftScanIndex].TableAlias, enabling
 // correct key lookup for both star-schema and chain joins.
-func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvider, currentRow Row, joinIndex int, filteredPipe chan<- Row) error {
+// hashTables holds the pre-built hash buckets for JoinAlgorithmHash joins.
+func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvider, currentRow Row, joinIndex int, filteredPipe chan<- Row, hashTables map[int]*hashJoinBucket) error {
 	if joinIndex >= len(p.Joins) {
 		select {
 		case filteredPipe <- currentRow:
@@ -428,6 +445,13 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 	}
 
 	join := p.Joins[joinIndex]
+
+	// Hash join: probe the pre-built hash table instead of scanning the inner table.
+	if join.Algorithm == JoinAlgorithmHash {
+		return p.executeHashJoinForRow(ctx, currentRow, joinIndex, filteredPipe, hashTables)
+	}
+
+	// Nested-loop join (index point or sequential).
 	innerScan := p.Scans[join.RightScanIndex]
 	fromAlias := p.Scans[join.LeftScanIndex].TableAlias
 
@@ -531,7 +555,7 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 
 		if matches {
 			matched = true
-			if err := p.executeJoinsForRow(ctx, provider, combinedRow, joinIndex+1, filteredPipe); err != nil {
+			if err := p.executeJoinsForRow(ctx, provider, combinedRow, joinIndex+1, filteredPipe, hashTables); err != nil {
 				return err
 			}
 		}
@@ -552,7 +576,58 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 		} else {
 			combinedRow = combineRowsProgressive(currentRow, nullInner, innerScan.TableAlias)
 		}
-		if err := p.executeJoinsForRow(ctx, provider, combinedRow, joinIndex+1, filteredPipe); err != nil {
+		if err := p.executeJoinsForRow(ctx, provider, combinedRow, joinIndex+1, filteredPipe, hashTables); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// executeHashJoinForRow probes the pre-built hash table for joinIndex and
+// recurses for matching inner rows.  Handles LEFT JOIN miss by emitting a
+// NULL-padded combined row when the probe finds no matches.
+func (p QueryPlan) executeHashJoinForRow(ctx context.Context, currentRow Row, joinIndex int, filteredPipe chan<- Row, hashTables map[int]*hashJoinBucket) error {
+	join := p.Joins[joinIndex]
+	innerScan := p.Scans[join.RightScanIndex]
+	fromAlias := p.Scans[join.LeftScanIndex].TableAlias
+
+	bucket := hashTables[joinIndex]
+
+	probeKey := probeSideHashKey(join, currentRow, fromAlias, joinIndex)
+	var matchingRows []Row
+	if probeKey != "" && bucket != nil {
+		matchingRows = bucket.rows[probeKey]
+	}
+
+	matched := false
+	for _, innerRow := range matchingRows {
+		var combinedRow Row
+		if joinIndex == 0 {
+			combinedRow = combineRows(currentRow, innerRow, fromAlias, innerScan.TableAlias)
+		} else {
+			combinedRow = combineRowsProgressive(currentRow, innerRow, innerScan.TableAlias)
+		}
+		matched = true
+		if err := p.executeJoinsForRow(ctx, nil, combinedRow, joinIndex+1, filteredPipe, hashTables); err != nil {
+			return err
+		}
+	}
+
+	// LEFT JOIN: no matching inner row — emit outer row with NULL inner columns.
+	if !matched && join.Type == Left {
+		var innerColumns []Column
+		if bucket != nil {
+			innerColumns = bucket.innerColumns
+		}
+		nullInner := nullRowForColumns(innerColumns)
+		var combinedRow Row
+		if joinIndex == 0 {
+			combinedRow = combineRows(currentRow, nullInner, fromAlias, innerScan.TableAlias)
+		} else {
+			combinedRow = combineRowsProgressive(currentRow, nullInner, innerScan.TableAlias)
+		}
+		if err := p.executeJoinsForRow(ctx, nil, combinedRow, joinIndex+1, filteredPipe, hashTables); err != nil {
 			return err
 		}
 	}
