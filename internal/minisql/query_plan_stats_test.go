@@ -1,6 +1,8 @@
 package minisql
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -340,4 +342,243 @@ func TestShouldUseIndexForRange(t *testing.T) {
 			assert.Equal(t, tt.want, got, "shouldUseIndexForRange() = %v, want %v", got, tt.want)
 		})
 	}
+}
+
+func TestBuildEquiDepthHistogram(t *testing.T) {
+	t.Parallel()
+
+	t.Run("uniform_distribution", func(t *testing.T) {
+		t.Parallel()
+		sorted := make([]float64, 100)
+		for i := range sorted {
+			sorted[i] = float64(i + 1)
+		}
+		h := buildEquiDepthHistogram(sorted, 10)
+		require.NotNil(t, h)
+		assert.Len(t, h.Bounds, 11) // numBuckets+1
+		assert.Equal(t, float64(1), h.Bounds[0])
+		assert.Equal(t, float64(100), h.Bounds[10])
+	})
+
+	t.Run("fewer_values_than_buckets", func(t *testing.T) {
+		t.Parallel()
+		sorted := []float64{1, 2, 3}
+		h := buildEquiDepthHistogram(sorted, 10)
+		require.NotNil(t, h)
+		// Capped at n=3 buckets → 4 bounds
+		assert.Len(t, h.Bounds, 4)
+	})
+
+	t.Run("empty_slice_returns_nil", func(t *testing.T) {
+		t.Parallel()
+		assert.Nil(t, buildEquiDepthHistogram(nil, 10))
+		assert.Nil(t, buildEquiDepthHistogram([]float64{}, 10))
+	})
+
+	t.Run("zero_buckets_returns_nil", func(t *testing.T) {
+		t.Parallel()
+		assert.Nil(t, buildEquiDepthHistogram([]float64{1, 2, 3}, 0))
+	})
+}
+
+func TestHistogramCDF(t *testing.T) {
+	t.Parallel()
+	// 4 buckets: [0,25), [25,50), [50,75), [75,100] → bounds = [0,25,50,75,100]
+	bounds := []float64{0, 25, 50, 75, 100}
+
+	t.Run("below_min_returns_0", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, 0.0, histogramCDF(bounds, -1))
+	})
+
+	t.Run("at_min_returns_0", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, 0.0, histogramCDF(bounds, 0))
+	})
+
+	t.Run("at_max_returns_1", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, 1.0, histogramCDF(bounds, 100))
+	})
+
+	t.Run("midpoint_of_first_bucket", func(t *testing.T) {
+		t.Parallel()
+		// v=12.5 is midpoint of [0,25) → bucket 0, within=0.5 → 0 + 0.5/4 = 0.125
+		got := histogramCDF(bounds, 12.5)
+		assert.InDelta(t, 0.125, got, 0.001)
+	})
+
+	t.Run("midpoint_of_second_bucket", func(t *testing.T) {
+		t.Parallel()
+		// v=37.5 is midpoint of [25,50) → bucket 1, within=0.5 → 1/4 + 0.5/4 = 0.375
+		got := histogramCDF(bounds, 37.5)
+		assert.InDelta(t, 0.375, got, 0.001)
+	})
+
+	t.Run("at_bucket_boundary", func(t *testing.T) {
+		t.Parallel()
+		// v=50 is at start of bucket 2: [50,75) → bucket 2, within=0 → 2/4 = 0.5
+		got := histogramCDF(bounds, 50)
+		assert.InDelta(t, 0.5, got, 0.001)
+	})
+}
+
+func TestEstimateSelectivityWithHistogram(t *testing.T) {
+	t.Parallel()
+	// Uniform 0..100, 10 buckets: [0,10,20,30,40,50,60,70,80,90,100]
+	bounds := make([]float64, 11)
+	for i := range bounds {
+		bounds[i] = float64(i * 10)
+	}
+	hist := &Histogram{Bounds: bounds}
+
+	t.Run("no_histogram_falls_back_to_fixed_constants", func(t *testing.T) {
+		t.Parallel()
+		rc := RangeCondition{Lower: &RangeBound{Value: int64(10), Inclusive: true}}
+		got := estimateSelectivityWithHistogram(nil, rc)
+		assert.Equal(t, 0.5, got) // fixed constant for single bound
+	})
+
+	t.Run("lower_bound_only", func(t *testing.T) {
+		t.Parallel()
+		// value > 50 → 1 - CDF(50) = 1 - 0.5 = 0.5
+		rc := RangeCondition{Lower: &RangeBound{Value: int64(50), Inclusive: false}}
+		got := estimateSelectivityWithHistogram(hist, rc)
+		assert.InDelta(t, 0.5, got, 0.01)
+	})
+
+	t.Run("upper_bound_only", func(t *testing.T) {
+		t.Parallel()
+		// value < 30 → CDF(30) = 0.3
+		rc := RangeCondition{Upper: &RangeBound{Value: int64(30), Inclusive: false}}
+		got := estimateSelectivityWithHistogram(hist, rc)
+		assert.InDelta(t, 0.3, got, 0.01)
+	})
+
+	t.Run("both_bounds", func(t *testing.T) {
+		t.Parallel()
+		// 20 < value < 60 → CDF(60) - CDF(20) = 0.6 - 0.2 = 0.4
+		rc := RangeCondition{
+			Lower: &RangeBound{Value: int64(20), Inclusive: false},
+			Upper: &RangeBound{Value: int64(60), Inclusive: false},
+		}
+		got := estimateSelectivityWithHistogram(hist, rc)
+		assert.InDelta(t, 0.4, got, 0.01)
+	})
+
+	t.Run("non_convertible_bound_falls_back_to_fixed", func(t *testing.T) {
+		t.Parallel()
+		// string value can't be converted → lower stays 0, upper stays 1 for unbounded
+		rc := RangeCondition{Lower: &RangeBound{Value: "text", Inclusive: true}}
+		got := estimateSelectivityWithHistogram(hist, rc)
+		// lower=0 (failed conversion), upper=1.0 → sel = 1.0
+		assert.Equal(t, 1.0, got)
+	})
+}
+
+func TestParseIndexStats_WithHistogram(t *testing.T) {
+	t.Parallel()
+
+	t.Run("parses_histogram_bounds", func(t *testing.T) {
+		t.Parallel()
+		s := "100 50|h=1,25,50,75,100"
+		stats, err := parseIndexStats(s)
+		require.NoError(t, err)
+		assert.Equal(t, int64(100), stats.NEntry)
+		assert.Equal(t, []int64{50}, stats.NDistinct)
+		require.NotNil(t, stats.Hist)
+		assert.Equal(t, []float64{1, 25, 50, 75, 100}, stats.Hist.Bounds)
+	})
+
+	t.Run("no_histogram_section", func(t *testing.T) {
+		t.Parallel()
+		stats, err := parseIndexStats("100 50")
+		require.NoError(t, err)
+		assert.Nil(t, stats.Hist)
+	})
+
+	t.Run("invalid_histogram_bound", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseIndexStats("100 50|h=1,abc,100")
+		assert.Error(t, err)
+	})
+}
+
+func TestSerializeHistogram(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil_histogram_writes_nothing", func(t *testing.T) {
+		t.Parallel()
+		var b strings.Builder
+		serializeHistogram(&b, nil)
+		assert.Empty(t, b.String())
+	})
+
+	t.Run("serializes_bounds", func(t *testing.T) {
+		t.Parallel()
+		var b strings.Builder
+		h := &Histogram{Bounds: []float64{0, 50, 100}}
+		serializeHistogram(&b, h)
+		assert.Equal(t, "|h=0,50,100", b.String())
+	})
+
+	t.Run("roundtrip", func(t *testing.T) {
+		t.Parallel()
+		sorted := make([]float64, 100)
+		for i := range sorted {
+			sorted[i] = float64(i + 1)
+		}
+		h := buildEquiDepthHistogram(sorted, 16)
+		require.NotNil(t, h)
+
+		var b strings.Builder
+		fmt.Fprintf(&b, "%d %d", 100, 100)
+		serializeHistogram(&b, h)
+
+		parsed, err := parseIndexStats(b.String())
+		require.NoError(t, err)
+		require.NotNil(t, parsed.Hist)
+		assert.Equal(t, len(h.Bounds), len(parsed.Hist.Bounds))
+		for i := range h.Bounds {
+			assert.InDelta(t, h.Bounds[i], parsed.Hist.Bounds[i], 0.0001)
+		}
+	})
+}
+
+func TestEstimateRangeRows_WithHistogram(t *testing.T) {
+	t.Parallel()
+
+	// Build histogram for values 1..100
+	sorted := make([]float64, 100)
+	for i := range sorted {
+		sorted[i] = float64(i + 1)
+	}
+	hist := buildEquiDepthHistogram(sorted, 10)
+
+	stats := IndexStats{
+		NEntry:    100,
+		NDistinct: []int64{100},
+		Hist:      hist,
+	}
+
+	t.Run("narrow_range_uses_histogram", func(t *testing.T) {
+		t.Parallel()
+		// value between 40 and 60 should be ~20 rows
+		rc := RangeCondition{
+			Lower: &RangeBound{Value: int64(40), Inclusive: true},
+			Upper: &RangeBound{Value: int64(60), Inclusive: true},
+		}
+		got := stats.EstimateRangeRows(rc, 0)
+		assert.InDelta(t, 20, float64(got), 5.0)
+	})
+
+	t.Run("full_range_returns_all", func(t *testing.T) {
+		t.Parallel()
+		rc := RangeCondition{
+			Lower: &RangeBound{Value: int64(1), Inclusive: true},
+			Upper: &RangeBound{Value: int64(100), Inclusive: true},
+		}
+		got := stats.EstimateRangeRows(rc, 0)
+		assert.InDelta(t, 100, float64(got), 5.0)
+	})
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -187,11 +188,11 @@ func (d *Database) analyzeTable(ctx context.Context, statsTable, table *Table) e
 }
 
 func (d *Database) analyzeIndex(ctx context.Context, statsTable *Table, tableName, indexName string, index BTreeIndex, isUnique bool) error {
-	// Get the index columns to determine if this is a composite index
-	var indexColumns []Column
-	table := d.tables[tableName]
+	var (
+		indexColumns []Column
+		table        = d.tables[tableName]
+	)
 
-	// Find the columns for this index
 	if table.PrimaryKey.Name == indexName {
 		indexColumns = table.PrimaryKey.Columns
 	} else {
@@ -211,35 +212,42 @@ func (d *Database) analyzeIndex(ctx context.Context, statsTable *Table, tableNam
 		}
 	}
 
-	numColumns := len(indexColumns)
-	entryCount := int64(0)
+	var (
+		numColumns = len(indexColumns)
+		entryCount = int64(0)
+	)
 
-	// Track distinct values for each prefix level
-	// prefixMaps[0] = distinct values for first column only
-	// prefixMaps[1] = distinct values for first 2 columns combined
-	// etc.
+	// Track distinct values for each prefix level.
 	prefixMaps := make([]map[string]struct{}, numColumns)
 	for i := range numColumns {
 		prefixMaps[i] = make(map[string]struct{})
 	}
 
-	// The index is a generic type, need to handle different key types
-	// For simplicity, use ScanAll which works for all index types
+	// Collect first-column numeric values for histogram building.
+	collectHist := len(indexColumns) > 0 && isNumericColumn(indexColumns[0])
+	var histValues []float64
+
 	if scanErr := index.ScanAll(ctx, false, func(key any, rowID RowID) error {
 		entryCount += 1
 
-		// Handle composite keys by tracking each prefix
 		if ck, isComposite := key.(CompositeKey); isComposite && numColumns > 1 {
-			// For each prefix level (1 column, 2 columns, ..., all columns)
 			for prefixLen := 1; prefixLen <= numColumns; prefixLen++ {
-				// Build a key string for this prefix
 				prefixKey := buildPrefixKey(ck.Values[:prefixLen])
 				prefixMaps[prefixLen-1][prefixKey] = struct{}{}
 			}
+			if collectHist && len(ck.Values) > 0 {
+				if f, ok := anyToFloat64(ck.Values[0]); ok {
+					histValues = append(histValues, f)
+				}
+			}
 		} else {
-			// Single column index - just track the full key
 			keyStr := fmt.Sprintf("%v", key)
 			prefixMaps[0][keyStr] = struct{}{}
+			if collectHist {
+				if f, ok := anyToFloat64(key); ok {
+					histValues = append(histValues, f)
+				}
+			}
 		}
 
 		return nil
@@ -247,31 +255,22 @@ func (d *Database) analyzeIndex(ctx context.Context, statsTable *Table, tableNam
 		return scanErr
 	}
 
-	// Build stat string in SQLite format: "nEntry nDistinct1 nDistinct2 ..."
-	// For single-column index: "100 50" means 100 entries, 50 distinct values
-	// For composite (col1, col2): "100 50 80" means 100 entries, 50 distinct col1 values, 80 distinct (col1,col2) pairs
 	stat := strings.Builder{}
 	fmt.Fprintf(&stat, "%d", entryCount)
 
 	for i := range numColumns {
 		distinctCount := int64(len(prefixMaps[i]))
-
-		// For unique indexes, only the final prefix (all columns) should have distinctCount == entryCount
-		// Intermediate prefixes can have fewer distinct values
 		if isUnique && i == numColumns-1 {
 			distinctCount = entryCount
 		}
-
 		fmt.Fprintf(&stat, " %d", distinctCount)
 	}
 
-	// Store stat in SQLite format
-	// Single-column example: "100 50" means 100 entries, 50 distinct values (avg 2 entries per value)
-	// Composite example: "100 10 50 100" for (col1, col2, col3) means:
-	//   - 100 total entries
-	//   - 10 distinct col1 values (avg 10 entries per col1 value)
-	//   - 50 distinct (col1, col2) combinations (avg 2 entries per combination)
-	//   - 100 distinct (col1, col2, col3) combinations (all unique)
+	if len(histValues) > 0 {
+		sort.Float64s(histValues)
+		hist := buildEquiDepthHistogram(histValues, histogramBuckets)
+		serializeHistogram(&stat, hist)
+	}
 
 	_, err := statsTable.Insert(ctx, Statement{
 		Kind:      Insert,
@@ -279,9 +278,9 @@ func (d *Database) analyzeIndex(ctx context.Context, statsTable *Table, tableNam
 		Fields:    statsTableFields,
 		Inserts: [][]OptionalValue{
 			{
-				{Value: NewTextPointer([]byte(tableName)), Valid: true},     // tbl
-				{Value: NewTextPointer([]byte(indexName)), Valid: true},     // idx
-				{Value: NewTextPointer([]byte(stat.String())), Valid: true}, // stat
+				{Value: NewTextPointer([]byte(tableName)), Valid: true},
+				{Value: NewTextPointer([]byte(indexName)), Valid: true},
+				{Value: NewTextPointer([]byte(stat.String())), Valid: true},
 			},
 		},
 	})
