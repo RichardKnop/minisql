@@ -824,3 +824,22 @@ func TestOpenWALAndRebuildIndex_ExistingWALEmpty(t *testing.T) {
 	assert.False(t, recovered)
 	assert.Equal(t, 0, walIndex.Size())
 }
+
+func TestWAL_SynchronousAndWriteBufferSize(t *testing.T) {
+	t.Parallel()
+
+	tmp, err := os.CreateTemp("", "wal_sync_test_*.wal")
+	require.NoError(t, err)
+	tmp.Close()
+	defer os.Remove(tmp.Name())
+
+	w, err := CreateWAL(tmp.Name(), PageSize)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, w.Close()) }()
+
+	// Default synchronous mode is Normal.
+	assert.Equal(t, SynchronousNormal, w.Synchronous())
+
+	// SetWriteBufferSize is accepted without error.
+	w.SetWriteBufferSize(64 * 1024)
+}

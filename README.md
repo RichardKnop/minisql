@@ -375,6 +375,7 @@ Important behavior and current non-goals:
 | `AUTOINCREMENT` | Primary key must be of type `INT8` |
 | `UNIQUE` | Can be specified when creating a table |
 | `CHECK` | Constraints to test values whenever they are inserted or updated in a column |
+| `FOREIGN KEY` | Single-column FK constraints with `RESTRICT` / `NO ACTION`; declared inside `CREATE TABLE`. `PRAGMA foreign_keys = on\|off` (default on). See [Foreign Keys](#foreign-keys). |
 | Composite primary key or unique constraint | As part of `CREATE TABLE` |
 | `NULL` and `NOT NULL` | Via null bit mask included in each row/cell |
 | `DEFAULT` | Supported for all columns, including `NOW()` for `TIMESTAMP` |
@@ -456,6 +457,87 @@ Currently you can only drop secondary non unique indexes.
 
 ```go
 _, err := db.Exec(`drop index "idx_created";`)
+```
+
+### Foreign Keys
+
+MiniSQL supports single-column foreign key constraints declared inside `CREATE TABLE`. There is no `ALTER TABLE ADD CONSTRAINT` — FKs must be defined at table-creation time, following the same approach as SQLite.
+
+Three equivalent syntax forms are accepted:
+
+```sql
+-- 1. Inline REFERENCES on the column definition
+CREATE TABLE orders (
+    id      int8 primary key autoincrement,
+    user_id int8 not null references "users" (id)
+);
+
+-- 2. Table-level FOREIGN KEY clause
+CREATE TABLE orders (
+    id      int8 primary key autoincrement,
+    user_id int8 not null,
+    foreign key (user_id) references "users" (id)
+);
+
+-- 3. Named constraint (CONSTRAINT … FOREIGN KEY)
+CREATE TABLE orders (
+    id      int8 primary key autoincrement,
+    user_id int8 not null,
+    constraint fk_orders_users foreign key (user_id) references "users" (id)
+);
+```
+
+**Rules:**
+- The referenced column must be a `PRIMARY KEY` or `UNIQUE` column in the parent table.
+- A `NULL` value in the FK column bypasses the check (the row is accepted without a matching parent row).
+- Dropping a parent table while a child FK still references it is blocked. Drop the child table first.
+
+**Referential actions** (specified via `ON DELETE` / `ON UPDATE`):
+
+| Action | Syntax | Behaviour in MiniSQL |
+|--------|--------|----------------------|
+| `RESTRICT` | `ON DELETE RESTRICT` | **Default.** Immediately rejects any `DELETE` or `UPDATE` on the parent row if a matching child row exists. |
+| `NO ACTION` | `ON DELETE NO ACTION` | Identical to `RESTRICT` in the current implementation. In the SQL standard the check can be deferred to end-of-statement; MiniSQL always checks immediately because deferred constraints are not yet supported. |
+| `CASCADE` | `ON DELETE CASCADE` | Parsed but **not yet implemented** — returns an error at `CREATE TABLE` time. |
+| `SET NULL` | `ON DELETE SET NULL` | Parsed but **not yet implemented** — returns an error at `CREATE TABLE` time. |
+
+When `ON DELETE` or `ON UPDATE` is omitted, `RESTRICT` is used.
+
+FK enforcement can be toggled at runtime:
+
+```sql
+PRAGMA foreign_keys;           -- returns 1 (on) or 0 (off)
+PRAGMA foreign_keys = off;     -- disable FK checks for this connection
+PRAGMA foreign_keys = on;      -- re-enable FK checks
+```
+
+FK checks are **on by default**. The pragma state is per-connection and is not persisted.
+
+```go
+// Example: insert a child row with a valid parent
+_, err = db.Exec(`insert into "orders" (user_id, amount) values (1, 100)`)
+
+// Example: this fails with ErrForeignKeyViolation — user_id 99 does not exist
+_, err = db.Exec(`insert into "orders" (user_id, amount) values (99, 100)`)
+if err != nil {
+    var fkErr minisql.ErrForeignKeyViolation
+    if errors.As(err, &fkErr) {
+        fmt.Printf("FK violation: %s.%s → %s.%s\n",
+            fkErr.ChildTable, fkErr.ChildColumn,
+            fkErr.ParentTable, fkErr.ParentColumn)
+    }
+}
+
+// Example: deleting a parent row that still has children fails with ErrForeignKeyParentViolation
+_, err = db.Exec(`delete from "users" where id = 1`)
+if err != nil {
+    var fkErr minisql.ErrForeignKeyParentViolation
+    if errors.As(err, &fkErr) {
+        fmt.Printf("parent FK violation: %s.%s referenced by %s.%s\n",
+            fkErr.ParentTable, fkErr.ParentColumn,
+            fkErr.ChildTable, fkErr.ChildColumn)
+    }
+}
 ```
 
 ## DML Commands

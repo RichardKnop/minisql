@@ -171,3 +171,13 @@ func (s *TestSuite) TearDownTest() {
 	// pick up a stale WAL from a previous test.
 	_ = os.Remove(s.dbFile.Name() + "-wal")
 }
+
+// reopenDB closes and reopens the database file, simulating a process restart.
+// The caller is responsible for setting s.db to the returned handle.
+func (s *TestSuite) reopenDB() *sql.DB {
+	db, err := sql.Open("minisql", s.dbFile.Name())
+	s.Require().NoError(err)
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	return db
+}

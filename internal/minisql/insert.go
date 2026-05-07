@@ -134,6 +134,12 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			return StatementResult{}, err
 		}
 
+		if t.checkChildFK != nil {
+			if err := t.checkChildFK(ctx, row); err != nil {
+				return StatementResult{}, err
+			}
+		}
+
 		// Collect the row for RETURNING before it is inserted (values are already
 		// final at this point, including any autoincrement PK that was resolved above).
 		if len(stmt.ReturningFields) > 0 {

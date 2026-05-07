@@ -51,7 +51,7 @@ func (p *parserItem) doParseCreateTable() error {
 		token := p.peek()
 
 		switch strings.ToUpper(token) {
-		case "PRIMARY KEY", "UNIQUE":
+		case "PRIMARY KEY", "UNIQUE", "FOREIGN KEY", "CONSTRAINT":
 			p.step = stepCreateTableConstraint
 			return nil
 		}
@@ -190,7 +190,7 @@ func (p *parserItem) doParseCreateTable() error {
 		}
 	case stepCreateTableColumnCheck:
 		checkRWord := strings.ToUpper(p.peek())
-		p.step = stepCreateTableCommaOrClosingParens
+		p.step = stepCreateTableColumnFKRef
 		if checkRWord != "CHECK" {
 			return nil
 		}
@@ -222,9 +222,33 @@ func (p *parserItem) doParseCreateTable() error {
 			p.pop()
 			p.step = stepCreateTableConstraintUniqueKey
 			return nil
+		case "FOREIGN KEY":
+			p.pop()
+			p.fkInProgress = minisql.ForeignKey{}
+			p.fkAfterStep = stepCreateTableConstraint
+			p.step = stepCreateTableConstraintForeignKey
+			return nil
+		case "CONSTRAINT":
+			p.pop()
+			// Peek the optional constraint name (identifier; quotes are stripped by peek)
+			name := p.peek()
+			if isIdentifier(name) {
+				p.fkInProgress = minisql.ForeignKey{Name: name}
+				p.pop()
+			} else {
+				p.fkInProgress = minisql.ForeignKey{}
+			}
+			// Expect FOREIGN KEY
+			if strings.ToUpper(p.peek()) != "FOREIGN KEY" {
+				return p.errorf("at CREATE TABLE: expected FOREIGN KEY after CONSTRAINT")
+			}
+			p.pop()
+			p.fkAfterStep = stepCreateTableConstraint
+			p.step = stepCreateTableConstraintForeignKey
+			return nil
 		}
 		if token != ")" {
-			return p.errorf("at CREATE TABLE: expected PRIMARY KEY, UNIQUE, or closing parens")
+			return p.errorf("at CREATE TABLE: expected PRIMARY KEY, UNIQUE, FOREIGN KEY, CONSTRAINT, or closing parens")
 		}
 		p.pop()
 		p.step = stepStatementEnd
@@ -300,6 +324,122 @@ func (p *parserItem) doParseCreateTable() error {
 		}
 		p.UniqueIndexes[len(p.UniqueIndexes)-1].Name = minisql.UniqueIndexName(p.TableName, columnNames(p.UniqueIndexes[len(p.UniqueIndexes)-1].Columns)...)
 		p.step = stepCreateTableConstraint
+	case stepCreateTableColumnFKRef:
+		// Optional inline REFERENCES clause after a column definition.
+		if strings.ToUpper(p.peek()) == "REFERENCES" {
+			p.pop()
+			// Set FK column = last defined column
+			p.fkInProgress = minisql.ForeignKey{
+				Column: p.Columns[len(p.Columns)-1].Name,
+			}
+			p.fkAfterStep = stepCreateTableCommaOrClosingParens
+			p.step = stepCreateTableFKParentTable
+			return nil
+		}
+		p.step = stepCreateTableCommaOrClosingParens
+
+	case stepCreateTableFKParentTable:
+		tableName := p.peek()
+		if !isIdentifier(tableName) {
+			return p.errorf("at CREATE TABLE: expected parent table name after REFERENCES")
+		}
+		p.fkInProgress.TargetTable = tableName
+		p.pop()
+		p.step = stepCreateTableFKParentOpenParens
+
+	case stepCreateTableFKParentOpenParens:
+		if p.peek() != "(" {
+			return p.errorf("at CREATE TABLE: expected '(' after REFERENCES table name")
+		}
+		p.pop()
+		p.step = stepCreateTableFKParentColumn
+
+	case stepCreateTableFKParentColumn:
+		colName := p.peek()
+		if !isIdentifier(colName) {
+			return p.errorf("at CREATE TABLE: expected parent column name")
+		}
+		p.fkInProgress.TargetColumn = colName
+		p.pop()
+		p.step = stepCreateTableFKParentCloseParens
+
+	case stepCreateTableFKParentCloseParens:
+		if p.peek() != ")" {
+			return p.errorf("at CREATE TABLE: expected ')' after parent column name")
+		}
+		p.pop()
+		p.step = stepCreateTableFKOnDeleteOrUpdate
+
+	case stepCreateTableFKOnDeleteOrUpdate:
+		token := strings.ToUpper(p.peek())
+		switch token {
+		case "ON DELETE":
+			p.pop()
+			p.fkActionTarget = "onDelete"
+			p.step = stepCreateTableFKActionKind
+		case "ON UPDATE":
+			p.pop()
+			p.fkActionTarget = "onUpdate"
+			p.step = stepCreateTableFKActionKind
+		default:
+			// No more FK clauses — finalize and continue
+			p.finalizeFKInProgress()
+			p.step = p.fkAfterStep
+		}
+
+	case stepCreateTableFKActionKind:
+		token := strings.ToUpper(p.peek())
+		var action minisql.FKAction
+		switch token {
+		case "RESTRICT":
+			action = minisql.FKActionRestrict
+		case "NO ACTION":
+			action = minisql.FKActionNoAction
+		case "SET NULL":
+			action = minisql.FKActionSetNull
+		case "CASCADE":
+			action = minisql.FKActionCascade
+		default:
+			return p.errorf("at CREATE TABLE: expected RESTRICT, NO ACTION, SET NULL, or CASCADE")
+		}
+		p.pop()
+		if p.fkActionTarget == "onDelete" {
+			p.fkInProgress.OnDelete = action
+		} else {
+			p.fkInProgress.OnUpdate = action
+		}
+		p.step = stepCreateTableFKOnDeleteOrUpdate // loop: check for more ON DELETE/UPDATE
+
+	// Table-level FOREIGN KEY (child column list)
+	case stepCreateTableConstraintForeignKey:
+		if p.peek() != "(" {
+			return p.errorf("at CREATE TABLE: expected '(' after FOREIGN KEY")
+		}
+		p.pop()
+		p.step = stepCreateTableConstraintForeignKeyColumn
+
+	case stepCreateTableConstraintForeignKeyColumn:
+		colName := p.peek()
+		if !isIdentifier(colName) {
+			return p.errorf("at CREATE TABLE: expected column name in FOREIGN KEY clause")
+		}
+		p.pop()
+		// Only single-column FK in Increment 1
+		if p.peek() == "," {
+			return p.errorf("at CREATE TABLE: multi-column foreign keys are not yet supported")
+		}
+		if p.peek() != ")" {
+			return p.errorf("at CREATE TABLE: expected ')' after FOREIGN KEY column")
+		}
+		p.pop()
+		p.fkInProgress.Column = colName
+		// Now expect REFERENCES
+		if strings.ToUpper(p.peek()) != "REFERENCES" {
+			return p.errorf("at CREATE TABLE: expected REFERENCES after FOREIGN KEY (...)")
+		}
+		p.pop()
+		p.step = stepCreateTableFKParentTable
+
 	case stepCreateTableCommaOrClosingParens:
 		commaOrClosingParens := strings.ToUpper(p.peek())
 		if commaOrClosingParens != "," && commaOrClosingParens != ")" {
@@ -313,6 +453,22 @@ func (p *parserItem) doParseCreateTable() error {
 		p.step = stepStatementEnd
 	}
 	return nil
+}
+
+// finalizeFKInProgress assigns a name (if not set) and appends fkInProgress to ForeignKeys.
+func (p *parserItem) finalizeFKInProgress() {
+	fk := p.fkInProgress
+	if fk.Name == "" {
+		fk.Name = minisql.AutoFKName(p.TableName, fk.TargetTable, fk.Column)
+	}
+	if fk.OnDelete == 0 {
+		fk.OnDelete = minisql.FKActionRestrict
+	}
+	if fk.OnUpdate == 0 {
+		fk.OnUpdate = minisql.FKActionRestrict
+	}
+	p.ForeignKeys = append(p.ForeignKeys, fk)
+	p.fkInProgress = minisql.ForeignKey{}
 }
 
 func columnNames(columns []minisql.Column) []string {

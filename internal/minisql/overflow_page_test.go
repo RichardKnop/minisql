@@ -84,3 +84,23 @@ func TestOverflowPage_Marshal(t *testing.T) {
 		assert.Equal(t, node, recreatedNode)
 	})
 }
+
+func TestOverflowPageSize(t *testing.T) {
+	t.Parallel()
+
+	h := &OverflowPageHeader{}
+	assert.Equal(t, uint64(9), h.Size())
+
+	page := &OverflowPage{Data: make([]byte, 100)}
+	assert.Equal(t, uint64(9)+100, page.Size())
+}
+
+func TestIndexOverflowPageSize(t *testing.T) {
+	t.Parallel()
+
+	h := &IndexOverflowPageHeader{}
+	assert.Equal(t, uint64(9), h.Size())
+
+	page := &IndexOverflowPage{Header: IndexOverflowPageHeader{ItemCount: 3}}
+	assert.Equal(t, uint64(9)+uint64(3)*8, page.Size())
+}

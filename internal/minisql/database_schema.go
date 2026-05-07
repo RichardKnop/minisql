@@ -25,6 +25,9 @@ const (
 	SchemaPrimaryKey
 	SchemaUniqueIndex
 	SchemaSecondaryIndex
+	// SchemaForeignKey identifies a foreign key constraint stored as a separate
+	// schema row (Name = FK name, TableName = child table, DDL = serialised FK).
+	SchemaForeignKey
 )
 
 // Schema represents a single row in the internal schema metadata table.

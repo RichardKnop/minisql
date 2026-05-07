@@ -14,13 +14,14 @@ import (
 func TestToInternalArgs(t *testing.T) {
 	t.Parallel()
 
-	t.Run("nil value returns nil slice", func(t *testing.T) {
+	t.Run("nil value is preserved as nil element", func(t *testing.T) {
 		t.Parallel()
 
 		args := []driver.NamedValue{{Value: nil}}
 		got, err := toInternalArgs(args)
 		require.NoError(t, err)
-		assert.Nil(t, got)
+		require.Len(t, got, 1)
+		assert.Nil(t, got[0])
 	})
 
 	t.Run("empty args returns empty slice", func(t *testing.T) {

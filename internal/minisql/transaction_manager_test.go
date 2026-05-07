@@ -666,3 +666,14 @@ func TestTransactionManager_ExecuteInTransaction(t *testing.T) {
 		resetMocks(&pagerMock.Mock, &saverMock.Mock)
 	})
 }
+
+func TestTransactionManager_SetCheckpointFunc(t *testing.T) {
+	t.Parallel()
+
+	tm := &TransactionManager{}
+	called := false
+	tm.SetCheckpointFunc(func() error { called = true; return nil })
+	require.NotNil(t, tm.checkpointFn)
+	require.NoError(t, tm.checkpointFn())
+	assert.True(t, called)
+}

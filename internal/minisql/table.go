@@ -30,6 +30,19 @@ type Table struct {
 	// parallelScan enables concurrent leaf-page scanning via parallelSequentialScan.
 	// Toggled by PRAGMA parallel_scan = on/off.
 	parallelScan bool
+	// ForeignKeys holds all outgoing FK constraints defined on this table.
+	ForeignKeys []ForeignKey
+	// fkColumnSet is a fast-lookup set of column names that are FK columns.
+	fkColumnSet map[string]bool
+	// referencedColumns is a fast-lookup set of column names in this table that
+	// are referenced by FK constraints from other tables.
+	referencedColumns map[string]bool
+	// checkChildFK is called before INSERT/UPDATE to verify outgoing FK constraints.
+	// Set by *Database when the table is created or loaded.
+	checkChildFK func(context.Context, Row) error
+	// checkParentFK is called before DELETE/UPDATE to verify inbound FK constraints.
+	// Set by *Database when the table is created or loaded.
+	checkParentFK func(context.Context, Row) error
 	// rightmostTablePage caches the last leaf page index for SeekNextRowID so that
 	// sequential (autoincrement) inserts skip the O(log N) root→leaf traversal.
 	// lastTxIDTablePage guards against stale hints from rolled-back transactions.
@@ -70,6 +83,34 @@ func WithParallelScan(enabled bool) TableOption {
 	return func(t *Table) {
 		t.parallelScan = enabled
 	}
+}
+
+// WithForeignKeys sets the outgoing FK constraints on the table.
+func WithForeignKeys(fks []ForeignKey) TableOption {
+	return func(t *Table) {
+		t.ForeignKeys = fks
+		t.fkColumnSet = make(map[string]bool, len(fks))
+		for _, fk := range fks {
+			t.fkColumnSet[fk.Column] = true
+		}
+	}
+}
+
+// WithChildFKChecker wires up a callback that checks outgoing FK constraints.
+// Called by *Database; must only be invoked while d.dbLock is held (write).
+func WithChildFKChecker(fn func(context.Context, Row) error) TableOption {
+	return func(t *Table) { t.checkChildFK = fn }
+}
+
+// WithParentFKChecker wires up a callback that checks inbound FK constraints.
+// Called by *Database; must only be invoked while d.dbLock is held (write).
+func WithParentFKChecker(fn func(context.Context, Row) error) TableOption {
+	return func(t *Table) { t.checkParentFK = fn }
+}
+
+// WithReferencedColumns marks which columns of this table are FK targets in other tables.
+func WithReferencedColumns(cols map[string]bool) TableOption {
+	return func(t *Table) { t.referencedColumns = cols }
 }
 
 // estimatedRowCount returns the tracked row count, or -1 if no row-count
