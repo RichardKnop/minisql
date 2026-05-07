@@ -120,8 +120,8 @@ type Scan struct {
 	Filters        OneOrMore
 	// SubScans holds the child index scans for ScanTypeIndexIntersect.
 	// Each child is executed to collect RowIDs; surviving rows are fetched after intersection.
-	SubScans  []Scan
-	Type      ScanType
+	SubScans      []Scan
+	Type          ScanType
 	CoveringIndex bool
 }
 

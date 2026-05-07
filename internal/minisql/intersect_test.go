@@ -340,9 +340,9 @@ func TestTable_IndexIntersectScan(t *testing.T) {
 			Filters: OneOrMore{
 				{
 					{
-						Operator:  Gt,
-						Operand1:  Operand{Type: OperandField, Value: Field{Name: "id"}},
-						Operand2:  Operand{Type: OperandInteger, Value: int64(10)},
+						Operator: Gt,
+						Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
+						Operand2: Operand{Type: OperandInteger, Value: int64(10)},
 					},
 				},
 			},

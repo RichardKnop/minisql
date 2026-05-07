@@ -62,7 +62,10 @@ func (s *TestSuite) TestParallelScan_ResultsMatchSequential() {
 	}
 
 	// Collect rows with sequential scan (parallel_scan off by default).
-	type row struct{ id int64; email, name string }
+	type row struct {
+		id          int64
+		email, name string
+	}
 	collectRows := func() []row {
 		rs, err := s.db.QueryContext(context.Background(), `select id, email, name from "users";`)
 		s.Require().NoError(err)

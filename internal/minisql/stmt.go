@@ -319,39 +319,39 @@ type CTE struct {
 
 // Statement ...
 type Statement struct {
-	PrimaryKey       PrimaryKey
-	Aliases          map[string]string
-	Functions        map[string]Function
-	Updates          map[string]OptionalValue
-	Offset           OptionalValue
-	Limit            OptionalValue
-	TableName        string
-	TableAlias       string
-	IndexName        string
-	Target           string
-	PragmaName       string
-	PragmaValue      string
-	Fields           []Field
-	Inserts          [][]OptionalValue
-	Aggregates       []AggregateExpr
-	GroupBy          []Field
-	Having           OneOrMore
-	Unions           []UnionClause
-	Joins            []Join
-	OrderBy          []OrderBy
-	UniqueIndexes    []UniqueIndex
-	Columns          []Column
-	Conditions       OneOrMore
-	ReturningFields    []Field
-	ExplainStatement   *Statement
-	FromSubquery       *Statement // non-nil when FROM clause is a derived table
-	FromSubqueryAlias  string     // alias for the derived table (e.g. "t" in FROM (...) t)
-	CTEs               []CTE      // non-nil for WITH … SELECT statements
-	Kind               StatementKind
-	ConflictAction     ConflictAction
-	IfNotExists        bool
-	ExplainAnalyze     bool
-	Distinct           bool
+	PrimaryKey        PrimaryKey
+	Aliases           map[string]string
+	Functions         map[string]Function
+	Updates           map[string]OptionalValue
+	Offset            OptionalValue
+	Limit             OptionalValue
+	TableName         string
+	TableAlias        string
+	IndexName         string
+	Target            string
+	PragmaName        string
+	PragmaValue       string
+	Fields            []Field
+	Inserts           [][]OptionalValue
+	Aggregates        []AggregateExpr
+	GroupBy           []Field
+	Having            OneOrMore
+	Unions            []UnionClause
+	Joins             []Join
+	OrderBy           []OrderBy
+	UniqueIndexes     []UniqueIndex
+	Columns           []Column
+	Conditions        OneOrMore
+	ReturningFields   []Field
+	ExplainStatement  *Statement
+	FromSubquery      *Statement // non-nil when FROM clause is a derived table
+	FromSubqueryAlias string     // alias for the derived table (e.g. "t" in FROM (...) t)
+	CTEs              []CTE      // non-nil for WITH … SELECT statements
+	Kind              StatementKind
+	ConflictAction    ConflictAction
+	IfNotExists       bool
+	ExplainAnalyze    bool
+	Distinct          bool
 }
 
 // NumPlaceholders returns the number of placeholder parameters (?) in the statement.
