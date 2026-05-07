@@ -43,6 +43,12 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 	}
 
 	for _, row := range rows {
+		if t.checkParentFK != nil {
+			if err := t.checkParentFK(ctx, row); err != nil {
+				return result, err
+			}
+		}
+
 		// Row locations can change after each delete, so we seek again for each key
 		// to make sure we have the correct cursor.
 		cursor, err := t.Seek(ctx, row.Key)

@@ -116,7 +116,7 @@ func toInternalArgs(args []driver.NamedValue) ([]any, error) {
 	for _, arg := range args {
 		switch v := arg.Value.(type) {
 		case nil:
-			return nil, nil
+			internalArgs = append(internalArgs, nil)
 		case int64, float64, bool:
 			internalArgs = append(internalArgs, v)
 		case string:

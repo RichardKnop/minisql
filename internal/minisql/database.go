@@ -32,23 +32,30 @@ type WALConfig struct {
 
 // Database is the top-level embedded SQL database instance.
 type Database struct {
-	walDBFile      DBFile
-	parser         Parser
-	factory        PagerFactory
-	saver          PageSaver
-	lockedProvider TableProvider
-	stmtCache      LRUCache[string]
-	tables         map[string]*Table
-	txManager      *TransactionManager
-	dbLock         *sync.RWMutex
-	walIndex       *WALIndex
-	clock          clock
-	logger         *zap.Logger
-	wal            *WAL
-	rowCounts      map[string]int64
-	dbFilePath     string
-	rowCountsMu    sync.RWMutex
-	parallelScan   bool
+	walDBFile         DBFile
+	parser            Parser
+	factory           PagerFactory
+	saver             PageSaver
+	lockedProvider    TableProvider
+	stmtCache         LRUCache[string]
+	tables            map[string]*Table
+	txManager         *TransactionManager
+	dbLock            *sync.RWMutex
+	walIndex          *WALIndex
+	clock             clock
+	logger            *zap.Logger
+	wal               *WAL
+	rowCounts         map[string]int64
+	dbFilePath        string
+	rowCountsMu       sync.RWMutex
+	parallelScan      bool
+	// referencedBy maps each parent table name to the list of FK constraints
+	// from other (child) tables that reference it.  Built at startup and kept
+	// in sync as tables are created/dropped.  Access is guarded by dbLock.
+	referencedBy      map[string][]inboundFK
+	// foreignKeysEnabled controls whether FK constraints are enforced.
+	// Default true; toggled by PRAGMA foreign_keys = on|off.
+	foreignKeysEnabled bool
 }
 
 type clock func() Time
@@ -58,15 +65,17 @@ type clock func() Time
 // that do not require WAL (commits fall back to writing directly to the pager).
 func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, parser Parser, factory PagerFactory, saver PageSaver, walCfg *WALConfig, opts ...DatabaseOption) (*Database, error) {
 	db := &Database{
-		dbFilePath: dbFilePath,
-		parser:     parser,
-		factory:    factory,
-		saver:      saver,
-		tables:     make(map[string]*Table),
-		rowCounts:  make(map[string]int64),
-		dbLock:     new(sync.RWMutex),
-		stmtCache:  lrucache.New[string](defaultMaxCachedStatements),
-		logger:     logger,
+		dbFilePath:         dbFilePath,
+		parser:             parser,
+		factory:            factory,
+		saver:              saver,
+		tables:             make(map[string]*Table),
+		rowCounts:          make(map[string]int64),
+		referencedBy:       make(map[string][]inboundFK),
+		foreignKeysEnabled: true,
+		dbLock:             new(sync.RWMutex),
+		stmtCache:          lrucache.New[string](defaultMaxCachedStatements),
+		logger:             logger,
 		clock: func() Time {
 			now := time.Now().UTC()
 			return Time{
@@ -550,10 +559,17 @@ func (d *Database) init(ctx context.Context) error {
 			if err := d.initSecondaryIndex(ctx, schema); err != nil {
 				return err
 			}
+		case SchemaForeignKey:
+			// FK schemas are processed in a second pass (see below).
 		default:
 			return fmt.Errorf("unrecognized schema type %d", schema.Type)
 		}
 	}
+
+	// Second pass: build the referencedBy map from all loaded tables' FK lists
+	// and wire up FK check callbacks.  This must happen after all tables are loaded
+	// so that cross-table references can be resolved.
+	d.rebuildFKState()
 
 	// Use the lock-free variant: init is called either from NewDatabase
 	// (single-threaded) or from Reopen (which holds dbLock.Lock()), so
@@ -706,6 +722,10 @@ func (d *Database) tableFromSQL(ctx context.Context, schema Schema) (*Table, err
 	}
 
 	opts = append(opts, WithParallelScan(d.parallelScan))
+
+	if len(stmt.ForeignKeys) > 0 {
+		opts = append(opts, WithForeignKeys(stmt.ForeignKeys))
+	}
 
 	return NewTable(
 		d.logger,
@@ -1042,6 +1062,30 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 	freePage.LeafNode = NewLeafNode()
 	freePage.LeafNode.Header.IsRoot = true
 
+	// Validate FK targets before creating the table.
+	for _, fk := range stmt.ForeignKeys {
+		// Self-referential FK: validate against the statement's own schema.
+		if fk.TargetTable == stmt.TableName {
+			if !d.stmtHasIndexOnColumn(stmt, fk.TargetColumn) {
+				return nil, fmt.Errorf(
+					"foreign key %q: column %q in table %q must be a primary key or unique index column",
+					fk.Name, fk.TargetColumn, fk.TargetTable,
+				)
+			}
+			continue
+		}
+		parentTable, ok := d.tables[fk.TargetTable]
+		if !ok {
+			return nil, fmt.Errorf("foreign key %q references unknown table %q", fk.Name, fk.TargetTable)
+		}
+		if !d.tableHasIndexOnColumn(parentTable, fk.TargetColumn) {
+			return nil, fmt.Errorf(
+				"foreign key %q: column %q in table %q must be a primary key or unique index column",
+				fk.Name, fk.TargetColumn, fk.TargetTable,
+			)
+		}
+	}
+
 	opts := []TableOption{}
 
 	if stmt.PrimaryKey.Name != "" {
@@ -1057,6 +1101,10 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 	}
 
 	opts = append(opts, WithParallelScan(d.parallelScan))
+
+	if len(stmt.ForeignKeys) > 0 {
+		opts = append(opts, WithForeignKeys(stmt.ForeignKeys))
+	}
 
 	createdTable := NewTable(
 		d.logger,
@@ -1100,6 +1148,24 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 
 	tx.DDLChanges = tx.DDLChanges.CreatedTable(createdTable)
 
+	// Register any FK constraints in the referencedBy map and wire up callbacks.
+	for _, fk := range createdTable.ForeignKeys {
+		d.referencedBy[fk.TargetTable] = append(d.referencedBy[fk.TargetTable], inboundFK{
+			ChildTable: createdTable.Name,
+			FK:         fk,
+		})
+		// Update parent table's referencedColumns and re-wire its checkParentFK.
+		// For self-referential FKs the parent IS the created table — handled below.
+		if parentTable, ok := d.tables[fk.TargetTable]; ok {
+			if parentTable.referencedColumns == nil {
+				parentTable.referencedColumns = make(map[string]bool)
+			}
+			parentTable.referencedColumns[fk.TargetColumn] = true
+			d.wireFKCallbacks(parentTable)
+		}
+	}
+	d.wireFKCallbacks(createdTable)
+
 	return createdTable, nil
 }
 
@@ -1118,6 +1184,19 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	tableToDelete := d.tables[name]
 
 	d.logger.Sugar().With("name", tableToDelete.Name).Debug("dropping table")
+
+	// Refuse drop if another table's FK references this table.
+	if d.foreignKeysEnabled {
+		if inbounds := d.referencedBy[name]; len(inbounds) > 0 {
+			return fmt.Errorf("%w: referenced by %s.%s",
+				ErrDropTableReferencedByFK, inbounds[0].ChildTable, inbounds[0].FK.Column)
+		}
+	}
+
+	// Remove outgoing FKs from the referencedBy map.
+	for _, fk := range tableToDelete.ForeignKeys {
+		d.removeFromReferencedBy(fk.TargetTable, name)
+	}
 
 	if err := d.deleteSchema(ctx, SchemaTable, tableToDelete.Name); err != nil {
 		return err
@@ -1584,4 +1663,115 @@ func (d *Database) deleteSchema(ctx context.Context, schemaType SchemaType, name
 		return fmt.Errorf("failed to delete from main table: no such entry %s of type %d", name, schemaType)
 	}
 	return err
+}
+
+// rebuildFKState reconstructs referencedBy from all loaded user tables and wires
+// up FK callbacks on each table.  Called once after all schemas are loaded at startup.
+func (d *Database) rebuildFKState() {
+	d.referencedBy = make(map[string][]inboundFK)
+	for _, table := range d.tables {
+		if isSystemTable(table.Name) {
+			continue
+		}
+		for _, fk := range table.ForeignKeys {
+			d.referencedBy[fk.TargetTable] = append(d.referencedBy[fk.TargetTable], inboundFK{
+				ChildTable: table.Name,
+				FK:         fk,
+			})
+		}
+	}
+	// Wire referencedColumns on each parent table so cursor.update can decide
+	// whether a parent FK check is necessary.
+	refColsByTable := make(map[string]map[string]bool)
+	for _, inbounds := range d.referencedBy {
+		for _, inbound := range inbounds {
+			if refColsByTable[inbound.FK.TargetTable] == nil {
+				refColsByTable[inbound.FK.TargetTable] = make(map[string]bool)
+			}
+			refColsByTable[inbound.FK.TargetTable][inbound.FK.TargetColumn] = true
+		}
+	}
+	for tableName, cols := range refColsByTable {
+		if t, ok := d.tables[tableName]; ok {
+			t.referencedColumns = cols
+		}
+	}
+	for _, table := range d.tables {
+		if !isSystemTable(table.Name) {
+			d.wireFKCallbacks(table)
+		}
+	}
+}
+
+// wireFKCallbacks attaches checkChildFK / checkParentFK closures to a table.
+// The closures capture d, so they always use the current FK state.
+func (d *Database) wireFKCallbacks(table *Table) {
+	if len(table.ForeignKeys) > 0 {
+		t := table
+		table.checkChildFK = func(ctx context.Context, row Row) error {
+			return d.checkChildFK(ctx, t, row)
+		}
+	}
+	if len(d.referencedBy[table.Name]) > 0 {
+		t := table
+		table.checkParentFK = func(ctx context.Context, row Row) error {
+			return d.checkParentFK(ctx, t, row)
+		}
+	}
+}
+
+// stmtHasIndexOnColumn checks a CREATE TABLE statement (not yet persisted) for a
+// primary key or unique constraint on colName.  Used for self-referential FK validation.
+func (d *Database) stmtHasIndexOnColumn(stmt Statement, colName string) bool {
+	if stmt.PrimaryKey.Name != "" {
+		for _, col := range stmt.PrimaryKey.Columns {
+			if col.Name == colName {
+				return true
+			}
+		}
+	}
+	for _, ui := range stmt.UniqueIndexes {
+		for _, col := range ui.Columns {
+			if col.Name == colName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// tableHasIndexOnColumn returns true if the table has a primary key or unique
+// index on the given (single) column.
+func (d *Database) tableHasIndexOnColumn(table *Table, colName string) bool {
+	if table.HasPrimaryKey() {
+		for _, col := range table.PrimaryKey.Columns {
+			if col.Name == colName {
+				return true
+			}
+		}
+	}
+	for _, idx := range table.UniqueIndexes {
+		for _, col := range idx.Columns {
+			if col.Name == colName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// removeFromReferencedBy removes all inbound FK entries from childTable targeting parentTable.
+func (d *Database) removeFromReferencedBy(parentTable, childTable string) {
+	inbounds := d.referencedBy[parentTable]
+	filtered := inbounds[:0]
+	for _, ib := range inbounds {
+		if ib.ChildTable != childTable {
+			filtered = append(filtered, ib)
+		}
+	}
+	if len(filtered) == 0 {
+		delete(d.referencedBy, parentTable)
+	} else {
+		d.referencedBy[parentTable] = filtered
+	}
 }

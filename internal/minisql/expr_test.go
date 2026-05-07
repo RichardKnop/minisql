@@ -1153,3 +1153,73 @@ func TestExpr_Eval_CaseWhen_Columns(t *testing.T) {
 	}
 	assert.Equal(t, []string{"score", "grade"}, e.Columns())
 }
+
+func TestArithOp_String(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "+", ArithAdd.String())
+	assert.Equal(t, "-", ArithSub.String())
+	assert.Equal(t, "*", ArithMul.String())
+	assert.Equal(t, "/", ArithDiv.String())
+	assert.Equal(t, "?", ArithOp(99).String())
+}
+
+func TestToStringVal(t *testing.T) {
+	t.Parallel()
+
+	s, ok := toStringVal(TextPointer{Data: []byte("hello")})
+	assert.True(t, ok)
+	assert.Equal(t, "hello", s)
+
+	s, ok = toStringVal("world")
+	assert.True(t, ok)
+	assert.Equal(t, "world", s)
+
+	_, ok = toStringVal(int64(42))
+	assert.False(t, ok)
+}
+
+func TestToFloat64(t *testing.T) {
+	t.Parallel()
+
+	v, err := toFloat64(int64(10))
+	require.NoError(t, err)
+	assert.Equal(t, float64(10), v)
+
+	v, err = toFloat64(float64(3.14))
+	require.NoError(t, err)
+	assert.Equal(t, 3.14, v)
+
+	v, err = toFloat64(int32(5))
+	require.NoError(t, err)
+	assert.Equal(t, float64(5), v)
+
+	v, err = toFloat64(float32(2.5))
+	require.NoError(t, err)
+	assert.InDelta(t, float64(float32(2.5)), v, 1e-6)
+
+	_, err = toFloat64("not a number")
+	require.Error(t, err)
+}
+
+func TestCastToTimestamp(t *testing.T) {
+	t.Parallel()
+
+	// TimestampMicros passes through unchanged.
+	ts := TimestampMicros(1234567890)
+	got, err := castToTimestamp(ts)
+	require.NoError(t, err)
+	assert.Equal(t, ts, got)
+
+	// Valid string parses to a timestamp.
+	_, err = castToTimestamp(TextPointer{Data: []byte("2024-01-15 10:00:00")})
+	require.NoError(t, err)
+
+	// Invalid string returns an error.
+	_, err = castToTimestamp(TextPointer{Data: []byte("not-a-date")})
+	require.Error(t, err)
+
+	// Unsupported type returns an error.
+	_, err = castToTimestamp(int64(42))
+	require.Error(t, err)
+}

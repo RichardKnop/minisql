@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"testing"
 
@@ -60,6 +61,23 @@ func TestStatement_BindArguments(t *testing.T) {
 		assert.Equal(t, NewTextPointer([]byte("foo")), stmt.Inserts[0][0].Value)
 		assert.Equal(t, Placeholder{}, stmt.Inserts[0][1].Value)
 		assert.Equal(t, Placeholder{}, stmt.Inserts[0][2].Value)
+	})
+
+	t.Run("Bind SELECT with OperandList placeholders", func(t *testing.T) {
+		stmt := Statement{
+			Kind:      Select,
+			TableName: "users",
+			Conditions: OneOrMore{
+				{
+					FieldIsInAny(Field{Name: "id"}, Placeholder{}, Placeholder{}),
+				},
+			},
+		}
+		bound, err := stmt.BindArguments(int64(1), int64(2))
+		require.NoError(t, err)
+		list := bound.Conditions[0][0].Operand2.Value.([]any)
+		assert.Equal(t, int64(1), list[0])
+		assert.Equal(t, int64(2), list[1])
 	})
 
 	t.Run("Bind UPDATE statement", func(t *testing.T) {
@@ -1550,7 +1568,7 @@ func TestStatement_DDL(t *testing.T) {
 		expected := `create table "users" (
 	a int4 primary key autoincrement,
 	b int8 not null,
-	c varchar(255) unique not null,
+	c varchar(255) not null unique,
 	d text not null,
 	e boolean not null default false,
 	f real,
@@ -1755,6 +1773,81 @@ func TestStatement_DDL(t *testing.T) {
 		expected := `create index "idx_users_on_foo_bar" on "users" (
 	foo,
 	bar
+);`
+
+		actual := stmt.DDL()
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("create table with single foreign key (default restrict)", func(t *testing.T) {
+		columns := []Column{
+			{Kind: Int8, Size: 8, Name: "id"},
+			{Kind: Int8, Size: 8, Name: "user_id", Nullable: false},
+		}
+		stmt := Statement{
+			Kind:       CreateTable,
+			TableName:  "orders",
+			Columns:    columns,
+			PrimaryKey: NewPrimaryKey("pk__orders", columns[0:1], true),
+			ForeignKeys: []ForeignKey{
+				{
+					Name:         "fk__orders__users__user_id",
+					Column:       "user_id",
+					TargetTable:  "users",
+					TargetColumn: "id",
+					OnDelete:     FKActionRestrict,
+					OnUpdate:     FKActionRestrict,
+				},
+			},
+		}
+
+		expected := `create table "orders" (
+	id int8 primary key autoincrement,
+	user_id int8 not null,
+	constraint "fk__orders__users__user_id" foreign key ("user_id") references "users" ("id") on delete restrict on update restrict
+);`
+
+		actual := stmt.DDL()
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("create table with multiple foreign keys", func(t *testing.T) {
+		columns := []Column{
+			{Kind: Int8, Size: 8, Name: "id"},
+			{Kind: Int8, Size: 8, Name: "order_id", Nullable: false},
+			{Kind: Int8, Size: 8, Name: "product_id", Nullable: false},
+		}
+		stmt := Statement{
+			Kind:       CreateTable,
+			TableName:  "order_items",
+			Columns:    columns,
+			PrimaryKey: NewPrimaryKey("pk__order_items", columns[0:1], true),
+			ForeignKeys: []ForeignKey{
+				{
+					Name:         "fk__order_items__orders__order_id",
+					Column:       "order_id",
+					TargetTable:  "orders",
+					TargetColumn: "id",
+					OnDelete:     FKActionRestrict,
+					OnUpdate:     FKActionRestrict,
+				},
+				{
+					Name:         "fk__order_items__products__product_id",
+					Column:       "product_id",
+					TargetTable:  "products",
+					TargetColumn: "id",
+					OnDelete:     FKActionNoAction,
+					OnUpdate:     FKActionNoAction,
+				},
+			},
+		}
+
+		expected := `create table "order_items" (
+	id int8 primary key autoincrement,
+	order_id int8 not null,
+	product_id int8 not null,
+	constraint "fk__order_items__orders__order_id" foreign key ("order_id") references "orders" ("id") on delete restrict on update restrict,
+	constraint "fk__order_items__products__product_id" foreign key ("product_id") references "products" ("id") on delete no action on update no action
 );`
 
 		actual := stmt.DDL()
@@ -2043,4 +2136,114 @@ func TestStatement_ValidateHaving(t *testing.T) {
 		err := stmt.Validate(tbl)
 		require.NoError(t, err)
 	})
+}
+
+func TestAggregateKind_String(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct{ kind AggregateKind; want string }{
+		{AggregateCount, "COUNT"},
+		{AggregateSum, "SUM"},
+		{AggregateAvg, "AVG"},
+		{AggregateMin, "MIN"},
+		{AggregateMax, "MAX"},
+		{AggregateKind(99), "UNKNOWN"},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, tt.kind.String())
+	}
+}
+
+func TestColumnKind_IsInt(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, Int4.IsInt())
+	assert.True(t, Int8.IsInt())
+	assert.False(t, Boolean.IsInt())
+	assert.False(t, Varchar.IsInt())
+	assert.False(t, Text.IsInt())
+	assert.False(t, Real.IsInt())
+	assert.False(t, Timestamp.IsInt())
+}
+
+func TestField_OutputName(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "name", Field{Name: "name"}.OutputName())
+	assert.Equal(t, "label", Field{Name: "name", Alias: "label"}.OutputName())
+	// Expr with alias uses the alias.
+	assert.Equal(t, "expr_alias", Field{Expr: &Expr{Literal: int64(1)}, Alias: "expr_alias"}.OutputName())
+	// Expr without alias uses Expr.String().
+	e := &Expr{Literal: int64(42)}
+	assert.Equal(t, e.String(), Field{Expr: e}.OutputName())
+}
+
+func TestDirection_String(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "ASC", Asc.String())
+	assert.Equal(t, "DESC", Desc.String())
+	assert.Equal(t, "UNKNOWN", Direction(99).String())
+}
+
+func TestStatement_IsDDL(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, Statement{Kind: CreateTable}.IsDDL())
+	assert.True(t, Statement{Kind: DropTable}.IsDDL())
+	assert.True(t, Statement{Kind: CreateIndex}.IsDDL())
+	assert.True(t, Statement{Kind: DropIndex}.IsDDL())
+	assert.False(t, Statement{Kind: Select}.IsDDL())
+	assert.False(t, Statement{Kind: Insert}.IsDDL())
+	assert.False(t, Statement{Kind: Update}.IsDDL())
+	assert.False(t, Statement{Kind: Delete}.IsDDL())
+}
+
+func TestStatement_ValidatePragma(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, Statement{PragmaName: "foreign_keys"}.validatePragma())
+	require.Error(t, Statement{}.validatePragma())
+}
+
+func TestIterator_Close(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	rows := []Row{{}, {}, {}}
+	it := NewSliceIterator(rows)
+
+	require.True(t, it.Next(ctx))
+	require.NoError(t, it.Close())
+	// After Close, Next must return false.
+	assert.False(t, it.Next(ctx))
+}
+
+func TestStatementKind_String(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		kind StatementKind
+		want string
+	}{
+		{CreateTable, "CREATE TABLE"},
+		{DropTable, "DROP TABLE"},
+		{CreateIndex, "CREATE INDEX"},
+		{DropIndex, "DROP INDEX"},
+		{Insert, "INSERT"},
+		{Select, "SELECT"},
+		{Update, "UPDATE"},
+		{Delete, "DELETE"},
+		{BeginTransaction, "BEGIN TRANSACTION"},
+		{CommitTransaction, "COMMIT TRANSACTION"},
+		{RollbackTransaction, "ROLLBACK TRANSACTION"},
+		{Analyze, "ANALYZE"},
+		{Vacuum, "VACUUM"},
+		{Pragma, "PRAGMA"},
+		{Explain, "EXPLAIN"},
+		{StatementKind(999), "UNKNOWN"},
+	}
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, tc.kind.String())
+	}
 }

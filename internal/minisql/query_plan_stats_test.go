@@ -582,3 +582,26 @@ func TestEstimateRangeRows_WithHistogram(t *testing.T) {
 		assert.InDelta(t, 100, float64(got), 5.0)
 	})
 }
+
+func TestAnyToFloat64(t *testing.T) {
+	t.Parallel()
+
+	v, ok := anyToFloat64(int32(3))
+	assert.True(t, ok)
+	assert.Equal(t, float64(3), v)
+
+	v, ok = anyToFloat64(int64(10))
+	assert.True(t, ok)
+	assert.Equal(t, float64(10), v)
+
+	v, ok = anyToFloat64(float32(1.5))
+	assert.True(t, ok)
+	assert.InDelta(t, float64(float32(1.5)), v, 1e-6)
+
+	v, ok = anyToFloat64(float64(2.5))
+	assert.True(t, ok)
+	assert.Equal(t, 2.5, v)
+
+	_, ok = anyToFloat64("not a number")
+	assert.False(t, ok)
+}

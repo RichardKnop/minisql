@@ -287,6 +287,30 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 		return false, err
 	}
 
+	// Check parent FK: only when an inbound-FK-referenced column is being updated.
+	if c.Table.checkParentFK != nil {
+		for colName := range changedValues {
+			if c.Table.referencedColumns[colName] {
+				if err := c.Table.checkParentFK(ctx, oldRow); err != nil {
+					return false, err
+				}
+				break
+			}
+		}
+	}
+
+	// Check child FK: only when an outgoing-FK column is being updated.
+	if c.Table.checkChildFK != nil {
+		for colName := range changedValues {
+			if c.Table.fkColumnSet[colName] {
+				if err := c.Table.checkChildFK(ctx, row); err != nil {
+					return false, err
+				}
+				break
+			}
+		}
+	}
+
 	page, err := c.Table.pager.ModifyPage(ctx, c.PageIdx)
 	if err != nil {
 		return false, fmt.Errorf("update: %w", err)

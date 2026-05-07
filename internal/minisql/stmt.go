@@ -340,6 +340,7 @@ type Statement struct {
 	Joins             []Join
 	OrderBy           []OrderBy
 	UniqueIndexes     []UniqueIndex
+	ForeignKeys       []ForeignKey
 	Columns           []Column
 	Conditions        OneOrMore
 	ReturningFields   []Field
@@ -452,6 +453,7 @@ func (s Statement) Clone() Statement {
 		ReturningFields:   s.ReturningFields,
 		ExplainAnalyze:    s.ExplainAnalyze,
 		FromSubqueryAlias: s.FromSubqueryAlias,
+		ForeignKeys:       s.ForeignKeys, // slice of value structs, safe to share
 	}
 	for i := range s.Inserts {
 		stmt.Inserts[i] = make([]OptionalValue, len(s.Inserts[i]))
@@ -1091,6 +1093,34 @@ func (s Statement) validateCreateTable() error {
 		nameMap[col.Name] = struct{}{}
 	}
 
+	for _, fk := range s.ForeignKeys {
+		if fk.Column == "" {
+			return errors.New("foreign key: column name cannot be empty")
+		}
+		if fk.TargetTable == "" {
+			return errors.New("foreign key: referenced table cannot be empty")
+		}
+		if fk.TargetColumn == "" {
+			return errors.New("foreign key: referenced column cannot be empty")
+		}
+		found := false
+		for _, col := range s.Columns {
+			if col.Name == fk.Column {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("foreign key column %q does not exist in table %q", fk.Column, s.TableName)
+		}
+		if fk.OnDelete == FKActionSetNull || fk.OnDelete == FKActionCascade {
+			return ErrFKActionNotSupported
+		}
+		if fk.OnUpdate == FKActionSetNull || fk.OnUpdate == FKActionCascade {
+			return ErrFKActionNotSupported
+		}
+	}
+
 	indexMap := map[string]struct{}{}
 
 	if _, ok := indexMap[indexColumnHash(s.PrimaryKey.Columns)]; ok {
@@ -1646,11 +1676,11 @@ func (s Statement) createTableDDL() string {
 				sb.WriteString(" autoincrement")
 			}
 		} else {
-			if _, ok := uniqueKeys[col.Name]; ok {
-				sb.WriteString(" unique")
-			}
 			if !col.Nullable {
 				sb.WriteString(" not null")
+			}
+			if _, ok := uniqueKeys[col.Name]; ok {
+				sb.WriteString(" unique")
 			}
 			if col.DefaultValueNow {
 				sb.WriteString(" default now()")
@@ -1706,7 +1736,12 @@ func (s Statement) createTableDDL() string {
 		sb.WriteString(")")
 	}
 
-	// TODO : add table-level constraints (composite primary keys, unique keys, foreign keys, etc.)
+	for _, fk := range s.ForeignKeys {
+		sb.WriteString(",\n")
+		fmt.Fprintf(&sb, "\tconstraint \"%s\" foreign key (\"%s\") references \"%s\" (\"%s\") on delete %s on update %s",
+			fk.Name, fk.Column, fk.TargetTable, fk.TargetColumn,
+			fk.OnDelete.String(), fk.OnUpdate.String())
+	}
 
 	sb.WriteString("\n);")
 	return sb.String()

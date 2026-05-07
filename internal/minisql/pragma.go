@@ -43,6 +43,8 @@ func (d *Database) executePragmaStatement(ctx context.Context, stmt Statement) (
 		return d.executeSynchronousPragma(stmt)
 	case "parallel_scan":
 		return d.executeParallelScanPragma(stmt)
+	case "foreign_keys":
+		return d.executeForeignKeysPragma(stmt)
 	default:
 		return StatementResult{}, fmt.Errorf("%w: %s", errUnknownPragma, stmt.PragmaName)
 	}
@@ -71,6 +73,30 @@ func (d *Database) executeSynchronousPragma(stmt Statement) (StatementResult, er
 
 var parallelScanResultColumns = []Column{
 	{Kind: Int4, Size: 4, Name: "parallel_scan"},
+}
+
+var foreignKeysResultColumns = []Column{
+	{Kind: Int4, Size: 4, Name: "foreign_keys"},
+}
+
+func (d *Database) executeForeignKeysPragma(stmt Statement) (StatementResult, error) {
+	if stmt.PragmaValue == "" {
+		d.dbLock.RLock()
+		enabled := d.foreignKeysEnabled
+		d.dbLock.RUnlock()
+		return boolPragmaResult(foreignKeysResultColumns, enabled), nil
+	}
+
+	enabled, err := parseBoolPragma(stmt.PragmaValue)
+	if err != nil {
+		return StatementResult{}, err
+	}
+
+	d.dbLock.Lock()
+	d.foreignKeysEnabled = enabled
+	d.dbLock.Unlock()
+
+	return boolPragmaResult(foreignKeysResultColumns, enabled), nil
 }
 
 func (d *Database) executeParallelScanPragma(stmt Statement) (StatementResult, error) {

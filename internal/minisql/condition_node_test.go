@@ -167,3 +167,33 @@ func TestConditionNode_ToDNF(t *testing.T) {
 		})
 	}
 }
+
+func TestConditionNode_Columns(t *testing.T) {
+	t.Parallel()
+
+	// nil receiver returns nil.
+	var nilNode *ConditionNode
+	assert.Nil(t, nilNode.Columns())
+
+	// Leaf with two field operands returns both column names.
+	leaf := &ConditionNode{Leaf: &Condition{
+		Operand1: Operand{Type: OperandField, Value: Field{Name: "a"}},
+		Operator: Eq,
+		Operand2: Operand{Type: OperandField, Value: Field{Name: "b"}},
+	}}
+	assert.Equal(t, []string{"a", "b"}, leaf.Columns())
+
+	// Non-leaf OR node merges columns from both children.
+	left := &ConditionNode{Leaf: &Condition{
+		Operand1: Operand{Type: OperandField, Value: Field{Name: "x"}},
+		Operator: Eq,
+		Operand2: Operand{Type: OperandInteger, Value: int64(1)},
+	}}
+	right := &ConditionNode{Leaf: &Condition{
+		Operand1: Operand{Type: OperandField, Value: Field{Name: "y"}},
+		Operator: Eq,
+		Operand2: Operand{Type: OperandInteger, Value: int64(2)},
+	}}
+	parent := &ConditionNode{Op: LogicOpOr, Left: left, Right: right}
+	assert.Equal(t, []string{"x", "y"}, parent.Columns())
+}

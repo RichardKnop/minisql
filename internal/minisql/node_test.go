@@ -152,3 +152,21 @@ func TestInternalNode_Child(t *testing.T) {
 		})
 	}
 }
+
+func TestInternalNode_LastCell_PrependCell(t *testing.T) {
+	t.Parallel()
+
+	node := &InternalNode{}
+	node.Header.KeysNum = 2
+	node.ICells[0] = ICell{Key: 10, Child: 1}
+	node.ICells[1] = ICell{Key: 20, Child: 2}
+	node.Header.RightChild = 3
+
+	assert.Equal(t, ICell{Key: 20, Child: 2}, node.LastCell())
+
+	node.PrependCell(ICell{Key: 5, Child: 0})
+	require.Equal(t, uint32(3), node.Header.KeysNum)
+	assert.Equal(t, ICell{Key: 5, Child: 0}, node.ICells[0])
+	assert.Equal(t, ICell{Key: 10, Child: 1}, node.ICells[1])
+	assert.Equal(t, ICell{Key: 20, Child: 2}, node.ICells[2])
+}

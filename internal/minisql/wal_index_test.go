@@ -214,3 +214,33 @@ func TestWALIndex_Concurrent(t *testing.T) {
 		}
 	}
 }
+
+func TestFreePage_MarshalUnmarshal(t *testing.T) {
+	t.Parallel()
+
+	fp := FreePage{NextFreePage: PageIndex(42)}
+	buf := make([]byte, PageSize)
+	require.NoError(t, fp.Marshal(buf))
+
+	var fp2 FreePage
+	require.NoError(t, fp2.Unmarshal(buf))
+	assert.Equal(t, fp.NextFreePage, fp2.NextFreePage)
+
+	// Wrong type byte returns an error.
+	buf[0] = 0xFF
+	require.Error(t, fp2.Unmarshal(buf))
+}
+
+func TestWALIndex_MaxPageIndex(t *testing.T) {
+	t.Parallel()
+
+	// Empty index returns 0.
+	wi := NewWALIndex()
+	assert.Equal(t, PageIndex(0), wi.MaxPageIndex())
+
+	// After adding pages the max is returned correctly.
+	wi.Update(PageIndex(3), make([]byte, 4096))
+	wi.Update(PageIndex(7), make([]byte, 4096))
+	wi.Update(PageIndex(1), make([]byte, 4096))
+	assert.Equal(t, PageIndex(7), wi.MaxPageIndex())
+}

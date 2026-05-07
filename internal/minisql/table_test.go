@@ -418,3 +418,50 @@ func TestTable_InternalNodeInsert(t *testing.T) {
 
 	mock.AssertExpectationsForObjects(t, pagerMock)
 }
+
+func TestTable_IndexColumnsByIndexName(t *testing.T) {
+	t.Parallel()
+
+	idCol := Column{Kind: Int8, Size: 8, Name: "id"}
+	emailCol := Column{Kind: Varchar, Size: 255, Name: "email"}
+	nameCol := Column{Kind: Varchar, Size: 100, Name: "name"}
+
+	table := &Table{
+		PrimaryKey: PrimaryKey{
+			IndexInfo: IndexInfo{Name: "pk__users", Columns: []Column{idCol}},
+		},
+		UniqueIndexes: map[string]UniqueIndex{
+			"unique__users__email": {IndexInfo: IndexInfo{Name: "unique__users__email", Columns: []Column{emailCol}}},
+		},
+		SecondaryIndexes: map[string]SecondaryIndex{
+			"idx__users__name": {IndexInfo: IndexInfo{Name: "idx__users__name", Columns: []Column{nameCol}}},
+		},
+	}
+
+	cols, ok := table.IndexColumnsByIndexName("pk__users")
+	require.True(t, ok)
+	assert.Equal(t, []Column{idCol}, cols)
+
+	cols, ok = table.IndexColumnsByIndexName("unique__users__email")
+	require.True(t, ok)
+	assert.Equal(t, []Column{emailCol}, cols)
+
+	cols, ok = table.IndexColumnsByIndexName("idx__users__name")
+	require.True(t, ok)
+	assert.Equal(t, []Column{nameCol}, cols)
+
+	_, ok = table.IndexColumnsByIndexName("nonexistent")
+	assert.False(t, ok)
+}
+
+func TestTable_EstimatedRowCount(t *testing.T) {
+	t.Parallel()
+
+	// No getter wired: returns -1.
+	table := &Table{}
+	assert.Equal(t, int64(-1), table.estimatedRowCount())
+
+	// Getter wired: returns the getter's value.
+	table.getRowCount = func() int64 { return 42 }
+	assert.Equal(t, int64(42), table.estimatedRowCount())
+}

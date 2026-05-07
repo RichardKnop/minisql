@@ -44,15 +44,17 @@ var reservedWords = []string{
 	"PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "DEFAULT", "NOT NULL", "NULL", "UNIQUE",
 	"IS NULL", "IS NOT NULL", "NOT BETWEEN", "NOT LIKE", "BETWEEN", "LIKE", "TRUE", "FALSE", "NOW()",
 	"CHECK",
-	"IF NOT EXISTS", "WHERE", "FROM", "SET", "ASC", "DESC", "AS",
+	"IF NOT EXISTS", "WHERE", "FROM", "SET NULL", "SET", "ASC", "DESC", "AS",
 	"BEGIN", "COMMIT", "ROLLBACK", "ANALYZE", "VACUUM",
 	"PRAGMA",
-	"INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "ON CONFLICT", "ON",
+	"INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "ON CONFLICT", "ON DELETE", "ON UPDATE", "ON",
 	"DO UPDATE", "DO NOTHING",
 	"DISTINCT",
 	"UNION ALL", "UNION",
 	"RETURNING",
 	"WITH",
+	// foreign key keywords (FOREIGN KEY before FOREIGN if we ever add FOREIGN)
+	"FOREIGN KEY", "REFERENCES", "CONSTRAINT", "NO ACTION", "CASCADE", "RESTRICT",
 	";",
 }
 
@@ -78,6 +80,17 @@ const (
 	stepCreateTableConstraintUniqueKeyColumn
 	stepCreateTableConstraintPrimaryKeyCommaOrClosingParens
 	stepCreateTableConstraintUniqueKeyCommaOrClosingParens
+	// Foreign key parsing (shared between inline and table-level FK syntax)
+	stepCreateTableColumnFKRef           // optional REFERENCES after column definition
+	stepCreateTableFKParentTable         // parent table name after REFERENCES
+	stepCreateTableFKParentOpenParens    // opening ( before parent column
+	stepCreateTableFKParentColumn        // parent column name
+	stepCreateTableFKParentCloseParens   // closing ) after parent column
+	stepCreateTableFKOnDeleteOrUpdate    // optional ON DELETE / ON UPDATE clause
+	stepCreateTableFKActionKind          // action: restrict/no action/set null/cascade
+	// Table-level FOREIGN KEY constraint
+	stepCreateTableConstraintForeignKey       // after FOREIGN KEY: opening (
+	stepCreateTableConstraintForeignKeyColumn // child column name
 	stepCreateTableCommaOrClosingParens
 	stepDropTableName
 	stepCreateIndexIfNotExists
@@ -148,6 +161,10 @@ type parserItem struct {
 	nextUpdateField   string
 	joinInProgress    minisql.Join
 	cteNameInProgress string
+	// FK parsing state
+	fkInProgress   minisql.ForeignKey
+	fkAfterStep    step   // step to resume after FK clause is fully parsed
+	fkActionTarget string // "onDelete" or "onUpdate"
 }
 
 // New returns a new SQL parser.
@@ -253,6 +270,15 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 			stepCreateTableConstraintUniqueKeyColumn,
 			stepCreateTableConstraintPrimaryKeyCommaOrClosingParens,
 			stepCreateTableConstraintUniqueKeyCommaOrClosingParens,
+			stepCreateTableColumnFKRef,
+			stepCreateTableFKParentTable,
+			stepCreateTableFKParentOpenParens,
+			stepCreateTableFKParentColumn,
+			stepCreateTableFKParentCloseParens,
+			stepCreateTableFKOnDeleteOrUpdate,
+			stepCreateTableFKActionKind,
+			stepCreateTableConstraintForeignKey,
+			stepCreateTableConstraintForeignKeyColumn,
 			stepCreateTableCommaOrClosingParens:
 			if err := p.doParseCreateTable(); err != nil {
 				return statements, err
