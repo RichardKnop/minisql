@@ -100,6 +100,11 @@ func (d *Driver) newDB(config *ConnectionConfig) (*minisql.Database, error) {
 			zap.Int("frames_in_index", walIndex.Size()))
 	}
 
+	dbOpts := []minisql.DatabaseOption{}
+	if config.ParallelScan {
+		dbOpts = append(dbOpts, minisql.WithParallelScanEnabled())
+	}
+
 	return minisql.NewDatabase(
 		context.Background(),
 		d.logger,
@@ -115,6 +120,7 @@ func (d *Driver) newDB(config *ConnectionConfig) (*minisql.Database, error) {
 			WALWriteBufferSize:  config.WALWriteBufferSize,
 			Synchronous:         config.Synchronous,
 		},
+		dbOpts...,
 	)
 }
 

@@ -223,6 +223,40 @@ func TestParseConnectionString(t *testing.T) {
 			wantErr:     true,
 			errContains: "invalid synchronous parameter",
 		},
+		{
+			name:    "parallel_scan=on",
+			connStr: "./test.db?parallel_scan=on",
+			wantConfig: &ConnectionConfig{
+				FilePath:               "./test.db",
+				WALCheckpointThreshold: DefaultWALCheckpointThreshold,
+				WALWriteBufferSize:     DefaultWALWriteBufferSize,
+				LogLevel:               "warn",
+				MaxCachedPages:         minisql.PageCacheSize,
+				Synchronous:            SynchronousNormal,
+				ParallelScan:           true,
+			},
+			wantErr: false,
+		},
+		{
+			name:    "parallel_scan=off explicit",
+			connStr: "./test.db?parallel_scan=off",
+			wantConfig: &ConnectionConfig{
+				FilePath:               "./test.db",
+				WALCheckpointThreshold: DefaultWALCheckpointThreshold,
+				WALWriteBufferSize:     DefaultWALWriteBufferSize,
+				LogLevel:               "warn",
+				MaxCachedPages:         minisql.PageCacheSize,
+				Synchronous:            SynchronousNormal,
+				ParallelScan:           false,
+			},
+			wantErr: false,
+		},
+		{
+			name:        "invalid parallel_scan value",
+			connStr:     "./test.db?parallel_scan=maybe",
+			wantErr:     true,
+			errContains: "invalid parallel_scan parameter",
+		},
 	}
 
 	for _, tt := range tests {

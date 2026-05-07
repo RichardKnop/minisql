@@ -17,3 +17,10 @@ func WithMaxCachedStatements(maxStatements int) DatabaseOption {
 		}
 	}
 }
+
+// WithParallelScanEnabled turns on concurrent leaf-page scanning for all user tables.
+func WithParallelScanEnabled() DatabaseOption {
+	return func(d *Database) {
+		d.parallelScan = true
+	}
+}

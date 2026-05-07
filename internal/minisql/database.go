@@ -48,6 +48,7 @@ type Database struct {
 	rowCounts      map[string]int64
 	dbFilePath     string
 	rowCountsMu    sync.RWMutex
+	parallelScan   bool
 }
 
 type clock func() Time
@@ -704,6 +705,8 @@ func (d *Database) tableFromSQL(ctx context.Context, schema Schema) (*Table, err
 		opts = append(opts, WithUniqueIndex(uniqueIndex))
 	}
 
+	opts = append(opts, WithParallelScan(d.parallelScan))
+
 	return NewTable(
 		d.logger,
 		tp,
@@ -1052,6 +1055,8 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 	for _, uniqueIndex := range stmt.UniqueIndexes {
 		opts = append(opts, WithUniqueIndex(uniqueIndex))
 	}
+
+	opts = append(opts, WithParallelScan(d.parallelScan))
 
 	createdTable := NewTable(
 		d.logger,

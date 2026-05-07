@@ -41,6 +41,7 @@ type ConnectionConfig struct {
 	MaxCachedPages         int             // Maximum number of pages to cache (default: 2000, 0 = use default)
 	SlowQueryThreshold     time.Duration   // Log queries at WARN when elapsed time meets or exceeds this duration (0 = disabled)
 	Synchronous            SynchronousMode // WAL fsync mode: off, normal (default), full
+	ParallelScan           bool            // Enable concurrent leaf-page scanning (default: false)
 }
 
 // DefaultConnectionConfig returns default configuration.
@@ -66,6 +67,7 @@ func DefaultConnectionConfig(filePath string) *ConnectionConfig {
 //   - max_cached_pages=N                : Page cache size in pages (default: 2000)
 //   - slow_query_threshold=50ms         : Log queries taking at least this long (0 = disabled)
 //   - synchronous=off|normal|full       : WAL fsync mode (default: normal, matching SQLite WAL default)
+//   - parallel_scan=on|off              : Enable concurrent leaf-page scanning (default: off)
 //
 // Examples:
 //   - "./my.db"                                       : Default settings
@@ -73,6 +75,7 @@ func DefaultConnectionConfig(filePath string) *ConnectionConfig {
 //   - "./my.db?wal_checkpoint_threshold=500"          : Auto-checkpoint every 500 frames
 //   - "./my.db?wal_write_buffer_size=0"               : Disable write batching (flush every commit)
 //   - "./my.db?synchronous=full"                      : fsync on every commit (maximum durability)
+//   - "./my.db?parallel_scan=on"                      : Enable parallel full table scans
 //   - "./my.db?log_level=info&max_cached_pages=500"   : Multiple parameters
 func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 	// Split on first '?' to separate path from query params
@@ -152,6 +155,18 @@ func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 			config.Synchronous = SynchronousFull
 		default:
 			return nil, fmt.Errorf("invalid synchronous parameter: expected off, normal, or full, got %q", syncStr)
+		}
+	}
+
+	// Parse parallel_scan parameter
+	if psStr := queryParams.Get("parallel_scan"); psStr != "" {
+		switch strings.ToLower(psStr) {
+		case "on", "1", "true":
+			config.ParallelScan = true
+		case "off", "0", "false":
+			config.ParallelScan = false
+		default:
+			return nil, fmt.Errorf("invalid parallel_scan parameter: expected on or off, got %q", psStr)
 		}
 	}
 

@@ -27,6 +27,9 @@ type Table struct {
 	// executeSelectFromDerivedTable. When set, sequentialScan iterates these
 	// in-memory rows instead of reading from the B+ tree pager.
 	virtualRows []Row
+	// parallelScan enables concurrent leaf-page scanning via parallelSequentialScan.
+	// Toggled by PRAGMA parallel_scan = on/off.
+	parallelScan bool
 	// rightmostTablePage caches the last leaf page index for SeekNextRowID so that
 	// sequential (autoincrement) inserts skip the O(log N) root→leaf traversal.
 	// lastTxIDTablePage guards against stale hints from rolled-back transactions.
@@ -59,6 +62,13 @@ func WithUniqueIndex(index UniqueIndex) TableOption {
 func WithSecondaryIndex(index SecondaryIndex) TableOption {
 	return func(t *Table) {
 		t.SecondaryIndexes[index.Name] = index
+	}
+}
+
+// WithParallelScan enables or disables concurrent leaf-page scanning for this table.
+func WithParallelScan(enabled bool) TableOption {
+	return func(t *Table) {
+		t.parallelScan = enabled
 	}
 }
 
