@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,27 +33,27 @@ type WALConfig struct {
 
 // Database is the top-level embedded SQL database instance.
 type Database struct {
-	walDBFile         DBFile
-	parser            Parser
-	factory           PagerFactory
-	saver             PageSaver
-	lockedProvider    TableProvider
-	stmtCache         LRUCache[string]
-	tables            map[string]*Table
-	txManager         *TransactionManager
-	dbLock            *sync.RWMutex
-	walIndex          *WALIndex
-	clock             clock
-	logger            *zap.Logger
-	wal               *WAL
-	rowCounts         map[string]int64
-	dbFilePath        string
-	rowCountsMu       sync.RWMutex
-	parallelScan      bool
+	walDBFile      DBFile
+	parser         Parser
+	factory        PagerFactory
+	saver          PageSaver
+	lockedProvider TableProvider
+	stmtCache      LRUCache[string]
+	tables         map[string]*Table
+	txManager      *TransactionManager
+	dbLock         *sync.RWMutex
+	walIndex       *WALIndex
+	clock          clock
+	logger         *zap.Logger
+	wal            *WAL
+	rowCounts      map[string]int64
+	dbFilePath     string
+	rowCountsMu    sync.RWMutex
+	parallelScan   bool
 	// referencedBy maps each parent table name to the list of FK constraints
 	// from other (child) tables that reference it.  Built at startup and kept
 	// in sync as tables are created/dropped.  Access is guarded by dbLock.
-	referencedBy      map[string][]inboundFK
+	referencedBy map[string][]inboundFK
 	// foreignKeysEnabled controls whether FK constraints are enforced.
 	// Default true; toggled by PRAGMA foreign_keys = on|off.
 	foreignKeysEnabled bool
@@ -1064,25 +1065,48 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 
 	// Validate FK targets before creating the table.
 	for _, fk := range stmt.ForeignKeys {
-		// Self-referential FK: validate against the statement's own schema.
-		if fk.TargetTable == stmt.TableName {
-			if !d.stmtHasIndexOnColumn(stmt, fk.TargetColumn) {
+		if len(fk.TargetColumns) == 1 {
+			targetCol := fk.TargetColumns[0]
+			if fk.TargetTable == stmt.TableName {
+				if !d.stmtHasIndexOnColumn(stmt, targetCol) {
+					return nil, fmt.Errorf(
+						"foreign key %q: column %q in table %q must be a primary key or unique index column",
+						fk.Name, targetCol, fk.TargetTable,
+					)
+				}
+				continue
+			}
+			parentTable, ok := d.tables[fk.TargetTable]
+			if !ok {
+				return nil, fmt.Errorf("foreign key %q references unknown table %q", fk.Name, fk.TargetTable)
+			}
+			if !d.tableHasIndexOnColumn(parentTable, targetCol) {
 				return nil, fmt.Errorf(
 					"foreign key %q: column %q in table %q must be a primary key or unique index column",
-					fk.Name, fk.TargetColumn, fk.TargetTable,
+					fk.Name, targetCol, fk.TargetTable,
 				)
 			}
-			continue
-		}
-		parentTable, ok := d.tables[fk.TargetTable]
-		if !ok {
-			return nil, fmt.Errorf("foreign key %q references unknown table %q", fk.Name, fk.TargetTable)
-		}
-		if !d.tableHasIndexOnColumn(parentTable, fk.TargetColumn) {
-			return nil, fmt.Errorf(
-				"foreign key %q: column %q in table %q must be a primary key or unique index column",
-				fk.Name, fk.TargetColumn, fk.TargetTable,
-			)
+		} else {
+			// Multi-column FK: target columns must form a primary key or unique constraint.
+			if fk.TargetTable == stmt.TableName {
+				if !d.stmtHasCompositeUniqueConstraint(stmt, fk.TargetColumns) {
+					return nil, fmt.Errorf(
+						"foreign key %q: columns (%s) in table %q must form a primary key or unique index",
+						fk.Name, strings.Join(fk.TargetColumns, ", "), fk.TargetTable,
+					)
+				}
+				continue
+			}
+			parentTable, ok := d.tables[fk.TargetTable]
+			if !ok {
+				return nil, fmt.Errorf("foreign key %q references unknown table %q", fk.Name, fk.TargetTable)
+			}
+			if !d.tableHasCompositeUniqueConstraint(parentTable, fk.TargetColumns) {
+				return nil, fmt.Errorf(
+					"foreign key %q: columns (%s) in table %q must form a primary key or unique index",
+					fk.Name, strings.Join(fk.TargetColumns, ", "), fk.TargetTable,
+				)
+			}
 		}
 	}
 
@@ -1154,13 +1178,15 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 			ChildTable: createdTable.Name,
 			FK:         fk,
 		})
-		// Update parent table's referencedColumns and re-wire its checkParentFK.
+		// Update parent table's referencedColumns and re-wire its FK callbacks.
 		// For self-referential FKs the parent IS the created table — handled below.
 		if parentTable, ok := d.tables[fk.TargetTable]; ok {
 			if parentTable.referencedColumns == nil {
 				parentTable.referencedColumns = make(map[string]bool)
 			}
-			parentTable.referencedColumns[fk.TargetColumn] = true
+			for _, col := range fk.TargetColumns {
+				parentTable.referencedColumns[col] = true
+			}
 			d.wireFKCallbacks(parentTable)
 		}
 	}
@@ -1188,8 +1214,8 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	// Refuse drop if another table's FK references this table.
 	if d.foreignKeysEnabled {
 		if inbounds := d.referencedBy[name]; len(inbounds) > 0 {
-			return fmt.Errorf("%w: referenced by %s.%s",
-				ErrDropTableReferencedByFK, inbounds[0].ChildTable, inbounds[0].FK.Column)
+			return fmt.Errorf("%w: referenced by %s.%v",
+				ErrDropTableReferencedByFK, inbounds[0].ChildTable, inbounds[0].FK.Columns)
 		}
 	}
 
@@ -1681,14 +1707,16 @@ func (d *Database) rebuildFKState() {
 		}
 	}
 	// Wire referencedColumns on each parent table so cursor.update can decide
-	// whether a parent FK check is necessary.
+	// whether a parent FK callback is necessary.
 	refColsByTable := make(map[string]map[string]bool)
 	for _, inbounds := range d.referencedBy {
 		for _, inbound := range inbounds {
 			if refColsByTable[inbound.FK.TargetTable] == nil {
 				refColsByTable[inbound.FK.TargetTable] = make(map[string]bool)
 			}
-			refColsByTable[inbound.FK.TargetTable][inbound.FK.TargetColumn] = true
+			for _, col := range inbound.FK.TargetColumns {
+				refColsByTable[inbound.FK.TargetTable][col] = true
+			}
 		}
 	}
 	for tableName, cols := range refColsByTable {
@@ -1703,7 +1731,7 @@ func (d *Database) rebuildFKState() {
 	}
 }
 
-// wireFKCallbacks attaches checkChildFK / checkParentFK closures to a table.
+// wireFKCallbacks attaches FK enforcement closures to a table.
 // The closures capture d, so they always use the current FK state.
 func (d *Database) wireFKCallbacks(table *Table) {
 	if len(table.ForeignKeys) > 0 {
@@ -1715,7 +1743,10 @@ func (d *Database) wireFKCallbacks(table *Table) {
 	if len(d.referencedBy[table.Name]) > 0 {
 		t := table
 		table.checkParentFK = func(ctx context.Context, row Row) error {
-			return d.checkParentFK(ctx, t, row)
+			return d.enforceParentFKOnDelete(ctx, t, row)
+		}
+		table.enforceParentFKOnUpdate = func(ctx context.Context, oldRow Row, newRow Row) error {
+			return d.enforceParentFKOnUpdate(ctx, t, oldRow, newRow)
 		}
 	}
 }
@@ -1758,6 +1789,52 @@ func (d *Database) tableHasIndexOnColumn(table *Table, colName string) bool {
 		}
 	}
 	return false
+}
+
+// stmtHasCompositeUniqueConstraint returns true if the CREATE TABLE statement has a
+// primary key or unique index whose column set exactly matches targetCols.
+func (d *Database) stmtHasCompositeUniqueConstraint(stmt Statement, targetCols []string) bool {
+	if columnsMatchSet(stmt.PrimaryKey.Columns, targetCols) {
+		return true
+	}
+	for _, ui := range stmt.UniqueIndexes {
+		if columnsMatchSet(ui.Columns, targetCols) {
+			return true
+		}
+	}
+	return false
+}
+
+// tableHasCompositeUniqueConstraint returns true if the table has a primary key or unique
+// index whose column set exactly matches targetCols.
+func (d *Database) tableHasCompositeUniqueConstraint(table *Table, targetCols []string) bool {
+	if table.HasPrimaryKey() && columnsMatchSet(table.PrimaryKey.Columns, targetCols) {
+		return true
+	}
+	for _, idx := range table.UniqueIndexes {
+		if columnsMatchSet(idx.Columns, targetCols) {
+			return true
+		}
+	}
+	return false
+}
+
+// columnsMatchSet returns true if cols contains exactly the same names as targetNames
+// (same count, same names, order-independent).
+func columnsMatchSet(cols []Column, targetNames []string) bool {
+	if len(cols) != len(targetNames) {
+		return false
+	}
+	nameSet := make(map[string]struct{}, len(cols))
+	for _, col := range cols {
+		nameSet[col.Name] = struct{}{}
+	}
+	for _, name := range targetNames {
+		if _, ok := nameSet[name]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // removeFromReferencedBy removes all inbound FK entries from childTable targeting parentTable.

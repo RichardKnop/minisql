@@ -16,10 +16,10 @@ func TestParse_ForeignKey(t *testing.T) {
 	p := New()
 
 	tests := []struct {
-		name     string
-		sql      string
-		wantFKs  []minisql.ForeignKey
-		wantErr  bool
+		name    string
+		sql     string
+		wantFKs []minisql.ForeignKey
+		wantErr bool
 	}{
 		{
 			name: "inline REFERENCES default restrict",
@@ -29,12 +29,12 @@ func TestParse_ForeignKey(t *testing.T) {
 			);`,
 			wantFKs: []minisql.ForeignKey{
 				{
-					Name:         "fk__orders__users__user_id",
-					Column:       "user_id",
-					TargetTable:  "users",
-					TargetColumn: "id",
-					OnDelete:     minisql.FKActionRestrict,
-					OnUpdate:     minisql.FKActionRestrict,
+					Name:          "fk__orders__users__user_id",
+					Columns:       []string{"user_id"},
+					TargetTable:   "users",
+					TargetColumns: []string{"id"},
+					OnDelete:      minisql.FKActionRestrict,
+					OnUpdate:      minisql.FKActionRestrict,
 				},
 			},
 		},
@@ -46,12 +46,12 @@ func TestParse_ForeignKey(t *testing.T) {
 			);`,
 			wantFKs: []minisql.ForeignKey{
 				{
-					Name:         "fk__orders__users__user_id",
-					Column:       "user_id",
-					TargetTable:  "users",
-					TargetColumn: "id",
-					OnDelete:     minisql.FKActionCascade,
-					OnUpdate:     minisql.FKActionRestrict,
+					Name:          "fk__orders__users__user_id",
+					Columns:       []string{"user_id"},
+					TargetTable:   "users",
+					TargetColumns: []string{"id"},
+					OnDelete:      minisql.FKActionCascade,
+					OnUpdate:      minisql.FKActionRestrict,
 				},
 			},
 		},
@@ -63,12 +63,12 @@ func TestParse_ForeignKey(t *testing.T) {
 			);`,
 			wantFKs: []minisql.ForeignKey{
 				{
-					Name:         "fk__orders__users__user_id",
-					Column:       "user_id",
-					TargetTable:  "users",
-					TargetColumn: "id",
-					OnDelete:     minisql.FKActionRestrict,
-					OnUpdate:     minisql.FKActionNoAction,
+					Name:          "fk__orders__users__user_id",
+					Columns:       []string{"user_id"},
+					TargetTable:   "users",
+					TargetColumns: []string{"id"},
+					OnDelete:      minisql.FKActionRestrict,
+					OnUpdate:      minisql.FKActionNoAction,
 				},
 			},
 		},
@@ -81,12 +81,12 @@ func TestParse_ForeignKey(t *testing.T) {
 			);`,
 			wantFKs: []minisql.ForeignKey{
 				{
-					Name:         "fk__orders__users__user_id",
-					Column:       "user_id",
-					TargetTable:  "users",
-					TargetColumn: "id",
-					OnDelete:     minisql.FKActionRestrict,
-					OnUpdate:     minisql.FKActionRestrict,
+					Name:          "fk__orders__users__user_id",
+					Columns:       []string{"user_id"},
+					TargetTable:   "users",
+					TargetColumns: []string{"id"},
+					OnDelete:      minisql.FKActionRestrict,
+					OnUpdate:      minisql.FKActionRestrict,
 				},
 			},
 		},
@@ -99,12 +99,12 @@ func TestParse_ForeignKey(t *testing.T) {
 			);`,
 			wantFKs: []minisql.ForeignKey{
 				{
-					Name:         "fk_orders_users",
-					Column:       "user_id",
-					TargetTable:  "users",
-					TargetColumn: "id",
-					OnDelete:     minisql.FKActionRestrict,
-					OnUpdate:     minisql.FKActionRestrict,
+					Name:          "fk_orders_users",
+					Columns:       []string{"user_id"},
+					TargetTable:   "users",
+					TargetColumns: []string{"id"},
+					OnDelete:      minisql.FKActionRestrict,
+					OnUpdate:      minisql.FKActionRestrict,
 				},
 			},
 		},
@@ -117,12 +117,12 @@ func TestParse_ForeignKey(t *testing.T) {
 			);`,
 			wantFKs: []minisql.ForeignKey{
 				{
-					Name:         "fk__orders__users__user_id",
-					Column:       "user_id",
-					TargetTable:  "users",
-					TargetColumn: "id",
-					OnDelete:     minisql.FKActionRestrict,
-					OnUpdate:     minisql.FKActionRestrict,
+					Name:          "fk__orders__users__user_id",
+					Columns:       []string{"user_id"},
+					TargetTable:   "users",
+					TargetColumns: []string{"id"},
+					OnDelete:      minisql.FKActionRestrict,
+					OnUpdate:      minisql.FKActionRestrict,
 				},
 			},
 		},
@@ -135,20 +135,80 @@ func TestParse_ForeignKey(t *testing.T) {
 			);`,
 			wantFKs: []minisql.ForeignKey{
 				{
-					Name:         "fk__order_items__orders__order_id",
-					Column:       "order_id",
-					TargetTable:  "orders",
-					TargetColumn: "id",
-					OnDelete:     minisql.FKActionRestrict,
-					OnUpdate:     minisql.FKActionRestrict,
+					Name:          "fk__order_items__orders__order_id",
+					Columns:       []string{"order_id"},
+					TargetTable:   "orders",
+					TargetColumns: []string{"id"},
+					OnDelete:      minisql.FKActionRestrict,
+					OnUpdate:      minisql.FKActionRestrict,
 				},
 				{
-					Name:         "fk__order_items__products__product_id",
-					Column:       "product_id",
-					TargetTable:  "products",
-					TargetColumn: "id",
-					OnDelete:     minisql.FKActionRestrict,
-					OnUpdate:     minisql.FKActionRestrict,
+					Name:          "fk__order_items__products__product_id",
+					Columns:       []string{"product_id"},
+					TargetTable:   "products",
+					TargetColumns: []string{"id"},
+					OnDelete:      minisql.FKActionRestrict,
+					OnUpdate:      minisql.FKActionRestrict,
+				},
+			},
+		},
+		{
+			name: "multi-column table-level FK",
+			sql: `CREATE TABLE shipment_lines (
+				id         int8 primary key autoincrement,
+				order_id   int8 not null,
+				product_id int8 not null,
+				shipped    int8 not null,
+				foreign key (order_id, product_id) references "order_lines" (order_id, product_id)
+			);`,
+			wantFKs: []minisql.ForeignKey{
+				{
+					Name:          "fk__shipment_lines__order_lines__order_id_product_id",
+					Columns:       []string{"order_id", "product_id"},
+					TargetTable:   "order_lines",
+					TargetColumns: []string{"order_id", "product_id"},
+					OnDelete:      minisql.FKActionRestrict,
+					OnUpdate:      minisql.FKActionRestrict,
+				},
+			},
+		},
+		{
+			name: "multi-column FK with ON DELETE CASCADE ON UPDATE SET NULL",
+			sql: `CREATE TABLE shipment_lines (
+				id         int8 primary key autoincrement,
+				order_id   int8,
+				product_id int8,
+				shipped    int8 not null,
+				foreign key (order_id, product_id) references "order_lines" (order_id, product_id) on delete cascade on update set null
+			);`,
+			wantFKs: []minisql.ForeignKey{
+				{
+					Name:          "fk__shipment_lines__order_lines__order_id_product_id",
+					Columns:       []string{"order_id", "product_id"},
+					TargetTable:   "order_lines",
+					TargetColumns: []string{"order_id", "product_id"},
+					OnDelete:      minisql.FKActionCascade,
+					OnUpdate:      minisql.FKActionSetNull,
+				},
+			},
+		},
+		{
+			name: "CONSTRAINT name multi-column FK",
+			sql: `CREATE TABLE shipment_lines (
+				id         int8 primary key autoincrement,
+				order_id   int8 not null,
+				product_id int8 not null,
+				shipped    int8 not null,
+				constraint fk_shipment_orderline foreign key (order_id, product_id) references "order_lines" (order_id, product_id) on delete restrict on update no action
+			);`,
+			wantFKs: []minisql.ForeignKey{
+				{
+					Name:          "fk_shipment_orderline",
+					Columns:       []string{"order_id", "product_id"},
+					TargetTable:   "order_lines",
+					TargetColumns: []string{"order_id", "product_id"},
+					OnDelete:      minisql.FKActionRestrict,
+					OnUpdate:      minisql.FKActionNoAction,
 				},
 			},
 		},
@@ -196,6 +256,16 @@ func TestParse_ForeignKey_DDLRoundtrip(t *testing.T) {
 				id int8 primary key autoincrement,
 				user_id int8 not null,
 				constraint fk_orders_users foreign key (user_id) references "users" (id)
+			);`,
+		},
+		{
+			name: "multi-column FK with default restrict actions",
+			sql: `CREATE TABLE shipment_lines (
+				id         int8 primary key autoincrement,
+				order_id   int8 not null,
+				product_id int8 not null,
+				shipped    int8 not null,
+				foreign key (order_id, product_id) references "order_lines" (order_id, product_id)
 			);`,
 		},
 	}
