@@ -188,6 +188,78 @@ func (p *parserItem) parseLeafCondition() (*minisql.ConditionNode, error) {
 		p.pop()
 	}
 
+	// Check for JSON path operators: col -> 'key' or col ->> 'key'
+	if nextOp := p.peek(); nextOp == "->" || nextOp == "->>" {
+		p.pop() // consume -> or ->>
+		arithOp := minisql.JSONArrow
+		if nextOp == "->>" {
+			arithOp = minisql.JSONArrowArrow
+		}
+		// Parse the key/index as a literal
+		keyExpr, err := p.parseFactor()
+		if err != nil {
+			return nil, p.errorf("at WHERE: expected key after %s: %v", nextOp, err)
+		}
+		jsonExpr := &minisql.Expr{
+			Left:  &minisql.Expr{Column: identifier},
+			Right: keyExpr,
+			Op:    arithOp,
+		}
+		cond := minisql.Condition{
+			Operand1: minisql.Operand{Type: minisql.OperandExpr, Value: jsonExpr},
+		}
+		op := strings.ToUpper(p.peek())
+		switch op {
+		case "IS NULL":
+			cond.Operator = minisql.Eq
+			cond.Operand2 = minisql.Operand{Type: minisql.OperandNull}
+			p.pop()
+		case "IS NOT NULL":
+			cond.Operator = minisql.Ne
+			cond.Operand2 = minisql.Operand{Type: minisql.OperandNull}
+			p.pop()
+		case "=":
+			cond.Operator = minisql.Eq
+			p.pop()
+			if err := p.parseCondScalarValue(&cond); err != nil {
+				return nil, err
+			}
+		case "!=":
+			cond.Operator = minisql.Ne
+			p.pop()
+			if err := p.parseCondScalarValue(&cond); err != nil {
+				return nil, err
+			}
+		case ">":
+			cond.Operator = minisql.Gt
+			p.pop()
+			if err := p.parseCondScalarValue(&cond); err != nil {
+				return nil, err
+			}
+		case ">=":
+			cond.Operator = minisql.Gte
+			p.pop()
+			if err := p.parseCondScalarValue(&cond); err != nil {
+				return nil, err
+			}
+		case "<":
+			cond.Operator = minisql.Lt
+			p.pop()
+			if err := p.parseCondScalarValue(&cond); err != nil {
+				return nil, err
+			}
+		case "<=":
+			cond.Operator = minisql.Lte
+			p.pop()
+			if err := p.parseCondScalarValue(&cond); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, p.wrapErr(errWhereUnknownOperator)
+		}
+		return &minisql.ConditionNode{Leaf: &cond}, nil
+	}
+
 	cond := minisql.Condition{
 		Operand1: minisql.Operand{
 			Type:  minisql.OperandField,

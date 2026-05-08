@@ -3,13 +3,13 @@
 [![CI Status](https://github.com/RichardKnop/minisql/actions/workflows/go.yml/badge.svg)](https://github.com/RichardKnop/minisql/actions/workflows/go.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/RichardKnop/minisql)](https://goreportcard.com/report/github.com/RichardKnop/minisql)
 
-`MiniSQL` is an embedded single file database written in Golang, inspired by `SQLite`. It is not a clone of `SQLite` in Go, it is an alternative solution which borrows ideas from other databases as well. It can differentiate itself from `SQLite` in several areas: 
+`MiniSQL` is an embedded single file database written in Golang, inspired by `SQLite`. It is not a clone of `SQLite` in Go, but rather an alternative database which borrows ideas from other databases as well (like Postgres). It can differentiate itself from `SQLite` in several areas: 
 
 1. **Pure Go, zero CGO** — already a differentiator.
 2. **MVCC snapshot isolation** — true MVCC for reads already implemented.
 3. **Parallel query execution** — SQLite is single-threaded; MiniSQL can parallelize full table scans.
 4. **Modern API surface** — idiomatic Go, context-aware, `database/sql` compatible.
-5. **JSON as a first-class type** — native JSONB (not an extension) - not implemented yet.
+5. **JSON as a first-class type** — native `json` column type with path operators and functions (not an extension).
 
 This is an early stage project and it might contain bugs and is not battle tested. Please employ caution when using this database.
 
@@ -329,6 +329,7 @@ if err := rows.Err(); err != nil {
 | `TEXT`       | Variable-length text. If length is <= 255, the text is stored inline, otherwise text is stored in overflow pages (with UTF-8 encoding). |
 | `VARCHAR(n)` | Storage works the same way as `TEXT` but allows limiting length of inserted/updated text to max value. |
 | `TIMESTAMP`  | 8-byte signed integer representing number of microseconds from `2000-01-01 00:00:00 UTC` (`Postgres epoch`). Supported range is from `4713 BC` to `294276 AD` inclusive. |
+| `JSON`       | Variable-length JSON document. Stored as compact text (whitespace stripped on write). Validated on insert/update — invalid JSON is rejected. Supports path extraction via `->` / `->>` operators and `JSON_*` functions. See [JSON Type](#json-type). |
 
 ## TIMESTAMP Spec
 
@@ -365,6 +366,90 @@ Important behavior and current non-goals:
 - Year `0000` is rejected in input. Use `0001 ... BC` for 1 BC.
 - MiniSQL does not currently support `TIMESTAMP WITH TIME ZONE`.
 - String formatting normalizes fractional precision to either no fractional part or exactly 6 fractional digits.
+
+## JSON Type
+
+The `json` column type stores any valid JSON document — object, array, string, number, boolean, or `null`. Values are validated and compacted on write (whitespace stripped, key insertion order preserved). Invalid JSON is rejected at insert/update time.
+
+```sql
+CREATE TABLE events (
+    id      int8 primary key autoincrement,
+    name    varchar(100) not null,
+    payload json
+);
+
+INSERT INTO events (name, payload) VALUES ('login', '{"user":"alice","uid":42}');
+INSERT INTO events (name, payload) VALUES ('tags',  '["go","sql","json"]');
+```
+
+### Path Operators
+
+| Operator | Returns | Description |
+|----------|---------|-------------|
+| `col -> 'key'` | JSON fragment | Extracts a field and returns it as a JSON-encoded string (the value is still quoted/wrapped). |
+| `col ->> 'key'` | SQL scalar | Extracts a field and returns it as a plain SQL value (string unquoted, number as integer or float). |
+| `col -> 0` | JSON fragment | Indexes into a JSON array by position (0-based). |
+| `col ->> 0` | SQL scalar | Same as above but as a scalar. |
+
+```sql
+-- Returns the JSON fragment: "alice"  (quoted)
+SELECT payload -> 'user' FROM events WHERE name = 'login';
+
+-- Returns the scalar string: alice  (unquoted)
+SELECT payload ->> 'user' FROM events WHERE name = 'login';
+
+-- Returns integer: 42
+SELECT payload ->> 'uid' FROM events WHERE name = 'login';
+
+-- Array index: returns "go"
+SELECT payload ->> 0 FROM events WHERE name = 'tags';
+
+-- Filter by JSON field value
+SELECT name FROM events WHERE payload ->> 'user' = 'alice';
+SELECT name FROM events WHERE payload ->> 'uid' = 42;
+```
+
+### JSON Functions
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `JSON_EXTRACT(doc, path)` | scalar | Extracts the value at a JSONPath expression as a SQL scalar. Equivalent to `doc ->> path`. Path syntax: `$` (root), `$.key`, `$['key']`, `$[n]`, chainable. |
+| `JSON_VALID(val)` | `1` or `0` | Returns `1` if `val` is syntactically valid JSON, `0` otherwise. Useful for validating text columns. |
+| `JSON_TYPE(doc[, path])` | text | Returns the JSON type name of the document root, or of the value at `path`. Values: `object`, `array`, `text`, `integer`, `real`, `true`, `false`, `null`. |
+| `JSON_ARRAY_LENGTH(doc)` | integer | Returns the number of elements in a JSON array. Returns `NULL` if the document is not an array. |
+
+```sql
+-- Extract with JSONPath
+SELECT JSON_EXTRACT(payload, '$.user') FROM events WHERE name = 'login';
+-- Returns: alice
+
+-- Type inspection
+SELECT JSON_TYPE(payload) FROM events WHERE name = 'login';  -- object
+SELECT JSON_TYPE(payload) FROM events WHERE name = 'tags';   -- array
+
+SELECT JSON_TYPE(payload, '$.uid') FROM events WHERE name = 'login'; -- integer
+
+-- Array length
+SELECT JSON_ARRAY_LENGTH(payload) FROM events WHERE name = 'tags'; -- 3
+
+-- Validate arbitrary text
+SELECT JSON_VALID('{"x":1}');  -- 1
+SELECT JSON_VALID('bad json'); -- 0
+```
+
+### CAST AS JSON
+
+`CAST(expr AS JSON)` validates and compacts an expression as JSON. Useful for casting a text column or literal to a JSON value.
+
+```sql
+SELECT CAST('{"a": 1}' AS JSON);  -- Returns: {"a":1}  (compacted)
+```
+
+### Null and Missing Keys
+
+- Inserting `NULL` into a `json` column is allowed (the column stores SQL `NULL`, not the JSON string `"null"`).
+- Extracting a key that does not exist returns SQL `NULL`.
+- Applying `->` or `->>` to a SQL `NULL` returns `NULL`.
 
 ## SQL Features
 
@@ -403,7 +488,9 @@ Important behavior and current non-goals:
 | Date/time functions | `NOW()` — current UTC timestamp; `DATE_TRUNC('unit', ts)` — truncate to `year`/`month`/`week`/`day`/`hour`/`minute`/`second`; `EXTRACT('field', ts)` / `DATE_PART('field', ts)` — extract numeric field (`year`, `month`, `day`, `hour`, `minute`, `second`, `dow`); `TO_TIMESTAMP('str')` — parse timestamp string into a TIMESTAMP value. All usable in `SELECT`, `UPDATE SET`, composable with other expressions |
 | `CASE WHEN` | Searched form: `CASE WHEN cond THEN result … ELSE default END`; simple form: `CASE expr WHEN val THEN result … ELSE default END`. Multiple WHEN clauses, optional ELSE (omitting returns NULL). Usable in `SELECT` (including nested in arithmetic), `UPDATE SET`, supports `IS NULL` / `IS NOT NULL` / all comparison operators in conditions |
 | `UNION` / `UNION ALL` | Combine results of two or more `SELECT` statements. `UNION ALL` concatenates all rows (duplicates kept); `UNION` deduplicates the combined result. Chains of three or more branches supported (e.g. `SELECT … UNION ALL SELECT … UNION SELECT …`). Each branch may have its own `WHERE` clause. |
-| `CAST(expr AS type)` | Standard SQL type coercion. Supported target types: `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE`, `TEXT`, `VARCHAR(n)`, `TIMESTAMP`. Follows SQLite semantics: float→int truncates toward zero; text→int/float parses leading digits (non-numeric input → 0). NULL propagates. Usable anywhere an expression is valid (e.g. `SELECT CAST(price AS INT8)`, `SELECT CAST(n AS TEXT) AS label`). |
+| `CAST(expr AS type)` | Standard SQL type coercion. Supported target types: `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE`, `TEXT`, `VARCHAR(n)`, `TIMESTAMP`, `JSON`. Follows SQLite semantics: float→int truncates toward zero; text→int/float parses leading digits (non-numeric input → 0). `CAST(x AS JSON)` validates and compacts the value. NULL propagates. Usable anywhere an expression is valid (e.g. `SELECT CAST(price AS INT8)`, `SELECT CAST(n AS TEXT) AS label`). |
+| JSON operators | `col -> 'key'` — extract a JSON field and return it as a JSON fragment (quoted string, array, object). `col ->> 'key'` — extract a JSON field and return it as a SQL scalar (unquoted string, integer, or float). Integer keys index into arrays (e.g. `col -> 0`). Both operators work in `SELECT` and `WHERE`. See [JSON Type](#json-type). |
+| JSON functions | `JSON_EXTRACT(doc, path)` — extract value at JSON path as a scalar (equivalent to `->>`). `JSON_VALID(val)` — returns `1` if the value is valid JSON, `0` otherwise. `JSON_TYPE(doc[, path])` — returns the JSON type name: `object`, `array`, `text`, `integer`, `real`, `true`, `false`, `null`. `JSON_ARRAY_LENGTH(doc)` — returns the number of elements in a JSON array. See [JSON Type](#json-type). |
 | `INTERVAL` arithmetic | PostgreSQL-style interval expressions. Supported units: `year`, `month`, `week`, `day`, `hour`, `minute`, `second`, `microsecond` (singular or plural). Supports compound intervals (`'1 year 3 months'`) and negative values (`'-2 days'`). Operations: `timestamp + interval → timestamp`, `timestamp - interval → timestamp`, `interval + interval → interval`, `interval - interval → interval`, `timestamp - timestamp → interval`. Month arithmetic is calendar-aware — adding 1 month to Jan 31 yields the last day of February. Usable in `SELECT` and `UPDATE SET`, composable with `AS` aliases. Examples: `SELECT created_at + INTERVAL '7 days' AS expires_at`, `SELECT ts - INTERVAL '1 year 6 months'`. |
 | `VACUUM` | Rebuilds the database file, repacking it into a minimal amount of disk space (similar to SQLite) |
 | `PRAGMA quick_check` | A cheap structural health check of the open database. |
@@ -414,6 +501,95 @@ Important behavior and current non-goals:
 | `PRAGMA parallel_scan` | Read current parallel scan state (returns 0 = off, 1 = on). |
 | `PRAGMA parallel_scan = on\|off` | Enable or disable concurrent leaf-page scanning for full table scans. See [Parallel Full Table Scan](#parallel-full-table-scan). |
 
+
+### Scalar Functions Reference
+
+#### String Functions
+
+| Function | Description |
+|----------|-------------|
+| `UPPER(s)` | Convert string to upper case. |
+| `LOWER(s)` | Convert string to lower case. |
+| `TRIM(s[, chars])` | Strip leading and trailing whitespace, or the given characters. |
+| `LTRIM(s[, chars])` | Strip leading whitespace or characters. |
+| `RTRIM(s[, chars])` | Strip trailing whitespace or characters. |
+| `LENGTH(s)` | Byte length of the string. |
+| `SUBSTR(s, start[, len])` | 1-based substring extraction. |
+| `REPLACE(s, from, to)` | Replace all occurrences of `from` with `to`. |
+| `CONCAT(a, b, ...)` | Concatenate arguments, skipping NULLs. |
+
+#### Numeric Functions
+
+| Function | Description |
+|----------|-------------|
+| `ABS(n)` | Absolute value; preserves input type (`INT8` or `DOUBLE`). |
+| `FLOOR(n)` | Largest integer not greater than `n`. |
+| `CEIL(n)` | Smallest integer not less than `n`. |
+| `ROUND(n[, d])` | Round to `d` decimal places (default 0). |
+| `MOD(a, b)` | Modulo; integer or float depending on inputs. |
+
+#### Date / Time Functions
+
+| Function | Description |
+|----------|-------------|
+| `NOW()` | Current UTC timestamp. |
+| `DATE_TRUNC('unit', ts)` | Truncate timestamp to `year`, `month`, `week`, `day`, `hour`, `minute`, or `second`. |
+| `EXTRACT('field', ts)` | Extract numeric field from timestamp: `year`, `month`, `day`, `hour`, `minute`, `second`, `dow`. |
+| `DATE_PART('field', ts)` | Alias for `EXTRACT`. |
+| `TO_TIMESTAMP('str')` | Parse a timestamp string into a `TIMESTAMP` value. |
+
+#### Conditional Functions
+
+| Function | Description |
+|----------|-------------|
+| `COALESCE(a, b, ...)` | Return the first non-NULL argument. |
+| `NULLIF(a, b)` | Return `NULL` when `a = b`, otherwise return `a`. |
+
+#### JSON Functions
+
+| Function | Description |
+|----------|-------------|
+| `JSON_EXTRACT(doc, path)` | Extract value at JSONPath as a SQL scalar. |
+| `JSON_VALID(val)` | `1` if `val` is valid JSON, `0` otherwise. |
+| `JSON_TYPE(doc[, path])` | JSON type name of the value (`object`, `array`, `text`, `integer`, `real`, `true`, `false`, `null`). |
+| `JSON_ARRAY_LENGTH(doc)` | Number of elements in a JSON array. |
+
+### Operators Reference
+
+#### Comparison Operators
+
+| Operator | Description |
+|----------|-------------|
+| `=` | Equal. |
+| `!=` | Not equal. |
+| `>` | Greater than. |
+| `>=` | Greater than or equal. |
+| `<` | Less than. |
+| `<=` | Less than or equal. |
+| `IS NULL` | Value is NULL. |
+| `IS NOT NULL` | Value is not NULL. |
+| `IN (...)` | Value is in a list or subquery result. |
+| `NOT IN (...)` | Value is not in a list or subquery result. |
+| `BETWEEN a AND b` | Value is between `a` and `b` inclusive. |
+| `NOT BETWEEN a AND b` | Value is outside `a` and `b`. |
+| `LIKE pattern` | String matches pattern (`%` = any sequence, `_` = single char, case-sensitive). |
+| `NOT LIKE pattern` | String does not match pattern. |
+
+#### Arithmetic Operators
+
+| Operator | Description |
+|----------|-------------|
+| `+` | Addition (numeric or `timestamp + interval`). |
+| `-` | Subtraction (numeric, `timestamp - interval`, or `timestamp - timestamp → interval`). |
+| `*` | Multiplication. |
+| `/` | Division (always returns `DOUBLE` when either side is fractional). |
+
+#### JSON Path Operators
+
+| Operator | Returns | Description |
+|----------|---------|-------------|
+| `col -> key` | JSON fragment | Extract field or array element; result is JSON-encoded. |
+| `col ->> key` | SQL scalar | Extract field or array element; result is a plain SQL value. |
 
 Prepared statements are supported using `?` as a placeholder. For example:
 

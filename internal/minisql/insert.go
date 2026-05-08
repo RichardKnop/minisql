@@ -128,6 +128,22 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 				}
 			}
 		}
+		// Normalise JSON columns to compact form before writing.
+		for i, col := range t.Columns {
+			if col.Kind != JSON || !rowValues[i].Valid {
+				continue
+			}
+			tp, ok := rowValues[i].Value.(TextPointer)
+			if !ok {
+				continue
+			}
+			normalised, err := normaliseJSON(tp.String())
+			if err != nil {
+				return StatementResult{}, fmt.Errorf("column %q: %w", col.Name, err)
+			}
+			rowValues[i].Value = NewTextPointer([]byte(normalised))
+		}
+
 		row := NewRowWithValues(t.Columns, rowValues)
 
 		if err := validateCheckConstraints(t.Columns, row); err != nil {

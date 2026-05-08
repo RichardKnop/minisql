@@ -138,6 +138,7 @@ const (
 	Varchar
 	Text
 	Timestamp
+	JSON
 )
 
 // IsInt ...
@@ -163,6 +164,8 @@ func (k ColumnKind) String() string {
 		return "text"
 	case Timestamp:
 		return "timestamp"
+	case JSON:
+		return "json"
 	default:
 		return "unknown"
 	}
@@ -170,13 +173,7 @@ func (k ColumnKind) String() string {
 
 // IsText ...
 func (k ColumnKind) IsText() bool {
-	if k == Varchar {
-		return true
-	}
-	if k == Text {
-		return true
-	}
-	return false
+	return k == Varchar || k == Text || k == JSON
 }
 
 // Column ...
@@ -1572,6 +1569,14 @@ func isValueValidForColumn(col Column, val OptionalValue) error {
 		if !ok {
 			return fmt.Errorf("expects timestamp value for %q", col.Name)
 		}
+	case JSON:
+		tp, ok := val.Value.(TextPointer)
+		if !ok {
+			return fmt.Errorf("expects a text value for JSON column %q", col.Name)
+		}
+		if _, err := normaliseJSON(tp.String()); err != nil {
+			return fmt.Errorf("field %q: %w", col.Name, err)
+		}
 	}
 	return nil
 }
@@ -1580,11 +1585,13 @@ func (s Statement) validateWhere() error {
 	for _, condGroup := range s.Conditions {
 		equalityMap := map[string][]any{}
 		for _, cond := range condGroup {
-			if cond.Operand1.Type != OperandField {
+			if cond.Operand1.Type != OperandField && cond.Operand1.Type != OperandExpr {
 				return errors.New("operand1 in WHERE condition must be a field")
 			}
-			if _, ok := cond.Operand1.Value.(Field); !ok {
-				return errors.New("operand1 in WHERE condition must be a field")
+			if cond.Operand1.Type == OperandField {
+				if _, ok := cond.Operand1.Value.(Field); !ok {
+					return errors.New("operand1 in WHERE condition must be a field")
+				}
 			}
 			if cond.Operand2.Type == OperandPlaceholder {
 				return errors.New("unbound placeholder in WHERE clause")

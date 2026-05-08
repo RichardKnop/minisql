@@ -283,7 +283,7 @@ func (r Row) Marshal() ([]byte, error) {
 			}
 			marshalFloat64(buf, value, offset)
 			offset += 8
-		case Varchar, Text:
+		case Varchar, Text, JSON:
 			textPointer, ok := r.Values[i].Value.(TextPointer)
 			if !ok {
 				return nil, fmt.Errorf("could not cast value for column %s to text pointer", col.Name)
@@ -366,7 +366,7 @@ func (r Row) UnmarshalWithMask(cell Cell, selectedMask []bool) (Row, error) {
 			value := unmarshalFloat64(cell.Value, uint64(offset))
 			r.Values[i] = OptionalValue{Value: value, Valid: true}
 			offset += 8
-		case Varchar, Text:
+		case Varchar, Text, JSON:
 			textPointer := TextPointer{}
 			if err := textPointer.Unmarshal(cell.Value, uint64(offset)); err != nil {
 				return Row{}, err
@@ -414,7 +414,7 @@ func (r Row) getColumnSize(col Column, data []byte, offset int) uint64 {
 		return 4
 	case Double:
 		return 8
-	case Varchar, Text:
+	case Varchar, Text, JSON:
 		// Read length prefix to determine size
 		length := unmarshalUint32(data, uint64(offset))
 		return TextPointer{Length: length}.Size()
@@ -521,7 +521,54 @@ func (r Row) checkConditionsWithColumnIndexes(condGroup Conditions, columnIndexe
 	return true, nil
 }
 
+// compareScalarToOperand compares a computed value (e.g., the result of a JSON
+// path expression) against the right-hand operand of a WHERE condition.
+func compareScalarToOperand(val any, op2 Operand, operator Operator) (bool, error) {
+	if val == nil {
+		switch operator {
+		case Eq:
+			return op2.Type == OperandNull, nil
+		case Ne:
+			return op2.Type != OperandNull, nil
+		default:
+			return false, nil
+		}
+	}
+	if op2.Type == OperandNull {
+		switch operator {
+		case Eq:
+			return false, nil
+		case Ne:
+			return true, nil
+		default:
+			return false, nil
+		}
+	}
+	switch val.(type) {
+	case int64, int32:
+		return compareInt8(val, op2.Value, operator)
+	case float64, float32:
+		return compareDouble(val, op2.Value, operator)
+	case TextPointer:
+		return compareText(val, op2.Value, operator)
+	case bool:
+		return compareBoolean(val, op2.Value, operator)
+	default:
+		return false, fmt.Errorf("unsupported expression result type %T", val)
+	}
+}
+
 func (r Row) checkCondition(cond Condition) (bool, error) {
+	// left side is an expression (e.g. JSON path); evaluate it then compare.
+	if cond.Operand1.Type == OperandExpr {
+		expr := cond.Operand1.Value.(*Expr)
+		result, err := expr.Eval(r)
+		if err != nil {
+			return false, err
+		}
+		return compareScalarToOperand(result, cond.Operand2, cond.Operator)
+	}
+
 	// left side is field, right side is literal value
 	if cond.Operand1.IsField() && !cond.Operand2.IsField() {
 		return r.compareFieldValue(cond.Operand1, cond.Operand2, cond.Operator)
@@ -542,6 +589,16 @@ func (r Row) checkCondition(cond Condition) (bool, error) {
 }
 
 func (r Row) checkConditionWithColumnIndexes(cond Condition, columnIndexes map[string]int) (bool, error) {
+	// left side is an expression (e.g. JSON path); evaluate it then compare.
+	if cond.Operand1.Type == OperandExpr {
+		expr := cond.Operand1.Value.(*Expr)
+		result, err := expr.Eval(r)
+		if err != nil {
+			return false, err
+		}
+		return compareScalarToOperand(result, cond.Operand2, cond.Operator)
+	}
+
 	// left side is field, right side is literal value
 	if cond.Operand1.IsField() && !cond.Operand2.IsField() {
 		return r.compareFieldValueWithColumnIndexes(cond.Operand1, cond.Operand2, cond.Operator, columnIndexes)
