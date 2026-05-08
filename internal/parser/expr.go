@@ -9,9 +9,10 @@ import (
 
 // parseExpr parses an arithmetic expression with correct operator precedence:
 //
-//	expr   := term   (('+' | '-') term)*
-//	term   := factor (('*' | '/') factor)*
-//	factor := '-' factor | '(' expr ')' | column_ref | numeric_literal
+//	expr    := term    (('+' | '-') term)*
+//	term    := jsonExpr (('*' | '/') jsonExpr)*
+//	jsonExpr := factor (('->' | '->>') factor)*
+//	factor  := '-' factor | '(' expr ')' | column_ref | numeric_literal
 func (p *parserItem) parseExpr() (*minisql.Expr, error) {
 	left, err := p.parseTerm()
 	if err != nil {
@@ -37,7 +38,7 @@ func (p *parserItem) parseExpr() (*minisql.Expr, error) {
 }
 
 func (p *parserItem) parseTerm() (*minisql.Expr, error) {
-	left, err := p.parseFactor()
+	left, err := p.parseJSONExpr()
 	if err != nil {
 		return nil, err
 	}
@@ -47,13 +48,41 @@ func (p *parserItem) parseTerm() (*minisql.Expr, error) {
 			break
 		}
 		p.pop()
-		right, err := p.parseFactor()
+		right, err := p.parseJSONExpr()
 		if err != nil {
 			return nil, err
 		}
 		arithOp := minisql.ArithMul
 		if op == "/" {
 			arithOp = minisql.ArithDiv
+		}
+		left = &minisql.Expr{Left: left, Right: right, Op: arithOp}
+	}
+	return left, nil
+}
+
+// parseJSONExpr parses JSON path extraction operators -> and ->>.
+// Binds tighter than + / - but looser than unary minus.
+//
+//	jsonExpr := factor ('->' factor | '->>' factor)*
+func (p *parserItem) parseJSONExpr() (*minisql.Expr, error) {
+	left, err := p.parseFactor()
+	if err != nil {
+		return nil, err
+	}
+	for {
+		op := p.peek()
+		if op != "->" && op != "->>" {
+			break
+		}
+		p.pop()
+		right, err := p.parseFactor()
+		if err != nil {
+			return nil, err
+		}
+		arithOp := minisql.JSONArrow
+		if op == "->>" {
+			arithOp = minisql.JSONArrowArrow
 		}
 		left = &minisql.Expr{Left: left, Right: right, Op: arithOp}
 	}
@@ -313,8 +342,11 @@ func (p *parserItem) parseCastExpr() (*minisql.Expr, error) {
 		if p.peek() == ")" {
 			p.pop() // consume inner ")"
 		}
+	case "JSON":
+		targetKind = minisql.JSON
+		p.pop()
 	default:
-		return nil, fmt.Errorf("CAST: unknown target type %q (want BOOLEAN, INT4, INT8, REAL, DOUBLE, TEXT, VARCHAR, TIMESTAMP)", typeToken)
+		return nil, fmt.Errorf("CAST: unknown target type %q (want BOOLEAN, INT4, INT8, REAL, DOUBLE, TEXT, VARCHAR, TIMESTAMP, JSON)", typeToken)
 	}
 
 	if p.peek() != ")" {
@@ -362,7 +394,8 @@ func isBuiltinFunction(name string) bool {
 		"MOD",
 		"DATE_TRUNC",
 		"EXTRACT", "DATE_PART",
-		"TO_TIMESTAMP":
+		"TO_TIMESTAMP",
+		"JSON_EXTRACT", "JSON_VALID", "JSON_TYPE", "JSON_ARRAY_LENGTH":
 		return true
 	}
 	return false

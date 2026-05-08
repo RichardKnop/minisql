@@ -271,6 +271,16 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 		if idx < 0 {
 			return false, fmt.Errorf("column '%s' not found", name)
 		}
+		// Normalise JSON values to compact form before writing.
+		if col.Kind == JSON && value.Valid {
+			if tp, ok := value.Value.(TextPointer); ok {
+				normalised, err := normaliseJSON(tp.String())
+				if err != nil {
+					return false, fmt.Errorf("column %q: %w", name, err)
+				}
+				value = OptionalValue{Value: NewTextPointer([]byte(normalised)), Valid: true}
+			}
+		}
 		var changed bool
 		row, changed = row.SetValue(name, value)
 		if changed {

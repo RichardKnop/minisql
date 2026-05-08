@@ -31,10 +31,10 @@ var (
 var reservedWords = []string{
 	// operators
 	"(", ")", ">=", "<=", "!=", ",", "=", ">", "<", "IN (", "NOT IN (", "?",
-	// arithmetic operators
-	"+", "-", "/",
+	// arithmetic operators (JSON arrow ops must come before "-" for longest-match tokenization)
+	"+", "->>", "->", "-", "/",
 	// column types
-	"BOOLEAN", "INT4", "INT8", "REAL", "DOUBLE", "TEXT", "VARCHAR(", "TIMESTAMP",
+	"BOOLEAN", "INT4", "INT8", "REAL", "DOUBLE", "TEXT", "VARCHAR(", "TIMESTAMP", "JSON",
 	// statement types
 	"EXPLAIN ANALYZE", "EXPLAIN",
 	"CREATE TABLE", "DROP TABLE", "CREATE INDEX", "DROP INDEX",

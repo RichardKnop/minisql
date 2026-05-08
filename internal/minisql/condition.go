@@ -84,6 +84,9 @@ const (
 	// OperandSubquery holds a *Statement SELECT that is evaluated before the
 	// outer scan begins and replaced with a concrete scalar or list value.
 	OperandSubquery
+	// OperandExpr holds an *Expr that is evaluated against the row at runtime.
+	// Used for JSON path expressions on the left-hand side of a WHERE condition.
+	OperandExpr
 )
 
 // Operand holds a typed value on one side of a condition expression.

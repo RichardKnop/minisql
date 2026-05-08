@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
@@ -13,10 +14,12 @@ type ArithOp int
 
 // ArithOp constants.
 const (
-	ArithAdd ArithOp = iota + 1 // +
-	ArithSub                    // -
-	ArithMul                    // *
-	ArithDiv                    // /
+	ArithAdd       ArithOp = iota + 1 // +
+	ArithSub                          // -
+	ArithMul                          // *
+	ArithDiv                          // /
+	JSONArrow                         // -> (returns JSON fragment)
+	JSONArrowArrow                    // ->> (returns SQL scalar)
 )
 
 func (op ArithOp) String() string {
@@ -29,6 +32,10 @@ func (op ArithOp) String() string {
 		return "*"
 	case ArithDiv:
 		return "/"
+	case JSONArrow:
+		return "->"
+	case JSONArrowArrow:
+		return "->>"
 	default:
 		return "?"
 	}
@@ -177,6 +184,23 @@ func (e *Expr) Columns() []string {
 	return append(left, right...)
 }
 
+// ColumnRefs returns all column names referenced in the expression tree.
+func (e *Expr) ColumnRefs() []string {
+	if e == nil {
+		return nil
+	}
+	if e.Column != "" {
+		return []string{e.Column}
+	}
+	var cols []string
+	cols = append(cols, e.Left.ColumnRefs()...)
+	cols = append(cols, e.Right.ColumnRefs()...)
+	for _, arg := range e.Args {
+		cols = append(cols, arg.ColumnRefs()...)
+	}
+	return cols
+}
+
 // Eval evaluates the expression against a row, returning a numeric result.
 // NULL propagates: any NULL operand produces a nil result.
 // Returns int64 when both operands are int64 (except division, which always returns float64).
@@ -294,6 +318,11 @@ func (e *Expr) Eval(row Row) (any, error) {
 		}
 	}
 
+	// JSON operators must be handled before numeric coercion.
+	if e.Op == JSONArrow || e.Op == JSONArrowArrow {
+		return e.evalJSONOp(leftVal, rightVal)
+	}
+
 	lf, err := toFloat64(leftVal)
 	if err != nil {
 		return nil, fmt.Errorf("left operand of %s: %w", e.Op, err)
@@ -373,9 +402,66 @@ func (e *Expr) evalCast(row Row) (any, error) {
 		return castToTextPointer(val)
 	case Timestamp:
 		return castToTimestamp(val)
+	case JSON:
+		s, ok := toStringVal(val)
+		if !ok {
+			return nil, fmt.Errorf("CAST: cannot convert %T to JSON", val)
+		}
+		normalised, err := normaliseJSON(s)
+		if err != nil {
+			return nil, fmt.Errorf("CAST: %w", err)
+		}
+		return NewTextPointer([]byte(normalised)), nil
 	default:
 		return nil, fmt.Errorf("CAST: unsupported target type %v", e.CastTargetType)
 	}
+}
+
+// evalJSONOp evaluates the -> and ->> binary JSON operators.
+// Left must be a JSON text value; right must be a string key or integer index.
+func (e *Expr) evalJSONOp(leftVal, rightVal any) (any, error) {
+	docStr, ok := toStringVal(leftVal)
+	if !ok {
+		return nil, fmt.Errorf("operator %s: left operand must be a JSON string, got %T", e.Op, leftVal)
+	}
+	var parsed any
+	if err := json.Unmarshal([]byte(docStr), &parsed); err != nil {
+		return nil, fmt.Errorf("operator %s: invalid JSON: %w", e.Op, err)
+	}
+
+	var extracted any
+	switch key := rightVal.(type) {
+	case TextPointer:
+		obj, ok := parsed.(map[string]any)
+		if !ok {
+			return nil, nil // not an object — NULL
+		}
+		v, exists := obj[key.String()]
+		if !exists {
+			return nil, nil
+		}
+		extracted = v
+	case int64:
+		arr, ok := parsed.([]any)
+		if !ok {
+			return nil, nil // not an array — NULL
+		}
+		if key < 0 || key >= int64(len(arr)) {
+			return nil, nil
+		}
+		extracted = arr[key]
+	default:
+		return nil, fmt.Errorf("operator %s: right operand must be a string key or integer index, got %T", e.Op, rightVal)
+	}
+
+	if extracted == nil {
+		return nil, nil
+	}
+	if e.Op == JSONArrow {
+		b, _ := json.Marshal(extracted)
+		return NewTextPointer(b), nil
+	}
+	return jsonToScalar(extracted), nil
 }
 
 func castToBool(v any) (bool, error) {
@@ -746,7 +832,7 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 			start = 0
 		}
 		b := []byte(s)
-		if int(start) >= len(b) {
+		if start >= int64(len(b)) {
 			return NewTextPointer([]byte{}), nil
 		}
 		if len(e.Args) == 3 {
@@ -1103,6 +1189,153 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 			return nil, fmt.Errorf("TO_TIMESTAMP: %w", err)
 		}
 		return TimestampMicros(t.TotalMicroseconds()), nil
+
+	// ── JSON functions ──────────────────────────────────────────────────────────
+
+	case "JSON_VALID":
+		if len(e.Args) != 1 {
+			return nil, fmt.Errorf("JSON_VALID requires exactly 1 argument")
+		}
+		v, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if v == nil {
+			return nil, nil
+		}
+		s, ok := toStringVal(v)
+		if !ok {
+			return int64(0), nil
+		}
+		if !json.Valid([]byte(s)) {
+			return int64(0), nil
+		}
+		return int64(1), nil
+
+	case "JSON_TYPE":
+		if len(e.Args) == 0 || len(e.Args) > 2 {
+			return nil, fmt.Errorf("JSON_TYPE requires 1 or 2 arguments")
+		}
+		docVal, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if docVal == nil {
+			return nil, nil
+		}
+		docStr, ok := toStringVal(docVal)
+		if !ok {
+			return nil, fmt.Errorf("JSON_TYPE: first argument must be a string")
+		}
+		var parsed any
+		if err := json.Unmarshal([]byte(docStr), &parsed); err != nil {
+			return nil, fmt.Errorf("JSON_TYPE: invalid JSON: %w", err)
+		}
+		target := parsed
+		if len(e.Args) == 2 {
+			pathVal, err := e.Args[1].Eval(row)
+			if err != nil {
+				return nil, err
+			}
+			if pathVal == nil {
+				return nil, nil
+			}
+			pathStr, ok := toStringVal(pathVal)
+			if !ok {
+				return nil, fmt.Errorf("JSON_TYPE: path argument must be a string")
+			}
+			val, found, err := evalJSONPath(parsed, pathStr)
+			if err != nil {
+				return nil, err
+			}
+			if !found {
+				return nil, nil
+			}
+			target = val
+		}
+		return NewTextPointer([]byte(jsonTypeName(target))), nil
+
+	case "JSON_ARRAY_LENGTH":
+		if len(e.Args) == 0 || len(e.Args) > 2 {
+			return nil, fmt.Errorf("JSON_ARRAY_LENGTH requires 1 or 2 arguments")
+		}
+		docVal, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if docVal == nil {
+			return nil, nil
+		}
+		docStr, ok := toStringVal(docVal)
+		if !ok {
+			return nil, fmt.Errorf("JSON_ARRAY_LENGTH: first argument must be a string")
+		}
+		var parsed any
+		if err := json.Unmarshal([]byte(docStr), &parsed); err != nil {
+			return nil, fmt.Errorf("JSON_ARRAY_LENGTH: invalid JSON: %w", err)
+		}
+		target := parsed
+		if len(e.Args) == 2 {
+			pathVal, err := e.Args[1].Eval(row)
+			if err != nil {
+				return nil, err
+			}
+			if pathVal == nil {
+				return nil, nil
+			}
+			pathStr, ok := toStringVal(pathVal)
+			if !ok {
+				return nil, fmt.Errorf("JSON_ARRAY_LENGTH: path argument must be a string")
+			}
+			val, found, err := evalJSONPath(parsed, pathStr)
+			if err != nil {
+				return nil, err
+			}
+			if !found {
+				return nil, nil
+			}
+			target = val
+		}
+		arr, ok := target.([]any)
+		if !ok {
+			return nil, nil // not an array — NULL
+		}
+		return int64(len(arr)), nil
+
+	case "JSON_EXTRACT":
+		if len(e.Args) != 2 {
+			return nil, fmt.Errorf("JSON_EXTRACT requires exactly 2 arguments")
+		}
+		docVal, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if docVal == nil {
+			return nil, nil
+		}
+		pathVal, err := e.Args[1].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if pathVal == nil {
+			return nil, nil
+		}
+		docStr, ok := toStringVal(docVal)
+		if !ok {
+			return nil, fmt.Errorf("JSON_EXTRACT: first argument must be a string")
+		}
+		pathStr, ok := toStringVal(pathVal)
+		if !ok {
+			return nil, fmt.Errorf("JSON_EXTRACT: second argument must be a string")
+		}
+		_, scalar, found, err := jsonExtract(docStr, pathStr)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return nil, nil
+		}
+		return scalar, nil
 
 	default:
 		return nil, fmt.Errorf("unknown function %q", e.FuncName)

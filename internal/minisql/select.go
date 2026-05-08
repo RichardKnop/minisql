@@ -1326,6 +1326,14 @@ func filterOnlyMask(columns []Column, filters OneOrMore) []bool {
 			if cond.Operand2.Type == OperandField {
 				filterCols[cond.Operand2.Value.(Field).Name] = struct{}{}
 			}
+			// OperandExpr (e.g. JSON path): collect all column refs from the expression.
+			if cond.Operand1.Type == OperandExpr {
+				if expr, ok := cond.Operand1.Value.(*Expr); ok {
+					for _, col := range expr.ColumnRefs() {
+						filterCols[col] = struct{}{}
+					}
+				}
+			}
 		}
 	}
 	mask := make([]bool, len(columns))
