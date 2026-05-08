@@ -1791,12 +1791,12 @@ func TestStatement_DDL(t *testing.T) {
 			PrimaryKey: NewPrimaryKey("pk__orders", columns[0:1], true),
 			ForeignKeys: []ForeignKey{
 				{
-					Name:         "fk__orders__users__user_id",
-					Column:       "user_id",
-					TargetTable:  "users",
-					TargetColumn: "id",
-					OnDelete:     FKActionRestrict,
-					OnUpdate:     FKActionRestrict,
+					Name:          "fk__orders__users__user_id",
+					Columns:       []string{"user_id"},
+					TargetTable:   "users",
+					TargetColumns: []string{"id"},
+					OnDelete:      FKActionRestrict,
+					OnUpdate:      FKActionRestrict,
 				},
 			},
 		}
@@ -1805,6 +1805,42 @@ func TestStatement_DDL(t *testing.T) {
 	id int8 primary key autoincrement,
 	user_id int8 not null,
 	constraint "fk__orders__users__user_id" foreign key ("user_id") references "users" ("id") on delete restrict on update restrict
+);`
+
+		actual := stmt.DDL()
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("create table with multi-column foreign key", func(t *testing.T) {
+		columns := []Column{
+			{Kind: Int8, Size: 8, Name: "id"},
+			{Kind: Int8, Size: 8, Name: "order_id", Nullable: false},
+			{Kind: Int8, Size: 8, Name: "product_id", Nullable: false},
+			{Kind: Int8, Size: 8, Name: "shipped", Nullable: false},
+		}
+		stmt := Statement{
+			Kind:       CreateTable,
+			TableName:  "shipment_lines",
+			Columns:    columns,
+			PrimaryKey: NewPrimaryKey("pk__shipment_lines", columns[0:1], true),
+			ForeignKeys: []ForeignKey{
+				{
+					Name:          "fk__shipment_lines__order_lines__order_id_product_id",
+					Columns:       []string{"order_id", "product_id"},
+					TargetTable:   "order_lines",
+					TargetColumns: []string{"order_id", "product_id"},
+					OnDelete:      FKActionCascade,
+					OnUpdate:      FKActionRestrict,
+				},
+			},
+		}
+
+		expected := `create table "shipment_lines" (
+	id int8 primary key autoincrement,
+	order_id int8 not null,
+	product_id int8 not null,
+	shipped int8 not null,
+	constraint "fk__shipment_lines__order_lines__order_id_product_id" foreign key ("order_id", "product_id") references "order_lines" ("order_id", "product_id") on delete cascade on update restrict
 );`
 
 		actual := stmt.DDL()
@@ -1824,20 +1860,20 @@ func TestStatement_DDL(t *testing.T) {
 			PrimaryKey: NewPrimaryKey("pk__order_items", columns[0:1], true),
 			ForeignKeys: []ForeignKey{
 				{
-					Name:         "fk__order_items__orders__order_id",
-					Column:       "order_id",
-					TargetTable:  "orders",
-					TargetColumn: "id",
-					OnDelete:     FKActionRestrict,
-					OnUpdate:     FKActionRestrict,
+					Name:          "fk__order_items__orders__order_id",
+					Columns:       []string{"order_id"},
+					TargetTable:   "orders",
+					TargetColumns: []string{"id"},
+					OnDelete:      FKActionRestrict,
+					OnUpdate:      FKActionRestrict,
 				},
 				{
-					Name:         "fk__order_items__products__product_id",
-					Column:       "product_id",
-					TargetTable:  "products",
-					TargetColumn: "id",
-					OnDelete:     FKActionNoAction,
-					OnUpdate:     FKActionNoAction,
+					Name:          "fk__order_items__products__product_id",
+					Columns:       []string{"product_id"},
+					TargetTable:   "products",
+					TargetColumns: []string{"id"},
+					OnDelete:      FKActionNoAction,
+					OnUpdate:      FKActionNoAction,
 				},
 			},
 		}
@@ -2141,7 +2177,10 @@ func TestStatement_ValidateHaving(t *testing.T) {
 func TestAggregateKind_String(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct{ kind AggregateKind; want string }{
+	tests := []struct {
+		kind AggregateKind
+		want string
+	}{
 		{AggregateCount, "COUNT"},
 		{AggregateSum, "SUM"},
 		{AggregateAvg, "AVG"},

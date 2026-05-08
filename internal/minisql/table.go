@@ -40,9 +40,12 @@ type Table struct {
 	// checkChildFK is called before INSERT/UPDATE to verify outgoing FK constraints.
 	// Set by *Database when the table is created or loaded.
 	checkChildFK func(context.Context, Row) error
-	// checkParentFK is called before DELETE/UPDATE to verify inbound FK constraints.
-	// Set by *Database when the table is created or loaded.
+	// checkParentFK is called before DELETE to enforce inbound FK constraints.
+	// Handles RESTRICT/CASCADE/SET NULL based on each FK's OnDelete action.
 	checkParentFK func(context.Context, Row) error
+	// enforceParentFKOnUpdate is called before UPDATE to enforce inbound FK constraints.
+	// Handles RESTRICT/CASCADE/SET NULL based on each FK's OnUpdate action.
+	enforceParentFKOnUpdate func(context.Context, Row, Row) error
 	// rightmostTablePage caches the last leaf page index for SeekNextRowID so that
 	// sequential (autoincrement) inserts skip the O(log N) root→leaf traversal.
 	// lastTxIDTablePage guards against stale hints from rolled-back transactions.
@@ -89,9 +92,11 @@ func WithParallelScan(enabled bool) TableOption {
 func WithForeignKeys(fks []ForeignKey) TableOption {
 	return func(t *Table) {
 		t.ForeignKeys = fks
-		t.fkColumnSet = make(map[string]bool, len(fks))
+		t.fkColumnSet = make(map[string]bool)
 		for _, fk := range fks {
-			t.fkColumnSet[fk.Column] = true
+			for _, col := range fk.Columns {
+				t.fkColumnSet[col] = true
+			}
 		}
 	}
 }
@@ -102,10 +107,16 @@ func WithChildFKChecker(fn func(context.Context, Row) error) TableOption {
 	return func(t *Table) { t.checkChildFK = fn }
 }
 
-// WithParentFKChecker wires up a callback that checks inbound FK constraints.
+// WithParentFKChecker wires up a callback that enforces inbound FK constraints on DELETE.
 // Called by *Database; must only be invoked while d.dbLock is held (write).
 func WithParentFKChecker(fn func(context.Context, Row) error) TableOption {
 	return func(t *Table) { t.checkParentFK = fn }
+}
+
+// WithParentFKUpdateEnforcer wires up a callback that enforces inbound FK constraints on UPDATE.
+// Called by *Database; must only be invoked while d.dbLock is held (write).
+func WithParentFKUpdateEnforcer(fn func(context.Context, Row, Row) error) TableOption {
+	return func(t *Table) { t.enforceParentFKOnUpdate = fn }
 }
 
 // WithReferencedColumns marks which columns of this table are FK targets in other tables.

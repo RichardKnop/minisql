@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // FKAction defines the referential action for ON DELETE / ON UPDATE.
@@ -14,7 +15,7 @@ const (
 	FKActionRestrict FKAction = iota + 1
 	// FKActionNoAction is the same as RESTRICT in this implementation (no deferred checks).
 	FKActionNoAction
-	// FKActionSetNull sets the FK column to NULL when the referenced row is deleted/updated.
+	// FKActionSetNull sets the FK column(s) to NULL when the referenced row is deleted/updated.
 	FKActionSetNull
 	// FKActionCascade propagates the delete/update to child rows.
 	FKActionCascade
@@ -35,45 +36,47 @@ func (a FKAction) String() string {
 	}
 }
 
-// ForeignKey describes a single FOREIGN KEY constraint on a child table column.
+// ForeignKey describes a FOREIGN KEY constraint on one or more child table columns.
 type ForeignKey struct {
-	Name         string
-	Column       string   // local (child) column
-	TargetTable  string   // referenced (parent) table
-	TargetColumn string   // referenced column in parent table
-	OnDelete     FKAction // default FKActionRestrict
-	OnUpdate     FKAction // default FKActionRestrict
+	Name          string
+	Columns       []string // local (child) columns
+	TargetTable   string   // referenced (parent) table
+	TargetColumns []string // referenced columns in parent table
+	OnDelete      FKAction // default FKActionRestrict
+	OnUpdate      FKAction // default FKActionRestrict
 }
 
 // ErrForeignKeyViolation is returned when a child row's FK value does not exist
 // in the parent table.
 type ErrForeignKeyViolation struct {
-	ChildTable   string
-	ChildColumn  string
-	ParentTable  string
-	ParentColumn string
+	ChildTable    string
+	ChildColumns  []string
+	ParentTable   string
+	ParentColumns []string
 }
 
 func (e ErrForeignKeyViolation) Error() string {
 	return fmt.Sprintf(
-		"foreign key constraint violation: %s.%s references non-existent value in %s.%s",
-		e.ChildTable, e.ChildColumn, e.ParentTable, e.ParentColumn,
+		"foreign key constraint violation: %s.(%s) references non-existent value in %s.(%s)",
+		e.ChildTable, strings.Join(e.ChildColumns, ", "),
+		e.ParentTable, strings.Join(e.ParentColumns, ", "),
 	)
 }
 
 // ErrForeignKeyParentViolation is returned when deleting or updating a parent row
 // that is still referenced by one or more child rows.
 type ErrForeignKeyParentViolation struct {
-	ParentTable  string
-	ParentColumn string
-	ChildTable   string
-	ChildColumn  string
+	ParentTable   string
+	ParentColumns []string
+	ChildTable    string
+	ChildColumns  []string
 }
 
 func (e ErrForeignKeyParentViolation) Error() string {
 	return fmt.Sprintf(
-		"foreign key constraint violation: %s.%s is still referenced by %s.%s",
-		e.ParentTable, e.ParentColumn, e.ChildTable, e.ChildColumn,
+		"foreign key constraint violation: %s.(%s) is still referenced by %s.(%s)",
+		e.ParentTable, strings.Join(e.ParentColumns, ", "),
+		e.ChildTable, strings.Join(e.ChildColumns, ", "),
 	)
 }
 
@@ -81,46 +84,52 @@ func (e ErrForeignKeyParentViolation) Error() string {
 // still referenced by a foreign key in another table.
 var ErrDropTableReferencedByFK = errors.New("cannot drop table: it is still referenced by a foreign key constraint")
 
-// ErrMultiColumnFKNotSupported is returned when a multi-column FK is specified.
-var ErrMultiColumnFKNotSupported = errors.New("multi-column foreign keys are not yet supported")
-
-// ErrFKActionNotSupported is returned when CASCADE or SET NULL action is specified.
-var ErrFKActionNotSupported = errors.New("only RESTRICT and NO ACTION are supported for foreign key actions in this version")
-
 // inboundFK records a child-side FK pointing at a given parent table.
 type inboundFK struct {
 	ChildTable string
 	FK         ForeignKey
 }
 
-// AutoFKName builds a deterministic FK constraint name from the involved tables/column.
-func AutoFKName(childTable, parentTable, column string) string {
-	return fmt.Sprintf("fk__%s__%s__%s", childTable, parentTable, column)
+// AutoFKName builds a deterministic FK constraint name from the involved tables and columns.
+func AutoFKName(childTable, parentTable string, columns []string) string {
+	return fmt.Sprintf("fk__%s__%s__%s", childTable, parentTable, strings.Join(columns, "_"))
 }
+
+// fkCascadeContextKey is used to signal that we are executing inside a FK cascade
+// so that recursive parent-FK enforcement is suppressed for the cascading table.
+type fkCascadeContextKey struct{}
 
 // errFKScanDone is a sentinel returned by the scan callback to stop early.
 var errFKScanDone = errors.New("fk: scan done")
 
-// checkChildFK verifies all outgoing FK constraints for a new row in childTable.
+// checkChildFK verifies all outgoing FK constraints for a new/updated row in childTable.
 // Must be called while d.dbLock is held (write).
 func (d *Database) checkChildFK(ctx context.Context, childTable *Table, row Row) error {
 	if !d.foreignKeysEnabled {
 		return nil
 	}
 	for _, fk := range childTable.ForeignKeys {
-		colIdx := -1
-		for i, col := range childTable.Columns {
-			if col.Name == fk.Column {
-				colIdx = i
-				break
+		// Collect FK column values from the row.
+		values := make([]any, len(fk.Columns))
+		anyNonNull := false
+		for i, colName := range fk.Columns {
+			idx := -1
+			for j, col := range childTable.Columns {
+				if col.Name == colName {
+					idx = j
+					break
+				}
+			}
+			if idx < 0 || idx >= len(row.Values) {
+				continue
+			}
+			if row.Values[idx].Valid {
+				values[i] = row.Values[idx].Value
+				anyNonNull = true
 			}
 		}
-		if colIdx < 0 || colIdx >= len(row.Values) {
-			continue
-		}
-		val := row.Values[colIdx]
-		if !val.Valid {
-			continue // NULL FK value is permitted
+		if !anyNonNull {
+			continue // all FK columns are NULL — permitted
 		}
 
 		parentTable, ok := d.tables[fk.TargetTable]
@@ -128,44 +137,38 @@ func (d *Database) checkChildFK(ctx context.Context, childTable *Table, row Row)
 			return fmt.Errorf("FK %q references unknown table %q", fk.Name, fk.TargetTable)
 		}
 
-		exists, err := d.fkValueExistsInParent(ctx, parentTable, fk.TargetColumn, val.Value)
+		exists, err := d.fkValuesExistInParent(ctx, parentTable, fk.TargetColumns, values)
 		if err != nil {
 			return fmt.Errorf("FK check %q: %w", fk.Name, err)
 		}
 		if !exists {
 			return ErrForeignKeyViolation{
-				ChildTable:   childTable.Name,
-				ChildColumn:  fk.Column,
-				ParentTable:  fk.TargetTable,
-				ParentColumn: fk.TargetColumn,
+				ChildTable:    childTable.Name,
+				ChildColumns:  fk.Columns,
+				ParentTable:   fk.TargetTable,
+				ParentColumns: fk.TargetColumns,
 			}
 		}
 	}
 	return nil
 }
 
-// checkParentFK verifies that deleting or updating oldRow in parentTable does not
-// break any inbound FK constraints (RESTRICT / NO ACTION).
+// enforceParentFKOnDelete enforces all inbound FK constraints for a row being deleted
+// from parentTable. Handles RESTRICT/NO ACTION (error), CASCADE (delete child rows),
+// and SET NULL (null out FK columns in child rows).
 // Must be called while d.dbLock is held (write).
-func (d *Database) checkParentFK(ctx context.Context, parentTable *Table, oldRow Row) error {
+func (d *Database) enforceParentFKOnDelete(ctx context.Context, parentTable *Table, oldRow Row) error {
 	if !d.foreignKeysEnabled {
 		return nil
 	}
+	// Suppress recursive parent enforcement during cascade operations.
+	cascadeCtx := context.WithValue(ctx, fkCascadeContextKey{}, parentTable.Name)
+
 	inbounds := d.referencedBy[parentTable.Name]
 	for _, inbound := range inbounds {
-		parentColIdx := -1
-		for i, col := range parentTable.Columns {
-			if col.Name == inbound.FK.TargetColumn {
-				parentColIdx = i
-				break
-			}
-		}
-		if parentColIdx < 0 || parentColIdx >= len(oldRow.Values) {
+		parentVals, anyNonNull := fkExtractValues(parentTable.Columns, inbound.FK.TargetColumns, oldRow)
+		if !anyNonNull {
 			continue
-		}
-		parentVal := oldRow.Values[parentColIdx]
-		if !parentVal.Valid {
-			continue // NULL parent value cannot be referenced
 		}
 
 		childTable, ok := d.tables[inbound.ChildTable]
@@ -173,25 +176,218 @@ func (d *Database) checkParentFK(ctx context.Context, parentTable *Table, oldRow
 			continue
 		}
 
-		referenced, err := d.fkChildHasValue(ctx, childTable, inbound.FK.Column, parentVal.Value)
-		if err != nil {
-			return fmt.Errorf("FK parent check for %s.%s: %w", parentTable.Name, inbound.FK.TargetColumn, err)
-		}
-		if referenced {
-			return ErrForeignKeyParentViolation{
-				ParentTable:  parentTable.Name,
-				ParentColumn: inbound.FK.TargetColumn,
-				ChildTable:   inbound.ChildTable,
-				ChildColumn:  inbound.FK.Column,
+		switch inbound.FK.OnDelete {
+		case FKActionRestrict, FKActionNoAction:
+			found, err := d.fkChildHasValues(ctx, childTable, inbound.FK.Columns, parentVals)
+			if err != nil {
+				return fmt.Errorf("FK parent check for %s.%v: %w", parentTable.Name, inbound.FK.TargetColumns, err)
+			}
+			if found {
+				return ErrForeignKeyParentViolation{
+					ParentTable:   parentTable.Name,
+					ParentColumns: inbound.FK.TargetColumns,
+					ChildTable:    inbound.ChildTable,
+					ChildColumns:  inbound.FK.Columns,
+				}
+			}
+		case FKActionCascade:
+			if err := d.cascadeDeleteChildRows(cascadeCtx, childTable, inbound.FK.Columns, parentVals); err != nil {
+				return fmt.Errorf("FK cascade delete on %s: %w", inbound.ChildTable, err)
+			}
+		case FKActionSetNull:
+			if err := d.setNullChildRows(cascadeCtx, childTable, inbound.FK.Columns, parentVals); err != nil {
+				return fmt.Errorf("FK set null on %s: %w", inbound.ChildTable, err)
 			}
 		}
 	}
 	return nil
 }
 
-// fkValueExistsInParent checks if value exists in the target column of parentTable.
-// Uses PK or unique index for O(log n) lookup.
-func (d *Database) fkValueExistsInParent(ctx context.Context, parentTable *Table, targetColumn string, value any) (bool, error) {
+// enforceParentFKOnUpdate enforces all inbound FK constraints for a row being updated
+// in parentTable. Handles RESTRICT/NO ACTION (error), CASCADE (update FK value in child
+// rows), and SET NULL (null out FK columns in child rows).
+// Must be called while d.dbLock is held (write).
+func (d *Database) enforceParentFKOnUpdate(ctx context.Context, parentTable *Table, oldRow, newRow Row) error {
+	if !d.foreignKeysEnabled {
+		return nil
+	}
+	cascadeCtx := context.WithValue(ctx, fkCascadeContextKey{}, parentTable.Name)
+
+	inbounds := d.referencedBy[parentTable.Name]
+	for _, inbound := range inbounds {
+		oldVals, anyNonNull := fkExtractValues(parentTable.Columns, inbound.FK.TargetColumns, oldRow)
+		if !anyNonNull {
+			continue
+		}
+		newVals, _ := fkExtractValues(parentTable.Columns, inbound.FK.TargetColumns, newRow)
+
+		// Only act if the referenced column values actually changed.
+		if fkSliceEqual(oldVals, newVals) {
+			continue
+		}
+
+		childTable, ok := d.tables[inbound.ChildTable]
+		if !ok {
+			continue
+		}
+
+		switch inbound.FK.OnUpdate {
+		case FKActionRestrict, FKActionNoAction:
+			found, err := d.fkChildHasValues(ctx, childTable, inbound.FK.Columns, oldVals)
+			if err != nil {
+				return fmt.Errorf("FK parent update check for %s.%v: %w", parentTable.Name, inbound.FK.TargetColumns, err)
+			}
+			if found {
+				return ErrForeignKeyParentViolation{
+					ParentTable:   parentTable.Name,
+					ParentColumns: inbound.FK.TargetColumns,
+					ChildTable:    inbound.ChildTable,
+					ChildColumns:  inbound.FK.Columns,
+				}
+			}
+		case FKActionCascade:
+			if err := d.cascadeUpdateChildRows(cascadeCtx, childTable, inbound.FK.Columns, oldVals, newVals); err != nil {
+				return fmt.Errorf("FK cascade update on %s: %w", inbound.ChildTable, err)
+			}
+		case FKActionSetNull:
+			if err := d.setNullChildRows(cascadeCtx, childTable, inbound.FK.Columns, oldVals); err != nil {
+				return fmt.Errorf("FK set null on %s: %w", inbound.ChildTable, err)
+			}
+		}
+	}
+	return nil
+}
+
+// cascadeDeleteChildRows deletes all rows in childTable where colNames == values.
+func (d *Database) cascadeDeleteChildRows(ctx context.Context, childTable *Table, colNames []string, values []any) error {
+	rows, err := d.fkChildFindRows(ctx, childTable, colNames, values)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		// Enforce inbound FKs on the child being deleted (the child may itself be a parent).
+		if err := d.enforceParentFKOnDelete(ctx, childTable, row); err != nil {
+			return err
+		}
+		cursor, err := childTable.Seek(ctx, row.Key)
+		if err != nil {
+			return err
+		}
+		if err := cursor.delete(ctx, row); err != nil {
+			return err
+		}
+		if childTable.getRowCount != nil {
+			if tx := TxFromContext(ctx); tx != nil {
+				tx.AddRowCountDelta(childTable.Name, -1)
+			}
+		}
+	}
+	return nil
+}
+
+// cascadeUpdateChildRows updates FK column(s) in all matching child rows from oldValues
+// to newValues.
+func (d *Database) cascadeUpdateChildRows(ctx context.Context, childTable *Table, colNames []string, oldValues, newValues []any) error {
+	rows, err := d.fkChildFindRows(ctx, childTable, colNames, oldValues)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		updates := make(map[string]OptionalValue, len(colNames))
+		for i, colName := range colNames {
+			if newValues[i] == nil {
+				updates[colName] = OptionalValue{}
+			} else {
+				updates[colName] = OptionalValue{Value: newValues[i], Valid: true}
+			}
+		}
+		stmt := Statement{
+			Kind:      Update,
+			TableName: childTable.Name,
+			Columns:   childTable.Columns,
+			Fields:    fieldsFromColumns(childTable.Columns...),
+			Updates:   updates,
+		}
+		cursor, err := childTable.Seek(ctx, row.Key)
+		if err != nil {
+			return err
+		}
+		// Temporarily detach parent FK callback to avoid re-checking the parent
+		// we are already cascading from.
+		orig := childTable.checkParentFK
+		childTable.checkParentFK = nil
+		_, updateErr := cursor.update(ctx, stmt, row)
+		childTable.checkParentFK = orig
+		if updateErr != nil {
+			return updateErr
+		}
+	}
+	return nil
+}
+
+// setNullChildRows sets the FK column(s) to NULL in all matching child rows.
+func (d *Database) setNullChildRows(ctx context.Context, childTable *Table, colNames []string, values []any) error {
+	rows, err := d.fkChildFindRows(ctx, childTable, colNames, values)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		updates := make(map[string]OptionalValue, len(colNames))
+		for _, colName := range colNames {
+			updates[colName] = OptionalValue{} // NULL
+		}
+		stmt := Statement{
+			Kind:      Update,
+			TableName: childTable.Name,
+			Columns:   childTable.Columns,
+			Fields:    fieldsFromColumns(childTable.Columns...),
+			Updates:   updates,
+		}
+		cursor, err := childTable.Seek(ctx, row.Key)
+		if err != nil {
+			return err
+		}
+		orig := childTable.checkParentFK
+		childTable.checkParentFK = nil
+		_, updateErr := cursor.update(ctx, stmt, row)
+		childTable.checkParentFK = orig
+		if updateErr != nil {
+			return updateErr
+		}
+	}
+	return nil
+}
+
+// fkValuesExistInParent checks whether the given values exist in the target columns
+// of parentTable. Uses PK or unique index for O(log n) lookup for single-column FKs.
+func (d *Database) fkValuesExistInParent(ctx context.Context, parentTable *Table, targetColumns []string, values []any) (bool, error) {
+	if len(targetColumns) == 1 {
+		return d.fkSingleValueExistsInParent(ctx, parentTable, targetColumns[0], values[0])
+	}
+
+	// Multi-column: sequential scan (composite FK index lookup is complex; scan is correct).
+	found := false
+	err := parentTable.sequentialScan(ctx, Scan{}, fieldsFromColumns(parentTable.Columns...), func(row Row) error {
+		for i, colName := range targetColumns {
+			ov, ok := row.GetValue(colName)
+			if !ok || !ov.Valid {
+				return nil
+			}
+			if !fkValuesEqual(ov.Value, values[i]) {
+				return nil
+			}
+		}
+		found = true
+		return errFKScanDone
+	})
+	if err != nil && !errors.Is(err, errFKScanDone) {
+		return false, err
+	}
+	return found, nil
+}
+
+// fkSingleValueExistsInParent is the fast-path for single-column FK lookups.
+func (d *Database) fkSingleValueExistsInParent(ctx context.Context, parentTable *Table, targetColumn string, value any) (bool, error) {
 	// Fast path: primary key lookup
 	if parentTable.HasPrimaryKey() &&
 		len(parentTable.PrimaryKey.Columns) == 1 &&
@@ -210,7 +406,7 @@ func (d *Database) fkValueExistsInParent(ctx context.Context, parentTable *Table
 		return len(rowIDs) > 0, nil
 	}
 
-	// Try unique indexes
+	// Try unique indexes.
 	for _, uniqueIndex := range parentTable.UniqueIndexes {
 		if len(uniqueIndex.Columns) != 1 || uniqueIndex.Columns[0].Name != targetColumn {
 			continue
@@ -233,37 +429,54 @@ func (d *Database) fkValueExistsInParent(ctx context.Context, parentTable *Table
 	return false, fmt.Errorf("FK target column %q in table %q has no usable index", targetColumn, parentTable.Name)
 }
 
-// fkChildHasValue returns true if any row in childTable has colName == value.
-func (d *Database) fkChildHasValue(ctx context.Context, childTable *Table, colName string, value any) (bool, error) {
-	var (
-		found  bool
-		colIdx = -1
-	)
-	for i, col := range childTable.Columns {
-		if col.Name == colName {
-			colIdx = i
-			break
-		}
-	}
-	if colIdx < 0 {
-		return false, nil
-	}
-
-	err := childTable.sequentialScan(ctx, Scan{}, []Field{{Name: colName}}, func(row Row) error {
-		if colIdx >= len(row.Values) {
-			return nil
-		}
-		v := row.Values[colIdx]
-		if v.Valid && fkValuesEqual(v.Value, value) {
-			found = true
-			return errFKScanDone
-		}
-		return nil
-	})
-	if err != nil && !errors.Is(err, errFKScanDone) {
+// fkChildHasValues returns true if any row in childTable has colNames == values.
+func (d *Database) fkChildHasValues(ctx context.Context, childTable *Table, colNames []string, values []any) (bool, error) {
+	rows, err := d.fkChildFindRows(ctx, childTable, colNames, values)
+	if err != nil {
 		return false, err
 	}
-	return found, nil
+	return len(rows) > 0, nil
+}
+
+// fkChildFindRows returns all rows in childTable where colNames == values.
+func (d *Database) fkChildFindRows(ctx context.Context, childTable *Table, colNames []string, values []any) ([]Row, error) {
+	var rows []Row
+	err := childTable.sequentialScan(ctx, Scan{}, fieldsFromColumns(childTable.Columns...), func(row Row) error {
+		for i, colName := range colNames {
+			ov, ok := row.GetValue(colName)
+			if !ok || !ov.Valid {
+				return nil
+			}
+			if !fkValuesEqual(ov.Value, values[i]) {
+				return nil
+			}
+		}
+		rows = append(rows, row.Clone())
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// fkExtractValues collects the values of targetColNames from row.
+// Returns the value slice and whether any value is non-NULL.
+func fkExtractValues(tableCols []Column, targetColNames []string, row Row) ([]any, bool) {
+	values := make([]any, len(targetColNames))
+	anyNonNull := false
+	for i, colName := range targetColNames {
+		for j, col := range tableCols {
+			if col.Name == colName {
+				if j < len(row.Values) && row.Values[j].Valid {
+					values[i] = row.Values[j].Value
+					anyNonNull = true
+				}
+				break
+			}
+		}
+	}
+	return values, anyNonNull
 }
 
 // fkValuesEqual compares two FK values for equality, handling int32/int64 cross-type.
@@ -287,4 +500,17 @@ func fkToInt64(v any) (int64, bool) {
 		return x, true
 	}
 	return 0, false
+}
+
+// fkSliceEqual returns true if two value slices are element-wise equal.
+func fkSliceEqual(a, b []any) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !fkValuesEqual(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
 }

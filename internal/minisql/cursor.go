@@ -287,11 +287,11 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 		return false, err
 	}
 
-	// Check parent FK: only when an inbound-FK-referenced column is being updated.
-	if c.Table.checkParentFK != nil {
+	// Enforce parent FK on UPDATE: only when a referenced column is being changed.
+	if c.Table.enforceParentFKOnUpdate != nil {
 		for colName := range changedValues {
 			if c.Table.referencedColumns[colName] {
-				if err := c.Table.checkParentFK(ctx, oldRow); err != nil {
+				if err := c.Table.enforceParentFKOnUpdate(ctx, oldRow, row); err != nil {
 					return false, err
 				}
 				break

@@ -1094,30 +1094,35 @@ func (s Statement) validateCreateTable() error {
 	}
 
 	for _, fk := range s.ForeignKeys {
-		if fk.Column == "" {
-			return errors.New("foreign key: column name cannot be empty")
+		if len(fk.Columns) == 0 {
+			return errors.New("foreign key: column list cannot be empty")
 		}
 		if fk.TargetTable == "" {
 			return errors.New("foreign key: referenced table cannot be empty")
 		}
-		if fk.TargetColumn == "" {
-			return errors.New("foreign key: referenced column cannot be empty")
+		if len(fk.TargetColumns) == 0 {
+			return errors.New("foreign key: referenced column list cannot be empty")
 		}
-		found := false
+		if len(fk.Columns) != len(fk.TargetColumns) {
+			return errors.New("foreign key: local and referenced column counts must match")
+		}
+		colByName := make(map[string]Column, len(s.Columns))
 		for _, col := range s.Columns {
-			if col.Name == fk.Column {
-				found = true
-				break
+			colByName[col.Name] = col
+		}
+		for _, colName := range fk.Columns {
+			if _, exists := colByName[colName]; !exists {
+				return fmt.Errorf("foreign key column %q does not exist in table %q", colName, s.TableName)
 			}
 		}
-		if !found {
-			return fmt.Errorf("foreign key column %q does not exist in table %q", fk.Column, s.TableName)
-		}
-		if fk.OnDelete == FKActionSetNull || fk.OnDelete == FKActionCascade {
-			return ErrFKActionNotSupported
-		}
-		if fk.OnUpdate == FKActionSetNull || fk.OnUpdate == FKActionCascade {
-			return ErrFKActionNotSupported
+		// SET NULL requires every FK column to be nullable.
+		if fk.OnDelete == FKActionSetNull || fk.OnUpdate == FKActionSetNull {
+			for _, colName := range fk.Columns {
+				col := colByName[colName]
+				if !col.Nullable {
+					return fmt.Errorf("foreign key SET NULL: column %q in table %q must be nullable", colName, s.TableName)
+				}
+			}
 		}
 	}
 
@@ -1738,8 +1743,16 @@ func (s Statement) createTableDDL() string {
 
 	for _, fk := range s.ForeignKeys {
 		sb.WriteString(",\n")
-		fmt.Fprintf(&sb, "\tconstraint \"%s\" foreign key (\"%s\") references \"%s\" (\"%s\") on delete %s on update %s",
-			fk.Name, fk.Column, fk.TargetTable, fk.TargetColumn,
+		childCols := make([]string, len(fk.Columns))
+		parentCols := make([]string, len(fk.TargetColumns))
+		for i, c := range fk.Columns {
+			childCols[i] = `"` + c + `"`
+		}
+		for i, c := range fk.TargetColumns {
+			parentCols[i] = `"` + c + `"`
+		}
+		fmt.Fprintf(&sb, "\tconstraint \"%s\" foreign key (%s) references \"%s\" (%s) on delete %s on update %s",
+			fk.Name, strings.Join(childCols, ", "), fk.TargetTable, strings.Join(parentCols, ", "),
 			fk.OnDelete.String(), fk.OnUpdate.String())
 	}
 

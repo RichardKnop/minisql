@@ -598,6 +598,70 @@ func TestWithMaxCachedStatements(t *testing.T) {
 	})
 }
 
+func TestDatabase_Accessors(t *testing.T) {
+	pager, dbFile := initTest(t)
+	ctx := context.Background()
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager, nil)
+	require.NoError(t, err)
+
+	assert.NotNil(t, aDatabase.GetTransactionManager())
+	assert.NotNil(t, aDatabase.GetSaver())
+	assert.NotNil(t, aDatabase.GetDDLSaver())
+	assert.Equal(t, dbFile.Name(), aDatabase.GetFileName())
+}
+
+func TestDatabase_PrepareStatements(t *testing.T) {
+	t.Parallel()
+
+	// PrepareStatements just delegates to the parser — test with a standalone Database
+	// that has a real parser wired in (drivers do this; unit tests use nil parser).
+	db := &Database{
+		parser: testParser{},
+	}
+	ctx := context.Background()
+	stmts, err := db.PrepareStatements(ctx, `select 1`)
+	require.NoError(t, err)
+	require.NotNil(t, stmts)
+}
+
+type testParser struct{}
+
+func (testParser) Parse(_ context.Context, sql string) ([]Statement, error) {
+	return []Statement{{Kind: Select}}, nil
+}
+
+func TestDatabase_WireFKCallbacks_ChildOnly(t *testing.T) {
+	t.Parallel()
+
+	// A table with FK but not referenced by others — only checkChildFK should be set.
+	db := &Database{referencedBy: make(map[string][]inboundFK)}
+	table := &Table{
+		Name: "orders",
+		ForeignKeys: []ForeignKey{
+			{Columns: []string{"user_id"}, TargetTable: "users", TargetColumns: []string{"id"}},
+		},
+	}
+	db.wireFKCallbacks(table)
+	assert.NotNil(t, table.checkChildFK, "checkChildFK should be wired for table with outgoing FK")
+	assert.Nil(t, table.checkParentFK, "checkParentFK should be nil for unreferenced table")
+}
+
+func TestDatabase_WireFKCallbacks_ParentOnly(t *testing.T) {
+	t.Parallel()
+
+	// A table referenced by another — only checkParentFK should be set.
+	db := &Database{referencedBy: map[string][]inboundFK{
+		"users": {
+			{ChildTable: "orders", FK: ForeignKey{Columns: []string{"user_id"}, TargetColumns: []string{"id"}}},
+		},
+	}}
+	table := &Table{Name: "users"}
+	db.wireFKCallbacks(table)
+	assert.Nil(t, table.checkChildFK, "checkChildFK should be nil for table with no outgoing FK")
+	assert.NotNil(t, table.checkParentFK, "checkParentFK should be wired for referenced table")
+	assert.NotNil(t, table.enforceParentFKOnUpdate, "enforceParentFKOnUpdate should be wired")
+}
+
 func collectMainSchemas(ctx context.Context, t *testing.T, aDatabase *Database) []Schema {
 	mainTable := aDatabase.tables[SchemaTableName]
 	schemaResults, err := mainTable.Select(ctx, Statement{

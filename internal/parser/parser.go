@@ -81,16 +81,16 @@ const (
 	stepCreateTableConstraintPrimaryKeyCommaOrClosingParens
 	stepCreateTableConstraintUniqueKeyCommaOrClosingParens
 	// Foreign key parsing (shared between inline and table-level FK syntax)
-	stepCreateTableColumnFKRef           // optional REFERENCES after column definition
-	stepCreateTableFKParentTable         // parent table name after REFERENCES
-	stepCreateTableFKParentOpenParens    // opening ( before parent column
-	stepCreateTableFKParentColumn        // parent column name
-	stepCreateTableFKParentCloseParens   // closing ) after parent column
-	stepCreateTableFKOnDeleteOrUpdate    // optional ON DELETE / ON UPDATE clause
-	stepCreateTableFKActionKind          // action: restrict/no action/set null/cascade
+	stepCreateTableColumnFKRef                // optional REFERENCES after column definition
+	stepCreateTableFKParentTable              // parent table name after REFERENCES
+	stepCreateTableFKParentOpenParens         // opening ( before parent column list
+	stepCreateTableFKParentColumn             // parent column name (repeatable)
+	stepCreateTableFKParentColumnCommaOrClose // , or ) after each parent column
+	stepCreateTableFKOnDeleteOrUpdate         // optional ON DELETE / ON UPDATE clause
+	stepCreateTableFKActionKind               // action: restrict/no action/set null/cascade
 	// Table-level FOREIGN KEY constraint
 	stepCreateTableConstraintForeignKey       // after FOREIGN KEY: opening (
-	stepCreateTableConstraintForeignKeyColumn // child column name
+	stepCreateTableConstraintForeignKeyColumn // child column name (repeatable)
 	stepCreateTableCommaOrClosingParens
 	stepDropTableName
 	stepCreateIndexIfNotExists
@@ -274,7 +274,7 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 			stepCreateTableFKParentTable,
 			stepCreateTableFKParentOpenParens,
 			stepCreateTableFKParentColumn,
-			stepCreateTableFKParentCloseParens,
+			stepCreateTableFKParentColumnCommaOrClose,
 			stepCreateTableFKOnDeleteOrUpdate,
 			stepCreateTableFKActionKind,
 			stepCreateTableConstraintForeignKey,
