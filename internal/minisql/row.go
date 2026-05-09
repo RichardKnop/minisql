@@ -200,6 +200,11 @@ func compareValue(kind ColumnKind, v1, v2 OptionalValue) bool {
 	if v1.Valid != v2.Valid {
 		return false
 	}
+	if kind.IsUUID() {
+		u1, ok1 := v1.Value.(UUIDValue)
+		u2, ok2 := v2.Value.(UUIDValue)
+		return ok1 && ok2 && u1 == u2
+	}
 	if !kind.IsText() {
 		return v1.Value == v2.Value
 	}
@@ -300,6 +305,13 @@ func (r Row) Marshal() ([]byte, error) {
 			}
 			marshalInt64(buf, int64(value), offset)
 			offset += 8
+		case UUID:
+			value, ok := r.Values[i].Value.(UUIDValue)
+			if !ok {
+				return nil, fmt.Errorf("could not cast value for column %s to UUID", col.Name)
+			}
+			copy(buf[offset:offset+16], value[:])
+			offset += 16
 		}
 	}
 
@@ -380,6 +392,11 @@ func (r Row) UnmarshalWithMask(cell Cell, selectedMask []bool) (Row, error) {
 			value := unmarshalInt64(cell.Value, uint64(offset))
 			r.Values[i] = OptionalValue{Value: TimestampMicros(value), Valid: true}
 			offset += 8
+		case UUID:
+			var value UUIDValue
+			copy(value[:], cell.Value[offset:offset+16])
+			r.Values[i] = OptionalValue{Value: value, Valid: true}
+			offset += 16
 		}
 	}
 
@@ -420,6 +437,8 @@ func (r Row) getColumnSize(col Column, data []byte, offset int) uint64 {
 		return TextPointer{Length: length}.Size()
 	case Timestamp:
 		return 8
+	case UUID:
+		return 16
 	}
 	return 0
 }
@@ -687,6 +706,12 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 					return foundInList, err
 				}
 				return !foundInList, err
+			case UUID:
+				foundInList, err := isInListUUID(fieldValue.Value, valueOperand.Value)
+				if operator == In {
+					return foundInList, err
+				}
+				return !foundInList, err
 			default:
 				return false, fmt.Errorf("unknown column kind '%s'", col.Kind)
 			}
@@ -756,6 +781,8 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 		return compareText(fieldValue.Value, valueOperand.Value, operator)
 	case Timestamp:
 		return compareTimestamp(fieldValue.Value, valueOperand.Value, operator)
+	case UUID:
+		return compareUUID(fieldValue.Value, valueOperand.Value, operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", col.Kind)
 	}
@@ -833,6 +860,12 @@ func (r Row) compareFieldValueWithColumnIndexes(fieldOperand, valueOperand Opera
 					return foundInList, err
 				}
 				return !foundInList, err
+			case UUID:
+				foundInList, err := isInListUUID(fieldValue.Value, valueOperand.Value)
+				if operator == In {
+					return foundInList, err
+				}
+				return !foundInList, err
 			default:
 				return false, fmt.Errorf("unknown column kind '%s'", col.Kind)
 			}
@@ -900,6 +933,8 @@ func (r Row) compareFieldValueWithColumnIndexes(fieldOperand, valueOperand Opera
 		return compareText(fieldValue.Value, valueOperand.Value, operator)
 	case Timestamp:
 		return compareTimestamp(fieldValue.Value, valueOperand.Value, operator)
+	case UUID:
+		return compareUUID(fieldValue.Value, valueOperand.Value, operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", col.Kind)
 	}

@@ -1,12 +1,22 @@
 package minisql
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestErrInvalidJSON_Unwrap(t *testing.T) {
+	t.Parallel()
+
+	inner := fmt.Errorf("parse failure")
+	err := ErrInvalidJSON{Cause: inner}
+	assert.Equal(t, inner, err.Unwrap())
+	assert.Contains(t, err.Error(), "parse failure")
+}
 
 func TestNormaliseJSON(t *testing.T) {
 	t.Parallel()

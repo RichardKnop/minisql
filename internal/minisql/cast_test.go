@@ -176,6 +176,7 @@ func rowWithBool(name string, val bool) Row {
 	)
 }
 
+
 func TestEvalCast_NullPropagates(t *testing.T) {
 	t.Parallel()
 

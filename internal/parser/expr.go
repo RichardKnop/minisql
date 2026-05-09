@@ -345,8 +345,11 @@ func (p *parserItem) parseCastExpr() (*minisql.Expr, error) {
 	case "JSON":
 		targetKind = minisql.JSON
 		p.pop()
+	case "UUID":
+		targetKind = minisql.UUID
+		p.pop()
 	default:
-		return nil, fmt.Errorf("CAST: unknown target type %q (want BOOLEAN, INT4, INT8, REAL, DOUBLE, TEXT, VARCHAR, TIMESTAMP, JSON)", typeToken)
+		return nil, fmt.Errorf("CAST: unknown target type %q (want BOOLEAN, INT4, INT8, REAL, DOUBLE, TEXT, VARCHAR, TIMESTAMP, JSON, UUID)", typeToken)
 	}
 
 	if p.peek() != ")" {

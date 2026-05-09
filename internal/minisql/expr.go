@@ -412,6 +412,27 @@ func (e *Expr) evalCast(row Row) (any, error) {
 			return nil, fmt.Errorf("CAST: %w", err)
 		}
 		return NewTextPointer([]byte(normalised)), nil
+	case UUID:
+		switch v := val.(type) {
+		case UUIDValue:
+			return v, nil
+		case TextPointer:
+			uv, err := ParseUUID(v.String())
+			if err != nil {
+				return nil, fmt.Errorf("CAST: %w", err)
+			}
+			return uv, nil
+		default:
+			s, ok := toStringVal(val)
+			if !ok {
+				return nil, fmt.Errorf("CAST: cannot convert %T to UUID", val)
+			}
+			uv, err := ParseUUID(s)
+			if err != nil {
+				return nil, fmt.Errorf("CAST: %w", err)
+			}
+			return uv, nil
+		}
 	default:
 		return nil, fmt.Errorf("CAST: unsupported target type %v", e.CastTargetType)
 	}
@@ -569,6 +590,8 @@ func castToTextPointer(v any) (TextPointer, error) {
 		return NewTextPointer([]byte("0")), nil
 	case Time:
 		return NewTextPointer([]byte(n.GoTime().UTC().Format("2006-01-02 15:04:05"))), nil
+	case UUIDValue:
+		return NewTextPointer([]byte(n.String())), nil
 	default:
 		return TextPointer{}, fmt.Errorf("CAST: cannot convert %T to text", v)
 	}

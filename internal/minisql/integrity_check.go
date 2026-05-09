@@ -565,6 +565,8 @@ func (d *Database) walkIndexOverflowPages(ctx context.Context, report IntegrityR
 		return walkIndexOverflowPagesTyped(ctx, report, pager, objectName, n, livePages)
 	case *IndexNode[CompositeKey]:
 		return walkIndexOverflowPagesTyped(ctx, report, pager, objectName, n, livePages)
+	case *IndexNode[UUIDValue]:
+		return walkIndexOverflowPagesTyped(ctx, report, pager, objectName, n, livePages)
 	default:
 		report.Issues = append(report.Issues, IntegrityIssue{
 			Code:    "index_node_type_unknown",
@@ -668,6 +670,8 @@ func indexNodeChildren(node any) []PageIndex {
 	case *IndexNode[string]:
 		return n.Children()
 	case *IndexNode[CompositeKey]:
+		return n.Children()
+	case *IndexNode[UUIDValue]:
 		return n.Children()
 	default:
 		return nil

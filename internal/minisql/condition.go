@@ -579,6 +579,66 @@ func compareTimestamp(value1, value2 any, operator Operator) (bool, error) {
 	return false, fmt.Errorf("unknown operator '%s'", operator)
 }
 
+func compareUUID(value1, value2 any, operator Operator) (bool, error) {
+	u1, err := toUUIDValue(value1)
+	if err != nil {
+		return false, fmt.Errorf("value '%v' cannot be cast as UUIDValue: %w", value1, err)
+	}
+	u2, err := toUUIDValue(value2)
+	if err != nil {
+		return false, fmt.Errorf("operand value '%v' cannot be cast as UUIDValue: %w", value2, err)
+	}
+	// UUIDs are compared lexicographically by their 16-byte representation.
+	cmp := uuidCompare(u1, u2)
+	switch operator {
+	case Eq:
+		return cmp == 0, nil
+	case Ne:
+		return cmp != 0, nil
+	case Gt:
+		return cmp > 0, nil
+	case Lt:
+		return cmp < 0, nil
+	case Gte:
+		return cmp >= 0, nil
+	case Lte:
+		return cmp <= 0, nil
+	}
+	return false, fmt.Errorf("unknown operator '%s'", operator)
+}
+
+func uuidCompare(a, b UUIDValue) int {
+	for i := range a {
+		if a[i] < b[i] {
+			return -1
+		}
+		if a[i] > b[i] {
+			return 1
+		}
+	}
+	return 0
+}
+
+func isInListUUID(value, list any) (bool, error) {
+	if _, err := toUUIDValue(value); err != nil {
+		return false, fmt.Errorf("value '%v' cannot be cast as UUIDValue: %w", value, err)
+	}
+	theList, ok := list.([]any)
+	if !ok {
+		return false, fmt.Errorf("list '%v' cannot be cast as []any", list)
+	}
+	for _, listValue := range theList {
+		match, err := compareUUID(value, listValue, Eq)
+		if err != nil {
+			return false, err
+		}
+		if match {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func isInListInt4(value, list any) (bool, error) {
 	_, ok := value.(int64)
 	if !ok {
