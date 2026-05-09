@@ -100,6 +100,7 @@ const (
 	stepCreateIndexOpeningParens
 	stepCreateIndexColumn
 	stepCreateIndexCommaOrClosingParens
+	stepCreateIndexWhereOrEnd
 	stepDropIndexName
 	stepInsertTable
 	stepInsertFieldsOpeningParens
@@ -299,7 +300,8 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 			stepCreateIndexOnTable,
 			stepCreateIndexOpeningParens,
 			stepCreateIndexColumn,
-			stepCreateIndexCommaOrClosingParens:
+			stepCreateIndexCommaOrClosingParens,
+			stepCreateIndexWhereOrEnd:
 			if err := p.doParseCreateIndex(); err != nil {
 				return statements, err
 			}

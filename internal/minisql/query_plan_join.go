@@ -269,8 +269,11 @@ func (t *Table) findIndexOnColumns(columnNames []string) *IndexInfo {
 		}
 	}
 
-	// Check secondary indexes
+	// Check secondary indexes (skip partial indexes — they omit rows)
 	for name, idx := range t.SecondaryIndexes {
+		if idx.WhereClause != "" {
+			continue
+		}
 		if matchesColumns(idx.Columns) {
 			return &IndexInfo{
 				Name:    name,

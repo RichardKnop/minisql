@@ -13,9 +13,25 @@ type SecondaryIndex struct {
 	IndexInfo
 }
 
-func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, keys []OptionalValue, rowID RowID) error {
+// rowSatisfiesWhereCond returns true when the row satisfies the partial index predicate,
+// or always true for a full (non-partial) index.
+func (si SecondaryIndex) rowSatisfiesWhereCond(row Row) (bool, error) {
+	if len(si.WhereCond) == 0 {
+		return true, nil
+	}
+	return row.CheckOneOrMore(si.WhereCond)
+}
+
+func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, keys []OptionalValue, rowID RowID, row Row) error {
 	if secondaryIndex.Index == nil {
 		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
+	}
+
+	// Partial index: skip rows that don't satisfy the WHERE predicate.
+	if ok, err := secondaryIndex.rowSatisfiesWhereCond(row); err != nil {
+		return fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)
+	} else if !ok {
+		return nil
 	}
 
 	if len(keys) == 0 {
@@ -70,7 +86,7 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 	return nil
 }
 
-func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, row Row) error {
+func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, oldRow, row Row) error {
 	if secondaryIndex.Index == nil {
 		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
 	}
@@ -80,15 +96,10 @@ func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 	}
 
 	if len(oldKeyParts) > 1 {
-		return t.updateCompositeSecondaryIndexKey(ctx, secondaryIndex, oldKeyParts, row)
+		return t.updateCompositeSecondaryIndexKey(ctx, secondaryIndex, oldKeyParts, oldRow, row)
 	}
 
 	oldKey := oldKeyParts[0]
-
-	castedOldKey, err := castKeyValue(secondaryIndex.Columns[0], oldKey.Value)
-	if err != nil {
-		return fmt.Errorf("failed to cast old secondary index value for %s: %w", secondaryIndex.Name, err)
-	}
 
 	newKey, ok := row.GetValue(secondaryIndex.Columns[0].Name)
 	if !ok {
@@ -96,8 +107,14 @@ func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 	}
 	rowID := row.Key
 
-	// We only need to insert into the index index if the key is not NULL
-	if newKey.Valid {
+	// Partial index: new row in index only if it satisfies the WHERE predicate.
+	newInIndex, err := secondaryIndex.rowSatisfiesWhereCond(row)
+	if err != nil {
+		return fmt.Errorf("partial index %s where check (new row): %w", secondaryIndex.Name, err)
+	}
+
+	// We only need to insert into the index if the key is not NULL and row satisfies WHERE.
+	if newKey.Valid && newInIndex {
 		castedKey, err := castKeyValue(secondaryIndex.Columns[0], newKey.Value)
 		if err != nil {
 			return fmt.Errorf("failed to cast secondary index key for %s: %w", secondaryIndex.Name, err)
@@ -109,25 +126,36 @@ func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 		}
 	}
 
-	if err := secondaryIndex.Index.Delete(ctx, castedOldKey, rowID); err != nil {
-		return fmt.Errorf("failed to delete key for secondary index %s: %w", secondaryIndex.Name, err)
+	// Partial index: only delete old key if old row was in the index and key was non-NULL.
+	oldInIndex, err := secondaryIndex.rowSatisfiesWhereCond(oldRow)
+	if err != nil {
+		return fmt.Errorf("partial index %s where check (old row): %w", secondaryIndex.Name, err)
+	}
+	if oldInIndex && oldKey.Valid {
+		castedOldKey, err := castKeyValue(secondaryIndex.Columns[0], oldKey.Value)
+		if err != nil {
+			return fmt.Errorf("failed to cast old secondary index value for %s: %w", secondaryIndex.Name, err)
+		}
+		if err := secondaryIndex.Index.Delete(ctx, castedOldKey, rowID); err != nil {
+			return fmt.Errorf("failed to delete key for secondary index %s: %w", secondaryIndex.Name, err)
+		}
 	}
 
 	return nil
 }
 
-func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, row Row) error {
+func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, oldRow, row Row) error {
 	if secondaryIndex.Index == nil {
 		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
 	}
 
-	// Check if old key should have been in the index (all columns non-NULL)
-	// Note: minisql doesn't index NULL values even for secondary indexes
-	oldKeyInIndex := true
+	// Check if old key should have been in the index (all columns non-NULL, satisfies WHERE).
+	// Note: minisql doesn't index NULL values even for secondary indexes.
+	oldNullsOK := true
 	oldKeyValues := make([]any, 0, len(oldKeyParts))
 	for i, key := range oldKeyParts {
 		if !key.Valid {
-			oldKeyInIndex = false
+			oldNullsOK = false
 			break
 		}
 		castedKey, err := castKeyValue(secondaryIndex.Columns[i], key.Value)
@@ -136,9 +164,14 @@ func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryI
 		}
 		oldKeyValues = append(oldKeyValues, castedKey)
 	}
+	oldWhereOK, err := secondaryIndex.rowSatisfiesWhereCond(oldRow)
+	if err != nil {
+		return fmt.Errorf("partial index %s where check (old row): %w", secondaryIndex.Name, err)
+	}
+	oldKeyInIndex := oldNullsOK && oldWhereOK
 
-	// Check if new key should be in the index (all columns non-NULL)
-	newKeyInIndex := true
+	// Check if new key should be in the index (all columns non-NULL, satisfies WHERE).
+	newNullsOK := true
 	newKeyValues := make([]any, 0, len(oldKeyParts))
 	for _, col := range secondaryIndex.Columns {
 		keyValue, ok := row.GetValue(col.Name)
@@ -146,7 +179,7 @@ func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryI
 			return fmt.Errorf("failed to get value for new secondary index %s", secondaryIndex.Name)
 		}
 		if !keyValue.Valid {
-			newKeyInIndex = false
+			newNullsOK = false
 			break
 		}
 		castedKey, err := castKeyValue(col, keyValue.Value)
@@ -155,10 +188,15 @@ func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryI
 		}
 		newKeyValues = append(newKeyValues, castedKey)
 	}
+	newWhereOK, err := secondaryIndex.rowSatisfiesWhereCond(row)
+	if err != nil {
+		return fmt.Errorf("partial index %s where check (new row): %w", secondaryIndex.Name, err)
+	}
+	newKeyInIndex := newNullsOK && newWhereOK
 
 	rowID := row.Key
 
-	// Insert new key if all columns are non-NULL
+	// Insert new key if all columns are non-NULL and row satisfies WHERE.
 	if newKeyInIndex {
 		ck := NewCompositeKey(secondaryIndex.Columns, newKeyValues...)
 		if err := secondaryIndex.Index.Insert(ctx, ck, rowID); err != nil {
@@ -166,7 +204,7 @@ func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryI
 		}
 	}
 
-	// Delete old key if it was in the index (all old columns were non-NULL)
+	// Delete old key if it was in the index.
 	if oldKeyInIndex {
 		oldCK := NewCompositeKey(secondaryIndex.Columns, oldKeyValues...)
 		if err := secondaryIndex.Index.Delete(ctx, oldCK, rowID); err != nil {

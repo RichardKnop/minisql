@@ -333,6 +333,7 @@ type Statement struct {
 	TableName         string
 	TableAlias        string
 	IndexName         string
+	IndexWhereClause  string // raw SQL of the partial index predicate (empty = full index)
 	Target            string
 	PragmaName        string
 	PragmaValue       string
@@ -437,6 +438,7 @@ func (s Statement) Clone() Statement {
 		TableName:         s.TableName,
 		TableAlias:        s.TableAlias,
 		IndexName:         s.IndexName,
+		IndexWhereClause:  s.IndexWhereClause,
 		Target:            s.Target,
 		PragmaName:        s.PragmaName,
 		PragmaValue:       s.PragmaValue,
@@ -698,6 +700,11 @@ func (s Statement) Prepare(now Time) (Statement, error) {
 		if err != nil {
 			return Statement{}, err
 		}
+	case CreateIndex:
+		// Partial index WHERE conditions are validated against the full table schema
+		// later in createIndex/initSecondaryIndex. Skip prepareWhere here because
+		// s.Columns only contains the indexed columns, not all table columns.
+		return s, nil
 	}
 	return s.prepareWhere()
 }
@@ -1837,7 +1844,11 @@ func (s Statement) createIndexDDL() string {
 		}
 	}
 
-	sb.WriteString("\n);")
+	sb.WriteString("\n)")
+	if s.IndexWhereClause != "" {
+		fmt.Fprintf(&sb, " where %s", s.IndexWhereClause)
+	}
+	sb.WriteString(";")
 	return sb.String()
 }
 

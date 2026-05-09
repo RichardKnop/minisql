@@ -28,7 +28,7 @@ func TestTable_PlanQuery_SingleSecondaryIndex(t *testing.T) {
 			secondaryIndexColumn,
 		}, 0, nil)
 	)
-	table.SetSecondaryIndex(indexName, []Column{secondaryIndexColumn}, nil)
+	table.SetSecondaryIndex(SecondaryIndex{IndexInfo: IndexInfo{Name: indexName, Columns: []Column{secondaryIndexColumn}}})
 
 	testCases := []struct {
 		Name     string

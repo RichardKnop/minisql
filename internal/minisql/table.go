@@ -223,15 +223,9 @@ func (p *singleTableProvider) GetTable(ctx context.Context, name string) (*Table
 }
 
 // SetSecondaryIndex ...
-func (t *Table) SetSecondaryIndex(name string, columns []Column, index BTreeIndex) {
-	t.SecondaryIndexes[name] = SecondaryIndex{
-		IndexInfo: IndexInfo{
-			Name:    name,
-			Columns: columns,
-		},
-		Index: index,
-	}
-	t.columnIndexInfoCache[indexColumnHash(columns)] = t.SecondaryIndexes[name].IndexInfo
+func (t *Table) SetSecondaryIndex(si SecondaryIndex) {
+	t.SecondaryIndexes[si.Name] = si
+	t.columnIndexInfoCache[indexColumnHash(si.Columns)] = si.IndexInfo
 }
 
 // RemoveSecondaryIndex ...

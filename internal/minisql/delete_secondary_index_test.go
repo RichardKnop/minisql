@@ -70,7 +70,7 @@ func TestTable_Delete_SingleSecondaryIndex(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		table.SetSecondaryIndex(indexName, indexCol, idx)
+		table.SetSecondaryIndex(SecondaryIndex{IndexInfo: IndexInfo{Name: indexName, Columns: indexCol}, Index: idx})
 		_, err = table.Insert(ctx, stmt)
 		return err
 	})
@@ -160,7 +160,7 @@ func TestTable_Delete_CompositeSecondaryIndex(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		table.SetSecondaryIndex(indexName, indexCols, idx)
+		table.SetSecondaryIndex(SecondaryIndex{IndexInfo: IndexInfo{Name: indexName, Columns: indexCols}, Index: idx})
 		_, err = table.Insert(ctx, stmt)
 		return err
 	})

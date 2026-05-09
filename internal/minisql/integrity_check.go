@@ -703,10 +703,11 @@ func (d *Database) checkTableIndexConsistency(ctx context.Context, report Integr
 			continue
 		}
 		report = checkIndexConsistency(ctx, report, table, indexConsistencyTarget{
-			name:    index.Name,
-			kind:    "secondary index",
-			columns: index.Columns,
-			index:   index.Index,
+			name:      index.Name,
+			kind:      "secondary index",
+			columns:   index.Columns,
+			index:     index.Index,
+			whereCond: index.WhereCond,
 		})
 	}
 
@@ -714,10 +715,11 @@ func (d *Database) checkTableIndexConsistency(ctx context.Context, report Integr
 }
 
 type indexConsistencyTarget struct {
-	index   BTreeIndex
-	name    string
-	kind    string
-	columns []Column
+	index     BTreeIndex
+	whereCond OneOrMore // partial index predicate; nil = full index
+	name      string
+	kind      string
+	columns   []Column
 }
 
 type integrityIndexEntries map[string]map[RowID]int
@@ -783,6 +785,22 @@ func streamCheckExpectedIndexEntries(ctx context.Context, report IntegrityReport
 		row, err := cursor.fetchRow(ctx, true, fields...)
 		if err != nil {
 			return report, err
+		}
+
+		// Partial index: rows not satisfying the WHERE predicate are not in the index.
+		if len(target.whereCond) > 0 {
+			ok, err := row.CheckOneOrMore(target.whereCond)
+			if err != nil {
+				report.Issues = append(report.Issues, IntegrityIssue{
+					Code:    "index_expected_entries_failed",
+					Message: fmt.Sprintf("failed to evaluate partial index predicate for %s on row %d: %v", target.name, row.Key, err),
+					Object:  target.name,
+				})
+				continue
+			}
+			if !ok {
+				continue
+			}
 		}
 
 		keyID, indexed, err := integrityKeyIDFromRow(row, target.columns, target.kind == "primary key")

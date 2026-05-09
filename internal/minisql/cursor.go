@@ -384,7 +384,7 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 				indexValues = append(indexValues, indexValue)
 			}
 
-			if err := c.Table.insertSecondaryIndexKey(ctx, secondaryIndex, indexValues, row.Key); err != nil {
+			if err := c.Table.insertSecondaryIndexKey(ctx, secondaryIndex, indexValues, row.Key, row); err != nil {
 				return false, err
 			}
 		}
@@ -452,7 +452,6 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 		}
 	}
 	for _, secondaryIndex := range c.Table.SecondaryIndexes {
-		// Only update secondary index key if it has changed
 		var changed bool
 		for _, col := range secondaryIndex.Columns {
 			if _, ok := changedValues[col.Name]; ok {
@@ -460,12 +459,20 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 				break
 			}
 		}
+		if !changed {
+			for _, colName := range secondaryIndex.WhereCondColumns() {
+				if _, ok := changedValues[colName]; ok {
+					changed = true
+					break
+				}
+			}
+		}
 		if changed {
 			oldIndexKeys, ok := oldRow.GetValuesForColumns(secondaryIndex.Columns)
 			if !ok || len(oldIndexKeys) != len(secondaryIndex.Columns) {
 				return false, fmt.Errorf("failed to get old value for secondary index %s", secondaryIndex.Name)
 			}
-			if err := c.Table.updateSecondaryIndexKey(ctx, secondaryIndex, oldIndexKeys, row); err != nil {
+			if err := c.Table.updateSecondaryIndexKey(ctx, secondaryIndex, oldIndexKeys, oldRow, row); err != nil {
 				return false, err
 			}
 		}
@@ -620,6 +627,13 @@ func (c *Cursor) deleteSecondaryIndexKeys(ctx context.Context, row Row) error {
 	}
 
 	for _, secondaryIndex := range c.Table.SecondaryIndexes {
+		// Partial index: row was not in the index if it didn't satisfy the WHERE predicate.
+		if ok, err := secondaryIndex.rowSatisfiesWhereCond(row); err != nil {
+			return fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)
+		} else if !ok {
+			continue
+		}
+
 		if len(secondaryIndex.Columns) > 1 {
 			if err := c.deleteCompositeSecondaryIndexKey(ctx, row, secondaryIndex); err != nil {
 				return err

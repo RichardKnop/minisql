@@ -54,7 +54,7 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 			},
 		))
 	)
-	table.SetSecondaryIndex(secondaryIndexName, columns[4:5], nil)
+	table.SetSecondaryIndex(SecondaryIndex{IndexInfo: IndexInfo{Name: secondaryIndexName, Columns: columns[4:5]}})
 
 	testCases := []struct {
 		Name     string
@@ -297,8 +297,8 @@ func TestTable_PlanQuery_Intersection(t *testing.T) {
 		), WithUniqueIndex(
 			UniqueIndex{IndexInfo: IndexInfo{Name: uniqueIndexName, Columns: columns[1:2]}},
 		))
-		tbl.SetSecondaryIndex(idxCreated, columns[4:5], nil)
-		tbl.SetSecondaryIndex(idxDob, columns[3:4], nil)
+		tbl.SetSecondaryIndex(SecondaryIndex{IndexInfo: IndexInfo{Name: idxCreated, Columns: columns[4:5]}})
+		tbl.SetSecondaryIndex(SecondaryIndex{IndexInfo: IndexInfo{Name: idxDob, Columns: columns[3:4]}})
 		return tbl
 	}
 
