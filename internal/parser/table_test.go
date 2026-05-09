@@ -334,11 +334,20 @@ func TestParse_CreateTable(t *testing.T) {
 		{
 			"CREATE TABLE with TEXT primary key fails",
 			`CREATE TABLE foo (
-				id text primary key, 
+				id text primary key,
 				bar varchar(255)
 			);`,
 			nil,
 			errCreateTablePrimaryKeyTextNotAllowed,
+		},
+		{
+			"CREATE TABLE with JSON primary key fails",
+			`CREATE TABLE foo (
+				id json primary key,
+				bar varchar(255)
+			);`,
+			nil,
+			errCreateTablePrimaryKeyJSONNotAllowed,
 		},
 		{
 			"CREATE TABLE with primary key",
@@ -414,6 +423,15 @@ func TestParse_CreateTable(t *testing.T) {
 			);`,
 			nil,
 			errCreateTableUniqueTextNotAllowed,
+		},
+		{
+			"CREATE TABLE with JSON unique index key fails",
+			`CREATE TABLE foo (
+				id int8 primary key,
+				payload json unique
+			);`,
+			nil,
+			errCreateTableUniqueJSONNotAllowed,
 		},
 		{
 			"CREATE TABLE with unique index key",

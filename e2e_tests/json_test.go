@@ -246,3 +246,29 @@ func (s *TestSuite) TestJSON() {
 		s.Require().False(rows.Next())
 	})
 }
+
+func (s *TestSuite) TestJSON_IndexOnJSONColumnDisallowed() {
+	_, err := s.db.Exec(`create table "docs" (
+		id      int8 primary key autoincrement,
+		payload json
+	);`)
+	s.Require().NoError(err)
+
+	s.Run("CREATE INDEX on JSON column is rejected", func() {
+		_, err = s.db.Exec(`create index "idx_payload" on "docs" (payload);`)
+		s.Require().Error(err)
+		s.ErrorContains(err, "b-tree index on JSON column is not supported")
+	})
+
+	s.Run("CREATE TABLE with JSON primary key is rejected", func() {
+		_, err := s.db.Exec(`create table "t1" (data json primary key);`)
+		s.Require().Error(err)
+		s.ErrorContains(err, "primary key cannot be of type JSON")
+	})
+
+	s.Run("CREATE TABLE with JSON unique column is rejected", func() {
+		_, err := s.db.Exec(`create table "t2" (id int8 primary key autoincrement, data json unique);`)
+		s.Require().Error(err)
+		s.ErrorContains(err, "unique key cannot be of type JSON")
+	})
+}
