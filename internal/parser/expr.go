@@ -195,6 +195,59 @@ func (p *parserItem) parseFuncCall(funcName string) (*minisql.Expr, error) {
 	}
 	p.pop() // consume "("
 
+	// EXTRACT/DATE_PART support both:
+	//   standard:  EXTRACT('year', col)
+	//   SQL-std:   EXTRACT(year FROM col)
+	// Detect the keyword-FROM form when the first token is an unquoted identifier.
+	// We check p.sql[p.i] != '\'' to distinguish unquoted identifiers from quoted strings —
+	// peek() strips quotes so 'year' and year both peek as "year".
+	if funcName == "EXTRACT" || funcName == "DATE_PART" {
+		first := p.peek()
+		if first != ")" && p.i < len(p.sql) && p.sql[p.i] != '\'' && isIdentifier(first) {
+			field := first
+			p.pop() // consume field keyword (e.g. "year")
+			if strings.ToUpper(p.peek()) == "FROM" {
+				p.pop() // consume "FROM"
+				tsExpr, err := p.parseExpr()
+				if err != nil {
+					return nil, fmt.Errorf("%s: %w", funcName, err)
+				}
+				if p.peek() != ")" {
+					return nil, fmt.Errorf("%s: expected ')'", funcName)
+				}
+				p.pop() // consume ")"
+				return &minisql.Expr{
+					FuncName: funcName,
+					Args: []*minisql.Expr{
+						{Literal: minisql.NewTextPointer([]byte(strings.ToLower(field)))},
+						tsExpr,
+					},
+				}, nil
+			}
+			// Not FROM — the identifier is a column reference; fall through with it
+			// pre-parsed as the first arg.
+			colExpr := &minisql.Expr{Column: field}
+			var args []*minisql.Expr
+			args = append(args, colExpr)
+			for {
+				if p.peek() == ")" {
+					p.pop()
+					break
+				}
+				if p.peek() != "," {
+					return nil, fmt.Errorf("expected ',' or ')' in %s() arguments", funcName)
+				}
+				p.pop()
+				arg, err := p.parseExpr()
+				if err != nil {
+					return nil, err
+				}
+				args = append(args, arg)
+			}
+			return &minisql.Expr{FuncName: funcName, Args: args}, nil
+		}
+	}
+
 	var args []*minisql.Expr
 	for {
 		if p.peek() == ")" {

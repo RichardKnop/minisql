@@ -475,7 +475,7 @@ func (s *TestSuite) TestForeignKey_OnUpdateCascade() {
 	defer rows.Close()
 	count := 0
 	for rows.Next() {
-		count++
+		count += 1
 	}
 	s.Equal(2, count, "transactions should still reference account 1 after non-referenced column update")
 }
@@ -513,7 +513,7 @@ func (s *TestSuite) TestForeignKey_OnDeleteSetNull() {
 	defer rows.Close()
 	count := 0
 	for rows.Next() {
-		count++
+		count += 1
 	}
 	s.Equal(2, count, "both employees should have department_id = NULL after department deletion")
 }

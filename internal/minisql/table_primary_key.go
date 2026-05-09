@@ -12,10 +12,12 @@ import (
 
 // IndexInfo ...
 type IndexInfo struct {
-	Name        string
-	Columns     []Column
-	WhereClause string   // raw SQL of the partial index predicate (empty = full index)
-	WhereCond   OneOrMore // parsed DNF form of the partial index predicate (nil = full index)
+	Expression    *Expr     // nil = column index; non-nil = expression index
+	WhereCond     OneOrMore // parsed DNF form of the partial index predicate (nil = full index)
+	Name          string
+	ExpressionSQL string   // raw SQL of the expression (empty = column index)
+	WhereClause   string   // raw SQL of the partial index predicate (empty = full index)
+	Columns       []Column
 }
 
 // WhereCondColumns returns the names of columns referenced in the partial index WHERE predicate.
@@ -289,17 +291,36 @@ func castKeyValue(col Column, val any) (any, error) {
 		}
 		return value, nil
 	case Varchar:
-		tp, ok := val.(TextPointer)
-		if !ok {
-			return nil, fmt.Errorf("could not cast value for column %s to TextPointer", col.Name)
+		switch v := val.(type) {
+		case TextPointer:
+			return v.String(), nil
+		case string:
+			return v, nil
+		case int64:
+			return fmt.Sprintf("%d", v), nil
+		case float64:
+			return fmt.Sprintf("%g", v), nil
+		case bool:
+			if v {
+				return "true", nil
+			}
+			return "false", nil
+		default:
+			return nil, fmt.Errorf("could not cast value for column %s to string", col.Name)
 		}
-		return tp.String(), nil
 	case Timestamp:
-		micros, ok := val.(TimestampMicros)
-		if !ok {
+		switch v := val.(type) {
+		case TimestampMicros:
+			return int64(v), nil
+		case TextPointer:
+			ts, err := ParseTimestamp(v.String())
+			if err != nil {
+				return nil, fmt.Errorf("could not parse timestamp for column %s: %w", col.Name, err)
+			}
+			return int64(TimestampMicros(ts.TotalMicroseconds())), nil
+		default:
 			return nil, fmt.Errorf("could not cast value for column %s to timestamp", col.Name)
 		}
-		return int64(micros), nil
 	case UUID:
 		uv, ok := val.(UUIDValue)
 		if !ok {

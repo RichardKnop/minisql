@@ -374,16 +374,19 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 		}
 		// Resinsert secondary keys if applicable
 		for _, secondaryIndex := range c.Table.SecondaryIndexes {
-			indexValues := make([]OptionalValue, 0, len(secondaryIndex.Columns))
-			for _, col := range secondaryIndex.Columns {
-				indexValue, ok := stmt.Updates[col.Name]
-				if !ok {
-					// Column not being updated — use the existing row value.
-					indexValue, _ = oldRow.GetValue(col.Name)
+			var indexValues []OptionalValue
+			if secondaryIndex.Expression == nil {
+				indexValues = make([]OptionalValue, 0, len(secondaryIndex.Columns))
+				for _, col := range secondaryIndex.Columns {
+					indexValue, ok := stmt.Updates[col.Name]
+					if !ok {
+						// Column not being updated — use the existing row value.
+						indexValue, _ = oldRow.GetValue(col.Name)
+					}
+					indexValues = append(indexValues, indexValue)
 				}
-				indexValues = append(indexValues, indexValue)
 			}
-
+			// For expression indexes, insertSecondaryIndexKey evaluates the expression from row directly.
 			if err := c.Table.insertSecondaryIndexKey(ctx, secondaryIndex, indexValues, row.Key, row); err != nil {
 				return false, err
 			}
@@ -453,10 +456,20 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 	}
 	for _, secondaryIndex := range c.Table.SecondaryIndexes {
 		var changed bool
-		for _, col := range secondaryIndex.Columns {
-			if _, ok := changedValues[col.Name]; ok {
-				changed = true
-				break
+		if secondaryIndex.Expression != nil {
+			// Expression index: changed when any source column of the expression changed.
+			for _, colName := range exprSourceColumns(secondaryIndex.Expression) {
+				if _, ok := changedValues[colName]; ok {
+					changed = true
+					break
+				}
+			}
+		} else {
+			for _, col := range secondaryIndex.Columns {
+				if _, ok := changedValues[col.Name]; ok {
+					changed = true
+					break
+				}
 			}
 		}
 		if !changed {
@@ -468,12 +481,19 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 			}
 		}
 		if changed {
-			oldIndexKeys, ok := oldRow.GetValuesForColumns(secondaryIndex.Columns)
-			if !ok || len(oldIndexKeys) != len(secondaryIndex.Columns) {
-				return false, fmt.Errorf("failed to get old value for secondary index %s", secondaryIndex.Name)
-			}
-			if err := c.Table.updateSecondaryIndexKey(ctx, secondaryIndex, oldIndexKeys, oldRow, row); err != nil {
-				return false, err
+			if secondaryIndex.Expression != nil {
+				// Expression index: updateSecondaryIndexKey re-evaluates the expression itself.
+				if err := c.Table.updateSecondaryIndexKey(ctx, secondaryIndex, nil, oldRow, row); err != nil {
+					return false, err
+				}
+			} else {
+				oldIndexKeys, ok := oldRow.GetValuesForColumns(secondaryIndex.Columns)
+				if !ok || len(oldIndexKeys) != len(secondaryIndex.Columns) {
+					return false, fmt.Errorf("failed to get old value for secondary index %s", secondaryIndex.Name)
+				}
+				if err := c.Table.updateSecondaryIndexKey(ctx, secondaryIndex, oldIndexKeys, oldRow, row); err != nil {
+					return false, err
+				}
 			}
 		}
 	}
@@ -631,6 +651,21 @@ func (c *Cursor) deleteSecondaryIndexKeys(ctx context.Context, row Row) error {
 		if ok, err := secondaryIndex.rowSatisfiesWhereCond(row); err != nil {
 			return fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)
 		} else if !ok {
+			continue
+		}
+
+		// Expression index: evaluate expression to get the key to delete.
+		if secondaryIndex.Expression != nil {
+			key, ok, err := evalExprIndexKey(secondaryIndex.Expression, secondaryIndex.Columns[0], row)
+			if err != nil {
+				return fmt.Errorf("expression index %s eval: %w", secondaryIndex.Name, err)
+			}
+			if !ok {
+				continue // NULL — was never indexed
+			}
+			if err := secondaryIndex.Index.Delete(ctx, key, row.Key); err != nil {
+				return fmt.Errorf("failed to delete expression index key %s: %w", secondaryIndex.Name, err)
+			}
 			continue
 		}
 

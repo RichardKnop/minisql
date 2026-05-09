@@ -2,6 +2,7 @@ package parser
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
@@ -54,14 +55,24 @@ func (p *parserItem) doParseCreateIndex() error {
 		p.pop()
 		p.step = stepCreateIndexColumn
 	case stepCreateIndexColumn:
-		identifier := p.peek()
-		if !isIdentifier(identifier) {
+		if p.peek() == "" {
 			return p.wrapErr(errCreateIndexNoColumns)
 		}
-		p.Columns = append(p.Columns, minisql.Column{
-			Name: identifier,
-		})
-		p.pop()
+		startPos := p.i
+		expr, err := p.parseExpr()
+		if err != nil {
+			return fmt.Errorf("at CREATE INDEX: failed to parse expression: %w", err)
+		}
+		// Simple column reference — not an expression index.
+		if expr.Column != "" {
+			p.Columns = append(p.Columns, minisql.Column{Name: expr.Column})
+			p.step = stepCreateIndexCommaOrClosingParens
+			return nil
+		}
+		// Complex expression (function call, arithmetic, JSON path, …).
+		p.IndexExpression = expr
+		p.IndexExpressionSQL = strings.TrimSpace(p.sql[startPos:p.i])
+		p.Columns = append(p.Columns, minisql.Column{Name: "__expr__"})
 		p.step = stepCreateIndexCommaOrClosingParens
 	case stepCreateIndexCommaOrClosingParens:
 		commaOrClosingParens := p.peek()

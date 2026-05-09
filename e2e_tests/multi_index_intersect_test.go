@@ -51,7 +51,7 @@ func (s *TestSuite) TestMultiIndexIntersect() {
 
 		var count int
 		for rows.Next() {
-			count++
+			count += 1
 		}
 		s.Require().NoError(rows.Err())
 		s.Zero(count)

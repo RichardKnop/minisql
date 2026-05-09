@@ -823,16 +823,25 @@ func (d *Database) initSecondaryIndex(ctx context.Context, schema Schema) error 
 		return err
 	}
 
-	indexColumn, ok := table.ColumnByName(stmt.Columns[0].Name)
-	if !ok {
-		return fmt.Errorf("column %s does not exist on table %s for secondary index %s", stmt.Columns[0].Name, schema.TableName, schema.Name)
+	var indexColumn Column
+	if stmt.IndexExpression != nil {
+		kind := inferExprResultKind(stmt.IndexExpression, table.Columns)
+		indexColumn = syntheticExprColumn(kind)
+	} else {
+		var ok bool
+		indexColumn, ok = table.ColumnByName(stmt.Columns[0].Name)
+		if !ok {
+			return fmt.Errorf("column %s does not exist on table %s for secondary index %s", stmt.Columns[0].Name, schema.TableName, schema.Name)
+		}
 	}
 	secondaryIndex := SecondaryIndex{
 		IndexInfo: IndexInfo{
-			Name:        schema.Name,
-			Columns:     []Column{indexColumn},
-			WhereClause: stmt.IndexWhereClause,
-			WhereCond:   stmt.Conditions,
+			Name:          schema.Name,
+			Columns:       []Column{indexColumn},
+			WhereClause:   stmt.IndexWhereClause,
+			WhereCond:     stmt.Conditions,
+			Expression:    stmt.IndexExpression,
+			ExpressionSQL: stmt.IndexExpressionSQL,
 		},
 	}
 
@@ -1347,17 +1356,26 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, table *Table
 		return errIndexAlreadyExists
 	}
 
-	// Resolve all index columns from the table schema (preserving order)
-	indexColumns := make([]Column, 0, len(stmt.Columns))
-	for _, stmtCol := range stmt.Columns {
-		col, ok := table.ColumnByName(stmtCol.Name)
-		if !ok {
-			return fmt.Errorf("column %s does not exist on table %s", stmtCol.Name, stmt.TableName)
+	// Resolve index columns from the table schema, or build a synthetic column for expression indexes.
+	var indexColumns []Column
+	if stmt.IndexExpression != nil {
+		if !isImmutableExpr(stmt.IndexExpression) {
+			return fmt.Errorf("expression index %s: expression must be immutable (no non-deterministic functions)", stmt.IndexName)
 		}
-		if col.Kind == JSON {
-			return fmt.Errorf("%w: column %q on table %q", errIndexOnJSONColumn, col.Name, stmt.TableName)
+		kind := inferExprResultKind(stmt.IndexExpression, table.Columns)
+		indexColumns = []Column{syntheticExprColumn(kind)}
+	} else {
+		indexColumns = make([]Column, 0, len(stmt.Columns))
+		for _, stmtCol := range stmt.Columns {
+			col, ok := table.ColumnByName(stmtCol.Name)
+			if !ok {
+				return fmt.Errorf("column %s does not exist on table %s", stmtCol.Name, stmt.TableName)
+			}
+			if col.Kind == JSON {
+				return fmt.Errorf("%w: column %q on table %q", errIndexOnJSONColumn, col.Name, stmt.TableName)
+			}
+			indexColumns = append(indexColumns, col)
 		}
-		indexColumns = append(indexColumns, col)
 	}
 
 	for _, info := range table.SecondaryIndexes {
@@ -1373,10 +1391,12 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, table *Table
 
 	secondaryIndex := SecondaryIndex{
 		IndexInfo: IndexInfo{
-			Name:        stmt.IndexName,
-			Columns:     indexColumns,
-			WhereClause: stmt.IndexWhereClause,
-			WhereCond:   stmt.Conditions,
+			Name:          stmt.IndexName,
+			Columns:       indexColumns,
+			WhereClause:   stmt.IndexWhereClause,
+			WhereCond:     stmt.Conditions,
+			Expression:    stmt.IndexExpression,
+			ExpressionSQL: stmt.IndexExpressionSQL,
 		},
 	}
 	createdIndex, err := d.createSecondaryIndex(ctx, stmt, table, secondaryIndex)
@@ -1418,7 +1438,20 @@ func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryInd
 			}
 		}
 
-		if len(secondaryIndex.Columns) > 1 {
+		switch {
+		case secondaryIndex.Expression != nil:
+			// Expression index: evaluate expression against the row.
+			key, ok, err := evalExprIndexKey(secondaryIndex.Expression, secondaryIndex.Columns[0], row)
+			if err != nil {
+				return fmt.Errorf("expression index %s eval: %w", secondaryIndex.Name, err)
+			}
+			if !ok {
+				continue // NULL result — don't index this row
+			}
+			if err := secondaryIndex.Index.Insert(ctx, key, row.Key); err != nil {
+				return err
+			}
+		case len(secondaryIndex.Columns) > 1:
 			// Composite secondary index: build a CompositeKey from all index columns
 			allValid := true
 			keyValues := make([]any, 0, len(secondaryIndex.Columns))
@@ -1444,7 +1477,7 @@ func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryInd
 			if err := secondaryIndex.Index.Insert(ctx, ck, row.Key); err != nil {
 				return err
 			}
-		} else {
+		default:
 			// Single-column secondary index
 			keyValue, ok := row.GetValue(secondaryIndex.Columns[0].Name)
 			if !ok {

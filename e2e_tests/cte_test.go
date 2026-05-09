@@ -75,7 +75,7 @@ func (s *TestSuite) TestCTE() {
 
 		var count int
 		for rows.Next() {
-			count++
+			count += 1
 			var id int64
 			var name string
 			s.Require().NoError(rows.Scan(&id, &name))
@@ -174,7 +174,7 @@ func (s *TestSuite) TestCTE() {
 		defer rows.Close()
 		var count int
 		for rows.Next() {
-			count++
+			count += 1
 			var n string
 			s.Require().NoError(rows.Scan(&n))
 		}

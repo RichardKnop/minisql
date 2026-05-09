@@ -225,13 +225,37 @@ func (p *singleTableProvider) GetTable(ctx context.Context, name string) (*Table
 // SetSecondaryIndex ...
 func (t *Table) SetSecondaryIndex(si SecondaryIndex) {
 	t.SecondaryIndexes[si.Name] = si
-	t.columnIndexInfoCache[indexColumnHash(si.Columns)] = si.IndexInfo
+	if si.Expression != nil {
+		// Expression indexes are looked up by their SQL text, not by column name.
+		t.columnIndexInfoCache[si.ExpressionSQL] = si.IndexInfo
+	} else {
+		t.columnIndexInfoCache[indexColumnHash(si.Columns)] = si.IndexInfo
+	}
 }
 
 // RemoveSecondaryIndex ...
 func (t *Table) RemoveSecondaryIndex(name string) {
-	delete(t.columnIndexInfoCache, indexColumnHash(t.SecondaryIndexes[name].Columns))
+	si, ok := t.SecondaryIndexes[name]
+	if !ok {
+		return
+	}
+	if si.Expression != nil {
+		delete(t.columnIndexInfoCache, si.ExpressionSQL)
+	} else {
+		delete(t.columnIndexInfoCache, indexColumnHash(si.Columns))
+	}
 	delete(t.SecondaryIndexes, name)
+}
+
+// FindExpressionIndex returns the secondary index whose Expression tree is
+// structurally equal to expr, or (SecondaryIndex{}, false) if none exists.
+func (t *Table) FindExpressionIndex(expr *Expr) (SecondaryIndex, bool) {
+	for _, si := range t.SecondaryIndexes {
+		if si.Expression != nil && exprEqual(si.Expression, expr) {
+			return si, true
+		}
+	}
+	return SecondaryIndex{}, false
 }
 
 // GetRootPageIdx ...

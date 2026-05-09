@@ -348,6 +348,58 @@ func (t *Table) findBestEqualityIndexMatch(group Conditions) *indexMatch {
 		}
 	}
 
+	// Try expression indexes for OperandExpr conditions (e.g. LOWER(email) = ?).
+	for condIdx, cond := range group {
+		if cond.Operand1.Type != OperandExpr {
+			continue
+		}
+		if (cond.Operator != Eq && cond.Operator != In) || cond.Operand2.Type == OperandNull {
+			continue
+		}
+		condExpr, ok := cond.Operand1.Value.(*Expr)
+		if !ok {
+			continue
+		}
+		si, found := t.FindExpressionIndex(condExpr)
+		if !found {
+			continue
+		}
+		if !partialIndexImplied(si.WhereCond, group) {
+			continue
+		}
+		var keys []any
+		if cond.Operator == Eq {
+			key, err := castKeyValue(si.Columns[0], cond.Operand2.Value)
+			if err != nil {
+				continue
+			}
+			keys = []any{key}
+		} else {
+			rawKeys, ok2 := cond.Operand2.Value.([]any)
+			if !ok2 {
+				continue
+			}
+			for _, raw := range rawKeys {
+				key, err := castKeyValue(si.Columns[0], raw)
+				if err != nil {
+					continue
+				}
+				keys = append(keys, key)
+			}
+			if len(keys) == 0 {
+				continue
+			}
+		}
+		exprMatch := &indexMatch{
+			info:              si.IndexInfo,
+			matchedConditions: map[int]bool{condIdx: true},
+			keys:              keys,
+		}
+		if isBetterMatch(exprMatch) {
+			bestMatch = exprMatch
+		}
+	}
+
 	return bestMatch
 }
 

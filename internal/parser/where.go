@@ -164,6 +164,19 @@ func (p *parserItem) parseLeafCondition() (*minisql.ConditionNode, error) {
 	identifier := p.peek()
 	upperIdent := strings.ToUpper(identifier)
 
+	// Built-in function call or CAST as WHERE left operand:
+	//   LOWER(email) = ?, DATE_TRUNC('month', ts) = ?, CAST(x AS INT8) > 0, etc.
+	if isBuiltinFunction(upperIdent) || upperIdent == "CAST" {
+		expr, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		cond := minisql.Condition{
+			Operand1: minisql.Operand{Type: minisql.OperandExpr, Value: expr},
+		}
+		return p.parseCondOperatorAndRHS(&cond)
+	}
+
 	// Handle aggregate function references (HAVING SUM(col) > x, etc.).
 	if aggKind := aggregateKindFromToken(upperIdent); aggKind != 0 {
 		p.pop() // consume e.g. "SUM("
@@ -185,79 +198,21 @@ func (p *parserItem) parseLeafCondition() (*minisql.ConditionNode, error) {
 		if !isIdentifier(identifier) {
 			return nil, p.wrapErr(errWhereExpectedField)
 		}
-		p.pop()
-	}
-
-	// Check for JSON path operators: col -> 'key' or col ->> 'key'
-	if nextOp := p.peek(); nextOp == "->" || nextOp == "->>" {
-		p.pop() // consume -> or ->>
-		arithOp := minisql.JSONArrow
-		if nextOp == "->>" {
-			arithOp = minisql.JSONArrowArrow
-		}
-		// Parse the key/index as a literal
-		keyExpr, err := p.parseFactor()
+		// Parse as expression to support arithmetic (price * qty) and JSON path
+		// (payload->>'key') starting with a plain column name.
+		expr, err := p.parseExpr()
 		if err != nil {
-			return nil, p.errorf("at WHERE: expected key after %s: %v", nextOp, err)
+			return nil, err
 		}
-		jsonExpr := &minisql.Expr{
-			Left:  &minisql.Expr{Column: identifier},
-			Right: keyExpr,
-			Op:    arithOp,
+		// Complex expression (arithmetic, JSON path, etc.) — use OperandExpr.
+		if expr.Column == "" {
+			cond := minisql.Condition{
+				Operand1: minisql.Operand{Type: minisql.OperandExpr, Value: expr},
+			}
+			return p.parseCondOperatorAndRHS(&cond)
 		}
-		cond := minisql.Condition{
-			Operand1: minisql.Operand{Type: minisql.OperandExpr, Value: jsonExpr},
-		}
-		op := strings.ToUpper(p.peek())
-		switch op {
-		case "IS NULL":
-			cond.Operator = minisql.Eq
-			cond.Operand2 = minisql.Operand{Type: minisql.OperandNull}
-			p.pop()
-		case "IS NOT NULL":
-			cond.Operator = minisql.Ne
-			cond.Operand2 = minisql.Operand{Type: minisql.OperandNull}
-			p.pop()
-		case "=":
-			cond.Operator = minisql.Eq
-			p.pop()
-			if err := p.parseCondScalarValue(&cond); err != nil {
-				return nil, err
-			}
-		case "!=":
-			cond.Operator = minisql.Ne
-			p.pop()
-			if err := p.parseCondScalarValue(&cond); err != nil {
-				return nil, err
-			}
-		case ">":
-			cond.Operator = minisql.Gt
-			p.pop()
-			if err := p.parseCondScalarValue(&cond); err != nil {
-				return nil, err
-			}
-		case ">=":
-			cond.Operator = minisql.Gte
-			p.pop()
-			if err := p.parseCondScalarValue(&cond); err != nil {
-				return nil, err
-			}
-		case "<":
-			cond.Operator = minisql.Lt
-			p.pop()
-			if err := p.parseCondScalarValue(&cond); err != nil {
-				return nil, err
-			}
-		case "<=":
-			cond.Operator = minisql.Lte
-			p.pop()
-			if err := p.parseCondScalarValue(&cond); err != nil {
-				return nil, err
-			}
-		default:
-			return nil, p.wrapErr(errWhereUnknownOperator)
-		}
-		return &minisql.ConditionNode{Leaf: &cond}, nil
+		// Bare column reference — fall through to OperandField handling below.
+		identifier = expr.Column
 	}
 
 	cond := minisql.Condition{
@@ -358,6 +313,101 @@ func (p *parserItem) parseLeafCondition() (*minisql.ConditionNode, error) {
 	}
 
 	return &minisql.ConditionNode{Leaf: &cond}, nil
+}
+
+// parseCondOperatorAndRHS parses the operator and right-hand side of a condition
+// whose left operand has already been set (expression or JSON path operands).
+func (p *parserItem) parseCondOperatorAndRHS(cond *minisql.Condition) (*minisql.ConditionNode, error) {
+	op := strings.ToUpper(p.peek())
+	switch op {
+	case "IS NULL":
+		cond.Operator = minisql.Eq
+		cond.Operand2 = minisql.Operand{Type: minisql.OperandNull}
+		p.pop()
+	case "IS NOT NULL":
+		cond.Operator = minisql.Ne
+		cond.Operand2 = minisql.Operand{Type: minisql.OperandNull}
+		p.pop()
+	case "=":
+		cond.Operator = minisql.Eq
+		p.pop()
+		if err := p.parseCondScalarValue(cond); err != nil {
+			return nil, err
+		}
+	case "!=":
+		cond.Operator = minisql.Ne
+		p.pop()
+		if err := p.parseCondScalarValue(cond); err != nil {
+			return nil, err
+		}
+	case ">":
+		cond.Operator = minisql.Gt
+		p.pop()
+		if err := p.parseCondScalarValue(cond); err != nil {
+			return nil, err
+		}
+	case ">=":
+		cond.Operator = minisql.Gte
+		p.pop()
+		if err := p.parseCondScalarValue(cond); err != nil {
+			return nil, err
+		}
+	case "<":
+		cond.Operator = minisql.Lt
+		p.pop()
+		if err := p.parseCondScalarValue(cond); err != nil {
+			return nil, err
+		}
+	case "<=":
+		cond.Operator = minisql.Lte
+		p.pop()
+		if err := p.parseCondScalarValue(cond); err != nil {
+			return nil, err
+		}
+	case "LIKE":
+		cond.Operator = minisql.Like
+		p.pop()
+		if err := p.parseCondScalarValue(cond); err != nil {
+			return nil, err
+		}
+	case "NOT LIKE":
+		cond.Operator = minisql.NotLike
+		p.pop()
+		if err := p.parseCondScalarValue(cond); err != nil {
+			return nil, err
+		}
+	case "IN (":
+		cond.Operator = minisql.In
+		cond.Operand2 = minisql.Operand{Type: minisql.OperandList, Value: []any{}}
+		p.pop()
+		if err := p.parseCondListValues(cond); err != nil {
+			return nil, err
+		}
+	case "NOT IN (":
+		cond.Operator = minisql.NotIn
+		cond.Operand2 = minisql.Operand{Type: minisql.OperandList, Value: []any{}}
+		p.pop()
+		if err := p.parseCondListValues(cond); err != nil {
+			return nil, err
+		}
+	case "BETWEEN":
+		cond.Operator = minisql.Between
+		cond.Operand2 = minisql.Operand{Type: minisql.OperandList, Value: []any{}}
+		p.pop()
+		if err := p.parseCondBetweenValues(cond); err != nil {
+			return nil, err
+		}
+	case "NOT BETWEEN":
+		cond.Operator = minisql.NotBetween
+		cond.Operand2 = minisql.Operand{Type: minisql.OperandList, Value: []any{}}
+		p.pop()
+		if err := p.parseCondBetweenValues(cond); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, p.wrapErr(errWhereUnknownOperator)
+	}
+	return &minisql.ConditionNode{Leaf: cond}, nil
 }
 
 // parseCondScalarValue parses a scalar value (literal, placeholder, field
