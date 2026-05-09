@@ -536,7 +536,7 @@ rows.Scan(&owner)
 | `NULL` and `NOT NULL` | Via null bit mask included in each row/cell |
 | `DEFAULT` | Supported for all columns, including `NOW()` for `TIMESTAMP` |
 | `DROP TABLE` | |
-| `CREATE INDEX`, `DROP INDEX` | Secondary non-unique indexes only; primary and unique indexes are declared as part of `CREATE TABLE`, partial secondary indexes with `WHERE` clause supported |
+| `CREATE INDEX`, `DROP INDEX` | Secondary non-unique indexes; primary and unique indexes are declared as part of `CREATE TABLE`. Supports composite (multi-column), partial (`WHERE` clause), and expression indexes. See [Indexes](#indexes). |
 | `INSERT` | Single row or multiple rows via a tuple of values separated by commas |
 | `ON CONFLICT` | Both `DO NOTHING` and `DO UPDATE` supported (with `EXCLUDED` pseudo table syntax for updating) |
 | `SELECT` | All fields with `*`, specific fields, or row count with `COUNT(*)`, derived tables support |
@@ -690,20 +690,200 @@ _, err := db.Exec(`create table "users" (
 _, err := db.Exec(`drop table "users";`)
 ```
 
-### CREATE INDEX
+### Indexes
 
-Currently you can only create secondary non unique indexes. Unique and primary index can be created as part of `CREATE TABLE`.
+MiniSQL supports several index types, each suited to a different access pattern. The query planner picks the best available index automatically using cost estimation based on statistics collected by `ANALYZE`.
+
+#### Index Types at a Glance
+
+| Type | Where declared | Example |
+|------|---------------|---------|
+| Primary key | `CREATE TABLE` column definition | `id INT8 PRIMARY KEY AUTOINCREMENT` |
+| Unique (single column) | `CREATE TABLE` column definition | `email VARCHAR(255) UNIQUE` |
+| Unique (composite) | `CREATE TABLE` table constraint | `UNIQUE (first_name, last_name)` |
+| Secondary | `CREATE INDEX` | `CREATE INDEX idx ON t (col)` |
+| Composite | `CREATE INDEX` | `CREATE INDEX idx ON t (col1, col2)` |
+| Partial | `CREATE INDEX … WHERE` | `CREATE INDEX idx ON t (col) WHERE active = true` |
+| Expression | `CREATE INDEX` with expression | `CREATE INDEX idx ON t (LOWER(col))` |
+
+#### Primary Key Index
+
+Declared inline as part of `CREATE TABLE`. Only a single-column primary key is supported. Using `AUTOINCREMENT` requires the type to be `INT8`.
+
+```sql
+CREATE TABLE users (
+    id    INT8 PRIMARY KEY AUTOINCREMENT,
+    email VARCHAR(255)
+);
+```
+
+The primary key index is always a unique B+ tree keyed by the row ID.
+
+#### Unique Index
+
+A unique constraint creates a B+ tree index that rejects duplicate values. It can be declared inline on a single column or as a table-level constraint for multi-column uniqueness:
+
+```sql
+-- Inline single-column unique
+CREATE TABLE users (
+    id    INT8 PRIMARY KEY AUTOINCREMENT,
+    email VARCHAR(255) UNIQUE
+);
+
+-- Table-level composite unique constraint
+CREATE TABLE memberships (
+    user_id INT8  NOT NULL,
+    org_id  INT8  NOT NULL,
+    UNIQUE (user_id, org_id)
+);
+```
+
+Attempting to insert or update a row that would violate a unique constraint returns `ErrDuplicateKey`.
+
+#### Secondary Index (Non-Unique)
+
+A plain secondary index speeds up equality and range lookups on a column without enforcing uniqueness.
+
+```sql
+CREATE INDEX idx_users_created ON users (created);
+DROP INDEX idx_users_created;
+```
 
 ```go
-_, err := db.Exec(`create index "idx_created" on "users" (created);`)
+_, err := db.Exec(`CREATE INDEX "idx_users_created" ON "users" (created);`)
 ```
+
+Use `ANALYZE` after bulk inserts to update the row-count and cardinality statistics that the planner relies on when choosing between a sequential scan and an index scan.
+
+#### Composite Index
+
+A composite index covers multiple columns. The planner can use it for:
+
+- Equality or range filters on any **prefix** of the index columns.
+- `ORDER BY` — when the query orders by exactly the same columns in the same sequence and direction as the index, the planner uses the index to read rows in order and skips the in-memory sort.
+
+```sql
+-- Index supporting WHERE last_name = ? AND first_name = ?
+-- and ORDER BY last_name, first_name
+CREATE INDEX idx_users_name ON users (last_name, first_name);
+```
+
+Mixed `ASC`/`DESC` on different columns still falls back to an in-memory sort. All columns must share the same direction for the ORDER BY optimisation to apply.
+
+#### Partial Index
+
+A partial index only stores entries for rows that satisfy a `WHERE` predicate. This makes the index smaller and faster when the interesting subset of rows is much smaller than the full table.
+
+```sql
+-- Only index active users — WHERE queries that include active = true can use it
+CREATE INDEX idx_active_users ON users (email) WHERE active = true;
+
+-- Only index high-value orders
+CREATE INDEX idx_large_orders ON orders (amount DESC) WHERE amount > 1000;
+
+-- Compound predicate
+CREATE INDEX idx_pending_recent ON orders (created DESC)
+    WHERE status = 'pending' AND amount > 0;
+```
+
+The planner uses a partial index when every term in the index's `WHERE` clause also appears verbatim in the query's `WHERE` clause. This check is conservative (syntactic containment), so complex rewrites or equivalent but differently structured conditions will not trigger the optimisation; in those cases the planner falls back to a sequential scan or a full secondary index.
+
+```sql
+-- Uses idx_active_users ✓
+SELECT email FROM users WHERE active = true AND email LIKE 'a%';
+
+-- Falls back to sequential scan — predicate is not a superset of the index predicate
+SELECT email FROM users WHERE email LIKE 'a%';
+```
+
+Rows that do not satisfy the partial index predicate are never stored in the index. `INSERT`, `UPDATE`, and `DELETE` automatically maintain the index for qualifying rows only.
+
+#### Expression Index
+
+An expression index keys the B+ tree on the *result* of evaluating a SQL expression rather than a raw column value. The most common use case is case-insensitive search:
+
+```sql
+-- Create the index on the lower-cased name
+CREATE INDEX idx_users_lower_name ON users (LOWER(name));
+
+-- The planner automatically uses the index for this query
+SELECT * FROM users WHERE LOWER(name) = 'alice';
+```
+
+The planner uses an expression index when the expression in the `WHERE` clause is structurally identical to the indexed expression — the function name, arguments, and any operators must match exactly.
+
+**Supported expression forms:**
+
+| Expression | Example | Key type |
+|-----------|---------|----------|
+| String functions | `LOWER(col)`, `UPPER(col)`, `TRIM(col)`, `SUBSTR(col, 1, 3)`, `REPLACE(col, 'a', 'b')`, `CONCAT(a, b)` | `VARCHAR` |
+| Numeric functions | `ABS(col)`, `FLOOR(col)`, `CEIL(col)`, `ROUND(col, 2)`, `MOD(col, 10)`, `LENGTH(col)` | `INT8` / `DOUBLE` |
+| Date/time functions | `DATE_TRUNC('month', ts)`, `TO_TIMESTAMP(col)` | `TIMESTAMP` |
+| Date extraction | `EXTRACT(year FROM ts)`, `DATE_PART('month', ts)` | `INT8` |
+| Arithmetic | `price * quantity`, `score + bonus`, `cost / 100` | `INT8` / `DOUBLE` |
+| JSON path | `payload ->> 'status'`, `data -> 'meta' ->> 'id'` | `VARCHAR` |
+| Type cast | `CAST(col AS INT8)`, `CAST(col AS TEXT)` | target type |
+| Chained functions | `LOWER(TRIM(col))`, `ABS(price * discount)` | inferred |
+
+```sql
+-- Arithmetic expression index (e.g. for computed total)
+CREATE INDEX idx_line_total ON order_lines (price * quantity);
+SELECT * FROM order_lines WHERE price * quantity > 500;
+
+-- JSON field expression index
+CREATE INDEX idx_event_type ON events (payload ->> 'type');
+SELECT * FROM events WHERE payload ->> 'type' = 'login';
+
+-- Date truncation index (monthly bucketing)
+CREATE INDEX idx_orders_month ON orders (DATE_TRUNC('month', created));
+SELECT * FROM orders WHERE DATE_TRUNC('month', created) = '2024-01-01 00:00:00';
+
+-- Year extraction
+CREATE INDEX idx_orders_year ON orders (EXTRACT(year FROM created));
+SELECT * FROM orders WHERE EXTRACT(year FROM created) = 2024;
+
+-- Chained functions
+CREATE INDEX idx_norm_email ON users (LOWER(TRIM(email)));
+SELECT * FROM users WHERE LOWER(TRIM(email)) = 'alice@example.com';
+```
+
+Expression indexes only store entries for rows where the expression evaluates to a non-NULL result. `INSERT`, `UPDATE`, and `DELETE` evaluate the expression automatically to keep the index up to date.
+
+`NOW()` and other non-deterministic functions are rejected at `CREATE INDEX` time.
+
+#### Covering Index (Index-Only Scan)
+
+When all columns referenced by a query are present in the index, MiniSQL performs an **index-only scan** — it reads the result entirely from the index pages without touching the main table. This avoids the extra I/O of looking up each row by its row ID.
+
+```sql
+-- Index covers both the filter column and the selected column
+CREATE INDEX idx_users_email_name ON users (email, name);
+
+-- Index-only scan: no table pages read
+SELECT name FROM users WHERE email = 'alice@example.com';
+```
+
+The planner picks index-only scans automatically when the covering condition is satisfied.
+
+#### Updating Statistics for the Planner
+
+The query planner uses per-table and per-index row-count estimates collected by `ANALYZE`. After bulk inserts or significant data changes, run `ANALYZE` to refresh statistics so the planner can make accurate cost comparisons:
+
+```sql
+ANALYZE;              -- analyze all tables
+ANALYZE users;        -- analyze one table
+```
+
+```go
+_, err := db.Exec(`ANALYZE;`)
+```
+
+Without up-to-date statistics the planner may over- or under-estimate the selectivity of an index and choose a sequential scan instead.
 
 ### DROP INDEX
 
-Currently you can only drop secondary non unique indexes.
-
 ```go
-_, err := db.Exec(`drop index "idx_created";`)
+_, err := db.Exec(`DROP INDEX "idx_created";`)
 ```
 
 ### Foreign Keys
@@ -935,9 +1115,9 @@ if err := rows.Err(); err != nil {
 }
 ```
 
-#### INNER JOIN (star schema)
+#### JOINs
 
-There is an experimental support for `INNER JOIN`, however it only supports star schema joins, i.e. one or more tables joined with the base table. Nested joins and other types of joins such as `LEFT`, `RIGHT` are not supported yet.
+`INNER JOIN`, `LEFT JOIN`, and `RIGHT JOIN` are supported. Arbitrary chain topologies work — three or more tables can be joined in sequence, not just star-schema patterns.
 
 ### UPDATE
 

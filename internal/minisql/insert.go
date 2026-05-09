@@ -103,11 +103,14 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 		whereCheckRow := Row{Key: nextRowID, Columns: t.Columns, Values: values}
 
 		for _, secondaryIndex := range t.SecondaryIndexes {
-			keyParts := stmt.InsertValuesForColumns(insertIdx, secondaryIndex.Columns...)
-			if len(keyParts) != len(secondaryIndex.Columns) {
-				return StatementResult{}, fmt.Errorf("failed to get value for secondary index %s", secondaryIndex.Name)
+			var keyParts []OptionalValue
+			if secondaryIndex.Expression == nil {
+				keyParts = stmt.InsertValuesForColumns(insertIdx, secondaryIndex.Columns...)
+				if len(keyParts) != len(secondaryIndex.Columns) {
+					return StatementResult{}, fmt.Errorf("failed to get value for secondary index %s", secondaryIndex.Name)
+				}
 			}
-
+			// For expression indexes, insertSecondaryIndexKey evaluates the expression from whereCheckRow.
 			if err := t.insertSecondaryIndexKey(ctx, secondaryIndex, keyParts, nextRowID, whereCheckRow); err != nil {
 				return StatementResult{}, err
 			}

@@ -703,11 +703,12 @@ func (d *Database) checkTableIndexConsistency(ctx context.Context, report Integr
 			continue
 		}
 		report = checkIndexConsistency(ctx, report, table, indexConsistencyTarget{
-			name:      index.Name,
-			kind:      "secondary index",
-			columns:   index.Columns,
-			index:     index.Index,
-			whereCond: index.WhereCond,
+			name:       index.Name,
+			kind:       "secondary index",
+			columns:    index.Columns,
+			index:      index.Index,
+			whereCond:  index.WhereCond,
+			expression: index.Expression,
 		})
 	}
 
@@ -715,11 +716,12 @@ func (d *Database) checkTableIndexConsistency(ctx context.Context, report Integr
 }
 
 type indexConsistencyTarget struct {
-	index     BTreeIndex
-	whereCond OneOrMore // partial index predicate; nil = full index
-	name      string
-	kind      string
-	columns   []Column
+	index      BTreeIndex
+	whereCond  OneOrMore // partial index predicate; nil = full index
+	expression *Expr     // non-nil for expression indexes
+	name       string
+	kind       string
+	columns    []Column
 }
 
 type integrityIndexEntries map[string]map[RowID]int
@@ -803,17 +805,37 @@ func streamCheckExpectedIndexEntries(ctx context.Context, report IntegrityReport
 			}
 		}
 
-		keyID, indexed, err := integrityKeyIDFromRow(row, target.columns, target.kind == "primary key")
-		if err != nil {
-			report.Issues = append(report.Issues, IntegrityIssue{
-				Code:    "index_expected_entries_failed",
-				Message: fmt.Sprintf("failed to derive expected entry for %s on row %d: %v", target.name, row.Key, err),
-				Object:  target.name,
-			})
-			continue
-		}
-		if !indexed {
-			continue
+		var keyID string
+		var indexed bool
+		if target.expression != nil {
+			keyVal, ok, err := evalExprIndexKey(target.expression, target.columns[0], row)
+			if err != nil {
+				report.Issues = append(report.Issues, IntegrityIssue{
+					Code:    "index_expected_entries_failed",
+					Message: fmt.Sprintf("failed to evaluate expression for %s on row %d: %v", target.name, row.Key, err),
+					Object:  target.name,
+				})
+				continue
+			}
+			if !ok {
+				continue // NULL result — row not indexed
+			}
+			keyID = integrityKeyID(keyVal)
+			indexed = true
+		} else {
+			var err error
+			keyID, indexed, err = integrityKeyIDFromRow(row, target.columns, target.kind == "primary key")
+			if err != nil {
+				report.Issues = append(report.Issues, IntegrityIssue{
+					Code:    "index_expected_entries_failed",
+					Message: fmt.Sprintf("failed to derive expected entry for %s on row %d: %v", target.name, row.Key, err),
+					Object:  target.name,
+				})
+				continue
+			}
+			if !indexed {
+				continue
+			}
 		}
 
 		rowIDs := actual[keyID]

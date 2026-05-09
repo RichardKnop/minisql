@@ -34,6 +34,21 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 		return nil
 	}
 
+	// Expression index: evaluate the expression against the row.
+	if secondaryIndex.Expression != nil {
+		key, ok, err := evalExprIndexKey(secondaryIndex.Expression, secondaryIndex.Columns[0], row)
+		if err != nil {
+			return fmt.Errorf("expression index %s eval: %w", secondaryIndex.Name, err)
+		}
+		if !ok {
+			return nil // NULL result — don't index
+		}
+		if err := secondaryIndex.Index.Insert(ctx, key, rowID); err != nil {
+			return fmt.Errorf("failed to insert key for expression index %s: %w", secondaryIndex.Name, err)
+		}
+		return nil
+	}
+
 	if len(keys) == 0 {
 		return fmt.Errorf("no keys provided for secondary index %s", secondaryIndex.Name)
 	}
@@ -89,6 +104,45 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, oldRow, row Row) error {
 	if secondaryIndex.Index == nil {
 		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
+	}
+
+	// Expression index: evaluate expression against old and new rows.
+	if secondaryIndex.Expression != nil {
+		syntheticCol := secondaryIndex.Columns[0]
+		rowID := row.Key
+
+		newInIndex, err := secondaryIndex.rowSatisfiesWhereCond(row)
+		if err != nil {
+			return fmt.Errorf("partial index %s where check (new row): %w", secondaryIndex.Name, err)
+		}
+		oldInIndex, err := secondaryIndex.rowSatisfiesWhereCond(oldRow)
+		if err != nil {
+			return fmt.Errorf("partial index %s where check (old row): %w", secondaryIndex.Name, err)
+		}
+
+		if newInIndex {
+			newKey, ok, err := evalExprIndexKey(secondaryIndex.Expression, syntheticCol, row)
+			if err != nil {
+				return fmt.Errorf("expression index %s eval (new row): %w", secondaryIndex.Name, err)
+			}
+			if ok {
+				if err := secondaryIndex.Index.Insert(ctx, newKey, rowID); err != nil {
+					return fmt.Errorf("failed to insert key for expression index %s: %w", secondaryIndex.Name, err)
+				}
+			}
+		}
+		if oldInIndex {
+			oldKey, ok, err := evalExprIndexKey(secondaryIndex.Expression, syntheticCol, oldRow)
+			if err != nil {
+				return fmt.Errorf("expression index %s eval (old row): %w", secondaryIndex.Name, err)
+			}
+			if ok {
+				if err := secondaryIndex.Index.Delete(ctx, oldKey, rowID); err != nil {
+					return fmt.Errorf("failed to delete key for expression index %s: %w", secondaryIndex.Name, err)
+				}
+			}
+		}
+		return nil
 	}
 
 	if len(oldKeyParts) == 0 {

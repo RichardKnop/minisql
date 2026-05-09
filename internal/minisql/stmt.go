@@ -332,8 +332,10 @@ type Statement struct {
 	Limit             OptionalValue
 	TableName         string
 	TableAlias        string
-	IndexName         string
-	IndexWhereClause  string // raw SQL of the partial index predicate (empty = full index)
+	IndexExpression    *Expr  // nil = column index; non-nil = expression index
+	IndexName          string
+	IndexWhereClause   string // raw SQL of the partial index predicate (empty = full index)
+	IndexExpressionSQL string // raw SQL of the index expression (empty = column index)
 	Target            string
 	PragmaName        string
 	PragmaValue       string
@@ -437,8 +439,10 @@ func (s Statement) Clone() Statement {
 		IfNotExists:       s.IfNotExists,
 		TableName:         s.TableName,
 		TableAlias:        s.TableAlias,
-		IndexName:         s.IndexName,
-		IndexWhereClause:  s.IndexWhereClause,
+		IndexName:          s.IndexName,
+		IndexWhereClause:   s.IndexWhereClause,
+		IndexExpression:    s.IndexExpression,
+		IndexExpressionSQL: s.IndexExpressionSQL,
 		Target:            s.Target,
 		PragmaName:        s.PragmaName,
 		PragmaValue:       s.PragmaValue,
@@ -636,7 +640,7 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 
 func operandTypeFromAny(value any) OperandType {
 	switch value.(type) {
-	case int64, int32:
+	case int64, int32, TimestampMicros:
 		return OperandInteger
 	case float64, float32:
 		return OperandFloat
@@ -1837,7 +1841,11 @@ func (s Statement) createIndexDDL() string {
 	fmt.Fprintf(&sb, "create index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName)
 
 	for i, col := range s.Columns {
-		fmt.Fprintf(&sb, "	%s", col.Name)
+		if s.IndexExpression != nil && i == 0 {
+			fmt.Fprintf(&sb, "	%s", s.IndexExpressionSQL)
+		} else {
+			fmt.Fprintf(&sb, "	%s", col.Name)
+		}
 
 		if i < len(s.Columns)-1 {
 			sb.WriteString(",\n")
