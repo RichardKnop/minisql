@@ -10,6 +10,7 @@
 3. **Parallel query execution** — SQLite is single-threaded; MiniSQL can parallelize full table scans.
 4. **Modern API surface** — idiomatic Go, context-aware, `database/sql` compatible.
 5. **JSON as a first-class type** — native `json` column type with path operators and functions (not an extension).
+6. **UUID as a first-class type** — native `uuid` column type with 16-byte binary storage, canonical lowercase formatting, and full index support.
 
 This is an early stage project and it might contain bugs and is not battle tested. Please employ caution when using this database.
 
@@ -330,6 +331,7 @@ if err := rows.Err(); err != nil {
 | `VARCHAR(n)` | Storage works the same way as `TEXT` but allows limiting length of inserted/updated text to max value. |
 | `TIMESTAMP`  | 8-byte signed integer representing number of microseconds from `2000-01-01 00:00:00 UTC` (`Postgres epoch`). Supported range is from `4713 BC` to `294276 AD` inclusive. |
 | `JSON`       | Variable-length JSON document. Stored as compact text (whitespace stripped on write). Validated on insert/update — invalid JSON is rejected. Supports path extraction via `->` / `->>` operators and `JSON_*` functions. See [JSON Type](#json-type). |
+| `UUID`       | Fixed 16-byte binary UUID stored inline in B-tree pages. Accepts the standard hyphenated form `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`. Upper-case input is normalised to lowercase on write. Invalid values are rejected at insert/update time. Returned as a lowercase hyphenated string. See [UUID Type](#uuid-type). |
 
 ## TIMESTAMP Spec
 
@@ -451,6 +453,75 @@ SELECT CAST('{"a": 1}' AS JSON);  -- Returns: {"a":1}  (compacted)
 - Extracting a key that does not exist returns SQL `NULL`.
 - Applying `->` or `->>` to a SQL `NULL` returns `NULL`.
 
+## UUID Type
+
+The `uuid` column type stores a standard UUID in fixed 16-byte binary form, inline in the B-tree page. No overflow pages are used.
+
+- Input is accepted in the standard hyphenated form: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`.
+- Upper-case hex digits are normalised to lower-case on write.
+- Invalid UUID strings are rejected at insert/update time with an error.
+- Values are returned as lowercase hyphenated strings via the `database/sql` driver.
+- UUID columns can be used as primary keys, unique indexes, and secondary indexes.
+
+```sql
+CREATE TABLE widgets (
+    id    uuid primary key,
+    name  varchar(100) not null,
+    owner uuid
+);
+```
+
+### Inserting UUIDs
+
+Pass UUID values as strings via prepared statements:
+
+```go
+const uuid1 = "550e8400-e29b-41d4-a716-446655440000"
+
+_, err := db.Exec(
+    `INSERT INTO widgets (id, name) VALUES (?, ?)`,
+    uuid1, "Widget Alpha",
+)
+```
+
+Upper-case input is accepted and silently normalised:
+
+```go
+_, err := db.Exec(
+    `INSERT INTO widgets (id, name) VALUES (?, ?)`,
+    "6BA7B810-9DAD-11D1-80B4-00C04FD430C8", "Widget Beta",
+)
+// Stored and returned as: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+```
+
+### Querying UUIDs
+
+```go
+rows, err := db.Query(`SELECT id, name FROM widgets WHERE id = ?`, uuid1)
+// ...
+var gotID, gotName string
+rows.Scan(&gotID, &gotName)
+// gotID == "550e8400-e29b-41d4-a716-446655440000"
+```
+
+### CAST with UUID
+
+```sql
+-- Parse a text literal as UUID (validates and stores in binary form)
+SELECT CAST('550e8400-e29b-41d4-a716-446655440000' AS UUID);
+
+-- Format a UUID column back to text
+SELECT CAST(id AS TEXT) FROM widgets WHERE name = 'Widget Alpha';
+```
+
+### Nullable UUID columns
+
+```go
+var owner *string
+rows.Scan(&owner)
+// owner == nil when the column value is NULL
+```
+
 ## SQL Features
 
 | Feature | Notes |
@@ -488,7 +559,7 @@ SELECT CAST('{"a": 1}' AS JSON);  -- Returns: {"a":1}  (compacted)
 | Date/time functions | `NOW()` — current UTC timestamp; `DATE_TRUNC('unit', ts)` — truncate to `year`/`month`/`week`/`day`/`hour`/`minute`/`second`; `EXTRACT('field', ts)` / `DATE_PART('field', ts)` — extract numeric field (`year`, `month`, `day`, `hour`, `minute`, `second`, `dow`); `TO_TIMESTAMP('str')` — parse timestamp string into a TIMESTAMP value. All usable in `SELECT`, `UPDATE SET`, composable with other expressions |
 | `CASE WHEN` | Searched form: `CASE WHEN cond THEN result … ELSE default END`; simple form: `CASE expr WHEN val THEN result … ELSE default END`. Multiple WHEN clauses, optional ELSE (omitting returns NULL). Usable in `SELECT` (including nested in arithmetic), `UPDATE SET`, supports `IS NULL` / `IS NOT NULL` / all comparison operators in conditions |
 | `UNION` / `UNION ALL` | Combine results of two or more `SELECT` statements. `UNION ALL` concatenates all rows (duplicates kept); `UNION` deduplicates the combined result. Chains of three or more branches supported (e.g. `SELECT … UNION ALL SELECT … UNION SELECT …`). Each branch may have its own `WHERE` clause. |
-| `CAST(expr AS type)` | Standard SQL type coercion. Supported target types: `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE`, `TEXT`, `VARCHAR(n)`, `TIMESTAMP`, `JSON`. Follows SQLite semantics: float→int truncates toward zero; text→int/float parses leading digits (non-numeric input → 0). `CAST(x AS JSON)` validates and compacts the value. NULL propagates. Usable anywhere an expression is valid (e.g. `SELECT CAST(price AS INT8)`, `SELECT CAST(n AS TEXT) AS label`). |
+| `CAST(expr AS type)` | Standard SQL type coercion. Supported target types: `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE`, `TEXT`, `VARCHAR(n)`, `TIMESTAMP`, `JSON`, `UUID`. Follows SQLite semantics: float→int truncates toward zero; text→int/float parses leading digits (non-numeric input → 0). `CAST(x AS JSON)` validates and compacts the value. `CAST(x AS UUID)` parses a UUID string and stores it in binary form. `CAST(uuid_col AS TEXT)` formats the 16-byte value back to a hyphenated lowercase string. NULL propagates. Usable anywhere an expression is valid (e.g. `SELECT CAST(price AS INT8)`, `SELECT CAST(n AS TEXT) AS label`, `SELECT CAST(id AS TEXT) FROM widgets`). |
 | JSON operators | `col -> 'key'` — extract a JSON field and return it as a JSON fragment (quoted string, array, object). `col ->> 'key'` — extract a JSON field and return it as a SQL scalar (unquoted string, integer, or float). Integer keys index into arrays (e.g. `col -> 0`). Both operators work in `SELECT` and `WHERE`. See [JSON Type](#json-type). |
 | JSON functions | `JSON_EXTRACT(doc, path)` — extract value at JSON path as a scalar (equivalent to `->>`). `JSON_VALID(val)` — returns `1` if the value is valid JSON, `0` otherwise. `JSON_TYPE(doc[, path])` — returns the JSON type name: `object`, `array`, `text`, `integer`, `real`, `true`, `false`, `null`. `JSON_ARRAY_LENGTH(doc)` — returns the number of elements in a JSON array. See [JSON Type](#json-type). |
 | `INTERVAL` arithmetic | PostgreSQL-style interval expressions. Supported units: `year`, `month`, `week`, `day`, `hour`, `minute`, `second`, `microsecond` (singular or plural). Supports compound intervals (`'1 year 3 months'`) and negative values (`'-2 days'`). Operations: `timestamp + interval → timestamp`, `timestamp - interval → timestamp`, `interval + interval → interval`, `interval - interval → interval`, `timestamp - timestamp → interval`. Month arithmetic is calendar-aware — adding 1 month to Jan 31 yields the last day of February. Usable in `SELECT` and `UPDATE SET`, composable with `AS` aliases. Examples: `SELECT created_at + INTERVAL '7 days' AS expires_at`, `SELECT ts - INTERVAL '1 year 6 months'`. |
