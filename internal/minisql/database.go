@@ -18,6 +18,7 @@ var (
 	errTableAlreadyExists        = errors.New("table already exists")
 	errIndexDoesNotExist         = errors.New("index does not exist")
 	errIndexAlreadyExists        = errors.New("index already exists")
+	errIndexOnJSONColumn         = errors.New("b-tree index on JSON column is not supported")
 )
 
 // WALConfig bundles the Write-Ahead Log objects that NewDatabase needs.
@@ -1352,6 +1353,9 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, table *Table
 		col, ok := table.ColumnByName(stmtCol.Name)
 		if !ok {
 			return fmt.Errorf("column %s does not exist on table %s", stmtCol.Name, stmt.TableName)
+		}
+		if col.Kind == JSON {
+			return fmt.Errorf("%w: column %q on table %q", errIndexOnJSONColumn, col.Name, stmt.TableName)
 		}
 		indexColumns = append(indexColumns, col)
 	}

@@ -16,8 +16,10 @@ var (
 	errCreateTableMultiplePrimaryKeys       = errors.New("at CREATE TABLE: multiple PRIMARY KEY columns specified")
 	errCreateTablePrimaryKeyTextNotAllowed  = errors.New("at CREATE TABLE: primary key cannot be of type TEXT")
 	errCreateTablePrimaryKeyVarcharTooLarge = fmt.Errorf("at CREATE TABLE: primary key of type VARCHAR exceeds max index key size %d", minisql.MaxIndexKeySize)
+	errCreateTablePrimaryKeyJSONNotAllowed  = errors.New("at CREATE TABLE: primary key cannot be of type JSON")
 	errCreateTableUniqueTextNotAllowed      = errors.New("at CREATE TABLE: unique key cannot be of type TEXT")
 	errCreateTableUniqueVarcharTooLarge     = fmt.Errorf("at CREATE TABLE: unique key of type VARCHAR exceeds max index key size %d", minisql.MaxIndexKeySize)
+	errCreateTableUniqueJSONNotAllowed      = errors.New("at CREATE TABLE: unique key cannot be of type JSON")
 	errCreateTableDefaultValueExpected      = errors.New("at CREATE TABLE: expected default value after DEFAULT")
 )
 
@@ -114,6 +116,9 @@ func (p *parserItem) doParseCreateTable() error {
 		if col.Kind == minisql.Varchar && col.Size > minisql.MaxIndexKeySize {
 			return p.wrapErr(errCreateTablePrimaryKeyVarcharTooLarge)
 		}
+		if col.Kind == minisql.JSON {
+			return p.wrapErr(errCreateTablePrimaryKeyJSONNotAllowed)
+		}
 		if primaryKey == "PRIMARY KEY AUTOINCREMENT" {
 			p.PrimaryKey.Autoincrement = true
 		}
@@ -148,6 +153,9 @@ func (p *parserItem) doParseCreateTable() error {
 		}
 		if col.Kind == minisql.Varchar && col.Size > minisql.MaxIndexKeySize {
 			return p.wrapErr(errCreateTableUniqueVarcharTooLarge)
+		}
+		if col.Kind == minisql.JSON {
+			return p.wrapErr(errCreateTableUniqueJSONNotAllowed)
 		}
 		p.UniqueIndexes = append(p.UniqueIndexes, minisql.UniqueIndex{
 			IndexInfo: minisql.IndexInfo{
@@ -284,6 +292,9 @@ func (p *parserItem) doParseCreateTable() error {
 		if foundCol.Name == "" {
 			return p.errorf("at CREATE TABLE: primary key column '%s' does not exist", columnName)
 		}
+		if foundCol.Kind == minisql.JSON {
+			return p.wrapErr(errCreateTablePrimaryKeyJSONNotAllowed)
+		}
 		p.PrimaryKey.Columns = append(p.PrimaryKey.Columns, foundCol)
 		p.step = stepCreateTableConstraintPrimaryKeyCommaOrClosingParens
 	case stepCreateTableConstraintUniqueKeyColumn:
@@ -298,6 +309,9 @@ func (p *parserItem) doParseCreateTable() error {
 				foundCol = col
 				break
 			}
+		}
+		if foundCol.Kind == minisql.JSON {
+			return p.wrapErr(errCreateTableUniqueJSONNotAllowed)
 		}
 		p.UniqueIndexes[len(p.UniqueIndexes)-1].Columns = append(p.UniqueIndexes[len(p.UniqueIndexes)-1].Columns, foundCol)
 		p.step = stepCreateTableConstraintUniqueKeyCommaOrClosingParens
