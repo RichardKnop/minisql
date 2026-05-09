@@ -73,6 +73,21 @@ func (p *parserItem) doParseCreateIndex() error {
 			p.step = stepCreateIndexColumn
 			return nil
 		}
+		p.step = stepCreateIndexWhereOrEnd
+	case stepCreateIndexWhereOrEnd:
+		token := strings.ToUpper(p.peek())
+		if token != "WHERE" {
+			p.step = stepStatementEnd
+			return nil
+		}
+		p.pop() // consume "WHERE"
+		startPos := p.i
+		node, err := p.parseCondExpr()
+		if err != nil {
+			return err
+		}
+		p.IndexWhereClause = strings.TrimSpace(p.sql[startPos:p.i])
+		p.Conditions = node.ToDNF()
 		p.step = stepStatementEnd
 	}
 	return nil

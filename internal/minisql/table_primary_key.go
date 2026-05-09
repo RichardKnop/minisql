@@ -12,8 +12,28 @@ import (
 
 // IndexInfo ...
 type IndexInfo struct {
-	Name    string
-	Columns []Column
+	Name        string
+	Columns     []Column
+	WhereClause string   // raw SQL of the partial index predicate (empty = full index)
+	WhereCond   OneOrMore // parsed DNF form of the partial index predicate (nil = full index)
+}
+
+// WhereCondColumns returns the names of columns referenced in the partial index WHERE predicate.
+func (ii IndexInfo) WhereCondColumns() []string {
+	seen := make(map[string]bool)
+	var cols []string
+	for _, andGroup := range ii.WhereCond {
+		for _, cond := range andGroup {
+			if cond.Operand1.Type == OperandField {
+				name := cond.Operand1.Value.(Field).Name
+				if !seen[name] {
+					seen[name] = true
+					cols = append(cols, name)
+				}
+			}
+		}
+	}
+	return cols
 }
 
 // PrimaryKey ...

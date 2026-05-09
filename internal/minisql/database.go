@@ -387,7 +387,7 @@ func (d *Database) SaveDDLChanges(ctx context.Context, changes DDLChanges) {
 		d.rowCountsMu.Unlock()
 	}
 	for tableName, index := range changes.CreateIndexes {
-		d.tables[tableName].SetSecondaryIndex(index.Name, index.Columns, index.Index)
+		d.tables[tableName].SetSecondaryIndex(index)
 	}
 	for tableName, index := range changes.DropIndexes {
 		d.tables[tableName].RemoveSecondaryIndex(index.Name)
@@ -828,8 +828,10 @@ func (d *Database) initSecondaryIndex(ctx context.Context, schema Schema) error 
 	}
 	secondaryIndex := SecondaryIndex{
 		IndexInfo: IndexInfo{
-			Name:    schema.Name,
-			Columns: []Column{indexColumn},
+			Name:        schema.Name,
+			Columns:     []Column{indexColumn},
+			WhereClause: stmt.IndexWhereClause,
+			WhereCond:   stmt.Conditions,
 		},
 	}
 
@@ -844,8 +846,9 @@ func (d *Database) initSecondaryIndex(ctx context.Context, schema Schema) error 
 	if err != nil {
 		return err
 	}
+	secondaryIndex.Index = btreeIndex
 
-	table.SetSecondaryIndex(schema.Name, []Column{indexColumn}, btreeIndex)
+	table.SetSecondaryIndex(secondaryIndex)
 
 	d.logger.Sugar().With(
 		"name", schema.Name,
@@ -1366,8 +1369,10 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, table *Table
 
 	secondaryIndex := SecondaryIndex{
 		IndexInfo: IndexInfo{
-			Name:    stmt.IndexName,
-			Columns: indexColumns,
+			Name:        stmt.IndexName,
+			Columns:     indexColumns,
+			WhereClause: stmt.IndexWhereClause,
+			WhereCond:   stmt.Conditions,
 		},
 	}
 	createdIndex, err := d.createSecondaryIndex(ctx, stmt, table, secondaryIndex)
@@ -1397,6 +1402,18 @@ func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryInd
 
 	for result.Rows.Next(ctx) {
 		row := result.Rows.Row()
+
+		// Partial index: skip rows that don't satisfy the WHERE predicate.
+		if len(secondaryIndex.WhereCond) > 0 {
+			ok, err := row.CheckOneOrMore(secondaryIndex.WhereCond)
+			if err != nil {
+				return fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)
+			}
+			if !ok {
+				continue
+			}
+		}
+
 		if len(secondaryIndex.Columns) > 1 {
 			// Composite secondary index: build a CompositeKey from all index columns
 			allValid := true

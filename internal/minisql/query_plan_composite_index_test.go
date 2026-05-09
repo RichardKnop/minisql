@@ -371,8 +371,8 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 					0,
 					nil,
 				)
-				t.SetSecondaryIndex("idx_first_name", compositeColumns[1:2], nil)
-				t.SetSecondaryIndex("idx_full_name", compositeColumns[1:3], nil)
+				t.SetSecondaryIndex(SecondaryIndex{IndexInfo: IndexInfo{Name: "idx_first_name", Columns: compositeColumns[1:2]}})
+				t.SetSecondaryIndex(SecondaryIndex{IndexInfo: IndexInfo{Name: "idx_full_name", Columns: compositeColumns[1:3]}})
 				return t
 			}(),
 			Statement{

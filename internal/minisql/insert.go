@@ -98,13 +98,17 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			}
 		}
 
+		// Build a snapshot row for partial index WHERE evaluation.
+		// After prepareInsert, values[i] corresponds to t.Columns[i].
+		whereCheckRow := Row{Key: nextRowID, Columns: t.Columns, Values: values}
+
 		for _, secondaryIndex := range t.SecondaryIndexes {
 			keyParts := stmt.InsertValuesForColumns(insertIdx, secondaryIndex.Columns...)
 			if len(keyParts) != len(secondaryIndex.Columns) {
 				return StatementResult{}, fmt.Errorf("failed to get value for secondary index %s", secondaryIndex.Name)
 			}
 
-			if err := t.insertSecondaryIndexKey(ctx, secondaryIndex, keyParts, nextRowID); err != nil {
+			if err := t.insertSecondaryIndexKey(ctx, secondaryIndex, keyParts, nextRowID, whereCheckRow); err != nil {
 				return StatementResult{}, err
 			}
 		}

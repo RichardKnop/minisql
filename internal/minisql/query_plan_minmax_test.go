@@ -21,7 +21,7 @@ func tableForMinMax(t *testing.T) *Table {
 	tbl := NewTable(zap.NewNop(), nil, nil, "results", cols, 0, nil,
 		WithPrimaryKey(NewPrimaryKey("pk_results", cols[0:1], false)),
 	)
-	tbl.SetSecondaryIndex("idx_score", []Column{cols[1]}, nil)
+	tbl.SetSecondaryIndex(SecondaryIndex{IndexInfo: IndexInfo{Name: "idx_score", Columns: []Column{cols[1]}}})
 	return tbl
 }
 

@@ -92,6 +92,44 @@ func TestParse_CreateIndex(t *testing.T) {
 			},
 			nil,
 		},
+		{
+			"CREATE INDEX with partial WHERE works",
+			"CREATE INDEX idx_active ON orders (amount) WHERE status = 'active';",
+			[]minisql.Statement{
+				{
+					Kind:             minisql.CreateIndex,
+					IndexName:        "idx_active",
+					TableName:        "orders",
+					IndexWhereClause: "status = 'active'",
+					Columns: []minisql.Column{
+						{Name: "amount"},
+					},
+					Conditions: minisql.OneOrMore{
+						{
+							{
+								Operand1: minisql.Operand{Type: minisql.OperandField, Value: minisql.Field{Name: "status"}},
+								Operand2: minisql.Operand{Type: minisql.OperandQuotedString, Value: minisql.NewTextPointer([]byte("active"))},
+								Operator: minisql.Eq,
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"CREATE INDEX without WHERE is still full index",
+			"CREATE INDEX idx_all ON orders (amount);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.CreateIndex,
+					IndexName: "idx_all",
+					TableName: "orders",
+					Columns:   []minisql.Column{{Name: "amount"}},
+				},
+			},
+			nil,
+		},
 	}
 
 	for _, aTestCase := range testCases {

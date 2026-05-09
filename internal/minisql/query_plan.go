@@ -3,6 +3,7 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"reflect"
 )
 
 // ScanType ...
@@ -336,6 +337,11 @@ func (t *Table) findBestEqualityIndexMatch(group Conditions) *indexMatch {
 
 	// Try each index
 	for _, indexInfo := range allIndexes {
+		// Partial index: only use when the query's AND group syntactically implies
+		// every condition in the index's WHERE predicate.
+		if !partialIndexImplied(indexInfo.WhereCond, group) {
+			continue
+		}
 		match := t.tryMatchIndex(indexInfo, group)
 		if match != nil && isBetterMatch(match) {
 			bestMatch = match
@@ -1214,4 +1220,41 @@ func (t *Table) tryMinMaxIndexPlan(stmt Statement) (QueryPlan, bool) {
 			IndexColumns: info.Columns,
 		}},
 	}, true
+}
+
+// partialIndexImplied returns true when the query's AND group syntactically
+// implies the partial index predicate. Uses SQLite-style conservative check:
+// the index WHERE must be a single AND group and every term of that group must
+// appear verbatim in the query's condition group. Full indexes always return true.
+func partialIndexImplied(indexWhereCond OneOrMore, queryGroup Conditions) bool {
+	if len(indexWhereCond) == 0 {
+		return true
+	}
+	// Only handle single-conjunct (no OR) index predicates conservatively.
+	if len(indexWhereCond) > 1 {
+		return false
+	}
+	for _, indexCond := range indexWhereCond[0] {
+		found := false
+		for _, queryCond := range queryGroup {
+			if conditionEqual(indexCond, queryCond) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func conditionEqual(a, b Condition) bool {
+	return a.Operator == b.Operator &&
+		operandEqual(a.Operand1, b.Operand1) &&
+		operandEqual(a.Operand2, b.Operand2)
+}
+
+func operandEqual(a, b Operand) bool {
+	return a.Type == b.Type && reflect.DeepEqual(a.Value, b.Value)
 }

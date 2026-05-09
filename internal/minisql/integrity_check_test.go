@@ -419,6 +419,6 @@ func addQuickCheckTestTableWithSecondaryIndex(db *Database, pager *pagerImpl, ta
 	if err != nil {
 		panic(err)
 	}
-	table.SetSecondaryIndex(indexName, columns[1:2], index)
+	table.SetSecondaryIndex(SecondaryIndex{IndexInfo: IndexInfo{Name: indexName, Columns: columns[1:2]}, Index: index})
 	return table
 }
