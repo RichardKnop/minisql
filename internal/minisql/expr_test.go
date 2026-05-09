@@ -1223,3 +1223,249 @@ func TestCastToTimestamp(t *testing.T) {
 	_, err = castToTimestamp(int64(42))
 	require.Error(t, err)
 }
+
+func TestColumnRefs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil expr", func(t *testing.T) {
+		t.Parallel()
+		var e *Expr
+		assert.Nil(t, e.ColumnRefs())
+	})
+
+	t.Run("column reference", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{Column: "price"}
+		assert.Equal(t, []string{"price"}, e.ColumnRefs())
+	})
+
+	t.Run("literal has no refs", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{Literal: int64(42)}
+		assert.Empty(t, e.ColumnRefs())
+	})
+
+	t.Run("binary expr collects both sides", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{
+			Left:  &Expr{Column: "price"},
+			Right: &Expr{Column: "cost"},
+			Op:    ArithAdd,
+		}
+		refs := e.ColumnRefs()
+		assert.ElementsMatch(t, []string{"price", "cost"}, refs)
+	})
+
+	t.Run("function args", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{
+			FuncName: "COALESCE",
+			Args: []*Expr{
+				{Column: "a"},
+				{Column: "b"},
+			},
+		}
+		refs := e.ColumnRefs()
+		assert.ElementsMatch(t, []string{"a", "b"}, refs)
+	})
+
+	t.Run("cast expr returns no refs (not recursed)", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{
+			CastExpr:       &Expr{Column: "amount"},
+			CastTargetType: Int8,
+		}
+		// ColumnRefs does not recurse into CastExpr — returns nil.
+		assert.Empty(t, e.ColumnRefs())
+	})
+}
+
+func TestEvalJSONOp(t *testing.T) {
+	t.Parallel()
+
+	t.Run("arrow key lookup on object", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{Op: JSONArrow}
+		doc := NewTextPointer([]byte(`{"name":"Alice","age":30}`))
+		key := NewTextPointer([]byte("name"))
+		val, err := e.evalJSONOp(doc, key)
+		require.NoError(t, err)
+		tp, ok := val.(TextPointer)
+		require.True(t, ok)
+		assert.Equal(t, `"Alice"`, tp.String())
+	})
+
+	t.Run("arrow arrow key lookup returns scalar", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{Op: JSONArrowArrow}
+		doc := NewTextPointer([]byte(`{"name":"Alice","age":30}`))
+		key := NewTextPointer([]byte("name"))
+		val, err := e.evalJSONOp(doc, key)
+		require.NoError(t, err)
+		tp, ok := val.(TextPointer)
+		require.True(t, ok)
+		assert.Equal(t, "Alice", tp.String())
+	})
+
+	t.Run("arrow arrow integer key on array", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{Op: JSONArrowArrow}
+		doc := NewTextPointer([]byte(`["a","b","c"]`))
+		val, err := e.evalJSONOp(doc, int64(1))
+		require.NoError(t, err)
+		tp, ok := val.(TextPointer)
+		require.True(t, ok)
+		assert.Equal(t, "b", tp.String())
+	})
+
+	t.Run("key missing returns nil", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{Op: JSONArrowArrow}
+		doc := NewTextPointer([]byte(`{"name":"Alice"}`))
+		key := NewTextPointer([]byte("missing"))
+		val, err := e.evalJSONOp(doc, key)
+		require.NoError(t, err)
+		assert.Nil(t, val)
+	})
+
+	t.Run("object key on non-object returns nil", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{Op: JSONArrow}
+		doc := NewTextPointer([]byte(`[1,2,3]`))
+		key := NewTextPointer([]byte("x"))
+		val, err := e.evalJSONOp(doc, key)
+		require.NoError(t, err)
+		assert.Nil(t, val)
+	})
+
+	t.Run("array index out of range returns nil", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{Op: JSONArrowArrow}
+		doc := NewTextPointer([]byte(`["a"]`))
+		val, err := e.evalJSONOp(doc, int64(5))
+		require.NoError(t, err)
+		assert.Nil(t, val)
+	})
+
+	t.Run("negative index returns nil", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{Op: JSONArrowArrow}
+		doc := NewTextPointer([]byte(`["a","b"]`))
+		val, err := e.evalJSONOp(doc, int64(-1))
+		require.NoError(t, err)
+		assert.Nil(t, val)
+	})
+
+	t.Run("left operand not a string errors", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{Op: JSONArrow}
+		_, err := e.evalJSONOp(int64(42), NewTextPointer([]byte("key")))
+		require.Error(t, err)
+	})
+
+	t.Run("invalid JSON errors", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{Op: JSONArrow}
+		_, err := e.evalJSONOp(NewTextPointer([]byte("not-json")), NewTextPointer([]byte("key")))
+		require.Error(t, err)
+	})
+
+	t.Run("right operand wrong type errors", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{Op: JSONArrow}
+		doc := NewTextPointer([]byte(`{"a":1}`))
+		_, err := e.evalJSONOp(doc, float64(1.5))
+		require.Error(t, err)
+	})
+}
+
+func TestEvalCastUUID(t *testing.T) {
+	t.Parallel()
+
+	const uuidStr = "550e8400-e29b-41d4-a716-446655440000"
+
+	t.Run("TextPointer to UUID", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{
+			CastExpr:       &Expr{Literal: NewTextPointer([]byte(uuidStr))},
+			CastTargetType: UUID,
+		}
+		val, err := e.evalCast(Row{})
+		require.NoError(t, err)
+		uv, ok := val.(UUIDValue)
+		require.True(t, ok)
+		assert.Equal(t, uuidStr, uv.String())
+	})
+
+	t.Run("UUIDValue passthrough", func(t *testing.T) {
+		t.Parallel()
+		uv, _ := ParseUUID(uuidStr)
+		e := &Expr{
+			CastExpr:       &Expr{Literal: uv},
+			CastTargetType: UUID,
+		}
+		val, err := e.evalCast(Row{})
+		require.NoError(t, err)
+		got, ok := val.(UUIDValue)
+		require.True(t, ok)
+		assert.Equal(t, uv, got)
+	})
+
+	t.Run("invalid string to UUID errors", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{
+			CastExpr:       &Expr{Literal: NewTextPointer([]byte("not-a-uuid"))},
+			CastTargetType: UUID,
+		}
+		_, err := e.evalCast(Row{})
+		require.Error(t, err)
+	})
+
+	t.Run("NULL propagates", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{
+			CastExpr:       &Expr{IsNull: true},
+			CastTargetType: UUID,
+		}
+		val, err := e.evalCast(Row{})
+		require.NoError(t, err)
+		assert.Nil(t, val)
+	})
+}
+
+func TestEvalCastJSON(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid JSON normalised", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{
+			CastExpr:       &Expr{Literal: NewTextPointer([]byte(`{ "a" : 1 }`))},
+			CastTargetType: JSON,
+		}
+		val, err := e.evalCast(Row{})
+		require.NoError(t, err)
+		tp, ok := val.(TextPointer)
+		require.True(t, ok)
+		assert.Equal(t, `{"a":1}`, tp.String())
+	})
+
+	t.Run("invalid JSON errors", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{
+			CastExpr:       &Expr{Literal: NewTextPointer([]byte("not-json"))},
+			CastTargetType: JSON,
+		}
+		_, err := e.evalCast(Row{})
+		require.Error(t, err)
+	})
+
+	t.Run("non-string to JSON errors", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{
+			CastExpr:       &Expr{Literal: int64(42)},
+			CastTargetType: JSON,
+		}
+		_, err := e.evalCast(Row{})
+		require.Error(t, err)
+	})
+}

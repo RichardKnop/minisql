@@ -1073,3 +1073,169 @@ func TestRow_CompareFieldValue_IsNull(t *testing.T) {
 		assert.True(t, ok)
 	})
 }
+
+func TestCompareScalarToOperand(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil val eq null operand", func(t *testing.T) {
+		t.Parallel()
+		ok, err := compareScalarToOperand(nil, Operand{Type: OperandNull}, Eq)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("nil val ne null operand is false", func(t *testing.T) {
+		t.Parallel()
+		ok, err := compareScalarToOperand(nil, Operand{Type: OperandNull}, Ne)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("nil val ne non-null operand", func(t *testing.T) {
+		t.Parallel()
+		ok, err := compareScalarToOperand(nil, Operand{Type: OperandInteger, Value: int64(1)}, Ne)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("nil val eq non-null operand is false", func(t *testing.T) {
+		t.Parallel()
+		ok, err := compareScalarToOperand(nil, Operand{Type: OperandInteger, Value: int64(1)}, Eq)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("nil val with non-eq/ne operator returns false", func(t *testing.T) {
+		t.Parallel()
+		ok, err := compareScalarToOperand(nil, Operand{Type: OperandInteger, Value: int64(1)}, Gt)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("non-null val eq null operand is false", func(t *testing.T) {
+		t.Parallel()
+		ok, err := compareScalarToOperand(int64(5), Operand{Type: OperandNull}, Eq)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("non-null val ne null operand is true", func(t *testing.T) {
+		t.Parallel()
+		ok, err := compareScalarToOperand(int64(5), Operand{Type: OperandNull}, Ne)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("int64 equality", func(t *testing.T) {
+		t.Parallel()
+		ok, err := compareScalarToOperand(int64(42), Operand{Type: OperandInteger, Value: int64(42)}, Eq)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("float64 comparison", func(t *testing.T) {
+		t.Parallel()
+		ok, err := compareScalarToOperand(float64(3.14), Operand{Type: OperandFloat, Value: float64(3.14)}, Eq)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("TextPointer comparison", func(t *testing.T) {
+		t.Parallel()
+		tp := NewTextPointer([]byte("hello"))
+		ok, err := compareScalarToOperand(tp, Operand{Type: OperandQuotedString, Value: NewTextPointer([]byte("hello"))}, Eq)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("bool comparison", func(t *testing.T) {
+		t.Parallel()
+		ok, err := compareScalarToOperand(true, Operand{Type: OperandBoolean, Value: true}, Eq)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("unsupported type errors", func(t *testing.T) {
+		t.Parallel()
+		_, err := compareScalarToOperand([]byte("raw"), Operand{Type: OperandInteger, Value: int64(1)}, Eq)
+		require.Error(t, err)
+	})
+}
+
+func TestRow_CompareFieldValue_UUID(t *testing.T) {
+	t.Parallel()
+
+	const uuidStr1 = "550e8400-e29b-41d4-a716-446655440000"
+	const uuidStr2 = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+
+	uv1, _ := ParseUUID(uuidStr1)
+	uv2, _ := ParseUUID(uuidStr2)
+
+	cols := []Column{{Name: "id", Kind: UUID, Size: 16}}
+
+	t.Run("UUID equality match", func(t *testing.T) {
+		t.Parallel()
+		row := NewRowWithValues(cols, []OptionalValue{{Value: uv1, Valid: true}})
+		cond := Condition{
+			Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
+			Operator: Eq,
+			Operand2: Operand{Type: OperandQuotedString, Value: uv1},
+		}
+		ok, err := row.checkCondition(cond)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("UUID equality no match", func(t *testing.T) {
+		t.Parallel()
+		row := NewRowWithValues(cols, []OptionalValue{{Value: uv1, Valid: true}})
+		cond := Condition{
+			Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
+			Operator: Eq,
+			Operand2: Operand{Type: OperandQuotedString, Value: uv2},
+		}
+		ok, err := row.checkCondition(cond)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("UUID IN list found", func(t *testing.T) {
+		t.Parallel()
+		row := NewRowWithValues(cols, []OptionalValue{{Value: uv1, Valid: true}})
+		cond := Condition{
+			Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
+			Operator: In,
+			Operand2: Operand{Type: OperandList, Value: []any{uv1, uv2}},
+		}
+		ok, err := row.checkCondition(cond)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("UUID NOT IN list", func(t *testing.T) {
+		t.Parallel()
+		uv3, _ := ParseUUID("6ba7b811-9dad-11d1-80b4-00c04fd430c8")
+		row := NewRowWithValues(cols, []OptionalValue{{Value: uv3, Valid: true}})
+		cond := Condition{
+			Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
+			Operator: NotIn,
+			Operand2: Operand{Type: OperandList, Value: []any{uv1, uv2}},
+		}
+		ok, err := row.checkCondition(cond)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("UUID NULL comparison", func(t *testing.T) {
+		t.Parallel()
+		row := NewRowWithValues(cols, []OptionalValue{{Valid: false}})
+		cond := Condition{
+			Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
+			Operator: Eq,
+			Operand2: Operand{Type: OperandNull},
+		}
+		ok, err := row.checkCondition(cond)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+}

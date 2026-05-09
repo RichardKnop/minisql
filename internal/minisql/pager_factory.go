@@ -30,6 +30,8 @@ func (p *pagerImpl) ForIndex(columns []Column, unique bool) Pager {
 		return &indexPager[float64]{p, columns, unique}
 	case Varchar:
 		return &indexPager[string]{p, columns, unique}
+	case UUID:
+		return &indexPager[UUIDValue]{p, columns, unique}
 	default:
 		panic(fmt.Sprintf("unsupported index column type: %v", columns[0].Kind))
 	}

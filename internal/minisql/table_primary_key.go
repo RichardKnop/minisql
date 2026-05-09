@@ -280,6 +280,12 @@ func castKeyValue(col Column, val any) (any, error) {
 			return nil, fmt.Errorf("could not cast value for column %s to timestamp", col.Name)
 		}
 		return int64(micros), nil
+	case UUID:
+		uv, ok := val.(UUIDValue)
+		if !ok {
+			return nil, fmt.Errorf("could not cast value for column %s to UUID", col.Name)
+		}
+		return uv, nil
 	default:
 		return val, nil
 	}

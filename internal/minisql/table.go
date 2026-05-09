@@ -1457,6 +1457,8 @@ func (t *Table) createBTreeIndex(pager *TransactionalPager, freePage *Page, colu
 			freePage.IndexNode = NewRootIndexNode[float64](unique)
 		case Varchar:
 			freePage.IndexNode = NewRootIndexNode[string](unique)
+		case UUID:
+			freePage.IndexNode = NewRootIndexNode[UUIDValue](unique)
 		default:
 			return nil, fmt.Errorf("unsupported BTree index column type %v for index %s", columns[0].Kind, indexName)
 		}
@@ -1502,6 +1504,11 @@ func (t *Table) newBTreeIndex(pager *TransactionalPager, rootPageIdx PageIndex, 
 			return NewUniqueIndex[string](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
 		}
 		return NewNonUniqueIndex[string](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
+	case UUID:
+		if unique {
+			return NewUniqueIndex[UUIDValue](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
+		}
+		return NewNonUniqueIndex[UUIDValue](t.logger, t.txManager, indexName, columns, pager, rootPageIdx)
 	default:
 		return nil, fmt.Errorf("unsupported BTree index column type %v for index %s", columns[0].Kind, indexName)
 	}

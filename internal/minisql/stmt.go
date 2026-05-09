@@ -139,6 +139,7 @@ const (
 	Text
 	Timestamp
 	JSON
+	UUID
 )
 
 // IsInt ...
@@ -166,6 +167,8 @@ func (k ColumnKind) String() string {
 		return "timestamp"
 	case JSON:
 		return "json"
+	case UUID:
+		return "uuid"
 	default:
 		return "unknown"
 	}
@@ -174,6 +177,11 @@ func (k ColumnKind) String() string {
 // IsText ...
 func (k ColumnKind) IsText() bool {
 	return k == Varchar || k == Text || k == JSON
+}
+
+// IsUUID reports whether the column kind is UUID.
+func (k ColumnKind) IsUUID() bool {
+	return k == UUID
 }
 
 // Column ...
@@ -806,6 +814,12 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 						return Statement{}, err
 					}
 					val.Value = timestamp
+				} else if col.Kind == UUID {
+					uv, err := toUUIDValue(val.Value)
+					if err != nil {
+						return Statement{}, fmt.Errorf("column %q: %w", col.Name, err)
+					}
+					val.Value = uv
 				}
 			}
 			newRow[i] = val
@@ -833,15 +847,25 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 				continue
 			}
 			col, ok := s.ColumnByName(name)
-			if !ok || col.Kind != Timestamp {
+			if !ok {
 				continue
 			}
-			timestamp, err := parseTimeValue(val.Value)
-			if err != nil {
-				return Statement{}, fmt.Errorf("invalid timestamp in ON CONFLICT DO UPDATE SET %s: %w", name, err)
+			switch col.Kind {
+			case Timestamp:
+				timestamp, err := parseTimeValue(val.Value)
+				if err != nil {
+					return Statement{}, fmt.Errorf("invalid timestamp in ON CONFLICT DO UPDATE SET %s: %w", name, err)
+				}
+				val.Value = timestamp
+				s.Updates[name] = val
+			case UUID:
+				uv, err := toUUIDValue(val.Value)
+				if err != nil {
+					return Statement{}, fmt.Errorf("invalid UUID in ON CONFLICT DO UPDATE SET %s: %w", name, err)
+				}
+				val.Value = uv
+				s.Updates[name] = val
 			}
-			val.Value = timestamp
-			s.Updates[name] = val
 		}
 	}
 
@@ -888,6 +912,13 @@ func (s Statement) prepareUpdate(now Time) (Statement, error) {
 			}
 			updateValue.Value = timestamp
 			s.Updates[name] = updateValue
+		} else if col.Kind == UUID {
+			uv, err := toUUIDValue(updateValue.Value)
+			if err != nil {
+				return Statement{}, fmt.Errorf("column %q: %w", name, err)
+			}
+			updateValue.Value = uv
+			s.Updates[name] = updateValue
 		}
 
 	}
@@ -918,7 +949,7 @@ func (s Statement) prepareWhere() (Statement, error) {
 			if !ok {
 				return Statement{}, fmt.Errorf("unknown field %q in table %q", field.Name, s.TableName)
 			}
-			if col.Kind != Timestamp {
+			if col.Kind != Timestamp && col.Kind != UUID {
 				continue
 			}
 			if cond.Operand2.Type == OperandNull {
@@ -926,19 +957,35 @@ func (s Statement) prepareWhere() (Statement, error) {
 			}
 			if cond.Operand2.Type == OperandList {
 				for k, value := range cond.Operand2.Value.([]any) {
-					timestamp, err := parseTimeValue(value)
-					if err != nil {
-						return Statement{}, err
+					if col.Kind == Timestamp {
+						converted, err := parseTimeValue(value)
+						if err != nil {
+							return Statement{}, err
+						}
+						s.Conditions[i][j].Operand2.Value.([]any)[k] = converted
+					} else {
+						uv, err := toUUIDValue(value)
+						if err != nil {
+							return Statement{}, fmt.Errorf("field %q: %w", field.Name, err)
+						}
+						s.Conditions[i][j].Operand2.Value.([]any)[k] = uv
 					}
-					s.Conditions[i][j].Operand2.Value.([]any)[k] = timestamp
 				}
 				continue
 			}
-			timestamp, err := parseTimeValue(cond.Operand2.Value)
-			if err != nil {
-				return Statement{}, err
+			if col.Kind == Timestamp {
+				timestamp, err := parseTimeValue(cond.Operand2.Value)
+				if err != nil {
+					return Statement{}, err
+				}
+				s.Conditions[i][j].Operand2.Value = timestamp
+			} else {
+				uv, err := toUUIDValue(cond.Operand2.Value)
+				if err != nil {
+					return Statement{}, fmt.Errorf("field %q: %w", field.Name, err)
+				}
+				s.Conditions[i][j].Operand2.Value = uv
 			}
-			s.Conditions[i][j].Operand2.Value = timestamp
 		}
 	}
 	return s, nil
@@ -1576,6 +1623,17 @@ func isValueValidForColumn(col Column, val OptionalValue) error {
 		}
 		if _, err := normaliseJSON(tp.String()); err != nil {
 			return fmt.Errorf("field %q: %w", col.Name, err)
+		}
+	case UUID:
+		switch v := val.Value.(type) {
+		case UUIDValue:
+			// already validated
+		case TextPointer:
+			if _, err := ParseUUID(v.String()); err != nil {
+				return fmt.Errorf("field %q: %w", col.Name, err)
+			}
+		default:
+			return fmt.Errorf("expects a UUID string for column %q", col.Name)
 		}
 	}
 	return nil

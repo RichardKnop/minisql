@@ -34,7 +34,7 @@ var reservedWords = []string{
 	// arithmetic operators (JSON arrow ops must come before "-" for longest-match tokenization)
 	"+", "->>", "->", "-", "/",
 	// column types
-	"BOOLEAN", "INT4", "INT8", "REAL", "DOUBLE", "TEXT", "VARCHAR(", "TIMESTAMP", "JSON",
+	"BOOLEAN", "INT4", "INT8", "REAL", "DOUBLE", "TEXT", "VARCHAR(", "TIMESTAMP", "JSON", "UUID",
 	// statement types
 	"EXPLAIN ANALYZE", "EXPLAIN",
 	"CREATE TABLE", "DROP TABLE", "CREATE INDEX", "DROP INDEX",

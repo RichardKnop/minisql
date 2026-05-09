@@ -65,6 +65,8 @@ func (r Rows) Next(dest []driver.Value) error {
 			dest[i] = string(v.Data)
 		case minisql.TimestampMicros:
 			dest[i] = minisql.FromMicroseconds(int64(v)).GoTime()
+		case minisql.UUIDValue:
+			dest[i] = v.String()
 		default:
 			dest[i] = aRow.Values[i].Value
 		}

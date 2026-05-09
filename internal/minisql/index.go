@@ -17,7 +17,7 @@ const MaxIndexKeySize = 255
 
 // IndexKey ...
 type IndexKey interface {
-	int8 | int32 | int64 | float32 | float64 | string | CompositeKey
+	int8 | int32 | int64 | float32 | float64 | string | CompositeKey | UUIDValue
 }
 
 // Index ...
@@ -1018,6 +1018,9 @@ func compare[T IndexKey](a, b T) int {
 		return strings.Compare(va, any(b).(string))
 	case CompositeKey:
 		return bytes.Compare(va.Comparison, any(b).(CompositeKey).Comparison)
+	case UUIDValue:
+		vb := any(b).(UUIDValue)
+		return bytes.Compare(va[:], vb[:])
 	}
 	return 0
 }

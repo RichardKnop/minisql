@@ -544,6 +544,8 @@ func isColumnDef(token string) (minisql.Column, bool) {
 		return minisql.Column{Kind: minisql.Timestamp, Size: 8}, true
 	case "JSON":
 		return minisql.Column{Kind: minisql.JSON}, true
+	case "UUID":
+		return minisql.Column{Kind: minisql.UUID, Size: 16}, true
 	default:
 		return minisql.Column{}, false
 	}

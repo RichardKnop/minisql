@@ -285,3 +285,53 @@ func TestTryRangeScan_WithStats(t *testing.T) {
 		assert.Equal(t, ScanTypeIndexRange, scan.Type)
 	})
 }
+
+func TestIncrementValue(t *testing.T) {
+	t.Parallel()
+
+	t.Run("int32 normal", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, int32(6), incrementValue(int32(5)))
+	})
+
+	t.Run("int32 max returns nil", func(t *testing.T) {
+		t.Parallel()
+		assert.Nil(t, incrementValue(int32((1<<31)-1)))
+	})
+
+	t.Run("int64 normal", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, int64(11), incrementValue(int64(10)))
+	})
+
+	t.Run("int64 max returns nil", func(t *testing.T) {
+		t.Parallel()
+		assert.Nil(t, incrementValue(int64((1<<63)-1)))
+	})
+
+	t.Run("float32 returns nil", func(t *testing.T) {
+		t.Parallel()
+		assert.Nil(t, incrementValue(float32(1.5)))
+	})
+
+	t.Run("float64 returns nil", func(t *testing.T) {
+		t.Parallel()
+		assert.Nil(t, incrementValue(float64(3.14)))
+	})
+
+	t.Run("string appends max byte", func(t *testing.T) {
+		t.Parallel()
+		got := incrementValue("hello")
+		assert.Equal(t, "hello\xFF", got)
+	})
+
+	t.Run("bool returns nil", func(t *testing.T) {
+		t.Parallel()
+		assert.Nil(t, incrementValue(true))
+	})
+
+	t.Run("unsupported type returns nil", func(t *testing.T) {
+		t.Parallel()
+		assert.Nil(t, incrementValue([]byte("x")))
+	})
+}

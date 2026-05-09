@@ -150,6 +150,9 @@ func (c *IndexCell[T]) Marshal(buf []byte) error {
 			return err
 		}
 		i += size
+	case UUIDValue:
+		copy(buf[i:i+16], v[:])
+		i += 16
 	}
 
 	if c.unique {
@@ -213,6 +216,11 @@ func (c *IndexCell[T]) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 			return 0, err
 		}
 		i += ci
+	case UUIDValue:
+		var uv UUIDValue
+		copy(uv[:], buf[i:i+16])
+		c.Key = any(uv).(T)
+		i += 16
 	default:
 		return 0, fmt.Errorf("unsupported column type: %T", v)
 	}
@@ -567,6 +575,8 @@ func marshalIndexNode(anyNode any, buf []byte) error {
 		return node.Marshal(buf)
 	case *IndexNode[CompositeKey]:
 		return node.Marshal(buf)
+	case *IndexNode[UUIDValue]:
+		return node.Marshal(buf)
 	default:
 		return fmt.Errorf("unknown index node type: %T", node)
 	}
@@ -625,6 +635,8 @@ func copyIndexNode(anyNode any) any {
 	case *IndexNode[string]:
 		return node.Clone()
 	case *IndexNode[CompositeKey]:
+		return node.Clone()
+	case *IndexNode[UUIDValue]:
 		return node.Clone()
 	default:
 		return nil
