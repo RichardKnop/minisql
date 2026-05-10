@@ -3,7 +3,7 @@ package e2etests
 import (
 	"errors"
 
-	minisqlErrors "github.com/RichardKnop/minisql/errors"
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 // createParentChildTables sets up a users (parent) + orders (child with FK) schema.

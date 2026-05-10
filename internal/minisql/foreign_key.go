@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	minisqlErrors "github.com/RichardKnop/minisql/errors"
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 // FKAction defines the referential action for ON DELETE / ON UPDATE.

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	minisqlErrors "github.com/RichardKnop/minisql/errors"
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 // snapshotColumns are a minimal column set used by all snapshot isolation tests.

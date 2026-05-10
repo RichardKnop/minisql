@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
-	minisqlErrors "github.com/RichardKnop/minisql/errors"
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 // TransactionalPager wraps a base Pager and routes reads and writes through the current transaction.

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	minisqlErrors "github.com/RichardKnop/minisql/errors"
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 func TestTransactionManager_Commit(t *testing.T) {

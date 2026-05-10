@@ -10,7 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
-	minisqlErrors "github.com/RichardKnop/minisql/errors"
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 // pageVersion is one historical snapshot of a page stored in the version
