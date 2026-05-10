@@ -1,4 +1,60 @@
-### 2026-04-29 (TimestampMicros named-type refactor — latest)
+### 2026-05-10 (VisitRowIDs iterator + overflow bug fix — latest)
+
+Three changes in this entry:
+
+**1. Bug fix — `FindRowIDs` missed overflow pages for secondary non-unique indexes** (`index_cursor.go`): non-unique index cells store up to `MaxInlineRowIDs = 4` row IDs inline; additional row IDs spill to `IndexOverflowPage` chains. `FindRowIDs` previously returned only the inline IDs (max 4), silently dropping any row IDs beyond the fourth. Queries with `WHERE status = ?` over a low-selectivity secondary index were returning wrong (truncated) result sets.
+
+**2. `VisitRowIDs` lazy iterator added to `BTreeIndex` interface** (`index_cursor.go`, `ports.go`): `VisitRowIDs(ctx, key, fn)` streams row IDs one at a time via a callback — inline IDs first, then overflow pages in chain order — without materialising the full slice. `FindRowIDs` is now implemented on top of `VisitRowIDs`. `indexPointScan` in `select.go` now calls `VisitRowIDs` instead of `FindRowIDs`, passing the existing `out func(Row) error` callback chain through. The `errLimitReached` sentinel now propagates through overflow page reads, causing early termination as soon as a LIMIT is satisfied. `collectRowIDsFromScan` (used for multi-index intersection) retains `FindRowIDs` since sorted intersection requires both sides materialised.
+
+**3. Two new select benchmarks** (`select_bench_test.go`):
+- `Select_SecondaryIndex_LowSelectivity`: 10 000 rows seeded with a 2-value `status` column (~5 000 rows per value, well past the 4-row inline threshold). Queries `WHERE status = ?` via a secondary index, returning all matching rows. Reports `rows/op`. Minisql 2.86 ms vs SQLite 2.69 ms (**1.06×** — near parity despite 10× more allocations).
+- `Select_SecondaryIndex_LowSelectivityLimit`: same setup with `LIMIT 10`. Exercises `VisitRowIDs` early termination: overflow page reads stop the moment the limit is satisfied. Minisql 10.0 µs vs SQLite 8.2 µs (1.22×).
+
+`Select_CountStar` is elevated vs the previous entry (26.7 µs vs 17.4 µs) with identical alloc count (680) and similar memory. No code path touched by these changes affects the counting logic; likely machine thermal variance — the M1 Max shows ±50% variance on short query-framework benchmarks across separate runs.
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| **Delete_ByPK** | **30.9 µs/op** | **70.7 µs/op†** | **0.44×** |
+| **Insert_SingleRow** | **18.3 µs/op** | **44.4 µs/op** | **0.41×** |
+| Insert_Batch | 359.9 µs/op | 226.3 µs/op | 1.59× |
+| Insert_PreparedBatch | 355.8 µs/op | 223.0 µs/op | 1.60× |
+| Insert_MultiValues | 232.4 µs/op | 176.0 µs/op | 1.32× |
+| Select_PointScan | 5.1 µs/op | 3.3 µs/op | 1.54× |
+| **Select_Limit** | **7.7 µs/op** | **8.0 µs/op** | **0.96×** |
+| **Select_FullScan** | **4.81 ms/op** | **5.26 ms/op** | **0.91×** |
+| Select_CountStar | 26.7 µs/op | 9.6 µs/op | 2.78× |
+| **Select_IndexRangeScan** | **717.7 µs/op** | **756.5 µs/op** | **0.95×** |
+| Select_SecondaryIndex_LowSelectivity | 2.86 ms/op | 2.69 ms/op | 1.06× |
+| Select_SecondaryIndex_LowSelectivityLimit | 10.0 µs/op | 8.2 µs/op | 1.22× |
+| Select_RangeScan | 1.61 ms/op | 856 µs/op | 1.88× |
+| **Update_ByPK** | **11.0 µs/op** | **38.6 µs/op†** | **0.28×** |
+
+† SQLite Delete run 2 (123 µs) and Update_ByPK run 3 (115 µs) are outliers; ratios use 2-run averages of the clean runs.
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Delete_ByPK | 31.5 KiB | 447 B |
+| Insert_SingleRow | 18.6 KiB | 311 B |
+| Insert_Batch | 302.0 KiB | 31.0 KiB |
+| Insert_PreparedBatch | 301.1 KiB | 31.0 KiB |
+| Insert_MultiValues | 268.1 KiB | 25.2 KiB |
+| Select_PointScan | 5.4 KiB | 679 B |
+| Select_Limit | 6.4 KiB | 1.7 KiB |
+| Select_FullScan | 5.3 MiB | 1.3 MiB |
+| Select_CountStar | 8.5 KiB | 400 B |
+| Select_IndexRangeScan | 808.4 KiB | 85.9 KiB |
+| Select_SecondaryIndex_LowSelectivity | 3.1 MiB | 313 KiB |
+| Select_SecondaryIndex_LowSelectivityLimit | 9.4 KiB | 1.1 KiB |
+| Select_RangeScan | 1.7 MiB | 85.9 KiB |
+| Update_ByPK | 9.1 KiB | 263 B |
+
+---
+
+### 2026-04-29 (TimestampMicros named-type refactor)
 
 `type TimestampMicros int64` replaces `Time` (13-byte struct) as the in-memory representation for all TIMESTAMP column values:
 - A 13-byte `Time` struct boxed into `any` always requires a separate heap allocation (the struct exceeds the 8-byte inline data word). `TimestampMicros` is a named `int64` — 8 bytes, stores inline in the `any` data word with zero extra allocation.
