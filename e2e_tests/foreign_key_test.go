@@ -3,7 +3,7 @@ package e2etests
 import (
 	"errors"
 
-	"github.com/RichardKnop/minisql/internal/minisql"
+	minisqlErrors "github.com/RichardKnop/minisql/errors"
 )
 
 // createParentChildTables sets up a users (parent) + orders (child with FK) schema.
@@ -130,7 +130,7 @@ func (s *TestSuite) TestForeignKey_Insert_InvalidFK() {
 
 	_, err := s.db.Exec(`insert into "orders" (user_id, amount) values (99, 100)`)
 	s.Require().Error(err)
-	var fkErr minisql.ErrForeignKeyViolation
+	var fkErr minisqlErrors.ErrForeignKeyViolation
 	s.True(errors.As(err, &fkErr), "expected ErrForeignKeyViolation, got %T: %v", err, err)
 	s.Equal("orders", fkErr.ChildTable)
 	s.Equal([]string{"user_id"}, fkErr.ChildColumns)
@@ -191,7 +191,7 @@ func (s *TestSuite) TestForeignKey_Delete_ParentReferencedRow_Blocked() {
 	// Deleting the parent row must fail.
 	_, err = s.db.Exec(`delete from "users" where id = 1`)
 	s.Require().Error(err)
-	var fkErr minisql.ErrForeignKeyParentViolation
+	var fkErr minisqlErrors.ErrForeignKeyParentViolation
 	s.True(errors.As(err, &fkErr), "expected ErrForeignKeyParentViolation, got %T: %v", err, err)
 	s.Equal("users", fkErr.ParentTable)
 	s.Equal([]string{"id"}, fkErr.ParentColumns)
@@ -260,7 +260,7 @@ func (s *TestSuite) TestForeignKey_Update_ChildFKColumn_InvalidTarget() {
 	// Reassign order to non-existent user — must fail.
 	_, err = s.db.Exec(`update "orders" set user_id = 999 where id = 1`)
 	s.Require().Error(err)
-	var fkErr minisql.ErrForeignKeyViolation
+	var fkErr minisqlErrors.ErrForeignKeyViolation
 	s.True(errors.As(err, &fkErr), "expected ErrForeignKeyViolation, got %T: %v", err, err)
 }
 
@@ -287,7 +287,7 @@ func (s *TestSuite) TestForeignKey_DropTable_ReferencedTable_Blocked() {
 	// Dropping the parent table while the child FK still references it must fail.
 	_, err := s.db.Exec(`drop table "users"`)
 	s.Require().Error(err)
-	s.True(errors.Is(err, minisql.ErrDropTableReferencedByFK) || s.Contains(err.Error(), "referenced by a foreign key"),
+	s.True(errors.Is(err, minisqlErrors.ErrDropTableReferencedByFK) || s.Contains(err.Error(), "referenced by a foreign key"),
 		"expected ErrDropTableReferencedByFK, got: %v", err)
 }
 
@@ -320,7 +320,7 @@ func (s *TestSuite) TestForeignKey_Reopen_StillEnforced() {
 	// FK should still be enforced after reopen.
 	_, err = s.db.Exec(`insert into "orders" (user_id, amount) values (99, 50)`)
 	s.Require().Error(err)
-	var fkErr minisql.ErrForeignKeyViolation
+	var fkErr minisqlErrors.ErrForeignKeyViolation
 	s.True(errors.As(err, &fkErr), "expected ErrForeignKeyViolation after reopen, got %T: %v", err, err)
 }
 
@@ -347,7 +347,7 @@ func (s *TestSuite) TestForeignKey_SelfReferential() {
 	// Invalid parent reference.
 	_, err = s.db.Exec(`insert into "categories" (name, parent_id) values ('Bad', 99)`)
 	s.Require().Error(err)
-	var fkErr minisql.ErrForeignKeyViolation
+	var fkErr minisqlErrors.ErrForeignKeyViolation
 	s.True(errors.As(err, &fkErr))
 }
 
@@ -364,7 +364,7 @@ func (s *TestSuite) TestForeignKey_BatchInsert_OneInvalidRow() {
 	// Second row references non-existent user_id=99 — the whole batch should fail.
 	_, err = s.db.Exec(`insert into "orders" (user_id, amount) values (1, 10), (99, 20)`)
 	s.Require().Error(err)
-	var fkErr minisql.ErrForeignKeyViolation
+	var fkErr minisqlErrors.ErrForeignKeyViolation
 	s.True(errors.As(err, &fkErr))
 }
 
@@ -684,7 +684,7 @@ func (s *TestSuite) TestForeignKey_MultiColumn_InvalidFK() {
 	defer stmt2.Close()
 	_, err = stmt2.Exec(int64(1), int64(99), int64(3))
 	s.Require().Error(err)
-	var fkErr minisql.ErrForeignKeyViolation
+	var fkErr minisqlErrors.ErrForeignKeyViolation
 	s.True(errors.As(err, &fkErr), "expected ErrForeignKeyViolation, got %T: %v", err, err)
 }
 
@@ -724,7 +724,7 @@ func (s *TestSuite) TestForeignKey_MultiColumn_DeleteParent_Blocked() {
 	defer stmt3.Close()
 	_, err = stmt3.Exec(int64(1), int64(10))
 	s.Require().Error(err)
-	var fkErr minisql.ErrForeignKeyParentViolation
+	var fkErr minisqlErrors.ErrForeignKeyParentViolation
 	s.True(errors.As(err, &fkErr), "expected ErrForeignKeyParentViolation, got %T: %v", err, err)
 }
 

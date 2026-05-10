@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	minisqlErrors "github.com/RichardKnop/minisql/errors"
 )
 
 func TestFKAction_String(t *testing.T) {
@@ -30,7 +32,7 @@ func TestFKAction_String(t *testing.T) {
 func TestErrForeignKeyViolation_Error(t *testing.T) {
 	t.Parallel()
 
-	err := ErrForeignKeyViolation{
+	err := minisqlErrors.ErrForeignKeyViolation{
 		ChildTable:    "orders",
 		ChildColumns:  []string{"user_id"},
 		ParentTable:   "users",
@@ -46,7 +48,7 @@ func TestErrForeignKeyViolation_Error(t *testing.T) {
 func TestErrForeignKeyParentViolation_Error(t *testing.T) {
 	t.Parallel()
 
-	err := ErrForeignKeyParentViolation{
+	err := minisqlErrors.ErrForeignKeyParentViolation{
 		ParentTable:   "users",
 		ParentColumns: []string{"id"},
 		ChildTable:    "orders",
@@ -592,7 +594,7 @@ func TestCheckChildFK_MultiColumn_VirtualParent(t *testing.T) {
 	}
 	err := db.checkChildFK(context.Background(), childTable, badRow)
 	require.Error(t, err)
-	var fkErr ErrForeignKeyViolation
+	var fkErr minisqlErrors.ErrForeignKeyViolation
 	require.ErrorAs(t, err, &fkErr)
 }
 
@@ -680,7 +682,7 @@ func TestEnforceParentFKOnDelete_RESTRICT_ChildExists(t *testing.T) {
 	row := Row{Columns: cols, Values: []OptionalValue{{Value: int64(1), Valid: true}}}
 	err := db.enforceParentFKOnDelete(context.Background(), &Table{Name: "users", Columns: cols}, row)
 	require.Error(t, err)
-	var fkErr ErrForeignKeyParentViolation
+	var fkErr minisqlErrors.ErrForeignKeyParentViolation
 	require.ErrorAs(t, err, &fkErr)
 }
 
@@ -812,7 +814,7 @@ func TestEnforceParentFKOnUpdate_RESTRICT_ChildExists(t *testing.T) {
 	newRow := Row{Columns: cols, Values: []OptionalValue{{Value: int64(2), Valid: true}}}
 	err := db.enforceParentFKOnUpdate(context.Background(), &Table{Name: "users", Columns: cols}, oldRow, newRow)
 	require.Error(t, err)
-	var fkErr ErrForeignKeyParentViolation
+	var fkErr minisqlErrors.ErrForeignKeyParentViolation
 	require.ErrorAs(t, err, &fkErr)
 }
 
