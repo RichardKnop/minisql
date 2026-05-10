@@ -51,11 +51,23 @@ func (ui *Index[T]) FindRowIDs(ctx context.Context, keyAny any) ([]RowID, error)
 		return []RowID{node.Cells[cursor.CellIdx].UniqueRowID}, nil
 	}
 
-	if len(node.Cells[cursor.CellIdx].RowIDs) == 0 {
+	cell := node.Cells[cursor.CellIdx]
+	if len(cell.RowIDs) == 0 {
 		return nil, fmt.Errorf("no row IDs for key: %v", key)
 	}
 
-	return node.Cells[cursor.CellIdx].RowIDs, nil
+	rowIDs := make([]RowID, len(cell.RowIDs))
+	copy(rowIDs, cell.RowIDs)
+
+	if cell.Overflow != 0 {
+		overflowIDs, err := readOverflowRowIDs[T](ctx, cursor.Index.pager, cell.Overflow)
+		if err != nil {
+			return nil, fmt.Errorf("read overflow row IDs: %w", err)
+		}
+		rowIDs = append(rowIDs, overflowIDs...)
+	}
+
+	return rowIDs, nil
 }
 
 // Seek ...
