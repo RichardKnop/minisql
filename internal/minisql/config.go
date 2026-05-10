@@ -33,12 +33,24 @@ func (h *DatabaseHeader) Size() uint64 {
 // Marshal serialises the database header to a byte slice.
 func (h *DatabaseHeader) Marshal() ([]byte, error) {
 	buf := make([]byte, h.Size())
+	if err := h.MarshalTo(buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+// MarshalTo serialises the database header into the provided buffer.
+// The buffer must be at least RootPageConfigSize bytes long.
+func (h *DatabaseHeader) MarshalTo(buf []byte) error {
+	if len(buf) < int(h.Size()) {
+		return fmt.Errorf("database header buffer too small: got %d bytes, want at least %d", len(buf), h.Size())
+	}
 	copy(buf[databaseHeaderMagicOffset:], []byte(DatabaseHeaderMagic))
 	marshalUint32(buf, DatabaseFileFormatVersion, databaseHeaderVersionOffset)
 	marshalUint32(buf, PageSize, databaseHeaderPageSizeOffset)
 	marshalUint32(buf, uint32(h.FirstFreePage), databaseHeaderFirstFreePageOffset)
 	marshalUint32(buf, h.FreePageCount, databaseHeaderFreePageCountOffset)
-	return buf, nil
+	return nil
 }
 
 // UnmarshalDatabaseHeader deserialises a database header from the given byte slice.

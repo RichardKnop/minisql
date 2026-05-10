@@ -329,12 +329,12 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 		return err
 	}
 
-	headerBytes, err := dbHeader.Marshal()
-	if err != nil {
+	var headerBuf [RootPageConfigSize]byte
+	if err := dbHeader.MarshalTo(headerBuf[:]); err != nil {
 		return err
 	}
 
-	_, err = p.file.WriteAt(headerBytes[0:RootPageConfigSize], 0)
+	_, err := p.file.WriteAt(headerBuf[:], 0)
 	if err != nil {
 		return err
 	}
@@ -425,12 +425,12 @@ func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) err
 			}
 		} else {
 			// Root page with header
-			headerBytes, err := mp.header.Marshal()
-			if err != nil {
+			var headerBuf [RootPageConfigSize]byte
+			if err := mp.header.MarshalTo(headerBuf[:]); err != nil {
 				return fmt.Errorf("error marshaling header: %w", err)
 			}
 
-			_, err = p.file.WriteAt(headerBytes[0:RootPageConfigSize], 0)
+			_, err := p.file.WriteAt(headerBuf[:], 0)
 			if err != nil {
 				return fmt.Errorf("error writing header: %w", err)
 			}

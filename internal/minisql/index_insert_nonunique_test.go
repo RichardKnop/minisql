@@ -159,6 +159,40 @@ func TestIndex_NonUnique_Insert(t *testing.T) {
 	})
 }
 
+func TestIndex_FindRowIDs_WithOverflow(t *testing.T) {
+	var (
+		pager, dbFile = initTest(t)
+		ctx           = context.Background()
+		col           = Column{Name: "test_column", Kind: Int8, Size: 8}
+		indexPager    = pager.ForIndex([]Column{col}, false)
+		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
+		txPager       = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
+	)
+	idx, err := NewNonUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
+	require.NoError(t, err)
+
+	key := int64(42)
+	// Insert more than MaxInlineRowIDs (4) row IDs for the same key so that overflow is used.
+	totalRows := MaxInlineRowIDs + 10
+	wantRowIDs := make([]RowID, totalRows)
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for i := range totalRows {
+			rowID := RowID(i + 1)
+			wantRowIDs[i] = rowID
+			if err := idx.Insert(ctx, key, rowID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	got, err := idx.FindRowIDs(ctx, key)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, wantRowIDs, got,
+		"FindRowIDs must return all row IDs including those in overflow pages")
+}
+
 func collectAllKeysAndRowIDs[T IndexKey](ctx context.Context, t *testing.T, idx *Index[T]) ([]T, []RowID) {
 	var (
 		actualKeys   = make([]T, 0, 10)

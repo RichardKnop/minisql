@@ -618,6 +618,13 @@ func (tm *TransactionManager) serializeWritesForWAL(ctx context.Context, tx *Tra
 	needPage0Frame := dbHeaderModified || page0Modified
 
 	pages := make([]WALPage, 0, len(writeInfos)+1)
+	releasePages := func() {
+		for _, wp := range pages {
+			if wp.Data != nil {
+				pageDataPool.Put(wp.Data)
+			}
+		}
+	}
 
 	if needPage0Frame {
 		var p0 *Page
@@ -638,6 +645,7 @@ func (tm *TransactionManager) serializeWritesForWAL(ctx context.Context, tx *Tra
 		buf := pageDataPool.Get().([]byte)
 		if err := marshalPage(info.Page, buf); err != nil {
 			pageDataPool.Put(buf)
+			releasePages()
 			return nil, fmt.Errorf("marshal page %d for WAL: %w", pageIdx, err)
 		}
 		pages = append(pages, WALPage{Index: pageIdx, Data: buf})
@@ -653,7 +661,10 @@ func (tm *TransactionManager) serializeWritesForWAL(ctx context.Context, tx *Tra
 //   - header is the modified DB header (nil / dbHeaderModified=false if only
 //     the B-tree changed).
 func (tm *TransactionManager) serializePage0ForWAL(ctx context.Context, page0 *Page, header *DatabaseHeader, dbHeaderModified bool) ([]byte, error) {
-	frame := make([]byte, PageSize)
+	frame := pageDataPool.Get().([]byte)
+	for i := range frame {
+		frame[i] = 0
+	}
 
 	// --- Header portion (bytes 0 .. RootPageConfigSize-1) ---
 	var hdr DatabaseHeader
@@ -667,11 +678,10 @@ func (tm *TransactionManager) serializePage0ForWAL(ctx context.Context, page0 *P
 		}
 		hdr = pager.GetHeader(ctx)
 	}
-	headerBytes, err := hdr.Marshal()
-	if err != nil {
+	if err := hdr.MarshalTo(frame[0:RootPageConfigSize]); err != nil {
+		pageDataPool.Put(frame)
 		return nil, fmt.Errorf("marshal DB header for WAL page 0: %w", err)
 	}
-	copy(frame[0:RootPageConfigSize], headerBytes[0:RootPageConfigSize])
 
 	// --- B-tree portion (bytes RootPageConfigSize .. PageSize-1) ---
 	var btreePage *Page
@@ -691,6 +701,7 @@ func (tm *TransactionManager) serializePage0ForWAL(ctx context.Context, page0 *P
 	pageBuf := pageDataPool.Get().([]byte)
 	if err := marshalPage(btreePage, pageBuf); err != nil {
 		pageDataPool.Put(pageBuf)
+		pageDataPool.Put(frame)
 		return nil, fmt.Errorf("marshal page 0 B-tree for WAL: %w", err)
 	}
 	copy(frame[RootPageConfigSize:], pageBuf[0:PageSize-RootPageConfigSize])
