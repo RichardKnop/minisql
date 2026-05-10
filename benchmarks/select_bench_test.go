@@ -3,6 +3,7 @@
 package benchmarks
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -241,6 +242,207 @@ func BenchmarkSelect_IndexRangeScan(b *testing.B) {
 				rows.Close()
 				if err := rows.Err(); err != nil {
 					b.Fatalf("rows err: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkSelect_SecondaryIndex_LowSelectivity measures an equality point scan
+// on a secondary non-unique index where the indexed column has very few distinct
+// values (~5 000 rows per key for seedN = 10 000).  At this scale each key's row
+// IDs span multiple overflow pages, so the benchmark exercises the VisitRowIDs
+// lazy-iterator path and reports all matching rows.
+func BenchmarkSelect_SecondaryIndex_LowSelectivity(b *testing.B) {
+	const statuses = 2 // 'active' / 'inactive' → ~seedN/2 rows per value
+	for _, d := range drivers {
+		b.Run(d.name, func(b *testing.B) {
+			db, cleanup := openDB(b, d)
+			defer cleanup()
+
+			var (
+				createStatus string
+				createIdx    string
+				insertStatus string
+				query        string
+			)
+			switch d.name {
+			case "minisql":
+				createStatus = `create table "bench_status" (
+					id     int8 primary key autoincrement,
+					name   varchar(255),
+					status varchar(16)
+				)`
+				createIdx = `create index "idx_bench_status" on "bench_status" (status)`
+				insertStatus = `insert into "bench_status" (name, status) values (?, ?)`
+				query = `select id, name from "bench_status" where status = ?`
+			default:
+				createStatus = `CREATE TABLE IF NOT EXISTS bench_status (
+					id     INTEGER PRIMARY KEY AUTOINCREMENT,
+					name   TEXT,
+					status TEXT
+				)`
+				createIdx = `CREATE INDEX IF NOT EXISTS idx_bench_status ON bench_status (status)`
+				insertStatus = `INSERT INTO bench_status (name, status) VALUES (?, ?)`
+				query = `SELECT id, name FROM bench_status WHERE status = ?`
+			}
+
+			mustExec(b, db, createStatus)
+
+			// Seed rows; alternate status values so each has ~seedN/statuses matches.
+			statusValues := []string{"active", "inactive"}
+			tx, err := db.Begin()
+			if err != nil {
+				b.Fatalf("begin: %v", err)
+			}
+			ins, err := tx.Prepare(insertStatus)
+			if err != nil {
+				_ = tx.Rollback()
+				b.Fatalf("prepare insert: %v", err)
+			}
+			for i := range seedN {
+				status := statusValues[i%statuses]
+				name := fmt.Sprintf("user-%06d", i)
+				if _, err := ins.Exec(name, status); err != nil {
+					_ = tx.Rollback()
+					b.Fatalf("insert row %d: %v", i, err)
+				}
+			}
+			ins.Close()
+			if err := tx.Commit(); err != nil {
+				b.Fatalf("commit seed: %v", err)
+			}
+
+			mustExec(b, db, createIdx)
+
+			stmt, err := db.Prepare(query)
+			if err != nil {
+				b.Fatalf("prepare: %v", err)
+			}
+			defer stmt.Close()
+
+			b.ResetTimer()
+			for range b.N {
+				rows, err := stmt.Query("active")
+				if err != nil {
+					b.Fatalf("query: %v", err)
+				}
+				n := 0
+				for rows.Next() {
+					var id int64
+					var name string
+					if err := rows.Scan(&id, &name); err != nil {
+						rows.Close()
+						b.Fatalf("scan: %v", err)
+					}
+					n += 1
+				}
+				rows.Close()
+				if err := rows.Err(); err != nil {
+					b.Fatalf("rows err: %v", err)
+				}
+				b.ReportMetric(float64(n), "rows/op")
+			}
+		})
+	}
+}
+
+// BenchmarkSelect_SecondaryIndex_LowSelectivityLimit measures the same
+// low-selectivity secondary index scan as above but with LIMIT 10.  This
+// exercises early termination: VisitRowIDs stops reading overflow pages as
+// soon as the limit is satisfied rather than loading all row IDs up front.
+func BenchmarkSelect_SecondaryIndex_LowSelectivityLimit(b *testing.B) {
+	const (
+		statuses = 2
+		limit    = 10
+	)
+	for _, d := range drivers {
+		b.Run(d.name, func(b *testing.B) {
+			db, cleanup := openDB(b, d)
+			defer cleanup()
+
+			var (
+				createStatus string
+				createIdx    string
+				insertStatus string
+				query        string
+			)
+			switch d.name {
+			case "minisql":
+				createStatus = `create table "bench_status" (
+					id     int8 primary key autoincrement,
+					name   varchar(255),
+					status varchar(16)
+				)`
+				createIdx = `create index "idx_bench_status" on "bench_status" (status)`
+				insertStatus = `insert into "bench_status" (name, status) values (?, ?)`
+				query = `select id, name from "bench_status" where status = ? limit 10`
+			default:
+				createStatus = `CREATE TABLE IF NOT EXISTS bench_status (
+					id     INTEGER PRIMARY KEY AUTOINCREMENT,
+					name   TEXT,
+					status TEXT
+				)`
+				createIdx = `CREATE INDEX IF NOT EXISTS idx_bench_status ON bench_status (status)`
+				insertStatus = `INSERT INTO bench_status (name, status) VALUES (?, ?)`
+				query = `SELECT id, name FROM bench_status WHERE status = ? LIMIT 10`
+			}
+
+			mustExec(b, db, createStatus)
+
+			statusValues := []string{"active", "inactive"}
+			tx, err := db.Begin()
+			if err != nil {
+				b.Fatalf("begin: %v", err)
+			}
+			ins, err := tx.Prepare(insertStatus)
+			if err != nil {
+				_ = tx.Rollback()
+				b.Fatalf("prepare insert: %v", err)
+			}
+			for i := range seedN {
+				status := statusValues[i%statuses]
+				name := fmt.Sprintf("user-%06d", i)
+				if _, err := ins.Exec(name, status); err != nil {
+					_ = tx.Rollback()
+					b.Fatalf("insert row %d: %v", i, err)
+				}
+			}
+			ins.Close()
+			if err := tx.Commit(); err != nil {
+				b.Fatalf("commit seed: %v", err)
+			}
+
+			mustExec(b, db, createIdx)
+
+			stmt, err := db.Prepare(query)
+			if err != nil {
+				b.Fatalf("prepare: %v", err)
+			}
+			defer stmt.Close()
+
+			b.ResetTimer()
+			for range b.N {
+				rows, err := stmt.Query("active")
+				if err != nil {
+					b.Fatalf("query: %v", err)
+				}
+				n := 0
+				for rows.Next() {
+					var id int64
+					var name string
+					if err := rows.Scan(&id, &name); err != nil {
+						rows.Close()
+						b.Fatalf("scan: %v", err)
+					}
+					n += 1
+				}
+				rows.Close()
+				if err := rows.Err(); err != nil {
+					b.Fatalf("rows err: %v", err)
+				}
+				if n != limit {
+					b.Fatalf("expected %d rows, got %d", limit, n)
 				}
 			}
 		})
