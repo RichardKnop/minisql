@@ -5,38 +5,42 @@ import (
 )
 
 const (
-	// MaxInlineVarchar ...
+	// MaxInlineVarchar is the maximum number of bytes stored directly inside a
+	// leaf cell before the value is spilled to overflow pages.
 	MaxInlineVarchar = 255 // Store up to 255 bytes inline
-	// MaxOverflowPageData ...
+	// MaxOverflowPageData is the maximum number of data bytes that fit in a
+	// single overflow page (page size − type byte − header).
 	MaxOverflowPageData = 4096 - 1 - 8 // Page size - page type byte - OverflowPageHeader size
 	// MaxOverflowTextSize limits the maximum size of a text value to 16 overflow pages.
 	MaxOverflowTextSize     = MaxOverflowPageData * 16
 	varcharLengthPrefixSize = 4
 )
 
-// OverflowPageHeader ...
+// OverflowPageHeader is the on-disk header for a text overflow page. It holds
+// the next-page pointer (0 = last page) and the number of data bytes on this page.
 type OverflowPageHeader struct {
 	NextPage PageIndex // 0 if last page
 	DataSize uint32    // Actual data size in this page
 }
 
-// Size ...
+// Size returns the fixed serialised byte size of the header (type byte + 4 + 4).
 func (h *OverflowPageHeader) Size() uint64 {
 	return 1 + 4 + 4
 }
 
-// OverflowPage ...
+// OverflowPage holds a chunk of text data that does not fit inline in a leaf
+// cell. Pages are chained via Header.NextPage until the full value is read.
 type OverflowPage struct {
 	Data   []byte
 	Header OverflowPageHeader
 }
 
-// Size ...
+// Size returns the serialised byte size of the overflow page (header + data length).
 func (h *OverflowPage) Size() uint64 {
 	return h.Header.Size() + uint64(len(h.Data))
 }
 
-// Marshal ...
+// Marshal serialises the overflow page into buf: type byte, header, then data.
 func (h *OverflowPage) Marshal(buf []byte) error {
 	i := uint64(0)
 
@@ -54,7 +58,8 @@ func (h *OverflowPage) Marshal(buf []byte) error {
 	return nil
 }
 
-// Unmarshal ...
+// Unmarshal deserialises the overflow page from buf, validating the type byte.
+// Data is sub-sliced directly into the page buffer (zero-copy).
 func (h *OverflowPage) Unmarshal(buf []byte) error {
 	i := uint64(0)
 

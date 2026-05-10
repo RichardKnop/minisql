@@ -10,7 +10,8 @@ type FreePage struct {
 	// Rest of page is unused
 }
 
-// Marshal ...
+// Marshal serialises the free-page record into buf. Only the type byte and the
+// next-free-page pointer are written; the remainder of the page is unused.
 func (n *FreePage) Marshal(buf []byte) error {
 	i := uint64(0)
 
@@ -22,7 +23,8 @@ func (n *FreePage) Marshal(buf []byte) error {
 	return nil
 }
 
-// Unmarshal ...
+// Unmarshal deserialises a free-page record from buf, reading the type byte
+// and the next-free-page pointer.
 func (n *FreePage) Unmarshal(buf []byte) error {
 	i := uint64(0)
 

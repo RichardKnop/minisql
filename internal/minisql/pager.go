@@ -13,7 +13,8 @@ import (
 // PageCacheSize is the default maximum number of pages to keep in memory.
 const PageCacheSize = 2000
 
-// DBFile ...
+// DBFile is the set of I/O operations the pager requires from the underlying
+// database file. *os.File satisfies this interface.
 type DBFile interface {
 	io.ReadSeeker
 	io.ReaderAt
@@ -22,7 +23,8 @@ type DBFile interface {
 	Sync() error
 }
 
-// PageUnmarshaler ...
+// PageUnmarshaler is a function that deserialises a raw page buffer into a typed Page.
+// Different implementations are used for table pages, index pages, and overflow pages.
 type PageUnmarshaler func(totalPages uint32, pageIdx PageIndex, buf []byte) (*Page, error)
 
 type pagerImpl struct {
@@ -106,7 +108,7 @@ func (p *pagerImpl) SetWALIndex(walIndex *WALIndex) {
 	}
 }
 
-// Close ...
+// Close syncs the file to ensure pending writes are flushed, then closes it.
 func (p *pagerImpl) Close() error {
 	if err := fastSync(p.file); err != nil {
 		return fmt.Errorf("failed to sync file before close: %w", err)
@@ -114,14 +116,19 @@ func (p *pagerImpl) Close() error {
 	return p.file.Close()
 }
 
-// TotalPages ...
+// TotalPages returns the current total number of pages tracked by the pager,
+// including pages that exist only in the WAL and have not yet been checkpointed.
 func (p *pagerImpl) TotalPages() uint32 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.totalPages
 }
 
-// GetPage ...
+// GetPage returns the page at pageIdx, serving it from the LRU cache when
+// available. On a cache miss it checks the WAL index first (for uncommitted or
+// not-yet-checkpointed writes), then falls back to reading from the DB file.
+// Passing pageIdx == TotalPages() allocates a new blank page and increments the
+// page count. The supplied unmarshaler deserialises the raw buffer into a typed Page.
 func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler PageUnmarshaler) (*Page, error) {
 	// Fast path: Check if page already exists in cache (read lock only)
 	p.mu.RLock()
@@ -273,7 +280,8 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 	return p.pages[pageIdx], nil
 }
 
-// GetHeader ...
+// GetHeader returns the in-memory copy of the database header, which is kept
+// in sync with page 0 on every read and write of that page.
 func (p *pagerImpl) GetHeader(ctx context.Context) DatabaseHeader {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -281,7 +289,8 @@ func (p *pagerImpl) GetHeader(ctx context.Context) DatabaseHeader {
 	return p.dbHeader
 }
 
-// SaveHeader ...
+// SaveHeader updates the in-memory database header. The change is not written
+// to disk until the next Flush or FlushBatch call for page 0.
 func (p *pagerImpl) SaveHeader(ctx context.Context, header DatabaseHeader) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -289,7 +298,8 @@ func (p *pagerImpl) SaveHeader(ctx context.Context, header DatabaseHeader) {
 	p.dbHeader = header
 }
 
-// SavePage ...
+// SavePage stores a page in the in-memory cache at pageIdx without writing it
+// to disk. The page is persisted only when Flush or FlushBatch is called.
 func (p *pagerImpl) SavePage(ctx context.Context, pageIdx PageIndex, page *Page) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -304,7 +314,9 @@ func (p *pagerImpl) SavePage(ctx context.Context, pageIdx PageIndex, page *Page)
 	p.pages[pageIdx] = page
 }
 
-// Flush ...
+// Flush marshals the page at pageIdx and writes it to the DB file. For page 0
+// it writes the database header first, then the remainder of the page data, and
+// calls fsync to ensure durability. No-ops if the page is not in cache.
 func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 	p.mu.RLock()
 	if int(pageIdx) >= len(p.pages) || p.pages[pageIdx] == nil {

@@ -4,19 +4,21 @@ import (
 	"fmt"
 )
 
-// Header ...
+// Header is the common 6-byte prefix shared by every leaf and internal B+ tree
+// page. It records the page type (leaf vs internal), whether this page is the
+// B+ tree root, and the parent page index.
 type Header struct {
 	IsInternal bool
 	IsRoot     bool
 	Parent     PageIndex
 }
 
-// Size ...
+// Size returns the fixed serialised byte length of a Header (6 bytes: type + root flag + parent).
 func (h *Header) Size() uint64 {
 	return 1 + 1 + 4
 }
 
-// Marshal ...
+// Marshal writes the header fields into buf starting at offset 0.
 func (h *Header) Marshal(buf []byte) {
 	i := uint64(0)
 	if h.IsInternal {
@@ -40,7 +42,7 @@ func (h *Header) Marshal(buf []byte) {
 	i += 4
 }
 
-// Unmarshal ...
+// Unmarshal reads the header fields from buf and returns the number of bytes consumed.
 func (h *Header) Unmarshal(buf []byte) (uint64, error) {
 	if buf[0] != PageTypeLeaf && buf[0] != PageTypeInternal {
 		return 0, fmt.Errorf("unrecognised page type byte %d", buf[0])

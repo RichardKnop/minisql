@@ -14,7 +14,8 @@ type TextPointer struct {
 	FirstPage PageIndex
 }
 
-// NewTextPointer ...
+// NewTextPointer constructs a TextPointer wrapping the given byte slice.
+// Text shorter than or equal to MaxInlineVarchar will be stored inline.
 func NewTextPointer(data []byte) TextPointer {
 	return TextPointer{
 		Length: uint32(len(data)),
@@ -22,7 +23,9 @@ func NewTextPointer(data []byte) TextPointer {
 	}
 }
 
-// Size ...
+// Size returns the serialised byte size of the pointer: for inline text, a
+// 4-byte length prefix plus the data; for overflow text, a 4-byte length prefix
+// plus a 4-byte first-page index.
 func (tp TextPointer) Size() uint64 {
 	if tp.IsInline() {
 		// 4 bytes length prefix + data
@@ -32,7 +35,8 @@ func (tp TextPointer) Size() uint64 {
 	return varcharLengthPrefixSize + 4
 }
 
-// IsInline ...
+// IsInline reports whether the text fits within MaxInlineVarchar bytes and is
+// stored directly in the leaf cell rather than on overflow pages.
 func (tp TextPointer) IsInline() bool {
 	return tp.Length <= MaxInlineVarchar
 }
@@ -41,12 +45,13 @@ func (tp TextPointer) String() string {
 	return string(tp.Data)
 }
 
-// NumberOfPages ...
+// NumberOfPages returns the number of overflow pages required to store the text.
 func (tp TextPointer) NumberOfPages() uint32 {
 	return tp.Length/MaxOverflowPageData + 1
 }
 
-// Marshal ...
+// Marshal serialises the pointer into buf at offset i: a 4-byte length prefix
+// followed by either the inline data or the first overflow page index.
 func (tp *TextPointer) Marshal(buf []byte, i uint64) error {
 	// Write length prefix
 	marshalUint32(buf, tp.Length, i)
@@ -66,7 +71,9 @@ func (tp *TextPointer) Marshal(buf []byte, i uint64) error {
 	return nil
 }
 
-// Unmarshal ...
+// Unmarshal reads a text pointer from buf at offset i. For inline text, Data
+// is sub-sliced directly into the page buffer (zero-copy). For overflow text,
+// only FirstPage is set; actual data is loaded later by readOverflowTexts.
 func (tp *TextPointer) Unmarshal(buf []byte, i uint64) error {
 	// Read length prefix
 	tp.Length = unmarshalUint32(buf, i)
@@ -86,7 +93,8 @@ func (tp *TextPointer) Unmarshal(buf []byte, i uint64) error {
 	return nil
 }
 
-// IsEqual ...
+// IsEqual reports whether two TextPointers represent the same value by
+// comparing Data content, Length, and FirstPage.
 func (tp TextPointer) IsEqual(tp2 TextPointer) bool {
 	if string(tp.Data) != string(tp2.Data) {
 		return false

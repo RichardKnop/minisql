@@ -1,7 +1,7 @@
 package minisql
 
 const (
-	// PageSize ...
+	// PageSize is the fixed size in bytes of every database page (4 KiB).
 	PageSize = 4096 // 4 kilobytes
 
 	// UsablePageSize returns the usable size of a page after accounting for headers
@@ -9,10 +9,13 @@ const (
 	UsablePageSize = PageSize - 7 - 8 - 8 - 8
 )
 
-// PageIndex ...
+// PageIndex is a 0-based index that identifies a page within a database file.
+// Page 0 is always the root / header page for a given B+ tree.
 type PageIndex uint32
 
-// Page ...
+// Page is the in-memory representation of a 4 KiB database page. Exactly one
+// of the node/page fields is non-nil at any time, reflecting the page's type
+// (leaf, internal, index, overflow, etc.).
 type Page struct {
 	IndexNode         any
 	OverflowPage      *OverflowPage

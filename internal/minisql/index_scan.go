@@ -545,7 +545,8 @@ func (ui *Index[T]) scanRangeRecursiveReverse(ctx context.Context, pageIdx PageI
 
 type indexCallback func(page *Page)
 
-// BFS ...
+// BFS performs a breadth-first traversal of the index B+ tree, calling f for
+// every page visited. Used by tests and the integrity checker to inspect all nodes.
 func (ui *Index[T]) BFS(ctx context.Context, f indexCallback) error {
 	rootPage, err := ui.pager.ReadPage(ctx, ui.GetRootPageIdx())
 	if err != nil {

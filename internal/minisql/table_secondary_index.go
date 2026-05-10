@@ -7,7 +7,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// SecondaryIndex ...
+// SecondaryIndex associates a non-unique B+ tree index with its metadata.
+// It supports plain column indexes, composite indexes, partial indexes
+// (with a WHERE predicate), and expression indexes.
 type SecondaryIndex struct {
 	Index BTreeIndex
 	IndexInfo

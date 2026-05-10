@@ -6,7 +6,9 @@ import (
 	"unsafe"
 )
 
-// IndexNodeHeader ...
+// IndexNodeHeader is the on-disk header for an index B+ tree node. It records
+// whether the node is the root and whether it is a leaf, its parent page,
+// the number of keys stored, and the page index of the rightmost child.
 type IndexNodeHeader struct {
 	IsRoot     bool
 	IsLeaf     bool
@@ -15,7 +17,7 @@ type IndexNodeHeader struct {
 	RightChild PageIndex
 }
 
-// Size ...
+// Size returns the fixed serialised byte size of the index node header.
 func (h *IndexNodeHeader) Size() (s uint64) {
 	return indexHeaderSize()
 }
@@ -24,7 +26,7 @@ func indexHeaderSize() uint64 {
 	return 1 + 1 + 1 + 4 + 4 + 4
 }
 
-// Marshal ...
+// Marshal serialises the header into buf, writing the PageTypeIndex byte first.
 func (h *IndexNodeHeader) Marshal(buf []byte) {
 	i := uint64(0)
 	buf[0] = PageTypeIndex
@@ -46,7 +48,8 @@ func (h *IndexNodeHeader) Marshal(buf []byte) {
 	i += 4
 }
 
-// Unmarshal ...
+// Unmarshal deserialises the header from buf, validates the page type byte,
+// and returns the number of bytes consumed.
 func (h *IndexNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 	i := uint64(0)
 	if buf[i] != PageTypeIndex {
@@ -76,7 +79,8 @@ type IndexCell[T IndexKey] struct {
 	unique       bool
 }
 
-// NewIndexCell ...
+// NewIndexCell allocates a new IndexCell for the given uniqueness mode.
+// Non-unique cells get a pre-allocated RowIDs slice; unique cells omit it.
 func NewIndexCell[T IndexKey](unique bool) IndexCell[T] {
 	c := IndexCell[T]{unique: unique}
 	if !unique {
@@ -87,7 +91,8 @@ func NewIndexCell[T IndexKey](unique bool) IndexCell[T] {
 	return c
 }
 
-// Size ...
+// Size returns the serialised byte size of the cell: key + child pointer +
+// either a single UniqueRowID (unique) or an inline row-ID list with overflow pointer.
 func (c *IndexCell[T]) Size() uint64 {
 	// Key size + child pointer size
 	size := keySize(c.Key) + 4
@@ -117,7 +122,8 @@ func keySize[T IndexKey](key T) uint64 {
 	}
 }
 
-// Marshal ...
+// Marshal serialises the cell into buf: key bytes, then row ID data (unique
+// inline or non-unique list + overflow pointer), then child page index.
 func (c *IndexCell[T]) Marshal(buf []byte) error {
 	i := uint64(0)
 
@@ -181,7 +187,8 @@ func (c *IndexCell[T]) Marshal(buf []byte) error {
 	return nil
 }
 
-// Unmarshal ...
+// Unmarshal deserialises a cell from buf using the column schema for composite
+// key decoding, and returns the number of bytes consumed.
 func (c *IndexCell[T]) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	i := uint64(0)
 
@@ -249,7 +256,8 @@ func (c *IndexCell[T]) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	return i, nil
 }
 
-// RemoveRowID ...
+// RemoveRowID removes the first occurrence of id from the cell's inline RowIDs
+// slice and decrements InlineRowIDs. Returns the removed index, or -1 if not found.
 func (c *IndexCell[T]) RemoveRowID(id RowID) int {
 	for i := range c.RowIDs {
 		if c.RowIDs[i] == id {
@@ -261,7 +269,8 @@ func (c *IndexCell[T]) RemoveRowID(id RowID) int {
 	return -1
 }
 
-// ReplaceRowID ...
+// ReplaceRowID replaces the first occurrence of id in the cell's inline RowIDs
+// slice with newID. Returns the replaced index, or -1 if id was not found.
 func (c *IndexCell[T]) ReplaceRowID(id, newID RowID) int {
 	for i := range c.RowIDs {
 		if c.RowIDs[i] == id {
@@ -318,7 +327,7 @@ func NewIndexNode[T IndexKey](unique bool, cells ...IndexCell[T]) *IndexNode[T] 
 	return &node
 }
 
-// NewRootIndexNode ...
+// NewRootIndexNode creates a new index node with IsRoot and IsLeaf set to true.
 func NewRootIndexNode[T IndexKey](unique bool, cells ...IndexCell[T]) *IndexNode[T] {
 	node := NewIndexNode[T](unique, cells...)
 	node.Header.IsRoot = true
@@ -326,7 +335,7 @@ func NewRootIndexNode[T IndexKey](unique bool, cells ...IndexCell[T]) *IndexNode
 	return node
 }
 
-// Size ...
+// Size returns the total serialised byte size of the index node (header + keys).
 func (n *IndexNode[T]) Size() uint64 {
 	size := n.Header.Size()
 
@@ -337,7 +346,7 @@ func (n *IndexNode[T]) Size() uint64 {
 	return size
 }
 
-// Marshal ...
+// Marshal serialises the node into buf: header first, then each cell up to Keys.
 func (n *IndexNode[T]) Marshal(buf []byte) error {
 	i := uint64(0)
 
@@ -354,7 +363,8 @@ func (n *IndexNode[T]) Marshal(buf []byte) error {
 	return nil
 }
 
-// Unmarshal ...
+// Unmarshal deserialises the node from buf and also recomputes the cached
+// freeBytes value. Returns the total number of bytes consumed.
 func (n *IndexNode[T]) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	i := uint64(0)
 
@@ -396,7 +406,8 @@ func (n *IndexNode[T]) Child(childIdx uint32) (PageIndex, error) {
 	return n.Cells[childIdx].Child, nil
 }
 
-// SetChild ...
+// SetChild updates the child pointer at position idx. idx == Keys sets the
+// right-child pointer in the header; any value in [0, Keys) updates the cell.
 func (n *IndexNode[T]) SetChild(idx uint32, childPage PageIndex) error {
 	keysNum := n.Header.Keys
 	if idx > keysNum {
@@ -412,7 +423,7 @@ func (n *IndexNode[T]) SetChild(idx uint32, childPage PageIndex) error {
 	return nil
 }
 
-// Keys ...
+// Keys returns a slice of all keys stored in the node, in order.
 func (n *IndexNode[T]) Keys() []T {
 	if n.Header.Keys == 0 {
 		return nil
@@ -438,7 +449,8 @@ func (n *IndexNode[T]) RowIDs() []RowID {
 	return rowIDs
 }
 
-// Children ...
+// Children returns all child page indices of the node (left children of each
+// cell plus the right-child from the header). Returns nil for leaf nodes.
 func (n *IndexNode[T]) Children() []PageIndex {
 	if n.Header.IsLeaf {
 		return nil
@@ -481,7 +493,8 @@ func (n *IndexNode[T]) DeleteKeyAndRightChild(idx uint32) error {
 	return nil
 }
 
-// GetRightChildByIndex ...
+// GetRightChildByIndex returns the right child of the cell at idx: the
+// right-child header field for the last key, or the next cell's child otherwise.
 func (n *IndexNode[T]) GetRightChildByIndex(idx uint32) PageIndex {
 	if idx == n.Header.Keys-1 {
 		return n.Header.RightChild
@@ -490,17 +503,18 @@ func (n *IndexNode[T]) GetRightChildByIndex(idx uint32) PageIndex {
 	return n.Cells[idx+1].Child
 }
 
-// FirstCell ...
+// FirstCell returns the leftmost cell in the node.
 func (n *IndexNode[T]) FirstCell() IndexCell[T] {
 	return n.Cells[0]
 }
 
-// LastCell ...
+// LastCell returns the rightmost cell currently stored in the node.
 func (n *IndexNode[T]) LastCell() IndexCell[T] {
 	return n.Cells[n.Header.Keys-1]
 }
 
-// RemoveFirstCell ...
+// RemoveFirstCell shifts all cells left by one, clears the last slot, updates
+// the cached free space, and decrements the key count.
 func (n *IndexNode[T]) RemoveFirstCell() {
 	removedSize := n.Cells[0].Size()
 	for i := 0; i < int(n.Header.Keys)-1; i++ {
@@ -511,7 +525,9 @@ func (n *IndexNode[T]) RemoveFirstCell() {
 	n.Header.Keys -= 1
 }
 
-// RemoveLastCell ...
+// RemoveLastCell demotes the current right-child pointer into the removed cell's
+// child slot, updates cached free space, decrements the key count, and returns
+// the removed cell.
 func (n *IndexNode[T]) RemoveLastCell() IndexCell[T] {
 	idx := n.Header.Keys - 1
 	n.Header.RightChild = n.Cells[idx].Child
@@ -522,7 +538,8 @@ func (n *IndexNode[T]) RemoveLastCell() IndexCell[T] {
 	return cellToRemove
 }
 
-// PrependCell ...
+// PrependCell shifts all existing cells right by one, inserts cell at position 0,
+// updates cached free space, and increments the key count.
 func (n *IndexNode[T]) PrependCell(cell IndexCell[T]) {
 	if len(n.Cells) <= int(n.Header.Keys) {
 		n.Cells = append(n.Cells, NewIndexCell[T](n.Cells[0].unique))
@@ -535,7 +552,8 @@ func (n *IndexNode[T]) PrependCell(cell IndexCell[T]) {
 	n.Header.Keys += 1
 }
 
-// AppendCells ...
+// AppendCells appends one or more cells to the end of the node, growing the
+// backing slice in one allocation if needed, and updates cached free space.
 func (n *IndexNode[T]) AppendCells(cells ...IndexCell[T]) {
 	needed := int(n.Header.Keys) + len(cells)
 	if needed > len(n.Cells) {
@@ -582,7 +600,7 @@ func marshalIndexNode(anyNode any, buf []byte) error {
 	}
 }
 
-// Clone ...
+// Clone returns a deep copy of the index node with independent cell slices.
 func (n *IndexNode[T]) Clone() *IndexNode[T] {
 	nodeCopy := &IndexNode[T]{
 		Header:    n.Header,
@@ -601,7 +619,7 @@ func (n *IndexNode[T]) Clone() *IndexNode[T] {
 	return nodeCopy
 }
 
-// Clone ...
+// Clone returns a deep copy of the cell with its own RowIDs slice.
 func (c *IndexCell[T]) Clone() IndexCell[T] {
 	nodeCopy := IndexCell[T]{
 		Key:          c.Key,
@@ -643,13 +661,14 @@ func copyIndexNode(anyNode any) any {
 	}
 }
 
-// MaxSpace ...
+// MaxSpace returns the total bytes available for cells in a page (page size minus header).
 func (n *IndexNode[T]) MaxSpace() uint64 {
 	maxSpace := PageSize - indexHeaderSize()
 	return maxSpace
 }
 
-// TakenSpace ...
+// TakenSpace returns the total number of bytes currently occupied by all cells
+// (computed by iterating; prefer AvailableSpace for hot paths).
 func (n *IndexNode[T]) TakenSpace() uint64 {
 	takenPageSize := uint64(0)
 	for i := uint32(0); i < n.Header.Keys; i++ {
@@ -663,7 +682,8 @@ func (n *IndexNode[T]) AvailableSpace() uint64 {
 	return n.freeBytes
 }
 
-// HasSpaceForKey ...
+// HasSpaceForKey reports whether the node has enough free space to accommodate
+// a new entry for key, using worst-case sizing (key + child + row ID overhead).
 func (n *IndexNode[T]) HasSpaceForKey(key T) bool {
 	// In case of a unique index we need space for key + rowID + child pointer
 	// In case of a non-unique index there if key doesn't exist yet, it will be
@@ -672,12 +692,15 @@ func (n *IndexNode[T]) HasSpaceForKey(key T) bool {
 	return (keySize(key) + 4 + rowIDsLengthPrefixSize + 4 + 8) <= n.AvailableSpace()
 }
 
-// AtLeastHalfFull ...
+// AtLeastHalfFull reports whether the node is at least half full by space,
+// the minimum occupancy required to avoid a merge after a deletion.
 func (n *IndexNode[T]) AtLeastHalfFull() bool {
 	return n.AvailableSpace() < (n.MaxSpace())/2
 }
 
-// SplitInHalves ...
+// SplitInHalves computes the left and right cell counts for a node split.
+// For non-unique nodes it splits by space so both halves are roughly equal.
+// For unique nodes it splits by key count (ceil/floor).
 func (n *IndexNode[T]) SplitInHalves(unique bool) (uint32, uint32) {
 	if !unique {
 		halfSpace := int((n.MaxSpace() - n.freeBytes) / 2)

@@ -6,36 +6,41 @@ import (
 )
 
 const (
-	// MaxInlineRowIDs ...
+	// MaxInlineRowIDs is the maximum number of row IDs stored directly inside an
+	// IndexCell before spilling into an overflow page.
 	MaxInlineRowIDs = 4
-	// MaxOverflowRowIDsPerPage ...
+	// MaxOverflowRowIDsPerPage is the maximum number of row IDs that fit in a
+	// single IndexOverflowPage (page size − type byte − header).
 	MaxOverflowRowIDsPerPage = 510 // (4096 - 1 - 8 ) / 8
 	rowIDsLengthPrefixSize   = 4
 )
 
-// IndexOverflowPageHeader ...
+// IndexOverflowPageHeader is the on-disk header for an index overflow page.
+// It holds the next-page pointer (0 = last page) and the number of row IDs
+// stored on this page.
 type IndexOverflowPageHeader struct {
 	NextPage  PageIndex // 0 if last page
 	ItemCount uint32    // how many row IDs are stored in this page
 }
 
-// Size ...
+// Size returns the fixed serialised byte size of the header (type byte + 4 + 4).
 func (h *IndexOverflowPageHeader) Size() uint64 {
 	return 1 + 4 + 4
 }
 
-// IndexOverflowPage ...
+// IndexOverflowPage holds the spill-over row IDs for a non-unique index cell
+// that exceeds MaxInlineRowIDs. Pages are chained via Header.NextPage.
 type IndexOverflowPage struct {
 	RowIDs []RowID
 	Header IndexOverflowPageHeader
 }
 
-// Size ...
+// Size returns the serialised byte size of the page (header + 8 bytes per row ID).
 func (h *IndexOverflowPage) Size() uint64 {
 	return h.Header.Size() + uint64(h.Header.ItemCount)*8
 }
 
-// Marshal ...
+// Marshal serialises the overflow page into buf: type byte, header, then row IDs.
 func (h *IndexOverflowPage) Marshal(buf []byte) error {
 	i := uint64(0)
 
@@ -56,7 +61,7 @@ func (h *IndexOverflowPage) Marshal(buf []byte) error {
 	return nil
 }
 
-// Unmarshal ...
+// Unmarshal deserialises the overflow page from buf, validating the type byte.
 func (h *IndexOverflowPage) Unmarshal(buf []byte) error {
 	i := uint64(0)
 
@@ -80,7 +85,7 @@ func (h *IndexOverflowPage) Unmarshal(buf []byte) error {
 	return nil
 }
 
-// LastRowID ...
+// LastRowID returns the last row ID stored on the page, or 0 if the page is empty.
 func (h *IndexOverflowPage) LastRowID() RowID {
 	if h.Header.ItemCount == 0 {
 		return 0
@@ -88,7 +93,8 @@ func (h *IndexOverflowPage) LastRowID() RowID {
 	return h.RowIDs[h.Header.ItemCount-1]
 }
 
-// RemoveLastRowID ...
+// RemoveLastRowID removes the last row ID from the page, decrements ItemCount,
+// and returns the removed value.
 func (h *IndexOverflowPage) RemoveLastRowID() RowID {
 	rowID := h.RowIDs[h.Header.ItemCount-1]
 	h.Header.ItemCount -= 1

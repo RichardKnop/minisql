@@ -9,16 +9,19 @@ import (
 	"github.com/RichardKnop/minisql/pkg/bitwise"
 )
 
-// OptionalValue ...
+// OptionalValue wraps a column value together with a validity flag.
+// Valid == false means the value is SQL NULL; Value is ignored in that case.
 type OptionalValue struct {
 	Value any
 	Valid bool
 }
 
-// RowID ...
+// RowID is the internal primary key used to locate a row in the B+ tree leaf pages.
+// It is separate from any user-defined primary key column.
 type RowID uint64
 
-// Row ...
+// Row is a single database record. Columns defines the schema; Values holds the
+// corresponding column values in the same order; Key is the internal RowID.
 type Row struct {
 	Columns []Column
 	Values  []OptionalValue
@@ -32,12 +35,12 @@ func maxCells(rowSize uint64) uint32 {
 	return uint32((PageSize - headerSize()) / (rowSize + 8 + 8))
 }
 
-// NewRow ...
+// NewRow allocates a zero-valued Row with the given column schema and no values set.
 func NewRow(columns []Column) Row {
 	return Row{Columns: columns}
 }
 
-// NewRowWithValues ...
+// NewRowWithValues constructs a Row with the given schema and pre-populated values.
 func NewRowWithValues(columns []Column, values []OptionalValue) Row {
 	return Row{Columns: columns, Values: values}
 }
@@ -164,7 +167,8 @@ func (r Row) GetValue(name string) (OptionalValue, bool) {
 	return OptionalValue{}, false
 }
 
-// GetValuesForColumns ...
+// GetValuesForColumns returns the values for the given columns in the order they
+// appear in the columns slice. Returns (nil, false) if any column is not found.
 func (r Row) GetValuesForColumns(columns []Column) ([]OptionalValue, bool) {
 	// Pre-allocate exact size and write directly by index
 	values := make([]OptionalValue, len(columns))
@@ -219,7 +223,8 @@ func compareValue(kind ColumnKind, v1, v2 OptionalValue) bool {
 	return tp1.IsEqual(tp2)
 }
 
-// Clone ...
+// Clone returns a deep copy of the row, with a fresh Values slice so mutations
+// to the copy do not affect the original.
 func (r Row) Clone() Row {
 	rowCopy := Row{
 		Key:     r.Key,
@@ -230,7 +235,8 @@ func (r Row) Clone() Row {
 	return rowCopy
 }
 
-// Marshal ...
+// Marshal serialises the row's non-NULL column values into a compact byte slice.
+// NULL values are tracked in the leaf node's null bitmask and occupy no space here.
 func (r Row) Marshal() ([]byte, error) {
 	// Single allocation: allocate exact size upfront instead of using append
 	size := r.Size()
@@ -496,7 +502,8 @@ func compileRowFilterForColumns(columns []Column, conditions OneOrMore) func(Row
 	}
 }
 
-// CheckConditions ...
+// CheckConditions evaluates a single AND-group of conditions against the row.
+// All conditions in the group must be satisfied; returns true for an empty group.
 func (r Row) CheckConditions(condGroup Conditions) (bool, error) {
 	if len(condGroup) == 0 {
 		return true, nil

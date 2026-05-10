@@ -15,12 +15,15 @@ import (
 // MaxIndexKeySize is the maximum number of bytes allowed for a single index key.
 const MaxIndexKeySize = 255
 
-// IndexKey ...
+// IndexKey is the type constraint for B+ tree index keys. It enumerates the concrete
+// Go types that can be stored as index key values, covering all supported column kinds.
 type IndexKey interface {
 	int8 | int32 | int64 | float32 | float64 | string | CompositeKey | UUIDValue
 }
 
-// Index ...
+// Index is the generic B+ tree implementation for all index types (primary key,
+// unique, and secondary non-unique). T constrains the key type to IndexKey,
+// allowing the same tree code to serve int64, string, CompositeKey, etc.
 type Index[T IndexKey] struct {
 	pager         TxPager
 	logger        *zap.Logger
@@ -34,12 +37,14 @@ type Index[T IndexKey] struct {
 	unique        bool
 }
 
-// NewUniqueIndex ...
+// NewUniqueIndex creates a B+ tree index that enforces uniqueness on every key.
+// Attempting to insert a duplicate key returns ErrDuplicateKey.
 func NewUniqueIndex[T IndexKey](logger *zap.Logger, txManager *TransactionManager, name string, columns []Column, pager TxPager, rootPageIdx PageIndex) (*Index[T], error) {
 	return newIndex[T](true, logger, txManager, name, columns, pager, rootPageIdx)
 }
 
-// NewNonUniqueIndex ...
+// NewNonUniqueIndex creates a B+ tree index that allows duplicate keys. Each
+// key maps to a list of row IDs stored inline and in overflow pages.
 func NewNonUniqueIndex[T IndexKey](logger *zap.Logger, txManager *TransactionManager, name string, columns []Column, pager TxPager, rootPageIdx PageIndex) (*Index[T], error) {
 	return newIndex[T](false, logger, txManager, name, columns, pager, rootPageIdx)
 }
@@ -67,12 +72,14 @@ func newIndex[T IndexKey](unique bool, logger *zap.Logger, txManager *Transactio
 	return idx, nil
 }
 
-// GetRootPageIdx ...
+// GetRootPageIdx returns the page index of the B+ tree root node for this index.
 func (ui *Index[T]) GetRootPageIdx() PageIndex {
 	return ui.rootPageIdx
 }
 
-// Insert ...
+// Insert adds keyAny → rowID to the index, splitting nodes as needed.
+// For unique indexes it returns ErrDuplicateKey if keyAny already exists.
+// For non-unique indexes it appends rowID to the existing key's row ID list.
 func (ui *Index[T]) Insert(ctx context.Context, keyAny any, rowID RowID) error {
 	key, ok := keyAny.(T)
 	if !ok {
@@ -288,7 +295,7 @@ func (ui *Index[T]) atLeastHalfFull(node *IndexNode[T]) bool {
 	return node.AtLeastHalfFull()
 }
 
-// ErrDuplicateKey ...
+// ErrDuplicateKey is returned by Insert when a unique index already contains the given key.
 var ErrDuplicateKey = errors.New("duplicate key")
 
 // insertNotFull inserts key/rowID into the subtree rooted at pageIdx.
@@ -488,7 +495,9 @@ func (ui *Index[T]) splitChild(ctx context.Context, parentPage, splitPage *Page,
 	return nil
 }
 
-// Delete ...
+// Delete removes the keyAny → rowID mapping from the index, merging or
+// rebalancing nodes as needed. For non-unique indexes only the specific
+// rowID is removed; other row IDs for the same key are preserved.
 func (ui *Index[T]) Delete(ctx context.Context, keyAny any, rowID RowID) error {
 	key, ok := keyAny.(T)
 	if !ok {

@@ -7,7 +7,7 @@ import (
 
 // PageType constants identify the type of data stored in a database page.
 const (
-	// PageTypeLeaf ...
+	// PageTypeLeaf identifies a leaf B+ tree node page.
 	PageTypeLeaf byte = iota
 	// PageTypeInternal identifies an internal (non-leaf) B+ tree node page.
 	PageTypeInternal
@@ -26,7 +26,9 @@ type tablePager struct {
 	columns []Column
 }
 
-// GetPage ...
+// GetPage returns the table page at pageIdx, deserialising it via the table
+// unmarshaler which selects the correct node type (leaf, internal, overflow,
+// or free) based on the page-type byte in the raw buffer.
 func (p *tablePager) GetPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
 	return p.pagerImpl.GetPage(ctx, pageIdx, p.unmarshal)
 }
