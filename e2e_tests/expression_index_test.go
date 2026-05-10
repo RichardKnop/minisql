@@ -395,6 +395,14 @@ func (s *TestSuite) TestExpressionIndex_JSONPath() {
 		('{"action": "cron"}');`)
 	s.Require().NoError(err)
 
+	s.Run("planner uses JSON expression index", func() {
+		rows := s.collectExplain(`EXPLAIN SELECT payload->>'action' FROM "events_json" WHERE payload->>'user_id' = 'u001';`)
+		s.Require().NotEmpty(rows)
+		s.Equal("index_point", rows[0].Operation)
+		s.Contains(rows[0].Detail, "table=events_json")
+		s.Contains(rows[0].Detail, "index=idx_events_user_id")
+	})
+
 	s.Run("find events for user u001", func() {
 		rows, err := s.db.Query(`select payload->>'action' from "events_json" where payload->>'user_id' = ?`, "u001")
 		s.Require().NoError(err)
