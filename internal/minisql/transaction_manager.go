@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	minisqlErrors "github.com/RichardKnop/minisql/errors"
 )
 
 // pageVersion is one historical snapshot of a page stored in the version
@@ -249,9 +251,6 @@ func (tm *TransactionManager) BeginReadOnlyTransaction(ctx context.Context) *Tra
 	return tx
 }
 
-// ErrTxConflict is returned when an optimistic concurrency check fails at commit time.
-var ErrTxConflict = errors.New("transaction conflict detected")
-
 // ErrCheckpointBlockedByReaders is returned when a checkpoint cannot proceed
 // because one or more read-only transactions hold snapshots that predate the
 // current commitSeq.  Callers should retry after the readers have finished.
@@ -385,13 +384,13 @@ func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction)
 		for pageIdx, readVersion := range tx.GetReadVersions() {
 			if tm.globalPageVersions[pageIdx] > readVersion {
 				tx.Abort()
-				return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", ErrTxConflict, tx.ID, pageIdx)
+				return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", minisqlErrors.ErrTxConflict, tx.ID, pageIdx)
 			}
 		}
 		if readDBHeaderVersion, exists := tx.GetDBHeaderReadVersion(); exists {
 			if tm.globalDBHeaderVersion > readDBHeaderVersion {
 				tx.Abort()
-				return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
+				return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", minisqlErrors.ErrTxConflict, tx.ID)
 			}
 		}
 	}
@@ -489,14 +488,14 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 				if tm.globalPageVersions[pageIdx] > readVersion {
 					tx.Abort()
 					tm.mu.Unlock()
-					return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", ErrTxConflict, tx.ID, pageIdx)
+					return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", minisqlErrors.ErrTxConflict, tx.ID, pageIdx)
 				}
 			}
 			if readDBHeaderVersion, exists := tx.GetDBHeaderReadVersion(); exists {
 				if tm.globalDBHeaderVersion > readDBHeaderVersion {
 					tx.Abort()
 					tm.mu.Unlock()
-					return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
+					return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", minisqlErrors.ErrTxConflict, tx.ID)
 				}
 			}
 		}
@@ -525,7 +524,7 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 			tx.Abort()
 			tm.mu.Unlock()
 			tm.walWriteMu.Unlock()
-			return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", ErrTxConflict, tx.ID, pageIdx)
+			return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", minisqlErrors.ErrTxConflict, tx.ID, pageIdx)
 		}
 	}
 	if readDBHeaderVersion, exists := tx.GetDBHeaderReadVersion(); exists {
@@ -533,7 +532,7 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 			tx.Abort()
 			tm.mu.Unlock()
 			tm.walWriteMu.Unlock()
-			return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", ErrTxConflict, tx.ID)
+			return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", minisqlErrors.ErrTxConflict, tx.ID)
 		}
 	}
 	tm.mu.Unlock()

@@ -947,7 +947,7 @@ _, err = db.Exec(`insert into "orders" (user_id, amount) values (1, 100)`)
 // Example: this fails with ErrForeignKeyViolation — user_id 99 does not exist
 _, err = db.Exec(`insert into "orders" (user_id, amount) values (99, 100)`)
 if err != nil {
-    var fkErr minisql.ErrForeignKeyViolation
+    var fkErr minisqlErrors.ErrForeignKeyViolation
     if errors.As(err, &fkErr) {
         fmt.Printf("FK violation: %s.%s → %s.%s\n",
             fkErr.ChildTable, fkErr.ChildColumn,
@@ -958,7 +958,7 @@ if err != nil {
 // Example: deleting a parent row that still has children fails with ErrForeignKeyParentViolation
 _, err = db.Exec(`delete from "users" where id = 1`)
 if err != nil {
-    var fkErr minisql.ErrForeignKeyParentViolation
+    var fkErr minisqlErrors.ErrForeignKeyParentViolation
     if errors.As(err, &fkErr) {
         fmt.Printf("parent FK violation: %s.%s referenced by %s.%s\n",
             fkErr.ParentTable, fkErr.ParentColumn,

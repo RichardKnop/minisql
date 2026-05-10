@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	minisqlErrors "github.com/RichardKnop/minisql/errors"
 )
 
 // snapshotColumns are a minimal column set used by all snapshot isolation tests.
@@ -218,7 +220,7 @@ func TestSnapshotIsolation_CheckpointBlockedByReader(t *testing.T) {
 }
 
 // TestSnapshotIsolation_ConcurrentReadWrite verifies that concurrent reads and
-// writes do not race.  Run with -race to detect data races.
+// writes do not race. Run with -race to detect data races.
 func TestSnapshotIsolation_ConcurrentReadWrite(t *testing.T) {
 	table, txManager, _ := newTestTable(t, snapshotColumns)
 	ctx := context.Background()
@@ -237,9 +239,7 @@ func TestSnapshotIsolation_ConcurrentReadWrite(t *testing.T) {
 
 	// Concurrent readers.
 	for r := 0; r < readers; r++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := 0; i < rounds; i++ {
 				err := txManager.ExecuteReadOnlyTransaction(ctx, func(rCtx context.Context) error {
 					selectAllSnapshot(rCtx, t, table)
@@ -249,17 +249,17 @@ func TestSnapshotIsolation_ConcurrentReadWrite(t *testing.T) {
 					errs <- err
 				}
 			}
-		}()
+		})
 	}
 
-	// Concurrent writers.  We allow ErrTxConflict (two writers collide) but
+	// Concurrent writers. We allow ErrTxConflict (two writers collide) but
 	// not any other error.
-	nextID := int64(100)
-	var idMu sync.Mutex
+	var (
+		nextID = int64(100)
+		idMu   sync.Mutex
+	)
 	for w := 0; w < writers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := 0; i < rounds; i++ {
 				idMu.Lock()
 				id := nextID
@@ -281,11 +281,11 @@ func TestSnapshotIsolation_ConcurrentReadWrite(t *testing.T) {
 					})
 					return err
 				})
-				if err != nil && !errors.Is(err, ErrTxConflict) {
+				if err != nil && !errors.Is(err, minisqlErrors.ErrTxConflict) {
 					errs <- err
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	minisqlErrors "github.com/RichardKnop/minisql/errors"
 )
 
 // FKAction defines the referential action for ON DELETE / ON UPDATE.
@@ -45,44 +47,6 @@ type ForeignKey struct {
 	OnDelete      FKAction // default FKActionRestrict
 	OnUpdate      FKAction // default FKActionRestrict
 }
-
-// ErrForeignKeyViolation is returned when a child row's FK value does not exist
-// in the parent table.
-type ErrForeignKeyViolation struct {
-	ChildTable    string
-	ChildColumns  []string
-	ParentTable   string
-	ParentColumns []string
-}
-
-func (e ErrForeignKeyViolation) Error() string {
-	return fmt.Sprintf(
-		"foreign key constraint violation: %s.(%s) references non-existent value in %s.(%s)",
-		e.ChildTable, strings.Join(e.ChildColumns, ", "),
-		e.ParentTable, strings.Join(e.ParentColumns, ", "),
-	)
-}
-
-// ErrForeignKeyParentViolation is returned when deleting or updating a parent row
-// that is still referenced by one or more child rows.
-type ErrForeignKeyParentViolation struct {
-	ParentTable   string
-	ParentColumns []string
-	ChildTable    string
-	ChildColumns  []string
-}
-
-func (e ErrForeignKeyParentViolation) Error() string {
-	return fmt.Sprintf(
-		"foreign key constraint violation: %s.(%s) is still referenced by %s.(%s)",
-		e.ParentTable, strings.Join(e.ParentColumns, ", "),
-		e.ChildTable, strings.Join(e.ChildColumns, ", "),
-	)
-}
-
-// ErrDropTableReferencedByFK is the base error for dropping a table that is
-// still referenced by a foreign key in another table.
-var ErrDropTableReferencedByFK = errors.New("cannot drop table: it is still referenced by a foreign key constraint")
 
 // inboundFK records a child-side FK pointing at a given parent table.
 type inboundFK struct {
@@ -142,7 +106,7 @@ func (d *Database) checkChildFK(ctx context.Context, childTable *Table, row Row)
 			return fmt.Errorf("FK check %q: %w", fk.Name, err)
 		}
 		if !exists {
-			return ErrForeignKeyViolation{
+			return minisqlErrors.ErrForeignKeyViolation{
 				ChildTable:    childTable.Name,
 				ChildColumns:  fk.Columns,
 				ParentTable:   fk.TargetTable,
@@ -183,7 +147,7 @@ func (d *Database) enforceParentFKOnDelete(ctx context.Context, parentTable *Tab
 				return fmt.Errorf("FK parent check for %s.%v: %w", parentTable.Name, inbound.FK.TargetColumns, err)
 			}
 			if found {
-				return ErrForeignKeyParentViolation{
+				return minisqlErrors.ErrForeignKeyParentViolation{
 					ParentTable:   parentTable.Name,
 					ParentColumns: inbound.FK.TargetColumns,
 					ChildTable:    inbound.ChildTable,
@@ -238,7 +202,7 @@ func (d *Database) enforceParentFKOnUpdate(ctx context.Context, parentTable *Tab
 				return fmt.Errorf("FK parent update check for %s.%v: %w", parentTable.Name, inbound.FK.TargetColumns, err)
 			}
 			if found {
-				return ErrForeignKeyParentViolation{
+				return minisqlErrors.ErrForeignKeyParentViolation{
 					ParentTable:   parentTable.Name,
 					ParentColumns: inbound.FK.TargetColumns,
 					ChildTable:    inbound.ChildTable,

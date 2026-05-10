@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	minisqlErrors "github.com/RichardKnop/minisql/errors"
 )
 
 func TestTransactionManager_Commit(t *testing.T) {
@@ -143,7 +145,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		// Now, committing the reading transaction should fail due to conflict
 		err = txManager.CommitTransaction(ctx, readTx)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrTxConflict)
+		assert.ErrorIs(t, err, minisqlErrors.ErrTxConflict)
 		assert.Equal(t, "transaction conflict detected: tx 1 aborted due to conflict on page 3", err.Error())
 
 		// Writing transaction should have updated page version, no other changes expected
@@ -208,7 +210,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		// Now, committing the first transaction should fail due to conflict
 		err = txManager.CommitTransaction(ctx, writeTx1)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrTxConflict)
+		assert.ErrorIs(t, err, minisqlErrors.ErrTxConflict)
 		assert.Equal(t, "transaction conflict detected: tx 1 aborted due to conflict on page 4", err.Error())
 
 		// Second transaction should have updated page version, no other changes expected
@@ -398,7 +400,7 @@ func TestTransactionManager_WAL_Commit(t *testing.T) {
 		// txA now conflicts (page 5 version changed to 4, but txA read at version 3).
 		err := txManager.CommitTransaction(ctx, txA)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrTxConflict)
+		assert.ErrorIs(t, err, minisqlErrors.ErrTxConflict)
 		assert.Equal(t, TxAborted, txA.Status)
 
 		// Only one WAL frame (for txB).

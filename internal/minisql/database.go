@@ -8,8 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/RichardKnop/minisql/pkg/lrucache"
 	"go.uber.org/zap"
+
+	minisqlErrors "github.com/RichardKnop/minisql/errors"
+	"github.com/RichardKnop/minisql/pkg/lrucache"
 )
 
 var (
@@ -1228,7 +1230,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	if d.foreignKeysEnabled {
 		if inbounds := d.referencedBy[name]; len(inbounds) > 0 {
 			return fmt.Errorf("%w: referenced by %s.%v",
-				ErrDropTableReferencedByFK, inbounds[0].ChildTable, inbounds[0].FK.Columns)
+				minisqlErrors.ErrDropTableReferencedByFK, inbounds[0].ChildTable, inbounds[0].FK.Columns)
 		}
 	}
 

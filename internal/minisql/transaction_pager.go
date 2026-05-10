@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"go.uber.org/zap"
+
+	minisqlErrors "github.com/RichardKnop/minisql/errors"
 )
 
 // TransactionalPager wraps a base Pager and routes reads and writes through the current transaction.
@@ -126,7 +128,7 @@ func (tp *TransactionalPager) ModifyPage(ctx context.Context, pageIdx PageIndex)
 		if readVersion, ok := tx.GetReadVersion(pageIdx); ok {
 			currentVersion := tp.txManager.GlobalPageVersion(ctx, pageIdx)
 			if currentVersion != readVersion {
-				return nil, ErrTxConflict
+				return nil, minisqlErrors.ErrTxConflict
 			}
 		}
 	}
