@@ -71,7 +71,13 @@ type TxPager interface {
 // BTreeIndex ...
 type BTreeIndex interface {
 	GetRootPageIdx() PageIndex
+	// FindRowIDs returns all row IDs for the given key as a slice.
+	// For large non-unique indexes prefer VisitRowIDs to avoid materialising the full list.
 	FindRowIDs(ctx context.Context, key any) ([]RowID, error)
+	// VisitRowIDs calls fn for each row ID associated with key, reading overflow pages
+	// lazily one at a time.  fn may return an error to stop early (e.g. a LIMIT sentinel);
+	// that error is propagated unchanged to the caller.
+	VisitRowIDs(ctx context.Context, key any, fn func(RowID) error) error
 	SeekLastKey(ctx context.Context, pageIdx PageIndex) (any, error)
 	Insert(ctx context.Context, key any, rowID RowID) error
 	Delete(ctx context.Context, key any, rowID RowID) error

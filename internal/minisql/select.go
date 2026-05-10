@@ -649,12 +649,12 @@ func (t *Table) selectStreamingDirect(
 			seen[key] = struct{}{}
 		}
 		if hasOffset && offset > 0 {
-			offset--
+			offset -= 1
 			return nil
 		}
 		projected = append(projected, p)
 		if hasLimit {
-			remaining--
+			remaining -= 1
 			if remaining == 0 {
 				return errLimitReached
 			}
@@ -713,12 +713,12 @@ func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields [
 			seen[key] = struct{}{}
 		}
 		if hasOffset && offset > 0 {
-			offset--
+			offset -= 1
 			continue
 		}
 		projected = append(projected, p)
 		if hasLimit {
-			limit--
+			limit -= 1
 			if limit == 0 {
 				break
 			}
@@ -951,19 +951,11 @@ func (t *Table) indexPointScan(ctx context.Context, scan Scan, selectedFields []
 	tableFilter := compileScanFilter(t.Columns, scan.Filters)
 	coveringFilter := compileScanFilter(scan.IndexColumns, scan.Filters)
 
-	// Lookup each primary key value
+	// Lookup each key value and process matching row IDs one at a time.
+	// VisitRowIDs reads overflow pages lazily, so a LIMIT sentinel returned by
+	// out stops iteration before all overflow pages are loaded.
 	for _, indexValue := range scan.IndexKeys {
-		// Find row ID from primary key index
-		rowIDs, err := idx.FindRowIDs(ctx, indexValue)
-		if err != nil {
-			if errors.Is(err, ErrNotFound) {
-				// Key not found, skip
-				continue
-			}
-			return fmt.Errorf("index lookup failed: %w", err)
-		}
-
-		for _, rowID := range rowIDs {
+		err := idx.VisitRowIDs(ctx, indexValue, func(rowID RowID) error {
 			var row Row
 
 			switch {
@@ -973,48 +965,47 @@ func (t *Table) indexPointScan(ctx context.Context, scan Scan, selectedFields []
 				row = NewRowWithValues(t.Columns, nil)
 				row.Key = rowID
 			default:
-				// Find the row by ID
 				cursor, err := t.Seek(ctx, rowID)
 				if err != nil {
 					return fmt.Errorf("find row failed: %w", err)
 				}
 
-				// Fetch the row
 				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
 				if err != nil {
 					return fmt.Errorf("fetch row failed: %w", err)
 				}
 
-				// Apply remaining filters
 				if tableFilter != nil {
 					ok, err := tableFilter(row)
 					if err != nil {
 						return err
 					}
 					if !ok {
-						continue // Skip this row
+						return nil
 					}
 				}
 			}
 
-			// For covering index scans, filters still need to be applied
-			// (all filter columns are guaranteed to be in the index).
 			if scan.CoveringIndex && coveringFilter != nil {
 				ok, err := coveringFilter(row)
 				if err != nil {
 					return err
 				}
 				if !ok {
-					continue
+					return nil
 				}
 			}
 
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if err := out(row); err != nil {
-				return err
+			return out(row)
+		})
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				continue
 			}
+			return fmt.Errorf("index lookup failed: %w", err)
 		}
 	}
 

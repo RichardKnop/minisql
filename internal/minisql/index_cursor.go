@@ -18,55 +18,82 @@ type IndexCursor[T IndexKey] struct {
 // ErrNotFound ...
 var ErrNotFound = errors.New("not found")
 
-// FindRowIDs ...
-func (ui *Index[T]) FindRowIDs(ctx context.Context, keyAny any) ([]RowID, error) {
+// VisitRowIDs calls fn for each row ID stored under key, reading overflow pages
+// one at a time so the caller never holds more than one page worth of IDs in memory.
+// fn may return an error to stop iteration early; that error is returned unchanged.
+func (ui *Index[T]) VisitRowIDs(ctx context.Context, keyAny any, fn func(RowID) error) error {
 	key, ok := keyAny.(T)
 	if !ok {
-		return nil, fmt.Errorf("invalid key type: %T", keyAny)
+		return fmt.Errorf("invalid key type: %T", keyAny)
 	}
 
 	rootPage, err := ui.pager.ReadPage(ctx, ui.GetRootPageIdx())
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	cursor, ok, err := ui.Seek(ctx, rootPage, key)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if !ok {
-		return nil, fmt.Errorf("%w: %v", ErrNotFound, key)
+		return fmt.Errorf("%w: %v", ErrNotFound, key)
 	}
 
 	page, err := cursor.Index.pager.ReadPage(ctx, cursor.PageIdx)
 	if err != nil {
-		return nil, fmt.Errorf("read page: %w", err)
+		return fmt.Errorf("read page: %w", err)
 	}
 	node := page.IndexNode.(*IndexNode[T])
 	if cursor.CellIdx >= node.Header.Keys {
-		return nil, fmt.Errorf("invalid cell index: %d", cursor.CellIdx)
-	}
-
-	if node.Cells[cursor.CellIdx].unique {
-		return []RowID{node.Cells[cursor.CellIdx].UniqueRowID}, nil
+		return fmt.Errorf("invalid cell index: %d", cursor.CellIdx)
 	}
 
 	cell := node.Cells[cursor.CellIdx]
+
+	if cell.unique {
+		return fn(cell.UniqueRowID)
+	}
+
 	if len(cell.RowIDs) == 0 {
-		return nil, fmt.Errorf("no row IDs for key: %v", key)
+		return fmt.Errorf("no row IDs for key: %v", key)
 	}
 
-	rowIDs := make([]RowID, len(cell.RowIDs))
-	copy(rowIDs, cell.RowIDs)
-
-	if cell.Overflow != 0 {
-		overflowIDs, err := readOverflowRowIDs[T](ctx, cursor.Index.pager, cell.Overflow)
-		if err != nil {
-			return nil, fmt.Errorf("read overflow row IDs: %w", err)
+	for _, rowID := range cell.RowIDs {
+		if err := fn(rowID); err != nil {
+			return err
 		}
-		rowIDs = append(rowIDs, overflowIDs...)
 	}
 
+	overflowIdx := cell.Overflow
+	for overflowIdx != 0 {
+		overflowPage, err := cursor.Index.pager.ReadPage(ctx, overflowIdx)
+		if err != nil {
+			return fmt.Errorf("read index overflow page %d: %w", overflowIdx, err)
+		}
+		node := overflowPage.IndexOverflowNode
+		for _, rowID := range node.RowIDs[:node.Header.ItemCount] {
+			if err := fn(rowID); err != nil {
+				return err
+			}
+		}
+		overflowIdx = node.Header.NextPage
+	}
+
+	return nil
+}
+
+// FindRowIDs returns all row IDs for key as a slice.
+// For large non-unique secondary indexes prefer VisitRowIDs to avoid materialising the full list.
+func (ui *Index[T]) FindRowIDs(ctx context.Context, keyAny any) ([]RowID, error) {
+	var rowIDs []RowID
+	err := ui.VisitRowIDs(ctx, keyAny, func(rowID RowID) error {
+		rowIDs = append(rowIDs, rowID)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	return rowIDs, nil
 }
 
