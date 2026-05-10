@@ -11,7 +11,9 @@ type indexPager[T IndexKey] struct {
 	unique  bool
 }
 
-// GetPage ...
+// GetPage returns the index page at pageIdx, deserialising it via the
+// type-parameterised index unmarshaler which handles index nodes, index
+// overflow pages, and free pages.
 func (p *indexPager[T]) GetPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
 	return p.pagerImpl.GetPage(ctx, pageIdx, p.unmarshal)
 }

@@ -55,7 +55,8 @@ func (n *InternalNode) Child(childIdx uint32) (PageIndex, error) {
 	return n.ICells[childIdx].Child, nil
 }
 
-// SetChild ...
+// SetChild updates the child pointer at position idx. idx == KeysNum sets the
+// right-child pointer; any value in [0, KeysNum) updates the corresponding ICell.
 func (n *InternalNode) SetChild(idx uint32, childPage PageIndex) error {
 	keysNum := n.Header.KeysNum
 	if idx > keysNum {
@@ -71,17 +72,20 @@ func (n *InternalNode) SetChild(idx uint32, childPage PageIndex) error {
 	return nil
 }
 
-// AtLeastHalfFull ...
+// AtLeastHalfFull reports whether the node holds at least ceil(maxIcells/2) keys,
+// the minimum occupancy required to avoid a merge after a deletion.
 func (n *InternalNode) AtLeastHalfFull(maxIcells int) bool {
 	return int(n.Header.KeysNum) >= (maxIcells+1)/2
 }
 
-// MoreThanHalfFull ...
+// MoreThanHalfFull reports whether the node holds strictly more than ceil(maxIcells/2)
+// keys, meaning it can donate a key to an under-full sibling during rebalancing.
 func (n *InternalNode) MoreThanHalfFull(maxIcells int) bool {
 	return int(n.Header.KeysNum) > (maxIcells+1)/2
 }
 
-// GetRightChildByIndex ...
+// GetRightChildByIndex returns the right child of the ICell at idx: the
+// right-child header field for the last key, or the next ICell's child otherwise.
 func (n *InternalNode) GetRightChildByIndex(idx uint32) PageIndex {
 	if idx == n.Header.KeysNum-1 {
 		return n.Header.RightChild
@@ -115,17 +119,18 @@ func (n *InternalNode) DeleteKeyAndRightChild(idx uint32) error {
 	return nil
 }
 
-// FirstCell ...
+// FirstCell returns the leftmost ICell in the node.
 func (n *InternalNode) FirstCell() ICell {
 	return n.ICells[0]
 }
 
-// LastCell ...
+// LastCell returns the rightmost ICell currently stored in the node.
 func (n *InternalNode) LastCell() ICell {
 	return n.ICells[n.Header.KeysNum-1]
 }
 
-// RemoveFirstCell ...
+// RemoveFirstCell shifts all ICells left by one and decrements the key count,
+// effectively removing the leftmost key and its child pointer.
 func (n *InternalNode) RemoveFirstCell() {
 	for i := 0; i < int(n.Header.KeysNum)-1; i++ {
 		n.ICells[i] = n.ICells[i+1]
@@ -134,7 +139,8 @@ func (n *InternalNode) RemoveFirstCell() {
 	n.Header.KeysNum -= 1
 }
 
-// RemoveLastCell ...
+// RemoveLastCell demotes the current right-child pointer into the removed cell's
+// child slot and decrements the key count, effectively removing the rightmost key.
 func (n *InternalNode) RemoveLastCell() {
 	idx := n.Header.KeysNum - 1
 	n.Header.RightChild = n.ICells[idx].Child
@@ -142,7 +148,8 @@ func (n *InternalNode) RemoveLastCell() {
 	n.Header.KeysNum -= 1
 }
 
-// PrependCell ...
+// PrependCell shifts all existing ICells right by one and inserts cell at
+// position 0, incrementing the key count.
 func (n *InternalNode) PrependCell(cell ICell) {
 	for i := int(n.Header.KeysNum); i > 0; i-- {
 		n.ICells[i] = n.ICells[i-1]
@@ -151,7 +158,8 @@ func (n *InternalNode) PrependCell(cell ICell) {
 	n.Header.KeysNum += 1
 }
 
-// AppendCells ...
+// AppendCells appends one or more ICells to the end of the node's cell array,
+// incrementing the key count for each.
 func (n *InternalNode) AppendCells(cells ...ICell) {
 	for _, cell := range cells {
 		n.ICells[n.Header.KeysNum] = cell
@@ -159,7 +167,7 @@ func (n *InternalNode) AppendCells(cells ...ICell) {
 	}
 }
 
-// Keys ...
+// Keys returns a slice of all separator keys stored in the node, in order.
 func (n *InternalNode) Keys() []RowID {
 	keys := make([]RowID, 0, n.Header.KeysNum)
 	for idx := range n.Header.KeysNum {
@@ -168,7 +176,8 @@ func (n *InternalNode) Keys() []RowID {
 	return keys
 }
 
-// Children ...
+// Children returns all child page indices of the node: the left child of each
+// ICell followed by the right-child pointer from the header (when set).
 func (n *InternalNode) Children() []PageIndex {
 	children := make([]PageIndex, 0, n.Header.KeysNum)
 	for idx := range n.Header.KeysNum {

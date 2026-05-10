@@ -4,7 +4,8 @@ import (
 	"fmt"
 )
 
-// ForTable ...
+// ForTable wraps the underlying pager with a table-specific unmarshaler that
+// decodes leaf, internal, overflow, and free pages using the given column schema.
 func (p *pagerImpl) ForTable(columns []Column) Pager {
 	return &tablePager{
 		pagerImpl: p,
@@ -12,7 +13,10 @@ func (p *pagerImpl) ForTable(columns []Column) Pager {
 	}
 }
 
-// ForIndex ...
+// ForIndex wraps the underlying pager with a type-parameterised index unmarshaler
+// chosen from the column kind. Composite (multi-column) indexes always use
+// CompositeKey; single-column indexes select the concrete key type that matches
+// the column kind (int8, int32, int64, float32, float64, string, or UUIDValue).
 func (p *pagerImpl) ForIndex(columns []Column, unique bool) Pager {
 	if len(columns) > 1 {
 		return &indexPager[CompositeKey]{p, columns, unique}

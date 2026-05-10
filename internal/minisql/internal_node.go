@@ -13,19 +13,21 @@ const (
 	RootInternalNodeMaxCells = 331
 )
 
-// InternalNodeHeader ...
+// InternalNodeHeader is the on-disk header for an internal B+ tree node. It
+// extends the base Header with the number of separator keys and the page index
+// of the rightmost child.
 type InternalNodeHeader struct {
 	Header
 	KeysNum    uint32
 	RightChild PageIndex
 }
 
-// Size ...
+// Size returns the serialised byte size of InternalNodeHeader (base Header + 8 bytes).
 func (h *InternalNodeHeader) Size() (s uint64) {
 	return h.Header.Size() + 8
 }
 
-// Marshal ...
+// Marshal serialises the header into buf in little-endian byte order.
 func (h *InternalNodeHeader) Marshal(buf []byte) {
 	i := uint64(0)
 
@@ -45,7 +47,7 @@ func (h *InternalNodeHeader) Marshal(buf []byte) {
 	i += 8
 }
 
-// Unmarshal ...
+// Unmarshal deserialises the header from buf and returns the number of bytes consumed.
 func (h *InternalNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 	i := uint64(0)
 
@@ -70,7 +72,8 @@ func (h *InternalNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 	return h.Size(), nil
 }
 
-// ICell ...
+// ICell is a single key-pointer pair stored in an internal B+ tree node.
+// Key is the separator row ID and Child is the left child page index.
 type ICell struct {
 	Key   RowID
 	Child PageIndex
@@ -79,12 +82,12 @@ type ICell struct {
 // ICellSize is the serialised byte size of an ICell (8-byte key + 4-byte child pointer).
 const ICellSize = 12 // (8+4)
 
-// Size ...
+// Size returns the fixed serialised byte size of an ICell (ICellSize = 12).
 func (c *ICell) Size() uint64 {
 	return ICellSize
 }
 
-// Marshal ...
+// Marshal serialises the ICell into buf: 8-byte key then 4-byte child index.
 func (c *ICell) Marshal(buf []byte) {
 	i := uint64(0)
 
@@ -94,7 +97,7 @@ func (c *ICell) Marshal(buf []byte) {
 	marshalUint32(buf, uint32(c.Child), i)
 }
 
-// Unmarshal ...
+// Unmarshal deserialises an ICell from buf and returns the number of bytes consumed.
 func (c *ICell) Unmarshal(buf []byte) (uint64, error) {
 	i := uint64(0)
 
@@ -107,13 +110,15 @@ func (c *ICell) Unmarshal(buf []byte) (uint64, error) {
 	return c.Size(), nil
 }
 
-// InternalNode ...
+// InternalNode is a non-leaf page in the B+ tree. It holds separator keys and
+// child page pointers: each ICell carries a left child, and the header's
+// RightChild field points to the rightmost subtree.
 type InternalNode struct {
 	Header InternalNodeHeader
 	ICells [InternalNodeMaxCells]ICell
 }
 
-// Clone ...
+// Clone returns a deep copy of the internal node with an independent ICell array.
 func (n *InternalNode) Clone() *InternalNode {
 	nodeCopy := NewInternalNode()
 	copy(nodeCopy.ICells[:], n.ICells[:])
@@ -124,7 +129,8 @@ func (n *InternalNode) Clone() *InternalNode {
 // RightChildNotSet is the sentinel value indicating an internal node has no right child yet.
 const RightChildNotSet = math.MaxUint32
 
-// NewInternalNode ...
+// NewInternalNode allocates a new internal node with IsInternal set and
+// RightChild initialised to RightChildNotSet.
 func NewInternalNode() *InternalNode {
 	node := InternalNode{
 		Header: InternalNodeHeader{
@@ -138,7 +144,8 @@ func NewInternalNode() *InternalNode {
 	return &node
 }
 
-// Size ...
+// Size returns the total serialised byte size of the internal node
+// (header + all ICells in the fixed-size array).
 func (n *InternalNode) Size() uint64 {
 	size := n.Header.Size()
 	for idx := range n.ICells {
@@ -147,7 +154,7 @@ func (n *InternalNode) Size() uint64 {
 	return size
 }
 
-// Marshal ...
+// Marshal serialises the node into buf: header first, then each ICell up to KeysNum.
 func (n *InternalNode) Marshal(buf []byte) error {
 	i := uint64(0)
 
@@ -162,7 +169,8 @@ func (n *InternalNode) Marshal(buf []byte) error {
 	return nil
 }
 
-// Unmarshal ...
+// Unmarshal deserialises the node from buf, reading the header then each ICell,
+// and returns the total number of bytes consumed.
 func (n *InternalNode) Unmarshal(buf []byte) (uint64, error) {
 	i := uint64(0)
 

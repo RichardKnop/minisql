@@ -8,7 +8,10 @@ import (
 	"go.uber.org/zap"
 )
 
-// Insert ...
+// Insert executes an INSERT statement against the table. It handles single-row,
+// multi-row, and multi-value inserts, ON CONFLICT DO NOTHING / DO UPDATE (upsert),
+// and maintains all primary-key, unique, and secondary indexes. Returns the number
+// of rows inserted and, when a RETURNING clause is present, the inserted rows.
 func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, error) {
 	stmt.TableName = t.Name
 	stmt.Columns = t.Columns

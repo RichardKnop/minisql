@@ -5,12 +5,12 @@ import (
 	"fmt"
 )
 
-// JoinType ...
+// JoinType identifies the variety of JOIN operation to perform.
 type JoinType int
 
 // JoinType constants enumerate the supported JOIN varieties.
 const (
-	// Inner ...
+	// Inner is an INNER JOIN — only rows that have a match in both tables.
 	Inner JoinType = iota + 1
 	// Left is a LEFT JOIN.
 	Left
@@ -18,7 +18,8 @@ const (
 	Right
 )
 
-// Join ...
+// Join describes a single JOIN clause within a SELECT statement, including the
+// joined table, its alias, the ON conditions, any nested sub-joins, and the type.
 type Join struct {
 	TableName  string
 	TableAlias string
@@ -27,7 +28,10 @@ type Join struct {
 	Type       JoinType
 }
 
-// AddJoin ...
+// AddJoin attaches a new JOIN clause to the statement at the correct position in
+// the join tree. fromTableAlias must match an existing alias (the base table or a
+// previously added join), and toTableAlias must be unique. Returns an error if the
+// statement is not a SELECT or the alias cannot be found.
 func (s Statement) AddJoin(joinType JoinType, fromTableAlias, toTable, toTableAlias string, conditions Conditions) (Statement, error) {
 	if s.Kind != Select {
 		return Statement{}, errors.New("joins can only be added to SELECT statements")
@@ -119,7 +123,9 @@ func (j Join) addJoin(joinType JoinType, fromTableAlias, toTable, toTaableAlias 
 	return Join{}, false, nil
 }
 
-// FromTableAlias ...
+// FromTableAlias returns the alias of the table on the left-hand side of the
+// JOIN condition by inspecting the first condition operand that belongs to a
+// different alias than the join's own table alias. Returns "" if undetermined.
 func (j Join) FromTableAlias() string {
 	if len(j.Conditions) == 0 || j.TableAlias == "" {
 		return ""

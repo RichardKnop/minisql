@@ -10,7 +10,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// IndexInfo ...
+// IndexInfo carries the metadata shared by all index types (primary key, unique,
+// and secondary). It records the index name, covered columns, and optional
+// partial-index predicate and expression used by the query planner.
 type IndexInfo struct {
 	Expression    *Expr     // nil = column index; non-nil = expression index
 	WhereCond     OneOrMore // parsed DNF form of the partial index predicate (nil = full index)
@@ -38,14 +40,16 @@ func (ii IndexInfo) WhereCondColumns() []string {
 	return cols
 }
 
-// PrimaryKey ...
+// PrimaryKey associates the B+ tree index with the primary key metadata and
+// records whether the key column uses AUTOINCREMENT.
 type PrimaryKey struct {
 	Index BTreeIndex
 	IndexInfo
 	Autoincrement bool
 }
 
-// NewPrimaryKey ...
+// NewPrimaryKey constructs a PrimaryKey descriptor with the given index name,
+// covered columns, and autoincrement flag. The BTreeIndex field is set later.
 func NewPrimaryKey(indexName string, columns []Column, autoincrement bool) PrimaryKey {
 	return PrimaryKey{
 		IndexInfo: IndexInfo{
@@ -56,7 +60,8 @@ func NewPrimaryKey(indexName string, columns []Column, autoincrement bool) Prima
 	}
 }
 
-// PrimaryKeyName ...
+// PrimaryKeyName returns the canonical internal index name for a table's primary key,
+// following the convention "pkey__<tableName>".
 func PrimaryKeyName(tableName string) string {
 	return fmt.Sprintf(
 		"pkey__%s",

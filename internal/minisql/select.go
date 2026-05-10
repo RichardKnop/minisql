@@ -9,10 +9,13 @@ import (
 	"go.uber.org/zap"
 )
 
-// ErrNoMoreRows ...
+// ErrNoMoreRows is returned by an Iterator's row function when the result set is exhausted.
 var ErrNoMoreRows = errors.New("no more rows")
 
-// Select ...
+// Select executes a SELECT statement against the table. It chooses the optimal
+// scan strategy (sequential, index point, index range, covering index, etc.) from
+// the query plan, applies WHERE filters, handles GROUP BY / HAVING, ORDER BY,
+// LIMIT / OFFSET, aggregates, DISTINCT, JOINs, and UNION / UNION ALL clauses.
 func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, error) {
 	stmt.TableName = t.Name
 	stmt.Columns = t.Columns

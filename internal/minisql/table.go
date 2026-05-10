@@ -10,7 +10,10 @@ import (
 	"go.uber.org/zap"
 )
 
-// Table ...
+// Table is the central runtime structure for a single database table. It holds
+// the schema (columns), the root page of the B+ tree that stores row data, and
+// all associated indexes (primary key, unique, secondary). Method calls on Table
+// execute DML statements, maintain indexes, and enforce constraints.
 type Table struct {
 	PrimaryKey           PrimaryKey
 	provider             TableProvider
@@ -57,24 +60,24 @@ type Table struct {
 	maximumICells      uint32
 }
 
-// TableOption ...
+// TableOption is a functional option applied to a Table during construction via NewTable.
 type TableOption func(*Table)
 
-// WithPrimaryKey ...
+// WithPrimaryKey sets the primary key index on the table being constructed.
 func WithPrimaryKey(pk PrimaryKey) TableOption {
 	return func(t *Table) {
 		t.PrimaryKey = pk
 	}
 }
 
-// WithUniqueIndex ...
+// WithUniqueIndex registers a unique index on the table being constructed.
 func WithUniqueIndex(index UniqueIndex) TableOption {
 	return func(t *Table) {
 		t.UniqueIndexes[index.Name] = index
 	}
 }
 
-// WithSecondaryIndex ...
+// WithSecondaryIndex registers a secondary (non-unique) index on the table being constructed.
 func WithSecondaryIndex(index SecondaryIndex) TableOption {
 	return func(t *Table) {
 		t.SecondaryIndexes[index.Name] = index
@@ -142,7 +145,9 @@ func WithRowCountGetter(fn func() int64) TableOption {
 	}
 }
 
-// NewTable ...
+// NewTable constructs a Table and applies the given options (primary key, unique
+// and secondary indexes, FK callbacks, etc.). If provider is nil a simple
+// single-table provider is created, which is sufficient for unit tests.
 func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, name string, columns []Column, rootPageIdx PageIndex, provider TableProvider, opts ...TableOption) *Table {
 	table := &Table{
 		Name:                 name,
@@ -211,7 +216,8 @@ type singleTableProvider struct {
 	table *Table
 }
 
-// GetTable ...
+// GetTable returns the single table this provider wraps, or a CTE virtual table
+// stored in the context, if the requested name matches.
 func (p *singleTableProvider) GetTable(ctx context.Context, name string) (*Table, bool) {
 	if vt, ok := cteFromContext(ctx, name); ok {
 		return vt, true
@@ -222,7 +228,8 @@ func (p *singleTableProvider) GetTable(ctx context.Context, name string) (*Table
 	return nil, false
 }
 
-// SetSecondaryIndex ...
+// SetSecondaryIndex registers or replaces a secondary index on the table and
+// updates the column-to-IndexInfo cache used by the query planner.
 func (t *Table) SetSecondaryIndex(si SecondaryIndex) {
 	t.SecondaryIndexes[si.Name] = si
 	if si.Expression != nil {
@@ -233,7 +240,8 @@ func (t *Table) SetSecondaryIndex(si SecondaryIndex) {
 	}
 }
 
-// RemoveSecondaryIndex ...
+// RemoveSecondaryIndex removes the named secondary index from the table and
+// clears it from the column-to-IndexInfo cache.
 func (t *Table) RemoveSecondaryIndex(name string) {
 	si, ok := t.SecondaryIndexes[name]
 	if !ok {
@@ -258,22 +266,23 @@ func (t *Table) FindExpressionIndex(expr *Expr) (SecondaryIndex, bool) {
 	return SecondaryIndex{}, false
 }
 
-// GetRootPageIdx ...
+// GetRootPageIdx returns the page index of the root page for the table's row B+ tree.
 func (t *Table) GetRootPageIdx() PageIndex {
 	return t.rootPageIdx
 }
 
-// HasNoIndex ...
+// HasNoIndex reports whether the table has no indexes at all — no primary key,
+// no unique indexes, and no secondary indexes.
 func (t *Table) HasNoIndex() bool {
 	return !t.HasPrimaryKey() && len(t.UniqueIndexes) == 0 && len(t.SecondaryIndexes) == 0
 }
 
-// HasPrimaryKey ...
+// HasPrimaryKey reports whether a primary key index has been defined for the table.
 func (t *Table) HasPrimaryKey() bool {
 	return t.PrimaryKey.Name != ""
 }
 
-// ColumnByName ...
+// ColumnByName looks up a column in the table's schema by name using the column cache.
 func (t *Table) ColumnByName(name string) (Column, bool) {
 	if idx, ok := t.columnCache[name]; ok {
 		return t.Columns[idx], true
@@ -281,7 +290,8 @@ func (t *Table) ColumnByName(name string) (Column, bool) {
 	return Column{}, false
 }
 
-// IndexColumnsByIndexName ...
+// IndexColumnsByIndexName returns the ordered column list for the named index
+// (primary key, unique, or secondary), or (nil, false) if no such index exists.
 func (t *Table) IndexColumnsByIndexName(name string) ([]Column, bool) {
 	if t.HasPrimaryKey() && t.PrimaryKey.Name == name {
 		return t.PrimaryKey.Columns, true
@@ -295,7 +305,8 @@ func (t *Table) IndexColumnsByIndexName(name string) ([]Column, bool) {
 	return nil, false
 }
 
-// HasIndexOnColumns ...
+// HasIndexOnColumns reports whether any index (primary, unique, or secondary)
+// covers exactly the given ordered column list.
 func (t *Table) HasIndexOnColumns(columns []Column) bool {
 	if len(columns) == 0 {
 		return false
@@ -304,13 +315,14 @@ func (t *Table) HasIndexOnColumns(columns []Column) bool {
 	return ok
 }
 
-// HasIndexOnColumn ...
+// HasIndexOnColumn reports whether any single-column index covers the named column.
 func (t *Table) HasIndexOnColumn(name string) bool {
 	_, ok := t.columnIndexInfoCache[name]
 	return ok
 }
 
-// IndexInfoByColumnName ...
+// IndexInfoByColumnName returns the IndexInfo for the index covering the named
+// single column, or (IndexInfo{}, false) if no such index exists.
 func (t *Table) IndexInfoByColumnName(name string) (IndexInfo, bool) {
 	info, ok := t.columnIndexInfoCache[name]
 	if !ok {
@@ -328,7 +340,7 @@ func (t *Table) IndexInfoByColumns(columns []Column) (IndexInfo, bool) {
 	return info, true
 }
 
-// IndexByName ...
+// IndexByName returns the BTreeIndex for the named index (primary, unique, or secondary).
 func (t *Table) IndexByName(name string) (BTreeIndex, bool) {
 	if t.HasPrimaryKey() && t.PrimaryKey.Name == name {
 		return t.PrimaryKey.Index, true
@@ -778,7 +790,8 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 	return t.InternalNodeInsert(ctx, splitPage.InternalNode.Header.Parent, newPage.Index)
 }
 
-// GetMaxKey ...
+// GetMaxKey returns the largest RowID in the subtree rooted at page by
+// following right-child pointers down to the rightmost leaf.
 func (t *Table) GetMaxKey(ctx context.Context, page *Page) (RowID, error) {
 	if page.LeafNode != nil {
 		if page.LeafNode.Header.Cells == 0 {
@@ -1415,7 +1428,8 @@ func (t *Table) maxICells(pageIdx PageIndex) int {
 
 type callback func(page *Page)
 
-// BFS ...
+// BFS performs a breadth-first traversal of the table's row B+ tree, calling f
+// for every page visited. Used by tests and the integrity checker.
 func (t *Table) BFS(ctx context.Context, f callback) error {
 	rootPage, err := t.pager.ReadPage(ctx, t.GetRootPageIdx())
 	if err != nil {

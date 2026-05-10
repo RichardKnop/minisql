@@ -7,7 +7,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// Delete ...
+// Delete executes a DELETE statement against the table, removing all rows that
+// match the WHERE clause and maintaining every affected index. Returns the
+// number of rows deleted and, when a RETURNING clause is present, the deleted rows.
 func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, error) {
 	stmt.TableName = t.Name
 	stmt.Columns = t.Columns

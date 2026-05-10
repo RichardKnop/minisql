@@ -15,7 +15,8 @@ type IndexCursor[T IndexKey] struct {
 	CellIdx uint32
 }
 
-// ErrNotFound ...
+// ErrNotFound is returned by VisitRowIDs and related lookups when the requested
+// key does not exist in the index.
 var ErrNotFound = errors.New("not found")
 
 // VisitRowIDs calls fn for each row ID stored under key, reading overflow pages
@@ -97,7 +98,9 @@ func (ui *Index[T]) FindRowIDs(ctx context.Context, keyAny any) ([]RowID, error)
 	return rowIDs, nil
 }
 
-// Seek ...
+// Seek performs a binary-search descent from page to find the cell whose key
+// equals keyAny. Returns the cursor and true if found, or the zero cursor and
+// false if the key does not exist in the subtree rooted at page.
 func (ui *Index[T]) Seek(ctx context.Context, page *Page, keyAny any) (IndexCursor[T], bool, error) {
 	key, ok := keyAny.(T)
 	if !ok {
@@ -131,7 +134,9 @@ func (ui *Index[T]) Seek(ctx context.Context, page *Page, keyAny any) (IndexCurs
 	return ui.Seek(ctx, childPage, key)
 }
 
-// SeekWithPrefix ...
+// SeekWithPrefix descends from page to find the first cell whose CompositeKey
+// matches prefixAny on its first prefixColumns columns. Only CompositeKey
+// indexes support this operation; all other key types return an error.
 func (ui *Index[T]) SeekWithPrefix(ctx context.Context, page *Page, prefixAny any, prefixColumns int) (IndexCursor[T], bool, error) {
 	prefix, ok := prefixAny.(T)
 	if !ok {

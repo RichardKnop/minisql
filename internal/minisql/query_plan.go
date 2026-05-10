@@ -6,7 +6,7 @@ import (
 	"reflect"
 )
 
-// ScanType ...
+// ScanType selects the execution strategy the query planner assigns to a Scan.
 type ScanType int
 
 // ScanType constants define the available index and table scan strategies.
@@ -50,13 +50,15 @@ func (st ScanType) String() string {
 	}
 }
 
-// RangeBound ...
+// RangeBound describes one end of a range scan condition, carrying the boundary
+// value and whether the bound is inclusive (>= / <=) or exclusive (> / <).
 type RangeBound struct {
 	Value     any
 	Inclusive bool // true for >= or <=, false for > or <
 }
 
-// RangeCondition ...
+// RangeCondition holds the optional lower and upper bounds for a ScanTypeIndexRange scan.
+// A nil bound means unbounded on that side.
 type RangeCondition struct {
 	Lower *RangeBound // nil = unbounded
 	Upper *RangeBound // nil = unbounded
@@ -110,7 +112,10 @@ type QueryPlan struct {
 	SortReverse  bool
 }
 
-// Scan ...
+// Scan describes a single table or index scan operation within a QueryPlan.
+// The Type field determines which execution path is used; the remaining fields
+// supply the parameters (index name, key values, range bounds, filters, etc.)
+// relevant to that scan type.
 type Scan struct {
 	RangeCondition RangeCondition
 	TableName      string

@@ -7,9 +7,10 @@ import (
 const (
 	// SchemaTableName is the internal table used to store schema metadata.
 	SchemaTableName = "minisql_schema"
-	// StatsTableName ...
+	// StatsTableName is the internal table used to store column statistics for query planning.
 	StatsTableName = "minisql_stats"
-	// MaxColumns ...
+	// MaxColumns is the hard limit on the number of columns per table, imposed by
+	// the 64-bit NullBitmask stored in every leaf cell.
 	MaxColumns = 64
 	// RootPageConfigSize is the number of bytes reserved for the root page config header.
 	RootPageConfigSize = 100

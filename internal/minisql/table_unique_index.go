@@ -8,13 +8,15 @@ import (
 	"go.uber.org/zap"
 )
 
-// UniqueIndex ...
+// UniqueIndex associates a unique-enforcing B+ tree index with its metadata.
+// Attempting to insert a duplicate key into the underlying Index returns ErrDuplicateKey.
 type UniqueIndex struct {
 	Index BTreeIndex
 	IndexInfo
 }
 
-// UniqueIndexName ...
+// UniqueIndexName returns the canonical internal name for a unique index,
+// following the convention "key__<tableName>__<col1>__<col2>...".
 func UniqueIndexName(tableName string, columns ...string) string {
 	return fmt.Sprintf(
 		"key__%s__%s",

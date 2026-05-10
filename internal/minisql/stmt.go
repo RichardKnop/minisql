@@ -20,12 +20,12 @@ const (
 	ConflictActionDoUpdate
 )
 
-// StatementKind ...
+// StatementKind identifies which SQL statement a parsed Statement represents.
 type StatementKind int
 
 // StatementKind constants enumerate the supported SQL statement types.
 const (
-	// CreateTable ...
+	// CreateTable is a CREATE TABLE DDL statement.
 	CreateTable StatementKind = iota + 1
 	DropTable
 	CreateIndex
@@ -85,9 +85,9 @@ type AggregateKind int
 
 // AggregateKind constants enumerate the supported aggregate functions.
 const (
-	// AggregateCount ...
+	// AggregateCount is the COUNT(*) aggregate function.
 	AggregateCount AggregateKind = iota + 1 // COUNT(*)
-	// AggregateSum ...
+	// AggregateSum is the SUM aggregate function.
 	AggregateSum // SUM(col)
 	// AggregateAvg is the AVG aggregate function.
 	AggregateAvg // AVG(col)
@@ -124,12 +124,12 @@ type AggregateExpr struct {
 	Kind   AggregateKind
 }
 
-// ColumnKind ...
+// ColumnKind identifies the data type of a table column.
 type ColumnKind int
 
 // ColumnKind constants enumerate the supported column data types.
 const (
-	// Boolean ...
+	// Boolean is the BOOLEAN column type (stored as int8).
 	Boolean ColumnKind = iota + 1
 	Int4
 	Int8
@@ -142,7 +142,7 @@ const (
 	UUID
 )
 
-// IsInt ...
+// IsInt reports whether the column kind is an integer type (INT4 or INT8).
 func (k ColumnKind) IsInt() bool {
 	return k == Int4 || k == Int8
 }
@@ -174,7 +174,7 @@ func (k ColumnKind) String() string {
 	}
 }
 
-// IsText ...
+// IsText reports whether the column kind stores variable-length text (VARCHAR, TEXT, or JSON).
 func (k ColumnKind) IsText() bool {
 	return k == Varchar || k == Text || k == JSON
 }
@@ -184,7 +184,8 @@ func (k ColumnKind) IsUUID() bool {
 	return k == UUID
 }
 
-// Column ...
+// Column describes a single column in a table's schema, including its data type,
+// size, nullability, default value, and optional CHECK constraint.
 type Column struct {
 	DefaultValue    OptionalValue
 	CheckCond       *ConditionNode // parsed CHECK expression (nil if no CHECK constraint)
@@ -232,7 +233,9 @@ func textOverflowFields(columns ...Column) []Field {
 	return overflowFields
 }
 
-// Field ...
+// Field represents a single item in a SELECT list (or GROUP BY / ORDER BY clause).
+// For plain column references only Name is set; for expressions Expr is non-nil;
+// Alias holds the AS alias, and AliasPrefix holds the table alias for qualified names.
 type Field struct {
 	Expr        *Expr
 	AliasPrefix string
@@ -262,12 +265,12 @@ func (f Field) OutputName() string {
 	return f.Name
 }
 
-// Direction ...
+// Direction specifies ascending or descending sort order for ORDER BY clauses.
 type Direction int
 
 // Direction constants define the sort order for ORDER BY clauses.
 const (
-	// Asc ...
+	// Asc is the ascending sort direction.
 	Asc Direction = iota + 1
 	// Desc is the descending sort direction.
 	Desc
@@ -284,23 +287,23 @@ func (d Direction) String() string {
 	}
 }
 
-// OrderBy ...
+// OrderBy pairs a field with its sort direction for an ORDER BY clause.
 type OrderBy struct {
 	Field     Field
 	Direction Direction
 }
 
-// Function ...
+// Function represents a SQL scalar function reference by name.
 type Function struct {
 	Name string
 }
 
 const nowFunctionName = "NOW()"
 
-// FunctionNow ...
+// FunctionNow is the sentinel value used for the NOW() scalar function in default values.
 var FunctionNow = Function{Name: nowFunctionName}
 
-// Placeholder ...
+// Placeholder is the sentinel type for a ? bind parameter in a prepared statement.
 type Placeholder struct{}
 
 // ExcludedRef represents a reference to EXCLUDED.column_name inside an
@@ -322,7 +325,9 @@ type CTE struct {
 	Body *Statement
 }
 
-// Statement ...
+// Statement is the central data structure produced by the parser. It describes
+// a single SQL statement of any kind (DML, DDL, transaction control, etc.) and
+// is passed through preparation, binding, validation, and execution unchanged.
 type Statement struct {
 	PrimaryKey        PrimaryKey
 	Aliases           map[string]string
@@ -420,7 +425,9 @@ func (s Statement) NumPlaceholders() int {
 	return count
 }
 
-// Clone ...
+// Clone returns a deep copy of the statement, safe to mutate independently.
+// Used by BindArguments so that a prepared statement can be re-bound with
+// different arguments without corrupting the original parsed form.
 func (s Statement) Clone() Statement {
 	// For INSERT, Fields are always fully rebuilt by prepareInsert — share the
 	// reference to avoid an allocation that immediately becomes dead.
@@ -512,7 +519,9 @@ func (s Statement) Clone() Statement {
 	return stmt
 }
 
-// BindArguments ...
+// BindArguments substitutes ? placeholders in the statement with the provided
+// arguments in left-to-right order. It clones the statement first so the
+// original prepared form is not modified and can be reused with different args.
 func (s Statement) BindArguments(args ...any) (Statement, error) {
 	// Clone statement so we can keep using the preparement statement
 	// with different arguments without modifying it
@@ -653,7 +662,7 @@ func operandTypeFromAny(value any) OperandType {
 	}
 }
 
-// HasField ...
+// HasField reports whether the SELECT field list contains a column with the given name.
 func (s Statement) HasField(name string) bool {
 	for _, field := range s.Fields {
 		if field.Name == name {
@@ -663,17 +672,18 @@ func (s Statement) HasField(name string) bool {
 	return false
 }
 
-// ReadOnly ...
+// ReadOnly reports whether the statement modifies no data (SELECT, PRAGMA, or EXPLAIN).
 func (s Statement) ReadOnly() bool {
 	return s.Kind == Select || s.Kind == Pragma || s.Kind == Explain
 }
 
-// IsDDL ...
+// IsDDL reports whether the statement is a data-definition statement
+// (CREATE TABLE, DROP TABLE, CREATE INDEX, or DROP INDEX).
 func (s Statement) IsDDL() bool {
 	return s.Kind == CreateTable || s.Kind == DropTable || s.Kind == CreateIndex || s.Kind == DropIndex
 }
 
-// ColumnByName ...
+// ColumnByName looks up a column in the statement's schema by name.
 func (s Statement) ColumnByName(name string) (Column, bool) {
 	for i := range s.Columns {
 		if s.Columns[i].Name == name {
@@ -1063,7 +1073,8 @@ func validateJoinTree(joins []Join, tableMap, aliasMap map[string]struct{}) erro
 	return nil
 }
 
-// Validate ...
+// Validate checks the statement for semantic correctness against the given table's
+// schema (column existence, type compatibility, constraint satisfaction, etc.).
 func (s Statement) Validate(table *Table) error {
 	switch s.Kind {
 	case CreateTable:
@@ -1719,7 +1730,9 @@ func (s Statement) validateWhere() error {
 	return nil
 }
 
-// DDL ...
+// DDL returns the canonical SQL DDL string for the statement (CREATE TABLE or
+// CREATE INDEX), used to persist the schema to the database header. Returns ""
+// for non-DDL statement kinds.
 func (s Statement) DDL() string {
 	switch s.Kind {
 	case CreateTable:
@@ -1911,7 +1924,9 @@ func (s Statement) resolveExcludedRefs(insertIdx int) Statement {
 	return s
 }
 
-// InsertValuesForColumns ...
+// InsertValuesForColumns returns the insert values for the given columns from the
+// insertIdx-th row in the INSERT statement, preserving the column order.
+// Columns not present in the INSERT field list are omitted from the result.
 func (s Statement) InsertValuesForColumns(insertIdx int, columns ...Column) []OptionalValue {
 	values := make([]OptionalValue, 0, len(columns))
 	for _, col := range columns {
@@ -1934,7 +1949,8 @@ func (s Statement) InsertValuesForColumns(insertIdx int, columns ...Column) []Op
 	return values
 }
 
-// ColumnIdx ...
+// ColumnIdx returns the 0-based index of the named column in the statement's
+// schema, or -1 if not found.
 func (s Statement) ColumnIdx(name string) int {
 	for i, col := range s.Columns {
 		if col.Name == name {
@@ -1944,12 +1960,13 @@ func (s Statement) ColumnIdx(name string) int {
 	return -1
 }
 
-// IsSelectCountAll ...
+// IsSelectCountAll reports whether the statement is a bare COUNT(*) query with
+// no WHERE clause or JOIN, eligible for the O(1) cached row-count fast path.
 func (s Statement) IsSelectCountAll() bool {
 	return s.ReadOnly() && len(s.Fields) == 1 && strings.ToUpper(s.Fields[0].Name) == "COUNT(*)"
 }
 
-// IsSelectAll ...
+// IsSelectAll reports whether the statement is a SELECT * (wildcard) query.
 func (s Statement) IsSelectAll() bool {
 	return s.ReadOnly() && len(s.Fields) == 1 && s.Fields[0].Name == "*"
 }
