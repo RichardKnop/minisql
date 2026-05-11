@@ -42,9 +42,10 @@ func TestParse_CreateIndex(t *testing.T) {
 			"CREATE INDEX foo ON bar (qux);",
 			[]minisql.Statement{
 				{
-					Kind:      minisql.CreateIndex,
-					IndexName: "foo",
-					TableName: "bar",
+					Kind:        minisql.CreateIndex,
+					IndexMethod: minisql.IndexMethodBTree,
+					IndexName:   "foo",
+					TableName:   "bar",
 					Columns: []minisql.Column{
 						{
 							Name: "qux",
@@ -59,9 +60,10 @@ func TestParse_CreateIndex(t *testing.T) {
 			"CREATE INDEX IF NOT EXISTS foo ON bar (qux);",
 			[]minisql.Statement{
 				{
-					Kind:      minisql.CreateIndex,
-					IndexName: "foo",
-					TableName: "bar",
+					Kind:        minisql.CreateIndex,
+					IndexMethod: minisql.IndexMethodBTree,
+					IndexName:   "foo",
+					TableName:   "bar",
 					Columns: []minisql.Column{
 						{
 							Name: "qux",
@@ -77,9 +79,10 @@ func TestParse_CreateIndex(t *testing.T) {
 			"CREATE INDEX foo ON bar (qux, baz);",
 			[]minisql.Statement{
 				{
-					Kind:      minisql.CreateIndex,
-					IndexName: "foo",
-					TableName: "bar",
+					Kind:        minisql.CreateIndex,
+					IndexMethod: minisql.IndexMethodBTree,
+					IndexName:   "foo",
+					TableName:   "bar",
 					Columns: []minisql.Column{
 						{
 							Name: "qux",
@@ -98,6 +101,7 @@ func TestParse_CreateIndex(t *testing.T) {
 			[]minisql.Statement{
 				{
 					Kind:             minisql.CreateIndex,
+					IndexMethod:      minisql.IndexMethodBTree,
 					IndexName:        "idx_active",
 					TableName:        "orders",
 					IndexWhereClause: "status = 'active'",
@@ -122,10 +126,55 @@ func TestParse_CreateIndex(t *testing.T) {
 			"CREATE INDEX idx_all ON orders (amount);",
 			[]minisql.Statement{
 				{
-					Kind:      minisql.CreateIndex,
-					IndexName: "idx_all",
-					TableName: "orders",
-					Columns:   []minisql.Column{{Name: "amount"}},
+					Kind:        minisql.CreateIndex,
+					IndexMethod: minisql.IndexMethodBTree,
+					IndexName:   "idx_all",
+					TableName:   "orders",
+					Columns:     []minisql.Column{{Name: "amount"}},
+				},
+			},
+			nil,
+		},
+		{
+			"CREATE FULLTEXT INDEX works",
+			"CREATE FULLTEXT INDEX idx_body ON articles (body);",
+			[]minisql.Statement{
+				{
+					Kind:           minisql.CreateIndex,
+					IndexMethod:    minisql.IndexMethodFullText,
+					IndexTokenizer: minisql.TextSearchTokenizerSimple,
+					IndexName:      "idx_body",
+					TableName:      "articles",
+					Columns:        []minisql.Column{{Name: "body"}},
+				},
+			},
+			nil,
+		},
+		{
+			"CREATE FULLTEXT INDEX with tokenizer option works",
+			"CREATE FULLTEXT INDEX idx_body ON articles (body) WITH (tokenizer = 'simple');",
+			[]minisql.Statement{
+				{
+					Kind:           minisql.CreateIndex,
+					IndexMethod:    minisql.IndexMethodFullText,
+					IndexTokenizer: minisql.TextSearchTokenizerSimple,
+					IndexName:      "idx_body",
+					TableName:      "articles",
+					Columns:        []minisql.Column{{Name: "body"}},
+				},
+			},
+			nil,
+		},
+		{
+			"CREATE INVERTED INDEX works",
+			"CREATE INVERTED INDEX idx_payload ON events (payload);",
+			[]minisql.Statement{
+				{
+					Kind:        minisql.CreateIndex,
+					IndexMethod: minisql.IndexMethodInverted,
+					IndexName:   "idx_payload",
+					TableName:   "events",
+					Columns:     []minisql.Column{{Name: "payload"}},
 				},
 			},
 			nil,
@@ -244,6 +293,7 @@ func TestParse_CreateExpressionIndex(t *testing.T) {
 
 			stmt := stmts[0]
 			assert.Equal(t, minisql.CreateIndex, stmt.Kind)
+			assert.Equal(t, minisql.IndexMethodBTree, stmt.IndexMethod)
 			assert.Equal(t, tt.expressionSQL, stmt.IndexExpressionSQL)
 			require.NotNil(t, stmt.IndexExpression)
 			assert.Equal(t, []minisql.Column{{Name: "__expr__"}}, stmt.Columns)

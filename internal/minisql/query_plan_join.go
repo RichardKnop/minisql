@@ -271,6 +271,9 @@ func (t *Table) findIndexOnColumns(columnNames []string) *IndexInfo {
 
 	// Check secondary indexes (skip partial indexes — they omit rows)
 	for name, idx := range t.SecondaryIndexes {
+		if !idx.IsBTree() {
+			continue
+		}
 		if idx.WhereClause != "" {
 			continue
 		}

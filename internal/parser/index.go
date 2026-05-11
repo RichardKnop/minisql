@@ -84,6 +84,16 @@ func (p *parserItem) doParseCreateIndex() error {
 			p.step = stepCreateIndexColumn
 			return nil
 		}
+		p.step = stepCreateIndexWithOrWhereOrEnd
+	case stepCreateIndexWithOrWhereOrEnd:
+		token := strings.ToUpper(p.peek())
+		if token != "WITH" {
+			p.step = stepCreateIndexWhereOrEnd
+			return nil
+		}
+		if err := p.parseCreateIndexWithOptions(); err != nil {
+			return err
+		}
 		p.step = stepCreateIndexWhereOrEnd
 	case stepCreateIndexWhereOrEnd:
 		token := strings.ToUpper(p.peek())
@@ -102,6 +112,51 @@ func (p *parserItem) doParseCreateIndex() error {
 		p.step = stepStatementEnd
 	}
 	return nil
+}
+
+func (p *parserItem) parseCreateIndexWithOptions() error {
+	p.pop() // consume WITH
+	if p.peek() != "(" {
+		return p.errorf("at CREATE INDEX: expected opening parens after WITH")
+	}
+	p.pop()
+
+	for {
+		optionName := strings.ToUpper(p.peek())
+		if optionName == "" || optionName == ")" {
+			return p.errorf("at CREATE INDEX: expected WITH option name")
+		}
+		p.pop()
+
+		if p.peek() != "=" {
+			return p.errorf("at CREATE INDEX: expected '=' after WITH option name")
+		}
+		p.pop()
+
+		optionValue := p.peek()
+		if optionValue == "" {
+			return p.errorf("at CREATE INDEX: expected WITH option value")
+		}
+		p.pop()
+
+		switch optionName {
+		case "TOKENIZER":
+			p.IndexTokenizer = strings.ToLower(optionValue)
+		default:
+			return p.errorf("at CREATE INDEX: unknown WITH option %q", optionName)
+		}
+
+		switch p.peek() {
+		case ",":
+			p.pop()
+			continue
+		case ")":
+			p.pop()
+			return nil
+		default:
+			return p.errorf("at CREATE INDEX: expected comma or closing parens after WITH option")
+		}
+	}
 }
 
 func (p *parserItem) doParseDropIndex() error {
