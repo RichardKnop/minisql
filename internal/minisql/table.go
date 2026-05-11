@@ -232,6 +232,9 @@ func (p *singleTableProvider) GetTable(ctx context.Context, name string) (*Table
 // updates the column-to-IndexInfo cache used by the query planner.
 func (t *Table) SetSecondaryIndex(si SecondaryIndex) {
 	t.SecondaryIndexes[si.Name] = si
+	if !si.IsBTree() {
+		return
+	}
 	if si.Expression != nil {
 		// Expression indexes are looked up by their SQL text, not by column name.
 		t.columnIndexInfoCache[si.ExpressionSQL] = si.IndexInfo
@@ -247,6 +250,10 @@ func (t *Table) RemoveSecondaryIndex(name string) {
 	if !ok {
 		return
 	}
+	if !si.IsBTree() {
+		delete(t.SecondaryIndexes, name)
+		return
+	}
 	if si.Expression != nil {
 		delete(t.columnIndexInfoCache, si.ExpressionSQL)
 	} else {
@@ -259,7 +266,7 @@ func (t *Table) RemoveSecondaryIndex(name string) {
 // structurally equal to expr, or (SecondaryIndex{}, false) if none exists.
 func (t *Table) FindExpressionIndex(expr *Expr) (SecondaryIndex, bool) {
 	for _, si := range t.SecondaryIndexes {
-		if si.Expression != nil && exprEqual(si.Expression, expr) {
+		if si.IsBTree() && si.Expression != nil && exprEqual(si.Expression, expr) {
 			return si, true
 		}
 	}
@@ -274,7 +281,15 @@ func (t *Table) GetRootPageIdx() PageIndex {
 // HasNoIndex reports whether the table has no indexes at all — no primary key,
 // no unique indexes, and no secondary indexes.
 func (t *Table) HasNoIndex() bool {
-	return !t.HasPrimaryKey() && len(t.UniqueIndexes) == 0 && len(t.SecondaryIndexes) == 0
+	if t.HasPrimaryKey() || len(t.UniqueIndexes) > 0 {
+		return false
+	}
+	for _, idx := range t.SecondaryIndexes {
+		if idx.IsBTree() {
+			return false
+		}
+	}
+	return true
 }
 
 // HasPrimaryKey reports whether a primary key index has been defined for the table.
@@ -349,6 +364,9 @@ func (t *Table) IndexByName(name string) (BTreeIndex, bool) {
 		return index.Index, true
 	}
 	if index, ok := t.SecondaryIndexes[name]; ok {
+		if !index.IsBTree() {
+			return nil, false
+		}
 		return index.Index, true
 	}
 	return nil, false

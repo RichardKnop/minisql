@@ -37,7 +37,7 @@ var reservedWords = []string{
 	"BOOLEAN", "INT4", "INT8", "REAL", "DOUBLE", "TEXT", "VARCHAR(", "TIMESTAMP", "JSON", "UUID",
 	// statement types
 	"EXPLAIN ANALYZE", "EXPLAIN",
-	"CREATE TABLE", "DROP TABLE", "CREATE INDEX", "DROP INDEX",
+	"CREATE TABLE", "DROP TABLE", "CREATE FULLTEXT INDEX", "CREATE INVERTED INDEX", "CREATE INDEX", "DROP INDEX",
 	"SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
 	"*", "COUNT(*)", "SUM(", "AVG(", "MIN(", "MAX(", "GROUP BY", "HAVING", "ORDER BY", "LIMIT", "OFFSET",
@@ -100,6 +100,7 @@ const (
 	stepCreateIndexOpeningParens
 	stepCreateIndexColumn
 	stepCreateIndexCommaOrClosingParens
+	stepCreateIndexWithOrWhereOrEnd
 	stepCreateIndexWhereOrEnd
 	stepDropIndexName
 	stepInsertTable
@@ -202,6 +203,18 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 				p.step = stepDropTableName
 			case "CREATE INDEX":
 				p.Kind = minisql.CreateIndex
+				p.IndexMethod = minisql.IndexMethodBTree
+				p.pop()
+				p.step = stepCreateIndexIfNotExists
+			case "CREATE FULLTEXT INDEX":
+				p.Kind = minisql.CreateIndex
+				p.IndexMethod = minisql.IndexMethodFullText
+				p.IndexTokenizer = minisql.TextSearchTokenizerSimple
+				p.pop()
+				p.step = stepCreateIndexIfNotExists
+			case "CREATE INVERTED INDEX":
+				p.Kind = minisql.CreateIndex
+				p.IndexMethod = minisql.IndexMethodInverted
 				p.pop()
 				p.step = stepCreateIndexIfNotExists
 			case "DROP INDEX":
@@ -301,6 +314,7 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 			stepCreateIndexOpeningParens,
 			stepCreateIndexColumn,
 			stepCreateIndexCommaOrClosingParens,
+			stepCreateIndexWithOrWhereOrEnd,
 			stepCreateIndexWhereOrEnd:
 			if err := p.doParseCreateIndex(); err != nil {
 				return statements, err

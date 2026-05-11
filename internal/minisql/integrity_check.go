@@ -60,7 +60,7 @@ func (d *Database) IntegrityCheck(ctx context.Context) (IntegrityReport, error) 
 			report = d.walkIndexPages(ctx, report, table.Name, index.Name, index.Columns, true, index.Index.GetRootPageIdx(), livePages)
 		}
 		for _, index := range table.SecondaryIndexes {
-			if index.Index == nil {
+			if !index.IsBTree() || index.Index == nil {
 				continue
 			}
 			report = d.walkIndexPages(ctx, report, table.Name, index.Name, index.Columns, false, index.Index.GetRootPageIdx(), livePages)
@@ -121,7 +121,7 @@ func (d *Database) QuickCheck(ctx context.Context) (IntegrityReport, error) {
 			}
 		}
 		for _, index := range table.SecondaryIndexes {
-			if index.Index != nil {
+			if index.IsBTree() && index.Index != nil {
 				rootPages[index.Index.GetRootPageIdx()] = fmt.Sprintf("index %s", index.Name)
 			}
 		}
@@ -699,7 +699,7 @@ func (d *Database) checkTableIndexConsistency(ctx context.Context, report Integr
 		})
 	}
 	for _, index := range table.SecondaryIndexes {
-		if index.Index == nil {
+		if !index.IsBTree() || index.Index == nil {
 			continue
 		}
 		report = checkIndexConsistency(ctx, report, table, indexConsistencyTarget{

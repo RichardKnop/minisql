@@ -1779,6 +1779,45 @@ func TestStatement_DDL(t *testing.T) {
 		assert.Equal(t, expected, actual)
 	})
 
+	t.Run("create fulltext index with tokenizer", func(t *testing.T) {
+		stmt := Statement{
+			Kind:           CreateIndex,
+			IndexMethod:    IndexMethodFullText,
+			IndexName:      "idx_articles_body",
+			IndexTokenizer: TextSearchTokenizerSimple,
+			TableName:      "articles",
+			Columns: []Column{
+				{Name: "body"},
+			},
+		}
+
+		expected := `create fulltext index "idx_articles_body" on "articles" (
+	body
+) with (tokenizer = 'simple');`
+
+		actual := stmt.DDL()
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("create inverted index", func(t *testing.T) {
+		stmt := Statement{
+			Kind:        CreateIndex,
+			IndexMethod: IndexMethodInverted,
+			IndexName:   "idx_events_payload",
+			TableName:   "events",
+			Columns: []Column{
+				{Name: "payload"},
+			},
+		}
+
+		expected := `create inverted index "idx_events_payload" on "events" (
+	payload
+);`
+
+		actual := stmt.DDL()
+		assert.Equal(t, expected, actual)
+	})
+
 	t.Run("create table with single foreign key (default restrict)", func(t *testing.T) {
 		columns := []Column{
 			{Kind: Int8, Size: 8, Name: "id"},

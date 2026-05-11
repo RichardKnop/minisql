@@ -337,6 +337,9 @@ func (t *Table) findBestEqualityIndexMatch(group Conditions) *indexMatch {
 		allIndexes = append(allIndexes, idx.IndexInfo)
 	}
 	for _, idx := range t.SecondaryIndexes {
+		if !idx.IsBTree() {
+			continue
+		}
 		allIndexes = append(allIndexes, idx.IndexInfo)
 	}
 

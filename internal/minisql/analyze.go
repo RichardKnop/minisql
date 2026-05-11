@@ -113,6 +113,9 @@ func (d *Database) Analyze(ctx context.Context, target string) error {
 
 		// 4. Analyze secondary indexes
 		for _, secondaryIdx := range table.SecondaryIndexes {
+			if !secondaryIdx.IsBTree() {
+				continue
+			}
 			if err := d.analyzeIndex(ctx, statsTable, tableName, secondaryIdx.Name, secondaryIdx.Index, false); err != nil {
 				return fmt.Errorf("analyze secondary index %s: %w", secondaryIdx.Name, err)
 			}
@@ -204,7 +207,7 @@ func (d *Database) analyzeIndex(ctx context.Context, statsTable *Table, tableNam
 		}
 		if indexColumns == nil {
 			for _, idx := range table.SecondaryIndexes {
-				if idx.Name == indexName {
+				if idx.IsBTree() && idx.Name == indexName {
 					indexColumns = idx.Columns
 					break
 				}

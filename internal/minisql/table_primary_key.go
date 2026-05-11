@@ -17,9 +17,16 @@ type IndexInfo struct {
 	Expression    *Expr     // nil = column index; non-nil = expression index
 	WhereCond     OneOrMore // parsed DNF form of the partial index predicate (nil = full index)
 	Name          string
-	ExpressionSQL string   // raw SQL of the expression (empty = column index)
-	WhereClause   string   // raw SQL of the partial index predicate (empty = full index)
+	ExpressionSQL string // raw SQL of the expression (empty = column index)
+	WhereClause   string // raw SQL of the partial index predicate (empty = full index)
+	Tokenizer     string // tokenizer option for full-text indexes
 	Columns       []Column
+	Method        IndexMethod
+}
+
+// IsBTree reports whether this index uses the scalar B+ tree access method.
+func (ii IndexInfo) IsBTree() bool {
+	return ii.Method == IndexMethodBTree
 }
 
 // WhereCondColumns returns the names of columns referenced in the partial index WHERE predicate.

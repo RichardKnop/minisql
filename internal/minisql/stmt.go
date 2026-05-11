@@ -287,6 +287,41 @@ func (d Direction) String() string {
 	}
 }
 
+// IndexMethod identifies the access method used by a secondary index.
+type IndexMethod int
+
+const (
+	// IndexMethodBTree is the default scalar B+ tree index method.
+	IndexMethodBTree IndexMethod = iota
+	// IndexMethodFullText is reserved for future full-text inverted indexes.
+	IndexMethodFullText
+	// IndexMethodInverted is reserved for future JSON inverted indexes.
+	IndexMethodInverted
+)
+
+func (m IndexMethod) String() string {
+	switch m {
+	case IndexMethodBTree:
+		return "btree"
+	case IndexMethodFullText:
+		return "fulltext"
+	case IndexMethodInverted:
+		return "inverted"
+	default:
+		return "unknown"
+	}
+}
+
+const (
+	// TextSearchTokenizerSimple is the only supported tokenizer in the initial
+	// full-text search implementation.
+	TextSearchTokenizerSimple = "simple"
+)
+
+func isSupportedIndexTokenizer(tokenizer string) bool {
+	return tokenizer == TextSearchTokenizerSimple
+}
+
 // OrderBy pairs a field with its sort direction for an ORDER BY clause.
 type OrderBy struct {
 	Field     Field
@@ -341,6 +376,7 @@ type Statement struct {
 	IndexName          string
 	IndexWhereClause   string // raw SQL of the partial index predicate (empty = full index)
 	IndexExpressionSQL string // raw SQL of the index expression (empty = column index)
+	IndexTokenizer     string // tokenizer option for full-text indexes
 	Target             string
 	PragmaName         string
 	PragmaValue        string
@@ -362,6 +398,7 @@ type Statement struct {
 	FromSubqueryAlias  string     // alias for the derived table (e.g. "t" in FROM (...) t)
 	CTEs               []CTE      // non-nil for WITH … SELECT statements
 	Kind               StatementKind
+	IndexMethod        IndexMethod
 	ConflictAction     ConflictAction
 	IfNotExists        bool
 	ExplainAnalyze     bool
@@ -450,6 +487,7 @@ func (s Statement) Clone() Statement {
 		IndexWhereClause:   s.IndexWhereClause,
 		IndexExpression:    s.IndexExpression,
 		IndexExpressionSQL: s.IndexExpressionSQL,
+		IndexTokenizer:     s.IndexTokenizer,
 		Target:             s.Target,
 		PragmaName:         s.PragmaName,
 		PragmaValue:        s.PragmaValue,
@@ -470,6 +508,7 @@ func (s Statement) Clone() Statement {
 		Offset:             s.Offset,
 		ReturningFields:    s.ReturningFields,
 		ExplainAnalyze:     s.ExplainAnalyze,
+		IndexMethod:        s.IndexMethod,
 		FromSubqueryAlias:  s.FromSubqueryAlias,
 		ForeignKeys:        s.ForeignKeys, // slice of value structs, safe to share
 	}
@@ -1254,7 +1293,7 @@ func (s Statement) validateCreateIndex(table *Table) error {
 		return errors.New("at least one column is required")
 	}
 
-	if table.HasIndexOnColumns(s.Columns) {
+	if s.IndexMethod == IndexMethodBTree && table.HasIndexOnColumns(s.Columns) {
 		return fmt.Errorf("columns %s can only have one index", columnNames(s.Columns))
 	}
 
@@ -1262,7 +1301,62 @@ func (s Statement) validateCreateIndex(table *Table) error {
 		return fmt.Errorf("index definition too long, maximum length is %d", maximumSchemaSQL)
 	}
 
+	if err := s.validateCreateIndexMethod(table); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func (s Statement) validateCreateIndexMethod(table *Table) error {
+	switch s.IndexMethod {
+	case IndexMethodBTree:
+		if s.IndexTokenizer != "" {
+			return errors.New("btree indexes do not support tokenizer options")
+		}
+		return nil
+	case IndexMethodFullText:
+		if s.IndexExpression != nil {
+			return errors.New("full-text indexes do not support expression keys yet")
+		}
+		if len(s.Columns) != 1 {
+			return errors.New("full-text indexes require exactly one column")
+		}
+		if s.IndexTokenizer == "" {
+			return errors.New("full-text indexes require a tokenizer")
+		}
+		if !isSupportedIndexTokenizer(s.IndexTokenizer) {
+			return fmt.Errorf("unsupported full-text tokenizer %q", s.IndexTokenizer)
+		}
+		col, ok := table.ColumnByName(s.Columns[0].Name)
+		if !ok {
+			return fmt.Errorf("column %s does not exist on table %s", s.Columns[0].Name, s.TableName)
+		}
+		if col.Kind != Text && col.Kind != Varchar {
+			return fmt.Errorf("full-text index column %q must be TEXT or VARCHAR", col.Name)
+		}
+		return nil
+	case IndexMethodInverted:
+		if s.IndexExpression != nil {
+			return errors.New("inverted indexes do not support expression keys yet")
+		}
+		if s.IndexTokenizer != "" {
+			return errors.New("inverted indexes do not support tokenizer options")
+		}
+		if len(s.Columns) != 1 {
+			return errors.New("inverted indexes require exactly one column")
+		}
+		col, ok := table.ColumnByName(s.Columns[0].Name)
+		if !ok {
+			return fmt.Errorf("column %s does not exist on table %s", s.Columns[0].Name, s.TableName)
+		}
+		if col.Kind != JSON {
+			return fmt.Errorf("inverted index column %q must be JSON", col.Name)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown index method %s", s.IndexMethod)
+	}
 }
 
 func (s Statement) validateDropIndex() error {
@@ -1861,7 +1955,14 @@ func (s Statement) createTableDDL() string {
 
 func (s Statement) createIndexDDL() string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "create index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName)
+	switch s.IndexMethod {
+	case IndexMethodFullText:
+		fmt.Fprintf(&sb, "create fulltext index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName)
+	case IndexMethodInverted:
+		fmt.Fprintf(&sb, "create inverted index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName)
+	default:
+		fmt.Fprintf(&sb, "create index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName)
+	}
 
 	for i, col := range s.Columns {
 		if s.IndexExpression != nil && i == 0 {
@@ -1876,6 +1977,9 @@ func (s Statement) createIndexDDL() string {
 	}
 
 	sb.WriteString("\n)")
+	if s.IndexTokenizer != "" {
+		fmt.Fprintf(&sb, " with (tokenizer = '%s')", s.IndexTokenizer)
+	}
 	if s.IndexWhereClause != "" {
 		fmt.Fprintf(&sb, " where %s", s.IndexWhereClause)
 	}
