@@ -60,6 +60,10 @@ func inferExprResultKind(expr *Expr, tableCols []Column) ColumnKind {
 		switch expr.FuncName {
 		case "LOWER", "UPPER", "TRIM", "LTRIM", "RTRIM", "SUBSTR", "REPLACE", "CONCAT":
 			return Varchar
+		case "MATCH":
+			return Boolean
+		case "TS_RANK":
+			return Double
 		case "LENGTH", "MOD":
 			return Int8
 		case "EXTRACT", "DATE_PART":

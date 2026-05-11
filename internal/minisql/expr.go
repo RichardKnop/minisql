@@ -1213,6 +1213,58 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 		}
 		return TimestampMicros(t.TotalMicroseconds()), nil
 
+	// ── Text search functions ──────────────────────────────────────────────────
+
+	case "MATCH":
+		if len(e.Args) != 2 {
+			return nil, fmt.Errorf("MATCH requires exactly 2 arguments")
+		}
+		docVal, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		queryVal, err := e.Args[1].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if docVal == nil || queryVal == nil {
+			return false, nil
+		}
+		doc, ok := toStringVal(docVal)
+		if !ok {
+			return nil, fmt.Errorf("MATCH: first argument must be a string")
+		}
+		query, ok := toStringVal(queryVal)
+		if !ok {
+			return nil, fmt.Errorf("MATCH: second argument must be a string")
+		}
+		return textSearchMatch(doc, query), nil
+
+	case "TS_RANK":
+		if len(e.Args) != 2 {
+			return nil, fmt.Errorf("TS_RANK requires exactly 2 arguments")
+		}
+		docVal, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		queryVal, err := e.Args[1].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if docVal == nil || queryVal == nil {
+			return float64(0), nil
+		}
+		doc, ok := toStringVal(docVal)
+		if !ok {
+			return nil, fmt.Errorf("TS_RANK: first argument must be a string")
+		}
+		query, ok := toStringVal(queryVal)
+		if !ok {
+			return nil, fmt.Errorf("TS_RANK: second argument must be a string")
+		}
+		return textSearchRank(doc, query), nil
+
 	// ── JSON functions ──────────────────────────────────────────────────────────
 
 	case "JSON_VALID":

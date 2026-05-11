@@ -451,7 +451,8 @@ func isBuiltinFunction(name string) bool {
 		"DATE_TRUNC",
 		"EXTRACT", "DATE_PART",
 		"TO_TIMESTAMP",
-		"JSON_EXTRACT", "JSON_VALID", "JSON_TYPE", "JSON_ARRAY_LENGTH":
+		"JSON_EXTRACT", "JSON_VALID", "JSON_TYPE", "JSON_ARRAY_LENGTH",
+		"MATCH", "TS_RANK":
 		return true
 	}
 	return false
