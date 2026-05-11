@@ -733,6 +733,12 @@ func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields [
 }
 
 func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, allRows []Row, requestedFields []Field) (StatementResult, error) {
+	var err error
+	allRows, err = addOrderByOutputFields(allRows, requestedFields, plan.OrderBy)
+	if err != nil {
+		return StatementResult{}, err
+	}
+
 	// Check if we can use heap optimization for LIMIT queries
 	var limit int
 	hasLimit := stmt.Limit.Valid
@@ -803,6 +809,58 @@ func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, allRows []Row, re
 	})
 
 	return result, nil
+}
+
+func addOrderByOutputFields(rows []Row, fields []Field, orderBy []OrderBy) ([]Row, error) {
+	if len(rows) == 0 || len(orderBy) == 0 {
+		return rows, nil
+	}
+
+	outputFields := make(map[string]Field)
+	for _, field := range fields {
+		outputFields[field.OutputName()] = field
+	}
+
+	for rowIdx, row := range rows {
+		updated := row
+		for _, clause := range orderBy {
+			if _, found := updated.GetValue(clause.Field.Name); found {
+				continue
+			}
+
+			field, ok := outputFields[clause.Field.Name]
+			if !ok {
+				continue
+			}
+
+			var value OptionalValue
+			if field.Expr != nil {
+				result, err := field.Expr.Eval(updated)
+				if err != nil {
+					return nil, fmt.Errorf("evaluating ORDER BY expression %q: %w", field.OutputName(), err)
+				}
+				if result != nil {
+					value = OptionalValue{Value: result, Valid: true}
+				}
+			} else {
+				lookupName := field.Name
+				if field.AliasPrefix != "" {
+					lookupName = field.AliasPrefix + "." + field.Name
+				}
+				existing, found := updated.GetValue(lookupName)
+				if !found {
+					continue
+				}
+				value = existing
+			}
+
+			updated.Columns = append(updated.Columns, Column{Name: field.OutputName()})
+			updated.Values = append(updated.Values, value)
+		}
+		rows[rowIdx] = updated
+	}
+
+	return rows, nil
 }
 
 func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, selectedFields []Field, out func(Row) error) error {

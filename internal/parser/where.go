@@ -157,6 +157,15 @@ func (p *parserItem) parsePrimaryCondExpr() (*minisql.ConditionNode, error) {
 	return p.parseLeafCondition()
 }
 
+func nextTokenIsConditionOperator(token string) bool {
+	switch strings.ToUpper(token) {
+	case "IS NULL", "IS NOT NULL", "=", "!=", ">", ">=", "<", "<=", "LIKE", "NOT LIKE":
+		return true
+	default:
+		return false
+	}
+}
+
 // parseLeafCondition parses a single WHERE/HAVING condition: field op value.
 // In HAVING clauses the left-side "field" may be a synthetic aggregate result
 // column name such as "SUM(total_paid)" or "COUNT(*)".
@@ -173,6 +182,11 @@ func (p *parserItem) parseLeafCondition() (*minisql.ConditionNode, error) {
 		}
 		cond := minisql.Condition{
 			Operand1: minisql.Operand{Type: minisql.OperandExpr, Value: expr},
+		}
+		if upperIdent == "MATCH" && !nextTokenIsConditionOperator(p.peek()) {
+			cond.Operator = minisql.Eq
+			cond.Operand2 = minisql.Operand{Type: minisql.OperandBoolean, Value: true}
+			return &minisql.ConditionNode{Leaf: &cond}, nil
 		}
 		return p.parseCondOperatorAndRHS(&cond)
 	}

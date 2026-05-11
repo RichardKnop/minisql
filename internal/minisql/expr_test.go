@@ -438,6 +438,57 @@ func TestExpr_Eval_UPPER_LOWER(t *testing.T) {
 	})
 }
 
+func TestExpr_Eval_TextSearch(t *testing.T) {
+	t.Parallel()
+
+	row := rowWithText("body", "MiniSQL is a small embedded database. MiniSQL stores data in pages.")
+
+	t.Run("MATCH uses implicit AND over query terms", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "MATCH", Args: []*Expr{{Column: "body"}, textExpr("minisql database")}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, true, v)
+	})
+
+	t.Run("MATCH ignores stop words and punctuation", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "MATCH", Args: []*Expr{{Column: "body"}, textExpr("the small, embedded!")}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, true, v)
+	})
+
+	t.Run("MATCH returns false when any query term is missing", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "MATCH", Args: []*Expr{{Column: "body"}, textExpr("minisql postgres")}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, false, v)
+	})
+
+	t.Run("TS_RANK uses log-scaled term frequency", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "TS_RANK", Args: []*Expr{{Column: "body"}, textExpr("minisql database")}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.InDelta(t, 0.8958, v.(float64), 0.0001)
+	})
+
+	t.Run("null arguments produce false match and zero rank", func(t *testing.T) {
+		t.Parallel()
+		nullRow := NewRowWithValues([]Column{{Name: "body", Kind: Text}}, []OptionalValue{{Valid: false}})
+
+		match, err := (&Expr{FuncName: "MATCH", Args: []*Expr{{Column: "body"}, textExpr("minisql")}}).Eval(nullRow)
+		require.NoError(t, err)
+		assert.Equal(t, false, match)
+
+		rank, err := (&Expr{FuncName: "TS_RANK", Args: []*Expr{{Column: "body"}, textExpr("minisql")}}).Eval(nullRow)
+		require.NoError(t, err)
+		assert.Equal(t, float64(0), rank)
+	})
+}
+
 func TestExpr_Eval_TRIM(t *testing.T) {
 	t.Parallel()
 

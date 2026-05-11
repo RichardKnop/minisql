@@ -329,43 +329,43 @@ type CTE struct {
 // a single SQL statement of any kind (DML, DDL, transaction control, etc.) and
 // is passed through preparation, binding, validation, and execution unchanged.
 type Statement struct {
-	PrimaryKey        PrimaryKey
-	Aliases           map[string]string
-	Functions         map[string]Function
-	Updates           map[string]OptionalValue
-	Offset            OptionalValue
-	Limit             OptionalValue
-	TableName         string
-	TableAlias        string
-	IndexExpression    *Expr  // nil = column index; non-nil = expression index
+	PrimaryKey         PrimaryKey
+	Aliases            map[string]string
+	Functions          map[string]Function
+	Updates            map[string]OptionalValue
+	Offset             OptionalValue
+	Limit              OptionalValue
+	TableName          string
+	TableAlias         string
+	IndexExpression    *Expr // nil = column index; non-nil = expression index
 	IndexName          string
 	IndexWhereClause   string // raw SQL of the partial index predicate (empty = full index)
 	IndexExpressionSQL string // raw SQL of the index expression (empty = column index)
-	Target            string
-	PragmaName        string
-	PragmaValue       string
-	Fields            []Field
-	Inserts           [][]OptionalValue
-	Aggregates        []AggregateExpr
-	GroupBy           []Field
-	Having            OneOrMore
-	Unions            []UnionClause
-	Joins             []Join
-	OrderBy           []OrderBy
-	UniqueIndexes     []UniqueIndex
-	ForeignKeys       []ForeignKey
-	Columns           []Column
-	Conditions        OneOrMore
-	ReturningFields   []Field
-	ExplainStatement  *Statement
-	FromSubquery      *Statement // non-nil when FROM clause is a derived table
-	FromSubqueryAlias string     // alias for the derived table (e.g. "t" in FROM (...) t)
-	CTEs              []CTE      // non-nil for WITH … SELECT statements
-	Kind              StatementKind
-	ConflictAction    ConflictAction
-	IfNotExists       bool
-	ExplainAnalyze    bool
-	Distinct          bool
+	Target             string
+	PragmaName         string
+	PragmaValue        string
+	Fields             []Field
+	Inserts            [][]OptionalValue
+	Aggregates         []AggregateExpr
+	GroupBy            []Field
+	Having             OneOrMore
+	Unions             []UnionClause
+	Joins              []Join
+	OrderBy            []OrderBy
+	UniqueIndexes      []UniqueIndex
+	ForeignKeys        []ForeignKey
+	Columns            []Column
+	Conditions         OneOrMore
+	ReturningFields    []Field
+	ExplainStatement   *Statement
+	FromSubquery       *Statement // non-nil when FROM clause is a derived table
+	FromSubqueryAlias  string     // alias for the derived table (e.g. "t" in FROM (...) t)
+	CTEs               []CTE      // non-nil for WITH … SELECT statements
+	Kind               StatementKind
+	ConflictAction     ConflictAction
+	IfNotExists        bool
+	ExplainAnalyze     bool
+	Distinct           bool
 }
 
 // NumPlaceholders returns the number of placeholder parameters (?) in the statement.
@@ -442,36 +442,36 @@ func (s Statement) Clone() Statement {
 	}
 
 	stmt := Statement{
-		Kind:              s.Kind,
-		IfNotExists:       s.IfNotExists,
-		TableName:         s.TableName,
-		TableAlias:        s.TableAlias,
+		Kind:               s.Kind,
+		IfNotExists:        s.IfNotExists,
+		TableName:          s.TableName,
+		TableAlias:         s.TableAlias,
 		IndexName:          s.IndexName,
 		IndexWhereClause:   s.IndexWhereClause,
 		IndexExpression:    s.IndexExpression,
 		IndexExpressionSQL: s.IndexExpressionSQL,
-		Target:            s.Target,
-		PragmaName:        s.PragmaName,
-		PragmaValue:       s.PragmaValue,
-		ConflictAction:    s.ConflictAction,
-		Columns:           s.Columns,
-		Distinct:          s.Distinct,
-		Fields:            fields,
-		Aggregates:        s.Aggregates, // slice of value types, safe to share
-		Aliases:           s.Aliases,
-		Inserts:           make([][]OptionalValue, len(s.Inserts)),
-		Functions:         s.Functions,
-		Conditions:        make(OneOrMore, len(s.Conditions)),
-		GroupBy:           s.GroupBy,
-		Having:            s.Having,
-		Joins:             s.Joins,
-		OrderBy:           s.OrderBy,
-		Limit:             s.Limit,
-		Offset:            s.Offset,
-		ReturningFields:   s.ReturningFields,
-		ExplainAnalyze:    s.ExplainAnalyze,
-		FromSubqueryAlias: s.FromSubqueryAlias,
-		ForeignKeys:       s.ForeignKeys, // slice of value structs, safe to share
+		Target:             s.Target,
+		PragmaName:         s.PragmaName,
+		PragmaValue:        s.PragmaValue,
+		ConflictAction:     s.ConflictAction,
+		Columns:            s.Columns,
+		Distinct:           s.Distinct,
+		Fields:             fields,
+		Aggregates:         s.Aggregates, // slice of value types, safe to share
+		Aliases:            s.Aliases,
+		Inserts:            make([][]OptionalValue, len(s.Inserts)),
+		Functions:          s.Functions,
+		Conditions:         make(OneOrMore, len(s.Conditions)),
+		GroupBy:            s.GroupBy,
+		Having:             s.Having,
+		Joins:              s.Joins,
+		OrderBy:            s.OrderBy,
+		Limit:              s.Limit,
+		Offset:             s.Offset,
+		ReturningFields:    s.ReturningFields,
+		ExplainAnalyze:     s.ExplainAnalyze,
+		FromSubqueryAlias:  s.FromSubqueryAlias,
+		ForeignKeys:        s.ForeignKeys, // slice of value structs, safe to share
 	}
 	for i := range s.Inserts {
 		stmt.Inserts[i] = make([]OptionalValue, len(s.Inserts[i]))
@@ -1546,13 +1546,23 @@ func (s Statement) validateSelect(table *Table) error {
 	if len(s.OrderBy) > 0 {
 		for _, anOrderBy := range s.OrderBy {
 			_, ok := table.ColumnByName(anOrderBy.Field.Name)
-			if !ok {
+			if !ok && !s.HasOutputField(anOrderBy.Field.Name) {
 				return fmt.Errorf("unknown field %q in ORDER BY clause", anOrderBy.Field.Name)
 			}
 		}
 	}
 
 	return nil
+}
+
+// HasOutputField reports whether SELECT emits a field with the given output name.
+func (s Statement) HasOutputField(name string) bool {
+	for _, field := range s.Fields {
+		if field.OutputName() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (s Statement) validateColumnValue(table *Table, col Column, val OptionalValue) error {
