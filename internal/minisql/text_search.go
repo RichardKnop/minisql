@@ -1,7 +1,6 @@
 package minisql
 
 import (
-	"fmt"
 	"math"
 	"unicode"
 )
@@ -11,11 +10,6 @@ var textSearchStopWords = map[string]struct{}{
 	"for": {}, "from": {}, "in": {}, "is": {}, "it": {}, "of": {}, "on": {}, "or": {},
 	"that": {}, "the": {}, "to": {}, "was": {}, "with": {},
 }
-
-const (
-	fullTextPostingPositionBits = 32
-	maxFullTextPostingComponent = uint64(^uint32(0))
-)
 
 type textSearchTokenPosition struct {
 	Term     string
@@ -27,6 +21,8 @@ type textSearchQuery struct {
 	Phrases [][]string
 }
 
+// textSearchTokens returns the normalized token terms from input, without
+// positions. It is used by ranking and callers that only need term presence.
 func textSearchTokens(input string) []string {
 	positions := textSearchTokenPositions(input)
 	tokens := make([]string, len(positions))
@@ -36,6 +32,8 @@ func textSearchTokens(input string) []string {
 	return tokens
 }
 
+// textSearchTokenPositions lowercases input, splits on non-letter/non-digit
+// boundaries, removes stop words, and assigns dense positions to emitted tokens.
 func textSearchTokenPositions(input string) []textSearchTokenPosition {
 	tokens := make([]textSearchTokenPosition, 0)
 	current := make([]rune, 0, 16)
@@ -69,6 +67,8 @@ func textSearchTokenPositions(input string) []textSearchTokenPosition {
 	return tokens
 }
 
+// uniqueTextSearchTokens returns de-duplicated indexable tokens in first-seen
+// order. Tokens too large for the current B+ tree key format are skipped.
 func uniqueTextSearchTokens(input string) []string {
 	tokens := textSearchTokens(input)
 	seen := make(map[string]struct{}, len(tokens))
@@ -86,6 +86,8 @@ func uniqueTextSearchTokens(input string) []string {
 	return unique
 }
 
+// parseTextSearchQuery splits a MATCH query into plain terms and double-quoted
+// phrases. Plain terms and phrases are combined with implicit AND semantics.
 func parseTextSearchQuery(input string) (textSearchQuery, bool) {
 	var (
 		query       textSearchQuery
@@ -137,6 +139,8 @@ func parseTextSearchQuery(input string) (textSearchQuery, bool) {
 	return query, true
 }
 
+// appendUniqueTextSearchTerms appends terms that are not already present,
+// preserving the order of their first occurrence.
 func appendUniqueTextSearchTerms(existing []string, terms ...string) []string {
 	seen := make(map[string]struct{}, len(existing)+len(terms))
 	for _, term := range existing {
@@ -155,6 +159,8 @@ func appendUniqueTextSearchTerms(existing []string, terms ...string) []string {
 	return existing
 }
 
+// allUniqueTokens returns every distinct token needed to evaluate the query,
+// including tokens that came from phrases.
 func (q textSearchQuery) allUniqueTokens() []string {
 	tokens := appendUniqueTextSearchTerms(nil, q.Terms...)
 	for _, phrase := range q.Phrases {
@@ -163,6 +169,8 @@ func (q textSearchQuery) allUniqueTokens() []string {
 	return tokens
 }
 
+// textSearchMatch evaluates MATCH semantics in memory. Plain query terms must
+// all be present, and every quoted phrase must appear at adjacent token positions.
 func textSearchMatch(document, query string) bool {
 	parsedQuery, ok := parseTextSearchQuery(query)
 	if !ok {
@@ -191,6 +199,8 @@ func textSearchMatch(document, query string) bool {
 	return true
 }
 
+// textSearchRank returns a simple log-scaled term-frequency score for the query
+// tokens. Phrase proximity does not affect ranking yet.
 func textSearchRank(document, query string) float64 {
 	parsedQuery, ok := parseTextSearchQuery(query)
 	if !ok {
@@ -218,6 +228,8 @@ func textSearchRank(document, query string) float64 {
 	return score / float64(len(queryTokens))
 }
 
+// textSearchPhraseMatches reports whether all tokens in phrase appear at
+// consecutive positions in the already-tokenized document position map.
 func textSearchPhraseMatches(positions map[string][]uint32, phrase []string) bool {
 	if len(phrase) == 0 {
 		return false
@@ -249,15 +261,4 @@ func textSearchPhraseMatches(positions map[string][]uint32, phrase []string) boo
 		}
 	}
 	return false
-}
-
-func encodeFullTextPosting(rowID RowID, position uint32) (RowID, error) {
-	if uint64(rowID) > maxFullTextPostingComponent {
-		return 0, fmt.Errorf("full-text row id %d exceeds positional posting limit", rowID)
-	}
-	return RowID(uint64(rowID)<<fullTextPostingPositionBits | uint64(position)), nil
-}
-
-func decodeFullTextPosting(posting RowID) (RowID, uint32) {
-	return RowID(uint64(posting) >> fullTextPostingPositionBits), uint32(posting)
 }

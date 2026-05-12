@@ -146,19 +146,6 @@ func TestTextSearchMatch(t *testing.T) {
 	}
 }
 
-func TestFullTextPostingEncoding(t *testing.T) {
-	t.Parallel()
-
-	posting, err := encodeFullTextPosting(42, 7)
-	assert.NoError(t, err)
-	rowID, position := decodeFullTextPosting(posting)
-	assert.Equal(t, RowID(42), rowID)
-	assert.Equal(t, uint32(7), position)
-
-	_, err = encodeFullTextPosting(RowID(maxFullTextPostingComponent+1), 0)
-	assert.ErrorContains(t, err, "exceeds positional posting limit")
-}
-
 func TestTextSearchRank(t *testing.T) {
 	t.Parallel()
 

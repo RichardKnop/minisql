@@ -231,7 +231,7 @@ func (t *Table) insertFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 		return err
 	}
 	for _, token := range tokens {
-		posting, err := encodeFullTextPosting(rowID, token.Position)
+		posting, err := encodeFullTextPosting(fullTextPosting{RowID: rowID, Position: token.Position})
 		if err != nil {
 			return err
 		}
@@ -266,7 +266,7 @@ func (t *Table) deleteFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 		return err
 	}
 	for _, token := range tokens {
-		posting, err := encodeFullTextPosting(rowID, token.Position)
+		posting, err := encodeFullTextPosting(fullTextPosting{RowID: rowID, Position: token.Position})
 		if err != nil {
 			return err
 		}

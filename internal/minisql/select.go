@@ -1114,8 +1114,8 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 		}
 		rows := make(map[RowID][]uint32)
 		for _, posting := range postings {
-			rowID, position := decodeFullTextPosting(posting)
-			rows[rowID] = append(rows[rowID], position)
+			decoded := decodeFullTextPosting(posting)
+			rows[decoded.RowID] = append(rows[decoded.RowID], decoded.Position)
 		}
 		postingsByTerm[term] = rows
 	}
