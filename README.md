@@ -636,7 +636,7 @@ ON articles (body)
 WITH (tokenizer = 'simple');
 ```
 
-The v1 index stores one B+ tree entry per unique token, with each token pointing at ordered positional postings `(row ID, token position)`. It does not compress postings, rank from index statistics, or use posting trees yet. Literal `MATCH(body, 'mini database')` predicates can use the index by intersecting posting rows for all query tokens; quoted phrases such as `MATCH(body, '"database pages"')` additionally require adjacent token positions. Dynamic query expressions fall back to the sequential semantics.
+The v1 index stores one B+ tree entry per unique token, with each token pointing at ordered positional postings `(row ID, token position)`. The current on-disk format stores packed positional postings in the generic B+ tree posting slots; a delta/varint posting-list codec exists internally as preparation for a future dedicated inverted-index payload format. It does not rank from index statistics or use posting trees yet. Literal `MATCH(body, 'mini database')` predicates can use the index by intersecting posting rows for all query tokens; quoted phrases such as `MATCH(body, '"database pages"')` additionally require adjacent token positions. Dynamic query expressions fall back to the sequential semantics.
 
 | Function | Description |
 |----------|-------------|
