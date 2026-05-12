@@ -115,6 +115,19 @@ func (s *TestSuite) TestFullTextSearch_FullTextIndex() {
 		s.Equal([]string{"MiniSQL", "Storage"}, titles)
 	})
 
+	s.Run("quoted phrases require adjacent indexed positions", func() {
+		rows, err := s.db.Query(`select title from "articles_fts" where MATCH(body, '"database pages"');`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		var title string
+		s.Require().NoError(rows.Scan(&title))
+		s.Equal("MiniSQL", title)
+		s.False(rows.Next())
+		s.Require().NoError(rows.Err())
+	})
+
 	s.Run("index reloads and passes integrity checks", func() {
 		s.Require().NoError(s.db.Close())
 		s.db = s.reopenDB()

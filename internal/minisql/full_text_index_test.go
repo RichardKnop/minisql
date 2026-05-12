@@ -84,6 +84,7 @@ func TestTable_FullTextIndexScanAndMaintenance(t *testing.T) {
 
 	titles := selectTitlesWithCondition(t, ctx, database, table, matchDatabasePages)
 	assert.Equal(t, []string{"MiniSQL", "Storage"}, titles)
+	assert.Equal(t, []string{"MiniSQL"}, selectTitlesWithCondition(t, ctx, database, table, fullTextMatchCondition("body", `"database pages"`)))
 
 	require.NoError(t, database.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		_, err := table.Update(ctx, Statement{

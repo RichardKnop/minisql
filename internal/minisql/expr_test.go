@@ -467,6 +467,14 @@ func TestExpr_Eval_TextSearch(t *testing.T) {
 		assert.Equal(t, false, v)
 	})
 
+	t.Run("MATCH supports quoted phrases", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "MATCH", Args: []*Expr{{Column: "body"}, textExpr(`"embedded database"`)}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, true, v)
+	})
+
 	t.Run("TS_RANK uses log-scaled term frequency", func(t *testing.T) {
 		t.Parallel()
 		e := &Expr{FuncName: "TS_RANK", Args: []*Expr{{Column: "body"}, textExpr("minisql database")}}

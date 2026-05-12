@@ -226,12 +226,16 @@ func (t *Table) insertFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 		return nil
 	}
 
-	tokens, err := fullTextTokensForRow(secondaryIndex, row)
+	tokens, err := fullTextTokenPositionsForRow(secondaryIndex, row)
 	if err != nil {
 		return err
 	}
 	for _, token := range tokens {
-		if err := secondaryIndex.Index.Insert(ctx, token, rowID); err != nil {
+		posting, err := encodeFullTextPosting(rowID, token.Position)
+		if err != nil {
+			return err
+		}
+		if err := secondaryIndex.Index.Insert(ctx, token.Term, posting); err != nil {
 			return fmt.Errorf("failed to insert token for full-text index %s: %w", secondaryIndex.Name, err)
 		}
 	}
@@ -257,12 +261,16 @@ func (t *Table) updateFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 }
 
 func (t *Table) deleteFullTextIndexKeys(ctx context.Context, secondaryIndex SecondaryIndex, rowID RowID, row Row) error {
-	tokens, err := fullTextTokensForRow(secondaryIndex, row)
+	tokens, err := fullTextTokenPositionsForRow(secondaryIndex, row)
 	if err != nil {
 		return err
 	}
 	for _, token := range tokens {
-		if err := secondaryIndex.Index.Delete(ctx, token, rowID); err != nil {
+		posting, err := encodeFullTextPosting(rowID, token.Position)
+		if err != nil {
+			return err
+		}
+		if err := secondaryIndex.Index.Delete(ctx, token.Term, posting); err != nil {
 			return fmt.Errorf("failed to delete token for full-text index %s: %w", secondaryIndex.Name, err)
 		}
 	}
@@ -270,6 +278,18 @@ func (t *Table) deleteFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 }
 
 func fullTextTokensForRow(secondaryIndex SecondaryIndex, row Row) ([]string, error) {
+	positions, err := fullTextTokenPositionsForRow(secondaryIndex, row)
+	if err != nil {
+		return nil, err
+	}
+	tokens := make([]string, 0, len(positions))
+	for _, token := range positions {
+		tokens = appendUniqueTextSearchTerms(tokens, token.Term)
+	}
+	return tokens, nil
+}
+
+func fullTextTokenPositionsForRow(secondaryIndex SecondaryIndex, row Row) ([]textSearchTokenPosition, error) {
 	if len(secondaryIndex.Columns) != 1 {
 		return nil, fmt.Errorf("full-text index %s requires exactly one source column", secondaryIndex.Name)
 	}
@@ -281,7 +301,15 @@ func fullTextTokensForRow(secondaryIndex SecondaryIndex, row Row) ([]string, err
 	if !ok {
 		return nil, fmt.Errorf("full-text index %s column %q must be text", secondaryIndex.Name, secondaryIndex.Columns[0].Name)
 	}
-	return uniqueTextSearchTokens(doc), nil
+	positions := textSearchTokenPositions(doc)
+	indexable := make([]textSearchTokenPosition, 0, len(positions))
+	for _, token := range positions {
+		if len([]byte(token.Term)) > MaxIndexKeySize {
+			continue
+		}
+		indexable = append(indexable, token)
+	}
+	return indexable, nil
 }
 
 func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, oldRow, row Row) error {

@@ -636,11 +636,11 @@ ON articles (body)
 WITH (tokenizer = 'simple');
 ```
 
-The v1 index stores one B+ tree entry per unique token, with each token pointing at an ordered posting list of row IDs. It does not store token positions, compress postings, rank from index statistics, or use posting trees yet. Literal `MATCH(body, 'mini database')` predicates can use the index by intersecting the posting lists for all query tokens; dynamic query expressions fall back to the sequential semantics.
+The v1 index stores one B+ tree entry per unique token, with each token pointing at ordered positional postings `(row ID, token position)`. It does not compress postings, rank from index statistics, or use posting trees yet. Literal `MATCH(body, 'mini database')` predicates can use the index by intersecting posting rows for all query tokens; quoted phrases such as `MATCH(body, '"database pages"')` additionally require adjacent token positions. Dynamic query expressions fall back to the sequential semantics.
 
 | Function | Description |
 |----------|-------------|
-| `MATCH(doc, query)` | Returns `true` when every non-stop-word query token appears in `doc`. Usable directly as `WHERE MATCH(body, 'mini database')`. |
+| `MATCH(doc, query)` | Returns `true` when every non-stop-word query token appears in `doc`. Double-quoted phrases require adjacent indexed token positions, e.g. `WHERE MATCH(body, '"mini database"')`. |
 | `TS_RANK(doc, query)` | Returns a simple relevance score using log-scaled term frequency: `sum(log(1 + term_frequency)) / query_terms`. |
 
 Tokenizer v1 lowercases text, splits on non-letter/non-digit boundaries, removes a small built-in English stop-word list, and does not perform stemming. For example, `database` and `databases` are different tokens.
@@ -650,6 +650,10 @@ SELECT id, TS_RANK(body, 'mini database') AS score
 FROM articles
 WHERE MATCH(body, 'mini database')
 ORDER BY score DESC;
+
+SELECT id
+FROM articles
+WHERE MATCH(body, 'mini "database pages"');
 ```
 
 ### Operators Reference
