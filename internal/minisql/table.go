@@ -60,91 +60,6 @@ type Table struct {
 	maximumICells      uint32
 }
 
-// TableOption is a functional option applied to a Table during construction via NewTable.
-type TableOption func(*Table)
-
-// WithPrimaryKey sets the primary key index on the table being constructed.
-func WithPrimaryKey(pk PrimaryKey) TableOption {
-	return func(t *Table) {
-		t.PrimaryKey = pk
-	}
-}
-
-// WithUniqueIndex registers a unique index on the table being constructed.
-func WithUniqueIndex(index UniqueIndex) TableOption {
-	return func(t *Table) {
-		t.UniqueIndexes[index.Name] = index
-	}
-}
-
-// WithSecondaryIndex registers a secondary (non-unique) index on the table being constructed.
-func WithSecondaryIndex(index SecondaryIndex) TableOption {
-	return func(t *Table) {
-		t.SecondaryIndexes[index.Name] = index
-	}
-}
-
-// WithParallelScan enables or disables concurrent leaf-page scanning for this table.
-func WithParallelScan(enabled bool) TableOption {
-	return func(t *Table) {
-		t.parallelScan = enabled
-	}
-}
-
-// WithForeignKeys sets the outgoing FK constraints on the table.
-func WithForeignKeys(fks []ForeignKey) TableOption {
-	return func(t *Table) {
-		t.ForeignKeys = fks
-		t.fkColumnSet = make(map[string]bool)
-		for _, fk := range fks {
-			for _, col := range fk.Columns {
-				t.fkColumnSet[col] = true
-			}
-		}
-	}
-}
-
-// WithChildFKChecker wires up a callback that checks outgoing FK constraints.
-// Called by *Database; must only be invoked while d.dbLock is held (write).
-func WithChildFKChecker(fn func(context.Context, Row) error) TableOption {
-	return func(t *Table) { t.checkChildFK = fn }
-}
-
-// WithParentFKChecker wires up a callback that enforces inbound FK constraints on DELETE.
-// Called by *Database; must only be invoked while d.dbLock is held (write).
-func WithParentFKChecker(fn func(context.Context, Row) error) TableOption {
-	return func(t *Table) { t.checkParentFK = fn }
-}
-
-// WithParentFKUpdateEnforcer wires up a callback that enforces inbound FK constraints on UPDATE.
-// Called by *Database; must only be invoked while d.dbLock is held (write).
-func WithParentFKUpdateEnforcer(fn func(context.Context, Row, Row) error) TableOption {
-	return func(t *Table) { t.enforceParentFKOnUpdate = fn }
-}
-
-// WithReferencedColumns marks which columns of this table are FK targets in other tables.
-func WithReferencedColumns(cols map[string]bool) TableOption {
-	return func(t *Table) { t.referencedColumns = cols }
-}
-
-// estimatedRowCount returns the tracked row count, or -1 if no row-count
-// accessor has been wired up (e.g. in unit tests that build tables directly).
-func (t *Table) estimatedRowCount() int64 {
-	if t.getRowCount == nil {
-		return -1
-	}
-	return t.getRowCount()
-}
-
-// WithRowCountGetter sets an O(1) row-count accessor on the table.
-// When set, COUNT(*) with no WHERE clause returns the value directly
-// instead of performing a leaf-page walk.
-func WithRowCountGetter(fn func() int64) TableOption {
-	return func(t *Table) {
-		t.getRowCount = fn
-	}
-}
-
 // NewTable constructs a Table and applies the given options (primary key, unique
 // and secondary indexes, FK callbacks, etc.). If provider is nil a simple
 // single-table provider is created, which is sufficient for unit tests.
@@ -285,7 +200,7 @@ func (t *Table) HasNoIndex() bool {
 		return false
 	}
 	for _, idx := range t.SecondaryIndexes {
-		if idx.IsBTree() {
+		if idx.IsBTree() || idx.Method == IndexMethodFullText {
 			return false
 		}
 	}
@@ -364,7 +279,7 @@ func (t *Table) IndexByName(name string) (BTreeIndex, bool) {
 		return index.Index, true
 	}
 	if index, ok := t.SecondaryIndexes[name]; ok {
-		if !index.IsBTree() {
+		if !index.IsBTree() && index.Method != IndexMethodFullText {
 			return nil, false
 		}
 		return index.Index, true
@@ -1562,4 +1477,13 @@ func (t *Table) newBTreeIndex(pager *TransactionalPager, rootPageIdx PageIndex, 
 	default:
 		return nil, fmt.Errorf("unsupported BTree index column type %v for index %s", columns[0].Kind, indexName)
 	}
+}
+
+// estimatedRowCount returns the tracked row count, or -1 if no row-count
+// accessor has been wired up (e.g. in unit tests that build tables directly).
+func (t *Table) estimatedRowCount() int64 {
+	if t.getRowCount == nil {
+		return -1
+	}
+	return t.getRowCount()
 }

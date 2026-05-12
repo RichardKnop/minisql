@@ -647,6 +647,18 @@ func (c *Cursor) deleteSecondaryIndexKeys(ctx context.Context, row Row) error {
 	}
 
 	for _, secondaryIndex := range c.Table.SecondaryIndexes {
+		if secondaryIndex.Method == IndexMethodFullText {
+			if ok, err := secondaryIndex.rowSatisfiesWhereCond(row); err != nil {
+				return fmt.Errorf("partial full-text index %s where check: %w", secondaryIndex.Name, err)
+			} else if !ok {
+				continue
+			}
+			if err := c.Table.deleteFullTextIndexKeys(ctx, secondaryIndex, row.Key, row); err != nil {
+				return err
+			}
+			continue
+		}
+
 		// Partial index: row was not in the index if it didn't satisfy the WHERE predicate.
 		if ok, err := secondaryIndex.rowSatisfiesWhereCond(row); err != nil {
 			return fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)

@@ -1073,6 +1073,71 @@ func (t *Table) indexPointScan(ctx context.Context, scan Scan, selectedFields []
 	return nil
 }
 
+func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return fmt.Errorf("no index found for full-text scan: %s", scan.IndexName)
+	}
+	if len(scan.IndexKeys) == 0 {
+		return nil
+	}
+
+	sets := make([][]RowID, 0, len(scan.IndexKeys))
+	for _, key := range scan.IndexKeys {
+		ids, err := idx.FindRowIDs(ctx, key)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return nil
+			}
+			return fmt.Errorf("full-text lookup failed: %w", err)
+		}
+		sets = append(sets, ids)
+	}
+
+	surviving := intersectSortedRowIDs(sets)
+	if len(surviving) == 0 {
+		return nil
+	}
+
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	for _, rowID := range surviving {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		var row Row
+		if len(selectedFields) == 0 {
+			row = NewRowWithValues(t.Columns, nil)
+			row.Key = rowID
+		} else {
+			cursor, err := t.Seek(ctx, rowID)
+			if err != nil {
+				return fmt.Errorf("full-text seek: %w", err)
+			}
+			row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
+			if err != nil {
+				return fmt.Errorf("full-text fetch: %w", err)
+			}
+		}
+
+		if tableFilter != nil {
+			ok, err := tableFilter(row)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
+		}
+
+		if err := out(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // errStopScan is a sentinel returned by an index scan callback to stop iteration after the
 // first row has been delivered.  It is never surfaced to callers.
 var errStopScan = errors.New("stop scan")

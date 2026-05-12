@@ -44,6 +44,9 @@ func uniqueTextSearchTokens(input string) []string {
 	seen := make(map[string]struct{}, len(tokens))
 	unique := make([]string, 0, len(tokens))
 	for _, token := range tokens {
+		if len([]byte(token)) > MaxIndexKeySize {
+			continue
+		}
 		if _, ok := seen[token]; ok {
 			continue
 		}

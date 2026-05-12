@@ -850,14 +850,16 @@ func (d *Database) initSecondaryIndex(ctx context.Context, schema Schema) error 
 		},
 	}
 
+	storageColumns := secondaryIndexStorageColumns(secondaryIndex)
+
 	// Create and set BTree index instance
 	tp := NewTransactionalPager(
-		d.factory.ForIndex(secondaryIndex.Columns, false),
+		d.factory.ForIndex(storageColumns, false),
 		d.txManager,
 		table.Name,
 		schema.Name,
 	)
-	btreeIndex, err := table.newBTreeIndex(tp, schema.RootPage, secondaryIndex.Columns, secondaryIndex.Name, false)
+	btreeIndex, err := table.newBTreeIndex(tp, schema.RootPage, storageColumns, secondaryIndex.Name, false)
 	if err != nil {
 		return err
 	}
@@ -1327,7 +1329,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	for _, secondaryIndex := range tableToDelete.SecondaryIndexes {
 
 		txPager := NewTransactionalPager(
-			d.factory.ForIndex(secondaryIndex.Columns, false),
+			d.factory.ForIndex(secondaryIndexStorageColumns(secondaryIndex), false),
 			d.txManager,
 			tableToDelete.Name,
 			secondaryIndex.Name,
@@ -1361,7 +1363,7 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, table *Table
 		return errIndexAlreadyExists
 	}
 
-	if stmt.IndexMethod != IndexMethodBTree {
+	if stmt.IndexMethod == IndexMethodInverted {
 		return fmt.Errorf("%w: %s indexes", errIndexMethodUnsupported, stmt.IndexMethod)
 	}
 
@@ -1380,7 +1382,7 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, table *Table
 			if !ok {
 				return fmt.Errorf("column %s does not exist on table %s", stmtCol.Name, stmt.TableName)
 			}
-			if col.Kind == JSON {
+			if stmt.IndexMethod == IndexMethodBTree && col.Kind == JSON {
 				return fmt.Errorf("%w: column %q on table %q", errIndexOnJSONColumn, col.Name, stmt.TableName)
 			}
 			indexColumns = append(indexColumns, col)
@@ -1450,6 +1452,10 @@ func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryInd
 		}
 
 		switch {
+		case secondaryIndex.Method == IndexMethodFullText:
+			if err := table.insertFullTextIndexKeys(ctx, secondaryIndex, row.Key, row); err != nil {
+				return err
+			}
 		case secondaryIndex.Expression != nil:
 			// Expression index: evaluate expression against the row.
 			key, ok, err := evalExprIndexKey(secondaryIndex.Expression, secondaryIndex.Columns[0], row)
@@ -1553,24 +1559,32 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 		indexColumns = append(indexColumns, indexColumn)
 	}
 
+	secondaryIndex := SecondaryIndex{
+		IndexInfo: IndexInfo{
+			Name:          schema.Name,
+			Columns:       indexColumns,
+			WhereClause:   stmts[0].IndexWhereClause,
+			WhereCond:     stmts[0].Conditions,
+			Expression:    stmts[0].IndexExpression,
+			ExpressionSQL: stmts[0].IndexExpressionSQL,
+			Tokenizer:     stmts[0].IndexTokenizer,
+			Method:        stmts[0].IndexMethod,
+		},
+	}
+	storageColumns := secondaryIndexStorageColumns(secondaryIndex)
+
 	txPager := NewTransactionalPager(
-		d.factory.ForIndex(indexColumns, true),
+		d.factory.ForIndex(storageColumns, false),
 		d.txManager,
 		table.Name,
 		schema.Name,
 	)
 
-	btreeIndex, err := table.newBTreeIndex(txPager, schema.RootPage, indexColumns, schema.Name, false)
+	btreeIndex, err := table.newBTreeIndex(txPager, schema.RootPage, storageColumns, schema.Name, false)
 	if err != nil {
 		return err
 	}
-	secondaryIndex := SecondaryIndex{
-		IndexInfo: IndexInfo{
-			Name:    schema.Name,
-			Columns: indexColumns,
-		},
-		Index: btreeIndex,
-	}
+	secondaryIndex.Index = btreeIndex
 
 	if err := d.deleteSchema(ctx, schema.Type, schema.Name); err != nil {
 		return err
@@ -1660,8 +1674,9 @@ func (d *Database) createUniqueIndex(ctx context.Context, table *Table, uniqueIn
 func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, table *Table, secondaryIndex SecondaryIndex) (BTreeIndex, error) {
 	d.logger.Sugar().With("column", secondaryIndex.Columns[0].Name).Debug("creating secondary index")
 
+	storageColumns := secondaryIndexStorageColumns(secondaryIndex)
 	txPager := NewTransactionalPager(
-		d.factory.ForIndex(secondaryIndex.Columns, false),
+		d.factory.ForIndex(storageColumns, false),
 		d.txManager,
 		table.Name,
 		secondaryIndex.Name,
@@ -1672,7 +1687,7 @@ func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, tab
 		return nil, err
 	}
 
-	createdIndex, err := table.createBTreeIndex(txPager, freePage, secondaryIndex.Columns, secondaryIndex.Name, false)
+	createdIndex, err := table.createBTreeIndex(txPager, freePage, storageColumns, secondaryIndex.Name, false)
 	if err != nil {
 		return nil, err
 	}
