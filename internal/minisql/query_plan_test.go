@@ -601,6 +601,8 @@ func TestScanType_String(t *testing.T) {
 		{want: "index_range", st: ScanTypeIndexRange},
 		{want: "index_first", st: ScanTypeIndexFirst},
 		{want: "index_last", st: ScanTypeIndexLast},
+		{want: "index_intersect", st: ScanTypeIndexIntersect},
+		{want: "fulltext", st: ScanTypeFullText},
 		{want: "unknown", st: ScanType(99)},
 	}
 

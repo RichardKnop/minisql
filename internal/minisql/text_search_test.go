@@ -56,6 +56,29 @@ func TestUniqueTextSearchTokens(t *testing.T) {
 	assert.Equal(t, []string{"minisql", "database"}, got)
 }
 
+func TestTextSearchTokenPositions(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, []textSearchTokenPosition{
+		{Term: "mini", Position: 0},
+		{Term: "embedded", Position: 1},
+		{Term: "database", Position: 2},
+	}, textSearchTokenPositions("The mini embedded database"))
+}
+
+func TestParseTextSearchQuery(t *testing.T) {
+	t.Parallel()
+
+	query, ok := parseTextSearchQuery(`mini "database pages"`)
+	assert.True(t, ok)
+	assert.Equal(t, []string{"mini"}, query.Terms)
+	assert.Equal(t, [][]string{{"database", "pages"}}, query.Phrases)
+	assert.Equal(t, []string{"mini", "database", "pages"}, query.allUniqueTokens())
+
+	_, ok = parseTextSearchQuery(`"unterminated phrase`)
+	assert.False(t, ok)
+}
+
 func TestTextSearchMatch(t *testing.T) {
 	t.Parallel()
 
@@ -95,6 +118,24 @@ func TestTextSearchMatch(t *testing.T) {
 			query:    "minisql",
 			want:     false,
 		},
+		{
+			name:     "quoted phrase requires adjacent tokens",
+			document: "MiniSQL stores database pages together",
+			query:    `"database pages"`,
+			want:     true,
+		},
+		{
+			name:     "quoted phrase rejects scattered tokens",
+			document: "MiniSQL stores database values across many pages",
+			query:    `"database pages"`,
+			want:     false,
+		},
+		{
+			name:     "plain terms and phrase combine with AND",
+			document: "MiniSQL stores database pages",
+			query:    `minisql "database pages"`,
+			want:     true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -103,6 +144,19 @@ func TestTextSearchMatch(t *testing.T) {
 			assert.Equal(t, tt.want, textSearchMatch(tt.document, tt.query))
 		})
 	}
+}
+
+func TestFullTextPostingEncoding(t *testing.T) {
+	t.Parallel()
+
+	posting, err := encodeFullTextPosting(42, 7)
+	assert.NoError(t, err)
+	rowID, position := decodeFullTextPosting(posting)
+	assert.Equal(t, RowID(42), rowID)
+	assert.Equal(t, uint32(7), position)
+
+	_, err = encodeFullTextPosting(RowID(maxFullTextPostingComponent+1), 0)
+	assert.ErrorContains(t, err, "exceeds positional posting limit")
 }
 
 func TestTextSearchRank(t *testing.T) {

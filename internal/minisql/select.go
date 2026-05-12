@@ -1082,19 +1082,71 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 		return nil
 	}
 
-	sets := make([][]RowID, 0, len(scan.IndexKeys))
+	query := scan.FullTextQuery
+	if query == nil {
+		terms := make([]string, 0, len(scan.IndexKeys))
+		for _, key := range scan.IndexKeys {
+			term, ok := key.(string)
+			if !ok {
+				continue
+			}
+			terms = appendUniqueTextSearchTerms(terms, term)
+		}
+		query = &textSearchQuery{Terms: terms}
+	}
+	queryTokens := query.allUniqueTokens()
+	if len(queryTokens) == 0 {
+		return nil
+	}
+
+	postingsByTerm := make(map[string]map[RowID][]uint32, len(queryTokens))
 	for _, key := range scan.IndexKeys {
-		ids, err := idx.FindRowIDs(ctx, key)
+		term, ok := key.(string)
+		if !ok {
+			continue
+		}
+		postings, err := idx.FindRowIDs(ctx, key)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				return nil
 			}
 			return fmt.Errorf("full-text lookup failed: %w", err)
 		}
-		sets = append(sets, ids)
+		rows := make(map[RowID][]uint32)
+		for _, posting := range postings {
+			rowID, position := decodeFullTextPosting(posting)
+			rows[rowID] = append(rows[rowID], position)
+		}
+		postingsByTerm[term] = rows
 	}
 
-	surviving := intersectSortedRowIDs(sets)
+	firstRows := postingsByTerm[queryTokens[0]]
+	surviving := make([]RowID, 0, len(firstRows))
+	for rowID := range firstRows {
+		positions := make(map[string][]uint32, len(queryTokens))
+		matches := true
+		for _, term := range queryTokens {
+			termPositions := postingsByTerm[term][rowID]
+			if len(termPositions) == 0 {
+				matches = false
+				break
+			}
+			positions[term] = termPositions
+		}
+		if !matches {
+			continue
+		}
+		for _, phrase := range query.Phrases {
+			if !textSearchPhraseMatches(positions, phrase) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			surviving = append(surviving, rowID)
+		}
+	}
+	sortRowIDs(surviving)
 	if len(surviving) == 0 {
 		return nil
 	}

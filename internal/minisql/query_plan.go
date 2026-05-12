@@ -122,6 +122,7 @@ type QueryPlan struct {
 // relevant to that scan type.
 type Scan struct {
 	RangeCondition RangeCondition
+	FullTextQuery  *textSearchQuery
 	TableName      string
 	TableAlias     string
 	IndexName      string
@@ -427,8 +428,10 @@ func (t *Table) tryFullTextIndexScan(filters OneOrMore) (Scan, bool) {
 		return Scan{}, false
 	}
 
-	var matchCondIdx = -1
-	var matchExpr *Expr
+	var (
+		matchCondIdx = -1
+		matchExpr    *Expr
+	)
 	for i, cond := range filters[0] {
 		if cond.Operator != Eq || cond.Operand2.Type != OperandBoolean || cond.Operand2.Value != true {
 			continue
@@ -456,13 +459,19 @@ func (t *Table) tryFullTextIndexScan(filters OneOrMore) (Scan, bool) {
 	if !ok {
 		return Scan{}, false
 	}
-	tokens := uniqueTextSearchTokens(query)
+	parsedQuery, ok := parseTextSearchQuery(query)
+	if !ok {
+		return Scan{}, false
+	}
+	tokens := parsedQuery.allUniqueTokens()
 	if len(tokens) == 0 {
 		return Scan{}, false
 	}
 
-	var matchedIndex SecondaryIndex
-	foundIndex := false
+	var (
+		matchedIndex SecondaryIndex
+		foundIndex   = false
+	)
 	for _, idx := range t.SecondaryIndexes {
 		if idx.Method != IndexMethodFullText || len(idx.Columns) != 1 {
 			continue
@@ -494,12 +503,13 @@ func (t *Table) tryFullTextIndexScan(filters OneOrMore) (Scan, bool) {
 		indexKeys[i] = token
 	}
 	return Scan{
-		TableName:    t.Name,
-		Type:         ScanTypeFullText,
-		IndexName:    matchedIndex.Name,
-		IndexColumns: []Column{fullTextTokenColumn()},
-		IndexKeys:    indexKeys,
-		Filters:      scanFilters,
+		TableName:     t.Name,
+		Type:          ScanTypeFullText,
+		FullTextQuery: &parsedQuery,
+		IndexName:     matchedIndex.Name,
+		IndexColumns:  []Column{fullTextTokenColumn()},
+		IndexKeys:     indexKeys,
+		Filters:       scanFilters,
 	}, true
 }
 
