@@ -27,6 +27,8 @@ const (
 	// memory, then fetches only the surviving rows.  Used for AND conditions where two or
 	// more independent indexes are available.
 	ScanTypeIndexIntersect
+	// ScanTypeFullText runs an inverted full-text index lookup for MATCH predicates.
+	ScanTypeFullText
 )
 
 func (st ScanType) String() string {
@@ -45,6 +47,8 @@ func (st ScanType) String() string {
 		return "index_last"
 	case ScanTypeIndexIntersect:
 		return "index_intersect"
+	case ScanTypeFullText:
+		return "fulltext"
 	default:
 		return "unknown"
 	}
@@ -233,6 +237,13 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error
 		return plan.optimizeOrdering(t, stmt.Conditions), nil
 	}
 
+	if fullTextScan, ok := t.tryFullTextIndexScan(stmt.Conditions); ok {
+		plan.Scans = []Scan{fullTextScan}
+		result := plan.optimizeOrdering(t, stmt.Conditions)
+		result.markCoveringIndexes(stmt)
+		return result, nil
+	}
+
 	// Check if we can do an index scans
 	if err := plan.setIndexScans(t, stmt.Conditions); err != nil {
 		return QueryPlan{}, err
@@ -409,6 +420,98 @@ func (t *Table) findBestEqualityIndexMatch(group Conditions) *indexMatch {
 	}
 
 	return bestMatch
+}
+
+func (t *Table) tryFullTextIndexScan(filters OneOrMore) (Scan, bool) {
+	if len(filters) != 1 {
+		return Scan{}, false
+	}
+
+	var matchCondIdx = -1
+	var matchExpr *Expr
+	for i, cond := range filters[0] {
+		if cond.Operator != Eq || cond.Operand2.Type != OperandBoolean || cond.Operand2.Value != true {
+			continue
+		}
+		if cond.Operand1.Type != OperandExpr {
+			continue
+		}
+		expr, ok := cond.Operand1.Value.(*Expr)
+		if !ok || expr.FuncName != "MATCH" || len(expr.Args) != 2 {
+			continue
+		}
+		matchCondIdx = i
+		matchExpr = expr
+		break
+	}
+	if matchExpr == nil {
+		return Scan{}, false
+	}
+
+	columnName := matchExpr.Args[0].Column
+	if columnName == "" {
+		return Scan{}, false
+	}
+	query, ok := literalText(matchExpr.Args[1])
+	if !ok {
+		return Scan{}, false
+	}
+	tokens := uniqueTextSearchTokens(query)
+	if len(tokens) == 0 {
+		return Scan{}, false
+	}
+
+	var matchedIndex SecondaryIndex
+	foundIndex := false
+	for _, idx := range t.SecondaryIndexes {
+		if idx.Method != IndexMethodFullText || len(idx.Columns) != 1 {
+			continue
+		}
+		if idx.Columns[0].Name == columnName {
+			matchedIndex = idx
+			foundIndex = true
+			break
+		}
+	}
+	if !foundIndex || !partialIndexImplied(matchedIndex.WhereCond, filters[0]) {
+		return Scan{}, false
+	}
+
+	remaining := make(Conditions, 0, len(filters[0]))
+	for i, cond := range filters[0] {
+		if i == matchCondIdx {
+			continue
+		}
+		remaining = append(remaining, cond)
+	}
+	scanFilters := OneOrMore{remaining}
+	if len(remaining) == 0 {
+		scanFilters = nil
+	}
+
+	indexKeys := make([]any, len(tokens))
+	for i, token := range tokens {
+		indexKeys[i] = token
+	}
+	return Scan{
+		TableName:    t.Name,
+		Type:         ScanTypeFullText,
+		IndexName:    matchedIndex.Name,
+		IndexColumns: []Column{fullTextTokenColumn()},
+		IndexKeys:    indexKeys,
+		Filters:      scanFilters,
+	}, true
+}
+
+func literalText(expr *Expr) (string, bool) {
+	if expr == nil {
+		return "", false
+	}
+	tp, ok := expr.Literal.(TextPointer)
+	if !ok {
+		return "", false
+	}
+	return tp.String(), true
 }
 
 // tryMatchIndex attempts to match an index against the conditions in a group.
@@ -1208,6 +1311,8 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 			return t.indexEndpointScan(ctx, p.Scans[0], selectedFields, out, true)
 		case ScanTypeIndexIntersect:
 			return t.indexIntersectScan(ctx, p.Scans[0], selectedFields, out)
+		case ScanTypeFullText:
+			return t.fullTextIndexScan(ctx, p.Scans[0], selectedFields, out)
 		case ScanTypeSequential:
 			return t.sequentialScan(ctx, p.Scans[0], selectedFields, out)
 		default:
@@ -1231,6 +1336,10 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 			}
 		case ScanTypeIndexIntersect:
 			if err := t.indexIntersectScan(ctx, scan, selectedFields, out); err != nil {
+				return err
+			}
+		case ScanTypeFullText:
+			if err := t.fullTextIndexScan(ctx, scan, selectedFields, out); err != nil {
 				return err
 			}
 		default:

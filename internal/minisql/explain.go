@@ -428,6 +428,8 @@ func (t *Table) executeExplainScan(ctx context.Context, plan QueryPlan, scan Sca
 		return t.sequentialScan(ctx, scan, selectedFields, out)
 	case ScanTypeIndexIntersect:
 		return t.indexIntersectScan(ctx, scan, selectedFields, out)
+	case ScanTypeFullText:
+		return t.fullTextIndexScan(ctx, scan, selectedFields, out)
 	default:
 		return fmt.Errorf("unhandled scan type in EXPLAIN ANALYZE: %d", scan.Type)
 	}
@@ -622,6 +624,10 @@ func estimateScanRows(table *Table, scan Scan) OptionalValue {
 			if estimated >= 0 {
 				return OptionalValue{Valid: true, Value: estimated}
 			}
+		}
+	case ScanTypeFullText:
+		if len(scan.IndexKeys) > 0 {
+			return OptionalValue{Valid: true, Value: int64(len(scan.IndexKeys))}
 		}
 	case ScanTypeIndexIntersect:
 		// Estimate as the minimum across sub-scans (intersection can only shrink the result).

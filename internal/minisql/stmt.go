@@ -293,7 +293,7 @@ type IndexMethod int
 const (
 	// IndexMethodBTree is the default scalar B+ tree index method.
 	IndexMethodBTree IndexMethod = iota
-	// IndexMethodFullText is reserved for future full-text inverted indexes.
+	// IndexMethodFullText indexes text tokens for MATCH predicates.
 	IndexMethodFullText
 	// IndexMethodInverted is reserved for future JSON inverted indexes.
 	IndexMethodInverted

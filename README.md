@@ -557,7 +557,7 @@ rows.Scan(&owner)
 | String functions | `UPPER(s)`, `LOWER(s)` — case conversion; `TRIM(s[, chars])`, `LTRIM(s[, chars])`, `RTRIM(s[, chars])` — strip whitespace or custom characters; `LENGTH(s)` — byte length; `SUBSTR(s, start[, len])` — 1-based substring; `REPLACE(s, from, to)` — replace all occurrences; `CONCAT(a, b, ...)` — concatenate (NULLs skipped). All usable in `SELECT`, `UPDATE SET`, and composable with each other and arithmetic |
 | Numeric functions | `ABS(n)` — absolute value (preserves input type); `FLOOR(n)`, `CEIL(n)` — floor/ceiling; `ROUND(n[, d])` — round to `d` decimal places (default 0); `MOD(a, b)` — modulo (integer or float). All usable in `SELECT`, `UPDATE SET`, composable with each other and arithmetic |
 | Date/time functions | `NOW()` — current UTC timestamp; `DATE_TRUNC('unit', ts)` — truncate to `year`/`month`/`week`/`day`/`hour`/`minute`/`second`; `EXTRACT('field', ts)` / `DATE_PART('field', ts)` — extract numeric field (`year`, `month`, `day`, `hour`, `minute`, `second`, `dow`); `TO_TIMESTAMP('str')` — parse timestamp string into a TIMESTAMP value. All usable in `SELECT`, `UPDATE SET`, composable with other expressions |
-| Full-text search functions | `MATCH(doc, query)` and `TS_RANK(doc, query)` provide initial full-text semantics via sequential scans. No full-text index is used yet. |
+| Full-text search functions | `MATCH(doc, query)` and `TS_RANK(doc, query)` provide initial full-text semantics. `CREATE FULLTEXT INDEX` can accelerate literal `MATCH` predicates on one `TEXT`/`VARCHAR` column. |
 | `CASE WHEN` | Searched form: `CASE WHEN cond THEN result … ELSE default END`; simple form: `CASE expr WHEN val THEN result … ELSE default END`. Multiple WHEN clauses, optional ELSE (omitting returns NULL). Usable in `SELECT` (including nested in arithmetic), `UPDATE SET`, supports `IS NULL` / `IS NOT NULL` / all comparison operators in conditions |
 | `UNION` / `UNION ALL` | Combine results of two or more `SELECT` statements. `UNION ALL` concatenates all rows (duplicates kept); `UNION` deduplicates the combined result. Chains of three or more branches supported (e.g. `SELECT … UNION ALL SELECT … UNION SELECT …`). Each branch may have its own `WHERE` clause. |
 | `CAST(expr AS type)` | Standard SQL type coercion. Supported target types: `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE`, `TEXT`, `VARCHAR(n)`, `TIMESTAMP`, `JSON`, `UUID`. Follows SQLite semantics: float→int truncates toward zero; text→int/float parses leading digits (non-numeric input → 0). `CAST(x AS JSON)` validates and compacts the value. `CAST(x AS UUID)` parses a UUID string and stores it in binary form. `CAST(uuid_col AS TEXT)` formats the 16-byte value back to a hyphenated lowercase string. NULL propagates. Usable anywhere an expression is valid (e.g. `SELECT CAST(price AS INT8)`, `SELECT CAST(n AS TEXT) AS label`, `SELECT CAST(id AS TEXT) FROM widgets`). |
@@ -628,7 +628,15 @@ rows.Scan(&owner)
 
 #### Full-Text Search Functions
 
-MiniSQL currently supports initial full-text search semantics without a full-text index. Queries using `MATCH` scan candidate rows, tokenize the document and query in memory, and evaluate the match during the normal `WHERE` filter.
+MiniSQL supports initial full-text search semantics with an optional v1 full-text index. Without an index, `MATCH` scans candidate rows, tokenizes the document and query in memory, and evaluates the match during the normal `WHERE` filter.
+
+```sql
+CREATE FULLTEXT INDEX idx_articles_body
+ON articles (body)
+WITH (tokenizer = 'simple');
+```
+
+The v1 index stores one B+ tree entry per unique token, with each token pointing at an ordered posting list of row IDs. It does not store token positions, compress postings, rank from index statistics, or use posting trees yet. Literal `MATCH(body, 'mini database')` predicates can use the index by intersecting the posting lists for all query tokens; dynamic query expressions fall back to the sequential semantics.
 
 | Function | Description |
 |----------|-------------|

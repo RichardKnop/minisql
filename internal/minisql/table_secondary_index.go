@@ -15,6 +15,17 @@ type SecondaryIndex struct {
 	IndexInfo
 }
 
+func fullTextTokenColumn() Column {
+	return Column{Name: "__fts_token__", Kind: Varchar, Size: MaxIndexKeySize}
+}
+
+func secondaryIndexStorageColumns(secondaryIndex SecondaryIndex) []Column {
+	if secondaryIndex.Method == IndexMethodFullText {
+		return []Column{fullTextTokenColumn()}
+	}
+	return secondaryIndex.Columns
+}
+
 // rowSatisfiesWhereCond returns true when the row satisfies the partial index predicate,
 // or always true for a full (non-partial) index.
 func (si SecondaryIndex) rowSatisfiesWhereCond(row Row) (bool, error) {
@@ -27,6 +38,10 @@ func (si SecondaryIndex) rowSatisfiesWhereCond(row Row) (bool, error) {
 func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, keys []OptionalValue, rowID RowID, row Row) error {
 	if secondaryIndex.Index == nil {
 		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
+	}
+
+	if secondaryIndex.Method == IndexMethodFullText {
+		return t.insertFullTextIndexKeys(ctx, secondaryIndex, rowID, row)
 	}
 
 	// Partial index: skip rows that don't satisfy the WHERE predicate.
@@ -106,6 +121,10 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, oldRow, row Row) error {
 	if secondaryIndex.Index == nil {
 		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
+	}
+
+	if secondaryIndex.Method == IndexMethodFullText {
+		return t.updateFullTextIndexKeys(ctx, secondaryIndex, oldRow, row)
 	}
 
 	// Expression index: evaluate expression against old and new rows.
@@ -198,6 +217,71 @@ func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 	}
 
 	return nil
+}
+
+func (t *Table) insertFullTextIndexKeys(ctx context.Context, secondaryIndex SecondaryIndex, rowID RowID, row Row) error {
+	if ok, err := secondaryIndex.rowSatisfiesWhereCond(row); err != nil {
+		return fmt.Errorf("partial full-text index %s where check: %w", secondaryIndex.Name, err)
+	} else if !ok {
+		return nil
+	}
+
+	tokens, err := fullTextTokensForRow(secondaryIndex, row)
+	if err != nil {
+		return err
+	}
+	for _, token := range tokens {
+		if err := secondaryIndex.Index.Insert(ctx, token, rowID); err != nil {
+			return fmt.Errorf("failed to insert token for full-text index %s: %w", secondaryIndex.Name, err)
+		}
+	}
+	return nil
+}
+
+func (t *Table) updateFullTextIndexKeys(ctx context.Context, secondaryIndex SecondaryIndex, oldRow, row Row) error {
+	rowID := row.Key
+	if oldInIndex, err := secondaryIndex.rowSatisfiesWhereCond(oldRow); err != nil {
+		return fmt.Errorf("partial full-text index %s where check (old row): %w", secondaryIndex.Name, err)
+	} else if oldInIndex {
+		if err := t.deleteFullTextIndexKeys(ctx, secondaryIndex, rowID, oldRow); err != nil {
+			return err
+		}
+	}
+
+	if newInIndex, err := secondaryIndex.rowSatisfiesWhereCond(row); err != nil {
+		return fmt.Errorf("partial full-text index %s where check (new row): %w", secondaryIndex.Name, err)
+	} else if newInIndex {
+		return t.insertFullTextIndexKeys(ctx, secondaryIndex, rowID, row)
+	}
+	return nil
+}
+
+func (t *Table) deleteFullTextIndexKeys(ctx context.Context, secondaryIndex SecondaryIndex, rowID RowID, row Row) error {
+	tokens, err := fullTextTokensForRow(secondaryIndex, row)
+	if err != nil {
+		return err
+	}
+	for _, token := range tokens {
+		if err := secondaryIndex.Index.Delete(ctx, token, rowID); err != nil {
+			return fmt.Errorf("failed to delete token for full-text index %s: %w", secondaryIndex.Name, err)
+		}
+	}
+	return nil
+}
+
+func fullTextTokensForRow(secondaryIndex SecondaryIndex, row Row) ([]string, error) {
+	if len(secondaryIndex.Columns) != 1 {
+		return nil, fmt.Errorf("full-text index %s requires exactly one source column", secondaryIndex.Name)
+	}
+	value, ok := row.GetValue(secondaryIndex.Columns[0].Name)
+	if !ok || !value.Valid {
+		return nil, nil
+	}
+	doc, ok := toStringVal(value.Value)
+	if !ok {
+		return nil, fmt.Errorf("full-text index %s column %q must be text", secondaryIndex.Name, secondaryIndex.Columns[0].Name)
+	}
+	return uniqueTextSearchTokens(doc), nil
 }
 
 func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, oldRow, row Row) error {

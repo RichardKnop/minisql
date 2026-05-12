@@ -16,11 +16,9 @@ func (s *TestSuite) TestIndexMethods_StrictScaffold() {
 	);`)
 	s.Require().NoError(err)
 
-	s.Run("fulltext index on text validates then fails as not implemented", func() {
+	s.Run("fulltext index on text is created", func() {
 		_, err := s.db.Exec(`create fulltext index "idx_articles_body_fts" on "articles_index_method" (body) with (tokenizer = 'simple');`)
-		s.Require().Error(err)
-		s.Contains(err.Error(), "index method is parsed but not implemented yet")
-		s.Contains(err.Error(), "fulltext indexes")
+		s.Require().NoError(err)
 	})
 
 	s.Run("fulltext index rejects non-text column before not implemented error", func() {
