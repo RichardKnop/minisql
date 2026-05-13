@@ -393,6 +393,45 @@ func TestDedicatedInvertedIndex_PromotesLargePostingListToPostingTree(t *testing
 	assert.NotEmpty(t, page.InvertedPostPage.Blocks)
 }
 
+func TestDedicatedInvertedIndex_MutatesPostingTreeInPlace(t *testing.T) {
+	index, txManager := newTestDedicatedInvertedIndex(t, "idx_json", invertedIndexPostingModeRowIDs)
+	ctx := context.Background()
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for i := 1; i <= 140; i++ {
+			if err := index.Insert(ctx, "k:type", invertedPosting{RowID: largeTestRowID(i)}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	before := requireDedicatedInvertedEntryCell(t, ctx, index, "k:type")
+	require.Equal(t, invertedPostingKindTree, before.PostingKind)
+	require.NotZero(t, before.Child)
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return index.Insert(ctx, "k:type", invertedPosting{RowID: largeTestRowID(141)})
+	}))
+	afterInsert := requireDedicatedInvertedEntryCell(t, ctx, index, "k:type")
+	assert.Equal(t, before.Child, afterInsert.Child)
+	assert.Equal(t, uint32(141), afterInsert.DocFreq)
+	assert.Equal(t, uint32(141), afterInsert.PostingCount)
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return index.Delete(ctx, "k:type", invertedPosting{RowID: largeTestRowID(141)})
+	}))
+	afterDelete := requireDedicatedInvertedEntryCell(t, ctx, index, "k:type")
+	assert.Equal(t, before.Child, afterDelete.Child)
+	assert.Equal(t, uint32(140), afterDelete.DocFreq)
+	assert.Equal(t, uint32(140), afterDelete.PostingCount)
+
+	postings := collectDedicatedInvertedPostings(t, ctx, index, "k:type")
+	require.Len(t, postings, 140)
+	assert.Equal(t, invertedPosting{RowID: largeTestRowID(1)}, postings[0])
+	assert.Equal(t, invertedPosting{RowID: largeTestRowID(140)}, postings[len(postings)-1])
+}
+
 func TestDedicatedInvertedIndex_PostingTreeInternalRouting(t *testing.T) {
 	pager, dbFile := initTest(t)
 	basePager := pager.ForInvertedIndex()
@@ -449,6 +488,61 @@ func TestDedicatedInvertedIndex_PostingTreeInternalRouting(t *testing.T) {
 		})
 	}))
 	assert.Equal(t, beforeFreePages+uint32(pageCount), basePager.GetHeader(ctx).FreePageCount)
+}
+
+func TestDedicatedInvertedIndex_MutatesPostingTreeAndRefreshesInternalRouting(t *testing.T) {
+	pager, dbFile := initTest(t)
+	basePager := pager.ForInvertedIndex()
+	txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(basePager), pager, nil)
+	txPager := NewTransactionalPager(basePager, txManager, "events", "idx_payload_inv")
+	index, err := NewDedicatedInvertedIndex("idx_payload_inv", invertedIndexPostingModeRowIDs, txPager, 0)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, index.InitRootPage))
+
+	postings := make([]invertedPosting, 1800)
+	for i := range postings {
+		postings[i] = invertedPosting{RowID: wideTestRowID(i + 1)}
+	}
+
+	var rootIdx PageIndex
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		var err error
+		rootIdx, err = index.writePostingTree(ctx, postings)
+		return err
+	}))
+
+	rootPage, err := index.pager.ReadPage(ctx, rootIdx)
+	require.NoError(t, err)
+	require.NotNil(t, rootPage.InvertedPostPage)
+	require.Greater(t, rootPage.InvertedPostPage.Header.Level, byte(0))
+	_, oldLast, _, err := invertedPostingPageRange(rootPage.InvertedPostPage)
+	require.NoError(t, err)
+
+	cell := invertedEntryCell{
+		Term:         "k:type",
+		DocFreq:      uint32(len(postings)),
+		PostingCount: uint32(len(postings)),
+		Child:        rootIdx,
+		PostingKind:  invertedPostingKindTree,
+		CodecVersion: invertedPostingCodecVersion,
+	}
+	newPosting := invertedPosting{RowID: wideTestRowID(len(postings) + 1)}
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		var mutated bool
+		cell, mutated, err = index.insertPostingIntoTreeCell(ctx, cell, newPosting)
+		require.True(t, mutated)
+		return err
+	}))
+
+	assert.Equal(t, rootIdx, cell.Child)
+	assert.Equal(t, uint32(len(postings)+1), cell.DocFreq)
+	rootPage, err = index.pager.ReadPage(ctx, rootIdx)
+	require.NoError(t, err)
+	_, newLast, count, err := invertedPostingPageRange(rootPage.InvertedPostPage)
+	require.NoError(t, err)
+	assert.Greater(t, newLast, oldLast)
+	assert.Equal(t, uint32(len(postings)+1), count)
 }
 
 func TestDedicatedInvertedIndex_DemotesPostingTreeAfterDeletes(t *testing.T) {

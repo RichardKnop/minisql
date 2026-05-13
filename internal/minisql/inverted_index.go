@@ -131,6 +131,16 @@ func (idx *dedicatedInvertedIndex) Delete(ctx context.Context, term string, post
 	}
 
 	oldCell := entryPage.Cells[cellIdx]
+	if oldCell.PostingKind == invertedPostingKindTree && oldCell.PostingCount > 64 {
+		updatedCell, mutated, err := idx.deletePostingFromTreeCell(ctx, oldCell, posting)
+		if err != nil {
+			return err
+		}
+		if mutated {
+			entryPage.Cells[cellIdx] = updatedCell
+			return nil
+		}
+	}
 	postings, err := idx.decodeInvertedEntryCell(ctx, oldCell)
 	if err != nil {
 		return err
@@ -536,8 +546,19 @@ func (idx *dedicatedInvertedIndex) insertEntryLeaf(ctx context.Context, pageIdx 
 	cellIdx, found := findInvertedEntryCell(entryPage.Cells, term)
 	postings := []invertedPosting{posting}
 	if found {
+		oldCell := entryPage.Cells[cellIdx]
+		if oldCell.PostingKind == invertedPostingKindTree {
+			updatedCell, mutated, err := idx.insertPostingIntoTreeCell(ctx, oldCell, posting)
+			if err != nil {
+				return "", 0, false, err
+			}
+			if mutated {
+				entryPage.Cells[cellIdx] = updatedCell
+				return "", 0, false, nil
+			}
+		}
 		var err error
-		postings, err = idx.decodeInvertedEntryCell(ctx, entryPage.Cells[cellIdx])
+		postings, err = idx.decodeInvertedEntryCell(ctx, oldCell)
 		if err != nil {
 			return "", 0, false, err
 		}
@@ -926,6 +947,208 @@ func (idx *dedicatedInvertedIndex) readPostingTree(ctx context.Context, cell inv
 	return groupInvertedPostings(idx.mode, postings), nil
 }
 
+// insertPostingIntoTreeCell updates one existing posting-tree leaf block in place.
+func (idx *dedicatedInvertedIndex) insertPostingIntoTreeCell(ctx context.Context, cell invertedEntryCell, posting invertedPosting) (invertedEntryCell, bool, error) {
+	leaf, blockIdx, err := idx.findPostingLeafBlock(ctx, cell.Child, posting.RowID)
+	if err != nil {
+		return invertedEntryCell{}, false, err
+	}
+	if blockIdx < 0 {
+		return invertedEntryCell{}, false, nil
+	}
+
+	block := leaf.InvertedPostPage.Blocks[blockIdx]
+	mode, blockPostings, err := decodeInvertedPostingList(block.Payload)
+	if err != nil {
+		return invertedEntryCell{}, false, err
+	}
+	if mode != idx.mode {
+		return invertedEntryCell{}, false, fmt.Errorf("inverted posting block uses posting mode %d, expected %d", mode, idx.mode)
+	}
+
+	oldDocFreq := len(blockPostings)
+	oldPostingCount := countInvertedPostings(idx.mode, blockPostings)
+	updatedPostings := groupInvertedPostings(idx.mode, append(blockPostings, posting))
+	newDocFreq := len(updatedPostings)
+	newPostingCount := countInvertedPostings(idx.mode, updatedPostings)
+	if oldDocFreq == newDocFreq && oldPostingCount == newPostingCount {
+		return cell, true, nil
+	}
+
+	payload, err := encodeInvertedPostingList(idx.mode, updatedPostings)
+	if err != nil {
+		return invertedEntryCell{}, false, err
+	}
+	if len(payload) > invertedPostingBlockPayloadMax {
+		return invertedEntryCell{}, false, nil
+	}
+
+	candidate := leaf.InvertedPostPage.Clone()
+	candidate.Blocks[blockIdx] = postingBlockFromPostings(idx.mode, updatedPostings, payload)
+	fits := ensureInvertedPostingPageFits(candidate, invertedPageBodySize(leaf.Index)) == nil
+	if !fits {
+		return invertedEntryCell{}, false, nil
+	}
+
+	page, err := idx.pager.ModifyPage(ctx, leaf.Index)
+	if err != nil {
+		return invertedEntryCell{}, false, fmt.Errorf("modify inverted posting leaf %d: %w", leaf.Index, err)
+	}
+	page.InvertedPostPage = candidate
+	if err := idx.refreshPostingAncestors(ctx, page.Index); err != nil {
+		return invertedEntryCell{}, false, err
+	}
+
+	updatedCell := cell
+	updatedCell.DocFreq = uint32(int(updatedCell.DocFreq) + newDocFreq - oldDocFreq)
+	updatedCell.PostingCount = uint32(int(updatedCell.PostingCount) + int(newPostingCount) - int(oldPostingCount))
+	return updatedCell, true, nil
+}
+
+// deletePostingFromTreeCell removes one posting from an existing posting-tree leaf block.
+func (idx *dedicatedInvertedIndex) deletePostingFromTreeCell(ctx context.Context, cell invertedEntryCell, posting invertedPosting) (invertedEntryCell, bool, error) {
+	leaf, blockIdx, err := idx.findPostingLeafBlock(ctx, cell.Child, posting.RowID)
+	if err != nil {
+		return invertedEntryCell{}, false, err
+	}
+	if blockIdx < 0 {
+		return cell, true, nil
+	}
+
+	block := leaf.InvertedPostPage.Blocks[blockIdx]
+	mode, blockPostings, err := decodeInvertedPostingList(block.Payload)
+	if err != nil {
+		return invertedEntryCell{}, false, err
+	}
+	if mode != idx.mode {
+		return invertedEntryCell{}, false, fmt.Errorf("inverted posting block uses posting mode %d, expected %d", mode, idx.mode)
+	}
+
+	oldDocFreq := len(blockPostings)
+	oldPostingCount := countInvertedPostings(idx.mode, blockPostings)
+	updatedPostings := removeInvertedPosting(idx.mode, blockPostings, posting)
+	newDocFreq := len(updatedPostings)
+	newPostingCount := countInvertedPostings(idx.mode, updatedPostings)
+	if oldDocFreq == newDocFreq && oldPostingCount == newPostingCount {
+		return cell, true, nil
+	}
+
+	candidate := leaf.InvertedPostPage.Clone()
+	if len(updatedPostings) == 0 {
+		if len(candidate.Blocks) == 1 {
+			return invertedEntryCell{}, false, nil
+		}
+		candidate.Blocks = slices.Delete(candidate.Blocks, blockIdx, blockIdx+1)
+	} else {
+		payload, err := encodeInvertedPostingList(idx.mode, updatedPostings)
+		if err != nil {
+			return invertedEntryCell{}, false, err
+		}
+		candidate.Blocks[blockIdx] = postingBlockFromPostings(idx.mode, updatedPostings, payload)
+	}
+	if err := ensureInvertedPostingPageFits(candidate, invertedPageBodySize(leaf.Index)); err != nil {
+		return invertedEntryCell{}, false, err
+	}
+
+	page, err := idx.pager.ModifyPage(ctx, leaf.Index)
+	if err != nil {
+		return invertedEntryCell{}, false, fmt.Errorf("modify inverted posting leaf %d: %w", leaf.Index, err)
+	}
+	page.InvertedPostPage = candidate
+	if err := idx.refreshPostingAncestors(ctx, page.Index); err != nil {
+		return invertedEntryCell{}, false, err
+	}
+
+	updatedCell := cell
+	updatedCell.DocFreq = uint32(int(updatedCell.DocFreq) + newDocFreq - oldDocFreq)
+	updatedCell.PostingCount = uint32(int(updatedCell.PostingCount) + int(newPostingCount) - int(oldPostingCount))
+	return updatedCell, true, nil
+}
+
+// findPostingLeafBlock descends to the leaf block whose row range should contain rowID.
+func (idx *dedicatedInvertedIndex) findPostingLeafBlock(ctx context.Context, rootIdx PageIndex, rowID RowID) (*Page, int, error) {
+	page, err := idx.pager.ReadPage(ctx, rootIdx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read inverted posting root %d: %w", rootIdx, err)
+	}
+	for {
+		if page.InvertedPostPage == nil {
+			return nil, 0, fmt.Errorf("inverted posting page %d is not a posting page", page.Index)
+		}
+		postingPage := page.InvertedPostPage
+		if len(postingPage.Blocks) == 0 {
+			return page, -1, nil
+		}
+		blockIdx := postingBlockIndexForRowID(postingPage.Blocks, rowID)
+		if postingPage.Header.Level == 0 {
+			return page, blockIdx, nil
+		}
+		childIdx := postingPage.Blocks[blockIdx].Child
+		if childIdx == 0 {
+			return nil, 0, fmt.Errorf("inverted posting internal page %d has zero child", page.Index)
+		}
+		page, err = idx.pager.ReadPage(ctx, childIdx)
+		if err != nil {
+			return nil, 0, fmt.Errorf("read inverted posting child %d: %w", childIdx, err)
+		}
+	}
+}
+
+// postingBlockIndexForRowID returns the first block whose range can hold rowID.
+func postingBlockIndexForRowID(blocks []invertedPostingBlock, rowID RowID) int {
+	for i, block := range blocks {
+		if rowID <= block.LastRowID {
+			return i
+		}
+	}
+	return len(blocks) - 1
+}
+
+// refreshPostingAncestors recomputes routing metadata after a child page changes.
+func (idx *dedicatedInvertedIndex) refreshPostingAncestors(ctx context.Context, childIdx PageIndex) error {
+	child, err := idx.pager.ReadPage(ctx, childIdx)
+	if err != nil {
+		return fmt.Errorf("read inverted posting child %d: %w", childIdx, err)
+	}
+	if child.InvertedPostPage == nil {
+		return fmt.Errorf("inverted posting child %d is not a posting page", childIdx)
+	}
+	parentIdx := child.InvertedPostPage.Header.Parent
+	if parentIdx == 0 {
+		return nil
+	}
+
+	parent, err := idx.pager.ModifyPage(ctx, parentIdx)
+	if err != nil {
+		return fmt.Errorf("modify inverted posting parent %d: %w", parentIdx, err)
+	}
+	if parent.InvertedPostPage == nil {
+		return fmt.Errorf("inverted posting parent %d is not a posting page", parentIdx)
+	}
+	first, last, count, err := invertedPostingPageRange(child.InvertedPostPage)
+	if err != nil {
+		return err
+	}
+	updated := false
+	for i, block := range parent.InvertedPostPage.Blocks {
+		if block.Child != childIdx {
+			continue
+		}
+		parent.InvertedPostPage.Blocks[i].FirstRowID = first
+		parent.InvertedPostPage.Blocks[i].LastRowID = last
+		parent.InvertedPostPage.Blocks[i].PostingCount = count
+		updated = true
+		break
+	}
+	if !updated {
+		return fmt.Errorf("inverted posting child %d not found in parent %d", childIdx, parentIdx)
+	}
+	if err := ensureInvertedPostingPageFits(parent.InvertedPostPage, invertedPageBodySize(parent.Index)); err != nil {
+		return err
+	}
+	return idx.refreshPostingAncestors(ctx, parentIdx)
+}
+
 // writePostingTree writes compressed posting blocks into a posting-page tree.
 func (idx *dedicatedInvertedIndex) writePostingTree(ctx context.Context, postings []invertedPosting) (PageIndex, error) {
 	blocks, err := makeInvertedPostingBlocks(idx.mode, postings)
@@ -1107,16 +1330,21 @@ func makeInvertedPostingBlocks(mode invertedPostingMode, postings []invertedPost
 			return nil, err
 		}
 		blockPostings := grouped[:n]
-		blocks = append(blocks, invertedPostingBlock{
-			Payload:      payload,
-			FirstRowID:   blockPostings[0].RowID,
-			LastRowID:    blockPostings[len(blockPostings)-1].RowID,
-			PostingCount: countInvertedPostings(mode, blockPostings),
-			CodecVersion: invertedPostingCodecVersion,
-		})
+		blocks = append(blocks, postingBlockFromPostings(mode, blockPostings, payload))
 		grouped = grouped[n:]
 	}
 	return blocks, nil
+}
+
+// postingBlockFromPostings builds block metadata around an encoded posting list.
+func postingBlockFromPostings(mode invertedPostingMode, postings []invertedPosting, payload []byte) invertedPostingBlock {
+	return invertedPostingBlock{
+		Payload:      payload,
+		FirstRowID:   postings[0].RowID,
+		LastRowID:    postings[len(postings)-1].RowID,
+		PostingCount: countInvertedPostings(mode, postings),
+		CodecVersion: invertedPostingCodecVersion,
+	}
 }
 
 // encodeLargestInvertedPostingBlock finds the largest prefix that fits one block.
