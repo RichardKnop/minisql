@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -209,6 +210,30 @@ func TestFullTextIndexScanMissingIndex(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no index found for full-text scan")
+}
+
+func TestPlanQuery_FullTextIndexSkipsOverlongQueryToken(t *testing.T) {
+	t.Parallel()
+
+	bodyColumn := Column{Name: "body", Kind: Text}
+	table := NewTable(testLogger, nil, nil, "articles", []Column{bodyColumn}, 0, nil, WithSecondaryIndex(SecondaryIndex{
+		IndexInfo: IndexInfo{
+			Name:    "idx_body_fts",
+			Method:  IndexMethodFullText,
+			Columns: []Column{bodyColumn},
+		},
+	}))
+
+	plan, err := table.PlanQuery(context.Background(), Statement{
+		Kind:       Select,
+		TableName:  "articles",
+		Columns:    table.Columns,
+		Fields:     []Field{{Name: "body"}},
+		Conditions: OneOrMore{{fullTextMatchCondition("body", "database "+strings.Repeat("x", MaxIndexKeySize+1))}},
+	})
+	require.NoError(t, err)
+	require.Len(t, plan.Scans, 1)
+	assert.Equal(t, ScanTypeSequential, plan.Scans[0].Type)
 }
 
 func TestIndexMethodStringAndTokenizer(t *testing.T) {

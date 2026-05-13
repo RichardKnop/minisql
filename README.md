@@ -456,7 +456,7 @@ FROM events
 WHERE JSON_CONTAINS(payload, '{"type":"click","tags":["web"]}');
 ```
 
-The v1 index stores generated JSON terms in a non-unique B+ tree. Terms include key existence (`k:user.id`) and scalar key/value entries (`kv:type:s:"click"`, `kv:tags[]:s:"web"`). The planner uses those terms as a prefilter for literal `JSON_CONTAINS(column, 'json')` queries, then rechecks the full predicate against the row for correctness. It does not support posting trees, compression, path-specific operators, or dynamic query expressions yet.
+The v1 index stores generated JSON terms in a non-unique B+ tree. Terms include key existence (`k:user.id`) and scalar key/value entries (`kv:type:s:"click"`, `kv:tags[]:s:"web"`). Generated terms longer than the current 255-byte index-key limit are skipped; indexed queries are always rechecked against the full row, and queries that cannot produce any indexable terms fall back to sequential evaluation. It does not support posting trees, compression, path-specific operators, or dynamic query expressions yet.
 
 ### CAST AS JSON
 
@@ -656,12 +656,12 @@ ON articles (body)
 WITH (tokenizer = 'simple');
 ```
 
-The v1 index stores one B+ tree entry per unique token, with each token pointing at ordered positional postings `(row ID, token position)`. The current on-disk format stores packed positional postings in the generic B+ tree posting slots; a delta/varint posting-list codec exists internally as preparation for a future dedicated inverted-index payload format. It does not rank from index statistics or use posting trees yet. Literal `MATCH(body, 'mini database')` predicates can use the index by intersecting posting rows for all query tokens; quoted phrases such as `MATCH(body, '"database pages"')` additionally require adjacent token positions. Dynamic query expressions fall back to the sequential semantics.
+The v1 index stores one B+ tree entry per unique token, with each token pointing at ordered positional postings `(row ID, token position)`. The current on-disk format stores packed positional postings in the generic B+ tree posting slots; a delta/varint posting-list codec exists internally as preparation for a future dedicated inverted-index payload format. It does not rank from index statistics or use posting trees yet. Literal `MATCH(body, 'mini database')` predicates can use the index by intersecting posting rows for all query tokens; quoted phrases such as `MATCH(body, '"database pages"')` additionally require adjacent token positions. Dynamic query expressions and queries containing tokens longer than the current 255-byte index-key limit fall back to the sequential semantics.
 
 | Function | Description |
 |----------|-------------|
 | `MATCH(doc, query)` | Returns `true` when every non-stop-word query token appears in `doc`. Double-quoted phrases require adjacent indexed token positions, e.g. `WHERE MATCH(body, '"mini database"')`. |
-| `TS_RANK(doc, query)` | Returns a simple relevance score using log-scaled term frequency: `sum(log(1 + term_frequency)) / query_terms`. |
+| `TS_RANK(doc, query)` | Returns a relevance score that combines saturated term frequency, query coverage, mild document-length normalization, exact phrase boosts, and token-proximity boosts. |
 
 Tokenizer v1 lowercases text, splits on non-letter/non-digit boundaries, removes a small built-in English stop-word list, and does not perform stemming. For example, `database` and `databases` are different tokens.
 

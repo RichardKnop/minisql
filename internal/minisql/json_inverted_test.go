@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,6 +35,17 @@ func TestJSONInvertedTermsForDocument(t *testing.T) {
 		"kv:type:s:\"click\"",
 		"kv:user.id:s:\"u1\"",
 	}, terms)
+}
+
+func TestJSONInvertedTermsSkipOverlongGeneratedTerms(t *testing.T) {
+	t.Parallel()
+
+	terms, err := jsonInvertedTermsForDocument(`{"short":"ok","long":"` + strings.Repeat("x", MaxIndexKeySize+1) + `"}`)
+	require.NoError(t, err)
+
+	assert.Contains(t, terms, "k:long")
+	assert.Contains(t, terms, `kv:short:s:"ok"`)
+	assert.NotContains(t, terms, `kv:long:s:"`+strings.Repeat("x", MaxIndexKeySize+1)+`"`)
 }
 
 func TestJSONContains(t *testing.T) {
