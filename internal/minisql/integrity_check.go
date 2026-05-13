@@ -60,7 +60,7 @@ func (d *Database) IntegrityCheck(ctx context.Context) (IntegrityReport, error) 
 			report = d.walkIndexPages(ctx, report, table.Name, index.Name, index.Columns, true, index.Index.GetRootPageIdx(), livePages)
 		}
 		for _, index := range table.SecondaryIndexes {
-			if index.Method == IndexMethodFullText && index.InvertedIndex != nil {
+			if secondaryIndexUsesDedicatedInvertedStorage(index.Method) && index.InvertedIndex != nil {
 				report = d.walkInvertedIndexPages(ctx, report, table.Name, index.Name, index.InvertedIndex.GetRootPageIdx(), livePages)
 				continue
 			}
@@ -125,7 +125,7 @@ func (d *Database) QuickCheck(ctx context.Context) (IntegrityReport, error) {
 			}
 		}
 		for _, index := range table.SecondaryIndexes {
-			if index.Method == IndexMethodFullText && index.InvertedIndex != nil {
+			if secondaryIndexUsesDedicatedInvertedStorage(index.Method) && index.InvertedIndex != nil {
 				rootPages[index.InvertedIndex.GetRootPageIdx()] = fmt.Sprintf("index %s", index.Name)
 			} else if index.Index != nil {
 				rootPages[index.Index.GetRootPageIdx()] = fmt.Sprintf("index %s", index.Name)
@@ -164,7 +164,7 @@ func (d *Database) QuickCheck(ctx context.Context) (IntegrityReport, error) {
 			report = d.checkIndexRoot(ctx, report, table.Name, index.Name, index.Columns, true, index.Index.GetRootPageIdx())
 		}
 		for _, index := range table.SecondaryIndexes {
-			if index.Method == IndexMethodFullText && index.InvertedIndex != nil {
+			if secondaryIndexUsesDedicatedInvertedStorage(index.Method) && index.InvertedIndex != nil {
 				report = d.checkInvertedIndexRoot(ctx, report, table.Name, index.Name, index.InvertedIndex.GetRootPageIdx())
 				continue
 			}
@@ -820,6 +820,9 @@ func (d *Database) checkTableIndexConsistency(ctx context.Context, report Integr
 		})
 	}
 	for _, index := range table.SecondaryIndexes {
+		if secondaryIndexUsesDedicatedInvertedStorage(index.Method) {
+			continue
+		}
 		if !index.IsBTree() || index.Index == nil {
 			continue
 		}

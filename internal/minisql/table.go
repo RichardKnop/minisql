@@ -282,7 +282,7 @@ func (t *Table) IndexByName(name string) (BTreeIndex, bool) {
 		return index.Index, true
 	}
 	if index, ok := t.SecondaryIndexes[name]; ok {
-		if !index.IsBTree() && index.Method != IndexMethodInverted {
+		if !index.IsBTree() {
 			return nil, false
 		}
 		return index.Index, true

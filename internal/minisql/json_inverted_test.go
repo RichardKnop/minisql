@@ -119,14 +119,17 @@ func TestJSONInvertedIndexHelpers(t *testing.T) {
 	assert.Contains(t, terms, `kv:type:s:"click"`)
 	assert.Contains(t, terms, `kv:tags[]:s:"web"`)
 
-	index := &fakeFullTextIndex{rowIDs: make(map[any][]RowID)}
+	index := &fakeFullTextInvertedIndex{
+		mode:     invertedPostingModeRowIDs,
+		postings: make(map[string][]invertedPosting),
+	}
 	secondaryIndex := SecondaryIndex{
 		IndexInfo: IndexInfo{
 			Name:    "idx_payload_inv",
 			Method:  IndexMethodInverted,
 			Columns: []Column{payloadColumn},
 		},
-		Index: index,
+		InvertedIndex: index,
 	}
 	table := NewTable(testLogger, nil, nil, "events", []Column{payloadColumn}, 0, nil)
 	ctx := context.Background()

@@ -1202,8 +1202,8 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 }
 
 func (t *Table) invertedIndexScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
-	idx, ok := t.IndexByName(scan.IndexName)
-	if !ok {
+	secondaryIndex, ok := t.SecondaryIndexes[scan.IndexName]
+	if !ok || secondaryIndex.Method != IndexMethodInverted || secondaryIndex.InvertedIndex == nil {
 		return fmt.Errorf("no index found for inverted scan: %s", scan.IndexName)
 	}
 	if len(scan.IndexKeys) == 0 {
@@ -1212,12 +1212,36 @@ func (t *Table) invertedIndexScan(ctx context.Context, scan Scan, selectedFields
 
 	var surviving []RowID
 	for i, key := range scan.IndexKeys {
-		rowIDs, err := idx.FindRowIDs(ctx, key)
+		term, ok := key.(string)
+		if !ok {
+			continue
+		}
+		iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
 		if err != nil {
-			if errors.Is(err, ErrNotFound) {
-				return nil
-			}
 			return fmt.Errorf("inverted lookup failed: %w", err)
+		}
+		rowIDs := make([]RowID, 0)
+		for {
+			block, ok, err := iter.NextBlock(ctx)
+			if err != nil {
+				return fmt.Errorf("inverted lookup failed: %w", err)
+			}
+			if !ok {
+				break
+			}
+			mode, postings, err := decodeInvertedPostingList(block.Payload)
+			if err != nil {
+				return fmt.Errorf("inverted decode failed: %w", err)
+			}
+			if mode != invertedPostingModeRowIDs {
+				return fmt.Errorf("inverted index %s uses posting mode %d", scan.IndexName, mode)
+			}
+			for _, posting := range postings {
+				rowIDs = append(rowIDs, posting.RowID)
+			}
+		}
+		if len(rowIDs) == 0 {
+			return nil
 		}
 		sortRowIDs(rowIDs)
 		rowIDs = compactRowIDs(rowIDs)

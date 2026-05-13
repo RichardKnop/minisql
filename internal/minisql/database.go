@@ -872,14 +872,14 @@ func (d *Database) initSecondaryIndex(ctx context.Context, schema Schema) error 
 		},
 	}
 
-	if secondaryIndex.Method == IndexMethodFullText {
+	if secondaryIndexUsesDedicatedInvertedStorage(secondaryIndex.Method) {
 		tp := NewTransactionalPager(
 			d.factory.ForInvertedIndex(),
 			d.txManager,
 			table.Name,
 			schema.Name,
 		)
-		invertedIdx, err := NewDedicatedInvertedIndex(schema.Name, invertedIndexPostingModePositions, tp, schema.RootPage)
+		invertedIdx, err := NewDedicatedInvertedIndex(schema.Name, invertedIndexPostingModeForIndexMethod(secondaryIndex.Method), tp, schema.RootPage)
 		if err != nil {
 			return err
 		}
@@ -1614,14 +1614,14 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 	}
 
 	// Free pages for the index
-	if secondaryIndex.Method == IndexMethodFullText {
+	if secondaryIndexUsesDedicatedInvertedStorage(secondaryIndex.Method) {
 		txPager := NewTransactionalPager(
 			d.factory.ForInvertedIndex(),
 			d.txManager,
 			table.Name,
 			schema.Name,
 		)
-		invertedIdx, err := NewDedicatedInvertedIndex(schema.Name, invertedIndexPostingModePositions, txPager, schema.RootPage)
+		invertedIdx, err := NewDedicatedInvertedIndex(schema.Name, invertedIndexPostingModeForIndexMethod(secondaryIndex.Method), txPager, schema.RootPage)
 		if err != nil {
 			return err
 		}
@@ -1729,7 +1729,7 @@ func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, tab
 	d.logger.Sugar().With("column", secondaryIndex.Columns[0].Name).Debug("creating secondary index")
 
 	var rootPageIdx PageIndex
-	if secondaryIndex.Method == IndexMethodFullText {
+	if secondaryIndexUsesDedicatedInvertedStorage(secondaryIndex.Method) {
 		txPager := NewTransactionalPager(
 			d.factory.ForInvertedIndex(),
 			d.txManager,
@@ -1740,7 +1740,7 @@ func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, tab
 		if err != nil {
 			return SecondaryIndex{}, err
 		}
-		invertedIdx, err := NewDedicatedInvertedIndex(secondaryIndex.Name, invertedIndexPostingModePositions, txPager, freePage.Index)
+		invertedIdx, err := NewDedicatedInvertedIndex(secondaryIndex.Name, invertedIndexPostingModeForIndexMethod(secondaryIndex.Method), txPager, freePage.Index)
 		if err != nil {
 			return SecondaryIndex{}, err
 		}

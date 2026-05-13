@@ -456,7 +456,7 @@ FROM events
 WHERE JSON_CONTAINS(payload, '{"type":"click","tags":["web"]}');
 ```
 
-The v1 index stores generated JSON terms in a non-unique B+ tree. Terms include key existence (`k:user.id`) and scalar key/value entries (`kv:type:s:"click"`, `kv:tags[]:s:"web"`). Generated terms longer than the current 255-byte index-key limit are skipped; indexed queries are always rechecked against the full row, and queries that cannot produce any indexable terms fall back to sequential evaluation. It does not support posting trees, compression, path-specific operators, or dynamic query expressions yet.
+The v1 index stores generated JSON terms in MiniSQL's dedicated inverted-index storage. Terms include key existence (`k:user.id`) and scalar key/value entries (`kv:type:s:"click"`, `kv:tags[]:s:"web"`), with each term pointing at row-id postings. Small posting lists are stored inline; larger posting lists are promoted to compressed posting pages with internal posting-tree routing pages. Generated terms longer than the current 255-byte index-key limit are skipped; indexed queries are always rechecked against the full row, and queries that cannot produce any indexable terms fall back to sequential evaluation. It does not support path-specific operators or dynamic query expressions yet.
 
 ### CAST AS JSON
 
