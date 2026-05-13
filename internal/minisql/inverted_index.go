@@ -975,34 +975,227 @@ func (idx *dedicatedInvertedIndex) insertPostingIntoTreeCell(ctx context.Context
 		return cell, true, nil
 	}
 
-	payload, err := encodeInvertedPostingList(idx.mode, updatedPostings)
+	replacementBlocks, err := makeInvertedPostingBlocks(idx.mode, updatedPostings)
 	if err != nil {
 		return invertedEntryCell{}, false, err
 	}
-	if len(payload) > invertedPostingBlockPayloadMax {
-		return invertedEntryCell{}, false, nil
-	}
-
 	candidate := leaf.InvertedPostPage.Clone()
-	candidate.Blocks[blockIdx] = postingBlockFromPostings(idx.mode, updatedPostings, payload)
+	candidate.Blocks = replaceInvertedPostingBlocks(candidate.Blocks, blockIdx, replacementBlocks)
 	fits := ensureInvertedPostingPageFits(candidate, invertedPageBodySize(leaf.Index)) == nil
-	if !fits {
-		return invertedEntryCell{}, false, nil
-	}
-
-	page, err := idx.pager.ModifyPage(ctx, leaf.Index)
-	if err != nil {
-		return invertedEntryCell{}, false, fmt.Errorf("modify inverted posting leaf %d: %w", leaf.Index, err)
-	}
-	page.InvertedPostPage = candidate
-	if err := idx.refreshPostingAncestors(ctx, page.Index); err != nil {
-		return invertedEntryCell{}, false, err
+	if fits {
+		page, err := idx.pager.ModifyPage(ctx, leaf.Index)
+		if err != nil {
+			return invertedEntryCell{}, false, fmt.Errorf("modify inverted posting leaf %d: %w", leaf.Index, err)
+		}
+		page.InvertedPostPage = candidate
+		if err := idx.refreshPostingAncestors(ctx, page.Index); err != nil {
+			return invertedEntryCell{}, false, err
+		}
+	} else {
+		newRoot, err := idx.splitPostingLeafForBlocks(ctx, cell.Child, leaf, blockIdx, replacementBlocks)
+		if err != nil {
+			return invertedEntryCell{}, false, err
+		}
+		cell.Child = newRoot
 	}
 
 	updatedCell := cell
 	updatedCell.DocFreq = uint32(int(updatedCell.DocFreq) + newDocFreq - oldDocFreq)
 	updatedCell.PostingCount = uint32(int(updatedCell.PostingCount) + int(newPostingCount) - int(oldPostingCount))
 	return updatedCell, true, nil
+}
+
+// splitPostingLeafForBlocks replaces one leaf block, splits leaf pages as needed, and routes new pages upward.
+func (idx *dedicatedInvertedIndex) splitPostingLeafForBlocks(ctx context.Context, rootIdx PageIndex, leaf *Page, blockIdx int, replacementBlocks []invertedPostingBlock) (PageIndex, error) {
+	allBlocks := replaceInvertedPostingBlocks(leaf.InvertedPostPage.Blocks, blockIdx, replacementBlocks)
+	blockGroups, err := groupInvertedPostingBlocksIntoPages(allBlocks, 0)
+	if err != nil {
+		return 0, err
+	}
+	if len(blockGroups) == 1 {
+		page, err := idx.pager.ModifyPage(ctx, leaf.Index)
+		if err != nil {
+			return 0, fmt.Errorf("modify inverted posting leaf %d: %w", leaf.Index, err)
+		}
+		page.InvertedPostPage.Blocks = blockGroups[0]
+		return rootIdx, idx.refreshPostingAncestors(ctx, page.Index)
+	}
+
+	newPages, err := idx.allocatePostingPages(ctx, len(blockGroups)-1)
+	if err != nil {
+		return 0, err
+	}
+	parentIdx := leaf.InvertedPostPage.Header.Parent
+	oldNextLeaf := leaf.InvertedPostPage.Header.NextLeaf
+	pages := make([]*Page, 0, len(blockGroups))
+
+	current, err := idx.pager.ModifyPage(ctx, leaf.Index)
+	if err != nil {
+		return 0, fmt.Errorf("modify inverted posting leaf %d: %w", leaf.Index, err)
+	}
+	currentPage := NewInvertedPostingPage(0)
+	currentPage.Header.Parent = parentIdx
+	currentPage.Blocks = blockGroups[0]
+	current.InvertedPostPage = currentPage
+	pages = append(pages, current)
+
+	for i, page := range newPages {
+		page.Clear()
+		postingPage := NewInvertedPostingPage(0)
+		postingPage.Header.Parent = parentIdx
+		postingPage.Blocks = blockGroups[i+1]
+		page.InvertedPostPage = postingPage
+		pages = append(pages, page)
+	}
+	for i, page := range pages {
+		if i+1 < len(pages) {
+			page.InvertedPostPage.Header.NextLeaf = pages[i+1].Index
+		} else {
+			page.InvertedPostPage.Header.NextLeaf = oldNextLeaf
+		}
+		if err := ensureInvertedPostingPageFits(page.InvertedPostPage, invertedPageBodySize(page.Index)); err != nil {
+			return 0, err
+		}
+	}
+
+	if parentIdx == 0 {
+		return idx.createPostingRoot(ctx, pages)
+	}
+	if err := idx.refreshPostingAncestors(ctx, current.Index); err != nil {
+		return 0, err
+	}
+	return idx.insertPostingRoutingBlocks(ctx, rootIdx, parentIdx, current.Index, pages[1:])
+}
+
+// insertPostingRoutingBlocks adds routing blocks for split child pages into an internal page.
+func (idx *dedicatedInvertedIndex) insertPostingRoutingBlocks(ctx context.Context, rootIdx, parentIdx, afterChildIdx PageIndex, newChildren []*Page) (PageIndex, error) {
+	parent, err := idx.pager.ModifyPage(ctx, parentIdx)
+	if err != nil {
+		return 0, fmt.Errorf("modify inverted posting parent %d: %w", parentIdx, err)
+	}
+	if parent.InvertedPostPage == nil || parent.InvertedPostPage.Header.Level == 0 {
+		return 0, fmt.Errorf("inverted posting parent %d is not an internal posting page", parentIdx)
+	}
+
+	insertAt := -1
+	first, last, count, err := idx.postingPageRangeByIndex(ctx, afterChildIdx)
+	if err != nil {
+		return 0, err
+	}
+	for i, block := range parent.InvertedPostPage.Blocks {
+		if block.Child != afterChildIdx {
+			continue
+		}
+		parent.InvertedPostPage.Blocks[i].FirstRowID = first
+		parent.InvertedPostPage.Blocks[i].LastRowID = last
+		parent.InvertedPostPage.Blocks[i].PostingCount = count
+		insertAt = i + 1
+		break
+	}
+	if insertAt < 0 {
+		return 0, fmt.Errorf("inverted posting child %d not found in parent %d", afterChildIdx, parentIdx)
+	}
+
+	routingBlocks := make([]invertedPostingBlock, 0, len(newChildren))
+	for _, child := range newChildren {
+		child.InvertedPostPage.Header.Parent = parentIdx
+		block, err := idx.routingBlockForPostingPage(child)
+		if err != nil {
+			return 0, err
+		}
+		routingBlocks = append(routingBlocks, block)
+	}
+	parent.InvertedPostPage.Blocks = slices.Insert(parent.InvertedPostPage.Blocks, insertAt, routingBlocks...)
+	if err := ensureInvertedPostingPageFits(parent.InvertedPostPage, invertedPageBodySize(parent.Index)); err == nil {
+		if err := idx.refreshPostingAncestors(ctx, parent.Index); err != nil {
+			return 0, err
+		}
+		return rootIdx, nil
+	}
+	return idx.splitPostingInternalPage(ctx, rootIdx, parent)
+}
+
+// splitPostingInternalPage splits an overfull posting internal page and propagates routing upward.
+func (idx *dedicatedInvertedIndex) splitPostingInternalPage(ctx context.Context, rootIdx PageIndex, page *Page) (PageIndex, error) {
+	postingPage := page.InvertedPostPage
+	blockGroups, err := groupInvertedPostingBlocksIntoPages(postingPage.Blocks, postingPage.Header.Level)
+	if err != nil {
+		return 0, err
+	}
+	if len(blockGroups) == 1 {
+		return rootIdx, nil
+	}
+
+	newPages, err := idx.allocatePostingPages(ctx, len(blockGroups)-1)
+	if err != nil {
+		return 0, err
+	}
+	parentIdx := postingPage.Header.Parent
+	pages := make([]*Page, 0, len(blockGroups))
+
+	current := page
+	currentPage := NewInvertedPostingPage(postingPage.Header.Level)
+	currentPage.Header.Parent = parentIdx
+	currentPage.Blocks = blockGroups[0]
+	current.InvertedPostPage = currentPage
+	pages = append(pages, current)
+
+	for i, newPage := range newPages {
+		newPage.Clear()
+		childPage := NewInvertedPostingPage(postingPage.Header.Level)
+		childPage.Header.Parent = parentIdx
+		childPage.Blocks = blockGroups[i+1]
+		newPage.InvertedPostPage = childPage
+		pages = append(pages, newPage)
+	}
+	for _, childPage := range pages {
+		if err := idx.updatePostingChildrenParent(ctx, childPage); err != nil {
+			return 0, err
+		}
+		if err := ensureInvertedPostingPageFits(childPage.InvertedPostPage, invertedPageBodySize(childPage.Index)); err != nil {
+			return 0, err
+		}
+	}
+
+	if parentIdx == 0 {
+		return idx.createPostingRoot(ctx, pages)
+	}
+	if err := idx.refreshPostingAncestors(ctx, current.Index); err != nil {
+		return 0, err
+	}
+	return idx.insertPostingRoutingBlocks(ctx, rootIdx, parentIdx, current.Index, pages[1:])
+}
+
+// createPostingRoot builds a new posting-tree root above split child pages.
+func (idx *dedicatedInvertedIndex) createPostingRoot(ctx context.Context, children []*Page) (PageIndex, error) {
+	pages := children
+	var err error
+	for len(pages) > 1 {
+		pages, err = idx.writePostingInternalLevel(ctx, pages)
+		if err != nil {
+			return 0, err
+		}
+	}
+	pages[0].InvertedPostPage.Header.Parent = 0
+	return pages[0].Index, nil
+}
+
+// updatePostingChildrenParent points every child of an internal posting page back to that page.
+func (idx *dedicatedInvertedIndex) updatePostingChildrenParent(ctx context.Context, page *Page) error {
+	if page.InvertedPostPage == nil || page.InvertedPostPage.Header.Level == 0 {
+		return nil
+	}
+	for _, block := range page.InvertedPostPage.Blocks {
+		child, err := idx.pager.ModifyPage(ctx, block.Child)
+		if err != nil {
+			return fmt.Errorf("modify inverted posting child %d parent: %w", block.Child, err)
+		}
+		if child.InvertedPostPage == nil {
+			return fmt.Errorf("inverted posting child %d is not a posting page", block.Child)
+		}
+		child.InvertedPostPage.Header.Parent = page.Index
+	}
+	return nil
 }
 
 // deletePostingFromTreeCell removes one posting from an existing posting-tree leaf block.
@@ -1147,6 +1340,33 @@ func (idx *dedicatedInvertedIndex) refreshPostingAncestors(ctx context.Context, 
 		return err
 	}
 	return idx.refreshPostingAncestors(ctx, parentIdx)
+}
+
+// routingBlockForPostingPage builds the internal routing block for a child page.
+func (idx *dedicatedInvertedIndex) routingBlockForPostingPage(page *Page) (invertedPostingBlock, error) {
+	first, last, count, err := invertedPostingPageRange(page.InvertedPostPage)
+	if err != nil {
+		return invertedPostingBlock{}, err
+	}
+	return invertedPostingBlock{
+		FirstRowID:   first,
+		LastRowID:    last,
+		PostingCount: count,
+		Child:        page.Index,
+		CodecVersion: invertedPostingCodecVersion,
+	}, nil
+}
+
+// postingPageRangeByIndex reads a posting page and summarizes its row-id range.
+func (idx *dedicatedInvertedIndex) postingPageRangeByIndex(ctx context.Context, pageIdx PageIndex) (RowID, RowID, uint32, error) {
+	page, err := idx.pager.ReadPage(ctx, pageIdx)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("read inverted posting page %d range: %w", pageIdx, err)
+	}
+	if page.InvertedPostPage == nil {
+		return 0, 0, 0, fmt.Errorf("inverted posting page %d is not a posting page", pageIdx)
+	}
+	return invertedPostingPageRange(page.InvertedPostPage)
 }
 
 // writePostingTree writes compressed posting blocks into a posting-page tree.
@@ -1345,6 +1565,15 @@ func postingBlockFromPostings(mode invertedPostingMode, postings []invertedPosti
 		PostingCount: countInvertedPostings(mode, postings),
 		CodecVersion: invertedPostingCodecVersion,
 	}
+}
+
+// replaceInvertedPostingBlocks swaps one block for one or more replacement blocks.
+func replaceInvertedPostingBlocks(blocks []invertedPostingBlock, idx int, replacements []invertedPostingBlock) []invertedPostingBlock {
+	updated := make([]invertedPostingBlock, 0, len(blocks)-1+len(replacements))
+	updated = append(updated, blocks[:idx]...)
+	updated = append(updated, replacements...)
+	updated = append(updated, blocks[idx+1:]...)
+	return updated
 }
 
 // encodeLargestInvertedPostingBlock finds the largest prefix that fits one block.

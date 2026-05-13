@@ -545,6 +545,54 @@ func TestDedicatedInvertedIndex_MutatesPostingTreeAndRefreshesInternalRouting(t 
 	assert.Equal(t, uint32(len(postings)+1), count)
 }
 
+func TestDedicatedInvertedIndex_InsertSplitsPostingLeafWithoutRebuild(t *testing.T) {
+	index, txManager := newTestDedicatedInvertedIndex(t, "idx_json", invertedIndexPostingModeRowIDs)
+	ctx := context.Background()
+
+	var rootIdx PageIndex
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		leaf, err := index.pager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		leaf.Clear()
+		postingPage := NewInvertedPostingPage(0)
+		for i := 1; ; i++ {
+			block, err := testInvertedPostingBlock(invertedPostingModeRowIDs, RowID(i*10))
+			if err != nil {
+				return err
+			}
+			candidate := postingPage.Clone()
+			candidate.Blocks = append(candidate.Blocks, block)
+			if err := ensureInvertedPostingPageFits(candidate, invertedPageBodySize(leaf.Index)); err != nil {
+				break
+			}
+			postingPage = candidate
+		}
+		require.Greater(t, len(postingPage.Blocks), 2)
+		leaf.InvertedPostPage = postingPage
+
+		replacementA, err := testInvertedPostingBlock(invertedPostingModeRowIDs, 5)
+		if err != nil {
+			return err
+		}
+		replacementB, err := testInvertedPostingBlock(invertedPostingModeRowIDs, 10)
+		if err != nil {
+			return err
+		}
+		rootIdx, err = index.splitPostingLeafForBlocks(ctx, leaf.Index, leaf, 0, []invertedPostingBlock{replacementA, replacementB})
+		return err
+	}))
+
+	require.NotZero(t, rootIdx)
+	rootPage, err := index.pager.ReadPage(ctx, rootIdx)
+	require.NoError(t, err)
+	require.NotNil(t, rootPage.InvertedPostPage)
+	assert.Equal(t, byte(1), rootPage.InvertedPostPage.Header.Level)
+	require.Len(t, rootPage.InvertedPostPage.Blocks, 2)
+	assertDedicatedInvertedPostingTreeValid(t, ctx, index, rootIdx, 0)
+}
+
 func TestDedicatedInvertedIndex_DemotesPostingTreeAfterDeletes(t *testing.T) {
 	index, txManager := newTestDedicatedInvertedIndex(t, "idx_json", invertedIndexPostingModeRowIDs)
 	ctx := context.Background()
@@ -870,4 +918,12 @@ func largeTestRowID(i int) RowID {
 
 func wideTestRowID(i int) RowID {
 	return RowID(i) << 40
+}
+
+func testInvertedPostingBlock(mode invertedPostingMode, rowID RowID) (invertedPostingBlock, error) {
+	payload, err := encodeInvertedPostingList(mode, []invertedPosting{{RowID: rowID}})
+	if err != nil {
+		return invertedPostingBlock{}, err
+	}
+	return postingBlockFromPostings(mode, []invertedPosting{{RowID: rowID}}, payload), nil
 }
