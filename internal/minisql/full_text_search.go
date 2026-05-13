@@ -5,6 +5,10 @@ import (
 	"unicode"
 )
 
+func fullTextTokenColumn() Column {
+	return Column{Name: "__fts_token__", Kind: Varchar, Size: MaxIndexKeySize}
+}
+
 var textSearchStopWords = map[string]struct{}{
 	"a": {}, "an": {}, "and": {}, "are": {}, "as": {}, "at": {}, "be": {}, "by": {},
 	"for": {}, "from": {}, "in": {}, "is": {}, "it": {}, "of": {}, "on": {}, "or": {},

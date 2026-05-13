@@ -105,6 +105,9 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 		table.columnIndexInfoCache[indexColumnHash(index.Columns)] = index.IndexInfo
 	}
 	for _, index := range table.SecondaryIndexes {
+		if !index.IsBTree() {
+			continue
+		}
 		table.columnIndexInfoCache[indexColumnHash(index.Columns)] = index.IndexInfo
 	}
 
@@ -200,7 +203,7 @@ func (t *Table) HasNoIndex() bool {
 		return false
 	}
 	for _, idx := range t.SecondaryIndexes {
-		if idx.IsBTree() || idx.Method == IndexMethodFullText {
+		if idx.IsBTree() || idx.Method == IndexMethodFullText || idx.Method == IndexMethodInverted {
 			return false
 		}
 	}
@@ -279,7 +282,7 @@ func (t *Table) IndexByName(name string) (BTreeIndex, bool) {
 		return index.Index, true
 	}
 	if index, ok := t.SecondaryIndexes[name]; ok {
-		if !index.IsBTree() && index.Method != IndexMethodFullText {
+		if !index.IsBTree() && index.Method != IndexMethodFullText && index.Method != IndexMethodInverted {
 			return nil, false
 		}
 		return index.Index, true

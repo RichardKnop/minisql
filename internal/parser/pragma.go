@@ -1,6 +1,8 @@
 package parser
 
-import "strings"
+import (
+	"strings"
+)
 
 func (p *parserItem) doParsePragma() error {
 	if p.step != stepPragma {

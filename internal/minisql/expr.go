@@ -1412,6 +1412,31 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 		}
 		return scalar, nil
 
+	case "JSON_CONTAINS":
+		if len(e.Args) != 2 {
+			return nil, fmt.Errorf("JSON_CONTAINS requires exactly 2 arguments")
+		}
+		docVal, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		queryVal, err := e.Args[1].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if docVal == nil || queryVal == nil {
+			return false, nil
+		}
+		docStr, ok := toStringVal(docVal)
+		if !ok {
+			return nil, fmt.Errorf("JSON_CONTAINS: first argument must be a string")
+		}
+		queryStr, ok := toStringVal(queryVal)
+		if !ok {
+			return nil, fmt.Errorf("JSON_CONTAINS: second argument must be a string")
+		}
+		return jsonContains(docStr, queryStr)
+
 	default:
 		return nil, fmt.Errorf("unknown function %q", e.FuncName)
 	}

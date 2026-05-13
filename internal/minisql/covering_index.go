@@ -12,7 +12,7 @@ func (p *QueryPlan) markCoveringIndexes(stmt Statement) {
 		return
 	}
 	for i, scan := range p.Scans {
-		if scan.Type == ScanTypeSequential || scan.Type == ScanTypeIndexIntersect || scan.Type == ScanTypeFullText {
+		if scan.Type == ScanTypeSequential || scan.Type == ScanTypeIndexIntersect || scan.Type == ScanTypeFullText || scan.Type == ScanTypeInverted {
 			continue
 		}
 		if coveringIndexEligible(stmt, scan.IndexColumns) {

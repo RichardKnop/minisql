@@ -133,6 +133,12 @@ func TestParse_JSONFunctions(t *testing.T) {
 			argCount: 1,
 		},
 		{
+			name:     "JSON_CONTAINS two args",
+			sql:      "SELECT JSON_CONTAINS(payload, '{\"type\":\"click\"}') FROM events;",
+			funcName: "JSON_CONTAINS",
+			argCount: 2,
+		},
+		{
 			name:     "JSON_TYPE with path",
 			sql:      "SELECT JSON_TYPE(payload, '$.tags') FROM events;",
 			funcName: "JSON_TYPE",
@@ -153,6 +159,27 @@ func TestParse_JSONFunctions(t *testing.T) {
 			assert.Len(t, expr.Args, tt.argCount)
 		})
 	}
+}
+
+func TestParse_JSONContainsWherePredicate(t *testing.T) {
+	t.Parallel()
+
+	stmts, err := New().Parse(context.Background(), `SELECT id FROM events WHERE JSON_CONTAINS(payload, '{"type":"click"}');`)
+	require.NoError(t, err)
+	require.Len(t, stmts, 1)
+	require.Len(t, stmts[0].Conditions, 1)
+	require.Len(t, stmts[0].Conditions[0], 1)
+
+	cond := stmts[0].Conditions[0][0]
+	assert.Equal(t, minisql.Eq, cond.Operator)
+	assert.Equal(t, minisql.OperandBoolean, cond.Operand2.Type)
+	assert.Equal(t, true, cond.Operand2.Value)
+	require.Equal(t, minisql.OperandExpr, cond.Operand1.Type)
+	expr, ok := cond.Operand1.Value.(*minisql.Expr)
+	require.True(t, ok)
+	assert.Equal(t, "JSON_CONTAINS", expr.FuncName)
+	require.Len(t, expr.Args, 2)
+	assert.Equal(t, "payload", expr.Args[0].Column)
 }
 
 func TestParse_CastAsJSON(t *testing.T) {

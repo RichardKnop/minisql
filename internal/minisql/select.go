@@ -87,12 +87,8 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 
 		for _, conditions := range stmt.Conditions {
 			for _, cond := range conditions {
-				if cond.Operand1.Type == OperandField {
-					selectedFields = append(selectedFields, cond.Operand1.Value.(Field))
-				}
-				if cond.Operand2.Type == OperandField {
-					selectedFields = append(selectedFields, cond.Operand2.Value.(Field))
-				}
+				selectedFields = appendOperandSourceFields(selectedFields, cond.Operand1)
+				selectedFields = appendOperandSourceFields(selectedFields, cond.Operand2)
 			}
 		}
 	}
@@ -1190,6 +1186,78 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 	return nil
 }
 
+func (t *Table) invertedIndexScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return fmt.Errorf("no index found for inverted scan: %s", scan.IndexName)
+	}
+	if len(scan.IndexKeys) == 0 {
+		return nil
+	}
+
+	var surviving []RowID
+	for i, key := range scan.IndexKeys {
+		rowIDs, err := idx.FindRowIDs(ctx, key)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return nil
+			}
+			return fmt.Errorf("inverted lookup failed: %w", err)
+		}
+		sortRowIDs(rowIDs)
+		rowIDs = compactRowIDs(rowIDs)
+		if i == 0 {
+			surviving = rowIDs
+			continue
+		}
+		surviving = intersectTwoSortedSets(surviving, rowIDs)
+		if len(surviving) == 0 {
+			return nil
+		}
+	}
+	if len(surviving) == 0 {
+		return nil
+	}
+
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	for _, rowID := range surviving {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		var row Row
+		if len(selectedFields) == 0 {
+			row = NewRowWithValues(t.Columns, nil)
+			row.Key = rowID
+		} else {
+			cursor, err := t.Seek(ctx, rowID)
+			if err != nil {
+				return fmt.Errorf("inverted seek: %w", err)
+			}
+			row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
+			if err != nil {
+				return fmt.Errorf("inverted fetch: %w", err)
+			}
+		}
+
+		if tableFilter != nil {
+			ok, err := tableFilter(row)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
+		}
+
+		if err := out(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // errStopScan is a sentinel returned by an index scan callback to stop iteration after the
 // first row has been delivered.  It is never surfaced to callers.
 var errStopScan = errors.New("stop scan")
@@ -1314,6 +1382,22 @@ func exprSourceFields(fields []Field) []Field {
 		}
 	}
 	return result
+}
+
+func appendOperandSourceFields(fields []Field, operand Operand) []Field {
+	switch operand.Type {
+	case OperandField:
+		return append(fields, operand.Value.(Field))
+	case OperandExpr:
+		expr, ok := operand.Value.(*Expr)
+		if !ok {
+			return fields
+		}
+		for _, colName := range expr.Columns() {
+			fields = append(fields, Field{Name: colName})
+		}
+	}
+	return fields
 }
 
 // rowDistinctKey builds a string key from a projected row's values for DISTINCT deduplication.
@@ -1677,6 +1761,21 @@ func sortRowIDs(ids []RowID) {
 			ids[j-1], ids[j] = ids[j], ids[j-1]
 		}
 	}
+}
+
+func compactRowIDs(ids []RowID) []RowID {
+	if len(ids) < 2 {
+		return ids
+	}
+	write := 1
+	for read := 1; read < len(ids); read++ {
+		if ids[read] == ids[read-1] {
+			continue
+		}
+		ids[write] = ids[read]
+		write++
+	}
+	return ids[:write]
 }
 
 // indexIntersectScan executes a ScanTypeIndexIntersect plan:

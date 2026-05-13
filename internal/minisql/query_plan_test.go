@@ -603,6 +603,7 @@ func TestScanType_String(t *testing.T) {
 		{want: "index_last", st: ScanTypeIndexLast},
 		{want: "index_intersect", st: ScanTypeIndexIntersect},
 		{want: "fulltext", st: ScanTypeFullText},
+		{want: "inverted", st: ScanTypeInverted},
 		{want: "unknown", st: ScanType(99)},
 	}
 

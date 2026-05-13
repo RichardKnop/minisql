@@ -430,6 +430,8 @@ func (t *Table) executeExplainScan(ctx context.Context, plan QueryPlan, scan Sca
 		return t.indexIntersectScan(ctx, scan, selectedFields, out)
 	case ScanTypeFullText:
 		return t.fullTextIndexScan(ctx, scan, selectedFields, out)
+	case ScanTypeInverted:
+		return t.invertedIndexScan(ctx, scan, selectedFields, out)
 	default:
 		return fmt.Errorf("unhandled scan type in EXPLAIN ANALYZE: %d", scan.Type)
 	}
@@ -466,12 +468,8 @@ func explainSelectedFields(t *Table, stmt Statement) []Field {
 func appendConditionFields(fields []Field, conditions OneOrMore) []Field {
 	for _, group := range conditions {
 		for _, cond := range group {
-			if cond.Operand1.Type == OperandField {
-				fields = append(fields, cond.Operand1.Value.(Field))
-			}
-			if cond.Operand2.Type == OperandField {
-				fields = append(fields, cond.Operand2.Value.(Field))
-			}
+			fields = appendOperandSourceFields(fields, cond.Operand1)
+			fields = appendOperandSourceFields(fields, cond.Operand2)
 		}
 	}
 	return fields
@@ -626,6 +624,10 @@ func estimateScanRows(table *Table, scan Scan) OptionalValue {
 			}
 		}
 	case ScanTypeFullText:
+		if len(scan.IndexKeys) > 0 {
+			return OptionalValue{Valid: true, Value: int64(len(scan.IndexKeys))}
+		}
+	case ScanTypeInverted:
 		if len(scan.IndexKeys) > 0 {
 			return OptionalValue{Valid: true, Value: int64(len(scan.IndexKeys))}
 		}
