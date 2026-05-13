@@ -1070,8 +1070,8 @@ func (t *Table) indexPointScan(ctx context.Context, scan Scan, selectedFields []
 }
 
 func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
-	idx, ok := t.IndexByName(scan.IndexName)
-	if !ok {
+	secondaryIndex, ok := t.SecondaryIndexes[scan.IndexName]
+	if !ok || secondaryIndex.Method != IndexMethodFullText || secondaryIndex.InvertedIndex == nil {
 		return fmt.Errorf("no index found for full-text scan: %s", scan.IndexName)
 	}
 	if len(scan.IndexKeys) == 0 {
@@ -1101,17 +1101,32 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 		if !ok {
 			continue
 		}
-		postings, err := idx.FindRowIDs(ctx, key)
+		iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
 		if err != nil {
-			if errors.Is(err, ErrNotFound) {
-				return nil
-			}
 			return fmt.Errorf("full-text lookup failed: %w", err)
 		}
 		rows := make(map[RowID][]uint32)
-		for _, posting := range postings {
-			decoded := decodeFullTextPosting(posting)
-			rows[decoded.RowID] = append(rows[decoded.RowID], decoded.Position)
+		for {
+			block, ok, err := iter.NextBlock(ctx)
+			if err != nil {
+				return fmt.Errorf("full-text lookup failed: %w", err)
+			}
+			if !ok {
+				break
+			}
+			mode, postings, err := decodeInvertedPostingList(block.Payload)
+			if err != nil {
+				return fmt.Errorf("full-text decode failed: %w", err)
+			}
+			if mode != invertedPostingModePositions {
+				return fmt.Errorf("full-text index %s uses posting mode %d", scan.IndexName, mode)
+			}
+			for _, posting := range postings {
+				rows[posting.RowID] = append(rows[posting.RowID], posting.Positions...)
+			}
+		}
+		if len(rows) == 0 {
+			return nil
 		}
 		postingsByTerm[term] = rows
 	}

@@ -161,14 +161,14 @@ func TestFullTextIndexKeyMaintenanceHelpers(t *testing.T) {
 	t.Parallel()
 
 	bodyColumn := Column{Name: "body", Kind: Text}
-	index := &fakeFullTextIndex{rowIDs: make(map[any][]RowID)}
+	index := &fakeFullTextInvertedIndex{postings: make(map[string][]invertedPosting)}
 	secondaryIndex := SecondaryIndex{
 		IndexInfo: IndexInfo{
 			Name:    "idx_body_fts",
 			Method:  IndexMethodFullText,
 			Columns: []Column{bodyColumn},
 		},
-		Index: index,
+		InvertedIndex: index,
 	}
 	table := NewTable(testLogger, nil, nil, "articles", []Column{bodyColumn}, 0, nil)
 	ctx := context.Background()
@@ -505,4 +505,58 @@ func (f *fakeFullTextIndex) ScanRange(context.Context, RangeCondition, bool, ind
 
 func (f *fakeFullTextIndex) BFS(context.Context, indexCallback) error {
 	return nil
+}
+
+type fakeFullTextInvertedIndex struct {
+	postings map[string][]invertedPosting
+	inserted []string
+	deleted  []string
+}
+
+func (f *fakeFullTextInvertedIndex) GetRootPageIdx() PageIndex {
+	return 0
+}
+
+func (f *fakeFullTextInvertedIndex) Mode() invertedIndexPostingMode {
+	return invertedIndexPostingModePositions
+}
+
+func (f *fakeFullTextInvertedIndex) Insert(_ context.Context, term string, posting invertedPosting) error {
+	f.inserted = append(f.inserted, term)
+	f.postings[term] = append(f.postings[term], posting)
+	return nil
+}
+
+func (f *fakeFullTextInvertedIndex) Delete(_ context.Context, term string, posting invertedPosting) error {
+	f.deleted = append(f.deleted, term)
+	postings := f.postings[term]
+	for i, existing := range postings {
+		if existing.RowID == posting.RowID {
+			f.postings[term] = append(postings[:i], postings[i+1:]...)
+			break
+		}
+	}
+	return nil
+}
+
+func (f *fakeFullTextInvertedIndex) Lookup(_ context.Context, term string) (invertedPostingIterator, error) {
+	payload, err := encodeInvertedPostingList(invertedPostingModePositions, f.postings[term])
+	if err != nil {
+		return nil, err
+	}
+	return &singleBlockInvertedPostingIterator{
+		block: invertedPostingBlock{
+			Payload:      payload,
+			CodecVersion: invertedPostingCodecVersion,
+		},
+		hasBlock: true,
+	}, nil
+}
+
+func (f *fakeFullTextInvertedIndex) Stats(_ context.Context, term string) (invertedPostingStats, error) {
+	postings := groupInvertedPostings(invertedPostingModePositions, f.postings[term])
+	return invertedPostingStats{
+		DocFreq:      uint32(len(postings)),
+		PostingCount: countInvertedPostings(invertedPostingModePositions, postings),
+	}, nil
 }

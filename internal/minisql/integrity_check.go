@@ -60,6 +60,10 @@ func (d *Database) IntegrityCheck(ctx context.Context) (IntegrityReport, error) 
 			report = d.walkIndexPages(ctx, report, table.Name, index.Name, index.Columns, true, index.Index.GetRootPageIdx(), livePages)
 		}
 		for _, index := range table.SecondaryIndexes {
+			if index.Method == IndexMethodFullText && index.InvertedIndex != nil {
+				report = d.walkInvertedIndexPages(ctx, report, table.Name, index.Name, index.InvertedIndex.GetRootPageIdx(), livePages)
+				continue
+			}
 			if index.Index == nil {
 				continue
 			}
@@ -121,7 +125,9 @@ func (d *Database) QuickCheck(ctx context.Context) (IntegrityReport, error) {
 			}
 		}
 		for _, index := range table.SecondaryIndexes {
-			if index.Index != nil {
+			if index.Method == IndexMethodFullText && index.InvertedIndex != nil {
+				rootPages[index.InvertedIndex.GetRootPageIdx()] = fmt.Sprintf("index %s", index.Name)
+			} else if index.Index != nil {
 				rootPages[index.Index.GetRootPageIdx()] = fmt.Sprintf("index %s", index.Name)
 			}
 		}
@@ -158,6 +164,10 @@ func (d *Database) QuickCheck(ctx context.Context) (IntegrityReport, error) {
 			report = d.checkIndexRoot(ctx, report, table.Name, index.Name, index.Columns, true, index.Index.GetRootPageIdx())
 		}
 		for _, index := range table.SecondaryIndexes {
+			if index.Method == IndexMethodFullText && index.InvertedIndex != nil {
+				report = d.checkInvertedIndexRoot(ctx, report, table.Name, index.Name, index.InvertedIndex.GetRootPageIdx())
+				continue
+			}
 			if index.Index == nil {
 				continue
 			}
@@ -335,6 +345,41 @@ func (d *Database) checkIndexRoot(ctx context.Context, report IntegrityReport, t
 		report.Issues = append(report.Issues, IntegrityIssue{
 			Code:    "index_root_invalid_type",
 			Message: fmt.Sprintf("index %s on table %s root page %d is not an index node", indexName, tableName, pageIdx),
+			Page:    pageIndexPtr(pageIdx),
+			Object:  indexName,
+		})
+	}
+
+	return report
+}
+
+func (d *Database) checkInvertedIndexRoot(ctx context.Context, report IntegrityReport, tableName, indexName string, pageIdx PageIndex) IntegrityReport {
+	if pageIdx >= PageIndex(report.TotalPages) {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_root_out_of_range",
+			Message: fmt.Sprintf("index %s on table %s has root page %d outside database page range", indexName, tableName, pageIdx),
+			Page:    pageIndexPtr(pageIdx),
+			Object:  indexName,
+		})
+		return report
+	}
+
+	page, err := d.factory.ForInvertedIndex().GetPage(ctx, pageIdx)
+	if err != nil {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_root_decode_failed",
+			Message: fmt.Sprintf("failed to decode root page for index %s on table %s: %v", indexName, tableName, err),
+			Page:    pageIndexPtr(pageIdx),
+			Object:  indexName,
+		})
+		return report
+	}
+	report.CheckedRootPages += 1
+
+	if page.InvertedEntryPage == nil {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_root_invalid_type",
+			Message: fmt.Sprintf("index %s on table %s root page %d is not an inverted entry node", indexName, tableName, pageIdx),
 			Page:    pageIndexPtr(pageIdx),
 			Object:  indexName,
 		})
@@ -544,6 +589,82 @@ func (d *Database) walkIndexPages(ctx context.Context, report IntegrityReport, t
 		children := indexNodeChildren(page.IndexNode)
 		stack = append(stack, children...)
 		report = d.walkIndexOverflowPages(ctx, report, pager, objectName, page.IndexNode, livePages)
+	}
+
+	return report
+}
+
+func (d *Database) walkInvertedIndexPages(ctx context.Context, report IntegrityReport, tableName, indexName string, root PageIndex, livePages map[PageIndex]string) IntegrityReport {
+	pager := d.factory.ForInvertedIndex()
+	visited := make(map[PageIndex]struct{})
+	stack := []PageIndex{root}
+	objectName := fmt.Sprintf("index %s on table %s", indexName, tableName)
+
+	for len(stack) > 0 {
+		pageIdx := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		if pageIdx >= PageIndex(report.TotalPages) {
+			report.Issues = append(report.Issues, IntegrityIssue{
+				Code:    "index_page_out_of_range",
+				Message: fmt.Sprintf("%s references page %d outside database page range", objectName, pageIdx),
+				Page:    pageIndexPtr(pageIdx),
+				Object:  indexName,
+			})
+			continue
+		}
+		if _, seen := visited[pageIdx]; seen {
+			continue
+		}
+		visited[pageIdx] = struct{}{}
+		report = markLivePage(report, livePages, pageIdx, objectName)
+
+		page, err := pager.GetPage(ctx, pageIdx)
+		if err != nil {
+			report.Issues = append(report.Issues, IntegrityIssue{
+				Code:    "index_page_decode_failed",
+				Message: fmt.Sprintf("failed to decode page %d for %s: %v", pageIdx, objectName, err),
+				Page:    pageIndexPtr(pageIdx),
+				Object:  indexName,
+			})
+			continue
+		}
+		switch {
+		case page.InvertedEntryPage != nil:
+			entryPage := page.InvertedEntryPage
+			if entryPage.Header.IsLeaf {
+				for _, cell := range entryPage.Cells {
+					if cell.PostingKind == invertedPostingKindTree && cell.Child != 0 {
+						stack = append(stack, cell.Child)
+					}
+				}
+				if entryPage.Header.NextLeaf != 0 {
+					stack = append(stack, entryPage.Header.NextLeaf)
+				}
+			} else {
+				stack = append(stack, invertedEntryChildren(entryPage)...)
+			}
+		case page.InvertedPostPage != nil:
+			postingPage := page.InvertedPostPage
+			if postingPage.Header.Level == 0 {
+				if postingPage.Header.NextLeaf != 0 {
+					stack = append(stack, postingPage.Header.NextLeaf)
+				}
+			} else {
+				for _, block := range postingPage.Blocks {
+					if block.Child != 0 {
+						stack = append(stack, block.Child)
+					}
+				}
+			}
+		default:
+			report.Issues = append(report.Issues, IntegrityIssue{
+				Code:    "index_page_invalid_type",
+				Message: fmt.Sprintf("page %d reachable from %s is not an inverted index page", pageIdx, objectName),
+				Page:    pageIndexPtr(pageIdx),
+				Object:  indexName,
+			})
+		}
 	}
 
 	return report

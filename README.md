@@ -657,7 +657,7 @@ ON articles (body)
 WITH (tokenizer = 'simple');
 ```
 
-The v1 index stores one B+ tree entry per unique token, with each token pointing at ordered positional postings `(row ID, token position)`. The current on-disk format stores packed positional postings in the generic B+ tree posting slots; a delta/varint posting-list codec exists internally as preparation for a future dedicated inverted-index payload format. It does not rank from index statistics or use posting trees yet. Literal `MATCH(body, 'mini database')` predicates can use the index by intersecting posting rows for all query tokens; quoted phrases such as `MATCH(body, '"database pages"')` additionally require adjacent token positions. Dynamic query expressions and queries containing tokens longer than the current 255-byte index-key limit fall back to the sequential semantics.
+The v1 index uses MiniSQL's dedicated inverted-index storage: an entry tree maps each unique token to ordered positional postings `(row ID, token position)`. Small posting lists are stored inline in the entry leaf; larger posting lists are promoted to compressed posting pages with internal posting-tree routing pages. Literal `MATCH(body, 'mini database')` predicates can use the index by intersecting posting rows for all query tokens; quoted phrases such as `MATCH(body, '"database pages"')` additionally require adjacent token positions. Dynamic query expressions and queries containing tokens longer than the current 255-byte index-key limit fall back to the sequential semantics.
 
 | Function | Description |
 |----------|-------------|

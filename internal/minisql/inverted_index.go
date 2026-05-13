@@ -427,6 +427,36 @@ func (idx *dedicatedInvertedIndex) Stats(ctx context.Context, term string) (inve
 	}, nil
 }
 
+// FreeAll releases every entry and posting page owned by the index.
+func (idx *dedicatedInvertedIndex) FreeAll(ctx context.Context) error {
+	stack := []PageIndex{idx.rootPageIdx}
+	for len(stack) > 0 {
+		pageIdx := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		page, err := idx.pager.ReadPage(ctx, pageIdx)
+		if err != nil {
+			return fmt.Errorf("read inverted entry page %d for free: %w", pageIdx, err)
+		}
+		if page.InvertedEntryPage == nil {
+			return fmt.Errorf("inverted entry page %d is not an entry page", pageIdx)
+		}
+		entryPage := page.InvertedEntryPage
+		if entryPage.Header.IsLeaf {
+			for _, cell := range entryPage.Cells {
+				if err := idx.freePostingTree(ctx, cell); err != nil {
+					return err
+				}
+			}
+		} else {
+			stack = append(stack, invertedEntryChildren(entryPage)...)
+		}
+		if err := idx.pager.AddFreePage(ctx, pageIdx); err != nil {
+			return fmt.Errorf("free inverted entry page %d: %w", pageIdx, err)
+		}
+	}
+	return nil
+}
+
 // readRootEntryPage reads and validates the entry-tree root page.
 func (idx *dedicatedInvertedIndex) readRootEntryPage(ctx context.Context) (*Page, error) {
 	page, err := idx.pager.ReadPage(ctx, idx.rootPageIdx)

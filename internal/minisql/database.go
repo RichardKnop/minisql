@@ -872,20 +872,34 @@ func (d *Database) initSecondaryIndex(ctx context.Context, schema Schema) error 
 		},
 	}
 
-	storageColumns := secondaryIndexStorageColumns(secondaryIndex)
+	if secondaryIndex.Method == IndexMethodFullText {
+		tp := NewTransactionalPager(
+			d.factory.ForInvertedIndex(),
+			d.txManager,
+			table.Name,
+			schema.Name,
+		)
+		invertedIdx, err := NewDedicatedInvertedIndex(schema.Name, invertedIndexPostingModePositions, tp, schema.RootPage)
+		if err != nil {
+			return err
+		}
+		secondaryIndex.InvertedIndex = invertedIdx
+	} else {
+		storageColumns := secondaryIndexStorageColumns(secondaryIndex)
 
-	// Create and set BTree index instance
-	tp := NewTransactionalPager(
-		d.factory.ForIndex(storageColumns, false),
-		d.txManager,
-		table.Name,
-		schema.Name,
-	)
-	btreeIndex, err := table.newBTreeIndex(tp, schema.RootPage, storageColumns, secondaryIndex.Name, false)
-	if err != nil {
-		return err
+		// Create and set BTree index instance
+		tp := NewTransactionalPager(
+			d.factory.ForIndex(storageColumns, false),
+			d.txManager,
+			table.Name,
+			schema.Name,
+		)
+		btreeIndex, err := table.newBTreeIndex(tp, schema.RootPage, storageColumns, secondaryIndex.Name, false)
+		if err != nil {
+			return err
+		}
+		secondaryIndex.Index = btreeIndex
 	}
-	secondaryIndex.Index = btreeIndex
 
 	table.SetSecondaryIndex(secondaryIndex)
 
@@ -1433,11 +1447,10 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, table *Table
 			Method:        stmt.IndexMethod,
 		},
 	}
-	createdIndex, err := d.createSecondaryIndex(ctx, stmt, table, secondaryIndex)
+	secondaryIndex, err = d.createSecondaryIndex(ctx, stmt, table, secondaryIndex)
 	if err != nil {
 		return err
 	}
-	secondaryIndex.Index = createdIndex
 
 	// Scan table and populate index
 	if err := d.populateIndex(ctx, table, secondaryIndex); err != nil {
@@ -1596,36 +1609,52 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 			Method:        stmts[0].IndexMethod,
 		},
 	}
-	storageColumns := secondaryIndexStorageColumns(secondaryIndex)
-
-	txPager := NewTransactionalPager(
-		d.factory.ForIndex(storageColumns, false),
-		d.txManager,
-		table.Name,
-		schema.Name,
-	)
-
-	btreeIndex, err := table.newBTreeIndex(txPager, schema.RootPage, storageColumns, schema.Name, false)
-	if err != nil {
-		return err
-	}
-	secondaryIndex.Index = btreeIndex
-
 	if err := d.deleteSchema(ctx, schema.Type, schema.Name); err != nil {
 		return err
 	}
 
 	// Free pages for the index
-	_ = btreeIndex.BFS(ctx, func(page *Page) {
-		if err := txPager.AddFreePage(ctx, page.Index); err != nil {
-			d.logger.Sugar().With(
-				"page", page.Index,
-				"error", err,
-			).Error("failed to free secondary index page")
-			return
+	if secondaryIndex.Method == IndexMethodFullText {
+		txPager := NewTransactionalPager(
+			d.factory.ForInvertedIndex(),
+			d.txManager,
+			table.Name,
+			schema.Name,
+		)
+		invertedIdx, err := NewDedicatedInvertedIndex(schema.Name, invertedIndexPostingModePositions, txPager, schema.RootPage)
+		if err != nil {
+			return err
 		}
-		d.logger.Sugar().With("page", page.Index).Debug("freed secondary index page")
-	})
+		if err := invertedIdx.FreeAll(ctx); err != nil {
+			return err
+		}
+	} else {
+		storageColumns := secondaryIndexStorageColumns(secondaryIndex)
+
+		txPager := NewTransactionalPager(
+			d.factory.ForIndex(storageColumns, false),
+			d.txManager,
+			table.Name,
+			schema.Name,
+		)
+
+		btreeIndex, err := table.newBTreeIndex(txPager, schema.RootPage, storageColumns, schema.Name, false)
+		if err != nil {
+			return err
+		}
+		secondaryIndex.Index = btreeIndex
+
+		_ = btreeIndex.BFS(ctx, func(page *Page) {
+			if err := txPager.AddFreePage(ctx, page.Index); err != nil {
+				d.logger.Sugar().With(
+					"page", page.Index,
+					"error", err,
+				).Error("failed to free secondary index page")
+				return
+			}
+			d.logger.Sugar().With("page", page.Index).Debug("freed secondary index page")
+		})
+	}
 
 	tx.DDLChanges = tx.DDLChanges.DroppedIndex(table.Name, secondaryIndex)
 
@@ -1696,38 +1725,63 @@ func (d *Database) createUniqueIndex(ctx context.Context, table *Table, uniqueIn
 	return createdIndex, nil
 }
 
-func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, table *Table, secondaryIndex SecondaryIndex) (BTreeIndex, error) {
+func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, table *Table, secondaryIndex SecondaryIndex) (SecondaryIndex, error) {
 	d.logger.Sugar().With("column", secondaryIndex.Columns[0].Name).Debug("creating secondary index")
 
-	storageColumns := secondaryIndexStorageColumns(secondaryIndex)
-	txPager := NewTransactionalPager(
-		d.factory.ForIndex(storageColumns, false),
-		d.txManager,
-		table.Name,
-		secondaryIndex.Name,
-	)
+	var rootPageIdx PageIndex
+	if secondaryIndex.Method == IndexMethodFullText {
+		txPager := NewTransactionalPager(
+			d.factory.ForInvertedIndex(),
+			d.txManager,
+			table.Name,
+			secondaryIndex.Name,
+		)
+		freePage, err := txPager.GetFreePage(ctx)
+		if err != nil {
+			return SecondaryIndex{}, err
+		}
+		invertedIdx, err := NewDedicatedInvertedIndex(secondaryIndex.Name, invertedIndexPostingModePositions, txPager, freePage.Index)
+		if err != nil {
+			return SecondaryIndex{}, err
+		}
+		if err := invertedIdx.InitRootPage(ctx); err != nil {
+			return SecondaryIndex{}, err
+		}
+		rootPageIdx = freePage.Index
+		secondaryIndex.InvertedIndex = invertedIdx
+	} else {
+		storageColumns := secondaryIndexStorageColumns(secondaryIndex)
+		txPager := NewTransactionalPager(
+			d.factory.ForIndex(storageColumns, false),
+			d.txManager,
+			table.Name,
+			secondaryIndex.Name,
+		)
 
-	freePage, err := txPager.GetFreePage(ctx)
-	if err != nil {
-		return nil, err
-	}
+		freePage, err := txPager.GetFreePage(ctx)
+		if err != nil {
+			return SecondaryIndex{}, err
+		}
 
-	createdIndex, err := table.createBTreeIndex(txPager, freePage, storageColumns, secondaryIndex.Name, false)
-	if err != nil {
-		return nil, err
+		createdIndex, err := table.createBTreeIndex(txPager, freePage, storageColumns, secondaryIndex.Name, false)
+		if err != nil {
+			return SecondaryIndex{}, err
+		}
+		rootPageIdx = freePage.Index
+		secondaryIndex.Index = createdIndex
 	}
 
 	if err := d.insertSchema(ctx, Schema{
 		Type:      SchemaSecondaryIndex,
 		Name:      secondaryIndex.Name,
 		TableName: table.Name,
-		RootPage:  freePage.Index,
+		RootPage:  rootPageIdx,
 		DDL:       stmt.DDL(),
 	}); err != nil {
-		return nil, err
+		return SecondaryIndex{}, err
 	}
 
-	return createdIndex, nil
+	return secondaryIndex, nil
 }
 
 func (d *Database) checkSchemaExists(ctx context.Context, schemaType SchemaType, name string) (Schema, bool, error) {

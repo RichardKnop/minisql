@@ -11,7 +11,8 @@ import (
 // It supports plain column indexes, composite indexes, partial indexes
 // (with a WHERE predicate), and expression indexes.
 type SecondaryIndex struct {
-	Index BTreeIndex
+	Index         BTreeIndex
+	InvertedIndex invertedIndex
 	IndexInfo
 }
 
@@ -35,12 +36,11 @@ func (si SecondaryIndex) rowSatisfiesWhereCond(row Row) (bool, error) {
 }
 
 func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, keys []OptionalValue, rowID RowID, row Row) error {
-	if secondaryIndex.Index == nil {
-		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
-	}
-
 	if secondaryIndex.Method == IndexMethodFullText {
 		return t.insertFullTextIndexKeys(ctx, secondaryIndex, rowID, row)
+	}
+	if secondaryIndex.Index == nil {
+		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
 	}
 	if secondaryIndex.Method == IndexMethodInverted {
 		return t.insertInvertedIndexKeys(ctx, secondaryIndex, rowID, row)
@@ -121,12 +121,11 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 }
 
 func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, oldRow, row Row) error {
-	if secondaryIndex.Index == nil {
-		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
-	}
-
 	if secondaryIndex.Method == IndexMethodFullText {
 		return t.updateFullTextIndexKeys(ctx, secondaryIndex, oldRow, row)
+	}
+	if secondaryIndex.Index == nil {
+		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
 	}
 	if secondaryIndex.Method == IndexMethodInverted {
 		return t.updateInvertedIndexKeys(ctx, secondaryIndex, oldRow, row)
@@ -225,6 +224,9 @@ func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 }
 
 func (t *Table) insertFullTextIndexKeys(ctx context.Context, secondaryIndex SecondaryIndex, rowID RowID, row Row) error {
+	if secondaryIndex.InvertedIndex == nil {
+		return fmt.Errorf("table %s has full-text index %s but no inverted index instance", t.Name, secondaryIndex.Name)
+	}
 	if ok, err := secondaryIndex.rowSatisfiesWhereCond(row); err != nil {
 		return fmt.Errorf("partial full-text index %s where check: %w", secondaryIndex.Name, err)
 	} else if !ok {
@@ -236,11 +238,8 @@ func (t *Table) insertFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 		return err
 	}
 	for _, token := range tokens {
-		posting, err := encodeFullTextPosting(fullTextPosting{RowID: rowID, Position: token.Position})
-		if err != nil {
-			return err
-		}
-		if err := secondaryIndex.Index.Insert(ctx, token.Term, posting); err != nil {
+		posting := invertedPosting{RowID: rowID, Positions: []uint32{token.Position}}
+		if err := secondaryIndex.InvertedIndex.Insert(ctx, token.Term, posting); err != nil {
 			return fmt.Errorf("failed to insert token for full-text index %s: %w", secondaryIndex.Name, err)
 		}
 	}
@@ -266,16 +265,16 @@ func (t *Table) updateFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 }
 
 func (t *Table) deleteFullTextIndexKeys(ctx context.Context, secondaryIndex SecondaryIndex, rowID RowID, row Row) error {
+	if secondaryIndex.InvertedIndex == nil {
+		return fmt.Errorf("table %s has full-text index %s but no inverted index instance", t.Name, secondaryIndex.Name)
+	}
 	tokens, err := fullTextTokenPositionsForRow(secondaryIndex, row)
 	if err != nil {
 		return err
 	}
 	for _, token := range tokens {
-		posting, err := encodeFullTextPosting(fullTextPosting{RowID: rowID, Position: token.Position})
-		if err != nil {
-			return err
-		}
-		if err := secondaryIndex.Index.Delete(ctx, token.Term, posting); err != nil {
+		posting := invertedPosting{RowID: rowID, Positions: []uint32{token.Position}}
+		if err := secondaryIndex.InvertedIndex.Delete(ctx, token.Term, posting); err != nil {
 			return fmt.Errorf("failed to delete token for full-text index %s: %w", secondaryIndex.Name, err)
 		}
 	}
