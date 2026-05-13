@@ -128,7 +128,7 @@ func (p *invertedEntryPage) Clone() *invertedEntryPage {
 // Marshal writes the entry page as a slotted page: fixed header, slot directory,
 // and variable-length cells packed backward from the end of the 4 KiB page.
 func (p *invertedEntryPage) Marshal(buf []byte) error {
-	if len(buf) < PageSize {
+	if len(buf) < int(p.Header.size()) {
 		return fmt.Errorf("inverted entry page buffer too small")
 	}
 	header := p.Header
@@ -136,7 +136,7 @@ func (p *invertedEntryPage) Marshal(buf []byte) error {
 	header.KeyCount = uint16(len(p.Cells))
 	header.FreeStart = uint16(header.size() + uint64(len(p.Cells))*2)
 
-	freeEnd := PageSize
+	freeEnd := len(buf)
 	slotBase := header.size()
 	for i, cell := range p.Cells {
 		cellBuf := make([]byte, cell.size())
@@ -144,7 +144,7 @@ func (p *invertedEntryPage) Marshal(buf []byte) error {
 			return err
 		}
 		if freeEnd-len(cellBuf) < int(header.FreeStart) {
-			return fmt.Errorf("inverted entry page has insufficient free space")
+			return errInvertedIndexEntryPageFull
 		}
 		freeEnd -= len(cellBuf)
 		copy(buf[freeEnd:freeEnd+len(cellBuf)], cellBuf)
@@ -168,7 +168,7 @@ func (p *invertedEntryPage) Unmarshal(buf []byte) error {
 	cells := make([]invertedEntryCell, 0, header.KeyCount)
 	for i := uint16(0); i < header.KeyCount; i++ {
 		offset := uint64(unmarshalUint16(buf, slotBase+uint64(i)*2))
-		if offset >= PageSize {
+		if offset >= uint64(len(buf)) {
 			return fmt.Errorf("inverted entry page slot %d out of range", i)
 		}
 		var cell invertedEntryCell
@@ -368,7 +368,7 @@ func (p *invertedPostingPage) Clone() *invertedPostingPage {
 // Marshal writes posting blocks into a slotted 4 KiB page, preserving room for
 // future variable-size compressed blocks and internal routing records.
 func (p *invertedPostingPage) Marshal(buf []byte) error {
-	if len(buf) < PageSize {
+	if len(buf) < int(p.Header.size()) {
 		return fmt.Errorf("inverted posting page buffer too small")
 	}
 	header := p.Header
@@ -376,7 +376,7 @@ func (p *invertedPostingPage) Marshal(buf []byte) error {
 	header.ItemCount = uint16(len(p.Blocks))
 	header.FreeStart = uint16(header.size() + uint64(len(p.Blocks))*2)
 
-	freeEnd := PageSize
+	freeEnd := len(buf)
 	slotBase := header.size()
 	for i, block := range p.Blocks {
 		blockBuf := make([]byte, block.size())
@@ -408,7 +408,7 @@ func (p *invertedPostingPage) Unmarshal(buf []byte) error {
 	blocks := make([]invertedPostingBlock, 0, header.ItemCount)
 	for i := uint16(0); i < header.ItemCount; i++ {
 		offset := uint64(unmarshalUint16(buf, slotBase+uint64(i)*2))
-		if offset >= PageSize {
+		if offset >= uint64(len(buf)) {
 			return fmt.Errorf("inverted posting page slot %d out of range", i)
 		}
 		var block invertedPostingBlock
