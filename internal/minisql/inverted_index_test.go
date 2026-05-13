@@ -2,7 +2,6 @@ package minisql
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -169,11 +168,47 @@ func TestDedicatedInvertedIndex_PersistsInlinePostings(t *testing.T) {
 	assert.Equal(t, []invertedPosting{{RowID: 42, Positions: []uint32{6, 9}}}, collectDedicatedInvertedPostings(t, ctx, reopenedIndex, "stored"))
 }
 
-func TestDedicatedInvertedIndex_InlineEntryPageFull(t *testing.T) {
+func TestDedicatedInvertedIndex_SplitsEntryTreeForManyTerms(t *testing.T) {
 	index, txManager := newTestDedicatedInvertedIndex(t, "idx_json", invertedIndexPostingModeRowIDs)
 	ctx := context.Background()
 
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for i := range 420 {
+			term := fmt.Sprintf("term-%03d-%0240d", i, i)
+			if err := index.Insert(ctx, term, invertedPosting{RowID: RowID(i + 1)}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	root, err := index.readRootEntryPage(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, root.InvertedEntryPage)
+	assert.False(t, root.InvertedEntryPage.Header.IsLeaf)
+	assert.Greater(t, countDedicatedInvertedEntryLeaves(t, ctx, index), 1)
+
+	assert.Greater(t, countDedicatedInvertedEntryLeaves(t, ctx, index), 15)
+	assert.Greater(t, dedicatedInvertedEntryTreeHeight(t, ctx, index), 2)
+	assert.Len(t, assertDedicatedInvertedEntryTreeValid(t, ctx, index), 420)
+
+	for _, i := range []int{0, 17, 127, 419} {
+		term := fmt.Sprintf("term-%03d-%0240d", i, i)
+		assert.Equal(t, []invertedPosting{{RowID: RowID(i + 1)}}, collectDedicatedInvertedPostings(t, ctx, index, term))
+	}
+}
+
+func TestDedicatedInvertedIndex_DeleteRebalancesEntryTreeAndFreesPages(t *testing.T) {
+	pager, dbFile := initTest(t)
+	basePager := pager.ForInvertedIndex()
+	txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(basePager), pager, nil)
+	txPager := NewTransactionalPager(basePager, txManager, "events", "idx_payload")
+	index, err := NewDedicatedInvertedIndex("idx_payload", invertedIndexPostingModeRowIDs, txPager, 0)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, index.InitRootPage))
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for i := range 128 {
 			term := fmt.Sprintf("term-%03d-%0240d", i, i)
 			if err := index.Insert(ctx, term, invertedPosting{RowID: RowID(i + 1)}); err != nil {
@@ -181,9 +216,258 @@ func TestDedicatedInvertedIndex_InlineEntryPageFull(t *testing.T) {
 			}
 		}
 		return nil
-	})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, errInvertedIndexEntryPageFull))
+	}))
+	root, err := index.readRootEntryPage(ctx)
+	require.NoError(t, err)
+	require.False(t, root.InvertedEntryPage.Header.IsLeaf)
+	require.Greater(t, countDedicatedInvertedEntryLeaves(t, ctx, index), 1)
+	beforeFreePages := basePager.GetHeader(ctx).FreePageCount
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for i := 1; i < 128; i++ {
+			term := fmt.Sprintf("term-%03d-%0240d", i, i)
+			if err := index.Delete(ctx, term, invertedPosting{RowID: RowID(i + 1)}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	root, err = index.readRootEntryPage(ctx)
+	require.NoError(t, err)
+	require.True(t, root.InvertedEntryPage.Header.IsLeaf)
+	require.Len(t, root.InvertedEntryPage.Cells, 1)
+	assert.Equal(t, "term-000-"+fmt.Sprintf("%0240d", 0), root.InvertedEntryPage.Cells[0].Term)
+	assert.Greater(t, basePager.GetHeader(ctx).FreePageCount, beforeFreePages)
+	assert.Equal(t, []invertedPosting{{RowID: 1}}, collectDedicatedInvertedPostings(t, ctx, index, "term-000-"+fmt.Sprintf("%0240d", 0)))
+	assert.Empty(t, collectDedicatedInvertedPostings(t, ctx, index, "term-127-"+fmt.Sprintf("%0240d", 127)))
+	assert.Equal(t, []string{"term-000-" + fmt.Sprintf("%0240d", 0)}, assertDedicatedInvertedEntryTreeValid(t, ctx, index))
+}
+
+func TestDedicatedInvertedIndex_DeleteLastEntryLeavesEmptyRoot(t *testing.T) {
+	index, txManager := newTestDedicatedInvertedIndex(t, "idx_json", invertedIndexPostingModeRowIDs)
+	ctx := context.Background()
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		require.NoError(t, index.Insert(ctx, "alpha", invertedPosting{RowID: 1}))
+		return index.Delete(ctx, "alpha", invertedPosting{RowID: 1})
+	}))
+
+	root, err := index.readRootEntryPage(ctx)
+	require.NoError(t, err)
+	require.True(t, root.InvertedEntryPage.Header.IsLeaf)
+	assert.Empty(t, root.InvertedEntryPage.Cells)
+	assert.Empty(t, collectDedicatedInvertedPostings(t, ctx, index, "alpha"))
+	assert.Empty(t, assertDedicatedInvertedEntryTreeValid(t, ctx, index))
+}
+
+func TestDedicatedInvertedIndex_PersistsMultiPageEntryTree(t *testing.T) {
+	pager, dbFile := initTest(t)
+	basePager := pager.ForInvertedIndex()
+	txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(basePager), pager, nil)
+	txPager := NewTransactionalPager(basePager, txManager, "events", "idx_payload")
+	index, err := NewDedicatedInvertedIndex("idx_payload", invertedIndexPostingModeRowIDs, txPager, 0)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, index.InitRootPage))
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for i := range 420 {
+			term := fmt.Sprintf("term-%03d-%0240d", i, i)
+			if err := index.Insert(ctx, term, invertedPosting{RowID: RowID(i + 1)}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	assert.Len(t, assertDedicatedInvertedEntryTreeValid(t, ctx, index), 420)
+
+	for pageIdx := PageIndex(0); pageIdx < PageIndex(pager.TotalPages()); pageIdx++ {
+		require.NoError(t, pager.Flush(ctx, pageIdx))
+	}
+	reopenedFile, err := os.OpenFile(dbFile.Name(), os.O_RDWR, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reopenedFile.Close() })
+	reopenedPager, err := NewPager(reopenedFile, PageSize, 1000)
+	require.NoError(t, err)
+	reopenedBasePager := reopenedPager.ForInvertedIndex()
+	reopenedTxManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(reopenedBasePager), reopenedPager, nil)
+	reopenedIndex, err := NewDedicatedInvertedIndex(
+		"idx_payload",
+		invertedIndexPostingModeRowIDs,
+		NewTransactionalPager(reopenedBasePager, reopenedTxManager, "events", "idx_payload"),
+		0,
+	)
+	require.NoError(t, err)
+
+	assert.Len(t, assertDedicatedInvertedEntryTreeValid(t, ctx, reopenedIndex), 420)
+	for _, i := range []int{0, 211, 419} {
+		term := fmt.Sprintf("term-%03d-%0240d", i, i)
+		assert.Equal(t, []invertedPosting{{RowID: RowID(i + 1)}}, collectDedicatedInvertedPostings(t, ctx, reopenedIndex, term))
+	}
+}
+
+func TestDedicatedInvertedIndex_LeafRebalanceBorrowsFromLeft(t *testing.T) {
+	t.Parallel()
+
+	index := &dedicatedInvertedIndex{}
+	parent := testInvertedEntryPage(0, false, []string{"m"})
+	parent.InvertedEntryPage.Cells[0].Child = 1
+	parent.InvertedEntryPage.Header.RightChild = 2
+	left := testInvertedEntryPage(1, true, []string{"a", "c"})
+	page := testInvertedEntryPage(2, true, []string{"m"})
+
+	require.NoError(t, index.borrowEntryFromLeft(context.Background(), parent, page, left, 1))
+
+	assert.Equal(t, []string{"a"}, invertedEntryTerms(left.InvertedEntryPage.Cells))
+	assert.Equal(t, []string{"c", "m"}, invertedEntryTerms(page.InvertedEntryPage.Cells))
+	assert.Equal(t, "c", parent.InvertedEntryPage.Cells[0].Term)
+}
+
+func TestDedicatedInvertedIndex_LeafRebalanceBorrowsFromRight(t *testing.T) {
+	t.Parallel()
+
+	index := &dedicatedInvertedIndex{}
+	parent := testInvertedEntryPage(0, false, []string{"m"})
+	parent.InvertedEntryPage.Cells[0].Child = 1
+	parent.InvertedEntryPage.Header.RightChild = 2
+	page := testInvertedEntryPage(1, true, []string{"a"})
+	right := testInvertedEntryPage(2, true, []string{"m", "z"})
+
+	require.NoError(t, index.borrowEntryFromRight(context.Background(), parent, page, right, 0))
+
+	assert.Equal(t, []string{"a", "m"}, invertedEntryTerms(page.InvertedEntryPage.Cells))
+	assert.Equal(t, []string{"z"}, invertedEntryTerms(right.InvertedEntryPage.Cells))
+	assert.Equal(t, "z", parent.InvertedEntryPage.Cells[0].Term)
+}
+
+func TestDedicatedInvertedIndex_LeafRebalanceMergesAndFreesRightPage(t *testing.T) {
+	t.Parallel()
+
+	index := &dedicatedInvertedIndex{}
+	parent := testInvertedEntryPage(0, false, []string{"m"})
+	parent.InvertedEntryPage.Cells[0].Child = 1
+	parent.InvertedEntryPage.Header.RightChild = 2
+	left := testInvertedEntryPage(1, true, []string{"a"})
+	right := testInvertedEntryPage(2, true, []string{"m"})
+
+	freed, err := index.mergeEntryPages(context.Background(), parent, left, right, 0)
+	require.NoError(t, err)
+
+	assert.Equal(t, PageIndex(2), freed)
+	assert.Equal(t, []string{"a", "m"}, invertedEntryTerms(left.InvertedEntryPage.Cells))
+	assert.Empty(t, parent.InvertedEntryPage.Cells)
+	assert.Equal(t, PageIndex(1), parent.InvertedEntryPage.Header.RightChild)
+}
+
+func TestDedicatedInvertedIndex_PromotesLargePostingListToPostingTree(t *testing.T) {
+	index, txManager := newTestDedicatedInvertedIndex(t, "idx_json", invertedIndexPostingModeRowIDs)
+	ctx := context.Background()
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for i := 1; i <= 140; i++ {
+			if err := index.Insert(ctx, "k:type", invertedPosting{RowID: largeTestRowID(i)}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	cell := requireDedicatedInvertedEntryCell(t, ctx, index, "k:type")
+	assert.Equal(t, invertedPostingKindTree, cell.PostingKind)
+	assert.NotZero(t, cell.Child)
+	assert.Empty(t, cell.Payload)
+
+	stats, err := index.Stats(ctx, "k:type")
+	require.NoError(t, err)
+	assert.Equal(t, invertedPostingStats{DocFreq: 140, PostingCount: 140}, stats)
+
+	postings := collectDedicatedInvertedPostings(t, ctx, index, "k:type")
+	require.Len(t, postings, 140)
+	assert.Equal(t, invertedPosting{RowID: largeTestRowID(1)}, postings[0])
+	assert.Equal(t, invertedPosting{RowID: largeTestRowID(140)}, postings[len(postings)-1])
+
+	page, err := index.pager.ReadPage(ctx, cell.Child)
+	require.NoError(t, err)
+	require.NotNil(t, page.InvertedPostPage)
+	assert.NotEmpty(t, page.InvertedPostPage.Blocks)
+}
+
+func TestDedicatedInvertedIndex_DemotesPostingTreeAfterDeletes(t *testing.T) {
+	index, txManager := newTestDedicatedInvertedIndex(t, "idx_json", invertedIndexPostingModeRowIDs)
+	ctx := context.Background()
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for i := 1; i <= 140; i++ {
+			if err := index.Insert(ctx, "status", invertedPosting{RowID: largeTestRowID(i)}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	require.Equal(t, invertedPostingKindTree, requireDedicatedInvertedEntryCell(t, ctx, index, "status").PostingKind)
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for i := 21; i <= 140; i++ {
+			if err := index.Delete(ctx, "status", invertedPosting{RowID: largeTestRowID(i)}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	cell := requireDedicatedInvertedEntryCell(t, ctx, index, "status")
+	assert.Equal(t, invertedPostingKindInline, cell.PostingKind)
+	assert.Zero(t, cell.Child)
+
+	postings := collectDedicatedInvertedPostings(t, ctx, index, "status")
+	require.Len(t, postings, 20)
+	assert.Equal(t, invertedPosting{RowID: largeTestRowID(1)}, postings[0])
+	assert.Equal(t, invertedPosting{RowID: largeTestRowID(20)}, postings[len(postings)-1])
+}
+
+func TestDedicatedInvertedIndex_PersistsPostingTree(t *testing.T) {
+	pager, dbFile := initTest(t)
+	basePager := pager.ForInvertedIndex()
+	txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(basePager), pager, nil)
+	txPager := NewTransactionalPager(basePager, txManager, "articles", "idx_body")
+	index, err := NewDedicatedInvertedIndex("idx_body", invertedIndexPostingModePositions, txPager, 0)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for rowID := 1; rowID <= 120; rowID++ {
+			if err := index.Insert(ctx, "database", invertedPosting{RowID: RowID(rowID), Positions: []uint32{1, 3, 5, 8, 13, 21, 34, 55}}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	require.Equal(t, invertedPostingKindTree, requireDedicatedInvertedEntryCell(t, ctx, index, "database").PostingKind)
+	require.NoError(t, pager.Flush(ctx, 0))
+	for pageIdx := PageIndex(1); pageIdx < PageIndex(pager.TotalPages()); pageIdx++ {
+		require.NoError(t, pager.Flush(ctx, pageIdx))
+	}
+
+	reopenedFile, err := os.OpenFile(dbFile.Name(), os.O_RDWR, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reopenedFile.Close() })
+	reopenedPager, err := NewPager(reopenedFile, PageSize, 1000)
+	require.NoError(t, err)
+	reopenedBasePager := reopenedPager.ForInvertedIndex()
+	reopenedTxManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(reopenedBasePager), reopenedPager, nil)
+	reopenedIndex, err := NewDedicatedInvertedIndex(
+		"idx_body",
+		invertedIndexPostingModePositions,
+		NewTransactionalPager(reopenedBasePager, reopenedTxManager, "articles", "idx_body"),
+		0,
+	)
+	require.NoError(t, err)
+
+	postings := collectDedicatedInvertedPostings(t, ctx, reopenedIndex, "database")
+	require.Len(t, postings, 120)
+	assert.Equal(t, invertedPosting{RowID: 1, Positions: []uint32{1, 3, 5, 8, 13, 21, 34, 55}}, postings[0])
+	assert.Equal(t, invertedPosting{RowID: 120, Positions: []uint32{1, 3, 5, 8, 13, 21, 34, 55}}, postings[len(postings)-1])
 }
 
 func newTestDedicatedInvertedIndex(t *testing.T, name string, mode invertedIndexPostingMode) (*dedicatedInvertedIndex, *TransactionManager) {
@@ -217,4 +501,178 @@ func collectDedicatedInvertedPostings(t *testing.T, ctx context.Context, index *
 		postings = append(postings, decoded...)
 	}
 	return postings
+}
+
+func requireDedicatedInvertedEntryCell(t *testing.T, ctx context.Context, index *dedicatedInvertedIndex, term string) invertedEntryCell {
+	t.Helper()
+
+	page, err := index.findEntryLeafPage(ctx, term)
+	require.NoError(t, err)
+	cellIdx, found := findInvertedEntryCell(page.InvertedEntryPage.Cells, term)
+	require.True(t, found)
+	return page.InvertedEntryPage.Cells[cellIdx]
+}
+
+func countDedicatedInvertedEntryLeaves(t *testing.T, ctx context.Context, index *dedicatedInvertedIndex) int {
+	t.Helper()
+
+	root, err := index.readRootEntryPage(ctx)
+	require.NoError(t, err)
+	page := root
+	for !page.InvertedEntryPage.Header.IsLeaf {
+		childIdx := page.InvertedEntryPage.Cells[0].Child
+		page, err = index.pager.ReadPage(ctx, childIdx)
+		require.NoError(t, err)
+		require.NotNil(t, page.InvertedEntryPage)
+	}
+
+	count := 0
+	for {
+		count++
+		next := page.InvertedEntryPage.Header.NextLeaf
+		if next == 0 {
+			return count
+		}
+		page, err = index.pager.ReadPage(ctx, next)
+		require.NoError(t, err)
+		require.NotNil(t, page.InvertedEntryPage)
+	}
+}
+
+func dedicatedInvertedEntryTreeHeight(t *testing.T, ctx context.Context, index *dedicatedInvertedIndex) int {
+	t.Helper()
+
+	page, err := index.readRootEntryPage(ctx)
+	require.NoError(t, err)
+	height := 1
+	for !page.InvertedEntryPage.Header.IsLeaf {
+		childIdx := page.InvertedEntryPage.Cells[0].Child
+		page, err = index.pager.ReadPage(ctx, childIdx)
+		require.NoError(t, err)
+		require.NotNil(t, page.InvertedEntryPage)
+		height++
+	}
+	return height
+}
+
+func assertDedicatedInvertedEntryTreeValid(t *testing.T, ctx context.Context, index *dedicatedInvertedIndex) []string {
+	t.Helper()
+
+	root, err := index.readRootEntryPage(ctx)
+	require.NoError(t, err)
+	terms := assertDedicatedInvertedEntryPageValid(t, ctx, index, root.Index, 0, "", "", true)
+	assert.Equal(t, terms, collectDedicatedInvertedLeafChainTerms(t, ctx, index))
+	return terms
+}
+
+func assertDedicatedInvertedEntryPageValid(
+	t *testing.T,
+	ctx context.Context,
+	index *dedicatedInvertedIndex,
+	pageIdx PageIndex,
+	parentIdx PageIndex,
+	minTerm string,
+	maxTerm string,
+	isRoot bool,
+) []string {
+	t.Helper()
+
+	page, err := index.pager.ReadPage(ctx, pageIdx)
+	require.NoError(t, err)
+	require.NotNil(t, page.InvertedEntryPage)
+	entryPage := page.InvertedEntryPage
+	assert.Equal(t, parentIdx, entryPage.Header.Parent)
+	if !isRoot {
+		assert.NotEqual(t, index.rootPageIdx, pageIdx)
+	}
+
+	for i := 1; i < len(entryPage.Cells); i++ {
+		assert.Less(t, entryPage.Cells[i-1].Term, entryPage.Cells[i].Term)
+	}
+
+	if entryPage.Header.IsLeaf {
+		terms := invertedEntryTerms(entryPage.Cells)
+		for _, term := range terms {
+			if minTerm != "" {
+				assert.GreaterOrEqual(t, term, minTerm)
+			}
+			if maxTerm != "" {
+				assert.Less(t, term, maxTerm)
+			}
+		}
+		return terms
+	}
+
+	children := invertedEntryChildren(entryPage)
+	require.Len(t, children, len(entryPage.Cells)+1)
+	terms := make([]string, 0)
+	for i, childIdx := range children {
+		childMin := minTerm
+		if i > 0 {
+			childMin = entryPage.Cells[i-1].Term
+		}
+		childMax := maxTerm
+		if i < len(entryPage.Cells) {
+			childMax = entryPage.Cells[i].Term
+		}
+		childTerms := assertDedicatedInvertedEntryPageValid(t, ctx, index, childIdx, pageIdx, childMin, childMax, false)
+		if i > 0 && len(childTerms) > 0 {
+			assert.Equal(t, childTerms[0], entryPage.Cells[i-1].Term)
+		}
+		terms = append(terms, childTerms...)
+	}
+	return terms
+}
+
+func collectDedicatedInvertedLeafChainTerms(t *testing.T, ctx context.Context, index *dedicatedInvertedIndex) []string {
+	t.Helper()
+
+	page, err := index.readRootEntryPage(ctx)
+	require.NoError(t, err)
+	for !page.InvertedEntryPage.Header.IsLeaf {
+		childIdx := page.InvertedEntryPage.Cells[0].Child
+		page, err = index.pager.ReadPage(ctx, childIdx)
+		require.NoError(t, err)
+		require.NotNil(t, page.InvertedEntryPage)
+	}
+
+	terms := make([]string, 0)
+	for {
+		terms = append(terms, invertedEntryTerms(page.InvertedEntryPage.Cells)...)
+		next := page.InvertedEntryPage.Header.NextLeaf
+		if next == 0 {
+			return terms
+		}
+		page, err = index.pager.ReadPage(ctx, next)
+		require.NoError(t, err)
+		require.NotNil(t, page.InvertedEntryPage)
+		require.True(t, page.InvertedEntryPage.Header.IsLeaf)
+	}
+}
+
+func testInvertedEntryPage(pageIdx PageIndex, isLeaf bool, terms []string) *Page {
+	page := &Page{Index: pageIdx, InvertedEntryPage: NewInvertedEntryPage(isLeaf)}
+	for _, term := range terms {
+		page.InvertedEntryPage.Cells = append(page.InvertedEntryPage.Cells, invertedEntryCell{
+			Term:         term,
+			PostingKind:  invertedPostingKindInline,
+			CodecVersion: invertedPostingCodecVersion,
+			DocFreq:      1,
+			PostingCount: 1,
+			Payload:      []byte{invertedPostingCodecVersion, byte(invertedPostingModeRowIDs), 1},
+		})
+	}
+	return page
+}
+
+func invertedEntryTerms(cells []invertedEntryCell) []string {
+	terms := make([]string, len(cells))
+	for i, cell := range cells {
+		terms[i] = cell.Term
+	}
+	return terms
+}
+
+func largeTestRowID(i int) RowID {
+	return RowID(i) << 56
 }
