@@ -13,6 +13,12 @@ func (p *pagerImpl) ForTable(columns []Column) Pager {
 	}
 }
 
+// ForInvertedIndex wraps the underlying pager with the dedicated inverted-index
+// unmarshaler for future entry and posting tree pages.
+func (p *pagerImpl) ForInvertedIndex() Pager {
+	return &invertedPager{pagerImpl: p}
+}
+
 // ForIndex wraps the underlying pager with a type-parameterised index unmarshaler
 // chosen from the column kind. Composite (multi-column) indexes always use
 // CompositeKey; single-column indexes select the concrete key type that matches

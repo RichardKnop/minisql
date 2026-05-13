@@ -483,6 +483,14 @@ func marshalPage(page *Page, buf []byte) error {
 		if err := page.IndexOverflowNode.Marshal(buf); err != nil {
 			return fmt.Errorf("error marshaling index overflow node: %w", err)
 		}
+	case page.InvertedEntryPage != nil:
+		if err := page.InvertedEntryPage.Marshal(buf); err != nil {
+			return fmt.Errorf("error marshaling inverted entry page: %w", err)
+		}
+	case page.InvertedPostPage != nil:
+		if err := page.InvertedPostPage.Marshal(buf); err != nil {
+			return fmt.Errorf("error marshaling inverted posting page: %w", err)
+		}
 	default:
 		return errors.New("no known node type found")
 	}

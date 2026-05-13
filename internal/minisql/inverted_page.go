@@ -13,7 +13,6 @@ type invertedEntryPageHeader struct {
 	Parent        PageIndex
 	RightChild    PageIndex
 	NextLeaf      PageIndex
-	Flags         uint16
 	KeyCount      uint16
 	FreeStart     uint16
 	FreeEnd       uint16
@@ -22,7 +21,7 @@ type invertedEntryPageHeader struct {
 }
 
 func (h invertedEntryPageHeader) size() uint64 {
-	return 1 + 1 + 2 + 1 + 2 + 2 + 2 + 4 + 4 + 4
+	return 1 + 1 + 1 + 2 + 2 + 2 + 4 + 4 + 4
 }
 
 // Marshal writes the versioned entry-page header used by the future inverted
@@ -36,8 +35,6 @@ func (h invertedEntryPageHeader) Marshal(buf []byte) error {
 	i += 1
 	buf[i] = h.FormatVersion
 	i += 1
-	marshalUint16(buf, h.Flags, i)
-	i += 2
 	buf = marshalBool(buf, h.IsLeaf, i)
 	i += 1
 	marshalUint16(buf, h.KeyCount, i)
@@ -69,8 +66,6 @@ func (h *invertedEntryPageHeader) Unmarshal(buf []byte) error {
 		return fmt.Errorf("unmarshal inverted entry page: unsupported format version %d", h.FormatVersion)
 	}
 	i += 1
-	h.Flags = unmarshalUint16(buf, i)
-	i += 2
 	h.IsLeaf = unmarshalBool(buf, i)
 	i += 1
 	h.KeyCount = unmarshalUint16(buf, i)
@@ -259,7 +254,6 @@ type invertedPostingPageHeader struct {
 	Parent        PageIndex
 	RightChild    PageIndex
 	NextLeaf      PageIndex
-	Flags         uint16
 	ItemCount     uint16
 	FreeStart     uint16
 	FreeEnd       uint16
@@ -268,7 +262,7 @@ type invertedPostingPageHeader struct {
 }
 
 func (h invertedPostingPageHeader) size() uint64 {
-	return 1 + 1 + 2 + 1 + 2 + 2 + 2 + 4 + 4 + 4
+	return 1 + 1 + 1 + 2 + 2 + 2 + 4 + 4 + 4
 }
 
 // Marshal writes the versioned posting-tree page header. Level 0 represents a
@@ -282,8 +276,6 @@ func (h invertedPostingPageHeader) Marshal(buf []byte) error {
 	i += 1
 	buf[i] = h.FormatVersion
 	i += 1
-	marshalUint16(buf, h.Flags, i)
-	i += 2
 	buf[i] = h.Level
 	i += 1
 	marshalUint16(buf, h.ItemCount, i)
@@ -315,8 +307,6 @@ func (h *invertedPostingPageHeader) Unmarshal(buf []byte) error {
 		return fmt.Errorf("unmarshal inverted posting page: unsupported format version %d", h.FormatVersion)
 	}
 	i += 1
-	h.Flags = unmarshalUint16(buf, i)
-	i += 2
 	h.Level = buf[i]
 	i += 1
 	h.ItemCount = unmarshalUint16(buf, i)

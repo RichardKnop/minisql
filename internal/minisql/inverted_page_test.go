@@ -12,7 +12,6 @@ func TestInvertedEntryPageHeader_Marshal(t *testing.T) {
 
 	header := invertedEntryPageHeader{
 		FormatVersion: invertedPageFormatVersion,
-		Flags:         3,
 		IsLeaf:        true,
 		KeyCount:      7,
 		FreeStart:     128,
@@ -98,7 +97,6 @@ func TestInvertedPostingPageHeader_Marshal(t *testing.T) {
 
 	header := invertedPostingPageHeader{
 		FormatVersion: invertedPageFormatVersion,
-		Flags:         1,
 		Level:         0,
 		ItemCount:     4,
 		FreeStart:     96,
