@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"math"
+	"slices"
 	"unicode"
 )
 
@@ -144,16 +145,15 @@ func parseTextSearchQuery(input string) (textSearchQuery, bool) {
 }
 
 // appendUniqueTextSearchTerms appends terms that are not already present,
-// preserving the order of their first occurrence.
+// preserving the order of their first occurrence. It intentionally does not
+// enforce index key limits so sequential MATCH semantics can still handle long
+// terms; index planning checks key sizes separately.
 func appendUniqueTextSearchTerms(existing []string, terms ...string) []string {
 	seen := make(map[string]struct{}, len(existing)+len(terms))
 	for _, term := range existing {
 		seen[term] = struct{}{}
 	}
 	for _, term := range terms {
-		if len([]byte(term)) > MaxIndexKeySize {
-			continue
-		}
 		if _, ok := seen[term]; ok {
 			continue
 		}
@@ -171,6 +171,24 @@ func (q textSearchQuery) allUniqueTokens() []string {
 		tokens = appendUniqueTextSearchTerms(tokens, phrase...)
 	}
 	return tokens
+}
+
+// hasOverlongToken reports whether any parsed query token cannot be represented
+// as a key in the current full-text B+ tree index.
+func (q textSearchQuery) hasOverlongToken() bool {
+	for _, term := range q.Terms {
+		if len([]byte(term)) > MaxIndexKeySize {
+			return true
+		}
+	}
+	for _, phrase := range q.Phrases {
+		for _, term := range phrase {
+			if len([]byte(term)) > MaxIndexKeySize {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // textSearchMatch evaluates MATCH semantics in memory. Plain query terms must
@@ -203,8 +221,9 @@ func textSearchMatch(document, query string) bool {
 	return true
 }
 
-// textSearchRank returns a simple log-scaled term-frequency score for the query
-// tokens. Phrase proximity does not affect ranking yet.
+// textSearchRank returns a relevance score for the query tokens. It combines
+// saturated term frequency, query coverage, mild document-length normalization,
+// phrase boosts, and proximity boosts from token positions.
 func textSearchRank(document, query string) float64 {
 	parsedQuery, ok := parseTextSearchQuery(query)
 	if !ok {
@@ -215,21 +234,138 @@ func textSearchRank(document, query string) float64 {
 		return 0
 	}
 
-	docTokens := textSearchTokens(document)
+	docTokens := textSearchTokenPositions(document)
 	if len(docTokens) == 0 {
 		return 0
 	}
+	return textSearchRankPositions(docTokens, parsedQuery)
+}
 
+func textSearchRankPositions(docTokens []textSearchTokenPosition, query textSearchQuery) float64 {
+	queryTokens := query.allUniqueTokens()
+	if len(queryTokens) == 0 || len(docTokens) == 0 {
+		return 0
+	}
+
+	positions := make(map[string][]uint32, len(docTokens))
 	frequencies := make(map[string]int, len(docTokens))
 	for _, token := range docTokens {
-		frequencies[token] += 1
+		frequencies[token.Term] += 1
+		positions[token.Term] = append(positions[token.Term], token.Position)
 	}
 
-	var score float64
+	var (
+		frequencyScore float64
+		matchedTerms   int
+	)
 	for _, token := range queryTokens {
-		score += math.Log1p(float64(frequencies[token]))
+		frequency := frequencies[token]
+		if frequency == 0 {
+			continue
+		}
+		matchedTerms += 1
+		frequencyScore += saturatedTermFrequency(frequency)
 	}
-	return score / float64(len(queryTokens))
+
+	if matchedTerms == 0 {
+		return 0
+	}
+
+	coverage := float64(matchedTerms) / float64(len(queryTokens))
+	base := (frequencyScore / float64(len(queryTokens))) * (0.5 + 0.5*coverage)
+	base *= textSearchLengthNormalization(len(docTokens), len(queryTokens))
+
+	return base + textSearchPhraseBoost(positions, query, len(queryTokens)) + textSearchProximityBoost(docTokens, queryTokens, coverage)
+}
+
+func saturatedTermFrequency(frequency int) float64 {
+	if frequency <= 0 {
+		return 0
+	}
+	raw := math.Log1p(float64(frequency))
+	return raw / (1 + raw)
+}
+
+func textSearchLengthNormalization(documentTokens, queryTokens int) float64 {
+	if documentTokens <= 0 || queryTokens <= 0 {
+		return 0
+	}
+	extraTokens := max(documentTokens-queryTokens, 0)
+	return 1 / math.Sqrt(1+float64(extraTokens)/20)
+}
+
+func textSearchPhraseBoost(positions map[string][]uint32, query textSearchQuery, queryTokenCount int) float64 {
+	if queryTokenCount == 0 {
+		return 0
+	}
+	var boost float64
+	for _, phrase := range query.Phrases {
+		if textSearchPhraseMatches(positions, phrase) {
+			boost += 0.25 * (float64(len(phrase)) / float64(queryTokenCount))
+		}
+	}
+	return boost
+}
+
+func textSearchProximityBoost(docTokens []textSearchTokenPosition, queryTokens []string, coverage float64) float64 {
+	if len(queryTokens) < 2 || coverage == 0 {
+		return 0
+	}
+	span, ok := textSearchMinCoverSpan(docTokens, queryTokens)
+	if !ok || span == 0 {
+		return 0
+	}
+	density := float64(len(queryTokens)) / float64(span)
+	return 0.20 * density * coverage
+}
+
+func textSearchMinCoverSpan(docTokens []textSearchTokenPosition, queryTokens []string) (uint32, bool) {
+	querySet := make(map[string]struct{}, len(queryTokens))
+	for _, token := range queryTokens {
+		querySet[token] = struct{}{}
+	}
+	hits := make([]textSearchTokenPosition, 0, len(docTokens))
+	for _, token := range docTokens {
+		if _, ok := querySet[token.Term]; ok {
+			hits = append(hits, token)
+		}
+	}
+	if len(hits) == 0 {
+		return 0, false
+	}
+	slices.SortFunc(hits, func(a, b textSearchTokenPosition) int {
+		return int(a.Position) - int(b.Position)
+	})
+
+	counts := make(map[string]int, len(queryTokens))
+	var (
+		have     int
+		left     int
+		bestSpan uint32
+		found    bool
+	)
+	for right, hit := range hits {
+		if counts[hit.Term] == 0 {
+			have += 1
+		}
+		counts[hit.Term] += 1
+
+		for have == len(queryTokens) {
+			span := hits[right].Position - hits[left].Position + 1
+			if !found || span < bestSpan {
+				bestSpan = span
+				found = true
+			}
+			leftTerm := hits[left].Term
+			counts[leftTerm] -= 1
+			if counts[leftTerm] == 0 {
+				have -= 1
+			}
+			left += 1
+		}
+	}
+
+	return bestSpan, found
 }
 
 // textSearchPhraseMatches reports whether all tokens in phrase appear at

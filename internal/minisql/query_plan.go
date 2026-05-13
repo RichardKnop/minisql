@@ -473,6 +473,9 @@ func (t *Table) tryFullTextIndexScan(filters OneOrMore) (Scan, bool) {
 	if !ok {
 		return Scan{}, false
 	}
+	if parsedQuery.hasOverlongToken() {
+		return Scan{}, false
+	}
 	tokens := parsedQuery.allUniqueTokens()
 	if len(tokens) == 0 {
 		return Scan{}, false
