@@ -265,8 +265,8 @@ func (h invertedPostingPageHeader) size() uint64 {
 	return 1 + 1 + 1 + 2 + 2 + 2 + 4 + 4 + 4
 }
 
-// Marshal writes the versioned posting-tree page header. Level 0 represents a
-// leaf page; higher levels are reserved for internal posting-tree pages.
+// Marshal writes the posting-tree page header. Level 0 stores compressed posting
+// blocks; higher levels store routing blocks that point to child pages.
 func (h invertedPostingPageHeader) Marshal(buf []byte) error {
 	if len(buf) < int(h.size()) {
 		return fmt.Errorf("inverted posting page header buffer too small")
@@ -337,8 +337,8 @@ type invertedPostingPage struct {
 	Blocks []invertedPostingBlock
 }
 
-// NewInvertedPostingPage creates an empty v1 slotted posting page. Level 0 is a
-// leaf block page; higher levels are reserved for posting-tree routing pages.
+// NewInvertedPostingPage creates an empty slotted posting page. Level 0 is a
+// leaf block page; higher levels are posting-tree routing pages.
 func NewInvertedPostingPage(level byte) *invertedPostingPage {
 	header := invertedPostingPageHeader{
 		FormatVersion: invertedPageFormatVersion,

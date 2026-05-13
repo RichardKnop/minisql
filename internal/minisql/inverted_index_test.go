@@ -393,6 +393,64 @@ func TestDedicatedInvertedIndex_PromotesLargePostingListToPostingTree(t *testing
 	assert.NotEmpty(t, page.InvertedPostPage.Blocks)
 }
 
+func TestDedicatedInvertedIndex_PostingTreeInternalRouting(t *testing.T) {
+	pager, dbFile := initTest(t)
+	basePager := pager.ForInvertedIndex()
+	txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(basePager), pager, nil)
+	txPager := NewTransactionalPager(basePager, txManager, "events", "idx_payload_inv")
+	index, err := NewDedicatedInvertedIndex("idx_payload_inv", invertedIndexPostingModeRowIDs, txPager, 0)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, index.InitRootPage))
+
+	postings := make([]invertedPosting, 1800)
+	for i := range postings {
+		postings[i] = invertedPosting{RowID: wideTestRowID(i + 1)}
+	}
+
+	var rootIdx PageIndex
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		var err error
+		rootIdx, err = index.writePostingTree(ctx, postings)
+		return err
+	}))
+
+	rootPage, err := index.pager.ReadPage(ctx, rootIdx)
+	require.NoError(t, err)
+	require.NotNil(t, rootPage.InvertedPostPage)
+	assert.Greater(t, rootPage.InvertedPostPage.Header.Level, byte(0))
+	pageCount := assertDedicatedInvertedPostingTreeValid(t, ctx, index, rootIdx, 0)
+
+	iter := &postingTreeInvertedPostingIterator{
+		pager:    index.pager,
+		nextPage: rootIdx,
+	}
+	var decoded []invertedPosting
+	for {
+		block, ok, err := iter.NextBlock(ctx)
+		require.NoError(t, err)
+		if !ok {
+			break
+		}
+		mode, blockPostings, err := decodeInvertedPostingList(block.Payload)
+		require.NoError(t, err)
+		require.Equal(t, invertedPostingModeRowIDs, mode)
+		decoded = append(decoded, blockPostings...)
+	}
+	require.Len(t, decoded, len(postings))
+	assert.Equal(t, postings[0], decoded[0])
+	assert.Equal(t, postings[len(postings)-1], decoded[len(decoded)-1])
+
+	beforeFreePages := basePager.GetHeader(ctx).FreePageCount
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return index.freePostingTree(ctx, invertedEntryCell{
+			PostingKind: invertedPostingKindTree,
+			Child:       rootIdx,
+		})
+	}))
+	assert.Equal(t, beforeFreePages+uint32(pageCount), basePager.GetHeader(ctx).FreePageCount)
+}
+
 func TestDedicatedInvertedIndex_DemotesPostingTreeAfterDeletes(t *testing.T) {
 	index, txManager := newTestDedicatedInvertedIndex(t, "idx_json", invertedIndexPostingModeRowIDs)
 	ctx := context.Background()
@@ -650,6 +708,45 @@ func collectDedicatedInvertedLeafChainTerms(t *testing.T, ctx context.Context, i
 	}
 }
 
+func assertDedicatedInvertedPostingTreeValid(t *testing.T, ctx context.Context, index *dedicatedInvertedIndex, pageIdx, parentIdx PageIndex) int {
+	t.Helper()
+
+	page, err := index.pager.ReadPage(ctx, pageIdx)
+	require.NoError(t, err)
+	require.NotNil(t, page.InvertedPostPage)
+	postingPage := page.InvertedPostPage
+	assert.Equal(t, parentIdx, postingPage.Header.Parent)
+	require.NotEmpty(t, postingPage.Blocks)
+	_, _, _, err = invertedPostingPageRange(postingPage)
+	require.NoError(t, err)
+
+	if postingPage.Header.Level == 0 {
+		for _, block := range postingPage.Blocks {
+			assert.Zero(t, block.Child)
+			assert.NotEmpty(t, block.Payload)
+			assert.Equal(t, invertedPostingCodecVersion, block.CodecVersion)
+		}
+		return 1
+	}
+
+	pageCount := 1
+	for _, block := range postingPage.Blocks {
+		assert.Empty(t, block.Payload)
+		assert.NotZero(t, block.Child)
+		childPage, err := index.pager.ReadPage(ctx, block.Child)
+		require.NoError(t, err)
+		require.NotNil(t, childPage.InvertedPostPage)
+		assert.Equal(t, postingPage.Header.Level-1, childPage.InvertedPostPage.Header.Level)
+		first, last, count, err := invertedPostingPageRange(childPage.InvertedPostPage)
+		require.NoError(t, err)
+		assert.Equal(t, block.FirstRowID, first)
+		assert.Equal(t, block.LastRowID, last)
+		assert.Equal(t, block.PostingCount, count)
+		pageCount += assertDedicatedInvertedPostingTreeValid(t, ctx, index, block.Child, pageIdx)
+	}
+	return pageCount
+}
+
 func testInvertedEntryPage(pageIdx PageIndex, isLeaf bool, terms []string) *Page {
 	page := &Page{Index: pageIdx, InvertedEntryPage: NewInvertedEntryPage(isLeaf)}
 	for _, term := range terms {
@@ -675,4 +772,8 @@ func invertedEntryTerms(cells []invertedEntryCell) []string {
 
 func largeTestRowID(i int) RowID {
 	return RowID(i) << 56
+}
+
+func wideTestRowID(i int) RowID {
+	return RowID(i) << 40
 }
