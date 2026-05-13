@@ -33,14 +33,12 @@ func (s *TestSuite) TestIndexMethods_StrictScaffold() {
 		s.Contains(err.Error(), `unsupported full-text tokenizer "porter"`)
 	})
 
-	s.Run("inverted index on JSON validates then fails as not implemented", func() {
+	s.Run("inverted index on JSON is created", func() {
 		_, err := s.db.Exec(`create inverted index "idx_events_payload_inv" on "events_index_method" (payload);`)
-		s.Require().Error(err)
-		s.Contains(err.Error(), "index method is parsed but not implemented yet")
-		s.Contains(err.Error(), "inverted indexes")
+		s.Require().NoError(err)
 	})
 
-	s.Run("inverted index rejects non-JSON column before not implemented error", func() {
+	s.Run("inverted index rejects non-JSON column", func() {
 		_, err := s.db.Exec(`create inverted index "idx_events_name_inv" on "events_index_method" (name);`)
 		s.Require().Error(err)
 		s.Contains(err.Error(), `inverted index column "name" must be JSON`)

@@ -658,6 +658,17 @@ func (c *Cursor) deleteSecondaryIndexKeys(ctx context.Context, row Row) error {
 			}
 			continue
 		}
+		if secondaryIndex.Method == IndexMethodInverted {
+			if ok, err := secondaryIndex.rowSatisfiesWhereCond(row); err != nil {
+				return fmt.Errorf("partial inverted index %s where check: %w", secondaryIndex.Name, err)
+			} else if !ok {
+				continue
+			}
+			if err := c.Table.deleteInvertedIndexKeys(ctx, secondaryIndex, row.Key, row); err != nil {
+				return err
+			}
+			continue
+		}
 
 		// Partial index: row was not in the index if it didn't satisfy the WHERE predicate.
 		if ok, err := secondaryIndex.rowSatisfiesWhereCond(row); err != nil {

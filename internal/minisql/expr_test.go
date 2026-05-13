@@ -497,6 +497,36 @@ func TestExpr_Eval_TextSearch(t *testing.T) {
 	})
 }
 
+func TestExpr_Eval_JSONContains(t *testing.T) {
+	t.Parallel()
+
+	row := rowWithText("payload", `{"type":"click","user":{"id":"u1"},"tags":["web","mobile"]}`)
+
+	t.Run("matches object subset", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "JSON_CONTAINS", Args: []*Expr{{Column: "payload"}, textExpr(`{"user":{"id":"u1"}}`)}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, true, v)
+	})
+
+	t.Run("returns false for missing values", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "JSON_CONTAINS", Args: []*Expr{{Column: "payload"}, textExpr(`{"type":"view"}`)}}
+		v, err := e.Eval(row)
+		require.NoError(t, err)
+		assert.Equal(t, false, v)
+	})
+
+	t.Run("invalid query errors", func(t *testing.T) {
+		t.Parallel()
+		e := &Expr{FuncName: "JSON_CONTAINS", Args: []*Expr{{Column: "payload"}, textExpr(`not-json`)}}
+		_, err := e.Eval(row)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid JSON query")
+	})
+}
+
 func TestExpr_Eval_TRIM(t *testing.T) {
 	t.Parallel()
 

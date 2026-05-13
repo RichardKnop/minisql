@@ -21,7 +21,6 @@ var (
 	errIndexDoesNotExist         = errors.New("index does not exist")
 	errIndexAlreadyExists        = errors.New("index already exists")
 	errIndexOnJSONColumn         = errors.New("b-tree index on JSON column is not supported")
-	errIndexMethodUnsupported    = errors.New("index method is parsed but not implemented yet")
 )
 
 // WALConfig bundles the Write-Ahead Log objects that NewDatabase needs.
@@ -1363,10 +1362,6 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, table *Table
 		return errIndexAlreadyExists
 	}
 
-	if stmt.IndexMethod == IndexMethodInverted {
-		return fmt.Errorf("%w: %s indexes", errIndexMethodUnsupported, stmt.IndexMethod)
-	}
-
 	// Resolve index columns from the table schema, or build a synthetic column for expression indexes.
 	var indexColumns []Column
 	if stmt.IndexExpression != nil {
@@ -1454,6 +1449,10 @@ func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryInd
 		switch {
 		case secondaryIndex.Method == IndexMethodFullText:
 			if err := table.insertFullTextIndexKeys(ctx, secondaryIndex, row.Key, row); err != nil {
+				return err
+			}
+		case secondaryIndex.Method == IndexMethodInverted:
+			if err := table.insertInvertedIndexKeys(ctx, secondaryIndex, row.Key, row); err != nil {
 				return err
 			}
 		case secondaryIndex.Expression != nil:

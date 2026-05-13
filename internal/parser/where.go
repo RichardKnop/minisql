@@ -183,7 +183,7 @@ func (p *parserItem) parseLeafCondition() (*minisql.ConditionNode, error) {
 		cond := minisql.Condition{
 			Operand1: minisql.Operand{Type: minisql.OperandExpr, Value: expr},
 		}
-		if upperIdent == "MATCH" && !nextTokenIsConditionOperator(p.peek()) {
+		if (upperIdent == "MATCH" || upperIdent == "JSON_CONTAINS") && !nextTokenIsConditionOperator(p.peek()) {
 			cond.Operator = minisql.Eq
 			cond.Operand2 = minisql.Operand{Type: minisql.OperandBoolean, Value: true}
 			return &minisql.ConditionNode{Leaf: &cond}, nil

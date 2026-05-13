@@ -29,6 +29,8 @@ const (
 	ScanTypeIndexIntersect
 	// ScanTypeFullText runs an inverted full-text index lookup for MATCH predicates.
 	ScanTypeFullText
+	// ScanTypeInverted runs a JSON inverted index lookup for JSON_CONTAINS predicates.
+	ScanTypeInverted
 )
 
 func (st ScanType) String() string {
@@ -49,6 +51,8 @@ func (st ScanType) String() string {
 		return "index_intersect"
 	case ScanTypeFullText:
 		return "fulltext"
+	case ScanTypeInverted:
+		return "inverted"
 	default:
 		return "unknown"
 	}
@@ -240,6 +244,12 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error
 
 	if fullTextScan, ok := t.tryFullTextIndexScan(stmt.Conditions); ok {
 		plan.Scans = []Scan{fullTextScan}
+		result := plan.optimizeOrdering(t, stmt.Conditions)
+		result.markCoveringIndexes(stmt)
+		return result, nil
+	}
+	if invertedScan, ok := t.tryInvertedIndexScan(stmt.Conditions); ok {
+		plan.Scans = []Scan{invertedScan}
 		result := plan.optimizeOrdering(t, stmt.Conditions)
 		result.markCoveringIndexes(stmt)
 		return result, nil
@@ -510,6 +520,75 @@ func (t *Table) tryFullTextIndexScan(filters OneOrMore) (Scan, bool) {
 		IndexColumns:  []Column{fullTextTokenColumn()},
 		IndexKeys:     indexKeys,
 		Filters:       scanFilters,
+	}, true
+}
+
+func (t *Table) tryInvertedIndexScan(filters OneOrMore) (Scan, bool) {
+	if len(filters) != 1 {
+		return Scan{}, false
+	}
+
+	var containsExpr *Expr
+	for _, cond := range filters[0] {
+		if cond.Operator != Eq || cond.Operand2.Type != OperandBoolean || cond.Operand2.Value != true {
+			continue
+		}
+		if cond.Operand1.Type != OperandExpr {
+			continue
+		}
+		expr, ok := cond.Operand1.Value.(*Expr)
+		if !ok || expr.FuncName != "JSON_CONTAINS" || len(expr.Args) != 2 {
+			continue
+		}
+		containsExpr = expr
+		break
+	}
+	if containsExpr == nil {
+		return Scan{}, false
+	}
+
+	columnName := containsExpr.Args[0].Column
+	if columnName == "" {
+		return Scan{}, false
+	}
+	query, ok := literalText(containsExpr.Args[1])
+	if !ok {
+		return Scan{}, false
+	}
+	terms, err := jsonInvertedTermsForQuery(query)
+	if err != nil || len(terms) == 0 {
+		return Scan{}, false
+	}
+
+	var (
+		matchedIndex SecondaryIndex
+		foundIndex   bool
+	)
+	for _, idx := range t.SecondaryIndexes {
+		if idx.Method != IndexMethodInverted || len(idx.Columns) != 1 {
+			continue
+		}
+		if idx.Columns[0].Name == columnName {
+			matchedIndex = idx
+			foundIndex = true
+			break
+		}
+	}
+	if !foundIndex || !partialIndexImplied(matchedIndex.WhereCond, filters[0]) {
+		return Scan{}, false
+	}
+
+	indexKeys := make([]any, len(terms))
+	for i, term := range terms {
+		indexKeys[i] = term
+	}
+	return Scan{
+		TableName:    t.Name,
+		Type:         ScanTypeInverted,
+		IndexName:    matchedIndex.Name,
+		IndexColumns: []Column{jsonInvertedTermColumn()},
+		IndexKeys:    indexKeys,
+		Filters:      filters,
 	}, true
 }
 
@@ -1323,6 +1402,8 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 			return t.indexIntersectScan(ctx, p.Scans[0], selectedFields, out)
 		case ScanTypeFullText:
 			return t.fullTextIndexScan(ctx, p.Scans[0], selectedFields, out)
+		case ScanTypeInverted:
+			return t.invertedIndexScan(ctx, p.Scans[0], selectedFields, out)
 		case ScanTypeSequential:
 			return t.sequentialScan(ctx, p.Scans[0], selectedFields, out)
 		default:
@@ -1350,6 +1431,10 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 			}
 		case ScanTypeFullText:
 			if err := t.fullTextIndexScan(ctx, scan, selectedFields, out); err != nil {
+				return err
+			}
+		case ScanTypeInverted:
+			if err := t.invertedIndexScan(ctx, scan, selectedFields, out); err != nil {
 				return err
 			}
 		default:

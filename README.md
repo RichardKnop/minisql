@@ -419,6 +419,7 @@ SELECT name FROM events WHERE payload ->> 'uid' = 42;
 | `JSON_VALID(val)` | `1` or `0` | Returns `1` if `val` is syntactically valid JSON, `0` otherwise. Useful for validating text columns. |
 | `JSON_TYPE(doc[, path])` | text | Returns the JSON type name of the document root, or of the value at `path`. Values: `object`, `array`, `text`, `integer`, `real`, `true`, `false`, `null`. |
 | `JSON_ARRAY_LENGTH(doc)` | integer | Returns the number of elements in a JSON array. Returns `NULL` if the document is not an array. |
+| `JSON_CONTAINS(doc, query)` | boolean | Returns `true` when `doc` contains `query` as a JSON subset. Object keys are matched recursively, arrays use element containment, and scalar values compare by JSON type/value. |
 
 ```sql
 -- Extract with JSONPath
@@ -437,7 +438,25 @@ SELECT JSON_ARRAY_LENGTH(payload) FROM events WHERE name = 'tags'; -- 3
 -- Validate arbitrary text
 SELECT JSON_VALID('{"x":1}');  -- 1
 SELECT JSON_VALID('bad json'); -- 0
+
+-- JSON containment
+SELECT name FROM events WHERE JSON_CONTAINS(payload, '{"user":"alice"}');
 ```
+
+### JSON Inverted Indexes
+
+MiniSQL supports a v1 JSON inverted index for accelerating literal `JSON_CONTAINS` predicates on one `json` column:
+
+```sql
+CREATE INVERTED INDEX idx_events_payload
+ON events (payload);
+
+SELECT name
+FROM events
+WHERE JSON_CONTAINS(payload, '{"type":"click","tags":["web"]}');
+```
+
+The v1 index stores generated JSON terms in a non-unique B+ tree. Terms include key existence (`k:user.id`) and scalar key/value entries (`kv:type:s:"click"`, `kv:tags[]:s:"web"`). The planner uses those terms as a prefilter for literal `JSON_CONTAINS(column, 'json')` queries, then rechecks the full predicate against the row for correctness. It does not support posting trees, compression, path-specific operators, or dynamic query expressions yet.
 
 ### CAST AS JSON
 
@@ -562,7 +581,7 @@ rows.Scan(&owner)
 | `UNION` / `UNION ALL` | Combine results of two or more `SELECT` statements. `UNION ALL` concatenates all rows (duplicates kept); `UNION` deduplicates the combined result. Chains of three or more branches supported (e.g. `SELECT … UNION ALL SELECT … UNION SELECT …`). Each branch may have its own `WHERE` clause. |
 | `CAST(expr AS type)` | Standard SQL type coercion. Supported target types: `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE`, `TEXT`, `VARCHAR(n)`, `TIMESTAMP`, `JSON`, `UUID`. Follows SQLite semantics: float→int truncates toward zero; text→int/float parses leading digits (non-numeric input → 0). `CAST(x AS JSON)` validates and compacts the value. `CAST(x AS UUID)` parses a UUID string and stores it in binary form. `CAST(uuid_col AS TEXT)` formats the 16-byte value back to a hyphenated lowercase string. NULL propagates. Usable anywhere an expression is valid (e.g. `SELECT CAST(price AS INT8)`, `SELECT CAST(n AS TEXT) AS label`, `SELECT CAST(id AS TEXT) FROM widgets`). |
 | JSON operators | `col -> 'key'` — extract a JSON field and return it as a JSON fragment (quoted string, array, object). `col ->> 'key'` — extract a JSON field and return it as a SQL scalar (unquoted string, integer, or float). Integer keys index into arrays (e.g. `col -> 0`). Both operators work in `SELECT` and `WHERE`. See [JSON Type](#json-type). |
-| JSON functions | `JSON_EXTRACT(doc, path)` — extract value at JSON path as a scalar (equivalent to `->>`). `JSON_VALID(val)` — returns `1` if the value is valid JSON, `0` otherwise. `JSON_TYPE(doc[, path])` — returns the JSON type name: `object`, `array`, `text`, `integer`, `real`, `true`, `false`, `null`. `JSON_ARRAY_LENGTH(doc)` — returns the number of elements in a JSON array. See [JSON Type](#json-type). |
+| JSON functions | `JSON_EXTRACT(doc, path)` — extract value at JSON path as a scalar (equivalent to `->>`). `JSON_VALID(val)` — returns `1` if the value is valid JSON, `0` otherwise. `JSON_TYPE(doc[, path])` — returns the JSON type name. `JSON_ARRAY_LENGTH(doc)` — returns the number of elements in a JSON array. `JSON_CONTAINS(doc, query)` — tests JSON subset containment and can use `CREATE INVERTED INDEX` for literal predicates. See [JSON Type](#json-type). |
 | `INTERVAL` arithmetic | PostgreSQL-style interval expressions. Supported units: `year`, `month`, `week`, `day`, `hour`, `minute`, `second`, `microsecond` (singular or plural). Supports compound intervals (`'1 year 3 months'`) and negative values (`'-2 days'`). Operations: `timestamp + interval → timestamp`, `timestamp - interval → timestamp`, `interval + interval → interval`, `interval - interval → interval`, `timestamp - timestamp → interval`. Month arithmetic is calendar-aware — adding 1 month to Jan 31 yields the last day of February. Usable in `SELECT` and `UPDATE SET`, composable with `AS` aliases. Examples: `SELECT created_at + INTERVAL '7 days' AS expires_at`, `SELECT ts - INTERVAL '1 year 6 months'`. |
 | `VACUUM` | Rebuilds the database file, repacking it into a minimal amount of disk space (similar to SQLite) |
 | `PRAGMA quick_check` | A cheap structural health check of the open database. |
@@ -625,6 +644,7 @@ rows.Scan(&owner)
 | `JSON_VALID(val)` | `1` if `val` is valid JSON, `0` otherwise. |
 | `JSON_TYPE(doc[, path])` | JSON type name of the value (`object`, `array`, `text`, `integer`, `real`, `true`, `false`, `null`). |
 | `JSON_ARRAY_LENGTH(doc)` | Number of elements in a JSON array. |
+| `JSON_CONTAINS(doc, query)` | Boolean JSON subset containment, indexable with `CREATE INVERTED INDEX` when the query JSON is a literal. |
 
 #### Full-Text Search Functions
 
@@ -736,6 +756,8 @@ MiniSQL supports several index types, each suited to a different access pattern.
 | Composite | `CREATE INDEX` | `CREATE INDEX idx ON t (col1, col2)` |
 | Partial | `CREATE INDEX … WHERE` | `CREATE INDEX idx ON t (col) WHERE active = true` |
 | Expression | `CREATE INDEX` with expression | `CREATE INDEX idx ON t (LOWER(col))` |
+| Full-text | `CREATE FULLTEXT INDEX` | `CREATE FULLTEXT INDEX idx ON articles (body) WITH (tokenizer = 'simple')` |
+| JSON inverted | `CREATE INVERTED INDEX` | `CREATE INVERTED INDEX idx ON events (payload)` |
 
 #### Primary Key Index
 
