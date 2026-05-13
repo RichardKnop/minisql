@@ -241,6 +241,9 @@ func textSearchRank(document, query string) float64 {
 	return textSearchRankPositions(docTokens, parsedQuery)
 }
 
+// textSearchRankPositions scores an already-tokenized document against a parsed
+// query. It is the shared core behind TS_RANK and keeps ranking independent from
+// whether MATCH used an index or a sequential scan.
 func textSearchRankPositions(docTokens []textSearchTokenPosition, query textSearchQuery) float64 {
 	queryTokens := query.allUniqueTokens()
 	if len(queryTokens) == 0 || len(docTokens) == 0 {
@@ -278,6 +281,8 @@ func textSearchRankPositions(docTokens []textSearchTokenPosition, query textSear
 	return base + textSearchPhraseBoost(positions, query, len(queryTokens)) + textSearchProximityBoost(docTokens, queryTokens, coverage)
 }
 
+// saturatedTermFrequency gives repeated term hits diminishing returns so a
+// document cannot win purely by repeating one query token many times.
 func saturatedTermFrequency(frequency int) float64 {
 	if frequency <= 0 {
 		return 0
@@ -286,6 +291,8 @@ func saturatedTermFrequency(frequency int) float64 {
 	return raw / (1 + raw)
 }
 
+// textSearchLengthNormalization mildly penalizes documents with many extra
+// tokens beyond the query length, favoring focused matches over noisy text.
 func textSearchLengthNormalization(documentTokens, queryTokens int) float64 {
 	if documentTokens <= 0 || queryTokens <= 0 {
 		return 0
@@ -294,6 +301,8 @@ func textSearchLengthNormalization(documentTokens, queryTokens int) float64 {
 	return 1 / math.Sqrt(1+float64(extraTokens)/20)
 }
 
+// textSearchPhraseBoost rewards quoted phrases that appear as adjacent tokens
+// in the document.
 func textSearchPhraseBoost(positions map[string][]uint32, query textSearchQuery, queryTokenCount int) float64 {
 	if queryTokenCount == 0 {
 		return 0
@@ -307,6 +316,8 @@ func textSearchPhraseBoost(positions map[string][]uint32, query textSearchQuery,
 	return boost
 }
 
+// textSearchProximityBoost rewards documents where all query tokens appear in a
+// compact span, making clustered matches rank above scattered matches.
 func textSearchProximityBoost(docTokens []textSearchTokenPosition, queryTokens []string, coverage float64) float64 {
 	if len(queryTokens) < 2 || coverage == 0 {
 		return 0
@@ -319,6 +330,8 @@ func textSearchProximityBoost(docTokens []textSearchTokenPosition, queryTokens [
 	return 0.20 * density * coverage
 }
 
+// textSearchMinCoverSpan finds the shortest token-position window containing at
+// least one occurrence of every unique query token.
 func textSearchMinCoverSpan(docTokens []textSearchTokenPosition, queryTokens []string) (uint32, bool) {
 	querySet := make(map[string]struct{}, len(queryTokens))
 	for _, token := range queryTokens {
