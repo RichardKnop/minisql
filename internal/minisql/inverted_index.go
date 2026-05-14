@@ -1225,11 +1225,26 @@ func (idx *dedicatedInvertedIndex) deletePostingFromTreeCell(ctx context.Context
 	if oldDocFreq == newDocFreq && oldPostingCount == newPostingCount {
 		return cell, true, nil
 	}
+	nextPostingCount := int(cell.PostingCount) + int(newPostingCount) - int(oldPostingCount)
+	if nextPostingCount <= 64 {
+		return invertedEntryCell{}, false, nil
+	}
 
 	candidate := leaf.InvertedPostPage.Clone()
 	if len(updatedPostings) == 0 {
 		if len(candidate.Blocks) == 1 {
-			return invertedEntryCell{}, false, nil
+			newRoot, removed, err := idx.removePostingLeafPage(ctx, cell.Child, leaf)
+			if err != nil {
+				return invertedEntryCell{}, false, err
+			}
+			if !removed {
+				return invertedEntryCell{}, false, nil
+			}
+			updatedCell := cell
+			updatedCell.Child = newRoot
+			updatedCell.DocFreq = uint32(int(updatedCell.DocFreq) - oldDocFreq)
+			updatedCell.PostingCount = uint32(nextPostingCount)
+			return updatedCell, true, nil
 		}
 		candidate.Blocks = slices.Delete(candidate.Blocks, blockIdx, blockIdx+1)
 	} else {
@@ -1248,14 +1263,315 @@ func (idx *dedicatedInvertedIndex) deletePostingFromTreeCell(ctx context.Context
 		return invertedEntryCell{}, false, fmt.Errorf("modify inverted posting leaf %d: %w", leaf.Index, err)
 	}
 	page.InvertedPostPage = candidate
-	if err := idx.refreshPostingAncestors(ctx, page.Index); err != nil {
+	newRoot, err := idx.rebalancePostingPageAfterDelete(ctx, cell.Child, page.Index)
+	if err != nil {
 		return invertedEntryCell{}, false, err
 	}
 
 	updatedCell := cell
+	updatedCell.Child = newRoot
 	updatedCell.DocFreq = uint32(int(updatedCell.DocFreq) + newDocFreq - oldDocFreq)
-	updatedCell.PostingCount = uint32(int(updatedCell.PostingCount) + int(newPostingCount) - int(oldPostingCount))
+	updatedCell.PostingCount = uint32(nextPostingCount)
 	return updatedCell, true, nil
+}
+
+// removePostingLeafPage unlinks an empty posting leaf and removes its parent route.
+func (idx *dedicatedInvertedIndex) removePostingLeafPage(ctx context.Context, rootIdx PageIndex, leaf *Page) (PageIndex, bool, error) {
+	if leaf.InvertedPostPage == nil || leaf.InvertedPostPage.Header.Level != 0 {
+		return 0, false, fmt.Errorf("inverted posting page %d is not a leaf", leaf.Index)
+	}
+	parentIdx := leaf.InvertedPostPage.Header.Parent
+	if parentIdx == 0 {
+		return 0, false, nil
+	}
+
+	canRemove, err := idx.canRemovePostingChild(ctx, parentIdx, leaf.Index)
+	if err != nil || !canRemove {
+		return 0, false, err
+	}
+
+	previousLeaf, err := idx.findPreviousPostingLeaf(ctx, rootIdx, leaf.Index)
+	if err != nil {
+		return 0, false, err
+	}
+	if previousLeaf != nil {
+		page, err := idx.pager.ModifyPage(ctx, previousLeaf.Index)
+		if err != nil {
+			return 0, false, fmt.Errorf("modify previous inverted posting leaf %d: %w", previousLeaf.Index, err)
+		}
+		page.InvertedPostPage.Header.NextLeaf = leaf.InvertedPostPage.Header.NextLeaf
+	}
+
+	newRoot, err := idx.removePostingChildRoute(ctx, rootIdx, parentIdx, leaf.Index)
+	if err != nil {
+		return 0, false, err
+	}
+	if err := idx.pager.AddFreePage(ctx, leaf.Index); err != nil {
+		return 0, false, fmt.Errorf("free empty inverted posting leaf %d: %w", leaf.Index, err)
+	}
+	return newRoot, true, nil
+}
+
+// rebalancePostingPageAfterDelete repairs underfull posting pages after shrink.
+func (idx *dedicatedInvertedIndex) rebalancePostingPageAfterDelete(ctx context.Context, rootIdx, pageIdx PageIndex) (PageIndex, error) {
+	page, err := idx.pager.ModifyPage(ctx, pageIdx)
+	if err != nil {
+		return 0, fmt.Errorf("modify inverted posting page %d after delete: %w", pageIdx, err)
+	}
+	if page.InvertedPostPage == nil {
+		return 0, fmt.Errorf("inverted posting page %d is not a posting page", pageIdx)
+	}
+	if pageIdx == rootIdx {
+		return idx.collapsePostingRoot(ctx, rootIdx)
+	}
+	if len(page.InvertedPostPage.Blocks) > 0 && !invertedPostingPageUnderfull(page.InvertedPostPage, invertedPageBodySize(pageIdx)) {
+		return rootIdx, idx.refreshPostingAncestors(ctx, pageIdx)
+	}
+
+	parent, childPos, err := idx.modifyPostingParent(ctx, page)
+	if err != nil {
+		return 0, err
+	}
+	left, right, err := idx.postingSiblings(ctx, parent.InvertedPostPage, childPos)
+	if err != nil {
+		return 0, err
+	}
+
+	if left != nil && invertedPostingPageCanSpare(left.InvertedPostPage, invertedPageBodySize(left.Index)) {
+		if err := idx.borrowPostingBlockFromLeft(ctx, page, left); err != nil {
+			return 0, err
+		}
+		if err := idx.refreshPostingAncestors(ctx, left.Index); err != nil {
+			return 0, err
+		}
+		return rootIdx, idx.refreshPostingAncestors(ctx, pageIdx)
+	}
+	if right != nil && invertedPostingPageCanSpare(right.InvertedPostPage, invertedPageBodySize(right.Index)) {
+		if err := idx.borrowPostingBlockFromRight(ctx, page, right); err != nil {
+			return 0, err
+		}
+		if err := idx.refreshPostingAncestors(ctx, right.Index); err != nil {
+			return 0, err
+		}
+		return rootIdx, idx.refreshPostingAncestors(ctx, pageIdx)
+	}
+
+	switch {
+	case right != nil:
+		return idx.mergePostingPagesAndRemoveRoute(ctx, rootIdx, page, right)
+	case left != nil:
+		return idx.mergePostingPagesAndRemoveRoute(ctx, rootIdx, left, page)
+	default:
+		return rootIdx, nil
+	}
+}
+
+// collapsePostingRoot replaces a single-child internal posting root with its child.
+func (idx *dedicatedInvertedIndex) collapsePostingRoot(ctx context.Context, rootIdx PageIndex) (PageIndex, error) {
+	root, err := idx.pager.ModifyPage(ctx, rootIdx)
+	if err != nil {
+		return 0, fmt.Errorf("modify inverted posting root %d: %w", rootIdx, err)
+	}
+	if root.InvertedPostPage == nil || root.InvertedPostPage.Header.Level == 0 || len(root.InvertedPostPage.Blocks) != 1 {
+		return rootIdx, nil
+	}
+	childIdx := root.InvertedPostPage.Blocks[0].Child
+	child, err := idx.pager.ModifyPage(ctx, childIdx)
+	if err != nil {
+		return 0, fmt.Errorf("modify inverted posting child %d for root collapse: %w", childIdx, err)
+	}
+	if child.InvertedPostPage == nil {
+		return 0, fmt.Errorf("inverted posting child %d is not a posting page", childIdx)
+	}
+	child.InvertedPostPage.Header.Parent = 0
+	if err := idx.pager.AddFreePage(ctx, rootIdx); err != nil {
+		return 0, fmt.Errorf("free collapsed inverted posting root %d: %w", rootIdx, err)
+	}
+	return childIdx, nil
+}
+
+// modifyPostingParent returns a writable parent and this page's child slot.
+func (idx *dedicatedInvertedIndex) modifyPostingParent(ctx context.Context, page *Page) (*Page, int, error) {
+	parentIdx := page.InvertedPostPage.Header.Parent
+	parent, err := idx.pager.ModifyPage(ctx, parentIdx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("modify inverted posting parent %d: %w", parentIdx, err)
+	}
+	if parent.InvertedPostPage == nil || parent.InvertedPostPage.Header.Level == 0 {
+		return nil, 0, fmt.Errorf("inverted posting parent %d is not an internal page", parentIdx)
+	}
+	for i, block := range parent.InvertedPostPage.Blocks {
+		if block.Child == page.Index {
+			return parent, i, nil
+		}
+	}
+	return nil, 0, fmt.Errorf("inverted posting child %d not found in parent %d", page.Index, parentIdx)
+}
+
+// postingSiblings returns writable siblings around a child position.
+func (idx *dedicatedInvertedIndex) postingSiblings(ctx context.Context, parent *invertedPostingPage, childPos int) (*Page, *Page, error) {
+	var left, right *Page
+	if childPos > 0 {
+		page, err := idx.pager.ModifyPage(ctx, parent.Blocks[childPos-1].Child)
+		if err != nil {
+			return nil, nil, fmt.Errorf("modify left inverted posting sibling: %w", err)
+		}
+		left = page
+	}
+	if childPos+1 < len(parent.Blocks) {
+		page, err := idx.pager.ModifyPage(ctx, parent.Blocks[childPos+1].Child)
+		if err != nil {
+			return nil, nil, fmt.Errorf("modify right inverted posting sibling: %w", err)
+		}
+		right = page
+	}
+	return left, right, nil
+}
+
+// borrowPostingBlockFromLeft moves the left sibling's last block into page.
+func (idx *dedicatedInvertedIndex) borrowPostingBlockFromLeft(ctx context.Context, page, left *Page) error {
+	moved := left.InvertedPostPage.Blocks[len(left.InvertedPostPage.Blocks)-1]
+	left.InvertedPostPage.Blocks = left.InvertedPostPage.Blocks[:len(left.InvertedPostPage.Blocks)-1]
+	page.InvertedPostPage.Blocks = slices.Insert(page.InvertedPostPage.Blocks, 0, moved)
+	if page.InvertedPostPage.Header.Level > 0 {
+		if err := idx.updateSinglePostingChildParent(ctx, moved.Child, page.Index); err != nil {
+			return err
+		}
+	}
+	if err := ensureInvertedPostingPageFits(left.InvertedPostPage, invertedPageBodySize(left.Index)); err != nil {
+		return err
+	}
+	return ensureInvertedPostingPageFits(page.InvertedPostPage, invertedPageBodySize(page.Index))
+}
+
+// borrowPostingBlockFromRight moves the right sibling's first block into page.
+func (idx *dedicatedInvertedIndex) borrowPostingBlockFromRight(ctx context.Context, page, right *Page) error {
+	moved := right.InvertedPostPage.Blocks[0]
+	right.InvertedPostPage.Blocks = slices.Delete(right.InvertedPostPage.Blocks, 0, 1)
+	page.InvertedPostPage.Blocks = append(page.InvertedPostPage.Blocks, moved)
+	if page.InvertedPostPage.Header.Level > 0 {
+		if err := idx.updateSinglePostingChildParent(ctx, moved.Child, page.Index); err != nil {
+			return err
+		}
+	}
+	if err := ensureInvertedPostingPageFits(right.InvertedPostPage, invertedPageBodySize(right.Index)); err != nil {
+		return err
+	}
+	return ensureInvertedPostingPageFits(page.InvertedPostPage, invertedPageBodySize(page.Index))
+}
+
+// mergePostingPagesAndRemoveRoute appends right into left, frees right, and repairs the parent.
+func (idx *dedicatedInvertedIndex) mergePostingPagesAndRemoveRoute(ctx context.Context, rootIdx PageIndex, left, right *Page) (PageIndex, error) {
+	if left.InvertedPostPage.Header.Level != right.InvertedPostPage.Header.Level {
+		return 0, fmt.Errorf("cannot merge posting pages with different levels")
+	}
+	left.InvertedPostPage.Blocks = append(left.InvertedPostPage.Blocks, right.InvertedPostPage.Blocks...)
+	if left.InvertedPostPage.Header.Level == 0 {
+		left.InvertedPostPage.Header.NextLeaf = right.InvertedPostPage.Header.NextLeaf
+	} else if err := idx.updatePostingChildrenParent(ctx, left); err != nil {
+		return 0, err
+	}
+	if err := ensureInvertedPostingPageFits(left.InvertedPostPage, invertedPageBodySize(left.Index)); err != nil {
+		return 0, err
+	}
+	newRoot, err := idx.removePostingChildRoute(ctx, rootIdx, right.InvertedPostPage.Header.Parent, right.Index)
+	if err != nil {
+		return 0, err
+	}
+	if err := idx.pager.AddFreePage(ctx, right.Index); err != nil {
+		return 0, fmt.Errorf("free merged inverted posting page %d: %w", right.Index, err)
+	}
+	return newRoot, nil
+}
+
+// updateSinglePostingChildParent rewrites one posting child page's parent pointer.
+func (idx *dedicatedInvertedIndex) updateSinglePostingChildParent(ctx context.Context, childIdx, parentIdx PageIndex) error {
+	child, err := idx.pager.ModifyPage(ctx, childIdx)
+	if err != nil {
+		return fmt.Errorf("modify inverted posting child %d parent: %w", childIdx, err)
+	}
+	if child.InvertedPostPage == nil {
+		return fmt.Errorf("inverted posting child %d is not a posting page", childIdx)
+	}
+	child.InvertedPostPage.Header.Parent = parentIdx
+	return nil
+}
+
+// canRemovePostingChild reports whether deleting a child route leaves a valid parent.
+func (idx *dedicatedInvertedIndex) canRemovePostingChild(ctx context.Context, parentIdx, childIdx PageIndex) (bool, error) {
+	parent, err := idx.pager.ReadPage(ctx, parentIdx)
+	if err != nil {
+		return false, fmt.Errorf("read inverted posting parent %d: %w", parentIdx, err)
+	}
+	if parent.InvertedPostPage == nil || parent.InvertedPostPage.Header.Level == 0 {
+		return false, fmt.Errorf("inverted posting parent %d is not an internal page", parentIdx)
+	}
+	found := false
+	for _, block := range parent.InvertedPostPage.Blocks {
+		if block.Child == childIdx {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return false, fmt.Errorf("inverted posting child %d not found in parent %d", childIdx, parentIdx)
+	}
+	return len(parent.InvertedPostPage.Blocks) > 1, nil
+}
+
+// findPreviousPostingLeaf walks the leaf chain and returns the leaf before leafIdx.
+func (idx *dedicatedInvertedIndex) findPreviousPostingLeaf(ctx context.Context, rootIdx, leafIdx PageIndex) (*Page, error) {
+	page, err := idx.leftmostPostingLeaf(ctx, rootIdx)
+	if err != nil {
+		return nil, err
+	}
+	var previous *Page
+	for page.Index != leafIdx {
+		next := page.InvertedPostPage.Header.NextLeaf
+		if next == 0 {
+			return nil, fmt.Errorf("inverted posting leaf %d not found in leaf chain", leafIdx)
+		}
+		previous = page
+		page, err = idx.pager.ReadPage(ctx, next)
+		if err != nil {
+			return nil, fmt.Errorf("read inverted posting leaf %d: %w", next, err)
+		}
+		if page.InvertedPostPage == nil || page.InvertedPostPage.Header.Level != 0 {
+			return nil, fmt.Errorf("inverted posting page %d is not a leaf", next)
+		}
+	}
+	return previous, nil
+}
+
+// removePostingChildRoute deletes one child routing block and collapses root when possible.
+func (idx *dedicatedInvertedIndex) removePostingChildRoute(ctx context.Context, rootIdx, parentIdx, childIdx PageIndex) (PageIndex, error) {
+	parent, err := idx.pager.ModifyPage(ctx, parentIdx)
+	if err != nil {
+		return 0, fmt.Errorf("modify inverted posting parent %d: %w", parentIdx, err)
+	}
+	if parent.InvertedPostPage == nil || parent.InvertedPostPage.Header.Level == 0 {
+		return 0, fmt.Errorf("inverted posting parent %d is not an internal page", parentIdx)
+	}
+
+	blockIdx := -1
+	for i, block := range parent.InvertedPostPage.Blocks {
+		if block.Child == childIdx {
+			blockIdx = i
+			break
+		}
+	}
+	if blockIdx < 0 {
+		return 0, fmt.Errorf("inverted posting child %d not found in parent %d", childIdx, parentIdx)
+	}
+
+	parent.InvertedPostPage.Blocks = slices.Delete(parent.InvertedPostPage.Blocks, blockIdx, blockIdx+1)
+	if len(parent.InvertedPostPage.Blocks) == 0 {
+		return 0, fmt.Errorf("inverted posting parent %d has no remaining children", parentIdx)
+	}
+	if err := ensureInvertedPostingPageFits(parent.InvertedPostPage, invertedPageBodySize(parent.Index)); err != nil {
+		return 0, err
+	}
+	return idx.rebalancePostingPageAfterDelete(ctx, rootIdx, parentIdx)
 }
 
 // findPostingLeafBlock descends to the leaf block whose row range should contain rowID.
@@ -1283,6 +1599,34 @@ func (idx *dedicatedInvertedIndex) findPostingLeafBlock(ctx context.Context, roo
 		page, err = idx.pager.ReadPage(ctx, childIdx)
 		if err != nil {
 			return nil, 0, fmt.Errorf("read inverted posting child %d: %w", childIdx, err)
+		}
+	}
+}
+
+// leftmostPostingLeaf follows internal posting pages down to the first leaf.
+func (idx *dedicatedInvertedIndex) leftmostPostingLeaf(ctx context.Context, rootIdx PageIndex) (*Page, error) {
+	page, err := idx.pager.ReadPage(ctx, rootIdx)
+	if err != nil {
+		return nil, fmt.Errorf("read inverted posting root %d: %w", rootIdx, err)
+	}
+	for {
+		if page.InvertedPostPage == nil {
+			return nil, fmt.Errorf("inverted posting page %d is not a posting page", page.Index)
+		}
+		if page.InvertedPostPage.Header.Level == 0 {
+			return page, nil
+		}
+		if len(page.InvertedPostPage.Blocks) == 0 {
+			return nil, fmt.Errorf("inverted posting internal page %d has no routing blocks", page.Index)
+		}
+		childIdx := page.InvertedPostPage.Blocks[0].Child
+		if childIdx == 0 {
+			return nil, fmt.Errorf("inverted posting internal page %d has zero child", page.Index)
+		}
+		var err error
+		page, err = idx.pager.ReadPage(ctx, childIdx)
+		if err != nil {
+			return nil, fmt.Errorf("read inverted posting child %d: %w", childIdx, err)
 		}
 	}
 }
@@ -1732,6 +2076,31 @@ func invertedEntryPageUsedBytes(page *invertedEntryPage) uint64 {
 func ensureInvertedPostingPageFits(page *invertedPostingPage, pageSize int) error {
 	buf := make([]byte, pageSize)
 	return page.Marshal(buf)
+}
+
+// invertedPostingPageUnderfull reports whether a posting page should be repaired after delete.
+func invertedPostingPageUnderfull(page *invertedPostingPage, pageSize int) bool {
+	if len(page.Blocks) == 0 {
+		return true
+	}
+	return invertedPostingPageUsedBytes(page) < uint64(pageSize)/3
+}
+
+// invertedPostingPageCanSpare reports whether a posting sibling can lend one block.
+func invertedPostingPageCanSpare(page *invertedPostingPage, pageSize int) bool {
+	if len(page.Blocks) < 2 {
+		return false
+	}
+	return invertedPostingPageUsedBytes(page) > uint64(pageSize)/2
+}
+
+// invertedPostingPageUsedBytes estimates occupied bytes including header and slots.
+func invertedPostingPageUsedBytes(page *invertedPostingPage) uint64 {
+	used := page.Header.size() + uint64(len(page.Blocks))*2
+	for _, block := range page.Blocks {
+		used += block.size()
+	}
+	return used
 }
 
 // invertedPageBodySize returns usable bytes for root and non-root inverted pages.

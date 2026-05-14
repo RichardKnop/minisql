@@ -593,6 +593,248 @@ func TestDedicatedInvertedIndex_InsertSplitsPostingLeafWithoutRebuild(t *testing
 	assertDedicatedInvertedPostingTreeValid(t, ctx, index, rootIdx, 0)
 }
 
+func TestDedicatedInvertedIndex_DeleteRemovesPostingLeafAndCollapsesRoot(t *testing.T) {
+	pager, dbFile := initTest(t)
+	basePager := pager.ForInvertedIndex()
+	txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(basePager), pager, nil)
+	txPager := NewTransactionalPager(basePager, txManager, "events", "idx_payload_inv")
+	index, err := NewDedicatedInvertedIndex("idx_payload_inv", invertedIndexPostingModeRowIDs, txPager, 0)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, index.InitRootPage))
+
+	var cell invertedEntryCell
+	var leftLeafIdx, oldRootIdx PageIndex
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		leftLeaf, err := index.pager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		rightLeaf, err := index.pager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+
+		leftLeaf.Clear()
+		leftPage := NewInvertedPostingPage(0)
+		for i := 1; i <= 65; i++ {
+			block, err := testInvertedPostingBlock(invertedPostingModeRowIDs, RowID(i))
+			if err != nil {
+				return err
+			}
+			leftPage.Blocks = append(leftPage.Blocks, block)
+		}
+		leftPage.Header.NextLeaf = rightLeaf.Index
+		leftLeaf.InvertedPostPage = leftPage
+
+		rightLeaf.Clear()
+		rightBlock, err := testInvertedPostingBlock(invertedPostingModeRowIDs, RowID(1000))
+		if err != nil {
+			return err
+		}
+		rightPage := NewInvertedPostingPage(0)
+		rightPage.Blocks = []invertedPostingBlock{rightBlock}
+		rightLeaf.InvertedPostPage = rightPage
+
+		oldRootIdx, err = index.createPostingRoot(ctx, []*Page{leftLeaf, rightLeaf})
+		if err != nil {
+			return err
+		}
+		leftLeafIdx = leftLeaf.Index
+		cell = invertedEntryCell{
+			Term:         "k:type",
+			DocFreq:      66,
+			PostingCount: 66,
+			Child:        oldRootIdx,
+			PostingKind:  invertedPostingKindTree,
+			CodecVersion: invertedPostingCodecVersion,
+		}
+		return nil
+	}))
+
+	beforeFreePages := basePager.GetHeader(ctx).FreePageCount
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		var mutated bool
+		cell, mutated, err = index.deletePostingFromTreeCell(ctx, cell, invertedPosting{RowID: 1000})
+		require.True(t, mutated)
+		return err
+	}))
+
+	assert.Equal(t, leftLeafIdx, cell.Child)
+	assert.Equal(t, uint32(65), cell.DocFreq)
+	assert.Equal(t, uint32(65), cell.PostingCount)
+	assert.Equal(t, beforeFreePages+2, basePager.GetHeader(ctx).FreePageCount)
+
+	leftLeaf, err := index.pager.ReadPage(ctx, leftLeafIdx)
+	require.NoError(t, err)
+	require.NotNil(t, leftLeaf.InvertedPostPage)
+	assert.Zero(t, leftLeaf.InvertedPostPage.Header.Parent)
+	assert.Zero(t, leftLeaf.InvertedPostPage.Header.NextLeaf)
+}
+
+func TestDedicatedInvertedIndex_RebalancesPostingLeafByBorrowingFromLeft(t *testing.T) {
+	pager, dbFile := initTest(t)
+	basePager := pager.ForInvertedIndex()
+	txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(basePager), pager, nil)
+	txPager := NewTransactionalPager(basePager, txManager, "events", "idx_payload_inv")
+	index, err := NewDedicatedInvertedIndex("idx_payload_inv", invertedIndexPostingModeRowIDs, txPager, 0)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, index.InitRootPage))
+
+	var rootIdx, leftIdx, rightIdx PageIndex
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		left, err := index.pager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		right, err := index.pager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		leftIdx = left.Index
+		rightIdx = right.Index
+
+		left.Clear()
+		leftPage := NewInvertedPostingPage(0)
+		for i := 1; i <= 85; i++ {
+			block, err := testInvertedPostingBlock(invertedPostingModeRowIDs, RowID(i*10))
+			if err != nil {
+				return err
+			}
+			leftPage.Blocks = append(leftPage.Blocks, block)
+		}
+		require.NoError(t, ensureInvertedPostingPageFits(leftPage, invertedPageBodySize(left.Index)))
+		leftPage.Header.NextLeaf = right.Index
+		left.InvertedPostPage = leftPage
+
+		right.Clear()
+		rightBlock, err := testInvertedPostingBlock(invertedPostingModeRowIDs, 10000)
+		if err != nil {
+			return err
+		}
+		rightPage := NewInvertedPostingPage(0)
+		rightPage.Blocks = []invertedPostingBlock{rightBlock}
+		right.InvertedPostPage = rightPage
+
+		rootIdx, err = index.createPostingRoot(ctx, []*Page{left, right})
+		if err != nil {
+			return err
+		}
+		rootIdx, err = index.rebalancePostingPageAfterDelete(ctx, rootIdx, right.Index)
+		return err
+	}))
+
+	assertDedicatedInvertedPostingTreeValid(t, ctx, index, rootIdx, 0)
+	left, err := index.pager.ReadPage(ctx, leftIdx)
+	require.NoError(t, err)
+	right, err := index.pager.ReadPage(ctx, rightIdx)
+	require.NoError(t, err)
+	require.NotNil(t, left.InvertedPostPage)
+	require.NotNil(t, right.InvertedPostPage)
+	assert.Len(t, left.InvertedPostPage.Blocks, 84)
+	require.Len(t, right.InvertedPostPage.Blocks, 2)
+	assert.Equal(t, RowID(850), right.InvertedPostPage.Blocks[0].FirstRowID)
+	assert.Equal(t, RowID(10000), right.InvertedPostPage.Blocks[1].FirstRowID)
+}
+
+func TestDedicatedInvertedIndex_MergesPostingInternalPagesAndCollapsesRoot(t *testing.T) {
+	pager, dbFile := initTest(t)
+	basePager := pager.ForInvertedIndex()
+	txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(basePager), pager, nil)
+	txPager := NewTransactionalPager(basePager, txManager, "events", "idx_payload_inv")
+	index, err := NewDedicatedInvertedIndex("idx_payload_inv", invertedIndexPostingModeRowIDs, txPager, 0)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, index.InitRootPage))
+
+	var rootIdx, collapsedRootIdx, leftInternalIdx, rightInternalIdx PageIndex
+	var beforeFreePages uint32
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		leftLeaf, err := index.pager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		rightLeaf, err := index.pager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		leftInternal, err := index.pager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		rightInternal, err := index.pager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		leftInternalIdx = leftInternal.Index
+		rightInternalIdx = rightInternal.Index
+
+		leftLeaf.Clear()
+		leftBlock, err := testInvertedPostingBlock(invertedPostingModeRowIDs, 10)
+		if err != nil {
+			return err
+		}
+		leftLeafPage := NewInvertedPostingPage(0)
+		leftLeafPage.Header.Parent = leftInternal.Index
+		leftLeafPage.Header.NextLeaf = rightLeaf.Index
+		leftLeafPage.Blocks = []invertedPostingBlock{leftBlock}
+		leftLeaf.InvertedPostPage = leftLeafPage
+
+		rightLeaf.Clear()
+		rightBlock, err := testInvertedPostingBlock(invertedPostingModeRowIDs, 20)
+		if err != nil {
+			return err
+		}
+		rightLeafPage := NewInvertedPostingPage(0)
+		rightLeafPage.Header.Parent = rightInternal.Index
+		rightLeafPage.Blocks = []invertedPostingBlock{rightBlock}
+		rightLeaf.InvertedPostPage = rightLeafPage
+
+		leftInternal.Clear()
+		leftRoute, err := index.routingBlockForPostingPage(leftLeaf)
+		if err != nil {
+			return err
+		}
+		leftInternalPage := NewInvertedPostingPage(1)
+		leftInternalPage.Blocks = []invertedPostingBlock{leftRoute}
+		leftInternal.InvertedPostPage = leftInternalPage
+
+		rightInternal.Clear()
+		rightRoute, err := index.routingBlockForPostingPage(rightLeaf)
+		if err != nil {
+			return err
+		}
+		rightInternalPage := NewInvertedPostingPage(1)
+		rightInternalPage.Blocks = []invertedPostingBlock{rightRoute}
+		rightInternal.InvertedPostPage = rightInternalPage
+
+		rootIdx, err = index.createPostingRoot(ctx, []*Page{leftInternal, rightInternal})
+		if err != nil {
+			return err
+		}
+		beforeFreePages = basePager.GetHeader(ctx).FreePageCount
+		collapsedRootIdx, err = index.rebalancePostingPageAfterDelete(ctx, rootIdx, leftInternal.Index)
+		if err != nil {
+			return err
+		}
+		return nil
+	}))
+
+	assert.Equal(t, beforeFreePages+2, basePager.GetHeader(ctx).FreePageCount)
+	assert.NotEqual(t, rootIdx, collapsedRootIdx)
+	assert.Equal(t, leftInternalIdx, collapsedRootIdx)
+	assertDedicatedInvertedPostingTreeValid(t, ctx, index, collapsedRootIdx, 0)
+	leftInternal, err := index.pager.ReadPage(ctx, leftInternalIdx)
+	require.NoError(t, err)
+	require.NotNil(t, leftInternal.InvertedPostPage)
+	require.Len(t, leftInternal.InvertedPostPage.Blocks, 2)
+	assert.Zero(t, leftInternal.InvertedPostPage.Header.Parent)
+	freedRight, err := index.pager.ReadPage(ctx, rightInternalIdx)
+	require.NoError(t, err)
+	assert.NotNil(t, freedRight.FreePage)
+}
+
 func TestDedicatedInvertedIndex_DemotesPostingTreeAfterDeletes(t *testing.T) {
 	index, txManager := newTestDedicatedInvertedIndex(t, "idx_json", invertedIndexPostingModeRowIDs)
 	ctx := context.Background()
