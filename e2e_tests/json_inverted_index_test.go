@@ -1,5 +1,7 @@
 package e2etests
 
+import "fmt"
+
 func (s *TestSuite) TestJSONInvertedIndex() {
 	_, err := s.db.Exec(`create table "events_inv" (
 		id      int8 primary key autoincrement,
@@ -102,4 +104,66 @@ func (s *TestSuite) collectEventNames(query string) []string {
 	}
 	s.Require().NoError(rows.Err())
 	return names
+}
+
+func (s *TestSuite) TestJSONInvertedIndexHeavyMaintenance() {
+	_, err := s.db.Exec(`create table "events_inv_heavy" (
+		id      int8 primary key,
+		name    varchar(100) not null,
+		payload json not null
+	);`)
+	s.Require().NoError(err)
+
+	for i := 1; i <= 90; i++ {
+		_, err = s.db.Exec(fmt.Sprintf(
+			`insert into "events_inv_heavy" (id, name, payload) values (%d, 'event-%03d', '{"type":"click","tags":["web","batch"],"user":{"id":"u%03d"}}');`,
+			i,
+			i,
+			i,
+		))
+		s.Require().NoError(err)
+	}
+
+	_, err = s.db.Exec(`create inverted index "idx_events_inv_heavy_payload" on "events_inv_heavy" (payload);`)
+	s.Require().NoError(err)
+
+	var count int
+	s.Require().NoError(s.db.QueryRow(`select count(*) from "events_inv_heavy" where JSON_CONTAINS(payload, '{"type":"click","tags":["web"]}');`).Scan(&count))
+	s.Equal(90, count)
+
+	for i := 1; i <= 30; i++ {
+		_, err = s.db.Exec(fmt.Sprintf(
+			`update "events_inv_heavy" set payload = '{"type":"view","tags":["web"],"user":{"id":"u%03d"}}' where id = %d;`,
+			i,
+			i,
+		))
+		s.Require().NoError(err)
+	}
+	s.Require().NoError(s.db.QueryRow(`select count(*) from "events_inv_heavy" where JSON_CONTAINS(payload, '{"type":"click","tags":["web"]}');`).Scan(&count))
+	s.Equal(60, count)
+
+	for i := 91; i <= 130; i++ {
+		_, err = s.db.Exec(fmt.Sprintf(
+			`insert into "events_inv_heavy" (id, name, payload) values (%d, 'event-%03d', '{"type":"click","tags":["web","inserted"],"user":{"id":"u%03d"}}');`,
+			i,
+			i,
+			i,
+		))
+		s.Require().NoError(err)
+	}
+	s.Require().NoError(s.db.QueryRow(`select count(*) from "events_inv_heavy" where JSON_CONTAINS(payload, '{"type":"click","tags":["web"]}');`).Scan(&count))
+	s.Equal(100, count)
+
+	for i := 31; i <= 50; i++ {
+		_, err = s.db.Exec(fmt.Sprintf(`delete from "events_inv_heavy" where id = %d;`, i))
+		s.Require().NoError(err)
+	}
+	s.Require().NoError(s.db.QueryRow(`select count(*) from "events_inv_heavy" where JSON_CONTAINS(payload, '{"type":"click","tags":["web"]}');`).Scan(&count))
+	s.Equal(80, count)
+
+	rows := s.collectExplain(`EXPLAIN ANALYZE SELECT name FROM "events_inv_heavy" WHERE JSON_CONTAINS(payload, '{"type":"click","tags":["web"]}');`)
+	s.Require().Len(rows, 1)
+	s.Equal("inverted", rows[0].Operation)
+	s.True(rows[0].RowsActual.Valid)
+	s.Equal(int64(80), rows[0].RowsActual.Int64)
 }

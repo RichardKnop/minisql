@@ -3,7 +3,9 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -894,6 +896,85 @@ func TestDedicatedInvertedIndex_DeleteTreePostingCanRemoveEntry(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestDedicatedInvertedIndex_RandomizedRowIDPostingTreeMaintenance(t *testing.T) {
+	index, txManager := newTestDedicatedInvertedIndex(t, "idx_json", invertedIndexPostingModeRowIDs)
+	ctx := context.Background()
+	rng := rand.New(rand.NewSource(42))
+	const term = "kv:type:s:\"click\""
+	expected := make(map[RowID]bool)
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for i := 1; i <= 180; i++ {
+			rowID := wideTestRowID(i)
+			expected[rowID] = true
+			if err := index.Insert(ctx, term, invertedPosting{RowID: rowID}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	assertDedicatedInvertedIndexMatchesRowIDs(t, ctx, index, term, expected)
+	require.Equal(t, invertedPostingKindTree, requireDedicatedInvertedEntryCell(t, ctx, index, term).PostingKind)
+
+	for step := 1; step <= 500; step++ {
+		rowID := wideTestRowID(rng.Intn(260) + 1)
+		deletePosting := expected[rowID] && rng.Intn(100) < 55
+		require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			if deletePosting {
+				delete(expected, rowID)
+				return index.Delete(ctx, term, invertedPosting{RowID: rowID})
+			}
+			expected[rowID] = true
+			return index.Insert(ctx, term, invertedPosting{RowID: rowID})
+		}))
+		if step%25 == 0 {
+			assertDedicatedInvertedIndexMatchesRowIDs(t, ctx, index, term, expected)
+		}
+	}
+	assertDedicatedInvertedIndexMatchesRowIDs(t, ctx, index, term, expected)
+}
+
+func TestDedicatedInvertedIndex_RandomizedPositionalPostingTreeMaintenance(t *testing.T) {
+	index, txManager := newTestDedicatedInvertedIndex(t, "idx_body", invertedIndexPostingModePositions)
+	ctx := context.Background()
+	rng := rand.New(rand.NewSource(99))
+	const term = "database"
+	expected := make(map[RowID]map[uint32]bool)
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for i := 1; i <= 90; i++ {
+			rowID := wideTestRowID(i)
+			for pos := uint32(1); pos <= 6; pos++ {
+				addExpectedPosition(expected, rowID, pos)
+			}
+			if err := index.Insert(ctx, term, invertedPosting{RowID: rowID, Positions: []uint32{1, 2, 3, 4, 5, 6}}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	assertDedicatedInvertedIndexMatchesPositions(t, ctx, index, term, expected)
+	require.Equal(t, invertedPostingKindTree, requireDedicatedInvertedEntryCell(t, ctx, index, term).PostingKind)
+
+	for step := 1; step <= 400; step++ {
+		rowID := wideTestRowID(rng.Intn(130) + 1)
+		position := uint32(rng.Intn(16) + 1)
+		deletePosting := expected[rowID][position] && rng.Intn(100) < 60
+		require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			if deletePosting {
+				removeExpectedPosition(expected, rowID, position)
+				return index.Delete(ctx, term, invertedPosting{RowID: rowID, Positions: []uint32{position}})
+			}
+			addExpectedPosition(expected, rowID, position)
+			return index.Insert(ctx, term, invertedPosting{RowID: rowID, Positions: []uint32{position}})
+		}))
+		if step%25 == 0 {
+			assertDedicatedInvertedIndexMatchesPositions(t, ctx, index, term, expected)
+		}
+	}
+	assertDedicatedInvertedIndexMatchesPositions(t, ctx, index, term, expected)
+}
+
 func TestDedicatedInvertedIndex_PersistsPostingTree(t *testing.T) {
 	pager, dbFile := initTest(t)
 	basePager := pager.ForInvertedIndex()
@@ -969,6 +1050,90 @@ func collectDedicatedInvertedPostings(t *testing.T, ctx context.Context, index *
 		postings = append(postings, decoded...)
 	}
 	return postings
+}
+
+func assertDedicatedInvertedIndexMatchesRowIDs(
+	t *testing.T,
+	ctx context.Context,
+	index *dedicatedInvertedIndex,
+	term string,
+	expected map[RowID]bool,
+) {
+	t.Helper()
+
+	expectedPostings := make([]invertedPosting, 0, len(expected))
+	rowIDs := make([]RowID, 0, len(expected))
+	for rowID := range expected {
+		rowIDs = append(rowIDs, rowID)
+	}
+	slices.Sort(rowIDs)
+	for _, rowID := range rowIDs {
+		expectedPostings = append(expectedPostings, invertedPosting{RowID: rowID})
+	}
+
+	assert.Equal(t, expectedPostings, collectDedicatedInvertedPostings(t, ctx, index, term))
+	stats, err := index.Stats(ctx, term)
+	require.NoError(t, err)
+	assert.Equal(t, invertedPostingStats{DocFreq: uint32(len(expectedPostings)), PostingCount: uint32(len(expectedPostings))}, stats)
+	assertDedicatedInvertedTermPhysicalTreeValid(t, ctx, index, term)
+}
+
+func assertDedicatedInvertedIndexMatchesPositions(
+	t *testing.T,
+	ctx context.Context,
+	index *dedicatedInvertedIndex,
+	term string,
+	expected map[RowID]map[uint32]bool,
+) {
+	t.Helper()
+
+	rowIDs := make([]RowID, 0, len(expected))
+	for rowID := range expected {
+		rowIDs = append(rowIDs, rowID)
+	}
+	slices.Sort(rowIDs)
+
+	expectedPostings := make([]invertedPosting, 0, len(rowIDs))
+	var postingCount uint32
+	for _, rowID := range rowIDs {
+		positions := make([]uint32, 0, len(expected[rowID]))
+		for position := range expected[rowID] {
+			positions = append(positions, position)
+		}
+		slices.Sort(positions)
+		postingCount += uint32(len(positions))
+		expectedPostings = append(expectedPostings, invertedPosting{RowID: rowID, Positions: positions})
+	}
+
+	assert.Equal(t, expectedPostings, collectDedicatedInvertedPostings(t, ctx, index, term))
+	stats, err := index.Stats(ctx, term)
+	require.NoError(t, err)
+	assert.Equal(t, invertedPostingStats{DocFreq: uint32(len(expectedPostings)), PostingCount: postingCount}, stats)
+	assertDedicatedInvertedTermPhysicalTreeValid(t, ctx, index, term)
+}
+
+func assertDedicatedInvertedTermPhysicalTreeValid(t *testing.T, ctx context.Context, index *dedicatedInvertedIndex, term string) {
+	t.Helper()
+
+	cell := requireDedicatedInvertedEntryCell(t, ctx, index, term)
+	if cell.PostingKind == invertedPostingKindTree {
+		assertDedicatedInvertedPostingTreeValid(t, ctx, index, cell.Child, 0)
+	}
+	assertDedicatedInvertedEntryTreeValid(t, ctx, index)
+}
+
+func addExpectedPosition(expected map[RowID]map[uint32]bool, rowID RowID, position uint32) {
+	if expected[rowID] == nil {
+		expected[rowID] = make(map[uint32]bool)
+	}
+	expected[rowID][position] = true
+}
+
+func removeExpectedPosition(expected map[RowID]map[uint32]bool, rowID RowID, position uint32) {
+	delete(expected[rowID], position)
+	if len(expected[rowID]) == 0 {
+		delete(expected, rowID)
+	}
 }
 
 func requireDedicatedInvertedEntryCell(t *testing.T, ctx context.Context, index *dedicatedInvertedIndex, term string) invertedEntryCell {
