@@ -654,9 +654,11 @@ func TestDedicatedInvertedIndex_DeleteRemovesPostingLeafAndCollapsesRoot(t *test
 
 	beforeFreePages := basePager.GetHeader(ctx).FreePageCount
 	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		var mutated bool
-		cell, mutated, err = index.deletePostingFromTreeCell(ctx, cell, invertedPosting{RowID: 1000})
-		require.True(t, mutated)
+		var result deletePostingTreeCellResult
+		result, err = index.deletePostingFromTreeCell(ctx, cell, invertedPosting{RowID: 1000})
+		require.True(t, result.Mutated)
+		require.False(t, result.RemoveEntry)
+		cell = result.Cell
 		return err
 	}))
 
@@ -866,6 +868,30 @@ func TestDedicatedInvertedIndex_DemotesPostingTreeAfterDeletes(t *testing.T) {
 	require.Len(t, postings, 20)
 	assert.Equal(t, invertedPosting{RowID: largeTestRowID(1)}, postings[0])
 	assert.Equal(t, invertedPosting{RowID: largeTestRowID(20)}, postings[len(postings)-1])
+}
+
+func TestDedicatedInvertedIndex_DeleteTreePostingCanRemoveEntry(t *testing.T) {
+	index, txManager := newTestDedicatedInvertedIndex(t, "idx_body", invertedIndexPostingModePositions)
+	ctx := context.Background()
+	positions := make([]uint32, 2000)
+	for i := range positions {
+		positions[i] = uint32(i + 1)
+	}
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return index.Insert(ctx, "database", invertedPosting{RowID: 1, Positions: positions})
+	}))
+	require.Equal(t, invertedPostingKindTree, requireDedicatedInvertedEntryCell(t, ctx, index, "database").PostingKind)
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return index.Delete(ctx, "database", invertedPosting{RowID: 1, Positions: positions})
+	}))
+
+	iter, err := index.Lookup(ctx, "database")
+	require.NoError(t, err)
+	_, ok, err := iter.NextBlock(ctx)
+	require.NoError(t, err)
+	assert.False(t, ok)
 }
 
 func TestDedicatedInvertedIndex_PersistsPostingTree(t *testing.T) {

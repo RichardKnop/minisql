@@ -26,6 +26,12 @@ type invertedPostingStats struct {
 	PostingCount uint32
 }
 
+type deletePostingTreeCellResult struct {
+	Cell        invertedEntryCell
+	Mutated     bool
+	RemoveEntry bool
+}
+
 // invertedPostingIterator streams compressed posting blocks for a single term.
 type invertedPostingIterator interface {
 	NextBlock(context.Context) (invertedPostingBlock, bool, error)
@@ -132,12 +138,16 @@ func (idx *dedicatedInvertedIndex) Delete(ctx context.Context, term string, post
 
 	oldCell := entryPage.Cells[cellIdx]
 	if oldCell.PostingKind == invertedPostingKindTree && oldCell.PostingCount > 64 {
-		updatedCell, mutated, err := idx.deletePostingFromTreeCell(ctx, oldCell, posting)
+		result, err := idx.deletePostingFromTreeCell(ctx, oldCell, posting)
 		if err != nil {
 			return err
 		}
-		if mutated {
-			entryPage.Cells[cellIdx] = updatedCell
+		if result.Mutated {
+			if result.RemoveEntry {
+				entryPage.Cells = slices.Delete(entryPage.Cells, cellIdx, cellIdx+1)
+				return idx.rebalanceEntryPageAfterDelete(ctx, page.Index)
+			}
+			entryPage.Cells[cellIdx] = result.Cell
 			return nil
 		}
 	}
@@ -1199,22 +1209,26 @@ func (idx *dedicatedInvertedIndex) updatePostingChildrenParent(ctx context.Conte
 }
 
 // deletePostingFromTreeCell removes one posting from an existing posting-tree leaf block.
-func (idx *dedicatedInvertedIndex) deletePostingFromTreeCell(ctx context.Context, cell invertedEntryCell, posting invertedPosting) (invertedEntryCell, bool, error) {
+func (idx *dedicatedInvertedIndex) deletePostingFromTreeCell(
+	ctx context.Context,
+	cell invertedEntryCell,
+	posting invertedPosting,
+) (deletePostingTreeCellResult, error) {
 	leaf, blockIdx, err := idx.findPostingLeafBlock(ctx, cell.Child, posting.RowID)
 	if err != nil {
-		return invertedEntryCell{}, false, err
+		return deletePostingTreeCellResult{}, err
 	}
 	if blockIdx < 0 {
-		return cell, true, nil
+		return deletePostingTreeCellResult{Cell: cell, Mutated: true}, nil
 	}
 
 	block := leaf.InvertedPostPage.Blocks[blockIdx]
 	mode, blockPostings, err := decodeInvertedPostingList(block.Payload)
 	if err != nil {
-		return invertedEntryCell{}, false, err
+		return deletePostingTreeCellResult{}, err
 	}
 	if mode != idx.mode {
-		return invertedEntryCell{}, false, fmt.Errorf("inverted posting block uses posting mode %d, expected %d", mode, idx.mode)
+		return deletePostingTreeCellResult{}, fmt.Errorf("inverted posting block uses posting mode %d, expected %d", mode, idx.mode)
 	}
 
 	oldDocFreq := len(blockPostings)
@@ -1223,11 +1237,26 @@ func (idx *dedicatedInvertedIndex) deletePostingFromTreeCell(ctx context.Context
 	newDocFreq := len(updatedPostings)
 	newPostingCount := countInvertedPostings(idx.mode, updatedPostings)
 	if oldDocFreq == newDocFreq && oldPostingCount == newPostingCount {
-		return cell, true, nil
+		return deletePostingTreeCellResult{Cell: cell, Mutated: true}, nil
 	}
 	nextPostingCount := int(cell.PostingCount) + int(newPostingCount) - int(oldPostingCount)
 	if nextPostingCount <= 64 {
-		return invertedEntryCell{}, false, nil
+		postings, err := idx.readPostingTree(ctx, cell)
+		if err != nil {
+			return deletePostingTreeCellResult{}, err
+		}
+		postings = removeInvertedPosting(idx.mode, postings, posting)
+		if len(postings) == 0 {
+			if err := idx.freePostingTree(ctx, cell); err != nil {
+				return deletePostingTreeCellResult{}, err
+			}
+			return deletePostingTreeCellResult{Mutated: true, RemoveEntry: true}, nil
+		}
+		updatedCell, err := idx.makeInvertedEntryCell(ctx, cell.Term, postings, []invertedEntryCell{cell})
+		if err != nil {
+			return deletePostingTreeCellResult{}, err
+		}
+		return deletePostingTreeCellResult{Cell: updatedCell, Mutated: true}, nil
 	}
 
 	candidate := leaf.InvertedPostPage.Clone()
@@ -1235,44 +1264,44 @@ func (idx *dedicatedInvertedIndex) deletePostingFromTreeCell(ctx context.Context
 		if len(candidate.Blocks) == 1 {
 			newRoot, removed, err := idx.removePostingLeafPage(ctx, cell.Child, leaf)
 			if err != nil {
-				return invertedEntryCell{}, false, err
+				return deletePostingTreeCellResult{}, err
 			}
 			if !removed {
-				return invertedEntryCell{}, false, nil
+				return deletePostingTreeCellResult{}, nil
 			}
 			updatedCell := cell
 			updatedCell.Child = newRoot
 			updatedCell.DocFreq = uint32(int(updatedCell.DocFreq) - oldDocFreq)
 			updatedCell.PostingCount = uint32(nextPostingCount)
-			return updatedCell, true, nil
+			return deletePostingTreeCellResult{Cell: updatedCell, Mutated: true}, nil
 		}
 		candidate.Blocks = slices.Delete(candidate.Blocks, blockIdx, blockIdx+1)
 	} else {
 		payload, err := encodeInvertedPostingList(idx.mode, updatedPostings)
 		if err != nil {
-			return invertedEntryCell{}, false, err
+			return deletePostingTreeCellResult{}, err
 		}
 		candidate.Blocks[blockIdx] = postingBlockFromPostings(idx.mode, updatedPostings, payload)
 	}
 	if err := ensureInvertedPostingPageFits(candidate, invertedPageBodySize(leaf.Index)); err != nil {
-		return invertedEntryCell{}, false, err
+		return deletePostingTreeCellResult{}, err
 	}
 
 	page, err := idx.pager.ModifyPage(ctx, leaf.Index)
 	if err != nil {
-		return invertedEntryCell{}, false, fmt.Errorf("modify inverted posting leaf %d: %w", leaf.Index, err)
+		return deletePostingTreeCellResult{}, fmt.Errorf("modify inverted posting leaf %d: %w", leaf.Index, err)
 	}
 	page.InvertedPostPage = candidate
 	newRoot, err := idx.rebalancePostingPageAfterDelete(ctx, cell.Child, page.Index)
 	if err != nil {
-		return invertedEntryCell{}, false, err
+		return deletePostingTreeCellResult{}, err
 	}
 
 	updatedCell := cell
 	updatedCell.Child = newRoot
 	updatedCell.DocFreq = uint32(int(updatedCell.DocFreq) + newDocFreq - oldDocFreq)
 	updatedCell.PostingCount = uint32(nextPostingCount)
-	return updatedCell, true, nil
+	return deletePostingTreeCellResult{Cell: updatedCell, Mutated: true}, nil
 }
 
 // removePostingLeafPage unlinks an empty posting leaf and removes its parent route.
