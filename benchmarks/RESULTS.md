@@ -1,4 +1,38 @@
-### 2026-05-14 (bulk full-text CREATE INDEX population — latest)
+### 2026-05-14 (bulk JSON inverted CREATE INDEX population — latest)
+
+`CREATE INVERTED INDEX` now uses the same build-time batching strategy as
+full-text indexes: postings are buffered by JSON term, terms are flushed in
+sorted order, and each term is inserted with `InsertMany`. This avoids
+rebuilding repeated key/value posting lists for every row during index
+population.
+
+The generated build-only timing/memory table for this run is appended below as
+`2026-05-14 21:50 UTC`.
+
+#### Timing
+
+| Benchmark | before | after | improvement |
+|---|---|---|---|
+| JSONInverted_BuildIndex/minisql_indexed | 294.46 ms/op | 46.11 ms/op | 6.4× faster |
+| FullText_BuildIndex/minisql | 53.75 ms/op | 60.79 ms/op | run variance |
+| FullText_BuildIndex/sqlite | 67.87 ms/op | 63.68 ms/op | reference variance |
+
+#### Memory (B/op)
+
+| Benchmark | before | after | improvement |
+|---|---|---|---|
+| JSONInverted_BuildIndex/minisql_indexed | 1327.7 MiB | 78.1 MiB | 17.0× lower |
+| FullText_BuildIndex/minisql | 81.4 MiB | 81.5 MiB | unchanged |
+| FullText_BuildIndex/sqlite | 428.8 KiB | 429.2 KiB | unchanged |
+
+Both inverted index build paths now avoid the original per-posting rebuild
+pattern. The next storage optimisation target should move from build-time
+population to runtime lookup/update allocation, especially common-term
+full-text lookups, JSON indexed scans, and full-text UPDATE maintenance.
+
+---
+
+### 2026-05-14 (bulk full-text CREATE INDEX population)
 
 `CREATE FULLTEXT INDEX` now buffers postings by term during index population and
 uses a new `InsertMany` path on the dedicated inverted index. This avoids the
@@ -914,4 +948,20 @@ Snapshot isolation (MVCC) for read-only transactions + TOCTOU fix in `ReadPage`:
 |---|---|---|---|
 | FullText_BuildIndex | 81.4 MiB | — | 428.8 KiB |
 | JSONInverted_BuildIndex | — | 1327.7 MiB | — |
+
+### 2026-05-14 21:50 UTC
+
+#### Timing
+
+| Benchmark | minisql | minisql_indexed | sqlite | ratio |
+|---|---|---|---|---|
+| FullText_BuildIndex | 60.79 ms/op | — | 63.68 ms/op | 1.0× |
+| JSONInverted_BuildIndex | — | 46.11 ms/op | — | — |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | minisql_indexed | sqlite |
+|---|---|---|---|
+| FullText_BuildIndex | 81.5 MiB | — | 429.2 KiB |
+| JSONInverted_BuildIndex | — | 78.1 MiB | — |
 

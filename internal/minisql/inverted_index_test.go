@@ -91,6 +91,32 @@ func TestDedicatedInvertedIndex_RowIDInlinePostings(t *testing.T) {
 	assert.Empty(t, collectDedicatedInvertedPostings(t, ctx, index, "missing"))
 }
 
+func TestDedicatedInvertedIndex_InsertManyRowIDPostings(t *testing.T) {
+	index, txManager := newTestDedicatedInvertedIndex(t, "idx_json", invertedIndexPostingModeRowIDs)
+	ctx := context.Background()
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		if err := index.InsertMany(ctx, `kv:type:s:"click"`, []invertedPosting{
+			{RowID: 7},
+			{RowID: 3},
+			{RowID: 7},
+			{RowID: 1},
+		}); err != nil {
+			return err
+		}
+		return index.InsertMany(ctx, "k:user.id", []invertedPosting{
+			{RowID: 5},
+			{RowID: 2},
+		})
+	}))
+
+	stats, err := index.Stats(ctx, `kv:type:s:"click"`)
+	require.NoError(t, err)
+	assert.Equal(t, invertedPostingStats{DocFreq: 3, PostingCount: 3}, stats)
+	assert.Equal(t, []invertedPosting{{RowID: 1}, {RowID: 3}, {RowID: 7}}, collectDedicatedInvertedPostings(t, ctx, index, `kv:type:s:"click"`))
+	assert.Equal(t, []invertedPosting{{RowID: 2}, {RowID: 5}}, collectDedicatedInvertedPostings(t, ctx, index, "k:user.id"))
+}
+
 func TestDedicatedInvertedIndex_PositionalInlinePostings(t *testing.T) {
 	index, txManager := newTestDedicatedInvertedIndex(t, "idx_body", invertedIndexPostingModePositions)
 	ctx := context.Background()
