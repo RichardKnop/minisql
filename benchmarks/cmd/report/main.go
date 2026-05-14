@@ -34,17 +34,24 @@ type row struct {
 	bPerOp  float64 // 0 if not reported
 }
 
+type sample struct {
+	nsPerOp float64
+	bPerOp  float64
+}
+
 // benchData holds all driver rows for a single benchmark.
 type benchData struct {
 	name    string
-	drivers map[string]row // driver name → metrics
+	drivers map[string]row // driver name → mean metrics
 }
 
-// benchLine matches the benchmark name, driver, and ns/op value.
+// benchLine matches the benchmark path and ns/op value. The final sub-benchmark
+// segment is treated as the driver, so both BenchmarkX/minisql and
+// BenchmarkX/case/minisql are supported.
 // B/op is extracted separately because a custom metric (e.g. "rows/op") may
 // appear between ns/op and B/op in the output line.
 var (
-	benchLine   = regexp.MustCompile(`^(Benchmark\w+)/(\w+)-\d+\s+\d+\s+([\d.]+)\s+ns/op`)
+	benchLine   = regexp.MustCompile(`^(Benchmark\S+)-\d+\s+\d+\s+([\d.]+)\s+ns/op`)
 	bPerOpField = regexp.MustCompile(`([\d.]+)\s+B/op`)
 )
 
@@ -95,7 +102,7 @@ func run() error {
 func parse(r io.Reader) []benchData {
 	// Preserve insertion order so benchmarks appear in the order they ran.
 	var order []string
-	byName := map[string]*benchData{}
+	byName := map[string]map[string][]sample{}
 
 	sc := bufio.NewScanner(r)
 	for sc.Scan() {
@@ -103,9 +110,12 @@ func parse(r io.Reader) []benchData {
 		if m == nil {
 			continue
 		}
-		benchName := m[1]
-		driver := m[2]
-		ns, err := strconv.ParseFloat(m[3], 64)
+		benchPath := m[1]
+		benchName, driver, ok := splitBenchmarkPath(benchPath)
+		if !ok {
+			continue
+		}
+		ns, err := strconv.ParseFloat(m[2], 64)
 		if err != nil {
 			continue
 		}
@@ -117,17 +127,49 @@ func parse(r io.Reader) []benchData {
 		}
 
 		if _, ok := byName[benchName]; !ok {
-			byName[benchName] = &benchData{name: benchName, drivers: map[string]row{}}
+			byName[benchName] = map[string][]sample{}
 			order = append(order, benchName)
 		}
-		byName[benchName].drivers[driver] = row{nsPerOp: ns, bPerOp: bop}
+		byName[benchName][driver] = append(byName[benchName][driver], sample{nsPerOp: ns, bPerOp: bop})
 	}
 
 	result := make([]benchData, 0, len(order))
 	for _, name := range order {
-		result = append(result, *byName[name])
+		data := benchData{name: name, drivers: map[string]row{}}
+		for driver, samples := range byName[name] {
+			data.drivers[driver] = meanRow(samples)
+		}
+		result = append(result, data)
 	}
 	return result
+}
+
+func splitBenchmarkPath(path string) (benchName, driver string, ok bool) {
+	idx := strings.LastIndex(path, "/")
+	if idx < 0 || idx == len(path)-1 {
+		return "", "", false
+	}
+	return path[:idx], path[idx+1:], true
+}
+
+func meanRow(samples []sample) row {
+	if len(samples) == 0 {
+		return row{}
+	}
+	var nsTotal, bTotal float64
+	var bCount int
+	for _, sample := range samples {
+		nsTotal += sample.nsPerOp
+		if sample.bPerOp > 0 {
+			bTotal += sample.bPerOp
+			bCount++
+		}
+	}
+	res := row{nsPerOp: nsTotal / float64(len(samples))}
+	if bCount > 0 {
+		res.bPerOp = bTotal / float64(bCount)
+	}
+	return res
 }
 
 func renderMarkdown(benches []benchData) string {
