@@ -24,7 +24,7 @@ var (
 	errIndexOnJSONColumn         = errors.New("b-tree index on JSON column is not supported")
 )
 
-const populateFullTextIndexFlushPostings = 64 * 1024
+const populateInvertedIndexFlushPostings = 64 * 1024
 
 // WALConfig bundles the Write-Ahead Log objects that NewDatabase needs.
 // Pass nil when creating in-memory/test databases that do not require WAL.
@@ -1469,6 +1469,9 @@ func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryInd
 	if secondaryIndex.Method == IndexMethodFullText {
 		return d.populateFullTextIndex(ctx, table, secondaryIndex)
 	}
+	if secondaryIndex.Method == IndexMethodInverted {
+		return d.populateJSONInvertedIndex(ctx, table, secondaryIndex)
+	}
 
 	result, err := table.Select(ctx, Statement{
 		Kind:   Select,
@@ -1623,7 +1626,75 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 			})
 			bufferedPostings++
 		}
-		if bufferedPostings >= populateFullTextIndexFlushPostings {
+		if bufferedPostings >= populateInvertedIndexFlushPostings {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := result.Rows.Err(); err != nil {
+		return err
+	}
+	return flush()
+}
+
+func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, secondaryIndex SecondaryIndex) error {
+	if secondaryIndex.InvertedIndex == nil {
+		return fmt.Errorf("table %s has inverted index %s but no inverted index instance", table.Name, secondaryIndex.Name)
+	}
+
+	result, err := table.Select(ctx, Statement{
+		Kind:   Select,
+		Fields: fieldsFromColumns(table.Columns...),
+	})
+	if err != nil {
+		return err
+	}
+
+	postingsByTerm := make(map[string][]invertedPosting)
+	bufferedPostings := 0
+	flush := func() error {
+		if len(postingsByTerm) == 0 {
+			return nil
+		}
+		terms := make([]string, 0, len(postingsByTerm))
+		for term := range postingsByTerm {
+			terms = append(terms, term)
+		}
+		sort.Strings(terms)
+		for _, term := range terms {
+			if err := secondaryIndex.InvertedIndex.InsertMany(ctx, term, postingsByTerm[term]); err != nil {
+				return fmt.Errorf("failed to insert JSON term batch for inverted index %s: %w", secondaryIndex.Name, err)
+			}
+		}
+		postingsByTerm = make(map[string][]invertedPosting)
+		bufferedPostings = 0
+		return nil
+	}
+
+	for result.Rows.Next(ctx) {
+		row := result.Rows.Row()
+
+		if len(secondaryIndex.WhereCond) > 0 {
+			ok, err := row.CheckOneOrMore(secondaryIndex.WhereCond)
+			if err != nil {
+				return fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)
+			}
+			if !ok {
+				continue
+			}
+		}
+
+		terms, err := jsonInvertedTermsForRow(secondaryIndex, row)
+		if err != nil {
+			return err
+		}
+		for _, term := range terms {
+			postingsByTerm[term] = append(postingsByTerm[term], invertedPosting{RowID: row.Key})
+			bufferedPostings++
+		}
+		if bufferedPostings >= populateInvertedIndexFlushPostings {
 			if err := flush(); err != nil {
 				return err
 			}
