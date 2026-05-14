@@ -276,7 +276,7 @@ func (ui *Index[T]) tryInsertIntoRightmostLeaf(ctx context.Context, leafIdx Page
 		leafNode.Cells[i].InlineRowIDs = 1
 		leafNode.Cells[i].RowIDs = []RowID{rowID}
 	}
-	leafNode.Header.Keys++
+	leafNode.Header.Keys += 1
 	leafNode.freeBytes -= leafNode.Cells[i].Size()
 	return true, nil
 }

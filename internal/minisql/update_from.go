@@ -123,7 +123,7 @@ func (d *Database) executeUpdateFrom(ctx context.Context, stmt Statement) (State
 			return result, err
 		}
 		if changed {
-			result.RowsAffected++
+			result.RowsAffected += 1
 			if len(stmt.ReturningFields) > 0 {
 				updatedKeys = append(updatedKeys, pu.row.Key)
 			}

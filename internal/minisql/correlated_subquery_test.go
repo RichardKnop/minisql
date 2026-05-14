@@ -184,9 +184,9 @@ func TestResolveSetSubqueries_Correlated(t *testing.T) {
 			continue
 		}
 		if !v.Valid {
-			nullCount++
+			nullCount += 1
 		} else {
-			matchCount++
+			matchCount += 1
 			assert.Equal(t, int64(2), v.Value, "matched dept id must be 2")
 		}
 	}
@@ -386,4 +386,3 @@ func TestCorrelatedSetUpdatesFromContext_Missing(t *testing.T) {
 	_, ok := correlatedSetUpdatesFromContext(context.Background())
 	assert.False(t, ok)
 }
-

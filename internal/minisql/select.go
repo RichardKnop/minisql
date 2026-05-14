@@ -1812,7 +1812,7 @@ func compactRowIDs(ids []RowID) []RowID {
 			continue
 		}
 		ids[write] = ids[read]
-		write++
+		write += 1
 	}
 	return ids[:write]
 }

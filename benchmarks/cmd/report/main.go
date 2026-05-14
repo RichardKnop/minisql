@@ -132,6 +132,9 @@ func parse(r io.Reader) []benchData {
 		}
 		byName[benchName][driver] = append(byName[benchName][driver], sample{nsPerOp: ns, bPerOp: bop})
 	}
+	if sc.Err() != nil {
+		return nil
+	}
 
 	result := make([]benchData, 0, len(order))
 	for _, name := range order {
@@ -162,7 +165,7 @@ func meanRow(samples []sample) row {
 		nsTotal += sample.nsPerOp
 		if sample.bPerOp > 0 {
 			bTotal += sample.bPerOp
-			bCount++
+			bCount += 1
 		}
 	}
 	res := row{nsPerOp: nsTotal / float64(len(samples))}

@@ -1218,7 +1218,7 @@ func countDedicatedInvertedEntryLeaves(t *testing.T, ctx context.Context, index 
 
 	count := 0
 	for {
-		count++
+		count += 1
 		next := page.InvertedEntryPage.Header.NextLeaf
 		if next == 0 {
 			return count
@@ -1240,7 +1240,7 @@ func dedicatedInvertedEntryTreeHeight(t *testing.T, ctx context.Context, index *
 		page, err = index.pager.ReadPage(ctx, childIdx)
 		require.NoError(t, err)
 		require.NotNil(t, page.InvertedEntryPage)
-		height++
+		height += 1
 	}
 	return height
 }

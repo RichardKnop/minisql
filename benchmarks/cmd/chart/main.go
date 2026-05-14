@@ -135,6 +135,9 @@ func parse(r io.Reader) []result {
 		}
 		results = append(results, result{benchmark: benchName, driver: driver, nsPerOp: ns})
 	}
+	if sc.Err() != nil {
+		return nil
+	}
 	return results
 }
 
@@ -164,7 +167,7 @@ func renderChart(benchName string, results []result, outDir string) error {
 	nsCounts := map[string]int{}
 	for _, res := range results {
 		nsTotals[res.driver] += res.nsPerOp
-		nsCounts[res.driver]++
+		nsCounts[res.driver] += 1
 	}
 	nsMap := map[string]float64{}
 	for driver, total := range nsTotals {

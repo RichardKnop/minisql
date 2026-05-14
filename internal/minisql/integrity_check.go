@@ -1126,7 +1126,7 @@ func expectedInvertedIndexEntriesForRow(index SecondaryIndex, row Row) (map[stri
 			return nil, err
 		}
 		for _, term := range terms {
-			expected[integrityKeyID(term)]++
+			expected[integrityKeyID(term)] += 1
 		}
 	default:
 		return nil, fmt.Errorf("unsupported inverted index method %s", index.Method.String())
@@ -1224,7 +1224,7 @@ func scanIndexEntries(ctx context.Context, index BTreeIndex) (integrityIndexEntr
 	if err := index.ScanAll(ctx, false, func(key any, rowID RowID) error {
 		keyID := integrityKeyID(key)
 		addIntegrityEntry(entries, keyID, rowID)
-		entryCounts[fmt.Sprintf("%s|%d", keyID, rowID)]++
+		entryCounts[fmt.Sprintf("%s|%d", keyID, rowID)] += 1
 		return nil
 	}); err != nil {
 		return nil, nil, err

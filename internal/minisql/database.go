@@ -1624,7 +1624,7 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 				RowID:     row.Key,
 				Positions: []uint32{token.Position},
 			})
-			bufferedPostings++
+			bufferedPostings += 1
 		}
 		if bufferedPostings >= populateInvertedIndexFlushPostings {
 			if err := flush(); err != nil {
@@ -1692,7 +1692,7 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		}
 		for _, term := range terms {
 			postingsByTerm[term] = append(postingsByTerm[term], invertedPosting{RowID: row.Key})
-			bufferedPostings++
+			bufferedPostings += 1
 		}
 		if bufferedPostings >= populateInvertedIndexFlushPostings {
 			if err := flush(); err != nil {

@@ -2242,7 +2242,7 @@ func (it *postingTreeInvertedPostingIterator) NextBlock(ctx context.Context) (in
 		it.nextPage = page.InvertedPostPage.Header.NextLeaf
 	}
 	block := it.blocks[it.blockIndex]
-	it.blockIndex++
+	it.blockIndex += 1
 	return block, true, nil
 }
 
