@@ -501,6 +501,16 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 			ctx = contextWithUpdateFromRows(ctx, fromRows)
 		}
 
+		// Correlated SET subqueries: pre-compute per-row values before acquiring
+		// the write lock for the same re-entrancy reason as UPDATE FROM above.
+		if stmt.Kind == Update {
+			var err error
+			ctx, err = d.resolveSetSubqueries(ctx, &stmt)
+			if err != nil {
+				return StatementResult{}, err
+			}
+		}
+
 		table, ok := d.GetTable(ctx, stmt.TableName)
 		if !ok {
 			return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, stmt.TableName)

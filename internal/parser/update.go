@@ -60,6 +60,31 @@ func (p *parserItem) doParseUpdate() error {
 		p.pop()
 		p.step = stepUpdateValue
 	case stepUpdateValue:
+		// Subquery in SET: SET col = (SELECT …)
+		if p.peek() == "(" {
+			rest := strings.TrimSpace(p.sql[p.i+1:])
+			if strings.HasPrefix(strings.ToUpper(rest), "SELECT") {
+				p.pop() // consume "("
+				subStmt, err := p.parseSubquery()
+				if err != nil {
+					return err
+				}
+				p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: subStmt, Valid: true})
+				p.nextUpdateField = ""
+				maybeNext := strings.ToUpper(p.peek())
+				if maybeNext == "WHERE" {
+					p.step = stepWhere
+					return nil
+				}
+				if maybeNext == "FROM" {
+					p.pop()
+					p.step = stepUpdateFrom
+					return nil
+				}
+				p.step = stepUpdateComma
+				return nil
+			}
+		}
 		specialValue := strings.ToUpper(p.peek())
 		switch specialValue {
 		case "?":
