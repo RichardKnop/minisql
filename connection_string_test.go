@@ -276,3 +276,28 @@ func TestParseConnectionString(t *testing.T) {
 		})
 	}
 }
+
+func TestGetZapLevel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		level    string
+		wantName string
+	}{
+		{"debug", "debug"},
+		{"info", "info"},
+		{"warn", "warn"},
+		{"error", "error"},
+		{"unknown", "warn"}, // default falls back to warn
+		{"", "warn"},        // empty string → default warn
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.level, func(t *testing.T) {
+			t.Parallel()
+			cfg := &ConnectionConfig{LogLevel: tt.level}
+			got := cfg.GetZapLevel()
+			assert.Equal(t, tt.wantName, got.String())
+		})
+	}
+}

@@ -1800,3 +1800,204 @@ func TestCompareInt4_TypeErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestIsValidCondition_MissingOperand1(t *testing.T) {
+	t.Parallel()
+	c := Condition{
+		Operator: Eq,
+		Operand2: Operand{Type: OperandInteger, Value: int64(1)},
+	}
+	assert.False(t, IsValidCondition(c))
+}
+
+func TestIsValidCondition_MissingOperator(t *testing.T) {
+	t.Parallel()
+	c := Condition{
+		Operand1: Operand{Type: OperandField, Value: Field{Name: "x"}},
+		Operand2: Operand{Type: OperandInteger, Value: int64(1)},
+	}
+	assert.False(t, IsValidCondition(c))
+}
+
+func TestCompareBoolean_TypeErrors(t *testing.T) {
+	t.Parallel()
+
+	_, err := compareBoolean("not-a-bool", true, Eq)
+	require.Error(t, err)
+
+	_, err = compareBoolean(true, "not-a-bool", Eq)
+	require.Error(t, err)
+}
+
+func TestCompareBoolean_UnknownOperator(t *testing.T) {
+	t.Parallel()
+	_, err := compareBoolean(true, false, Operator(99))
+	require.Error(t, err)
+}
+
+func TestCompareReal_TypeErrors(t *testing.T) {
+	t.Parallel()
+
+	_, err := compareReal("not-a-float", float64(1.0), Eq)
+	require.Error(t, err)
+
+	_, err = compareReal(float64(1.0), "not-a-float", Eq)
+	require.Error(t, err)
+}
+
+func TestCompareDouble_TypeErrors(t *testing.T) {
+	t.Parallel()
+
+	_, err := compareDouble("not-a-float", float64(1.0), Eq)
+	require.Error(t, err)
+
+	_, err = compareDouble(float64(1.0), "not-a-float", Eq)
+	require.Error(t, err)
+}
+
+func TestCompareText_TypeErrors(t *testing.T) {
+	t.Parallel()
+
+	_, err := compareText("not-a-TextPointer", NewTextPointer([]byte("x")), Eq)
+	require.Error(t, err)
+
+	_, err = compareText(NewTextPointer([]byte("x")), "not-a-TextPointer", Eq)
+	require.Error(t, err)
+}
+
+func TestIsBetweenInt4_ErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	_, err := isBetweenInt4("bad", int64(1), int64(10))
+	require.Error(t, err, "invalid value type should error")
+
+	_, err = isBetweenInt4(int64(5), "bad", int64(10))
+	require.Error(t, err, "invalid low type should error")
+}
+
+func TestIsBetweenInt8_ErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	_, err := isBetweenInt8("bad", int64(1), int64(10))
+	require.Error(t, err, "invalid value type should error")
+
+	_, err = isBetweenInt8(int64(5), "bad", int64(10))
+	require.Error(t, err, "invalid low type should error")
+}
+
+func TestIsBetweenReal_ErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	_, err := isBetweenReal("bad", float64(1.0), float64(10.0))
+	require.Error(t, err, "invalid value type should error")
+
+	_, err = isBetweenReal(float64(5.0), "bad", float64(10.0))
+	require.Error(t, err, "invalid low type should error")
+}
+
+func TestIsBetweenDouble_ErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	_, err := isBetweenDouble("bad", float64(1.0), float64(10.0))
+	require.Error(t, err, "invalid value type should error")
+
+	_, err = isBetweenDouble(float64(5.0), "bad", float64(10.0))
+	require.Error(t, err, "invalid low type should error")
+}
+
+func TestIsBetweenText_ErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	_, err := isBetweenText("bad", NewTextPointer([]byte("a")), NewTextPointer([]byte("z")))
+	require.Error(t, err, "invalid value type should error")
+
+	_, err = isBetweenText(NewTextPointer([]byte("m")), "bad", NewTextPointer([]byte("z")))
+	require.Error(t, err, "invalid low type should error")
+}
+
+func TestIsBetweenTimestamp_ErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	t1 := MustParseTimestampMicros("2020-01-01 00:00:00")
+	t3 := MustParseTimestampMicros("2022-12-31 23:59:59")
+
+	_, err := isBetweenTimestamp("bad", t1, t3)
+	require.Error(t, err, "invalid value type should error")
+
+	_, err = isBetweenTimestamp(t1, "bad", t3)
+	require.Error(t, err, "invalid low type should error")
+}
+
+func TestIsInListInt8_ErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	_, err := isInListInt8("not-int64", []any{int64(1), int64(2)})
+	require.Error(t, err, "invalid value type should error")
+
+	_, err = isInListInt8(int64(1), "not-a-list")
+	require.Error(t, err, "invalid list type should error")
+}
+
+func TestIsInListText_ErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	_, err := isInListText("not-a-TextPointer", []any{NewTextPointer([]byte("a"))})
+	require.Error(t, err, "invalid value type should error")
+
+	_, err = isInListText(NewTextPointer([]byte("a")), "not-a-list")
+	require.Error(t, err, "invalid list type should error")
+}
+
+func TestCompareReal_UnknownOperator(t *testing.T) {
+	t.Parallel()
+	_, err := compareReal(float64(1.0), float64(2.0), Operator(99))
+	require.Error(t, err)
+}
+
+func TestCompareDouble_UnknownOperator(t *testing.T) {
+	t.Parallel()
+	_, err := compareDouble(float64(1.0), float64(2.0), Operator(99))
+	require.Error(t, err)
+}
+
+// Second error-return paths: value and low are valid but high has wrong type.
+
+func TestIsBetweenInt4_HighTypeError(t *testing.T) {
+	t.Parallel()
+	_, err := isBetweenInt4(int64(5), int64(1), "bad-high")
+	require.Error(t, err)
+}
+
+func TestIsBetweenInt8_HighTypeError(t *testing.T) {
+	t.Parallel()
+	_, err := isBetweenInt8(int64(5), int64(1), "bad-high")
+	require.Error(t, err)
+}
+
+func TestIsBetweenReal_HighTypeError(t *testing.T) {
+	t.Parallel()
+	_, err := isBetweenReal(float64(5.0), float64(1.0), "bad-high")
+	require.Error(t, err)
+}
+
+func TestIsBetweenDouble_HighTypeError(t *testing.T) {
+	t.Parallel()
+	_, err := isBetweenDouble(float64(5.0), float64(1.0), "bad-high")
+	require.Error(t, err)
+}
+
+func TestIsBetweenText_HighTypeError(t *testing.T) {
+	t.Parallel()
+	lo := NewTextPointer([]byte("a"))
+	val := NewTextPointer([]byte("m"))
+	_, err := isBetweenText(val, lo, "bad-high")
+	require.Error(t, err)
+}
+
+func TestIsBetweenTimestamp_HighTypeError(t *testing.T) {
+	t.Parallel()
+	t1 := MustParseTimestampMicros("2020-01-01 00:00:00")
+	t2 := MustParseTimestampMicros("2021-01-01 00:00:00")
+	_, err := isBetweenTimestamp(t2, t1, "bad-high")
+	require.Error(t, err)
+}

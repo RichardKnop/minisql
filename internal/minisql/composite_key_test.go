@@ -143,3 +143,47 @@ func TestCompositeKey_GenerateComparison(t *testing.T) {
 		assert.Equal(t, ck1.Comparison, ck2.Comparison)
 	})
 }
+
+func TestCompositeKey_Prefix_VarcharColumn(t *testing.T) {
+	t.Parallel()
+
+	columns := []Column{
+		{Kind: Varchar, Name: "name", Size: 100},
+		{Kind: Int8, Name: "id", Size: 8},
+	}
+	ck := NewCompositeKey(columns, "hello", int64(42))
+
+	// Prefix of 1 column (Varchar "hello") — comparison stores raw bytes without length prefix.
+	p := ck.Prefix(1)
+	assert.Equal(t, []byte("hello"), p.Comparison)
+
+	// Prefix of 2 columns — full comparison.
+	p2 := ck.Prefix(2)
+	assert.Equal(t, ck.Comparison, p2.Comparison)
+}
+
+func TestCompositeKey_Prefix_AllTypes(t *testing.T) {
+	t.Parallel()
+
+	// Exercise Boolean, Int4, Real, Double, Timestamp switch cases in Prefix.
+	columns := []Column{
+		{Kind: Boolean, Name: "b"},
+		{Kind: Int4, Name: "i4"},
+		{Kind: Real, Name: "r"},
+		{Kind: Double, Name: "d"},
+		{Kind: Timestamp, Name: "ts"},
+	}
+	ck := NewCompositeKey(columns, true, int32(1), float32(1.5), float64(2.5), int64(1000))
+
+	// Prefix of each additional column grows the comparison slice.
+	p1 := ck.Prefix(1) // Boolean: 1 byte
+	assert.Len(t, p1.Comparison, 1)
+	p2 := ck.Prefix(2) // + Int4: 4 bytes
+	assert.Len(t, p2.Comparison, 5)
+	p3 := ck.Prefix(3) // + Real: 4 bytes
+	assert.Len(t, p3.Comparison, 9)
+	p4 := ck.Prefix(4) // + Double: 8 bytes
+	assert.Len(t, p4.Comparison, 17)
+	p5 := ck.Prefix(5) // + Timestamp: 8 bytes
+	assert.Equal(t, ck.Comparison, p5.Comparison)
+}
