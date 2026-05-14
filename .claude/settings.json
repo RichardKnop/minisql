@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(LOG_LEVEL=info go test *)",
+      "Bash(go test *)",
+      "Bash(golangci-lint run *)",
+      "Bash(go tool cover *)",
+      "Bash(LOG_LEVEL=error go test *)",
+      "Bash(LOG_LEVEL=warn go test *)",
+      "Bash(go tool pprof *)",
+      "Bash(make lint *)"
+    ]
+  }
+}
