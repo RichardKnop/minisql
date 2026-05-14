@@ -255,6 +255,12 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 		changedValues = map[string]Column{}
 	)
 	for name, value := range stmt.Updates {
+		// Correlated subquery placeholders must have been resolved by
+		// resolveSetSubqueries before reaching here; if one slips through it
+		// indicates a programming error.
+		if _, isSub := value.Value.(*Statement); isSub {
+			return false, fmt.Errorf("internal error: unresolved correlated subquery for column %q in cursor.update", name)
+		}
 		// Evaluate arithmetic expressions against the current row before applying.
 		if expr, ok := value.Value.(*Expr); ok {
 			result, err := expr.Eval(row)

@@ -34,23 +34,59 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 	// affects indexed columns. If not, and the row size does not increase, we update
 	// rows in-place as we encounter them. Otherwise we collect all rows first and
 	// update them afterwards to avoid conflicts with B-tree structural changes.
+	type pendingRow struct {
+		row  Row
+		stmt Statement // may carry per-row correlated SET values
+	}
 	var (
-		cantUpdateInPlace []Row
+		cantUpdateInPlace []pendingRow
 		updatedKeys       []RowID // tracked only when RETURNING is requested
 	)
 
+	// Pre-computed correlated SET subquery values (built in resolveSetSubqueries).
+	corrUpdates, hasCorrUpdates := correlatedSetUpdatesFromContext(ctx)
+
+	// mergeCorrelatedUpdates returns a statement with per-row correlated SET values
+	// merged in.  If there are none, it returns stmt unchanged.
+	mergeCorrelatedUpdates := func(row Row) Statement {
+		if !hasCorrUpdates {
+			return stmt
+		}
+		rowMap, ok := corrUpdates[row.Key]
+		if !ok || len(rowMap) == 0 {
+			return stmt
+		}
+		merged := make(map[string]OptionalValue, len(stmt.Updates)+len(rowMap))
+		for k, v := range stmt.Updates {
+			merged[k] = v
+		}
+		for k, v := range rowMap {
+			merged[k] = v
+		}
+		s := stmt
+		s.Updates = merged
+		return s
+	}
+
 	if err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
+		rowStmt := mergeCorrelatedUpdates(row)
+
 		size := row.Size()
 		newSize := size
 
 		indexChanges := false
-		for colName, newValue := range stmt.Updates {
-			col, _ := stmt.ColumnByName(colName)
+		for colName, newValue := range rowStmt.Updates {
+			col, _ := rowStmt.ColumnByName(colName)
 			oldValue, _ := row.GetValue(colName)
 
-			// Expression values are evaluated at execution time — their actual value
-			// and size are unknown statically, so we must use the full update path.
+			// Expression values and correlated subquery placeholders are resolved at
+			// execution time — their actual value and size are unknown statically,
+			// so we must use the full update path.
 			if _, isExpr := newValue.Value.(*Expr); isExpr {
+				indexChanges = true
+				break
+			}
+			if _, isSub := newValue.Value.(*Statement); isSub {
 				indexChanges = true
 				break
 			}
@@ -85,7 +121,7 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 			if err != nil {
 				return err
 			}
-			changed, err := cursor.update(ctx, stmt, row)
+			changed, err := cursor.update(ctx, rowStmt, row)
 			if err != nil {
 				return err
 			}
@@ -99,20 +135,20 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 
 		// Cannot update in place — collect and defer.
-		cantUpdateInPlace = append(cantUpdateInPlace, row)
+		cantUpdateInPlace = append(cantUpdateInPlace, pendingRow{row: row, stmt: rowStmt})
 		return nil
 	}); err != nil {
 		return result, err
 	}
 
 	// Apply deferred updates for rows that couldn't be updated in place.
-	for _, row := range cantUpdateInPlace {
-		cursor, err := t.Seek(ctx, row.Key)
+	for _, pending := range cantUpdateInPlace {
+		cursor, err := t.Seek(ctx, pending.row.Key)
 		if err != nil {
 			return result, err
 		}
 
-		changed, err := cursor.update(ctx, stmt, row)
+		changed, err := cursor.update(ctx, pending.stmt, pending.row)
 		if err != nil {
 			return result, err
 		}
@@ -120,7 +156,7 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 		if changed {
 			result.RowsAffected += 1
 			if len(stmt.ReturningFields) > 0 {
-				updatedKeys = append(updatedKeys, row.Key)
+				updatedKeys = append(updatedKeys, pending.row.Key)
 			}
 		}
 	}

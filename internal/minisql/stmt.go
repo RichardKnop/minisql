@@ -1488,8 +1488,12 @@ func (s Statement) validateUpdate(table *Table) error {
 			return fmt.Errorf("unknown field %q in table %q", field.Name, table.Name)
 		}
 		updateVal := s.Updates[field.Name]
-		// Arithmetic expressions are evaluated at execution time — skip static type validation.
+		// Arithmetic expressions and correlated subqueries are evaluated at execution
+		// time — skip static type validation for both.
 		if _, isExpr := updateVal.Value.(*Expr); isExpr {
+			continue
+		}
+		if _, isSub := updateVal.Value.(*Statement); isSub {
 			continue
 		}
 		if err := s.validateColumnValue(table, col, updateVal); err != nil {
