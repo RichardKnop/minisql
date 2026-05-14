@@ -1,4 +1,34 @@
-### 2026-05-10 (VisitRowIDs iterator + overflow bug fix — latest)
+### 2026-05-14 (Full-text and JSON inverted benchmark suite added — latest)
+
+Added the first dedicated benchmark suite for MiniSQL's inverted-index storage
+and recorded the initial baseline. The generated timing/memory tables for this
+run are appended below as `2026-05-14 21:13 UTC`.
+
+- Full-text: build index, insert maintenance, rare/medium/common single-term lookup, multi-term AND lookup, phrase lookup, update maintenance, and delete maintenance.
+- JSON inverted: build index, insert maintenance, key/value containment, object-subset containment, update maintenance, and delete maintenance.
+- Full-text benchmarks include SQLite FTS5 sub-benchmarks when the linked SQLite driver supports `fts5`.
+- JSON benchmarks include MiniSQL indexed vs MiniSQL sequential `JSON_CONTAINS`; SQLite JSON baselines are labelled contextual because SQLite does not provide an equivalent native JSON containment inverted index.
+
+Baseline highlights:
+- Full-text build is the clearest hotspot: MiniSQL averages **1.85 s/op** versus SQLite FTS5 at **57.7 ms/op** (**32× slower**) and allocates **3.6 GiB/op**.
+- Full-text indexed lookup is competitive for rare/medium terms (**0.8× SQLite**) but falls behind for common terms (**3.1× slower**), multi-term AND (**1.4× slower**), phrase search (**1.1× slower**), and especially UPDATE maintenance (**10× slower**).
+- Full-text INSERT and DELETE maintenance are already faster than SQLite FTS5 in this fixture (**0.4×** and **0.3×** SQLite respectively), but MiniSQL allocates much more memory per operation.
+- JSON inverted lookup is materially faster than MiniSQL's sequential JSON scan: key/value lookup is **2.4× faster**, object-subset lookup is **2.2× faster**.
+- JSON indexed lookup is still slower than SQLite's contextual baselines: roughly **1.3×** slower than SQLite JSON scan for key/value lookup and **3-4×** slower than SQLite fixed-path expression indexes.
+
+The baseline was collected with split inverted-index runs so build-index
+benchmarks do not auto-scale to impractical iteration counts:
+
+```sh
+make bench-inverted-build BENCH_COUNT=5
+make bench-inverted-runtime BENCH_COUNT=5
+cat benchmarks/raw_inverted_build.txt benchmarks/raw_inverted_runtime.txt > benchmarks/raw.txt
+make bench-report
+```
+
+---
+
+### 2026-05-10 (VisitRowIDs iterator + overflow bug fix)
 
 Three changes in this entry:
 
@@ -794,3 +824,45 @@ Snapshot isolation (MVCC) for read-only transactions + TOCTOU fix in `ReadPage`:
 | Select_IndexRangeScan | 772.4 KiB | 85.9 KiB |
 | Select_RangeScan | 2.1 MiB | 85.9 KiB |
 | Update_ByPK | 9.0 KiB | 263 B |
+### 2026-05-14 21:13 UTC
+
+#### Timing
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan | ratio |
+|---|---|---|---|---|---|---|---|
+| FullText_BuildIndex | 1.85 s/op | — | — | 57.70 ms/op | — | — | 32.0× |
+| JSONInverted_BuildIndex | — | 296.61 ms/op | — | — | — | — | — |
+| FullText_Insert_WithIndex | 87.92 µs/op | — | — | 224.76 µs/op | — | — | 0.4× |
+| FullText_Search_SingleTerm/rare | 215.50 µs/op | — | — | 279.90 µs/op | — | — | 0.8× |
+| FullText_Search_SingleTerm/medium | 228.22 µs/op | — | — | 282.04 µs/op | — | — | 0.8× |
+| FullText_Search_SingleTerm/common | 1.03 ms/op | — | — | 334.15 µs/op | — | — | 3.1× |
+| FullText_Search_MultiTermAND | 423.05 µs/op | — | — | 312.27 µs/op | — | — | 1.4× |
+| FullText_Search_Phrase | 312.12 µs/op | — | — | 273.05 µs/op | — | — | 1.1× |
+| FullText_Update_WithIndex | 3.28 ms/op | — | — | 328.61 µs/op | — | — | 10.0× |
+| FullText_Delete_WithIndex | 67.42 µs/op | — | — | 227.23 µs/op | — | — | 0.3× |
+| JSONInverted_Insert_WithIndex | — | 97.65 µs/op | — | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 1.25 ms/op | 3.05 ms/op | — | 340.98 µs/op | 990.32 µs/op | — |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.48 ms/op | 3.25 ms/op | — | 442.39 µs/op | 1.06 ms/op | — |
+| JSONInverted_Update_WithIndex | — | 1.20 ms/op | — | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 145.75 µs/op | — | — | — | — | — |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan |
+|---|---|---|---|---|---|---|
+| FullText_BuildIndex | 3624.8 MiB | — | — | 429.0 KiB | — | — |
+| JSONInverted_BuildIndex | — | 1327.3 MiB | — | — | — | — |
+| FullText_Insert_WithIndex | 66.7 KiB | — | — | 714 B | — | — |
+| FullText_Search_SingleTerm/rare | 62.9 KiB | — | — | 533 B | — | — |
+| FullText_Search_SingleTerm/medium | 68.5 KiB | — | — | 533 B | — | — |
+| FullText_Search_SingleTerm/common | 606.8 KiB | — | — | 548 B | — | — |
+| FullText_Search_MultiTermAND | 358.7 KiB | — | — | 532 B | — | — |
+| FullText_Search_Phrase | 176.6 KiB | — | — | 540 B | — | — |
+| FullText_Update_WithIndex | 6.0 MiB | — | — | 411 B | — | — |
+| FullText_Delete_WithIndex | 40.4 KiB | — | — | 260 B | — | — |
+| JSONInverted_Insert_WithIndex | — | 163.9 KiB | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 1.5 MiB | 3.3 MiB | — | 549 B | 548 B |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.8 MiB | 3.5 MiB | — | 549 B | 548 B |
+| JSONInverted_Update_WithIndex | — | 4.6 MiB | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 143.0 KiB | — | — | — | — |
+

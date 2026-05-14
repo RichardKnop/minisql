@@ -42,7 +42,10 @@ type result struct {
 // benchLine matches lines like:
 //
 //	BenchmarkInsert_SingleRow/minisql-10    1234    56789 ns/op
-var benchLine = regexp.MustCompile(`^(Benchmark\w+)/(\w+)-\d+\s+\d+\s+([\d.]+)\s+ns/op`)
+//
+// Nested sub-benchmark paths are supported; the final path segment is treated
+// as the driver, e.g. BenchmarkFullText_Search/rare/minisql-10.
+var benchLine = regexp.MustCompile(`^(Benchmark\S+)-\d+\s+\d+\s+([\d.]+)\s+ns/op`)
 
 // driver display order and colours.
 var (
@@ -122,13 +125,25 @@ func parse(r io.Reader) []result {
 		if m == nil {
 			continue
 		}
-		ns, err := strconv.ParseFloat(m[3], 64)
+		benchName, driver, ok := splitBenchmarkPath(m[1])
+		if !ok {
+			continue
+		}
+		ns, err := strconv.ParseFloat(m[2], 64)
 		if err != nil {
 			continue
 		}
-		results = append(results, result{benchmark: m[1], driver: m[2], nsPerOp: ns})
+		results = append(results, result{benchmark: benchName, driver: driver, nsPerOp: ns})
 	}
 	return results
+}
+
+func splitBenchmarkPath(path string) (benchName, driver string, ok bool) {
+	idx := strings.LastIndex(path, "/")
+	if idx < 0 || idx == len(path)-1 {
+		return "", "", false
+	}
+	return path[:idx], path[idx+1:], true
 }
 
 // renderChart writes a grouped bar chart PNG for one benchmark to outDir.
@@ -145,9 +160,15 @@ func parse(r io.Reader) []result {
 //   - Give each driver's BarChart Offset = -(N-1)*half + i*barWidth so that the
 //     bars fan out symmetrically around the single x tick at data position 0.
 func renderChart(benchName string, results []result, outDir string) error {
-	nsMap := map[string]float64{}
+	nsTotals := map[string]float64{}
+	nsCounts := map[string]int{}
 	for _, res := range results {
-		nsMap[res.driver] = res.nsPerOp
+		nsTotals[res.driver] += res.nsPerOp
+		nsCounts[res.driver]++
+	}
+	nsMap := map[string]float64{}
+	for driver, total := range nsTotals {
+		nsMap[driver] = total / float64(nsCounts[driver])
 	}
 
 	// Collect present drivers in stable order.

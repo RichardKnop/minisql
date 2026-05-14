@@ -11,9 +11,19 @@ make bench
 # Run each benchmark 5 times for better statistical confidence
 make bench BENCH_COUNT=5
 
+# Run setup-heavy benchmarks exactly once per iteration
+make bench BENCH=BenchmarkFullText_BuildIndex BENCH_TIME=1x BENCH_COUNT=5
+
 # Run only a specific benchmark group
 make bench BENCH=BenchmarkInsert
 make bench BENCH=BenchmarkSelect
+
+# Run only the inverted-index benchmark families
+make bench-inverted BENCH_COUNT=5
+make bench-inverted-build BENCH_COUNT=5
+make bench-inverted-runtime BENCH_COUNT=5
+make bench-fulltext
+make bench-json
 ```
 
 ## Benchmark groups
@@ -30,8 +40,34 @@ make bench BENCH=BenchmarkSelect
 | `BenchmarkUpdate_ByPK` | UPDATE a single row by primary key |
 | `BenchmarkDelete_ByPK` | DELETE a single row by primary key |
 | `BenchmarkTxn_NInserts` | Commit overhead: 50 INSERTs per explicit transaction |
+| `BenchmarkFullText_BuildIndex` | Build a full-text index over seeded documents |
+| `BenchmarkFullText_Insert_WithIndex` | INSERT maintenance cost with full-text index present |
+| `BenchmarkFullText_Search_SingleTerm` | Rare, medium, and common token lookups |
+| `BenchmarkFullText_Search_MultiTermAND` | Multi-token posting-list intersection |
+| `BenchmarkFullText_Search_Phrase` | Positional phrase filtering |
+| `BenchmarkFullText_Update_WithIndex` | UPDATE maintenance cost with full-text index present |
+| `BenchmarkFullText_Delete_WithIndex` | DELETE maintenance cost with full-text index present |
+| `BenchmarkJSONInverted_BuildIndex` | Build a JSON inverted index over seeded payloads |
+| `BenchmarkJSONInverted_Insert_WithIndex` | INSERT maintenance cost with JSON inverted index present |
+| `BenchmarkJSONInverted_Contains_KeyValue` | JSON key/value containment lookup |
+| `BenchmarkJSONInverted_Contains_ObjectSubset` | Multi-term JSON subset containment lookup |
+| `BenchmarkJSONInverted_Update_WithIndex` | UPDATE maintenance cost with JSON inverted index present |
+| `BenchmarkJSONInverted_Delete_WithIndex` | DELETE maintenance cost with JSON inverted index present |
 
 Both drivers are configured for fair durability comparison: MiniSQL uses its default WAL mode; SQLite is opened with `PRAGMA journal_mode=WAL` and `PRAGMA synchronous=FULL`.
+
+Full-text benchmarks compare MiniSQL against SQLite FTS5 when the linked SQLite
+driver supports `CREATE VIRTUAL TABLE ... USING fts5`. JSON benchmarks always
+include MiniSQL indexed and sequential `JSON_CONTAINS` variants. SQLite JSON
+benchmarks are contextual only: `sqlite_json_scan` uses JSON/path predicates and
+`sqlite_json_expr_index` uses a fixed-path expression index, which is not
+equivalent to MiniSQL's JSON containment inverted index.
+
+`make bench-inverted` intentionally splits build and steady-state benchmarks.
+Index builds use `BENCH_INVERTED_BUILD_TIME=1x` by default because they rebuild
+the full fixture on every iteration. Runtime query and maintenance benchmarks
+use `BENCH_INVERTED_RUNTIME_TIME=10x` by default so repeated baseline runs stay
+practical while still averaging several operations.
 
 ## Generating charts
 
