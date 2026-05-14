@@ -23,6 +23,19 @@ func (p *parserItem) doParseUpdate() error {
 		}
 		p.TableName = tableName
 		p.pop()
+		// Optional target alias: UPDATE employees e SET … or UPDATE employees AS e SET …
+		if next := strings.ToUpper(p.peek()); next == "AS" {
+			p.pop()
+			alias := p.peek()
+			if !isIdentifier(alias) {
+				return p.errorf("at UPDATE: expected alias after AS")
+			}
+			p.TableAlias = alias
+			p.pop()
+		} else if next != "" && next != "SET" && isIdentifier(p.peek()) {
+			p.TableAlias = p.peek()
+			p.pop()
+		}
 		p.step = stepUpdateSet
 	case stepUpdateSet:
 		setRWord := p.peek()
@@ -101,9 +114,14 @@ func (p *parserItem) doParseUpdate() error {
 			p.setUpdate(p.nextUpdateField, updateValue)
 			p.nextUpdateField = ""
 		}
-		maybeWhere := p.peek()
-		if strings.ToUpper(maybeWhere) == "WHERE" {
+		maybeNext := strings.ToUpper(p.peek())
+		if maybeNext == "WHERE" {
 			p.step = stepWhere
+			return nil
+		}
+		if maybeNext == "FROM" {
+			p.pop()
+			p.step = stepUpdateFrom
 			return nil
 		}
 		p.step = stepUpdateComma
@@ -118,11 +136,67 @@ func (p *parserItem) doParseUpdate() error {
 			p.step = stepReturningField
 			return nil
 		}
+		if strings.ToUpper(commaOrEnd) == "FROM" {
+			p.pop()
+			p.step = stepUpdateFrom
+			return nil
+		}
 		if commaOrEnd != "," {
 			return p.errorf("at UPDATE: expected ','")
 		}
 		p.pop()
 		p.step = stepUpdateField
+	case stepUpdateFrom:
+		next := p.peek()
+		if next == "(" {
+			// FROM (SELECT …) alias
+			p.pop() // consume "("
+			if strings.ToUpper(p.peek()) != "SELECT" {
+				return p.errorf("at UPDATE FROM: expected SELECT inside parentheses")
+			}
+			subStmt, err := p.parseSubquery()
+			if err != nil {
+				return err
+			}
+			p.UpdateFromSubquery = subStmt
+			// Optional AS before alias
+			if strings.ToUpper(p.peek()) == "AS" {
+				p.pop()
+			}
+			alias, _ := p.peekIdentifierWithLength()
+			if !isIdentifier(alias) {
+				return p.errorf("at UPDATE FROM: expected alias after subquery")
+			}
+			p.UpdateFromAlias = alias
+			p.pop()
+		} else {
+			// FROM table_name [AS] [alias]
+			tableName, _ := p.peekIdentifierWithLength()
+			if !isIdentifier(tableName) {
+				return p.errorf("at UPDATE FROM: expected table name")
+			}
+			p.UpdateFromTable = tableName
+			p.pop()
+			// Optional alias
+			if strings.ToUpper(p.peek()) == "AS" {
+				p.pop()
+				alias, _ := p.peekIdentifierWithLength()
+				if !isIdentifier(alias) {
+					return p.errorf("at UPDATE FROM: expected alias after AS")
+				}
+				p.UpdateFromAlias = alias
+				p.pop()
+			} else if a := p.peek(); a != "" && strings.ToUpper(a) != "WHERE" && a != ";" && isIdentifier(a) {
+				p.UpdateFromAlias = a
+				p.pop()
+			}
+		}
+		// FROM clause parsed; optional WHERE follows
+		if strings.ToUpper(p.peek()) == "WHERE" {
+			p.step = stepWhere
+		} else {
+			p.step = stepStatementEnd
+		}
 	}
 	return nil
 }

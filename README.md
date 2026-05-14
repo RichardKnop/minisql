@@ -563,7 +563,8 @@ rows.Scan(&owner)
 | `WITH` | Basic support for `CTEs`, SELECT only currently |
 | `EXPLAIN`, `EXPLAIN ANALYZE` | Query plan inspection for `SELECT` statements. `EXPLAIN ANALYZE` also executes the query and returns actual row counts and timing |
 | `JOIN` | `INNER`, `LEFT` and `RIGHT` joins supported |
-| `UPDATE` | |
+| `UPDATE` | Standard `UPDATE t SET col = val WHERE …` |
+| `UPDATE … FROM` | PostgreSQL-style multi-table update: `UPDATE t1 [AS alias] SET col = t2.val FROM t2 [AS alias] WHERE join_condition`. The `FROM` source can be a table name or a subquery (`FROM (SELECT …) AS alias`). Each target row may match at most one FROM row; zero matches leaves the row unchanged. SET expressions can reference columns from both tables (e.g. `SET salary = dept.budget / 10`). |
 | `DELETE` | |
 | `RETURNING` | Can be used to return columns from `INSERT` or `DELETE` queries, common use case is to return auto incremented primary key |
 | `WHERE` | Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`, `LIKE`, `NOT LIKE`, `BETWEEN`, support for SELECT only non-correlated scalar subqueries |
@@ -1199,6 +1200,41 @@ Select to verify update:
 --------+----------------------------------+-------------------------+--------+-------------------------------
  1      | Danny_Mason2966@xqj6f.tech       | Danny Mason             | 36     | 2025-12-21 22:31:35.514831    
 ```
+
+### UPDATE FROM
+
+PostgreSQL-style `UPDATE … FROM` lets you set column values based on data from a second table (or subquery). The target table can have an optional alias; the `FROM` source can be a table name or a derived subquery.
+
+```go
+// Set each employee's salary to the budget of their department divided by 10.
+_, err := db.ExecContext(context.Background(), `
+    update employees e
+    set salary = d.budget / 10
+    from departments d
+    where e.dept_id = d.id
+`)
+if err != nil {
+    return err
+}
+
+// Same query using explicit AS aliases.
+_, err = db.ExecContext(context.Background(), `
+    update employees as emp
+    set salary = dept.budget / 10
+    from departments as dept
+    where emp.dept_id = dept.id
+`)
+
+// FROM can also be a subquery.
+_, err = db.ExecContext(context.Background(), `
+    update employees e
+    set salary = d.budget
+    from (select id, budget from departments where id = 1) as d
+    where e.dept_id = d.id
+`)
+```
+
+Each target row may match **at most one** FROM row; zero matches leaves the row unchanged. If more than one FROM row matches a single target row, the statement returns an error.
 
 ### DELETE
 

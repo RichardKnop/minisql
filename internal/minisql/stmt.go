@@ -396,6 +396,9 @@ type Statement struct {
 	ExplainStatement   *Statement
 	FromSubquery       *Statement // non-nil when FROM clause is a derived table
 	FromSubqueryAlias  string     // alias for the derived table (e.g. "t" in FROM (...) t)
+	UpdateFromTable    string     // table name in UPDATE … FROM clause (empty = no UPDATE FROM)
+	UpdateFromAlias    string     // alias for the UPDATE FROM table (e.g. "d" in FROM departments d)
+	UpdateFromSubquery *Statement // non-nil when UPDATE FROM clause is a subquery
 	CTEs               []CTE      // non-nil for WITH … SELECT statements
 	Kind               StatementKind
 	IndexMethod        IndexMethod
@@ -510,6 +513,8 @@ func (s Statement) Clone() Statement {
 		ExplainAnalyze:     s.ExplainAnalyze,
 		IndexMethod:        s.IndexMethod,
 		FromSubqueryAlias:  s.FromSubqueryAlias,
+		UpdateFromTable:    s.UpdateFromTable,
+		UpdateFromAlias:    s.UpdateFromAlias,
 		ForeignKeys:        s.ForeignKeys, // slice of value structs, safe to share
 	}
 	for i := range s.Inserts {
@@ -547,6 +552,10 @@ func (s Statement) Clone() Statement {
 	if s.FromSubquery != nil {
 		inner := s.FromSubquery.Clone()
 		stmt.FromSubquery = &inner
+	}
+	if s.UpdateFromSubquery != nil {
+		inner := s.UpdateFromSubquery.Clone()
+		stmt.UpdateFromSubquery = &inner
 	}
 	if len(s.CTEs) > 0 {
 		stmt.CTEs = make([]CTE, len(s.CTEs))

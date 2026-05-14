@@ -488,6 +488,19 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 			return d.executeSelectFromDerivedTable(ctx, stmt)
 		}
 
+		// UPDATE … FROM: pre-materialise the FROM source rows before acquiring
+		// the write lock.  This avoids a re-entrant dbLock deadlock that would
+		// occur if materialisation happened inside executeTableStatement (which
+		// holds the exclusive write lock) and the FROM source is a subquery
+		// (which calls GetTable → RLock).
+		if stmt.Kind == Update && (stmt.UpdateFromTable != "" || stmt.UpdateFromSubquery != nil) {
+			fromRows, err := d.materialiseFromSource(ctx, stmt)
+			if err != nil {
+				return StatementResult{}, err
+			}
+			ctx = contextWithUpdateFromRows(ctx, fromRows)
+		}
+
 		table, ok := d.GetTable(ctx, stmt.TableName)
 		if !ok {
 			return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, stmt.TableName)
@@ -948,6 +961,9 @@ func (d *Database) executeTableStatement(ctx context.Context, table *Table, stmt
 	case Select:
 		return table.Select(ctx, stmt)
 	case Update:
+		if stmt.UpdateFromTable != "" || stmt.UpdateFromSubquery != nil {
+			return d.executeUpdateFrom(ctx, stmt)
+		}
 		return table.Update(ctx, stmt)
 	case Delete:
 		return table.Delete(ctx, stmt)

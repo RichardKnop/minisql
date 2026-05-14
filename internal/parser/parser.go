@@ -124,6 +124,7 @@ const (
 	stepUpdateEquals
 	stepUpdateValue
 	stepUpdateComma
+	stepUpdateFrom
 	stepDeleteFromTable
 	stepSelectField
 	stepSelectFrom
@@ -378,7 +379,8 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 			stepUpdateField,
 			stepUpdateEquals,
 			stepUpdateValue,
-			stepUpdateComma:
+			stepUpdateComma,
+			stepUpdateFrom:
 			if err := p.doParseUpdate(); err != nil {
 				return statements, err
 			}

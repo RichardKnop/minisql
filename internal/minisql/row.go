@@ -258,20 +258,36 @@ func (r Row) Marshal() ([]byte, error) {
 		case Int4:
 			value, ok := r.Values[i].Value.(int32)
 			if !ok {
-				n, ok2 := r.Values[i].Value.(int64)
-				if !ok2 {
+				switch n := r.Values[i].Value.(type) {
+				case int64:
+					if n < math.MinInt32 || n > math.MaxInt32 {
+						return nil, fmt.Errorf("value %d overflows INT4 for column %s", n, col.Name)
+					}
+					value = int32(n)
+				case float64:
+					if n < math.MinInt32 || n > math.MaxInt32 || math.Trunc(n) != n {
+						return nil, fmt.Errorf("value %g cannot be stored as INT4 for column %s", n, col.Name)
+					}
+					value = int32(n)
+				default:
 					return nil, fmt.Errorf("could not cast value for column %s to either int64 or int32", col.Name)
 				}
-				if n < math.MinInt32 || n > math.MaxInt32 {
-					return nil, fmt.Errorf("value %d overflows INT4 for column %s", n, col.Name)
-				}
-				value = int32(n)
 			}
 			marshalInt32(buf, value, offset)
 			offset += 4
 		case Int8:
-			value, ok := r.Values[i].Value.(int64)
-			if !ok {
+			var value int64
+			switch n := r.Values[i].Value.(type) {
+			case int64:
+				value = n
+			case float64:
+				if math.Trunc(n) != n || n < math.MinInt64 || n > math.MaxInt64 {
+					return nil, fmt.Errorf("value %g cannot be stored as INT8 for column %s", n, col.Name)
+				}
+				value = int64(n)
+			case int32:
+				value = int64(n)
+			default:
 				return nil, fmt.Errorf("could not cast value for column %s to int64", col.Name)
 			}
 			marshalInt64(buf, value, offset)
@@ -651,7 +667,17 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 	if valueOperand.Type == OperandField {
 		return false, errors.New("cannot compare column value against field operand")
 	}
-	name := fieldOperand.Value.(Field).Name
+	f := fieldOperand.Value.(Field)
+	name := f.Name
+	// When an alias prefix is present (e.g. "d.name"), try the fully-qualified
+	// name first so that combined rows (UPDATE FROM, JOIN) are matched correctly.
+	// Fall back to the plain name for push-down conditions on plain single-table rows.
+	if f.AliasPrefix != "" {
+		qualName := f.AliasPrefix + "." + f.Name
+		if _, qi := r.GetColumn(qualName); qi >= 0 {
+			name = qualName
+		}
+	}
 	col, idx := r.GetColumn(name)
 	if idx < 0 {
 		return false, fmt.Errorf("row does not contain column '%s'", name)
@@ -805,6 +831,12 @@ func (r Row) compareFieldValueWithColumnIndexes(fieldOperand, valueOperand Opera
 
 	field := fieldOperand.Value.(Field)
 	name := field.Name
+	if field.AliasPrefix != "" {
+		qualName := field.AliasPrefix + "." + field.Name
+		if _, exists := columnIndexes[qualName]; exists {
+			name = qualName
+		}
+	}
 	colIdx, ok := columnIndexes[name]
 	if !ok {
 		return false, fmt.Errorf("row does not contain column '%s'", name)
