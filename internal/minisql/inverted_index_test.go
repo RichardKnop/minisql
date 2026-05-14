@@ -112,6 +112,37 @@ func TestDedicatedInvertedIndex_PositionalInlinePostings(t *testing.T) {
 	}, postings)
 }
 
+func TestDedicatedInvertedIndex_InsertManyPositionalPostings(t *testing.T) {
+	index, txManager := newTestDedicatedInvertedIndex(t, "idx_body", invertedIndexPostingModePositions)
+	ctx := context.Background()
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		if err := index.InsertMany(ctx, "database", []invertedPosting{
+			{RowID: 10, Positions: []uint32{4, 2, 4}},
+			{RowID: 5, Positions: []uint32{1}},
+			{RowID: 10, Positions: []uint32{7}},
+		}); err != nil {
+			return err
+		}
+		return index.InsertMany(ctx, "search", []invertedPosting{
+			{RowID: 2, Positions: []uint32{9}},
+			{RowID: 1, Positions: []uint32{3}},
+		})
+	}))
+
+	stats, err := index.Stats(ctx, "database")
+	require.NoError(t, err)
+	assert.Equal(t, invertedPostingStats{DocFreq: 2, PostingCount: 4}, stats)
+	assert.Equal(t, []invertedPosting{
+		{RowID: 5, Positions: []uint32{1}},
+		{RowID: 10, Positions: []uint32{2, 4, 7}},
+	}, collectDedicatedInvertedPostings(t, ctx, index, "database"))
+	assert.Equal(t, []invertedPosting{
+		{RowID: 1, Positions: []uint32{3}},
+		{RowID: 2, Positions: []uint32{9}},
+	}, collectDedicatedInvertedPostings(t, ctx, index, "search"))
+}
+
 func TestDedicatedInvertedIndex_DeleteInlinePostings(t *testing.T) {
 	index, txManager := newTestDedicatedInvertedIndex(t, "idx_body", invertedIndexPostingModePositions)
 	ctx := context.Background()

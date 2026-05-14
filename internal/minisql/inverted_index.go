@@ -42,6 +42,7 @@ type invertedIndex interface {
 	GetRootPageIdx() PageIndex
 	Mode() invertedIndexPostingMode
 	Insert(ctx context.Context, term string, posting invertedPosting) error
+	InsertMany(ctx context.Context, term string, postings []invertedPosting) error
 	Delete(ctx context.Context, term string, posting invertedPosting) error
 	Lookup(ctx context.Context, term string) (invertedPostingIterator, error)
 	Stats(ctx context.Context, term string) (invertedPostingStats, error)
@@ -106,7 +107,30 @@ func (idx *dedicatedInvertedIndex) Insert(ctx context.Context, term string, post
 		return fmt.Errorf("inverted index term exceeds max index key size %d", MaxIndexKeySize)
 	}
 
-	separator, rightPageIdx, split, err := idx.insertEntry(ctx, idx.rootPageIdx, term, posting)
+	one := [1]invertedPosting{posting}
+	separator, rightPageIdx, split, err := idx.insertEntry(ctx, idx.rootPageIdx, term, one[:])
+	if err != nil {
+		return err
+	}
+	if !split {
+		return nil
+	}
+
+	return idx.splitRootEntryPage(ctx, separator, rightPageIdx)
+}
+
+// InsertMany adds a batch of postings for one term. It is primarily used by
+// CREATE INDEX population so a term's posting list can be encoded once instead
+// of being repeatedly decoded and re-encoded for every token occurrence.
+func (idx *dedicatedInvertedIndex) InsertMany(ctx context.Context, term string, postings []invertedPosting) error {
+	if len(postings) == 0 {
+		return nil
+	}
+	if len([]byte(term)) > MaxIndexKeySize {
+		return fmt.Errorf("inverted index term exceeds max index key size %d", MaxIndexKeySize)
+	}
+
+	separator, rightPageIdx, split, err := idx.insertEntry(ctx, idx.rootPageIdx, term, postings)
 	if err != nil {
 		return err
 	}
@@ -527,8 +551,8 @@ func (idx *dedicatedInvertedIndex) findEntryLeafPage(ctx context.Context, term s
 	}
 }
 
-// insertEntry recursively inserts a term posting and returns a split separator if needed.
-func (idx *dedicatedInvertedIndex) insertEntry(ctx context.Context, pageIdx PageIndex, term string, posting invertedPosting) (string, PageIndex, bool, error) {
+// insertEntry recursively inserts term postings and returns a split separator if needed.
+func (idx *dedicatedInvertedIndex) insertEntry(ctx context.Context, pageIdx PageIndex, term string, postings []invertedPosting) (string, PageIndex, bool, error) {
 	page, err := idx.pager.ReadPage(ctx, pageIdx)
 	if err != nil {
 		return "", 0, false, fmt.Errorf("read inverted entry page %d: %w", pageIdx, err)
@@ -537,13 +561,13 @@ func (idx *dedicatedInvertedIndex) insertEntry(ctx context.Context, pageIdx Page
 		return "", 0, false, fmt.Errorf("inverted entry page %d is not an entry page", pageIdx)
 	}
 	if page.InvertedEntryPage.Header.IsLeaf {
-		return idx.insertEntryLeaf(ctx, pageIdx, term, posting)
+		return idx.insertEntryLeaf(ctx, pageIdx, term, postings)
 	}
-	return idx.insertEntryInternal(ctx, pageIdx, term, posting)
+	return idx.insertEntryInternal(ctx, pageIdx, term, postings)
 }
 
 // insertEntryLeaf inserts or updates one leaf cell, splitting the leaf on overflow.
-func (idx *dedicatedInvertedIndex) insertEntryLeaf(ctx context.Context, pageIdx PageIndex, term string, posting invertedPosting) (string, PageIndex, bool, error) {
+func (idx *dedicatedInvertedIndex) insertEntryLeaf(ctx context.Context, pageIdx PageIndex, term string, postings []invertedPosting) (string, PageIndex, bool, error) {
 	page, err := idx.pager.ModifyPage(ctx, pageIdx)
 	if err != nil {
 		return "", 0, false, fmt.Errorf("modify inverted entry leaf %d: %w", pageIdx, err)
@@ -554,11 +578,11 @@ func (idx *dedicatedInvertedIndex) insertEntryLeaf(ctx context.Context, pageIdx 
 	}
 
 	cellIdx, found := findInvertedEntryCell(entryPage.Cells, term)
-	postings := []invertedPosting{posting}
+	allPostings := append([]invertedPosting(nil), postings...)
 	if found {
 		oldCell := entryPage.Cells[cellIdx]
-		if oldCell.PostingKind == invertedPostingKindTree {
-			updatedCell, mutated, err := idx.insertPostingIntoTreeCell(ctx, oldCell, posting)
+		if oldCell.PostingKind == invertedPostingKindTree && len(postings) == 1 {
+			updatedCell, mutated, err := idx.insertPostingIntoTreeCell(ctx, oldCell, postings[0])
 			if err != nil {
 				return "", 0, false, err
 			}
@@ -568,14 +592,14 @@ func (idx *dedicatedInvertedIndex) insertEntryLeaf(ctx context.Context, pageIdx 
 			}
 		}
 		var err error
-		postings, err = idx.decodeInvertedEntryCell(ctx, oldCell)
+		existingPostings, err := idx.decodeInvertedEntryCell(ctx, oldCell)
 		if err != nil {
 			return "", 0, false, err
 		}
-		postings = append(postings, posting)
+		allPostings = append(existingPostings, allPostings...)
 	}
 
-	cell, err := idx.makeInvertedEntryCell(ctx, term, postings, entryPage.Cells[cellIdx:cellIdx+boolToInt(found)])
+	cell, err := idx.makeInvertedEntryCell(ctx, term, allPostings, entryPage.Cells[cellIdx:cellIdx+boolToInt(found)])
 	if err != nil {
 		return "", 0, false, err
 	}
@@ -596,7 +620,7 @@ func (idx *dedicatedInvertedIndex) insertEntryLeaf(ctx context.Context, pageIdx 
 }
 
 // insertEntryInternal descends into a child and absorbs child splits.
-func (idx *dedicatedInvertedIndex) insertEntryInternal(ctx context.Context, pageIdx PageIndex, term string, posting invertedPosting) (string, PageIndex, bool, error) {
+func (idx *dedicatedInvertedIndex) insertEntryInternal(ctx context.Context, pageIdx PageIndex, term string, postings []invertedPosting) (string, PageIndex, bool, error) {
 	page, err := idx.pager.ReadPage(ctx, pageIdx)
 	if err != nil {
 		return "", 0, false, fmt.Errorf("read inverted entry internal %d: %w", pageIdx, err)
@@ -610,7 +634,7 @@ func (idx *dedicatedInvertedIndex) insertEntryInternal(ctx context.Context, page
 		return "", 0, false, err
 	}
 
-	separator, rightChildIdx, split, err := idx.insertEntry(ctx, childIdx, term, posting)
+	separator, rightChildIdx, split, err := idx.insertEntry(ctx, childIdx, term, postings)
 	if err != nil || !split {
 		return "", 0, false, err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,8 @@ var (
 	errIndexAlreadyExists        = errors.New("index already exists")
 	errIndexOnJSONColumn         = errors.New("b-tree index on JSON column is not supported")
 )
+
+const populateFullTextIndexFlushPostings = 64 * 1024
 
 // WALConfig bundles the Write-Ahead Log objects that NewDatabase needs.
 // Pass nil when creating in-memory/test databases that do not require WAL.
@@ -1463,6 +1466,10 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, table *Table
 }
 
 func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryIndex SecondaryIndex) error {
+	if secondaryIndex.Method == IndexMethodFullText {
+		return d.populateFullTextIndex(ctx, table, secondaryIndex)
+	}
+
 	result, err := table.Select(ctx, Statement{
 		Kind:   Select,
 		Fields: fieldsFromColumns(table.Columns...),
@@ -1556,6 +1563,77 @@ func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryInd
 	}
 
 	return nil
+}
+
+func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, secondaryIndex SecondaryIndex) error {
+	if secondaryIndex.InvertedIndex == nil {
+		return fmt.Errorf("table %s has full-text index %s but no inverted index instance", table.Name, secondaryIndex.Name)
+	}
+
+	result, err := table.Select(ctx, Statement{
+		Kind:   Select,
+		Fields: fieldsFromColumns(table.Columns...),
+	})
+	if err != nil {
+		return err
+	}
+
+	postingsByTerm := make(map[string][]invertedPosting)
+	bufferedPostings := 0
+	flush := func() error {
+		if len(postingsByTerm) == 0 {
+			return nil
+		}
+		terms := make([]string, 0, len(postingsByTerm))
+		for term := range postingsByTerm {
+			terms = append(terms, term)
+		}
+		sort.Strings(terms)
+		for _, term := range terms {
+			if err := secondaryIndex.InvertedIndex.InsertMany(ctx, term, postingsByTerm[term]); err != nil {
+				return fmt.Errorf("failed to insert token batch for full-text index %s: %w", secondaryIndex.Name, err)
+			}
+		}
+		postingsByTerm = make(map[string][]invertedPosting)
+		bufferedPostings = 0
+		return nil
+	}
+
+	for result.Rows.Next(ctx) {
+		row := result.Rows.Row()
+
+		if len(secondaryIndex.WhereCond) > 0 {
+			ok, err := row.CheckOneOrMore(secondaryIndex.WhereCond)
+			if err != nil {
+				return fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)
+			}
+			if !ok {
+				continue
+			}
+		}
+
+		tokens, err := fullTextTokenPositionsForRow(secondaryIndex, row)
+		if err != nil {
+			return err
+		}
+		for _, token := range tokens {
+			postingsByTerm[token.Term] = append(postingsByTerm[token.Term], invertedPosting{
+				RowID:     row.Key,
+				Positions: []uint32{token.Position},
+			})
+			bufferedPostings++
+		}
+		if bufferedPostings >= populateFullTextIndexFlushPostings {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := result.Rows.Err(); err != nil {
+		return err
+	}
+	return flush()
 }
 
 func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {

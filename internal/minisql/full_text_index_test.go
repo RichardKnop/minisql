@@ -463,6 +463,12 @@ func (f *fakeFullTextInvertedIndex) Insert(_ context.Context, term string, posti
 	return nil
 }
 
+func (f *fakeFullTextInvertedIndex) InsertMany(_ context.Context, term string, postings []invertedPosting) error {
+	f.inserted = append(f.inserted, term)
+	f.postings[term] = append(f.postings[term], postings...)
+	return nil
+}
+
 func (f *fakeFullTextInvertedIndex) Delete(_ context.Context, term string, posting invertedPosting) error {
 	f.deleted = append(f.deleted, term)
 	postings := f.postings[term]

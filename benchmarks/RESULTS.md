@@ -1,4 +1,37 @@
-### 2026-05-14 (Full-text and JSON inverted benchmark suite added — latest)
+### 2026-05-14 (bulk full-text CREATE INDEX population — latest)
+
+`CREATE FULLTEXT INDEX` now buffers postings by term during index population and
+uses a new `InsertMany` path on the dedicated inverted index. This avoids the
+old build-time pattern of decoding, regrouping, sorting, and re-encoding the
+same hot term once for every token occurrence.
+
+The generated build-only timing/memory table for this run is appended below as
+`2026-05-14 21:28 UTC`.
+
+#### Timing
+
+| Benchmark | before | after | improvement |
+|---|---|---|---|
+| FullText_BuildIndex/minisql | 1.85 s/op | 53.75 ms/op | 34.4× faster |
+| FullText_BuildIndex/sqlite | 57.70 ms/op | 67.87 ms/op | reference variance |
+| JSONInverted_BuildIndex/minisql_indexed | 296.61 ms/op | 294.46 ms/op | unchanged |
+
+#### Memory (B/op)
+
+| Benchmark | before | after | improvement |
+|---|---|---|---|
+| FullText_BuildIndex/minisql | 3624.8 MiB | 81.4 MiB | 44.5× lower |
+| FullText_BuildIndex/sqlite | 429.0 KiB | 428.8 KiB | unchanged |
+| JSONInverted_BuildIndex/minisql_indexed | 1327.3 MiB | 1327.7 MiB | unchanged |
+
+Full-text build is no longer the top timing hotspot in this fixture; it is now
+slightly faster than SQLite FTS5 on wall time. Allocation is still much higher
+than SQLite, so the next likely target is reducing tokenizer/posting allocation
+and then applying a similar build-time batching path to JSON inverted indexes.
+
+---
+
+### 2026-05-14 (Full-text and JSON inverted benchmark suite added)
 
 Added the first dedicated benchmark suite for MiniSQL's inverted-index storage
 and recorded the initial baseline. The generated timing/memory tables for this
@@ -865,4 +898,20 @@ Snapshot isolation (MVCC) for read-only transactions + TOCTOU fix in `ReadPage`:
 | JSONInverted_Contains_ObjectSubset/object_subset | — | 1.8 MiB | 3.5 MiB | — | 549 B | 548 B |
 | JSONInverted_Update_WithIndex | — | 4.6 MiB | — | — | — | — |
 | JSONInverted_Delete_WithIndex | — | 143.0 KiB | — | — | — | — |
+
+### 2026-05-14 21:28 UTC
+
+#### Timing
+
+| Benchmark | minisql | minisql_indexed | sqlite | ratio |
+|---|---|---|---|---|
+| FullText_BuildIndex | 53.75 ms/op | — | 67.87 ms/op | 0.8× |
+| JSONInverted_BuildIndex | — | 294.46 ms/op | — | — |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | minisql_indexed | sqlite |
+|---|---|---|---|
+| FullText_BuildIndex | 81.4 MiB | — | 428.8 KiB |
+| JSONInverted_BuildIndex | — | 1327.7 MiB | — |
 
