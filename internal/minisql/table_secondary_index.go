@@ -11,7 +11,8 @@ import (
 // It supports plain column indexes, composite indexes, partial indexes
 // (with a WHERE predicate), and expression indexes.
 type SecondaryIndex struct {
-	Index BTreeIndex
+	Index         BTreeIndex
+	InvertedIndex invertedIndex
 	IndexInfo
 }
 
@@ -25,6 +26,17 @@ func secondaryIndexStorageColumns(secondaryIndex SecondaryIndex) []Column {
 	return secondaryIndex.Columns
 }
 
+func secondaryIndexUsesDedicatedInvertedStorage(method IndexMethod) bool {
+	return method == IndexMethodFullText || method == IndexMethodInverted
+}
+
+func invertedIndexPostingModeForIndexMethod(method IndexMethod) invertedIndexPostingMode {
+	if method == IndexMethodFullText {
+		return invertedIndexPostingModePositions
+	}
+	return invertedIndexPostingModeRowIDs
+}
+
 // rowSatisfiesWhereCond returns true when the row satisfies the partial index predicate,
 // or always true for a full (non-partial) index.
 func (si SecondaryIndex) rowSatisfiesWhereCond(row Row) (bool, error) {
@@ -35,15 +47,14 @@ func (si SecondaryIndex) rowSatisfiesWhereCond(row Row) (bool, error) {
 }
 
 func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, keys []OptionalValue, rowID RowID, row Row) error {
-	if secondaryIndex.Index == nil {
-		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
-	}
-
 	if secondaryIndex.Method == IndexMethodFullText {
 		return t.insertFullTextIndexKeys(ctx, secondaryIndex, rowID, row)
 	}
 	if secondaryIndex.Method == IndexMethodInverted {
 		return t.insertInvertedIndexKeys(ctx, secondaryIndex, rowID, row)
+	}
+	if secondaryIndex.Index == nil {
+		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
 	}
 
 	// Partial index: skip rows that don't satisfy the WHERE predicate.
@@ -121,15 +132,14 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 }
 
 func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, oldRow, row Row) error {
-	if secondaryIndex.Index == nil {
-		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
-	}
-
 	if secondaryIndex.Method == IndexMethodFullText {
 		return t.updateFullTextIndexKeys(ctx, secondaryIndex, oldRow, row)
 	}
 	if secondaryIndex.Method == IndexMethodInverted {
 		return t.updateInvertedIndexKeys(ctx, secondaryIndex, oldRow, row)
+	}
+	if secondaryIndex.Index == nil {
+		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
 	}
 
 	// Expression index: evaluate expression against old and new rows.
@@ -225,6 +235,9 @@ func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 }
 
 func (t *Table) insertFullTextIndexKeys(ctx context.Context, secondaryIndex SecondaryIndex, rowID RowID, row Row) error {
+	if secondaryIndex.InvertedIndex == nil {
+		return fmt.Errorf("table %s has full-text index %s but no inverted index instance", t.Name, secondaryIndex.Name)
+	}
 	if ok, err := secondaryIndex.rowSatisfiesWhereCond(row); err != nil {
 		return fmt.Errorf("partial full-text index %s where check: %w", secondaryIndex.Name, err)
 	} else if !ok {
@@ -236,11 +249,8 @@ func (t *Table) insertFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 		return err
 	}
 	for _, token := range tokens {
-		posting, err := encodeFullTextPosting(fullTextPosting{RowID: rowID, Position: token.Position})
-		if err != nil {
-			return err
-		}
-		if err := secondaryIndex.Index.Insert(ctx, token.Term, posting); err != nil {
+		posting := invertedPosting{RowID: rowID, Positions: []uint32{token.Position}}
+		if err := secondaryIndex.InvertedIndex.Insert(ctx, token.Term, posting); err != nil {
 			return fmt.Errorf("failed to insert token for full-text index %s: %w", secondaryIndex.Name, err)
 		}
 	}
@@ -266,16 +276,16 @@ func (t *Table) updateFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 }
 
 func (t *Table) deleteFullTextIndexKeys(ctx context.Context, secondaryIndex SecondaryIndex, rowID RowID, row Row) error {
+	if secondaryIndex.InvertedIndex == nil {
+		return fmt.Errorf("table %s has full-text index %s but no inverted index instance", t.Name, secondaryIndex.Name)
+	}
 	tokens, err := fullTextTokenPositionsForRow(secondaryIndex, row)
 	if err != nil {
 		return err
 	}
 	for _, token := range tokens {
-		posting, err := encodeFullTextPosting(fullTextPosting{RowID: rowID, Position: token.Position})
-		if err != nil {
-			return err
-		}
-		if err := secondaryIndex.Index.Delete(ctx, token.Term, posting); err != nil {
+		posting := invertedPosting{RowID: rowID, Positions: []uint32{token.Position}}
+		if err := secondaryIndex.InvertedIndex.Delete(ctx, token.Term, posting); err != nil {
 			return fmt.Errorf("failed to delete token for full-text index %s: %w", secondaryIndex.Name, err)
 		}
 	}
@@ -283,6 +293,9 @@ func (t *Table) deleteFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 }
 
 func (t *Table) insertInvertedIndexKeys(ctx context.Context, secondaryIndex SecondaryIndex, rowID RowID, row Row) error {
+	if secondaryIndex.InvertedIndex == nil {
+		return fmt.Errorf("table %s has inverted index %s but no inverted index instance", t.Name, secondaryIndex.Name)
+	}
 	if ok, err := secondaryIndex.rowSatisfiesWhereCond(row); err != nil {
 		return fmt.Errorf("partial inverted index %s where check: %w", secondaryIndex.Name, err)
 	} else if !ok {
@@ -294,7 +307,7 @@ func (t *Table) insertInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 		return err
 	}
 	for _, term := range terms {
-		if err := secondaryIndex.Index.Insert(ctx, term, rowID); err != nil {
+		if err := secondaryIndex.InvertedIndex.Insert(ctx, term, invertedPosting{RowID: rowID}); err != nil {
 			return fmt.Errorf("failed to insert JSON term for inverted index %s: %w", secondaryIndex.Name, err)
 		}
 	}
@@ -320,12 +333,15 @@ func (t *Table) updateInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 }
 
 func (t *Table) deleteInvertedIndexKeys(ctx context.Context, secondaryIndex SecondaryIndex, rowID RowID, row Row) error {
+	if secondaryIndex.InvertedIndex == nil {
+		return fmt.Errorf("table %s has inverted index %s but no inverted index instance", t.Name, secondaryIndex.Name)
+	}
 	terms, err := jsonInvertedTermsForRow(secondaryIndex, row)
 	if err != nil {
 		return err
 	}
 	for _, term := range terms {
-		if err := secondaryIndex.Index.Delete(ctx, term, rowID); err != nil {
+		if err := secondaryIndex.InvertedIndex.Delete(ctx, term, invertedPosting{RowID: rowID}); err != nil {
 			return fmt.Errorf("failed to delete JSON term for inverted index %s: %w", secondaryIndex.Name, err)
 		}
 	}

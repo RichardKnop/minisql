@@ -29,6 +29,7 @@ type LRUCache[T any] interface {
 type PagerFactory interface {
 	ForTable([]Column) Pager
 	ForIndex(columns []Column, unique bool) Pager
+	ForInvertedIndex() Pager
 }
 
 // TxPagerFactory is a function that opens a transactional pager for the named

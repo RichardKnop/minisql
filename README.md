@@ -175,6 +175,16 @@ Each row has an internal row ID which is an unsigned 64 bit integer starting at 
 
 Moreover, each row starts with 64 bit null mask which determines which values are NULL. Because of the NULL bit mask being an unsigned 64 bit integer, there is a limit of `maximum 64 columns per table`.
 
+### Storage Data Structures
+
+MiniSQL currently uses a few related page-backed trees:
+
+- Tables use a B+ tree keyed by MiniSQL's internal row ID. Leaf pages store rows; internal pages store routing keys and child page references.
+- Primary, unique and secondary indexes use the existing B-tree-style index pages. Secondary index keys can point to multiple row IDs.
+- Full-text and JSON inverted indexes use dedicated inverted-index pages. An entry tree maps each generated term, such as a text token or JSON key/value term, to postings. Small posting lists are stored inline in the entry leaf. Larger posting lists are promoted to compressed posting leaf pages, with internal posting-tree routing pages keyed by row-id ranges.
+
+The inverted index is therefore not just a regular secondary index with larger value lists. It has two levels of structure: term lookup in the entry tree, then posting lookup/iteration in a posting tree. This keeps high-frequency terms from forcing huge values into entry pages and gives the storage layer room for future optimisations such as better posting compression, posting-tree skipping, and eventually pending-list style batched updates.
+
 ### Database Header Format
 
 The first `100` bytes of page `0` are reserved for the MiniSQL database header. This is part of the on-disk file format.
@@ -456,7 +466,7 @@ FROM events
 WHERE JSON_CONTAINS(payload, '{"type":"click","tags":["web"]}');
 ```
 
-The v1 index stores generated JSON terms in a non-unique B+ tree. Terms include key existence (`k:user.id`) and scalar key/value entries (`kv:type:s:"click"`, `kv:tags[]:s:"web"`). Generated terms longer than the current 255-byte index-key limit are skipped; indexed queries are always rechecked against the full row, and queries that cannot produce any indexable terms fall back to sequential evaluation. It does not support posting trees, compression, path-specific operators, or dynamic query expressions yet.
+The v1 index stores generated JSON terms in MiniSQL's dedicated inverted-index storage. Terms include key existence (`k:user.id`) and scalar key/value entries (`kv:type:s:"click"`, `kv:tags[]:s:"web"`), with each term pointing at row-id postings. Small posting lists are stored inline; larger posting lists are promoted to compressed posting pages with internal posting-tree routing pages. Generated terms longer than the current 255-byte index-key limit are skipped; indexed queries are always rechecked against the full row, and queries that cannot produce any indexable terms fall back to sequential evaluation. It does not support path-specific operators or dynamic query expressions yet.
 
 ### CAST AS JSON
 
@@ -657,7 +667,7 @@ ON articles (body)
 WITH (tokenizer = 'simple');
 ```
 
-The v1 index stores one B+ tree entry per unique token, with each token pointing at ordered positional postings `(row ID, token position)`. The current on-disk format stores packed positional postings in the generic B+ tree posting slots; a delta/varint posting-list codec exists internally as preparation for a future dedicated inverted-index payload format. It does not rank from index statistics or use posting trees yet. Literal `MATCH(body, 'mini database')` predicates can use the index by intersecting posting rows for all query tokens; quoted phrases such as `MATCH(body, '"database pages"')` additionally require adjacent token positions. Dynamic query expressions and queries containing tokens longer than the current 255-byte index-key limit fall back to the sequential semantics.
+The v1 index uses MiniSQL's dedicated inverted-index storage: an entry tree maps each unique token to ordered positional postings `(row ID, token position)`. Small posting lists are stored inline in the entry leaf; larger posting lists are promoted to compressed posting pages with internal posting-tree routing pages. Literal `MATCH(body, 'mini database')` predicates can use the index by intersecting posting rows for all query tokens; quoted phrases such as `MATCH(body, '"database pages"')` additionally require adjacent token positions. Dynamic query expressions and queries containing tokens longer than the current 255-byte index-key limit fall back to the sequential semantics.
 
 | Function | Description |
 |----------|-------------|

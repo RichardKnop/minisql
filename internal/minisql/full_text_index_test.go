@@ -161,14 +161,14 @@ func TestFullTextIndexKeyMaintenanceHelpers(t *testing.T) {
 	t.Parallel()
 
 	bodyColumn := Column{Name: "body", Kind: Text}
-	index := &fakeFullTextIndex{rowIDs: make(map[any][]RowID)}
+	index := &fakeFullTextInvertedIndex{postings: make(map[string][]invertedPosting)}
 	secondaryIndex := SecondaryIndex{
 		IndexInfo: IndexInfo{
 			Name:    "idx_body_fts",
 			Method:  IndexMethodFullText,
 			Columns: []Column{bodyColumn},
 		},
-		Index: index,
+		InvertedIndex: index,
 	}
 	table := NewTable(testLogger, nil, nil, "articles", []Column{bodyColumn}, 0, nil)
 	ctx := context.Background()
@@ -442,67 +442,64 @@ func fullTextMatchCondition(columnName, query string) Condition {
 	}
 }
 
-type fakeFullTextIndex struct {
-	rowIDs   map[any][]RowID
+type fakeFullTextInvertedIndex struct {
+	postings map[string][]invertedPosting
 	inserted []string
 	deleted  []string
+	mode     invertedPostingMode
 }
 
-func (f *fakeFullTextIndex) GetRootPageIdx() PageIndex {
+func (f *fakeFullTextInvertedIndex) GetRootPageIdx() PageIndex {
 	return 0
 }
 
-func (f *fakeFullTextIndex) FindRowIDs(_ context.Context, key any) ([]RowID, error) {
-	ids, ok := f.rowIDs[key]
-	if !ok {
-		return nil, ErrNotFound
-	}
-	return ids, nil
+func (f *fakeFullTextInvertedIndex) Mode() invertedIndexPostingMode {
+	return invertedIndexPostingMode(f.postingMode())
 }
 
-func (f *fakeFullTextIndex) VisitRowIDs(_ context.Context, key any, fn func(RowID) error) error {
-	ids, ok := f.rowIDs[key]
-	if !ok {
-		return ErrNotFound
-	}
-	for _, id := range ids {
-		if err := fn(id); err != nil {
-			return err
-		}
-	}
+func (f *fakeFullTextInvertedIndex) Insert(_ context.Context, term string, posting invertedPosting) error {
+	f.inserted = append(f.inserted, term)
+	f.postings[term] = append(f.postings[term], posting)
 	return nil
 }
 
-func (f *fakeFullTextIndex) SeekLastKey(context.Context, PageIndex) (any, error) {
-	return nil, ErrNotFound
-}
-
-func (f *fakeFullTextIndex) Insert(_ context.Context, key any, rowID RowID) error {
-	f.inserted = append(f.inserted, key.(string))
-	f.rowIDs[key] = append(f.rowIDs[key], rowID)
-	return nil
-}
-
-func (f *fakeFullTextIndex) Delete(_ context.Context, key any, rowID RowID) error {
-	f.deleted = append(f.deleted, key.(string))
-	ids := f.rowIDs[key]
-	for i, id := range ids {
-		if id == rowID {
-			f.rowIDs[key] = append(ids[:i], ids[i+1:]...)
+func (f *fakeFullTextInvertedIndex) Delete(_ context.Context, term string, posting invertedPosting) error {
+	f.deleted = append(f.deleted, term)
+	postings := f.postings[term]
+	for i, existing := range postings {
+		if existing.RowID == posting.RowID {
+			f.postings[term] = append(postings[:i], postings[i+1:]...)
 			break
 		}
 	}
 	return nil
 }
 
-func (f *fakeFullTextIndex) ScanAll(context.Context, bool, indexScanner) error {
-	return nil
+func (f *fakeFullTextInvertedIndex) Lookup(_ context.Context, term string) (invertedPostingIterator, error) {
+	payload, err := encodeInvertedPostingList(f.postingMode(), f.postings[term])
+	if err != nil {
+		return nil, err
+	}
+	return &singleBlockInvertedPostingIterator{
+		block: invertedPostingBlock{
+			Payload:      payload,
+			CodecVersion: invertedPostingCodecVersion,
+		},
+		hasBlock: true,
+	}, nil
 }
 
-func (f *fakeFullTextIndex) ScanRange(context.Context, RangeCondition, bool, indexScanner) error {
-	return nil
+func (f *fakeFullTextInvertedIndex) Stats(_ context.Context, term string) (invertedPostingStats, error) {
+	postings := groupInvertedPostings(f.postingMode(), f.postings[term])
+	return invertedPostingStats{
+		DocFreq:      uint32(len(postings)),
+		PostingCount: countInvertedPostings(f.postingMode(), postings),
+	}, nil
 }
 
-func (f *fakeFullTextIndex) BFS(context.Context, indexCallback) error {
-	return nil
+func (f *fakeFullTextInvertedIndex) postingMode() invertedPostingMode {
+	if f.mode != 0 {
+		return f.mode
+	}
+	return invertedPostingModePositions
 }

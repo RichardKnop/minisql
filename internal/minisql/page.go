@@ -23,6 +23,8 @@ type Page struct {
 	InternalNode      *InternalNode
 	LeafNode          *LeafNode
 	IndexOverflowNode *IndexOverflowPage
+	InvertedEntryPage *invertedEntryPage
+	InvertedPostPage  *invertedPostingPage
 	Index             PageIndex
 }
 
@@ -54,6 +56,10 @@ func (p *Page) Clone() *Page {
 			RowIDs: make([]RowID, len(p.IndexOverflowNode.RowIDs)),
 		}
 		copy(pageCopy.IndexOverflowNode.RowIDs, p.IndexOverflowNode.RowIDs)
+	case p.InvertedEntryPage != nil:
+		pageCopy.InvertedEntryPage = p.InvertedEntryPage.Clone()
+	case p.InvertedPostPage != nil:
+		pageCopy.InvertedPostPage = p.InvertedPostPage.Clone()
 	}
 
 	return pageCopy

@@ -19,6 +19,10 @@ const (
 	PageTypeFree
 	// PageTypeIndexOverflow identifies an index overflow page for large row ID lists.
 	PageTypeIndexOverflow
+	// PageTypeInvertedEntry identifies a future dedicated inverted-index entry tree page.
+	PageTypeInvertedEntry
+	// PageTypeInvertedPosting identifies a future dedicated inverted-index posting tree page.
+	PageTypeInvertedPosting
 )
 
 type tablePager struct {

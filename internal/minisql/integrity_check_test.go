@@ -329,6 +329,121 @@ func TestDatabase_IntegrityCheck(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, issueCodes(report), "index_orphan_entry")
 	})
+
+	t.Run("missing full-text index posting is reported", func(t *testing.T) {
+		pager, dbFile := initTest(t)
+		mockParser := new(MockParser)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), mockParser, pager, pager, nil)
+		require.NoError(t, err)
+
+		createTableStmt := Statement{
+			Kind:      CreateTable,
+			TableName: "articles_integrity",
+			Columns: []Column{
+				{Name: "body", Kind: Text},
+			},
+		}
+		createIndexStmt := Statement{
+			Kind:           CreateIndex,
+			TableName:      "articles_integrity",
+			IndexName:      "idx_articles_integrity_body",
+			Columns:        []Column{{Name: "body"}},
+			IndexMethod:    IndexMethodFullText,
+			IndexTokenizer: TextSearchTokenizerSimple,
+		}
+		mockParser.EXPECT().Parse(mock.Anything, createTableStmt.DDL()).Return([]Statement{createTableStmt}, nil).Once()
+
+		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
+			_, err := db.ExecuteStatement(ctx, createTableStmt)
+			if err != nil {
+				return err
+			}
+			_, err = db.ExecuteStatement(ctx, createIndexStmt)
+			return err
+		})
+		require.NoError(t, err)
+
+		insertStmt := Statement{
+			Kind:      Insert,
+			TableName: "articles_integrity",
+			Fields:    []Field{{Name: "body"}},
+			Inserts: [][]OptionalValue{{
+				{Value: NewTextPointer([]byte("database pages")), Valid: true},
+			}},
+		}
+		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
+			_, err := db.tables["articles_integrity"].Insert(ctx, insertStmt)
+			return err
+		})
+		require.NoError(t, err)
+
+		secondaryIndex := db.tables["articles_integrity"].SecondaryIndexes["idx_articles_integrity_body"]
+		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
+			return secondaryIndex.InvertedIndex.Delete(ctx, "database", invertedPosting{RowID: 0, Positions: []uint32{0}})
+		})
+		require.NoError(t, err)
+
+		report, err := db.IntegrityCheck(context.Background())
+		require.NoError(t, err)
+		assert.Contains(t, issueCodes(report), "index_missing_entry")
+	})
+
+	t.Run("orphan JSON inverted index posting is reported", func(t *testing.T) {
+		pager, dbFile := initTest(t)
+		mockParser := new(MockParser)
+		db, err := NewDatabase(context.Background(), testLogger, dbFile.Name(), mockParser, pager, pager, nil)
+		require.NoError(t, err)
+
+		createTableStmt := Statement{
+			Kind:      CreateTable,
+			TableName: "events_integrity",
+			Columns: []Column{
+				{Name: "payload", Kind: JSON},
+			},
+		}
+		createIndexStmt := Statement{
+			Kind:        CreateIndex,
+			TableName:   "events_integrity",
+			IndexName:   "idx_events_integrity_payload",
+			Columns:     []Column{{Name: "payload"}},
+			IndexMethod: IndexMethodInverted,
+		}
+		mockParser.EXPECT().Parse(mock.Anything, createTableStmt.DDL()).Return([]Statement{createTableStmt}, nil).Once()
+
+		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
+			_, err := db.ExecuteStatement(ctx, createTableStmt)
+			if err != nil {
+				return err
+			}
+			_, err = db.ExecuteStatement(ctx, createIndexStmt)
+			return err
+		})
+		require.NoError(t, err)
+
+		insertStmt := Statement{
+			Kind:      Insert,
+			TableName: "events_integrity",
+			Fields:    []Field{{Name: "payload"}},
+			Inserts: [][]OptionalValue{{
+				{Value: NewTextPointer([]byte(`{"type":"click"}`)), Valid: true},
+			}},
+		}
+		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
+			_, err := db.tables["events_integrity"].Insert(ctx, insertStmt)
+			return err
+		})
+		require.NoError(t, err)
+
+		secondaryIndex := db.tables["events_integrity"].SecondaryIndexes["idx_events_integrity_payload"]
+		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
+			return secondaryIndex.InvertedIndex.Insert(ctx, `kv:type:s:"ghost"`, invertedPosting{RowID: 99})
+		})
+		require.NoError(t, err)
+
+		report, err := db.IntegrityCheck(context.Background())
+		require.NoError(t, err)
+		assert.Contains(t, issueCodes(report), "index_orphan_entry")
+	})
 }
 
 func issueCodes(report IntegrityReport) []string {

@@ -60,6 +60,10 @@ func (d *Database) IntegrityCheck(ctx context.Context) (IntegrityReport, error) 
 			report = d.walkIndexPages(ctx, report, table.Name, index.Name, index.Columns, true, index.Index.GetRootPageIdx(), livePages)
 		}
 		for _, index := range table.SecondaryIndexes {
+			if secondaryIndexUsesDedicatedInvertedStorage(index.Method) && index.InvertedIndex != nil {
+				report = d.walkInvertedIndexPages(ctx, report, table.Name, index.Name, index.InvertedIndex.GetRootPageIdx(), livePages)
+				continue
+			}
 			if index.Index == nil {
 				continue
 			}
@@ -121,7 +125,9 @@ func (d *Database) QuickCheck(ctx context.Context) (IntegrityReport, error) {
 			}
 		}
 		for _, index := range table.SecondaryIndexes {
-			if index.Index != nil {
+			if secondaryIndexUsesDedicatedInvertedStorage(index.Method) && index.InvertedIndex != nil {
+				rootPages[index.InvertedIndex.GetRootPageIdx()] = fmt.Sprintf("index %s", index.Name)
+			} else if index.Index != nil {
 				rootPages[index.Index.GetRootPageIdx()] = fmt.Sprintf("index %s", index.Name)
 			}
 		}
@@ -158,6 +164,10 @@ func (d *Database) QuickCheck(ctx context.Context) (IntegrityReport, error) {
 			report = d.checkIndexRoot(ctx, report, table.Name, index.Name, index.Columns, true, index.Index.GetRootPageIdx())
 		}
 		for _, index := range table.SecondaryIndexes {
+			if secondaryIndexUsesDedicatedInvertedStorage(index.Method) && index.InvertedIndex != nil {
+				report = d.checkInvertedIndexRoot(ctx, report, table.Name, index.Name, index.InvertedIndex.GetRootPageIdx())
+				continue
+			}
 			if index.Index == nil {
 				continue
 			}
@@ -335,6 +345,41 @@ func (d *Database) checkIndexRoot(ctx context.Context, report IntegrityReport, t
 		report.Issues = append(report.Issues, IntegrityIssue{
 			Code:    "index_root_invalid_type",
 			Message: fmt.Sprintf("index %s on table %s root page %d is not an index node", indexName, tableName, pageIdx),
+			Page:    pageIndexPtr(pageIdx),
+			Object:  indexName,
+		})
+	}
+
+	return report
+}
+
+func (d *Database) checkInvertedIndexRoot(ctx context.Context, report IntegrityReport, tableName, indexName string, pageIdx PageIndex) IntegrityReport {
+	if pageIdx >= PageIndex(report.TotalPages) {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_root_out_of_range",
+			Message: fmt.Sprintf("index %s on table %s has root page %d outside database page range", indexName, tableName, pageIdx),
+			Page:    pageIndexPtr(pageIdx),
+			Object:  indexName,
+		})
+		return report
+	}
+
+	page, err := d.factory.ForInvertedIndex().GetPage(ctx, pageIdx)
+	if err != nil {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_root_decode_failed",
+			Message: fmt.Sprintf("failed to decode root page for index %s on table %s: %v", indexName, tableName, err),
+			Page:    pageIndexPtr(pageIdx),
+			Object:  indexName,
+		})
+		return report
+	}
+	report.CheckedRootPages += 1
+
+	if page.InvertedEntryPage == nil {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_root_invalid_type",
+			Message: fmt.Sprintf("index %s on table %s root page %d is not an inverted entry node", indexName, tableName, pageIdx),
 			Page:    pageIndexPtr(pageIdx),
 			Object:  indexName,
 		})
@@ -549,6 +594,82 @@ func (d *Database) walkIndexPages(ctx context.Context, report IntegrityReport, t
 	return report
 }
 
+func (d *Database) walkInvertedIndexPages(ctx context.Context, report IntegrityReport, tableName, indexName string, root PageIndex, livePages map[PageIndex]string) IntegrityReport {
+	pager := d.factory.ForInvertedIndex()
+	visited := make(map[PageIndex]struct{})
+	stack := []PageIndex{root}
+	objectName := fmt.Sprintf("index %s on table %s", indexName, tableName)
+
+	for len(stack) > 0 {
+		pageIdx := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		if pageIdx >= PageIndex(report.TotalPages) {
+			report.Issues = append(report.Issues, IntegrityIssue{
+				Code:    "index_page_out_of_range",
+				Message: fmt.Sprintf("%s references page %d outside database page range", objectName, pageIdx),
+				Page:    pageIndexPtr(pageIdx),
+				Object:  indexName,
+			})
+			continue
+		}
+		if _, seen := visited[pageIdx]; seen {
+			continue
+		}
+		visited[pageIdx] = struct{}{}
+		report = markLivePage(report, livePages, pageIdx, objectName)
+
+		page, err := pager.GetPage(ctx, pageIdx)
+		if err != nil {
+			report.Issues = append(report.Issues, IntegrityIssue{
+				Code:    "index_page_decode_failed",
+				Message: fmt.Sprintf("failed to decode page %d for %s: %v", pageIdx, objectName, err),
+				Page:    pageIndexPtr(pageIdx),
+				Object:  indexName,
+			})
+			continue
+		}
+		switch {
+		case page.InvertedEntryPage != nil:
+			entryPage := page.InvertedEntryPage
+			if entryPage.Header.IsLeaf {
+				for _, cell := range entryPage.Cells {
+					if cell.PostingKind == invertedPostingKindTree && cell.Child != 0 {
+						stack = append(stack, cell.Child)
+					}
+				}
+				if entryPage.Header.NextLeaf != 0 {
+					stack = append(stack, entryPage.Header.NextLeaf)
+				}
+			} else {
+				stack = append(stack, invertedEntryChildren(entryPage)...)
+			}
+		case page.InvertedPostPage != nil:
+			postingPage := page.InvertedPostPage
+			if postingPage.Header.Level == 0 {
+				if postingPage.Header.NextLeaf != 0 {
+					stack = append(stack, postingPage.Header.NextLeaf)
+				}
+			} else {
+				for _, block := range postingPage.Blocks {
+					if block.Child != 0 {
+						stack = append(stack, block.Child)
+					}
+				}
+			}
+		default:
+			report.Issues = append(report.Issues, IntegrityIssue{
+				Code:    "index_page_invalid_type",
+				Message: fmt.Sprintf("page %d reachable from %s is not an inverted index page", pageIdx, objectName),
+				Page:    pageIndexPtr(pageIdx),
+				Object:  indexName,
+			})
+		}
+	}
+
+	return report
+}
+
 func (d *Database) walkIndexOverflowPages(ctx context.Context, report IntegrityReport, pager Pager, objectName string, node any, livePages map[PageIndex]string) IntegrityReport {
 	switch n := node.(type) {
 	case *IndexNode[int8]:
@@ -699,6 +820,17 @@ func (d *Database) checkTableIndexConsistency(ctx context.Context, report Integr
 		})
 	}
 	for _, index := range table.SecondaryIndexes {
+		if secondaryIndexUsesDedicatedInvertedStorage(index.Method) {
+			if index.InvertedIndex != nil {
+				report = checkInvertedIndexConsistency(ctx, report, table, invertedIndexConsistencyTarget{
+					name:       index.Name,
+					method:     index.Method,
+					index:      index.InvertedIndex,
+					tableIndex: index,
+				})
+			}
+			continue
+		}
 		if !index.IsBTree() || index.Index == nil {
 			continue
 		}
@@ -715,6 +847,13 @@ func (d *Database) checkTableIndexConsistency(ctx context.Context, report Integr
 	return report
 }
 
+type invertedIndexConsistencyTarget struct {
+	index      invertedIndex
+	tableIndex SecondaryIndex
+	name       string
+	method     IndexMethod
+}
+
 type indexConsistencyTarget struct {
 	index      BTreeIndex
 	whereCond  OneOrMore // partial index predicate; nil = full index
@@ -725,6 +864,56 @@ type indexConsistencyTarget struct {
 }
 
 type integrityIndexEntries map[string]map[RowID]int
+
+func checkInvertedIndexConsistency(ctx context.Context, report IntegrityReport, table *Table, target invertedIndexConsistencyTarget) IntegrityReport {
+	objectName := fmt.Sprintf("%s index %s on table %s", target.method.String(), target.name, table.Name)
+
+	actual, duplicateEntries, err := scanInvertedIndexEntries(ctx, target.index)
+	if err != nil {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_scan_failed",
+			Message: fmt.Sprintf("failed to scan %s: %v", objectName, err),
+			Object:  target.name,
+		})
+		return report
+	}
+
+	for entryID, count := range duplicateEntries {
+		if count <= 1 {
+			continue
+		}
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_duplicate_entry",
+			Message: fmt.Sprintf("%s contains duplicate entry %s (%d occurrences)", objectName, entryID, count),
+			Object:  target.name,
+		})
+	}
+
+	report, err = streamCheckExpectedInvertedIndexEntries(ctx, report, table, target, actual)
+	if err != nil {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "table_scan_failed",
+			Message: fmt.Sprintf("failed to scan table %s for integrity verification against %s: %v", table.Name, objectName, err),
+			Object:  target.name,
+		})
+		return report
+	}
+
+	for termID, actualRowIDs := range actual {
+		for rowID, count := range actualRowIDs {
+			if count <= 0 {
+				continue
+			}
+			report.Issues = append(report.Issues, IntegrityIssue{
+				Code:    "index_orphan_entry",
+				Message: fmt.Sprintf("%s contains row %d for unexpected term %s", objectName, rowID, termID),
+				Object:  target.name,
+			})
+		}
+	}
+
+	return report
+}
 
 func checkIndexConsistency(ctx context.Context, report IntegrityReport, table *Table, target indexConsistencyTarget) IntegrityReport {
 	objectName := fmt.Sprintf("%s %s on table %s", target.kind, target.name, table.Name)
@@ -774,6 +963,67 @@ func checkIndexConsistency(ctx context.Context, report IntegrityReport, table *T
 	}
 
 	return report
+}
+
+func streamCheckExpectedInvertedIndexEntries(ctx context.Context, report IntegrityReport, table *Table, target invertedIndexConsistencyTarget, actual integrityIndexEntries) (IntegrityReport, error) {
+	cursor, err := table.SeekFirst(ctx)
+	if err != nil {
+		return report, err
+	}
+
+	fields := fieldsFromColumns(table.Columns...)
+	for !cursor.EndOfTable {
+		row, err := cursor.fetchRow(ctx, true, fields...)
+		if err != nil {
+			return report, err
+		}
+
+		if len(target.tableIndex.WhereCond) > 0 {
+			ok, err := row.CheckOneOrMore(target.tableIndex.WhereCond)
+			if err != nil {
+				report.Issues = append(report.Issues, IntegrityIssue{
+					Code:    "index_expected_entries_failed",
+					Message: fmt.Sprintf("failed to evaluate partial index predicate for %s on row %d: %v", target.name, row.Key, err),
+					Object:  target.name,
+				})
+				continue
+			}
+			if !ok {
+				continue
+			}
+		}
+
+		expected, err := expectedInvertedIndexEntriesForRow(target.tableIndex, row)
+		if err != nil {
+			report.Issues = append(report.Issues, IntegrityIssue{
+				Code:    "index_expected_entries_failed",
+				Message: fmt.Sprintf("failed to derive expected terms for %s on row %d: %v", target.name, row.Key, err),
+				Object:  target.name,
+			})
+			continue
+		}
+
+		for termID, count := range expected {
+			rowIDs := actual[termID]
+			if rowIDs[row.Key] >= count {
+				rowIDs[row.Key] -= count
+				if rowIDs[row.Key] == 0 {
+					delete(rowIDs, row.Key)
+					if len(rowIDs) == 0 {
+						delete(actual, termID)
+					}
+				}
+				continue
+			}
+
+			report.Issues = append(report.Issues, IntegrityIssue{
+				Code:    "index_missing_entry",
+				Message: fmt.Sprintf("%s index %s on table %s is missing row %d for term %s", target.method.String(), target.name, table.Name, row.Key, termID),
+				Object:  target.name,
+			})
+		}
+	}
+	return report, nil
 }
 
 func streamCheckExpectedIndexEntries(ctx context.Context, report IntegrityReport, table *Table, target indexConsistencyTarget, actual integrityIndexEntries) (IntegrityReport, error) {
@@ -859,6 +1109,115 @@ func streamCheckExpectedIndexEntries(ctx context.Context, report IntegrityReport
 	return report, nil
 }
 
+func expectedInvertedIndexEntriesForRow(index SecondaryIndex, row Row) (map[string]int, error) {
+	expected := make(map[string]int)
+	switch index.Method {
+	case IndexMethodFullText:
+		tokens, err := fullTextTokenPositionsForRow(index, row)
+		if err != nil {
+			return nil, err
+		}
+		for _, token := range tokens {
+			expected[integrityKeyID(token.Term)]++
+		}
+	case IndexMethodInverted:
+		terms, err := jsonInvertedTermsForRow(index, row)
+		if err != nil {
+			return nil, err
+		}
+		for _, term := range terms {
+			expected[integrityKeyID(term)]++
+		}
+	default:
+		return nil, fmt.Errorf("unsupported inverted index method %s", index.Method.String())
+	}
+	return expected, nil
+}
+
+func scanInvertedIndexEntries(ctx context.Context, index invertedIndex) (integrityIndexEntries, map[string]int, error) {
+	dedicated, ok := index.(*dedicatedInvertedIndex)
+	if !ok {
+		return nil, nil, fmt.Errorf("unsupported inverted index implementation %T", index)
+	}
+
+	entries := make(integrityIndexEntries)
+	entryCounts := make(map[string]int)
+	if err := scanDedicatedInvertedEntryCells(ctx, dedicated, func(cell invertedEntryCell) error {
+		termID := integrityKeyID(cell.Term)
+		iter, err := dedicated.newPostingIterator(ctx, cell)
+		if err != nil {
+			return err
+		}
+		for {
+			block, ok, err := iter.NextBlock(ctx)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				break
+			}
+			mode, postings, err := decodeInvertedPostingList(block.Payload)
+			if err != nil {
+				return err
+			}
+			if mode != dedicated.Mode() {
+				return fmt.Errorf("inverted term %q uses posting mode %d, expected %d", cell.Term, mode, dedicated.Mode())
+			}
+			for _, posting := range postings {
+				count := integrityInvertedPostingCount(mode, posting)
+				addIntegrityEntryCount(entries, termID, posting.RowID, count)
+				if mode == invertedPostingModeRowIDs {
+					entryCounts[fmt.Sprintf("%s|%d", termID, posting.RowID)] += count
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, nil, err
+	}
+
+	return entries, entryCounts, nil
+}
+
+func scanDedicatedInvertedEntryCells(ctx context.Context, index *dedicatedInvertedIndex, visit func(invertedEntryCell) error) error {
+	root, err := index.readRootEntryPage(ctx)
+	if err != nil {
+		return err
+	}
+
+	stack := []PageIndex{root.Index}
+	for len(stack) > 0 {
+		pageIdx := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		page, err := index.pager.ReadPage(ctx, pageIdx)
+		if err != nil {
+			return fmt.Errorf("read inverted entry page %d: %w", pageIdx, err)
+		}
+		if page.InvertedEntryPage == nil {
+			return fmt.Errorf("page %d is not an inverted entry page", pageIdx)
+		}
+		entryPage := page.InvertedEntryPage
+		if !entryPage.Header.IsLeaf {
+			stack = append(stack, invertedEntryChildren(entryPage)...)
+			continue
+		}
+		for _, cell := range entryPage.Cells {
+			if err := visit(cell); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func integrityInvertedPostingCount(mode invertedPostingMode, posting invertedPosting) int {
+	if mode == invertedPostingModePositions {
+		return len(posting.Positions)
+	}
+	return 1
+}
+
 func scanIndexEntries(ctx context.Context, index BTreeIndex) (integrityIndexEntries, map[string]int, error) {
 	entries := make(integrityIndexEntries)
 	entryCounts := make(map[string]int)
@@ -874,12 +1233,16 @@ func scanIndexEntries(ctx context.Context, index BTreeIndex) (integrityIndexEntr
 }
 
 func addIntegrityEntry(entries integrityIndexEntries, keyID string, rowID RowID) {
+	addIntegrityEntryCount(entries, keyID, rowID, 1)
+}
+
+func addIntegrityEntryCount(entries integrityIndexEntries, keyID string, rowID RowID, count int) {
 	rowIDs, ok := entries[keyID]
 	if !ok {
 		rowIDs = make(map[RowID]int)
 		entries[keyID] = rowIDs
 	}
-	rowIDs[rowID] += 1
+	rowIDs[rowID] += count
 }
 
 func integrityKeyIDFromRow(row Row, columns []Column, required bool) (string, bool, error) {
