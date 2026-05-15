@@ -93,6 +93,34 @@ func TestJSONContains(t *testing.T) {
 	}
 }
 
+func TestJSONInvertedQueryTermsAreExact(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		query string
+		want  bool
+	}{
+		{name: "scalar root", query: `"click"`, want: true},
+		{name: "non-empty object scalar tree", query: `{"type":"click","user":{"id":"u1"}}`, want: true},
+		{name: "unique scalar array query", query: `{"tags":["web","mobile"]}`, want: true},
+		{name: "duplicate scalar array query needs recheck", query: `{"tags":["web","web"]}`, want: false},
+		{name: "object array query needs recheck", query: `{"tags":[{"name":"web"}]}`, want: false},
+		{name: "empty object needs recheck", query: `{"user":{}}`, want: false},
+		{name: "empty array needs recheck", query: `{"tags":[]}`, want: false},
+		{name: "overlong scalar term needs recheck", query: `{"long":"` + strings.Repeat("x", MaxIndexKeySize+1) + `"}`, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			value, err := decodeJSONForInvertedIndex(tt.query)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, jsonInvertedQueryTermsAreExact(value))
+		})
+	}
+}
+
 func TestJSONInvertedIndexHelpers(t *testing.T) {
 	t.Parallel()
 

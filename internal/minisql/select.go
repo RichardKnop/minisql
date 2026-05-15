@@ -1273,7 +1273,7 @@ func (t *Table) invertedIndexScan(ctx context.Context, scan Scan, selectedFields
 	}
 
 	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
-	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	tableFilter := compileInvertedScanFilter(t.Columns, scan.Filters)
 	for _, rowID := range surviving {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -1684,6 +1684,100 @@ func compileScanFilter(columns []Column, filters OneOrMore) func(Row) (bool, err
 	return func(row Row) (bool, error) {
 		return row.CheckOneOrMoreWithColumnIndexes(filters, columnIndexes)
 	}
+}
+
+// compileInvertedScanFilter specializes JSON_CONTAINS rechecks for indexed
+// inverted scans while preserving the generic filter path for all other cases.
+func compileInvertedScanFilter(columns []Column, filters OneOrMore) func(Row) (bool, error) {
+	jsonFilter, remainingFilters, ok := compileJSONContainsRecheck(columns, filters)
+	if !ok {
+		return compileScanFilter(columns, filters)
+	}
+	remainingFilter := compileScanFilter(columns, remainingFilters)
+	return func(row Row) (bool, error) {
+		ok, err := jsonFilter(row)
+		if err != nil || !ok {
+			return ok, err
+		}
+		if remainingFilter == nil {
+			return true, nil
+		}
+		return remainingFilter(row)
+	}
+}
+
+func compileJSONContainsRecheck(columns []Column, filters OneOrMore) (func(Row) (bool, error), OneOrMore, bool) {
+	if len(filters) != 1 {
+		return nil, nil, false
+	}
+	columnIndexes := make(map[string]int, len(columns))
+	for i := range columns {
+		columnIndexes[columns[i].Name] = i
+	}
+
+	for condIdx, cond := range filters[0] {
+		columnName, query, ok := jsonContainsLiteralCondition(cond)
+		if !ok {
+			continue
+		}
+		columnIdx, ok := columnIndexes[columnName]
+		if !ok {
+			return nil, nil, false
+		}
+		queryValue, err := decodeJSONForInvertedIndex(query)
+		if err != nil {
+			return nil, nil, false
+		}
+		exactTerms := jsonInvertedQueryTermsAreExact(queryValue)
+		remaining := make(Conditions, 0, len(filters[0])-1)
+		remaining = append(remaining, filters[0][:condIdx]...)
+		remaining = append(remaining, filters[0][condIdx+1:]...)
+		var remainingFilters OneOrMore
+		if len(remaining) > 0 {
+			remainingFilters = OneOrMore{remaining}
+		}
+		return func(row Row) (bool, error) {
+			if exactTerms {
+				return true, nil
+			}
+			if columnIdx >= len(row.Values) {
+				return false, nil
+			}
+			value := row.Values[columnIdx]
+			if !value.Valid {
+				return false, nil
+			}
+			doc, ok := toStringVal(value.Value)
+			if !ok {
+				return false, fmt.Errorf("JSON_CONTAINS: first argument must be a string")
+			}
+			return jsonContainsDecodedQuery(doc, queryValue)
+		}, remainingFilters, true
+	}
+
+	return nil, nil, false
+}
+
+func jsonContainsLiteralCondition(cond Condition) (string, string, bool) {
+	if cond.Operator != Eq || cond.Operand2.Type != OperandBoolean || cond.Operand2.Value != true {
+		return "", "", false
+	}
+	if cond.Operand1.Type != OperandExpr {
+		return "", "", false
+	}
+	expr, ok := cond.Operand1.Value.(*Expr)
+	if !ok || expr.FuncName != "JSON_CONTAINS" || len(expr.Args) != 2 {
+		return "", "", false
+	}
+	columnName := expr.Args[0].Column
+	if columnName == "" {
+		return "", "", false
+	}
+	query, ok := literalText(expr.Args[1])
+	if !ok {
+		return "", "", false
+	}
+	return columnName, query, true
 }
 
 // virtualSequentialScan iterates the table's in-memory virtualRows, applies the

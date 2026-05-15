@@ -556,6 +556,89 @@ func TestCompileScanFilter(t *testing.T) {
 	})
 }
 
+func TestCompileInvertedScanFilter(t *testing.T) {
+	t.Parallel()
+
+	columns := []Column{
+		{Name: "payload", Kind: JSON, Size: MaxInlineVarchar},
+		{Name: "kind", Kind: Varchar, Size: MaxInlineVarchar},
+	}
+	row := NewRowWithValues(columns, []OptionalValue{
+		{Value: NewTextPointer([]byte(`{"type":"click","user":{"id":"u1"}}`)), Valid: true},
+		{Value: NewTextPointer([]byte("event")), Valid: true},
+	})
+
+	t.Run("predecodes json contains query", func(t *testing.T) {
+		t.Parallel()
+
+		filter := compileInvertedScanFilter(columns, OneOrMore{{jsonContainsCondition("payload", `{"user":{"id":"u1"}}`)}})
+		require.NotNil(t, filter)
+
+		ok, err := filter(row)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("applies remaining filters", func(t *testing.T) {
+		t.Parallel()
+
+		filters := OneOrMore{{
+			jsonContainsCondition("payload", `{"type":"click"}`),
+			FieldIsEqual(Field{Name: "kind"}, OperandQuotedString, NewTextPointer([]byte("audit"))),
+		}}
+		filter := compileInvertedScanFilter(columns, filters)
+		require.NotNil(t, filter)
+
+		ok, err := filter(row)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("rechecks object array queries", func(t *testing.T) {
+		t.Parallel()
+
+		arrayRow := NewRowWithValues(columns, []OptionalValue{
+			{Value: NewTextPointer([]byte(`{"tags":[{"name":"mobile"}]}`)), Valid: true},
+			{Value: NewTextPointer([]byte("event")), Valid: true},
+		})
+		filter := compileInvertedScanFilter(columns, OneOrMore{{jsonContainsCondition("payload", `{"tags":[{"name":"web"}]}`)}})
+		require.NotNil(t, filter)
+
+		ok, err := filter(arrayRow)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("falls back for generic filters", func(t *testing.T) {
+		t.Parallel()
+
+		filters := OneOrMore{{FieldIsEqual(Field{Name: "kind"}, OperandQuotedString, NewTextPointer([]byte("event")))}}
+		filter := compileInvertedScanFilter(columns, filters)
+		require.NotNil(t, filter)
+
+		ok, err := filter(row)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+}
+
+func jsonContainsCondition(columnName, query string) Condition {
+	return Condition{
+		Operand1: Operand{
+			Type: OperandExpr,
+			Value: &Expr{
+				FuncName: "JSON_CONTAINS",
+				Args: []*Expr{
+					{Column: columnName},
+					{Literal: NewTextPointer([]byte(query))},
+				},
+			},
+		},
+		Operator: Eq,
+		Operand2: Operand{Type: OperandBoolean, Value: true},
+	}
+}
+
 func TestTable_Select_Overflow(t *testing.T) {
 	table, txManager, _ := newTestTable(t, testOverflowColumns)
 	var (
