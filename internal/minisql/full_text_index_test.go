@@ -446,6 +446,7 @@ type fakeFullTextInvertedIndex struct {
 	postings map[string][]invertedPosting
 	inserted []string
 	deleted  []string
+	replaced []string
 	mode     invertedPostingMode
 }
 
@@ -467,6 +468,14 @@ func (f *fakeFullTextInvertedIndex) InsertMany(_ context.Context, term string, p
 	f.inserted = append(f.inserted, term)
 	f.postings[term] = append(f.postings[term], postings...)
 	return nil
+}
+
+func (f *fakeFullTextInvertedIndex) Replace(_ context.Context, term string, oldPosting, newPosting invertedPosting) error {
+	f.replaced = append(f.replaced, term)
+	if err := f.Delete(context.Background(), term, oldPosting); err != nil {
+		return err
+	}
+	return f.Insert(context.Background(), term, newPosting)
 }
 
 func (f *fakeFullTextInvertedIndex) Delete(_ context.Context, term string, posting invertedPosting) error {
