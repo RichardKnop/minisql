@@ -31,7 +31,16 @@ func encodeInvertedPostingList(mode invertedPostingMode, postings []invertedPost
 		return nil, fmt.Errorf("unknown inverted posting mode %d", mode)
 	}
 
-	grouped := groupInvertedPostings(mode, postings)
+	return encodeGroupedInvertedPostingList(mode, groupInvertedPostings(mode, postings))
+}
+
+// encodeGroupedInvertedPostingList serializes postings that are already sorted,
+// grouped by row ID, and deduplicated. It is used by posting-tree block packing
+// to avoid repeatedly regrouping prefixes while searching for a block boundary.
+func encodeGroupedInvertedPostingList(mode invertedPostingMode, grouped []invertedPosting) ([]byte, error) {
+	if mode != invertedPostingModeRowIDs && mode != invertedPostingModePositions {
+		return nil, fmt.Errorf("unknown inverted posting mode %d", mode)
+	}
 	buf := make([]byte, 0, 2+len(grouped)*binary.MaxVarintLen64*2)
 	buf = append(buf, invertedPostingCodecVersion, byte(mode))
 

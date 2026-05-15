@@ -1,4 +1,44 @@
-### 2026-05-15 (runtime inverted-index allocation pass — latest)
+### 2026-05-15 (posting-tree block packing optimisation — latest)
+
+Full-text UPDATE was traced to hot posting-tree mutation. A focused internal
+benchmark showed a single hot positional posting-tree mutation costing roughly
+`3.1 ms/op`, `5.8 MiB/op`, and `60k allocs/op`. The root cause was
+`encodeLargestInvertedPostingBlock`: it searched for a fitting compressed block
+by re-encoding every prefix from `1..N`, and each prefix encode regrouped and
+resorted postings.
+
+Posting block packing now:
+
+- encodes already-grouped postings without regrouping each prefix;
+- uses binary search to find the largest prefix that fits a posting block;
+- keeps the existing block format unchanged.
+
+The focused mutation benchmark now measures hot `Replace` at roughly
+`0.14 ms/op`, `0.2 MiB/op`, and `1.5k allocs/op`. The generated runtime table
+for the full inverted benchmark suite is appended below as `2026-05-15 19:35 UTC`.
+
+#### Timing
+
+| Benchmark | before | after | improvement |
+|---|---|---|---|
+| FullText_Update_WithIndex/minisql | 3.25 ms/op | 474.57 µs/op | 6.8× faster |
+| FullText_Update_WithIndex/sqlite | 375.41 µs/op | 451.48 µs/op | reference variance |
+| JSONInverted_Update_WithIndex/minisql_indexed | 431.96 µs/op | 421.89 µs/op | roughly unchanged |
+
+#### Memory (B/op)
+
+| Benchmark | before | after | improvement |
+|---|---|---|---|
+| FullText_Update_WithIndex/minisql | 5.9 MiB | 586.1 KiB | 10.3× lower |
+| JSONInverted_Update_WithIndex/minisql_indexed | 1.2 MiB | 1.2 MiB | unchanged |
+
+Full-text UPDATE is now roughly at SQLite FTS5 wall-time parity in this fixture,
+though MiniSQL still allocates much more memory. The next likely runtime targets
+are lookup allocation for common full-text terms and JSON indexed scans.
+
+---
+
+### 2026-05-15 (runtime inverted-index allocation pass)
 
 Runtime inverted-index maintenance and scans received two targeted allocation
 improvements:
@@ -1048,4 +1088,42 @@ Snapshot isolation (MVCC) for read-only transactions + TOCTOU fix in `ReadPage`:
 | JSONInverted_Contains_ObjectSubset/object_subset | — | 1.7 MiB | 3.5 MiB | — | 548 B | 549 B |
 | JSONInverted_Update_WithIndex | — | 1.2 MiB | — | — | — | — |
 | JSONInverted_Delete_WithIndex | — | 142.5 KiB | — | — | — | — |
+
+### 2026-05-15 19:35 UTC
+
+#### Timing
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan | ratio |
+|---|---|---|---|---|---|---|---|
+| FullText_Insert_WithIndex | 91.09 µs/op | — | — | 224.51 µs/op | — | — | 0.4× |
+| FullText_Search_SingleTerm/rare | 209.33 µs/op | — | — | 361.07 µs/op | — | — | 0.6× |
+| FullText_Search_SingleTerm/medium | 209.67 µs/op | — | — | 438.83 µs/op | — | — | 0.5× |
+| FullText_Search_SingleTerm/common | 1.01 ms/op | — | — | 432.22 µs/op | — | — | 2.3× |
+| FullText_Search_MultiTermAND | 332.81 µs/op | — | — | 354.13 µs/op | — | — | 0.9× |
+| FullText_Search_Phrase | 330.16 µs/op | — | — | 367.14 µs/op | — | — | 0.9× |
+| FullText_Update_WithIndex | 474.57 µs/op | — | — | 451.48 µs/op | — | — | 1.1× |
+| FullText_Delete_WithIndex | 90.31 µs/op | — | — | 197.68 µs/op | — | — | 0.5× |
+| JSONInverted_Insert_WithIndex | — | 113.81 µs/op | — | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 1.32 ms/op | 3.10 ms/op | — | 424.78 µs/op | 1.05 ms/op | — |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.78 ms/op | 3.87 ms/op | — | 455.52 µs/op | 1.09 ms/op | — |
+| JSONInverted_Update_WithIndex | — | 421.89 µs/op | — | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 120.44 µs/op | — | — | — | — | — |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan |
+|---|---|---|---|---|---|---|
+| FullText_Insert_WithIndex | 66.9 KiB | — | — | 705 B | — | — |
+| FullText_Search_SingleTerm/rare | 66.8 KiB | — | — | 532 B | — | — |
+| FullText_Search_SingleTerm/medium | 71.5 KiB | — | — | 533 B | — | — |
+| FullText_Search_SingleTerm/common | 531.4 KiB | — | — | 548 B | — | — |
+| FullText_Search_MultiTermAND | 283.7 KiB | — | — | 532 B | — | — |
+| FullText_Search_Phrase | 173.4 KiB | — | — | 540 B | — | — |
+| FullText_Update_WithIndex | 586.1 KiB | — | — | 412 B | — | — |
+| FullText_Delete_WithIndex | 40.4 KiB | — | — | 260 B | — | — |
+| JSONInverted_Insert_WithIndex | — | 164.3 KiB | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 1.4 MiB | 3.3 MiB | — | 548 B | 548 B |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.7 MiB | 3.5 MiB | — | 550 B | 549 B |
+| JSONInverted_Update_WithIndex | — | 1.2 MiB | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 142.6 KiB | — | — | — | — |
 
