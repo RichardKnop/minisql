@@ -18,13 +18,19 @@ func jsonInvertedTermColumn() Column {
 // Objects must contain every queried key recursively, arrays must contain every
 // queried element, and scalar values must match by JSON type and value.
 func jsonContains(doc, query string) (bool, error) {
-	docValue, err := decodeJSONForInvertedIndex(doc)
-	if err != nil {
-		return false, fmt.Errorf("invalid JSON document: %w", err)
-	}
 	queryValue, err := decodeJSONForInvertedIndex(query)
 	if err != nil {
 		return false, fmt.Errorf("invalid JSON query: %w", err)
+	}
+	return jsonContainsDecodedQuery(doc, queryValue)
+}
+
+// jsonContainsDecodedQuery checks containment when the query side has already
+// been decoded, avoiding repeated parsing for indexed scan rechecks.
+func jsonContainsDecodedQuery(doc string, queryValue any) (bool, error) {
+	docValue, err := decodeJSONForInvertedIndex(doc)
+	if err != nil {
+		return false, fmt.Errorf("invalid JSON document: %w", err)
 	}
 	return jsonContainsValue(docValue, queryValue), nil
 }
@@ -48,6 +54,62 @@ func jsonInvertedTermsForQuery(query string) ([]string, error) {
 		return nil, err
 	}
 	return jsonInvertedTerms(value), nil
+}
+
+// jsonInvertedQueryTermsAreExact reports whether the generated terms fully
+// prove JSON containment without reparsing the candidate document. Array and
+// empty-container queries still need rechecking unless the array contains only
+// unique scalar values whose term presence is enough to prove membership.
+func jsonInvertedQueryTermsAreExact(value any) bool {
+	return jsonInvertedQueryTermsAreExactAt("", value)
+}
+
+func jsonInvertedQueryTermsAreExactAt(path string, value any) bool {
+	switch v := value.(type) {
+	case map[string]any:
+		if len(v) == 0 {
+			return false
+		}
+		for key, child := range v {
+			childPath := joinJSONInvertedPath(path, key)
+			if len([]byte("k:"+childPath)) > MaxIndexKeySize {
+				return false
+			}
+			if !jsonInvertedQueryTermsAreExactAt(childPath, child) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		return jsonInvertedScalarArrayTermsAreExactAt(path+"[]", v)
+	default:
+		if path == "" {
+			path = "$"
+		}
+		return len([]byte("kv:"+path+":"+jsonInvertedScalarTerm(v))) <= MaxIndexKeySize
+	}
+}
+
+func jsonInvertedScalarArrayTermsAreExactAt(path string, values []any) bool {
+	if len(values) == 0 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		switch value.(type) {
+		case map[string]any, []any:
+			return false
+		}
+		term := "kv:" + path + ":" + jsonInvertedScalarTerm(value)
+		if len([]byte(term)) > MaxIndexKeySize {
+			return false
+		}
+		if _, ok := seen[term]; ok {
+			return false
+		}
+		seen[term] = struct{}{}
+	}
+	return true
 }
 
 // decodeJSONForInvertedIndex parses JSON with numbers preserved as json.Number

@@ -1127,3 +1127,14 @@ Snapshot isolation (MVCC) for read-only transactions + TOCTOU fix in `ReadPage`:
 | JSONInverted_Update_WithIndex | — | 1.2 MiB | — | — | — | — |
 | JSONInverted_Delete_WithIndex | — | 142.6 KiB | — | — | — | — |
 
+### 2026-05-15 19:55 UTC
+
+Targeted JSON indexed scan allocation pass. MiniSQL now predecodes literal
+`JSON_CONTAINS` queries for inverted-index rechecks and skips document rechecks
+when generated JSON terms are exact for scalar/object and unique scalar-array
+membership queries.
+
+| Benchmark | Before | After | Allocation Before | Allocation After |
+|---|---:|---:|---:|---:|
+| JSONInverted_Contains_KeyValue/key_value/minisql_indexed | 1.32 ms/op | ~422 µs/op | 1.4 MiB/op | ~409 KiB/op |
+| JSONInverted_Contains_ObjectSubset/object_subset/minisql_indexed | 1.78 ms/op | ~432 µs/op | 1.7 MiB/op | ~660 KiB/op |
