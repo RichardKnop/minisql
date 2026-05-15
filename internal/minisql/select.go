@@ -1094,6 +1094,9 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 	if len(queryTokens) == 0 {
 		return nil
 	}
+	if len(queryTokens) == 1 && len(query.Phrases) == 0 {
+		return t.fullTextSingleTermIndexScan(ctx, secondaryIndex, scan, queryTokens[0], selectedFields, out)
+	}
 
 	postingsByTerm := make(map[string]map[RowID][]uint32, len(queryTokens))
 	for _, key := range scan.IndexKeys {
@@ -1208,6 +1211,73 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 
 		if err := out(row); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func (t *Table) fullTextSingleTermIndexScan(ctx context.Context, secondaryIndex SecondaryIndex, scan Scan, term string, selectedFields []Field, out func(Row) error) error {
+	iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
+	if err != nil {
+		return fmt.Errorf("full-text lookup failed: %w", err)
+	}
+
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	var (
+		lastRowID RowID
+		haveLast  bool
+	)
+	for {
+		block, ok, err := iter.NextBlock(ctx)
+		if err != nil {
+			return fmt.Errorf("full-text lookup failed: %w", err)
+		}
+		if !ok {
+			break
+		}
+		mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
+			if haveLast && rowID == lastRowID {
+				return nil
+			}
+			haveLast = true
+			lastRowID = rowID
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
+			var row Row
+			if len(selectedFields) == 0 {
+				row = NewRowWithValues(t.Columns, nil)
+				row.Key = rowID
+			} else {
+				cursor, err := t.Seek(ctx, rowID)
+				if err != nil {
+					return fmt.Errorf("full-text seek: %w", err)
+				}
+				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
+				if err != nil {
+					return fmt.Errorf("full-text fetch: %w", err)
+				}
+			}
+
+			if tableFilter != nil {
+				ok, err := tableFilter(row)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return nil
+				}
+			}
+
+			return out(row)
+		})
+		if err != nil {
+			return err
+		}
+		if mode != invertedPostingModePositions {
+			return fmt.Errorf("full-text index %s uses posting mode %d", scan.IndexName, mode)
 		}
 	}
 	return nil
