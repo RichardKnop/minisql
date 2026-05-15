@@ -48,6 +48,26 @@ func TestInvertedPostingCodec_Positions(t *testing.T) {
 	}, decoded)
 }
 
+func TestForEachInvertedPostingRowIDSkipsPositions(t *testing.T) {
+	t.Parallel()
+
+	encoded, err := encodeInvertedPostingList(invertedPostingModePositions, []invertedPosting{
+		{RowID: 7, Positions: []uint32{12, 3}},
+		{RowID: 2, Positions: []uint32{1}},
+		{RowID: 7, Positions: []uint32{20}},
+	})
+	require.NoError(t, err)
+
+	var rowIDs []RowID
+	mode, err := forEachInvertedPostingRowID(encoded, func(rowID RowID) error {
+		rowIDs = append(rowIDs, rowID)
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, invertedPostingModePositions, mode)
+	assert.Equal(t, []RowID{2, 7}, rowIDs)
+}
+
 func TestInvertedPostingCodec_Empty(t *testing.T) {
 	t.Parallel()
 

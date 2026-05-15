@@ -1138,3 +1138,15 @@ membership queries.
 |---|---:|---:|---:|---:|
 | JSONInverted_Contains_KeyValue/key_value/minisql_indexed | 1.32 ms/op | ~422 µs/op | 1.4 MiB/op | ~409 KiB/op |
 | JSONInverted_Contains_ObjectSubset/object_subset/minisql_indexed | 1.78 ms/op | ~432 µs/op | 1.7 MiB/op | ~660 KiB/op |
+
+### 2026-05-15 20:06 UTC
+
+Targeted full-text common-term lookup pass. MiniSQL now streams single-token,
+non-phrase full-text posting lists directly and decodes only row IDs instead of
+materializing per-row position maps before fetching rows.
+
+| Benchmark | Before | After | Allocation Before | Allocation After |
+|---|---:|---:|---:|---:|
+| FullText_Search_SingleTerm/common/minisql | 1.01 ms/op | ~539 µs/op | 531.4 KiB/op | ~320 KiB/op |
+| FullText_Search_SingleTerm/medium/minisql | 209.67 µs/op | ~217 µs/op | 71.5 KiB/op | ~69.6 KiB/op |
+| FullText_Search_SingleTerm/rare/minisql | 209.33 µs/op | ~189 µs/op | 66.8 KiB/op | ~65.7 KiB/op |
