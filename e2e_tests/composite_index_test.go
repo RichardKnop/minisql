@@ -2,7 +2,6 @@ package e2etests
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
 )
@@ -77,8 +76,6 @@ func (s *TestSuite) TestCompositeIndex() {
 	s.Run("Select with range query", func() {
 		users := s.collectCompositeUsers(`select * from users where first_name >= 'Kiefer' and first_name <= 'Tyron';`)
 		s.Require().Len(users, 4)
-
-		fmt.Println(users)
 
 		s.Equal("Lilian", users[0].FirstName)
 		s.Equal("Tacey", users[0].LastName)
