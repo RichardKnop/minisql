@@ -24,9 +24,10 @@ values(100, 'Johnathan_Walker250@ptr6k.page', 'Johnathan Walker', '2024-01-02 15
 
 	// Next insert multiple rows without specifying created column (should default to now())
 	// Also switch order of name and email to ensure columns are mapped correctly
+	generatedTimestampStart := time.Now().UTC()
 	s.execQuery(`insert into users("name", "email") values('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video'),
-('Mason Callan', 'Mason_Callan9524@bu2lo.edu'),
-('Logan Flynn', 'Logan_Flynn9019@xtwt3.pro'),
+	('Mason Callan', 'Mason_Callan9524@bu2lo.edu'),
+	('Logan Flynn', 'Logan_Flynn9019@xtwt3.pro'),
 ('Beatrice Uttley', 'Beatrice_Uttley1670@1wa8o.org'),
 ('Harry Johnson', 'Harry_Johnson5515@jcf8v.video'),
 ('Carl Thomson', 'Carl_Thomson4218@kyb7t.host'),
@@ -34,7 +35,8 @@ values(100, 'Johnathan_Walker250@ptr6k.page', 'Johnathan Walker', '2024-01-02 15
 
 	// Insert one more row to test using NOW() function for created timestamp
 	s.execQuery(`insert into users("email", "name", "created") 
-values('Cristal_Duvall6639@yvu30.press', 'Cristal Duvall', NOW());`, 1)
+	values('Cristal_Duvall6639@yvu30.press', 'Cristal Duvall', NOW());`, 1)
+	generatedTimestampEnd := time.Now().UTC()
 
 	s.Run("Inserting duplicate primary key should fail", func() {
 		result, err := s.db.ExecContext(context.Background(), `insert into users("id", "email", "name", "created") 
@@ -72,14 +74,10 @@ values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:2
 			Created: time.Date(2024, 1, 2, 15, 30, 27, 0, time.UTC),
 		}, users[1])
 
-		now := time.Now().UTC()
 		for i := 2; i < 10; i++ {
 			s.Equal(int64(100+i-1), users[i].ID) // id should continue from 100
-			s.Equal(now.Year(), users[i].Created.Year())
-			s.Equal(now.Month(), users[i].Created.Month())
-			s.Equal(now.Day(), users[i].Created.Day())
-			s.Equal(now.Hour(), users[i].Created.Hour())
-			s.Equal(now.Minute(), users[i].Created.Minute())
+			s.False(users[i].Created.Before(generatedTimestampStart), "created timestamp should not be before insert window")
+			s.False(users[i].Created.After(generatedTimestampEnd), "created timestamp should not be after insert window")
 		}
 	})
 
