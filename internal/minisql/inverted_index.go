@@ -2093,23 +2093,33 @@ func replaceInvertedPostingBlocks(blocks []invertedPostingBlock, idx int, replac
 
 // encodeLargestInvertedPostingBlock finds the largest prefix that fits one block.
 func encodeLargestInvertedPostingBlock(mode invertedPostingMode, postings []invertedPosting, maxPayload int) (int, []byte, error) {
-	var (
-		bestPayload []byte
-		bestN       int
-	)
-	for n := 1; n <= len(postings); n++ {
-		payload, err := encodeInvertedPostingList(mode, postings[:n])
+	if len(postings) == 0 {
+		return 0, nil, fmt.Errorf("cannot encode empty inverted posting block")
+	}
+	firstPayload, err := encodeGroupedInvertedPostingList(mode, postings[:1])
+	if err != nil {
+		return 0, nil, err
+	}
+	if len(firstPayload) > maxPayload {
+		return 1, firstPayload, nil
+	}
+
+	lo, hi := 1, len(postings)
+	bestN := 1
+	bestPayload := firstPayload
+	for lo <= hi {
+		mid := lo + (hi-lo)/2
+		payload, err := encodeGroupedInvertedPostingList(mode, postings[:mid])
 		if err != nil {
 			return 0, nil, err
 		}
-		if len(payload) > maxPayload && n > 1 {
-			break
+		if len(payload) <= maxPayload {
+			bestN = mid
+			bestPayload = payload
+			lo = mid + 1
+			continue
 		}
-		bestPayload = payload
-		bestN = n
-		if len(payload) > maxPayload {
-			break
-		}
+		hi = mid - 1
 	}
 	return bestN, bestPayload, nil
 }
