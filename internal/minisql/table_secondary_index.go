@@ -3,6 +3,7 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"go.uber.org/zap"
 )
@@ -258,19 +259,55 @@ func (t *Table) insertFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 }
 
 func (t *Table) updateFullTextIndexKeys(ctx context.Context, secondaryIndex SecondaryIndex, oldRow, row Row) error {
+	if secondaryIndex.InvertedIndex == nil {
+		return fmt.Errorf("table %s has full-text index %s but no inverted index instance", t.Name, secondaryIndex.Name)
+	}
 	rowID := row.Key
-	if oldInIndex, err := secondaryIndex.rowSatisfiesWhereCond(oldRow); err != nil {
+	oldInIndex, err := secondaryIndex.rowSatisfiesWhereCond(oldRow)
+	if err != nil {
 		return fmt.Errorf("partial full-text index %s where check (old row): %w", secondaryIndex.Name, err)
-	} else if oldInIndex {
-		if err := t.deleteFullTextIndexKeys(ctx, secondaryIndex, rowID, oldRow); err != nil {
-			return err
-		}
+	}
+	newInIndex, err := secondaryIndex.rowSatisfiesWhereCond(row)
+	if err != nil {
+		return fmt.Errorf("partial full-text index %s where check (new row): %w", secondaryIndex.Name, err)
+	}
+	if oldInIndex && !newInIndex {
+		return t.deleteFullTextIndexKeys(ctx, secondaryIndex, rowID, oldRow)
+	}
+	if !oldInIndex && newInIndex {
+		return t.insertFullTextIndexKeys(ctx, secondaryIndex, rowID, row)
+	}
+	if !oldInIndex && !newInIndex {
+		return nil
 	}
 
-	if newInIndex, err := secondaryIndex.rowSatisfiesWhereCond(row); err != nil {
-		return fmt.Errorf("partial full-text index %s where check (new row): %w", secondaryIndex.Name, err)
-	} else if newInIndex {
-		return t.insertFullTextIndexKeys(ctx, secondaryIndex, rowID, row)
+	oldPostings, err := fullTextPostingsByTermForRow(secondaryIndex, rowID, oldRow)
+	if err != nil {
+		return err
+	}
+	newPostings, err := fullTextPostingsByTermForRow(secondaryIndex, rowID, row)
+	if err != nil {
+		return err
+	}
+	for term, oldPosting := range oldPostings {
+		newPosting, ok := newPostings[term]
+		if !ok {
+			if err := secondaryIndex.InvertedIndex.Delete(ctx, term, oldPosting); err != nil {
+				return fmt.Errorf("failed to delete token for full-text index %s: %w", secondaryIndex.Name, err)
+			}
+			continue
+		}
+		if !slices.Equal(oldPosting.Positions, newPosting.Positions) {
+			if err := secondaryIndex.InvertedIndex.Replace(ctx, term, oldPosting, newPosting); err != nil {
+				return fmt.Errorf("failed to replace token for full-text index %s: %w", secondaryIndex.Name, err)
+			}
+		}
+		delete(newPostings, term)
+	}
+	for term, posting := range newPostings {
+		if err := secondaryIndex.InvertedIndex.Insert(ctx, term, posting); err != nil {
+			return fmt.Errorf("failed to insert token for full-text index %s: %w", secondaryIndex.Name, err)
+		}
 	}
 	return nil
 }
@@ -290,6 +327,26 @@ func (t *Table) deleteFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 		}
 	}
 	return nil
+}
+
+func fullTextPostingsByTermForRow(secondaryIndex SecondaryIndex, rowID RowID, row Row) (map[string]invertedPosting, error) {
+	tokens, err := fullTextTokenPositionsForRow(secondaryIndex, row)
+	if err != nil {
+		return nil, err
+	}
+	postings := make(map[string]invertedPosting, len(tokens))
+	for _, token := range tokens {
+		posting := postings[token.Term]
+		posting.RowID = rowID
+		posting.Positions = append(posting.Positions, token.Position)
+		postings[token.Term] = posting
+	}
+	for term, posting := range postings {
+		slices.Sort(posting.Positions)
+		posting.Positions = slices.Compact(posting.Positions)
+		postings[term] = posting
+	}
+	return postings, nil
 }
 
 func (t *Table) insertInvertedIndexKeys(ctx context.Context, secondaryIndex SecondaryIndex, rowID RowID, row Row) error {
@@ -315,19 +372,49 @@ func (t *Table) insertInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 }
 
 func (t *Table) updateInvertedIndexKeys(ctx context.Context, secondaryIndex SecondaryIndex, oldRow, row Row) error {
+	if secondaryIndex.InvertedIndex == nil {
+		return fmt.Errorf("table %s has inverted index %s but no inverted index instance", t.Name, secondaryIndex.Name)
+	}
 	rowID := row.Key
-	if oldInIndex, err := secondaryIndex.rowSatisfiesWhereCond(oldRow); err != nil {
+	oldInIndex, err := secondaryIndex.rowSatisfiesWhereCond(oldRow)
+	if err != nil {
 		return fmt.Errorf("partial inverted index %s where check (old row): %w", secondaryIndex.Name, err)
-	} else if oldInIndex {
-		if err := t.deleteInvertedIndexKeys(ctx, secondaryIndex, rowID, oldRow); err != nil {
-			return err
-		}
+	}
+	newInIndex, err := secondaryIndex.rowSatisfiesWhereCond(row)
+	if err != nil {
+		return fmt.Errorf("partial inverted index %s where check (new row): %w", secondaryIndex.Name, err)
+	}
+	if oldInIndex && !newInIndex {
+		return t.deleteInvertedIndexKeys(ctx, secondaryIndex, rowID, oldRow)
+	}
+	if !oldInIndex && newInIndex {
+		return t.insertInvertedIndexKeys(ctx, secondaryIndex, rowID, row)
+	}
+	if !oldInIndex && !newInIndex {
+		return nil
 	}
 
-	if newInIndex, err := secondaryIndex.rowSatisfiesWhereCond(row); err != nil {
-		return fmt.Errorf("partial inverted index %s where check (new row): %w", secondaryIndex.Name, err)
-	} else if newInIndex {
-		return t.insertInvertedIndexKeys(ctx, secondaryIndex, rowID, row)
+	oldTerms, err := jsonInvertedTermSetForRow(secondaryIndex, oldRow)
+	if err != nil {
+		return err
+	}
+	newTerms, err := jsonInvertedTermSetForRow(secondaryIndex, row)
+	if err != nil {
+		return err
+	}
+	for term := range oldTerms {
+		if _, ok := newTerms[term]; ok {
+			delete(newTerms, term)
+			continue
+		}
+		if err := secondaryIndex.InvertedIndex.Delete(ctx, term, invertedPosting{RowID: rowID}); err != nil {
+			return fmt.Errorf("failed to delete JSON term for inverted index %s: %w", secondaryIndex.Name, err)
+		}
+	}
+	for term := range newTerms {
+		if err := secondaryIndex.InvertedIndex.Insert(ctx, term, invertedPosting{RowID: rowID}); err != nil {
+			return fmt.Errorf("failed to insert JSON term for inverted index %s: %w", secondaryIndex.Name, err)
+		}
 	}
 	return nil
 }
@@ -361,6 +448,18 @@ func jsonInvertedTermsForRow(secondaryIndex SecondaryIndex, row Row) ([]string, 
 		return nil, fmt.Errorf("inverted index %s column %q must be JSON text", secondaryIndex.Name, secondaryIndex.Columns[0].Name)
 	}
 	return jsonInvertedTermsForDocument(doc)
+}
+
+func jsonInvertedTermSetForRow(secondaryIndex SecondaryIndex, row Row) (map[string]struct{}, error) {
+	terms, err := jsonInvertedTermsForRow(secondaryIndex, row)
+	if err != nil {
+		return nil, err
+	}
+	termSet := make(map[string]struct{}, len(terms))
+	for _, term := range terms {
+		termSet[term] = struct{}{}
+	}
+	return termSet, nil
 }
 
 func fullTextTokensForRow(secondaryIndex SecondaryIndex, row Row) ([]string, error) {

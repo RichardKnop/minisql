@@ -43,6 +43,7 @@ type invertedIndex interface {
 	Mode() invertedIndexPostingMode
 	Insert(ctx context.Context, term string, posting invertedPosting) error
 	InsertMany(ctx context.Context, term string, postings []invertedPosting) error
+	Replace(ctx context.Context, term string, oldPosting, newPosting invertedPosting) error
 	Delete(ctx context.Context, term string, posting invertedPosting) error
 	Lookup(ctx context.Context, term string) (invertedPostingIterator, error)
 	Stats(ctx context.Context, term string) (invertedPostingStats, error)
@@ -139,6 +140,59 @@ func (idx *dedicatedInvertedIndex) InsertMany(ctx context.Context, term string, 
 	}
 
 	return idx.splitRootEntryPage(ctx, separator, rightPageIdx)
+}
+
+// Replace swaps one posting for another under the same term. It is used by
+// UPDATE maintenance when a term remains present but its positions changed.
+func (idx *dedicatedInvertedIndex) Replace(ctx context.Context, term string, oldPosting, newPosting invertedPosting) error {
+	if len([]byte(term)) > MaxIndexKeySize {
+		return fmt.Errorf("inverted index term exceeds max index key size %d", MaxIndexKeySize)
+	}
+
+	leafPage, err := idx.findEntryLeafPage(ctx, term)
+	if err != nil {
+		return err
+	}
+	page, err := idx.pager.ModifyPage(ctx, leafPage.Index)
+	if err != nil {
+		return fmt.Errorf("modify inverted entry leaf %d: %w", leafPage.Index, err)
+	}
+	if page.InvertedEntryPage == nil || !page.InvertedEntryPage.Header.IsLeaf {
+		return fmt.Errorf("inverted entry page %d is not a leaf", page.Index)
+	}
+	entryPage := page.InvertedEntryPage
+	cellIdx, found := findInvertedEntryCell(entryPage.Cells, term)
+	if !found {
+		return idx.Insert(ctx, term, newPosting)
+	}
+
+	oldCell := entryPage.Cells[cellIdx]
+	if oldCell.PostingKind == invertedPostingKindTree && oldCell.PostingCount > 64 {
+		updatedCell, mutated, err := idx.replacePostingInTreeCell(ctx, oldCell, oldPosting, newPosting)
+		if err != nil {
+			return err
+		}
+		if mutated {
+			entryPage.Cells[cellIdx] = updatedCell
+			return nil
+		}
+	}
+
+	postings, err := idx.decodeInvertedEntryCell(ctx, oldCell)
+	if err != nil {
+		return err
+	}
+	postings = removeInvertedPosting(idx.mode, postings, oldPosting)
+	postings = append(postings, newPosting)
+	cell, err := idx.makeInvertedEntryCell(ctx, term, postings, []invertedEntryCell{oldCell})
+	if err != nil {
+		return err
+	}
+	entryPage.Cells[cellIdx] = cell
+	if err := ensureInvertedEntryPageFits(entryPage, invertedPageBodySize(page.Index)); err != nil {
+		return err
+	}
+	return nil
 }
 
 // Delete removes a posting from a compressed posting list for term.
@@ -1008,6 +1062,70 @@ func (idx *dedicatedInvertedIndex) insertPostingIntoTreeCell(ctx context.Context
 	if oldDocFreq == newDocFreq && oldPostingCount == newPostingCount {
 		return cell, true, nil
 	}
+
+	replacementBlocks, err := makeInvertedPostingBlocks(idx.mode, updatedPostings)
+	if err != nil {
+		return invertedEntryCell{}, false, err
+	}
+	candidate := leaf.InvertedPostPage.Clone()
+	candidate.Blocks = replaceInvertedPostingBlocks(candidate.Blocks, blockIdx, replacementBlocks)
+	fits := ensureInvertedPostingPageFits(candidate, invertedPageBodySize(leaf.Index)) == nil
+	if fits {
+		page, err := idx.pager.ModifyPage(ctx, leaf.Index)
+		if err != nil {
+			return invertedEntryCell{}, false, fmt.Errorf("modify inverted posting leaf %d: %w", leaf.Index, err)
+		}
+		page.InvertedPostPage = candidate
+		if err := idx.refreshPostingAncestors(ctx, page.Index); err != nil {
+			return invertedEntryCell{}, false, err
+		}
+	} else {
+		newRoot, err := idx.splitPostingLeafForBlocks(ctx, cell.Child, leaf, blockIdx, replacementBlocks)
+		if err != nil {
+			return invertedEntryCell{}, false, err
+		}
+		cell.Child = newRoot
+	}
+
+	updatedCell := cell
+	updatedCell.DocFreq = uint32(int(updatedCell.DocFreq) + newDocFreq - oldDocFreq)
+	updatedCell.PostingCount = uint32(int(updatedCell.PostingCount) + int(newPostingCount) - int(oldPostingCount))
+	return updatedCell, true, nil
+}
+
+// replacePostingInTreeCell updates one posting-tree leaf block by removing an
+// old posting and adding its replacement in a single page mutation.
+func (idx *dedicatedInvertedIndex) replacePostingInTreeCell(
+	ctx context.Context,
+	cell invertedEntryCell,
+	oldPosting, newPosting invertedPosting,
+) (invertedEntryCell, bool, error) {
+	if oldPosting.RowID != newPosting.RowID {
+		return invertedEntryCell{}, false, nil
+	}
+	leaf, blockIdx, err := idx.findPostingLeafBlock(ctx, cell.Child, oldPosting.RowID)
+	if err != nil {
+		return invertedEntryCell{}, false, err
+	}
+	if blockIdx < 0 {
+		return invertedEntryCell{}, false, nil
+	}
+
+	block := leaf.InvertedPostPage.Blocks[blockIdx]
+	mode, blockPostings, err := decodeInvertedPostingList(block.Payload)
+	if err != nil {
+		return invertedEntryCell{}, false, err
+	}
+	if mode != idx.mode {
+		return invertedEntryCell{}, false, fmt.Errorf("inverted posting block uses posting mode %d, expected %d", mode, idx.mode)
+	}
+
+	oldDocFreq := len(blockPostings)
+	oldPostingCount := countInvertedPostings(idx.mode, blockPostings)
+	updatedPostings := removeInvertedPosting(idx.mode, blockPostings, oldPosting)
+	updatedPostings = groupInvertedPostings(idx.mode, append(updatedPostings, newPosting))
+	newDocFreq := len(updatedPostings)
+	newPostingCount := countInvertedPostings(idx.mode, updatedPostings)
 
 	replacementBlocks, err := makeInvertedPostingBlocks(idx.mode, updatedPostings)
 	if err != nil {

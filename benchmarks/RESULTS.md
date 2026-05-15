@@ -1,4 +1,50 @@
-### 2026-05-14 (bulk JSON inverted CREATE INDEX population — latest)
+### 2026-05-15 (runtime inverted-index allocation pass — latest)
+
+Runtime inverted-index maintenance and scans received two targeted allocation
+improvements:
+
+- Full-text scans no longer allocate per-row phrase-position maps for queries
+  that do not contain phrases. Single-term and AND queries only need row-ID
+  intersection.
+- JSON inverted UPDATE maintenance now diffs old/new term sets and skips shared
+  row-ID terms instead of deleting and reinserting unchanged key-existence
+  terms.
+- Full-text UPDATE maintenance can replace changed positions for surviving
+  terms in a single term mutation, though this is a smaller win in the current
+  fixture because most updated terms are deleted or inserted outright.
+
+The generated runtime timing/memory table for this run is appended below as
+`2026-05-15 19:19 UTC`.
+
+#### Timing
+
+| Benchmark | before | after | improvement |
+|---|---|---|---|
+| JSONInverted_Update_WithIndex/minisql_indexed | 1.20 ms/op | 431.96 µs/op | 2.8× faster |
+| FullText_Search_MultiTermAND/minisql | 423.05 µs/op | 308.45 µs/op | 1.4× faster |
+| FullText_Search_SingleTerm/common/minisql | 1.03 ms/op | 956.69 µs/op | 1.1× faster |
+| FullText_Update_WithIndex/minisql | 3.28 ms/op | 3.25 ms/op | roughly unchanged |
+| JSONInverted_Contains_KeyValue/minisql_indexed | 1.25 ms/op | 1.26 ms/op | roughly unchanged |
+
+#### Memory (B/op)
+
+| Benchmark | before | after | improvement |
+|---|---|---|---|
+| JSONInverted_Update_WithIndex/minisql_indexed | 4.6 MiB | 1.2 MiB | 3.8× lower |
+| FullText_Search_MultiTermAND/minisql | 358.7 KiB | 283.7 KiB | 21% lower |
+| FullText_Search_SingleTerm/common/minisql | 606.8 KiB | 532.1 KiB | 12% lower |
+| JSONInverted_Contains_KeyValue/minisql_indexed | 1.5 MiB | 1.4 MiB | modest |
+| FullText_Update_WithIndex/minisql | 6.0 MiB | 5.9 MiB | modest |
+
+The remaining large runtime allocation target is full-text UPDATE. The current
+small improvement suggests the dominant cost is deeper than term-level duplicate
+work, likely posting-tree page mutation/write-set cloning and table row update
+overhead. That should be profiled with a dedicated allocation profiler or
+smaller microbenchmarks around posting-tree delete/insert/replace.
+
+---
+
+### 2026-05-14 (bulk JSON inverted CREATE INDEX population)
 
 `CREATE INVERTED INDEX` now uses the same build-time batching strategy as
 full-text indexes: postings are buffered by JSON term, terms are flushed in
@@ -964,4 +1010,42 @@ Snapshot isolation (MVCC) for read-only transactions + TOCTOU fix in `ReadPage`:
 |---|---|---|---|
 | FullText_BuildIndex | 81.5 MiB | — | 429.2 KiB |
 | JSONInverted_BuildIndex | — | 78.1 MiB | — |
+
+### 2026-05-15 19:19 UTC
+
+#### Timing
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan | ratio |
+|---|---|---|---|---|---|---|---|
+| FullText_Insert_WithIndex | 70.28 µs/op | — | — | 162.56 µs/op | — | — | 0.4× |
+| FullText_Search_SingleTerm/rare | 207.69 µs/op | — | — | 274.34 µs/op | — | — | 0.8× |
+| FullText_Search_SingleTerm/medium | 195.04 µs/op | — | — | 330.99 µs/op | — | — | 0.6× |
+| FullText_Search_SingleTerm/common | 956.69 µs/op | — | — | 328.30 µs/op | — | — | 2.9× |
+| FullText_Search_MultiTermAND | 308.45 µs/op | — | — | 301.59 µs/op | — | — | 1.0× |
+| FullText_Search_Phrase | 275.49 µs/op | — | — | 387.63 µs/op | — | — | 0.7× |
+| FullText_Update_WithIndex | 3.25 ms/op | — | — | 375.41 µs/op | — | — | 8.6× |
+| FullText_Delete_WithIndex | 76.67 µs/op | — | — | 337.64 µs/op | — | — | 0.2× |
+| JSONInverted_Insert_WithIndex | — | 103.79 µs/op | — | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 1.26 ms/op | 3.10 ms/op | — | 278.97 µs/op | 991.60 µs/op | — |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.42 ms/op | 3.34 ms/op | — | 513.01 µs/op | 1.03 ms/op | — |
+| JSONInverted_Update_WithIndex | — | 431.96 µs/op | — | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 102.73 µs/op | — | — | — | — | — |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan |
+|---|---|---|---|---|---|---|
+| FullText_Insert_WithIndex | 66.9 KiB | — | — | 714 B | — | — |
+| FullText_Search_SingleTerm/rare | 66.8 KiB | — | — | 533 B | — | — |
+| FullText_Search_SingleTerm/medium | 71.5 KiB | — | — | 533 B | — | — |
+| FullText_Search_SingleTerm/common | 532.1 KiB | — | — | 548 B | — | — |
+| FullText_Search_MultiTermAND | 283.7 KiB | — | — | 533 B | — | — |
+| FullText_Search_Phrase | 171.2 KiB | — | — | 540 B | — | — |
+| FullText_Update_WithIndex | 5.9 MiB | — | — | 412 B | — | — |
+| FullText_Delete_WithIndex | 40.4 KiB | — | — | 259 B | — | — |
+| JSONInverted_Insert_WithIndex | — | 164.3 KiB | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 1.4 MiB | 3.3 MiB | — | 550 B | 548 B |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.7 MiB | 3.5 MiB | — | 548 B | 549 B |
+| JSONInverted_Update_WithIndex | — | 1.2 MiB | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 142.5 KiB | — | — | — | — |
 

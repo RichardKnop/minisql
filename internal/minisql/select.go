@@ -1101,11 +1101,15 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 		if !ok {
 			continue
 		}
+		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
+		if err != nil {
+			return fmt.Errorf("full-text stats lookup failed: %w", err)
+		}
 		iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
 		if err != nil {
 			return fmt.Errorf("full-text lookup failed: %w", err)
 		}
-		rows := make(map[RowID][]uint32)
+		rows := make(map[RowID][]uint32, stats.DocFreq)
 		for {
 			block, ok, err := iter.NextBlock(ctx)
 			if err != nil {
@@ -1133,24 +1137,32 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 
 	firstRows := postingsByTerm[queryTokens[0]]
 	surviving := make([]RowID, 0, len(firstRows))
+	needsPositions := len(query.Phrases) > 0
 	for rowID := range firstRows {
-		positions := make(map[string][]uint32, len(queryTokens))
 		matches := true
+		var positions map[string][]uint32
+		if needsPositions {
+			positions = make(map[string][]uint32, len(queryTokens))
+		}
 		for _, term := range queryTokens {
 			termPositions := postingsByTerm[term][rowID]
 			if len(termPositions) == 0 {
 				matches = false
 				break
 			}
-			positions[term] = termPositions
+			if needsPositions {
+				positions[term] = termPositions
+			}
 		}
 		if !matches {
 			continue
 		}
-		for _, phrase := range query.Phrases {
-			if !textSearchPhraseMatches(positions, phrase) {
-				matches = false
-				break
+		if needsPositions {
+			for _, phrase := range query.Phrases {
+				if !textSearchPhraseMatches(positions, phrase) {
+					matches = false
+					break
+				}
 			}
 		}
 		if matches {
@@ -1216,11 +1228,15 @@ func (t *Table) invertedIndexScan(ctx context.Context, scan Scan, selectedFields
 		if !ok {
 			continue
 		}
+		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
+		if err != nil {
+			return fmt.Errorf("inverted stats lookup failed: %w", err)
+		}
 		iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
 		if err != nil {
 			return fmt.Errorf("inverted lookup failed: %w", err)
 		}
-		rowIDs := make([]RowID, 0)
+		rowIDs := make([]RowID, 0, stats.DocFreq)
 		for {
 			block, ok, err := iter.NextBlock(ctx)
 			if err != nil {
@@ -1243,8 +1259,6 @@ func (t *Table) invertedIndexScan(ctx context.Context, scan Scan, selectedFields
 		if len(rowIDs) == 0 {
 			return nil
 		}
-		sortRowIDs(rowIDs)
-		rowIDs = compactRowIDs(rowIDs)
 		if i == 0 {
 			surviving = rowIDs
 			continue
@@ -1800,21 +1814,6 @@ func sortRowIDs(ids []RowID) {
 			ids[j-1], ids[j] = ids[j], ids[j-1]
 		}
 	}
-}
-
-func compactRowIDs(ids []RowID) []RowID {
-	if len(ids) < 2 {
-		return ids
-	}
-	write := 1
-	for read := 1; read < len(ids); read++ {
-		if ids[read] == ids[read-1] {
-			continue
-		}
-		ids[write] = ids[read]
-		write += 1
-	}
-	return ids[:write]
 }
 
 // indexIntersectScan executes a ScanTypeIndexIntersect plan:
