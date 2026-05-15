@@ -1295,3 +1295,4 @@ Shout out to some great repos and other resources that were invaluable while fig
 - [sqlparser](https://github.com/marianogappa/sqlparser)
 - [sqlite docs](https://www.sqlite.org/fileformat2.html) (section about file format has been especially useful)
 - [C++ implementation of B+ tree](https://github.com/sayef/bplus-tree)
+- [Mastering PostgreSQL GIN Indexes: The Ultimate Guide to Faster JSONB, Array, and Full-Text Search](https://medium.com/@vedantthakkar1003/mastering-postgresql-gin-indexes-the-ultimate-guide-to-faster-jsonb-array-and-full-text-search-f1f8ec3e67af)
