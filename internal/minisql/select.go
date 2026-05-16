@@ -41,6 +41,16 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 
 	t.logger.Debug("query plan", zap.String("query type", "SELECT"), zap.Any("plan", plan))
 
+	if stmt.IsSelectCountAll() && len(stmt.Joins) == 0 && t.virtualRows == nil {
+		result, ok, err := t.tryCountFromExactInvertedIndex(ctx, plan)
+		if err != nil {
+			return StatementResult{}, err
+		}
+		if ok {
+			return result, nil
+		}
+	}
+
 	// Only fetch fields included in the SELECT query or fields needed for WHERE conditions
 	// TODO - handle * plus other fields, for example SELECT *, a, b FROM table WHERE c = 1
 	var (
@@ -149,14 +159,17 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 }
 
 func (t *Table) selectCount(rows []Row) (StatementResult, error) {
-	count := int64(len(rows))
+	return countResult(int64(len(rows))), nil
+}
+
+func countResult(count int64) StatementResult {
 	return StatementResult{
 		Columns: []Column{{Name: "COUNT(*)"}},
 		Rows: NewSingleRowIterator(NewRowWithValues(
 			[]Column{{Name: "COUNT(*)"}},
 			[]OptionalValue{{Valid: true, Value: count}},
 		)),
-	}, nil
+	}
 }
 
 // countAllLeafWalk counts every row in the table.
@@ -199,15 +212,7 @@ func (t *Table) countAllLeafWalk(ctx context.Context) (StatementResult, error) {
 		}
 	}
 
-	return StatementResult{
-		Columns: []Column{
-			{Name: "COUNT(*)"},
-		},
-		Rows: NewSingleRowIterator(NewRowWithValues(
-			[]Column{{Name: "COUNT(*)"}},
-			[]OptionalValue{{Valid: true, Value: count}},
-		)),
-	}, nil
+	return countResult(count), nil
 }
 
 // aggState holds the running accumulator for a single aggregate expression.
@@ -1507,6 +1512,112 @@ func (t *Table) invertedIndexScan(ctx context.Context, scan Scan, selectedFields
 		}
 	}
 	return nil
+}
+
+func (t *Table) tryCountFromExactInvertedIndex(ctx context.Context, plan QueryPlan) (StatementResult, bool, error) {
+	if len(plan.Scans) != 1 || plan.Scans[0].Type != ScanTypeInverted {
+		return StatementResult{}, false, nil
+	}
+	scan := plan.Scans[0]
+	if !jsonInvertedScanFilterIsExact(scan.Filters) {
+		return StatementResult{}, false, nil
+	}
+	count, err := t.countInvertedIndexScan(ctx, scan)
+	if err != nil {
+		return StatementResult{}, false, err
+	}
+	return countResult(count), true, nil
+}
+
+func jsonInvertedScanFilterIsExact(filters OneOrMore) bool {
+	if len(filters) != 1 || len(filters[0]) != 1 {
+		return false
+	}
+	_, query, ok := jsonContainsLiteralCondition(filters[0][0])
+	if !ok {
+		return false
+	}
+	queryValue, err := decodeJSONForInvertedIndex(query)
+	if err != nil {
+		return false
+	}
+	return jsonInvertedQueryTermsAreExact(queryValue)
+}
+
+func (t *Table) countInvertedIndexScan(ctx context.Context, scan Scan) (int64, error) {
+	secondaryIndex, ok := t.SecondaryIndexes[scan.IndexName]
+	if !ok || secondaryIndex.Method != IndexMethodInverted || secondaryIndex.InvertedIndex == nil {
+		return 0, fmt.Errorf("no index found for inverted scan: %s", scan.IndexName)
+	}
+	if len(scan.IndexKeys) == 0 {
+		return 0, nil
+	}
+
+	var surviving []RowID
+	for i, key := range scan.IndexKeys {
+		term, ok := key.(string)
+		if !ok {
+			continue
+		}
+		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
+		if err != nil {
+			return 0, fmt.Errorf("inverted stats lookup failed: %w", err)
+		}
+		rowIDs, err := loadInvertedRowIDsForTerm(ctx, secondaryIndex, scan.IndexName, term, stats.DocFreq)
+		if err != nil {
+			return 0, err
+		}
+		if len(rowIDs) == 0 {
+			return 0, nil
+		}
+		if i == 0 {
+			surviving = rowIDs
+			continue
+		}
+		surviving = intersectTwoSortedSets(surviving, rowIDs)
+		if len(surviving) == 0 {
+			return 0, nil
+		}
+	}
+	return int64(len(surviving)), nil
+}
+
+func loadInvertedRowIDsForTerm(ctx context.Context, secondaryIndex SecondaryIndex, indexName, term string, docFreq uint32) ([]RowID, error) {
+	iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
+	if err != nil {
+		return nil, fmt.Errorf("inverted lookup failed: %w", err)
+	}
+
+	rowIDs := make([]RowID, 0, docFreq)
+	var (
+		lastRowID RowID
+		haveLast  bool
+	)
+	for {
+		block, ok, err := iter.NextBlock(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("inverted lookup failed: %w", err)
+		}
+		if !ok {
+			break
+		}
+		mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
+			if haveLast && rowID == lastRowID {
+				return nil
+			}
+			haveLast = true
+			lastRowID = rowID
+			rowIDs = append(rowIDs, rowID)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if mode != invertedPostingModeRowIDs {
+			return nil, fmt.Errorf("inverted index %s uses posting mode %d", indexName, mode)
+		}
+	}
+	return rowIDs, nil
 }
 
 // errStopScan is a sentinel returned by an index scan callback to stop iteration after the

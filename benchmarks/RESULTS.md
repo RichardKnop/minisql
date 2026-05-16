@@ -1,3 +1,200 @@
+### 2026-05-16 00:32 UTC
+
+Targeted JSON indexed `COUNT(*)` pass. MiniSQL now counts exact JSON inverted
+predicates from posting-list intersections directly, avoiding row fetch and row
+emission when the index terms fully prove the `JSON_CONTAINS` predicate.
+
+| Benchmark | Before | After | Allocation Before | Allocation After |
+|---|---:|---:|---:|---:|
+| JSONInverted_Contains_KeyValue/key_value/minisql_indexed | ~422 µs/op | ~172 µs/op | ~409 KiB/op | ~177 KiB/op |
+| JSONInverted_Contains_ObjectSubset/object_subset/minisql_indexed | ~432 µs/op | ~204 µs/op | ~660 KiB/op | ~321 KiB/op |
+
+### 2026-05-16 00:21 UTC
+
+Targeted full-text multi-term AND lookup pass. MiniSQL now handles non-phrase
+multi-term full-text queries by loading row IDs only, ordering terms by document
+frequency, and intersecting sorted row-id lists instead of materializing
+per-term position maps.
+
+| Benchmark | Before | After | Allocation Before | Allocation After |
+|---|---:|---:|---:|---:|
+| FullText_Search_MultiTermAND/minisql | 332.81 µs/op | ~241 µs/op | 283.7 KiB/op | ~78.3 KiB/op |
+
+### 2026-05-15 20:06 UTC
+
+Targeted full-text common-term lookup pass. MiniSQL now streams single-token,
+non-phrase full-text posting lists directly and decodes only row IDs instead of
+materializing per-row position maps before fetching rows.
+
+| Benchmark | Before | After | Allocation Before | Allocation After |
+|---|---:|---:|---:|---:|
+| FullText_Search_SingleTerm/common/minisql | 1.01 ms/op | ~539 µs/op | 531.4 KiB/op | ~320 KiB/op |
+| FullText_Search_SingleTerm/medium/minisql | 209.67 µs/op | ~217 µs/op | 71.5 KiB/op | ~69.6 KiB/op |
+| FullText_Search_SingleTerm/rare/minisql | 209.33 µs/op | ~189 µs/op | 66.8 KiB/op | ~65.7 KiB/op |
+
+### 2026-05-15 19:55 UTC
+
+Targeted JSON indexed scan allocation pass. MiniSQL now predecodes literal
+`JSON_CONTAINS` queries for inverted-index rechecks and skips document rechecks
+when generated JSON terms are exact for scalar/object and unique scalar-array
+membership queries.
+
+| Benchmark | Before | After | Allocation Before | Allocation After |
+|---|---:|---:|---:|---:|
+| JSONInverted_Contains_KeyValue/key_value/minisql_indexed | 1.32 ms/op | ~422 µs/op | 1.4 MiB/op | ~409 KiB/op |
+| JSONInverted_Contains_ObjectSubset/object_subset/minisql_indexed | 1.78 ms/op | ~432 µs/op | 1.7 MiB/op | ~660 KiB/op |
+
+### 2026-05-15 19:35 UTC
+
+#### Timing
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan | ratio |
+|---|---|---|---|---|---|---|---|
+| FullText_Insert_WithIndex | 91.09 µs/op | — | — | 224.51 µs/op | — | — | 0.4× |
+| FullText_Search_SingleTerm/rare | 209.33 µs/op | — | — | 361.07 µs/op | — | — | 0.6× |
+| FullText_Search_SingleTerm/medium | 209.67 µs/op | — | — | 438.83 µs/op | — | — | 0.5× |
+| FullText_Search_SingleTerm/common | 1.01 ms/op | — | — | 432.22 µs/op | — | — | 2.3× |
+| FullText_Search_MultiTermAND | 332.81 µs/op | — | — | 354.13 µs/op | — | — | 0.9× |
+| FullText_Search_Phrase | 330.16 µs/op | — | — | 367.14 µs/op | — | — | 0.9× |
+| FullText_Update_WithIndex | 474.57 µs/op | — | — | 451.48 µs/op | — | — | 1.1× |
+| FullText_Delete_WithIndex | 90.31 µs/op | — | — | 197.68 µs/op | — | — | 0.5× |
+| JSONInverted_Insert_WithIndex | — | 113.81 µs/op | — | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 1.32 ms/op | 3.10 ms/op | — | 424.78 µs/op | 1.05 ms/op | — |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.78 ms/op | 3.87 ms/op | — | 455.52 µs/op | 1.09 ms/op | — |
+| JSONInverted_Update_WithIndex | — | 421.89 µs/op | — | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 120.44 µs/op | — | — | — | — | — |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan |
+|---|---|---|---|---|---|---|
+| FullText_Insert_WithIndex | 66.9 KiB | — | — | 705 B | — | — |
+| FullText_Search_SingleTerm/rare | 66.8 KiB | — | — | 532 B | — | — |
+| FullText_Search_SingleTerm/medium | 71.5 KiB | — | — | 533 B | — | — |
+| FullText_Search_SingleTerm/common | 531.4 KiB | — | — | 548 B | — | — |
+| FullText_Search_MultiTermAND | 283.7 KiB | — | — | 532 B | — | — |
+| FullText_Search_Phrase | 173.4 KiB | — | — | 540 B | — | — |
+| FullText_Update_WithIndex | 586.1 KiB | — | — | 412 B | — | — |
+| FullText_Delete_WithIndex | 40.4 KiB | — | — | 260 B | — | — |
+| JSONInverted_Insert_WithIndex | — | 164.3 KiB | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 1.4 MiB | 3.3 MiB | — | 548 B | 548 B |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.7 MiB | 3.5 MiB | — | 550 B | 549 B |
+| JSONInverted_Update_WithIndex | — | 1.2 MiB | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 142.6 KiB | — | — | — | — |
+
+### 2026-05-15 19:19 UTC
+
+#### Timing
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan | ratio |
+|---|---|---|---|---|---|---|---|
+| FullText_Insert_WithIndex | 70.28 µs/op | — | — | 162.56 µs/op | — | — | 0.4× |
+| FullText_Search_SingleTerm/rare | 207.69 µs/op | — | — | 274.34 µs/op | — | — | 0.8× |
+| FullText_Search_SingleTerm/medium | 195.04 µs/op | — | — | 330.99 µs/op | — | — | 0.6× |
+| FullText_Search_SingleTerm/common | 956.69 µs/op | — | — | 328.30 µs/op | — | — | 2.9× |
+| FullText_Search_MultiTermAND | 308.45 µs/op | — | — | 301.59 µs/op | — | — | 1.0× |
+| FullText_Search_Phrase | 275.49 µs/op | — | — | 387.63 µs/op | — | — | 0.7× |
+| FullText_Update_WithIndex | 3.25 ms/op | — | — | 375.41 µs/op | — | — | 8.6× |
+| FullText_Delete_WithIndex | 76.67 µs/op | — | — | 337.64 µs/op | — | — | 0.2× |
+| JSONInverted_Insert_WithIndex | — | 103.79 µs/op | — | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 1.26 ms/op | 3.10 ms/op | — | 278.97 µs/op | 991.60 µs/op | — |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.42 ms/op | 3.34 ms/op | — | 513.01 µs/op | 1.03 ms/op | — |
+| JSONInverted_Update_WithIndex | — | 431.96 µs/op | — | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 102.73 µs/op | — | — | — | — | — |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan |
+|---|---|---|---|---|---|---|
+| FullText_Insert_WithIndex | 66.9 KiB | — | — | 714 B | — | — |
+| FullText_Search_SingleTerm/rare | 66.8 KiB | — | — | 533 B | — | — |
+| FullText_Search_SingleTerm/medium | 71.5 KiB | — | — | 533 B | — | — |
+| FullText_Search_SingleTerm/common | 532.1 KiB | — | — | 548 B | — | — |
+| FullText_Search_MultiTermAND | 283.7 KiB | — | — | 533 B | — | — |
+| FullText_Search_Phrase | 171.2 KiB | — | — | 540 B | — | — |
+| FullText_Update_WithIndex | 5.9 MiB | — | — | 412 B | — | — |
+| FullText_Delete_WithIndex | 40.4 KiB | — | — | 259 B | — | — |
+| JSONInverted_Insert_WithIndex | — | 164.3 KiB | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 1.4 MiB | 3.3 MiB | — | 550 B | 548 B |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.7 MiB | 3.5 MiB | — | 548 B | 549 B |
+| JSONInverted_Update_WithIndex | — | 1.2 MiB | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 142.5 KiB | — | — | — | — |
+
+### 2026-05-14 21:50 UTC
+
+#### Timing
+
+| Benchmark | minisql | minisql_indexed | sqlite | ratio |
+|---|---|---|---|---|
+| FullText_BuildIndex | 60.79 ms/op | — | 63.68 ms/op | 1.0× |
+| JSONInverted_BuildIndex | — | 46.11 ms/op | — | — |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | minisql_indexed | sqlite |
+|---|---|---|---|
+| FullText_BuildIndex | 81.5 MiB | — | 429.2 KiB |
+| JSONInverted_BuildIndex | — | 78.1 MiB | — |
+
+
+### 2026-05-14 21:28 UTC
+
+#### Timing
+
+| Benchmark | minisql | minisql_indexed | sqlite | ratio |
+|---|---|---|---|---|
+| FullText_BuildIndex | 53.75 ms/op | — | 67.87 ms/op | 0.8× |
+| JSONInverted_BuildIndex | — | 294.46 ms/op | — | — |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | minisql_indexed | sqlite |
+|---|---|---|---|
+| FullText_BuildIndex | 81.4 MiB | — | 428.8 KiB |
+| JSONInverted_BuildIndex | — | 1327.7 MiB | — |
+
+### 2026-05-14 21:13 UTC
+
+#### Timing
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan | ratio |
+|---|---|---|---|---|---|---|---|
+| FullText_BuildIndex | 1.85 s/op | — | — | 57.70 ms/op | — | — | 32.0× |
+| JSONInverted_BuildIndex | — | 296.61 ms/op | — | — | — | — | — |
+| FullText_Insert_WithIndex | 87.92 µs/op | — | — | 224.76 µs/op | — | — | 0.4× |
+| FullText_Search_SingleTerm/rare | 215.50 µs/op | — | — | 279.90 µs/op | — | — | 0.8× |
+| FullText_Search_SingleTerm/medium | 228.22 µs/op | — | — | 282.04 µs/op | — | — | 0.8× |
+| FullText_Search_SingleTerm/common | 1.03 ms/op | — | — | 334.15 µs/op | — | — | 3.1× |
+| FullText_Search_MultiTermAND | 423.05 µs/op | — | — | 312.27 µs/op | — | — | 1.4× |
+| FullText_Search_Phrase | 312.12 µs/op | — | — | 273.05 µs/op | — | — | 1.1× |
+| FullText_Update_WithIndex | 3.28 ms/op | — | — | 328.61 µs/op | — | — | 10.0× |
+| FullText_Delete_WithIndex | 67.42 µs/op | — | — | 227.23 µs/op | — | — | 0.3× |
+| JSONInverted_Insert_WithIndex | — | 97.65 µs/op | — | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 1.25 ms/op | 3.05 ms/op | — | 340.98 µs/op | 990.32 µs/op | — |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.48 ms/op | 3.25 ms/op | — | 442.39 µs/op | 1.06 ms/op | — |
+| JSONInverted_Update_WithIndex | — | 1.20 ms/op | — | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 145.75 µs/op | — | — | — | — | — |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan |
+|---|---|---|---|---|---|---|
+| FullText_BuildIndex | 3624.8 MiB | — | — | 429.0 KiB | — | — |
+| JSONInverted_BuildIndex | — | 1327.3 MiB | — | — | — | — |
+| FullText_Insert_WithIndex | 66.7 KiB | — | — | 714 B | — | — |
+| FullText_Search_SingleTerm/rare | 62.9 KiB | — | — | 533 B | — | — |
+| FullText_Search_SingleTerm/medium | 68.5 KiB | — | — | 533 B | — | — |
+| FullText_Search_SingleTerm/common | 606.8 KiB | — | — | 548 B | — | — |
+| FullText_Search_MultiTermAND | 358.7 KiB | — | — | 532 B | — | — |
+| FullText_Search_Phrase | 176.6 KiB | — | — | 540 B | — | — |
+| FullText_Update_WithIndex | 6.0 MiB | — | — | 411 B | — | — |
+| FullText_Delete_WithIndex | 40.4 KiB | — | — | 260 B | — | — |
+| JSONInverted_Insert_WithIndex | — | 163.9 KiB | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 1.5 MiB | 3.3 MiB | — | 549 B | 548 B |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.8 MiB | 3.5 MiB | — | 549 B | 548 B |
+| JSONInverted_Update_WithIndex | — | 4.6 MiB | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 143.0 KiB | — | — | — | — |
+
 ### 2026-05-15 (posting-tree block packing optimisation — latest)
 
 Full-text UPDATE was traced to hot posting-tree mutation. A focused internal
@@ -977,187 +1174,3 @@ Snapshot isolation (MVCC) for read-only transactions + TOCTOU fix in `ReadPage`:
 | Select_IndexRangeScan | 772.4 KiB | 85.9 KiB |
 | Select_RangeScan | 2.1 MiB | 85.9 KiB |
 | Update_ByPK | 9.0 KiB | 263 B |
-### 2026-05-14 21:13 UTC
-
-#### Timing
-
-| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan | ratio |
-|---|---|---|---|---|---|---|---|
-| FullText_BuildIndex | 1.85 s/op | — | — | 57.70 ms/op | — | — | 32.0× |
-| JSONInverted_BuildIndex | — | 296.61 ms/op | — | — | — | — | — |
-| FullText_Insert_WithIndex | 87.92 µs/op | — | — | 224.76 µs/op | — | — | 0.4× |
-| FullText_Search_SingleTerm/rare | 215.50 µs/op | — | — | 279.90 µs/op | — | — | 0.8× |
-| FullText_Search_SingleTerm/medium | 228.22 µs/op | — | — | 282.04 µs/op | — | — | 0.8× |
-| FullText_Search_SingleTerm/common | 1.03 ms/op | — | — | 334.15 µs/op | — | — | 3.1× |
-| FullText_Search_MultiTermAND | 423.05 µs/op | — | — | 312.27 µs/op | — | — | 1.4× |
-| FullText_Search_Phrase | 312.12 µs/op | — | — | 273.05 µs/op | — | — | 1.1× |
-| FullText_Update_WithIndex | 3.28 ms/op | — | — | 328.61 µs/op | — | — | 10.0× |
-| FullText_Delete_WithIndex | 67.42 µs/op | — | — | 227.23 µs/op | — | — | 0.3× |
-| JSONInverted_Insert_WithIndex | — | 97.65 µs/op | — | — | — | — | — |
-| JSONInverted_Contains_KeyValue/key_value | — | 1.25 ms/op | 3.05 ms/op | — | 340.98 µs/op | 990.32 µs/op | — |
-| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.48 ms/op | 3.25 ms/op | — | 442.39 µs/op | 1.06 ms/op | — |
-| JSONInverted_Update_WithIndex | — | 1.20 ms/op | — | — | — | — | — |
-| JSONInverted_Delete_WithIndex | — | 145.75 µs/op | — | — | — | — | — |
-
-#### Memory (B/op)
-
-| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan |
-|---|---|---|---|---|---|---|
-| FullText_BuildIndex | 3624.8 MiB | — | — | 429.0 KiB | — | — |
-| JSONInverted_BuildIndex | — | 1327.3 MiB | — | — | — | — |
-| FullText_Insert_WithIndex | 66.7 KiB | — | — | 714 B | — | — |
-| FullText_Search_SingleTerm/rare | 62.9 KiB | — | — | 533 B | — | — |
-| FullText_Search_SingleTerm/medium | 68.5 KiB | — | — | 533 B | — | — |
-| FullText_Search_SingleTerm/common | 606.8 KiB | — | — | 548 B | — | — |
-| FullText_Search_MultiTermAND | 358.7 KiB | — | — | 532 B | — | — |
-| FullText_Search_Phrase | 176.6 KiB | — | — | 540 B | — | — |
-| FullText_Update_WithIndex | 6.0 MiB | — | — | 411 B | — | — |
-| FullText_Delete_WithIndex | 40.4 KiB | — | — | 260 B | — | — |
-| JSONInverted_Insert_WithIndex | — | 163.9 KiB | — | — | — | — |
-| JSONInverted_Contains_KeyValue/key_value | — | 1.5 MiB | 3.3 MiB | — | 549 B | 548 B |
-| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.8 MiB | 3.5 MiB | — | 549 B | 548 B |
-| JSONInverted_Update_WithIndex | — | 4.6 MiB | — | — | — | — |
-| JSONInverted_Delete_WithIndex | — | 143.0 KiB | — | — | — | — |
-
-### 2026-05-14 21:28 UTC
-
-#### Timing
-
-| Benchmark | minisql | minisql_indexed | sqlite | ratio |
-|---|---|---|---|---|
-| FullText_BuildIndex | 53.75 ms/op | — | 67.87 ms/op | 0.8× |
-| JSONInverted_BuildIndex | — | 294.46 ms/op | — | — |
-
-#### Memory (B/op)
-
-| Benchmark | minisql | minisql_indexed | sqlite |
-|---|---|---|---|
-| FullText_BuildIndex | 81.4 MiB | — | 428.8 KiB |
-| JSONInverted_BuildIndex | — | 1327.7 MiB | — |
-
-### 2026-05-14 21:50 UTC
-
-#### Timing
-
-| Benchmark | minisql | minisql_indexed | sqlite | ratio |
-|---|---|---|---|---|
-| FullText_BuildIndex | 60.79 ms/op | — | 63.68 ms/op | 1.0× |
-| JSONInverted_BuildIndex | — | 46.11 ms/op | — | — |
-
-#### Memory (B/op)
-
-| Benchmark | minisql | minisql_indexed | sqlite |
-|---|---|---|---|
-| FullText_BuildIndex | 81.5 MiB | — | 429.2 KiB |
-| JSONInverted_BuildIndex | — | 78.1 MiB | — |
-
-### 2026-05-15 19:19 UTC
-
-#### Timing
-
-| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan | ratio |
-|---|---|---|---|---|---|---|---|
-| FullText_Insert_WithIndex | 70.28 µs/op | — | — | 162.56 µs/op | — | — | 0.4× |
-| FullText_Search_SingleTerm/rare | 207.69 µs/op | — | — | 274.34 µs/op | — | — | 0.8× |
-| FullText_Search_SingleTerm/medium | 195.04 µs/op | — | — | 330.99 µs/op | — | — | 0.6× |
-| FullText_Search_SingleTerm/common | 956.69 µs/op | — | — | 328.30 µs/op | — | — | 2.9× |
-| FullText_Search_MultiTermAND | 308.45 µs/op | — | — | 301.59 µs/op | — | — | 1.0× |
-| FullText_Search_Phrase | 275.49 µs/op | — | — | 387.63 µs/op | — | — | 0.7× |
-| FullText_Update_WithIndex | 3.25 ms/op | — | — | 375.41 µs/op | — | — | 8.6× |
-| FullText_Delete_WithIndex | 76.67 µs/op | — | — | 337.64 µs/op | — | — | 0.2× |
-| JSONInverted_Insert_WithIndex | — | 103.79 µs/op | — | — | — | — | — |
-| JSONInverted_Contains_KeyValue/key_value | — | 1.26 ms/op | 3.10 ms/op | — | 278.97 µs/op | 991.60 µs/op | — |
-| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.42 ms/op | 3.34 ms/op | — | 513.01 µs/op | 1.03 ms/op | — |
-| JSONInverted_Update_WithIndex | — | 431.96 µs/op | — | — | — | — | — |
-| JSONInverted_Delete_WithIndex | — | 102.73 µs/op | — | — | — | — | — |
-
-#### Memory (B/op)
-
-| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan |
-|---|---|---|---|---|---|---|
-| FullText_Insert_WithIndex | 66.9 KiB | — | — | 714 B | — | — |
-| FullText_Search_SingleTerm/rare | 66.8 KiB | — | — | 533 B | — | — |
-| FullText_Search_SingleTerm/medium | 71.5 KiB | — | — | 533 B | — | — |
-| FullText_Search_SingleTerm/common | 532.1 KiB | — | — | 548 B | — | — |
-| FullText_Search_MultiTermAND | 283.7 KiB | — | — | 533 B | — | — |
-| FullText_Search_Phrase | 171.2 KiB | — | — | 540 B | — | — |
-| FullText_Update_WithIndex | 5.9 MiB | — | — | 412 B | — | — |
-| FullText_Delete_WithIndex | 40.4 KiB | — | — | 259 B | — | — |
-| JSONInverted_Insert_WithIndex | — | 164.3 KiB | — | — | — | — |
-| JSONInverted_Contains_KeyValue/key_value | — | 1.4 MiB | 3.3 MiB | — | 550 B | 548 B |
-| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.7 MiB | 3.5 MiB | — | 548 B | 549 B |
-| JSONInverted_Update_WithIndex | — | 1.2 MiB | — | — | — | — |
-| JSONInverted_Delete_WithIndex | — | 142.5 KiB | — | — | — | — |
-
-### 2026-05-15 19:35 UTC
-
-#### Timing
-
-| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan | ratio |
-|---|---|---|---|---|---|---|---|
-| FullText_Insert_WithIndex | 91.09 µs/op | — | — | 224.51 µs/op | — | — | 0.4× |
-| FullText_Search_SingleTerm/rare | 209.33 µs/op | — | — | 361.07 µs/op | — | — | 0.6× |
-| FullText_Search_SingleTerm/medium | 209.67 µs/op | — | — | 438.83 µs/op | — | — | 0.5× |
-| FullText_Search_SingleTerm/common | 1.01 ms/op | — | — | 432.22 µs/op | — | — | 2.3× |
-| FullText_Search_MultiTermAND | 332.81 µs/op | — | — | 354.13 µs/op | — | — | 0.9× |
-| FullText_Search_Phrase | 330.16 µs/op | — | — | 367.14 µs/op | — | — | 0.9× |
-| FullText_Update_WithIndex | 474.57 µs/op | — | — | 451.48 µs/op | — | — | 1.1× |
-| FullText_Delete_WithIndex | 90.31 µs/op | — | — | 197.68 µs/op | — | — | 0.5× |
-| JSONInverted_Insert_WithIndex | — | 113.81 µs/op | — | — | — | — | — |
-| JSONInverted_Contains_KeyValue/key_value | — | 1.32 ms/op | 3.10 ms/op | — | 424.78 µs/op | 1.05 ms/op | — |
-| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.78 ms/op | 3.87 ms/op | — | 455.52 µs/op | 1.09 ms/op | — |
-| JSONInverted_Update_WithIndex | — | 421.89 µs/op | — | — | — | — | — |
-| JSONInverted_Delete_WithIndex | — | 120.44 µs/op | — | — | — | — | — |
-
-#### Memory (B/op)
-
-| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan |
-|---|---|---|---|---|---|---|
-| FullText_Insert_WithIndex | 66.9 KiB | — | — | 705 B | — | — |
-| FullText_Search_SingleTerm/rare | 66.8 KiB | — | — | 532 B | — | — |
-| FullText_Search_SingleTerm/medium | 71.5 KiB | — | — | 533 B | — | — |
-| FullText_Search_SingleTerm/common | 531.4 KiB | — | — | 548 B | — | — |
-| FullText_Search_MultiTermAND | 283.7 KiB | — | — | 532 B | — | — |
-| FullText_Search_Phrase | 173.4 KiB | — | — | 540 B | — | — |
-| FullText_Update_WithIndex | 586.1 KiB | — | — | 412 B | — | — |
-| FullText_Delete_WithIndex | 40.4 KiB | — | — | 260 B | — | — |
-| JSONInverted_Insert_WithIndex | — | 164.3 KiB | — | — | — | — |
-| JSONInverted_Contains_KeyValue/key_value | — | 1.4 MiB | 3.3 MiB | — | 548 B | 548 B |
-| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.7 MiB | 3.5 MiB | — | 550 B | 549 B |
-| JSONInverted_Update_WithIndex | — | 1.2 MiB | — | — | — | — |
-| JSONInverted_Delete_WithIndex | — | 142.6 KiB | — | — | — | — |
-
-### 2026-05-15 19:55 UTC
-
-Targeted JSON indexed scan allocation pass. MiniSQL now predecodes literal
-`JSON_CONTAINS` queries for inverted-index rechecks and skips document rechecks
-when generated JSON terms are exact for scalar/object and unique scalar-array
-membership queries.
-
-| Benchmark | Before | After | Allocation Before | Allocation After |
-|---|---:|---:|---:|---:|
-| JSONInverted_Contains_KeyValue/key_value/minisql_indexed | 1.32 ms/op | ~422 µs/op | 1.4 MiB/op | ~409 KiB/op |
-| JSONInverted_Contains_ObjectSubset/object_subset/minisql_indexed | 1.78 ms/op | ~432 µs/op | 1.7 MiB/op | ~660 KiB/op |
-
-### 2026-05-15 20:06 UTC
-
-Targeted full-text common-term lookup pass. MiniSQL now streams single-token,
-non-phrase full-text posting lists directly and decodes only row IDs instead of
-materializing per-row position maps before fetching rows.
-
-| Benchmark | Before | After | Allocation Before | Allocation After |
-|---|---:|---:|---:|---:|
-| FullText_Search_SingleTerm/common/minisql | 1.01 ms/op | ~539 µs/op | 531.4 KiB/op | ~320 KiB/op |
-| FullText_Search_SingleTerm/medium/minisql | 209.67 µs/op | ~217 µs/op | 71.5 KiB/op | ~69.6 KiB/op |
-| FullText_Search_SingleTerm/rare/minisql | 209.33 µs/op | ~189 µs/op | 66.8 KiB/op | ~65.7 KiB/op |
-
-### 2026-05-16 00:21 UTC
-
-Targeted full-text multi-term AND lookup pass. MiniSQL now handles non-phrase
-multi-term full-text queries by loading row IDs only, ordering terms by document
-frequency, and intersecting sorted row-id lists instead of materializing
-per-term position maps.
-
-| Benchmark | Before | After | Allocation Before | Allocation After |
-|---|---:|---:|---:|---:|
-| FullText_Search_MultiTermAND/minisql | 332.81 µs/op | ~241 µs/op | 283.7 KiB/op | ~78.3 KiB/op |
