@@ -1,14 +1,20 @@
 # Agent OS Standards Index
 
 parser:
+  error-construction: Parser error helpers — errorf vs wrapErr, sentinel vs inline errors
   peek-pop-errors: Cursor peek/pop helpers, which to use, and error message format
+  reserved-word-ordering: Reserved word slice ordering for longest-match tokenization correctness
   reserved-words: SQL keyword tokenizer rules and how to add new keywords
   state-machine: Two-level dispatch pattern for statement sub-parsers
-  where-recursive-descent: WHERE clause recursive-descent parser and DNF normalisation
+  step-machine: Step iota constants + doParse*() dispatch pattern; how to add new syntax
+  where-recursive-descent: WHERE clause recursive-descent parser, DNF normalisation, and expression precedence
 
 query-execution:
+  covering-index: CoveringIndex=true eligibility; SELECT-only, IS NULL disqualifier, COUNT(*) shortcut
   dnf-scans-fanout: OR groups in DNF each become one Scan; residual Scan.Filters applied post-index
+  hash-join-selection: Hash join vs nested-loop selection; 1M threshold, RIGHT JOIN exception
   index-selection: Operator eligibility, index priority, composite prefix matching, override guard
+  join-topology: flattenJoinTree + scanIndexByAlias; why LeftScanIndex is never hardcoded to 0
   plan-pipeline: Channel-based scan→consumer pipeline; streaming vs in-memory sort paths
   sort-path: ORDER BY path selection; heap optimisation for LIMIT; DISTINCT materialisation
 
@@ -26,5 +32,8 @@ storage-engine:
 testing:
   datagen: Row generator helpers, uniqueness guarantees, naming convention for new entity types
   e2e-suite: TestSuite setup/teardown lifecycle, SQL fixture placement, sub-test vs method rules
+  must-helpers: mustXxx helper pattern; t.Helper, require.NoError, ExecuteInTransaction wrapping
+  parser-test-structure: testCase struct, table-driven loop, assert.ErrorIs (never string compare)
   row-size-presets: testColumns/testMediumColumns/testBigColumns — when to use each
+  same-transaction-manager: Table + index pagers must share one TxManager or OCC conflicts occur
   unit-test-setup: initTest helper, TransactionalPager wiring, ExecuteInTransaction requirement
