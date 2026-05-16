@@ -197,26 +197,40 @@ func TestTable_PlanQuery_CompositeIndex(t *testing.T) {
 				},
 			},
 			QueryPlan{
-				Scans: []Scan{
-					{
-						TableName:    "users",
-						Type:         ScanTypeIndexPoint,
-						IndexName:    compositePKIndexName,
-						IndexColumns: compositeColumns[1:3],
-						IndexKeys: []any{
-							NewCompositeKey(compositeColumns[1:3], "John", "Doe"),
+				Scans: []Scan{{
+					TableName: "users",
+					Type:      ScanTypeIndexUnion,
+					SubScans: []Scan{
+						{
+							TableName:    "users",
+							Type:         ScanTypeIndexPoint,
+							IndexName:    compositePKIndexName,
+							IndexColumns: compositeColumns[1:3],
+							IndexKeys: []any{
+								NewCompositeKey(compositeColumns[1:3], "John", "Doe"),
+							},
+						},
+						{
+							TableName:    "users",
+							Type:         ScanTypeIndexPoint,
+							IndexName:    compositePKIndexName,
+							IndexColumns: compositeColumns[1:3],
+							IndexKeys: []any{
+								NewCompositeKey(compositeColumns[1:3], "Jane", "Smith"),
+							},
 						},
 					},
-					{
-						TableName:    "users",
-						Type:         ScanTypeIndexPoint,
-						IndexName:    compositePKIndexName,
-						IndexColumns: compositeColumns[1:3],
-						IndexKeys: []any{
-							NewCompositeKey(compositeColumns[1:3], "Jane", "Smith"),
+					Filters: OneOrMore{
+						{
+							FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, NewTextPointer([]byte("John"))),
+							FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, NewTextPointer([]byte("Doe"))),
+						},
+						{
+							FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, NewTextPointer([]byte("Jane"))),
+							FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, NewTextPointer([]byte("Smith"))),
 						},
 					},
-				},
+				}},
 			},
 		},
 		{

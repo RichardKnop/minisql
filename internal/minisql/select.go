@@ -2134,6 +2134,19 @@ func (t *Table) virtualSequentialScan(ctx context.Context, scan Scan, out func(R
 // collectRowIDsFromScan runs a sub-scan and collects all RowIDs it produces without
 // fetching table rows.  Supported sub-scan types: ScanTypeIndexPoint and ScanTypeIndexRange.
 func (t *Table) collectRowIDsFromScan(ctx context.Context, scan Scan) ([]RowID, error) {
+	// Intersect: recursively collect and intersect sub-scan RowID sets.
+	if scan.Type == ScanTypeIndexIntersect {
+		sets := make([][]RowID, 0, len(scan.SubScans))
+		for _, sub := range scan.SubScans {
+			ids, err := t.collectRowIDsFromScan(ctx, sub)
+			if err != nil {
+				return nil, err
+			}
+			sets = append(sets, ids)
+		}
+		return intersectSortedRowIDs(sets), nil
+	}
+
 	idx, ok := t.IndexByName(scan.IndexName)
 	if !ok {
 		return nil, fmt.Errorf("no index found for intersect sub-scan: %s", scan.IndexName)
@@ -2290,6 +2303,118 @@ func (t *Table) indexIntersectScan(ctx context.Context, scan Scan, selectedField
 
 		if err := out(row); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// unionTwoSortedSets returns the sorted, deduplicated union of two sorted RowID slices.
+func unionTwoSortedSets(a, b []RowID) []RowID {
+	result := make([]RowID, 0, len(a)+len(b))
+	emit := func(id RowID) {
+		if len(result) == 0 || result[len(result)-1] != id {
+			result = append(result, id)
+		}
+	}
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		switch {
+		case a[i] == b[j]:
+			emit(a[i])
+			i++
+			j++
+		case a[i] < b[j]:
+			emit(a[i])
+			i++
+		default:
+			emit(b[j])
+			j++
+		}
+	}
+	for ; i < len(a); i++ {
+		emit(a[i])
+	}
+	for ; j < len(b); j++ {
+		emit(b[j])
+	}
+	return result
+}
+
+// unionSortedRowIDs sorts each input slice and returns their deduplicated union.
+func unionSortedRowIDs(sets [][]RowID) []RowID {
+	if len(sets) == 0 {
+		return nil
+	}
+	for i := range sets {
+		sortRowIDs(sets[i])
+	}
+	result := sets[0]
+	for _, next := range sets[1:] {
+		result = unionTwoSortedSets(result, next)
+	}
+	return result
+}
+
+// indexUnionScan executes a ScanTypeIndexUnion plan:
+//  1. Collect RowID sets from each OR-group sub-scan.
+//  2. Union (deduplicate) all sets in memory.
+//  3. Fetch each surviving row once and re-check the full WHERE clause.
+func (t *Table) indexUnionScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
+	sets := make([][]RowID, 0, len(scan.SubScans))
+	for _, sub := range scan.SubScans {
+		ids, err := t.collectRowIDsFromScan(ctx, sub)
+		if err != nil {
+			return err
+		}
+		sets = append(sets, ids)
+	}
+
+	surviving := unionSortedRowIDs(sets)
+	if len(surviving) == 0 {
+		return nil
+	}
+
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+
+	var emitted int64
+	scanLimit := scan.ScanLimit
+	for _, rowID := range surviving {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		var row Row
+		if len(selectedFields) == 0 {
+			row = NewRowWithValues(t.Columns, nil)
+			row.Key = rowID
+		} else {
+			cursor, err := t.Seek(ctx, rowID)
+			if err != nil {
+				return fmt.Errorf("union seek: %w", err)
+			}
+			row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
+			if err != nil {
+				return fmt.Errorf("union fetch: %w", err)
+			}
+		}
+
+		if tableFilter != nil {
+			ok, err := tableFilter(row)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
+		}
+
+		if err := out(row); err != nil {
+			return err
+		}
+		emitted++
+		if scanLimit > 0 && emitted >= scanLimit {
+			return nil
 		}
 	}
 	return nil

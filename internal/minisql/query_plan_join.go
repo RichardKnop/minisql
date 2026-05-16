@@ -317,8 +317,8 @@ func planJoinTableScan(t *Table, tableName, tableAlias string, conditions OneOrM
 	if err := tempPlan.setIndexScans(t, conditions); err != nil {
 		return defaultScan
 	}
-	if len(tempPlan.Scans) != 1 {
-		// Multiple OR groups each with an index — keep sequential for simplicity.
+	if len(tempPlan.Scans) != 1 || tempPlan.Scans[0].Type == ScanTypeIndexUnion {
+		// Multiple OR groups each with an index — keep sequential for simplicity in JOIN path.
 		return defaultScan
 	}
 	scan := tempPlan.Scans[0]
