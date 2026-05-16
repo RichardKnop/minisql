@@ -941,6 +941,50 @@ _, err := db.Exec(`ANALYZE;`)
 
 Without up-to-date statistics the planner may over- or under-estimate the selectivity of an index and choose a sequential scan instead.
 
+#### ANALYZE Statistics Format
+
+`ANALYZE` stores one row per object (table or index) in the internal `minisql_stats` table. You can inspect it directly:
+
+```sql
+SELECT * FROM minisql_stats;
+```
+
+**Table row** (no index name): a single decimal integer — the row count.
+
+```
+100
+```
+
+**Index row**: a space-separated list of numbers, optionally followed by a histogram and/or Most Common Values (MCV) suffix.
+
+```
+<nEntry> <nDistinct_prefix1> [<nDistinct_prefix2> ...][|h=<bounds>][|mcv=<values>]
+```
+
+| Component | Meaning |
+|-----------|---------|
+| `nEntry` | Total number of entries in the index (equals the table row count for non-partial indexes). |
+| `nDistinct_prefixN` | Number of distinct key combinations for the first N columns of the index. Composite indexes emit one value per prefix length. For unique indexes the last value equals `nEntry`. |
+| `\|h=b0,b1,...,bK` | Equi-depth histogram for the leading column (numeric/timestamp columns only). The K+1 comma-separated floats are bucket boundary values. Each of the K buckets holds approximately the same number of entries. Used by the planner to estimate range-scan selectivity. |
+| `\|mcv=v1:c1,v2:c2,...` | Most Common Values list (non-unique indexes only, up to 50 entries). Each entry is a URL-encoded value string and its occurrence count, sorted descending by count. Used by the planner for exact equality selectivity estimates. |
+
+**Example** — secondary index on a `status` column with 1 000 rows, 2 distinct values, and a skewed distribution:
+
+```
+1000 2|mcv=active%3A950,inactive%3A50
+```
+
+**Example** — primary key on a numeric `id` column with 10 000 rows (unique, so `nDistinct == nEntry`, histogram appended):
+
+```
+10000 10000|h=1,313,625,938,...,9998,10000
+```
+
+The planner uses statistics in two ways:
+
+- **Equality cost gate**: if the MCV list shows that an equality condition would match more than 30% of table rows, the planner falls back to a sequential scan instead of the index.
+- **Range cost gate**: if the histogram estimate shows a range condition would match more than 30% of rows, the planner likewise prefers a sequential scan.
+
 ### DROP INDEX
 
 ```go

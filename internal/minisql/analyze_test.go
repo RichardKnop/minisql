@@ -117,6 +117,7 @@ func TestDatabase_Analyze(t *testing.T) {
 	}, stats[2])
 
 	// Secondary index on created (Timestamp) — numeric, so a histogram suffix is appended.
+	// Also MCV (non-unique index) with |mcv= suffix.
 	assert.Equal(t, testTableName, stats[3].TableName)
 	assert.Equal(t, "idx_created", stats[3].IndexName)
 	assert.True(t, strings.HasPrefix(stats[3].StatValue, "100 10"), "created stat should start with '100 10'")
@@ -127,6 +128,108 @@ func TestDatabase_Analyze(t *testing.T) {
 	assert.NotNil(t, createdStats.Hist, "Timestamp index should have a histogram")
 	// 10 distinct timestamps — histogram has at most 10 distinct boundaries.
 	assert.GreaterOrEqual(t, len(createdStats.Hist.Bounds), 2)
+	// Non-unique secondary index collects MCV.
+	assert.NotEmpty(t, createdStats.MCV, "non-unique secondary index should have MCV entries")
+
+	mock.AssertExpectationsForObjects(t, mockParser)
+}
+
+func TestDatabase_Analyze_MCVGuidedPlanSelection(t *testing.T) {
+	var (
+		pager, dbFile = initTest(t)
+		mockParser    = new(MockParser)
+		ctx           = context.Background()
+		indexName     = "idx_status"
+		statusColumns = []Column{
+			{Kind: Int8, Size: 8, Name: "id"},
+			{Kind: Varchar, Size: 50, Name: "status", Nullable: true},
+		}
+	)
+
+	aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager, nil)
+	require.NoError(t, err)
+
+	stmt := Statement{
+		Kind:       CreateTable,
+		TableName:  testTableName,
+		Columns:    statusColumns,
+		PrimaryKey: NewPrimaryKey(PrimaryKeyName(testTableName), statusColumns[0:1], true),
+	}
+	mockParser.On("Parse", mock.Anything, stmt.DDL()).Return([]Statement{stmt}, nil)
+	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		_, err := aDatabase.ExecuteStatement(ctx, stmt)
+		return err
+	})
+	require.NoError(t, err)
+
+	createIndexStmt := Statement{
+		Kind:      CreateIndex,
+		IndexName: indexName,
+		TableName: testTableName,
+		Columns:   statusColumns[1:2],
+	}
+	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		_, err := aDatabase.ExecuteStatement(ctx, createIndexStmt)
+		return err
+	})
+	require.NoError(t, err)
+
+	// Insert 1000 rows: 950 "active", 50 "inactive".
+	insertStmt := Statement{
+		Kind:    Insert,
+		Fields:  fieldsFromColumns(statusColumns...),
+		Inserts: [][]OptionalValue{},
+	}
+	for i := range 1000 {
+		status := "active"
+		if i < 50 {
+			status = "inactive"
+		}
+		insertStmt.Inserts = append(insertStmt.Inserts, []OptionalValue{
+			{Value: int64(i + 1), Valid: true},
+			{Value: NewTextPointer([]byte(status)), Valid: true},
+		})
+	}
+	mustInsert(ctx, t, aDatabase.tables[testTableName], aDatabase.txManager, insertStmt)
+
+	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return aDatabase.Analyze(ctx, testTableName)
+	})
+	require.NoError(t, err)
+
+	// Verify MCV was collected.
+	statusStats := aDatabase.tables[testTableName].indexStats[indexName]
+	assert.Equal(t, int64(1000), statusStats.NEntry)
+	require.NotEmpty(t, statusStats.MCV)
+	// Dominant value ("active") should be first (sorted desc by count).
+	assert.Equal(t, "active", statusStats.MCV[0].Value)
+	assert.Equal(t, int64(950), statusStats.MCV[0].Count)
+
+	// Dominant value: 95% selectivity → should fall back to sequential scan.
+	activeQuery := Statement{
+		Kind: Select,
+		Conditions: OneOrMore{
+			{FieldIsEqual(Field{Name: "status"}, OperandQuotedString, NewTextPointer([]byte("active")))},
+		},
+	}
+	activePlan, err := aDatabase.tables[testTableName].PlanQuery(ctx, activeQuery)
+	require.NoError(t, err)
+	require.Len(t, activePlan.Scans, 1)
+	assert.Equal(t, ScanTypeSequential, activePlan.Scans[0].Type,
+		"dominant value should trigger sequential scan fallback")
+
+	// Rare value: 5% selectivity → should use index point scan.
+	inactiveQuery := Statement{
+		Kind: Select,
+		Conditions: OneOrMore{
+			{FieldIsEqual(Field{Name: "status"}, OperandQuotedString, NewTextPointer([]byte("inactive")))},
+		},
+	}
+	inactivePlan, err := aDatabase.tables[testTableName].PlanQuery(ctx, inactiveQuery)
+	require.NoError(t, err)
+	require.Len(t, inactivePlan.Scans, 1)
+	assert.Equal(t, ScanTypeIndexPoint, inactivePlan.Scans[0].Type,
+		"rare value should use index point scan")
 
 	mock.AssertExpectationsForObjects(t, mockParser)
 }

@@ -122,8 +122,12 @@ func (d *Database) Analyze(ctx context.Context, target string) error {
 		}
 	}
 
-	// Load stats into memory
-	stats, err := d.listStats(ctx, target)
+	// Load stats into memory using the statsTable object we already hold.
+	// We cannot use listStats here because it requires d.tables[StatsTableName]
+	// to be set, which only happens after SaveDDLChanges at transaction commit.
+	// When the stats table is brand-new (created in this same transaction),
+	// d.tables would not yet contain it.
+	stats, err := d.scanStatsTable(ctx, statsTable, target)
 	if err != nil {
 		return err
 	}
@@ -135,7 +139,9 @@ func (d *Database) Analyze(ctx context.Context, target string) error {
 		if err != nil {
 			return err
 		}
-		d.tables[s.TableName].indexStats[s.IndexName] = indexStats
+		if tbl, ok := d.tables[s.TableName]; ok {
+			tbl.indexStats[s.IndexName] = indexStats
+		}
 	}
 
 	return nil
@@ -226,9 +232,11 @@ func (d *Database) analyzeIndex(ctx context.Context, statsTable *Table, tableNam
 		prefixMaps[i] = make(map[string]struct{})
 	}
 
-	// Collect first-column numeric values for histogram building.
+	// Collect first-column numeric values for histogram building and
+	// a frequency map for the MCV list.
 	collectHist := len(indexColumns) > 0 && isNumericColumn(indexColumns[0])
 	var histValues []float64
+	freq := make(map[string]int64)
 
 	if scanErr := index.ScanAll(ctx, false, func(key any, rowID RowID) error {
 		entryCount += 1
@@ -238,14 +246,18 @@ func (d *Database) analyzeIndex(ctx context.Context, statsTable *Table, tableNam
 				prefixKey := buildPrefixKey(ck.Values[:prefixLen])
 				prefixMaps[prefixLen-1][prefixKey] = struct{}{}
 			}
-			if collectHist && len(ck.Values) > 0 {
-				if f, ok := anyToFloat64(ck.Values[0]); ok {
-					histValues = append(histValues, f)
+			if len(ck.Values) > 0 {
+				freq[mcvKeyStr(ck.Values[0])]++
+				if collectHist {
+					if f, ok := anyToFloat64(ck.Values[0]); ok {
+						histValues = append(histValues, f)
+					}
 				}
 			}
 		} else {
-			keyStr := fmt.Sprintf("%v", key)
+			keyStr := mcvKeyStr(key)
 			prefixMaps[0][keyStr] = struct{}{}
+			freq[keyStr]++
 			if collectHist {
 				if f, ok := anyToFloat64(key); ok {
 					histValues = append(histValues, f)
@@ -273,6 +285,12 @@ func (d *Database) analyzeIndex(ctx context.Context, statsTable *Table, tableNam
 		sort.Float64s(histValues)
 		hist := buildEquiDepthHistogram(histValues, histogramBuckets)
 		serializeHistogram(&stat, hist)
+	}
+
+	// Build and append MCV list (skip for unique indexes: every value appears once).
+	if !isUnique {
+		mcv := buildMCV(freq, mcvMaxEntries)
+		serializeMCV(&stat, mcv)
 	}
 
 	_, err := statsTable.Insert(ctx, Statement{
