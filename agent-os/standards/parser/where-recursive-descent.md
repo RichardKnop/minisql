@@ -1,30 +1,48 @@
 ---
-name: WHERE Clause Recursive-Descent + DNF
-description: Why WHERE uses recursive-descent instead of the state machine, and how to extend it
+name: WHERE / Expression Parsing (Recursive Descent)
+description: Entry points, mandatory DNF normalisation, BETWEEN AND handling, and expression operator precedence
 type: standard
 ---
 
-# WHERE Clause: Recursive-Descent + DNF
+# WHERE / Expression Parsing (Recursive Descent)
 
-The WHERE clause is **not** parsed by the state machine. It uses a recursive-descent parser instead.
+WHERE conditions and scalar expressions use a **recursive-descent parser** that
+runs inside the step machine — it is NOT driven by step constants.
 
-## Why
+## Entry points
 
-A linear state machine cannot handle arbitrary parenthesis nesting like `(a AND (b OR c))`. Recursion is required to build the condition tree. DNF normalisation then flattens the tree into `[][]Condition` so all downstream engine code (query planner, row evaluation) is unchanged.
+| Function | Parses |
+|---|---|
+| `parseCondExpr()` | Full WHERE clause (OR level, lowest precedence) |
+| `parseAndExpr()` | AND-chained conditions |
+| `parsePrimaryCondExpr()` | Parenthesised group or single leaf |
+| `parseLeafCondition()` | Single `field op value` condition |
+| `parseExpr()` | Scalar arithmetic / JSON / function expression |
 
-## Call graph
+## DNF normalisation — mandatory
 
+After `parseCondExpr()` the result MUST be normalised to DNF via `node.ToDNF()`:
+
+```go
+node, err := p.parseCondExpr()
+// ...
+p.Conditions = node.ToDNF()
 ```
-doParseWhere
-  parseCondExpr        → OR  (lowest precedence)
-    parseAndExpr       → AND
-      parsePrimaryCondExpr  → parenthesised group or leaf
-        parseLeafCondition  → field op value
-```
 
-## Rules
+All downstream code (evaluation in `row.go`, index scan in `query_plan.go`,
+predicate push-down) iterates over `stmt.Conditions` as `[][]Condition` (DNF).
+A raw `*ConditionNode` is never consumed downstream — passing it unwrapped causes
+panics or silent mis-evaluation.
 
-- `doParseWhere` consumes `WHERE`, calls `parseCondExpr`, then calls `node.ToDNF()` to produce `[][]Condition`.
-- `parseCondBetweenValues` consumes the syntactic `AND` between BETWEEN bounds before `parseAndExpr` sees it — do not add extra `AND` handling.
-- Adding a new WHERE operator: add the keyword to `reservedWords`, add a `case` in `parseLeafCondition`, add a value-parsing helper if needed.
-- The `ConditionNode` tree lives only during parsing; after `ToDNF()` it is discarded.
+## BETWEEN's syntactic AND
+
+`parseCondBetweenValues` consumes the `AND` keyword between BETWEEN bounds.
+This prevents `parseAndExpr` from treating it as a logical AND and splitting
+the condition in two. Never remove this consume step.
+
+## Expression precedence (highest to lowest)
+
+1. Unary minus, literals, function calls, parenthesised sub-expressions (`parseFactor`)
+2. JSON path `->` / `->>` (`parseJSONExpr`)
+3. `*` `/` (`parseTerm`)
+4. `+` `-` (`parseExpr`)
