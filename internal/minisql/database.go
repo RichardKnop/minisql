@@ -45,6 +45,7 @@ type Database struct {
 	saver          PageSaver
 	lockedProvider TableProvider
 	stmtCache      LRUCache[string]
+	planCache      LRUCache[string]
 	tables         map[string]*Table
 	txManager      *TransactionManager
 	dbLock         *sync.RWMutex
@@ -82,6 +83,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, par
 		foreignKeysEnabled: true,
 		dbLock:             new(sync.RWMutex),
 		stmtCache:          lrucache.New[string](defaultMaxCachedStatements),
+		planCache:          lrucache.New[string](defaultMaxCachedPlans),
 		logger:             logger,
 		clock: func() Time {
 			now := time.Now().UTC()
@@ -194,6 +196,7 @@ func (d *Database) PrepareStatement(ctx context.Context, query string) (Statemen
 	}
 
 	stmt := statements[0]
+	stmt.CacheKey = query
 
 	// Cache the parsed statement
 	d.stmtCache.Put(query, stmt, true)
@@ -737,7 +740,9 @@ func (d *Database) tableFromSQL(ctx context.Context, schema Schema) (*Table, err
 		"",
 	)
 
-	opts := []TableOption{}
+	opts := []TableOption{
+		WithPlanCache(d.planCache),
+	}
 
 	if stmt.PrimaryKey.Name != "" {
 		opts = append(opts, WithPrimaryKey(NewPrimaryKey(
@@ -945,21 +950,29 @@ func (d *Database) executeDDLStatement(ctx context.Context, stmt Statement) (Sta
 	d.dbLock.Lock()
 	defer d.dbLock.Unlock()
 
+	var execErr error
 	switch stmt.Kind {
 	case CreateTable:
-		_, err := d.createTable(ctx, stmt)
-		return StatementResult{}, err
+		_, execErr = d.createTable(ctx, stmt)
 	case DropTable:
-		return StatementResult{}, d.dropTable(ctx, stmt.TableName)
+		execErr = d.dropTable(ctx, stmt.TableName)
 	case CreateIndex:
-		return StatementResult{}, d.createIndex(ctx, stmt, table)
+		execErr = d.createIndex(ctx, stmt, table)
 	case DropIndex:
-		return StatementResult{}, d.dropIndex(ctx, stmt)
+		execErr = d.dropIndex(ctx, stmt)
 	case Analyze:
-		return StatementResult{}, d.Analyze(ctx, stmt.TableName)
+		execErr = d.Analyze(ctx, stmt.TableName)
+	default:
+		return StatementResult{}, fmt.Errorf("unrecognized DDL statement type: %v", stmt.Kind)
 	}
 
-	return StatementResult{}, fmt.Errorf("unrecognized DDL statement type: %v", stmt.Kind)
+	// Any schema or statistics change invalidates all cached query plans.
+	// CreateTable is excluded: no existing plan targets a brand-new table.
+	if execErr == nil && stmt.Kind != CreateTable {
+		d.planCache.Purge()
+	}
+
+	return StatementResult{}, execErr
 }
 
 func (d *Database) executeTableStatement(ctx context.Context, table *Table, stmt Statement) (StatementResult, error) {
@@ -1172,7 +1185,9 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 		}
 	}
 
-	opts := []TableOption{}
+	opts := []TableOption{
+		WithPlanCache(d.planCache),
+	}
 
 	if stmt.PrimaryKey.Name != "" {
 		opts = append(opts, WithPrimaryKey(NewPrimaryKey(

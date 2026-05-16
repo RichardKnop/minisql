@@ -49,6 +49,10 @@ type Table struct {
 	// enforceParentFKOnUpdate is called before UPDATE to enforce inbound FK constraints.
 	// Handles RESTRICT/CASCADE/SET NULL based on each FK's OnUpdate action.
 	enforceParentFKOnUpdate func(context.Context, Row, Row) error
+	// planCache is the shared plan cache from *Database. When non-nil, PlanQuery
+	// checks here first and stores results after planning. Nil for system tables
+	// and virtual tables created for derived-table subqueries.
+	planCache LRUCache[string]
 	// rightmostTablePage caches the last leaf page index for SeekNextRowID so that
 	// sequential (autoincrement) inserts skip the O(log N) root→leaf traversal.
 	// lastTxIDTablePage guards against stale hints from rolled-back transactions.

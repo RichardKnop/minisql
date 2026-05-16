@@ -7,7 +7,7 @@
 `MiniSQL` is an embedded single file database written in Golang, inspired by `SQLite` but borrows ideas from other databases such as `Postgres` too. It can differentiate itself from `SQLite` in several areas: 
 
 1. Pure Go / zero CGO
-2. MVCC snapshot isolation (for reads, OCC for writes), 
+2. MVCC snapshot isolation (for reads, OCC for writes)
 3. Parallel scan
 4. JSON + UUID as native types
 5. Built-in full-text search

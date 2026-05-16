@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 )
@@ -135,7 +136,11 @@ type Scan struct {
 	Filters        OneOrMore
 	// SubScans holds the child index scans for ScanTypeIndexIntersect.
 	// Each child is executed to collect RowIDs; surviving rows are fetched after intersection.
-	SubScans      []Scan
+	SubScans []Scan
+	// ScanLimit, when non-zero, tells the scan to stop after emitting this many qualifying rows.
+	// Set by PlanQuery when LIMIT is present, no in-memory sort is required, and no DISTINCT.
+	// For LIMIT N OFFSET M the value is M+N so that skipped rows are also counted.
+	ScanLimit     int64
 	Type          ScanType
 	CoveringIndex bool
 }
@@ -205,6 +210,61 @@ SELECT * from users ORDER BY created DESC; - use index on created for ordering
 SELECT * from users ORDER BY non_indexed_col; - order in memory
 */
 func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error) {
+	// Plan cache: safe only when stmt.Conditions is empty (no bound values in the
+	// plan) and there are no JOINs (join plans embed per-execution join key values).
+	// ORDER BY-only queries are the primary beneficiary: the index-vs-sort decision
+	// is schema-derived and stable across all executions of the same SQL.
+	canCache := stmt.CacheKey != "" && t.planCache != nil &&
+		len(stmt.Conditions) == 0 && len(stmt.Joins) == 0
+
+	if canCache {
+		if cached, ok := t.planCache.Get(stmt.CacheKey); ok {
+			return applyScanLimit(cached.(QueryPlan), stmt), nil
+		}
+	}
+
+	plan, err := t.planQueryUncached(ctx, stmt)
+	if err != nil {
+		return QueryPlan{}, err
+	}
+
+	if canCache {
+		t.planCache.Put(stmt.CacheKey, plan, true)
+	}
+
+	return applyScanLimit(plan, stmt), nil
+}
+
+// applyScanLimit attaches a ScanLimit to each scan in the plan when LIMIT is present
+// and the query does not require a full-table materialisation (no in-memory sort, no
+// DISTINCT, no JOINs).  ScanLimit = OFFSET + LIMIT so that skipped (offset) rows are
+// included in the early-stop count.
+//
+// ScanLimit is intentionally set AFTER cache retrieval: the LIMIT/OFFSET values are
+// per-execution bound values, not schema-derived, so they must not be baked into the
+// cached plan.  To avoid mutating the shared cached slice, we copy plan.Scans first.
+func applyScanLimit(plan QueryPlan, stmt Statement) QueryPlan {
+	if !stmt.Limit.Valid || plan.SortInMemory || stmt.Distinct || len(plan.Joins) > 0 {
+		return plan
+	}
+	scanLimit := stmt.Limit.Value.(int64)
+	if stmt.Offset.Valid {
+		scanLimit += stmt.Offset.Value.(int64)
+	}
+	if scanLimit <= 0 {
+		return plan
+	}
+	scans := make([]Scan, len(plan.Scans))
+	copy(scans, plan.Scans)
+	for i := range scans {
+		scans[i].ScanLimit = scanLimit
+	}
+	plan.Scans = scans
+	return plan
+}
+
+// planQueryUncached derives a query plan from scratch without consulting the plan cache.
+func (t *Table) planQueryUncached(ctx context.Context, stmt Statement) (QueryPlan, error) {
 	// Handle multi-table queries (JOINs)
 	if len(stmt.Joins) > 0 {
 		return t.planJoinQuery(ctx, stmt)
@@ -1360,6 +1420,14 @@ func tryRangeScan(tableName string, indexInfo IndexInfo, filters Conditions, sta
 	return scan, true, nil
 }
 
+// drainRowCh reads and discards all remaining values from ch until it is closed.
+// Called after joinCancel() to let the JOIN goroutine unblock and exit cleanly.
+func drainRowCh(ch <-chan Row) {
+	for v := range ch {
+		_ = v
+	}
+}
+
 // Execute runs the query plan, calling out for every row produced.
 // out receives each row synchronously on the caller's goroutine; no internal
 // goroutines or channels are created.  JOIN queries are the exception: they
@@ -1370,16 +1438,31 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 	// Handle JOIN queries: executeNestedLoopJoin still uses chan<- Row internally,
 	// so we bridge it with a goroutine + channel and forward rows to the callback.
 	if len(p.Joins) > 0 {
+		// Use a child context so that we can cancel the JOIN goroutine when the
+		// consumer stops early (e.g. via errLimitReached).  Without cancellation,
+		// returning an error from out() while the goroutine is still sending to ch
+		// would either block the goroutine (if ch is full) or leak it.
+		joinCtx, joinCancel := context.WithCancel(ctx)
+		defer joinCancel()
+
 		ch := make(chan Row, 128)
 		var joinErr error
 		go func() {
 			defer close(ch)
-			joinErr = p.executeNestedLoopJoin(ctx, provider, selectedFields, ch)
+			joinErr = p.executeNestedLoopJoin(joinCtx, provider, selectedFields, ch)
 		}()
 		for row := range ch {
 			if err := out(row); err != nil {
+				joinCancel()
+				// Drain the channel so the goroutine can unblock and close ch,
+				// then return the consumer's error (e.g. errLimitReached).
+				drainRowCh(ch)
 				return err
 			}
+		}
+		if errors.Is(joinErr, context.Canceled) {
+			// The context was cancelled by us (joinCancel above); not a real error.
+			return nil
 		}
 		return joinErr
 	}

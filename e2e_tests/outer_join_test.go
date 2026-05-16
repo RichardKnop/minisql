@@ -409,3 +409,96 @@ func (s *TestSuite) TestRightJoin() {
 		}
 	})
 }
+
+// TestInnerJoin_Limit verifies that LIMIT pushdown for JOIN queries returns exactly
+// the requested number of rows and does not leak goroutines.
+func (s *TestSuite) TestInnerJoin_Limit() {
+	_, err := s.db.Exec(`create table "users" (
+		id int8 primary key,
+		name varchar(50)
+	);`)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`create table "orders" (
+		id int8 primary key,
+		user_id int8,
+		amount int8
+	);`)
+	s.Require().NoError(err)
+
+	// Three users, Alice with 3 orders, Bob with 2, Charlie with 1 — 6 join rows total.
+	for _, stmt := range []string{
+		`insert into users("id", "name") values(1, 'Alice');`,
+		`insert into users("id", "name") values(2, 'Bob');`,
+		`insert into users("id", "name") values(3, 'Charlie');`,
+		`insert into orders("id", "user_id", "amount") values(1, 1, 10);`,
+		`insert into orders("id", "user_id", "amount") values(2, 1, 20);`,
+		`insert into orders("id", "user_id", "amount") values(3, 1, 30);`,
+		`insert into orders("id", "user_id", "amount") values(4, 2, 40);`,
+		`insert into orders("id", "user_id", "amount") values(5, 2, 50);`,
+		`insert into orders("id", "user_id", "amount") values(6, 3, 60);`,
+	} {
+		_, err = s.db.Exec(stmt)
+		s.Require().NoError(err)
+	}
+
+	s.Run("LIMIT 3 returns exactly 3 rows", func() {
+		rows, err := s.db.Query(`
+			select u.id, o.id
+			from users as u
+			inner join orders as o on u.id = o.user_id
+			limit 3;
+		`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		var got [][2]int64
+		for rows.Next() {
+			var uid, oid int64
+			s.Require().NoError(rows.Scan(&uid, &oid))
+			got = append(got, [2]int64{uid, oid})
+		}
+		s.Require().NoError(rows.Err())
+		s.Len(got, 3, "LIMIT 3 should return exactly 3 rows")
+	})
+
+	s.Run("LIMIT 2 OFFSET 1 skips first row and returns next 2", func() {
+		rows, err := s.db.Query(`
+			select u.id, o.id
+			from users as u
+			inner join orders as o on u.id = o.user_id
+			limit 2 offset 1;
+		`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		var got [][2]int64
+		for rows.Next() {
+			var uid, oid int64
+			s.Require().NoError(rows.Scan(&uid, &oid))
+			got = append(got, [2]int64{uid, oid})
+		}
+		s.Require().NoError(rows.Err())
+		s.Len(got, 2, "LIMIT 2 OFFSET 1 should return exactly 2 rows")
+	})
+
+	s.Run("LIMIT larger than result set returns all rows", func() {
+		rows, err := s.db.Query(`
+			select u.id, o.id
+			from users as u
+			inner join orders as o on u.id = o.user_id
+			limit 100;
+		`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		var got [][2]int64
+		for rows.Next() {
+			var uid, oid int64
+			s.Require().NoError(rows.Scan(&uid, &oid))
+			got = append(got, [2]int64{uid, oid})
+		}
+		s.Require().NoError(rows.Err())
+		s.Len(got, 6, "LIMIT 100 with 6 total rows should return all 6 rows")
+	})
+}

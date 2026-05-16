@@ -400,6 +400,10 @@ type Statement struct {
 	UpdateFromAlias    string     // alias for the UPDATE FROM table (e.g. "d" in FROM departments d)
 	UpdateFromSubquery *Statement // non-nil when UPDATE FROM clause is a subquery
 	CTEs               []CTE      // non-nil for WITH … SELECT statements
+	// CacheKey is the original SQL text set by PrepareStatement; it is the key
+	// used to look up and store the query plan in the plan cache.  Empty for
+	// statements that were not prepared via PrepareStatement (ad-hoc queries).
+	CacheKey           string
 	Kind               StatementKind
 	IndexMethod        IndexMethod
 	ConflictAction     ConflictAction
@@ -483,6 +487,7 @@ func (s Statement) Clone() Statement {
 
 	stmt := Statement{
 		Kind:               s.Kind,
+		CacheKey:           s.CacheKey,
 		IfNotExists:        s.IfNotExists,
 		TableName:          s.TableName,
 		TableAlias:         s.TableAlias,
