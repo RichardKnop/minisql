@@ -977,7 +977,11 @@ func (p QueryPlan) executeHashJoinForRow(ctx context.Context, currentRow Row, jo
 	probeKey := probeSideHashKey(join, currentRow, fromAlias, joinIndex)
 	var matchingRows []Row
 	if probeKey != "" && bucket != nil {
-		matchingRows = bucket.rows[probeKey]
+		// Check the Bloom filter before touching the hash map: if the filter
+		// says the key is definitely absent, skip the map probe entirely.
+		if bucket.filter.MayContain([]byte(probeKey)) {
+			matchingRows = bucket.rows[probeKey]
+		}
 	}
 
 	matched := false

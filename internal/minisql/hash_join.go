@@ -5,15 +5,30 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/RichardKnop/minisql/pkg/bloom"
+)
+
+const (
+	// bloomFPRate is the target false-positive rate for the per-bucket Bloom
+	// filter. At 1%, the filter rejects ~99% of definite misses without a
+	// hash-map probe, while adding negligible memory overhead.
+	bloomFPRate = 0.01
+	// bloomMinN is the minimum expected-element count passed to bloom.New when
+	// the inner table has no row-count estimate. Sized for small tables.
+	bloomMinN = 512
 )
 
 // hashJoinBucket is the in-memory hash table built from the inner (build) side
 // of a single hash join.  The map key is a null-byte-delimited encoding of the
 // join column values; the value is the list of inner rows sharing that key.
 // innerColumns is kept to construct NULL rows for LEFT JOIN misses.
+// filter is a Bloom filter over the same key set used to reject probe keys
+// that are definitely not present, avoiding an unnecessary map lookup.
 type hashJoinBucket struct {
 	rows         map[string][]Row
 	innerColumns []Column
+	filter       *bloom.Filter
 }
 
 // buildHashBuckets scans the build side of every JoinAlgorithmHash join in the
@@ -30,9 +45,16 @@ func buildHashBuckets(ctx context.Context, plan QueryPlan, provider TableProvide
 		if !ok {
 			return nil, fmt.Errorf("%w: %s", errTableDoesNotExist, innerScan.TableName)
 		}
+		// Size the Bloom filter using the inner table's row-count estimate.
+		// Fall back to bloomMinN when no statistics are available.
+		n := innerTable.estimatedRowCount()
+		if n <= 0 {
+			n = bloomMinN
+		}
 		bucket := &hashJoinBucket{
 			rows:         make(map[string][]Row),
 			innerColumns: innerTable.Columns,
+			filter:       bloom.New(uint(n), bloomFPRate),
 		}
 		innerFields := fieldsFromColumns(innerTable.Columns...)
 		if err := runTableScan(ctx, plan, innerTable, innerScan, innerFields, func(row Row) error {
@@ -41,6 +63,7 @@ func buildHashBuckets(ctx context.Context, plan QueryPlan, provider TableProvide
 				return nil // NULL join key — never matches
 			}
 			bucket.rows[key] = append(bucket.rows[key], row)
+			bucket.filter.Add([]byte(key))
 			return nil
 		}); err != nil {
 			return nil, fmt.Errorf("hash join build phase (join %d): %w", i, err)
