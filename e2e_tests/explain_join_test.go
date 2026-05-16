@@ -85,7 +85,11 @@ func (s *TestSuite) TestExplainJoin() {
 		_, err = s.db.Exec(`insert into "ej_tags" (user_id, tag) values (1, 'vip'), (2, 'new')`)
 		s.Require().NoError(err)
 
-		// ej_tags has NO index on user_id → join from ej_users → ej_tags uses hash join.
+		// ej_tags (2 rows) < ej_users (3 rows): greedy join reordering promotes
+		// ej_tags to the outer/base position and ej_users to the inner position.
+		// ej_users has a PK on user_id, so the planner uses indexed nested-loop —
+		// strictly better than the hash join the user-specified order would have
+		// produced.
 		rows := s.collectExplain(`
 			EXPLAIN SELECT u.name, t.tag
 			FROM "ej_users" AS u
@@ -93,8 +97,10 @@ func (s *TestSuite) TestExplainJoin() {
 
 		joinRow := s.findExplainRow(rows, "join")
 		s.Require().NotNil(joinRow, "expected a 'join' row")
-		s.Contains(joinRow.Detail, "algorithm=hash")
 		s.Contains(joinRow.Detail, "type=inner")
+		s.Contains(joinRow.Detail, "algorithm=nested_loop")
+		s.Contains(joinRow.Detail, "left=t")
+		s.Contains(joinRow.Detail, "right=u")
 	})
 
 	s.Run("left_join", func() {

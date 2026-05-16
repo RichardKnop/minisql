@@ -640,3 +640,108 @@ func TestFindIndexOnColumns(t *testing.T) {
 		assert.Nil(t, info)
 	})
 }
+
+func TestGreedyJoinOrder_StarSchema(t *testing.T) {
+	t.Parallel()
+
+	// Three tables: A (1000 rows), B (10 rows), C (500 rows).
+	// Greedy should start with B, then pick C before A.
+	nodes := []joinGraphNode{
+		{tableAlias: "a", rows: 1000},
+		{tableAlias: "b", rows: 10},
+		{tableAlias: "c", rows: 500},
+	}
+	// Star schema: all join to "a".
+	edges := []joinGraphEdge{
+		{alias1: "a", alias2: "b", joinType: Inner},
+		{alias1: "a", alias2: "c", joinType: Inner},
+	}
+
+	orderedNodes, orderedEdges, ok := greedyJoinOrder(nodes, edges)
+	require.True(t, ok)
+	require.Len(t, orderedNodes, 3)
+	require.Len(t, orderedEdges, 2)
+
+	// B is smallest → first.
+	assert.Equal(t, "b", orderedNodes[0].tableAlias)
+	// Next reachable from B via edges: A (via edge a-b). C is NOT reachable from B directly
+	// (edge a-c connects a and c, neither of which is done). So A must come before C.
+	assert.Equal(t, "a", orderedNodes[1].tableAlias)
+	// Once A is done, C becomes reachable.
+	assert.Equal(t, "c", orderedNodes[2].tableAlias)
+}
+
+func TestGreedyJoinOrder_ChainSchema(t *testing.T) {
+	t.Parallel()
+
+	// Chain: A → B → C, row counts A=1000, B=5, C=200.
+	// Connectivity: edge a-b and edge b-c.
+	// Greedy: start B (5), then A (1000, reachable via a-b) or C (200, reachable via b-c).
+	// C (200) < A (1000) → pick C next, then A.
+	nodes := []joinGraphNode{
+		{tableAlias: "a", rows: 1000},
+		{tableAlias: "b", rows: 5},
+		{tableAlias: "c", rows: 200},
+	}
+	edges := []joinGraphEdge{
+		{alias1: "a", alias2: "b", joinType: Inner},
+		{alias1: "b", alias2: "c", joinType: Inner},
+	}
+
+	orderedNodes, orderedEdges, ok := greedyJoinOrder(nodes, edges)
+	require.True(t, ok)
+	require.Len(t, orderedNodes, 3)
+	require.Len(t, orderedEdges, 2)
+
+	assert.Equal(t, "b", orderedNodes[0].tableAlias)
+	assert.Equal(t, "c", orderedNodes[1].tableAlias)
+	assert.Equal(t, "a", orderedNodes[2].tableAlias)
+}
+
+func TestGreedyJoinOrder_FallbackOnOuterJoin(t *testing.T) {
+	t.Parallel()
+
+	nodes := []joinGraphNode{
+		{tableAlias: "a", rows: 100},
+		{tableAlias: "b", rows: 5},
+	}
+	edges := []joinGraphEdge{
+		{alias1: "a", alias2: "b", joinType: Left}, // non-INNER → ineligible
+	}
+
+	_, _, ok := greedyJoinOrder(nodes, edges)
+	assert.False(t, ok, "should fall back when any join is not INNER")
+}
+
+func TestGreedyJoinOrder_FallbackOnUnknownRowCount(t *testing.T) {
+	t.Parallel()
+
+	nodes := []joinGraphNode{
+		{tableAlias: "a", rows: -1}, // unknown
+		{tableAlias: "b", rows: 50},
+	}
+	edges := []joinGraphEdge{
+		{alias1: "a", alias2: "b", joinType: Inner},
+	}
+
+	_, _, ok := greedyJoinOrder(nodes, edges)
+	assert.False(t, ok, "should fall back when any table has unknown row count")
+}
+
+func TestGreedyJoinOrder_UserOrderPreservedWhenAlreadyOptimal(t *testing.T) {
+	t.Parallel()
+
+	// A (10 rows) is already smallest — greedy produces same order as user.
+	nodes := []joinGraphNode{
+		{tableAlias: "a", rows: 10},
+		{tableAlias: "b", rows: 500},
+	}
+	edges := []joinGraphEdge{
+		{alias1: "a", alias2: "b", joinType: Inner},
+	}
+
+	orderedNodes, _, ok := greedyJoinOrder(nodes, edges)
+	require.True(t, ok)
+	assert.Equal(t, "a", orderedNodes[0].tableAlias)
+	assert.Equal(t, "b", orderedNodes[1].tableAlias)
+}

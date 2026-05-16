@@ -25,7 +25,18 @@ func chanRowCallback(ctx context.Context, ch chan<- Row) func(Row) error {
 // 1. Use index on inner table join column when available (index nested loop join).
 // 2. Push single-table WHERE conditions into individual table scans.
 // 3. Use index scans for pushed-down conditions when a matching index exists.
+// 4. Greedy join reordering: when all tables have ANALYZE statistics and all
+//    joins are INNER, reorders the join sequence so the smallest tables are
+//    processed first, minimising intermediate result sizes.
 func (t *Table) planJoinQuery(ctx context.Context, stmt Statement) (QueryPlan, error) {
+	// Attempt greedy join reordering when statistics are available.
+	if plan, ok, err := t.planJoinQueryGreedy(ctx, stmt); err != nil {
+		return QueryPlan{}, err
+	} else if ok {
+		return plan, nil
+	}
+
+	// Fallback: user-specified order.
 	baseTableFilters, joinTableFilters := pushDownFilters(stmt.Conditions, stmt.TableAlias, stmt.Joins)
 
 	plan := QueryPlan{
@@ -45,6 +56,316 @@ func (t *Table) planJoinQuery(ctx context.Context, stmt Statement) (QueryPlan, e
 
 	return plan, nil
 }
+
+// joinGraphNode is one participant (table) in the join graph used for greedy reordering.
+type joinGraphNode struct {
+	tableName  string
+	tableAlias string
+	table      *Table
+	rows       int64 // estimated row count from ANALYZE; -1 if unknown
+}
+
+// joinGraphEdge is an undirected edge in the join graph: the ON conditions
+// connecting two aliases, plus the join type.  Conditions are stored verbatim
+// from the parser — they identify both endpoints by alias prefix so they
+// remain correct regardless of which end is treated as "left" vs "right".
+type joinGraphEdge struct {
+	alias1     string
+	alias2     string
+	conditions Conditions
+	joinType   JoinType
+}
+
+// collectJoinGraph walks the join tree rooted at stmt and returns the set of
+// joinGraphNodes (one per table, including the base) and joinGraphEdges (one
+// per Join clause).  Returns (nil, nil, false) when the tree contains a join
+// whose FromTableAlias cannot be resolved — indicating a topology too complex
+// for greedy reordering.
+func (t *Table) collectJoinGraph(ctx context.Context, stmt Statement) ([]joinGraphNode, []joinGraphEdge, bool) {
+	nodes := []joinGraphNode{{
+		tableName:  t.Name,
+		tableAlias: stmt.TableAlias,
+		table:      t,
+		rows:       t.estimatedRowCount(),
+	}}
+	aliasSet := map[string]struct{}{stmt.TableAlias: {}}
+	var edges []joinGraphEdge
+
+	var walk func(joins []Join) bool
+	walk = func(joins []Join) bool {
+		for _, j := range joins {
+			fromAlias := j.FromTableAlias()
+			if fromAlias == "" {
+				return false // cannot determine connectivity — abort
+			}
+			jTable, ok := t.provider.GetTable(ctx, j.TableName)
+			if !ok {
+				return false
+			}
+			nodes = append(nodes, joinGraphNode{
+				tableName:  j.TableName,
+				tableAlias: j.TableAlias,
+				table:      jTable,
+				rows:       jTable.estimatedRowCount(),
+			})
+			aliasSet[j.TableAlias] = struct{}{}
+			edges = append(edges, joinGraphEdge{
+				alias1:     fromAlias,
+				alias2:     j.TableAlias,
+				conditions: j.Conditions,
+				joinType:   j.Type,
+			})
+			if !walk(j.Joins) {
+				return false
+			}
+		}
+		return true
+	}
+	if !walk(stmt.Joins) {
+		return nil, nil, false
+	}
+	return nodes, edges, true
+}
+
+// greedyJoinOrder returns a reordered sequence of joinGraphNodes and, for each
+// node beyond the first (the new base), the edge that connects it to the
+// already-processed set.  The algorithm is greedy nearest-neighbour: start with
+// the node with the fewest estimated rows, then at each step extend with the
+// cheapest reachable node.
+//
+// Returns (nil, nil, false) when:
+//   - any estimated row count is -1 (no ANALYZE data),
+//   - any join is not INNER (outer joins are order-sensitive), or
+//   - the graph is disconnected (should never happen for a valid SQL JOIN).
+func greedyJoinOrder(nodes []joinGraphNode, edges []joinGraphEdge) ([]joinGraphNode, []joinGraphEdge, bool) {
+	// Eligibility: all INNER, all rows known.
+	for _, e := range edges {
+		if e.joinType != Inner {
+			return nil, nil, false
+		}
+	}
+	for _, n := range nodes {
+		if n.rows < 0 {
+			return nil, nil, false
+		}
+	}
+
+	// Build adjacency: alias → list of incident edges.
+	adj := make(map[string][]int, len(nodes)) // alias → edge indices
+	for i, e := range edges {
+		adj[e.alias1] = append(adj[e.alias1], i)
+		adj[e.alias2] = append(adj[e.alias2], i)
+	}
+
+	// Find the node with fewest rows to start.
+	startIdx := 0
+	for i, n := range nodes {
+		if n.rows < nodes[startIdx].rows {
+			startIdx = i
+		}
+	}
+
+	done := make(map[string]struct{}, len(nodes))
+	remaining := make(map[string]int, len(nodes)) // alias → nodes index
+	for i, n := range nodes {
+		remaining[n.tableAlias] = i
+	}
+
+	orderedNodes := make([]joinGraphNode, 0, len(nodes))
+	orderedEdges := make([]joinGraphEdge, 0, len(nodes)-1) // one per join (excludes base)
+
+	start := nodes[startIdx]
+	orderedNodes = append(orderedNodes, start)
+	done[start.tableAlias] = struct{}{}
+	delete(remaining, start.tableAlias)
+
+	for len(remaining) > 0 {
+		// Find the cheapest node reachable from any done node.
+		bestNodeIdx := -1
+		bestEdgeIdx := -1
+		bestRows := int64(-1)
+
+		for doneAlias := range done {
+			for _, edgeIdx := range adj[doneAlias] {
+				e := edges[edgeIdx]
+				// Determine the other endpoint.
+				var otherAlias string
+				if e.alias1 == doneAlias {
+					otherAlias = e.alias2
+				} else {
+					otherAlias = e.alias1
+				}
+				nodeIdx, stillPending := remaining[otherAlias]
+				if !stillPending {
+					continue
+				}
+				n := nodes[nodeIdx]
+				if bestNodeIdx == -1 || n.rows < bestRows {
+					bestNodeIdx = nodeIdx
+					bestEdgeIdx = edgeIdx
+					bestRows = n.rows
+				}
+			}
+		}
+
+		if bestNodeIdx == -1 {
+			// Graph is disconnected — cannot reorder safely.
+			return nil, nil, false
+		}
+
+		chosen := nodes[bestNodeIdx]
+		orderedNodes = append(orderedNodes, chosen)
+		orderedEdges = append(orderedEdges, edges[bestEdgeIdx])
+		done[chosen.tableAlias] = struct{}{}
+		delete(remaining, chosen.tableAlias)
+	}
+
+	return orderedNodes, orderedEdges, true
+}
+
+// planJoinQueryGreedy attempts greedy join reordering. Returns (plan, true, nil)
+// when reordering is applied; (QueryPlan{}, false, nil) when the plan falls
+// back to user order; (QueryPlan{}, false, err) on a hard error.
+func (t *Table) planJoinQueryGreedy(ctx context.Context, stmt Statement) (QueryPlan, bool, error) {
+	nodes, edges, ok := t.collectJoinGraph(ctx, stmt)
+	if !ok {
+		return QueryPlan{}, false, nil
+	}
+
+	orderedNodes, orderedEdges, ok := greedyJoinOrder(nodes, edges)
+	if !ok {
+		return QueryPlan{}, false, nil
+	}
+
+	// If the greedy order matches the user order exactly, fall through to the
+	// normal path so existing test expectations are not perturbed.
+	if orderedNodes[0].tableAlias == stmt.TableAlias {
+		userOrderPreserved := true
+		for i, j := range stmt.Joins {
+			if i+1 >= len(orderedNodes) || orderedNodes[i+1].tableAlias != j.TableAlias {
+				userOrderPreserved = false
+				break
+			}
+		}
+		if userOrderPreserved {
+			return QueryPlan{}, false, nil
+		}
+	}
+
+	// Build per-alias filters (push-down regardless of which table is base).
+	allFilters := make(map[string]OneOrMore, len(nodes))
+	{
+		baseFilters, joinFilters := pushDownFilters(stmt.Conditions, stmt.TableAlias, stmt.Joins)
+		allFilters[stmt.TableAlias] = baseFilters
+		for alias, f := range joinFilters {
+			allFilters[alias] = f
+		}
+	}
+
+	plan := QueryPlan{
+		OrderBy:      stmt.OrderBy,
+		SortInMemory: len(stmt.OrderBy) > 0,
+		Joins:        make([]JoinPlan, 0, len(orderedNodes)-1),
+		Scans:        make([]Scan, 0, len(orderedNodes)),
+	}
+
+	newBase := orderedNodes[0]
+	plan.Scans = append(plan.Scans, planJoinTableScan(
+		newBase.table, newBase.tableName, newBase.tableAlias,
+		allFilters[newBase.tableAlias],
+	))
+	scanIndexByAlias := map[string]int{newBase.tableAlias: 0}
+
+	for i, node := range orderedNodes[1:] {
+		edge := orderedEdges[i]
+
+		// Determine from-alias: the endpoint of this edge that is already done.
+		fromAlias := edge.alias1
+		if _, done := scanIndexByAlias[fromAlias]; !done {
+			fromAlias = edge.alias2
+		}
+		leftScanIndex := scanIndexByAlias[fromAlias]
+
+		var fromTable *Table
+		if leftScanIndex == 0 {
+			fromTable = newBase.table
+		} else {
+			fromTableName := plan.Scans[leftScanIndex].TableName
+			ft, ftOk := t.provider.GetTable(ctx, fromTableName)
+			if !ftOk {
+				return QueryPlan{}, false, fmt.Errorf("%w: %s", errTableDoesNotExist, fromTableName)
+			}
+			fromTable = ft
+		}
+
+		joinColumnPairs, err := extractJoinColumnPairs(
+			edge.conditions, fromAlias, node.tableAlias,
+			fromTable, node.table,
+		)
+		if err != nil {
+			return QueryPlan{}, false, err
+		}
+
+		joinTableColumns := make([]string, len(joinColumnPairs))
+		for j, pair := range joinColumnPairs {
+			joinTableColumns[j] = pair.JoinTableColumn.Name
+		}
+		joinTableIndex := node.table.findIndexOnColumns(joinTableColumns)
+
+		var (
+			innerScanType  ScanType
+			innerIndexInfo *IndexInfo
+			algorithm      JoinAlgorithm
+		)
+		if joinTableIndex != nil {
+			innerScanType = ScanTypeIndexPoint
+			innerIndexInfo = joinTableIndex
+			algorithm = JoinAlgorithmNestedLoop
+		} else {
+			innerScanType = ScanTypeSequential
+			buildRows := node.rows
+			if buildRows < 0 || buildRows <= hashJoinMaxBuildRows {
+				algorithm = JoinAlgorithmHash
+			} else {
+				algorithm = JoinAlgorithmNestedLoop
+			}
+		}
+
+		var joinScan Scan
+		if innerScanType == ScanTypeSequential {
+			joinScan = planJoinTableScan(node.table, node.tableName, node.tableAlias, allFilters[node.tableAlias])
+		} else {
+			joinScan = Scan{
+				TableName:  node.tableName,
+				TableAlias: node.tableAlias,
+				Type:       innerScanType,
+				Filters:    allFilters[node.tableAlias],
+			}
+			if innerIndexInfo != nil {
+				joinScan.IndexName = innerIndexInfo.Name
+				joinScan.IndexColumns = innerIndexInfo.Columns
+			}
+		}
+
+		plan.Scans = append(plan.Scans, joinScan)
+		rightScanIndex := len(plan.Scans) - 1
+		scanIndexByAlias[node.tableAlias] = rightScanIndex
+
+		plan.Joins = append(plan.Joins, JoinPlan{
+			Type:            Inner,
+			LeftScanIndex:   leftScanIndex,
+			RightScanIndex:  rightScanIndex,
+			Conditions:      edge.conditions,
+			OuterJoinColumn: joinColumnPairs[0].BaseTableColumn.Name,
+			InnerJoinColumn: joinColumnPairs[0].JoinTableColumn.Name,
+			JoinColumnPairs: joinColumnPairs,
+			Algorithm:       algorithm,
+		})
+	}
+
+	return plan, true, nil
+}
+
 
 // flattenJoinTree recursively walks the join tree in DFS order and appends one
 // Scan and one JoinPlan entry per join node. LeftScanIndex is set to the scan
