@@ -1,11 +1,36 @@
 package minisql
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// mapTableProvider is a test TableProvider backed by a simple name→table map.
+type mapTableProvider struct {
+	tables map[string]*Table
+}
+
+func (m *mapTableProvider) GetTable(_ context.Context, name string) (*Table, bool) {
+	t, ok := m.tables[name]
+	return t, ok
+}
+
+// stubTable builds a minimal *Table with a given name and row-count estimate for
+// use in collectJoinGraph / greedyJoinOrder unit tests. No pager is needed
+// because collectJoinGraph only calls estimatedRowCount() and provider.GetTable.
+func stubTable(name string, rows int64) *Table {
+	tbl := &Table{
+		Name:             name,
+		UniqueIndexes:    map[string]UniqueIndex{},
+		SecondaryIndexes: map[string]SecondaryIndex{},
+	}
+	fixedCount := rows
+	tbl.getRowCount = func() int64 { return fixedCount }
+	return tbl
+}
 
 func TestPushDownFilters(t *testing.T) {
 	t.Parallel()
@@ -744,4 +769,146 @@ func TestGreedyJoinOrder_UserOrderPreservedWhenAlreadyOptimal(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "a", orderedNodes[0].tableAlias)
 	assert.Equal(t, "b", orderedNodes[1].tableAlias)
+}
+
+func TestCollectJoinGraph_TwoTableInner(t *testing.T) {
+	t.Parallel()
+
+	tblA := stubTable("a", 100)
+	tblB := stubTable("b", 20)
+
+	provider := &mapTableProvider{tables: map[string]*Table{"b": tblB}}
+	tblA.provider = provider
+
+	// SELECT ... FROM a AS x INNER JOIN b AS y ON x.id = y.a_id
+	onCond := FieldIsEqual(
+		Field{AliasPrefix: "x", Name: "id"},
+		OperandField,
+		Field{AliasPrefix: "y", Name: "a_id"},
+	)
+	stmt := Statement{
+		TableAlias: "x",
+		Joins: []Join{
+			{
+				TableName:  "b",
+				TableAlias: "y",
+				Type:       Inner,
+				Conditions: Conditions{onCond},
+			},
+		},
+	}
+
+	nodes, edges, ok := tblA.collectJoinGraph(t.Context(), stmt)
+	require.True(t, ok)
+	require.Len(t, nodes, 2)
+	require.Len(t, edges, 1)
+
+	// First node is always the base table.
+	assert.Equal(t, "x", nodes[0].tableAlias)
+	assert.Equal(t, int64(100), nodes[0].rows)
+	assert.Equal(t, "y", nodes[1].tableAlias)
+	assert.Equal(t, int64(20), nodes[1].rows)
+
+	assert.Equal(t, "x", edges[0].alias1)
+	assert.Equal(t, "y", edges[0].alias2)
+	assert.Equal(t, Inner, edges[0].joinType)
+}
+
+func TestCollectJoinGraph_ThreeTableChain(t *testing.T) {
+	t.Parallel()
+
+	tblA := stubTable("a", 1000)
+	tblB := stubTable("b", 5)
+	tblC := stubTable("c", 200)
+
+	provider := &mapTableProvider{tables: map[string]*Table{
+		"b": tblB,
+		"c": tblC,
+	}}
+	tblA.provider = provider
+
+	onAB := FieldIsEqual(Field{AliasPrefix: "a", Name: "id"}, OperandField, Field{AliasPrefix: "b", Name: "a_id"})
+	onBC := FieldIsEqual(Field{AliasPrefix: "b", Name: "id"}, OperandField, Field{AliasPrefix: "c", Name: "b_id"})
+
+	stmt := Statement{
+		TableAlias: "a",
+		Joins: []Join{
+			{
+				TableName:  "b",
+				TableAlias: "b",
+				Type:       Inner,
+				Conditions: Conditions{onAB},
+				Joins: []Join{
+					{
+						TableName:  "c",
+						TableAlias: "c",
+						Type:       Inner,
+						Conditions: Conditions{onBC},
+					},
+				},
+			},
+		},
+	}
+
+	nodes, edges, ok := tblA.collectJoinGraph(t.Context(), stmt)
+	require.True(t, ok)
+	assert.Len(t, nodes, 3)
+	assert.Len(t, edges, 2)
+}
+
+func TestCollectJoinGraph_UnknownTable_ReturnsFalse(t *testing.T) {
+	t.Parallel()
+
+	tblA := stubTable("a", 100)
+	// Provider has no tables — GetTable will return false.
+	tblA.provider = &mapTableProvider{tables: map[string]*Table{}}
+
+	onCond := FieldIsEqual(
+		Field{AliasPrefix: "x", Name: "id"},
+		OperandField,
+		Field{AliasPrefix: "y", Name: "a_id"},
+	)
+	stmt := Statement{
+		TableAlias: "x",
+		Joins: []Join{
+			{
+				TableName:  "missing",
+				TableAlias: "y",
+				Type:       Inner,
+				Conditions: Conditions{onCond},
+			},
+		},
+	}
+
+	_, _, ok := tblA.collectJoinGraph(t.Context(), stmt)
+	assert.False(t, ok)
+}
+
+func TestCollectJoinGraph_NoFromAlias_ReturnsFalse(t *testing.T) {
+	t.Parallel()
+
+	tblA := stubTable("a", 100)
+	tblB := stubTable("b", 20)
+	tblA.provider = &mapTableProvider{tables: map[string]*Table{"b": tblB}}
+
+	// A join condition with no alias prefix on either side — FromTableAlias() returns "".
+	onCond := FieldIsEqual(
+		Field{Name: "id"},   // no AliasPrefix
+		OperandField,
+		Field{Name: "a_id"}, // no AliasPrefix
+	)
+	stmt := Statement{
+		TableAlias: "x",
+		Joins: []Join{
+			{
+				TableName:  "b",
+				TableAlias: "y",
+				Type:       Inner,
+				Conditions: Conditions{onCond},
+			},
+		},
+	}
+
+	_, _, ok := tblA.collectJoinGraph(t.Context(), stmt)
+	assert.False(t, ok)
 }
