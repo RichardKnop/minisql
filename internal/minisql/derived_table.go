@@ -11,9 +11,16 @@ import (
 // executeSelectFromDerivedTable handles SELECT … FROM (subquery) alias.
 // It executes the inner subquery, materialises its rows, wraps them in a
 // virtual *Table, then re-runs the outer SELECT against that table.
+//
+// Before execution, outer WHERE conditions that reference only columns produced
+// by the inner SELECT are pushed down into the subquery. This reduces the number
+// of rows materialised when the inner query can filter early (e.g. using an index).
 func (d *Database) executeSelectFromDerivedTable(ctx context.Context, stmt Statement) (StatementResult, error) {
-	// Execute inner subquery.
-	innerResult, err := d.ExecuteStatement(ctx, *stmt.FromSubquery)
+	// Attempt predicate pushdown: move eligible outer WHERE conditions into the
+	// inner subquery, reducing the number of rows materialised.
+	inner, remainingConds := pushIntoInner(stmt.Conditions, *stmt.FromSubquery, stmt.FromSubqueryAlias)
+
+	innerResult, err := d.ExecuteStatement(ctx, inner)
 	if err != nil {
 		return StatementResult{}, fmt.Errorf("derived table %q: %w", stmt.FromSubqueryAlias, err)
 	}
@@ -32,9 +39,11 @@ func (d *Database) executeSelectFromDerivedTable(ctx context.Context, stmt State
 
 	// Normalise the outer statement: strip the derived-table alias prefix from
 	// all field references so that plain column names in the virtual table match.
+	// Use only the conditions that were NOT pushed into the inner subquery.
 	outer := stripDerivedTableAliasPrefix(stmt, stmt.FromSubqueryAlias)
 	outer.FromSubquery = nil
 	outer.TableName = stmt.FromSubqueryAlias
+	outer.Conditions = stripConditionsAlias(remainingConds, stmt.FromSubqueryAlias)
 
 	return vt.Select(ctx, outer)
 }

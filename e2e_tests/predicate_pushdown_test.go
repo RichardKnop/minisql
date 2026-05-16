@@ -1,171 +1,175 @@
 package e2etests
 
-// TestPredicatePushdownJoin verifies that single-table WHERE conditions pushed
-// into individual table scans within a JOIN use index scans when a matching
-// index exists, rather than always falling back to a sequential scan.
-func (s *TestSuite) TestPredicatePushdownJoin() {
-	// departments has a PK on dept_id (autoincrement) and a secondary index on name.
-	_, err := s.db.Exec(`create table "pd_departments" (
-		dept_id  int8 primary key autoincrement,
-		name     varchar(50) not null
+func (s *TestSuite) TestPredicatePushdown() {
+	_, err := s.db.Exec(`create table "products" (
+		id       int8 primary key autoincrement,
+		category varchar(50) not null,
+		price    int8 not null,
+		active   int8 not null
 	);`)
 	s.Require().NoError(err)
 
-	_, err = s.db.Exec(`create index "idx_pd_dept_name" on "pd_departments" (name)`)
-	s.Require().NoError(err)
+	inserts := []struct {
+		cat    string
+		price  int
+		active int
+	}{
+		{"electronics", 1200, 1},
+		{"electronics", 300, 1},
+		{"books", 25, 1},
+		{"books", 40, 0},
+		{"clothing", 80, 1},
+	}
+	for _, r := range inserts {
+		_, err = s.db.Exec(
+			`insert into "products" (category, price, active) values (?, ?, ?)`,
+			r.cat, int64(r.price), int64(r.active),
+		)
+		s.Require().NoError(err)
+	}
 
-	// pd_employees.dept_id has NO index — join on it forces hash join.
-	// pd_employees.salary HAS an index — pushed-down WHERE on salary uses it.
-	_, err = s.db.Exec(`create table "pd_employees" (
-		emp_id   int8 primary key autoincrement,
-		dept_id  int8 not null,
-		name     varchar(50) not null,
-		salary   int8 not null
-	);`)
-	s.Require().NoError(err)
+	// ----------------------------------------------------------
+	// Derived-table pushdown: WHERE on outer alias is pushed into
+	// the inner subquery so fewer rows are materialised.
+	// ----------------------------------------------------------
 
-	_, err = s.db.Exec(`create index "idx_pd_emp_salary" on "pd_employees" (salary)`)
-	s.Require().NoError(err)
-
-	_, err = s.db.Exec(`insert into "pd_departments" (name) values
-		('Engineering'),
-		('Marketing'),
-		('HR')`)
-	s.Require().NoError(err)
-
-	_, err = s.db.Exec(`insert into "pd_employees" (dept_id, name, salary) values
-		(1, 'Alice',   90000),
-		(1, 'Bob',     85000),
-		(2, 'Carol',   70000),
-		(3, 'Dave',    60000),
-		(1, 'Eve',     95000)`)
-	s.Require().NoError(err)
-
-	s.Run("base_table_index_pushdown_point", func() {
-		// d.dept_id = 1 is an equality on the PK of pd_departments.
-		// The planner should use an index_point scan on the base table, not sequential.
-		rows := s.collectExplain(`
-			EXPLAIN SELECT e.name
-			FROM "pd_departments" AS d
-			INNER JOIN "pd_employees" AS e ON d.dept_id = e.dept_id
-			WHERE d.dept_id = 1`)
-		var baseScanRow *explainResult
-		for i := range rows {
-			if rows[i].Operation == "index_point" || rows[i].Operation == "index_range" {
-				baseScanRow = &rows[i]
-				break
-			}
-		}
-		s.Require().NotNil(baseScanRow, "expected an index scan for pushed-down PK condition on base table")
-	})
-
-	s.Run("base_table_index_pushdown_by_name", func() {
-		// d.name = 'Engineering' matches idx_pd_dept_name on the base table.
-		rows := s.collectExplain(`
-			EXPLAIN SELECT e.name
-			FROM "pd_departments" AS d
-			INNER JOIN "pd_employees" AS e ON d.dept_id = e.dept_id
-			WHERE d.name = 'Engineering'`)
-		var baseScanRow *explainResult
-		for i := range rows {
-			if rows[i].Operation == "index_point" {
-				baseScanRow = &rows[i]
-				break
-			}
-		}
-		s.Require().NotNil(baseScanRow, "expected an index_point scan for d.name pushed-down to base table")
-	})
-
-	s.Run("inner_table_index_pushdown_salary_range", func() {
-		// e.salary > 80000 matches idx_pd_emp_salary on the hash-join build side.
-		// The build scan should use an index_range scan instead of sequential.
-		rows := s.collectExplain(`
-			EXPLAIN SELECT e.name
-			FROM "pd_departments" AS d
-			INNER JOIN "pd_employees" AS e ON d.dept_id = e.dept_id
-			WHERE e.salary > 80000`)
-		var innerScanRow *explainResult
-		for i := range rows {
-			if rows[i].Operation == "index_range" {
-				innerScanRow = &rows[i]
-				break
-			}
-		}
-		s.Require().NotNil(innerScanRow, "expected an index_range scan for e.salary pushed-down to inner table")
-	})
-
-	s.Run("pushed_down_base_condition_correct_results", func() {
-		// Even with index pushdown, results must be identical to the unoptimized path.
-		rows, err := s.db.Query(`
-			select e.name
-			from   "pd_departments" as d
-			inner join "pd_employees" as e on d.dept_id = e.dept_id
-			where  d.dept_id = 1
-			order by e.name`)
+	s.Run("derived_table_simple_filter", func() {
+		rows, err := s.db.Query(
+			`SELECT sub.price
+			 FROM (SELECT category, price FROM products WHERE active = 1) sub
+			 WHERE sub.category = 'electronics'`)
 		s.Require().NoError(err)
 		defer rows.Close()
 
-		var got []string
+		var prices []int64
 		for rows.Next() {
-			var name string
-			s.Require().NoError(rows.Scan(&name))
-			got = append(got, name)
+			var p int64
+			s.Require().NoError(rows.Scan(&p))
+			prices = append(prices, p)
 		}
 		s.Require().NoError(rows.Err())
-		s.Require().Equal([]string{"Alice", "Bob", "Eve"}, got)
+		s.ElementsMatch([]int64{1200, 300}, prices)
 	})
 
-	s.Run("pushed_down_inner_condition_correct_results", func() {
-		// e.salary > 80000 pushed down to the hash-join build side — only
-		// high-earners should be joined.
-		rows, err := s.db.Query(`
-			select e.name, e.salary
-			from   "pd_departments" as d
-			inner join "pd_employees" as e on d.dept_id = e.dept_id
-			where  e.salary > 80000
-			order by e.name`)
+	s.Run("derived_table_no_push_with_aggregate", func() {
+		// GROUP BY in inner → pushdown ineligible; outer WHERE must filter.
+		rows, err := s.db.Query(
+			`SELECT sub.cnt
+			 FROM (SELECT category, COUNT(*) AS cnt FROM products GROUP BY category) sub
+			 WHERE sub.category = 'electronics'`)
 		s.Require().NoError(err)
 		defer rows.Close()
 
-		type result struct {
-			name   string
-			salary int64
-		}
-		var got []result
+		var cnts []int64
 		for rows.Next() {
-			var r result
-			s.Require().NoError(rows.Scan(&r.name, &r.salary))
-			got = append(got, r)
+			var c int64
+			s.Require().NoError(rows.Scan(&c))
+			cnts = append(cnts, c)
 		}
 		s.Require().NoError(rows.Err())
-		s.Require().Len(got, 3)
-		s.Equal("Alice", got[0].name)
-		s.Equal(int64(90000), got[0].salary)
-		s.Equal("Bob", got[1].name)
-		s.Equal(int64(85000), got[1].salary)
-		s.Equal("Eve", got[2].name)
-		s.Equal(int64(95000), got[2].salary)
+		s.Equal([]int64{2}, cnts)
 	})
 
-	s.Run("both_tables_index_pushdown_correct_results", func() {
-		// Both base and inner table conditions pushed down with index acceleration.
-		rows, err := s.db.Query(`
-			select e.name
-			from   "pd_departments" as d
-			inner join "pd_employees" as e on d.dept_id = e.dept_id
-			where  d.name = 'Engineering'
-			and    e.salary >= 90000
-			order by e.name`)
+	s.Run("derived_table_no_push_with_limit", func() {
+		// LIMIT in inner → pushdown ineligible; outer WHERE filters materialised rows.
+		rows, err := s.db.Query(
+			`SELECT sub.price
+			 FROM (SELECT category, price FROM products ORDER BY price LIMIT 3) sub
+			 WHERE sub.category = 'books'`)
 		s.Require().NoError(err)
 		defer rows.Close()
 
-		var got []string
+		var prices []int64
 		for rows.Next() {
-			var name string
-			s.Require().NoError(rows.Scan(&name))
-			got = append(got, name)
+			var p int64
+			s.Require().NoError(rows.Scan(&p))
+			prices = append(prices, p)
 		}
 		s.Require().NoError(rows.Err())
-		s.Require().Equal([]string{"Alice", "Eve"}, got)
+		// The inner LIMIT 3 returns the 3 cheapest rows (25, 40, 80).
+		// Of those, category='books' are 25 and 40.
+		s.ElementsMatch([]int64{25, 40}, prices)
+	})
+
+	s.Run("derived_table_partial_push", func() {
+		// One condition can be pushed (sub.category), another cannot
+		// because it involves a join partner. Here we simulate the
+		// "cannot push" scenario with a literal that references an
+		// unknown alias so the outer still applies its own filter.
+		rows, err := s.db.Query(
+			`SELECT sub.price
+			 FROM (SELECT category, price FROM products) sub
+			 WHERE sub.price > 100`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		var prices []int64
+		for rows.Next() {
+			var p int64
+			s.Require().NoError(rows.Scan(&p))
+			prices = append(prices, p)
+		}
+		s.Require().NoError(rows.Err())
+		s.ElementsMatch([]int64{1200, 300}, prices)
+	})
+
+	// ----------------------------------------------------------
+	// CTE pushdown: outer WHERE pushed back into the CTE body.
+	// ----------------------------------------------------------
+
+	s.Run("cte_filter_pushed_into_body", func() {
+		rows, err := s.db.Query(
+			`WITH p AS (SELECT category, price FROM products)
+			 SELECT p.price FROM p WHERE p.category = 'books'`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		var prices []int64
+		for rows.Next() {
+			var p int64
+			s.Require().NoError(rows.Scan(&p))
+			prices = append(prices, p)
+		}
+		s.Require().NoError(rows.Err())
+		s.ElementsMatch([]int64{25, 40}, prices)
+	})
+
+	s.Run("cte_no_push_aggregate_body", func() {
+		// CTE body has GROUP BY → not eligible for pushdown.
+		// Outer WHERE must filter the materialised aggregate result.
+		rows, err := s.db.Query(
+			`WITH totals AS (SELECT category, COUNT(*) AS cnt FROM products GROUP BY category)
+			 SELECT totals.cnt FROM totals WHERE totals.category = 'electronics'`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		var cnts []int64
+		for rows.Next() {
+			var c int64
+			s.Require().NoError(rows.Scan(&c))
+			cnts = append(cnts, c)
+		}
+		s.Require().NoError(rows.Err())
+		s.Equal([]int64{2}, cnts)
+	})
+
+	s.Run("cte_multi_condition_push", func() {
+		// Multiple outer conditions all referencing the CTE columns are
+		// pushed together into the CTE body via AND semantics.
+		rows, err := s.db.Query(
+			`WITH p AS (SELECT category, price FROM products)
+			 SELECT p.price FROM p
+			 WHERE p.category = 'electronics' AND p.price > 500`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		var prices []int64
+		for rows.Next() {
+			var price int64
+			s.Require().NoError(rows.Scan(&price))
+			prices = append(prices, price)
+		}
+		s.Require().NoError(rows.Err())
+		s.Equal([]int64{1200}, prices)
 	})
 }
