@@ -428,6 +428,8 @@ func (t *Table) executeExplainScan(ctx context.Context, plan QueryPlan, scan Sca
 		return t.sequentialScan(ctx, scan, selectedFields, out)
 	case ScanTypeIndexIntersect:
 		return t.indexIntersectScan(ctx, scan, selectedFields, out)
+	case ScanTypeIndexUnion:
+		return t.indexUnionScan(ctx, scan, selectedFields, out)
 	case ScanTypeFullText:
 		return t.fullTextIndexScan(ctx, scan, selectedFields, out)
 	case ScanTypeInverted:
@@ -483,14 +485,22 @@ func scanOperation(scan Scan) string {
 }
 
 func scanDetail(scan Scan) string {
-	if scan.Type == ScanTypeIndexIntersect {
+	if scan.Type == ScanTypeIndexIntersect || scan.Type == ScanTypeIndexUnion {
 		subParts := make([]string, 0, len(scan.SubScans))
 		for _, sub := range scan.SubScans {
-			subParts = append(subParts, sub.IndexName)
+			if sub.IndexName != "" {
+				subParts = append(subParts, sub.IndexName)
+			} else {
+				subParts = append(subParts, sub.Type.String())
+			}
+		}
+		sep := "+"
+		if scan.Type == ScanTypeIndexUnion {
+			sep = "|"
 		}
 		parts := []string{
 			"table=" + scan.TableName,
-			"indexes=" + strings.Join(subParts, "+"),
+			"indexes=" + strings.Join(subParts, sep),
 		}
 		if len(scan.Filters) > 0 {
 			parts = append(parts, fmt.Sprintf("filters=%d", conditionCount(scan.Filters)))

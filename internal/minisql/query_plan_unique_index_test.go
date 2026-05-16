@@ -127,22 +127,30 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				},
 			},
 			QueryPlan{
-				Scans: []Scan{
-					{
-						TableName:    testTableName,
-						Type:         ScanTypeIndexPoint,
-						IndexName:    indexName,
-						IndexColumns: testColumns[1:2],
-						IndexKeys:    []any{"foo@example.com"},
+				Scans: []Scan{{
+					TableName: testTableName,
+					Type:      ScanTypeIndexUnion,
+					SubScans: []Scan{
+						{
+							TableName:    testTableName,
+							Type:         ScanTypeIndexPoint,
+							IndexName:    indexName,
+							IndexColumns: testColumns[1:2],
+							IndexKeys:    []any{"foo@example.com"},
+						},
+						{
+							TableName:    testTableName,
+							Type:         ScanTypeIndexPoint,
+							IndexName:    indexName,
+							IndexColumns: testColumns[1:2],
+							IndexKeys:    []any{"bar@example.com"},
+						},
 					},
-					{
-						TableName:    testTableName,
-						Type:         ScanTypeIndexPoint,
-						IndexName:    indexName,
-						IndexColumns: testColumns[1:2],
-						IndexKeys:    []any{"bar@example.com"},
+					Filters: OneOrMore{
+						{FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com")))},
+						{FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("bar@example.com")))},
 					},
-				},
+				}},
 			},
 		},
 		{
@@ -161,32 +169,42 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				},
 			},
 			QueryPlan{
-				Scans: []Scan{
-					{
-						TableName:    testTableName,
-						Type:         ScanTypeIndexPoint,
-						IndexName:    indexName,
-						IndexColumns: testColumns[1:2],
-						IndexKeys:    []any{"foo@example.com"},
-						Filters: OneOrMore{
-							{
+				Scans: []Scan{{
+					TableName: testTableName,
+					Type:      ScanTypeIndexUnion,
+					SubScans: []Scan{
+						{
+							TableName:    testTableName,
+							Type:         ScanTypeIndexPoint,
+							IndexName:    indexName,
+							IndexColumns: testColumns[1:2],
+							IndexKeys:    []any{"foo@example.com"},
+							Filters: OneOrMore{{
 								FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
-							},
+							}},
 						},
-					},
-					{
-						TableName:    testTableName,
-						Type:         ScanTypeIndexPoint,
-						IndexName:    indexName,
-						IndexColumns: testColumns[1:2],
-						IndexKeys:    []any{"bar@example.com"},
-						Filters: OneOrMore{
-							{
+						{
+							TableName:    testTableName,
+							Type:         ScanTypeIndexPoint,
+							IndexName:    indexName,
+							IndexColumns: testColumns[1:2],
+							IndexKeys:    []any{"bar@example.com"},
+							Filters: OneOrMore{{
 								FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(69)),
-							},
+							}},
 						},
 					},
-				},
+					Filters: OneOrMore{
+						{
+							FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
+							FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						},
+						{
+							FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(69)),
+							FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("bar@example.com"))),
+						},
+					},
+				}},
 			},
 		},
 		{
@@ -204,27 +222,38 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				},
 			},
 			QueryPlan{
-				Scans: []Scan{
-					{
-						TableName:    testTableName,
-						Type:         ScanTypeIndexPoint,
-						IndexName:    indexName,
-						IndexColumns: testColumns[1:2],
-						IndexKeys:    []any{"foo@example.com"},
-						Filters: OneOrMore{
-							{
+				Scans: []Scan{{
+					TableName: testTableName,
+					Type:      ScanTypeIndexUnion,
+					SubScans: []Scan{
+						{
+							TableName:    testTableName,
+							Type:         ScanTypeIndexPoint,
+							IndexName:    indexName,
+							IndexColumns: testColumns[1:2],
+							IndexKeys:    []any{"foo@example.com"},
+							Filters: OneOrMore{{
 								FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
-							},
+							}},
+						},
+						{
+							TableName:    testTableName,
+							Type:         ScanTypeIndexPoint,
+							IndexName:    indexName,
+							IndexColumns: testColumns[1:2],
+							IndexKeys:    []any{"bar@example.com"},
 						},
 					},
-					{
-						TableName:    testTableName,
-						Type:         ScanTypeIndexPoint,
-						IndexName:    indexName,
-						IndexColumns: testColumns[1:2],
-						IndexKeys:    []any{"bar@example.com"},
+					Filters: OneOrMore{
+						{
+							FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
+							FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com"))),
+						},
+						{
+							FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("bar@example.com"))),
+						},
 					},
-				},
+				}},
 			},
 		},
 		{
@@ -443,34 +472,45 @@ func TestTable_PlanQuery_SingleUniqueIndex(t *testing.T) {
 				},
 			},
 			QueryPlan{
-				Scans: []Scan{
-					{
-						TableName:    testTableName,
-						Type:         ScanTypeIndexRange,
-						IndexName:    indexName,
-						IndexColumns: testColumns[1:2],
-						RangeCondition: RangeCondition{
-							Lower: &RangeBound{
-								Value:     "foo@example.com",
-								Inclusive: true,
+				Scans: []Scan{{
+					TableName: testTableName,
+					Type:      ScanTypeIndexUnion,
+					SubScans: []Scan{
+						{
+							TableName:    testTableName,
+							Type:         ScanTypeIndexRange,
+							IndexName:    indexName,
+							IndexColumns: testColumns[1:2],
+							RangeCondition: RangeCondition{
+								Lower: &RangeBound{
+									Value:     "foo@example.com",
+									Inclusive: true,
+								},
 							},
+						},
+						{
+							TableName:    testTableName,
+							Type:         ScanTypeIndexRange,
+							IndexName:    indexName,
+							IndexColumns: testColumns[1:2],
+							RangeCondition: RangeCondition{
+								Upper: &RangeBound{
+									Value: "qux@example.com",
+								},
+							},
+							Filters: OneOrMore{{
+								FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
+							}},
 						},
 					},
-					{
-						TableName:    testTableName,
-						Type:         ScanTypeIndexRange,
-						IndexName:    indexName,
-						IndexColumns: testColumns[1:2],
-						RangeCondition: RangeCondition{
-							Upper: &RangeBound{
-								Value: "qux@example.com",
-							},
-						},
-						Filters: OneOrMore{{
+					Filters: OneOrMore{
+						{FieldIsGreaterOrEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com")))},
+						{
+							FieldIsLess(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("qux@example.com"))),
 							FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42)),
-						}},
+						},
 					},
-				},
+				}},
 			},
 		},
 		{

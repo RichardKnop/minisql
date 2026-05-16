@@ -28,6 +28,10 @@ const (
 	// memory, then fetches only the surviving rows.  Used for AND conditions where two or
 	// more independent indexes are available.
 	ScanTypeIndexIntersect
+	// ScanTypeIndexUnion runs each sub-scan to collect RowID sets, unions (deduplicates) them
+	// in memory, then fetches only the surviving rows once.  Used for OR conditions where every
+	// OR branch has an index match, avoiding duplicate row emission and redundant scans.
+	ScanTypeIndexUnion
 	// ScanTypeFullText runs an inverted full-text index lookup for MATCH predicates.
 	ScanTypeFullText
 	// ScanTypeInverted runs a JSON inverted index lookup for JSON_CONTAINS predicates.
@@ -50,6 +54,8 @@ func (st ScanType) String() string {
 		return "index_last"
 	case ScanTypeIndexIntersect:
 		return "index_intersect"
+	case ScanTypeIndexUnion:
+		return "index_union"
 	case ScanTypeFullText:
 		return "fulltext"
 	case ScanTypeInverted:
@@ -1203,14 +1209,28 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 	// When all groups fall back to sequential scan (no index usable), keep the
 	// default single sequential scan which already holds the full DNF filter.
 	hasRealIndexScan := false
+	allIndexed := true
 	for _, scan := range indexScans {
 		if scan.Type != ScanTypeSequential {
 			hasRealIndexScan = true
-			break
+		} else {
+			allIndexed = false
 		}
 	}
 	if len(indexScans) > 0 && hasRealIndexScan {
-		p.Scans = indexScans
+		if allIndexed && len(indexScans) > 1 {
+			// Every OR group has an index-backed scan → merge into a single union scan.
+			// The executor collects RowIDs from each sub-scan, deduplicates, then
+			// fetches each surviving row once and re-checks the full WHERE clause.
+			p.Scans = []Scan{{
+				TableName: t.Name,
+				Type:      ScanTypeIndexUnion,
+				SubScans:  indexScans,
+				Filters:   conditions, // full DNF re-check after row fetch
+			}}
+		} else {
+			p.Scans = indexScans
+		}
 	}
 
 	return nil
@@ -1486,6 +1506,8 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 			return t.indexEndpointScan(ctx, p.Scans[0], selectedFields, out, true)
 		case ScanTypeIndexIntersect:
 			return t.indexIntersectScan(ctx, p.Scans[0], selectedFields, out)
+		case ScanTypeIndexUnion:
+			return t.indexUnionScan(ctx, p.Scans[0], selectedFields, out)
 		case ScanTypeFullText:
 			return t.fullTextIndexScan(ctx, p.Scans[0], selectedFields, out)
 		case ScanTypeInverted:

@@ -113,22 +113,30 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 				},
 			},
 			QueryPlan{
-				Scans: []Scan{
-					{
-						TableName:    "users",
-						Type:         ScanTypeIndexPoint,
-						IndexName:    pkIndexName,
-						IndexColumns: columns[0:1],
-						IndexKeys:    []any{int64(42)},
+				Scans: []Scan{{
+					TableName: "users",
+					Type:      ScanTypeIndexUnion,
+					SubScans: []Scan{
+						{
+							TableName:    "users",
+							Type:         ScanTypeIndexPoint,
+							IndexName:    pkIndexName,
+							IndexColumns: columns[0:1],
+							IndexKeys:    []any{int64(42)},
+						},
+						{
+							TableName:    "users",
+							Type:         ScanTypeIndexPoint,
+							IndexName:    uniqueIndexName,
+							IndexColumns: columns[1:2],
+							IndexKeys:    []any{"foo@example.com"},
+						},
 					},
-					{
-						TableName:    "users",
-						Type:         ScanTypeIndexPoint,
-						IndexName:    uniqueIndexName,
-						IndexColumns: columns[1:2],
-						IndexKeys:    []any{"foo@example.com"},
+					Filters: OneOrMore{
+						{FieldIsEqual(Field{Name: "id"}, OperandInteger, int64(42))},
+						{FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com")))},
 					},
-				},
+				}},
 			},
 		},
 		{
@@ -145,27 +153,35 @@ func TestTable_PlanQuery_MultipleIndexes(t *testing.T) {
 				},
 			},
 			QueryPlan{
-				Scans: []Scan{
-					{
-						TableName:    "users",
-						Type:         ScanTypeIndexPoint,
-						IndexName:    uniqueIndexName,
-						IndexColumns: columns[1:2],
-						IndexKeys:    []any{"foo@example.com"},
-					},
-					{
-						TableName:    "users",
-						Type:         ScanTypeIndexRange,
-						IndexName:    secondaryIndexName,
-						IndexColumns: columns[4:5],
-						RangeCondition: RangeCondition{
-							Lower: &RangeBound{
-								Value:     int64(MustParseTimestampMicros("2025-01-01 00:00:00")),
-								Inclusive: true,
+				Scans: []Scan{{
+					TableName: "users",
+					Type:      ScanTypeIndexUnion,
+					SubScans: []Scan{
+						{
+							TableName:    "users",
+							Type:         ScanTypeIndexPoint,
+							IndexName:    uniqueIndexName,
+							IndexColumns: columns[1:2],
+							IndexKeys:    []any{"foo@example.com"},
+						},
+						{
+							TableName:    "users",
+							Type:         ScanTypeIndexRange,
+							IndexName:    secondaryIndexName,
+							IndexColumns: columns[4:5],
+							RangeCondition: RangeCondition{
+								Lower: &RangeBound{
+									Value:     int64(MustParseTimestampMicros("2025-01-01 00:00:00")),
+									Inclusive: true,
+								},
 							},
 						},
 					},
-				},
+					Filters: OneOrMore{
+						{FieldIsEqual(Field{Name: "email"}, OperandQuotedString, NewTextPointer([]byte("foo@example.com")))},
+						{FieldIsGreaterOrEqual(Field{Name: "created"}, OperandQuotedString, MustParseTimestampMicros("2025-01-01 00:00:00"))},
+					},
+				}},
 			},
 		},
 		{
