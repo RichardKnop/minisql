@@ -583,8 +583,68 @@ func TestParse_Select(t *testing.T) {
 			nil,
 		},
 		{
+			"SELECT with FULL OUTER JOIN",
+			"SELECT u.id, o.id FROM users AS u FULL OUTER JOIN orders AS o ON u.id = o.user_id;",
+			[]minisql.Statement{
+				{
+					Kind:       minisql.Select,
+					TableName:  "users",
+					TableAlias: "u",
+					Fields: []minisql.Field{
+						{AliasPrefix: "u", Name: "id"},
+						{AliasPrefix: "o", Name: "id"},
+					},
+					Joins: []minisql.Join{
+						{
+							Type:       minisql.FullOuter,
+							TableName:  "orders",
+							TableAlias: "o",
+							Conditions: minisql.Conditions{
+								minisql.FieldIsEqual(
+									minisql.Field{AliasPrefix: "u", Name: "id"},
+									minisql.OperandField,
+									minisql.Field{AliasPrefix: "o", Name: "user_id"},
+								),
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"SELECT with FULL JOIN (short form)",
+			"SELECT u.id, o.id FROM users AS u FULL JOIN orders AS o ON u.id = o.user_id;",
+			[]minisql.Statement{
+				{
+					Kind:       minisql.Select,
+					TableName:  "users",
+					TableAlias: "u",
+					Fields: []minisql.Field{
+						{AliasPrefix: "u", Name: "id"},
+						{AliasPrefix: "o", Name: "id"},
+					},
+					Joins: []minisql.Join{
+						{
+							Type:       minisql.FullOuter,
+							TableName:  "orders",
+							TableAlias: "o",
+							Conditions: minisql.Conditions{
+								minisql.FieldIsEqual(
+									minisql.Field{AliasPrefix: "u", Name: "id"},
+									minisql.OperandField,
+									minisql.Field{AliasPrefix: "o", Name: "user_id"},
+								),
+							},
+						},
+					},
+				},
+			},
+			nil,
+		},
+		{
 			"SELECT with nested INNER JOIN",
-			`SELECT u.id, p.name FROM users AS u 
+			`SELECT u.id, p.name FROM users AS u
 			INNER JOIN profiles AS p ON u.id = p.user_id
 			LEFT JOIN avatars As a ON a.profile_id = p.id;`,
 			[]minisql.Statement{

@@ -114,8 +114,9 @@ func (t *Table) flattenJoinTree(
 			// No index on the inner join column.  Hash join is O(N+M) vs O(N×M)
 			// for nested-loop, so prefer it unless the build side is too large to
 			// materialise in memory or the join type requires nested-loop (RIGHT JOIN
-			// needs an unmatched-row pass that is harder to do with a hash table).
-			if join.Type != Right {
+			// and FULL OUTER JOIN need an unmatched-row pass that is harder to do with
+			// a hash table).
+			if join.Type != Right && join.Type != FullOuter {
 				buildRows := joinedTable.estimatedRowCount()
 				if buildRows < 0 || buildRows <= hashJoinMaxBuildRows {
 					algorithm = JoinAlgorithmHash
@@ -467,15 +468,15 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 	default:
 	}
 
-	// RIGHT JOIN: emit right-table rows that had no matching base row.
-	hasRightJoin := false
+	// RIGHT JOIN / FULL OUTER JOIN: emit right-table rows that had no matching base row.
+	hasRightOrFullJoin := false
 	for _, j := range p.Joins {
-		if j.Type == Right {
-			hasRightJoin = true
+		if j.Type == Right || j.Type == FullOuter {
+			hasRightOrFullJoin = true
 			break
 		}
 	}
-	if hasRightJoin {
+	if hasRightOrFullJoin {
 		if err := p.executeRightJoinPass(ctx, provider, filteredPipe); err != nil {
 			return err
 		}
@@ -625,8 +626,8 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 	default:
 	}
 
-	// LEFT JOIN: emit the outer row with NULL-filled inner columns when nothing matched.
-	if !matched && join.Type == Left {
+	// LEFT JOIN / FULL OUTER JOIN: emit the outer row with NULL-filled inner columns when nothing matched.
+	if !matched && (join.Type == Left || join.Type == FullOuter) {
 		nullInner := nullRowForColumns(innerTable.Columns)
 		var combinedRow Row
 		if joinIndex == 0 {
@@ -672,8 +673,8 @@ func (p QueryPlan) executeHashJoinForRow(ctx context.Context, currentRow Row, jo
 		}
 	}
 
-	// LEFT JOIN: no matching inner row — emit outer row with NULL inner columns.
-	if !matched && join.Type == Left {
+	// LEFT JOIN / FULL OUTER JOIN: no matching inner row — emit outer row with NULL inner columns.
+	if !matched && (join.Type == Left || join.Type == FullOuter) {
 		var innerColumns []Column
 		if bucket != nil {
 			innerColumns = bucket.innerColumns
@@ -706,7 +707,7 @@ func (p QueryPlan) executeRightJoinPass(ctx context.Context, provider TableProvi
 	baseFields := fieldsFromColumns(baseTable.Columns...)
 
 	for joinIndex, join := range p.Joins {
-		if join.Type != Right {
+		if join.Type != Right && join.Type != FullOuter {
 			continue
 		}
 

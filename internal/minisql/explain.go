@@ -554,6 +554,8 @@ func joinTypeString(joinType JoinType) string {
 		return "left"
 	case Right:
 		return "right"
+	case FullOuter:
+		return "full outer"
 	default:
 		return "unknown"
 	}

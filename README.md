@@ -2,19 +2,16 @@
 
 [![CI Status](https://github.com/RichardKnop/minisql/actions/workflows/go.yml/badge.svg)](https://github.com/RichardKnop/minisql/actions/workflows/go.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/RichardKnop/minisql)](https://goreportcard.com/report/github.com/RichardKnop/minisql)
-
-`MiniSQL` is an embedded single file database written in Golang, inspired by `SQLite`. It is not a clone of `SQLite` in Go, but rather an alternative database which borrows ideas from other databases as well (like Postgres). It can differentiate itself from `SQLite` in several areas: 
-
-1. **Pure Go, zero CGO** — already a differentiator.
-2. **MVCC snapshot isolation** — true MVCC for reads already implemented.
-3. **Parallel query execution** — SQLite is single-threaded; MiniSQL can parallelize full table scans.
-4. **Modern API surface** — idiomatic Go, context-aware, `database/sql` compatible.
-5. **JSON as a first-class type** — native `json` column type with path operators and functions (not an extension).
-6. **UUID as a first-class type** — native `uuid` column type with 16-byte binary storage, canonical lowercase formatting, and full index support.
-
-This is an early stage project and it might contain bugs and is not battle tested. Please employ caution when using this database.
-
 [![Donate Bitcoin](https://img.shields.io/badge/donate-bitcoin-orange.svg)](https://richardknop.github.io/donate/)
+
+`MiniSQL` is an embedded single file database written in Golang, inspired by `SQLite` but borrows ideas from other databases such as `Postgres` too. It can differentiate itself from `SQLite` in several areas: 
+
+1. Pure Go / zero CGO
+2. MVCC snapshot isolation (for reads, OCC for writes), 
+3. Parallel scan
+4. JSON + UUID as native types
+5. Built-in full-text search
+6. Built-in JSON inverted index
 
 To use minisql in your Go code, import the driver:
 
