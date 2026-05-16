@@ -22,6 +22,8 @@ type LRUCache[T any] interface {
 	GetAndPromote(T) (any, bool)
 	Put(T, any, bool)
 	EvictIfNeeded() (T, bool)
+	// Purge removes all entries, used to invalidate the plan cache on schema changes.
+	Purge()
 }
 
 // PagerFactory creates typed Pager instances for table data and index pages,

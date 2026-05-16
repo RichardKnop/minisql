@@ -126,11 +126,28 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	// Materialising path: buffer every matching row, then dispatch.
 	// Required for COUNT (needs a total), GROUP BY, aggregates, ORDER BY (sort),
 	// and JOIN (goroutine-based execution inside plan.Execute).
+	//
+	// LIMIT pushdown: for JOIN queries with no in-memory sort and no DISTINCT we
+	// can stop collecting rows after OFFSET+LIMIT rows, avoiding a full scan of
+	// every matching row.  plan.Execute propagates errLimitReached from the
+	// callback; the JOIN goroutine is cancelled and drained inside Execute itself.
+	var joinScanLimit int64
+	if len(plan.Joins) > 0 && stmt.Limit.Valid && !plan.SortInMemory && !stmt.Distinct {
+		joinScanLimit = stmt.Limit.Value.(int64)
+		if stmt.Offset.Valid {
+			joinScanLimit += stmt.Offset.Value.(int64)
+		}
+	}
+
 	var rows []Row
-	if err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
+	err = plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
 		rows = append(rows, row)
+		if joinScanLimit > 0 && int64(len(rows)) >= joinScanLimit {
+			return errLimitReached
+		}
 		return nil
-	}); err != nil {
+	})
+	if err != nil && !errors.Is(err, errLimitReached) {
 		return StatementResult{}, err
 	}
 

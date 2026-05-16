@@ -79,3 +79,11 @@ func WithRowCountGetter(fn func() int64) TableOption {
 		t.getRowCount = fn
 	}
 }
+
+// WithPlanCache wires the shared plan cache into the table so that PlanQuery
+// can skip re-planning on repeated executions of the same prepared statement.
+func WithPlanCache(cache LRUCache[string]) TableOption {
+	return func(t *Table) {
+		t.planCache = cache
+	}
+}

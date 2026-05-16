@@ -174,6 +174,15 @@ func (c *cacheImpl[T]) moveToFront(entry *cacheEntry[T]) {
 	c.addToFront(entry)
 }
 
+// Purge removes all entries from the cache, resetting it to an empty state.
+func (c *cacheImpl[T]) Purge() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries = make(map[T]*cacheEntry[T])
+	c.head = nil
+	c.tail = nil
+}
+
 func (c *cacheImpl[T]) addToFront(entry *cacheEntry[T]) {
 	entry.next = c.head
 	entry.prev = nil

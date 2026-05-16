@@ -12,6 +12,15 @@ type parallelScanResult struct {
 	err error
 }
 
+// drainParallelScanCh reads and discards all remaining values from ch until it is
+// closed.  Called after cancel() to let workers unblock their channel sends and
+// exit cleanly before the consumer returns.
+func drainParallelScanCh(ch <-chan parallelScanResult) {
+	for v := range ch {
+		_ = v
+	}
+}
+
 // leafPageList walks the leaf chain from the leftmost leaf and returns every leaf PageIndex.
 func (t *Table) leafPageList(ctx context.Context) ([]PageIndex, error) {
 	cursor, err := t.SeekFirst(ctx)
@@ -87,12 +96,24 @@ func (t *Table) parallelSequentialScan(ctx context.Context, scan Scan, selectedF
 		close(ch)
 	}()
 
+	var received int64
+	scanLimit := scan.ScanLimit
 	for result := range ch {
 		if result.err != nil {
+			cancel()
+			drainParallelScanCh(ch)
 			return result.err
 		}
 		if err := out(result.row); err != nil {
+			cancel()
+			drainParallelScanCh(ch)
 			return err
+		}
+		received++
+		if scanLimit > 0 && received >= scanLimit {
+			cancel()
+			drainParallelScanCh(ch)
+			return nil
 		}
 	}
 
