@@ -294,6 +294,10 @@ func (p *parserItem) doParseSelect() error {
 			p.joinInProgress.Type = minisql.Right
 			p.step = stepSelectJoinTable
 			p.pop()
+		case "FULL OUTER JOIN", "FULL JOIN":
+			p.joinInProgress.Type = minisql.FullOuter
+			p.step = stepSelectJoinTable
+			p.pop()
 		default:
 			p.step = stepSelectGroupBy
 			return nil

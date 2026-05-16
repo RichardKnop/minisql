@@ -16,6 +16,8 @@ const (
 	Left
 	// Right is a RIGHT JOIN.
 	Right
+	// FullOuter is a FULL OUTER JOIN — all rows from both tables, with NULLs where there is no match.
+	FullOuter
 )
 
 // Join describes a single JOIN clause within a SELECT statement, including the
