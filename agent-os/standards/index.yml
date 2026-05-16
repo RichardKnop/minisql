@@ -13,7 +13,7 @@ query-execution:
   covering-index: CoveringIndex=true eligibility; SELECT-only, IS NULL disqualifier, COUNT(*) shortcut
   dnf-scans-fanout: OR groups in DNF each become one Scan; residual Scan.Filters applied post-index
   hash-join-selection: Hash join vs nested-loop selection; 1M threshold, RIGHT JOIN exception
-  index-selection: Operator eligibility, index priority, composite prefix matching, override guard
+  index-selection: Operator eligibility, index priority, composite prefix matching, expression/partial index matching, FTS/inverted scan types, override guard
   join-topology: flattenJoinTree + scanIndexByAlias; why LeftScanIndex is never hardcoded to 0
   plan-pipeline: Channel-based scan→consumer pipeline; streaming vs in-memory sort paths
   sort-path: ORDER BY path selection; heap optimisation for LIMIT; DISTINCT materialisation
@@ -24,7 +24,7 @@ storage-engine:
   page-layout: 4KB page tagged-union, page 0 special handling, usable space
   pager-cache: Sparse page array + LRU; I/O and unmarshal outside the lock
   rightmost-leaf-cache: Per-transaction hint for sequential inserts; lastTxID guard, split invalidation
-  rollback-journal: Write-before protocol, CRC32 integrity, crash recovery
+  rollback-journal: "TOMBSTONE — the rollback journal was replaced by WAL; see wal.md"
   snapshot-isolation: Read-only snapshot semantics, pageVersionHistory lifecycle, TOCTOU rule, checkpoint blocking
   wal: WAL frame format, append/replay/checkpoint lifecycle, fsync modes
   wal-write-buffering: pendingBuf accumulation, flush triggers, flushThreshold=0 for tests, flush-before-checkpoint rule
