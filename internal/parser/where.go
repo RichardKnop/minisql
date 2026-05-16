@@ -173,6 +173,25 @@ func (p *parserItem) parseLeafCondition() (*minisql.ConditionNode, error) {
 	identifier := p.peek()
 	upperIdent := strings.ToUpper(identifier)
 
+	// Literal value on the left side of a condition (e.g. WHERE 1 = 1, WHERE true).
+	// These are constant-foldable at plan time.
+	if v, ln := p.peekValue(); ln != 0 {
+		p.pop()
+		var op1 minisql.Operand
+		switch val := v.(type) {
+		case int64:
+			op1 = minisql.Operand{Type: minisql.OperandInteger, Value: val}
+		case float64:
+			op1 = minisql.Operand{Type: minisql.OperandFloat, Value: val}
+		case bool:
+			op1 = minisql.Operand{Type: minisql.OperandBoolean, Value: val}
+		case string:
+			op1 = minisql.Operand{Type: minisql.OperandQuotedString, Value: minisql.NewTextPointer([]byte(val))}
+		}
+		cond := minisql.Condition{Operand1: op1}
+		return p.parseCondOperatorAndRHS(&cond)
+	}
+
 	// Built-in function call or CAST as WHERE left operand:
 	//   LOWER(email) = ?, DATE_TRUNC('month', ts) = ?, CAST(x AS INT8) > 0, etc.
 	if isBuiltinFunction(upperIdent) || upperIdent == "CAST" {
@@ -462,6 +481,16 @@ func (p *parserItem) parseCondScalarValue(cond *minisql.Condition) error {
 			return err
 		}
 		cond.Operand2 = minisql.Operand{Type: minisql.OperandSubquery, Value: subStmt}
+		return nil
+	}
+	// Built-in function call or CAST on the right side (e.g. UPPER('active'), CAST(? AS INT8)).
+	// Parsed as an OperandExpr; constant-foldable at plan time.
+	if upperIdent := strings.ToUpper(p.peek()); isBuiltinFunction(upperIdent) || upperIdent == "CAST" {
+		expr, err := p.parseExpr()
+		if err != nil {
+			return err
+		}
+		cond.Operand2 = minisql.Operand{Type: minisql.OperandExpr, Value: expr}
 		return nil
 	}
 	if identifier := p.peek(); isIdentifier(identifier) {
