@@ -340,6 +340,9 @@ type indexMatch struct {
 	stats               *IndexStats
 	info                IndexInfo
 	keys                []any
+	// estKeyStr is the MCV lookup key for the first equality key — populated
+	// only for single-value Eq conditions; empty for IN or composite paths.
+	estKeyStr           string
 	hasProperUpperBound bool
 	isPrimaryKey        bool
 	isUnique            bool
@@ -801,10 +804,18 @@ func (t *Table) tryMatchIndex(indexInfo IndexInfo, group Conditions) *indexMatch
 		indexKeys = compositeKey
 	}
 
+	// For single-value single-column equality, capture the key as a string
+	// for MCV lookup in the planner's cost gate.
+	var estKeyStr string
+	if rangeCondition == nil && len(indexKeys) == 1 {
+		estKeyStr = mcvKeyStr(indexKeys[0])
+	}
+
 	match := &indexMatch{
 		info:                indexInfo,
 		matchedConditions:   matchedConditions,
 		keys:                indexKeys,
+		estKeyStr:           estKeyStr,
 		rangeCondition:      rangeCondition,
 		hasProperUpperBound: hasProperUpperBound,
 		isPrimaryKey:        isPK,
@@ -1069,6 +1080,21 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 						intersectScan.Filters = OneOrMore{remaining}
 					}
 					indexScans = append(indexScans, intersectScan)
+					continue
+				}
+			}
+
+			// Equality cost gate: if MCV/NDV statistics indicate the index is not
+			// selective enough (estimated rows > 30% of table), fall back to a
+			// sequential scan for this OR group.
+			if match.rangeCondition == nil && match.estKeyStr != "" && match.stats != nil {
+				tableRows := t.estimatedRowCount()
+				if !shouldUseIndexForEquality(match.stats, match.estKeyStr, tableRows) {
+					indexScans = append(indexScans, Scan{
+						TableName: t.Name,
+						Type:      ScanTypeSequential,
+						Filters:   OneOrMore{group},
+					})
 					continue
 				}
 			}

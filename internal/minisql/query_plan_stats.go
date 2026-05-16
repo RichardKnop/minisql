@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,6 +12,9 @@ const (
 	// histogramBuckets is the number of equi-depth histogram buckets built
 	// during ANALYZE for numeric index columns.
 	histogramBuckets = 32
+
+	// mcvMaxEntries is the maximum number of Most Common Values kept per index.
+	mcvMaxEntries = 50
 
 	// Cost thresholds for index vs table scan decision
 	indexScanThreshold = 0.3 // If index scan returns >30% of rows, table scan may be faster
@@ -28,11 +32,26 @@ type Histogram struct {
 	Bounds []float64
 }
 
+// MCVEntry is one entry in the Most Common Values list for an index column.
+// Value is the string representation of the index key (as produced by
+// mcvKeyStr). Count is the number of index entries with that exact value.
+type MCVEntry struct {
+	Value string
+	Count int64
+}
+
 // IndexStats holds parsed statistics for an index
 type IndexStats struct {
 	NDistinct []int64
 	NEntry    int64
 	Hist      *Histogram // nil when not collected or column type is non-numeric
+	MCV       []MCVEntry // top-K most common values, descending by Count; nil when not collected
+}
+
+// mcvKeyStr converts an index key value to the canonical string used as the
+// MCV map key during ANALYZE and as the lookup key in the planner.
+func mcvKeyStr(v any) string {
+	return fmt.Sprintf("%v", v)
 }
 
 // isNumericColumn reports whether c supports histogram collection.
@@ -145,6 +164,73 @@ func estimateSelectivityWithHistogram(hist *Histogram, rc RangeCondition) float6
 	return sel
 }
 
+// buildMCV selects the top-n most frequent entries from freq and returns them
+// sorted descending by count. Entries with the same count are ordered arbitrarily.
+func buildMCV(freq map[string]int64, n int) []MCVEntry {
+	type pair struct {
+		key   string
+		count int64
+	}
+	pairs := make([]pair, 0, len(freq))
+	for k, c := range freq {
+		pairs = append(pairs, pair{k, c})
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		return pairs[i].count > pairs[j].count
+	})
+	if len(pairs) > n {
+		pairs = pairs[:n]
+	}
+	mcv := make([]MCVEntry, len(pairs))
+	for i, p := range pairs {
+		mcv[i] = MCVEntry{Value: p.key, Count: p.count}
+	}
+	return mcv
+}
+
+// serializeMCV appends the MCV list to a stat string builder.
+// Format: "|mcv=encval1:count1,encval2:count2,..."
+// Values are URL-encoded so commas and colons inside values are safe.
+func serializeMCV(b *strings.Builder, mcv []MCVEntry) {
+	if len(mcv) == 0 {
+		return
+	}
+	b.WriteString("|mcv=")
+	for i, e := range mcv {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(url.QueryEscape(e.Value))
+		b.WriteByte(':')
+		b.WriteString(strconv.FormatInt(e.Count, 10))
+	}
+}
+
+// parseMCV parses a "|mcv=..." string produced by serializeMCV.
+func parseMCV(s string) ([]MCVEntry, error) {
+	if s == "" {
+		return nil, nil
+	}
+	entries := strings.Split(s, ",")
+	mcv := make([]MCVEntry, 0, len(entries))
+	for _, entry := range entries {
+		k, v, ok := strings.Cut(entry, ":")
+		if !ok {
+			continue
+		}
+		decoded, err := url.QueryUnescape(k)
+		if err != nil {
+			return nil, fmt.Errorf("invalid MCV key %q: %w", k, err)
+		}
+		count, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid MCV count %q: %w", v, err)
+		}
+		mcv = append(mcv, MCVEntry{Value: decoded, Count: count})
+	}
+	return mcv, nil
+}
+
 // serializeHistogram appends the histogram to a stat string builder.
 func serializeHistogram(b *strings.Builder, h *Histogram) {
 	if h == nil || len(h.Bounds) == 0 {
@@ -177,11 +263,24 @@ func parseHistogram(s string) (*Histogram, error) {
 	return &Histogram{Bounds: bounds}, nil
 }
 
-// parseIndexStats parses a stat string: "nEntry nDistinct1 [nDistinct2 ...][|h=b0,b1,...]"
+// parseIndexStats parses a stat string:
+// "nEntry nDistinct1 [nDistinct2 ...][|h=b0,b1,...][|mcv=val1:count1,...]"
 func parseIndexStats(statString string) (IndexStats, error) {
 	mainPart := statString
 	var hist *Histogram
-	if before, histStr, ok := strings.Cut(statString, "|h="); ok {
+	var mcv []MCVEntry
+
+	// Strip |mcv= suffix first (it comes after |h= if both are present).
+	if before, mcvStr, ok := strings.Cut(mainPart, "|mcv="); ok {
+		mainPart = before
+		var err error
+		mcv, err = parseMCV(mcvStr)
+		if err != nil {
+			return IndexStats{}, err
+		}
+	}
+
+	if before, histStr, ok := strings.Cut(mainPart, "|h="); ok {
 		mainPart = before
 		var err error
 		hist, err = parseHistogram(histStr)
@@ -213,6 +312,7 @@ func parseIndexStats(statString string) (IndexStats, error) {
 		NEntry:    nEntry,
 		NDistinct: nDistinct,
 		Hist:      hist,
+		MCV:       mcv,
 	}, nil
 }
 
@@ -229,6 +329,38 @@ func (s IndexStats) Selectivity() float64 {
 	// Use the last nDistinct value (most specific prefix)
 	finalDistinct := s.NDistinct[len(s.NDistinct)-1]
 	return float64(finalDistinct) / float64(s.NEntry)
+}
+
+// EstimateEqualityRows estimates the number of rows that will match an equality
+// condition on the leading column of this index for the given key string.
+//
+// Lookup order:
+//  1. MCV list — if keyStr is in the top-K, return the exact stored count.
+//  2. NDV fallback — return NEntry / NDistinct[0] (average rows per distinct value).
+//  3. Worst case — return NEntry when no statistics are available.
+func (s IndexStats) EstimateEqualityRows(keyStr string) int64 {
+	for _, e := range s.MCV {
+		if e.Value == keyStr {
+			return e.Count
+		}
+	}
+	if len(s.NDistinct) > 0 && s.NDistinct[0] > 0 {
+		return s.NEntry / s.NDistinct[0]
+	}
+	return s.NEntry
+}
+
+// shouldUseIndexForEquality returns true when an equality index scan is
+// estimated to be cheaper than a full sequential scan. tableRows is the
+// current estimated row count for the table (from estimatedRowCount()).
+// When tableRows <= 0 (unavailable) the function defaults to using the index.
+func shouldUseIndexForEquality(stats *IndexStats, keyStr string, tableRows int64) bool {
+	if stats == nil || tableRows <= 0 {
+		return true
+	}
+	estimated := stats.EstimateEqualityRows(keyStr)
+	selectivity := float64(estimated) / float64(tableRows)
+	return selectivity <= indexScanThreshold
 }
 
 // EstimateRangeRows estimates the number of rows that will match a range condition.
