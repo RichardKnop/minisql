@@ -247,6 +247,46 @@ func TestFullTextIndexScanSingleTermStreamsRowIDs(t *testing.T) {
 	assert.Equal(t, []RowID{3, 7, 9}, rowIDs)
 }
 
+func TestFullTextIndexScanMultiTermIntersectsRowIDs(t *testing.T) {
+	t.Parallel()
+
+	index := &fakeFullTextInvertedIndex{
+		postings: map[string][]invertedPosting{
+			"common": {
+				{RowID: 9, Positions: []uint32{1}},
+				{RowID: 3, Positions: []uint32{1}},
+				{RowID: 7, Positions: []uint32{1}},
+				{RowID: 11, Positions: []uint32{1}},
+			},
+			"cohort": {
+				{RowID: 7, Positions: []uint32{2}},
+				{RowID: 3, Positions: []uint32{2}},
+			},
+		},
+	}
+	table := NewTable(testLogger, nil, nil, "articles", []Column{{Name: "body", Kind: Text}}, 0, nil, WithSecondaryIndex(SecondaryIndex{
+		IndexInfo: IndexInfo{
+			Name:    "idx_body_fts",
+			Method:  IndexMethodFullText,
+			Columns: []Column{{Name: "body", Kind: Text}},
+		},
+		InvertedIndex: index,
+	}))
+
+	var rowIDs []RowID
+	err := table.fullTextIndexScan(context.Background(), Scan{
+		Type:          ScanTypeFullText,
+		IndexName:     "idx_body_fts",
+		IndexKeys:     []any{"common", "cohort"},
+		FullTextQuery: &textSearchQuery{Terms: []string{"common", "cohort"}},
+	}, nil, func(row Row) error {
+		rowIDs = append(rowIDs, row.Key)
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []RowID{3, 7}, rowIDs)
+}
+
 func TestPlanQuery_FullTextIndexSkipsOverlongQueryToken(t *testing.T) {
 	t.Parallel()
 

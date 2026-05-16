@@ -1150,3 +1150,14 @@ materializing per-row position maps before fetching rows.
 | FullText_Search_SingleTerm/common/minisql | 1.01 ms/op | ~539 µs/op | 531.4 KiB/op | ~320 KiB/op |
 | FullText_Search_SingleTerm/medium/minisql | 209.67 µs/op | ~217 µs/op | 71.5 KiB/op | ~69.6 KiB/op |
 | FullText_Search_SingleTerm/rare/minisql | 209.33 µs/op | ~189 µs/op | 66.8 KiB/op | ~65.7 KiB/op |
+
+### 2026-05-16 00:21 UTC
+
+Targeted full-text multi-term AND lookup pass. MiniSQL now handles non-phrase
+multi-term full-text queries by loading row IDs only, ordering terms by document
+frequency, and intersecting sorted row-id lists instead of materializing
+per-term position maps.
+
+| Benchmark | Before | After | Allocation Before | Allocation After |
+|---|---:|---:|---:|---:|
+| FullText_Search_MultiTermAND/minisql | 332.81 µs/op | ~241 µs/op | 283.7 KiB/op | ~78.3 KiB/op |
