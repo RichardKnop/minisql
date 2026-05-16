@@ -482,6 +482,19 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 				return StatementResult{}, err
 			}
 			stmt.Conditions = resolved
+
+			// Constant folding: replace OperandExpr operands that contain no
+			// column references with their evaluated literal values.  This
+			// enables index use for patterns like WHERE col = UPPER('foo') and
+			// prunes AND groups that are always false.
+			folded, alwaysFalse, err := FoldConditions(stmt.Conditions)
+			if err != nil {
+				return StatementResult{}, err
+			}
+			if alwaysFalse {
+				return StatementResult{Rows: NewSliceIterator(nil)}, nil
+			}
+			stmt.Conditions = folded // nil when WHERE is always true → no filter
 		}
 
 		// SELECT with UNION / UNION ALL branches is handled by the union executor.

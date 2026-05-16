@@ -569,7 +569,7 @@ func (p *parserItem) peekWithLength() (string, int) {
 }
 
 func (p *parserItem) peekQuotedStringWithLength() (string, int) {
-	if len(p.sql) < p.i || p.sql[p.i] != '\'' {
+	if p.i >= len(p.sql) || p.sql[p.i] != '\'' {
 		return "", 0
 	}
 	for i := p.i + 1; i < len(p.sql); i++ {
@@ -589,7 +589,7 @@ func (p *parserItem) peekBooleanWithLength() (bool, int) {
 }
 
 func (p *parserItem) peekIntWithLength() (int64, int) {
-	if len(p.sql) < p.i || !unicode.IsDigit(rune(p.sql[p.i])) {
+	if p.i >= len(p.sql) || !unicode.IsDigit(rune(p.sql[p.i])) {
 		return 0, 0
 	}
 	for i := p.i + 1; i < len(p.sql); i++ {
@@ -610,7 +610,7 @@ func (p *parserItem) peekIntWithLength() (int64, int) {
 }
 
 func (p *parserItem) peekNumberWithLength() (float64, int) {
-	if len(p.sql) < p.i || !unicode.IsDigit(rune(p.sql[p.i])) {
+	if p.i >= len(p.sql) || !unicode.IsDigit(rune(p.sql[p.i])) {
 		return 0.0, 0
 	}
 	for i := p.i + 1; i < len(p.sql); i++ {
