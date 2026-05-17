@@ -162,6 +162,178 @@ func TestFindExpressionIndex(t *testing.T) {
 	})
 }
 
+func TestBuildGroupKey(t *testing.T) {
+	t.Parallel()
+
+	cols := []Column{
+		{Name: "age", Kind: Int8},
+		{Name: "name", Kind: Varchar},
+		{Name: "active", Kind: Boolean},
+		{Name: "score", Kind: Double},
+		{Name: "ratio", Kind: Real},
+	}
+
+	makeRow := func(vals ...OptionalValue) Row {
+		return NewRowWithValues(cols[:len(vals)], vals)
+	}
+
+	t.Run("int64 encoded with i64 prefix", func(t *testing.T) {
+		t.Parallel()
+		row := makeRow(OptionalValue{Value: int64(42), Valid: true})
+		key := string(buildGroupKey(nil, row, []int{0}))
+		assert.Equal(t, "i64:42", key)
+	})
+
+	t.Run("int32 encoded with i32 prefix", func(t *testing.T) {
+		t.Parallel()
+		row := makeRow(OptionalValue{Value: int32(7), Valid: true})
+		key := string(buildGroupKey(nil, row, []int{0}))
+		assert.Equal(t, "i32:7", key)
+	})
+
+	t.Run("bool true encoded as b:true", func(t *testing.T) {
+		t.Parallel()
+		row := NewRowWithValues(cols[2:3], []OptionalValue{{Value: true, Valid: true}})
+		key := string(buildGroupKey(nil, row, []int{0}))
+		assert.Equal(t, "b:true", key)
+	})
+
+	t.Run("bool false encoded as b:false", func(t *testing.T) {
+		t.Parallel()
+		row := NewRowWithValues(cols[2:3], []OptionalValue{{Value: false, Valid: true}})
+		key := string(buildGroupKey(nil, row, []int{0}))
+		assert.Equal(t, "b:false", key)
+	})
+
+	t.Run("float64 encoded with f64 prefix", func(t *testing.T) {
+		t.Parallel()
+		row := NewRowWithValues(cols[3:4], []OptionalValue{{Value: float64(3.14), Valid: true}})
+		key := string(buildGroupKey(nil, row, []int{0}))
+		assert.Contains(t, key, "f64:")
+	})
+
+	t.Run("float32 encoded with f32 prefix", func(t *testing.T) {
+		t.Parallel()
+		row := NewRowWithValues(cols[4:5], []OptionalValue{{Value: float32(1.5), Valid: true}})
+		key := string(buildGroupKey(nil, row, []int{0}))
+		assert.Contains(t, key, "f32:")
+	})
+
+	t.Run("TextPointer encoded with t prefix", func(t *testing.T) {
+		t.Parallel()
+		row := NewRowWithValues(cols[1:2], []OptionalValue{{Value: NewTextPointer([]byte("hello")), Valid: true}})
+		key := string(buildGroupKey(nil, row, []int{0}))
+		assert.Contains(t, key, "t5:hello")
+	})
+
+	t.Run("null value encoded as null", func(t *testing.T) {
+		t.Parallel()
+		row := makeRow(OptionalValue{Valid: false})
+		key := string(buildGroupKey(nil, row, []int{0}))
+		assert.Equal(t, "null", key)
+	})
+
+	t.Run("out-of-range index encoded as null", func(t *testing.T) {
+		t.Parallel()
+		row := makeRow(OptionalValue{Value: int64(1), Valid: true})
+		key := string(buildGroupKey(nil, row, []int{99}))
+		assert.Equal(t, "null", key)
+	})
+
+	t.Run("negative index encoded as null", func(t *testing.T) {
+		t.Parallel()
+		row := makeRow(OptionalValue{Value: int64(1), Valid: true})
+		key := string(buildGroupKey(nil, row, []int{-1}))
+		assert.Equal(t, "null", key)
+	})
+
+	t.Run("multiple columns separated by unit separator", func(t *testing.T) {
+		t.Parallel()
+		row := NewRowWithValues(cols[:2], []OptionalValue{
+			{Value: int64(1), Valid: true},
+			{Value: NewTextPointer([]byte("alice")), Valid: true},
+		})
+		key := string(buildGroupKey(nil, row, []int{0, 1}))
+		assert.Equal(t, "i64:1\x1ft5:alice", key)
+	})
+
+	t.Run("int64 and float64 with same value produce distinct keys", func(t *testing.T) {
+		t.Parallel()
+		r1 := makeRow(OptionalValue{Value: int64(1), Valid: true})
+		r2 := NewRowWithValues(cols[3:4], []OptionalValue{{Value: float64(1), Valid: true}})
+		k1 := string(buildGroupKey(nil, r1, []int{0}))
+		k2 := string(buildGroupKey(nil, r2, []int{0}))
+		assert.NotEqual(t, k1, k2)
+	})
+
+	t.Run("buf is reused across calls", func(t *testing.T) {
+		t.Parallel()
+		row := makeRow(OptionalValue{Value: int64(5), Valid: true})
+		buf := make([]byte, 0, 64)
+		buf = buildGroupKey(buf[:0], row, []int{0})
+		assert.Equal(t, "i64:5", string(buf))
+		buf = buildGroupKey(buf[:0], row, []int{0})
+		assert.Equal(t, "i64:5", string(buf))
+	})
+
+	t.Run("empty column index list produces empty key", func(t *testing.T) {
+		t.Parallel()
+		row := makeRow(OptionalValue{Value: int64(1), Valid: true})
+		key := string(buildGroupKey(nil, row, []int{}))
+		assert.Equal(t, "", key)
+	})
+}
+
+func TestGroupByColumnIndex(t *testing.T) {
+	t.Parallel()
+
+	cols := []Column{
+		{Name: "id", Kind: Int8},
+		{Name: "name", Kind: Varchar},
+		{Name: "age", Kind: Int8},
+	}
+
+	t.Run("plain name found at correct index", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, 1, groupByColumnIndex(cols, Field{Name: "name"}))
+	})
+
+	t.Run("first column found", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, 0, groupByColumnIndex(cols, Field{Name: "id"}))
+	})
+
+	t.Run("last column found", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, 2, groupByColumnIndex(cols, Field{Name: "age"}))
+	})
+
+	t.Run("missing name returns -1", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, -1, groupByColumnIndex(cols, Field{Name: "score"}))
+	})
+
+	t.Run("alias-qualified name falls back to bare name when column not qualified", func(t *testing.T) {
+		t.Parallel()
+		// Column is stored as plain "name", not "t.name" — expect fallback.
+		assert.Equal(t, 1, groupByColumnIndex(cols, Field{Name: "name", AliasPrefix: "t"}))
+	})
+
+	t.Run("alias-qualified name found when column is stored qualified", func(t *testing.T) {
+		t.Parallel()
+		qualifiedCols := []Column{
+			{Name: "t.id", Kind: Int8},
+			{Name: "t.name", Kind: Varchar},
+		}
+		assert.Equal(t, 1, groupByColumnIndex(qualifiedCols, Field{Name: "name", AliasPrefix: "t"}))
+	})
+
+	t.Run("empty cols returns -1", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, -1, groupByColumnIndex(nil, Field{Name: "id"}))
+	})
+}
+
 func TestWhereCondColumns(t *testing.T) {
 	t.Parallel()
 

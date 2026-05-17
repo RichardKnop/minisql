@@ -693,6 +693,278 @@ func TestTable_Select_Overflow(t *testing.T) {
 	})
 }
 
+// TestTable_SelectGroupBy covers selectGroupBy via Table.Select.
+// Uses testColumns: id(Int8), email(Varchar), age(Int4), verified(Boolean), score(Real), created(Timestamp).
+// We insert rows with two distinct verified values (true/false) and assert group counts and sums.
+func TestTable_SelectGroupBy(t *testing.T) {
+	table, txManager, _ := newTestTable(t, testColumns)
+	ctx := context.Background()
+
+	// Insert 5 rows: 3 verified=true, 2 verified=false.  Age values: 10,20,30 / 40,50.
+	insertStmt := Statement{
+		Kind:   Insert,
+		Fields: []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}, {Name: "score"}, {Name: "created"}},
+	}
+	for i, row := range [][]OptionalValue{
+		{{Value: int64(1), Valid: true}, {Value: NewTextPointer([]byte("a@e.com")), Valid: true}, {Value: int32(10), Valid: true}, {Value: true, Valid: true}, {Value: float32(1.0), Valid: true}, {Valid: false}},
+		{{Value: int64(2), Valid: true}, {Value: NewTextPointer([]byte("b@e.com")), Valid: true}, {Value: int32(20), Valid: true}, {Value: true, Valid: true}, {Value: float32(2.0), Valid: true}, {Valid: false}},
+		{{Value: int64(3), Valid: true}, {Value: NewTextPointer([]byte("c@e.com")), Valid: true}, {Value: int32(30), Valid: true}, {Value: true, Valid: true}, {Value: float32(3.0), Valid: true}, {Valid: false}},
+		{{Value: int64(4), Valid: true}, {Value: NewTextPointer([]byte("d@e.com")), Valid: true}, {Value: int32(40), Valid: true}, {Value: false, Valid: true}, {Value: float32(4.0), Valid: true}, {Valid: false}},
+		{{Value: int64(5), Valid: true}, {Value: NewTextPointer([]byte("e@e.com")), Valid: true}, {Value: int32(50), Valid: true}, {Value: false, Valid: true}, {Value: float32(5.0), Valid: true}, {Valid: false}},
+	} {
+		_ = i
+		ins := insertStmt
+		ins.Inserts = [][]OptionalValue{row}
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			_, err := table.Insert(ctx, ins)
+			return err
+		})
+		require.NoError(t, err)
+	}
+
+	t.Run("group_by_count", func(t *testing.T) {
+		stmt := Statement{
+			Kind: Select,
+			Fields: []Field{
+				{Name: "verified"},
+				{Name: "count(*)"},
+			},
+			Aggregates: []AggregateExpr{
+				{Kind: 0},
+				{Kind: AggregateCount},
+			},
+			GroupBy: []Field{{Name: "verified"}},
+		}
+		result, err := table.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		rows := collectRows(ctx, result)
+		require.Len(t, rows, 2)
+
+		counts := map[bool]int64{}
+		for _, r := range rows {
+			v, _ := r.GetValue("verified")
+			c, _ := r.GetValue("count(*)")
+			counts[v.Value.(bool)] = c.Value.(int64)
+		}
+		assert.Equal(t, int64(3), counts[true])
+		assert.Equal(t, int64(2), counts[false])
+	})
+
+	t.Run("group_by_sum_int", func(t *testing.T) {
+		stmt := Statement{
+			Kind: Select,
+			Fields: []Field{
+				{Name: "verified"},
+				{Name: "sum(age)"},
+			},
+			Aggregates: []AggregateExpr{
+				{Kind: 0},
+				{Kind: AggregateSum, Column: "age"},
+			},
+			GroupBy: []Field{{Name: "verified"}},
+		}
+		result, err := table.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		rows := collectRows(ctx, result)
+		require.Len(t, rows, 2)
+
+		sums := map[bool]int64{}
+		for _, r := range rows {
+			v, _ := r.GetValue("verified")
+			s, _ := r.GetValue("sum(age)")
+			sums[v.Value.(bool)] = s.Value.(int64)
+		}
+		assert.Equal(t, int64(60), sums[true])  // 10+20+30
+		assert.Equal(t, int64(90), sums[false]) // 40+50
+	})
+
+	t.Run("group_by_min_max", func(t *testing.T) {
+		stmt := Statement{
+			Kind: Select,
+			Fields: []Field{
+				{Name: "verified"},
+				{Name: "min(age)"},
+				{Name: "max(age)"},
+			},
+			Aggregates: []AggregateExpr{
+				{Kind: 0},
+				{Kind: AggregateMin, Column: "age"},
+				{Kind: AggregateMax, Column: "age"},
+			},
+			GroupBy: []Field{{Name: "verified"}},
+		}
+		result, err := table.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		rows := collectRows(ctx, result)
+		require.Len(t, rows, 2)
+
+		type minmax struct{ min, max int32 }
+		groups := map[bool]minmax{}
+		for _, r := range rows {
+			v, _ := r.GetValue("verified")
+			mn, _ := r.GetValue("min(age)")
+			mx, _ := r.GetValue("max(age)")
+			groups[v.Value.(bool)] = minmax{mn.Value.(int32), mx.Value.(int32)}
+		}
+		assert.Equal(t, minmax{10, 30}, groups[true])
+		assert.Equal(t, minmax{40, 50}, groups[false])
+	})
+
+	t.Run("group_by_avg", func(t *testing.T) {
+		stmt := Statement{
+			Kind: Select,
+			Fields: []Field{
+				{Name: "verified"},
+				{Name: "avg(age)"},
+			},
+			Aggregates: []AggregateExpr{
+				{Kind: 0},
+				{Kind: AggregateAvg, Column: "age"},
+			},
+			GroupBy: []Field{{Name: "verified"}},
+		}
+		result, err := table.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		rows := collectRows(ctx, result)
+		require.Len(t, rows, 2)
+
+		avgs := map[bool]float64{}
+		for _, r := range rows {
+			v, _ := r.GetValue("verified")
+			a, _ := r.GetValue("avg(age)")
+			avgs[v.Value.(bool)] = a.Value.(float64)
+		}
+		assert.InDelta(t, 20.0, avgs[true], 0.001)  // (10+20+30)/3
+		assert.InDelta(t, 45.0, avgs[false], 0.001) // (40+50)/2
+	})
+
+	t.Run("group_by_with_having", func(t *testing.T) {
+		stmt := Statement{
+			Kind: Select,
+			Fields: []Field{
+				{Name: "verified"},
+				{Name: "count(*)"},
+			},
+			Aggregates: []AggregateExpr{
+				{Kind: 0},
+				{Kind: AggregateCount},
+			},
+			GroupBy: []Field{{Name: "verified"}},
+			Having: OneOrMore{{
+				{
+					Operand1: Operand{Type: OperandField, Value: Field{Name: "count(*)"}},
+					Operator: Gt,
+					Operand2: Operand{Type: OperandInteger, Value: int64(2)},
+				},
+			}},
+		}
+		result, err := table.Select(ctx, stmt)
+		require.NoError(t, err)
+
+		rows := collectRows(ctx, result)
+		// Only verified=true group has count=3 > 2.
+		require.Len(t, rows, 1)
+		v, _ := rows[0].GetValue("verified")
+		assert.Equal(t, true, v.Value)
+	})
+}
+
+// TestTable_SelectAggregate covers selectAggregate via Table.Select (no GROUP BY).
+func TestTable_SelectAggregate(t *testing.T) {
+	table, txManager, _ := newTestTable(t, testColumns)
+	ctx := context.Background()
+
+	insertStmt := Statement{
+		Kind:   Insert,
+		Fields: []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}, {Name: "score"}, {Name: "created"}},
+	}
+	for _, row := range [][]OptionalValue{
+		{{Value: int64(1), Valid: true}, {Value: NewTextPointer([]byte("a@e.com")), Valid: true}, {Value: int32(10), Valid: true}, {Value: true, Valid: true}, {Value: float32(1.0), Valid: true}, {Valid: false}},
+		{{Value: int64(2), Valid: true}, {Value: NewTextPointer([]byte("b@e.com")), Valid: true}, {Value: int32(20), Valid: true}, {Value: true, Valid: true}, {Value: float32(2.0), Valid: true}, {Valid: false}},
+		{{Value: int64(3), Valid: true}, {Value: NewTextPointer([]byte("c@e.com")), Valid: true}, {Value: int32(30), Valid: true}, {Value: false, Valid: true}, {Value: float32(3.0), Valid: true}, {Valid: false}},
+	} {
+		ins := insertStmt
+		ins.Inserts = [][]OptionalValue{row}
+		err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+			_, err := table.Insert(ctx, ins)
+			return err
+		})
+		require.NoError(t, err)
+	}
+
+	t.Run("count_all", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: []Field{{Name: "count(*)"}},
+			Aggregates: []AggregateExpr{
+				{Kind: AggregateCount},
+			},
+		}
+		result, err := table.Select(ctx, stmt)
+		require.NoError(t, err)
+		rows := collectRows(ctx, result)
+		require.Len(t, rows, 1)
+		// countResult hardcodes "COUNT(*)" (uppercase) as the result column name.
+		cnt, _ := rows[0].GetValue("COUNT(*)")
+		assert.Equal(t, int64(3), cnt.Value)
+	})
+
+	t.Run("sum_int_column", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: []Field{{Name: "sum(age)"}},
+			Aggregates: []AggregateExpr{
+				{Kind: AggregateSum, Column: "age"},
+			},
+		}
+		result, err := table.Select(ctx, stmt)
+		require.NoError(t, err)
+		rows := collectRows(ctx, result)
+		require.Len(t, rows, 1)
+		s, _ := rows[0].GetValue("sum(age)")
+		assert.Equal(t, int64(60), s.Value) // 10+20+30
+	})
+
+	t.Run("avg_int_column", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: []Field{{Name: "avg(age)"}},
+			Aggregates: []AggregateExpr{
+				{Kind: AggregateAvg, Column: "age"},
+			},
+		}
+		result, err := table.Select(ctx, stmt)
+		require.NoError(t, err)
+		rows := collectRows(ctx, result)
+		require.Len(t, rows, 1)
+		a, _ := rows[0].GetValue("avg(age)")
+		assert.InDelta(t, 20.0, a.Value.(float64), 0.001)
+	})
+
+	t.Run("min_max_int_column", func(t *testing.T) {
+		stmt := Statement{
+			Kind:   Select,
+			Fields: []Field{{Name: "min(age)"}, {Name: "max(age)"}},
+			Aggregates: []AggregateExpr{
+				{Kind: AggregateMin, Column: "age"},
+				{Kind: AggregateMax, Column: "age"},
+			},
+		}
+		result, err := table.Select(ctx, stmt)
+		require.NoError(t, err)
+		rows := collectRows(ctx, result)
+		require.Len(t, rows, 1)
+		mn, _ := rows[0].GetValue("min(age)")
+		mx, _ := rows[0].GetValue("max(age)")
+		assert.Equal(t, int32(10), mn.Value)
+		assert.Equal(t, int32(30), mx.Value)
+	})
+}
+
 func collectRows(ctx context.Context, r StatementResult) []Row {
 	results := []Row{}
 	for r.Rows.Next(ctx) {
