@@ -92,8 +92,14 @@ func (i *Iterator) Err() error {
 // lazy iterator over result rows (non-nil even for INSERT/UPDATE/DELETE when a
 // RETURNING clause was present). RowsAffected and LastInsertId follow
 // database/sql conventions.
+//
+// rawRows, when non-nil, holds the same projected rows that back the Rows
+// iterator. Callers that need to materialise all rows (e.g. CTE body
+// collection) can steal this slice directly instead of draining the iterator,
+// avoiding a second heap allocation of the same data.
 type StatementResult struct {
 	Rows         Iterator
+	rawRows      []Row   // non-nil when produced by selectStreamingDirect
 	Columns      []Column
 	RowsAffected int
 	LastInsertID int64
