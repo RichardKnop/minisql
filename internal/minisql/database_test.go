@@ -598,6 +598,26 @@ func TestWithMaxCachedStatements(t *testing.T) {
 	})
 }
 
+func TestWithMaxCachedPlans(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("positive value replaces default cache", func(t *testing.T) {
+		pager, dbFile := initTest(t)
+		aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager, nil,
+			WithMaxCachedPlans(50))
+		require.NoError(t, err)
+		assert.NotNil(t, aDatabase.planCache)
+	})
+
+	t.Run("zero is ignored, cache still allocated by default", func(t *testing.T) {
+		pager, dbFile := initTest(t)
+		aDatabase, err := NewDatabase(ctx, testLogger, dbFile.Name(), nil, pager, pager, nil,
+			WithMaxCachedPlans(0))
+		require.NoError(t, err)
+		assert.NotNil(t, aDatabase.planCache)
+	})
+}
+
 func TestDatabase_Accessors(t *testing.T) {
 	pager, dbFile := initTest(t)
 	ctx := context.Background()

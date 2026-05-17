@@ -6,6 +6,68 @@ import (
 	"fmt"
 )
 
+// joinMemo holds precomputed, per-join-level state that is constant across all
+// outer rows. Computing these once in executeNestedLoopJoin instead of per outer
+// row eliminates repeated slice allocations in the hot join path.
+type joinMemo struct {
+	innerTable      *Table
+	innerFields     []Field
+	combinedColumns []Column // alias-prefixed combined columns for this join level
+	joinFilter      func(Row) (bool, error)
+	nullInnerCount  int // len(innerTable.Columns), for LEFT/FULL OUTER null padding
+}
+
+// buildCombinedColumns returns the alias-prefixed column list for the first join
+// level (joinIndex == 0).
+func buildCombinedColumns(outerCols []Column, outerAlias string, innerCols []Column, innerAlias string) []Column {
+	combined := make([]Column, 0, len(outerCols)+len(innerCols))
+	for _, col := range outerCols {
+		c := col
+		if outerAlias != "" {
+			c.Name = outerAlias + "." + col.Name
+		}
+		combined = append(combined, c)
+	}
+	for _, col := range innerCols {
+		c := col
+		c.Name = innerAlias + "." + col.Name
+		combined = append(combined, c)
+	}
+	return combined
+}
+
+// buildCombinedColumnsProgressive appends alias-prefixed inner columns to an
+// already-combined outer column list (joinIndex > 0).
+func buildCombinedColumnsProgressive(existingCols, innerCols []Column, innerAlias string) []Column {
+	combined := make([]Column, 0, len(existingCols)+len(innerCols))
+	combined = append(combined, existingCols...)
+	for _, col := range innerCols {
+		c := col
+		c.Name = innerAlias + "." + col.Name
+		combined = append(combined, c)
+	}
+	return combined
+}
+
+// combineRowsWithSchema concatenates outer and inner row values using a
+// precomputed combined column slice. Avoids the per-row Column slice allocation
+// that combineRows performs.
+func combineRowsWithSchema(outerRow, innerRow Row, combinedColumns []Column) Row {
+	combined := make([]OptionalValue, len(outerRow.Values)+len(innerRow.Values))
+	copy(combined, outerRow.Values)
+	copy(combined[len(outerRow.Values):], innerRow.Values)
+	return NewRowWithValues(combinedColumns, combined)
+}
+
+// combineRowWithNullInner combines outerRow with nullCount NULL-valued inner
+// columns using a precomputed combined column schema. Avoids a separate
+// nullRowForColumns allocation for the LEFT/FULL OUTER JOIN miss path.
+func combineRowWithNullInner(outerRow Row, nullCount int, combinedColumns []Column) Row {
+	combined := make([]OptionalValue, len(outerRow.Values)+nullCount)
+	copy(combined, outerRow.Values)
+	return NewRowWithValues(combinedColumns, combined)
+}
+
 // chanRowCallback wraps a buffered channel as a row callback.
 // The goroutine sending to the channel must close it when done.
 func chanRowCallback(ctx context.Context, ch chan<- Row) func(Row) error {
@@ -22,12 +84,12 @@ func chanRowCallback(ctx context.Context, ch chan<- Row) func(Row) error {
 // planJoinQuery creates an optimized query plan for JOINs.
 // Supports arbitrary join topologies (star schema, chain joins, and mixed).
 // Optimizations:
-// 1. Use index on inner table join column when available (index nested loop join).
-// 2. Push single-table WHERE conditions into individual table scans.
-// 3. Use index scans for pushed-down conditions when a matching index exists.
-// 4. Greedy join reordering: when all tables have ANALYZE statistics and all
-//    joins are INNER, reorders the join sequence so the smallest tables are
-//    processed first, minimising intermediate result sizes.
+//  1. Use index on inner table join column when available (index nested loop join).
+//  2. Push single-table WHERE conditions into individual table scans.
+//  3. Use index scans for pushed-down conditions when a matching index exists.
+//  4. Greedy join reordering: when all tables have ANALYZE statistics and all
+//     joins are INNER, reorders the join sequence so the smallest tables are
+//     processed first, minimising intermediate result sizes.
 func (t *Table) planJoinQuery(ctx context.Context, stmt Statement) (QueryPlan, error) {
 	// Attempt greedy join reordering when statistics are available.
 	if plan, ok, err := t.planJoinQueryGreedy(ctx, stmt); err != nil {
@@ -365,7 +427,6 @@ func (t *Table) planJoinQueryGreedy(ctx context.Context, stmt Statement) (QueryP
 
 	return plan, true, nil
 }
-
 
 // flattenJoinTree recursively walks the join tree in DFS order and appends one
 // Scan and one JoinPlan entry per join node. LeftScanIndex is set to the scan
@@ -761,6 +822,38 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 		return fmt.Errorf("%w: %s", errTableDoesNotExist, baseScan.TableName)
 	}
 
+	// Precompute per-join-level state that is constant across all outer rows.
+	// This eliminates repeated table lookups, fieldsFromColumns calls, column
+	// schema allocations, and filter compilation in the hot per-row path.
+	joinMemos := make([]joinMemo, len(p.Joins))
+	for i, join := range p.Joins {
+		innerScan := p.Scans[join.RightScanIndex]
+		innerTable, innerOK := provider.GetTable(ctx, innerScan.TableName)
+		if !innerOK {
+			return fmt.Errorf("%w: %s", errTableDoesNotExist, innerScan.TableName)
+		}
+
+		var combinedCols []Column
+		if i == 0 {
+			combinedCols = buildCombinedColumns(baseTable.Columns, baseScan.TableAlias, innerTable.Columns, innerScan.TableAlias)
+		} else {
+			combinedCols = buildCombinedColumnsProgressive(joinMemos[i-1].combinedColumns, innerTable.Columns, innerScan.TableAlias)
+		}
+
+		joinConditions := OneOrMore{}
+		if len(join.Conditions) > 0 {
+			joinConditions = append(joinConditions, join.Conditions)
+		}
+
+		joinMemos[i] = joinMemo{
+			innerTable:      innerTable,
+			innerFields:     fieldsFromColumns(innerTable.Columns...),
+			combinedColumns: combinedCols,
+			joinFilter:      compileRowFilterForColumns(combinedCols, joinConditions),
+			nullInnerCount:  len(innerTable.Columns),
+		}
+	}
+
 	baseRowChan := make(chan Row, 100)
 	baseErrChan := make(chan error, 1)
 	baseFields := fieldsFromColumns(baseTable.Columns...)
@@ -778,7 +871,7 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 			return err
 		default:
 		}
-		if err := p.executeJoinsForRow(ctx, provider, baseRow, 0, filteredPipe, hashTables); err != nil {
+		if err := p.executeJoinsForRow(ctx, provider, baseRow, 0, filteredPipe, hashTables, joinMemos); err != nil {
 			return err
 		}
 	}
@@ -814,7 +907,8 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 // each join is resolved from p.Scans[join.LeftScanIndex].TableAlias, enabling
 // correct key lookup for both star-schema and chain joins.
 // hashTables holds the pre-built hash buckets for JoinAlgorithmHash joins.
-func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvider, currentRow Row, joinIndex int, filteredPipe chan<- Row, hashTables map[int]*hashJoinBucket) error {
+// memos holds per-join-level state precomputed once by executeNestedLoopJoin.
+func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvider, currentRow Row, joinIndex int, filteredPipe chan<- Row, hashTables map[int]*hashJoinBucket, memos []joinMemo) error {
 	if joinIndex >= len(p.Joins) {
 		select {
 		case filteredPipe <- currentRow:
@@ -828,147 +922,156 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 
 	// Hash join: probe the pre-built hash table instead of scanning the inner table.
 	if join.Algorithm == JoinAlgorithmHash {
-		return p.executeHashJoinForRow(ctx, currentRow, joinIndex, filteredPipe, hashTables)
+		return p.executeHashJoinForRow(ctx, currentRow, joinIndex, filteredPipe, hashTables, memos)
 	}
 
 	// Nested-loop join (index point or sequential).
+	// Use precomputed per-join-level state from memos to avoid repeated allocations.
+	memo := memos[joinIndex]
 	innerScan := p.Scans[join.RightScanIndex]
 	fromAlias := p.Scans[join.LeftScanIndex].TableAlias
 
-	innerTable, ok := provider.GetTable(ctx, innerScan.TableName)
-	if !ok {
-		return fmt.Errorf("%w: %s", errTableDoesNotExist, innerScan.TableName)
-	}
-
-	innerFields := fieldsFromColumns(innerTable.Columns...)
-	innerRowChan := make(chan Row, 100)
-	innerErrChan := make(chan error, 1)
-
-	// For semi/anti-semi joins use a child context so we can cancel the inner
-	// goroutine as soon as we have found (or confirmed the absence of) a match.
-	innerCtx := ctx
-	var innerCancel context.CancelFunc
-	if join.Type == Semi || join.Type == AntiSemi {
-		innerCtx, innerCancel = context.WithCancel(ctx)
-		defer innerCancel()
-	}
+	matched := false
 
 	if innerScan.Type == ScanTypeIndexPoint && join.InnerJoinColumn != "" {
-		go func() {
-			defer close(innerRowChan)
-
-			var joinKeyValues []any
-
-			if len(join.JoinColumnPairs) > 0 {
-				joinKeyValues = make([]any, len(join.JoinColumnPairs))
-				for i, pair := range join.JoinColumnPairs {
-					var (
-						keyValue OptionalValue
-						ok       bool
-					)
-					if joinIndex == 0 {
-						// currentRow is the unmodified base-table row — no alias prefix yet.
-						keyValue, ok = currentRow.GetValue(pair.BaseTableColumn.Name)
-					} else {
-						keyValue, ok = currentRow.GetValue(fromAlias + "." + pair.BaseTableColumn.Name)
-					}
-					if !ok || !keyValue.Valid {
-						return
-					}
-					joinKeyValues[i] = keyValue.Value
-				}
-			} else {
+		// Synchronous index point-scan: no goroutine or channel needed.
+		// An index point lookup returns a small number of rows (0 or 1 for unique
+		// indexes); spawning a goroutine + 100-slot buffered channel per outer row
+		// is far more expensive than the lookup itself.
+		var joinKeyValues []any
+		if len(join.JoinColumnPairs) > 0 {
+			joinKeyValues = make([]any, len(join.JoinColumnPairs))
+			for i, pair := range join.JoinColumnPairs {
 				var (
 					keyValue OptionalValue
 					ok       bool
 				)
 				if joinIndex == 0 {
-					keyValue, ok = currentRow.GetValue(join.OuterJoinColumn)
+					keyValue, ok = currentRow.GetValue(pair.BaseTableColumn.Name)
 				} else {
-					keyValue, ok = currentRow.GetValue(fromAlias + "." + join.OuterJoinColumn)
+					keyValue, ok = currentRow.GetValue(fromAlias + "." + pair.BaseTableColumn.Name)
 				}
 				if !ok || !keyValue.Valid {
-					return
+					joinKeyValues = nil
+					break
 				}
+				joinKeyValues[i] = keyValue.Value
+			}
+		} else {
+			var (
+				keyValue OptionalValue
+				ok       bool
+			)
+			if joinIndex == 0 {
+				keyValue, ok = currentRow.GetValue(join.OuterJoinColumn)
+			} else {
+				keyValue, ok = currentRow.GetValue(fromAlias + "." + join.OuterJoinColumn)
+			}
+			if ok && keyValue.Valid {
 				joinKeyValues = []any{keyValue.Value}
 			}
+		}
 
+		if len(joinKeyValues) > 0 {
 			indexScan := innerScan
 			indexScan.IndexKeys = joinKeyValues
-			if err := innerTable.indexPointScan(innerCtx, indexScan, innerFields, chanRowCallback(innerCtx, innerRowChan)); err != nil {
-				innerErrChan <- err
-			}
-		}()
-	} else {
-		go func() {
-			defer close(innerRowChan)
-			if err := innerTable.sequentialScan(innerCtx, innerScan, innerFields, chanRowCallback(innerCtx, innerRowChan)); err != nil {
-				innerErrChan <- err
-			}
-		}()
-	}
-
-	joinConditions := OneOrMore{}
-	if len(join.Conditions) > 0 {
-		joinConditions = append(joinConditions, join.Conditions)
-	}
-	var joinFilter func(Row) (bool, error)
-
-	matched := false
-	for innerRow := range innerRowChan {
-		select {
-		case err := <-innerErrChan:
-			return err
-		default:
-		}
-
-		var combinedRow Row
-		if joinIndex == 0 {
-			combinedRow = combineRows(currentRow, innerRow, fromAlias, innerScan.TableAlias)
-		} else {
-			combinedRow = combineRowsProgressive(currentRow, innerRow, innerScan.TableAlias)
-		}
-
-		if joinFilter == nil {
-			joinFilter = compileRowFilterForColumns(combinedRow.Columns, joinConditions)
-		}
-
-		matches := true
-		if joinFilter != nil {
-			var err error
-			matches, err = joinFilter(combinedRow)
+			// Use indexPointGetAll instead of indexPointScan so that no callback
+			// closure is created at this call site.  The closure would otherwise
+			// escape to the heap once per outer row, producing large allocations
+			// even in the unmatched LEFT JOIN case where it is never called.
+			innerRows, err := memo.innerTable.indexPointGetAll(ctx, indexScan, memo.innerFields)
 			if err != nil {
 				return err
 			}
+			for _, innerRow := range innerRows {
+				if (join.Type == Semi || join.Type == AntiSemi) && matched {
+					break // already decided
+				}
+				if join.Type == Semi || join.Type == AntiSemi {
+					matched = true
+					break
+				}
+				combinedRow := combineRowsWithSchema(currentRow, innerRow, memo.combinedColumns)
+				matches := true
+				if memo.joinFilter != nil {
+					var filterErr error
+					matches, filterErr = memo.joinFilter(combinedRow)
+					if filterErr != nil {
+						return filterErr
+					}
+				}
+				if matches {
+					matched = true
+					if err := p.executeJoinsForRow(ctx, provider, combinedRow, joinIndex+1, filteredPipe, hashTables, memos); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	} else {
+		// Async sequential scan: run in a goroutine so the outer loop and inner
+		// scan can pipeline. Use a modest buffer to limit memory per join.
+		innerCtx := ctx
+		var innerCancel context.CancelFunc
+		if join.Type == Semi || join.Type == AntiSemi {
+			innerCtx, innerCancel = context.WithCancel(ctx)
+			defer innerCancel()
 		}
 
-		if matches {
-			matched = true
-			if join.Type == Semi {
-				// First match found: cancel the inner scan, drain remaining rows.
+		innerRowChan := make(chan Row, 16)
+		innerErrChan := make(chan error, 1)
+
+		// Pass innerScan by value as a goroutine argument rather than capturing
+		// it in the closure.  Capture causes the Scan struct (~200 B) to escape
+		// to the heap for every outer row — even rows that take the index-scan
+		// branch never reach this goroutine.  Argument-passing keeps innerScan
+		// on the stack for the calling frame.
+		go func(scan Scan) {
+			defer close(innerRowChan)
+			if err := memo.innerTable.sequentialScan(innerCtx, scan, memo.innerFields, chanRowCallback(innerCtx, innerRowChan)); err != nil {
+				innerErrChan <- err
+			}
+		}(innerScan)
+
+		for innerRow := range innerRowChan {
+			select {
+			case err := <-innerErrChan:
+				return err
+			default:
+			}
+
+			if join.Type == Semi || join.Type == AntiSemi {
+				matched = true
 				innerCancel()
 				drainRowCh(innerRowChan)
 				break
 			}
-			if join.Type == AntiSemi {
-				// Any match means outer row is excluded.
-				innerCancel()
-				drainRowCh(innerRowChan)
-				return nil
-			}
-			if err := p.executeJoinsForRow(ctx, provider, combinedRow, joinIndex+1, filteredPipe, hashTables); err != nil {
-				return err
-			}
-		}
-	}
 
-	select {
-	case err := <-innerErrChan:
-		if innerCancel != nil && errors.Is(err, context.Canceled) {
-			break // we triggered the cancellation ourselves
+			combinedRow := combineRowsWithSchema(currentRow, innerRow, memo.combinedColumns)
+			matches := true
+			if memo.joinFilter != nil {
+				var err error
+				matches, err = memo.joinFilter(combinedRow)
+				if err != nil {
+					return err
+				}
+			}
+			if matches {
+				matched = true
+				if err := p.executeJoinsForRow(ctx, provider, combinedRow, joinIndex+1, filteredPipe, hashTables, memos); err != nil {
+					return err
+				}
+			}
 		}
-		return err
-	default:
+
+		select {
+		case err := <-innerErrChan:
+			if innerCancel != nil && errors.Is(err, context.Canceled) {
+				break // we triggered the cancellation ourselves
+			}
+			return err
+		default:
+		}
 	}
 
 	// Semi-join: emit the outer row when the inner had at least one match.
@@ -978,7 +1081,7 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 			if joinIndex == 0 {
 				outerRow = prefixRowAlias(currentRow, fromAlias)
 			}
-			return p.executeJoinsForRow(ctx, provider, outerRow, joinIndex+1, filteredPipe, hashTables)
+			return p.executeJoinsForRow(ctx, provider, outerRow, joinIndex+1, filteredPipe, hashTables, memos)
 		}
 		return nil
 	}
@@ -989,19 +1092,13 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 		if joinIndex == 0 {
 			outerRow = prefixRowAlias(currentRow, fromAlias)
 		}
-		return p.executeJoinsForRow(ctx, provider, outerRow, joinIndex+1, filteredPipe, hashTables)
+		return p.executeJoinsForRow(ctx, provider, outerRow, joinIndex+1, filteredPipe, hashTables, memos)
 	}
 
 	// LEFT JOIN / FULL OUTER JOIN: emit the outer row with NULL-filled inner columns when nothing matched.
 	if !matched && (join.Type == Left || join.Type == FullOuter) {
-		nullInner := nullRowForColumns(innerTable.Columns)
-		var combinedRow Row
-		if joinIndex == 0 {
-			combinedRow = combineRows(currentRow, nullInner, fromAlias, innerScan.TableAlias)
-		} else {
-			combinedRow = combineRowsProgressive(currentRow, nullInner, innerScan.TableAlias)
-		}
-		if err := p.executeJoinsForRow(ctx, provider, combinedRow, joinIndex+1, filteredPipe, hashTables); err != nil {
+		combinedRow := combineRowWithNullInner(currentRow, memo.nullInnerCount, memo.combinedColumns)
+		if err := p.executeJoinsForRow(ctx, provider, combinedRow, joinIndex+1, filteredPipe, hashTables, memos); err != nil {
 			return err
 		}
 	}
@@ -1012,9 +1109,9 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 // executeHashJoinForRow probes the pre-built hash table for joinIndex and
 // recurses for matching inner rows.  Handles LEFT JOIN miss by emitting a
 // NULL-padded combined row when the probe finds no matches.
-func (p QueryPlan) executeHashJoinForRow(ctx context.Context, currentRow Row, joinIndex int, filteredPipe chan<- Row, hashTables map[int]*hashJoinBucket) error {
+func (p QueryPlan) executeHashJoinForRow(ctx context.Context, currentRow Row, joinIndex int, filteredPipe chan<- Row, hashTables map[int]*hashJoinBucket, memos []joinMemo) error {
 	join := p.Joins[joinIndex]
-	innerScan := p.Scans[join.RightScanIndex]
+	memo := memos[joinIndex]
 	fromAlias := p.Scans[join.LeftScanIndex].TableAlias
 
 	bucket := hashTables[joinIndex]
@@ -1041,39 +1138,24 @@ func (p QueryPlan) executeHashJoinForRow(ctx context.Context, currentRow Row, jo
 			if joinIndex == 0 {
 				outerRow = prefixRowAlias(currentRow, fromAlias)
 			}
-			return p.executeJoinsForRow(ctx, nil, outerRow, joinIndex+1, filteredPipe, hashTables)
+			return p.executeJoinsForRow(ctx, nil, outerRow, joinIndex+1, filteredPipe, hashTables, memos)
 		}
 		return nil
 	}
 
 	matched := false
 	for _, innerRow := range matchingRows {
-		var combinedRow Row
-		if joinIndex == 0 {
-			combinedRow = combineRows(currentRow, innerRow, fromAlias, innerScan.TableAlias)
-		} else {
-			combinedRow = combineRowsProgressive(currentRow, innerRow, innerScan.TableAlias)
-		}
+		combinedRow := combineRowsWithSchema(currentRow, innerRow, memo.combinedColumns)
 		matched = true
-		if err := p.executeJoinsForRow(ctx, nil, combinedRow, joinIndex+1, filteredPipe, hashTables); err != nil {
+		if err := p.executeJoinsForRow(ctx, nil, combinedRow, joinIndex+1, filteredPipe, hashTables, memos); err != nil {
 			return err
 		}
 	}
 
 	// LEFT JOIN / FULL OUTER JOIN: no matching inner row — emit outer row with NULL inner columns.
 	if !matched && (join.Type == Left || join.Type == FullOuter) {
-		var innerColumns []Column
-		if bucket != nil {
-			innerColumns = bucket.innerColumns
-		}
-		nullInner := nullRowForColumns(innerColumns)
-		var combinedRow Row
-		if joinIndex == 0 {
-			combinedRow = combineRows(currentRow, nullInner, fromAlias, innerScan.TableAlias)
-		} else {
-			combinedRow = combineRowsProgressive(currentRow, nullInner, innerScan.TableAlias)
-		}
-		if err := p.executeJoinsForRow(ctx, nil, combinedRow, joinIndex+1, filteredPipe, hashTables); err != nil {
+		combinedRow := combineRowWithNullInner(currentRow, memo.nullInnerCount, memo.combinedColumns)
+		if err := p.executeJoinsForRow(ctx, nil, combinedRow, joinIndex+1, filteredPipe, hashTables, memos); err != nil {
 			return err
 		}
 	}

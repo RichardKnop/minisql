@@ -259,6 +259,141 @@ func TestFoldConditions_ColumnExprNotFolded(t *testing.T) {
 	assert.Equal(t, OperandExpr, result[0][0].Operand1.Type)
 }
 
+// TestEvalConstCond exercises all branches of evalConstCond directly.
+func TestEvalConstCond(t *testing.T) {
+	t.Parallel()
+
+	t.Run("NULL = NULL", func(t *testing.T) {
+		cond := Condition{
+			Operand1: Operand{Type: OperandNull},
+			Operator: Eq,
+			Operand2: Operand{Type: OperandNull},
+		}
+		result, canEval := evalConstCond(cond)
+		assert.True(t, canEval)
+		assert.True(t, result)
+	})
+
+	t.Run("NULL = non-null", func(t *testing.T) {
+		cond := Condition{
+			Operand1: Operand{Type: OperandNull},
+			Operator: Eq,
+			Operand2: Operand{Type: OperandInteger, Value: int64(1)},
+		}
+		result, canEval := evalConstCond(cond)
+		assert.True(t, canEval)
+		assert.False(t, result)
+	})
+
+	t.Run("NULL != non-null", func(t *testing.T) {
+		cond := Condition{
+			Operand1: Operand{Type: OperandNull},
+			Operator: Ne,
+			Operand2: Operand{Type: OperandInteger, Value: int64(1)},
+		}
+		result, canEval := evalConstCond(cond)
+		assert.True(t, canEval)
+		assert.True(t, result)
+	})
+
+	t.Run("NULL > non-null (unsupported for null)", func(t *testing.T) {
+		cond := Condition{
+			Operand1: Operand{Type: OperandNull},
+			Operator: Gt,
+			Operand2: Operand{Type: OperandInteger, Value: int64(1)},
+		}
+		result, canEval := evalConstCond(cond)
+		assert.False(t, canEval)
+		assert.False(t, result)
+	})
+
+	t.Run("non-null = NULL", func(t *testing.T) {
+		cond := Condition{
+			Operand1: Operand{Type: OperandInteger, Value: int64(5)},
+			Operator: Eq,
+			Operand2: Operand{Type: OperandNull},
+		}
+		result, canEval := evalConstCond(cond)
+		assert.True(t, canEval)
+		assert.False(t, result)
+	})
+
+	t.Run("non-null != NULL", func(t *testing.T) {
+		cond := Condition{
+			Operand1: Operand{Type: OperandInteger, Value: int64(5)},
+			Operator: Ne,
+			Operand2: Operand{Type: OperandNull},
+		}
+		result, canEval := evalConstCond(cond)
+		assert.True(t, canEval)
+		assert.True(t, result)
+	})
+
+	t.Run("non-null > NULL (unsupported for null)", func(t *testing.T) {
+		cond := Condition{
+			Operand1: Operand{Type: OperandInteger, Value: int64(5)},
+			Operator: Gt,
+			Operand2: Operand{Type: OperandNull},
+		}
+		result, canEval := evalConstCond(cond)
+		assert.False(t, canEval)
+		assert.False(t, result)
+	})
+
+	t.Run("unsupported operand type returns canEval=false", func(t *testing.T) {
+		// struct{}{} is not a recognised scalar type → compareScalarToOperand errors.
+		cond := Condition{
+			Operand1: Operand{Type: OperandInteger, Value: struct{}{}},
+			Operator: Eq,
+			Operand2: Operand{Type: OperandInteger, Value: int64(1)},
+		}
+		result, canEval := evalConstCond(cond)
+		assert.False(t, canEval)
+		assert.False(t, result)
+	})
+}
+
+// TestIsConstExpr_CaseClauses exercises the CASE-clause branches of isConstExpr.
+func TestIsConstExpr_CaseClauses(t *testing.T) {
+	t.Parallel()
+
+	t.Run("searched CASE with non-nil Cond is non-const", func(t *testing.T) {
+		expr := &Expr{
+			CaseClauses: []CaseWhen{
+				{Cond: &ConditionNode{}, When: &Expr{Literal: int64(1)}, Then: &Expr{Literal: int64(2)}},
+			},
+		}
+		assert.False(t, isConstExpr(expr))
+	})
+
+	t.Run("simple CASE with non-const When is non-const", func(t *testing.T) {
+		expr := &Expr{
+			CaseClauses: []CaseWhen{
+				{When: &Expr{Column: "status"}, Then: &Expr{Literal: int64(1)}},
+			},
+		}
+		assert.False(t, isConstExpr(expr))
+	})
+
+	t.Run("simple CASE with all-const clauses is const", func(t *testing.T) {
+		expr := &Expr{
+			CaseClauses: []CaseWhen{
+				{When: &Expr{Literal: int64(1)}, Then: &Expr{Literal: int64(2)}},
+			},
+		}
+		assert.True(t, isConstExpr(expr))
+	})
+}
+
+// TestAnyToOperand_Default verifies that an unrecognised type returns OperandExpr.
+func TestAnyToOperand_Default(t *testing.T) {
+	t.Parallel()
+
+	type myType struct{}
+	got := anyToOperand(myType{})
+	assert.Equal(t, OperandExpr, got.Type)
+}
+
 // TestFoldConditions_MixedGroups verifies OR group semantics: if one AND group is
 // always false it is pruned, but other groups survive.
 func TestFoldConditions_MixedGroups(t *testing.T) {
