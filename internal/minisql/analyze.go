@@ -40,7 +40,7 @@ var (
 
 // Analyze gathers statistics for all tables (or a specific target) and stores them in the stats table.
 func (d *Database) Analyze(ctx context.Context, target string) error {
-	_, exists, err := d.checkSchemaExists(ctx, SchemaTable, StatsTableSQL)
+	_, exists, err := d.checkSchemaExists(ctx, SchemaTable, StatsTableName)
 	if err != nil {
 		return err
 	}

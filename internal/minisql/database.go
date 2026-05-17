@@ -53,9 +53,9 @@ type Database struct {
 	clock          clock
 	logger         *zap.Logger
 	wal            *WAL
-	rowCounts      map[string]int64
-	dbFilePath     string
-	rowCountsMu    sync.RWMutex
+	rowCounts   map[string]int64
+	dbFilePath  string
+	rowCountsMu               sync.RWMutex
 	parallelScan   bool
 	// referencedBy maps each parent table name to the list of FK constraints
 	// from other (child) tables that reference it.  Built at startup and kept
@@ -78,8 +78,8 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, par
 		factory:            factory,
 		saver:              saver,
 		tables:             make(map[string]*Table),
-		rowCounts:          make(map[string]int64),
-		referencedBy:       make(map[string][]inboundFK),
+		rowCounts:    make(map[string]int64),
+		referencedBy: make(map[string][]inboundFK),
 		foreignKeysEnabled: true,
 		dbLock:             new(sync.RWMutex),
 		stmtCache:          lrucache.New[string](defaultMaxCachedStatements),
@@ -249,7 +249,7 @@ func (d *Database) Reopen(ctx context.Context, factory PagerFactory, saver PageS
 	d.saver = saver
 	d.tables = make(map[string]*Table)
 
-	// Reset the row-count cache; init() will repopulate it via leaf walks.
+	// Reset the row-count and staleness caches; init() will repopulate them.
 	d.rowCountsMu.Lock()
 	d.rowCounts = make(map[string]int64)
 	d.rowCountsMu.Unlock()
