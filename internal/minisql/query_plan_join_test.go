@@ -559,6 +559,135 @@ func TestCombineRowsProgressive(t *testing.T) {
 	assert.True(t, v.Valid)
 }
 
+func TestBuildCombinedColumns(t *testing.T) {
+	t.Parallel()
+
+	outerCols := []Column{
+		{Name: "id", Kind: Int8, Size: 8},
+		{Name: "name", Kind: Varchar, Size: 50},
+	}
+	innerCols := []Column{
+		{Name: "id", Kind: Int8, Size: 8},
+		{Name: "amount", Kind: Int8, Size: 8},
+	}
+
+	t.Run("with aliases", func(t *testing.T) {
+		cols := buildCombinedColumns(outerCols, "u", innerCols, "o")
+		require.Len(t, cols, 4)
+		assert.Equal(t, "u.id", cols[0].Name)
+		assert.Equal(t, "u.name", cols[1].Name)
+		assert.Equal(t, "o.id", cols[2].Name)
+		assert.Equal(t, "o.amount", cols[3].Name)
+		assert.Equal(t, Int8, cols[0].Kind)
+		assert.Equal(t, Varchar, cols[1].Kind)
+	})
+
+	t.Run("outer alias empty", func(t *testing.T) {
+		cols := buildCombinedColumns(outerCols, "", innerCols, "o")
+		require.Len(t, cols, 4)
+		// outer columns keep original names when alias is empty
+		assert.Equal(t, "id", cols[0].Name)
+		assert.Equal(t, "name", cols[1].Name)
+		assert.Equal(t, "o.id", cols[2].Name)
+		assert.Equal(t, "o.amount", cols[3].Name)
+	})
+}
+
+func TestBuildCombinedColumnsProgressive(t *testing.T) {
+	t.Parallel()
+
+	existingCols := []Column{
+		{Name: "u.id", Kind: Int8, Size: 8},
+		{Name: "o.amount", Kind: Int8, Size: 8},
+	}
+	innerCols := []Column{
+		{Name: "code", Kind: Varchar, Size: 10},
+	}
+
+	cols := buildCombinedColumnsProgressive(existingCols, innerCols, "s")
+
+	require.Len(t, cols, 3)
+	assert.Equal(t, "u.id", cols[0].Name)
+	assert.Equal(t, "o.amount", cols[1].Name)
+	assert.Equal(t, "s.code", cols[2].Name)
+	assert.Equal(t, Int8, cols[0].Kind)
+	assert.Equal(t, Varchar, cols[2].Kind)
+}
+
+func TestCombineRowsWithSchema(t *testing.T) {
+	t.Parallel()
+
+	outerCols := []Column{
+		{Name: "id", Kind: Int8, Size: 8},
+		{Name: "name", Kind: Varchar, Size: 50},
+	}
+	innerCols := []Column{
+		{Name: "id", Kind: Int8, Size: 8},
+		{Name: "amount", Kind: Int8, Size: 8},
+	}
+	combinedCols := buildCombinedColumns(outerCols, "u", innerCols, "o")
+
+	outerRow := NewRowWithValues(outerCols, []OptionalValue{
+		{Value: int64(1), Valid: true},
+		{Value: NewTextPointer([]byte("Alice")), Valid: true},
+	})
+	innerRow := NewRowWithValues(innerCols, []OptionalValue{
+		{Value: int64(10), Valid: true},
+		{Value: int64(200), Valid: true},
+	})
+
+	combined := combineRowsWithSchema(outerRow, innerRow, combinedCols)
+
+	require.Len(t, combined.Columns, 4)
+	assert.Equal(t, "u.id", combined.Columns[0].Name)
+	assert.Equal(t, "o.amount", combined.Columns[3].Name)
+
+	v, ok := combined.GetValue("u.id")
+	require.True(t, ok)
+	assert.Equal(t, int64(1), v.Value)
+
+	v, ok = combined.GetValue("o.amount")
+	require.True(t, ok)
+	assert.Equal(t, int64(200), v.Value)
+}
+
+func TestCombineRowWithNullInner(t *testing.T) {
+	t.Parallel()
+
+	outerCols := []Column{
+		{Name: "id", Kind: Int8, Size: 8},
+	}
+	innerCols := []Column{
+		{Name: "user_id", Kind: Int8, Size: 8},
+		{Name: "total", Kind: Int8, Size: 8},
+	}
+	combinedCols := buildCombinedColumns(outerCols, "u", innerCols, "o")
+
+	outer := NewRowWithValues(outerCols, []OptionalValue{
+		{Value: int64(42), Valid: true},
+	})
+
+	combined := combineRowWithNullInner(outer, len(innerCols), combinedCols)
+
+	require.Len(t, combined.Columns, 3)
+	require.Len(t, combined.Values, 3)
+
+	// Outer value is preserved.
+	v, ok := combined.GetValue("u.id")
+	require.True(t, ok)
+	assert.Equal(t, int64(42), v.Value)
+	assert.True(t, v.Valid)
+
+	// Inner values are zero-value (NULL).
+	v, ok = combined.GetValue("o.user_id")
+	require.True(t, ok)
+	assert.False(t, v.Valid)
+
+	v, ok = combined.GetValue("o.total")
+	require.True(t, ok)
+	assert.False(t, v.Valid)
+}
+
 func TestCompileJoinConditions(t *testing.T) {
 	t.Parallel()
 
@@ -911,4 +1040,140 @@ func TestCollectJoinGraph_NoFromAlias_ReturnsFalse(t *testing.T) {
 
 	_, _, ok := tblA.collectJoinGraph(t.Context(), stmt)
 	assert.False(t, ok)
+}
+
+func TestChanRowCallback(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sends row to channel", func(t *testing.T) {
+		ctx := context.Background()
+		ch := make(chan Row, 1)
+		cb := chanRowCallback(ctx, ch)
+
+		row := NewRowWithValues([]Column{{Name: "id", Kind: Int8, Size: 8}}, []OptionalValue{{Value: int64(1), Valid: true}})
+		err := cb(row)
+		require.NoError(t, err)
+
+		received := <-ch
+		assert.Equal(t, row.Values, received.Values)
+	})
+
+	t.Run("returns ctx.Err when context is cancelled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // cancel immediately
+		ch := make(chan Row) // unbuffered — send would block
+		cb := chanRowCallback(ctx, ch)
+
+		row := NewRowWithValues([]Column{{Name: "id", Kind: Int8, Size: 8}}, []OptionalValue{{Value: int64(1), Valid: true}})
+		err := cb(row)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, context.Canceled)
+	})
+}
+
+func TestDrainRowCh(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan Row, 3)
+	ch <- NewRowWithValues(nil, nil)
+	ch <- NewRowWithValues(nil, nil)
+	close(ch)
+
+	// Should return without blocking after draining all values.
+	drainRowCh(ch)
+}
+
+func TestDrainParallelScanCh(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan parallelScanResult, 2)
+	ch <- parallelScanResult{row: NewRowWithValues(nil, nil)}
+	close(ch)
+
+	drainParallelScanCh(ch)
+}
+
+func TestPushDownFilters_UnknownAlias(t *testing.T) {
+	t.Parallel()
+
+	// WHERE x.foo = 1 where 'x' is not the base table alias and not a join alias.
+	// The condition should fall through to the base group.
+	conditions := OneOrMore{
+		{
+			FieldIsEqual(Field{AliasPrefix: "x", Name: "foo"}, OperandInteger, int64(1)),
+		},
+	}
+	joins := []Join{
+		{TableName: "profiles", TableAlias: "p"},
+	}
+
+	baseFilters, joinFilters := pushDownFilters(conditions, "u", joins)
+
+	assert.Len(t, baseFilters, 1, "Unknown alias condition falls back to base group")
+	assert.Len(t, baseFilters[0], 1)
+	assert.Len(t, joinFilters["p"], 0)
+}
+
+func TestExtractJoinColumnPairs_NonFieldOperand(t *testing.T) {
+	t.Parallel()
+
+	baseTable := &Table{
+		Name:        "a",
+		Columns:     []Column{{Name: "id", Kind: Int8, Size: 8}},
+		columnCache: map[string]int{"id": 0},
+	}
+	joinTable := &Table{
+		Name:        "b",
+		Columns:     []Column{{Name: "a_id", Kind: Int8, Size: 8}},
+		columnCache: map[string]int{"a_id": 0},
+	}
+
+	// Condition with a non-field operand on the left — must be skipped.
+	conditions := Conditions{
+		{
+			Operand1: Operand{Type: OperandInteger, Value: int64(1)},
+			Operator: Eq,
+			Operand2: Operand{Type: OperandField, Value: Field{AliasPrefix: "b", Name: "a_id"}},
+		},
+	}
+
+	pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
+	assert.Error(t, err)
+	assert.Nil(t, pairs)
+}
+
+func TestFindIndexOnColumns_SkipNonBTreeAndPartial(t *testing.T) {
+	t.Parallel()
+
+	tbl := &Table{
+		Name: "docs",
+		PrimaryKey: PrimaryKey{
+			IndexInfo: IndexInfo{
+				Name:    "pk",
+				Columns: []Column{{Name: "other_col", Kind: Int8, Size: 8}},
+			},
+		},
+		UniqueIndexes: map[string]UniqueIndex{},
+		SecondaryIndexes: map[string]SecondaryIndex{
+			"ft_idx": {
+				IndexInfo: IndexInfo{
+					Name:    "ft_idx",
+					Columns: []Column{{Name: "title", Kind: Varchar, Size: 255}},
+					Method:  IndexMethodFullText, // non-BTree → should be skipped
+				},
+			},
+			"partial_idx": {
+				IndexInfo: IndexInfo{
+					Name:        "partial_idx",
+					Columns:     []Column{{Name: "title", Kind: Varchar, Size: 255}},
+					Method:      IndexMethodBTree,
+					WhereClause: "active = true", // partial → should be skipped
+				},
+			},
+		},
+	}
+
+	// Searching for "title" column — neither the FTS nor the partial index should match.
+	result := tbl.findIndexOnColumns([]string{"title"})
+	assert.Nil(t, result, "non-BTree and partial indexes should be skipped")
 }

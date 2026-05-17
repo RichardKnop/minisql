@@ -38,7 +38,7 @@ func buildCombinedColumns(outerCols []Column, outerAlias string, innerCols []Col
 
 // buildCombinedColumnsProgressive appends alias-prefixed inner columns to an
 // already-combined outer column list (joinIndex > 0).
-func buildCombinedColumnsProgressive(existingCols []Column, innerCols []Column, innerAlias string) []Column {
+func buildCombinedColumnsProgressive(existingCols, innerCols []Column, innerAlias string) []Column {
 	combined := make([]Column, 0, len(existingCols)+len(innerCols))
 	combined = append(combined, existingCols...)
 	for _, col := range innerCols {
@@ -84,12 +84,12 @@ func chanRowCallback(ctx context.Context, ch chan<- Row) func(Row) error {
 // planJoinQuery creates an optimized query plan for JOINs.
 // Supports arbitrary join topologies (star schema, chain joins, and mixed).
 // Optimizations:
-// 1. Use index on inner table join column when available (index nested loop join).
-// 2. Push single-table WHERE conditions into individual table scans.
-// 3. Use index scans for pushed-down conditions when a matching index exists.
-// 4. Greedy join reordering: when all tables have ANALYZE statistics and all
-//    joins are INNER, reorders the join sequence so the smallest tables are
-//    processed first, minimising intermediate result sizes.
+//  1. Use index on inner table join column when available (index nested loop join).
+//  2. Push single-table WHERE conditions into individual table scans.
+//  3. Use index scans for pushed-down conditions when a matching index exists.
+//  4. Greedy join reordering: when all tables have ANALYZE statistics and all
+//     joins are INNER, reorders the join sequence so the smallest tables are
+//     processed first, minimising intermediate result sizes.
 func (t *Table) planJoinQuery(ctx context.Context, stmt Statement) (QueryPlan, error) {
 	// Attempt greedy join reordering when statistics are available.
 	if plan, ok, err := t.planJoinQueryGreedy(ctx, stmt); err != nil {
@@ -427,7 +427,6 @@ func (t *Table) planJoinQueryGreedy(ctx context.Context, stmt Statement) (QueryP
 
 	return plan, true, nil
 }
-
 
 // flattenJoinTree recursively walks the join tree in DFS order and appends one
 // Scan and one JoinPlan entry per join node. LeftScanIndex is set to the scan
