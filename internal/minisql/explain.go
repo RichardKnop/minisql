@@ -102,8 +102,41 @@ func (d *Database) executeExplain(ctx context.Context, stmt Statement) (Statemen
 
 // executeExplainCTEs handles EXPLAIN [ANALYZE] WITH … SELECT statements.
 // Each CTE is materialised in order, emitting a "cte" step per CTE followed
-// by the outer query's plan steps.
+// by the outer query's plan steps. Unused CTEs are pruned and eligible main
+// FROM CTEs are inlined before planning, mirroring the execution path.
 func (d *Database) executeExplainCTEs(ctx context.Context, inner Statement, analyze bool) (StatementResult, error) {
+	// Mirror the execution-path optimisations so EXPLAIN reflects actual behaviour.
+	inner = pruneUnusedCTEs(inner)
+
+	for i, cte := range inner.CTEs {
+		if cte.Name != inner.TableName {
+			continue
+		}
+		if cteIsInlineable(cte, inner, inner.CTEs) {
+			outerAlias := inner.TableAlias
+			if outerAlias == "" {
+				outerAlias = inner.TableName
+			}
+			merged := inlineCTE(inner, cte, outerAlias)
+			remaining := make([]CTE, 0, len(inner.CTEs)-1)
+			remaining = append(remaining, inner.CTEs[:i]...)
+			remaining = append(remaining, inner.CTEs[i+1:]...)
+			merged.CTEs = remaining
+			if len(merged.CTEs) == 0 {
+				// All CTEs eliminated — explain as a plain query.
+				explainStmt := Statement{
+					Kind:             Explain,
+					ExplainStatement: &merged,
+					ExplainAnalyze:   analyze,
+				}
+				return d.executeExplain(ctx, explainStmt)
+			}
+			// Remaining CTEs still need materialisation — recurse.
+			return d.executeExplainCTEs(ctx, merged, analyze)
+		}
+		break
+	}
+
 	type cteStep struct {
 		name     string
 		rowCount int64

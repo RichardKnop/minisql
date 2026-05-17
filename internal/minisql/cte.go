@@ -24,7 +24,44 @@ func cteFromContext(ctx context.Context, name string) (*Table, bool) {
 // Each CTE body is executed in declaration order; results are materialised
 // into virtual tables and registered in the context so subsequent CTEs and
 // the main query can reference them by name.
+//
+// Before materialising, two optimisations are applied:
+//  1. Unused CTEs are pruned — they produce no rows visible to the query.
+//  2. The main FROM CTE is inlined when eligible — a simple filtered scan
+//     whose body has no aggregation, DISTINCT, LIMIT, or UNION is merged
+//     directly into the outer statement, letting the planner use real-table
+//     indexes and propagate LIMIT/ORDER BY to the underlying scan.
 func (d *Database) executeCTESelect(ctx context.Context, stmt Statement) (StatementResult, error) {
+	// Prune CTEs that are never referenced — materialising them would be
+	// pure overhead with no effect on the query result.
+	stmt = pruneUnusedCTEs(stmt)
+
+	// Check if the main FROM CTE can be inlined into the outer statement.
+	for i, cte := range stmt.CTEs {
+		if cte.Name != stmt.TableName {
+			continue
+		}
+		if cteIsInlineable(cte, stmt, stmt.CTEs) {
+			outerAlias := stmt.TableAlias
+			if outerAlias == "" {
+				outerAlias = stmt.TableName
+			}
+			merged := inlineCTE(stmt, cte, outerAlias)
+			// Remove the inlined CTE; any remaining ones still need materialisation.
+			remaining := make([]CTE, 0, len(stmt.CTEs)-1)
+			remaining = append(remaining, stmt.CTEs[:i]...)
+			remaining = append(remaining, stmt.CTEs[i+1:]...)
+			merged.CTEs = remaining
+			if len(merged.CTEs) == 0 {
+				return d.ExecuteStatement(ctx, merged)
+			}
+			// Remaining CTEs may be needed by WHERE subqueries — recurse so
+			// they are materialised and placed in the CTE registry context.
+			return d.executeCTESelect(ctx, merged)
+		}
+		break
+	}
+
 	registry := make(map[string]*Table, len(stmt.CTEs))
 
 	for _, cte := range stmt.CTEs {
