@@ -493,6 +493,16 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 		}
 	}
 
+	// If the loop exited at EOF while the WHERE step was pending, there is no
+	// WHERE clause. Advance the state machine now so validate() doesn't reject
+	// the statement as having an empty WHERE. doParseWhere() returns nil and
+	// transitions to stepStatementEnd when it peeks "" (EOF).
+	if p.step == stepWhere && p.i >= len(p.sql) {
+		if err := p.doParseWhere(); err != nil {
+			return nil, err
+		}
+	}
+
 	// Also handle statements (e.g. VACUUM) that are valid at EOF without a
 	// trailing semicolon: they set p.step = stepStatementEnd before the loop
 	// ends but are not yet in the slice.

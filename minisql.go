@@ -233,6 +233,7 @@ func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.Name
 	}
 
 	var totalRowsAffected int64
+	var lastInsertID int64
 
 	for _, stmt := range statements {
 		if len(internalArgs) > 0 {
@@ -246,9 +247,12 @@ func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.Name
 			return nil, err
 		}
 		totalRowsAffected += int64(result.RowsAffected)
+		if result.LastInsertID != 0 {
+			lastInsertID = result.LastInsertID
+		}
 	}
 
-	return Result{rowsAffected: totalRowsAffected}, nil
+	return Result{rowsAffected: totalRowsAffected, lastInsertID: lastInsertID}, nil
 }
 
 // QueryContext executes a query that may return rows.
