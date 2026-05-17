@@ -1,3 +1,19 @@
+### 2026-05-17 — Nested-loop join hot-path allocation pass
+
+Four layers of per-outer-row heap allocation were eliminated from the join executor:
+
+1. **`joinMemo` precomputation** — inner table lookup, `fieldsFromColumns`, combined column schema, and join filter compiled once per join level instead of once per outer row.
+2. **`indexPointGetAll`** — replaces a callback closure (which escaped to the heap even when never invoked) with a plain `[]Row` return; returns `nil` for zero matches.
+3. **Inlined `processInnerRow`** — the shared closure captured a mutable `joinFilter` variable, causing a heap allocation per outer row; inlined at both call sites.
+4. **Goroutine argument passing** — `Scan` struct (~200 B) was captured by reference in the goroutine closure, forcing it to the heap; changed to an explicit argument.
+
+| Benchmark | Before | After | Alloc Before | Alloc After | SQLite | Ratio (after vs SQLite) |
+|---|---:|---:|---:|---:|---:|---:|
+| Join_Inner_SmallLarge/minisql | ~12.6 ms/op | ~8.6 ms/op | ~16.9 MiB/op | ~11.7 MiB/op | ~4.9 ms/op | 1.8× |
+| Join_Left_UnmatchedRows/minisql | ~42.9 ms/op | ~11.9 ms/op | ~86.3 MiB/op | ~12.3 MiB/op | ~4.2 ms/op | 2.9× |
+
+INNER JOIN closed from 2.5× to **1.8×** SQLite. LEFT JOIN closed from 10.7× to **2.9×** SQLite (7× allocation reduction).
+
 ### 2026-05-16 00:32 UTC
 
 Targeted JSON indexed `COUNT(*)` pass. MiniSQL now counts exact JSON inverted
