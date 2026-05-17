@@ -698,8 +698,8 @@ func TestCompareReal(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		a        float64
-		b        float64
+		a        float32
+		b        float32
 		operator Operator
 		want     bool
 		wantErr  bool
@@ -1356,7 +1356,7 @@ func TestIsBetweenReal(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		value   float64
+		value   float32
 		low     float64
 		high    float64
 		want    bool
@@ -1481,11 +1481,11 @@ func TestIsInListReal(t *testing.T) {
 		want    bool
 		wantErr bool
 	}{
-		{name: "found in list", value: float64(5.5), list: []any{float64(1.1), float64(5.5), float64(10.0)}, want: true},
-		{name: "not found in list", value: float64(7.7), list: []any{float64(1.1), float64(5.5), float64(10.0)}, want: false},
-		{name: "empty list", value: float64(5.5), list: []any{}, want: false},
+		{name: "found in list", value: float32(5.5), list: []any{float64(1.1), float64(5.5), float64(10.0)}, want: true},
+		{name: "not found in list", value: float32(7.7), list: []any{float64(1.1), float64(5.5), float64(10.0)}, want: false},
+		{name: "empty list", value: float32(5.5), list: []any{}, want: false},
 		{name: "invalid value type", value: "not a float", list: []any{float64(1.0)}, wantErr: true},
-		{name: "invalid list type", value: float64(1.0), list: "not a list", wantErr: true},
+		{name: "invalid list type", value: float32(1.0), list: "not a list", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -1573,8 +1573,8 @@ func TestCompareTimestamp(t *testing.T) {
 	t3 := MustParseTimestampMicros("2021-06-15 12:00:00")
 
 	tests := []struct {
-		a        any
-		b        any
+		a        TimestampMicros
+		b        TimestampMicros
 		name     string
 		operator Operator
 		want     bool
@@ -1588,8 +1588,6 @@ func TestCompareTimestamp(t *testing.T) {
 		{name: "greater or equal same", a: t2, b: t3, operator: Gte, want: true},
 		{name: "less or equal same", a: t2, b: t3, operator: Lte, want: true},
 		{name: "unknown operator", a: t1, b: t2, operator: Operator(999), wantErr: true},
-		{name: "invalid value1 type", a: "bad", b: t2, operator: Eq, wantErr: true},
-		{name: "invalid value2 type", a: t1, b: "bad", operator: Eq, wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -1755,50 +1753,14 @@ func TestFieldIsNotBetween(t *testing.T) {
 	assert.Equal(t, int64(65), vals[1])
 }
 
-func TestToInt64ForInt4(t *testing.T) {
+func TestCompareInt4_RangeErrors(t *testing.T) {
 	t.Parallel()
 
-	t.Run("int64 value passes through", func(t *testing.T) {
-		got, err := toInt64ForInt4(int64(42))
-		require.NoError(t, err)
-		assert.Equal(t, int64(42), got)
-	})
+	_, err := compareInt4(int64(1<<32), int64(1), Eq)
+	require.Error(t, err)
 
-	t.Run("int32 value is widened to int64", func(t *testing.T) {
-		got, err := toInt64ForInt4(int32(-7))
-		require.NoError(t, err)
-		assert.Equal(t, int64(-7), got)
-	})
-
-	t.Run("wrong type returns error", func(t *testing.T) {
-		_, err := toInt64ForInt4("not a number")
-		assert.Error(t, err)
-	})
-}
-
-func TestCompareInt4_TypeErrors(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		v1      any
-		v2      any
-		name    string
-		op      Operator
-		wantErr bool
-	}{
-		{name: "out of range v1", v1: int64(1 << 32), v2: int64(1), op: Eq, wantErr: true},
-		{name: "out of range v2", v1: int64(1), v2: int64(1 << 32), op: Eq, wantErr: true},
-		{name: "bad type v1", v1: "x", v2: int64(1), op: Eq, wantErr: true},
-		{name: "bad type v2", v1: int64(1), v2: "x", op: Eq, wantErr: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			_, err := compareInt4(tt.v1, tt.v2, tt.op)
-			assert.Error(t, err)
-		})
-	}
+	_, err = compareInt4(int64(1), int64(1<<32), Eq)
+	require.Error(t, err)
 }
 
 func TestIsValidCondition_MissingOperand1(t *testing.T) {
@@ -1819,49 +1781,9 @@ func TestIsValidCondition_MissingOperator(t *testing.T) {
 	assert.False(t, IsValidCondition(c))
 }
 
-func TestCompareBoolean_TypeErrors(t *testing.T) {
-	t.Parallel()
-
-	_, err := compareBoolean("not-a-bool", true, Eq)
-	require.Error(t, err)
-
-	_, err = compareBoolean(true, "not-a-bool", Eq)
-	require.Error(t, err)
-}
-
 func TestCompareBoolean_UnknownOperator(t *testing.T) {
 	t.Parallel()
 	_, err := compareBoolean(true, false, Operator(99))
-	require.Error(t, err)
-}
-
-func TestCompareReal_TypeErrors(t *testing.T) {
-	t.Parallel()
-
-	_, err := compareReal("not-a-float", float64(1.0), Eq)
-	require.Error(t, err)
-
-	_, err = compareReal(float64(1.0), "not-a-float", Eq)
-	require.Error(t, err)
-}
-
-func TestCompareDouble_TypeErrors(t *testing.T) {
-	t.Parallel()
-
-	_, err := compareDouble("not-a-float", float64(1.0), Eq)
-	require.Error(t, err)
-
-	_, err = compareDouble(float64(1.0), "not-a-float", Eq)
-	require.Error(t, err)
-}
-
-func TestCompareText_TypeErrors(t *testing.T) {
-	t.Parallel()
-
-	_, err := compareText("not-a-TextPointer", NewTextPointer([]byte("x")), Eq)
-	require.Error(t, err)
-
-	_, err = compareText(NewTextPointer([]byte("x")), "not-a-TextPointer", Eq)
 	require.Error(t, err)
 }
 
@@ -1950,7 +1872,7 @@ func TestIsInListText_ErrorPaths(t *testing.T) {
 
 func TestCompareReal_UnknownOperator(t *testing.T) {
 	t.Parallel()
-	_, err := compareReal(float64(1.0), float64(2.0), Operator(99))
+	_, err := compareReal(float32(1.0), float32(2.0), Operator(99))
 	require.Error(t, err)
 }
 

@@ -374,20 +374,12 @@ func FieldIsLessOrEqual(field Field, operandType OperandType, value any) Conditi
 	}
 }
 
-func compareBoolean(value1, value2 any, operator Operator) (bool, error) {
-	theValue1, ok := value1.(bool)
-	if !ok {
-		return false, fmt.Errorf("value '%v' cannot be cast as bool", value1)
-	}
-	theValue2, ok := value2.(bool)
-	if !ok {
-		return false, fmt.Errorf("operand value '%v' cannot be cast as bool", value2)
-	}
+func compareBoolean(v1, v2 bool, operator Operator) (bool, error) {
 	switch operator {
 	case Eq:
-		return theValue1 == theValue2, nil
+		return v1 == v2, nil
 	case Ne:
-		return theValue1 != theValue2, nil
+		return v1 != v2, nil
 	case Gt:
 		return false, errors.New("cannot compare boolean values with '>'")
 	case Lt:
@@ -400,196 +392,133 @@ func compareBoolean(value1, value2 any, operator Operator) (bool, error) {
 	return false, fmt.Errorf("unknown operator '%s'", operator)
 }
 
-func toInt64ForInt4(v any) (int64, error) {
-	switch n := v.(type) {
-	case int64:
-		return n, nil
-	case int32:
-		return int64(n), nil
-	default:
-		return 0, fmt.Errorf("value '%v' cannot be cast as int32 or int64", v)
-	}
-}
-
-func compareInt4(value1, value2 any, operator Operator) (bool, error) {
-	theValue1, err := toInt64ForInt4(value1)
-	if err != nil {
-		return false, err
-	}
-	theValue2, err := toInt64ForInt4(value2)
-	if err != nil {
-		return false, err
-	}
+func compareInt4(v1, v2 int64, operator Operator) (bool, error) {
 	// Validate that both values are within the INT4 range before comparing.
-	for _, v := range []int64{theValue1, theValue2} {
-		if v < math.MinInt32 || v > math.MaxInt32 {
-			return false, fmt.Errorf("value %d is out of INT4 range", v)
-		}
+	if v1 < math.MinInt32 || v1 > math.MaxInt32 {
+		return false, fmt.Errorf("value %d is out of INT4 range", v1)
+	}
+	if v2 < math.MinInt32 || v2 > math.MaxInt32 {
+		return false, fmt.Errorf("value %d is out of INT4 range", v2)
 	}
 	switch operator {
 	case Eq:
-		return theValue1 == theValue2, nil
+		return v1 == v2, nil
 	case Ne:
-		return theValue1 != theValue2, nil
+		return v1 != v2, nil
 	case Gt:
-		return theValue1 > theValue2, nil
+		return v1 > v2, nil
 	case Lt:
-		return theValue1 < theValue2, nil
+		return v1 < v2, nil
 	case Gte:
-		return theValue1 >= theValue2, nil
+		return v1 >= v2, nil
 	case Lte:
-		return theValue1 <= theValue2, nil
+		return v1 <= v2, nil
 	}
 	return false, fmt.Errorf("unknown operator '%s'", operator)
 }
 
-func compareInt8(value1, value2 any, operator Operator) (bool, error) {
-	theValue1, ok := value1.(int64)
-	if !ok {
-		return false, fmt.Errorf("value '%v' cannot be cast as int64", value1)
-	}
-	theValue2, ok := value2.(int64)
-	if !ok {
-		return false, fmt.Errorf("operand value '%v' cannot be cast as int64", value2)
-	}
+func compareInt8(v1, v2 int64, operator Operator) (bool, error) {
 	switch operator {
 	case Eq:
-		return theValue1 == theValue2, nil
+		return v1 == v2, nil
 	case Ne:
-		return theValue1 != theValue2, nil
+		return v1 != v2, nil
 	case Gt:
-		return theValue1 > theValue2, nil
+		return v1 > v2, nil
 	case Lt:
-		return theValue1 < theValue2, nil
+		return v1 < v2, nil
 	case Gte:
-		return theValue1 >= theValue2, nil
+		return v1 >= v2, nil
 	case Lte:
-		return theValue1 <= theValue2, nil
+		return v1 <= v2, nil
 	}
 	return false, fmt.Errorf("unknown operator '%s'", operator)
 }
 
-func compareReal(value1, value2 any, operator Operator) (bool, error) {
-	theValue1, ok := value1.(float64)
-	if !ok {
-		return false, fmt.Errorf("value '%v' cannot be cast as float64", value1)
-	}
-	theValue2, ok := value2.(float64)
-	if !ok {
-		return false, fmt.Errorf("operand value '%v' cannot be cast as float64", value2)
-	}
+// compareReal compares two float32 values. Field values are stored as float32;
+// the operand is narrowed from float64 at the call site.
+func compareReal(v1, v2 float32, operator Operator) (bool, error) {
 	switch operator {
 	case Eq:
-		return float32(theValue1) == float32(theValue2), nil
+		return v1 == v2, nil
 	case Ne:
-		return float32(theValue1) != float32(theValue2), nil
+		return v1 != v2, nil
 	case Gt:
-		return float32(theValue1) > float32(theValue2), nil
+		return v1 > v2, nil
 	case Lt:
-		return float32(theValue1) < float32(theValue2), nil
+		return v1 < v2, nil
 	case Gte:
-		return float32(theValue1) >= float32(theValue2), nil
+		return v1 >= v2, nil
 	case Lte:
-		return float32(theValue1) <= float32(theValue2), nil
+		return v1 <= v2, nil
 	}
 	return false, fmt.Errorf("unknown operator '%s'", operator)
 }
 
-func compareDouble(value1, value2 any, operator Operator) (bool, error) {
-	theValue1, ok := value1.(float64)
-	if !ok {
-		return false, fmt.Errorf("value '%v' cannot be cast as float64", value1)
-	}
-	theValue2, ok := value2.(float64)
-	if !ok {
-		return false, fmt.Errorf("operand value '%v' cannot be cast as float64", value2)
-	}
+func compareDouble(v1, v2 float64, operator Operator) (bool, error) {
 	switch operator {
 	case Eq:
-		return theValue1 == theValue2, nil
+		return v1 == v2, nil
 	case Ne:
-		return theValue1 != theValue2, nil
+		return v1 != v2, nil
 	case Gt:
-		return theValue1 > theValue2, nil
+		return v1 > v2, nil
 	case Lt:
-		return theValue1 < theValue2, nil
+		return v1 < v2, nil
 	case Gte:
-		return theValue1 >= theValue2, nil
+		return v1 >= v2, nil
 	case Lte:
-		return theValue1 <= theValue2, nil
+		return v1 <= v2, nil
 	}
 	return false, fmt.Errorf("unknown operator '%s'", operator)
 }
 
-func compareText(value1, value2 any, operator Operator) (bool, error) {
-	// From Golang dosc (https://go.dev/ref/spec#Comparison_operators)
-	// Two string values are compared lexically byte-wise.
-	theValue1, ok := value1.(TextPointer)
-	if !ok {
-		return false, fmt.Errorf("value '%v' cannot be cast as TextPointer", value1)
-	}
-	theValue2, ok := value2.(TextPointer)
-	if !ok {
-		return false, fmt.Errorf("operand value '%v' cannot be cast as TextPointer", value2)
-	}
+// compareText compares two TextPointer values lexicographically byte-wise.
+func compareText(v1, v2 TextPointer, operator Operator) (bool, error) {
+	s1 := v1.String()
+	s2 := v2.String()
 	switch operator {
 	case Eq:
-		return theValue1.String() == theValue2.String(), nil
+		return s1 == s2, nil
 	case Ne:
-		return theValue1.String() != theValue2.String(), nil
+		return s1 != s2, nil
 	case Gt:
-		return theValue1.String() > theValue2.String(), nil
+		return s1 > s2, nil
 	case Lt:
-		return theValue1.String() < theValue2.String(), nil
+		return s1 < s2, nil
 	case Gte:
-		return theValue1.String() >= theValue2.String(), nil
+		return s1 >= s2, nil
 	case Lte:
-		return theValue1.String() <= theValue2.String(), nil
+		return s1 <= s2, nil
 	case Like:
-		return likeMatch(theValue2.String(), theValue1.String()), nil
+		return likeMatch(s2, s1), nil
 	case NotLike:
-		return !likeMatch(theValue2.String(), theValue1.String()), nil
+		return !likeMatch(s2, s1), nil
 	}
 	return false, fmt.Errorf("unknown operator '%s'", operator)
 }
 
-func compareTimestamp(value1, value2 any, operator Operator) (bool, error) {
-	theValue1, ok := value1.(TimestampMicros)
-	if !ok {
-		return false, fmt.Errorf("value '%v' cannot be cast as TimestampMicros", value1)
-	}
-	theValue2, ok := value2.(TimestampMicros)
-	if !ok {
-		return false, fmt.Errorf("operand value '%v' cannot be cast as TimestampMicros", value2)
-	}
+func compareTimestamp(v1, v2 TimestampMicros, operator Operator) (bool, error) {
 	switch operator {
 	case Eq:
-		return theValue1 == theValue2, nil
+		return v1 == v2, nil
 	case Ne:
-		return theValue1 != theValue2, nil
+		return v1 != v2, nil
 	case Gt:
-		return theValue1 > theValue2, nil
+		return v1 > v2, nil
 	case Lt:
-		return theValue1 < theValue2, nil
+		return v1 < v2, nil
 	case Gte:
-		return theValue1 >= theValue2, nil
+		return v1 >= v2, nil
 	case Lte:
-		return theValue1 <= theValue2, nil
+		return v1 <= v2, nil
 	}
 	return false, fmt.Errorf("unknown operator '%s'", operator)
 }
 
-func compareUUID(value1, value2 any, operator Operator) (bool, error) {
-	u1, err := toUUIDValue(value1)
-	if err != nil {
-		return false, fmt.Errorf("value '%v' cannot be cast as UUIDValue: %w", value1, err)
-	}
-	u2, err := toUUIDValue(value2)
-	if err != nil {
-		return false, fmt.Errorf("operand value '%v' cannot be cast as UUIDValue: %w", value2, err)
-	}
+func compareUUID(v1, v2 UUIDValue, operator Operator) (bool, error) {
 	// UUIDs are compared lexicographically by their 16-byte representation.
-	cmp := uuidCompare(u1, u2)
+	cmp := uuidCompare(v1, v2)
 	switch operator {
 	case Eq:
 		return cmp == 0, nil
@@ -620,7 +549,8 @@ func uuidCompare(a, b UUIDValue) int {
 }
 
 func isInListUUID(value, list any) (bool, error) {
-	if _, err := toUUIDValue(value); err != nil {
+	v, err := toUUIDValue(value)
+	if err != nil {
 		return false, fmt.Errorf("value '%v' cannot be cast as UUIDValue: %w", value, err)
 	}
 	theList, ok := list.([]any)
@@ -628,7 +558,11 @@ func isInListUUID(value, list any) (bool, error) {
 		return false, fmt.Errorf("list '%v' cannot be cast as []any", list)
 	}
 	for _, listValue := range theList {
-		match, err := compareUUID(value, listValue, Eq)
+		lv, err := toUUIDValue(listValue)
+		if err != nil {
+			return false, err
+		}
+		match, err := compareUUID(v, lv, Eq)
 		if err != nil {
 			return false, err
 		}
@@ -640,7 +574,7 @@ func isInListUUID(value, list any) (bool, error) {
 }
 
 func isInListInt4(value, list any) (bool, error) {
-	_, ok := value.(int64)
+	v, ok := value.(int64)
 	if !ok {
 		return false, fmt.Errorf("value '%v' cannot be cast as int64", value)
 	}
@@ -649,7 +583,11 @@ func isInListInt4(value, list any) (bool, error) {
 		return false, fmt.Errorf("list '%v' cannot be cast as []any", list)
 	}
 	for _, listValue := range theList {
-		match, err := compareInt4(value, listValue, Eq)
+		lv, ok := listValue.(int64)
+		if !ok {
+			return false, fmt.Errorf("list value '%v' cannot be cast as int64", listValue)
+		}
+		match, err := compareInt4(v, lv, Eq)
 		if err != nil {
 			return false, err
 		}
@@ -661,7 +599,7 @@ func isInListInt4(value, list any) (bool, error) {
 }
 
 func isInListInt8(value, list any) (bool, error) {
-	_, ok := value.(int64)
+	v, ok := value.(int64)
 	if !ok {
 		return false, fmt.Errorf("value '%v' cannot be cast as int64", value)
 	}
@@ -670,7 +608,11 @@ func isInListInt8(value, list any) (bool, error) {
 		return false, fmt.Errorf("list '%v' cannot be cast as []any", list)
 	}
 	for _, listValue := range theList {
-		match, err := compareInt8(value, listValue, Eq)
+		lv, ok := listValue.(int64)
+		if !ok {
+			return false, fmt.Errorf("list value '%v' cannot be cast as int64", listValue)
+		}
+		match, err := compareInt8(v, lv, Eq)
 		if err != nil {
 			return false, err
 		}
@@ -682,16 +624,20 @@ func isInListInt8(value, list any) (bool, error) {
 }
 
 func isInListReal(value, list any) (bool, error) {
-	_, ok := value.(float64)
+	v, ok := value.(float32)
 	if !ok {
-		return false, fmt.Errorf("value '%v' cannot be cast as float64", value)
+		return false, fmt.Errorf("value '%v' cannot be cast as float32", value)
 	}
 	theList, ok := list.([]any)
 	if !ok {
 		return false, fmt.Errorf("list '%v' cannot be cast as []any", list)
 	}
 	for _, listValue := range theList {
-		match, err := compareReal(value, listValue, Eq)
+		lv, ok := listValue.(float64)
+		if !ok {
+			return false, fmt.Errorf("list value '%v' cannot be cast as float64", listValue)
+		}
+		match, err := compareReal(v, float32(lv), Eq)
 		if err != nil {
 			return false, err
 		}
@@ -703,7 +649,7 @@ func isInListReal(value, list any) (bool, error) {
 }
 
 func isInListDouble(value, list any) (bool, error) {
-	_, ok := value.(float64)
+	v, ok := value.(float64)
 	if !ok {
 		return false, fmt.Errorf("value '%v' cannot be cast as float64", value)
 	}
@@ -712,7 +658,11 @@ func isInListDouble(value, list any) (bool, error) {
 		return false, fmt.Errorf("list '%v' cannot be cast as []any", list)
 	}
 	for _, listValue := range theList {
-		match, err := compareDouble(value, listValue, Eq)
+		lv, ok := listValue.(float64)
+		if !ok {
+			return false, fmt.Errorf("list value '%v' cannot be cast as float64", listValue)
+		}
+		match, err := compareDouble(v, lv, Eq)
 		if err != nil {
 			return false, err
 		}
@@ -724,7 +674,7 @@ func isInListDouble(value, list any) (bool, error) {
 }
 
 func isInListText(value, list any) (bool, error) {
-	_, ok := value.(TextPointer)
+	v, ok := value.(TextPointer)
 	if !ok {
 		return false, fmt.Errorf("value '%v' cannot be cast as TextPointer", value)
 	}
@@ -733,7 +683,11 @@ func isInListText(value, list any) (bool, error) {
 		return false, fmt.Errorf("list '%v' cannot be cast as []any", list)
 	}
 	for _, listValue := range theList {
-		match, err := compareText(value, listValue, Eq)
+		lv, ok := listValue.(TextPointer)
+		if !ok {
+			return false, fmt.Errorf("list value '%v' cannot be cast as TextPointer", listValue)
+		}
+		match, err := compareText(v, lv, Eq)
 		if err != nil {
 			return false, err
 		}
@@ -745,7 +699,7 @@ func isInListText(value, list any) (bool, error) {
 }
 
 func isInListTimestamp(value, list any) (bool, error) {
-	_, ok := value.(TimestampMicros)
+	v, ok := value.(TimestampMicros)
 	if !ok {
 		return false, fmt.Errorf("value '%v' cannot be cast as TimestampMicros", value)
 	}
@@ -754,7 +708,11 @@ func isInListTimestamp(value, list any) (bool, error) {
 		return false, fmt.Errorf("list '%v' cannot be cast as []any", list)
 	}
 	for _, listValue := range theList {
-		match, err := compareTimestamp(value, listValue, Eq)
+		lv, ok := listValue.(TimestampMicros)
+		if !ok {
+			return false, fmt.Errorf("list value '%v' cannot be cast as TimestampMicros", listValue)
+		}
+		match, err := compareTimestamp(v, lv, Eq)
 		if err != nil {
 			return false, err
 		}
@@ -766,14 +724,25 @@ func isInListTimestamp(value, list any) (bool, error) {
 }
 
 // isBetween* functions check whether value falls within [low, high] inclusive.
-// They reuse the existing compare* functions to avoid duplicating comparison logic.
 
 func isBetweenInt4(value, low, high any) (bool, error) {
-	geq, err := compareInt4(value, low, Gte)
+	v, ok := value.(int64)
+	if !ok {
+		return false, fmt.Errorf("value '%v' cannot be cast as int64", value)
+	}
+	lo, ok := low.(int64)
+	if !ok {
+		return false, fmt.Errorf("BETWEEN low bound '%v' cannot be cast as int64", low)
+	}
+	hi, ok := high.(int64)
+	if !ok {
+		return false, fmt.Errorf("BETWEEN high bound '%v' cannot be cast as int64", high)
+	}
+	geq, err := compareInt4(v, lo, Gte)
 	if err != nil {
 		return false, err
 	}
-	leq, err := compareInt4(value, high, Lte)
+	leq, err := compareInt4(v, hi, Lte)
 	if err != nil {
 		return false, err
 	}
@@ -781,47 +750,71 @@ func isBetweenInt4(value, low, high any) (bool, error) {
 }
 
 func isBetweenInt8(value, low, high any) (bool, error) {
-	geq, err := compareInt8(value, low, Gte)
-	if err != nil {
-		return false, err
+	v, ok := value.(int64)
+	if !ok {
+		return false, fmt.Errorf("value '%v' cannot be cast as int64", value)
 	}
-	leq, err := compareInt8(value, high, Lte)
-	if err != nil {
-		return false, err
+	lo, ok := low.(int64)
+	if !ok {
+		return false, fmt.Errorf("BETWEEN low bound '%v' cannot be cast as int64", low)
 	}
-	return geq && leq, nil
+	hi, ok := high.(int64)
+	if !ok {
+		return false, fmt.Errorf("BETWEEN high bound '%v' cannot be cast as int64", high)
+	}
+	return v >= lo && v <= hi, nil
 }
 
 func isBetweenReal(value, low, high any) (bool, error) {
-	geq, err := compareReal(value, low, Gte)
-	if err != nil {
-		return false, err
+	v, ok := value.(float32)
+	if !ok {
+		return false, fmt.Errorf("value '%v' cannot be cast as float32", value)
 	}
-	leq, err := compareReal(value, high, Lte)
-	if err != nil {
-		return false, err
+	lo, ok := low.(float64)
+	if !ok {
+		return false, fmt.Errorf("BETWEEN low bound '%v' cannot be cast as float64", low)
 	}
-	return geq && leq, nil
+	hi, ok := high.(float64)
+	if !ok {
+		return false, fmt.Errorf("BETWEEN high bound '%v' cannot be cast as float64", high)
+	}
+	return v >= float32(lo) && v <= float32(hi), nil
 }
 
 func isBetweenDouble(value, low, high any) (bool, error) {
-	geq, err := compareDouble(value, low, Gte)
-	if err != nil {
-		return false, err
+	v, ok := value.(float64)
+	if !ok {
+		return false, fmt.Errorf("value '%v' cannot be cast as float64", value)
 	}
-	leq, err := compareDouble(value, high, Lte)
-	if err != nil {
-		return false, err
+	lo, ok := low.(float64)
+	if !ok {
+		return false, fmt.Errorf("BETWEEN low bound '%v' cannot be cast as float64", low)
 	}
-	return geq && leq, nil
+	hi, ok := high.(float64)
+	if !ok {
+		return false, fmt.Errorf("BETWEEN high bound '%v' cannot be cast as float64", high)
+	}
+	return v >= lo && v <= hi, nil
 }
 
 func isBetweenText(value, low, high any) (bool, error) {
-	geq, err := compareText(value, low, Gte)
+	v, ok := value.(TextPointer)
+	if !ok {
+		return false, fmt.Errorf("value '%v' cannot be cast as TextPointer", value)
+	}
+	lo, ok := low.(TextPointer)
+	if !ok {
+		return false, fmt.Errorf("BETWEEN low bound '%v' cannot be cast as TextPointer", low)
+	}
+	hi, ok := high.(TextPointer)
+	if !ok {
+		return false, fmt.Errorf("BETWEEN high bound '%v' cannot be cast as TextPointer", high)
+	}
+	geq, err := compareText(v, lo, Gte)
 	if err != nil {
 		return false, err
 	}
-	leq, err := compareText(value, high, Lte)
+	leq, err := compareText(v, hi, Lte)
 	if err != nil {
 		return false, err
 	}
@@ -829,13 +822,17 @@ func isBetweenText(value, low, high any) (bool, error) {
 }
 
 func isBetweenTimestamp(value, low, high any) (bool, error) {
-	geq, err := compareTimestamp(value, low, Gte)
-	if err != nil {
-		return false, err
+	v, ok := value.(TimestampMicros)
+	if !ok {
+		return false, fmt.Errorf("value '%v' cannot be cast as TimestampMicros", value)
 	}
-	leq, err := compareTimestamp(value, high, Lte)
-	if err != nil {
-		return false, err
+	lo, ok := low.(TimestampMicros)
+	if !ok {
+		return false, fmt.Errorf("BETWEEN low bound '%v' cannot be cast as TimestampMicros", low)
 	}
-	return geq && leq, nil
+	hi, ok := high.(TimestampMicros)
+	if !ok {
+		return false, fmt.Errorf("BETWEEN high bound '%v' cannot be cast as TimestampMicros", high)
+	}
+	return v >= lo && v <= hi, nil
 }

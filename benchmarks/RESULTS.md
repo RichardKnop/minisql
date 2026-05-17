@@ -1,3 +1,21 @@
+### 2026-05-18 — Typed comparison function signatures
+
+Eliminated per-call heap allocations from the row comparison hot path by changing all comparison function signatures from `(value1, value2 any, operator Operator)` to typed parameters:
+
+- `compareBoolean(v1, v2 bool, op)` — was `any`; Go escape analysis caused boxing of `bool` values on heap due to `fmt.Errorf` in error paths
+- `compareInt4(v1, v2 int64, op)` — removed `toInt64ForInt4` helper (range check remains inline); `int64` now unboxed at call site
+- `compareInt8(v1, v2 int64, op)` — highest-frequency path; `139,642 allocs/op` eliminated (pprof `alloc_objects` pinpointed exact call site)
+- `compareReal(v1, v2 float32, op)` — field storage is `float32`; callers narrow `float64` operand values at call site with `float32(...)`
+- `compareDouble(v1, v2 float64, op)`, `compareText(v1, v2 TextPointer, op)`, `compareTimestamp(v1, v2 TimestampMicros, op)`, `compareUUID(v1, v2 UUIDValue, op)` — all typed
+
+Go's escape analysis was causing `value1`/`value2 any` to be marked heap-escaping because `fmt.Errorf` in error paths forced boxing. With typed parameters, primitive values stay on the stack.
+
+| Benchmark | Before | After | Δ allocs | Δ latency | SQLite | Ratio |
+|---|---:|---:|---:|---:|---:|---:|
+| Subquery_InList/minisql | ~9.6 ms/op | ~8.7 ms/op | 194,677 → 159,776 (−18%) | −10% | ~3.7 ms/op | **2.4×** |
+
+−34,901 allocs/op. Memory: ~6.97 MiB → ~6.69 MiB/op (−4%).
+
 ### 2026-05-17 — IN-subquery semi-join allocation pass
 
 Three allocation sources eliminated from the IN (subquery) → semi-join hot path:

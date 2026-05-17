@@ -35,7 +35,7 @@ func TestCompareUUID(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		v1, v2   any
+		v1, v2   UUIDValue
 		op       Operator
 		expected bool
 		wantErr  bool
@@ -52,10 +52,6 @@ func TestCompareUUID(t *testing.T) {
 		{"gt less", lo, hi, Gt, false, false},
 		{"gte greater", hi, lo, Gte, true, false},
 		{"gte equal", lo, same, Gte, true, false},
-		{"string input", "550e8400-e29b-41d4-a716-446655440000", same, Eq, true, false},
-		{"TextPointer input", NewTextPointer([]byte("550e8400-e29b-41d4-a716-446655440000")), same, Eq, true, false},
-		{"invalid v1", "not-a-uuid", same, Eq, false, true},
-		{"invalid v2", lo, "not-a-uuid", Eq, false, true},
 		{"unknown operator", lo, same, 0, false, true},
 	}
 

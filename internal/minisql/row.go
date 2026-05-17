@@ -586,15 +586,19 @@ func compareScalarToOperand(val any, op2 Operand, operator Operator) (bool, erro
 			return false, nil
 		}
 	}
-	switch val.(type) {
-	case int64, int32:
-		return compareInt8(val, op2.Value, operator)
-	case float64, float32:
-		return compareDouble(val, op2.Value, operator)
+	switch v1 := val.(type) {
+	case int64:
+		return compareInt8(v1, op2.Value.(int64), operator)
+	case int32:
+		return compareInt8(int64(v1), op2.Value.(int64), operator)
+	case float64:
+		return compareDouble(v1, op2.Value.(float64), operator)
+	case float32:
+		return compareDouble(float64(v1), op2.Value.(float64), operator)
 	case TextPointer:
-		return compareText(val, op2.Value, operator)
+		return compareText(v1, op2.Value.(TextPointer), operator)
 	case bool:
-		return compareBoolean(val, op2.Value, operator)
+		return compareBoolean(v1, op2.Value.(bool), operator)
 	default:
 		return false, fmt.Errorf("unsupported expression result type %T", val)
 	}
@@ -807,15 +811,23 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 	case Int8:
 		return compareInt8(fieldValue.Value.(int64), valueOperand.Value.(int64), operator)
 	case Real:
-		return compareReal(float64(fieldValue.Value.(float32)), valueOperand.Value.(float64), operator)
+		return compareReal(fieldValue.Value.(float32), float32(valueOperand.Value.(float64)), operator)
 	case Double:
 		return compareDouble(fieldValue.Value.(float64), valueOperand.Value.(float64), operator)
 	case Varchar, Text:
-		return compareText(fieldValue.Value, valueOperand.Value, operator)
+		return compareText(fieldValue.Value.(TextPointer), valueOperand.Value.(TextPointer), operator)
 	case Timestamp:
-		return compareTimestamp(fieldValue.Value, valueOperand.Value, operator)
+		return compareTimestamp(fieldValue.Value.(TimestampMicros), valueOperand.Value.(TimestampMicros), operator)
 	case UUID:
-		return compareUUID(fieldValue.Value, valueOperand.Value, operator)
+		u1, err := toUUIDValue(fieldValue.Value)
+		if err != nil {
+			return false, err
+		}
+		u2, err := toUUIDValue(valueOperand.Value)
+		if err != nil {
+			return false, err
+		}
+		return compareUUID(u1, u2, operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", col.Kind)
 	}
@@ -965,15 +977,23 @@ func (r Row) compareFieldValueWithColumnIndexes(fieldOperand, valueOperand Opera
 	case Int8:
 		return compareInt8(fieldValue.Value.(int64), valueOperand.Value.(int64), operator)
 	case Real:
-		return compareReal(float64(fieldValue.Value.(float32)), valueOperand.Value.(float64), operator)
+		return compareReal(fieldValue.Value.(float32), float32(valueOperand.Value.(float64)), operator)
 	case Double:
 		return compareDouble(fieldValue.Value.(float64), valueOperand.Value.(float64), operator)
 	case Varchar, Text:
-		return compareText(fieldValue.Value, valueOperand.Value, operator)
+		return compareText(fieldValue.Value.(TextPointer), valueOperand.Value.(TextPointer), operator)
 	case Timestamp:
-		return compareTimestamp(fieldValue.Value, valueOperand.Value, operator)
+		return compareTimestamp(fieldValue.Value.(TimestampMicros), valueOperand.Value.(TimestampMicros), operator)
 	case UUID:
-		return compareUUID(fieldValue.Value, valueOperand.Value, operator)
+		u1, err := toUUIDValue(fieldValue.Value)
+		if err != nil {
+			return false, err
+		}
+		u2, err := toUUIDValue(valueOperand.Value)
+		if err != nil {
+			return false, err
+		}
+		return compareUUID(u1, u2, operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", col.Kind)
 	}
@@ -1027,19 +1047,19 @@ func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, err
 
 	switch aColumn1.Kind {
 	case Boolean:
-		return compareBoolean(value1.Value, value2.Value, operator)
+		return compareBoolean(value1.Value.(bool), value2.Value.(bool), operator)
 	case Int4:
-		return compareInt4(value1.Value, value2.Value, operator)
+		return compareInt4(int64(value1.Value.(int32)), int64(value2.Value.(int32)), operator)
 	case Int8:
-		return compareInt8(value1.Value, value2.Value, operator)
+		return compareInt8(value1.Value.(int64), value2.Value.(int64), operator)
 	case Real:
-		return compareReal(value1.Value, value2.Value, operator)
+		return compareReal(value1.Value.(float32), value2.Value.(float32), operator)
 	case Double:
-		return compareDouble(value1.Value, value2.Value, operator)
+		return compareDouble(value1.Value.(float64), value2.Value.(float64), operator)
 	case Varchar, Text:
-		return compareText(value1.Value, value2.Value, operator)
+		return compareText(value1.Value.(TextPointer), value2.Value.(TextPointer), operator)
 	case Timestamp:
-		return compareTimestamp(value1.Value, value2.Value, operator)
+		return compareTimestamp(value1.Value.(TimestampMicros), value2.Value.(TimestampMicros), operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", aColumn1.Kind)
 	}
@@ -1091,19 +1111,19 @@ func (r Row) compareFieldsWithColumnIndexes(field1, field2 Operand, operator Ope
 
 	switch col1.Kind {
 	case Boolean:
-		return compareBoolean(value1.Value, value2.Value, operator)
+		return compareBoolean(value1.Value.(bool), value2.Value.(bool), operator)
 	case Int4:
-		return compareInt4(value1.Value, value2.Value, operator)
+		return compareInt4(int64(value1.Value.(int32)), int64(value2.Value.(int32)), operator)
 	case Int8:
-		return compareInt8(value1.Value, value2.Value, operator)
+		return compareInt8(value1.Value.(int64), value2.Value.(int64), operator)
 	case Real:
-		return compareReal(value1.Value, value2.Value, operator)
+		return compareReal(value1.Value.(float32), value2.Value.(float32), operator)
 	case Double:
-		return compareDouble(value1.Value, value2.Value, operator)
+		return compareDouble(value1.Value.(float64), value2.Value.(float64), operator)
 	case Varchar, Text:
-		return compareText(value1.Value, value2.Value, operator)
+		return compareText(value1.Value.(TextPointer), value2.Value.(TextPointer), operator)
 	case Timestamp:
-		return compareTimestamp(value1.Value, value2.Value, operator)
+		return compareTimestamp(value1.Value.(TimestampMicros), value2.Value.(TimestampMicros), operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", col1.Kind)
 	}
