@@ -844,6 +844,15 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 	innerRowChan := make(chan Row, 100)
 	innerErrChan := make(chan error, 1)
 
+	// For semi/anti-semi joins use a child context so we can cancel the inner
+	// goroutine as soon as we have found (or confirmed the absence of) a match.
+	innerCtx := ctx
+	var innerCancel context.CancelFunc
+	if join.Type == Semi || join.Type == AntiSemi {
+		innerCtx, innerCancel = context.WithCancel(ctx)
+		defer innerCancel()
+	}
+
 	if innerScan.Type == ScanTypeIndexPoint && join.InnerJoinColumn != "" {
 		go func() {
 			defer close(innerRowChan)
@@ -886,14 +895,14 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 
 			indexScan := innerScan
 			indexScan.IndexKeys = joinKeyValues
-			if err := innerTable.indexPointScan(ctx, indexScan, innerFields, chanRowCallback(ctx, innerRowChan)); err != nil {
+			if err := innerTable.indexPointScan(innerCtx, indexScan, innerFields, chanRowCallback(innerCtx, innerRowChan)); err != nil {
 				innerErrChan <- err
 			}
 		}()
 	} else {
 		go func() {
 			defer close(innerRowChan)
-			if err := innerTable.sequentialScan(ctx, innerScan, innerFields, chanRowCallback(ctx, innerRowChan)); err != nil {
+			if err := innerTable.sequentialScan(innerCtx, innerScan, innerFields, chanRowCallback(innerCtx, innerRowChan)); err != nil {
 				innerErrChan <- err
 			}
 		}()
@@ -935,6 +944,18 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 
 		if matches {
 			matched = true
+			if join.Type == Semi {
+				// First match found: cancel the inner scan, drain remaining rows.
+				innerCancel()
+				drainRowCh(innerRowChan)
+				break
+			}
+			if join.Type == AntiSemi {
+				// Any match means outer row is excluded.
+				innerCancel()
+				drainRowCh(innerRowChan)
+				return nil
+			}
 			if err := p.executeJoinsForRow(ctx, provider, combinedRow, joinIndex+1, filteredPipe, hashTables); err != nil {
 				return err
 			}
@@ -943,8 +964,32 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 
 	select {
 	case err := <-innerErrChan:
+		if innerCancel != nil && errors.Is(err, context.Canceled) {
+			break // we triggered the cancellation ourselves
+		}
 		return err
 	default:
+	}
+
+	// Semi-join: emit the outer row when the inner had at least one match.
+	if join.Type == Semi {
+		if matched {
+			outerRow := currentRow
+			if joinIndex == 0 {
+				outerRow = prefixRowAlias(currentRow, fromAlias)
+			}
+			return p.executeJoinsForRow(ctx, provider, outerRow, joinIndex+1, filteredPipe, hashTables)
+		}
+		return nil
+	}
+
+	// Anti-semi-join: emit the outer row only when there was no inner match.
+	if join.Type == AntiSemi {
+		outerRow := currentRow
+		if joinIndex == 0 {
+			outerRow = prefixRowAlias(currentRow, fromAlias)
+		}
+		return p.executeJoinsForRow(ctx, provider, outerRow, joinIndex+1, filteredPipe, hashTables)
 	}
 
 	// LEFT JOIN / FULL OUTER JOIN: emit the outer row with NULL-filled inner columns when nothing matched.
@@ -982,6 +1027,23 @@ func (p QueryPlan) executeHashJoinForRow(ctx context.Context, currentRow Row, jo
 		if bucket.filter.MayContain([]byte(probeKey)) {
 			matchingRows = bucket.rows[probeKey]
 		}
+	}
+
+	// Semi-join / anti-semi-join: check existence only, emit the outer row
+	// (not the combined row).  At joinIndex==0 the outer row has plain column
+	// names; prefix them with fromAlias so downstream projection resolves
+	// alias-qualified SELECT fields (e.g. "u.name") correctly.
+	if join.Type == Semi || join.Type == AntiSemi {
+		emit := join.Type == Semi && len(matchingRows) > 0
+		emit = emit || (join.Type == AntiSemi && len(matchingRows) == 0)
+		if emit {
+			outerRow := currentRow
+			if joinIndex == 0 {
+				outerRow = prefixRowAlias(currentRow, fromAlias)
+			}
+			return p.executeJoinsForRow(ctx, nil, outerRow, joinIndex+1, filteredPipe, hashTables)
+		}
+		return nil
 	}
 
 	matched := false
@@ -1201,13 +1263,34 @@ func nullRowForColumns(columns []Column) Row {
 
 // combineRows concatenates columns and values from outer and inner rows (first join)
 // Column names are prefixed with table aliases to avoid conflicts (e.g., "u.id", "o.id")
+// prefixRowAlias returns a copy of row with each column name prefixed by
+// "alias.".  When alias is empty the original row is returned unchanged.
+func prefixRowAlias(row Row, alias string) Row {
+	if alias == "" {
+		return row
+	}
+	result := Row{
+		Key:     row.Key,
+		Columns: make([]Column, len(row.Columns)),
+		Values:  make([]OptionalValue, len(row.Values)),
+	}
+	copy(result.Values, row.Values)
+	for i, col := range row.Columns {
+		result.Columns[i] = col
+		result.Columns[i].Name = alias + "." + col.Name
+	}
+	return result
+}
+
 func combineRows(outerRow, innerRow Row, outerTableAlias, innerTableAlias string) Row {
 	combinedColumns := make([]Column, 0, len(outerRow.Columns)+len(innerRow.Columns))
 
-	// Add outer table columns with table alias prefix
+	// Add outer table columns, optionally prefixed with the table alias.
 	for _, col := range outerRow.Columns {
 		prefixedCol := col
-		prefixedCol.Name = outerTableAlias + "." + col.Name
+		if outerTableAlias != "" {
+			prefixedCol.Name = outerTableAlias + "." + col.Name
+		}
 		combinedColumns = append(combinedColumns, prefixedCol)
 	}
 

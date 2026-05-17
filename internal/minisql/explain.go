@@ -71,7 +71,10 @@ func (d *Database) executeExplain(ctx context.Context, stmt Statement) (Statemen
 		return StatementResult{}, err
 	}
 
-	// Resolve WHERE subqueries before Validate so validateWhere never sees *Statement operands.
+	// Lift eligible IN/NOT IN (subquery) conditions to semi-joins before planning.
+	inner = liftINSubqueriesToSemiJoins(inner)
+
+	// Resolve remaining WHERE subqueries before Validate.
 	inner.Conditions, err = d.resolveSubqueries(ctx, inner.Conditions)
 	if err != nil {
 		return StatementResult{}, err
@@ -566,6 +569,10 @@ func joinTypeString(joinType JoinType) string {
 		return "right"
 	case FullOuter:
 		return "full outer"
+	case Semi:
+		return "semi"
+	case AntiSemi:
+		return "anti_semi"
 	default:
 		return "unknown"
 	}

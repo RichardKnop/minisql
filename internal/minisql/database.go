@@ -475,6 +475,13 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 			return d.executeCTESelect(ctx, stmt)
 		}
 
+		// Convert eligible IN/NOT IN (subquery) conditions to semi-joins before
+		// resolveSubqueries so that the join planner can use early termination
+		// and avoid full materialisation of the inner result set.
+		if stmt.Kind == Select && len(stmt.Conditions) > 0 {
+			stmt = liftINSubqueriesToSemiJoins(stmt)
+		}
+
 		// Pre-evaluate any non-correlated scalar subqueries in the WHERE clause.
 		if len(stmt.Conditions) > 0 {
 			resolved, err := d.resolveSubqueries(ctx, stmt.Conditions)
