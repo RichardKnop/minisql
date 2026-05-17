@@ -1,3 +1,16 @@
+### 2026-05-17 — CTE materialisation double-allocation elimination
+
+Two heap allocation sources eliminated from CTE execution:
+
+1. **Virtual table fast COUNT** — `(*Table).Select COUNT(*)` with no conditions on a virtual table previously scanned all materialised rows via `countAllLeafWalk`; now returns `len(t.virtualRows)` directly.
+2. **`rawRows` fast path** — `selectStreamingDirect` builds `projected []Row` and wraps it in `NewSliceIterator`; `executeCTESelect` previously drained that iterator into a *second* `[]Row` of identical size. The `rawRows` field on `StatementResult` carries the backing slice so the caller can steal it without re-allocating.
+
+| Benchmark | Before | After | Alloc Before | Alloc After | SQLite | Ratio (after vs SQLite) |
+|---|---:|---:|---:|---:|---:|---:|
+| CTE_Materialise/minisql | ~1.84 ms/op | ~1.71 ms/op | ~2.74 MiB/op | ~2.05 MiB/op | ~0.44 ms/op | 3.9× |
+
+~25% allocation reduction (−690 KB/op). CTE closed from 4.2× to **3.9×** SQLite.
+
 ### 2026-05-17 — Nested-loop join hot-path allocation pass
 
 Four layers of per-outer-row heap allocation were eliminated from the join executor:

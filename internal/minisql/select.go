@@ -25,11 +25,14 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, fmt.Errorf("invalid statement kind for SELECT: %v", stmt.Kind)
 	}
 
-	// Fast path: COUNT(*) with no WHERE clause and no JOIN — walk leaf page
-	// headers without deserialising any row data.
-	// Virtual tables (derived FROM subqueries) must skip this and go through
-	// the normal materialising path so the in-memory rows are counted instead.
-	if stmt.IsSelectCountAll() && len(stmt.Conditions) == 0 && len(stmt.Joins) == 0 && t.virtualRows == nil {
+	// Fast path: COUNT(*) with no WHERE clause and no JOIN.
+	// B-tree tables walk leaf page headers without deserialising row data.
+	// Virtual tables (CTEs, derived tables) already have rows in memory — return
+	// len(virtualRows) directly without a second scan pass.
+	if stmt.IsSelectCountAll() && len(stmt.Conditions) == 0 && len(stmt.Joins) == 0 {
+		if t.virtualRows != nil {
+			return countResult(int64(len(t.virtualRows))), nil
+		}
 		return t.countAllLeafWalk(ctx)
 	}
 
@@ -689,6 +692,7 @@ func (t *Table) selectStreamingDirect(
 	}
 
 	result.Rows = NewSliceIterator(projected)
+	result.rawRows = projected
 	return result, nil
 }
 

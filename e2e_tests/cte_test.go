@@ -191,48 +191,50 @@ func (s *TestSuite) TestCTE_Explain() {
 ('carol@example.com', 'Carol');`, 3)
 
 	s.Run("explain_cte", func() {
+		// Plain scan CTE is inlined — no materialisation step in the plan.
 		rows := s.collectExplain(
 			`EXPLAIN WITH t AS (SELECT id, name FROM users) SELECT t.name FROM t`)
-		s.Require().Len(rows, 2)
+		s.Require().Len(rows, 1)
 
 		s.Equal(int64(1), rows[0].Step)
-		s.Equal("cte", rows[0].Operation)
-		s.Contains(rows[0].Detail, "name=t")
+		s.NotEmpty(rows[0].Operation)
+		s.Contains(rows[0].Detail, "table=users")
 		s.False(rows[0].RowsActual.Valid)
-
-		s.Equal(int64(2), rows[1].Step)
-		s.NotEmpty(rows[1].Operation)
-		s.Contains(rows[1].Detail, "table=t")
 	})
 
 	s.Run("explain_analyze_cte", func() {
+		// Inlined CTE — EXPLAIN ANALYZE shows a single real-table scan step.
 		rows := s.collectExplain(
 			`EXPLAIN ANALYZE WITH t AS (SELECT id, name FROM users) SELECT t.name FROM t`)
-		s.Require().Len(rows, 2)
+		s.Require().Len(rows, 1)
 
-		s.Equal("cte", rows[0].Operation)
+		s.Equal(int64(1), rows[0].Step)
+		s.NotEmpty(rows[0].Operation)
 		s.True(rows[0].RowsActual.Valid)
 		s.Equal(int64(3), rows[0].RowsActual.Int64)
-		s.True(rows[0].DurationUS.Valid)
-
-		s.Equal(int64(2), rows[1].Step)
-		s.True(rows[1].RowsActual.Valid)
-		s.Equal(int64(3), rows[1].RowsActual.Int64)
 	})
 
 	s.Run("explain_multiple_ctes", func() {
+		// cte1 (main FROM) is inlined; cte2 is unused and pruned.
+		// Result: a single real-table scan step.
 		rows := s.collectExplain(
 			`EXPLAIN WITH
 			   cte1 AS (SELECT id FROM users),
 			   cte2 AS (SELECT id FROM users WHERE id > 1)
 			 SELECT cte1.id FROM cte1`)
-		// 2 CTE steps + 1 scan step
-		s.Require().Len(rows, 3)
+		s.Require().Len(rows, 1)
+		s.Equal(int64(1), rows[0].Step)
+		s.Contains(rows[0].Detail, "table=users")
+	})
+
+	s.Run("explain_cte_non_inlineable", func() {
+		// DISTINCT CTE cannot be inlined — materialisation step still appears.
+		rows := s.collectExplain(
+			`EXPLAIN WITH t AS (SELECT DISTINCT id, name FROM users) SELECT t.name FROM t`)
+		s.Require().Len(rows, 2)
 		s.Equal("cte", rows[0].Operation)
-		s.Contains(rows[0].Detail, "name=cte1")
-		s.Equal("cte", rows[1].Operation)
-		s.Contains(rows[1].Detail, "name=cte2")
-		s.Equal(int64(3), rows[2].Step)
+		s.Contains(rows[0].Detail, "name=t")
+		s.Equal(int64(2), rows[1].Step)
 	})
 }
 
@@ -267,4 +269,133 @@ func (s *TestSuite) TestCTE_PreparedStatement() {
 	s.Require().NoError(rows.Err())
 	s.Require().Len(names, 1)
 	s.Equal("Alice", names[0])
+}
+
+func (s *TestSuite) TestCTE_Inline() {
+	_, err := s.db.Exec(`create table "products" (
+		id    int8 primary key autoincrement,
+		name  varchar(100) not null,
+		price int8 not null,
+		active boolean not null
+	);`)
+	s.Require().NoError(err)
+
+	for _, row := range []struct {
+		name   string
+		price  int64
+		active bool
+	}{
+		{"Widget", 10, true},
+		{"Gadget", 20, true},
+		{"Doohickey", 5, false},
+		{"Thingamajig", 15, true},
+		{"Whatchamacallit", 8, false},
+	} {
+		_, err = s.db.Exec(
+			`insert into "products" (name, price, active) values (?, ?, ?)`,
+			row.name, row.price, row.active,
+		)
+		s.Require().NoError(err)
+	}
+
+	s.Run("inline_body_condition_and_outer_condition_both_filter", func() {
+		// CTE body filters active=true (3 rows); outer WHERE filters price > 12.
+		// After inlining both conditions apply directly on the real table.
+		rows, err := s.db.Query(
+			`WITH p AS (SELECT id, name, price FROM products WHERE active = true)
+			 SELECT p.name FROM p WHERE p.price > 12`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		var names []string
+		for rows.Next() {
+			var n string
+			s.Require().NoError(rows.Scan(&n))
+			names = append(names, n)
+		}
+		s.Require().NoError(rows.Err())
+		s.ElementsMatch([]string{"Gadget", "Thingamajig"}, names)
+	})
+
+	s.Run("inline_with_limit", func() {
+		// LIMIT on the outer query propagates through inlining to the real scan.
+		rows, err := s.db.Query(
+			`WITH p AS (SELECT id, name FROM products WHERE active = true)
+			 SELECT p.name FROM p LIMIT 2`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		var names []string
+		for rows.Next() {
+			var n string
+			s.Require().NoError(rows.Scan(&n))
+			names = append(names, n)
+		}
+		s.Require().NoError(rows.Err())
+		s.Len(names, 2)
+	})
+
+	s.Run("inline_select_star", func() {
+		// SELECT * against an inlined CTE must return the body's column subset
+		// (id + name) not the full underlying table (id, name, price, active).
+		rows, err := s.db.Query(
+			`WITH p AS (SELECT id, name FROM products WHERE active = true) SELECT * FROM p`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		cols, err := rows.Columns()
+		s.Require().NoError(err)
+		s.ElementsMatch([]string{"id", "name"}, cols)
+
+		var count int
+		for rows.Next() {
+			count++
+			var id int64
+			var name string
+			s.Require().NoError(rows.Scan(&id, &name))
+		}
+		s.Require().NoError(rows.Err())
+		s.Equal(3, count) // Widget, Gadget, Thingamajig
+	})
+
+	s.Run("non_inlineable_limit_cte_still_works", func() {
+		// LIMIT CTE cannot be inlined — it must materialise correctly and the
+		// outer query then filters the materialised subset.
+		rows, err := s.db.Query(
+			`WITH cheap AS (SELECT id, name, price FROM products WHERE active = true ORDER BY price LIMIT 2)
+			 SELECT cheap.name FROM cheap`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		var names []string
+		for rows.Next() {
+			var n string
+			s.Require().NoError(rows.Scan(&n))
+			names = append(names, n)
+		}
+		s.Require().NoError(rows.Err())
+		// Two cheapest active products: Widget(10) and Thingamajig(15).
+		s.Require().Len(names, 2)
+		s.ElementsMatch([]string{"Widget", "Thingamajig"}, names)
+	})
+
+	s.Run("unused_cte_pruned", func() {
+		// The unused CTE (orphan) must be silently dropped without error.
+		rows, err := s.db.Query(
+			`WITH
+			   active AS (SELECT id, name FROM products WHERE active = true),
+			   orphan AS (SELECT id FROM products WHERE price > 100)
+			 SELECT active.name FROM active WHERE active.price > 12`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		var names []string
+		for rows.Next() {
+			var n string
+			s.Require().NoError(rows.Scan(&n))
+			names = append(names, n)
+		}
+		s.Require().NoError(rows.Err())
+		s.ElementsMatch([]string{"Gadget", "Thingamajig"}, names)
+	})
 }
