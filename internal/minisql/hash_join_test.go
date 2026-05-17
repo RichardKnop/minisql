@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestFormatHashKeyPart(t *testing.T) {
+func TestAppendHashKeyPart(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -30,12 +30,12 @@ func TestFormatHashKeyPart(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tc.want, formatHashKeyPart(tc.input))
+			assert.Equal(t, tc.want, string(appendHashKeyPart(nil, tc.input)))
 		})
 	}
 }
 
-func TestBuildSideHashKey(t *testing.T) {
+func TestAppendHashKey_BuildSide(t *testing.T) {
 	t.Parallel()
 
 	cols := []Column{
@@ -55,16 +55,16 @@ func TestBuildSideHashKey(t *testing.T) {
 			{Valid: true, Value: int64(1)},
 			{Valid: true, Value: "sports"},
 		})
-		assert.Equal(t, "sports", buildSideHashKey(join, row))
+		assert.Equal(t, "sports", string(appendHashKey(nil, join, row, "", 0, true)))
 	})
 
-	t.Run("NULL value returns empty string", func(t *testing.T) {
+	t.Run("NULL value returns nil", func(t *testing.T) {
 		t.Parallel()
 		row := NewRowWithValues(cols, []OptionalValue{
 			{Valid: true, Value: int64(1)},
 			{Valid: false},
 		})
-		assert.Equal(t, "", buildSideHashKey(join, row))
+		assert.Nil(t, appendHashKey(nil, join, row, "", 0, true))
 	})
 
 	t.Run("composite key joins parts with null byte", func(t *testing.T) {
@@ -79,11 +79,11 @@ func TestBuildSideHashKey(t *testing.T) {
 			{Valid: true, Value: int64(7)},
 			{Valid: true, Value: "music"},
 		})
-		assert.Equal(t, "7\x00music", buildSideHashKey(join2, row))
+		assert.Equal(t, "7\x00music", string(appendHashKey(nil, join2, row, "", 0, true)))
 	})
 }
 
-func TestProbeSideHashKey(t *testing.T) {
+func TestAppendHashKey_ProbeSide(t *testing.T) {
 	t.Parallel()
 
 	cols := []Column{
@@ -102,7 +102,7 @@ func TestProbeSideHashKey(t *testing.T) {
 			{Valid: true, Value: int64(5)},
 			{Valid: true, Value: "alice"},
 		})
-		assert.Equal(t, "5", probeSideHashKey(join, row, "u", 0))
+		assert.Equal(t, "5", string(appendHashKey(nil, join, row, "u", 0, false)))
 	})
 
 	t.Run("joinIndex 1 uses alias-prefixed column name", func(t *testing.T) {
@@ -112,16 +112,16 @@ func TestProbeSideHashKey(t *testing.T) {
 		row := NewRowWithValues(prefixedCols, []OptionalValue{
 			{Valid: true, Value: int64(5)},
 		})
-		assert.Equal(t, "5", probeSideHashKey(join, row, "u", 1))
+		assert.Equal(t, "5", string(appendHashKey(nil, join, row, "u", 1, false)))
 	})
 
-	t.Run("NULL probe key returns empty string", func(t *testing.T) {
+	t.Run("NULL probe key returns nil", func(t *testing.T) {
 		t.Parallel()
 		row := NewRowWithValues(cols, []OptionalValue{
 			{Valid: false},
 			{Valid: true, Value: "alice"},
 		})
-		assert.Equal(t, "", probeSideHashKey(join, row, "u", 0))
+		assert.Nil(t, appendHashKey(nil, join, row, "u", 0, false))
 	})
 }
 
