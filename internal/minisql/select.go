@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"go.uber.org/zap"
@@ -259,18 +260,38 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row)
 		}
 	}
 
+	// Pre-compute column index for each aggregate's source column to avoid
+	// per-row linear scans through column names.
+	aggColIdx := make([]int, len(stmt.Aggregates))
+	for i, agg := range stmt.Aggregates {
+		aggColIdx[i] = -1
+		if agg.Column == "" {
+			continue
+		}
+		for j, col := range stmt.Columns {
+			if col.Name == agg.Column {
+				aggColIdx[i] = j
+				break
+			}
+		}
+	}
+
 	for _, row := range rows {
 		for i, agg := range stmt.Aggregates {
 			switch agg.Kind {
 			case AggregateCount:
-				states[i].count += 1
+				states[i].count++
 
 			case AggregateSum, AggregateAvg:
-				val, ok := row.GetValue(agg.Column)
-				if !ok || !val.Valid {
-					continue // SQL aggregate functions ignore NULLs
+				colIdx := aggColIdx[i]
+				if colIdx < 0 || colIdx >= len(row.Values) {
+					continue
 				}
-				states[i].count += 1
+				val := row.Values[colIdx]
+				if !val.Valid {
+					continue
+				}
+				states[i].count++
 				states[i].hasValue = true
 				if states[i].useIntSum {
 					switch v := val.Value.(type) {
@@ -289,8 +310,12 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row)
 				}
 
 			case AggregateMin:
-				val, ok := row.GetValue(agg.Column)
-				if !ok || !val.Valid {
+				colIdx := aggColIdx[i]
+				if colIdx < 0 || colIdx >= len(row.Values) {
+					continue
+				}
+				val := row.Values[colIdx]
+				if !val.Valid {
 					continue
 				}
 				if !states[i].hasValue || compareValues(val, states[i].min) < 0 {
@@ -299,8 +324,12 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row)
 				}
 
 			case AggregateMax:
-				val, ok := row.GetValue(agg.Column)
-				if !ok || !val.Valid {
+				colIdx := aggColIdx[i]
+				if colIdx < 0 || colIdx >= len(row.Values) {
+					continue
+				}
+				val := row.Values[colIdx]
+				if !val.Valid {
 					continue
 				}
 				if !states[i].hasValue || compareValues(val, states[i].max) > 0 {
@@ -371,15 +400,21 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row)
 	}, nil
 }
 
-// groupState holds per-group accumulators for a GROUP BY query.
-type groupState struct {
-	groupValues []OptionalValue // values of the GROUP BY columns for this group
-	aggStates   []aggState
+// groupEntry holds per-group state offsets into the shared flat pools.
+// Using flat pools eliminates one heap allocation per group for aggStates and
+// groupValues slices. Index-based access remains safe across pool reallocations
+// because Go copies pool contents on grow.
+type groupEntry struct {
+	aggStateStart int32
+	groupValStart int32
 }
 
 func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (StatementResult, error) {
+	numAggs := len(stmt.Aggregates)
+	numGroupBy := len(stmt.GroupBy)
+
 	// Determine integer vs float accumulation mode for SUM/AVG per aggregate.
-	useIntSum := make([]bool, len(stmt.Aggregates))
+	useIntSum := make([]bool, numAggs)
 	for i, agg := range stmt.Aggregates {
 		if agg.Kind != AggregateSum && agg.Kind != AggregateAvg {
 			continue
@@ -389,92 +424,164 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 		}
 	}
 
-	// Build a name→index map for GROUP BY fields (for looking up values after scan).
-	groupByIdx := make(map[string]int, len(stmt.GroupBy))
+	// Pre-compute column index for each GROUP BY field (avoids per-row linear scans).
+	groupByColIdx := make([]int, numGroupBy)
 	for i, f := range stmt.GroupBy {
-		groupByIdx[f.Name] = i
+		groupByColIdx[i] = groupByColumnIndex(stmt.Columns, f)
 	}
 
-	// groups maps a group key string to its accumulated state.
-	// groupOrder preserves insertion order so output is deterministic.
-	groups := make(map[string]*groupState)
-	groupOrder := make([]string, 0)
+	// Pre-compute column index for each aggregate's source column.
+	aggColIdx := make([]int, numAggs)
+	for i, agg := range stmt.Aggregates {
+		aggColIdx[i] = -1
+		if agg.Column == "" || agg.Kind == 0 || agg.Kind == AggregateCount {
+			continue
+		}
+		for j, col := range stmt.Columns {
+			if col.Name == agg.Column {
+				aggColIdx[i] = j
+				break
+			}
+		}
+	}
+
+	// Pre-compute field → GROUP BY index for result emission (avoids map lookup per group per field).
+	fieldToGroupByIdx := make([]int, numAggs)
+	for i := range stmt.Fields {
+		fieldToGroupByIdx[i] = -1
+		if stmt.Aggregates[i].Kind != 0 {
+			continue
+		}
+		for j, gf := range stmt.GroupBy {
+			if gf.Name == stmt.Fields[i].Name {
+				fieldToGroupByIdx[i] = j
+				break
+			}
+		}
+	}
+
+	// Estimate initial group count for pool sizing — avoids repeated small reallocations
+	// in the common case where groups fit within the initial capacity.
+	estGroups := len(rows) / 10
+	if estGroups < 16 {
+		estGroups = 16
+	} else if estGroups > 4096 {
+		estGroups = 4096
+	}
+
+	var (
+		groupMap     = make(map[string]int32, estGroups)
+		groupEntries = make([]groupEntry, 0, estGroups)
+		groupOrder   = make([]string, 0, estGroups)
+		// Flat pools: one allocation amortises across all groups.
+		aggStatePool = make([]aggState, 0, estGroups*numAggs)
+		groupValPool = make([]OptionalValue, 0, estGroups*numGroupBy)
+	)
+
+	// keyBuf is reused across rows; string(keyBuf) for map lookup is optimised by
+	// the Go compiler to avoid allocation when the key already exists in the map.
+	var keyBuf []byte
 
 	for _, row := range rows {
-		// Compute group key from the GROUP BY columns.
-		groupRow := row.OnlyFields(stmt.GroupBy...)
-		key := groupRow.rowDistinctKey()
+		keyBuf = buildGroupKey(keyBuf[:0], row, groupByColIdx)
 
-		gs, exists := groups[key]
+		gsIdx, exists := groupMap[string(keyBuf)]
 		if !exists {
-			states := make([]aggState, len(stmt.Aggregates))
-			for i := range states {
-				states[i].useIntSum = useIntSum[i]
+			key := string(keyBuf) // one alloc per new group
+
+			aggStart := int32(len(aggStatePool))
+			for i := range numAggs {
+				aggStatePool = append(aggStatePool, aggState{useIntSum: useIntSum[i]})
 			}
-			gs = &groupState{
-				groupValues: make([]OptionalValue, len(stmt.GroupBy)),
-				aggStates:   states,
+
+			gvStart := int32(len(groupValPool))
+			for _, colIdx := range groupByColIdx {
+				if colIdx >= 0 && colIdx < len(row.Values) {
+					groupValPool = append(groupValPool, row.Values[colIdx])
+				} else {
+					groupValPool = append(groupValPool, OptionalValue{})
+				}
 			}
-			// Record the group column values from this first row.
-			copy(gs.groupValues, groupRow.Values)
-			groups[key] = gs
+
+			gsIdx = int32(len(groupEntries))
+			groupEntries = append(groupEntries, groupEntry{
+				aggStateStart: aggStart,
+				groupValStart: gvStart,
+			})
+			groupMap[key] = gsIdx
 			groupOrder = append(groupOrder, key)
 		}
 
-		// Accumulate aggregates for this group.
+		// Accumulate aggregates using pool indices — no pointer indirection through groupState.
+		aggBase := int(groupEntries[gsIdx].aggStateStart)
 		for i, agg := range stmt.Aggregates {
 			switch agg.Kind {
 			case 0:
 				// Non-aggregate GROUP BY column — no accumulation needed.
 			case AggregateCount:
-				gs.aggStates[i].count += 1
+				aggStatePool[aggBase+i].count++
 			case AggregateSum, AggregateAvg:
-				val, ok := row.GetValue(agg.Column)
-				if !ok || !val.Valid {
+				colIdx := aggColIdx[i]
+				if colIdx < 0 || colIdx >= len(row.Values) {
 					continue
 				}
-				gs.aggStates[i].count += 1
-				gs.aggStates[i].hasValue = true
-				if gs.aggStates[i].useIntSum {
+				val := row.Values[colIdx]
+				if !val.Valid {
+					continue
+				}
+				aggStatePool[aggBase+i].count++
+				aggStatePool[aggBase+i].hasValue = true
+				if aggStatePool[aggBase+i].useIntSum {
 					switch v := val.Value.(type) {
 					case int64:
-						gs.aggStates[i].sumI += v
+						aggStatePool[aggBase+i].sumI += v
 					case int32:
-						gs.aggStates[i].sumI += int64(v)
+						aggStatePool[aggBase+i].sumI += int64(v)
 					}
 				} else {
 					switch v := val.Value.(type) {
 					case float64:
-						gs.aggStates[i].sumF += v
+						aggStatePool[aggBase+i].sumF += v
 					case float32:
-						gs.aggStates[i].sumF += float64(v)
+						aggStatePool[aggBase+i].sumF += float64(v)
 					}
 				}
 			case AggregateMin:
-				val, ok := row.GetValue(agg.Column)
-				if !ok || !val.Valid {
+				colIdx := aggColIdx[i]
+				if colIdx < 0 || colIdx >= len(row.Values) {
 					continue
 				}
-				if !gs.aggStates[i].hasValue || compareValues(val, gs.aggStates[i].min) < 0 {
-					gs.aggStates[i].min = val
-					gs.aggStates[i].hasValue = true
+				val := row.Values[colIdx]
+				if !val.Valid {
+					continue
+				}
+				if !aggStatePool[aggBase+i].hasValue || compareValues(val, aggStatePool[aggBase+i].min) < 0 {
+					aggStatePool[aggBase+i].min = val
+					aggStatePool[aggBase+i].hasValue = true
 				}
 			case AggregateMax:
-				val, ok := row.GetValue(agg.Column)
-				if !ok || !val.Valid {
+				colIdx := aggColIdx[i]
+				if colIdx < 0 || colIdx >= len(row.Values) {
 					continue
 				}
-				if !gs.aggStates[i].hasValue || compareValues(val, gs.aggStates[i].max) > 0 {
-					gs.aggStates[i].max = val
-					gs.aggStates[i].hasValue = true
+				val := row.Values[colIdx]
+				if !val.Valid {
+					continue
+				}
+				if !aggStatePool[aggBase+i].hasValue || compareValues(val, aggStatePool[aggBase+i].max) > 0 {
+					aggStatePool[aggBase+i].max = val
+					aggStatePool[aggBase+i].hasValue = true
 				}
 			}
 		}
 	}
 	_ = ctx // ctx kept for signature compat; no blocking ops remain
 
+	nFields := len(stmt.Fields)
+	nGroups := len(groupOrder)
+
 	// Build result column metadata.
-	resultColumns := make([]Column, len(stmt.Fields))
+	resultColumns := make([]Column, nFields)
 	for i, field := range stmt.Fields {
 		agg := stmt.Aggregates[i]
 		colName := field.OutputName() // respects AS alias
@@ -502,22 +609,27 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 		}
 	}
 
-	// Build one result row per group, applying HAVING filter.
-	resultRows := make([]Row, 0, len(groupOrder))
-	for _, key := range groupOrder {
-		gs := groups[key]
-		values := make([]OptionalValue, len(stmt.Fields))
+	// Preallocate one flat block for all result values — one alloc covers every group.
+	allResultValues := make([]OptionalValue, nGroups*nFields)
+	resultRows := make([]Row, 0, nGroups)
+
+	for gi, key := range groupOrder {
+		gsIdx := groupMap[key]
+		aggBase := int(groupEntries[gsIdx].aggStateStart)
+		gvBase := int(groupEntries[gsIdx].groupValStart)
+
+		values := allResultValues[gi*nFields : (gi+1)*nFields]
+
 		for i, agg := range stmt.Aggregates {
 			switch agg.Kind {
 			case 0:
-				// Look up the group column value by field name.
-				if idx, ok := groupByIdx[stmt.Fields[i].Name]; ok {
-					values[i] = gs.groupValues[idx]
+				if j := fieldToGroupByIdx[i]; j >= 0 {
+					values[i] = groupValPool[gvBase+j]
 				}
 			case AggregateCount:
-				values[i] = OptionalValue{Valid: true, Value: gs.aggStates[i].count}
+				values[i] = OptionalValue{Valid: true, Value: aggStatePool[aggBase+i].count}
 			case AggregateSum:
-				st := gs.aggStates[i]
+				st := aggStatePool[aggBase+i]
 				if st.hasValue {
 					if st.useIntSum {
 						values[i] = OptionalValue{Valid: true, Value: st.sumI}
@@ -526,7 +638,7 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 					}
 				}
 			case AggregateAvg:
-				st := gs.aggStates[i]
+				st := aggStatePool[aggBase+i]
 				if st.hasValue && st.count > 0 {
 					if st.useIntSum {
 						values[i] = OptionalValue{Valid: true, Value: float64(st.sumI) / float64(st.count)}
@@ -535,12 +647,12 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 					}
 				}
 			case AggregateMin:
-				if gs.aggStates[i].hasValue {
-					values[i] = gs.aggStates[i].min
+				if aggStatePool[aggBase+i].hasValue {
+					values[i] = aggStatePool[aggBase+i].min
 				}
 			case AggregateMax:
-				if gs.aggStates[i].hasValue {
-					values[i] = gs.aggStates[i].max
+				if aggStatePool[aggBase+i].hasValue {
+					values[i] = aggStatePool[aggBase+i].max
 				}
 			}
 		}
@@ -1853,6 +1965,70 @@ func appendOperandSourceFields(fields []Field, operand Operand) []Field {
 		}
 	}
 	return fields
+}
+
+// buildGroupKey appends a collision-free group key to buf using pre-computed column indices.
+// The encoding matches rowDistinctKey so the two functions are interchangeable for the same values.
+// buf must be reset (zero-length) by the caller before each call; the returned slice is buf grown in place.
+func buildGroupKey(buf []byte, row Row, colIndices []int) []byte {
+	for i, colIdx := range colIndices {
+		if i > 0 {
+			buf = append(buf, '\x1f')
+		}
+		if colIdx < 0 || colIdx >= len(row.Values) {
+			buf = append(buf, "null"...)
+			continue
+		}
+		v := row.Values[colIdx]
+		if !v.Valid {
+			buf = append(buf, "null"...)
+			continue
+		}
+		switch val := v.Value.(type) {
+		case TextPointer:
+			buf = append(buf, 't')
+			buf = strconv.AppendInt(buf, int64(val.Length), 10)
+			buf = append(buf, ':')
+			buf = append(buf, val.Data...)
+		case bool:
+			buf = append(buf, "b:"...)
+			buf = strconv.AppendBool(buf, val)
+		case int64:
+			buf = append(buf, "i64:"...)
+			buf = strconv.AppendInt(buf, val, 10)
+		case int32:
+			buf = append(buf, "i32:"...)
+			buf = strconv.AppendInt(buf, int64(val), 10)
+		case float64:
+			buf = append(buf, "f64:"...)
+			buf = strconv.AppendFloat(buf, val, 'g', -1, 64)
+		case float32:
+			buf = append(buf, "f32:"...)
+			buf = strconv.AppendFloat(buf, float64(val), 'g', -1, 32)
+		default:
+			buf = fmt.Appendf(buf, "?:%v", val)
+		}
+	}
+	return buf
+}
+
+// groupByColumnIndex resolves the index of field f in cols.
+// Tries the alias-qualified name first (e.g. "t.age"), then falls back to the bare name.
+func groupByColumnIndex(cols []Column, f Field) int {
+	if f.AliasPrefix != "" {
+		qualified := f.AliasPrefix + "." + f.Name
+		for i, col := range cols {
+			if col.Name == qualified {
+				return i
+			}
+		}
+	}
+	for i, col := range cols {
+		if col.Name == f.Name {
+			return i
+		}
+	}
+	return -1
 }
 
 // rowDistinctKey builds a string key from a projected row's values for DISTINCT deduplication.

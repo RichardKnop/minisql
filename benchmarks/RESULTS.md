@@ -1,3 +1,22 @@
+### 2026-05-17 — GROUP BY allocation pass
+
+Five allocation sources eliminated from the GROUP BY aggregation hot path:
+
+1. **Pre-computed column indices** — `groupByColIdx` and `aggColIdx` resolve GROUP BY field and aggregate column positions once before the row loop, replacing O(n) name scans (`GetValue` / `OnlyFields`) with O(1) index reads per row.
+2. **Eliminated `OnlyFields` + `rowDistinctKey` per row** — replaced with `buildGroupKey`, which builds the key directly from pre-computed indices into a reusable `[]byte` buffer reset each row. The Go compiler optimises `map[string][string([]byte)]` to avoid allocation on lookup for existing groups.
+3. **Flat `aggStatePool`** — one `[]aggState` slice amortises all per-group accumulator allocations. Index-based access (`aggStatePool[aggBase+i]`) remains safe across pool reallocations because Go copies pool contents on grow.
+4. **Flat `groupValPool`** — same pattern for per-group GROUP BY column values, eliminating a `make([]OptionalValue, numGroupBy)` per group.
+5. **Flat result-values block** — one `make([]OptionalValue, nGroups*nFields)` covers every group's result row, replacing a `make` per group during result emission.
+
+Pre-computed `fieldToGroupByIdx` also removes the `groupByIdx map[string]int` lookup during result emission.
+
+| Benchmark | Before | After | Alloc Before | Alloc After | SQLite | Ratio (after vs SQLite) |
+|---|---:|---:|---:|---:|---:|---:|
+| GroupBy_Aggregate/minisql | ~3.47 ms/op | ~2.19 ms/op | ~5.16 MiB/op | ~3.83 MiB/op | ~2.18 ms/op | **1.0×** |
+| Having_Filter/minisql | — | ~2.15 ms/op | — | ~3.75 MiB/op | ~1.94 ms/op | 1.1× |
+
+77% allocation reduction (−40,306 allocs/op). GROUP BY latency now **at parity with SQLite** (2.19ms vs 2.18ms).
+
 ### 2026-05-17 — CTE materialisation double-allocation elimination
 
 Two heap allocation sources eliminated from CTE execution:
