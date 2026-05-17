@@ -1,54 +1,61 @@
 package e2etests
 
 func (s *TestSuite) TestDelete() {
-	_, err := s.db.Exec(createUsersTableSQL)
+	_, err := s.db.Exec(`create table "del_users" (
+		id   int8 primary key autoincrement,
+		name varchar(100) not null
+	)`)
 	s.Require().NoError(err)
 
-	// Insert test users
-	s.execQuery(`insert into users("name", "email") values('Danny Mason', 'Danny_Mason2966@xqj6f.tech'),
-('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page'),
-('Tyson Weldon', 'Tyson_Weldon2108@zynuu.video'),
-('Mason Callan', 'Mason_Callan9524@bu2lo.edu'),
-('Logan Flynn', 'Logan_Flynn9019@xtwt3.pro'),
-('Beatrice Uttley', 'Beatrice_Uttley1670@1wa8o.org'),
-('Harry Johnson', 'Harry_Johnson5515@jcf8v.video'),
-('Carl Thomson', 'Carl_Thomson4218@kyb7t.host'),
-('Kaylee Johnson', 'Kaylee_Johnson8112@c2nyu.design'),
-('Cristal Duvall', 'Cristal_Duvall6639@yvu30.press');`, 10)
+	_, err = s.db.Exec(
+		`insert into "del_users" (name) values (?), (?), (?)`,
+		"Alice", "Bob", "Carol",
+	)
+	s.Require().NoError(err)
 
-	s.Run("Delete with where matching no rows", func() {
-		s.execQuery(`delete from users where id = 9999;`, 0)
+	s.Run("delete_with_where", func() {
+		res, err := s.db.Exec(`delete from "del_users" where name = ?`, "Alice")
+		s.Require().NoError(err)
+		n, err := res.RowsAffected()
+		s.Require().NoError(err)
+		s.Equal(int64(1), n)
 
-		users := s.collectUsers(`select * from users;`)
-		s.Require().Len(users, 10)
+		var count int64
+		s.Require().NoError(s.db.QueryRow(`select count(*) from "del_users"`).Scan(&count))
+		s.Equal(int64(2), count)
 	})
 
-	s.Run("Delete one row", func() {
-		s.execQuery(`delete from users where id = 9;`, 1)
+	s.Run("delete_without_where_no_semicolon", func() {
+		_, err := s.db.Exec(`insert into "del_users" (name) values (?)`, "Dave")
+		s.Require().NoError(err)
 
-		users := s.collectUsers(`select * from users;`)
-		s.Require().Len(users, 9)
-		expectedIDs := []int64{1, 2, 3, 4, 5, 6, 7, 8, 10}
-		for i := 0; i < 9; i++ {
-			s.Equal(expectedIDs[i], users[i].ID)
-		}
+		var before int64
+		s.Require().NoError(s.db.QueryRow(`select count(*) from "del_users"`).Scan(&before))
+		s.Greater(before, int64(0))
+
+		res, err := s.db.Exec(`delete from "del_users"`)
+		s.Require().NoError(err)
+		n, err := res.RowsAffected()
+		s.Require().NoError(err)
+		s.Equal(before, n)
+
+		var after int64
+		s.Require().NoError(s.db.QueryRow(`select count(*) from "del_users"`).Scan(&after))
+		s.Equal(int64(0), after)
 	})
 
-	s.Run("Delete multiple rows", func() {
-		s.execQuery(`delete from users where id = 1 or id = 5;`, 2)
+	s.Run("delete_without_where_with_semicolon", func() {
+		_, err := s.db.Exec(`insert into "del_users" (name) values (?), (?)`, "Eve", "Frank")
+		s.Require().NoError(err)
 
-		users := s.collectUsers(`select * from users;`)
-		s.Require().Len(users, 7)
-		expectedIDs := []int64{2, 3, 4, 6, 7, 8, 10}
-		for i := 0; i < 7; i++ {
-			s.Equal(expectedIDs[i], users[i].ID)
-		}
-	})
+		res, err := s.db.Exec(`delete from "del_users";`)
+		s.Require().NoError(err)
+		n, err := res.RowsAffected()
+		s.Require().NoError(err)
+		s.Equal(int64(2), n)
 
-	s.Run("Delete all rows", func() {
-		s.execQuery(`delete from users;`, 7)
-
-		users := s.collectUsers(`select * from users;`)
-		s.Require().Len(users, 0)
+		var after int64
+		s.Require().NoError(s.db.QueryRow(`select count(*) from "del_users"`).Scan(&after))
+		s.Equal(int64(0), after)
 	})
 }

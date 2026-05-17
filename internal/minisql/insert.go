@@ -34,6 +34,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 	// hits, which update existing rows without changing the total count).
 	newRowsInserted := 0
 	var returningRows []Row
+	var lastInsertID int64
 	for insertIdx, values := range stmt.Inserts {
 		switch stmt.ConflictAction {
 		case ConflictActionDoNothing:
@@ -205,6 +206,19 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 		rowsInserted += 1
 		newRowsInserted += 1
 
+		// Track the PK value of this newly inserted row for LastInsertId.
+		// Works for single-column int8 PKs (autoincrement and explicit).
+		// For composite or non-int8 PKs, lastInsertID stays 0.
+		if t.HasPrimaryKey() && len(t.PrimaryKey.Columns) == 1 {
+			if pkIdx := stmt.ColumnIdx(t.PrimaryKey.Columns[0].Name); pkIdx >= 0 && pkIdx < len(values) {
+				if v := values[pkIdx]; v.Valid {
+					if id, ok := v.Value.(int64); ok {
+						lastInsertID = id
+					}
+				}
+			}
+		}
+
 		if insertIdx == len(stmt.Inserts)-1 {
 			break
 		}
@@ -242,7 +256,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 	}
 
-	result := StatementResult{RowsAffected: rowsInserted}
+	result := StatementResult{RowsAffected: rowsInserted, LastInsertID: lastInsertID}
 	if len(stmt.ReturningFields) > 0 {
 		result.Columns = returningColumns(stmt.ReturningFields, t.Columns)
 		result.Rows = NewSliceIterator(returningRows)

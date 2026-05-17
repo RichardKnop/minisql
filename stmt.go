@@ -70,7 +70,7 @@ func (s Stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (result
 		return nil, err
 	}
 
-	return Result{rowsAffected: int64(stmtResult.RowsAffected)}, nil
+	return Result{rowsAffected: int64(stmtResult.RowsAffected), lastInsertID: stmtResult.LastInsertID}, nil
 }
 
 // Query executes a query that may return rows, such as a

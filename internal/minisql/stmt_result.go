@@ -96,5 +96,5 @@ type StatementResult struct {
 	Rows         Iterator
 	Columns      []Column
 	RowsAffected int
-	LastInsertId int64
+	LastInsertID int64
 }

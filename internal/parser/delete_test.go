@@ -31,6 +31,17 @@ func TestParse_Delete(t *testing.T) {
 			nil,
 		},
 		{
+			"DELETE without WHERE and without semicolon works",
+			"DELETE FROM 'a'",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Delete,
+					TableName: "a",
+				},
+			},
+			nil,
+		},
+		{
 			"DELETE with empty WHERE fails",
 			"DELETE FROM 'a' WHERE",
 			nil,
