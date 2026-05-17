@@ -1116,23 +1116,20 @@ func (p QueryPlan) executeHashJoinForRow(ctx context.Context, currentRow Row, jo
 
 	bucket := hashTables[joinIndex]
 
-	probeKey := probeSideHashKey(join, currentRow, fromAlias, joinIndex)
-	var matchingRows []Row
-	if probeKey != "" && bucket != nil {
-		// Check the Bloom filter before touching the hash map: if the filter
-		// says the key is definitely absent, skip the map probe entirely.
-		if bucket.filter.MayContain([]byte(probeKey)) {
-			matchingRows = bucket.rows[probeKey]
-		}
-	}
+	// Build the probe key into a stack-local buffer; nil means a NULL join column.
+	var probeKeyBuf [128]byte
+	probeKey := appendHashKey(probeKeyBuf[:0], join, currentRow, fromAlias, joinIndex, false)
 
-	// Semi-join / anti-semi-join: check existence only, emit the outer row
-	// (not the combined row).  At joinIndex==0 the outer row has plain column
-	// names; prefix them with fromAlias so downstream projection resolves
-	// alias-qualified SELECT fields (e.g. "u.name") correctly.
+	// Semi-join / anti-semi-join: check existence only — no need to load inner
+	// rows.  The build phase populated bucket.present (not bucket.rows).
 	if join.Type == Semi || join.Type == AntiSemi {
-		emit := join.Type == Semi && len(matchingRows) > 0
-		emit = emit || (join.Type == AntiSemi && len(matchingRows) == 0)
+		var found bool
+		if probeKey != nil && bucket != nil && bucket.filter.MayContain(probeKey) {
+			// Go compiler optimises map[string]struct{}[string([]byte)] to avoid
+			// allocation when the key is already present.
+			_, found = bucket.present[string(probeKey)]
+		}
+		emit := (join.Type == Semi && found) || (join.Type == AntiSemi && !found)
 		if emit {
 			outerRow := currentRow
 			if joinIndex == 0 {
@@ -1141,6 +1138,16 @@ func (p QueryPlan) executeHashJoinForRow(ctx context.Context, currentRow Row, jo
 			return p.executeJoinsForRow(ctx, nil, outerRow, joinIndex+1, filteredPipe, hashTables, memos)
 		}
 		return nil
+	}
+
+	// Regular join: retrieve matching inner rows from bucket.rows.
+	var matchingRows []Row
+	if probeKey != nil && bucket != nil {
+		// Check the Bloom filter before touching the hash map: if the filter
+		// says the key is definitely absent, skip the map probe entirely.
+		if bucket.filter.MayContain(probeKey) {
+			matchingRows = bucket.rows[string(probeKey)]
+		}
 	}
 
 	matched := false

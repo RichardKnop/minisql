@@ -1,3 +1,19 @@
+### 2026-05-17 — IN-subquery semi-join allocation pass
+
+Three allocation sources eliminated from the IN (subquery) → semi-join hot path:
+
+1. **Existence-only build table** — `hashJoinBucket.present map[string]struct{}` replaces `hashJoinBucket.rows map[string][]Row` for Semi/AntiSemi joins. The build phase no longer stores full inner rows or allocates a `[]Row` per distinct key — only the key set is stored.
+2. **Reused `[]byte` key buffer in build phase** — `appendHashKey` replaces `buildSideHashKey` (`make([]string, n)` + `strings.Join` = 2 allocs/row). The build callback resets a single `keyBuf` slice each inner row; one `string(keyBuf)` allocation happens only for new distinct keys.
+3. **Stack-local probe key buffer** — `executeHashJoinForRow` builds the probe key into a `[128]byte` stack array (via `appendHashKey`), avoiding the `make([]string, n)` + `strings.Join` pair that the old `probeSideHashKey` performed per outer row.
+
+`formatHashKeyPart` (returned allocated `string`) replaced by `appendHashKeyPart` (appends into caller buffer, zero allocs).
+
+| Benchmark | Before | After | Alloc Before | Alloc After | SQLite | Ratio (after vs SQLite) |
+|---|---:|---:|---:|---:|---:|---:|
+| Subquery_InList/minisql | ~10.7 ms/op | ~9.6 ms/op | ~8.31 MiB/op | ~6.70 MiB/op | ~3.7 ms/op | **2.6×** |
+
+~11% allocation reduction (−24,900 allocs/op, 219,580 → 194,680). ~10% latency reduction. Memory dropped from 8.31 MiB to ~6.70 MiB/op.
+
 ### 2026-05-17 — GROUP BY allocation pass
 
 Five allocation sources eliminated from the GROUP BY aggregation hot path:
