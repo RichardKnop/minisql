@@ -18,6 +18,12 @@ const (
 	Right
 	// FullOuter is a FULL OUTER JOIN — all rows from both tables, with NULLs where there is no match.
 	FullOuter
+	// Semi is a semi-join: emit the outer row when at least one matching inner row exists.
+	// Used internally to implement IN (subquery) without materialising the subquery.
+	Semi
+	// AntiSemi is an anti-semi-join: emit the outer row when no matching inner row exists.
+	// Used internally to implement NOT IN (subquery).
+	AntiSemi
 )
 
 // Join describes a single JOIN clause within a SELECT statement, including the

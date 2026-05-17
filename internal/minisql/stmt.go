@@ -1645,9 +1645,20 @@ func (s Statement) validateSelect(table *Table) error {
 		tableMap := map[string]struct{}{table.Name: {}}
 		aliasMap := map[string]struct{}{}
 		if s.TableAlias == "" {
-			return errors.New("table must have alias when query contains JOIN")
+			// Synthetic semi/anti-semi-only joins do not require an outer alias.
+			allSemi := true
+			for _, j := range s.Joins {
+				if j.Type != Semi && j.Type != AntiSemi {
+					allSemi = false
+					break
+				}
+			}
+			if !allSemi {
+				return errors.New("table must have alias when query contains JOIN")
+			}
+		} else {
+			aliasMap[s.TableAlias] = struct{}{}
 		}
-		aliasMap[s.TableAlias] = struct{}{}
 		if err := validateJoinTree(s.Joins, tableMap, aliasMap); err != nil {
 			return err
 		}
