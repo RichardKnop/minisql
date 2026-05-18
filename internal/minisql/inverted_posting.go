@@ -223,6 +223,44 @@ func groupInvertedPostings(mode invertedPostingMode, postings []invertedPosting)
 	return grouped
 }
 
+// groupInvertedPostingsInPlace sorts and groups postings in-place, returning a
+// subslice of the input. The caller must not retain the input slice after this
+// call. Unlike groupInvertedPostings it avoids the up-front copy, so the common
+// case (all unique RowIDs) has zero allocations. Used on the hot insert/update
+// path where the caller always owns the slice.
+func groupInvertedPostingsInPlace(mode invertedPostingMode, postings []invertedPosting) []invertedPosting {
+	if len(postings) == 0 {
+		return postings
+	}
+	if len(postings) == 1 {
+		if mode == invertedPostingModePositions {
+			slices.Sort(postings[0].Positions)
+			postings[0].Positions = slices.Compact(postings[0].Positions)
+		}
+		return postings
+	}
+	slices.SortFunc(postings, compareInvertedPostings)
+	out := 0
+	for i := 1; i < len(postings); i++ {
+		if postings[out].RowID == postings[i].RowID {
+			if mode == invertedPostingModePositions {
+				postings[out].Positions = append(postings[out].Positions, postings[i].Positions...)
+			}
+		} else {
+			out++
+			postings[out] = postings[i]
+		}
+	}
+	postings = postings[:out+1]
+	if mode == invertedPostingModePositions {
+		for i := range postings {
+			slices.Sort(postings[i].Positions)
+			postings[i].Positions = slices.Compact(postings[i].Positions)
+		}
+	}
+	return postings
+}
+
 // compareInvertedPostings orders postings by row ID, then by first position for
 // positional postings. Canonical ordering keeps encoded payloads deterministic.
 func compareInvertedPostings(a, b invertedPosting) int {
