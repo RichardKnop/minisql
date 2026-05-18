@@ -81,11 +81,11 @@ the same session before this baseline was taken.
 | Search_SingleTerm/medium (10 matches) | 15,909 | — | 11,676 | **1.36×** |
 | Search_SingleTerm/common (1k matches) | 15,762 | — | 66,954 | **0.24×** ✓ |
 | Search_MultiTermAND (10 matches) | 31,044 | — | 38,480 | **0.81×** ✓ |
-| Search_Phrase (100 matches) | 98,544 | — | 28,108 | **3.51×** |
+| Search_Phrase (100 matches) | 55,591 | — | 34,185 | **1.63×** |
 | Update_WithIndex | 152,371 | 1,114 | 126,335 | **1.21×** |
 | Delete_WithIndex | 349,550 | 3,158 | 178,476 | **1.96×** |
 
-**Search improvements (2026-05-18):** Parser pre-computes `strings.ToUpper` once per query (was per-token×keyword). Single-term COUNT(\*) uses `DocFreq` from index entry header instead of iterating all postings — O(log N) vs O(N). Rare/medium dropped from ~11× to ~1.5×; common flipped from 8.9× slower to 4× faster than SQLite.
+**Search improvements (2026-05-18/19):** Parser pre-computes `strings.ToUpper` once per query (was per-token×keyword). Single-term COUNT(\*) uses `DocFreq` from the index entry header — O(log N) vs O(N). Rare/medium dropped from ~11× to ~1.5×; common flipped to 4× faster than SQLite. Phrase search: replaced `map[RowID][]uint32` postings with sorted `[]invertedPosting` + binary search (eliminating per-row map allocations); phrase adjacency check replaced with zero-alloc binary search on sorted position arrays; COUNT(\*) with index-covered predicates skips B-tree row fetch entirely. Phrase dropped from 9.5× to 1.6×.
 
 ### JSON INVERTED INDEX
 
@@ -125,7 +125,7 @@ Ranked by ratio (excluding Vacuum):
 | CTE_Materialise | 4.25× | 14,134 |
 | FullText_Insert_WithIndex | 3.76× | 3,164 |
 | FullText_BuildIndex | 3.64× | 196,574 |
-| FullText_Search_Phrase | 3.51× | — |
+| FullText_Search_Phrase | 1.63× | — |
 | CountStar | 3.02× | 706 |
 | Join_Left_UnmatchedRows | 2.84× | 203,249 |
 | WAL_Checkpoint | 2.62× | 305 |
