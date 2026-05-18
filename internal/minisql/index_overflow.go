@@ -104,15 +104,16 @@ func (h *IndexOverflowPage) RemoveLastRowID() RowID {
 
 func appendRowID[T IndexKey](ctx context.Context, pager TxPager, node *IndexNode[T], cellIdx uint32, rowID RowID) error {
 	cell := node.Cells[cellIdx]
-	if cell.Overflow == 0 && len(cell.RowIDs) < MaxInlineRowIDs {
+	if cell.Overflow == 0 && len(cell.RowIDs) < MaxInlineRowIDs && node.freeBytes >= 8 {
 		// Just append to inline row IDs; each inline RowID is 8 bytes.
 		node.Cells[cellIdx].RowIDs = append(node.Cells[cellIdx].RowIDs, rowID)
 		node.Cells[cellIdx].InlineRowIDs += 1
 		node.freeBytes -= 8
 		return nil
 	}
-	if cell.Overflow == 0 && len(cell.RowIDs) == MaxInlineRowIDs {
-		// First overflow page
+	if cell.Overflow == 0 {
+		// No room for another inline row ID (either at MaxInlineRowIDs or node is
+		// out of space). Create the first overflow page.
 		freePage, err := pager.GetFreePage(ctx)
 		if err != nil {
 			return err
@@ -164,8 +165,8 @@ func removeRowID[T IndexKey](ctx context.Context, pager TxPager, node *IndexNode
 	// For non-unique index, we need to remove specific row ID,
 	// check for overflow page to free and potentially remove the key
 	// if no row IDs left.
-	if node.Cells[cellIdx].InlineRowIDs == 1 {
-		// If there is only one inline row ID and it matches, remove the key
+	if node.Cells[cellIdx].InlineRowIDs == 1 && node.Cells[cellIdx].Overflow == 0 {
+		// Only one row ID total with no overflow — remove the whole key.
 		if node.Cells[cellIdx].RowIDs[0] == rowID {
 			return node.DeleteKeyAndRightChild(uint32(cellIdx))
 		}
