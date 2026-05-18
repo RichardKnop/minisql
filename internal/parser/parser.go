@@ -22,11 +22,16 @@ var (
 )
 
 var (
-	identifierCharRegexp = regexp.MustCompile(`[\"a-zA-Z_0-9]`)
 	// Matches valid identifiers including qualified names (e.g., table.column, schema.table.column)
 	// Supports both quoted ("my table") and unquoted (table_name) segments
 	identifierRegexp = regexp.MustCompile(`^(\"[a-zA-Z_][a-zA-Z_0-9]*\"|[a-zA-Z_][a-zA-Z_0-9]*)(\.(\"[a-zA-Z_][a-zA-Z_0-9]*\"|[a-zA-Z_][a-zA-Z_0-9]*))*`)
 )
+
+// isIdentChar reports whether c can appear inside a SQL identifier or
+// double-quoted name (a-z, A-Z, 0-9, _, ").
+func isIdentChar(c byte) bool {
+	return c == '"' || c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
 
 var reservedWords = []string{
 	// operators
@@ -158,9 +163,10 @@ type parser struct{}
 
 type parserItem struct {
 	minisql.Statement
-	i                 int // where we are in the query
-	sql               string
-	step              step
+	i        int    // where we are in the query
+	sql      string // original (case-preserved) SQL, used for literals and identifiers
+	upperSQL string // strings.ToUpper(sql), computed once; used for keyword matching
+	step     step
 	nextUpdateField   string
 	joinInProgress    minisql.Join
 	cteNameInProgress string
@@ -177,9 +183,11 @@ func New() *parser {
 
 // Parse parses the given SQL string and returns a slice of statements.
 func (p *parser) Parse(ctx context.Context, sql string) ([]minisql.Statement, error) {
+	normalised := strings.Join(strings.Fields(sql), " ")
 	item := &parserItem{
-		sql:  strings.Join(strings.Fields(sql), " "),
-		step: stepBeginning,
+		sql:      normalised,
+		upperSQL: strings.ToUpper(normalised),
+		step:     stepBeginning,
 	}
 	statements, err := item.doParse()
 	return statements, err
@@ -439,9 +447,11 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 					all := next == "UNION ALL"
 					p.pop() // consume "UNION [ALL]"
 					// Parse the right-hand SELECT from the remaining SQL.
+					sub := p.sql[p.i:]
 					rest := &parserItem{
-						sql:  p.sql[p.i:],
-						step: stepBeginning,
+						sql:      sub,
+						upperSQL: p.upperSQL[p.i:],
+						step:     stepBeginning,
 					}
 					unionStmts, err := rest.doParse()
 					if err != nil {
@@ -539,26 +549,27 @@ func (p *parserItem) peekWithLength() (string, int) {
 		return "", 0
 	}
 
+	if p.upperSQL == "" {
+		p.upperSQL = strings.ToUpper(p.sql)
+	}
 	// First check for reserved words, however we need to be careful here. For example,
 	// we don't want to match "DESC" when the next token is "description".
 	for _, rWord := range reservedWords {
-		token := strings.ToUpper(p.sql[p.i:min(len(p.sql), p.i+len(rWord))])
-		if token != rWord {
+		end := min(len(p.upperSQL), p.i+len(rWord))
+		if p.upperSQL[p.i:end] != rWord {
 			continue
 		}
 
 		// Make sure the next character is not a continuation of an identifier
 		if p.i+len(rWord) < len(p.sql) {
-			var (
-				lastChar = p.sql[p.i+len(rWord)-1]
-				nextChar = p.sql[p.i+len(rWord)]
-			)
-			if identifierCharRegexp.MatchString(string(lastChar)) && identifierCharRegexp.MatchString(string(nextChar)) {
+			lastChar := p.sql[p.i+len(rWord)-1]
+			nextChar := p.sql[p.i+len(rWord)]
+			if isIdentChar(lastChar) && isIdentChar(nextChar) {
 				break
 			}
 		}
 
-		return token, len(token)
+		return p.upperSQL[p.i:end], len(rWord)
 	}
 
 	// Next for quoted string literals

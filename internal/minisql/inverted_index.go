@@ -632,7 +632,7 @@ func (idx *dedicatedInvertedIndex) insertEntryLeaf(ctx context.Context, pageIdx 
 	}
 
 	cellIdx, found := findInvertedEntryCell(entryPage.Cells, term)
-	allPostings := append([]invertedPosting(nil), postings...)
+	var allPostings []invertedPosting
 	if found {
 		oldCell := entryPage.Cells[cellIdx]
 		if oldCell.PostingKind == invertedPostingKindTree && len(postings) == 1 {
@@ -645,12 +645,13 @@ func (idx *dedicatedInvertedIndex) insertEntryLeaf(ctx context.Context, pageIdx 
 				return "", 0, false, nil
 			}
 		}
-		var err error
 		existingPostings, err := idx.decodeInvertedEntryCell(ctx, oldCell)
 		if err != nil {
 			return "", 0, false, err
 		}
-		allPostings = append(existingPostings, allPostings...)
+		allPostings = append(existingPostings, postings...)
+	} else {
+		allPostings = postings // groupInvertedPostings copies internally
 	}
 
 	cell, err := idx.makeInvertedEntryCell(ctx, term, allPostings, entryPage.Cells[cellIdx:cellIdx+boolToInt(found)])
@@ -934,7 +935,7 @@ func (idx *dedicatedInvertedIndex) makeInvertedEntryCell(
 	oldCells []invertedEntryCell,
 ) (invertedEntryCell, error) {
 	grouped := groupInvertedPostings(idx.mode, postings)
-	payload, err := encodeInvertedPostingList(idx.mode, grouped)
+	payload, err := encodeGroupedInvertedPostingList(idx.mode, grouped)
 	if err != nil {
 		return invertedEntryCell{}, err
 	}

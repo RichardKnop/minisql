@@ -12,8 +12,9 @@ func (p *parserItem) parseExplain(analyze bool) error {
 	p.pop()
 
 	rest := &parserItem{
-		sql:  p.sql[p.i:],
-		step: stepBeginning,
+		sql:      p.sql[p.i:],
+		upperSQL: p.upperSQL[p.i:],
+		step:     stepBeginning,
 	}
 	statements, err := rest.doParse()
 	if err != nil {

@@ -381,6 +381,59 @@ func textSearchMinCoverSpan(docTokens []textSearchTokenPosition, queryTokens []s
 	return bestSpan, found
 }
 
+// invertedPostingBinarySearch returns the index of the posting with rowID in
+// a sorted []invertedPosting, or -1 if not found.
+func invertedPostingBinarySearch(postings []invertedPosting, rowID RowID) int {
+	lo, hi := 0, len(postings)
+	for lo < hi {
+		mid := (lo + hi) >> 1
+		if postings[mid].RowID < rowID {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo < len(postings) && postings[lo].RowID == rowID {
+		return lo
+	}
+	return -1
+}
+
+// textSearchPhraseMatchesSorted reports whether the phrase appears in a
+// document. allPositions[i] holds the sorted positions of queryTokens[i];
+// phraseIndices[j] is the queryTokens index for phrase term j.
+// Uses binary search on sorted position slices — zero allocations.
+func textSearchPhraseMatchesSorted(allPositions [][]uint32, phraseIndices []int) bool {
+	if len(phraseIndices) == 0 {
+		return false
+	}
+	starts := allPositions[phraseIndices[0]]
+	for _, start := range starts {
+		matches := true
+		for offset := 1; offset < len(phraseIndices); offset++ {
+			target := start + uint32(offset)
+			positions := allPositions[phraseIndices[offset]]
+			lo, hi := 0, len(positions)
+			for lo < hi {
+				mid := (lo + hi) >> 1
+				if positions[mid] < target {
+					lo = mid + 1
+				} else {
+					hi = mid
+				}
+			}
+			if lo >= len(positions) || positions[lo] != target {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
+}
+
 // textSearchPhraseMatches reports whether all tokens in phrase appear at
 // consecutive positions in the already-tokenized document position map.
 func textSearchPhraseMatches(positions map[string][]uint32, phrase []string) bool {
