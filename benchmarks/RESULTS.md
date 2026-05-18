@@ -1,3 +1,21 @@
+### 2026-05-18 — Zero-alloc qualified column name lookup
+
+Eliminated heap allocations from all hot-path `AliasPrefix + "." + Name` string concatenation sites. Qualified column lookups (e.g. `"t.age"`) appeared at 13 sites across `row.go`, `row_heap.go`, `sort.go`, and `select.go`. Each concatenation allocated a transient heap string per condition evaluation.
+
+Two techniques applied:
+
+- **Map lookup sites** (`compareFieldValueWithColumnIndexes`, `compareFieldsWithColumnIndexes` × 2): Stack-local `[256]byte` buffer + `columnIndexes[string(buf[:n])]`. Go's compiler specifically optimises `m[string([]byte)]` map lookups to avoid heap allocation for the temporary key.
+- **Linear-scan sites** (`compareFieldValue`, `OnlyFields`, `sort.go`, `row_heap.go`, `select.go`): New `getColumnQualified(prefix, colName string)` and `getValueQualified(prefix, colName string)` helpers on `Row` that perform the comparison inline using string-slice equality (`n[:plen] == prefix && n[plen+1:] == colName`) — zero allocations.
+- **`groupByColumnIndex`**: Inline string-slice comparison without concatenation.
+
+`compareFieldValueWithColumnIndexes` at `row.go:847` was the dominant site: ~500,000 allocs/op per profiling run (~20,800/iter in the InList benchmark).
+
+| Benchmark | Before | After | Δ allocs | Δ memory | SQLite | Ratio |
+|---|---:|---:|---:|---:|---:|---:|
+| Subquery_InList/minisql | ~8.7 ms/op | ~9.2 ms/op | 159,776 → 139,779 (−12.5%) | 6.69 → 6.10 MiB/op (−9%) | ~3.8 ms/op | **2.4×** |
+
+−19,997 allocs/op. Cumulative from baseline: 194,677 → 139,779 (−28%).
+
 ### 2026-05-18 — Typed comparison function signatures
 
 Eliminated per-call heap allocations from the row comparison hot path by changing all comparison function signatures from `(value1, value2 any, operator Operator)` to typed parameters:

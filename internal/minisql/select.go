@@ -978,11 +978,7 @@ func addOrderByOutputFields(rows []Row, fields []Field, orderBy []OrderBy) ([]Ro
 					value = OptionalValue{Value: result, Valid: true}
 				}
 			} else {
-				lookupName := field.Name
-				if field.AliasPrefix != "" {
-					lookupName = field.AliasPrefix + "." + field.Name
-				}
-				existing, found := updated.GetValue(lookupName)
+				existing, found := updated.getValueQualified(field.AliasPrefix, field.Name)
 				if !found {
 					continue
 				}
@@ -1913,13 +1909,7 @@ func projectRow(row Row, fields []Field) (Row, error) {
 				values = append(values, OptionalValue{Value: result, Valid: true})
 			}
 		} else {
-			var lookupName string
-			if f.AliasPrefix != "" {
-				lookupName = f.AliasPrefix + "." + f.Name
-			} else {
-				lookupName = f.Name
-			}
-			col, idx := row.GetColumn(lookupName)
+			col, idx := row.getColumnQualified(f.AliasPrefix, f.Name)
 			if idx >= 0 {
 				columns = append(columns, col)
 				values = append(values, row.Values[idx])
@@ -2016,9 +2006,11 @@ func buildGroupKey(buf []byte, row Row, colIndices []int) []byte {
 // Tries the alias-qualified name first (e.g. "t.age"), then falls back to the bare name.
 func groupByColumnIndex(cols []Column, f Field) int {
 	if f.AliasPrefix != "" {
-		qualified := f.AliasPrefix + "." + f.Name
+		plen := len(f.AliasPrefix)
+		total := plen + 1 + len(f.Name)
 		for i, col := range cols {
-			if col.Name == qualified {
+			n := col.Name
+			if len(n) == total && n[:plen] == f.AliasPrefix && n[plen] == '.' && n[plen+1:] == f.Name {
 				return i
 			}
 		}
