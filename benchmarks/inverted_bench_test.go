@@ -40,16 +40,19 @@ var minisqlOnlyInvertedBenchDrivers = []invertedBenchDriver{invertedBenchDrivers
 func BenchmarkFullText_BuildIndex(b *testing.B) {
 	for _, d := range fullTextComparableDrivers(b) {
 		b.Run(d.name, func(b *testing.B) {
-			for i := range b.N {
-				db, cleanup := openInvertedBenchDB(b, d)
-				createFullTextTable(b, db, d)
-				seedFullTextRows(b, db, d, invertedSeedN, int64(i))
+			// Seed once; each iteration drops and recreates the index.
+			db, cleanup := openInvertedBenchDB(b, d)
+			defer cleanup()
+			createFullTextTable(b, db, d)
+			seedFullTextRows(b, db, d, invertedSeedN, 0)
+			createFullTextIndex(b, db, d)
 
+			b.ResetTimer()
+			for range b.N {
+				dropFullTextIndex(b, db, d)
 				b.StartTimer()
 				createFullTextIndex(b, db, d)
 				b.StopTimer()
-
-				cleanup()
 			}
 			b.ReportMetric(float64(invertedSeedN), "docs/op")
 		})
@@ -423,6 +426,19 @@ func createFullTextIndex(t testing.TB, db *sql.DB, d invertedBenchDriver) {
 		mustExec(t, db, `CREATE TRIGGER articles_fts_ai AFTER INSERT ON articles_fts BEGIN INSERT INTO articles_fts_index(rowid, body) VALUES (new.id, new.body); END`)
 		mustExec(t, db, `CREATE TRIGGER articles_fts_ad AFTER DELETE ON articles_fts BEGIN INSERT INTO articles_fts_index(articles_fts_index, rowid, body) VALUES('delete', old.id, old.body); END`)
 		mustExec(t, db, `CREATE TRIGGER articles_fts_au AFTER UPDATE ON articles_fts BEGIN INSERT INTO articles_fts_index(articles_fts_index, rowid, body) VALUES('delete', old.id, old.body); INSERT INTO articles_fts_index(rowid, body) VALUES (new.id, new.body); END`)
+	}
+}
+
+func dropFullTextIndex(t testing.TB, db *sql.DB, d invertedBenchDriver) {
+	t.Helper()
+	switch d.name {
+	case "minisql":
+		mustExec(t, db, `drop index "idx_articles_body"`)
+	case "sqlite":
+		mustExec(t, db, `DROP TRIGGER IF EXISTS articles_fts_au`)
+		mustExec(t, db, `DROP TRIGGER IF EXISTS articles_fts_ad`)
+		mustExec(t, db, `DROP TRIGGER IF EXISTS articles_fts_ai`)
+		mustExec(t, db, `DROP TABLE IF EXISTS articles_fts_index`)
 	}
 }
 
