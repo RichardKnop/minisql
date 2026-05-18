@@ -144,21 +144,23 @@ func BenchmarkForeignKey_DeleteCascade(b *testing.B) {
 			}
 			defer delParent.Close()
 
-			b.ResetTimer()
+			// Pre-seed all b.N parent rows with 10 children each so the timed
+			// loop only measures the cascade delete, not the insert overhead.
 			for i := range b.N {
 				parentID := int64(i + 1)
-
-				b.StopTimer()
 				if _, err := insParent.Exec(parentID, fmt.Sprintf("parent-%d", i)); err != nil {
-					b.Fatalf("insert parent: %v", err)
+					b.Fatalf("pre-seed insert parent: %v", err)
 				}
 				for j := range 10 {
 					if _, err := insChild.Exec(parentID, fmt.Sprintf("child-%d-%d", i, j)); err != nil {
-						b.Fatalf("insert child: %v", err)
+						b.Fatalf("pre-seed insert child: %v", err)
 					}
 				}
-				b.StartTimer()
+			}
 
+			b.ResetTimer()
+			for i := range b.N {
+				parentID := int64(i + 1)
 				if _, err := delParent.Exec(parentID); err != nil {
 					b.Fatalf("delete parent: %v", err)
 				}
