@@ -75,19 +75,21 @@ the same session before this baseline was taken.
 
 | Benchmark | minisql ns/op | minisql allocs/op | SQLite ns/op | Ratio |
 |---|---:|---:|---:|---:|
-| BuildIndex (1k docs) | 10,568,210 | 48,928 | 2,533,610 | **4.17×** |
-| Insert_WithIndex | 362,813 | 2,410 | 111,469 | **3.25×** |
+| BuildIndex (1k docs) | 6,573,914 | 35,106 | 2,062,776 | **3.19×** |
+| Insert_WithIndex | 197,245 | 1,289 | 94,187 | **2.09×** |
 | Search_SingleTerm/rare (1 match) | 16,113 | — | 10,558 | **1.53×** |
 | Search_SingleTerm/medium (10 matches) | 15,909 | — | 11,676 | **1.36×** |
 | Search_SingleTerm/common (1k matches) | 15,762 | — | 66,954 | **0.24×** ✓ |
 | Search_MultiTermAND (10 matches) | 31,044 | — | 38,480 | **0.81×** ✓ |
 | Search_Phrase (100 matches) | 55,591 | — | 34,185 | **1.63×** |
-| Update_WithIndex | 120,824 | ~800 | 131,491 | **0.92×** ✓ |
-| Delete_WithIndex | 308,189 | ~2,200 | 196,694 | **1.57×** |
+| Update_WithIndex | 74,823 | 545 | 94,200 | **0.79×** ✓ |
+| Delete_WithIndex | 186,852 | 1,822 | 134,360 | **1.39×** |
 
 **Search improvements (2026-05-18/19):** Parser pre-computes `strings.ToUpper` once per query (was per-token×keyword). Single-term COUNT(\*) uses `DocFreq` from the index entry header — O(log N) vs O(N). Rare/medium dropped from ~11× to ~1.5×; common flipped to 4× faster than SQLite. Phrase search: replaced `map[RowID][]uint32` postings with sorted `[]invertedPosting` + binary search (eliminating per-row map allocations); phrase adjacency check replaced with zero-alloc binary search on sorted position arrays; COUNT(\*) with index-covered predicates skips B-tree row fetch entirely. Phrase dropped from 9.5× to 1.6×.
 
-**Maintenance improvements (2026-05-19):** `invertedEntryPage.Marshal` and `invertedPostingPage.Marshal` now write cells/blocks directly into the destination page buffer — eliminates one `make([]byte)` allocation per cell/block (77% alloc reduction in BuildIndex, ~24% in Insert). Fixed double-grouping in `makeInvertedEntryCell`: was calling `groupInvertedPostings` then passing to `encodeInvertedPostingList` which called `groupInvertedPostings` again; now calls `encodeGroupedInvertedPostingList` directly. Deferred the `allPostings` copy in `insertEntryLeaf` to only the code paths that need it. Update_WithIndex flipped to faster than SQLite (0.92×).
+**Maintenance improvements (2026-05-19, round 1):** `invertedEntryPage.Marshal` and `invertedPostingPage.Marshal` now write cells/blocks directly into the destination page buffer — eliminates one `make([]byte)` allocation per cell/block. Fixed double-grouping in `makeInvertedEntryCell` (was calling `encodeInvertedPostingList` which re-grouped already-grouped input; now calls `encodeGroupedInvertedPostingList` directly). Deferred the `allPostings` copy in `insertEntryLeaf` to only the paths that use it.
+
+**Maintenance improvements (2026-05-19, round 2):** Added `groupInvertedPostingsInPlace` — sorts and groups in-place with zero allocations for the common all-unique-RowID case. Switched `makeInvertedEntryCell`, `insertPostingIntoTreeCell`, and `replacePostingInTreeCell` to use it. Removed the redundant `groupInvertedPostings` calls inside `makeInvertedPostingBlocks` (callers always pass already-grouped input), `removeInvertedPosting` (callers always pass sorted decoded postings), and `readPostingTree` (postings from sequential sorted B-tree blocks are already in order). Net: Insert allocs 3,164→1,289 (−59%), Insert 3.76×→2.09×, Update 1.21×→0.79× (faster than SQLite), Delete 1.96×→1.39×, BuildIndex 3.64×→3.19× with 82% fewer allocs.
 
 ### JSON INVERTED INDEX
 
@@ -125,18 +127,18 @@ Ranked by ratio (excluding Vacuum):
 |---|---:|---:|
 | Explain | 4.33× | 68 |
 | CTE_Materialise | 4.25× | 14,134 |
-| FullText_BuildIndex | 4.17× | 48,928 |
-| FullText_Insert_WithIndex | 3.25× | 2,410 |
 | CountStar | 3.02× | 706 |
+| FullText_BuildIndex | 3.19× | 35,106 |
 | Join_Left_UnmatchedRows | 2.84× | 203,249 |
 | WAL_Checkpoint | 2.62× | 305 |
 | Subquery_InList | 2.29× | 139,776 |
-| FullText_Delete_WithIndex | 1.57× | ~2,200 |
+| FullText_Insert_WithIndex | 2.09× | 1,289 |
 | Join_Inner_SmallLarge | 1.78× | 153,371 |
 | PointScan | 1.76× | 69 |
 | RangeScan | 1.74× | 19,922 |
 | FullText_Search_Phrase | 1.63× | — |
 | FullText_Search_SingleTerm/rare | 1.53× | — |
+| FullText_Delete_WithIndex | 1.39× | 1,822 |
 | FullText_Search_SingleTerm/medium | 1.36× | — |
 
 ### Summary: at parity or faster than SQLite
@@ -150,7 +152,7 @@ Ranked by ratio (excluding Vacuum):
 | Insert_SingleRow | **0.35×** (2.9× faster) |
 | ForeignKey_Insert | **0.40×** (2.5× faster) |
 | FullText_Search_MultiTermAND | **0.81×** (1.2× faster) |
-| FullText_Update_WithIndex | **0.92×** ✓ |
+| FullText_Update_WithIndex | **0.79×** (1.3× faster) |
 | ForeignKey_DeleteCascade | **0.98×** |
 | Select_FullScan | **0.93×** |
 | GroupBy_Aggregate | **0.97×** |

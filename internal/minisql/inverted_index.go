@@ -934,7 +934,7 @@ func (idx *dedicatedInvertedIndex) makeInvertedEntryCell(
 	postings []invertedPosting,
 	oldCells []invertedEntryCell,
 ) (invertedEntryCell, error) {
-	grouped := groupInvertedPostings(idx.mode, postings)
+	grouped := groupInvertedPostingsInPlace(idx.mode, postings)
 	payload, err := encodeGroupedInvertedPostingList(idx.mode, grouped)
 	if err != nil {
 		return invertedEntryCell{}, err
@@ -1033,7 +1033,7 @@ func (idx *dedicatedInvertedIndex) readPostingTree(ctx context.Context, cell inv
 		}
 		postings = append(postings, blockPostings...)
 	}
-	return groupInvertedPostings(idx.mode, postings), nil
+	return postings, nil
 }
 
 // insertPostingIntoTreeCell updates one existing posting-tree leaf block in place.
@@ -1057,7 +1057,7 @@ func (idx *dedicatedInvertedIndex) insertPostingIntoTreeCell(ctx context.Context
 
 	oldDocFreq := len(blockPostings)
 	oldPostingCount := countInvertedPostings(idx.mode, blockPostings)
-	updatedPostings := groupInvertedPostings(idx.mode, append(blockPostings, posting))
+	updatedPostings := groupInvertedPostingsInPlace(idx.mode, append(blockPostings, posting))
 	newDocFreq := len(updatedPostings)
 	newPostingCount := countInvertedPostings(idx.mode, updatedPostings)
 	if oldDocFreq == newDocFreq && oldPostingCount == newPostingCount {
@@ -1124,7 +1124,7 @@ func (idx *dedicatedInvertedIndex) replacePostingInTreeCell(
 	oldDocFreq := len(blockPostings)
 	oldPostingCount := countInvertedPostings(idx.mode, blockPostings)
 	updatedPostings := removeInvertedPosting(idx.mode, blockPostings, oldPosting)
-	updatedPostings = groupInvertedPostings(idx.mode, append(updatedPostings, newPosting))
+	updatedPostings = groupInvertedPostingsInPlace(idx.mode, append(updatedPostings, newPosting))
 	newDocFreq := len(updatedPostings)
 	newPostingCount := countInvertedPostings(idx.mode, updatedPostings)
 
@@ -2056,18 +2056,18 @@ func (idx *dedicatedInvertedIndex) freePostingTree(ctx context.Context, cell inv
 	return nil
 }
 
-// makeInvertedPostingBlocks groups postings into bounded compressed blocks.
+// makeInvertedPostingBlocks packs already-grouped postings into bounded
+// compressed blocks. Callers are responsible for grouping before this call.
 func makeInvertedPostingBlocks(mode invertedPostingMode, postings []invertedPosting) ([]invertedPostingBlock, error) {
-	grouped := groupInvertedPostings(mode, postings)
 	blocks := make([]invertedPostingBlock, 0)
-	for len(grouped) > 0 {
-		n, payload, err := encodeLargestInvertedPostingBlock(mode, grouped, invertedPostingBlockPayloadMax)
+	for len(postings) > 0 {
+		n, payload, err := encodeLargestInvertedPostingBlock(mode, postings, invertedPostingBlockPayloadMax)
 		if err != nil {
 			return nil, err
 		}
-		blockPostings := grouped[:n]
+		blockPostings := postings[:n]
 		blocks = append(blocks, postingBlockFromPostings(mode, blockPostings, payload))
-		grouped = grouped[n:]
+		postings = postings[n:]
 	}
 	return blocks, nil
 }
@@ -2182,8 +2182,9 @@ func countInvertedPostings(mode invertedPostingMode, postings []invertedPosting)
 }
 
 // removeInvertedPosting removes one row or selected positions from postings.
+// Postings must already be sorted by RowID (i.e. as returned by the codec).
 func removeInvertedPosting(mode invertedPostingMode, postings []invertedPosting, remove invertedPosting) []invertedPosting {
-	grouped := groupInvertedPostings(mode, postings)
+	grouped := postings
 	i, found := slices.BinarySearchFunc(grouped, remove.RowID, func(posting invertedPosting, rowID RowID) int {
 		if posting.RowID < rowID {
 			return -1
