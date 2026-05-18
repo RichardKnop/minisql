@@ -115,6 +115,23 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 	}
 
+	// For COUNT(*) queries where every WHERE condition was consumed by an index
+	// scan (no post-scan filters remain), the scan callback never needs to read
+	// column data from the main table — only the row key matters for counting.
+	// Clear selectedFields so the scan skips the B-tree row fetch entirely.
+	if stmt.IsSelectCountAll() && len(selectedFields) > 0 {
+		allConsumed := true
+		for _, scan := range plan.Scans {
+			if len(scan.Filters) > 0 {
+				allConsumed = false
+				break
+			}
+		}
+		if allConsumed {
+			selectedFields = nil
+		}
+	}
+
 	// Fast path: streaming queries that require no sort, no GROUP BY, and no
 	// aggregates, and have no JOINs. This avoids materializing an intermediate
 	// []Row buffer from the plan scan.
@@ -1315,7 +1332,11 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 		return t.fullTextMultiTermIndexScan(ctx, secondaryIndex, scan, queryTokens, selectedFields, out)
 	}
 
-	postingsByTerm := make(map[string]map[RowID][]uint32, len(queryTokens))
+	// Load postings for each term as sorted []invertedPosting — directly from
+	// the decoder, no map needed. Each RowID appears in exactly one block
+	// (the row-grouped codec writes one entry per document), so postings from
+	// successive blocks can be concatenated in order.
+	postingsByTerm := make(map[string][]invertedPosting, len(queryTokens))
 	for _, key := range scan.IndexKeys {
 		term, ok := key.(string)
 		if !ok {
@@ -1329,7 +1350,7 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 		if err != nil {
 			return fmt.Errorf("full-text lookup failed: %w", err)
 		}
-		rows := make(map[RowID][]uint32, stats.DocFreq)
+		postings := make([]invertedPosting, 0, stats.DocFreq)
 		for {
 			block, ok, err := iter.NextBlock(ctx)
 			if err != nil {
@@ -1338,48 +1359,81 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 			if !ok {
 				break
 			}
-			mode, postings, err := decodeInvertedPostingList(block.Payload)
+			mode, decoded, err := decodeInvertedPostingList(block.Payload)
 			if err != nil {
 				return fmt.Errorf("full-text decode failed: %w", err)
 			}
 			if mode != invertedPostingModePositions {
 				return fmt.Errorf("full-text index %s uses posting mode %d", scan.IndexName, mode)
 			}
-			for _, posting := range postings {
-				rows[posting.RowID] = append(rows[posting.RowID], posting.Positions...)
-			}
+			postings = append(postings, decoded...)
 		}
-		if len(rows) == 0 {
+		if len(postings) == 0 {
 			return nil
 		}
-		postingsByTerm[term] = rows
+		postingsByTerm[term] = postings
 	}
 
-	firstRows := postingsByTerm[queryTokens[0]]
-	surviving := make([]RowID, 0, len(firstRows))
 	needsPositions := len(query.Phrases) > 0
-	for rowID := range firstRows {
-		matches := true
-		var positions map[string][]uint32
-		if needsPositions {
-			positions = make(map[string][]uint32, len(queryTokens))
+
+	// Pre-compute phrase→queryToken index mapping once per query so the
+	// per-row phrase check is allocation-free.
+	type phraseMapping struct{ indices []int }
+	phraseMappings := make([]phraseMapping, len(query.Phrases))
+	for pi, phrase := range query.Phrases {
+		indices := make([]int, len(phrase))
+		for i, term := range phrase {
+			idx := -1
+			for j, qt := range queryTokens {
+				if qt == term {
+					idx = j
+					break
+				}
+			}
+			if idx < 0 {
+				return nil
+			}
+			indices[i] = idx
 		}
-		for _, term := range queryTokens {
-			termPositions := postingsByTerm[term][rowID]
-			if len(termPositions) == 0 {
+		phraseMappings[pi] = phraseMapping{indices: indices}
+	}
+
+	// allPositions[i] holds the positions of queryTokens[i] in the current
+	// candidate document. Allocated once and overwritten for each candidate.
+	var allPositions [][]uint32
+	if needsPositions {
+		allPositions = make([][]uint32, len(queryTokens))
+	}
+
+	// Iterate the first term's postings in sorted RowID order. Survivors come
+	// out sorted so sortRowIDs is unnecessary.
+	firstPostings := postingsByTerm[queryTokens[0]]
+	surviving := make([]RowID, 0, len(firstPostings))
+
+	for _, firstPosting := range firstPostings {
+		rowID := firstPosting.RowID
+		matches := true
+
+		if needsPositions {
+			allPositions[0] = firstPosting.Positions
+		}
+		for i := 1; i < len(queryTokens); i++ {
+			termPostings := postingsByTerm[queryTokens[i]]
+			idx := invertedPostingBinarySearch(termPostings, rowID)
+			if idx < 0 {
 				matches = false
 				break
 			}
 			if needsPositions {
-				positions[term] = termPositions
+				allPositions[i] = termPostings[idx].Positions
 			}
 		}
 		if !matches {
 			continue
 		}
 		if needsPositions {
-			for _, phrase := range query.Phrases {
-				if !textSearchPhraseMatches(positions, phrase) {
+			for _, pm := range phraseMappings {
+				if !textSearchPhraseMatchesSorted(allPositions, pm.indices) {
 					matches = false
 					break
 				}
@@ -1389,7 +1443,6 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 			surviving = append(surviving, rowID)
 		}
 	}
-	sortRowIDs(surviving)
 	if len(surviving) == 0 {
 		return nil
 	}
