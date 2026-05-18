@@ -139,15 +139,14 @@ func (p *invertedEntryPage) Marshal(buf []byte) error {
 	freeEnd := len(buf)
 	slotBase := header.size()
 	for i, cell := range p.Cells {
-		cellBuf := make([]byte, cell.size())
-		if err := cell.Marshal(cellBuf); err != nil {
-			return err
-		}
-		if freeEnd-len(cellBuf) < int(header.FreeStart) {
+		sz := int(cell.size())
+		if freeEnd-sz < int(header.FreeStart) {
 			return errInvertedIndexEntryPageFull
 		}
-		freeEnd -= len(cellBuf)
-		copy(buf[freeEnd:freeEnd+len(cellBuf)], cellBuf)
+		freeEnd -= sz
+		if err := cell.Marshal(buf[freeEnd : freeEnd+sz]); err != nil {
+			return err
+		}
 		marshalUint16(buf, uint16(freeEnd), slotBase+uint64(i)*2)
 	}
 	header.FreeEnd = uint16(freeEnd)
@@ -379,15 +378,14 @@ func (p *invertedPostingPage) Marshal(buf []byte) error {
 	freeEnd := len(buf)
 	slotBase := header.size()
 	for i, block := range p.Blocks {
-		blockBuf := make([]byte, block.size())
-		if err := block.Marshal(blockBuf); err != nil {
-			return err
-		}
-		if freeEnd-len(blockBuf) < int(header.FreeStart) {
+		sz := int(block.size())
+		if freeEnd-sz < int(header.FreeStart) {
 			return fmt.Errorf("inverted posting page has insufficient free space")
 		}
-		freeEnd -= len(blockBuf)
-		copy(buf[freeEnd:freeEnd+len(blockBuf)], blockBuf)
+		freeEnd -= sz
+		if err := block.Marshal(buf[freeEnd : freeEnd+sz]); err != nil {
+			return err
+		}
 		marshalUint16(buf, uint16(freeEnd), slotBase+uint64(i)*2)
 	}
 	header.FreeEnd = uint16(freeEnd)
