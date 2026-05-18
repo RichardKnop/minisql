@@ -77,13 +77,15 @@ the same session before this baseline was taken.
 |---|---:|---:|---:|---:|
 | BuildIndex (1k docs) | 10,671,270 | 196,574 | 2,930,337 | **3.64×** |
 | Insert_WithIndex | 382,788 | 3,164 | 101,730 | **3.76×** |
-| Search_SingleTerm/rare (1 match) | 127,992 | 2,324 | 11,330 | **11.3×** |
-| Search_SingleTerm/medium (10 matches) | 141,208 | 2,368 | 12,244 | **11.5×** |
-| Search_SingleTerm/common (1k matches) | 610,049 | 5,330 | 68,425 | **8.9×** |
-| Search_MultiTermAND (10 matches) | 161,892 | 2,377 | 39,519 | **4.10×** |
-| Search_Phrase (100 matches) | 288,227 | 3,658 | 30,345 | **9.50×** |
+| Search_SingleTerm/rare (1 match) | 16,113 | — | 10,558 | **1.53×** |
+| Search_SingleTerm/medium (10 matches) | 15,909 | — | 11,676 | **1.36×** |
+| Search_SingleTerm/common (1k matches) | 15,762 | — | 66,954 | **0.24×** ✓ |
+| Search_MultiTermAND (10 matches) | 31,044 | — | 38,480 | **0.81×** ✓ |
+| Search_Phrase (100 matches) | 98,544 | — | 28,108 | **3.51×** |
 | Update_WithIndex | 152,371 | 1,114 | 126,335 | **1.21×** |
 | Delete_WithIndex | 349,550 | 3,158 | 178,476 | **1.96×** |
+
+**Search improvements (2026-05-18):** Parser pre-computes `strings.ToUpper` once per query (was per-token×keyword). Single-term COUNT(\*) uses `DocFreq` from index entry header instead of iterating all postings — O(log N) vs O(N). Rare/medium dropped from ~11× to ~1.5×; common flipped from 8.9× slower to 4× faster than SQLite.
 
 ### JSON INVERTED INDEX
 
@@ -119,14 +121,11 @@ Ranked by ratio (excluding Vacuum):
 
 | Benchmark | Ratio | allocs/op |
 |---|---:|---:|
-| FullText_Search_SingleTerm (rare/medium) | ~11× | 2,324–2,368 |
-| FullText_Search_Phrase | 9.5× | 3,658 |
-| FullText_Search_SingleTerm (common) | 8.9× | 5,330 |
-| FullText_Search_MultiTermAND | 4.1× | 2,377 |
 | Explain | 4.33× | 68 |
 | CTE_Materialise | 4.25× | 14,134 |
 | FullText_Insert_WithIndex | 3.76× | 3,164 |
 | FullText_BuildIndex | 3.64× | 196,574 |
+| FullText_Search_Phrase | 3.51× | — |
 | CountStar | 3.02× | 706 |
 | Join_Left_UnmatchedRows | 2.84× | 203,249 |
 | WAL_Checkpoint | 2.62× | 305 |
@@ -134,16 +133,20 @@ Ranked by ratio (excluding Vacuum):
 | Join_Inner_SmallLarge | 1.78× | 153,371 |
 | PointScan | 1.76× | 69 |
 | RangeScan | 1.74× | 19,922 |
+| FullText_Search_SingleTerm/rare | 1.53× | — |
+| FullText_Search_SingleTerm/medium | 1.36× | — |
 
 ### Summary: at parity or faster than SQLite
 
 | Benchmark | Ratio |
 |---|---:|
+| FullText_Search_SingleTerm/common | **0.24×** (4.2× faster) |
 | Delete_ByPK | **0.20×** (5× faster) |
 | OnConflict_DoUpdate | **0.20×** (5× faster) |
 | Update_ByPK | **0.32×** (3× faster) |
 | Insert_SingleRow | **0.35×** (2.9× faster) |
 | ForeignKey_Insert | **0.40×** (2.5× faster) |
+| FullText_Search_MultiTermAND | **0.81×** (1.2× faster) |
 | ForeignKey_DeleteCascade | **0.98×** |
 | Select_FullScan | **0.93×** |
 | GroupBy_Aggregate | **0.97×** |
