@@ -53,6 +53,13 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		if ok {
 			return result, nil
 		}
+		result, ok, err = t.tryCountFromFullTextIndex(ctx, plan)
+		if err != nil {
+			return StatementResult{}, err
+		}
+		if ok {
+			return result, nil
+		}
 	}
 
 	// Only fetch fields included in the SELECT query or fields needed for WHERE conditions
@@ -1728,6 +1735,35 @@ func (t *Table) tryCountFromExactInvertedIndex(ctx context.Context, plan QueryPl
 		return StatementResult{}, false, err
 	}
 	return countResult(count), true, nil
+}
+
+// tryCountFromFullTextIndex is a fast-count shortcut for single-term full-text
+// COUNT(*) queries with no additional post-scan filters. It reads DocFreq
+// directly from the index entry (one B-tree lookup) instead of iterating the
+// entire postings list.
+func (t *Table) tryCountFromFullTextIndex(ctx context.Context, plan QueryPlan) (StatementResult, bool, error) {
+	if len(plan.Scans) != 1 || plan.Scans[0].Type != ScanTypeFullText {
+		return StatementResult{}, false, nil
+	}
+	scan := plan.Scans[0]
+	q := scan.FullTextQuery
+	if q == nil || len(q.Terms) != 1 || len(q.Phrases) != 0 {
+		// Multi-term AND needs intersection; phrases need position checks.
+		return StatementResult{}, false, nil
+	}
+	if len(scan.Filters) > 0 {
+		// Additional WHERE predicates require row-level evaluation.
+		return StatementResult{}, false, nil
+	}
+	secondaryIndex, ok := t.SecondaryIndexes[scan.IndexName]
+	if !ok || secondaryIndex.Method != IndexMethodFullText || secondaryIndex.InvertedIndex == nil {
+		return StatementResult{}, false, nil
+	}
+	stats, err := secondaryIndex.InvertedIndex.Stats(ctx, q.Terms[0])
+	if err != nil {
+		return StatementResult{}, false, err
+	}
+	return countResult(int64(stats.DocFreq)), true, nil
 }
 
 func jsonInvertedScanFilterIsExact(filters OneOrMore) bool {
