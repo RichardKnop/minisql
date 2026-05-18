@@ -36,7 +36,7 @@ func TestTable_Update(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"email": {Value: NewTextPointer([]byte("updatednone@foo.bar")), Valid: true},
+				"email": MakeVarchar(NewTextPointer([]byte("updatednone@foo.bar"))),
 			},
 			Conditions: OneOrMore{
 				{
@@ -74,12 +74,12 @@ func TestTable_Update(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"email":   {Value: NewTextPointer([]byte("updatedsingle@foo.bar")), Valid: true},
-				"created": {Value: MustParseTimestampMicros("2000-01-01 00:00:00"), Valid: true},
+				"email":   MakeVarchar(NewTextPointer([]byte("updatedsingle@foo.bar"))),
+				"created": MakeTimestamp(MustParseTimestampMicros("2000-01-01 00:00:00")),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.AsInt8()),
 				},
 			},
 		}
@@ -98,8 +98,8 @@ func TestTable_Update(t *testing.T) {
 		for i, row := range rows {
 			expectedRow := row.Clone()
 			if i == 5 {
-				expectedRow, _ = expectedRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("updatedsingle@foo.bar")), Valid: true})
-				expectedRow, _ = expectedRow.SetValue("created", OptionalValue{Value: MustParseTimestampMicros("2000-01-01 00:00:00"), Valid: true})
+				expectedRow, _ = expectedRow.SetValue("email", MakeVarchar(NewTextPointer([]byte("updatedsingle@foo.bar"))))
+				expectedRow, _ = expectedRow.SetValue("created", MakeTimestamp(MustParseTimestampMicros("2000-01-01 00:00:00")))
 				rows[i] = expectedRow
 			}
 
@@ -116,11 +116,11 @@ func TestTable_Update(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"email": {Valid: false},
+				"email": MakeNull(),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.AsInt8()),
 				},
 			},
 		}
@@ -139,7 +139,7 @@ func TestTable_Update(t *testing.T) {
 		for i, row := range rows {
 			expectedRow := row.Clone()
 			if i == 18 {
-				expectedRow, _ = expectedRow.SetValue("email", OptionalValue{Valid: false})
+				expectedRow, _ = expectedRow.SetValue("email", MakeNull())
 			}
 
 			expected = append(expected, expectedRow)
@@ -152,7 +152,7 @@ func TestTable_Update(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"email": {Value: NewTextPointer([]byte("updatedall@foo.bar")), Valid: true},
+				"email": MakeVarchar(NewTextPointer([]byte("updatedall@foo.bar"))),
 			},
 		}
 
@@ -169,7 +169,7 @@ func TestTable_Update(t *testing.T) {
 		expected := make([]Row, 0, len(rows))
 		for _, row := range rows {
 			expectedRow := row.Clone()
-			expectedRow, _ = expectedRow.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("updatedall@foo.bar")), Valid: true})
+			expectedRow, _ = expectedRow.SetValue("email", MakeVarchar(NewTextPointer([]byte("updatedall@foo.bar"))))
 			expected = append(expected, expectedRow)
 		}
 
@@ -226,11 +226,11 @@ func TestTable_Update_Overflow(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"profile": {Value: updatedOverflowText, Valid: true},
+				"profile": MakeText(updatedOverflowText),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.AsInt8()),
 				},
 			},
 		}
@@ -249,7 +249,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 			if i != 0 {
 				continue
 			}
-			expected[i], _ = expected[i].SetValue("profile", OptionalValue{Value: updatedOverflowText, Valid: true})
+			expected[i], _ = expected[i].SetValue("profile", MakeText(updatedOverflowText))
 		}
 
 		checkRows(ctx, t, table, expected)
@@ -278,11 +278,11 @@ func TestTable_Update_Overflow(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"profile": {Value: updatedInlineText, Valid: true},
+				"profile": MakeText(updatedInlineText),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.AsInt8()),
 				},
 			},
 		}
@@ -301,7 +301,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 			if i != 1 {
 				continue
 			}
-			expected[i], _ = expected[i].SetValue("profile", OptionalValue{Value: updatedInlineText, Valid: true})
+			expected[i], _ = expected[i].SetValue("profile", MakeText(updatedInlineText))
 		}
 
 		checkRows(ctx, t, table, expected)
@@ -331,11 +331,11 @@ func TestTable_Update_Overflow(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"profile": {Value: updatedShrunkOverflowText, Valid: true},
+				"profile": MakeText(updatedShrunkOverflowText),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.AsInt8()),
 				},
 			},
 		}
@@ -354,7 +354,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 			if i != 2 {
 				continue
 			}
-			expected[i], _ = expected[i].SetValue("profile", OptionalValue{Value: updatedShrunkOverflowText, Valid: true})
+			expected[i], _ = expected[i].SetValue("profile", MakeText(updatedShrunkOverflowText))
 		}
 
 		checkRows(ctx, t, table, expected)
@@ -383,11 +383,11 @@ func TestTable_Update_Overflow(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"profile": {Value: expandedOverflowText, Valid: true},
+				"profile": MakeText(expandedOverflowText),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.AsInt8()),
 				},
 			},
 		}
@@ -406,7 +406,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 			if i != 0 {
 				continue
 			}
-			expected[i], _ = expected[i].SetValue("profile", OptionalValue{Value: expandedOverflowText, Valid: true})
+			expected[i], _ = expected[i].SetValue("profile", MakeText(expandedOverflowText))
 		}
 
 		checkRows(ctx, t, table, expected)

@@ -83,7 +83,7 @@ func TestTable_Delete_SingleSecondaryIndex(t *testing.T) {
 		result := mustDelete(ctx, t, table, txManager, pager, Statement{
 			Kind: Delete,
 			Conditions: OneOrMore{
-				{FieldIsEqual(Field{Name: "email"}, OperandQuotedString, emailVal.Value)},
+				{FieldIsEqual(Field{Name: "email"}, OperandQuotedString, emailVal.AsAny())},
 			},
 		})
 
@@ -176,8 +176,8 @@ func TestTable_Delete_CompositeSecondaryIndex(t *testing.T) {
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, firstNameVal.Value),
-					FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, lastNameVal.Value),
+					FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, firstNameVal.AsAny()),
+					FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, lastNameVal.AsAny()),
 				},
 			},
 		})

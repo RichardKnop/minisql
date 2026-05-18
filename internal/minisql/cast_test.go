@@ -172,7 +172,7 @@ func TestCastToTextPointer(t *testing.T) {
 func rowWithBool(name string, val bool) Row {
 	return NewRowWithValues(
 		[]Column{{Name: name, Kind: Boolean}},
-		[]OptionalValue{{Value: val, Valid: true}},
+		[]OptionalValue{MakeBool(val)},
 	)
 }
 

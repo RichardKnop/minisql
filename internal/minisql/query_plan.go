@@ -250,12 +250,12 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error
 // per-execution bound values, not schema-derived, so they must not be baked into the
 // cached plan.  To avoid mutating the shared cached slice, we copy plan.Scans first.
 func applyScanLimit(plan QueryPlan, stmt Statement) QueryPlan {
-	if !stmt.Limit.Valid || plan.SortInMemory || stmt.Distinct || len(plan.Joins) > 0 {
+	if stmt.Limit.IsNull() || plan.SortInMemory || stmt.Distinct || len(plan.Joins) > 0 {
 		return plan
 	}
-	scanLimit := stmt.Limit.Value.(int64)
-	if stmt.Offset.Valid {
-		scanLimit += stmt.Offset.Value.(int64)
+	scanLimit := stmt.Limit.AsInt8()
+	if stmt.Offset.IsValid() {
+		scanLimit += stmt.Offset.AsInt8()
 	}
 	if scanLimit <= 0 {
 		return plan

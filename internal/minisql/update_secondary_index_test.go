@@ -84,12 +84,12 @@ func TestTable_Update_SingleSecondaryIndex(t *testing.T) {
 			TableName: testTableName,
 			Columns:   testCompositeKeyColumns,
 			Updates: map[string]OptionalValue{
-				"email": {Value: NewTextPointer([]byte(newEmailStr)), Valid: true},
+				"email": MakeVarchar(NewTextPointer([]byte(newEmailStr))),
 			},
 			Conditions: OneOrMore{{
 				{
 					Operand1: Operand{Type: OperandField, Value: Field{Name: "email"}},
-					Operand2: Operand{Type: OperandQuotedString, Value: oldEmail.Value},
+					Operand2: Operand{Type: OperandQuotedString, Value: oldEmail.AsAny()},
 					Operator: Eq,
 				},
 			}},
@@ -119,7 +119,7 @@ func TestTable_Update_SingleSecondaryIndex(t *testing.T) {
 		updatedRow := result.Rows.Row()
 		emailVal, ok := updatedRow.GetValue("email")
 		require.True(t, ok)
-		assert.True(t, emailVal.Valid)
+		assert.True(t, emailVal.IsValid())
 	})
 }
 
@@ -136,8 +136,8 @@ func TestSecondaryIndex_RowSatisfiesWhereCond(t *testing.T) {
 		return Row{
 			Columns: cols,
 			Values: []OptionalValue{
-				{Value: NewTextPointer([]byte(status)), Valid: true},
-				{Value: amount, Valid: true},
+				MakeVarchar(NewTextPointer([]byte(status))),
+				MakeInt8(amount),
 			},
 		}
 	}

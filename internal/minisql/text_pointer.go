@@ -117,20 +117,17 @@ func (r Row) storeOverflowTexts(ctx context.Context, pager TxPager) (Row, error)
 			continue
 		}
 		value, ok := r.GetValue(col.Name)
-		if !ok || !value.Valid {
+		if !ok || !value.IsValid() {
 			continue
 		}
-		textPointer, ok := value.Value.(TextPointer)
-		if !ok {
+		if !value.IsTextLike() {
 			return r, fmt.Errorf("expected TextPointer value for text column %s", col.Name)
 		}
+		textPointer := value.AsTextPointer()
 		if err := textPointer.storeOverflowText(ctx, pager); err != nil {
 			return r, err
 		}
-		r.Values[i] = OptionalValue{
-			Valid: true,
-			Value: textPointer,
-		}
+		r.Values[i] = MakeTextByColumnKind(col.Kind, textPointer)
 	}
 	return r, nil
 }
@@ -184,13 +181,13 @@ func (r Row) readOverflowTexts(ctx context.Context, pager TxPager) (Row, error) 
 			continue
 		}
 		value, ok := r.GetValue(col.Name)
-		if !ok || !value.Valid {
+		if !ok || !value.IsValid() {
 			continue
 		}
-		textPointer, ok := value.Value.(TextPointer)
-		if !ok {
+		if !value.IsTextLike() {
 			return Row{}, fmt.Errorf("expected TextPointer value for text column %s", col.Name)
 		}
+		textPointer := value.AsTextPointer()
 		if textPointer.IsInline() {
 			continue
 		}
@@ -215,7 +212,7 @@ func (r Row) readOverflowTexts(ctx context.Context, pager TxPager) (Row, error) 
 			currentPageIdx = overflowPage.OverflowPage.Header.NextPage
 		}
 		textPointer.Data = bytes.Trim(overflowData, "\x00")
-		r, _ = r.SetValue(col.Name, OptionalValue{Value: textPointer, Valid: true})
+		r, _ = r.SetValue(col.Name, MakeTextByColumnKind(col.Kind, textPointer))
 	}
 	return r, nil
 }

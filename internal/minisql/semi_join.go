@@ -17,7 +17,7 @@ func semiJoinEligible(sub Statement) (innerCol string, ok bool) {
 	if sub.Distinct || sub.GroupBy != nil || sub.Having != nil {
 		return "", false
 	}
-	if sub.Limit.Valid || sub.Offset.Valid {
+	if sub.Limit.IsValid() || sub.Offset.IsValid() {
 		return "", false
 	}
 	if len(sub.Fields) != 1 {

@@ -11,21 +11,21 @@ import (
 func rowWithInt(name string, val int64) Row {
 	return NewRowWithValues(
 		[]Column{{Name: name, Kind: Int8}},
-		[]OptionalValue{{Value: val, Valid: true}},
+		[]OptionalValue{MakeInt8(val)},
 	)
 }
 
 func rowWithFloat(name string, val float64) Row {
 	return NewRowWithValues(
 		[]Column{{Name: name, Kind: Double}},
-		[]OptionalValue{{Value: val, Valid: true}},
+		[]OptionalValue{MakeDouble(val)},
 	)
 }
 
 func rowWithNull(name string) Row {
 	return NewRowWithValues(
 		[]Column{{Name: name, Kind: Int8}},
-		[]OptionalValue{{Valid: false}},
+		[]OptionalValue{MakeNull()},
 	)
 }
 
@@ -200,9 +200,9 @@ func TestExpr_Eval_Nested(t *testing.T) {
 			{Name: "c", Kind: Int8},
 		},
 		[]OptionalValue{
-			{Value: int64(2), Valid: true},
-			{Value: int64(3), Valid: true},
-			{Value: int64(4), Valid: true},
+			MakeInt8(int64(2)),
+			MakeInt8(int64(3)),
+			MakeInt8(int64(4)),
 		},
 	)
 
@@ -270,7 +270,7 @@ func TestExpr_Eval_COALESCE(t *testing.T) {
 		t.Parallel()
 		row := NewRowWithValues(
 			[]Column{{Name: "a", Kind: Int8}, {Name: "b", Kind: Int8}},
-			[]OptionalValue{{Valid: false}, {Value: int64(42), Valid: true}},
+			[]OptionalValue{MakeNull(), MakeInt8(int64(42))},
 		)
 		res, err := (&Expr{
 			FuncName: "COALESCE",
@@ -380,7 +380,7 @@ func TestExpr_Eval_NULLIF(t *testing.T) {
 func rowWithText(name, val string) Row {
 	return NewRowWithValues(
 		[]Column{{Name: name, Kind: Text}},
-		[]OptionalValue{{Value: NewTextPointer([]byte(val)), Valid: true}},
+		[]OptionalValue{MakeVarchar(NewTextPointer([]byte(val)))},
 	)
 }
 
@@ -419,7 +419,7 @@ func TestExpr_Eval_UPPER_LOWER(t *testing.T) {
 
 	t.Run("UPPER null propagates", func(t *testing.T) {
 		t.Parallel()
-		nullRow := NewRowWithValues([]Column{{Name: "name", Kind: Text}}, []OptionalValue{{Valid: false}})
+		nullRow := NewRowWithValues([]Column{{Name: "name", Kind: Text}}, []OptionalValue{MakeNull()})
 		v, err := (&Expr{FuncName: "UPPER", Args: []*Expr{{Column: "name"}}}).Eval(nullRow)
 		require.NoError(t, err)
 		assert.Nil(t, v)
@@ -485,7 +485,7 @@ func TestExpr_Eval_TextSearch(t *testing.T) {
 
 	t.Run("null arguments produce false match and zero rank", func(t *testing.T) {
 		t.Parallel()
-		nullRow := NewRowWithValues([]Column{{Name: "body", Kind: Text}}, []OptionalValue{{Valid: false}})
+		nullRow := NewRowWithValues([]Column{{Name: "body", Kind: Text}}, []OptionalValue{MakeNull()})
 
 		match, err := (&Expr{FuncName: "MATCH", Args: []*Expr{{Column: "body"}, textExpr("minisql")}}).Eval(nullRow)
 		require.NoError(t, err)
@@ -697,8 +697,8 @@ func TestExpr_Eval_CONCAT(t *testing.T) {
 		row := NewRowWithValues(
 			[]Column{{Name: "first", Kind: Text}, {Name: "last", Kind: Text}},
 			[]OptionalValue{
-				{Value: NewTextPointer([]byte("John")), Valid: true},
-				{Value: NewTextPointer([]byte("Doe")), Valid: true},
+				MakeVarchar(NewTextPointer([]byte("John"))),
+				MakeVarchar(NewTextPointer([]byte("Doe"))),
 			},
 		)
 		e := &Expr{FuncName: "CONCAT", Args: []*Expr{{Column: "first"}, textExpr(" "), {Column: "last"}}}
@@ -929,7 +929,7 @@ func TestExpr_Eval_MOD(t *testing.T) {
 func rowWithTimestamp(name string, ts TimestampMicros) Row {
 	return NewRowWithValues(
 		[]Column{{Name: name, Kind: Timestamp}},
-		[]OptionalValue{{Value: ts, Valid: true}},
+		[]OptionalValue{MakeTimestamp(ts)},
 	)
 }
 
@@ -994,7 +994,7 @@ func TestExpr_Eval_DATE_TRUNC(t *testing.T) {
 
 	t.Run("null timestamp propagates", func(t *testing.T) {
 		t.Parallel()
-		nullRow := NewRowWithValues([]Column{{Name: "ts", Kind: Timestamp}}, []OptionalValue{{Valid: false}})
+		nullRow := NewRowWithValues([]Column{{Name: "ts", Kind: Timestamp}}, []OptionalValue{MakeNull()})
 		e := &Expr{FuncName: "DATE_TRUNC", Args: []*Expr{textExpr("day"), {Column: "ts"}}}
 		v, err := e.Eval(nullRow)
 		require.NoError(t, err)
@@ -1046,7 +1046,7 @@ func TestExpr_Eval_EXTRACT(t *testing.T) {
 
 	t.Run("null propagates", func(t *testing.T) {
 		t.Parallel()
-		nullRow := NewRowWithValues([]Column{{Name: "ts", Kind: Timestamp}}, []OptionalValue{{Valid: false}})
+		nullRow := NewRowWithValues([]Column{{Name: "ts", Kind: Timestamp}}, []OptionalValue{MakeNull()})
 		e := &Expr{FuncName: "EXTRACT", Args: []*Expr{textExpr("year"), {Column: "ts"}}}
 		v, err := e.Eval(nullRow)
 		require.NoError(t, err)
@@ -1089,8 +1089,8 @@ func caseRow(score int64, status string) Row {
 			{Name: "status", Kind: Text},
 		},
 		[]OptionalValue{
-			{Value: score, Valid: true},
-			{Value: NewTextPointer([]byte(status)), Valid: true},
+			MakeInt8(score),
+			MakeVarchar(NewTextPointer([]byte(status))),
 		},
 	)
 }

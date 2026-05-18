@@ -15,11 +15,11 @@ func TestRowHeap_Basic(t *testing.T) {
 
 	// Add 5 rows, but heap should only keep top 3
 	rows := []Row{
-		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{{Value: int32(10), Valid: true}}),
-		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{{Value: int32(50), Valid: true}}),
-		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{{Value: int32(30), Valid: true}}),
-		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{{Value: int32(20), Valid: true}}),
-		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{{Value: int32(40), Valid: true}}),
+		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{MakeInt4(int32(10))}),
+		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{MakeInt4(int32(50))}),
+		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{MakeInt4(int32(30))}),
+		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{MakeInt4(int32(20))}),
+		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{MakeInt4(int32(40))}),
 	}
 
 	for _, row := range rows {
@@ -36,7 +36,7 @@ func TestRowHeap_Basic(t *testing.T) {
 	expectedScores := []int32{10, 20, 30}
 	for i, row := range result {
 		val, _ := row.GetValue("score")
-		score := val.Value.(int32)
+		score := val.AsInt4()
 		if score != expectedScores[i] {
 			t.Errorf("Row %d: expected score %d, got %d", i, expectedScores[i], score)
 		}
@@ -53,11 +53,11 @@ func TestRowHeap_Descending(t *testing.T) {
 	h := newRowHeap(orderBy, 3)
 
 	rows := []Row{
-		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{{Value: int32(10), Valid: true}}),
-		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{{Value: int32(50), Valid: true}}),
-		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{{Value: int32(30), Valid: true}}),
-		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{{Value: int32(20), Valid: true}}),
-		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{{Value: int32(40), Valid: true}}),
+		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{MakeInt4(int32(10))}),
+		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{MakeInt4(int32(50))}),
+		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{MakeInt4(int32(30))}),
+		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{MakeInt4(int32(20))}),
+		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{MakeInt4(int32(40))}),
 	}
 
 	for _, row := range rows {
@@ -74,7 +74,7 @@ func TestRowHeap_Descending(t *testing.T) {
 	expectedScores := []int32{50, 40, 30}
 	for i, row := range result {
 		val, _ := row.GetValue("score")
-		score := val.Value.(int32)
+		score := val.AsInt4()
 		if score != expectedScores[i] {
 			t.Errorf("Row %d: expected score %d, got %d", i, expectedScores[i], score)
 		}
@@ -91,9 +91,9 @@ func TestRowHeap_LessThanMaxSize(t *testing.T) {
 	h := newRowHeap(orderBy, 10) // Max size larger than input
 
 	rows := []Row{
-		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{{Value: int32(30), Valid: true}}),
-		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{{Value: int32(10), Valid: true}}),
-		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{{Value: int32(20), Valid: true}}),
+		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{MakeInt4(int32(30))}),
+		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{MakeInt4(int32(10))}),
+		NewRowWithValues([]Column{{Name: "score", Kind: Int4}}, []OptionalValue{MakeInt4(int32(20))}),
 	}
 
 	for _, row := range rows {
@@ -110,7 +110,7 @@ func TestRowHeap_LessThanMaxSize(t *testing.T) {
 	expectedScores := []int32{10, 20, 30}
 	for i, row := range result {
 		val, _ := row.GetValue("score")
-		score := val.Value.(int32)
+		score := val.AsInt4()
 		if score != expectedScores[i] {
 			t.Errorf("Row %d: expected score %d, got %d", i, expectedScores[i], score)
 		}
@@ -130,7 +130,7 @@ func BenchmarkRowHeap_TopN(b *testing.B) {
 	for i := range totalRows {
 		rows[i] = NewRowWithValues(
 			[]Column{{Name: "score", Kind: Int4}},
-			[]OptionalValue{{Value: int32(i % 1000), Valid: true}},
+			[]OptionalValue{MakeInt4(int32(i % 1000))},
 		)
 	}
 
@@ -158,7 +158,7 @@ func BenchmarkRowHeap_FullSort(b *testing.B) {
 	for i := 0; i < totalRows; i++ {
 		rows[i] = NewRowWithValues(
 			[]Column{{Name: "score", Kind: Int4}},
-			[]OptionalValue{{Value: int32(i % 1000), Valid: true}},
+			[]OptionalValue{MakeInt4(int32(i % 1000))},
 		)
 	}
 

@@ -35,9 +35,9 @@ func TestTable_FullTextIndexScanAndMaintenance(t *testing.T) {
 
 	require.NoError(t, database.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, row := range [][]OptionalValue{
-			{{Valid: true, Value: int64(1)}, {Valid: true, Value: NewTextPointer([]byte("MiniSQL"))}, {Valid: true, Value: NewTextPointer([]byte("MiniSQL stores rows in B tree pages and database pages."))}},
-			{{Valid: true, Value: int64(2)}, {Valid: true, Value: NewTextPointer([]byte("Postgres"))}, {Valid: true, Value: NewTextPointer([]byte("Postgres has generalized inverted indexes."))}},
-			{{Valid: true, Value: int64(3)}, {Valid: true, Value: NewTextPointer([]byte("Storage"))}, {Valid: true, Value: NewTextPointer([]byte("A small database stores data in pages."))}},
+			{MakeInt8(int64(1)), MakeVarchar(NewTextPointer([]byte("MiniSQL"))), MakeVarchar(NewTextPointer([]byte("MiniSQL stores rows in B tree pages and database pages.")))},
+			{MakeInt8(int64(2)), MakeVarchar(NewTextPointer([]byte("Postgres"))), MakeVarchar(NewTextPointer([]byte("Postgres has generalized inverted indexes.")))},
+			{MakeInt8(int64(3)), MakeVarchar(NewTextPointer([]byte("Storage"))), MakeVarchar(NewTextPointer([]byte("A small database stores data in pages.")))},
 		} {
 			_, err := database.ExecuteStatement(ctx, Statement{
 				Kind:      Insert,
@@ -92,7 +92,7 @@ func TestTable_FullTextIndexScanAndMaintenance(t *testing.T) {
 			Kind:    Update,
 			Columns: columns,
 			Updates: map[string]OptionalValue{
-				"body": {Valid: true, Value: NewTextPointer([]byte("Fresh token document about index maintenance."))},
+				"body": MakeVarchar(NewTextPointer([]byte("Fresh token document about index maintenance."))),
 			},
 			Conditions: OneOrMore{{
 				{
@@ -142,7 +142,7 @@ func TestFullTextIndexHelpers(t *testing.T) {
 
 	row := Row{
 		Columns: []Column{sourceColumn},
-		Values:  []OptionalValue{{Valid: true, Value: NewTextPointer([]byte("MiniSQL minisql database and pages"))}},
+		Values:  []OptionalValue{MakeVarchar(NewTextPointer([]byte("MiniSQL minisql database and pages")))},
 	}
 	tokens, err := fullTextTokensForRow(SecondaryIndex{
 		IndexInfo: IndexInfo{Name: "idx_body", Columns: []Column{sourceColumn}},
@@ -176,12 +176,12 @@ func TestFullTextIndexKeyMaintenanceHelpers(t *testing.T) {
 	oldRow := Row{
 		Key:     7,
 		Columns: []Column{bodyColumn},
-		Values:  []OptionalValue{{Valid: true, Value: NewTextPointer([]byte("old token value"))}},
+		Values:  []OptionalValue{MakeVarchar(NewTextPointer([]byte("old token value")))},
 	}
 	newRow := Row{
 		Key:     7,
 		Columns: []Column{bodyColumn},
-		Values:  []OptionalValue{{Valid: true, Value: NewTextPointer([]byte("new token value"))}},
+		Values:  []OptionalValue{MakeVarchar(NewTextPointer([]byte("new token value")))},
 	}
 
 	require.NoError(t, table.insertFullTextIndexKeys(ctx, secondaryIndex, newRow.Key, newRow))
@@ -486,10 +486,10 @@ func selectTitlesWithCondition(t *testing.T, ctx context.Context, database *Data
 		for result.Rows.Next(ctx) {
 			row := result.Rows.Row()
 			value, ok := row.GetValue("title")
-			if !ok || !value.Valid {
+			if !ok || !value.IsValid() {
 				continue
 			}
-			title, ok := toStringVal(value.Value)
+			title, ok := toStringVal(value.AsAny())
 			if ok {
 				titles = append(titles, title)
 			}

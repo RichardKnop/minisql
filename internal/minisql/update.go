@@ -82,11 +82,11 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 			// Expression values and correlated subquery placeholders are resolved at
 			// execution time — their actual value and size are unknown statically,
 			// so we must use the full update path.
-			if _, isExpr := newValue.Value.(*Expr); isExpr {
+			if newValue.IsExpr() {
 				indexChanges = true
 				break
 			}
-			if _, isSub := newValue.Value.(*Statement); isSub {
+			if newValue.IsStatement() {
 				indexChanges = true
 				break
 			}
@@ -99,17 +99,17 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 
 			switch {
 			case col.Kind.IsText():
-				if oldValue.Valid {
-					newSize -= uint64(oldValue.Value.(TextPointer).Size())
+				if oldValue.IsValid() {
+					newSize -= uint64(oldValue.AsTextPointer().Size())
 				}
-				if newValue.Valid {
-					newSize += uint64(newValue.Value.(TextPointer).Size())
+				if newValue.IsValid() {
+					newSize += uint64(newValue.AsTextPointer().Size())
 				}
 				continue
-			case !oldValue.Valid && newValue.Valid:
+			case !oldValue.IsValid() && newValue.IsValid():
 				// NULL -> NOT NULL
 				newSize += uint64(col.Size)
-			case oldValue.Valid && !newValue.Valid:
+			case oldValue.IsValid() && !newValue.IsValid():
 				// NOT NULL -> NULL
 				newSize -= uint64(col.Size)
 			}

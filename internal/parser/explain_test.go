@@ -64,7 +64,7 @@ func TestParse_Explain(t *testing.T) {
 						TableName: "users",
 						Fields:    []minisql.Field{{Name: "id"}},
 						Inserts: [][]minisql.OptionalValue{
-							{{Valid: true, Value: int64(1)}},
+							{minisql.MakeInt8(int64(1))},
 						},
 					},
 				},

@@ -65,7 +65,7 @@ func TestParse_Update(t *testing.T) {
 					TableName: "a",
 					Fields:    []minisql.Field{{Name: "b"}},
 					Updates: map[string]minisql.OptionalValue{
-						"b": {Value: minisql.NewTextPointer([]byte("hello")), Valid: true},
+						"b": minisql.MakeVarchar(minisql.NewTextPointer([]byte("hello"))),
 					},
 					Conditions: minisql.OneOrMore{
 						{
@@ -85,7 +85,7 @@ func TestParse_Update(t *testing.T) {
 					TableName: "a",
 					Fields:    []minisql.Field{{Name: "b"}},
 					Updates: map[string]minisql.OptionalValue{
-						"b": {Value: false, Valid: true},
+						"b": minisql.MakeBool(false),
 					},
 				},
 			},
@@ -100,7 +100,7 @@ func TestParse_Update(t *testing.T) {
 					TableName: "a",
 					Fields:    []minisql.Field{{Name: "b"}},
 					Updates: map[string]minisql.OptionalValue{
-						"b": {Value: int64(25), Valid: true},
+						"b": minisql.MakeInt8(int64(25)),
 					},
 					Conditions: minisql.OneOrMore{
 						{
@@ -120,7 +120,7 @@ func TestParse_Update(t *testing.T) {
 					TableName: "a",
 					Fields:    []minisql.Field{{Name: "b"}},
 					Updates: map[string]minisql.OptionalValue{
-						"b": {Value: float64(3.75), Valid: true},
+						"b": minisql.MakeDouble(float64(3.75)),
 					},
 					Conditions: minisql.OneOrMore{
 						{
@@ -140,7 +140,7 @@ func TestParse_Update(t *testing.T) {
 					TableName: "a",
 					Fields:    []minisql.Field{{Name: "b"}},
 					Updates: map[string]minisql.OptionalValue{
-						"b": {Valid: false},
+						"b": minisql.MakeNull(),
 					},
 					Conditions: minisql.OneOrMore{
 						{
@@ -160,7 +160,7 @@ func TestParse_Update(t *testing.T) {
 					TableName: "a",
 					Fields:    []minisql.Field{{Name: "b"}},
 					Updates: map[string]minisql.OptionalValue{
-						"b": {Value: minisql.NewTextPointer([]byte("hello\\'world")), Valid: true},
+						"b": minisql.MakeVarchar(minisql.NewTextPointer([]byte("hello\\'world"))),
 					},
 					Conditions: minisql.OneOrMore{
 						{
@@ -180,8 +180,8 @@ func TestParse_Update(t *testing.T) {
 					TableName: "a",
 					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}},
 					Updates: map[string]minisql.OptionalValue{
-						"b": {Value: minisql.NewTextPointer([]byte("hello")), Valid: true},
-						"c": {Value: minisql.FunctionNow, Valid: true},
+						"b": minisql.MakeVarchar(minisql.NewTextPointer([]byte("hello"))),
+						"c": minisql.MakeFunction(minisql.FunctionNow),
 					},
 					Conditions: minisql.OneOrMore{
 						{
@@ -201,8 +201,8 @@ func TestParse_Update(t *testing.T) {
 					TableName: "a",
 					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}},
 					Updates: map[string]minisql.OptionalValue{
-						"b": {Value: minisql.NewTextPointer([]byte("hello")), Valid: true},
-						"c": {Value: minisql.NewTextPointer([]byte("bye")), Valid: true},
+						"b": minisql.MakeVarchar(minisql.NewTextPointer([]byte("hello"))),
+						"c": minisql.MakeVarchar(minisql.NewTextPointer([]byte("bye"))),
 					},
 					Conditions: minisql.OneOrMore{
 						{
@@ -223,8 +223,8 @@ func TestParse_Update(t *testing.T) {
 					TableName: "a",
 					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}},
 					Updates: map[string]minisql.OptionalValue{
-						"b": {Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
-						"c": {Value: minisql.Placeholder{}, Valid: true},
+						"b": minisql.MakeVarchar(minisql.NewTextPointer([]byte("foo"))),
+						"c": minisql.MakePlaceholder(),
 					},
 					Conditions: minisql.OneOrMore{
 						{
@@ -265,14 +265,11 @@ func TestParse_UpdateArithmetic(t *testing.T) {
 					TableName: "products",
 					Fields:    []minisql.Field{{Name: "count"}},
 					Updates: map[string]minisql.OptionalValue{
-						"count": {
-							Value: &minisql.Expr{
+						"count": minisql.MakeExpr(&minisql.Expr{
 								Left:  &minisql.Expr{Column: "count"},
 								Right: &minisql.Expr{Literal: int64(1)},
 								Op:    minisql.ArithAdd,
-							},
-							Valid: true,
-						},
+							}),
 					},
 				},
 			},
@@ -287,14 +284,11 @@ func TestParse_UpdateArithmetic(t *testing.T) {
 					TableName: "products",
 					Fields:    []minisql.Field{{Name: "price"}},
 					Updates: map[string]minisql.OptionalValue{
-						"price": {
-							Value: &minisql.Expr{
+						"price": minisql.MakeExpr(&minisql.Expr{
 								Left:  &minisql.Expr{Column: "price"},
 								Right: &minisql.Expr{Literal: float64(1.1)},
 								Op:    minisql.ArithMul,
-							},
-							Valid: true,
-						},
+							}),
 					},
 				},
 			},
@@ -309,14 +303,11 @@ func TestParse_UpdateArithmetic(t *testing.T) {
 					TableName: "orders",
 					Fields:    []minisql.Field{{Name: "diff"}},
 					Updates: map[string]minisql.OptionalValue{
-						"diff": {
-							Value: &minisql.Expr{
+						"diff": minisql.MakeExpr(&minisql.Expr{
 								Left:  &minisql.Expr{Column: "total"},
 								Right: &minisql.Expr{Column: "discount"},
 								Op:    minisql.ArithSub,
-							},
-							Valid: true,
-						},
+							}),
 					},
 				},
 			},
@@ -331,18 +322,15 @@ func TestParse_UpdateArithmetic(t *testing.T) {
 					TableName: "t",
 					Fields:    []minisql.Field{{Name: "x"}},
 					Updates: map[string]minisql.OptionalValue{
-						"x": {
-							Value: &minisql.Expr{
-								Left: &minisql.Expr{Column: "a"},
-								Right: &minisql.Expr{
-									Left:  &minisql.Expr{Column: "b"},
-									Right: &minisql.Expr{Column: "c"},
-									Op:    minisql.ArithMul,
-								},
-								Op: minisql.ArithAdd,
+						"x": minisql.MakeExpr(&minisql.Expr{
+							Left: &minisql.Expr{Column: "a"},
+							Right: &minisql.Expr{
+								Left:  &minisql.Expr{Column: "b"},
+								Right: &minisql.Expr{Column: "c"},
+								Op:    minisql.ArithMul,
 							},
-							Valid: true,
-						},
+							Op: minisql.ArithAdd,
+						}),
 					},
 				},
 			},

@@ -99,10 +99,7 @@ func TestParse_CheckConstraint(t *testing.T) {
 							Kind:     minisql.Int8,
 							Size:     8,
 							Nullable: false,
-							DefaultValue: minisql.OptionalValue{
-								Value: int64(1),
-								Valid: true,
-							},
+							DefaultValue: minisql.MakeInt8(int64(1)),
 							Check:     "n > 0",
 							CheckCond: leaf(fieldCond("n", minisql.Gt, minisql.OperandInteger, int64(0))),
 						},

@@ -26,8 +26,8 @@ func TestValidateCheckConstraints(t *testing.T) {
 
 	makeRow := func(id, price int64) Row {
 		return NewRowWithValues(columns, []OptionalValue{
-			{Value: id, Valid: true},
-			{Value: price, Valid: true},
+			MakeInt8(id),
+			MakeInt8(price),
 		})
 	}
 
@@ -54,8 +54,8 @@ func TestValidateCheckConstraints(t *testing.T) {
 			{Name: "name", Kind: Text},
 		}
 		row := NewRowWithValues(bare, []OptionalValue{
-			{Value: int64(1), Valid: true},
-			{Value: NewTextPointer([]byte("foo")), Valid: true},
+			MakeInt8(int64(1)),
+			MakeVarchar(NewTextPointer([]byte("foo"))),
 		})
 		err := validateCheckConstraints(bare, row)
 		require.NoError(t, err)

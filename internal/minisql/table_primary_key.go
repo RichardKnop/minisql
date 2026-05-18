@@ -95,7 +95,7 @@ func (t *Table) insertPrimaryKey(ctx context.Context, keyParts []OptionalValue, 
 
 	key := keyParts[0]
 
-	if !key.Valid {
+	if !key.IsValid() {
 		if !t.PrimaryKey.Autoincrement {
 			return 0, fmt.Errorf("failed to get value for primary key %s", t.PrimaryKey.Name)
 		}
@@ -105,7 +105,7 @@ func (t *Table) insertPrimaryKey(ctx context.Context, keyParts []OptionalValue, 
 		}
 		return newPrimaryKey, nil
 	}
-	castedKey, err := castKeyValue(t.PrimaryKey.Columns[0], key.Value)
+	castedKey, err := castKeyValue(t.PrimaryKey.Columns[0], key.AsAny())
 	if err != nil {
 		return 0, fmt.Errorf("failed to cast primary key value for %s: %w", t.PrimaryKey.Name, err)
 	}
@@ -156,10 +156,10 @@ func (t *Table) insertCompositePrimaryKey(ctx context.Context, keyParts []Option
 
 	keyValues := make([]any, 0, len(keyParts))
 	for i, key := range keyParts {
-		if !key.Valid {
+		if !key.IsValid() {
 			return 0, fmt.Errorf("failed to get value for primary key %s", t.PrimaryKey.Name)
 		}
-		castedKey, err := castKeyValue(t.PrimaryKey.Columns[i], key.Value)
+		castedKey, err := castKeyValue(t.PrimaryKey.Columns[i], key.AsAny())
 		if err != nil {
 			return 0, fmt.Errorf("failed to cast primary key value for %s: %w", t.PrimaryKey.Name, err)
 		}
@@ -194,7 +194,7 @@ func (t *Table) updatePrimaryKey(ctx context.Context, oldKeyParts []OptionalValu
 
 	oldKey := oldKeyParts[0]
 
-	castedOldKey, err := castKeyValue(t.PrimaryKey.Columns[0], oldKey.Value)
+	castedOldKey, err := castKeyValue(t.PrimaryKey.Columns[0], oldKey.AsAny())
 	if err != nil {
 		return fmt.Errorf("failed to cast old primary key value for %s: %w", t.PrimaryKey.Name, err)
 	}
@@ -203,10 +203,10 @@ func (t *Table) updatePrimaryKey(ctx context.Context, oldKeyParts []OptionalValu
 	if !ok {
 		return nil
 	}
-	if !newKey.Valid {
+	if !newKey.IsValid() {
 		return fmt.Errorf("cannot update primary key %s to NULL", t.PrimaryKey.Name)
 	}
-	castedKey, err := castKeyValue(t.PrimaryKey.Columns[0], newKey.Value)
+	castedKey, err := castKeyValue(t.PrimaryKey.Columns[0], newKey.AsAny())
 	if err != nil {
 		return fmt.Errorf("failed to cast new primary key value for %s: %w", t.PrimaryKey.Name, err)
 	}
@@ -231,10 +231,10 @@ func (t *Table) updateCompositePrimaryKey(ctx context.Context, oldKeyParts []Opt
 
 	oldKeyValues := make([]any, 0, len(oldKeyParts))
 	for i, keyPart := range oldKeyParts {
-		if !keyPart.Valid {
+		if !keyPart.IsValid() {
 			return fmt.Errorf("failed to get value for old composite primary key %s", t.PrimaryKey.Name)
 		}
-		castedKey, err := castKeyValue(t.PrimaryKey.Columns[i], keyPart.Value)
+		castedKey, err := castKeyValue(t.PrimaryKey.Columns[i], keyPart.AsAny())
 		if err != nil {
 			return fmt.Errorf("failed to cast old primary key value for %s: %w", t.PrimaryKey.Name, err)
 		}
@@ -247,10 +247,10 @@ func (t *Table) updateCompositePrimaryKey(ctx context.Context, oldKeyParts []Opt
 		if !ok {
 			return fmt.Errorf("failed to get value for new composite primary key %s", t.PrimaryKey.Name)
 		}
-		if !keyValue.Valid {
+		if !keyValue.IsValid() {
 			return fmt.Errorf("cannot update composite primary key %s to part NULL", t.PrimaryKey.Name)
 		}
-		castedKey, err := castKeyValue(col, keyValue.Value)
+		castedKey, err := castKeyValue(col, keyValue.AsAny())
 		if err != nil {
 			return fmt.Errorf("failed to cast new composite primary key value for %s: %w", t.PrimaryKey.Name, err)
 		}

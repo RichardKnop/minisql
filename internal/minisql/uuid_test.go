@@ -93,7 +93,7 @@ func TestUUIDRowMarshalUnmarshal(t *testing.T) {
 	require.NoError(t, err)
 
 	row := minisql.NewRowWithValues(cols, []minisql.OptionalValue{
-		{Value: uv, Valid: true},
+		minisql.MakeUUID(uv),
 	})
 
 	b, err := row.Marshal()
@@ -104,8 +104,7 @@ func TestUUIDRowMarshalUnmarshal(t *testing.T) {
 	row2, err = row2.Unmarshal(minisql.Cell{Value: b}, minisql.Field{Name: "id"})
 	require.NoError(t, err)
 
-	got, ok := row2.Values[0].Value.(minisql.UUIDValue)
-	require.True(t, ok)
+	got := row2.Values[0].AsUUID()
 	assert.Equal(t, uv, got)
 }
 
@@ -116,7 +115,7 @@ func TestUUIDRowMarshalNull(t *testing.T) {
 	}
 
 	row := minisql.NewRowWithValues(cols, []minisql.OptionalValue{
-		{Valid: false},
+		minisql.MakeNull(),
 	})
 
 	b, err := row.Marshal()

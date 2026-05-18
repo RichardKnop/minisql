@@ -79,7 +79,7 @@ func TestDatabase_Analyze(t *testing.T) {
 		if i > 0 && i%10 == 0 {
 			now = now.Add(time.Minute)
 		}
-		row.Values[5].Value = MustParseTimestampMicros(now.Format(timestampFormat))
+		row.Values[5] = MakeTimestamp(MustParseTimestampMicros(now.Format(timestampFormat)))
 		insertStmt.Inserts = append(insertStmt.Inserts, row.Values)
 	}
 
@@ -186,8 +186,8 @@ func TestDatabase_Analyze_MCVGuidedPlanSelection(t *testing.T) {
 			status = "inactive"
 		}
 		insertStmt.Inserts = append(insertStmt.Inserts, []OptionalValue{
-			{Value: int64(i + 1), Valid: true},
-			{Value: NewTextPointer([]byte(status)), Valid: true},
+			MakeInt8(int64(i + 1)),
+			MakeVarchar(NewTextPointer([]byte(status))),
 		})
 	}
 	mustInsert(ctx, t, aDatabase.tables[testTableName], aDatabase.txManager, insertStmt)
@@ -285,15 +285,15 @@ func TestDatabase_Analyze_CompositeIndex(t *testing.T) {
 	for i := range 100 {
 		values := make([]OptionalValue, 0, len(columns))
 		if i < 50 {
-			values = append(values, OptionalValue{Value: NewTextPointer([]byte(countries[0])), Valid: true})
+			values = append(values, MakeVarchar(NewTextPointer([]byte(countries[0]))))
 		} else {
-			values = append(values, OptionalValue{Value: NewTextPointer([]byte(countries[1])), Valid: true})
+			values = append(values, MakeVarchar(NewTextPointer([]byte(countries[1]))))
 		}
 		if i > 0 && i%10 == 0 {
 			cityIdx += 1
 		}
-		values = append(values, OptionalValue{Value: NewTextPointer([]byte(cities[cityIdx])), Valid: true})
-		values = append(values, OptionalValue{Value: NewTextPointer([]byte(streets[i])), Valid: true})
+		values = append(values, MakeVarchar(NewTextPointer([]byte(cities[cityIdx]))))
+		values = append(values, MakeVarchar(NewTextPointer([]byte(streets[i]))))
 		insertStmt.Inserts = append(insertStmt.Inserts, values)
 	}
 

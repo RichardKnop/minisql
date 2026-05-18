@@ -136,10 +136,10 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	// every matching row.  plan.Execute propagates errLimitReached from the
 	// callback; the JOIN goroutine is cancelled and drained inside Execute itself.
 	var joinScanLimit int64
-	if len(plan.Joins) > 0 && stmt.Limit.Valid && !plan.SortInMemory && !stmt.Distinct {
-		joinScanLimit = stmt.Limit.Value.(int64)
-		if stmt.Offset.Valid {
-			joinScanLimit += stmt.Offset.Value.(int64)
+	if len(plan.Joins) > 0 && stmt.Limit.IsValid() && !plan.SortInMemory && !stmt.Distinct {
+		joinScanLimit = stmt.Limit.AsInt8()
+		if stmt.Offset.IsValid() {
+			joinScanLimit += stmt.Offset.AsInt8()
 		}
 	}
 
@@ -188,7 +188,7 @@ func countResult(count int64) StatementResult {
 		Columns: []Column{{Name: "COUNT(*)"}},
 		Rows: NewSingleRowIterator(NewRowWithValues(
 			[]Column{{Name: "COUNT(*)"}},
-			[]OptionalValue{{Valid: true, Value: count}},
+			[]OptionalValue{MakeInt8(count)},
 		)),
 	}
 }
@@ -288,24 +288,24 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row)
 					continue
 				}
 				val := row.Values[colIdx]
-				if !val.Valid {
+				if val.IsNull() {
 					continue
 				}
 				states[i].count++
 				states[i].hasValue = true
 				if states[i].useIntSum {
-					switch v := val.Value.(type) {
-					case int64:
-						states[i].sumI += v
-					case int32:
-						states[i].sumI += int64(v)
+					switch val.Kind() {
+					case ovalInt8:
+						states[i].sumI += val.AsInt8()
+					case ovalInt4:
+						states[i].sumI += int64(val.AsInt4())
 					}
 				} else {
-					switch v := val.Value.(type) {
-					case float64:
-						states[i].sumF += v
-					case float32:
-						states[i].sumF += float64(v)
+					switch val.Kind() {
+					case ovalDouble:
+						states[i].sumF += val.AsDouble()
+					case ovalReal:
+						states[i].sumF += float64(val.AsReal())
 					}
 				}
 
@@ -315,7 +315,7 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row)
 					continue
 				}
 				val := row.Values[colIdx]
-				if !val.Valid {
+				if val.IsNull() {
 					continue
 				}
 				if !states[i].hasValue || compareValues(val, states[i].min) < 0 {
@@ -329,7 +329,7 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row)
 					continue
 				}
 				val := row.Values[colIdx]
-				if !val.Valid {
+				if val.IsNull() {
 					continue
 				}
 				if !states[i].hasValue || compareValues(val, states[i].max) > 0 {
@@ -350,30 +350,30 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row)
 		switch agg.Kind {
 		case AggregateCount:
 			resultColumns[i] = Column{Name: fieldName, Kind: Int8}
-			resultValues[i] = OptionalValue{Valid: true, Value: states[i].count}
+			resultValues[i] = MakeInt8(states[i].count)
 
 		case AggregateSum:
 			switch {
 			case !states[i].hasValue:
 				resultColumns[i] = Column{Name: fieldName, Kind: Int8}
-				resultValues[i] = OptionalValue{} // NULL — no non-NULL rows
+				resultValues[i] = MakeNull() // NULL — no non-NULL rows
 			case states[i].useIntSum:
 				resultColumns[i] = Column{Name: fieldName, Kind: Int8}
-				resultValues[i] = OptionalValue{Valid: true, Value: states[i].sumI}
+				resultValues[i] = MakeInt8(states[i].sumI)
 			default:
 				resultColumns[i] = Column{Name: fieldName, Kind: Double}
-				resultValues[i] = OptionalValue{Valid: true, Value: states[i].sumF}
+				resultValues[i] = MakeDouble(states[i].sumF)
 			}
 
 		case AggregateAvg:
 			resultColumns[i] = Column{Name: fieldName, Kind: Double}
 			switch {
 			case !states[i].hasValue || states[i].count == 0:
-				resultValues[i] = OptionalValue{} // NULL
+				resultValues[i] = MakeNull() // NULL
 			case states[i].useIntSum:
-				resultValues[i] = OptionalValue{Valid: true, Value: float64(states[i].sumI) / float64(states[i].count)}
+				resultValues[i] = MakeDouble(float64(states[i].sumI) / float64(states[i].count))
 			default:
-				resultValues[i] = OptionalValue{Valid: true, Value: states[i].sumF / float64(states[i].count)}
+				resultValues[i] = MakeDouble(states[i].sumF / float64(states[i].count))
 			}
 
 		case AggregateMin:
@@ -499,7 +499,7 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 				if colIdx >= 0 && colIdx < len(row.Values) {
 					groupValPool = append(groupValPool, row.Values[colIdx])
 				} else {
-					groupValPool = append(groupValPool, OptionalValue{})
+					groupValPool = append(groupValPool, MakeNull())
 				}
 			}
 
@@ -526,24 +526,24 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 					continue
 				}
 				val := row.Values[colIdx]
-				if !val.Valid {
+				if val.IsNull() {
 					continue
 				}
 				aggStatePool[aggBase+i].count++
 				aggStatePool[aggBase+i].hasValue = true
 				if aggStatePool[aggBase+i].useIntSum {
-					switch v := val.Value.(type) {
-					case int64:
-						aggStatePool[aggBase+i].sumI += v
-					case int32:
-						aggStatePool[aggBase+i].sumI += int64(v)
+					switch val.Kind() {
+					case ovalInt8:
+						aggStatePool[aggBase+i].sumI += val.AsInt8()
+					case ovalInt4:
+						aggStatePool[aggBase+i].sumI += int64(val.AsInt4())
 					}
 				} else {
-					switch v := val.Value.(type) {
-					case float64:
-						aggStatePool[aggBase+i].sumF += v
-					case float32:
-						aggStatePool[aggBase+i].sumF += float64(v)
+					switch val.Kind() {
+					case ovalDouble:
+						aggStatePool[aggBase+i].sumF += val.AsDouble()
+					case ovalReal:
+						aggStatePool[aggBase+i].sumF += float64(val.AsReal())
 					}
 				}
 			case AggregateMin:
@@ -552,7 +552,7 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 					continue
 				}
 				val := row.Values[colIdx]
-				if !val.Valid {
+				if val.IsNull() {
 					continue
 				}
 				if !aggStatePool[aggBase+i].hasValue || compareValues(val, aggStatePool[aggBase+i].min) < 0 {
@@ -565,7 +565,7 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 					continue
 				}
 				val := row.Values[colIdx]
-				if !val.Valid {
+				if val.IsNull() {
 					continue
 				}
 				if !aggStatePool[aggBase+i].hasValue || compareValues(val, aggStatePool[aggBase+i].max) > 0 {
@@ -627,23 +627,23 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 					values[i] = groupValPool[gvBase+j]
 				}
 			case AggregateCount:
-				values[i] = OptionalValue{Valid: true, Value: aggStatePool[aggBase+i].count}
+				values[i] = MakeInt8(aggStatePool[aggBase+i].count)
 			case AggregateSum:
 				st := aggStatePool[aggBase+i]
 				if st.hasValue {
 					if st.useIntSum {
-						values[i] = OptionalValue{Valid: true, Value: st.sumI}
+						values[i] = MakeInt8(st.sumI)
 					} else {
-						values[i] = OptionalValue{Valid: true, Value: st.sumF}
+						values[i] = MakeDouble(st.sumF)
 					}
 				}
 			case AggregateAvg:
 				st := aggStatePool[aggBase+i]
 				if st.hasValue && st.count > 0 {
 					if st.useIntSum {
-						values[i] = OptionalValue{Valid: true, Value: float64(st.sumI) / float64(st.count)}
+						values[i] = MakeDouble(float64(st.sumI) / float64(st.count))
 					} else {
-						values[i] = OptionalValue{Valid: true, Value: st.sumF / float64(st.count)}
+						values[i] = MakeDouble(st.sumF / float64(st.count))
 					}
 				}
 			case AggregateMin:
@@ -680,8 +680,8 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 	}
 
 	// Apply OFFSET.
-	if stmt.Offset.Valid {
-		offset := int(stmt.Offset.Value.(int64))
+	if stmt.Offset.IsValid() {
+		offset := int(stmt.Offset.AsInt8())
 		if offset >= len(resultRows) {
 			resultRows = []Row{}
 		} else {
@@ -690,8 +690,8 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 	}
 
 	// Apply LIMIT.
-	if stmt.Limit.Valid {
-		limit := int(stmt.Limit.Value.(int64))
+	if stmt.Limit.IsValid() {
+		limit := int(stmt.Limit.AsInt8())
 		if limit < len(resultRows) {
 			resultRows = resultRows[:limit]
 		}
@@ -749,14 +749,14 @@ func (t *Table) selectStreamingDirect(
 	var (
 		remaining int64
 		offset    int64
-		hasLimit  = stmt.Limit.Valid
-		hasOffset = stmt.Offset.Valid
+		hasLimit  = stmt.Limit.IsValid()
+		hasOffset = stmt.Offset.IsValid()
 	)
 	if hasLimit {
-		remaining = stmt.Limit.Value.(int64)
+		remaining = stmt.Limit.AsInt8()
 	}
 	if hasOffset {
-		offset = stmt.Offset.Value.(int64)
+		offset = stmt.Offset.AsInt8()
 	}
 
 	var seen map[string]struct{}
@@ -822,14 +822,14 @@ func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields [
 
 	var (
 		limit, offset int64
-		hasLimit      = stmt.Limit.Valid
-		hasOffset     = stmt.Offset.Valid
+		hasLimit      = stmt.Limit.IsValid()
+		hasOffset     = stmt.Offset.IsValid()
 	)
 	if hasLimit {
-		limit = stmt.Limit.Value.(int64)
+		limit = stmt.Limit.AsInt8()
 	}
 	if hasOffset {
-		offset = stmt.Offset.Value.(int64)
+		offset = stmt.Offset.AsInt8()
 	}
 
 	var seen map[string]struct{}
@@ -876,14 +876,14 @@ func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, allRows []Row, re
 
 	// Check if we can use heap optimization for LIMIT queries
 	var limit int
-	hasLimit := stmt.Limit.Valid
+	hasLimit := stmt.Limit.IsValid()
 	if hasLimit {
-		limit = int(stmt.Limit.Value.(int64))
+		limit = int(stmt.Limit.AsInt8())
 	}
 
 	var offset int
-	if stmt.Offset.Valid {
-		offset = int(stmt.Offset.Value.(int64))
+	if stmt.Offset.IsValid() {
+		offset = int(stmt.Offset.AsInt8())
 	}
 
 	// For queries with LIMIT (and optional OFFSET), use a heap to keep only top N+offset rows.
@@ -975,7 +975,7 @@ func addOrderByOutputFields(rows []Row, fields []Field, orderBy []OrderBy) ([]Ro
 					return nil, fmt.Errorf("evaluating ORDER BY expression %q: %w", field.OutputName(), err)
 				}
 				if result != nil {
-					value = OptionalValue{Value: result, Valid: true}
+					value = optionalValueFromAny(0, result)
 				}
 			} else {
 				existing, found := updated.getValueQualified(field.AliasPrefix, field.Name)
@@ -1904,9 +1904,9 @@ func projectRow(row Row, fields []Field) (Row, error) {
 			}
 			columns = append(columns, Column{Name: f.OutputName()})
 			if result == nil {
-				values = append(values, OptionalValue{Valid: false})
+				values = append(values, MakeNull())
 			} else {
-				values = append(values, OptionalValue{Value: result, Valid: true})
+				values = append(values, optionalValueFromAny(0, result))
 			}
 		} else {
 			col, idx := row.getColumnQualified(f.AliasPrefix, f.Name)
@@ -1916,7 +1916,7 @@ func projectRow(row Row, fields []Field) (Row, error) {
 			} else {
 				// Column not found — keep zero-value column with the requested name.
 				columns = append(columns, Column{Name: f.Name})
-				values = append(values, OptionalValue{Valid: false})
+				values = append(values, MakeNull())
 			}
 		}
 	}
@@ -1970,11 +1970,11 @@ func buildGroupKey(buf []byte, row Row, colIndices []int) []byte {
 			continue
 		}
 		v := row.Values[colIdx]
-		if !v.Valid {
+		if v.IsNull() {
 			buf = append(buf, "null"...)
 			continue
 		}
-		switch val := v.Value.(type) {
+		switch val := v.AsAny().(type) {
 		case TextPointer:
 			buf = append(buf, 't')
 			buf = strconv.AppendInt(buf, int64(val.Length), 10)
@@ -2032,11 +2032,11 @@ func (r Row) rowDistinctKey() string {
 		if i > 0 {
 			b.WriteByte('\x1f') // ASCII unit separator
 		}
-		if !v.Valid {
+		if v.IsNull() {
 			b.WriteString("null")
 			continue
 		}
-		switch val := v.Value.(type) {
+		switch val := v.AsAny().(type) {
 		case TextPointer:
 			fmt.Fprintf(&b, "t%d:%s", val.Length, val.String())
 		case bool:
@@ -2314,10 +2314,10 @@ func compileJSONContainsRecheck(columns []Column, filters OneOrMore) (func(Row) 
 				return false, nil
 			}
 			value := row.Values[columnIdx]
-			if !value.Valid {
+			if value.IsNull() {
 				return false, nil
 			}
-			doc, ok := toStringVal(value.Value)
+			doc, ok := toStringVal(value.AsAny())
 			if !ok {
 				return false, fmt.Errorf("JSON_CONTAINS: first argument must be a string")
 			}

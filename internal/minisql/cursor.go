@@ -258,19 +258,20 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 		// Correlated subquery placeholders must have been resolved by
 		// resolveSetSubqueries before reaching here; if one slips through it
 		// indicates a programming error.
-		if _, isSub := value.Value.(*Statement); isSub {
+		if value.IsStatement() {
 			return false, fmt.Errorf("internal error: unresolved correlated subquery for column %q in cursor.update", name)
 		}
 		// Evaluate arithmetic expressions against the current row before applying.
-		if expr, ok := value.Value.(*Expr); ok {
+		if value.IsExpr() {
+			expr := value.AsExpr()
 			result, err := expr.Eval(row)
 			if err != nil {
 				return false, fmt.Errorf("evaluating expression for column %q: %w", name, err)
 			}
 			if result == nil {
-				value = OptionalValue{Valid: false}
+				value = MakeNull()
 			} else {
-				value = OptionalValue{Value: result, Valid: true}
+				value = optionalValueFromAny(0, result)
 			}
 		}
 		col, idx := row.GetColumn(name)
@@ -278,13 +279,14 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 			return false, fmt.Errorf("column '%s' not found", name)
 		}
 		// Normalise JSON values to compact form before writing.
-		if col.Kind == JSON && value.Valid {
-			if tp, ok := value.Value.(TextPointer); ok {
+		if col.Kind == JSON && value.IsValid() {
+			if value.Kind() == ovalJSON || value.Kind() == ovalText || value.Kind() == ovalVarchar {
+				tp := value.AsTextPointer()
 				normalised, err := normaliseJSON(tp.String())
 				if err != nil {
 					return false, fmt.Errorf("column %q: %w", name, err)
 				}
-				value = OptionalValue{Value: NewTextPointer([]byte(normalised)), Valid: true}
+				value = MakeJSON(NewTextPointer([]byte(normalised)))
 			}
 		}
 		var changed bool
@@ -552,7 +554,7 @@ func (c *Cursor) deletePrimaryKey(ctx context.Context, row Row) error {
 		return fmt.Errorf("primary key %s not found in row", c.Table.PrimaryKey.Name)
 	}
 
-	castedValue, err := castKeyValue(c.Table.PrimaryKey.Columns[0], primaryKeyValue.Value)
+	castedValue, err := castKeyValue(c.Table.PrimaryKey.Columns[0], primaryKeyValue.AsAny())
 	if err != nil {
 		return fmt.Errorf("failed to cast key value for primary key %s: %w", c.Table.PrimaryKey.Name, err)
 	}
@@ -572,10 +574,10 @@ func (c *Cursor) deleteCompositePrimaryKey(ctx context.Context, row Row) error {
 
 	keyValues := make([]any, 0, len(keyParts))
 	for i, keyPart := range keyParts {
-		if !keyPart.Valid {
+		if !keyPart.IsValid() {
 			return fmt.Errorf("failed to get value for comnposite primary key %s", c.Table.PrimaryKey.Name)
 		}
-		castedKey, err := castKeyValue(c.Table.PrimaryKey.Columns[i], keyPart.Value)
+		castedKey, err := castKeyValue(c.Table.PrimaryKey.Columns[i], keyPart.AsAny())
 		if err != nil {
 			return fmt.Errorf("failed to cast old unique index value for %s: %w", c.Table.PrimaryKey.Name, err)
 		}
@@ -607,7 +609,7 @@ func (c *Cursor) deleteUniqueIndexKeys(ctx context.Context, row Row) error {
 			return fmt.Errorf("unique index key %s not found in row", uniqueIndex.Name)
 		}
 
-		castedValue, err := castKeyValue(uniqueIndex.Columns[0], indexValue.Value)
+		castedValue, err := castKeyValue(uniqueIndex.Columns[0], indexValue.AsAny())
 		if err != nil {
 			return fmt.Errorf("failed to cast key value for unique index %s: %w", uniqueIndex.Name, err)
 		}
@@ -628,11 +630,11 @@ func (c *Cursor) deleteCompositeUniqueIndexKey(ctx context.Context, row Row, uni
 
 	keyValues := make([]any, 0, len(keyParts))
 	for i, keyPart := range keyParts {
-		if !keyPart.Valid {
+		if !keyPart.IsValid() {
 			// No need to delete as key should not be in the index (all columns are not non-NULL)
 			return nil
 		}
-		castedKey, err := castKeyValue(uniqueIndex.Columns[i], keyPart.Value)
+		castedKey, err := castKeyValue(uniqueIndex.Columns[i], keyPart.AsAny())
 		if err != nil {
 			return fmt.Errorf("failed to cast unique index value for %s: %w", uniqueIndex.Name, err)
 		}
@@ -710,7 +712,7 @@ func (c *Cursor) deleteSecondaryIndexKeys(ctx context.Context, row Row) error {
 			return fmt.Errorf("unique index key %s not found in row", secondaryIndex.Name)
 		}
 
-		castedValue, err := castKeyValue(secondaryIndex.Columns[0], indexValue.Value)
+		castedValue, err := castKeyValue(secondaryIndex.Columns[0], indexValue.AsAny())
 		if err != nil {
 			return fmt.Errorf("failed to cast key value for secondary index %s: %w", secondaryIndex.Name, err)
 		}
@@ -731,11 +733,11 @@ func (c *Cursor) deleteCompositeSecondaryIndexKey(ctx context.Context, row Row, 
 
 	keyValues := make([]any, 0, len(keyParts))
 	for i, keyPart := range keyParts {
-		if !keyPart.Valid {
+		if !keyPart.IsValid() {
 			// No need to delete as key should not be in the index (all columns are not non-NULL)
 			return nil
 		}
-		castedKey, err := castKeyValue(secondaryIndex.Columns[i], keyPart.Value)
+		castedKey, err := castKeyValue(secondaryIndex.Columns[i], keyPart.AsAny())
 		if err != nil {
 			return fmt.Errorf("failed to cast secondary index value for %s: %w", secondaryIndex.Name, err)
 		}

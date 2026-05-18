@@ -69,7 +69,7 @@ func (p *parserItem) doParseUpdate() error {
 				if err != nil {
 					return err
 				}
-				p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: subStmt, Valid: true})
+				p.setUpdate(p.nextUpdateField, minisql.MakeStatement(subStmt))
 				p.nextUpdateField = ""
 				maybeNext := strings.ToUpper(p.peek())
 				if maybeNext == "WHERE" {
@@ -88,23 +88,23 @@ func (p *parserItem) doParseUpdate() error {
 		specialValue := strings.ToUpper(p.peek())
 		switch specialValue {
 		case "?":
-			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: minisql.Placeholder{}, Valid: true})
+			p.setUpdate(p.nextUpdateField, minisql.MakePlaceholder())
 			p.nextUpdateField = ""
 			p.pop()
 		case "NULL":
-			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Valid: false})
+			p.setUpdate(p.nextUpdateField, minisql.MakeNull())
 			p.nextUpdateField = ""
 			p.pop()
 		case "NOW()":
-			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: minisql.FunctionNow, Valid: true})
+			p.setUpdate(p.nextUpdateField, minisql.MakeFunction(minisql.FunctionNow))
 			p.nextUpdateField = ""
 			p.pop()
 		case "TRUE":
-			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: true, Valid: true})
+			p.setUpdate(p.nextUpdateField, minisql.MakeBool(true))
 			p.nextUpdateField = ""
 			p.pop()
 		case "FALSE":
-			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: false, Valid: true})
+			p.setUpdate(p.nextUpdateField, minisql.MakeBool(false))
 			p.nextUpdateField = ""
 			p.pop()
 		default:
@@ -116,7 +116,7 @@ func (p *parserItem) doParseUpdate() error {
 					return p.wrapErr(errUpdateExpectedQuotedValueOrInt)
 				}
 				strValue := value.(string)
-				p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: minisql.NewTextPointer([]byte(strValue)), Valid: true})
+				p.setUpdate(p.nextUpdateField, minisql.MakeVarchar(minisql.NewTextPointer([]byte(strValue))))
 				p.nextUpdateField = ""
 				p.pop()
 				break
@@ -130,11 +130,11 @@ func (p *parserItem) doParseUpdate() error {
 			var updateValue minisql.OptionalValue
 			// Plain numeric/bool literal — no expression overhead needed.
 			if expr.FuncName == "" && !expr.IsNull && expr.Column == "" && expr.Left == nil && expr.CaseClauses == nil {
-				updateValue = minisql.OptionalValue{Value: expr.Literal, Valid: true}
+				updateValue = minisql.OptionalValueFromParserAny(expr.Literal)
 			} else {
 				// Column reference, binary expression, or function call — store as
 				// *Expr for runtime evaluation against the current row.
-				updateValue = minisql.OptionalValue{Value: expr, Valid: true}
+				updateValue = minisql.MakeExpr(expr)
 			}
 			p.setUpdate(p.nextUpdateField, updateValue)
 			p.nextUpdateField = ""

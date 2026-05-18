@@ -87,11 +87,11 @@ func TestTable_Update_PrimaryKey(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"id": {Value: id2.Value, Valid: true},
+				"id": MakeInt8(id2.AsInt8()),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.AsInt8()),
 				},
 			},
 		}
@@ -116,11 +116,11 @@ func TestTable_Update_PrimaryKey(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"id": {Value: id.Value, Valid: true},
+				"id": MakeInt8(id.AsInt8()),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.AsInt8()),
 				},
 			},
 		}
@@ -149,11 +149,11 @@ func TestTable_Update_PrimaryKey(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"id": {Value: int64(42), Valid: true},
+				"id": MakeInt8(int64(42)),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.AsInt8()),
 				},
 			},
 		}
@@ -172,7 +172,7 @@ func TestTable_Update_PrimaryKey(t *testing.T) {
 			if i != 0 {
 				continue
 			}
-			expected[i], _ = expected[i].SetValue("id", OptionalValue{Value: int64(42), Valid: true})
+			expected[i], _ = expected[i].SetValue("id", MakeInt8(int64(42)))
 		}
 
 		checkRows(ctx, t, table, expected)
@@ -262,13 +262,13 @@ func TestTable_Update_CompositePrimaryKey(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"first_name": {Value: firstName2.Value.(TextPointer), Valid: true},
-				"last_name":  {Value: lastName2.Value.(TextPointer), Valid: true},
+				"first_name": MakeVarchar(firstName2.AsTextPointer()),
+				"last_name":  MakeVarchar(lastName2.AsTextPointer()),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, firstName.Value.(TextPointer)),
-					FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, lastName.Value.(TextPointer)),
+					FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, firstName.AsTextPointer()),
+					FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, lastName.AsTextPointer()),
 				},
 			},
 		}
@@ -295,13 +295,13 @@ func TestTable_Update_CompositePrimaryKey(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"first_name": {Value: firstName.Value.(TextPointer), Valid: true},
-				"last_name":  {Value: lastName.Value.(TextPointer), Valid: true},
+				"first_name": MakeVarchar(firstName.AsTextPointer()),
+				"last_name":  MakeVarchar(lastName.AsTextPointer()),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, firstName.Value.(TextPointer)),
-					FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, lastName.Value.(TextPointer)),
+					FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, firstName.AsTextPointer()),
+					FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, lastName.AsTextPointer()),
 				},
 			},
 		}
@@ -329,19 +329,19 @@ func TestTable_Update_CompositePrimaryKey(t *testing.T) {
 		lastName, ok := rows[0].GetValue("last_name")
 		require.True(t, ok)
 
-		newFirstName := firstName.Value.(TextPointer).String() + " 2"
-		newLastName := lastName.Value.(TextPointer).String() + " 2"
+		newFirstName := firstName.AsTextPointer().String() + " 2"
+		newLastName := lastName.AsTextPointer().String() + " 2"
 
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"first_name": {Value: NewTextPointer([]byte(newFirstName)), Valid: true},
-				"last_name":  {Value: NewTextPointer([]byte(newLastName)), Valid: true},
+				"first_name": MakeVarchar(NewTextPointer([]byte(newFirstName))),
+				"last_name":  MakeVarchar(NewTextPointer([]byte(newLastName))),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, firstName.Value),
-					FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, lastName.Value),
+					FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, firstName.AsAny()),
+					FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, lastName.AsAny()),
 				},
 			},
 		}
@@ -360,8 +360,8 @@ func TestTable_Update_CompositePrimaryKey(t *testing.T) {
 			if i != 0 {
 				continue
 			}
-			expected[i], _ = expected[i].SetValue("first_name", OptionalValue{Value: NewTextPointer([]byte(newFirstName)), Valid: true})
-			expected[i], _ = expected[i].SetValue("last_name", OptionalValue{Value: NewTextPointer([]byte(newLastName)), Valid: true})
+			expected[i], _ = expected[i].SetValue("first_name", MakeVarchar(NewTextPointer([]byte(newFirstName))))
+			expected[i], _ = expected[i].SetValue("last_name", MakeVarchar(NewTextPointer([]byte(newLastName))))
 		}
 
 		checkRowsWithCompositePrimaryKey(ctx, t, table, expected)

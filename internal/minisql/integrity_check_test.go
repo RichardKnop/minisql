@@ -254,7 +254,7 @@ func TestDatabase_IntegrityCheck(t *testing.T) {
 				{Name: "email"},
 			},
 			Inserts: [][]OptionalValue{{
-				{Value: NewTextPointer([]byte("alice@example.com")), Valid: true},
+				MakeVarchar(NewTextPointer([]byte("alice@example.com"))),
 			}},
 		}
 		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
@@ -310,7 +310,7 @@ func TestDatabase_IntegrityCheck(t *testing.T) {
 				{Name: "email"},
 			},
 			Inserts: [][]OptionalValue{{
-				{Value: NewTextPointer([]byte("alice@example.com")), Valid: true},
+				MakeVarchar(NewTextPointer([]byte("alice@example.com"))),
 			}},
 		}
 		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
@@ -368,7 +368,7 @@ func TestDatabase_IntegrityCheck(t *testing.T) {
 			TableName: "articles_integrity",
 			Fields:    []Field{{Name: "body"}},
 			Inserts: [][]OptionalValue{{
-				{Value: NewTextPointer([]byte("database pages")), Valid: true},
+				MakeVarchar(NewTextPointer([]byte("database pages"))),
 			}},
 		}
 		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
@@ -425,7 +425,7 @@ func TestDatabase_IntegrityCheck(t *testing.T) {
 			TableName: "events_integrity",
 			Fields:    []Field{{Name: "payload"}},
 			Inserts: [][]OptionalValue{{
-				{Value: NewTextPointer([]byte(`{"type":"click"}`)), Valid: true},
+				MakeVarchar(NewTextPointer([]byte(`{"type":"click"}`))),
 			}},
 		}
 		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {

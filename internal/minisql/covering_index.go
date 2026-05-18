@@ -123,7 +123,7 @@ func rowFromIndexKey(key any, indexColumns []Column, rowID RowID) Row {
 	if ck, ok := key.(CompositeKey); ok {
 		vals := make([]OptionalValue, len(ck.Columns))
 		for i := range ck.Columns {
-			vals[i] = OptionalValue{Value: ck.Values[i], Valid: true}
+			vals[i] = optionalValueFromAny(ck.Columns[i].Kind, ck.Values[i])
 		}
 		row := NewRowWithValues(ck.Columns, vals)
 		row.Key = rowID
@@ -132,8 +132,95 @@ func rowFromIndexKey(key any, indexColumns []Column, rowID RowID) Row {
 
 	// Single-column index.
 	col := indexColumns[0]
-	vals := []OptionalValue{{Value: key, Valid: true}}
+	vals := []OptionalValue{optionalValueFromAny(col.Kind, key)}
 	row := NewRowWithValues([]Column{col}, vals)
 	row.Key = rowID
 	return row
+}
+
+// optionalValueFromAny constructs an OptionalValue from a raw typed value,
+// using the column kind to dispatch to the correct Make* constructor.
+func optionalValueFromAny(kind ColumnKind, v any) OptionalValue {
+	if v == nil {
+		return MakeNull()
+	}
+	switch kind {
+	case Boolean:
+		if b, ok := v.(bool); ok {
+			return MakeBool(b)
+		}
+	case Int4:
+		switch n := v.(type) {
+		case int32:
+			return MakeInt4(n)
+		case int64:
+			return MakeInt4(int32(n))
+		}
+	case Int8:
+		switch n := v.(type) {
+		case int64:
+			return MakeInt8(n)
+		case int32:
+			return MakeInt8(int64(n))
+		}
+	case Real:
+		if f, ok := v.(float32); ok {
+			return MakeReal(f)
+		}
+	case Double:
+		if f, ok := v.(float64); ok {
+			return MakeDouble(f)
+		}
+	case Varchar:
+		switch s := v.(type) {
+		case TextPointer:
+			return MakeVarchar(s)
+		case string:
+			return MakeVarchar(NewTextPointer([]byte(s)))
+		}
+	case Text:
+		switch s := v.(type) {
+		case TextPointer:
+			return MakeText(s)
+		case string:
+			return MakeText(NewTextPointer([]byte(s)))
+		}
+	case JSON:
+		switch s := v.(type) {
+		case TextPointer:
+			return MakeJSON(s)
+		case string:
+			return MakeJSON(NewTextPointer([]byte(s)))
+		}
+	case Timestamp:
+		if ts, ok := v.(TimestampMicros); ok {
+			return MakeTimestamp(ts)
+		}
+	case UUID:
+		if u, ok := v.(UUIDValue); ok {
+			return MakeUUID(u)
+		}
+	}
+	// Fallback: try dynamic dispatch on the value itself.
+	switch n := v.(type) {
+	case bool:
+		return MakeBool(n)
+	case int32:
+		return MakeInt4(n)
+	case int64:
+		return MakeInt8(n)
+	case float32:
+		return MakeReal(n)
+	case float64:
+		return MakeDouble(n)
+	case TextPointer:
+		return MakeTextByColumnKind(kind, n)
+	case TimestampMicros:
+		return MakeTimestamp(n)
+	case UUIDValue:
+		return MakeUUID(n)
+	case string:
+		return MakeTextByColumnKind(kind, NewTextPointer([]byte(n)))
+	}
+	return MakeNull()
 }

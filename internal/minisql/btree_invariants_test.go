@@ -3,6 +3,7 @@ package minisql
 import (
 	"context"
 	"math/rand"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -74,7 +75,7 @@ func TestTable_BTreeInvariants_RandomDeleteSequence(t *testing.T) {
 		require.Equal(t, 1, result.RowsAffected)
 
 		for i := range remaining {
-			if remaining[i].Values[0] == row.Values[0] {
+			if reflect.DeepEqual(remaining[i].Values[0], row.Values[0]) {
 				remaining = append(remaining[:i], remaining[i+1:]...)
 				break
 			}

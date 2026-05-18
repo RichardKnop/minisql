@@ -34,7 +34,7 @@ func (d *Database) resolveSetSubqueries(ctx context.Context, stmt *Statement) (c
 	// Fast path: no subquery values in SET.
 	hasSubquery := false
 	for _, val := range stmt.Updates {
-		if _, ok := val.Value.(*Statement); ok {
+		if val.IsStatement() {
 			hasSubquery = true
 			break
 		}
@@ -62,10 +62,10 @@ func (d *Database) resolveSetSubqueries(ctx context.Context, stmt *Statement) (c
 	var entries []subEntry
 
 	for colName, val := range stmt.Updates {
-		inner, ok := val.Value.(*Statement)
-		if !ok {
+		if !val.IsStatement() {
 			continue
 		}
+		inner := val.AsStatement()
 		corr := isCorrelatedSetSubquery(*inner, targetTable.Columns, stmt.TableName, outerAlias)
 		entries = append(entries, subEntry{colName, *inner, corr})
 	}
@@ -157,7 +157,7 @@ func (d *Database) executeScalarSetSubquery(ctx context.Context, stmt Statement)
 		if err := result.Rows.Err(); err != nil {
 			return OptionalValue{}, err
 		}
-		return OptionalValue{Valid: false}, nil // NULL
+		return MakeNull(), nil // NULL
 	}
 	row := result.Rows.Row()
 	// Guard: more than one row is an error.
@@ -167,8 +167,8 @@ func (d *Database) executeScalarSetSubquery(ctx context.Context, stmt Statement)
 	if err := result.Rows.Err(); err != nil {
 		return OptionalValue{}, err
 	}
-	if len(row.Values) == 0 || !row.Values[0].Valid {
-		return OptionalValue{Valid: false}, nil
+	if len(row.Values) == 0 || row.Values[0].IsNull() {
+		return MakeNull(), nil
 	}
 	return row.Values[0], nil
 }
@@ -256,26 +256,24 @@ func bindOuterOperand(op Operand, outerRow Row, outerTableName, outerAlias strin
 
 // operandFromOptionalValue converts a concrete row value to the matching Operand.
 func operandFromOptionalValue(val OptionalValue) Operand {
-	if !val.Valid {
+	if val.IsNull() {
 		return Operand{Type: OperandNull}
 	}
-	switch v := val.Value.(type) {
-	case int64:
-		return Operand{Type: OperandInteger, Value: v}
-	case int32:
-		return Operand{Type: OperandInteger, Value: int64(v)}
-	case float64:
-		return Operand{Type: OperandFloat, Value: v}
-	case float32:
-		return Operand{Type: OperandFloat, Value: float64(v)}
-	case bool:
-		return Operand{Type: OperandBoolean, Value: v}
-	case TextPointer:
-		return Operand{Type: OperandQuotedString, Value: string(v.Data)}
-	case string:
-		return Operand{Type: OperandQuotedString, Value: v}
-	case TimestampMicros:
-		return Operand{Type: OperandQuotedString, Value: v}
+	switch val.Kind() {
+	case ovalInt8:
+		return Operand{Type: OperandInteger, Value: val.AsInt8()}
+	case ovalInt4:
+		return Operand{Type: OperandInteger, Value: int64(val.AsInt4())}
+	case ovalDouble:
+		return Operand{Type: OperandFloat, Value: val.AsDouble()}
+	case ovalReal:
+		return Operand{Type: OperandFloat, Value: float64(val.AsReal())}
+	case ovalBoolean:
+		return Operand{Type: OperandBoolean, Value: val.AsBool()}
+	case ovalVarchar, ovalText, ovalJSON:
+		return Operand{Type: OperandQuotedString, Value: string(val.AsTextPointer().Data)}
+	case ovalTimestamp:
+		return Operand{Type: OperandQuotedString, Value: val.AsTimestamp()}
 	default:
 		return Operand{Type: OperandNull}
 	}

@@ -78,10 +78,10 @@ func TestRow_Marshal(t *testing.T) {
 
 		assert.Equal(t, row.Values[0], partialRow.Values[0])
 		assert.Equal(t, row.Values[1], partialRow.Values[1])
-		assert.False(t, partialRow.Values[2].Valid)
-		assert.False(t, partialRow.Values[3].Valid)
-		assert.False(t, partialRow.Values[4].Valid)
-		assert.False(t, partialRow.Values[5].Valid)
+		assert.False(t, partialRow.Values[2].IsValid())
+		assert.False(t, partialRow.Values[3].IsValid())
+		assert.False(t, partialRow.Values[4].IsValid())
+		assert.False(t, partialRow.Values[5].IsValid())
 	})
 }
 
@@ -101,11 +101,11 @@ func TestRow_UnmarshalWithMask(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, row.Values[0], actual.Values[0]) // id
-	assert.False(t, actual.Values[1].Valid)          // email skipped
+	assert.False(t, actual.Values[1].IsValid())          // email skipped
 	assert.Equal(t, row.Values[2], actual.Values[2]) // age
-	assert.False(t, actual.Values[3].Valid)
-	assert.False(t, actual.Values[4].Valid)
-	assert.False(t, actual.Values[5].Valid)
+	assert.False(t, actual.Values[3].IsValid())
+	assert.False(t, actual.Values[4].IsValid())
+	assert.False(t, actual.Values[5].IsValid())
 }
 
 func TestRow_CheckOneOrMore(t *testing.T) {
@@ -113,7 +113,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 
 	row := gen.Row()
 	aRowWithNulls := gen.Row()
-	aRowWithNulls.Values[4] = OptionalValue{} // 5th column to NULL
+	aRowWithNulls.Values[4] = MakeNull() // 5th column to NULL
 
 	var (
 		idMatch = Condition{
@@ -124,7 +124,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandInteger,
-				Value: row.Values[0].Value.(int64),
+				Value: row.Values[0].AsInt8(),
 			},
 		}
 		idMismatch = Condition{
@@ -135,7 +135,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandInteger,
-				Value: row.Values[0].Value.(int64) + 1,
+				Value: row.Values[0].AsInt8() + 1,
 			},
 		}
 		emailMatch = Condition{
@@ -146,7 +146,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandQuotedString,
-				Value: row.Values[1].Value,
+				Value: row.Values[1].AsAny(),
 			},
 		}
 		emailMismatch = Condition{
@@ -157,7 +157,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandQuotedString,
-				Value: NewTextPointer([]byte(row.Values[1].Value.(TextPointer).String() + "bogus")),
+				Value: NewTextPointer([]byte(row.Values[1].AsTextPointer().String() + "bogus")),
 			},
 		}
 		ageMatch = Condition{
@@ -168,7 +168,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandInteger,
-				Value: int64(row.Values[2].Value.(int32)),
+				Value: int64(row.Values[2].AsInt4()),
 			},
 		}
 		ageMismatch = Condition{
@@ -179,7 +179,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandInteger,
-				Value: int64(row.Values[2].Value.(int32) + 1),
+				Value: int64(row.Values[2].AsInt4() + 1),
 			},
 		}
 		verifiedMatch = Condition{
@@ -190,7 +190,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandBoolean,
-				Value: row.Values[3].Value.(bool),
+				Value: row.Values[3].AsBool(),
 			},
 		}
 		verifiedMismatch = Condition{
@@ -201,7 +201,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandBoolean,
-				Value: !row.Values[3].Value.(bool),
+				Value: !row.Values[3].AsBool(),
 			},
 		}
 		timestampMatch = Condition{
@@ -212,7 +212,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 			Operator: Eq,
 			Operand2: Operand{
 				Type:  OperandQuotedString,
-				Value: row.Values[5].Value.(TimestampMicros),
+				Value: row.Values[5].AsTimestamp(),
 			},
 		}
 		timestampMismatch = Condition{
@@ -417,7 +417,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Ne,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(row.Values[2].Value.(int32)),
+							Value: int64(row.Values[2].AsInt4()),
 						},
 					},
 				},
@@ -457,7 +457,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Gt,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(row.Values[2].Value.(int32)),
+							Value: int64(row.Values[2].AsInt4()),
 						},
 					},
 				},
@@ -517,7 +517,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Gte,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(row.Values[2].Value.(int32)),
+							Value: int64(row.Values[2].AsInt4()),
 						},
 					},
 				},
@@ -557,7 +557,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Lte,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(row.Values[2].Value.(int32)),
+							Value: int64(row.Values[2].AsInt4()),
 						},
 					},
 				},
@@ -577,7 +577,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: Lte,
 						Operand2: Operand{
 							Type:  OperandInteger,
-							Value: int64(row.Values[2].Value.(int32)) - 1,
+							Value: int64(row.Values[2].AsInt4()) - 1,
 						},
 					},
 				},
@@ -617,7 +617,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: In,
 						Operand2: Operand{
 							Type:  OperandList,
-							Value: []any{row.Values[0].Value.(int64) - 1, row.Values[0].Value.(int64), row.Values[0].Value.(int64) + 1},
+							Value: []any{row.Values[0].AsInt8() - 1, row.Values[0].AsInt8(), row.Values[0].AsInt8() + 1},
 						},
 					},
 				},
@@ -637,7 +637,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: In,
 						Operand2: Operand{
 							Type:  OperandList,
-							Value: []any{row.Values[0].Value.(int64) - 1, row.Values[0].Value.(int64) - 2, row.Values[0].Value.(int64) + 1},
+							Value: []any{row.Values[0].AsInt8() - 1, row.Values[0].AsInt8() - 2, row.Values[0].AsInt8() + 1},
 						},
 					},
 				},
@@ -657,7 +657,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: NotIn,
 						Operand2: Operand{
 							Type:  OperandList,
-							Value: []any{row.Values[0].Value.(int64) - 1, row.Values[0].Value.(int64) - 2, row.Values[0].Value.(int64) + 1},
+							Value: []any{row.Values[0].AsInt8() - 1, row.Values[0].AsInt8() - 2, row.Values[0].AsInt8() + 1},
 						},
 					},
 				},
@@ -677,7 +677,7 @@ func TestRow_CheckOneOrMore(t *testing.T) {
 						Operator: NotIn,
 						Operand2: Operand{
 							Type:  OperandList,
-							Value: []any{row.Values[0].Value.(int64) - 1, row.Values[0].Value.(int64), row.Values[0].Value.(int64) + 1},
+							Value: []any{row.Values[0].AsInt8() - 1, row.Values[0].AsInt8(), row.Values[0].AsInt8() + 1},
 						},
 					},
 				},
@@ -704,12 +704,12 @@ func TestRow_CheckOneOrMoreWithColumnIndexes(t *testing.T) {
 			{
 				Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
 				Operator: Eq,
-				Operand2: Operand{Type: OperandInteger, Value: row.Values[0].Value.(int64)},
+				Operand2: Operand{Type: OperandInteger, Value: row.Values[0].AsInt8()},
 			},
 			{
 				Operand1: Operand{Type: OperandField, Value: Field{Name: "age"}},
 				Operator: Gte,
-				Operand2: Operand{Type: OperandInteger, Value: int64(row.Values[2].Value.(int32))},
+				Operand2: Operand{Type: OperandInteger, Value: int64(row.Values[2].AsInt4())},
 			},
 		},
 	}
@@ -742,9 +742,9 @@ func TestRow_CompareFieldValueWithColumnIndexes_Errors(t *testing.T) {
 			{Name: "verified", Kind: Boolean, Size: 1},
 		},
 		[]OptionalValue{
-			{Value: int64(10), Valid: true},
-			{Value: int32(5), Valid: true},
-			{Value: true, Valid: true},
+			MakeInt8(int64(10)),
+			MakeInt4(int32(5)),
+			MakeBool(true),
 		},
 	)
 	columnIndexes := map[string]int{
@@ -784,7 +784,7 @@ func TestRow_CompareFieldValueWithColumnIndexes_Errors(t *testing.T) {
 	})
 
 	t.Run("row values out of bounds", func(t *testing.T) {
-		shortValuesRow := NewRowWithValues(row.Columns, []OptionalValue{{Value: int64(10), Valid: true}})
+		shortValuesRow := NewRowWithValues(row.Columns, []OptionalValue{MakeInt8(int64(10))})
 		_, err := shortValuesRow.compareFieldValueWithColumnIndexes(
 			Operand{Type: OperandField, Value: Field{Name: "age"}},
 			Operand{Type: OperandInteger, Value: int64(5)},
@@ -824,9 +824,9 @@ func TestRow_CompareFieldsWithColumnIndexes_Errors(t *testing.T) {
 		{Name: "c", Kind: Int4, Size: 4},
 	}
 	row := NewRowWithValues(cols, []OptionalValue{
-		{Value: int64(1), Valid: true},
-		{Value: int64(2), Valid: true},
-		{Value: int32(3), Valid: true},
+		MakeInt8(int64(1)),
+		MakeInt8(int64(2)),
+		MakeInt4(int32(3)),
 	})
 	columnIndexes := map[string]int{"a": 0, "b": 1, "c": 2}
 
@@ -855,7 +855,7 @@ func TestRow_CompareFieldsWithColumnIndexes_Errors(t *testing.T) {
 	})
 
 	t.Run("row values out of bounds", func(t *testing.T) {
-		shortValuesRow := NewRowWithValues(cols, []OptionalValue{{Value: int64(1), Valid: true}})
+		shortValuesRow := NewRowWithValues(cols, []OptionalValue{MakeInt8(int64(1))})
 		_, err := shortValuesRow.compareFieldsWithColumnIndexes(field("a"), field("b"), Eq, columnIndexes)
 		assert.Error(t, err)
 	})
@@ -865,20 +865,20 @@ func TestRow_GetValue(t *testing.T) {
 	t.Parallel()
 
 	row := NewRowWithValues(testColumns, []OptionalValue{
-		{Value: int64(125478), Valid: true},
-		{Value: "test@example.com", Valid: true},
+		MakeInt8(int64(125478)),
+		MakeVarchar(NewTextPointer([]byte("test@example.com"))),
 	})
 
 	t.Run("found", func(t *testing.T) {
 		value, found := row.GetValue("email")
 		assert.True(t, found)
-		assert.Equal(t, OptionalValue{Value: "test@example.com", Valid: true}, value)
+		assert.Equal(t, MakeVarchar(NewTextPointer([]byte("test@example.com"))), value)
 	})
 
 	t.Run("not found", func(t *testing.T) {
 		value, found := row.GetValue("bogus")
 		assert.False(t, found)
-		assert.Equal(t, OptionalValue{Value: nil, Valid: false}, value)
+		assert.Equal(t, MakeNull(), value)
 	})
 }
 
@@ -886,17 +886,17 @@ func TestRow_SetValue(t *testing.T) {
 	t.Parallel()
 
 	row := NewRowWithValues(testColumns, []OptionalValue{
-		{Value: int64(125478), Valid: true},
-		{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
+		MakeInt8(int64(125478)),
+		MakeVarchar(NewTextPointer([]byte("test@example.com"))),
 	})
 
 	t.Run("changed", func(t *testing.T) {
-		_, changed := row.SetValue("email", OptionalValue{Value: NewTextPointer([]byte("new@example.com")), Valid: true})
+		_, changed := row.SetValue("email", MakeVarchar(NewTextPointer([]byte("new@example.com"))))
 		assert.True(t, changed)
 	})
 
 	t.Run("not changed", func(t *testing.T) {
-		_, changed := row.SetValue("id", OptionalValue{Value: int64(125478), Valid: true})
+		_, changed := row.SetValue("id", MakeInt8(int64(125478)))
 		assert.False(t, changed)
 	})
 }
@@ -934,9 +934,9 @@ func TestRow_CompareFields(t *testing.T) {
 		{Kind: Int4, Name: "z", Size: 4},
 	}
 	row := NewRowWithValues(cols, []OptionalValue{
-		{Value: int64(10), Valid: true},
-		{Value: int64(10), Valid: true},
-		{Value: int32(5), Valid: true},
+		MakeInt8(int64(10)),
+		MakeInt8(int64(10)),
+		MakeInt4(int32(5)),
 	})
 
 	field := func(name string) Operand {
@@ -981,8 +981,8 @@ func TestRow_CheckCondition(t *testing.T) {
 		{Kind: Int8, Name: "b", Size: 8},
 	}
 	row := NewRowWithValues(cols, []OptionalValue{
-		{Value: int64(5), Valid: true},
-		{Value: int64(5), Valid: true},
+		MakeInt8(int64(5)),
+		MakeInt8(int64(5)),
 	})
 
 	t.Run("both fields equal", func(t *testing.T) {
@@ -1038,7 +1038,7 @@ func TestRow_CompareFieldValue_IsNull(t *testing.T) {
 	}
 
 	t.Run("IS NULL matches null field", func(t *testing.T) {
-		row := NewRowWithValues(cols, []OptionalValue{{Valid: false}})
+		row := NewRowWithValues(cols, []OptionalValue{MakeNull()})
 		cond := Condition{
 			Operand1: Operand{Type: OperandField, Value: Field{Name: "x"}},
 			Operator: Eq,
@@ -1050,7 +1050,7 @@ func TestRow_CompareFieldValue_IsNull(t *testing.T) {
 	})
 
 	t.Run("IS NULL does not match non-null field", func(t *testing.T) {
-		row := NewRowWithValues(cols, []OptionalValue{{Value: int64(1), Valid: true}})
+		row := NewRowWithValues(cols, []OptionalValue{MakeInt8(int64(1))})
 		cond := Condition{
 			Operand1: Operand{Type: OperandField, Value: Field{Name: "x"}},
 			Operator: Eq,
@@ -1062,7 +1062,7 @@ func TestRow_CompareFieldValue_IsNull(t *testing.T) {
 	})
 
 	t.Run("IS NOT NULL matches non-null field", func(t *testing.T) {
-		row := NewRowWithValues(cols, []OptionalValue{{Value: int64(1), Valid: true}})
+		row := NewRowWithValues(cols, []OptionalValue{MakeInt8(int64(1))})
 		cond := Condition{
 			Operand1: Operand{Type: OperandField, Value: Field{Name: "x"}},
 			Operator: Ne,
@@ -1175,7 +1175,7 @@ func TestRow_CompareFieldValue_UUID(t *testing.T) {
 
 	t.Run("UUID equality match", func(t *testing.T) {
 		t.Parallel()
-		row := NewRowWithValues(cols, []OptionalValue{{Value: uv1, Valid: true}})
+		row := NewRowWithValues(cols, []OptionalValue{MakeUUID(uv1)})
 		cond := Condition{
 			Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
 			Operator: Eq,
@@ -1188,7 +1188,7 @@ func TestRow_CompareFieldValue_UUID(t *testing.T) {
 
 	t.Run("UUID equality no match", func(t *testing.T) {
 		t.Parallel()
-		row := NewRowWithValues(cols, []OptionalValue{{Value: uv1, Valid: true}})
+		row := NewRowWithValues(cols, []OptionalValue{MakeUUID(uv1)})
 		cond := Condition{
 			Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
 			Operator: Eq,
@@ -1201,7 +1201,7 @@ func TestRow_CompareFieldValue_UUID(t *testing.T) {
 
 	t.Run("UUID IN list found", func(t *testing.T) {
 		t.Parallel()
-		row := NewRowWithValues(cols, []OptionalValue{{Value: uv1, Valid: true}})
+		row := NewRowWithValues(cols, []OptionalValue{MakeUUID(uv1)})
 		cond := Condition{
 			Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
 			Operator: In,
@@ -1215,7 +1215,7 @@ func TestRow_CompareFieldValue_UUID(t *testing.T) {
 	t.Run("UUID NOT IN list", func(t *testing.T) {
 		t.Parallel()
 		uv3, _ := ParseUUID("6ba7b811-9dad-11d1-80b4-00c04fd430c8")
-		row := NewRowWithValues(cols, []OptionalValue{{Value: uv3, Valid: true}})
+		row := NewRowWithValues(cols, []OptionalValue{MakeUUID(uv3)})
 		cond := Condition{
 			Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
 			Operator: NotIn,
@@ -1228,7 +1228,7 @@ func TestRow_CompareFieldValue_UUID(t *testing.T) {
 
 	t.Run("UUID NULL comparison", func(t *testing.T) {
 		t.Parallel()
-		row := NewRowWithValues(cols, []OptionalValue{{Valid: false}})
+		row := NewRowWithValues(cols, []OptionalValue{MakeNull()})
 		cond := Condition{
 			Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
 			Operator: Eq,

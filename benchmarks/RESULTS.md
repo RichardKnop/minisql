@@ -1,3 +1,36 @@
+### 2026-05-18 — M2 typed discriminated union for OptionalValue
+
+Replaced `OptionalValue{Value any; Valid bool}` (24 bytes, any-boxing causing heap allocation for every column value) with a 64-byte discriminated union that eliminates all heap allocations on the hot-path row scan.
+
+New layout:
+
+```
+kind  uint8          — discriminant (0=null, 1-10=ColumnKind, 251-255=special)
+[7]byte              — alignment padding
+num   uint64         — bool(0/1), int32/int64, float32/float64bits, timestamp micros;
+                        UUID first 8 bytes; TextPointer.Length
+hi    uint64         — UUID last 8 bytes; TextPointer.FirstPage
+data  []byte         — text/varchar/json/UUID data; ExcludedRef column name; Function name
+extra any            — *Expr (kind=251) or *Statement (kind=252) only
+```
+
+Scalar types (bool, int32, int64, float32, float64, timestamp, UUID) are stored inline in `num`/`hi` — no heap allocation. Text types (varchar, text, JSON) reuse the `data []byte` from `TextPointer`, which is already on the heap for large values. The `extra any` field is only populated for `*Expr`/`*Statement` values in `Statement.Updates` — not in the `row.Values` hot path.
+
+Key fixes required during migration:
+- `btree_invariants_test.go`: `OptionalValue` is no longer comparable via `==` (contains `[]byte`); changed to `reflect.DeepEqual`
+- `covering_index.go` `optionalValueFromAny`: B-tree index stores varchar as plain `string`; added `case string:` fallback converting via `NewTextPointer`
+- `row.go` `Marshal()`: added cross-type numeric coercion (Double→Int8 via truncation) to handle `Expr.Eval()` returning `float64` for arithmetic on int columns
+- `stmt_test.go`: `BindArguments` converts `string`→`TextPointer`; test assertion updated to use `.AsTextPointer().String()`
+- `select_test.go`, `minisql_test.go`: overflow test used `MakeVarchar` for a `Text`-kind column; corrected to `MakeText`
+
+| Benchmark | Before (qualName fix) | After (M2) | Δ allocs | Δ memory | SQLite | Ratio |
+|---|---:|---:|---:|---:|---:|---:|
+| Subquery_InList/minisql | ~9.2 ms/op | ~13 ms/op | 139,779 → 94,878 (−32%) | 6.10 → 9.89 MiB/op (+62%) | ~4.1 ms/op | **3.2×** |
+
+−44,901 allocs/op. Cumulative from baseline: 194,677 → 94,878 (−51%).
+
+**Tradeoff:** The struct grew from 24 to 64 bytes (2.67×). For `row.Values []OptionalValue`, this increases cache pressure during full-scan rows, causing the latency regression (+40%) and memory increase (+62%) despite the allocation reduction. The net result is fewer GC pauses but worse cache efficiency.
+
 ### 2026-05-18 — Zero-alloc qualified column name lookup
 
 Eliminated heap allocations from all hot-path `AliasPrefix + "." + Name` string concatenation sites. Qualified column lookups (e.g. `"t.age"`) appeared at 13 sites across `row.go`, `row_heap.go`, `sort.go`, and `select.go`. Each concatenation allocated a transient heap string per condition evaluation.

@@ -129,15 +129,80 @@ func compareAny(a, b any) int {
 }
 
 func compareValues(a, b OptionalValue) int {
-	if !a.Valid && !b.Valid {
+	if a.IsNull() && b.IsNull() {
 		return 0
 	}
-	if !a.Valid {
+	if a.IsNull() {
 		return -1 // NULL is less than any value
 	}
-	if !b.Valid {
+	if b.IsNull() {
 		return 1
 	}
 
-	return compareAny(a.Value, b.Value)
+	// Switch on kind for type-safe comparison without boxing.
+	switch a.Kind() {
+	case ovalBoolean:
+		av, bv := a.AsBool(), b.AsBool()
+		if av == bv {
+			return 0
+		}
+		if av {
+			return 1
+		}
+		return -1
+	case ovalInt4:
+		av, bv := int64(a.AsInt4()), int64(b.AsInt4())
+		if av < bv {
+			return -1
+		} else if av > bv {
+			return 1
+		}
+		return 0
+	case ovalInt8:
+		av, bv := a.AsInt8(), b.AsInt8()
+		if av < bv {
+			return -1
+		} else if av > bv {
+			return 1
+		}
+		return 0
+	case ovalReal:
+		av, bv := float64(a.AsReal()), float64(b.AsReal())
+		if av < bv {
+			return -1
+		} else if av > bv {
+			return 1
+		}
+		return 0
+	case ovalDouble:
+		av, bv := a.AsDouble(), b.AsDouble()
+		if av < bv {
+			return -1
+		} else if av > bv {
+			return 1
+		}
+		return 0
+	case ovalVarchar, ovalText, ovalJSON:
+		return strings.Compare(a.AsTextPointer().String(), b.AsTextPointer().String())
+	case ovalTimestamp:
+		av, bv := a.AsTimestamp(), b.AsTimestamp()
+		if av < bv {
+			return -1
+		} else if av > bv {
+			return 1
+		}
+		return 0
+	case ovalUUID:
+		av, bv := a.AsUUID(), b.AsUUID()
+		// Compare as byte arrays
+		for i := range av {
+			if av[i] < bv[i] {
+				return -1
+			} else if av[i] > bv[i] {
+				return 1
+			}
+		}
+		return 0
+	}
+	return 0
 }

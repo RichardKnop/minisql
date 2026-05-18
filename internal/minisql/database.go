@@ -360,8 +360,8 @@ func (d *Database) initTableRowCount(ctx context.Context, tableName string, tabl
 	if result.Rows.Next(ctx) {
 		row := result.Rows.Row()
 		if len(row.Values) > 0 {
-			if n, ok := row.Values[0].Value.(int64); ok {
-				count = n
+			if row.Values[0].IsValid() {
+				count = row.Values[0].AsInt8()
 			}
 		}
 	}
@@ -697,11 +697,11 @@ func (d *Database) initEmptyDatabase(ctx context.Context, rooPageIdx PageIndex, 
 		Fields:    mainTableFields,
 		Inserts: [][]OptionalValue{
 			{
-				{Value: int32(SchemaTable), Valid: true},
-				{Value: NewTextPointer([]byte(mainTable.Name)), Valid: true}, // name
-				{}, // tbl_name
-				{Value: int32(mainTable.GetRootPageIdx()), Valid: true},    // root page
-				{Value: NewTextPointer([]byte(MainTableSQL)), Valid: true}, // sql
+				MakeInt4(int32(SchemaTable)),
+				MakeVarchar(NewTextPointer([]byte(mainTable.Name))), // name
+				MakeNull(), // tbl_name
+				MakeInt4(int32(mainTable.GetRootPageIdx())),    // root page
+				MakeText(NewTextPointer([]byte(MainTableSQL))), // sql
 			},
 		},
 	})
@@ -1560,11 +1560,11 @@ func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryInd
 				if !ok {
 					return fmt.Errorf("column %s does not exist on row in table %s", col.Name, table.Name)
 				}
-				if !keyValue.Valid {
+				if !keyValue.IsValid() {
 					allValid = false
 					break
 				}
-				castedKeyValue, err := castKeyValue(col, keyValue.Value)
+				castedKeyValue, err := castKeyValue(col, keyValue.AsAny())
 				if err != nil {
 					return err
 				}
@@ -1583,10 +1583,10 @@ func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryInd
 			if !ok {
 				return fmt.Errorf("column %s does not exist on row in table %s", secondaryIndex.Columns[0].Name, table.Name)
 			}
-			if !keyValue.Valid {
+			if !keyValue.IsValid() {
 				continue // skip NULLs
 			}
-			castedKeyValue, err := castKeyValue(secondaryIndex.Columns[0], keyValue.Value)
+			castedKeyValue, err := castKeyValue(secondaryIndex.Columns[0], keyValue.AsAny())
 			if err != nil {
 				return err
 			}
@@ -2006,11 +2006,21 @@ func (d *Database) insertSchema(ctx context.Context, schema Schema) error {
 		Fields:    mainTableFields,
 		Inserts: [][]OptionalValue{
 			{
-				{Value: int32(schema.Type), Valid: true},
-				{Value: NewTextPointer([]byte(schema.Name)), Valid: true},
-				{Value: NewTextPointer([]byte(schema.TableName)), Valid: schema.TableName != ""},
-				{Value: int32(schema.RootPage), Valid: true},
-				{Value: NewTextPointer([]byte(schema.DDL)), Valid: schema.DDL != ""},
+				MakeInt4(int32(schema.Type)),
+				MakeVarchar(NewTextPointer([]byte(schema.Name))),
+				func() OptionalValue {
+					if schema.TableName != "" {
+						return MakeVarchar(NewTextPointer([]byte(schema.TableName)))
+					}
+					return MakeNull()
+				}(),
+				MakeInt4(int32(schema.RootPage)),
+				func() OptionalValue {
+					if schema.DDL != "" {
+						return MakeText(NewTextPointer([]byte(schema.DDL)))
+					}
+					return MakeNull()
+				}(),
 			},
 		},
 	})

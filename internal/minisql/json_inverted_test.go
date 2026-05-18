@@ -138,7 +138,7 @@ func TestJSONInvertedIndexHelpers(t *testing.T) {
 	row := Row{
 		Key:     42,
 		Columns: []Column{payloadColumn},
-		Values:  []OptionalValue{{Valid: true, Value: NewTextPointer([]byte(`{"type":"click","tags":["web"]}`))}},
+		Values:  []OptionalValue{MakeVarchar(NewTextPointer([]byte(`{"type":"click","tags":["web"]}`)))},
 	}
 	terms, err := jsonInvertedTermsForRow(SecondaryIndex{
 		IndexInfo: IndexInfo{Name: "idx_payload", Columns: []Column{payloadColumn}},
@@ -169,7 +169,7 @@ func TestJSONInvertedIndexHelpers(t *testing.T) {
 	newRow := Row{
 		Key:     42,
 		Columns: []Column{payloadColumn},
-		Values:  []OptionalValue{{Valid: true, Value: NewTextPointer([]byte(`{"type":"view"}`))}},
+		Values:  []OptionalValue{MakeVarchar(NewTextPointer([]byte(`{"type":"view"}`)))},
 	}
 	require.NoError(t, table.updateInvertedIndexKeys(ctx, secondaryIndex, oldRow, newRow))
 	assert.Contains(t, index.deleted, `kv:type:s:"click"`)
@@ -209,7 +209,7 @@ func TestJSONInvertedCountExactIndexScan(t *testing.T) {
 	require.True(t, result.Rows.Next(context.Background()))
 	countValue, ok := result.Rows.Row().GetValue("COUNT(*)")
 	require.True(t, ok)
-	assert.Equal(t, int64(2), countValue.Value)
+	assert.Equal(t, int64(2), countValue.AsAny())
 }
 
 func TestJSONInvertedCountSkipsNonExactIndexScan(t *testing.T) {

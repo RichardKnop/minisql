@@ -26,10 +26,10 @@ func TestRowsColumnsCloseAndNext(t *testing.T) {
 		columns: columns,
 		iter: internalminisql.NewSliceIterator([]internalminisql.Row{
 			internalminisql.NewRowWithValues(columns, []internalminisql.OptionalValue{
-				{Valid: true, Value: int64(1)},
-				{Valid: true, Value: internalminisql.NewTextPointer([]byte("alice"))},
-				{Valid: true, Value: internalminisql.TimestampMicros(ts)},
-				{},
+				internalminisql.MakeInt8(int64(1)),
+				internalminisql.MakeText(internalminisql.NewTextPointer([]byte("alice"))),
+				internalminisql.MakeTimestamp(internalminisql.TimestampMicros(ts)),
+				internalminisql.MakeNull(),
 			}),
 		}),
 		ctx: context.Background(),
@@ -72,7 +72,7 @@ func TestRowsNextValidatesDestinationWidth(t *testing.T) {
 		columns: columns,
 		iter: internalminisql.NewSliceIterator([]internalminisql.Row{
 			internalminisql.NewRowWithValues(columns, []internalminisql.OptionalValue{
-				{Valid: true, Value: int64(1)},
+				internalminisql.MakeInt8(int64(1)),
 			}),
 		}),
 		ctx: context.Background(),

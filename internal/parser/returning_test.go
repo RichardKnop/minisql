@@ -24,8 +24,8 @@ func TestParse_Returning(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "id"}, {Name: "name"}},
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: int64(1), Valid: true},
-							{Value: minisql.NewTextPointer([]byte("Alice")), Valid: true},
+							minisql.MakeInt8(int64(1)),
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("Alice"))),
 						},
 					},
 					ReturningFields: []minisql.Field{{Name: "id"}},
@@ -43,8 +43,8 @@ func TestParse_Returning(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "name"}, {Name: "score"}},
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: minisql.NewTextPointer([]byte("Bob")), Valid: true},
-							{Value: int64(10), Valid: true},
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("Bob"))),
+							minisql.MakeInt8(int64(10)),
 						},
 					},
 					ReturningFields: []minisql.Field{{Name: "id"}, {Name: "name"}, {Name: "score"}},
@@ -62,7 +62,7 @@ func TestParse_Returning(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "name"}},
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: minisql.NewTextPointer([]byte("Carol")), Valid: true},
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("Carol"))),
 						},
 					},
 					ReturningFields: []minisql.Field{{Name: "*"}},
@@ -81,8 +81,8 @@ func TestParse_Returning(t *testing.T) {
 					Fields:         []minisql.Field{{Name: "id"}, {Name: "name"}},
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: int64(1), Valid: true},
-							{Value: minisql.NewTextPointer([]byte("Dave")), Valid: true},
+							minisql.MakeInt8(int64(1)),
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("Dave"))),
 						},
 					},
 					ReturningFields: []minisql.Field{{Name: "id"}},
@@ -98,7 +98,7 @@ func TestParse_Returning(t *testing.T) {
 					Kind:      minisql.Update,
 					TableName: "users",
 					Updates: map[string]minisql.OptionalValue{
-						"score": {Value: int64(99), Valid: true},
+						"score": minisql.MakeInt8(int64(99)),
 					},
 					Fields: []minisql.Field{{Name: "score"}},
 					Conditions: minisql.OneOrMore{
@@ -119,7 +119,7 @@ func TestParse_Returning(t *testing.T) {
 					Kind:      minisql.Update,
 					TableName: "users",
 					Updates: map[string]minisql.OptionalValue{
-						"score": {Value: int64(99), Valid: true},
+						"score": minisql.MakeInt8(int64(99)),
 					},
 					Fields: []minisql.Field{{Name: "score"}},
 					Conditions: minisql.OneOrMore{
@@ -159,7 +159,7 @@ func TestParse_Returning(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "id"}},
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: int64(1), Valid: true},
+							minisql.MakeInt8(int64(1)),
 						},
 					},
 					ReturningFields: []minisql.Field{{Name: "id"}},

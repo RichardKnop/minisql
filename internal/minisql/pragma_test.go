@@ -79,11 +79,11 @@ func TestBoolPragmaResult(t *testing.T) {
 	res := boolPragmaResult(cols, true)
 	require.Equal(t, cols, res.Columns)
 	require.True(t, res.Rows.Next(ctx))
-	assert.Equal(t, int32(1), res.Rows.Row().Values[0].Value)
+	assert.Equal(t, int32(1), res.Rows.Row().Values[0].AsAny())
 
 	res = boolPragmaResult(cols, false)
 	require.True(t, res.Rows.Next(ctx))
-	assert.Equal(t, int32(0), res.Rows.Row().Values[0].Value)
+	assert.Equal(t, int32(0), res.Rows.Row().Values[0].AsAny())
 }
 
 func TestSynchronousResult(t *testing.T) {
@@ -94,7 +94,7 @@ func TestSynchronousResult(t *testing.T) {
 		res := synchronousResult(mode)
 		require.Equal(t, synchronousResultColumns, res.Columns)
 		require.True(t, res.Rows.Next(ctx))
-		assert.Equal(t, int32(mode), res.Rows.Row().Values[0].Value)
+		assert.Equal(t, int32(mode), res.Rows.Row().Values[0].AsAny())
 	}
 }
 
@@ -105,7 +105,7 @@ func TestWalCheckpointResult(t *testing.T) {
 	res := walCheckpointResult()
 	require.Equal(t, walCheckpointResultColumns, res.Columns)
 	require.True(t, res.Rows.Next(ctx))
-	assert.Equal(t, "ok", res.Rows.Row().Values[0].Value.(TextPointer).String())
+	assert.Equal(t, "ok", res.Rows.Row().Values[0].AsTextPointer().String())
 }
 
 func TestExecuteForeignKeysPragma(t *testing.T) {
@@ -118,20 +118,20 @@ func TestExecuteForeignKeysPragma(t *testing.T) {
 	res, err := db.executeForeignKeysPragma(Statement{PragmaName: "foreign_keys"})
 	require.NoError(t, err)
 	require.True(t, res.Rows.Next(ctx))
-	assert.Equal(t, int32(1), res.Rows.Row().Values[0].Value)
+	assert.Equal(t, int32(1), res.Rows.Row().Values[0].AsAny())
 
 	// Disable.
 	res, err = db.executeForeignKeysPragma(Statement{PragmaName: "foreign_keys", PragmaValue: "off"})
 	require.NoError(t, err)
 	require.True(t, res.Rows.Next(ctx))
-	assert.Equal(t, int32(0), res.Rows.Row().Values[0].Value)
+	assert.Equal(t, int32(0), res.Rows.Row().Values[0].AsAny())
 	assert.False(t, db.foreignKeysEnabled)
 
 	// Re-enable.
 	res, err = db.executeForeignKeysPragma(Statement{PragmaName: "foreign_keys", PragmaValue: "on"})
 	require.NoError(t, err)
 	require.True(t, res.Rows.Next(ctx))
-	assert.Equal(t, int32(1), res.Rows.Row().Values[0].Value)
+	assert.Equal(t, int32(1), res.Rows.Row().Values[0].AsAny())
 	assert.True(t, db.foreignKeysEnabled)
 
 	// Invalid value.
@@ -149,20 +149,20 @@ func TestExecuteParallelScanPragma(t *testing.T) {
 	res, err := db.executeParallelScanPragma(Statement{PragmaName: "parallel_scan"})
 	require.NoError(t, err)
 	require.True(t, res.Rows.Next(ctx))
-	assert.Equal(t, int32(0), res.Rows.Row().Values[0].Value)
+	assert.Equal(t, int32(0), res.Rows.Row().Values[0].AsAny())
 
 	// Enable.
 	res, err = db.executeParallelScanPragma(Statement{PragmaName: "parallel_scan", PragmaValue: "on"})
 	require.NoError(t, err)
 	require.True(t, res.Rows.Next(ctx))
-	assert.Equal(t, int32(1), res.Rows.Row().Values[0].Value)
+	assert.Equal(t, int32(1), res.Rows.Row().Values[0].AsAny())
 	assert.True(t, db.parallelScan)
 
 	// Disable again.
 	res, err = db.executeParallelScanPragma(Statement{PragmaName: "parallel_scan", PragmaValue: "off"})
 	require.NoError(t, err)
 	require.True(t, res.Rows.Next(ctx))
-	assert.Equal(t, int32(0), res.Rows.Row().Values[0].Value)
+	assert.Equal(t, int32(0), res.Rows.Row().Values[0].AsAny())
 	assert.False(t, db.parallelScan)
 
 	// Invalid value.
@@ -191,8 +191,8 @@ func TestIntegrityReportResult(t *testing.T) {
 	require.Equal(t, pragmaResultColumns, res.Columns)
 	require.True(t, res.Rows.Next(ctx))
 	row := res.Rows.Row()
-	assert.Equal(t, "integrity_check", row.Values[0].Value.(TextPointer).String())
-	assert.Equal(t, "ok", row.Values[1].Value.(TextPointer).String())
+	assert.Equal(t, "integrity_check", row.Values[0].AsTextPointer().String())
+	assert.Equal(t, "ok", row.Values[1].AsTextPointer().String())
 	assert.False(t, res.Rows.Next(ctx))
 
 	// Report with issues emits one row per issue.
@@ -205,11 +205,11 @@ func TestIntegrityReportResult(t *testing.T) {
 	res = integrityReportResult("integrity_check", issueReport)
 	require.True(t, res.Rows.Next(ctx))
 	row = res.Rows.Row()
-	assert.Equal(t, "E001", row.Values[1].Value.(TextPointer).String())
-	assert.Equal(t, "bad page", row.Values[4].Value.(TextPointer).String())
+	assert.Equal(t, "E001", row.Values[1].AsTextPointer().String())
+	assert.Equal(t, "bad page", row.Values[4].AsTextPointer().String())
 	require.True(t, res.Rows.Next(ctx))
 	row = res.Rows.Row()
-	assert.Equal(t, "E002", row.Values[1].Value.(TextPointer).String())
+	assert.Equal(t, "E002", row.Values[1].AsTextPointer().String())
 	assert.False(t, res.Rows.Next(ctx))
 }
 
@@ -223,7 +223,7 @@ func TestExecuteSynchronousPragma(t *testing.T) {
 	res, err := db.executeSynchronousPragma(Statement{PragmaName: "synchronous"})
 	require.NoError(t, err)
 	require.True(t, res.Rows.Next(ctx))
-	assert.Equal(t, int32(SynchronousNormal), res.Rows.Row().Values[0].Value)
+	assert.Equal(t, int32(SynchronousNormal), res.Rows.Row().Values[0].AsAny())
 
 	// Write invalid value returns error.
 	_, err = db.executeSynchronousPragma(Statement{PragmaName: "synchronous", PragmaValue: "fast"})
@@ -233,5 +233,5 @@ func TestExecuteSynchronousPragma(t *testing.T) {
 	res, err = db.executeSynchronousPragma(Statement{PragmaName: "synchronous", PragmaValue: "off"})
 	require.NoError(t, err)
 	require.True(t, res.Rows.Next(ctx))
-	assert.Equal(t, int32(SynchronousOff), res.Rows.Row().Values[0].Value)
+	assert.Equal(t, int32(SynchronousOff), res.Rows.Row().Values[0].AsAny())
 }

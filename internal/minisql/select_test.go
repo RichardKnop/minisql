@@ -17,9 +17,9 @@ func TestTable_Select(t *testing.T) {
 	)
 
 	// Set some values to NULL so we can test selecting/filtering on NULLs
-	rows[5].Values[2] = OptionalValue{Valid: false}
-	rows[21].Values[5] = OptionalValue{Valid: false}
-	rows[32].Values[2] = OptionalValue{Valid: false}
+	rows[5].Values[2] = MakeNull()
+	rows[21].Values[5] = MakeNull()
+	rows[32].Values[2] = MakeNull()
 
 	// Batch insert test rows
 	insertStmt := Statement{
@@ -53,7 +53,7 @@ func TestTable_Select(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
 			Fields: fieldsFromColumns(table.Columns...),
-			Limit:  OptionalValue{Value: int64(10), Valid: true},
+			Limit:  MakeInt8(int64(10)),
 		}
 
 		result, err := table.Select(ctx, stmt)
@@ -66,7 +66,7 @@ func TestTable_Select(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
 			Fields: fieldsFromColumns(table.Columns...),
-			Offset: OptionalValue{Value: int64(10), Valid: true},
+			Offset: MakeInt8(int64(10)),
 		}
 
 		result, err := table.Select(ctx, stmt)
@@ -79,8 +79,8 @@ func TestTable_Select(t *testing.T) {
 		stmt := Statement{
 			Kind:   Select,
 			Fields: fieldsFromColumns(table.Columns...),
-			Limit:  OptionalValue{Value: int64(5), Valid: true},
-			Offset: OptionalValue{Value: int64(10), Valid: true},
+			Limit:  MakeInt8(int64(5)),
+			Offset: MakeInt8(int64(10)),
 		}
 
 		result, err := table.Select(ctx, stmt)
@@ -347,7 +347,7 @@ func TestTable_Select(t *testing.T) {
 		sort.Slice(expected, func(i, j int) bool {
 			email1, _ := expected[i].GetValue("email")
 			email2, _ := expected[j].GetValue("email")
-			return email1.Value.(TextPointer).String() < email2.Value.(TextPointer).String()
+			return email1.AsTextPointer().String() < email2.AsTextPointer().String()
 		})
 		assert.Equal(t, expected, collectRows(ctx, result))
 	})
@@ -373,7 +373,7 @@ func TestTable_Select(t *testing.T) {
 		sort.Slice(expected, func(i, j int) bool {
 			email1, _ := expected[i].GetValue("email")
 			email2, _ := expected[j].GetValue("email")
-			return email1.Value.(TextPointer).String() > email2.Value.(TextPointer).String()
+			return email1.AsTextPointer().String() > email2.AsTextPointer().String()
 		})
 		assert.Equal(t, expected, collectRows(ctx, result))
 	})
@@ -402,7 +402,7 @@ func TestTable_Select(t *testing.T) {
 			}
 			emailI, _ := expected[i].GetValue("email")
 			emailJ, _ := expected[j].GetValue("email")
-			return emailI.Value.(TextPointer).String() < emailJ.Value.(TextPointer).String()
+			return emailI.AsTextPointer().String() < emailJ.AsTextPointer().String()
 		})
 
 		assert.Equal(t, expected, collectRows(ctx, result))
@@ -432,7 +432,7 @@ func TestTable_Select(t *testing.T) {
 			}
 			emailI, _ := expected[i].GetValue("email")
 			emailJ, _ := expected[j].GetValue("email")
-			return emailI.Value.(TextPointer).String() > emailJ.Value.(TextPointer).String()
+			return emailI.AsTextPointer().String() > emailJ.AsTextPointer().String()
 		})
 
 		assert.Equal(t, expected, collectRows(ctx, result))
@@ -467,7 +467,7 @@ func TestTable_Select(t *testing.T) {
 			}
 			emailI, _ := expected[i].GetValue("email")
 			emailJ, _ := expected[j].GetValue("email")
-			return emailI.Value.(TextPointer).String() < emailJ.Value.(TextPointer).String()
+			return emailI.AsTextPointer().String() < emailJ.AsTextPointer().String()
 		})
 
 		assert.Equal(t, expected, collectRows(ctx, result))
@@ -485,7 +485,7 @@ func TestTable_Select(t *testing.T) {
 		assert.Equal(t, []Row{
 			NewRowWithValues(
 				[]Column{{Name: "COUNT(*)"}},
-				[]OptionalValue{{Value: int64(len(rows)), Valid: true}},
+				[]OptionalValue{MakeInt8(int64(len(rows)))},
 			),
 		}, collectRows(ctx, result))
 	})
@@ -497,15 +497,15 @@ func TestTable_Select(t *testing.T) {
 		sort.Slice(expected, func(i, j int) bool {
 			id1, _ := expected[i].GetValue("id")
 			id2, _ := expected[j].GetValue("id")
-			return id1.Value.(int64) < id2.Value.(int64)
+			return id1.AsInt8() < id2.AsInt8()
 		})
 		var (
-			middleID      = expected[10].Values[0].Value.(int64)
+			middleID      = expected[10].Values[0].AsInt8()
 			expectedCount int64
 		)
 		for _, row := range expected {
 			idVal, _ := row.GetValue("id")
-			if idVal.Value.(int64) > middleID {
+			if idVal.AsInt8() > middleID {
 				expectedCount += 1
 			}
 		}
@@ -522,7 +522,7 @@ func TestTable_Select(t *testing.T) {
 		assert.Equal(t, []Row{
 			NewRowWithValues(
 				[]Column{{Name: "COUNT(*)"}},
-				[]OptionalValue{{Value: int64(expectedCount), Valid: true}},
+				[]OptionalValue{MakeInt8(int64(expectedCount))},
 			),
 		}, collectRows(ctx, result))
 	})
@@ -543,7 +543,7 @@ func TestCompileScanFilter(t *testing.T) {
 				{
 					Operand1: Operand{Type: OperandField, Value: Field{Name: "id"}},
 					Operator: Eq,
-					Operand2: Operand{Type: OperandInteger, Value: row.Values[0].Value.(int64)},
+					Operand2: Operand{Type: OperandInteger, Value: row.Values[0].AsInt8()},
 				},
 			},
 		}
@@ -564,8 +564,8 @@ func TestCompileInvertedScanFilter(t *testing.T) {
 		{Name: "kind", Kind: Varchar, Size: MaxInlineVarchar},
 	}
 	row := NewRowWithValues(columns, []OptionalValue{
-		{Value: NewTextPointer([]byte(`{"type":"click","user":{"id":"u1"}}`)), Valid: true},
-		{Value: NewTextPointer([]byte("event")), Valid: true},
+		MakeVarchar(NewTextPointer([]byte(`{"type":"click","user":{"id":"u1"}}`))),
+		MakeVarchar(NewTextPointer([]byte("event"))),
 	})
 
 	t.Run("predecodes json contains query", func(t *testing.T) {
@@ -598,8 +598,8 @@ func TestCompileInvertedScanFilter(t *testing.T) {
 		t.Parallel()
 
 		arrayRow := NewRowWithValues(columns, []OptionalValue{
-			{Value: NewTextPointer([]byte(`{"tags":[{"name":"mobile"}]}`)), Valid: true},
-			{Value: NewTextPointer([]byte("event")), Valid: true},
+			MakeVarchar(NewTextPointer([]byte(`{"tags":[{"name":"mobile"}]}`))),
+			MakeVarchar(NewTextPointer([]byte("event"))),
 		})
 		filter := compileInvertedScanFilter(columns, OneOrMore{{jsonContainsCondition("payload", `{"tags":[{"name":"web"}]}`)}})
 		require.NotNil(t, filter)
@@ -677,15 +677,15 @@ func TestTable_Select_Overflow(t *testing.T) {
 
 		// Set expected first overflow pages on rows
 		overflow1, _ := rows[1].GetValue("profile")
-		tp1 := overflow1.Value.(TextPointer)
+		tp1 := overflow1.AsTextPointer()
 		tp1.FirstPage = 1
-		overflow1.Value = tp1
+		overflow1 = MakeTextByColumnKind(Text, tp1)
 		rows[1], _ = rows[1].SetValue("profile", overflow1)
 
 		overflow2, _ := rows[2].GetValue("profile")
-		tp2 := overflow2.Value.(TextPointer)
+		tp2 := overflow2.AsTextPointer()
 		tp2.FirstPage = 2
-		overflow2.Value = tp2
+		overflow2 = MakeTextByColumnKind(Text, tp2)
 		rows[2], _ = rows[2].SetValue("profile", overflow2)
 
 		// And now we can assert
@@ -706,11 +706,11 @@ func TestTable_SelectGroupBy(t *testing.T) {
 		Fields: []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}, {Name: "score"}, {Name: "created"}},
 	}
 	for i, row := range [][]OptionalValue{
-		{{Value: int64(1), Valid: true}, {Value: NewTextPointer([]byte("a@e.com")), Valid: true}, {Value: int32(10), Valid: true}, {Value: true, Valid: true}, {Value: float32(1.0), Valid: true}, {Valid: false}},
-		{{Value: int64(2), Valid: true}, {Value: NewTextPointer([]byte("b@e.com")), Valid: true}, {Value: int32(20), Valid: true}, {Value: true, Valid: true}, {Value: float32(2.0), Valid: true}, {Valid: false}},
-		{{Value: int64(3), Valid: true}, {Value: NewTextPointer([]byte("c@e.com")), Valid: true}, {Value: int32(30), Valid: true}, {Value: true, Valid: true}, {Value: float32(3.0), Valid: true}, {Valid: false}},
-		{{Value: int64(4), Valid: true}, {Value: NewTextPointer([]byte("d@e.com")), Valid: true}, {Value: int32(40), Valid: true}, {Value: false, Valid: true}, {Value: float32(4.0), Valid: true}, {Valid: false}},
-		{{Value: int64(5), Valid: true}, {Value: NewTextPointer([]byte("e@e.com")), Valid: true}, {Value: int32(50), Valid: true}, {Value: false, Valid: true}, {Value: float32(5.0), Valid: true}, {Valid: false}},
+		{MakeInt8(int64(1)), MakeVarchar(NewTextPointer([]byte("a@e.com"))), MakeInt4(int32(10)), MakeBool(true), MakeReal(float32(1.0)), MakeNull()},
+		{MakeInt8(int64(2)), MakeVarchar(NewTextPointer([]byte("b@e.com"))), MakeInt4(int32(20)), MakeBool(true), MakeReal(float32(2.0)), MakeNull()},
+		{MakeInt8(int64(3)), MakeVarchar(NewTextPointer([]byte("c@e.com"))), MakeInt4(int32(30)), MakeBool(true), MakeReal(float32(3.0)), MakeNull()},
+		{MakeInt8(int64(4)), MakeVarchar(NewTextPointer([]byte("d@e.com"))), MakeInt4(int32(40)), MakeBool(false), MakeReal(float32(4.0)), MakeNull()},
+		{MakeInt8(int64(5)), MakeVarchar(NewTextPointer([]byte("e@e.com"))), MakeInt4(int32(50)), MakeBool(false), MakeReal(float32(5.0)), MakeNull()},
 	} {
 		_ = i
 		ins := insertStmt
@@ -745,7 +745,7 @@ func TestTable_SelectGroupBy(t *testing.T) {
 		for _, r := range rows {
 			v, _ := r.GetValue("verified")
 			c, _ := r.GetValue("count(*)")
-			counts[v.Value.(bool)] = c.Value.(int64)
+			counts[v.AsBool()] = c.AsInt8()
 		}
 		assert.Equal(t, int64(3), counts[true])
 		assert.Equal(t, int64(2), counts[false])
@@ -774,7 +774,7 @@ func TestTable_SelectGroupBy(t *testing.T) {
 		for _, r := range rows {
 			v, _ := r.GetValue("verified")
 			s, _ := r.GetValue("sum(age)")
-			sums[v.Value.(bool)] = s.Value.(int64)
+			sums[v.AsBool()] = s.AsInt8()
 		}
 		assert.Equal(t, int64(60), sums[true])  // 10+20+30
 		assert.Equal(t, int64(90), sums[false]) // 40+50
@@ -807,7 +807,7 @@ func TestTable_SelectGroupBy(t *testing.T) {
 			v, _ := r.GetValue("verified")
 			mn, _ := r.GetValue("min(age)")
 			mx, _ := r.GetValue("max(age)")
-			groups[v.Value.(bool)] = minmax{mn.Value.(int32), mx.Value.(int32)}
+			groups[v.AsBool()] = minmax{mn.AsInt4(), mx.AsInt4()}
 		}
 		assert.Equal(t, minmax{10, 30}, groups[true])
 		assert.Equal(t, minmax{40, 50}, groups[false])
@@ -836,7 +836,7 @@ func TestTable_SelectGroupBy(t *testing.T) {
 		for _, r := range rows {
 			v, _ := r.GetValue("verified")
 			a, _ := r.GetValue("avg(age)")
-			avgs[v.Value.(bool)] = a.Value.(float64)
+			avgs[v.AsBool()] = a.AsDouble()
 		}
 		assert.InDelta(t, 20.0, avgs[true], 0.001)  // (10+20+30)/3
 		assert.InDelta(t, 45.0, avgs[false], 0.001) // (40+50)/2
@@ -869,7 +869,7 @@ func TestTable_SelectGroupBy(t *testing.T) {
 		// Only verified=true group has count=3 > 2.
 		require.Len(t, rows, 1)
 		v, _ := rows[0].GetValue("verified")
-		assert.Equal(t, true, v.Value)
+		assert.Equal(t, true, v.AsAny())
 	})
 }
 
@@ -883,9 +883,9 @@ func TestTable_SelectAggregate(t *testing.T) {
 		Fields: []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}, {Name: "score"}, {Name: "created"}},
 	}
 	for _, row := range [][]OptionalValue{
-		{{Value: int64(1), Valid: true}, {Value: NewTextPointer([]byte("a@e.com")), Valid: true}, {Value: int32(10), Valid: true}, {Value: true, Valid: true}, {Value: float32(1.0), Valid: true}, {Valid: false}},
-		{{Value: int64(2), Valid: true}, {Value: NewTextPointer([]byte("b@e.com")), Valid: true}, {Value: int32(20), Valid: true}, {Value: true, Valid: true}, {Value: float32(2.0), Valid: true}, {Valid: false}},
-		{{Value: int64(3), Valid: true}, {Value: NewTextPointer([]byte("c@e.com")), Valid: true}, {Value: int32(30), Valid: true}, {Value: false, Valid: true}, {Value: float32(3.0), Valid: true}, {Valid: false}},
+		{MakeInt8(int64(1)), MakeVarchar(NewTextPointer([]byte("a@e.com"))), MakeInt4(int32(10)), MakeBool(true), MakeReal(float32(1.0)), MakeNull()},
+		{MakeInt8(int64(2)), MakeVarchar(NewTextPointer([]byte("b@e.com"))), MakeInt4(int32(20)), MakeBool(true), MakeReal(float32(2.0)), MakeNull()},
+		{MakeInt8(int64(3)), MakeVarchar(NewTextPointer([]byte("c@e.com"))), MakeInt4(int32(30)), MakeBool(false), MakeReal(float32(3.0)), MakeNull()},
 	} {
 		ins := insertStmt
 		ins.Inserts = [][]OptionalValue{row}
@@ -910,7 +910,7 @@ func TestTable_SelectAggregate(t *testing.T) {
 		require.Len(t, rows, 1)
 		// countResult hardcodes "COUNT(*)" (uppercase) as the result column name.
 		cnt, _ := rows[0].GetValue("COUNT(*)")
-		assert.Equal(t, int64(3), cnt.Value)
+		assert.Equal(t, int64(3), cnt.AsAny())
 	})
 
 	t.Run("sum_int_column", func(t *testing.T) {
@@ -926,7 +926,7 @@ func TestTable_SelectAggregate(t *testing.T) {
 		rows := collectRows(ctx, result)
 		require.Len(t, rows, 1)
 		s, _ := rows[0].GetValue("sum(age)")
-		assert.Equal(t, int64(60), s.Value) // 10+20+30
+		assert.Equal(t, int64(60), s.AsAny()) // 10+20+30
 	})
 
 	t.Run("avg_int_column", func(t *testing.T) {
@@ -942,7 +942,7 @@ func TestTable_SelectAggregate(t *testing.T) {
 		rows := collectRows(ctx, result)
 		require.Len(t, rows, 1)
 		a, _ := rows[0].GetValue("avg(age)")
-		assert.InDelta(t, 20.0, a.Value.(float64), 0.001)
+		assert.InDelta(t, 20.0, a.AsDouble(), 0.001)
 	})
 
 	t.Run("min_max_int_column", func(t *testing.T) {
@@ -960,8 +960,8 @@ func TestTable_SelectAggregate(t *testing.T) {
 		require.Len(t, rows, 1)
 		mn, _ := rows[0].GetValue("min(age)")
 		mx, _ := rows[0].GetValue("max(age)")
-		assert.Equal(t, int32(10), mn.Value)
-		assert.Equal(t, int32(30), mx.Value)
+		assert.Equal(t, int32(10), mn.AsAny())
+		assert.Equal(t, int32(30), mx.AsAny())
 	})
 }
 

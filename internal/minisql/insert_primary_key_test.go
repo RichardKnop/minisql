@@ -148,7 +148,7 @@ func TestTable_Insert_PrimaryKey_Autoincrement(t *testing.T) {
 		}
 		for _, row := range rows {
 			// Set primary key value to NULL so we can test autoincrement
-			row.Values[0] = OptionalValue{Valid: false}
+			row.Values[0] = MakeNull()
 			stmt.Inserts = append(stmt.Inserts, row.Values)
 		}
 
@@ -259,8 +259,8 @@ func TestTable_Insert_CompositePrimaryKey(t *testing.T) {
 	for i := range len(rows) {
 		expectedPrimaryKeys = append(expectedPrimaryKeys, NewCompositeKey(
 			table.Columns[1:3],
-			rows[i].Values[1].Value.(TextPointer).String(),
-			rows[i].Values[2].Value.(TextPointer).String(),
+			rows[i].Values[1].AsTextPointer().String(),
+			rows[i].Values[2].AsTextPointer().String(),
 		))
 	}
 	checkCompositeIndexKeys(ctx, t, table.PrimaryKey.Index, expectedPrimaryKeys)
@@ -294,7 +294,7 @@ func checkRowsWithPrimaryKey(ctx context.Context, t *testing.T, table *Table, ex
 	for _, r := range expectedRows {
 		id, ok := r.GetValue("id")
 		require.True(t, ok)
-		expectedIDMap[id.Value.(int64)] = struct{}{}
+		expectedIDMap[id.AsInt8()] = struct{}{}
 	}
 
 	var actual []Row
@@ -302,7 +302,7 @@ func checkRowsWithPrimaryKey(ctx context.Context, t *testing.T, table *Table, ex
 		row := selectResult.Rows.Row()
 		actual = append(actual, row)
 		if len(expectedIDMap) > 0 {
-			_, ok := expectedIDMap[row.Values[0].Value.(int64)]
+			_, ok := expectedIDMap[row.Values[0].AsInt8()]
 			assert.True(t, ok)
 		}
 	}
@@ -352,7 +352,7 @@ func checkRowsWithCompositePrimaryKey(ctx context.Context, t *testing.T, table *
 		require.True(t, ok)
 		lastName, ok := r.GetValue("last_name")
 		require.True(t, ok)
-		expectedIDMap[fmt.Sprintf("%s|%s", firstName.Value.(TextPointer).String(), lastName.Value.(TextPointer).String())] = struct{}{}
+		expectedIDMap[fmt.Sprintf("%s|%s", firstName.AsTextPointer().String(), lastName.AsTextPointer().String())] = struct{}{}
 	}
 
 	var actual []Row
@@ -360,7 +360,7 @@ func checkRowsWithCompositePrimaryKey(ctx context.Context, t *testing.T, table *
 		row := selectResult.Rows.Row()
 		actual = append(actual, row)
 		if len(expectedIDMap) > 0 {
-			_, ok := expectedIDMap[fmt.Sprintf("%s|%s", row.Values[1].Value.(TextPointer).String(), row.Values[2].Value.(TextPointer).String())]
+			_, ok := expectedIDMap[fmt.Sprintf("%s|%s", row.Values[1].AsTextPointer().String(), row.Values[2].AsTextPointer().String())]
 			assert.True(t, ok)
 		}
 	}

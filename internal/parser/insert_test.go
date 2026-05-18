@@ -64,7 +64,7 @@ func TestParse_Insert(t *testing.T) {
 					Kind:      minisql.Insert,
 					TableName: "a",
 					Fields:    []minisql.Field{{Name: "b"}},
-					Inserts:   [][]minisql.OptionalValue{{{Value: minisql.NewTextPointer([]byte("1")), Valid: true}}},
+					Inserts:   [][]minisql.OptionalValue{{minisql.MakeVarchar(minisql.NewTextPointer([]byte("1")))}},
 				},
 			},
 			nil,
@@ -85,9 +85,9 @@ func TestParse_Insert(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "d"}},
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: minisql.NewTextPointer([]byte("1")), Valid: true},
-							{Value: int64(2), Valid: true},
-							{Value: float64(3.75), Valid: true},
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("1"))),
+							minisql.MakeInt8(int64(2)),
+							minisql.MakeDouble(float64(3.75)),
 						},
 					},
 				},
@@ -104,14 +104,14 @@ func TestParse_Insert(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "d"}},
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: minisql.NewTextPointer([]byte("1")), Valid: true},
-							{Value: int64(2), Valid: true},
-							{Value: float64(3.75), Valid: true},
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("1"))),
+							minisql.MakeInt8(int64(2)),
+							minisql.MakeDouble(float64(3.75)),
 						},
 						{
-							{Value: minisql.NewTextPointer([]byte("4")), Valid: true},
-							{Value: minisql.NewTextPointer([]byte("5")), Valid: true},
-							{Value: minisql.NewTextPointer([]byte("6")), Valid: true},
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("4"))),
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("5"))),
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("6"))),
 						},
 					},
 				},
@@ -128,11 +128,11 @@ func TestParse_Insert(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "d"}, {Name: "e"}, {Name: "f"}},
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: int64(25), Valid: true},
-							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
-							{Value: true, Valid: true},
-							{Value: float64(42.69), Valid: true},
-							{Valid: false},
+							minisql.MakeInt8(int64(25)),
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("foo"))),
+							minisql.MakeBool(true),
+							minisql.MakeDouble(float64(42.69)),
+							minisql.MakeNull(),
 						},
 					},
 				},
@@ -149,9 +149,9 @@ func TestParse_Insert(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "d"}},
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: int64(25), Valid: true},
-							{Value: minisql.FunctionNow, Valid: true},
-							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+							minisql.MakeInt8(int64(25)),
+							minisql.MakeFunction(minisql.FunctionNow),
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("foo"))),
 						},
 					},
 				},
@@ -168,9 +168,9 @@ func TestParse_Insert(t *testing.T) {
 					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}, {Name: "d"}},
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: minisql.Placeholder{}, Valid: true},
-							{Value: minisql.Placeholder{}, Valid: true},
-							{Value: minisql.Placeholder{}, Valid: true},
+							minisql.MakePlaceholder(),
+							minisql.MakePlaceholder(),
+							minisql.MakePlaceholder(),
 						},
 					},
 				},
@@ -188,8 +188,8 @@ func TestParse_Insert(t *testing.T) {
 					ConflictAction: minisql.ConflictActionDoNothing,
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: int64(1), Valid: true},
-							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+							minisql.MakeInt8(int64(1)),
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("foo"))),
 						},
 					},
 				},
@@ -207,8 +207,8 @@ func TestParse_Insert(t *testing.T) {
 					ConflictAction: minisql.ConflictActionDoNothing,
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: int64(1), Valid: true},
-							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+							minisql.MakeInt8(int64(1)),
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("foo"))),
 						},
 					},
 				},
@@ -226,12 +226,12 @@ func TestParse_Insert(t *testing.T) {
 					ConflictAction: minisql.ConflictActionDoUpdate,
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: int64(1), Valid: true},
-							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+							minisql.MakeInt8(int64(1)),
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("foo"))),
 						},
 					},
 					Updates: map[string]minisql.OptionalValue{
-						"c": {Value: minisql.NewTextPointer([]byte("bar")), Valid: true},
+						"c": minisql.MakeVarchar(minisql.NewTextPointer([]byte("bar"))),
 					},
 				},
 			},
@@ -248,12 +248,12 @@ func TestParse_Insert(t *testing.T) {
 					ConflictAction: minisql.ConflictActionDoUpdate,
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: int64(1), Valid: true},
-							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+							minisql.MakeInt8(int64(1)),
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("foo"))),
 						},
 					},
 					Updates: map[string]minisql.OptionalValue{
-						"c": {Value: minisql.NewTextPointer([]byte("bar")), Valid: true},
+						"c": minisql.MakeVarchar(minisql.NewTextPointer([]byte("bar"))),
 					},
 				},
 			},
@@ -270,13 +270,13 @@ func TestParse_Insert(t *testing.T) {
 					ConflictAction: minisql.ConflictActionDoUpdate,
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: int64(1), Valid: true},
-							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+							minisql.MakeInt8(int64(1)),
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("foo"))),
 						},
 					},
 					Updates: map[string]minisql.OptionalValue{
-						"b": {Value: int64(2), Valid: true},
-						"c": {Valid: false},
+						"b": minisql.MakeInt8(int64(2)),
+						"c": minisql.MakeNull(),
 					},
 				},
 			},
@@ -293,12 +293,12 @@ func TestParse_Insert(t *testing.T) {
 					ConflictAction: minisql.ConflictActionDoUpdate,
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: int64(1), Valid: true},
-							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+							minisql.MakeInt8(int64(1)),
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("foo"))),
 						},
 					},
 					Updates: map[string]minisql.OptionalValue{
-						"c": {Value: minisql.Placeholder{}, Valid: true},
+						"c": minisql.MakePlaceholder(),
 					},
 				},
 			},
@@ -315,12 +315,12 @@ func TestParse_Insert(t *testing.T) {
 					ConflictAction: minisql.ConflictActionDoUpdate,
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: int64(1), Valid: true},
-							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+							minisql.MakeInt8(int64(1)),
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("foo"))),
 						},
 					},
 					Updates: map[string]minisql.OptionalValue{
-						"c": {Value: minisql.FunctionNow, Valid: true},
+						"c": minisql.MakeFunction(minisql.FunctionNow),
 					},
 				},
 			},
@@ -337,12 +337,12 @@ func TestParse_Insert(t *testing.T) {
 					ConflictAction: minisql.ConflictActionDoUpdate,
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: int64(1), Valid: true},
-							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+							minisql.MakeInt8(int64(1)),
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("foo"))),
 						},
 					},
 					Updates: map[string]minisql.OptionalValue{
-						"c": {Value: minisql.ExcludedRef{Column: "c"}, Valid: true},
+						"c": minisql.MakeExcludedRef(minisql.ExcludedRef{Column: "c"}),
 					},
 				},
 			},
@@ -359,13 +359,13 @@ func TestParse_Insert(t *testing.T) {
 					ConflictAction: minisql.ConflictActionDoUpdate,
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: int64(1), Valid: true},
-							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+							minisql.MakeInt8(int64(1)),
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("foo"))),
 						},
 					},
 					Updates: map[string]minisql.OptionalValue{
-						"b": {Value: minisql.ExcludedRef{Column: "b"}, Valid: true},
-						"c": {Value: minisql.ExcludedRef{Column: "c"}, Valid: true},
+						"b": minisql.MakeExcludedRef(minisql.ExcludedRef{Column: "b"}),
+						"c": minisql.MakeExcludedRef(minisql.ExcludedRef{Column: "c"}),
 					},
 				},
 			},
@@ -382,13 +382,13 @@ func TestParse_Insert(t *testing.T) {
 					ConflictAction: minisql.ConflictActionDoUpdate,
 					Inserts: [][]minisql.OptionalValue{
 						{
-							{Value: int64(1), Valid: true},
-							{Value: minisql.NewTextPointer([]byte("foo")), Valid: true},
+							minisql.MakeInt8(int64(1)),
+							minisql.MakeVarchar(minisql.NewTextPointer([]byte("foo"))),
 						},
 					},
 					Updates: map[string]minisql.OptionalValue{
-						"b": {Value: minisql.ExcludedRef{Column: "b"}, Valid: true},
-						"c": {Value: minisql.NewTextPointer([]byte("override")), Valid: true},
+						"b": minisql.MakeExcludedRef(minisql.ExcludedRef{Column: "b"}),
+						"c": minisql.MakeVarchar(minisql.NewTextPointer([]byte("override"))),
 					},
 				},
 			},

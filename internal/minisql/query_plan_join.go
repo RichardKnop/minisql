@@ -951,11 +951,11 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 				} else {
 					keyValue, ok = currentRow.GetValue(fromAlias + "." + pair.BaseTableColumn.Name)
 				}
-				if !ok || !keyValue.Valid {
+				if !ok || keyValue.IsNull() {
 					joinKeyValues = nil
 					break
 				}
-				joinKeyValues[i] = keyValue.Value
+				joinKeyValues[i] = keyValue.AsAny()
 			}
 		} else {
 			var (
@@ -967,8 +967,8 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 			} else {
 				keyValue, ok = currentRow.GetValue(fromAlias + "." + join.OuterJoinColumn)
 			}
-			if ok && keyValue.Valid {
-				joinKeyValues = []any{keyValue.Value}
+			if ok && keyValue.IsValid() {
+				joinKeyValues = []any{keyValue.AsAny()}
 			}
 		}
 

@@ -345,9 +345,9 @@ func TestFKExtractValues(t *testing.T) {
 		row := Row{
 			Columns: cols,
 			Values: []OptionalValue{
-				{Value: int64(42), Valid: true},
-				{Value: NewTextPointer([]byte("alice@example.com")), Valid: true},
-				{Value: NewTextPointer([]byte("active")), Valid: true},
+				MakeInt8(int64(42)),
+				MakeVarchar(NewTextPointer([]byte("alice@example.com"))),
+				MakeVarchar(NewTextPointer([]byte("active"))),
 			},
 		}
 		vals, anyNonNull := fkExtractValues(cols, []string{"id"}, row)
@@ -360,9 +360,9 @@ func TestFKExtractValues(t *testing.T) {
 		row := Row{
 			Columns: cols,
 			Values: []OptionalValue{
-				{Value: int64(1), Valid: true},
-				{Value: NewTextPointer([]byte("alice@example.com")), Valid: true},
-				{Value: NewTextPointer([]byte("active")), Valid: true},
+				MakeInt8(int64(1)),
+				MakeVarchar(NewTextPointer([]byte("alice@example.com"))),
+				MakeVarchar(NewTextPointer([]byte("active"))),
 			},
 		}
 		vals, anyNonNull := fkExtractValues(cols, []string{"id", "email"}, row)
@@ -375,9 +375,9 @@ func TestFKExtractValues(t *testing.T) {
 		row := Row{
 			Columns: cols,
 			Values: []OptionalValue{
-				{Valid: false}, // NULL id
-				{Value: NewTextPointer([]byte("alice@example.com")), Valid: true},
-				{Value: NewTextPointer([]byte("active")), Valid: true},
+				MakeNull(), // NULL id
+				MakeVarchar(NewTextPointer([]byte("alice@example.com"))),
+				MakeVarchar(NewTextPointer([]byte("active"))),
 			},
 		}
 		vals, anyNonNull := fkExtractValues(cols, []string{"id"}, row)
@@ -389,7 +389,7 @@ func TestFKExtractValues(t *testing.T) {
 		row := Row{
 			Columns: cols,
 			Values: []OptionalValue{
-				{Value: int64(1), Valid: true},
+				MakeInt8(int64(1)),
 			},
 		}
 		_, anyNonNull := fkExtractValues(cols, []string{"nonexistent"}, row)
@@ -438,8 +438,8 @@ func TestFKValuesExistInParent_MultiColumn(t *testing.T) {
 			{
 				Columns: cols,
 				Values: []OptionalValue{
-					{Value: int64(1), Valid: true},
-					{Value: int64(2), Valid: true},
+					MakeInt8(int64(1)),
+					MakeInt8(int64(2)),
 				},
 			},
 		},
@@ -463,9 +463,9 @@ func TestFKChildFindRows_VirtualTable(t *testing.T) {
 		Name:    "orders",
 		Columns: cols,
 		virtualRows: []Row{
-			{Columns: cols, Values: []OptionalValue{{Value: int64(1), Valid: true}}},
-			{Columns: cols, Values: []OptionalValue{{Value: int64(2), Valid: true}}},
-			{Columns: cols, Values: []OptionalValue{{Valid: false}}}, // NULL
+			{Columns: cols, Values: []OptionalValue{MakeInt8(int64(1))}},
+			{Columns: cols, Values: []OptionalValue{MakeInt8(int64(2))}},
+			{Columns: cols, Values: []OptionalValue{MakeNull()}}, // NULL
 		},
 	}
 	db := &Database{}
@@ -504,7 +504,7 @@ func TestCheckChildFK_AllNullValues(t *testing.T) {
 	// NULL FK column — FK check skipped.
 	row := Row{
 		Columns: childCols,
-		Values:  []OptionalValue{{Valid: false}},
+		Values:  []OptionalValue{MakeNull()},
 	}
 	err := db.checkChildFK(context.Background(), childTable, row)
 	require.NoError(t, err)
@@ -529,7 +529,7 @@ func TestCheckChildFK_ParentTableMissing(t *testing.T) {
 	}
 	row := Row{
 		Columns: childCols,
-		Values:  []OptionalValue{{Value: int64(1), Valid: true}},
+		Values:  []OptionalValue{MakeInt8(int64(1))},
 	}
 	err := db.checkChildFK(context.Background(), childTable, row)
 	require.Error(t, err)
@@ -550,8 +550,8 @@ func TestCheckChildFK_MultiColumn_VirtualParent(t *testing.T) {
 			{
 				Columns: parentCols,
 				Values: []OptionalValue{
-					{Value: int64(1), Valid: true},
-					{Value: int64(2), Valid: true},
+					MakeInt8(int64(1)),
+					MakeInt8(int64(2)),
 				},
 			},
 		},
@@ -578,8 +578,8 @@ func TestCheckChildFK_MultiColumn_VirtualParent(t *testing.T) {
 	row := Row{
 		Columns: childCols,
 		Values: []OptionalValue{
-			{Value: int64(1), Valid: true},
-			{Value: int64(2), Valid: true},
+			MakeInt8(int64(1)),
+			MakeInt8(int64(2)),
 		},
 	}
 	require.NoError(t, db.checkChildFK(context.Background(), childTable, row))
@@ -588,8 +588,8 @@ func TestCheckChildFK_MultiColumn_VirtualParent(t *testing.T) {
 	badRow := Row{
 		Columns: childCols,
 		Values: []OptionalValue{
-			{Value: int64(1), Valid: true},
-			{Value: int64(99), Valid: true},
+			MakeInt8(int64(1)),
+			MakeInt8(int64(99)),
 		},
 	}
 	err := db.checkChildFK(context.Background(), childTable, badRow)
@@ -631,7 +631,7 @@ func TestEnforceParentFKOnDelete_ChildTableMissing(t *testing.T) {
 		},
 		tables: map[string]*Table{},
 	}
-	row := Row{Columns: cols, Values: []OptionalValue{{Value: int64(1), Valid: true}}}
+	row := Row{Columns: cols, Values: []OptionalValue{MakeInt8(int64(1))}}
 	err := db.enforceParentFKOnDelete(context.Background(), &Table{Name: "users", Columns: cols}, row)
 	require.NoError(t, err) // missing child table → continue → no error
 }
@@ -652,7 +652,7 @@ func TestEnforceParentFKOnDelete_RESTRICT_NoChildRows(t *testing.T) {
 		},
 		tables: map[string]*Table{"orders": childTable},
 	}
-	row := Row{Columns: cols, Values: []OptionalValue{{Value: int64(1), Valid: true}}}
+	row := Row{Columns: cols, Values: []OptionalValue{MakeInt8(int64(1))}}
 	err := db.enforceParentFKOnDelete(context.Background(), &Table{Name: "users", Columns: cols}, row)
 	require.NoError(t, err)
 }
@@ -666,7 +666,7 @@ func TestEnforceParentFKOnDelete_RESTRICT_ChildExists(t *testing.T) {
 		Name:    "orders",
 		Columns: childCols,
 		virtualRows: []Row{
-			{Columns: childCols, Values: []OptionalValue{{Value: int64(1), Valid: true}}},
+			{Columns: childCols, Values: []OptionalValue{MakeInt8(int64(1))}},
 		},
 	}
 	db := &Database{
@@ -679,7 +679,7 @@ func TestEnforceParentFKOnDelete_RESTRICT_ChildExists(t *testing.T) {
 		},
 		tables: map[string]*Table{"orders": childTable},
 	}
-	row := Row{Columns: cols, Values: []OptionalValue{{Value: int64(1), Valid: true}}}
+	row := Row{Columns: cols, Values: []OptionalValue{MakeInt8(int64(1))}}
 	err := db.enforceParentFKOnDelete(context.Background(), &Table{Name: "users", Columns: cols}, row)
 	require.Error(t, err)
 	var fkErr minisqlErrors.ErrForeignKeyParentViolation
@@ -702,7 +702,7 @@ func TestEnforceParentFKOnDelete_CASCADE_NoChildRows(t *testing.T) {
 		},
 		tables: map[string]*Table{"orders": childTable},
 	}
-	row := Row{Columns: cols, Values: []OptionalValue{{Value: int64(1), Valid: true}}}
+	row := Row{Columns: cols, Values: []OptionalValue{MakeInt8(int64(1))}}
 	err := db.enforceParentFKOnDelete(context.Background(), &Table{Name: "users", Columns: cols}, row)
 	require.NoError(t, err)
 }
@@ -723,7 +723,7 @@ func TestEnforceParentFKOnDelete_SETNULL_NoChildRows(t *testing.T) {
 		},
 		tables: map[string]*Table{"orders": childTable},
 	}
-	row := Row{Columns: cols, Values: []OptionalValue{{Value: int64(1), Valid: true}}}
+	row := Row{Columns: cols, Values: []OptionalValue{MakeInt8(int64(1))}}
 	err := db.enforceParentFKOnDelete(context.Background(), &Table{Name: "users", Columns: cols}, row)
 	require.NoError(t, err)
 }
@@ -760,7 +760,7 @@ func TestEnforceParentFKOnUpdate_ColumnsUnchanged(t *testing.T) {
 			}},
 		},
 	}
-	row := Row{Columns: cols, Values: []OptionalValue{{Value: int64(1), Valid: true}}}
+	row := Row{Columns: cols, Values: []OptionalValue{MakeInt8(int64(1))}}
 	// Same old/new values → no action needed.
 	err := db.enforceParentFKOnUpdate(context.Background(), &Table{Name: "users", Columns: cols}, row, row)
 	require.NoError(t, err)
@@ -782,8 +782,8 @@ func TestEnforceParentFKOnUpdate_RESTRICT_NoChildRows(t *testing.T) {
 		},
 		tables: map[string]*Table{"orders": childTable},
 	}
-	oldRow := Row{Columns: cols, Values: []OptionalValue{{Value: int64(1), Valid: true}}}
-	newRow := Row{Columns: cols, Values: []OptionalValue{{Value: int64(2), Valid: true}}}
+	oldRow := Row{Columns: cols, Values: []OptionalValue{MakeInt8(int64(1))}}
+	newRow := Row{Columns: cols, Values: []OptionalValue{MakeInt8(int64(2))}}
 	err := db.enforceParentFKOnUpdate(context.Background(), &Table{Name: "users", Columns: cols}, oldRow, newRow)
 	require.NoError(t, err)
 }
@@ -797,7 +797,7 @@ func TestEnforceParentFKOnUpdate_RESTRICT_ChildExists(t *testing.T) {
 		Name:    "orders",
 		Columns: childCols,
 		virtualRows: []Row{
-			{Columns: childCols, Values: []OptionalValue{{Value: int64(1), Valid: true}}},
+			{Columns: childCols, Values: []OptionalValue{MakeInt8(int64(1))}},
 		},
 	}
 	db := &Database{
@@ -810,8 +810,8 @@ func TestEnforceParentFKOnUpdate_RESTRICT_ChildExists(t *testing.T) {
 		},
 		tables: map[string]*Table{"orders": childTable},
 	}
-	oldRow := Row{Columns: cols, Values: []OptionalValue{{Value: int64(1), Valid: true}}}
-	newRow := Row{Columns: cols, Values: []OptionalValue{{Value: int64(2), Valid: true}}}
+	oldRow := Row{Columns: cols, Values: []OptionalValue{MakeInt8(int64(1))}}
+	newRow := Row{Columns: cols, Values: []OptionalValue{MakeInt8(int64(2))}}
 	err := db.enforceParentFKOnUpdate(context.Background(), &Table{Name: "users", Columns: cols}, oldRow, newRow)
 	require.Error(t, err)
 	var fkErr minisqlErrors.ErrForeignKeyParentViolation

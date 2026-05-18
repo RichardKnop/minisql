@@ -50,7 +50,7 @@ var (
 			Size:         1,
 			Name:         "verified",
 			Nullable:     true,
-			DefaultValue: OptionalValue{Value: false, Valid: true},
+			DefaultValue: MakeBool(false),
 		},
 		{
 			Kind:     Real,
@@ -63,7 +63,7 @@ var (
 			Size:         8,
 			Name:         "created",
 			Nullable:     true,
-			DefaultValue: OptionalValue{Value: MustParseTimestampMicros("0001-01-01 00:00:00.000000"), Valid: true},
+			DefaultValue: MakeTimestamp(MustParseTimestampMicros("0001-01-01 00:00:00.000000")),
 		},
 	}
 	testRowSize = uint64(8 + 4 + 255 + 4 + 1 + 4 + 8) // calculated size of testColumns
@@ -94,7 +94,7 @@ var (
 				Size:         1,
 				Name:         "verified",
 				Nullable:     true,
-				DefaultValue: OptionalValue{Value: false, Valid: true},
+				DefaultValue: MakeBool(false),
 			},
 			{
 				Kind:     Real,
@@ -107,7 +107,7 @@ var (
 				Size:         8,
 				Name:         "created",
 				Nullable:     true,
-				DefaultValue: OptionalValue{Value: MustParseTimestampMicros("0001-01-01 00:00:00.000000"), Valid: true},
+				DefaultValue: MakeTimestamp(MustParseTimestampMicros("0001-01-01 00:00:00.000000")),
 			},
 		},
 		int((PageSize-uint32(RootPageConfigSize)-
@@ -144,7 +144,7 @@ var (
 				Size:         1,
 				Name:         "verified",
 				Nullable:     true,
-				DefaultValue: OptionalValue{Value: false, Valid: true},
+				DefaultValue: MakeBool(false),
 			},
 			{
 				Kind:     Real,
@@ -157,7 +157,7 @@ var (
 				Size:         8,
 				Name:         "created",
 				Nullable:     true,
-				DefaultValue: OptionalValue{Value: MustParseTimestampMicros("0001-01-01 00:00:00.000000"), Valid: true},
+				DefaultValue: MakeTimestamp(MustParseTimestampMicros("0001-01-01 00:00:00.000000")),
 			},
 		},
 		int((PageSize - uint32(RootPageConfigSize) -
@@ -224,12 +224,12 @@ func newDataGen(seed uint64) *dataGen {
 
 func (g *dataGen) Row() Row {
 	return NewRowWithValues(testColumns, []OptionalValue{
-		{Value: g.Int64(), Valid: true},
-		{Value: g.paddedEmail(), Valid: true},
-		{Value: int32(g.IntRange(18, 100)), Valid: true},
-		{Value: g.Bool(), Valid: true},
-		{Value: g.Float32(), Valid: true},
-		{Value: MustParseTimestampMicros(g.PastDate().Format(timestampFormat)), Valid: true},
+		MakeInt8(g.Int64()),
+		MakeVarchar(g.paddedEmail()),
+		MakeInt4(int32(g.IntRange(18, 100))),
+		MakeBool(g.Bool()),
+		MakeReal(g.Float32()),
+		MakeTimestamp(MustParseTimestampMicros(g.PastDate().Format(timestampFormat))),
 	})
 }
 
@@ -254,42 +254,42 @@ func (g *dataGen) Rows(number int) []Row {
 		row := g.Row()
 
 		// Ensure unique ID
-		_, ok := idMap[row.Values[0].Value.(int64)]
+		_, ok := idMap[row.Values[0].AsInt8()]
 		for ok {
 			row = g.Row()
-			_, ok = idMap[row.Values[0].Value.(int64)]
+			_, ok = idMap[row.Values[0].AsInt8()]
 		}
 
 		// Ensure unique email
-		_, ok = emailMap[row.Values[1].Value.(TextPointer).String()]
+		_, ok = emailMap[row.Values[1].AsTextPointer().String()]
 		for ok {
 			row = g.Row()
-			_, ok = emailMap[row.Values[1].Value.(TextPointer).String()]
+			_, ok = emailMap[row.Values[1].AsTextPointer().String()]
 		}
 
 		row.Key = RowID(i)
 		rows = append(rows, row)
 
-		idMap[row.Values[0].Value.(int64)] = struct{}{}
-		emailMap[row.Values[1].Value.(TextPointer).String()] = struct{}{}
+		idMap[row.Values[0].AsInt8()] = struct{}{}
+		emailMap[row.Values[1].AsTextPointer().String()] = struct{}{}
 	}
 	return rows
 }
 
 func (g *dataGen) MediumRow() Row {
 	row := NewRowWithValues(testMediumColumns, []OptionalValue{
-		{Value: g.Int64(), Valid: true},
-		{Value: g.paddedEmail(), Valid: true},
-		{Value: int32(g.IntRange(18, 100)), Valid: true},
-		{Value: g.Bool(), Valid: true},
-		{Value: g.Float32(), Valid: true},
-		{Value: MustParseTimestampMicros(g.PastDate().Format(timestampFormat)), Valid: true},
+		MakeInt8(g.Int64()),
+		MakeVarchar(g.paddedEmail()),
+		MakeInt4(int32(g.IntRange(18, 100))),
+		MakeBool(g.Bool()),
+		MakeReal(g.Float32()),
+		MakeTimestamp(MustParseTimestampMicros(g.PastDate().Format(timestampFormat))),
 	})
 
 	for len(row.Values) < len(testMediumColumns) {
 		row.Values = append(
 			row.Values,
-			OptionalValue{Value: g.textOfLength(testMediumColumns[len(row.Values)].Size), Valid: true},
+			MakeVarchar(g.textOfLength(testMediumColumns[len(row.Values)].Size)),
 		)
 	}
 	return row
@@ -313,42 +313,42 @@ func (g *dataGen) MediumRows(number int) []Row {
 		row := g.MediumRow()
 
 		// Ensure unique ID
-		_, ok := idMap[row.Values[0].Value.(int64)]
+		_, ok := idMap[row.Values[0].AsInt8()]
 		for ok {
 			row = g.MediumRow()
-			_, ok = idMap[row.Values[0].Value.(int64)]
+			_, ok = idMap[row.Values[0].AsInt8()]
 		}
 
 		// Ensure unique email
-		_, ok = emailMap[row.Values[1].Value.(TextPointer).String()]
+		_, ok = emailMap[row.Values[1].AsTextPointer().String()]
 		for ok {
 			row = g.MediumRow()
-			_, ok = emailMap[row.Values[1].Value.(TextPointer).String()]
+			_, ok = emailMap[row.Values[1].AsTextPointer().String()]
 		}
 
 		row.Key = RowID(i)
 		rows = append(rows, row)
 
-		idMap[row.Values[0].Value.(int64)] = struct{}{}
-		emailMap[row.Values[1].Value.(TextPointer).String()] = struct{}{}
+		idMap[row.Values[0].AsInt8()] = struct{}{}
+		emailMap[row.Values[1].AsTextPointer().String()] = struct{}{}
 	}
 	return rows
 }
 
 func (g *dataGen) BigRow() Row {
 	row := NewRowWithValues(testBigColumns, []OptionalValue{
-		{Value: g.Int64(), Valid: true},
-		{Value: g.paddedEmail(), Valid: true},
-		{Value: int32(g.IntRange(18, 100)), Valid: true},
-		{Value: g.Bool(), Valid: true},
-		{Value: g.Float32(), Valid: true},
-		{Value: MustParseTimestampMicros(g.PastDate().Format(timestampFormat)), Valid: true},
+		MakeInt8(g.Int64()),
+		MakeVarchar(g.paddedEmail()),
+		MakeInt4(int32(g.IntRange(18, 100))),
+		MakeBool(g.Bool()),
+		MakeReal(g.Float32()),
+		MakeTimestamp(MustParseTimestampMicros(g.PastDate().Format(timestampFormat))),
 	})
 
 	for len(row.Values) < len(testBigColumns) {
 		row.Values = append(
 			row.Values,
-			OptionalValue{Value: g.textOfLength(testBigColumns[len(row.Values)].Size), Valid: true},
+			MakeVarchar(g.textOfLength(testBigColumns[len(row.Values)].Size)),
 		)
 	}
 	return row
@@ -364,32 +364,32 @@ func (g *dataGen) BigRows(number int) []Row {
 		row := g.BigRow()
 
 		// Ensure unique ID
-		_, ok := idMap[row.Values[0].Value.(int64)]
+		_, ok := idMap[row.Values[0].AsInt8()]
 		for ok {
 			row = g.BigRow()
-			_, ok = idMap[row.Values[0].Value.(int64)]
+			_, ok = idMap[row.Values[0].AsInt8()]
 		}
 
 		// Ensure unique email
-		_, ok = emailMap[row.Values[1].Value.(TextPointer).String()]
+		_, ok = emailMap[row.Values[1].AsTextPointer().String()]
 		for ok {
 			row = g.BigRow()
-			_, ok = emailMap[row.Values[1].Value.(TextPointer).String()]
+			_, ok = emailMap[row.Values[1].AsTextPointer().String()]
 		}
 
 		row.Key = RowID(i)
 		rows = append(rows, row)
 
-		idMap[row.Values[0].Value.(int64)] = struct{}{}
-		emailMap[row.Values[1].Value.(TextPointer).String()] = struct{}{}
+		idMap[row.Values[0].AsInt8()] = struct{}{}
+		emailMap[row.Values[1].AsTextPointer().String()] = struct{}{}
 	}
 	return rows
 }
 
 func (g *dataGen) RowWithPrimaryKey(primaryKey int64) Row {
 	return NewRowWithValues(testColumns[0:2], []OptionalValue{
-		{Value: primaryKey, Valid: true},
-		{Value: NewTextPointer([]byte(g.Email())), Valid: true},
+		MakeInt8(primaryKey),
+		MakeVarchar(NewTextPointer([]byte(g.Email()))),
 	})
 }
 
@@ -402,24 +402,24 @@ func (g *dataGen) RowsWithPrimaryKey(number int) []Row {
 		row := g.RowWithPrimaryKey(int64(i + 1))
 
 		// Ensure unique email
-		_, ok := emailMap[row.Values[1].Value.(TextPointer).String()]
+		_, ok := emailMap[row.Values[1].AsTextPointer().String()]
 		for ok {
 			row = g.RowWithPrimaryKey(int64(i + 1))
-			_, ok = emailMap[row.Values[1].Value.(TextPointer).String()]
+			_, ok = emailMap[row.Values[1].AsTextPointer().String()]
 		}
 
 		row.Key = RowID(i)
 		rows = append(rows, row)
 
-		emailMap[row.Values[1].Value.(TextPointer).String()] = struct{}{}
+		emailMap[row.Values[1].AsTextPointer().String()] = struct{}{}
 	}
 	return rows
 }
 
 func (g *dataGen) RowWithUniqueIndex() Row {
 	return NewRowWithValues(testColumns[0:2], []OptionalValue{
-		{Value: g.Int64(), Valid: true},
-		{Value: NewTextPointer([]byte(g.Email())), Valid: true},
+		MakeInt8(g.Int64()),
+		MakeVarchar(NewTextPointer([]byte(g.Email()))),
 	})
 }
 
@@ -432,16 +432,16 @@ func (g *dataGen) RowsWithUniqueIndex(number int) []Row {
 		row := g.RowWithUniqueIndex()
 
 		// Ensure unique email
-		_, ok := emailMap[row.Values[1].Value.(TextPointer).String()]
+		_, ok := emailMap[row.Values[1].AsTextPointer().String()]
 		for ok {
 			row = g.RowWithUniqueIndex()
-			_, ok = emailMap[row.Values[1].Value.(TextPointer).String()]
+			_, ok = emailMap[row.Values[1].AsTextPointer().String()]
 		}
 
 		row.Key = RowID(i)
 		rows = append(rows, row)
 
-		emailMap[row.Values[1].Value.(TextPointer).String()] = struct{}{}
+		emailMap[row.Values[1].AsTextPointer().String()] = struct{}{}
 	}
 	return rows
 }
@@ -467,9 +467,9 @@ var testOverflowColumns = []Column{
 
 func (g *dataGen) OverflowRow(textSize uint32) Row {
 	return NewRowWithValues(testOverflowColumns, []OptionalValue{
-		{Value: g.Int64(), Valid: true},
-		{Value: g.paddedEmail(), Valid: true},
-		{Value: g.textOfLength(textSize), Valid: true},
+		MakeInt8(g.Int64()),
+		MakeVarchar(g.paddedEmail()),
+		MakeText(g.textOfLength(textSize)),
 	})
 }
 
@@ -482,14 +482,14 @@ func (g *dataGen) OverflowRows(number int, sizes []uint32) []Row {
 	rows := make([]Row, 0, number)
 	for i := range number {
 		row := g.OverflowRow(sizes[i])
-		_, ok := idMap[row.Values[0].Value.(int64)]
+		_, ok := idMap[row.Values[0].AsInt8()]
 		for ok {
 			row = g.OverflowRow(sizes[i])
-			_, ok = idMap[row.Values[0].Value.(int64)]
+			_, ok = idMap[row.Values[0].AsInt8()]
 		}
 		row.Key = RowID(i)
 		rows = append(rows, row)
-		idMap[row.Values[0].Value.(int64)] = struct{}{}
+		idMap[row.Values[0].AsInt8()] = struct{}{}
 	}
 	return rows
 }
@@ -524,11 +524,11 @@ var testCompositeKeyColumns = []Column{
 
 func (g *dataGen) RowWithCompositeKey() Row {
 	return NewRowWithValues(testCompositeKeyColumns, []OptionalValue{
-		{Value: g.Int64(), Valid: true},
-		{Value: NewTextPointer([]byte(g.FirstName())), Valid: true},
-		{Value: NewTextPointer([]byte(g.LastName())), Valid: true},
-		{Value: NewTextPointer([]byte(g.Email())), Valid: true},
-		{Value: MustParseTimestampMicros(g.PastDate().Format(timestampFormat)), Valid: true},
+		MakeInt8(g.Int64()),
+		MakeVarchar(NewTextPointer([]byte(g.FirstName()))),
+		MakeVarchar(NewTextPointer([]byte(g.LastName()))),
+		MakeVarchar(NewTextPointer([]byte(g.Email()))),
+		MakeTimestamp(MustParseTimestampMicros(g.PastDate().Format(timestampFormat))),
 	})
 }
 
@@ -541,11 +541,11 @@ func (g *dataGen) RowsWithCompositeKey(number int) []Row {
 		row := g.RowWithCompositeKey()
 
 		// Ensure unique composite key
-		uniqueHash := fmt.Sprintf("%s|%s", row.Values[1].Value.(TextPointer).String(), row.Values[2].Value.(TextPointer).String())
+		uniqueHash := fmt.Sprintf("%s|%s", row.Values[1].AsTextPointer().String(), row.Values[2].AsTextPointer().String())
 		_, ok := uniqueMap[uniqueHash]
 		for ok {
 			row = g.RowWithCompositeKey()
-			uniqueHash = fmt.Sprintf("%s|%s", row.Values[1].Value.(TextPointer).String(), row.Values[2].Value.(TextPointer).String())
+			uniqueHash = fmt.Sprintf("%s|%s", row.Values[1].AsTextPointer().String(), row.Values[2].AsTextPointer().String())
 			_, ok = uniqueMap[uniqueHash]
 		}
 
@@ -875,7 +875,7 @@ func checkRows(ctx context.Context, t *testing.T, table *Table, expectedRows []R
 	for _, r := range expectedRows {
 		id, ok := r.GetValue("id")
 		require.True(t, ok)
-		expectedIDMap[id.Value.(int64)] = struct{}{}
+		expectedIDMap[id.AsInt8()] = struct{}{}
 	}
 
 	var actual []Row
@@ -883,7 +883,7 @@ func checkRows(ctx context.Context, t *testing.T, table *Table, expectedRows []R
 		row := selectResult.Rows.Row()
 		actual = append(actual, row)
 		if len(expectedIDMap) > 0 {
-			_, ok := expectedIDMap[row.Values[0].Value.(int64)]
+			_, ok := expectedIDMap[row.Values[0].AsInt8()]
 			assert.True(t, ok)
 		}
 	}
@@ -894,10 +894,10 @@ func checkRows(ctx context.Context, t *testing.T, table *Table, expectedRows []R
 		assert.Equal(t, expectedRows[i].Key, actual[i].Key, "row key %d does not match expected %d", i)
 		assert.Equal(t, expectedRows[i].Columns, actual[i].Columns, "row columns %d does not match expected", i)
 		for j, val := range expectedRows[i].Values {
-			tp, ok := val.Value.(TextPointer)
-			if ok {
-				assert.Equal(t, int(tp.Length), int(actual[i].Values[j].Value.(TextPointer).Length), "row %d text pointer length %d does not match expected", i, j)
-				assert.Equal(t, tp.Data, actual[i].Values[j].Value.(TextPointer).Data, "row %d text pointer data %d does not match expected", i, j)
+			if val.IsTextLike() {
+				tp := val.AsTextPointer()
+				assert.Equal(t, int(tp.Length), int(actual[i].Values[j].AsTextPointer().Length), "row %d text pointer length %d does not match expected", i, j)
+				assert.Equal(t, tp.Data, actual[i].Values[j].AsTextPointer().Data, "row %d text pointer data %d does not match expected", i, j)
 			} else {
 				assert.Equal(t, actual[i].Values[j], expectedRows[i].Values[j], "row %d value %d does not match expected", i, j)
 			}

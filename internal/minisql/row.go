@@ -9,13 +9,6 @@ import (
 	"github.com/RichardKnop/minisql/pkg/bitwise"
 )
 
-// OptionalValue wraps a column value together with a validity flag.
-// Valid == false means the value is SQL NULL; Value is ignored in that case.
-type OptionalValue struct {
-	Value any
-	Valid bool
-}
-
 // RowID is the internal primary key used to locate a row in the B+ tree leaf pages.
 // It is separate from any user-defined primary key column.
 type RowID uint64
@@ -50,7 +43,7 @@ func (r Row) Size() uint64 {
 	size := uint64(0)
 	for i, col := range r.Columns {
 		// Skip NULL values - they take no space (tracked in bitmask)
-		if !r.Values[i].Valid {
+		if r.Values[i].IsNull() {
 			continue
 		}
 
@@ -60,27 +53,12 @@ func (r Row) Size() uint64 {
 		}
 		size += varcharLengthPrefixSize
 
-		s, ok := r.Values[i].Value.(string)
-		if ok {
-			if uint64(len(s)) <= MaxInlineVarchar {
-				size += uint64(len(s))
-			} else {
-				size += 4 // first overflow page index
-			}
-			continue
+		tp := r.Values[i].AsTextPointer()
+		if uint64(len(tp.Data)) <= MaxInlineVarchar {
+			size += uint64(len(tp.Data))
+		} else {
+			size += 4 // first overflow page index
 		}
-
-		tp, ok := r.Values[i].Value.(TextPointer)
-		if ok {
-			if uint64(len(tp.Data)) <= MaxInlineVarchar {
-				size += uint64(len(tp.Data))
-			} else {
-				size += 4 // first overflow page index
-			}
-			continue
-		}
-
-		panic(fmt.Sprintf("cannot calculate size for non-string/textpointer value for text column: %v, type: %T", r.Values[i].Value, r.Values[i].Value))
 	}
 	return size
 }
@@ -226,29 +204,21 @@ func (r Row) SetValue(name string, value OptionalValue) (Row, bool) {
 }
 
 func compareValue(kind ColumnKind, v1, v2 OptionalValue) bool {
-	if !v1.Valid && !v2.Valid {
+	if v1.IsNull() && v2.IsNull() {
 		return true
 	}
-	if v1.Valid != v2.Valid {
+	if v1.IsNull() != v2.IsNull() {
 		return false
 	}
 	if kind.IsUUID() {
-		u1, ok1 := v1.Value.(UUIDValue)
-		u2, ok2 := v2.Value.(UUIDValue)
-		return ok1 && ok2 && u1 == u2
+		u1 := v1.AsUUID()
+		u2 := v2.AsUUID()
+		return u1 == u2
 	}
 	if !kind.IsText() {
-		return v1.Value == v2.Value
+		return v1.num == v2.num && v1.hi == v2.hi
 	}
-	tp1, ok := v1.Value.(TextPointer)
-	if !ok {
-		return false
-	}
-	tp2, ok := v2.Value.(TextPointer)
-	if !ok {
-		return false
-	}
-	return tp1.IsEqual(tp2)
+	return v1.AsTextPointer().IsEqual(v2.AsTextPointer())
 }
 
 // Clone returns a deep copy of the row, with a fresh Values slice so mutations
@@ -272,94 +242,72 @@ func (r Row) Marshal() ([]byte, error) {
 
 	offset := uint64(0)
 	for i, col := range r.Columns {
-		if !r.Values[i].Valid {
+		if r.Values[i].IsNull() {
 			continue // NULL values take no space (tracked in bitmask)
 		}
 		switch col.Kind {
 		case Boolean:
-			value, ok := r.Values[i].Value.(bool)
-			if !ok {
-				return nil, errors.New("could not cast value to bool")
-			}
+			value := r.Values[i].AsBool()
 			marshalBool(buf, value, offset)
 			offset += 1
 		case Int4:
-			value, ok := r.Values[i].Value.(int32)
-			if !ok {
-				switch n := r.Values[i].Value.(type) {
-				case int64:
-					if n < math.MinInt32 || n > math.MaxInt32 {
-						return nil, fmt.Errorf("value %d overflows INT4 for column %s", n, col.Name)
-					}
-					value = int32(n)
-				case float64:
-					if n < math.MinInt32 || n > math.MaxInt32 || math.Trunc(n) != n {
-						return nil, fmt.Errorf("value %g cannot be stored as INT4 for column %s", n, col.Name)
-					}
-					value = int32(n)
-				default:
-					return nil, fmt.Errorf("could not cast value for column %s to either int64 or int32", col.Name)
-				}
-			}
+			value := r.Values[i].AsInt4()
 			marshalInt32(buf, value, offset)
 			offset += 4
 		case Int8:
 			var value int64
-			switch n := r.Values[i].Value.(type) {
-			case int64:
-				value = n
-			case float64:
-				if math.Trunc(n) != n || n < math.MinInt64 || n > math.MaxInt64 {
-					return nil, fmt.Errorf("value %g cannot be stored as INT8 for column %s", n, col.Name)
-				}
-				value = int64(n)
-			case int32:
-				value = int64(n)
+			switch r.Values[i].Kind() {
+			case ovalInt4:
+				value = int64(r.Values[i].AsInt4())
+			case ovalDouble:
+				value = int64(math.Trunc(r.Values[i].AsDouble()))
+			case ovalReal:
+				value = int64(math.Trunc(float64(r.Values[i].AsReal())))
 			default:
-				return nil, fmt.Errorf("could not cast value for column %s to int64", col.Name)
+				value = r.Values[i].AsInt8()
 			}
 			marshalInt64(buf, value, offset)
 			offset += 8
 		case Real:
-			value, ok := r.Values[i].Value.(float32)
-			if !ok {
-				_, ok = r.Values[i].Value.(float64)
-				if !ok {
-					return nil, fmt.Errorf("could not cast value for column %s to either float64 or float32", col.Name)
-				}
-				value = float32(r.Values[i].Value.(float64))
+			var value float32
+			switch r.Values[i].Kind() {
+			case ovalDouble:
+				value = float32(r.Values[i].AsDouble())
+			case ovalInt4:
+				value = float32(r.Values[i].AsInt4())
+			case ovalInt8:
+				value = float32(r.Values[i].AsInt8())
+			default:
+				value = r.Values[i].AsReal()
 			}
 			marshalFloat32(buf, value, offset)
 			offset += 4
 		case Double:
-			value, ok := r.Values[i].Value.(float64)
-			if !ok {
-				return nil, fmt.Errorf("could not cast value for column %s to float64", col.Name)
+			var value float64
+			switch r.Values[i].Kind() {
+			case ovalReal:
+				value = float64(r.Values[i].AsReal())
+			case ovalInt4:
+				value = float64(r.Values[i].AsInt4())
+			case ovalInt8:
+				value = float64(r.Values[i].AsInt8())
+			default:
+				value = r.Values[i].AsDouble()
 			}
 			marshalFloat64(buf, value, offset)
 			offset += 8
 		case Varchar, Text, JSON:
-			textPointer, ok := r.Values[i].Value.(TextPointer)
-			if !ok {
-				return nil, fmt.Errorf("could not cast value for column %s to text pointer", col.Name)
-			}
-
+			textPointer := r.Values[i].AsTextPointer()
 			if err := textPointer.Marshal(buf, offset); err != nil {
 				return nil, err
 			}
 			offset += textPointer.Size()
 		case Timestamp:
-			value, ok := r.Values[i].Value.(TimestampMicros)
-			if !ok {
-				return nil, fmt.Errorf("could not cast value for column %s to timestamp", col.Name)
-			}
+			value := r.Values[i].AsTimestamp()
 			marshalInt64(buf, int64(value), offset)
 			offset += 8
 		case UUID:
-			value, ok := r.Values[i].Value.(UUIDValue)
-			if !ok {
-				return nil, fmt.Errorf("could not cast value for column %s to UUID", col.Name)
-			}
+			value := r.Values[i].AsUUID()
 			copy(buf[offset:offset+16], value[:])
 			offset += 16
 		}
@@ -395,7 +343,7 @@ func (r Row) UnmarshalWithMask(cell Cell, selectedMask []bool) (Row, error) {
 
 		// If column not selected, skip it but track offset.
 		if !selectedMask[i] {
-			r.Values[i] = OptionalValue{Valid: false}
+			r.Values[i] = MakeNull()
 			if !isNull {
 				// Skip over the data without unmarshaling
 				offset += int(r.getColumnSize(col, cell.Value, offset))
@@ -404,29 +352,29 @@ func (r Row) UnmarshalWithMask(cell Cell, selectedMask []bool) (Row, error) {
 		}
 
 		if isNull {
-			r.Values[i] = OptionalValue{Valid: false}
+			r.Values[i] = MakeNull()
 			continue
 		}
 		switch col.Kind {
 		case Boolean:
 			value := unmarshalBool(cell.Value, uint64(offset))
-			r.Values[i] = OptionalValue{Value: value, Valid: true}
+			r.Values[i] = MakeBool(value)
 			offset += 1
 		case Int4:
 			value := unmarshalInt32(cell.Value, uint64(offset))
-			r.Values[i] = OptionalValue{Value: int32(value), Valid: true}
+			r.Values[i] = MakeInt4(value)
 			offset += 4
 		case Int8:
 			value := unmarshalInt64(cell.Value, uint64(offset))
-			r.Values[i] = OptionalValue{Value: int64(value), Valid: true}
+			r.Values[i] = MakeInt8(int64(value))
 			offset += 8
 		case Real:
 			value := unmarshalFloat32(cell.Value, uint64(offset))
-			r.Values[i] = OptionalValue{Value: value, Valid: true}
+			r.Values[i] = MakeReal(value)
 			offset += 4
 		case Double:
 			value := unmarshalFloat64(cell.Value, uint64(offset))
-			r.Values[i] = OptionalValue{Value: value, Valid: true}
+			r.Values[i] = MakeDouble(value)
 			offset += 8
 		case Varchar, Text, JSON:
 			textPointer := TextPointer{}
@@ -437,15 +385,15 @@ func (r Row) UnmarshalWithMask(cell Cell, selectedMask []bool) (Row, error) {
 				textPointer.Data = bytes.Trim(textPointer.Data, "\x00")
 			}
 			offset += int(textPointer.Size())
-			r.Values[i] = OptionalValue{Value: textPointer, Valid: true}
+			r.Values[i] = MakeTextByColumnKind(col.Kind, textPointer)
 		case Timestamp:
 			value := unmarshalInt64(cell.Value, uint64(offset))
-			r.Values[i] = OptionalValue{Value: TimestampMicros(value), Valid: true}
+			r.Values[i] = MakeTimestamp(TimestampMicros(value))
 			offset += 8
 		case UUID:
 			var value UUIDValue
 			copy(value[:], cell.Value[offset:offset+16])
-			r.Values[i] = OptionalValue{Value: value, Valid: true}
+			r.Values[i] = MakeUUID(value)
 			offset += 16
 		}
 	}
@@ -719,9 +667,9 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 	case OperandNull:
 		switch operator {
 		case Eq:
-			return !fieldValue.Valid, nil
+			return fieldValue.IsNull(), nil
 		case Ne:
-			return fieldValue.Valid, nil
+			return fieldValue.IsValid(), nil
 		default:
 			return false, errors.New("only '=' and '!=' operators supported when comparing against NULL")
 		}
@@ -732,43 +680,43 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 			case Boolean:
 				return false, errors.New("IN / NOT IN operator not supported for boolean columns")
 			case Int4:
-				foundInList, err := isInListInt4(fieldValue.Value, valueOperand.Value)
+				foundInList, err := isInListInt4(fieldValue.AsInt4(), valueOperand.Value)
 				if operator == In {
 					return foundInList, err
 				}
 				return !foundInList, err
 			case Int8:
-				foundInList, err := isInListInt8(fieldValue.Value, valueOperand.Value)
+				foundInList, err := isInListInt8(fieldValue.AsInt8(), valueOperand.Value)
 				if operator == In {
 					return foundInList, err
 				}
 				return !foundInList, err
 			case Real:
-				foundInList, err := isInListReal(fieldValue.Value, valueOperand.Value)
+				foundInList, err := isInListReal(fieldValue.AsReal(), valueOperand.Value)
 				if operator == In {
 					return foundInList, err
 				}
 				return !foundInList, err
 			case Double:
-				foundInList, err := isInListDouble(fieldValue.Value, valueOperand.Value)
+				foundInList, err := isInListDouble(fieldValue.AsDouble(), valueOperand.Value)
 				if operator == In {
 					return foundInList, err
 				}
 				return !foundInList, err
 			case Varchar, Text:
-				foundInList, err := isInListText(fieldValue.Value, valueOperand.Value)
+				foundInList, err := isInListText(fieldValue.AsTextPointer(), valueOperand.Value)
 				if operator == In {
 					return foundInList, err
 				}
 				return !foundInList, err
 			case Timestamp:
-				foundInList, err := isInListTimestamp(fieldValue.Value, valueOperand.Value)
+				foundInList, err := isInListTimestamp(fieldValue.AsTimestamp(), valueOperand.Value)
 				if operator == In {
 					return foundInList, err
 				}
 				return !foundInList, err
 			case UUID:
-				foundInList, err := isInListUUID(fieldValue.Value, valueOperand.Value)
+				foundInList, err := isInListUUID(fieldValue.AsUUID(), valueOperand.Value)
 				if operator == In {
 					return foundInList, err
 				}
@@ -790,17 +738,17 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 			case Boolean:
 				return false, errors.New("BETWEEN operator not supported for boolean columns")
 			case Int4:
-				inRange, err = isBetweenInt4(int64(fieldValue.Value.(int32)), list[0], list[1])
+				inRange, err = isBetweenInt4(int64(fieldValue.AsInt4()), list[0], list[1])
 			case Int8:
-				inRange, err = isBetweenInt8(fieldValue.Value, list[0], list[1])
+				inRange, err = isBetweenInt8(fieldValue.AsInt8(), list[0], list[1])
 			case Real:
-				inRange, err = isBetweenReal(float64(fieldValue.Value.(float32)), list[0], list[1])
+				inRange, err = isBetweenReal(float64(fieldValue.AsReal()), list[0], list[1])
 			case Double:
-				inRange, err = isBetweenDouble(fieldValue.Value, list[0], list[1])
+				inRange, err = isBetweenDouble(fieldValue.AsDouble(), list[0], list[1])
 			case Varchar, Text:
-				inRange, err = isBetweenText(fieldValue.Value, list[0], list[1])
+				inRange, err = isBetweenText(fieldValue.AsTextPointer(), list[0], list[1])
 			case Timestamp:
-				inRange, err = isBetweenTimestamp(fieldValue.Value, list[0], list[1])
+				inRange, err = isBetweenTimestamp(fieldValue.AsTimestamp(), list[0], list[1])
 			default:
 				return false, fmt.Errorf("unknown column kind '%s'", col.Kind)
 			}
@@ -817,7 +765,7 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 		}
 	}
 
-	if !fieldValue.Valid {
+	if fieldValue.IsNull() {
 		return false, nil // NULL cannot be compared to non-NULL value
 	}
 
@@ -827,23 +775,23 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 
 	switch col.Kind {
 	case Boolean:
-		return compareBoolean(fieldValue.Value.(bool), valueOperand.Value.(bool), operator)
+		return compareBoolean(fieldValue.AsBool(), valueOperand.Value.(bool), operator)
 	case Int4:
 		// Int values from parser always come back as int64, int4 row data
 		// will come back as int32 and int8 as int64
-		return compareInt4(int64(fieldValue.Value.(int32)), valueOperand.Value.(int64), operator)
+		return compareInt4(int64(fieldValue.AsInt4()), valueOperand.Value.(int64), operator)
 	case Int8:
-		return compareInt8(fieldValue.Value.(int64), valueOperand.Value.(int64), operator)
+		return compareInt8(fieldValue.AsInt8(), valueOperand.Value.(int64), operator)
 	case Real:
-		return compareReal(fieldValue.Value.(float32), float32(valueOperand.Value.(float64)), operator)
+		return compareReal(fieldValue.AsReal(), float32(valueOperand.Value.(float64)), operator)
 	case Double:
-		return compareDouble(fieldValue.Value.(float64), valueOperand.Value.(float64), operator)
+		return compareDouble(fieldValue.AsDouble(), valueOperand.Value.(float64), operator)
 	case Varchar, Text:
-		return compareText(fieldValue.Value.(TextPointer), valueOperand.Value.(TextPointer), operator)
+		return compareText(fieldValue.AsTextPointer(), valueOperand.Value.(TextPointer), operator)
 	case Timestamp:
-		return compareTimestamp(fieldValue.Value.(TimestampMicros), valueOperand.Value.(TimestampMicros), operator)
+		return compareTimestamp(fieldValue.AsTimestamp(), valueOperand.Value.(TimestampMicros), operator)
 	case UUID:
-		u1, err := toUUIDValue(fieldValue.Value)
+		u1, err := toUUIDValue(fieldValue.AsAny())
 		if err != nil {
 			return false, err
 		}
@@ -893,9 +841,9 @@ func (r Row) compareFieldValueWithColumnIndexes(fieldOperand, valueOperand Opera
 	case OperandNull:
 		switch operator {
 		case Eq:
-			return !fieldValue.Valid, nil
+			return fieldValue.IsNull(), nil
 		case Ne:
-			return fieldValue.Valid, nil
+			return fieldValue.IsValid(), nil
 		default:
 			return false, errors.New("only '=' and '!=' operators supported when comparing against NULL")
 		}
@@ -906,43 +854,43 @@ func (r Row) compareFieldValueWithColumnIndexes(fieldOperand, valueOperand Opera
 			case Boolean:
 				return false, errors.New("IN / NOT IN operator not supported for boolean columns")
 			case Int4:
-				foundInList, err := isInListInt4(fieldValue.Value, valueOperand.Value)
+				foundInList, err := isInListInt4(fieldValue.AsInt4(), valueOperand.Value)
 				if operator == In {
 					return foundInList, err
 				}
 				return !foundInList, err
 			case Int8:
-				foundInList, err := isInListInt8(fieldValue.Value, valueOperand.Value)
+				foundInList, err := isInListInt8(fieldValue.AsInt8(), valueOperand.Value)
 				if operator == In {
 					return foundInList, err
 				}
 				return !foundInList, err
 			case Real:
-				foundInList, err := isInListReal(fieldValue.Value, valueOperand.Value)
+				foundInList, err := isInListReal(fieldValue.AsReal(), valueOperand.Value)
 				if operator == In {
 					return foundInList, err
 				}
 				return !foundInList, err
 			case Double:
-				foundInList, err := isInListDouble(fieldValue.Value, valueOperand.Value)
+				foundInList, err := isInListDouble(fieldValue.AsDouble(), valueOperand.Value)
 				if operator == In {
 					return foundInList, err
 				}
 				return !foundInList, err
 			case Varchar, Text:
-				foundInList, err := isInListText(fieldValue.Value, valueOperand.Value)
+				foundInList, err := isInListText(fieldValue.AsTextPointer(), valueOperand.Value)
 				if operator == In {
 					return foundInList, err
 				}
 				return !foundInList, err
 			case Timestamp:
-				foundInList, err := isInListTimestamp(fieldValue.Value, valueOperand.Value)
+				foundInList, err := isInListTimestamp(fieldValue.AsTimestamp(), valueOperand.Value)
 				if operator == In {
 					return foundInList, err
 				}
 				return !foundInList, err
 			case UUID:
-				foundInList, err := isInListUUID(fieldValue.Value, valueOperand.Value)
+				foundInList, err := isInListUUID(fieldValue.AsUUID(), valueOperand.Value)
 				if operator == In {
 					return foundInList, err
 				}
@@ -964,17 +912,17 @@ func (r Row) compareFieldValueWithColumnIndexes(fieldOperand, valueOperand Opera
 			case Boolean:
 				return false, errors.New("BETWEEN operator not supported for boolean columns")
 			case Int4:
-				inRange, err = isBetweenInt4(int64(fieldValue.Value.(int32)), list[0], list[1])
+				inRange, err = isBetweenInt4(int64(fieldValue.AsInt4()), list[0], list[1])
 			case Int8:
-				inRange, err = isBetweenInt8(fieldValue.Value, list[0], list[1])
+				inRange, err = isBetweenInt8(fieldValue.AsInt8(), list[0], list[1])
 			case Real:
-				inRange, err = isBetweenReal(float64(fieldValue.Value.(float32)), list[0], list[1])
+				inRange, err = isBetweenReal(float64(fieldValue.AsReal()), list[0], list[1])
 			case Double:
-				inRange, err = isBetweenDouble(fieldValue.Value, list[0], list[1])
+				inRange, err = isBetweenDouble(fieldValue.AsDouble(), list[0], list[1])
 			case Varchar, Text:
-				inRange, err = isBetweenText(fieldValue.Value, list[0], list[1])
+				inRange, err = isBetweenText(fieldValue.AsTextPointer(), list[0], list[1])
 			case Timestamp:
-				inRange, err = isBetweenTimestamp(fieldValue.Value, list[0], list[1])
+				inRange, err = isBetweenTimestamp(fieldValue.AsTimestamp(), list[0], list[1])
 			default:
 				return false, fmt.Errorf("unknown column kind '%s'", col.Kind)
 			}
@@ -991,7 +939,7 @@ func (r Row) compareFieldValueWithColumnIndexes(fieldOperand, valueOperand Opera
 		}
 	}
 
-	if !fieldValue.Valid {
+	if fieldValue.IsNull() {
 		return false, nil // NULL cannot be compared to non-NULL value
 	}
 
@@ -1001,21 +949,21 @@ func (r Row) compareFieldValueWithColumnIndexes(fieldOperand, valueOperand Opera
 
 	switch col.Kind {
 	case Boolean:
-		return compareBoolean(fieldValue.Value.(bool), valueOperand.Value.(bool), operator)
+		return compareBoolean(fieldValue.AsBool(), valueOperand.Value.(bool), operator)
 	case Int4:
-		return compareInt4(int64(fieldValue.Value.(int32)), valueOperand.Value.(int64), operator)
+		return compareInt4(int64(fieldValue.AsInt4()), valueOperand.Value.(int64), operator)
 	case Int8:
-		return compareInt8(fieldValue.Value.(int64), valueOperand.Value.(int64), operator)
+		return compareInt8(fieldValue.AsInt8(), valueOperand.Value.(int64), operator)
 	case Real:
-		return compareReal(fieldValue.Value.(float32), float32(valueOperand.Value.(float64)), operator)
+		return compareReal(fieldValue.AsReal(), float32(valueOperand.Value.(float64)), operator)
 	case Double:
-		return compareDouble(fieldValue.Value.(float64), valueOperand.Value.(float64), operator)
+		return compareDouble(fieldValue.AsDouble(), valueOperand.Value.(float64), operator)
 	case Varchar, Text:
-		return compareText(fieldValue.Value.(TextPointer), valueOperand.Value.(TextPointer), operator)
+		return compareText(fieldValue.AsTextPointer(), valueOperand.Value.(TextPointer), operator)
 	case Timestamp:
-		return compareTimestamp(fieldValue.Value.(TimestampMicros), valueOperand.Value.(TimestampMicros), operator)
+		return compareTimestamp(fieldValue.AsTimestamp(), valueOperand.Value.(TimestampMicros), operator)
 	case UUID:
-		u1, err := toUUIDValue(fieldValue.Value)
+		u1, err := toUUIDValue(fieldValue.AsAny())
 		if err != nil {
 			return false, err
 		}
@@ -1068,19 +1016,19 @@ func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, err
 
 	switch aColumn1.Kind {
 	case Boolean:
-		return compareBoolean(value1.Value.(bool), value2.Value.(bool), operator)
+		return compareBoolean(value1.AsBool(), value2.AsBool(), operator)
 	case Int4:
-		return compareInt4(int64(value1.Value.(int32)), int64(value2.Value.(int32)), operator)
+		return compareInt4(int64(value1.AsInt4()), int64(value2.AsInt4()), operator)
 	case Int8:
-		return compareInt8(value1.Value.(int64), value2.Value.(int64), operator)
+		return compareInt8(value1.AsInt8(), value2.AsInt8(), operator)
 	case Real:
-		return compareReal(value1.Value.(float32), value2.Value.(float32), operator)
+		return compareReal(value1.AsReal(), value2.AsReal(), operator)
 	case Double:
-		return compareDouble(value1.Value.(float64), value2.Value.(float64), operator)
+		return compareDouble(value1.AsDouble(), value2.AsDouble(), operator)
 	case Varchar, Text:
-		return compareText(value1.Value.(TextPointer), value2.Value.(TextPointer), operator)
+		return compareText(value1.AsTextPointer(), value2.AsTextPointer(), operator)
 	case Timestamp:
-		return compareTimestamp(value1.Value.(TimestampMicros), value2.Value.(TimestampMicros), operator)
+		return compareTimestamp(value1.AsTimestamp(), value2.AsTimestamp(), operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", aColumn1.Kind)
 	}
@@ -1148,19 +1096,19 @@ func (r Row) compareFieldsWithColumnIndexes(field1, field2 Operand, operator Ope
 
 	switch col1.Kind {
 	case Boolean:
-		return compareBoolean(value1.Value.(bool), value2.Value.(bool), operator)
+		return compareBoolean(value1.AsBool(), value2.AsBool(), operator)
 	case Int4:
-		return compareInt4(int64(value1.Value.(int32)), int64(value2.Value.(int32)), operator)
+		return compareInt4(int64(value1.AsInt4()), int64(value2.AsInt4()), operator)
 	case Int8:
-		return compareInt8(value1.Value.(int64), value2.Value.(int64), operator)
+		return compareInt8(value1.AsInt8(), value2.AsInt8(), operator)
 	case Real:
-		return compareReal(value1.Value.(float32), value2.Value.(float32), operator)
+		return compareReal(value1.AsReal(), value2.AsReal(), operator)
 	case Double:
-		return compareDouble(value1.Value.(float64), value2.Value.(float64), operator)
+		return compareDouble(value1.AsDouble(), value2.AsDouble(), operator)
 	case Varchar, Text:
-		return compareText(value1.Value.(TextPointer), value2.Value.(TextPointer), operator)
+		return compareText(value1.AsTextPointer(), value2.AsTextPointer(), operator)
 	case Timestamp:
-		return compareTimestamp(value1.Value.(TimestampMicros), value2.Value.(TimestampMicros), operator)
+		return compareTimestamp(value1.AsTimestamp(), value2.AsTimestamp(), operator)
 	default:
 		return false, fmt.Errorf("unknown column kind '%s'", col1.Kind)
 	}
@@ -1170,7 +1118,7 @@ func (r Row) compareFieldsWithColumnIndexes(field1, field2 Operand, operator Ope
 func (r Row) NullBitmask() uint64 {
 	var bitmask uint64 = 0
 	for i, val := range r.Values {
-		if !val.Valid {
+		if val.IsNull() {
 			bitmask = bitwise.Set(bitmask, int(i))
 		}
 	}

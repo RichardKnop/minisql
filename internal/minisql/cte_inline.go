@@ -14,7 +14,7 @@ func cteBodyIsInlineEligible(body Statement) bool {
 	if body.Distinct {
 		return false
 	}
-	if body.Limit.Valid || body.Offset.Valid {
+	if body.Limit.IsValid() || body.Offset.IsValid() {
 		return false
 	}
 	if len(body.Unions) > 0 {

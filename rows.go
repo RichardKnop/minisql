@@ -56,19 +56,22 @@ func (r Rows) Next(dest []driver.Value) error {
 	}
 
 	for i := range dest {
-		if !aRow.Values[i].Valid {
+		val := aRow.Values[i]
+		if !val.IsValid() {
 			dest[i] = nil
 			continue
 		}
-		switch v := aRow.Values[i].Value.(type) {
-		case minisql.TextPointer:
-			dest[i] = string(v.Data)
+		if val.IsTextLike() {
+			dest[i] = string(val.AsTextPointer().Data)
+			continue
+		}
+		switch v := val.AsAny().(type) {
 		case minisql.TimestampMicros:
 			dest[i] = minisql.FromMicroseconds(int64(v)).GoTime()
 		case minisql.UUIDValue:
 			dest[i] = v.String()
 		default:
-			dest[i] = aRow.Values[i].Value
+			dest[i] = v
 		}
 	}
 

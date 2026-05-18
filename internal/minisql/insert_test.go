@@ -41,7 +41,7 @@ func TestTable_Insert(t *testing.T) {
 	})
 
 	t.Run("Insert row with NULL value", func(t *testing.T) {
-		rows[1].Values[1] = OptionalValue{Valid: false} // set second column to NULL
+		rows[1].Values[1] = MakeNull() // set second column to NULL
 		stmt := Statement{
 			Kind:    Insert,
 			Fields:  fieldsFromColumns(testColumns...),

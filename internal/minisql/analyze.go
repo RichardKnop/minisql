@@ -186,9 +186,9 @@ func (d *Database) analyzeTable(ctx context.Context, statsTable, table *Table) e
 		Fields:    statsTableFields,
 		Inserts: [][]OptionalValue{
 			{
-				{Value: NewTextPointer([]byte(table.Name)), Valid: true}, // tbl
-				{}, // idx (NULL for table stats)
-				{Value: NewTextPointer([]byte(stat)), Valid: true}, // stat
+				MakeVarchar(NewTextPointer([]byte(table.Name))), // tbl
+				MakeNull(), // idx (NULL for table stats)
+				MakeText(NewTextPointer([]byte(stat))), // stat
 			},
 		},
 	})
@@ -299,9 +299,9 @@ func (d *Database) analyzeIndex(ctx context.Context, statsTable *Table, tableNam
 		Fields:    statsTableFields,
 		Inserts: [][]OptionalValue{
 			{
-				{Value: NewTextPointer([]byte(tableName)), Valid: true},
-				{Value: NewTextPointer([]byte(indexName)), Valid: true},
-				{Value: NewTextPointer([]byte(stat.String())), Valid: true},
+				MakeVarchar(NewTextPointer([]byte(tableName))),
+				MakeVarchar(NewTextPointer([]byte(indexName))),
+				MakeText(NewTextPointer([]byte(stat.String()))),
 			},
 		},
 	})
@@ -386,11 +386,11 @@ func (d *Database) scanStatsTable(ctx context.Context, statsTable *Table, tableN
 
 func scanStats(row Row) Stats {
 	s := Stats{
-		TableName: row.Values[0].Value.(TextPointer).String(),
-		StatValue: row.Values[2].Value.(TextPointer).String(),
+		TableName: row.Values[0].AsTextPointer().String(),
+		StatValue: row.Values[2].AsTextPointer().String(),
 	}
-	if row.Values[1].Valid {
-		s.IndexName = row.Values[1].Value.(TextPointer).String()
+	if row.Values[1].IsValid() {
+		s.IndexName = row.Values[1].AsTextPointer().String()
 	}
 	return s
 }

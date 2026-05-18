@@ -18,8 +18,8 @@ func TestStatement_NumberPlaceholders(t *testing.T) {
 		Kind:      Update,
 		TableName: "a",
 		Updates: map[string]OptionalValue{
-			"b": {Value: NewTextPointer([]byte("foo")), Valid: true},
-			"c": {Value: Placeholder{}, Valid: true},
+			"b": MakeVarchar(NewTextPointer([]byte("foo"))),
+			"c": MakePlaceholder(),
 		},
 		Conditions: OneOrMore{
 			{
@@ -42,9 +42,9 @@ func TestStatement_BindArguments(t *testing.T) {
 			Fields:    []Field{{Name: "b"}, {Name: "c"}, {Name: "d"}},
 			Inserts: [][]OptionalValue{
 				{
-					{Value: NewTextPointer([]byte("foo")), Valid: true},
-					{Value: Placeholder{}, Valid: true},
-					{Value: Placeholder{}, Valid: true},
+					MakeVarchar(NewTextPointer([]byte("foo"))),
+					MakePlaceholder(),
+					MakePlaceholder(),
 				},
 			},
 		}
@@ -53,14 +53,14 @@ func TestStatement_BindArguments(t *testing.T) {
 		stmtWithArgs, err := stmt.BindArguments(int64(123), "bar")
 		require.NoError(t, err)
 
-		assert.Equal(t, NewTextPointer([]byte("foo")), stmtWithArgs.Inserts[0][0].Value)
-		assert.Equal(t, int64(123), stmtWithArgs.Inserts[0][1].Value)
-		assert.Equal(t, "bar", stmtWithArgs.Inserts[0][2].Value)
+		assert.Equal(t, NewTextPointer([]byte("foo")), stmtWithArgs.Inserts[0][0].AsAny())
+		assert.Equal(t, int64(123), stmtWithArgs.Inserts[0][1].AsAny())
+		assert.Equal(t, "bar", stmtWithArgs.Inserts[0][2].AsTextPointer().String())
 
 		// Ensure original statement is unchanged
-		assert.Equal(t, NewTextPointer([]byte("foo")), stmt.Inserts[0][0].Value)
-		assert.Equal(t, Placeholder{}, stmt.Inserts[0][1].Value)
-		assert.Equal(t, Placeholder{}, stmt.Inserts[0][2].Value)
+		assert.Equal(t, NewTextPointer([]byte("foo")), stmt.Inserts[0][0].AsAny())
+		assert.Equal(t, Placeholder{}, stmt.Inserts[0][1].AsAny())
+		assert.Equal(t, Placeholder{}, stmt.Inserts[0][2].AsAny())
 	})
 
 	t.Run("Bind SELECT with OperandList placeholders", func(t *testing.T) {
@@ -86,9 +86,9 @@ func TestStatement_BindArguments(t *testing.T) {
 			TableName: "a",
 			Fields:    []Field{{Name: "b"}, {Name: "c"}, {Name: "d"}},
 			Updates: map[string]OptionalValue{
-				"b": {Value: NewTextPointer([]byte("foo")), Valid: true},
-				"c": {Value: Placeholder{}, Valid: true},
-				"d": {Value: Placeholder{}, Valid: true},
+				"b": MakeVarchar(NewTextPointer([]byte("foo"))),
+				"c": MakePlaceholder(),
+				"d": MakePlaceholder(),
 			},
 			Conditions: OneOrMore{
 				{
@@ -102,14 +102,14 @@ func TestStatement_BindArguments(t *testing.T) {
 		stmtWithArgs, err := stmt.BindArguments(int64(123), nil, "bar")
 		require.NoError(t, err)
 
-		assert.Equal(t, int64(123), stmtWithArgs.Updates["c"].Value)
-		assert.Equal(t, OptionalValue{}, stmtWithArgs.Updates["d"])
+		assert.Equal(t, int64(123), stmtWithArgs.Updates["c"].AsAny())
+		assert.Equal(t, MakeNull(), stmtWithArgs.Updates["d"])
 		condition := stmtWithArgs.Conditions[0][0]
 		assert.Equal(t, "bar", condition.Operand2.Value)
 
 		// Ensure original statement is unchanged
-		assert.Equal(t, Placeholder{}, stmt.Updates["c"].Value)
-		assert.Equal(t, Placeholder{}, stmt.Updates["d"].Value)
+		assert.Equal(t, Placeholder{}, stmt.Updates["c"].AsAny())
+		assert.Equal(t, Placeholder{}, stmt.Updates["d"].AsAny())
 		originalCondition := stmt.Conditions[0][0]
 		assert.Equal(t, OperandPlaceholder, originalCondition.Operand2.Type)
 	})
@@ -138,10 +138,10 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 			},
 			Inserts: [][]OptionalValue{
 				{
-					{Value: "foo@example.com", Valid: true},
+					MakeVarchar(NewTextPointer([]byte("foo@example.com"))),
 				},
 				{
-					{Value: "bar@example.com", Valid: true},
+					MakeVarchar(NewTextPointer([]byte("bar@example.com"))),
 				},
 			},
 		}
@@ -154,15 +154,15 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 		assert.Equal(t, [][]OptionalValue{
 			{
 				{}, // id
-				{Value: "foo@example.com", Valid: true},
+				MakeVarchar(NewTextPointer([]byte("foo@example.com"))),
 				{},                          // age
-				{Value: false, Valid: true}, // verified has default value
+				MakeBool(false), // verified has default value
 			},
 			{
 				{}, // id
-				{Value: "bar@example.com", Valid: true},
+				MakeVarchar(NewTextPointer([]byte("bar@example.com"))),
 				{},                          // age
-				{Value: false, Valid: true}, // verified has default value
+				MakeBool(false), // verified has default value
 			},
 		}, stmt.Inserts)
 	})
@@ -183,7 +183,7 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 			},
 			Inserts: [][]OptionalValue{
 				{
-					{Value: Function{Name: "UNKNOWN_FUNCTION"}, Valid: true},
+					MakeFunction(Function{Name: "UNKNOWN_FUNCTION"}),
 				},
 			},
 		}
@@ -209,7 +209,7 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 			},
 			Inserts: [][]OptionalValue{
 				{
-					{Value: FunctionNow, Valid: true},
+					MakeFunction(FunctionNow),
 				},
 			},
 		}
@@ -221,10 +221,7 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 		assert.Equal(t, fieldsFromColumns(stmt.Columns...), stmt.Fields)
 		assert.Equal(t, [][]OptionalValue{
 			{
-				{
-					Value: TimestampMicros(now.TotalMicroseconds()),
-					Valid: true,
-				},
+				MakeTimestamp(TimestampMicros(now.TotalMicroseconds())),
 			},
 		}, stmt.Inserts)
 	})
@@ -245,7 +242,7 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 			},
 			Inserts: [][]OptionalValue{
 				{
-					{Value: FunctionNow, Valid: true},
+					MakeFunction(FunctionNow),
 				},
 			},
 		}
@@ -257,10 +254,7 @@ func TestStatement_Prepare_Insert(t *testing.T) {
 		assert.Equal(t, fieldsFromColumns(stmt.Columns...), stmt.Fields)
 		assert.Equal(t, [][]OptionalValue{
 			{
-				{
-					Value: TimestampMicros(now.TotalMicroseconds()),
-					Valid: true,
-				},
+				MakeTimestamp(TimestampMicros(now.TotalMicroseconds())),
 			},
 		}, stmt.Inserts)
 	})
@@ -292,7 +286,7 @@ func TestStatement_Prepare_Update(t *testing.T) {
 			},
 			Fields: []Field{{Name: "created"}},
 			Updates: map[string]OptionalValue{
-				"created": {Value: NewTextPointer([]byte("2025-12-20 03:13:27.674801")), Valid: true},
+				"created": MakeVarchar(NewTextPointer([]byte("2025-12-20 03:13:27.674801"))),
 			},
 		}
 
@@ -300,10 +294,7 @@ func TestStatement_Prepare_Update(t *testing.T) {
 		stmt, err = stmt.Prepare(now)
 		require.NoError(t, err)
 
-		assert.Equal(t, OptionalValue{
-			Value: TimestampMicros(now.TotalMicroseconds()),
-			Valid: true,
-		}, stmt.Updates["created"])
+		assert.Equal(t, MakeTimestamp(TimestampMicros(now.TotalMicroseconds())), stmt.Updates["created"])
 	})
 
 	t.Run("Unknown functions in UPDATE statements cause error", func(t *testing.T) {
@@ -319,7 +310,7 @@ func TestStatement_Prepare_Update(t *testing.T) {
 			},
 			Fields: []Field{{Name: "created"}},
 			Updates: map[string]OptionalValue{
-				"created": {Value: Function{Name: "UNKNOWN_FUNCTION"}, Valid: true},
+				"created": MakeFunction(Function{Name: "UNKNOWN_FUNCTION"}),
 			},
 		}
 
@@ -341,7 +332,7 @@ func TestStatement_Prepare_Update(t *testing.T) {
 			},
 			Fields: []Field{{Name: "created"}},
 			Updates: map[string]OptionalValue{
-				"created": {Value: FunctionNow, Valid: true},
+				"created": MakeFunction(FunctionNow),
 			},
 		}
 
@@ -349,10 +340,7 @@ func TestStatement_Prepare_Update(t *testing.T) {
 		stmt, err = stmt.Prepare(now)
 		require.NoError(t, err)
 
-		assert.Equal(t, OptionalValue{
-			Value: TimestampMicros(now.TotalMicroseconds()),
-			Valid: true,
-		}, stmt.Updates["created"])
+		assert.Equal(t, MakeTimestamp(TimestampMicros(now.TotalMicroseconds())), stmt.Updates["created"])
 	})
 }
 
@@ -370,7 +358,7 @@ func TestStatement_Prepare_CreateTable(t *testing.T) {
 				Kind:         Timestamp,
 				Size:         8,
 				Name:         "created",
-				DefaultValue: OptionalValue{Value: NewTextPointer([]byte("0001-01-01 00:00:00")), Valid: true},
+				DefaultValue: MakeVarchar(NewTextPointer([]byte("0001-01-01 00:00:00"))),
 			},
 		}
 		stmt = Statement{
@@ -380,16 +368,14 @@ func TestStatement_Prepare_CreateTable(t *testing.T) {
 		}
 	)
 
-	_, ok := stmt.Columns[1].DefaultValue.Value.(TimestampMicros)
-	assert.False(t, ok)
+	assert.False(t, stmt.Columns[1].DefaultValue.IsValid() && stmt.Columns[1].DefaultValue.Kind() == ovalTimestamp)
 
 	var err error
 	stmt, err = stmt.Prepare(Time{})
 	require.NoError(t, err)
 
-	_, ok = stmt.Columns[1].DefaultValue.Value.(TimestampMicros)
-	assert.True(t, ok, "expected default value for 'created' column to be TimestampMicros")
-	assert.Equal(t, MustParseTimestampMicros("0001-01-01 00:00:00"), stmt.Columns[1].DefaultValue.Value)
+	assert.True(t, stmt.Columns[1].DefaultValue.IsValid(), "expected default value for 'created' column to be TimestampMicros")
+	assert.Equal(t, MustParseTimestampMicros("0001-01-01 00:00:00"), stmt.Columns[1].DefaultValue.AsTimestamp())
 }
 
 func TestStatement_Validate(t *testing.T) {
@@ -441,13 +427,13 @@ func TestStatement_Validate(t *testing.T) {
 				Kind:         Varchar,
 				Size:         MaxInlineVarchar,
 				Name:         "status",
-				DefaultValue: OptionalValue{Value: "pending", Valid: true},
+				DefaultValue: MakeVarchar(NewTextPointer([]byte("pending"))),
 			},
 			{
 				Kind:         Timestamp,
 				Size:         8,
 				Name:         "created",
-				DefaultValue: OptionalValue{Value: "0001-01-01 00:00:00", Valid: true},
+				DefaultValue: MakeVarchar(NewTextPointer([]byte("0001-01-01 00:00:00"))),
 			},
 		}
 		aTableWithDefaultValue = NewTable(zap.NewNop(), nil, nil, testTableName, defaultValueColumns, 0, nil, WithPrimaryKey(
@@ -699,10 +685,10 @@ func TestStatement_Validate(t *testing.T) {
 			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
-					{Value: int32(1), Valid: true},
-					{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
-					{Value: int32(25), Valid: true},
-					{Value: true, Valid: true},
+					MakeInt4(int32(1)),
+					MakeVarchar(NewTextPointer([]byte("test@example.com"))),
+					MakeInt4(int32(25)),
+					MakeBool(true),
 				},
 			},
 		}
@@ -720,7 +706,7 @@ func TestStatement_Validate(t *testing.T) {
 			Fields:    []Field{{Name: "id"}},
 			Inserts: [][]OptionalValue{
 				{
-					{Value: int32(1), Valid: true},
+					MakeInt4(int32(1)),
 				},
 			},
 		}
@@ -738,7 +724,7 @@ func TestStatement_Validate(t *testing.T) {
 			Fields:    []Field{{Name: "id"}},
 			Inserts: [][]OptionalValue{
 				{
-					{Value: int64(1), Valid: true},
+					MakeInt8(int64(1)),
 				},
 			},
 		}
@@ -755,8 +741,8 @@ func TestStatement_Validate(t *testing.T) {
 			Fields:    []Field{{Name: "id"}, {Name: "email"}},
 			Inserts: [][]OptionalValue{
 				{
-					{Valid: false}, // NULL for primary key
-					{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
+					MakeNull(), // NULL for primary key
+					MakeVarchar(NewTextPointer([]byte("test@example.com"))),
 				},
 			},
 		}
@@ -774,8 +760,8 @@ func TestStatement_Validate(t *testing.T) {
 			Fields:    []Field{{Name: "id"}, {Name: "email"}},
 			Inserts: [][]OptionalValue{
 				{
-					{Valid: false}, // NULL for primary key
-					{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
+					MakeNull(), // NULL for primary key
+					MakeVarchar(NewTextPointer([]byte("test@example.com"))),
 				},
 			},
 		}
@@ -792,10 +778,10 @@ func TestStatement_Validate(t *testing.T) {
 			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
-					{Valid: false}, // NULL for non-nullable id
-					{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
-					{Value: int32(25), Valid: true},
-					{Value: true, Valid: true},
+					MakeNull(), // NULL for non-nullable id
+					MakeVarchar(NewTextPointer([]byte("test@example.com"))),
+					MakeInt4(int32(25)),
+					MakeBool(true),
 				},
 			},
 		}
@@ -813,10 +799,10 @@ func TestStatement_Validate(t *testing.T) {
 			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
-					{Value: int32(1), Valid: true},
-					{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
-					{Value: int32(25), Valid: true},
-					{Value: Placeholder{}, Valid: true},
+					MakeInt4(int32(1)),
+					MakeVarchar(NewTextPointer([]byte("test@example.com"))),
+					MakeInt4(int32(25)),
+					MakePlaceholder(),
 				},
 			},
 		}
@@ -834,10 +820,10 @@ func TestStatement_Validate(t *testing.T) {
 			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
-					{Value: int32(1), Valid: true},
-					{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
-					{Valid: false}, // NULL for nullable age
-					{Valid: false}, // NULL for nullable verified
+					MakeInt4(int32(1)),
+					MakeVarchar(NewTextPointer([]byte("test@example.com"))),
+					MakeNull(), // NULL for nullable age
+					MakeNull(), // NULL for nullable verified
 				},
 			},
 		}
@@ -854,10 +840,10 @@ func TestStatement_Validate(t *testing.T) {
 			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
-					{Value: int32(1), Valid: true},
-					{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
-					{Value: int32(25), Valid: true},
-					{Value: true, Valid: true},
+					MakeInt4(int32(1)),
+					MakeVarchar(NewTextPointer([]byte("test@example.com"))),
+					MakeInt4(int32(25)),
+					MakeBool(true),
 				},
 			},
 		}
@@ -874,9 +860,9 @@ func TestStatement_Validate(t *testing.T) {
 			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "bogus"}},
 			Inserts: [][]OptionalValue{
 				{
-					{Value: int32(1), Valid: true},
-					{Value: NewTextPointer([]byte("test@example.com")), Valid: true},
-					{Value: int32(25), Valid: true},
+					MakeInt4(int32(1)),
+					MakeVarchar(NewTextPointer([]byte("test@example.com"))),
+					MakeInt4(int32(25)),
 				},
 			},
 		}
@@ -894,10 +880,10 @@ func TestStatement_Validate(t *testing.T) {
 			Fields:    []Field{{Name: "id"}, {Name: "email"}, {Name: "age"}, {Name: "verified"}},
 			Inserts: [][]OptionalValue{
 				{
-					{Value: int32(1), Valid: true},
-					{Value: NewTextPointer([]byte{0xff, 0xfe, 0xfd}), Valid: true}, // invalid UTF-8
-					{Valid: false}, // NULL for nullable age
-					{Valid: false}, // NULL for nullable verified
+					MakeInt4(int32(1)),
+					MakeVarchar(NewTextPointer([]byte{0xff, 0xfe, 0xfd})), // invalid UTF-8
+					MakeNull(), // NULL for nullable age
+					MakeNull(), // NULL for nullable verified
 				},
 			},
 		}
@@ -915,8 +901,8 @@ func TestStatement_Validate(t *testing.T) {
 			Fields:    []Field{{Name: "id"}, {Name: "email"}},
 			Inserts: [][]OptionalValue{
 				{
-					{Value: int32(1), Valid: true},
-					{Value: NewTextPointer(bytes.Repeat([]byte{'a'}, 256)), Valid: true},
+					MakeInt4(int32(1)),
+					MakeVarchar(NewTextPointer(bytes.Repeat([]byte{'a'}, 256))),
 				},
 			},
 		}
@@ -933,7 +919,7 @@ func TestStatement_Validate(t *testing.T) {
 			Columns:   table.Columns,
 			Fields:    []Field{{Name: "unknown_field"}},
 			Updates: map[string]OptionalValue{
-				"unknown_field": {Valid: false},
+				"unknown_field": MakeNull(),
 			},
 		}
 
@@ -949,7 +935,7 @@ func TestStatement_Validate(t *testing.T) {
 			Columns:   table.Columns,
 			Fields:    []Field{{Name: "email"}},
 			Updates: map[string]OptionalValue{
-				"email": {Value: NewTextPointer([]byte{0xff, 0xfe, 0xfd}), Valid: true}, // invalid UTF-8,
+				"email": MakeVarchar(NewTextPointer([]byte{0xff, 0xfe, 0xfd})), // invalid UTF-8,
 			},
 		}
 
@@ -981,7 +967,7 @@ func TestStatement_Validate(t *testing.T) {
 			Columns:   table.Columns,
 			Fields:    []Field{{Name: "age"}},
 			Updates: map[string]OptionalValue{
-				"age": {Value: Placeholder{}, Valid: true}, // ? (unbound placeholder)
+				"age": MakePlaceholder(), // ? (unbound placeholder)
 			},
 		}
 
@@ -997,7 +983,7 @@ func TestStatement_Validate(t *testing.T) {
 			Columns:   table.Columns,
 			Fields:    []Field{{Name: "age"}},
 			Updates: map[string]OptionalValue{
-				"age": {Valid: false}, // NULL for nullable age
+				"age": MakeNull(), // NULL for nullable age
 			},
 		}
 
@@ -1012,8 +998,8 @@ func TestStatement_Validate(t *testing.T) {
 			Columns:   table.Columns,
 			Fields:    []Field{{Name: "email"}, {Name: "age"}},
 			Updates: map[string]OptionalValue{
-				"email": {Value: NewTextPointer([]byte("new@example.com")), Valid: true},
-				"age":   {Value: int32(30), Valid: true},
+				"email": MakeVarchar(NewTextPointer([]byte("new@example.com"))),
+				"age":   MakeInt4(int32(30)),
 			},
 		}
 
@@ -1102,7 +1088,7 @@ func TestStatement_Validate(t *testing.T) {
 			TableName: table.Name,
 			Columns:   table.Columns,
 			Fields:    []Field{{Name: "COUNT(*)"}},
-			Offset:    OptionalValue{Value: int64(100), Valid: true},
+			Offset:    MakeInt8(int64(100)),
 		}
 
 		err := stmt.Validate(table)
@@ -1116,7 +1102,7 @@ func TestStatement_Validate(t *testing.T) {
 			TableName: table.Name,
 			Columns:   table.Columns,
 			Fields:    []Field{{Name: "COUNT(*)"}},
-			Limit:     OptionalValue{Value: int64(100), Valid: true},
+			Limit:     MakeInt8(int64(100)),
 		}
 
 		err := stmt.Validate(table)
@@ -1130,7 +1116,7 @@ func TestStatement_Validate(t *testing.T) {
 			TableName: table.Name,
 			Columns:   table.Columns,
 			Fields:    []Field{{Name: "id"}, {Name: "email"}},
-			Limit:     OptionalValue{Value: int64(-5), Valid: true},
+			Limit:     MakeInt8(int64(-5)),
 		}
 
 		err := stmt.Validate(table)
@@ -1210,7 +1196,7 @@ func TestStatement_Validate(t *testing.T) {
 			TableName: table.Name,
 			Columns:   table.Columns,
 			Fields:    []Field{{Name: "id"}, {Name: "email"}},
-			Offset:    OptionalValue{Value: int64(-5), Valid: true},
+			Offset:    MakeInt8(int64(-5)),
 		}
 
 		err := stmt.Validate(table)
@@ -1386,97 +1372,97 @@ func TestStatement_ValidateColumnValue(t *testing.T) {
 		{
 			"invalid BOOLEAN value",
 			Column{Kind: Boolean, Name: "foo"},
-			OptionalValue{Value: "not_a_bool", Valid: true},
+			MakeVarchar(NewTextPointer([]byte("not_a_bool"))),
 			`expects BOOLEAN value for "foo"`,
 		},
 		{
 			"valid BOOLEAN value",
 			Column{Kind: Boolean, Name: "foo"},
-			OptionalValue{Value: true, Valid: true},
+			MakeBool(true),
 			"",
 		},
 		{
 			"invalid INT4 value",
 			Column{Kind: Int4, Name: "foo"},
-			OptionalValue{Value: "not_an_int", Valid: true},
+			MakeVarchar(NewTextPointer([]byte("not_an_int"))),
 			`expects INT4 value for "foo"`,
 		},
 		{
 			"valid INT4 value",
 			Column{Kind: Int4, Name: "foo"},
-			OptionalValue{Value: int32(25), Valid: true},
+			MakeInt4(int32(25)),
 			"",
 		},
 		{
 			"invalid INT8 value",
 			Column{Kind: Int8, Name: "foo"},
-			OptionalValue{Value: int32(25), Valid: true},
+			MakeInt4(int32(25)),
 			`expects INT8 value for "foo"`,
 		},
 		{
 			"valid INT8 value",
 			Column{Kind: Int8, Name: "foo"},
-			OptionalValue{Value: int64(25), Valid: true},
+			MakeInt8(int64(25)),
 			"",
 		},
 		{
 			"invalid REAL value",
 			Column{Kind: Real, Name: "foo"},
-			OptionalValue{Value: "not_a_real", Valid: true},
+			MakeVarchar(NewTextPointer([]byte("not_a_real"))),
 			`expects REAL value for "foo"`,
 		},
 		{
 			"valid REAL value",
 			Column{Kind: Real, Name: "foo"},
-			OptionalValue{Value: float32(25.5), Valid: true},
+			MakeReal(float32(25.5)),
 			"",
 		},
 		{
 			"invalid DOUBLE value",
 			Column{Kind: Double, Name: "foo"},
-			OptionalValue{Value: float32(25.5), Valid: true},
+			MakeReal(float32(25.5)),
 			`expects DOUBLE value for "foo"`,
 		},
 		{
 			"valid DOUBLE value",
 			Column{Kind: Double, Name: "foo"},
-			OptionalValue{Value: float64(25.5), Valid: true},
+			MakeDouble(float64(25.5)),
 			"",
 		},
 		{
 			"invalid TEXT value",
 			Column{Kind: Text, Name: "foo"},
-			OptionalValue{Value: float32(25.5), Valid: true},
+			MakeReal(float32(25.5)),
 			`expects a text value for "foo"`,
 		},
 		{
 			"valid TEXT value",
 			Column{Kind: Text, Name: "foo"},
-			OptionalValue{Value: NewTextPointer([]byte("some text")), Valid: true},
+			MakeVarchar(NewTextPointer([]byte("some text"))),
 			"",
 		},
 		{
 			"invalid VARCHAR value",
 			Column{Kind: Varchar, Name: "foo"},
-			OptionalValue{Value: float32(25.5), Valid: true},
+			MakeReal(float32(25.5)),
 			`expects a text value for "foo"`,
 		},
 		{
 			"valid VARCHAR value",
 			Column{Kind: Varchar, Size: 100, Name: "foo"},
-			OptionalValue{Value: NewTextPointer([]byte("some text")), Valid: true},
+			MakeVarchar(NewTextPointer([]byte("some text"))),
 			"",
 		},
 		{
 			"invalid TIMESTAMP value",
 			Column{Kind: Timestamp, Name: "foo"},
-			OptionalValue{Value: int32(25), Valid: true},
+			MakeInt4(int32(25)),
 			`expects timestamp value for "foo"`,
 		},
 		{
 			"valid TIMESTAMP value",
 			Column{Kind: Timestamp, Name: "foo"},
-			OptionalValue{Value: MustParseTimestampMicros("2000-01-01 00:00:00"), Valid: true},
+			MakeTimestamp(MustParseTimestampMicros("2000-01-01 00:00:00")),
 			"",
 		},
 	}
@@ -1524,7 +1510,7 @@ func TestStatement_DDL(t *testing.T) {
 				Size:         1,
 				Name:         "e",
 				Nullable:     false,
-				DefaultValue: OptionalValue{Value: false, Valid: true},
+				DefaultValue: MakeBool(false),
 			},
 			{
 				Kind:     Real,
@@ -1953,12 +1939,12 @@ func TestStatement_InsertValuesForColumns(t *testing.T) {
 		Fields: []Field{{Name: "id"}, {Name: "email"}},
 		Inserts: [][]OptionalValue{
 			{
-				{Value: int32(1), Valid: true},
-				{Value: "john@example.com", Valid: true},
+				MakeInt4(int32(1)),
+				MakeVarchar(NewTextPointer([]byte("john@example.com"))),
 			},
 			{
-				{Value: int32(2), Valid: true},
-				{Value: "jane@example.com", Valid: true},
+				MakeInt4(int32(2)),
+				MakeVarchar(NewTextPointer([]byte("jane@example.com"))),
 			},
 		},
 	}
@@ -1971,15 +1957,15 @@ func TestStatement_InsertValuesForColumns(t *testing.T) {
 	t.Run("value for single column", func(t *testing.T) {
 		vals := stmt.InsertValuesForColumns(0, stmt.Columns[1])
 		assert.Equal(t, []OptionalValue{
-			{Value: "john@example.com", Valid: true},
+			MakeVarchar(NewTextPointer([]byte("john@example.com"))),
 		}, vals)
 	})
 
 	t.Run("value for two column", func(t *testing.T) {
 		vals := stmt.InsertValuesForColumns(1, stmt.Columns[0], stmt.Columns[1])
 		assert.Equal(t, []OptionalValue{
-			{Value: int32(2), Valid: true},
-			{Value: "jane@example.com", Valid: true},
+			MakeInt4(int32(2)),
+			MakeVarchar(NewTextPointer([]byte("jane@example.com"))),
 		}, vals)
 	})
 }
@@ -2065,8 +2051,8 @@ func TestStatement_PrepareWhere(t *testing.T) {
 		}
 		result, err := stmt.prepareWhere()
 		require.NoError(t, err)
-		_, ok := result.Conditions[0][0].Operand2.Value.(TimestampMicros)
-		assert.True(t, ok, "expected TimestampMicros value after prepareWhere")
+		_, isTimestamp := result.Conditions[0][0].Operand2.Value.(TimestampMicros)
+		assert.True(t, isTimestamp, "expected TimestampMicros value after prepareWhere")
 	})
 
 	t.Run("unknown field returns error", func(t *testing.T) {

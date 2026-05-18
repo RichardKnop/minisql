@@ -15,11 +15,11 @@ func BenchmarkRowClone(b *testing.B) {
 	}
 
 	row := NewRowWithValues(columns, []OptionalValue{
-		{Value: int64(123), Valid: true},
-		{Value: "John Doe", Valid: true},
-		{Value: "john@example.com", Valid: true},
-		{Value: int32(30), Valid: true},
-		{Value: Time{Year: 2024, Month: 1, Day: 1}, Valid: true},
+		MakeInt8(int64(123)),
+		MakeVarchar(NewTextPointer([]byte("John Doe"))),
+		MakeVarchar(NewTextPointer([]byte("john@example.com"))),
+		MakeInt4(int32(30)),
+		MakeTimestamp(MustParseTimestampMicros("2024-01-01 00:00:00")),
 	})
 	row.Key = RowID(123)
 
@@ -44,14 +44,14 @@ func BenchmarkRowOnlyFields(b *testing.B) {
 	}
 
 	row := NewRowWithValues(columns, []OptionalValue{
-		{Value: int64(123), Valid: true},
-		{Value: "John Doe", Valid: true},
-		{Value: "john@example.com", Valid: true},
-		{Value: int32(30), Valid: true},
-		{Value: Time{Year: 2024, Month: 1, Day: 1}, Valid: true},
-		{Value: Time{Year: 2024, Month: 1, Day: 2}, Valid: true},
-		{Value: "active", Valid: true},
-		{Value: float64(95.5), Valid: true},
+		MakeInt8(int64(123)),
+		MakeVarchar(NewTextPointer([]byte("John Doe"))),
+		MakeVarchar(NewTextPointer([]byte("john@example.com"))),
+		MakeInt4(int32(30)),
+		MakeTimestamp(MustParseTimestampMicros("2024-01-01 00:00:00")),
+		MakeTimestamp(MustParseTimestampMicros("2024-01-02 00:00:00")),
+		MakeVarchar(NewTextPointer([]byte("active"))),
+		MakeDouble(float64(95.5)),
 	})
 	row.Key = RowID(123)
 
@@ -74,7 +74,7 @@ func BenchmarkRowOnlyFieldsMany(b *testing.B) {
 	values := make([]OptionalValue, 20)
 	for i := range 20 {
 		columns[i] = Column{Name: string(rune('a' + i)), Kind: Int8, Size: 8}
-		values[i] = OptionalValue{Value: int64(i), Valid: true}
+		values[i] = MakeInt8(int64(i))
 	}
 
 	row := NewRowWithValues(columns, values)

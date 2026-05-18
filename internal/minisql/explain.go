@@ -204,8 +204,8 @@ func (d *Database) executeExplainCTEs(ctx context.Context, inner Statement, anal
 	for _, cs := range cteSteps {
 		row := explainRow{operation: "cte", detail: "name=" + cs.name}
 		if analyze {
-			row.actual = OptionalValue{Valid: true, Value: cs.rowCount}
-			row.duration = OptionalValue{Valid: true, Value: cs.duration}
+			row.actual = MakeInt8(cs.rowCount)
+			row.duration = MakeInt8(cs.duration)
 		}
 		allRows = append(allRows, row)
 	}
@@ -226,14 +226,14 @@ func (d *Database) executeExplainCTEs(ctx context.Context, inner Statement, anal
 		if analyze && idx >= numCTEs {
 			planStep := idx - numCTEs + 1
 			if metric, ok := outerMetrics[planStep]; ok {
-				row.actual = OptionalValue{Valid: true, Value: metric.rows}
-				row.duration = OptionalValue{Valid: true, Value: metric.durationUS}
+				row.actual = MakeInt8(metric.rows)
+				row.duration = MakeInt8(metric.durationUS)
 			}
 		}
 		resultRows = append(resultRows, NewRowWithValues(explainColumns, []OptionalValue{
-			{Valid: true, Value: int64(step)},
-			{Valid: true, Value: NewTextPointer([]byte(row.operation))},
-			{Valid: true, Value: NewTextPointer([]byte(row.detail))},
+			MakeInt8(int64(step)),
+			MakeText(NewTextPointer([]byte(row.operation))),
+			MakeText(NewTextPointer([]byte(row.detail))),
 			row.estimated,
 			row.actual,
 			row.duration,
@@ -296,8 +296,8 @@ func (d *Database) executeExplainDerivedTable(ctx context.Context, inner Stateme
 		detail:    "alias=" + inner.FromSubqueryAlias,
 	}
 	if analyze {
-		derivedStep.actual = OptionalValue{Valid: true, Value: int64(len(innerRows))}
-		derivedStep.duration = OptionalValue{Valid: true, Value: innerDuration}
+		derivedStep.actual = MakeInt8(int64(len(innerRows)))
+		derivedStep.duration = MakeInt8(innerDuration)
 	}
 
 	planRows := plan.explainRows(ctx, vt, d.lockedProvider)
@@ -317,14 +317,14 @@ func (d *Database) executeExplainDerivedTable(ctx context.Context, inner Stateme
 		// Outer plan metrics are 1-based (from analyzePlan); idx maps directly to plan step.
 		if analyze && idx > 0 {
 			if metric, ok := outerMetrics[idx]; ok {
-				row.actual = OptionalValue{Valid: true, Value: metric.rows}
-				row.duration = OptionalValue{Valid: true, Value: metric.durationUS}
+				row.actual = MakeInt8(metric.rows)
+				row.duration = MakeInt8(metric.durationUS)
 			}
 		}
 		resultRows = append(resultRows, NewRowWithValues(explainColumns, []OptionalValue{
-			{Valid: true, Value: int64(step)},
-			{Valid: true, Value: NewTextPointer([]byte(row.operation))},
-			{Valid: true, Value: NewTextPointer([]byte(row.detail))},
+			MakeInt8(int64(step)),
+			MakeText(NewTextPointer([]byte(row.operation))),
+			MakeText(NewTextPointer([]byte(row.detail))),
 			row.estimated,
 			row.actual,
 			row.duration,
@@ -342,13 +342,13 @@ func buildExplainResult(ctx context.Context, plan QueryPlan, table *Table, provi
 	for idx, row := range rows {
 		step := idx + 1
 		if metric, ok := metrics[step]; ok {
-			row.actual = OptionalValue{Valid: true, Value: metric.rows}
-			row.duration = OptionalValue{Valid: true, Value: metric.durationUS}
+			row.actual = MakeInt8(metric.rows)
+			row.duration = MakeInt8(metric.durationUS)
 		}
 		resultRows = append(resultRows, NewRowWithValues(explainColumns, []OptionalValue{
-			{Valid: true, Value: int64(step)},
-			{Valid: true, Value: NewTextPointer([]byte(row.operation))},
-			{Valid: true, Value: NewTextPointer([]byte(row.detail))},
+			MakeInt8(int64(step)),
+			MakeText(NewTextPointer([]byte(row.operation))),
+			MakeText(NewTextPointer([]byte(row.detail))),
 			row.estimated,
 			row.actual,
 			row.duration,
@@ -654,51 +654,51 @@ func estimateScanRows(table *Table, scan Scan) OptionalValue {
 	switch scan.Type {
 	case ScanTypeSequential, ScanTypeIndexAll:
 		if table.getRowCount != nil {
-			return OptionalValue{Valid: true, Value: table.getRowCount()}
+			return MakeInt8(table.getRowCount())
 		}
 	case ScanTypeIndexFirst, ScanTypeIndexLast:
-		return OptionalValue{Valid: true, Value: int64(1)}
+		return MakeInt8(int64(1))
 	case ScanTypeIndexPoint:
 		if stats, ok := table.indexStats[scan.IndexName]; ok {
 			estimated := estimateFilteredRows(&stats, nil)
 			if estimated >= 0 {
-				return OptionalValue{Valid: true, Value: estimated * int64(max(1, len(scan.IndexKeys)))}
+				return MakeInt8(estimated * int64(max(1, len(scan.IndexKeys))))
 			}
 		}
 		if len(scan.IndexKeys) > 0 {
-			return OptionalValue{Valid: true, Value: int64(len(scan.IndexKeys))}
+			return MakeInt8(int64(len(scan.IndexKeys)))
 		}
 	case ScanTypeIndexRange:
 		if stats, ok := table.indexStats[scan.IndexName]; ok {
 			estimated := estimateFilteredRows(&stats, &scan.RangeCondition)
 			if estimated >= 0 {
-				return OptionalValue{Valid: true, Value: estimated}
+				return MakeInt8(estimated)
 			}
 		}
 	case ScanTypeFullText:
 		if len(scan.IndexKeys) > 0 {
-			return OptionalValue{Valid: true, Value: int64(len(scan.IndexKeys))}
+			return MakeInt8(int64(len(scan.IndexKeys)))
 		}
 	case ScanTypeInverted:
 		if len(scan.IndexKeys) > 0 {
-			return OptionalValue{Valid: true, Value: int64(len(scan.IndexKeys))}
+			return MakeInt8(int64(len(scan.IndexKeys)))
 		}
 	case ScanTypeIndexIntersect:
 		// Estimate as the minimum across sub-scans (intersection can only shrink the result).
 		var minEstimate int64 = -1
 		for _, sub := range scan.SubScans {
 			est := estimateScanRows(table, sub)
-			if !est.Valid {
+			if est.IsNull() {
 				continue
 			}
-			v := est.Value.(int64)
+			v := est.AsInt8()
 			if minEstimate < 0 || v < minEstimate {
 				minEstimate = v
 			}
 		}
 		if minEstimate >= 0 {
-			return OptionalValue{Valid: true, Value: minEstimate}
+			return MakeInt8(minEstimate)
 		}
 	}
-	return OptionalValue{}
+	return MakeNull()
 }

@@ -192,10 +192,7 @@ func (p *parserItem) doParseCreateTable() error {
 		if _, ok := defaultValue.(string); ok {
 			defaultValue = minisql.NewTextPointer([]byte(defaultValue.(string)))
 		}
-		p.Columns[len(p.Columns)-1].DefaultValue = minisql.OptionalValue{
-			Value: defaultValue,
-			Valid: true,
-		}
+		p.Columns[len(p.Columns)-1].DefaultValue = minisql.OptionalValueFromParserAny(defaultValue)
 	case stepCreateTableColumnCheck:
 		checkRWord := strings.ToUpper(p.peek())
 		p.step = stepCreateTableColumnFKRef

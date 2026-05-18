@@ -24,8 +24,8 @@ func TestParse_UpdateSetSubquery_NonCorrelated(t *testing.T) {
 
 	val, ok := stmt.Updates["price"]
 	require.True(t, ok, "price must be in Updates")
-	inner, ok := val.Value.(*minisql.Statement)
-	require.True(t, ok, "SET value must be *Statement (subquery)")
+	require.True(t, val.IsStatement(), "SET value must be *Statement (subquery)")
+	inner := val.AsStatement()
 	assert.Equal(t, minisql.Select, inner.Kind)
 	assert.Equal(t, "products", inner.TableName)
 }
@@ -45,8 +45,8 @@ func TestParse_UpdateSetSubquery_Correlated(t *testing.T) {
 
 	val, ok := stmt.Updates["salary"]
 	require.True(t, ok, "salary must be in Updates")
-	inner, ok := val.Value.(*minisql.Statement)
-	require.True(t, ok, "SET value must be *Statement (subquery)")
+	require.True(t, val.IsStatement(), "SET value must be *Statement (subquery)")
+	inner := val.AsStatement()
 	assert.Equal(t, minisql.Select, inner.Kind)
 	assert.Equal(t, "depts", inner.TableName)
 	require.NotEmpty(t, inner.Conditions)
@@ -65,13 +65,11 @@ func TestParse_UpdateSetSubquery_MultipleColumns(t *testing.T) {
 
 	salaryVal, ok := stmt.Updates["salary"]
 	require.True(t, ok)
-	_, ok = salaryVal.Value.(*minisql.Statement)
-	require.True(t, ok, "salary SET value must be *Statement")
+	require.True(t, salaryVal.IsStatement(), "salary SET value must be *Statement")
 
 	bonusVal, ok := stmt.Updates["bonus"]
 	require.True(t, ok)
-	_, ok = bonusVal.Value.(*minisql.Statement)
-	require.True(t, ok, "bonus SET value must be *Statement")
+	require.True(t, bonusVal.IsStatement(), "bonus SET value must be *Statement")
 }
 
 func TestParse_UpdateSetSubquery_MixedWithLiteral(t *testing.T) {
@@ -83,9 +81,8 @@ func TestParse_UpdateSetSubquery_MixedWithLiteral(t *testing.T) {
 	require.Len(t, stmts, 1)
 
 	stmt := stmts[0]
-	_, isSubquery := stmt.Updates["salary"].Value.(*minisql.Statement)
-	assert.True(t, isSubquery, "salary must be subquery")
-	assert.Equal(t, true, stmt.Updates["active"].Value, "active must be bool literal")
+	assert.True(t, stmt.Updates["salary"].IsStatement(), "salary must be subquery")
+	assert.Equal(t, true, stmt.Updates["active"].AsBool(), "active must be bool literal")
 }
 
 func TestParse_UpdateSetSubquery_WithoutWhere(t *testing.T) {

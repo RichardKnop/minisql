@@ -61,9 +61,9 @@ func TestProjectReturning(t *testing.T) {
 		{Name: "score", Kind: Int4, Size: 4},
 	}
 	vals := []OptionalValue{
-		{Value: int64(42), Valid: true},
-		{Value: NewTextPointer([]byte("Alice")), Valid: true},
-		{Value: int32(99), Valid: true},
+		MakeInt8(int64(42)),
+		MakeVarchar(NewTextPointer([]byte("Alice"))),
+		MakeInt4(int32(99)),
 	}
 	row := NewRowWithValues(cols, vals)
 
@@ -72,8 +72,8 @@ func TestProjectReturning(t *testing.T) {
 		got, err := projectReturning(row, []Field{{Name: "id"}})
 		require.NoError(t, err)
 		require.Len(t, got.Values, 1)
-		assert.Equal(t, int64(42), got.Values[0].Value)
-		assert.True(t, got.Values[0].Valid)
+		assert.Equal(t, int64(42), got.Values[0].AsAny())
+		assert.True(t, got.Values[0].IsValid())
 	})
 
 	t.Run("project multiple fields", func(t *testing.T) {
@@ -81,8 +81,8 @@ func TestProjectReturning(t *testing.T) {
 		got, err := projectReturning(row, []Field{{Name: "id"}, {Name: "score"}})
 		require.NoError(t, err)
 		require.Len(t, got.Values, 2)
-		assert.Equal(t, int64(42), got.Values[0].Value)
-		assert.Equal(t, int32(99), got.Values[1].Value)
+		assert.Equal(t, int64(42), got.Values[0].AsAny())
+		assert.Equal(t, int32(99), got.Values[1].AsAny())
 	})
 
 	t.Run("star returns all values", func(t *testing.T) {
@@ -98,20 +98,20 @@ func TestProjectReturning(t *testing.T) {
 		got, err := projectReturning(row, []Field{{Name: "nonexistent"}})
 		require.NoError(t, err)
 		require.Len(t, got.Values, 1)
-		assert.False(t, got.Values[0].Valid)
+		assert.False(t, got.Values[0].IsValid())
 	})
 
 	t.Run("null value in row is preserved", func(t *testing.T) {
 		t.Parallel()
 		nullVals := []OptionalValue{
-			{Value: int64(7), Valid: true},
-			{Valid: false}, // name is NULL
-			{Value: int32(0), Valid: true},
+			MakeInt8(int64(7)),
+			MakeNull(), // name is NULL
+			MakeInt4(int32(0)),
 		}
 		nullRow := NewRowWithValues(cols, nullVals)
 		got, err := projectReturning(nullRow, []Field{{Name: "name"}})
 		require.NoError(t, err)
 		require.Len(t, got.Values, 1)
-		assert.False(t, got.Values[0].Valid)
+		assert.False(t, got.Values[0].IsValid())
 	})
 }

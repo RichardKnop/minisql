@@ -87,7 +87,7 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			if len(t.PrimaryKey.Columns) == 1 {
 				// Update statement with autoincremented primary key value
 				pkIdx := stmt.ColumnIdx(t.PrimaryKey.Columns[0].Name)
-				values[pkIdx] = OptionalValue{Value: insertedPrimaryKey, Valid: true}
+				values[pkIdx] = optionalValueFromAny(t.PrimaryKey.Columns[0].Kind, insertedPrimaryKey)
 			}
 		}
 
@@ -141,18 +141,17 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 		// Normalise JSON columns to compact form before writing.
 		for i, col := range t.Columns {
-			if col.Kind != JSON || !rowValues[i].Valid {
+			if col.Kind != JSON || rowValues[i].IsNull() {
 				continue
 			}
-			tp, ok := rowValues[i].Value.(TextPointer)
-			if !ok {
-				continue
+			if rowValues[i].Kind() == ovalJSON || rowValues[i].Kind() == ovalText || rowValues[i].Kind() == ovalVarchar {
+				tp := rowValues[i].AsTextPointer()
+				normalised, err := normaliseJSON(tp.String())
+				if err != nil {
+					return StatementResult{}, fmt.Errorf("column %q: %w", col.Name, err)
+				}
+				rowValues[i] = MakeJSON(NewTextPointer([]byte(normalised)))
 			}
-			normalised, err := normaliseJSON(tp.String())
-			if err != nil {
-				return StatementResult{}, fmt.Errorf("column %q: %w", col.Name, err)
-			}
-			rowValues[i].Value = NewTextPointer([]byte(normalised))
 		}
 
 		row := NewRowWithValues(t.Columns, rowValues)
@@ -211,10 +210,8 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 		// For composite or non-int8 PKs, lastInsertID stays 0.
 		if t.HasPrimaryKey() && len(t.PrimaryKey.Columns) == 1 {
 			if pkIdx := stmt.ColumnIdx(t.PrimaryKey.Columns[0].Name); pkIdx >= 0 && pkIdx < len(values) {
-				if v := values[pkIdx]; v.Valid {
-					if id, ok := v.Value.(int64); ok {
-						lastInsertID = id
-					}
+				if v := values[pkIdx]; v.Kind() == ovalInt8 {
+					lastInsertID = v.AsInt8()
 				}
 			}
 		}
@@ -369,16 +366,16 @@ func (t *Table) findInsertConflict(ctx context.Context, stmt Statement, insertId
 // Returns nil if any key part is NULL (NULL values are not indexed).
 func buildIndexLookupKey(columns []Column, keyParts []OptionalValue) (any, error) {
 	for _, kp := range keyParts {
-		if !kp.Valid {
+		if kp.IsNull() {
 			return nil, nil
 		}
 	}
 	if len(columns) == 1 {
-		return castKeyValue(columns[0], keyParts[0].Value)
+		return castKeyValue(columns[0], keyParts[0].AsAny())
 	}
 	keyValues := make([]any, 0, len(keyParts))
 	for i, kp := range keyParts {
-		castedKey, err := castKeyValue(columns[i], kp.Value)
+		castedKey, err := castKeyValue(columns[i], kp.AsAny())
 		if err != nil {
 			return nil, err
 		}

@@ -403,13 +403,13 @@ type Statement struct {
 	// CacheKey is the original SQL text set by PrepareStatement; it is the key
 	// used to look up and store the query plan in the plan cache.  Empty for
 	// statements that were not prepared via PrepareStatement (ad-hoc queries).
-	CacheKey           string
-	Kind               StatementKind
-	IndexMethod        IndexMethod
-	ConflictAction     ConflictAction
-	IfNotExists        bool
-	ExplainAnalyze     bool
-	Distinct           bool
+	CacheKey       string
+	Kind           StatementKind
+	IndexMethod    IndexMethod
+	ConflictAction ConflictAction
+	IfNotExists    bool
+	ExplainAnalyze bool
+	Distinct       bool
 }
 
 // NumPlaceholders returns the number of placeholder parameters (?) in the statement.
@@ -423,7 +423,7 @@ func (s Statement) NumPlaceholders() int {
 	if s.Kind == Insert {
 		for _, anInsert := range s.Inserts {
 			for _, val := range anInsert {
-				if _, ok := val.Value.(Placeholder); ok {
+				if val.IsPlaceholder() {
 					count += 1
 				}
 			}
@@ -431,7 +431,7 @@ func (s Statement) NumPlaceholders() int {
 		// Also count placeholders in the DO UPDATE SET clause.
 		if s.ConflictAction == ConflictActionDoUpdate {
 			for _, val := range s.Updates {
-				if _, ok := val.Value.(Placeholder); ok {
+				if val.IsPlaceholder() {
 					count += 1
 				}
 			}
@@ -440,7 +440,7 @@ func (s Statement) NumPlaceholders() int {
 
 	if s.Kind == Update {
 		for _, val := range s.Updates {
-			if _, ok := val.Value.(Placeholder); ok {
+			if val.IsPlaceholder() {
 				count += 1
 			}
 		}
@@ -606,16 +606,16 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 	if s.Kind == Insert {
 		for i, anInsert := range stmt.Inserts {
 			for j, val := range anInsert {
-				if _, ok := val.Value.(Placeholder); !ok {
+				if !val.IsPlaceholder() {
 					continue
 				}
 				if len(args) == 0 {
 					return Statement{}, errors.New("not enough arguments to bind placeholders")
 				}
 				if args[0] == nil {
-					stmt.Inserts[i][j] = OptionalValue{}
+					stmt.Inserts[i][j] = MakeNull()
 				} else {
-					stmt.Inserts[i][j].Value = args[0]
+					stmt.Inserts[i][j] = optionalValueFromAny(0, args[0])
 				}
 				args = args[1:]
 			}
@@ -628,16 +628,16 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 				if !ok {
 					continue
 				}
-				if _, ok := val.Value.(Placeholder); !ok {
+				if !val.IsPlaceholder() {
 					continue
 				}
 				if len(args) == 0 {
 					return Statement{}, errors.New("not enough arguments to bind placeholders")
 				}
 				if args[0] == nil {
-					stmt.Updates[field.Name] = OptionalValue{}
+					stmt.Updates[field.Name] = MakeNull()
 				} else {
-					stmt.Updates[field.Name] = OptionalValue{Value: args[0], Valid: true}
+					stmt.Updates[field.Name] = optionalValueFromAny(0, args[0])
 				}
 				args = args[1:]
 			}
@@ -650,16 +650,16 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 			if !ok {
 				continue
 			}
-			if _, ok := val.Value.(Placeholder); !ok {
+			if !val.IsPlaceholder() {
 				continue
 			}
 			if len(args) == 0 {
 				return Statement{}, errors.New("not enough arguments to bind placeholders")
 			}
 			if args[0] == nil {
-				stmt.Updates[field.Name] = OptionalValue{}
+				stmt.Updates[field.Name] = MakeNull()
 			} else {
-				stmt.Updates[field.Name] = OptionalValue{Value: args[0], Valid: true}
+				stmt.Updates[field.Name] = optionalValueFromAny(0, args[0])
 			}
 			args = args[1:]
 		}
@@ -780,25 +780,23 @@ func (s Statement) Prepare(now Time) (Statement, error) {
 // In case of TIMESTAMP columns, it transforms string default values into Time.
 func (s Statement) prepareCreateTable() (Statement, error) {
 	for i, col := range s.Columns {
-		if !col.DefaultValue.Valid {
+		if !col.DefaultValue.IsValid() {
 			continue
 		}
 		if col.Kind == Timestamp {
 			// If this is already a TimestampMicros value, accept it as is
-			_, ok := col.DefaultValue.Value.(TimestampMicros)
-			if ok {
+			if col.DefaultValue.Kind() == ovalTimestamp {
 				return s, nil
 			}
 			// Otherwise, validate and transform TextPointer → TimestampMicros
-			_, ok = col.DefaultValue.Value.(TextPointer)
-			if !ok {
-				return s, fmt.Errorf("default value '%s' is not a valid TextPointer", col.DefaultValue.Value)
+			if col.DefaultValue.Kind() != ovalVarchar && col.DefaultValue.Kind() != ovalText {
+				return s, fmt.Errorf("default value '%s' is not a valid TextPointer", col.DefaultValue.AsAny())
 			}
-			timestamp, err := ParseTimestamp(col.DefaultValue.Value.(TextPointer).String())
+			timestamp, err := ParseTimestamp(col.DefaultValue.AsTextPointer().String())
 			if err != nil {
-				return s, fmt.Errorf("default value '%s' is not a valid timestamp: %w", col.DefaultValue.Value, err)
+				return s, fmt.Errorf("default value '%s' is not a valid timestamp: %w", col.DefaultValue.AsTextPointer().String(), err)
 			}
-			col.DefaultValue.Value = TimestampMicros(timestamp.TotalMicroseconds())
+			col.DefaultValue = MakeTimestamp(TimestampMicros(timestamp.TotalMicroseconds()))
 			s.Columns[i] = col
 		}
 
@@ -866,34 +864,36 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 				val = s.Inserts[j][k]
 			} else {
 				// Column was omitted — apply table default.
-				if col.DefaultValue.Valid {
+				if col.DefaultValue.IsValid() {
 					val = col.DefaultValue
 				} else if col.DefaultValueNow {
-					val = OptionalValue{Valid: true, Value: TimestampMicros(now.TotalMicroseconds())}
+					val = MakeTimestamp(TimestampMicros(now.TotalMicroseconds()))
 				}
 				newRow[i] = val
 				continue
 			}
 
-			if val.Valid {
-				if fn, ok := val.Value.(Function); ok {
+			if val.IsValid() {
+				switch {
+				case val.IsFunction():
+					fn := val.AsFunction()
 					if fn.Name == FunctionNow.Name {
-						val.Value = TimestampMicros(now.TotalMicroseconds())
+						val = MakeTimestamp(TimestampMicros(now.TotalMicroseconds()))
 					} else {
 						return Statement{}, fmt.Errorf("unsupported function %q in INSERT", fn.Name)
 					}
-				} else if col.Kind == Timestamp {
-					timestamp, err := parseTimeValue(val.Value)
+				case col.Kind == Timestamp:
+					timestamp, err := parseTimeValue(val.AsAny())
 					if err != nil {
 						return Statement{}, err
 					}
-					val.Value = timestamp
-				} else if col.Kind == UUID {
-					uv, err := toUUIDValue(val.Value)
+					val = MakeTimestamp(timestamp)
+				case col.Kind == UUID:
+					uv, err := toUUIDValue(val.AsAny())
 					if err != nil {
 						return Statement{}, fmt.Errorf("column %q: %w", col.Name, err)
 					}
-					val.Value = uv
+					val = MakeUUID(uv)
 				}
 			}
 			newRow[i] = val
@@ -905,19 +905,19 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 	// prepareUpdate is only called for Kind==Update, so we do it explicitly here.
 	if s.ConflictAction == ConflictActionDoUpdate {
 		for name, val := range s.Updates {
-			if !val.Valid {
+			if !val.IsValid() {
 				continue
 			}
 			// ExcludedRef is resolved at execution time — leave it alone.
-			if _, ok := val.Value.(ExcludedRef); ok {
+			if val.IsExcludedRef() {
 				continue
 			}
-			if fn, ok := val.Value.(Function); ok {
+			if val.IsFunction() {
+				fn := val.AsFunction()
 				if fn.Name != FunctionNow.Name {
 					return Statement{}, fmt.Errorf("unsupported function %q in ON CONFLICT DO UPDATE", fn.Name)
 				}
-				val.Value = TimestampMicros(now.TotalMicroseconds())
-				s.Updates[name] = val
+				s.Updates[name] = MakeTimestamp(TimestampMicros(now.TotalMicroseconds()))
 				continue
 			}
 			col, ok := s.ColumnByName(name)
@@ -926,19 +926,17 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 			}
 			switch col.Kind {
 			case Timestamp:
-				timestamp, err := parseTimeValue(val.Value)
+				timestamp, err := parseTimeValue(val.AsAny())
 				if err != nil {
 					return Statement{}, fmt.Errorf("invalid timestamp in ON CONFLICT DO UPDATE SET %s: %w", name, err)
 				}
-				val.Value = timestamp
-				s.Updates[name] = val
+				s.Updates[name] = MakeTimestamp(timestamp)
 			case UUID:
-				uv, err := toUUIDValue(val.Value)
+				uv, err := toUUIDValue(val.AsAny())
 				if err != nil {
 					return Statement{}, fmt.Errorf("invalid UUID in ON CONFLICT DO UPDATE SET %s: %w", name, err)
 				}
-				val.Value = uv
-				s.Updates[name] = val
+				s.Updates[name] = MakeUUID(uv)
 			}
 		}
 	}
@@ -962,39 +960,37 @@ func (s Statement) prepareUpdate(now Time) (Statement, error) {
 			return Statement{}, fmt.Errorf("missing update value for field %q", name)
 		}
 
-		if !updateValue.Valid {
+		if !updateValue.IsValid() {
 			continue
 		}
 
 		// Arithmetic expressions are evaluated at execution time against the row —
 		// skip all static type preparation for them.
-		if _, ok := updateValue.Value.(*Expr); ok {
+		if updateValue.IsExpr() {
 			continue
 		}
 
-		if fn, ok := updateValue.Value.(Function); ok {
+		switch {
+		case updateValue.IsFunction():
+			fn := updateValue.AsFunction()
 			if fn.Name == FunctionNow.Name {
-				updateValue.Value = TimestampMicros(now.TotalMicroseconds())
-				s.Updates[name] = updateValue
+				s.Updates[name] = MakeTimestamp(TimestampMicros(now.TotalMicroseconds()))
 			} else {
 				return Statement{}, fmt.Errorf("unsupported function %q in UPDATE", fn.Name)
 			}
-		} else if col.Kind == Timestamp {
-			timestamp, err := parseTimeValue(updateValue.Value)
+		case col.Kind == Timestamp:
+			timestamp, err := parseTimeValue(updateValue.AsAny())
 			if err != nil {
 				return Statement{}, err
 			}
-			updateValue.Value = timestamp
-			s.Updates[name] = updateValue
-		} else if col.Kind == UUID {
-			uv, err := toUUIDValue(updateValue.Value)
+			s.Updates[name] = MakeTimestamp(timestamp)
+		case col.Kind == UUID:
+			uv, err := toUUIDValue(updateValue.AsAny())
 			if err != nil {
 				return Statement{}, fmt.Errorf("column %q: %w", name, err)
 			}
-			updateValue.Value = uv
-			s.Updates[name] = updateValue
+			s.Updates[name] = MakeUUID(uv)
 		}
-
 	}
 
 	return s, nil
@@ -1436,7 +1432,7 @@ func (s Statement) validateInsert(table *Table) error {
 		if col.Nullable {
 			continue
 		}
-		if col.DefaultValue.Valid {
+		if col.DefaultValue.IsValid() {
 			continue
 		}
 		if hasPk && col.Name == pkColumn.Name && table.PrimaryKey.Autoincrement {
@@ -1471,10 +1467,10 @@ func (s Statement) validateInsert(table *Table) error {
 
 	// Validate EXCLUDED.col references: the referenced column must exist in the table.
 	for _, val := range s.Updates {
-		ref, ok := val.Value.(ExcludedRef)
-		if !ok {
+		if !val.IsExcludedRef() {
 			continue
 		}
+		ref := val.AsExcludedRef()
 		if _, exists := table.ColumnByName(ref.Column); !exists {
 			return fmt.Errorf("EXCLUDED.%s: column %q does not exist in table %q", ref.Column, ref.Column, table.Name)
 		}
@@ -1495,10 +1491,10 @@ func (s Statement) validateUpdate(table *Table) error {
 		updateVal := s.Updates[field.Name]
 		// Arithmetic expressions and correlated subqueries are evaluated at execution
 		// time — skip static type validation for both.
-		if _, isExpr := updateVal.Value.(*Expr); isExpr {
+		if updateVal.IsExpr() {
 			continue
 		}
-		if _, isSub := updateVal.Value.(*Statement); isSub {
+		if updateVal.IsStatement() {
 			continue
 		}
 		if err := s.validateColumnValue(table, col, updateVal); err != nil {
@@ -1512,15 +1508,15 @@ func (s Statement) validateSelect(table *Table) error {
 	if len(s.Fields) == 0 {
 		return errors.New("at least one field to select is required")
 	}
-	if s.Limit.Valid {
-		limitValue, ok := s.Limit.Value.(int64)
-		if !ok || limitValue < 0 {
+	if s.Limit.IsValid() {
+		limitValue := s.Limit.AsInt8()
+		if limitValue < 0 {
 			return errors.New("LIMIT must be a non-negative integer")
 		}
 	}
-	if s.Offset.Valid {
-		offsetValue, ok := s.Offset.Value.(int64)
-		if !ok || offsetValue < 0 {
+	if s.Offset.IsValid() {
+		offsetValue := s.Offset.AsInt8()
+		if offsetValue < 0 {
 			return errors.New("OFFSET must be a non-negative integer")
 		}
 	}
@@ -1529,10 +1525,10 @@ func (s Statement) validateSelect(table *Table) error {
 		if len(s.OrderBy) > 0 {
 			return errors.New("ORDER BY cannot be used with COUNT(*)")
 		}
-		if s.Offset.Valid {
+		if s.Offset.IsValid() {
 			return errors.New("OFFSET cannot be used with COUNT(*)")
 		}
-		if s.Limit.Valid {
+		if s.Limit.IsValid() {
 			return errors.New("LIMIT cannot be used with COUNT(*)")
 		}
 	}
@@ -1689,17 +1685,17 @@ func (s Statement) HasOutputField(name string) bool {
 }
 
 func (s Statement) validateColumnValue(table *Table, col Column, val OptionalValue) error {
-	if _, ok := val.Value.(Placeholder); ok {
+	if val.IsPlaceholder() {
 		return fmt.Errorf("unbound placeholder in value for field %q", col.Name)
 	}
 	var isPkColumn bool
 	if table.HasPrimaryKey() && len(table.PrimaryKey.Columns) == 1 && col.Name == table.PrimaryKey.Columns[0].Name {
 		isPkColumn = true
 	}
-	if !val.Valid && isPkColumn && !table.PrimaryKey.Autoincrement {
+	if !val.IsValid() && isPkColumn && !table.PrimaryKey.Autoincrement {
 		return fmt.Errorf("primary key on field %q cannot be NULL", col.Name)
 	}
-	if !val.Valid && !col.Nullable && !isPkColumn {
+	if !val.IsValid() && !col.Nullable && !isPkColumn {
 		return fmt.Errorf("field %q cannot be NULL", col.Name)
 	}
 	if err := isValueValidForColumn(col, val); err != nil {
@@ -1709,57 +1705,46 @@ func (s Statement) validateColumnValue(table *Table, col Column, val OptionalVal
 }
 
 func isValueValidForColumn(col Column, val OptionalValue) error {
-	if !val.Valid {
+	if !val.IsValid() {
 		return nil
 	}
 	// Skip validation for expression values — these are evaluated at execution time.
-	if _, isExpr := val.Value.(*Expr); isExpr {
+	if val.IsExpr() {
 		return nil
 	}
 	switch col.Kind {
 	case Boolean:
-		_, ok := val.Value.(bool)
-		if !ok {
+		if val.Kind() != ovalBoolean {
 			return fmt.Errorf("expects BOOLEAN value for %q", col.Name)
 		}
 	case Int4:
-		_, ok := val.Value.(int64)
-		if !ok {
-			_, ok2 := val.Value.(int32)
-			if !ok2 {
-				return fmt.Errorf("expects INT4 value for %q", col.Name)
-			}
+		if val.Kind() != ovalInt4 && val.Kind() != ovalInt8 {
+			return fmt.Errorf("expects INT4 value for %q", col.Name)
 		}
 	case Int8:
-		_, ok := val.Value.(int64)
-		if !ok {
+		if val.Kind() != ovalInt8 {
 			return fmt.Errorf("expects INT8 value for %q", col.Name)
 		}
 	case Real:
-		_, ok := val.Value.(float64)
-		if !ok {
-			_, ok2 := val.Value.(float32)
-			if !ok2 {
-				return fmt.Errorf("expects REAL value for %q", col.Name)
-			}
+		if val.Kind() != ovalReal && val.Kind() != ovalDouble {
+			return fmt.Errorf("expects REAL value for %q", col.Name)
 		}
 	case Double:
-		_, ok := val.Value.(float64)
-		if !ok {
+		if val.Kind() != ovalDouble {
 			return fmt.Errorf("expects DOUBLE value for %q", col.Name)
 		}
 	case Varchar, Text:
-		tp, ok := val.Value.(TextPointer)
-		if !ok {
+		if val.Kind() != ovalVarchar && val.Kind() != ovalText {
 			return fmt.Errorf("expects a text value for %q", col.Name)
 		}
+		tp := val.AsTextPointer()
 		switch col.Kind {
 		case Varchar:
-			if utf8.RuneCountInString(val.Value.(TextPointer).String()) > int(col.Size) {
+			if utf8.RuneCountInString(tp.String()) > int(col.Size) {
 				return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", col.Name, col.Size)
 			}
 		case Text:
-			if utf8.RuneCountInString(val.Value.(TextPointer).String()) > MaxOverflowTextSize {
+			if utf8.RuneCountInString(tp.String()) > MaxOverflowTextSize {
 				return fmt.Errorf("field %q exceeds maximum TEXT length of %d", col.Name, MaxOverflowTextSize)
 			}
 		}
@@ -1767,24 +1752,23 @@ func isValueValidForColumn(col Column, val OptionalValue) error {
 			return fmt.Errorf("expects valid UTF-8 string for %q", col.Name)
 		}
 	case Timestamp:
-		_, ok := val.Value.(TimestampMicros)
-		if !ok {
+		if val.Kind() != ovalTimestamp {
 			return fmt.Errorf("expects timestamp value for %q", col.Name)
 		}
 	case JSON:
-		tp, ok := val.Value.(TextPointer)
-		if !ok {
+		if val.Kind() != ovalJSON && val.Kind() != ovalVarchar && val.Kind() != ovalText {
 			return fmt.Errorf("expects a text value for JSON column %q", col.Name)
 		}
+		tp := val.AsTextPointer()
 		if _, err := normaliseJSON(tp.String()); err != nil {
 			return fmt.Errorf("field %q: %w", col.Name, err)
 		}
 	case UUID:
-		switch v := val.Value.(type) {
-		case UUIDValue:
+		switch val.Kind() {
+		case ovalUUID:
 			// already validated
-		case TextPointer:
-			if _, err := ParseUUID(v.String()); err != nil {
+		case ovalVarchar, ovalText:
+			if _, err := ParseUUID(val.AsTextPointer().String()); err != nil {
 				return fmt.Errorf("field %q: %w", col.Name, err)
 			}
 		default:
@@ -1911,22 +1895,26 @@ func (s Statement) createTableDDL() string {
 			}
 			if col.DefaultValueNow {
 				sb.WriteString(" default now()")
-			} else if col.DefaultValue.Valid {
+			} else if col.DefaultValue.IsValid() {
 				switch col.Kind {
 				case Boolean:
-					if col.DefaultValue.Value.(bool) {
+					if col.DefaultValue.AsBool() {
 						sb.WriteString(" default true")
 					} else {
 						sb.WriteString(" default false")
 					}
-				case Int4, Int8:
-					fmt.Fprintf(&sb, " default %d", col.DefaultValue.Value.(int64))
-				case Real, Double:
-					fmt.Fprintf(&sb, " default %f", col.DefaultValue.Value.(float64))
+				case Int4:
+					fmt.Fprintf(&sb, " default %d", col.DefaultValue.AsInt4())
+				case Int8:
+					fmt.Fprintf(&sb, " default %d", col.DefaultValue.AsInt8())
+				case Real:
+					fmt.Fprintf(&sb, " default %f", col.DefaultValue.AsReal())
+				case Double:
+					fmt.Fprintf(&sb, " default %f", col.DefaultValue.AsDouble())
 				case Varchar, Text:
-					fmt.Fprintf(&sb, " default '%s'", col.DefaultValue.Value.(TextPointer).String())
+					fmt.Fprintf(&sb, " default '%s'", col.DefaultValue.AsTextPointer().String())
 				case Timestamp:
-					fmt.Fprintf(&sb, " default '%s'", FromMicroseconds(int64(col.DefaultValue.Value.(TimestampMicros))).String())
+					fmt.Fprintf(&sb, " default '%s'", FromMicroseconds(int64(col.DefaultValue.AsTimestamp())).String())
 				}
 			}
 			if col.Check != "" {
@@ -2045,7 +2033,7 @@ func (s Statement) resolveExcludedRefs(insertIdx int) Statement {
 	}
 	hasRef := false
 	for _, val := range s.Updates {
-		if _, ok := val.Value.(ExcludedRef); ok {
+		if val.IsExcludedRef() {
 			hasRef = true
 			break
 		}
@@ -2055,10 +2043,10 @@ func (s Statement) resolveExcludedRefs(insertIdx int) Statement {
 	}
 	resolved := maps.Clone(s.Updates)
 	for colName, val := range resolved {
-		ref, ok := val.Value.(ExcludedRef)
-		if !ok {
+		if !val.IsExcludedRef() {
 			continue
 		}
+		ref := val.AsExcludedRef()
 		if proposed, found := s.insertValueForColumnName(insertIdx, ref.Column); found {
 			resolved[colName] = proposed
 		}

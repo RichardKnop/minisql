@@ -24,7 +24,7 @@ func TestResolveSetSubqueries_NoSubqueries(t *testing.T) {
 		Kind:      Update,
 		TableName: "employees",
 		Updates: map[string]OptionalValue{
-			"dept_id": {Valid: true, Value: int64(1)},
+			"dept_id": MakeInt8(int64(1)),
 		},
 	}
 	ctx := context.Background()
@@ -32,7 +32,7 @@ func TestResolveSetSubqueries_NoSubqueries(t *testing.T) {
 	require.NoError(t, err)
 	_, ok := correlatedSetUpdatesFromContext(newCtx)
 	assert.False(t, ok, "no correlatedSetUpdates should be in context when there are no subqueries")
-	assert.Equal(t, int64(1), stmt.Updates["dept_id"].Value, "literal value must be unchanged")
+	assert.Equal(t, int64(1), stmt.Updates["dept_id"].AsInt8(), "literal value must be unchanged")
 }
 
 func TestResolveSetSubqueries_TableNotFound(t *testing.T) {
@@ -42,7 +42,7 @@ func TestResolveSetSubqueries_TableNotFound(t *testing.T) {
 	stmt := &Statement{
 		Kind:      Update,
 		TableName: "no_such_table",
-		Updates:   map[string]OptionalValue{"dept_id": {Valid: true, Value: inner}},
+		Updates:   map[string]OptionalValue{"dept_id": MakeStatement(inner)},
 	}
 	ctx := context.Background()
 	newCtx, err := db.resolveSetSubqueries(ctx, stmt)
@@ -74,14 +74,14 @@ func TestResolveSetSubqueries_NonCorrelated_OneRow(t *testing.T) {
 	stmt := &Statement{
 		Kind:      Update,
 		TableName: "employees",
-		Updates:   map[string]OptionalValue{"dept_id": {Valid: true, Value: inner}},
+		Updates:   map[string]OptionalValue{"dept_id": MakeStatement(inner)},
 	}
 	ctx := context.Background()
 	newCtx, err := db.resolveSetSubqueries(ctx, stmt)
 	require.NoError(t, err)
 	// The *Statement placeholder must be replaced with the scalar result (int64(1)).
-	assert.Equal(t, int64(1), stmt.Updates["dept_id"].Value)
-	assert.True(t, stmt.Updates["dept_id"].Valid)
+	assert.Equal(t, int64(1), stmt.Updates["dept_id"].AsInt8())
+	assert.True(t, stmt.Updates["dept_id"].IsValid())
 	// Non-correlated path does not populate the context map.
 	_, ok := correlatedSetUpdatesFromContext(newCtx)
 	assert.False(t, ok)
@@ -107,12 +107,12 @@ func TestResolveSetSubqueries_NonCorrelated_NoRows(t *testing.T) {
 	stmt := &Statement{
 		Kind:      Update,
 		TableName: "employees",
-		Updates:   map[string]OptionalValue{"dept_id": {Valid: true, Value: inner}},
+		Updates:   map[string]OptionalValue{"dept_id": MakeStatement(inner)},
 	}
 	ctx := context.Background()
 	_, err := db.resolveSetSubqueries(ctx, stmt)
 	require.NoError(t, err)
-	assert.False(t, stmt.Updates["dept_id"].Valid, "zero-row subquery should produce NULL")
+	assert.True(t, stmt.Updates["dept_id"].IsNull(), "zero-row subquery should produce NULL")
 }
 
 func TestResolveSetSubqueries_NonCorrelated_MultipleRows(t *testing.T) {
@@ -127,7 +127,7 @@ func TestResolveSetSubqueries_NonCorrelated_MultipleRows(t *testing.T) {
 	stmt := &Statement{
 		Kind:      Update,
 		TableName: "employees",
-		Updates:   map[string]OptionalValue{"dept_id": {Valid: true, Value: inner}},
+		Updates:   map[string]OptionalValue{"dept_id": MakeStatement(inner)},
 	}
 	ctx := context.Background()
 	_, err := db.resolveSetSubqueries(ctx, stmt)
@@ -158,7 +158,7 @@ func TestResolveSetSubqueries_Correlated(t *testing.T) {
 		Kind:       Update,
 		TableName:  "employees",
 		TableAlias: "e",
-		Updates:    map[string]OptionalValue{"dept_id": {Valid: true, Value: inner}},
+		Updates:    map[string]OptionalValue{"dept_id": MakeStatement(inner)},
 	}
 	ctx := context.Background()
 	newCtx, err := db.resolveSetSubqueries(ctx, stmt)
@@ -172,8 +172,7 @@ func TestResolveSetSubqueries_Correlated(t *testing.T) {
 
 	// The *Statement placeholder must remain in stmt.Updates so that validateUpdate
 	// can verify there is at least one field to update.
-	_, isStmt := stmt.Updates["dept_id"].Value.(*Statement)
-	assert.True(t, isStmt, "*Statement placeholder must not be removed from stmt.Updates")
+	assert.True(t, stmt.Updates["dept_id"].IsStatement(), "*Statement placeholder must not be removed from stmt.Updates")
 
 	// Verify per-row results: Alice has dept_id=0 (no match → NULL),
 	// Bob has dept_id=2 (matches dept id=2 → int64(2)).
@@ -183,11 +182,11 @@ func TestResolveSetSubqueries_Correlated(t *testing.T) {
 		if !exists {
 			continue
 		}
-		if !v.Valid {
+		if v.IsNull() {
 			nullCount += 1
 		} else {
 			matchCount += 1
-			assert.Equal(t, int64(2), v.Value, "matched dept id must be 2")
+			assert.Equal(t, int64(2), v.AsInt8(), "matched dept id must be 2")
 		}
 	}
 	assert.Equal(t, 1, nullCount, "Alice (dept_id=0) should have NULL result")
@@ -273,7 +272,7 @@ func TestBindOuterOperand_QualifiedRef(t *testing.T) {
 	t.Parallel()
 
 	outerCols := []Column{{Name: "dept_id", Kind: Int8}}
-	outerRow := NewRowWithValues(outerCols, []OptionalValue{{Valid: true, Value: int64(42)}})
+	outerRow := NewRowWithValues(outerCols, []OptionalValue{MakeInt8(int64(42))})
 
 	op := Operand{Type: OperandField, Value: Field{Name: "dept_id", AliasPrefix: "e"}}
 	bound := bindOuterOperand(op, outerRow, "employees", "e")
@@ -286,7 +285,7 @@ func TestBindOuterOperand_NonOuterRef(t *testing.T) {
 	t.Parallel()
 
 	outerCols := []Column{{Name: "dept_id", Kind: Int8}}
-	outerRow := NewRowWithValues(outerCols, []OptionalValue{{Valid: true, Value: int64(42)}})
+	outerRow := NewRowWithValues(outerCols, []OptionalValue{MakeInt8(int64(42))})
 
 	// AliasPrefix is "depts" — refers to inner table, not outer.
 	op := Operand{Type: OperandField, Value: Field{Name: "id", AliasPrefix: "depts"}}
@@ -300,7 +299,7 @@ func TestBindOuterOperand_NullValue(t *testing.T) {
 	t.Parallel()
 
 	outerCols := []Column{{Name: "x", Kind: Int8}}
-	outerRow := NewRowWithValues(outerCols, []OptionalValue{{Valid: false}})
+	outerRow := NewRowWithValues(outerCols, []OptionalValue{MakeNull()})
 
 	op := Operand{Type: OperandField, Value: Field{Name: "x", AliasPrefix: "t"}}
 	bound := bindOuterOperand(op, outerRow, "tbl", "t")
@@ -312,7 +311,7 @@ func TestBindOuterRowToStatement(t *testing.T) {
 	t.Parallel()
 
 	outerCols := []Column{{Name: "dept_id", Kind: Int8}}
-	outerRow := NewRowWithValues(outerCols, []OptionalValue{{Valid: true, Value: int64(7)}})
+	outerRow := NewRowWithValues(outerCols, []OptionalValue{MakeInt8(int64(7))})
 
 	inner := Statement{
 		Kind:      Select,
@@ -348,14 +347,14 @@ func TestOperandFromOptionalValue(t *testing.T) {
 		wantType OperandType
 		wantVal  any
 	}{
-		{"null", OptionalValue{Valid: false}, OperandNull, nil},
-		{"int64", OptionalValue{Valid: true, Value: int64(5)}, OperandInteger, int64(5)},
-		{"int32", OptionalValue{Valid: true, Value: int32(3)}, OperandInteger, int64(3)},
-		{"float64", OptionalValue{Valid: true, Value: float64(1.5)}, OperandFloat, float64(1.5)},
-		{"float32", OptionalValue{Valid: true, Value: float32(2.5)}, OperandFloat, float64(float32(2.5))},
-		{"bool", OptionalValue{Valid: true, Value: true}, OperandBoolean, true},
-		{"TextPointer", OptionalValue{Valid: true, Value: NewTextPointer([]byte("hi"))}, OperandQuotedString, "hi"},
-		{"string", OptionalValue{Valid: true, Value: "hello"}, OperandQuotedString, "hello"},
+		{"null", MakeNull(), OperandNull, nil},
+		{"int64", MakeInt8(int64(5)), OperandInteger, int64(5)},
+		{"int32", MakeInt4(int32(3)), OperandInteger, int64(3)},
+		{"float64", MakeDouble(float64(1.5)), OperandFloat, float64(1.5)},
+		{"float32", MakeReal(float32(2.5)), OperandFloat, float64(float32(2.5))},
+		{"bool", MakeBool(true), OperandBoolean, true},
+		{"TextPointer", MakeVarchar(NewTextPointer([]byte("hi"))), OperandQuotedString, "hi"},
+		{"string", MakeVarchar(NewTextPointer([]byte("hello"))), OperandQuotedString, "hello"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -373,12 +372,12 @@ func TestContextWithCorrelatedSetUpdates(t *testing.T) {
 	t.Parallel()
 
 	updates := correlatedSetUpdates{
-		RowID(1): {"salary": {Valid: true, Value: int64(5000)}},
+		RowID(1): {"salary": MakeInt8(int64(5000))},
 	}
 	ctx := contextWithCorrelatedSetUpdates(context.Background(), updates)
 	got, ok := correlatedSetUpdatesFromContext(ctx)
 	require.True(t, ok)
-	assert.Equal(t, int64(5000), got[RowID(1)]["salary"].Value)
+	assert.Equal(t, int64(5000), got[RowID(1)]["salary"].AsInt8())
 }
 
 func TestCorrelatedSetUpdatesFromContext_Missing(t *testing.T) {

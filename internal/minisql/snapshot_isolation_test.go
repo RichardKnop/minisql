@@ -37,8 +37,8 @@ func insertSnapshotRow(
 			Fields:    fieldsFromColumns(snapshotColumns...),
 			Inserts: [][]OptionalValue{
 				{
-					{Value: id, Valid: true},
-					{Value: NewTextPointer([]byte(name)), Valid: true},
+					MakeInt8(id),
+					MakeVarchar(NewTextPointer([]byte(name))),
 				},
 			},
 		})
@@ -97,7 +97,7 @@ func TestSnapshotIsolation_ReadDoesNotSeeWriteAfterStart(t *testing.T) {
 	rows := selectAllSnapshot(readCtx, t, table)
 	assert.Len(t, rows, 1, "snapshot reader must not see write committed after it started")
 	if len(rows) == 1 {
-		assert.Equal(t, int64(1), rows[0].Values[0].Value)
+		assert.Equal(t, int64(1), rows[0].Values[0].AsAny())
 	}
 
 	// Commit the read transaction — must always succeed.
@@ -274,8 +274,8 @@ func TestSnapshotIsolation_ConcurrentReadWrite(t *testing.T) {
 						Fields:    fieldsFromColumns(snapshotColumns...),
 						Inserts: [][]OptionalValue{
 							{
-								{Value: id, Valid: true},
-								{Value: NewTextPointer([]byte("concurrent")), Valid: true},
+								MakeInt8(id),
+								MakeVarchar(NewTextPointer([]byte("concurrent"))),
 							},
 						},
 					})

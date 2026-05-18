@@ -67,19 +67,19 @@ func (p *parserItem) doParseInsert() error {
 	case stepInsertValues:
 		specialValue := strings.ToUpper(p.peek())
 		if specialValue == "?" {
-			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.OptionalValue{Value: minisql.Placeholder{}, Valid: true})
+			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.MakePlaceholder())
 			p.pop()
 			p.step = stepInsertValuesCommaOrClosingParens
 			return nil
 		}
 		if specialValue == "NULL" {
-			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.OptionalValue{Valid: false})
+			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.MakeNull())
 			p.pop()
 			p.step = stepInsertValuesCommaOrClosingParens
 			return nil
 		}
 		if specialValue == "NOW()" {
-			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.OptionalValue{Value: minisql.FunctionNow, Valid: true})
+			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.MakeFunction(minisql.FunctionNow))
 			p.pop()
 			p.step = stepInsertValuesCommaOrClosingParens
 			return nil
@@ -88,9 +88,9 @@ func (p *parserItem) doParseInsert() error {
 		if ln > 0 {
 			var insertValue minisql.OptionalValue
 			if strValue, ok := value.(string); ok {
-				insertValue = minisql.OptionalValue{Value: minisql.NewTextPointer([]byte(strValue)), Valid: true}
+				insertValue = minisql.MakeVarchar(minisql.NewTextPointer([]byte(strValue)))
 			} else {
-				insertValue = minisql.OptionalValue{Value: value, Valid: true}
+				insertValue = minisql.OptionalValueFromParserAny(value)
 			}
 			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], insertValue)
 			p.pop()
@@ -172,10 +172,7 @@ func (p *parserItem) doParseInsert() error {
 		// EXCLUDED.column_name — reference to the proposed (rejected) row's value.
 		if strings.HasPrefix(strings.ToUpper(token), "EXCLUDED.") {
 			colName := token[len("EXCLUDED."):]
-			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{
-				Value: minisql.ExcludedRef{Column: colName},
-				Valid: true,
-			})
+			p.setUpdate(p.nextUpdateField, minisql.MakeExcludedRef(minisql.ExcludedRef{Column: colName}))
 			p.nextUpdateField = ""
 			p.pop()
 			p.step = stepInsertOnConflictUpdateComma
@@ -184,15 +181,15 @@ func (p *parserItem) doParseInsert() error {
 		specialValue := strings.ToUpper(token)
 		switch specialValue {
 		case "?":
-			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: minisql.Placeholder{}, Valid: true})
+			p.setUpdate(p.nextUpdateField, minisql.MakePlaceholder())
 			p.nextUpdateField = ""
 			p.pop()
 		case "NULL":
-			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Valid: false})
+			p.setUpdate(p.nextUpdateField, minisql.MakeNull())
 			p.nextUpdateField = ""
 			p.pop()
 		case "NOW()":
-			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: minisql.FunctionNow, Valid: true})
+			p.setUpdate(p.nextUpdateField, minisql.MakeFunction(minisql.FunctionNow))
 			p.nextUpdateField = ""
 			p.pop()
 		default:
@@ -202,9 +199,9 @@ func (p *parserItem) doParseInsert() error {
 			}
 			var v minisql.OptionalValue
 			if strValue, ok := value.(string); ok {
-				v = minisql.OptionalValue{Value: minisql.NewTextPointer([]byte(strValue)), Valid: true}
+				v = minisql.MakeVarchar(minisql.NewTextPointer([]byte(strValue)))
 			} else {
-				v = minisql.OptionalValue{Value: value, Valid: true}
+				v = minisql.OptionalValueFromParserAny(value)
 			}
 			p.setUpdate(p.nextUpdateField, v)
 			p.nextUpdateField = ""

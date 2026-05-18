@@ -50,7 +50,7 @@ func innerIsPushdownEligible(inner Statement) bool {
 	if len(inner.GroupBy) > 0 || len(inner.Aggregates) > 0 || len(inner.Having) > 0 {
 		return false
 	}
-	if inner.Limit.Valid || inner.Offset.Valid {
+	if inner.Limit.IsValid() || inner.Offset.IsValid() {
 		return false
 	}
 	if len(inner.Unions) > 0 {

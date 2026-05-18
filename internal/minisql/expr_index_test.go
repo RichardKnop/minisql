@@ -418,9 +418,9 @@ func TestEvalExprIndexKey(t *testing.T) {
 		{Name: "qty", Kind: Int8},
 	}
 	row := NewRowWithValues(cols, []OptionalValue{
-		{Value: float64(9.99), Valid: true},
-		{Value: NewTextPointer([]byte("widget")), Valid: true},
-		{Value: int64(5), Valid: true},
+		MakeDouble(float64(9.99)),
+		MakeVarchar(NewTextPointer([]byte("widget"))),
+		MakeInt8(int64(5)),
 	})
 
 	t.Run("string column lower", func(t *testing.T) {
@@ -451,7 +451,7 @@ func TestEvalExprIndexKey(t *testing.T) {
 	t.Run("NULL column not indexed", func(t *testing.T) {
 		t.Parallel()
 		nullCols := []Column{{Name: "name", Kind: Varchar}}
-		nullRow := NewRowWithValues(nullCols, []OptionalValue{{Value: nil, Valid: false}})
+		nullRow := NewRowWithValues(nullCols, []OptionalValue{MakeNull()})
 		expr := &Expr{FuncName: "LOWER", Args: []*Expr{{Column: "name"}}}
 		synCol := syntheticExprColumn(Varchar)
 		key, ok, err := evalExprIndexKey(expr, synCol, nullRow)

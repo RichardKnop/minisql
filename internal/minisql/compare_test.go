@@ -149,28 +149,28 @@ func TestCompareValues(t *testing.T) {
 
 	t.Run("both NULL are equal", func(t *testing.T) {
 		t.Parallel()
-		assert.Equal(t, 0, compareValues(OptionalValue{Valid: false}, OptionalValue{Valid: false}))
+		assert.Equal(t, 0, compareValues(MakeNull(), MakeNull()))
 	})
 
 	t.Run("NULL is less than any value", func(t *testing.T) {
 		t.Parallel()
-		null := OptionalValue{Valid: false}
-		nonNull := OptionalValue{Value: int64(0), Valid: true}
+		null := MakeNull()
+		nonNull := MakeInt8(int64(0))
 		assert.Equal(t, -1, compareValues(null, nonNull))
 	})
 
 	t.Run("any value is greater than NULL", func(t *testing.T) {
 		t.Parallel()
-		null := OptionalValue{Valid: false}
-		nonNull := OptionalValue{Value: int64(0), Valid: true}
+		null := MakeNull()
+		nonNull := MakeInt8(int64(0))
 		assert.Equal(t, 1, compareValues(nonNull, null))
 	})
 
 	t.Run("delegates to compareAny for non-NULL values", func(t *testing.T) {
 		t.Parallel()
-		lo := OptionalValue{Value: int64(1), Valid: true}
-		hi := OptionalValue{Value: int64(2), Valid: true}
-		eq := OptionalValue{Value: int64(1), Valid: true}
+		lo := MakeInt8(int64(1))
+		hi := MakeInt8(int64(2))
+		eq := MakeInt8(int64(1))
 		assert.Equal(t, -1, compareValues(lo, hi))
 		assert.Equal(t, 1, compareValues(hi, lo))
 		assert.Equal(t, 0, compareValues(lo, eq))
@@ -178,8 +178,8 @@ func TestCompareValues(t *testing.T) {
 
 	t.Run("string values", func(t *testing.T) {
 		t.Parallel()
-		a := OptionalValue{Value: "apple", Valid: true}
-		b := OptionalValue{Value: "banana", Valid: true}
+		a := MakeVarchar(NewTextPointer([]byte("apple")))
+		b := MakeVarchar(NewTextPointer([]byte("banana")))
 		assert.Equal(t, -1, compareValues(a, b))
 		assert.Equal(t, 1, compareValues(b, a))
 		assert.Equal(t, 0, compareValues(a, a))

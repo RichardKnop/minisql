@@ -868,13 +868,13 @@ func (t *Table) freeOverflowPages(ctx context.Context, row Row, onlyForColumns .
 			continue
 		}
 		value, ok := row.GetValue(col.Name)
-		if !ok || !value.Valid {
+		if !ok || !value.IsValid() {
 			continue
 		}
-		textPointer, ok := value.Value.(TextPointer)
-		if !ok {
+		if !value.IsTextLike() {
 			return fmt.Errorf("expected TextPointer value for text column %s", col.Name)
 		}
+		textPointer := value.AsTextPointer()
 		if textPointer.IsInline() {
 			continue
 		}

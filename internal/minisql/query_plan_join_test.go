@@ -468,7 +468,7 @@ func TestNullRowForColumns(t *testing.T) {
 
 	require.Len(t, row.Values, len(cols))
 	for i, v := range row.Values {
-		assert.False(t, v.Valid, "column %d (%s) should be NULL", i, cols[i].Name)
+		assert.False(t, v.IsValid(), "column %d (%s) should be NULL", i, cols[i].Name)
 	}
 	assert.Len(t, row.Columns, len(cols))
 }
@@ -486,12 +486,12 @@ func TestCombineRows(t *testing.T) {
 	}
 
 	outerRow := NewRowWithValues(outerCols, []OptionalValue{
-		{Value: int64(1), Valid: true},
-		{Value: NewTextPointer([]byte("Alice")), Valid: true},
+		MakeInt8(int64(1)),
+		MakeVarchar(NewTextPointer([]byte("Alice"))),
 	})
 	innerRow := NewRowWithValues(innerCols, []OptionalValue{
-		{Value: int64(10), Valid: true},
-		{Value: int64(200), Valid: true},
+		MakeInt8(int64(10)),
+		MakeInt8(int64(200)),
 	})
 
 	combined := combineRows(outerRow, innerRow, "u", "o")
@@ -505,11 +505,11 @@ func TestCombineRows(t *testing.T) {
 	// Values are accessible by prefixed name
 	v, ok := combined.GetValue("u.id")
 	require.True(t, ok)
-	assert.Equal(t, int64(1), v.Value)
+	assert.Equal(t, int64(1), v.AsAny())
 
 	v, ok = combined.GetValue("o.amount")
 	require.True(t, ok)
-	assert.Equal(t, int64(200), v.Value)
+	assert.Equal(t, int64(200), v.AsAny())
 }
 
 func TestCombineRows_NullInner(t *testing.T) {
@@ -518,7 +518,7 @@ func TestCombineRows_NullInner(t *testing.T) {
 	outerCols := []Column{{Name: "id", Kind: Int8, Size: 8}}
 	innerCols := []Column{{Name: "user_id", Kind: Int8, Size: 8}}
 
-	outer := NewRowWithValues(outerCols, []OptionalValue{{Value: int64(1), Valid: true}})
+	outer := NewRowWithValues(outerCols, []OptionalValue{MakeInt8(int64(1))})
 	nullInner := nullRowForColumns(innerCols)
 
 	combined := combineRows(outer, nullInner, "u", "o")
@@ -526,7 +526,7 @@ func TestCombineRows_NullInner(t *testing.T) {
 	require.Len(t, combined.Columns, 2)
 	v, ok := combined.GetValue("o.user_id")
 	require.True(t, ok)
-	assert.False(t, v.Valid, "inner column should be NULL")
+	assert.False(t, v.IsValid(), "inner column should be NULL")
 }
 
 func TestCombineRowsProgressive(t *testing.T) {
@@ -538,13 +538,13 @@ func TestCombineRowsProgressive(t *testing.T) {
 		{Name: "o.amount", Kind: Int8, Size: 8},
 	}
 	existingRow := NewRowWithValues(existingCols, []OptionalValue{
-		{Value: int64(1), Valid: true},
-		{Value: int64(100), Valid: true},
+		MakeInt8(int64(1)),
+		MakeInt8(int64(100)),
 	})
 
 	newCols := []Column{{Name: "status", Kind: Varchar, Size: 20}}
 	newRow := NewRowWithValues(newCols, []OptionalValue{
-		{Value: NewTextPointer([]byte("shipped")), Valid: true},
+		MakeVarchar(NewTextPointer([]byte("shipped"))),
 	})
 
 	combined := combineRowsProgressive(existingRow, newRow, "s")
@@ -556,7 +556,7 @@ func TestCombineRowsProgressive(t *testing.T) {
 
 	v, ok := combined.GetValue("s.status")
 	require.True(t, ok)
-	assert.True(t, v.Valid)
+	assert.True(t, v.IsValid())
 }
 
 func TestBuildCombinedColumns(t *testing.T) {
@@ -628,12 +628,12 @@ func TestCombineRowsWithSchema(t *testing.T) {
 	combinedCols := buildCombinedColumns(outerCols, "u", innerCols, "o")
 
 	outerRow := NewRowWithValues(outerCols, []OptionalValue{
-		{Value: int64(1), Valid: true},
-		{Value: NewTextPointer([]byte("Alice")), Valid: true},
+		MakeInt8(int64(1)),
+		MakeVarchar(NewTextPointer([]byte("Alice"))),
 	})
 	innerRow := NewRowWithValues(innerCols, []OptionalValue{
-		{Value: int64(10), Valid: true},
-		{Value: int64(200), Valid: true},
+		MakeInt8(int64(10)),
+		MakeInt8(int64(200)),
 	})
 
 	combined := combineRowsWithSchema(outerRow, innerRow, combinedCols)
@@ -644,11 +644,11 @@ func TestCombineRowsWithSchema(t *testing.T) {
 
 	v, ok := combined.GetValue("u.id")
 	require.True(t, ok)
-	assert.Equal(t, int64(1), v.Value)
+	assert.Equal(t, int64(1), v.AsAny())
 
 	v, ok = combined.GetValue("o.amount")
 	require.True(t, ok)
-	assert.Equal(t, int64(200), v.Value)
+	assert.Equal(t, int64(200), v.AsAny())
 }
 
 func TestCombineRowWithNullInner(t *testing.T) {
@@ -664,7 +664,7 @@ func TestCombineRowWithNullInner(t *testing.T) {
 	combinedCols := buildCombinedColumns(outerCols, "u", innerCols, "o")
 
 	outer := NewRowWithValues(outerCols, []OptionalValue{
-		{Value: int64(42), Valid: true},
+		MakeInt8(int64(42)),
 	})
 
 	combined := combineRowWithNullInner(outer, len(innerCols), combinedCols)
@@ -675,17 +675,17 @@ func TestCombineRowWithNullInner(t *testing.T) {
 	// Outer value is preserved.
 	v, ok := combined.GetValue("u.id")
 	require.True(t, ok)
-	assert.Equal(t, int64(42), v.Value)
-	assert.True(t, v.Valid)
+	assert.Equal(t, int64(42), v.AsAny())
+	assert.True(t, v.IsValid())
 
 	// Inner values are zero-value (NULL).
 	v, ok = combined.GetValue("o.user_id")
 	require.True(t, ok)
-	assert.False(t, v.Valid)
+	assert.False(t, v.IsValid())
 
 	v, ok = combined.GetValue("o.total")
 	require.True(t, ok)
-	assert.False(t, v.Valid)
+	assert.False(t, v.IsValid())
 }
 
 func TestCompileJoinConditions(t *testing.T) {
@@ -696,8 +696,8 @@ func TestCompileJoinConditions(t *testing.T) {
 		{Name: "o.user_id", Kind: Int8, Size: 8},
 	}
 	row := NewRowWithValues(cols, []OptionalValue{
-		{Value: int64(42), Valid: true},
-		{Value: int64(42), Valid: true},
+		MakeInt8(int64(42)),
+		MakeInt8(int64(42)),
 	})
 
 	t.Run("no conditions always matches", func(t *testing.T) {
@@ -724,8 +724,8 @@ func TestCompileJoinConditions(t *testing.T) {
 			{Name: "o.user_id", Kind: Int8, Size: 8},
 		}
 		mismatchRow := NewRowWithValues(mismatchCols, []OptionalValue{
-			{Value: int64(1), Valid: true},
-			{Value: int64(99), Valid: true},
+			MakeInt8(int64(1)),
+			MakeInt8(int64(99)),
 		})
 		cond := FieldIsEqual(
 			Field{AliasPrefix: "u", Name: "id"},
@@ -1050,7 +1050,7 @@ func TestChanRowCallback(t *testing.T) {
 		ch := make(chan Row, 1)
 		cb := chanRowCallback(ctx, ch)
 
-		row := NewRowWithValues([]Column{{Name: "id", Kind: Int8, Size: 8}}, []OptionalValue{{Value: int64(1), Valid: true}})
+		row := NewRowWithValues([]Column{{Name: "id", Kind: Int8, Size: 8}}, []OptionalValue{MakeInt8(int64(1))})
 		err := cb(row)
 		require.NoError(t, err)
 
@@ -1064,7 +1064,7 @@ func TestChanRowCallback(t *testing.T) {
 		ch := make(chan Row) // unbuffered — send would block
 		cb := chanRowCallback(ctx, ch)
 
-		row := NewRowWithValues([]Column{{Name: "id", Kind: Int8, Size: 8}}, []OptionalValue{{Value: int64(1), Valid: true}})
+		row := NewRowWithValues([]Column{{Name: "id", Kind: Int8, Size: 8}}, []OptionalValue{MakeInt8(int64(1))})
 		err := cb(row)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, context.Canceled)

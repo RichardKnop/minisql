@@ -63,14 +63,14 @@ func TestCTEBodyIsInlineEligible(t *testing.T) {
 	t.Run("has_limit", func(t *testing.T) {
 		t.Parallel()
 		body := makeSimpleBody("users", nil)
-		body.Limit = OptionalValue{Valid: true, Value: int64(10)}
+		body.Limit = MakeInt8(int64(10))
 		assert.False(t, cteBodyIsInlineEligible(body))
 	})
 
 	t.Run("has_offset", func(t *testing.T) {
 		t.Parallel()
 		body := makeSimpleBody("users", nil)
-		body.Offset = OptionalValue{Valid: true, Value: int64(5)}
+		body.Offset = MakeInt8(int64(5))
 		assert.False(t, cteBodyIsInlineEligible(body))
 	})
 

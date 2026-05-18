@@ -106,7 +106,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 	})
 
 	t.Run("Select single row by unique index key - index scan", func(t *testing.T) {
-		email := rows[5].Values[1].Value.(TextPointer)
+		email := rows[5].Values[1].AsTextPointer()
 		stmt := Statement{
 			Kind:   Select,
 			Fields: fieldsFromColumns(table.Columns...),
@@ -137,10 +137,10 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 
 	t.Run("Select multiple rows by unique index - index scan", func(t *testing.T) {
 		emails := []any{
-			rows[5].Values[1].Value.(TextPointer),
-			rows[11].Values[1].Value.(TextPointer),
-			rows[12].Values[1].Value.(TextPointer),
-			rows[33].Values[1].Value.(TextPointer),
+			rows[5].Values[1].AsTextPointer(),
+			rows[11].Values[1].AsTextPointer(),
+			rows[12].Values[1].AsTextPointer(),
+			rows[33].Values[1].AsTextPointer(),
 		}
 		stmt := Statement{
 			Kind:   Select,
@@ -178,10 +178,10 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 
 	t.Run("Select rows where unique key is NOT IN - sequential scan", func(t *testing.T) {
 		emails := []any{
-			rows[5].Values[1].Value.(TextPointer),
-			rows[11].Values[1].Value.(TextPointer),
-			rows[12].Values[1].Value.(TextPointer),
-			rows[33].Values[1].Value.(TextPointer),
+			rows[5].Values[1].AsTextPointer(),
+			rows[11].Values[1].AsTextPointer(),
+			rows[12].Values[1].AsTextPointer(),
+			rows[33].Values[1].AsTextPointer(),
 		}
 		stmt := Statement{
 			Kind:   Select,
@@ -224,11 +224,11 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 	sort.Slice(rowsOrderedByEmail, func(i, j int) bool {
 		email1, _ := rowsOrderedByEmail[i].GetValue("email")
 		email2, _ := rowsOrderedByEmail[j].GetValue("email")
-		return email1.Value.(TextPointer).String() < email2.Value.(TextPointer).String()
+		return email1.AsTextPointer().String() < email2.AsTextPointer().String()
 	})
 
 	t.Run("Select rows by range with lower bound - range scan", func(t *testing.T) {
-		email := rowsOrderedByEmail[10].Values[1].Value.(TextPointer)
+		email := rowsOrderedByEmail[10].Values[1].AsTextPointer()
 		stmt := Statement{
 			Kind:   Select,
 			Fields: fieldsFromColumns(table.Columns...),
@@ -266,7 +266,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 	})
 
 	t.Run("Select rows by range with upper bound - range scan", func(t *testing.T) {
-		email := rowsOrderedByEmail[30].Values[1].Value.(TextPointer)
+		email := rowsOrderedByEmail[30].Values[1].AsTextPointer()
 		stmt := Statement{
 			Kind:   Select,
 			Fields: fieldsFromColumns(table.Columns...),
@@ -304,8 +304,8 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 	})
 
 	t.Run("Select rows by range with both lower and upper bound - range scan", func(t *testing.T) {
-		email1 := rowsOrderedByEmail[10].Values[1].Value.(TextPointer)
-		email2 := rowsOrderedByEmail[30].Values[1].Value.(TextPointer)
+		email1 := rowsOrderedByEmail[10].Values[1].AsTextPointer()
+		email2 := rowsOrderedByEmail[30].Values[1].AsTextPointer()
 		stmt := Statement{
 			Kind:   Select,
 			Fields: fieldsFromColumns(table.Columns...),
@@ -384,7 +384,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 						Operator: Eq,
 						Operand2: Operand{
 							Type:  OperandQuotedString,
-							Value: email.Value,
+							Value: email.AsAny(),
 						},
 					},
 				},
@@ -422,7 +422,7 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 	sort.Slice(rowsOrderedByEmailDesc, func(i, j int) bool {
 		email1, _ := rowsOrderedByEmailDesc[i].GetValue("email")
 		email2, _ := rowsOrderedByEmailDesc[j].GetValue("email")
-		return email1.Value.(TextPointer).String() > email2.Value.(TextPointer).String()
+		return email1.AsTextPointer().String() > email2.AsTextPointer().String()
 	})
 
 	t.Run("Select with order by sort with index desc", func(t *testing.T) {

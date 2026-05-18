@@ -99,8 +99,8 @@ func insertRowInDB(t *testing.T, db *Database, tableName string, id int64, name 
 			Kind:   Insert,
 			Fields: fieldsFromColumns(tbl.Columns...),
 			Inserts: [][]OptionalValue{{
-				{Value: id, Valid: true},
-				{Value: NewTextPointer([]byte(name)), Valid: true},
+				MakeInt8(id),
+				MakeVarchar(NewTextPointer([]byte(name))),
 			}},
 		})
 		return err

@@ -195,25 +195,25 @@ func TestEstimateScanRows_AllTypes(t *testing.T) {
 	t.Run("sequential with row count", func(t *testing.T) {
 		t.Parallel()
 		got := estimateScanRows(table, Scan{Type: ScanTypeSequential})
-		assert.Equal(t, int64(42), got.Value)
+		assert.Equal(t, int64(42), got.AsAny())
 	})
 
 	t.Run("index all with row count", func(t *testing.T) {
 		t.Parallel()
 		got := estimateScanRows(table, Scan{Type: ScanTypeIndexAll})
-		assert.Equal(t, int64(42), got.Value)
+		assert.Equal(t, int64(42), got.AsAny())
 	})
 
 	t.Run("index first returns 1", func(t *testing.T) {
 		t.Parallel()
 		got := estimateScanRows(table, Scan{Type: ScanTypeIndexFirst})
-		assert.Equal(t, int64(1), got.Value)
+		assert.Equal(t, int64(1), got.AsAny())
 	})
 
 	t.Run("index last returns 1", func(t *testing.T) {
 		t.Parallel()
 		got := estimateScanRows(table, Scan{Type: ScanTypeIndexLast})
-		assert.Equal(t, int64(1), got.Value)
+		assert.Equal(t, int64(1), got.AsAny())
 	})
 
 	t.Run("index point no stats uses key count", func(t *testing.T) {
@@ -223,13 +223,13 @@ func TestEstimateScanRows_AllTypes(t *testing.T) {
 			IndexName: "nonexistent",
 			IndexKeys: []any{int64(1), int64(2)},
 		})
-		assert.Equal(t, int64(2), got.Value)
+		assert.Equal(t, int64(2), got.AsAny())
 	})
 
 	t.Run("index range no stats returns invalid", func(t *testing.T) {
 		t.Parallel()
 		got := estimateScanRows(table, Scan{Type: ScanTypeIndexRange, IndexName: "none"})
-		assert.False(t, got.Valid)
+		assert.False(t, got.IsValid())
 	})
 }
 
@@ -359,12 +359,12 @@ func TestBuildExplainResult_PlainPlan(t *testing.T) {
 
 	row := result.Rows.Row()
 	require.Len(t, row.Values, len(explainColumns))
-	assert.Equal(t, int64(1), row.Values[0].Value)
-	assert.Equal(t, "index_point", row.Values[1].Value.(TextPointer).String())
-	assert.Contains(t, row.Values[2].Value.(TextPointer).String(), "index=pkey__test_table")
-	assert.Equal(t, int64(1), row.Values[3].Value)
-	assert.False(t, row.Values[4].Valid)
-	assert.False(t, row.Values[5].Valid)
+	assert.Equal(t, int64(1), row.Values[0].AsAny())
+	assert.Equal(t, "index_point", row.Values[1].AsTextPointer().String())
+	assert.Contains(t, row.Values[2].AsTextPointer().String(), "index=pkey__test_table")
+	assert.Equal(t, int64(1), row.Values[3].AsAny())
+	assert.False(t, row.Values[4].IsValid())
+	assert.False(t, row.Values[5].IsValid())
 }
 
 func TestTable_AnalyzePlanSequentialScan(t *testing.T) {
@@ -376,12 +376,12 @@ func TestTable_AnalyzePlanSequentialScan(t *testing.T) {
 		Fields:  fieldsFromColumns(table.Columns...),
 		Inserts: [][]OptionalValue{
 			{
-				{Valid: true, Value: int64(1)},
-				{Valid: true, Value: NewTextPointer([]byte("a@example.com"))},
+				MakeInt8(int64(1)),
+				MakeVarchar(NewTextPointer([]byte("a@example.com"))),
 			},
 			{
-				{Valid: true, Value: int64(2)},
-				{Valid: true, Value: NewTextPointer([]byte("b@example.com"))},
+				MakeInt8(int64(2)),
+				MakeVarchar(NewTextPointer([]byte("b@example.com"))),
 			},
 		},
 	}

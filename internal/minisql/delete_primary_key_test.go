@@ -88,7 +88,7 @@ func TestTable_Delete_PrimaryKey(t *testing.T) {
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.AsInt8()),
 				},
 			},
 		}
@@ -188,8 +188,8 @@ func TestTable_Delete_CompositePrimaryKey(t *testing.T) {
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, firstName.Value),
-					FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, lastName.Value),
+					FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, firstName.AsAny()),
+					FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, lastName.AsAny()),
 				},
 			},
 		}

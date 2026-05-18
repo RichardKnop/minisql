@@ -25,9 +25,9 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 	)
 
 	// Set some values to NULL so we can test selecting/filtering on NULLs
-	rows[1].Values[2] = OptionalValue{Valid: false}
-	rows[3].Values[5] = OptionalValue{Valid: false}
-	rows[4].Values[5] = OptionalValue{Valid: false}
+	rows[1].Values[2] = MakeNull()
+	rows[3].Values[5] = MakeNull()
+	rows[4].Values[5] = MakeNull()
 
 	// Batch insert test rows
 	stmt := Statement{
@@ -59,7 +59,7 @@ func TestTable_Delete_RootLeafNode(t *testing.T) {
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.Value.(int64)),
+					FieldIsEqual(Field{Name: "id"}, OperandInteger, id.AsInt8()),
 				},
 			},
 		})
@@ -560,7 +560,7 @@ func rowIDs(rows ...Row) []any {
 	for _, r := range rows {
 		id, ok := r.GetValue("id")
 		if ok {
-			ids = append(ids, id.Value.(int64))
+			ids = append(ids, id.AsInt8())
 		}
 	}
 	return ids

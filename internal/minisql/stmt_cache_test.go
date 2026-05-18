@@ -143,7 +143,7 @@ func TestScanLimit_SimpleLimit(t *testing.T) {
 		TableName: testTableName,
 		Columns:   testColumns,
 		Fields:    []Field{{Name: "*"}},
-		Limit:     OptionalValue{Value: int64(10), Valid: true},
+		Limit:     MakeInt8(int64(10)),
 	}
 
 	plan, err := table.PlanQuery(ctx, stmt)
@@ -163,8 +163,8 @@ func TestScanLimit_OffsetPlusLimit(t *testing.T) {
 		TableName: testTableName,
 		Columns:   testColumns,
 		Fields:    []Field{{Name: "*"}},
-		Limit:     OptionalValue{Value: int64(20), Valid: true},
-		Offset:    OptionalValue{Value: int64(5), Valid: true},
+		Limit:     MakeInt8(int64(20)),
+		Offset:    MakeInt8(int64(5)),
 	}
 
 	plan, err := table.PlanQuery(ctx, stmt)
@@ -186,7 +186,7 @@ func TestScanLimit_SortInMemory_NoScanLimit(t *testing.T) {
 		Columns:   testColumns,
 		Fields:    []Field{{Name: "*"}},
 		OrderBy:   []OrderBy{{Field: Field{Name: "email"}, Direction: Asc}},
-		Limit:     OptionalValue{Value: int64(10), Valid: true},
+		Limit:     MakeInt8(int64(10)),
 	}
 
 	plan, err := table.PlanQuery(ctx, stmt)
@@ -209,7 +209,7 @@ func TestScanLimit_Distinct_NoScanLimit(t *testing.T) {
 		Columns:   testColumns,
 		Fields:    []Field{{Name: "*"}},
 		Distinct:  true,
-		Limit:     OptionalValue{Value: int64(10), Valid: true},
+		Limit:     MakeInt8(int64(10)),
 	}
 
 	plan, err := table.PlanQuery(ctx, stmt)
@@ -238,10 +238,10 @@ func TestScanLimit_CachedPlanNotMutated(t *testing.T) {
 	}
 
 	stmt10 := baseStmt
-	stmt10.Limit = OptionalValue{Value: int64(10), Valid: true}
+	stmt10.Limit = MakeInt8(int64(10))
 
 	stmt50 := baseStmt
-	stmt50.Limit = OptionalValue{Value: int64(50), Valid: true}
+	stmt50.Limit = MakeInt8(int64(50))
 
 	plan10, err := table.PlanQuery(ctx, stmt10)
 	require.NoError(t, err)

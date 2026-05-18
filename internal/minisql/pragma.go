@@ -139,7 +139,7 @@ func boolPragmaResult(cols []Column, enabled bool) StatementResult {
 	if enabled {
 		v = 1
 	}
-	row := NewRowWithValues(cols, []OptionalValue{{Value: v, Valid: true}})
+	row := NewRowWithValues(cols, []OptionalValue{MakeInt4(v)})
 	return StatementResult{
 		Columns: cols,
 		Rows:    rowsIterator([]Row{row}),
@@ -177,27 +177,27 @@ func integrityReportResult(checkName string, report IntegrityReport) StatementRe
 
 func integrityOKRow(checkName string) Row {
 	return NewRowWithValues(pragmaResultColumns, []OptionalValue{
-		{Value: NewTextPointer([]byte(checkName)), Valid: true},
-		{Value: NewTextPointer([]byte("ok")), Valid: true},
-		{},
-		{},
-		{Value: NewTextPointer([]byte("ok")), Valid: true},
+		MakeText(NewTextPointer([]byte(checkName))),
+		MakeText(NewTextPointer([]byte("ok"))),
+		MakeNull(),
+		MakeNull(),
+		MakeText(NewTextPointer([]byte("ok"))),
 	})
 }
 
 func integrityIssueRow(checkName string, issue IntegrityIssue) Row {
 	row := NewRowWithValues(pragmaResultColumns, []OptionalValue{
-		{Value: NewTextPointer([]byte(checkName)), Valid: true},
-		{Value: NewTextPointer([]byte(issue.Code)), Valid: true},
-		{},
-		{},
-		{Value: NewTextPointer([]byte(issue.Message)), Valid: true},
+		MakeText(NewTextPointer([]byte(checkName))),
+		MakeText(NewTextPointer([]byte(issue.Code))),
+		MakeNull(),
+		MakeNull(),
+		MakeText(NewTextPointer([]byte(issue.Message))),
 	})
 	if issue.Page != nil {
-		row.Values[2] = OptionalValue{Value: int64(*issue.Page), Valid: true}
+		row.Values[2] = MakeInt8(int64(*issue.Page))
 	}
 	if issue.Object != "" {
-		row.Values[3] = OptionalValue{Value: NewTextPointer([]byte(issue.Object)), Valid: true}
+		row.Values[3] = MakeText(NewTextPointer([]byte(issue.Object)))
 	}
 	return row
 }
@@ -212,7 +212,7 @@ var synchronousResultColumns = []Column{
 
 func synchronousResult(mode SynchronousMode) StatementResult {
 	row := NewRowWithValues(synchronousResultColumns, []OptionalValue{
-		{Value: int32(mode), Valid: true},
+		MakeInt4(int32(mode)),
 	})
 	return StatementResult{
 		Columns: synchronousResultColumns,
@@ -222,7 +222,7 @@ func synchronousResult(mode SynchronousMode) StatementResult {
 
 func walCheckpointResult() StatementResult {
 	row := NewRowWithValues(walCheckpointResultColumns, []OptionalValue{
-		{Value: NewTextPointer([]byte("ok")), Valid: true},
+		MakeText(NewTextPointer([]byte("ok"))),
 	})
 	return StatementResult{
 		Columns: walCheckpointResultColumns,

@@ -88,7 +88,7 @@ func TestTable_Insert_OnConflictDoUpdate_UniqueIndex(t *testing.T) {
 			ConflictAction: ConflictActionDoUpdate,
 			Inserts:        [][]OptionalValue{newRow.Values},
 			Updates: map[string]OptionalValue{
-				"id": {Value: int64(9999), Valid: true},
+				"id": MakeInt8(int64(9999)),
 			},
 		}
 
@@ -111,7 +111,7 @@ func TestTable_Insert_OnConflictDoUpdate_UniqueIndex(t *testing.T) {
 			// Reuse existing email (rows[0]) — triggers unique index conflict.
 			Inserts: [][]OptionalValue{rows[0].Values},
 			Updates: map[string]OptionalValue{
-				"id": {Value: newID, Valid: true},
+				"id": MakeInt8(newID),
 			},
 		}
 
@@ -133,7 +133,7 @@ func TestTable_Insert_OnConflictDoUpdate_UniqueIndex(t *testing.T) {
 					{
 						Operand1: Operand{Type: OperandField, Value: Field{Name: "email"}},
 						Operator: Eq,
-						Operand2: Operand{Type: OperandQuotedString, Value: rows[0].Values[1].Value},
+						Operand2: Operand{Type: OperandQuotedString, Value: rows[0].Values[1].AsAny()},
 					},
 				},
 			},
@@ -141,19 +141,19 @@ func TestTable_Insert_OnConflictDoUpdate_UniqueIndex(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, selectResult.Rows.Next(ctx))
 		updatedRow := selectResult.Rows.Row()
-		assert.Equal(t, newID, updatedRow.Values[0].Value.(int64))
+		assert.Equal(t, newID, updatedRow.Values[0].AsInt8())
 	})
 
 	t.Run("ON CONFLICT DO UPDATE with no actual change reports 0 rows affected", func(t *testing.T) {
 		// Update id to the same value it already has — no change.
-		existingID := rows[1].Values[0].Value.(int64)
+		existingID := rows[1].Values[0].AsInt8()
 		stmt := Statement{
 			Kind:           Insert,
 			Fields:         fieldsFromColumns(table.Columns...),
 			ConflictAction: ConflictActionDoUpdate,
 			Inserts:        [][]OptionalValue{rows[1].Values},
 			Updates: map[string]OptionalValue{
-				"id": {Value: existingID, Valid: true},
+				"id": MakeInt8(existingID),
 			},
 		}
 
@@ -179,7 +179,7 @@ func TestTable_Insert_OnConflictDoUpdate_UniqueIndex(t *testing.T) {
 				newRow.Values,  // no conflict → insert
 			},
 			Updates: map[string]OptionalValue{
-				"id": {Value: int64(100), Valid: true},
+				"id": MakeInt8(int64(100)),
 			},
 		}
 
@@ -270,7 +270,7 @@ func TestTable_Insert_OnConflictDoUpdate_ExcludedRef_UniqueIndex(t *testing.T) {
 		newID := int64(77)
 		// Same email as rows[0] → conflict. EXCLUDED.id should resolve to newID.
 		conflictingValues := []OptionalValue{
-			{Value: newID, Valid: true},
+			MakeInt8(newID),
 			rows[0].Values[1], // same email
 		}
 		stmt := Statement{
@@ -279,7 +279,7 @@ func TestTable_Insert_OnConflictDoUpdate_ExcludedRef_UniqueIndex(t *testing.T) {
 			ConflictAction: ConflictActionDoUpdate,
 			Inserts:        [][]OptionalValue{conflictingValues},
 			Updates: map[string]OptionalValue{
-				"id": {Value: ExcludedRef{Column: "id"}, Valid: true},
+				"id": MakeExcludedRef(ExcludedRef{Column: "id"}),
 			},
 		}
 
@@ -301,14 +301,14 @@ func TestTable_Insert_OnConflictDoUpdate_ExcludedRef_UniqueIndex(t *testing.T) {
 					{
 						Operand1: Operand{Type: OperandField, Value: Field{Name: "email"}},
 						Operator: Eq,
-						Operand2: Operand{Type: OperandQuotedString, Value: rows[0].Values[1].Value},
+						Operand2: Operand{Type: OperandQuotedString, Value: rows[0].Values[1].AsAny()},
 					},
 				},
 			},
 		})
 		require.NoError(t, err)
 		require.True(t, selectResult.Rows.Next(ctx))
-		assert.Equal(t, newID, selectResult.Rows.Row().Values[0].Value.(int64))
+		assert.Equal(t, newID, selectResult.Rows.Row().Values[0].AsInt8())
 	})
 
 	t.Run("EXCLUDED.col in multi-row insert applies per-row proposed value", func(t *testing.T) {
@@ -319,11 +319,11 @@ func TestTable_Insert_OnConflictDoUpdate_ExcludedRef_UniqueIndex(t *testing.T) {
 			Fields:         append(fieldsFromColumns(table.Columns...), Field{Name: "id"}),
 			ConflictAction: ConflictActionDoUpdate,
 			Inserts: [][]OptionalValue{
-				{{Value: newID1, Valid: true}, rows[1].Values[1]},
-				{{Value: newID2, Valid: true}, rows[2].Values[1]},
+				{MakeInt8(newID1), rows[1].Values[1]},
+				{MakeInt8(newID2), rows[2].Values[1]},
 			},
 			Updates: map[string]OptionalValue{
-				"id": {Value: ExcludedRef{Column: "id"}, Valid: true},
+				"id": MakeExcludedRef(ExcludedRef{Column: "id"}),
 			},
 		}
 
@@ -344,13 +344,13 @@ func TestTable_Insert_OnConflictDoUpdate_ExcludedRef_UniqueIndex(t *testing.T) {
 				{
 					Operand1: Operand{Type: OperandField, Value: Field{Name: "email"}},
 					Operator: Eq,
-					Operand2: Operand{Type: OperandQuotedString, Value: rows[1].Values[1].Value},
+					Operand2: Operand{Type: OperandQuotedString, Value: rows[1].Values[1].AsAny()},
 				},
 			}},
 		})
 		require.NoError(t, err)
 		require.True(t, sel1.Rows.Next(ctx))
-		assert.Equal(t, newID1, sel1.Rows.Row().Values[0].Value.(int64))
+		assert.Equal(t, newID1, sel1.Rows.Row().Values[0].AsInt8())
 
 		// rows[2] → newID2
 		sel2, err := table.Select(ctx, Statement{
@@ -360,13 +360,13 @@ func TestTable_Insert_OnConflictDoUpdate_ExcludedRef_UniqueIndex(t *testing.T) {
 				{
 					Operand1: Operand{Type: OperandField, Value: Field{Name: "email"}},
 					Operator: Eq,
-					Operand2: Operand{Type: OperandQuotedString, Value: rows[2].Values[1].Value},
+					Operand2: Operand{Type: OperandQuotedString, Value: rows[2].Values[1].AsAny()},
 				},
 			}},
 		})
 		require.NoError(t, err)
 		require.True(t, sel2.Rows.Next(ctx))
-		assert.Equal(t, newID2, sel2.Rows.Row().Values[0].Value.(int64))
+		assert.Equal(t, newID2, sel2.Rows.Row().Values[0].AsInt8())
 	})
 }
 

@@ -123,13 +123,13 @@ func appendHashKey(buf []byte, join JoinPlan, row Row, fromAlias string, joinInd
 			}
 		}
 		val, ok := row.GetValue(colName)
-		if !ok || !val.Valid {
+		if !ok || val.IsNull() {
 			return nil // NULL key — never matches
 		}
 		if i > 0 {
 			buf = append(buf, '\x00')
 		}
-		buf = appendHashKeyPart(buf, val.Value)
+		buf = appendHashKeyPart(buf, val.AsAny())
 	}
 	return buf
 }

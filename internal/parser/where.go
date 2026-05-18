@@ -58,7 +58,7 @@ func (p *parserItem) doParseWhere() error {
 	if len(p.OrderBy) > 0 {
 		return p.errorf("at WHERE: ORDER BY must be after WHERE clause")
 	}
-	if p.Offset.Valid || p.Limit.Valid {
+	if p.Offset.IsValid() || p.Limit.IsValid() {
 		return p.errorf("at WHERE: OFFSET / LIMIT must be after WHERE clause")
 	}
 	if len(p.Conditions) > 0 {

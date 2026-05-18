@@ -353,7 +353,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 						Operator: Eq,
 						Operand2: Operand{
 							Type:  OperandQuotedString,
-							Value: email.Value,
+							Value: email.AsAny(),
 						},
 					},
 				},
@@ -388,7 +388,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		sort.Slice(expected, func(i, j int) bool {
 			id1, _ := expected[i].GetValue("id")
 			id2, _ := expected[j].GetValue("id")
-			return id1.Value.(int64) < id2.Value.(int64)
+			return id1.AsInt8() < id2.AsInt8()
 		})
 		assert.Equal(t, expected, collectRows(ctx, result))
 	})
@@ -414,7 +414,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 		sort.Slice(expected, func(i, j int) bool {
 			id1, _ := expected[i].GetValue("id")
 			id2, _ := expected[j].GetValue("id")
-			return id1.Value.(int64) > id2.Value.(int64)
+			return id1.AsInt8() > id2.AsInt8()
 		})
 		assert.Equal(t, expected, collectRows(ctx, result))
 	})

@@ -45,11 +45,11 @@ func (t *Table) insertUniqueIndexKey(ctx context.Context, uniqueIndex UniqueInde
 	key := keyParts[0]
 
 	// We only need to insert into the unique index if the key is not NULL
-	if !key.Valid {
+	if !key.IsValid() {
 		return nil
 	}
 
-	castedKey, err := castKeyValue(uniqueIndex.Columns[0], key.Value)
+	castedKey, err := castKeyValue(uniqueIndex.Columns[0], key.AsAny())
 	if err != nil {
 		return fmt.Errorf("failed to cast key value for unique index  %s: %w", uniqueIndex.Name, err)
 	}
@@ -75,14 +75,14 @@ func (t *Table) insertUniqueCompositeIndexKey(ctx context.Context, uniqueIndex U
 	// This follows standard SQL behavior where NULL != NULL and unique constraints
 	// don't apply when any indexed column contains NULL
 	for _, key := range keyParts {
-		if !key.Valid {
+		if !key.IsValid() {
 			return nil
 		}
 	}
 
 	keyValues := make([]any, 0, len(keyParts))
 	for i, key := range keyParts {
-		castedKey, err := castKeyValue(uniqueIndex.Columns[i], key.Value)
+		castedKey, err := castKeyValue(uniqueIndex.Columns[i], key.AsAny())
 		if err != nil {
 			return fmt.Errorf("failed to cast unique index value for %s: %w", uniqueIndex.Name, err)
 		}
@@ -118,7 +118,7 @@ func (t *Table) updateUniqueIndexKey(ctx context.Context, uniqueIndex UniqueInde
 
 	oldKey := oldKeyParts[0]
 
-	castedOldKey, err := castKeyValue(uniqueIndex.Columns[0], oldKey.Value)
+	castedOldKey, err := castKeyValue(uniqueIndex.Columns[0], oldKey.AsAny())
 	if err != nil {
 		return fmt.Errorf("failed to cast old unique index value for %s: %w", uniqueIndex.Name, err)
 	}
@@ -130,8 +130,8 @@ func (t *Table) updateUniqueIndexKey(ctx context.Context, uniqueIndex UniqueInde
 	rowID := row.Key
 
 	// We only need to insert into the index index if the key is not NULL
-	if newKey.Valid {
-		castedKey, err := castKeyValue(uniqueIndex.Columns[0], newKey.Value)
+	if newKey.IsValid() {
+		castedKey, err := castKeyValue(uniqueIndex.Columns[0], newKey.AsAny())
 		if err != nil {
 			return fmt.Errorf("failed to cast unique index key for %s: %w", uniqueIndex.Name, err)
 		}
@@ -158,11 +158,11 @@ func (t *Table) updateCompositeUniqueIndexKey(ctx context.Context, uniqueIndex U
 	oldKeyInIndex := true
 	oldKeyValues := make([]any, 0, len(oldKeyParts))
 	for i, key := range oldKeyParts {
-		if !key.Valid {
+		if !key.IsValid() {
 			oldKeyInIndex = false
 			break
 		}
-		castedKey, err := castKeyValue(uniqueIndex.Columns[i], key.Value)
+		castedKey, err := castKeyValue(uniqueIndex.Columns[i], key.AsAny())
 		if err != nil {
 			return fmt.Errorf("failed to cast old unique index value for %s: %w", uniqueIndex.Name, err)
 		}
@@ -177,11 +177,11 @@ func (t *Table) updateCompositeUniqueIndexKey(ctx context.Context, uniqueIndex U
 		if !ok {
 			return fmt.Errorf("failed to get value for new unique index %s", uniqueIndex.Name)
 		}
-		if !keyValue.Valid {
+		if !keyValue.IsValid() {
 			newKeyInIndex = false
 			break
 		}
-		castedKey, err := castKeyValue(col, keyValue.Value)
+		castedKey, err := castKeyValue(col, keyValue.AsAny())
 		if err != nil {
 			return fmt.Errorf("failed to cast new unique index value for %s: %w", uniqueIndex.Name, err)
 		}

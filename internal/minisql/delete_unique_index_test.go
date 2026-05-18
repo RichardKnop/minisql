@@ -99,7 +99,7 @@ func TestTable_Delete_UniqueIndex(t *testing.T) {
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "email"}, OperandQuotedString, email.Value.(TextPointer)),
+					FieldIsEqual(Field{Name: "email"}, OperandQuotedString, email.AsTextPointer()),
 				},
 			},
 		}
@@ -209,8 +209,8 @@ func TestTable_Delete_CompositeUniqueIndex(t *testing.T) {
 			Kind: Delete,
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, firstName.Value),
-					FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, lastName.Value),
+					FieldIsEqual(Field{Name: "first_name"}, OperandQuotedString, firstName.AsAny()),
+					FieldIsEqual(Field{Name: "last_name"}, OperandQuotedString, lastName.AsAny()),
 				},
 			},
 		}

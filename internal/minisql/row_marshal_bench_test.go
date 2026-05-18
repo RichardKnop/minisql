@@ -14,11 +14,11 @@ func BenchmarkRow_Marshal(b *testing.B) {
 	}
 
 	values := []OptionalValue{
-		{Value: int64(123), Valid: true},
-		{Value: TextPointer{Data: []byte("John Doe"), Length: 8}, Valid: true},
-		{Value: int32(30), Valid: true},
-		{Value: float64(95.5), Valid: true},
-		{Value: true, Valid: true},
+		MakeInt8(int64(123)),
+		MakeVarchar(TextPointer{Data: []byte("John Doe"), Length: 8}),
+		MakeInt4(int32(30)),
+		MakeDouble(float64(95.5)),
+		MakeBool(true),
 	}
 
 	row := NewRowWithValues(columns, values)
@@ -44,11 +44,11 @@ func BenchmarkRow_MarshalWithNulls(b *testing.B) {
 	}
 
 	values := []OptionalValue{
-		{Value: int64(123), Valid: true},
-		{Valid: false}, // NULL
-		{Value: int32(30), Valid: true},
-		{Valid: false}, // NULL
-		{Value: true, Valid: true},
+		MakeInt8(int64(123)),
+		MakeNull(), // NULL
+		MakeInt4(int32(30)),
+		MakeNull(), // NULL
+		MakeBool(true),
 	}
 
 	row := NewRowWithValues(columns, values)
@@ -74,11 +74,11 @@ func BenchmarkRow_Unmarshal(b *testing.B) {
 	}
 
 	values := []OptionalValue{
-		{Value: int64(123), Valid: true},
-		{Value: TextPointer{Data: []byte("John Doe"), Length: 8}, Valid: true},
-		{Value: int32(30), Valid: true},
-		{Value: float64(95.5), Valid: true},
-		{Value: true, Valid: true},
+		MakeInt8(int64(123)),
+		MakeVarchar(TextPointer{Data: []byte("John Doe"), Length: 8}),
+		MakeInt4(int32(30)),
+		MakeDouble(float64(95.5)),
+		MakeBool(true),
 	}
 
 	row := NewRowWithValues(columns, values)
@@ -116,12 +116,12 @@ func BenchmarkRow_OnlyFields(b *testing.B) {
 	}
 
 	values := []OptionalValue{
-		{Value: int64(123), Valid: true},
-		{Value: TextPointer{Data: []byte("John Doe"), Length: 8}, Valid: true},
-		{Value: int32(30), Valid: true},
-		{Value: float64(95.5), Valid: true},
-		{Value: true, Valid: true},
-		{Value: Time{}, Valid: true},
+		MakeInt8(int64(123)),
+		MakeVarchar(TextPointer{Data: []byte("John Doe"), Length: 8}),
+		MakeInt4(int32(30)),
+		MakeDouble(float64(95.5)),
+		MakeBool(true),
+		MakeTimestamp(MustParseTimestampMicros("2024-01-01 00:00:00")),
 	}
 
 	row := NewRowWithValues(columns, values)

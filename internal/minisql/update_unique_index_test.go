@@ -100,11 +100,11 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"email": {Value: email2.Value, Valid: true},
+				"email": MakeVarchar(email2.AsTextPointer()),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "email"}, OperandInteger, email1.Value.(TextPointer)),
+					FieldIsEqual(Field{Name: "email"}, OperandInteger, email1.AsTextPointer()),
 				},
 			},
 		}
@@ -129,11 +129,11 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"email": {Value: email.Value, Valid: true},
+				"email": MakeVarchar(email.AsTextPointer()),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "email"}, OperandInteger, email.Value.(TextPointer)),
+					FieldIsEqual(Field{Name: "email"}, OperandInteger, email.AsTextPointer()),
 				},
 			},
 		}
@@ -162,11 +162,11 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"email": {Value: NewTextPointer([]byte("newemail@example.com")), Valid: true},
+				"email": MakeVarchar(NewTextPointer([]byte("newemail@example.com"))),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "email"}, OperandInteger, email.Value.(TextPointer)),
+					FieldIsEqual(Field{Name: "email"}, OperandInteger, email.AsTextPointer()),
 				},
 			},
 		}
@@ -185,7 +185,7 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 			if i != 0 {
 				continue
 			}
-			expected[i], _ = expected[i].SetValue("email", OptionalValue{Value: NewTextPointer([]byte("newemail@example.com")), Valid: true})
+			expected[i], _ = expected[i].SetValue("email", MakeVarchar(NewTextPointer([]byte("newemail@example.com"))))
 		}
 
 		checkRows(ctx, t, table, expected)
@@ -288,13 +288,13 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"first_name": {Value: firstName2.Value, Valid: true},
-				"last_name":  {Value: lastName2.Value, Valid: true},
+				"first_name": MakeVarchar(firstName2.AsTextPointer()),
+				"last_name":  MakeVarchar(lastName2.AsTextPointer()),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "first_name"}, OperandInteger, firstName.Value),
-					FieldIsEqual(Field{Name: "last_name"}, OperandInteger, lastName.Value),
+					FieldIsEqual(Field{Name: "first_name"}, OperandInteger, firstName.AsAny()),
+					FieldIsEqual(Field{Name: "last_name"}, OperandInteger, lastName.AsAny()),
 				},
 			},
 		}
@@ -321,13 +321,13 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"first_name": {Value: firstName.Value, Valid: true},
-				"last_name":  {Value: lastName.Value, Valid: true},
+				"first_name": MakeVarchar(firstName.AsTextPointer()),
+				"last_name":  MakeVarchar(lastName.AsTextPointer()),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "first_name"}, OperandInteger, firstName.Value),
-					FieldIsEqual(Field{Name: "last_name"}, OperandInteger, lastName.Value),
+					FieldIsEqual(Field{Name: "first_name"}, OperandInteger, firstName.AsAny()),
+					FieldIsEqual(Field{Name: "last_name"}, OperandInteger, lastName.AsAny()),
 				},
 			},
 		}
@@ -355,19 +355,19 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 		lastName, ok := rows[0].GetValue("last_name")
 		require.True(t, ok)
 
-		newFirstName := firstName.Value.(TextPointer).String() + " 2"
-		newLastName := lastName.Value.(TextPointer).String() + " 2"
+		newFirstName := firstName.AsTextPointer().String() + " 2"
+		newLastName := lastName.AsTextPointer().String() + " 2"
 
 		stmt := Statement{
 			Kind: Update,
 			Updates: map[string]OptionalValue{
-				"first_name": {Value: NewTextPointer([]byte(newFirstName)), Valid: true},
-				"last_name":  {Value: NewTextPointer([]byte(newLastName)), Valid: true},
+				"first_name": MakeVarchar(NewTextPointer([]byte(newFirstName))),
+				"last_name":  MakeVarchar(NewTextPointer([]byte(newLastName))),
 			},
 			Conditions: OneOrMore{
 				{
-					FieldIsEqual(Field{Name: "first_name"}, OperandInteger, firstName.Value),
-					FieldIsEqual(Field{Name: "last_name"}, OperandInteger, lastName.Value),
+					FieldIsEqual(Field{Name: "first_name"}, OperandInteger, firstName.AsAny()),
+					FieldIsEqual(Field{Name: "last_name"}, OperandInteger, lastName.AsAny()),
 				},
 			},
 		}
@@ -386,8 +386,8 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 			if i != 0 {
 				continue
 			}
-			expected[i], _ = expected[i].SetValue("first_name", OptionalValue{Value: NewTextPointer([]byte(newFirstName)), Valid: true})
-			expected[i], _ = expected[i].SetValue("last_name", OptionalValue{Value: NewTextPointer([]byte(newLastName)), Valid: true})
+			expected[i], _ = expected[i].SetValue("first_name", MakeVarchar(NewTextPointer([]byte(newFirstName))))
+			expected[i], _ = expected[i].SetValue("last_name", MakeVarchar(NewTextPointer([]byte(newLastName))))
 		}
 
 		checkRows(ctx, t, table, expected)

@@ -17,8 +17,8 @@ func TestNewVirtualTable(t *testing.T) {
 		{Name: "name", Kind: Text},
 	}
 	rows := []Row{
-		NewRowWithValues(cols, []OptionalValue{{Valid: true, Value: int64(1)}, {Valid: true, Value: NewTextPointer([]byte("Alice"))}}),
-		NewRowWithValues(cols, []OptionalValue{{Valid: true, Value: int64(2)}, {Valid: true, Value: NewTextPointer([]byte("Bob"))}}),
+		NewRowWithValues(cols, []OptionalValue{MakeInt8(int64(1)), MakeVarchar(NewTextPointer([]byte("Alice")))}),
+		NewRowWithValues(cols, []OptionalValue{MakeInt8(int64(2)), MakeVarchar(NewTextPointer([]byte("Bob")))}),
 	}
 
 	vt := newVirtualTable(zap.NewNop(), "t", cols, rows)
@@ -166,9 +166,9 @@ func TestVirtualSequentialScan(t *testing.T) {
 		{Name: "score", Kind: Int8},
 	}
 	rows := []Row{
-		NewRowWithValues(cols, []OptionalValue{{Valid: true, Value: int64(1)}, {Valid: true, Value: int64(90)}}),
-		NewRowWithValues(cols, []OptionalValue{{Valid: true, Value: int64(2)}, {Valid: true, Value: int64(70)}}),
-		NewRowWithValues(cols, []OptionalValue{{Valid: true, Value: int64(3)}, {Valid: true, Value: int64(85)}}),
+		NewRowWithValues(cols, []OptionalValue{MakeInt8(int64(1)), MakeInt8(int64(90))}),
+		NewRowWithValues(cols, []OptionalValue{MakeInt8(int64(2)), MakeInt8(int64(70))}),
+		NewRowWithValues(cols, []OptionalValue{MakeInt8(int64(3)), MakeInt8(int64(85))}),
 	}
 
 	vt := newVirtualTable(zap.NewNop(), "t", cols, rows)
@@ -206,8 +206,8 @@ func TestVirtualSequentialScan(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Len(t, got, 2)
-		assert.Equal(t, int64(90), got[0].Values[1].Value)
-		assert.Equal(t, int64(85), got[1].Values[1].Value)
+		assert.Equal(t, int64(90), got[0].Values[1].AsAny())
+		assert.Equal(t, int64(85), got[1].Values[1].AsAny())
 	})
 
 	t.Run("empty virtual table returns no rows", func(t *testing.T) {

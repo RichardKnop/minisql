@@ -95,17 +95,17 @@ func scanSchema(row Row) Schema {
 		tableName string
 		ddl       string
 	)
-	if row.Values[2].Valid {
-		tableName = row.Values[2].Value.(TextPointer).String()
+	if row.Values[2].IsValid() {
+		tableName = row.Values[2].AsTextPointer().String()
 	}
-	if row.Values[4].Valid {
-		ddl = row.Values[4].Value.(TextPointer).String()
+	if row.Values[4].IsValid() {
+		ddl = row.Values[4].AsTextPointer().String()
 	}
 	return Schema{
-		Type:      SchemaType(row.Values[0].Value.(int32)),
-		Name:      row.Values[1].Value.(TextPointer).String(),
+		Type:      SchemaType(row.Values[0].AsInt4()),
+		Name:      row.Values[1].AsTextPointer().String(),
 		TableName: tableName,
-		RootPage:  PageIndex(row.Values[3].Value.(int32)),
+		RootPage:  PageIndex(row.Values[3].AsInt4()),
 		DDL:       ddl,
 	}
 }

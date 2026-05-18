@@ -52,8 +52,8 @@ func TestAppendHashKey_BuildSide(t *testing.T) {
 	t.Run("valid value returns key", func(t *testing.T) {
 		t.Parallel()
 		row := NewRowWithValues(cols, []OptionalValue{
-			{Valid: true, Value: int64(1)},
-			{Valid: true, Value: "sports"},
+			MakeInt8(int64(1)),
+			MakeVarchar(NewTextPointer([]byte("sports"))),
 		})
 		assert.Equal(t, "sports", string(appendHashKey(nil, join, row, "", 0, true)))
 	})
@@ -61,8 +61,8 @@ func TestAppendHashKey_BuildSide(t *testing.T) {
 	t.Run("NULL value returns nil", func(t *testing.T) {
 		t.Parallel()
 		row := NewRowWithValues(cols, []OptionalValue{
-			{Valid: true, Value: int64(1)},
-			{Valid: false},
+			MakeInt8(int64(1)),
+			MakeNull(),
 		})
 		assert.Nil(t, appendHashKey(nil, join, row, "", 0, true))
 	})
@@ -76,8 +76,8 @@ func TestAppendHashKey_BuildSide(t *testing.T) {
 			},
 		}
 		row := NewRowWithValues(cols, []OptionalValue{
-			{Valid: true, Value: int64(7)},
-			{Valid: true, Value: "music"},
+			MakeInt8(int64(7)),
+			MakeVarchar(NewTextPointer([]byte("music"))),
 		})
 		assert.Equal(t, "7\x00music", string(appendHashKey(nil, join2, row, "", 0, true)))
 	})
@@ -99,8 +99,8 @@ func TestAppendHashKey_ProbeSide(t *testing.T) {
 	t.Run("joinIndex 0 uses plain column name", func(t *testing.T) {
 		t.Parallel()
 		row := NewRowWithValues(cols, []OptionalValue{
-			{Valid: true, Value: int64(5)},
-			{Valid: true, Value: "alice"},
+			MakeInt8(int64(5)),
+			MakeVarchar(NewTextPointer([]byte("alice"))),
 		})
 		assert.Equal(t, "5", string(appendHashKey(nil, join, row, "u", 0, false)))
 	})
@@ -110,7 +110,7 @@ func TestAppendHashKey_ProbeSide(t *testing.T) {
 		// Simulate a combined row with alias prefix "u.user_id"
 		prefixedCols := []Column{{Name: "u.user_id", Kind: Int8}}
 		row := NewRowWithValues(prefixedCols, []OptionalValue{
-			{Valid: true, Value: int64(5)},
+			MakeInt8(int64(5)),
 		})
 		assert.Equal(t, "5", string(appendHashKey(nil, join, row, "u", 1, false)))
 	})
@@ -118,8 +118,8 @@ func TestAppendHashKey_ProbeSide(t *testing.T) {
 	t.Run("NULL probe key returns nil", func(t *testing.T) {
 		t.Parallel()
 		row := NewRowWithValues(cols, []OptionalValue{
-			{Valid: false},
-			{Valid: true, Value: "alice"},
+			MakeNull(),
+			MakeVarchar(NewTextPointer([]byte("alice"))),
 		})
 		assert.Nil(t, appendHashKey(nil, join, row, "u", 0, false))
 	})

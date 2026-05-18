@@ -88,10 +88,10 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 		// Composite secondary index: all key columns must be non-NULL
 		keyValues := make([]any, 0, len(keys))
 		for i, key := range keys {
-			if !key.Valid {
+			if !key.IsValid() {
 				return nil // skip if any column is NULL
 			}
-			castedKey, err := castKeyValue(secondaryIndex.Columns[i], key.Value)
+			castedKey, err := castKeyValue(secondaryIndex.Columns[i], key.AsAny())
 			if err != nil {
 				return fmt.Errorf("failed to cast key value for secondary index %s: %w", secondaryIndex.Name, err)
 			}
@@ -111,11 +111,11 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 	key := keys[0]
 
 	// We only need to insert into the index if the key is not NULL
-	if !key.Valid {
+	if !key.IsValid() {
 		return nil
 	}
 
-	castedKey, err := castKeyValue(secondaryIndex.Columns[0], key.Value)
+	castedKey, err := castKeyValue(secondaryIndex.Columns[0], key.AsAny())
 	if err != nil {
 		return fmt.Errorf("failed to cast key value for secondary index  %s: %w", secondaryIndex.Name, err)
 	}
@@ -205,8 +205,8 @@ func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 	}
 
 	// We only need to insert into the index if the key is not NULL and row satisfies WHERE.
-	if newKey.Valid && newInIndex {
-		castedKey, err := castKeyValue(secondaryIndex.Columns[0], newKey.Value)
+	if newKey.IsValid() && newInIndex {
+		castedKey, err := castKeyValue(secondaryIndex.Columns[0], newKey.AsAny())
 		if err != nil {
 			return fmt.Errorf("failed to cast secondary index key for %s: %w", secondaryIndex.Name, err)
 		}
@@ -222,8 +222,8 @@ func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 	if err != nil {
 		return fmt.Errorf("partial index %s where check (old row): %w", secondaryIndex.Name, err)
 	}
-	if oldInIndex && oldKey.Valid {
-		castedOldKey, err := castKeyValue(secondaryIndex.Columns[0], oldKey.Value)
+	if oldInIndex && oldKey.IsValid() {
+		castedOldKey, err := castKeyValue(secondaryIndex.Columns[0], oldKey.AsAny())
 		if err != nil {
 			return fmt.Errorf("failed to cast old secondary index value for %s: %w", secondaryIndex.Name, err)
 		}
@@ -440,10 +440,10 @@ func jsonInvertedTermsForRow(secondaryIndex SecondaryIndex, row Row) ([]string, 
 		return nil, fmt.Errorf("inverted index %s requires exactly one source column", secondaryIndex.Name)
 	}
 	value, ok := row.GetValue(secondaryIndex.Columns[0].Name)
-	if !ok || !value.Valid {
+	if !ok || !value.IsValid() {
 		return nil, nil
 	}
-	doc, ok := toStringVal(value.Value)
+	doc, ok := toStringVal(value.AsAny())
 	if !ok {
 		return nil, fmt.Errorf("inverted index %s column %q must be JSON text", secondaryIndex.Name, secondaryIndex.Columns[0].Name)
 	}
@@ -479,10 +479,10 @@ func fullTextTokenPositionsForRow(secondaryIndex SecondaryIndex, row Row) ([]tex
 		return nil, fmt.Errorf("full-text index %s requires exactly one source column", secondaryIndex.Name)
 	}
 	value, ok := row.GetValue(secondaryIndex.Columns[0].Name)
-	if !ok || !value.Valid {
+	if !ok || !value.IsValid() {
 		return nil, nil
 	}
-	doc, ok := toStringVal(value.Value)
+	doc, ok := toStringVal(value.AsAny())
 	if !ok {
 		return nil, fmt.Errorf("full-text index %s column %q must be text", secondaryIndex.Name, secondaryIndex.Columns[0].Name)
 	}
@@ -507,11 +507,11 @@ func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryI
 	oldNullsOK := true
 	oldKeyValues := make([]any, 0, len(oldKeyParts))
 	for i, key := range oldKeyParts {
-		if !key.Valid {
+		if !key.IsValid() {
 			oldNullsOK = false
 			break
 		}
-		castedKey, err := castKeyValue(secondaryIndex.Columns[i], key.Value)
+		castedKey, err := castKeyValue(secondaryIndex.Columns[i], key.AsAny())
 		if err != nil {
 			return fmt.Errorf("failed to cast old secondary index value for %s: %w", secondaryIndex.Name, err)
 		}
@@ -531,11 +531,11 @@ func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryI
 		if !ok {
 			return fmt.Errorf("failed to get value for new secondary index %s", secondaryIndex.Name)
 		}
-		if !keyValue.Valid {
+		if !keyValue.IsValid() {
 			newNullsOK = false
 			break
 		}
-		castedKey, err := castKeyValue(col, keyValue.Value)
+		castedKey, err := castKeyValue(col, keyValue.AsAny())
 		if err != nil {
 			return fmt.Errorf("failed to cast new secondary index value for %s: %w", secondaryIndex.Name, err)
 		}

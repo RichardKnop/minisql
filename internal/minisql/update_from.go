@@ -254,15 +254,15 @@ func resolveUpdateFromExprs(stmt Statement, mergedRow Row) (Statement, error) {
 	}
 	resolved := make(map[string]OptionalValue, len(stmt.Updates))
 	for colName, val := range stmt.Updates {
-		if expr, ok := val.Value.(*Expr); ok {
-			result, err := expr.Eval(mergedRow)
+		if val.IsExpr() {
+			result, err := val.AsExpr().Eval(mergedRow)
 			if err != nil {
 				return stmt, fmt.Errorf("evaluating SET expression for column %q: %w", colName, err)
 			}
 			if result == nil {
-				resolved[colName] = OptionalValue{Valid: false}
+				resolved[colName] = MakeNull()
 			} else {
-				resolved[colName] = OptionalValue{Value: result, Valid: true}
+				resolved[colName] = optionalValueFromAny(0, result)
 			}
 		} else {
 			resolved[colName] = val

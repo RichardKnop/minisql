@@ -476,11 +476,11 @@ func (d *Database) checkTableLeafPage(ctx context.Context, report IntegrityRepor
 			continue
 		}
 		for i, col := range table.Columns {
-			if !col.Kind.IsText() || !row.Values[i].Valid {
+			if !col.Kind.IsText() || row.Values[i].IsNull() {
 				continue
 			}
-			tp, ok := row.Values[i].Value.(TextPointer)
-			if !ok || tp.IsInline() || tp.FirstPage == 0 {
+			tp := row.Values[i].AsTextPointer()
+			if tp.IsInline() || tp.FirstPage == 0 {
 				continue
 			}
 			report = d.walkOverflowPages(report, fmt.Sprintf("table %s column %s", table.Name, col.Name), tp.FirstPage, livePages)
@@ -1252,13 +1252,13 @@ func integrityKeyIDFromRow(row Row, columns []Column, required bool) (string, bo
 	}
 
 	if len(columns) == 1 {
-		if !keyParts[0].Valid {
+		if keyParts[0].IsNull() {
 			if required {
 				return "", false, fmt.Errorf("required key column %s is NULL", columns[0].Name)
 			}
 			return "", false, nil
 		}
-		keyValue, err := castKeyValue(columns[0], keyParts[0].Value)
+		keyValue, err := castKeyValue(columns[0], keyParts[0].AsAny())
 		if err != nil {
 			return "", false, err
 		}
@@ -1267,13 +1267,13 @@ func integrityKeyIDFromRow(row Row, columns []Column, required bool) (string, bo
 
 	keyValues := make([]any, 0, len(columns))
 	for i, keyPart := range keyParts {
-		if !keyPart.Valid {
+		if keyPart.IsNull() {
 			if required {
 				return "", false, fmt.Errorf("required key column %s is NULL", columns[i].Name)
 			}
 			return "", false, nil
 		}
-		keyValue, err := castKeyValue(columns[i], keyPart.Value)
+		keyValue, err := castKeyValue(columns[i], keyPart.AsAny())
 		if err != nil {
 			return "", false, err
 		}

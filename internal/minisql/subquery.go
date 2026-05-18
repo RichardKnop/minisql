@@ -36,8 +36,8 @@ func (d *Database) resolveSubqueries(ctx context.Context, conditions OneOrMore) 
 				var values []any
 				for result.Rows.Next(ctx) {
 					row := result.Rows.Row()
-					if len(row.Values) > 0 && row.Values[0].Valid {
-						v := row.Values[0].Value
+					if len(row.Values) > 0 && row.Values[0].IsValid() {
+						v := row.Values[0].AsAny()
 						if _, dup := seen[v]; !dup {
 							seen[v] = struct{}{}
 							values = append(values, v)
@@ -71,10 +71,10 @@ func (d *Database) resolveSubqueries(ctx context.Context, conditions OneOrMore) 
 				if err := result.Rows.Err(); err != nil {
 					return nil, fmt.Errorf("subquery: reading row: %w", err)
 				}
-				if len(row.Values) == 0 || !row.Values[0].Valid {
+				if len(row.Values) == 0 || !row.Values[0].IsValid() {
 					cond.Operand2 = Operand{Type: OperandNull}
 				} else {
-					val := row.Values[0].Value
+					val := row.Values[0].AsAny()
 					cond.Operand2 = Operand{
 						Type:  scalarOperandType(val),
 						Value: val,

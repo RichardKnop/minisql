@@ -27,8 +27,8 @@ func TestLeafPageList_NonEmpty(t *testing.T) {
 		Columns: table.Columns,
 		Fields:  fieldsFromColumns(table.Columns...),
 		Inserts: [][]OptionalValue{
-			{{Valid: true, Value: int64(1)}, {Valid: true, Value: NewTextPointer([]byte("a@example.com"))}},
-			{{Valid: true, Value: int64(2)}, {Valid: true, Value: NewTextPointer([]byte("b@example.com"))}},
+			{MakeInt8(int64(1)), MakeVarchar(NewTextPointer([]byte("a@example.com")))},
+			{MakeInt8(int64(2)), MakeVarchar(NewTextPointer([]byte("b@example.com")))},
 		},
 	})
 
@@ -58,8 +58,8 @@ func TestParallelSequentialScan_MatchesSequential(t *testing.T) {
 	inserts := make([][]OptionalValue, 0, n)
 	for i := range n {
 		inserts = append(inserts, []OptionalValue{
-			{Valid: true, Value: int64(i + 1)},
-			{Valid: true, Value: NewTextPointer([]byte("user@example.com"))},
+			MakeInt8(int64(i + 1)),
+			MakeVarchar(NewTextPointer([]byte("user@example.com"))),
 		})
 	}
 	mustInsert(ctx, t, table, txManager, Statement{
@@ -96,7 +96,7 @@ func TestParallelSequentialScan_MatchesSequential(t *testing.T) {
 		sort.Slice(rows, func(i, j int) bool {
 			vi, _ := rows[i].GetValue(table.Columns[0].Name)
 			vj, _ := rows[j].GetValue(table.Columns[0].Name)
-			return vi.Value.(int64) < vj.Value.(int64)
+			return vi.AsInt8() < vj.AsInt8()
 		})
 	}
 	sortRowsByKey(seqRows)
@@ -115,8 +115,8 @@ func TestParallelSequentialScan_WithFilter(t *testing.T) {
 	inserts := make([][]OptionalValue, 0, n)
 	for i := range n {
 		inserts = append(inserts, []OptionalValue{
-			{Valid: true, Value: int64(i + 1)},
-			{Valid: true, Value: NewTextPointer([]byte("user@example.com"))},
+			MakeInt8(int64(i + 1)),
+			MakeVarchar(NewTextPointer([]byte("user@example.com"))),
 		})
 	}
 	mustInsert(ctx, t, table, txManager, Statement{

@@ -476,13 +476,13 @@ func (p *parserItem) doParseSelect() error {
 		if n == 0 {
 			return p.errorf("at SELECT: expected integer value for LIMIT")
 		}
-		p.Limit = minisql.OptionalValue{Value: limitValue, Valid: true}
+		p.Limit = minisql.MakeInt8(limitValue)
 		p.pop()
 		p.step = stepSelectOffset
 	case stepSelectOffset:
 		offsetRWord := p.peek()
 		if strings.ToUpper(offsetRWord) != "OFFSET" {
-			if !p.Offset.Valid {
+			if !p.Offset.IsValid() {
 				p.step = stepWhere
 				return nil
 			}
@@ -494,7 +494,7 @@ func (p *parserItem) doParseSelect() error {
 		if n == 0 {
 			return p.errorf("at SELECT: expected integer value for OFFSET")
 		}
-		p.Offset = minisql.OptionalValue{Value: offsetValue, Valid: true}
+		p.Offset = minisql.MakeInt8(offsetValue)
 		p.pop()
 		p.step = stepStatementEnd
 	}

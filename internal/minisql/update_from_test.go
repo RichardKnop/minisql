@@ -14,7 +14,7 @@ func TestContextWithUpdateFromRows(t *testing.T) {
 
 	cols := []Column{{Name: "id", Kind: Int8}}
 	rows := []Row{
-		NewRowWithValues(cols, []OptionalValue{{Valid: true, Value: int64(1)}}),
+		NewRowWithValues(cols, []OptionalValue{MakeInt8(int64(1))}),
 	}
 
 	ctx := contextWithUpdateFromRows(context.Background(), rows)
@@ -48,8 +48,8 @@ func TestPrefixRowColumns(t *testing.T) {
 		{Name: "name", Kind: Text},
 	}
 	vals := []OptionalValue{
-		{Valid: true, Value: int64(42)},
-		{Valid: true, Value: NewTextPointer([]byte("Engineering"))},
+		MakeInt8(int64(42)),
+		MakeVarchar(NewTextPointer([]byte("Engineering"))),
 	}
 	row := NewRowWithValues(cols, vals)
 
@@ -85,8 +85,8 @@ func TestBuildUpdateFromMergedRow(t *testing.T) {
 		{Name: "dept_id", Kind: Int8},
 	}
 	targetVals := []OptionalValue{
-		{Valid: true, Value: int64(1)},
-		{Valid: true, Value: int64(10)},
+		MakeInt8(int64(1)),
+		MakeInt8(int64(10)),
 	}
 	targetRow := NewRowWithValues(targetCols, targetVals)
 
@@ -95,8 +95,8 @@ func TestBuildUpdateFromMergedRow(t *testing.T) {
 		{Name: "emp.name", Kind: Text},
 	}
 	fromVals := []OptionalValue{
-		{Valid: true, Value: int64(10)},
-		{Valid: true, Value: NewTextPointer([]byte("Engineering"))},
+		MakeInt8(int64(10)),
+		MakeVarchar(NewTextPointer([]byte("Engineering"))),
 	}
 	fromRow := NewRowWithValues(fromCols, fromVals)
 
@@ -121,22 +121,22 @@ func TestBuildUpdateFromMergedRow(t *testing.T) {
 	// Values are correct.
 	col, i := merged.GetColumn("t.dept_id")
 	require.NotNil(t, col)
-	assert.Equal(t, int64(10), merged.Values[i].Value)
+	assert.Equal(t, int64(10), merged.Values[i].AsAny())
 
 	col2, j := merged.GetColumn("emp.name")
 	require.NotNil(t, col2)
-	assert.Equal(t, NewTextPointer([]byte("Engineering")), merged.Values[j].Value)
+	assert.Equal(t, NewTextPointer([]byte("Engineering")), merged.Values[j].AsAny())
 }
 
 func TestBuildUpdateFromMergedRow_ColumnCount(t *testing.T) {
 	t.Parallel()
 
 	targetCols := []Column{{Name: "a", Kind: Int8}, {Name: "b", Kind: Int8}}
-	targetVals := []OptionalValue{{Valid: true, Value: int64(1)}, {Valid: true, Value: int64(2)}}
+	targetVals := []OptionalValue{MakeInt8(int64(1)), MakeInt8(int64(2))}
 	targetRow := NewRowWithValues(targetCols, targetVals)
 
 	fromCols := []Column{{Name: "x.c", Kind: Int8}}
-	fromVals := []OptionalValue{{Valid: true, Value: int64(3)}}
+	fromVals := []OptionalValue{MakeInt8(int64(3))}
 	fromRow := NewRowWithValues(fromCols, fromVals)
 
 	merged := buildUpdateFromMergedRow(targetRow, "tgt", fromRow)
@@ -154,20 +154,20 @@ func TestResolveUpdateFromExprs(t *testing.T) {
 		{Name: "bonus", Kind: Int8},
 	}
 	mergedRow := NewRowWithValues(cols, []OptionalValue{
-		{Valid: true, Value: int64(1000)},
-		{Valid: true, Value: int64(200)},
+		MakeInt8(int64(1000)),
+		MakeInt8(int64(200)),
 	})
 
 	t.Run("non-expr values are kept as-is", func(t *testing.T) {
 		t.Parallel()
 		stmt := Statement{
 			Updates: map[string]OptionalValue{
-				"salary": {Valid: true, Value: int64(9999)},
+				"salary": MakeInt8(int64(9999)),
 			},
 		}
 		resolved, err := resolveUpdateFromExprs(stmt, mergedRow)
 		require.NoError(t, err)
-		assert.Equal(t, int64(9999), resolved.Updates["salary"].Value)
+		assert.Equal(t, int64(9999), resolved.Updates["salary"].AsAny())
 	})
 
 	t.Run("expr values are evaluated", func(t *testing.T) {
@@ -180,12 +180,12 @@ func TestResolveUpdateFromExprs(t *testing.T) {
 		}
 		stmt := Statement{
 			Updates: map[string]OptionalValue{
-				"salary": {Valid: true, Value: expr},
+				"salary": MakeExpr(expr),
 			},
 		}
 		resolved, err := resolveUpdateFromExprs(stmt, mergedRow)
 		require.NoError(t, err)
-		assert.Equal(t, int64(1200), resolved.Updates["salary"].Value)
+		assert.Equal(t, int64(1200), resolved.Updates["salary"].AsAny())
 	})
 
 	t.Run("expr evaluating to nil produces NULL", func(t *testing.T) {
@@ -194,12 +194,12 @@ func TestResolveUpdateFromExprs(t *testing.T) {
 		expr := &Expr{IsNull: true}
 		stmt := Statement{
 			Updates: map[string]OptionalValue{
-				"salary": {Valid: true, Value: expr},
+				"salary": MakeExpr(expr),
 			},
 		}
 		resolved, err := resolveUpdateFromExprs(stmt, mergedRow)
 		require.NoError(t, err)
-		assert.False(t, resolved.Updates["salary"].Valid, "NULL expr should resolve to NULL")
+		assert.False(t, resolved.Updates["salary"].IsValid(), "NULL expr should resolve to NULL")
 	})
 
 	t.Run("empty updates returns stmt unchanged", func(t *testing.T) {
@@ -263,8 +263,8 @@ func updateFromTestDB(t *testing.T) *Database {
 	// Insert departments: id=1 → Engineering, id=2 → Sales
 	err = db.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, row := range [][]OptionalValue{
-			{{Valid: true, Value: int64(1)}, {Valid: true, Value: NewTextPointer([]byte("Engineering"))}},
-			{{Valid: true, Value: int64(2)}, {Valid: true, Value: NewTextPointer([]byte("Sales"))}},
+			{MakeInt8(int64(1)), MakeVarchar(NewTextPointer([]byte("Engineering")))},
+			{MakeInt8(int64(2)), MakeVarchar(NewTextPointer([]byte("Sales")))},
 		} {
 			_, err := db.ExecuteStatement(ctx, Statement{
 				Kind:      Insert,
@@ -284,8 +284,8 @@ func updateFromTestDB(t *testing.T) *Database {
 	// Insert employees: id=1 name=Alice dept_id=0 (will be updated), id=2 name=Bob dept_id=2
 	err = db.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, row := range [][]OptionalValue{
-			{{Valid: true, Value: int64(1)}, {Valid: true, Value: NewTextPointer([]byte("Alice"))}, {Valid: true, Value: int64(0)}},
-			{{Valid: true, Value: int64(2)}, {Valid: true, Value: NewTextPointer([]byte("Bob"))}, {Valid: true, Value: int64(2)}},
+			{MakeInt8(int64(1)), MakeVarchar(NewTextPointer([]byte("Alice"))), MakeInt8(int64(0))},
+			{MakeInt8(int64(2)), MakeVarchar(NewTextPointer([]byte("Bob"))), MakeInt8(int64(2))},
 		} {
 			_, err := db.ExecuteStatement(ctx, Statement{
 				Kind:      Insert,
@@ -364,7 +364,7 @@ func TestExecuteUpdateFrom_BasicJoin(t *testing.T) {
 		UpdateFromTable: "departments",
 		UpdateFromAlias: "d",
 		Updates: map[string]OptionalValue{
-			"dept_id": {Valid: true, Value: int64(1)},
+			"dept_id": MakeInt8(int64(1)),
 		},
 		Conditions: OneOrMore{
 			{
@@ -405,7 +405,7 @@ func TestExecuteUpdateFrom_NonExistentTargetTable(t *testing.T) {
 		TableName:       "no_such_table",
 		UpdateFromTable: "departments",
 		UpdateFromAlias: "d",
-		Updates:         map[string]OptionalValue{"x": {Valid: true, Value: int64(1)}},
+		Updates:         map[string]OptionalValue{"x": MakeInt8(int64(1))},
 	}
 
 	err := db.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -435,7 +435,7 @@ func TestExecuteUpdateFrom_NoMatchingFromRow(t *testing.T) {
 		UpdateFromTable: "departments",
 		UpdateFromAlias: "d",
 		Updates: map[string]OptionalValue{
-			"dept_id": {Valid: true, Value: int64(99)},
+			"dept_id": MakeInt8(int64(99)),
 		},
 		Conditions: OneOrMore{
 			{

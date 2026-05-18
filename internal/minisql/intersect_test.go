@@ -170,11 +170,11 @@ func intersectTestTable(t *testing.T) (*Table, *TransactionManager) {
 	err = aDatabase.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		for _, row := range [][]OptionalValue{
 			// id=1: sports/active
-			{{Valid: true, Value: int64(1)}, {Valid: true, Value: NewTextPointer([]byte("sports"))}, {Valid: true, Value: NewTextPointer([]byte("active"))}},
+			{MakeInt8(int64(1)), MakeVarchar(NewTextPointer([]byte("sports"))), MakeVarchar(NewTextPointer([]byte("active")))},
 			// id=2: sports/inactive
-			{{Valid: true, Value: int64(2)}, {Valid: true, Value: NewTextPointer([]byte("sports"))}, {Valid: true, Value: NewTextPointer([]byte("inactive"))}},
+			{MakeInt8(int64(2)), MakeVarchar(NewTextPointer([]byte("sports"))), MakeVarchar(NewTextPointer([]byte("inactive")))},
 			// id=3: music/active
-			{{Valid: true, Value: int64(3)}, {Valid: true, Value: NewTextPointer([]byte("music"))}, {Valid: true, Value: NewTextPointer([]byte("active"))}},
+			{MakeInt8(int64(3)), MakeVarchar(NewTextPointer([]byte("music"))), MakeVarchar(NewTextPointer([]byte("active")))},
 		} {
 			_, err := aDatabase.ExecuteStatement(ctx, Statement{
 				Kind:      Insert,
@@ -278,7 +278,7 @@ func TestTable_IndexIntersectScan(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Len(t, rows, 1)
-		assert.Equal(t, int64(1), rows[0].Values[0].Value)
+		assert.Equal(t, int64(1), rows[0].Values[0].AsAny())
 	})
 
 	t.Run("indexIntersectScan — empty intersection", func(t *testing.T) {

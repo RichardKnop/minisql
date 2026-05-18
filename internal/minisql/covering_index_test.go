@@ -169,8 +169,8 @@ func TestRowFromIndexKey(t *testing.T) {
 		assert.Equal(t, rowID, row.Key)
 		assert.Equal(t, []Column{idCol}, row.Columns)
 		require.Len(t, row.Values, 1)
-		assert.Equal(t, int64(99), row.Values[0].Value)
-		assert.True(t, row.Values[0].Valid)
+		assert.Equal(t, int64(99), row.Values[0].AsInt8())
+		assert.True(t, row.Values[0].IsValid())
 	})
 
 	t.Run("composite key", func(t *testing.T) {
@@ -186,10 +186,10 @@ func TestRowFromIndexKey(t *testing.T) {
 		assert.Equal(t, rowID, row.Key)
 		assert.Equal(t, []Column{idCol, emailCol}, row.Columns)
 		require.Len(t, row.Values, 2)
-		assert.Equal(t, int64(5), row.Values[0].Value)
-		assert.True(t, row.Values[0].Valid)
-		assert.Equal(t, "a@b.com", row.Values[1].Value)
-		assert.True(t, row.Values[1].Valid)
+		assert.Equal(t, int64(5), row.Values[0].AsInt8())
+		assert.True(t, row.Values[0].IsValid())
+		assert.Equal(t, "a@b.com", row.Values[1].AsTextPointer().String())
+		assert.True(t, row.Values[1].IsValid())
 	})
 }
 

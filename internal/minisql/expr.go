@@ -244,10 +244,10 @@ func (e *Expr) Eval(row Row) (any, error) {
 				return nil, fmt.Errorf("column %q not found in row", e.Column)
 			}
 		}
-		if !v.Valid {
+		if v.IsNull() {
 			return nil, nil // NULL propagates
 		}
-		return v.Value, nil
+		return v.AsAny(), nil
 	}
 
 	// Numeric literal

@@ -87,8 +87,8 @@ func (d *Database) checkChildFK(ctx context.Context, childTable *Table, row Row)
 			if idx < 0 || idx >= len(row.Values) {
 				continue
 			}
-			if row.Values[idx].Valid {
-				values[i] = row.Values[idx].Value
+			if row.Values[idx].IsValid() {
+				values[i] = row.Values[idx].AsAny()
 				anyNonNull = true
 			}
 		}
@@ -260,9 +260,9 @@ func (d *Database) cascadeUpdateChildRows(ctx context.Context, childTable *Table
 		updates := make(map[string]OptionalValue, len(colNames))
 		for i, colName := range colNames {
 			if newValues[i] == nil {
-				updates[colName] = OptionalValue{}
+				updates[colName] = MakeNull()
 			} else {
-				updates[colName] = OptionalValue{Value: newValues[i], Valid: true}
+				updates[colName] = optionalValueFromAny(0, newValues[i])
 			}
 		}
 		stmt := Statement{
@@ -298,7 +298,7 @@ func (d *Database) setNullChildRows(ctx context.Context, childTable *Table, colN
 	for _, row := range rows {
 		updates := make(map[string]OptionalValue, len(colNames))
 		for _, colName := range colNames {
-			updates[colName] = OptionalValue{} // NULL
+			updates[colName] = MakeNull() // NULL
 		}
 		stmt := Statement{
 			Kind:      Update,
@@ -334,10 +334,10 @@ func (d *Database) fkValuesExistInParent(ctx context.Context, parentTable *Table
 	err := parentTable.sequentialScan(ctx, Scan{}, fieldsFromColumns(parentTable.Columns...), func(row Row) error {
 		for i, colName := range targetColumns {
 			ov, ok := row.GetValue(colName)
-			if !ok || !ov.Valid {
+			if !ok || ov.IsNull() {
 				return nil
 			}
-			if !fkValuesEqual(ov.Value, values[i]) {
+			if !fkValuesEqual(ov.AsAny(), values[i]) {
 				return nil
 			}
 		}
@@ -408,10 +408,10 @@ func (d *Database) fkChildFindRows(ctx context.Context, childTable *Table, colNa
 	err := childTable.sequentialScan(ctx, Scan{}, fieldsFromColumns(childTable.Columns...), func(row Row) error {
 		for i, colName := range colNames {
 			ov, ok := row.GetValue(colName)
-			if !ok || !ov.Valid {
+			if !ok || ov.IsNull() {
 				return nil
 			}
-			if !fkValuesEqual(ov.Value, values[i]) {
+			if !fkValuesEqual(ov.AsAny(), values[i]) {
 				return nil
 			}
 		}
@@ -432,8 +432,8 @@ func fkExtractValues(tableCols []Column, targetColNames []string, row Row) ([]an
 	for i, colName := range targetColNames {
 		for j, col := range tableCols {
 			if col.Name == colName {
-				if j < len(row.Values) && row.Values[j].Valid {
-					values[i] = row.Values[j].Value
+				if j < len(row.Values) && row.Values[j].IsValid() {
+					values[i] = row.Values[j].AsAny()
 					anyNonNull = true
 				}
 				break

@@ -138,12 +138,12 @@ func TestInnerIsPushdownEligible_Having(t *testing.T) {
 
 func TestInnerIsPushdownEligible_Limit(t *testing.T) {
 	t.Parallel()
-	assert.False(t, innerIsPushdownEligible(Statement{Limit: OptionalValue{Valid: true, Value: int64(10)}}))
+	assert.False(t, innerIsPushdownEligible(Statement{Limit: MakeInt8(int64(10))}))
 }
 
 func TestInnerIsPushdownEligible_Offset(t *testing.T) {
 	t.Parallel()
-	assert.False(t, innerIsPushdownEligible(Statement{Offset: OptionalValue{Valid: true, Value: int64(5)}}))
+	assert.False(t, innerIsPushdownEligible(Statement{Offset: MakeInt8(int64(5))}))
 }
 
 func TestInnerIsPushdownEligible_Union(t *testing.T) {
