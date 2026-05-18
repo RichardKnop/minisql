@@ -104,16 +104,7 @@ func (r Row) OnlyFields(fields ...Field) Row {
 	// Pre-allocate exact size and write directly by index
 	outIdx := 0
 	for _, field := range fields {
-		// For fields with an alias prefix, look for "alias.name" format
-		// For fields without, look for just "name"
-		var lookupName string
-		if field.AliasPrefix != "" {
-			lookupName = field.AliasPrefix + "." + field.Name
-		} else {
-			lookupName = field.Name
-		}
-
-		if _, idx := r.GetColumn(lookupName); idx >= 0 {
+		if _, idx := r.getColumnQualified(field.AliasPrefix, field.Name); idx >= 0 {
 			filteredRow.Columns[outIdx] = r.Columns[idx]
 			filteredRow.Values[outIdx] = r.Values[idx]
 			outIdx += 1
@@ -158,6 +149,43 @@ func (r Row) GetColumn(name string) (Column, int) {
 func (r Row) GetValue(name string) (OptionalValue, bool) {
 	for i, col := range r.Columns {
 		if col.Name == name {
+			if i >= len(r.Values) {
+				return OptionalValue{}, false
+			}
+			return r.Values[i], true
+		}
+	}
+	return OptionalValue{}, false
+}
+
+// getColumnQualified looks up a column by "prefix.colName" (when prefix != "") or
+// bare colName (when prefix == ""). Zero heap allocations — avoids string concatenation.
+func (r Row) getColumnQualified(prefix, colName string) (Column, int) {
+	if prefix == "" {
+		return r.GetColumn(colName)
+	}
+	plen := len(prefix)
+	total := plen + 1 + len(colName)
+	for i, col := range r.Columns {
+		n := col.Name
+		if len(n) == total && n[:plen] == prefix && n[plen] == '.' && n[plen+1:] == colName {
+			return col, i
+		}
+	}
+	return Column{}, -1
+}
+
+// getValueQualified looks up a value by "prefix.colName" (when prefix != "") or
+// bare colName (when prefix == ""). Zero heap allocations — avoids string concatenation.
+func (r Row) getValueQualified(prefix, colName string) (OptionalValue, bool) {
+	if prefix == "" {
+		return r.GetValue(colName)
+	}
+	plen := len(prefix)
+	total := plen + 1 + len(colName)
+	for i, col := range r.Columns {
+		n := col.Name
+		if len(n) == total && n[:plen] == prefix && n[plen] == '.' && n[plen+1:] == colName {
 			if i >= len(r.Values) {
 				return OptionalValue{}, false
 			}
@@ -672,23 +700,19 @@ func (r Row) compareFieldValue(fieldOperand, valueOperand Operand, operator Oper
 		return false, errors.New("cannot compare column value against field operand")
 	}
 	f := fieldOperand.Value.(Field)
-	name := f.Name
 	// When an alias prefix is present (e.g. "d.name"), try the fully-qualified
 	// name first so that combined rows (UPDATE FROM, JOIN) are matched correctly.
 	// Fall back to the plain name for push-down conditions on plain single-table rows.
-	if f.AliasPrefix != "" {
-		qualName := f.AliasPrefix + "." + f.Name
-		if _, qi := r.GetColumn(qualName); qi >= 0 {
-			name = qualName
-		}
+	col, idx := r.getColumnQualified(f.AliasPrefix, f.Name)
+	if idx < 0 && f.AliasPrefix != "" {
+		col, idx = r.GetColumn(f.Name)
 	}
-	col, idx := r.GetColumn(name)
 	if idx < 0 {
-		return false, fmt.Errorf("row does not contain column '%s'", name)
+		return false, fmt.Errorf("row does not contain column '%s'", f.Name)
 	}
 	fieldValue, ok := r.GetValue(col.Name)
 	if !ok {
-		return false, fmt.Errorf("row does not have '%s' column", name)
+		return false, fmt.Errorf("row does not have '%s' column", f.Name)
 	}
 
 	switch valueOperand.Type {
@@ -842,20 +866,26 @@ func (r Row) compareFieldValueWithColumnIndexes(fieldOperand, valueOperand Opera
 	}
 
 	field := fieldOperand.Value.(Field)
-	name := field.Name
+	var colIdx int
+	var ok bool
 	if field.AliasPrefix != "" {
-		qualName := field.AliasPrefix + "." + field.Name
-		if _, exists := columnIndexes[qualName]; exists {
-			name = qualName
-		}
+		// Zero-alloc qualified lookup: compiler optimizes map[string([]byte)] to avoid heap allocation.
+		var buf [256]byte
+		n := copy(buf[:], field.AliasPrefix)
+		buf[n] = '.'
+		n++
+		n += copy(buf[n:], field.Name)
+		colIdx, ok = columnIndexes[string(buf[:n])]
 	}
-	colIdx, ok := columnIndexes[name]
 	if !ok {
-		return false, fmt.Errorf("row does not contain column '%s'", name)
+		colIdx, ok = columnIndexes[field.Name]
+	}
+	if !ok {
+		return false, fmt.Errorf("row does not contain column '%s'", field.Name)
 	}
 	col := r.Columns[colIdx]
 	if colIdx >= len(r.Values) {
-		return false, fmt.Errorf("row does not have '%s' column", name)
+		return false, fmt.Errorf("row does not have '%s' column", field.Name)
 	}
 	fieldValue := r.Values[colIdx]
 
@@ -1011,25 +1041,16 @@ func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, err
 		return true, nil
 	}
 
-	// Extract field names with alias prefix for JOIN support
 	f1 := field1.Value.(Field)
-	name1 := f1.Name
-	if f1.AliasPrefix != "" {
-		name1 = f1.AliasPrefix + "." + f1.Name
-	}
-	aColumn1, idx1 := r.GetColumn(name1)
+	aColumn1, idx1 := r.getColumnQualified(f1.AliasPrefix, f1.Name)
 	if idx1 < 0 {
-		return false, fmt.Errorf("row does not contain column '%s'", name1)
+		return false, fmt.Errorf("row does not contain column '%s'", f1.Name)
 	}
 
 	f2 := field2.Value.(Field)
-	name2 := f2.Name
-	if f2.AliasPrefix != "" {
-		name2 = f2.AliasPrefix + "." + f2.Name
-	}
-	aColumn2, idx2 := r.GetColumn(name2)
+	aColumn2, idx2 := r.getColumnQualified(f2.AliasPrefix, f2.Name)
 	if idx2 < 0 {
-		return false, fmt.Errorf("row does not contain column '%s'", name2)
+		return false, fmt.Errorf("row does not contain column '%s'", f2.Name)
 	}
 
 	if aColumn1.Kind != aColumn2.Kind {
@@ -1038,11 +1059,11 @@ func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, err
 
 	value1, ok := r.GetValue(aColumn1.Name)
 	if !ok {
-		return false, fmt.Errorf("row does not have '%s' column", name1)
+		return false, fmt.Errorf("row does not have '%s' column", f1.Name)
 	}
 	value2, ok := r.GetValue(aColumn2.Name)
 	if !ok {
-		return false, fmt.Errorf("row does not have '%s' column", name2)
+		return false, fmt.Errorf("row does not have '%s' column", f2.Name)
 	}
 
 	switch aColumn1.Kind {
@@ -1078,23 +1099,39 @@ func (r Row) compareFieldsWithColumnIndexes(field1, field2 Operand, operator Ope
 	}
 
 	f1 := field1.Value.(Field)
-	name1 := f1.Name
+	var idx1 int
+	var ok bool
 	if f1.AliasPrefix != "" {
-		name1 = f1.AliasPrefix + "." + f1.Name
+		var buf [256]byte
+		n := copy(buf[:], f1.AliasPrefix)
+		buf[n] = '.'
+		n++
+		n += copy(buf[n:], f1.Name)
+		idx1, ok = columnIndexes[string(buf[:n])]
 	}
-	idx1, ok := columnIndexes[name1]
 	if !ok {
-		return false, fmt.Errorf("row does not contain column '%s'", name1)
+		idx1, ok = columnIndexes[f1.Name]
+	}
+	if !ok {
+		return false, fmt.Errorf("row does not contain column '%s'", f1.Name)
 	}
 
 	f2 := field2.Value.(Field)
-	name2 := f2.Name
+	var idx2 int
+	ok = false
 	if f2.AliasPrefix != "" {
-		name2 = f2.AliasPrefix + "." + f2.Name
+		var buf [256]byte
+		n := copy(buf[:], f2.AliasPrefix)
+		buf[n] = '.'
+		n++
+		n += copy(buf[n:], f2.Name)
+		idx2, ok = columnIndexes[string(buf[:n])]
 	}
-	idx2, ok := columnIndexes[name2]
 	if !ok {
-		return false, fmt.Errorf("row does not contain column '%s'", name2)
+		idx2, ok = columnIndexes[f2.Name]
+	}
+	if !ok {
+		return false, fmt.Errorf("row does not contain column '%s'", f2.Name)
 	}
 
 	col1 := r.Columns[idx1]
