@@ -1029,6 +1029,15 @@ func (t *Table) selectStreamingDirectRowView(
 			return StatementResult{}, true, err
 		}
 		newRowViewIter = iterFactory
+	case ScanTypeIndexPoint:
+		if scan.CoveringIndex || !t.isNonUniqueSecondaryBTreeIndex(scan.IndexName) {
+			return StatementResult{}, false, nil
+		}
+		iterFactory, err := t.indexRowViewIteratorFactory(ctx, plan, scan, tableFilter, remaining, offset, hasLimit, hasOffset)
+		if err != nil {
+			return StatementResult{}, true, err
+		}
+		newRowViewIter = iterFactory
 	default:
 		return StatementResult{}, false, nil
 	}
@@ -1196,10 +1205,40 @@ func (t *Table) collectIndexScanRowIDs(ctx context.Context, plan QueryPlan, scan
 		if err := idx.ScanRange(ctx, scan.RangeCondition, plan.SortReverse, appendRowID); err != nil && !errors.Is(err, errLimitReached) {
 			return nil, err
 		}
+	case ScanTypeIndexPoint:
+		for _, indexValue := range scan.IndexKeys {
+			err := idx.VisitRowIDs(ctx, indexValue, func(rowID RowID) error {
+				rowIDs = append(rowIDs, rowID)
+				if canApplyScanLimit && scan.ScanLimit > 0 {
+					emitted += 1
+					if emitted >= scan.ScanLimit {
+						return errLimitReached
+					}
+				}
+				return ctx.Err()
+			})
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			if errors.Is(err, errLimitReached) {
+				break
+			}
+			if err != nil {
+				return nil, fmt.Errorf("index lookup failed: %w", err)
+			}
+			if canApplyScanLimit && scan.ScanLimit > 0 && emitted >= scan.ScanLimit {
+				break
+			}
+		}
 	default:
 		return nil, fmt.Errorf("unsupported row view index scan type: %s", scan.Type)
 	}
 	return rowIDs, nil
+}
+
+func (t *Table) isNonUniqueSecondaryBTreeIndex(name string) bool {
+	index, ok := t.SecondaryIndexes[name]
+	return ok && index.IsBTree()
 }
 
 func (t *Table) rowViewByRowID(ctx context.Context, rowID RowID) (RowView, error) {

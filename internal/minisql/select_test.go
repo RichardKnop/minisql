@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestTable_Select(t *testing.T) {
@@ -717,6 +718,79 @@ func TestTable_Select_Overflow(t *testing.T) {
 		assert.Equal(t, rows[2].Values[0], got[0].Values[0])
 		assert.Equal(t, profile.Value.(TextPointer).String(), got[0].Values[1].Value.(TextPointer).String())
 	})
+}
+
+func TestTable_Select_NonUniqueSecondaryIndexPointUsesRowViews(t *testing.T) {
+	pager, dbFile := initTest(t)
+
+	var (
+		ctx        = context.Background()
+		tablePager = pager.ForTable(testColumns[0:3])
+		txManager  = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
+		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		table      *Table
+		indexName  = "idx__test_table__age"
+		indexCols  = testColumns[2:3]
+		rows       = []Row{
+			NewRowWithValues(testColumns[0:3], []OptionalValue{{Value: int64(1), Valid: true}, {Value: NewTextPointer([]byte("a@example.com")), Valid: true}, {Value: int32(42), Valid: true}}),
+			NewRowWithValues(testColumns[0:3], []OptionalValue{{Value: int64(2), Valid: true}, {Value: NewTextPointer([]byte("b@example.com")), Valid: true}, {Value: int32(7), Valid: true}}),
+			NewRowWithValues(testColumns[0:3], []OptionalValue{{Value: int64(3), Valid: true}, {Value: NewTextPointer([]byte("c@example.com")), Valid: true}, {Value: int32(42), Valid: true}}),
+		}
+	)
+
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		freePage, err := txPager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		freePage.LeafNode = NewLeafNode()
+		freePage.LeafNode.Header.IsRoot = true
+		table = NewTable(testLogger, txPager, txManager, testTableName, testColumns[0:3], freePage.Index, nil)
+
+		indexPager := pager.ForIndex(indexCols, false)
+		txIndexPager := NewTransactionalPager(indexPager, txManager, testTableName, indexName)
+		indexRoot, err := txIndexPager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		idx, err := table.createBTreeIndex(txIndexPager, indexRoot, indexCols, indexName, false)
+		if err != nil {
+			return err
+		}
+		table.SetSecondaryIndex(SecondaryIndex{IndexInfo: IndexInfo{Name: indexName, Columns: indexCols}, Index: idx})
+
+		stmt := Statement{
+			Kind:    Insert,
+			Fields:  fieldsFromColumns(testColumns[0:3]...),
+			Inserts: make([][]OptionalValue, 0, len(rows)),
+		}
+		for _, row := range rows {
+			stmt.Inserts = append(stmt.Inserts, row.Values)
+		}
+		_, err = table.Insert(ctx, stmt)
+		return err
+	})
+	require.NoError(t, err)
+
+	result, err := table.Select(ctx, Statement{
+		Kind: Select,
+		Fields: []Field{
+			{Name: "id"},
+			{Name: "email"},
+		},
+		Conditions: NewOneOrMore(Conditions{
+			FieldIsEqual(Field{Name: "age"}, OperandInteger, int64(42)),
+		}),
+	})
+	require.NoError(t, err)
+	assert.Len(t, result.RowViewFieldIndexes, 2)
+
+	got := collectRows(ctx, result)
+	require.Len(t, got, 2)
+	assert.Equal(t, rows[0].Values[0], got[0].Values[0])
+	assert.Equal(t, rows[0].Values[1], got[0].Values[1])
+	assert.Equal(t, rows[2].Values[0], got[1].Values[0])
+	assert.Equal(t, rows[2].Values[1], got[1].Values[1])
 }
 
 // TestTable_SelectGroupBy covers selectGroupBy via Table.Select.
