@@ -100,3 +100,61 @@ func TestRowView_Materialize(t *testing.T) {
 	assert.False(t, got.Values[4].Valid)
 	assert.False(t, got.Values[5].Valid)
 }
+
+func TestRowView_CheckOneOrMoreWithColumnIndexes(t *testing.T) {
+	t.Parallel()
+
+	row := gen.Row()
+	data, err := row.Marshal()
+	require.NoError(t, err)
+
+	view := NewRowView(row.Columns, Cell{
+		NullBitmask: row.NullBitmask(),
+		Value:       data,
+	})
+	columnIndexes := make(map[string]int, len(row.Columns))
+	for i, col := range row.Columns {
+		columnIndexes[col.Name] = i
+	}
+
+	id := row.Values[0].Value.(int64)
+	age := int64(row.Values[2].Value.(int32))
+	conditions := NewOneOrMore(Conditions{
+		FieldIsGreaterOrEqual(Field{Name: "id"}, OperandInteger, id),
+		FieldIsLessOrEqual(Field{Name: "age"}, OperandInteger, age),
+	})
+
+	ok, err := view.CheckOneOrMoreWithColumnIndexes(conditions, columnIndexes)
+	require.NoError(t, err)
+	assert.True(t, ok)
+
+	conditions = NewOneOrMore(Conditions{
+		FieldIsGreater(Field{Name: "age"}, OperandInteger, age),
+	})
+
+	ok, err = view.CheckOneOrMoreWithColumnIndexes(conditions, columnIndexes)
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func TestRowView_CheckOneOrMoreWithColumnIndexes_Null(t *testing.T) {
+	t.Parallel()
+
+	row := gen.Row()
+	row.Values[2] = OptionalValue{}
+	data, err := row.Marshal()
+	require.NoError(t, err)
+
+	view := NewRowView(row.Columns, Cell{
+		NullBitmask: row.NullBitmask(),
+		Value:       data,
+	})
+	columnIndexes := map[string]int{"age": 2}
+
+	ok, err := view.CheckOneOrMoreWithColumnIndexes(
+		NewOneOrMore(Conditions{FieldIsNull(Field{Name: "age"})}),
+		columnIndexes,
+	)
+	require.NoError(t, err)
+	assert.True(t, ok)
+}

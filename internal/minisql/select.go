@@ -991,10 +991,10 @@ func (t *Table) selectStreamingDirectSequentialRowView(
 
 	result := StatementResult{Columns: resultColumns}
 	scan := plan.Scans[0]
-	tableFilter := compileScanFilter(t.Columns, scan.Filters)
-	if tableFilter != nil {
+	if !rowViewFilterSupports(scan.Filters) {
 		return StatementResult{}, false, nil
 	}
+	tableFilter := compileRowViewFilterForColumns(t.Columns, scan.Filters)
 
 	var (
 		remaining int64
@@ -1052,6 +1052,15 @@ func (t *Table) selectStreamingDirectSequentialRowView(
 		}
 
 		view := NewRowView(t.Columns, cell)
+		if tableFilter != nil {
+			ok, err := tableFilter(view)
+			if err != nil {
+				return StatementResult{}, true, err
+			}
+			if !ok {
+				continue
+			}
+		}
 		row, err := projectRowView(ctx, t.pager, view, fieldIndexes, resultColumns)
 		if err != nil {
 			return StatementResult{}, true, err
