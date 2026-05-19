@@ -1,11 +1,12 @@
 package minisql
 
 import (
+	"context"
 	"errors"
 	"fmt"
 )
 
-func compileRowViewFilterForColumns(columns []Column, conditions OneOrMore) func(RowView) (bool, error) {
+func compileRowViewFilterForColumns(columns []Column, pager TxPager, conditions OneOrMore) func(context.Context, RowView) (bool, error) {
 	if len(conditions) == 0 {
 		return nil
 	}
@@ -13,23 +14,15 @@ func compileRowViewFilterForColumns(columns []Column, conditions OneOrMore) func
 	for i := range columns {
 		columnIndexes[columns[i].Name] = i
 	}
-	return func(view RowView) (bool, error) {
-		return view.CheckOneOrMoreWithColumnIndexes(conditions, columnIndexes)
+	return func(ctx context.Context, view RowView) (bool, error) {
+		return view.CheckOneOrMoreWithColumnIndexes(ctx, pager, conditions, columnIndexes)
 	}
 }
 
 func rowViewFilterSupports(columns []Column, conditions OneOrMore) bool {
-	columnByName := make(map[string]Column, len(columns))
-	for _, col := range columns {
-		columnByName[col.Name] = col
-	}
 	for _, group := range conditions {
 		for _, cond := range group {
 			if cond.Operand1.Type == OperandExpr || cond.Operand2.Type == OperandExpr {
-				return false
-			}
-			if rowViewFilterOperandNeedsOverflowText(cond.Operand1, columnByName) ||
-				rowViewFilterOperandNeedsOverflowText(cond.Operand2, columnByName) {
 				return false
 			}
 		}
@@ -37,30 +30,16 @@ func rowViewFilterSupports(columns []Column, conditions OneOrMore) bool {
 	return true
 }
 
-func rowViewFilterOperandNeedsOverflowText(operand Operand, columnByName map[string]Column) bool {
-	if !operand.IsField() {
-		return false
-	}
-	field := operand.Value.(Field)
-	if field.AliasPrefix != "" {
-		if col, ok := columnByName[field.AliasPrefix+"."+field.Name]; ok {
-			return col.MayUseOverflowText()
-		}
-	}
-	col, ok := columnByName[field.Name]
-	return ok && col.MayUseOverflowText()
-}
-
 // CheckOneOrMoreWithColumnIndexes evaluates conditions against lazily decoded
 // cell data. It mirrors Row.CheckOneOrMoreWithColumnIndexes without allocating a
 // []OptionalValue for the whole row.
-func (rv RowView) CheckOneOrMoreWithColumnIndexes(conditions OneOrMore, columnIndexes map[string]int) (bool, error) {
+func (rv RowView) CheckOneOrMoreWithColumnIndexes(ctx context.Context, pager TxPager, conditions OneOrMore, columnIndexes map[string]int) (bool, error) {
 	if len(conditions) == 0 {
 		return true, nil
 	}
 
 	for _, condGroup := range conditions {
-		ok, err := rv.checkConditionsWithColumnIndexes(condGroup, columnIndexes)
+		ok, err := rv.checkConditionsWithColumnIndexes(ctx, pager, condGroup, columnIndexes)
 		if err != nil {
 			return false, err
 		}
@@ -72,13 +51,13 @@ func (rv RowView) CheckOneOrMoreWithColumnIndexes(conditions OneOrMore, columnIn
 	return false, nil
 }
 
-func (rv RowView) checkConditionsWithColumnIndexes(condGroup Conditions, columnIndexes map[string]int) (bool, error) {
+func (rv RowView) checkConditionsWithColumnIndexes(ctx context.Context, pager TxPager, condGroup Conditions, columnIndexes map[string]int) (bool, error) {
 	if len(condGroup) == 0 {
 		return true, nil
 	}
 
 	for _, cond := range condGroup {
-		ok, err := rv.checkConditionWithColumnIndexes(cond, columnIndexes)
+		ok, err := rv.checkConditionWithColumnIndexes(ctx, pager, cond, columnIndexes)
 		if err != nil {
 			return false, err
 		}
@@ -90,27 +69,27 @@ func (rv RowView) checkConditionsWithColumnIndexes(condGroup Conditions, columnI
 	return true, nil
 }
 
-func (rv RowView) checkConditionWithColumnIndexes(cond Condition, columnIndexes map[string]int) (bool, error) {
+func (rv RowView) checkConditionWithColumnIndexes(ctx context.Context, pager TxPager, cond Condition, columnIndexes map[string]int) (bool, error) {
 	if cond.Operand1.Type == OperandExpr {
 		return false, errRowViewUnsupportedCondition
 	}
 
 	if cond.Operand1.IsField() && !cond.Operand2.IsField() {
-		return rv.compareFieldValueWithColumnIndexes(cond.Operand1, cond.Operand2, cond.Operator, columnIndexes)
+		return rv.compareFieldValueWithColumnIndexes(ctx, pager, cond.Operand1, cond.Operand2, cond.Operator, columnIndexes)
 	}
 
 	if cond.Operand2.IsField() && !cond.Operand1.IsField() {
-		return rv.compareFieldValueWithColumnIndexes(cond.Operand2, cond.Operand1, cond.Operator, columnIndexes)
+		return rv.compareFieldValueWithColumnIndexes(ctx, pager, cond.Operand2, cond.Operand1, cond.Operator, columnIndexes)
 	}
 
 	if cond.Operand1.IsField() && cond.Operand2.IsField() {
-		return rv.compareFieldsWithColumnIndexes(cond.Operand1, cond.Operand2, cond.Operator, columnIndexes)
+		return rv.compareFieldsWithColumnIndexes(ctx, pager, cond.Operand1, cond.Operand2, cond.Operator, columnIndexes)
 	}
 
 	return cond.Operand1.Value == cond.Operand2.Value, nil
 }
 
-func (rv RowView) compareFieldValueWithColumnIndexes(fieldOperand, valueOperand Operand, operator Operator, columnIndexes map[string]int) (bool, error) {
+func (rv RowView) compareFieldValueWithColumnIndexes(ctx context.Context, pager TxPager, fieldOperand, valueOperand Operand, operator Operator, columnIndexes map[string]int) (bool, error) {
 	if fieldOperand.Type != OperandField {
 		return false, fmt.Errorf("field operand invalid, type '%d'", fieldOperand.Type)
 	}
@@ -124,7 +103,7 @@ func (rv RowView) compareFieldValueWithColumnIndexes(fieldOperand, valueOperand 
 		return false, fmt.Errorf("row does not contain column '%s'", field.Name)
 	}
 	col := rv.columns[colIdx]
-	fieldValue, err := rv.ValueAt(colIdx)
+	fieldValue, err := rv.ValueAtWithOverflow(ctx, pager, colIdx)
 	if err != nil {
 		return false, err
 	}
@@ -150,7 +129,7 @@ func (rv RowView) compareFieldValueWithColumnIndexes(fieldOperand, valueOperand 
 	return compareRowViewFieldValue(col.Kind, fieldValue, valueOperand, operator)
 }
 
-func (rv RowView) compareFieldsWithColumnIndexes(field1, field2 Operand, operator Operator, columnIndexes map[string]int) (bool, error) {
+func (rv RowView) compareFieldsWithColumnIndexes(ctx context.Context, pager TxPager, field1, field2 Operand, operator Operator, columnIndexes map[string]int) (bool, error) {
 	idx1, ok := rowViewColumnIndex(field1.Value.(Field), columnIndexes)
 	if !ok {
 		return false, fmt.Errorf("row does not contain column '%s'", field1.Value.(Field).Name)
@@ -166,11 +145,11 @@ func (rv RowView) compareFieldsWithColumnIndexes(field1, field2 Operand, operato
 		return false, fmt.Errorf("columns '%s' and '%s' have different types", col1.Name, col2.Name)
 	}
 
-	value1, err := rv.ValueAt(idx1)
+	value1, err := rv.ValueAtWithOverflow(ctx, pager, idx1)
 	if err != nil {
 		return false, err
 	}
-	value2, err := rv.ValueAt(idx2)
+	value2, err := rv.ValueAtWithOverflow(ctx, pager, idx2)
 	if err != nil {
 		return false, err
 	}

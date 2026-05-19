@@ -114,6 +114,30 @@ func (rv RowView) ValueAt(idx int) (OptionalValue, error) {
 	}
 }
 
+// ValueAtWithOverflow lazily decodes a single column and reads overflow text when needed.
+func (rv RowView) ValueAtWithOverflow(ctx context.Context, pager TxPager, idx int) (OptionalValue, error) {
+	value, err := rv.ValueAt(idx)
+	if err != nil || !value.Valid {
+		return value, err
+	}
+	col := rv.columns[idx]
+	if !col.MayUseOverflowText() {
+		return value, nil
+	}
+	textPointer, ok := value.Value.(TextPointer)
+	if !ok {
+		return OptionalValue{}, fmt.Errorf("expected TextPointer value for text column %s", col.Name)
+	}
+	if !textPointer.IsInline() && pager == nil {
+		return OptionalValue{}, fmt.Errorf("overflow text column %d requires a pager", idx)
+	}
+	textPointer, err = textPointer.readOverflowText(ctx, pager)
+	if err != nil {
+		return OptionalValue{}, err
+	}
+	return OptionalValue{Valid: true, Value: textPointer}, nil
+}
+
 // BoolAt lazily decodes a BOOLEAN column.
 func (rv RowView) BoolAt(idx int) (bool, bool, error) {
 	if null, err := rv.IsNull(idx); err != nil || null {

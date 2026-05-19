@@ -997,7 +997,7 @@ func (t *Table) selectStreamingDirectRowView(
 	if !rowViewFilterSupports(t.Columns, scan.Filters) {
 		return StatementResult{}, false, nil
 	}
-	tableFilter := compileRowViewFilterForColumns(t.Columns, scan.Filters)
+	tableFilter := compileRowViewFilterForColumns(t.Columns, t.pager, scan.Filters)
 
 	var (
 		remaining int64
@@ -1042,7 +1042,7 @@ func (t *Table) selectStreamingDirectRowView(
 
 func (t *Table) sequentialRowViewIteratorFactory(
 	ctx context.Context,
-	tableFilter func(RowView) (bool, error),
+	tableFilter func(context.Context, RowView) (bool, error),
 	remaining int64,
 	offset int64,
 	hasLimit bool,
@@ -1089,7 +1089,7 @@ func (t *Table) sequentialRowViewIteratorFactory(
 
 				view := NewRowView(t.Columns, cell)
 				if tableFilter != nil {
-					ok, err := tableFilter(view)
+					ok, err := tableFilter(iterCtx, view)
 					if err != nil {
 						return RowView{}, err
 					}
@@ -1118,7 +1118,7 @@ func (t *Table) indexRowViewIteratorFactory(
 	ctx context.Context,
 	plan QueryPlan,
 	scan Scan,
-	tableFilter func(RowView) (bool, error),
+	tableFilter func(context.Context, RowView) (bool, error),
 	remaining int64,
 	offset int64,
 	hasLimit bool,
@@ -1145,7 +1145,7 @@ func (t *Table) indexRowViewIteratorFactory(
 					return RowView{}, err
 				}
 				if tableFilter != nil {
-					ok, err := tableFilter(view)
+					ok, err := tableFilter(iterCtx, view)
 					if err != nil {
 						return RowView{}, err
 					}

@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -124,7 +125,7 @@ func TestRowView_CheckOneOrMoreWithColumnIndexes(t *testing.T) {
 		FieldIsLessOrEqual(Field{Name: "age"}, OperandInteger, age),
 	})
 
-	ok, err := view.CheckOneOrMoreWithColumnIndexes(conditions, columnIndexes)
+	ok, err := view.CheckOneOrMoreWithColumnIndexes(context.Background(), nil, conditions, columnIndexes)
 	require.NoError(t, err)
 	assert.True(t, ok)
 
@@ -132,7 +133,7 @@ func TestRowView_CheckOneOrMoreWithColumnIndexes(t *testing.T) {
 		FieldIsGreater(Field{Name: "age"}, OperandInteger, age),
 	})
 
-	ok, err = view.CheckOneOrMoreWithColumnIndexes(conditions, columnIndexes)
+	ok, err = view.CheckOneOrMoreWithColumnIndexes(context.Background(), nil, conditions, columnIndexes)
 	require.NoError(t, err)
 	assert.False(t, ok)
 }
@@ -152,6 +153,8 @@ func TestRowView_CheckOneOrMoreWithColumnIndexes_Null(t *testing.T) {
 	columnIndexes := map[string]int{"age": 2}
 
 	ok, err := view.CheckOneOrMoreWithColumnIndexes(
+		context.Background(),
+		nil,
 		NewOneOrMore(Conditions{FieldIsNull(Field{Name: "age"})}),
 		columnIndexes,
 	)

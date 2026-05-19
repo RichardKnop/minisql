@@ -692,6 +692,31 @@ func TestTable_Select_Overflow(t *testing.T) {
 		// And now we can assert
 		assert.Equal(t, rows, collectRows(ctx, result))
 	})
+
+	t.Run("Filter on overflow text uses row views", func(t *testing.T) {
+		profile, ok := rows[2].GetValue("profile")
+		require.True(t, ok)
+
+		stmt := Statement{
+			Kind: Select,
+			Fields: []Field{
+				{Name: "id"},
+				{Name: "profile"},
+			},
+			Conditions: NewOneOrMore(Conditions{
+				FieldIsEqual(Field{Name: "profile"}, OperandQuotedString, profile.Value),
+			}),
+		}
+
+		result, err := table.Select(ctx, stmt)
+		require.NoError(t, err)
+		assert.Len(t, result.RowViewFieldIndexes, 2)
+
+		got := collectRows(ctx, result)
+		require.Len(t, got, 1)
+		assert.Equal(t, rows[2].Values[0], got[0].Values[0])
+		assert.Equal(t, profile.Value.(TextPointer).String(), got[0].Values[1].Value.(TextPointer).String())
+	})
 }
 
 // TestTable_SelectGroupBy covers selectGroupBy via Table.Select.
