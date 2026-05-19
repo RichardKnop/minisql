@@ -1133,6 +1133,10 @@ func (t *Table) indexRowViewIteratorFactory(
 	hasLimit bool,
 	hasOffset bool,
 ) (func() RowViewIterator, error) {
+	if scan.Type == ScanTypeIndexPoint {
+		return t.indexPointRowViewIteratorFactory(scan, tableFilter, remaining, offset, hasLimit, hasOffset)
+	}
+
 	rowIDs, err := t.collectIndexScanRowIDs(ctx, plan, scan, tableFilter == nil)
 	if err != nil {
 		return nil, err
@@ -1175,6 +1179,91 @@ func (t *Table) indexRowViewIteratorFactory(
 				return view, nil
 			}
 			return RowView{}, ErrNoMoreRows
+		})
+	}, nil
+}
+
+type pointRowIDIteratorIndex interface {
+	PointRowIDIterator(context.Context, any) (rowIDNextFunc, error)
+}
+
+func (t *Table) indexPointRowViewIteratorFactory(
+	scan Scan,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) (func() RowViewIterator, error) {
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return nil, fmt.Errorf("no index found for row view scan: %s", scan.IndexName)
+	}
+	pointIdx, ok := idx.(pointRowIDIteratorIndex)
+	if !ok {
+		return nil, fmt.Errorf("index %s does not support row ID iteration", scan.IndexName)
+	}
+
+	return func() RowViewIterator {
+		keyIdx := 0
+		var nextRowID rowIDNextFunc
+		iterRemaining := remaining
+		iterOffset := offset
+		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
+			for {
+				if err := iterCtx.Err(); err != nil {
+					return RowView{}, err
+				}
+				if nextRowID == nil {
+					if keyIdx >= len(scan.IndexKeys) {
+						return RowView{}, ErrNoMoreRows
+					}
+					var err error
+					nextRowID, err = pointIdx.PointRowIDIterator(iterCtx, scan.IndexKeys[keyIdx])
+					keyIdx += 1
+					if errors.Is(err, ErrNotFound) {
+						nextRowID = nil
+						continue
+					}
+					if err != nil {
+						return RowView{}, fmt.Errorf("index lookup failed: %w", err)
+					}
+				}
+
+				rowID, err := nextRowID(iterCtx)
+				if errors.Is(err, ErrNoMoreRows) {
+					nextRowID = nil
+					continue
+				}
+				if err != nil {
+					return RowView{}, err
+				}
+
+				view, err := t.rowViewByRowID(iterCtx, rowID)
+				if err != nil {
+					return RowView{}, err
+				}
+				if tableFilter != nil {
+					ok, err := tableFilter(iterCtx, view)
+					if err != nil {
+						return RowView{}, err
+					}
+					if !ok {
+						continue
+					}
+				}
+				if hasOffset && iterOffset > 0 {
+					iterOffset -= 1
+					continue
+				}
+				if hasLimit {
+					if iterRemaining == 0 {
+						return RowView{}, ErrNoMoreRows
+					}
+					iterRemaining -= 1
+				}
+				return view, nil
+			}
 		})
 	}, nil
 }
