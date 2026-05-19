@@ -113,27 +113,71 @@ func (r *Rows) nextRowView(dest []driver.Value) error {
 
 	view := r.rowViewIter.RowView()
 	for i, fieldIdx := range r.rowViewFieldIndexes {
-		value, err := view.ValueAt(fieldIdx)
+		value, err := r.rowViewDriverValue(view, i, fieldIdx)
 		if err != nil {
 			return err
 		}
-		if !value.Valid {
-			dest[i] = nil
-			continue
-		}
-		switch v := value.Value.(type) {
-		case minisql.TextPointer:
-			dest[i] = string(v.Data)
-		case minisql.TimestampMicros:
-			dest[i] = minisql.FromMicroseconds(int64(v)).GoTime()
-		case minisql.UUIDValue:
-			dest[i] = v.String()
-		default:
-			dest[i] = value.Value
-		}
+		dest[i] = value
 	}
 
 	return nil
+}
+
+func (r *Rows) rowViewDriverValue(view minisql.RowView, destIdx, fieldIdx int) (driver.Value, error) {
+	if fieldIdx < 0 || fieldIdx >= len(view.Columns()) {
+		return nil, fmt.Errorf("column index %d out of bounds", fieldIdx)
+	}
+	isNull, err := view.IsNull(fieldIdx)
+	if err != nil || isNull {
+		return nil, err
+	}
+	switch r.columns[destIdx].Kind {
+	case minisql.Boolean:
+		value, ok, err := view.BoolAt(fieldIdx)
+		if err != nil || !ok {
+			return nil, err
+		}
+		return value, nil
+	case minisql.Int4, minisql.Int8:
+		value, ok, err := view.Int64At(fieldIdx)
+		if err != nil || !ok {
+			return nil, err
+		}
+		return value, nil
+	case minisql.Real, minisql.Double:
+		value, ok, err := view.Float64At(fieldIdx)
+		if err != nil || !ok {
+			return nil, err
+		}
+		return value, nil
+	case minisql.Varchar, minisql.Text, minisql.JSON:
+		value, err := view.TextAt(fieldIdx)
+		if err != nil {
+			return nil, err
+		}
+		return string(value.Data), nil
+	case minisql.Timestamp:
+		value, ok, err := view.Int64At(fieldIdx)
+		if err != nil || !ok {
+			return nil, err
+		}
+		return minisql.FromMicroseconds(value).GoTime(), nil
+	case minisql.UUID:
+		value, ok, err := view.UUIDAt(fieldIdx)
+		if err != nil || !ok {
+			return nil, err
+		}
+		return value.String(), nil
+	default:
+		value, err := view.ValueAt(fieldIdx)
+		if err != nil {
+			return nil, err
+		}
+		if !value.Valid {
+			return nil, nil
+		}
+		return value.Value, nil
+	}
 }
 
 func (r *Rows) closeReadTx(success bool) error {
