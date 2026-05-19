@@ -43,7 +43,7 @@ func cteBodyIsInlineEligible(body Statement) bool {
 func cteRefCount(cteName string, mainStmt Statement, allCTEs []CTE) int {
 	count := 0
 	if mainStmt.TableName == cteName {
-		count++
+		count += 1
 	}
 	count += cteJoinRefCount(cteName, mainStmt.Joins)
 	for _, other := range allCTEs {
@@ -51,7 +51,7 @@ func cteRefCount(cteName string, mainStmt Statement, allCTEs []CTE) int {
 			continue
 		}
 		if other.Body.TableName == cteName {
-			count++
+			count += 1
 		}
 		count += cteJoinRefCount(cteName, other.Body.Joins)
 	}
@@ -62,7 +62,7 @@ func cteJoinRefCount(cteName string, joins []Join) int {
 	count := 0
 	for _, j := range joins {
 		if j.TableName == cteName {
-			count++
+			count += 1
 		}
 		count += cteJoinRefCount(cteName, j.Joins)
 	}

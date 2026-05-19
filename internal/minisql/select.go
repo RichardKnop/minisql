@@ -151,6 +151,24 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return t.selectStreamingDirect(ctx, stmt, plan, selectedFields, requestedFields)
 	}
 
+	// COUNT(*) with post-scan filters: count matching rows without collecting
+	// them into a []Row. For sequential scans, also reuse a single values buffer
+	// across all rows to eliminate the dominant per-row heap allocation.
+	if stmt.IsSelectCountAll() && len(plan.Joins) == 0 {
+		if len(plan.Scans) == 1 && plan.Scans[0].Type == ScanTypeSequential {
+			return t.countSequentialScanZeroAlloc(ctx, plan.Scans[0], selectedFields)
+		}
+		var count int64
+		err = plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
+			count += 1
+			return nil
+		})
+		if err != nil {
+			return StatementResult{}, err
+		}
+		return countResult(count), nil
+	}
+
 	// Materialising path: buffer every matching row, then dispatch.
 	// Required for COUNT (needs a total), GROUP BY, aggregates, ORDER BY (sort),
 	// and JOIN (goroutine-based execution inside plan.Execute).
@@ -304,7 +322,7 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row)
 		for i, agg := range stmt.Aggregates {
 			switch agg.Kind {
 			case AggregateCount:
-				states[i].count++
+				states[i].count += 1
 
 			case AggregateSum, AggregateAvg:
 				colIdx := aggColIdx[i]
@@ -315,7 +333,7 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row)
 				if !val.Valid {
 					continue
 				}
-				states[i].count++
+				states[i].count += 1
 				states[i].hasValue = true
 				if states[i].useIntSum {
 					switch v := val.Value.(type) {
@@ -543,7 +561,7 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 			case 0:
 				// Non-aggregate GROUP BY column — no accumulation needed.
 			case AggregateCount:
-				aggStatePool[aggBase+i].count++
+				aggStatePool[aggBase+i].count += 1
 			case AggregateSum, AggregateAvg:
 				colIdx := aggColIdx[i]
 				if colIdx < 0 || colIdx >= len(row.Values) {
@@ -553,7 +571,7 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 				if !val.Valid {
 					continue
 				}
-				aggStatePool[aggBase+i].count++
+				aggStatePool[aggBase+i].count += 1
 				aggStatePool[aggBase+i].hasValue = true
 				if aggStatePool[aggBase+i].useIntSum {
 					switch v := val.Value.(type) {
@@ -2277,6 +2295,91 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 	}
 
 	return nil
+}
+
+// countSequentialScanZeroAlloc counts rows that match the scan filter without
+// collecting them. It reuses a single []OptionalValue buffer across all rows,
+// eliminating the per-row heap allocation in UnmarshalWithMask. Virtual tables
+// and parallel scans fall back to the general sequentialScan path.
+func (t *Table) countSequentialScanZeroAlloc(ctx context.Context, scan Scan, selectedFields []Field) (StatementResult, error) {
+	if t.virtualRows != nil || t.parallelScan {
+		var count int64
+		err := t.sequentialScan(ctx, scan, selectedFields, func(Row) error {
+			count += 1
+			return nil
+		})
+		if err != nil {
+			return StatementResult{}, err
+		}
+		return countResult(count), nil
+	}
+
+	cursor, err := t.SeekFirst(ctx)
+	if err != nil {
+		return StatementResult{}, err
+	}
+
+	fullMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+
+	// Pre-allocate a single reusable values buffer. Safe because count(*) never
+	// retains a row after the predicate check — the buffer is overwritten each row.
+	var reuseValues []OptionalValue
+	if len(fullMask) > 0 {
+		reuseValues = make([]OptionalValue, len(t.Columns))
+	}
+
+	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return StatementResult{}, fmt.Errorf("count sequential scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	var count int64
+	for !cursor.EndOfTable {
+		if err := ctx.Err(); err != nil {
+			return StatementResult{}, err
+		}
+
+		if page.Index != cursor.PageIdx {
+			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
+			if err != nil {
+				return StatementResult{}, fmt.Errorf("count sequential scan: %w", err)
+			}
+		}
+
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+
+		switch {
+		case cursor.CellIdx < page.LeafNode.Header.Cells-1:
+			cursor.CellIdx += 1
+		case page.LeafNode.Header.NextLeaf == 0:
+			cursor.EndOfTable = true
+		default:
+			cursor.PageIdx = page.LeafNode.Header.NextLeaf
+			cursor.CellIdx = 0
+		}
+
+		if tableFilter != nil {
+			// Decode into reusable buffer — safe because count never retains the row.
+			row := t.newRow()
+			row, err = row.unmarshalWithMaskInto(cell, fullMask, reuseValues)
+			if err != nil {
+				return StatementResult{}, err
+			}
+			row.Key = cell.Key
+			ok, err := tableFilter(row)
+			if err != nil {
+				return StatementResult{}, err
+			}
+			if !ok {
+				continue
+			}
+		}
+		// No filter or filter passed: count the row without touching row data.
+		count += 1
+	}
+	return countResult(count), nil
 }
 
 // filterOnlyMask returns a column-selection mask that includes only the columns

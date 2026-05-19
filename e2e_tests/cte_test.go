@@ -349,7 +349,7 @@ func (s *TestSuite) TestCTE_Inline() {
 
 		var count int
 		for rows.Next() {
-			count++
+			count += 1
 			var id int64
 			var name string
 			s.Require().NoError(rows.Scan(&id, &name))

@@ -379,15 +379,29 @@ func (r Row) Unmarshal(cell Cell, selectedFields ...Field) (Row, error) {
 // (keys only; values remain zero-value placeholders).
 func (r Row) UnmarshalWithMask(cell Cell, selectedMask []bool) (Row, error) {
 	r.Key = cell.Key
-
+	r.Values = make([]OptionalValue, len(r.Columns))
 	if len(selectedMask) == 0 {
-		r.Values = make([]OptionalValue, len(r.Columns))
 		return r, nil
 	}
+	return r.decodeColumnsWithMask(cell, selectedMask)
+}
 
-	// Pre-allocate exact size and write directly by index instead of append
-	r.Values = make([]OptionalValue, len(r.Columns))
+// unmarshalWithMaskInto decodes cell into r using a caller-supplied values
+// buffer, avoiding the heap allocation in UnmarshalWithMask. The caller must
+// not retain Row.Values across row iterations; it is overwritten each call.
+func (r Row) unmarshalWithMaskInto(cell Cell, selectedMask []bool, values []OptionalValue) (Row, error) {
+	r.Key = cell.Key
+	clear(values[:len(r.Columns)])
+	r.Values = values[:len(r.Columns)]
+	if len(selectedMask) == 0 {
+		return r, nil
+	}
+	return r.decodeColumnsWithMask(cell, selectedMask)
+}
 
+// decodeColumnsWithMask is the shared inner loop used by UnmarshalWithMask and
+// unmarshalWithMaskInto. r.Values must already be allocated and zeroed.
+func (r Row) decodeColumnsWithMask(cell Cell, selectedMask []bool) (Row, error) {
 	offset := 0
 	for i, col := range r.Columns {
 		// Check if column is NULL
@@ -395,7 +409,6 @@ func (r Row) UnmarshalWithMask(cell Cell, selectedMask []bool) (Row, error) {
 
 		// If column not selected, skip it but track offset.
 		if !selectedMask[i] {
-			r.Values[i] = OptionalValue{Valid: false}
 			if !isNull {
 				// Skip over the data without unmarshaling
 				offset += int(r.getColumnSize(col, cell.Value, offset))
@@ -404,7 +417,6 @@ func (r Row) UnmarshalWithMask(cell Cell, selectedMask []bool) (Row, error) {
 		}
 
 		if isNull {
-			r.Values[i] = OptionalValue{Valid: false}
 			continue
 		}
 		switch col.Kind {
