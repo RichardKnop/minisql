@@ -148,7 +148,7 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		!stmt.IsSelectAggregate() &&
 		!plan.SortInMemory &&
 		len(plan.Joins) == 0 {
-		if result, ok, err := t.selectStreamingDirectSequentialRowView(ctx, stmt, plan, requestedFields); ok || err != nil {
+		if result, ok, err := t.selectStreamingDirectRowView(ctx, stmt, plan, requestedFields); ok || err != nil {
 			return result, err
 		}
 		return t.selectStreamingDirect(ctx, stmt, plan, selectedFields, requestedFields)
@@ -975,13 +975,13 @@ func (t *Table) selectStreamingDirect(
 	return result, nil
 }
 
-func (t *Table) selectStreamingDirectSequentialRowView(
+func (t *Table) selectStreamingDirectRowView(
 	ctx context.Context,
 	stmt Statement,
 	plan QueryPlan,
 	requestedFields []Field,
 ) (StatementResult, bool, error) {
-	if t.virtualRows != nil || t.parallelScan || len(plan.Scans) != 1 || plan.Scans[0].Type != ScanTypeSequential {
+	if t.virtualRows != nil || t.parallelScan || len(plan.Scans) != 1 {
 		return StatementResult{}, false, nil
 	}
 	fieldIndexes, resultColumns, inlineSafe, ok := rowViewProjectionPlan(t.Columns, requestedFields)
@@ -1012,17 +1012,52 @@ func (t *Table) selectStreamingDirectSequentialRowView(
 		offset = stmt.Offset.Value.(int64)
 	}
 
+	var newRowViewIter func() RowViewIterator
+	switch scan.Type {
+	case ScanTypeSequential:
+		iterFactory, err := t.sequentialRowViewIteratorFactory(ctx, tableFilter, remaining, offset, hasLimit, hasOffset)
+		if err != nil {
+			return StatementResult{}, true, err
+		}
+		newRowViewIter = iterFactory
+	case ScanTypeIndexAll, ScanTypeIndexRange:
+		if scan.CoveringIndex {
+			return StatementResult{}, false, nil
+		}
+		iterFactory, err := t.indexRowViewIteratorFactory(ctx, plan, scan, tableFilter, remaining, offset, hasLimit, hasOffset)
+		if err != nil {
+			return StatementResult{}, true, err
+		}
+		newRowViewIter = iterFactory
+	default:
+		return StatementResult{}, false, nil
+	}
+
+	result.RowViews = newRowViewIter()
+	result.RowViewFieldIndexes = fieldIndexes
+	result.Rows = rowViewMaterializingIterator(ctx, t.pager, newRowViewIter(), fieldIndexes, resultColumns)
+	return result, true, nil
+}
+
+func (t *Table) sequentialRowViewIteratorFactory(
+	ctx context.Context,
+	tableFilter func(RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) (func() RowViewIterator, error) {
 	cursor, err := t.SeekFirst(ctx)
 	if err != nil {
-		return StatementResult{}, true, err
+		return nil, err
 	}
 	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
 	if err != nil {
-		return StatementResult{}, true, fmt.Errorf("row view sequential scan: %w", err)
+		return nil, fmt.Errorf("row view sequential scan: %w", err)
 	}
 	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
 
-	newRowViewIter := func() RowViewIterator {
+	return func() RowViewIterator {
 		iterCursor := cursor
 		iterPage := page
 		iterRemaining := remaining
@@ -1075,12 +1110,103 @@ func (t *Table) selectStreamingDirectSequentialRowView(
 			}
 			return RowView{}, ErrNoMoreRows
 		})
-	}
+	}, nil
+}
 
-	result.RowViews = newRowViewIter()
-	result.RowViewFieldIndexes = fieldIndexes
-	result.Rows = rowViewMaterializingIterator(ctx, t.pager, newRowViewIter(), fieldIndexes, resultColumns)
-	return result, true, nil
+func (t *Table) indexRowViewIteratorFactory(
+	ctx context.Context,
+	plan QueryPlan,
+	scan Scan,
+	tableFilter func(RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) (func() RowViewIterator, error) {
+	rowIDs, err := t.collectIndexScanRowIDs(ctx, plan, scan, tableFilter == nil)
+	if err != nil {
+		return nil, err
+	}
+	return func() RowViewIterator {
+		idx := 0
+		iterRemaining := remaining
+		iterOffset := offset
+		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
+			for idx < len(rowIDs) {
+				if err := iterCtx.Err(); err != nil {
+					return RowView{}, err
+				}
+				rowID := rowIDs[idx]
+				idx += 1
+
+				view, err := t.rowViewByRowID(iterCtx, rowID)
+				if err != nil {
+					return RowView{}, err
+				}
+				if tableFilter != nil {
+					ok, err := tableFilter(view)
+					if err != nil {
+						return RowView{}, err
+					}
+					if !ok {
+						continue
+					}
+				}
+				if hasOffset && iterOffset > 0 {
+					iterOffset -= 1
+					continue
+				}
+				if hasLimit {
+					if iterRemaining == 0 {
+						return RowView{}, ErrNoMoreRows
+					}
+					iterRemaining -= 1
+				}
+				return view, nil
+			}
+			return RowView{}, ErrNoMoreRows
+		})
+	}, nil
+}
+
+func (t *Table) collectIndexScanRowIDs(ctx context.Context, plan QueryPlan, scan Scan, canApplyScanLimit bool) ([]RowID, error) {
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return nil, fmt.Errorf("no index found for row view scan: %s", scan.IndexName)
+	}
+	rowIDs := make([]RowID, 0)
+	var emitted int64
+	appendRowID := func(_ any, rowID RowID) error {
+		rowIDs = append(rowIDs, rowID)
+		if canApplyScanLimit && scan.ScanLimit > 0 {
+			emitted += 1
+			if emitted >= scan.ScanLimit {
+				return errLimitReached
+			}
+		}
+		return ctx.Err()
+	}
+	switch scan.Type {
+	case ScanTypeIndexAll:
+		if err := idx.ScanAll(ctx, plan.SortReverse, appendRowID); err != nil && !errors.Is(err, errLimitReached) {
+			return nil, err
+		}
+	case ScanTypeIndexRange:
+		if err := idx.ScanRange(ctx, scan.RangeCondition, plan.SortReverse, appendRowID); err != nil && !errors.Is(err, errLimitReached) {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported row view index scan type: %s", scan.Type)
+	}
+	return rowIDs, nil
+}
+
+func (t *Table) rowViewByRowID(ctx context.Context, rowID RowID) (RowView, error) {
+	cursor, err := t.Seek(ctx, rowID)
+	if err != nil {
+		return RowView{}, fmt.Errorf("find row failed: %w", err)
+	}
+	return cursor.fetchRowView(ctx)
 }
 
 func rowViewProjectionPlan(columns []Column, fields []Field) ([]int, []Column, bool, bool) {

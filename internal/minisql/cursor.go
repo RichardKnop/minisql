@@ -219,6 +219,17 @@ func (c *Cursor) fetchRowWithMask(ctx context.Context, advance bool, selectedMas
 	return row, nil
 }
 
+func (c *Cursor) fetchRowView(ctx context.Context) (RowView, error) {
+	page, err := c.Table.pager.ReadPage(ctx, c.PageIdx)
+	if err != nil {
+		return RowView{}, fmt.Errorf("read page: %w", err)
+	}
+	if c.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
+		return RowView{}, fmt.Errorf("cell index %d out of bounds, max %d", c.CellIdx, page.LeafNode.Header.Cells-1)
+	}
+	return NewRowView(c.Table.Columns, page.LeafNode.Cells[c.CellIdx]), nil
+}
+
 func (c *Cursor) saveToCell(ctx context.Context, node *LeafNode, cellIdx uint32, key RowID, row Row) error {
 	var err error
 	row, err = row.storeOverflowTexts(ctx, c.Table.pager)
