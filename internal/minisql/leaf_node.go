@@ -80,8 +80,8 @@ func (c *Cell) Marshal(buf []byte) {
 }
 
 // Unmarshal deserialises a cell from buf using the column schema to determine
-// each field's size. Value is sub-sliced directly into the page buffer (zero-copy);
-// isOwned is false until PrepareModifyCell is called.
+// each field's size. Value is copied into owned memory (isOwned=true) so that
+// the cell does not alias the source buffer, which may be returned to a pool.
 func (c *Cell) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	offset := uint64(0)
 
@@ -108,10 +108,13 @@ func (c *Cell) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 		}
 	}
 
-	// Pass 2: Sub-slice directly into page buffer — zero allocation, zero copy.
-	// isOwned stays false; PrepareModifyCell copies on first write (COW).
+	// Pass 2: Copy value bytes into owned memory. A zero-copy sub-slice would alias
+	// the source buffer (WAL frame buffers are returned to pageDataPool on the next
+	// commit and reused as pageBuf, corrupting any c.Value still pointing into them).
 	if totalSize > 0 {
-		c.Value = buf[offset : offset+totalSize]
+		c.Value = make([]byte, totalSize)
+		copy(c.Value, buf[offset:offset+totalSize])
+		c.isOwned = true
 		offset += totalSize
 	}
 
