@@ -705,12 +705,14 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				},
 				Cells: []Cell{
 					{
-						Key:   1,
-						Value: prefixWithLength([]byte("ccc")),
+						Key:     1,
+						Value:   prefixWithLength([]byte("ccc")),
+						isOwned: true,
 					},
 					{
-						Key:   2,
-						Value: prefixWithLength([]byte("ddd")),
+						Key:     2,
+						Value:   prefixWithLength([]byte("ddd")),
+						isOwned: true,
 					},
 				},
 			},
@@ -729,8 +731,9 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				},
 				Cells: []Cell{
 					{
-						Key:   5,
-						Value: prefixWithLength([]byte("aaa")),
+						Key:     5,
+						Value:   prefixWithLength([]byte("aaa")),
+						isOwned: true,
 					},
 				},
 			},
@@ -749,12 +752,14 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				},
 				Cells: []Cell{
 					{
-						Key:   12,
-						Value: prefixWithLength([]byte("bbb")),
+						Key:     12,
+						Value:   prefixWithLength([]byte("bbb")),
+						isOwned: true,
 					},
 					{
-						Key:   18,
-						Value: prefixWithLength([]byte("fff")),
+						Key:     18,
+						Value:   prefixWithLength([]byte("fff")),
+						isOwned: true,
 					},
 				},
 			},
@@ -772,8 +777,9 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				},
 				Cells: []Cell{
 					{
-						Key:   21,
-						Value: prefixWithLength([]byte("ggg")),
+						Key:     21,
+						Value:   prefixWithLength([]byte("ggg")),
+						isOwned: true,
 					},
 				},
 			},

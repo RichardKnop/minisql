@@ -728,6 +728,22 @@ func (ui *Index[T]) removeFromInternal(ctx context.Context, page *Page, idx int,
 			return fmt.Errorf("remove successor key: %w", err)
 		}
 	default:
+		// Guard against overflow: if merging left + separator + right would exceed one page,
+		// steal the successor from the right child instead (mirrors the atLeastHalfFull path).
+		separatorSize := node.Cells[idx].Size()
+		rightUsed := rightChildNode.MaxSpace() - rightChildNode.freeBytes
+		if separatorSize+rightUsed > leftChildNode.freeBytes {
+			successor, err := ui.getSucc(ctx, node, idx)
+			if err != nil {
+				return fmt.Errorf("get successor key: %w", err)
+			}
+			node.Cells[idx].Key = successor.Key
+			node.Cells[idx].InlineRowIDs = successor.InlineRowIDs
+			node.Cells[idx].RowIDs = successor.RowIDs
+			node.Cells[idx].UniqueRowID = successor.UniqueRowID
+			node.Cells[idx].Overflow = successor.Overflow
+			return ui.remove(ctx, rightChildPage, successor.Key, rowID)
+		}
 		if err := ui.merge(ctx, page, leftChildPage, rightChildPage, uint32(idx)); err != nil {
 			return fmt.Errorf("merge children: %w", err)
 		}
@@ -819,7 +835,21 @@ func (ui *Index[T]) fill(ctx context.Context, parent, page *Page, idx int) error
 		return ui.borrowFromRight(ctx, parent, page, right, uint32(idx))
 	}
 
+	pageNode := page.IndexNode.(*IndexNode[T])
+
 	if idx != int(parentNode.Header.Keys) {
+		// Guard against merge overflow: merging two not-half-full nodes requires pulling one
+		// separator cell down from the parent. For int64 unique indexes, each cell is 20 bytes
+		// (8 key + 8 UniqueRowID + 4 Child). At the not-half-full threshold, a node can hold
+		// up to 102 cells (102×20 = 2040 ≤ MaxSpace/2 = 2040). Two such nodes plus one
+		// separator cell = (2×102+1)×20 = 4100 bytes, which exceeds MaxSpace (4081).
+		// When the merged content would overflow, the sibling must have ≥102 cells (that is
+		// why the merge would overflow), so force-borrowing 1 cell from it is always safe.
+		separatorSize := parentNode.Cells[idx].Size()
+		rightUsed := rightNode.MaxSpace() - rightNode.freeBytes
+		if separatorSize+rightUsed > pageNode.freeBytes {
+			return ui.borrowFromRight(ctx, parent, page, right, uint32(idx))
+		}
 		if err := ui.merge(ctx, parent, page, right, uint32(idx)); err != nil {
 			return fmt.Errorf("merge with left: %w", err)
 		}
@@ -827,6 +857,11 @@ func (ui *Index[T]) fill(ctx context.Context, parent, page *Page, idx int) error
 		return ui.pager.AddFreePage(ctx, right.Index)
 	}
 
+	separatorSize := parentNode.Cells[idx-1].Size()
+	pageUsed := pageNode.MaxSpace() - pageNode.freeBytes
+	if separatorSize+pageUsed > leftNode.freeBytes {
+		return ui.borrowFromLeft(ctx, parent, page, left, uint32(idx))
+	}
 	if err := ui.merge(ctx, parent, left, page, uint32(idx-1)); err != nil {
 		return fmt.Errorf("merge with right: %w", err)
 	}

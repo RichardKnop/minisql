@@ -32,8 +32,9 @@ func TestLeafNode_Marshal(t *testing.T) {
 		NextLeaf: 4,
 	}
 	node.Cells = append(node.Cells, Cell{
-		Key:   1,
-		Value: prefixWithLength(bytes.Repeat([]byte{'a'}, 230)),
+		Key:     1,
+		Value:   prefixWithLength(bytes.Repeat([]byte{'a'}, 230)),
+		isOwned: true, // Unmarshal produces owned copies to avoid aliasing page buffers
 	}, Cell{
 		Key:         2,
 		NullBitmask: bitwise.Set(uint64(0), 0),
