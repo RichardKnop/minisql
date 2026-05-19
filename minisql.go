@@ -288,18 +288,21 @@ func (c *Conn) QueryContext(ctx context.Context, query string, args []driver.Nam
 		}
 	}
 
-	result, err := c.executeStatement(ctx, stmt)
+	result, rowsCtx, readTx, err := c.executeQueryStatement(ctx, stmt)
 	if err != nil {
 		return nil, err
 	}
+	useRowViews := len(result.RowViewFieldIndexes) > 0
 
 	return &Rows{
 		columns:             result.Columns,
 		iter:                result.Rows,
 		rowViewIter:         result.RowViews,
 		rowViewFieldIndexes: result.RowViewFieldIndexes,
-		useRowViews:         len(result.RowViewFieldIndexes) > 0,
-		ctx:                 ctx,
+		useRowViews:         useRowViews,
+		ctx:                 rowsCtx,
+		txManager:           c.db.GetTransactionManager(),
+		tx:                  readTx,
 	}, nil
 }
 
@@ -325,6 +328,34 @@ func (c *Conn) TransactionContext(ctx context.Context) context.Context {
 		return minisql.WithTransaction(ctx, c.transaction)
 	}
 	return ctx
+}
+
+func (c *Conn) executeQueryStatement(ctx context.Context, stmt minisql.Statement) (minisql.StatementResult, context.Context, *minisql.Transaction, error) {
+	if c.HasActiveTransaction() || (stmt.Kind != minisql.Select && stmt.Kind != minisql.Explain) {
+		result, err := c.executeStatement(ctx, stmt)
+		return result, ctx, nil, err
+	}
+
+	txManager := c.db.GetTransactionManager()
+	tx := txManager.BeginReadOnlyTransaction(ctx)
+	txCtx := minisql.WithTransaction(ctx, tx)
+
+	result, err := c.db.ExecuteStatement(txCtx, stmt)
+	if err != nil {
+		txManager.RollbackTransaction(txCtx, tx)
+		return minisql.StatementResult{}, ctx, nil, err
+	}
+
+	if len(result.RowViewFieldIndexes) > 0 {
+		return result, txCtx, tx, nil
+	}
+
+	if err := txManager.CommitTransaction(txCtx, tx); err != nil {
+		txManager.RollbackTransaction(txCtx, tx)
+		return minisql.StatementResult{}, ctx, nil, err
+	}
+
+	return result, ctx, nil, nil
 }
 
 func (c *Conn) executeStatement(ctx context.Context, stmt minisql.Statement) (minisql.StatementResult, error) {

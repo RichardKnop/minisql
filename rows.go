@@ -16,7 +16,10 @@ type Rows struct {
 	iter                minisql.Iterator
 	rowViewIter         minisql.RowViewIterator
 	ctx                 context.Context
+	txManager           *minisql.TransactionManager
+	tx                  *minisql.Transaction
 	useRowViews         bool
+	txClosed            bool
 }
 
 // Columns returns the names of the columns. The number of
@@ -32,9 +35,13 @@ func (r Rows) Columns() []string {
 }
 
 // Close closes the rows iterator.
-func (r Rows) Close() error {
+func (r *Rows) Close() error {
 	if r.useRowViews {
-		return r.rowViewIter.Close()
+		if err := r.rowViewIter.Close(); err != nil {
+			_ = r.closeReadTx(false)
+			return err
+		}
+		return r.closeReadTx(true)
 	}
 	return r.iter.Close()
 }
@@ -48,13 +55,17 @@ func (r Rows) Close() error {
 // The dest should not be written to outside of Next. Care
 // should be taken when closing Rows not to modify
 // a buffer held in dest.
-func (r Rows) Next(dest []driver.Value) error {
+func (r *Rows) Next(dest []driver.Value) error {
 	if r.useRowViews {
 		return r.nextRowView(dest)
 	}
 
 	if !r.iter.Next(r.ctx) {
 		if err := r.iter.Err(); err != nil {
+			_ = r.closeReadTx(false)
+			return err
+		}
+		if err := r.closeReadTx(true); err != nil {
 			return err
 		}
 		return io.EOF
@@ -85,9 +96,13 @@ func (r Rows) Next(dest []driver.Value) error {
 	return nil
 }
 
-func (r Rows) nextRowView(dest []driver.Value) error {
+func (r *Rows) nextRowView(dest []driver.Value) error {
 	if !r.rowViewIter.Next(r.ctx) {
 		if err := r.rowViewIter.Err(); err != nil {
+			_ = r.closeReadTx(false)
+			return err
+		}
+		if err := r.closeReadTx(true); err != nil {
 			return err
 		}
 		return io.EOF
@@ -118,5 +133,21 @@ func (r Rows) nextRowView(dest []driver.Value) error {
 		}
 	}
 
+	return nil
+}
+
+func (r *Rows) closeReadTx(success bool) error {
+	if r.txManager == nil || r.tx == nil || r.txClosed {
+		return nil
+	}
+	r.txClosed = true
+	if !success {
+		r.txManager.RollbackTransaction(r.ctx, r.tx)
+		return nil
+	}
+	if err := r.txManager.CommitTransaction(r.ctx, r.tx); err != nil {
+		r.txManager.RollbackTransaction(r.ctx, r.tx)
+		return err
+	}
 	return nil
 }

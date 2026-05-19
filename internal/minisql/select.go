@@ -1012,11 +1012,6 @@ func (t *Table) selectStreamingDirectSequentialRowView(
 		offset = stmt.Offset.Value.(int64)
 	}
 
-	projected := make([]RowView, 0)
-	if hasLimit {
-		projected = make([]RowView, 0, int(remaining))
-	}
-
 	cursor, err := t.SeekFirst(ctx)
 	if err != nil {
 		return StatementResult{}, true, err
@@ -1027,54 +1022,64 @@ func (t *Table) selectStreamingDirectSequentialRowView(
 	}
 	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
 
-	for !cursor.EndOfTable {
-		if err := ctx.Err(); err != nil {
-			return StatementResult{}, true, err
-		}
-		if page.Index != cursor.PageIdx {
-			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
-			if err != nil {
-				return StatementResult{}, true, fmt.Errorf("row view sequential scan: %w", err)
-			}
-		}
+	newRowViewIter := func() RowViewIterator {
+		iterCursor := cursor
+		iterPage := page
+		iterRemaining := remaining
+		iterOffset := offset
+		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
+			for !iterCursor.EndOfTable {
+				if err := iterCtx.Err(); err != nil {
+					return RowView{}, err
+				}
+				if iterPage.Index != iterCursor.PageIdx {
+					var err error
+					iterPage, err = t.pager.ReadPage(iterCtx, iterCursor.PageIdx)
+					if err != nil {
+						return RowView{}, fmt.Errorf("row view sequential scan: %w", err)
+					}
+				}
 
-		cell := page.LeafNode.Cells[cursor.CellIdx]
-		switch {
-		case cursor.CellIdx < page.LeafNode.Header.Cells-1:
-			cursor.CellIdx += 1
-		case page.LeafNode.Header.NextLeaf == 0:
-			cursor.EndOfTable = true
-		default:
-			cursor.PageIdx = page.LeafNode.Header.NextLeaf
-			cursor.CellIdx = 0
-		}
+				cell := iterPage.LeafNode.Cells[iterCursor.CellIdx]
+				switch {
+				case iterCursor.CellIdx < iterPage.LeafNode.Header.Cells-1:
+					iterCursor.CellIdx += 1
+				case iterPage.LeafNode.Header.NextLeaf == 0:
+					iterCursor.EndOfTable = true
+				default:
+					iterCursor.PageIdx = iterPage.LeafNode.Header.NextLeaf
+					iterCursor.CellIdx = 0
+				}
 
-		view := NewRowView(t.Columns, cell)
-		if tableFilter != nil {
-			ok, err := tableFilter(view)
-			if err != nil {
-				return StatementResult{}, true, err
+				view := NewRowView(t.Columns, cell)
+				if tableFilter != nil {
+					ok, err := tableFilter(view)
+					if err != nil {
+						return RowView{}, err
+					}
+					if !ok {
+						continue
+					}
+				}
+				if hasOffset && iterOffset > 0 {
+					iterOffset -= 1
+					continue
+				}
+				if hasLimit {
+					if iterRemaining == 0 {
+						return RowView{}, ErrNoMoreRows
+					}
+					iterRemaining -= 1
+				}
+				return view, nil
 			}
-			if !ok {
-				continue
-			}
-		}
-		if hasOffset && offset > 0 {
-			offset -= 1
-			continue
-		}
-		projected = append(projected, view)
-		if hasLimit {
-			remaining -= 1
-			if remaining == 0 {
-				break
-			}
-		}
+			return RowView{}, ErrNoMoreRows
+		})
 	}
 
-	result.RowViews = NewSliceRowViewIterator(projected)
+	result.RowViews = newRowViewIter()
 	result.RowViewFieldIndexes = fieldIndexes
-	result.Rows = rowViewMaterializingIterator(ctx, t.pager, projected, fieldIndexes, resultColumns)
+	result.Rows = rowViewMaterializingIterator(ctx, t.pager, newRowViewIter(), fieldIndexes, resultColumns)
 	return result, true, nil
 }
 
@@ -1124,14 +1129,15 @@ func projectRowView(ctx context.Context, pager TxPager, view RowView, fieldIndex
 	return row, nil
 }
 
-func rowViewMaterializingIterator(ctx context.Context, pager TxPager, views []RowView, fieldIndexes []int, columns []Column) Iterator {
-	idx := 0
-	return NewIterator(func(context.Context) (Row, error) {
-		if idx >= len(views) {
+func rowViewMaterializingIterator(ctx context.Context, pager TxPager, views RowViewIterator, fieldIndexes []int, columns []Column) Iterator {
+	return NewIterator(func(iterCtx context.Context) (Row, error) {
+		if !views.Next(iterCtx) {
+			if err := views.Err(); err != nil {
+				return Row{}, err
+			}
 			return Row{}, ErrNoMoreRows
 		}
-		view := views[idx]
-		idx += 1
+		view := views.RowView()
 		return projectRowView(ctx, pager, view, fieldIndexes, columns)
 	})
 }
