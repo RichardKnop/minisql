@@ -1184,7 +1184,7 @@ func (t *Table) collectIndexScanRowIDs(ctx context.Context, plan QueryPlan, scan
 	if !ok {
 		return nil, fmt.Errorf("no index found for row view scan: %s", scan.IndexName)
 	}
-	rowIDs := make([]RowID, 0)
+	rowIDs := make([]RowID, 0, rowIDBufferCapacity(scan, canApplyScanLimit))
 	var emitted int64
 	appendRowID := func(_ any, rowID RowID) error {
 		rowIDs = append(rowIDs, rowID)
@@ -1234,6 +1234,16 @@ func (t *Table) collectIndexScanRowIDs(ctx context.Context, plan QueryPlan, scan
 		return nil, fmt.Errorf("unsupported row view index scan type: %s", scan.Type)
 	}
 	return rowIDs, nil
+}
+
+func rowIDBufferCapacity(scan Scan, canApplyScanLimit bool) int {
+	if canApplyScanLimit && scan.ScanLimit > 0 {
+		return int(min(scan.ScanLimit, int64(MaxOverflowRowIDsPerPage)))
+	}
+	if scan.Type == ScanTypeIndexPoint {
+		return len(scan.IndexKeys) * MaxInlineRowIDs
+	}
+	return 0
 }
 
 func (t *Table) isNonUniqueSecondaryBTreeIndex(name string) bool {
