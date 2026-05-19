@@ -176,18 +176,14 @@ func (tp *TextPointer) storeOverflowText(ctx context.Context, pager TxPager) err
 }
 
 func (r Row) readOverflowTexts(ctx context.Context, pager TxPager) (Row, error) {
-	if len(r.Values) == 0 {
-		return r, nil
-	}
-	for _, col := range r.Columns {
+	for i, col := range r.Columns {
 		if !col.Kind.IsText() {
 			continue
 		}
-		value, ok := r.GetValue(col.Name)
-		if !ok || !value.Valid {
+		if i >= len(r.Values) || !r.Values[i].Valid {
 			continue
 		}
-		textPointer, ok := value.Value.(TextPointer)
+		textPointer, ok := r.Values[i].Value.(TextPointer)
 		if !ok {
 			return Row{}, fmt.Errorf("expected TextPointer value for text column %s", col.Name)
 		}
@@ -215,7 +211,7 @@ func (r Row) readOverflowTexts(ctx context.Context, pager TxPager) (Row, error) 
 			currentPageIdx = overflowPage.OverflowPage.Header.NextPage
 		}
 		textPointer.Data = bytes.Trim(overflowData, "\x00")
-		r, _ = r.SetValue(col.Name, OptionalValue{Value: textPointer, Valid: true})
+		r.Values[i] = OptionalValue{Value: textPointer, Valid: true}
 	}
 	return r, nil
 }

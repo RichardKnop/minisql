@@ -1,5 +1,14 @@
 # Benchmark Results
 
+## 2026-05-19 — CTE / CountStar zero-alloc optimisation
+
+**Platform:** Apple M1 Max · darwin/arm64 · Go 1.26  
+**Settings:** `-benchtime=5s -count=3` · median of 3 runs shown
+
+**CTE_Materialise improvements (2026-05-19):** `UnmarshalWithMask` refactored to extract a shared `decodeColumnsWithMask` inner loop; added `unmarshalWithMaskInto` which accepts a caller-supplied values buffer so the dominant `make([]OptionalValue, n)` allocation can be eliminated for COUNT(\*) scans. `countSequentialScanZeroAlloc` pre-allocates one reuse buffer before the scan loop and re-uses it across every row — safe because COUNT(\*) never retains a row after the predicate check. Net: CTE_Materialise allocs 14,134→92 (99% reduction), 1,851µs→826µs (2.2× speedup), ratio 4.25×→1.62×. CountStar allocs 706→30 (96% reduction), 29.5µs→6.1µs (4.9× speedup), ratio 3.02×→0.56× (now faster than SQLite).
+
+---
+
 ## 2026-05-18 — Baseline
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26  
@@ -19,7 +28,7 @@ the same session before this baseline was taken.
 | PointScan | 6,042 | 69 | 3,436 | **1.76×** |
 | Limit | 7,961 | 129 | 8,087 | **1.0×** |
 | FullScan (10k rows) | 4,810,296 | 112,321 | 5,186,549 | **0.93×** ✓ |
-| CountStar | 29,477 | 706 | 9,760 | **3.02×** |
+| CountStar | 6,080 | 30 | 10,797 | **0.56×** ✓ |
 | IndexRangeScan | 739,527 | 11,077 | 730,900 | **1.01×** |
 | RangeScan | 1,510,027 | 19,922 | 869,343 | **1.74×** |
 | SecondaryIndex_LowSelectivity (5k rows) | 3,079,429 | 54,951 | 2,785,947 | **1.11×** |
@@ -62,7 +71,7 @@ the same session before this baseline was taken.
 | Benchmark | minisql ns/op | minisql allocs/op | SQLite ns/op | Ratio |
 |---|---:|---:|---:|---:|
 | Subquery_InList (5k rows) | 8,380,671 | 139,776 | 3,653,376 | **2.29×** |
-| CTE_Materialise | 1,850,823 | 14,134 | 435,575 | **4.25×** |
+| CTE_Materialise | 826,014 | 92 | 510,964 | **1.62×** |
 
 ### FOREIGN KEY
 
@@ -126,8 +135,6 @@ Ranked by ratio (excluding Vacuum):
 | Benchmark | Ratio | allocs/op |
 |---|---:|---:|
 | Explain | 4.33× | 68 |
-| CTE_Materialise | 4.25× | 14,134 |
-| CountStar | 3.02× | 706 |
 | FullText_BuildIndex | 3.19× | 35,106 |
 | Join_Left_UnmatchedRows | 2.84× | 203,249 |
 | WAL_Checkpoint | 2.62× | 305 |
@@ -137,6 +144,7 @@ Ranked by ratio (excluding Vacuum):
 | PointScan | 1.76× | 69 |
 | RangeScan | 1.74× | 19,922 |
 | FullText_Search_Phrase | 1.63× | — |
+| CTE_Materialise | 1.62× | 92 |
 | FullText_Search_SingleTerm/rare | 1.53× | — |
 | FullText_Delete_WithIndex | 1.39× | 1,822 |
 | FullText_Search_SingleTerm/medium | 1.36× | — |
@@ -151,6 +159,7 @@ Ranked by ratio (excluding Vacuum):
 | Update_ByPK | **0.32×** (3× faster) |
 | Insert_SingleRow | **0.35×** (2.9× faster) |
 | ForeignKey_Insert | **0.40×** (2.5× faster) |
+| CountStar | **0.56×** (1.8× faster) |
 | FullText_Search_MultiTermAND | **0.81×** (1.2× faster) |
 | FullText_Update_WithIndex | **0.79×** (1.3× faster) |
 | ForeignKey_DeleteCascade | **0.98×** |
