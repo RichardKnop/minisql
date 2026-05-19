@@ -984,17 +984,17 @@ func (t *Table) selectStreamingDirectRowView(
 	if t.virtualRows != nil || t.parallelScan || len(plan.Scans) != 1 {
 		return StatementResult{}, false, nil
 	}
-	fieldIndexes, resultColumns, inlineSafe, ok := rowViewProjectionPlan(t.Columns, requestedFields)
+	fieldIndexes, resultColumns, ok := rowViewProjectionPlan(t.Columns, requestedFields)
 	if !ok {
 		return StatementResult{}, false, nil
 	}
-	if stmt.Distinct || !inlineSafe {
+	if stmt.Distinct {
 		return StatementResult{}, false, nil
 	}
 
 	result := StatementResult{Columns: resultColumns}
 	scan := plan.Scans[0]
-	if !rowViewFilterSupports(scan.Filters) {
+	if !rowViewFilterSupports(t.Columns, scan.Filters) {
 		return StatementResult{}, false, nil
 	}
 	tableFilter := compileRowViewFilterForColumns(t.Columns, scan.Filters)
@@ -1034,6 +1034,7 @@ func (t *Table) selectStreamingDirectRowView(
 	}
 
 	result.RowViews = newRowViewIter()
+	result.RowViewPager = t.pager
 	result.RowViewFieldIndexes = fieldIndexes
 	result.Rows = rowViewMaterializingIterator(ctx, t.pager, newRowViewIter(), fieldIndexes, resultColumns)
 	return result, true, nil
@@ -1209,13 +1210,12 @@ func (t *Table) rowViewByRowID(ctx context.Context, rowID RowID) (RowView, error
 	return cursor.fetchRowView(ctx)
 }
 
-func rowViewProjectionPlan(columns []Column, fields []Field) ([]int, []Column, bool, bool) {
+func rowViewProjectionPlan(columns []Column, fields []Field) ([]int, []Column, bool) {
 	indexes := make([]int, len(fields))
 	resultColumns := make([]Column, len(fields))
-	inlineSafe := true
 	for i, field := range fields {
 		if field.Expr != nil || field.AliasPrefix != "" {
-			return nil, nil, false, false
+			return nil, nil, false
 		}
 		idx := -1
 		for j, col := range columns {
@@ -1227,14 +1227,11 @@ func rowViewProjectionPlan(columns []Column, fields []Field) ([]int, []Column, b
 			}
 		}
 		if idx < 0 {
-			return nil, nil, false, false
-		}
-		if resultColumns[i].Kind == Text || resultColumns[i].Kind == JSON || (resultColumns[i].Kind == Varchar && resultColumns[i].Size > MaxInlineVarchar) {
-			inlineSafe = false
+			return nil, nil, false
 		}
 		indexes[i] = idx
 	}
-	return indexes, resultColumns, inlineSafe, true
+	return indexes, resultColumns, true
 }
 
 func projectRowView(ctx context.Context, pager TxPager, view RowView, fieldIndexes []int, columns []Column) (Row, error) {

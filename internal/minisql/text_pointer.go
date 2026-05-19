@@ -175,6 +175,35 @@ func (tp *TextPointer) storeOverflowText(ctx context.Context, pager TxPager) err
 	return nil
 }
 
+func (tp TextPointer) readOverflowText(ctx context.Context, pager TxPager) (TextPointer, error) {
+	if tp.IsInline() {
+		return tp, nil
+	}
+
+	// Read overflow data; pre-allocate to the known total length to avoid
+	// repeated reallocation as overflow pages are appended.
+	var (
+		overflowData   = make([]byte, 0, tp.Length)
+		currentPageIdx = tp.FirstPage
+		remainingSize  = tp.Length
+	)
+	for remainingSize > 0 {
+		overflowPage, err := pager.ReadPage(ctx, currentPageIdx)
+		if err != nil {
+			return TextPointer{}, fmt.Errorf("read overflow page %d: %w", currentPageIdx, err)
+		}
+		if overflowPage.OverflowPage == nil {
+			return TextPointer{}, fmt.Errorf("page %d is not an overflow page", currentPageIdx)
+		}
+		dataSize := min(remainingSize, overflowPage.OverflowPage.Header.DataSize)
+		overflowData = append(overflowData, overflowPage.OverflowPage.Data[:dataSize]...)
+		remainingSize -= dataSize
+		currentPageIdx = overflowPage.OverflowPage.Header.NextPage
+	}
+	tp.Data = bytes.Trim(overflowData, "\x00")
+	return tp, nil
+}
+
 func (r Row) readOverflowTexts(ctx context.Context, pager TxPager) (Row, error) {
 	for i, col := range r.Columns {
 		if !col.Kind.IsText() {
@@ -190,27 +219,10 @@ func (r Row) readOverflowTexts(ctx context.Context, pager TxPager) (Row, error) 
 		if textPointer.IsInline() {
 			continue
 		}
-		// Read overflow data; pre-allocate to the known total length to avoid
-		// repeated reallocation as overflow pages are appended.
-		var (
-			overflowData   = make([]byte, 0, textPointer.Length)
-			currentPageIdx = textPointer.FirstPage
-			remainingSize  = textPointer.Length
-		)
-		for remainingSize > 0 {
-			overflowPage, err := pager.ReadPage(ctx, currentPageIdx)
-			if err != nil {
-				return Row{}, fmt.Errorf("read overflow page %d: %w", currentPageIdx, err)
-			}
-			if overflowPage.OverflowPage == nil {
-				return Row{}, fmt.Errorf("page %d is not an overflow page", currentPageIdx)
-			}
-			dataSize := min(remainingSize, overflowPage.OverflowPage.Header.DataSize)
-			overflowData = append(overflowData, overflowPage.OverflowPage.Data[:dataSize]...)
-			remainingSize -= dataSize
-			currentPageIdx = overflowPage.OverflowPage.Header.NextPage
+		textPointer, err := textPointer.readOverflowText(ctx, pager)
+		if err != nil {
+			return Row{}, err
 		}
-		textPointer.Data = bytes.Trim(overflowData, "\x00")
 		r.Values[i] = OptionalValue{Value: textPointer, Valid: true}
 	}
 	return r, nil

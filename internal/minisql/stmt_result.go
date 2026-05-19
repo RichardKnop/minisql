@@ -163,6 +163,7 @@ func (i *Iterator) Err() error {
 type StatementResult struct {
 	Rows                Iterator
 	RowViews            RowViewIterator
+	RowViewPager        TxPager
 	rawRows             []Row // non-nil when produced by selectStreamingDirect
 	Columns             []Column
 	RowViewFieldIndexes []int

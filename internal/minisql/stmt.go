@@ -197,6 +197,11 @@ type Column struct {
 	DefaultValueNow bool
 }
 
+// MayUseOverflowText reports whether values in this column may live on overflow pages.
+func (c Column) MayUseOverflowText() bool {
+	return c.Kind == Text || c.Kind == JSON || (c.Kind == Varchar && c.Size > MaxInlineVarchar)
+}
+
 func fieldsFromColumns(columns ...Column) []Field {
 	fields := make([]Field, 0, len(columns))
 	for _, col := range columns {
@@ -208,10 +213,7 @@ func fieldsFromColumns(columns ...Column) []Field {
 func textOverflowColumns(columns ...Column) []Column {
 	overflowColumns := make([]Column, 0, len(columns))
 	for _, col := range columns {
-		if !col.Kind.IsText() {
-			continue
-		}
-		if col.Kind == Varchar && col.Size <= MaxInlineVarchar {
+		if !col.MayUseOverflowText() {
 			continue
 		}
 		overflowColumns = append(overflowColumns, col)
@@ -403,13 +405,13 @@ type Statement struct {
 	// CacheKey is the original SQL text set by PrepareStatement; it is the key
 	// used to look up and store the query plan in the plan cache.  Empty for
 	// statements that were not prepared via PrepareStatement (ad-hoc queries).
-	CacheKey           string
-	Kind               StatementKind
-	IndexMethod        IndexMethod
-	ConflictAction     ConflictAction
-	IfNotExists        bool
-	ExplainAnalyze     bool
-	Distinct           bool
+	CacheKey       string
+	Kind           StatementKind
+	IndexMethod    IndexMethod
+	ConflictAction ConflictAction
+	IfNotExists    bool
+	ExplainAnalyze bool
+	Distinct       bool
 }
 
 // NumPlaceholders returns the number of placeholder parameters (?) in the statement.

@@ -15,6 +15,7 @@ type Rows struct {
 	rowViewFieldIndexes []int
 	iter                minisql.Iterator
 	rowViewIter         minisql.RowViewIterator
+	rowViewPager        minisql.TxPager
 	ctx                 context.Context
 	txManager           *minisql.TransactionManager
 	tx                  *minisql.Transaction
@@ -151,7 +152,7 @@ func (r *Rows) rowViewDriverValue(view minisql.RowView, destIdx, fieldIdx int) (
 		}
 		return value, nil
 	case minisql.Varchar, minisql.Text, minisql.JSON:
-		value, err := view.TextAt(fieldIdx)
+		value, err := view.TextAtWithOverflow(r.ctx, r.rowViewPager, fieldIdx)
 		if err != nil {
 			return nil, err
 		}

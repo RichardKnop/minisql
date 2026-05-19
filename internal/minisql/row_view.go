@@ -193,6 +193,18 @@ func (rv RowView) TextAt(idx int) (TextPointer, error) {
 	return textPointer, nil
 }
 
+// TextAtWithOverflow lazily decodes a text column and reads overflow pages when needed.
+func (rv RowView) TextAtWithOverflow(ctx context.Context, pager TxPager, idx int) (TextPointer, error) {
+	textPointer, err := rv.TextAt(idx)
+	if err != nil || textPointer.IsInline() {
+		return textPointer, err
+	}
+	if pager == nil {
+		return TextPointer{}, fmt.Errorf("overflow text column %d requires a pager", idx)
+	}
+	return textPointer.readOverflowText(ctx, pager)
+}
+
 // UUIDAt lazily decodes a UUID column.
 func (rv RowView) UUIDAt(idx int) (UUIDValue, bool, error) {
 	if null, err := rv.IsNull(idx); err != nil || null {

@@ -18,15 +18,37 @@ func compileRowViewFilterForColumns(columns []Column, conditions OneOrMore) func
 	}
 }
 
-func rowViewFilterSupports(conditions OneOrMore) bool {
+func rowViewFilterSupports(columns []Column, conditions OneOrMore) bool {
+	columnByName := make(map[string]Column, len(columns))
+	for _, col := range columns {
+		columnByName[col.Name] = col
+	}
 	for _, group := range conditions {
 		for _, cond := range group {
 			if cond.Operand1.Type == OperandExpr || cond.Operand2.Type == OperandExpr {
 				return false
 			}
+			if rowViewFilterOperandNeedsOverflowText(cond.Operand1, columnByName) ||
+				rowViewFilterOperandNeedsOverflowText(cond.Operand2, columnByName) {
+				return false
+			}
 		}
 	}
 	return true
+}
+
+func rowViewFilterOperandNeedsOverflowText(operand Operand, columnByName map[string]Column) bool {
+	if !operand.IsField() {
+		return false
+	}
+	field := operand.Value.(Field)
+	if field.AliasPrefix != "" {
+		if col, ok := columnByName[field.AliasPrefix+"."+field.Name]; ok {
+			return col.MayUseOverflowText()
+		}
+	}
+	col, ok := columnByName[field.Name]
+	return ok && col.MayUseOverflowText()
 }
 
 // CheckOneOrMoreWithColumnIndexes evaluates conditions against lazily decoded

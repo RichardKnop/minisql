@@ -674,6 +674,7 @@ func TestTable_Select_Overflow(t *testing.T) {
 
 		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
+		assert.Len(t, result.RowViewFieldIndexes, len(testOverflowColumns))
 
 		// Set expected first overflow pages on rows
 		overflow1, _ := rows[1].GetValue("profile")

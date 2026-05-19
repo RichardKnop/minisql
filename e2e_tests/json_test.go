@@ -1,5 +1,7 @@
 package e2etests
 
+import "strings"
+
 func (s *TestSuite) TestJSON() {
 	_, err := s.db.Exec(`create table events (
 		id      int8 primary key autoincrement,
@@ -40,6 +42,30 @@ func (s *TestSuite) TestJSON() {
 			"e3", `[1,2,3]`,
 		)
 		s.Require().NoError(err)
+	})
+
+	s.Run("SELECT_overflow_json_projection", func() {
+		_, err := s.db.Exec(`create table overflow_events (
+			id      int8 primary key autoincrement,
+			payload json
+		);`)
+		s.Require().NoError(err)
+
+		payload := `{"body":"` + strings.Repeat("x", 600) + `"}`
+		_, err = s.db.Exec(
+			`insert into overflow_events (payload) values (?)`,
+			payload,
+		)
+		s.Require().NoError(err)
+
+		rows, err := s.db.Query(`select payload from overflow_events`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		var got string
+		s.Require().NoError(rows.Scan(&got))
+		s.Equal(payload, got)
 	})
 
 	s.Run("INSERT_null_payload", func() {

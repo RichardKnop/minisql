@@ -298,6 +298,7 @@ func (c *Conn) QueryContext(ctx context.Context, query string, args []driver.Nam
 		columns:             result.Columns,
 		iter:                result.Rows,
 		rowViewIter:         result.RowViews,
+		rowViewPager:        result.RowViewPager,
 		rowViewFieldIndexes: result.RowViewFieldIndexes,
 		useRowViews:         useRowViews,
 		ctx:                 rowsCtx,
