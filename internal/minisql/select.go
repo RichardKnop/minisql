@@ -3142,16 +3142,18 @@ func (t *Table) collectRowIDsFromScan(ctx context.Context, scan Scan) ([]RowID, 
 	}
 	switch scan.Type {
 	case ScanTypeIndexPoint:
-		var rowIDs []RowID
+		rowIDs := make([]RowID, 0, len(scan.IndexKeys)*MaxInlineRowIDs)
 		for _, key := range scan.IndexKeys {
-			ids, err := idx.FindRowIDs(ctx, key)
+			err := idx.VisitRowIDs(ctx, key, func(rowID RowID) error {
+				rowIDs = append(rowIDs, rowID)
+				return ctx.Err()
+			})
 			if err != nil {
 				if errors.Is(err, ErrNotFound) {
 					continue
 				}
 				return nil, fmt.Errorf("intersect point lookup: %w", err)
 			}
-			rowIDs = append(rowIDs, ids...)
 		}
 		return rowIDs, nil
 	case ScanTypeIndexRange:
