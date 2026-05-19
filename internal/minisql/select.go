@@ -169,6 +169,13 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return countResult(count), nil
 	}
 
+	// GROUP BY + single sequential scan: stream rows through a reuse buffer to avoid
+	// one make([]OptionalValue) per row. Falls back to the general path for virtual
+	// tables and parallel scans (handled inside selectGroupByZeroAlloc).
+	if stmt.IsSelectGroupBy() && len(plan.Joins) == 0 && len(plan.Scans) == 1 && plan.Scans[0].Type == ScanTypeSequential {
+		return t.selectGroupByZeroAlloc(ctx, stmt, plan.Scans[0], selectedFields)
+	}
+
 	// Materialising path: buffer every matching row, then dispatch.
 	// Required for COUNT (needs a total), GROUP BY, aggregates, ORDER BY (sort),
 	// and JOIN (goroutine-based execution inside plan.Execute).
@@ -451,7 +458,25 @@ type groupEntry struct {
 	groupValStart int32
 }
 
-func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (StatementResult, error) {
+// groupByAccumulator holds all streaming GROUP BY state. Create with
+// newGroupByAccumulator, feed rows with process(), then call buildResult().
+// Separating state from the row loop lets the zero-alloc sequential scan path
+// share the same result-building code as the general materialised path.
+type groupByAccumulator struct {
+	aggregates        []AggregateExpr
+	useIntSum         []bool
+	groupByColIdx     []int
+	aggColIdx         []int
+	fieldToGroupByIdx []int
+	groupMap          map[string]int32
+	groupEntries      []groupEntry
+	groupOrder        []string
+	aggStatePool      []aggState
+	groupValPool      []OptionalValue
+	keyBuf            []byte
+}
+
+func newGroupByAccumulator(stmt Statement, t *Table, estRows int) *groupByAccumulator {
 	numAggs := len(stmt.Aggregates)
 	numGroupBy := len(stmt.GroupBy)
 
@@ -502,125 +527,222 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 		}
 	}
 
-	// Estimate initial group count for pool sizing — avoids repeated small reallocations
-	// in the common case where groups fit within the initial capacity.
-	estGroups := len(rows) / 10
+	estGroups := estRows / 10
 	if estGroups < 16 {
 		estGroups = 16
 	} else if estGroups > 4096 {
 		estGroups = 4096
 	}
 
-	var (
-		groupMap     = make(map[string]int32, estGroups)
-		groupEntries = make([]groupEntry, 0, estGroups)
-		groupOrder   = make([]string, 0, estGroups)
-		// Flat pools: one allocation amortises across all groups.
-		aggStatePool = make([]aggState, 0, estGroups*numAggs)
-		groupValPool = make([]OptionalValue, 0, estGroups*numGroupBy)
-	)
+	return &groupByAccumulator{
+		aggregates:        stmt.Aggregates,
+		useIntSum:         useIntSum,
+		groupByColIdx:     groupByColIdx,
+		aggColIdx:         aggColIdx,
+		fieldToGroupByIdx: fieldToGroupByIdx,
+		groupMap:          make(map[string]int32, estGroups),
+		groupEntries:      make([]groupEntry, 0, estGroups),
+		groupOrder:        make([]string, 0, estGroups),
+		aggStatePool:      make([]aggState, 0, estGroups*numAggs),
+		groupValPool:      make([]OptionalValue, 0, estGroups*numGroupBy),
+	}
+}
 
-	// keyBuf is reused across rows; string(keyBuf) for map lookup is optimised by
-	// the Go compiler to avoid allocation when the key already exists in the map.
-	var keyBuf []byte
+// process accumulates one row into the group state. Safe to call with a
+// reused Row.Values buffer as long as the caller does not retain the row
+// after returning — values needed for grouping are copied into groupValPool.
+func (acc *groupByAccumulator) process(row Row) {
+	acc.keyBuf = buildGroupKey(acc.keyBuf[:0], row, acc.groupByColIdx)
 
-	for _, row := range rows {
-		keyBuf = buildGroupKey(keyBuf[:0], row, groupByColIdx)
+	gsIdx, exists := acc.groupMap[string(acc.keyBuf)]
+	if !exists {
+		key := string(acc.keyBuf) // one alloc per new group
 
-		gsIdx, exists := groupMap[string(keyBuf)]
-		if !exists {
-			key := string(keyBuf) // one alloc per new group
-
-			aggStart := int32(len(aggStatePool))
-			for i := range numAggs {
-				aggStatePool = append(aggStatePool, aggState{useIntSum: useIntSum[i]})
-			}
-
-			gvStart := int32(len(groupValPool))
-			for _, colIdx := range groupByColIdx {
-				if colIdx >= 0 && colIdx < len(row.Values) {
-					groupValPool = append(groupValPool, row.Values[colIdx])
-				} else {
-					groupValPool = append(groupValPool, OptionalValue{})
-				}
-			}
-
-			gsIdx = int32(len(groupEntries))
-			groupEntries = append(groupEntries, groupEntry{
-				aggStateStart: aggStart,
-				groupValStart: gvStart,
-			})
-			groupMap[key] = gsIdx
-			groupOrder = append(groupOrder, key)
+		aggStart := int32(len(acc.aggStatePool))
+		for i := range len(acc.aggregates) {
+			acc.aggStatePool = append(acc.aggStatePool, aggState{useIntSum: acc.useIntSum[i]})
 		}
 
-		// Accumulate aggregates using pool indices — no pointer indirection through groupState.
-		aggBase := int(groupEntries[gsIdx].aggStateStart)
-		for i, agg := range stmt.Aggregates {
-			switch agg.Kind {
-			case 0:
-				// Non-aggregate GROUP BY column — no accumulation needed.
-			case AggregateCount:
-				aggStatePool[aggBase+i].count += 1
-			case AggregateSum, AggregateAvg:
-				colIdx := aggColIdx[i]
-				if colIdx < 0 || colIdx >= len(row.Values) {
-					continue
+		gvStart := int32(len(acc.groupValPool))
+		for _, colIdx := range acc.groupByColIdx {
+			if colIdx >= 0 && colIdx < len(row.Values) {
+				acc.groupValPool = append(acc.groupValPool, row.Values[colIdx])
+			} else {
+				acc.groupValPool = append(acc.groupValPool, OptionalValue{})
+			}
+		}
+
+		gsIdx = int32(len(acc.groupEntries))
+		acc.groupEntries = append(acc.groupEntries, groupEntry{
+			aggStateStart: aggStart,
+			groupValStart: gvStart,
+		})
+		acc.groupMap[key] = gsIdx
+		acc.groupOrder = append(acc.groupOrder, key)
+	}
+
+	aggBase := int(acc.groupEntries[gsIdx].aggStateStart)
+	for i, agg := range acc.aggregates {
+		switch agg.Kind {
+		case 0:
+			// Non-aggregate GROUP BY column — no accumulation needed.
+		case AggregateCount:
+			acc.aggStatePool[aggBase+i].count += 1
+		case AggregateSum, AggregateAvg:
+			colIdx := acc.aggColIdx[i]
+			if colIdx < 0 || colIdx >= len(row.Values) {
+				continue
+			}
+			val := row.Values[colIdx]
+			if !val.Valid {
+				continue
+			}
+			acc.aggStatePool[aggBase+i].count += 1
+			acc.aggStatePool[aggBase+i].hasValue = true
+			if acc.aggStatePool[aggBase+i].useIntSum {
+				switch v := val.Value.(type) {
+				case int64:
+					acc.aggStatePool[aggBase+i].sumI += v
+				case int32:
+					acc.aggStatePool[aggBase+i].sumI += int64(v)
 				}
-				val := row.Values[colIdx]
-				if !val.Valid {
-					continue
+			} else {
+				switch v := val.Value.(type) {
+				case float64:
+					acc.aggStatePool[aggBase+i].sumF += v
+				case float32:
+					acc.aggStatePool[aggBase+i].sumF += float64(v)
 				}
-				aggStatePool[aggBase+i].count += 1
-				aggStatePool[aggBase+i].hasValue = true
-				if aggStatePool[aggBase+i].useIntSum {
-					switch v := val.Value.(type) {
-					case int64:
-						aggStatePool[aggBase+i].sumI += v
-					case int32:
-						aggStatePool[aggBase+i].sumI += int64(v)
-					}
-				} else {
-					switch v := val.Value.(type) {
-					case float64:
-						aggStatePool[aggBase+i].sumF += v
-					case float32:
-						aggStatePool[aggBase+i].sumF += float64(v)
-					}
-				}
-			case AggregateMin:
-				colIdx := aggColIdx[i]
-				if colIdx < 0 || colIdx >= len(row.Values) {
-					continue
-				}
-				val := row.Values[colIdx]
-				if !val.Valid {
-					continue
-				}
-				if !aggStatePool[aggBase+i].hasValue || compareValues(val, aggStatePool[aggBase+i].min) < 0 {
-					aggStatePool[aggBase+i].min = val
-					aggStatePool[aggBase+i].hasValue = true
-				}
-			case AggregateMax:
-				colIdx := aggColIdx[i]
-				if colIdx < 0 || colIdx >= len(row.Values) {
-					continue
-				}
-				val := row.Values[colIdx]
-				if !val.Valid {
-					continue
-				}
-				if !aggStatePool[aggBase+i].hasValue || compareValues(val, aggStatePool[aggBase+i].max) > 0 {
-					aggStatePool[aggBase+i].max = val
-					aggStatePool[aggBase+i].hasValue = true
-				}
+			}
+		case AggregateMin:
+			colIdx := acc.aggColIdx[i]
+			if colIdx < 0 || colIdx >= len(row.Values) {
+				continue
+			}
+			val := row.Values[colIdx]
+			if !val.Valid {
+				continue
+			}
+			if !acc.aggStatePool[aggBase+i].hasValue || compareValues(val, acc.aggStatePool[aggBase+i].min) < 0 {
+				acc.aggStatePool[aggBase+i].min = val
+				acc.aggStatePool[aggBase+i].hasValue = true
+			}
+		case AggregateMax:
+			colIdx := acc.aggColIdx[i]
+			if colIdx < 0 || colIdx >= len(row.Values) {
+				continue
+			}
+			val := row.Values[colIdx]
+			if !val.Valid {
+				continue
+			}
+			if !acc.aggStatePool[aggBase+i].hasValue || compareValues(val, acc.aggStatePool[aggBase+i].max) > 0 {
+				acc.aggStatePool[aggBase+i].max = val
+				acc.aggStatePool[aggBase+i].hasValue = true
 			}
 		}
 	}
-	_ = ctx // ctx kept for signature compat; no blocking ops remain
+}
 
+func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (StatementResult, error) {
+	_ = ctx // ctx kept for signature compat; no blocking ops remain
+	acc := newGroupByAccumulator(stmt, t, len(rows))
+	for _, row := range rows {
+		acc.process(row)
+	}
+	return acc.buildResult(stmt, t)
+}
+
+// selectGroupByZeroAlloc handles GROUP BY over a single sequential scan without
+// materialising rows. It reuses one []OptionalValue buffer across all rows,
+// eliminating the per-row heap allocation from UnmarshalWithMask. Falls back to
+// the general path for virtual tables and parallel scans.
+func (t *Table) selectGroupByZeroAlloc(ctx context.Context, stmt Statement, scan Scan, selectedFields []Field) (StatementResult, error) {
+	if t.virtualRows != nil || t.parallelScan {
+		var rows []Row
+		if err := t.sequentialScan(ctx, scan, selectedFields, func(row Row) error {
+			rows = append(rows, row)
+			return nil
+		}); err != nil {
+			return StatementResult{}, err
+		}
+		return t.selectGroupBy(ctx, stmt, rows)
+	}
+
+	cursor, err := t.SeekFirst(ctx)
+	if err != nil {
+		return StatementResult{}, err
+	}
+
+	fullMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+
+	// Pre-allocate one reusable values buffer. Safe because process() copies the
+	// GROUP BY column values it needs into groupValPool before returning — the
+	// buffer is overwritten on the next row.
+	reuseValues := make([]OptionalValue, len(t.Columns))
+
+	estRows := int(t.estimatedRowCount())
+	if estRows <= 0 {
+		estRows = 160 // conservative default (estGroups = 16)
+	}
+	acc := newGroupByAccumulator(stmt, t, estRows)
+
+	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return StatementResult{}, fmt.Errorf("group by sequential scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	for !cursor.EndOfTable {
+		if err := ctx.Err(); err != nil {
+			return StatementResult{}, err
+		}
+
+		if page.Index != cursor.PageIdx {
+			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
+			if err != nil {
+				return StatementResult{}, fmt.Errorf("group by sequential scan: %w", err)
+			}
+		}
+
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+
+		switch {
+		case cursor.CellIdx < page.LeafNode.Header.Cells-1:
+			cursor.CellIdx += 1
+		case page.LeafNode.Header.NextLeaf == 0:
+			cursor.EndOfTable = true
+		default:
+			cursor.PageIdx = page.LeafNode.Header.NextLeaf
+			cursor.CellIdx = 0
+		}
+
+		row := t.newRow()
+		row, err = row.unmarshalWithMaskInto(cell, fullMask, reuseValues)
+		if err != nil {
+			return StatementResult{}, err
+		}
+
+		if tableFilter != nil {
+			ok, err := tableFilter(row)
+			if err != nil {
+				return StatementResult{}, err
+			}
+			if !ok {
+				continue
+			}
+		}
+
+		acc.process(row)
+	}
+
+	return acc.buildResult(stmt, t)
+}
+
+func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementResult, error) {
 	nFields := len(stmt.Fields)
-	nGroups := len(groupOrder)
+	nGroups := len(acc.groupOrder)
 
 	// Build result column metadata.
 	resultColumns := make([]Column, nFields)
@@ -637,7 +759,7 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 		case AggregateCount:
 			resultColumns[i] = Column{Name: colName, Kind: Int8}
 		case AggregateSum:
-			if useIntSum[i] {
+			if acc.useIntSum[i] {
 				resultColumns[i] = Column{Name: colName, Kind: Int8}
 			} else {
 				resultColumns[i] = Column{Name: colName, Kind: Double}
@@ -655,23 +777,23 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 	allResultValues := make([]OptionalValue, nGroups*nFields)
 	resultRows := make([]Row, 0, nGroups)
 
-	for gi, key := range groupOrder {
-		gsIdx := groupMap[key]
-		aggBase := int(groupEntries[gsIdx].aggStateStart)
-		gvBase := int(groupEntries[gsIdx].groupValStart)
+	for gi, key := range acc.groupOrder {
+		gsIdx := acc.groupMap[key]
+		aggBase := int(acc.groupEntries[gsIdx].aggStateStart)
+		gvBase := int(acc.groupEntries[gsIdx].groupValStart)
 
 		values := allResultValues[gi*nFields : (gi+1)*nFields]
 
-		for i, agg := range stmt.Aggregates {
+		for i, agg := range acc.aggregates {
 			switch agg.Kind {
 			case 0:
-				if j := fieldToGroupByIdx[i]; j >= 0 {
-					values[i] = groupValPool[gvBase+j]
+				if j := acc.fieldToGroupByIdx[i]; j >= 0 {
+					values[i] = acc.groupValPool[gvBase+j]
 				}
 			case AggregateCount:
-				values[i] = OptionalValue{Valid: true, Value: aggStatePool[aggBase+i].count}
+				values[i] = OptionalValue{Valid: true, Value: acc.aggStatePool[aggBase+i].count}
 			case AggregateSum:
-				st := aggStatePool[aggBase+i]
+				st := acc.aggStatePool[aggBase+i]
 				if st.hasValue {
 					if st.useIntSum {
 						values[i] = OptionalValue{Valid: true, Value: st.sumI}
@@ -680,7 +802,7 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 					}
 				}
 			case AggregateAvg:
-				st := aggStatePool[aggBase+i]
+				st := acc.aggStatePool[aggBase+i]
 				if st.hasValue && st.count > 0 {
 					if st.useIntSum {
 						values[i] = OptionalValue{Valid: true, Value: float64(st.sumI) / float64(st.count)}
@@ -689,12 +811,12 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 					}
 				}
 			case AggregateMin:
-				if aggStatePool[aggBase+i].hasValue {
-					values[i] = aggStatePool[aggBase+i].min
+				if acc.aggStatePool[aggBase+i].hasValue {
+					values[i] = acc.aggStatePool[aggBase+i].min
 				}
 			case AggregateMax:
-				if aggStatePool[aggBase+i].hasValue {
-					values[i] = aggStatePool[aggBase+i].max
+				if acc.aggStatePool[aggBase+i].hasValue {
+					values[i] = acc.aggStatePool[aggBase+i].max
 				}
 			}
 		}

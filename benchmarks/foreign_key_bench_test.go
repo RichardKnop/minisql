@@ -76,9 +76,10 @@ func BenchmarkForeignKey_Insert(b *testing.B) {
 }
 
 // BenchmarkForeignKey_DeleteCascade measures the cost of deleting a parent row
-// that has cascade-delete children.  Each iteration inserts a parent with 10
-// children, then deletes the parent (triggering cascade deletion of all 10 children).
-// The insert phase is excluded from timing via b.StopTimer / b.StartTimer.
+// that has cascade-delete children. Each iteration inserts a parent with 10
+// children (untimed), then deletes the parent (timed), triggering cascade
+// deletion of all 10 children. The table always contains exactly 1 parent and
+// 10 children during the timed delete, giving stable, b.N-independent timing.
 func BenchmarkForeignKey_DeleteCascade(b *testing.B) {
 	for _, d := range drivers {
 		b.Run(d.name, func(b *testing.B) {
@@ -144,23 +145,23 @@ func BenchmarkForeignKey_DeleteCascade(b *testing.B) {
 			}
 			defer delParent.Close()
 
-			// Pre-seed all b.N parent rows with 10 children each so the timed
-			// loop only measures the cascade delete, not the insert overhead.
-			for i := range b.N {
-				parentID := int64(i + 1)
-				if _, err := insParent.Exec(parentID, fmt.Sprintf("parent-%d", i)); err != nil {
-					b.Fatalf("pre-seed insert parent: %v", err)
-				}
-				for j := range 10 {
-					if _, err := insChild.Exec(parentID, fmt.Sprintf("child-%d-%d", i, j)); err != nil {
-						b.Fatalf("pre-seed insert child: %v", err)
-					}
-				}
-			}
-
 			b.ResetTimer()
 			for i := range b.N {
 				parentID := int64(i + 1)
+
+				// Insert phase (untimed): one parent + 10 children.
+				b.StopTimer()
+				if _, err := insParent.Exec(parentID, fmt.Sprintf("parent-%d", i)); err != nil {
+					b.Fatalf("insert parent: %v", err)
+				}
+				for j := range 10 {
+					if _, err := insChild.Exec(parentID, fmt.Sprintf("child-%d-%d", i, j)); err != nil {
+						b.Fatalf("insert child: %v", err)
+					}
+				}
+				b.StartTimer()
+
+				// Timed: delete parent, cascading to its 10 children.
 				if _, err := delParent.Exec(parentID); err != nil {
 					b.Fatalf("delete parent: %v", err)
 				}
