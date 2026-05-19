@@ -1046,6 +1046,12 @@ func (t *Table) selectStreamingDirectRowView(
 			return StatementResult{}, true, err
 		}
 		newRowViewIter = iterFactory
+	case ScanTypeIndexIntersect, ScanTypeIndexUnion:
+		iterFactory, err := t.indexSetRowViewIteratorFactory(ctx, scan, tableFilter, remaining, offset, hasLimit, hasOffset)
+		if err != nil {
+			return StatementResult{}, true, err
+		}
+		newRowViewIter = iterFactory
 	default:
 		return StatementResult{}, false, nil
 	}
@@ -1149,6 +1155,62 @@ func (t *Table) indexRowViewIteratorFactory(
 	if err != nil {
 		return nil, err
 	}
+	return func() RowViewIterator {
+		idx := 0
+		iterRemaining := remaining
+		iterOffset := offset
+		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
+			for idx < len(rowIDs) {
+				if err := iterCtx.Err(); err != nil {
+					return RowView{}, err
+				}
+				rowID := rowIDs[idx]
+				idx += 1
+
+				view, err := t.rowViewByRowID(iterCtx, rowID)
+				if err != nil {
+					return RowView{}, err
+				}
+				if tableFilter != nil {
+					ok, err := tableFilter(iterCtx, view)
+					if err != nil {
+						return RowView{}, err
+					}
+					if !ok {
+						continue
+					}
+				}
+				if hasOffset && iterOffset > 0 {
+					iterOffset -= 1
+					continue
+				}
+				if hasLimit {
+					if iterRemaining == 0 {
+						return RowView{}, ErrNoMoreRows
+					}
+					iterRemaining -= 1
+				}
+				return view, nil
+			}
+			return RowView{}, ErrNoMoreRows
+		})
+	}, nil
+}
+
+func (t *Table) indexSetRowViewIteratorFactory(
+	ctx context.Context,
+	scan Scan,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) (func() RowViewIterator, error) {
+	rowIDs, err := t.collectIndexSetScanRowIDs(ctx, scan)
+	if err != nil {
+		return nil, err
+	}
+
 	return func() RowViewIterator {
 		idx := 0
 		iterRemaining := remaining
@@ -3205,15 +3267,7 @@ func (t *Table) virtualSequentialScan(ctx context.Context, scan Scan, out func(R
 func (t *Table) collectRowIDsFromScan(ctx context.Context, scan Scan) ([]RowID, error) {
 	// Intersect: recursively collect and intersect sub-scan RowID sets.
 	if scan.Type == ScanTypeIndexIntersect {
-		sets := make([][]RowID, 0, len(scan.SubScans))
-		for _, sub := range scan.SubScans {
-			ids, err := t.collectRowIDsFromScan(ctx, sub)
-			if err != nil {
-				return nil, err
-			}
-			sets = append(sets, ids)
-		}
-		return intersectSortedRowIDs(sets), nil
+		return t.collectIndexSetScanRowIDs(ctx, scan)
 	}
 
 	idx, ok := t.IndexByName(scan.IndexName)
@@ -3247,6 +3301,26 @@ func (t *Table) collectRowIDsFromScan(ctx context.Context, scan Scan) ([]RowID, 
 		return rowIDs, nil
 	default:
 		return nil, fmt.Errorf("unsupported sub-scan type for intersect: %s", scan.Type)
+	}
+}
+
+func (t *Table) collectIndexSetScanRowIDs(ctx context.Context, scan Scan) ([]RowID, error) {
+	sets := make([][]RowID, 0, len(scan.SubScans))
+	for _, sub := range scan.SubScans {
+		ids, err := t.collectRowIDsFromScan(ctx, sub)
+		if err != nil {
+			return nil, err
+		}
+		sets = append(sets, ids)
+	}
+
+	switch scan.Type {
+	case ScanTypeIndexIntersect:
+		return intersectSortedRowIDs(sets), nil
+	case ScanTypeIndexUnion:
+		return unionSortedRowIDs(sets), nil
+	default:
+		return nil, fmt.Errorf("unsupported index set scan type: %s", scan.Type)
 	}
 }
 
@@ -3325,16 +3399,10 @@ func sortRowIDs(ids []RowID) {
 //  2. Intersect all sets in memory.
 //  3. Fetch the surviving rows and apply any remaining post-filters.
 func (t *Table) indexIntersectScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
-	sets := make([][]RowID, 0, len(scan.SubScans))
-	for _, sub := range scan.SubScans {
-		ids, err := t.collectRowIDsFromScan(ctx, sub)
-		if err != nil {
-			return err
-		}
-		sets = append(sets, ids)
+	surviving, err := t.collectIndexSetScanRowIDs(ctx, scan)
+	if err != nil {
+		return err
 	}
-
-	surviving := intersectSortedRowIDs(sets)
 	if len(surviving) == 0 {
 		return nil
 	}
@@ -3431,16 +3499,10 @@ func unionSortedRowIDs(sets [][]RowID) []RowID {
 //  2. Union (deduplicate) all sets in memory.
 //  3. Fetch each surviving row once and re-check the full WHERE clause.
 func (t *Table) indexUnionScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
-	sets := make([][]RowID, 0, len(scan.SubScans))
-	for _, sub := range scan.SubScans {
-		ids, err := t.collectRowIDsFromScan(ctx, sub)
-		if err != nil {
-			return err
-		}
-		sets = append(sets, ids)
+	surviving, err := t.collectIndexSetScanRowIDs(ctx, scan)
+	if err != nil {
+		return err
 	}
-
-	surviving := unionSortedRowIDs(sets)
 	if len(surviving) == 0 {
 		return nil
 	}

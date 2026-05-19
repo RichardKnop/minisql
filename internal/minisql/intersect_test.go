@@ -357,4 +357,70 @@ func TestTable_IndexIntersectScan(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, rows)
 	})
+
+	t.Run("select index intersect uses row views", func(t *testing.T) {
+		t.Parallel()
+		stmt := Statement{
+			Kind: Select,
+			Fields: []Field{
+				{Name: "id"},
+				{Name: "cat"},
+			},
+			Conditions: OneOrMore{
+				{
+					FieldIsEqual(Field{Name: "cat"}, OperandQuotedString, NewTextPointer([]byte("sports"))),
+					FieldIsEqual(Field{Name: "status"}, OperandQuotedString, NewTextPointer([]byte("active"))),
+				},
+			},
+		}
+
+		var result StatementResult
+		err := txManager.ExecuteReadOnlyTransaction(ctx, func(ctx context.Context) error {
+			var err error
+			result, err = table.Select(ctx, stmt)
+			if err != nil {
+				return err
+			}
+			assert.Len(t, result.RowViewFieldIndexes, 2)
+			rows := collectRows(ctx, result)
+			require.Len(t, rows, 1)
+			assert.Equal(t, int64(1), rows[0].Values[0].Value)
+			assert.Equal(t, "sports", rows[0].Values[1].Value.(TextPointer).String())
+			return nil
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("select index union uses row views", func(t *testing.T) {
+		t.Parallel()
+		stmt := Statement{
+			Kind: Select,
+			Fields: []Field{
+				{Name: "id"},
+				{Name: "status"},
+			},
+			Conditions: OneOrMore{
+				{FieldIsEqual(Field{Name: "cat"}, OperandQuotedString, NewTextPointer([]byte("music")))},
+				{FieldIsEqual(Field{Name: "status"}, OperandQuotedString, NewTextPointer([]byte("inactive")))},
+			},
+		}
+
+		var result StatementResult
+		err := txManager.ExecuteReadOnlyTransaction(ctx, func(ctx context.Context) error {
+			var err error
+			result, err = table.Select(ctx, stmt)
+			if err != nil {
+				return err
+			}
+			assert.Len(t, result.RowViewFieldIndexes, 2)
+			rows := collectRows(ctx, result)
+			require.Len(t, rows, 2)
+			assert.Equal(t, int64(2), rows[0].Values[0].Value)
+			assert.Equal(t, "inactive", rows[0].Values[1].Value.(TextPointer).String())
+			assert.Equal(t, int64(3), rows[1].Values[0].Value)
+			assert.Equal(t, "active", rows[1].Values[1].Value.(TextPointer).String())
+			return nil
+		})
+		require.NoError(t, err)
+	})
 }
