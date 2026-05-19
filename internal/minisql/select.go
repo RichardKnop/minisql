@@ -1052,6 +1052,15 @@ func (t *Table) selectStreamingDirectRowView(
 			return StatementResult{}, true, err
 		}
 		newRowViewIter = iterFactory
+	case ScanTypeFullText:
+		iterFactory, ok, err := t.fullTextRowViewIteratorFactory(scan, tableFilter, remaining, offset, hasLimit, hasOffset)
+		if err != nil {
+			return StatementResult{}, true, err
+		}
+		if !ok {
+			return StatementResult{}, false, nil
+		}
+		newRowViewIter = iterFactory
 	default:
 		return StatementResult{}, false, nil
 	}
@@ -1211,6 +1220,17 @@ func (t *Table) indexSetRowViewIteratorFactory(
 		return nil, err
 	}
 
+	return t.rowIDRowViewIteratorFactory(rowIDs, tableFilter, remaining, offset, hasLimit, hasOffset), nil
+}
+
+func (t *Table) rowIDRowViewIteratorFactory(
+	rowIDs []RowID,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) func() RowViewIterator {
 	return func() RowViewIterator {
 		idx := 0
 		iterRemaining := remaining
@@ -1250,7 +1270,119 @@ func (t *Table) indexSetRowViewIteratorFactory(
 			}
 			return RowView{}, ErrNoMoreRows
 		})
-	}, nil
+	}
+}
+
+func (t *Table) fullTextRowViewIteratorFactory(
+	scan Scan,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) (func() RowViewIterator, bool, error) {
+	secondaryIndex, query, queryTokens, err := t.fullTextScanState(scan)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(queryTokens) == 0 {
+		return func() RowViewIterator {
+			return NewRowViewIterator(func(context.Context) (RowView, error) {
+				return RowView{}, ErrNoMoreRows
+			})
+		}, true, nil
+	}
+	if len(queryTokens) != 1 || len(query.Phrases) > 0 {
+		return nil, false, nil
+	}
+
+	term := queryTokens[0]
+	return func() RowViewIterator {
+		iterRemaining := remaining
+		iterOffset := offset
+		var (
+			iter     invertedPostingIterator
+			rowIDs   []RowID
+			rowIdx   int
+			lastRow  RowID
+			haveLast bool
+			done     bool
+		)
+		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
+			if iter == nil {
+				var err error
+				iter, err = secondaryIndex.InvertedIndex.Lookup(iterCtx, term)
+				if err != nil {
+					return RowView{}, fmt.Errorf("full-text lookup failed: %w", err)
+				}
+			}
+
+			for {
+				if err := iterCtx.Err(); err != nil {
+					return RowView{}, err
+				}
+				for rowIdx < len(rowIDs) {
+					rowID := rowIDs[rowIdx]
+					rowIdx += 1
+					if haveLast && rowID == lastRow {
+						continue
+					}
+					haveLast = true
+					lastRow = rowID
+
+					view, err := t.rowViewByRowID(iterCtx, rowID)
+					if err != nil {
+						return RowView{}, err
+					}
+					if tableFilter != nil {
+						ok, err := tableFilter(iterCtx, view)
+						if err != nil {
+							return RowView{}, err
+						}
+						if !ok {
+							continue
+						}
+					}
+					if hasOffset && iterOffset > 0 {
+						iterOffset -= 1
+						continue
+					}
+					if hasLimit {
+						if iterRemaining == 0 {
+							return RowView{}, ErrNoMoreRows
+						}
+						iterRemaining -= 1
+					}
+					return view, nil
+				}
+				if done {
+					return RowView{}, ErrNoMoreRows
+				}
+
+				block, ok, err := iter.NextBlock(iterCtx)
+				if err != nil {
+					return RowView{}, fmt.Errorf("full-text lookup failed: %w", err)
+				}
+				if !ok {
+					done = true
+					continue
+				}
+
+				rowIDs = rowIDs[:0]
+				mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
+					rowIDs = append(rowIDs, rowID)
+					return nil
+				})
+				if err != nil {
+					return RowView{}, err
+				}
+				if mode != invertedPostingModePositions {
+					return RowView{}, fmt.Errorf("full-text index %s uses posting mode %d", scan.IndexName, mode)
+				}
+				rowIdx = 0
+			}
+		})
+	}, true, nil
 }
 
 type pointRowIDIteratorIndex interface {
@@ -2014,30 +2146,14 @@ func (t *Table) indexPointGetAll(ctx context.Context, scan Scan, selectedFields 
 }
 
 func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
-	secondaryIndex, ok := t.SecondaryIndexes[scan.IndexName]
-	if !ok || secondaryIndex.Method != IndexMethodFullText || secondaryIndex.InvertedIndex == nil {
-		return fmt.Errorf("no index found for full-text scan: %s", scan.IndexName)
+	secondaryIndex, query, queryTokens, err := t.fullTextScanState(scan)
+	if err != nil {
+		return err
 	}
-	if len(scan.IndexKeys) == 0 {
-		return nil
-	}
-
-	query := scan.FullTextQuery
-	if query == nil {
-		terms := make([]string, 0, len(scan.IndexKeys))
-		for _, key := range scan.IndexKeys {
-			term, ok := key.(string)
-			if !ok {
-				continue
-			}
-			terms = appendUniqueTextSearchTerms(terms, term)
-		}
-		query = &textSearchQuery{Terms: terms}
-	}
-	queryTokens := query.allUniqueTokens()
 	if len(queryTokens) == 0 {
 		return nil
 	}
+
 	if len(queryTokens) == 1 && len(query.Phrases) == 0 {
 		return t.fullTextSingleTermIndexScan(ctx, secondaryIndex, scan, queryTokens[0], selectedFields, out)
 	}
@@ -2197,6 +2313,32 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 		}
 	}
 	return nil
+}
+
+func (t *Table) fullTextScanState(scan Scan) (SecondaryIndex, *textSearchQuery, []string, error) {
+	secondaryIndex, ok := t.SecondaryIndexes[scan.IndexName]
+	if !ok || secondaryIndex.Method != IndexMethodFullText || secondaryIndex.InvertedIndex == nil {
+		return SecondaryIndex{}, nil, nil, fmt.Errorf("no index found for full-text scan: %s", scan.IndexName)
+	}
+	if len(scan.IndexKeys) == 0 {
+		return secondaryIndex, nil, nil, nil
+	}
+
+	query := scan.FullTextQuery
+	if query == nil {
+		terms := make([]string, 0, len(scan.IndexKeys))
+		for _, key := range scan.IndexKeys {
+			term, ok := key.(string)
+			if !ok {
+				continue
+			}
+			terms = appendUniqueTextSearchTerms(terms, term)
+		}
+		query = &textSearchQuery{Terms: terms}
+	}
+
+	queryTokens := query.allUniqueTokens()
+	return secondaryIndex, query, queryTokens, nil
 }
 
 func (t *Table) fullTextMultiTermIndexScan(ctx context.Context, secondaryIndex SecondaryIndex, scan Scan, terms []string, selectedFields []Field, out func(Row) error) error {
