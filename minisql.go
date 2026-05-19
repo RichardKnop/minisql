@@ -294,9 +294,12 @@ func (c *Conn) QueryContext(ctx context.Context, query string, args []driver.Nam
 	}
 
 	return &Rows{
-		columns: result.Columns,
-		iter:    result.Rows,
-		ctx:     ctx,
+		columns:             result.Columns,
+		iter:                result.Rows,
+		rowViewIter:         result.RowViews,
+		rowViewFieldIndexes: result.RowViewFieldIndexes,
+		useRowViews:         len(result.RowViewFieldIndexes) > 0,
+		ctx:                 ctx,
 	}, nil
 }
 

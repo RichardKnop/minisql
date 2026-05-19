@@ -984,8 +984,11 @@ func (t *Table) selectStreamingDirectSequentialRowView(
 	if t.virtualRows != nil || t.parallelScan || len(plan.Scans) != 1 || plan.Scans[0].Type != ScanTypeSequential {
 		return StatementResult{}, false, nil
 	}
-	fieldIndexes, resultColumns, ok := rowViewProjectionPlan(t.Columns, requestedFields)
+	fieldIndexes, resultColumns, inlineSafe, ok := rowViewProjectionPlan(t.Columns, requestedFields)
 	if !ok {
+		return StatementResult{}, false, nil
+	}
+	if stmt.Distinct || !inlineSafe {
 		return StatementResult{}, false, nil
 	}
 
@@ -1009,14 +1012,9 @@ func (t *Table) selectStreamingDirectSequentialRowView(
 		offset = stmt.Offset.Value.(int64)
 	}
 
-	var seen map[string]struct{}
-	if stmt.Distinct {
-		seen = make(map[string]struct{})
-	}
-
-	projected := make([]Row, 0)
+	projected := make([]RowView, 0)
 	if hasLimit {
-		projected = make([]Row, 0, int(remaining))
+		projected = make([]RowView, 0, int(remaining))
 	}
 
 	cursor, err := t.SeekFirst(ctx)
@@ -1061,22 +1059,11 @@ func (t *Table) selectStreamingDirectSequentialRowView(
 				continue
 			}
 		}
-		row, err := projectRowView(ctx, t.pager, view, fieldIndexes, resultColumns)
-		if err != nil {
-			return StatementResult{}, true, err
-		}
-		if stmt.Distinct {
-			key := row.rowDistinctKey()
-			if _, dup := seen[key]; dup {
-				continue
-			}
-			seen[key] = struct{}{}
-		}
 		if hasOffset && offset > 0 {
 			offset -= 1
 			continue
 		}
-		projected = append(projected, row)
+		projected = append(projected, view)
 		if hasLimit {
 			remaining -= 1
 			if remaining == 0 {
@@ -1085,17 +1072,19 @@ func (t *Table) selectStreamingDirectSequentialRowView(
 		}
 	}
 
-	result.Rows = NewSliceIterator(projected)
-	result.rawRows = projected
+	result.RowViews = NewSliceRowViewIterator(projected)
+	result.RowViewFieldIndexes = fieldIndexes
+	result.Rows = rowViewMaterializingIterator(ctx, t.pager, projected, fieldIndexes, resultColumns)
 	return result, true, nil
 }
 
-func rowViewProjectionPlan(columns []Column, fields []Field) ([]int, []Column, bool) {
+func rowViewProjectionPlan(columns []Column, fields []Field) ([]int, []Column, bool, bool) {
 	indexes := make([]int, len(fields))
 	resultColumns := make([]Column, len(fields))
+	inlineSafe := true
 	for i, field := range fields {
 		if field.Expr != nil || field.AliasPrefix != "" {
-			return nil, nil, false
+			return nil, nil, false, false
 		}
 		idx := -1
 		for j, col := range columns {
@@ -1107,11 +1096,14 @@ func rowViewProjectionPlan(columns []Column, fields []Field) ([]int, []Column, b
 			}
 		}
 		if idx < 0 {
-			return nil, nil, false
+			return nil, nil, false, false
+		}
+		if resultColumns[i].Kind == Text || resultColumns[i].Kind == JSON || (resultColumns[i].Kind == Varchar && resultColumns[i].Size > MaxInlineVarchar) {
+			inlineSafe = false
 		}
 		indexes[i] = idx
 	}
-	return indexes, resultColumns, true
+	return indexes, resultColumns, inlineSafe, true
 }
 
 func projectRowView(ctx context.Context, pager TxPager, view RowView, fieldIndexes []int, columns []Column) (Row, error) {
@@ -1130,6 +1122,18 @@ func projectRowView(ctx context.Context, pager TxPager, view RowView, fieldIndex
 		return Row{}, fmt.Errorf("row view projection read overflow: %w", err)
 	}
 	return row, nil
+}
+
+func rowViewMaterializingIterator(ctx context.Context, pager TxPager, views []RowView, fieldIndexes []int, columns []Column) Iterator {
+	idx := 0
+	return NewIterator(func(context.Context) (Row, error) {
+		if idx >= len(views) {
+			return Row{}, ErrNoMoreRows
+		}
+		view := views[idx]
+		idx += 1
+		return projectRowView(ctx, pager, view, fieldIndexes, columns)
+	})
 }
 
 func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields []Field) (StatementResult, error) {

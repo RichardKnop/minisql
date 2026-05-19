@@ -11,9 +11,12 @@ import (
 
 // Rows ...
 type Rows struct {
-	columns []minisql.Column
-	iter    minisql.Iterator
-	ctx     context.Context
+	columns             []minisql.Column
+	rowViewFieldIndexes []int
+	iter                minisql.Iterator
+	rowViewIter         minisql.RowViewIterator
+	ctx                 context.Context
+	useRowViews         bool
 }
 
 // Columns returns the names of the columns. The number of
@@ -30,6 +33,9 @@ func (r Rows) Columns() []string {
 
 // Close closes the rows iterator.
 func (r Rows) Close() error {
+	if r.useRowViews {
+		return r.rowViewIter.Close()
+	}
 	return r.iter.Close()
 }
 
@@ -43,6 +49,10 @@ func (r Rows) Close() error {
 // should be taken when closing Rows not to modify
 // a buffer held in dest.
 func (r Rows) Next(dest []driver.Value) error {
+	if r.useRowViews {
+		return r.nextRowView(dest)
+	}
+
 	if !r.iter.Next(r.ctx) {
 		if err := r.iter.Err(); err != nil {
 			return err
@@ -69,6 +79,42 @@ func (r Rows) Next(dest []driver.Value) error {
 			dest[i] = v.String()
 		default:
 			dest[i] = aRow.Values[i].Value
+		}
+	}
+
+	return nil
+}
+
+func (r Rows) nextRowView(dest []driver.Value) error {
+	if !r.rowViewIter.Next(r.ctx) {
+		if err := r.rowViewIter.Err(); err != nil {
+			return err
+		}
+		return io.EOF
+	}
+	if len(r.rowViewFieldIndexes) != len(dest) {
+		return fmt.Errorf("expected %d values, got %d", len(dest), len(r.rowViewFieldIndexes))
+	}
+
+	view := r.rowViewIter.RowView()
+	for i, fieldIdx := range r.rowViewFieldIndexes {
+		value, err := view.ValueAt(fieldIdx)
+		if err != nil {
+			return err
+		}
+		if !value.Valid {
+			dest[i] = nil
+			continue
+		}
+		switch v := value.Value.(type) {
+		case minisql.TextPointer:
+			dest[i] = string(v.Data)
+		case minisql.TimestampMicros:
+			dest[i] = minisql.FromMicroseconds(int64(v)).GoTime()
+		case minisql.UUIDValue:
+			dest[i] = v.String()
+		default:
+			dest[i] = value.Value
 		}
 	}
 

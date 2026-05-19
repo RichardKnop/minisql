@@ -14,6 +14,69 @@ type Iterator struct {
 	end     bool
 }
 
+// RowViewIterator is a pull-based cursor over lazy RowView results.
+type RowViewIterator struct {
+	err      error
+	rowFunc  func(ctx context.Context) (RowView, error)
+	nextView RowView
+	end      bool
+}
+
+// NewRowViewIterator wraps a row-view-producing function into an iterator.
+func NewRowViewIterator(rowFunc func(ctx context.Context) (RowView, error)) RowViewIterator {
+	return RowViewIterator{rowFunc: rowFunc}
+}
+
+// NewSliceRowViewIterator returns an iterator that yields row views from rows.
+func NewSliceRowViewIterator(rows []RowView) RowViewIterator {
+	idx := 0
+	return NewRowViewIterator(func(ctx context.Context) (RowView, error) {
+		if idx >= len(rows) {
+			return RowView{}, ErrNoMoreRows
+		}
+		row := rows[idx]
+		idx += 1
+		return row, nil
+	})
+}
+
+// RowView returns the most-recently-fetched view.
+func (i *RowViewIterator) RowView() RowView {
+	return i.nextView
+}
+
+// Next advances the iterator to the next row view.
+func (i *RowViewIterator) Next(ctx context.Context) bool {
+	if i.err != nil {
+		return false
+	}
+	if i.end {
+		return false
+	}
+	row, err := i.rowFunc(ctx)
+	if err != nil {
+		if errors.Is(err, ErrNoMoreRows) {
+			i.end = true
+			return false
+		}
+		i.err = err
+		return false
+	}
+	i.nextView = row
+	return true
+}
+
+// Close marks the iterator as exhausted.
+func (i *RowViewIterator) Close() error {
+	i.end = true
+	return nil
+}
+
+// Err returns the first non-ErrNoMoreRows error encountered by the iterator.
+func (i *RowViewIterator) Err() error {
+	return i.err
+}
+
 // NewIterator wraps a row-producing function into an Iterator. The function
 // should return ErrNoMoreRows to signal end-of-stream; any other error is
 // surfaced via Err() after Next() returns false.
@@ -98,9 +161,11 @@ func (i *Iterator) Err() error {
 // collection) can steal this slice directly instead of draining the iterator,
 // avoiding a second heap allocation of the same data.
 type StatementResult struct {
-	Rows         Iterator
-	rawRows      []Row   // non-nil when produced by selectStreamingDirect
-	Columns      []Column
-	RowsAffected int
-	LastInsertID int64
+	Rows                Iterator
+	RowViews            RowViewIterator
+	rawRows             []Row // non-nil when produced by selectStreamingDirect
+	Columns             []Column
+	RowViewFieldIndexes []int
+	RowsAffected        int
+	LastInsertID        int64
 }
