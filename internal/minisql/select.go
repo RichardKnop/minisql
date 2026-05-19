@@ -148,6 +148,9 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		!stmt.IsSelectAggregate() &&
 		!plan.SortInMemory &&
 		len(plan.Joins) == 0 {
+		if result, ok, err := t.selectStreamingDirectSequentialRowView(ctx, stmt, plan, requestedFields); ok || err != nil {
+			return result, err
+		}
 		return t.selectStreamingDirect(ctx, stmt, plan, selectedFields, requestedFields)
 	}
 
@@ -970,6 +973,154 @@ func (t *Table) selectStreamingDirect(
 	result.Rows = NewSliceIterator(projected)
 	result.rawRows = projected
 	return result, nil
+}
+
+func (t *Table) selectStreamingDirectSequentialRowView(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if t.virtualRows != nil || t.parallelScan || len(plan.Scans) != 1 || plan.Scans[0].Type != ScanTypeSequential {
+		return StatementResult{}, false, nil
+	}
+	fieldIndexes, resultColumns, ok := rowViewProjectionPlan(t.Columns, requestedFields)
+	if !ok {
+		return StatementResult{}, false, nil
+	}
+
+	result := StatementResult{Columns: resultColumns}
+	scan := plan.Scans[0]
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	if tableFilter != nil {
+		return StatementResult{}, false, nil
+	}
+
+	var (
+		remaining int64
+		offset    int64
+		hasLimit  = stmt.Limit.Valid
+		hasOffset = stmt.Offset.Valid
+	)
+	if hasLimit {
+		remaining = stmt.Limit.Value.(int64)
+	}
+	if hasOffset {
+		offset = stmt.Offset.Value.(int64)
+	}
+
+	var seen map[string]struct{}
+	if stmt.Distinct {
+		seen = make(map[string]struct{})
+	}
+
+	projected := make([]Row, 0)
+	if hasLimit {
+		projected = make([]Row, 0, int(remaining))
+	}
+
+	cursor, err := t.SeekFirst(ctx)
+	if err != nil {
+		return StatementResult{}, true, err
+	}
+	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return StatementResult{}, true, fmt.Errorf("row view sequential scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	for !cursor.EndOfTable {
+		if err := ctx.Err(); err != nil {
+			return StatementResult{}, true, err
+		}
+		if page.Index != cursor.PageIdx {
+			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
+			if err != nil {
+				return StatementResult{}, true, fmt.Errorf("row view sequential scan: %w", err)
+			}
+		}
+
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+		switch {
+		case cursor.CellIdx < page.LeafNode.Header.Cells-1:
+			cursor.CellIdx += 1
+		case page.LeafNode.Header.NextLeaf == 0:
+			cursor.EndOfTable = true
+		default:
+			cursor.PageIdx = page.LeafNode.Header.NextLeaf
+			cursor.CellIdx = 0
+		}
+
+		view := NewRowView(t.Columns, cell)
+		row, err := projectRowView(ctx, t.pager, view, fieldIndexes, resultColumns)
+		if err != nil {
+			return StatementResult{}, true, err
+		}
+		if stmt.Distinct {
+			key := row.rowDistinctKey()
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+		}
+		if hasOffset && offset > 0 {
+			offset -= 1
+			continue
+		}
+		projected = append(projected, row)
+		if hasLimit {
+			remaining -= 1
+			if remaining == 0 {
+				break
+			}
+		}
+	}
+
+	result.Rows = NewSliceIterator(projected)
+	result.rawRows = projected
+	return result, true, nil
+}
+
+func rowViewProjectionPlan(columns []Column, fields []Field) ([]int, []Column, bool) {
+	indexes := make([]int, len(fields))
+	resultColumns := make([]Column, len(fields))
+	for i, field := range fields {
+		if field.Expr != nil || field.AliasPrefix != "" {
+			return nil, nil, false
+		}
+		idx := -1
+		for j, col := range columns {
+			if col.Name == field.Name {
+				idx = j
+				resultColumns[i] = col
+				resultColumns[i].Name = field.OutputName()
+				break
+			}
+		}
+		if idx < 0 {
+			return nil, nil, false
+		}
+		indexes[i] = idx
+	}
+	return indexes, resultColumns, true
+}
+
+func projectRowView(ctx context.Context, pager TxPager, view RowView, fieldIndexes []int, columns []Column) (Row, error) {
+	values := make([]OptionalValue, len(fieldIndexes))
+	for i, idx := range fieldIndexes {
+		value, err := view.ValueAt(idx)
+		if err != nil {
+			return Row{}, err
+		}
+		values[i] = value
+	}
+	row := NewRowWithValues(columns, values)
+	row.Key = view.Key()
+	row, err := row.readOverflowTexts(ctx, pager)
+	if err != nil {
+		return Row{}, fmt.Errorf("row view projection read overflow: %w", err)
+	}
+	return row, nil
 }
 
 func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields []Field) (StatementResult, error) {
