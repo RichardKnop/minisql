@@ -25,97 +25,66 @@ var ErrNotFound = errors.New("not found")
 // one at a time so the caller never holds more than one page worth of IDs in memory.
 // fn may return an error to stop iteration early; that error is returned unchanged.
 func (ui *Index[T]) VisitRowIDs(ctx context.Context, keyAny any, fn func(RowID) error) error {
+	key, cell, err := ui.pointCell(ctx, keyAny)
+	if err != nil {
+		return err
+	}
+
+	return ui.visitCellRowIDs(ctx, key, cell, fn)
+}
+
+func (ui *Index[T]) pointCell(ctx context.Context, keyAny any) (T, IndexCell[T], error) {
 	key, ok := keyAny.(T)
 	if !ok {
-		return fmt.Errorf("invalid key type: %T", keyAny)
+		return key, IndexCell[T]{}, fmt.Errorf("invalid key type: %T", keyAny)
 	}
 
 	rootPage, err := ui.pager.ReadPage(ctx, ui.GetRootPageIdx())
 	if err != nil {
-		return err
+		return key, IndexCell[T]{}, err
 	}
 
 	cursor, ok, err := ui.Seek(ctx, rootPage, key)
 	if err != nil {
-		return err
+		return key, IndexCell[T]{}, err
 	}
 	if !ok {
-		return fmt.Errorf("%w: %v", ErrNotFound, key)
+		return key, IndexCell[T]{}, fmt.Errorf("%w: %v", ErrNotFound, key)
 	}
 
 	page, err := cursor.Index.pager.ReadPage(ctx, cursor.PageIdx)
 	if err != nil {
-		return fmt.Errorf("read page: %w", err)
+		return key, IndexCell[T]{}, fmt.Errorf("read page: %w", err)
 	}
 	node := page.IndexNode.(*IndexNode[T])
 	if cursor.CellIdx >= node.Header.Keys {
-		return fmt.Errorf("invalid cell index: %d", cursor.CellIdx)
+		return key, IndexCell[T]{}, fmt.Errorf("invalid cell index: %d", cursor.CellIdx)
 	}
 
-	cell := node.Cells[cursor.CellIdx]
+	return key, node.Cells[cursor.CellIdx], nil
+}
 
+func (ui *Index[T]) visitCellRowIDs(ctx context.Context, key T, cell IndexCell[T], fn func(RowID) error) error {
 	if cell.unique {
 		return fn(cell.UniqueRowID)
 	}
-
 	if len(cell.RowIDs) == 0 {
 		return fmt.Errorf("no row IDs for key: %v", key)
 	}
-
 	for _, rowID := range cell.RowIDs {
 		if err := fn(rowID); err != nil {
 			return err
 		}
 	}
-
-	overflowIdx := cell.Overflow
-	for overflowIdx != 0 {
-		overflowPage, err := cursor.Index.pager.ReadPage(ctx, overflowIdx)
-		if err != nil {
-			return fmt.Errorf("read index overflow page %d: %w", overflowIdx, err)
-		}
-		node := overflowPage.IndexOverflowNode
-		for _, rowID := range node.RowIDs[:node.Header.ItemCount] {
-			if err := fn(rowID); err != nil {
-				return err
-			}
-		}
-		overflowIdx = node.Header.NextPage
-	}
-
-	return nil
+	return visitOverflowRowIDs(ctx, ui.pager, cell.Overflow, fn)
 }
 
 // PointRowIDIterator returns a pull iterator over row IDs stored under keyAny.
 func (ui *Index[T]) PointRowIDIterator(ctx context.Context, keyAny any) (rowIDNextFunc, error) {
-	key, ok := keyAny.(T)
-	if !ok {
-		return nil, fmt.Errorf("invalid key type: %T", keyAny)
-	}
-
-	rootPage, err := ui.pager.ReadPage(ctx, ui.GetRootPageIdx())
+	key, cell, err := ui.pointCell(ctx, keyAny)
 	if err != nil {
 		return nil, err
 	}
-
-	cursor, ok, err := ui.Seek(ctx, rootPage, key)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, fmt.Errorf("%w: %v", ErrNotFound, key)
-	}
-
-	page, err := cursor.Index.pager.ReadPage(ctx, cursor.PageIdx)
-	if err != nil {
-		return nil, fmt.Errorf("read page: %w", err)
-	}
-	node := page.IndexNode.(*IndexNode[T])
-	if cursor.CellIdx >= node.Header.Keys {
-		return nil, fmt.Errorf("invalid cell index: %d", cursor.CellIdx)
-	}
-
-	cell := node.Cells[cursor.CellIdx]
 	if cell.unique {
 		emitted := false
 		return func(context.Context) (RowID, error) {
