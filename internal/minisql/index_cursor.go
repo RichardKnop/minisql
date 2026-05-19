@@ -79,6 +79,18 @@ func (ui *Index[T]) visitCellRowIDs(ctx context.Context, key T, cell IndexCell[T
 	return visitOverflowRowIDs(ctx, ui.pager, cell.Overflow, fn)
 }
 
+// PointUniqueRowID returns the row ID for keyAny when this index cell is unique.
+func (ui *Index[T]) PointUniqueRowID(ctx context.Context, keyAny any) (RowID, error) {
+	key, cell, err := ui.pointCell(ctx, keyAny)
+	if err != nil {
+		return 0, err
+	}
+	if !cell.unique {
+		return 0, fmt.Errorf("index cell for key %v is not unique", key)
+	}
+	return cell.UniqueRowID, nil
+}
+
 // PointRowIDIterator returns a pull iterator over row IDs stored under keyAny.
 func (ui *Index[T]) PointRowIDIterator(ctx context.Context, keyAny any) (rowIDNextFunc, error) {
 	key, cell, err := ui.pointCell(ctx, keyAny)

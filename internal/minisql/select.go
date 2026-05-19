@@ -1030,8 +1030,16 @@ func (t *Table) selectStreamingDirectRowView(
 		}
 		newRowViewIter = iterFactory
 	case ScanTypeIndexPoint:
-		if scan.CoveringIndex || !t.isNonUniqueSecondaryBTreeIndex(scan.IndexName) {
+		if scan.CoveringIndex {
 			return StatementResult{}, false, nil
+		}
+		if t.isUniquePointIndex(scan.IndexName) {
+			iterFactory, err := t.uniqueIndexPointRowViewIteratorFactory(scan, tableFilter, remaining, offset, hasLimit, hasOffset)
+			if err != nil {
+				return StatementResult{}, true, err
+			}
+			newRowViewIter = iterFactory
+			break
 		}
 		iterFactory, err := t.indexRowViewIteratorFactory(ctx, plan, scan, tableFilter, remaining, offset, hasLimit, hasOffset)
 		if err != nil {
@@ -1187,6 +1195,75 @@ type pointRowIDIteratorIndex interface {
 	PointRowIDIterator(context.Context, any) (rowIDNextFunc, error)
 }
 
+type uniquePointRowIDIndex interface {
+	PointUniqueRowID(context.Context, any) (RowID, error)
+}
+
+func (t *Table) uniqueIndexPointRowViewIteratorFactory(
+	scan Scan,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) (func() RowViewIterator, error) {
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return nil, fmt.Errorf("no index found for row view scan: %s", scan.IndexName)
+	}
+	pointIdx, ok := idx.(uniquePointRowIDIndex)
+	if !ok {
+		return nil, fmt.Errorf("index %s does not support unique row ID lookup", scan.IndexName)
+	}
+
+	return func() RowViewIterator {
+		keyIdx := 0
+		iterRemaining := remaining
+		iterOffset := offset
+		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
+			for keyIdx < len(scan.IndexKeys) {
+				if err := iterCtx.Err(); err != nil {
+					return RowView{}, err
+				}
+				rowID, err := pointIdx.PointUniqueRowID(iterCtx, scan.IndexKeys[keyIdx])
+				keyIdx += 1
+				if errors.Is(err, ErrNotFound) {
+					continue
+				}
+				if err != nil {
+					return RowView{}, fmt.Errorf("index lookup failed: %w", err)
+				}
+
+				view, err := t.rowViewByRowID(iterCtx, rowID)
+				if err != nil {
+					return RowView{}, err
+				}
+				if tableFilter != nil {
+					ok, err := tableFilter(iterCtx, view)
+					if err != nil {
+						return RowView{}, err
+					}
+					if !ok {
+						continue
+					}
+				}
+				if hasOffset && iterOffset > 0 {
+					iterOffset -= 1
+					continue
+				}
+				if hasLimit {
+					if iterRemaining == 0 {
+						return RowView{}, ErrNoMoreRows
+					}
+					iterRemaining -= 1
+				}
+				return view, nil
+			}
+			return RowView{}, ErrNoMoreRows
+		})
+	}, nil
+}
+
 func (t *Table) indexPointRowViewIteratorFactory(
 	scan Scan,
 	tableFilter func(context.Context, RowView) (bool, error),
@@ -1268,6 +1345,14 @@ func (t *Table) indexPointRowViewIteratorFactory(
 	}, nil
 }
 
+func (t *Table) isUniquePointIndex(name string) bool {
+	if t.HasPrimaryKey() && t.PrimaryKey.Name == name {
+		return true
+	}
+	_, ok := t.UniqueIndexes[name]
+	return ok
+}
+
 func (t *Table) collectIndexScanRowIDs(ctx context.Context, plan QueryPlan, scan Scan, canApplyScanLimit bool) ([]RowID, error) {
 	idx, ok := t.IndexByName(scan.IndexName)
 	if !ok {
@@ -1333,11 +1418,6 @@ func rowIDBufferCapacity(scan Scan, canApplyScanLimit bool) int {
 		return len(scan.IndexKeys) * MaxInlineRowIDs
 	}
 	return 0
-}
-
-func (t *Table) isNonUniqueSecondaryBTreeIndex(name string) bool {
-	index, ok := t.SecondaryIndexes[name]
-	return ok && index.IsBTree()
 }
 
 func (t *Table) rowViewByRowID(ctx context.Context, rowID RowID) (RowView, error) {
