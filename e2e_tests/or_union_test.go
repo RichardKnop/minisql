@@ -1,6 +1,8 @@
 package e2etests
 
-import "sort"
+import (
+	"sort"
+)
 
 func (s *TestSuite) TestORIndexUnion() {
 	_, err := s.db.Exec(`create table "tickets" (

@@ -1,6 +1,8 @@
 package e2etests
 
-import "strings"
+import (
+	"strings"
+)
 
 // TestSemiJoin verifies the semi-join and anti-semi-join optimisation that
 // converts eligible IN/NOT IN (subquery) conditions into synthetic Semi /

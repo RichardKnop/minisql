@@ -1,6 +1,8 @@
 package minisql
 
-import "fmt"
+import (
+	"fmt"
+)
 
 const (
 	invertedPageFormatVersion byte = 1

@@ -1,6 +1,8 @@
 package e2etests
 
-import "context"
+import (
+	"context"
+)
 
 // TestExplainJoin verifies EXPLAIN output for all JOIN-related query plan
 // features: nested-loop indexed join, hash join, LEFT/RIGHT JOIN, chain joins,

@@ -1,6 +1,8 @@
 package e2etests
 
-import "time"
+import (
+	"time"
+)
 
 const tsLayout = "2006-01-02 15:04:05"
 

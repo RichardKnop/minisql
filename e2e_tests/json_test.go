@@ -1,6 +1,8 @@
 package e2etests
 
-import "strings"
+import (
+	"strings"
+)
 
 func (s *TestSuite) TestJSON() {
 	_, err := s.db.Exec(`create table events (

@@ -1,6 +1,8 @@
 package e2etests
 
-import "fmt"
+import (
+	"fmt"
+)
 
 func (s *TestSuite) TestJSONInvertedIndex() {
 	_, err := s.db.Exec(`create table "events_inv" (

@@ -1,6 +1,8 @@
 package e2etests
 
-import "context"
+import (
+	"context"
+)
 
 func (s *TestSuite) TestCTE() {
 	_, err := s.db.Exec(`create table "users" (

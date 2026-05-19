@@ -1,6 +1,8 @@
 package e2etests
 
-import "time"
+import (
+	"time"
+)
 
 func (s *TestSuite) TestReturning() {
 	_, err := s.db.Exec(`create table "users" (

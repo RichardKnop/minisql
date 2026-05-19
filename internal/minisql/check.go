@@ -1,6 +1,8 @@
 package minisql
 
-import "fmt"
+import (
+	"fmt"
+)
 
 // ErrCheckConstraintViolation is returned when an INSERT or UPDATE row fails a CHECK constraint.
 type ErrCheckConstraintViolation struct {
