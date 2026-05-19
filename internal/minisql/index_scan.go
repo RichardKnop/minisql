@@ -41,14 +41,10 @@ func (ui *Index[T]) scanAscending(ctx context.Context, pageIdx PageIndex, callba
 					}
 				}
 				if cell.Overflow != 0 {
-					rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
-					if err != nil {
+					if err := visitOverflowRowIDs(ctx, ui.pager, cell.Overflow, func(rowID RowID) error {
+						return callback(cell.Key, rowID)
+					}); err != nil {
 						return err
-					}
-					for _, rowID := range rowIDs {
-						if err := callback(cell.Key, rowID); err != nil {
-							return err
-						}
 					}
 				}
 			}
@@ -79,14 +75,10 @@ func (ui *Index[T]) scanAscending(ctx context.Context, pageIdx PageIndex, callba
 				}
 			}
 			if cell.Overflow != 0 {
-				rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
-				if err != nil {
+				if err := visitOverflowRowIDs(ctx, ui.pager, cell.Overflow, func(rowID RowID) error {
+					return callback(cell.Key, rowID)
+				}); err != nil {
 					return err
-				}
-				for _, rowID := range rowIDs {
-					if err := callback(cell.Key, rowID); err != nil {
-						return err
-					}
 				}
 			}
 		}
@@ -126,14 +118,10 @@ func (ui *Index[T]) scanDescending(ctx context.Context, pageIdx PageIndex, callb
 					}
 				}
 				if cell.Overflow != 0 {
-					rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
-					if err != nil {
+					if err := visitOverflowRowIDs(ctx, ui.pager, cell.Overflow, func(rowID RowID) error {
+						return callback(cell.Key, rowID)
+					}); err != nil {
 						return err
-					}
-					for _, rowID := range rowIDs {
-						if err := callback(cell.Key, rowID); err != nil {
-							return err
-						}
 					}
 				}
 			}
@@ -165,14 +153,10 @@ func (ui *Index[T]) scanDescending(ctx context.Context, pageIdx PageIndex, callb
 				}
 			}
 			if cell.Overflow != 0 {
-				rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
-				if err != nil {
+				if err := visitOverflowRowIDs(ctx, ui.pager, cell.Overflow, func(rowID RowID) error {
+					return callback(cell.Key, rowID)
+				}); err != nil {
 					return err
-				}
-				for _, rowID := range rowIDs {
-					if err := callback(cell.Key, rowID); err != nil {
-						return err
-					}
 				}
 			}
 		}
@@ -286,14 +270,10 @@ func (ui *Index[T]) scanRangeFrom(
 				}
 			}
 			if cell.Overflow != 0 {
-				rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
-				if err != nil {
+				if err := visitOverflowRowIDs(ctx, ui.pager, cell.Overflow, func(rowID RowID) error {
+					return callback(key, rowID)
+				}); err != nil {
 					return err
-				}
-				for _, rowID := range rowIDs {
-					if err := callback(key, rowID); err != nil {
-						return err
-					}
 				}
 			}
 		}
@@ -364,14 +344,10 @@ func (ui *Index[T]) scanRangeFrom(
 					}
 				}
 				if cell.Overflow != 0 {
-					rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
-					if err != nil {
+					if err := visitOverflowRowIDs(ctx, ui.pager, cell.Overflow, func(rowID RowID) error {
+						return callback(key, rowID)
+					}); err != nil {
 						return err
-					}
-					for _, rowID := range rowIDs {
-						if err := callback(key, rowID); err != nil {
-							return err
-						}
 					}
 				}
 			}
@@ -437,14 +413,10 @@ func (ui *Index[T]) scanRangeRecursive(ctx context.Context, pageIdx PageIndex, r
 				}
 			}
 			if cell.Overflow != 0 {
-				rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
-				if err != nil {
+				if err := visitOverflowRowIDs(ctx, ui.pager, cell.Overflow, func(rowID RowID) error {
+					return callback(key, rowID)
+				}); err != nil {
 					return err
-				}
-				for _, rowID := range rowIDs {
-					if err := callback(key, rowID); err != nil {
-						return err
-					}
 				}
 			}
 		}
@@ -519,14 +491,10 @@ func (ui *Index[T]) scanRangeRecursiveReverse(ctx context.Context, pageIdx PageI
 					}
 				}
 				if cell.Overflow != 0 {
-					rowIDs, err := readOverflowRowIDs[T](ctx, ui.pager, cell.Overflow)
-					if err != nil {
+					if err := visitOverflowRowIDs(ctx, ui.pager, cell.Overflow, func(rowID RowID) error {
+						return callback(key, rowID)
+					}); err != nil {
 						return err
-					}
-					for _, rowID := range rowIDs {
-						if err := callback(key, rowID); err != nil {
-							return err
-						}
 					}
 				}
 			}

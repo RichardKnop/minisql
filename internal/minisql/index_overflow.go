@@ -248,17 +248,30 @@ func readOverflowRowIDs[T IndexKey](ctx context.Context, pager TxPager, overflow
 	}
 
 	rowIDs := make([]RowID, 0, 1)
-	for overflowIdx != 0 {
-		overflowPage, err := pager.ReadPage(ctx, overflowIdx)
-		if err != nil {
-			return nil, fmt.Errorf("read index overflow page %d: %w", overflowIdx, err)
-		}
-		rowIDs = append(
-			rowIDs,
-			overflowPage.IndexOverflowNode.RowIDs[0:overflowPage.IndexOverflowNode.Header.ItemCount]...,
-		)
-		overflowIdx = overflowPage.IndexOverflowNode.Header.NextPage
+	err := visitOverflowRowIDs(ctx, pager, overflowIdx, func(rowID RowID) error {
+		rowIDs = append(rowIDs, rowID)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return rowIDs, nil
+}
+
+func visitOverflowRowIDs(ctx context.Context, pager TxPager, overflowIdx PageIndex, fn func(RowID) error) error {
+	for overflowIdx != 0 {
+		overflowPage, err := pager.ReadPage(ctx, overflowIdx)
+		if err != nil {
+			return fmt.Errorf("read index overflow page %d: %w", overflowIdx, err)
+		}
+		node := overflowPage.IndexOverflowNode
+		for _, rowID := range node.RowIDs[:node.Header.ItemCount] {
+			if err := fn(rowID); err != nil {
+				return err
+			}
+		}
+		overflowIdx = node.Header.NextPage
+	}
+	return nil
 }
