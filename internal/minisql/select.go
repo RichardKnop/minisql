@@ -2982,6 +2982,7 @@ func (t *Table) collectFullTextPhraseRowIDs(
 	// (the row-grouped codec writes one entry per document), so postings from
 	// successive blocks can be concatenated in order.
 	postingsByTerm := make(map[string][]invertedPosting, len(queryTokens))
+	docFreqByTerm := make(map[string]uint32, len(queryTokens))
 	for _, key := range scan.IndexKeys {
 		term, ok := key.(string)
 		if !ok {
@@ -3017,6 +3018,7 @@ func (t *Table) collectFullTextPhraseRowIDs(
 			return nil, nil
 		}
 		postingsByTerm[term] = postings
+		docFreqByTerm[term] = stats.DocFreq
 	}
 
 	// Pre-compute phrase→queryToken index mapping once per query so the
@@ -3045,16 +3047,21 @@ func (t *Table) collectFullTextPhraseRowIDs(
 	// candidate document. Allocated once and overwritten for each candidate.
 	allPositions := make([][]uint32, len(queryTokens))
 
-	// Iterate the first term's postings in sorted RowID order. Survivors come
-	// out sorted so sortRowIDs is unnecessary.
-	firstPostings := postingsByTerm[queryTokens[0]]
-	surviving := make([]RowID, 0, len(firstPostings))
+	// Iterate the rarest term's postings in sorted RowID order. Survivors come
+	// out sorted so sortRowIDs is unnecessary, and starting with the smallest
+	// posting list bounds the number of candidate phrase checks.
+	candidateIdx := rarestFullTextTokenIndex(queryTokens, docFreqByTerm)
+	candidatePostings := postingsByTerm[queryTokens[candidateIdx]]
+	surviving := make([]RowID, 0, len(candidatePostings))
 
-	for _, firstPosting := range firstPostings {
-		rowID := firstPosting.RowID
+	for _, candidatePosting := range candidatePostings {
+		rowID := candidatePosting.RowID
 		matches := true
-		allPositions[0] = firstPosting.Positions
-		for i := 1; i < len(queryTokens); i++ {
+		allPositions[candidateIdx] = candidatePosting.Positions
+		for i := range queryTokens {
+			if i == candidateIdx {
+				continue
+			}
 			termPostings := postingsByTerm[queryTokens[i]]
 			idx := invertedPostingBinarySearch(termPostings, rowID)
 			if idx < 0 {
@@ -3077,6 +3084,19 @@ func (t *Table) collectFullTextPhraseRowIDs(
 		}
 	}
 	return surviving, nil
+}
+
+func rarestFullTextTokenIndex(queryTokens []string, docFreqByTerm map[string]uint32) int {
+	bestIdx := 0
+	bestFreq := docFreqByTerm[queryTokens[0]]
+	for i := 1; i < len(queryTokens); i++ {
+		freq := docFreqByTerm[queryTokens[i]]
+		if freq < bestFreq || (freq == bestFreq && strings.Compare(queryTokens[i], queryTokens[bestIdx]) < 0) {
+			bestIdx = i
+			bestFreq = freq
+		}
+	}
+	return bestIdx
 }
 
 func loadFullTextRowIDsForTerm(ctx context.Context, secondaryIndex SecondaryIndex, indexName, term string, docFreq uint32) ([]RowID, error) {
