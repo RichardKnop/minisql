@@ -4168,10 +4168,9 @@ func (t *Table) virtualSequentialScan(ctx context.Context, scan Scan, out func(R
 }
 
 // collectRowIDsFromScan runs a sub-scan and collects all RowIDs it produces without
-// fetching table rows.  Supported sub-scan types: ScanTypeIndexPoint and ScanTypeIndexRange.
+// fetching table rows.
 func (t *Table) collectRowIDsFromScan(ctx context.Context, scan Scan) ([]RowID, error) {
-	// Intersect: recursively collect and intersect sub-scan RowID sets.
-	if scan.Type == ScanTypeIndexIntersect {
+	if scan.Type == ScanTypeIndexIntersect || scan.Type == ScanTypeIndexUnion {
 		return t.collectIndexSetScanRowIDs(ctx, scan)
 	}
 
@@ -4210,23 +4209,41 @@ func (t *Table) collectRowIDsFromScan(ctx context.Context, scan Scan) ([]RowID, 
 }
 
 func (t *Table) collectIndexSetScanRowIDs(ctx context.Context, scan Scan) ([]RowID, error) {
-	sets := make([][]RowID, 0, len(scan.SubScans))
-	for _, sub := range scan.SubScans {
+	switch scan.Type {
+	case ScanTypeIndexIntersect, ScanTypeIndexUnion:
+	default:
+		return nil, fmt.Errorf("unsupported index set scan type: %s", scan.Type)
+	}
+	if len(scan.SubScans) == 0 {
+		return nil, nil
+	}
+
+	var result []RowID
+	for i, sub := range scan.SubScans {
 		ids, err := t.collectRowIDsFromScan(ctx, sub)
 		if err != nil {
 			return nil, err
 		}
-		sets = append(sets, ids)
+
+		if i == 0 {
+			sortRowIDs(ids)
+			result = ids
+			continue
+		}
+
+		sortRowIDs(ids)
+		switch scan.Type {
+		case ScanTypeIndexIntersect:
+			result = intersectTwoSortedSets(result, ids)
+			if len(result) == 0 {
+				return nil, nil
+			}
+		case ScanTypeIndexUnion:
+			result = unionTwoSortedSets(result, ids)
+		}
 	}
 
-	switch scan.Type {
-	case ScanTypeIndexIntersect:
-		return intersectSortedRowIDs(sets), nil
-	case ScanTypeIndexUnion:
-		return unionSortedRowIDs(sets), nil
-	default:
-		return nil, fmt.Errorf("unsupported index set scan type: %s", scan.Type)
-	}
+	return result, nil
 }
 
 // intersectTwoSortedSets returns the sorted intersection of two already-sorted RowID slices.
