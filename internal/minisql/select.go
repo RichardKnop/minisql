@@ -1062,7 +1062,7 @@ func (t *Table) selectStreamingDirectRowView(
 		}
 		newRowViewIter = iterFactory
 	case ScanTypeFullText:
-		iterFactory, ok, err := t.fullTextRowViewIteratorFactory(scan, tableFilter, remaining, offset, hasLimit, hasOffset)
+		iterFactory, ok, err := t.fullTextRowViewIteratorFactory(ctx, scan, tableFilter, remaining, offset, hasLimit, hasOffset)
 		if err != nil {
 			return StatementResult{}, true, err
 		}
@@ -1289,6 +1289,7 @@ func (t *Table) rowIDRowViewIteratorFactory(
 }
 
 func (t *Table) fullTextRowViewIteratorFactory(
+	ctx context.Context,
 	scan Scan,
 	tableFilter func(context.Context, RowView) (bool, error),
 	remaining int64,
@@ -1308,7 +1309,11 @@ func (t *Table) fullTextRowViewIteratorFactory(
 		}, true, nil
 	}
 	if len(queryTokens) != 1 || len(query.Phrases) > 0 {
-		return nil, false, nil
+		rowIDs, err := t.collectFullTextScanRowIDs(ctx, secondaryIndex, scan, query, queryTokens)
+		if err != nil {
+			return nil, false, err
+		}
+		return t.rowIDRowViewIteratorFactory(rowIDs, tableFilter, remaining, offset, hasLimit, hasOffset), true, nil
 	}
 
 	term := queryTokens[0]
@@ -2188,120 +2193,9 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 	if len(queryTokens) == 1 && len(query.Phrases) == 0 {
 		return t.fullTextSingleTermIndexScan(ctx, secondaryIndex, scan, queryTokens[0], selectedFields, out)
 	}
-	if len(query.Phrases) == 0 {
-		return t.fullTextMultiTermIndexScan(ctx, secondaryIndex, scan, queryTokens, selectedFields, out)
-	}
-
-	// Load postings for each term as sorted []invertedPosting — directly from
-	// the decoder, no map needed. Each RowID appears in exactly one block
-	// (the row-grouped codec writes one entry per document), so postings from
-	// successive blocks can be concatenated in order.
-	postingsByTerm := make(map[string][]invertedPosting, len(queryTokens))
-	for _, key := range scan.IndexKeys {
-		term, ok := key.(string)
-		if !ok {
-			continue
-		}
-		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
-		if err != nil {
-			return fmt.Errorf("full-text stats lookup failed: %w", err)
-		}
-		iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
-		if err != nil {
-			return fmt.Errorf("full-text lookup failed: %w", err)
-		}
-		postings := make([]invertedPosting, 0, stats.DocFreq)
-		for {
-			block, ok, err := iter.NextBlock(ctx)
-			if err != nil {
-				return fmt.Errorf("full-text lookup failed: %w", err)
-			}
-			if !ok {
-				break
-			}
-			mode, decoded, err := decodeInvertedPostingList(block.Payload)
-			if err != nil {
-				return fmt.Errorf("full-text decode failed: %w", err)
-			}
-			if mode != invertedPostingModePositions {
-				return fmt.Errorf("full-text index %s uses posting mode %d", scan.IndexName, mode)
-			}
-			postings = append(postings, decoded...)
-		}
-		if len(postings) == 0 {
-			return nil
-		}
-		postingsByTerm[term] = postings
-	}
-
-	needsPositions := len(query.Phrases) > 0
-
-	// Pre-compute phrase→queryToken index mapping once per query so the
-	// per-row phrase check is allocation-free.
-	type phraseMapping struct{ indices []int }
-	phraseMappings := make([]phraseMapping, len(query.Phrases))
-	for pi, phrase := range query.Phrases {
-		indices := make([]int, len(phrase))
-		for i, term := range phrase {
-			idx := -1
-			for j, qt := range queryTokens {
-				if qt == term {
-					idx = j
-					break
-				}
-			}
-			if idx < 0 {
-				return nil
-			}
-			indices[i] = idx
-		}
-		phraseMappings[pi] = phraseMapping{indices: indices}
-	}
-
-	// allPositions[i] holds the positions of queryTokens[i] in the current
-	// candidate document. Allocated once and overwritten for each candidate.
-	var allPositions [][]uint32
-	if needsPositions {
-		allPositions = make([][]uint32, len(queryTokens))
-	}
-
-	// Iterate the first term's postings in sorted RowID order. Survivors come
-	// out sorted so sortRowIDs is unnecessary.
-	firstPostings := postingsByTerm[queryTokens[0]]
-	surviving := make([]RowID, 0, len(firstPostings))
-
-	for _, firstPosting := range firstPostings {
-		rowID := firstPosting.RowID
-		matches := true
-
-		if needsPositions {
-			allPositions[0] = firstPosting.Positions
-		}
-		for i := 1; i < len(queryTokens); i++ {
-			termPostings := postingsByTerm[queryTokens[i]]
-			idx := invertedPostingBinarySearch(termPostings, rowID)
-			if idx < 0 {
-				matches = false
-				break
-			}
-			if needsPositions {
-				allPositions[i] = termPostings[idx].Positions
-			}
-		}
-		if !matches {
-			continue
-		}
-		if needsPositions {
-			for _, pm := range phraseMappings {
-				if !textSearchPhraseMatchesSorted(allPositions, pm.indices) {
-					matches = false
-					break
-				}
-			}
-		}
-		if matches {
-			surviving = append(surviving, rowID)
-		}
+	surviving, err := t.collectFullTextScanRowIDs(ctx, secondaryIndex, scan, query, queryTokens)
+	if err != nil {
+		return err
 	}
 	if len(surviving) == 0 {
 		return nil
@@ -2370,6 +2264,181 @@ func (t *Table) fullTextScanState(scan Scan) (SecondaryIndex, *textSearchQuery, 
 
 	queryTokens := query.allUniqueTokens()
 	return secondaryIndex, query, queryTokens, nil
+}
+
+func (t *Table) collectFullTextScanRowIDs(
+	ctx context.Context,
+	secondaryIndex SecondaryIndex,
+	scan Scan,
+	query *textSearchQuery,
+	queryTokens []string,
+) ([]RowID, error) {
+	if len(queryTokens) == 0 {
+		return nil, nil
+	}
+	if len(query.Phrases) == 0 {
+		return t.collectFullTextMultiTermRowIDs(ctx, secondaryIndex, scan.IndexName, queryTokens)
+	}
+	return t.collectFullTextPhraseRowIDs(ctx, secondaryIndex, scan, query, queryTokens)
+}
+
+func (t *Table) collectFullTextMultiTermRowIDs(
+	ctx context.Context,
+	secondaryIndex SecondaryIndex,
+	indexName string,
+	terms []string,
+) ([]RowID, error) {
+	termsByDocFreq := make([]string, 0, len(terms))
+	docFreqByTerm := make(map[string]uint32, len(terms))
+	for _, term := range terms {
+		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
+		if err != nil {
+			return nil, fmt.Errorf("full-text stats lookup failed: %w", err)
+		}
+		if stats.DocFreq == 0 {
+			return nil, nil
+		}
+		docFreqByTerm[term] = stats.DocFreq
+		termsByDocFreq = append(termsByDocFreq, term)
+	}
+	slices.SortFunc(termsByDocFreq, func(a, b string) int {
+		if docFreqByTerm[a] < docFreqByTerm[b] {
+			return -1
+		}
+		if docFreqByTerm[a] > docFreqByTerm[b] {
+			return 1
+		}
+		return strings.Compare(a, b)
+	})
+
+	var surviving []RowID
+	for i, term := range termsByDocFreq {
+		rowIDs, err := loadFullTextRowIDsForTerm(ctx, secondaryIndex, indexName, term, docFreqByTerm[term])
+		if err != nil {
+			return nil, err
+		}
+		if len(rowIDs) == 0 {
+			return nil, nil
+		}
+		if i == 0 {
+			surviving = rowIDs
+			continue
+		}
+		surviving = intersectTwoSortedSets(surviving, rowIDs)
+		if len(surviving) == 0 {
+			return nil, nil
+		}
+	}
+	return surviving, nil
+}
+
+func (t *Table) collectFullTextPhraseRowIDs(
+	ctx context.Context,
+	secondaryIndex SecondaryIndex,
+	scan Scan,
+	query *textSearchQuery,
+	queryTokens []string,
+) ([]RowID, error) {
+	// Load postings for each term as sorted []invertedPosting — directly from
+	// the decoder, no map needed. Each RowID appears in exactly one block
+	// (the row-grouped codec writes one entry per document), so postings from
+	// successive blocks can be concatenated in order.
+	postingsByTerm := make(map[string][]invertedPosting, len(queryTokens))
+	for _, key := range scan.IndexKeys {
+		term, ok := key.(string)
+		if !ok {
+			continue
+		}
+		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
+		if err != nil {
+			return nil, fmt.Errorf("full-text stats lookup failed: %w", err)
+		}
+		iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
+		if err != nil {
+			return nil, fmt.Errorf("full-text lookup failed: %w", err)
+		}
+		postings := make([]invertedPosting, 0, stats.DocFreq)
+		for {
+			block, ok, err := iter.NextBlock(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("full-text lookup failed: %w", err)
+			}
+			if !ok {
+				break
+			}
+			mode, decoded, err := decodeInvertedPostingList(block.Payload)
+			if err != nil {
+				return nil, fmt.Errorf("full-text decode failed: %w", err)
+			}
+			if mode != invertedPostingModePositions {
+				return nil, fmt.Errorf("full-text index %s uses posting mode %d", scan.IndexName, mode)
+			}
+			postings = append(postings, decoded...)
+		}
+		if len(postings) == 0 {
+			return nil, nil
+		}
+		postingsByTerm[term] = postings
+	}
+
+	// Pre-compute phrase→queryToken index mapping once per query so the
+	// per-row phrase check is allocation-free.
+	type phraseMapping struct{ indices []int }
+	phraseMappings := make([]phraseMapping, len(query.Phrases))
+	for pi, phrase := range query.Phrases {
+		indices := make([]int, len(phrase))
+		for i, term := range phrase {
+			idx := -1
+			for j, qt := range queryTokens {
+				if qt == term {
+					idx = j
+					break
+				}
+			}
+			if idx < 0 {
+				return nil, nil
+			}
+			indices[i] = idx
+		}
+		phraseMappings[pi] = phraseMapping{indices: indices}
+	}
+
+	// allPositions[i] holds the positions of queryTokens[i] in the current
+	// candidate document. Allocated once and overwritten for each candidate.
+	allPositions := make([][]uint32, len(queryTokens))
+
+	// Iterate the first term's postings in sorted RowID order. Survivors come
+	// out sorted so sortRowIDs is unnecessary.
+	firstPostings := postingsByTerm[queryTokens[0]]
+	surviving := make([]RowID, 0, len(firstPostings))
+
+	for _, firstPosting := range firstPostings {
+		rowID := firstPosting.RowID
+		matches := true
+		allPositions[0] = firstPosting.Positions
+		for i := 1; i < len(queryTokens); i++ {
+			termPostings := postingsByTerm[queryTokens[i]]
+			idx := invertedPostingBinarySearch(termPostings, rowID)
+			if idx < 0 {
+				matches = false
+				break
+			}
+			allPositions[i] = termPostings[idx].Positions
+		}
+		if !matches {
+			continue
+		}
+		for _, pm := range phraseMappings {
+			if !textSearchPhraseMatchesSorted(allPositions, pm.indices) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			surviving = append(surviving, rowID)
+		}
+	}
+	return surviving, nil
 }
 
 func (t *Table) fullTextMultiTermIndexScan(ctx context.Context, secondaryIndex SecondaryIndex, scan Scan, terms []string, selectedFields []Field, out func(Row) error) error {

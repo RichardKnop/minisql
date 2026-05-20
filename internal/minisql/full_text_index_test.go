@@ -93,6 +93,43 @@ func TestTable_FullTextIndexScanAndMaintenance(t *testing.T) {
 			TableName:  tableName,
 			Columns:    columns,
 			Fields:     []Field{{Name: "title"}},
+			Conditions: OneOrMore{{matchDatabasePages}},
+		})
+		if err != nil {
+			return err
+		}
+		assert.Len(t, result.RowViewFieldIndexes, 1)
+		rows := collectRows(ctx, result)
+		require.Len(t, rows, 2)
+		assert.Equal(t, "MiniSQL", rows[0].Values[0].Value.(TextPointer).String())
+		assert.Equal(t, "Storage", rows[1].Values[0].Value.(TextPointer).String())
+		return nil
+	}))
+
+	require.NoError(t, database.txManager.ExecuteReadOnlyTransaction(ctx, func(ctx context.Context) error {
+		result, err := table.Select(ctx, Statement{
+			Kind:       Select,
+			TableName:  tableName,
+			Columns:    columns,
+			Fields:     []Field{{Name: "title"}},
+			Conditions: OneOrMore{{fullTextMatchCondition("body", `"database pages"`)}},
+		})
+		if err != nil {
+			return err
+		}
+		assert.Len(t, result.RowViewFieldIndexes, 1)
+		rows := collectRows(ctx, result)
+		require.Len(t, rows, 1)
+		assert.Equal(t, "MiniSQL", rows[0].Values[0].Value.(TextPointer).String())
+		return nil
+	}))
+
+	require.NoError(t, database.txManager.ExecuteReadOnlyTransaction(ctx, func(ctx context.Context) error {
+		result, err := table.Select(ctx, Statement{
+			Kind:       Select,
+			TableName:  tableName,
+			Columns:    columns,
+			Fields:     []Field{{Name: "title"}},
 			Conditions: OneOrMore{{fullTextMatchCondition("body", "database")}},
 		})
 		if err != nil {
