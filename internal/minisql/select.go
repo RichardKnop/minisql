@@ -189,6 +189,10 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return result, err
 	}
 
+	if stmt.IsSelectAggregate() && len(plan.Joins) == 0 {
+		return t.selectAggregateStreaming(ctx, stmt, plan, selectedFields)
+	}
+
 	// Materialising path: buffer every matching row, then dispatch.
 	// Required for COUNT (needs a total), GROUP BY, aggregates, ORDER BY (sort),
 	// and JOIN (goroutine-based execution inside plan.Execute).
@@ -310,6 +314,27 @@ type aggState struct {
 }
 
 func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row) (StatementResult, error) {
+	states, aggColIdx := t.newAggStates(stmt)
+	for _, row := range rows {
+		if err := accumulateAggregateRow(stmt, states, aggColIdx, row); err != nil {
+			return StatementResult{}, err
+		}
+	}
+	_ = ctx // kept for signature compatibility with earlier callers.
+	return t.aggregateResult(stmt, states), nil
+}
+
+func (t *Table) selectAggregateStreaming(ctx context.Context, stmt Statement, plan QueryPlan, selectedFields []Field) (StatementResult, error) {
+	states, aggColIdx := t.newAggStates(stmt)
+	if err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
+		return accumulateAggregateRow(stmt, states, aggColIdx, row)
+	}); err != nil {
+		return StatementResult{}, err
+	}
+	return t.aggregateResult(stmt, states), nil
+}
+
+func (t *Table) newAggStates(stmt Statement) ([]aggState, []int) {
 	states := make([]aggState, len(stmt.Aggregates))
 
 	// Determine whether integer or float accumulation should be used for SUM/AVG.
@@ -337,72 +362,70 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row)
 			}
 		}
 	}
+	return states, aggColIdx
+}
 
-	for _, row := range rows {
-		for i, agg := range stmt.Aggregates {
-			switch agg.Kind {
-			case AggregateCount:
-				states[i].count += 1
+func accumulateAggregateRow(stmt Statement, states []aggState, aggColIdx []int, row Row) error {
+	for i, agg := range stmt.Aggregates {
+		switch agg.Kind {
+		case AggregateCount:
+			states[i].count += 1
 
-			case AggregateSum, AggregateAvg:
-				colIdx := aggColIdx[i]
-				if colIdx < 0 || colIdx >= len(row.Values) {
-					continue
+		case AggregateSum, AggregateAvg:
+			val, ok := aggregateRowValue(row, agg.Column, aggColIdx[i])
+			if !ok || !val.Valid {
+				continue
+			}
+			states[i].count += 1
+			states[i].hasValue = true
+			if states[i].useIntSum {
+				switch v := val.Value.(type) {
+				case int64:
+					states[i].sumI += v
+				case int32:
+					states[i].sumI += int64(v)
 				}
-				val := row.Values[colIdx]
-				if !val.Valid {
-					continue
+			} else {
+				switch v := val.Value.(type) {
+				case float64:
+					states[i].sumF += v
+				case float32:
+					states[i].sumF += float64(v)
 				}
-				states[i].count += 1
+			}
+
+		case AggregateMin:
+			val, ok := aggregateRowValue(row, agg.Column, aggColIdx[i])
+			if !ok || !val.Valid {
+				continue
+			}
+			if !states[i].hasValue || compareValues(val, states[i].min) < 0 {
+				states[i].min = val
 				states[i].hasValue = true
-				if states[i].useIntSum {
-					switch v := val.Value.(type) {
-					case int64:
-						states[i].sumI += v
-					case int32:
-						states[i].sumI += int64(v)
-					}
-				} else {
-					switch v := val.Value.(type) {
-					case float64:
-						states[i].sumF += v
-					case float32:
-						states[i].sumF += float64(v)
-					}
-				}
+			}
 
-			case AggregateMin:
-				colIdx := aggColIdx[i]
-				if colIdx < 0 || colIdx >= len(row.Values) {
-					continue
-				}
-				val := row.Values[colIdx]
-				if !val.Valid {
-					continue
-				}
-				if !states[i].hasValue || compareValues(val, states[i].min) < 0 {
-					states[i].min = val
-					states[i].hasValue = true
-				}
-
-			case AggregateMax:
-				colIdx := aggColIdx[i]
-				if colIdx < 0 || colIdx >= len(row.Values) {
-					continue
-				}
-				val := row.Values[colIdx]
-				if !val.Valid {
-					continue
-				}
-				if !states[i].hasValue || compareValues(val, states[i].max) > 0 {
-					states[i].max = val
-					states[i].hasValue = true
-				}
+		case AggregateMax:
+			val, ok := aggregateRowValue(row, agg.Column, aggColIdx[i])
+			if !ok || !val.Valid {
+				continue
+			}
+			if !states[i].hasValue || compareValues(val, states[i].max) > 0 {
+				states[i].max = val
+				states[i].hasValue = true
 			}
 		}
 	}
-	_ = ctx // ctx kept for signature compat; no blocking ops remain
+	return nil
+}
 
+func aggregateRowValue(row Row, colName string, colIdx int) (OptionalValue, bool) {
+	if colIdx >= 0 && colIdx < len(row.Values) && colIdx < len(row.Columns) && row.Columns[colIdx].Name == colName {
+		return row.Values[colIdx], true
+	}
+	return row.GetValue(colName)
+}
+
+func (t *Table) aggregateResult(stmt Statement, states []aggState) StatementResult {
 	// Build result columns and a single result row.
 	resultColumns := make([]Column, len(stmt.Aggregates))
 	resultValues := make([]OptionalValue, len(stmt.Aggregates))
@@ -459,7 +482,7 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row)
 	return StatementResult{
 		Columns: resultColumns,
 		Rows:    NewSingleRowIterator(NewRowWithValues(resultColumns, resultValues)),
-	}, nil
+	}
 }
 
 func (t *Table) trySelectMinMaxFromIndexEndpoint(ctx context.Context, stmt Statement, plan QueryPlan) (StatementResult, bool, error) {
