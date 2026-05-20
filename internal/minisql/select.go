@@ -2053,33 +2053,39 @@ func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields [
 		seen = make(map[string]struct{})
 	}
 
-	projected := make([]Row, 0, len(scanned))
-	for _, row := range scanned {
-		p, err := projectRow(row, requestedFields)
-		if err != nil {
-			return StatementResult{}, err
+	idx := 0
+	result.Rows = NewIterator(func(ctx context.Context) (Row, error) {
+		if hasLimit && limit == 0 {
+			return Row{}, ErrNoMoreRows
 		}
-		if stmt.Distinct {
-			key := p.rowDistinctKey()
-			if _, dup := seen[key]; dup {
+
+		for idx < len(scanned) {
+			row := scanned[idx]
+			idx += 1
+
+			p, err := projectRow(row, requestedFields)
+			if err != nil {
+				return Row{}, err
+			}
+			if stmt.Distinct {
+				key := p.rowDistinctKey()
+				if _, dup := seen[key]; dup {
+					continue
+				}
+				seen[key] = struct{}{}
+			}
+			if hasOffset && offset > 0 {
+				offset -= 1
 				continue
 			}
-			seen[key] = struct{}{}
-		}
-		if hasOffset && offset > 0 {
-			offset -= 1
-			continue
-		}
-		projected = append(projected, p)
-		if hasLimit {
-			limit -= 1
-			if limit == 0 {
-				break
+			if hasLimit {
+				limit -= 1
 			}
+			return p, nil
 		}
-	}
 
-	result.Rows = NewSliceIterator(projected)
+		return Row{}, ErrNoMoreRows
+	})
 	return result, nil
 }
 
