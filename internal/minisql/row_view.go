@@ -98,7 +98,7 @@ func (rv RowView) ValueAt(idx int) (OptionalValue, error) {
 	case Double:
 		return OptionalValue{Value: unmarshalFloat64(rv.value, uint64(offset)), Valid: true}, nil
 	case Varchar, Text, JSON:
-		textPointer, err := rv.TextAt(idx)
+		textPointer, err := rv.textAtOffset(idx, offset)
 		if err != nil {
 			return OptionalValue{}, err
 		}
@@ -206,6 +206,13 @@ func (rv RowView) TextAt(idx int) (TextPointer, error) {
 	offset, err := rv.offsetOf(idx)
 	if err != nil {
 		return TextPointer{}, err
+	}
+	return rv.textAtOffset(idx, offset)
+}
+
+func (rv RowView) textAtOffset(idx int, offset int) (TextPointer, error) {
+	if idx < 0 || idx >= len(rv.columns) {
+		return TextPointer{}, fmt.Errorf("column index %d out of bounds", idx)
 	}
 	textPointer := TextPointer{}
 	if err := textPointer.Unmarshal(rv.value, uint64(offset)); err != nil {
