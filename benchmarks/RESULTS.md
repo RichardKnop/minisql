@@ -1,5 +1,104 @@
 # Benchmark Results
 
+### 2026-05-20 17:10 UTC
+
+#### Timing
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan | ratio |
+|---|---|---|---|---|---|---|---|
+| GroupBy_Aggregate | 820.48 µs/op | — | — | 2.16 ms/op | — | — | 0.4× |
+| Having_Filter | 789.93 µs/op | — | — | 2.00 ms/op | — | — | 0.4× |
+| Distinct_HighCardinality | 4.22 ms/op | — | — | 6.07 ms/op | — | — | 0.7× |
+| Delete_ByPK | 36.82 µs/op | — | — | 86.54 µs/op | — | — | 0.4× |
+| ForeignKey_Insert | 19.44 µs/op | — | — | 47.38 µs/op | — | — | 0.4× |
+| ForeignKey_DeleteCascade | 55.65 µs/op | — | — | 48.74 µs/op | — | — | 1.1× |
+| Insert_SingleRow | 17.81 µs/op | — | — | 43.55 µs/op | — | — | 0.4× |
+| Insert_Batch | 388.34 µs/op | — | — | 235.68 µs/op | — | — | 1.6× |
+| Insert_PreparedBatch | 378.91 µs/op | — | — | 234.35 µs/op | — | — | 1.6× |
+| Insert_MultiValues | 240.51 µs/op | — | — | 171.56 µs/op | — | — | 1.4× |
+| FullText_BuildIndex | 6.85 ms/op | — | — | 2.04 ms/op | — | — | 3.4× |
+| FullText_Insert_WithIndex | 196.10 µs/op | — | — | 90.77 µs/op | — | — | 2.2× |
+| FullText_Search_SingleTerm/rare | 15.88 µs/op | — | — | 10.35 µs/op | — | — | 1.5× |
+| FullText_Search_SingleTerm/medium | 15.77 µs/op | — | — | 11.17 µs/op | — | — | 1.4× |
+| FullText_Search_SingleTerm/common | 15.76 µs/op | — | — | 63.79 µs/op | — | — | 0.2× |
+| FullText_Search_MultiTermAND | 27.16 µs/op | — | — | 36.95 µs/op | — | — | 0.7× |
+| FullText_Search_Phrase | 35.73 µs/op | — | — | 28.09 µs/op | — | — | 1.3× |
+| FullText_Update_WithIndex | 86.81 µs/op | — | — | 100.70 µs/op | — | — | 0.9× |
+| FullText_Delete_WithIndex | 179.92 µs/op | — | — | 134.86 µs/op | — | — | 1.3× |
+| JSONInverted_BuildIndex | — | 16.82 ms/op | — | — | — | — | — |
+| JSONInverted_Insert_WithIndex | — | 639.46 µs/op | — | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 48.70 µs/op | 2.80 ms/op | — | 30.51 µs/op | 713.32 µs/op | — |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 83.48 µs/op | 3.10 ms/op | — | 129.47 µs/op | 754.84 µs/op | — |
+| JSONInverted_Update_WithIndex | — | 11.37 µs/op | — | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 421.47 µs/op | — | — | — | — | — |
+| Join_Inner_SmallLarge | 8.71 ms/op | — | — | 4.84 ms/op | — | — | 1.8× |
+| Join_Left_UnmatchedRows | 15.43 ms/op | — | — | 4.16 ms/op | — | — | 3.7× |
+| Vacuum_Small | 20.16 ms/op | — | — | 278.73 µs/op | — | — | 72.3× |
+| WAL_Checkpoint | 347.18 µs/op | — | — | 69.09 µs/op | — | — | 5.0× |
+| Explain | 5.11 µs/op | — | — | 1.19 µs/op | — | — | 4.3× |
+| Select_PointScan | 5.46 µs/op | — | — | 3.59 µs/op | — | — | 1.5× |
+| Select_Limit | 7.79 µs/op | — | — | 7.77 µs/op | — | — | 1.0× |
+| Select_FullScan | 3.30 ms/op | — | — | 5.06 ms/op | — | — | 0.7× |
+| Select_CountStar | 5.31 µs/op | — | — | 9.77 µs/op | — | — | 0.5× |
+| Select_IndexRangeScan | 567.80 µs/op | — | — | 750.54 µs/op | — | — | 0.8× |
+| Select_SecondaryIndex_LowSelectivity | 2.12 ms/op | — | — | 2.82 ms/op | — | — | 0.8× |
+| Select_SecondaryIndex_LowSelectivityLimit | 9.06 µs/op | — | — | 8.21 µs/op | — | — | 1.1× |
+| Select_RangeScan | 1.44 ms/op | — | — | 868.41 µs/op | — | — | 1.7× |
+| CTE_Materialise | 690.01 µs/op | — | — | 440.30 µs/op | — | — | 1.6× |
+| Subquery_InList | 9.21 ms/op | — | — | 3.62 ms/op | — | — | 2.5× |
+| OnConflict_DoUpdate | 12.70 µs/op | — | — | 38.02 µs/op | — | — | 0.3× |
+| Update_ByPK | 12.27 µs/op | — | — | 36.58 µs/op | — | — | 0.3× |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan |
+|---|---|---|---|---|---|---|
+| GroupBy_Aggregate | 366.6 KiB | — | — | 3.5 KiB | — | — |
+| Having_Filter | 281.5 KiB | — | — | 1.9 KiB | — | — |
+| Distinct_HighCardinality | 2.9 MiB | — | — | 586.3 KiB | — | — |
+| Delete_ByPK | 33.4 KiB | — | — | 447 B | — | — |
+| ForeignKey_Insert | 20.2 KiB | — | — | 192 B | — | — |
+| ForeignKey_DeleteCascade | 14.7 KiB | — | — | 128 B | — | — |
+| Insert_SingleRow | 18.7 KiB | — | — | 311 B | — | — |
+| Insert_Batch | 303.7 KiB | — | — | 31.0 KiB | — | — |
+| Insert_PreparedBatch | 302.9 KiB | — | — | 31.0 KiB | — | — |
+| Insert_MultiValues | 268.3 KiB | — | — | 25.2 KiB | — | — |
+| FullText_BuildIndex | 10.5 MiB | — | — | 392 B | — | — |
+| FullText_Insert_WithIndex | 267.7 KiB | — | — | 439 B | — | — |
+| FullText_Search_SingleTerm/rare | 4.8 KiB | — | — | 392 B | — | — |
+| FullText_Search_SingleTerm/medium | 4.8 KiB | — | — | 392 B | — | — |
+| FullText_Search_SingleTerm/common | 4.8 KiB | — | — | 408 B | — | — |
+| FullText_Search_MultiTermAND | 14.7 KiB | — | — | 392 B | — | — |
+| FullText_Search_Phrase | 52.1 KiB | — | — | 400 B | — | — |
+| FullText_Update_WithIndex | 87.1 KiB | — | — | 291 B | — | — |
+| FullText_Delete_WithIndex | 237.5 KiB | — | — | 135 B | — | — |
+| JSONInverted_BuildIndex | — | 55.4 MiB | — | — | — | — |
+| JSONInverted_Insert_WithIndex | — | 1.7 MiB | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 142.0 KiB | 3.2 MiB | — | 408 B | 408 B |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 285.2 KiB | 3.3 MiB | — | 408 B | 408 B |
+| JSONInverted_Update_WithIndex | — | 12.1 KiB | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 1.3 MiB | — | — | — | — |
+| Join_Inner_SmallLarge | 11.0 MiB | — | — | 1.1 MiB | — | — |
+| Join_Left_UnmatchedRows | 11.7 MiB | — | — | 708.2 KiB | — | — |
+| Vacuum_Small | 8.0 MiB | — | — | 89 B | — | — |
+| WAL_Checkpoint | 69.6 KiB | — | — | 440 B | — | — |
+| Explain | 6.4 KiB | — | — | 680 B | — | — |
+| Select_PointScan | 5.7 KiB | — | — | 679 B | — | — |
+| Select_Limit | 5.7 KiB | — | — | 1.7 KiB | — | — |
+| Select_FullScan | 1.2 MiB | — | — | 1.3 MiB | — | — |
+| Select_CountStar | 2.5 KiB | — | — | 400 B | — | — |
+| Select_IndexRangeScan | 255.5 KiB | — | — | 85.9 KiB | — | — |
+| Select_SecondaryIndex_LowSelectivity | 828.0 KiB | — | — | 313.0 KiB | — | — |
+| Select_SecondaryIndex_LowSelectivityLimit | 6.8 KiB | — | — | 1.1 KiB | — | — |
+| Select_RangeScan | 204.6 KiB | — | — | 85.9 KiB | — | — |
+| CTE_Materialise | 8.0 KiB | — | — | 400 B | — | — |
+| Subquery_InList | 5.8 MiB | — | — | 234.7 KiB | — | — |
+| OnConflict_DoUpdate | 8.7 KiB | — | — | 259 B | — | — |
+| Update_ByPK | 9.9 KiB | — | — | 263 B | — | — |
+
+
+
+
 ## 2026-05-19 — GROUP BY / HAVING zero-alloc streaming
 
 **GROUP BY zero-alloc sequential scan:** `selectGroupBy` materialised every
