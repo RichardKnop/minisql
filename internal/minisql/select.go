@@ -148,6 +148,9 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		!stmt.IsSelectAggregate() &&
 		!plan.SortInMemory &&
 		len(plan.Joins) == 0 {
+		if result, ok, err := t.selectStreamingDirectCoveringIndex(ctx, stmt, plan, requestedFields); ok || err != nil {
+			return result, err
+		}
 		if result, ok, err := t.selectStreamingDirectRowView(ctx, stmt, plan, requestedFields); ok || err != nil {
 			return result, err
 		}
@@ -1035,6 +1038,127 @@ func (t *Table) selectStreamingDirect(
 	return result, nil
 }
 
+func (t *Table) selectStreamingDirectCoveringIndex(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if stmt.Distinct || len(plan.Scans) != 1 {
+		return StatementResult{}, false, nil
+	}
+	scan := plan.Scans[0]
+	if !scan.CoveringIndex {
+		return StatementResult{}, false, nil
+	}
+	switch scan.Type {
+	case ScanTypeIndexAll, ScanTypeIndexRange, ScanTypeIndexPoint:
+	default:
+		return StatementResult{}, false, nil
+	}
+	for _, field := range requestedFields {
+		if field.Expr != nil {
+			return StatementResult{}, false, nil
+		}
+	}
+
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return StatementResult{}, true, fmt.Errorf("no index found for covering scan: %s", scan.IndexName)
+	}
+
+	resultColumns := make([]Column, len(requestedFields))
+	for i, field := range requestedFields {
+		col, colIdx := columnByFieldName(scan.IndexColumns, field.Name)
+		if colIdx < 0 {
+			return StatementResult{}, false, nil
+		}
+		col.Name = field.OutputName()
+		resultColumns[i] = col
+	}
+
+	var (
+		remaining int64
+		offset    int64
+		hasLimit  = stmt.Limit.Valid
+		hasOffset = stmt.Offset.Valid
+	)
+	if hasLimit {
+		remaining = stmt.Limit.Value.(int64)
+	}
+	if hasOffset {
+		offset = stmt.Offset.Value.(int64)
+	}
+
+	filter := compileScanFilter(scan.IndexColumns, scan.Filters)
+	projected := make([]Row, 0)
+	if hasLimit {
+		projected = make([]Row, 0, int(remaining))
+	}
+	emit := func(key any, rowID RowID) error {
+		row := rowFromIndexKey(key, scan.IndexColumns, rowID)
+		if filter != nil {
+			ok, err := filter(row)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return nil
+			}
+		}
+		if hasOffset && offset > 0 {
+			offset -= 1
+			return nil
+		}
+		projectedRow, err := projectCoveringIndexRow(row, requestedFields, resultColumns)
+		if err != nil {
+			return err
+		}
+		projected = append(projected, projectedRow)
+		if hasLimit {
+			remaining -= 1
+			if remaining == 0 {
+				return errLimitReached
+			}
+		}
+		return ctx.Err()
+	}
+
+	switch scan.Type {
+	case ScanTypeIndexAll:
+		err := idx.ScanAll(ctx, plan.SortReverse, emit)
+		if err != nil && !errors.Is(err, errLimitReached) {
+			return StatementResult{}, true, err
+		}
+	case ScanTypeIndexRange:
+		err := idx.ScanRange(ctx, scan.RangeCondition, plan.SortReverse, emit)
+		if err != nil && !errors.Is(err, errLimitReached) {
+			return StatementResult{}, true, err
+		}
+	case ScanTypeIndexPoint:
+		for _, indexValue := range scan.IndexKeys {
+			err := idx.VisitRowIDs(ctx, indexValue, func(rowID RowID) error {
+				return emit(indexValue, rowID)
+			})
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			if errors.Is(err, errLimitReached) {
+				break
+			}
+			if err != nil {
+				return StatementResult{}, true, fmt.Errorf("index lookup failed: %w", err)
+			}
+		}
+	}
+
+	return StatementResult{
+		Columns: resultColumns,
+		Rows:    NewSliceIterator(projected),
+		rawRows: projected,
+	}, true, nil
+}
+
 func (t *Table) selectStreamingDirectRowView(
 	ctx context.Context,
 	stmt Statement,
@@ -1171,6 +1295,29 @@ func (t *Table) selectStreamingDirectRowView(
 	result.RowViewFieldIndexes = fieldIndexes
 	result.Rows = rowViewMaterializingIterator(ctx, t.pager, newRowViewIter(), fieldIndexes, resultColumns)
 	return result, true, nil
+}
+
+func columnByFieldName(columns []Column, name string) (Column, int) {
+	for i, col := range columns {
+		if col.Name == name {
+			return col, i
+		}
+	}
+	return Column{}, -1
+}
+
+func projectCoveringIndexRow(row Row, fields []Field, columns []Column) (Row, error) {
+	values := make([]OptionalValue, len(fields))
+	for i, field := range fields {
+		value, ok := row.GetValue(field.Name)
+		if !ok {
+			return Row{}, fmt.Errorf("row does not contain column '%s'", field.Name)
+		}
+		values[i] = value
+	}
+	projected := NewRowWithValues(columns, values)
+	projected.Key = row.Key
+	return projected, nil
 }
 
 func (t *Table) sequentialRowViewIteratorFactory(

@@ -210,7 +210,7 @@ func (rv RowView) TextAt(idx int) (TextPointer, error) {
 	return rv.textAtOffset(idx, offset)
 }
 
-func (rv RowView) textAtOffset(idx int, offset int) (TextPointer, error) {
+func (rv RowView) textAtOffset(idx, offset int) (TextPointer, error) {
 	if idx < 0 || idx >= len(rv.columns) {
 		return TextPointer{}, fmt.Errorf("column index %d out of bounds", idx)
 	}
