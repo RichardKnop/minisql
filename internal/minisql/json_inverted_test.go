@@ -292,6 +292,41 @@ func TestJSONInvertedCountExactIndexScan(t *testing.T) {
 	assert.Equal(t, int64(2), countValue.Value)
 }
 
+func TestJSONInvertedCountExactSingleTermUsesStats(t *testing.T) {
+	t.Parallel()
+
+	payloadColumn := Column{Name: "payload", Kind: JSON}
+	index := &fakeFullTextInvertedIndex{
+		mode: invertedPostingModeRowIDs,
+		postings: map[string][]invertedPosting{
+			`kv:type:s:"click"`: {{RowID: 1}, {RowID: 3}},
+		},
+	}
+	table := NewTable(testLogger, nil, nil, "events", []Column{payloadColumn}, 0, nil, WithSecondaryIndex(SecondaryIndex{
+		IndexInfo: IndexInfo{
+			Name:    "idx_payload_inv",
+			Method:  IndexMethodInverted,
+			Columns: []Column{payloadColumn},
+		},
+		InvertedIndex: index,
+	}))
+
+	result, ok, err := table.tryCountFromExactInvertedIndex(context.Background(), QueryPlan{Scans: []Scan{{
+		TableName: "events",
+		Type:      ScanTypeInverted,
+		IndexName: "idx_payload_inv",
+		IndexKeys: []any{`kv:type:s:"click"`},
+		Filters:   OneOrMore{{jsonContainsCondition("payload", `"click"`)}},
+	}}})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	require.True(t, result.Rows.Next(context.Background()))
+	countValue, ok := result.Rows.Row().GetValue("COUNT(*)")
+	require.True(t, ok)
+	assert.Equal(t, int64(2), countValue.Value)
+}
+
 func TestJSONInvertedCountSkipsNonExactIndexScan(t *testing.T) {
 	t.Parallel()
 

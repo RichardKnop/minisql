@@ -3436,9 +3436,21 @@ func (t *Table) countInvertedIndexScan(ctx context.Context, scan Scan) (int64, e
 	if len(scan.IndexKeys) == 0 {
 		return 0, nil
 	}
+	if len(scan.IndexKeys) == 1 {
+		term, ok := scan.IndexKeys[0].(string)
+		if !ok {
+			return 0, nil
+		}
+		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
+		if err != nil {
+			return 0, fmt.Errorf("inverted stats lookup failed: %w", err)
+		}
+		return int64(stats.DocFreq), nil
+	}
 
 	var surviving []RowID
-	for i, key := range scan.IndexKeys {
+	haveSurviving := false
+	for _, key := range scan.IndexKeys {
 		term, ok := key.(string)
 		if !ok {
 			continue
@@ -3454,8 +3466,9 @@ func (t *Table) countInvertedIndexScan(ctx context.Context, scan Scan) (int64, e
 		if len(rowIDs) == 0 {
 			return 0, nil
 		}
-		if i == 0 {
+		if !haveSurviving {
 			surviving = rowIDs
+			haveSurviving = true
 			continue
 		}
 		surviving = intersectTwoSortedSets(surviving, rowIDs)
