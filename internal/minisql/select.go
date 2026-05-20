@@ -1330,12 +1330,7 @@ func (t *Table) selectStreamingDirectRowView(
 	}
 
 	if stmt.Distinct {
-		rows, err := distinctRowsFromRowViews(ctx, t.pager, newRowViewIter(), fieldIndexes, resultColumns, remaining, offset, hasLimit, hasOffset)
-		if err != nil {
-			return StatementResult{}, true, err
-		}
-		result.Rows = NewSliceIterator(rows)
-		result.rawRows = rows
+		result.Rows = distinctRowViewMaterializingIterator(ctx, t.pager, newRowViewIter(), fieldIndexes, resultColumns, remaining, offset, hasLimit, hasOffset)
 		return result, true, nil
 	}
 
@@ -1991,7 +1986,7 @@ func rowViewMaterializingIterator(ctx context.Context, pager TxPager, views RowV
 	})
 }
 
-func distinctRowsFromRowViews(
+func distinctRowViewMaterializingIterator(
 	ctx context.Context,
 	pager TxPager,
 	views RowViewIterator,
@@ -2001,39 +1996,39 @@ func distinctRowsFromRowViews(
 	offset int64,
 	hasLimit bool,
 	hasOffset bool,
-) ([]Row, error) {
+) Iterator {
 	seen := make(map[string]struct{})
-	projected := make([]Row, 0)
-	if hasLimit {
-		projected = make([]Row, 0, int(remaining))
-	}
 
-	for views.Next(ctx) {
-		row, err := projectRowView(ctx, pager, views.RowView(), fieldIndexes, columns)
-		if err != nil {
-			return nil, err
+	return NewIterator(func(iterCtx context.Context) (Row, error) {
+		if hasLimit && remaining == 0 {
+			return Row{}, ErrNoMoreRows
 		}
-		key := row.rowDistinctKey()
-		if _, dup := seen[key]; dup {
-			continue
-		}
-		seen[key] = struct{}{}
-		if hasOffset && offset > 0 {
-			offset -= 1
-			continue
-		}
-		projected = append(projected, row)
-		if hasLimit {
-			remaining -= 1
-			if remaining == 0 {
-				break
+
+		for views.Next(iterCtx) {
+			row, err := projectRowView(ctx, pager, views.RowView(), fieldIndexes, columns)
+			if err != nil {
+				return Row{}, err
 			}
+			key := row.rowDistinctKey()
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			if hasOffset && offset > 0 {
+				offset -= 1
+				continue
+			}
+			if hasLimit {
+				remaining -= 1
+			}
+			return row, nil
 		}
-	}
-	if err := views.Err(); err != nil {
-		return nil, err
-	}
-	return projected, nil
+
+		if err := views.Err(); err != nil {
+			return Row{}, err
+		}
+		return Row{}, ErrNoMoreRows
+	})
 }
 
 func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields []Field) (StatementResult, error) {
