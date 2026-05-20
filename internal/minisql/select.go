@@ -158,6 +158,9 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	// them into a []Row. For sequential scans, also reuse a single values buffer
 	// across all rows to eliminate the dominant per-row heap allocation.
 	if stmt.IsSelectCountAll() && len(plan.Joins) == 0 {
+		if result, ok, err := t.tryCountFromIndexScan(ctx, plan); err != nil || ok {
+			return result, err
+		}
 		if len(plan.Scans) == 1 && plan.Scans[0].Type == ScanTypeSequential {
 			return t.countSequentialScanZeroAlloc(ctx, plan.Scans[0], selectedFields)
 		}
@@ -3310,6 +3313,58 @@ func (t *Table) countSequentialScanZeroAlloc(ctx context.Context, scan Scan, sel
 		count += 1
 	}
 	return countResult(count), nil
+}
+
+func (t *Table) tryCountFromIndexScan(ctx context.Context, plan QueryPlan) (StatementResult, bool, error) {
+	if len(plan.Scans) != 1 {
+		return StatementResult{}, false, nil
+	}
+	scan := plan.Scans[0]
+	if len(scan.Filters) > 0 {
+		return StatementResult{}, false, nil
+	}
+	switch scan.Type {
+	case ScanTypeIndexAll, ScanTypeIndexRange, ScanTypeIndexPoint:
+	default:
+		return StatementResult{}, false, nil
+	}
+
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return StatementResult{}, true, fmt.Errorf("no index found for count scan: %s", scan.IndexName)
+	}
+
+	var count int64
+	countRowID := func(RowID) error {
+		count += 1
+		return ctx.Err()
+	}
+	countIndexEntry := func(_ any, rowID RowID) error {
+		return countRowID(rowID)
+	}
+
+	switch scan.Type {
+	case ScanTypeIndexAll:
+		if err := idx.ScanAll(ctx, false, countIndexEntry); err != nil {
+			return StatementResult{}, true, err
+		}
+	case ScanTypeIndexRange:
+		if err := idx.ScanRange(ctx, scan.RangeCondition, false, countIndexEntry); err != nil {
+			return StatementResult{}, true, err
+		}
+	case ScanTypeIndexPoint:
+		for _, indexValue := range scan.IndexKeys {
+			err := idx.VisitRowIDs(ctx, indexValue, countRowID)
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return StatementResult{}, true, fmt.Errorf("index lookup failed: %w", err)
+			}
+		}
+	}
+
+	return countResult(count), true, nil
 }
 
 func (t *Table) countSequentialScanRowView(ctx context.Context, scan Scan) (StatementResult, error) {
