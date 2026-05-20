@@ -3224,11 +3224,12 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 }
 
 // countSequentialScanZeroAlloc counts rows that match the scan filter without
-// collecting them. It reuses a single []OptionalValue buffer across all rows,
-// eliminating the per-row heap allocation in UnmarshalWithMask. Virtual tables
-// and parallel scans fall back to the general sequentialScan path.
+// collecting them. Simple predicates use RowView so count scans can evaluate
+// filters directly over cell bytes; predicates that still need Row evaluation
+// fall back to a reusable []OptionalValue buffer. Virtual tables fall back to
+// the general sequentialScan path because their rows are already materialised.
 func (t *Table) countSequentialScanZeroAlloc(ctx context.Context, scan Scan, selectedFields []Field) (StatementResult, error) {
-	if t.virtualRows != nil || t.parallelScan {
+	if t.virtualRows != nil {
 		var count int64
 		err := t.sequentialScan(ctx, scan, selectedFields, func(Row) error {
 			count += 1
@@ -3238,6 +3239,9 @@ func (t *Table) countSequentialScanZeroAlloc(ctx context.Context, scan Scan, sel
 			return StatementResult{}, err
 		}
 		return countResult(count), nil
+	}
+	if rowViewFilterSupports(t.Columns, scan.Filters) {
+		return t.countSequentialScanRowView(ctx, scan)
 	}
 
 	cursor, err := t.SeekFirst(ctx)
@@ -3303,6 +3307,73 @@ func (t *Table) countSequentialScanZeroAlloc(ctx context.Context, scan Scan, sel
 			}
 		}
 		// No filter or filter passed: count the row without touching row data.
+		count += 1
+	}
+	return countResult(count), nil
+}
+
+func (t *Table) countSequentialScanRowView(ctx context.Context, scan Scan) (StatementResult, error) {
+	tableFilter := compileRowViewFilterForColumns(t.Columns, t.pager, scan.Filters)
+	if t.parallelScan {
+		iterFactory, err := t.parallelSequentialRowViewIteratorFactory(ctx, tableFilter, 0, 0, false, false)
+		if err != nil {
+			return StatementResult{}, err
+		}
+		iter := iterFactory()
+		var count int64
+		for iter.Next(ctx) {
+			count += 1
+		}
+		if err := iter.Err(); err != nil {
+			return StatementResult{}, err
+		}
+		return countResult(count), nil
+	}
+
+	cursor, err := t.SeekFirst(ctx)
+	if err != nil {
+		return StatementResult{}, err
+	}
+	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return StatementResult{}, fmt.Errorf("count row view sequential scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	var count int64
+	for !cursor.EndOfTable {
+		if err := ctx.Err(); err != nil {
+			return StatementResult{}, err
+		}
+
+		if page.Index != cursor.PageIdx {
+			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
+			if err != nil {
+				return StatementResult{}, fmt.Errorf("count row view sequential scan: %w", err)
+			}
+		}
+
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+
+		switch {
+		case cursor.CellIdx < page.LeafNode.Header.Cells-1:
+			cursor.CellIdx += 1
+		case page.LeafNode.Header.NextLeaf == 0:
+			cursor.EndOfTable = true
+		default:
+			cursor.PageIdx = page.LeafNode.Header.NextLeaf
+			cursor.CellIdx = 0
+		}
+
+		if tableFilter != nil {
+			ok, err := tableFilter(ctx, NewRowView(t.Columns, cell))
+			if err != nil {
+				return StatementResult{}, err
+			}
+			if !ok {
+				continue
+			}
+		}
 		count += 1
 	}
 	return countResult(count), nil
