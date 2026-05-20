@@ -2504,52 +2504,6 @@ func (t *Table) collectFullTextPhraseRowIDs(
 	return surviving, nil
 }
 
-func (t *Table) fullTextMultiTermIndexScan(ctx context.Context, secondaryIndex SecondaryIndex, scan Scan, terms []string, selectedFields []Field, out func(Row) error) error {
-	termsByDocFreq := make([]string, 0, len(terms))
-	docFreqByTerm := make(map[string]uint32, len(terms))
-	for _, term := range terms {
-		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
-		if err != nil {
-			return fmt.Errorf("full-text stats lookup failed: %w", err)
-		}
-		if stats.DocFreq == 0 {
-			return nil
-		}
-		docFreqByTerm[term] = stats.DocFreq
-		termsByDocFreq = append(termsByDocFreq, term)
-	}
-	slices.SortFunc(termsByDocFreq, func(a, b string) int {
-		if docFreqByTerm[a] < docFreqByTerm[b] {
-			return -1
-		}
-		if docFreqByTerm[a] > docFreqByTerm[b] {
-			return 1
-		}
-		return strings.Compare(a, b)
-	})
-
-	var surviving []RowID
-	for i, term := range termsByDocFreq {
-		rowIDs, err := loadFullTextRowIDsForTerm(ctx, secondaryIndex, scan.IndexName, term, docFreqByTerm[term])
-		if err != nil {
-			return err
-		}
-		if len(rowIDs) == 0 {
-			return nil
-		}
-		if i == 0 {
-			surviving = rowIDs
-			continue
-		}
-		surviving = intersectTwoSortedSets(surviving, rowIDs)
-		if len(surviving) == 0 {
-			return nil
-		}
-	}
-
-	return t.emitFullTextRows(ctx, scan, selectedFields, surviving, out)
-}
-
 func loadFullTextRowIDsForTerm(ctx context.Context, secondaryIndex SecondaryIndex, indexName, term string, docFreq uint32) ([]RowID, error) {
 	iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
 	if err != nil {
@@ -2586,46 +2540,6 @@ func loadFullTextRowIDsForTerm(ctx context.Context, secondaryIndex SecondaryInde
 		}
 	}
 	return rowIDs, nil
-}
-
-func (t *Table) emitFullTextRows(ctx context.Context, scan Scan, selectedFields []Field, rowIDs []RowID, out func(Row) error) error {
-	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
-	tableFilter := compileScanFilter(t.Columns, scan.Filters)
-	for _, rowID := range rowIDs {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		var row Row
-		if len(selectedFields) == 0 {
-			row = NewRowWithValues(t.Columns, nil)
-			row.Key = rowID
-		} else {
-			cursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("full-text seek: %w", err)
-			}
-			row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-			if err != nil {
-				return fmt.Errorf("full-text fetch: %w", err)
-			}
-		}
-
-		if tableFilter != nil {
-			ok, err := tableFilter(row)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				continue
-			}
-		}
-
-		if err := out(row); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (t *Table) fullTextSingleTermIndexScan(ctx context.Context, secondaryIndex SecondaryIndex, scan Scan, term string, selectedFields []Field, out func(Row) error) error {
