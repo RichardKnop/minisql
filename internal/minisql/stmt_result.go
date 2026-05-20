@@ -8,10 +8,11 @@ import (
 // Iterator is a pull-based row cursor returned as part of a StatementResult.
 // Call Next to advance, Row to read the current row, and Err after the loop.
 type Iterator struct {
-	err     error
-	rowFunc func(ctx context.Context) (Row, error)
-	nextRow Row
-	end     bool
+	err       error
+	rowFunc   func(ctx context.Context) (Row, error)
+	closeFunc func() error
+	nextRow   Row
+	end       bool
 }
 
 // RowViewIterator is a pull-based cursor over lazy RowView results.
@@ -83,6 +84,13 @@ func (i *RowViewIterator) Err() error {
 func NewIterator(rowFunc func(ctx context.Context) (Row, error)) Iterator {
 	return Iterator{
 		rowFunc: rowFunc,
+	}
+}
+
+func newIteratorWithClose(rowFunc func(ctx context.Context) (Row, error), closeFunc func() error) Iterator {
+	return Iterator{
+		rowFunc:   rowFunc,
+		closeFunc: closeFunc,
 	}
 }
 
@@ -158,6 +166,9 @@ func (i *Iterator) Next(ctx context.Context) bool {
 // Close marks the iterator as exhausted so subsequent Next calls return false.
 func (i *Iterator) Close() error {
 	i.end = true
+	if i.closeFunc != nil {
+		return i.closeFunc()
+	}
 	return nil
 }
 

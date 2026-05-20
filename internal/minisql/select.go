@@ -1140,10 +1140,59 @@ func (t *Table) selectStreamingDirectCoveringIndex(
 	}
 
 	filter := compileScanFilter(scan.IndexColumns, scan.Filters)
-	projected := make([]Row, 0)
-	if hasLimit {
-		projected = make([]Row, 0, int(remaining))
+
+	return StatementResult{
+		Columns: resultColumns,
+		Rows: t.coveringIndexIterator(
+			ctx,
+			idx,
+			plan,
+			scan,
+			filter,
+			requestedFields,
+			resultColumns,
+			remaining,
+			offset,
+			hasLimit,
+			hasOffset,
+		),
+	}, true, nil
+}
+
+type coveringIndexIteratorItem struct {
+	row Row
+	err error
+}
+
+func (t *Table) coveringIndexIterator(
+	ctx context.Context,
+	idx BTreeIndex,
+	plan QueryPlan,
+	scan Scan,
+	filter func(Row) (bool, error),
+	requestedFields []Field,
+	resultColumns []Column,
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) Iterator {
+	if hasLimit && remaining == 0 {
+		return NewSliceIterator(nil)
 	}
+
+	iterCtx, cancel := context.WithCancel(ctx)
+	ch := make(chan coveringIndexIteratorItem, 16)
+
+	send := func(item coveringIndexIteratorItem) error {
+		select {
+		case <-iterCtx.Done():
+			return errLimitReached
+		case ch <- item:
+			return nil
+		}
+	}
+
 	emit := func(key any, rowID RowID) error {
 		row := rowFromIndexKey(key, scan.IndexColumns, rowID)
 		if filter != nil {
@@ -1163,27 +1212,52 @@ func (t *Table) selectStreamingDirectCoveringIndex(
 		if err != nil {
 			return err
 		}
-		projected = append(projected, projectedRow)
+		if err := send(coveringIndexIteratorItem{row: projectedRow}); err != nil {
+			return err
+		}
 		if hasLimit {
 			remaining -= 1
 			if remaining == 0 {
 				return errLimitReached
 			}
 		}
-		return ctx.Err()
+		return iterCtx.Err()
 	}
 
+	go func() {
+		defer close(ch)
+		err := scanCoveringIndexRows(iterCtx, idx, plan, scan, emit)
+		if err != nil && !errors.Is(err, errLimitReached) && !errors.Is(err, context.Canceled) {
+			_ = send(coveringIndexIteratorItem{err: err})
+		}
+	}()
+
+	return newIteratorWithClose(func(ctx context.Context) (Row, error) {
+		select {
+		case <-ctx.Done():
+			cancel()
+			return Row{}, ctx.Err()
+		case item, ok := <-ch:
+			if !ok {
+				return Row{}, ErrNoMoreRows
+			}
+			if item.err != nil {
+				return Row{}, item.err
+			}
+			return item.row, nil
+		}
+	}, func() error {
+		cancel()
+		return nil
+	})
+}
+
+func scanCoveringIndexRows(ctx context.Context, idx BTreeIndex, plan QueryPlan, scan Scan, emit func(any, RowID) error) error {
 	switch scan.Type {
 	case ScanTypeIndexAll:
-		err := idx.ScanAll(ctx, plan.SortReverse, emit)
-		if err != nil && !errors.Is(err, errLimitReached) {
-			return StatementResult{}, true, err
-		}
+		return idx.ScanAll(ctx, plan.SortReverse, emit)
 	case ScanTypeIndexRange:
-		err := idx.ScanRange(ctx, scan.RangeCondition, plan.SortReverse, emit)
-		if err != nil && !errors.Is(err, errLimitReached) {
-			return StatementResult{}, true, err
-		}
+		return idx.ScanRange(ctx, scan.RangeCondition, plan.SortReverse, emit)
 	case ScanTypeIndexPoint:
 		for _, indexValue := range scan.IndexKeys {
 			err := idx.VisitRowIDs(ctx, indexValue, func(rowID RowID) error {
@@ -1193,19 +1267,16 @@ func (t *Table) selectStreamingDirectCoveringIndex(
 				continue
 			}
 			if errors.Is(err, errLimitReached) {
-				break
+				return err
 			}
 			if err != nil {
-				return StatementResult{}, true, fmt.Errorf("index lookup failed: %w", err)
+				return fmt.Errorf("index lookup failed: %w", err)
 			}
 		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported covering index scan type: %s", scan.Type)
 	}
-
-	return StatementResult{
-		Columns: resultColumns,
-		Rows:    NewSliceIterator(projected),
-		rawRows: projected,
-	}, true, nil
 }
 
 func (t *Table) selectStreamingDirectRowView(
