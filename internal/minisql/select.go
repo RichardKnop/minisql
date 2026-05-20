@@ -994,10 +994,19 @@ func (t *Table) selectStreamingDirectRowView(
 
 	result := StatementResult{Columns: resultColumns}
 	scan := plan.Scans[0]
-	if !rowViewFilterSupports(t.Columns, scan.Filters) {
-		return StatementResult{}, false, nil
+	var tableFilter func(context.Context, RowView) (bool, error)
+	if scan.Type == ScanTypeInverted {
+		var ok bool
+		tableFilter, ok = compileInvertedRowViewFilter(t.Columns, t.pager, scan.Filters)
+		if !ok {
+			return StatementResult{}, false, nil
+		}
+	} else {
+		if !rowViewFilterSupports(t.Columns, scan.Filters) {
+			return StatementResult{}, false, nil
+		}
+		tableFilter = compileRowViewFilterForColumns(t.Columns, t.pager, scan.Filters)
 	}
-	tableFilter := compileRowViewFilterForColumns(t.Columns, t.pager, scan.Filters)
 
 	var (
 		remaining int64
@@ -1059,6 +1068,12 @@ func (t *Table) selectStreamingDirectRowView(
 		}
 		if !ok {
 			return StatementResult{}, false, nil
+		}
+		newRowViewIter = iterFactory
+	case ScanTypeInverted:
+		iterFactory, err := t.invertedRowViewIteratorFactory(ctx, scan, tableFilter, remaining, offset, hasLimit, hasOffset)
+		if err != nil {
+			return StatementResult{}, true, err
 		}
 		newRowViewIter = iterFactory
 	default:
@@ -1383,6 +1398,22 @@ func (t *Table) fullTextRowViewIteratorFactory(
 			}
 		})
 	}, true, nil
+}
+
+func (t *Table) invertedRowViewIteratorFactory(
+	ctx context.Context,
+	scan Scan,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) (func() RowViewIterator, error) {
+	rowIDs, err := t.collectInvertedScanRowIDs(ctx, scan)
+	if err != nil {
+		return nil, err
+	}
+	return t.rowIDRowViewIteratorFactory(rowIDs, tableFilter, remaining, offset, hasLimit, hasOffset), nil
 }
 
 type pointRowIDIteratorIndex interface {
@@ -2533,59 +2564,9 @@ func (t *Table) fullTextSingleTermIndexScan(ctx context.Context, secondaryIndex 
 }
 
 func (t *Table) invertedIndexScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
-	secondaryIndex, ok := t.SecondaryIndexes[scan.IndexName]
-	if !ok || secondaryIndex.Method != IndexMethodInverted || secondaryIndex.InvertedIndex == nil {
-		return fmt.Errorf("no index found for inverted scan: %s", scan.IndexName)
-	}
-	if len(scan.IndexKeys) == 0 {
-		return nil
-	}
-
-	var surviving []RowID
-	for i, key := range scan.IndexKeys {
-		term, ok := key.(string)
-		if !ok {
-			continue
-		}
-		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
-		if err != nil {
-			return fmt.Errorf("inverted stats lookup failed: %w", err)
-		}
-		iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
-		if err != nil {
-			return fmt.Errorf("inverted lookup failed: %w", err)
-		}
-		rowIDs := make([]RowID, 0, stats.DocFreq)
-		for {
-			block, ok, err := iter.NextBlock(ctx)
-			if err != nil {
-				return fmt.Errorf("inverted lookup failed: %w", err)
-			}
-			if !ok {
-				break
-			}
-			mode, postings, err := decodeInvertedPostingList(block.Payload)
-			if err != nil {
-				return fmt.Errorf("inverted decode failed: %w", err)
-			}
-			if mode != invertedPostingModeRowIDs {
-				return fmt.Errorf("inverted index %s uses posting mode %d", scan.IndexName, mode)
-			}
-			for _, posting := range postings {
-				rowIDs = append(rowIDs, posting.RowID)
-			}
-		}
-		if len(rowIDs) == 0 {
-			return nil
-		}
-		if i == 0 {
-			surviving = rowIDs
-			continue
-		}
-		surviving = intersectTwoSortedSets(surviving, rowIDs)
-		if len(surviving) == 0 {
-			return nil
-		}
+	surviving, err := t.collectInvertedScanRowIDs(ctx, scan)
+	if err != nil {
+		return err
 	}
 	if len(surviving) == 0 {
 		return nil
@@ -2628,6 +2609,64 @@ func (t *Table) invertedIndexScan(ctx context.Context, scan Scan, selectedFields
 		}
 	}
 	return nil
+}
+
+func (t *Table) collectInvertedScanRowIDs(ctx context.Context, scan Scan) ([]RowID, error) {
+	secondaryIndex, ok := t.SecondaryIndexes[scan.IndexName]
+	if !ok || secondaryIndex.Method != IndexMethodInverted || secondaryIndex.InvertedIndex == nil {
+		return nil, fmt.Errorf("no index found for inverted scan: %s", scan.IndexName)
+	}
+	if len(scan.IndexKeys) == 0 {
+		return nil, nil
+	}
+
+	var surviving []RowID
+	for i, key := range scan.IndexKeys {
+		term, ok := key.(string)
+		if !ok {
+			continue
+		}
+		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
+		if err != nil {
+			return nil, fmt.Errorf("inverted stats lookup failed: %w", err)
+		}
+		iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
+		if err != nil {
+			return nil, fmt.Errorf("inverted lookup failed: %w", err)
+		}
+		rowIDs := make([]RowID, 0, stats.DocFreq)
+		for {
+			block, ok, err := iter.NextBlock(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("inverted lookup failed: %w", err)
+			}
+			if !ok {
+				break
+			}
+			mode, postings, err := decodeInvertedPostingList(block.Payload)
+			if err != nil {
+				return nil, fmt.Errorf("inverted decode failed: %w", err)
+			}
+			if mode != invertedPostingModeRowIDs {
+				return nil, fmt.Errorf("inverted index %s uses posting mode %d", scan.IndexName, mode)
+			}
+			for _, posting := range postings {
+				rowIDs = append(rowIDs, posting.RowID)
+			}
+		}
+		if len(rowIDs) == 0 {
+			return nil, nil
+		}
+		if i == 0 {
+			surviving = rowIDs
+			continue
+		}
+		surviving = intersectTwoSortedSets(surviving, rowIDs)
+		if len(surviving) == 0 {
+			return nil, nil
+		}
+	}
+	return surviving, nil
 }
 
 func (t *Table) tryCountFromExactInvertedIndex(ctx context.Context, plan QueryPlan) (StatementResult, bool, error) {
@@ -3305,6 +3344,30 @@ func compileInvertedScanFilter(columns []Column, filters OneOrMore) func(Row) (b
 	}
 }
 
+func compileInvertedRowViewFilter(columns []Column, pager TxPager, filters OneOrMore) (func(context.Context, RowView) (bool, error), bool) {
+	jsonFilter, remainingFilters, ok := compileJSONContainsRowViewRecheck(columns, pager, filters)
+	if !ok {
+		if !rowViewFilterSupports(columns, filters) {
+			return nil, false
+		}
+		return compileRowViewFilterForColumns(columns, pager, filters), true
+	}
+	if !rowViewFilterSupports(columns, remainingFilters) {
+		return nil, false
+	}
+	remainingFilter := compileRowViewFilterForColumns(columns, pager, remainingFilters)
+	return func(ctx context.Context, view RowView) (bool, error) {
+		ok, err := jsonFilter(ctx, view)
+		if err != nil || !ok {
+			return ok, err
+		}
+		if remainingFilter == nil {
+			return true, nil
+		}
+		return remainingFilter(ctx, view)
+	}, true
+}
+
 func compileJSONContainsRecheck(columns []Column, filters OneOrMore) (func(Row) (bool, error), OneOrMore, bool) {
 	if len(filters) != 1 {
 		return nil, nil, false
@@ -3345,6 +3408,59 @@ func compileJSONContainsRecheck(columns []Column, filters OneOrMore) (func(Row) 
 			value := row.Values[columnIdx]
 			if !value.Valid {
 				return false, nil
+			}
+			doc, ok := toStringVal(value.Value)
+			if !ok {
+				return false, fmt.Errorf("JSON_CONTAINS: first argument must be a string")
+			}
+			return jsonContainsDecodedQuery(doc, queryValue)
+		}, remainingFilters, true
+	}
+
+	return nil, nil, false
+}
+
+func compileJSONContainsRowViewRecheck(
+	columns []Column,
+	pager TxPager,
+	filters OneOrMore,
+) (func(context.Context, RowView) (bool, error), OneOrMore, bool) {
+	if len(filters) != 1 {
+		return nil, nil, false
+	}
+	columnIndexes := make(map[string]int, len(columns))
+	for i := range columns {
+		columnIndexes[columns[i].Name] = i
+	}
+
+	for condIdx, cond := range filters[0] {
+		columnName, query, ok := jsonContainsLiteralCondition(cond)
+		if !ok {
+			continue
+		}
+		columnIdx, ok := columnIndexes[columnName]
+		if !ok {
+			return nil, nil, false
+		}
+		queryValue, err := decodeJSONForInvertedIndex(query)
+		if err != nil {
+			return nil, nil, false
+		}
+		exactTerms := jsonInvertedQueryTermsAreExact(queryValue)
+		remaining := make(Conditions, 0, len(filters[0])-1)
+		remaining = append(remaining, filters[0][:condIdx]...)
+		remaining = append(remaining, filters[0][condIdx+1:]...)
+		var remainingFilters OneOrMore
+		if len(remaining) > 0 {
+			remainingFilters = OneOrMore{remaining}
+		}
+		return func(ctx context.Context, view RowView) (bool, error) {
+			if exactTerms {
+				return true, nil
+			}
+			value, err := view.ValueAtWithOverflow(ctx, pager, columnIdx)
+			if err != nil || !value.Valid {
+				return false, err
 			}
 			doc, ok := toStringVal(value.Value)
 			if !ok {
