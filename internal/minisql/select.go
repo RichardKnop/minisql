@@ -2977,48 +2977,37 @@ func (t *Table) collectFullTextPhraseRowIDs(
 	query *textSearchQuery,
 	queryTokens []string,
 ) ([]RowID, error) {
-	// Load postings for each term as sorted []invertedPosting — directly from
-	// the decoder, no map needed. Each RowID appears in exactly one block
-	// (the row-grouped codec writes one entry per document), so postings from
-	// successive blocks can be concatenated in order.
-	postingsByTerm := make(map[string][]invertedPosting, len(queryTokens))
 	docFreqByTerm := make(map[string]uint32, len(queryTokens))
-	for _, key := range scan.IndexKeys {
-		term, ok := key.(string)
-		if !ok {
-			continue
-		}
+	for _, term := range queryTokens {
 		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
 		if err != nil {
 			return nil, fmt.Errorf("full-text stats lookup failed: %w", err)
 		}
-		iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
-		if err != nil {
-			return nil, fmt.Errorf("full-text lookup failed: %w", err)
+		if stats.DocFreq == 0 {
+			return nil, nil
 		}
-		postings := make([]invertedPosting, 0, stats.DocFreq)
-		for {
-			block, ok, err := iter.NextBlock(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("full-text lookup failed: %w", err)
-			}
-			if !ok {
-				break
-			}
-			mode, decoded, err := decodeInvertedPostingList(block.Payload)
-			if err != nil {
-				return nil, fmt.Errorf("full-text decode failed: %w", err)
-			}
-			if mode != invertedPostingModePositions {
-				return nil, fmt.Errorf("full-text index %s uses posting mode %d", scan.IndexName, mode)
-			}
-			postings = append(postings, decoded...)
+		docFreqByTerm[term] = stats.DocFreq
+	}
+
+	// Stream the rarest term and keep only the other posting lists for binary
+	// lookups. This avoids retaining the candidate posting list while still
+	// preserving sorted survivor output.
+	candidateIdx := rarestFullTextTokenIndex(queryTokens, docFreqByTerm)
+	candidateTerm := queryTokens[candidateIdx]
+
+	postingsByTerm := make(map[string][]invertedPosting, len(queryTokens)-1)
+	for i, term := range queryTokens {
+		if i == candidateIdx {
+			continue
+		}
+		postings, err := loadFullTextPostingsForTerm(ctx, secondaryIndex, scan.IndexName, term, docFreqByTerm[term])
+		if err != nil {
+			return nil, err
 		}
 		if len(postings) == 0 {
 			return nil, nil
 		}
 		postingsByTerm[term] = postings
-		docFreqByTerm[term] = stats.DocFreq
 	}
 
 	// Pre-compute phrase→queryToken index mapping once per query so the
@@ -3047,40 +3036,55 @@ func (t *Table) collectFullTextPhraseRowIDs(
 	// candidate document. Allocated once and overwritten for each candidate.
 	allPositions := make([][]uint32, len(queryTokens))
 
-	// Iterate the rarest term's postings in sorted RowID order. Survivors come
-	// out sorted so sortRowIDs is unnecessary, and starting with the smallest
-	// posting list bounds the number of candidate phrase checks.
-	candidateIdx := rarestFullTextTokenIndex(queryTokens, docFreqByTerm)
-	candidatePostings := postingsByTerm[queryTokens[candidateIdx]]
-	surviving := make([]RowID, 0, len(candidatePostings))
+	iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, candidateTerm)
+	if err != nil {
+		return nil, fmt.Errorf("full-text lookup failed: %w", err)
+	}
+	surviving := make([]RowID, 0, docFreqByTerm[candidateTerm])
 
-	for _, candidatePosting := range candidatePostings {
-		rowID := candidatePosting.RowID
-		matches := true
-		allPositions[candidateIdx] = candidatePosting.Positions
-		for i := range queryTokens {
-			if i == candidateIdx {
+	for {
+		block, ok, err := iter.NextBlock(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("full-text lookup failed: %w", err)
+		}
+		if !ok {
+			break
+		}
+		mode, decoded, err := decodeInvertedPostingList(block.Payload)
+		if err != nil {
+			return nil, fmt.Errorf("full-text decode failed: %w", err)
+		}
+		if mode != invertedPostingModePositions {
+			return nil, fmt.Errorf("full-text index %s uses posting mode %d", scan.IndexName, mode)
+		}
+		for _, candidatePosting := range decoded {
+			rowID := candidatePosting.RowID
+			matches := true
+			allPositions[candidateIdx] = candidatePosting.Positions
+			for i := range queryTokens {
+				if i == candidateIdx {
+					continue
+				}
+				termPostings := postingsByTerm[queryTokens[i]]
+				idx := invertedPostingBinarySearch(termPostings, rowID)
+				if idx < 0 {
+					matches = false
+					break
+				}
+				allPositions[i] = termPostings[idx].Positions
+			}
+			if !matches {
 				continue
 			}
-			termPostings := postingsByTerm[queryTokens[i]]
-			idx := invertedPostingBinarySearch(termPostings, rowID)
-			if idx < 0 {
-				matches = false
-				break
+			for _, pm := range phraseMappings {
+				if !textSearchPhraseMatchesSorted(allPositions, pm.indices) {
+					matches = false
+					break
+				}
 			}
-			allPositions[i] = termPostings[idx].Positions
-		}
-		if !matches {
-			continue
-		}
-		for _, pm := range phraseMappings {
-			if !textSearchPhraseMatchesSorted(allPositions, pm.indices) {
-				matches = false
-				break
+			if matches {
+				surviving = append(surviving, rowID)
 			}
-		}
-		if matches {
-			surviving = append(surviving, rowID)
 		}
 	}
 	return surviving, nil
@@ -3097,6 +3101,39 @@ func rarestFullTextTokenIndex(queryTokens []string, docFreqByTerm map[string]uin
 		}
 	}
 	return bestIdx
+}
+
+func loadFullTextPostingsForTerm(
+	ctx context.Context,
+	secondaryIndex SecondaryIndex,
+	indexName string,
+	term string,
+	docFreq uint32,
+) ([]invertedPosting, error) {
+	iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
+	if err != nil {
+		return nil, fmt.Errorf("full-text lookup failed: %w", err)
+	}
+
+	postings := make([]invertedPosting, 0, docFreq)
+	for {
+		block, ok, err := iter.NextBlock(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("full-text lookup failed: %w", err)
+		}
+		if !ok {
+			break
+		}
+		mode, decoded, err := decodeInvertedPostingList(block.Payload)
+		if err != nil {
+			return nil, fmt.Errorf("full-text decode failed: %w", err)
+		}
+		if mode != invertedPostingModePositions {
+			return nil, fmt.Errorf("full-text index %s uses posting mode %d", indexName, mode)
+		}
+		postings = append(postings, decoded...)
+	}
+	return postings, nil
 }
 
 func loadFullTextRowIDsForTerm(ctx context.Context, secondaryIndex SecondaryIndex, indexName, term string, docFreq uint32) ([]RowID, error) {
