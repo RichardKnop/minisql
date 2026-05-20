@@ -981,7 +981,7 @@ func (t *Table) selectStreamingDirectRowView(
 	plan QueryPlan,
 	requestedFields []Field,
 ) (StatementResult, bool, error) {
-	if t.virtualRows != nil || t.parallelScan || len(plan.Scans) != 1 {
+	if t.virtualRows != nil || len(plan.Scans) != 1 {
 		return StatementResult{}, false, nil
 	}
 	fieldIndexes, resultColumns, ok := rowViewProjectionPlan(t.Columns, requestedFields)
@@ -1032,7 +1032,15 @@ func (t *Table) selectStreamingDirectRowView(
 	var newRowViewIter func() RowViewIterator
 	switch scan.Type {
 	case ScanTypeSequential:
-		iterFactory, err := t.sequentialRowViewIteratorFactory(ctx, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
+		var (
+			iterFactory func() RowViewIterator
+			err         error
+		)
+		if t.parallelScan {
+			iterFactory, err = t.parallelSequentialRowViewIteratorFactory(ctx, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
+		} else {
+			iterFactory, err = t.sequentialRowViewIteratorFactory(ctx, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
+		}
 		if err != nil {
 			return StatementResult{}, true, err
 		}

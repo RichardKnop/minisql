@@ -150,6 +150,43 @@ func TestParallelSequentialScan_WithFilter(t *testing.T) {
 	assert.Len(t, parRows, 50)
 }
 
+func TestTable_Select_ParallelSequentialScanUsesRowViews(t *testing.T) {
+	table, txManager, _ := newTestTable(t, testColumns[0:2])
+	ctx := context.Background()
+
+	const n = 100
+	inserts := make([][]OptionalValue, 0, n)
+	for i := range n {
+		inserts = append(inserts, []OptionalValue{
+			{Valid: true, Value: int64(i + 1)},
+			{Valid: true, Value: NewTextPointer([]byte("user@example.com"))},
+		})
+	}
+	mustInsert(ctx, t, table, txManager, Statement{
+		Kind:    Insert,
+		Columns: table.Columns,
+		Fields:  fieldsFromColumns(table.Columns...),
+		Inserts: inserts,
+	})
+
+	table.parallelScan = true
+	result, err := table.Select(ctx, Statement{
+		Kind: Select,
+		Fields: []Field{
+			{Name: "id"},
+			{Name: "email"},
+		},
+		Conditions: NewOneOrMore(Conditions{
+			FieldIsGreater(Field{Name: "id"}, OperandInteger, int64(50)),
+		}),
+	})
+	require.NoError(t, err)
+	assert.Len(t, result.RowViewFieldIndexes, 2)
+
+	got := collectRows(ctx, result)
+	require.Len(t, got, 50)
+}
+
 func TestParallelSequentialScan_EmptyTable(t *testing.T) {
 	table, txManager, _ := newTestTable(t, testColumns[0:2])
 	ctx := context.Background()
