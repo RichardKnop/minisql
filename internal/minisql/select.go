@@ -3095,7 +3095,7 @@ func rarestFullTextTokenIndex(queryTokens []string, docFreqByTerm map[string]uin
 	bestFreq := docFreqByTerm[queryTokens[0]]
 	for i := 1; i < len(queryTokens); i++ {
 		freq := docFreqByTerm[queryTokens[i]]
-		if freq < bestFreq || (freq == bestFreq && strings.Compare(queryTokens[i], queryTokens[bestIdx]) < 0) {
+		if freq < bestFreq || (freq == bestFreq && queryTokens[i] < queryTokens[bestIdx]) {
 			bestIdx = i
 			bestFreq = freq
 		}
@@ -3454,33 +3454,40 @@ func (t *Table) tryCountFromExactInvertedIndex(ctx context.Context, plan QueryPl
 	return countResult(count), true, nil
 }
 
-// tryCountFromFullTextIndex is a fast-count shortcut for single-term full-text
-// COUNT(*) queries with no additional post-scan filters. It reads DocFreq
-// directly from the index entry (one B-tree lookup) instead of iterating the
-// entire postings list.
+// tryCountFromFullTextIndex is a count shortcut for full-text COUNT(*) queries
+// with no additional post-scan filters. Single-term queries read DocFreq
+// directly; multi-term and phrase queries count matching RowIDs without
+// fetching or materialising table rows.
 func (t *Table) tryCountFromFullTextIndex(ctx context.Context, plan QueryPlan) (StatementResult, bool, error) {
 	if len(plan.Scans) != 1 || plan.Scans[0].Type != ScanTypeFullText {
 		return StatementResult{}, false, nil
 	}
 	scan := plan.Scans[0]
-	q := scan.FullTextQuery
-	if q == nil || len(q.Terms) != 1 || len(q.Phrases) != 0 {
-		// Multi-term AND needs intersection; phrases need position checks.
-		return StatementResult{}, false, nil
-	}
 	if len(scan.Filters) > 0 {
 		// Additional WHERE predicates require row-level evaluation.
 		return StatementResult{}, false, nil
 	}
-	secondaryIndex, ok := t.SecondaryIndexes[scan.IndexName]
-	if !ok || secondaryIndex.Method != IndexMethodFullText || secondaryIndex.InvertedIndex == nil {
-		return StatementResult{}, false, nil
-	}
-	stats, err := secondaryIndex.InvertedIndex.Stats(ctx, q.Terms[0])
+
+	secondaryIndex, query, queryTokens, err := t.fullTextScanState(scan)
 	if err != nil {
 		return StatementResult{}, false, err
 	}
-	return countResult(int64(stats.DocFreq)), true, nil
+	if len(queryTokens) == 0 {
+		return countResult(0), true, nil
+	}
+	if query != nil && len(queryTokens) == 1 && len(query.Phrases) == 0 {
+		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, queryTokens[0])
+		if err != nil {
+			return StatementResult{}, false, err
+		}
+		return countResult(int64(stats.DocFreq)), true, nil
+	}
+
+	rowIDs, err := t.collectFullTextScanRowIDs(ctx, secondaryIndex, scan, query, queryTokens)
+	if err != nil {
+		return StatementResult{}, false, err
+	}
+	return countResult(int64(len(rowIDs))), true, nil
 }
 
 func jsonInvertedScanFilterIsExact(filters OneOrMore) bool {

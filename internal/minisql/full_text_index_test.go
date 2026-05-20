@@ -343,6 +343,47 @@ func TestFullTextIndexScanMultiTermIntersectsRowIDs(t *testing.T) {
 	assert.Equal(t, []RowID{3, 7}, rowIDs)
 }
 
+func TestFullTextCountMultiTermIndexScanAvoidsRowFetch(t *testing.T) {
+	t.Parallel()
+
+	index := &fakeFullTextInvertedIndex{
+		postings: map[string][]invertedPosting{
+			"common": {
+				{RowID: 9, Positions: []uint32{1}},
+				{RowID: 3, Positions: []uint32{1}},
+				{RowID: 7, Positions: []uint32{1}},
+				{RowID: 11, Positions: []uint32{1}},
+			},
+			"cohort": {
+				{RowID: 7, Positions: []uint32{2}},
+				{RowID: 3, Positions: []uint32{2}},
+			},
+		},
+	}
+	table := NewTable(testLogger, nil, nil, "articles", []Column{{Name: "body", Kind: Text}}, 0, nil, WithSecondaryIndex(SecondaryIndex{
+		IndexInfo: IndexInfo{
+			Name:    "idx_body_fts",
+			Method:  IndexMethodFullText,
+			Columns: []Column{{Name: "body", Kind: Text}},
+		},
+		InvertedIndex: index,
+	}))
+
+	result, ok, err := table.tryCountFromFullTextIndex(context.Background(), QueryPlan{Scans: []Scan{{
+		Type:          ScanTypeFullText,
+		IndexName:     "idx_body_fts",
+		IndexKeys:     []any{"common", "cohort"},
+		FullTextQuery: &textSearchQuery{Terms: []string{"common", "cohort"}},
+	}}})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	require.True(t, result.Rows.Next(context.Background()))
+	countValue, ok := result.Rows.Row().GetValue("COUNT(*)")
+	require.True(t, ok)
+	assert.Equal(t, int64(2), countValue.Value)
+}
+
 func TestPlanQuery_FullTextIndexSkipsOverlongQueryToken(t *testing.T) {
 	t.Parallel()
 
