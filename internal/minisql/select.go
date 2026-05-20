@@ -182,6 +182,10 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return t.selectGroupByZeroAlloc(ctx, stmt, plan.Scans[0], selectedFields)
 	}
 
+	if result, ok, err := t.trySelectMinMaxFromIndexEndpoint(ctx, stmt, plan); err != nil || ok {
+		return result, err
+	}
+
 	// Materialising path: buffer every matching row, then dispatch.
 	// Required for COUNT (needs a total), GROUP BY, aggregates, ORDER BY (sort),
 	// and JOIN (goroutine-based execution inside plan.Execute).
@@ -453,6 +457,59 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row)
 		Columns: resultColumns,
 		Rows:    NewSingleRowIterator(NewRowWithValues(resultColumns, resultValues)),
 	}, nil
+}
+
+func (t *Table) trySelectMinMaxFromIndexEndpoint(ctx context.Context, stmt Statement, plan QueryPlan) (StatementResult, bool, error) {
+	if !stmt.IsSelectAggregate() || len(stmt.Aggregates) != 1 || len(stmt.Fields) != 1 || len(plan.Joins) > 0 || len(plan.Scans) != 1 {
+		return StatementResult{}, false, nil
+	}
+
+	agg := stmt.Aggregates[0]
+	scan := plan.Scans[0]
+	switch {
+	case agg.Kind == AggregateMin && scan.Type == ScanTypeIndexFirst:
+	case agg.Kind == AggregateMax && scan.Type == ScanTypeIndexLast:
+	default:
+		return StatementResult{}, false, nil
+	}
+	if len(scan.Filters) > 0 {
+		return StatementResult{}, false, nil
+	}
+
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return StatementResult{}, true, fmt.Errorf("no index found for min/max scan: %s", scan.IndexName)
+	}
+
+	var (
+		endpointKey any
+		found       bool
+	)
+	err := idx.ScanAll(ctx, scan.Type == ScanTypeIndexLast, func(key any, _ RowID) error {
+		endpointKey = key
+		found = true
+		return errStopScan
+	})
+	if err != nil && !errors.Is(err, errStopScan) {
+		return StatementResult{}, true, err
+	}
+
+	fieldName := stmt.Fields[0].OutputName()
+	resultCol := Column{Name: fieldName}
+	if col, ok := t.ColumnByName(agg.Column); ok {
+		resultCol.Kind = col.Kind
+		resultCol.Size = col.Size
+	}
+
+	value := OptionalValue{}
+	if found {
+		value = OptionalValue{Valid: true, Value: endpointKey}
+	}
+	row := NewRowWithValues([]Column{resultCol}, []OptionalValue{value})
+	return StatementResult{
+		Columns: []Column{resultCol},
+		Rows:    NewSingleRowIterator(row),
+	}, true, nil
 }
 
 // groupEntry holds per-group state offsets into the shared flat pools.
