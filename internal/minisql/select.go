@@ -3202,6 +3202,21 @@ func (t *Table) fullTextSingleTermIndexScan(ctx context.Context, secondaryIndex 
 }
 
 func (t *Table) invertedIndexScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
+	secondaryIndex, ok := t.SecondaryIndexes[scan.IndexName]
+	if !ok || secondaryIndex.Method != IndexMethodInverted || secondaryIndex.InvertedIndex == nil {
+		return fmt.Errorf("no index found for inverted scan: %s", scan.IndexName)
+	}
+	if len(scan.IndexKeys) == 0 {
+		return nil
+	}
+	if len(scan.IndexKeys) == 1 {
+		term, ok := scan.IndexKeys[0].(string)
+		if !ok {
+			return nil
+		}
+		return t.singleTermInvertedIndexScan(ctx, secondaryIndex, scan, term, selectedFields, out)
+	}
+
 	surviving, err := t.collectInvertedScanRowIDs(ctx, scan)
 	if err != nil {
 		return err
@@ -3244,6 +3259,71 @@ func (t *Table) invertedIndexScan(ctx context.Context, scan Scan, selectedFields
 
 		if err := out(row); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func (t *Table) singleTermInvertedIndexScan(
+	ctx context.Context,
+	secondaryIndex SecondaryIndex,
+	scan Scan,
+	term string,
+	selectedFields []Field,
+	out func(Row) error,
+) error {
+	iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
+	if err != nil {
+		return fmt.Errorf("inverted lookup failed: %w", err)
+	}
+
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileInvertedScanFilter(t.Columns, scan.Filters)
+	for {
+		block, ok, err := iter.NextBlock(ctx)
+		if err != nil {
+			return fmt.Errorf("inverted lookup failed: %w", err)
+		}
+		if !ok {
+			break
+		}
+		mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
+			var row Row
+			if len(selectedFields) == 0 {
+				row = NewRowWithValues(t.Columns, nil)
+				row.Key = rowID
+			} else {
+				cursor, err := t.Seek(ctx, rowID)
+				if err != nil {
+					return fmt.Errorf("inverted seek: %w", err)
+				}
+				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
+				if err != nil {
+					return fmt.Errorf("inverted fetch: %w", err)
+				}
+			}
+
+			if tableFilter != nil {
+				ok, err := tableFilter(row)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return nil
+				}
+			}
+
+			return out(row)
+		})
+		if err != nil {
+			return err
+		}
+		if mode != invertedPostingModeRowIDs {
+			return fmt.Errorf("inverted index %s uses posting mode %d", scan.IndexName, mode)
 		}
 	}
 	return nil
