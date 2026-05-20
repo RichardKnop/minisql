@@ -1703,7 +1703,7 @@ func rowViewProjectionPlan(columns []Column, fields []Field) ([]int, []Column, b
 func projectRowView(ctx context.Context, pager TxPager, view RowView, fieldIndexes []int, columns []Column) (Row, error) {
 	values := make([]OptionalValue, len(fieldIndexes))
 	for i, idx := range fieldIndexes {
-		value, err := view.ValueAt(idx)
+		value, err := view.ValueAtWithOverflow(ctx, pager, idx)
 		if err != nil {
 			return Row{}, err
 		}
@@ -1711,10 +1711,6 @@ func projectRowView(ctx context.Context, pager TxPager, view RowView, fieldIndex
 	}
 	row := NewRowWithValues(columns, values)
 	row.Key = view.Key()
-	row, err := row.readOverflowTexts(ctx, pager)
-	if err != nil {
-		return Row{}, fmt.Errorf("row view projection read overflow: %w", err)
-	}
 	return row, nil
 }
 
