@@ -988,9 +988,6 @@ func (t *Table) selectStreamingDirectRowView(
 	if !ok {
 		return StatementResult{}, false, nil
 	}
-	if stmt.Distinct {
-		return StatementResult{}, false, nil
-	}
 
 	result := StatementResult{Columns: resultColumns}
 	scan := plan.Scans[0]
@@ -1021,10 +1018,21 @@ func (t *Table) selectStreamingDirectRowView(
 		offset = stmt.Offset.Value.(int64)
 	}
 
+	iterRemaining := remaining
+	iterOffset := offset
+	iterHasLimit := hasLimit
+	iterHasOffset := hasOffset
+	if stmt.Distinct {
+		iterRemaining = 0
+		iterOffset = 0
+		iterHasLimit = false
+		iterHasOffset = false
+	}
+
 	var newRowViewIter func() RowViewIterator
 	switch scan.Type {
 	case ScanTypeSequential:
-		iterFactory, err := t.sequentialRowViewIteratorFactory(ctx, tableFilter, remaining, offset, hasLimit, hasOffset)
+		iterFactory, err := t.sequentialRowViewIteratorFactory(ctx, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
 		if err != nil {
 			return StatementResult{}, true, err
 		}
@@ -1033,7 +1041,7 @@ func (t *Table) selectStreamingDirectRowView(
 		if scan.CoveringIndex {
 			return StatementResult{}, false, nil
 		}
-		iterFactory, err := t.indexRowViewIteratorFactory(ctx, plan, scan, tableFilter, remaining, offset, hasLimit, hasOffset)
+		iterFactory, err := t.indexRowViewIteratorFactory(ctx, plan, scan, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
 		if err != nil {
 			return StatementResult{}, true, err
 		}
@@ -1043,26 +1051,26 @@ func (t *Table) selectStreamingDirectRowView(
 			return StatementResult{}, false, nil
 		}
 		if t.isUniquePointIndex(scan.IndexName) {
-			iterFactory, err := t.uniqueIndexPointRowViewIteratorFactory(scan, tableFilter, remaining, offset, hasLimit, hasOffset)
+			iterFactory, err := t.uniqueIndexPointRowViewIteratorFactory(scan, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
 			if err != nil {
 				return StatementResult{}, true, err
 			}
 			newRowViewIter = iterFactory
 			break
 		}
-		iterFactory, err := t.indexRowViewIteratorFactory(ctx, plan, scan, tableFilter, remaining, offset, hasLimit, hasOffset)
+		iterFactory, err := t.indexRowViewIteratorFactory(ctx, plan, scan, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
 		if err != nil {
 			return StatementResult{}, true, err
 		}
 		newRowViewIter = iterFactory
 	case ScanTypeIndexIntersect, ScanTypeIndexUnion:
-		iterFactory, err := t.indexSetRowViewIteratorFactory(ctx, scan, tableFilter, remaining, offset, hasLimit, hasOffset)
+		iterFactory, err := t.indexSetRowViewIteratorFactory(ctx, scan, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
 		if err != nil {
 			return StatementResult{}, true, err
 		}
 		newRowViewIter = iterFactory
 	case ScanTypeFullText:
-		iterFactory, ok, err := t.fullTextRowViewIteratorFactory(ctx, scan, tableFilter, remaining, offset, hasLimit, hasOffset)
+		iterFactory, ok, err := t.fullTextRowViewIteratorFactory(ctx, scan, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
 		if err != nil {
 			return StatementResult{}, true, err
 		}
@@ -1071,13 +1079,23 @@ func (t *Table) selectStreamingDirectRowView(
 		}
 		newRowViewIter = iterFactory
 	case ScanTypeInverted:
-		iterFactory, err := t.invertedRowViewIteratorFactory(ctx, scan, tableFilter, remaining, offset, hasLimit, hasOffset)
+		iterFactory, err := t.invertedRowViewIteratorFactory(ctx, scan, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
 		if err != nil {
 			return StatementResult{}, true, err
 		}
 		newRowViewIter = iterFactory
 	default:
 		return StatementResult{}, false, nil
+	}
+
+	if stmt.Distinct {
+		rows, err := distinctRowsFromRowViews(ctx, t.pager, newRowViewIter(), fieldIndexes, resultColumns, remaining, offset, hasLimit, hasOffset)
+		if err != nil {
+			return StatementResult{}, true, err
+		}
+		result.Rows = NewSliceIterator(rows)
+		result.rawRows = rows
+		return result, true, nil
 	}
 
 	result.RowViews = newRowViewIter()
@@ -1711,6 +1729,51 @@ func rowViewMaterializingIterator(ctx context.Context, pager TxPager, views RowV
 		view := views.RowView()
 		return projectRowView(ctx, pager, view, fieldIndexes, columns)
 	})
+}
+
+func distinctRowsFromRowViews(
+	ctx context.Context,
+	pager TxPager,
+	views RowViewIterator,
+	fieldIndexes []int,
+	columns []Column,
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) ([]Row, error) {
+	seen := make(map[string]struct{})
+	projected := make([]Row, 0)
+	if hasLimit {
+		projected = make([]Row, 0, int(remaining))
+	}
+
+	for views.Next(ctx) {
+		row, err := projectRowView(ctx, pager, views.RowView(), fieldIndexes, columns)
+		if err != nil {
+			return nil, err
+		}
+		key := row.rowDistinctKey()
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		if hasOffset && offset > 0 {
+			offset -= 1
+			continue
+		}
+		projected = append(projected, row)
+		if hasLimit {
+			remaining -= 1
+			if remaining == 0 {
+				break
+			}
+		}
+	}
+	if err := views.Err(); err != nil {
+		return nil, err
+	}
+	return projected, nil
 }
 
 func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields []Field) (StatementResult, error) {
