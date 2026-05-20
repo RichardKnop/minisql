@@ -1580,6 +1580,7 @@ type rowIDStreamIterator struct {
 	cancel context.CancelFunc
 }
 
+// Next returns the next streamed row ID, cancelling the producer when ctx is done.
 func (i rowIDStreamIterator) Next(ctx context.Context) (RowID, error) {
 	select {
 	case <-ctx.Done():
@@ -1596,6 +1597,7 @@ func (i rowIDStreamIterator) Next(ctx context.Context) (RowID, error) {
 	}
 }
 
+// Close cancels the producer backing this row-id stream.
 func (i rowIDStreamIterator) Close() error {
 	i.cancel()
 	return nil
@@ -2103,15 +2105,6 @@ func (t *Table) isUniquePointIndex(name string) bool {
 	return ok
 }
 
-func (t *Table) collectIndexScanRowIDs(ctx context.Context, plan QueryPlan, scan Scan, canApplyScanLimit bool) ([]RowID, error) {
-	rowIDs := make([]RowID, 0, rowIDBufferCapacity(scan, canApplyScanLimit))
-	err := t.scanIndexRangeRowIDs(ctx, plan, scan, canApplyScanLimit, func(rowID RowID) error {
-		rowIDs = append(rowIDs, rowID)
-		return nil
-	})
-	return rowIDs, err
-}
-
 func (t *Table) scanIndexRangeRowIDs(ctx context.Context, plan QueryPlan, scan Scan, canApplyScanLimit bool, emit func(RowID) error) error {
 	idx, ok := t.IndexByName(scan.IndexName)
 	if !ok {
@@ -2165,16 +2158,6 @@ func (t *Table) scanIndexRangeRowIDs(ctx context.Context, plan QueryPlan, scan S
 		return fmt.Errorf("unsupported row view index scan type: %s", scan.Type)
 	}
 	return nil
-}
-
-func rowIDBufferCapacity(scan Scan, canApplyScanLimit bool) int {
-	if canApplyScanLimit && scan.ScanLimit > 0 {
-		return int(min(scan.ScanLimit, int64(MaxOverflowRowIDsPerPage)))
-	}
-	if scan.Type == ScanTypeIndexPoint {
-		return len(scan.IndexKeys) * MaxInlineRowIDs
-	}
-	return 0
 }
 
 func (t *Table) rowViewByRowID(ctx context.Context, rowID RowID) (RowView, error) {
@@ -3337,9 +3320,42 @@ func (t *Table) collectInvertedScanRowIDs(ctx context.Context, scan Scan) ([]Row
 	if len(scan.IndexKeys) == 0 {
 		return nil, nil
 	}
+	terms, err := t.invertedScanTermsByDocFreq(ctx, secondaryIndex, scan)
+	if err != nil {
+		return nil, err
+	}
+	if len(terms) == 0 {
+		return nil, nil
+	}
 
 	var surviving []RowID
-	haveSurviving := false
+	for i, termStats := range terms {
+		rowIDs, err := loadInvertedRowIDsForTerm(ctx, secondaryIndex, scan.IndexName, termStats.term, termStats.docFreq)
+		if err != nil {
+			return nil, err
+		}
+		if len(rowIDs) == 0 {
+			return nil, nil
+		}
+		if i == 0 {
+			surviving = rowIDs
+			continue
+		}
+		surviving = intersectTwoSortedSets(surviving, rowIDs)
+		if len(surviving) == 0 {
+			return nil, nil
+		}
+	}
+	return surviving, nil
+}
+
+type invertedScanTermStats struct {
+	term    string
+	docFreq uint32
+}
+
+func (t *Table) invertedScanTermsByDocFreq(ctx context.Context, secondaryIndex SecondaryIndex, scan Scan) ([]invertedScanTermStats, error) {
+	terms := make([]invertedScanTermStats, 0, len(scan.IndexKeys))
 	for _, key := range scan.IndexKeys {
 		term, ok := key.(string)
 		if !ok {
@@ -3349,24 +3365,21 @@ func (t *Table) collectInvertedScanRowIDs(ctx context.Context, scan Scan) ([]Row
 		if err != nil {
 			return nil, fmt.Errorf("inverted stats lookup failed: %w", err)
 		}
-		rowIDs, err := loadInvertedRowIDsForTerm(ctx, secondaryIndex, scan.IndexName, term, stats.DocFreq)
-		if err != nil {
-			return nil, err
-		}
-		if len(rowIDs) == 0 {
+		if stats.DocFreq == 0 {
 			return nil, nil
 		}
-		if !haveSurviving {
-			surviving = rowIDs
-			haveSurviving = true
-			continue
-		}
-		surviving = intersectTwoSortedSets(surviving, rowIDs)
-		if len(surviving) == 0 {
-			return nil, nil
-		}
+		terms = append(terms, invertedScanTermStats{term: term, docFreq: stats.DocFreq})
 	}
-	return surviving, nil
+	slices.SortFunc(terms, func(a, b invertedScanTermStats) int {
+		if a.docFreq < b.docFreq {
+			return -1
+		}
+		if a.docFreq > b.docFreq {
+			return 1
+		}
+		return strings.Compare(a.term, b.term)
+	})
+	return terms, nil
 }
 
 func (t *Table) tryCountFromExactInvertedIndex(ctx context.Context, plan QueryPlan) (StatementResult, bool, error) {
@@ -3447,28 +3460,25 @@ func (t *Table) countInvertedIndexScan(ctx context.Context, scan Scan) (int64, e
 		}
 		return int64(stats.DocFreq), nil
 	}
+	terms, err := t.invertedScanTermsByDocFreq(ctx, secondaryIndex, scan)
+	if err != nil {
+		return 0, err
+	}
+	if len(terms) == 0 {
+		return 0, nil
+	}
 
 	var surviving []RowID
-	haveSurviving := false
-	for _, key := range scan.IndexKeys {
-		term, ok := key.(string)
-		if !ok {
-			continue
-		}
-		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
-		if err != nil {
-			return 0, fmt.Errorf("inverted stats lookup failed: %w", err)
-		}
-		rowIDs, err := loadInvertedRowIDsForTerm(ctx, secondaryIndex, scan.IndexName, term, stats.DocFreq)
+	for i, termStats := range terms {
+		rowIDs, err := loadInvertedRowIDsForTerm(ctx, secondaryIndex, scan.IndexName, termStats.term, termStats.docFreq)
 		if err != nil {
 			return 0, err
 		}
 		if len(rowIDs) == 0 {
 			return 0, nil
 		}
-		if !haveSurviving {
+		if i == 0 {
 			surviving = rowIDs
-			haveSurviving = true
 			continue
 		}
 		surviving = intersectTwoSortedSets(surviving, rowIDs)
