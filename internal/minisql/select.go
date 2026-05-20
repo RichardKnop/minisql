@@ -2819,6 +2819,75 @@ func (t *Table) indexPointGetAll(ctx context.Context, scan Scan, selectedFields 
 	return rows, nil
 }
 
+// indexPointExists reports whether any row matches the index point scan and
+// residual filters, without materialising matched rows.
+func (t *Table) indexPointExists(ctx context.Context, scan Scan, selectedFields []Field) (bool, error) {
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return false, fmt.Errorf("no index found for point scan: %s", scan.IndexName)
+	}
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	coveringFilter := compileScanFilter(scan.IndexColumns, scan.Filters)
+	isCovering := scan.CoveringIndex
+	idxColumns := scan.IndexColumns
+	nSelected := len(selectedFields)
+
+	for _, indexValue := range scan.IndexKeys {
+		err := idx.VisitRowIDs(ctx, indexValue, func(rowID RowID) error {
+			var row Row
+			switch {
+			case isCovering:
+				row = rowFromIndexKey(indexValue, idxColumns, rowID)
+			case nSelected == 0:
+				row = NewRowWithValues(t.Columns, nil)
+				row.Key = rowID
+			default:
+				cursor, err := t.Seek(ctx, rowID)
+				if err != nil {
+					return fmt.Errorf("find row failed: %w", err)
+				}
+				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
+				if err != nil {
+					return fmt.Errorf("fetch row failed: %w", err)
+				}
+				if tableFilter != nil {
+					ok, err := tableFilter(row)
+					if err != nil {
+						return err
+					}
+					if !ok {
+						return nil
+					}
+				}
+			}
+			if isCovering && coveringFilter != nil {
+				ok, err := coveringFilter(row)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return nil
+				}
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return errStopScan
+		})
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if errors.Is(err, errStopScan) {
+			return true, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("index lookup failed: %w", err)
+		}
+	}
+	return false, nil
+}
+
 func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
 	secondaryIndex, query, queryTokens, err := t.fullTextScanState(scan)
 	if err != nil {
