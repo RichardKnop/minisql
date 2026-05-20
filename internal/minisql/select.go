@@ -184,6 +184,9 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	if stmt.IsSelectGroupBy() && len(plan.Joins) == 0 && len(plan.Scans) == 1 && plan.Scans[0].Type == ScanTypeSequential {
 		return t.selectGroupByZeroAlloc(ctx, stmt, plan.Scans[0], selectedFields)
 	}
+	if stmt.IsSelectGroupBy() && len(plan.Joins) == 0 {
+		return t.selectGroupByStreaming(ctx, stmt, plan, selectedFields)
+	}
 
 	if result, ok, err := t.trySelectMinMaxFromIndexEndpoint(ctx, stmt, plan); err != nil || ok {
 		return result, err
@@ -742,20 +745,39 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 	return acc.buildResult(stmt, t)
 }
 
+func (t *Table) selectGroupByStreaming(ctx context.Context, stmt Statement, plan QueryPlan, selectedFields []Field) (StatementResult, error) {
+	estRows := int(t.estimatedRowCount())
+	if estRows <= 0 {
+		estRows = 160 // conservative default (estGroups = 16)
+	}
+	acc := newGroupByAccumulator(stmt, t, estRows)
+	if err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
+		acc.process(row)
+		return nil
+	}); err != nil {
+		return StatementResult{}, err
+	}
+	return acc.buildResult(stmt, t)
+}
+
 // selectGroupByZeroAlloc handles GROUP BY over a single sequential scan without
 // materialising rows. It reuses one []OptionalValue buffer across all rows,
 // eliminating the per-row heap allocation from UnmarshalWithMask. Falls back to
 // the general path for virtual tables and parallel scans.
 func (t *Table) selectGroupByZeroAlloc(ctx context.Context, stmt Statement, scan Scan, selectedFields []Field) (StatementResult, error) {
 	if t.virtualRows != nil || t.parallelScan {
-		var rows []Row
+		estRows := int(t.estimatedRowCount())
+		if estRows <= 0 {
+			estRows = 160 // conservative default (estGroups = 16)
+		}
+		acc := newGroupByAccumulator(stmt, t, estRows)
 		if err := t.sequentialScan(ctx, scan, selectedFields, func(row Row) error {
-			rows = append(rows, row)
+			acc.process(row)
 			return nil
 		}); err != nil {
 			return StatementResult{}, err
 		}
-		return t.selectGroupBy(ctx, stmt, rows)
+		return acc.buildResult(stmt, t)
 	}
 
 	cursor, err := t.SeekFirst(ctx)
