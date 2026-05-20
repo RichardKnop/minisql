@@ -1523,21 +1523,23 @@ func (t *Table) indexRowViewIteratorFactory(
 		return t.indexPointRowViewIteratorFactory(scan, tableFilter, remaining, offset, hasLimit, hasOffset)
 	}
 
-	rowIDs, err := t.collectIndexScanRowIDs(ctx, plan, scan, tableFilter == nil)
-	if err != nil {
-		return nil, err
-	}
+	canApplyScanLimit := tableFilter == nil
 	return func() RowViewIterator {
-		idx := 0
 		iterRemaining := remaining
 		iterOffset := offset
-		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
-			for idx < len(rowIDs) {
+		nextRowID := t.indexRangeRowIDIterator(ctx, plan, scan, canApplyScanLimit)
+		return newRowViewIteratorWithClose(func(iterCtx context.Context) (RowView, error) {
+			for {
 				if err := iterCtx.Err(); err != nil {
 					return RowView{}, err
 				}
-				rowID := rowIDs[idx]
-				idx += 1
+				rowID, err := nextRowID.Next(iterCtx)
+				if errors.Is(err, ErrNoMoreRows) {
+					return RowView{}, ErrNoMoreRows
+				}
+				if err != nil {
+					return RowView{}, err
+				}
 
 				view, err := t.rowViewByRowID(iterCtx, rowID)
 				if err != nil {
@@ -1564,9 +1566,65 @@ func (t *Table) indexRowViewIteratorFactory(
 				}
 				return view, nil
 			}
-			return RowView{}, ErrNoMoreRows
-		})
+		}, nextRowID.Close)
 	}, nil
+}
+
+type rowIDStreamItem struct {
+	rowID RowID
+	err   error
+}
+
+type rowIDStreamIterator struct {
+	ch     <-chan rowIDStreamItem
+	cancel context.CancelFunc
+}
+
+func (i rowIDStreamIterator) Next(ctx context.Context) (RowID, error) {
+	select {
+	case <-ctx.Done():
+		i.cancel()
+		return 0, ctx.Err()
+	case item, ok := <-i.ch:
+		if !ok {
+			return 0, ErrNoMoreRows
+		}
+		if item.err != nil {
+			return 0, item.err
+		}
+		return item.rowID, nil
+	}
+}
+
+func (i rowIDStreamIterator) Close() error {
+	i.cancel()
+	return nil
+}
+
+func (t *Table) indexRangeRowIDIterator(ctx context.Context, plan QueryPlan, scan Scan, canApplyScanLimit bool) rowIDStreamIterator {
+	iterCtx, cancel := context.WithCancel(ctx)
+	ch := make(chan rowIDStreamItem, 16)
+
+	send := func(item rowIDStreamItem) error {
+		select {
+		case <-iterCtx.Done():
+			return errLimitReached
+		case ch <- item:
+			return nil
+		}
+	}
+
+	go func() {
+		defer close(ch)
+		err := t.scanIndexRangeRowIDs(iterCtx, plan, scan, canApplyScanLimit, func(rowID RowID) error {
+			return send(rowIDStreamItem{rowID: rowID})
+		})
+		if err != nil && !errors.Is(err, errLimitReached) && !errors.Is(err, context.Canceled) {
+			_ = send(rowIDStreamItem{err: err})
+		}
+	}()
+
+	return rowIDStreamIterator{ch: ch, cancel: cancel}
 }
 
 func (t *Table) indexSetRowViewIteratorFactory(
@@ -1932,14 +1990,24 @@ func (t *Table) isUniquePointIndex(name string) bool {
 }
 
 func (t *Table) collectIndexScanRowIDs(ctx context.Context, plan QueryPlan, scan Scan, canApplyScanLimit bool) ([]RowID, error) {
+	rowIDs := make([]RowID, 0, rowIDBufferCapacity(scan, canApplyScanLimit))
+	err := t.scanIndexRangeRowIDs(ctx, plan, scan, canApplyScanLimit, func(rowID RowID) error {
+		rowIDs = append(rowIDs, rowID)
+		return nil
+	})
+	return rowIDs, err
+}
+
+func (t *Table) scanIndexRangeRowIDs(ctx context.Context, plan QueryPlan, scan Scan, canApplyScanLimit bool, emit func(RowID) error) error {
 	idx, ok := t.IndexByName(scan.IndexName)
 	if !ok {
-		return nil, fmt.Errorf("no index found for row view scan: %s", scan.IndexName)
+		return fmt.Errorf("no index found for row view scan: %s", scan.IndexName)
 	}
-	rowIDs := make([]RowID, 0, rowIDBufferCapacity(scan, canApplyScanLimit))
 	var emitted int64
-	appendRowID := func(_ any, rowID RowID) error {
-		rowIDs = append(rowIDs, rowID)
+	emitRowID := func(rowID RowID) error {
+		if err := emit(rowID); err != nil {
+			return err
+		}
 		if canApplyScanLimit && scan.ScanLimit > 0 {
 			emitted += 1
 			if emitted >= scan.ScanLimit {
@@ -1950,24 +2018,21 @@ func (t *Table) collectIndexScanRowIDs(ctx context.Context, plan QueryPlan, scan
 	}
 	switch scan.Type {
 	case ScanTypeIndexAll:
-		if err := idx.ScanAll(ctx, plan.SortReverse, appendRowID); err != nil && !errors.Is(err, errLimitReached) {
-			return nil, err
+		if err := idx.ScanAll(ctx, plan.SortReverse, func(_ any, rowID RowID) error {
+			return emitRowID(rowID)
+		}); err != nil && !errors.Is(err, errLimitReached) {
+			return err
 		}
 	case ScanTypeIndexRange:
-		if err := idx.ScanRange(ctx, scan.RangeCondition, plan.SortReverse, appendRowID); err != nil && !errors.Is(err, errLimitReached) {
-			return nil, err
+		if err := idx.ScanRange(ctx, scan.RangeCondition, plan.SortReverse, func(_ any, rowID RowID) error {
+			return emitRowID(rowID)
+		}); err != nil && !errors.Is(err, errLimitReached) {
+			return err
 		}
 	case ScanTypeIndexPoint:
 		for _, indexValue := range scan.IndexKeys {
 			err := idx.VisitRowIDs(ctx, indexValue, func(rowID RowID) error {
-				rowIDs = append(rowIDs, rowID)
-				if canApplyScanLimit && scan.ScanLimit > 0 {
-					emitted += 1
-					if emitted >= scan.ScanLimit {
-						return errLimitReached
-					}
-				}
-				return ctx.Err()
+				return emitRowID(rowID)
 			})
 			if errors.Is(err, ErrNotFound) {
 				continue
@@ -1976,16 +2041,16 @@ func (t *Table) collectIndexScanRowIDs(ctx context.Context, plan QueryPlan, scan
 				break
 			}
 			if err != nil {
-				return nil, fmt.Errorf("index lookup failed: %w", err)
+				return fmt.Errorf("index lookup failed: %w", err)
 			}
 			if canApplyScanLimit && scan.ScanLimit > 0 && emitted >= scan.ScanLimit {
 				break
 			}
 		}
 	default:
-		return nil, fmt.Errorf("unsupported row view index scan type: %s", scan.Type)
+		return fmt.Errorf("unsupported row view index scan type: %s", scan.Type)
 	}
-	return rowIDs, nil
+	return nil
 }
 
 func rowIDBufferCapacity(scan Scan, canApplyScanLimit bool) int {
@@ -2045,7 +2110,7 @@ func projectRowView(ctx context.Context, pager TxPager, view RowView, fieldIndex
 }
 
 func rowViewMaterializingIterator(ctx context.Context, pager TxPager, views RowViewIterator, fieldIndexes []int, columns []Column) Iterator {
-	return NewIterator(func(iterCtx context.Context) (Row, error) {
+	return newIteratorWithClose(func(iterCtx context.Context) (Row, error) {
 		if !views.Next(iterCtx) {
 			if err := views.Err(); err != nil {
 				return Row{}, err
@@ -2054,7 +2119,7 @@ func rowViewMaterializingIterator(ctx context.Context, pager TxPager, views RowV
 		}
 		view := views.RowView()
 		return projectRowView(ctx, pager, view, fieldIndexes, columns)
-	})
+	}, views.Close)
 }
 
 func distinctRowViewMaterializingIterator(
@@ -2070,7 +2135,7 @@ func distinctRowViewMaterializingIterator(
 ) Iterator {
 	seen := make(map[string]struct{})
 
-	return NewIterator(func(iterCtx context.Context) (Row, error) {
+	return newIteratorWithClose(func(iterCtx context.Context) (Row, error) {
 		if hasLimit && remaining == 0 {
 			return Row{}, ErrNoMoreRows
 		}
@@ -2099,7 +2164,7 @@ func distinctRowViewMaterializingIterator(
 			return Row{}, err
 		}
 		return Row{}, ErrNoMoreRows
-	})
+	}, views.Close)
 }
 
 func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields []Field) (StatementResult, error) {

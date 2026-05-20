@@ -17,15 +17,23 @@ type Iterator struct {
 
 // RowViewIterator is a pull-based cursor over lazy RowView results.
 type RowViewIterator struct {
-	err      error
-	rowFunc  func(ctx context.Context) (RowView, error)
-	nextView RowView
-	end      bool
+	err       error
+	rowFunc   func(ctx context.Context) (RowView, error)
+	closeFunc func() error
+	nextView  RowView
+	end       bool
 }
 
 // NewRowViewIterator wraps a row-view-producing function into an iterator.
 func NewRowViewIterator(rowFunc func(ctx context.Context) (RowView, error)) RowViewIterator {
 	return RowViewIterator{rowFunc: rowFunc}
+}
+
+func newRowViewIteratorWithClose(rowFunc func(ctx context.Context) (RowView, error), closeFunc func() error) RowViewIterator {
+	return RowViewIterator{
+		rowFunc:   rowFunc,
+		closeFunc: closeFunc,
+	}
 }
 
 // NewSliceRowViewIterator returns an iterator that yields row views from rows.
@@ -70,6 +78,9 @@ func (i *RowViewIterator) Next(ctx context.Context) bool {
 // Close marks the iterator as exhausted.
 func (i *RowViewIterator) Close() error {
 	i.end = true
+	if i.closeFunc != nil {
+		return i.closeFunc()
+	}
 	return nil
 }
 
