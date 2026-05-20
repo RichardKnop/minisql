@@ -196,6 +196,10 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return t.selectAggregateStreaming(ctx, stmt, plan, selectedFields)
 	}
 
+	if result, ok, err := t.selectWithSortStreamingLimit(ctx, stmt, plan, selectedFields, requestedFields); ok || err != nil {
+		return result, err
+	}
+
 	// Materialising path: buffer every matching row, then dispatch.
 	// Required for COUNT (needs a total), GROUP BY, aggregates, ORDER BY (sort),
 	// and JOIN (goroutine-based execution inside plan.Execute).
@@ -2034,14 +2038,7 @@ func distinctRowsFromRowViews(
 
 func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields []Field) (StatementResult, error) {
 	result := StatementResult{
-		Columns: make([]Column, len(requestedFields)),
-	}
-	for i, field := range requestedFields {
-		if field.Expr != nil {
-			result.Columns[i] = Column{Name: field.OutputName()}
-		} else if colIdx := stmt.ColumnIdx(field.Name); colIdx >= 0 {
-			result.Columns[i] = t.Columns[colIdx]
-		}
+		Columns: t.selectResultColumns(stmt, requestedFields),
 	}
 
 	var (
@@ -2089,6 +2086,73 @@ func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields [
 
 	result.Rows = NewSliceIterator(projected)
 	return result, nil
+}
+
+func (t *Table) selectWithSortStreamingLimit(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	selectedFields []Field,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if len(plan.Joins) > 0 ||
+		!plan.SortInMemory ||
+		!stmt.Limit.Valid ||
+		len(plan.OrderBy) == 0 ||
+		stmt.Distinct ||
+		stmt.IsSelectCountAll() ||
+		stmt.IsSelectGroupBy() ||
+		stmt.IsSelectAggregate() {
+		return StatementResult{}, false, nil
+	}
+
+	limit := int(stmt.Limit.Value.(int64))
+	offset := 0
+	if stmt.Offset.Valid {
+		offset = int(stmt.Offset.Value.(int64))
+	}
+	maxRows := limit + offset
+
+	h := newRowHeap(plan.OrderBy, maxRows)
+	outputFields := orderByOutputFields(requestedFields)
+	err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
+		updated, err := addOrderByOutputFieldsToRow(row, outputFields, plan.OrderBy)
+		if err != nil {
+			return err
+		}
+		h.PushRow(updated)
+		return nil
+	})
+	if err != nil {
+		return StatementResult{}, true, err
+	}
+
+	allRows := h.ExtractSorted()
+	if offset >= len(allRows) {
+		allRows = []Row{}
+	} else {
+		end := offset + limit
+		if end < len(allRows) {
+			allRows = allRows[offset:end]
+		} else {
+			allRows = allRows[offset:]
+		}
+	}
+
+	idx := 0
+	result := StatementResult{
+		Columns: t.selectResultColumns(stmt, requestedFields),
+	}
+	result.Rows = NewIterator(func(ctx context.Context) (Row, error) {
+		if idx >= len(allRows) {
+			return Row{}, ErrNoMoreRows
+		}
+		row := allRows[idx]
+		idx += 1
+		return projectRow(row, requestedFields)
+	})
+
+	return result, true, nil
 }
 
 func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, allRows []Row, requestedFields []Field) (StatementResult, error) {
@@ -2146,14 +2210,7 @@ func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, allRows []Row, re
 	// Create result with materialized rows
 	idx := 0
 	result := StatementResult{
-		Columns: make([]Column, len(requestedFields)),
-	}
-	for i, field := range requestedFields {
-		if field.Expr != nil {
-			result.Columns[i] = Column{Name: field.OutputName()}
-		} else if colIdx := stmt.ColumnIdx(field.Name); colIdx >= 0 {
-			result.Columns[i] = t.Columns[colIdx]
-		}
+		Columns: t.selectResultColumns(stmt, requestedFields),
 	}
 
 	result.Rows = NewIterator(func(ctx context.Context) (Row, error) {
@@ -2170,52 +2227,80 @@ func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, allRows []Row, re
 	return result, nil
 }
 
+func (t *Table) selectResultColumns(stmt Statement, requestedFields []Field) []Column {
+	columns := make([]Column, len(requestedFields))
+	for i, field := range requestedFields {
+		if field.Expr != nil {
+			columns[i] = Column{Name: field.OutputName()}
+		} else if colIdx := stmt.ColumnIdx(field.Name); colIdx >= 0 {
+			columns[i] = t.Columns[colIdx]
+		}
+	}
+	return columns
+}
+
 func addOrderByOutputFields(rows []Row, fields []Field, orderBy []OrderBy) ([]Row, error) {
 	if len(rows) == 0 || len(orderBy) == 0 {
 		return rows, nil
 	}
 
-	outputFields := make(map[string]Field)
-	for _, field := range fields {
-		outputFields[field.OutputName()] = field
-	}
-
+	outputFields := orderByOutputFields(fields)
 	for rowIdx, row := range rows {
-		updated := row
-		for _, clause := range orderBy {
-			if _, found := updated.GetValue(clause.Field.Name); found {
-				continue
-			}
-
-			field, ok := outputFields[clause.Field.Name]
-			if !ok {
-				continue
-			}
-
-			var value OptionalValue
-			if field.Expr != nil {
-				result, err := field.Expr.Eval(updated)
-				if err != nil {
-					return nil, fmt.Errorf("evaluating ORDER BY expression %q: %w", field.OutputName(), err)
-				}
-				if result != nil {
-					value = OptionalValue{Value: result, Valid: true}
-				}
-			} else {
-				existing, found := updated.getValueQualified(field.AliasPrefix, field.Name)
-				if !found {
-					continue
-				}
-				value = existing
-			}
-
-			updated.Columns = append(updated.Columns, Column{Name: field.OutputName()})
-			updated.Values = append(updated.Values, value)
+		updated, err := addOrderByOutputFieldsToRow(row, outputFields, orderBy)
+		if err != nil {
+			return nil, err
 		}
 		rows[rowIdx] = updated
 	}
 
 	return rows, nil
+}
+
+func orderByOutputFields(fields []Field) map[string]Field {
+	outputFields := make(map[string]Field)
+	for _, field := range fields {
+		outputFields[field.OutputName()] = field
+	}
+	return outputFields
+}
+
+func addOrderByOutputFieldsToRow(row Row, outputFields map[string]Field, orderBy []OrderBy) (Row, error) {
+	if len(orderBy) == 0 {
+		return row, nil
+	}
+	updated := row
+	for _, clause := range orderBy {
+		if _, found := updated.GetValue(clause.Field.Name); found {
+			continue
+		}
+
+		field, ok := outputFields[clause.Field.Name]
+		if !ok {
+			continue
+		}
+
+		var value OptionalValue
+		if field.Expr != nil {
+			result, err := field.Expr.Eval(updated)
+			if err != nil {
+				return Row{}, fmt.Errorf("evaluating ORDER BY expression %q: %w", field.OutputName(), err)
+			}
+			if result != nil {
+				value = OptionalValue{Value: result, Valid: true}
+			}
+		} else {
+			existing, found := updated.getValueQualified(field.AliasPrefix, field.Name)
+			if !found {
+				continue
+			}
+			value = existing
+		}
+
+		updated.Columns = append(updated.Columns, Column{Name: field.OutputName()})
+		updated.Values = append(updated.Values, value)
+	}
+
+	return updated, nil
 }
 
 func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, selectedFields []Field, out func(Row) error) error {
