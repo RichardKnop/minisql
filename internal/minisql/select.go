@@ -1820,11 +1820,125 @@ func (t *Table) invertedRowViewIteratorFactory(
 	hasLimit bool,
 	hasOffset bool,
 ) (func() RowViewIterator, error) {
+	secondaryIndex, ok := t.SecondaryIndexes[scan.IndexName]
+	if !ok || secondaryIndex.Method != IndexMethodInverted || secondaryIndex.InvertedIndex == nil {
+		return nil, fmt.Errorf("no index found for inverted scan: %s", scan.IndexName)
+	}
+	if len(scan.IndexKeys) == 0 {
+		return func() RowViewIterator {
+			return NewRowViewIterator(func(context.Context) (RowView, error) {
+				return RowView{}, ErrNoMoreRows
+			})
+		}, nil
+	}
+	if len(scan.IndexKeys) == 1 {
+		term, ok := scan.IndexKeys[0].(string)
+		if !ok {
+			return func() RowViewIterator {
+				return NewRowViewIterator(func(context.Context) (RowView, error) {
+					return RowView{}, ErrNoMoreRows
+				})
+			}, nil
+		}
+		return t.singleTermInvertedRowViewIteratorFactory(secondaryIndex, scan, term, tableFilter, remaining, offset, hasLimit, hasOffset), nil
+	}
+
 	rowIDs, err := t.collectInvertedScanRowIDs(ctx, scan)
 	if err != nil {
 		return nil, err
 	}
 	return t.rowIDRowViewIteratorFactory(rowIDs, tableFilter, remaining, offset, hasLimit, hasOffset), nil
+}
+
+func (t *Table) singleTermInvertedRowViewIteratorFactory(
+	secondaryIndex SecondaryIndex,
+	scan Scan,
+	term string,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) func() RowViewIterator {
+	return func() RowViewIterator {
+		iterRemaining := remaining
+		iterOffset := offset
+		var (
+			iter   invertedPostingIterator
+			rowIDs []RowID
+			rowIdx int
+			done   bool
+		)
+		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
+			if iter == nil {
+				var err error
+				iter, err = secondaryIndex.InvertedIndex.Lookup(iterCtx, term)
+				if err != nil {
+					return RowView{}, fmt.Errorf("inverted lookup failed: %w", err)
+				}
+			}
+
+			for {
+				if err := iterCtx.Err(); err != nil {
+					return RowView{}, err
+				}
+				for rowIdx < len(rowIDs) {
+					rowID := rowIDs[rowIdx]
+					rowIdx += 1
+
+					view, err := t.rowViewByRowID(iterCtx, rowID)
+					if err != nil {
+						return RowView{}, err
+					}
+					if tableFilter != nil {
+						ok, err := tableFilter(iterCtx, view)
+						if err != nil {
+							return RowView{}, err
+						}
+						if !ok {
+							continue
+						}
+					}
+					if hasOffset && iterOffset > 0 {
+						iterOffset -= 1
+						continue
+					}
+					if hasLimit {
+						if iterRemaining == 0 {
+							return RowView{}, ErrNoMoreRows
+						}
+						iterRemaining -= 1
+					}
+					return view, nil
+				}
+				if done {
+					return RowView{}, ErrNoMoreRows
+				}
+
+				block, ok, err := iter.NextBlock(iterCtx)
+				if err != nil {
+					return RowView{}, fmt.Errorf("inverted lookup failed: %w", err)
+				}
+				if !ok {
+					done = true
+					continue
+				}
+
+				rowIDs = rowIDs[:0]
+				mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
+					rowIDs = append(rowIDs, rowID)
+					return nil
+				})
+				if err != nil {
+					return RowView{}, err
+				}
+				if mode != invertedPostingModeRowIDs {
+					return RowView{}, fmt.Errorf("inverted index %s uses posting mode %d", scan.IndexName, mode)
+				}
+				rowIdx = 0
+			}
+		})
+	}
 }
 
 type pointRowIDIteratorIndex interface {
@@ -3145,7 +3259,8 @@ func (t *Table) collectInvertedScanRowIDs(ctx context.Context, scan Scan) ([]Row
 	}
 
 	var surviving []RowID
-	for i, key := range scan.IndexKeys {
+	haveSurviving := false
+	for _, key := range scan.IndexKeys {
 		term, ok := key.(string)
 		if !ok {
 			continue
@@ -3154,35 +3269,16 @@ func (t *Table) collectInvertedScanRowIDs(ctx context.Context, scan Scan) ([]Row
 		if err != nil {
 			return nil, fmt.Errorf("inverted stats lookup failed: %w", err)
 		}
-		iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
+		rowIDs, err := loadInvertedRowIDsForTerm(ctx, secondaryIndex, scan.IndexName, term, stats.DocFreq)
 		if err != nil {
-			return nil, fmt.Errorf("inverted lookup failed: %w", err)
-		}
-		rowIDs := make([]RowID, 0, stats.DocFreq)
-		for {
-			block, ok, err := iter.NextBlock(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("inverted lookup failed: %w", err)
-			}
-			if !ok {
-				break
-			}
-			mode, postings, err := decodeInvertedPostingList(block.Payload)
-			if err != nil {
-				return nil, fmt.Errorf("inverted decode failed: %w", err)
-			}
-			if mode != invertedPostingModeRowIDs {
-				return nil, fmt.Errorf("inverted index %s uses posting mode %d", scan.IndexName, mode)
-			}
-			for _, posting := range postings {
-				rowIDs = append(rowIDs, posting.RowID)
-			}
+			return nil, err
 		}
 		if len(rowIDs) == 0 {
 			return nil, nil
 		}
-		if i == 0 {
+		if !haveSurviving {
 			surviving = rowIDs
+			haveSurviving = true
 			continue
 		}
 		surviving = intersectTwoSortedSets(surviving, rowIDs)
