@@ -99,6 +99,21 @@ func NewSliceIterator(rows []Row) Iterator {
 	})
 }
 
+func materializeResultRows(ctx context.Context, result StatementResult) ([]Row, error) {
+	if result.rawRows != nil {
+		return result.rawRows, nil
+	}
+
+	var rows []Row
+	for result.Rows.Next(ctx) {
+		rows = append(rows, result.Rows.Row())
+	}
+	if err := result.Rows.Err(); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // NewSingleRowIterator returns an Iterator that yields exactly one row then signals end-of-stream.
 func NewSingleRowIterator(row Row) Iterator {
 	i := Iterator{}

@@ -153,11 +153,8 @@ func (d *Database) executeExplainCTEs(ctx context.Context, inner Statement, anal
 		if err != nil {
 			return StatementResult{}, fmt.Errorf("CTE %q: %w", cte.Name, err)
 		}
-		var rows []Row
-		for result.Rows.Next(cteCtx) {
-			rows = append(rows, result.Rows.Row())
-		}
-		if err := result.Rows.Err(); err != nil {
+		rows, err := materializeResultRows(cteCtx, result)
+		if err != nil {
 			return StatementResult{}, fmt.Errorf("CTE %q: reading rows: %w", cte.Name, err)
 		}
 		dur := time.Since(start).Microseconds()
@@ -254,11 +251,8 @@ func (d *Database) executeExplainDerivedTable(ctx context.Context, inner Stateme
 	if err != nil {
 		return StatementResult{}, fmt.Errorf("derived table %q: %w", inner.FromSubqueryAlias, err)
 	}
-	var innerRows []Row
-	for innerResult.Rows.Next(ctx) {
-		innerRows = append(innerRows, innerResult.Rows.Row())
-	}
-	if err := innerResult.Rows.Err(); err != nil {
+	innerRows, err := materializeResultRows(ctx, innerResult)
+	if err != nil {
 		return StatementResult{}, fmt.Errorf("derived table %q: reading rows: %w", inner.FromSubqueryAlias, err)
 	}
 	innerDuration := time.Since(start).Microseconds()
