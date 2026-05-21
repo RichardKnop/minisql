@@ -740,6 +740,119 @@ func (acc *groupByAccumulator) process(row Row) {
 	}
 }
 
+func (acc *groupByAccumulator) processView(view RowView) error {
+	var err error
+	acc.keyBuf, err = buildGroupKeyFromRowView(acc.keyBuf[:0], view, acc.groupByColIdx)
+	if err != nil {
+		return err
+	}
+
+	gsIdx, exists := acc.groupMap[string(acc.keyBuf)]
+	if !exists {
+		key := string(acc.keyBuf) // one alloc per new group
+
+		aggStart := int32(len(acc.aggStatePool))
+		for i := range len(acc.aggregates) {
+			acc.aggStatePool = append(acc.aggStatePool, aggState{useIntSum: acc.useIntSum[i]})
+		}
+
+		gvStart := int32(len(acc.groupValPool))
+		for _, colIdx := range acc.groupByColIdx {
+			if colIdx >= 0 && colIdx < len(view.Columns()) {
+				val, err := view.ValueAt(colIdx)
+				if err != nil {
+					return err
+				}
+				acc.groupValPool = append(acc.groupValPool, val)
+			} else {
+				acc.groupValPool = append(acc.groupValPool, OptionalValue{})
+			}
+		}
+
+		gsIdx = int32(len(acc.groupEntries))
+		acc.groupEntries = append(acc.groupEntries, groupEntry{
+			aggStateStart: aggStart,
+			groupValStart: gvStart,
+		})
+		acc.groupMap[key] = gsIdx
+		acc.groupOrder = append(acc.groupOrder, key)
+	}
+
+	aggBase := int(acc.groupEntries[gsIdx].aggStateStart)
+	for i, agg := range acc.aggregates {
+		state := &acc.aggStatePool[aggBase+i]
+		switch agg.Kind {
+		case 0:
+			// Non-aggregate GROUP BY column — no accumulation needed.
+		case AggregateCount:
+			state.count += 1
+		case AggregateSum, AggregateAvg:
+			colIdx := acc.aggColIdx[i]
+			if colIdx < 0 || colIdx >= len(view.Columns()) {
+				continue
+			}
+			val, err := view.ValueAt(colIdx)
+			if err != nil {
+				return err
+			}
+			if !val.Valid {
+				continue
+			}
+			state.count += 1
+			state.hasValue = true
+			if state.useIntSum {
+				switch v := val.Value.(type) {
+				case int64:
+					state.sumI += v
+				case int32:
+					state.sumI += int64(v)
+				}
+			} else {
+				switch v := val.Value.(type) {
+				case float64:
+					state.sumF += v
+				case float32:
+					state.sumF += float64(v)
+				}
+			}
+		case AggregateMin:
+			colIdx := acc.aggColIdx[i]
+			if colIdx < 0 || colIdx >= len(view.Columns()) {
+				continue
+			}
+			val, err := view.ValueAt(colIdx)
+			if err != nil {
+				return err
+			}
+			if !val.Valid {
+				continue
+			}
+			if !state.hasValue || compareValues(val, state.min) < 0 {
+				state.min = val
+				state.hasValue = true
+			}
+		case AggregateMax:
+			colIdx := acc.aggColIdx[i]
+			if colIdx < 0 || colIdx >= len(view.Columns()) {
+				continue
+			}
+			val, err := view.ValueAt(colIdx)
+			if err != nil {
+				return err
+			}
+			if !val.Valid {
+				continue
+			}
+			if !state.hasValue || compareValues(val, state.max) > 0 {
+				state.max = val
+				state.hasValue = true
+			}
+		}
+	}
+
+	return nil
+}
+
 func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (StatementResult, error) {
 	_ = ctx // ctx kept for signature compat; no blocking ops remain
 	acc := newGroupByAccumulator(stmt, t, len(rows))
@@ -792,11 +905,6 @@ func (t *Table) selectGroupByZeroAlloc(ctx context.Context, stmt Statement, scan
 	fullMask := selectedColumnsMask(t.Columns, selectedFields)
 	tableFilter := compileScanFilter(t.Columns, scan.Filters)
 
-	// Pre-allocate one reusable values buffer. Safe because process() copies the
-	// GROUP BY column values it needs into groupValPool before returning — the
-	// buffer is overwritten on the next row.
-	reuseValues := make([]OptionalValue, len(t.Columns))
-
 	estRows := int(t.estimatedRowCount())
 	if estRows <= 0 {
 		estRows = 160 // conservative default (estGroups = 16)
@@ -833,13 +941,13 @@ func (t *Table) selectGroupByZeroAlloc(ctx context.Context, stmt Statement, scan
 			cursor.CellIdx = 0
 		}
 
-		row := t.newRow()
-		row, err = row.unmarshalWithMaskInto(cell, fullMask, reuseValues)
-		if err != nil {
-			return StatementResult{}, err
-		}
+		view := NewRowView(t.Columns, cell)
 
 		if tableFilter != nil {
+			row, err := view.Materialize(fullMask)
+			if err != nil {
+				return StatementResult{}, err
+			}
 			ok, err := tableFilter(row)
 			if err != nil {
 				return StatementResult{}, err
@@ -849,7 +957,9 @@ func (t *Table) selectGroupByZeroAlloc(ctx context.Context, stmt Statement, scan
 			}
 		}
 
-		acc.process(row)
+		if err := acc.processView(view); err != nil {
+			return StatementResult{}, err
+		}
 	}
 
 	return acc.buildResult(stmt, t)
@@ -3690,30 +3800,57 @@ func buildGroupKey(buf []byte, row Row, colIndices []int) []byte {
 			buf = append(buf, "null"...)
 			continue
 		}
-		switch val := v.Value.(type) {
-		case TextPointer:
-			buf = append(buf, 't')
-			buf = strconv.AppendInt(buf, int64(val.Length), 10)
-			buf = append(buf, ':')
-			buf = append(buf, val.Data...)
-		case bool:
-			buf = append(buf, "b:"...)
-			buf = strconv.AppendBool(buf, val)
-		case int64:
-			buf = append(buf, "i64:"...)
-			buf = strconv.AppendInt(buf, val, 10)
-		case int32:
-			buf = append(buf, "i32:"...)
-			buf = strconv.AppendInt(buf, int64(val), 10)
-		case float64:
-			buf = append(buf, "f64:"...)
-			buf = strconv.AppendFloat(buf, val, 'g', -1, 64)
-		case float32:
-			buf = append(buf, "f32:"...)
-			buf = strconv.AppendFloat(buf, float64(val), 'g', -1, 32)
-		default:
-			buf = fmt.Appendf(buf, "?:%v", val)
+		buf = appendGroupKeyValue(buf, v)
+	}
+	return buf
+}
+
+func buildGroupKeyFromRowView(buf []byte, view RowView, colIndices []int) ([]byte, error) {
+	for i, colIdx := range colIndices {
+		if i > 0 {
+			buf = append(buf, '\x1f')
 		}
+		if colIdx < 0 || colIdx >= len(view.Columns()) {
+			buf = append(buf, "null"...)
+			continue
+		}
+		value, err := view.ValueAt(colIdx)
+		if err != nil {
+			return nil, err
+		}
+		if !value.Valid {
+			buf = append(buf, "null"...)
+			continue
+		}
+		buf = appendGroupKeyValue(buf, value)
+	}
+	return buf, nil
+}
+
+func appendGroupKeyValue(buf []byte, value OptionalValue) []byte {
+	switch val := value.Value.(type) {
+	case TextPointer:
+		buf = append(buf, 't')
+		buf = strconv.AppendInt(buf, int64(val.Length), 10)
+		buf = append(buf, ':')
+		buf = append(buf, val.Data...)
+	case bool:
+		buf = append(buf, "b:"...)
+		buf = strconv.AppendBool(buf, val)
+	case int64:
+		buf = append(buf, "i64:"...)
+		buf = strconv.AppendInt(buf, val, 10)
+	case int32:
+		buf = append(buf, "i32:"...)
+		buf = strconv.AppendInt(buf, int64(val), 10)
+	case float64:
+		buf = append(buf, "f64:"...)
+		buf = strconv.AppendFloat(buf, val, 'g', -1, 64)
+	case float32:
+		buf = append(buf, "f32:"...)
+		buf = strconv.AppendFloat(buf, float64(val), 'g', -1, 32)
+	default:
+		buf = fmt.Appendf(buf, "?:%v", val)
 	}
 	return buf
 }
