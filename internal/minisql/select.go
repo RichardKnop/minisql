@@ -205,6 +205,9 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	if result, ok, err := t.selectWithSortStreamingLimit(ctx, stmt, plan, selectedFields, requestedFields); ok || err != nil {
 		return result, err
 	}
+	if result, ok, err := t.selectWithSortRowView(ctx, stmt, plan, selectedFields, requestedFields); ok || err != nil {
+		return result, err
+	}
 
 	// Materialising path: buffer every matching row, then dispatch.
 	// Required for COUNT (needs a total), GROUP BY, aggregates, ORDER BY (sort),
@@ -2824,6 +2827,153 @@ func (t *Table) selectWithSortStreamingLimitRowView(
 		for i := range requestedFields {
 			values[i] = row.Values[i]
 		}
+		projected := NewRowWithValues(resultColumns, values)
+		projected.Key = row.Key
+		return projected, nil
+	})
+
+	return result, true, nil
+}
+
+func (t *Table) selectWithSortRowView(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	selectedFields []Field,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if len(plan.Joins) > 0 ||
+		len(plan.Scans) != 1 ||
+		plan.Scans[0].Type != ScanTypeSequential ||
+		t.virtualRows != nil ||
+		t.parallelScan ||
+		!plan.SortInMemory ||
+		stmt.Limit.Valid ||
+		len(plan.OrderBy) == 0 ||
+		stmt.Distinct ||
+		stmt.IsSelectCountAll() ||
+		stmt.IsSelectGroupBy() ||
+		stmt.IsSelectAggregate() {
+		return StatementResult{}, false, nil
+	}
+	for _, field := range requestedFields {
+		if field.Expr != nil {
+			return StatementResult{}, false, nil
+		}
+	}
+	for _, clause := range plan.OrderBy {
+		if clause.Field.Expr != nil {
+			return StatementResult{}, false, nil
+		}
+	}
+
+	sortFields := orderByHeapFields(requestedFields, plan.OrderBy)
+	fieldIndexes, sortColumns, ok := rowViewProjectionPlan(t.Columns, sortFields, stmt.TableName, stmt.TableAlias)
+	if !ok {
+		return StatementResult{}, false, nil
+	}
+	_, resultColumns, ok := rowViewProjectionPlan(t.Columns, requestedFields, stmt.TableName, stmt.TableAlias)
+	if !ok {
+		return StatementResult{}, false, nil
+	}
+
+	scan := plan.Scans[0]
+	var (
+		rowViewFilter func(context.Context, RowView) (bool, error)
+		rowFilter     func(Row) (bool, error)
+		selectedMask  []bool
+	)
+	if rowViewFilterSupports(t.Columns, scan.Filters) {
+		rowViewFilter = compileRowViewFilterForColumns(t.Columns, t.pager, scan.Filters)
+	} else {
+		rowFilter = compileScanFilter(t.Columns, scan.Filters)
+		selectedMask = selectedColumnsMask(t.Columns, selectedFields)
+	}
+
+	cursor, err := t.SeekFirst(ctx)
+	if err != nil {
+		return StatementResult{}, true, err
+	}
+	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return StatementResult{}, true, fmt.Errorf("order by row view scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	allRows := make([]Row, 0)
+	for !cursor.EndOfTable {
+		if err := ctx.Err(); err != nil {
+			return StatementResult{}, true, err
+		}
+		if page.Index != cursor.PageIdx {
+			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
+			if err != nil {
+				return StatementResult{}, true, fmt.Errorf("order by row view scan: %w", err)
+			}
+		}
+		if cursor.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
+			return StatementResult{}, true, fmt.Errorf("cell index %d out of bounds, max %d", cursor.CellIdx, page.LeafNode.Header.Cells-1)
+		}
+
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+		advanceLeafCursor(cursor, page)
+		view := NewRowView(t.Columns, cell)
+
+		if rowViewFilter != nil {
+			ok, err := rowViewFilter(ctx, view)
+			if err != nil {
+				return StatementResult{}, true, err
+			}
+			if !ok {
+				continue
+			}
+		} else if rowFilter != nil {
+			row, err := view.MaterializeWithOverflow(ctx, t.pager, selectedMask)
+			if err != nil {
+				return StatementResult{}, true, err
+			}
+			ok, err := rowFilter(row)
+			if err != nil {
+				return StatementResult{}, true, err
+			}
+			if !ok {
+				continue
+			}
+		}
+
+		row, err := projectRowView(ctx, t.pager, view, fieldIndexes, sortColumns)
+		if err != nil {
+			return StatementResult{}, true, err
+		}
+		allRows = append(allRows, row)
+	}
+
+	if err := t.sortRows(allRows, plan.OrderBy); err != nil {
+		return StatementResult{}, true, err
+	}
+
+	offset := 0
+	if stmt.Offset.Valid {
+		offset = int(stmt.Offset.Value.(int64))
+	}
+	if offset >= len(allRows) {
+		allRows = nil
+	} else if offset > 0 {
+		allRows = allRows[offset:]
+	}
+
+	result := StatementResult{
+		Columns: resultColumns,
+	}
+	idx := 0
+	result.Rows = NewIterator(func(ctx context.Context) (Row, error) {
+		if idx >= len(allRows) {
+			return Row{}, ErrNoMoreRows
+		}
+		row := allRows[idx]
+		idx += 1
+		values := make([]OptionalValue, len(requestedFields))
+		copy(values, row.Values[:len(requestedFields)])
 		projected := NewRowWithValues(resultColumns, values)
 		projected.Key = row.Key
 		return projected, nil
