@@ -208,7 +208,7 @@ func TestProjectCoveringIndexKey(t *testing.T) {
 			int64(99),
 			[]Column{idCol},
 			RowID(42),
-			[]Field{{Name: "id"}},
+			[]int{0},
 			[]Column{idCol},
 		)
 		require.NoError(t, err)
@@ -230,7 +230,7 @@ func TestProjectCoveringIndexKey(t *testing.T) {
 			ck,
 			[]Column{idCol, emailCol},
 			RowID(7),
-			[]Field{{Name: "email"}},
+			[]int{1},
 			[]Column{emailCol},
 		)
 		require.NoError(t, err)

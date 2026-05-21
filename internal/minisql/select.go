@@ -1117,6 +1117,7 @@ func (t *Table) selectStreamingDirectCoveringIndex(
 	}
 
 	resultColumns := make([]Column, len(requestedFields))
+	projectionIndexes := make([]int, len(requestedFields))
 	for i, field := range requestedFields {
 		col, colIdx := columnByFieldName(scan.IndexColumns, field.Name)
 		if colIdx < 0 {
@@ -1124,6 +1125,7 @@ func (t *Table) selectStreamingDirectCoveringIndex(
 		}
 		col.Name = field.OutputName()
 		resultColumns[i] = col
+		projectionIndexes[i] = colIdx
 	}
 
 	var (
@@ -1149,7 +1151,7 @@ func (t *Table) selectStreamingDirectCoveringIndex(
 			plan,
 			scan,
 			filter,
-			requestedFields,
+			projectionIndexes,
 			resultColumns,
 			remaining,
 			offset,
@@ -1170,7 +1172,7 @@ func (t *Table) coveringIndexIterator(
 	plan QueryPlan,
 	scan Scan,
 	filter func(Row) (bool, error),
-	requestedFields []Field,
+	projectionIndexes []int,
 	resultColumns []Column,
 	remaining int64,
 	offset int64,
@@ -1208,7 +1210,7 @@ func (t *Table) coveringIndexIterator(
 			offset -= 1
 			return nil
 		}
-		projectedRow, err := projectCoveringIndexKey(key, scan.IndexColumns, rowID, requestedFields, resultColumns)
+		projectedRow, err := projectCoveringIndexKey(key, scan.IndexColumns, rowID, projectionIndexes, resultColumns)
 		if err != nil {
 			return err
 		}
@@ -1421,19 +1423,12 @@ func columnByFieldName(columns []Column, name string) (Column, int) {
 	return Column{}, -1
 }
 
-func projectCoveringIndexKey(key any, indexColumns []Column, rowID RowID, fields []Field, columns []Column) (Row, error) {
+func projectCoveringIndexKey(key any, indexColumns []Column, rowID RowID, projectionIndexes []int, columns []Column) (Row, error) {
 	if ck, ok := key.(CompositeKey); ok {
-		values := make([]OptionalValue, len(fields))
-		for i, field := range fields {
-			idx := -1
-			for j, col := range ck.Columns {
-				if col.Name == field.Name {
-					idx = j
-					break
-				}
-			}
-			if idx < 0 {
-				return Row{}, fmt.Errorf("row does not contain column '%s'", field.Name)
+		values := make([]OptionalValue, len(projectionIndexes))
+		for i, idx := range projectionIndexes {
+			if idx < 0 || idx >= len(ck.Values) {
+				return Row{}, fmt.Errorf("covering index projection column %d out of range", idx)
 			}
 			values[i] = OptionalValue{Value: ck.Values[idx], Valid: true}
 		}
@@ -1445,8 +1440,8 @@ func projectCoveringIndexKey(key any, indexColumns []Column, rowID RowID, fields
 	if len(indexColumns) != 1 {
 		return Row{}, fmt.Errorf("single-column index key has %d index columns", len(indexColumns))
 	}
-	if len(fields) != 1 || fields[0].Name != indexColumns[0].Name {
-		return Row{}, fmt.Errorf("row does not contain column '%s'", fields[0].Name)
+	if len(projectionIndexes) != 1 || projectionIndexes[0] != 0 {
+		return Row{}, fmt.Errorf("single-column index projection indexes %v", projectionIndexes)
 	}
 	projected := NewRowWithValues(columns, []OptionalValue{{Value: key, Valid: true}})
 	projected.Key = rowID
