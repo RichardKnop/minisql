@@ -71,6 +71,18 @@ func buildHashBuckets(ctx context.Context, plan QueryPlan, provider TableProvide
 			bucket.rows = make(map[string][]Row)
 		}
 
+		// For semi-joins on a sequential scan with RowView-compatible filters,
+		// use the RowView path to avoid materialising full rows just for key
+		// extraction.  This eliminates the per-row []OptionalValue allocation.
+		if isSemiJoin && innerScan.Type == ScanTypeSequential &&
+			rowViewFilterSupports(innerTable.Columns, innerScan.Filters) {
+			if err := buildSemiJoinBucketFromRowViews(ctx, innerTable, innerScan, join, bucket); err != nil {
+				return nil, fmt.Errorf("hash join build phase (join %d): %w", i, err)
+			}
+			buckets[i] = bucket
+			continue
+		}
+
 		innerFields := fieldsFromColumns(innerTable.Columns...)
 		// keyBuf is reused across rows in the build phase to avoid one alloc per row.
 		var keyBuf []byte
@@ -100,6 +112,83 @@ func buildHashBuckets(ctx context.Context, plan QueryPlan, provider TableProvide
 		buckets[i] = bucket
 	}
 	return buckets, nil
+}
+
+// buildSemiJoinBucketFromRowViews fills bucket.present using a RowView
+// sequential scan that avoids materialising full rows.  It applies filters and
+// extracts join keys via typed accessors, eliminating per-row heap allocations.
+func buildSemiJoinBucketFromRowViews(ctx context.Context, innerTable *Table, innerScan Scan, join JoinPlan, bucket *hashJoinBucket) error {
+	// Pre-compute join-key column indexes and kinds so the inner loop can use
+	// typed accessors without name lookups.
+	colIdxs := make([]int, len(join.JoinColumnPairs))
+	colKinds := make([]ColumnKind, len(join.JoinColumnPairs))
+	colIndexMap := make(map[string]int, len(innerTable.Columns))
+	for idx, col := range innerTable.Columns {
+		colIndexMap[col.Name] = idx
+	}
+	for p, pair := range join.JoinColumnPairs {
+		idx, ok := colIndexMap[pair.JoinTableColumn.Name]
+		if !ok {
+			return fmt.Errorf("join column %s not found in inner table", pair.JoinTableColumn.Name)
+		}
+		colIdxs[p] = idx
+		colKinds[p] = innerTable.Columns[idx].Kind
+	}
+
+	innerFields := fieldsFromColumns(innerTable.Columns...)
+	filter := innerTable.compileRowViewScanFilter(innerScan, innerFields)
+
+	cursor, err := innerTable.SeekFirst(ctx)
+	if err != nil {
+		return err
+	}
+	page, err := innerTable.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return fmt.Errorf("semi-join build scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	var keyBuf []byte
+	for !cursor.EndOfTable {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if page.Index != cursor.PageIdx {
+			page, err = innerTable.pager.ReadPage(ctx, cursor.PageIdx)
+			if err != nil {
+				return fmt.Errorf("semi-join build scan: %w", err)
+			}
+		}
+		if cursor.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
+			return fmt.Errorf("cell index %d out of bounds, max %d", cursor.CellIdx, page.LeafNode.Header.Cells-1)
+		}
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+		advanceLeafCursor(cursor, page)
+
+		view := NewRowView(innerTable.Columns, cell)
+		ok, err := filter.accept(ctx, innerTable.pager, view)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+
+		var valid bool
+		keyBuf, valid, err = appendHashKeyFromView(keyBuf[:0], view, colIdxs, colKinds)
+		if err != nil {
+			return err
+		}
+		if !valid {
+			continue // NULL key — never matches
+		}
+		if _, exists := bucket.present[string(keyBuf)]; !exists {
+			key := string(keyBuf)
+			bucket.present[key] = struct{}{}
+			bucket.filter.Add(keyBuf)
+		}
+	}
+	return nil
 }
 
 // appendHashKey encodes the join column values from row into buf and returns
@@ -162,5 +251,70 @@ func appendHashKeyPart(buf []byte, v any) []byte {
 	default:
 		return fmt.Appendf(buf, "%v", v)
 	}
+}
+
+// appendHashKeyFromView encodes join key columns from a RowView into buf using
+// typed accessors, avoiding boxing values into any.  Returns (buf, true, nil)
+// on success, (nil, false, nil) when any join column is NULL, or an error on
+// decode failure.  colIdxs and colKinds must be pre-computed and co-indexed.
+func appendHashKeyFromView(buf []byte, view RowView, colIdxs []int, colKinds []ColumnKind) ([]byte, bool, error) {
+	for i, colIdx := range colIdxs {
+		isNull, err := view.IsNull(colIdx)
+		if err != nil {
+			return nil, false, err
+		}
+		if isNull {
+			return nil, false, nil // NULL key — never matches
+		}
+		if i > 0 {
+			buf = append(buf, '\x00')
+		}
+		switch colKinds[i] {
+		case Int4, Int8, Timestamp:
+			v, _, err := view.Int64At(colIdx)
+			if err != nil {
+				return nil, false, err
+			}
+			buf = strconv.AppendInt(buf, v, 10)
+		case Real, Double:
+			v, _, err := view.Float64At(colIdx)
+			if err != nil {
+				return nil, false, err
+			}
+			buf = strconv.AppendFloat(buf, v, 'f', -1, 64)
+		case Boolean:
+			v, _, err := view.BoolAt(colIdx)
+			if err != nil {
+				return nil, false, err
+			}
+			if v {
+				buf = append(buf, '1')
+			} else {
+				buf = append(buf, '0')
+			}
+		case Varchar, Text, JSON:
+			tp, err := view.TextAt(colIdx)
+			if err != nil {
+				return nil, false, err
+			}
+			buf = append(buf, tp.String()...)
+		case UUID:
+			v, _, err := view.UUIDAt(colIdx)
+			if err != nil {
+				return nil, false, err
+			}
+			buf = append(buf, v.String()...)
+		default:
+			val, err := view.ValueAt(colIdx)
+			if err != nil {
+				return nil, false, err
+			}
+			if !val.Valid {
+				return nil, false, nil
+			}
+			buf = appendHashKeyPart(buf, val.Value)
+		}
+	}
+	return buf, true, nil
 }
 

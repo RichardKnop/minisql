@@ -150,6 +150,22 @@ Alloc counts unchanged (468/273 — same structure, just smaller allocations).
 
 ---
 
+### 2026-05-21 — Step 4+5: eliminate double projection + semi-join RowView build phase
+
+**Changes:**
+- Step 4: `selectWithSortRowView` output iterator now sub-slices `row.Values[:nResult]` instead of copying into a new `[]OptionalValue` per result row; no alloc when ORDER BY columns are already in SELECT fields
+- Step 5: `buildSemiJoinBucketFromRowViews` in `hash_join.go` — for semi/anti-semi hash joins on sequential scans with RowView-compatible filters, the inner table build phase now uses a direct RowView scan with typed accessors (`Int64At`, `Float64At`, `TextAt`, `BoolAt`) instead of `runTableScan → sequentialScan → view.MaterializeWithOverflow`; eliminates per-row `[]OptionalValue` allocation on the build side; `appendHashKeyFromView` encodes join keys without boxing values into `any`
+
+#### Memory change (B/op, mean of 3 runs)
+
+| Benchmark | before | after | reduction | vs SQLite |
+|---|---|---|---|---|
+| Subquery_InList | 5.78 MiB | **3.42 MiB** | **1.69×** | 14× (was 25×) |
+
+Alloc count: 134,876 → 74,887 (1.80× reduction). Remaining allocations are from the outer-table row materialisation and database/sql driver delivery per result row.
+
+---
+
 ### 2026-05-20 17:10 UTC
 
 #### Timing
