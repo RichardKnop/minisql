@@ -38,11 +38,7 @@ func (r Rows) Columns() []string {
 // Close closes the rows iterator.
 func (r *Rows) Close() error {
 	if r.useRowViews {
-		if err := r.rowViewIter.Close(); err != nil {
-			_ = r.closeReadTx(false)
-			return err
-		}
-		return r.closeReadTx(true)
+		return r.closeRowViewIterators(true)
 	}
 	return r.iter.Close()
 }
@@ -100,15 +96,10 @@ func (r *Rows) Next(dest []driver.Value) error {
 func (r *Rows) nextRowView(dest []driver.Value) error {
 	if !r.rowViewIter.Next(r.ctx) {
 		if err := r.rowViewIter.Err(); err != nil {
-			_ = r.rowViewIter.Close()
-			_ = r.closeReadTx(false)
+			_ = r.closeRowViewIterators(false)
 			return err
 		}
-		if err := r.rowViewIter.Close(); err != nil {
-			_ = r.closeReadTx(false)
-			return err
-		}
-		if err := r.closeReadTx(true); err != nil {
+		if err := r.closeRowViewIterators(true); err != nil {
 			return err
 		}
 		return io.EOF
@@ -127,6 +118,18 @@ func (r *Rows) nextRowView(dest []driver.Value) error {
 	}
 
 	return nil
+}
+
+func (r *Rows) closeRowViewIterators(success bool) error {
+	err := r.rowViewIter.Close()
+	if fallbackErr := r.iter.Close(); err == nil {
+		err = fallbackErr
+	}
+	if err != nil {
+		_ = r.closeReadTx(false)
+		return err
+	}
+	return r.closeReadTx(success)
 }
 
 func (r *Rows) rowViewDriverValue(view minisql.RowView, destIdx, fieldIdx int) (driver.Value, error) {
