@@ -1288,7 +1288,7 @@ func (t *Table) selectStreamingDirectRowView(
 	if t.virtualRows != nil || len(plan.Scans) != 1 {
 		return StatementResult{}, false, nil
 	}
-	fieldIndexes, resultColumns, ok := rowViewProjectionPlan(t.Columns, requestedFields)
+	fieldIndexes, resultColumns, ok := rowViewProjectionPlan(t.Columns, requestedFields, stmt.TableName, stmt.TableAlias)
 	if !ok {
 		return StatementResult{}, false, nil
 	}
@@ -2168,11 +2168,14 @@ func (t *Table) rowViewByRowID(ctx context.Context, rowID RowID) (RowView, error
 	return cursor.fetchRowView(ctx)
 }
 
-func rowViewProjectionPlan(columns []Column, fields []Field) ([]int, []Column, bool) {
+func rowViewProjectionPlan(columns []Column, fields []Field, allowedAliases ...string) ([]int, []Column, bool) {
 	indexes := make([]int, len(fields))
 	resultColumns := make([]Column, len(fields))
 	for i, field := range fields {
-		if field.Expr != nil || field.AliasPrefix != "" {
+		if field.Expr != nil {
+			return nil, nil, false
+		}
+		if field.AliasPrefix != "" && !rowViewAliasAllowed(field.AliasPrefix, allowedAliases) {
 			return nil, nil, false
 		}
 		idx := -1
@@ -2190,6 +2193,15 @@ func rowViewProjectionPlan(columns []Column, fields []Field) ([]int, []Column, b
 		indexes[i] = idx
 	}
 	return indexes, resultColumns, true
+}
+
+func rowViewAliasAllowed(alias string, allowedAliases []string) bool {
+	for _, allowed := range allowedAliases {
+		if allowed != "" && alias == allowed {
+			return true
+		}
+	}
+	return false
 }
 
 func projectRowView(ctx context.Context, pager TxPager, view RowView, fieldIndexes []int, columns []Column) (Row, error) {

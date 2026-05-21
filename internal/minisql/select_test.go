@@ -793,6 +793,46 @@ func TestTable_Select_NonUniqueSecondaryIndexPointUsesRowViews(t *testing.T) {
 	assert.Equal(t, rows[2].Values[1], got[1].Values[1])
 }
 
+func TestTable_Select_QualifiedSingleTableFieldsUseRowViews(t *testing.T) {
+	table, txManager, _ := newTestTable(t, testColumns[0:3])
+	ctx := context.Background()
+
+	row := NewRowWithValues(testColumns[0:3], []OptionalValue{
+		{Value: int64(1), Valid: true},
+		{Value: NewTextPointer([]byte("a@example.com")), Valid: true},
+		{Value: int32(42), Valid: true},
+	})
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		_, err := table.Insert(ctx, Statement{
+			Kind:    Insert,
+			Fields:  fieldsFromColumns(testColumns[0:3]...),
+			Inserts: [][]OptionalValue{row.Values},
+		})
+		return err
+	})
+	require.NoError(t, err)
+
+	result, err := table.Select(ctx, Statement{
+		Kind:       Select,
+		TableName:  testTableName,
+		TableAlias: "u",
+		Fields: []Field{
+			{Name: "id", AliasPrefix: "u"},
+			{Name: "email", AliasPrefix: "u"},
+		},
+		Conditions: NewOneOrMore(Conditions{
+			FieldIsEqual(Field{Name: "age", AliasPrefix: "u"}, OperandInteger, int64(42)),
+		}),
+	})
+	require.NoError(t, err)
+	assert.Len(t, result.RowViewFieldIndexes, 2)
+
+	got := collectRows(ctx, result)
+	require.Len(t, got, 1)
+	assert.Equal(t, row.Values[0], got[0].Values[0])
+	assert.Equal(t, row.Values[1], got[0].Values[1])
+}
+
 // TestTable_SelectGroupBy covers selectGroupBy via Table.Select.
 // Uses testColumns: id(Int8), email(Varchar), age(Int4), verified(Boolean), score(Real), created(Timestamp).
 // We insert rows with two distinct verified values (true/false) and assert group counts and sums.
