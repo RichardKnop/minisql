@@ -2832,9 +2832,17 @@ func (t *Table) indexPointExists(ctx context.Context, scan Scan, selectedFields 
 	isCovering := scan.CoveringIndex
 	idxColumns := scan.IndexColumns
 	nSelected := len(selectedFields)
+	hasResidualFilter := tableFilter != nil || (isCovering && coveringFilter != nil)
 
 	for _, indexValue := range scan.IndexKeys {
 		err := idx.VisitRowIDs(ctx, indexValue, func(rowID RowID) error {
+			if !hasResidualFilter {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return errStopScan
+			}
+
 			var row Row
 			switch {
 			case isCovering:
