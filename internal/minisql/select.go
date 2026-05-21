@@ -1208,7 +1208,7 @@ func (t *Table) coveringIndexIterator(
 			offset -= 1
 			return nil
 		}
-		projectedRow, err := projectCoveringIndexRow(row, requestedFields, resultColumns)
+		projectedRow, err := projectCoveringIndexKey(key, scan.IndexColumns, rowID, requestedFields, resultColumns)
 		if err != nil {
 			return err
 		}
@@ -1421,17 +1421,35 @@ func columnByFieldName(columns []Column, name string) (Column, int) {
 	return Column{}, -1
 }
 
-func projectCoveringIndexRow(row Row, fields []Field, columns []Column) (Row, error) {
-	values := make([]OptionalValue, len(fields))
-	for i, field := range fields {
-		value, ok := row.GetValue(field.Name)
-		if !ok {
-			return Row{}, fmt.Errorf("row does not contain column '%s'", field.Name)
+func projectCoveringIndexKey(key any, indexColumns []Column, rowID RowID, fields []Field, columns []Column) (Row, error) {
+	if ck, ok := key.(CompositeKey); ok {
+		values := make([]OptionalValue, len(fields))
+		for i, field := range fields {
+			idx := -1
+			for j, col := range ck.Columns {
+				if col.Name == field.Name {
+					idx = j
+					break
+				}
+			}
+			if idx < 0 {
+				return Row{}, fmt.Errorf("row does not contain column '%s'", field.Name)
+			}
+			values[i] = OptionalValue{Value: ck.Values[idx], Valid: true}
 		}
-		values[i] = value
+		projected := NewRowWithValues(columns, values)
+		projected.Key = rowID
+		return projected, nil
 	}
-	projected := NewRowWithValues(columns, values)
-	projected.Key = row.Key
+
+	if len(indexColumns) != 1 {
+		return Row{}, fmt.Errorf("single-column index key has %d index columns", len(indexColumns))
+	}
+	if len(fields) != 1 || fields[0].Name != indexColumns[0].Name {
+		return Row{}, fmt.Errorf("row does not contain column '%s'", fields[0].Name)
+	}
+	projected := NewRowWithValues(columns, []OptionalValue{{Value: key, Valid: true}})
+	projected.Key = rowID
 	return projected, nil
 }
 

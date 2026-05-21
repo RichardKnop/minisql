@@ -193,6 +193,55 @@ func TestRowFromIndexKey(t *testing.T) {
 	})
 }
 
+func TestProjectCoveringIndexKey(t *testing.T) {
+	t.Parallel()
+
+	var (
+		idCol    = Column{Kind: Int8, Size: 8, Name: "id"}
+		emailCol = Column{Kind: Varchar, Size: MaxInlineVarchar, Name: "email", Nullable: true}
+	)
+
+	t.Run("single-column key", func(t *testing.T) {
+		t.Parallel()
+
+		row, err := projectCoveringIndexKey(
+			int64(99),
+			[]Column{idCol},
+			RowID(42),
+			[]Field{{Name: "id"}},
+			[]Column{idCol},
+		)
+		require.NoError(t, err)
+		assert.Equal(t, RowID(42), row.Key)
+		require.Len(t, row.Values, 1)
+		assert.Equal(t, int64(99), row.Values[0].Value)
+		assert.True(t, row.Values[0].Valid)
+	})
+
+	t.Run("composite key projects requested subset", func(t *testing.T) {
+		t.Parallel()
+
+		ck := NewCompositeKey(
+			[]Column{idCol, emailCol},
+			int64(5),
+			"a@b.com",
+		)
+		row, err := projectCoveringIndexKey(
+			ck,
+			[]Column{idCol, emailCol},
+			RowID(7),
+			[]Field{{Name: "email"}},
+			[]Column{emailCol},
+		)
+		require.NoError(t, err)
+		assert.Equal(t, RowID(7), row.Key)
+		assert.Equal(t, []Column{emailCol}, row.Columns)
+		require.Len(t, row.Values, 1)
+		assert.Equal(t, "a@b.com", row.Values[0].Value)
+		assert.True(t, row.Values[0].Valid)
+	})
+}
+
 func TestMarkCoveringIndexes(t *testing.T) {
 	t.Parallel()
 
