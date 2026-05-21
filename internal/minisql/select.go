@@ -199,6 +199,9 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return t.selectAggregateStreaming(ctx, stmt, plan, selectedFields)
 	}
 
+	if result, ok, err := t.selectWithSortStreamingLimitRowView(ctx, stmt, plan, selectedFields, requestedFields); ok || err != nil {
+		return result, err
+	}
 	if result, ok, err := t.selectWithSortStreamingLimit(ctx, stmt, plan, selectedFields, requestedFields); ok || err != nil {
 		return result, err
 	}
@@ -2656,6 +2659,161 @@ func (t *Table) selectWithSortStreamingLimit(
 	return result, true, nil
 }
 
+func (t *Table) selectWithSortStreamingLimitRowView(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	selectedFields []Field,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if len(plan.Joins) > 0 ||
+		len(plan.Scans) != 1 ||
+		plan.Scans[0].Type != ScanTypeSequential ||
+		t.virtualRows != nil ||
+		t.parallelScan ||
+		!plan.SortInMemory ||
+		!stmt.Limit.Valid ||
+		len(plan.OrderBy) == 0 ||
+		stmt.Distinct ||
+		stmt.IsSelectCountAll() ||
+		stmt.IsSelectGroupBy() ||
+		stmt.IsSelectAggregate() {
+		return StatementResult{}, false, nil
+	}
+	for _, field := range requestedFields {
+		if field.Expr != nil {
+			return StatementResult{}, false, nil
+		}
+	}
+	for _, clause := range plan.OrderBy {
+		if clause.Field.Expr != nil {
+			return StatementResult{}, false, nil
+		}
+	}
+
+	heapFields := orderByHeapFields(requestedFields, plan.OrderBy)
+	fieldIndexes, _, ok := rowViewProjectionPlan(t.Columns, heapFields, stmt.TableName, stmt.TableAlias)
+	if !ok {
+		return StatementResult{}, false, nil
+	}
+	heapColumns := heapColumnsForFields(t.Columns, heapFields)
+	_, resultColumns, ok := rowViewProjectionPlan(t.Columns, requestedFields, stmt.TableName, stmt.TableAlias)
+	if !ok {
+		return StatementResult{}, false, nil
+	}
+
+	scan := plan.Scans[0]
+	var (
+		rowViewFilter func(context.Context, RowView) (bool, error)
+		rowFilter     func(Row) (bool, error)
+		selectedMask  []bool
+	)
+	if rowViewFilterSupports(t.Columns, scan.Filters) {
+		rowViewFilter = compileRowViewFilterForColumns(t.Columns, t.pager, scan.Filters)
+	} else {
+		rowFilter = compileScanFilter(t.Columns, scan.Filters)
+		selectedMask = selectedColumnsMask(t.Columns, selectedFields)
+	}
+
+	limit := int(stmt.Limit.Value.(int64))
+	offset := 0
+	if stmt.Offset.Valid {
+		offset = int(stmt.Offset.Value.(int64))
+	}
+	maxRows := limit + offset
+	h := newRowHeap(plan.OrderBy, maxRows)
+
+	cursor, err := t.SeekFirst(ctx)
+	if err != nil {
+		return StatementResult{}, true, err
+	}
+	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return StatementResult{}, true, fmt.Errorf("order by row view scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	for !cursor.EndOfTable {
+		if err := ctx.Err(); err != nil {
+			return StatementResult{}, true, err
+		}
+		if page.Index != cursor.PageIdx {
+			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
+			if err != nil {
+				return StatementResult{}, true, fmt.Errorf("order by row view scan: %w", err)
+			}
+		}
+		if cursor.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
+			return StatementResult{}, true, fmt.Errorf("cell index %d out of bounds, max %d", cursor.CellIdx, page.LeafNode.Header.Cells-1)
+		}
+
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+		advanceLeafCursor(cursor, page)
+		view := NewRowView(t.Columns, cell)
+
+		if rowViewFilter != nil {
+			ok, err := rowViewFilter(ctx, view)
+			if err != nil {
+				return StatementResult{}, true, err
+			}
+			if !ok {
+				continue
+			}
+		} else if rowFilter != nil {
+			row, err := view.MaterializeWithOverflow(ctx, t.pager, selectedMask)
+			if err != nil {
+				return StatementResult{}, true, err
+			}
+			ok, err := rowFilter(row)
+			if err != nil {
+				return StatementResult{}, true, err
+			}
+			if !ok {
+				continue
+			}
+		}
+
+		row, err := projectRowView(ctx, t.pager, view, fieldIndexes, heapColumns)
+		if err != nil {
+			return StatementResult{}, true, err
+		}
+		h.PushRow(row)
+	}
+
+	allRows := h.ExtractSorted()
+	if offset >= len(allRows) {
+		allRows = nil
+	} else {
+		end := offset + limit
+		if end < len(allRows) {
+			allRows = allRows[offset:end]
+		} else {
+			allRows = allRows[offset:]
+		}
+	}
+
+	idx := 0
+	result := StatementResult{
+		Columns: resultColumns,
+	}
+	result.Rows = NewIterator(func(ctx context.Context) (Row, error) {
+		if idx >= len(allRows) {
+			return Row{}, ErrNoMoreRows
+		}
+		row := allRows[idx]
+		idx += 1
+		values := make([]OptionalValue, len(requestedFields))
+		for i := range requestedFields {
+			values[i] = row.Values[i]
+		}
+		projected := NewRowWithValues(resultColumns, values)
+		projected.Key = row.Key
+		return projected, nil
+	})
+
+	return result, true, nil
+}
+
 func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, allRows []Row, requestedFields []Field) (StatementResult, error) {
 	var err error
 	allRows, err = addOrderByOutputFields(allRows, requestedFields, plan.OrderBy)
@@ -2763,6 +2921,47 @@ func orderByOutputFields(fields []Field) map[string]Field {
 		outputFields[field.OutputName()] = field
 	}
 	return outputFields
+}
+
+func orderByHeapFields(fields []Field, orderBy []OrderBy) []Field {
+	result := make([]Field, 0, len(fields)+len(orderBy))
+	seen := make(map[string]struct{}, len(fields)+len(orderBy))
+	for _, field := range fields {
+		result = append(result, field)
+		seen[field.OutputName()] = struct{}{}
+		if field.Name != "" {
+			seen[field.Name] = struct{}{}
+		}
+	}
+	for _, clause := range orderBy {
+		field := clause.Field
+		if _, ok := seen[field.OutputName()]; ok {
+			continue
+		}
+		if _, ok := seen[field.Name]; ok {
+			continue
+		}
+		result = append(result, field)
+		seen[field.OutputName()] = struct{}{}
+		if field.Name != "" {
+			seen[field.Name] = struct{}{}
+		}
+	}
+	return result
+}
+
+func heapColumnsForFields(columns []Column, fields []Field) []Column {
+	heapColumns := make([]Column, len(fields))
+	for i, field := range fields {
+		for _, col := range columns {
+			if col.Name == field.Name {
+				heapColumns[i] = col
+				heapColumns[i].Name = field.OutputName()
+				break
+			}
+		}
+	}
+	return heapColumns
 }
 
 func addOrderByOutputFieldsToRow(row Row, outputFields map[string]Field, orderBy []OrderBy) (Row, error) {
