@@ -2557,12 +2557,11 @@ func (t *Table) indexedScanRow(
 		row = NewRowWithValues(t.Columns, nil)
 		row.Key = rowID
 	default:
-		cursor, err := t.Seek(ctx, rowID)
+		view, err := t.rowViewByRowID(ctx, rowID)
 		if err != nil {
-			return Row{}, false, fmt.Errorf("find row failed: %w", err)
+			return Row{}, false, err
 		}
-
-		row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
+		row, err = view.MaterializeWithOverflow(ctx, t.pager, selectedMask)
 		if err != nil {
 			return Row{}, false, fmt.Errorf("fetch row failed: %w", err)
 		}
@@ -2597,11 +2596,11 @@ func (t *Table) rowIDScanRow(
 		row = NewRowWithValues(t.Columns, nil)
 		row.Key = rowID
 	} else {
-		cursor, err := t.Seek(ctx, rowID)
+		view, err := t.rowViewByRowID(ctx, rowID)
 		if err != nil {
-			return Row{}, false, fmt.Errorf("find row failed: %w", err)
+			return Row{}, false, err
 		}
-		row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
+		row, err = view.MaterializeWithOverflow(ctx, t.pager, selectedMask)
 		if err != nil {
 			return Row{}, false, fmt.Errorf("fetch row failed: %w", err)
 		}
