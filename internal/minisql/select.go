@@ -2724,18 +2724,6 @@ func (t *Table) selectWithSortStreamingLimitRowView(
 	}
 
 	scan := plan.Scans[0]
-	var (
-		rowViewFilter func(context.Context, RowView) (bool, error)
-		rowFilter     func(Row) (bool, error)
-		selectedMask  []bool
-	)
-	if rowViewFilterSupports(t.Columns, scan.Filters) {
-		rowViewFilter = compileRowViewFilterForColumns(t.Columns, t.pager, scan.Filters)
-	} else {
-		rowFilter = compileScanFilter(t.Columns, scan.Filters)
-		selectedMask = selectedColumnsMask(t.Columns, selectedFields)
-	}
-
 	limit := int(stmt.Limit.Value.(int64))
 	offset := 0
 	if stmt.Offset.Valid {
@@ -2744,61 +2732,12 @@ func (t *Table) selectWithSortStreamingLimitRowView(
 	maxRows := limit + offset
 	h := newRowHeap(plan.OrderBy, maxRows)
 
-	cursor, err := t.SeekFirst(ctx)
+	err := t.scanSequentialProjectedRowViews(ctx, scan, selectedFields, fieldIndexes, heapColumns, func(row Row) error {
+		h.PushRow(row)
+		return nil
+	})
 	if err != nil {
 		return StatementResult{}, true, err
-	}
-	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
-	if err != nil {
-		return StatementResult{}, true, fmt.Errorf("order by row view scan: %w", err)
-	}
-	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
-
-	for !cursor.EndOfTable {
-		if err := ctx.Err(); err != nil {
-			return StatementResult{}, true, err
-		}
-		if page.Index != cursor.PageIdx {
-			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
-			if err != nil {
-				return StatementResult{}, true, fmt.Errorf("order by row view scan: %w", err)
-			}
-		}
-		if cursor.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
-			return StatementResult{}, true, fmt.Errorf("cell index %d out of bounds, max %d", cursor.CellIdx, page.LeafNode.Header.Cells-1)
-		}
-
-		cell := page.LeafNode.Cells[cursor.CellIdx]
-		advanceLeafCursor(cursor, page)
-		view := NewRowView(t.Columns, cell)
-
-		if rowViewFilter != nil {
-			ok, err := rowViewFilter(ctx, view)
-			if err != nil {
-				return StatementResult{}, true, err
-			}
-			if !ok {
-				continue
-			}
-		} else if rowFilter != nil {
-			row, err := view.MaterializeWithOverflow(ctx, t.pager, selectedMask)
-			if err != nil {
-				return StatementResult{}, true, err
-			}
-			ok, err := rowFilter(row)
-			if err != nil {
-				return StatementResult{}, true, err
-			}
-			if !ok {
-				continue
-			}
-		}
-
-		row, err := projectRowView(ctx, t.pager, view, fieldIndexes, heapColumns)
-		if err != nil {
-			return StatementResult{}, true, err
-		}
-		h.PushRow(row)
 	}
 
 	allRows := h.ExtractSorted()
@@ -2850,7 +2789,6 @@ func (t *Table) selectWithSortRowView(
 		!plan.SortInMemory ||
 		stmt.Limit.Valid ||
 		len(plan.OrderBy) == 0 ||
-		stmt.Distinct ||
 		stmt.IsSelectCountAll() ||
 		stmt.IsSelectGroupBy() ||
 		stmt.IsSelectAggregate() {
@@ -2878,78 +2816,21 @@ func (t *Table) selectWithSortRowView(
 	}
 
 	scan := plan.Scans[0]
-	var (
-		rowViewFilter func(context.Context, RowView) (bool, error)
-		rowFilter     func(Row) (bool, error)
-		selectedMask  []bool
-	)
-	if rowViewFilterSupports(t.Columns, scan.Filters) {
-		rowViewFilter = compileRowViewFilterForColumns(t.Columns, t.pager, scan.Filters)
-	} else {
-		rowFilter = compileScanFilter(t.Columns, scan.Filters)
-		selectedMask = selectedColumnsMask(t.Columns, selectedFields)
-	}
-
-	cursor, err := t.SeekFirst(ctx)
+	allRows := make([]Row, 0)
+	err := t.scanSequentialProjectedRowViews(ctx, scan, selectedFields, fieldIndexes, sortColumns, func(row Row) error {
+		allRows = append(allRows, row)
+		return nil
+	})
 	if err != nil {
 		return StatementResult{}, true, err
-	}
-	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
-	if err != nil {
-		return StatementResult{}, true, fmt.Errorf("order by row view scan: %w", err)
-	}
-	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
-
-	allRows := make([]Row, 0)
-	for !cursor.EndOfTable {
-		if err := ctx.Err(); err != nil {
-			return StatementResult{}, true, err
-		}
-		if page.Index != cursor.PageIdx {
-			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
-			if err != nil {
-				return StatementResult{}, true, fmt.Errorf("order by row view scan: %w", err)
-			}
-		}
-		if cursor.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
-			return StatementResult{}, true, fmt.Errorf("cell index %d out of bounds, max %d", cursor.CellIdx, page.LeafNode.Header.Cells-1)
-		}
-
-		cell := page.LeafNode.Cells[cursor.CellIdx]
-		advanceLeafCursor(cursor, page)
-		view := NewRowView(t.Columns, cell)
-
-		if rowViewFilter != nil {
-			ok, err := rowViewFilter(ctx, view)
-			if err != nil {
-				return StatementResult{}, true, err
-			}
-			if !ok {
-				continue
-			}
-		} else if rowFilter != nil {
-			row, err := view.MaterializeWithOverflow(ctx, t.pager, selectedMask)
-			if err != nil {
-				return StatementResult{}, true, err
-			}
-			ok, err := rowFilter(row)
-			if err != nil {
-				return StatementResult{}, true, err
-			}
-			if !ok {
-				continue
-			}
-		}
-
-		row, err := projectRowView(ctx, t.pager, view, fieldIndexes, sortColumns)
-		if err != nil {
-			return StatementResult{}, true, err
-		}
-		allRows = append(allRows, row)
 	}
 
 	if err := t.sortRows(allRows, plan.OrderBy); err != nil {
 		return StatementResult{}, true, err
+	}
+
+	if stmt.Distinct {
+		allRows = deduplicateRows(allRows, requestedFields)
 	}
 
 	offset := 0
@@ -2980,6 +2861,94 @@ func (t *Table) selectWithSortRowView(
 	})
 
 	return result, true, nil
+}
+
+type compiledRowViewScanFilter struct {
+	rowViewFilter func(context.Context, RowView) (bool, error)
+	rowFilter     func(Row) (bool, error)
+	selectedMask  []bool
+}
+
+func (t *Table) compileRowViewScanFilter(scan Scan, selectedFields []Field) compiledRowViewScanFilter {
+	if rowViewFilterSupports(t.Columns, scan.Filters) {
+		return compiledRowViewScanFilter{
+			rowViewFilter: compileRowViewFilterForColumns(t.Columns, t.pager, scan.Filters),
+		}
+	}
+	return compiledRowViewScanFilter{
+		rowFilter:    compileScanFilter(t.Columns, scan.Filters),
+		selectedMask: selectedColumnsMask(t.Columns, selectedFields),
+	}
+}
+
+func (f compiledRowViewScanFilter) accept(ctx context.Context, pager TxPager, view RowView) (bool, error) {
+	if f.rowViewFilter != nil {
+		return f.rowViewFilter(ctx, view)
+	}
+	if f.rowFilter == nil {
+		return true, nil
+	}
+	row, err := view.MaterializeWithOverflow(ctx, pager, f.selectedMask)
+	if err != nil {
+		return false, err
+	}
+	return f.rowFilter(row)
+}
+
+func (t *Table) scanSequentialProjectedRowViews(
+	ctx context.Context,
+	scan Scan,
+	selectedFields []Field,
+	fieldIndexes []int,
+	columns []Column,
+	consume func(Row) error,
+) error {
+	filter := t.compileRowViewScanFilter(scan, selectedFields)
+	cursor, err := t.SeekFirst(ctx)
+	if err != nil {
+		return err
+	}
+	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return fmt.Errorf("row view scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	for !cursor.EndOfTable {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if page.Index != cursor.PageIdx {
+			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
+			if err != nil {
+				return fmt.Errorf("row view scan: %w", err)
+			}
+		}
+		if cursor.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
+			return fmt.Errorf("cell index %d out of bounds, max %d", cursor.CellIdx, page.LeafNode.Header.Cells-1)
+		}
+
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+		advanceLeafCursor(cursor, page)
+		view := NewRowView(t.Columns, cell)
+
+		ok, err := filter.accept(ctx, t.pager, view)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+
+		row, err := projectRowView(ctx, t.pager, view, fieldIndexes, columns)
+		if err != nil {
+			return err
+		}
+		if err := consume(row); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, allRows []Row, requestedFields []Field) (StatementResult, error) {

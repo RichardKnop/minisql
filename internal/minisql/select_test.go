@@ -869,6 +869,42 @@ func TestTable_Select_OrderByNoLimitUsesRowViewSort(t *testing.T) {
 	assert.Equal(t, rows[0].Values[0], got[2].Values[0])
 }
 
+func TestTable_Select_DistinctOrderByNoLimitUsesRowViewSort(t *testing.T) {
+	table, txManager, _ := newTestTable(t, testColumns[0:3])
+	ctx := context.Background()
+
+	rows := []Row{
+		NewRowWithValues(testColumns[0:3], []OptionalValue{{Value: int64(1), Valid: true}, {Value: NewTextPointer([]byte("alice@example.com")), Valid: true}, {Value: int32(30), Valid: true}}),
+		NewRowWithValues(testColumns[0:3], []OptionalValue{{Value: int64(2), Valid: true}, {Value: NewTextPointer([]byte("bob@example.com")), Valid: true}, {Value: int32(10), Valid: true}}),
+		NewRowWithValues(testColumns[0:3], []OptionalValue{{Value: int64(3), Valid: true}, {Value: NewTextPointer([]byte("alice@example.com")), Valid: true}, {Value: int32(20), Valid: true}}),
+	}
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		_, err := table.Insert(ctx, Statement{
+			Kind:    Insert,
+			Fields:  fieldsFromColumns(testColumns[0:3]...),
+			Inserts: [][]OptionalValue{rows[0].Values, rows[1].Values, rows[2].Values},
+		})
+		return err
+	})
+	require.NoError(t, err)
+
+	result, err := table.Select(ctx, Statement{
+		Kind:     Select,
+		Distinct: true,
+		Fields: []Field{
+			{Name: "email"},
+		},
+		OrderBy: []OrderBy{{Field: Field{Name: "age"}, Direction: Asc}},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, result.RowViewFieldIndexes)
+
+	got := collectRows(ctx, result)
+	require.Len(t, got, 2)
+	assert.Equal(t, rows[1].Values[1], got[0].Values[0])
+	assert.Equal(t, rows[2].Values[1], got[1].Values[0])
+}
+
 // TestTable_SelectGroupBy covers selectGroupBy via Table.Select.
 // Uses testColumns: id(Int8), email(Varchar), age(Int4), verified(Boolean), score(Real), created(Timestamp).
 // We insert rows with two distinct verified values (true/false) and assert group counts and sums.
