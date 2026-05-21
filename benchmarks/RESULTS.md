@@ -132,6 +132,24 @@ continued join / index-scan / aggregate RowView work.
 
 ---
 
+### 2026-05-21 — Step 1+2: aggState min/max split + RowView filter paths
+
+**Changes:**
+- `groupAggState` replaces `aggState` in GROUP BY pool (removed 48-byte min/max fields; MIN/MAX now use a side pool `minMaxPool []OptionalValue` allocated only when query has MIN/MAX aggregates)
+- `groupByAccumulator` initial pool cap reduced from `min(estRows/10, 4096)` to `min(estRows/10, 64)` (floor 8); pool grows on demand
+- `selectGroupByZeroAlloc` and `selectAggregateSequentialRowView` filter paths now use `compileRowViewScanFilter` instead of materialising a full `Row` for filtering (Step 2)
+
+#### Memory change (B/op, mean of 3 runs)
+
+| Benchmark | before | after | reduction | vs SQLite |
+|---|---|---|---|---|
+| GroupBy_Aggregate | 375.8 KiB | **56.5 KiB** | **6.7×** | 16× (was 107×) |
+| Having_Filter | 287.7 KiB | **45.0 KiB** | **6.4×** | 24× (was 149×) |
+
+Alloc counts unchanged (468/273 — same structure, just smaller allocations).
+
+---
+
 ### 2026-05-20 17:10 UTC
 
 #### Timing
