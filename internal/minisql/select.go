@@ -1654,7 +1654,7 @@ func (t *Table) selectStreamingDirectRowView(
 	result.RowViews = newRowViewIter()
 	result.RowViewPager = t.pager
 	result.RowViewFieldIndexes = fieldIndexes
-	result.Rows = rowViewMaterializingIterator(ctx, t.pager, newRowViewIter(), fieldIndexes, resultColumns)
+	result.Rows = lazyRowViewMaterializingIterator(t.pager, newRowViewIter, fieldIndexes, resultColumns)
 	return result, true, nil
 }
 
@@ -2475,8 +2475,22 @@ func projectRowView(ctx context.Context, pager TxPager, view RowView, fieldIndex
 	return row, nil
 }
 
-func rowViewMaterializingIterator(ctx context.Context, pager TxPager, views RowViewIterator, fieldIndexes []int, columns []Column) Iterator {
+func lazyRowViewMaterializingIterator(pager TxPager, viewFactory func() RowViewIterator, fieldIndexes []int, columns []Column) Iterator {
+	var (
+		views  RowViewIterator
+		opened bool
+	)
+
+	ensureOpen := func() {
+		if opened {
+			return
+		}
+		views = viewFactory()
+		opened = true
+	}
+
 	return newIteratorWithClose(func(iterCtx context.Context) (Row, error) {
+		ensureOpen()
 		if !views.Next(iterCtx) {
 			if err := views.Err(); err != nil {
 				return Row{}, err
@@ -2485,7 +2499,12 @@ func rowViewMaterializingIterator(ctx context.Context, pager TxPager, views RowV
 		}
 		view := views.RowView()
 		return projectRowView(iterCtx, pager, view, fieldIndexes, columns)
-	}, views.Close)
+	}, func() error {
+		if !opened {
+			return nil
+		}
+		return views.Close()
+	})
 }
 
 func distinctRowViewMaterializingIterator(

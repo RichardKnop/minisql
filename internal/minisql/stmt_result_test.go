@@ -44,3 +44,44 @@ func TestMaterializeResultRowsUsesRowViews(t *testing.T) {
 	assert.False(t, usedRowsIterator)
 	assert.True(t, closedRowsIterator)
 }
+
+func TestLazyRowViewMaterializingIteratorOpensOnDemand(t *testing.T) {
+	t.Parallel()
+
+	row := gen.Row()
+	row.Key = 7
+	data, err := row.Marshal()
+	require.NoError(t, err)
+
+	openCount := 0
+	closeCount := 0
+	newIter := func() RowViewIterator {
+		openCount += 1
+		return newRowViewIteratorWithClose(func(ctx context.Context) (RowView, error) {
+			return NewRowView(row.Columns, Cell{
+				Key:         row.Key,
+				Value:       data,
+				NullBitmask: row.NullBitmask(),
+			}), nil
+		}, func() error {
+			closeCount += 1
+			return nil
+		})
+	}
+
+	iter := lazyRowViewMaterializingIterator(nil, newIter, []int{0, 2}, []Column{row.Columns[0], row.Columns[2]})
+	require.NoError(t, iter.Close())
+	assert.Zero(t, openCount)
+	assert.Zero(t, closeCount)
+
+	iter = lazyRowViewMaterializingIterator(nil, newIter, []int{0, 2}, []Column{row.Columns[0], row.Columns[2]})
+	require.True(t, iter.Next(context.Background()))
+	got := iter.Row()
+	assert.Equal(t, []Column{row.Columns[0], row.Columns[2]}, got.Columns)
+	assert.Equal(t, row.Values[0], got.Values[0])
+	assert.Equal(t, row.Values[2], got.Values[1])
+	assert.Equal(t, 1, openCount)
+
+	require.NoError(t, iter.Close())
+	assert.Equal(t, 1, closeCount)
+}
