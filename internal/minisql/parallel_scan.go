@@ -179,7 +179,7 @@ func (t *Table) parallelSequentialRowViewIteratorFactory(
 
 		iterRemaining := remaining
 		iterOffset := offset
-		return NewRowViewIterator(func(nextCtx context.Context) (RowView, error) {
+		return newRowViewIteratorWithClose(func(nextCtx context.Context) (RowView, error) {
 			if err := nextCtx.Err(); err != nil {
 				cancel()
 				drainParallelRowViewScanCh(ch)
@@ -208,6 +208,10 @@ func (t *Table) parallelSequentialRowViewIteratorFactory(
 			}
 			cancel()
 			return RowView{}, ErrNoMoreRows
+		}, func() error {
+			cancel()
+			drainParallelRowViewScanCh(ch)
+			return nil
 		})
 	}, nil
 }
