@@ -100,6 +100,11 @@ func (r *Rows) Next(dest []driver.Value) error {
 func (r *Rows) nextRowView(dest []driver.Value) error {
 	if !r.rowViewIter.Next(r.ctx) {
 		if err := r.rowViewIter.Err(); err != nil {
+			_ = r.rowViewIter.Close()
+			_ = r.closeReadTx(false)
+			return err
+		}
+		if err := r.rowViewIter.Close(); err != nil {
 			_ = r.closeReadTx(false)
 			return err
 		}
