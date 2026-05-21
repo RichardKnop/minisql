@@ -2691,7 +2691,6 @@ func (t *Table) selectWithSortStreamingLimitRowView(
 		len(plan.Scans) != 1 ||
 		plan.Scans[0].Type != ScanTypeSequential ||
 		t.virtualRows != nil ||
-		t.parallelScan ||
 		!plan.SortInMemory ||
 		!stmt.Limit.Valid ||
 		len(plan.OrderBy) == 0 ||
@@ -2732,7 +2731,7 @@ func (t *Table) selectWithSortStreamingLimitRowView(
 	maxRows := limit + offset
 	h := newRowHeap(plan.OrderBy, maxRows)
 
-	err := t.scanSequentialProjectedRowViews(ctx, scan, selectedFields, fieldIndexes, heapColumns, func(row Row) error {
+	err := t.scanProjectedRowViews(ctx, scan, selectedFields, fieldIndexes, heapColumns, func(row Row) error {
 		h.PushRow(row)
 		return nil
 	})
@@ -2785,7 +2784,6 @@ func (t *Table) selectWithSortRowView(
 		len(plan.Scans) != 1 ||
 		plan.Scans[0].Type != ScanTypeSequential ||
 		t.virtualRows != nil ||
-		t.parallelScan ||
 		!plan.SortInMemory ||
 		stmt.Limit.Valid ||
 		len(plan.OrderBy) == 0 ||
@@ -2817,7 +2815,7 @@ func (t *Table) selectWithSortRowView(
 
 	scan := plan.Scans[0]
 	allRows := make([]Row, 0)
-	err := t.scanSequentialProjectedRowViews(ctx, scan, selectedFields, fieldIndexes, sortColumns, func(row Row) error {
+	err := t.scanProjectedRowViews(ctx, scan, selectedFields, fieldIndexes, sortColumns, func(row Row) error {
 		allRows = append(allRows, row)
 		return nil
 	})
@@ -2895,7 +2893,7 @@ func (f compiledRowViewScanFilter) accept(ctx context.Context, pager TxPager, vi
 	return f.rowFilter(row)
 }
 
-func (t *Table) scanSequentialProjectedRowViews(
+func (t *Table) scanProjectedRowViews(
 	ctx context.Context,
 	scan Scan,
 	selectedFields []Field,
@@ -2904,6 +2902,10 @@ func (t *Table) scanSequentialProjectedRowViews(
 	consume func(Row) error,
 ) error {
 	filter := t.compileRowViewScanFilter(scan, selectedFields)
+	if t.parallelScan {
+		return t.scanParallelProjectedRowViews(ctx, filter, fieldIndexes, columns, consume)
+	}
+
 	cursor, err := t.SeekFirst(ctx)
 	if err != nil {
 		return err
@@ -2949,6 +2951,37 @@ func (t *Table) scanSequentialProjectedRowViews(
 		}
 	}
 	return nil
+}
+
+func (t *Table) scanParallelProjectedRowViews(
+	ctx context.Context,
+	filter compiledRowViewScanFilter,
+	fieldIndexes []int,
+	columns []Column,
+	consume func(Row) error,
+) error {
+	rowViewFilter := func(filterCtx context.Context, view RowView) (bool, error) {
+		return filter.accept(filterCtx, t.pager, view)
+	}
+	newIter, err := t.parallelSequentialRowViewIteratorFactory(ctx, rowViewFilter, 0, 0, false, false)
+	if err != nil {
+		return err
+	}
+	views := newIter()
+	defer func() {
+		_ = views.Close()
+	}()
+
+	for views.Next(ctx) {
+		row, err := projectRowView(ctx, t.pager, views.RowView(), fieldIndexes, columns)
+		if err != nil {
+			return err
+		}
+		if err := consume(row); err != nil {
+			return err
+		}
+	}
+	return views.Err()
 }
 
 func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, allRows []Row, requestedFields []Field) (StatementResult, error) {
