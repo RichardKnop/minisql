@@ -386,21 +386,8 @@ func (r Row) UnmarshalWithMask(cell Cell, selectedMask []bool) (Row, error) {
 	return r.decodeColumnsWithMask(cell, selectedMask)
 }
 
-// unmarshalWithMaskInto decodes cell into r using a caller-supplied values
-// buffer, avoiding the heap allocation in UnmarshalWithMask. The caller must
-// not retain Row.Values across row iterations; it is overwritten each call.
-func (r Row) unmarshalWithMaskInto(cell Cell, selectedMask []bool, values []OptionalValue) (Row, error) {
-	r.Key = cell.Key
-	clear(values[:len(r.Columns)])
-	r.Values = values[:len(r.Columns)]
-	if len(selectedMask) == 0 {
-		return r, nil
-	}
-	return r.decodeColumnsWithMask(cell, selectedMask)
-}
-
-// decodeColumnsWithMask is the shared inner loop used by UnmarshalWithMask and
-// unmarshalWithMaskInto. r.Values must already be allocated and zeroed.
+// decodeColumnsWithMask is the shared inner loop used by UnmarshalWithMask.
+// r.Values must already be allocated and zeroed.
 func (r Row) decodeColumnsWithMask(cell Cell, selectedMask []bool) (Row, error) {
 	offset := 0
 	for i, col := range r.Columns {

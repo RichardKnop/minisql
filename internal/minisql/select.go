@@ -4165,7 +4165,7 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 // countSequentialScanZeroAlloc counts rows that match the scan filter without
 // collecting them. Simple predicates use RowView so count scans can evaluate
 // filters directly over cell bytes; predicates that still need Row evaluation
-// fall back to a reusable []OptionalValue buffer. Virtual tables fall back to
+// materialise from RowView at the predicate boundary. Virtual tables fall back to
 // the general sequentialScan path because their rows are already materialised.
 func (t *Table) countSequentialScanZeroAlloc(ctx context.Context, scan Scan, selectedFields []Field) (StatementResult, error) {
 	if t.virtualRows != nil {
@@ -4191,13 +4191,6 @@ func (t *Table) countSequentialScanZeroAlloc(ctx context.Context, scan Scan, sel
 	fullMask := selectedColumnsMask(t.Columns, selectedFields)
 	tableFilter := compileScanFilter(t.Columns, scan.Filters)
 
-	// Pre-allocate a single reusable values buffer. Safe because count(*) never
-	// retains a row after the predicate check — the buffer is overwritten each row.
-	var reuseValues []OptionalValue
-	if len(fullMask) > 0 {
-		reuseValues = make([]OptionalValue, len(t.Columns))
-	}
-
 	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
 	if err != nil {
 		return StatementResult{}, fmt.Errorf("count sequential scan: %w", err)
@@ -4218,25 +4211,13 @@ func (t *Table) countSequentialScanZeroAlloc(ctx context.Context, scan Scan, sel
 		}
 
 		cell := page.LeafNode.Cells[cursor.CellIdx]
-
-		switch {
-		case cursor.CellIdx < page.LeafNode.Header.Cells-1:
-			cursor.CellIdx += 1
-		case page.LeafNode.Header.NextLeaf == 0:
-			cursor.EndOfTable = true
-		default:
-			cursor.PageIdx = page.LeafNode.Header.NextLeaf
-			cursor.CellIdx = 0
-		}
+		advanceLeafCursor(cursor, page)
 
 		if tableFilter != nil {
-			// Decode into reusable buffer — safe because count never retains the row.
-			row := t.newRow()
-			row, err = row.unmarshalWithMaskInto(cell, fullMask, reuseValues)
+			row, err := NewRowView(t.Columns, cell).MaterializeWithOverflow(ctx, t.pager, fullMask)
 			if err != nil {
 				return StatementResult{}, err
 			}
-			row.Key = cell.Key
 			ok, err := tableFilter(row)
 			if err != nil {
 				return StatementResult{}, err
