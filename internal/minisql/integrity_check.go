@@ -971,10 +971,17 @@ func streamCheckExpectedInvertedIndexEntries(ctx context.Context, report Integri
 		return report, err
 	}
 
-	fields := fieldsFromColumns(table.Columns...)
+	fullMask := selectedColumnsMask(table.Columns, fieldsFromColumns(table.Columns...))
 	for !cursor.EndOfTable {
-		row, err := cursor.fetchRow(ctx, true, fields...)
+		view, err := cursor.fetchRowView(ctx)
 		if err != nil {
+			return report, err
+		}
+		row, err := view.MaterializeWithOverflow(ctx, table.pager, fullMask)
+		if err != nil {
+			return report, err
+		}
+		if err := cursor.advance(ctx); err != nil {
 			return report, err
 		}
 
@@ -1032,10 +1039,17 @@ func streamCheckExpectedIndexEntries(ctx context.Context, report IntegrityReport
 		return report, err
 	}
 
-	fields := fieldsFromColumns(table.Columns...)
+	fullMask := selectedColumnsMask(table.Columns, fieldsFromColumns(table.Columns...))
 	for !cursor.EndOfTable {
-		row, err := cursor.fetchRow(ctx, true, fields...)
+		view, err := cursor.fetchRowView(ctx)
 		if err != nil {
+			return report, err
+		}
+		row, err := view.MaterializeWithOverflow(ctx, table.pager, fullMask)
+		if err != nil {
+			return report, err
+		}
+		if err := cursor.advance(ctx); err != nil {
 			return report, err
 		}
 
