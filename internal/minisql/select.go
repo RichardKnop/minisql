@@ -2537,6 +2537,54 @@ func addOrderByOutputFieldsToRow(row Row, outputFields map[string]Field, orderBy
 	return updated, nil
 }
 
+func (t *Table) indexedScanRow(
+	ctx context.Context,
+	key any,
+	rowID RowID,
+	isCovering bool,
+	indexColumns []Column,
+	selectedMask []bool,
+	nSelected int,
+	tableFilter func(Row) (bool, error),
+	coveringFilter func(Row) (bool, error),
+) (Row, bool, error) {
+	var row Row
+
+	switch {
+	case isCovering:
+		row = rowFromIndexKey(key, indexColumns, rowID)
+	case nSelected == 0:
+		row = NewRowWithValues(t.Columns, nil)
+		row.Key = rowID
+	default:
+		cursor, err := t.Seek(ctx, rowID)
+		if err != nil {
+			return Row{}, false, fmt.Errorf("find row failed: %w", err)
+		}
+
+		row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
+		if err != nil {
+			return Row{}, false, fmt.Errorf("fetch row failed: %w", err)
+		}
+
+		if tableFilter != nil {
+			ok, err := tableFilter(row)
+			if err != nil || !ok {
+				return Row{}, false, err
+			}
+		}
+	}
+
+	if isCovering && coveringFilter != nil {
+		ok, err := coveringFilter(row)
+		if err != nil || !ok {
+			return Row{}, false, err
+		}
+	}
+
+	return row, true, nil
+}
+
 func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, selectedFields []Field, out func(Row) error) error {
 	idx, ok := t.IndexByName(scan.IndexName)
 	if !ok {
@@ -2551,49 +2599,12 @@ func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, se
 
 	// Scan index in order (or reverse order)
 	if err := idx.ScanAll(ctx, aPlan.SortReverse, func(key any, rowID RowID) error {
-		var row Row
-
-		switch {
-		case scan.CoveringIndex:
-			// Index-only scan: build row directly from key without touching the table page.
-			row = rowFromIndexKey(key, scan.IndexColumns, rowID)
-		case nSelected == 0:
-			row = NewRowWithValues(t.Columns, nil)
-			row.Key = rowID
-		default:
-			// Find the row by ID
-			cursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("find row failed: %w", err)
-			}
-
-			row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-			if err != nil {
-				return fmt.Errorf("fetch row failed: %w", err)
-			}
-
-			// Apply remaining filters
-			if tableFilter != nil {
-				ok, err := tableFilter(row)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return nil // Skip this row
-				}
-			}
-		}
-
-		// For covering index scans, filters still need to be applied
-		// (all filter columns are guaranteed to be in the index).
-		if scan.CoveringIndex && coveringFilter != nil {
-			ok, err := coveringFilter(row)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return nil
-			}
+		row, ok, err := t.indexedScanRow(
+			ctx, key, rowID, scan.CoveringIndex, scan.IndexColumns,
+			selectedMask, nSelected, tableFilter, coveringFilter,
+		)
+		if err != nil || !ok {
+			return err
 		}
 
 		if err := ctx.Err(); err != nil {
@@ -2619,49 +2630,12 @@ func (t *Table) indexRangeScan(ctx context.Context, aPlan QueryPlan, scan Scan, 
 
 	// Scan index within range (forward or reverse)
 	if err := idx.ScanRange(ctx, scan.RangeCondition, aPlan.SortReverse, func(key any, rowID RowID) error {
-		var row Row
-
-		switch {
-		case scan.CoveringIndex:
-			// Index-only scan: build row directly from key without touching the table page.
-			row = rowFromIndexKey(key, scan.IndexColumns, rowID)
-		case nSelected == 0:
-			row = NewRowWithValues(t.Columns, nil)
-			row.Key = rowID
-		default:
-			// Find the row by ID
-			cursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("find row failed: %w", err)
-			}
-
-			row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-			if err != nil {
-				return fmt.Errorf("fetch row failed: %w", err)
-			}
-
-			// Apply remaining filters
-			if tableFilter != nil {
-				ok, err := tableFilter(row)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return nil // Skip this row
-				}
-			}
-		}
-
-		// For covering index scans, filters still need to be applied
-		// (all filter columns are guaranteed to be in the index).
-		if scan.CoveringIndex && coveringFilter != nil {
-			ok, err := coveringFilter(row)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return nil
-			}
+		row, ok, err := t.indexedScanRow(
+			ctx, key, rowID, scan.CoveringIndex, scan.IndexColumns,
+			selectedMask, nSelected, tableFilter, coveringFilter,
+		)
+		if err != nil || !ok {
+			return err
 		}
 
 		if err := ctx.Err(); err != nil {
@@ -2689,44 +2663,12 @@ func (t *Table) indexPointScan(ctx context.Context, scan Scan, selectedFields []
 	// out stops iteration before all overflow pages are loaded.
 	for _, indexValue := range scan.IndexKeys {
 		err := idx.VisitRowIDs(ctx, indexValue, func(rowID RowID) error {
-			var row Row
-
-			switch {
-			case scan.CoveringIndex:
-				row = rowFromIndexKey(indexValue, scan.IndexColumns, rowID)
-			case len(selectedFields) == 0:
-				row = NewRowWithValues(t.Columns, nil)
-				row.Key = rowID
-			default:
-				cursor, err := t.Seek(ctx, rowID)
-				if err != nil {
-					return fmt.Errorf("find row failed: %w", err)
-				}
-
-				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-				if err != nil {
-					return fmt.Errorf("fetch row failed: %w", err)
-				}
-
-				if tableFilter != nil {
-					ok, err := tableFilter(row)
-					if err != nil {
-						return err
-					}
-					if !ok {
-						return nil
-					}
-				}
-			}
-
-			if scan.CoveringIndex && coveringFilter != nil {
-				ok, err := coveringFilter(row)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return nil
-				}
+			row, ok, err := t.indexedScanRow(
+				ctx, indexValue, rowID, scan.CoveringIndex, scan.IndexColumns,
+				selectedMask, len(selectedFields), tableFilter, coveringFilter,
+			)
+			if err != nil || !ok {
+				return err
 			}
 
 			if err := ctx.Err(); err != nil {
