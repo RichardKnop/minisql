@@ -98,15 +98,22 @@ func (s Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (rows 
 		return nil, err
 	}
 
-	result, err := s.conn.executeStatement(ctx, stmtWithArgs)
+	result, rowsCtx, readTx, err := s.conn.executeQueryStatement(ctx, stmtWithArgs)
 	if err != nil {
 		return nil, err
 	}
+	useRowViews := len(result.RowViewFieldIndexes) > 0
 
 	return &Rows{
-		columns: result.Columns,
-		iter:    result.Rows,
-		ctx:     ctx,
+		columns:             result.Columns,
+		iter:                result.Rows,
+		rowViewIter:         result.RowViews,
+		rowViewPager:        result.RowViewPager,
+		rowViewFieldIndexes: result.RowViewFieldIndexes,
+		useRowViews:         useRowViews,
+		ctx:                 rowsCtx,
+		txManager:           s.conn.db.GetTransactionManager(),
+		tx:                  readTx,
 	}, nil
 }
 

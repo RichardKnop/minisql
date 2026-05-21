@@ -166,6 +166,32 @@ Alloc count: 134,876 → 74,887 (1.80× reduction). Remaining allocations are fr
 
 ---
 
+### 2026-05-21 — Step 3: RowView path for prepared-statement queries
+
+**Root cause fixed:** `Stmt.QueryContext` (the driver path for `db.Prepare` + `stmt.Query`) called `executeStatement` directly and built `Rows` without `rowViewIter`, `rowViewPager`, or `rowViewFieldIndexes`. As a result, `useRowViews` was always `false` for prepared statements regardless of scan type — the RowView machinery built in prior steps was entirely bypassed at this layer.
+
+**Fix:** `Stmt.QueryContext` now calls `executeQueryStatement` (same path as `Conn.QueryContext`) and forwards all RowView fields to `Rows`. The read-only transaction is kept open when `RowViewFieldIndexes` is non-empty, allowing the lazy iterator to safely read pages under the snapshot.
+
+#### Memory change (B/op, mean of 3 runs)
+
+| Benchmark | before | after | reduction | vs SQLite |
+|---|---|---|---|---|
+| Select_IndexRangeScan | 242 KiB | **111 KiB** | **2.2×** | 1.3× (was 2.8×) |
+| Select_RangeScan | 210 KiB | **82.6 KiB** | **2.5×** | **0.94×** ✓ better than SQLite |
+| Select_SecondaryIndex_LowSelectivity | 848 KiB | **435 KiB** | **2.0×** | 1.4× (was 2.7×) |
+
+#### Allocs/op change
+
+| Benchmark | before | after | reduction | vs SQLite |
+|---|---|---|---|---|
+| Select_IndexRangeScan | 8,873 | **6,650** | **1.3×** | 1.0× (was 1.3×) |
+| Select_RangeScan | 7,719 | **5,516** | **1.4×** | **0.84×** ✓ better than SQLite |
+| Select_SecondaryIndex_LowSelectivity | 39,946 | **29,942** | **1.3×** | 1.0× (was 1.3×) |
+
+`Select_RangeScan` (sequential scan, no index) is now better than SQLite on both memory and alloc count. `Select_IndexRangeScan` is at alloc parity with SQLite; remaining 1.3× memory gap is from `leafNodeSeek` cursor allocation per rowID lookup in the index range scan path.
+
+---
+
 ### 2026-05-20 17:10 UTC
 
 #### Timing
