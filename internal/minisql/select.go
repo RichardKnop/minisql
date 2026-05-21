@@ -319,9 +319,21 @@ func (t *Table) countAllLeafWalk(ctx context.Context) (StatementResult, error) {
 }
 
 // aggState holds the running accumulator for a single aggregate expression.
+// Used by the scalar aggregate path (no GROUP BY).
 type aggState struct {
 	min       OptionalValue
 	max       OptionalValue
+	count     int64
+	sumI      int64
+	sumF      float64
+	useIntSum bool
+	hasValue  bool
+}
+
+// groupAggState is the per-group accumulator used inside groupByAccumulator.
+// min/max are omitted here and stored in a separate minMaxPool so COUNT/SUM/AVG
+// queries don't pay 48 bytes per entry for fields they never use.
+type groupAggState struct {
 	count     int64
 	sumI      int64
 	sumF      float64
@@ -356,8 +368,7 @@ func (t *Table) selectAggregateSequentialRowView(ctx context.Context, stmt State
 		return StatementResult{}, err
 	}
 
-	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
-	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	filter := t.compileRowViewScanFilter(scan, selectedFields)
 	states, aggColIdx := t.newAggStates(stmt)
 
 	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
@@ -384,18 +395,12 @@ func (t *Table) selectAggregateSequentialRowView(ctx context.Context, stmt State
 		advanceLeafCursor(cursor, page)
 		view := NewRowView(t.Columns, cell)
 
-		if tableFilter != nil {
-			row, err := view.MaterializeWithOverflow(ctx, t.pager, selectedMask)
-			if err != nil {
-				return StatementResult{}, err
-			}
-			ok, err := tableFilter(row)
-			if err != nil {
-				return StatementResult{}, err
-			}
-			if !ok {
-				continue
-			}
+		ok, err := filter.accept(ctx, t.pager, view)
+		if err != nil {
+			return StatementResult{}, err
+		}
+		if !ok {
+			continue
 		}
 
 		if err := accumulateAggregateRowView(ctx, t.pager, stmt.Aggregates, states, aggColIdx, view); err != nil {
@@ -690,6 +695,7 @@ func (t *Table) trySelectMinMaxFromIndexEndpoint(ctx context.Context, stmt State
 type groupEntry struct {
 	aggStateStart int32
 	groupValStart int32
+	minMaxStart   int32 // index into acc.minMaxPool; -1 if query has no MIN/MAX
 }
 
 // groupByAccumulator holds all streaming GROUP BY state. Create with
@@ -705,9 +711,14 @@ type groupByAccumulator struct {
 	groupMap          map[string]int32
 	groupEntries      []groupEntry
 	groupOrder        []string
-	aggStatePool      []aggState
+	aggStatePool      []groupAggState
 	groupValPool      []OptionalValue
 	keyBuf            []byte
+	// minMaxPool holds one OptionalValue per (group × numMinMax). Only allocated
+	// when the query contains at least one MIN or MAX aggregate.
+	minMaxPool    []OptionalValue
+	minMaxAggSlot []int // aggIdx → slot within group's minMax block (-1 if not MIN/MAX)
+	numMinMax     int
 }
 
 func newGroupByAccumulator(stmt Statement, t *Table, estRows int) *groupByAccumulator {
@@ -761,11 +772,30 @@ func newGroupByAccumulator(stmt Statement, t *Table, estRows int) *groupByAccumu
 		}
 	}
 
+	// Map each aggregate index to its MIN/MAX slot (only for MIN/MAX aggregates).
+	numMinMax := 0
+	minMaxAggSlot := make([]int, numAggs)
+	for i, agg := range stmt.Aggregates {
+		if agg.Kind == AggregateMin || agg.Kind == AggregateMax {
+			minMaxAggSlot[i] = numMinMax
+			numMinMax++
+		} else {
+			minMaxAggSlot[i] = -1
+		}
+	}
+
+	// Cap the initial pool to 64 groups to avoid large upfront allocations.
+	// The pool grows on demand via append, so this is only the reservation.
 	estGroups := estRows / 10
-	if estGroups < 16 {
-		estGroups = 16
-	} else if estGroups > 4096 {
-		estGroups = 4096
+	if estGroups < 8 {
+		estGroups = 8
+	} else if estGroups > 64 {
+		estGroups = 64
+	}
+
+	var minMaxPool []OptionalValue
+	if numMinMax > 0 {
+		minMaxPool = make([]OptionalValue, 0, estGroups*numMinMax)
 	}
 
 	return &groupByAccumulator{
@@ -777,8 +807,11 @@ func newGroupByAccumulator(stmt Statement, t *Table, estRows int) *groupByAccumu
 		groupMap:          make(map[string]int32, estGroups),
 		groupEntries:      make([]groupEntry, 0, estGroups),
 		groupOrder:        make([]string, 0, estGroups),
-		aggStatePool:      make([]aggState, 0, estGroups*numAggs),
+		aggStatePool:      make([]groupAggState, 0, estGroups*numAggs),
 		groupValPool:      make([]OptionalValue, 0, estGroups*numGroupBy),
+		minMaxPool:        minMaxPool,
+		minMaxAggSlot:     minMaxAggSlot,
+		numMinMax:         numMinMax,
 	}
 }
 
@@ -794,7 +827,7 @@ func (acc *groupByAccumulator) process(row Row) {
 
 		aggStart := int32(len(acc.aggStatePool))
 		for i := range len(acc.aggregates) {
-			acc.aggStatePool = append(acc.aggStatePool, aggState{useIntSum: acc.useIntSum[i]})
+			acc.aggStatePool = append(acc.aggStatePool, groupAggState{useIntSum: acc.useIntSum[i]})
 		}
 
 		gvStart := int32(len(acc.groupValPool))
@@ -806,16 +839,26 @@ func (acc *groupByAccumulator) process(row Row) {
 			}
 		}
 
+		mmStart := int32(-1)
+		if acc.numMinMax > 0 {
+			mmStart = int32(len(acc.minMaxPool))
+			for range acc.numMinMax {
+				acc.minMaxPool = append(acc.minMaxPool, OptionalValue{})
+			}
+		}
+
 		gsIdx = int32(len(acc.groupEntries))
 		acc.groupEntries = append(acc.groupEntries, groupEntry{
 			aggStateStart: aggStart,
 			groupValStart: gvStart,
+			minMaxStart:   mmStart,
 		})
 		acc.groupMap[key] = gsIdx
 		acc.groupOrder = append(acc.groupOrder, key)
 	}
 
 	aggBase := int(acc.groupEntries[gsIdx].aggStateStart)
+	mmBase := int(acc.groupEntries[gsIdx].minMaxStart)
 	for i, agg := range acc.aggregates {
 		switch agg.Kind {
 		case 0:
@@ -857,9 +900,9 @@ func (acc *groupByAccumulator) process(row Row) {
 			if !val.Valid {
 				continue
 			}
-			if !acc.aggStatePool[aggBase+i].hasValue || compareValues(val, acc.aggStatePool[aggBase+i].min) < 0 {
-				acc.aggStatePool[aggBase+i].min = val
-				acc.aggStatePool[aggBase+i].hasValue = true
+			slot := mmBase + acc.minMaxAggSlot[i]
+			if !acc.minMaxPool[slot].Valid || compareValues(val, acc.minMaxPool[slot]) < 0 {
+				acc.minMaxPool[slot] = val
 			}
 		case AggregateMax:
 			colIdx := acc.aggColIdx[i]
@@ -870,9 +913,9 @@ func (acc *groupByAccumulator) process(row Row) {
 			if !val.Valid {
 				continue
 			}
-			if !acc.aggStatePool[aggBase+i].hasValue || compareValues(val, acc.aggStatePool[aggBase+i].max) > 0 {
-				acc.aggStatePool[aggBase+i].max = val
-				acc.aggStatePool[aggBase+i].hasValue = true
+			slot := mmBase + acc.minMaxAggSlot[i]
+			if !acc.minMaxPool[slot].Valid || compareValues(val, acc.minMaxPool[slot]) > 0 {
+				acc.minMaxPool[slot] = val
 			}
 		}
 	}
@@ -891,7 +934,7 @@ func (acc *groupByAccumulator) processView(view RowView) error {
 
 		aggStart := int32(len(acc.aggStatePool))
 		for i := range len(acc.aggregates) {
-			acc.aggStatePool = append(acc.aggStatePool, aggState{useIntSum: acc.useIntSum[i]})
+			acc.aggStatePool = append(acc.aggStatePool, groupAggState{useIntSum: acc.useIntSum[i]})
 		}
 
 		gvStart := int32(len(acc.groupValPool))
@@ -907,16 +950,26 @@ func (acc *groupByAccumulator) processView(view RowView) error {
 			}
 		}
 
+		mmStart := int32(-1)
+		if acc.numMinMax > 0 {
+			mmStart = int32(len(acc.minMaxPool))
+			for range acc.numMinMax {
+				acc.minMaxPool = append(acc.minMaxPool, OptionalValue{})
+			}
+		}
+
 		gsIdx = int32(len(acc.groupEntries))
 		acc.groupEntries = append(acc.groupEntries, groupEntry{
 			aggStateStart: aggStart,
 			groupValStart: gvStart,
+			minMaxStart:   mmStart,
 		})
 		acc.groupMap[key] = gsIdx
 		acc.groupOrder = append(acc.groupOrder, key)
 	}
 
 	aggBase := int(acc.groupEntries[gsIdx].aggStateStart)
+	mmBase := int(acc.groupEntries[gsIdx].minMaxStart)
 	for i, agg := range acc.aggregates {
 		state := &acc.aggStatePool[aggBase+i]
 		switch agg.Kind {
@@ -965,9 +1018,9 @@ func (acc *groupByAccumulator) processView(view RowView) error {
 			if !val.Valid {
 				continue
 			}
-			if !state.hasValue || compareValues(val, state.min) < 0 {
-				state.min = val
-				state.hasValue = true
+			slot := mmBase + acc.minMaxAggSlot[i]
+			if !acc.minMaxPool[slot].Valid || compareValues(val, acc.minMaxPool[slot]) < 0 {
+				acc.minMaxPool[slot] = val
 			}
 		case AggregateMax:
 			colIdx := acc.aggColIdx[i]
@@ -981,9 +1034,9 @@ func (acc *groupByAccumulator) processView(view RowView) error {
 			if !val.Valid {
 				continue
 			}
-			if !state.hasValue || compareValues(val, state.max) > 0 {
-				state.max = val
-				state.hasValue = true
+			slot := mmBase + acc.minMaxAggSlot[i]
+			if !acc.minMaxPool[slot].Valid || compareValues(val, acc.minMaxPool[slot]) > 0 {
+				acc.minMaxPool[slot] = val
 			}
 		}
 	}
@@ -1039,12 +1092,11 @@ func (t *Table) selectGroupByZeroAlloc(ctx context.Context, stmt Statement, scan
 		return StatementResult{}, err
 	}
 
-	fullMask := selectedColumnsMask(t.Columns, selectedFields)
-	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	filter := t.compileRowViewScanFilter(scan, selectedFields)
 
 	estRows := int(t.estimatedRowCount())
 	if estRows <= 0 {
-		estRows = 160 // conservative default (estGroups = 16)
+		estRows = 80 // conservative default (estGroups = 8)
 	}
 	acc := newGroupByAccumulator(stmt, t, estRows)
 
@@ -1080,18 +1132,12 @@ func (t *Table) selectGroupByZeroAlloc(ctx context.Context, stmt Statement, scan
 
 		view := NewRowView(t.Columns, cell)
 
-		if tableFilter != nil {
-			row, err := view.Materialize(fullMask)
-			if err != nil {
-				return StatementResult{}, err
-			}
-			ok, err := tableFilter(row)
-			if err != nil {
-				return StatementResult{}, err
-			}
-			if !ok {
-				continue
-			}
+		ok, err := filter.accept(ctx, t.pager, view)
+		if err != nil {
+			return StatementResult{}, err
+		}
+		if !ok {
+			continue
 		}
 
 		if err := acc.processView(view); err != nil {
@@ -1143,6 +1189,7 @@ func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementR
 		gsIdx := acc.groupMap[key]
 		aggBase := int(acc.groupEntries[gsIdx].aggStateStart)
 		gvBase := int(acc.groupEntries[gsIdx].groupValStart)
+		mmBase := int(acc.groupEntries[gsIdx].minMaxStart)
 
 		values := allResultValues[gi*nFields : (gi+1)*nFields]
 
@@ -1173,12 +1220,14 @@ func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementR
 					}
 				}
 			case AggregateMin:
-				if acc.aggStatePool[aggBase+i].hasValue {
-					values[i] = acc.aggStatePool[aggBase+i].min
+				slot := mmBase + acc.minMaxAggSlot[i]
+				if acc.minMaxPool[slot].Valid {
+					values[i] = acc.minMaxPool[slot]
 				}
 			case AggregateMax:
-				if acc.aggStatePool[aggBase+i].hasValue {
-					values[i] = acc.aggStatePool[aggBase+i].max
+				slot := mmBase + acc.minMaxAggSlot[i]
+				if acc.minMaxPool[slot].Valid {
+					values[i] = acc.minMaxPool[slot]
 				}
 			}
 		}
