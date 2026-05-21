@@ -299,15 +299,14 @@ func (t *Table) parallelScanWorker(
 			}
 
 			cell := page.LeafNode.Cells[i]
+			view := NewRowView(t.Columns, cell)
 
 			if !twoPhase {
-				row := t.newRow()
-				row, err = row.UnmarshalWithMask(cell, fullMask)
+				row, err := view.Materialize(fullMask)
 				if err != nil {
 					send(parallelScanResult{err: err})
 					return
 				}
-				row.Key = cell.Key
 				if tableFilter != nil {
 					ok, err := tableFilter(row)
 					if err != nil {
@@ -330,8 +329,7 @@ func (t *Table) parallelScanWorker(
 			}
 
 			// Two-phase: decode only predicate columns first to skip non-matching rows cheaply.
-			filterRow := t.newRow()
-			filterRow, err = filterRow.UnmarshalWithMask(cell, filterMask)
+			filterRow, err := view.Materialize(filterMask)
 			if err != nil {
 				send(parallelScanResult{err: err})
 				return
@@ -345,14 +343,7 @@ func (t *Table) parallelScanWorker(
 				continue
 			}
 
-			row := t.newRow()
-			row, err = row.UnmarshalWithMask(cell, fullMask)
-			if err != nil {
-				send(parallelScanResult{err: err})
-				return
-			}
-			row.Key = cell.Key
-			row, err = row.readOverflowTexts(ctx, t.pager)
+			row, err := view.MaterializeWithOverflow(ctx, t.pager, fullMask)
 			if err != nil {
 				send(parallelScanResult{err: err})
 				return
