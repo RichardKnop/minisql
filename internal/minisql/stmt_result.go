@@ -123,6 +123,28 @@ func materializeResultRows(ctx context.Context, result StatementResult) ([]Row, 
 		return result.rawRows, nil
 	}
 
+	if result.RowViews.rowFunc != nil {
+		defer func() {
+			_ = result.Rows.Close()
+		}()
+		defer func() {
+			_ = result.RowViews.Close()
+		}()
+
+		var rows []Row
+		for result.RowViews.Next(ctx) {
+			row, err := projectRowView(ctx, result.RowViewPager, result.RowViews.RowView(), result.RowViewFieldIndexes, result.Columns)
+			if err != nil {
+				return nil, err
+			}
+			rows = append(rows, row)
+		}
+		if err := result.RowViews.Err(); err != nil {
+			return nil, err
+		}
+		return rows, nil
+	}
+
 	defer func() {
 		_ = result.Rows.Close()
 	}()
