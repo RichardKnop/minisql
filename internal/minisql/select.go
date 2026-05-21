@@ -193,6 +193,9 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	}
 
 	if stmt.IsSelectAggregate() && len(plan.Joins) == 0 {
+		if len(plan.Scans) == 1 && plan.Scans[0].Type == ScanTypeSequential && t.virtualRows == nil && !t.parallelScan {
+			return t.selectAggregateSequentialRowView(ctx, stmt, plan.Scans[0], selectedFields)
+		}
 		return t.selectAggregateStreaming(ctx, stmt, plan, selectedFields)
 	}
 
@@ -341,6 +344,62 @@ func (t *Table) selectAggregateStreaming(ctx context.Context, stmt Statement, pl
 	return t.aggregateResult(stmt, states), nil
 }
 
+func (t *Table) selectAggregateSequentialRowView(ctx context.Context, stmt Statement, scan Scan, selectedFields []Field) (StatementResult, error) {
+	cursor, err := t.SeekFirst(ctx)
+	if err != nil {
+		return StatementResult{}, err
+	}
+
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	states, aggColIdx := t.newAggStates(stmt)
+
+	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return StatementResult{}, fmt.Errorf("aggregate sequential scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	for !cursor.EndOfTable {
+		if err := ctx.Err(); err != nil {
+			return StatementResult{}, err
+		}
+		if page.Index != cursor.PageIdx {
+			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
+			if err != nil {
+				return StatementResult{}, fmt.Errorf("aggregate sequential scan: %w", err)
+			}
+		}
+		if cursor.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
+			return StatementResult{}, fmt.Errorf("cell index %d out of bounds, max %d", cursor.CellIdx, page.LeafNode.Header.Cells-1)
+		}
+
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+		advanceLeafCursor(cursor, page)
+		view := NewRowView(t.Columns, cell)
+
+		if tableFilter != nil {
+			row, err := view.MaterializeWithOverflow(ctx, t.pager, selectedMask)
+			if err != nil {
+				return StatementResult{}, err
+			}
+			ok, err := tableFilter(row)
+			if err != nil {
+				return StatementResult{}, err
+			}
+			if !ok {
+				continue
+			}
+		}
+
+		if err := accumulateAggregateRowView(ctx, t.pager, stmt.Aggregates, states, aggColIdx, view); err != nil {
+			return StatementResult{}, err
+		}
+	}
+
+	return t.aggregateResult(stmt, states), nil
+}
+
 func (t *Table) newAggStates(stmt Statement) ([]aggState, []int) {
 	states := make([]aggState, len(stmt.Aggregates))
 
@@ -425,11 +484,84 @@ func accumulateAggregateRow(stmt Statement, states []aggState, aggColIdx []int, 
 	return nil
 }
 
+func accumulateAggregateRowView(ctx context.Context, pager TxPager, aggregates []AggregateExpr, states []aggState, aggColIdx []int, view RowView) error {
+	for i, agg := range aggregates {
+		switch agg.Kind {
+		case AggregateCount:
+			states[i].count += 1
+
+		case AggregateSum, AggregateAvg:
+			val, ok, err := aggregateRowViewValue(ctx, pager, view, aggColIdx[i])
+			if err != nil {
+				return err
+			}
+			if !ok || !val.Valid {
+				continue
+			}
+			states[i].count += 1
+			states[i].hasValue = true
+			if states[i].useIntSum {
+				switch v := val.Value.(type) {
+				case int64:
+					states[i].sumI += v
+				case int32:
+					states[i].sumI += int64(v)
+				}
+			} else {
+				switch v := val.Value.(type) {
+				case float64:
+					states[i].sumF += v
+				case float32:
+					states[i].sumF += float64(v)
+				}
+			}
+
+		case AggregateMin:
+			val, ok, err := aggregateRowViewValue(ctx, pager, view, aggColIdx[i])
+			if err != nil {
+				return err
+			}
+			if !ok || !val.Valid {
+				continue
+			}
+			if !states[i].hasValue || compareValues(val, states[i].min) < 0 {
+				states[i].min = val
+				states[i].hasValue = true
+			}
+
+		case AggregateMax:
+			val, ok, err := aggregateRowViewValue(ctx, pager, view, aggColIdx[i])
+			if err != nil {
+				return err
+			}
+			if !ok || !val.Valid {
+				continue
+			}
+			if !states[i].hasValue || compareValues(val, states[i].max) > 0 {
+				states[i].max = val
+				states[i].hasValue = true
+			}
+		}
+	}
+	return nil
+}
+
 func aggregateRowValue(row Row, colName string, colIdx int) (OptionalValue, bool) {
 	if colIdx >= 0 && colIdx < len(row.Values) && colIdx < len(row.Columns) && row.Columns[colIdx].Name == colName {
 		return row.Values[colIdx], true
 	}
 	return row.GetValue(colName)
+}
+
+func aggregateRowViewValue(ctx context.Context, pager TxPager, view RowView, colIdx int) (OptionalValue, bool, error) {
+	if colIdx < 0 || colIdx >= len(view.Columns()) {
+		return OptionalValue{}, false, nil
+	}
+	value, err := view.ValueAtWithOverflow(ctx, pager, colIdx)
+	if err != nil {
+		return OptionalValue{}, false, err
+	}
+	return value, true, nil
 }
 
 func (t *Table) aggregateResult(stmt Statement, states []aggState) StatementResult {
