@@ -200,6 +200,18 @@ func (c *Cursor) fetchRowWithMask(ctx context.Context, advance bool, selectedMas
 	return row, nil
 }
 
+func (c *Cursor) advance(ctx context.Context) error {
+	page, err := c.Table.pager.ReadPage(ctx, c.PageIdx)
+	if err != nil {
+		return fmt.Errorf("read page: %w", err)
+	}
+	if c.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
+		return fmt.Errorf("cell index %d out of bounds, max %d", c.CellIdx, page.LeafNode.Header.Cells-1)
+	}
+	advanceLeafCursor(c, page)
+	return nil
+}
+
 func advanceLeafCursor(cursor *Cursor, page *Page) {
 	switch {
 	case cursor.CellIdx < page.LeafNode.Header.Cells-1:

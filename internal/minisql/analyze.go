@@ -170,8 +170,7 @@ func (d *Database) analyzeTable(ctx context.Context, statsTable, table *Table) e
 	}
 
 	for !cursor.EndOfTable {
-		_, err := cursor.fetchRow(ctx, true)
-		if err != nil {
+		if err := cursor.advance(ctx); err != nil {
 			return err
 		}
 		rowCount += 1
