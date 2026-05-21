@@ -2585,6 +2585,38 @@ func (t *Table) indexedScanRow(
 	return row, true, nil
 }
 
+func (t *Table) rowIDScanRow(
+	ctx context.Context,
+	rowID RowID,
+	selectedMask []bool,
+	nSelected int,
+	tableFilter func(Row) (bool, error),
+) (Row, bool, error) {
+	var row Row
+	if nSelected == 0 {
+		row = NewRowWithValues(t.Columns, nil)
+		row.Key = rowID
+	} else {
+		cursor, err := t.Seek(ctx, rowID)
+		if err != nil {
+			return Row{}, false, fmt.Errorf("find row failed: %w", err)
+		}
+		row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
+		if err != nil {
+			return Row{}, false, fmt.Errorf("fetch row failed: %w", err)
+		}
+	}
+
+	if tableFilter != nil {
+		ok, err := tableFilter(row)
+		if err != nil || !ok {
+			return Row{}, false, err
+		}
+	}
+
+	return row, true, nil
+}
+
 func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, selectedFields []Field, out func(Row) error) error {
 	idx, ok := t.IndexByName(scan.IndexName)
 	if !ok {
@@ -2858,34 +2890,18 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 
 	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
 	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	nSelected := len(selectedFields)
 	for _, rowID := range surviving {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		var row Row
-		if len(selectedFields) == 0 {
-			row = NewRowWithValues(t.Columns, nil)
-			row.Key = rowID
-		} else {
-			cursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("full-text seek: %w", err)
-			}
-			row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-			if err != nil {
-				return fmt.Errorf("full-text fetch: %w", err)
-			}
+		row, ok, err := t.rowIDScanRow(ctx, rowID, selectedMask, nSelected, tableFilter)
+		if err != nil {
+			return err
 		}
-
-		if tableFilter != nil {
-			ok, err := tableFilter(row)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				continue
-			}
+		if !ok {
+			continue
 		}
 
 		if err := out(row); err != nil {
@@ -3199,6 +3215,7 @@ func (t *Table) fullTextSingleTermIndexScan(ctx context.Context, secondaryIndex 
 
 	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
 	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	nSelected := len(selectedFields)
 	var (
 		lastRowID RowID
 		haveLast  bool
@@ -3221,29 +3238,12 @@ func (t *Table) fullTextSingleTermIndexScan(ctx context.Context, secondaryIndex 
 				return err
 			}
 
-			var row Row
-			if len(selectedFields) == 0 {
-				row = NewRowWithValues(t.Columns, nil)
-				row.Key = rowID
-			} else {
-				cursor, err := t.Seek(ctx, rowID)
-				if err != nil {
-					return fmt.Errorf("full-text seek: %w", err)
-				}
-				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-				if err != nil {
-					return fmt.Errorf("full-text fetch: %w", err)
-				}
+			row, ok, err := t.rowIDScanRow(ctx, rowID, selectedMask, nSelected, tableFilter)
+			if err != nil {
+				return err
 			}
-
-			if tableFilter != nil {
-				ok, err := tableFilter(row)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return nil
-				}
+			if !ok {
+				return nil
 			}
 
 			return out(row)
@@ -3284,34 +3284,18 @@ func (t *Table) invertedIndexScan(ctx context.Context, scan Scan, selectedFields
 
 	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
 	tableFilter := compileInvertedScanFilter(t.Columns, scan.Filters)
+	nSelected := len(selectedFields)
 	for _, rowID := range surviving {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		var row Row
-		if len(selectedFields) == 0 {
-			row = NewRowWithValues(t.Columns, nil)
-			row.Key = rowID
-		} else {
-			cursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("inverted seek: %w", err)
-			}
-			row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-			if err != nil {
-				return fmt.Errorf("inverted fetch: %w", err)
-			}
+		row, ok, err := t.rowIDScanRow(ctx, rowID, selectedMask, nSelected, tableFilter)
+		if err != nil {
+			return err
 		}
-
-		if tableFilter != nil {
-			ok, err := tableFilter(row)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				continue
-			}
+		if !ok {
+			continue
 		}
 
 		if err := out(row); err != nil {
@@ -3336,6 +3320,7 @@ func (t *Table) singleTermInvertedIndexScan(
 
 	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
 	tableFilter := compileInvertedScanFilter(t.Columns, scan.Filters)
+	nSelected := len(selectedFields)
 	for {
 		block, ok, err := iter.NextBlock(ctx)
 		if err != nil {
@@ -3349,29 +3334,12 @@ func (t *Table) singleTermInvertedIndexScan(
 				return err
 			}
 
-			var row Row
-			if len(selectedFields) == 0 {
-				row = NewRowWithValues(t.Columns, nil)
-				row.Key = rowID
-			} else {
-				cursor, err := t.Seek(ctx, rowID)
-				if err != nil {
-					return fmt.Errorf("inverted seek: %w", err)
-				}
-				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-				if err != nil {
-					return fmt.Errorf("inverted fetch: %w", err)
-				}
+			row, ok, err := t.rowIDScanRow(ctx, rowID, selectedMask, nSelected, tableFilter)
+			if err != nil {
+				return err
 			}
-
-			if tableFilter != nil {
-				ok, err := tableFilter(row)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return nil
-				}
+			if !ok {
+				return nil
 			}
 
 			return out(row)
@@ -3622,28 +3590,15 @@ func (t *Table) indexEndpointScan(ctx context.Context, scan Scan, selectedFields
 		return fmt.Errorf("no index found for endpoint scan: %s", scan.IndexName)
 	}
 	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	nSelected := len(selectedFields)
 
 	err := idx.ScanAll(ctx, reverse, func(key any, rowID RowID) error {
-		var row Row
-
-		if scan.CoveringIndex {
-			// Index-only scan: build row directly from key without touching the table page.
-			row = rowFromIndexKey(key, scan.IndexColumns, rowID)
-		} else {
-			cursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("find row failed: %w", err)
-			}
-
-			if len(selectedFields) == 0 {
-				row = NewRowWithValues(t.Columns, nil)
-				row.Key = rowID
-			} else {
-				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-				if err != nil {
-					return fmt.Errorf("fetch row failed: %w", err)
-				}
-			}
+		row, ok, err := t.indexedScanRow(
+			ctx, key, rowID, scan.CoveringIndex, scan.IndexColumns,
+			selectedMask, nSelected, nil, nil,
+		)
+		if err != nil || !ok {
+			return err
 		}
 
 		if err := ctx.Err(); err != nil {
@@ -4611,35 +4566,19 @@ func (t *Table) indexIntersectScan(ctx context.Context, scan Scan, selectedField
 
 	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
 	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	nSelected := len(selectedFields)
 
 	for _, rowID := range surviving {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		var row Row
-		if len(selectedFields) == 0 {
-			row = NewRowWithValues(t.Columns, nil)
-			row.Key = rowID
-		} else {
-			cursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("intersect seek: %w", err)
-			}
-			row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-			if err != nil {
-				return fmt.Errorf("intersect fetch: %w", err)
-			}
+		row, ok, err := t.rowIDScanRow(ctx, rowID, selectedMask, nSelected, tableFilter)
+		if err != nil {
+			return err
 		}
-
-		if tableFilter != nil {
-			ok, err := tableFilter(row)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				continue
-			}
+		if !ok {
+			continue
 		}
 
 		if err := out(row); err != nil {
@@ -4711,6 +4650,7 @@ func (t *Table) indexUnionScan(ctx context.Context, scan Scan, selectedFields []
 
 	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
 	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	nSelected := len(selectedFields)
 
 	var emitted int64
 	scanLimit := scan.ScanLimit
@@ -4719,29 +4659,12 @@ func (t *Table) indexUnionScan(ctx context.Context, scan Scan, selectedFields []
 			return err
 		}
 
-		var row Row
-		if len(selectedFields) == 0 {
-			row = NewRowWithValues(t.Columns, nil)
-			row.Key = rowID
-		} else {
-			cursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("union seek: %w", err)
-			}
-			row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-			if err != nil {
-				return fmt.Errorf("union fetch: %w", err)
-			}
+		row, ok, err := t.rowIDScanRow(ctx, rowID, selectedMask, nSelected, tableFilter)
+		if err != nil {
+			return err
 		}
-
-		if tableFilter != nil {
-			ok, err := tableFilter(row)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				continue
-			}
+		if !ok {
+			continue
 		}
 
 		if err := out(row); err != nil {
