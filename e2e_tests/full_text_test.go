@@ -1,6 +1,8 @@
 package e2etests
 
-import "fmt"
+import (
+	"fmt"
+)
 
 func (s *TestSuite) TestFullTextSearch_SequentialMatchAndRank() {
 	_, err := s.db.Exec(`create table "articles" (

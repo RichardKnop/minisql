@@ -165,12 +165,12 @@ func (d *Database) materialiseFromSource(ctx context.Context, stmt Statement) ([
 		if err != nil {
 			return nil, fmt.Errorf("UPDATE FROM subquery: %w", err)
 		}
-		var rows []Row
-		for result.Rows.Next(ctx) {
-			rows = append(rows, prefixRowColumns(result.Rows.Row(), fromAlias))
-		}
-		if err := result.Rows.Err(); err != nil {
+		rows, err := materializeResultRows(ctx, result)
+		if err != nil {
 			return nil, err
+		}
+		for i, row := range rows {
+			rows[i] = prefixRowColumns(row, fromAlias)
 		}
 		return rows, nil
 	}
@@ -192,12 +192,12 @@ func (d *Database) materialiseFromSource(ctx context.Context, stmt Statement) ([
 	if err != nil {
 		return nil, fmt.Errorf("UPDATE FROM table %q: %w", stmt.UpdateFromTable, err)
 	}
-	var rows []Row
-	for result.Rows.Next(ctx) {
-		rows = append(rows, prefixRowColumns(result.Rows.Row(), fromAlias))
-	}
-	if err := result.Rows.Err(); err != nil {
+	rows, err := materializeResultRows(ctx, result)
+	if err != nil {
 		return nil, err
+	}
+	for i, row := range rows {
+		rows[i] = prefixRowColumns(row, fromAlias)
 	}
 	return rows, nil
 }

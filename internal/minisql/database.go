@@ -53,9 +53,9 @@ type Database struct {
 	clock          clock
 	logger         *zap.Logger
 	wal            *WAL
-	rowCounts   map[string]int64
-	dbFilePath  string
-	rowCountsMu               sync.RWMutex
+	rowCounts      map[string]int64
+	dbFilePath     string
+	rowCountsMu    sync.RWMutex
 	parallelScan   bool
 	// referencedBy maps each parent table name to the list of FK constraints
 	// from other (child) tables that reference it.  Built at startup and kept
@@ -78,8 +78,8 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, par
 		factory:            factory,
 		saver:              saver,
 		tables:             make(map[string]*Table),
-		rowCounts:    make(map[string]int64),
-		referencedBy: make(map[string][]inboundFK),
+		rowCounts:          make(map[string]int64),
+		referencedBy:       make(map[string][]inboundFK),
 		foreignKeysEnabled: true,
 		dbLock:             new(sync.RWMutex),
 		stmtCache:          lrucache.New[string](defaultMaxCachedStatements),
@@ -1061,6 +1061,9 @@ func flattenUnionChain(stmt Statement) ([]Statement, []bool) {
 // same number of columns (validated at execution time by the query engine).
 func (d *Database) executeUnion(ctx context.Context, stmt Statement) (StatementResult, error) {
 	stmts, alls := flattenUnionChain(stmt)
+	if unionAllOnly(alls) {
+		return d.executeUnionAllStreaming(ctx, stmts)
+	}
 
 	var allRows []Row
 	var resultColumns []Column
@@ -1122,6 +1125,57 @@ func (d *Database) executeUnion(ctx context.Context, stmt Statement) (StatementR
 			row := allRows[idx]
 			idx += 1
 			return row, nil
+		}),
+	}, nil
+}
+
+func unionAllOnly(alls []bool) bool {
+	for _, all := range alls {
+		if !all {
+			return false
+		}
+	}
+	return len(alls) > 0
+}
+
+func (d *Database) executeUnionAllStreaming(ctx context.Context, stmts []Statement) (StatementResult, error) {
+	results := make([]StatementResult, len(stmts))
+	var resultColumns []Column
+
+	for i, s := range stmts {
+		table, ok := d.GetTable(ctx, s.TableName)
+		if !ok {
+			return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, s.TableName)
+		}
+
+		result, err := d.executeTableStatement(ctx, table, s)
+		if err != nil {
+			return StatementResult{}, err
+		}
+
+		if i == 0 {
+			resultColumns = result.Columns
+		} else if len(result.Columns) != len(resultColumns) {
+			return StatementResult{}, fmt.Errorf("UNION branch %d returned %d columns, expected %d", i+1, len(result.Columns), len(resultColumns))
+		}
+		results[i] = result
+	}
+
+	branchIdx := 0
+	return StatementResult{
+		Columns: resultColumns,
+		Rows: NewIterator(func(ctx context.Context) (Row, error) {
+			for branchIdx < len(results) {
+				iter := &results[branchIdx].Rows
+				if iter.Next(ctx) {
+					return iter.Row(), nil
+				}
+				if err := iter.Err(); err != nil {
+					return Row{}, err
+				}
+				branchIdx += 1
+			}
+			return Row{}, ErrNoMoreRows
 		}),
 	}, nil
 }

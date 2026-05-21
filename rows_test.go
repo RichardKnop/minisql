@@ -16,10 +16,10 @@ func TestRowsColumnsCloseAndNext(t *testing.T) {
 	t.Parallel()
 
 	columns := []internalminisql.Column{
-		{Name: "id", Kind: internalminisql.Int8},
-		{Name: "name", Kind: internalminisql.Text},
-		{Name: "created", Kind: internalminisql.Timestamp},
-		{Name: "nullable", Kind: internalminisql.Text},
+		{Name: "id", Kind: internalminisql.Int8, Size: 8},
+		{Name: "name", Kind: internalminisql.Varchar, Size: internalminisql.MaxInlineVarchar},
+		{Name: "created", Kind: internalminisql.Timestamp, Size: 8},
+		{Name: "nullable", Kind: internalminisql.Varchar, Size: internalminisql.MaxInlineVarchar},
 	}
 	ts := internalminisql.MustParseTimestampMicros("2024-06-15 12:34:56.123456")
 	rows := Rows{
@@ -81,4 +81,46 @@ func TestRowsNextValidatesDestinationWidth(t *testing.T) {
 	err := rows.Next(make([]driver.Value, 2))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "expected 2 values, got 1")
+}
+
+func TestRowsNextUsesRowViews(t *testing.T) {
+	t.Parallel()
+
+	columns := []internalminisql.Column{
+		{Name: "id", Kind: internalminisql.Int8, Size: 8},
+		{Name: "name", Kind: internalminisql.Varchar, Size: internalminisql.MaxInlineVarchar},
+		{Name: "created", Kind: internalminisql.Timestamp, Size: 8},
+		{Name: "nullable", Kind: internalminisql.Varchar, Size: internalminisql.MaxInlineVarchar},
+	}
+	ts := internalminisql.MustParseTimestampMicros("2024-06-15 12:34:56.123456")
+	row := internalminisql.NewRowWithValues(columns, []internalminisql.OptionalValue{
+		{Valid: true, Value: int64(1)},
+		{Valid: true, Value: internalminisql.NewTextPointer([]byte("alice"))},
+		{Valid: true, Value: internalminisql.TimestampMicros(ts)},
+		{},
+	})
+	data, err := row.Marshal()
+	require.NoError(t, err)
+
+	rows := Rows{
+		columns:             columns,
+		rowViewFieldIndexes: []int{0, 1, 2, 3},
+		rowViewIter: internalminisql.NewSliceRowViewIterator([]internalminisql.RowView{
+			internalminisql.NewRowView(columns, internalminisql.Cell{
+				Value:       data,
+				NullBitmask: row.NullBitmask(),
+			}),
+		}),
+		ctx:         context.Background(),
+		useRowViews: true,
+	}
+
+	dest := make([]driver.Value, len(columns))
+	require.NoError(t, rows.Next(dest))
+	assert.Equal(t, int64(1), dest[0])
+	assert.Equal(t, "alice", dest[1])
+	assert.Equal(t, time.Date(2024, 6, 15, 12, 34, 56, 123456000, time.UTC), dest[2])
+	assert.Nil(t, dest[3])
+
+	assert.ErrorIs(t, rows.Next(dest), io.EOF)
 }

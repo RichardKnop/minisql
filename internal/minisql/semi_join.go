@@ -1,6 +1,8 @@
 package minisql
 
-import "fmt"
+import (
+	"fmt"
+)
 
 // semiJoinEligible reports whether sub can be converted to a semi-join.
 // Returns the single inner column name and true when eligible.

@@ -1,7 +1,6 @@
 package minisql
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"math"
@@ -368,103 +367,6 @@ func (r Row) Marshal() ([]byte, error) {
 	return buf, nil
 }
 
-// Unmarshal decodes cell into a Row. For columns not in selectedFields, an empty
-// OptionalValue is inserted to maintain index alignment.
-func (r Row) Unmarshal(cell Cell, selectedFields ...Field) (Row, error) {
-	return r.UnmarshalWithMask(cell, selectedColumnsMask(r.Columns, selectedFields))
-}
-
-// UnmarshalWithMask decodes cell into a Row using a precomputed column-selection mask.
-// selectedMask must have len == len(r.Columns). A nil/empty mask means "no fields selected"
-// (keys only; values remain zero-value placeholders).
-func (r Row) UnmarshalWithMask(cell Cell, selectedMask []bool) (Row, error) {
-	r.Key = cell.Key
-	r.Values = make([]OptionalValue, len(r.Columns))
-	if len(selectedMask) == 0 {
-		return r, nil
-	}
-	return r.decodeColumnsWithMask(cell, selectedMask)
-}
-
-// unmarshalWithMaskInto decodes cell into r using a caller-supplied values
-// buffer, avoiding the heap allocation in UnmarshalWithMask. The caller must
-// not retain Row.Values across row iterations; it is overwritten each call.
-func (r Row) unmarshalWithMaskInto(cell Cell, selectedMask []bool, values []OptionalValue) (Row, error) {
-	r.Key = cell.Key
-	clear(values[:len(r.Columns)])
-	r.Values = values[:len(r.Columns)]
-	if len(selectedMask) == 0 {
-		return r, nil
-	}
-	return r.decodeColumnsWithMask(cell, selectedMask)
-}
-
-// decodeColumnsWithMask is the shared inner loop used by UnmarshalWithMask and
-// unmarshalWithMaskInto. r.Values must already be allocated and zeroed.
-func (r Row) decodeColumnsWithMask(cell Cell, selectedMask []bool) (Row, error) {
-	offset := 0
-	for i, col := range r.Columns {
-		// Check if column is NULL
-		isNull := bitwise.IsSet(cell.NullBitmask, i)
-
-		// If column not selected, skip it but track offset.
-		if !selectedMask[i] {
-			if !isNull {
-				// Skip over the data without unmarshaling
-				offset += int(r.getColumnSize(col, cell.Value, offset))
-			}
-			continue
-		}
-
-		if isNull {
-			continue
-		}
-		switch col.Kind {
-		case Boolean:
-			value := unmarshalBool(cell.Value, uint64(offset))
-			r.Values[i] = OptionalValue{Value: value, Valid: true}
-			offset += 1
-		case Int4:
-			value := unmarshalInt32(cell.Value, uint64(offset))
-			r.Values[i] = OptionalValue{Value: int32(value), Valid: true}
-			offset += 4
-		case Int8:
-			value := unmarshalInt64(cell.Value, uint64(offset))
-			r.Values[i] = OptionalValue{Value: int64(value), Valid: true}
-			offset += 8
-		case Real:
-			value := unmarshalFloat32(cell.Value, uint64(offset))
-			r.Values[i] = OptionalValue{Value: value, Valid: true}
-			offset += 4
-		case Double:
-			value := unmarshalFloat64(cell.Value, uint64(offset))
-			r.Values[i] = OptionalValue{Value: value, Valid: true}
-			offset += 8
-		case Varchar, Text, JSON:
-			textPointer := TextPointer{}
-			if err := textPointer.Unmarshal(cell.Value, uint64(offset)); err != nil {
-				return Row{}, err
-			}
-			if textPointer.IsInline() {
-				textPointer.Data = bytes.Trim(textPointer.Data, "\x00")
-			}
-			offset += int(textPointer.Size())
-			r.Values[i] = OptionalValue{Value: textPointer, Valid: true}
-		case Timestamp:
-			value := unmarshalInt64(cell.Value, uint64(offset))
-			r.Values[i] = OptionalValue{Value: TimestampMicros(value), Valid: true}
-			offset += 8
-		case UUID:
-			var value UUIDValue
-			copy(value[:], cell.Value[offset:offset+16])
-			r.Values[i] = OptionalValue{Value: value, Valid: true}
-			offset += 16
-		}
-	}
-
-	return r, nil
-}
-
 func selectedColumnsMask(columns []Column, selectedFields []Field) []bool {
 	if len(selectedFields) == 0 {
 		return nil
@@ -479,30 +381,6 @@ func selectedColumnsMask(columns []Column, selectedFields []Field) []bool {
 		mask[i] = ok
 	}
 	return mask
-}
-
-func (r Row) getColumnSize(col Column, data []byte, offset int) uint64 {
-	switch col.Kind {
-	case Boolean:
-		return 1
-	case Int4:
-		return 4
-	case Int8:
-		return 8
-	case Real:
-		return 4
-	case Double:
-		return 8
-	case Varchar, Text, JSON:
-		// Read length prefix to determine size
-		length := unmarshalUint32(data, uint64(offset))
-		return TextPointer{Length: length}.Size()
-	case Timestamp:
-		return 8
-	case UUID:
-		return 16
-	}
-	return 0
 }
 
 // CheckOneOrMore checks whether row satisfies one or more sets of conditions

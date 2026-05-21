@@ -464,8 +464,9 @@ func (d *Database) walkTablePages(ctx context.Context, report IntegrityReport, t
 }
 
 func (d *Database) checkTableLeafPage(ctx context.Context, report IntegrityReport, table *Table, page *Page, fields []Field, livePages map[PageIndex]string) IntegrityReport {
+	selectedMask := selectedColumnsMask(table.Columns, fields)
 	for _, cell := range page.LeafNode.Cells[:page.LeafNode.Header.Cells] {
-		row, err := NewRow(table.Columns).Unmarshal(cell, fields...)
+		row, err := NewRowView(table.Columns, cell).MaterializeWithOverflow(ctx, table.pager, selectedMask)
 		if err != nil {
 			report.Issues = append(report.Issues, IntegrityIssue{
 				Code:    "table_row_decode_failed",
@@ -971,10 +972,17 @@ func streamCheckExpectedInvertedIndexEntries(ctx context.Context, report Integri
 		return report, err
 	}
 
-	fields := fieldsFromColumns(table.Columns...)
+	fullMask := selectedColumnsMask(table.Columns, fieldsFromColumns(table.Columns...))
 	for !cursor.EndOfTable {
-		row, err := cursor.fetchRow(ctx, true, fields...)
+		view, err := cursor.fetchRowView(ctx)
 		if err != nil {
+			return report, err
+		}
+		row, err := view.MaterializeWithOverflow(ctx, table.pager, fullMask)
+		if err != nil {
+			return report, err
+		}
+		if err := cursor.advance(ctx); err != nil {
 			return report, err
 		}
 
@@ -1032,10 +1040,17 @@ func streamCheckExpectedIndexEntries(ctx context.Context, report IntegrityReport
 		return report, err
 	}
 
-	fields := fieldsFromColumns(table.Columns...)
+	fullMask := selectedColumnsMask(table.Columns, fieldsFromColumns(table.Columns...))
 	for !cursor.EndOfTable {
-		row, err := cursor.fetchRow(ctx, true, fields...)
+		view, err := cursor.fetchRowView(ctx)
 		if err != nil {
+			return report, err
+		}
+		row, err := view.MaterializeWithOverflow(ctx, table.pager, fullMask)
+		if err != nil {
+			return report, err
+		}
+		if err := cursor.advance(ctx); err != nil {
 			return report, err
 		}
 

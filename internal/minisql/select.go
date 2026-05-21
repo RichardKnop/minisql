@@ -148,6 +148,12 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		!stmt.IsSelectAggregate() &&
 		!plan.SortInMemory &&
 		len(plan.Joins) == 0 {
+		if result, ok, err := t.selectStreamingDirectCoveringIndex(ctx, stmt, plan, requestedFields); ok || err != nil {
+			return result, err
+		}
+		if result, ok, err := t.selectStreamingDirectRowView(ctx, stmt, plan, requestedFields); ok || err != nil {
+			return result, err
+		}
 		return t.selectStreamingDirect(ctx, stmt, plan, selectedFields, requestedFields)
 	}
 
@@ -155,6 +161,9 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	// them into a []Row. For sequential scans, also reuse a single values buffer
 	// across all rows to eliminate the dominant per-row heap allocation.
 	if stmt.IsSelectCountAll() && len(plan.Joins) == 0 {
+		if result, ok, err := t.tryCountFromIndexScan(ctx, plan); err != nil || ok {
+			return result, err
+		}
 		if len(plan.Scans) == 1 && plan.Scans[0].Type == ScanTypeSequential {
 			return t.countSequentialScanZeroAlloc(ctx, plan.Scans[0], selectedFields)
 		}
@@ -174,6 +183,30 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	// tables and parallel scans (handled inside selectGroupByZeroAlloc).
 	if stmt.IsSelectGroupBy() && len(plan.Joins) == 0 && len(plan.Scans) == 1 && plan.Scans[0].Type == ScanTypeSequential {
 		return t.selectGroupByZeroAlloc(ctx, stmt, plan.Scans[0], selectedFields)
+	}
+	if stmt.IsSelectGroupBy() && len(plan.Joins) == 0 {
+		return t.selectGroupByStreaming(ctx, stmt, plan, selectedFields)
+	}
+
+	if result, ok, err := t.trySelectMinMaxFromIndexEndpoint(ctx, stmt, plan); err != nil || ok {
+		return result, err
+	}
+
+	if stmt.IsSelectAggregate() && len(plan.Joins) == 0 {
+		if len(plan.Scans) == 1 && plan.Scans[0].Type == ScanTypeSequential && t.virtualRows == nil && !t.parallelScan {
+			return t.selectAggregateSequentialRowView(ctx, stmt, plan.Scans[0], selectedFields)
+		}
+		return t.selectAggregateStreaming(ctx, stmt, plan, selectedFields)
+	}
+
+	if result, ok, err := t.selectWithSortStreamingLimitRowView(ctx, stmt, plan, selectedFields, requestedFields); ok || err != nil {
+		return result, err
+	}
+	if result, ok, err := t.selectWithSortStreamingLimit(ctx, stmt, plan, selectedFields, requestedFields); ok || err != nil {
+		return result, err
+	}
+	if result, ok, err := t.selectWithSortRowView(ctx, stmt, plan, selectedFields, requestedFields); ok || err != nil {
+		return result, err
 	}
 
 	// Materialising path: buffer every matching row, then dispatch.
@@ -297,6 +330,83 @@ type aggState struct {
 }
 
 func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row) (StatementResult, error) {
+	states, aggColIdx := t.newAggStates(stmt)
+	for _, row := range rows {
+		if err := accumulateAggregateRow(stmt, states, aggColIdx, row); err != nil {
+			return StatementResult{}, err
+		}
+	}
+	_ = ctx // kept for signature compatibility with earlier callers.
+	return t.aggregateResult(stmt, states), nil
+}
+
+func (t *Table) selectAggregateStreaming(ctx context.Context, stmt Statement, plan QueryPlan, selectedFields []Field) (StatementResult, error) {
+	states, aggColIdx := t.newAggStates(stmt)
+	if err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
+		return accumulateAggregateRow(stmt, states, aggColIdx, row)
+	}); err != nil {
+		return StatementResult{}, err
+	}
+	return t.aggregateResult(stmt, states), nil
+}
+
+func (t *Table) selectAggregateSequentialRowView(ctx context.Context, stmt Statement, scan Scan, selectedFields []Field) (StatementResult, error) {
+	cursor, err := t.SeekFirst(ctx)
+	if err != nil {
+		return StatementResult{}, err
+	}
+
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	states, aggColIdx := t.newAggStates(stmt)
+
+	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return StatementResult{}, fmt.Errorf("aggregate sequential scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	for !cursor.EndOfTable {
+		if err := ctx.Err(); err != nil {
+			return StatementResult{}, err
+		}
+		if page.Index != cursor.PageIdx {
+			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
+			if err != nil {
+				return StatementResult{}, fmt.Errorf("aggregate sequential scan: %w", err)
+			}
+		}
+		if cursor.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
+			return StatementResult{}, fmt.Errorf("cell index %d out of bounds, max %d", cursor.CellIdx, page.LeafNode.Header.Cells-1)
+		}
+
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+		advanceLeafCursor(cursor, page)
+		view := NewRowView(t.Columns, cell)
+
+		if tableFilter != nil {
+			row, err := view.MaterializeWithOverflow(ctx, t.pager, selectedMask)
+			if err != nil {
+				return StatementResult{}, err
+			}
+			ok, err := tableFilter(row)
+			if err != nil {
+				return StatementResult{}, err
+			}
+			if !ok {
+				continue
+			}
+		}
+
+		if err := accumulateAggregateRowView(ctx, t.pager, stmt.Aggregates, states, aggColIdx, view); err != nil {
+			return StatementResult{}, err
+		}
+	}
+
+	return t.aggregateResult(stmt, states), nil
+}
+
+func (t *Table) newAggStates(stmt Statement) ([]aggState, []int) {
 	states := make([]aggState, len(stmt.Aggregates))
 
 	// Determine whether integer or float accumulation should be used for SUM/AVG.
@@ -324,72 +434,143 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row)
 			}
 		}
 	}
+	return states, aggColIdx
+}
 
-	for _, row := range rows {
-		for i, agg := range stmt.Aggregates {
-			switch agg.Kind {
-			case AggregateCount:
-				states[i].count += 1
+func accumulateAggregateRow(stmt Statement, states []aggState, aggColIdx []int, row Row) error {
+	for i, agg := range stmt.Aggregates {
+		switch agg.Kind {
+		case AggregateCount:
+			states[i].count += 1
 
-			case AggregateSum, AggregateAvg:
-				colIdx := aggColIdx[i]
-				if colIdx < 0 || colIdx >= len(row.Values) {
-					continue
+		case AggregateSum, AggregateAvg:
+			val, ok := aggregateRowValue(row, agg.Column, aggColIdx[i])
+			if !ok || !val.Valid {
+				continue
+			}
+			states[i].count += 1
+			states[i].hasValue = true
+			if states[i].useIntSum {
+				switch v := val.Value.(type) {
+				case int64:
+					states[i].sumI += v
+				case int32:
+					states[i].sumI += int64(v)
 				}
-				val := row.Values[colIdx]
-				if !val.Valid {
-					continue
+			} else {
+				switch v := val.Value.(type) {
+				case float64:
+					states[i].sumF += v
+				case float32:
+					states[i].sumF += float64(v)
 				}
-				states[i].count += 1
+			}
+
+		case AggregateMin:
+			val, ok := aggregateRowValue(row, agg.Column, aggColIdx[i])
+			if !ok || !val.Valid {
+				continue
+			}
+			if !states[i].hasValue || compareValues(val, states[i].min) < 0 {
+				states[i].min = val
 				states[i].hasValue = true
-				if states[i].useIntSum {
-					switch v := val.Value.(type) {
-					case int64:
-						states[i].sumI += v
-					case int32:
-						states[i].sumI += int64(v)
-					}
-				} else {
-					switch v := val.Value.(type) {
-					case float64:
-						states[i].sumF += v
-					case float32:
-						states[i].sumF += float64(v)
-					}
-				}
+			}
 
-			case AggregateMin:
-				colIdx := aggColIdx[i]
-				if colIdx < 0 || colIdx >= len(row.Values) {
-					continue
-				}
-				val := row.Values[colIdx]
-				if !val.Valid {
-					continue
-				}
-				if !states[i].hasValue || compareValues(val, states[i].min) < 0 {
-					states[i].min = val
-					states[i].hasValue = true
-				}
-
-			case AggregateMax:
-				colIdx := aggColIdx[i]
-				if colIdx < 0 || colIdx >= len(row.Values) {
-					continue
-				}
-				val := row.Values[colIdx]
-				if !val.Valid {
-					continue
-				}
-				if !states[i].hasValue || compareValues(val, states[i].max) > 0 {
-					states[i].max = val
-					states[i].hasValue = true
-				}
+		case AggregateMax:
+			val, ok := aggregateRowValue(row, agg.Column, aggColIdx[i])
+			if !ok || !val.Valid {
+				continue
+			}
+			if !states[i].hasValue || compareValues(val, states[i].max) > 0 {
+				states[i].max = val
+				states[i].hasValue = true
 			}
 		}
 	}
-	_ = ctx // ctx kept for signature compat; no blocking ops remain
+	return nil
+}
 
+func accumulateAggregateRowView(ctx context.Context, pager TxPager, aggregates []AggregateExpr, states []aggState, aggColIdx []int, view RowView) error {
+	for i, agg := range aggregates {
+		switch agg.Kind {
+		case AggregateCount:
+			states[i].count += 1
+
+		case AggregateSum, AggregateAvg:
+			val, ok, err := aggregateRowViewValue(ctx, pager, view, aggColIdx[i])
+			if err != nil {
+				return err
+			}
+			if !ok || !val.Valid {
+				continue
+			}
+			states[i].count += 1
+			states[i].hasValue = true
+			if states[i].useIntSum {
+				switch v := val.Value.(type) {
+				case int64:
+					states[i].sumI += v
+				case int32:
+					states[i].sumI += int64(v)
+				}
+			} else {
+				switch v := val.Value.(type) {
+				case float64:
+					states[i].sumF += v
+				case float32:
+					states[i].sumF += float64(v)
+				}
+			}
+
+		case AggregateMin:
+			val, ok, err := aggregateRowViewValue(ctx, pager, view, aggColIdx[i])
+			if err != nil {
+				return err
+			}
+			if !ok || !val.Valid {
+				continue
+			}
+			if !states[i].hasValue || compareValues(val, states[i].min) < 0 {
+				states[i].min = val
+				states[i].hasValue = true
+			}
+
+		case AggregateMax:
+			val, ok, err := aggregateRowViewValue(ctx, pager, view, aggColIdx[i])
+			if err != nil {
+				return err
+			}
+			if !ok || !val.Valid {
+				continue
+			}
+			if !states[i].hasValue || compareValues(val, states[i].max) > 0 {
+				states[i].max = val
+				states[i].hasValue = true
+			}
+		}
+	}
+	return nil
+}
+
+func aggregateRowValue(row Row, colName string, colIdx int) (OptionalValue, bool) {
+	if colIdx >= 0 && colIdx < len(row.Values) && colIdx < len(row.Columns) && row.Columns[colIdx].Name == colName {
+		return row.Values[colIdx], true
+	}
+	return row.GetValue(colName)
+}
+
+func aggregateRowViewValue(ctx context.Context, pager TxPager, view RowView, colIdx int) (OptionalValue, bool, error) {
+	if colIdx < 0 || colIdx >= len(view.Columns()) {
+		return OptionalValue{}, false, nil
+	}
+	value, err := view.ValueAtWithOverflow(ctx, pager, colIdx)
+	if err != nil {
+		return OptionalValue{}, false, err
+	}
+	return value, true, nil
+}
+
+func (t *Table) aggregateResult(stmt Statement, states []aggState) StatementResult {
 	// Build result columns and a single result row.
 	resultColumns := make([]Column, len(stmt.Aggregates))
 	resultValues := make([]OptionalValue, len(stmt.Aggregates))
@@ -446,7 +627,60 @@ func (t *Table) selectAggregate(ctx context.Context, stmt Statement, rows []Row)
 	return StatementResult{
 		Columns: resultColumns,
 		Rows:    NewSingleRowIterator(NewRowWithValues(resultColumns, resultValues)),
-	}, nil
+	}
+}
+
+func (t *Table) trySelectMinMaxFromIndexEndpoint(ctx context.Context, stmt Statement, plan QueryPlan) (StatementResult, bool, error) {
+	if !stmt.IsSelectAggregate() || len(stmt.Aggregates) != 1 || len(stmt.Fields) != 1 || len(plan.Joins) > 0 || len(plan.Scans) != 1 {
+		return StatementResult{}, false, nil
+	}
+
+	agg := stmt.Aggregates[0]
+	scan := plan.Scans[0]
+	switch {
+	case agg.Kind == AggregateMin && scan.Type == ScanTypeIndexFirst:
+	case agg.Kind == AggregateMax && scan.Type == ScanTypeIndexLast:
+	default:
+		return StatementResult{}, false, nil
+	}
+	if len(scan.Filters) > 0 {
+		return StatementResult{}, false, nil
+	}
+
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return StatementResult{}, true, fmt.Errorf("no index found for min/max scan: %s", scan.IndexName)
+	}
+
+	var (
+		endpointKey any
+		found       bool
+	)
+	err := idx.ScanAll(ctx, scan.Type == ScanTypeIndexLast, func(key any, _ RowID) error {
+		endpointKey = key
+		found = true
+		return errStopScan
+	})
+	if err != nil && !errors.Is(err, errStopScan) {
+		return StatementResult{}, true, err
+	}
+
+	fieldName := stmt.Fields[0].OutputName()
+	resultCol := Column{Name: fieldName}
+	if col, ok := t.ColumnByName(agg.Column); ok {
+		resultCol.Kind = col.Kind
+		resultCol.Size = col.Size
+	}
+
+	value := OptionalValue{}
+	if found {
+		value = OptionalValue{Valid: true, Value: endpointKey}
+	}
+	row := NewRowWithValues([]Column{resultCol}, []OptionalValue{value})
+	return StatementResult{
+		Columns: []Column{resultCol},
+		Rows:    NewSingleRowIterator(row),
+	}, true, nil
 }
 
 // groupEntry holds per-group state offsets into the shared flat pools.
@@ -644,6 +878,119 @@ func (acc *groupByAccumulator) process(row Row) {
 	}
 }
 
+func (acc *groupByAccumulator) processView(view RowView) error {
+	var err error
+	acc.keyBuf, err = buildGroupKeyFromRowView(acc.keyBuf[:0], view, acc.groupByColIdx)
+	if err != nil {
+		return err
+	}
+
+	gsIdx, exists := acc.groupMap[string(acc.keyBuf)]
+	if !exists {
+		key := string(acc.keyBuf) // one alloc per new group
+
+		aggStart := int32(len(acc.aggStatePool))
+		for i := range len(acc.aggregates) {
+			acc.aggStatePool = append(acc.aggStatePool, aggState{useIntSum: acc.useIntSum[i]})
+		}
+
+		gvStart := int32(len(acc.groupValPool))
+		for _, colIdx := range acc.groupByColIdx {
+			if colIdx >= 0 && colIdx < len(view.Columns()) {
+				val, err := view.ValueAt(colIdx)
+				if err != nil {
+					return err
+				}
+				acc.groupValPool = append(acc.groupValPool, val)
+			} else {
+				acc.groupValPool = append(acc.groupValPool, OptionalValue{})
+			}
+		}
+
+		gsIdx = int32(len(acc.groupEntries))
+		acc.groupEntries = append(acc.groupEntries, groupEntry{
+			aggStateStart: aggStart,
+			groupValStart: gvStart,
+		})
+		acc.groupMap[key] = gsIdx
+		acc.groupOrder = append(acc.groupOrder, key)
+	}
+
+	aggBase := int(acc.groupEntries[gsIdx].aggStateStart)
+	for i, agg := range acc.aggregates {
+		state := &acc.aggStatePool[aggBase+i]
+		switch agg.Kind {
+		case 0:
+			// Non-aggregate GROUP BY column — no accumulation needed.
+		case AggregateCount:
+			state.count += 1
+		case AggregateSum, AggregateAvg:
+			colIdx := acc.aggColIdx[i]
+			if colIdx < 0 || colIdx >= len(view.Columns()) {
+				continue
+			}
+			val, err := view.ValueAt(colIdx)
+			if err != nil {
+				return err
+			}
+			if !val.Valid {
+				continue
+			}
+			state.count += 1
+			state.hasValue = true
+			if state.useIntSum {
+				switch v := val.Value.(type) {
+				case int64:
+					state.sumI += v
+				case int32:
+					state.sumI += int64(v)
+				}
+			} else {
+				switch v := val.Value.(type) {
+				case float64:
+					state.sumF += v
+				case float32:
+					state.sumF += float64(v)
+				}
+			}
+		case AggregateMin:
+			colIdx := acc.aggColIdx[i]
+			if colIdx < 0 || colIdx >= len(view.Columns()) {
+				continue
+			}
+			val, err := view.ValueAt(colIdx)
+			if err != nil {
+				return err
+			}
+			if !val.Valid {
+				continue
+			}
+			if !state.hasValue || compareValues(val, state.min) < 0 {
+				state.min = val
+				state.hasValue = true
+			}
+		case AggregateMax:
+			colIdx := acc.aggColIdx[i]
+			if colIdx < 0 || colIdx >= len(view.Columns()) {
+				continue
+			}
+			val, err := view.ValueAt(colIdx)
+			if err != nil {
+				return err
+			}
+			if !val.Valid {
+				continue
+			}
+			if !state.hasValue || compareValues(val, state.max) > 0 {
+				state.max = val
+				state.hasValue = true
+			}
+		}
+	}
+
+	return nil
+}
+
 func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (StatementResult, error) {
 	_ = ctx // ctx kept for signature compat; no blocking ops remain
 	acc := newGroupByAccumulator(stmt, t, len(rows))
@@ -653,20 +1000,38 @@ func (t *Table) selectGroupBy(ctx context.Context, stmt Statement, rows []Row) (
 	return acc.buildResult(stmt, t)
 }
 
-// selectGroupByZeroAlloc handles GROUP BY over a single sequential scan without
-// materialising rows. It reuses one []OptionalValue buffer across all rows,
-// eliminating the per-row heap allocation from UnmarshalWithMask. Falls back to
-// the general path for virtual tables and parallel scans.
+func (t *Table) selectGroupByStreaming(ctx context.Context, stmt Statement, plan QueryPlan, selectedFields []Field) (StatementResult, error) {
+	estRows := int(t.estimatedRowCount())
+	if estRows <= 0 {
+		estRows = 160 // conservative default (estGroups = 16)
+	}
+	acc := newGroupByAccumulator(stmt, t, estRows)
+	if err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
+		acc.process(row)
+		return nil
+	}); err != nil {
+		return StatementResult{}, err
+	}
+	return acc.buildResult(stmt, t)
+}
+
+// selectGroupByZeroAlloc handles GROUP BY over a single sequential scan by
+// accumulating directly from RowView. Falls back to the general path for virtual
+// tables and parallel scans.
 func (t *Table) selectGroupByZeroAlloc(ctx context.Context, stmt Statement, scan Scan, selectedFields []Field) (StatementResult, error) {
 	if t.virtualRows != nil || t.parallelScan {
-		var rows []Row
+		estRows := int(t.estimatedRowCount())
+		if estRows <= 0 {
+			estRows = 160 // conservative default (estGroups = 16)
+		}
+		acc := newGroupByAccumulator(stmt, t, estRows)
 		if err := t.sequentialScan(ctx, scan, selectedFields, func(row Row) error {
-			rows = append(rows, row)
+			acc.process(row)
 			return nil
 		}); err != nil {
 			return StatementResult{}, err
 		}
-		return t.selectGroupBy(ctx, stmt, rows)
+		return acc.buildResult(stmt, t)
 	}
 
 	cursor, err := t.SeekFirst(ctx)
@@ -676,11 +1041,6 @@ func (t *Table) selectGroupByZeroAlloc(ctx context.Context, stmt Statement, scan
 
 	fullMask := selectedColumnsMask(t.Columns, selectedFields)
 	tableFilter := compileScanFilter(t.Columns, scan.Filters)
-
-	// Pre-allocate one reusable values buffer. Safe because process() copies the
-	// GROUP BY column values it needs into groupValPool before returning — the
-	// buffer is overwritten on the next row.
-	reuseValues := make([]OptionalValue, len(t.Columns))
 
 	estRows := int(t.estimatedRowCount())
 	if estRows <= 0 {
@@ -718,13 +1078,13 @@ func (t *Table) selectGroupByZeroAlloc(ctx context.Context, stmt Statement, scan
 			cursor.CellIdx = 0
 		}
 
-		row := t.newRow()
-		row, err = row.unmarshalWithMaskInto(cell, fullMask, reuseValues)
-		if err != nil {
-			return StatementResult{}, err
-		}
+		view := NewRowView(t.Columns, cell)
 
 		if tableFilter != nil {
+			row, err := view.Materialize(fullMask)
+			if err != nil {
+				return StatementResult{}, err
+			}
 			ok, err := tableFilter(row)
 			if err != nil {
 				return StatementResult{}, err
@@ -734,7 +1094,9 @@ func (t *Table) selectGroupByZeroAlloc(ctx context.Context, stmt Statement, scan
 			}
 		}
 
-		acc.process(row)
+		if err := acc.processView(view); err != nil {
+			return StatementResult{}, err
+		}
 	}
 
 	return acc.buildResult(stmt, t)
@@ -972,16 +1334,1230 @@ func (t *Table) selectStreamingDirect(
 	return result, nil
 }
 
+func (t *Table) selectStreamingDirectCoveringIndex(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if stmt.Distinct || len(plan.Scans) != 1 {
+		return StatementResult{}, false, nil
+	}
+	scan := plan.Scans[0]
+	if !scan.CoveringIndex {
+		return StatementResult{}, false, nil
+	}
+	switch scan.Type {
+	case ScanTypeIndexAll, ScanTypeIndexRange, ScanTypeIndexPoint:
+	default:
+		return StatementResult{}, false, nil
+	}
+	for _, field := range requestedFields {
+		if field.Expr != nil {
+			return StatementResult{}, false, nil
+		}
+	}
+
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return StatementResult{}, true, fmt.Errorf("no index found for covering scan: %s", scan.IndexName)
+	}
+
+	resultColumns := make([]Column, len(requestedFields))
+	projectionIndexes := make([]int, len(requestedFields))
+	for i, field := range requestedFields {
+		col, colIdx := columnByFieldName(scan.IndexColumns, field.Name)
+		if colIdx < 0 {
+			return StatementResult{}, false, nil
+		}
+		col.Name = field.OutputName()
+		resultColumns[i] = col
+		projectionIndexes[i] = colIdx
+	}
+
+	var (
+		remaining int64
+		offset    int64
+		hasLimit  = stmt.Limit.Valid
+		hasOffset = stmt.Offset.Valid
+	)
+	if hasLimit {
+		remaining = stmt.Limit.Value.(int64)
+	}
+	if hasOffset {
+		offset = stmt.Offset.Value.(int64)
+	}
+
+	filter := compileScanFilter(scan.IndexColumns, scan.Filters)
+
+	return StatementResult{
+		Columns: resultColumns,
+		Rows: t.coveringIndexIterator(
+			ctx,
+			idx,
+			plan,
+			scan,
+			filter,
+			projectionIndexes,
+			resultColumns,
+			remaining,
+			offset,
+			hasLimit,
+			hasOffset,
+		),
+	}, true, nil
+}
+
+type coveringIndexIteratorItem struct {
+	row Row
+	err error
+}
+
+func (t *Table) coveringIndexIterator(
+	ctx context.Context,
+	idx BTreeIndex,
+	plan QueryPlan,
+	scan Scan,
+	filter func(Row) (bool, error),
+	projectionIndexes []int,
+	resultColumns []Column,
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) Iterator {
+	if hasLimit && remaining == 0 {
+		return NewSliceIterator(nil)
+	}
+
+	iterCtx, cancel := context.WithCancel(ctx)
+	ch := make(chan coveringIndexIteratorItem, 16)
+
+	send := func(item coveringIndexIteratorItem) error {
+		select {
+		case <-iterCtx.Done():
+			return errLimitReached
+		case ch <- item:
+			return nil
+		}
+	}
+
+	emit := func(key any, rowID RowID) error {
+		if filter != nil {
+			row := rowFromIndexKey(key, scan.IndexColumns, rowID)
+			ok, err := filter(row)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return nil
+			}
+		}
+		if hasOffset && offset > 0 {
+			offset -= 1
+			return nil
+		}
+		projectedRow, err := projectCoveringIndexKey(key, scan.IndexColumns, rowID, projectionIndexes, resultColumns)
+		if err != nil {
+			return err
+		}
+		if err := send(coveringIndexIteratorItem{row: projectedRow}); err != nil {
+			return err
+		}
+		if hasLimit {
+			remaining -= 1
+			if remaining == 0 {
+				return errLimitReached
+			}
+		}
+		return iterCtx.Err()
+	}
+
+	go func() {
+		defer close(ch)
+		err := scanCoveringIndexRows(iterCtx, idx, plan, scan, emit)
+		if err != nil && !errors.Is(err, errLimitReached) && !errors.Is(err, context.Canceled) {
+			_ = send(coveringIndexIteratorItem{err: err})
+		}
+	}()
+
+	return newIteratorWithClose(func(ctx context.Context) (Row, error) {
+		select {
+		case <-ctx.Done():
+			cancel()
+			return Row{}, ctx.Err()
+		case item, ok := <-ch:
+			if !ok {
+				return Row{}, ErrNoMoreRows
+			}
+			if item.err != nil {
+				return Row{}, item.err
+			}
+			return item.row, nil
+		}
+	}, func() error {
+		cancel()
+		return nil
+	})
+}
+
+func scanCoveringIndexRows(ctx context.Context, idx BTreeIndex, plan QueryPlan, scan Scan, emit func(any, RowID) error) error {
+	switch scan.Type {
+	case ScanTypeIndexAll:
+		return idx.ScanAll(ctx, plan.SortReverse, emit)
+	case ScanTypeIndexRange:
+		return idx.ScanRange(ctx, scan.RangeCondition, plan.SortReverse, emit)
+	case ScanTypeIndexPoint:
+		for _, indexValue := range scan.IndexKeys {
+			err := idx.VisitRowIDs(ctx, indexValue, func(rowID RowID) error {
+				return emit(indexValue, rowID)
+			})
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			if errors.Is(err, errLimitReached) {
+				return err
+			}
+			if err != nil {
+				return fmt.Errorf("index lookup failed: %w", err)
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported covering index scan type: %s", scan.Type)
+	}
+}
+
+func (t *Table) selectStreamingDirectRowView(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if t.virtualRows != nil || len(plan.Scans) != 1 {
+		return StatementResult{}, false, nil
+	}
+	fieldIndexes, resultColumns, ok := rowViewProjectionPlan(t.Columns, requestedFields, stmt.TableName, stmt.TableAlias)
+	if !ok {
+		return StatementResult{}, false, nil
+	}
+
+	result := StatementResult{Columns: resultColumns}
+	scan := plan.Scans[0]
+	var tableFilter func(context.Context, RowView) (bool, error)
+	if scan.Type == ScanTypeInverted {
+		var ok bool
+		tableFilter, ok = compileInvertedRowViewFilter(t.Columns, t.pager, scan.Filters)
+		if !ok {
+			return StatementResult{}, false, nil
+		}
+	} else {
+		if !rowViewFilterSupports(t.Columns, scan.Filters) {
+			return StatementResult{}, false, nil
+		}
+		tableFilter = compileRowViewFilterForColumns(t.Columns, t.pager, scan.Filters)
+	}
+
+	var (
+		remaining int64
+		offset    int64
+		hasLimit  = stmt.Limit.Valid
+		hasOffset = stmt.Offset.Valid
+	)
+	if hasLimit {
+		remaining = stmt.Limit.Value.(int64)
+	}
+	if hasOffset {
+		offset = stmt.Offset.Value.(int64)
+	}
+
+	iterRemaining := remaining
+	iterOffset := offset
+	iterHasLimit := hasLimit
+	iterHasOffset := hasOffset
+	if stmt.Distinct {
+		iterRemaining = 0
+		iterOffset = 0
+		iterHasLimit = false
+		iterHasOffset = false
+	}
+
+	var newRowViewIter func() RowViewIterator
+	switch scan.Type {
+	case ScanTypeSequential:
+		var (
+			iterFactory func() RowViewIterator
+			err         error
+		)
+		if t.parallelScan {
+			iterFactory, err = t.parallelSequentialRowViewIteratorFactory(ctx, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
+		} else {
+			iterFactory, err = t.sequentialRowViewIteratorFactory(ctx, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
+		}
+		if err != nil {
+			return StatementResult{}, true, err
+		}
+		newRowViewIter = iterFactory
+	case ScanTypeIndexAll, ScanTypeIndexRange:
+		if scan.CoveringIndex {
+			return StatementResult{}, false, nil
+		}
+		iterFactory, err := t.indexRowViewIteratorFactory(ctx, plan, scan, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
+		if err != nil {
+			return StatementResult{}, true, err
+		}
+		newRowViewIter = iterFactory
+	case ScanTypeIndexPoint:
+		if scan.CoveringIndex {
+			return StatementResult{}, false, nil
+		}
+		if t.isUniquePointIndex(scan.IndexName) {
+			iterFactory, err := t.uniqueIndexPointRowViewIteratorFactory(scan, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
+			if err != nil {
+				return StatementResult{}, true, err
+			}
+			newRowViewIter = iterFactory
+			break
+		}
+		iterFactory, err := t.indexRowViewIteratorFactory(ctx, plan, scan, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
+		if err != nil {
+			return StatementResult{}, true, err
+		}
+		newRowViewIter = iterFactory
+	case ScanTypeIndexIntersect, ScanTypeIndexUnion:
+		iterFactory, err := t.indexSetRowViewIteratorFactory(ctx, scan, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
+		if err != nil {
+			return StatementResult{}, true, err
+		}
+		newRowViewIter = iterFactory
+	case ScanTypeFullText:
+		iterFactory, ok, err := t.fullTextRowViewIteratorFactory(ctx, scan, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
+		if err != nil {
+			return StatementResult{}, true, err
+		}
+		if !ok {
+			return StatementResult{}, false, nil
+		}
+		newRowViewIter = iterFactory
+	case ScanTypeInverted:
+		iterFactory, err := t.invertedRowViewIteratorFactory(ctx, scan, tableFilter, iterRemaining, iterOffset, iterHasLimit, iterHasOffset)
+		if err != nil {
+			return StatementResult{}, true, err
+		}
+		newRowViewIter = iterFactory
+	default:
+		return StatementResult{}, false, nil
+	}
+
+	if stmt.Distinct {
+		result.Rows = distinctRowViewMaterializingIterator(ctx, t.pager, newRowViewIter(), fieldIndexes, resultColumns, remaining, offset, hasLimit, hasOffset)
+		return result, true, nil
+	}
+
+	result.RowViews = newRowViewIter()
+	result.RowViewPager = t.pager
+	result.RowViewFieldIndexes = fieldIndexes
+	result.Rows = lazyRowViewMaterializingIterator(t.pager, newRowViewIter, fieldIndexes, resultColumns)
+	return result, true, nil
+}
+
+func columnByFieldName(columns []Column, name string) (Column, int) {
+	for i, col := range columns {
+		if col.Name == name {
+			return col, i
+		}
+	}
+	return Column{}, -1
+}
+
+func projectCoveringIndexKey(key any, indexColumns []Column, rowID RowID, projectionIndexes []int, columns []Column) (Row, error) {
+	if ck, ok := key.(CompositeKey); ok {
+		values := make([]OptionalValue, len(projectionIndexes))
+		for i, idx := range projectionIndexes {
+			if idx < 0 || idx >= len(ck.Values) {
+				return Row{}, fmt.Errorf("covering index projection column %d out of range", idx)
+			}
+			values[i] = OptionalValue{Value: ck.Values[idx], Valid: true}
+		}
+		projected := NewRowWithValues(columns, values)
+		projected.Key = rowID
+		return projected, nil
+	}
+
+	if len(indexColumns) != 1 {
+		return Row{}, fmt.Errorf("single-column index key has %d index columns", len(indexColumns))
+	}
+	if len(projectionIndexes) != 1 || projectionIndexes[0] != 0 {
+		return Row{}, fmt.Errorf("single-column index projection indexes %v", projectionIndexes)
+	}
+	projected := NewRowWithValues(columns, []OptionalValue{{Value: key, Valid: true}})
+	projected.Key = rowID
+	return projected, nil
+}
+
+func (t *Table) sequentialRowViewIteratorFactory(
+	ctx context.Context,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) (func() RowViewIterator, error) {
+	cursor, err := t.SeekFirst(ctx)
+	if err != nil {
+		return nil, err
+	}
+	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return nil, fmt.Errorf("row view sequential scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	return func() RowViewIterator {
+		iterCursor := cursor
+		iterPage := page
+		iterRemaining := remaining
+		iterOffset := offset
+		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
+			for !iterCursor.EndOfTable {
+				if err := iterCtx.Err(); err != nil {
+					return RowView{}, err
+				}
+				if iterPage.Index != iterCursor.PageIdx {
+					var err error
+					iterPage, err = t.pager.ReadPage(iterCtx, iterCursor.PageIdx)
+					if err != nil {
+						return RowView{}, fmt.Errorf("row view sequential scan: %w", err)
+					}
+				}
+
+				cell := iterPage.LeafNode.Cells[iterCursor.CellIdx]
+				switch {
+				case iterCursor.CellIdx < iterPage.LeafNode.Header.Cells-1:
+					iterCursor.CellIdx += 1
+				case iterPage.LeafNode.Header.NextLeaf == 0:
+					iterCursor.EndOfTable = true
+				default:
+					iterCursor.PageIdx = iterPage.LeafNode.Header.NextLeaf
+					iterCursor.CellIdx = 0
+				}
+
+				view := NewRowView(t.Columns, cell)
+				if tableFilter != nil {
+					ok, err := tableFilter(iterCtx, view)
+					if err != nil {
+						return RowView{}, err
+					}
+					if !ok {
+						continue
+					}
+				}
+				if hasOffset && iterOffset > 0 {
+					iterOffset -= 1
+					continue
+				}
+				if hasLimit {
+					if iterRemaining == 0 {
+						return RowView{}, ErrNoMoreRows
+					}
+					iterRemaining -= 1
+				}
+				return view, nil
+			}
+			return RowView{}, ErrNoMoreRows
+		})
+	}, nil
+}
+
+func (t *Table) indexRowViewIteratorFactory(
+	ctx context.Context,
+	plan QueryPlan,
+	scan Scan,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) (func() RowViewIterator, error) {
+	if scan.Type == ScanTypeIndexPoint {
+		return t.indexPointRowViewIteratorFactory(scan, tableFilter, remaining, offset, hasLimit, hasOffset)
+	}
+
+	canApplyScanLimit := tableFilter == nil
+	return func() RowViewIterator {
+		iterRemaining := remaining
+		iterOffset := offset
+		nextRowID := t.indexRangeRowIDIterator(ctx, plan, scan, canApplyScanLimit)
+		return newRowViewIteratorWithClose(func(iterCtx context.Context) (RowView, error) {
+			for {
+				if err := iterCtx.Err(); err != nil {
+					return RowView{}, err
+				}
+				rowID, err := nextRowID.Next(iterCtx)
+				if errors.Is(err, ErrNoMoreRows) {
+					return RowView{}, ErrNoMoreRows
+				}
+				if err != nil {
+					return RowView{}, err
+				}
+
+				view, err := t.rowViewByRowID(iterCtx, rowID)
+				if err != nil {
+					return RowView{}, err
+				}
+				if tableFilter != nil {
+					ok, err := tableFilter(iterCtx, view)
+					if err != nil {
+						return RowView{}, err
+					}
+					if !ok {
+						continue
+					}
+				}
+				if hasOffset && iterOffset > 0 {
+					iterOffset -= 1
+					continue
+				}
+				if hasLimit {
+					if iterRemaining == 0 {
+						return RowView{}, ErrNoMoreRows
+					}
+					iterRemaining -= 1
+				}
+				return view, nil
+			}
+		}, nextRowID.Close)
+	}, nil
+}
+
+type rowIDStreamItem struct {
+	rowID RowID
+	err   error
+}
+
+type rowIDStreamIterator struct {
+	ch     <-chan rowIDStreamItem
+	cancel context.CancelFunc
+}
+
+// Next returns the next streamed row ID, cancelling the producer when ctx is done.
+func (i rowIDStreamIterator) Next(ctx context.Context) (RowID, error) {
+	select {
+	case <-ctx.Done():
+		i.cancel()
+		return 0, ctx.Err()
+	case item, ok := <-i.ch:
+		if !ok {
+			return 0, ErrNoMoreRows
+		}
+		if item.err != nil {
+			return 0, item.err
+		}
+		return item.rowID, nil
+	}
+}
+
+// Close cancels the producer backing this row-id stream.
+func (i rowIDStreamIterator) Close() error {
+	i.cancel()
+	return nil
+}
+
+func (t *Table) indexRangeRowIDIterator(ctx context.Context, plan QueryPlan, scan Scan, canApplyScanLimit bool) rowIDStreamIterator {
+	iterCtx, cancel := context.WithCancel(ctx)
+	ch := make(chan rowIDStreamItem, 16)
+
+	send := func(item rowIDStreamItem) error {
+		select {
+		case <-iterCtx.Done():
+			return errLimitReached
+		case ch <- item:
+			return nil
+		}
+	}
+
+	go func() {
+		defer close(ch)
+		err := t.scanIndexRangeRowIDs(iterCtx, plan, scan, canApplyScanLimit, func(rowID RowID) error {
+			return send(rowIDStreamItem{rowID: rowID})
+		})
+		if err != nil && !errors.Is(err, errLimitReached) && !errors.Is(err, context.Canceled) {
+			_ = send(rowIDStreamItem{err: err})
+		}
+	}()
+
+	return rowIDStreamIterator{ch: ch, cancel: cancel}
+}
+
+func (t *Table) indexSetRowViewIteratorFactory(
+	ctx context.Context,
+	scan Scan,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) (func() RowViewIterator, error) {
+	rowIDs, err := t.collectIndexSetScanRowIDs(ctx, scan)
+	if err != nil {
+		return nil, err
+	}
+
+	return t.rowIDRowViewIteratorFactory(rowIDs, tableFilter, remaining, offset, hasLimit, hasOffset), nil
+}
+
+func (t *Table) rowIDRowViewIteratorFactory(
+	rowIDs []RowID,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) func() RowViewIterator {
+	return func() RowViewIterator {
+		idx := 0
+		iterRemaining := remaining
+		iterOffset := offset
+		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
+			for idx < len(rowIDs) {
+				if err := iterCtx.Err(); err != nil {
+					return RowView{}, err
+				}
+				rowID := rowIDs[idx]
+				idx += 1
+
+				view, err := t.rowViewByRowID(iterCtx, rowID)
+				if err != nil {
+					return RowView{}, err
+				}
+				if tableFilter != nil {
+					ok, err := tableFilter(iterCtx, view)
+					if err != nil {
+						return RowView{}, err
+					}
+					if !ok {
+						continue
+					}
+				}
+				if hasOffset && iterOffset > 0 {
+					iterOffset -= 1
+					continue
+				}
+				if hasLimit {
+					if iterRemaining == 0 {
+						return RowView{}, ErrNoMoreRows
+					}
+					iterRemaining -= 1
+				}
+				return view, nil
+			}
+			return RowView{}, ErrNoMoreRows
+		})
+	}
+}
+
+func (t *Table) fullTextRowViewIteratorFactory(
+	ctx context.Context,
+	scan Scan,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) (func() RowViewIterator, bool, error) {
+	secondaryIndex, query, queryTokens, err := t.fullTextScanState(scan)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(queryTokens) == 0 {
+		return func() RowViewIterator {
+			return NewRowViewIterator(func(context.Context) (RowView, error) {
+				return RowView{}, ErrNoMoreRows
+			})
+		}, true, nil
+	}
+	if len(queryTokens) != 1 || len(query.Phrases) > 0 {
+		rowIDs, err := t.collectFullTextScanRowIDs(ctx, secondaryIndex, scan, query, queryTokens)
+		if err != nil {
+			return nil, false, err
+		}
+		return t.rowIDRowViewIteratorFactory(rowIDs, tableFilter, remaining, offset, hasLimit, hasOffset), true, nil
+	}
+
+	term := queryTokens[0]
+	return func() RowViewIterator {
+		iterRemaining := remaining
+		iterOffset := offset
+		var (
+			iter     invertedPostingIterator
+			rowIDs   []RowID
+			rowIdx   int
+			lastRow  RowID
+			haveLast bool
+			done     bool
+		)
+		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
+			if iter == nil {
+				var err error
+				iter, err = secondaryIndex.InvertedIndex.Lookup(iterCtx, term)
+				if err != nil {
+					return RowView{}, fmt.Errorf("full-text lookup failed: %w", err)
+				}
+			}
+
+			for {
+				if err := iterCtx.Err(); err != nil {
+					return RowView{}, err
+				}
+				for rowIdx < len(rowIDs) {
+					rowID := rowIDs[rowIdx]
+					rowIdx += 1
+					if haveLast && rowID == lastRow {
+						continue
+					}
+					haveLast = true
+					lastRow = rowID
+
+					view, err := t.rowViewByRowID(iterCtx, rowID)
+					if err != nil {
+						return RowView{}, err
+					}
+					if tableFilter != nil {
+						ok, err := tableFilter(iterCtx, view)
+						if err != nil {
+							return RowView{}, err
+						}
+						if !ok {
+							continue
+						}
+					}
+					if hasOffset && iterOffset > 0 {
+						iterOffset -= 1
+						continue
+					}
+					if hasLimit {
+						if iterRemaining == 0 {
+							return RowView{}, ErrNoMoreRows
+						}
+						iterRemaining -= 1
+					}
+					return view, nil
+				}
+				if done {
+					return RowView{}, ErrNoMoreRows
+				}
+
+				block, ok, err := iter.NextBlock(iterCtx)
+				if err != nil {
+					return RowView{}, fmt.Errorf("full-text lookup failed: %w", err)
+				}
+				if !ok {
+					done = true
+					continue
+				}
+
+				rowIDs = rowIDs[:0]
+				mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
+					rowIDs = append(rowIDs, rowID)
+					return nil
+				})
+				if err != nil {
+					return RowView{}, err
+				}
+				if mode != invertedPostingModePositions {
+					return RowView{}, fmt.Errorf("full-text index %s uses posting mode %d", scan.IndexName, mode)
+				}
+				rowIdx = 0
+			}
+		})
+	}, true, nil
+}
+
+func (t *Table) invertedRowViewIteratorFactory(
+	ctx context.Context,
+	scan Scan,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) (func() RowViewIterator, error) {
+	secondaryIndex, ok := t.SecondaryIndexes[scan.IndexName]
+	if !ok || secondaryIndex.Method != IndexMethodInverted || secondaryIndex.InvertedIndex == nil {
+		return nil, fmt.Errorf("no index found for inverted scan: %s", scan.IndexName)
+	}
+	if len(scan.IndexKeys) == 0 {
+		return func() RowViewIterator {
+			return NewRowViewIterator(func(context.Context) (RowView, error) {
+				return RowView{}, ErrNoMoreRows
+			})
+		}, nil
+	}
+	if len(scan.IndexKeys) == 1 {
+		term, ok := scan.IndexKeys[0].(string)
+		if !ok {
+			return func() RowViewIterator {
+				return NewRowViewIterator(func(context.Context) (RowView, error) {
+					return RowView{}, ErrNoMoreRows
+				})
+			}, nil
+		}
+		return t.singleTermInvertedRowViewIteratorFactory(secondaryIndex, scan, term, tableFilter, remaining, offset, hasLimit, hasOffset), nil
+	}
+
+	rowIDs, err := t.collectInvertedScanRowIDs(ctx, scan)
+	if err != nil {
+		return nil, err
+	}
+	return t.rowIDRowViewIteratorFactory(rowIDs, tableFilter, remaining, offset, hasLimit, hasOffset), nil
+}
+
+func (t *Table) singleTermInvertedRowViewIteratorFactory(
+	secondaryIndex SecondaryIndex,
+	scan Scan,
+	term string,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) func() RowViewIterator {
+	return func() RowViewIterator {
+		iterRemaining := remaining
+		iterOffset := offset
+		var (
+			iter   invertedPostingIterator
+			rowIDs []RowID
+			rowIdx int
+			done   bool
+		)
+		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
+			if iter == nil {
+				var err error
+				iter, err = secondaryIndex.InvertedIndex.Lookup(iterCtx, term)
+				if err != nil {
+					return RowView{}, fmt.Errorf("inverted lookup failed: %w", err)
+				}
+			}
+
+			for {
+				if err := iterCtx.Err(); err != nil {
+					return RowView{}, err
+				}
+				for rowIdx < len(rowIDs) {
+					rowID := rowIDs[rowIdx]
+					rowIdx += 1
+
+					view, err := t.rowViewByRowID(iterCtx, rowID)
+					if err != nil {
+						return RowView{}, err
+					}
+					if tableFilter != nil {
+						ok, err := tableFilter(iterCtx, view)
+						if err != nil {
+							return RowView{}, err
+						}
+						if !ok {
+							continue
+						}
+					}
+					if hasOffset && iterOffset > 0 {
+						iterOffset -= 1
+						continue
+					}
+					if hasLimit {
+						if iterRemaining == 0 {
+							return RowView{}, ErrNoMoreRows
+						}
+						iterRemaining -= 1
+					}
+					return view, nil
+				}
+				if done {
+					return RowView{}, ErrNoMoreRows
+				}
+
+				block, ok, err := iter.NextBlock(iterCtx)
+				if err != nil {
+					return RowView{}, fmt.Errorf("inverted lookup failed: %w", err)
+				}
+				if !ok {
+					done = true
+					continue
+				}
+
+				rowIDs = rowIDs[:0]
+				mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
+					rowIDs = append(rowIDs, rowID)
+					return nil
+				})
+				if err != nil {
+					return RowView{}, err
+				}
+				if mode != invertedPostingModeRowIDs {
+					return RowView{}, fmt.Errorf("inverted index %s uses posting mode %d", scan.IndexName, mode)
+				}
+				rowIdx = 0
+			}
+		})
+	}
+}
+
+type pointRowIDIteratorIndex interface {
+	PointRowIDIterator(context.Context, any) (rowIDNextFunc, error)
+}
+
+type uniquePointRowIDIndex interface {
+	PointUniqueRowID(context.Context, any) (RowID, error)
+}
+
+func (t *Table) uniqueIndexPointRowViewIteratorFactory(
+	scan Scan,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) (func() RowViewIterator, error) {
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return nil, fmt.Errorf("no index found for row view scan: %s", scan.IndexName)
+	}
+	pointIdx, ok := idx.(uniquePointRowIDIndex)
+	if !ok {
+		return nil, fmt.Errorf("index %s does not support unique row ID lookup", scan.IndexName)
+	}
+
+	return func() RowViewIterator {
+		keyIdx := 0
+		iterRemaining := remaining
+		iterOffset := offset
+		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
+			for keyIdx < len(scan.IndexKeys) {
+				if err := iterCtx.Err(); err != nil {
+					return RowView{}, err
+				}
+				rowID, err := pointIdx.PointUniqueRowID(iterCtx, scan.IndexKeys[keyIdx])
+				keyIdx += 1
+				if errors.Is(err, ErrNotFound) {
+					continue
+				}
+				if err != nil {
+					return RowView{}, fmt.Errorf("index lookup failed: %w", err)
+				}
+
+				view, err := t.rowViewByRowID(iterCtx, rowID)
+				if err != nil {
+					return RowView{}, err
+				}
+				if tableFilter != nil {
+					ok, err := tableFilter(iterCtx, view)
+					if err != nil {
+						return RowView{}, err
+					}
+					if !ok {
+						continue
+					}
+				}
+				if hasOffset && iterOffset > 0 {
+					iterOffset -= 1
+					continue
+				}
+				if hasLimit {
+					if iterRemaining == 0 {
+						return RowView{}, ErrNoMoreRows
+					}
+					iterRemaining -= 1
+				}
+				return view, nil
+			}
+			return RowView{}, ErrNoMoreRows
+		})
+	}, nil
+}
+
+func (t *Table) indexPointRowViewIteratorFactory(
+	scan Scan,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) (func() RowViewIterator, error) {
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return nil, fmt.Errorf("no index found for row view scan: %s", scan.IndexName)
+	}
+	pointIdx, ok := idx.(pointRowIDIteratorIndex)
+	if !ok {
+		return nil, fmt.Errorf("index %s does not support row ID iteration", scan.IndexName)
+	}
+
+	return func() RowViewIterator {
+		keyIdx := 0
+		var nextRowID rowIDNextFunc
+		iterRemaining := remaining
+		iterOffset := offset
+		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
+			for {
+				if err := iterCtx.Err(); err != nil {
+					return RowView{}, err
+				}
+				if nextRowID == nil {
+					if keyIdx >= len(scan.IndexKeys) {
+						return RowView{}, ErrNoMoreRows
+					}
+					var err error
+					nextRowID, err = pointIdx.PointRowIDIterator(iterCtx, scan.IndexKeys[keyIdx])
+					keyIdx += 1
+					if errors.Is(err, ErrNotFound) {
+						nextRowID = nil
+						continue
+					}
+					if err != nil {
+						return RowView{}, fmt.Errorf("index lookup failed: %w", err)
+					}
+				}
+
+				rowID, err := nextRowID(iterCtx)
+				if errors.Is(err, ErrNoMoreRows) {
+					nextRowID = nil
+					continue
+				}
+				if err != nil {
+					return RowView{}, err
+				}
+
+				view, err := t.rowViewByRowID(iterCtx, rowID)
+				if err != nil {
+					return RowView{}, err
+				}
+				if tableFilter != nil {
+					ok, err := tableFilter(iterCtx, view)
+					if err != nil {
+						return RowView{}, err
+					}
+					if !ok {
+						continue
+					}
+				}
+				if hasOffset && iterOffset > 0 {
+					iterOffset -= 1
+					continue
+				}
+				if hasLimit {
+					if iterRemaining == 0 {
+						return RowView{}, ErrNoMoreRows
+					}
+					iterRemaining -= 1
+				}
+				return view, nil
+			}
+		})
+	}, nil
+}
+
+func (t *Table) isUniquePointIndex(name string) bool {
+	if t.HasPrimaryKey() && t.PrimaryKey.Name == name {
+		return true
+	}
+	_, ok := t.UniqueIndexes[name]
+	return ok
+}
+
+func (t *Table) scanIndexRangeRowIDs(ctx context.Context, plan QueryPlan, scan Scan, canApplyScanLimit bool, emit func(RowID) error) error {
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return fmt.Errorf("no index found for row view scan: %s", scan.IndexName)
+	}
+	var emitted int64
+	emitRowID := func(rowID RowID) error {
+		if err := emit(rowID); err != nil {
+			return err
+		}
+		if canApplyScanLimit && scan.ScanLimit > 0 {
+			emitted += 1
+			if emitted >= scan.ScanLimit {
+				return errLimitReached
+			}
+		}
+		return ctx.Err()
+	}
+	switch scan.Type {
+	case ScanTypeIndexAll:
+		if err := idx.ScanAll(ctx, plan.SortReverse, func(_ any, rowID RowID) error {
+			return emitRowID(rowID)
+		}); err != nil && !errors.Is(err, errLimitReached) {
+			return err
+		}
+	case ScanTypeIndexRange:
+		if err := idx.ScanRange(ctx, scan.RangeCondition, plan.SortReverse, func(_ any, rowID RowID) error {
+			return emitRowID(rowID)
+		}); err != nil && !errors.Is(err, errLimitReached) {
+			return err
+		}
+	case ScanTypeIndexPoint:
+		for _, indexValue := range scan.IndexKeys {
+			err := idx.VisitRowIDs(ctx, indexValue, func(rowID RowID) error {
+				return emitRowID(rowID)
+			})
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			if errors.Is(err, errLimitReached) {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("index lookup failed: %w", err)
+			}
+			if canApplyScanLimit && scan.ScanLimit > 0 && emitted >= scan.ScanLimit {
+				break
+			}
+		}
+	default:
+		return fmt.Errorf("unsupported row view index scan type: %s", scan.Type)
+	}
+	return nil
+}
+
+func (t *Table) rowViewByRowID(ctx context.Context, rowID RowID) (RowView, error) {
+	cursor, err := t.Seek(ctx, rowID)
+	if err != nil {
+		return RowView{}, fmt.Errorf("find row failed: %w", err)
+	}
+	return cursor.fetchRowView(ctx)
+}
+
+func rowViewProjectionPlan(columns []Column, fields []Field, allowedAliases ...string) ([]int, []Column, bool) {
+	indexes := make([]int, len(fields))
+	resultColumns := make([]Column, len(fields))
+	for i, field := range fields {
+		if field.Expr != nil {
+			return nil, nil, false
+		}
+		if field.AliasPrefix != "" && !rowViewAliasAllowed(field.AliasPrefix, allowedAliases) {
+			return nil, nil, false
+		}
+		idx := -1
+		for j, col := range columns {
+			if col.Name == field.Name {
+				idx = j
+				resultColumns[i] = col
+				resultColumns[i].Name = field.OutputName()
+				break
+			}
+		}
+		if idx < 0 {
+			return nil, nil, false
+		}
+		indexes[i] = idx
+	}
+	return indexes, resultColumns, true
+}
+
+func rowViewAliasAllowed(alias string, allowedAliases []string) bool {
+	for _, allowed := range allowedAliases {
+		if allowed != "" && alias == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func projectRowView(ctx context.Context, pager TxPager, view RowView, fieldIndexes []int, columns []Column) (Row, error) {
+	values := make([]OptionalValue, len(fieldIndexes))
+	for i, idx := range fieldIndexes {
+		value, err := view.ValueAtWithOverflow(ctx, pager, idx)
+		if err != nil {
+			return Row{}, err
+		}
+		values[i] = value
+	}
+	row := NewRowWithValues(columns, values)
+	row.Key = view.Key()
+	return row, nil
+}
+
+func lazyRowViewMaterializingIterator(pager TxPager, viewFactory func() RowViewIterator, fieldIndexes []int, columns []Column) Iterator {
+	var (
+		views  RowViewIterator
+		opened bool
+	)
+
+	ensureOpen := func() {
+		if opened {
+			return
+		}
+		views = viewFactory()
+		opened = true
+	}
+
+	return newIteratorWithClose(func(iterCtx context.Context) (Row, error) {
+		ensureOpen()
+		if !views.Next(iterCtx) {
+			if err := views.Err(); err != nil {
+				return Row{}, err
+			}
+			return Row{}, ErrNoMoreRows
+		}
+		view := views.RowView()
+		return projectRowView(iterCtx, pager, view, fieldIndexes, columns)
+	}, func() error {
+		if !opened {
+			return nil
+		}
+		return views.Close()
+	})
+}
+
+func distinctRowViewMaterializingIterator(
+	ctx context.Context,
+	pager TxPager,
+	views RowViewIterator,
+	fieldIndexes []int,
+	columns []Column,
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) Iterator {
+	seen := make(map[string]struct{})
+
+	return newIteratorWithClose(func(iterCtx context.Context) (Row, error) {
+		if hasLimit && remaining == 0 {
+			return Row{}, ErrNoMoreRows
+		}
+
+		for views.Next(iterCtx) {
+			row, err := projectRowView(iterCtx, pager, views.RowView(), fieldIndexes, columns)
+			if err != nil {
+				return Row{}, err
+			}
+			key := row.rowDistinctKey()
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			if hasOffset && offset > 0 {
+				offset -= 1
+				continue
+			}
+			if hasLimit {
+				remaining -= 1
+			}
+			return row, nil
+		}
+
+		if err := views.Err(); err != nil {
+			return Row{}, err
+		}
+		return Row{}, ErrNoMoreRows
+	}, views.Close)
+}
+
 func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields []Field) (StatementResult, error) {
 	result := StatementResult{
-		Columns: make([]Column, len(requestedFields)),
-	}
-	for i, field := range requestedFields {
-		if field.Expr != nil {
-			result.Columns[i] = Column{Name: field.OutputName()}
-		} else if colIdx := stmt.ColumnIdx(field.Name); colIdx >= 0 {
-			result.Columns[i] = t.Columns[colIdx]
-		}
+		Columns: t.selectResultColumns(stmt, requestedFields),
 	}
 
 	var (
@@ -1001,34 +2577,411 @@ func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields [
 		seen = make(map[string]struct{})
 	}
 
-	projected := make([]Row, 0, len(scanned))
-	for _, row := range scanned {
-		p, err := projectRow(row, requestedFields)
-		if err != nil {
-			return StatementResult{}, err
+	idx := 0
+	result.Rows = NewIterator(func(ctx context.Context) (Row, error) {
+		if hasLimit && limit == 0 {
+			return Row{}, ErrNoMoreRows
 		}
-		if stmt.Distinct {
-			key := p.rowDistinctKey()
-			if _, dup := seen[key]; dup {
+
+		for idx < len(scanned) {
+			row := scanned[idx]
+			idx += 1
+
+			p, err := projectRow(row, requestedFields)
+			if err != nil {
+				return Row{}, err
+			}
+			if stmt.Distinct {
+				key := p.rowDistinctKey()
+				if _, dup := seen[key]; dup {
+					continue
+				}
+				seen[key] = struct{}{}
+			}
+			if hasOffset && offset > 0 {
+				offset -= 1
 				continue
 			}
-			seen[key] = struct{}{}
-		}
-		if hasOffset && offset > 0 {
-			offset -= 1
-			continue
-		}
-		projected = append(projected, p)
-		if hasLimit {
-			limit -= 1
-			if limit == 0 {
-				break
+			if hasLimit {
+				limit -= 1
 			}
+			return p, nil
+		}
+
+		return Row{}, ErrNoMoreRows
+	})
+	return result, nil
+}
+
+func (t *Table) selectWithSortStreamingLimit(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	selectedFields []Field,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if len(plan.Joins) > 0 ||
+		!plan.SortInMemory ||
+		!stmt.Limit.Valid ||
+		len(plan.OrderBy) == 0 ||
+		stmt.Distinct ||
+		stmt.IsSelectCountAll() ||
+		stmt.IsSelectGroupBy() ||
+		stmt.IsSelectAggregate() {
+		return StatementResult{}, false, nil
+	}
+
+	limit := int(stmt.Limit.Value.(int64))
+	offset := 0
+	if stmt.Offset.Valid {
+		offset = int(stmt.Offset.Value.(int64))
+	}
+	maxRows := limit + offset
+
+	h := newRowHeap(plan.OrderBy, maxRows)
+	outputFields := orderByOutputFields(requestedFields)
+	err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
+		updated, err := addOrderByOutputFieldsToRow(row, outputFields, plan.OrderBy)
+		if err != nil {
+			return err
+		}
+		h.PushRow(updated)
+		return nil
+	})
+	if err != nil {
+		return StatementResult{}, true, err
+	}
+
+	allRows := h.ExtractSorted()
+	if offset >= len(allRows) {
+		allRows = []Row{}
+	} else {
+		end := offset + limit
+		if end < len(allRows) {
+			allRows = allRows[offset:end]
+		} else {
+			allRows = allRows[offset:]
 		}
 	}
 
-	result.Rows = NewSliceIterator(projected)
-	return result, nil
+	idx := 0
+	result := StatementResult{
+		Columns: t.selectResultColumns(stmt, requestedFields),
+	}
+	result.Rows = NewIterator(func(ctx context.Context) (Row, error) {
+		if idx >= len(allRows) {
+			return Row{}, ErrNoMoreRows
+		}
+		row := allRows[idx]
+		idx += 1
+		return projectRow(row, requestedFields)
+	})
+
+	return result, true, nil
+}
+
+func (t *Table) selectWithSortStreamingLimitRowView(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	selectedFields []Field,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if len(plan.Joins) > 0 ||
+		len(plan.Scans) != 1 ||
+		plan.Scans[0].Type != ScanTypeSequential ||
+		t.virtualRows != nil ||
+		!plan.SortInMemory ||
+		!stmt.Limit.Valid ||
+		len(plan.OrderBy) == 0 ||
+		stmt.Distinct ||
+		stmt.IsSelectCountAll() ||
+		stmt.IsSelectGroupBy() ||
+		stmt.IsSelectAggregate() {
+		return StatementResult{}, false, nil
+	}
+	for _, field := range requestedFields {
+		if field.Expr != nil {
+			return StatementResult{}, false, nil
+		}
+	}
+	for _, clause := range plan.OrderBy {
+		if clause.Field.Expr != nil {
+			return StatementResult{}, false, nil
+		}
+	}
+
+	heapFields := orderByHeapFields(requestedFields, plan.OrderBy)
+	fieldIndexes, _, ok := rowViewProjectionPlan(t.Columns, heapFields, stmt.TableName, stmt.TableAlias)
+	if !ok {
+		return StatementResult{}, false, nil
+	}
+	heapColumns := heapColumnsForFields(t.Columns, heapFields)
+	_, resultColumns, ok := rowViewProjectionPlan(t.Columns, requestedFields, stmt.TableName, stmt.TableAlias)
+	if !ok {
+		return StatementResult{}, false, nil
+	}
+
+	scan := plan.Scans[0]
+	limit := int(stmt.Limit.Value.(int64))
+	offset := 0
+	if stmt.Offset.Valid {
+		offset = int(stmt.Offset.Value.(int64))
+	}
+	maxRows := limit + offset
+	h := newRowHeap(plan.OrderBy, maxRows)
+
+	err := t.scanProjectedRowViews(ctx, scan, selectedFields, fieldIndexes, heapColumns, func(row Row) error {
+		h.PushRow(row)
+		return nil
+	})
+	if err != nil {
+		return StatementResult{}, true, err
+	}
+
+	allRows := h.ExtractSorted()
+	if offset >= len(allRows) {
+		allRows = nil
+	} else {
+		end := offset + limit
+		if end < len(allRows) {
+			allRows = allRows[offset:end]
+		} else {
+			allRows = allRows[offset:]
+		}
+	}
+
+	idx := 0
+	result := StatementResult{
+		Columns: resultColumns,
+	}
+	result.Rows = NewIterator(func(ctx context.Context) (Row, error) {
+		if idx >= len(allRows) {
+			return Row{}, ErrNoMoreRows
+		}
+		row := allRows[idx]
+		idx += 1
+		values := make([]OptionalValue, len(requestedFields))
+		for i := range requestedFields {
+			values[i] = row.Values[i]
+		}
+		projected := NewRowWithValues(resultColumns, values)
+		projected.Key = row.Key
+		return projected, nil
+	})
+
+	return result, true, nil
+}
+
+func (t *Table) selectWithSortRowView(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	selectedFields []Field,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if len(plan.Joins) > 0 ||
+		len(plan.Scans) != 1 ||
+		plan.Scans[0].Type != ScanTypeSequential ||
+		t.virtualRows != nil ||
+		!plan.SortInMemory ||
+		stmt.Limit.Valid ||
+		len(plan.OrderBy) == 0 ||
+		stmt.IsSelectCountAll() ||
+		stmt.IsSelectGroupBy() ||
+		stmt.IsSelectAggregate() {
+		return StatementResult{}, false, nil
+	}
+	for _, field := range requestedFields {
+		if field.Expr != nil {
+			return StatementResult{}, false, nil
+		}
+	}
+	for _, clause := range plan.OrderBy {
+		if clause.Field.Expr != nil {
+			return StatementResult{}, false, nil
+		}
+	}
+
+	sortFields := orderByHeapFields(requestedFields, plan.OrderBy)
+	fieldIndexes, sortColumns, ok := rowViewProjectionPlan(t.Columns, sortFields, stmt.TableName, stmt.TableAlias)
+	if !ok {
+		return StatementResult{}, false, nil
+	}
+	_, resultColumns, ok := rowViewProjectionPlan(t.Columns, requestedFields, stmt.TableName, stmt.TableAlias)
+	if !ok {
+		return StatementResult{}, false, nil
+	}
+
+	scan := plan.Scans[0]
+	allRows := make([]Row, 0)
+	err := t.scanProjectedRowViews(ctx, scan, selectedFields, fieldIndexes, sortColumns, func(row Row) error {
+		allRows = append(allRows, row)
+		return nil
+	})
+	if err != nil {
+		return StatementResult{}, true, err
+	}
+
+	if err := t.sortRows(allRows, plan.OrderBy); err != nil {
+		return StatementResult{}, true, err
+	}
+
+	if stmt.Distinct {
+		allRows = deduplicateRows(allRows, requestedFields)
+	}
+
+	offset := 0
+	if stmt.Offset.Valid {
+		offset = int(stmt.Offset.Value.(int64))
+	}
+	if offset >= len(allRows) {
+		allRows = nil
+	} else if offset > 0 {
+		allRows = allRows[offset:]
+	}
+
+	result := StatementResult{
+		Columns: resultColumns,
+	}
+	idx := 0
+	result.Rows = NewIterator(func(ctx context.Context) (Row, error) {
+		if idx >= len(allRows) {
+			return Row{}, ErrNoMoreRows
+		}
+		row := allRows[idx]
+		idx += 1
+		values := make([]OptionalValue, len(requestedFields))
+		copy(values, row.Values[:len(requestedFields)])
+		projected := NewRowWithValues(resultColumns, values)
+		projected.Key = row.Key
+		return projected, nil
+	})
+
+	return result, true, nil
+}
+
+type compiledRowViewScanFilter struct {
+	rowViewFilter func(context.Context, RowView) (bool, error)
+	rowFilter     func(Row) (bool, error)
+	selectedMask  []bool
+}
+
+func (t *Table) compileRowViewScanFilter(scan Scan, selectedFields []Field) compiledRowViewScanFilter {
+	if rowViewFilterSupports(t.Columns, scan.Filters) {
+		return compiledRowViewScanFilter{
+			rowViewFilter: compileRowViewFilterForColumns(t.Columns, t.pager, scan.Filters),
+		}
+	}
+	return compiledRowViewScanFilter{
+		rowFilter:    compileScanFilter(t.Columns, scan.Filters),
+		selectedMask: selectedColumnsMask(t.Columns, selectedFields),
+	}
+}
+
+func (f compiledRowViewScanFilter) accept(ctx context.Context, pager TxPager, view RowView) (bool, error) {
+	if f.rowViewFilter != nil {
+		return f.rowViewFilter(ctx, view)
+	}
+	if f.rowFilter == nil {
+		return true, nil
+	}
+	row, err := view.MaterializeWithOverflow(ctx, pager, f.selectedMask)
+	if err != nil {
+		return false, err
+	}
+	return f.rowFilter(row)
+}
+
+func (t *Table) scanProjectedRowViews(
+	ctx context.Context,
+	scan Scan,
+	selectedFields []Field,
+	fieldIndexes []int,
+	columns []Column,
+	consume func(Row) error,
+) error {
+	filter := t.compileRowViewScanFilter(scan, selectedFields)
+	if t.parallelScan {
+		return t.scanParallelProjectedRowViews(ctx, filter, fieldIndexes, columns, consume)
+	}
+
+	cursor, err := t.SeekFirst(ctx)
+	if err != nil {
+		return err
+	}
+	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return fmt.Errorf("row view scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	for !cursor.EndOfTable {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if page.Index != cursor.PageIdx {
+			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
+			if err != nil {
+				return fmt.Errorf("row view scan: %w", err)
+			}
+		}
+		if cursor.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
+			return fmt.Errorf("cell index %d out of bounds, max %d", cursor.CellIdx, page.LeafNode.Header.Cells-1)
+		}
+
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+		advanceLeafCursor(cursor, page)
+		view := NewRowView(t.Columns, cell)
+
+		ok, err := filter.accept(ctx, t.pager, view)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+
+		row, err := projectRowView(ctx, t.pager, view, fieldIndexes, columns)
+		if err != nil {
+			return err
+		}
+		if err := consume(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (t *Table) scanParallelProjectedRowViews(
+	ctx context.Context,
+	filter compiledRowViewScanFilter,
+	fieldIndexes []int,
+	columns []Column,
+	consume func(Row) error,
+) error {
+	rowViewFilter := func(filterCtx context.Context, view RowView) (bool, error) {
+		return filter.accept(filterCtx, t.pager, view)
+	}
+	newIter, err := t.parallelSequentialRowViewIteratorFactory(ctx, rowViewFilter, 0, 0, false, false)
+	if err != nil {
+		return err
+	}
+	views := newIter()
+	defer func() {
+		_ = views.Close()
+	}()
+
+	for views.Next(ctx) {
+		row, err := projectRowView(ctx, t.pager, views.RowView(), fieldIndexes, columns)
+		if err != nil {
+			return err
+		}
+		if err := consume(row); err != nil {
+			return err
+		}
+	}
+	return views.Err()
 }
 
 func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, allRows []Row, requestedFields []Field) (StatementResult, error) {
@@ -1086,14 +3039,7 @@ func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, allRows []Row, re
 	// Create result with materialized rows
 	idx := 0
 	result := StatementResult{
-		Columns: make([]Column, len(requestedFields)),
-	}
-	for i, field := range requestedFields {
-		if field.Expr != nil {
-			result.Columns[i] = Column{Name: field.OutputName()}
-		} else if colIdx := stmt.ColumnIdx(field.Name); colIdx >= 0 {
-			result.Columns[i] = t.Columns[colIdx]
-		}
+		Columns: t.selectResultColumns(stmt, requestedFields),
 	}
 
 	result.Rows = NewIterator(func(ctx context.Context) (Row, error) {
@@ -1110,52 +3056,200 @@ func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, allRows []Row, re
 	return result, nil
 }
 
+func (t *Table) selectResultColumns(stmt Statement, requestedFields []Field) []Column {
+	columns := make([]Column, len(requestedFields))
+	for i, field := range requestedFields {
+		if field.Expr != nil {
+			columns[i] = Column{Name: field.OutputName()}
+		} else if colIdx := stmt.ColumnIdx(field.Name); colIdx >= 0 {
+			columns[i] = t.Columns[colIdx]
+		}
+	}
+	return columns
+}
+
 func addOrderByOutputFields(rows []Row, fields []Field, orderBy []OrderBy) ([]Row, error) {
 	if len(rows) == 0 || len(orderBy) == 0 {
 		return rows, nil
 	}
 
-	outputFields := make(map[string]Field)
-	for _, field := range fields {
-		outputFields[field.OutputName()] = field
-	}
-
+	outputFields := orderByOutputFields(fields)
 	for rowIdx, row := range rows {
-		updated := row
-		for _, clause := range orderBy {
-			if _, found := updated.GetValue(clause.Field.Name); found {
-				continue
-			}
-
-			field, ok := outputFields[clause.Field.Name]
-			if !ok {
-				continue
-			}
-
-			var value OptionalValue
-			if field.Expr != nil {
-				result, err := field.Expr.Eval(updated)
-				if err != nil {
-					return nil, fmt.Errorf("evaluating ORDER BY expression %q: %w", field.OutputName(), err)
-				}
-				if result != nil {
-					value = OptionalValue{Value: result, Valid: true}
-				}
-			} else {
-				existing, found := updated.getValueQualified(field.AliasPrefix, field.Name)
-				if !found {
-					continue
-				}
-				value = existing
-			}
-
-			updated.Columns = append(updated.Columns, Column{Name: field.OutputName()})
-			updated.Values = append(updated.Values, value)
+		updated, err := addOrderByOutputFieldsToRow(row, outputFields, orderBy)
+		if err != nil {
+			return nil, err
 		}
 		rows[rowIdx] = updated
 	}
 
 	return rows, nil
+}
+
+func orderByOutputFields(fields []Field) map[string]Field {
+	outputFields := make(map[string]Field)
+	for _, field := range fields {
+		outputFields[field.OutputName()] = field
+	}
+	return outputFields
+}
+
+func orderByHeapFields(fields []Field, orderBy []OrderBy) []Field {
+	result := make([]Field, 0, len(fields)+len(orderBy))
+	seen := make(map[string]struct{}, len(fields)+len(orderBy))
+	for _, field := range fields {
+		result = append(result, field)
+		seen[field.OutputName()] = struct{}{}
+		if field.Name != "" {
+			seen[field.Name] = struct{}{}
+		}
+	}
+	for _, clause := range orderBy {
+		field := clause.Field
+		if _, ok := seen[field.OutputName()]; ok {
+			continue
+		}
+		if _, ok := seen[field.Name]; ok {
+			continue
+		}
+		result = append(result, field)
+		seen[field.OutputName()] = struct{}{}
+		if field.Name != "" {
+			seen[field.Name] = struct{}{}
+		}
+	}
+	return result
+}
+
+func heapColumnsForFields(columns []Column, fields []Field) []Column {
+	heapColumns := make([]Column, len(fields))
+	for i, field := range fields {
+		for _, col := range columns {
+			if col.Name == field.Name {
+				heapColumns[i] = col
+				heapColumns[i].Name = field.OutputName()
+				break
+			}
+		}
+	}
+	return heapColumns
+}
+
+func addOrderByOutputFieldsToRow(row Row, outputFields map[string]Field, orderBy []OrderBy) (Row, error) {
+	if len(orderBy) == 0 {
+		return row, nil
+	}
+	updated := row
+	for _, clause := range orderBy {
+		if _, found := updated.GetValue(clause.Field.Name); found {
+			continue
+		}
+
+		field, ok := outputFields[clause.Field.Name]
+		if !ok {
+			continue
+		}
+
+		var value OptionalValue
+		if field.Expr != nil {
+			result, err := field.Expr.Eval(updated)
+			if err != nil {
+				return Row{}, fmt.Errorf("evaluating ORDER BY expression %q: %w", field.OutputName(), err)
+			}
+			if result != nil {
+				value = OptionalValue{Value: result, Valid: true}
+			}
+		} else {
+			existing, found := updated.getValueQualified(field.AliasPrefix, field.Name)
+			if !found {
+				continue
+			}
+			value = existing
+		}
+
+		updated.Columns = append(updated.Columns, Column{Name: field.OutputName()})
+		updated.Values = append(updated.Values, value)
+	}
+
+	return updated, nil
+}
+
+func (t *Table) indexedScanRow(
+	ctx context.Context,
+	key any,
+	rowID RowID,
+	isCovering bool,
+	indexColumns []Column,
+	selectedMask []bool,
+	nSelected int,
+	tableFilter func(Row) (bool, error),
+	coveringFilter func(Row) (bool, error),
+) (Row, bool, error) {
+	var row Row
+
+	switch {
+	case isCovering:
+		row = rowFromIndexKey(key, indexColumns, rowID)
+	case nSelected == 0:
+		row = NewRowWithValues(t.Columns, nil)
+		row.Key = rowID
+	default:
+		view, err := t.rowViewByRowID(ctx, rowID)
+		if err != nil {
+			return Row{}, false, err
+		}
+		row, err = view.MaterializeWithOverflow(ctx, t.pager, selectedMask)
+		if err != nil {
+			return Row{}, false, fmt.Errorf("fetch row failed: %w", err)
+		}
+
+		if tableFilter != nil {
+			ok, err := tableFilter(row)
+			if err != nil || !ok {
+				return Row{}, false, err
+			}
+		}
+	}
+
+	if isCovering && coveringFilter != nil {
+		ok, err := coveringFilter(row)
+		if err != nil || !ok {
+			return Row{}, false, err
+		}
+	}
+
+	return row, true, nil
+}
+
+func (t *Table) rowIDScanRow(
+	ctx context.Context,
+	rowID RowID,
+	selectedMask []bool,
+	nSelected int,
+	tableFilter func(Row) (bool, error),
+) (Row, bool, error) {
+	var row Row
+	if nSelected == 0 {
+		row = NewRowWithValues(t.Columns, nil)
+		row.Key = rowID
+	} else {
+		view, err := t.rowViewByRowID(ctx, rowID)
+		if err != nil {
+			return Row{}, false, err
+		}
+		row, err = view.MaterializeWithOverflow(ctx, t.pager, selectedMask)
+		if err != nil {
+			return Row{}, false, fmt.Errorf("fetch row failed: %w", err)
+		}
+	}
+
+	if tableFilter != nil {
+		ok, err := tableFilter(row)
+		if err != nil || !ok {
+			return Row{}, false, err
+		}
+	}
+
+	return row, true, nil
 }
 
 func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, selectedFields []Field, out func(Row) error) error {
@@ -1167,55 +3261,17 @@ func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, se
 		selectedMask   = selectedColumnsMask(t.Columns, selectedFields)
 		tableFilter    = compileScanFilter(t.Columns, scan.Filters)
 		coveringFilter = compileScanFilter(scan.IndexColumns, scan.Filters)
+		nSelected      = len(selectedFields)
 	)
 
 	// Scan index in order (or reverse order)
 	if err := idx.ScanAll(ctx, aPlan.SortReverse, func(key any, rowID RowID) error {
-		var row Row
-
-		if scan.CoveringIndex {
-			// Index-only scan: build row directly from key without touching the table page.
-			row = rowFromIndexKey(key, scan.IndexColumns, rowID)
-		} else {
-			// Find the row by ID
-			cursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("find row failed: %w", err)
-			}
-
-			if len(selectedFields) == 0 {
-				row = NewRowWithValues(t.Columns, nil)
-				row.Key = rowID
-			} else {
-				var err error
-				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-				if err != nil {
-					return fmt.Errorf("fetch row failed: %w", err)
-				}
-
-				// Apply remaining filters
-				if tableFilter != nil {
-					ok, err := tableFilter(row)
-					if err != nil {
-						return err
-					}
-					if !ok {
-						return nil // Skip this row
-					}
-				}
-			}
-		}
-
-		// For covering index scans, filters still need to be applied
-		// (all filter columns are guaranteed to be in the index).
-		if scan.CoveringIndex && coveringFilter != nil {
-			ok, err := coveringFilter(row)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return nil
-			}
+		row, ok, err := t.indexedScanRow(
+			ctx, key, rowID, scan.CoveringIndex, scan.IndexColumns,
+			selectedMask, nSelected, tableFilter, coveringFilter,
+		)
+		if err != nil || !ok {
+			return err
 		}
 
 		if err := ctx.Err(); err != nil {
@@ -1237,54 +3293,16 @@ func (t *Table) indexRangeScan(ctx context.Context, aPlan QueryPlan, scan Scan, 
 	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
 	tableFilter := compileScanFilter(t.Columns, scan.Filters)
 	coveringFilter := compileScanFilter(scan.IndexColumns, scan.Filters)
+	nSelected := len(selectedFields)
 
 	// Scan index within range (forward or reverse)
 	if err := idx.ScanRange(ctx, scan.RangeCondition, aPlan.SortReverse, func(key any, rowID RowID) error {
-		var row Row
-
-		if scan.CoveringIndex {
-			// Index-only scan: build row directly from key without touching the table page.
-			row = rowFromIndexKey(key, scan.IndexColumns, rowID)
-		} else {
-			// Find the row by ID
-			cursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("find row failed: %w", err)
-			}
-
-			if len(selectedFields) == 0 {
-				row = NewRowWithValues(t.Columns, nil)
-				row.Key = rowID
-			} else {
-				var err error
-				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-				if err != nil {
-					return fmt.Errorf("fetch row failed: %w", err)
-				}
-
-				// Apply remaining filters
-				if tableFilter != nil {
-					ok, err := tableFilter(row)
-					if err != nil {
-						return err
-					}
-					if !ok {
-						return nil // Skip this row
-					}
-				}
-			}
-		}
-
-		// For covering index scans, filters still need to be applied
-		// (all filter columns are guaranteed to be in the index).
-		if scan.CoveringIndex && coveringFilter != nil {
-			ok, err := coveringFilter(row)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return nil
-			}
+		row, ok, err := t.indexedScanRow(
+			ctx, key, rowID, scan.CoveringIndex, scan.IndexColumns,
+			selectedMask, nSelected, tableFilter, coveringFilter,
+		)
+		if err != nil || !ok {
+			return err
 		}
 
 		if err := ctx.Err(); err != nil {
@@ -1312,44 +3330,12 @@ func (t *Table) indexPointScan(ctx context.Context, scan Scan, selectedFields []
 	// out stops iteration before all overflow pages are loaded.
 	for _, indexValue := range scan.IndexKeys {
 		err := idx.VisitRowIDs(ctx, indexValue, func(rowID RowID) error {
-			var row Row
-
-			switch {
-			case scan.CoveringIndex:
-				row = rowFromIndexKey(indexValue, scan.IndexColumns, rowID)
-			case len(selectedFields) == 0:
-				row = NewRowWithValues(t.Columns, nil)
-				row.Key = rowID
-			default:
-				cursor, err := t.Seek(ctx, rowID)
-				if err != nil {
-					return fmt.Errorf("find row failed: %w", err)
-				}
-
-				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-				if err != nil {
-					return fmt.Errorf("fetch row failed: %w", err)
-				}
-
-				if tableFilter != nil {
-					ok, err := tableFilter(row)
-					if err != nil {
-						return err
-					}
-					if !ok {
-						return nil
-					}
-				}
-			}
-
-			if scan.CoveringIndex && coveringFilter != nil {
-				ok, err := coveringFilter(row)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return nil
-				}
+			row, ok, err := t.indexedScanRow(
+				ctx, indexValue, rowID, scan.CoveringIndex, scan.IndexColumns,
+				selectedMask, len(selectedFields), tableFilter, coveringFilter,
+			)
+			if err != nil || !ok {
+				return err
 			}
 
 			if err := ctx.Err(); err != nil {
@@ -1390,40 +3376,15 @@ func (t *Table) indexPointGetAll(ctx context.Context, scan Scan, selectedFields 
 	var rows []Row
 	for _, indexValue := range scan.IndexKeys {
 		if err := idx.VisitRowIDs(ctx, indexValue, func(rowID RowID) error {
-			var row Row
-			switch {
-			case isCovering:
-				row = rowFromIndexKey(indexValue, idxColumns, rowID)
-			case nSelected == 0:
-				row = NewRowWithValues(t.Columns, nil)
-				row.Key = rowID
-			default:
-				cursor, err := t.Seek(ctx, rowID)
-				if err != nil {
-					return fmt.Errorf("find row failed: %w", err)
-				}
-				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-				if err != nil {
-					return fmt.Errorf("fetch row failed: %w", err)
-				}
-				if tableFilter != nil {
-					ok, err := tableFilter(row)
-					if err != nil {
-						return err
-					}
-					if !ok {
-						return nil
-					}
-				}
+			row, ok, err := t.indexedScanRow(
+				ctx, indexValue, rowID, isCovering, idxColumns,
+				selectedMask, nSelected, tableFilter, coveringFilter,
+			)
+			if err != nil {
+				return err
 			}
-			if isCovering && coveringFilter != nil {
-				ok, err := coveringFilter(row)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return nil
-				}
+			if !ok {
+				return nil
 			}
 			if err := ctx.Err(); err != nil {
 				return err
@@ -1440,13 +3401,108 @@ func (t *Table) indexPointGetAll(ctx context.Context, scan Scan, selectedFields 
 	return rows, nil
 }
 
+// indexPointExists reports whether any row matches the index point scan and
+// residual filters, without materialising matched rows.
+func (t *Table) indexPointExists(ctx context.Context, scan Scan, selectedFields []Field) (bool, error) {
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return false, fmt.Errorf("no index found for point scan: %s", scan.IndexName)
+	}
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	coveringFilter := compileScanFilter(scan.IndexColumns, scan.Filters)
+	isCovering := scan.CoveringIndex
+	idxColumns := scan.IndexColumns
+	nSelected := len(selectedFields)
+	hasResidualFilter := tableFilter != nil || (isCovering && coveringFilter != nil)
+
+	for _, indexValue := range scan.IndexKeys {
+		err := idx.VisitRowIDs(ctx, indexValue, func(rowID RowID) error {
+			if !hasResidualFilter {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return errStopScan
+			}
+
+			_, ok, err := t.indexedScanRow(
+				ctx, indexValue, rowID, isCovering, idxColumns,
+				selectedMask, nSelected, tableFilter, coveringFilter,
+			)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return nil
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return errStopScan
+		})
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if errors.Is(err, errStopScan) {
+			return true, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("index lookup failed: %w", err)
+		}
+	}
+	return false, nil
+}
+
 func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
+	secondaryIndex, query, queryTokens, err := t.fullTextScanState(scan)
+	if err != nil {
+		return err
+	}
+	if len(queryTokens) == 0 {
+		return nil
+	}
+
+	if len(queryTokens) == 1 && len(query.Phrases) == 0 {
+		return t.fullTextSingleTermIndexScan(ctx, secondaryIndex, scan, queryTokens[0], selectedFields, out)
+	}
+	surviving, err := t.collectFullTextScanRowIDs(ctx, secondaryIndex, scan, query, queryTokens)
+	if err != nil {
+		return err
+	}
+	if len(surviving) == 0 {
+		return nil
+	}
+
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	nSelected := len(selectedFields)
+	for _, rowID := range surviving {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		row, ok, err := t.rowIDScanRow(ctx, rowID, selectedMask, nSelected, tableFilter)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+
+		if err := out(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (t *Table) fullTextScanState(scan Scan) (SecondaryIndex, *textSearchQuery, []string, error) {
 	secondaryIndex, ok := t.SecondaryIndexes[scan.IndexName]
 	if !ok || secondaryIndex.Method != IndexMethodFullText || secondaryIndex.InvertedIndex == nil {
-		return fmt.Errorf("no index found for full-text scan: %s", scan.IndexName)
+		return SecondaryIndex{}, nil, nil, fmt.Errorf("no index found for full-text scan: %s", scan.IndexName)
 	}
 	if len(scan.IndexKeys) == 0 {
-		return nil
+		return secondaryIndex, nil, nil, nil
 	}
 
 	query := scan.FullTextQuery
@@ -1461,181 +3517,42 @@ func (t *Table) fullTextIndexScan(ctx context.Context, scan Scan, selectedFields
 		}
 		query = &textSearchQuery{Terms: terms}
 	}
+
 	queryTokens := query.allUniqueTokens()
-	if len(queryTokens) == 0 {
-		return nil
-	}
-	if len(queryTokens) == 1 && len(query.Phrases) == 0 {
-		return t.fullTextSingleTermIndexScan(ctx, secondaryIndex, scan, queryTokens[0], selectedFields, out)
-	}
-	if len(query.Phrases) == 0 {
-		return t.fullTextMultiTermIndexScan(ctx, secondaryIndex, scan, queryTokens, selectedFields, out)
-	}
-
-	// Load postings for each term as sorted []invertedPosting — directly from
-	// the decoder, no map needed. Each RowID appears in exactly one block
-	// (the row-grouped codec writes one entry per document), so postings from
-	// successive blocks can be concatenated in order.
-	postingsByTerm := make(map[string][]invertedPosting, len(queryTokens))
-	for _, key := range scan.IndexKeys {
-		term, ok := key.(string)
-		if !ok {
-			continue
-		}
-		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
-		if err != nil {
-			return fmt.Errorf("full-text stats lookup failed: %w", err)
-		}
-		iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
-		if err != nil {
-			return fmt.Errorf("full-text lookup failed: %w", err)
-		}
-		postings := make([]invertedPosting, 0, stats.DocFreq)
-		for {
-			block, ok, err := iter.NextBlock(ctx)
-			if err != nil {
-				return fmt.Errorf("full-text lookup failed: %w", err)
-			}
-			if !ok {
-				break
-			}
-			mode, decoded, err := decodeInvertedPostingList(block.Payload)
-			if err != nil {
-				return fmt.Errorf("full-text decode failed: %w", err)
-			}
-			if mode != invertedPostingModePositions {
-				return fmt.Errorf("full-text index %s uses posting mode %d", scan.IndexName, mode)
-			}
-			postings = append(postings, decoded...)
-		}
-		if len(postings) == 0 {
-			return nil
-		}
-		postingsByTerm[term] = postings
-	}
-
-	needsPositions := len(query.Phrases) > 0
-
-	// Pre-compute phrase→queryToken index mapping once per query so the
-	// per-row phrase check is allocation-free.
-	type phraseMapping struct{ indices []int }
-	phraseMappings := make([]phraseMapping, len(query.Phrases))
-	for pi, phrase := range query.Phrases {
-		indices := make([]int, len(phrase))
-		for i, term := range phrase {
-			idx := -1
-			for j, qt := range queryTokens {
-				if qt == term {
-					idx = j
-					break
-				}
-			}
-			if idx < 0 {
-				return nil
-			}
-			indices[i] = idx
-		}
-		phraseMappings[pi] = phraseMapping{indices: indices}
-	}
-
-	// allPositions[i] holds the positions of queryTokens[i] in the current
-	// candidate document. Allocated once and overwritten for each candidate.
-	var allPositions [][]uint32
-	if needsPositions {
-		allPositions = make([][]uint32, len(queryTokens))
-	}
-
-	// Iterate the first term's postings in sorted RowID order. Survivors come
-	// out sorted so sortRowIDs is unnecessary.
-	firstPostings := postingsByTerm[queryTokens[0]]
-	surviving := make([]RowID, 0, len(firstPostings))
-
-	for _, firstPosting := range firstPostings {
-		rowID := firstPosting.RowID
-		matches := true
-
-		if needsPositions {
-			allPositions[0] = firstPosting.Positions
-		}
-		for i := 1; i < len(queryTokens); i++ {
-			termPostings := postingsByTerm[queryTokens[i]]
-			idx := invertedPostingBinarySearch(termPostings, rowID)
-			if idx < 0 {
-				matches = false
-				break
-			}
-			if needsPositions {
-				allPositions[i] = termPostings[idx].Positions
-			}
-		}
-		if !matches {
-			continue
-		}
-		if needsPositions {
-			for _, pm := range phraseMappings {
-				if !textSearchPhraseMatchesSorted(allPositions, pm.indices) {
-					matches = false
-					break
-				}
-			}
-		}
-		if matches {
-			surviving = append(surviving, rowID)
-		}
-	}
-	if len(surviving) == 0 {
-		return nil
-	}
-
-	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
-	tableFilter := compileScanFilter(t.Columns, scan.Filters)
-	for _, rowID := range surviving {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		var row Row
-		if len(selectedFields) == 0 {
-			row = NewRowWithValues(t.Columns, nil)
-			row.Key = rowID
-		} else {
-			cursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("full-text seek: %w", err)
-			}
-			row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-			if err != nil {
-				return fmt.Errorf("full-text fetch: %w", err)
-			}
-		}
-
-		if tableFilter != nil {
-			ok, err := tableFilter(row)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				continue
-			}
-		}
-
-		if err := out(row); err != nil {
-			return err
-		}
-	}
-	return nil
+	return secondaryIndex, query, queryTokens, nil
 }
 
-func (t *Table) fullTextMultiTermIndexScan(ctx context.Context, secondaryIndex SecondaryIndex, scan Scan, terms []string, selectedFields []Field, out func(Row) error) error {
+func (t *Table) collectFullTextScanRowIDs(
+	ctx context.Context,
+	secondaryIndex SecondaryIndex,
+	scan Scan,
+	query *textSearchQuery,
+	queryTokens []string,
+) ([]RowID, error) {
+	if len(queryTokens) == 0 {
+		return nil, nil
+	}
+	if len(query.Phrases) == 0 {
+		return t.collectFullTextMultiTermRowIDs(ctx, secondaryIndex, scan.IndexName, queryTokens)
+	}
+	return t.collectFullTextPhraseRowIDs(ctx, secondaryIndex, scan, query, queryTokens)
+}
+
+func (t *Table) collectFullTextMultiTermRowIDs(
+	ctx context.Context,
+	secondaryIndex SecondaryIndex,
+	indexName string,
+	terms []string,
+) ([]RowID, error) {
 	termsByDocFreq := make([]string, 0, len(terms))
 	docFreqByTerm := make(map[string]uint32, len(terms))
 	for _, term := range terms {
 		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
 		if err != nil {
-			return fmt.Errorf("full-text stats lookup failed: %w", err)
+			return nil, fmt.Errorf("full-text stats lookup failed: %w", err)
 		}
 		if stats.DocFreq == 0 {
-			return nil
+			return nil, nil
 		}
 		docFreqByTerm[term] = stats.DocFreq
 		termsByDocFreq = append(termsByDocFreq, term)
@@ -1652,12 +3569,12 @@ func (t *Table) fullTextMultiTermIndexScan(ctx context.Context, secondaryIndex S
 
 	var surviving []RowID
 	for i, term := range termsByDocFreq {
-		rowIDs, err := loadFullTextRowIDsForTerm(ctx, secondaryIndex, scan.IndexName, term, docFreqByTerm[term])
+		rowIDs, err := loadFullTextRowIDsForTerm(ctx, secondaryIndex, indexName, term, docFreqByTerm[term])
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if len(rowIDs) == 0 {
-			return nil
+			return nil, nil
 		}
 		if i == 0 {
 			surviving = rowIDs
@@ -1665,11 +3582,176 @@ func (t *Table) fullTextMultiTermIndexScan(ctx context.Context, secondaryIndex S
 		}
 		surviving = intersectTwoSortedSets(surviving, rowIDs)
 		if len(surviving) == 0 {
-			return nil
+			return nil, nil
 		}
 	}
+	return surviving, nil
+}
 
-	return t.emitFullTextRows(ctx, scan, selectedFields, surviving, out)
+func (t *Table) collectFullTextPhraseRowIDs(
+	ctx context.Context,
+	secondaryIndex SecondaryIndex,
+	scan Scan,
+	query *textSearchQuery,
+	queryTokens []string,
+) ([]RowID, error) {
+	docFreqByTerm := make(map[string]uint32, len(queryTokens))
+	for _, term := range queryTokens {
+		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
+		if err != nil {
+			return nil, fmt.Errorf("full-text stats lookup failed: %w", err)
+		}
+		if stats.DocFreq == 0 {
+			return nil, nil
+		}
+		docFreqByTerm[term] = stats.DocFreq
+	}
+
+	// Stream the rarest term and keep only the other posting lists for binary
+	// lookups. This avoids retaining the candidate posting list while still
+	// preserving sorted survivor output.
+	candidateIdx := rarestFullTextTokenIndex(queryTokens, docFreqByTerm)
+	candidateTerm := queryTokens[candidateIdx]
+
+	postingsByTerm := make(map[string][]invertedPosting, len(queryTokens)-1)
+	for i, term := range queryTokens {
+		if i == candidateIdx {
+			continue
+		}
+		postings, err := loadFullTextPostingsForTerm(ctx, secondaryIndex, scan.IndexName, term, docFreqByTerm[term])
+		if err != nil {
+			return nil, err
+		}
+		if len(postings) == 0 {
+			return nil, nil
+		}
+		postingsByTerm[term] = postings
+	}
+
+	// Pre-compute phrase→queryToken index mapping once per query so the
+	// per-row phrase check is allocation-free.
+	type phraseMapping struct{ indices []int }
+	phraseMappings := make([]phraseMapping, len(query.Phrases))
+	for pi, phrase := range query.Phrases {
+		indices := make([]int, len(phrase))
+		for i, term := range phrase {
+			idx := -1
+			for j, qt := range queryTokens {
+				if qt == term {
+					idx = j
+					break
+				}
+			}
+			if idx < 0 {
+				return nil, nil
+			}
+			indices[i] = idx
+		}
+		phraseMappings[pi] = phraseMapping{indices: indices}
+	}
+
+	// allPositions[i] holds the positions of queryTokens[i] in the current
+	// candidate document. Allocated once and overwritten for each candidate.
+	allPositions := make([][]uint32, len(queryTokens))
+
+	iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, candidateTerm)
+	if err != nil {
+		return nil, fmt.Errorf("full-text lookup failed: %w", err)
+	}
+	surviving := make([]RowID, 0, docFreqByTerm[candidateTerm])
+
+	for {
+		block, ok, err := iter.NextBlock(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("full-text lookup failed: %w", err)
+		}
+		if !ok {
+			break
+		}
+		mode, decoded, err := decodeInvertedPostingList(block.Payload)
+		if err != nil {
+			return nil, fmt.Errorf("full-text decode failed: %w", err)
+		}
+		if mode != invertedPostingModePositions {
+			return nil, fmt.Errorf("full-text index %s uses posting mode %d", scan.IndexName, mode)
+		}
+		for _, candidatePosting := range decoded {
+			rowID := candidatePosting.RowID
+			matches := true
+			allPositions[candidateIdx] = candidatePosting.Positions
+			for i := range queryTokens {
+				if i == candidateIdx {
+					continue
+				}
+				termPostings := postingsByTerm[queryTokens[i]]
+				idx := invertedPostingBinarySearch(termPostings, rowID)
+				if idx < 0 {
+					matches = false
+					break
+				}
+				allPositions[i] = termPostings[idx].Positions
+			}
+			if !matches {
+				continue
+			}
+			for _, pm := range phraseMappings {
+				if !textSearchPhraseMatchesSorted(allPositions, pm.indices) {
+					matches = false
+					break
+				}
+			}
+			if matches {
+				surviving = append(surviving, rowID)
+			}
+		}
+	}
+	return surviving, nil
+}
+
+func rarestFullTextTokenIndex(queryTokens []string, docFreqByTerm map[string]uint32) int {
+	bestIdx := 0
+	bestFreq := docFreqByTerm[queryTokens[0]]
+	for i := 1; i < len(queryTokens); i++ {
+		freq := docFreqByTerm[queryTokens[i]]
+		if freq < bestFreq || (freq == bestFreq && queryTokens[i] < queryTokens[bestIdx]) {
+			bestIdx = i
+			bestFreq = freq
+		}
+	}
+	return bestIdx
+}
+
+func loadFullTextPostingsForTerm(
+	ctx context.Context,
+	secondaryIndex SecondaryIndex,
+	indexName string,
+	term string,
+	docFreq uint32,
+) ([]invertedPosting, error) {
+	iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
+	if err != nil {
+		return nil, fmt.Errorf("full-text lookup failed: %w", err)
+	}
+
+	postings := make([]invertedPosting, 0, docFreq)
+	for {
+		block, ok, err := iter.NextBlock(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("full-text lookup failed: %w", err)
+		}
+		if !ok {
+			break
+		}
+		mode, decoded, err := decodeInvertedPostingList(block.Payload)
+		if err != nil {
+			return nil, fmt.Errorf("full-text decode failed: %w", err)
+		}
+		if mode != invertedPostingModePositions {
+			return nil, fmt.Errorf("full-text index %s uses posting mode %d", indexName, mode)
+		}
+		postings = append(postings, decoded...)
+	}
+	return postings, nil
 }
 
 func loadFullTextRowIDsForTerm(ctx context.Context, secondaryIndex SecondaryIndex, indexName, term string, docFreq uint32) ([]RowID, error) {
@@ -1710,46 +3792,6 @@ func loadFullTextRowIDsForTerm(ctx context.Context, secondaryIndex SecondaryInde
 	return rowIDs, nil
 }
 
-func (t *Table) emitFullTextRows(ctx context.Context, scan Scan, selectedFields []Field, rowIDs []RowID, out func(Row) error) error {
-	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
-	tableFilter := compileScanFilter(t.Columns, scan.Filters)
-	for _, rowID := range rowIDs {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		var row Row
-		if len(selectedFields) == 0 {
-			row = NewRowWithValues(t.Columns, nil)
-			row.Key = rowID
-		} else {
-			cursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("full-text seek: %w", err)
-			}
-			row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-			if err != nil {
-				return fmt.Errorf("full-text fetch: %w", err)
-			}
-		}
-
-		if tableFilter != nil {
-			ok, err := tableFilter(row)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				continue
-			}
-		}
-
-		if err := out(row); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (t *Table) fullTextSingleTermIndexScan(ctx context.Context, secondaryIndex SecondaryIndex, scan Scan, term string, selectedFields []Field, out func(Row) error) error {
 	iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
 	if err != nil {
@@ -1758,6 +3800,7 @@ func (t *Table) fullTextSingleTermIndexScan(ctx context.Context, secondaryIndex 
 
 	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
 	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	nSelected := len(selectedFields)
 	var (
 		lastRowID RowID
 		haveLast  bool
@@ -1780,29 +3823,12 @@ func (t *Table) fullTextSingleTermIndexScan(ctx context.Context, secondaryIndex 
 				return err
 			}
 
-			var row Row
-			if len(selectedFields) == 0 {
-				row = NewRowWithValues(t.Columns, nil)
-				row.Key = rowID
-			} else {
-				cursor, err := t.Seek(ctx, rowID)
-				if err != nil {
-					return fmt.Errorf("full-text seek: %w", err)
-				}
-				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-				if err != nil {
-					return fmt.Errorf("full-text fetch: %w", err)
-				}
+			row, ok, err := t.rowIDScanRow(ctx, rowID, selectedMask, nSelected, tableFilter)
+			if err != nil {
+				return err
 			}
-
-			if tableFilter != nil {
-				ok, err := tableFilter(row)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return nil
-				}
+			if !ok {
+				return nil
 			}
 
 			return out(row)
@@ -1825,52 +3851,17 @@ func (t *Table) invertedIndexScan(ctx context.Context, scan Scan, selectedFields
 	if len(scan.IndexKeys) == 0 {
 		return nil
 	}
-
-	var surviving []RowID
-	for i, key := range scan.IndexKeys {
-		term, ok := key.(string)
+	if len(scan.IndexKeys) == 1 {
+		term, ok := scan.IndexKeys[0].(string)
 		if !ok {
-			continue
-		}
-		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
-		if err != nil {
-			return fmt.Errorf("inverted stats lookup failed: %w", err)
-		}
-		iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
-		if err != nil {
-			return fmt.Errorf("inverted lookup failed: %w", err)
-		}
-		rowIDs := make([]RowID, 0, stats.DocFreq)
-		for {
-			block, ok, err := iter.NextBlock(ctx)
-			if err != nil {
-				return fmt.Errorf("inverted lookup failed: %w", err)
-			}
-			if !ok {
-				break
-			}
-			mode, postings, err := decodeInvertedPostingList(block.Payload)
-			if err != nil {
-				return fmt.Errorf("inverted decode failed: %w", err)
-			}
-			if mode != invertedPostingModeRowIDs {
-				return fmt.Errorf("inverted index %s uses posting mode %d", scan.IndexName, mode)
-			}
-			for _, posting := range postings {
-				rowIDs = append(rowIDs, posting.RowID)
-			}
-		}
-		if len(rowIDs) == 0 {
 			return nil
 		}
-		if i == 0 {
-			surviving = rowIDs
-			continue
-		}
-		surviving = intersectTwoSortedSets(surviving, rowIDs)
-		if len(surviving) == 0 {
-			return nil
-		}
+		return t.singleTermInvertedIndexScan(ctx, secondaryIndex, scan, term, selectedFields, out)
+	}
+
+	surviving, err := t.collectInvertedScanRowIDs(ctx, scan)
+	if err != nil {
+		return err
 	}
 	if len(surviving) == 0 {
 		return nil
@@ -1878,34 +3869,18 @@ func (t *Table) invertedIndexScan(ctx context.Context, scan Scan, selectedFields
 
 	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
 	tableFilter := compileInvertedScanFilter(t.Columns, scan.Filters)
+	nSelected := len(selectedFields)
 	for _, rowID := range surviving {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		var row Row
-		if len(selectedFields) == 0 {
-			row = NewRowWithValues(t.Columns, nil)
-			row.Key = rowID
-		} else {
-			cursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("inverted seek: %w", err)
-			}
-			row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-			if err != nil {
-				return fmt.Errorf("inverted fetch: %w", err)
-			}
+		row, ok, err := t.rowIDScanRow(ctx, rowID, selectedMask, nSelected, tableFilter)
+		if err != nil {
+			return err
 		}
-
-		if tableFilter != nil {
-			ok, err := tableFilter(row)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				continue
-			}
+		if !ok {
+			continue
 		}
 
 		if err := out(row); err != nil {
@@ -1913,6 +3888,125 @@ func (t *Table) invertedIndexScan(ctx context.Context, scan Scan, selectedFields
 		}
 	}
 	return nil
+}
+
+func (t *Table) singleTermInvertedIndexScan(
+	ctx context.Context,
+	secondaryIndex SecondaryIndex,
+	scan Scan,
+	term string,
+	selectedFields []Field,
+	out func(Row) error,
+) error {
+	iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
+	if err != nil {
+		return fmt.Errorf("inverted lookup failed: %w", err)
+	}
+
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	tableFilter := compileInvertedScanFilter(t.Columns, scan.Filters)
+	nSelected := len(selectedFields)
+	for {
+		block, ok, err := iter.NextBlock(ctx)
+		if err != nil {
+			return fmt.Errorf("inverted lookup failed: %w", err)
+		}
+		if !ok {
+			break
+		}
+		mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
+			row, ok, err := t.rowIDScanRow(ctx, rowID, selectedMask, nSelected, tableFilter)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return nil
+			}
+
+			return out(row)
+		})
+		if err != nil {
+			return err
+		}
+		if mode != invertedPostingModeRowIDs {
+			return fmt.Errorf("inverted index %s uses posting mode %d", scan.IndexName, mode)
+		}
+	}
+	return nil
+}
+
+func (t *Table) collectInvertedScanRowIDs(ctx context.Context, scan Scan) ([]RowID, error) {
+	secondaryIndex, ok := t.SecondaryIndexes[scan.IndexName]
+	if !ok || secondaryIndex.Method != IndexMethodInverted || secondaryIndex.InvertedIndex == nil {
+		return nil, fmt.Errorf("no index found for inverted scan: %s", scan.IndexName)
+	}
+	if len(scan.IndexKeys) == 0 {
+		return nil, nil
+	}
+	terms, err := t.invertedScanTermsByDocFreq(ctx, secondaryIndex, scan)
+	if err != nil {
+		return nil, err
+	}
+	if len(terms) == 0 {
+		return nil, nil
+	}
+
+	var surviving []RowID
+	for i, termStats := range terms {
+		rowIDs, err := loadInvertedRowIDsForTerm(ctx, secondaryIndex, scan.IndexName, termStats.term, termStats.docFreq)
+		if err != nil {
+			return nil, err
+		}
+		if len(rowIDs) == 0 {
+			return nil, nil
+		}
+		if i == 0 {
+			surviving = rowIDs
+			continue
+		}
+		surviving = intersectTwoSortedSets(surviving, rowIDs)
+		if len(surviving) == 0 {
+			return nil, nil
+		}
+	}
+	return surviving, nil
+}
+
+type invertedScanTermStats struct {
+	term    string
+	docFreq uint32
+}
+
+func (t *Table) invertedScanTermsByDocFreq(ctx context.Context, secondaryIndex SecondaryIndex, scan Scan) ([]invertedScanTermStats, error) {
+	terms := make([]invertedScanTermStats, 0, len(scan.IndexKeys))
+	for _, key := range scan.IndexKeys {
+		term, ok := key.(string)
+		if !ok {
+			continue
+		}
+		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
+		if err != nil {
+			return nil, fmt.Errorf("inverted stats lookup failed: %w", err)
+		}
+		if stats.DocFreq == 0 {
+			return nil, nil
+		}
+		terms = append(terms, invertedScanTermStats{term: term, docFreq: stats.DocFreq})
+	}
+	slices.SortFunc(terms, func(a, b invertedScanTermStats) int {
+		if a.docFreq < b.docFreq {
+			return -1
+		}
+		if a.docFreq > b.docFreq {
+			return 1
+		}
+		return strings.Compare(a.term, b.term)
+	})
+	return terms, nil
 }
 
 func (t *Table) tryCountFromExactInvertedIndex(ctx context.Context, plan QueryPlan) (StatementResult, bool, error) {
@@ -1930,33 +4024,40 @@ func (t *Table) tryCountFromExactInvertedIndex(ctx context.Context, plan QueryPl
 	return countResult(count), true, nil
 }
 
-// tryCountFromFullTextIndex is a fast-count shortcut for single-term full-text
-// COUNT(*) queries with no additional post-scan filters. It reads DocFreq
-// directly from the index entry (one B-tree lookup) instead of iterating the
-// entire postings list.
+// tryCountFromFullTextIndex is a count shortcut for full-text COUNT(*) queries
+// with no additional post-scan filters. Single-term queries read DocFreq
+// directly; multi-term and phrase queries count matching RowIDs without
+// fetching or materialising table rows.
 func (t *Table) tryCountFromFullTextIndex(ctx context.Context, plan QueryPlan) (StatementResult, bool, error) {
 	if len(plan.Scans) != 1 || plan.Scans[0].Type != ScanTypeFullText {
 		return StatementResult{}, false, nil
 	}
 	scan := plan.Scans[0]
-	q := scan.FullTextQuery
-	if q == nil || len(q.Terms) != 1 || len(q.Phrases) != 0 {
-		// Multi-term AND needs intersection; phrases need position checks.
-		return StatementResult{}, false, nil
-	}
 	if len(scan.Filters) > 0 {
 		// Additional WHERE predicates require row-level evaluation.
 		return StatementResult{}, false, nil
 	}
-	secondaryIndex, ok := t.SecondaryIndexes[scan.IndexName]
-	if !ok || secondaryIndex.Method != IndexMethodFullText || secondaryIndex.InvertedIndex == nil {
-		return StatementResult{}, false, nil
-	}
-	stats, err := secondaryIndex.InvertedIndex.Stats(ctx, q.Terms[0])
+
+	secondaryIndex, query, queryTokens, err := t.fullTextScanState(scan)
 	if err != nil {
 		return StatementResult{}, false, err
 	}
-	return countResult(int64(stats.DocFreq)), true, nil
+	if len(queryTokens) == 0 {
+		return countResult(0), true, nil
+	}
+	if query != nil && len(queryTokens) == 1 && len(query.Phrases) == 0 {
+		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, queryTokens[0])
+		if err != nil {
+			return StatementResult{}, false, err
+		}
+		return countResult(int64(stats.DocFreq)), true, nil
+	}
+
+	rowIDs, err := t.collectFullTextScanRowIDs(ctx, secondaryIndex, scan, query, queryTokens)
+	if err != nil {
+		return StatementResult{}, false, err
+	}
+	return countResult(int64(len(rowIDs))), true, nil
 }
 
 func jsonInvertedScanFilterIsExact(filters OneOrMore) bool {
@@ -1982,18 +4083,28 @@ func (t *Table) countInvertedIndexScan(ctx context.Context, scan Scan) (int64, e
 	if len(scan.IndexKeys) == 0 {
 		return 0, nil
 	}
-
-	var surviving []RowID
-	for i, key := range scan.IndexKeys {
-		term, ok := key.(string)
+	if len(scan.IndexKeys) == 1 {
+		term, ok := scan.IndexKeys[0].(string)
 		if !ok {
-			continue
+			return 0, nil
 		}
 		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
 		if err != nil {
 			return 0, fmt.Errorf("inverted stats lookup failed: %w", err)
 		}
-		rowIDs, err := loadInvertedRowIDsForTerm(ctx, secondaryIndex, scan.IndexName, term, stats.DocFreq)
+		return int64(stats.DocFreq), nil
+	}
+	terms, err := t.invertedScanTermsByDocFreq(ctx, secondaryIndex, scan)
+	if err != nil {
+		return 0, err
+	}
+	if len(terms) == 0 {
+		return 0, nil
+	}
+
+	var surviving []RowID
+	for i, termStats := range terms {
+		rowIDs, err := loadInvertedRowIDsForTerm(ctx, secondaryIndex, scan.IndexName, termStats.term, termStats.docFreq)
 		if err != nil {
 			return 0, err
 		}
@@ -2064,28 +4175,15 @@ func (t *Table) indexEndpointScan(ctx context.Context, scan Scan, selectedFields
 		return fmt.Errorf("no index found for endpoint scan: %s", scan.IndexName)
 	}
 	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	nSelected := len(selectedFields)
 
 	err := idx.ScanAll(ctx, reverse, func(key any, rowID RowID) error {
-		var row Row
-
-		if scan.CoveringIndex {
-			// Index-only scan: build row directly from key without touching the table page.
-			row = rowFromIndexKey(key, scan.IndexColumns, rowID)
-		} else {
-			cursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("find row failed: %w", err)
-			}
-
-			if len(selectedFields) == 0 {
-				row = NewRowWithValues(t.Columns, nil)
-				row.Key = rowID
-			} else {
-				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-				if err != nil {
-					return fmt.Errorf("fetch row failed: %w", err)
-				}
-			}
+		row, ok, err := t.indexedScanRow(
+			ctx, key, rowID, scan.CoveringIndex, scan.IndexColumns,
+			selectedMask, nSelected, nil, nil,
+		)
+		if err != nil || !ok {
+			return err
 		}
 
 		if err := ctx.Err(); err != nil {
@@ -2203,30 +4301,57 @@ func buildGroupKey(buf []byte, row Row, colIndices []int) []byte {
 			buf = append(buf, "null"...)
 			continue
 		}
-		switch val := v.Value.(type) {
-		case TextPointer:
-			buf = append(buf, 't')
-			buf = strconv.AppendInt(buf, int64(val.Length), 10)
-			buf = append(buf, ':')
-			buf = append(buf, val.Data...)
-		case bool:
-			buf = append(buf, "b:"...)
-			buf = strconv.AppendBool(buf, val)
-		case int64:
-			buf = append(buf, "i64:"...)
-			buf = strconv.AppendInt(buf, val, 10)
-		case int32:
-			buf = append(buf, "i32:"...)
-			buf = strconv.AppendInt(buf, int64(val), 10)
-		case float64:
-			buf = append(buf, "f64:"...)
-			buf = strconv.AppendFloat(buf, val, 'g', -1, 64)
-		case float32:
-			buf = append(buf, "f32:"...)
-			buf = strconv.AppendFloat(buf, float64(val), 'g', -1, 32)
-		default:
-			buf = fmt.Appendf(buf, "?:%v", val)
+		buf = appendGroupKeyValue(buf, v)
+	}
+	return buf
+}
+
+func buildGroupKeyFromRowView(buf []byte, view RowView, colIndices []int) ([]byte, error) {
+	for i, colIdx := range colIndices {
+		if i > 0 {
+			buf = append(buf, '\x1f')
 		}
+		if colIdx < 0 || colIdx >= len(view.Columns()) {
+			buf = append(buf, "null"...)
+			continue
+		}
+		value, err := view.ValueAt(colIdx)
+		if err != nil {
+			return nil, err
+		}
+		if !value.Valid {
+			buf = append(buf, "null"...)
+			continue
+		}
+		buf = appendGroupKeyValue(buf, value)
+	}
+	return buf, nil
+}
+
+func appendGroupKeyValue(buf []byte, value OptionalValue) []byte {
+	switch val := value.Value.(type) {
+	case TextPointer:
+		buf = append(buf, 't')
+		buf = strconv.AppendInt(buf, int64(val.Length), 10)
+		buf = append(buf, ':')
+		buf = append(buf, val.Data...)
+	case bool:
+		buf = append(buf, "b:"...)
+		buf = strconv.AppendBool(buf, val)
+	case int64:
+		buf = append(buf, "i64:"...)
+		buf = strconv.AppendInt(buf, val, 10)
+	case int32:
+		buf = append(buf, "i32:"...)
+		buf = strconv.AppendInt(buf, int64(val), 10)
+	case float64:
+		buf = append(buf, "f64:"...)
+		buf = strconv.AppendFloat(buf, val, 'g', -1, 64)
+	case float32:
+		buf = append(buf, "f32:"...)
+		buf = strconv.AppendFloat(buf, float64(val), 'g', -1, 32)
+	default:
+		buf = fmt.Appendf(buf, "?:%v", val)
 	}
 	return buf
 }
@@ -2340,11 +4465,28 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 			return err
 		}
 
-		if !twoPhase {
-			// ── Single-phase path (original behaviour) ────────────────────────
-			row, err := cursor.fetchRowWithMask(ctx, true, fullMask)
+		// Re-read page when the cursor crossed a page boundary.
+		if page.Index != cursor.PageIdx {
+			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
 			if err != nil {
-				return err
+				return fmt.Errorf("sequential scan: %w", err)
+			}
+		}
+
+		if cursor.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
+			return fmt.Errorf("cell index %d out of bounds, max %d", cursor.CellIdx, page.LeafNode.Header.Cells-1)
+		}
+
+		// Snapshot the current cell before advancing the cursor so every path
+		// decodes from the same cell while matching fetchRowWithMask advancement.
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+		advanceLeafCursor(cursor, page)
+		view := NewRowView(t.Columns, cell)
+
+		if !twoPhase {
+			row, err := view.MaterializeWithOverflow(ctx, t.pager, fullMask)
+			if err != nil {
+				return fmt.Errorf("sequential scan materialize row: %w", err)
 			}
 			if tableFilter != nil {
 				ok, err := tableFilter(row)
@@ -2361,33 +4503,8 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 			continue
 		}
 
-		// ── Two-phase path ────────────────────────────────────────────────────
-		// Re-read page when the cursor crossed a page boundary.
-		if page.Index != cursor.PageIdx {
-			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
-			if err != nil {
-				return fmt.Errorf("sequential scan: %w", err)
-			}
-		}
-
-		// Snapshot the current cell before advancing the cursor so phase 2
-		// can unmarshal from the same cell without a second ReadPage call.
-		cell := page.LeafNode.Cells[cursor.CellIdx]
-
-		// Advance cursor (mirrors fetchRowWithMask advance logic).
-		switch {
-		case cursor.CellIdx < page.LeafNode.Header.Cells-1:
-			cursor.CellIdx += 1
-		case page.LeafNode.Header.NextLeaf == 0:
-			cursor.EndOfTable = true
-		default:
-			cursor.PageIdx = page.LeafNode.Header.NextLeaf
-			cursor.CellIdx = 0
-		}
-
 		// Phase 1: decode only the columns needed to evaluate the predicate.
-		filterRow := t.newRow()
-		filterRow, err = filterRow.UnmarshalWithMask(cell, filterMask)
+		filterRow, err := view.Materialize(filterMask)
 		if err != nil {
 			return err
 		}
@@ -2401,12 +4518,7 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 		}
 
 		// Phase 2: decode all selected columns (cell data is still valid in cache).
-		row := t.newRow()
-		row, err = row.UnmarshalWithMask(cell, fullMask)
-		if err != nil {
-			return err
-		}
-		row, err = row.readOverflowTexts(ctx, t.pager)
+		row, err := view.MaterializeWithOverflow(ctx, t.pager, fullMask)
 		if err != nil {
 			return fmt.Errorf("sequential scan read overflow: %w", err)
 		}
@@ -2420,11 +4532,12 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 }
 
 // countSequentialScanZeroAlloc counts rows that match the scan filter without
-// collecting them. It reuses a single []OptionalValue buffer across all rows,
-// eliminating the per-row heap allocation in UnmarshalWithMask. Virtual tables
-// and parallel scans fall back to the general sequentialScan path.
+// collecting them. Simple predicates use RowView so count scans can evaluate
+// filters directly over cell bytes; predicates that still need Row evaluation
+// materialise from RowView at the predicate boundary. Virtual tables fall back to
+// the general sequentialScan path because their rows are already materialised.
 func (t *Table) countSequentialScanZeroAlloc(ctx context.Context, scan Scan, selectedFields []Field) (StatementResult, error) {
-	if t.virtualRows != nil || t.parallelScan {
+	if t.virtualRows != nil {
 		var count int64
 		err := t.sequentialScan(ctx, scan, selectedFields, func(Row) error {
 			count += 1
@@ -2435,6 +4548,9 @@ func (t *Table) countSequentialScanZeroAlloc(ctx context.Context, scan Scan, sel
 		}
 		return countResult(count), nil
 	}
+	if rowViewFilterSupports(t.Columns, scan.Filters) {
+		return t.countSequentialScanRowView(ctx, scan)
+	}
 
 	cursor, err := t.SeekFirst(ctx)
 	if err != nil {
@@ -2443,13 +4559,6 @@ func (t *Table) countSequentialScanZeroAlloc(ctx context.Context, scan Scan, sel
 
 	fullMask := selectedColumnsMask(t.Columns, selectedFields)
 	tableFilter := compileScanFilter(t.Columns, scan.Filters)
-
-	// Pre-allocate a single reusable values buffer. Safe because count(*) never
-	// retains a row after the predicate check — the buffer is overwritten each row.
-	var reuseValues []OptionalValue
-	if len(fullMask) > 0 {
-		reuseValues = make([]OptionalValue, len(t.Columns))
-	}
 
 	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
 	if err != nil {
@@ -2471,6 +4580,121 @@ func (t *Table) countSequentialScanZeroAlloc(ctx context.Context, scan Scan, sel
 		}
 
 		cell := page.LeafNode.Cells[cursor.CellIdx]
+		advanceLeafCursor(cursor, page)
+
+		if tableFilter != nil {
+			row, err := NewRowView(t.Columns, cell).MaterializeWithOverflow(ctx, t.pager, fullMask)
+			if err != nil {
+				return StatementResult{}, err
+			}
+			ok, err := tableFilter(row)
+			if err != nil {
+				return StatementResult{}, err
+			}
+			if !ok {
+				continue
+			}
+		}
+		// No filter or filter passed: count the row without touching row data.
+		count += 1
+	}
+	return countResult(count), nil
+}
+
+func (t *Table) tryCountFromIndexScan(ctx context.Context, plan QueryPlan) (StatementResult, bool, error) {
+	if len(plan.Scans) != 1 {
+		return StatementResult{}, false, nil
+	}
+	scan := plan.Scans[0]
+	if len(scan.Filters) > 0 {
+		return StatementResult{}, false, nil
+	}
+	switch scan.Type {
+	case ScanTypeIndexAll, ScanTypeIndexRange, ScanTypeIndexPoint:
+	default:
+		return StatementResult{}, false, nil
+	}
+
+	idx, ok := t.IndexByName(scan.IndexName)
+	if !ok {
+		return StatementResult{}, true, fmt.Errorf("no index found for count scan: %s", scan.IndexName)
+	}
+
+	var count int64
+	countRowID := func(RowID) error {
+		count += 1
+		return ctx.Err()
+	}
+	countIndexEntry := func(_ any, rowID RowID) error {
+		return countRowID(rowID)
+	}
+
+	switch scan.Type {
+	case ScanTypeIndexAll:
+		if err := idx.ScanAll(ctx, false, countIndexEntry); err != nil {
+			return StatementResult{}, true, err
+		}
+	case ScanTypeIndexRange:
+		if err := idx.ScanRange(ctx, scan.RangeCondition, false, countIndexEntry); err != nil {
+			return StatementResult{}, true, err
+		}
+	case ScanTypeIndexPoint:
+		for _, indexValue := range scan.IndexKeys {
+			err := idx.VisitRowIDs(ctx, indexValue, countRowID)
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return StatementResult{}, true, fmt.Errorf("index lookup failed: %w", err)
+			}
+		}
+	}
+
+	return countResult(count), true, nil
+}
+
+func (t *Table) countSequentialScanRowView(ctx context.Context, scan Scan) (StatementResult, error) {
+	tableFilter := compileRowViewFilterForColumns(t.Columns, t.pager, scan.Filters)
+	if t.parallelScan {
+		iterFactory, err := t.parallelSequentialRowViewIteratorFactory(ctx, tableFilter, 0, 0, false, false)
+		if err != nil {
+			return StatementResult{}, err
+		}
+		iter := iterFactory()
+		var count int64
+		for iter.Next(ctx) {
+			count += 1
+		}
+		if err := iter.Err(); err != nil {
+			return StatementResult{}, err
+		}
+		return countResult(count), nil
+	}
+
+	cursor, err := t.SeekFirst(ctx)
+	if err != nil {
+		return StatementResult{}, err
+	}
+	page, err := t.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return StatementResult{}, fmt.Errorf("count row view sequential scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	var count int64
+	for !cursor.EndOfTable {
+		if err := ctx.Err(); err != nil {
+			return StatementResult{}, err
+		}
+
+		if page.Index != cursor.PageIdx {
+			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
+			if err != nil {
+				return StatementResult{}, fmt.Errorf("count row view sequential scan: %w", err)
+			}
+		}
+
+		cell := page.LeafNode.Cells[cursor.CellIdx]
 
 		switch {
 		case cursor.CellIdx < page.LeafNode.Header.Cells-1:
@@ -2483,14 +4707,7 @@ func (t *Table) countSequentialScanZeroAlloc(ctx context.Context, scan Scan, sel
 		}
 
 		if tableFilter != nil {
-			// Decode into reusable buffer — safe because count never retains the row.
-			row := t.newRow()
-			row, err = row.unmarshalWithMaskInto(cell, fullMask, reuseValues)
-			if err != nil {
-				return StatementResult{}, err
-			}
-			row.Key = cell.Key
-			ok, err := tableFilter(row)
+			ok, err := tableFilter(ctx, NewRowView(t.Columns, cell))
 			if err != nil {
 				return StatementResult{}, err
 			}
@@ -2498,7 +4715,6 @@ func (t *Table) countSequentialScanZeroAlloc(ctx context.Context, scan Scan, sel
 				continue
 			}
 		}
-		// No filter or filter passed: count the row without touching row data.
 		count += 1
 	}
 	return countResult(count), nil
@@ -2590,6 +4806,30 @@ func compileInvertedScanFilter(columns []Column, filters OneOrMore) func(Row) (b
 	}
 }
 
+func compileInvertedRowViewFilter(columns []Column, pager TxPager, filters OneOrMore) (func(context.Context, RowView) (bool, error), bool) {
+	jsonFilter, remainingFilters, ok := compileJSONContainsRowViewRecheck(columns, pager, filters)
+	if !ok {
+		if !rowViewFilterSupports(columns, filters) {
+			return nil, false
+		}
+		return compileRowViewFilterForColumns(columns, pager, filters), true
+	}
+	if !rowViewFilterSupports(columns, remainingFilters) {
+		return nil, false
+	}
+	remainingFilter := compileRowViewFilterForColumns(columns, pager, remainingFilters)
+	return func(ctx context.Context, view RowView) (bool, error) {
+		ok, err := jsonFilter(ctx, view)
+		if err != nil || !ok {
+			return ok, err
+		}
+		if remainingFilter == nil {
+			return true, nil
+		}
+		return remainingFilter(ctx, view)
+	}, true
+}
+
 func compileJSONContainsRecheck(columns []Column, filters OneOrMore) (func(Row) (bool, error), OneOrMore, bool) {
 	if len(filters) != 1 {
 		return nil, nil, false
@@ -2630,6 +4870,59 @@ func compileJSONContainsRecheck(columns []Column, filters OneOrMore) (func(Row) 
 			value := row.Values[columnIdx]
 			if !value.Valid {
 				return false, nil
+			}
+			doc, ok := toStringVal(value.Value)
+			if !ok {
+				return false, fmt.Errorf("JSON_CONTAINS: first argument must be a string")
+			}
+			return jsonContainsDecodedQuery(doc, queryValue)
+		}, remainingFilters, true
+	}
+
+	return nil, nil, false
+}
+
+func compileJSONContainsRowViewRecheck(
+	columns []Column,
+	pager TxPager,
+	filters OneOrMore,
+) (func(context.Context, RowView) (bool, error), OneOrMore, bool) {
+	if len(filters) != 1 {
+		return nil, nil, false
+	}
+	columnIndexes := make(map[string]int, len(columns))
+	for i := range columns {
+		columnIndexes[columns[i].Name] = i
+	}
+
+	for condIdx, cond := range filters[0] {
+		columnName, query, ok := jsonContainsLiteralCondition(cond)
+		if !ok {
+			continue
+		}
+		columnIdx, ok := columnIndexes[columnName]
+		if !ok {
+			return nil, nil, false
+		}
+		queryValue, err := decodeJSONForInvertedIndex(query)
+		if err != nil {
+			return nil, nil, false
+		}
+		exactTerms := jsonInvertedQueryTermsAreExact(queryValue)
+		remaining := make(Conditions, 0, len(filters[0])-1)
+		remaining = append(remaining, filters[0][:condIdx]...)
+		remaining = append(remaining, filters[0][condIdx+1:]...)
+		var remainingFilters OneOrMore
+		if len(remaining) > 0 {
+			remainingFilters = OneOrMore{remaining}
+		}
+		return func(ctx context.Context, view RowView) (bool, error) {
+			if exactTerms {
+				return true, nil
+			}
+			value, err := view.ValueAtWithOverflow(ctx, pager, columnIdx)
+			if err != nil || !value.Valid {
+				return false, err
 			}
 			doc, ok := toStringVal(value.Value)
 			if !ok {
@@ -2690,19 +4983,10 @@ func (t *Table) virtualSequentialScan(ctx context.Context, scan Scan, out func(R
 }
 
 // collectRowIDsFromScan runs a sub-scan and collects all RowIDs it produces without
-// fetching table rows.  Supported sub-scan types: ScanTypeIndexPoint and ScanTypeIndexRange.
+// fetching table rows.
 func (t *Table) collectRowIDsFromScan(ctx context.Context, scan Scan) ([]RowID, error) {
-	// Intersect: recursively collect and intersect sub-scan RowID sets.
-	if scan.Type == ScanTypeIndexIntersect {
-		sets := make([][]RowID, 0, len(scan.SubScans))
-		for _, sub := range scan.SubScans {
-			ids, err := t.collectRowIDsFromScan(ctx, sub)
-			if err != nil {
-				return nil, err
-			}
-			sets = append(sets, ids)
-		}
-		return intersectSortedRowIDs(sets), nil
+	if scan.Type == ScanTypeIndexIntersect || scan.Type == ScanTypeIndexUnion {
+		return t.collectIndexSetScanRowIDs(ctx, scan)
 	}
 
 	idx, ok := t.IndexByName(scan.IndexName)
@@ -2711,16 +4995,18 @@ func (t *Table) collectRowIDsFromScan(ctx context.Context, scan Scan) ([]RowID, 
 	}
 	switch scan.Type {
 	case ScanTypeIndexPoint:
-		var rowIDs []RowID
+		rowIDs := make([]RowID, 0, len(scan.IndexKeys)*MaxInlineRowIDs)
 		for _, key := range scan.IndexKeys {
-			ids, err := idx.FindRowIDs(ctx, key)
+			err := idx.VisitRowIDs(ctx, key, func(rowID RowID) error {
+				rowIDs = append(rowIDs, rowID)
+				return ctx.Err()
+			})
 			if err != nil {
 				if errors.Is(err, ErrNotFound) {
 					continue
 				}
 				return nil, fmt.Errorf("intersect point lookup: %w", err)
 			}
-			rowIDs = append(rowIDs, ids...)
 		}
 		return rowIDs, nil
 	case ScanTypeIndexRange:
@@ -2735,6 +5021,44 @@ func (t *Table) collectRowIDsFromScan(ctx context.Context, scan Scan) ([]RowID, 
 	default:
 		return nil, fmt.Errorf("unsupported sub-scan type for intersect: %s", scan.Type)
 	}
+}
+
+func (t *Table) collectIndexSetScanRowIDs(ctx context.Context, scan Scan) ([]RowID, error) {
+	switch scan.Type {
+	case ScanTypeIndexIntersect, ScanTypeIndexUnion:
+	default:
+		return nil, fmt.Errorf("unsupported index set scan type: %s", scan.Type)
+	}
+	if len(scan.SubScans) == 0 {
+		return nil, nil
+	}
+
+	var result []RowID
+	for i, sub := range scan.SubScans {
+		ids, err := t.collectRowIDsFromScan(ctx, sub)
+		if err != nil {
+			return nil, err
+		}
+
+		if i == 0 {
+			sortRowIDs(ids)
+			result = ids
+			continue
+		}
+
+		sortRowIDs(ids)
+		switch scan.Type {
+		case ScanTypeIndexIntersect:
+			result = intersectTwoSortedSets(result, ids)
+			if len(result) == 0 {
+				return nil, nil
+			}
+		case ScanTypeIndexUnion:
+			result = unionTwoSortedSets(result, ids)
+		}
+	}
+
+	return result, nil
 }
 
 // intersectTwoSortedSets returns the sorted intersection of two already-sorted RowID slices.
@@ -2812,51 +5136,29 @@ func sortRowIDs(ids []RowID) {
 //  2. Intersect all sets in memory.
 //  3. Fetch the surviving rows and apply any remaining post-filters.
 func (t *Table) indexIntersectScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
-	sets := make([][]RowID, 0, len(scan.SubScans))
-	for _, sub := range scan.SubScans {
-		ids, err := t.collectRowIDsFromScan(ctx, sub)
-		if err != nil {
-			return err
-		}
-		sets = append(sets, ids)
+	surviving, err := t.collectIndexSetScanRowIDs(ctx, scan)
+	if err != nil {
+		return err
 	}
-
-	surviving := intersectSortedRowIDs(sets)
 	if len(surviving) == 0 {
 		return nil
 	}
 
 	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
 	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	nSelected := len(selectedFields)
 
 	for _, rowID := range surviving {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		var row Row
-		if len(selectedFields) == 0 {
-			row = NewRowWithValues(t.Columns, nil)
-			row.Key = rowID
-		} else {
-			cursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("intersect seek: %w", err)
-			}
-			row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-			if err != nil {
-				return fmt.Errorf("intersect fetch: %w", err)
-			}
+		row, ok, err := t.rowIDScanRow(ctx, rowID, selectedMask, nSelected, tableFilter)
+		if err != nil {
+			return err
 		}
-
-		if tableFilter != nil {
-			ok, err := tableFilter(row)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				continue
-			}
+		if !ok {
+			continue
 		}
 
 		if err := out(row); err != nil {
@@ -2918,22 +5220,17 @@ func unionSortedRowIDs(sets [][]RowID) []RowID {
 //  2. Union (deduplicate) all sets in memory.
 //  3. Fetch each surviving row once and re-check the full WHERE clause.
 func (t *Table) indexUnionScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
-	sets := make([][]RowID, 0, len(scan.SubScans))
-	for _, sub := range scan.SubScans {
-		ids, err := t.collectRowIDsFromScan(ctx, sub)
-		if err != nil {
-			return err
-		}
-		sets = append(sets, ids)
+	surviving, err := t.collectIndexSetScanRowIDs(ctx, scan)
+	if err != nil {
+		return err
 	}
-
-	surviving := unionSortedRowIDs(sets)
 	if len(surviving) == 0 {
 		return nil
 	}
 
 	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
 	tableFilter := compileScanFilter(t.Columns, scan.Filters)
+	nSelected := len(selectedFields)
 
 	var emitted int64
 	scanLimit := scan.ScanLimit
@@ -2942,29 +5239,12 @@ func (t *Table) indexUnionScan(ctx context.Context, scan Scan, selectedFields []
 			return err
 		}
 
-		var row Row
-		if len(selectedFields) == 0 {
-			row = NewRowWithValues(t.Columns, nil)
-			row.Key = rowID
-		} else {
-			cursor, err := t.Seek(ctx, rowID)
-			if err != nil {
-				return fmt.Errorf("union seek: %w", err)
-			}
-			row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-			if err != nil {
-				return fmt.Errorf("union fetch: %w", err)
-			}
+		row, ok, err := t.rowIDScanRow(ctx, rowID, selectedMask, nSelected, tableFilter)
+		if err != nil {
+			return err
 		}
-
-		if tableFilter != nil {
-			ok, err := tableFilter(row)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				continue
-			}
+		if !ok {
+			continue
 		}
 
 		if err := out(row); err != nil {

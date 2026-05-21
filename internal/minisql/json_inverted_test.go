@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -176,6 +177,85 @@ func TestJSONInvertedIndexHelpers(t *testing.T) {
 	assert.Contains(t, index.inserted, `kv:type:s:"view"`)
 }
 
+func TestTable_JSONInvertedIndexScanUsesRowViews(t *testing.T) {
+	pager, dbFile := initTest(t)
+	ctx := context.Background()
+	mockParser := new(MockParser)
+	database, err := NewDatabase(ctx, testLogger, dbFile.Name(), mockParser, pager, pager, nil)
+	require.NoError(t, err)
+
+	const tableName = "events"
+	columns := []Column{
+		{Kind: Int8, Size: 8, Name: "id"},
+		{Kind: Varchar, Size: MaxInlineVarchar, Name: "name"},
+		{Kind: JSON, Name: "payload"},
+	}
+	createStmt := Statement{
+		Kind:      CreateTable,
+		TableName: tableName,
+		Columns:   columns,
+	}
+	require.NoError(t, database.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		_, err := database.ExecuteStatement(ctx, createStmt)
+		return err
+	}))
+
+	require.NoError(t, database.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for _, row := range [][]OptionalValue{
+			{{Valid: true, Value: int64(1)}, {Valid: true, Value: NewTextPointer([]byte("click-web"))}, {Valid: true, Value: NewTextPointer([]byte(`{"type":"click","tags":["web"]}`))}},
+			{{Valid: true, Value: int64(2)}, {Valid: true, Value: NewTextPointer([]byte("view-web"))}, {Valid: true, Value: NewTextPointer([]byte(`{"type":"view","tags":["web"]}`))}},
+		} {
+			_, err := database.ExecuteStatement(ctx, Statement{
+				Kind:      Insert,
+				TableName: tableName,
+				Columns:   columns,
+				Fields:    fieldsFromColumns(columns...),
+				Inserts:   [][]OptionalValue{row},
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	indexStmt := Statement{
+		Kind:        CreateIndex,
+		TableName:   tableName,
+		IndexName:   "idx_events_payload",
+		Columns:     []Column{{Name: "payload"}},
+		IndexMethod: IndexMethodInverted,
+	}
+	mockParser.On("Parse", mock.Anything, createStmt.DDL()).Return([]Statement{createStmt}, nil).Once()
+	require.NoError(t, database.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		_, err := database.ExecuteStatement(ctx, indexStmt)
+		return err
+	}))
+
+	table, ok := database.GetTable(ctx, tableName)
+	require.True(t, ok)
+
+	require.NoError(t, database.txManager.ExecuteReadOnlyTransaction(ctx, func(ctx context.Context) error {
+		result, err := table.Select(ctx, Statement{
+			Kind:       Select,
+			TableName:  tableName,
+			Columns:    columns,
+			Fields:     []Field{{Name: "name"}},
+			Conditions: OneOrMore{{jsonContainsCondition("payload", `{"type":"click"}`)}},
+		})
+		if err != nil {
+			return err
+		}
+		assert.Len(t, result.RowViewFieldIndexes, 1)
+		rows := collectRows(ctx, result)
+		require.Len(t, rows, 1)
+		assert.Equal(t, "click-web", rows[0].Values[0].Value.(TextPointer).String())
+		return nil
+	}))
+
+	mockParser.AssertExpectations(t)
+}
+
 func TestJSONInvertedCountExactIndexScan(t *testing.T) {
 	t.Parallel()
 
@@ -202,6 +282,41 @@ func TestJSONInvertedCountExactIndexScan(t *testing.T) {
 		IndexName: "idx_payload_inv",
 		IndexKeys: []any{`k:type`, `kv:type:s:"click"`},
 		Filters:   OneOrMore{{jsonContainsCondition("payload", `{"type":"click"}`)}},
+	}}})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	require.True(t, result.Rows.Next(context.Background()))
+	countValue, ok := result.Rows.Row().GetValue("COUNT(*)")
+	require.True(t, ok)
+	assert.Equal(t, int64(2), countValue.Value)
+}
+
+func TestJSONInvertedCountExactSingleTermUsesStats(t *testing.T) {
+	t.Parallel()
+
+	payloadColumn := Column{Name: "payload", Kind: JSON}
+	index := &fakeFullTextInvertedIndex{
+		mode: invertedPostingModeRowIDs,
+		postings: map[string][]invertedPosting{
+			`kv:type:s:"click"`: {{RowID: 1}, {RowID: 3}},
+		},
+	}
+	table := NewTable(testLogger, nil, nil, "events", []Column{payloadColumn}, 0, nil, WithSecondaryIndex(SecondaryIndex{
+		IndexInfo: IndexInfo{
+			Name:    "idx_payload_inv",
+			Method:  IndexMethodInverted,
+			Columns: []Column{payloadColumn},
+		},
+		InvertedIndex: index,
+	}))
+
+	result, ok, err := table.tryCountFromExactInvertedIndex(context.Background(), QueryPlan{Scans: []Scan{{
+		TableName: "events",
+		Type:      ScanTypeInverted,
+		IndexName: "idx_payload_inv",
+		IndexKeys: []any{`kv:type:s:"click"`},
+		Filters:   OneOrMore{{jsonContainsCondition("payload", `"click"`)}},
 	}}})
 	require.NoError(t, err)
 	require.True(t, ok)

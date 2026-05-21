@@ -8,10 +8,85 @@ import (
 // Iterator is a pull-based row cursor returned as part of a StatementResult.
 // Call Next to advance, Row to read the current row, and Err after the loop.
 type Iterator struct {
-	err     error
-	rowFunc func(ctx context.Context) (Row, error)
-	nextRow Row
-	end     bool
+	err       error
+	rowFunc   func(ctx context.Context) (Row, error)
+	closeFunc func() error
+	nextRow   Row
+	end       bool
+}
+
+// RowViewIterator is a pull-based cursor over lazy RowView results.
+type RowViewIterator struct {
+	err       error
+	rowFunc   func(ctx context.Context) (RowView, error)
+	closeFunc func() error
+	nextView  RowView
+	end       bool
+}
+
+// NewRowViewIterator wraps a row-view-producing function into an iterator.
+func NewRowViewIterator(rowFunc func(ctx context.Context) (RowView, error)) RowViewIterator {
+	return RowViewIterator{rowFunc: rowFunc}
+}
+
+func newRowViewIteratorWithClose(rowFunc func(ctx context.Context) (RowView, error), closeFunc func() error) RowViewIterator {
+	return RowViewIterator{
+		rowFunc:   rowFunc,
+		closeFunc: closeFunc,
+	}
+}
+
+// NewSliceRowViewIterator returns an iterator that yields row views from rows.
+func NewSliceRowViewIterator(rows []RowView) RowViewIterator {
+	idx := 0
+	return NewRowViewIterator(func(ctx context.Context) (RowView, error) {
+		if idx >= len(rows) {
+			return RowView{}, ErrNoMoreRows
+		}
+		row := rows[idx]
+		idx += 1
+		return row, nil
+	})
+}
+
+// RowView returns the most-recently-fetched view.
+func (i *RowViewIterator) RowView() RowView {
+	return i.nextView
+}
+
+// Next advances the iterator to the next row view.
+func (i *RowViewIterator) Next(ctx context.Context) bool {
+	if i.err != nil {
+		return false
+	}
+	if i.end {
+		return false
+	}
+	row, err := i.rowFunc(ctx)
+	if err != nil {
+		if errors.Is(err, ErrNoMoreRows) {
+			i.end = true
+			return false
+		}
+		i.err = err
+		return false
+	}
+	i.nextView = row
+	return true
+}
+
+// Close marks the iterator as exhausted.
+func (i *RowViewIterator) Close() error {
+	i.end = true
+	if i.closeFunc != nil {
+		return i.closeFunc()
+	}
+	return nil
+}
+
+// Err returns the first non-ErrNoMoreRows error encountered by the iterator.
+func (i *RowViewIterator) Err() error {
+	return i.err
 }
 
 // NewIterator wraps a row-producing function into an Iterator. The function
@@ -20,6 +95,13 @@ type Iterator struct {
 func NewIterator(rowFunc func(ctx context.Context) (Row, error)) Iterator {
 	return Iterator{
 		rowFunc: rowFunc,
+	}
+}
+
+func newIteratorWithClose(rowFunc func(ctx context.Context) (Row, error), closeFunc func() error) Iterator {
+	return Iterator{
+		rowFunc:   rowFunc,
+		closeFunc: closeFunc,
 	}
 }
 
@@ -34,6 +116,46 @@ func NewSliceIterator(rows []Row) Iterator {
 		idx += 1
 		return row, nil
 	})
+}
+
+func materializeResultRows(ctx context.Context, result StatementResult) ([]Row, error) {
+	if result.rawRows != nil {
+		return result.rawRows, nil
+	}
+
+	if result.RowViews.rowFunc != nil {
+		defer func() {
+			_ = result.Rows.Close()
+		}()
+		defer func() {
+			_ = result.RowViews.Close()
+		}()
+
+		var rows []Row
+		for result.RowViews.Next(ctx) {
+			row, err := projectRowView(ctx, result.RowViewPager, result.RowViews.RowView(), result.RowViewFieldIndexes, result.Columns)
+			if err != nil {
+				return nil, err
+			}
+			rows = append(rows, row)
+		}
+		if err := result.RowViews.Err(); err != nil {
+			return nil, err
+		}
+		return rows, nil
+	}
+
+	defer func() {
+		_ = result.Rows.Close()
+	}()
+	var rows []Row
+	for result.Rows.Next(ctx) {
+		rows = append(rows, result.Rows.Row())
+	}
+	if err := result.Rows.Err(); err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 // NewSingleRowIterator returns an Iterator that yields exactly one row then signals end-of-stream.
@@ -80,6 +202,9 @@ func (i *Iterator) Next(ctx context.Context) bool {
 // Close marks the iterator as exhausted so subsequent Next calls return false.
 func (i *Iterator) Close() error {
 	i.end = true
+	if i.closeFunc != nil {
+		return i.closeFunc()
+	}
 	return nil
 }
 
@@ -98,9 +223,12 @@ func (i *Iterator) Err() error {
 // collection) can steal this slice directly instead of draining the iterator,
 // avoiding a second heap allocation of the same data.
 type StatementResult struct {
-	Rows         Iterator
-	rawRows      []Row   // non-nil when produced by selectStreamingDirect
-	Columns      []Column
-	RowsAffected int
-	LastInsertID int64
+	Rows                Iterator
+	RowViews            RowViewIterator
+	RowViewPager        TxPager
+	rawRows             []Row // non-nil when produced by selectStreamingDirect
+	Columns             []Column
+	RowViewFieldIndexes []int
+	RowsAffected        int
+	LastInsertID        int64
 }

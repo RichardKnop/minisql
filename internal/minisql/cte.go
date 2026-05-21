@@ -72,19 +72,9 @@ func (d *Database) executeCTESelect(ctx context.Context, stmt Statement) (Statem
 		if err != nil {
 			return StatementResult{}, fmt.Errorf("CTE %q: %w", cte.Name, err)
 		}
-		// Fast path: steal the pre-projected slice directly when the result was
-		// produced by selectStreamingDirect — avoids a second heap allocation of
-		// the same rows when draining the iterator.
-		var rows []Row
-		if result.rawRows != nil {
-			rows = result.rawRows
-		} else {
-			for result.Rows.Next(cteCtx) {
-				rows = append(rows, result.Rows.Row())
-			}
-			if err := result.Rows.Err(); err != nil {
-				return StatementResult{}, fmt.Errorf("CTE %q: reading rows: %w", cte.Name, err)
-			}
+		rows, err := materializeResultRows(cteCtx, result)
+		if err != nil {
+			return StatementResult{}, fmt.Errorf("CTE %q: reading rows: %w", cte.Name, err)
 		}
 		vt := newVirtualTable(d.logger, cte.Name, result.Columns, rows)
 		// Use the database's locked provider so JOINs inside the main query can
@@ -134,16 +124,9 @@ func (d *Database) executeCTESelect(ctx context.Context, stmt Statement) (Statem
 					if err != nil {
 						return StatementResult{}, fmt.Errorf("CTE %q (pushdown): %w", cte.Name, err)
 					}
-					var rows []Row
-					if result.rawRows != nil {
-						rows = result.rawRows
-					} else {
-						for result.Rows.Next(cteCtx) {
-							rows = append(rows, result.Rows.Row())
-						}
-						if err := result.Rows.Err(); err != nil {
-							return StatementResult{}, fmt.Errorf("CTE %q (pushdown): reading rows: %w", cte.Name, err)
-						}
+					rows, err := materializeResultRows(cteCtx, result)
+					if err != nil {
+						return StatementResult{}, fmt.Errorf("CTE %q (pushdown): reading rows: %w", cte.Name, err)
 					}
 					vt = newVirtualTable(d.logger, cte.Name, result.Columns, rows)
 					vt.provider = d.lockedProvider

@@ -118,6 +118,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 
 		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
+		assert.Len(t, result.RowViewFieldIndexes, len(table.Columns))
 
 		actual := collectRows(ctx, result)
 		assert.Len(t, actual, 1)
@@ -148,6 +149,7 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 
 		result, err := table.Select(ctx, stmt)
 		require.NoError(t, err)
+		assert.Len(t, result.RowViewFieldIndexes, len(table.Columns))
 
 		// We expect rows 5, 11, 12, and 33
 		expected := make([]Row, 0, len(ids))

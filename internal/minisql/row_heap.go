@@ -73,6 +73,10 @@ func (h *rowHeap) Pop() interface{} {
 
 // PushRow adds a row to the heap, maintaining max size
 func (h *rowHeap) PushRow(row Row) {
+	if h.maxSize <= 0 {
+		return
+	}
+
 	if len(h.rows) < h.maxSize {
 		// Heap not full yet, just add
 		heap.Push(h, row)

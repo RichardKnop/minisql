@@ -12,10 +12,21 @@ type parallelScanResult struct {
 	err error
 }
 
+type parallelRowViewScanResult struct {
+	view RowView
+	err  error
+}
+
 // drainParallelScanCh reads and discards all remaining values from ch until it is
 // closed.  Called after cancel() to let workers unblock their channel sends and
 // exit cleanly before the consumer returns.
 func drainParallelScanCh(ch <-chan parallelScanResult) {
+	for v := range ch {
+		_ = v
+	}
+}
+
+func drainParallelRowViewScanCh(ch <-chan parallelRowViewScanResult) {
 	for v := range ch {
 		_ = v
 	}
@@ -120,6 +131,140 @@ func (t *Table) parallelSequentialScan(ctx context.Context, scan Scan, selectedF
 	return nil
 }
 
+func (t *Table) parallelSequentialRowViewIteratorFactory(
+	ctx context.Context,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) (func() RowViewIterator, error) {
+	pages, err := t.leafPageList(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(pages) == 0 {
+		return func() RowViewIterator {
+			return NewRowViewIterator(func(context.Context) (RowView, error) {
+				return RowView{}, ErrNoMoreRows
+			})
+		}, nil
+	}
+
+	numWorkers := min(runtime.NumCPU(), len(pages))
+	pagesPerWorker := (len(pages) + numWorkers - 1) / numWorkers
+
+	return func() RowViewIterator {
+		iterCtx, cancel := context.WithCancel(ctx)
+		ch := make(chan parallelRowViewScanResult, numWorkers*16)
+
+		var wg sync.WaitGroup
+		for i := range numWorkers {
+			start := i * pagesPerWorker
+			end := min(start+pagesPerWorker, len(pages))
+			if start >= len(pages) {
+				break
+			}
+			wg.Add(1)
+			go func(workerPages []PageIndex) {
+				defer wg.Done()
+				t.parallelRowViewScanWorker(iterCtx, workerPages, tableFilter, ch)
+			}(pages[start:end])
+		}
+
+		go func() {
+			wg.Wait()
+			close(ch)
+		}()
+
+		iterRemaining := remaining
+		iterOffset := offset
+		return newRowViewIteratorWithClose(func(nextCtx context.Context) (RowView, error) {
+			if err := nextCtx.Err(); err != nil {
+				cancel()
+				drainParallelRowViewScanCh(ch)
+				return RowView{}, err
+			}
+			if hasLimit && iterRemaining == 0 {
+				cancel()
+				drainParallelRowViewScanCh(ch)
+				return RowView{}, ErrNoMoreRows
+			}
+
+			for result := range ch {
+				if result.err != nil {
+					cancel()
+					drainParallelRowViewScanCh(ch)
+					return RowView{}, result.err
+				}
+				if hasOffset && iterOffset > 0 {
+					iterOffset -= 1
+					continue
+				}
+				if hasLimit {
+					iterRemaining -= 1
+				}
+				return result.view, nil
+			}
+			cancel()
+			return RowView{}, ErrNoMoreRows
+		}, func() error {
+			cancel()
+			drainParallelRowViewScanCh(ch)
+			return nil
+		})
+	}, nil
+}
+
+func (t *Table) parallelRowViewScanWorker(
+	ctx context.Context,
+	pages []PageIndex,
+	tableFilter func(context.Context, RowView) (bool, error),
+	ch chan<- parallelRowViewScanResult,
+) {
+	send := func(r parallelRowViewScanResult) bool {
+		select {
+		case ch <- r:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+
+	for _, pageIdx := range pages {
+		if ctx.Err() != nil {
+			return
+		}
+
+		page, err := t.pager.ReadPage(ctx, pageIdx)
+		if err != nil {
+			send(parallelRowViewScanResult{err: fmt.Errorf("parallel row view scan worker: %w", err)})
+			return
+		}
+
+		for i := range page.LeafNode.Header.Cells {
+			if ctx.Err() != nil {
+				return
+			}
+
+			view := NewRowView(t.Columns, page.LeafNode.Cells[i])
+			if tableFilter != nil {
+				ok, err := tableFilter(ctx, view)
+				if err != nil {
+					send(parallelRowViewScanResult{err: err})
+					return
+				}
+				if !ok {
+					continue
+				}
+			}
+			if !send(parallelRowViewScanResult{view: view}) {
+				return
+			}
+		}
+	}
+}
+
 func (t *Table) parallelScanWorker(
 	ctx context.Context,
 	pages []PageIndex,
@@ -154,15 +299,14 @@ func (t *Table) parallelScanWorker(
 			}
 
 			cell := page.LeafNode.Cells[i]
+			view := NewRowView(t.Columns, cell)
 
 			if !twoPhase {
-				row := t.newRow()
-				row, err = row.UnmarshalWithMask(cell, fullMask)
+				row, err := view.Materialize(fullMask)
 				if err != nil {
 					send(parallelScanResult{err: err})
 					return
 				}
-				row.Key = cell.Key
 				if tableFilter != nil {
 					ok, err := tableFilter(row)
 					if err != nil {
@@ -185,8 +329,7 @@ func (t *Table) parallelScanWorker(
 			}
 
 			// Two-phase: decode only predicate columns first to skip non-matching rows cheaply.
-			filterRow := t.newRow()
-			filterRow, err = filterRow.UnmarshalWithMask(cell, filterMask)
+			filterRow, err := view.Materialize(filterMask)
 			if err != nil {
 				send(parallelScanResult{err: err})
 				return
@@ -200,14 +343,7 @@ func (t *Table) parallelScanWorker(
 				continue
 			}
 
-			row := t.newRow()
-			row, err = row.UnmarshalWithMask(cell, fullMask)
-			if err != nil {
-				send(parallelScanResult{err: err})
-				return
-			}
-			row.Key = cell.Key
-			row, err = row.readOverflowTexts(ctx, t.pager)
+			row, err := view.MaterializeWithOverflow(ctx, t.pager, fullMask)
 			if err != nil {
 				send(parallelScanResult{err: err})
 				return

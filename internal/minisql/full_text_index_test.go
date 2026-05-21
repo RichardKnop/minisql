@@ -87,6 +87,62 @@ func TestTable_FullTextIndexScanAndMaintenance(t *testing.T) {
 	assert.Equal(t, []string{"MiniSQL", "Storage"}, titles)
 	assert.Equal(t, []string{"MiniSQL"}, selectTitlesWithCondition(t, ctx, database, table, fullTextMatchCondition("body", `"database pages"`)))
 
+	require.NoError(t, database.txManager.ExecuteReadOnlyTransaction(ctx, func(ctx context.Context) error {
+		result, err := table.Select(ctx, Statement{
+			Kind:       Select,
+			TableName:  tableName,
+			Columns:    columns,
+			Fields:     []Field{{Name: "title"}},
+			Conditions: OneOrMore{{matchDatabasePages}},
+		})
+		if err != nil {
+			return err
+		}
+		assert.Len(t, result.RowViewFieldIndexes, 1)
+		rows := collectRows(ctx, result)
+		require.Len(t, rows, 2)
+		assert.Equal(t, "MiniSQL", rows[0].Values[0].Value.(TextPointer).String())
+		assert.Equal(t, "Storage", rows[1].Values[0].Value.(TextPointer).String())
+		return nil
+	}))
+
+	require.NoError(t, database.txManager.ExecuteReadOnlyTransaction(ctx, func(ctx context.Context) error {
+		result, err := table.Select(ctx, Statement{
+			Kind:       Select,
+			TableName:  tableName,
+			Columns:    columns,
+			Fields:     []Field{{Name: "title"}},
+			Conditions: OneOrMore{{fullTextMatchCondition("body", `"database pages"`)}},
+		})
+		if err != nil {
+			return err
+		}
+		assert.Len(t, result.RowViewFieldIndexes, 1)
+		rows := collectRows(ctx, result)
+		require.Len(t, rows, 1)
+		assert.Equal(t, "MiniSQL", rows[0].Values[0].Value.(TextPointer).String())
+		return nil
+	}))
+
+	require.NoError(t, database.txManager.ExecuteReadOnlyTransaction(ctx, func(ctx context.Context) error {
+		result, err := table.Select(ctx, Statement{
+			Kind:       Select,
+			TableName:  tableName,
+			Columns:    columns,
+			Fields:     []Field{{Name: "title"}},
+			Conditions: OneOrMore{{fullTextMatchCondition("body", "database")}},
+		})
+		if err != nil {
+			return err
+		}
+		assert.Len(t, result.RowViewFieldIndexes, 1)
+		rows := collectRows(ctx, result)
+		require.Len(t, rows, 2)
+		assert.Equal(t, "MiniSQL", rows[0].Values[0].Value.(TextPointer).String())
+		assert.Equal(t, "Storage", rows[1].Values[0].Value.(TextPointer).String())
+		return nil
+	}))
+
 	require.NoError(t, database.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		_, err := table.Update(ctx, Statement{
 			Kind:    Update,
@@ -285,6 +341,47 @@ func TestFullTextIndexScanMultiTermIntersectsRowIDs(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, []RowID{3, 7}, rowIDs)
+}
+
+func TestFullTextCountMultiTermIndexScanAvoidsRowFetch(t *testing.T) {
+	t.Parallel()
+
+	index := &fakeFullTextInvertedIndex{
+		postings: map[string][]invertedPosting{
+			"common": {
+				{RowID: 9, Positions: []uint32{1}},
+				{RowID: 3, Positions: []uint32{1}},
+				{RowID: 7, Positions: []uint32{1}},
+				{RowID: 11, Positions: []uint32{1}},
+			},
+			"cohort": {
+				{RowID: 7, Positions: []uint32{2}},
+				{RowID: 3, Positions: []uint32{2}},
+			},
+		},
+	}
+	table := NewTable(testLogger, nil, nil, "articles", []Column{{Name: "body", Kind: Text}}, 0, nil, WithSecondaryIndex(SecondaryIndex{
+		IndexInfo: IndexInfo{
+			Name:    "idx_body_fts",
+			Method:  IndexMethodFullText,
+			Columns: []Column{{Name: "body", Kind: Text}},
+		},
+		InvertedIndex: index,
+	}))
+
+	result, ok, err := table.tryCountFromFullTextIndex(context.Background(), QueryPlan{Scans: []Scan{{
+		Type:          ScanTypeFullText,
+		IndexName:     "idx_body_fts",
+		IndexKeys:     []any{"common", "cohort"},
+		FullTextQuery: &textSearchQuery{Terms: []string{"common", "cohort"}},
+	}}})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	require.True(t, result.Rows.Next(context.Background()))
+	countValue, ok := result.Rows.Row().GetValue("COUNT(*)")
+	require.True(t, ok)
+	assert.Equal(t, int64(2), countValue.Value)
 }
 
 func TestPlanQuery_FullTextIndexSkipsOverlongQueryToken(t *testing.T) {

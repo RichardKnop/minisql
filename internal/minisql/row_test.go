@@ -57,8 +57,8 @@ func TestRow_Marshal(t *testing.T) {
 		data, err := row.Marshal()
 		require.NoError(t, err)
 
-		actual := NewRow(testColumns)
-		actual, err = actual.Unmarshal(Cell{Value: data}, fieldsFromColumns(row.Columns...)...)
+		view := NewRowView(testColumns, Cell{Value: data})
+		actual, err := view.Materialize(selectedColumnsMask(testColumns, fieldsFromColumns(row.Columns...)))
 		require.NoError(t, err)
 
 		assert.Equal(t, row, actual)
@@ -72,8 +72,8 @@ func TestRow_Marshal(t *testing.T) {
 
 		selectedFields := fieldsFromColumns(testColumns[0:2]...)
 
-		partialRow := NewRow(testColumns)
-		partialRow, err = partialRow.Unmarshal(Cell{Value: data}, selectedFields...)
+		view := NewRowView(testColumns, Cell{Value: data})
+		partialRow, err := view.Materialize(selectedColumnsMask(testColumns, selectedFields))
 		require.NoError(t, err)
 
 		assert.Equal(t, row.Values[0], partialRow.Values[0])
@@ -83,29 +83,6 @@ func TestRow_Marshal(t *testing.T) {
 		assert.False(t, partialRow.Values[4].Valid)
 		assert.False(t, partialRow.Values[5].Valid)
 	})
-}
-
-func TestRow_UnmarshalWithMask(t *testing.T) {
-	t.Parallel()
-
-	row := gen.Row()
-	data, err := row.Marshal()
-	require.NoError(t, err)
-
-	mask := selectedColumnsMask(testColumns, []Field{
-		{Name: "id"},
-		{Name: "age"},
-	})
-	actual := NewRow(testColumns)
-	actual, err = actual.UnmarshalWithMask(Cell{Value: data}, mask)
-	require.NoError(t, err)
-
-	assert.Equal(t, row.Values[0], actual.Values[0]) // id
-	assert.False(t, actual.Values[1].Valid)          // email skipped
-	assert.Equal(t, row.Values[2], actual.Values[2]) // age
-	assert.False(t, actual.Values[3].Valid)
-	assert.False(t, actual.Values[4].Valid)
-	assert.False(t, actual.Values[5].Valid)
 }
 
 func TestRow_CheckOneOrMore(t *testing.T) {

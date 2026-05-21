@@ -26,11 +26,8 @@ func (d *Database) executeSelectFromDerivedTable(ctx context.Context, stmt State
 	}
 
 	// Materialise all rows from the inner result.
-	var innerRows []Row
-	for innerResult.Rows.Next(ctx) {
-		innerRows = append(innerRows, innerResult.Rows.Row())
-	}
-	if err := innerResult.Rows.Err(); err != nil {
+	innerRows, err := materializeResultRows(ctx, innerResult)
+	if err != nil {
 		return StatementResult{}, fmt.Errorf("derived table %q: reading rows: %w", stmt.FromSubqueryAlias, err)
 	}
 

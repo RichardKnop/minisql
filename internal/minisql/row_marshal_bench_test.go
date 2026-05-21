@@ -97,8 +97,7 @@ func BenchmarkRow_Unmarshal(b *testing.B) {
 	b.ReportAllocs()
 
 	for range b.N {
-		r := NewRow(columns)
-		_, err := r.Unmarshal(cell)
+		_, err := NewRowView(columns, cell).Materialize(selectedColumnsMask(columns, fieldsFromColumns(columns...)))
 		if err != nil {
 			b.Fatal(err)
 		}
