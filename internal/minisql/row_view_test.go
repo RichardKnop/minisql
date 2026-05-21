@@ -33,6 +33,33 @@ func TestRowView_ValueAt(t *testing.T) {
 	}
 }
 
+func TestRowView_NamedAndNullAccessors(t *testing.T) {
+	t.Parallel()
+
+	row := gen.Row()
+	row.Values[2] = OptionalValue{}
+	data, err := row.Marshal()
+	require.NoError(t, err)
+
+	view := NewRowView(row.Columns, Cell{
+		NullBitmask: row.NullBitmask(),
+		Value:       data,
+	})
+
+	isNull, err := view.IsNull(2)
+	require.NoError(t, err)
+	assert.True(t, isNull)
+
+	value, found, err := view.ValueByName("email")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, row.Values[1], value)
+
+	_, found, err = view.ValueByName("missing")
+	require.NoError(t, err)
+	assert.False(t, found)
+}
+
 func TestRowView_TypedAccessors(t *testing.T) {
 	t.Parallel()
 
@@ -68,6 +95,87 @@ func TestRowView_TypedAccessors(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	assert.InDelta(t, float64(row.Values[4].Value.(float32)), gotReal, 0.0001)
+}
+
+func TestRowView_UUIDAt(t *testing.T) {
+	t.Parallel()
+
+	uuidValue, err := ParseUUID("550e8400-e29b-41d4-a716-446655440000")
+	require.NoError(t, err)
+	row := NewRowWithValues(
+		[]Column{{Name: "uuid", Kind: UUID, Size: 16}},
+		[]OptionalValue{{Valid: true, Value: uuidValue}},
+	)
+	data, err := row.Marshal()
+	require.NoError(t, err)
+
+	view := NewRowView(row.Columns, Cell{
+		NullBitmask: row.NullBitmask(),
+		Value:       data,
+	})
+
+	got, ok, err := view.UUIDAt(0)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, uuidValue, got)
+}
+
+func TestRowView_OverflowAwareAccessors(t *testing.T) {
+	t.Parallel()
+
+	row := NewRowWithValues(
+		[]Column{{Name: "body", Kind: Text, Size: MaxInlineVarchar}},
+		[]OptionalValue{{Valid: true, Value: NewTextPointer([]byte("inline body"))}},
+	)
+	data, err := row.Marshal()
+	require.NoError(t, err)
+
+	view := NewRowView(row.Columns, Cell{
+		NullBitmask: row.NullBitmask(),
+		Value:       data,
+	})
+
+	value, err := view.ValueAtWithOverflow(context.Background(), nil, 0)
+	require.NoError(t, err)
+	require.True(t, value.Valid)
+	assert.Equal(t, "inline body", value.Value.(TextPointer).String())
+
+	textValue, err := view.TextAtWithOverflow(context.Background(), nil, 0)
+	require.NoError(t, err)
+	assert.Equal(t, "inline body", textValue.String())
+
+	materialized, err := view.MaterializeWithOverflow(context.Background(), nil, []bool{true})
+	require.NoError(t, err)
+	assert.Equal(t, "inline body", materialized.Values[0].Value.(TextPointer).String())
+}
+
+func TestRowView_OverflowAwareAccessorsRequirePagerForOverflow(t *testing.T) {
+	t.Parallel()
+
+	longText := make([]byte, MaxInlineVarchar+1)
+	for i := range longText {
+		longText[i] = 'x'
+	}
+	row := NewRowWithValues(
+		[]Column{{Name: "body", Kind: Text, Size: MaxInlineVarchar}},
+		[]OptionalValue{{Valid: true, Value: NewTextPointer(longText)}},
+	)
+	data, err := row.Marshal()
+	require.NoError(t, err)
+
+	view := NewRowView(row.Columns, Cell{
+		NullBitmask: row.NullBitmask(),
+		Value:       data,
+	})
+
+	_, err = view.ValueAtWithOverflow(context.Background(), nil, 0)
+	require.Error(t, err)
+
+	_, err = view.TextAtWithOverflow(context.Background(), nil, 0)
+	require.Error(t, err)
+
+	_, err = view.MaterializeWithOverflow(context.Background(), nil, []bool{true})
+	require.Error(t, err)
 }
 
 func TestRowView_Materialize(t *testing.T) {

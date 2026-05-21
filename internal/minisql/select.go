@@ -2553,13 +2553,14 @@ func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, se
 	if err := idx.ScanAll(ctx, aPlan.SortReverse, func(key any, rowID RowID) error {
 		var row Row
 
-		if scan.CoveringIndex {
+		switch {
+		case scan.CoveringIndex:
 			// Index-only scan: build row directly from key without touching the table page.
 			row = rowFromIndexKey(key, scan.IndexColumns, rowID)
-		} else if nSelected == 0 {
+		case nSelected == 0:
 			row = NewRowWithValues(t.Columns, nil)
 			row.Key = rowID
-		} else {
+		default:
 			// Find the row by ID
 			cursor, err := t.Seek(ctx, rowID)
 			if err != nil {
@@ -2620,13 +2621,14 @@ func (t *Table) indexRangeScan(ctx context.Context, aPlan QueryPlan, scan Scan, 
 	if err := idx.ScanRange(ctx, scan.RangeCondition, aPlan.SortReverse, func(key any, rowID RowID) error {
 		var row Row
 
-		if scan.CoveringIndex {
+		switch {
+		case scan.CoveringIndex:
 			// Index-only scan: build row directly from key without touching the table page.
 			row = rowFromIndexKey(key, scan.IndexColumns, rowID)
-		} else if nSelected == 0 {
+		case nSelected == 0:
 			row = NewRowWithValues(t.Columns, nil)
 			row.Key = rowID
-		} else {
+		default:
 			// Find the row by ID
 			cursor, err := t.Seek(ctx, rowID)
 			if err != nil {

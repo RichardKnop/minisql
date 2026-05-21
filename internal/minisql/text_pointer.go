@@ -219,6 +219,9 @@ func (r Row) readOverflowTexts(ctx context.Context, pager TxPager) (Row, error) 
 		if textPointer.IsInline() {
 			continue
 		}
+		if pager == nil {
+			return Row{}, fmt.Errorf("overflow text column %d requires a pager", i)
+		}
 		textPointer, err := textPointer.readOverflowText(ctx, pager)
 		if err != nil {
 			return Row{}, err
