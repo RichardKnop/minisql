@@ -182,41 +182,34 @@ func (c *Cursor) fetchRowWithMask(ctx context.Context, advance bool, selectedMas
 		return Row{}, fmt.Errorf("read page: %w", err)
 	}
 
-	row := c.Table.newRow()
 	if c.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
 		return Row{}, fmt.Errorf("cell index %d out of bounds, max %d", c.CellIdx, page.LeafNode.Header.Cells-1)
 	}
-	row, err = row.UnmarshalWithMask(page.LeafNode.Cells[c.CellIdx], selectedMask)
+	view := NewRowView(c.Table.Columns, page.LeafNode.Cells[c.CellIdx])
+	row, err := view.MaterializeWithOverflow(ctx, c.Table.pager, selectedMask)
 	if err != nil {
-		return Row{}, err
-	}
-	row.Key = page.LeafNode.Cells[c.CellIdx].Key
-
-	row, err = row.readOverflowTexts(ctx, c.Table.pager)
-	if err != nil {
-		return Row{}, fmt.Errorf("read overflow texts: %w", err)
+		return Row{}, fmt.Errorf("materialize row: %w", err)
 	}
 
 	if !advance {
 		return row, nil
 	}
 
-	// There are still more cells in the page, move cursor to next cell and return
-	if c.CellIdx < page.LeafNode.Header.Cells-1 {
-		c.CellIdx += 1
-		return row, nil
-	}
-
-	// If there is no leaf page to the right, set end of table flag and return
-	if page.LeafNode.Header.NextLeaf == 0 {
-		c.EndOfTable = true
-		return row, nil
-	}
-
-	c.PageIdx = page.LeafNode.Header.NextLeaf
-	c.CellIdx = 0
+	advanceLeafCursor(c, page)
 
 	return row, nil
+}
+
+func advanceLeafCursor(cursor *Cursor, page *Page) {
+	switch {
+	case cursor.CellIdx < page.LeafNode.Header.Cells-1:
+		cursor.CellIdx += 1
+	case page.LeafNode.Header.NextLeaf == 0:
+		cursor.EndOfTable = true
+	default:
+		cursor.PageIdx = page.LeafNode.Header.NextLeaf
+		cursor.CellIdx = 0
+	}
 }
 
 func (c *Cursor) fetchRowView(ctx context.Context) (RowView, error) {

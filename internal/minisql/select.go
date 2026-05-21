@@ -3842,7 +3842,7 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 		// Snapshot the current cell before advancing the cursor so every path
 		// decodes from the same cell while matching fetchRowWithMask advancement.
 		cell := page.LeafNode.Cells[cursor.CellIdx]
-		advanceSequentialCursor(cursor, page)
+		advanceLeafCursor(cursor, page)
 		view := NewRowView(t.Columns, cell)
 
 		if !twoPhase {
@@ -3891,18 +3891,6 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 	}
 
 	return nil
-}
-
-func advanceSequentialCursor(cursor *Cursor, page *Page) {
-	switch {
-	case cursor.CellIdx < page.LeafNode.Header.Cells-1:
-		cursor.CellIdx += 1
-	case page.LeafNode.Header.NextLeaf == 0:
-		cursor.EndOfTable = true
-	default:
-		cursor.PageIdx = page.LeafNode.Header.NextLeaf
-		cursor.CellIdx = 0
-	}
 }
 
 // countSequentialScanZeroAlloc counts rows that match the scan filter without
