@@ -975,13 +975,36 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 		if len(joinKeyValues) > 0 {
 			indexScan := innerScan
 			indexScan.IndexKeys = joinKeyValues
-			if join.Type == Semi || join.Type == AntiSemi {
+			switch {
+			case join.Type == Semi || join.Type == AntiSemi:
 				exists, err := memo.innerTable.indexPointExists(ctx, indexScan, memo.innerFields)
 				if err != nil {
 					return err
 				}
 				matched = exists
-			} else {
+			case !memo.innerTable.isUniquePointIndex(indexScan.IndexName):
+				err := memo.innerTable.indexPointScan(ctx, indexScan, memo.innerFields, func(innerRow Row) error {
+					combinedRow := combineRowsWithSchema(currentRow, innerRow, memo.combinedColumns)
+					matches := true
+					if memo.joinFilter != nil {
+						var filterErr error
+						matches, filterErr = memo.joinFilter(combinedRow)
+						if filterErr != nil {
+							return filterErr
+						}
+					}
+					if matches {
+						matched = true
+						if err := p.executeJoinsForRow(ctx, provider, combinedRow, joinIndex+1, filteredPipe, hashTables, memos); err != nil {
+							return err
+						}
+					}
+					return nil
+				})
+				if err != nil {
+					return err
+				}
+			default:
 				// Use indexPointGetAll instead of indexPointScan so that no callback
 				// closure is created at this call site.  The closure would otherwise
 				// escape to the heap once per outer row, producing large allocations
