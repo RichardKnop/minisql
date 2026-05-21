@@ -1194,8 +1194,8 @@ func (t *Table) coveringIndexIterator(
 	}
 
 	emit := func(key any, rowID RowID) error {
-		row := rowFromIndexKey(key, scan.IndexColumns, rowID)
 		if filter != nil {
+			row := rowFromIndexKey(key, scan.IndexColumns, rowID)
 			ok, err := filter(row)
 			if err != nil {
 				return err
