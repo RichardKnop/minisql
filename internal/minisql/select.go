@@ -2740,40 +2740,15 @@ func (t *Table) indexPointGetAll(ctx context.Context, scan Scan, selectedFields 
 	var rows []Row
 	for _, indexValue := range scan.IndexKeys {
 		if err := idx.VisitRowIDs(ctx, indexValue, func(rowID RowID) error {
-			var row Row
-			switch {
-			case isCovering:
-				row = rowFromIndexKey(indexValue, idxColumns, rowID)
-			case nSelected == 0:
-				row = NewRowWithValues(t.Columns, nil)
-				row.Key = rowID
-			default:
-				cursor, err := t.Seek(ctx, rowID)
-				if err != nil {
-					return fmt.Errorf("find row failed: %w", err)
-				}
-				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-				if err != nil {
-					return fmt.Errorf("fetch row failed: %w", err)
-				}
-				if tableFilter != nil {
-					ok, err := tableFilter(row)
-					if err != nil {
-						return err
-					}
-					if !ok {
-						return nil
-					}
-				}
+			row, ok, err := t.indexedScanRow(
+				ctx, indexValue, rowID, isCovering, idxColumns,
+				selectedMask, nSelected, tableFilter, coveringFilter,
+			)
+			if err != nil {
+				return err
 			}
-			if isCovering && coveringFilter != nil {
-				ok, err := coveringFilter(row)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return nil
-				}
+			if !ok {
+				return nil
 			}
 			if err := ctx.Err(); err != nil {
 				return err
@@ -2814,40 +2789,15 @@ func (t *Table) indexPointExists(ctx context.Context, scan Scan, selectedFields 
 				return errStopScan
 			}
 
-			var row Row
-			switch {
-			case isCovering:
-				row = rowFromIndexKey(indexValue, idxColumns, rowID)
-			case nSelected == 0:
-				row = NewRowWithValues(t.Columns, nil)
-				row.Key = rowID
-			default:
-				cursor, err := t.Seek(ctx, rowID)
-				if err != nil {
-					return fmt.Errorf("find row failed: %w", err)
-				}
-				row, err = cursor.fetchRowWithMask(ctx, false, selectedMask)
-				if err != nil {
-					return fmt.Errorf("fetch row failed: %w", err)
-				}
-				if tableFilter != nil {
-					ok, err := tableFilter(row)
-					if err != nil {
-						return err
-					}
-					if !ok {
-						return nil
-					}
-				}
+			_, ok, err := t.indexedScanRow(
+				ctx, indexValue, rowID, isCovering, idxColumns,
+				selectedMask, nSelected, tableFilter, coveringFilter,
+			)
+			if err != nil {
+				return err
 			}
-			if isCovering && coveringFilter != nil {
-				ok, err := coveringFilter(row)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return nil
-				}
+			if !ok {
+				return nil
 			}
 			if err := ctx.Err(); err != nil {
 				return err
