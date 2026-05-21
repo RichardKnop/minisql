@@ -318,3 +318,105 @@ func appendHashKeyFromView(buf []byte, view RowView, colIdxs []int, colKinds []C
 	return buf, true, nil
 }
 
+// semiJoinProbeRowViewIteratorFactory returns a factory that creates a
+// RowViewIterator scanning the outer (probe) table sequentially. For each outer
+// row it extracts the join key via typed accessors (no boxing), checks the
+// Bloom filter and then the bucket.present map, and yields only matching outer
+// RowViews. Non-matching rows are skipped without materialising a full Row.
+func semiJoinProbeRowViewIteratorFactory(
+	ctx context.Context,
+	outerTable *Table,
+	join JoinPlan,
+	bucket *hashJoinBucket,
+	tableFilter func(context.Context, RowView) (bool, error),
+	remaining, offset int64,
+	hasLimit, hasOffset bool,
+) (func() RowViewIterator, error) {
+	colIdxs := make([]int, len(join.JoinColumnPairs))
+	colKinds := make([]ColumnKind, len(join.JoinColumnPairs))
+	colIndexMap := make(map[string]int, len(outerTable.Columns))
+	for i, col := range outerTable.Columns {
+		colIndexMap[col.Name] = i
+	}
+	for p, pair := range join.JoinColumnPairs {
+		idx, ok := colIndexMap[pair.BaseTableColumn.Name]
+		if !ok {
+			return nil, fmt.Errorf("semi-join probe: column %s not found in outer table", pair.BaseTableColumn.Name)
+		}
+		colIdxs[p] = idx
+		colKinds[p] = outerTable.Columns[idx].Kind
+	}
+
+	cursor, err := outerTable.SeekFirst(ctx)
+	if err != nil {
+		return nil, err
+	}
+	page, err := outerTable.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return nil, fmt.Errorf("semi-join probe scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	return func() RowViewIterator {
+		iterCursor := cursor
+		iterPage := page
+		iterRemaining := remaining
+		iterOffset := offset
+		var keyBuf []byte
+		var valid bool
+		var scanErr error
+		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
+			for !iterCursor.EndOfTable {
+				if ctxErr := iterCtx.Err(); ctxErr != nil {
+					return RowView{}, ctxErr
+				}
+				if iterPage.Index != iterCursor.PageIdx {
+					iterPage, scanErr = outerTable.pager.ReadPage(iterCtx, iterCursor.PageIdx)
+					if scanErr != nil {
+						return RowView{}, fmt.Errorf("semi-join probe scan: %w", scanErr)
+					}
+				}
+				cell := iterPage.LeafNode.Cells[iterCursor.CellIdx]
+				advanceLeafCursor(iterCursor, iterPage)
+
+				view := NewRowView(outerTable.Columns, cell)
+				if tableFilter != nil {
+					ok, filterErr := tableFilter(iterCtx, view)
+					if filterErr != nil {
+						return RowView{}, filterErr
+					}
+					if !ok {
+						continue
+					}
+				}
+
+				keyBuf, valid, scanErr = appendHashKeyFromView(keyBuf[:0], view, colIdxs, colKinds)
+				if scanErr != nil {
+					return RowView{}, scanErr
+				}
+				if !valid {
+					continue
+				}
+				if !bucket.filter.MayContain(keyBuf) {
+					continue
+				}
+				if _, present := bucket.present[string(keyBuf)]; !present {
+					continue
+				}
+				if hasOffset && iterOffset > 0 {
+					iterOffset--
+					continue
+				}
+				if hasLimit {
+					if iterRemaining == 0 {
+						return RowView{}, ErrNoMoreRows
+					}
+					iterRemaining--
+				}
+				return view, nil
+			}
+			return RowView{}, ErrNoMoreRows
+		})
+	}, nil
+}
+

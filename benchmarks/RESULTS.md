@@ -192,6 +192,31 @@ Alloc count: 134,876 → 74,887 (1.80× reduction). Remaining allocations are fr
 
 ---
 
+### 2026-05-21 — Step 10: RowView outer probe scan for hash semi-join
+
+**Root cause:** Even with `buildSemiJoinBucketFromRowViews` eliminating inner-side materialization (Step 5), the outer (probe) scan still went through `runTableScan → sequentialScan → view.MaterializeWithOverflow` for every outer row, plus `rows = append(rows, row)` growing a `[]Row` slice, plus `Row.OnlyFields` projecting each matched row. Profile breakdown (864 iters, 5000 rows/op):
+- `rows = append(rows, row)` slice growth: 990 MB (30%)
+- `view.Materialize` + `ValueAt` boxing for 10k outer rows: 910 MB (28%)
+- `Row.OnlyFields` projecting 5k matched rows: 471 MB (14%)
+
+**Fix:** `selectSemiJoinDirectRowView` in `select.go` — new fast path for single semi-join queries with sequential outer scan. Builds the hash bucket via `buildHashBuckets`, then calls `semiJoinProbeRowViewIteratorFactory` in `hash_join.go` which scans the outer table with `NewRowViewIterator`, extracts probe keys via `appendHashKeyFromView` (typed accessors, no boxing), checks the Bloom filter + `bucket.present`, and yields only matched outer RowViews. Result is wired into `result.RowViews` / `result.RowViewFieldIndexes` so `Rows.nextRowView` delivers values without any intermediate `[]Row` collection or `OnlyFields` projection.
+
+#### Memory change (B/op, mean of 3 runs)
+
+| Benchmark | before | after | reduction | vs SQLite |
+|---|---|---|---|---|
+| Subquery_InList | 3.39 MiB | **859 KiB** | **4.0×** | 3.6× (was 14×) |
+
+#### Allocs/op change
+
+| Benchmark | before | after | reduction | vs SQLite |
+|---|---|---|---|---|
+| Subquery_InList | 74,883 | **35,101** | **2.1×** | 1.8× (was 3.7×) |
+
+Latency also improved: 7.4 ms → 4.5 ms (now within 10% of SQLite's 4.1 ms). Remaining 859 KiB is dominated by the inner build phase (Bloom filter allocation + map growth + key strings for ~10 000 inner entries).
+
+---
+
 ### 2026-05-20 17:10 UTC
 
 #### Timing

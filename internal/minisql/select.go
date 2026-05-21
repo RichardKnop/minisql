@@ -209,6 +209,12 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return result, err
 	}
 
+	// Fast path for hash semi-join with a sequential outer scan and RowView-compatible
+	// conditions. Scans the outer table without materialising non-matching rows.
+	if result, ok, err := t.selectSemiJoinDirectRowView(ctx, stmt, plan, requestedFields); ok || err != nil {
+		return result, err
+	}
+
 	// Materialising path: buffer every matching row, then dispatch.
 	// Required for COUNT (needs a total), GROUP BY, aggregates, ORDER BY (sort),
 	// and JOIN (goroutine-based execution inside plan.Execute).
@@ -1703,6 +1709,80 @@ func (t *Table) selectStreamingDirectRowView(
 		return result, true, nil
 	}
 
+	result.RowViews = newRowViewIter()
+	result.RowViewPager = t.pager
+	result.RowViewFieldIndexes = fieldIndexes
+	result.Rows = lazyRowViewMaterializingIterator(t.pager, newRowViewIter, fieldIndexes, resultColumns)
+	return result, true, nil
+}
+
+// selectSemiJoinDirectRowView is a fast path for SELECT queries whose only join
+// is a single hash semi-join and whose outer table is a non-virtual sequential
+// scan with RowView-compatible conditions.  It builds the inner hash bucket once,
+// then scans the outer table using RowViews and probes the bucket without
+// materialising non-matching rows, wiring matched RowViews straight to the
+// driver layer via result.RowViews.
+func (t *Table) selectSemiJoinDirectRowView(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if len(plan.Joins) != 1 || plan.Joins[0].Type != Semi {
+		return StatementResult{}, false, nil
+	}
+	if t.virtualRows != nil || t.parallelScan {
+		return StatementResult{}, false, nil
+	}
+	if stmt.IsSelectGroupBy() || stmt.IsSelectAggregate() || stmt.Distinct || plan.SortInMemory {
+		return StatementResult{}, false, nil
+	}
+	if len(plan.Scans) == 0 || plan.Scans[0].Type != ScanTypeSequential {
+		return StatementResult{}, false, nil
+	}
+
+	outerScan := plan.Scans[0]
+
+	// Output must be projectable from outer table columns only (semi-join yields no inner columns).
+	fieldIndexes, resultColumns, ok := rowViewProjectionPlan(t.Columns, requestedFields, stmt.TableName, stmt.TableAlias)
+	if !ok {
+		return StatementResult{}, false, nil
+	}
+	if !rowViewFilterSupports(t.Columns, outerScan.Filters) {
+		return StatementResult{}, false, nil
+	}
+	outerFilter := compileRowViewFilterForColumns(t.Columns, t.pager, outerScan.Filters)
+
+	hashTables, err := buildHashBuckets(ctx, plan, t.provider)
+	if err != nil {
+		return StatementResult{}, true, err
+	}
+	bucket, hasBucket := hashTables[0]
+	if !hasBucket || bucket.present == nil {
+		return StatementResult{}, false, nil
+	}
+
+	join := plan.Joins[0]
+
+	var remaining, offset int64
+	hasLimit := stmt.Limit.Valid
+	hasOffset := stmt.Offset.Valid
+	if hasLimit {
+		remaining = stmt.Limit.Value.(int64)
+	}
+	if hasOffset {
+		offset = stmt.Offset.Value.(int64)
+	}
+
+	newRowViewIter, err := semiJoinProbeRowViewIteratorFactory(
+		ctx, t, join, bucket, outerFilter,
+		remaining, offset, hasLimit, hasOffset,
+	)
+	if err != nil {
+		return StatementResult{}, true, err
+	}
+
+	result := StatementResult{Columns: resultColumns}
 	result.RowViews = newRowViewIter()
 	result.RowViewPager = t.pager
 	result.RowViewFieldIndexes = fieldIndexes
