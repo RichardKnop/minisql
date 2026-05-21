@@ -118,10 +118,6 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 	return table
 }
 
-func (t *Table) newRow() Row {
-	return Row{Columns: t.Columns}
-}
-
 func indexColumnHash(columns []Column) string {
 	var hash strings.Builder
 	for i, col := range columns {
@@ -764,8 +760,7 @@ func (t *Table) DeleteKey(ctx context.Context, pageIdx PageIndex, key RowID) err
 
 	// Remove any overflow pages
 	if overflowFields := textOverflowFields(t.Columns...); len(overflowFields) > 0 && ok {
-		row := t.newRow()
-		row, err = row.Unmarshal(cellToDelete, overflowFields...)
+		row, err := NewRowView(t.Columns, cellToDelete).MaterializeWithOverflow(ctx, t.pager, selectedColumnsMask(t.Columns, overflowFields))
 		if err != nil {
 			return err
 		}

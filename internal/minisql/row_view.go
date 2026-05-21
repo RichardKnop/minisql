@@ -255,8 +255,8 @@ func (rv RowView) UUIDAt(idx int) (UUIDValue, bool, error) {
 
 // Materialize decodes selected columns into the legacy Row representation.
 //
-// selectedMask follows Row.UnmarshalWithMask semantics: a nil/empty mask means
-// no values are selected, while a true entry decodes the corresponding column.
+// selectedMask is column-aligned: a nil/empty mask means no values are selected,
+// while a true entry decodes the corresponding column.
 func (rv RowView) Materialize(selectedMask []bool) (Row, error) {
 	row := Row{
 		Columns: rv.columns,

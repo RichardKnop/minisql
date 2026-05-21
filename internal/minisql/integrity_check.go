@@ -464,8 +464,9 @@ func (d *Database) walkTablePages(ctx context.Context, report IntegrityReport, t
 }
 
 func (d *Database) checkTableLeafPage(ctx context.Context, report IntegrityReport, table *Table, page *Page, fields []Field, livePages map[PageIndex]string) IntegrityReport {
+	selectedMask := selectedColumnsMask(table.Columns, fields)
 	for _, cell := range page.LeafNode.Cells[:page.LeafNode.Header.Cells] {
-		row, err := NewRow(table.Columns).Unmarshal(cell, fields...)
+		row, err := NewRowView(table.Columns, cell).MaterializeWithOverflow(ctx, table.pager, selectedMask)
 		if err != nil {
 			report.Issues = append(report.Issues, IntegrityIssue{
 				Code:    "table_row_decode_failed",

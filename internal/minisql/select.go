@@ -1012,10 +1012,9 @@ func (t *Table) selectGroupByStreaming(ctx context.Context, stmt Statement, plan
 	return acc.buildResult(stmt, t)
 }
 
-// selectGroupByZeroAlloc handles GROUP BY over a single sequential scan without
-// materialising rows. It reuses one []OptionalValue buffer across all rows,
-// eliminating the per-row heap allocation from UnmarshalWithMask. Falls back to
-// the general path for virtual tables and parallel scans.
+// selectGroupByZeroAlloc handles GROUP BY over a single sequential scan by
+// accumulating directly from RowView. Falls back to the general path for virtual
+// tables and parallel scans.
 func (t *Table) selectGroupByZeroAlloc(ctx context.Context, stmt Statement, scan Scan, selectedFields []Field) (StatementResult, error) {
 	if t.virtualRows != nil || t.parallelScan {
 		estRows := int(t.estimatedRowCount())

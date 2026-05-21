@@ -100,8 +100,7 @@ func TestUUIDRowMarshalUnmarshal(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, b, 16)
 
-	row2 := minisql.NewRow(cols)
-	row2, err = row2.Unmarshal(minisql.Cell{Value: b}, minisql.Field{Name: "id"})
+	row2, err := minisql.NewRowView(cols, minisql.Cell{Value: b}).Materialize([]bool{true})
 	require.NoError(t, err)
 
 	got, ok := row2.Values[0].Value.(minisql.UUIDValue)
