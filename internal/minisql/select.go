@@ -3827,11 +3827,28 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 			return err
 		}
 
-		if !twoPhase {
-			// ── Single-phase path (original behaviour) ────────────────────────
-			row, err := cursor.fetchRowWithMask(ctx, true, fullMask)
+		// Re-read page when the cursor crossed a page boundary.
+		if page.Index != cursor.PageIdx {
+			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
 			if err != nil {
-				return err
+				return fmt.Errorf("sequential scan: %w", err)
+			}
+		}
+
+		if cursor.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
+			return fmt.Errorf("cell index %d out of bounds, max %d", cursor.CellIdx, page.LeafNode.Header.Cells-1)
+		}
+
+		// Snapshot the current cell before advancing the cursor so every path
+		// decodes from the same cell while matching fetchRowWithMask advancement.
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+		advanceSequentialCursor(cursor, page)
+		view := NewRowView(t.Columns, cell)
+
+		if !twoPhase {
+			row, err := view.MaterializeWithOverflow(ctx, t.pager, fullMask)
+			if err != nil {
+				return fmt.Errorf("sequential scan materialize row: %w", err)
 			}
 			if tableFilter != nil {
 				ok, err := tableFilter(row)
@@ -3848,33 +3865,8 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 			continue
 		}
 
-		// ── Two-phase path ────────────────────────────────────────────────────
-		// Re-read page when the cursor crossed a page boundary.
-		if page.Index != cursor.PageIdx {
-			page, err = t.pager.ReadPage(ctx, cursor.PageIdx)
-			if err != nil {
-				return fmt.Errorf("sequential scan: %w", err)
-			}
-		}
-
-		// Snapshot the current cell before advancing the cursor so phase 2
-		// can unmarshal from the same cell without a second ReadPage call.
-		cell := page.LeafNode.Cells[cursor.CellIdx]
-
-		// Advance cursor (mirrors fetchRowWithMask advance logic).
-		switch {
-		case cursor.CellIdx < page.LeafNode.Header.Cells-1:
-			cursor.CellIdx += 1
-		case page.LeafNode.Header.NextLeaf == 0:
-			cursor.EndOfTable = true
-		default:
-			cursor.PageIdx = page.LeafNode.Header.NextLeaf
-			cursor.CellIdx = 0
-		}
-
 		// Phase 1: decode only the columns needed to evaluate the predicate.
-		filterRow := t.newRow()
-		filterRow, err = filterRow.UnmarshalWithMask(cell, filterMask)
+		filterRow, err := view.Materialize(filterMask)
 		if err != nil {
 			return err
 		}
@@ -3888,12 +3880,7 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 		}
 
 		// Phase 2: decode all selected columns (cell data is still valid in cache).
-		row := t.newRow()
-		row, err = row.UnmarshalWithMask(cell, fullMask)
-		if err != nil {
-			return err
-		}
-		row, err = row.readOverflowTexts(ctx, t.pager)
+		row, err := view.MaterializeWithOverflow(ctx, t.pager, fullMask)
 		if err != nil {
 			return fmt.Errorf("sequential scan read overflow: %w", err)
 		}
@@ -3904,6 +3891,18 @@ func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []
 	}
 
 	return nil
+}
+
+func advanceSequentialCursor(cursor *Cursor, page *Page) {
+	switch {
+	case cursor.CellIdx < page.LeafNode.Header.Cells-1:
+		cursor.CellIdx += 1
+	case page.LeafNode.Header.NextLeaf == 0:
+		cursor.EndOfTable = true
+	default:
+		cursor.PageIdx = page.LeafNode.Header.NextLeaf
+		cursor.CellIdx = 0
+	}
 }
 
 // countSequentialScanZeroAlloc counts rows that match the scan filter without
