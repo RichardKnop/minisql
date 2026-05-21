@@ -123,6 +123,7 @@ func materializeResultRows(ctx context.Context, result StatementResult) ([]Row, 
 		return result.rawRows, nil
 	}
 
+	defer result.Rows.Close()
 	var rows []Row
 	for result.Rows.Next(ctx) {
 		rows = append(rows, result.Rows.Row())

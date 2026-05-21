@@ -2215,7 +2215,7 @@ func rowViewMaterializingIterator(ctx context.Context, pager TxPager, views RowV
 			return Row{}, ErrNoMoreRows
 		}
 		view := views.RowView()
-		return projectRowView(ctx, pager, view, fieldIndexes, columns)
+		return projectRowView(iterCtx, pager, view, fieldIndexes, columns)
 	}, views.Close)
 }
 
@@ -2238,7 +2238,7 @@ func distinctRowViewMaterializingIterator(
 		}
 
 		for views.Next(iterCtx) {
-			row, err := projectRowView(ctx, pager, views.RowView(), fieldIndexes, columns)
+			row, err := projectRowView(iterCtx, pager, views.RowView(), fieldIndexes, columns)
 			if err != nil {
 				return Row{}, err
 			}
