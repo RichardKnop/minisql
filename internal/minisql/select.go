@@ -2890,6 +2890,7 @@ func (t *Table) selectWithSortRowView(
 		allRows = allRows[offset:]
 	}
 
+	nResult := len(requestedFields)
 	result := StatementResult{
 		Columns: resultColumns,
 	}
@@ -2900,9 +2901,15 @@ func (t *Table) selectWithSortRowView(
 		}
 		row := allRows[idx]
 		idx += 1
-		values := make([]OptionalValue, len(requestedFields))
-		copy(values, row.Values[:len(requestedFields)])
-		projected := NewRowWithValues(resultColumns, values)
+		// When all ORDER BY columns are already in SELECT, scanProjectedRowViews
+		// produces exactly nResult values — reuse the slice to avoid an alloc+copy.
+		if len(row.Values) <= nResult {
+			row.Columns = resultColumns
+			return row, nil
+		}
+		// Extra sort-only columns were appended beyond nResult — sub-slice them
+		// off without copying the backing array.
+		projected := NewRowWithValues(resultColumns, row.Values[:nResult])
 		projected.Key = row.Key
 		return projected, nil
 	})
