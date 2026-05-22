@@ -120,7 +120,7 @@ func (t *Table) parallelSequentialScan(ctx context.Context, scan Scan, selectedF
 			drainParallelScanCh(ch)
 			return err
 		}
-		received++
+		received += 1
 		if scanLimit > 0 && received >= scanLimit {
 			cancel()
 			drainParallelScanCh(ch)

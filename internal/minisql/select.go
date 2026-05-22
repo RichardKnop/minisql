@@ -215,6 +215,14 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return result, err
 	}
 
+	// Streaming join path: for INNER/LEFT/RIGHT/FULL OUTER joins with no
+	// ORDER BY sort, GROUP BY, aggregate, or DISTINCT, deliver rows from the
+	// join goroutine directly to the Iterator without buffering into []Row.
+	// This eliminates the rows = append(rows, row) slice growth.
+	if result, ok, err := t.selectStreamingJoin(ctx, stmt, plan, selectedFields, requestedFields); ok || err != nil {
+		return result, err
+	}
+
 	// Materialising path: buffer every matching row, then dispatch.
 	// Required for COUNT (needs a total), GROUP BY, aggregates, ORDER BY (sort),
 	// and JOIN (goroutine-based execution inside plan.Execute).
@@ -2706,6 +2714,17 @@ func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields [
 		seen = make(map[string]struct{})
 	}
 
+	// Precompute projection schema from the first row's column layout.  For
+	// plain field references (no expression), this eliminates per-row
+	// make([]Column,...) inside OnlyFields; only make([]OptionalValue,...) is
+	// allocated per row.  Falls back to the full projectRow path when any
+	// field has an expression or when there are no rows.
+	var projectedCols []Column
+	var projectedIdxs []int
+	if len(scanned) > 0 {
+		projectedCols, projectedIdxs = buildProjectionSchema(scanned[0].Columns, requestedFields)
+	}
+
 	idx := 0
 	result.Rows = NewIterator(func(ctx context.Context) (Row, error) {
 		if hasLimit && limit == 0 {
@@ -2716,9 +2735,15 @@ func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields [
 			row := scanned[idx]
 			idx += 1
 
-			p, err := projectRow(row, requestedFields)
-			if err != nil {
-				return Row{}, err
+			var p Row
+			if projectedCols != nil {
+				p = row.projectFast(projectedCols, projectedIdxs)
+			} else {
+				var err error
+				p, err = projectRow(row, requestedFields)
+				if err != nil {
+					return Row{}, err
+				}
 			}
 			if stmt.Distinct {
 				key := p.rowDistinctKey()
@@ -2740,6 +2765,121 @@ func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields [
 		return Row{}, ErrNoMoreRows
 	})
 	return result, nil
+}
+
+// selectStreamingJoin streams INNER/LEFT/RIGHT/FULL OUTER join results without
+// buffering into []Row.  The join goroutine runs concurrently; the returned
+// Iterator reads rows from it on demand.  Ineligible when ORDER BY sort,
+// GROUP BY, aggregate, COUNT(*), DISTINCT, or semi/anti-semi joins are present.
+func (t *Table) selectStreamingJoin(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	selectedFields []Field,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if len(plan.Joins) == 0 ||
+		plan.SortInMemory ||
+		stmt.IsSelectGroupBy() ||
+		stmt.IsSelectAggregate() ||
+		stmt.IsSelectCountAll() ||
+		stmt.Distinct {
+		return StatementResult{}, false, nil
+	}
+	// Semi/anti-semi joins are handled by selectSemiJoinDirectRowView above.
+	for _, j := range plan.Joins {
+		if j.Type == Semi || j.Type == AntiSemi {
+			return StatementResult{}, false, nil
+		}
+	}
+
+	joinCtx, joinCancel := context.WithCancel(ctx)
+	ch := make(chan Row, 128)
+	errCh := make(chan error, 1)
+
+	go func() {
+		defer close(ch)
+		if err := plan.executeNestedLoopJoin(joinCtx, t.provider, selectedFields, ch); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				select {
+				case errCh <- err:
+				default:
+				}
+			}
+		}
+	}()
+
+	var (
+		limit, offset int64
+		hasLimit      = stmt.Limit.Valid
+		hasOffset     = stmt.Offset.Valid
+	)
+	if hasLimit {
+		limit = stmt.Limit.Value.(int64)
+	}
+	if hasOffset {
+		offset = stmt.Offset.Value.(int64)
+	}
+
+	var projectedCols []Column
+	var projectedIdxs []int
+	schemaComputed := false
+
+	result := StatementResult{
+		Columns: t.selectResultColumns(stmt, requestedFields),
+	}
+	result.Rows = newIteratorWithClose(
+		func(iterCtx context.Context) (Row, error) {
+			if hasLimit && limit == 0 {
+				return Row{}, ErrNoMoreRows
+			}
+			for {
+				select {
+				case <-iterCtx.Done():
+					return Row{}, iterCtx.Err()
+				case row, ok := <-ch:
+					if !ok {
+						// Channel closed — surface any join error.
+						select {
+						case err := <-errCh:
+							return Row{}, err
+						default:
+							return Row{}, ErrNoMoreRows
+						}
+					}
+					// Lazily compute projection schema from the first row.
+					if !schemaComputed {
+						projectedCols, projectedIdxs = buildProjectionSchema(row.Columns, requestedFields)
+						schemaComputed = true
+					}
+					var p Row
+					if projectedCols != nil {
+						p = row.projectFast(projectedCols, projectedIdxs)
+					} else {
+						var err error
+						p, err = projectRow(row, requestedFields)
+						if err != nil {
+							return Row{}, err
+						}
+					}
+					if hasOffset && offset > 0 {
+						offset--
+						continue
+					}
+					if hasLimit {
+						limit--
+					}
+					return p, nil
+				}
+			}
+		},
+		func() error {
+			joinCancel()
+			drainRowCh(ch)
+			return nil
+		},
+	)
+	return result, true, nil
 }
 
 func (t *Table) selectWithSortStreamingLimit(
@@ -5317,14 +5457,14 @@ func unionTwoSortedSets(a, b []RowID) []RowID {
 		switch {
 		case a[i] == b[j]:
 			emit(a[i])
-			i++
-			j++
+			i += 1
+			j += 1
 		case a[i] < b[j]:
 			emit(a[i])
-			i++
+			i += 1
 		default:
 			emit(b[j])
-			j++
+			j += 1
 		}
 	}
 	for ; i < len(a); i++ {
@@ -5386,7 +5526,7 @@ func (t *Table) indexUnionScan(ctx context.Context, scan Scan, selectedFields []
 		if err := out(row); err != nil {
 			return err
 		}
-		emitted++
+		emitted += 1
 		if scanLimit > 0 && emitted >= scanLimit {
 			return nil
 		}

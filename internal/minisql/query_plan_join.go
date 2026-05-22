@@ -12,6 +12,7 @@ import (
 type joinMemo struct {
 	innerTable      *Table
 	innerFields     []Field
+	innerAllMask    []bool   // all-true mask for full inner-row materialisation via RowView
 	combinedColumns []Column // alias-prefixed combined columns for this join level
 	joinFilter      func(Row) (bool, error)
 	nullInnerCount  int // len(innerTable.Columns), for LEFT/FULL OUTER null padding
@@ -845,9 +846,14 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 			joinConditions = append(joinConditions, join.Conditions)
 		}
 
+		allMask := make([]bool, len(innerTable.Columns))
+		for k := range allMask {
+			allMask[k] = true
+		}
 		joinMemos[i] = joinMemo{
 			innerTable:      innerTable,
 			innerFields:     fieldsFromColumns(innerTable.Columns...),
+			innerAllMask:    allMask,
 			combinedColumns: combinedCols,
 			joinFilter:      compileRowFilterForColumns(combinedCols, joinConditions),
 			nullInnerCount:  len(innerTable.Columns),
@@ -1164,22 +1170,34 @@ func (p QueryPlan) executeHashJoinForRow(ctx context.Context, currentRow Row, jo
 		return nil
 	}
 
-	// Regular join: retrieve matching inner rows from bucket.rows.
-	var matchingRows []Row
-	if probeKey != nil && bucket != nil {
-		// Check the Bloom filter before touching the hash map: if the filter
-		// says the key is definitely absent, skip the map probe entirely.
-		if bucket.filter.MayContain(probeKey) {
-			matchingRows = bucket.rows[string(probeKey)]
-		}
-	}
-
+	// Regular join: retrieve matching inner rows from the bucket.
 	matched := false
-	for _, innerRow := range matchingRows {
-		combinedRow := combineRowsWithSchema(currentRow, innerRow, memo.combinedColumns)
-		matched = true
-		if err := p.executeJoinsForRow(ctx, nil, combinedRow, joinIndex+1, filteredPipe, hashTables, memos); err != nil {
-			return err
+	if probeKey != nil && bucket != nil && bucket.filter.MayContain(probeKey) {
+		probeKeyStr := string(probeKey)
+		if bucket.cells != nil {
+			// Compact path: decode cell bytes lazily on probe hit, avoiding
+			// the build-phase []OptionalValue allocation for unmatched rows.
+			for _, cc := range bucket.cells[probeKeyStr] {
+				innerRow, err := NewRowView(memo.innerTable.Columns, cc.toCell()).
+					MaterializeWithOverflow(ctx, memo.innerTable.pager, memo.innerAllMask)
+				if err != nil {
+					return err
+				}
+				combinedRow := combineRowsWithSchema(currentRow, innerRow, memo.combinedColumns)
+				matched = true
+				if err := p.executeJoinsForRow(ctx, nil, combinedRow, joinIndex+1, filteredPipe, hashTables, memos); err != nil {
+					return err
+				}
+			}
+		} else {
+			// Legacy path: pre-materialised rows (index scans or non-RowView-compatible filters).
+			for _, innerRow := range bucket.rows[probeKeyStr] {
+				combinedRow := combineRowsWithSchema(currentRow, innerRow, memo.combinedColumns)
+				matched = true
+				if err := p.executeJoinsForRow(ctx, nil, combinedRow, joinIndex+1, filteredPipe, hashTables, memos); err != nil {
+					return err
+				}
+			}
 		}
 	}
 

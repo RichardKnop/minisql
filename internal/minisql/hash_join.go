@@ -18,23 +18,41 @@ const (
 	bloomMinN = 512
 )
 
+// compactCell stores the raw leaf-cell bytes for one inner build-side row.
+// Keeping raw bytes instead of a materialised Row eliminates the per-row
+// []OptionalValue allocation during the hash-join build phase.  On probe hit
+// the bytes are decoded lazily via NewRowView + MaterializeWithOverflow, so
+// only matched rows pay the decoding cost.
+type compactCell struct {
+	value       []byte // owned copy of Cell.Value; safe after page eviction
+	nullBitmask uint64
+	key         RowID
+}
+
+func (cc compactCell) toCell() Cell {
+	return Cell{Value: cc.value, NullBitmask: cc.nullBitmask, Key: cc.key, isOwned: true}
+}
+
 // hashJoinBucket is the in-memory hash table built from the inner (build) side
 // of a single hash join.  The map key is a null-byte-delimited encoding of the
 // join column values.
 //
-// For regular joins (INNER/LEFT/RIGHT/FULL OUTER) rows holds all inner rows per
-// key so they can be combined with the outer row on a hit.
+// For regular joins (INNER/LEFT/RIGHT/FULL OUTER) on a sequential inner scan,
+// cells holds compact raw-byte copies of inner rows (no []OptionalValue).  The
+// legacy rows map is used only when the inner scan is not sequential or its
+// filters are not RowView-compatible.
 //
 // For semi/anti-semi joins only key existence is needed; present stores just the
-// set of keys and rows is nil, eliminating the per-key []Row allocation and the
-// cost of keeping full inner rows in memory.
+// set of keys, eliminating the per-key []Row allocation and the cost of keeping
+// full inner rows in memory.
 //
 // innerColumns is kept to construct NULL rows for LEFT JOIN misses.
 // filter is a Bloom filter over the same key set used to reject probe keys
 // that are definitely not present, avoiding an unnecessary map lookup.
 type hashJoinBucket struct {
-	rows         map[string][]Row   // non-nil for INNER/LEFT/RIGHT/FULL OUTER joins
-	present      map[string]struct{} // non-nil for Semi/AntiSemi joins
+	rows         map[string][]Row         // non-nil for regular joins using the legacy path
+	cells        map[string][]compactCell // non-nil for regular joins using the compact path
+	present      map[string]struct{}      // non-nil for Semi/AntiSemi joins
 	innerColumns []Column
 	filter       *bloom.Filter
 }
@@ -65,24 +83,39 @@ func buildHashBuckets(ctx context.Context, plan QueryPlan, provider TableProvide
 			innerColumns: innerTable.Columns,
 			filter:       bloom.New(uint(n), bloomFPRate),
 		}
-		if isSemiJoin {
-			bucket.present = make(map[string]struct{})
-		} else {
-			bucket.rows = make(map[string][]Row)
-		}
 
-		// For semi-joins on a sequential scan with RowView-compatible filters,
-		// use the RowView path to avoid materialising full rows just for key
-		// extraction.  This eliminates the per-row []OptionalValue allocation.
-		if isSemiJoin && innerScan.Type == ScanTypeSequential &&
-			rowViewFilterSupports(innerTable.Columns, innerScan.Filters) {
-			if err := buildSemiJoinBucketFromRowViews(ctx, innerTable, innerScan, join, bucket); err != nil {
+		// Virtual tables (CTEs, derived tables) have no B+tree pager; only
+		// physical sequential scans can use the RowView path.
+		useRowViewPath := innerTable.virtualRows == nil &&
+			innerScan.Type == ScanTypeSequential &&
+			rowViewFilterSupports(innerTable.Columns, innerScan.Filters)
+
+		switch {
+		case isSemiJoin:
+			bucket.present = make(map[string]struct{})
+			if useRowViewPath {
+				// Semi-join RowView path: key-only scan, no row materialisation.
+				if err := buildSemiJoinBucketFromRowViews(ctx, innerTable, innerScan, join, bucket); err != nil {
+					return nil, fmt.Errorf("hash join build phase (join %d): %w", i, err)
+				}
+				buckets[i] = bucket
+				continue
+			}
+		case useRowViewPath:
+			// Regular join RowView path: store compact cell bytes instead of full
+			// rows, deferring []OptionalValue allocation to probe-hit time.
+			bucket.cells = make(map[string][]compactCell)
+			if err := buildHashBucketFromCells(ctx, innerTable, innerScan, join, bucket); err != nil {
 				return nil, fmt.Errorf("hash join build phase (join %d): %w", i, err)
 			}
 			buckets[i] = bucket
 			continue
+		default:
+			bucket.rows = make(map[string][]Row)
 		}
 
+		// Fallback: legacy materialising scan for index scans or non-RowView-
+		// compatible filters.
 		innerFields := fieldsFromColumns(innerTable.Columns...)
 		// keyBuf is reused across rows in the build phase to avoid one alloc per row.
 		var keyBuf []byte
@@ -187,6 +220,89 @@ func buildSemiJoinBucketFromRowViews(ctx context.Context, innerTable *Table, inn
 			bucket.present[key] = struct{}{}
 			bucket.filter.Add(keyBuf)
 		}
+	}
+	return nil
+}
+
+// buildHashBucketFromCells fills bucket.cells using a RowView sequential scan.
+// Rather than materialising a full []OptionalValue row per inner row, it copies
+// the raw cell bytes (value + nullBitmask + key) into a compactCell.  On probe
+// hit the bytes are decoded lazily via NewRowView + MaterializeWithOverflow,
+// so only matched rows pay the full decoding cost.
+func buildHashBucketFromCells(ctx context.Context, innerTable *Table, innerScan Scan, join JoinPlan, bucket *hashJoinBucket) error {
+	colIdxs := make([]int, len(join.JoinColumnPairs))
+	colKinds := make([]ColumnKind, len(join.JoinColumnPairs))
+	colIndexMap := make(map[string]int, len(innerTable.Columns))
+	for idx, col := range innerTable.Columns {
+		colIndexMap[col.Name] = idx
+	}
+	for p, pair := range join.JoinColumnPairs {
+		idx, ok := colIndexMap[pair.JoinTableColumn.Name]
+		if !ok {
+			return fmt.Errorf("join column %s not found in inner table", pair.JoinTableColumn.Name)
+		}
+		colIdxs[p] = idx
+		colKinds[p] = innerTable.Columns[idx].Kind
+	}
+
+	innerFields := fieldsFromColumns(innerTable.Columns...)
+	filter := innerTable.compileRowViewScanFilter(innerScan, innerFields)
+
+	cursor, err := innerTable.SeekFirst(ctx)
+	if err != nil {
+		return err
+	}
+	page, err := innerTable.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return fmt.Errorf("hash join compact build scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	var keyBuf []byte
+	for !cursor.EndOfTable {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if page.Index != cursor.PageIdx {
+			page, err = innerTable.pager.ReadPage(ctx, cursor.PageIdx)
+			if err != nil {
+				return fmt.Errorf("hash join compact build scan: %w", err)
+			}
+		}
+		if cursor.CellIdx > page.LeafNode.Header.Cells-1 || len(page.LeafNode.Cells) == 0 {
+			return fmt.Errorf("cell index %d out of bounds, max %d", cursor.CellIdx, page.LeafNode.Header.Cells-1)
+		}
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+		advanceLeafCursor(cursor, page)
+
+		view := NewRowView(innerTable.Columns, cell)
+		ok, err := filter.accept(ctx, innerTable.pager, view)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+
+		var valid bool
+		keyBuf, valid, err = appendHashKeyFromView(keyBuf[:0], view, colIdxs, colKinds)
+		if err != nil {
+			return err
+		}
+		if !valid {
+			continue // NULL join key — never matches
+		}
+		// Copy cell bytes — the page buffer may be reused after the cursor advances.
+		valueCopy := make([]byte, len(cell.Value))
+		copy(valueCopy, cell.Value)
+		cc := compactCell{
+			value:       valueCopy,
+			nullBitmask: cell.NullBitmask,
+			key:         cell.Key,
+		}
+		key := string(keyBuf)
+		bucket.cells[key] = append(bucket.cells[key], cc)
+		bucket.filter.Add(keyBuf)
 	}
 	return nil
 }
@@ -404,14 +520,14 @@ func semiJoinProbeRowViewIteratorFactory(
 					continue
 				}
 				if hasOffset && iterOffset > 0 {
-					iterOffset--
+					iterOffset -= 1
 					continue
 				}
 				if hasLimit {
 					if iterRemaining == 0 {
 						return RowView{}, ErrNoMoreRows
 					}
-					iterRemaining--
+					iterRemaining -= 1
 				}
 				return view, nil
 			}
@@ -419,4 +535,3 @@ func semiJoinProbeRowViewIteratorFactory(
 		})
 	}, nil
 }
-

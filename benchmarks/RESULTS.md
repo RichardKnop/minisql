@@ -217,6 +217,88 @@ Latency also improved: 7.4 ms → 4.5 ms (now within 10% of SQLite's 4.1 ms). Re
 
 ---
 
+### 2026-05-22 — Step 5 (new): compact cell build phase for regular hash joins
+
+**Root cause:** For regular (non-semi) hash joins on sequential inner scans, `buildHashBuckets` called `runTableScan → sequentialScan → view.MaterializeWithOverflow` to produce a full `[]OptionalValue` Row per inner row, then stored each Row in `bucket.rows[key]`. For the `Join_Inner_SmallLarge` benchmark (10k inner rows), this materialised 10k Rows at build time even though many may never be probed.
+
+**Fix:** Added `compactCell` struct (`value []byte`, `nullBitmask uint64`, `key RowID`) and `cells map[string][]compactCell` to `hashJoinBucket`. New `buildHashBucketFromCells` performs a RowView sequential scan, copying only the raw B+tree cell bytes per inner row (no `[]OptionalValue` allocation at build time). On probe hit, `NewRowView(memo.innerTable.Columns, cc.toCell()).MaterializeWithOverflow(...)` decodes the row lazily. Virtual tables (CTEs, derived tables) fall back to the legacy path since they have no B+tree pager.
+
+#### Memory change (B/op, benchtime=30s)
+
+| Benchmark | before | after | reduction | vs SQLite |
+|---|---|---|---|---|
+| Join_Inner_SmallLarge | 11.50 MiB | **10.94 MiB** | **1.05×** | 9.8× (was 10.2×) |
+| Join_Left_UnmatchedRows | 12.24 MiB | **11.67 MiB** | **1.05×** | 16.2× (was 17.3×) |
+
+#### Allocs/op change
+
+| Benchmark | before | after | change | note |
+|---|---|---|---|---|
+| Join_Inner_SmallLarge | 150,012 | 160,010 | +10k | one `make([]byte)` per inner cell during build |
+| Join_Left_UnmatchedRows | 209,893 | 209,891 | ≈ same | — |
+
+**Note:** The improvement is modest (~5%) because the benchmark has a high probe hit rate — every inner row matches some outer row, so `MaterializeWithOverflow` is called for all 10k rows anyway (just deferred from build to probe). The benefit is larger for queries with a low probe hit rate where many inner rows are stored but never matched.
+
+---
+
+### 2026-05-22 — Step 6: precomputed projection schema eliminates per-row []Column alloc
+
+**Root cause:** `Row.OnlyFields` (called via `projectRow` inside `selectStreaming`'s lazy iterator) allocates `make([]Column, len(fields))` AND `make([]OptionalValue, len(fields))` for every result row. `Column` is ~80 bytes (Name string, DefaultValue, Check fields), so for a 3-field SELECT from a 6-column combined JOIN row: 3 × 80 = 240 bytes of `[]Column` per row × 10k rows = 2.4 MB/iter. The column schema is **constant across all rows** in a result set — computing it per row is pure waste.
+
+**Fix:** Added `buildProjectionSchema(sourceColumns []Column, fields []Field) ([]Column, []int)` and `Row.projectFast(projectedCols []Column, srcIndexes []int) Row` in `row.go`. `selectStreaming` precomputes the schema once from the first row before starting the iterator, then uses `projectFast` for all subsequent rows. For expression fields (`f.Expr != nil`), `buildProjectionSchema` returns `nil` and the full `projectRow` path is used. Also faster: `projectFast` uses direct index access into `r.Values` instead of `getColumnQualified` string matching per field per row.
+
+#### Memory change (B/op, benchtime=30s)
+
+| Benchmark | baseline | after Step 5 | after Step 6 | total reduction | vs SQLite |
+|---|---|---|---|---|---|
+| Join_Inner_SmallLarge | 11.50 MiB | 10.94 MiB | **8.65 MiB** | **1.33×** | 8.1× (was 10.2×) |
+| Join_Left_UnmatchedRows | 12.24 MiB | 11.67 MiB | **9.38 MiB** | **1.31×** | 13.1× (was 17.3×) |
+
+#### Allocs/op change
+
+| Benchmark | baseline | after Step 5 | after Step 6 | vs baseline |
+|---|---|---|---|---|
+| Join_Inner_SmallLarge | 150,012 | 160,010 | **150,011** | ≈ same |
+| Join_Left_UnmatchedRows | 199,893 | 209,891 | **199,891** | ≈ same |
+
+**Note:** Steps 5 and 6 are complementary — Step 5 added +10k allocs (one `make([]byte)` per inner cell), Step 6 removes 10k allocs (eliminating `make([]Column)` per result row). Net: alloc count unchanged vs baseline, but memory reduced by ~28% across join benchmarks.
+
+Latency also improved: Join_Inner went from ~13 ms/op → ~8.3 ms/op (37% faster), now at **1.5× SQLite** (was 2.3×).
+
+---
+
+### 2026-05-22 — Step 7: streaming JOIN output eliminates []Row collection
+
+**Root cause:** Even with projectFast eliminating per-row `[]Column` allocation, all combined join rows were first buffered into a `[]Row` slice (`rows = append(rows, row)` at `Select.func2`, 29% of allocations = 2.8 MiB/iter) before being iterated by `selectStreaming`. This buffer holds every combined row for the full JOIN result set simultaneously, causing peak memory proportional to result set size.
+
+**Fix:** Added `selectStreamingJoin` in `select.go`. For INNER/LEFT/RIGHT/FULL OUTER joins with no ORDER BY sort, GROUP BY, aggregate, COUNT(*), or DISTINCT, this function replaces the collect-then-iterate pattern with a channel-reading iterator backed by the join goroutine running concurrently. The join goroutine sends rows to `ch chan Row`; the iterator reads from `ch` on demand, applying `projectFast` and LIMIT/OFFSET inline. `newIteratorWithClose` is used so that `Rows.Close()` (or natural EOF via `database/sql`) cancels the goroutine via `joinCancel()` and drains the channel cleanly. Semi/anti-semi joins are excluded (already handled by `selectSemiJoinDirectRowView`).
+
+#### Memory change (B/op, benchtime=20s)
+
+| Benchmark | after Step 6 | after Step 7 | reduction | cumulative from baseline | vs SQLite |
+|---|---|---|---|---|---|
+| Join_Inner_SmallLarge | 8.65 MiB | **6.12 MiB** | **1.41×** | **1.97×** total | 5.7× (was 10.2×) |
+| Join_Left_UnmatchedRows | 9.38 MiB | **6.86 MiB** | **1.37×** | **1.87×** total | 9.7× (was 17.3×) |
+
+#### Allocs/op — unchanged
+
+| Benchmark | after Step 6 | after Step 7 |
+|---|---|---|
+| Join_Inner_SmallLarge | 150,011 | **149,992** |
+| Join_Left_UnmatchedRows | 199,891 | **199,872** |
+
+Subquery_InList unaffected: 874 KB / 35,100 allocs — semi-join takes a separate path.
+
+**Total improvement (Steps 3+5+6+7 combined):**
+
+| Benchmark | original baseline | current | reduction | vs SQLite |
+|---|---|---|---|---|
+| Join_Inner_SmallLarge | 12.06 MiB | **6.12 MiB** | **1.97×** | 5.7× (was 10.2×) |
+| Join_Left_UnmatchedRows | 12.24 MiB | **6.86 MiB** | **1.78×** | 9.7× (was 17.3×) |
+| Subquery_InList | 5.78 MiB | **854 KB** | **6.9×** | 3.6× (was 25×) |
+
+---
+
 ### 2026-05-20 17:10 UTC
 
 #### Timing

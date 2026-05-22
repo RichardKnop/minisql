@@ -119,6 +119,42 @@ func (r Row) OnlyFields(fields ...Field) Row {
 	return filteredRow
 }
 
+// buildProjectionSchema computes the projected column list and the source
+// value indexes for a set of requested fields against a known source column
+// list.  Calling this once per query and reusing the results in projectFast
+// eliminates the per-row make([]Column,...) allocation inside OnlyFields.
+//
+// Returns (nil, nil) when any field has an expression (Expr != nil), signalling
+// to the caller to fall back to the full projectRow path.
+func buildProjectionSchema(sourceColumns []Column, fields []Field) ([]Column, []int) {
+	cols := make([]Column, 0, len(fields))
+	idxs := make([]int, 0, len(fields))
+	probe := Row{Columns: sourceColumns}
+	for _, f := range fields {
+		if f.Expr != nil {
+			return nil, nil // expression field — cannot precompute
+		}
+		col, idx := probe.getColumnQualified(f.AliasPrefix, f.Name)
+		if idx >= 0 {
+			cols = append(cols, col)
+			idxs = append(idxs, idx)
+		}
+	}
+	return cols, idxs
+}
+
+// projectFast returns a new Row containing only the columns in projectedCols
+// with values copied from the source row according to srcIndexes.  Only
+// make([]OptionalValue,...) is allocated — the projectedCols slice is shared
+// across all calls for the same query.
+func (r Row) projectFast(projectedCols []Column, srcIndexes []int) Row {
+	values := make([]OptionalValue, len(srcIndexes))
+	for i, idx := range srcIndexes {
+		values[i] = r.Values[idx]
+	}
+	return NewRowWithValues(projectedCols, values)
+}
+
 func rowMatchesRequestedFieldsInOrder(row Row, fields []Field) bool {
 	if len(fields) != len(row.Columns) {
 		return false
@@ -763,7 +799,7 @@ func (r Row) compareFieldValueWithColumnIndexes(fieldOperand, valueOperand Opera
 		var buf [256]byte
 		n := copy(buf[:], field.AliasPrefix)
 		buf[n] = '.'
-		n++
+		n += 1
 		n += copy(buf[n:], field.Name)
 		colIdx, ok = columnIndexes[string(buf[:n])]
 	}
@@ -995,7 +1031,7 @@ func (r Row) compareFieldsWithColumnIndexes(field1, field2 Operand, operator Ope
 		var buf [256]byte
 		n := copy(buf[:], f1.AliasPrefix)
 		buf[n] = '.'
-		n++
+		n += 1
 		n += copy(buf[n:], f1.Name)
 		idx1, ok = columnIndexes[string(buf[:n])]
 	}
@@ -1013,7 +1049,7 @@ func (r Row) compareFieldsWithColumnIndexes(field1, field2 Operand, operator Ope
 		var buf [256]byte
 		n := copy(buf[:], f2.AliasPrefix)
 		buf[n] = '.'
-		n++
+		n += 1
 		n += copy(buf[n:], f2.Name)
 		idx2, ok = columnIndexes[string(buf[:n])]
 	}

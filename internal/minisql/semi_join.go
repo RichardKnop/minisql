@@ -122,7 +122,7 @@ func liftINSubqueriesToSemiJoins(stmt Statement) Statement {
 			}
 
 			semiAlias := fmt.Sprintf("__semi%d", semiCounter)
-			semiCounter++
+			semiCounter += 1
 
 			// Build the ON condition: outerAlias.outerCol = semiAlias.innerCol
 			outerField := cond.Operand1.Value.(Field)

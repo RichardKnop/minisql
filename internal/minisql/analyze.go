@@ -246,7 +246,7 @@ func (d *Database) analyzeIndex(ctx context.Context, statsTable *Table, tableNam
 				prefixMaps[prefixLen-1][prefixKey] = struct{}{}
 			}
 			if len(ck.Values) > 0 {
-				freq[mcvKeyStr(ck.Values[0])]++
+				freq[mcvKeyStr(ck.Values[0])] += 1
 				if collectHist {
 					if f, ok := anyToFloat64(ck.Values[0]); ok {
 						histValues = append(histValues, f)
@@ -256,7 +256,7 @@ func (d *Database) analyzeIndex(ctx context.Context, statsTable *Table, tableNam
 		} else {
 			keyStr := mcvKeyStr(key)
 			prefixMaps[0][keyStr] = struct{}{}
-			freq[keyStr]++
+			freq[keyStr] += 1
 			if collectHist {
 				if f, ok := anyToFloat64(key); ok {
 					histValues = append(histValues, f)

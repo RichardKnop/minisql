@@ -1105,7 +1105,7 @@ func streamCheckExpectedIndexEntries(ctx context.Context, report IntegrityReport
 
 		rowIDs := actual[keyID]
 		if rowIDs[row.Key] > 0 {
-			rowIDs[row.Key]--
+			rowIDs[row.Key] -= 1
 			if rowIDs[row.Key] == 0 {
 				delete(rowIDs, row.Key)
 				if len(rowIDs) == 0 {
@@ -1133,7 +1133,7 @@ func expectedInvertedIndexEntriesForRow(index SecondaryIndex, row Row) (map[stri
 			return nil, err
 		}
 		for _, token := range tokens {
-			expected[integrityKeyID(token.Term)]++
+			expected[integrityKeyID(token.Term)] += 1
 		}
 	case IndexMethodInverted:
 		terms, err := jsonInvertedTermsForRow(index, row)
