@@ -1,6 +1,6 @@
 # Benchmark Results
 
-### 2026-05-22 — INLJ hot-path optimisation baseline (branch refactor/row-view-api)
+### 2026-05-22 — DISTINCT streaming + GROUP BY passedIndices (branch refactor/row-view-api)
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26
 **Settings:** `-benchtime=3s -count=3` · median of 3 runs shown
@@ -14,6 +14,8 @@ Cumulative optimisations in this baseline:
 - Precomputed projection schema (`projectFast`, eliminates per-row `[]Column` alloc)
 - INLJ hot path: `ErrNotFound` sentinel (−20k allocs), `PointUniqueRowID` direct call,
   `singleKeySlice` reuse for single-pair `JoinColumnPairs`, `neededOuterFields` column pruning
+- DISTINCT streaming via `appendDistinctKeyFromView` + `newDistinctRowViewIteratorFactory` (no []OptionalValue per row; allocs at parity with SQLite)
+- GROUP BY `buildResult`: `resultRows []Row` → `passedIndices []int32` (-4.8 KiB/op)
 
 #### Timing (median of 3 runs)
 
@@ -63,9 +65,9 @@ Cumulative optimisations in this baseline:
 
 | Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan | ratio |
 |---|---|---|---|---|---|---|---|
-| GroupBy_Aggregate | 55.0 KiB | — | — | 3.5 KiB | — | — | **16×** |
-| Having_Filter | 44.0 KiB | — | — | 1.9 KiB | — | — | **23×** |
-| Distinct_HighCardinality | 2.91 MiB | — | — | 586 KiB | — | — | **5.1×** |
+| GroupBy_Aggregate | 50.7 KiB | — | — | 3.5 KiB | — | — | **14×** |
+| Having_Filter | 39.4 KiB | — | — | 1.9 KiB | — | — | **20×** |
+| Distinct_HighCardinality | 1.72 MiB | — | — | 586 KiB | — | — | **2.9×** |
 | Delete_ByPK | 25.5 KiB | — | — | 447 B | — | — | **58×** |
 | ForeignKey_Insert | 20.1 KiB | — | — | 192 B | — | — | **107×** |
 | ForeignKey_DeleteCascade | 14.7 KiB | — | — | 128 B | — | — | **118×** |
@@ -113,7 +115,7 @@ Cumulative optimisations in this baseline:
 |---|---|---|---|
 | GroupBy_Aggregate | 468 | 309 | 1.5× |
 | Having_Filter | 273 | 111 | 2.5× |
-| Distinct_HighCardinality | 90,139 | 40,010 | 2.3× |
+| Distinct_HighCardinality | **40,145** | **40,010** | **~1.0×** ✓ |
 | Delete_ByPK | 112 | 19 | 5.9× |
 | Insert_SingleRow | 56 | 12 | 4.7× |
 | Join_Inner_SmallLarge | 139,989 | 99,757 | 1.4× |
