@@ -860,32 +860,40 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 		}
 	}
 
-	baseRowChan := make(chan Row, 100)
-	baseErrChan := make(chan error, 1)
-	baseFields := fieldsFromColumns(baseTable.Columns...)
-
-	go func() {
-		defer close(baseRowChan)
-		if err := runTableScan(ctx, p, baseTable, baseScan, baseFields, chanRowCallback(ctx, baseRowChan)); err != nil {
-			baseErrChan <- err
+	// RowView outer scan: for sequential non-virtual hash joins, iterate the base
+	// table as RowViews to avoid materialising unmatched outer rows.
+	if canUseOuterRowViewScan(p, baseTable, baseScan) {
+		if err := p.executeNestedLoopJoinOuterRowView(ctx, provider, baseTable, baseScan, filteredPipe, hashTables, joinMemos); err != nil {
+			return err
 		}
-	}()
+	} else {
+		baseRowChan := make(chan Row, 100)
+		baseErrChan := make(chan error, 1)
+		baseFields := fieldsFromColumns(baseTable.Columns...)
 
-	for baseRow := range baseRowChan {
+		go func() {
+			defer close(baseRowChan)
+			if err := runTableScan(ctx, p, baseTable, baseScan, baseFields, chanRowCallback(ctx, baseRowChan)); err != nil {
+				baseErrChan <- err
+			}
+		}()
+
+		for baseRow := range baseRowChan {
+			select {
+			case err := <-baseErrChan:
+				return err
+			default:
+			}
+			if err := p.executeJoinsForRow(ctx, provider, baseRow, 0, filteredPipe, hashTables, joinMemos); err != nil {
+				return err
+			}
+		}
+
 		select {
 		case err := <-baseErrChan:
 			return err
 		default:
 		}
-		if err := p.executeJoinsForRow(ctx, provider, baseRow, 0, filteredPipe, hashTables, joinMemos); err != nil {
-			return err
-		}
-	}
-
-	select {
-	case err := <-baseErrChan:
-		return err
-	default:
 	}
 
 	// RIGHT JOIN / FULL OUTER JOIN: emit right-table rows that had no matching base row.
@@ -898,6 +906,137 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 	}
 	if hasRightOrFullJoin {
 		if err := p.executeRightJoinPass(ctx, provider, filteredPipe); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// canUseOuterRowViewScan reports whether the outer (base) table scan in a hash
+// join can be driven as a RowView iteration rather than a fully materialised Row
+// scan. When true, executeNestedLoopJoinOuterRowView can be called instead of the
+// channel-based fallback path.
+func canUseOuterRowViewScan(p QueryPlan, baseTable *Table, baseScan Scan) bool {
+	return baseScan.Type == ScanTypeSequential &&
+		baseTable.virtualRows == nil &&
+		!baseTable.parallelScan &&
+		len(p.Joins) > 0 &&
+		p.Joins[0].Algorithm == JoinAlgorithmHash &&
+		len(p.Joins[0].JoinColumnPairs) > 0 &&
+		rowViewFilterSupports(baseTable.Columns, baseScan.Filters)
+}
+
+// executeNestedLoopJoinOuterRowView iterates the base table as RowViews and
+// materialises each outer row only when the hash probe succeeds (or when the join
+// type requires an outer row even on a miss, e.g. LEFT JOIN). For INNER JOINs
+// where selectivity is low this eliminates make([]OptionalValue) for every
+// unmatched outer row — the dominant allocation in a wide-table join scan.
+//
+// Caller must have verified canUseOuterRowViewScan before calling.
+func (p QueryPlan) executeNestedLoopJoinOuterRowView(
+	ctx context.Context,
+	provider TableProvider,
+	baseTable *Table,
+	baseScan Scan,
+	filteredPipe chan<- Row,
+	hashTables map[int]*hashJoinBucket,
+	joinMemos []joinMemo,
+) error {
+	firstJoin := p.Joins[0]
+
+	// Pre-compute the base-table column indices for the first join's key columns.
+	// These are used by appendHashKeyFromView to extract the probe key without
+	// materialising the full row.
+	colIdxMap := make(map[string]int, len(baseTable.Columns))
+	for i, col := range baseTable.Columns {
+		colIdxMap[col.Name] = i
+	}
+	colIdxs := make([]int, len(firstJoin.JoinColumnPairs))
+	colKinds := make([]ColumnKind, len(firstJoin.JoinColumnPairs))
+	for i, pair := range firstJoin.JoinColumnPairs {
+		idx, ok := colIdxMap[pair.BaseTableColumn.Name]
+		if !ok {
+			return fmt.Errorf("outer RowView scan: join column %q not found in base table %s",
+				pair.BaseTableColumn.Name, baseTable.Name)
+		}
+		colIdxs[i] = idx
+		colKinds[i] = baseTable.Columns[idx].Kind
+	}
+
+	// All-true mask: materialise every base-table column (same as the existing path).
+	allMask := make([]bool, len(baseTable.Columns))
+	for i := range allMask {
+		allMask[i] = true
+	}
+
+	// Compile a RowView filter for any post-scan base-table conditions.
+	var baseFilter func(context.Context, RowView) (bool, error)
+	if len(baseScan.Filters) > 0 {
+		baseFilter = compileRowViewFilterForColumns(baseTable.Columns, baseTable.pager, baseScan.Filters)
+	}
+
+	bucket := hashTables[0]
+	innerJoin := firstJoin.Type == Inner
+
+	cursor, err := baseTable.SeekFirst(ctx)
+	if err != nil {
+		return err
+	}
+	page, err := baseTable.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return fmt.Errorf("outer RowView scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	var keyBuf [128]byte
+
+	for !cursor.EndOfTable {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if page.Index != cursor.PageIdx {
+			page, err = baseTable.pager.ReadPage(ctx, cursor.PageIdx)
+			if err != nil {
+				return fmt.Errorf("outer RowView scan: %w", err)
+			}
+		}
+
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+		advanceLeafCursor(cursor, page)
+
+		view := NewRowView(baseTable.Columns, cell)
+
+		// Apply post-scan base-table filters via typed RowView accessors.
+		if baseFilter != nil {
+			pass, filterErr := baseFilter(ctx, view)
+			if filterErr != nil {
+				return filterErr
+			}
+			if !pass {
+				continue
+			}
+		}
+
+		// Extract probe key via typed RowView accessors — no make([]OptionalValue).
+		probeKey, valid, err := appendHashKeyFromView(keyBuf[:0], view, colIdxs, colKinds)
+		if err != nil {
+			return err
+		}
+
+		// INNER JOIN fast-skip: if the key is NULL or the Bloom filter reports a
+		// definite absence, this outer row has no match — skip without materialising.
+		if innerJoin && (!valid || bucket == nil || !bucket.filter.MayContain(probeKey)) {
+			continue
+		}
+
+		// Materialise the base-table row now that we know it may be needed.
+		baseRow, err := view.MaterializeWithOverflow(ctx, baseTable.pager, allMask)
+		if err != nil {
+			return err
+		}
+
+		if err := p.executeJoinsForRow(ctx, provider, baseRow, 0, filteredPipe, hashTables, joinMemos); err != nil {
 			return err
 		}
 	}

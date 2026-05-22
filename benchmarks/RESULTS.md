@@ -324,6 +324,39 @@ Subquery_InList unaffected: 874 KB / 35,100 allocs — semi-join takes a separat
 
 ---
 
+### 2026-05-22 — RowView outer scan for hash join base table
+
+**Root cause:** `executeNestedLoopJoin` always materialised every outer (base) table row into `Row{[]OptionalValue}` before probing the hash table — even for INNER JOINs where most outer rows produce no match. For a 1% selectivity INNER JOIN (10K outer rows → 100 results), all 10K outer rows received a full `make([]OptionalValue, nCols)` decode before the probe key was even checked.
+
+**Fix:** Added `executeNestedLoopJoinOuterRowView` in `query_plan_join.go`. For sequential non-virtual base-table scans where the first join is a hash join, the outer table is now iterated as `RowView` objects (raw leaf cell bytes). The join key is extracted via `appendHashKeyFromView` (typed accessors, no boxing) and the Bloom filter is checked **before** materialising the row. For INNER JOINs, rows with a NULL key or a definite Bloom absence are discarded entirely — no `make([]OptionalValue)` is ever called for them. Only rows that pass the Bloom filter are materialised and forwarded to `executeJoinsForRow`. The left/right/full outer join path materialises unconditionally (every outer row must emit something) but still avoids the channel goroutine overhead.
+
+#### New benchmark: `Join_Inner_LowSelectivity` (1% match rate, 10K outer → 100 results)
+
+| Metric | minisql | sqlite |
+|---|---|---|
+| ns/op | 333 µs | 845 µs |
+| B/op | 112 KiB | 11.3 KiB |
+| allocs/op | 2,613 | 1,009 |
+
+Without the RowView path, this benchmark would allocate ~9,900 more `[]OptionalValue` slices (one per skipped outer row) — roughly +240–320 KiB B/op and +~10K allocs/op.
+
+#### Impact on existing benchmarks
+
+`Join_Inner_SmallLarge` (100% match rate) is unchanged — all outer rows match so the Bloom skip never fires:
+
+| Benchmark | allocs/op | B/op |
+|---|---|---|
+| Join_Inner_SmallLarge | 139,987 | 6.32 MiB |
+
+**Cumulative totals (all join optimisations combined):**
+
+| Benchmark | original baseline | current | reduction | vs SQLite |
+|---|---|---|---|---|
+| Join_Inner_SmallLarge | 12.06 MiB / 150k allocs | **6.32 MiB / 140k allocs** | **1.91×** | 5.6× (was 10.2×) |
+| Join_Inner_LowSelectivity | — (new) | **112 KiB / 2,613 allocs** | — | 10× memory vs SQLite (but 2.5× faster!) |
+
+---
+
 ### 2026-05-20 17:10 UTC
 
 #### Timing
