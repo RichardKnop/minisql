@@ -168,7 +168,7 @@ func rowViewColumnIndex(field Field, columnIndexes map[string]int) (int, bool) {
 		var buf [256]byte
 		n := copy(buf[:], field.AliasPrefix)
 		buf[n] = '.'
-		n++
+		n += 1
 		n += copy(buf[n:], field.Name)
 		colIdx, ok = columnIndexes[string(buf[:n])]
 	}

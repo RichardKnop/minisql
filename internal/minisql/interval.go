@@ -186,7 +186,7 @@ func intervalFloorDivMod(a, b int32) (int32, int32) {
 	r := a % b
 	if r < 0 {
 		r += b
-		q--
+		q -= 1
 	}
 	return q, r
 }

@@ -12,9 +12,20 @@ import (
 type joinMemo struct {
 	innerTable      *Table
 	innerFields     []Field
+	innerAllMask    []bool   // all-true mask for full inner-row materialisation via RowView
 	combinedColumns []Column // alias-prefixed combined columns for this join level
 	joinFilter      func(Row) (bool, error)
 	nullInnerCount  int // len(innerTable.Columns), for LEFT/FULL OUTER null padding
+
+	// Pre-computed for index point lookup hot path (avoids per-outer-row allocations).
+	singleKeySlice      []any                   // reusable 1-element key slice for single-column joins
+	innerIndex          BTreeIndex              // resolved index for point lookups (avoids per-row IndexByName)
+	innerSelectedMask   []bool                  // selectedColumnsMask for inner table
+	innerNSelected      int                     // len(innerFields)
+	innerTableFilter    func(Row) (bool, error) // compileScanFilter for inner table rows
+	innerCoveringFilter func(Row) (bool, error) // compileScanFilter for covering index rows
+	innerCovering       bool                    // whether inner scan is a covering index
+	innerIndexCols      []Column                // index columns for inner covering scan
 }
 
 // buildCombinedColumns returns the alias-prefixed column list for the first join
@@ -708,6 +719,61 @@ func planJoinTableScan(t *Table, tableName, tableAlias string, conditions OneOrM
 	return scan
 }
 
+// neededOuterFields returns the subset of base-table columns that the join
+// actually references.  Decoding only needed columns avoids boxing TextPointer
+// values for columns that appear in the schema but are not selected or used as
+// join keys — saving one heap allocation per unused text column per outer row.
+//
+// When there are scan filters the function falls back to all columns because
+// the filter evaluation reads column values by index and must see decoded data.
+func neededOuterFields(p QueryPlan, baseTable *Table, baseScan Scan, selectedFields []Field) []Field {
+	// With filters we cannot safely skip columns (filter may read any column).
+	if len(baseScan.Filters) > 0 {
+		return fieldsFromColumns(baseTable.Columns...)
+	}
+
+	needed := make(map[string]struct{}, len(baseTable.Columns))
+
+	// Join key columns for every join that has the base table on its left side.
+	for _, join := range p.Joins {
+		if join.LeftScanIndex != 0 {
+			continue
+		}
+		for _, pair := range join.JoinColumnPairs {
+			needed[pair.BaseTableColumn.Name] = struct{}{}
+		}
+		if join.OuterJoinColumn != "" {
+			needed[join.OuterJoinColumn] = struct{}{}
+		}
+	}
+
+	// SELECT fields that are explicitly scoped to the base table's alias.
+	// Fields with no alias prefix are ambiguous in a join query — include all.
+	baseAlias := baseScan.TableAlias
+	for _, f := range selectedFields {
+		if f.AliasPrefix == "" {
+			// Unaliased field: can't determine ownership — fall back to all cols.
+			return fieldsFromColumns(baseTable.Columns...)
+		}
+		if f.AliasPrefix == baseAlias {
+			needed[f.Name] = struct{}{}
+		}
+	}
+
+	if len(needed) == 0 || len(needed) >= len(baseTable.Columns) {
+		return fieldsFromColumns(baseTable.Columns...)
+	}
+
+	// Build reduced field list preserving schema order.
+	fields := make([]Field, 0, len(needed))
+	for _, col := range baseTable.Columns {
+		if _, ok := needed[col.Name]; ok {
+			fields = append(fields, Field{Name: col.Name})
+		}
+	}
+	return fields
+}
+
 // runTableScan dispatches a single-table scan to the appropriate method based on
 // the scan type. Used in the JOIN execution path where the scan type may have been
 // optimized to an index scan by planJoinTableScan.
@@ -845,41 +911,65 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 			joinConditions = append(joinConditions, join.Conditions)
 		}
 
+		allMask := make([]bool, len(innerTable.Columns))
+		for k := range allMask {
+			allMask[k] = true
+		}
+		innerFields := fieldsFromColumns(innerTable.Columns...)
+		innerScanForMemo := p.Scans[join.RightScanIndex]
+		innerIdx, _ := innerTable.IndexByName(innerScanForMemo.IndexName)
 		joinMemos[i] = joinMemo{
-			innerTable:      innerTable,
-			innerFields:     fieldsFromColumns(innerTable.Columns...),
-			combinedColumns: combinedCols,
-			joinFilter:      compileRowFilterForColumns(combinedCols, joinConditions),
-			nullInnerCount:  len(innerTable.Columns),
+			innerTable:          innerTable,
+			innerFields:         innerFields,
+			innerAllMask:        allMask,
+			combinedColumns:     combinedCols,
+			joinFilter:          compileRowFilterForColumns(combinedCols, joinConditions),
+			nullInnerCount:      len(innerTable.Columns),
+			singleKeySlice:      make([]any, 1),
+			innerIndex:          innerIdx,
+			innerSelectedMask:   selectedColumnsMask(innerTable.Columns, innerFields),
+			innerNSelected:      len(innerFields),
+			innerTableFilter:    compileScanFilter(innerTable.Columns, innerScanForMemo.Filters),
+			innerCoveringFilter: compileScanFilter(innerScanForMemo.IndexColumns, innerScanForMemo.Filters),
+			innerCovering:       innerScanForMemo.CoveringIndex,
+			innerIndexCols:      innerScanForMemo.IndexColumns,
 		}
 	}
 
-	baseRowChan := make(chan Row, 100)
-	baseErrChan := make(chan error, 1)
-	baseFields := fieldsFromColumns(baseTable.Columns...)
-
-	go func() {
-		defer close(baseRowChan)
-		if err := runTableScan(ctx, p, baseTable, baseScan, baseFields, chanRowCallback(ctx, baseRowChan)); err != nil {
-			baseErrChan <- err
+	// RowView outer scan: for sequential non-virtual hash joins, iterate the base
+	// table as RowViews to avoid materialising unmatched outer rows.
+	if canUseOuterRowViewScan(p, baseTable, baseScan) {
+		if err := p.executeNestedLoopJoinOuterRowView(ctx, provider, baseTable, baseScan, filteredPipe, hashTables, joinMemos); err != nil {
+			return err
 		}
-	}()
+	} else {
+		baseRowChan := make(chan Row, 100)
+		baseErrChan := make(chan error, 1)
+		baseFields := neededOuterFields(p, baseTable, baseScan, selectedFields)
 
-	for baseRow := range baseRowChan {
+		go func() {
+			defer close(baseRowChan)
+			if err := runTableScan(ctx, p, baseTable, baseScan, baseFields, chanRowCallback(ctx, baseRowChan)); err != nil {
+				baseErrChan <- err
+			}
+		}()
+
+		for baseRow := range baseRowChan {
+			select {
+			case err := <-baseErrChan:
+				return err
+			default:
+			}
+			if err := p.executeJoinsForRow(ctx, provider, baseRow, 0, filteredPipe, hashTables, joinMemos); err != nil {
+				return err
+			}
+		}
+
 		select {
 		case err := <-baseErrChan:
 			return err
 		default:
 		}
-		if err := p.executeJoinsForRow(ctx, provider, baseRow, 0, filteredPipe, hashTables, joinMemos); err != nil {
-			return err
-		}
-	}
-
-	select {
-	case err := <-baseErrChan:
-		return err
-	default:
 	}
 
 	// RIGHT JOIN / FULL OUTER JOIN: emit right-table rows that had no matching base row.
@@ -892,6 +982,137 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 	}
 	if hasRightOrFullJoin {
 		if err := p.executeRightJoinPass(ctx, provider, filteredPipe); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// canUseOuterRowViewScan reports whether the outer (base) table scan in a hash
+// join can be driven as a RowView iteration rather than a fully materialised Row
+// scan. When true, executeNestedLoopJoinOuterRowView can be called instead of the
+// channel-based fallback path.
+func canUseOuterRowViewScan(p QueryPlan, baseTable *Table, baseScan Scan) bool {
+	return baseScan.Type == ScanTypeSequential &&
+		baseTable.virtualRows == nil &&
+		!baseTable.parallelScan &&
+		len(p.Joins) > 0 &&
+		p.Joins[0].Algorithm == JoinAlgorithmHash &&
+		len(p.Joins[0].JoinColumnPairs) > 0 &&
+		rowViewFilterSupports(baseTable.Columns, baseScan.Filters)
+}
+
+// executeNestedLoopJoinOuterRowView iterates the base table as RowViews and
+// materialises each outer row only when the hash probe succeeds (or when the join
+// type requires an outer row even on a miss, e.g. LEFT JOIN). For INNER JOINs
+// where selectivity is low this eliminates make([]OptionalValue) for every
+// unmatched outer row — the dominant allocation in a wide-table join scan.
+//
+// Caller must have verified canUseOuterRowViewScan before calling.
+func (p QueryPlan) executeNestedLoopJoinOuterRowView(
+	ctx context.Context,
+	provider TableProvider,
+	baseTable *Table,
+	baseScan Scan,
+	filteredPipe chan<- Row,
+	hashTables map[int]*hashJoinBucket,
+	joinMemos []joinMemo,
+) error {
+	firstJoin := p.Joins[0]
+
+	// Pre-compute the base-table column indices for the first join's key columns.
+	// These are used by appendHashKeyFromView to extract the probe key without
+	// materialising the full row.
+	colIdxMap := make(map[string]int, len(baseTable.Columns))
+	for i, col := range baseTable.Columns {
+		colIdxMap[col.Name] = i
+	}
+	colIdxs := make([]int, len(firstJoin.JoinColumnPairs))
+	colKinds := make([]ColumnKind, len(firstJoin.JoinColumnPairs))
+	for i, pair := range firstJoin.JoinColumnPairs {
+		idx, ok := colIdxMap[pair.BaseTableColumn.Name]
+		if !ok {
+			return fmt.Errorf("outer RowView scan: join column %q not found in base table %s",
+				pair.BaseTableColumn.Name, baseTable.Name)
+		}
+		colIdxs[i] = idx
+		colKinds[i] = baseTable.Columns[idx].Kind
+	}
+
+	// All-true mask: materialise every base-table column (same as the existing path).
+	allMask := make([]bool, len(baseTable.Columns))
+	for i := range allMask {
+		allMask[i] = true
+	}
+
+	// Compile a RowView filter for any post-scan base-table conditions.
+	var baseFilter func(context.Context, RowView) (bool, error)
+	if len(baseScan.Filters) > 0 {
+		baseFilter = compileRowViewFilterForColumns(baseTable.Columns, baseTable.pager, baseScan.Filters)
+	}
+
+	bucket := hashTables[0]
+	innerJoin := firstJoin.Type == Inner
+
+	cursor, err := baseTable.SeekFirst(ctx)
+	if err != nil {
+		return err
+	}
+	page, err := baseTable.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return fmt.Errorf("outer RowView scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	var keyBuf [128]byte
+
+	for !cursor.EndOfTable {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if page.Index != cursor.PageIdx {
+			page, err = baseTable.pager.ReadPage(ctx, cursor.PageIdx)
+			if err != nil {
+				return fmt.Errorf("outer RowView scan: %w", err)
+			}
+		}
+
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+		advanceLeafCursor(cursor, page)
+
+		view := NewRowView(baseTable.Columns, cell)
+
+		// Apply post-scan base-table filters via typed RowView accessors.
+		if baseFilter != nil {
+			pass, filterErr := baseFilter(ctx, view)
+			if filterErr != nil {
+				return filterErr
+			}
+			if !pass {
+				continue
+			}
+		}
+
+		// Extract probe key via typed RowView accessors — no make([]OptionalValue).
+		probeKey, valid, err := appendHashKeyFromView(keyBuf[:0], view, colIdxs, colKinds)
+		if err != nil {
+			return err
+		}
+
+		// INNER JOIN fast-skip: if the key is NULL or the Bloom filter reports a
+		// definite absence, this outer row has no match — skip without materialising.
+		if innerJoin && (!valid || bucket == nil || !bucket.filter.MayContain(probeKey)) {
+			continue
+		}
+
+		// Materialise the base-table row now that we know it may be needed.
+		baseRow, err := view.MaterializeWithOverflow(ctx, baseTable.pager, allMask)
+		if err != nil {
+			return err
+		}
+
+		if err := p.executeJoinsForRow(ctx, provider, baseRow, 0, filteredPipe, hashTables, joinMemos); err != nil {
 			return err
 		}
 	}
@@ -927,7 +1148,9 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 
 	// Nested-loop join (index point or sequential).
 	// Use precomputed per-join-level state from memos to avoid repeated allocations.
-	memo := memos[joinIndex]
+	// Take a pointer into the slice (not a copy) so the 216-byte struct never
+	// escapes to the heap due to closure capture in the non-unique index path.
+	memo := &memos[joinIndex]
 	innerScan := p.Scans[join.RightScanIndex]
 	fromAlias := p.Scans[join.LeftScanIndex].TableAlias
 
@@ -940,8 +1163,10 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 		// is far more expensive than the lookup itself.
 		var joinKeyValues []any
 		if len(join.JoinColumnPairs) > 0 {
-			joinKeyValues = make([]any, len(join.JoinColumnPairs))
-			for i, pair := range join.JoinColumnPairs {
+			if len(join.JoinColumnPairs) == 1 {
+				// Single-pair fast path: reuse the pre-allocated singleKeySlice to
+				// avoid make([]any, 1) on every outer row (~70MB saved per benchmark).
+				pair := join.JoinColumnPairs[0]
 				var (
 					keyValue OptionalValue
 					ok       bool
@@ -951,11 +1176,28 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 				} else {
 					keyValue, ok = currentRow.GetValue(fromAlias + "." + pair.BaseTableColumn.Name)
 				}
-				if !ok || !keyValue.Valid {
-					joinKeyValues = nil
-					break
+				if ok && keyValue.Valid {
+					memo.singleKeySlice[0] = keyValue.Value
+					joinKeyValues = memo.singleKeySlice
 				}
-				joinKeyValues[i] = keyValue.Value
+			} else {
+				joinKeyValues = make([]any, len(join.JoinColumnPairs))
+				for i, pair := range join.JoinColumnPairs {
+					var (
+						keyValue OptionalValue
+						ok       bool
+					)
+					if joinIndex == 0 {
+						keyValue, ok = currentRow.GetValue(pair.BaseTableColumn.Name)
+					} else {
+						keyValue, ok = currentRow.GetValue(fromAlias + "." + pair.BaseTableColumn.Name)
+					}
+					if !ok || !keyValue.Valid {
+						joinKeyValues = nil
+						break
+					}
+					joinKeyValues[i] = keyValue.Value
+				}
 			}
 		} else {
 			var (
@@ -968,7 +1210,10 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 				keyValue, ok = currentRow.GetValue(fromAlias + "." + join.OuterJoinColumn)
 			}
 			if ok && keyValue.Valid {
-				joinKeyValues = []any{keyValue.Value}
+				// Reuse the pre-allocated single-key slice from joinMemo to avoid
+				// allocating a new []any{...} on every outer row.
+				memo.singleKeySlice[0] = keyValue.Value
+				joinKeyValues = memo.singleKeySlice
 			}
 		}
 
@@ -1005,21 +1250,33 @@ func (p QueryPlan) executeJoinsForRow(ctx context.Context, provider TableProvide
 					return err
 				}
 			default:
-				// Use indexPointGetAll instead of indexPointScan so that no callback
-				// closure is created at this call site.  The closure would otherwise
-				// escape to the heap once per outer row, producing large allocations
-				// even in the unmatched LEFT JOIN case where it is never called.
-				innerRows, err := memo.innerTable.indexPointGetAll(ctx, indexScan, memo.innerFields)
-				if err != nil {
-					return err
-				}
-				for _, innerRow := range innerRows {
-					combinedRow := combineRowsWithSchema(currentRow, innerRow, memo.combinedColumns)
+				// Unique index fast path: PointUniqueRowID avoids allocating a closure +
+				// rows slice on every outer row (including the 99%-miss case).
+				for _, indexKey := range joinKeyValues {
+					rowID, ptErr := memo.innerIndex.PointUniqueRowID(ctx, indexKey)
+					if errors.Is(ptErr, ErrNotFound) {
+						continue
+					}
+					if ptErr != nil {
+						return ptErr
+					}
+					row, ok, rowErr := memo.innerTable.indexedScanRow(
+						ctx, indexKey, rowID,
+						memo.innerCovering, memo.innerIndexCols,
+						memo.innerSelectedMask, memo.innerNSelected,
+						memo.innerTableFilter, memo.innerCoveringFilter,
+					)
+					if rowErr != nil {
+						return rowErr
+					}
+					if !ok {
+						continue
+					}
+					combinedRow := combineRowsWithSchema(currentRow, row, memo.combinedColumns)
 					matches := true
 					if memo.joinFilter != nil {
 						var filterErr error
-						matches, filterErr = memo.joinFilter(combinedRow)
-						if filterErr != nil {
+						if matches, filterErr = memo.joinFilter(combinedRow); filterErr != nil {
 							return filterErr
 						}
 					}
@@ -1164,22 +1421,36 @@ func (p QueryPlan) executeHashJoinForRow(ctx context.Context, currentRow Row, jo
 		return nil
 	}
 
-	// Regular join: retrieve matching inner rows from bucket.rows.
-	var matchingRows []Row
-	if probeKey != nil && bucket != nil {
-		// Check the Bloom filter before touching the hash map: if the filter
-		// says the key is definitely absent, skip the map probe entirely.
-		if bucket.filter.MayContain(probeKey) {
-			matchingRows = bucket.rows[string(probeKey)]
-		}
-	}
-
+	// Regular join: retrieve matching inner rows from the bucket.
 	matched := false
-	for _, innerRow := range matchingRows {
-		combinedRow := combineRowsWithSchema(currentRow, innerRow, memo.combinedColumns)
-		matched = true
-		if err := p.executeJoinsForRow(ctx, nil, combinedRow, joinIndex+1, filteredPipe, hashTables, memos); err != nil {
-			return err
+	if probeKey != nil && bucket != nil && bucket.filter.MayContain(probeKey) {
+		if bucket.cells != nil {
+			// Compact path: decode cell bytes lazily on probe hit, avoiding
+			// the build-phase []OptionalValue allocation for unmatched rows.
+			// Use string(probeKey) directly in the index expression — the Go compiler
+			// elides the string allocation for []byte→string conversions used only
+			// as a map key, avoiding one heap alloc per matching outer row.
+			for _, cc := range bucket.cells[string(probeKey)] {
+				innerRow, err := NewRowView(memo.innerTable.Columns, cc.toCell()).
+					MaterializeWithOverflow(ctx, memo.innerTable.pager, memo.innerAllMask)
+				if err != nil {
+					return err
+				}
+				combinedRow := combineRowsWithSchema(currentRow, innerRow, memo.combinedColumns)
+				matched = true
+				if err := p.executeJoinsForRow(ctx, nil, combinedRow, joinIndex+1, filteredPipe, hashTables, memos); err != nil {
+					return err
+				}
+			}
+		} else {
+			// Legacy path: pre-materialised rows (index scans or non-RowView-compatible filters).
+			for _, innerRow := range bucket.rows[string(probeKey)] {
+				combinedRow := combineRowsWithSchema(currentRow, innerRow, memo.combinedColumns)
+				matched = true
+				if err := p.executeJoinsForRow(ctx, nil, combinedRow, joinIndex+1, filteredPipe, hashTables, memos); err != nil {
+					return err
+				}
+			}
 		}
 	}
 

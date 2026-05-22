@@ -94,6 +94,9 @@ type BTreeIndex interface {
 	// lazily one at a time.  fn may return an error to stop early (e.g. a LIMIT sentinel);
 	// that error is propagated unchanged to the caller.
 	VisitRowIDs(ctx context.Context, key any, fn func(RowID) error) error
+	// PointUniqueRowID returns the single row ID for key on a unique index.
+	// Returns ErrNotFound when the key is absent.
+	PointUniqueRowID(ctx context.Context, key any) (RowID, error)
 	SeekLastKey(ctx context.Context, pageIdx PageIndex) (any, error)
 	Insert(ctx context.Context, key any, rowID RowID) error
 	Delete(ctx context.Context, key any, rowID RowID) error

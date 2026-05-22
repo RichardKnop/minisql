@@ -69,17 +69,6 @@ the full fixture on every iteration. Runtime query and maintenance benchmarks
 use `BENCH_INVERTED_RUNTIME_TIME=10x` by default so repeated baseline runs stay
 practical while still averaging several operations.
 
-## Generating charts
-
-Charts require `benchmarks/raw.txt` to exist (produced by `make bench`).
-
-```sh
-# Generate PNG bar charts to benchmarks/charts/
-make bench-chart
-```
-
-Charts compare MiniSQL (blue) against SQLite (red) for each benchmark and are written to `benchmarks/charts/`.
-
 ## Statistical comparison with benchstat
 
 For a statistically rigorous comparison install [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat):

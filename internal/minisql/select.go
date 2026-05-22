@@ -209,16 +209,38 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return result, err
 	}
 
+	// Fast path for hash semi-join with a sequential outer scan and RowView-compatible
+	// conditions. Scans the outer table without materialising non-matching rows.
+	if result, ok, err := t.selectSemiJoinDirectRowView(ctx, stmt, plan, requestedFields); ok || err != nil {
+		return result, err
+	}
+
+	// Streaming join path: for INNER/LEFT/RIGHT/FULL OUTER joins with no
+	// ORDER BY sort, GROUP BY, aggregate, or DISTINCT, deliver rows from the
+	// join goroutine directly to the Iterator without buffering into []Row.
+	// This eliminates the rows = append(rows, row) slice growth.
+	if result, ok, err := t.selectStreamingJoin(ctx, stmt, plan, selectedFields, requestedFields); ok || err != nil {
+		return result, err
+	}
+
+	// JOIN + ORDER BY + LIMIT: use a bounded min-heap (size = limit+offset) so
+	// memory is O(limit) rather than O(join cardinality).
+	if result, ok, err := t.selectJoinWithSortStreamingLimit(ctx, stmt, plan, selectedFields, requestedFields); ok || err != nil {
+		return result, err
+	}
+
 	// Materialising path: buffer every matching row, then dispatch.
-	// Required for COUNT (needs a total), GROUP BY, aggregates, ORDER BY (sort),
-	// and JOIN (goroutine-based execution inside plan.Execute).
+	// Reached for JOIN queries that require GROUP BY, aggregate, or semi/anti-semi
+	// joins — where all rows must be collected before output can begin.
+	// Simple JOINs (including DISTINCT and ORDER BY + LIMIT) exit via the
+	// dedicated paths above.
 	//
-	// LIMIT pushdown: for JOIN queries with no in-memory sort and no DISTINCT we
-	// can stop collecting rows after OFFSET+LIMIT rows, avoiding a full scan of
-	// every matching row.  plan.Execute propagates errLimitReached from the
-	// callback; the JOIN goroutine is cancelled and drained inside Execute itself.
+	// LIMIT pushdown: for JOIN queries with no in-memory sort we can stop
+	// collecting rows after OFFSET+LIMIT rows, avoiding a full scan of every
+	// matching row.  plan.Execute propagates errLimitReached from the callback;
+	// the JOIN goroutine is cancelled and drained inside Execute itself.
 	var joinScanLimit int64
-	if len(plan.Joins) > 0 && stmt.Limit.Valid && !plan.SortInMemory && !stmt.Distinct {
+	if len(plan.Joins) > 0 && stmt.Limit.Valid && !plan.SortInMemory {
 		joinScanLimit = stmt.Limit.Value.(int64)
 		if stmt.Offset.Valid {
 			joinScanLimit += stmt.Offset.Value.(int64)
@@ -1710,6 +1732,80 @@ func (t *Table) selectStreamingDirectRowView(
 	return result, true, nil
 }
 
+// selectSemiJoinDirectRowView is a fast path for SELECT queries whose only join
+// is a single hash semi-join and whose outer table is a non-virtual sequential
+// scan with RowView-compatible conditions.  It builds the inner hash bucket once,
+// then scans the outer table using RowViews and probes the bucket without
+// materialising non-matching rows, wiring matched RowViews straight to the
+// driver layer via result.RowViews.
+func (t *Table) selectSemiJoinDirectRowView(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if len(plan.Joins) != 1 || plan.Joins[0].Type != Semi {
+		return StatementResult{}, false, nil
+	}
+	if t.virtualRows != nil || t.parallelScan {
+		return StatementResult{}, false, nil
+	}
+	if stmt.IsSelectGroupBy() || stmt.IsSelectAggregate() || stmt.Distinct || plan.SortInMemory {
+		return StatementResult{}, false, nil
+	}
+	if len(plan.Scans) == 0 || plan.Scans[0].Type != ScanTypeSequential {
+		return StatementResult{}, false, nil
+	}
+
+	outerScan := plan.Scans[0]
+
+	// Output must be projectable from outer table columns only (semi-join yields no inner columns).
+	fieldIndexes, resultColumns, ok := rowViewProjectionPlan(t.Columns, requestedFields, stmt.TableName, stmt.TableAlias)
+	if !ok {
+		return StatementResult{}, false, nil
+	}
+	if !rowViewFilterSupports(t.Columns, outerScan.Filters) {
+		return StatementResult{}, false, nil
+	}
+	outerFilter := compileRowViewFilterForColumns(t.Columns, t.pager, outerScan.Filters)
+
+	hashTables, err := buildHashBuckets(ctx, plan, t.provider)
+	if err != nil {
+		return StatementResult{}, true, err
+	}
+	bucket, hasBucket := hashTables[0]
+	if !hasBucket || bucket.present == nil {
+		return StatementResult{}, false, nil
+	}
+
+	join := plan.Joins[0]
+
+	var remaining, offset int64
+	hasLimit := stmt.Limit.Valid
+	hasOffset := stmt.Offset.Valid
+	if hasLimit {
+		remaining = stmt.Limit.Value.(int64)
+	}
+	if hasOffset {
+		offset = stmt.Offset.Value.(int64)
+	}
+
+	newRowViewIter, err := semiJoinProbeRowViewIteratorFactory(
+		ctx, t, join, bucket, outerFilter,
+		remaining, offset, hasLimit, hasOffset,
+	)
+	if err != nil {
+		return StatementResult{}, true, err
+	}
+
+	result := StatementResult{Columns: resultColumns}
+	result.RowViews = newRowViewIter()
+	result.RowViewPager = t.pager
+	result.RowViewFieldIndexes = fieldIndexes
+	result.Rows = lazyRowViewMaterializingIterator(t.pager, newRowViewIter, fieldIndexes, resultColumns)
+	return result, true, nil
+}
+
 func columnByFieldName(columns []Column, name string) (Column, int) {
 	for i, col := range columns {
 		if col.Name == name {
@@ -2626,6 +2722,17 @@ func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields [
 		seen = make(map[string]struct{})
 	}
 
+	// Precompute projection schema from the first row's column layout.  For
+	// plain field references (no expression), this eliminates per-row
+	// make([]Column,...) inside OnlyFields; only make([]OptionalValue,...) is
+	// allocated per row.  Falls back to the full projectRow path when any
+	// field has an expression or when there are no rows.
+	var projectedCols []Column
+	var projectedIdxs []int
+	if len(scanned) > 0 {
+		projectedCols, projectedIdxs = buildProjectionSchema(scanned[0].Columns, requestedFields)
+	}
+
 	idx := 0
 	result.Rows = NewIterator(func(ctx context.Context) (Row, error) {
 		if hasLimit && limit == 0 {
@@ -2636,9 +2743,15 @@ func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields [
 			row := scanned[idx]
 			idx += 1
 
-			p, err := projectRow(row, requestedFields)
-			if err != nil {
-				return Row{}, err
+			var p Row
+			if projectedCols != nil {
+				p = row.projectFast(projectedCols, projectedIdxs)
+			} else {
+				var err error
+				p, err = projectRow(row, requestedFields)
+				if err != nil {
+					return Row{}, err
+				}
 			}
 			if stmt.Distinct {
 				key := p.rowDistinctKey()
@@ -2660,6 +2773,208 @@ func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields [
 		return Row{}, ErrNoMoreRows
 	})
 	return result, nil
+}
+
+// selectStreamingJoin streams INNER/LEFT/RIGHT/FULL OUTER join results without
+// buffering into []Row.  The join goroutine runs concurrently; the returned
+// Iterator reads rows from it on demand.  Ineligible when ORDER BY sort,
+// GROUP BY, aggregate, COUNT(*), or semi/anti-semi joins are present.
+// DISTINCT is handled inline via a hash-set dedup on the projected row key.
+func (t *Table) selectStreamingJoin(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	selectedFields []Field,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if len(plan.Joins) == 0 ||
+		plan.SortInMemory ||
+		stmt.IsSelectGroupBy() ||
+		stmt.IsSelectAggregate() ||
+		stmt.IsSelectCountAll() {
+		return StatementResult{}, false, nil
+	}
+	// Semi/anti-semi joins are handled by selectSemiJoinDirectRowView above.
+	for _, j := range plan.Joins {
+		if j.Type == Semi || j.Type == AntiSemi {
+			return StatementResult{}, false, nil
+		}
+	}
+
+	joinCtx, joinCancel := context.WithCancel(ctx)
+	ch := make(chan Row, 128)
+	errCh := make(chan error, 1)
+
+	go func() {
+		defer close(ch)
+		if err := plan.executeNestedLoopJoin(joinCtx, t.provider, selectedFields, ch); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				select {
+				case errCh <- err:
+				default:
+				}
+			}
+		}
+	}()
+
+	var (
+		limit, offset int64
+		hasLimit      = stmt.Limit.Valid
+		hasOffset     = stmt.Offset.Valid
+	)
+	if hasLimit {
+		limit = stmt.Limit.Value.(int64)
+	}
+	if hasOffset {
+		offset = stmt.Offset.Value.(int64)
+	}
+
+	var projectedCols []Column
+	var projectedIdxs []int
+	schemaComputed := false
+
+	var seen map[string]struct{}
+	if stmt.Distinct {
+		seen = make(map[string]struct{})
+	}
+
+	result := StatementResult{
+		Columns: t.selectResultColumns(stmt, requestedFields),
+	}
+	result.Rows = newIteratorWithClose(
+		func(iterCtx context.Context) (Row, error) {
+			if hasLimit && limit == 0 {
+				return Row{}, ErrNoMoreRows
+			}
+			for {
+				select {
+				case <-iterCtx.Done():
+					return Row{}, iterCtx.Err()
+				case row, ok := <-ch:
+					if !ok {
+						// Channel closed — surface any join error.
+						select {
+						case err := <-errCh:
+							return Row{}, err
+						default:
+							return Row{}, ErrNoMoreRows
+						}
+					}
+					// Lazily compute projection schema from the first row.
+					if !schemaComputed {
+						projectedCols, projectedIdxs = buildProjectionSchema(row.Columns, requestedFields)
+						schemaComputed = true
+					}
+					var p Row
+					if projectedCols != nil {
+						p = row.projectFast(projectedCols, projectedIdxs)
+					} else {
+						var err error
+						p, err = projectRow(row, requestedFields)
+						if err != nil {
+							return Row{}, err
+						}
+					}
+					if seen != nil {
+						key := p.rowDistinctKey()
+						if _, dup := seen[key]; dup {
+							continue
+						}
+						seen[key] = struct{}{}
+					}
+					if hasOffset && offset > 0 {
+						offset--
+						continue
+					}
+					if hasLimit {
+						limit--
+					}
+					return p, nil
+				}
+			}
+		},
+		func() error {
+			joinCancel()
+			drainRowCh(ch)
+			return nil
+		},
+	)
+	return result, true, nil
+}
+
+// selectJoinWithSortStreamingLimit handles JOIN + ORDER BY + LIMIT using a bounded
+// min-heap of size limit+offset, keeping memory proportional to the output size
+// rather than the full join cardinality.
+func (t *Table) selectJoinWithSortStreamingLimit(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	selectedFields []Field,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if len(plan.Joins) == 0 ||
+		!plan.SortInMemory ||
+		!stmt.Limit.Valid ||
+		len(plan.OrderBy) == 0 ||
+		stmt.Distinct ||
+		stmt.IsSelectCountAll() ||
+		stmt.IsSelectGroupBy() ||
+		stmt.IsSelectAggregate() {
+		return StatementResult{}, false, nil
+	}
+	// Semi/anti-semi joins with ORDER BY fall through to the materialising path.
+	for _, j := range plan.Joins {
+		if j.Type == Semi || j.Type == AntiSemi {
+			return StatementResult{}, false, nil
+		}
+	}
+
+	limit := int(stmt.Limit.Value.(int64))
+	offset := 0
+	if stmt.Offset.Valid {
+		offset = int(stmt.Offset.Value.(int64))
+	}
+	maxRows := limit + offset
+
+	outputFields := orderByOutputFields(requestedFields)
+	h := newRowHeap(plan.OrderBy, maxRows)
+	err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
+		updated, err := addOrderByOutputFieldsToRow(row, outputFields, plan.OrderBy)
+		if err != nil {
+			return err
+		}
+		h.PushRow(updated)
+		return nil
+	})
+	if err != nil {
+		return StatementResult{}, true, err
+	}
+
+	allRows := h.ExtractSorted()
+	if offset >= len(allRows) {
+		allRows = []Row{}
+	} else {
+		end := offset + limit
+		if end < len(allRows) {
+			allRows = allRows[offset:end]
+		} else {
+			allRows = allRows[offset:]
+		}
+	}
+
+	idx := 0
+	result := StatementResult{
+		Columns: t.selectResultColumns(stmt, requestedFields),
+	}
+	result.Rows = NewIterator(func(ctx context.Context) (Row, error) {
+		if idx >= len(allRows) {
+			return Row{}, ErrNoMoreRows
+		}
+		row := allRows[idx]
+		idx++
+		return projectRow(row, requestedFields)
+	})
+	return result, true, nil
 }
 
 func (t *Table) selectWithSortStreamingLimit(
@@ -2890,6 +3205,7 @@ func (t *Table) selectWithSortRowView(
 		allRows = allRows[offset:]
 	}
 
+	nResult := len(requestedFields)
 	result := StatementResult{
 		Columns: resultColumns,
 	}
@@ -2900,9 +3216,15 @@ func (t *Table) selectWithSortRowView(
 		}
 		row := allRows[idx]
 		idx += 1
-		values := make([]OptionalValue, len(requestedFields))
-		copy(values, row.Values[:len(requestedFields)])
-		projected := NewRowWithValues(resultColumns, values)
+		// When all ORDER BY columns are already in SELECT, scanProjectedRowViews
+		// produces exactly nResult values — reuse the slice to avoid an alloc+copy.
+		if len(row.Values) <= nResult {
+			row.Columns = resultColumns
+			return row, nil
+		}
+		// Extra sort-only columns were appended beyond nResult — sub-slice them
+		// off without copying the backing array.
+		projected := NewRowWithValues(resultColumns, row.Values[:nResult])
 		projected.Key = row.Key
 		return projected, nil
 	})
@@ -3403,52 +3725,6 @@ func (t *Table) indexPointScan(ctx context.Context, scan Scan, selectedFields []
 	return nil
 }
 
-// indexPointGetAll collects all rows matching the index keys in scan and
-// returns them as a slice.  Returns nil when no rows match (zero allocation).
-// Unlike indexPointScan, no callback closure is required from the caller,
-// which eliminates per-outer-row heap allocations in hot join paths where
-// indexPointScan's callback closure would otherwise escape.
-func (t *Table) indexPointGetAll(ctx context.Context, scan Scan, selectedFields []Field) ([]Row, error) {
-	idx, ok := t.IndexByName(scan.IndexName)
-	if !ok {
-		return nil, fmt.Errorf("no index found for point scan: %s", scan.IndexName)
-	}
-	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
-	tableFilter := compileScanFilter(t.Columns, scan.Filters)
-	coveringFilter := compileScanFilter(scan.IndexColumns, scan.Filters)
-	// Extract fields used inside the inner closure so scan does not escape to
-	// the heap through the closure — the compiler can then keep scan on the stack.
-	isCovering := scan.CoveringIndex
-	idxColumns := scan.IndexColumns
-	nSelected := len(selectedFields)
-
-	var rows []Row
-	for _, indexValue := range scan.IndexKeys {
-		if err := idx.VisitRowIDs(ctx, indexValue, func(rowID RowID) error {
-			row, ok, err := t.indexedScanRow(
-				ctx, indexValue, rowID, isCovering, idxColumns,
-				selectedMask, nSelected, tableFilter, coveringFilter,
-			)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return nil
-			}
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			rows = append(rows, row)
-			return nil
-		}); err != nil {
-			if errors.Is(err, ErrNotFound) {
-				continue
-			}
-			return nil, fmt.Errorf("index lookup failed: %w", err)
-		}
-	}
-	return rows, nil
-}
 
 // indexPointExists reports whether any row matches the index point scan and
 // residual filters, without materialising matched rows.
@@ -5230,14 +5506,14 @@ func unionTwoSortedSets(a, b []RowID) []RowID {
 		switch {
 		case a[i] == b[j]:
 			emit(a[i])
-			i++
-			j++
+			i += 1
+			j += 1
 		case a[i] < b[j]:
 			emit(a[i])
-			i++
+			i += 1
 		default:
 			emit(b[j])
-			j++
+			j += 1
 		}
 	}
 	for ; i < len(a); i++ {
@@ -5299,7 +5575,7 @@ func (t *Table) indexUnionScan(ctx context.Context, scan Scan, selectedFields []
 		if err := out(row); err != nil {
 			return err
 		}
-		emitted++
+		emitted += 1
 		if scanLimit > 0 && emitted >= scanLimit {
 			return nil
 		}

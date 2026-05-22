@@ -101,6 +101,67 @@ func BenchmarkJoin_Inner_SmallLarge(b *testing.B) {
 	}
 }
 
+// BenchmarkJoin_Inner_LowSelectivity measures an INNER JOIN where ~99% of outer
+// rows have no matching inner row. The RowView outer scan optimisation avoids
+// materialising the non-matching rows, so savings are proportional to selectivity.
+func BenchmarkJoin_Inner_LowSelectivity(b *testing.B) {
+	for _, d := range drivers {
+		b.Run(d.name, func(b *testing.B) {
+			db, cleanup := openDB(b, d)
+			defer cleanup()
+			seedRows(b, db, d, seedN) // 10K outer rows
+
+			var (
+				createPrem string
+				insertPrem string
+				query      string
+			)
+			switch d.name {
+			case "minisql":
+				createPrem = `create table "bench_inner_prem" (emp_id int8 primary key, tier varchar(20))`
+				insertPrem = `insert into "bench_inner_prem" (emp_id, tier) values (?, ?)`
+				query      = `select r.id, r.name, p.tier from "bench_rows" AS r inner join "bench_inner_prem" AS p on r.id = p.emp_id`
+			default:
+				createPrem = `CREATE TABLE bench_inner_prem (emp_id INTEGER PRIMARY KEY, tier TEXT)`
+				insertPrem = `INSERT INTO bench_inner_prem (emp_id, tier) VALUES (?, ?)`
+				query      = `SELECT r.id, r.name, p.tier FROM bench_rows AS r INNER JOIN bench_inner_prem AS p ON r.id = p.emp_id`
+			}
+
+			mustExec(b, db, createPrem)
+			// Only 1% of bench_rows have an inner match (100 out of 10K).
+			for i := range joinPremN {
+				mustExec(b, db, insertPrem, int64(i*100+1), "gold")
+			}
+
+			b.ResetTimer()
+			for range b.N {
+				rows, err := db.Query(query)
+				if err != nil {
+					b.Fatalf("query: %v", err)
+				}
+				n := 0
+				for rows.Next() {
+					var (
+						id   int64
+						name string
+						tier string
+					)
+					if err := rows.Scan(&id, &name, &tier); err != nil {
+						rows.Close()
+						b.Fatalf("scan: %v", err)
+					}
+					n++
+				}
+				rows.Close()
+				if err := rows.Err(); err != nil {
+					b.Fatalf("rows err: %v", err)
+				}
+				b.ReportMetric(float64(n), "rows/op")
+			}
+		})
+	}
+}
+
 // BenchmarkJoin_Left_UnmatchedRows measures a LEFT JOIN where ~99% of outer
 // rows have no matching inner row.  Exercises the null-row-emit path.
 func BenchmarkJoin_Left_UnmatchedRows(b *testing.B) {

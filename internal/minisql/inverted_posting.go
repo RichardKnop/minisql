@@ -247,7 +247,7 @@ func groupInvertedPostingsInPlace(mode invertedPostingMode, postings []invertedP
 				postings[out].Positions = append(postings[out].Positions, postings[i].Positions...)
 			}
 		} else {
-			out++
+			out += 1
 			postings[out] = postings[i]
 		}
 	}

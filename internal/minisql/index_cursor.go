@@ -49,7 +49,7 @@ func (ui *Index[T]) pointCell(ctx context.Context, keyAny any) (T, IndexCell[T],
 		return key, IndexCell[T]{}, err
 	}
 	if !ok {
-		return key, IndexCell[T]{}, fmt.Errorf("%w: %v", ErrNotFound, key)
+		return key, IndexCell[T]{}, ErrNotFound
 	}
 
 	page, err := cursor.Index.pager.ReadPage(ctx, cursor.PageIdx)
