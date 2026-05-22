@@ -3725,52 +3725,6 @@ func (t *Table) indexPointScan(ctx context.Context, scan Scan, selectedFields []
 	return nil
 }
 
-// indexPointGetAll collects all rows matching the index keys in scan and
-// returns them as a slice.  Returns nil when no rows match (zero allocation).
-// Unlike indexPointScan, no callback closure is required from the caller,
-// which eliminates per-outer-row heap allocations in hot join paths where
-// indexPointScan's callback closure would otherwise escape.
-func (t *Table) indexPointGetAll(ctx context.Context, scan Scan, selectedFields []Field) ([]Row, error) {
-	idx, ok := t.IndexByName(scan.IndexName)
-	if !ok {
-		return nil, fmt.Errorf("no index found for point scan: %s", scan.IndexName)
-	}
-	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
-	tableFilter := compileScanFilter(t.Columns, scan.Filters)
-	coveringFilter := compileScanFilter(scan.IndexColumns, scan.Filters)
-	// Extract fields used inside the inner closure so scan does not escape to
-	// the heap through the closure — the compiler can then keep scan on the stack.
-	isCovering := scan.CoveringIndex
-	idxColumns := scan.IndexColumns
-	nSelected := len(selectedFields)
-
-	var rows []Row
-	for _, indexValue := range scan.IndexKeys {
-		if err := idx.VisitRowIDs(ctx, indexValue, func(rowID RowID) error {
-			row, ok, err := t.indexedScanRow(
-				ctx, indexValue, rowID, isCovering, idxColumns,
-				selectedMask, nSelected, tableFilter, coveringFilter,
-			)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return nil
-			}
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			rows = append(rows, row)
-			return nil
-		}); err != nil {
-			if errors.Is(err, ErrNotFound) {
-				continue
-			}
-			return nil, fmt.Errorf("index lookup failed: %w", err)
-		}
-	}
-	return rows, nil
-}
 
 // indexPointExists reports whether any row matches the index point scan and
 // residual filters, without materialising matched rows.
