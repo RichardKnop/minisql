@@ -225,16 +225,16 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 
 	// Materialising path: buffer every matching row, then dispatch.
 	// Reached for JOIN queries that also require an in-memory sort (ORDER BY),
-	// GROUP BY, aggregate, or DISTINCT — where all rows must be collected before
-	// output can begin.  Non-JOIN queries and simple JOIN SELECT queries exit
-	// earlier via the dedicated paths above.
+	// GROUP BY, or aggregate — where all rows must be collected before output can
+	// begin.  Non-JOIN queries and simple JOIN SELECT queries (including DISTINCT)
+	// exit earlier via the dedicated paths above.
 	//
-	// LIMIT pushdown: for JOIN queries with no in-memory sort and no DISTINCT we
-	// can stop collecting rows after OFFSET+LIMIT rows, avoiding a full scan of
-	// every matching row.  plan.Execute propagates errLimitReached from the
-	// callback; the JOIN goroutine is cancelled and drained inside Execute itself.
+	// LIMIT pushdown: for JOIN queries with no in-memory sort we can stop
+	// collecting rows after OFFSET+LIMIT rows, avoiding a full scan of every
+	// matching row.  plan.Execute propagates errLimitReached from the callback;
+	// the JOIN goroutine is cancelled and drained inside Execute itself.
 	var joinScanLimit int64
-	if len(plan.Joins) > 0 && stmt.Limit.Valid && !plan.SortInMemory && !stmt.Distinct {
+	if len(plan.Joins) > 0 && stmt.Limit.Valid && !plan.SortInMemory {
 		joinScanLimit = stmt.Limit.Value.(int64)
 		if stmt.Offset.Valid {
 			joinScanLimit += stmt.Offset.Value.(int64)
@@ -2772,7 +2772,8 @@ func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields [
 // selectStreamingJoin streams INNER/LEFT/RIGHT/FULL OUTER join results without
 // buffering into []Row.  The join goroutine runs concurrently; the returned
 // Iterator reads rows from it on demand.  Ineligible when ORDER BY sort,
-// GROUP BY, aggregate, COUNT(*), DISTINCT, or semi/anti-semi joins are present.
+// GROUP BY, aggregate, COUNT(*), or semi/anti-semi joins are present.
+// DISTINCT is handled inline via a hash-set dedup on the projected row key.
 func (t *Table) selectStreamingJoin(
 	ctx context.Context,
 	stmt Statement,
@@ -2784,8 +2785,7 @@ func (t *Table) selectStreamingJoin(
 		plan.SortInMemory ||
 		stmt.IsSelectGroupBy() ||
 		stmt.IsSelectAggregate() ||
-		stmt.IsSelectCountAll() ||
-		stmt.Distinct {
+		stmt.IsSelectCountAll() {
 		return StatementResult{}, false, nil
 	}
 	// Semi/anti-semi joins are handled by selectSemiJoinDirectRowView above.
@@ -2827,6 +2827,11 @@ func (t *Table) selectStreamingJoin(
 	var projectedIdxs []int
 	schemaComputed := false
 
+	var seen map[string]struct{}
+	if stmt.Distinct {
+		seen = make(map[string]struct{})
+	}
+
 	result := StatementResult{
 		Columns: t.selectResultColumns(stmt, requestedFields),
 	}
@@ -2863,6 +2868,13 @@ func (t *Table) selectStreamingJoin(
 						if err != nil {
 							return Row{}, err
 						}
+					}
+					if seen != nil {
+						key := p.rowDistinctKey()
+						if _, dup := seen[key]; dup {
+							continue
+						}
+						seen[key] = struct{}{}
 					}
 					if hasOffset && offset > 0 {
 						offset--

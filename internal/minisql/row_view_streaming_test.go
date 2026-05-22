@@ -434,3 +434,64 @@ func TestTable_Select_AntiSemiJoin(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []int64{1, 3}, ids)
 }
+
+func TestTable_Select_StreamingInnerJoin_Distinct(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	userCols := []Column{
+		{Name: "user_id", Kind: Int8, Size: 8},
+		{Name: "country", Kind: Varchar, Size: 32},
+	}
+	users, usersTx := newNamedTestTable(t, "users", userCols)
+	insertRowValues(ctx, t, users, usersTx, [][]OptionalValue{
+		{{Value: int64(1), Valid: true}, {Value: NewTextPointer([]byte("US")), Valid: true}},
+		{{Value: int64(2), Valid: true}, {Value: NewTextPointer([]byte("UK")), Valid: true}},
+		{{Value: int64(3), Valid: true}, {Value: NewTextPointer([]byte("US")), Valid: true}},
+	})
+
+	orders, ordersTx := newNamedTestTable(t, "orders", joinColumns)
+	insertRowValues(ctx, t, orders, ordersTx, [][]OptionalValue{
+		{{Value: int64(1), Valid: true}, {Value: int64(1), Valid: true}, {Value: int64(100), Valid: true}},
+		{{Value: int64(2), Valid: true}, {Value: int64(2), Valid: true}, {Value: int64(200), Valid: true}},
+		{{Value: int64(3), Valid: true}, {Value: int64(3), Valid: true}, {Value: int64(300), Valid: true}},
+	})
+
+	users.provider = &mapTableProvider{tables: map[string]*Table{
+		"users":  users,
+		"orders": orders,
+	}}
+
+	onCond := FieldIsEqual(
+		Field{AliasPrefix: "u", Name: "user_id"},
+		OperandField,
+		Field{AliasPrefix: "o", Name: "user_id"},
+	)
+	stmt := Statement{
+		Kind:       Select,
+		TableAlias: "u",
+		Distinct:   true,
+		Fields:     []Field{{AliasPrefix: "u", Name: "country"}},
+		Joins: []Join{{
+			TableName:  "orders",
+			TableAlias: "o",
+			Type:       Inner,
+			Conditions: Conditions{onCond},
+		}},
+	}
+
+	result, err := users.Select(ctx, stmt)
+	require.NoError(t, err)
+
+	rows := collectRows(ctx, result)
+	// 3 joined rows, but "US" appears twice (users 1 and 3); DISTINCT yields 2 unique countries
+	assert.Len(t, rows, 2)
+
+	var countries []string
+	for _, row := range rows {
+		v, ok := row.GetValue("u.country")
+		require.True(t, ok, "column u.country not found in row %v", row.Columns)
+		countries = append(countries, v.Value.(TextPointer).String())
+	}
+	assert.ElementsMatch(t, []string{"US", "UK"}, countries)
+}
