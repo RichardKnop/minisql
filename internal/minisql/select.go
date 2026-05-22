@@ -1203,9 +1203,11 @@ func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementR
 		}
 	}
 
-	// Preallocate one flat block for all result values — one alloc covers every group.
+	// Preallocate one flat block for all group values — one alloc covers every group.
+	// passedIndices tracks which group indices passed HAVING, using int32 (4 bytes each)
+	// instead of full Row structs (48 bytes each).
 	allResultValues := make([]OptionalValue, nGroups*nFields)
-	resultRows := make([]Row, 0, nGroups)
+	passedIndices := make([]int32, 0, nGroups)
 
 	for gi, key := range acc.groupOrder {
 		gsIdx := acc.groupMap[key]
@@ -1253,10 +1255,10 @@ func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementR
 				}
 			}
 		}
-		resultRow := NewRowWithValues(resultColumns, values)
 
 		// Apply HAVING filter against the computed aggregate row.
 		if len(stmt.Having) > 0 {
+			resultRow := NewRowWithValues(resultColumns, values)
 			ok, err := resultRow.CheckOneOrMore(stmt.Having)
 			if err != nil {
 				return StatementResult{}, fmt.Errorf("HAVING: %w", err)
@@ -1266,31 +1268,48 @@ func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementR
 			}
 		}
 
-		resultRows = append(resultRows, resultRow)
+		passedIndices = append(passedIndices, int32(gi))
 	}
 
-	// Apply ORDER BY if specified.
+	// Apply ORDER BY if specified — sort passedIndices by comparing allResultValues slices.
 	if len(stmt.OrderBy) > 0 {
-		if err := t.sortRows(resultRows, stmt.OrderBy); err != nil {
-			return StatementResult{}, err
-		}
+		slices.SortFunc(passedIndices, func(a, b int32) int {
+			rowA := NewRowWithValues(resultColumns, allResultValues[int(a)*nFields:(int(a)+1)*nFields])
+			rowB := NewRowWithValues(resultColumns, allResultValues[int(b)*nFields:(int(b)+1)*nFields])
+			for _, clause := range stmt.OrderBy {
+				valA, foundA := rowA.getValueQualified(clause.Field.AliasPrefix, clause.Field.Name)
+				valB, foundB := rowB.getValueQualified(clause.Field.AliasPrefix, clause.Field.Name)
+				if !foundA || !foundB {
+					continue
+				}
+				cmp := compareValues(valA, valB)
+				if cmp == 0 {
+					continue
+				}
+				if clause.Direction == Desc {
+					return -cmp
+				}
+				return cmp
+			}
+			return 0
+		})
 	}
 
 	// Apply OFFSET.
 	if stmt.Offset.Valid {
 		offset := int(stmt.Offset.Value.(int64))
-		if offset >= len(resultRows) {
-			resultRows = []Row{}
+		if offset >= len(passedIndices) {
+			passedIndices = passedIndices[:0]
 		} else {
-			resultRows = resultRows[offset:]
+			passedIndices = passedIndices[offset:]
 		}
 	}
 
 	// Apply LIMIT.
 	if stmt.Limit.Valid {
 		limit := int(stmt.Limit.Value.(int64))
-		if limit < len(resultRows) {
-			resultRows = resultRows[:limit]
+		if limit < len(passedIndices) {
+			passedIndices = passedIndices[:limit]
 		}
 	}
 
@@ -1298,12 +1317,12 @@ func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementR
 	return StatementResult{
 		Columns: resultColumns,
 		Rows: NewIterator(func(ctx context.Context) (Row, error) {
-			if idx >= len(resultRows) {
+			if idx >= len(passedIndices) {
 				return Row{}, ErrNoMoreRows
 			}
-			row := resultRows[idx]
-			idx += 1
-			return row, nil
+			gi := int(passedIndices[idx])
+			idx++
+			return NewRowWithValues(resultColumns, allResultValues[gi*nFields:(gi+1)*nFields]), nil
 		}),
 	}, nil
 }
@@ -1721,7 +1740,11 @@ func (t *Table) selectStreamingDirectRowView(
 	}
 
 	if stmt.Distinct {
-		result.Rows = distinctRowViewMaterializingIterator(ctx, t.pager, newRowViewIter(), fieldIndexes, resultColumns, remaining, offset, hasLimit, hasOffset)
+		distinctFactory := newDistinctRowViewIteratorFactory(ctx, t.pager, newRowViewIter, fieldIndexes, t.Columns, remaining, offset, hasLimit, hasOffset)
+		result.RowViews = distinctFactory()
+		result.RowViewPager = t.pager
+		result.RowViewFieldIndexes = fieldIndexes
+		result.Rows = lazyRowViewMaterializingIterator(t.pager, distinctFactory, fieldIndexes, resultColumns)
 		return result, true, nil
 	}
 
@@ -2655,49 +2678,172 @@ func lazyRowViewMaterializingIterator(pager TxPager, viewFactory func() RowViewI
 	})
 }
 
-func distinctRowViewMaterializingIterator(
+// appendDistinctKeyFromView encodes the projected columns of view into buf for
+// DISTINCT dedup.  Unlike appendHashKeyFromView, NULL values are included in
+// the key (NULL == NULL for DISTINCT purposes).  Uses typed RowView accessors
+// so no []OptionalValue is allocated; text bytes are copied directly into buf.
+func appendDistinctKeyFromView(
 	ctx context.Context,
 	pager TxPager,
-	views RowViewIterator,
+	buf []byte,
+	view RowView,
+	fieldIndexes []int,
+	columns []Column,
+) ([]byte, error) {
+	for i, colIdx := range fieldIndexes {
+		if i > 0 {
+			buf = append(buf, '\x1f')
+		}
+		isNull, err := view.IsNull(colIdx)
+		if err != nil {
+			return nil, err
+		}
+		if isNull {
+			buf = append(buf, "null"...)
+			continue
+		}
+		col := columns[colIdx]
+		switch col.Kind {
+		case Int4:
+			v, _, err := view.Int64At(colIdx)
+			if err != nil {
+				return nil, err
+			}
+			buf = append(buf, "i32:"...)
+			buf = strconv.AppendInt(buf, v, 10)
+		case Int8:
+			v, _, err := view.Int64At(colIdx)
+			if err != nil {
+				return nil, err
+			}
+			buf = append(buf, "i64:"...)
+			buf = strconv.AppendInt(buf, v, 10)
+		case Timestamp:
+			v, _, err := view.Int64At(colIdx)
+			if err != nil {
+				return nil, err
+			}
+			buf = append(buf, "ts:"...)
+			buf = strconv.AppendInt(buf, v, 10)
+		case Real:
+			v, _, err := view.Float64At(colIdx)
+			if err != nil {
+				return nil, err
+			}
+			buf = append(buf, "f32:"...)
+			buf = strconv.AppendFloat(buf, v, 'g', -1, 32)
+		case Double:
+			v, _, err := view.Float64At(colIdx)
+			if err != nil {
+				return nil, err
+			}
+			buf = append(buf, "f64:"...)
+			buf = strconv.AppendFloat(buf, v, 'g', -1, 64)
+		case Boolean:
+			v, _, err := view.BoolAt(colIdx)
+			if err != nil {
+				return nil, err
+			}
+			buf = append(buf, "b:"...)
+			if v {
+				buf = append(buf, "true"...)
+			} else {
+				buf = append(buf, "false"...)
+			}
+		case Varchar, Text, JSON:
+			var tp TextPointer
+			if pager != nil {
+				tp, err = view.TextAtWithOverflow(ctx, pager, colIdx)
+			} else {
+				tp, err = view.TextAt(colIdx)
+			}
+			if err != nil {
+				return nil, err
+			}
+			buf = append(buf, 't')
+			buf = strconv.AppendInt(buf, int64(tp.Length), 10)
+			buf = append(buf, ':')
+			buf = append(buf, tp.Data...) // copy inline bytes; no string alloc
+		case UUID:
+			v, _, err := view.UUIDAt(colIdx)
+			if err != nil {
+				return nil, err
+			}
+			buf = append(buf, v[:]...)
+		default:
+			val, err := view.ValueAt(colIdx)
+			if err != nil {
+				return nil, err
+			}
+			if !val.Valid {
+				buf = append(buf, "null"...)
+			} else {
+				buf = fmt.Appendf(buf, "?:%v", val.Value)
+			}
+		}
+	}
+	return buf, nil
+}
+
+// newDistinctRowViewIteratorFactory returns a factory that creates a
+// RowViewIterator wrapping innerFactory with DISTINCT dedup applied via a
+// hash-set keyed by the projected column values.  LIMIT/OFFSET are applied
+// after dedup.  Each factory call produces an independent iterator with its
+// own seen-set so the factory may be called multiple times safely.
+func newDistinctRowViewIteratorFactory(
+	ctx context.Context,
+	pager TxPager,
+	innerFactory func() RowViewIterator,
 	fieldIndexes []int,
 	columns []Column,
 	remaining int64,
 	offset int64,
 	hasLimit bool,
 	hasOffset bool,
-) Iterator {
-	seen := make(map[string]struct{})
+) func() RowViewIterator {
+	return func() RowViewIterator {
+		inner := innerFactory()
+		seen := make(map[string]struct{})
+		buf := make([]byte, 0, 64)
+		rem := remaining
+		off := offset
+		done := false
 
-	return newIteratorWithClose(func(iterCtx context.Context) (Row, error) {
-		if hasLimit && remaining == 0 {
-			return Row{}, ErrNoMoreRows
-		}
-
-		for views.Next(iterCtx) {
-			row, err := projectRowView(iterCtx, pager, views.RowView(), fieldIndexes, columns)
-			if err != nil {
-				return Row{}, err
+		return newRowViewIteratorWithClose(func(iterCtx context.Context) (RowView, error) {
+			if done || (hasLimit && rem == 0) {
+				return RowView{}, ErrNoMoreRows
 			}
-			key := row.rowDistinctKey()
-			if _, dup := seen[key]; dup {
-				continue
+			for {
+				if !inner.Next(iterCtx) {
+					done = true
+					if err := inner.Err(); err != nil {
+						return RowView{}, err
+					}
+					return RowView{}, ErrNoMoreRows
+				}
+				view := inner.RowView()
+				buf = buf[:0]
+				var err error
+				buf, err = appendDistinctKeyFromView(ctx, pager, buf, view, fieldIndexes, columns)
+				if err != nil {
+					return RowView{}, err
+				}
+				key := string(buf)
+				if _, dup := seen[key]; dup {
+					continue
+				}
+				seen[key] = struct{}{}
+				if hasOffset && off > 0 {
+					off--
+					continue
+				}
+				if hasLimit {
+					rem--
+				}
+				return view, nil
 			}
-			seen[key] = struct{}{}
-			if hasOffset && offset > 0 {
-				offset -= 1
-				continue
-			}
-			if hasLimit {
-				remaining -= 1
-			}
-			return row, nil
-		}
-
-		if err := views.Err(); err != nil {
-			return Row{}, err
-		}
-		return Row{}, ErrNoMoreRows
-	}, views.Close)
+		}, inner.Close)
+	}
 }
 
 func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields []Field) (StatementResult, error) {
