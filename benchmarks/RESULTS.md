@@ -1,6 +1,6 @@
 # Benchmark Results
 
-### 2026-05-22 — DISTINCT streaming + GROUP BY passedIndices (branch refactor/row-view-api)
+### 2026-05-23 — JOIN combined RowView (branch refactor/row-view-api)
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26
 **Settings:** `-benchtime=3s -count=3` · median of 3 runs shown
@@ -16,14 +16,18 @@ Cumulative optimisations in this baseline:
   `singleKeySlice` reuse for single-pair `JoinColumnPairs`, `neededOuterFields` column pruning
 - DISTINCT streaming via `appendDistinctKeyFromView` + `newDistinctRowViewIteratorFactory` (no []OptionalValue per row; allocs at parity with SQLite)
 - GROUP BY `buildResult`: `resultRows []Row` → `passedIndices []int32` (-4.8 KiB/op)
+- **JOIN CombinedRowView**: `selectHashJoinDirectRowView` + `selectINLJDirectRowView` fast paths;
+  outer cell bytes + inner pointer; no goroutine/channel; `innerCellBuf` reused per match;
+  outer table looked up from `plan.Scans[0]` (handles greedy join reordering);
+  NULL-inner LEFT JOIN via `innerIsNull=true` + `splitIdx > 0` guard in RowView accessors
 
 #### Timing (median of 3 runs)
 
 | Benchmark | minisql | sqlite | ratio |
 |---|---|---|---|
-| GroupBy_Aggregate | 938 µs/op | 2.46 ms/op | 0.38× ✓ |
-| Having_Filter | 681 µs/op | 2.18 ms/op | 0.31× ✓ |
-| Distinct_HighCardinality | 4.87 ms/op | 6.49 ms/op | 0.75× ✓ |
+| GroupBy_Aggregate | 988 µs/op | 2.20 ms/op | 0.45× ✓ |
+| Having_Filter | 733 µs/op | 1.97 ms/op | 0.37× ✓ |
+| Distinct_HighCardinality | 3.03 ms/op | 6.68 ms/op | 0.45× ✓ |
 | Delete_ByPK | 31.8 µs/op | 63.7 µs/op | 0.50× ✓ |
 | ForeignKey_Insert | 23.1 µs/op | 51.9 µs/op | 0.44× ✓ |
 | ForeignKey_DeleteCascade | 96.2 µs/op | 84.3 µs/op | 1.14× |
@@ -40,26 +44,26 @@ Cumulative optimisations in this baseline:
 | FullText_Search_Phrase | 49.0 µs/op | 33.6 µs/op | 1.46× |
 | FullText_Update_WithIndex | 113 µs/op | 210 µs/op | 0.54× ✓ |
 | FullText_Delete_WithIndex | 254 µs/op | 339 µs/op | 0.75× ✓ |
-| Join_Inner_SmallLarge | 10.9 ms/op | 5.72 ms/op | 1.91× |
-| Join_Inner_LowSelectivity | 291 µs/op | 816 µs/op | 0.36× ✓ |
-| Join_Left_UnmatchedRows | 11.7 ms/op | 4.89 ms/op | 2.40× |
+| **Join_Inner_SmallLarge** | **5.60 ms/op** | **5.98 ms/op** | **0.94× ✓** |
+| **Join_Inner_LowSelectivity** | **126 µs/op** | **834 µs/op** | **0.15× ✓** |
+| **Join_Left_UnmatchedRows** | **4.31 ms/op** | **5.27 ms/op** | **0.82× ✓** |
 | Vacuum_Small | 24.5 ms/op | 637 µs/op | 38× |
 | WAL_Checkpoint | 246 µs/op | 103 µs/op | 2.38× |
 | Explain | 7.06 µs/op | 1.63 µs/op | 4.33× |
 | Select_PointScan | 7.34 µs/op | 4.03 µs/op | 1.82× |
 | Select_Limit | 7.88 µs/op | 9.79 µs/op | 0.81× ✓ |
-| Select_FullScan | 4.02 ms/op | 6.20 ms/op | 0.65× ✓ |
-| Select_CountStar | 6.10 µs/op | 10.8 µs/op | 0.56× ✓ |
-| Select_IndexRangeScan | 1.13 ms/op | 848 µs/op | 1.34× |
+| Select_FullScan | 4.31 ms/op | 6.38 ms/op | 0.68× ✓ |
+| Select_CountStar | 6.33 µs/op | 11.8 µs/op | 0.54× ✓ |
+| Select_IndexRangeScan | 1.09 ms/op | 904 µs/op | 1.21× |
 | Select_SecondaryIndex_LowSelectivity | 2.03 ms/op | 3.14 ms/op | 0.65× ✓ |
 | Select_SecondaryIndex_LowSelectivityLimit | 11.2 µs/op | 9.65 µs/op | 1.16× |
-| Select_RangeScan | 1.49 ms/op | 976 µs/op | 1.53× |
+| Select_RangeScan | 1.61 ms/op | 983 µs/op | 1.64× |
 | CTE_Materialise | 819 µs/op | 558 µs/op | 1.47× |
 | Subquery_InList | 4.63 ms/op | 4.08 ms/op | 1.13× |
 | OnConflict_DoUpdate | 15.3 µs/op | 132 µs/op | 0.12× ✓ |
 | Update_ByPK | 15.0 µs/op | 141 µs/op | 0.11× ✓ |
 
-> Note: SQLite OnConflict_DoUpdate and Update_ByPK medians are high due to M1 thermal variance (2nd/3rd runs were 131k/132k ns and 141k/147k ns; one run dropped to 45k/91k). Historical baseline shows ~44–52 µs for these.
+> Note: SQLite OnConflict_DoUpdate and Update_ByPK medians are high due to M1 thermal variance. Historical baseline shows ~44–52 µs for these.
 
 #### Memory (B/op, median of 3 runs)
 
@@ -90,20 +94,20 @@ Cumulative optimisations in this baseline:
 | JSONInverted_Contains_ObjectSubset/object_subset | — | 279.2 KiB | 3.37 MiB | — | 408 B | 408 B | — |
 | JSONInverted_Update_WithIndex | — | 9.6 KiB | — | — | — | — | — |
 | JSONInverted_Delete_WithIndex | — | 1.31 MiB | — | — | — | — | — |
-| Join_Inner_SmallLarge | 6.02 MiB | — | — | 1.07 MiB | — | — | **5.6×** |
-| Join_Inner_LowSelectivity | 85.4 KiB | — | — | 11.3 KiB | — | — | **7.6×** |
-| Join_Left_UnmatchedRows | 4.26 MiB | — | — | 708 KiB | — | — | **6.2×** |
+| **Join_Inner_SmallLarge** | **2.61 MiB** | — | — | **1.07 MiB** | — | — | **2.4×** |
+| **Join_Inner_LowSelectivity** | **22.6 KiB** | — | — | **11.3 KiB** | — | — | **2.0×** |
+| **Join_Left_UnmatchedRows** | **873 KiB** | — | — | **708 KiB** | — | — | **1.23×** |
 | Vacuum_Small | 8.04 MiB | — | — | 89 B | — | — | — |
 | WAL_Checkpoint | 69.3 KiB | — | — | 440 B | — | — | **161×** |
 | Explain | 6.4 KiB | — | — | 680 B | — | — | **9.6×** |
 | Select_PointScan | 5.3 KiB | — | — | 679 B | — | — | **8.0×** |
 | Select_Limit | 4.0 KiB | — | — | 1.7 KiB | — | — | **2.4×** |
-| Select_FullScan | **1.23 MiB** | — | — | **1.29 MiB** | — | — | **0.95×** ✓ |
+| Select_FullScan | **1.29 MiB** | — | — | **1.36 MiB** | — | — | **0.95×** ✓ |
 | Select_CountStar | 2.5 KiB | — | — | 400 B | — | — | **6.5×** |
 | Select_IndexRangeScan | 110.9 KiB | — | — | 85.9 KiB | — | — | **1.3×** |
 | Select_SecondaryIndex_LowSelectivity | 434.9 KiB | — | — | 313 KiB | — | — | **1.4×** |
 | Select_SecondaryIndex_LowSelectivityLimit | 6.0 KiB | — | — | 1.1 KiB | — | — | **5.6×** |
-| Select_RangeScan | **82.2 KiB** | — | — | **85.9 KiB** | — | — | **0.96×** ✓ |
+| Select_RangeScan | **82.4 KiB** | — | — | **85.9 KiB** | — | — | **0.96×** ✓ |
 | CTE_Materialise | 7.2 KiB | — | — | 400 B | — | — | **18×** |
 | Subquery_InList | 859 KiB | — | — | 235 KiB | — | — | **3.7×** |
 | OnConflict_DoUpdate | 8.7 KiB | — | — | 260 B | — | — | **34×** |
@@ -118,9 +122,9 @@ Cumulative optimisations in this baseline:
 | Distinct_HighCardinality | **40,145** | **40,010** | **~1.0×** ✓ |
 | Delete_ByPK | 112 | 19 | 5.9× |
 | Insert_SingleRow | 56 | 12 | 4.7× |
-| Join_Inner_SmallLarge | 139,989 | 99,757 | 1.4× |
-| Join_Inner_LowSelectivity | 2,115 | 1,009 | 2.1× |
-| Join_Left_UnmatchedRows | 120,316 | 70,157 | 1.71× |
+| **Join_Inner_SmallLarge** | **89,778** | **99,757** | **0.90× ✓** |
+| **Join_Inner_LowSelectivity** | **1,295** | **1,009** | **1.28×** |
+| **Join_Left_UnmatchedRows** | **79,740** | **70,157** | **1.14×** |
 | Select_FullScan | **79,827** | **99,758** | **0.80×** ✓ |
 | Select_RangeScan | **5,516** | **6,581** | **0.84×** ✓ |
 | Select_IndexRangeScan | 6,650 | 6,581 | 1.01× ✓ |
@@ -131,14 +135,19 @@ Cumulative optimisations in this baseline:
 
 #### Key observations
 
-**Wins vs SQLite (timing):** GroupBy, Having, Distinct, most SELECT paths, DML (insert/update/delete), semi-join, subquery (nearly at parity), full-text common-term and multi-term, Join_Inner_LowSelectivity.
+**Wins vs SQLite (timing):** GroupBy, Having, Distinct, most SELECT paths, DML (insert/update/delete), semi-join, subquery (nearly at parity), full-text common-term and multi-term, **all three JOIN benchmarks** (now 0.15–0.94×).
 
-**Wins vs SQLite (memory/allocs):** Select_FullScan (0.95× B, 0.80× allocs), Select_RangeScan (0.96× B, 0.84× allocs), Select_IndexRangeScan (1.01× allocs — at parity).
+**Wins vs SQLite (memory/allocs):** Select_FullScan (0.95× B, 0.80× allocs), Select_RangeScan (0.96× B, 0.84× allocs), Select_IndexRangeScan (1.01× allocs — at parity), **Join_Inner_SmallLarge allocs (0.90×)**.
+
+**JOIN improvement summary (was → now):**
+- Join_Inner_SmallLarge: 6.0 MiB → 2.6 MiB (**2.4×**, was 5.6×); 1.91× slower → **0.94× faster** ✓
+- Join_Left_UnmatchedRows: 4.3 MiB → 873 KiB (**1.23×**, was 6.2×); 2.40× slower → **0.82× faster** ✓
+- Join_Inner_LowSelectivity: 85 KiB → 23 KiB (**2.0×**, was 7.6×); 0.36× → **0.15×** ✓
 
 **Largest remaining memory gaps:**
-1. **JOIN high-selectivity** — 5.6–6.2× gap. `combineRowsWithSchema` still allocates `[]OptionalValue` per combined row on the output side; hash join materialises inner rows on probe hits; RowView end-to-end for JOIN output is not yet implemented.
+1. **JOIN high-selectivity** — 2.4× gap remaining (Join_Inner_SmallLarge). Inner hash build still allocates compact cells per inner row; outer scan still boxes probe keys via `OptionalValue`. Further reduction would require zero-alloc hash probe keys and arena-free inner cell storage.
 2. **Subquery/InList** — 3.7× gap (was 25× at project start). Remaining: inner build phase (Bloom filter + hash map + key strings for ~10k inner entries).
-3. **GROUP BY/HAVING** — 16–23× memory gap despite fast timing. `aggStatePool` and `groupValPool` still allocate per-group structs; RowView GROUP BY path is not yet end-to-end zero-copy.
-4. **DISTINCT** — 5.1× memory gap. Materialises all rows into `[]Row` for deduplication.
+3. **GROUP BY/HAVING** — 14–20× memory gap despite fast timing. `aggStatePool` and `groupValPool` still allocate per-group structs; RowView GROUP BY path is not yet end-to-end zero-copy.
+4. **DISTINCT** — 2.9× memory gap. Allocs now at parity with SQLite; remaining bytes from hash-set key strings.
 5. **Batch INSERT** — 1.8× slower than SQLite. Multi-row insert path not yet RowView-optimised; each row still allocates `[]OptionalValue`.
 6. **Full-text** — large absolute memory (10 MiB build index) due to inverted index structure; not a target for RowView optimisation.
