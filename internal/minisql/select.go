@@ -224,8 +224,10 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	}
 
 	// Materialising path: buffer every matching row, then dispatch.
-	// Required for COUNT (needs a total), GROUP BY, aggregates, ORDER BY (sort),
-	// and JOIN (goroutine-based execution inside plan.Execute).
+	// Reached for JOIN queries that also require an in-memory sort (ORDER BY),
+	// GROUP BY, aggregate, or DISTINCT — where all rows must be collected before
+	// output can begin.  Non-JOIN queries and simple JOIN SELECT queries exit
+	// earlier via the dedicated paths above.
 	//
 	// LIMIT pushdown: for JOIN queries with no in-memory sort and no DISTINCT we
 	// can stop collecting rows after OFFSET+LIMIT rows, avoiding a full scan of
