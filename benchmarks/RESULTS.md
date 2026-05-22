@@ -299,6 +299,31 @@ Subquery_InList unaffected: 874 KB / 35,100 allocs — semi-join takes a separat
 
 ---
 
+### 2026-05-22 — Arena for compact cell build phase (eliminate per-row make([]byte))
+
+**Root cause:** `buildHashBucketFromCells` was allocating `make([]byte, len(cell.Value)) + copy` per inner row — one heap allocation per cell. For 10k inner rows this produced 10k small (50-100 byte) allocations in addition to the cell data itself, adding GC pressure and per-allocation overhead from size-class rounding.
+
+**Fix:** Replaced per-row allocation with a contiguous byte arena pre-sized by sampling the first page (already in memory from `SeekFirst`). Average cell size is computed from the first page's cells; the arena is pre-allocated to `estRows × avgCellBytes`. Each `compactCell.value` is a 3-index sub-slice of the arena (`arena[start:end:end]`), keeping the backing array alive via Go's slice header GC reference without storing the arena explicitly in the bucket. The arena grows via `append` if the estimate is low; old sub-slices remain valid across reallocations because they reference the old backing array.
+
+#### Memory and alloc change (B/op, benchtime=30s)
+
+| Benchmark | before | after | B/op | allocs |
+|---|---|---|---|---|
+| Join_Inner_SmallLarge | 6.12 MiB / 149,992 allocs | **6.02 MiB / 139,993 allocs** | −100 KB | **−10k** |
+| Join_Left_UnmatchedRows | 6.86 MiB / 199,872 allocs | 6.86 MiB / 199,872 allocs | unchanged | unchanged |
+
+`Join_Left_UnmatchedRows` is unaffected: its inner (build) side uses an index scan rather than a sequential scan and therefore takes the legacy materialising path, not the compact cell path.
+
+**Cumulative totals (Steps 3+5+6+7+arena):**
+
+| Benchmark | original baseline | current | reduction | vs SQLite |
+|---|---|---|---|---|
+| Join_Inner_SmallLarge | 12.06 MiB / 150k allocs | **6.02 MiB / 140k allocs** | **2.0×** | 5.4× (was 10.2×) |
+| Join_Left_UnmatchedRows | 12.24 MiB / 200k allocs | **6.86 MiB / 200k allocs** | **1.78×** | 9.5× (was 17.3×) |
+| Subquery_InList | 5.78 MiB / 135k allocs | **854 KB / 35k allocs** | **6.9×** | 3.6× (was 25×) |
+
+---
+
 ### 2026-05-20 17:10 UTC
 
 #### Timing

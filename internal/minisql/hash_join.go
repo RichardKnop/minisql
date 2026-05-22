@@ -23,8 +23,10 @@ const (
 // []OptionalValue allocation during the hash-join build phase.  On probe hit
 // the bytes are decoded lazily via NewRowView + MaterializeWithOverflow, so
 // only matched rows pay the decoding cost.
+// value is a sub-slice of a shared arena; it is safe to read after page
+// eviction because the arena holds an independent copy of the bytes.
 type compactCell struct {
-	value       []byte // owned copy of Cell.Value; safe after page eviction
+	value       []byte
 	nullBitmask uint64
 	key         RowID
 }
@@ -229,6 +231,11 @@ func buildSemiJoinBucketFromRowViews(ctx context.Context, innerTable *Table, inn
 // the raw cell bytes (value + nullBitmask + key) into a compactCell.  On probe
 // hit the bytes are decoded lazily via NewRowView + MaterializeWithOverflow,
 // so only matched rows pay the full decoding cost.
+//
+// Cell bytes are stored in a contiguous arena (one large []byte grown via
+// append) rather than one make([]byte) per row.  Each compactCell.value is a
+// sub-slice of the arena; the GC keeps the backing array alive through those
+// slice headers, so the arena does not need to escape to the bucket.
 func buildHashBucketFromCells(ctx context.Context, innerTable *Table, innerScan Scan, join JoinPlan, bucket *hashJoinBucket) error {
 	colIdxs := make([]int, len(join.JoinColumnPairs))
 	colKinds := make([]ColumnKind, len(join.JoinColumnPairs))
@@ -257,6 +264,27 @@ func buildHashBucketFromCells(ctx context.Context, innerTable *Table, innerScan 
 		return fmt.Errorf("hash join compact build scan: %w", err)
 	}
 	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	// Pre-size the arena so the common case needs only one allocation.
+	// Sample the first page to get the average cell value size for this table;
+	// the page is already in memory from the SeekFirst call above, so this adds
+	// no I/O.  Multiply by the estimated row count to get the total capacity.
+	// The arena grows via append if the estimate is low; sub-slices stored in
+	// compactCell remain valid across reallocations because they reference the
+	// old backing array.
+	avgCellBytes := 64 // fallback for empty first page
+	if n := len(page.LeafNode.Cells); n > 0 {
+		var total int
+		for _, c := range page.LeafNode.Cells {
+			total += len(c.Value)
+		}
+		avgCellBytes = total / n
+	}
+	estRows := innerTable.estimatedRowCount()
+	if estRows <= 0 {
+		estRows = 64
+	}
+	arena := make([]byte, 0, int(estRows)*avgCellBytes)
 
 	var keyBuf []byte
 	for !cursor.EndOfTable {
@@ -292,11 +320,13 @@ func buildHashBucketFromCells(ctx context.Context, innerTable *Table, innerScan 
 		if !valid {
 			continue // NULL join key — never matches
 		}
-		// Copy cell bytes — the page buffer may be reused after the cursor advances.
-		valueCopy := make([]byte, len(cell.Value))
-		copy(valueCopy, cell.Value)
+		// Append cell bytes into the arena instead of allocating per row.
+		// Use a three-index slice so no later append can corrupt adjacent cells.
+		start := len(arena)
+		arena = append(arena, cell.Value...)
+		end := len(arena)
 		cc := compactCell{
-			value:       valueCopy,
+			value:       arena[start:end:end],
 			nullBitmask: cell.NullBitmask,
 			key:         cell.Key,
 		}
