@@ -8,6 +8,4 @@ test-output.txt
 .vscode/
 benchmarks/raw.txt
 benchmarks/raw_*.txt
-benchmarks/charts/
-chart
 report
