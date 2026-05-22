@@ -2712,14 +2712,14 @@ func appendDistinctKeyFromView(
 				return nil, err
 			}
 			buf = append(buf, "f32:"...)
-			buf = strconv.AppendFloat(buf, v, 'v', -1, 32)
+			buf = strconv.AppendFloat(buf, v, 'g', -1, 32)
 		case Double:
 			v, _, err := view.Float64At(colIdx)
 			if err != nil {
 				return nil, err
 			}
 			buf = append(buf, "f64:"...)
-			buf = strconv.AppendFloat(buf, v, 'v', -1, 64)
+			buf = strconv.AppendFloat(buf, v, 'g', -1, 64)
 		case Boolean:
 			v, _, err := view.BoolAt(colIdx)
 			if err != nil {
