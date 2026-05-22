@@ -1203,9 +1203,11 @@ func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementR
 		}
 	}
 
-	// Preallocate one flat block for all result values — one alloc covers every group.
+	// Preallocate one flat block for all group values — one alloc covers every group.
+	// passedIndices tracks which group indices passed HAVING, using int32 (4 bytes each)
+	// instead of full Row structs (48 bytes each).
 	allResultValues := make([]OptionalValue, nGroups*nFields)
-	resultRows := make([]Row, 0, nGroups)
+	passedIndices := make([]int32, 0, nGroups)
 
 	for gi, key := range acc.groupOrder {
 		gsIdx := acc.groupMap[key]
@@ -1253,10 +1255,10 @@ func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementR
 				}
 			}
 		}
-		resultRow := NewRowWithValues(resultColumns, values)
 
 		// Apply HAVING filter against the computed aggregate row.
 		if len(stmt.Having) > 0 {
+			resultRow := NewRowWithValues(resultColumns, values)
 			ok, err := resultRow.CheckOneOrMore(stmt.Having)
 			if err != nil {
 				return StatementResult{}, fmt.Errorf("HAVING: %w", err)
@@ -1266,31 +1268,48 @@ func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementR
 			}
 		}
 
-		resultRows = append(resultRows, resultRow)
+		passedIndices = append(passedIndices, int32(gi))
 	}
 
-	// Apply ORDER BY if specified.
+	// Apply ORDER BY if specified — sort passedIndices by comparing allResultValues slices.
 	if len(stmt.OrderBy) > 0 {
-		if err := t.sortRows(resultRows, stmt.OrderBy); err != nil {
-			return StatementResult{}, err
-		}
+		slices.SortFunc(passedIndices, func(a, b int32) int {
+			rowA := NewRowWithValues(resultColumns, allResultValues[int(a)*nFields:(int(a)+1)*nFields])
+			rowB := NewRowWithValues(resultColumns, allResultValues[int(b)*nFields:(int(b)+1)*nFields])
+			for _, clause := range stmt.OrderBy {
+				valA, foundA := rowA.getValueQualified(clause.Field.AliasPrefix, clause.Field.Name)
+				valB, foundB := rowB.getValueQualified(clause.Field.AliasPrefix, clause.Field.Name)
+				if !foundA || !foundB {
+					continue
+				}
+				cmp := compareValues(valA, valB)
+				if cmp == 0 {
+					continue
+				}
+				if clause.Direction == Desc {
+					return -cmp
+				}
+				return cmp
+			}
+			return 0
+		})
 	}
 
 	// Apply OFFSET.
 	if stmt.Offset.Valid {
 		offset := int(stmt.Offset.Value.(int64))
-		if offset >= len(resultRows) {
-			resultRows = []Row{}
+		if offset >= len(passedIndices) {
+			passedIndices = passedIndices[:0]
 		} else {
-			resultRows = resultRows[offset:]
+			passedIndices = passedIndices[offset:]
 		}
 	}
 
 	// Apply LIMIT.
 	if stmt.Limit.Valid {
 		limit := int(stmt.Limit.Value.(int64))
-		if limit < len(resultRows) {
-			resultRows = resultRows[:limit]
+		if limit < len(passedIndices) {
+			passedIndices = passedIndices[:limit]
 		}
 	}
 
@@ -1298,12 +1317,12 @@ func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementR
 	return StatementResult{
 		Columns: resultColumns,
 		Rows: NewIterator(func(ctx context.Context) (Row, error) {
-			if idx >= len(resultRows) {
+			if idx >= len(passedIndices) {
 				return Row{}, ErrNoMoreRows
 			}
-			row := resultRows[idx]
-			idx += 1
-			return row, nil
+			gi := int(passedIndices[idx])
+			idx++
+			return NewRowWithValues(resultColumns, allResultValues[gi*nFields:(gi+1)*nFields]), nil
 		}),
 	}, nil
 }
