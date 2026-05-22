@@ -223,11 +223,17 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return result, err
 	}
 
+	// JOIN + ORDER BY + LIMIT: use a bounded min-heap (size = limit+offset) so
+	// memory is O(limit) rather than O(join cardinality).
+	if result, ok, err := t.selectJoinWithSortStreamingLimit(ctx, stmt, plan, selectedFields, requestedFields); ok || err != nil {
+		return result, err
+	}
+
 	// Materialising path: buffer every matching row, then dispatch.
-	// Reached for JOIN queries that also require an in-memory sort (ORDER BY),
-	// GROUP BY, or aggregate — where all rows must be collected before output can
-	// begin.  Non-JOIN queries and simple JOIN SELECT queries (including DISTINCT)
-	// exit earlier via the dedicated paths above.
+	// Reached for JOIN queries that require GROUP BY, aggregate, or semi/anti-semi
+	// joins — where all rows must be collected before output can begin.
+	// Simple JOINs (including DISTINCT and ORDER BY + LIMIT) exit via the
+	// dedicated paths above.
 	//
 	// LIMIT pushdown: for JOIN queries with no in-memory sort we can stop
 	// collecting rows after OFFSET+LIMIT rows, avoiding a full scan of every
@@ -2893,6 +2899,81 @@ func (t *Table) selectStreamingJoin(
 			return nil
 		},
 	)
+	return result, true, nil
+}
+
+// selectJoinWithSortStreamingLimit handles JOIN + ORDER BY + LIMIT using a bounded
+// min-heap of size limit+offset, keeping memory proportional to the output size
+// rather than the full join cardinality.
+func (t *Table) selectJoinWithSortStreamingLimit(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	selectedFields []Field,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if len(plan.Joins) == 0 ||
+		!plan.SortInMemory ||
+		!stmt.Limit.Valid ||
+		len(plan.OrderBy) == 0 ||
+		stmt.Distinct ||
+		stmt.IsSelectCountAll() ||
+		stmt.IsSelectGroupBy() ||
+		stmt.IsSelectAggregate() {
+		return StatementResult{}, false, nil
+	}
+	// Semi/anti-semi joins with ORDER BY fall through to the materialising path.
+	for _, j := range plan.Joins {
+		if j.Type == Semi || j.Type == AntiSemi {
+			return StatementResult{}, false, nil
+		}
+	}
+
+	limit := int(stmt.Limit.Value.(int64))
+	offset := 0
+	if stmt.Offset.Valid {
+		offset = int(stmt.Offset.Value.(int64))
+	}
+	maxRows := limit + offset
+
+	outputFields := orderByOutputFields(requestedFields)
+	h := newRowHeap(plan.OrderBy, maxRows)
+	err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
+		updated, err := addOrderByOutputFieldsToRow(row, outputFields, plan.OrderBy)
+		if err != nil {
+			return err
+		}
+		h.PushRow(updated)
+		return nil
+	})
+	if err != nil {
+		return StatementResult{}, true, err
+	}
+
+	allRows := h.ExtractSorted()
+	if offset >= len(allRows) {
+		allRows = []Row{}
+	} else {
+		end := offset + limit
+		if end < len(allRows) {
+			allRows = allRows[offset:end]
+		} else {
+			allRows = allRows[offset:]
+		}
+	}
+
+	idx := 0
+	result := StatementResult{
+		Columns: t.selectResultColumns(stmt, requestedFields),
+	}
+	result.Rows = NewIterator(func(ctx context.Context) (Row, error) {
+		if idx >= len(allRows) {
+			return Row{}, ErrNoMoreRows
+		}
+		row := allRows[idx]
+		idx++
+		return projectRow(row, requestedFields)
+	})
 	return result, true, nil
 }
 

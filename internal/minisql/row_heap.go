@@ -100,12 +100,12 @@ func (h *rowHeap) PushRow(row Row) {
 				continue // Equal, check next column
 			}
 
-			// For ASC: replace root if new < root (we keep smallest values)
+			// For ASC (or unset): replace root if new < root (we keep smallest values)
 			// For DESC: replace root if new > root (we keep largest values)
-			if clause.Direction == Asc {
-				shouldReplace = cmp < 0
-			} else {
+			if clause.Direction == Desc {
 				shouldReplace = cmp > 0
+			} else {
+				shouldReplace = cmp < 0
 			}
 			break
 		}

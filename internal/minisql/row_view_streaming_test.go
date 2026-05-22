@@ -495,3 +495,67 @@ func TestTable_Select_StreamingInnerJoin_Distinct(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{"US", "UK"}, countries)
 }
+
+func TestTable_Select_JoinWithOrderByLimit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	userCols := []Column{
+		{Name: "user_id", Kind: Int8, Size: 8},
+	}
+	users, usersTx := newNamedTestTable(t, "users", userCols)
+	insertRowValues(ctx, t, users, usersTx, [][]OptionalValue{
+		{{Value: int64(1), Valid: true}},
+		{{Value: int64(2), Valid: true}},
+		{{Value: int64(3), Valid: true}},
+	})
+
+	orders, ordersTx := newNamedTestTable(t, "orders", joinColumns)
+	// order_id, user_id, amount — amounts are 300, 100, 200 to test sort
+	insertRowValues(ctx, t, orders, ordersTx, [][]OptionalValue{
+		{{Value: int64(1), Valid: true}, {Value: int64(1), Valid: true}, {Value: int64(300), Valid: true}},
+		{{Value: int64(2), Valid: true}, {Value: int64(2), Valid: true}, {Value: int64(100), Valid: true}},
+		{{Value: int64(3), Valid: true}, {Value: int64(3), Valid: true}, {Value: int64(200), Valid: true}},
+	})
+
+	users.provider = &mapTableProvider{tables: map[string]*Table{
+		"users":  users,
+		"orders": orders,
+	}}
+
+	onCond := FieldIsEqual(
+		Field{AliasPrefix: "u", Name: "user_id"},
+		OperandField,
+		Field{AliasPrefix: "o", Name: "user_id"},
+	)
+	stmt := Statement{
+		Kind:       Select,
+		TableAlias: "u",
+		Fields:     []Field{{AliasPrefix: "o", Name: "amount"}},
+		Joins: []Join{{
+			TableName:  "orders",
+			TableAlias: "o",
+			Type:       Inner,
+			Conditions: Conditions{onCond},
+		}},
+		Limit: OptionalValue{Value: int64(2), Valid: true},
+		OrderBy: []OrderBy{{
+			Field: Field{AliasPrefix: "o", Name: "amount"},
+		}},
+	}
+
+	result, err := users.Select(ctx, stmt)
+	require.NoError(t, err)
+
+	rows := collectRows(ctx, result)
+	// Sorted ASC by amount: 100, 200, 300 — LIMIT 2 yields [100, 200]
+	require.Len(t, rows, 2)
+
+	amounts := make([]int64, 2)
+	for i, row := range rows {
+		v, ok := row.GetValue("o.amount")
+		require.True(t, ok, "column o.amount not found in row %v", row.Columns)
+		amounts[i] = v.Value.(int64)
+	}
+	assert.Equal(t, []int64{100, 200}, amounts)
+}
