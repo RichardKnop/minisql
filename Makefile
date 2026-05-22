@@ -82,13 +82,3 @@ bench-report:
 		echo "No raw.txt found — run 'make bench' first."; exit 1; \
 	fi
 	go run ./benchmarks/cmd/report/ -out $(CURDIR)/benchmarks/RESULTS.md benchmarks/raw.txt
-
-# bench-chart: generate PNG bar charts from benchmarks/raw.txt.
-# Charts are written to benchmarks/charts/.
-# $(CURDIR) is the absolute path to the repo root, so the output directory is
-# always correct regardless of where make is invoked from.
-bench-chart:
-	@if [ ! -f benchmarks/raw.txt ]; then \
-		echo "No raw.txt found — run 'make bench' first."; exit 1; \
-	fi
-	go run ./benchmarks/cmd/chart/ -out $(CURDIR)/benchmarks/charts benchmarks/raw.txt
