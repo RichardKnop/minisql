@@ -13,11 +13,19 @@ import (
 // It is the migration target for read paths: filters, projections, joins, and
 // database/sql delivery should pull typed values from RowView instead of first
 // materialising a Row with a []OptionalValue backing array.
+//
+// For combined join views, inner != nil and splitIdx separates outer columns
+// (indexes 0..splitIdx-1) from inner columns (indexes splitIdx..N-1).
+// All typed accessors transparently route inner-column reads through inner.
 type RowView struct {
 	columns     []Column
 	value       []byte
 	nullBitmask uint64
 	key         RowID
+	inner       *RowView // non-nil for combined join views; routes inner-column reads
+	innerPager  TxPager  // pager for inner table (overflow text in inner columns)
+	splitIdx    int      // outer column count; columns[splitIdx:] belong to inner
+	innerIsNull bool     // true → all inner columns are NULL (LEFT JOIN miss)
 }
 
 // NewRowView returns a lazy row view over cell using columns as the schema.
@@ -27,6 +35,25 @@ func NewRowView(columns []Column, cell Cell) RowView {
 		value:       cell.Value,
 		nullBitmask: cell.NullBitmask,
 		key:         cell.Key,
+	}
+}
+
+// NewCombinedRowView constructs a join RowView that routes column accesses to
+// the outer or inner side based on splitIdx.  outerView supplies the outer cell
+// bytes; innerView (a pre-allocated pointer reused per inner match) supplies the
+// inner cell bytes.  innerPager is the inner table's pager, used when an inner
+// text column requires overflow-page reads.  If innerIsNull is true all inner
+// column accesses return NULL (LEFT JOIN miss path).
+func NewCombinedRowView(combinedCols []Column, outerView RowView, innerView *RowView, innerPager TxPager, splitIdx int, innerIsNull bool) RowView {
+	return RowView{
+		columns:     combinedCols,
+		value:       outerView.value,
+		nullBitmask: outerView.nullBitmask,
+		key:         outerView.key,
+		inner:       innerView,
+		innerPager:  innerPager,
+		splitIdx:    splitIdx,
+		innerIsNull: innerIsNull,
 	}
 }
 
@@ -42,6 +69,12 @@ func (rv RowView) Columns() []Column {
 
 // IsNull reports whether column idx is SQL NULL.
 func (rv RowView) IsNull(idx int) (bool, error) {
+	if rv.splitIdx > 0 && idx >= rv.splitIdx {
+		if rv.innerIsNull {
+			return true, nil
+		}
+		return rv.inner.IsNull(idx - rv.splitIdx)
+	}
 	if idx < 0 || idx >= len(rv.columns) {
 		return false, fmt.Errorf("column index %d out of bounds", idx)
 	}
@@ -69,6 +102,12 @@ func (rv RowView) ValueByName(name string) (OptionalValue, bool, error) {
 // New read paths should prefer the typed accessors below to avoid interface
 // boxing on text/UUID values.
 func (rv RowView) ValueAt(idx int) (OptionalValue, error) {
+	if rv.splitIdx > 0 && idx >= rv.splitIdx {
+		if rv.innerIsNull {
+			return OptionalValue{}, nil
+		}
+		return rv.inner.ValueAt(idx - rv.splitIdx)
+	}
 	if idx < 0 || idx >= len(rv.columns) {
 		return OptionalValue{}, fmt.Errorf("column index %d out of bounds", idx)
 	}
@@ -116,6 +155,16 @@ func (rv RowView) ValueAt(idx int) (OptionalValue, error) {
 
 // ValueAtWithOverflow lazily decodes a single column and reads overflow text when needed.
 func (rv RowView) ValueAtWithOverflow(ctx context.Context, pager TxPager, idx int) (OptionalValue, error) {
+	if rv.splitIdx > 0 && idx >= rv.splitIdx {
+		if rv.innerIsNull {
+			return OptionalValue{}, nil
+		}
+		innerPager := pager
+		if rv.innerPager != nil {
+			innerPager = rv.innerPager
+		}
+		return rv.inner.ValueAtWithOverflow(ctx, innerPager, idx-rv.splitIdx)
+	}
 	value, err := rv.ValueAt(idx)
 	if err != nil || !value.Valid {
 		return value, err
@@ -140,6 +189,12 @@ func (rv RowView) ValueAtWithOverflow(ctx context.Context, pager TxPager, idx in
 
 // BoolAt lazily decodes a BOOLEAN column.
 func (rv RowView) BoolAt(idx int) (bool, bool, error) {
+	if rv.splitIdx > 0 && idx >= rv.splitIdx {
+		if rv.innerIsNull {
+			return false, false, nil
+		}
+		return rv.inner.BoolAt(idx - rv.splitIdx)
+	}
 	if null, err := rv.IsNull(idx); err != nil || null {
 		return false, false, err
 	}
@@ -155,6 +210,12 @@ func (rv RowView) BoolAt(idx int) (bool, bool, error) {
 
 // Int64At lazily decodes an INT4, INT8, or TIMESTAMP column as int64.
 func (rv RowView) Int64At(idx int) (int64, bool, error) {
+	if rv.splitIdx > 0 && idx >= rv.splitIdx {
+		if rv.innerIsNull {
+			return 0, false, nil
+		}
+		return rv.inner.Int64At(idx - rv.splitIdx)
+	}
 	if null, err := rv.IsNull(idx); err != nil || null {
 		return 0, false, err
 	}
@@ -174,6 +235,12 @@ func (rv RowView) Int64At(idx int) (int64, bool, error) {
 
 // Float64At lazily decodes a REAL or DOUBLE column as float64.
 func (rv RowView) Float64At(idx int) (float64, bool, error) {
+	if rv.splitIdx > 0 && idx >= rv.splitIdx {
+		if rv.innerIsNull {
+			return 0, false, nil
+		}
+		return rv.inner.Float64At(idx - rv.splitIdx)
+	}
 	if null, err := rv.IsNull(idx); err != nil || null {
 		return 0, false, err
 	}
@@ -193,6 +260,12 @@ func (rv RowView) Float64At(idx int) (float64, bool, error) {
 
 // TextAt lazily decodes a TEXT/VARCHAR/JSON column as a TextPointer.
 func (rv RowView) TextAt(idx int) (TextPointer, error) {
+	if rv.splitIdx > 0 && idx >= rv.splitIdx {
+		if rv.innerIsNull {
+			return TextPointer{}, nil
+		}
+		return rv.inner.TextAt(idx - rv.splitIdx)
+	}
 	if null, err := rv.IsNull(idx); err != nil || null {
 		return TextPointer{}, err
 	}
@@ -226,6 +299,16 @@ func (rv RowView) textAtOffset(idx, offset int) (TextPointer, error) {
 
 // TextAtWithOverflow lazily decodes a text column and reads overflow pages when needed.
 func (rv RowView) TextAtWithOverflow(ctx context.Context, pager TxPager, idx int) (TextPointer, error) {
+	if rv.splitIdx > 0 && idx >= rv.splitIdx {
+		if rv.innerIsNull {
+			return TextPointer{}, nil
+		}
+		innerPager := pager
+		if rv.innerPager != nil {
+			innerPager = rv.innerPager
+		}
+		return rv.inner.TextAtWithOverflow(ctx, innerPager, idx-rv.splitIdx)
+	}
 	textPointer, err := rv.TextAt(idx)
 	if err != nil || textPointer.IsInline() {
 		return textPointer, err
@@ -238,6 +321,12 @@ func (rv RowView) TextAtWithOverflow(ctx context.Context, pager TxPager, idx int
 
 // UUIDAt lazily decodes a UUID column.
 func (rv RowView) UUIDAt(idx int) (UUIDValue, bool, error) {
+	if rv.splitIdx > 0 && idx >= rv.splitIdx {
+		if rv.innerIsNull {
+			return UUIDValue{}, false, nil
+		}
+		return rv.inner.UUIDAt(idx - rv.splitIdx)
+	}
 	if null, err := rv.IsNull(idx); err != nil || null {
 		return UUIDValue{}, false, err
 	}

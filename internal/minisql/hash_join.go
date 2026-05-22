@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -562,6 +563,334 @@ func semiJoinProbeRowViewIteratorFactory(
 				return view, nil
 			}
 			return RowView{}, ErrNoMoreRows
+		})
+	}, nil
+}
+
+// inljProbeRowViewIteratorFactory returns a factory that creates a
+// RowViewIterator for a single INNER/LEFT index nested-loop join (INLJ) with a
+// unique inner index (primary key or unique secondary index).
+//
+// For each outer row it extracts the join key via typed accessors (no boxing of
+// the full row), probes the inner index with PointUniqueRowID, copies the inner
+// cell bytes into a reusable buffer, and yields a CombinedRowView that routes
+// column reads to outer page bytes or the copied inner bytes without ever
+// constructing a []OptionalValue.  Unmatched outer rows in INNER JOIN are skipped
+// without materialisation; LEFT JOIN emits a NULL-inner CombinedRowView instead.
+//
+// Restriction: the inner scan must have no post-lookup filters (innerFilters empty)
+// and the join must be single-column equi-join over a unique inner index.
+func inljProbeRowViewIteratorFactory(
+	ctx context.Context,
+	outerTable *Table,
+	innerTable *Table,
+	innerIndex BTreeIndex,
+	join JoinPlan,
+	combinedCols []Column,
+	outerFilter func(context.Context, RowView) (bool, error),
+	remaining, offset int64,
+	hasLimit, hasOffset bool,
+	isLeft bool,
+) (func() RowViewIterator, error) {
+	if len(join.JoinColumnPairs) == 0 {
+		return nil, fmt.Errorf("inlj probe: no join column pairs")
+	}
+	colIndexMap := make(map[string]int, len(outerTable.Columns))
+	for i, col := range outerTable.Columns {
+		colIndexMap[col.Name] = i
+	}
+	outerColIdx, ok := colIndexMap[join.JoinColumnPairs[0].BaseTableColumn.Name]
+	if !ok {
+		return nil, fmt.Errorf("inlj probe: column %s not found in outer table", join.JoinColumnPairs[0].BaseTableColumn.Name)
+	}
+
+	splitIdx := len(outerTable.Columns)
+
+	cursor, err := outerTable.SeekFirst(ctx)
+	if err != nil {
+		return nil, err
+	}
+	page, err := outerTable.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return nil, fmt.Errorf("inlj probe scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	return func() RowViewIterator {
+		iterCursor := cursor
+		iterPage := page
+		iterRemaining := remaining
+		iterOffset := offset
+
+		innerView := new(RowView)
+		// innerCellBuf is a reusable buffer for inner cell bytes; it grows to fit
+		// the largest inner row seen and is reset ([:0]) for each new inner match.
+		// This eliminates per-row heap allocation for the inner cell copy.
+		var innerCellBuf []byte
+
+		var scanErr error
+
+		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
+			for !iterCursor.EndOfTable {
+				if ctxErr := iterCtx.Err(); ctxErr != nil {
+					return RowView{}, ctxErr
+				}
+				if iterPage.Index != iterCursor.PageIdx {
+					iterPage, scanErr = outerTable.pager.ReadPage(iterCtx, iterCursor.PageIdx)
+					if scanErr != nil {
+						return RowView{}, fmt.Errorf("inlj probe scan: %w", scanErr)
+					}
+				}
+				cell := iterPage.LeafNode.Cells[iterCursor.CellIdx]
+				advanceLeafCursor(iterCursor, iterPage)
+
+				outerView := NewRowView(outerTable.Columns, cell)
+
+				if outerFilter != nil {
+					ok, filterErr := outerFilter(iterCtx, outerView)
+					if filterErr != nil {
+						return RowView{}, filterErr
+					}
+					if !ok {
+						continue
+					}
+				}
+
+				// Extract probe key value via compatibility bridge (boxes to any once).
+				probeKeyOV, err := outerView.ValueAt(outerColIdx)
+				if err != nil {
+					return RowView{}, err
+				}
+				if !probeKeyOV.Valid {
+					// NULL outer join key — no match possible.
+					if isLeft {
+						return NewCombinedRowView(combinedCols, outerView, nil, nil, splitIdx, true), nil
+					}
+					continue
+				}
+
+				// INLJ point lookup on the unique inner index.
+				rowID, err := innerIndex.PointUniqueRowID(iterCtx, probeKeyOV.Value)
+				if isNotFound(err) {
+					if isLeft {
+						return NewCombinedRowView(combinedCols, outerView, nil, nil, splitIdx, true), nil
+					}
+					continue
+				}
+				if err != nil {
+					return RowView{}, fmt.Errorf("inlj probe: %w", err)
+				}
+
+				// Fetch inner row view by rowID and copy its cell bytes into the
+				// reusable buffer so the inner RowView remains valid after the
+				// inner table's pager reads subsequent pages.
+				innerRowView, err := innerTable.rowViewByRowID(iterCtx, rowID)
+				if err != nil {
+					return RowView{}, fmt.Errorf("inlj probe fetch inner row: %w", err)
+				}
+				innerCellBuf = append(innerCellBuf[:0], innerRowView.value...)
+				*innerView = RowView{
+					columns:     innerTable.Columns,
+					value:       innerCellBuf,
+					nullBitmask: innerRowView.nullBitmask,
+					key:         innerRowView.key,
+				}
+
+				combined := NewCombinedRowView(combinedCols, outerView, innerView, innerTable.pager, splitIdx, false)
+				if hasOffset && iterOffset > 0 {
+					iterOffset--
+					continue
+				}
+				if hasLimit {
+					if iterRemaining == 0 {
+						return RowView{}, ErrNoMoreRows
+					}
+					iterRemaining--
+				}
+				return combined, nil
+			}
+			return RowView{}, ErrNoMoreRows
+		})
+	}, nil
+}
+
+// isNotFound reports whether err signals that a key was not found in an index.
+func isNotFound(err error) bool {
+	return errors.Is(err, ErrNotFound)
+}
+
+// hashJoinProbeRowViewIteratorFactory returns a factory that creates a
+// RowViewIterator for INNER/LEFT hash join probing without materialising
+// combined rows into []OptionalValue.  For each outer row it extracts the join
+// key via typed accessors, checks the Bloom filter and the bucket.cells map, and
+// yields CombinedRowViews that route column reads directly to the outer page
+// bytes or the arena-backed inner cell bytes.  Non-matching outer rows are
+// skipped without any heap allocation.
+//
+// For LEFT JOIN, unmatched outer rows emit a combined view with innerIsNull=true
+// so the driver receives NULL for every inner column.
+//
+// The returned factory may be called multiple times; each call produces an
+// independent iterator starting from the beginning of the outer scan.
+func hashJoinProbeRowViewIteratorFactory(
+	ctx context.Context,
+	outerTable *Table,
+	innerTable *Table,
+	join JoinPlan,
+	bucket *hashJoinBucket,
+	combinedCols []Column,
+	outerFilter func(context.Context, RowView) (bool, error),
+	remaining, offset int64,
+	hasLimit, hasOffset bool,
+	isLeft bool,
+) (func() RowViewIterator, error) {
+	// Pre-compute outer join-key column indexes and kinds for appendHashKeyFromView.
+	colIdxs := make([]int, len(join.JoinColumnPairs))
+	colKinds := make([]ColumnKind, len(join.JoinColumnPairs))
+	colIndexMap := make(map[string]int, len(outerTable.Columns))
+	for i, col := range outerTable.Columns {
+		colIndexMap[col.Name] = i
+	}
+	for p, pair := range join.JoinColumnPairs {
+		idx, ok := colIndexMap[pair.BaseTableColumn.Name]
+		if !ok {
+			return nil, fmt.Errorf("hash join probe: column %s not found in outer table", pair.BaseTableColumn.Name)
+		}
+		colIdxs[p] = idx
+		colKinds[p] = outerTable.Columns[idx].Kind
+	}
+
+	splitIdx := len(outerTable.Columns)
+
+	cursor, err := outerTable.SeekFirst(ctx)
+	if err != nil {
+		return nil, err
+	}
+	page, err := outerTable.pager.ReadPage(ctx, cursor.PageIdx)
+	if err != nil {
+		return nil, fmt.Errorf("hash join probe scan: %w", err)
+	}
+	cursor.EndOfTable = page.LeafNode.Header.Cells == 0
+
+	return func() RowViewIterator {
+		iterCursor := cursor
+		iterPage := page
+		iterRemaining := remaining
+		iterOffset := offset
+
+		// innerView is allocated once per iterator and updated for each inner match.
+		// The pointer is stored in each returned CombinedRowView; the driver reads
+		// from it before the next Next() call updates it.
+		innerView := new(RowView)
+
+		var (
+			outerView    RowView
+			pendingCells []compactCell
+			pendingIdx   int
+			leftMissNext bool // emit NULL-inner combined view before next outer row
+		)
+
+		var (
+			keyBuf  []byte
+			scanErr error
+		)
+
+		return NewRowViewIterator(func(iterCtx context.Context) (RowView, error) {
+			for {
+				if ctxErr := iterCtx.Err(); ctxErr != nil {
+					return RowView{}, ctxErr
+				}
+
+				// Emit pending LEFT JOIN null row before advancing to the next outer row.
+				if leftMissNext {
+					leftMissNext = false
+					combined := NewCombinedRowView(combinedCols, outerView, nil, nil, splitIdx, true)
+					if hasOffset && iterOffset > 0 {
+						iterOffset -= 1
+						continue
+					}
+					if hasLimit {
+						if iterRemaining == 0 {
+							return RowView{}, ErrNoMoreRows
+						}
+						iterRemaining -= 1
+					}
+					return combined, nil
+				}
+
+				// Drain remaining inner matches for the current outer row.
+				if pendingIdx < len(pendingCells) {
+					cc := pendingCells[pendingIdx]
+					pendingIdx += 1
+					*innerView = RowView{
+						columns:     innerTable.Columns,
+						value:       cc.value,
+						nullBitmask: cc.nullBitmask,
+						key:         cc.key,
+					}
+					combined := NewCombinedRowView(combinedCols, outerView, innerView, innerTable.pager, splitIdx, false)
+					if hasOffset && iterOffset > 0 {
+						iterOffset -= 1
+						continue
+					}
+					if hasLimit {
+						if iterRemaining == 0 {
+							return RowView{}, ErrNoMoreRows
+						}
+						iterRemaining -= 1
+					}
+					return combined, nil
+				}
+
+				// Advance to next outer row.
+				if iterCursor.EndOfTable {
+					return RowView{}, ErrNoMoreRows
+				}
+				if iterPage.Index != iterCursor.PageIdx {
+					iterPage, scanErr = outerTable.pager.ReadPage(iterCtx, iterCursor.PageIdx)
+					if scanErr != nil {
+						return RowView{}, fmt.Errorf("hash join probe scan: %w", scanErr)
+					}
+				}
+				cell := iterPage.LeafNode.Cells[iterCursor.CellIdx]
+				advanceLeafCursor(iterCursor, iterPage)
+
+				outerView = NewRowView(outerTable.Columns, cell)
+
+				if outerFilter != nil {
+					ok, filterErr := outerFilter(iterCtx, outerView)
+					if filterErr != nil {
+						return RowView{}, filterErr
+					}
+					if !ok {
+						continue
+					}
+				}
+
+				var valid bool
+				keyBuf, valid, scanErr = appendHashKeyFromView(keyBuf[:0], outerView, colIdxs, colKinds)
+				if scanErr != nil {
+					return RowView{}, scanErr
+				}
+				if !valid || !bucket.filter.MayContain(keyBuf) {
+					if isLeft {
+						leftMissNext = true
+					}
+					continue
+				}
+
+				cells := bucket.cells[string(keyBuf)]
+				if len(cells) == 0 {
+					if isLeft {
+						leftMissNext = true
+					}
+					continue
+				}
+
+				pendingCells = cells
+				pendingIdx = 0
+				// Loop back to drain inner matches.
+			}
 		})
 	}, nil
 }

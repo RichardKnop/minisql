@@ -198,11 +198,10 @@ func TestTable_Select_StreamingInnerJoin(t *testing.T) {
 	assert.Len(t, rows, 3)
 
 	// Verify user_id values are only 1 and 2 (user 3 excluded).
-	// Combined join columns are alias-qualified: "u.user_id".
 	var userIDs []int64
 	for _, row := range rows {
-		uid, ok := row.GetValue("u.user_id")
-		require.True(t, ok, "column u.user_id not found in row %v", row.Columns)
+		uid, ok := row.GetValue("user_id")
+		require.True(t, ok, "column user_id not found in row %v", row.Columns)
 		userIDs = append(userIDs, uid.Value.(int64))
 	}
 	assert.Contains(t, userIDs, int64(1))
