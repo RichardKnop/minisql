@@ -1,6 +1,6 @@
 ---
 name: Same TransactionManager in Index Unit Tests
-description: Table and index pagers must share one TransactionManager or OCC commits fail with ErrTxConflict
+description: Table and index pagers must share one TransactionManager or MVCC version tracking becomes inconsistent
 type: standard
 ---
 
@@ -11,10 +11,12 @@ all pagers must be wired to the **same** `TransactionManager` instance.
 
 ## Why
 
-Each `TransactionManager` tracks its own page version state independently. If a table
-pager uses TxManager-A and an index pager uses TxManager-B, commits from TxManager-B
-look like "unseen concurrent writes" to TxManager-A → `ErrTxConflict` at commit time.
-This is a spurious conflict that would never occur in production (single TxManager).
+Each `TransactionManager` maintains its own `commitSeq`, `pageLastCommittedSeq`, and
+`pageVersionHistory` independently. If a table pager uses TxManager-A and an index pager
+uses TxManager-B, each manager only sees commits from pagers registered with it. Version
+tracking diverges: snapshot readers on TxManager-A would not see history written by
+TxManager-B, leading to stale reads. This inconsistency never occurs in production where
+a single `TransactionManager` governs all pagers for a database file.
 
 ## `newTestTable` + `mockPagerFactory`
 

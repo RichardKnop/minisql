@@ -2,7 +2,6 @@ package minisql
 
 import (
 	"context"
-	"maps"
 	"sync"
 	"time"
 )
@@ -41,15 +40,18 @@ type WriteInfo struct {
 	OriginalPage *Page
 	Table        string
 	Index        string
+	// InPlace is true when the page was modified directly in the LRU cache
+	// rather than via a deep clone.  Set only by ModifyPage when no snapshot
+	// readers are active.  RollbackTransaction uses this flag to evict the
+	// dirty LRU slot so the next read reloads from the WAL.
+	InPlace bool
 }
 
-// Transaction tracks the read and write sets for optimistic concurrency control.
+// Transaction tracks the write set for the current transaction.
 type Transaction struct {
 	DDLChanges     DDLChanges
 	StartTime      time.Time
-	ReadSet        map[PageIndex]uint64
 	WriteSet       map[PageIndex]WriteInfo
-	DBHeaderRead   *uint64
 	DBHeaderWrite  *DatabaseHeader
 	rowCountDeltas map[string]int64
 	ID             TransactionID
@@ -107,25 +109,13 @@ func (tx *Transaction) RowCountDeltas() map[string]int64 {
 	return tx.rowCountDeltas
 }
 
-// TrackRead records that the given page was read at the given version.
-// It is a no-op for read-only transactions.
-func (tx *Transaction) TrackRead(pageIdx PageIndex, version uint64) {
-	if tx.ReadOnly {
-		return
-	}
-	tx.mu.Lock()
-	if tx.ReadSet == nil {
-		tx.ReadSet = make(map[PageIndex]uint64, 16)
-	}
-	tx.ReadSet[pageIdx] = version
-	tx.mu.Unlock()
-}
-
 // TrackWrite records a modified page in the transaction write set.
 // originalPage is the page as it was before modification; it is stored for
 // MVCC snapshot reads and must not be nil for pages that existed prior to
 // this transaction (use nil for newly-allocated pages).
-func (tx *Transaction) TrackWrite(pageIdx PageIndex, page, originalPage *Page, table, index string) {
+// inPlace must be true when the page was modified directly in the LRU cache
+// (no clone); RollbackTransaction will then evict the slot via InvalidatePage.
+func (tx *Transaction) TrackWrite(pageIdx PageIndex, page, originalPage *Page, table, index string, inPlace bool) {
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
 
@@ -134,19 +124,8 @@ func (tx *Transaction) TrackWrite(pageIdx PageIndex, page, originalPage *Page, t
 		Table:        table,
 		Index:        index,
 		OriginalPage: originalPage,
+		InPlace:      inPlace,
 	}
-}
-
-// TrackDBHeaderRead records the version of the database header when it was read.
-// It is a no-op for read-only transactions.
-func (tx *Transaction) TrackDBHeaderRead(version uint64) {
-	if tx.ReadOnly {
-		return
-	}
-	tx.mu.Lock()
-	defer tx.mu.Unlock()
-
-	tx.DBHeaderRead = &version
 }
 
 // TrackDBHeaderWrite records a modified database header in the transaction write set.
@@ -155,29 +134,6 @@ func (tx *Transaction) TrackDBHeaderWrite(header DatabaseHeader) {
 	defer tx.mu.Unlock()
 
 	tx.DBHeaderWrite = &header
-}
-
-// GetReadVersion returns the version recorded when the given page was read, if any.
-func (tx *Transaction) GetReadVersion(pageIdx PageIndex) (uint64, bool) {
-	tx.mu.RLock()
-	defer tx.mu.RUnlock()
-
-	if tx.ReadSet == nil {
-		return 0, false
-	}
-	v, ok := tx.ReadSet[pageIdx]
-	return v, ok
-}
-
-// GetReadVersions returns a copy of the page read-version map.
-func (tx *Transaction) GetReadVersions() map[PageIndex]uint64 {
-	tx.mu.RLock()
-	defer tx.mu.RUnlock()
-
-	// Return a copy to avoid concurrent map access
-	readSetCopy := make(map[PageIndex]uint64, len(tx.ReadSet))
-	maps.Copy(readSetCopy, tx.ReadSet)
-	return readSetCopy
 }
 
 // WritePage associates a page with the table it belongs to.
@@ -189,14 +145,6 @@ type WritePage struct {
 // GetWriteVersions returns the transaction's write set.
 func (tx *Transaction) GetWriteVersions() map[PageIndex]WriteInfo {
 	return tx.WriteSet
-}
-
-// GetDBHeaderReadVersion returns the version of the database header as it was read, if any.
-func (tx *Transaction) GetDBHeaderReadVersion() (uint64, bool) {
-	if tx.DBHeaderRead == nil {
-		return 0, false
-	}
-	return *tx.DBHeaderRead, true
 }
 
 // GetModifiedPage returns the in-memory modified copy of the page at pageIdx, if any.

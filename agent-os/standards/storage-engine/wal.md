@@ -88,4 +88,4 @@ After a normal close the DB file is fully populated (checkpoint-on-close ran) an
 - `WALConfig` is wired by `NewDatabase` before `init()` runs, so `SetWALIndex` and the WAL fields on `TransactionManager` are always set before any page access.
 - Unit tests that do not need WAL infrastructure pass `nil` for `walCfg`; those commits fall back to `commitDirect`. Production code always passes a real `*WALConfig`.
 - If the WAL protocol changes (frame format, checksum, commit marker), update `wal.go`, README, this standard, and the WAL e2e tests together.
-- `context.Background()` (not the request context) must be used when creating temporary databases for operations like VACUUM to avoid OCC contamination from the calling transaction.
+- `context.Background()` (not the request context) must be used when creating temporary databases for operations like VACUUM to avoid contamination from the caller's active write transaction.

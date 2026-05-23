@@ -6,8 +6,6 @@ import (
 	"fmt"
 
 	"go.uber.org/zap"
-
-	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 // TransactionalPager wraps a base Pager and routes reads and writes through the current transaction.
@@ -52,26 +50,15 @@ func (tp *TransactionalPager) ReadPage(ctx context.Context, pageIdx PageIndex) (
 		return modifiedPage, nil
 	}
 
-	// For write transactions the page version must be captured BEFORE reading
-	// the page content from the LRU cache to avoid a TOCTOU race: if a commit
-	// lands between GetPage (pager mutex) and GlobalPageVersion (txManager
-	// mutex), we would record a version that is newer than the page content we
-	// actually read.  By snapshotting the version first, any interleaved commit
-	// causes readVersion < the post-commit version seen at ModifyPage time,
-	// which the OCC check will catch.  Read-only transactions skip this to
-	// avoid the mutex acquisition (the version is never used for them).
-	var readVersion uint64
-	if !tx.ReadOnly {
-		readVersion = tp.txManager.GlobalPageVersion(ctx, pageIdx)
-	}
-
 	page, err := tp.GetPage(ctx, pageIdx)
 	if err != nil {
 		return nil, err
 	}
 
+	// Write transactions: return the cached page directly.
+	// Single-writer enforcement (activeWriters) guarantees no concurrent writer
+	// can have modified this page since we started, so no conflict check needed.
 	if !tx.ReadOnly {
-		tx.TrackRead(pageIdx, readVersion)
 		return page, nil
 	}
 
@@ -102,6 +89,14 @@ func (tp *TransactionalPager) ReadPage(ctx context.Context, pageIdx PageIndex) (
 }
 
 // ModifyPage returns a writable copy of the page at pageIdx, creating one if it doesn't exist in the write set.
+//
+// Fast path (no active snapshot readers, existing page): returns the LRU page
+// directly and modifies it in-place.  No clone is created, so there is no
+// per-page heap allocation.  RollbackTransaction will evict the LRU slot via
+// InvalidatePage to restore WAL state on error.
+//
+// Slow path (active snapshot readers or new page): clones the page so the
+// original remains available for MVCC version history.
 func (tp *TransactionalPager) ModifyPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
 	tx := TxFromContext(ctx)
 	if tx == nil {
@@ -114,30 +109,38 @@ func (tp *TransactionalPager) ModifyPage(ctx context.Context, pageIdx PageIndex)
 		return modifiedPage, nil
 	}
 
-	// Get current page and create a copy for modification
+	// Determine whether this is a newly-allocated page before GetPage
+	// increments TotalPages.  New pages always take the clone path: their
+	// "original" is a blank page and the in-place rollback behaviour differs
+	// subtly from the clone path (which leaves the blank page in the LRU).
+	isNewPage := pageIdx >= PageIndex(tp.TotalPages())
+
+	// Get current page from the shared LRU cache.
 	originalPage, err := tp.GetPage(ctx, pageIdx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Early conflict detection: if this page was already read by this transaction
-	// and the page has since been updated by a concurrent commit, fail fast with
-	// ErrTxConflict rather than letting the stale cursor position produce a
-	// confusing "duplicate key" error later.
-	if !tx.ReadOnly {
-		if readVersion, ok := tx.GetReadVersion(pageIdx); ok {
-			currentVersion := tp.txManager.GlobalPageVersion(ctx, pageIdx)
-			if currentVersion != readVersion {
-				return nil, minisqlErrors.ErrTxConflict
-			}
+	// Fast path: sole writer (single-writer enforced by activeWriters), no snapshot
+	// readers, existing committed page.  Modify the LRU page in-place — no clone.
+	// Pages that have never been committed (PageLastCommittedSeq == 0) have
+	// unique-seeded cells in the LRU that may mismatch the Index's own unique flag;
+	// always clone those.
+	if !isNewPage && tp.txManager.PageLastCommittedSeq(pageIdx) > 0 {
+		tp.txManager.mu.RLock()
+		hasReaders := tp.txManager.hasActiveSnapshotReadersLocked()
+		tp.txManager.mu.RUnlock()
+
+		if !hasReaders {
+			tx.TrackWrite(pageIdx, originalPage, nil, tp.table, tp.index, true)
+			return originalPage, nil
 		}
 	}
 
-	// Create a deep copy for modification.  Keep a reference to originalPage so
-	// the transaction manager can store it in the version history at commit time
-	// for any concurrent snapshot readers.
+	// Slow path: clone to preserve the pre-write version for snapshot readers
+	// or for a clean rollback of new pages.
 	modifiedPage = originalPage.Clone()
-	tx.TrackWrite(pageIdx, modifiedPage, originalPage, tp.table, tp.index)
+	tx.TrackWrite(pageIdx, modifiedPage, originalPage, tp.table, tp.index, false)
 
 	return modifiedPage, nil
 }
@@ -236,19 +239,10 @@ func (tp *TransactionalPager) AddFreePage(ctx context.Context, pageIdx PageIndex
 
 func (tp *TransactionalPager) readDBHeader(ctx context.Context) DatabaseHeader {
 	tx := TxFromContext(ctx)
-
-	// Check if we already have a copy of database header in the transaction
-	var dbHeader DatabaseHeader
 	if header, exists := tx.GetModifiedDBHeader(); exists {
-		dbHeader = *header
-	} else {
-		// Read header version and track it
-		currentVersion := tp.txManager.GlobalDBHeaderVersion(ctx)
-		dbHeader = tp.GetHeader(ctx)
-		tx.TrackDBHeaderRead(currentVersion)
+		return *header
 	}
-
-	return dbHeader
+	return tp.GetHeader(ctx)
 }
 
 // GetOverflowPage returns a writable copy of the overflow page at pageIdx.

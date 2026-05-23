@@ -172,9 +172,11 @@ func (s *TestSuite) TearDownTest() {
 	_ = os.Remove(s.dbFile.Name() + "-wal")
 }
 
-// reopenDB closes and reopens the database file, simulating a process restart.
-// The caller is responsible for setting s.db to the returned handle.
+// reopenDB closes the current database connection and reopens the database file,
+// simulating a process restart. The caller is responsible for assigning the
+// returned handle back to s.db.
 func (s *TestSuite) reopenDB() *sql.DB {
+	s.Require().NoError(s.db.Close())
 	db, err := sql.Open("minisql", s.dbFile.Name())
 	s.Require().NoError(err)
 	db.SetMaxOpenConns(1)

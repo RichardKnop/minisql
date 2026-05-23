@@ -483,6 +483,44 @@ func (_c *MockPageSaver_FlushBatch_Call) RunAndReturn(run func(context1 context.
 	return _c
 }
 
+// InvalidatePage provides a mock function for the type MockPageSaver
+func (_mock *MockPageSaver) InvalidatePage(pageIndex PageIndex) {
+	_mock.Called(pageIndex)
+	return
+}
+
+// MockPageSaver_InvalidatePage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InvalidatePage'
+type MockPageSaver_InvalidatePage_Call struct {
+	*mock.Call
+}
+
+// InvalidatePage is a helper method to define mock.On call
+//   - pageIndex PageIndex
+func (_e *MockPageSaver_Expecter) InvalidatePage(pageIndex interface{}) *MockPageSaver_InvalidatePage_Call {
+	return &MockPageSaver_InvalidatePage_Call{Call: _e.mock.On("InvalidatePage", pageIndex)}
+}
+
+func (_c *MockPageSaver_InvalidatePage_Call) Run(run func(pageIndex PageIndex)) *MockPageSaver_InvalidatePage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 PageIndex
+		if args[0] != nil {
+			arg0 = args[0].(PageIndex)
+		}
+		run(arg0)
+	})
+	return _c
+}
+
+func (_c *MockPageSaver_InvalidatePage_Call) Return() *MockPageSaver_InvalidatePage_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockPageSaver_InvalidatePage_Call) RunAndReturn(run func(pageIndex PageIndex)) *MockPageSaver_InvalidatePage_Call {
+	_c.Run(run)
+	return _c
+}
+
 // SaveHeader provides a mock function for the type MockPageSaver
 func (_mock *MockPageSaver) SaveHeader(context1 context.Context, databaseHeader DatabaseHeader) {
 	_mock.Called(context1, databaseHeader)

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLite. It implements a hand-written recursive-descent + state-machine SQL parser, a B+ tree storage engine with 4 KB pages, an LRU page cache, a Write-Ahead Log (WAL) for crash recovery, Optimistic Concurrency Control (OCC) for write transactions, and in-memory MVCC snapshot isolation for read-only transactions. It registers itself as a `database/sql` driver.
+MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLite. It implements a hand-written recursive-descent + state-machine SQL parser, a B+ tree storage engine with 4 KB pages, an LRU page cache, a Write-Ahead Log (WAL) for crash recovery, single-writer enforcement (via an atomic counter) for write transactions, and in-memory MVCC snapshot isolation for read-only transactions. It registers itself as a `database/sql` driver.
 
 **Module:** `github.com/RichardKnop/minisql`
 **Go version:** 1.26
@@ -90,8 +90,8 @@ MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLi
 │   │   ├── free_page.go          # Free page list management
 │   │   ├── header.go             # DatabaseHeader marshal/unmarshal
 │   │   ├── transaction.go        # Transaction struct + context helpers
-│   │   ├── transaction_pager.go  # TransactionalPager: wraps pager with OCC tracking
-│   │   ├── transaction_manager.go # OCC (write txns) + MVCC snapshot isolation (read-only txns)
+│   │   ├── transaction_pager.go  # TransactionalPager: in-place LRU fast path + clone slow path for writes
+│   │   ├── transaction_manager.go # Single-writer enforcement + MVCC snapshot isolation (read-only txns)
 │   │   ├── wal.go                # Write-Ahead Log: append frames, replay, checkpoint
 │   │   ├── wal_index.go          # In-memory WAL index: PageIndex → latest committed bytes
 │   │   ├── vacuum.go             # VACUUM: 8-phase copy-compact-swap
@@ -155,7 +155,7 @@ MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLi
 │   ├── cast_test.go              # CAST expressions
 │   ├── check_test.go             # CHECK constraints
 │   ├── composite_index_test.go   # Multi-column composite indexes
-│   ├── concurrency_test.go       # OCC conflict + concurrent MVCC reads
+│   ├── concurrency_test.go       # Single-writer enforcement + concurrent MVCC snapshot reads
 │   ├── concurrency_bench_test.go # Concurrent insert/read benchmarks (e2e-level)
 │   ├── correlated_subquery_update_test.go  # UPDATE FROM with correlated subquery
 │   ├── covering_index_test.go    # Covering (index-only) scan
@@ -434,7 +434,7 @@ Tribal knowledge, design decisions, and gotchas for specific subsystems are docu
 | | `query-execution/join-topology.md` | flattenJoinTree + scanIndexByAlias; LeftScanIndex is never hardcoded 0 |
 | **Storage Engine** | `storage-engine/page-layout.md` | 4 KB tagged-union page, page 0 header format, usable space |
 | | `storage-engine/pager-cache.md` | Sparse page array + LRU; I/O outside the lock |
-| | `storage-engine/occ-transactions.md` | OCC ReadSet/WriteSet lifecycle; tx travels via context |
+| | `storage-engine/occ-transactions.md` | Write transaction lifecycle; single-writer enforcement; in-place LRU fast path |
 | | `storage-engine/snapshot-isolation.md` | MVCC read-only snapshots; pageVersionHistory; TOCTOU rule; checkpoint blocking |
 | | `storage-engine/wal.md` | WAL frame format, commit protocol, crash recovery, checkpoint |
 | | `storage-engine/wal-write-buffering.md` | pendingBuf accumulation; flush-before-checkpoint rule |
@@ -573,7 +573,7 @@ func foo() error {
 - Transactions are stored in the context: `TxFromContext(ctx)` / `WithTransaction(ctx, tx)`.
 - Several subsystems use context for injection: CTEs (`ctxWithCTERegistry`), correlated subquery SET values (`contextWithCorrelatedSetUpdates`). Follow this pattern when adding new context-injected state.
 - Pass `ctx` through every layer without modification (except when injecting a transaction or other state).
-- Use `context.Background()` (not the request context) when creating temporary databases inside operations like VACUUM — the request context carries an OCC transaction that would contaminate the temp DB.
+- Use `context.Background()` (not the request context) when creating temporary databases inside operations like VACUUM — the request context carries an active write transaction that would contaminate the temp DB.
 
 ---
 
@@ -697,16 +697,19 @@ The `synchronous` setting on `WAL` controls when `fsync()` is called. It matches
 
 MiniSQL uses two complementary concurrency mechanisms:
 
-**Write transactions — Optimistic Concurrency Control (OCC)**
-- `txPager.ReadPage()` captures the global page version *before* reading the LRU cache (important: version is read first to avoid a TOCTOU race with concurrent commits), then records it in the read-set.
-- `txPager.ModifyPage()` clones the page into the write-set. It also performs early conflict detection: if the page was previously read and the global version has advanced since then, it returns `ErrTxConflict` immediately rather than waiting for commit-time validation.
-- At commit time, each read-set version is checked against the current global page version; any mismatch returns `ErrTxConflict`.
-- All Table methods run inside a write transaction context supplied by `TransactionManager.ExecuteInTransaction`.
+**Write transactions — single-writer enforcement**
+- `TransactionManager` tracks active writers with an `activeWriters atomic.Int32`. `BeginTransaction` increments it; `CommitTransaction` / `RollbackTransaction` decrement it. Only one write transaction may be active at a time; a second call to `BeginTransaction` blocks until the first finishes.
+- `txPager.ModifyPage()` has two paths:
+  - **Fast path** (in-place): when no snapshot reader is active (`hasActiveSnapshotReadersLocked() == false`) and the page has been committed at least once (`PageLastCommittedSeq > 0`), the shared LRU page is returned directly and modified in-place. No clone is made; `WriteInfo.InPlace = true` and `OriginalPage = nil`.
+  - **Slow path** (clone): new pages, or when snapshot readers are active. The page is cloned; the clone goes into the write-set. `WriteInfo.OriginalPage` holds the pre-clone pointer for MVCC history.
+- At commit time, `WriteSet` pages are flushed via WAL (`commitWithWAL`). For cloned pages where snapshot readers exist, `OriginalPage` is stored in `pageVersionHistory` for MVCC readers.
+- `RollbackTransaction` evicts in-place pages via `saver.InvalidatePage(pageIdx)` so the next read reloads the committed version from WAL. Cloned pages are simply discarded.
+- All `Table` methods run inside a write transaction context via `TransactionManager.ExecuteInTransaction`.
 
 **Read-only transactions — Snapshot Isolation (MVCC)**
 - `BeginReadOnlyTransaction` captures `tm.commitSeq` as the transaction's `SnapshotSeq` (under `tm.mu` to prevent races with concurrent commits).
-- `ReadPage` for read-only transactions checks `pageLastCommittedSeq[pageIdx]` against `tx.SnapshotSeq`. If the cached page was committed after the snapshot, it retrieves the historical version from `pageVersionHistory` instead.
-- At write commit time, the pre-modification page (`WriteInfo.OriginalPage`) is saved in `pageVersionHistory` with `validUntilSeq = commitSeq - 1` if any snapshot readers need it.
+- `ReadPage` for read-only transactions calls `PageLastCommittedSeq(pageIdx)` and compares it to `tx.SnapshotSeq`. If the cached page is safe (committed at or before the snapshot), it is returned directly. Otherwise the historical version is retrieved from `pageVersionHistory`.
+- At write commit time, if snapshot readers are active, `WriteInfo.OriginalPage` (the pre-write copy) is saved in `pageVersionHistory` with `validUntilSeq = commitSeq - 1`. In-place writes (`OriginalPage = nil`) skip this — in-place is only taken when no readers are active.
 - `trimPageVersionHistoryLocked` GCs historical versions no longer needed by any active reader (called on each commit/rollback).
 - Checkpoint (WAL truncation) is blocked while snapshot readers are active (`ErrCheckpointBlockedByReaders`).
 - Use `ExecuteReadOnlyTransaction` for the read-only wrapper; `BeginReadOnlyTransaction` + `CommitTransaction` manually if you need the snapshot seq.
@@ -734,9 +737,8 @@ Parser files mirror engine files: `parser/select.go` ↔ `internal/minisql/selec
 - **Maximum 64 columns per table** — enforced by the 64-bit NULL bitmask in each row.
 - **Maximum row size: ~4,065 bytes** — a row must fit in a single page (overflow pages handle TEXT/JSON column data, but the row header + fixed-width fields must fit).
 - **TEXT/VARCHAR key columns in indexes** — TEXT columns cannot be primary-key or unique-index key columns (enforced in `validateCreateTable`). VARCHAR up to `MaxIndexKeySize` is permitted.
-- **Single connection recommended** — OCC with multiple connections to the same file causes high conflict rates.
+- **Single connection enforced** — `Driver.Open` returns `ErrDatabaseAlreadyOpen` when a second `sql.Open` targets the same file path (enforced by a per-file lock map in the driver). Multiple in-process connections to the same file would corrupt the page cache.
 - **No `database/sql` connection pooling** — always `db.SetMaxOpenConns(1)` / `db.SetMaxIdleConns(1)`.
-- **FULL OUTER JOIN not yet implemented** — only INNER JOIN, LEFT JOIN, and RIGHT JOIN are supported.
 - **No savepoints** — `SAVEPOINT` / `ROLLBACK TO SAVEPOINT` are not yet implemented.
 - **No window functions** — `RANK()`, `ROW_NUMBER()`, `SUM() OVER`, `LAG()`, etc. are not yet implemented.
 - **No ALTER TABLE** — schema evolution requires CREATE + INSERT SELECT + DROP + RENAME.

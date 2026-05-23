@@ -9,8 +9,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 // snapshotColumns are a minimal column set used by all snapshot isolation tests.
@@ -194,7 +192,8 @@ func TestSnapshotIsolation_CheckpointBlockedByReader(t *testing.T) {
 	ctx := context.Background()
 
 	// Commit a write so there is something to checkpoint.
-	writeTx := env.txManager.BeginTransaction(ctx)
+	writeTx, err := env.txManager.BeginTransaction(ctx)
+	require.NoError(t, err)
 	writeTx.WriteSet[2] = WriteInfo{
 		Page:  &Page{Index: PageIndex(2), LeafNode: NewLeafNode()},
 		Table: "t",
@@ -207,14 +206,14 @@ func TestSnapshotIsolation_CheckpointBlockedByReader(t *testing.T) {
 	assert.True(t, env.txManager.hasActiveSnapshotReadersLocked(), "must have active reader")
 
 	// Checkpoint must be blocked.
-	err := env.txManager.CheckpointWAL(env.dbFile)
-	assert.ErrorIs(t, err, ErrCheckpointBlockedByReaders)
+	checkErr := env.txManager.CheckpointWAL(env.dbFile)
+	assert.ErrorIs(t, checkErr, ErrCheckpointBlockedByReaders)
 
 	// After the reader commits, checkpoint must succeed.
 	require.NoError(t, env.txManager.CommitTransaction(ctx, readTx))
 
-	err = env.txManager.CheckpointWAL(env.dbFile)
-	require.NoError(t, err)
+	checkErr = env.txManager.CheckpointWAL(env.dbFile)
+	require.NoError(t, checkErr)
 
 	env.saverMock.AssertExpectations(t)
 }
@@ -252,8 +251,8 @@ func TestSnapshotIsolation_ConcurrentReadWrite(t *testing.T) {
 		})
 	}
 
-	// Concurrent writers. We allow ErrTxConflict (two writers collide) but
-	// not any other error.
+	// Concurrent writers. We allow ErrConcurrentWriter (only one writer allowed)
+	// but not any other error.
 	var (
 		nextID = int64(100)
 		idMu   sync.Mutex
@@ -281,7 +280,7 @@ func TestSnapshotIsolation_ConcurrentReadWrite(t *testing.T) {
 					})
 					return err
 				})
-				if err != nil && !errors.Is(err, minisqlErrors.ErrTxConflict) {
+				if err != nil && !errors.Is(err, ErrConcurrentWriter) {
 					errs <- err
 				}
 			}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -30,28 +31,29 @@ var pageDataPool = sync.Pool{
 	New: func() any { return make([]byte, PageSize) },
 }
 
-// TransactionManager coordinates optimistic concurrency control for the database.
+// TransactionManager coordinates transactions for the database.
+// Only one write transaction may be active at a time (enforced by activeWriters).
+// Read-only transactions use MVCC snapshot isolation and may run concurrently.
 type TransactionManager struct {
-	saver                 PageSaver
-	ddlSaver              DDLSaver
-	factory               TxPagerFactory
-	checkpointFn          func() error
-	rowCountApplier       func(map[string]int64)
-	logger                *zap.Logger
-	globalPageVersions    map[PageIndex]uint64
-	pageLastCommittedSeq  map[PageIndex]uint64
-	pageVersionHistory    map[PageIndex][]pageVersion
-	commitHook            func(commitPhase)
-	wal                   *WAL
-	walIndex              *WALIndex
-	transactions          map[TransactionID]*Transaction
-	dbFilePath            string
-	commitSeq             uint64
-	checkpointThreshold   int
-	nextTxID              TransactionID
-	globalDBHeaderVersion uint64
-	mu                    sync.RWMutex
-	walWriteMu            sync.Mutex
+	saver                PageSaver
+	ddlSaver             DDLSaver
+	factory              TxPagerFactory
+	checkpointFn         func() error
+	rowCountApplier      func(map[string]int64)
+	logger               *zap.Logger
+	pageLastCommittedSeq map[PageIndex]uint64
+	pageVersionHistory   map[PageIndex][]pageVersion
+	commitHook           func(commitPhase)
+	wal                  *WAL
+	walIndex             *WALIndex
+	transactions         map[TransactionID]*Transaction
+	dbFilePath           string
+	commitSeq            uint64
+	checkpointThreshold  int
+	nextTxID             TransactionID
+	activeWriters        atomic.Int32
+	mu                   sync.RWMutex
+	walWriteMu           sync.Mutex
 }
 
 type commitPhase string
@@ -62,12 +64,15 @@ const (
 	commitPhaseAfterWALAppend  commitPhase = "after_wal_append"
 )
 
+// ErrConcurrentWriter is returned when a second write transaction is attempted
+// while one is already active. Only one write transaction may exist at a time.
+var ErrConcurrentWriter = minisqlErrors.ErrConcurrentWriter
+
 // NewTransactionManager creates and returns a new TransactionManager.
 func NewTransactionManager(logger *zap.Logger, dbFilePath string, factory TxPagerFactory, saver PageSaver, ddlSaver DDLSaver) *TransactionManager {
 	return &TransactionManager{
 		nextTxID:             1,
 		transactions:         make(map[TransactionID]*Transaction),
-		globalPageVersions:   make(map[PageIndex]uint64),
 		pageLastCommittedSeq: make(map[PageIndex]uint64),
 		pageVersionHistory:   make(map[PageIndex][]pageVersion),
 		logger:               logger,
@@ -142,7 +147,7 @@ func (tm *TransactionManager) CheckpointWAL(dbFile DBFile) error {
 	}
 	tm.mu.Unlock()
 
-	tm.logger.Info("WAL checkpoint completed",
+	tm.logger.Debug("WAL checkpoint completed",
 		zap.Int64("frames_checkpointed", framesBefore))
 
 	return nil
@@ -185,7 +190,10 @@ func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(
 		return fn(ctx)
 	}
 
-	tx := tm.BeginTransaction(ctx)
+	tx, err := tm.BeginTransaction(ctx)
+	if err != nil {
+		return err
+	}
 	ctx = WithTransaction(ctx, tx)
 
 	if err := fn(ctx); err != nil {
@@ -201,16 +209,20 @@ func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(
 	return nil
 }
 
-// BeginTransaction starts a new transaction and registers it with the manager.
-func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction {
+// BeginTransaction starts a new write transaction and registers it with the manager.
+// Returns ErrConcurrentWriter if another write transaction is already active.
+func (tm *TransactionManager) BeginTransaction(ctx context.Context) (*Transaction, error) {
 	tm.mu.Lock()
+	if tm.activeWriters.Load() > 0 {
+		tm.mu.Unlock()
+		return nil, ErrConcurrentWriter
+	}
+	tm.activeWriters.Add(1)
 	tx := &Transaction{
 		ID:        tm.nextTxID,
 		StartTime: time.Now(),
 		WriteSet:  make(map[PageIndex]WriteInfo),
 		Status:    TxActive,
-		// ReadSet is lazily allocated in TrackRead to avoid the map allocation
-		// for read-only transactions.
 	}
 	tm.nextTxID += 1
 	tm.transactions[tx.ID] = tx
@@ -218,7 +230,7 @@ func (tm *TransactionManager) BeginTransaction(ctx context.Context) *Transaction
 
 	tm.logger.Debug("begin transaction", zap.Uint64("tx_id", uint64(tx.ID)))
 
-	return tx
+	return tx, nil
 }
 
 // BeginReadOnlyTransaction starts a read-only transaction with snapshot
@@ -235,7 +247,6 @@ func (tm *TransactionManager) BeginReadOnlyTransaction(ctx context.Context) *Tra
 	tx := &Transaction{
 		ID:          tm.nextTxID,
 		StartTime:   time.Now(),
-		WriteSet:    make(map[PageIndex]WriteInfo),
 		Status:      TxActive,
 		ReadOnly:    true,
 		SnapshotSeq: tm.commitSeq,
@@ -281,6 +292,7 @@ func (tm *TransactionManager) hasActiveSnapshotReadersLocked() bool {
 	}
 	return false
 }
+
 
 // appendPageVersionLocked adds an old page snapshot to the version history for
 // pageIdx.  validUntilSeq is the highest SnapshotSeq for which this version
@@ -369,30 +381,18 @@ func (tm *TransactionManager) CommitTransaction(ctx context.Context, tx *Transac
 	return tm.commitDirect(ctx, tx)
 }
 
-// commitDirect is the non-WAL commit path: OCC check then write pages straight to the pager.
+// commitDirect is the non-WAL commit path: write pages straight to the pager.
 // Used only when WAL mode has not been enabled (e.g. in unit tests that do not set up a WAL).
 func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction) error {
+	if !tx.ReadOnly {
+		defer tm.activeWriters.Add(-1)
+	}
+
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
 	if tx.Status != TxActive {
 		return fmt.Errorf("transaction %d is not active", tx.ID)
-	}
-
-	// OCC conflict check (skip for ReadOnly transactions — ReadSet is never populated).
-	if !tx.ReadOnly {
-		for pageIdx, readVersion := range tx.GetReadVersions() {
-			if tm.globalPageVersions[pageIdx] > readVersion {
-				tx.Abort()
-				return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", minisqlErrors.ErrTxConflict, tx.ID, pageIdx)
-			}
-		}
-		if readDBHeaderVersion, exists := tx.GetDBHeaderReadVersion(); exists {
-			if tm.globalDBHeaderVersion > readDBHeaderVersion {
-				tx.Abort()
-				return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", minisqlErrors.ErrTxConflict, tx.ID)
-			}
-		}
 	}
 
 	writeInfos := tx.GetWriteVersions()
@@ -415,7 +415,6 @@ func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction)
 	// Apply DB header write first.
 	if header, modified := tx.GetModifiedDBHeader(); modified {
 		tm.saver.SaveHeader(ctx, *header)
-		tm.globalDBHeaderVersion += 1
 		pagesToFlush = append(pagesToFlush, 0)
 	}
 	// Apply page writes.  For each page, save the old version into the history
@@ -427,7 +426,6 @@ func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction)
 		}
 		tm.saver.SavePage(ctx, pageIdx, info.Page)
 		tm.pageLastCommittedSeq[pageIdx] = newSeq
-		tm.globalPageVersions[pageIdx] += 1
 		pagesToFlush = append(pagesToFlush, pageIdx)
 	}
 
@@ -463,16 +461,19 @@ func (tm *TransactionManager) runCommitHook(phase commitPhase) {
 // commitWithWAL is the WAL-based commit path.
 //
 // Concurrency design:
-//   - walWriteMu serialises writers so only one transaction appends to the WAL
-//     at a time.  This prevents interleaved frames and ensures the OCC check
-//     remains valid until the WAL append completes.
-//   - tm.mu is held only briefly: once to perform the OCC check (after
-//     acquiring walWriteMu) and once to update globalPageVersions and the
-//     in-memory pager cache after a successful WAL append.
+//   - activeWriters enforces single-writer: only one write transaction can exist
+//     at a time, so there are no write-write conflicts to detect.
+//   - walWriteMu serialises the WAL append and in-memory state update so that
+//     the WAL index remains consistent under concurrent goroutines.
+//   - tm.mu is held only briefly to update MVCC state after a successful WAL append.
 //   - WAL I/O happens outside tm.mu so readers are never blocked by write I/O.
 func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction) error {
+	if !tx.ReadOnly {
+		defer tm.activeWriters.Add(-1)
+	}
+
 	// === FAST PATH: read-only transactions ===
-	// Validate under tm.mu and return immediately — no WAL involvement needed.
+	// Commit under tm.mu and return immediately — no WAL involvement needed.
 	tm.mu.Lock()
 	if tx.Status != TxActive {
 		tm.mu.Unlock()
@@ -481,24 +482,6 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 	writeInfos := tx.GetWriteVersions()
 	isReadOnly := len(writeInfos) == 0 && !tx.DDLChanges.HasChanges()
 	if isReadOnly {
-		// For read-only transactions (ReadOnly flag set), the ReadSet was never
-		// populated, so there is nothing to validate — skip the conflict check.
-		if !tx.ReadOnly {
-			for pageIdx, readVersion := range tx.GetReadVersions() {
-				if tm.globalPageVersions[pageIdx] > readVersion {
-					tx.Abort()
-					tm.mu.Unlock()
-					return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", minisqlErrors.ErrTxConflict, tx.ID, pageIdx)
-				}
-			}
-			if readDBHeaderVersion, exists := tx.GetDBHeaderReadVersion(); exists {
-				if tm.globalDBHeaderVersion > readDBHeaderVersion {
-					tx.Abort()
-					tm.mu.Unlock()
-					return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", minisqlErrors.ErrTxConflict, tx.ID)
-				}
-			}
-		}
 		tx.Commit()
 		delete(tm.transactions, tx.ID)
 		tm.trimPageVersionHistoryLocked()
@@ -510,34 +493,12 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 
 	// === WRITE PATH ===
 
-	// Step 1: Acquire WAL write mutex to serialise writers.
-	// Steps 2–5 are protected by this mutex so the OCC check remains valid
-	// until the WAL append completes.  We release it explicitly before steps
-	// 6–7 so that a triggered auto-checkpoint can re-acquire it without
-	// deadlocking.
+	// Step 1: Acquire WAL write mutex to serialise WAL appends.
+	// Released explicitly before step 5 so a triggered auto-checkpoint can
+	// re-acquire it without deadlocking.
 	tm.walWriteMu.Lock()
 
-	// Step 2: OCC check (under tm.mu, after acquiring walWriteMu).
-	tm.mu.Lock()
-	for pageIdx, readVersion := range tx.GetReadVersions() {
-		if tm.globalPageVersions[pageIdx] > readVersion {
-			tx.Abort()
-			tm.mu.Unlock()
-			tm.walWriteMu.Unlock()
-			return fmt.Errorf("%w: tx %d aborted due to conflict on page %d", minisqlErrors.ErrTxConflict, tx.ID, pageIdx)
-		}
-	}
-	if readDBHeaderVersion, exists := tx.GetDBHeaderReadVersion(); exists {
-		if tm.globalDBHeaderVersion > readDBHeaderVersion {
-			tx.Abort()
-			tm.mu.Unlock()
-			tm.walWriteMu.Unlock()
-			return fmt.Errorf("%w: tx %d aborted due to conflict on DB header", minisqlErrors.ErrTxConflict, tx.ID)
-		}
-	}
-	tm.mu.Unlock()
-
-	// Step 3: Serialise modified pages into WAL frames (outside both locks).
+	// Step 2: Serialise modified pages into WAL frames (outside both locks).
 	walPages, err := tm.serializeWritesForWAL(ctx, tx)
 	if err != nil {
 		tx.Abort()
@@ -545,7 +506,7 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 		return fmt.Errorf("serialize writes for WAL tx %d: %w", tx.ID, err)
 	}
 
-	// Step 4: Append to WAL (I/O outside tm.mu; walWriteMu held).
+	// Step 3: Append to WAL (I/O outside tm.mu; walWriteMu held).
 	if len(walPages) > 0 {
 		tm.runCommitHook(commitPhaseBeforeWALAppend)
 		if err := tm.wal.AppendTransaction(walPages); err != nil {
@@ -556,11 +517,10 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 		tm.runCommitHook(commitPhaseAfterWALAppend)
 	}
 
-	// Step 5: Update in-memory state (under tm.mu).
+	// Step 4: Update in-memory state (under tm.mu).
 	tm.mu.Lock()
 	if header, modified := tx.GetModifiedDBHeader(); modified {
 		tm.saver.SaveHeader(ctx, *header)
-		tm.globalDBHeaderVersion += 1
 	}
 	// Advance commit sequence and save old page versions for snapshot readers.
 	tm.commitSeq += 1
@@ -572,7 +532,6 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 		}
 		tm.saver.SavePage(ctx, pageIdx, info.Page)
 		tm.pageLastCommittedSeq[pageIdx] = newSeq
-		tm.globalPageVersions[pageIdx] += 1
 	}
 	if tx.DDLChanges.HasChanges() {
 		tm.ddlSaver.SaveDDLChanges(ctx, tx.DDLChanges)
@@ -586,11 +545,11 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 	delete(tm.transactions, tx.ID)
 	tm.mu.Unlock()
 
-	// Release walWriteMu before steps 6–7 so a triggered auto-checkpoint can
+	// Release walWriteMu before step 5 so a triggered auto-checkpoint can
 	// acquire it without deadlocking.
 	tm.walWriteMu.Unlock()
 
-	// Step 6: Update WAL index so subsequent reads see the latest committed data.
+	// Step 5: Update WAL index so subsequent reads see the latest committed data.
 	// Recycle old page buffers that are displaced by newer commits.
 	for _, wp := range walPages {
 		if old := tm.walIndex.Update(wp.Index, wp.Data); old != nil {
@@ -600,7 +559,7 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 
 	tm.logger.Debug("commit transaction (WAL)", zap.Uint64("tx_id", uint64(tx.ID)))
 
-	// Step 7: Trigger auto-checkpoint if the WAL has grown past the threshold.
+	// Step 6: Trigger auto-checkpoint if the WAL has grown past the threshold.
 	tm.runAutoCheckpoint(ctx)
 
 	return nil
@@ -743,6 +702,19 @@ func (tm *TransactionManager) runAutoCheckpoint(_ context.Context) {
 
 // RollbackTransaction aborts the transaction and discards all in-memory changes.
 func (tm *TransactionManager) RollbackTransaction(ctx context.Context, tx *Transaction) {
+	if !tx.ReadOnly {
+		tm.activeWriters.Add(-1)
+	}
+
+	// Evict pages that were modified in-place so the next read reloads
+	// the committed version from the WAL index.  Pages that were cloned
+	// (InPlace == false) leave their original untouched in the LRU;
+	// discarding the WriteSet clone is sufficient for those.
+	for pageIdx, info := range tx.WriteSet {
+		if info.InPlace {
+			tm.saver.InvalidatePage(pageIdx)
+		}
+	}
 	tx.Abort()
 
 	// Clean up transaction and GC any version history that is no longer needed.
@@ -754,18 +726,3 @@ func (tm *TransactionManager) RollbackTransaction(ctx context.Context, tx *Trans
 	tm.logger.Debug("rollback transaction", zap.Uint64("tx_id", uint64(tx.ID)))
 }
 
-// GlobalDBHeaderVersion returns the current committed version of the database header.
-func (tm *TransactionManager) GlobalDBHeaderVersion(ctx context.Context) uint64 {
-	tm.mu.RLock()
-	defer tm.mu.RUnlock()
-
-	return tm.globalDBHeaderVersion
-}
-
-// GlobalPageVersion returns the current committed version of the given page.
-func (tm *TransactionManager) GlobalPageVersion(ctx context.Context, pageIdx PageIndex) uint64 {
-	tm.mu.RLock()
-	defer tm.mu.RUnlock()
-
-	return tm.globalPageVersions[pageIdx]
-}

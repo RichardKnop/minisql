@@ -298,6 +298,18 @@ func (p *pagerImpl) SaveHeader(ctx context.Context, header DatabaseHeader) {
 	p.dbHeader = header
 }
 
+// InvalidatePage removes the page at pageIdx from the LRU cache without
+// persisting it.  Called during transaction rollback when a page was modified
+// in-place and the dirty copy must be discarded; the next read will reload
+// the committed version from the WAL index.
+func (p *pagerImpl) InvalidatePage(pageIdx PageIndex) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if int(pageIdx) < len(p.pages) {
+		p.pages[pageIdx] = nil
+	}
+}
+
 // SavePage stores a page in the in-memory cache at pageIdx without writing it
 // to disk. The page is persisted only when Flush or FlushBatch is called.
 func (p *pagerImpl) SavePage(ctx context.Context, pageIdx PageIndex, page *Page) {
