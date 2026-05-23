@@ -89,6 +89,14 @@ func (tp *TransactionalPager) ReadPage(ctx context.Context, pageIdx PageIndex) (
 }
 
 // ModifyPage returns a writable copy of the page at pageIdx, creating one if it doesn't exist in the write set.
+//
+// Fast path (no active snapshot readers, existing page): returns the LRU page
+// directly and modifies it in-place.  No clone is created, so there is no
+// per-page heap allocation.  RollbackTransaction will evict the LRU slot via
+// InvalidatePage to restore WAL state on error.
+//
+// Slow path (active snapshot readers or new page): clones the page so the
+// original remains available for MVCC version history.
 func (tp *TransactionalPager) ModifyPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
 	tx := TxFromContext(ctx)
 	if tx == nil {
@@ -101,17 +109,38 @@ func (tp *TransactionalPager) ModifyPage(ctx context.Context, pageIdx PageIndex)
 		return modifiedPage, nil
 	}
 
-	// Get current page and create a copy for modification
+	// Determine whether this is a newly-allocated page before GetPage
+	// increments TotalPages.  New pages always take the clone path: their
+	// "original" is a blank page and the in-place rollback behaviour differs
+	// subtly from the clone path (which leaves the blank page in the LRU).
+	isNewPage := pageIdx >= PageIndex(tp.TotalPages())
+
+	// Get current page from the shared LRU cache.
 	originalPage, err := tp.GetPage(ctx, pageIdx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create a deep copy for modification.  Keep a reference to originalPage so
-	// the transaction manager can store it in the version history at commit time
-	// for any concurrent snapshot readers.
+	// Fast path: sole writer (single-writer enforced by activeWriters), no snapshot
+	// readers, existing committed page.  Modify the LRU page in-place — no clone.
+	// Pages that have never been committed (PageLastCommittedSeq == 0) have
+	// unique-seeded cells in the LRU that may mismatch the Index's own unique flag;
+	// always clone those.
+	if !isNewPage && tp.txManager.PageLastCommittedSeq(pageIdx) > 0 {
+		tp.txManager.mu.RLock()
+		hasReaders := tp.txManager.hasActiveSnapshotReadersLocked()
+		tp.txManager.mu.RUnlock()
+
+		if !hasReaders {
+			tx.TrackWrite(pageIdx, originalPage, nil, tp.table, tp.index, true)
+			return originalPage, nil
+		}
+	}
+
+	// Slow path: clone to preserve the pre-write version for snapshot readers
+	// or for a clean rollback of new pages.
 	modifiedPage = originalPage.Clone()
-	tx.TrackWrite(pageIdx, modifiedPage, originalPage, tp.table, tp.index)
+	tx.TrackWrite(pageIdx, modifiedPage, originalPage, tp.table, tp.index, false)
 
 	return modifiedPage, nil
 }

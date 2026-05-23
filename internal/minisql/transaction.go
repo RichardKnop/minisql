@@ -40,6 +40,11 @@ type WriteInfo struct {
 	OriginalPage *Page
 	Table        string
 	Index        string
+	// InPlace is true when the page was modified directly in the LRU cache
+	// rather than via a deep clone.  Set only by ModifyPage when no snapshot
+	// readers are active.  RollbackTransaction uses this flag to evict the
+	// dirty LRU slot so the next read reloads from the WAL.
+	InPlace bool
 }
 
 // Transaction tracks the write set for the current transaction.
@@ -108,7 +113,9 @@ func (tx *Transaction) RowCountDeltas() map[string]int64 {
 // originalPage is the page as it was before modification; it is stored for
 // MVCC snapshot reads and must not be nil for pages that existed prior to
 // this transaction (use nil for newly-allocated pages).
-func (tx *Transaction) TrackWrite(pageIdx PageIndex, page, originalPage *Page, table, index string) {
+// inPlace must be true when the page was modified directly in the LRU cache
+// (no clone); RollbackTransaction will then evict the slot via InvalidatePage.
+func (tx *Transaction) TrackWrite(pageIdx PageIndex, page, originalPage *Page, table, index string, inPlace bool) {
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
 
@@ -117,6 +124,7 @@ func (tx *Transaction) TrackWrite(pageIdx PageIndex, page, originalPage *Page, t
 		Table:        table,
 		Index:        index,
 		OriginalPage: originalPage,
+		InPlace:      inPlace,
 	}
 }
 

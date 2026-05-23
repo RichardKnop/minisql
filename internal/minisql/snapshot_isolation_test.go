@@ -213,7 +213,7 @@ func TestSnapshotIsolation_CheckpointBlockedByReader(t *testing.T) {
 	require.NoError(t, env.txManager.CommitTransaction(ctx, readTx))
 
 	checkErr = env.txManager.CheckpointWAL(env.dbFile)
-	require.NoError(t, err)
+	require.NoError(t, checkErr)
 
 	env.saverMock.AssertExpectations(t)
 }

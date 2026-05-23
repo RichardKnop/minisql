@@ -62,6 +62,10 @@ type PageSaver interface {
 	SavePage(context.Context, PageIndex, *Page)
 	SaveHeader(context.Context, DatabaseHeader)
 	SetWALIndex(*WALIndex)
+	// InvalidatePage removes a page from the LRU cache so the next read
+	// reloads it from the WAL.  Used by RollbackTransaction to discard pages
+	// that were modified in-place during a rolled-back write transaction.
+	InvalidatePage(PageIndex)
 	Flusher
 }
 

@@ -147,7 +147,7 @@ func (tm *TransactionManager) CheckpointWAL(dbFile DBFile) error {
 	}
 	tm.mu.Unlock()
 
-	tm.logger.Info("WAL checkpoint completed",
+	tm.logger.Debug("WAL checkpoint completed",
 		zap.Int64("frames_checkpointed", framesBefore))
 
 	return nil
@@ -293,6 +293,7 @@ func (tm *TransactionManager) hasActiveSnapshotReadersLocked() bool {
 	}
 	return false
 }
+
 
 // appendPageVersionLocked adds an old page snapshot to the version history for
 // pageIdx.  validUntilSeq is the highest SnapshotSeq for which this version
@@ -704,6 +705,16 @@ func (tm *TransactionManager) runAutoCheckpoint(_ context.Context) {
 func (tm *TransactionManager) RollbackTransaction(ctx context.Context, tx *Transaction) {
 	if !tx.ReadOnly {
 		tm.activeWriters.Add(-1)
+	}
+
+	// Evict pages that were modified in-place so the next read reloads
+	// the committed version from the WAL index.  Pages that were cloned
+	// (InPlace == false) leave their original untouched in the LRU;
+	// discarding the WriteSet clone is sufficient for those.
+	for pageIdx, info := range tx.WriteSet {
+		if info.InPlace {
+			tm.saver.InvalidatePage(pageIdx)
+		}
 	}
 	tx.Abort()
 
