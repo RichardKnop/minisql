@@ -334,7 +334,11 @@ func (c *Conn) TransactionContext(ctx context.Context) context.Context {
 func (c *Conn) executeQueryStatement(ctx context.Context, stmt minisql.Statement) (minisql.StatementResult, context.Context, *minisql.Transaction, error) {
 	if c.HasActiveTransaction() || (stmt.Kind != minisql.Select && stmt.Kind != minisql.Explain) {
 		result, err := c.executeStatement(ctx, stmt)
-		return result, ctx, nil, err
+		// When there is an active write transaction, the row view iterator
+		// fetches rows lazily using the returned context. Passing the
+		// transaction context ensures ReadPage checks the WriteSet so that
+		// uncommitted writes are visible within the same transaction.
+		return result, c.TransactionContext(ctx), nil, err
 	}
 
 	txManager := c.db.GetTransactionManager()

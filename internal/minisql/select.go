@@ -315,6 +315,9 @@ func countResult(count int64) StatementResult {
 //
 // Fast path: if a row-count getter has been registered (set by the Database
 // after loading the table), returns the cached count in O(1) without any I/O.
+// The fast path is skipped when an active write transaction is in context
+// because its uncommitted changes (in the WriteSet) are not yet reflected in
+// the row-count cache — the page walk uses ReadPage which checks the WriteSet.
 //
 // Fallback: walks the B+ tree leaf page chain and sums Header.Cells on each
 // page — O(leaf pages), no row data read or deserialised.
@@ -322,7 +325,9 @@ func countResult(count int64) StatementResult {
 // This is only valid for COUNT(*) with no WHERE clause and no JOIN.
 func (t *Table) countAllLeafWalk(ctx context.Context) (StatementResult, error) {
 	var count int64
-	if t.getRowCount != nil {
+	tx := TxFromContext(ctx)
+	useCache := t.getRowCount != nil && (tx == nil || tx.ReadOnly)
+	if useCache {
 		count = t.getRowCount()
 	} else {
 		cursor, err := t.SeekFirst(ctx)
