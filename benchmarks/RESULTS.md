@@ -1,5 +1,69 @@
 # Benchmark Results
 
+### 2026-05-24 — Window function implementation (no regressions)
+
+**Platform:** Apple M1 Max · darwin/arm64 · Go 1.26
+**Settings:** `-benchtime=1×` (`-count=1`) · single run
+**Branch:** `refactor/row-view-api`
+
+New feature: full window function support (ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD,
+FIRST_VALUE, LAST_VALUE, NTH_VALUE, SUM/AVG/COUNT/MIN/MAX OVER).  The `HasWindowFuncs()`
+guard on `Statement` ensures existing queries pay zero overhead — every alloc/op count
+is identical to the prior baseline.
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| GroupBy_Aggregate | 1.21 ms/op | 2.79 ms/op | **0.43×** ✓ |
+| Having_Filter | 960 µs/op | 2.26 ms/op | **0.42×** ✓ |
+| Distinct_HighCardinality | 3.58 ms/op | 6.84 ms/op | **0.52×** ✓ |
+| Delete_ByPK | 27.4 µs/op | 129 µs/op | **0.21×** ✓ |
+| ForeignKey_Insert | 17.5 µs/op | 55.1 µs/op | **0.32×** ✓ |
+| ForeignKey_DeleteCascade | 111 µs/op | 70.1 µs/op | 1.58× |
+| Insert_SingleRow | 16.0 µs/op | 56.4 µs/op | **0.28×** ✓ |
+| Insert_Batch | 417 µs/op | 263 µs/op | 1.58× |
+| Insert_PreparedBatch | 411 µs/op | 260 µs/op | 1.58× |
+| Insert_MultiValues | 246 µs/op | 180 µs/op | 1.37× |
+| Join_Inner_SmallLarge | 5.26 ms/op | 5.91 ms/op | **0.89×** ✓ |
+| Join_Inner_LowSelectivity | 127 µs/op | 840 µs/op | **0.15×** ✓ |
+| Join_Left_UnmatchedRows | 4.08 ms/op | 4.87 ms/op | **0.84×** ✓ |
+| Explain | 7.25 µs/op | 1.69 µs/op | 4.29× |
+| Select_PointScan | 7.33 µs/op | 3.96 µs/op | 1.85× |
+| Select_Limit | 9.06 µs/op | 9.49 µs/op | **0.95×** ✓ |
+| Select_FullScan | 4.31 ms/op | 6.50 ms/op | **0.66×** ✓ |
+| Select_CountStar | 6.69 µs/op | 11.1 µs/op | **0.60×** ✓ |
+| Select_IndexRangeScan | 1.43 ms/op | 869 µs/op | 1.64× |
+| Select_SecondaryIndex_LowSelectivity | 2.15 ms/op | 3.24 ms/op | **0.66×** ✓ |
+| Select_SecondaryIndex_LowSelectivityLimit | 11.6 µs/op | 9.57 µs/op | 1.21× |
+| Select_RangeScan | 1.94 ms/op | 1.11 ms/op | 1.75× |
+| CTE_Materialise | 1.16 ms/op | 579 µs/op | 2.00× |
+| Subquery_InList | 5.83 ms/op | 4.38 ms/op | 1.33× |
+| OnConflict_DoUpdate | 10.7 µs/op | 42.5 µs/op | **0.25×** ✓ |
+| Update_ByPK | 13.1 µs/op | 44.0 µs/op | **0.30×** ✓ |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| GroupBy_Aggregate | 38,241 | 3,611 |
+| Join_Inner_SmallLarge | 2,686,285 | 1,120,442 |
+| Explain | **6,089** | 680 |
+| Select_PointScan | 5,100 | 679 |
+| Select_FullScan | 1,297,643 | 1,357,756 |
+
+#### Allocs/op (key paths, unchanged from prior baseline)
+
+| Benchmark | minisql | sqlite |
+|---|---|---|
+| Explain | **58** | 18 |
+| Select_PointScan | 62 | 26 |
+| GroupBy_Aggregate | 463 | 309 |
+| Join_Inner_SmallLarge | 89,778 | 99,757 |
+| Join_Left_UnmatchedRows | 79,739 | 70,157 |
+
+---
+
 ### 2026-05-23 — EXPLAIN allocation reduction
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26

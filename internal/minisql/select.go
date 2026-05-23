@@ -37,6 +37,11 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return t.countAllLeafWalk(ctx)
 	}
 
+	// Window-function queries: materialise all rows first, then apply window logic.
+	if stmt.HasWindowFuncs() {
+		return t.selectWithWindowFuncs(ctx, stmt)
+	}
+
 	// Create query plan
 	plan, err := t.PlanQuery(ctx, stmt)
 	if err != nil {

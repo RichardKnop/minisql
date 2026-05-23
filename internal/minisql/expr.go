@@ -51,6 +51,7 @@ type CaseWhen struct {
 
 // Expr is an arithmetic expression tree node.
 // Exactly one interpretation is active (checked in priority order):
+//   - WindowFunc != nil:        a window function call (ROW_NUMBER, SUM OVER, etc.)
 //   - CaseClauses != nil:      a CASE WHEN expression
 //   - FuncName != "":          a built-in function call (Args holds the arguments)
 //   - CastExpr != nil:         a CAST(expr AS type) expression
@@ -65,6 +66,7 @@ type Expr struct {
 	CaseInput      *Expr
 	Left           *Expr
 	CastExpr       *Expr
+	WindowFunc     *WindowFunc
 	FuncName       string
 	Column         string
 	Args           []*Expr
@@ -82,6 +84,9 @@ func (e *Expr) String() string {
 func (e *Expr) str(nested bool) string {
 	if e == nil {
 		return ""
+	}
+	if e.WindowFunc != nil {
+		return windowFuncString(e.WindowFunc)
 	}
 	if e.CaseClauses != nil {
 		var b strings.Builder
@@ -201,6 +206,44 @@ func (e *Expr) ColumnRefs() []string {
 	return cols
 }
 
+// windowFuncString returns a human-readable name for a window function expression.
+func windowFuncString(wf *WindowFunc) string {
+	if wf == nil {
+		return ""
+	}
+	switch wf.Kind {
+	case WindowRowNumber:
+		return "ROW_NUMBER() OVER (...)"
+	case WindowRank:
+		return "RANK() OVER (...)"
+	case WindowDenseRank:
+		return "DENSE_RANK() OVER (...)"
+	case WindowNtile:
+		return "NTILE(...) OVER (...)"
+	case WindowLag:
+		return "LAG(...) OVER (...)"
+	case WindowLead:
+		return "LEAD(...) OVER (...)"
+	case WindowFirstValue:
+		return "FIRST_VALUE(...) OVER (...)"
+	case WindowLastValue:
+		return "LAST_VALUE(...) OVER (...)"
+	case WindowNthValue:
+		return "NTH_VALUE(...) OVER (...)"
+	case WindowSum:
+		return "SUM(...) OVER (...)"
+	case WindowAvg:
+		return "AVG(...) OVER (...)"
+	case WindowCount:
+		return "COUNT(*) OVER (...)"
+	case WindowMin:
+		return "MIN(...) OVER (...)"
+	case WindowMax:
+		return "MAX(...) OVER (...)"
+	}
+	return "WINDOW(...)"
+}
+
 // Eval evaluates the expression against a row, returning a numeric result.
 // NULL propagates: any NULL operand produces a nil result.
 // Returns int64 when both operands are int64 (except division, which always returns float64).
@@ -208,6 +251,12 @@ func (e *Expr) ColumnRefs() []string {
 func (e *Expr) Eval(row Row) (any, error) {
 	if e == nil {
 		return nil, nil
+	}
+
+	// Window function expressions cannot be evaluated row-by-row; they require
+	// partition context.  selectWithWindowFuncs handles them before projection.
+	if e.WindowFunc != nil {
+		return nil, fmt.Errorf("window function %s cannot be evaluated outside window context", windowFuncString(e.WindowFunc))
 	}
 
 	// CASE expression

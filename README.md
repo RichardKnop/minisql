@@ -590,6 +590,7 @@ rows.Scan(&owner)
 | `LIMIT` and `OFFSET` | Basic pagination |
 | `ORDER BY` | Single column only |
 | `GROUP BY` and `HAVING` | Aggregate functions: `COUNT`, `MAX`, `MIN`, `SUM`, `AVG` |
+| Window functions | `ROW_NUMBER()`, `RANK()`, `DENSE_RANK()`, `NTILE(n)` — ranking; `LAG(col[, offset])`, `LEAD(col[, offset])` — offset access; `FIRST_VALUE(col)`, `LAST_VALUE(col)`, `NTH_VALUE(col, n)` — positional; `SUM(col)`, `AVG(col)`, `COUNT(*)`, `MIN(col)`, `MAX(col)` as aggregate windows. All support `OVER ([PARTITION BY col, ...] [ORDER BY col [ASC\|DESC], ...] [ROWS\|RANGE BETWEEN ... AND ...])`. Default frame: entire partition when no `ORDER BY`; running accumulation (`UNBOUNDED PRECEDING` to `CURRENT ROW`) when `ORDER BY` is present. |
 | Arithmetic expressions | `+`, `-`, `*`, `/` in `SELECT` and `UPDATE SET` (e.g. `price * 1.1`, `count + 1`) |
 | Scalar functions | `COALESCE(a, b, ...)` returns first non-NULL argument; `NULLIF(a, b)` returns NULL when `a = b`, else `a`. Both usable in `SELECT`, `UPDATE SET`, and nested inside arithmetic |
 | String functions | `UPPER(s)`, `LOWER(s)` — case conversion; `TRIM(s[, chars])`, `LTRIM(s[, chars])`, `RTRIM(s[, chars])` — strip whitespace or custom characters; `LENGTH(s)` — byte length; `SUBSTR(s, start[, len])` — 1-based substring; `REPLACE(s, from, to)` — replace all occurrences; `CONCAT(a, b, ...)` — concatenate (NULLs skipped). All usable in `SELECT`, `UPDATE SET`, and composable with each other and arithmetic |

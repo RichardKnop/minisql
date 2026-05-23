@@ -71,6 +71,43 @@ func (p *parserItem) doParseSelect() error {
 			}
 			p.pop() // consume ")"
 
+			// SUM(col) OVER (...) — window aggregate, not a plain aggregate.
+			if strings.ToUpper(p.peek()) == "OVER" {
+				p.pop() // consume "OVER"
+				spec, err := p.parseWindowSpec()
+				if err != nil {
+					return p.errorf("at SELECT %s OVER: %v", strings.TrimSuffix(upperIdent, "("), err)
+				}
+				funcName := strings.TrimSuffix(upperIdent, "(")
+				kind := windowFuncKind(funcName)
+				if kind == 0 {
+					return p.errorf("at SELECT: unknown window function %q", funcName)
+				}
+				colExpr := &minisql.Expr{Column: colName}
+				wfExpr := &minisql.Expr{WindowFunc: &minisql.WindowFunc{Kind: kind, Arg: colExpr, Spec: spec}}
+				fieldName := funcName + "(" + colName + ") OVER (...)"
+				field := minisql.Field{Name: fieldName, Expr: wfExpr}
+				if strings.ToUpper(p.peek()) == "AS" {
+					p.pop()
+					alias := p.peek()
+					if !isIdentifier(alias) {
+						return p.errorf("at SELECT: expected alias after window function")
+					}
+					field.Alias = alias
+					p.pop()
+				}
+				if len(p.Aggregates) > 0 {
+					p.Aggregates = append(p.Aggregates, minisql.AggregateExpr{})
+				}
+				p.Fields = append(p.Fields, field)
+				if strings.ToUpper(p.peek()) == "FROM" {
+					p.step = stepSelectFrom
+					return nil
+				}
+				p.step = stepSelectComma
+				return nil
+			}
+
 			// Build synthetic field name e.g. "SUM(price)"
 			funcName := strings.TrimSuffix(upperIdent, "(")
 			fieldName := funcName + "(" + colName + ")"
@@ -123,8 +160,39 @@ func (p *parserItem) doParseSelect() error {
 
 		// Handle COUNT(*) special case — consume immediately.
 		if upperIdent == "COUNT(*)" {
-			p.Fields = append(p.Fields, minisql.Field{Name: identifier})
 			p.pop()
+
+			// COUNT(*) OVER (...) — window count.
+			if strings.ToUpper(p.peek()) == "OVER" {
+				p.pop() // consume "OVER"
+				spec, err := p.parseWindowSpec()
+				if err != nil {
+					return p.errorf("at SELECT COUNT(*) OVER: %v", err)
+				}
+				wfExpr := &minisql.Expr{WindowFunc: &minisql.WindowFunc{Kind: minisql.WindowCount, Spec: spec}}
+				field := minisql.Field{Name: "COUNT(*) OVER (...)", Expr: wfExpr}
+				if strings.ToUpper(p.peek()) == "AS" {
+					p.pop()
+					alias := p.peek()
+					if !isIdentifier(alias) {
+						return p.errorf("at SELECT: expected alias after COUNT(*) OVER")
+					}
+					field.Alias = alias
+					p.pop()
+				}
+				if len(p.Aggregates) > 0 {
+					p.Aggregates = append(p.Aggregates, minisql.AggregateExpr{})
+				}
+				p.Fields = append(p.Fields, field)
+				if strings.ToUpper(p.peek()) == "FROM" {
+					p.step = stepSelectFrom
+					return nil
+				}
+				p.step = stepSelectComma
+				return nil
+			}
+
+			p.Fields = append(p.Fields, minisql.Field{Name: identifier})
 			if len(p.Aggregates) > 0 {
 				p.Aggregates = append(p.Aggregates, minisql.AggregateExpr{})
 			}

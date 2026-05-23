@@ -414,6 +414,18 @@ type Statement struct {
 	Distinct       bool
 }
 
+// HasWindowFuncs reports whether the SELECT field list contains at least one
+// window function (Expr.WindowFunc != nil).  It is the zero-overhead guard used
+// by Select() to skip all window-function logic for regular queries.
+func (s Statement) HasWindowFuncs() bool {
+	for i := range s.Fields {
+		if s.Fields[i].Expr != nil && s.Fields[i].Expr.WindowFunc != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // NumPlaceholders returns the number of placeholder parameters (?) in the statement.
 func (s Statement) NumPlaceholders() int {
 	if s.Kind == Explain && s.ExplainStatement != nil {
