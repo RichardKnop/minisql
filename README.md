@@ -7,7 +7,7 @@
 `MiniSQL` is an embedded single file database written in Golang, inspired by `SQLite` but borrows ideas from other databases such as `Postgres` too. It can differentiate itself from `SQLite` in several areas: 
 
 1. Pure Go / zero CGO
-2. MVCC snapshot isolation (for reads, OCC for writes)
+2. MVCC snapshot isolation (for reads, serialized single-writer for writes)
 3. Parallel scan
 4. JSON + UUID as native types
 5. Built-in full-text search
@@ -36,10 +36,21 @@ db, err := sql.Open("minisql", "./my.db?log_level=debug&max_cached_pages=500")
 
 ## Connection Pooling
 
-**MiniSQL is an embedded, single-file database (similar to SQLite).** However, it can support multiple connections for reads so it is not necessary to set max connections to 1, it depends on your workloads:
+**MiniSQL requires exactly one open connection. Always call `SetMaxOpenConns(1)` after opening the database:**
 
-- Write-heavy workloads: SetMaxOpenConns(1) still makes sense — writes serialize internally on dbLock anyway, multiple connections just add OCC conflict noise without throughput gain.                                                                                              
- - Read-heavy or mixed workloads: multiple connections are beneficial — read-only transactions run concurrently via MVCC snapshot isolation without holding the database lock.
+```go
+db, err := sql.Open("minisql", "./my.db")
+if err != nil {
+    log.Fatal(err)
+}
+db.SetMaxOpenConns(1)
+```
+
+MiniSQL is an embedded single-file database where each connection (`Driver.Open`) creates its own independent in-memory state: a separate page cache, WAL index, and transaction manager. Multiple connections pointing at the same file do **not** share this state, so they will see inconsistent data and can corrupt the database.
+
+**Read concurrency is handled within a single connection.** Read-only transactions use MVCC snapshot isolation — concurrent goroutines running `SELECT` through the same `*sql.DB` get consistent, non-blocking snapshots without holding any write lock. `SetMaxOpenConns(1)` does not limit read concurrency; it routes all goroutines through the one shared connection whose MVCC machinery works correctly.
+
+**Write operations are serialized.** Only one write transaction may be active at a time. MiniSQL returns `ErrConcurrentWriter` if a second write transaction is attempted while one is already in progress. This is consistent with SQLite's WAL-mode behaviour (`SQLITE_BUSY` for concurrent writers).
 
 ## Connection String Parameters
 

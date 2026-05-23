@@ -6,8 +6,6 @@ import (
 	"fmt"
 
 	"go.uber.org/zap"
-
-	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 // TransactionalPager wraps a base Pager and routes reads and writes through the current transaction.
@@ -52,26 +50,15 @@ func (tp *TransactionalPager) ReadPage(ctx context.Context, pageIdx PageIndex) (
 		return modifiedPage, nil
 	}
 
-	// For write transactions the page version must be captured BEFORE reading
-	// the page content from the LRU cache to avoid a TOCTOU race: if a commit
-	// lands between GetPage (pager mutex) and GlobalPageVersion (txManager
-	// mutex), we would record a version that is newer than the page content we
-	// actually read.  By snapshotting the version first, any interleaved commit
-	// causes readVersion < the post-commit version seen at ModifyPage time,
-	// which the OCC check will catch.  Read-only transactions skip this to
-	// avoid the mutex acquisition (the version is never used for them).
-	var readVersion uint64
-	if !tx.ReadOnly {
-		readVersion = tp.txManager.GlobalPageVersion(ctx, pageIdx)
-	}
-
 	page, err := tp.GetPage(ctx, pageIdx)
 	if err != nil {
 		return nil, err
 	}
 
+	// Write transactions: return the cached page directly.
+	// Single-writer enforcement (activeWriters) guarantees no concurrent writer
+	// can have modified this page since we started, so no conflict check needed.
 	if !tx.ReadOnly {
-		tx.TrackRead(pageIdx, readVersion)
 		return page, nil
 	}
 
@@ -118,19 +105,6 @@ func (tp *TransactionalPager) ModifyPage(ctx context.Context, pageIdx PageIndex)
 	originalPage, err := tp.GetPage(ctx, pageIdx)
 	if err != nil {
 		return nil, err
-	}
-
-	// Early conflict detection: if this page was already read by this transaction
-	// and the page has since been updated by a concurrent commit, fail fast with
-	// ErrTxConflict rather than letting the stale cursor position produce a
-	// confusing "duplicate key" error later.
-	if !tx.ReadOnly {
-		if readVersion, ok := tx.GetReadVersion(pageIdx); ok {
-			currentVersion := tp.txManager.GlobalPageVersion(ctx, pageIdx)
-			if currentVersion != readVersion {
-				return nil, minisqlErrors.ErrTxConflict
-			}
-		}
 	}
 
 	// Create a deep copy for modification.  Keep a reference to originalPage so
@@ -236,19 +210,10 @@ func (tp *TransactionalPager) AddFreePage(ctx context.Context, pageIdx PageIndex
 
 func (tp *TransactionalPager) readDBHeader(ctx context.Context) DatabaseHeader {
 	tx := TxFromContext(ctx)
-
-	// Check if we already have a copy of database header in the transaction
-	var dbHeader DatabaseHeader
 	if header, exists := tx.GetModifiedDBHeader(); exists {
-		dbHeader = *header
-	} else {
-		// Read header version and track it
-		currentVersion := tp.txManager.GlobalDBHeaderVersion(ctx)
-		dbHeader = tp.GetHeader(ctx)
-		tx.TrackDBHeaderRead(currentVersion)
+		return *header
 	}
-
-	return dbHeader
+	return tp.GetHeader(ctx)
 }
 
 // GetOverflowPage returns a writable copy of the overflow page at pageIdx.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -23,11 +24,17 @@ func init() {
 	sql.Register(driverName, &Driver{})
 }
 
+// ErrDatabaseAlreadyOpen is returned when a second connection to the same
+// database file is attempted. MiniSQL requires exactly one connection per file;
+// use SetMaxOpenConns(1) on the *sql.DB.
+var ErrDatabaseAlreadyOpen = errors.New("database file is already open: use SetMaxOpenConns(1)")
+
 // Driver implements the database/sql/driver.Driver interface.
 type Driver struct {
-	mu     sync.Mutex
-	parser minisql.Parser
-	logger *zap.Logger
+	mu        sync.Mutex
+	parser    minisql.Parser
+	logger    *zap.Logger
+	openFiles map[string]bool
 }
 
 // Open returns a new connection to the database.
@@ -46,12 +53,25 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 		return nil, fmt.Errorf("failed to parse connection string: %w", err)
 	}
 
+	// Enforce single connection per file. Each connection creates its own
+	// independent in-memory state (page cache, WAL index, transaction manager).
+	// Multiple connections to the same file would not share this state and would
+	// see inconsistent data. Use SetMaxOpenConns(1) on the *sql.DB.
+	if d.openFiles == nil {
+		d.openFiles = make(map[string]bool)
+	}
+	if d.openFiles[config.FilePath] {
+		return nil, fmt.Errorf("%w: %s", ErrDatabaseAlreadyOpen, config.FilePath)
+	}
+	d.openFiles[config.FilePath] = true
+
 	// Initialize logger if not set
 	if d.logger == nil {
 		logConfig := logging.DefaultConfig()
 		logConfig.Level = config.GetZapLevel()
 		logger, err := logConfig.Build()
 		if err != nil {
+			delete(d.openFiles, config.FilePath)
 			return nil, fmt.Errorf("failed to create logger: %w", err)
 		}
 		d.logger = logger
@@ -63,14 +83,21 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 
 	db, err := d.newDB(config)
 	if err != nil {
+		delete(d.openFiles, config.FilePath)
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
+	filePath := config.FilePath
 	return &Conn{
 		db:                 db,
 		parser:             d.parser,
 		logger:             d.logger,
 		slowQueryThreshold: config.SlowQueryThreshold,
+		closeFunc: func() {
+			d.mu.Lock()
+			delete(d.openFiles, filePath)
+			d.mu.Unlock()
+		},
 	}, nil
 }
 
@@ -130,6 +157,7 @@ type Conn struct {
 	parser             minisql.Parser
 	transaction        *minisql.Transaction
 	logger             *zap.Logger
+	closeFunc          func()
 	mu                 sync.RWMutex
 	slowQueryThreshold time.Duration
 }
@@ -155,13 +183,15 @@ func (c *Conn) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Rollback any active transaction
 	if c.transaction != nil {
-		// Transaction cleanup is handled internally
 		c.transaction = nil
 	}
 
-	return c.db.Close()
+	err := c.db.Close()
+	if c.closeFunc != nil {
+		c.closeFunc()
+	}
+	return err
 }
 
 // Prepare returns a prepared statement, bound to this connection.
@@ -201,13 +231,16 @@ func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 		return nil, fmt.Errorf("transaction already in progress")
 	}
 
-	// Create a new transaction using the transaction manager
-	c.transaction = c.db.GetTransactionManager().BeginTransaction(ctx)
+	tx, err := c.db.GetTransactionManager().BeginTransaction(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.transaction = tx
 
 	return &Tx{
 		conn: c,
-		tx:   c.transaction,
-		ctx:  minisql.WithTransaction(ctx, c.transaction),
+		tx:   tx,
+		ctx:  minisql.WithTransaction(ctx, tx),
 	}, nil
 }
 
