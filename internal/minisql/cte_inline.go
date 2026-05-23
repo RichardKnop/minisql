@@ -65,7 +65,7 @@ func cteBodyIsInlineEligibleIgnoreAliases(body Statement) bool {
 // body.Fields is referenced by the outer query's fields, conditions, GROUP BY,
 // HAVING, or ORDER BY. If no alias is referenced, inlining is safe even though
 // the CTE body uses column renaming: the outer simply never names those aliases.
-func cteBodyAliasesConflictWithOuter(body Statement, outer Statement) bool {
+func cteBodyAliasesConflictWithOuter(body, outer Statement) bool {
 	aliasSet := make(map[string]struct{})
 	for _, f := range body.Fields {
 		if f.Name != "*" && f.Alias != "" {
