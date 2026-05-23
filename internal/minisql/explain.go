@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
+	"strconv"
 	"time"
 )
 
@@ -12,7 +12,7 @@ var errExplainUnsupportedStatement = errors.New("EXPLAIN currently supports SELE
 
 type explainRow struct {
 	operation string
-	detail    string
+	detail    []byte
 	estimated OptionalValue
 	actual    OptionalValue
 	duration  OptionalValue
@@ -199,7 +199,7 @@ func (d *Database) executeExplainCTEs(ctx context.Context, inner Statement, anal
 	planRows := plan.explainRows(ctx, mainTable, d.lockedProvider)
 	allRows := make([]explainRow, 0, numCTEs+len(planRows))
 	for _, cs := range cteSteps {
-		row := explainRow{operation: "cte", detail: "name=" + cs.name}
+		row := explainRow{operation: "cte", detail: append([]byte("name="), cs.name...)}
 		if analyze {
 			row.actual = OptionalValue{Valid: true, Value: cs.rowCount}
 			row.duration = OptionalValue{Valid: true, Value: cs.duration}
@@ -230,7 +230,7 @@ func (d *Database) executeExplainCTEs(ctx context.Context, inner Statement, anal
 		resultRows = append(resultRows, NewRowWithValues(explainColumns, []OptionalValue{
 			{Valid: true, Value: int64(step)},
 			{Valid: true, Value: NewTextPointer([]byte(row.operation))},
-			{Valid: true, Value: NewTextPointer([]byte(row.detail))},
+			{Valid: true, Value: NewTextPointer(row.detail)},
 			row.estimated,
 			row.actual,
 			row.duration,
@@ -287,7 +287,7 @@ func (d *Database) executeExplainDerivedTable(ctx context.Context, inner Stateme
 	// Build the leading derived_table step (always step 1).
 	derivedStep := explainRow{
 		operation: "derived_table",
-		detail:    "alias=" + inner.FromSubqueryAlias,
+		detail:    append([]byte("alias="), inner.FromSubqueryAlias...),
 	}
 	if analyze {
 		derivedStep.actual = OptionalValue{Valid: true, Value: int64(len(innerRows))}
@@ -318,7 +318,7 @@ func (d *Database) executeExplainDerivedTable(ctx context.Context, inner Stateme
 		resultRows = append(resultRows, NewRowWithValues(explainColumns, []OptionalValue{
 			{Valid: true, Value: int64(step)},
 			{Valid: true, Value: NewTextPointer([]byte(row.operation))},
-			{Valid: true, Value: NewTextPointer([]byte(row.detail))},
+			{Valid: true, Value: NewTextPointer(row.detail)},
 			row.estimated,
 			row.actual,
 			row.duration,
@@ -342,7 +342,7 @@ func buildExplainResult(ctx context.Context, plan QueryPlan, table *Table, provi
 		resultRows = append(resultRows, NewRowWithValues(explainColumns, []OptionalValue{
 			{Valid: true, Value: int64(step)},
 			{Valid: true, Value: NewTextPointer([]byte(row.operation))},
-			{Valid: true, Value: NewTextPointer([]byte(row.detail))},
+			{Valid: true, Value: NewTextPointer(row.detail)},
 			row.estimated,
 			row.actual,
 			row.duration,
@@ -514,76 +514,99 @@ func scanOperation(scan Scan) string {
 	return scan.Type.String()
 }
 
-func scanDetail(scan Scan) string {
+func scanDetail(scan Scan) []byte {
+	b := make([]byte, 0, 64)
 	if scan.Type == ScanTypeIndexIntersect || scan.Type == ScanTypeIndexUnion {
-		subParts := make([]string, 0, len(scan.SubScans))
-		for _, sub := range scan.SubScans {
+		sep := byte('+')
+		if scan.Type == ScanTypeIndexUnion {
+			sep = '|'
+		}
+		b = append(b, "table="...)
+		b = append(b, scan.TableName...)
+		b = append(b, " indexes="...)
+		for i, sub := range scan.SubScans {
+			if i > 0 {
+				b = append(b, sep)
+			}
 			if sub.IndexName != "" {
-				subParts = append(subParts, sub.IndexName)
+				b = append(b, sub.IndexName...)
 			} else {
-				subParts = append(subParts, sub.Type.String())
+				b = append(b, sub.Type.String()...)
 			}
 		}
-		sep := "+"
-		if scan.Type == ScanTypeIndexUnion {
-			sep = "|"
-		}
-		parts := []string{
-			"table=" + scan.TableName,
-			"indexes=" + strings.Join(subParts, sep),
-		}
 		if len(scan.Filters) > 0 {
-			parts = append(parts, fmt.Sprintf("filters=%d", conditionCount(scan.Filters)))
+			b = append(b, " filters="...)
+			b = strconv.AppendInt(b, int64(conditionCount(scan.Filters)), 10)
 		}
-		return strings.Join(parts, " ")
+		return b
 	}
-	parts := []string{"table=" + scan.TableName}
+	b = append(b, "table="...)
+	b = append(b, scan.TableName...)
 	if scan.TableAlias != "" && scan.TableAlias != scan.TableName {
-		parts = append(parts, "alias="+scan.TableAlias)
+		b = append(b, " alias="...)
+		b = append(b, scan.TableAlias...)
 	}
 	if scan.IndexName != "" {
-		parts = append(parts, "index="+scan.IndexName)
+		b = append(b, " index="...)
+		b = append(b, scan.IndexName...)
 	}
 	if len(scan.IndexColumns) > 0 {
-		parts = append(parts, "columns="+columnNames(scan.IndexColumns))
+		b = append(b, " columns="...)
+		b = append(b, columnNames(scan.IndexColumns)...)
 	}
 	if len(scan.IndexKeys) > 0 {
-		parts = append(parts, fmt.Sprintf("keys=%v", scan.IndexKeys))
+		b = append(b, ' ')
+		b = append(b, fmt.Sprintf("keys=%v", scan.IndexKeys)...)
 	}
 	if scan.RangeCondition.Lower != nil || scan.RangeCondition.Upper != nil {
-		parts = append(parts, "range="+rangeDetail(scan.RangeCondition))
+		b = append(b, " range="...)
+		b = append(b, rangeDetail(scan.RangeCondition)...)
 	}
 	if len(scan.Filters) > 0 {
-		parts = append(parts, fmt.Sprintf("filters=%d", conditionCount(scan.Filters)))
+		b = append(b, " filters="...)
+		b = strconv.AppendInt(b, int64(conditionCount(scan.Filters)), 10)
 	}
 	if scan.CoveringIndex {
-		parts = append(parts, "covering=true")
+		b = append(b, " covering=true"...)
 	}
-	return strings.Join(parts, " ")
+	return b
 }
 
-func joinDetail(plan QueryPlan, join JoinPlan) string {
+func joinDetail(plan QueryPlan, join JoinPlan) []byte {
 	algo := "nested_loop"
 	if join.Algorithm == JoinAlgorithmHash {
 		algo = "hash"
 	}
-	parts := []string{"type=" + joinTypeString(join.Type), "algorithm=" + algo}
+	b := make([]byte, 0, 64)
+	b = append(b, "type="...)
+	b = append(b, joinTypeString(join.Type)...)
+	b = append(b, " algorithm="...)
+	b = append(b, algo...)
 	if join.LeftScanIndex >= 0 && join.LeftScanIndex < len(plan.Scans) {
-		parts = append(parts, "left="+plan.Scans[join.LeftScanIndex].TableAlias)
+		b = append(b, " left="...)
+		b = append(b, plan.Scans[join.LeftScanIndex].TableAlias...)
 	}
 	if join.RightScanIndex >= 0 && join.RightScanIndex < len(plan.Scans) {
-		parts = append(parts, "right="+plan.Scans[join.RightScanIndex].TableAlias)
+		b = append(b, " right="...)
+		b = append(b, plan.Scans[join.RightScanIndex].TableAlias...)
 	}
 	if len(join.JoinColumnPairs) > 0 {
-		pairs := make([]string, 0, len(join.JoinColumnPairs))
-		for _, pair := range join.JoinColumnPairs {
-			pairs = append(pairs, pair.BaseTableColumn.String()+"="+pair.JoinTableColumn.String())
+		b = append(b, " on="...)
+		for i, pair := range join.JoinColumnPairs {
+			if i > 0 {
+				b = append(b, ',')
+			}
+			b = append(b, pair.BaseTableColumn.String()...)
+			b = append(b, '=')
+			b = append(b, pair.JoinTableColumn.String()...)
 		}
-		parts = append(parts, "on="+strings.Join(pairs, ","))
 	} else if join.OuterJoinColumn != "" || join.InnerJoinColumn != "" {
-		parts = append(parts, "on="+join.OuterJoinColumn+"="+join.InnerJoinColumn)
+		b = append(b, " on="...)
+		b = append(b, join.OuterJoinColumn...)
+		b = append(b, '=')
+		b = append(b, join.InnerJoinColumn...)
 	}
-	return strings.Join(parts, " ")
+	return b
 }
 
 func joinTypeString(joinType JoinType) string {
@@ -605,35 +628,47 @@ func joinTypeString(joinType JoinType) string {
 	}
 }
 
-func orderByDetail(orderBy []OrderBy) string {
-	parts := make([]string, 0, len(orderBy))
-	for _, order := range orderBy {
-		direction := "ASC"
-		if order.Direction == Desc {
-			direction = "DESC"
+func orderByDetail(orderBy []OrderBy) []byte {
+	b := make([]byte, 0, 32)
+	b = append(b, "order_by="...)
+	for i, order := range orderBy {
+		if i > 0 {
+			b = append(b, ',')
 		}
-		parts = append(parts, order.Field.String()+" "+direction)
+		b = append(b, order.Field.String()...)
+		if order.Direction == Desc {
+			b = append(b, " DESC"...)
+		} else {
+			b = append(b, " ASC"...)
+		}
 	}
-	return "order_by=" + strings.Join(parts, ",")
+	return b
 }
 
-func rangeDetail(condition RangeCondition) string {
-	parts := make([]string, 0, 2)
+func rangeDetail(condition RangeCondition) []byte {
+	b := make([]byte, 0, 32)
 	if condition.Lower != nil {
-		op := ">"
 		if condition.Lower.Inclusive {
-			op = ">="
+			b = append(b, ">="...)
+		} else {
+			b = append(b, '>')
 		}
-		parts = append(parts, fmt.Sprintf("%s %v", op, condition.Lower.Value))
+		b = append(b, ' ')
+		b = append(b, fmt.Sprintf("%v", condition.Lower.Value)...)
 	}
 	if condition.Upper != nil {
-		op := "<"
-		if condition.Upper.Inclusive {
-			op = "<="
+		if condition.Lower != nil {
+			b = append(b, " and "...)
 		}
-		parts = append(parts, fmt.Sprintf("%s %v", op, condition.Upper.Value))
+		if condition.Upper.Inclusive {
+			b = append(b, "<="...)
+		} else {
+			b = append(b, '<')
+		}
+		b = append(b, ' ')
+		b = append(b, fmt.Sprintf("%v", condition.Upper.Value)...)
 	}
-	return strings.Join(parts, " and ")
+	return b
 }
 
 func conditionCount(conditions OneOrMore) int {

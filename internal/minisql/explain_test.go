@@ -39,7 +39,7 @@ func TestJoinDetail(t *testing.T) {
 				},
 			},
 		}
-		detail := joinDetail(plan, join)
+		detail := string(joinDetail(plan, join))
 		assert.Contains(t, detail, "type=inner")
 		assert.Contains(t, detail, "left=u")
 		assert.Contains(t, detail, "right=o")
@@ -55,7 +55,7 @@ func TestJoinDetail(t *testing.T) {
 			OuterJoinColumn: "id",
 			InnerJoinColumn: "user_id",
 		}
-		detail := joinDetail(plan, join)
+		detail := string(joinDetail(plan, join))
 		assert.Contains(t, detail, "type=left")
 		assert.Contains(t, detail, "on=id=user_id")
 	})
@@ -63,8 +63,7 @@ func TestJoinDetail(t *testing.T) {
 	t.Run("out-of-range scan indexes", func(t *testing.T) {
 		t.Parallel()
 		join := JoinPlan{Type: Right, LeftScanIndex: -1, RightScanIndex: 99}
-		detail := joinDetail(plan, join)
-		assert.Equal(t, "type=right algorithm=nested_loop", detail)
+		assert.Equal(t, "type=right algorithm=nested_loop", string(joinDetail(plan, join)))
 	})
 }
 
@@ -73,28 +72,28 @@ func TestOrderByDetail(t *testing.T) {
 
 	t.Run("single ASC", func(t *testing.T) {
 		t.Parallel()
-		got := orderByDetail([]OrderBy{{Field: Field{Name: "name"}, Direction: Asc}})
+		got := string(orderByDetail([]OrderBy{{Field: Field{Name: "name"}, Direction: Asc}}))
 		assert.Equal(t, "order_by=name ASC", got)
 	})
 
 	t.Run("single DESC", func(t *testing.T) {
 		t.Parallel()
-		got := orderByDetail([]OrderBy{{Field: Field{Name: "score"}, Direction: Desc}})
+		got := string(orderByDetail([]OrderBy{{Field: Field{Name: "score"}, Direction: Desc}}))
 		assert.Equal(t, "order_by=score DESC", got)
 	})
 
 	t.Run("multiple columns", func(t *testing.T) {
 		t.Parallel()
-		got := orderByDetail([]OrderBy{
+		got := string(orderByDetail([]OrderBy{
 			{Field: Field{Name: "score"}, Direction: Desc},
 			{Field: Field{Name: "name"}, Direction: Asc},
-		})
+		}))
 		assert.Equal(t, "order_by=score DESC,name ASC", got)
 	})
 
 	t.Run("empty", func(t *testing.T) {
 		t.Parallel()
-		assert.Equal(t, "order_by=", orderByDetail(nil))
+		assert.Equal(t, "order_by=", string(orderByDetail(nil)))
 	})
 }
 
@@ -104,25 +103,25 @@ func TestRangeDetail(t *testing.T) {
 	t.Run("lower only exclusive", func(t *testing.T) {
 		t.Parallel()
 		rc := RangeCondition{Lower: &RangeBound{Value: int64(10), Inclusive: false}}
-		assert.Equal(t, "> 10", rangeDetail(rc))
+		assert.Equal(t, "> 10", string(rangeDetail(rc)))
 	})
 
 	t.Run("lower only inclusive", func(t *testing.T) {
 		t.Parallel()
 		rc := RangeCondition{Lower: &RangeBound{Value: int64(10), Inclusive: true}}
-		assert.Equal(t, ">= 10", rangeDetail(rc))
+		assert.Equal(t, ">= 10", string(rangeDetail(rc)))
 	})
 
 	t.Run("upper only exclusive", func(t *testing.T) {
 		t.Parallel()
 		rc := RangeCondition{Upper: &RangeBound{Value: int64(50), Inclusive: false}}
-		assert.Equal(t, "< 50", rangeDetail(rc))
+		assert.Equal(t, "< 50", string(rangeDetail(rc)))
 	})
 
 	t.Run("upper only inclusive", func(t *testing.T) {
 		t.Parallel()
 		rc := RangeCondition{Upper: &RangeBound{Value: int64(50), Inclusive: true}}
-		assert.Equal(t, "<= 50", rangeDetail(rc))
+		assert.Equal(t, "<= 50", string(rangeDetail(rc)))
 	})
 
 	t.Run("both bounds", func(t *testing.T) {
@@ -131,12 +130,12 @@ func TestRangeDetail(t *testing.T) {
 			Lower: &RangeBound{Value: int64(10), Inclusive: true},
 			Upper: &RangeBound{Value: int64(50), Inclusive: false},
 		}
-		assert.Equal(t, ">= 10 and < 50", rangeDetail(rc))
+		assert.Equal(t, ">= 10 and < 50", string(rangeDetail(rc)))
 	})
 
 	t.Run("no bounds", func(t *testing.T) {
 		t.Parallel()
-		assert.Equal(t, "", rangeDetail(RangeCondition{}))
+		assert.Equal(t, "", string(rangeDetail(RangeCondition{})))
 	})
 }
 
@@ -175,7 +174,7 @@ func TestScanDetail_AllFields(t *testing.T) {
 		},
 		Filters: OneOrMore{{{}}},
 	}
-	detail := scanDetail(scan)
+	detail := string(scanDetail(scan))
 	assert.Contains(t, detail, "table=orders")
 	assert.Contains(t, detail, "alias=o")
 	assert.Contains(t, detail, "index=idx_user")
