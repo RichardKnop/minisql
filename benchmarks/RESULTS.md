@@ -1,5 +1,172 @@
 # Benchmark Results
 
+### 2026-05-23 — EXPLAIN allocation reduction
+
+**Platform:** Apple M1 Max · darwin/arm64 · Go 1.26
+**Settings:** `-benchtime=1×` (`-count=1`) · single run
+**Branch:** `refactor/explain`
+
+Cumulative optimisations in this baseline (adds EXPLAIN improvements on top of previous):
+
+**EXPLAIN path:**
+- **`[]byte` detail building**: `scanDetail`, `joinDetail`, `orderByDetail`, and `rangeDetail`
+  now build output via direct `[]byte` append instead of `[]string{}` + `strings.Join`,
+  eliminating the intermediate slice allocation and the `strings.Join` output string.
+  `explainRow.detail` changed to `[]byte` so `NewTextPointer` receives bytes directly
+  without a `string→[]byte` conversion per row.
+- **`liftINSubqueriesToSemiJoins` fast path**: added `hasINSubqueryConditions` guard that
+  returns early when no `IN/NOT IN (subquery)` conditions are present, avoiding the
+  `outerTableNames` map allocation and join-tree walk on every non-IN query (including
+  every EXPLAIN call).
+
+Combined impact: **67 → 58 allocs/op**, **6,533 → 6,087 B/op** on `BenchmarkExplain/minisql`
+(−13% allocs, −6.8% memory). SQLite baseline remains 18 allocs/op; gap closed from 49 → 40.
+
+#### Timing
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| GroupBy_Aggregate | 1.04 ms/op | 2.54 ms/op | **0.41×** ✓ |
+| Having_Filter | 811 µs/op | 2.27 ms/op | **0.36×** ✓ |
+| Distinct_HighCardinality | 4.05 ms/op | 6.42 ms/op | **0.63×** ✓ |
+| Delete_ByPK | 31.5 µs/op | 149 µs/op | **0.21×** ✓ |
+| ForeignKey_Insert | 18.7 µs/op | 77.0 µs/op | **0.24×** ✓ |
+| ForeignKey_DeleteCascade | 97.6 µs/op | 50.7 µs/op | 1.92× |
+| Insert_SingleRow | 14.5 µs/op | 43.7 µs/op | **0.33×** ✓ |
+| Insert_Batch (100 rows) | 364 µs/op | 248 µs/op | 1.47× |
+| Insert_PreparedBatch (100) | 385 µs/op | 234 µs/op | 1.64× |
+| Insert_MultiValues (100) | 218 µs/op | 174 µs/op | 1.25× |
+| FullText_BuildIndex (1K docs) | 7.02 ms/op | 1.99 ms/op | 3.53× |
+| FullText_Insert_WithIndex | 173 µs/op | 92.4 µs/op | 1.88× |
+| FullText_Search_SingleTerm/rare | 16.4 µs/op | 10.3 µs/op | 1.58× |
+| FullText_Search_SingleTerm/medium | 15.5 µs/op | 11.3 µs/op | 1.38× |
+| FullText_Search_SingleTerm/common | 16.2 µs/op | 65.2 µs/op | **0.25×** ✓ |
+| FullText_Search_MultiTermAND | 26.1 µs/op | 37.5 µs/op | **0.70×** ✓ |
+| FullText_Search_Phrase | 33.7 µs/op | 28.1 µs/op | 1.20× |
+| FullText_Update_WithIndex | 63.0 µs/op | 95.4 µs/op | **0.66×** ✓ |
+| FullText_Delete_WithIndex | 150 µs/op | 155 µs/op | **0.96×** ✓ |
+| **Join_Inner_SmallLarge** | **4.32 ms/op** | **4.75 ms/op** | **0.91×** ✓ |
+| **Join_Inner_LowSelectivity** | **109 µs/op** | **741 µs/op** | **0.15×** ✓ |
+| **Join_Left_UnmatchedRows** | **3.76 ms/op** | **4.20 ms/op** | **0.90×** ✓ |
+| Vacuum_Small | 18.5 ms/op | 278 µs/op | 66.5× |
+| WAL_Checkpoint | 192 µs/op | 77.6 µs/op | 2.48× |
+| Explain | 5.38 µs/op | 1.23 µs/op | 4.39× |
+| Select_PointScan | 5.56 µs/op | 3.41 µs/op | 1.63× |
+| Select_Limit | 7.11 µs/op | 8.07 µs/op | **0.88×** ✓ |
+| Select_FullScan (10K rows) | 3.59 ms/op | 5.30 ms/op | **0.68×** ✓ |
+| Select_CountStar | 5.64 µs/op | 10.1 µs/op | **0.56×** ✓ |
+| Select_IndexRangeScan | 819 µs/op | 769 µs/op | 1.06× |
+| Select_SecondaryIndex_LowSelectivity | 2.00 ms/op | 2.78 ms/op | **0.72×** ✓ |
+| Select_SecondaryIndex_LowSelectivityLimit | 9.34 µs/op | 8.45 µs/op | 1.10× |
+| Select_RangeScan | 1.47 ms/op | 867 µs/op | 1.70× |
+| CTE_Materialise | 766 µs/op | 455 µs/op | 1.68× |
+| Subquery_InList (5K rows) | 4.47 ms/op | 3.83 ms/op | 1.17× |
+| OnConflict_DoUpdate | 9.14 µs/op | 36.6 µs/op | **0.25×** ✓ |
+| Update_ByPK | 10.8 µs/op | 108 µs/op | **0.10×** ✓ |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan | ratio |
+|---|---|---|---|---|---|---|---|
+| GroupBy_Aggregate | 37.5 KiB | — | — | 3.5 KiB | — | — | 10.6× |
+| Having_Filter | 28.9 KiB | — | — | 1.9 KiB | — | — | 14.9× |
+| Distinct_HighCardinality | 1.69 MiB | — | — | 586 KiB | — | — | 2.9× |
+| Delete_ByPK | 7.2 KiB | — | — | 447 B | — | — | 16.6× |
+| ForeignKey_Insert | **3.5 KiB** | — | — | 191 B | — | — | 18.6× |
+| ForeignKey_DeleteCascade | **11.3 KiB** | — | — | 128 B | — | — | 90.1× |
+| Insert_SingleRow | **3.92 KiB** | — | — | 311 B | — | — | **12.9×** |
+| Insert_Batch (100) | **243 KiB** | — | — | 31.0 KiB | — | — | **7.8×** |
+| Insert_PreparedBatch (100) | **241 KiB** | — | — | 31.0 KiB | — | — | **7.8×** |
+| Insert_MultiValues (100) | **197 KiB** | — | — | 25.2 KiB | — | — | **7.8×** |
+| FullText_BuildIndex | 10.7 MiB | — | — | 392 B | — | — | — |
+| FullText_Insert_WithIndex | 203 KiB | — | — | 439 B | — | — | 474× |
+| FullText_Search_SingleTerm/rare | 4.4 KiB | — | — | 392 B | — | — | 11.6× |
+| FullText_Search_SingleTerm/medium | 4.4 KiB | — | — | 392 B | — | — | 11.6× |
+| FullText_Search_SingleTerm/common | 4.4 KiB | — | — | 408 B | — | — | 11.1× |
+| FullText_Search_MultiTermAND | 14.2 KiB | — | — | 392 B | — | — | 37.0× |
+| FullText_Search_Phrase | 48.2 KiB | — | — | 400 B | — | — | 123× |
+| FullText_Update_WithIndex | 43.3 KiB | — | — | 291 B | — | — | 152× |
+| FullText_Delete_WithIndex | 175 KiB | — | — | 135 B | — | — | 1,328× |
+| JSONInverted_BuildIndex | — | 55.3 MiB | — | — | — | — | — |
+| JSONInverted_Insert_WithIndex | — | 1.66 MiB | — | — | — | — | — |
+| JSONInverted_Contains_KeyValue | — | 142 KiB | 3.26 MiB | — | 408 B | 408 B | — |
+| JSONInverted_Contains_ObjectSubset | — | 279 KiB | 3.37 MiB | — | 408 B | 408 B | — |
+| JSONInverted_Update_WithIndex | — | 10.5 KiB | — | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 1.25 MiB | — | — | — | — | — |
+| **Join_Inner_SmallLarge** | **2.56 MiB** | — | — | **1.07 MiB** | — | — | 2.4× |
+| **Join_Inner_LowSelectivity** | **22.7 KiB** | — | — | **11.3 KiB** | — | — | 2.0× |
+| **Join_Left_UnmatchedRows** | **878 KiB** | — | — | **708 KiB** | — | — | 1.24× |
+| Vacuum_Small | 1.66 MiB | — | — | 90 B | — | — | — |
+| WAL_Checkpoint | 69.3 KiB | — | — | 440 B | — | — | 161× |
+| Explain | **5.94 KiB** | — | — | 680 B | — | — | **8.95×** |
+| Select_PointScan | 4.98 KiB | — | — | 679 B | — | — | 7.3× |
+| Select_Limit | 4.00 KiB | — | — | 1.7 KiB | — | — | 2.3× |
+| Select_FullScan | **1.24 MiB** | — | — | **1.30 MiB** | — | — | **0.95×** ✓ |
+| Select_CountStar | 2.5 KiB | — | — | 400 B | — | — | 6.4× |
+| Select_IndexRangeScan | 112 KiB | — | — | 85.9 KiB | — | — | 1.3× |
+| Select_SecondaryIndex_LowSelectivity | 437 KiB | — | — | 313 KiB | — | — | 1.4× |
+| Select_SecondaryIndex_LowSelectivityLimit | 5.65 KiB | — | — | 1.1 KiB | — | — | 5.2× |
+| Select_RangeScan | **83.7 KiB** | — | — | **85.9 KiB** | — | — | **0.97×** ✓ |
+| CTE_Materialise | 7.9 KiB | — | — | 400 B | — | — | 20.3× |
+| Subquery_InList | 870 KiB | — | — | 235 KiB | — | — | 3.7× |
+| OnConflict_DoUpdate | **3.1 KiB** | — | — | 259 B | — | — | **12.3×** |
+| Update_ByPK | **6.6 KiB** | — | — | 263 B | — | — | **25.8×** |
+
+#### Allocs/op
+
+| Benchmark | minisql | sqlite | ratio |
+|---|---|---|---|
+| GroupBy_Aggregate | 463 | 309 | 1.5× |
+| Having_Filter | 268 | 111 | 2.4× |
+| Distinct_HighCardinality | **40,145** | **40,010** | **~1.0×** ✓ |
+| Delete_ByPK | 85 | 19 | 4.5× |
+| ForeignKey_Insert | 37 | 8 | 4.6× |
+| ForeignKey_DeleteCascade | 141 | 5 | 28.2× |
+| Insert_SingleRow | **41** | 12 | 3.4× |
+| Insert_Batch (100) | **3,154** | 1,302 | 2.4× |
+| Insert_PreparedBatch (100) | **3,150** | 1,300 | 2.4× |
+| Insert_MultiValues (100) | **2,175** | 617 | 3.5× |
+| OnConflict_DoUpdate | 39 | 10 | 3.9× |
+| Update_ByPK | **63** | 10 | 6.3× |
+| **Join_Inner_SmallLarge** | **89,778** | **99,757** | **0.90×** ✓ |
+| **Join_Inner_LowSelectivity** | **1,294** | **1,009** | 1.28× |
+| **Join_Left_UnmatchedRows** | **79,739** | **70,157** | 1.14× |
+| Select_FullScan | **79,826** | **99,758** | **0.80×** ✓ |
+| Select_RangeScan | **5,511** | **6,581** | **0.84×** ✓ |
+| Select_IndexRangeScan | 6,645 | 6,581 | 1.01× ✓ |
+| Select_SecondaryIndex_LowSelectivity | 29,937 | 29,886 | **~1.0×** ✓ |
+| Subquery_InList | 35,102 | 20,010 | 1.75× |
+| CTE_Materialise | 89 | 13 | 6.9× |
+| Select_CountStar | 29 | 13 | 2.2× |
+| **Explain** | **58** | **18** | **3.2×** |
+
+#### Delta vs previous baseline (CTE alias-tolerant inlining)
+
+| Benchmark | Old B/op | New B/op | Δ memory | Old allocs | New allocs | Δ allocs |
+|---|---|---|---|---|---|---|
+| Explain/minisql | 6,533 B | 6,087 B | −446 B (−6.8%) | 67 | 58 | **−9 (−13%)** |
+
+The 9-alloc saving comes from: (a) eliminating `outerTableNames` map + walk in
+`liftINSubqueriesToSemiJoins` via `hasINSubqueryConditions` fast-path guard (~3–4 allocs);
+(b) replacing `[]string` + `strings.Join` in `scanDetail`/`joinDetail`/`orderByDetail` with
+direct `[]byte` append (~4–5 allocs); (c) eliminating `[]byte(row.detail)` conversion in
+`buildExplainResult` (~1–2 allocs per row). Gap vs SQLite closed from 49 → 40 allocs/op.
+
+#### Key observations
+
+**Major wins vs SQLite (timing):** GroupBy (0.41×), Having (0.36×), CountStar (0.56×), all DML — Delete (0.21×), Insert (0.33×), Update (0.10×), OnConflict (0.25×), FK_Insert (0.24×), FK_DeleteCascade n/a — all JOIN benchmarks (0.15–0.91×), full-text search/common (0.25×) and multi-term (0.70×), FullText_Update (0.66×), FullText_Delete (0.96×), Select_FullScan (0.68×), Select_SecondaryIndex_LowSelectivity (0.72×).
+
+**Major wins vs SQLite (memory/allocs):** Select_FullScan (0.95× B, 0.80× allocs), Select_RangeScan (0.97× B, 0.84× allocs), Select_IndexRangeScan (1.01× allocs — at parity), Join_Inner_SmallLarge allocs (0.90×), Distinct allocs (1.0×).
+
+**Largest remaining memory gaps (within current architecture):**
+1. **GROUP BY/HAVING** — 10–15× memory gap. Remaining: Go map overhead for group-key strings, `OptionalValue` boxing per aggregate slot.
+2. **Batch INSERT** — 1.47–1.64× slower than SQLite. Each of the 100 separate autocommit transactions pays full WAL + transaction overhead.
+3. **Insert_MultiValues** — 7.8× memory gap vs SQLite. Remaining: `Statement.Clone` for 100-row payload, WAL frame allocation per modified page, index node copies.
+4. **Full-text** — large absolute memory for build/insert due to inverted index structure; search and update are competitive.
+5. **Explain** — 4.4× slower, 9× more memory than SQLite; remaining gap is in query preparation, planning, and page read paths — not addressable with string-building tricks alone.
+
+---
+
 ### 2026-05-23 — CTE alias-tolerant inlining
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26

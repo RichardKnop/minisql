@@ -67,6 +67,21 @@ func prefixConditionAlias(cond Condition, alias string) Condition {
 	return cond
 }
 
+// hasINSubqueryConditions reports whether conds contains any IN/NOT IN condition
+// whose right-hand side is a subquery. Used as a fast-path guard to avoid
+// allocating the outerTableNames map when there is nothing to lift.
+func hasINSubqueryConditions(conds OneOrMore) bool {
+	for _, group := range conds {
+		for _, cond := range group {
+			if (cond.Operator == In || cond.Operator == NotIn) &&
+				cond.Operand2.Type == OperandSubquery {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // liftINSubqueriesToSemiJoins converts eligible IN/NOT IN (subquery) conditions
 // in stmt.Conditions into Semi / AntiSemi JOIN entries, removing the original
 // condition from stmt.Conditions.  Ineligible subqueries are left untouched so
@@ -76,6 +91,9 @@ func prefixConditionAlias(cond Condition, alias string) Condition {
 // alias is set to stmt.TableName so that the join planner can form correct
 // ON conditions.
 func liftINSubqueriesToSemiJoins(stmt Statement) Statement {
+	if !hasINSubqueryConditions(stmt.Conditions) {
+		return stmt
+	}
 	outerTables := outerTableNames(stmt)
 	semiCounter := 0
 
