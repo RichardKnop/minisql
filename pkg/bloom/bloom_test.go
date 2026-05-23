@@ -82,7 +82,7 @@ func TestFalsePositiveRate_WithinBounds(t *testing.T) {
 	const probeCount = 100_000
 	for i := n; i < n+probeCount; i++ {
 		if f.MayContain(fmt.Appendf(nil, "item-%d", i)) {
-			fp++
+			fp += 1
 		}
 	}
 	fpRate := float64(fp) / probeCount
@@ -95,8 +95,8 @@ func TestFalsePositiveRate_WithinBounds(t *testing.T) {
 func TestOptimalM(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		n    uint
-		p    float64
+		n           uint
+		p           float64
 		wantAtLeast uint64
 	}{
 		{1000, 0.01, 9000},   // theoretical ~9585 bits

@@ -33,15 +33,15 @@ func BenchmarkJoin_Inner_SmallLarge(b *testing.B) {
 			case "minisql":
 				createDept = `create table "bench_dept" (id int8 primary key autoincrement, name varchar(100))`
 				insertDept = `insert into "bench_dept" (name) values (?)`
-				createEmp  = `create table "bench_emp" (id int8 primary key autoincrement, dept_id int8, name varchar(100), salary int8)`
-				insertEmp  = `insert into "bench_emp" (dept_id, name, salary) values (?, ?, ?)`
-				query      = `select e.id, e.name, d.name from "bench_emp" AS e inner join "bench_dept" AS d on e.dept_id = d.id`
+				createEmp = `create table "bench_emp" (id int8 primary key autoincrement, dept_id int8, name varchar(100), salary int8)`
+				insertEmp = `insert into "bench_emp" (dept_id, name, salary) values (?, ?, ?)`
+				query = `select e.id, e.name, d.name from "bench_emp" AS e inner join "bench_dept" AS d on e.dept_id = d.id`
 			default:
 				createDept = `CREATE TABLE bench_dept (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)`
 				insertDept = `INSERT INTO bench_dept (name) VALUES (?)`
-				createEmp  = `CREATE TABLE bench_emp (id INTEGER PRIMARY KEY AUTOINCREMENT, dept_id INTEGER, name TEXT, salary INTEGER)`
-				insertEmp  = `INSERT INTO bench_emp (dept_id, name, salary) VALUES (?, ?, ?)`
-				query      = `SELECT e.id, e.name, d.name FROM bench_emp AS e INNER JOIN bench_dept AS d ON e.dept_id = d.id`
+				createEmp = `CREATE TABLE bench_emp (id INTEGER PRIMARY KEY AUTOINCREMENT, dept_id INTEGER, name TEXT, salary INTEGER)`
+				insertEmp = `INSERT INTO bench_emp (dept_id, name, salary) VALUES (?, ?, ?)`
+				query = `SELECT e.id, e.name, d.name FROM bench_emp AS e INNER JOIN bench_dept AS d ON e.dept_id = d.id`
 			}
 
 			mustExec(b, db, createDept)
@@ -89,7 +89,7 @@ func BenchmarkJoin_Inner_SmallLarge(b *testing.B) {
 						rows.Close()
 						b.Fatalf("scan: %v", err)
 					}
-					n++
+					n += 1
 				}
 				rows.Close()
 				if err := rows.Err(); err != nil {
@@ -120,11 +120,11 @@ func BenchmarkJoin_Inner_LowSelectivity(b *testing.B) {
 			case "minisql":
 				createPrem = `create table "bench_inner_prem" (emp_id int8 primary key, tier varchar(20))`
 				insertPrem = `insert into "bench_inner_prem" (emp_id, tier) values (?, ?)`
-				query      = `select r.id, r.name, p.tier from "bench_rows" AS r inner join "bench_inner_prem" AS p on r.id = p.emp_id`
+				query = `select r.id, r.name, p.tier from "bench_rows" AS r inner join "bench_inner_prem" AS p on r.id = p.emp_id`
 			default:
 				createPrem = `CREATE TABLE bench_inner_prem (emp_id INTEGER PRIMARY KEY, tier TEXT)`
 				insertPrem = `INSERT INTO bench_inner_prem (emp_id, tier) VALUES (?, ?)`
-				query      = `SELECT r.id, r.name, p.tier FROM bench_rows AS r INNER JOIN bench_inner_prem AS p ON r.id = p.emp_id`
+				query = `SELECT r.id, r.name, p.tier FROM bench_rows AS r INNER JOIN bench_inner_prem AS p ON r.id = p.emp_id`
 			}
 
 			mustExec(b, db, createPrem)
@@ -150,7 +150,7 @@ func BenchmarkJoin_Inner_LowSelectivity(b *testing.B) {
 						rows.Close()
 						b.Fatalf("scan: %v", err)
 					}
-					n++
+					n += 1
 				}
 				rows.Close()
 				if err := rows.Err(); err != nil {
@@ -180,11 +180,11 @@ func BenchmarkJoin_Left_UnmatchedRows(b *testing.B) {
 			case "minisql":
 				createPrem = `create table "bench_premium" (emp_id int8 primary key, tier varchar(20))`
 				insertPrem = `insert into "bench_premium" (emp_id, tier) values (?, ?)`
-				query      = `select r.id, r.name, p.tier from "bench_rows" AS r left join "bench_premium" AS p on r.id = p.emp_id`
+				query = `select r.id, r.name, p.tier from "bench_rows" AS r left join "bench_premium" AS p on r.id = p.emp_id`
 			default:
 				createPrem = `CREATE TABLE bench_premium (emp_id INTEGER PRIMARY KEY, tier TEXT)`
 				insertPrem = `INSERT INTO bench_premium (emp_id, tier) VALUES (?, ?)`
-				query      = `SELECT r.id, r.name, p.tier FROM bench_rows AS r LEFT JOIN bench_premium AS p ON r.id = p.emp_id`
+				query = `SELECT r.id, r.name, p.tier FROM bench_rows AS r LEFT JOIN bench_premium AS p ON r.id = p.emp_id`
 			}
 
 			mustExec(b, db, createPrem)
@@ -210,7 +210,7 @@ func BenchmarkJoin_Left_UnmatchedRows(b *testing.B) {
 						rows.Close()
 						b.Fatalf("scan: %v", err)
 					}
-					n++
+					n += 1
 				}
 				rows.Close()
 				if err := rows.Err(); err != nil {

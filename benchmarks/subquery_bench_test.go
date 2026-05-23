@@ -58,17 +58,17 @@ func BenchmarkSubquery_InList(b *testing.B) {
 			)
 			switch d.name {
 			case "minisql":
-				createUsers  = `create table "bench_sq_users" (id int8 primary key autoincrement, name varchar(100))`
+				createUsers = `create table "bench_sq_users" (id int8 primary key autoincrement, name varchar(100))`
 				createOrders = `create table "bench_sq_orders" (id int8 primary key autoincrement, user_id int8, amount int8)`
-				insertUser   = `insert into "bench_sq_users" (name) values (?)`
-				insertOrder  = `insert into "bench_sq_orders" (user_id, amount) values (?, ?)`
-				query        = `select name from "bench_sq_users" where id in (select user_id from "bench_sq_orders" where amount > 500)`
+				insertUser = `insert into "bench_sq_users" (name) values (?)`
+				insertOrder = `insert into "bench_sq_orders" (user_id, amount) values (?, ?)`
+				query = `select name from "bench_sq_users" where id in (select user_id from "bench_sq_orders" where amount > 500)`
 			default:
-				createUsers  = `CREATE TABLE bench_sq_users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)`
+				createUsers = `CREATE TABLE bench_sq_users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)`
 				createOrders = `CREATE TABLE bench_sq_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER)`
-				insertUser   = `INSERT INTO bench_sq_users (name) VALUES (?)`
-				insertOrder  = `INSERT INTO bench_sq_orders (user_id, amount) VALUES (?, ?)`
-				query        = `SELECT name FROM bench_sq_users WHERE id IN (SELECT user_id FROM bench_sq_orders WHERE amount > 500)`
+				insertUser = `INSERT INTO bench_sq_users (name) VALUES (?)`
+				insertOrder = `INSERT INTO bench_sq_orders (user_id, amount) VALUES (?, ?)`
+				query = `SELECT name FROM bench_sq_users WHERE id IN (SELECT user_id FROM bench_sq_orders WHERE amount > 500)`
 			}
 
 			mustExec(b, db, createUsers)
@@ -133,7 +133,7 @@ func BenchmarkSubquery_InList(b *testing.B) {
 						rows.Close()
 						b.Fatalf("scan: %v", err)
 					}
-					n++
+					n += 1
 				}
 				rows.Close()
 				if err := rows.Err(); err != nil {

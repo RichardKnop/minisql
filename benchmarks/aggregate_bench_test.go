@@ -43,7 +43,7 @@ func BenchmarkGroupBy_Aggregate(b *testing.B) {
 						rows.Close()
 						b.Fatalf("scan: %v", err)
 					}
-					n++
+					n += 1
 				}
 				rows.Close()
 				if err := rows.Err(); err != nil {
@@ -94,7 +94,7 @@ func BenchmarkHaving_Filter(b *testing.B) {
 						rows.Close()
 						b.Fatalf("scan: %v", err)
 					}
-					n++
+					n += 1
 				}
 				rows.Close()
 				if err := rows.Err(); err != nil {
@@ -125,11 +125,11 @@ func BenchmarkDistinct_HighCardinality(b *testing.B) {
 			case "minisql":
 				createT = `create table "bench_distinct" (id int8 primary key autoincrement, email varchar(255))`
 				insertT = `insert into "bench_distinct" (email) values (?)`
-				query   = `select distinct email from "bench_distinct"`
+				query = `select distinct email from "bench_distinct"`
 			default:
 				createT = `CREATE TABLE bench_distinct (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT)`
 				insertT = `INSERT INTO bench_distinct (email) VALUES (?)`
-				query   = `SELECT DISTINCT email FROM bench_distinct`
+				query = `SELECT DISTINCT email FROM bench_distinct`
 			}
 
 			mustExec(b, db, createT)
@@ -166,7 +166,7 @@ func BenchmarkDistinct_HighCardinality(b *testing.B) {
 						rows.Close()
 						b.Fatalf("scan: %v", err)
 					}
-					n++
+					n += 1
 				}
 				rows.Close()
 				if err := rows.Err(); err != nil {

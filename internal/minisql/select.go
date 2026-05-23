@@ -215,6 +215,20 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return result, err
 	}
 
+	// Fast path for single INNER/LEFT INLJ with a unique inner index, a sequential
+	// outer scan, and no extra join conditions. Streams CombinedRowViews by copying
+	// inner cell bytes into a reusable buffer, eliminating per-row []OptionalValue.
+	if result, ok, err := t.selectINLJDirectRowView(ctx, stmt, plan, requestedFields); ok || err != nil {
+		return result, err
+	}
+
+	// Fast path for single INNER/LEFT hash join with compact-cell inner build and a
+	// sequential outer scan. Delivers combined RowViews without goroutine, channel,
+	// or []OptionalValue allocation per combined row.
+	if result, ok, err := t.selectHashJoinDirectRowView(ctx, stmt, plan, requestedFields); ok || err != nil {
+		return result, err
+	}
+
 	// Streaming join path: for INNER/LEFT/RIGHT/FULL OUTER joins with no
 	// ORDER BY sort, GROUP BY, aggregate, or DISTINCT, deliver rows from the
 	// join goroutine directly to the Iterator without buffering into []Row.
@@ -800,7 +814,7 @@ func newGroupByAccumulator(stmt Statement, t *Table, estRows int) *groupByAccumu
 	for i, agg := range stmt.Aggregates {
 		if agg.Kind == AggregateMin || agg.Kind == AggregateMax {
 			minMaxAggSlot[i] = numMinMax
-			numMinMax++
+			numMinMax += 1
 		} else {
 			minMaxAggSlot[i] = -1
 		}
@@ -1321,7 +1335,7 @@ func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementR
 				return Row{}, ErrNoMoreRows
 			}
 			gi := int(passedIndices[idx])
-			idx++
+			idx += 1
 			return NewRowWithValues(resultColumns, allResultValues[gi*nFields:(gi+1)*nFields]), nil
 		}),
 	}, nil
@@ -1826,6 +1840,218 @@ func (t *Table) selectSemiJoinDirectRowView(
 	result.RowViewPager = t.pager
 	result.RowViewFieldIndexes = fieldIndexes
 	result.Rows = lazyRowViewMaterializingIterator(t.pager, newRowViewIter, fieldIndexes, resultColumns)
+	return result, true, nil
+}
+
+// selectHashJoinDirectRowView is a fast path for SELECT queries whose only join
+// is a single INNER or LEFT hash join with no extra join conditions, a sequential
+// outer scan, and a compact-cell inner build (bucket.cells != nil). It bypasses
+// the goroutine + channel path of selectStreamingJoin and delivers combined
+// RowViews directly to the driver without allocating []OptionalValue per row.
+//
+// Guards: single join, INNER or LEFT type, hash algorithm, no extra join
+// conditions, non-virtual/non-parallel outer scan, RowView-compatible outer
+// filters, compact-cell inner bucket.
+func (t *Table) selectHashJoinDirectRowView(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if len(plan.Joins) != 1 {
+		return StatementResult{}, false, nil
+	}
+	join := plan.Joins[0]
+	if join.Type != Inner && join.Type != Left {
+		return StatementResult{}, false, nil
+	}
+	if join.Algorithm != JoinAlgorithmHash {
+		return StatementResult{}, false, nil
+	}
+	// Bail out if there are extra ON conditions beyond the equi-join key pairs:
+	// those require per-row evaluation that this fast path does not perform.
+	if len(join.Conditions) > len(join.JoinColumnPairs) {
+		return StatementResult{}, false, nil
+	}
+	if stmt.IsSelectGroupBy() || stmt.IsSelectAggregate() || stmt.IsSelectCountAll() || stmt.Distinct || plan.SortInMemory {
+		return StatementResult{}, false, nil
+	}
+	if len(plan.Scans) == 0 || plan.Scans[0].Type != ScanTypeSequential {
+		return StatementResult{}, false, nil
+	}
+
+	outerScan := plan.Scans[0]
+	outerTable, ok := t.provider.GetTable(ctx, outerScan.TableName)
+	if !ok {
+		return StatementResult{}, true, fmt.Errorf("%w: %s", errTableDoesNotExist, outerScan.TableName)
+	}
+	if outerTable.virtualRows != nil || outerTable.parallelScan {
+		return StatementResult{}, false, nil
+	}
+	if !rowViewFilterSupports(outerTable.Columns, outerScan.Filters) {
+		return StatementResult{}, false, nil
+	}
+
+	innerScan := plan.Scans[join.RightScanIndex]
+
+	innerTable, ok := t.provider.GetTable(ctx, innerScan.TableName)
+	if !ok {
+		return StatementResult{}, true, fmt.Errorf("%w: %s", errTableDoesNotExist, innerScan.TableName)
+	}
+
+	combinedCols := buildCombinedColumns(outerTable.Columns, outerScan.TableAlias, innerTable.Columns, innerScan.TableAlias)
+
+	fieldIndexes, resultColumns, ok := combinedRowViewProjectionPlan(combinedCols, requestedFields)
+	if !ok {
+		return StatementResult{}, false, nil
+	}
+
+	hashTables, err := buildHashBuckets(ctx, plan, t.provider)
+	if err != nil {
+		return StatementResult{}, true, err
+	}
+	bucket, hasBucket := hashTables[0]
+	if !hasBucket || bucket.cells == nil {
+		return StatementResult{}, false, nil
+	}
+
+	outerFilter := compileRowViewFilterForColumns(outerTable.Columns, outerTable.pager, outerScan.Filters)
+
+	var remaining, offset int64
+	hasLimit := stmt.Limit.Valid
+	hasOffset := stmt.Offset.Valid
+	if hasLimit {
+		remaining = stmt.Limit.Value.(int64)
+	}
+	if hasOffset {
+		offset = stmt.Offset.Value.(int64)
+	}
+
+	newRowViewIter, err := hashJoinProbeRowViewIteratorFactory(
+		ctx, outerTable, innerTable, join, bucket, combinedCols,
+		outerFilter, remaining, offset, hasLimit, hasOffset,
+		join.Type == Left,
+	)
+	if err != nil {
+		return StatementResult{}, true, err
+	}
+
+	result := StatementResult{Columns: resultColumns}
+	result.RowViews = newRowViewIter()
+	result.RowViewPager = outerTable.pager
+	result.RowViewFieldIndexes = fieldIndexes
+	result.Rows = lazyRowViewMaterializingIterator(outerTable.pager, newRowViewIter, fieldIndexes, resultColumns)
+	return result, true, nil
+}
+
+// selectINLJDirectRowView is a fast path for SELECT queries whose only join is a
+// single INNER or LEFT index nested-loop join (INLJ) with a unique inner index,
+// a sequential outer scan, RowView-compatible outer filters, and no extra join
+// conditions.  It bypasses row materialisation by streaming CombinedRowViews
+// that route column reads directly to outer page bytes and copied inner cell bytes.
+//
+// For INNER JOIN, unmatched outer rows are skipped without allocating a Row.
+// For LEFT JOIN, unmatched outer rows emit a NULL-inner CombinedRowView.
+func (t *Table) selectINLJDirectRowView(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	requestedFields []Field,
+) (StatementResult, bool, error) {
+	if len(plan.Joins) != 1 {
+		return StatementResult{}, false, nil
+	}
+	join := plan.Joins[0]
+	if join.Type != Inner && join.Type != Left {
+		return StatementResult{}, false, nil
+	}
+	if join.Algorithm != JoinAlgorithmNestedLoop {
+		return StatementResult{}, false, nil
+	}
+	// Bail out for multi-column join keys or extra ON conditions beyond the
+	// equi-join pairs (those require per-row evaluation not implemented here).
+	if len(join.JoinColumnPairs) != 1 || len(join.Conditions) > len(join.JoinColumnPairs) {
+		return StatementResult{}, false, nil
+	}
+	if stmt.IsSelectGroupBy() || stmt.IsSelectAggregate() || stmt.IsSelectCountAll() || stmt.Distinct || plan.SortInMemory {
+		return StatementResult{}, false, nil
+	}
+	if len(plan.Scans) == 0 || plan.Scans[0].Type != ScanTypeSequential {
+		return StatementResult{}, false, nil
+	}
+
+	outerScan := plan.Scans[0]
+	outerTable, ok := t.provider.GetTable(ctx, outerScan.TableName)
+	if !ok {
+		return StatementResult{}, true, fmt.Errorf("%w: %s", errTableDoesNotExist, outerScan.TableName)
+	}
+	if outerTable.virtualRows != nil || outerTable.parallelScan {
+		return StatementResult{}, false, nil
+	}
+	if !rowViewFilterSupports(outerTable.Columns, outerScan.Filters) {
+		return StatementResult{}, false, nil
+	}
+
+	innerScan := plan.Scans[join.RightScanIndex]
+	if innerScan.Type != ScanTypeIndexPoint {
+		return StatementResult{}, false, nil
+	}
+	// Only handle unique inner index (0 or 1 inner match per outer row).
+	if innerScan.IndexName == "" {
+		return StatementResult{}, false, nil
+	}
+
+	innerTable, ok := t.provider.GetTable(ctx, innerScan.TableName)
+	if !ok {
+		return StatementResult{}, true, fmt.Errorf("%w: %s", errTableDoesNotExist, innerScan.TableName)
+	}
+	if !innerTable.isUniquePointIndex(innerScan.IndexName) {
+		return StatementResult{}, false, nil
+	}
+	// Skip when inner scan has post-lookup filters — would require applying them to
+	// the inner RowView, which adds complexity not yet implemented here.
+	if len(innerScan.Filters) > 0 {
+		return StatementResult{}, false, nil
+	}
+
+	innerIdx, ok := innerTable.IndexByName(innerScan.IndexName)
+	if !ok {
+		return StatementResult{}, false, nil
+	}
+
+	combinedCols := buildCombinedColumns(outerTable.Columns, outerScan.TableAlias, innerTable.Columns, innerScan.TableAlias)
+
+	fieldIndexes, resultColumns, ok := combinedRowViewProjectionPlan(combinedCols, requestedFields)
+	if !ok {
+		return StatementResult{}, false, nil
+	}
+
+	outerFilter := compileRowViewFilterForColumns(outerTable.Columns, outerTable.pager, outerScan.Filters)
+
+	var remaining, offset int64
+	hasLimit := stmt.Limit.Valid
+	hasOffset := stmt.Offset.Valid
+	if hasLimit {
+		remaining = stmt.Limit.Value.(int64)
+	}
+	if hasOffset {
+		offset = stmt.Offset.Value.(int64)
+	}
+
+	newRowViewIter, err := inljProbeRowViewIteratorFactory(
+		ctx, outerTable, innerTable, innerIdx, join, combinedCols,
+		outerFilter, remaining, offset, hasLimit, hasOffset,
+		join.Type == Left,
+	)
+	if err != nil {
+		return StatementResult{}, true, err
+	}
+
+	result := StatementResult{Columns: resultColumns}
+	result.RowViews = newRowViewIter()
+	result.RowViewPager = outerTable.pager
+	result.RowViewFieldIndexes = fieldIndexes
+	result.Rows = lazyRowViewMaterializingIterator(outerTable.pager, newRowViewIter, fieldIndexes, resultColumns)
 	return result, true, nil
 }
 
@@ -2632,6 +2858,39 @@ func rowViewAliasAllowed(alias string, allowedAliases []string) bool {
 	return false
 }
 
+// combinedRowViewProjectionPlan builds a field-index mapping for projecting from
+// a combined join RowView whose column names carry alias prefixes (e.g. "a.id").
+// A field with AliasPrefix="a", Name="id" matches the combined column "a.id".
+// A field with AliasPrefix="", Name="id" matches a combined column named "id"
+// (outer table with no alias).
+func combinedRowViewProjectionPlan(combinedCols []Column, fields []Field) ([]int, []Column, bool) {
+	indexes := make([]int, len(fields))
+	resultColumns := make([]Column, len(fields))
+	for i, field := range fields {
+		if field.Expr != nil {
+			return nil, nil, false
+		}
+		qualName := field.Name
+		if field.AliasPrefix != "" {
+			qualName = field.AliasPrefix + "." + field.Name
+		}
+		idx := -1
+		for j, col := range combinedCols {
+			if col.Name == qualName {
+				idx = j
+				resultColumns[i] = col
+				resultColumns[i].Name = field.OutputName()
+				break
+			}
+		}
+		if idx < 0 {
+			return nil, nil, false
+		}
+		indexes[i] = idx
+	}
+	return indexes, resultColumns, true
+}
+
 func projectRowView(ctx context.Context, pager TxPager, view RowView, fieldIndexes []int, columns []Column) (Row, error) {
 	values := make([]OptionalValue, len(fieldIndexes))
 	for i, idx := range fieldIndexes {
@@ -2834,11 +3093,11 @@ func newDistinctRowViewIteratorFactory(
 				}
 				seen[key] = struct{}{}
 				if hasOffset && off > 0 {
-					off--
+					off -= 1
 					continue
 				}
 				if hasLimit {
-					rem--
+					rem -= 1
 				}
 				return view, nil
 			}
@@ -3029,11 +3288,11 @@ func (t *Table) selectStreamingJoin(
 						seen[key] = struct{}{}
 					}
 					if hasOffset && offset > 0 {
-						offset--
+						offset -= 1
 						continue
 					}
 					if hasLimit {
-						limit--
+						limit -= 1
 					}
 					return p, nil
 				}
@@ -3117,7 +3376,7 @@ func (t *Table) selectJoinWithSortStreamingLimit(
 			return Row{}, ErrNoMoreRows
 		}
 		row := allRows[idx]
-		idx++
+		idx += 1
 		return projectRow(row, requestedFields)
 	})
 	return result, true, nil
@@ -3870,7 +4129,6 @@ func (t *Table) indexPointScan(ctx context.Context, scan Scan, selectedFields []
 
 	return nil
 }
-
 
 // indexPointExists reports whether any row matches the index point scan and
 // residual filters, without materialising matched rows.
@@ -5588,7 +5846,7 @@ func sortRowIDs(ids []RowID) {
 			j := i
 			for j > 0 && ids[j-1] > v {
 				ids[j] = ids[j-1]
-				j--
+				j -= 1
 			}
 			ids[j] = v
 		}
