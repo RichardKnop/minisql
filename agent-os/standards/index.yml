@@ -20,7 +20,7 @@ query-execution:
 
 storage-engine:
   biased-leaf-split: Sequential-insert optimisation in LeafNodeSplitInsert; even-split pre-alloc rule; update size-check underflow hazard
-  occ-transactions: OCC ReadSet/WriteSet lifecycle; transaction travels via context, never as parameter
+  occ-transactions: Write transaction lifecycle; single-writer enforcement; in-place LRU fast path vs clone slow path; tx travels via context
   page-layout: 4KB page tagged-union, page 0 special handling, usable space
   pager-cache: Sparse page array + LRU; I/O and unmarshal outside the lock
   rightmost-leaf-cache: Per-transaction hint for sequential inserts; lastTxID guard, split invalidation
@@ -35,5 +35,5 @@ testing:
   must-helpers: mustXxx helper pattern; t.Helper, require.NoError, ExecuteInTransaction wrapping
   parser-test-structure: testCase struct, table-driven loop, assert.ErrorIs (never string compare)
   row-size-presets: testColumns/testMediumColumns/testBigColumns — when to use each
-  same-transaction-manager: Table + index pagers must share one TxManager or OCC conflicts occur
+  same-transaction-manager: Table + index pagers must share one TxManager or MVCC version tracking becomes inconsistent
   unit-test-setup: initTest helper, TransactionalPager wiring, ExecuteInTransaction requirement

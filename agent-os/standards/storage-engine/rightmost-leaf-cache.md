@@ -67,7 +67,7 @@ non-rightmost child), the cache is invalidated.
 
 - Cache fields are `atomic` for read safety, but correctness depends on
   `lastTxID` being checked before every use of `rightmostLeaf`.
-- Never bypass the guard even in single-threaded contexts — the OCC conflict
-  path can roll back and restart a transaction with the same struct instance.
+- Never bypass the guard even in single-threaded contexts — a transaction
+  rollback and retry can reuse the same struct instance with a new tx ID.
 - The cache is per-`Index`/`Table` instance, not per-transaction; the guard
   is what makes it safe across transaction boundaries.

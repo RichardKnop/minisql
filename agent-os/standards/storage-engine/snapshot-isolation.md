@@ -6,7 +6,7 @@ type: standard
 
 # Snapshot Isolation (MVCC)
 
-Read-only transactions see a consistent point-in-time snapshot. Write transactions use OCC (see `occ-transactions.md`).
+Read-only transactions see a consistent point-in-time snapshot. Write transactions use single-writer enforcement (see `occ-transactions.md`).
 
 ## How it works
 
@@ -24,21 +24,16 @@ if tx.ReadOnly {
 }
 ```
 
-## TOCTOU rule (critical)
+## ReadPage snapshot path (detail)
 
-**Always capture the page version BEFORE calling `GetPage`.** Capturing after is a TOCTOU bug: a concurrent write commit between `GetPage` and version-capture gives the wrong (newer) version number to OCC.
+`ReadPage` for a read-only transaction:
+1. Calls `GetPage` to obtain the current LRU page.
+2. Calls `PageLastCommittedSeq(pageIdx)` to check when the cached version was last committed.
+3. If `lastCommitted <= tx.SnapshotSeq` — the cache is safe; return it.
+4. Otherwise retrieve the historical version from `pageVersionHistory` via `PageVersionAtSnapshot`.
+5. If no historical version exists (page allocated after the snapshot) — return the cached page as a best-effort fallback and log a warning.
 
-```go
-// CORRECT — version captured before GetPage
-version := tm.pageLastCommittedSeq[pageIdx]
-page, err := pager.GetPage(ctx, pageIdx)
-tx.ReadSet[pageIdx] = version
-
-// WRONG — version captured after GetPage (TOCTOU race)
-page, err := pager.GetPage(ctx, pageIdx)
-version := tm.pageLastCommittedSeq[pageIdx] // may have advanced
-tx.ReadSet[pageIdx] = version
-```
+Note: the in-place LRU fast path (see `occ-transactions.md`) is only taken when **no snapshot readers are active**, so a committed write transaction that used the fast path will never have an MVCC reader that needs the pre-write version of those pages.
 
 ## `pageVersionHistory` lifecycle
 
@@ -55,5 +50,5 @@ WAL checkpoint must not overwrite DB-file pages that a snapshot reader still nee
 
 - Never read `commitSeq` outside `tm.mu` except via `atomic` helpers provided.
 - `SnapshotSeq` on a transaction is immutable after `BeginReadOnlyTransaction` — never modify it.
-- Read-only transactions skip OCC read-set tracking entirely (no `ReadSet` population).
+- Read-only transactions do not participate in write-set tracking; they only read pages through `ReadPage`, never through `ModifyPage`.
 - Snapshot history entries are `*Page` pointers — do not mutate a page after storing it in history; always copy before modifying.
