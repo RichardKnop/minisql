@@ -266,6 +266,28 @@ func (p *parserItem) parseFuncCall(funcName string) (*minisql.Expr, error) {
 		}
 		args = append(args, arg)
 	}
+
+	// Detect OVER (...) — turns this call into a window function expression.
+	if strings.ToUpper(p.peek()) == "OVER" {
+		p.pop() // consume "OVER"
+		spec, err := p.parseWindowSpec()
+		if err != nil {
+			return nil, fmt.Errorf("%s OVER: %w", funcName, err)
+		}
+		kind := windowFuncKind(funcName)
+		if kind == 0 {
+			return nil, fmt.Errorf("unknown window function %q", funcName)
+		}
+		wf := &minisql.WindowFunc{Kind: kind, Spec: spec}
+		if len(args) > 0 {
+			wf.Arg = args[0]
+		}
+		if len(args) > 1 {
+			wf.Arg2 = args[1]
+		}
+		return &minisql.Expr{WindowFunc: wf}, nil
+	}
+
 	return &minisql.Expr{FuncName: funcName, Args: args}, nil
 }
 
@@ -455,5 +477,205 @@ func isBuiltinFunction(name string) bool {
 		"MATCH", "TS_RANK":
 		return true
 	}
+	return isWindowFunction(name)
+}
+
+// isWindowFunction reports whether name (upper-cased) is a window function.
+func isWindowFunction(name string) bool {
+	switch name {
+	case "ROW_NUMBER", "RANK", "DENSE_RANK", "NTILE",
+		"LAG", "LEAD",
+		"FIRST_VALUE", "LAST_VALUE", "NTH_VALUE":
+		return true
+	}
 	return false
+}
+
+// windowFuncKind maps an upper-cased function name to its WindowFuncKind.
+// Returns 0 if the name is not a dedicated window function (aggregate-as-window
+// is handled separately via the token in the caller).
+func windowFuncKind(name string) minisql.WindowFuncKind {
+	switch name {
+	case "ROW_NUMBER":
+		return minisql.WindowRowNumber
+	case "RANK":
+		return minisql.WindowRank
+	case "DENSE_RANK":
+		return minisql.WindowDenseRank
+	case "NTILE":
+		return minisql.WindowNtile
+	case "LAG":
+		return minisql.WindowLag
+	case "LEAD":
+		return minisql.WindowLead
+	case "FIRST_VALUE":
+		return minisql.WindowFirstValue
+	case "LAST_VALUE":
+		return minisql.WindowLastValue
+	case "NTH_VALUE":
+		return minisql.WindowNthValue
+	case "SUM":
+		return minisql.WindowSum
+	case "AVG":
+		return minisql.WindowAvg
+	case "COUNT":
+		return minisql.WindowCount
+	case "MIN":
+		return minisql.WindowMin
+	case "MAX":
+		return minisql.WindowMax
+	}
+	return 0
+}
+
+// parseWindowSpec parses the content inside OVER (...).
+// Grammar:
+//
+//	OVER ( [PARTITION BY col, ...] [ORDER BY col [ASC|DESC], ...] [frame_clause] )
+func (p *parserItem) parseWindowSpec() (minisql.WindowSpec, error) {
+	if p.peek() != "(" {
+		return minisql.WindowSpec{}, fmt.Errorf("OVER: expected '('")
+	}
+	p.pop() // consume "("
+
+	var spec minisql.WindowSpec
+
+	// PARTITION BY
+	if strings.ToUpper(p.peek()) == "PARTITION BY" {
+		p.pop() // consume "PARTITION BY"
+		for {
+			col := p.peek()
+			if !isIdentifier(col) {
+				return minisql.WindowSpec{}, fmt.Errorf("OVER PARTITION BY: expected column name, got %q", col)
+			}
+			// Strip table qualifier if present (e.g. "t.col" → "col")
+			if dot := strings.LastIndex(col, "."); dot >= 0 {
+				col = col[dot+1:]
+			}
+			p.pop()
+			spec.PartitionBy = append(spec.PartitionBy, col)
+			if p.peek() != "," {
+				break
+			}
+			p.pop() // consume ","
+		}
+	}
+
+	// ORDER BY
+	if strings.ToUpper(p.peek()) == "ORDER BY" {
+		p.pop() // consume "ORDER BY"
+		for {
+			col := p.peek()
+			if !isIdentifier(col) {
+				return minisql.WindowSpec{}, fmt.Errorf("OVER ORDER BY: expected column name, got %q", col)
+			}
+			// Derive AliasPrefix from qualified name (e.g. "t.col")
+			var aliasPrefix string
+			name := col
+			if dot := strings.LastIndex(col, "."); dot >= 0 {
+				aliasPrefix = col[:dot]
+				name = col[dot+1:]
+			}
+			p.pop()
+			dir := minisql.Asc
+			switch strings.ToUpper(p.peek()) {
+			case "ASC":
+				p.pop()
+			case "DESC":
+				dir = minisql.Desc
+				p.pop()
+			}
+			spec.OrderBy = append(spec.OrderBy, minisql.OrderBy{
+				Field:     minisql.Field{Name: name, AliasPrefix: aliasPrefix},
+				Direction: dir,
+			})
+			if p.peek() != "," {
+				break
+			}
+			p.pop() // consume ","
+		}
+	}
+
+	// Optional frame clause: ROWS BETWEEN ... AND ... | RANGE BETWEEN ... AND ...
+	upper := strings.ToUpper(p.peek())
+	if upper == "ROWS BETWEEN" || upper == "RANGE BETWEEN" {
+		frame, err := p.parseWindowFrame(upper)
+		if err != nil {
+			return minisql.WindowSpec{}, err
+		}
+		spec.Frame = &frame
+	}
+
+	if p.peek() != ")" {
+		return minisql.WindowSpec{}, fmt.Errorf("OVER: expected ')', got %q", p.peek())
+	}
+	p.pop() // consume ")"
+
+	return spec, nil
+}
+
+// parseWindowFrame parses the ROWS/RANGE BETWEEN ... AND ... clause.
+// The modeToken is already peeked ("ROWS BETWEEN" or "RANGE BETWEEN").
+func (p *parserItem) parseWindowFrame(modeToken string) (minisql.WindowFrame, error) {
+	p.pop() // consume "ROWS BETWEEN" or "RANGE BETWEEN"
+
+	mode := minisql.FrameRows
+	if strings.HasPrefix(strings.ToUpper(modeToken), "RANGE") {
+		mode = minisql.FrameRange
+	}
+
+	start, err := p.parseFrameBound()
+	if err != nil {
+		return minisql.WindowFrame{}, fmt.Errorf("frame start: %w", err)
+	}
+
+	// Consume the AND separator — do NOT rely on the reserved-words tokenizer
+	// because "AND" is not in reservedWords (it is handled by the WHERE parser
+	// via parseAndExpr).  Instead do a direct case-insensitive string compare.
+	if strings.ToUpper(p.peek()) != "AND" {
+		return minisql.WindowFrame{}, fmt.Errorf("frame: expected AND between bounds, got %q", p.peek())
+	}
+	p.pop()
+
+	end, err := p.parseFrameBound()
+	if err != nil {
+		return minisql.WindowFrame{}, fmt.Errorf("frame end: %w", err)
+	}
+
+	return minisql.WindowFrame{Mode: mode, Start: start, End: end}, nil
+}
+
+// parseFrameBound parses one side of a frame specification.
+func (p *parserItem) parseFrameBound() (minisql.FrameBound, error) {
+	tok := strings.ToUpper(p.peek())
+
+	switch tok {
+	case "UNBOUNDED PRECEDING":
+		p.pop()
+		return minisql.FrameBound{Kind: minisql.FrameUnboundedPreceding}, nil
+	case "UNBOUNDED FOLLOWING":
+		p.pop()
+		return minisql.FrameBound{Kind: minisql.FrameUnboundedFollowing}, nil
+	case "CURRENT ROW":
+		p.pop()
+		return minisql.FrameBound{Kind: minisql.FrameCurrentRow}, nil
+	}
+
+	// N PRECEDING or N FOLLOWING
+	n, ln := p.peekIntWithLength()
+	if ln == 0 {
+		return minisql.FrameBound{}, fmt.Errorf("frame bound: expected UNBOUNDED PRECEDING, CURRENT ROW, or integer offset, got %q", p.peek())
+	}
+	p.pop()
+	direction := strings.ToUpper(p.peek())
+	switch direction {
+	case "PRECEDING":
+		p.pop()
+		return minisql.FrameBound{Kind: minisql.FramePreceding, Offset: int(n)}, nil
+	case "FOLLOWING":
+		p.pop()
+		return minisql.FrameBound{Kind: minisql.FrameFollowing, Offset: int(n)}, nil
+	default:
+		return minisql.FrameBound{}, fmt.Errorf("frame bound: expected PRECEDING or FOLLOWING, got %q", p.peek())
+	}
 }

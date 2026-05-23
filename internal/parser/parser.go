@@ -58,6 +58,13 @@ var reservedWords = []string{
 	"UNION ALL", "UNION",
 	"RETURNING",
 	"WITH",
+	// window function keywords (multi-word before single to ensure longest-match)
+	"PARTITION BY",
+	"ROWS BETWEEN", "RANGE BETWEEN",
+	"UNBOUNDED PRECEDING", "UNBOUNDED FOLLOWING",
+	"CURRENT ROW",
+	"PRECEDING", "FOLLOWING",
+	"OVER",
 	// foreign key keywords (FOREIGN KEY before FOREIGN if we ever add FOREIGN)
 	"FOREIGN KEY", "REFERENCES", "CONSTRAINT", "NO ACTION", "CASCADE", "RESTRICT",
 	";",
