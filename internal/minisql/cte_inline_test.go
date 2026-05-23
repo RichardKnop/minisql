@@ -212,6 +212,133 @@ func TestCTEAppearsInConditionSubqueries(t *testing.T) {
 	})
 }
 
+// TestCTEBodyAliasesConflictWithOuter verifies the alias-conflict check used
+// by the extended inlining pass.
+func TestCTEBodyAliasesConflictWithOuter(t *testing.T) {
+	t.Parallel()
+
+	body := Statement{
+		Fields: []Field{
+			{Name: "id"},
+			{Name: "name", Alias: "display_name"},
+		},
+	}
+
+	t.Run("outer_count_star_no_conflict", func(t *testing.T) {
+		t.Parallel()
+		outer := Statement{Fields: []Field{{Name: "COUNT(*)"}}}
+		assert.False(t, cteBodyAliasesConflictWithOuter(body, outer))
+	})
+
+	t.Run("outer_refs_alias_in_field", func(t *testing.T) {
+		t.Parallel()
+		outer := Statement{Fields: []Field{{Name: "display_name"}}}
+		assert.True(t, cteBodyAliasesConflictWithOuter(body, outer))
+	})
+
+	t.Run("outer_refs_alias_in_condition", func(t *testing.T) {
+		t.Parallel()
+		cond := Condition{
+			Operand1: Operand{Type: OperandField, Value: Field{Name: "display_name"}},
+			Operator: Eq,
+			Operand2: Operand{Type: OperandQuotedString, Value: "Alice"},
+		}
+		outer := Statement{Conditions: OneOrMore{{cond}}}
+		assert.True(t, cteBodyAliasesConflictWithOuter(body, outer))
+	})
+
+	t.Run("outer_refs_alias_in_order_by", func(t *testing.T) {
+		t.Parallel()
+		outer := Statement{
+			Fields:  []Field{{Name: "id"}},
+			OrderBy: []OrderBy{{Field: Field{Name: "display_name"}}},
+		}
+		assert.True(t, cteBodyAliasesConflictWithOuter(body, outer))
+	})
+
+	t.Run("outer_refs_non_aliased_column_no_conflict", func(t *testing.T) {
+		t.Parallel()
+		outer := Statement{Fields: []Field{{Name: "id"}}}
+		assert.False(t, cteBodyAliasesConflictWithOuter(body, outer))
+	})
+
+	t.Run("no_aliases_in_body_never_conflicts", func(t *testing.T) {
+		t.Parallel()
+		noAlias := Statement{Fields: []Field{{Name: "id"}, {Name: "name"}}}
+		outer := Statement{Fields: []Field{{Name: "display_name"}}}
+		assert.False(t, cteBodyAliasesConflictWithOuter(noAlias, outer))
+	})
+}
+
+// TestCTEIsInlineableAliasExtension verifies the second-chance inlining path
+// for CTE bodies with column aliases that the outer query doesn't reference.
+func TestCTEIsInlineableAliasExtension(t *testing.T) {
+	t.Parallel()
+
+	makeAliasBody := func() *Statement {
+		return &Statement{
+			Kind:      Select,
+			TableName: "bench_rows",
+			Fields:    []Field{{Name: "id"}, {Name: "name", Alias: "display_name"}},
+			Conditions: OneOrMore{{Condition{
+				Operand1: Operand{Type: OperandField, Value: Field{Name: "age"}},
+				Operator: Gte,
+				Operand2: Operand{Type: OperandInteger, Value: int64(80)},
+			}}},
+		}
+	}
+
+	t.Run("count_star_outer_can_inline", func(t *testing.T) {
+		t.Parallel()
+		cte := CTE{Name: "seniors", Body: makeAliasBody()}
+		outer := Statement{
+			Kind:      Select,
+			TableName: "seniors",
+			Fields:    []Field{{Name: "COUNT(*)"}},
+		}
+		assert.True(t, cteIsInlineable(cte, outer, []CTE{cte}))
+	})
+
+	t.Run("outer_refs_alias_cannot_inline", func(t *testing.T) {
+		t.Parallel()
+		cte := CTE{Name: "seniors", Body: makeAliasBody()}
+		outer := Statement{
+			Kind:      Select,
+			TableName: "seniors",
+			Fields:    []Field{{Name: "display_name"}},
+		}
+		assert.False(t, cteIsInlineable(cte, outer, []CTE{cte}))
+	})
+
+	t.Run("outer_id_only_can_inline", func(t *testing.T) {
+		t.Parallel()
+		cte := CTE{Name: "seniors", Body: makeAliasBody()}
+		outer := Statement{
+			Kind:      Select,
+			TableName: "seniors",
+			Fields:    []Field{{Name: "id"}},
+		}
+		assert.True(t, cteIsInlineable(cte, outer, []CTE{cte}))
+	})
+
+	t.Run("group_by_still_blocks_inlining", func(t *testing.T) {
+		t.Parallel()
+		groupBody := &Statement{
+			Kind:      Select,
+			TableName: "bench_rows",
+			Fields:    []Field{{Name: "age"}, {Name: "name", Alias: "display_name"}},
+			GroupBy:   []Field{{Name: "age"}},
+		}
+		cte := CTE{Name: "summary", Body: groupBody}
+		outer := Statement{
+			Kind:      Select,
+			TableName: "summary",
+			Fields:    []Field{{Name: "COUNT(*)"}},
+		}
+		assert.False(t, cteIsInlineable(cte, outer, []CTE{cte}))
+	})
+}
+
 // TestCTEIsUsed verifies the usage detector used for pruning.
 func TestCTEIsUsed(t *testing.T) {
 	t.Parallel()
