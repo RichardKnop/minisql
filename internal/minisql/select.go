@@ -820,13 +820,37 @@ func newGroupByAccumulator(stmt Statement, t *Table, estRows int) *groupByAccumu
 		}
 	}
 
-	// Cap the initial pool to 64 groups to avoid large upfront allocations.
-	// The pool grows on demand via append, so this is only the reservation.
-	estGroups := estRows / 10
-	if estGroups < 8 {
-		estGroups = 8
-	} else if estGroups > 64 {
-		estGroups = 64
+	// Estimate the number of distinct groups using a 1%-cardinality heuristic
+	// (estRows/100). This is more accurate than estRows/10 for typical aggregation
+	// queries and avoids the pool growth that occurs when actual groups exceed the
+	// initial capacity. The cap at 512 prevents excessive upfront allocation for
+	// very large tables. If index statistics are available for a GROUP BY column,
+	// use the NDV (number of distinct values) directly.
+	estGroups := estRows / 100
+	if estGroups < 16 {
+		estGroups = 16
+	} else if estGroups > 512 {
+		estGroups = 512
+	}
+	for _, colIdx := range groupByColIdx {
+		if colIdx < 0 || colIdx >= len(t.Columns) {
+			continue
+		}
+		colName := t.Columns[colIdx].Name
+		for idxName, idx := range t.SecondaryIndexes {
+			if len(idx.Columns) > 0 && idx.Columns[0].Name == colName {
+				if stats, ok := t.indexStats[idxName]; ok && len(stats.NDistinct) > 0 && stats.NDistinct[0] > 0 {
+					ndv := int(stats.NDistinct[0])
+					if ndv > estGroups {
+						if ndv > 512 {
+							ndv = 512
+						}
+						estGroups = ndv
+					}
+				}
+				break
+			}
+		}
 	}
 
 	var minMaxPool []OptionalValue
