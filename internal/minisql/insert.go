@@ -35,6 +35,9 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 	newRowsInserted := 0
 	var returningRows []Row
 	var lastInsertID int64
+	// Allocate once and reuse across iterations. saveToCell marshals the row to
+	// bytes immediately, so the backing array is safe to overwrite next iteration.
+	rowValues := make([]OptionalValue, len(t.Columns))
 	for insertIdx, values := range stmt.Inserts {
 		switch stmt.ConflictAction {
 		case ConflictActionDoNothing:
@@ -120,15 +123,16 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			}
 		}
 
-		// Assemble row values in table-column order.
+		// Assemble row values in table-column order into the reused rowValues slice.
 		// Fast path: after prepareInsert, values[i] == value for t.Columns[i] — just copy.
 		// Slow path: direct Insert call without prepareInsert — use field-name lookup.
-		rowValues := make([]OptionalValue, len(t.Columns))
 		if len(values) == len(t.Columns) {
 			// prepareInsert was called; values are already in column order.
 			copy(rowValues, values)
 		} else {
 			// Direct call without prepareInsert; resolve by field name.
+			// Clear stale values from prior iteration before selective assignment.
+			clear(rowValues)
 			fieldPositions := make(map[string]int, len(stmt.Fields))
 			for i, f := range stmt.Fields {
 				fieldPositions[f.Name] = i
