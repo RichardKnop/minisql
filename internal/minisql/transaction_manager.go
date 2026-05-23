@@ -247,7 +247,6 @@ func (tm *TransactionManager) BeginReadOnlyTransaction(ctx context.Context) *Tra
 	tx := &Transaction{
 		ID:          tm.nextTxID,
 		StartTime:   time.Now(),
-		WriteSet:    make(map[PageIndex]WriteInfo),
 		Status:      TxActive,
 		ReadOnly:    true,
 		SnapshotSeq: tm.commitSeq,
