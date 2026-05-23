@@ -116,21 +116,23 @@ func (r Row) storeOverflowTexts(ctx context.Context, pager TxPager) (Row, error)
 		if !col.Kind.IsText() {
 			continue
 		}
-		value, ok := r.GetValue(col.Name)
-		if !ok || !value.Valid {
+		value := r.Values[i]
+		if !value.Valid {
 			continue
 		}
 		textPointer, ok := value.Value.(TextPointer)
 		if !ok {
 			return r, fmt.Errorf("expected TextPointer value for text column %s", col.Name)
 		}
+		// Inline text needs no overflow page and the TextPointer is unchanged —
+		// skip the re-assignment that would box TextPointer into any (heap alloc).
+		if textPointer.IsInline() {
+			continue
+		}
 		if err := textPointer.storeOverflowText(ctx, pager); err != nil {
 			return r, err
 		}
-		r.Values[i] = OptionalValue{
-			Valid: true,
-			Value: textPointer,
-		}
+		r.Values[i] = OptionalValue{Valid: true, Value: textPointer}
 	}
 	return r, nil
 }
