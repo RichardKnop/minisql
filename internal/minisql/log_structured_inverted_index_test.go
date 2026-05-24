@@ -457,6 +457,35 @@ func TestLogStructuredInvertedIndex_CompactionPreservesPositionReplacement(t *te
 	)
 }
 
+func TestLogStructuredInvertedIndex_BaseFoldbackAppliesTermsInBatches(t *testing.T) {
+	ctx := context.Background()
+	index, txManager, metaRoot := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModeRowIDs)
+
+	const term = "kv:type:s:\"click\""
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for i := 0; i < logStructuredInvertedIndexMergeRunSize*logStructuredInvertedIndexMergeRunSize; i++ {
+			batch := newInvertedIndexMutationBatch(index.Mode())
+			batch.Insert(term, invertedPosting{RowID: RowID(i + 1)})
+			if err := index.ApplyBatch(ctx, batch); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	page, err := index.pager.ReadPage(ctx, metaRoot)
+	require.NoError(t, err)
+	require.NotNil(t, page.InvertedMetaPage)
+	assert.Empty(t, page.InvertedMetaPage.Segments)
+
+	iter, err := index.Lookup(ctx, term)
+	require.NoError(t, err)
+	postings := collectInvertedIteratorPostings(t, ctx, iter)
+	require.Len(t, postings, logStructuredInvertedIndexMergeRunSize*logStructuredInvertedIndexMergeRunSize)
+	assert.Equal(t, RowID(1), postings[0].RowID)
+	assert.Equal(t, RowID(logStructuredInvertedIndexMergeRunSize*logStructuredInvertedIndexMergeRunSize), postings[len(postings)-1].RowID)
+}
+
 func newTestLogStructuredInvertedIndex(
 	t *testing.T,
 	mode invertedIndexPostingMode,
