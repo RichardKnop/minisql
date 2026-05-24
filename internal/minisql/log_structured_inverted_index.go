@@ -135,6 +135,9 @@ func (idx *logStructuredInvertedIndex) Lookup(ctx context.Context, term string) 
 	if len(meta.Segments) == 0 {
 		return idx.base.Lookup(ctx, term)
 	}
+	if !segmentsMayContainTerm(meta.Segments, term) {
+		return idx.base.Lookup(ctx, term)
+	}
 	postings, err := idx.materializeTermPostings(ctx, meta, term)
 	if err != nil {
 		return nil, err
@@ -152,6 +155,9 @@ func (idx *logStructuredInvertedIndex) Stats(ctx context.Context, term string) (
 		return invertedPostingStats{}, err
 	}
 	if len(meta.Segments) == 0 {
+		return idx.base.Stats(ctx, term)
+	}
+	if !segmentsMayContainTerm(meta.Segments, term) {
 		return idx.base.Stats(ctx, term)
 	}
 	postings, err := idx.materializeTermPostings(ctx, meta, term)
@@ -403,6 +409,15 @@ func segmentMayContainTerm(segment invertedSegmentDescriptor, term string) bool 
 		return true
 	}
 	return term >= segment.FirstTerm && term <= segment.LastTerm
+}
+
+func segmentsMayContainTerm(segments []invertedSegmentDescriptor, term string) bool {
+	for _, segment := range segments {
+		if segmentMayContainTerm(segment, term) {
+			return true
+		}
+	}
+	return false
 }
 
 func segmentTermBounds(cells []invertedSegmentCell) (string, string) {
