@@ -220,6 +220,17 @@ func (idx *logStructuredInvertedIndex) visitSegmentTermCells(ctx context.Context
 			return fmt.Errorf("inverted segment page %d has unexpected page type", pageIdx)
 		}
 		cells := page.InvertedSegmentPage.Cells
+		if len(cells) == 0 {
+			pageIdx = page.InvertedSegmentPage.Header.NextPage
+			continue
+		}
+		if term < cells[0].Term {
+			return nil
+		}
+		if term > cells[len(cells)-1].Term {
+			pageIdx = page.InvertedSegmentPage.Header.NextPage
+			continue
+		}
 		i := sort.Search(len(cells), func(i int) bool {
 			return cells[i].Term >= term
 		})
