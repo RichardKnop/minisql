@@ -1706,12 +1706,10 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 		if err != nil {
 			return err
 		}
-		for _, token := range tokens {
-			postingsByTerm[token.Term] = append(postingsByTerm[token.Term], invertedPosting{
-				RowID:     row.Key,
-				Positions: []uint32{token.Position},
-			})
-			bufferedPostings += 1
+		rowPostings := fullTextPostingsByTerm(row.Key, tokens)
+		for term, posting := range rowPostings {
+			postingsByTerm[term] = append(postingsByTerm[term], posting)
+			bufferedPostings += len(posting.Positions)
 		}
 		if bufferedPostings >= populateInvertedIndexFlushPostings {
 			if err := flush(); err != nil {

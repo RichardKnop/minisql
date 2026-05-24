@@ -452,7 +452,7 @@ func (idx *logStructuredInvertedIndex) mutationSegmentCells(kind byte, postingsB
 	var totalPostingCount uint32
 	for _, term := range terms {
 		postings := append([]invertedPosting(nil), postingsByTerm[term]...)
-		sortInvertedPostings(postings)
+		postings = groupInvertedPostingsInPlace(idx.Mode(), postings)
 		blocks, err := makeInvertedPostingBlocks(idx.Mode(), postings)
 		if err != nil {
 			return nil, 0, err

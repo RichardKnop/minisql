@@ -157,6 +157,28 @@ func TestLogStructuredInvertedIndex_ApplyBatchWritesSegments(t *testing.T) {
 	assert.Equal(t, []invertedPosting{{RowID: 21}, {RowID: 22}}, postings)
 }
 
+func TestLogStructuredInvertedIndex_ApplyBatchGroupsSegmentPostings(t *testing.T) {
+	ctx := context.Background()
+	index, txManager, _ := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModePositions)
+
+	const term = "database"
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		batch := newInvertedIndexMutationBatch(index.Mode())
+		batch.Insert(term, invertedPosting{RowID: 7, Positions: []uint32{3}})
+		batch.Insert(term, invertedPosting{RowID: 7, Positions: []uint32{1, 3}})
+		batch.Insert(term, invertedPosting{RowID: 9, Positions: []uint32{2}})
+		return index.ApplyBatch(ctx, batch)
+	}))
+
+	iter, err := index.Lookup(ctx, term)
+	require.NoError(t, err)
+	postings := collectInvertedIteratorPostings(t, ctx, iter)
+	assert.Equal(t, []invertedPosting{
+		{RowID: 7, Positions: []uint32{1, 3}},
+		{RowID: 9, Positions: []uint32{2}},
+	}, postings)
+}
+
 func TestLogStructuredInvertedIndex_LookupSkipsOutOfRangeSegments(t *testing.T) {
 	ctx := context.Background()
 	index, txManager, metaRoot := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModeRowIDs)
