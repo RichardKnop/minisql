@@ -222,6 +222,61 @@ func forEachInvertedPostingRowID(encoded []byte, fn func(RowID) error) (inverted
 	return mode, nil
 }
 
+func forEachInvertedPostingDocCount(encoded []byte, fn func(RowID, uint32) error) (invertedPostingMode, error) {
+	if len(encoded) < 2 {
+		return 0, fmt.Errorf("decode inverted postings: short buffer")
+	}
+	if encoded[0] != invertedPostingCodecVersion {
+		return 0, fmt.Errorf("decode inverted postings: unsupported codec version %d", encoded[0])
+	}
+	mode := invertedPostingMode(encoded[1])
+	if mode != invertedPostingModeRowIDs && mode != invertedPostingModePositions {
+		return 0, fmt.Errorf("decode inverted postings: unknown mode %d", mode)
+	}
+
+	var (
+		prevRowID RowID
+		offset    = 2
+		haveRow   bool
+	)
+	for offset < len(encoded) {
+		rowDelta, n := binary.Uvarint(encoded[offset:])
+		if n <= 0 {
+			return 0, fmt.Errorf("decode inverted posting row delta at byte %d", offset)
+		}
+		offset += n
+
+		rowID := RowID(rowDelta)
+		if haveRow {
+			rowID = prevRowID + RowID(rowDelta)
+		}
+
+		var positionCount uint32 = 1
+		if mode == invertedPostingModePositions {
+			count, n := binary.Uvarint(encoded[offset:])
+			if n <= 0 {
+				return 0, fmt.Errorf("decode inverted posting position count at byte %d", offset)
+			}
+			offset += n
+			positionCount = uint32(count)
+			for range count {
+				_, n := binary.Uvarint(encoded[offset:])
+				if n <= 0 {
+					return 0, fmt.Errorf("decode inverted posting position delta at byte %d", offset)
+				}
+				offset += n
+			}
+		}
+
+		if err := fn(rowID, positionCount); err != nil {
+			return 0, err
+		}
+		prevRowID = rowID
+		haveRow = true
+	}
+	return mode, nil
+}
+
 // groupInvertedPostings canonicalizes postings before encoding. JSON-style
 // row-only postings deduplicate row IDs; full-text postings merge and sort
 // positions by row ID.

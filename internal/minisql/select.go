@@ -4809,6 +4809,13 @@ func (t *Table) tryCountFromFullTextIndex(ctx context.Context, plan QueryPlan) (
 		return countResult(0), true, nil
 	}
 	if query != nil && len(queryTokens) == 1 && len(query.Phrases) == 0 {
+		if counter, ok := secondaryIndex.InvertedIndex.(invertedDocFreqCounter); ok {
+			docFreq, err := counter.CountDocFreq(ctx, queryTokens[0])
+			if err != nil {
+				return StatementResult{}, false, err
+			}
+			return countResult(int64(docFreq)), true, nil
+		}
 		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, queryTokens[0])
 		if err != nil {
 			return StatementResult{}, false, err
@@ -4887,6 +4894,14 @@ func (t *Table) countInvertedIndexScan(ctx context.Context, scan Scan) (int64, e
 }
 
 func loadInvertedRowIDsForTerm(ctx context.Context, secondaryIndex SecondaryIndex, indexName, term string, docFreq uint32) ([]RowID, error) {
+	if loader, ok := secondaryIndex.InvertedIndex.(invertedRowIDLoader); ok {
+		rowIDs, err := loader.LoadRowIDs(ctx, term, docFreq)
+		if err != nil {
+			return nil, fmt.Errorf("inverted row id lookup failed: %w", err)
+		}
+		return rowIDs, nil
+	}
+
 	iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
 	if err != nil {
 		return nil, fmt.Errorf("inverted lookup failed: %w", err)

@@ -297,6 +297,33 @@ func TestLogStructuredInvertedIndex_DeleteSegmentFiltersEarlierPostings(t *testi
 	assert.Equal(t, invertedPostingStats{DocFreq: 1, PostingCount: 1}, stats)
 }
 
+func TestLogStructuredInvertedIndex_PositionalDeleteRemovesSelectedPositions(t *testing.T) {
+	ctx := context.Background()
+	index, txManager, _ := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModePositions)
+
+	const term = "database"
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		insertBatch := newInvertedIndexMutationBatch(index.Mode())
+		insertBatch.Insert(term, invertedPosting{RowID: 7, Positions: []uint32{1, 2, 3}})
+		if err := index.ApplyBatch(ctx, insertBatch); err != nil {
+			return err
+		}
+
+		deleteBatch := newInvertedIndexMutationBatch(index.Mode())
+		deleteBatch.Delete(term, invertedPosting{RowID: 7, Positions: []uint32{2}})
+		return index.ApplyBatch(ctx, deleteBatch)
+	}))
+
+	iter, err := index.Lookup(ctx, term)
+	require.NoError(t, err)
+	postings := collectInvertedIteratorPostings(t, ctx, iter)
+	assert.Equal(t, []invertedPosting{{RowID: 7, Positions: []uint32{1, 3}}}, postings)
+
+	stats, err := index.Stats(ctx, term)
+	require.NoError(t, err)
+	assert.Equal(t, invertedPostingStats{DocFreq: 1, PostingCount: 2}, stats)
+}
+
 func TestLogStructuredInvertedIndex_ReplaceSegmentReinsertsSameRow(t *testing.T) {
 	ctx := context.Background()
 	index, txManager, metaRoot := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModePositions)
@@ -470,7 +497,7 @@ func TestLogStructuredInvertedIndex_BaseFoldbackAppliesTermsInBatches(t *testing
 				return err
 			}
 		}
-		return nil
+		return index.compactSegments(ctx)
 	}))
 
 	page, err := index.pager.ReadPage(ctx, metaRoot)

@@ -159,6 +159,37 @@ func BenchmarkFullText_Search_Phrase(b *testing.B) {
 	}
 }
 
+// BenchmarkFullText_Search_AfterDeletes measures lookup cost after many
+// append-only delete tombstones have accumulated in the log-structured index.
+func BenchmarkFullText_Search_AfterDeletes(b *testing.B) {
+	for _, d := range minisqlOnlyInvertedBenchDrivers {
+		b.Run(d.name, func(b *testing.B) {
+			db, cleanup := openSeededFullTextBenchDB(b, d, invertedSeedN)
+			defer cleanup()
+			stmt := prepareFullTextDelete(b, db, d)
+			defer stmt.Close()
+
+			const deletedRows = invertedSeedN / 2
+			for i := range deletedRows {
+				if _, err := stmt.Exec(i + 1); err != nil {
+					b.Fatalf("delete full-text row: %v", err)
+				}
+			}
+			query := fullTextSearchSQL(d, "common", "common")
+			wantRows := invertedSeedN - deletedRows
+
+			b.ResetTimer()
+			for range b.N {
+				n := queryCount(b, db, query)
+				if n != wantRows {
+					b.Fatalf("expected %d rows, got %d", wantRows, n)
+				}
+			}
+			b.ReportMetric(float64(wantRows), "matches/op")
+		})
+	}
+}
+
 // BenchmarkFullText_Update_WithIndex measures replacing indexed text while the
 // full-text index removes old postings and inserts new ones.
 func BenchmarkFullText_Update_WithIndex(b *testing.B) {
@@ -259,6 +290,37 @@ func BenchmarkJSONInverted_Contains_KeyValue(b *testing.B) {
 // containment predicate.
 func BenchmarkJSONInverted_Contains_ObjectSubset(b *testing.B) {
 	benchJSONContains(b, "object_subset", `{"type":"click","tags":["web"]}`, `json_extract(payload, '$.type') = 'click' AND instr(payload, '"web"') > 0`, jsonClickRows(invertedSeedN))
+}
+
+// BenchmarkJSONInverted_Contains_AfterDeletes measures containment lookup cost
+// after many delete tombstones have accumulated in the log-structured index.
+func BenchmarkJSONInverted_Contains_AfterDeletes(b *testing.B) {
+	for _, d := range minisqlOnlyInvertedBenchDrivers {
+		b.Run(d.name+"_indexed", func(b *testing.B) {
+			db, cleanup := openSeededJSONBenchDB(b, d, invertedSeedN, true)
+			defer cleanup()
+			stmt := prepareJSONDelete(b, db, d)
+			defer stmt.Close()
+
+			const deletedRows = invertedSeedN / 2
+			for i := range deletedRows {
+				if _, err := stmt.Exec(i + 1); err != nil {
+					b.Fatalf("delete JSON row: %v", err)
+				}
+			}
+			query := `select count(*) from "events_json" where JSON_CONTAINS(payload, '{"type":"click"}')`
+			wantRows := jsonClickRowsAfterDeletingPrefix(invertedSeedN, deletedRows)
+
+			b.ResetTimer()
+			for range b.N {
+				n := queryCount(b, db, query)
+				if n != wantRows {
+					b.Fatalf("expected %d rows, got %d", wantRows, n)
+				}
+			}
+			b.ReportMetric(float64(wantRows), "matches/op")
+		})
+	}
 }
 
 // BenchmarkJSONInverted_Update_WithIndex measures replacing JSON payloads while
@@ -657,4 +719,14 @@ func queryCount(t testing.TB, db *sql.DB, query string) int {
 
 func jsonClickRows(n int) int {
 	return (n + 2) / 3
+}
+
+func jsonClickRowsAfterDeletingPrefix(n, deletedRows int) int {
+	var count int
+	for i := deletedRows; i < n; i++ {
+		if i%3 == 0 {
+			count++
+		}
+	}
+	return count
 }

@@ -49,6 +49,14 @@ type invertedIndex interface {
 	Stats(ctx context.Context, term string) (invertedPostingStats, error)
 }
 
+type invertedRowIDLoader interface {
+	LoadRowIDs(ctx context.Context, term string, hint uint32) ([]RowID, error)
+}
+
+type invertedDocFreqCounter interface {
+	CountDocFreq(ctx context.Context, term string) (uint32, error)
+}
+
 type dedicatedInvertedIndex struct {
 	pager       TxPager
 	rootPageIdx PageIndex
@@ -523,6 +531,62 @@ func (idx *dedicatedInvertedIndex) Stats(ctx context.Context, term string) (inve
 		DocFreq:      cell.DocFreq,
 		PostingCount: cell.PostingCount,
 	}, nil
+}
+
+func (idx *dedicatedInvertedIndex) CountDocFreq(ctx context.Context, term string) (uint32, error) {
+	stats, err := idx.Stats(ctx, term)
+	if err != nil {
+		return 0, err
+	}
+	return stats.DocFreq, nil
+}
+
+func (idx *dedicatedInvertedIndex) LoadRowIDs(ctx context.Context, term string, hint uint32) ([]RowID, error) {
+	if idx.mode != invertedPostingModeRowIDs {
+		return nil, fmt.Errorf("inverted index %s uses posting mode %d", idx.name, idx.mode)
+	}
+	iter, err := idx.Lookup(ctx, term)
+	if err != nil {
+		return nil, err
+	}
+	return collectRowIDsFromIterator(ctx, iter, idx.mode, hint)
+}
+
+func collectRowIDsFromIterator(
+	ctx context.Context,
+	iter invertedPostingIterator,
+	expectedMode invertedPostingMode,
+	hint uint32,
+) ([]RowID, error) {
+	rowIDs := make([]RowID, 0, hint)
+	var (
+		lastRowID RowID
+		haveLast  bool
+	)
+	for {
+		block, ok, err := iter.NextBlock(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return rowIDs, nil
+		}
+		mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
+			if haveLast && rowID == lastRowID {
+				return nil
+			}
+			haveLast = true
+			lastRowID = rowID
+			rowIDs = append(rowIDs, rowID)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if mode != expectedMode {
+			return nil, fmt.Errorf("inverted posting block uses posting mode %d, expected %d", mode, expectedMode)
+		}
+	}
 }
 
 // FreeAll releases every entry and posting page owned by the index.
