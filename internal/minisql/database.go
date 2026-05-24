@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1676,15 +1675,14 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 		if len(postingsByTerm) == 0 {
 			return nil
 		}
-		terms := make([]string, 0, len(postingsByTerm))
-		for term := range postingsByTerm {
-			terms = append(terms, term)
-		}
-		sort.Strings(terms)
-		for _, term := range terms {
-			if err := secondaryIndex.InvertedIndex.InsertMany(ctx, term, postingsByTerm[term]); err != nil {
-				return fmt.Errorf("failed to insert token batch for full-text index %s: %w", secondaryIndex.Name, err)
+		batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
+		for term, postings := range postingsByTerm {
+			for _, posting := range postings {
+				batch.Insert(term, posting)
 			}
+		}
+		if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
+			return fmt.Errorf("failed to insert token batch for full-text index %s: %w", secondaryIndex.Name, err)
 		}
 		postingsByTerm = make(map[string][]invertedPosting)
 		bufferedPostings = 0
@@ -1747,15 +1745,14 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		if len(postingsByTerm) == 0 {
 			return nil
 		}
-		terms := make([]string, 0, len(postingsByTerm))
-		for term := range postingsByTerm {
-			terms = append(terms, term)
-		}
-		sort.Strings(terms)
-		for _, term := range terms {
-			if err := secondaryIndex.InvertedIndex.InsertMany(ctx, term, postingsByTerm[term]); err != nil {
-				return fmt.Errorf("failed to insert JSON term batch for inverted index %s: %w", secondaryIndex.Name, err)
+		batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
+		for term, postings := range postingsByTerm {
+			for _, posting := range postings {
+				batch.Insert(term, posting)
 			}
+		}
+		if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
+			return fmt.Errorf("failed to insert JSON term batch for inverted index %s: %w", secondaryIndex.Name, err)
 		}
 		postingsByTerm = make(map[string][]invertedPosting)
 		bufferedPostings = 0

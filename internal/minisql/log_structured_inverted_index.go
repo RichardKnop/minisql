@@ -97,11 +97,20 @@ func (idx *logStructuredInvertedIndex) Mode() invertedIndexPostingMode {
 }
 
 func (idx *logStructuredInvertedIndex) Insert(ctx context.Context, term string, posting invertedPosting) error {
-	return idx.base.Insert(ctx, term, posting)
+	batch := newInvertedIndexMutationBatch(idx.Mode())
+	batch.Insert(term, posting)
+	return idx.ApplyBatch(ctx, batch)
 }
 
 func (idx *logStructuredInvertedIndex) InsertMany(ctx context.Context, term string, postings []invertedPosting) error {
-	return idx.base.InsertMany(ctx, term, postings)
+	if len(postings) == 0 {
+		return nil
+	}
+	batch := newInvertedIndexMutationBatch(idx.Mode())
+	for _, posting := range postings {
+		batch.Insert(term, posting)
+	}
+	return idx.ApplyBatch(ctx, batch)
 }
 
 func (idx *logStructuredInvertedIndex) Replace(ctx context.Context, term string, oldPosting, newPosting invertedPosting) error {
