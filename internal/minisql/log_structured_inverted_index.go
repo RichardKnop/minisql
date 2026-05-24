@@ -299,11 +299,7 @@ func (idx *logStructuredInvertedIndex) materializeTermPostings(
 		return nil, err
 	}
 
-	segments := append([]invertedSegmentDescriptor(nil), meta.Segments...)
-	sort.SliceStable(segments, func(i, j int) bool {
-		return segments[i].Generation < segments[j].Generation
-	})
-	for _, segment := range segments {
+	for _, segment := range meta.Segments {
 		if !segmentMayContainTerm(segment, term) {
 			continue
 		}

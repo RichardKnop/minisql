@@ -148,6 +148,7 @@ func TestLogStructuredInvertedIndex_ApplyBatchWritesSegments(t *testing.T) {
 	require.NotNil(t, page.InvertedMetaPage)
 	require.Len(t, page.InvertedMetaPage.Segments, 1)
 	assert.Equal(t, invertedSegmentKindInsert, page.InvertedMetaPage.Segments[0].Kind)
+	assert.Equal(t, uint64(1), page.InvertedMetaPage.Segments[0].Generation)
 	assert.Equal(t, term, page.InvertedMetaPage.Segments[0].FirstTerm)
 	assert.Equal(t, term, page.InvertedMetaPage.Segments[0].LastTerm)
 
@@ -273,6 +274,8 @@ func TestLogStructuredInvertedIndex_ReplaceSegmentReinsertsSameRow(t *testing.T)
 	metaPage, err := index.pager.ReadPage(ctx, metaRoot)
 	require.NoError(t, err)
 	require.Len(t, metaPage.InvertedMetaPage.Segments, 2)
+	assert.Equal(t, uint64(1), metaPage.InvertedMetaPage.Segments[0].Generation)
+	assert.Equal(t, uint64(2), metaPage.InvertedMetaPage.Segments[1].Generation)
 	replaceSegment := metaPage.InvertedMetaPage.Segments[1]
 	segmentPage, err := index.pager.ReadPage(ctx, replaceSegment.RootPage)
 	require.NoError(t, err)
