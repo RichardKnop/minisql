@@ -386,7 +386,7 @@ func TestLogStructuredInvertedIndex_MergesOldestSegmentRun(t *testing.T) {
 	require.NotNil(t, page.InvertedMetaPage)
 	require.Len(t, page.InvertedMetaPage.Segments, 1)
 	assert.Equal(t, byte(1), page.InvertedMetaPage.Segments[0].Level)
-	assert.Equal(t, invertedSegmentKindMixed, page.InvertedMetaPage.Segments[0].Kind)
+	assert.Equal(t, invertedSegmentKindInsert, page.InvertedMetaPage.Segments[0].Kind)
 
 	iter, err := index.Lookup(ctx, term)
 	require.NoError(t, err)

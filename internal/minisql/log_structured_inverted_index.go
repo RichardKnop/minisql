@@ -522,7 +522,7 @@ func (idx *logStructuredInvertedIndex) compactOldestSegmentRun(ctx context.Conte
 		Generation:   run[len(run)-1].Generation,
 		RootPage:     rootPage,
 		PostingCount: postingCount,
-		Kind:         invertedSegmentKindMixed,
+		Kind:         segmentCellsKind(cells),
 		Level:        nextLevel,
 		FirstTerm:    firstTerm,
 		LastTerm:     lastTerm,
@@ -582,7 +582,6 @@ func (idx *logStructuredInvertedIndex) mergeSegmentRunCells(
 			for _, posting := range postings {
 				switch kind {
 				case invertedSegmentKindInsert:
-					delete(state.deletes, posting.RowID)
 					state.inserts[posting.RowID] = posting
 				case invertedSegmentKindDelete:
 					delete(state.inserts, posting.RowID)
@@ -788,6 +787,19 @@ func sortSegmentCells(cells []invertedSegmentCell) {
 		}
 		return invertedSegmentCellKindOrder(cells[i].Kind) < invertedSegmentCellKindOrder(cells[j].Kind)
 	})
+}
+
+func segmentCellsKind(cells []invertedSegmentCell) byte {
+	if len(cells) == 0 {
+		return invertedSegmentKindMixed
+	}
+	kind := cells[0].Kind
+	for _, cell := range cells[1:] {
+		if cell.Kind != kind {
+			return invertedSegmentKindMixed
+		}
+	}
+	return kind
 }
 
 func invertedSegmentCellKindOrder(kind byte) int {
