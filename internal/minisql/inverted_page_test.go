@@ -227,3 +227,45 @@ func TestInvertedMetaPage_UnmarshalRejectsUnknownSegmentKind(t *testing.T) {
 	var decoded invertedMetaPage
 	require.ErrorContains(t, decoded.Unmarshal(buf), "unknown kind")
 }
+
+func TestInvertedSegmentPage_Marshal(t *testing.T) {
+	t.Parallel()
+
+	postings := []invertedPosting{
+		{RowID: 4},
+		{RowID: 9},
+	}
+	payload, err := encodeInvertedPostingList(invertedPostingModeRowIDs, postings)
+	require.NoError(t, err)
+
+	page := NewInvertedSegmentPage()
+	page.Header.NextPage = 12
+	page.Cells = []invertedSegmentCell{
+		{
+			Term: "kv:type:s:\"click\"",
+			Block: invertedPostingBlock{
+				FirstRowID:   postings[0].RowID,
+				LastRowID:    postings[len(postings)-1].RowID,
+				PostingCount: countInvertedPostings(invertedPostingModeRowIDs, postings),
+				CodecVersion: invertedPostingCodecVersion,
+				Payload:      payload,
+			},
+			DocFreq:      uint32(len(postings)),
+			PostingCount: countInvertedPostings(invertedPostingModeRowIDs, postings),
+		},
+	}
+
+	buf := make([]byte, PageSize)
+	require.NoError(t, page.Marshal(buf))
+
+	var decoded invertedSegmentPage
+	require.NoError(t, decoded.Unmarshal(buf))
+	assert.Equal(t, page.Header.NextPage, decoded.Header.NextPage)
+	assert.Equal(t, uint16(len(page.Cells)), decoded.Header.CellCount)
+	assert.Equal(t, page.Cells, decoded.Cells)
+
+	clone := decoded.Clone()
+	require.NotNil(t, clone)
+	clone.Cells[0].Block.Payload[0] = 99
+	assert.NotEqual(t, clone.Cells[0].Block.Payload[0], decoded.Cells[0].Block.Payload[0])
+}

@@ -516,6 +516,13 @@ func marshalPage(page *Page, buf []byte) error {
 		if err := page.InvertedMetaPage.Marshal(buf); err != nil {
 			return fmt.Errorf("error marshaling inverted meta page: %w", err)
 		}
+	case page.InvertedSegmentPage != nil:
+		if page.Index == 0 {
+			buf = buf[:PageSize-RootPageConfigSize]
+		}
+		if err := page.InvertedSegmentPage.Marshal(buf); err != nil {
+			return fmt.Errorf("error marshaling inverted segment page: %w", err)
+		}
 	default:
 		return errors.New("no known node type found")
 	}

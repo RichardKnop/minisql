@@ -668,6 +668,10 @@ func (d *Database) walkInvertedIndexPages(ctx context.Context, report IntegrityR
 					}
 				}
 			}
+		case page.InvertedSegmentPage != nil:
+			if page.InvertedSegmentPage.Header.NextPage != 0 {
+				stack = append(stack, page.InvertedSegmentPage.Header.NextPage)
+			}
 		default:
 			report.Issues = append(report.Issues, IntegrityIssue{
 				Code:    "index_page_invalid_type",
@@ -1160,19 +1164,33 @@ func expectedInvertedIndexEntriesForRow(index SecondaryIndex, row Row) (map[stri
 }
 
 func scanInvertedIndexEntries(ctx context.Context, index invertedIndex) (integrityIndexEntries, map[string]int, error) {
-	var dedicated *dedicatedInvertedIndex
+	entries := make(integrityIndexEntries)
+	entryCounts := make(map[string]int)
 	switch idx := index.(type) {
 	case *dedicatedInvertedIndex:
-		dedicated = idx
+		if err := scanDedicatedInvertedIndexEntries(ctx, idx, entries, entryCounts); err != nil {
+			return nil, nil, err
+		}
 	case *logStructuredInvertedIndex:
-		dedicated = idx.base
+		if err := scanDedicatedInvertedIndexEntries(ctx, idx.base, entries, entryCounts); err != nil {
+			return nil, nil, err
+		}
+		if err := scanLogStructuredInvertedSegments(ctx, idx, entries, entryCounts); err != nil {
+			return nil, nil, err
+		}
 	default:
 		return nil, nil, fmt.Errorf("unsupported inverted index implementation %T", index)
 	}
+	return entries, entryCounts, nil
+}
 
-	entries := make(integrityIndexEntries)
-	entryCounts := make(map[string]int)
-	if err := scanDedicatedInvertedEntryCells(ctx, dedicated, func(cell invertedEntryCell) error {
+func scanDedicatedInvertedIndexEntries(
+	ctx context.Context,
+	dedicated *dedicatedInvertedIndex,
+	entries integrityIndexEntries,
+	entryCounts map[string]int,
+) error {
+	return scanDedicatedInvertedEntryCells(ctx, dedicated, func(cell invertedEntryCell) error {
 		termID := integrityKeyID(cell.Term)
 		iter, err := dedicated.newPostingIterator(ctx, cell)
 		if err != nil {
@@ -1202,11 +1220,64 @@ func scanInvertedIndexEntries(ctx context.Context, index invertedIndex) (integri
 			}
 		}
 		return nil
-	}); err != nil {
-		return nil, nil, err
-	}
+	})
+}
 
-	return entries, entryCounts, nil
+func scanLogStructuredInvertedSegments(
+	ctx context.Context,
+	index *logStructuredInvertedIndex,
+	entries integrityIndexEntries,
+	entryCounts map[string]int,
+) error {
+	meta, err := index.readMetaPage(ctx)
+	if err != nil {
+		return err
+	}
+	for _, segment := range meta.Segments {
+		if segment.Kind != invertedSegmentKindInsert {
+			continue
+		}
+		if err := scanInvertedSegmentCells(ctx, index.pager, segment.RootPage, func(cell invertedSegmentCell) error {
+			termID := integrityKeyID(cell.Term)
+			mode, postings, err := decodeInvertedPostingList(cell.Block.Payload)
+			if err != nil {
+				return err
+			}
+			if mode != index.Mode() {
+				return fmt.Errorf("inverted segment term %q uses posting mode %d, expected %d", cell.Term, mode, index.Mode())
+			}
+			for _, posting := range postings {
+				count := integrityInvertedPostingCount(mode, posting)
+				addIntegrityEntryCount(entries, termID, posting.RowID, count)
+				if mode == invertedPostingModeRowIDs {
+					entryCounts[fmt.Sprintf("%s|%d", termID, posting.RowID)] += count
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func scanInvertedSegmentCells(ctx context.Context, pager TxPager, root PageIndex, visit func(invertedSegmentCell) error) error {
+	for pageIdx := root; pageIdx != 0; {
+		page, err := pager.ReadPage(ctx, pageIdx)
+		if err != nil {
+			return fmt.Errorf("read inverted segment page %d: %w", pageIdx, err)
+		}
+		if page.InvertedSegmentPage == nil {
+			return fmt.Errorf("inverted segment page %d has unexpected page type", pageIdx)
+		}
+		for _, cell := range page.InvertedSegmentPage.Cells {
+			if err := visit(cell); err != nil {
+				return err
+			}
+		}
+		pageIdx = page.InvertedSegmentPage.Header.NextPage
+	}
+	return nil
 }
 
 func scanDedicatedInvertedEntryCells(ctx context.Context, index *dedicatedInvertedIndex, visit func(invertedEntryCell) error) error {

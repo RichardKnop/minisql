@@ -25,6 +25,8 @@ const (
 	PageTypeInvertedPosting
 	// PageTypeInvertedMeta identifies log-structured inverted-index metadata pages.
 	PageTypeInvertedMeta
+	// PageTypeInvertedSegment identifies log-structured inverted-index segment pages.
+	PageTypeInvertedSegment
 )
 
 type tablePager struct {

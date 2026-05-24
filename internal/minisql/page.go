@@ -17,16 +17,17 @@ type PageIndex uint32
 // of the node/page fields is non-nil at any time, reflecting the page's type
 // (leaf, internal, index, overflow, etc.).
 type Page struct {
-	IndexNode         any
-	OverflowPage      *OverflowPage
-	FreePage          *FreePage
-	InternalNode      *InternalNode
-	LeafNode          *LeafNode
-	IndexOverflowNode *IndexOverflowPage
-	InvertedEntryPage *invertedEntryPage
-	InvertedPostPage  *invertedPostingPage
-	InvertedMetaPage  *invertedMetaPage
-	Index             PageIndex
+	IndexNode           any
+	OverflowPage        *OverflowPage
+	FreePage            *FreePage
+	InternalNode        *InternalNode
+	LeafNode            *LeafNode
+	IndexOverflowNode   *IndexOverflowPage
+	InvertedEntryPage   *invertedEntryPage
+	InvertedPostPage    *invertedPostingPage
+	InvertedMetaPage    *invertedMetaPage
+	InvertedSegmentPage *invertedSegmentPage
+	Index               PageIndex
 }
 
 // Clone creates a deep copy of the page.
@@ -63,6 +64,8 @@ func (p *Page) Clone() *Page {
 		pageCopy.InvertedPostPage = p.InvertedPostPage.Clone()
 	case p.InvertedMetaPage != nil:
 		pageCopy.InvertedMetaPage = p.InvertedMetaPage.Clone()
+	case p.InvertedSegmentPage != nil:
+		pageCopy.InvertedSegmentPage = p.InvertedSegmentPage.Clone()
 	}
 
 	return pageCopy

@@ -113,11 +113,54 @@ func (idx *logStructuredInvertedIndex) ApplyBatch(ctx context.Context, batch inv
 }
 
 func (idx *logStructuredInvertedIndex) Lookup(ctx context.Context, term string) (invertedPostingIterator, error) {
-	return idx.base.Lookup(ctx, term)
+	baseIter, err := idx.base.Lookup(ctx, term)
+	if err != nil {
+		return nil, err
+	}
+
+	iterators := []invertedPostingIterator{baseIter}
+	meta, err := idx.readMetaPage(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, segment := range meta.Segments {
+		if segment.Kind != invertedSegmentKindInsert {
+			continue
+		}
+		block, found, err := idx.lookupSegmentBlock(ctx, segment.RootPage, term)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			iterators = append(iterators, &singleBlockInvertedPostingIterator{block: block, hasBlock: true})
+		}
+	}
+	return &concatenatingInvertedPostingIterator{iterators: iterators}, nil
 }
 
 func (idx *logStructuredInvertedIndex) Stats(ctx context.Context, term string) (invertedPostingStats, error) {
-	return idx.base.Stats(ctx, term)
+	stats, err := idx.base.Stats(ctx, term)
+	if err != nil {
+		return invertedPostingStats{}, err
+	}
+	meta, err := idx.readMetaPage(ctx)
+	if err != nil {
+		return invertedPostingStats{}, err
+	}
+	for _, segment := range meta.Segments {
+		if segment.Kind != invertedSegmentKindInsert {
+			continue
+		}
+		cell, found, err := idx.lookupSegmentCell(ctx, segment.RootPage, term)
+		if err != nil {
+			return invertedPostingStats{}, err
+		}
+		if found {
+			stats.DocFreq += cell.DocFreq
+			stats.PostingCount += cell.PostingCount
+		}
+	}
+	return stats, nil
 }
 
 func (idx *logStructuredInvertedIndex) FreeAll(ctx context.Context) error {
@@ -131,11 +174,89 @@ func (idx *logStructuredInvertedIndex) FreeAll(ctx context.Context) error {
 	if page.InvertedMetaPage != nil {
 		for _, segment := range page.InvertedMetaPage.Segments {
 			if segment.RootPage != 0 {
-				if err := idx.pager.AddFreePage(ctx, segment.RootPage); err != nil {
+				if err := idx.freeSegmentPages(ctx, segment.RootPage); err != nil {
 					return fmt.Errorf("free inverted segment root %d: %w", segment.RootPage, err)
 				}
 			}
 		}
 	}
 	return idx.pager.AddFreePage(ctx, idx.rootPageIdx)
+}
+
+func (idx *logStructuredInvertedIndex) readMetaPage(ctx context.Context) (*invertedMetaPage, error) {
+	page, err := idx.pager.ReadPage(ctx, idx.rootPageIdx)
+	if err != nil {
+		return nil, fmt.Errorf("read inverted metadata root: %w", err)
+	}
+	if page.InvertedMetaPage == nil {
+		return nil, fmt.Errorf("inverted index %s root page %d is not a metadata page", idx.name, idx.rootPageIdx)
+	}
+	return page.InvertedMetaPage, nil
+}
+
+func (idx *logStructuredInvertedIndex) lookupSegmentBlock(ctx context.Context, root PageIndex, term string) (invertedPostingBlock, bool, error) {
+	cell, found, err := idx.lookupSegmentCell(ctx, root, term)
+	if err != nil {
+		return invertedPostingBlock{}, false, err
+	}
+	if !found {
+		return invertedPostingBlock{}, false, nil
+	}
+	return cell.Block, true, nil
+}
+
+func (idx *logStructuredInvertedIndex) lookupSegmentCell(ctx context.Context, root PageIndex, term string) (invertedSegmentCell, bool, error) {
+	for pageIdx := root; pageIdx != 0; {
+		page, err := idx.pager.ReadPage(ctx, pageIdx)
+		if err != nil {
+			return invertedSegmentCell{}, false, fmt.Errorf("read inverted segment page %d: %w", pageIdx, err)
+		}
+		if page.InvertedSegmentPage == nil {
+			return invertedSegmentCell{}, false, fmt.Errorf("inverted segment page %d has unexpected page type", pageIdx)
+		}
+		for _, cell := range page.InvertedSegmentPage.Cells {
+			if cell.Term == term {
+				return cell, true, nil
+			}
+		}
+		pageIdx = page.InvertedSegmentPage.Header.NextPage
+	}
+	return invertedSegmentCell{}, false, nil
+}
+
+func (idx *logStructuredInvertedIndex) freeSegmentPages(ctx context.Context, root PageIndex) error {
+	for pageIdx := root; pageIdx != 0; {
+		page, err := idx.pager.ReadPage(ctx, pageIdx)
+		if err != nil {
+			return fmt.Errorf("read inverted segment page %d for free: %w", pageIdx, err)
+		}
+		nextPage := PageIndex(0)
+		if page.InvertedSegmentPage != nil {
+			nextPage = page.InvertedSegmentPage.Header.NextPage
+		}
+		if err := idx.pager.AddFreePage(ctx, pageIdx); err != nil {
+			return err
+		}
+		pageIdx = nextPage
+	}
+	return nil
+}
+
+type concatenatingInvertedPostingIterator struct {
+	iterators []invertedPostingIterator
+	index     int
+}
+
+func (it *concatenatingInvertedPostingIterator) NextBlock(ctx context.Context) (invertedPostingBlock, bool, error) {
+	for it.index < len(it.iterators) {
+		block, ok, err := it.iterators[it.index].NextBlock(ctx)
+		if err != nil {
+			return invertedPostingBlock{}, false, err
+		}
+		if ok {
+			return block, true, nil
+		}
+		it.index++
+	}
+	return invertedPostingBlock{}, false, nil
 }
