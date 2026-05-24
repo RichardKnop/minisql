@@ -501,3 +501,50 @@ returns false and the CTE is inlined, eliminating all `materializeResultRows` / 
 3. **Insert_MultiValues** — 7.8× memory gap vs SQLite (197 KiB vs 25 KiB). Remaining: `Statement.Clone` for 100-row payload (~15 KiB), WAL frame allocation per modified page, index node copies.
 4. **Full-text** — large absolute memory for build/insert due to inverted index structure; search and update are competitive.
 5. **CTE, Subquery, Distinct** — 1.75–3.7× memory gap; remaining from hash-set key strings and hash map overhead.
+### 2026-05-24 23:08 UTC
+
+#### Timing
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan | ratio |
+|---|---|---|---|---|---|---|---|
+| FullText_BuildIndex | 5.97 ms/op | — | — | 2.68 ms/op | — | — | 2.2× |
+| JSONInverted_BuildIndex | — | 27.73 ms/op | — | — | — | — | — |
+| FullText_Insert_WithIndex | 87.13 µs/op | — | — | 178.00 µs/op | — | — | 0.5× |
+| FullText_Search_SingleTerm/rare | 140.20 µs/op | — | — | 490.49 µs/op | — | — | 0.3× |
+| FullText_Search_SingleTerm/medium | 107.76 µs/op | — | — | 480.07 µs/op | — | — | 0.2× |
+| FullText_Search_SingleTerm/common | 107.66 µs/op | — | — | 433.68 µs/op | — | — | 0.2× |
+| FullText_Search_MultiTermAND | 148.90 µs/op | — | — | 392.73 µs/op | — | — | 0.4× |
+| FullText_Search_Phrase | 129.37 µs/op | — | — | 384.30 µs/op | — | — | 0.3× |
+| FullText_Search_AfterDeletes | 929.97 µs/op | — | — | — | — | — | — |
+| FullText_Update_WithIndex | 1.18 ms/op | — | — | 594.12 µs/op | — | — | 2.0× |
+| FullText_Delete_WithIndex | 67.74 µs/op | — | — | 162.14 µs/op | — | — | 0.4× |
+| JSONInverted_Insert_WithIndex | — | 87.53 µs/op | — | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 579.93 µs/op | 5.78 ms/op | — | 311.73 µs/op | 982.44 µs/op | — |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.03 ms/op | 4.03 ms/op | — | 386.94 µs/op | 1.25 ms/op | — |
+| JSONInverted_Contains_AfterDeletes | — | 492.62 µs/op | — | — | — | — | — |
+| JSONInverted_Update_WithIndex | — | 179.17 µs/op | — | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 106.66 µs/op | — | — | — | — | — |
+
+#### Memory (B/op)
+
+| Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan |
+|---|---|---|---|---|---|---|
+| FullText_BuildIndex | 5.4 MiB | — | — | 696 B | — | — |
+| JSONInverted_BuildIndex | — | 15.2 MiB | — | — | — | — |
+| FullText_Insert_WithIndex | 39.2 KiB | — | — | 716 B | — | — |
+| FullText_Search_SingleTerm/rare | 38.3 KiB | — | — | 533 B | — | — |
+| FullText_Search_SingleTerm/medium | 34.7 KiB | — | — | 533 B | — | — |
+| FullText_Search_SingleTerm/common | 38.3 KiB | — | — | 549 B | — | — |
+| FullText_Search_MultiTermAND | 43.8 KiB | — | — | 533 B | — | — |
+| FullText_Search_Phrase | 62.3 KiB | — | — | 538 B | — | — |
+| FullText_Search_AfterDeletes | 68.8 KiB | — | — | — | — | — |
+| FullText_Update_WithIndex | 669.8 KiB | — | — | 404 B | — | — |
+| FullText_Delete_WithIndex | 32.8 KiB | — | — | 257 B | — | — |
+| JSONInverted_Insert_WithIndex | — | 47.2 KiB | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 93.4 KiB | 3.2 MiB | — | 549 B | 549 B |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 155.4 KiB | 3.4 MiB | — | 549 B | 549 B |
+| JSONInverted_Contains_AfterDeletes | — | 127.7 KiB | — | — | — | — |
+| JSONInverted_Update_WithIndex | — | 63.9 KiB | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 38.4 KiB | — | — | — | — |
+
+
