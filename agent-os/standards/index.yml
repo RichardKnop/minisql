@@ -20,7 +20,7 @@ query-execution:
 
 storage-engine:
   biased-leaf-split: Sequential-insert optimisation in LeafNodeSplitInsert; even-split pre-alloc rule; update size-check underflow hazard
-  occ-transactions: Write transaction lifecycle; single-writer enforcement; in-place LRU fast path vs clone slow path; tx travels via context
+  write-transactions: Write transaction lifecycle; single-writer enforcement; in-place LRU fast path vs clone slow path; tx travels via context
   page-layout: 4KB page tagged-union, page 0 special handling, usable space
   pager-cache: Sparse page array + LRU; I/O and unmarshal outside the lock
   rightmost-leaf-cache: Per-transaction hint for sequential inserts; lastTxID guard, split invalidation

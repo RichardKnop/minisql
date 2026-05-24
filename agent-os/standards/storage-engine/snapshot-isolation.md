@@ -6,7 +6,7 @@ type: standard
 
 # Snapshot Isolation (MVCC)
 
-Read-only transactions see a consistent point-in-time snapshot. Write transactions use single-writer enforcement (see `occ-transactions.md`).
+Read-only transactions see a consistent point-in-time snapshot. Write transactions use single-writer enforcement (see `write-transactions.md`).
 
 ## How it works
 
@@ -33,7 +33,7 @@ if tx.ReadOnly {
 4. Otherwise retrieve the historical version from `pageVersionHistory` via `PageVersionAtSnapshot`.
 5. If no historical version exists (page allocated after the snapshot) — return the cached page as a best-effort fallback and log a warning.
 
-Note: the in-place LRU fast path (see `occ-transactions.md`) is only taken when **no snapshot readers are active**, so a committed write transaction that used the fast path will never have an MVCC reader that needs the pre-write version of those pages.
+Note: the in-place LRU fast path (see `write-transactions.md`) is only taken when **no snapshot readers are active**, so a committed write transaction that used the fast path will never have an MVCC reader that needs the pre-write version of those pages.
 
 ## `pageVersionHistory` lifecycle
 
