@@ -1,5 +1,78 @@
 # Benchmark Results
 
+### 2026-05-24 — Inverted-index write-path memory reduction
+
+**Platform:** Apple M1 Max · darwin/arm64 · Go 1.26
+**Settings:** focused inverted-index DML run, `-benchmem`, `-count=1`
+**Branch:** `codex-inverted-index-memory-wins`
+
+Cumulative optimisations in this baseline:
+
+- **Append-only posting-block insert path**: when new row IDs are increasing and the target
+  posting block has room, MiniSQL now appends the delta-encoded posting bytes directly instead
+  of decoding, regrouping, and re-encoding the whole block.
+- **Full-text per-row term aggregation**: INSERT/DELETE maintenance now groups all positions
+  for the same row+term into one posting before touching the inverted index.
+- **Allocation-free inverted page fit checks**: entry/posting page fit checks use byte
+  accounting instead of allocating and marshaling a temporary 4 KiB page.
+- **Reusable JSON path escaper**: JSON inverted term generation reuses a package-level
+  `strings.Replacer` instead of rebuilding it for every path segment.
+
+Command:
+
+```bash
+LOG_LEVEL=warn go test -tags bench -bench='Benchmark(FullText|JSONInverted)_(BuildIndex|Insert_WithIndex|Update_WithIndex|Delete_WithIndex)$' -benchmem -run '^$' -count=1 -memprofile=/tmp/minisql_inverted_dml_after_mem.prof ./benchmarks/
+```
+
+#### Timing
+
+| Benchmark | minisql | sqlite |
+|---|---:|---:|
+| FullText_BuildIndex | 6.26 ms/op | 3.39 ms/op |
+| FullText_Insert_WithIndex | 152 µs/op | 134 µs/op |
+| FullText_Update_WithIndex | 80.1 µs/op | 144 µs/op |
+| FullText_Delete_WithIndex | 226 µs/op | 256 µs/op |
+| JSONInverted_BuildIndex | 5.87 ms/op | — |
+| JSONInverted_Insert_WithIndex | 158 µs/op | — |
+| JSONInverted_Update_WithIndex | 10.7 µs/op | — |
+| JSONInverted_Delete_WithIndex | 354 µs/op | — |
+
+#### Memory (B/op)
+
+| Benchmark | before | after | delta |
+|---|---:|---:|---:|
+| FullText_BuildIndex | 10.7 MiB | 3.0 MiB | −71% |
+| FullText_Insert_WithIndex | 203 KiB | 29.0 KiB | −86% |
+| FullText_Update_WithIndex | 43.3 KiB | 27.4 KiB | −37% |
+| FullText_Delete_WithIndex | 175 KiB | 141 KiB | −20% |
+| JSONInverted_BuildIndex | 55.3 MiB | 5.3 MiB | −90% |
+| JSONInverted_Insert_WithIndex | 1.66 MiB | 153 KiB | −91% |
+| JSONInverted_Update_WithIndex | 10.5 KiB | 9.9 KiB | −5% |
+| JSONInverted_Delete_WithIndex | 1.25 MiB | 1.13 MiB | −8% |
+
+#### Allocs/op
+
+| Benchmark | before | after | delta |
+|---|---:|---:|---:|
+| FullText_BuildIndex | 35,797 | 34,056 | −5% |
+| FullText_Insert_WithIndex | 822 | 226 | −73% |
+| FullText_Update_WithIndex | 231 | 245 | +6% |
+| FullText_Delete_WithIndex | 1,357 | 1,350 | −1% |
+| JSONInverted_BuildIndex | 143,587 | 85,895 | −40% |
+| JSONInverted_Insert_WithIndex | 526 | 214 | −59% |
+| JSONInverted_Update_WithIndex | 85 | 82 | −4% |
+| JSONInverted_Delete_WithIndex | 460 | 392 | −15% |
+
+#### Key observations
+
+The append-only path and allocation-free fit checks remove the worst insert/build allocation
+spikes from the shared inverted-index storage layer. The largest remaining allocation source
+is now delete maintenance, especially JSON deletes, because deletion still decodes existing
+posting blocks into `[]invertedPosting`, removes a row ID, and re-encodes the block. That
+remaining shape is the main evidence for the next segment/tombstone refactor.
+
+---
+
 ### 2026-05-24 — Window function implementation (no regressions)
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26

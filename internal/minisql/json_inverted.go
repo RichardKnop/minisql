@@ -14,6 +14,13 @@ func jsonInvertedTermColumn() Column {
 	return Column{Name: "__json_term__", Kind: Varchar, Size: MaxIndexKeySize}
 }
 
+var jsonInvertedPathReplacer = strings.NewReplacer(
+	`\`, `\\`,
+	`.`, `\.`,
+	`[`, `\[`,
+	`]`, `\]`,
+)
+
 // jsonContains reports whether doc contains query using JSON subset semantics.
 // Objects must contain every queried key recursively, arrays must contain every
 // queried element, and scalar values must match by JSON type and value.
@@ -190,13 +197,7 @@ func joinJSONInvertedPath(parent, key string) string {
 // jsonInvertedPathSegment escapes path separator characters inside object keys
 // so similarly named paths generate different term strings.
 func jsonInvertedPathSegment(segment string) string {
-	replacer := strings.NewReplacer(
-		`\`, `\\`,
-		`.`, `\.`,
-		`[`, `\[`,
-		`]`, `\]`,
-	)
-	return replacer.Replace(segment)
+	return jsonInvertedPathReplacer.Replace(segment)
 }
 
 // jsonInvertedScalarTerm encodes a scalar JSON value with a type prefix, keeping
