@@ -62,6 +62,7 @@ type invertedSegmentCell struct {
 	Block        invertedPostingBlock
 	DocFreq      uint32
 	PostingCount uint32
+	Kind         byte
 }
 
 type invertedSegmentPage struct {
@@ -147,7 +148,7 @@ func (p *invertedSegmentPage) Unmarshal(buf []byte) error {
 }
 
 func (c invertedSegmentCell) size() uint64 {
-	return 2 + uint64(len([]byte(c.Term))) + 4 + 4 + c.Block.size()
+	return 2 + uint64(len([]byte(c.Term))) + 1 + 4 + 4 + c.Block.size()
 }
 
 func (c invertedSegmentCell) Marshal(buf []byte) error {
@@ -162,6 +163,8 @@ func (c invertedSegmentCell) Marshal(buf []byte) error {
 	i += 2
 	copy(buf[i:i+uint64(len([]byte(c.Term)))], []byte(c.Term))
 	i += uint64(len([]byte(c.Term)))
+	buf[i] = c.Kind
+	i += 1
 	marshalUint32(buf, c.DocFreq, i)
 	i += 4
 	marshalUint32(buf, c.PostingCount, i)
@@ -173,17 +176,22 @@ func (c invertedSegmentCell) Marshal(buf []byte) error {
 }
 
 func (c *invertedSegmentCell) Unmarshal(buf []byte) (uint64, error) {
-	if len(buf) < 10 {
+	if len(buf) < 11 {
 		return 0, fmt.Errorf("inverted segment cell buffer too small")
 	}
 	i := uint64(0)
 	termLen := uint64(unmarshalUint16(buf, i))
 	i += 2
-	if len(buf) < int(i+termLen+8) {
+	if len(buf) < int(i+termLen+9) {
 		return 0, fmt.Errorf("inverted segment cell truncated")
 	}
 	c.Term = string(buf[i : i+termLen])
 	i += termLen
+	c.Kind = buf[i]
+	if c.Kind != invertedSegmentKindInsert && c.Kind != invertedSegmentKindDelete {
+		return 0, fmt.Errorf("inverted segment cell has unknown kind %d", c.Kind)
+	}
+	i += 1
 	c.DocFreq = unmarshalUint32(buf, i)
 	i += 4
 	c.PostingCount = unmarshalUint32(buf, i)

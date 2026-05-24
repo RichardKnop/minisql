@@ -1234,10 +1234,17 @@ func scanLogStructuredInvertedSegments(
 		return err
 	}
 	for _, segment := range meta.Segments {
-		if segment.Kind != invertedSegmentKindInsert {
+		if segment.Kind == invertedSegmentKindDelete {
 			continue
 		}
 		if err := scanInvertedSegmentCells(ctx, index.pager, segment.RootPage, func(cell invertedSegmentCell) error {
+			kind := segment.Kind
+			if kind == invertedSegmentKindMixed {
+				kind = cell.Kind
+			}
+			if kind == invertedSegmentKindDelete {
+				return nil
+			}
 			termID := integrityKeyID(cell.Term)
 			mode, postings, err := decodeInvertedPostingList(cell.Block.Payload)
 			if err != nil {

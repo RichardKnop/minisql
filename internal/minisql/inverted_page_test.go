@@ -192,6 +192,12 @@ func TestInvertedMetaPage_Marshal(t *testing.T) {
 			PostingCount: 7,
 			Kind:         invertedSegmentKindDelete,
 		},
+		{
+			Generation:   3,
+			RootPage:     99,
+			PostingCount: 9,
+			Kind:         invertedSegmentKindMixed,
+		},
 	}
 	buf := make([]byte, PageSize)
 	require.NoError(t, page.Marshal(buf))
@@ -252,6 +258,7 @@ func TestInvertedSegmentPage_Marshal(t *testing.T) {
 			},
 			DocFreq:      uint32(len(postings)),
 			PostingCount: countInvertedPostings(invertedPostingModeRowIDs, postings),
+			Kind:         invertedSegmentKindInsert,
 		},
 	}
 

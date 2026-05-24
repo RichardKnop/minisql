@@ -5,6 +5,7 @@ import "fmt"
 const (
 	invertedSegmentKindInsert byte = 1
 	invertedSegmentKindDelete byte = 2
+	invertedSegmentKindMixed  byte = 3
 )
 
 type invertedSegmentDescriptor struct {
@@ -39,7 +40,7 @@ func (d *invertedSegmentDescriptor) Unmarshal(buf []byte) error {
 	}
 	i := uint64(0)
 	d.Kind = buf[i]
-	if d.Kind != invertedSegmentKindInsert && d.Kind != invertedSegmentKindDelete {
+	if d.Kind != invertedSegmentKindInsert && d.Kind != invertedSegmentKindDelete && d.Kind != invertedSegmentKindMixed {
 		return fmt.Errorf("inverted segment descriptor has unknown kind %d", d.Kind)
 	}
 	i += 1

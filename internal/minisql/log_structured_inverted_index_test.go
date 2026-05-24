@@ -131,6 +131,113 @@ func TestLogStructuredInvertedIndex_LookupMergesBaseAndSegment(t *testing.T) {
 	assert.Equal(t, invertedPostingStats{DocFreq: 3, PostingCount: 3}, stats)
 }
 
+func TestLogStructuredInvertedIndex_ApplyBatchWritesSegments(t *testing.T) {
+	ctx := context.Background()
+	index, txManager, metaRoot := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModeRowIDs)
+
+	const term = "kv:type:s:\"click\""
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		batch := newInvertedIndexMutationBatch(index.Mode())
+		batch.Insert(term, invertedPosting{RowID: 21})
+		batch.Insert(term, invertedPosting{RowID: 22})
+		return index.ApplyBatch(ctx, batch)
+	}))
+
+	page, err := index.pager.ReadPage(ctx, metaRoot)
+	require.NoError(t, err)
+	require.NotNil(t, page.InvertedMetaPage)
+	require.Len(t, page.InvertedMetaPage.Segments, 1)
+	assert.Equal(t, invertedSegmentKindInsert, page.InvertedMetaPage.Segments[0].Kind)
+
+	iter, err := index.Lookup(ctx, term)
+	require.NoError(t, err)
+	postings := collectInvertedIteratorPostings(t, ctx, iter)
+	assert.Equal(t, []invertedPosting{{RowID: 21}, {RowID: 22}}, postings)
+}
+
+func TestLogStructuredInvertedIndex_DeleteSegmentFiltersEarlierPostings(t *testing.T) {
+	ctx := context.Background()
+	index, txManager, _ := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModeRowIDs)
+
+	const term = "kv:type:s:\"click\""
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		insertBatch := newInvertedIndexMutationBatch(index.Mode())
+		insertBatch.Insert(term, invertedPosting{RowID: 21})
+		insertBatch.Insert(term, invertedPosting{RowID: 22})
+		if err := index.ApplyBatch(ctx, insertBatch); err != nil {
+			return err
+		}
+
+		deleteBatch := newInvertedIndexMutationBatch(index.Mode())
+		deleteBatch.Delete(term, invertedPosting{RowID: 21})
+		return index.ApplyBatch(ctx, deleteBatch)
+	}))
+
+	iter, err := index.Lookup(ctx, term)
+	require.NoError(t, err)
+	postings := collectInvertedIteratorPostings(t, ctx, iter)
+	assert.Equal(t, []invertedPosting{{RowID: 22}}, postings)
+
+	stats, err := index.Stats(ctx, term)
+	require.NoError(t, err)
+	assert.Equal(t, invertedPostingStats{DocFreq: 1, PostingCount: 1}, stats)
+}
+
+func TestLogStructuredInvertedIndex_ReplaceSegmentReinsertsSameRow(t *testing.T) {
+	ctx := context.Background()
+	index, txManager, _ := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModePositions)
+
+	const term = "database"
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		batch := newInvertedIndexMutationBatch(index.Mode())
+		batch.Insert(term, invertedPosting{RowID: 5, Positions: []uint32{1}})
+		if err := index.ApplyBatch(ctx, batch); err != nil {
+			return err
+		}
+		return index.Replace(
+			ctx,
+			term,
+			invertedPosting{RowID: 5, Positions: []uint32{1}},
+			invertedPosting{RowID: 5, Positions: []uint32{2, 4}},
+		)
+	}))
+
+	iter, err := index.Lookup(ctx, term)
+	require.NoError(t, err)
+	postings := collectInvertedIteratorPostings(t, ctx, iter)
+	assert.Equal(t, []invertedPosting{{RowID: 5, Positions: []uint32{2, 4}}}, postings)
+}
+
+func newTestLogStructuredInvertedIndex(
+	t *testing.T,
+	mode invertedIndexPostingMode,
+) (*logStructuredInvertedIndex, *TransactionManager, PageIndex) {
+	t.Helper()
+
+	ctx := context.Background()
+	pager, tempFile := initTest(t)
+	basePager := pager.ForInvertedIndex()
+	txManager := NewTransactionManager(zap.NewNop(), tempFile.Name(), mockPagerFactory(basePager), pager, nil)
+	txPager := NewTransactionalPager(basePager, txManager, testTableName, "idx_payload")
+
+	var metaRoot PageIndex
+	var index *logStructuredInvertedIndex
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		metaPage, err := txPager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		basePage, err := txPager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		metaRoot = metaPage.Index
+		index, err = NewLogStructuredInvertedIndex(ctx, "idx_payload", mode, txPager, metaPage.Index, basePage.Index)
+		return err
+	}))
+	return index, txManager, metaRoot
+}
+
 func writeTestInvertedSegment(ctx context.Context, pager TxPager, pageIdx PageIndex, term string, postings []invertedPosting) error {
 	payload, err := encodeInvertedPostingList(invertedPostingModeRowIDs, postings)
 	if err != nil {
@@ -153,6 +260,7 @@ func writeTestInvertedSegment(ctx context.Context, pager TxPager, pageIdx PageIn
 		},
 		DocFreq:      uint32(len(postings)),
 		PostingCount: countInvertedPostings(invertedPostingModeRowIDs, postings),
+		Kind:         invertedSegmentKindInsert,
 	}}
 	return nil
 }
