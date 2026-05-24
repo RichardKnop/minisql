@@ -365,6 +365,67 @@ func TestLogStructuredInvertedIndex_CompactsSegmentsIntoBase(t *testing.T) {
 	assert.Equal(t, RowID(logStructuredInvertedIndexCompactSegmentThreshold), postings[len(postings)-1].RowID)
 }
 
+func TestLogStructuredInvertedIndex_MergesOldestSegmentRun(t *testing.T) {
+	ctx := context.Background()
+	index, txManager, metaRoot := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModeRowIDs)
+
+	const term = "kv:type:s:\"click\""
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		for i := 0; i < logStructuredInvertedIndexMergeRunSize; i++ {
+			batch := newInvertedIndexMutationBatch(index.Mode())
+			batch.Insert(term, invertedPosting{RowID: RowID(i + 1)})
+			if err := index.ApplyBatch(ctx, batch); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	page, err := index.pager.ReadPage(ctx, metaRoot)
+	require.NoError(t, err)
+	require.NotNil(t, page.InvertedMetaPage)
+	require.Len(t, page.InvertedMetaPage.Segments, 1)
+	assert.Equal(t, byte(1), page.InvertedMetaPage.Segments[0].Level)
+	assert.Equal(t, invertedSegmentKindMixed, page.InvertedMetaPage.Segments[0].Kind)
+
+	iter, err := index.Lookup(ctx, term)
+	require.NoError(t, err)
+	postings := collectInvertedIteratorPostings(t, ctx, iter)
+	require.Len(t, postings, logStructuredInvertedIndexMergeRunSize)
+	assert.Equal(t, RowID(1), postings[0].RowID)
+	assert.Equal(t, RowID(logStructuredInvertedIndexMergeRunSize), postings[len(postings)-1].RowID)
+}
+
+func TestLogStructuredInvertedIndex_MergedSegmentPreservesTombstones(t *testing.T) {
+	ctx := context.Background()
+	index, txManager, _ := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModeRowIDs)
+
+	const term = "kv:type:s:\"click\""
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		if err := index.base.Insert(ctx, term, invertedPosting{RowID: 7}); err != nil {
+			return err
+		}
+		for i := 0; i < logStructuredInvertedIndexMergeRunSize; i++ {
+			batch := newInvertedIndexMutationBatch(index.Mode())
+			if i == 0 {
+				batch.Delete(term, invertedPosting{RowID: 7})
+			} else {
+				batch.Insert(term, invertedPosting{RowID: RowID(i + 100)})
+			}
+			if err := index.ApplyBatch(ctx, batch); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	iter, err := index.Lookup(ctx, term)
+	require.NoError(t, err)
+	postings := collectInvertedIteratorPostings(t, ctx, iter)
+	require.NotEmpty(t, postings)
+	assert.NotContains(t, postings, invertedPosting{RowID: 7})
+}
+
 func TestLogStructuredInvertedIndex_CompactionPreservesPositionReplacement(t *testing.T) {
 	ctx := context.Background()
 	index, txManager, _ := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModePositions)

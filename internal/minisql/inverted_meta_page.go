@@ -13,12 +13,13 @@ type invertedSegmentDescriptor struct {
 	RootPage     PageIndex
 	PostingCount uint32
 	Kind         byte
+	Level        byte
 	FirstTerm    string
 	LastTerm     string
 }
 
 func (d invertedSegmentDescriptor) size() uint64 {
-	return 1 + 4 + 4 + 8 + 2 + uint64(len([]byte(d.FirstTerm))) + 2 + uint64(len([]byte(d.LastTerm)))
+	return 1 + 1 + 4 + 4 + 8 + 2 + uint64(len([]byte(d.FirstTerm))) + 2 + uint64(len([]byte(d.LastTerm)))
 }
 
 func (d invertedSegmentDescriptor) Marshal(buf []byte) error {
@@ -33,6 +34,8 @@ func (d invertedSegmentDescriptor) Marshal(buf []byte) error {
 	}
 	i := uint64(0)
 	buf[i] = d.Kind
+	i += 1
+	buf[i] = d.Level
 	i += 1
 	marshalUint32(buf, uint32(d.RootPage), i)
 	i += 4
@@ -51,7 +54,7 @@ func (d invertedSegmentDescriptor) Marshal(buf []byte) error {
 }
 
 func (d *invertedSegmentDescriptor) Unmarshal(buf []byte) error {
-	const fixedSize = 1 + 4 + 4 + 8 + 2 + 2
+	const fixedSize = 1 + 1 + 4 + 4 + 8 + 2 + 2
 	if len(buf) < fixedSize {
 		return fmt.Errorf("inverted segment descriptor buffer too small")
 	}
@@ -60,6 +63,8 @@ func (d *invertedSegmentDescriptor) Unmarshal(buf []byte) error {
 	if d.Kind != invertedSegmentKindInsert && d.Kind != invertedSegmentKindDelete && d.Kind != invertedSegmentKindMixed {
 		return fmt.Errorf("inverted segment descriptor has unknown kind %d", d.Kind)
 	}
+	i += 1
+	d.Level = buf[i]
 	i += 1
 	d.RootPage = PageIndex(unmarshalUint32(buf, i))
 	i += 4
@@ -187,7 +192,7 @@ func (p *invertedMetaPage) Unmarshal(buf []byte) error {
 
 	segments := make([]invertedSegmentDescriptor, 0, segmentCount)
 	for range segmentCount {
-		const fixedDescriptorSize = 1 + 4 + 4 + 8 + 2 + 2
+		const fixedDescriptorSize = 1 + 1 + 4 + 4 + 8 + 2 + 2
 		if len(buf) < int(i+fixedDescriptorSize) {
 			return fmt.Errorf("inverted meta page segment list truncated")
 		}

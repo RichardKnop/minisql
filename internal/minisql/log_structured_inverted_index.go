@@ -8,6 +8,7 @@ import (
 
 const logStructuredInvertedIndexCompactSegmentThreshold = 96
 const logStructuredInvertedIndexMetaCompactBytes = PageSize * 3 / 4
+const logStructuredInvertedIndexMergeRunSize = 16
 
 type logStructuredInvertedIndex struct {
 	pager       TxPager
@@ -471,14 +472,268 @@ func (idx *logStructuredInvertedIndex) appendMutationBatchSegment(ctx context.Co
 		RootPage:     rootPage,
 		PostingCount: postingCount,
 		Kind:         kind,
+		Level:        0,
 		FirstTerm:    firstTerm,
 		LastTerm:     lastTerm,
 	})
-	if len(metaPage.InvertedMetaPage.Segments) < logStructuredInvertedIndexCompactSegmentThreshold &&
-		metaPage.InvertedMetaPage.usedBytes() < logStructuredInvertedIndexMetaCompactBytes {
+	return idx.maybeCompactAfterNewSegment(ctx)
+}
+
+func (idx *logStructuredInvertedIndex) compactOldestSegmentRun(ctx context.Context) (bool, error) {
+	meta, err := idx.readMetaPage(ctx)
+	if err != nil {
+		return false, err
+	}
+	if len(meta.Segments) < logStructuredInvertedIndexMergeRunSize {
+		return false, nil
+	}
+	start := -1
+	end := -1
+	for i := 0; i < len(meta.Segments); {
+		level := meta.Segments[i].Level
+		j := i + 1
+		for j < len(meta.Segments) && meta.Segments[j].Level == level {
+			j++
+		}
+		if j-i >= logStructuredInvertedIndexMergeRunSize {
+			start = i
+			end = i + logStructuredInvertedIndexMergeRunSize
+			break
+		}
+		i = j
+	}
+	if start < 0 {
+		return false, nil
+	}
+
+	run := append([]invertedSegmentDescriptor(nil), meta.Segments[start:end]...)
+	cells, postingCount, err := idx.mergeSegmentRunCells(ctx, run)
+	if err != nil {
+		return false, err
+	}
+	sortSegmentCells(cells)
+	rootPage, err := idx.writeSegmentCells(ctx, cells)
+	if err != nil {
+		return false, err
+	}
+	firstTerm, lastTerm := segmentTermBounds(cells)
+	nextLevel := run[len(run)-1].Level + 1
+	replacement := invertedSegmentDescriptor{
+		Generation:   run[len(run)-1].Generation,
+		RootPage:     rootPage,
+		PostingCount: postingCount,
+		Kind:         invertedSegmentKindMixed,
+		Level:        nextLevel,
+		FirstTerm:    firstTerm,
+		LastTerm:     lastTerm,
+	}
+
+	metaPage, err := idx.pager.ModifyPage(ctx, idx.rootPageIdx)
+	if err != nil {
+		return false, fmt.Errorf("modify inverted metadata root after segment merge: %w", err)
+	}
+	if metaPage.InvertedMetaPage == nil {
+		return false, fmt.Errorf("inverted index %s root page %d is not a metadata page", idx.name, idx.rootPageIdx)
+	}
+	updated := make([]invertedSegmentDescriptor, 0, len(metaPage.InvertedMetaPage.Segments)-len(run)+1)
+	updated = append(updated, metaPage.InvertedMetaPage.Segments[:start]...)
+	updated = append(updated, replacement)
+	updated = append(updated, metaPage.InvertedMetaPage.Segments[end:]...)
+	metaPage.InvertedMetaPage.Segments = updated
+
+	for _, segment := range run {
+		if err := idx.freeSegmentPages(ctx, segment.RootPage); err != nil {
+			return false, fmt.Errorf("free merged inverted segment root %d: %w", segment.RootPage, err)
+		}
+	}
+	return true, nil
+}
+
+func (idx *logStructuredInvertedIndex) mergeSegmentRunCells(
+	ctx context.Context,
+	segments []invertedSegmentDescriptor,
+) ([]invertedSegmentCell, uint32, error) {
+	type termState struct {
+		inserts map[RowID]invertedPosting
+		deletes map[RowID]invertedPosting
+	}
+
+	states := make(map[string]termState)
+	for _, segment := range segments {
+		if err := idx.visitSegmentCells(ctx, segment.RootPage, func(cell invertedSegmentCell) error {
+			kind := segment.Kind
+			if kind == invertedSegmentKindMixed {
+				kind = cell.Kind
+			}
+			mode, postings, err := decodeInvertedPostingList(cell.Block.Payload)
+			if err != nil {
+				return err
+			}
+			if mode != idx.Mode() {
+				return fmt.Errorf("inverted segment block uses posting mode %d, expected %d", mode, idx.Mode())
+			}
+			state := states[cell.Term]
+			if state.inserts == nil {
+				state.inserts = make(map[RowID]invertedPosting)
+			}
+			if state.deletes == nil {
+				state.deletes = make(map[RowID]invertedPosting)
+			}
+			for _, posting := range postings {
+				switch kind {
+				case invertedSegmentKindInsert:
+					delete(state.deletes, posting.RowID)
+					state.inserts[posting.RowID] = posting
+				case invertedSegmentKindDelete:
+					delete(state.inserts, posting.RowID)
+					state.deletes[posting.RowID] = posting
+				default:
+					return fmt.Errorf("unknown inverted segment kind %d", kind)
+				}
+			}
+			states[cell.Term] = state
+			return nil
+		}); err != nil {
+			return nil, 0, err
+		}
+	}
+
+	terms := make([]string, 0, len(states))
+	for term := range states {
+		terms = append(terms, term)
+	}
+	sort.Strings(terms)
+	var cells []invertedSegmentCell
+	var totalPostingCount uint32
+	for _, term := range terms {
+		state := states[term]
+		deletePostings := postingsFromMap(state.deletes)
+		deleteCells, deletePostingCount, err := idx.segmentCellsForPostings(invertedSegmentKindDelete, term, deletePostings)
+		if err != nil {
+			return nil, 0, err
+		}
+		insertPostings := postingsFromMap(state.inserts)
+		insertCells, insertPostingCount, err := idx.segmentCellsForPostings(invertedSegmentKindInsert, term, insertPostings)
+		if err != nil {
+			return nil, 0, err
+		}
+		cells = append(cells, deleteCells...)
+		cells = append(cells, insertCells...)
+		totalPostingCount += deletePostingCount + insertPostingCount
+	}
+	if len(cells) == 0 {
+		return nil, 0, fmt.Errorf("cannot merge empty inverted segment run")
+	}
+	return cells, totalPostingCount, nil
+}
+
+func postingsFromMap(postingsByRowID map[RowID]invertedPosting) []invertedPosting {
+	postings := make([]invertedPosting, 0, len(postingsByRowID))
+	for _, posting := range postingsByRowID {
+		postings = append(postings, posting)
+	}
+	sortInvertedPostings(postings)
+	return postings
+}
+
+func (idx *logStructuredInvertedIndex) segmentCellsForPostings(
+	kind byte,
+	term string,
+	postings []invertedPosting,
+) ([]invertedSegmentCell, uint32, error) {
+	if len(postings) == 0 {
+		return nil, 0, nil
+	}
+	blocks, err := makeInvertedPostingBlocks(idx.Mode(), postings)
+	if err != nil {
+		return nil, 0, err
+	}
+	cells := make([]invertedSegmentCell, 0, len(blocks))
+	var totalPostingCount uint32
+	for _, block := range blocks {
+		mode, blockPostings, err := decodeInvertedPostingList(block.Payload)
+		if err != nil {
+			return nil, 0, err
+		}
+		if mode != idx.Mode() {
+			return nil, 0, fmt.Errorf("encoded inverted segment block uses posting mode %d, expected %d", mode, idx.Mode())
+		}
+		postingCount := countInvertedPostings(idx.Mode(), blockPostings)
+		cells = append(cells, invertedSegmentCell{
+			Term:         term,
+			Block:        block,
+			DocFreq:      uint32(len(blockPostings)),
+			PostingCount: postingCount,
+			Kind:         kind,
+		})
+		totalPostingCount += postingCount
+	}
+	return cells, totalPostingCount, nil
+}
+
+func shouldFoldSegmentsIntoBase(meta *invertedMetaPage) bool {
+	if len(meta.Segments) >= logStructuredInvertedIndexCompactSegmentThreshold {
+		return true
+	}
+	if meta.usedBytes() >= logStructuredInvertedIndexMetaCompactBytes {
+		return true
+	}
+	for _, segment := range meta.Segments {
+		if segment.Level >= 2 {
+			return true
+		}
+	}
+	return false
+}
+
+func (idx *logStructuredInvertedIndex) maybeFoldSegmentsIntoBase(ctx context.Context) error {
+	meta, err := idx.readMetaPage(ctx)
+	if err != nil {
+		return err
+	}
+	if shouldFoldSegmentsIntoBase(meta) {
+		return idx.compactSegments(ctx)
+	}
+	return nil
+}
+
+func (idx *logStructuredInvertedIndex) maybeCompactAfterAppend(ctx context.Context) error {
+	for {
+		compacted, err := idx.compactOldestSegmentRun(ctx)
+		if err != nil {
+			return err
+		}
+		if !compacted {
+			break
+		}
+	}
+	return idx.maybeFoldSegmentsIntoBase(ctx)
+}
+
+func (idx *logStructuredInvertedIndex) compactSegmentsIfNeeded(ctx context.Context) error {
+	if err := idx.maybeCompactAfterAppend(ctx); err != nil {
+		return err
+	}
+	meta, err := idx.readMetaPage(ctx)
+	if err != nil {
+		return err
+	}
+	if shouldFoldSegmentsIntoBase(meta) {
+		return idx.compactSegments(ctx)
+	}
+	return nil
+}
+
+func (idx *logStructuredInvertedIndex) maybeCompactAfterNewSegment(ctx context.Context) error {
+	meta, err := idx.readMetaPage(ctx)
+	if err != nil {
+		return err
+	}
+	if len(meta.Segments) < logStructuredInvertedIndexMergeRunSize &&
+		!shouldFoldSegmentsIntoBase(meta) {
 		return nil
 	}
-	return idx.compactSegments(ctx)
+	return idx.compactSegmentsIfNeeded(ctx)
 }
 
 func segmentMayContainTerm(segment invertedSegmentDescriptor, term string) bool {
