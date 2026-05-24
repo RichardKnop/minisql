@@ -75,6 +75,36 @@ func encodeGroupedInvertedPostingList(mode invertedPostingMode, grouped []invert
 	return buf, nil
 }
 
+// encodeTrailingInvertedPosting serializes one posting that follows prevRowID
+// inside an existing block payload. The caller guarantees posting.RowID is newer.
+func encodeTrailingInvertedPosting(mode invertedPostingMode, prevRowID RowID, posting invertedPosting) ([]byte, uint32) {
+	var tmp [binary.MaxVarintLen64]byte
+	buf := make([]byte, 0, binary.MaxVarintLen64*(2+len(posting.Positions)))
+
+	n := binary.PutUvarint(tmp[:], uint64(posting.RowID-prevRowID))
+	buf = append(buf, tmp[:n]...)
+	if mode == invertedPostingModeRowIDs {
+		return buf, 1
+	}
+
+	positions := append([]uint32(nil), posting.Positions...)
+	slices.Sort(positions)
+	positions = slices.Compact(positions)
+	n = binary.PutUvarint(tmp[:], uint64(len(positions)))
+	buf = append(buf, tmp[:n]...)
+	var prevPosition uint32
+	for i, position := range positions {
+		positionDelta := uint64(position)
+		if i > 0 {
+			positionDelta = uint64(position - prevPosition)
+		}
+		n = binary.PutUvarint(tmp[:], positionDelta)
+		buf = append(buf, tmp[:n]...)
+		prevPosition = position
+	}
+	return buf, uint32(len(positions))
+}
+
 // decodeInvertedPostingList decodes the v1 row-grouped posting codec and
 // returns the encoded mode together with sorted postings.
 func decodeInvertedPostingList(encoded []byte) (invertedPostingMode, []invertedPosting, error) {

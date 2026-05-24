@@ -249,9 +249,9 @@ func (t *Table) insertFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 	if err != nil {
 		return err
 	}
-	for _, token := range tokens {
-		posting := invertedPosting{RowID: rowID, Positions: []uint32{token.Position}}
-		if err := secondaryIndex.InvertedIndex.Insert(ctx, token.Term, posting); err != nil {
+	postings := fullTextPostingsByTerm(rowID, tokens)
+	for term, posting := range postings {
+		if err := secondaryIndex.InvertedIndex.Insert(ctx, term, posting); err != nil {
 			return fmt.Errorf("failed to insert token for full-text index %s: %w", secondaryIndex.Name, err)
 		}
 	}
@@ -320,9 +320,9 @@ func (t *Table) deleteFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 	if err != nil {
 		return err
 	}
-	for _, token := range tokens {
-		posting := invertedPosting{RowID: rowID, Positions: []uint32{token.Position}}
-		if err := secondaryIndex.InvertedIndex.Delete(ctx, token.Term, posting); err != nil {
+	postings := fullTextPostingsByTerm(rowID, tokens)
+	for term, posting := range postings {
+		if err := secondaryIndex.InvertedIndex.Delete(ctx, term, posting); err != nil {
 			return fmt.Errorf("failed to delete token for full-text index %s: %w", secondaryIndex.Name, err)
 		}
 	}
@@ -334,6 +334,10 @@ func fullTextPostingsByTermForRow(secondaryIndex SecondaryIndex, rowID RowID, ro
 	if err != nil {
 		return nil, err
 	}
+	return fullTextPostingsByTerm(rowID, tokens), nil
+}
+
+func fullTextPostingsByTerm(rowID RowID, tokens []textSearchTokenPosition) map[string]invertedPosting {
 	postings := make(map[string]invertedPosting, len(tokens))
 	for _, token := range tokens {
 		posting := postings[token.Term]
@@ -346,7 +350,7 @@ func fullTextPostingsByTermForRow(secondaryIndex SecondaryIndex, rowID RowID, ro
 		posting.Positions = slices.Compact(posting.Positions)
 		postings[term] = posting
 	}
-	return postings, nil
+	return postings
 }
 
 func (t *Table) insertInvertedIndexKeys(ctx context.Context, secondaryIndex SecondaryIndex, rowID RowID, row Row) error {

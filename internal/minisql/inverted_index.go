@@ -1047,6 +1047,10 @@ func (idx *dedicatedInvertedIndex) insertPostingIntoTreeCell(ctx context.Context
 	}
 
 	block := leaf.InvertedPostPage.Blocks[blockIdx]
+	if updatedCell, ok, err := idx.appendPostingToTreeBlock(ctx, cell, leaf, blockIdx, block, posting); ok || err != nil {
+		return updatedCell, ok, err
+	}
+
 	mode, blockPostings, err := decodeInvertedPostingList(block.Payload)
 	if err != nil {
 		return invertedEntryCell{}, false, err
@@ -1091,6 +1095,56 @@ func (idx *dedicatedInvertedIndex) insertPostingIntoTreeCell(ctx context.Context
 	updatedCell := cell
 	updatedCell.DocFreq = uint32(int(updatedCell.DocFreq) + newDocFreq - oldDocFreq)
 	updatedCell.PostingCount = uint32(int(updatedCell.PostingCount) + int(newPostingCount) - int(oldPostingCount))
+	return updatedCell, true, nil
+}
+
+// appendPostingToTreeBlock extends the rightmost matching posting block without
+// decoding/re-encoding it. It handles the common INSERT/CREATE INDEX case where
+// row IDs arrive in increasing order.
+func (idx *dedicatedInvertedIndex) appendPostingToTreeBlock(
+	ctx context.Context,
+	cell invertedEntryCell,
+	leaf *Page,
+	blockIdx int,
+	block invertedPostingBlock,
+	posting invertedPosting,
+) (invertedEntryCell, bool, error) {
+	if posting.RowID <= block.LastRowID {
+		return invertedEntryCell{}, false, nil
+	}
+	if idx.mode == invertedPostingModePositions && len(posting.Positions) == 0 {
+		return invertedEntryCell{}, false, nil
+	}
+
+	appendPayload, postingCount := encodeTrailingInvertedPosting(idx.mode, block.LastRowID, posting)
+	if len(block.Payload)+len(appendPayload) > invertedPostingBlockPayloadMax {
+		return invertedEntryCell{}, false, nil
+	}
+	if invertedPostingPageUsedBytes(leaf.InvertedPostPage)+uint64(len(appendPayload)) > uint64(invertedPageBodySize(leaf.Index)) {
+		return invertedEntryCell{}, false, nil
+	}
+
+	page, err := idx.pager.ModifyPage(ctx, leaf.Index)
+	if err != nil {
+		return invertedEntryCell{}, false, fmt.Errorf("modify inverted posting leaf %d: %w", leaf.Index, err)
+	}
+	postingPage := page.InvertedPostPage
+	if postingPage == nil || postingPage.Header.Level != 0 || blockIdx >= len(postingPage.Blocks) {
+		return invertedEntryCell{}, false, fmt.Errorf("inverted posting page %d changed during append", leaf.Index)
+	}
+
+	block = postingPage.Blocks[blockIdx]
+	block.Payload = append(block.Payload, appendPayload...)
+	block.LastRowID = posting.RowID
+	block.PostingCount += postingCount
+	postingPage.Blocks[blockIdx] = block
+
+	if err := idx.refreshPostingAncestors(ctx, page.Index); err != nil {
+		return invertedEntryCell{}, false, err
+	}
+	updatedCell := cell
+	updatedCell.DocFreq += 1
+	updatedCell.PostingCount += postingCount
 	return updatedCell, true, nil
 }
 
@@ -2220,12 +2274,8 @@ func removeInvertedPosting(mode invertedPostingMode, postings []invertedPosting,
 
 // ensureInvertedEntryPageFits verifies an entry page can marshal into pageSize.
 func ensureInvertedEntryPageFits(page *invertedEntryPage, pageSize int) error {
-	buf := make([]byte, pageSize)
-	if err := page.Marshal(buf); err != nil {
-		if errors.Is(err, errInvertedIndexEntryPageFull) {
-			return err
-		}
-		return err
+	if invertedEntryPageUsedBytes(page) > uint64(pageSize) {
+		return errInvertedIndexEntryPageFull
 	}
 	return nil
 }
@@ -2257,8 +2307,10 @@ func invertedEntryPageUsedBytes(page *invertedEntryPage) uint64 {
 
 // ensureInvertedPostingPageFits verifies a posting page can marshal into pageSize.
 func ensureInvertedPostingPageFits(page *invertedPostingPage, pageSize int) error {
-	buf := make([]byte, pageSize)
-	return page.Marshal(buf)
+	if invertedPostingPageUsedBytes(page) > uint64(pageSize) {
+		return fmt.Errorf("inverted posting page has insufficient free space")
+	}
+	return nil
 }
 
 // invertedPostingPageUnderfull reports whether a posting page should be repaired after delete.
