@@ -26,6 +26,7 @@ type logStructuredInvertedIndex struct {
 var _ invertedIndex = (*logStructuredInvertedIndex)(nil)
 var _ invertedBatchApplier = (*logStructuredInvertedIndex)(nil)
 
+// OpenInvertedIndex opens either a log-structured or legacy dedicated inverted index.
 func OpenInvertedIndex(ctx context.Context, name string, mode invertedIndexPostingMode, pager TxPager, rootPageIdx PageIndex) (invertedIndex, error) {
 	page, err := pager.ReadPage(ctx, rootPageIdx)
 	if err != nil {
@@ -40,6 +41,7 @@ func OpenInvertedIndex(ctx context.Context, name string, mode invertedIndexPosti
 	return nil, fmt.Errorf("inverted index %s root page %d is neither metadata nor entry page", name, rootPageIdx)
 }
 
+// NewLogStructuredInvertedIndex initializes a log-structured inverted index.
 func NewLogStructuredInvertedIndex(
 	ctx context.Context,
 	name string,
@@ -95,20 +97,24 @@ func newLogStructuredInvertedIndexFromMeta(
 	}, nil
 }
 
+// GetRootPageIdx returns the metadata root page.
 func (idx *logStructuredInvertedIndex) GetRootPageIdx() PageIndex {
 	return idx.rootPageIdx
 }
 
+// Mode returns the posting mode used by the index.
 func (idx *logStructuredInvertedIndex) Mode() invertedIndexPostingMode {
 	return idx.base.Mode()
 }
 
+// Insert adds one posting for term.
 func (idx *logStructuredInvertedIndex) Insert(ctx context.Context, term string, posting invertedPosting) error {
 	batch := newInvertedIndexMutationBatch(idx.Mode())
 	batch.Insert(term, posting)
 	return idx.ApplyBatch(ctx, batch)
 }
 
+// InsertMany adds multiple postings for term.
 func (idx *logStructuredInvertedIndex) InsertMany(ctx context.Context, term string, postings []invertedPosting) error {
 	if len(postings) == 0 {
 		return nil
@@ -120,6 +126,7 @@ func (idx *logStructuredInvertedIndex) InsertMany(ctx context.Context, term stri
 	return idx.ApplyBatch(ctx, batch)
 }
 
+// Replace deletes oldPosting and inserts newPosting for term.
 func (idx *logStructuredInvertedIndex) Replace(ctx context.Context, term string, oldPosting, newPosting invertedPosting) error {
 	batch := newInvertedIndexMutationBatch(idx.Mode())
 	batch.Delete(term, oldPosting)
@@ -127,12 +134,14 @@ func (idx *logStructuredInvertedIndex) Replace(ctx context.Context, term string,
 	return idx.ApplyBatch(ctx, batch)
 }
 
+// Delete removes posting for term.
 func (idx *logStructuredInvertedIndex) Delete(ctx context.Context, term string, posting invertedPosting) error {
 	batch := newInvertedIndexMutationBatch(idx.Mode())
 	batch.Delete(term, posting)
 	return idx.ApplyBatch(ctx, batch)
 }
 
+// ApplyBatch appends a batch of mutations as a segment.
 func (idx *logStructuredInvertedIndex) ApplyBatch(ctx context.Context, batch invertedIndexMutationBatch) error {
 	if batch.Empty() {
 		return nil
@@ -143,6 +152,7 @@ func (idx *logStructuredInvertedIndex) ApplyBatch(ctx context.Context, batch inv
 	return idx.appendMutationBatchSegment(ctx, batch)
 }
 
+// Lookup returns posting blocks for term.
 func (idx *logStructuredInvertedIndex) Lookup(ctx context.Context, term string) (invertedPostingIterator, error) {
 	meta, err := idx.readMetaPage(ctx)
 	if err != nil {
@@ -168,6 +178,7 @@ func (idx *logStructuredInvertedIndex) Lookup(ctx context.Context, term string) 
 	return &sliceInvertedPostingIterator{blocks: blocks}, nil
 }
 
+// Stats returns document and posting counts for term.
 func (idx *logStructuredInvertedIndex) Stats(ctx context.Context, term string) (invertedPostingStats, error) {
 	meta, err := idx.readMetaPage(ctx)
 	if err != nil {
@@ -198,6 +209,7 @@ func (idx *logStructuredInvertedIndex) Stats(ctx context.Context, term string) (
 	}, nil
 }
 
+// CountDocFreq returns the number of documents that contain term.
 func (idx *logStructuredInvertedIndex) CountDocFreq(ctx context.Context, term string) (uint32, error) {
 	meta, err := idx.readMetaPage(ctx)
 	if err != nil {
@@ -226,6 +238,7 @@ func (idx *logStructuredInvertedIndex) CountDocFreq(ctx context.Context, term st
 	return idx.countPositionDocFreq(ctx, meta, term)
 }
 
+// LoadRowIDs returns sorted row IDs for a row-id-only term.
 func (idx *logStructuredInvertedIndex) LoadRowIDs(ctx context.Context, term string, hint uint32) ([]RowID, error) {
 	if idx.Mode() != invertedPostingModeRowIDs {
 		return nil, fmt.Errorf("inverted index %s uses posting mode %d", idx.name, idx.Mode())
@@ -264,6 +277,7 @@ func (idx *logStructuredInvertedIndex) LoadRowIDs(ctx context.Context, term stri
 	return sortedRowIDsFromSet(rowIDs), nil
 }
 
+// FreeAll releases the base index, all segments, and the metadata root.
 func (idx *logStructuredInvertedIndex) FreeAll(ctx context.Context) error {
 	if err := idx.base.FreeAll(ctx); err != nil {
 		return err
@@ -353,6 +367,7 @@ type concatenatingInvertedPostingIterator struct {
 	index     int
 }
 
+// NextBlock returns the next block from the current iterator chain.
 func (it *concatenatingInvertedPostingIterator) NextBlock(ctx context.Context) (invertedPostingBlock, bool, error) {
 	for it.index < len(it.iterators) {
 		block, ok, err := it.iterators[it.index].NextBlock(ctx)
@@ -372,6 +387,7 @@ type sliceInvertedPostingIterator struct {
 	index  int
 }
 
+// NextBlock returns the next in-memory block.
 func (it *sliceInvertedPostingIterator) NextBlock(context.Context) (invertedPostingBlock, bool, error) {
 	if it.index >= len(it.blocks) {
 		return invertedPostingBlock{}, false, nil

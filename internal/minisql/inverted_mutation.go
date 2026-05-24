@@ -24,18 +24,22 @@ func newInvertedIndexMutationBatch(mode invertedIndexPostingMode) invertedIndexM
 	}
 }
 
+// Insert records an inserted posting for term.
 func (b *invertedIndexMutationBatch) Insert(term string, posting invertedPosting) {
 	b.inserts[term] = append(b.inserts[term], posting)
 }
 
+// Delete records a deleted posting for term.
 func (b *invertedIndexMutationBatch) Delete(term string, posting invertedPosting) {
 	b.deletes[term] = append(b.deletes[term], posting)
 }
 
+// Empty reports whether the batch has no mutations.
 func (b invertedIndexMutationBatch) Empty() bool {
 	return len(b.inserts) == 0 && len(b.deletes) == 0
 }
 
+// Apply applies the batch to index.
 func (b invertedIndexMutationBatch) Apply(ctx context.Context, index invertedIndex) error {
 	if b.Empty() {
 		return nil

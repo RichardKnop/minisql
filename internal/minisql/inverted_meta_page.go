@@ -22,6 +22,7 @@ func (d invertedSegmentDescriptor) size() uint64 {
 	return 1 + 1 + 4 + 4 + 8 + 2 + uint64(len([]byte(d.FirstTerm))) + 2 + uint64(len([]byte(d.LastTerm)))
 }
 
+// Marshal writes the segment descriptor into buf.
 func (d invertedSegmentDescriptor) Marshal(buf []byte) error {
 	if len([]byte(d.FirstTerm)) > MaxIndexKeySize {
 		return fmt.Errorf("inverted segment first term exceeds max index key size %d", MaxIndexKeySize)
@@ -53,6 +54,7 @@ func (d invertedSegmentDescriptor) Marshal(buf []byte) error {
 	return nil
 }
 
+// Unmarshal decodes the segment descriptor from buf.
 func (d *invertedSegmentDescriptor) Unmarshal(buf []byte) error {
 	const fixedSize = 1 + 1 + 4 + 4 + 8 + 2 + 2
 	if len(buf) < fixedSize {
@@ -96,6 +98,7 @@ type invertedMetaPage struct {
 	Segments       []invertedSegmentDescriptor
 }
 
+// NewInvertedMetaPage creates metadata for a log-structured inverted index.
 func NewInvertedMetaPage(mode invertedPostingMode, baseRoot PageIndex) *invertedMetaPage {
 	return &invertedMetaPage{
 		FormatVersion:  invertedPageFormatVersion,
@@ -109,6 +112,7 @@ func (p *invertedMetaPage) headerSize() uint64 {
 	return 1 + 1 + 1 + 2 + 4 + 8
 }
 
+// Clone returns a deep copy of the inverted metadata page.
 func (p *invertedMetaPage) Clone() *invertedMetaPage {
 	if p == nil {
 		return nil
@@ -124,6 +128,7 @@ func (p *invertedMetaPage) Clone() *invertedMetaPage {
 	return clone
 }
 
+// Marshal writes the inverted metadata page into buf.
 func (p *invertedMetaPage) Marshal(buf []byte) error {
 	used := p.usedBytes()
 	if len(buf) < int(used) {
@@ -164,6 +169,7 @@ func (p *invertedMetaPage) usedBytes() uint64 {
 	return used
 }
 
+// Unmarshal decodes the inverted metadata page from buf.
 func (p *invertedMetaPage) Unmarshal(buf []byte) error {
 	if len(buf) < int(p.headerSize()) {
 		return fmt.Errorf("inverted meta page buffer too small")

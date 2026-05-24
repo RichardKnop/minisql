@@ -533,6 +533,7 @@ func (idx *dedicatedInvertedIndex) Stats(ctx context.Context, term string) (inve
 	}, nil
 }
 
+// CountDocFreq returns the number of documents that contain term.
 func (idx *dedicatedInvertedIndex) CountDocFreq(ctx context.Context, term string) (uint32, error) {
 	stats, err := idx.Stats(ctx, term)
 	if err != nil {
@@ -541,6 +542,7 @@ func (idx *dedicatedInvertedIndex) CountDocFreq(ctx context.Context, term string
 	return stats.DocFreq, nil
 }
 
+// LoadRowIDs returns the sorted row IDs for a row-id-only inverted term.
 func (idx *dedicatedInvertedIndex) LoadRowIDs(ctx context.Context, term string, hint uint32) ([]RowID, error) {
 	if idx.mode != invertedPostingModeRowIDs {
 		return nil, fmt.Errorf("inverted index %s uses posting mode %d", idx.name, idx.mode)

@@ -14,6 +14,7 @@ func (h invertedSegmentPageHeader) size() uint64 {
 	return 1 + 1 + 2 + 2 + 2 + 4
 }
 
+// Marshal writes the segment page header into buf.
 func (h invertedSegmentPageHeader) Marshal(buf []byte) error {
 	if len(buf) < int(h.size()) {
 		return fmt.Errorf("inverted segment page header buffer too small")
@@ -33,6 +34,7 @@ func (h invertedSegmentPageHeader) Marshal(buf []byte) error {
 	return nil
 }
 
+// Unmarshal decodes the segment page header from buf.
 func (h *invertedSegmentPageHeader) Unmarshal(buf []byte) error {
 	if len(buf) < int(h.size()) {
 		return fmt.Errorf("inverted segment page header buffer too small")
@@ -80,6 +82,7 @@ func NewInvertedSegmentPage() *invertedSegmentPage {
 	return &invertedSegmentPage{Header: header}
 }
 
+// Clone returns a deep copy of the segment page.
 func (p *invertedSegmentPage) Clone() *invertedSegmentPage {
 	if p == nil {
 		return nil
@@ -95,6 +98,7 @@ func (p *invertedSegmentPage) Clone() *invertedSegmentPage {
 	return clone
 }
 
+// Marshal writes the segment page into buf.
 func (p *invertedSegmentPage) Marshal(buf []byte) error {
 	if len(buf) < int(p.Header.size()) {
 		return fmt.Errorf("inverted segment page buffer too small")
@@ -124,6 +128,7 @@ func (p *invertedSegmentPage) Marshal(buf []byte) error {
 	return nil
 }
 
+// Unmarshal decodes the segment page from buf.
 func (p *invertedSegmentPage) Unmarshal(buf []byte) error {
 	var header invertedSegmentPageHeader
 	if err := header.Unmarshal(buf); err != nil {
@@ -151,6 +156,7 @@ func (c invertedSegmentCell) size() uint64 {
 	return 2 + uint64(len([]byte(c.Term))) + 1 + 4 + 4 + c.Block.size()
 }
 
+// Marshal writes the segment cell into buf.
 func (c invertedSegmentCell) Marshal(buf []byte) error {
 	if len([]byte(c.Term)) > MaxIndexKeySize {
 		return fmt.Errorf("inverted segment term exceeds max index key size %d", MaxIndexKeySize)
@@ -175,6 +181,7 @@ func (c invertedSegmentCell) Marshal(buf []byte) error {
 	return nil
 }
 
+// Unmarshal decodes the segment cell from buf.
 func (c *invertedSegmentCell) Unmarshal(buf []byte) (uint64, error) {
 	if len(buf) < 11 {
 		return 0, fmt.Errorf("inverted segment cell buffer too small")
