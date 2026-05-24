@@ -6,6 +6,8 @@ import (
 	"sort"
 )
 
+const logStructuredInvertedIndexCompactSegmentThreshold = 96
+
 type logStructuredInvertedIndex struct {
 	pager       TxPager
 	rootPageIdx PageIndex
@@ -382,7 +384,10 @@ func (idx *logStructuredInvertedIndex) appendMutationBatchSegment(ctx context.Co
 		PostingCount: postingCount,
 		Kind:         kind,
 	})
-	return nil
+	if len(metaPage.InvertedMetaPage.Segments) < logStructuredInvertedIndexCompactSegmentThreshold {
+		return nil
+	}
+	return idx.compactSegments(ctx)
 }
 
 func (idx *logStructuredInvertedIndex) mutationSegmentCells(kind byte, postingsByTerm map[string][]invertedPosting) ([]invertedSegmentCell, uint32, error) {
@@ -462,6 +467,90 @@ func (idx *logStructuredInvertedIndex) newSegmentPage(ctx context.Context) (*Pag
 	page.Clear()
 	page.InvertedSegmentPage = NewInvertedSegmentPage()
 	return page, nil
+}
+
+func (idx *logStructuredInvertedIndex) compactSegments(ctx context.Context) error {
+	meta, err := idx.readMetaPage(ctx)
+	if err != nil {
+		return err
+	}
+	if len(meta.Segments) == 0 {
+		return nil
+	}
+	segments := append([]invertedSegmentDescriptor(nil), meta.Segments...)
+	sort.SliceStable(segments, func(i, j int) bool {
+		return segments[i].Generation < segments[j].Generation
+	})
+	for _, segment := range segments {
+		if err := idx.applySegmentToBase(ctx, segment); err != nil {
+			return err
+		}
+	}
+	for _, segment := range segments {
+		if err := idx.freeSegmentPages(ctx, segment.RootPage); err != nil {
+			return fmt.Errorf("free compacted inverted segment root %d: %w", segment.RootPage, err)
+		}
+	}
+
+	metaPage, err := idx.pager.ModifyPage(ctx, idx.rootPageIdx)
+	if err != nil {
+		return fmt.Errorf("modify inverted metadata root after compaction: %w", err)
+	}
+	if metaPage.InvertedMetaPage == nil {
+		return fmt.Errorf("inverted index %s root page %d is not a metadata page", idx.name, idx.rootPageIdx)
+	}
+	metaPage.InvertedMetaPage.Segments = nil
+	return nil
+}
+
+func (idx *logStructuredInvertedIndex) applySegmentToBase(ctx context.Context, segment invertedSegmentDescriptor) error {
+	return idx.visitSegmentCells(ctx, segment.RootPage, func(cell invertedSegmentCell) error {
+		kind := segment.Kind
+		if kind == invertedSegmentKindMixed {
+			kind = cell.Kind
+		}
+		mode, postings, err := decodeInvertedPostingList(cell.Block.Payload)
+		if err != nil {
+			return err
+		}
+		if mode != idx.Mode() {
+			return fmt.Errorf("inverted segment block uses posting mode %d, expected %d", mode, idx.Mode())
+		}
+		switch kind {
+		case invertedSegmentKindInsert:
+			if err := idx.base.InsertMany(ctx, cell.Term, postings); err != nil {
+				return fmt.Errorf("compact inverted segment insert term %q: %w", cell.Term, err)
+			}
+		case invertedSegmentKindDelete:
+			for _, posting := range postings {
+				if err := idx.base.Delete(ctx, cell.Term, posting); err != nil {
+					return fmt.Errorf("compact inverted segment delete term %q: %w", cell.Term, err)
+				}
+			}
+		default:
+			return fmt.Errorf("unknown inverted segment kind %d", kind)
+		}
+		return nil
+	})
+}
+
+func (idx *logStructuredInvertedIndex) visitSegmentCells(ctx context.Context, root PageIndex, visit func(invertedSegmentCell) error) error {
+	for pageIdx := root; pageIdx != 0; {
+		page, err := idx.pager.ReadPage(ctx, pageIdx)
+		if err != nil {
+			return fmt.Errorf("read inverted segment page %d: %w", pageIdx, err)
+		}
+		if page.InvertedSegmentPage == nil {
+			return fmt.Errorf("inverted segment page %d has unexpected page type", pageIdx)
+		}
+		for _, cell := range page.InvertedSegmentPage.Cells {
+			if err := visit(cell); err != nil {
+				return err
+			}
+		}
+		pageIdx = page.InvertedSegmentPage.Header.NextPage
+	}
+	return nil
 }
 
 func currentSegmentPageSize(page *invertedSegmentPage) uint64 {
