@@ -219,6 +219,56 @@ func TestLogStructuredInvertedIndex_LookupSkipsOutOfRangeSegments(t *testing.T) 
 	assert.False(t, ok)
 }
 
+func TestLogStructuredInvertedIndex_InsertOnlyLookupStreamsSegmentBlocks(t *testing.T) {
+	ctx := context.Background()
+	index, txManager, metaRoot := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModeRowIDs)
+
+	const term = "kv:type:s:\"click\""
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		page, err := index.newSegmentPage(ctx)
+		if err != nil {
+			return err
+		}
+		page.InvertedSegmentPage.Cells = []invertedSegmentCell{{
+			Term: term,
+			Block: invertedPostingBlock{
+				FirstRowID:   42,
+				LastRowID:    42,
+				PostingCount: 1,
+				CodecVersion: invertedPostingCodecVersion,
+				Payload:      []byte{255},
+			},
+			DocFreq:      1,
+			PostingCount: 1,
+			Kind:         invertedSegmentKindInsert,
+		}}
+		meta, err := index.pager.ModifyPage(ctx, metaRoot)
+		if err != nil {
+			return err
+		}
+		meta.InvertedMetaPage.Segments = []invertedSegmentDescriptor{{
+			Generation:   1,
+			RootPage:     page.Index,
+			PostingCount: 1,
+			Kind:         invertedSegmentKindInsert,
+			FirstTerm:    term,
+			LastTerm:     term,
+		}}
+		return nil
+	}))
+
+	iter, err := index.Lookup(ctx, term)
+	require.NoError(t, err)
+	block, ok, err := iter.NextBlock(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, []byte{255}, block.Payload)
+
+	stats, err := index.Stats(ctx, term)
+	require.NoError(t, err)
+	assert.Equal(t, invertedPostingStats{DocFreq: 1, PostingCount: 1}, stats)
+}
+
 func TestLogStructuredInvertedIndex_DeleteSegmentFiltersEarlierPostings(t *testing.T) {
 	ctx := context.Background()
 	index, txManager, _ := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModeRowIDs)

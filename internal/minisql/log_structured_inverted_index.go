@@ -147,6 +147,9 @@ func (idx *logStructuredInvertedIndex) Lookup(ctx context.Context, term string) 
 	if !segmentsMayContainTerm(meta.Segments, term) {
 		return idx.base.Lookup(ctx, term)
 	}
+	if insertOnlySegmentsMayContainTerm(meta.Segments, term) {
+		return idx.lookupInsertOnlySegments(ctx, meta, term)
+	}
 	postings, err := idx.materializeTermPostings(ctx, meta, term)
 	if err != nil {
 		return nil, err
@@ -168,6 +171,9 @@ func (idx *logStructuredInvertedIndex) Stats(ctx context.Context, term string) (
 	}
 	if !segmentsMayContainTerm(meta.Segments, term) {
 		return idx.base.Stats(ctx, term)
+	}
+	if insertOnlySegmentsMayContainTerm(meta.Segments, term) {
+		return idx.statsInsertOnlySegments(ctx, meta, term)
 	}
 	postings, err := idx.materializeTermPostings(ctx, meta, term)
 	if err != nil {
@@ -294,6 +300,57 @@ func (it *sliceInvertedPostingIterator) NextBlock(context.Context) (invertedPost
 	block := it.blocks[it.index]
 	it.index++
 	return block, true, nil
+}
+
+func (idx *logStructuredInvertedIndex) lookupInsertOnlySegments(
+	ctx context.Context,
+	meta *invertedMetaPage,
+	term string,
+) (invertedPostingIterator, error) {
+	baseIter, err := idx.base.Lookup(ctx, term)
+	if err != nil {
+		return nil, err
+	}
+	iterators := []invertedPostingIterator{baseIter}
+	for _, segment := range meta.Segments {
+		if !segmentMayContainTerm(segment, term) {
+			continue
+		}
+		if err := idx.visitSegmentTermCells(ctx, segment.RootPage, term, func(cell invertedSegmentCell) error {
+			iterators = append(iterators, &singleBlockInvertedPostingIterator{
+				block:    cell.Block,
+				hasBlock: true,
+			})
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return &concatenatingInvertedPostingIterator{iterators: iterators}, nil
+}
+
+func (idx *logStructuredInvertedIndex) statsInsertOnlySegments(
+	ctx context.Context,
+	meta *invertedMetaPage,
+	term string,
+) (invertedPostingStats, error) {
+	stats, err := idx.base.Stats(ctx, term)
+	if err != nil {
+		return invertedPostingStats{}, err
+	}
+	for _, segment := range meta.Segments {
+		if !segmentMayContainTerm(segment, term) {
+			continue
+		}
+		if err := idx.visitSegmentTermCells(ctx, segment.RootPage, term, func(cell invertedSegmentCell) error {
+			stats.DocFreq += cell.DocFreq
+			stats.PostingCount += cell.PostingCount
+			return nil
+		}); err != nil {
+			return invertedPostingStats{}, err
+		}
+	}
+	return stats, nil
 }
 
 func (idx *logStructuredInvertedIndex) materializeTermPostings(
@@ -438,6 +495,18 @@ func segmentsMayContainTerm(segments []invertedSegmentDescriptor, term string) b
 		}
 	}
 	return false
+}
+
+func insertOnlySegmentsMayContainTerm(segments []invertedSegmentDescriptor, term string) bool {
+	for _, segment := range segments {
+		if !segmentMayContainTerm(segment, term) {
+			continue
+		}
+		if segment.Kind != invertedSegmentKindInsert {
+			return false
+		}
+	}
+	return true
 }
 
 func segmentTermBounds(cells []invertedSegmentCell) (string, string) {
