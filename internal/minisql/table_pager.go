@@ -23,6 +23,8 @@ const (
 	PageTypeInvertedEntry
 	// PageTypeInvertedPosting identifies a future dedicated inverted-index posting tree page.
 	PageTypeInvertedPosting
+	// PageTypeInvertedMeta identifies log-structured inverted-index metadata pages.
+	PageTypeInvertedMeta
 )
 
 type tablePager struct {

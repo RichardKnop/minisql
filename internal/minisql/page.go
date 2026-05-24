@@ -25,6 +25,7 @@ type Page struct {
 	IndexOverflowNode *IndexOverflowPage
 	InvertedEntryPage *invertedEntryPage
 	InvertedPostPage  *invertedPostingPage
+	InvertedMetaPage  *invertedMetaPage
 	Index             PageIndex
 }
 
@@ -60,6 +61,8 @@ func (p *Page) Clone() *Page {
 		pageCopy.InvertedEntryPage = p.InvertedEntryPage.Clone()
 	case p.InvertedPostPage != nil:
 		pageCopy.InvertedPostPage = p.InvertedPostPage.Clone()
+	case p.InvertedMetaPage != nil:
+		pageCopy.InvertedMetaPage = p.InvertedMetaPage.Clone()
 	}
 
 	return pageCopy

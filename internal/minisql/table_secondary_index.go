@@ -250,10 +250,12 @@ func (t *Table) insertFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 		return err
 	}
 	postings := fullTextPostingsByTerm(rowID, tokens)
+	batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
 	for term, posting := range postings {
-		if err := secondaryIndex.InvertedIndex.Insert(ctx, term, posting); err != nil {
-			return fmt.Errorf("failed to insert token for full-text index %s: %w", secondaryIndex.Name, err)
-		}
+		batch.Insert(term, posting)
+	}
+	if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
+		return fmt.Errorf("failed to insert tokens for full-text index %s: %w", secondaryIndex.Name, err)
 	}
 	return nil
 }
@@ -289,12 +291,11 @@ func (t *Table) updateFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 	if err != nil {
 		return err
 	}
+	batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
 	for term, oldPosting := range oldPostings {
 		newPosting, ok := newPostings[term]
 		if !ok {
-			if err := secondaryIndex.InvertedIndex.Delete(ctx, term, oldPosting); err != nil {
-				return fmt.Errorf("failed to delete token for full-text index %s: %w", secondaryIndex.Name, err)
-			}
+			batch.Delete(term, oldPosting)
 			continue
 		}
 		if !slices.Equal(oldPosting.Positions, newPosting.Positions) {
@@ -305,9 +306,10 @@ func (t *Table) updateFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 		delete(newPostings, term)
 	}
 	for term, posting := range newPostings {
-		if err := secondaryIndex.InvertedIndex.Insert(ctx, term, posting); err != nil {
-			return fmt.Errorf("failed to insert token for full-text index %s: %w", secondaryIndex.Name, err)
-		}
+		batch.Insert(term, posting)
+	}
+	if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
+		return fmt.Errorf("failed to update tokens for full-text index %s: %w", secondaryIndex.Name, err)
 	}
 	return nil
 }
@@ -321,10 +323,12 @@ func (t *Table) deleteFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 		return err
 	}
 	postings := fullTextPostingsByTerm(rowID, tokens)
+	batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
 	for term, posting := range postings {
-		if err := secondaryIndex.InvertedIndex.Delete(ctx, term, posting); err != nil {
-			return fmt.Errorf("failed to delete token for full-text index %s: %w", secondaryIndex.Name, err)
-		}
+		batch.Delete(term, posting)
+	}
+	if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
+		return fmt.Errorf("failed to delete tokens for full-text index %s: %w", secondaryIndex.Name, err)
 	}
 	return nil
 }
@@ -367,10 +371,12 @@ func (t *Table) insertInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 	if err != nil {
 		return err
 	}
+	batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
 	for _, term := range terms {
-		if err := secondaryIndex.InvertedIndex.Insert(ctx, term, invertedPosting{RowID: rowID}); err != nil {
-			return fmt.Errorf("failed to insert JSON term for inverted index %s: %w", secondaryIndex.Name, err)
-		}
+		batch.Insert(term, invertedPosting{RowID: rowID})
+	}
+	if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
+		return fmt.Errorf("failed to insert JSON terms for inverted index %s: %w", secondaryIndex.Name, err)
 	}
 	return nil
 }
@@ -406,19 +412,19 @@ func (t *Table) updateInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 	if err != nil {
 		return err
 	}
+	batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
 	for term := range oldTerms {
 		if _, ok := newTerms[term]; ok {
 			delete(newTerms, term)
 			continue
 		}
-		if err := secondaryIndex.InvertedIndex.Delete(ctx, term, invertedPosting{RowID: rowID}); err != nil {
-			return fmt.Errorf("failed to delete JSON term for inverted index %s: %w", secondaryIndex.Name, err)
-		}
+		batch.Delete(term, invertedPosting{RowID: rowID})
 	}
 	for term := range newTerms {
-		if err := secondaryIndex.InvertedIndex.Insert(ctx, term, invertedPosting{RowID: rowID}); err != nil {
-			return fmt.Errorf("failed to insert JSON term for inverted index %s: %w", secondaryIndex.Name, err)
-		}
+		batch.Insert(term, invertedPosting{RowID: rowID})
+	}
+	if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
+		return fmt.Errorf("failed to update JSON terms for inverted index %s: %w", secondaryIndex.Name, err)
 	}
 	return nil
 }
@@ -431,10 +437,12 @@ func (t *Table) deleteInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 	if err != nil {
 		return err
 	}
+	batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
 	for _, term := range terms {
-		if err := secondaryIndex.InvertedIndex.Delete(ctx, term, invertedPosting{RowID: rowID}); err != nil {
-			return fmt.Errorf("failed to delete JSON term for inverted index %s: %w", secondaryIndex.Name, err)
-		}
+		batch.Delete(term, invertedPosting{RowID: rowID})
+	}
+	if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
+		return fmt.Errorf("failed to delete JSON terms for inverted index %s: %w", secondaryIndex.Name, err)
 	}
 	return nil
 }

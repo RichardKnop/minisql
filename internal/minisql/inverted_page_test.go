@@ -173,3 +173,57 @@ func TestInvertedPostingPage_Marshal(t *testing.T) {
 	clone.Blocks[0].Payload[0] = 99
 	assert.NotEqual(t, clone.Blocks[0].Payload[0], decoded.Blocks[0].Payload[0])
 }
+
+func TestInvertedMetaPage_Marshal(t *testing.T) {
+	t.Parallel()
+
+	page := NewInvertedMetaPage(invertedPostingModePositions, 42)
+	page.NextGeneration = 9
+	page.Segments = []invertedSegmentDescriptor{
+		{
+			Generation:   1,
+			RootPage:     77,
+			PostingCount: 120,
+			Kind:         invertedSegmentKindInsert,
+		},
+		{
+			Generation:   2,
+			RootPage:     88,
+			PostingCount: 7,
+			Kind:         invertedSegmentKindDelete,
+		},
+	}
+	buf := make([]byte, PageSize)
+	require.NoError(t, page.Marshal(buf))
+
+	var decoded invertedMetaPage
+	require.NoError(t, decoded.Unmarshal(buf))
+	assert.Equal(t, page.FormatVersion, decoded.FormatVersion)
+	assert.Equal(t, page.Mode, decoded.Mode)
+	assert.Equal(t, page.BaseRoot, decoded.BaseRoot)
+	assert.Equal(t, page.NextGeneration, decoded.NextGeneration)
+	assert.Equal(t, page.Segments, decoded.Segments)
+
+	clone := decoded.Clone()
+	require.NotNil(t, clone)
+	clone.Segments[0].RootPage = 99
+	assert.NotEqual(t, clone.Segments[0].RootPage, decoded.Segments[0].RootPage)
+}
+
+func TestInvertedMetaPage_UnmarshalRejectsUnknownSegmentKind(t *testing.T) {
+	t.Parallel()
+
+	page := NewInvertedMetaPage(invertedPostingModeRowIDs, 12)
+	page.Segments = []invertedSegmentDescriptor{{
+		Generation:   1,
+		RootPage:     99,
+		PostingCount: 10,
+		Kind:         invertedSegmentKindInsert,
+	}}
+	buf := make([]byte, PageSize)
+	require.NoError(t, page.Marshal(buf))
+	buf[page.headerSize()] = 99
+
+	var decoded invertedMetaPage
+	require.ErrorContains(t, decoded.Unmarshal(buf), "unknown kind")
+}

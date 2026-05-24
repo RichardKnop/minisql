@@ -38,6 +38,12 @@ func (p *invertedPager) unmarshal(totalPages uint32, pageIdx PageIndex, buf []by
 			return nil, err
 		}
 		return &Page{Index: pageIdx, InvertedPostPage: page}, nil
+	case PageTypeInvertedMeta:
+		page := new(invertedMetaPage)
+		if err := page.Unmarshal(buf[idx:]); err != nil {
+			return nil, err
+		}
+		return &Page{Index: pageIdx, InvertedMetaPage: page}, nil
 	case PageTypeFree:
 		freePage := new(FreePage)
 		if err := freePage.Unmarshal(buf[idx:]); err != nil {
