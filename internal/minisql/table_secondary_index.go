@@ -342,7 +342,15 @@ func fullTextPostingsByTermForRow(secondaryIndex SecondaryIndex, rowID RowID, ro
 }
 
 func fullTextPostingsByTerm(rowID RowID, tokens []textSearchTokenPosition) map[string]invertedPosting {
-	postings := make(map[string]invertedPosting, len(tokens))
+	return fullTextPostingsByTermInto(rowID, tokens, make(map[string]invertedPosting, len(tokens)))
+}
+
+func fullTextPostingsByTermInto(
+	rowID RowID,
+	tokens []textSearchTokenPosition,
+	postings map[string]invertedPosting,
+) map[string]invertedPosting {
+	clear(postings)
 	for _, token := range tokens {
 		posting := postings[token.Term]
 		posting.RowID = rowID
@@ -448,6 +456,10 @@ func (t *Table) deleteInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 }
 
 func jsonInvertedTermsForRow(secondaryIndex SecondaryIndex, row Row) ([]string, error) {
+	return jsonInvertedTermsForRowInto(secondaryIndex, row, nil)
+}
+
+func jsonInvertedTermsForRowInto(secondaryIndex SecondaryIndex, row Row, terms []string) ([]string, error) {
 	if len(secondaryIndex.Columns) != 1 {
 		return nil, fmt.Errorf("inverted index %s requires exactly one source column", secondaryIndex.Name)
 	}
@@ -459,7 +471,7 @@ func jsonInvertedTermsForRow(secondaryIndex SecondaryIndex, row Row) ([]string, 
 	if !ok {
 		return nil, fmt.Errorf("inverted index %s column %q must be JSON text", secondaryIndex.Name, secondaryIndex.Columns[0].Name)
 	}
-	return jsonInvertedTermsForDocument(doc)
+	return jsonInvertedTermsForDocumentInto(doc, terms)
 }
 
 func jsonInvertedTermSetForRow(secondaryIndex SecondaryIndex, row Row) (map[string]struct{}, error) {
@@ -487,26 +499,38 @@ func fullTextTokensForRow(secondaryIndex SecondaryIndex, row Row) ([]string, err
 }
 
 func fullTextTokenPositionsForRow(secondaryIndex SecondaryIndex, row Row) ([]textSearchTokenPosition, error) {
+	positions, _, err := fullTextTokenPositionsForRowInto(secondaryIndex, row, nil, nil)
+	return positions, err
+}
+
+func fullTextTokenPositionsForRowInto(
+	secondaryIndex SecondaryIndex,
+	row Row,
+	positions []textSearchTokenPosition,
+	current []rune,
+) ([]textSearchTokenPosition, []rune, error) {
 	if len(secondaryIndex.Columns) != 1 {
-		return nil, fmt.Errorf("full-text index %s requires exactly one source column", secondaryIndex.Name)
+		return nil, current, fmt.Errorf("full-text index %s requires exactly one source column", secondaryIndex.Name)
 	}
 	value, ok := row.GetValue(secondaryIndex.Columns[0].Name)
 	if !ok || !value.Valid {
-		return nil, nil
+		return nil, current, nil
 	}
 	doc, ok := toStringVal(value.Value)
 	if !ok {
-		return nil, fmt.Errorf("full-text index %s column %q must be text", secondaryIndex.Name, secondaryIndex.Columns[0].Name)
+		return nil, current, fmt.Errorf("full-text index %s column %q must be text", secondaryIndex.Name, secondaryIndex.Columns[0].Name)
 	}
-	positions := textSearchTokenPositions(doc)
-	indexable := make([]textSearchTokenPosition, 0, len(positions))
-	for _, token := range positions {
+	positions, current = textSearchTokenPositionsInto(doc, positions, current)
+	writeIdx := 0
+	for readIdx := range positions {
+		token := positions[readIdx]
 		if len([]byte(token.Term)) > MaxIndexKeySize {
 			continue
 		}
-		indexable = append(indexable, token)
+		positions[writeIdx] = token
+		writeIdx++
 	}
-	return indexable, nil
+	return positions[:writeIdx], current, nil
 }
 
 func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, oldRow, row Row) error {

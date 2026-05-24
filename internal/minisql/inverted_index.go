@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"slices"
@@ -2179,6 +2180,10 @@ func (idx *dedicatedInvertedIndex) freePostingTree(ctx context.Context, cell inv
 // makeInvertedPostingBlocks packs already-grouped postings into bounded
 // compressed blocks. Callers are responsible for grouping before this call.
 func makeInvertedPostingBlocks(mode invertedPostingMode, postings []invertedPosting) ([]invertedPostingBlock, error) {
+	if mode == invertedPostingModeRowIDs {
+		return makeRowIDInvertedPostingBlocks(postings)
+	}
+
 	blocks := make([]invertedPostingBlock, 0)
 	for len(postings) > 0 {
 		n, payload, err := encodeLargestInvertedPostingBlock(mode, postings, invertedPostingBlockPayloadMax)
@@ -2189,6 +2194,66 @@ func makeInvertedPostingBlocks(mode invertedPostingMode, postings []invertedPost
 		blocks = append(blocks, postingBlockFromPostings(mode, blockPostings, payload))
 		postings = postings[n:]
 	}
+	return blocks, nil
+}
+
+// makeRowIDInvertedPostingBlocks packs row-only postings in one pass. The
+// positional path still needs full per-row position encoding, but JSON inverted
+// indexes can split blocks while streaming row deltas into the payload.
+func makeRowIDInvertedPostingBlocks(postings []invertedPosting) ([]invertedPostingBlock, error) {
+	if len(postings) == 0 {
+		return nil, nil
+	}
+
+	blocks := make([]invertedPostingBlock, 0, len(postings)/invertedPostingBlockPayloadMax+1)
+	payload := make([]byte, 0, invertedPostingBlockPayloadMax)
+	payload = append(payload, invertedPostingCodecVersion, byte(invertedPostingModeRowIDs))
+
+	var (
+		firstRowID   RowID
+		lastRowID    RowID
+		prevRowID    RowID
+		postingCount uint32
+		tmp          [binary.MaxVarintLen64]byte
+	)
+	for _, posting := range postings {
+		rowDelta := uint64(posting.RowID)
+		if postingCount > 0 {
+			rowDelta = uint64(posting.RowID - prevRowID)
+		}
+		n := binary.PutUvarint(tmp[:], rowDelta)
+		if postingCount > 0 && len(payload)+n > invertedPostingBlockPayloadMax {
+			blocks = append(blocks, invertedPostingBlock{
+				Payload:      payload,
+				FirstRowID:   firstRowID,
+				LastRowID:    lastRowID,
+				PostingCount: postingCount,
+				CodecVersion: invertedPostingCodecVersion,
+			})
+
+			payload = make([]byte, 0, invertedPostingBlockPayloadMax)
+			payload = append(payload, invertedPostingCodecVersion, byte(invertedPostingModeRowIDs))
+			rowDelta = uint64(posting.RowID)
+			n = binary.PutUvarint(tmp[:], rowDelta)
+			postingCount = 0
+		}
+
+		if postingCount == 0 {
+			firstRowID = posting.RowID
+		}
+		payload = append(payload, tmp[:n]...)
+		lastRowID = posting.RowID
+		prevRowID = posting.RowID
+		postingCount++
+	}
+
+	blocks = append(blocks, invertedPostingBlock{
+		Payload:      payload,
+		FirstRowID:   firstRowID,
+		LastRowID:    lastRowID,
+		PostingCount: postingCount,
+		CodecVersion: invertedPostingCodecVersion,
+	})
 	return blocks, nil
 }
 

@@ -40,8 +40,17 @@ func textSearchTokens(input string) []string {
 // textSearchTokenPositions lowercases input, splits on non-letter/non-digit
 // boundaries, removes stop words, and assigns dense positions to emitted tokens.
 func textSearchTokenPositions(input string) []textSearchTokenPosition {
-	tokens := make([]textSearchTokenPosition, 0)
-	current := make([]rune, 0, 16)
+	tokens, _ := textSearchTokenPositionsInto(input, nil, nil)
+	return tokens
+}
+
+func textSearchTokenPositionsInto(
+	input string,
+	tokens []textSearchTokenPosition,
+	current []rune,
+) ([]textSearchTokenPosition, []rune) {
+	tokens = tokens[:0]
+	current = current[:0]
 	var position uint64
 
 	flush := func() {
@@ -69,7 +78,7 @@ func textSearchTokenPositions(input string) []textSearchTokenPosition {
 	}
 	flush()
 
-	return tokens
+	return tokens, current
 }
 
 // uniqueTextSearchTokens returns de-duplicated indexable tokens in first-seen

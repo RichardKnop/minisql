@@ -45,11 +45,15 @@ func jsonContainsDecodedQuery(doc string, queryValue any) (bool, error) {
 // jsonInvertedTermsForDocument extracts every key-existence and scalar
 // key/value term that should be stored for one JSON document.
 func jsonInvertedTermsForDocument(doc string) ([]string, error) {
+	return jsonInvertedTermsForDocumentInto(doc, nil)
+}
+
+func jsonInvertedTermsForDocumentInto(doc string, terms []string) ([]string, error) {
 	value, err := decodeJSONForInvertedIndex(doc)
 	if err != nil {
 		return nil, err
 	}
-	return jsonInvertedTerms(value), nil
+	return jsonInvertedTermsInto(value, terms), nil
 }
 
 // jsonInvertedTermsForQuery extracts the terms that must be present before a
@@ -141,7 +145,10 @@ func decodeJSONForInvertedIndex(input string) (any, error) {
 // jsonInvertedTerms returns a stable, deduplicated list of all index terms
 // generated from a decoded JSON value.
 func jsonInvertedTerms(value any) []string {
-	var terms []string
+	return jsonInvertedTermsInto(value, nil)
+}
+
+func jsonInvertedTermsInto(value any, terms []string) []string {
 	collectJSONInvertedTerms(&terms, "", value)
 	slices.Sort(terms)
 	return slices.Compact(terms)

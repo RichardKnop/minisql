@@ -1670,6 +1670,9 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 	}
 
 	postingsByTerm := make(map[string][]invertedPosting)
+	tokenBuf := make([]textSearchTokenPosition, 0, 16)
+	tokenRuneBuf := make([]rune, 0, 32)
+	rowPostings := make(map[string]invertedPosting, 16)
 	bufferedPostings := 0
 	flush := func() error {
 		if len(postingsByTerm) == 0 {
@@ -1677,9 +1680,7 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 		}
 		batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
 		for term, postings := range postingsByTerm {
-			for _, posting := range postings {
-				batch.Insert(term, posting)
-			}
+			batch.InsertMany(term, postings)
 		}
 		if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
 			return fmt.Errorf("failed to insert token batch for full-text index %s: %w", secondaryIndex.Name, err)
@@ -1702,11 +1703,13 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 			}
 		}
 
-		tokens, err := fullTextTokenPositionsForRow(secondaryIndex, row)
+		tokens, current, err := fullTextTokenPositionsForRowInto(secondaryIndex, row, tokenBuf[:0], tokenRuneBuf[:0])
 		if err != nil {
 			return err
 		}
-		rowPostings := fullTextPostingsByTerm(row.Key, tokens)
+		tokenBuf = tokens[:0]
+		tokenRuneBuf = current[:0]
+		rowPostings = fullTextPostingsByTermInto(row.Key, tokens, rowPostings)
 		for term, posting := range rowPostings {
 			postingsByTerm[term] = append(postingsByTerm[term], posting)
 			bufferedPostings += len(posting.Positions)
@@ -1738,6 +1741,7 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 	}
 
 	postingsByTerm := make(map[string][]invertedPosting)
+	termBuf := make([]string, 0, 16)
 	bufferedPostings := 0
 	flush := func() error {
 		if len(postingsByTerm) == 0 {
@@ -1745,9 +1749,7 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		}
 		batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
 		for term, postings := range postingsByTerm {
-			for _, posting := range postings {
-				batch.Insert(term, posting)
-			}
+			batch.InsertMany(term, postings)
 		}
 		if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
 			return fmt.Errorf("failed to insert JSON term batch for inverted index %s: %w", secondaryIndex.Name, err)
@@ -1770,7 +1772,7 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 			}
 		}
 
-		terms, err := jsonInvertedTermsForRow(secondaryIndex, row)
+		terms, err := jsonInvertedTermsForRowInto(secondaryIndex, row, termBuf[:0])
 		if err != nil {
 			return err
 		}
@@ -1778,6 +1780,7 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 			postingsByTerm[term] = append(postingsByTerm[term], invertedPosting{RowID: row.Key})
 			bufferedPostings += 1
 		}
+		termBuf = terms[:0]
 		if bufferedPostings >= populateInvertedIndexFlushPostings {
 			if err := flush(); err != nil {
 				return err

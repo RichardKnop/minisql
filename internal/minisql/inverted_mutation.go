@@ -29,6 +29,14 @@ func (b *invertedIndexMutationBatch) Insert(term string, posting invertedPosting
 	b.inserts[term] = append(b.inserts[term], posting)
 }
 
+// InsertMany records multiple inserted postings for term.
+func (b *invertedIndexMutationBatch) InsertMany(term string, postings []invertedPosting) {
+	if len(postings) == 0 {
+		return
+	}
+	b.inserts[term] = postings
+}
+
 // Delete records a deleted posting for term.
 func (b *invertedIndexMutationBatch) Delete(term string, posting invertedPosting) {
 	b.deletes[term] = append(b.deletes[term], posting)
