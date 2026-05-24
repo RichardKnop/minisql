@@ -219,12 +219,15 @@ func (idx *logStructuredInvertedIndex) visitSegmentTermCells(ctx context.Context
 		if page.InvertedSegmentPage == nil {
 			return fmt.Errorf("inverted segment page %d has unexpected page type", pageIdx)
 		}
-		for _, cell := range page.InvertedSegmentPage.Cells {
-			if cell.Term == term {
-				if err := visit(cell); err != nil {
-					return err
-				}
+		cells := page.InvertedSegmentPage.Cells
+		i := sort.Search(len(cells), func(i int) bool {
+			return cells[i].Term >= term
+		})
+		for i < len(cells) && cells[i].Term == term {
+			if err := visit(cells[i]); err != nil {
+				return err
 			}
+			i++
 		}
 		pageIdx = page.InvertedSegmentPage.Header.NextPage
 	}
@@ -377,6 +380,7 @@ func (idx *logStructuredInvertedIndex) appendMutationBatchSegment(ctx context.Co
 		return err
 	}
 	cells := append(deleteCells, insertCells...)
+	sortSegmentCells(cells)
 	postingCount := deletePostingCount + insertPostingCount
 	firstTerm, lastTerm := segmentTermBounds(cells)
 	rootPage, err := idx.writeSegmentCells(ctx, cells)
@@ -444,6 +448,22 @@ func segmentTermBounds(cells []invertedSegmentCell) (string, string) {
 		}
 	}
 	return firstTerm, lastTerm
+}
+
+func sortSegmentCells(cells []invertedSegmentCell) {
+	sort.SliceStable(cells, func(i, j int) bool {
+		if cells[i].Term != cells[j].Term {
+			return cells[i].Term < cells[j].Term
+		}
+		return invertedSegmentCellKindOrder(cells[i].Kind) < invertedSegmentCellKindOrder(cells[j].Kind)
+	})
+}
+
+func invertedSegmentCellKindOrder(kind byte) int {
+	if kind == invertedSegmentKindDelete {
+		return 0
+	}
+	return 1
 }
 
 func (idx *logStructuredInvertedIndex) mutationSegmentCells(kind byte, postingsByTerm map[string][]invertedPosting) ([]invertedSegmentCell, uint32, error) {

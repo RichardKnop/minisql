@@ -248,7 +248,7 @@ func TestLogStructuredInvertedIndex_DeleteSegmentFiltersEarlierPostings(t *testi
 
 func TestLogStructuredInvertedIndex_ReplaceSegmentReinsertsSameRow(t *testing.T) {
 	ctx := context.Background()
-	index, txManager, _ := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModePositions)
+	index, txManager, metaRoot := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModePositions)
 
 	const term = "database"
 	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -269,6 +269,16 @@ func TestLogStructuredInvertedIndex_ReplaceSegmentReinsertsSameRow(t *testing.T)
 	require.NoError(t, err)
 	postings := collectInvertedIteratorPostings(t, ctx, iter)
 	assert.Equal(t, []invertedPosting{{RowID: 5, Positions: []uint32{2, 4}}}, postings)
+
+	metaPage, err := index.pager.ReadPage(ctx, metaRoot)
+	require.NoError(t, err)
+	require.Len(t, metaPage.InvertedMetaPage.Segments, 2)
+	replaceSegment := metaPage.InvertedMetaPage.Segments[1]
+	segmentPage, err := index.pager.ReadPage(ctx, replaceSegment.RootPage)
+	require.NoError(t, err)
+	require.Len(t, segmentPage.InvertedSegmentPage.Cells, 2)
+	assert.Equal(t, invertedSegmentKindDelete, segmentPage.InvertedSegmentPage.Cells[0].Kind)
+	assert.Equal(t, invertedSegmentKindInsert, segmentPage.InvertedSegmentPage.Cells[1].Kind)
 }
 
 func TestLogStructuredInvertedIndex_CompactsSegmentsIntoBase(t *testing.T) {
