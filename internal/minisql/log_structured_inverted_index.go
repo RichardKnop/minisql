@@ -7,6 +7,7 @@ import (
 )
 
 const logStructuredInvertedIndexCompactSegmentThreshold = 96
+const logStructuredInvertedIndexMetaCompactBytes = PageSize * 3 / 4
 
 type logStructuredInvertedIndex struct {
 	pager       TxPager
@@ -285,6 +286,9 @@ func (idx *logStructuredInvertedIndex) materializeTermPostings(
 		return segments[i].Generation < segments[j].Generation
 	})
 	for _, segment := range segments {
+		if !segmentMayContainTerm(segment, term) {
+			continue
+		}
 		if err := idx.visitSegmentTermCells(ctx, segment.RootPage, term, func(cell invertedSegmentCell) error {
 			kind := segment.Kind
 			if kind == invertedSegmentKindMixed {
@@ -359,6 +363,7 @@ func (idx *logStructuredInvertedIndex) appendMutationBatchSegment(ctx context.Co
 	}
 	cells := append(deleteCells, insertCells...)
 	postingCount := deletePostingCount + insertPostingCount
+	firstTerm, lastTerm := segmentTermBounds(cells)
 	rootPage, err := idx.writeSegmentCells(ctx, cells)
 	if err != nil {
 		return err
@@ -383,11 +388,38 @@ func (idx *logStructuredInvertedIndex) appendMutationBatchSegment(ctx context.Co
 		RootPage:     rootPage,
 		PostingCount: postingCount,
 		Kind:         kind,
+		FirstTerm:    firstTerm,
+		LastTerm:     lastTerm,
 	})
-	if len(metaPage.InvertedMetaPage.Segments) < logStructuredInvertedIndexCompactSegmentThreshold {
+	if len(metaPage.InvertedMetaPage.Segments) < logStructuredInvertedIndexCompactSegmentThreshold &&
+		metaPage.InvertedMetaPage.usedBytes() < logStructuredInvertedIndexMetaCompactBytes {
 		return nil
 	}
 	return idx.compactSegments(ctx)
+}
+
+func segmentMayContainTerm(segment invertedSegmentDescriptor, term string) bool {
+	if segment.FirstTerm == "" && segment.LastTerm == "" {
+		return true
+	}
+	return term >= segment.FirstTerm && term <= segment.LastTerm
+}
+
+func segmentTermBounds(cells []invertedSegmentCell) (string, string) {
+	if len(cells) == 0 {
+		return "", ""
+	}
+	firstTerm := cells[0].Term
+	lastTerm := cells[0].Term
+	for _, cell := range cells[1:] {
+		if cell.Term < firstTerm {
+			firstTerm = cell.Term
+		}
+		if cell.Term > lastTerm {
+			lastTerm = cell.Term
+		}
+	}
+	return firstTerm, lastTerm
 }
 
 func (idx *logStructuredInvertedIndex) mutationSegmentCells(kind byte, postingsByTerm map[string][]invertedPosting) ([]invertedSegmentCell, uint32, error) {

@@ -148,11 +148,52 @@ func TestLogStructuredInvertedIndex_ApplyBatchWritesSegments(t *testing.T) {
 	require.NotNil(t, page.InvertedMetaPage)
 	require.Len(t, page.InvertedMetaPage.Segments, 1)
 	assert.Equal(t, invertedSegmentKindInsert, page.InvertedMetaPage.Segments[0].Kind)
+	assert.Equal(t, term, page.InvertedMetaPage.Segments[0].FirstTerm)
+	assert.Equal(t, term, page.InvertedMetaPage.Segments[0].LastTerm)
 
 	iter, err := index.Lookup(ctx, term)
 	require.NoError(t, err)
 	postings := collectInvertedIteratorPostings(t, ctx, iter)
 	assert.Equal(t, []invertedPosting{{RowID: 21}, {RowID: 22}}, postings)
+}
+
+func TestLogStructuredInvertedIndex_LookupSkipsOutOfRangeSegments(t *testing.T) {
+	ctx := context.Background()
+	index, txManager, metaRoot := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModeRowIDs)
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		page, err := index.newSegmentPage(ctx)
+		if err != nil {
+			return err
+		}
+		page.InvertedSegmentPage.Cells = []invertedSegmentCell{{
+			Term: "zeta",
+			Block: invertedPostingBlock{
+				CodecVersion: invertedPostingCodecVersion,
+				Payload:      []byte{255},
+			},
+			Kind: invertedSegmentKindInsert,
+		}}
+		meta, err := index.pager.ModifyPage(ctx, metaRoot)
+		if err != nil {
+			return err
+		}
+		meta.InvertedMetaPage.Segments = []invertedSegmentDescriptor{{
+			Generation:   1,
+			RootPage:     page.Index,
+			PostingCount: 1,
+			Kind:         invertedSegmentKindInsert,
+			FirstTerm:    "zeta",
+			LastTerm:     "zeta",
+		}}
+		return nil
+	}))
+
+	iter, err := index.Lookup(ctx, "alpha")
+	require.NoError(t, err)
+	_, ok, err := iter.NextBlock(ctx)
+	require.NoError(t, err)
+	assert.False(t, ok)
 }
 
 func TestLogStructuredInvertedIndex_DeleteSegmentFiltersEarlierPostings(t *testing.T) {
@@ -230,7 +271,7 @@ func TestLogStructuredInvertedIndex_CompactsSegmentsIntoBase(t *testing.T) {
 	page, err := index.pager.ReadPage(ctx, metaRoot)
 	require.NoError(t, err)
 	require.NotNil(t, page.InvertedMetaPage)
-	assert.Empty(t, page.InvertedMetaPage.Segments)
+	assert.Less(t, len(page.InvertedMetaPage.Segments), logStructuredInvertedIndexCompactSegmentThreshold)
 
 	iter, err := index.Lookup(ctx, term)
 	require.NoError(t, err)

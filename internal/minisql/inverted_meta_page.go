@@ -13,13 +13,21 @@ type invertedSegmentDescriptor struct {
 	RootPage     PageIndex
 	PostingCount uint32
 	Kind         byte
+	FirstTerm    string
+	LastTerm     string
 }
 
 func (d invertedSegmentDescriptor) size() uint64 {
-	return 1 + 4 + 4 + 8
+	return 1 + 4 + 4 + 8 + 2 + uint64(len([]byte(d.FirstTerm))) + 2 + uint64(len([]byte(d.LastTerm)))
 }
 
 func (d invertedSegmentDescriptor) Marshal(buf []byte) error {
+	if len([]byte(d.FirstTerm)) > MaxIndexKeySize {
+		return fmt.Errorf("inverted segment first term exceeds max index key size %d", MaxIndexKeySize)
+	}
+	if len([]byte(d.LastTerm)) > MaxIndexKeySize {
+		return fmt.Errorf("inverted segment last term exceeds max index key size %d", MaxIndexKeySize)
+	}
 	if len(buf) < int(d.size()) {
 		return fmt.Errorf("inverted segment descriptor buffer too small")
 	}
@@ -31,11 +39,20 @@ func (d invertedSegmentDescriptor) Marshal(buf []byte) error {
 	marshalUint32(buf, d.PostingCount, i)
 	i += 4
 	marshalUint64(buf, d.Generation, i)
+	i += 8
+	marshalUint16(buf, uint16(len([]byte(d.FirstTerm))), i)
+	i += 2
+	copy(buf[i:i+uint64(len([]byte(d.FirstTerm)))], []byte(d.FirstTerm))
+	i += uint64(len([]byte(d.FirstTerm)))
+	marshalUint16(buf, uint16(len([]byte(d.LastTerm))), i)
+	i += 2
+	copy(buf[i:i+uint64(len([]byte(d.LastTerm)))], []byte(d.LastTerm))
 	return nil
 }
 
 func (d *invertedSegmentDescriptor) Unmarshal(buf []byte) error {
-	if len(buf) < int(d.size()) {
+	const fixedSize = 1 + 4 + 4 + 8 + 2 + 2
+	if len(buf) < fixedSize {
 		return fmt.Errorf("inverted segment descriptor buffer too small")
 	}
 	i := uint64(0)
@@ -49,6 +66,20 @@ func (d *invertedSegmentDescriptor) Unmarshal(buf []byte) error {
 	d.PostingCount = unmarshalUint32(buf, i)
 	i += 4
 	d.Generation = unmarshalUint64(buf, i)
+	i += 8
+	firstTermLen := uint64(unmarshalUint16(buf, i))
+	i += 2
+	if len(buf) < int(i+firstTermLen+2) {
+		return fmt.Errorf("inverted segment descriptor first term truncated")
+	}
+	d.FirstTerm = string(buf[i : i+firstTermLen])
+	i += firstTermLen
+	lastTermLen := uint64(unmarshalUint16(buf, i))
+	i += 2
+	if len(buf) < int(i+lastTermLen) {
+		return fmt.Errorf("inverted segment descriptor last term truncated")
+	}
+	d.LastTerm = string(buf[i : i+lastTermLen])
 	return nil
 }
 
@@ -89,7 +120,7 @@ func (p *invertedMetaPage) Clone() *invertedMetaPage {
 }
 
 func (p *invertedMetaPage) Marshal(buf []byte) error {
-	used := p.headerSize() + uint64(len(p.Segments))*(invertedSegmentDescriptor{}).size()
+	used := p.usedBytes()
 	if len(buf) < int(used) {
 		return fmt.Errorf("inverted meta page buffer too small")
 	}
@@ -120,6 +151,14 @@ func (p *invertedMetaPage) Marshal(buf []byte) error {
 	return nil
 }
 
+func (p *invertedMetaPage) usedBytes() uint64 {
+	used := p.headerSize()
+	for _, segment := range p.Segments {
+		used += segment.size()
+	}
+	return used
+}
+
 func (p *invertedMetaPage) Unmarshal(buf []byte) error {
 	if len(buf) < int(p.headerSize()) {
 		return fmt.Errorf("inverted meta page buffer too small")
@@ -148,7 +187,8 @@ func (p *invertedMetaPage) Unmarshal(buf []byte) error {
 
 	segments := make([]invertedSegmentDescriptor, 0, segmentCount)
 	for range segmentCount {
-		if len(buf) < int(i+(invertedSegmentDescriptor{}).size()) {
+		const fixedDescriptorSize = 1 + 4 + 4 + 8 + 2 + 2
+		if len(buf) < int(i+fixedDescriptorSize) {
 			return fmt.Errorf("inverted meta page segment list truncated")
 		}
 		var segment invertedSegmentDescriptor

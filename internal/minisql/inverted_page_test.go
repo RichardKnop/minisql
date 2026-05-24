@@ -185,18 +185,24 @@ func TestInvertedMetaPage_Marshal(t *testing.T) {
 			RootPage:     77,
 			PostingCount: 120,
 			Kind:         invertedSegmentKindInsert,
+			FirstTerm:    "alpha",
+			LastTerm:     "omega",
 		},
 		{
 			Generation:   2,
 			RootPage:     88,
 			PostingCount: 7,
 			Kind:         invertedSegmentKindDelete,
+			FirstTerm:    "json:a",
+			LastTerm:     "json:z",
 		},
 		{
 			Generation:   3,
 			RootPage:     99,
 			PostingCount: 9,
 			Kind:         invertedSegmentKindMixed,
+			FirstTerm:    "term:1",
+			LastTerm:     "term:9",
 		},
 	}
 	buf := make([]byte, PageSize)
@@ -225,6 +231,8 @@ func TestInvertedMetaPage_UnmarshalRejectsUnknownSegmentKind(t *testing.T) {
 		RootPage:     99,
 		PostingCount: 10,
 		Kind:         invertedSegmentKindInsert,
+		FirstTerm:    "alpha",
+		LastTerm:     "omega",
 	}}
 	buf := make([]byte, PageSize)
 	require.NoError(t, page.Marshal(buf))
