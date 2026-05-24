@@ -376,10 +376,10 @@ func (d *Database) checkInvertedIndexRoot(ctx context.Context, report IntegrityR
 	}
 	report.CheckedRootPages += 1
 
-	if page.InvertedEntryPage == nil {
+	if page.InvertedEntryPage == nil && page.InvertedMetaPage == nil {
 		report.Issues = append(report.Issues, IntegrityIssue{
 			Code:    "index_root_invalid_type",
-			Message: fmt.Sprintf("index %s on table %s root page %d is not an inverted entry node", indexName, tableName, pageIdx),
+			Message: fmt.Sprintf("index %s on table %s root page %d is not an inverted entry or metadata node", indexName, tableName, pageIdx),
 			Page:    pageIndexPtr(pageIdx),
 			Object:  indexName,
 		})
@@ -631,6 +631,16 @@ func (d *Database) walkInvertedIndexPages(ctx context.Context, report IntegrityR
 			continue
 		}
 		switch {
+		case page.InvertedMetaPage != nil:
+			metaPage := page.InvertedMetaPage
+			if metaPage.BaseRoot != 0 {
+				stack = append(stack, metaPage.BaseRoot)
+			}
+			for _, segment := range metaPage.Segments {
+				if segment.RootPage != 0 {
+					stack = append(stack, segment.RootPage)
+				}
+			}
 		case page.InvertedEntryPage != nil:
 			entryPage := page.InvertedEntryPage
 			if entryPage.Header.IsLeaf {
@@ -1150,8 +1160,13 @@ func expectedInvertedIndexEntriesForRow(index SecondaryIndex, row Row) (map[stri
 }
 
 func scanInvertedIndexEntries(ctx context.Context, index invertedIndex) (integrityIndexEntries, map[string]int, error) {
-	dedicated, ok := index.(*dedicatedInvertedIndex)
-	if !ok {
+	var dedicated *dedicatedInvertedIndex
+	switch idx := index.(type) {
+	case *dedicatedInvertedIndex:
+		dedicated = idx
+	case *logStructuredInvertedIndex:
+		dedicated = idx.base
+	default:
 		return nil, nil, fmt.Errorf("unsupported inverted index implementation %T", index)
 	}
 

@@ -907,7 +907,7 @@ func (d *Database) initSecondaryIndex(ctx context.Context, schema Schema) error 
 			table.Name,
 			schema.Name,
 		)
-		invertedIdx, err := NewDedicatedInvertedIndex(schema.Name, invertedIndexPostingModeForIndexMethod(secondaryIndex.Method), tp, schema.RootPage)
+		invertedIdx, err := OpenInvertedIndex(ctx, schema.Name, invertedIndexPostingModeForIndexMethod(secondaryIndex.Method), tp, schema.RootPage)
 		if err != nil {
 			return err
 		}
@@ -1859,11 +1859,15 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 			table.Name,
 			schema.Name,
 		)
-		invertedIdx, err := NewDedicatedInvertedIndex(schema.Name, invertedIndexPostingModeForIndexMethod(secondaryIndex.Method), txPager, schema.RootPage)
+		invertedIdx, err := OpenInvertedIndex(ctx, schema.Name, invertedIndexPostingModeForIndexMethod(secondaryIndex.Method), txPager, schema.RootPage)
 		if err != nil {
 			return err
 		}
-		if err := invertedIdx.FreeAll(ctx); err != nil {
+		freeable, ok := invertedIdx.(interface{ FreeAll(context.Context) error })
+		if !ok {
+			return fmt.Errorf("unsupported inverted index implementation %T", invertedIdx)
+		}
+		if err := freeable.FreeAll(ctx); err != nil {
 			return err
 		}
 	} else {
@@ -1974,18 +1978,26 @@ func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, tab
 			table.Name,
 			secondaryIndex.Name,
 		)
-		freePage, err := txPager.GetFreePage(ctx)
+		metaPage, err := txPager.GetFreePage(ctx)
 		if err != nil {
 			return SecondaryIndex{}, err
 		}
-		invertedIdx, err := NewDedicatedInvertedIndex(secondaryIndex.Name, invertedIndexPostingModeForIndexMethod(secondaryIndex.Method), txPager, freePage.Index)
+		basePage, err := txPager.GetFreePage(ctx)
 		if err != nil {
 			return SecondaryIndex{}, err
 		}
-		if err := invertedIdx.InitRootPage(ctx); err != nil {
+		invertedIdx, err := NewLogStructuredInvertedIndex(
+			ctx,
+			secondaryIndex.Name,
+			invertedIndexPostingModeForIndexMethod(secondaryIndex.Method),
+			txPager,
+			metaPage.Index,
+			basePage.Index,
+		)
+		if err != nil {
 			return SecondaryIndex{}, err
 		}
-		rootPageIdx = freePage.Index
+		rootPageIdx = metaPage.Index
 		secondaryIndex.InvertedIndex = invertedIdx
 	} else {
 		storageColumns := secondaryIndexStorageColumns(secondaryIndex)
