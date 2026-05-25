@@ -4,6 +4,7 @@ import (
 	"math"
 	"slices"
 	"unicode"
+	"unicode/utf8"
 )
 
 func fullTextTokenColumn() Column {
@@ -40,8 +41,34 @@ func textSearchTokens(input string) []string {
 // textSearchTokenPositions lowercases input, splits on non-letter/non-digit
 // boundaries, removes stop words, and assigns dense positions to emitted tokens.
 func textSearchTokenPositions(input string) []textSearchTokenPosition {
-	tokens := make([]textSearchTokenPosition, 0)
-	current := make([]rune, 0, 16)
+	tokens, _ := textSearchTokenPositionsInto(input, nil, nil)
+	return tokens
+}
+
+func textSearchTokenPositionsInto(
+	input string,
+	tokens []textSearchTokenPosition,
+	current []rune,
+) ([]textSearchTokenPosition, []rune) {
+	return textSearchTokenPositionsFromRunesInto(input, nil, tokens, current)
+}
+
+func textSearchTokenPositionsBytesInto(
+	input []byte,
+	tokens []textSearchTokenPosition,
+	current []rune,
+) ([]textSearchTokenPosition, []rune) {
+	return textSearchTokenPositionsFromRunesInto("", input, tokens, current)
+}
+
+func textSearchTokenPositionsFromRunesInto(
+	input string,
+	inputBytes []byte,
+	tokens []textSearchTokenPosition,
+	current []rune,
+) ([]textSearchTokenPosition, []rune) {
+	tokens = tokens[:0]
+	current = current[:0]
 	var position uint64
 
 	flush := func() {
@@ -60,16 +87,28 @@ func textSearchTokenPositions(input string) []textSearchTokenPosition {
 		position += 1
 	}
 
-	for _, r := range input {
+	consume := func(r rune) {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			current = append(current, unicode.ToLower(r))
-			continue
+			return
 		}
 		flush()
 	}
+
+	if inputBytes == nil {
+		for _, r := range input {
+			consume(r)
+		}
+	} else {
+		for len(inputBytes) > 0 {
+			r, size := utf8.DecodeRune(inputBytes)
+			consume(r)
+			inputBytes = inputBytes[size:]
+		}
+	}
 	flush()
 
-	return tokens
+	return tokens, current
 }
 
 // uniqueTextSearchTokens returns de-duplicated indexable tokens in first-seen

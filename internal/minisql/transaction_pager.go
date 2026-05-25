@@ -194,6 +194,8 @@ func (p *Page) Clear() {
 	p.IndexOverflowNode = nil
 	p.InvertedEntryPage = nil
 	p.InvertedPostPage = nil
+	p.InvertedMetaPage = nil
+	p.InvertedSegmentPage = nil
 }
 
 // AddFreePage marks pageIdx as a free page and prepends it to the free list.
@@ -228,6 +230,8 @@ func (tp *TransactionalPager) AddFreePage(ctx context.Context, pageIdx PageIndex
 	freePage.IndexOverflowNode = nil
 	freePage.InvertedEntryPage = nil
 	freePage.InvertedPostPage = nil
+	freePage.InvertedMetaPage = nil
+	freePage.InvertedSegmentPage = nil
 
 	// Update header
 	dbHeader.FirstFreePage = pageIdx

@@ -10,7 +10,7 @@ type invertedPager struct {
 }
 
 // GetPage returns an inverted-index page, deserialising entry pages, posting
-// pages, and free pages from their page-type byte.
+// pages, segment pages, and free pages from their page-type byte.
 func (p *invertedPager) GetPage(ctx context.Context, pageIdx PageIndex) (*Page, error) {
 	return p.pagerImpl.GetPage(ctx, pageIdx, p.unmarshal)
 }
@@ -38,6 +38,18 @@ func (p *invertedPager) unmarshal(totalPages uint32, pageIdx PageIndex, buf []by
 			return nil, err
 		}
 		return &Page{Index: pageIdx, InvertedPostPage: page}, nil
+	case PageTypeInvertedMeta:
+		page := new(invertedMetaPage)
+		if err := page.Unmarshal(buf[idx:]); err != nil {
+			return nil, err
+		}
+		return &Page{Index: pageIdx, InvertedMetaPage: page}, nil
+	case PageTypeInvertedSegment:
+		page := new(invertedSegmentPage)
+		if err := page.Unmarshal(buf[idx:]); err != nil {
+			return nil, err
+		}
+		return &Page{Index: pageIdx, InvertedSegmentPage: page}, nil
 	case PageTypeFree:
 		freePage := new(FreePage)
 		if err := freePage.Unmarshal(buf[idx:]); err != nil {

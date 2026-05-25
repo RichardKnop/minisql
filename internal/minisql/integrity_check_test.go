@@ -379,7 +379,28 @@ func TestDatabase_IntegrityCheck(t *testing.T) {
 
 		secondaryIndex := db.tables["articles_integrity"].SecondaryIndexes["idx_articles_integrity_body"]
 		err = db.txManager.ExecuteInTransaction(context.Background(), func(ctx context.Context) error {
-			return secondaryIndex.InvertedIndex.Delete(ctx, "database", invertedPosting{RowID: 0, Positions: []uint32{0}})
+			index := secondaryIndex.InvertedIndex
+			if logIndex, ok := index.(*logStructuredInvertedIndex); ok {
+				meta, err := logIndex.readMetaPage(ctx)
+				if err != nil {
+					return err
+				}
+				segmentPage, err := logIndex.pager.ModifyPage(ctx, meta.Segments[0].RootPage)
+				if err != nil {
+					return err
+				}
+				for i, cell := range segmentPage.InvertedSegmentPage.Cells {
+					if cell.Term == "database" {
+						segmentPage.InvertedSegmentPage.Cells = append(
+							segmentPage.InvertedSegmentPage.Cells[:i],
+							segmentPage.InvertedSegmentPage.Cells[i+1:]...,
+						)
+						return nil
+					}
+				}
+				return nil
+			}
+			return index.Delete(ctx, "database", invertedPosting{RowID: 0, Positions: []uint32{0}})
 		})
 		require.NoError(t, err)
 

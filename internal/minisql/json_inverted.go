@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/big"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -45,11 +46,23 @@ func jsonContainsDecodedQuery(doc string, queryValue any) (bool, error) {
 // jsonInvertedTermsForDocument extracts every key-existence and scalar
 // key/value term that should be stored for one JSON document.
 func jsonInvertedTermsForDocument(doc string) ([]string, error) {
+	return jsonInvertedTermsForDocumentInto(doc, nil)
+}
+
+func jsonInvertedTermsForDocumentInto(doc string, terms []string) ([]string, error) {
 	value, err := decodeJSONForInvertedIndex(doc)
 	if err != nil {
 		return nil, err
 	}
-	return jsonInvertedTerms(value), nil
+	return jsonInvertedTermsInto(value, terms), nil
+}
+
+func jsonInvertedTermsForDocumentBytesInto(doc []byte, terms []string) ([]string, error) {
+	value, err := decodeJSONBytesForInvertedIndex(doc)
+	if err != nil {
+		return nil, err
+	}
+	return jsonInvertedTermsInto(value, terms), nil
 }
 
 // jsonInvertedTermsForQuery extracts the terms that must be present before a
@@ -123,6 +136,15 @@ func jsonInvertedScalarArrayTermsAreExactAt(path string, values []any) bool {
 // so term generation and containment can canonicalize numeric values explicitly.
 func decodeJSONForInvertedIndex(input string) (any, error) {
 	dec := json.NewDecoder(strings.NewReader(input))
+	return decodeJSONWithNumber(dec)
+}
+
+func decodeJSONBytesForInvertedIndex(input []byte) (any, error) {
+	dec := json.NewDecoder(bytes.NewReader(input))
+	return decodeJSONWithNumber(dec)
+}
+
+func decodeJSONWithNumber(dec *json.Decoder) (any, error) {
 	dec.UseNumber()
 	var value any
 	if err := dec.Decode(&value); err != nil {
@@ -141,7 +163,10 @@ func decodeJSONForInvertedIndex(input string) (any, error) {
 // jsonInvertedTerms returns a stable, deduplicated list of all index terms
 // generated from a decoded JSON value.
 func jsonInvertedTerms(value any) []string {
-	var terms []string
+	return jsonInvertedTermsInto(value, nil)
+}
+
+func jsonInvertedTermsInto(value any, terms []string) []string {
 	collectJSONInvertedTerms(&terms, "", value)
 	slices.Sort(terms)
 	return slices.Compact(terms)
@@ -152,15 +177,10 @@ func jsonInvertedTerms(value any) []string {
 func collectJSONInvertedTerms(terms *[]string, path string, value any) {
 	switch v := value.(type) {
 	case map[string]any:
-		keys := make([]string, 0, len(v))
-		for key := range v {
-			keys = append(keys, key)
-		}
-		slices.Sort(keys)
-		for _, key := range keys {
+		for key, child := range v {
 			childPath := joinJSONInvertedPath(path, key)
 			appendJSONInvertedTerm(terms, "k:"+childPath)
-			collectJSONInvertedTerms(terms, childPath, v[key])
+			collectJSONInvertedTerms(terms, childPath, child)
 		}
 	case []any:
 		arrayPath := path + "[]"
@@ -197,6 +217,9 @@ func joinJSONInvertedPath(parent, key string) string {
 // jsonInvertedPathSegment escapes path separator characters inside object keys
 // so similarly named paths generate different term strings.
 func jsonInvertedPathSegment(segment string) string {
+	if !strings.ContainsAny(segment, "\\.[]") {
+		return segment
+	}
 	return jsonInvertedPathReplacer.Replace(segment)
 }
 
@@ -207,8 +230,7 @@ func jsonInvertedScalarTerm(value any) string {
 	case nil:
 		return "null"
 	case string:
-		encoded, _ := json.Marshal(v)
-		return "s:" + string(encoded)
+		return "s:" + strconv.Quote(v)
 	case bool:
 		if v {
 			return "b:true"

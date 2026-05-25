@@ -250,10 +250,12 @@ func (t *Table) insertFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 		return err
 	}
 	postings := fullTextPostingsByTerm(rowID, tokens)
+	batch := newInvertedIndexMutationBatchWithCapacity(secondaryIndex.InvertedIndex.Mode(), len(postings), 0)
 	for term, posting := range postings {
-		if err := secondaryIndex.InvertedIndex.Insert(ctx, term, posting); err != nil {
-			return fmt.Errorf("failed to insert token for full-text index %s: %w", secondaryIndex.Name, err)
-		}
+		batch.Insert(term, posting)
+	}
+	if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
+		return fmt.Errorf("failed to insert tokens for full-text index %s: %w", secondaryIndex.Name, err)
 	}
 	return nil
 }
@@ -281,33 +283,39 @@ func (t *Table) updateFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 		return nil
 	}
 
-	oldPostings, err := fullTextPostingsByTermForRow(secondaryIndex, rowID, oldRow)
+	var tokenBuf []textSearchTokenPosition
+	var tokenRuneBuf []rune
+	oldTokens, current, err := fullTextTokenPositionsForRowInto(secondaryIndex, oldRow, tokenBuf, tokenRuneBuf)
 	if err != nil {
 		return err
 	}
-	newPostings, err := fullTextPostingsByTermForRow(secondaryIndex, rowID, row)
+	oldPostings := fullTextPostingsByTerm(rowID, oldTokens)
+	tokenBuf = oldTokens[:0]
+	tokenRuneBuf = current[:0]
+
+	newTokens, _, err := fullTextTokenPositionsForRowInto(secondaryIndex, row, tokenBuf, tokenRuneBuf)
 	if err != nil {
 		return err
 	}
+	newPostings := fullTextPostingsByTerm(rowID, newTokens)
+	batch := newInvertedIndexMutationBatchWithCapacity(secondaryIndex.InvertedIndex.Mode(), len(newPostings), len(oldPostings))
 	for term, oldPosting := range oldPostings {
 		newPosting, ok := newPostings[term]
 		if !ok {
-			if err := secondaryIndex.InvertedIndex.Delete(ctx, term, oldPosting); err != nil {
-				return fmt.Errorf("failed to delete token for full-text index %s: %w", secondaryIndex.Name, err)
-			}
+			batch.Delete(term, oldPosting)
 			continue
 		}
 		if !slices.Equal(oldPosting.Positions, newPosting.Positions) {
-			if err := secondaryIndex.InvertedIndex.Replace(ctx, term, oldPosting, newPosting); err != nil {
-				return fmt.Errorf("failed to replace token for full-text index %s: %w", secondaryIndex.Name, err)
-			}
+			batch.Delete(term, oldPosting)
+			batch.Insert(term, newPosting)
 		}
 		delete(newPostings, term)
 	}
 	for term, posting := range newPostings {
-		if err := secondaryIndex.InvertedIndex.Insert(ctx, term, posting); err != nil {
-			return fmt.Errorf("failed to insert token for full-text index %s: %w", secondaryIndex.Name, err)
-		}
+		batch.Insert(term, posting)
+	}
+	if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
+		return fmt.Errorf("failed to update tokens for full-text index %s: %w", secondaryIndex.Name, err)
 	}
 	return nil
 }
@@ -321,24 +329,30 @@ func (t *Table) deleteFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 		return err
 	}
 	postings := fullTextPostingsByTerm(rowID, tokens)
+	batch := newInvertedIndexMutationBatchWithCapacity(secondaryIndex.InvertedIndex.Mode(), 0, len(postings))
 	for term, posting := range postings {
-		if err := secondaryIndex.InvertedIndex.Delete(ctx, term, posting); err != nil {
-			return fmt.Errorf("failed to delete token for full-text index %s: %w", secondaryIndex.Name, err)
-		}
+		batch.Delete(term, posting)
+	}
+	if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
+		return fmt.Errorf("failed to delete tokens for full-text index %s: %w", secondaryIndex.Name, err)
 	}
 	return nil
 }
 
-func fullTextPostingsByTermForRow(secondaryIndex SecondaryIndex, rowID RowID, row Row) (map[string]invertedPosting, error) {
-	tokens, err := fullTextTokenPositionsForRow(secondaryIndex, row)
-	if err != nil {
-		return nil, err
-	}
-	return fullTextPostingsByTerm(rowID, tokens), nil
+func fullTextPostingsByTerm(rowID RowID, tokens []textSearchTokenPosition) map[string]invertedPosting {
+	return fullTextPostingsByTermInto(rowID, tokens, make(map[string]invertedPosting, len(tokens)))
 }
 
-func fullTextPostingsByTerm(rowID RowID, tokens []textSearchTokenPosition) map[string]invertedPosting {
-	postings := make(map[string]invertedPosting, len(tokens))
+func fullTextPostingsByTermInto(
+	rowID RowID,
+	tokens []textSearchTokenPosition,
+	postings map[string]invertedPosting,
+) map[string]invertedPosting {
+	for term, posting := range postings {
+		posting.RowID = rowID
+		posting.Positions = posting.Positions[:0]
+		postings[term] = posting
+	}
 	for _, token := range tokens {
 		posting := postings[token.Term]
 		posting.RowID = rowID
@@ -346,6 +360,10 @@ func fullTextPostingsByTerm(rowID RowID, tokens []textSearchTokenPosition) map[s
 		postings[token.Term] = posting
 	}
 	for term, posting := range postings {
+		if len(posting.Positions) == 0 {
+			delete(postings, term)
+			continue
+		}
 		slices.Sort(posting.Positions)
 		posting.Positions = slices.Compact(posting.Positions)
 		postings[term] = posting
@@ -367,10 +385,12 @@ func (t *Table) insertInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 	if err != nil {
 		return err
 	}
+	batch := newInvertedIndexMutationBatchWithCapacity(secondaryIndex.InvertedIndex.Mode(), len(terms), 0)
 	for _, term := range terms {
-		if err := secondaryIndex.InvertedIndex.Insert(ctx, term, invertedPosting{RowID: rowID}); err != nil {
-			return fmt.Errorf("failed to insert JSON term for inverted index %s: %w", secondaryIndex.Name, err)
-		}
+		batch.Insert(term, invertedPosting{RowID: rowID})
+	}
+	if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
+		return fmt.Errorf("failed to insert JSON terms for inverted index %s: %w", secondaryIndex.Name, err)
 	}
 	return nil
 }
@@ -398,27 +418,39 @@ func (t *Table) updateInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 		return nil
 	}
 
-	oldTerms, err := jsonInvertedTermSetForRow(secondaryIndex, oldRow)
+	oldTerms, err := jsonInvertedTermsForRow(secondaryIndex, oldRow)
 	if err != nil {
 		return err
 	}
-	newTerms, err := jsonInvertedTermSetForRow(secondaryIndex, row)
+	newTerms, err := jsonInvertedTermsForRow(secondaryIndex, row)
 	if err != nil {
 		return err
 	}
-	for term := range oldTerms {
-		if _, ok := newTerms[term]; ok {
-			delete(newTerms, term)
+	batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
+	oldIdx, newIdx := 0, 0
+	for oldIdx < len(oldTerms) && newIdx < len(newTerms) {
+		oldTerm, newTerm := oldTerms[oldIdx], newTerms[newIdx]
+		if oldTerm == newTerm {
+			oldIdx++
+			newIdx++
 			continue
 		}
-		if err := secondaryIndex.InvertedIndex.Delete(ctx, term, invertedPosting{RowID: rowID}); err != nil {
-			return fmt.Errorf("failed to delete JSON term for inverted index %s: %w", secondaryIndex.Name, err)
+		if oldTerm < newTerm {
+			batch.Delete(oldTerm, invertedPosting{RowID: rowID})
+			oldIdx++
+			continue
 		}
+		batch.Insert(newTerm, invertedPosting{RowID: rowID})
+		newIdx++
 	}
-	for term := range newTerms {
-		if err := secondaryIndex.InvertedIndex.Insert(ctx, term, invertedPosting{RowID: rowID}); err != nil {
-			return fmt.Errorf("failed to insert JSON term for inverted index %s: %w", secondaryIndex.Name, err)
-		}
+	for ; oldIdx < len(oldTerms); oldIdx++ {
+		batch.Delete(oldTerms[oldIdx], invertedPosting{RowID: rowID})
+	}
+	for ; newIdx < len(newTerms); newIdx++ {
+		batch.Insert(newTerms[newIdx], invertedPosting{RowID: rowID})
+	}
+	if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
+		return fmt.Errorf("failed to update JSON terms for inverted index %s: %w", secondaryIndex.Name, err)
 	}
 	return nil
 }
@@ -431,15 +463,21 @@ func (t *Table) deleteInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 	if err != nil {
 		return err
 	}
+	batch := newInvertedIndexMutationBatchWithCapacity(secondaryIndex.InvertedIndex.Mode(), 0, len(terms))
 	for _, term := range terms {
-		if err := secondaryIndex.InvertedIndex.Delete(ctx, term, invertedPosting{RowID: rowID}); err != nil {
-			return fmt.Errorf("failed to delete JSON term for inverted index %s: %w", secondaryIndex.Name, err)
-		}
+		batch.Delete(term, invertedPosting{RowID: rowID})
+	}
+	if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
+		return fmt.Errorf("failed to delete JSON terms for inverted index %s: %w", secondaryIndex.Name, err)
 	}
 	return nil
 }
 
 func jsonInvertedTermsForRow(secondaryIndex SecondaryIndex, row Row) ([]string, error) {
+	return jsonInvertedTermsForRowInto(secondaryIndex, row, nil)
+}
+
+func jsonInvertedTermsForRowInto(secondaryIndex SecondaryIndex, row Row, terms []string) ([]string, error) {
 	if len(secondaryIndex.Columns) != 1 {
 		return nil, fmt.Errorf("inverted index %s requires exactly one source column", secondaryIndex.Name)
 	}
@@ -447,23 +485,14 @@ func jsonInvertedTermsForRow(secondaryIndex SecondaryIndex, row Row) ([]string, 
 	if !ok || !value.Valid {
 		return nil, nil
 	}
-	doc, ok := toStringVal(value.Value)
-	if !ok {
+	switch doc := value.Value.(type) {
+	case TextPointer:
+		return jsonInvertedTermsForDocumentBytesInto(doc.Data, terms)
+	case string:
+		return jsonInvertedTermsForDocumentInto(doc, terms)
+	default:
 		return nil, fmt.Errorf("inverted index %s column %q must be JSON text", secondaryIndex.Name, secondaryIndex.Columns[0].Name)
 	}
-	return jsonInvertedTermsForDocument(doc)
-}
-
-func jsonInvertedTermSetForRow(secondaryIndex SecondaryIndex, row Row) (map[string]struct{}, error) {
-	terms, err := jsonInvertedTermsForRow(secondaryIndex, row)
-	if err != nil {
-		return nil, err
-	}
-	termSet := make(map[string]struct{}, len(terms))
-	for _, term := range terms {
-		termSet[term] = struct{}{}
-	}
-	return termSet, nil
 }
 
 func fullTextTokensForRow(secondaryIndex SecondaryIndex, row Row) ([]string, error) {
@@ -479,26 +508,45 @@ func fullTextTokensForRow(secondaryIndex SecondaryIndex, row Row) ([]string, err
 }
 
 func fullTextTokenPositionsForRow(secondaryIndex SecondaryIndex, row Row) ([]textSearchTokenPosition, error) {
+	positions, _, err := fullTextTokenPositionsForRowInto(secondaryIndex, row, nil, nil)
+	return positions, err
+}
+
+func fullTextTokenPositionsForRowInto(
+	secondaryIndex SecondaryIndex,
+	row Row,
+	positions []textSearchTokenPosition,
+	current []rune,
+) ([]textSearchTokenPosition, []rune, error) {
 	if len(secondaryIndex.Columns) != 1 {
-		return nil, fmt.Errorf("full-text index %s requires exactly one source column", secondaryIndex.Name)
+		return nil, current, fmt.Errorf("full-text index %s requires exactly one source column", secondaryIndex.Name)
 	}
 	value, ok := row.GetValue(secondaryIndex.Columns[0].Name)
 	if !ok || !value.Valid {
-		return nil, nil
+		return nil, current, nil
 	}
-	doc, ok := toStringVal(value.Value)
-	if !ok {
-		return nil, fmt.Errorf("full-text index %s column %q must be text", secondaryIndex.Name, secondaryIndex.Columns[0].Name)
+	switch doc := value.Value.(type) {
+	case TextPointer:
+		positions, current = textSearchTokenPositionsBytesInto(doc.Data, positions, current)
+	case string:
+		positions, current = textSearchTokenPositionsInto(doc, positions, current)
+	default:
+		return nil, current, fmt.Errorf("full-text index %s column %q must be text", secondaryIndex.Name, secondaryIndex.Columns[0].Name)
 	}
-	positions := textSearchTokenPositions(doc)
-	indexable := make([]textSearchTokenPosition, 0, len(positions))
-	for _, token := range positions {
+	return filterIndexableTextSearchTokenPositions(positions), current, nil
+}
+
+func filterIndexableTextSearchTokenPositions(positions []textSearchTokenPosition) []textSearchTokenPosition {
+	writeIdx := 0
+	for readIdx := range positions {
+		token := positions[readIdx]
 		if len([]byte(token.Term)) > MaxIndexKeySize {
 			continue
 		}
-		indexable = append(indexable, token)
+		positions[writeIdx] = token
+		writeIdx++
 	}
-	return indexable, nil
+	return positions[:writeIdx]
 }
 
 func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, oldRow, row Row) error {

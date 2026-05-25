@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +24,7 @@ var (
 )
 
 const populateInvertedIndexFlushPostings = 64 * 1024
+const populateInvertedIndexInitialTerms = 1024
 
 // WALConfig bundles the Write-Ahead Log objects that NewDatabase needs.
 // Pass nil when creating in-memory/test databases that do not require WAL.
@@ -907,7 +907,7 @@ func (d *Database) initSecondaryIndex(ctx context.Context, schema Schema) error 
 			table.Name,
 			schema.Name,
 		)
-		invertedIdx, err := NewDedicatedInvertedIndex(schema.Name, invertedIndexPostingModeForIndexMethod(secondaryIndex.Method), tp, schema.RootPage)
+		invertedIdx, err := OpenInvertedIndex(ctx, schema.Name, invertedIndexPostingModeForIndexMethod(secondaryIndex.Method), tp, schema.RootPage)
 		if err != nil {
 			return err
 		}
@@ -1662,63 +1662,83 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 		return fmt.Errorf("table %s has full-text index %s but no inverted index instance", table.Name, secondaryIndex.Name)
 	}
 
-	result, err := table.Select(ctx, Statement{
-		Kind:   Select,
-		Fields: fieldsFromColumns(table.Columns...),
-	})
-	if err != nil {
-		return err
-	}
-
-	postingsByTerm := make(map[string][]invertedPosting)
+	postingsByTerm := make(map[string][]invertedPosting, populateInvertedIndexInitialTerms)
+	tokenBuf := make([]textSearchTokenPosition, 0, 16)
+	tokenRuneBuf := make([]rune, 0, 32)
+	rowPostings := make(map[string]invertedPosting, 16)
 	bufferedPostings := 0
 	flush := func() error {
 		if len(postingsByTerm) == 0 {
 			return nil
 		}
-		terms := make([]string, 0, len(postingsByTerm))
-		for term := range postingsByTerm {
-			terms = append(terms, term)
+		batch := invertedIndexMutationBatch{
+			mode:    secondaryIndex.InvertedIndex.Mode(),
+			inserts: postingsByTerm,
 		}
-		sort.Strings(terms)
-		for _, term := range terms {
-			if err := secondaryIndex.InvertedIndex.InsertMany(ctx, term, postingsByTerm[term]); err != nil {
-				return fmt.Errorf("failed to insert token batch for full-text index %s: %w", secondaryIndex.Name, err)
-			}
+		if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
+			return fmt.Errorf("failed to insert token batch for full-text index %s: %w", secondaryIndex.Name, err)
 		}
-		postingsByTerm = make(map[string][]invertedPosting)
+		postingsByTerm = make(map[string][]invertedPosting, populateInvertedIndexInitialTerms)
 		bufferedPostings = 0
 		return nil
 	}
-
-	for result.Rows.Next(ctx) {
-		row := result.Rows.Row()
-
-		if len(secondaryIndex.WhereCond) > 0 {
-			ok, err := row.CheckOneOrMore(secondaryIndex.WhereCond)
-			if err != nil {
-				return fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)
-			}
-			if !ok {
-				continue
-			}
-		}
-
-		tokens, err := fullTextTokenPositionsForRow(secondaryIndex, row)
-		if err != nil {
-			return err
-		}
-		for _, token := range tokens {
-			postingsByTerm[token.Term] = append(postingsByTerm[token.Term], invertedPosting{
-				RowID:     row.Key,
-				Positions: []uint32{token.Position},
-			})
-			bufferedPostings += 1
+	addPostings := func(rowID RowID, tokens []textSearchTokenPosition) error {
+		rowPostings = fullTextPostingsByTermInto(rowID, tokens, rowPostings)
+		for term, posting := range rowPostings {
+			postingsByTerm[term] = append(postingsByTerm[term], posting)
+			bufferedPostings += len(posting.Positions)
 		}
 		if bufferedPostings >= populateInvertedIndexFlushPostings {
 			if err := flush(); err != nil {
 				return err
 			}
+		}
+		return nil
+	}
+
+	if len(secondaryIndex.WhereCond) == 0 {
+		err := scanInvertedIndexDocumentRowViews(ctx, table, secondaryIndex, func(rowID RowID, doc TextPointer) error {
+			var tokens []textSearchTokenPosition
+			tokens, tokenRuneBuf = textSearchTokenPositionsBytesInto(doc.Data, tokenBuf[:0], tokenRuneBuf[:0])
+			tokens = filterIndexableTextSearchTokenPositions(tokens)
+			err := addPostings(rowID, tokens)
+			tokenBuf = tokens[:0]
+			tokenRuneBuf = tokenRuneBuf[:0]
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		return flush()
+	}
+
+	result, err := table.Select(ctx, Statement{
+		Kind:   Select,
+		Fields: fieldsForInvertedIndexPopulation(table, secondaryIndex),
+	})
+	if err != nil {
+		return err
+	}
+
+	for result.Rows.Next(ctx) {
+		row := result.Rows.Row()
+
+		ok, err := row.CheckOneOrMore(secondaryIndex.WhereCond)
+		if err != nil {
+			return fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)
+		}
+		if !ok {
+			continue
+		}
+
+		tokens, current, err := fullTextTokenPositionsForRowInto(secondaryIndex, row, tokenBuf[:0], tokenRuneBuf[:0])
+		if err != nil {
+			return err
+		}
+		tokenBuf = tokens[:0]
+		tokenRuneBuf = current[:0]
+		if err := addPostings(row.Key, tokens); err != nil {
+			return err
 		}
 	}
 
@@ -1733,6 +1753,53 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		return fmt.Errorf("table %s has inverted index %s but no inverted index instance", table.Name, secondaryIndex.Name)
 	}
 
+	postingsByTerm := make(map[string][]invertedPosting, populateInvertedIndexInitialTerms)
+	termBuf := make([]string, 0, 16)
+	bufferedPostings := 0
+	flush := func() error {
+		if len(postingsByTerm) == 0 {
+			return nil
+		}
+		batch := invertedIndexMutationBatch{
+			mode:    secondaryIndex.InvertedIndex.Mode(),
+			inserts: postingsByTerm,
+		}
+		if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
+			return fmt.Errorf("failed to insert JSON term batch for inverted index %s: %w", secondaryIndex.Name, err)
+		}
+		postingsByTerm = make(map[string][]invertedPosting, populateInvertedIndexInitialTerms)
+		bufferedPostings = 0
+		return nil
+	}
+	addTerms := func(rowID RowID, terms []string) error {
+		for _, term := range terms {
+			postingsByTerm[term] = append(postingsByTerm[term], invertedPosting{RowID: rowID})
+			bufferedPostings += 1
+		}
+		if bufferedPostings >= populateInvertedIndexFlushPostings {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if len(secondaryIndex.WhereCond) == 0 {
+		err := scanInvertedIndexDocumentRowViews(ctx, table, secondaryIndex, func(rowID RowID, doc TextPointer) error {
+			terms, err := jsonInvertedTermsForDocumentBytesInto(doc.Data, termBuf[:0])
+			if err != nil {
+				return err
+			}
+			err = addTerms(rowID, terms)
+			termBuf = terms[:0]
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		return flush()
+	}
+
 	result, err := table.Select(ctx, Statement{
 		Kind:   Select,
 		Fields: fieldsFromColumns(table.Columns...),
@@ -1741,52 +1808,24 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		return err
 	}
 
-	postingsByTerm := make(map[string][]invertedPosting)
-	bufferedPostings := 0
-	flush := func() error {
-		if len(postingsByTerm) == 0 {
-			return nil
-		}
-		terms := make([]string, 0, len(postingsByTerm))
-		for term := range postingsByTerm {
-			terms = append(terms, term)
-		}
-		sort.Strings(terms)
-		for _, term := range terms {
-			if err := secondaryIndex.InvertedIndex.InsertMany(ctx, term, postingsByTerm[term]); err != nil {
-				return fmt.Errorf("failed to insert JSON term batch for inverted index %s: %w", secondaryIndex.Name, err)
-			}
-		}
-		postingsByTerm = make(map[string][]invertedPosting)
-		bufferedPostings = 0
-		return nil
-	}
-
 	for result.Rows.Next(ctx) {
 		row := result.Rows.Row()
 
-		if len(secondaryIndex.WhereCond) > 0 {
-			ok, err := row.CheckOneOrMore(secondaryIndex.WhereCond)
-			if err != nil {
-				return fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)
-			}
-			if !ok {
-				continue
-			}
+		ok, err := row.CheckOneOrMore(secondaryIndex.WhereCond)
+		if err != nil {
+			return fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)
+		}
+		if !ok {
+			continue
 		}
 
-		terms, err := jsonInvertedTermsForRow(secondaryIndex, row)
+		terms, err := jsonInvertedTermsForRowInto(secondaryIndex, row, termBuf[:0])
 		if err != nil {
 			return err
 		}
-		for _, term := range terms {
-			postingsByTerm[term] = append(postingsByTerm[term], invertedPosting{RowID: row.Key})
-			bufferedPostings += 1
-		}
-		if bufferedPostings >= populateInvertedIndexFlushPostings {
-			if err := flush(); err != nil {
-				return err
-			}
+		termBuf = terms[:0]
+		if err := addTerms(row.Key, terms); err != nil {
+			return err
 		}
 	}
 
@@ -1794,6 +1833,56 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		return err
 	}
 	return flush()
+}
+
+func scanInvertedIndexDocumentRowViews(ctx context.Context, table *Table, secondaryIndex SecondaryIndex, consume func(RowID, TextPointer) error) error {
+	if len(secondaryIndex.Columns) != 1 {
+		return fmt.Errorf("inverted index %s requires exactly one source column", secondaryIndex.Name)
+	}
+	colIdx, ok := table.columnCache[secondaryIndex.Columns[0].Name]
+	if !ok {
+		return fmt.Errorf("column %s does not exist on table %s for inverted index %s", secondaryIndex.Columns[0].Name, table.Name, secondaryIndex.Name)
+	}
+	cursor, err := table.SeekFirst(ctx)
+	if err != nil {
+		return err
+	}
+	for !cursor.EndOfTable {
+		page, err := table.pager.ReadPage(ctx, cursor.PageIdx)
+		if err != nil {
+			return fmt.Errorf("read page: %w", err)
+		}
+		if page.LeafNode == nil {
+			return fmt.Errorf("expected leaf page %d while populating inverted index %s", cursor.PageIdx, secondaryIndex.Name)
+		}
+		if len(page.LeafNode.Cells) == 0 || cursor.CellIdx >= page.LeafNode.Header.Cells {
+			return fmt.Errorf("cell index %d out of bounds, cells %d", cursor.CellIdx, page.LeafNode.Header.Cells)
+		}
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+		view := NewRowView(table.Columns, cell)
+		isNull, err := view.IsNull(colIdx)
+		if err != nil {
+			return err
+		}
+		if !isNull {
+			doc, err := view.TextAtWithOverflow(ctx, table.pager, colIdx)
+			if err != nil {
+				return err
+			}
+			if err := consume(cell.Key, doc); err != nil {
+				return err
+			}
+		}
+		advanceLeafCursor(cursor, page)
+	}
+	return nil
+}
+
+func fieldsForInvertedIndexPopulation(table *Table, secondaryIndex SecondaryIndex) []Field {
+	if len(secondaryIndex.WhereCond) > 0 {
+		return fieldsFromColumns(table.Columns...)
+	}
+	return fieldsFromColumns(secondaryIndex.Columns...)
 }
 
 func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
@@ -1859,11 +1948,15 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 			table.Name,
 			schema.Name,
 		)
-		invertedIdx, err := NewDedicatedInvertedIndex(schema.Name, invertedIndexPostingModeForIndexMethod(secondaryIndex.Method), txPager, schema.RootPage)
+		invertedIdx, err := OpenInvertedIndex(ctx, schema.Name, invertedIndexPostingModeForIndexMethod(secondaryIndex.Method), txPager, schema.RootPage)
 		if err != nil {
 			return err
 		}
-		if err := invertedIdx.FreeAll(ctx); err != nil {
+		freeable, ok := invertedIdx.(interface{ FreeAll(context.Context) error })
+		if !ok {
+			return fmt.Errorf("unsupported inverted index implementation %T", invertedIdx)
+		}
+		if err := freeable.FreeAll(ctx); err != nil {
 			return err
 		}
 	} else {
@@ -1974,18 +2067,26 @@ func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, tab
 			table.Name,
 			secondaryIndex.Name,
 		)
-		freePage, err := txPager.GetFreePage(ctx)
+		metaPage, err := txPager.GetFreePage(ctx)
 		if err != nil {
 			return SecondaryIndex{}, err
 		}
-		invertedIdx, err := NewDedicatedInvertedIndex(secondaryIndex.Name, invertedIndexPostingModeForIndexMethod(secondaryIndex.Method), txPager, freePage.Index)
+		basePage, err := txPager.GetFreePage(ctx)
 		if err != nil {
 			return SecondaryIndex{}, err
 		}
-		if err := invertedIdx.InitRootPage(ctx); err != nil {
+		invertedIdx, err := NewLogStructuredInvertedIndex(
+			ctx,
+			secondaryIndex.Name,
+			invertedIndexPostingModeForIndexMethod(secondaryIndex.Method),
+			txPager,
+			metaPage.Index,
+			basePage.Index,
+		)
+		if err != nil {
 			return SecondaryIndex{}, err
 		}
-		rootPageIdx = freePage.Index
+		rootPageIdx = metaPage.Index
 		secondaryIndex.InvertedIndex = invertedIdx
 	} else {
 		storageColumns := secondaryIndexStorageColumns(secondaryIndex)

@@ -260,3 +260,45 @@ func (s *TestSuite) TestFullTextSearch_FullTextIndexHeavyMaintenance() {
 	s.True(rows[0].RowsActual.Valid)
 	s.Equal(int64(80), rows[0].RowsActual.Int64)
 }
+
+func (s *TestSuite) TestFullTextSearch_PartialIndexAndNulls() {
+	_, err := s.db.Exec(`create table "articles_fts_partial" (
+		id        int8 primary key,
+		published boolean not null,
+		title     varchar(100) not null,
+		body      text
+	);`)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`insert into "articles_fts_partial" (id, published, title, body) values
+		(1, true,  'Public Guide',  'needle published database guide'),
+		(2, false, 'Draft Guide',   'needle draft database guide'),
+		(3, true,  'Null Body',     null);`)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`create fulltext index "idx_articles_fts_partial_body" on "articles_fts_partial" (body) with (tokenizer = 'simple') where published = true;`)
+	s.Require().NoError(err)
+
+	rows := s.collectExplain(`EXPLAIN SELECT title FROM "articles_fts_partial" WHERE published = true AND MATCH(body, 'needle database');`)
+	s.Require().NotEmpty(rows)
+	s.Equal("fulltext", rows[0].Operation)
+	s.Contains(rows[0].Detail, "index=idx_articles_fts_partial_body")
+
+	var count int
+	s.Require().NoError(s.db.QueryRow(`select count(*) from "articles_fts_partial" where published = true and MATCH(body, 'needle database');`).Scan(&count))
+	s.Equal(1, count)
+
+	_, err = s.db.Exec(`update "articles_fts_partial" set published = true where id = 2;`)
+	s.Require().NoError(err)
+	s.Require().NoError(s.db.QueryRow(`select count(*) from "articles_fts_partial" where published = true and MATCH(body, 'needle database');`).Scan(&count))
+	s.Equal(2, count)
+
+	_, err = s.db.Exec(`update "articles_fts_partial" set body = null where id = 1;`)
+	s.Require().NoError(err)
+	s.Require().NoError(s.db.QueryRow(`select count(*) from "articles_fts_partial" where published = true and MATCH(body, 'needle database');`).Scan(&count))
+	s.Equal(1, count)
+
+	results := s.collectPragmaResults(`PRAGMA integrity_check;`)
+	s.Require().Len(results, 1)
+	s.Equal("ok", results[0].Code)
+}

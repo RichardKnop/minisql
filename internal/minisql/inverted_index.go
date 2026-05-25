@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"slices"
@@ -47,6 +48,22 @@ type invertedIndex interface {
 	Delete(ctx context.Context, term string, posting invertedPosting) error
 	Lookup(ctx context.Context, term string) (invertedPostingIterator, error)
 	Stats(ctx context.Context, term string) (invertedPostingStats, error)
+}
+
+type invertedRowIDLoader interface {
+	LoadRowIDs(ctx context.Context, term string, hint uint32) ([]RowID, error)
+}
+
+type invertedRowIDScanner interface {
+	ForEachRowID(ctx context.Context, term string, fn func(RowID) error) error
+}
+
+type invertedDocFreqCounter interface {
+	CountDocFreq(ctx context.Context, term string) (uint32, error)
+}
+
+type invertedDocFreqEstimator interface {
+	EstimateDocFreq(ctx context.Context, term string) (uint32, error)
 }
 
 type dedicatedInvertedIndex struct {
@@ -523,6 +540,111 @@ func (idx *dedicatedInvertedIndex) Stats(ctx context.Context, term string) (inve
 		DocFreq:      cell.DocFreq,
 		PostingCount: cell.PostingCount,
 	}, nil
+}
+
+// CountDocFreq returns the number of documents that contain term.
+func (idx *dedicatedInvertedIndex) CountDocFreq(ctx context.Context, term string) (uint32, error) {
+	stats, err := idx.Stats(ctx, term)
+	if err != nil {
+		return 0, err
+	}
+	return stats.DocFreq, nil
+}
+
+// LoadRowIDs returns the sorted row IDs for a row-id-only inverted term.
+func (idx *dedicatedInvertedIndex) LoadRowIDs(ctx context.Context, term string, hint uint32) ([]RowID, error) {
+	if idx.mode != invertedPostingModeRowIDs {
+		return nil, fmt.Errorf("inverted index %s uses posting mode %d", idx.name, idx.mode)
+	}
+	iter, err := idx.Lookup(ctx, term)
+	if err != nil {
+		return nil, err
+	}
+	return collectRowIDsFromIterator(ctx, iter, idx.mode, hint)
+}
+
+// ForEachRowID streams sorted row IDs for a row-id-only inverted term.
+func (idx *dedicatedInvertedIndex) ForEachRowID(ctx context.Context, term string, fn func(RowID) error) error {
+	if idx.mode != invertedPostingModeRowIDs {
+		return fmt.Errorf("inverted index %s uses posting mode %d", idx.name, idx.mode)
+	}
+	iter, err := idx.Lookup(ctx, term)
+	if err != nil {
+		return err
+	}
+	return forEachRowIDFromPostingIterator(ctx, iter, idx.mode, fn)
+}
+
+func collectRowIDsFromIterator(
+	ctx context.Context,
+	iter invertedPostingIterator,
+	expectedMode invertedPostingMode,
+	hint uint32,
+) ([]RowID, error) {
+	rowIDs := make([]RowID, 0, hint)
+	var (
+		lastRowID RowID
+		haveLast  bool
+	)
+	for {
+		block, ok, err := iter.NextBlock(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return rowIDs, nil
+		}
+		mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
+			if haveLast && rowID == lastRowID {
+				return nil
+			}
+			haveLast = true
+			lastRowID = rowID
+			rowIDs = append(rowIDs, rowID)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if mode != expectedMode {
+			return nil, fmt.Errorf("inverted posting block uses posting mode %d, expected %d", mode, expectedMode)
+		}
+	}
+}
+
+func forEachRowIDFromPostingIterator(
+	ctx context.Context,
+	iter invertedPostingIterator,
+	expectedMode invertedPostingMode,
+	fn func(RowID) error,
+) error {
+	var (
+		lastRowID RowID
+		haveLast  bool
+	)
+	for {
+		block, ok, err := iter.NextBlock(ctx)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+		mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
+			if haveLast && rowID == lastRowID {
+				return nil
+			}
+			haveLast = true
+			lastRowID = rowID
+			return fn(rowID)
+		})
+		if err != nil {
+			return err
+		}
+		if mode != expectedMode {
+			return fmt.Errorf("inverted posting block uses posting mode %d, expected %d", mode, expectedMode)
+		}
+	}
 }
 
 // FreeAll releases every entry and posting page owned by the index.
@@ -2113,6 +2235,10 @@ func (idx *dedicatedInvertedIndex) freePostingTree(ctx context.Context, cell inv
 // makeInvertedPostingBlocks packs already-grouped postings into bounded
 // compressed blocks. Callers are responsible for grouping before this call.
 func makeInvertedPostingBlocks(mode invertedPostingMode, postings []invertedPosting) ([]invertedPostingBlock, error) {
+	if mode == invertedPostingModeRowIDs {
+		return makeRowIDInvertedPostingBlocks(postings)
+	}
+
 	blocks := make([]invertedPostingBlock, 0)
 	for len(postings) > 0 {
 		n, payload, err := encodeLargestInvertedPostingBlock(mode, postings, invertedPostingBlockPayloadMax)
@@ -2124,6 +2250,98 @@ func makeInvertedPostingBlocks(mode invertedPostingMode, postings []invertedPost
 		postings = postings[n:]
 	}
 	return blocks, nil
+}
+
+// makeRowIDInvertedPostingBlocks packs row-only postings in one pass. The
+// positional path still needs full per-row position encoding, but JSON inverted
+// indexes can split blocks while streaming row deltas into the payload.
+func makeRowIDInvertedPostingBlocks(postings []invertedPosting) ([]invertedPostingBlock, error) {
+	if len(postings) == 0 {
+		return nil, nil
+	}
+
+	blocks := make([]invertedPostingBlock, 0, len(postings)/invertedPostingBlockPayloadMax+1)
+	return appendRowIDInvertedPostingBlocks(blocks, len(postings), func(i int) RowID {
+		return postings[i].RowID
+	}), nil
+}
+
+func makeRowIDInvertedPostingBlocksFromRowIDs(rowIDs []RowID) ([]invertedPostingBlock, error) {
+	if len(rowIDs) == 0 {
+		return nil, nil
+	}
+
+	blocks := make([]invertedPostingBlock, 0, len(rowIDs)/invertedPostingBlockPayloadMax+1)
+	return appendRowIDInvertedPostingBlocks(blocks, len(rowIDs), func(i int) RowID {
+		return rowIDs[i]
+	}), nil
+}
+
+func appendRowIDInvertedPostingBlocks(
+	blocks []invertedPostingBlock,
+	count int,
+	rowIDAt func(int) RowID,
+) []invertedPostingBlock {
+	payload := newRowIDInvertedPostingPayload(count)
+
+	var (
+		firstRowID   RowID
+		lastRowID    RowID
+		prevRowID    RowID
+		postingCount uint32
+		tmp          [binary.MaxVarintLen64]byte
+	)
+	for i := range count {
+		rowID := rowIDAt(i)
+		rowDelta := uint64(rowID)
+		if postingCount > 0 {
+			rowDelta = uint64(rowID - prevRowID)
+		}
+		n := binary.PutUvarint(tmp[:], rowDelta)
+		if postingCount > 0 && len(payload)+n > invertedPostingBlockPayloadMax {
+			blocks = append(blocks, invertedPostingBlock{
+				Payload:      payload,
+				FirstRowID:   firstRowID,
+				LastRowID:    lastRowID,
+				PostingCount: postingCount,
+				CodecVersion: invertedPostingCodecVersion,
+			})
+
+			payload = newRowIDInvertedPostingPayload(count - i)
+			rowDelta = uint64(rowID)
+			n = binary.PutUvarint(tmp[:], rowDelta)
+			postingCount = 0
+		}
+
+		if postingCount == 0 {
+			firstRowID = rowID
+		}
+		payload = append(payload, tmp[:n]...)
+		lastRowID = rowID
+		prevRowID = rowID
+		postingCount++
+	}
+
+	blocks = append(blocks, invertedPostingBlock{
+		Payload:      payload,
+		FirstRowID:   firstRowID,
+		LastRowID:    lastRowID,
+		PostingCount: postingCount,
+		CodecVersion: invertedPostingCodecVersion,
+	})
+	return blocks
+}
+
+func newRowIDInvertedPostingPayload(remainingRowIDs int) []byte {
+	capacity := 2 + remainingRowIDs*binary.MaxVarintLen64
+	if capacity > invertedPostingBlockPayloadMax {
+		capacity = invertedPostingBlockPayloadMax
+	}
+	if capacity < 2 {
+		capacity = 2
+	}
+	payload := make([]byte, 0, capacity)
+	return append(payload, invertedPostingCodecVersion, byte(invertedPostingModeRowIDs))
 }
 
 // postingBlockFromPostings builds block metadata around an encoded posting list.
@@ -2151,32 +2369,58 @@ func encodeLargestInvertedPostingBlock(mode invertedPostingMode, postings []inve
 	if len(postings) == 0 {
 		return 0, nil, fmt.Errorf("cannot encode empty inverted posting block")
 	}
-	firstPayload, err := encodeGroupedInvertedPostingList(mode, postings[:1])
-	if err != nil {
-		return 0, nil, err
-	}
-	if len(firstPayload) > maxPayload {
-		return 1, firstPayload, nil
+	if mode != invertedPostingModeRowIDs && mode != invertedPostingModePositions {
+		return 0, nil, fmt.Errorf("unknown inverted posting mode %d", mode)
 	}
 
-	lo, hi := 1, len(postings)
-	bestN := 1
-	bestPayload := firstPayload
-	for lo <= hi {
-		mid := lo + (hi-lo)/2
-		payload, err := encodeGroupedInvertedPostingList(mode, postings[:mid])
-		if err != nil {
-			return 0, nil, err
+	used := 2
+	var prevRowID RowID
+	for i, posting := range postings {
+		postingSize := encodedGroupedPostingSize(mode, posting, prevRowID, i == 0)
+		if i > 0 && used+postingSize > maxPayload {
+			payload, err := encodeGroupedInvertedPostingList(mode, postings[:i])
+			return i, payload, err
 		}
-		if len(payload) <= maxPayload {
-			bestN = mid
-			bestPayload = payload
-			lo = mid + 1
-			continue
-		}
-		hi = mid - 1
+		used += postingSize
+		prevRowID = posting.RowID
 	}
-	return bestN, bestPayload, nil
+	payload, err := encodeGroupedInvertedPostingList(mode, postings)
+	return len(postings), payload, err
+}
+
+func encodedGroupedPostingSize(
+	mode invertedPostingMode,
+	posting invertedPosting,
+	prevRowID RowID,
+	first bool,
+) int {
+	rowDelta := uint64(posting.RowID)
+	if !first {
+		rowDelta = uint64(posting.RowID - prevRowID)
+	}
+	size := uvarintSize(rowDelta)
+	if mode == invertedPostingModePositions {
+		size += uvarintSize(uint64(len(posting.Positions)))
+		var prevPosition uint32
+		for i, position := range posting.Positions {
+			positionDelta := uint64(position)
+			if i > 0 {
+				positionDelta = uint64(position - prevPosition)
+			}
+			size += uvarintSize(positionDelta)
+			prevPosition = position
+		}
+	}
+	return size
+}
+
+func uvarintSize(value uint64) int {
+	size := 1
+	for value >= 0x80 {
+		value >>= 7
+		size++
+	}
+	return size
 }
 
 // groupInvertedPostingBlocksIntoPages packs posting blocks into posting pages.
