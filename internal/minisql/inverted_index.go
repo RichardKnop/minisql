@@ -2206,6 +2206,27 @@ func makeRowIDInvertedPostingBlocks(postings []invertedPosting) ([]invertedPosti
 	}
 
 	blocks := make([]invertedPostingBlock, 0, len(postings)/invertedPostingBlockPayloadMax+1)
+	return appendRowIDInvertedPostingBlocks(blocks, len(postings), func(i int) RowID {
+		return postings[i].RowID
+	}), nil
+}
+
+func makeRowIDInvertedPostingBlocksFromRowIDs(rowIDs []RowID) ([]invertedPostingBlock, error) {
+	if len(rowIDs) == 0 {
+		return nil, nil
+	}
+
+	blocks := make([]invertedPostingBlock, 0, len(rowIDs)/invertedPostingBlockPayloadMax+1)
+	return appendRowIDInvertedPostingBlocks(blocks, len(rowIDs), func(i int) RowID {
+		return rowIDs[i]
+	}), nil
+}
+
+func appendRowIDInvertedPostingBlocks(
+	blocks []invertedPostingBlock,
+	count int,
+	rowIDAt func(int) RowID,
+) []invertedPostingBlock {
 	payload := make([]byte, 0, invertedPostingBlockPayloadMax)
 	payload = append(payload, invertedPostingCodecVersion, byte(invertedPostingModeRowIDs))
 
@@ -2216,10 +2237,11 @@ func makeRowIDInvertedPostingBlocks(postings []invertedPosting) ([]invertedPosti
 		postingCount uint32
 		tmp          [binary.MaxVarintLen64]byte
 	)
-	for _, posting := range postings {
-		rowDelta := uint64(posting.RowID)
+	for i := range count {
+		rowID := rowIDAt(i)
+		rowDelta := uint64(rowID)
 		if postingCount > 0 {
-			rowDelta = uint64(posting.RowID - prevRowID)
+			rowDelta = uint64(rowID - prevRowID)
 		}
 		n := binary.PutUvarint(tmp[:], rowDelta)
 		if postingCount > 0 && len(payload)+n > invertedPostingBlockPayloadMax {
@@ -2233,17 +2255,17 @@ func makeRowIDInvertedPostingBlocks(postings []invertedPosting) ([]invertedPosti
 
 			payload = make([]byte, 0, invertedPostingBlockPayloadMax)
 			payload = append(payload, invertedPostingCodecVersion, byte(invertedPostingModeRowIDs))
-			rowDelta = uint64(posting.RowID)
+			rowDelta = uint64(rowID)
 			n = binary.PutUvarint(tmp[:], rowDelta)
 			postingCount = 0
 		}
 
 		if postingCount == 0 {
-			firstRowID = posting.RowID
+			firstRowID = rowID
 		}
 		payload = append(payload, tmp[:n]...)
-		lastRowID = posting.RowID
-		prevRowID = posting.RowID
+		lastRowID = rowID
+		prevRowID = rowID
 		postingCount++
 	}
 
@@ -2254,7 +2276,7 @@ func makeRowIDInvertedPostingBlocks(postings []invertedPosting) ([]invertedPosti
 		PostingCount: postingCount,
 		CodecVersion: invertedPostingCodecVersion,
 	})
-	return blocks, nil
+	return blocks
 }
 
 // postingBlockFromPostings builds block metadata around an encoded posting list.

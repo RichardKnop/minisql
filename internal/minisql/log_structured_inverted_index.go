@@ -968,6 +968,10 @@ func (idx *logStructuredInvertedIndex) mergeSegmentRunCells(
 	ctx context.Context,
 	segments []invertedSegmentDescriptor,
 ) ([]invertedSegmentCell, uint32, error) {
+	if idx.Mode() == invertedPostingModeRowIDs {
+		return idx.mergeRowIDSegmentRunCells(ctx, segments)
+	}
+
 	states, err := idx.reduceSegmentStates(ctx, segments)
 	if err != nil {
 		return nil, 0, err
@@ -998,9 +1002,102 @@ func (idx *logStructuredInvertedIndex) mergeSegmentRunCells(
 	return cells, totalPostingCount, nil
 }
 
+func (idx *logStructuredInvertedIndex) mergeRowIDSegmentRunCells(
+	ctx context.Context,
+	segments []invertedSegmentDescriptor,
+) ([]invertedSegmentCell, uint32, error) {
+	states, err := idx.reduceRowIDSegmentStates(ctx, segments)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	terms := sortedRowIDSegmentStateTerms(states)
+	var cells []invertedSegmentCell
+	var totalPostingCount uint32
+	for _, term := range terms {
+		state := states[term]
+		deleteRowIDs := sortedRowIDsFromSet(state.deletes)
+		deleteCells, deletePostingCount, err := segmentCellsForRowIDs(invertedSegmentKindDelete, term, deleteRowIDs)
+		if err != nil {
+			return nil, 0, err
+		}
+		insertRowIDs := sortedRowIDsFromSet(state.inserts)
+		insertCells, insertPostingCount, err := segmentCellsForRowIDs(invertedSegmentKindInsert, term, insertRowIDs)
+		if err != nil {
+			return nil, 0, err
+		}
+		cells = append(cells, deleteCells...)
+		cells = append(cells, insertCells...)
+		totalPostingCount += deletePostingCount + insertPostingCount
+	}
+	if len(cells) == 0 {
+		return nil, 0, fmt.Errorf("cannot merge empty inverted segment run")
+	}
+	return cells, totalPostingCount, nil
+}
+
 type segmentTermState struct {
 	inserts map[RowID]invertedPosting
 	deletes map[RowID]invertedPosting
+}
+
+type rowIDSegmentTermState struct {
+	inserts map[RowID]struct{}
+	deletes map[RowID]struct{}
+}
+
+func (idx *logStructuredInvertedIndex) reduceRowIDSegmentStates(
+	ctx context.Context,
+	segments []invertedSegmentDescriptor,
+) (map[string]rowIDSegmentTermState, error) {
+	states := make(map[string]rowIDSegmentTermState)
+	for _, segment := range segments {
+		if err := idx.visitSegmentCells(ctx, segment.RootPage, func(cell invertedSegmentCell) error {
+			kind := segment.Kind
+			if kind == invertedSegmentKindMixed {
+				kind = cell.Kind
+			}
+			state := states[cell.Term]
+			if state.inserts == nil {
+				state.inserts = make(map[RowID]struct{})
+			}
+			if state.deletes == nil {
+				state.deletes = make(map[RowID]struct{})
+			}
+			mode, err := forEachInvertedPostingRowID(cell.Block.Payload, func(rowID RowID) error {
+				switch kind {
+				case invertedSegmentKindInsert:
+					applyRowIDSegmentStateInsert(state, rowID)
+				case invertedSegmentKindDelete:
+					applyRowIDSegmentStateDelete(state, rowID)
+				default:
+					return fmt.Errorf("unknown inverted segment kind %d", kind)
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			if mode != idx.Mode() {
+				return fmt.Errorf("inverted segment block uses posting mode %d, expected %d", mode, idx.Mode())
+			}
+			states[cell.Term] = state
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return states, nil
+}
+
+func applyRowIDSegmentStateInsert(state rowIDSegmentTermState, rowID RowID) {
+	state.inserts[rowID] = struct{}{}
+	delete(state.deletes, rowID)
+}
+
+func applyRowIDSegmentStateDelete(state rowIDSegmentTermState, rowID RowID) {
+	delete(state.inserts, rowID)
+	state.deletes[rowID] = struct{}{}
 }
 
 func (idx *logStructuredInvertedIndex) reduceSegmentStates(
@@ -1097,6 +1194,15 @@ func sortedSegmentStateTerms(states map[string]segmentTermState) []string {
 	return terms
 }
 
+func sortedRowIDSegmentStateTerms(states map[string]rowIDSegmentTermState) []string {
+	terms := make([]string, 0, len(states))
+	for term := range states {
+		terms = append(terms, term)
+	}
+	sort.Strings(terms)
+	return terms
+}
+
 func postingsFromMap(postingsByRowID map[RowID]invertedPosting) []invertedPosting {
 	postings := make([]invertedPosting, 0, len(postingsByRowID))
 	for _, posting := range postingsByRowID {
@@ -1104,6 +1210,33 @@ func postingsFromMap(postingsByRowID map[RowID]invertedPosting) []invertedPostin
 	}
 	sortInvertedPostings(postings)
 	return postings
+}
+
+func segmentCellsForRowIDs(kind byte, term string, rowIDs []RowID) ([]invertedSegmentCell, uint32, error) {
+	if len(rowIDs) == 0 {
+		return nil, 0, nil
+	}
+	blocks, err := makeRowIDInvertedPostingBlocksFromRowIDs(rowIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	cells := make([]invertedSegmentCell, 0, len(blocks))
+	offset := 0
+	for _, block := range blocks {
+		n := 0
+		for offset+n < len(rowIDs) && rowIDs[offset+n] <= block.LastRowID {
+			n++
+		}
+		cells = append(cells, invertedSegmentCell{
+			Term:         term,
+			Block:        block,
+			DocFreq:      uint32(n),
+			PostingCount: block.PostingCount,
+			Kind:         kind,
+		})
+		offset += n
+	}
+	return cells, uint32(len(rowIDs)), nil
 }
 
 func (idx *logStructuredInvertedIndex) segmentCellsForPostings(
