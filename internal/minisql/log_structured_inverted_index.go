@@ -668,31 +668,40 @@ func (idx *logStructuredInvertedIndex) applyBlockPositions(
 	block invertedPostingBlock,
 	kind byte,
 ) error {
-	mode, postings, err := decodeInvertedPostingList(block.Payload)
+	mode, err := forEachInvertedPostingPosition(block.Payload, func(rowID RowID, positions []uint32) error {
+		posting := invertedPosting{RowID: rowID, Positions: positions}
+		return idx.applyPositionPosting(positionsByRowID, kind, posting)
+	})
 	if err != nil {
 		return err
 	}
 	if mode != idx.Mode() {
 		return fmt.Errorf("inverted segment block uses posting mode %d, expected %d", mode, idx.Mode())
 	}
-	for _, posting := range postings {
-		switch kind {
-		case invertedSegmentKindInsert:
-			positionsByRowID[posting.RowID] = mergeUint32s(positionsByRowID[posting.RowID], posting.Positions)
-		case invertedSegmentKindDelete:
-			if len(posting.Positions) == 0 {
-				delete(positionsByRowID, posting.RowID)
-				continue
-			}
-			positions := removeUint32s(positionsByRowID[posting.RowID], posting.Positions)
-			if len(positions) == 0 {
-				delete(positionsByRowID, posting.RowID)
-				continue
-			}
-			positionsByRowID[posting.RowID] = positions
-		default:
-			return fmt.Errorf("unknown inverted segment kind %d", kind)
+	return nil
+}
+
+func (idx *logStructuredInvertedIndex) applyPositionPosting(
+	positionsByRowID map[RowID][]uint32,
+	kind byte,
+	posting invertedPosting,
+) error {
+	switch kind {
+	case invertedSegmentKindInsert:
+		positionsByRowID[posting.RowID] = mergeUint32s(positionsByRowID[posting.RowID], posting.Positions)
+	case invertedSegmentKindDelete:
+		if len(posting.Positions) == 0 {
+			delete(positionsByRowID, posting.RowID)
+			return nil
 		}
+		positions := removeUint32s(positionsByRowID[posting.RowID], posting.Positions)
+		if len(positions) == 0 {
+			delete(positionsByRowID, posting.RowID)
+			return nil
+		}
+		positionsByRowID[posting.RowID] = positions
+	default:
+		return fmt.Errorf("unknown inverted segment kind %d", kind)
 	}
 	return nil
 }
@@ -807,6 +816,9 @@ func (idx *logStructuredInvertedIndex) applyIteratorPostings(
 }
 
 func (idx *logStructuredInvertedIndex) applyBlockPostings(byRowID map[RowID]invertedPosting, block invertedPostingBlock, kind byte) error {
+	if idx.Mode() == invertedPostingModePositions {
+		return idx.applyBlockPositionPostings(byRowID, block, kind)
+	}
 	mode, postings, err := decodeInvertedPostingList(block.Payload)
 	if err != nil {
 		return err
@@ -843,6 +855,48 @@ func (idx *logStructuredInvertedIndex) applyBlockPostings(byRowID map[RowID]inve
 		default:
 			return fmt.Errorf("unknown inverted segment kind %d", kind)
 		}
+	}
+	return nil
+}
+
+func (idx *logStructuredInvertedIndex) applyBlockPositionPostings(
+	byRowID map[RowID]invertedPosting,
+	block invertedPostingBlock,
+	kind byte,
+) error {
+	mode, err := forEachInvertedPostingPosition(block.Payload, func(rowID RowID, positions []uint32) error {
+		posting := invertedPosting{RowID: rowID, Positions: positions}
+		switch kind {
+		case invertedSegmentKindInsert:
+			existing := byRowID[posting.RowID]
+			existing.RowID = posting.RowID
+			existing.Positions = mergeUint32s(existing.Positions, posting.Positions)
+			byRowID[posting.RowID] = existing
+		case invertedSegmentKindDelete:
+			if len(posting.Positions) == 0 {
+				delete(byRowID, posting.RowID)
+				return nil
+			}
+			existing, ok := byRowID[posting.RowID]
+			if !ok {
+				return nil
+			}
+			existing.Positions = removeUint32s(existing.Positions, posting.Positions)
+			if len(existing.Positions) == 0 {
+				delete(byRowID, posting.RowID)
+				return nil
+			}
+			byRowID[posting.RowID] = existing
+		default:
+			return fmt.Errorf("unknown inverted segment kind %d", kind)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if mode != idx.Mode() {
+		return fmt.Errorf("inverted segment block uses posting mode %d, expected %d", mode, idx.Mode())
 	}
 	return nil
 }
@@ -1111,13 +1165,6 @@ func (idx *logStructuredInvertedIndex) reduceSegmentStates(
 			if kind == invertedSegmentKindMixed {
 				kind = cell.Kind
 			}
-			mode, postings, err := decodeInvertedPostingList(cell.Block.Payload)
-			if err != nil {
-				return err
-			}
-			if mode != idx.Mode() {
-				return fmt.Errorf("inverted segment block uses posting mode %d, expected %d", mode, idx.Mode())
-			}
 			state := states[cell.Term]
 			if state.inserts == nil {
 				state.inserts = make(map[RowID]invertedPosting)
@@ -1125,7 +1172,8 @@ func (idx *logStructuredInvertedIndex) reduceSegmentStates(
 			if state.deletes == nil {
 				state.deletes = make(map[RowID]invertedPosting)
 			}
-			for _, posting := range postings {
+			mode, err := forEachInvertedPostingPosition(cell.Block.Payload, func(rowID RowID, positions []uint32) error {
+				posting := invertedPosting{RowID: rowID, Positions: positions}
 				switch kind {
 				case invertedSegmentKindInsert:
 					applySegmentStateInsert(idx.Mode(), state, posting)
@@ -1134,6 +1182,13 @@ func (idx *logStructuredInvertedIndex) reduceSegmentStates(
 				default:
 					return fmt.Errorf("unknown inverted segment kind %d", kind)
 				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			if mode != idx.Mode() {
+				return fmt.Errorf("inverted segment block uses posting mode %d, expected %d", mode, idx.Mode())
 			}
 			states[cell.Term] = state
 			return nil

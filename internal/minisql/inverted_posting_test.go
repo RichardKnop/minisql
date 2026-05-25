@@ -68,6 +68,32 @@ func TestForEachInvertedPostingRowIDSkipsPositions(t *testing.T) {
 	assert.Equal(t, []RowID{2, 7}, rowIDs)
 }
 
+func TestForEachInvertedPostingPositionStreamsPostings(t *testing.T) {
+	t.Parallel()
+
+	encoded, err := encodeInvertedPostingList(invertedPostingModePositions, []invertedPosting{
+		{RowID: 7, Positions: []uint32{12, 3}},
+		{RowID: 2, Positions: []uint32{1}},
+		{RowID: 7, Positions: []uint32{20}},
+	})
+	require.NoError(t, err)
+
+	var postings []invertedPosting
+	mode, err := forEachInvertedPostingPosition(encoded, func(rowID RowID, positions []uint32) error {
+		postings = append(postings, invertedPosting{
+			RowID:     rowID,
+			Positions: positions,
+		})
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, invertedPostingModePositions, mode)
+	assert.Equal(t, []invertedPosting{
+		{RowID: 2, Positions: []uint32{1}},
+		{RowID: 7, Positions: []uint32{3, 12, 20}},
+	}, postings)
+}
+
 func TestInvertedPostingCodec_Empty(t *testing.T) {
 	t.Parallel()
 
