@@ -533,6 +533,10 @@ func fullTextTokenPositionsForRowInto(
 	default:
 		return nil, current, fmt.Errorf("full-text index %s column %q must be text", secondaryIndex.Name, secondaryIndex.Columns[0].Name)
 	}
+	return filterIndexableTextSearchTokenPositions(positions), current, nil
+}
+
+func filterIndexableTextSearchTokenPositions(positions []textSearchTokenPosition) []textSearchTokenPosition {
 	writeIdx := 0
 	for readIdx := range positions {
 		token := positions[readIdx]
@@ -542,7 +546,7 @@ func fullTextTokenPositionsForRowInto(
 		positions[writeIdx] = token
 		writeIdx++
 	}
-	return positions[:writeIdx], current, nil
+	return positions[:writeIdx]
 }
 
 func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, oldKeyParts []OptionalValue, oldRow, row Row) error {

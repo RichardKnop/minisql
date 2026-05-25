@@ -1662,14 +1662,6 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 		return fmt.Errorf("table %s has full-text index %s but no inverted index instance", table.Name, secondaryIndex.Name)
 	}
 
-	result, err := table.Select(ctx, Statement{
-		Kind:   Select,
-		Fields: fieldsForInvertedIndexPopulation(table, secondaryIndex),
-	})
-	if err != nil {
-		return err
-	}
-
 	postingsByTerm := make(map[string][]invertedPosting, populateInvertedIndexInitialTerms)
 	tokenBuf := make([]textSearchTokenPosition, 0, 16)
 	tokenRuneBuf := make([]rune, 0, 32)
@@ -1690,27 +1682,8 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 		bufferedPostings = 0
 		return nil
 	}
-
-	for result.Rows.Next(ctx) {
-		row := result.Rows.Row()
-
-		if len(secondaryIndex.WhereCond) > 0 {
-			ok, err := row.CheckOneOrMore(secondaryIndex.WhereCond)
-			if err != nil {
-				return fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)
-			}
-			if !ok {
-				continue
-			}
-		}
-
-		tokens, current, err := fullTextTokenPositionsForRowInto(secondaryIndex, row, tokenBuf[:0], tokenRuneBuf[:0])
-		if err != nil {
-			return err
-		}
-		tokenBuf = tokens[:0]
-		tokenRuneBuf = current[:0]
-		rowPostings = fullTextPostingsByTermInto(row.Key, tokens, rowPostings)
+	addPostings := func(rowID RowID, tokens []textSearchTokenPosition) error {
+		rowPostings = fullTextPostingsByTermInto(rowID, tokens, rowPostings)
 		for term, posting := range rowPostings {
 			postingsByTerm[term] = append(postingsByTerm[term], posting)
 			bufferedPostings += len(posting.Positions)
@@ -1719,6 +1692,53 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 			if err := flush(); err != nil {
 				return err
 			}
+		}
+		return nil
+	}
+
+	if len(secondaryIndex.WhereCond) == 0 {
+		err := scanInvertedIndexDocumentRowViews(ctx, table, secondaryIndex, func(rowID RowID, doc TextPointer) error {
+			var tokens []textSearchTokenPosition
+			tokens, tokenRuneBuf = textSearchTokenPositionsBytesInto(doc.Data, tokenBuf[:0], tokenRuneBuf[:0])
+			tokens = filterIndexableTextSearchTokenPositions(tokens)
+			err := addPostings(rowID, tokens)
+			tokenBuf = tokens[:0]
+			tokenRuneBuf = tokenRuneBuf[:0]
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		return flush()
+	}
+
+	result, err := table.Select(ctx, Statement{
+		Kind:   Select,
+		Fields: fieldsForInvertedIndexPopulation(table, secondaryIndex),
+	})
+	if err != nil {
+		return err
+	}
+
+	for result.Rows.Next(ctx) {
+		row := result.Rows.Row()
+
+		ok, err := row.CheckOneOrMore(secondaryIndex.WhereCond)
+		if err != nil {
+			return fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)
+		}
+		if !ok {
+			continue
+		}
+
+		tokens, current, err := fullTextTokenPositionsForRowInto(secondaryIndex, row, tokenBuf[:0], tokenRuneBuf[:0])
+		if err != nil {
+			return err
+		}
+		tokenBuf = tokens[:0]
+		tokenRuneBuf = current[:0]
+		if err := addPostings(row.Key, tokens); err != nil {
+			return err
 		}
 	}
 
@@ -1731,14 +1751,6 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, secondaryIndex SecondaryIndex) error {
 	if secondaryIndex.InvertedIndex == nil {
 		return fmt.Errorf("table %s has inverted index %s but no inverted index instance", table.Name, secondaryIndex.Name)
-	}
-
-	result, err := table.Select(ctx, Statement{
-		Kind:   Select,
-		Fields: fieldsFromColumns(table.Columns...),
-	})
-	if err != nil {
-		return err
 	}
 
 	postingsByTerm := make(map[string][]invertedPosting, populateInvertedIndexInitialTerms)
@@ -1759,33 +1771,61 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		bufferedPostings = 0
 		return nil
 	}
+	addTerms := func(rowID RowID, terms []string) error {
+		for _, term := range terms {
+			postingsByTerm[term] = append(postingsByTerm[term], invertedPosting{RowID: rowID})
+			bufferedPostings += 1
+		}
+		if bufferedPostings >= populateInvertedIndexFlushPostings {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if len(secondaryIndex.WhereCond) == 0 {
+		err := scanInvertedIndexDocumentRowViews(ctx, table, secondaryIndex, func(rowID RowID, doc TextPointer) error {
+			terms, err := jsonInvertedTermsForDocumentBytesInto(doc.Data, termBuf[:0])
+			if err != nil {
+				return err
+			}
+			err = addTerms(rowID, terms)
+			termBuf = terms[:0]
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		return flush()
+	}
+
+	result, err := table.Select(ctx, Statement{
+		Kind:   Select,
+		Fields: fieldsFromColumns(table.Columns...),
+	})
+	if err != nil {
+		return err
+	}
 
 	for result.Rows.Next(ctx) {
 		row := result.Rows.Row()
 
-		if len(secondaryIndex.WhereCond) > 0 {
-			ok, err := row.CheckOneOrMore(secondaryIndex.WhereCond)
-			if err != nil {
-				return fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)
-			}
-			if !ok {
-				continue
-			}
+		ok, err := row.CheckOneOrMore(secondaryIndex.WhereCond)
+		if err != nil {
+			return fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)
+		}
+		if !ok {
+			continue
 		}
 
 		terms, err := jsonInvertedTermsForRowInto(secondaryIndex, row, termBuf[:0])
 		if err != nil {
 			return err
 		}
-		for _, term := range terms {
-			postingsByTerm[term] = append(postingsByTerm[term], invertedPosting{RowID: row.Key})
-			bufferedPostings += 1
-		}
 		termBuf = terms[:0]
-		if bufferedPostings >= populateInvertedIndexFlushPostings {
-			if err := flush(); err != nil {
-				return err
-			}
+		if err := addTerms(row.Key, terms); err != nil {
+			return err
 		}
 	}
 
@@ -1793,6 +1833,49 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		return err
 	}
 	return flush()
+}
+
+func scanInvertedIndexDocumentRowViews(ctx context.Context, table *Table, secondaryIndex SecondaryIndex, consume func(RowID, TextPointer) error) error {
+	if len(secondaryIndex.Columns) != 1 {
+		return fmt.Errorf("inverted index %s requires exactly one source column", secondaryIndex.Name)
+	}
+	colIdx, ok := table.columnCache[secondaryIndex.Columns[0].Name]
+	if !ok {
+		return fmt.Errorf("column %s does not exist on table %s for inverted index %s", secondaryIndex.Columns[0].Name, table.Name, secondaryIndex.Name)
+	}
+	cursor, err := table.SeekFirst(ctx)
+	if err != nil {
+		return err
+	}
+	for !cursor.EndOfTable {
+		page, err := table.pager.ReadPage(ctx, cursor.PageIdx)
+		if err != nil {
+			return fmt.Errorf("read page: %w", err)
+		}
+		if page.LeafNode == nil {
+			return fmt.Errorf("expected leaf page %d while populating inverted index %s", cursor.PageIdx, secondaryIndex.Name)
+		}
+		if len(page.LeafNode.Cells) == 0 || cursor.CellIdx >= page.LeafNode.Header.Cells {
+			return fmt.Errorf("cell index %d out of bounds, cells %d", cursor.CellIdx, page.LeafNode.Header.Cells)
+		}
+		cell := page.LeafNode.Cells[cursor.CellIdx]
+		view := NewRowView(table.Columns, cell)
+		isNull, err := view.IsNull(colIdx)
+		if err != nil {
+			return err
+		}
+		if !isNull {
+			doc, err := view.TextAtWithOverflow(ctx, table.pager, colIdx)
+			if err != nil {
+				return err
+			}
+			if err := consume(cell.Key, doc); err != nil {
+				return err
+			}
+		}
+		advanceLeafCursor(cursor, page)
+	}
+	return nil
 }
 
 func fieldsForInvertedIndexPopulation(table *Table, secondaryIndex SecondaryIndex) []Field {
