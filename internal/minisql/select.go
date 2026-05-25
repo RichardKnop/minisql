@@ -5787,6 +5787,15 @@ func compileJSONContainsRowViewRecheck(
 	pager TxPager,
 	filters OneOrMore,
 ) (func(context.Context, RowView) (bool, error), OneOrMore, bool) {
+	return compileJSONContainsRowViewFilter(columns, pager, filters, true)
+}
+
+func compileJSONContainsRowViewFilter(
+	columns []Column,
+	pager TxPager,
+	filters OneOrMore,
+	allowExactTermsShortcut bool,
+) (func(context.Context, RowView) (bool, error), OneOrMore, bool) {
 	if len(filters) != 1 {
 		return nil, nil, false
 	}
@@ -5817,7 +5826,7 @@ func compileJSONContainsRowViewRecheck(
 			remainingFilters = OneOrMore{remaining}
 		}
 		return func(ctx context.Context, view RowView) (bool, error) {
-			if exactTerms {
+			if allowExactTermsShortcut && exactTerms {
 				return true, nil
 			}
 			value, err := view.ValueAtWithOverflow(ctx, pager, columnIdx)

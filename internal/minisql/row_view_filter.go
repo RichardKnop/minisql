@@ -10,6 +10,20 @@ func compileRowViewFilterForColumns(columns []Column, pager TxPager, conditions 
 	if len(conditions) == 0 {
 		return nil
 	}
+	jsonFilter, remainingFilters, ok := compileJSONContainsRowViewFilter(columns, pager, conditions, false)
+	if ok {
+		remainingFilter := compileRowViewFilterForColumns(columns, pager, remainingFilters)
+		return func(ctx context.Context, view RowView) (bool, error) {
+			ok, err := jsonFilter(ctx, view)
+			if err != nil || !ok {
+				return ok, err
+			}
+			if remainingFilter == nil {
+				return true, nil
+			}
+			return remainingFilter(ctx, view)
+		}
+	}
 	columnIndexes := make(map[string]int, len(columns))
 	for i := range columns {
 		columnIndexes[columns[i].Name] = i
@@ -22,9 +36,18 @@ func compileRowViewFilterForColumns(columns []Column, pager TxPager, conditions 
 func rowViewFilterSupports(columns []Column, conditions OneOrMore) bool {
 	for _, group := range conditions {
 		for _, cond := range group {
-			if cond.Operand1.Type == OperandExpr || cond.Operand2.Type == OperandExpr {
+			if cond.Operand2.Type == OperandExpr {
 				return false
 			}
+			if cond.Operand1.Type != OperandExpr {
+				continue
+			}
+			if len(conditions) == 1 {
+				if _, _, ok := jsonContainsLiteralCondition(cond); ok {
+					continue
+				}
+			}
+			return false
 		}
 	}
 	return true
