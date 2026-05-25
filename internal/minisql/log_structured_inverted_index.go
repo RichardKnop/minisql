@@ -1302,12 +1302,54 @@ func (idx *logStructuredInvertedIndex) segmentCellsForPostings(
 	if len(postings) == 0 {
 		return nil, 0, nil
 	}
-	blocks, err := makeInvertedPostingBlocks(idx.Mode(), postings)
-	if err != nil {
-		return nil, 0, err
+	return idx.appendSegmentCellsForPostings(nil, kind, term, postings)
+}
+
+func (idx *logStructuredInvertedIndex) appendSegmentCellsForPostings(
+	cells []invertedSegmentCell,
+	kind byte,
+	term string,
+	postings []invertedPosting,
+) ([]invertedSegmentCell, uint32, error) {
+	if len(postings) == 0 {
+		return cells, 0, nil
 	}
-	cells := make([]invertedSegmentCell, 0, len(blocks))
+	if idx.Mode() == invertedPostingModeRowIDs {
+		blocks, err := makeRowIDInvertedPostingBlocks(postings)
+		if err != nil {
+			return nil, 0, err
+		}
+		return appendSegmentCellsForBlocks(cells, kind, term, postings, blocks), uint32(len(postings)), nil
+	}
+
 	var totalPostingCount uint32
+	for len(postings) > 0 {
+		n, payload, err := encodeLargestInvertedPostingBlock(idx.Mode(), postings, invertedPostingBlockPayloadMax)
+		if err != nil {
+			return nil, 0, err
+		}
+		blockPostings := postings[:n]
+		block := postingBlockFromPostings(idx.Mode(), blockPostings, payload)
+		cells = append(cells, invertedSegmentCell{
+			Term:         term,
+			Block:        block,
+			DocFreq:      uint32(n),
+			PostingCount: block.PostingCount,
+			Kind:         kind,
+		})
+		totalPostingCount += block.PostingCount
+		postings = postings[n:]
+	}
+	return cells, totalPostingCount, nil
+}
+
+func appendSegmentCellsForBlocks(
+	cells []invertedSegmentCell,
+	kind byte,
+	term string,
+	postings []invertedPosting,
+	blocks []invertedPostingBlock,
+) []invertedSegmentCell {
 	offset := 0
 	for _, block := range blocks {
 		n := 0
@@ -1321,10 +1363,9 @@ func (idx *logStructuredInvertedIndex) segmentCellsForPostings(
 			PostingCount: block.PostingCount,
 			Kind:         kind,
 		})
-		totalPostingCount += block.PostingCount
 		offset += n
 	}
-	return cells, totalPostingCount, nil
+	return cells
 }
 
 func shouldFoldSegmentsIntoBase(meta *invertedMetaPage) bool {
@@ -1473,26 +1514,13 @@ func (idx *logStructuredInvertedIndex) mutationSegmentCells(kind byte, postingsB
 	for _, term := range terms {
 		postings := postingsByTerm[term]
 		postings = groupInvertedPostingsInPlace(idx.Mode(), postings)
-		blocks, err := makeInvertedPostingBlocks(idx.Mode(), postings)
+		var postingCount uint32
+		var err error
+		cells, postingCount, err = idx.appendSegmentCellsForPostings(cells, kind, term, postings)
 		if err != nil {
 			return nil, 0, err
 		}
-		offset := 0
-		for _, block := range blocks {
-			n := 0
-			for offset+n < len(postings) && postings[offset+n].RowID <= block.LastRowID {
-				n++
-			}
-			cells = append(cells, invertedSegmentCell{
-				Term:         term,
-				Block:        block,
-				DocFreq:      uint32(n),
-				PostingCount: block.PostingCount,
-				Kind:         kind,
-			})
-			totalPostingCount += block.PostingCount
-			offset += n
-		}
+		totalPostingCount += postingCount
 	}
 	return cells, totalPostingCount, nil
 }
