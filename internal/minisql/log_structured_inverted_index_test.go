@@ -180,6 +180,41 @@ func TestLogStructuredInvertedIndex_ApplyBatchGroupsSegmentPostings(t *testing.T
 	}, postings)
 }
 
+func TestLogStructuredInvertedIndex_RowIDMixedSegmentsKeepReinsertedRows(t *testing.T) {
+	ctx := context.Background()
+	index, txManager, _ := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModeRowIDs)
+
+	const term = "kv:type:s:\"click\""
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		batch := newInvertedIndexMutationBatch(index.Mode())
+		batch.Insert(term, invertedPosting{RowID: 3})
+		batch.Insert(term, invertedPosting{RowID: 7})
+		if err := index.ApplyBatch(ctx, batch); err != nil {
+			return err
+		}
+
+		batch = newInvertedIndexMutationBatch(index.Mode())
+		batch.Delete(term, invertedPosting{RowID: 3})
+		batch.Delete(term, invertedPosting{RowID: 7})
+		batch.Insert(term, invertedPosting{RowID: 7})
+		batch.Insert(term, invertedPosting{RowID: 9})
+		return index.ApplyBatch(ctx, batch)
+	}))
+
+	iter, err := index.Lookup(ctx, term)
+	require.NoError(t, err)
+	postings := collectInvertedIteratorPostings(t, ctx, iter)
+	assert.Equal(t, []invertedPosting{{RowID: 7}, {RowID: 9}}, postings)
+
+	rowIDs, err := index.LoadRowIDs(ctx, term, 0)
+	require.NoError(t, err)
+	assert.Equal(t, []RowID{7, 9}, rowIDs)
+
+	stats, err := index.Stats(ctx, term)
+	require.NoError(t, err)
+	assert.Equal(t, invertedPostingStats{DocFreq: 2, PostingCount: 2}, stats)
+}
+
 func TestLogStructuredInvertedIndex_LookupSkipsOutOfRangeSegments(t *testing.T) {
 	ctx := context.Background()
 	index, txManager, metaRoot := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModeRowIDs)

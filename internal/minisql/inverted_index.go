@@ -58,6 +58,10 @@ type invertedDocFreqCounter interface {
 	CountDocFreq(ctx context.Context, term string) (uint32, error)
 }
 
+type invertedDocFreqEstimator interface {
+	EstimateDocFreq(ctx context.Context, term string) (uint32, error)
+}
+
 type dedicatedInvertedIndex struct {
 	pager       TxPager
 	rootPageIdx PageIndex

@@ -170,6 +170,17 @@ func (idx *logStructuredInvertedIndex) Lookup(ctx context.Context, term string) 
 	if insertOnlySegmentsMayContainTerm(meta.Segments, term) {
 		return idx.lookupInsertOnlySegments(ctx, meta, term)
 	}
+	if idx.Mode() == invertedPostingModeRowIDs {
+		rowIDs, err := idx.loadMergedRowIDs(ctx, meta, term, 0)
+		if err != nil {
+			return nil, err
+		}
+		blocks, err := makeRowIDInvertedPostingBlocksFromRowIDs(rowIDs)
+		if err != nil {
+			return nil, err
+		}
+		return &sliceInvertedPostingIterator{blocks: blocks}, nil
+	}
 	postings, err := idx.materializeTermPostings(ctx, meta, term)
 	if err != nil {
 		return nil, err
@@ -197,7 +208,12 @@ func (idx *logStructuredInvertedIndex) Stats(ctx context.Context, term string) (
 		return idx.statsInsertOnlySegments(ctx, meta, term)
 	}
 	if idx.Mode() == invertedPostingModeRowIDs {
-		return idx.statsRowIDSegments(ctx, meta, term)
+		rowIDs, err := idx.loadMergedRowIDs(ctx, meta, term, 0)
+		if err != nil {
+			return invertedPostingStats{}, err
+		}
+		docFreq := uint32(len(rowIDs))
+		return invertedPostingStats{DocFreq: docFreq, PostingCount: docFreq}, nil
 	}
 	if idx.Mode() == invertedPostingModePositions {
 		return idx.statsPositionSegments(ctx, meta, term)
@@ -232,13 +248,51 @@ func (idx *logStructuredInvertedIndex) CountDocFreq(ctx context.Context, term st
 		return stats.DocFreq, nil
 	}
 	if idx.Mode() == invertedPostingModeRowIDs {
-		stats, err := idx.statsRowIDSegments(ctx, meta, term)
+		rowIDs, err := idx.loadMergedRowIDs(ctx, meta, term, 0)
 		if err != nil {
 			return 0, err
 		}
-		return stats.DocFreq, nil
+		return uint32(len(rowIDs)), nil
 	}
 	return idx.countPositionDocFreq(ctx, meta, term)
+}
+
+// EstimateDocFreq returns a cheap upper-bound document frequency for scan term
+// ordering. Mixed row-id segments can contain deletes, so exact counts are
+// resolved by the later row-id merge path instead of by this estimator.
+func (idx *logStructuredInvertedIndex) EstimateDocFreq(ctx context.Context, term string) (uint32, error) {
+	meta, err := idx.readMetaPage(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	baseCount, err := idx.base.CountDocFreq(ctx, term)
+	if err != nil {
+		return 0, err
+	}
+	if len(meta.Segments) == 0 || !segmentsMayContainTerm(meta.Segments, term) {
+		return baseCount, nil
+	}
+
+	docFreq := baseCount
+	for _, segment := range meta.Segments {
+		if !segmentMayContainTerm(segment, term) {
+			continue
+		}
+		if err := idx.visitSegmentTermCells(ctx, segment.RootPage, term, func(cell invertedSegmentCell) error {
+			kind := segment.Kind
+			if kind == invertedSegmentKindMixed {
+				kind = cell.Kind
+			}
+			if kind == invertedSegmentKindInsert {
+				docFreq += cell.DocFreq
+			}
+			return nil
+		}); err != nil {
+			return 0, err
+		}
+	}
+	return docFreq, nil
 }
 
 // LoadRowIDs returns sorted row IDs for a row-id-only term.
@@ -254,14 +308,99 @@ func (idx *logStructuredInvertedIndex) LoadRowIDs(ctx context.Context, term stri
 		return idx.base.LoadRowIDs(ctx, term, hint)
 	}
 
-	rowIDs := make(map[RowID]struct{}, hint)
-	baseIter, err := idx.base.Lookup(ctx, term)
+	return idx.loadMergedRowIDs(ctx, meta, term, hint)
+}
+
+func (idx *logStructuredInvertedIndex) loadMergedRowIDs(
+	ctx context.Context,
+	meta *invertedMetaPage,
+	term string,
+	hint uint32,
+) ([]RowID, error) {
+	if len(meta.Segments) == 0 || !segmentsMayContainTerm(meta.Segments, term) {
+		return idx.base.LoadRowIDs(ctx, term, hint)
+	}
+	if insertOnlySegmentsMayContainTerm(meta.Segments, term) {
+		return idx.loadInsertOnlyRowIDs(ctx, meta, term, hint)
+	}
+
+	overrides, err := idx.rowIDSegmentOverrides(ctx, meta, term)
 	if err != nil {
 		return nil, err
 	}
-	if err := applyIteratorRowIDs(ctx, rowIDs, baseIter, invertedSegmentKindInsert); err != nil {
+	if len(overrides) == 0 {
+		return idx.base.LoadRowIDs(ctx, term, hint)
+	}
+
+	baseRowIDs, err := idx.base.LoadRowIDs(ctx, term, hint)
+	if err != nil {
 		return nil, err
 	}
+	surviving := baseRowIDs[:0]
+	for _, rowID := range baseRowIDs {
+		keep, touched := overrides[rowID]
+		if !touched {
+			surviving = append(surviving, rowID)
+			continue
+		}
+		if keep {
+			surviving = append(surviving, rowID)
+		}
+		delete(overrides, rowID)
+	}
+
+	if len(overrides) == 0 {
+		if len(surviving) == 0 {
+			return nil, nil
+		}
+		return surviving, nil
+	}
+
+	for rowID, keep := range overrides {
+		if keep {
+			surviving = append(surviving, rowID)
+		}
+	}
+	if len(surviving) == 0 {
+		return nil, nil
+	}
+	sortRowIDs(surviving)
+	return compactSortedRowIDs(surviving), nil
+}
+
+func (idx *logStructuredInvertedIndex) loadInsertOnlyRowIDs(
+	ctx context.Context,
+	meta *invertedMetaPage,
+	term string,
+	hint uint32,
+) ([]RowID, error) {
+	rowIDs, err := idx.base.LoadRowIDs(ctx, term, hint)
+	if err != nil {
+		return nil, err
+	}
+	for _, segment := range meta.Segments {
+		if !segmentMayContainTerm(segment, term) {
+			continue
+		}
+		if err := idx.visitSegmentTermCells(ctx, segment.RootPage, term, func(cell invertedSegmentCell) error {
+			return appendBlockRowIDs(&rowIDs, cell.Block, idx.Mode())
+		}); err != nil {
+			return nil, err
+		}
+	}
+	if len(rowIDs) == 0 {
+		return nil, nil
+	}
+	sortRowIDs(rowIDs)
+	return compactSortedRowIDs(rowIDs), nil
+}
+
+func (idx *logStructuredInvertedIndex) rowIDSegmentOverrides(
+	ctx context.Context,
+	meta *invertedMetaPage,
+	term string,
+) (map[RowID]bool, error) {
+	overrides := make(map[RowID]bool)
 	for _, segment := range meta.Segments {
 		if !segmentMayContainTerm(segment, term) {
 			continue
@@ -271,13 +410,13 @@ func (idx *logStructuredInvertedIndex) LoadRowIDs(ctx context.Context, term stri
 			if kind == invertedSegmentKindMixed {
 				kind = cell.Kind
 			}
-			return applyBlockRowIDs(rowIDs, cell.Block, idx.Mode(), kind)
+			return applyBlockRowIDOverrides(overrides, cell.Block, idx.Mode(), kind)
 		}); err != nil {
 			return nil, err
 		}
 	}
 
-	return sortedRowIDsFromSet(rowIDs), nil
+	return overrides, nil
 }
 
 // FreeAll releases the base index, all segments, and the metadata root.
@@ -451,64 +590,27 @@ func (idx *logStructuredInvertedIndex) statsInsertOnlySegments(
 	return stats, nil
 }
 
-func (idx *logStructuredInvertedIndex) statsRowIDSegments(
-	ctx context.Context,
-	meta *invertedMetaPage,
-	term string,
-) (invertedPostingStats, error) {
-	rowIDs := make(map[RowID]struct{})
-	baseIter, err := idx.base.Lookup(ctx, term)
+func appendBlockRowIDs(rowIDs *[]RowID, block invertedPostingBlock, expectedMode invertedPostingMode) error {
+	mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
+		*rowIDs = append(*rowIDs, rowID)
+		return nil
+	})
 	if err != nil {
-		return invertedPostingStats{}, err
+		return err
 	}
-	if err := applyIteratorRowIDs(ctx, rowIDs, baseIter, invertedSegmentKindInsert); err != nil {
-		return invertedPostingStats{}, err
+	if mode != expectedMode {
+		return fmt.Errorf("inverted posting block uses posting mode %d, expected %d", mode, expectedMode)
 	}
-	for _, segment := range meta.Segments {
-		if !segmentMayContainTerm(segment, term) {
-			continue
-		}
-		if err := idx.visitSegmentTermCells(ctx, segment.RootPage, term, func(cell invertedSegmentCell) error {
-			kind := segment.Kind
-			if kind == invertedSegmentKindMixed {
-				kind = cell.Kind
-			}
-			return applyBlockRowIDs(rowIDs, cell.Block, idx.Mode(), kind)
-		}); err != nil {
-			return invertedPostingStats{}, err
-		}
-	}
-	docFreq := uint32(len(rowIDs))
-	return invertedPostingStats{DocFreq: docFreq, PostingCount: docFreq}, nil
+	return nil
 }
 
-func applyIteratorRowIDs(
-	ctx context.Context,
-	rowIDs map[RowID]struct{},
-	iter invertedPostingIterator,
-	kind byte,
-) error {
-	for {
-		block, ok, err := iter.NextBlock(ctx)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-		if err := applyBlockRowIDs(rowIDs, block, invertedPostingModeRowIDs, kind); err != nil {
-			return err
-		}
-	}
-}
-
-func applyBlockRowIDs(rowIDs map[RowID]struct{}, block invertedPostingBlock, expectedMode invertedPostingMode, kind byte) error {
+func applyBlockRowIDOverrides(overrides map[RowID]bool, block invertedPostingBlock, expectedMode invertedPostingMode, kind byte) error {
 	mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
 		switch kind {
 		case invertedSegmentKindInsert:
-			rowIDs[rowID] = struct{}{}
+			overrides[rowID] = true
 		case invertedSegmentKindDelete:
-			delete(rowIDs, rowID)
+			overrides[rowID] = false
 		default:
 			return fmt.Errorf("unknown inverted segment kind %d", kind)
 		}
@@ -756,6 +858,21 @@ func sortedRowIDsFromSet(rowIDSet map[RowID]struct{}) []RowID {
 	}
 	sortRowIDs(rowIDs)
 	return rowIDs
+}
+
+func compactSortedRowIDs(rowIDs []RowID) []RowID {
+	if len(rowIDs) < 2 {
+		return rowIDs
+	}
+	writeIdx := 1
+	for _, rowID := range rowIDs[1:] {
+		if rowID == rowIDs[writeIdx-1] {
+			continue
+		}
+		rowIDs[writeIdx] = rowID
+		writeIdx++
+	}
+	return rowIDs[:writeIdx]
 }
 
 func (idx *logStructuredInvertedIndex) materializeTermPostings(

@@ -4756,14 +4756,24 @@ func (t *Table) invertedScanTermsByDocFreq(ctx context.Context, secondaryIndex S
 		if !ok {
 			continue
 		}
-		stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
-		if err != nil {
-			return nil, fmt.Errorf("inverted stats lookup failed: %w", err)
+		var docFreq uint32
+		if estimator, ok := secondaryIndex.InvertedIndex.(invertedDocFreqEstimator); ok {
+			var err error
+			docFreq, err = estimator.EstimateDocFreq(ctx, term)
+			if err != nil {
+				return nil, fmt.Errorf("inverted stats lookup failed: %w", err)
+			}
+		} else {
+			stats, err := secondaryIndex.InvertedIndex.Stats(ctx, term)
+			if err != nil {
+				return nil, fmt.Errorf("inverted stats lookup failed: %w", err)
+			}
+			docFreq = stats.DocFreq
 		}
-		if stats.DocFreq == 0 {
+		if docFreq == 0 {
 			return nil, nil
 		}
-		terms = append(terms, invertedScanTermStats{term: term, docFreq: stats.DocFreq})
+		terms = append(terms, invertedScanTermStats{term: term, docFreq: docFreq})
 	}
 	slices.SortFunc(terms, func(a, b invertedScanTermStats) int {
 		if a.docFreq < b.docFreq {
