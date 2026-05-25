@@ -348,7 +348,11 @@ func fullTextPostingsByTermInto(
 	tokens []textSearchTokenPosition,
 	postings map[string]invertedPosting,
 ) map[string]invertedPosting {
-	clear(postings)
+	for term, posting := range postings {
+		posting.RowID = rowID
+		posting.Positions = posting.Positions[:0]
+		postings[term] = posting
+	}
 	for _, token := range tokens {
 		posting := postings[token.Term]
 		posting.RowID = rowID
@@ -356,6 +360,10 @@ func fullTextPostingsByTermInto(
 		postings[token.Term] = posting
 	}
 	for term, posting := range postings {
+		if len(posting.Positions) == 0 {
+			delete(postings, term)
+			continue
+		}
 		slices.Sort(posting.Positions)
 		posting.Positions = slices.Compact(posting.Positions)
 		postings[term] = posting
