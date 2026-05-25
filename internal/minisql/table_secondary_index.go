@@ -299,9 +299,8 @@ func (t *Table) updateFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 			continue
 		}
 		if !slices.Equal(oldPosting.Positions, newPosting.Positions) {
-			if err := secondaryIndex.InvertedIndex.Replace(ctx, term, oldPosting, newPosting); err != nil {
-				return fmt.Errorf("failed to replace token for full-text index %s: %w", secondaryIndex.Name, err)
-			}
+			batch.Delete(term, oldPosting)
+			batch.Insert(term, newPosting)
 		}
 		delete(newPostings, term)
 	}
