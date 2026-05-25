@@ -1500,6 +1500,17 @@ func (idx *logStructuredInvertedIndex) compactSegments(ctx context.Context) erro
 	sort.SliceStable(segments, func(i, j int) bool {
 		return segments[i].Generation < segments[j].Generation
 	})
+	if idx.Mode() == invertedPostingModeRowIDs {
+		states, err := idx.reduceRowIDSegmentStates(ctx, segments)
+		if err != nil {
+			return err
+		}
+		if err := idx.applyRowIDSegmentStatesToBase(ctx, states); err != nil {
+			return err
+		}
+		return idx.clearSegmentsAfterBaseFoldback(ctx, segments)
+	}
+
 	states, err := idx.reduceSegmentStates(ctx, segments)
 	if err != nil {
 		return err
@@ -1507,6 +1518,13 @@ func (idx *logStructuredInvertedIndex) compactSegments(ctx context.Context) erro
 	if err := idx.applySegmentStatesToBase(ctx, states); err != nil {
 		return err
 	}
+	return idx.clearSegmentsAfterBaseFoldback(ctx, segments)
+}
+
+func (idx *logStructuredInvertedIndex) clearSegmentsAfterBaseFoldback(
+	ctx context.Context,
+	segments []invertedSegmentDescriptor,
+) error {
 	for _, segment := range segments {
 		if err := idx.freeSegmentPages(ctx, segment.RootPage); err != nil {
 			return fmt.Errorf("free compacted inverted segment root %d: %w", segment.RootPage, err)
@@ -1521,6 +1539,29 @@ func (idx *logStructuredInvertedIndex) compactSegments(ctx context.Context) erro
 		return fmt.Errorf("inverted index %s root page %d is not a metadata page", idx.name, idx.rootPageIdx)
 	}
 	metaPage.InvertedMetaPage.Segments = nil
+	return nil
+}
+
+func (idx *logStructuredInvertedIndex) applyRowIDSegmentStatesToBase(
+	ctx context.Context,
+	states map[string]rowIDSegmentTermState,
+) error {
+	terms := sortedRowIDSegmentStateTerms(states)
+	for _, term := range terms {
+		state := states[term]
+		for _, rowID := range sortedRowIDsFromSet(state.deletes) {
+			if err := idx.base.Delete(ctx, term, invertedPosting{RowID: rowID}); err != nil {
+				return fmt.Errorf("compact inverted segment delete term %q: %w", term, err)
+			}
+		}
+		insertPostings := postingsFromRowIDs(sortedRowIDsFromSet(state.inserts))
+		if len(insertPostings) == 0 {
+			continue
+		}
+		if err := idx.base.InsertMany(ctx, term, insertPostings); err != nil {
+			return fmt.Errorf("compact inverted segment insert term %q: %w", term, err)
+		}
+	}
 	return nil
 }
 
@@ -1545,6 +1586,14 @@ func (idx *logStructuredInvertedIndex) applySegmentStatesToBase(
 		}
 	}
 	return nil
+}
+
+func postingsFromRowIDs(rowIDs []RowID) []invertedPosting {
+	postings := make([]invertedPosting, 0, len(rowIDs))
+	for _, rowID := range rowIDs {
+		postings = append(postings, invertedPosting{RowID: rowID})
+	}
+	return postings
 }
 
 func (idx *logStructuredInvertedIndex) visitSegmentCells(ctx context.Context, root PageIndex, visit func(invertedSegmentCell) error) error {

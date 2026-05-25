@@ -513,6 +513,41 @@ func TestLogStructuredInvertedIndex_BaseFoldbackAppliesTermsInBatches(t *testing
 	assert.Equal(t, RowID(logStructuredInvertedIndexMergeRunSize*logStructuredInvertedIndexMergeRunSize), postings[len(postings)-1].RowID)
 }
 
+func TestLogStructuredInvertedIndex_RowIDBaseFoldbackAppliesTombstones(t *testing.T) {
+	ctx := context.Background()
+	index, txManager, metaRoot := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModeRowIDs)
+
+	const term = "kv:type:s:\"click\""
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		if err := index.base.InsertMany(ctx, term, []invertedPosting{
+			{RowID: 7},
+			{RowID: 11},
+		}); err != nil {
+			return err
+		}
+		batch := newInvertedIndexMutationBatch(index.Mode())
+		batch.Delete(term, invertedPosting{RowID: 7})
+		batch.Insert(term, invertedPosting{RowID: 13})
+		if err := index.ApplyBatch(ctx, batch); err != nil {
+			return err
+		}
+		return index.compactSegments(ctx)
+	}))
+
+	page, err := index.pager.ReadPage(ctx, metaRoot)
+	require.NoError(t, err)
+	require.NotNil(t, page.InvertedMetaPage)
+	assert.Empty(t, page.InvertedMetaPage.Segments)
+
+	iter, err := index.Lookup(ctx, term)
+	require.NoError(t, err)
+	postings := collectInvertedIteratorPostings(t, ctx, iter)
+	assert.Equal(t, []invertedPosting{
+		{RowID: 11},
+		{RowID: 13},
+	}, postings)
+}
+
 func newTestLogStructuredInvertedIndex(
 	t *testing.T,
 	mode invertedIndexPostingMode,
