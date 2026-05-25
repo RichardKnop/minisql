@@ -177,6 +177,44 @@ func TestJSONInvertedIndexHelpers(t *testing.T) {
 	assert.Contains(t, index.inserted, `kv:type:s:"view"`)
 }
 
+func TestIntersectInvertedRowIDsWithTermStreamsIntoCandidateBuffer(t *testing.T) {
+	t.Parallel()
+
+	index := &fakeFullTextInvertedIndex{
+		mode: invertedPostingModeRowIDs,
+		postings: map[string][]invertedPosting{
+			`kv:type:s:"click"`: {
+				{RowID: 2},
+				{RowID: 4},
+				{RowID: 4},
+				{RowID: 8},
+				{RowID: 13},
+			},
+		},
+	}
+	secondaryIndex := SecondaryIndex{
+		IndexInfo: IndexInfo{
+			Name:   "idx_payload_inv",
+			Method: IndexMethodInverted,
+		},
+		InvertedIndex: index,
+	}
+	candidates := []RowID{1, 4, 8, 9}
+	candidateBacking := &candidates[0]
+
+	got, err := intersectInvertedRowIDsWithTerm(
+		context.Background(),
+		candidates,
+		secondaryIndex,
+		"idx_payload_inv",
+		`kv:type:s:"click"`,
+	)
+	require.NoError(t, err)
+	require.Equal(t, []RowID{4, 8}, got)
+	assert.Same(t, candidateBacking, &got[0])
+	assert.Equal(t, []string{`kv:type:s:"click"`}, index.lookupTerms)
+}
+
 func TestTable_JSONInvertedIndexScanUsesRowViews(t *testing.T) {
 	pager, dbFile := initTest(t)
 	ctx := context.Background()

@@ -615,11 +615,12 @@ func fullTextMatchCondition(columnName, query string) Condition {
 }
 
 type fakeFullTextInvertedIndex struct {
-	postings map[string][]invertedPosting
-	inserted []string
-	deleted  []string
-	replaced []string
-	mode     invertedPostingMode
+	postings    map[string][]invertedPosting
+	inserted    []string
+	deleted     []string
+	replaced    []string
+	lookupTerms []string
+	mode        invertedPostingMode
 }
 
 func (f *fakeFullTextInvertedIndex) GetRootPageIdx() PageIndex {
@@ -663,6 +664,7 @@ func (f *fakeFullTextInvertedIndex) Delete(_ context.Context, term string, posti
 }
 
 func (f *fakeFullTextInvertedIndex) Lookup(_ context.Context, term string) (invertedPostingIterator, error) {
+	f.lookupTerms = append(f.lookupTerms, term)
 	payload, err := encodeInvertedPostingList(f.postingMode(), f.postings[term])
 	if err != nil {
 		return nil, err

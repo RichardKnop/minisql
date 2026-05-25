@@ -4720,18 +4720,23 @@ func (t *Table) collectInvertedScanRowIDs(ctx context.Context, scan Scan) ([]Row
 
 	var surviving []RowID
 	for i, termStats := range terms {
-		rowIDs, err := loadInvertedRowIDsForTerm(ctx, secondaryIndex, scan.IndexName, termStats.term, termStats.docFreq)
-		if err != nil {
-			return nil, err
-		}
-		if len(rowIDs) == 0 {
-			return nil, nil
-		}
 		if i == 0 {
+			rowIDs, err := loadInvertedRowIDsForTerm(ctx, secondaryIndex, scan.IndexName, termStats.term, termStats.docFreq)
+			if err != nil {
+				return nil, err
+			}
+			if len(rowIDs) == 0 {
+				return nil, nil
+			}
 			surviving = rowIDs
 			continue
 		}
-		surviving = intersectTwoSortedSets(surviving, rowIDs)
+
+		var err error
+		surviving, err = intersectInvertedRowIDsWithTerm(ctx, surviving, secondaryIndex, scan.IndexName, termStats.term)
+		if err != nil {
+			return nil, err
+		}
 		if len(surviving) == 0 {
 			return nil, nil
 		}
@@ -4874,23 +4879,93 @@ func (t *Table) countInvertedIndexScan(ctx context.Context, scan Scan) (int64, e
 
 	var surviving []RowID
 	for i, termStats := range terms {
-		rowIDs, err := loadInvertedRowIDsForTerm(ctx, secondaryIndex, scan.IndexName, termStats.term, termStats.docFreq)
-		if err != nil {
-			return 0, err
-		}
-		if len(rowIDs) == 0 {
-			return 0, nil
-		}
 		if i == 0 {
+			rowIDs, err := loadInvertedRowIDsForTerm(ctx, secondaryIndex, scan.IndexName, termStats.term, termStats.docFreq)
+			if err != nil {
+				return 0, err
+			}
+			if len(rowIDs) == 0 {
+				return 0, nil
+			}
 			surviving = rowIDs
 			continue
 		}
-		surviving = intersectTwoSortedSets(surviving, rowIDs)
+
+		var err error
+		surviving, err = intersectInvertedRowIDsWithTerm(ctx, surviving, secondaryIndex, scan.IndexName, termStats.term)
+		if err != nil {
+			return 0, err
+		}
 		if len(surviving) == 0 {
 			return 0, nil
 		}
 	}
 	return int64(len(surviving)), nil
+}
+
+func intersectInvertedRowIDsWithTerm(
+	ctx context.Context,
+	candidates []RowID,
+	secondaryIndex SecondaryIndex,
+	indexName, term string,
+) ([]RowID, error) {
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
+	if err != nil {
+		return nil, fmt.Errorf("inverted lookup failed: %w", err)
+	}
+
+	out := candidates[:0]
+	candidateIdx := 0
+	var (
+		lastRowID RowID
+		haveLast  bool
+	)
+	for {
+		block, ok, err := iter.NextBlock(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("inverted lookup failed: %w", err)
+		}
+		if !ok {
+			break
+		}
+
+		mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if haveLast && rowID == lastRowID {
+				return nil
+			}
+			haveLast = true
+			lastRowID = rowID
+
+			for candidateIdx < len(candidates) && candidates[candidateIdx] < rowID {
+				candidateIdx++
+			}
+			if candidateIdx >= len(candidates) {
+				return nil
+			}
+			if candidates[candidateIdx] == rowID {
+				out = append(out, rowID)
+				candidateIdx++
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if mode != invertedPostingModeRowIDs {
+			return nil, fmt.Errorf("inverted index %s uses posting mode %d", indexName, mode)
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 func loadInvertedRowIDsForTerm(ctx context.Context, secondaryIndex SecondaryIndex, indexName, term string, docFreq uint32) ([]RowID, error) {
