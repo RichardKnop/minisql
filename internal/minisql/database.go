@@ -24,6 +24,7 @@ var (
 )
 
 const populateInvertedIndexFlushPostings = 64 * 1024
+const populateInvertedIndexInitialTerms = 1024
 
 // WALConfig bundles the Write-Ahead Log objects that NewDatabase needs.
 // Pass nil when creating in-memory/test databases that do not require WAL.
@@ -1663,13 +1664,13 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 
 	result, err := table.Select(ctx, Statement{
 		Kind:   Select,
-		Fields: fieldsFromColumns(table.Columns...),
+		Fields: fieldsForInvertedIndexPopulation(table, secondaryIndex),
 	})
 	if err != nil {
 		return err
 	}
 
-	postingsByTerm := make(map[string][]invertedPosting)
+	postingsByTerm := make(map[string][]invertedPosting, populateInvertedIndexInitialTerms)
 	tokenBuf := make([]textSearchTokenPosition, 0, 16)
 	tokenRuneBuf := make([]rune, 0, 32)
 	rowPostings := make(map[string]invertedPosting, 16)
@@ -1685,7 +1686,7 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 		if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
 			return fmt.Errorf("failed to insert token batch for full-text index %s: %w", secondaryIndex.Name, err)
 		}
-		postingsByTerm = make(map[string][]invertedPosting)
+		postingsByTerm = make(map[string][]invertedPosting, populateInvertedIndexInitialTerms)
 		bufferedPostings = 0
 		return nil
 	}
@@ -1740,7 +1741,7 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		return err
 	}
 
-	postingsByTerm := make(map[string][]invertedPosting)
+	postingsByTerm := make(map[string][]invertedPosting, populateInvertedIndexInitialTerms)
 	termBuf := make([]string, 0, 16)
 	bufferedPostings := 0
 	flush := func() error {
@@ -1754,7 +1755,7 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
 			return fmt.Errorf("failed to insert JSON term batch for inverted index %s: %w", secondaryIndex.Name, err)
 		}
-		postingsByTerm = make(map[string][]invertedPosting)
+		postingsByTerm = make(map[string][]invertedPosting, populateInvertedIndexInitialTerms)
 		bufferedPostings = 0
 		return nil
 	}
@@ -1792,6 +1793,13 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		return err
 	}
 	return flush()
+}
+
+func fieldsForInvertedIndexPopulation(table *Table, secondaryIndex SecondaryIndex) []Field {
+	if len(secondaryIndex.WhereCond) > 0 {
+		return fieldsFromColumns(table.Columns...)
+	}
+	return fieldsFromColumns(secondaryIndex.Columns...)
 }
 
 func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {

@@ -485,11 +485,14 @@ func jsonInvertedTermsForRowInto(secondaryIndex SecondaryIndex, row Row, terms [
 	if !ok || !value.Valid {
 		return nil, nil
 	}
-	doc, ok := toStringVal(value.Value)
-	if !ok {
+	switch doc := value.Value.(type) {
+	case TextPointer:
+		return jsonInvertedTermsForDocumentBytesInto(doc.Data, terms)
+	case string:
+		return jsonInvertedTermsForDocumentInto(doc, terms)
+	default:
 		return nil, fmt.Errorf("inverted index %s column %q must be JSON text", secondaryIndex.Name, secondaryIndex.Columns[0].Name)
 	}
-	return jsonInvertedTermsForDocumentInto(doc, terms)
 }
 
 func fullTextTokensForRow(secondaryIndex SecondaryIndex, row Row) ([]string, error) {

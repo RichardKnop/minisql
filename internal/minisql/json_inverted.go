@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/big"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -50,6 +51,14 @@ func jsonInvertedTermsForDocument(doc string) ([]string, error) {
 
 func jsonInvertedTermsForDocumentInto(doc string, terms []string) ([]string, error) {
 	value, err := decodeJSONForInvertedIndex(doc)
+	if err != nil {
+		return nil, err
+	}
+	return jsonInvertedTermsInto(value, terms), nil
+}
+
+func jsonInvertedTermsForDocumentBytesInto(doc []byte, terms []string) ([]string, error) {
+	value, err := decodeJSONBytesForInvertedIndex(doc)
 	if err != nil {
 		return nil, err
 	}
@@ -127,6 +136,15 @@ func jsonInvertedScalarArrayTermsAreExactAt(path string, values []any) bool {
 // so term generation and containment can canonicalize numeric values explicitly.
 func decodeJSONForInvertedIndex(input string) (any, error) {
 	dec := json.NewDecoder(strings.NewReader(input))
+	return decodeJSONWithNumber(dec)
+}
+
+func decodeJSONBytesForInvertedIndex(input []byte) (any, error) {
+	dec := json.NewDecoder(bytes.NewReader(input))
+	return decodeJSONWithNumber(dec)
+}
+
+func decodeJSONWithNumber(dec *json.Decoder) (any, error) {
 	dec.UseNumber()
 	var value any
 	if err := dec.Decode(&value); err != nil {
@@ -199,6 +217,9 @@ func joinJSONInvertedPath(parent, key string) string {
 // jsonInvertedPathSegment escapes path separator characters inside object keys
 // so similarly named paths generate different term strings.
 func jsonInvertedPathSegment(segment string) string {
+	if !strings.ContainsAny(segment, "\\.[]") {
+		return segment
+	}
 	return jsonInvertedPathReplacer.Replace(segment)
 }
 
@@ -209,8 +230,7 @@ func jsonInvertedScalarTerm(value any) string {
 	case nil:
 		return "null"
 	case string:
-		encoded, _ := json.Marshal(v)
-		return "s:" + string(encoded)
+		return "s:" + strconv.Quote(v)
 	case bool:
 		if v {
 			return "b:true"
