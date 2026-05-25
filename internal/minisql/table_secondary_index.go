@@ -525,11 +525,14 @@ func fullTextTokenPositionsForRowInto(
 	if !ok || !value.Valid {
 		return nil, current, nil
 	}
-	doc, ok := toStringVal(value.Value)
-	if !ok {
+	switch doc := value.Value.(type) {
+	case TextPointer:
+		positions, current = textSearchTokenPositionsBytesInto(doc.Data, positions, current)
+	case string:
+		positions, current = textSearchTokenPositionsInto(doc, positions, current)
+	default:
 		return nil, current, fmt.Errorf("full-text index %s column %q must be text", secondaryIndex.Name, secondaryIndex.Columns[0].Name)
 	}
-	positions, current = textSearchTokenPositionsInto(doc, positions, current)
 	writeIdx := 0
 	for readIdx := range positions {
 		token := positions[readIdx]

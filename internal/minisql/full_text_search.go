@@ -4,6 +4,7 @@ import (
 	"math"
 	"slices"
 	"unicode"
+	"unicode/utf8"
 )
 
 func fullTextTokenColumn() Column {
@@ -49,6 +50,23 @@ func textSearchTokenPositionsInto(
 	tokens []textSearchTokenPosition,
 	current []rune,
 ) ([]textSearchTokenPosition, []rune) {
+	return textSearchTokenPositionsFromRunesInto(input, nil, tokens, current)
+}
+
+func textSearchTokenPositionsBytesInto(
+	input []byte,
+	tokens []textSearchTokenPosition,
+	current []rune,
+) ([]textSearchTokenPosition, []rune) {
+	return textSearchTokenPositionsFromRunesInto("", input, tokens, current)
+}
+
+func textSearchTokenPositionsFromRunesInto(
+	input string,
+	inputBytes []byte,
+	tokens []textSearchTokenPosition,
+	current []rune,
+) ([]textSearchTokenPosition, []rune) {
 	tokens = tokens[:0]
 	current = current[:0]
 	var position uint64
@@ -69,12 +87,24 @@ func textSearchTokenPositionsInto(
 		position += 1
 	}
 
-	for _, r := range input {
+	consume := func(r rune) {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			current = append(current, unicode.ToLower(r))
-			continue
+			return
 		}
 		flush()
+	}
+
+	if inputBytes == nil {
+		for _, r := range input {
+			consume(r)
+		}
+	} else {
+		for len(inputBytes) > 0 {
+			r, size := utf8.DecodeRune(inputBytes)
+			consume(r)
+			inputBytes = inputBytes[size:]
+		}
 	}
 	flush()
 
