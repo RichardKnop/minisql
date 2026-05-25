@@ -283,14 +283,21 @@ func (t *Table) updateFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 		return nil
 	}
 
-	oldPostings, err := fullTextPostingsByTermForRow(secondaryIndex, rowID, oldRow)
+	var tokenBuf []textSearchTokenPosition
+	var tokenRuneBuf []rune
+	oldTokens, current, err := fullTextTokenPositionsForRowInto(secondaryIndex, oldRow, tokenBuf, tokenRuneBuf)
 	if err != nil {
 		return err
 	}
-	newPostings, err := fullTextPostingsByTermForRow(secondaryIndex, rowID, row)
+	oldPostings := fullTextPostingsByTerm(rowID, oldTokens)
+	tokenBuf = oldTokens[:0]
+	tokenRuneBuf = current[:0]
+
+	newTokens, _, err := fullTextTokenPositionsForRowInto(secondaryIndex, row, tokenBuf, tokenRuneBuf)
 	if err != nil {
 		return err
 	}
+	newPostings := fullTextPostingsByTerm(rowID, newTokens)
 	batch := newInvertedIndexMutationBatchWithCapacity(secondaryIndex.InvertedIndex.Mode(), len(newPostings), len(oldPostings))
 	for term, oldPosting := range oldPostings {
 		newPosting, ok := newPostings[term]
@@ -330,14 +337,6 @@ func (t *Table) deleteFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 		return fmt.Errorf("failed to delete tokens for full-text index %s: %w", secondaryIndex.Name, err)
 	}
 	return nil
-}
-
-func fullTextPostingsByTermForRow(secondaryIndex SecondaryIndex, rowID RowID, row Row) (map[string]invertedPosting, error) {
-	tokens, err := fullTextTokenPositionsForRow(secondaryIndex, row)
-	if err != nil {
-		return nil, err
-	}
-	return fullTextPostingsByTerm(rowID, tokens), nil
 }
 
 func fullTextPostingsByTerm(rowID RowID, tokens []textSearchTokenPosition) map[string]invertedPosting {
