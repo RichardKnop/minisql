@@ -19,6 +19,9 @@ Cumulative refactor work in this baseline:
   segment creation groups its one-shot posting slices in place.
 - **Batched full-text UPDATE replacements**: changed-position postings are recorded in the row
   update's existing mutation batch instead of appending one segment per replaced term.
+- **Lower-allocation JSON term maintenance**: JSON UPDATE diffs sorted term slices directly,
+  JSON object walks no longer allocate per-object key slices, and insert/delete mutation
+  batches are pre-sized for their term counts.
 - **Benchmark correction**: `BenchmarkJSONInverted_BuildIndex` now stops the timer around
   per-iteration fixture setup, so the reported memory reflects index creation rather than
   database/table/seed allocation.
@@ -56,51 +59,51 @@ make bench-inverted BENCH_COUNT=5
 | Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan |
 |---|---:|---:|---:|---:|---:|---:|
 | FullText_BuildIndex | 3.7 MiB | — | — | 696 B | — | — |
-| JSONInverted_BuildIndex | — | 5.8 MiB | — | — | — | — |
-| FullText_Insert_WithIndex | 38.4 KiB | — | — | 715 B | — | — |
-| FullText_Search_SingleTerm/rare | 38.4 KiB | — | — | 532 B | — | — |
-| FullText_Search_SingleTerm/medium | 38.4 KiB | — | — | 532 B | — | — |
-| FullText_Search_SingleTerm/common | 38.4 KiB | — | — | 550 B | — | — |
-| FullText_Search_MultiTermAND | 47.4 KiB | — | — | 532 B | — | — |
-| FullText_Search_Phrase | 61.6 KiB | — | — | 541 B | — | — |
-| FullText_Search_AfterDeletes | 117 KiB | — | — | — | — | — |
+| JSONInverted_BuildIndex | — | 5.7 MiB | — | — | — | — |
+| FullText_Insert_WithIndex | 38.4 KiB | — | — | 712 B | — | — |
+| FullText_Search_SingleTerm/rare | 37.0 KiB | — | — | 531 B | — | — |
+| FullText_Search_SingleTerm/medium | 37.0 KiB | — | — | 532 B | — | — |
+| FullText_Search_SingleTerm/common | 37.7 KiB | — | — | 549 B | — | — |
+| FullText_Search_MultiTermAND | 46.7 KiB | — | — | 532 B | — | — |
+| FullText_Search_Phrase | 60.2 KiB | — | — | 541 B | — | — |
+| FullText_Search_AfterDeletes | 119 KiB | — | — | — | — | — |
 | FullText_Update_WithIndex | 65.4 KiB | — | — | 413 B | — | — |
 | FullText_Delete_WithIndex | 32.1 KiB | — | — | 260 B | — | — |
-| JSONInverted_Insert_WithIndex | — | 60.1 KiB | — | — | — | — |
-| JSONInverted_Contains_KeyValue/key_value | — | 93.4 KiB | 3.3 MiB | — | 547 B | 548 B |
-| JSONInverted_Contains_ObjectSubset/object_subset | — | 155 KiB | 3.4 MiB | — | 548 B | 548 B |
-| JSONInverted_Contains_AfterDeletes | — | 215 KiB | — | — | — | — |
-| JSONInverted_Update_WithIndex | — | 71.9 KiB | — | — | — | — |
-| JSONInverted_Delete_WithIndex | — | 51.3 KiB | — | — | — | — |
+| JSONInverted_Insert_WithIndex | — | 59.7 KiB | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 93.4 KiB | 3.3 MiB | — | 549 B | 549 B |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 156 KiB | 3.3 MiB | — | 549 B | 548 B |
+| JSONInverted_Contains_AfterDeletes | — | 213 KiB | — | — | — | — |
+| JSONInverted_Update_WithIndex | — | 70.8 KiB | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 50.9 KiB | — | — | — | — |
 
 #### Allocs/op
 
 | Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan |
 |---|---:|---:|---:|---:|---:|---:|
-| FullText_BuildIndex | 30,384 | — | — | 36 | — | — |
-| JSONInverted_BuildIndex | — | 79,657 | — | — | — | — |
-| FullText_Insert_WithIndex | 118 | — | — | 16 | — | — |
+| FullText_BuildIndex | 30,357 | — | — | 36 | — | — |
+| JSONInverted_BuildIndex | — | 78,658 | — | — | — | — |
+| FullText_Insert_WithIndex | 117 | — | — | 16 | — | — |
 | FullText_Search_SingleTerm/rare | 78 | — | — | 13 | — | — |
 | FullText_Search_SingleTerm/medium | 78 | — | — | 13 | — | — |
 | FullText_Search_SingleTerm/common | 80 | — | — | 15 | — | — |
 | FullText_Search_MultiTermAND | 98 | — | — | 13 | — | — |
-| FullText_Search_Phrase | 314 | — | — | 14 | — | — |
+| FullText_Search_Phrase | 313 | — | — | 14 | — | — |
 | FullText_Search_AfterDeletes | 102 | — | — | — | — | — |
 | FullText_Update_WithIndex | 195 | — | — | 12 | — | — |
 | FullText_Delete_WithIndex | 127 | — | — | 6 | — | — |
-| JSONInverted_Insert_WithIndex | — | 211 | — | — | — | — |
+| JSONInverted_Insert_WithIndex | — | 209 | — | — | — | — |
 | JSONInverted_Contains_KeyValue/key_value | — | 118 | 51,093 | — | 15 | 15 |
-| JSONInverted_Contains_ObjectSubset/object_subset | — | 158 | 58,107 | — | 15 | 15 |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 158 | 58,105 | — | 15 | 15 |
 | JSONInverted_Contains_AfterDeletes | — | 159 | — | — | — | — |
-| JSONInverted_Update_WithIndex | — | 286 | — | — | — | — |
-| JSONInverted_Delete_WithIndex | — | 199 | — | — | — | — |
+| JSONInverted_Update_WithIndex | — | 276 | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 197 | — | — | — | — |
 
 #### Key observations
 
 The log-structured layer has shifted the remaining problem. Delete-heavy maintenance is now
 far cheaper than the pre-refactor dedicated-index path, and indexed JSON contains queries
 remain much cheaper than MiniSQL sequential JSON scans. The largest remaining write-path
-memory deltas are now JSON update/delete (`~72 KiB/op` / `~51 KiB/op`) and full-text
+memory deltas are now JSON update/delete (`~71 KiB/op` / `~51 KiB/op`) and full-text
 update (`~65 KiB/op`), mostly from per-operation token/term extraction, segment
 payload encoding, WAL/page-copy overhead, and the unavoidable delete+insert shape of UPDATE.
 

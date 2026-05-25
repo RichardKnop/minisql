@@ -159,15 +159,10 @@ func jsonInvertedTermsInto(value any, terms []string) []string {
 func collectJSONInvertedTerms(terms *[]string, path string, value any) {
 	switch v := value.(type) {
 	case map[string]any:
-		keys := make([]string, 0, len(v))
-		for key := range v {
-			keys = append(keys, key)
-		}
-		slices.Sort(keys)
-		for _, key := range keys {
+		for key, child := range v {
 			childPath := joinJSONInvertedPath(path, key)
 			appendJSONInvertedTerm(terms, "k:"+childPath)
-			collectJSONInvertedTerms(terms, childPath, v[key])
+			collectJSONInvertedTerms(terms, childPath, child)
 		}
 	case []any:
 		arrayPath := path + "[]"

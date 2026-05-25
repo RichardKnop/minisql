@@ -250,7 +250,7 @@ func (t *Table) insertFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 		return err
 	}
 	postings := fullTextPostingsByTerm(rowID, tokens)
-	batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
+	batch := newInvertedIndexMutationBatchWithCapacity(secondaryIndex.InvertedIndex.Mode(), len(postings), 0)
 	for term, posting := range postings {
 		batch.Insert(term, posting)
 	}
@@ -291,7 +291,7 @@ func (t *Table) updateFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 	if err != nil {
 		return err
 	}
-	batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
+	batch := newInvertedIndexMutationBatchWithCapacity(secondaryIndex.InvertedIndex.Mode(), len(newPostings), len(oldPostings))
 	for term, oldPosting := range oldPostings {
 		newPosting, ok := newPostings[term]
 		if !ok {
@@ -322,7 +322,7 @@ func (t *Table) deleteFullTextIndexKeys(ctx context.Context, secondaryIndex Seco
 		return err
 	}
 	postings := fullTextPostingsByTerm(rowID, tokens)
-	batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
+	batch := newInvertedIndexMutationBatchWithCapacity(secondaryIndex.InvertedIndex.Mode(), 0, len(postings))
 	for term, posting := range postings {
 		batch.Delete(term, posting)
 	}
@@ -378,7 +378,7 @@ func (t *Table) insertInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 	if err != nil {
 		return err
 	}
-	batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
+	batch := newInvertedIndexMutationBatchWithCapacity(secondaryIndex.InvertedIndex.Mode(), len(terms), 0)
 	for _, term := range terms {
 		batch.Insert(term, invertedPosting{RowID: rowID})
 	}
@@ -411,24 +411,36 @@ func (t *Table) updateInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 		return nil
 	}
 
-	oldTerms, err := jsonInvertedTermSetForRow(secondaryIndex, oldRow)
+	oldTerms, err := jsonInvertedTermsForRow(secondaryIndex, oldRow)
 	if err != nil {
 		return err
 	}
-	newTerms, err := jsonInvertedTermSetForRow(secondaryIndex, row)
+	newTerms, err := jsonInvertedTermsForRow(secondaryIndex, row)
 	if err != nil {
 		return err
 	}
 	batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
-	for term := range oldTerms {
-		if _, ok := newTerms[term]; ok {
-			delete(newTerms, term)
+	oldIdx, newIdx := 0, 0
+	for oldIdx < len(oldTerms) && newIdx < len(newTerms) {
+		oldTerm, newTerm := oldTerms[oldIdx], newTerms[newIdx]
+		if oldTerm == newTerm {
+			oldIdx++
+			newIdx++
 			continue
 		}
-		batch.Delete(term, invertedPosting{RowID: rowID})
+		if oldTerm < newTerm {
+			batch.Delete(oldTerm, invertedPosting{RowID: rowID})
+			oldIdx++
+			continue
+		}
+		batch.Insert(newTerm, invertedPosting{RowID: rowID})
+		newIdx++
 	}
-	for term := range newTerms {
-		batch.Insert(term, invertedPosting{RowID: rowID})
+	for ; oldIdx < len(oldTerms); oldIdx++ {
+		batch.Delete(oldTerms[oldIdx], invertedPosting{RowID: rowID})
+	}
+	for ; newIdx < len(newTerms); newIdx++ {
+		batch.Insert(newTerms[newIdx], invertedPosting{RowID: rowID})
 	}
 	if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
 		return fmt.Errorf("failed to update JSON terms for inverted index %s: %w", secondaryIndex.Name, err)
@@ -444,7 +456,7 @@ func (t *Table) deleteInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 	if err != nil {
 		return err
 	}
-	batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
+	batch := newInvertedIndexMutationBatchWithCapacity(secondaryIndex.InvertedIndex.Mode(), 0, len(terms))
 	for _, term := range terms {
 		batch.Delete(term, invertedPosting{RowID: rowID})
 	}
@@ -471,18 +483,6 @@ func jsonInvertedTermsForRowInto(secondaryIndex SecondaryIndex, row Row, terms [
 		return nil, fmt.Errorf("inverted index %s column %q must be JSON text", secondaryIndex.Name, secondaryIndex.Columns[0].Name)
 	}
 	return jsonInvertedTermsForDocumentInto(doc, terms)
-}
-
-func jsonInvertedTermSetForRow(secondaryIndex SecondaryIndex, row Row) (map[string]struct{}, error) {
-	terms, err := jsonInvertedTermsForRow(secondaryIndex, row)
-	if err != nil {
-		return nil, err
-	}
-	termSet := make(map[string]struct{}, len(terms))
-	for _, term := range terms {
-		termSet[term] = struct{}{}
-	}
-	return termSet, nil
 }
 
 func fullTextTokensForRow(secondaryIndex SecondaryIndex, row Row) ([]string, error) {

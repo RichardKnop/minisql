@@ -17,10 +17,17 @@ type invertedIndexMutationBatch struct {
 }
 
 func newInvertedIndexMutationBatch(mode invertedIndexPostingMode) invertedIndexMutationBatch {
+	return newInvertedIndexMutationBatchWithCapacity(mode, 0, 0)
+}
+
+func newInvertedIndexMutationBatchWithCapacity(
+	mode invertedIndexPostingMode,
+	insertTerms, deleteTerms int,
+) invertedIndexMutationBatch {
 	return invertedIndexMutationBatch{
 		mode:    mode,
-		inserts: make(map[string][]invertedPosting),
-		deletes: make(map[string][]invertedPosting),
+		inserts: make(map[string][]invertedPosting, insertTerms),
+		deletes: make(map[string][]invertedPosting, deleteTerms),
 	}
 }
 
