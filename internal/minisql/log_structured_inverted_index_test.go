@@ -213,6 +213,10 @@ func TestLogStructuredInvertedIndex_RowIDMixedSegmentsKeepReinsertedRows(t *test
 	stats, err := index.Stats(ctx, term)
 	require.NoError(t, err)
 	assert.Equal(t, invertedPostingStats{DocFreq: 2, PostingCount: 2}, stats)
+
+	docFreq, err := index.CountDocFreq(ctx, term)
+	require.NoError(t, err)
+	assert.Equal(t, uint32(2), docFreq)
 }
 
 func TestLogStructuredInvertedIndex_LookupSkipsOutOfRangeSegments(t *testing.T) {
