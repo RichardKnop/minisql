@@ -169,3 +169,45 @@ func (s *TestSuite) TestJSONInvertedIndexHeavyMaintenance() {
 	s.True(rows[0].RowsActual.Valid)
 	s.Equal(int64(80), rows[0].RowsActual.Int64)
 }
+
+func (s *TestSuite) TestJSONInvertedIndex_PartialIndexAndNulls() {
+	_, err := s.db.Exec(`create table "events_inv_partial" (
+		id      int8 primary key,
+		visible boolean not null,
+		name    varchar(100) not null,
+		payload json
+	);`)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`insert into "events_inv_partial" (id, visible, name, payload) values
+		(1, true,  'visible-click',  '{"type":"click","tags":["web"]}'),
+		(2, false, 'hidden-click',   '{"type":"click","tags":["web"]}'),
+		(3, true,  'visible-null',   null);`)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`create inverted index "idx_events_inv_partial_payload" on "events_inv_partial" (payload) where visible = true;`)
+	s.Require().NoError(err)
+
+	rows := s.collectExplain(`EXPLAIN SELECT name FROM "events_inv_partial" WHERE visible = true AND JSON_CONTAINS(payload, '{"type":"click"}');`)
+	s.Require().NotEmpty(rows)
+	s.Equal("inverted", rows[0].Operation)
+	s.Contains(rows[0].Detail, "index=idx_events_inv_partial_payload")
+
+	var count int
+	s.Require().NoError(s.db.QueryRow(`select count(*) from "events_inv_partial" where visible = true and JSON_CONTAINS(payload, '{"type":"click"}');`).Scan(&count))
+	s.Equal(1, count)
+
+	_, err = s.db.Exec(`update "events_inv_partial" set visible = true where id = 2;`)
+	s.Require().NoError(err)
+	s.Require().NoError(s.db.QueryRow(`select count(*) from "events_inv_partial" where visible = true and JSON_CONTAINS(payload, '{"type":"click"}');`).Scan(&count))
+	s.Equal(2, count)
+
+	_, err = s.db.Exec(`update "events_inv_partial" set payload = null where id = 1;`)
+	s.Require().NoError(err)
+	s.Require().NoError(s.db.QueryRow(`select count(*) from "events_inv_partial" where visible = true and JSON_CONTAINS(payload, '{"type":"click"}');`).Scan(&count))
+	s.Equal(1, count)
+
+	results := s.collectPragmaResults(`PRAGMA integrity_check;`)
+	s.Require().Len(results, 1)
+	s.Equal("ok", results[0].Code)
+}
