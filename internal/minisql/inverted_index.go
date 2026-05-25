@@ -2304,32 +2304,58 @@ func encodeLargestInvertedPostingBlock(mode invertedPostingMode, postings []inve
 	if len(postings) == 0 {
 		return 0, nil, fmt.Errorf("cannot encode empty inverted posting block")
 	}
-	firstPayload, err := encodeGroupedInvertedPostingList(mode, postings[:1])
-	if err != nil {
-		return 0, nil, err
-	}
-	if len(firstPayload) > maxPayload {
-		return 1, firstPayload, nil
+	if mode != invertedPostingModeRowIDs && mode != invertedPostingModePositions {
+		return 0, nil, fmt.Errorf("unknown inverted posting mode %d", mode)
 	}
 
-	lo, hi := 1, len(postings)
-	bestN := 1
-	bestPayload := firstPayload
-	for lo <= hi {
-		mid := lo + (hi-lo)/2
-		payload, err := encodeGroupedInvertedPostingList(mode, postings[:mid])
-		if err != nil {
-			return 0, nil, err
+	used := 2
+	var prevRowID RowID
+	for i, posting := range postings {
+		postingSize := encodedGroupedPostingSize(mode, posting, prevRowID, i == 0)
+		if i > 0 && used+postingSize > maxPayload {
+			payload, err := encodeGroupedInvertedPostingList(mode, postings[:i])
+			return i, payload, err
 		}
-		if len(payload) <= maxPayload {
-			bestN = mid
-			bestPayload = payload
-			lo = mid + 1
-			continue
-		}
-		hi = mid - 1
+		used += postingSize
+		prevRowID = posting.RowID
 	}
-	return bestN, bestPayload, nil
+	payload, err := encodeGroupedInvertedPostingList(mode, postings)
+	return len(postings), payload, err
+}
+
+func encodedGroupedPostingSize(
+	mode invertedPostingMode,
+	posting invertedPosting,
+	prevRowID RowID,
+	first bool,
+) int {
+	rowDelta := uint64(posting.RowID)
+	if !first {
+		rowDelta = uint64(posting.RowID - prevRowID)
+	}
+	size := uvarintSize(rowDelta)
+	if mode == invertedPostingModePositions {
+		size += uvarintSize(uint64(len(posting.Positions)))
+		var prevPosition uint32
+		for i, position := range posting.Positions {
+			positionDelta := uint64(position)
+			if i > 0 {
+				positionDelta = uint64(position - prevPosition)
+			}
+			size += uvarintSize(positionDelta)
+			prevPosition = position
+		}
+	}
+	return size
+}
+
+func uvarintSize(value uint64) int {
+	size := 1
+	for value >= 0x80 {
+		value >>= 7
+		size++
+	}
+	return size
 }
 
 // groupInvertedPostingBlocksIntoPages packs posting blocks into posting pages.
