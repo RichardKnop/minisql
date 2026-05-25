@@ -1,6 +1,6 @@
 # Benchmark Results
 
-### 2026-05-25 — Log-structured inverted-index refactor baseline
+### 2026-05-25 — Log-structured inverted-index refactor refresh
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26
 **Settings:** inverted-index suite, `-benchmem`, `BENCH_COUNT=5`, build benchmarks at `1x`, runtime benchmarks at `10x`
@@ -22,6 +22,16 @@ Cumulative refactor work in this baseline:
 - **Lower-allocation JSON term maintenance**: JSON UPDATE diffs sorted term slices directly,
   JSON object walks no longer allocate per-object key slices, and insert/delete mutation
   batches are pre-sized for their term counts.
+- **Mode-specific segment compaction**: row-ID JSON segment merges and base foldback now avoid
+  positional posting structs, while full-text positional segment reads stream decoded postings
+  instead of allocating intermediate posting slices.
+- **Lower-allocation segment writing**: segment page packing reuses sorted cell slices, segment
+  cell construction avoids temporary block slices, and posting block sizing encodes each
+  positional block once.
+- **Full-text buffer reuse**: UPDATE maintenance reuses token buffers between old/new row
+  tokenization, and CREATE INDEX population preserves per-term position slice capacity.
+- **Right-sized row-ID mutation payloads**: JSON row-ID mutation blocks no longer reserve a
+  full block-sized buffer for single-row terms.
 - **Benchmark correction**: `BenchmarkJSONInverted_BuildIndex` now stops the timer around
   per-iteration fixture setup, so the reported memory reflects index creation rather than
   database/table/seed allocation.
@@ -36,80 +46,81 @@ make bench-inverted BENCH_COUNT=5
 
 | Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan | ratio |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| FullText_BuildIndex | 4.28 ms/op | — | — | 2.57 ms/op | — | — | 1.7× |
-| JSONInverted_BuildIndex | — | 5.58 ms/op | — | — | — | — | — |
-| FullText_Insert_WithIndex | 73.0 µs/op | — | — | 245 µs/op | — | — | 0.3× |
-| FullText_Search_SingleTerm/rare | 90.2 µs/op | — | — | 183 µs/op | — | — | 0.5× |
-| FullText_Search_SingleTerm/medium | 84.5 µs/op | — | — | 258 µs/op | — | — | 0.3× |
-| FullText_Search_SingleTerm/common | 90.0 µs/op | — | — | 303 µs/op | — | — | 0.3× |
-| FullText_Search_MultiTermAND | 112 µs/op | — | — | 280 µs/op | — | — | 0.4× |
-| FullText_Search_Phrase | 103 µs/op | — | — | 263 µs/op | — | — | 0.4× |
-| FullText_Search_AfterDeletes | 317 µs/op | — | — | — | — | — | — |
-| FullText_Update_WithIndex | 105 µs/op | — | — | 305 µs/op | — | — | 0.3× |
-| FullText_Delete_WithIndex | 62.3 µs/op | — | — | 241 µs/op | — | — | 0.3× |
-| JSONInverted_Insert_WithIndex | — | 79.1 µs/op | — | — | — | — | — |
-| JSONInverted_Contains_KeyValue/key_value | — | 540 µs/op | 2.88 ms/op | — | 333 µs/op | 995 µs/op | — |
-| JSONInverted_Contains_ObjectSubset/object_subset | — | 989 µs/op | 3.12 ms/op | — | 405 µs/op | 967 µs/op | — |
-| JSONInverted_Contains_AfterDeletes | — | 487 µs/op | — | — | — | — | — |
-| JSONInverted_Update_WithIndex | — | 128 µs/op | — | — | — | — | — |
-| JSONInverted_Delete_WithIndex | — | 96.8 µs/op | — | — | — | — | — |
+| FullText_BuildIndex | 4.98 ms/op | — | — | 2.86 ms/op | — | — | 1.7× |
+| JSONInverted_BuildIndex | — | 6.30 ms/op | — | — | — | — | — |
+| FullText_Insert_WithIndex | 114 µs/op | — | — | 310 µs/op | — | — | 0.4× |
+| FullText_Search_SingleTerm/rare | 169 µs/op | — | — | 245 µs/op | — | — | 0.7× |
+| FullText_Search_SingleTerm/medium | 141 µs/op | — | — | 221 µs/op | — | — | 0.6× |
+| FullText_Search_SingleTerm/common | 181 µs/op | — | — | 459 µs/op | — | — | 0.4× |
+| FullText_Search_MultiTermAND | 221 µs/op | — | — | 338 µs/op | — | — | 0.7× |
+| FullText_Search_Phrase | 216 µs/op | — | — | 224 µs/op | — | — | 1.0× |
+| FullText_Search_AfterDeletes | 353 µs/op | — | — | — | — | — | — |
+| FullText_Update_WithIndex | 182 µs/op | — | — | 321 µs/op | — | — | 0.6× |
+| FullText_Delete_WithIndex | 79.0 µs/op | — | — | 273 µs/op | — | — | 0.3× |
+| JSONInverted_Insert_WithIndex | — | 142 µs/op | — | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 835 µs/op | 6.24 ms/op | — | 336 µs/op | 1.28 ms/op | — |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 1.15 ms/op | 4.83 ms/op | — | 380 µs/op | 1.10 ms/op | — |
+| JSONInverted_Contains_AfterDeletes | — | 682 µs/op | — | — | — | — | — |
+| JSONInverted_Update_WithIndex | — | 437 µs/op | — | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 74.5 µs/op | — | — | — | — | — |
 
 #### Memory (B/op)
 
 | Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan |
 |---|---:|---:|---:|---:|---:|---:|
-| FullText_BuildIndex | 3.7 MiB | — | — | 696 B | — | — |
-| JSONInverted_BuildIndex | — | 5.7 MiB | — | — | — | — |
-| FullText_Insert_WithIndex | 38.4 KiB | — | — | 712 B | — | — |
-| FullText_Search_SingleTerm/rare | 37.0 KiB | — | — | 531 B | — | — |
-| FullText_Search_SingleTerm/medium | 37.0 KiB | — | — | 532 B | — | — |
-| FullText_Search_SingleTerm/common | 37.7 KiB | — | — | 549 B | — | — |
-| FullText_Search_MultiTermAND | 46.7 KiB | — | — | 532 B | — | — |
-| FullText_Search_Phrase | 60.2 KiB | — | — | 541 B | — | — |
-| FullText_Search_AfterDeletes | 119 KiB | — | — | — | — | — |
-| FullText_Update_WithIndex | 65.4 KiB | — | — | 413 B | — | — |
-| FullText_Delete_WithIndex | 32.1 KiB | — | — | 260 B | — | — |
-| JSONInverted_Insert_WithIndex | — | 59.7 KiB | — | — | — | — |
-| JSONInverted_Contains_KeyValue/key_value | — | 93.4 KiB | 3.3 MiB | — | 549 B | 549 B |
-| JSONInverted_Contains_ObjectSubset/object_subset | — | 156 KiB | 3.3 MiB | — | 549 B | 548 B |
+| FullText_BuildIndex | 2.3 MiB | — | — | 696 B | — | — |
+| JSONInverted_BuildIndex | — | 4.6 MiB | — | — | — | — |
+| FullText_Insert_WithIndex | 36.3 KiB | — | — | 699 B | — | — |
+| FullText_Search_SingleTerm/rare | 34.6 KiB | — | — | 533 B | — | — |
+| FullText_Search_SingleTerm/medium | 36.2 KiB | — | — | 532 B | — | — |
+| FullText_Search_SingleTerm/common | 36.2 KiB | — | — | 548 B | — | — |
+| FullText_Search_MultiTermAND | 45.2 KiB | — | — | 532 B | — | — |
+| FullText_Search_Phrase | 60.2 KiB | — | — | 540 B | — | — |
+| FullText_Search_AfterDeletes | 117 KiB | — | — | — | — | — |
+| FullText_Update_WithIndex | 60.1 KiB | — | — | 413 B | — | — |
+| FullText_Delete_WithIndex | 30.0 KiB | — | — | 259 B | — | — |
+| JSONInverted_Insert_WithIndex | — | 43.1 KiB | — | — | — | — |
+| JSONInverted_Contains_KeyValue/key_value | — | 94.1 KiB | 3.3 MiB | — | 548 B | 548 B |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 156 KiB | 3.4 MiB | — | 548 B | 547 B |
 | JSONInverted_Contains_AfterDeletes | — | 213 KiB | — | — | — | — |
-| JSONInverted_Update_WithIndex | — | 70.8 KiB | — | — | — | — |
-| JSONInverted_Delete_WithIndex | — | 50.9 KiB | — | — | — | — |
+| JSONInverted_Update_WithIndex | — | 60.2 KiB | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 34.3 KiB | — | — | — | — |
 
 #### Allocs/op
 
 | Benchmark | minisql | minisql_indexed | minisql_sequential | sqlite | sqlite_json_expr_index | sqlite_json_scan |
 |---|---:|---:|---:|---:|---:|---:|
-| FullText_BuildIndex | 30,357 | — | — | 36 | — | — |
-| JSONInverted_BuildIndex | — | 78,658 | — | — | — | — |
-| FullText_Insert_WithIndex | 117 | — | — | 16 | — | — |
-| FullText_Search_SingleTerm/rare | 78 | — | — | 13 | — | — |
-| FullText_Search_SingleTerm/medium | 78 | — | — | 13 | — | — |
-| FullText_Search_SingleTerm/common | 80 | — | — | 15 | — | — |
-| FullText_Search_MultiTermAND | 98 | — | — | 13 | — | — |
+| FullText_BuildIndex | 22,526 | — | — | 36 | — | — |
+| JSONInverted_BuildIndex | — | 78,519 | — | — | — | — |
+| FullText_Insert_WithIndex | 100 | — | — | 16 | — | — |
+| FullText_Search_SingleTerm/rare | 77 | — | — | 13 | — | — |
+| FullText_Search_SingleTerm/medium | 77 | — | — | 13 | — | — |
+| FullText_Search_SingleTerm/common | 79 | — | — | 15 | — | — |
+| FullText_Search_MultiTermAND | 97 | — | — | 13 | — | — |
 | FullText_Search_Phrase | 313 | — | — | 14 | — | — |
 | FullText_Search_AfterDeletes | 102 | — | — | — | — | — |
-| FullText_Update_WithIndex | 195 | — | — | 12 | — | — |
-| FullText_Delete_WithIndex | 127 | — | — | 6 | — | — |
-| JSONInverted_Insert_WithIndex | — | 209 | — | — | — | — |
+| FullText_Update_WithIndex | 153 | — | — | 12 | — | — |
+| FullText_Delete_WithIndex | 109 | — | — | 6 | — | — |
+| JSONInverted_Insert_WithIndex | — | 204 | — | — | — | — |
 | JSONInverted_Contains_KeyValue/key_value | — | 118 | 51,093 | — | 15 | 15 |
-| JSONInverted_Contains_ObjectSubset/object_subset | — | 158 | 58,105 | — | 15 | 15 |
+| JSONInverted_Contains_ObjectSubset/object_subset | — | 158 | 58,106 | — | 15 | 15 |
 | JSONInverted_Contains_AfterDeletes | — | 159 | — | — | — | — |
-| JSONInverted_Update_WithIndex | — | 276 | — | — | — | — |
-| JSONInverted_Delete_WithIndex | — | 197 | — | — | — | — |
+| JSONInverted_Update_WithIndex | — | 272 | — | — | — | — |
+| JSONInverted_Delete_WithIndex | — | 192 | — | — | — | — |
 
 #### Key observations
 
-The log-structured layer has shifted the remaining problem. Delete-heavy maintenance is now
-far cheaper than the pre-refactor dedicated-index path, and indexed JSON contains queries
-remain much cheaper than MiniSQL sequential JSON scans. The largest remaining write-path
-memory deltas are now JSON update/delete (`~71 KiB/op` / `~51 KiB/op`) and full-text
-update (`~65 KiB/op`), mostly from per-operation token/term extraction, segment
-payload encoding, WAL/page-copy overhead, and the unavoidable delete+insert shape of UPDATE.
+The post-refresh numbers show the later segment and buffer-reuse work landing where expected.
+Full-text build memory is down from `3.7 MiB/op` to `2.3 MiB/op`, full-text update allocations
+are down from `195` to `153 allocs/op`, JSON insert memory is down from `59.7 KiB/op` to
+`43.1 KiB/op`, and JSON delete memory is down from `50.9 KiB/op` to `34.3 KiB/op`.
 
-The larger segment merge run improves hot update/delete writes but raises after-delete lookup
-memory because more mutation segments remain visible before compaction. That makes streaming
-or more selective segment read/merge paths the next meaningful refactor target.
+The default runtime benchmark still uses only `10x`, so update timings remain noisy when a
+run happens to cross a segment merge. Allocation counts are more stable, and longer targeted
+runs showed lower steady-state memory for the newest row-ID payload change (`~27 KiB/op` for
+JSON update at `700x`). The remaining gap to SQLite is now less about obvious inverted-index
+temporary slices and more about page/WAL copies, JSON decoding/normalisation, segment payload
+encoding, and the fact that UPDATE maintenance still emits delete+insert mutations.
 
 ---
 
