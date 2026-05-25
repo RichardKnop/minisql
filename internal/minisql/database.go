@@ -1679,9 +1679,9 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 		if len(postingsByTerm) == 0 {
 			return nil
 		}
-		batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
-		for term, postings := range postingsByTerm {
-			batch.InsertMany(term, postings)
+		batch := invertedIndexMutationBatch{
+			mode:    secondaryIndex.InvertedIndex.Mode(),
+			inserts: postingsByTerm,
 		}
 		if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
 			return fmt.Errorf("failed to insert token batch for full-text index %s: %w", secondaryIndex.Name, err)
@@ -1748,9 +1748,9 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		if len(postingsByTerm) == 0 {
 			return nil
 		}
-		batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
-		for term, postings := range postingsByTerm {
-			batch.InsertMany(term, postings)
+		batch := invertedIndexMutationBatch{
+			mode:    secondaryIndex.InvertedIndex.Mode(),
+			inserts: postingsByTerm,
 		}
 		if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
 			return fmt.Errorf("failed to insert JSON term batch for inverted index %s: %w", secondaryIndex.Name, err)
