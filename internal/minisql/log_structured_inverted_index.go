@@ -9,7 +9,10 @@ import (
 const (
 	logStructuredInvertedIndexCompactSegmentThreshold = 96
 	logStructuredInvertedIndexMetaCompactBytes        = PageSize * 3 / 4
-	logStructuredInvertedIndexMergeRunSize            = 16
+
+	// Merge enough level-0 segments to amortize update/delete write cost without
+	// letting point lookups scan an excessive number of tiny mutation segments.
+	logStructuredInvertedIndexMergeRunSize = 32
 
 	// Base foldback rewrites existing posting lists, so keep it rare on hot DML
 	// paths and prefer leveled segment merges for routine compaction.
@@ -1280,7 +1283,7 @@ func (idx *logStructuredInvertedIndex) mutationSegmentCells(kind byte, postingsB
 	cells := make([]invertedSegmentCell, 0, len(terms))
 	var totalPostingCount uint32
 	for _, term := range terms {
-		postings := append([]invertedPosting(nil), postingsByTerm[term]...)
+		postings := postingsByTerm[term]
 		postings = groupInvertedPostingsInPlace(idx.Mode(), postings)
 		blocks, err := makeInvertedPostingBlocks(idx.Mode(), postings)
 		if err != nil {
