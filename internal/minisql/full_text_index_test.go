@@ -620,6 +620,7 @@ type fakeFullTextInvertedIndex struct {
 	deleted     []string
 	replaced    []string
 	lookupTerms []string
+	scanTerms   []string
 	mode        invertedPostingMode
 }
 
@@ -676,6 +677,17 @@ func (f *fakeFullTextInvertedIndex) Lookup(_ context.Context, term string) (inve
 		},
 		hasBlock: true,
 	}, nil
+}
+
+func (f *fakeFullTextInvertedIndex) ForEachRowID(_ context.Context, term string, fn func(RowID) error) error {
+	f.scanTerms = append(f.scanTerms, term)
+	postings := groupInvertedPostings(f.postingMode(), f.postings[term])
+	for _, posting := range postings {
+		if err := fn(posting.RowID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (f *fakeFullTextInvertedIndex) Stats(_ context.Context, term string) (invertedPostingStats, error) {

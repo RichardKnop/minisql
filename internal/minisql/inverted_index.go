@@ -54,6 +54,10 @@ type invertedRowIDLoader interface {
 	LoadRowIDs(ctx context.Context, term string, hint uint32) ([]RowID, error)
 }
 
+type invertedRowIDScanner interface {
+	ForEachRowID(ctx context.Context, term string, fn func(RowID) error) error
+}
+
 type invertedDocFreqCounter interface {
 	CountDocFreq(ctx context.Context, term string) (uint32, error)
 }
@@ -559,6 +563,18 @@ func (idx *dedicatedInvertedIndex) LoadRowIDs(ctx context.Context, term string, 
 	return collectRowIDsFromIterator(ctx, iter, idx.mode, hint)
 }
 
+// ForEachRowID streams sorted row IDs for a row-id-only inverted term.
+func (idx *dedicatedInvertedIndex) ForEachRowID(ctx context.Context, term string, fn func(RowID) error) error {
+	if idx.mode != invertedPostingModeRowIDs {
+		return fmt.Errorf("inverted index %s uses posting mode %d", idx.name, idx.mode)
+	}
+	iter, err := idx.Lookup(ctx, term)
+	if err != nil {
+		return err
+	}
+	return forEachRowIDFromPostingIterator(ctx, iter, idx.mode, fn)
+}
+
 func collectRowIDsFromIterator(
 	ctx context.Context,
 	iter invertedPostingIterator,
@@ -592,6 +608,41 @@ func collectRowIDsFromIterator(
 		}
 		if mode != expectedMode {
 			return nil, fmt.Errorf("inverted posting block uses posting mode %d, expected %d", mode, expectedMode)
+		}
+	}
+}
+
+func forEachRowIDFromPostingIterator(
+	ctx context.Context,
+	iter invertedPostingIterator,
+	expectedMode invertedPostingMode,
+	fn func(RowID) error,
+) error {
+	var (
+		lastRowID RowID
+		haveLast  bool
+	)
+	for {
+		block, ok, err := iter.NextBlock(ctx)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+		mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
+			if haveLast && rowID == lastRowID {
+				return nil
+			}
+			haveLast = true
+			lastRowID = rowID
+			return fn(rowID)
+		})
+		if err != nil {
+			return err
+		}
+		if mode != expectedMode {
+			return fmt.Errorf("inverted posting block uses posting mode %d, expected %d", mode, expectedMode)
 		}
 	}
 }

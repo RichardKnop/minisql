@@ -312,6 +312,41 @@ func (idx *logStructuredInvertedIndex) LoadRowIDs(ctx context.Context, term stri
 	return idx.loadMergedRowIDs(ctx, meta, term, hint)
 }
 
+// ForEachRowID streams sorted row IDs for a row-id-only term.
+func (idx *logStructuredInvertedIndex) ForEachRowID(ctx context.Context, term string, fn func(RowID) error) error {
+	if idx.Mode() != invertedPostingModeRowIDs {
+		return fmt.Errorf("inverted index %s uses posting mode %d", idx.name, idx.Mode())
+	}
+	meta, err := idx.readMetaPage(ctx)
+	if err != nil {
+		return err
+	}
+	if len(meta.Segments) == 0 || !segmentsMayContainTerm(meta.Segments, term) {
+		return idx.base.ForEachRowID(ctx, term, fn)
+	}
+	if insertOnlySegmentsMayContainTerm(meta.Segments, term) {
+		iter, err := idx.lookupInsertOnlySegments(ctx, meta, term)
+		if err != nil {
+			return err
+		}
+		return forEachRowIDFromPostingIterator(ctx, iter, idx.Mode(), fn)
+	}
+
+	rowIDs, err := idx.loadMergedRowIDs(ctx, meta, term, 0)
+	if err != nil {
+		return err
+	}
+	for _, rowID := range rowIDs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := fn(rowID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (idx *logStructuredInvertedIndex) countMergedRowIDs(
 	ctx context.Context,
 	meta *invertedMetaPage,
@@ -346,7 +381,7 @@ func (idx *logStructuredInvertedIndex) countMergedRowIDs(
 	if err != nil {
 		return 0, err
 	}
-	if err := forEachIteratorRowID(ctx, baseIter, idx.Mode(), func(rowID RowID) error {
+	if err := forEachRowIDFromPostingIterator(ctx, baseIter, idx.Mode(), func(rowID RowID) error {
 		for stateIdx < len(states) && states[stateIdx].rowID < rowID {
 			stateIdx++
 		}
@@ -689,30 +724,6 @@ func appendBlockRowIDs(rowIDs *[]RowID, block invertedPostingBlock, expectedMode
 		return fmt.Errorf("inverted posting block uses posting mode %d, expected %d", mode, expectedMode)
 	}
 	return nil
-}
-
-func forEachIteratorRowID(
-	ctx context.Context,
-	iter invertedPostingIterator,
-	expectedMode invertedPostingMode,
-	fn func(RowID) error,
-) error {
-	for {
-		block, ok, err := iter.NextBlock(ctx)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-		mode, err := forEachInvertedPostingRowID(block.Payload, fn)
-		if err != nil {
-			return err
-		}
-		if mode != expectedMode {
-			return fmt.Errorf("inverted posting block uses posting mode %d, expected %d", mode, expectedMode)
-		}
-	}
 }
 
 func appendBlockRowIDStates(

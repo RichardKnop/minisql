@@ -4923,6 +4923,10 @@ func intersectInvertedRowIDsWithTerm(
 		return nil, nil
 	}
 
+	if scanner, ok := secondaryIndex.InvertedIndex.(invertedRowIDScanner); ok {
+		return intersectInvertedRowIDsWithScanner(ctx, candidates, scanner, term)
+	}
+
 	iter, err := secondaryIndex.InvertedIndex.Lookup(ctx, term)
 	if err != nil {
 		return nil, fmt.Errorf("inverted lookup failed: %w", err)
@@ -4971,6 +4975,39 @@ func intersectInvertedRowIDsWithTerm(
 		if mode != invertedPostingModeRowIDs {
 			return nil, fmt.Errorf("inverted index %s uses posting mode %d", indexName, mode)
 		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+func intersectInvertedRowIDsWithScanner(
+	ctx context.Context,
+	candidates []RowID,
+	scanner invertedRowIDScanner,
+	term string,
+) ([]RowID, error) {
+	out := candidates[:0]
+	candidateIdx := 0
+	err := scanner.ForEachRowID(ctx, term, func(rowID RowID) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		for candidateIdx < len(candidates) && candidates[candidateIdx] < rowID {
+			candidateIdx++
+		}
+		if candidateIdx >= len(candidates) {
+			return nil
+		}
+		if candidates[candidateIdx] == rowID {
+			out = append(out, rowID)
+			candidateIdx++
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("inverted row id scan failed: %w", err)
 	}
 	if len(out) == 0 {
 		return nil, nil

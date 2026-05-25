@@ -212,7 +212,8 @@ func TestIntersectInvertedRowIDsWithTermStreamsIntoCandidateBuffer(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, []RowID{4, 8}, got)
 	assert.Same(t, candidateBacking, &got[0])
-	assert.Equal(t, []string{`kv:type:s:"click"`}, index.lookupTerms)
+	assert.Empty(t, index.lookupTerms)
+	assert.Equal(t, []string{`kv:type:s:"click"`}, index.scanTerms)
 }
 
 func TestTable_JSONInvertedIndexScanUsesRowViews(t *testing.T) {
