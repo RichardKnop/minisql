@@ -1501,7 +1501,8 @@ func (idx *logStructuredInvertedIndex) writeSegmentCells(ctx context.Context, ce
 	var rootPageIdx PageIndex
 	var currentPage *Page
 	var currentSize uint64
-	for _, cell := range cells {
+	pageStart := 0
+	for i, cell := range cells {
 		cellSize := cell.size()
 		if (invertedSegmentPageHeader{}).size()+2+cellSize > uint64(PageSize) {
 			return 0, fmt.Errorf("inverted segment cell for term %q exceeds page size", cell.Term)
@@ -1516,6 +1517,7 @@ func (idx *logStructuredInvertedIndex) writeSegmentCells(ctx context.Context, ce
 			currentSize = currentSegmentPageSize(currentPage.InvertedSegmentPage)
 		}
 		if currentSize+2+cellSize > uint64(PageSize) {
+			currentPage.InvertedSegmentPage.Cells = cells[pageStart:i:i]
 			nextPage, err := idx.newSegmentPage(ctx)
 			if err != nil {
 				return 0, err
@@ -1523,13 +1525,14 @@ func (idx *logStructuredInvertedIndex) writeSegmentCells(ctx context.Context, ce
 			currentPage.InvertedSegmentPage.Header.NextPage = nextPage.Index
 			currentPage = nextPage
 			currentSize = currentSegmentPageSize(currentPage.InvertedSegmentPage)
+			pageStart = i
 		}
-		currentPage.InvertedSegmentPage.Cells = append(currentPage.InvertedSegmentPage.Cells, cell)
 		currentSize += 2 + cellSize
 	}
 	if rootPageIdx == 0 {
 		return 0, fmt.Errorf("cannot write empty inverted segment")
 	}
+	currentPage.InvertedSegmentPage.Cells = cells[pageStart:len(cells):len(cells)]
 	return rootPageIdx, nil
 }
 
