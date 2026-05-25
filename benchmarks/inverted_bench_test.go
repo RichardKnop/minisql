@@ -240,6 +240,7 @@ func BenchmarkFullText_Delete_WithIndex(b *testing.B) {
 func BenchmarkJSONInverted_BuildIndex(b *testing.B) {
 	for _, d := range minisqlOnlyInvertedBenchDrivers {
 		b.Run(d.name+"_indexed", func(b *testing.B) {
+			b.StopTimer()
 			for i := range b.N {
 				db, cleanup := openInvertedBenchDB(b, d)
 				createJSONTable(b, db, d)
