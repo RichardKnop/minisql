@@ -2227,8 +2227,7 @@ func appendRowIDInvertedPostingBlocks(
 	count int,
 	rowIDAt func(int) RowID,
 ) []invertedPostingBlock {
-	payload := make([]byte, 0, invertedPostingBlockPayloadMax)
-	payload = append(payload, invertedPostingCodecVersion, byte(invertedPostingModeRowIDs))
+	payload := newRowIDInvertedPostingPayload(count)
 
 	var (
 		firstRowID   RowID
@@ -2253,8 +2252,7 @@ func appendRowIDInvertedPostingBlocks(
 				CodecVersion: invertedPostingCodecVersion,
 			})
 
-			payload = make([]byte, 0, invertedPostingBlockPayloadMax)
-			payload = append(payload, invertedPostingCodecVersion, byte(invertedPostingModeRowIDs))
+			payload = newRowIDInvertedPostingPayload(count - i)
 			rowDelta = uint64(rowID)
 			n = binary.PutUvarint(tmp[:], rowDelta)
 			postingCount = 0
@@ -2277,6 +2275,18 @@ func appendRowIDInvertedPostingBlocks(
 		CodecVersion: invertedPostingCodecVersion,
 	})
 	return blocks
+}
+
+func newRowIDInvertedPostingPayload(remainingRowIDs int) []byte {
+	capacity := 2 + remainingRowIDs*binary.MaxVarintLen64
+	if capacity > invertedPostingBlockPayloadMax {
+		capacity = invertedPostingBlockPayloadMax
+	}
+	if capacity < 2 {
+		capacity = 2
+	}
+	payload := make([]byte, 0, capacity)
+	return append(payload, invertedPostingCodecVersion, byte(invertedPostingModeRowIDs))
 }
 
 // postingBlockFromPostings builds block metadata around an encoded posting list.
