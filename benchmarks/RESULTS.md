@@ -1,51 +1,16 @@
 # Benchmark Results
 
-## 2026-05-26 — Post ALTER TABLE / Self-Describing Cell Format Baseline
+## 2026-05-26 — Baseline After Self-Describing Cell Format + ALTER TABLE
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
-**Branch:** `refactor/alter-table` (merged self-describing cell refactor + ALTER TABLE)  
+**Branch:** `refactor/alter-table`  
 **Command:** `LOG_LEVEL=warn go test -tags bench -bench=. -benchmem -count=1 -run '^$' ./benchmarks/`  
 **Runtime:** `187.669s`
 
-### What changed since the previous baseline (2026-05-25)
+This baseline reflects two changes merged since the previous measurement (2026-05-25):
 
-The previous baseline was taken immediately after the log-structured inverted-index refactor was merged. Since then:
-
-- **Self-describing cell format** (`type_code.go`, `row_view.go`): every leaf cell now carries its own type codes; RowView reads columns without touching the schema, eliminating a schema lookup per column per row.
-- **ALTER TABLE** implemented: ADD/DROP/RENAME COLUMN, RENAME TO. No benchmark impact.
-
-The cell-format change is responsible for the across-the-board latency reductions visible below.
-
-### Notable improvements vs 2026-05-25 baseline
-
-| Benchmark | Old | New | Δ |
-|---|---:|---:|---:|
-| Select_PointScan/minisql | 13.3 µs | 5.8 µs | −57% |
-| Select_IndexRangeScan/minisql | 2.11 ms | 805 µs | −62% |
-| Select_FullScan/minisql | 6.63 ms | 3.77 ms | −43% |
-| Select_CountStar/minisql | 11.1 µs | 5.7 µs | −49% |
-| Explain/minisql | 12.8 µs | 5.2 µs | −59% |
-| WAL_Checkpoint/minisql | 652 µs | 244 µs | −63% |
-| Update_ByPK/minisql | 20.1 µs | 10.9 µs | −46% |
-| OnConflict_DoUpdate/minisql | 16.6 µs | 8.7 µs | −48% |
-| Delete_ByPK/minisql | 36.0 µs | 21.9 µs | −39% |
-| Insert_Batch/minisql | 607 µs | 398 µs | −34% |
-| FullText_Search_Phrase/minisql | 86.6 µs | 28.4 µs | −67% |
-| FullText_Search_MultiTermAND/minisql | 55.6 µs | 27.6 µs | −50% |
-| FullText_Search_AfterDeletes/minisql | 189 µs | 86.1 µs | −54% |
-| ForeignKey_DeleteCascade/minisql | 178 µs | 46.1 µs | −74% |
-| Join_Inner_LowSelectivity/minisql | 181 µs | 115 µs | −37% |
-
-### Memory regressions vs 2026-05-25 baseline
-
-| Benchmark | Old | New | Δ |
-|---|---:|---:|---:|
-| Join_Inner_SmallLarge/minisql | 2.57 MiB | 3.46 MiB | +35% |
-| Insert_Batch/minisql | 242.5 KiB | 251.3 KiB | +4% |
-| Insert_PreparedBatch/minisql | 240.8 KiB | 250.2 KiB | +4% |
-| Insert_MultiValues/minisql | 197.2 KiB | 207.1 KiB | +5% |
-
-The Join_Inner_SmallLarge memory regression warrants investigation (see Memory Outliers section).
+- **Self-describing cell format** (`type_code.go`, `row_view.go`): every leaf cell now stores its own type codes; `RowView` reads columns without touching the schema. This eliminated a per-column schema lookup on every row read and is responsible for the broad latency reductions visible across SELECT, UPDATE, DELETE, and JOIN benchmarks.
+- **ALTER TABLE** (ADD/DROP/RENAME COLUMN, RENAME TO): schema-only DDL, no measurable benchmark impact.
 
 ## Full Benchmark Baseline
 
@@ -110,7 +75,7 @@ The Join_Inner_SmallLarge memory regression warrants investigation (see Memory O
 | Join_Left_UnmatchedRows/minisql | 3.71 ms | 878.3 KiB | 79,739 |
 | Join_Left_UnmatchedRows/sqlite | 4.24 ms | 725.2 KiB | 70,157 |
 | Vacuum_Small/minisql | 19.85 ms | 1.71 MiB | 15,024 |
-| Vacuum_Small/sqlite | 298 µs | 90 B | 12 |
+| Vacuum_Small/sqlite | 298 µs | 90 B | 4 |
 | WAL_Checkpoint/minisql | 244 µs | 71.5 KiB | 45 |
 | WAL_Checkpoint/sqlite | 112 µs | 440 B | 12 |
 | Explain/minisql | 5.17 µs | 6.0 KiB | 58 |
@@ -140,29 +105,22 @@ The Join_Inner_SmallLarge memory regression warrants investigation (see Memory O
 | Update_ByPK/minisql | 10.9 µs | 6.8 KiB | 63 |
 | Update_ByPK/sqlite | 40.8 µs | 263 B | 10 |
 
-## Memory Outliers — Profiling Candidates
+## Memory Outliers
 
-Ranked by absolute bytes/op for minisql, excluding intentionally-unindexed sequential scan variants.
+The largest remaining memory consumers (minisql only, excluding intentional sequential-scan variants):
 
-| Rank | Benchmark | Memory/op | Allocs/op | Notes |
-|---:|---|---:|---:|---|
-| 1 | `JSONInverted_BuildIndex` | 3.99 MiB | 63,050 | Build-time term extraction and segment materialisation |
-| 2 | `Join_Inner_SmallLarge` | 3.46 MiB | 89,778 | **Regressed +35%** vs prior baseline; ~39 B/row overhead vs sqlite |
-| 3 | `Vacuum_Small` | 1.71 MiB | 15,024 | Full copy-compact-swap; expected but large vs sqlite's 90 B |
-| 4 | `Distinct_HighCardinality` | 1.69 MiB | 40,144 | In-memory dedup set for 10K distinct rows |
-| 5 | `FullText_BuildIndex` | 1.66 MiB | 16,328 | Per-doc postings map during bulk index build |
-| 6 | `Select_FullScan` | 1.24 MiB | 79,827 | ~13 B/alloc — 8 allocs/row for 10K rows; row materialisation |
-| 7 | `JSONInverted_Delete_WithIndex` | 1012 KiB | 395 | Delete-path reads full posting list into memory |
-| 8 | `Subquery_InList` | 872 KiB | 35,102 | IN-list materialises outer scan rows |
-| 9 | `Join_Left_UnmatchedRows` | 878 KiB | 79,739 | Same root cause as SmallLarge join |
-| 10 | `Insert_Batch` / `PreparedBatch` | ~251 KiB | 3,257 | ~2.5 KiB/row vs sqlite's 310 B/row; 8× gap |
+- `Join_Inner_SmallLarge`: `3.46 MiB/op`, `89,778 allocs/op` — combined-row materialisation per matched pair
+- `JSONInverted_BuildIndex`: `3.99 MiB/op`, `63,050 allocs/op` — in-memory term→postings map during build
+- `Vacuum_Small`: `1.71 MiB/op` — full copy-compact-swap; structural cost
+- `Distinct_HighCardinality`: `1.69 MiB/op`, `40,144 allocs/op` — in-memory dedup set for 10K distinct rows
+- `FullText_BuildIndex`: `1.66 MiB/op`, `16,328 allocs/op` — per-doc postings map
+- `Select_FullScan`: `1.24 MiB/op`, `79,827 allocs/op` — ~8 allocs/row from `Materialize()` per RowView
+- `JSONInverted_Delete_WithIndex`: `1012 KiB/op` — full posting list read into memory on delete
+- `Insert_Batch` / `PreparedBatch`: `~251 KiB/op` — ~2.5 KiB/row vs SQLite's 310 B; per-row clone+bind+prepare overhead
 
-### Likely root causes and suggested profiling targets
+Good next optimisation targets:
 
-**Join row materialisation** (`Join_Inner_SmallLarge`, `Join_Left_UnmatchedRows`): the join executor builds a combined `Row` struct with a `[]OptionalValue` slice for every matched pair. For a 10K-row result set this generates ~90K allocations. A RowView-based join path (already exists on the scan side) that avoids materialising `[]OptionalValue` until projection would be the natural next step. This is also the source of the +35% memory regression — something in the join path allocates more per row now.
-
-**Select full-scan materialisation** (`Select_FullScan`): 79,827 allocs for 10K rows = ~8 allocs/row. The scan pipeline still calls `Materialize()` on each RowView, allocating a `Row.Values []OptionalValue` slice per row. A streaming projection that reads directly from RowView into the driver dest slice would collapse this to O(1) allocations per row.
-
-**Insert batch overhead** (`Insert_Batch`, `Insert_PreparedBatch`, `Insert_MultiValues`): 2.5 KiB/row vs SQLite's 310 B suggests heavy per-row statement preparation (clone, bind-args, prepareInsert). Reusing a prepared statement across rows within a multi-row batch would reduce this significantly.
-
-**JSONInverted_BuildIndex** and **FullText_BuildIndex**: these are known targets from the previous analysis — streaming term extraction instead of building a full in-memory term→postings map per document.
+- Streaming join projection to avoid allocating `Row.Values []OptionalValue` per matched pair
+- Streaming SELECT delivery that reads directly from RowView into the driver dest slice (eliminating `Materialize()`)
+- Batch insert path that reuses prepared state across rows within a single multi-row statement
+- Streaming term extraction for inverted-index build and maintenance

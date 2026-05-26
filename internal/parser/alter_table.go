@@ -72,11 +72,11 @@ func (p *parserItem) doParseAlterTable() error {
 
 	case stepAlterTableAddColumnVarcharLen:
 		sizeToken := p.peek()
-		size, err := strconv.Atoi(sizeToken)
+		size, err := strconv.ParseUint(sizeToken, 10, 32)
 		if err != nil {
 			return p.errorf("at ALTER TABLE ADD COLUMN: varchar size %q must be an integer", sizeToken)
 		}
-		if size <= 0 {
+		if size == 0 {
 			return p.errorf("at ALTER TABLE ADD COLUMN: varchar size must be a positive integer")
 		}
 		p.pop()
