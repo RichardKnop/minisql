@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
-	internalminisql "github.com/RichardKnop/minisql/internal/minisql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/RichardKnop/minisql/internal/minisql"
 )
 
 func TestToInternalArgs(t *testing.T) {
@@ -140,16 +141,16 @@ func TestStmtCloseNumInputAndUnsupportedLegacyMethods(t *testing.T) {
 	t.Parallel()
 
 	stmt := Stmt{
-		statement: internalminisql.Statement{
-			Kind:      internalminisql.Select,
+		statement: minisql.Statement{
+			Kind:      minisql.Select,
 			TableName: "users",
-			Fields:    []internalminisql.Field{{Name: "*"}},
-			Conditions: internalminisql.OneOrMore{
+			Fields:    []minisql.Field{{Name: "*"}},
+			Conditions: minisql.OneOrMore{
 				{
-					internalminisql.FieldIsEqual(
-						internalminisql.Field{Name: "id"},
-						internalminisql.OperandPlaceholder,
-						internalminisql.Placeholder{},
+					minisql.FieldIsEqual(
+						minisql.Field{Name: "id"},
+						minisql.OperandPlaceholder,
+						minisql.Placeholder{},
 					),
 				},
 			},

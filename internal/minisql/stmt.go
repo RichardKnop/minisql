@@ -195,6 +195,12 @@ type Column struct {
 	Size            uint32
 	Nullable        bool
 	DefaultValueNow bool
+	// Deleted marks a column that has been dropped via ALTER TABLE DROP COLUMN.
+	// Deleted columns remain in the schema so that existing cells (which still
+	// carry their bytes at that position) can be decoded correctly.  They are
+	// invisible to all query processing and new rows write TypeCodeNull + set
+	// the NullBitmask bit for the slot.
+	Deleted bool
 }
 
 // MayUseOverflowText reports whether values in this column may live on overflow pages.
@@ -1911,12 +1917,16 @@ func (s Statement) createTableDDL() string {
 		if col.Kind == Varchar {
 			fmt.Fprintf(&sb, "(%d)", col.Size)
 		}
-		if col.Name == pkColumn {
+		switch {
+		case col.Deleted:
+			// Tombstone marker persisted in DDL so schema round-trips correctly.
+			sb.WriteString(" dropped")
+		case col.Name == pkColumn:
 			sb.WriteString(" primary key")
 			if s.PrimaryKey.Autoincrement {
 				sb.WriteString(" autoincrement")
 			}
-		} else {
+		default:
 			if !col.Nullable {
 				sb.WriteString(" not null")
 			}

@@ -4,8 +4,7 @@ import (
 	"testing"
 )
 
-// BenchmarkCellUnmarshal measures the performance of cell unmarshaling
-// with the single-allocation optimization
+// BenchmarkCellUnmarshal measures the performance of cell unmarshaling.
 func BenchmarkCellUnmarshal(b *testing.B) {
 	columns := []Column{
 		{Kind: Int8, Size: 8, Name: "id"},
@@ -16,54 +15,54 @@ func BenchmarkCellUnmarshal(b *testing.B) {
 		{Kind: Timestamp, Size: 8, Name: "created"},
 	}
 
-	// Marshal some sample data
-	buf := make([]byte, 0, 1024)
+	// Build a cell using the new self-describing format.
+	src := Cell{
+		NullBitmask: 0,
+		Key:         123,
+		ColumnCount: uint8(len(columns)),
+		TypeCodes:   make([]byte, len(columns)),
+	}
+	for i, col := range columns {
+		src.TypeCodes[i] = byte(kindToTypeCode(col.Kind))
+	}
 
-	// NullBitmask (8 bytes)
-	buf = append(buf, make([]byte, 8)...)
-
-	// Key (8 bytes)
-	buf = append(buf, make([]byte, 8)...)
-	marshalUint64(buf, uint64(123), 8)
-
-	// Int8 (8 bytes)
-	buf = append(buf, make([]byte, 8)...)
-	marshalInt64(buf, int64(123), 16)
-
-	// Varchar email (4 bytes length + data)
+	// Marshal value bytes manually to match the packed layout.
 	email := "test@example.com"
-	buf = append(buf, make([]byte, 4)...)
-	marshalInt32(buf, int32(len(email)), 24)
-	buf = append(buf, []byte(email)...)
-
-	// Varchar name (4 bytes length + data)
 	name := "John Doe"
-	currentOffset := 28 + len(email)
-	buf = append(buf, make([]byte, 4)...)
-	marshalInt32(buf, int32(len(name)), uint64(currentOffset))
-	buf = append(buf, []byte(name)...)
+	valueBuf := make([]byte, 0, 128)
+	// id (Int8)
+	tmp8 := make([]byte, 8)
+	marshalInt64(tmp8, 123, 0)
+	valueBuf = append(valueBuf, tmp8...)
+	// email (Varchar: 4-byte length + data)
+	tmp4 := make([]byte, 4)
+	marshalInt32(tmp4, int32(len(email)), 0)
+	valueBuf = append(valueBuf, tmp4...)
+	valueBuf = append(valueBuf, []byte(email)...)
+	// name (Varchar)
+	marshalInt32(tmp4, int32(len(name)), 0)
+	valueBuf = append(valueBuf, tmp4...)
+	valueBuf = append(valueBuf, []byte(name)...)
+	// active (Boolean)
+	valueBuf = append(valueBuf, 1)
+	// score (Int4)
+	marshalInt32(tmp4, 100, 0)
+	valueBuf = append(valueBuf, tmp4...)
+	// created (Timestamp/Int8)
+	marshalInt64(tmp8, 1640000000, 0)
+	valueBuf = append(valueBuf, tmp8...)
+	src.Value = valueBuf
 
-	// Boolean (1 byte)
-	currentOffset += 4 + len(name)
-	buf = append(buf, make([]byte, 1)...)
-	marshalBool(buf, true, uint64(currentOffset))
-
-	// Int4 (4 bytes)
-	currentOffset += 1
-	buf = append(buf, make([]byte, 4)...)
-	marshalInt32(buf, int32(100), uint64(currentOffset))
-
-	// Timestamp (8 bytes)
-	currentOffset += 4
-	buf = append(buf, make([]byte, 8)...)
-	marshalInt64(buf, int64(1640000000), uint64(currentOffset))
+	// Marshal the whole cell into a buffer.
+	buf := make([]byte, src.Size())
+	src.Marshal(buf)
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
 		testCell := Cell{}
-		_, err := testCell.Unmarshal(columns, buf)
+		_, err := testCell.Unmarshal(buf)
 		if err != nil {
 			b.Fatal(err)
 		}

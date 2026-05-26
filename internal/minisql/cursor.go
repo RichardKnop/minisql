@@ -256,11 +256,23 @@ func (c *Cursor) saveToCell(ctx context.Context, node *LeafNode, cellIdx uint32,
 		}
 	}
 
+	// Build TypeCodes from row columns. Deleted columns use TypeCodeNull.
+	typeCodes := make([]byte, len(row.Columns))
+	for i, col := range row.Columns {
+		if col.Deleted {
+			typeCodes[i] = byte(TypeCodeNull)
+		} else {
+			typeCodes[i] = byte(kindToTypeCode(col.Kind))
+		}
+	}
+
 	node.PrepareModifyCell(cellIdx)
 	cell := &node.Cells[cellIdx]
 	cell.NullBitmask = row.NullBitmask()
 	cell.Key = key
 	cell.Value = rowBuf
+	cell.TypeCodes = typeCodes
+	cell.ColumnCount = uint8(len(row.Columns))
 
 	return nil
 }

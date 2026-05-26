@@ -166,7 +166,7 @@ PRAGMA parallel_scan = off;
 
 ## Storage
 
-Each page size is `4096 bytes`. Rows larger than page size are not supported. Therefore, the largest allowed inline row size is `4065 bytes` (with exception of root page 0 which has first 100 bytes reserved for config). Variable text colums can use overflow pages and are not limited by page size.
+Each page size is `4096 bytes`. Rows larger than page size are not supported. Therefore, the largest allowed inline row size is `4065 bytes` (with exception of root page 0 which has first 100 bytes reserved for config). Variable text columns can use overflow pages and are not limited by page size.
 
 ```
 4096 (page size) 
@@ -179,9 +179,22 @@ Each page size is `4096 bytes`. Rows larger than page size are not supported. Th
 
 All tables are kept track of via a system table `minisql_schema` which contains table name, `CREATE TABLE` SQL to document table structure and a root page index indicating which page contains root node of the table B+ Tree.
 
-Each row has an internal row ID which is an unsigned 64 bit integer starting at 0. These are used as keys in B+ Tree data structure. 
+Each row has an internal row ID which is an unsigned 64 bit integer starting at 0. These are used as keys in B+ Tree data structure.
 
 Moreover, each row starts with 64 bit null mask which determines which values are NULL. Because of the NULL bit mask being an unsigned 64 bit integer, there is a limit of `maximum 64 columns per table`.
+
+### Self-describing cell format
+
+Every B+ tree leaf cell is self-describing. The on-disk layout is:
+
+```
+[8B NullBitmask] [8B Key] [1B ColumnCount] [N TypeCode bytes] [packed values]
+```
+
+Each cell stores a one-byte `ColumnCount` followed by `ColumnCount` type-code bytes (one per column). The type code encodes the on-disk width for each column independently of the current schema. This makes cells self-describing in two ways:
+
+- **Lazy ADD COLUMN**: rows written before a column was added carry a smaller `ColumnCount`. Readers return the column's default value for positions beyond `ColumnCount` — no B+ tree rebuild required.
+- **Tombstone DROP COLUMN**: the schema marks a column `Deleted = true`. Old rows still carry real bytes at the dropped position; the type code tells the decoder how many bytes to skip. New rows written after the DROP carry a zero-width `TypeCodeNull` placeholder — also no rebuild required.
 
 ### Storage Data Structures
 

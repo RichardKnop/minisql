@@ -28,12 +28,14 @@ const (
 // eviction because the arena holds an independent copy of the bytes.
 type compactCell struct {
 	value       []byte
+	typeCodes   []byte
 	nullBitmask uint64
 	key         RowID
+	columnCount uint8
 }
 
 func (cc compactCell) toCell() Cell {
-	return Cell{Value: cc.value, NullBitmask: cc.nullBitmask, Key: cc.key, isOwned: true}
+	return Cell{Value: cc.value, NullBitmask: cc.nullBitmask, Key: cc.key, TypeCodes: cc.typeCodes, ColumnCount: cc.columnCount, isOwned: true}
 }
 
 // hashJoinBucket is the in-memory hash table built from the inner (build) side
@@ -330,6 +332,8 @@ func buildHashBucketFromCells(ctx context.Context, innerTable *Table, innerScan 
 			value:       arena[start:end:end],
 			nullBitmask: cell.NullBitmask,
 			key:         cell.Key,
+			typeCodes:   cell.TypeCodes,
+			columnCount: cell.ColumnCount,
 		}
 		key := string(keyBuf)
 		bucket.cells[key] = append(bucket.cells[key], cc)
@@ -692,6 +696,8 @@ func inljProbeRowViewIteratorFactory(
 				*innerView = RowView{
 					columns:     innerTable.Columns,
 					value:       innerCellBuf,
+					typeCodes:   innerRowView.typeCodes,
+					columnCount: innerRowView.columnCount,
 					nullBitmask: innerRowView.nullBitmask,
 					key:         innerRowView.key,
 				}
@@ -825,6 +831,8 @@ func hashJoinProbeRowViewIteratorFactory(
 					*innerView = RowView{
 						columns:     innerTable.Columns,
 						value:       cc.value,
+						typeCodes:   cc.typeCodes,
+						columnCount: int(cc.columnCount),
 						nullBitmask: cc.nullBitmask,
 						key:         cc.key,
 					}

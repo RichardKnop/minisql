@@ -57,7 +57,7 @@ func TestRow_Marshal(t *testing.T) {
 		data, err := row.Marshal()
 		require.NoError(t, err)
 
-		view := NewRowView(testColumns, Cell{Value: data})
+		view := NewRowView(testColumns, makeTestCell(0, row.NullBitmask(), data, row.Columns))
 		actual, err := view.Materialize(selectedColumnsMask(testColumns, fieldsFromColumns(row.Columns...)))
 		require.NoError(t, err)
 
@@ -72,7 +72,7 @@ func TestRow_Marshal(t *testing.T) {
 
 		selectedFields := fieldsFromColumns(testColumns[0:2]...)
 
-		view := NewRowView(testColumns, Cell{Value: data})
+		view := NewRowView(testColumns, makeTestCell(0, row.NullBitmask(), data, row.Columns))
 		partialRow, err := view.Materialize(selectedColumnsMask(testColumns, selectedFields))
 		require.NoError(t, err)
 

@@ -91,6 +91,8 @@ func BenchmarkRow_Unmarshal(b *testing.B) {
 		NullBitmask: 0,
 		Key:         123,
 		Value:       buf,
+		TypeCodes:   TypeCodesFromColumns(columns),
+		ColumnCount: uint8(len(columns)),
 	}
 
 	b.ResetTimer()

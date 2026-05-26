@@ -12,15 +12,7 @@ import (
 func TestLeafNode_Marshal(t *testing.T) {
 	t.Parallel()
 
-	var (
-		node    = NewLeafNode()
-		columns = []Column{
-			{
-				Kind: Varchar,
-				Size: 230,
-			},
-		}
-	)
+	node := NewLeafNode()
 
 	node.Header = LeafNodeHeader{
 		Header: Header{
@@ -32,12 +24,16 @@ func TestLeafNode_Marshal(t *testing.T) {
 		NextLeaf: 4,
 	}
 	node.Cells = append(node.Cells, Cell{
-		Key:     1,
-		Value:   prefixWithLength(bytes.Repeat([]byte{'a'}, 230)),
-		isOwned: true, // Unmarshal produces owned copies to avoid aliasing page buffers
+		Key:         1,
+		Value:       prefixWithLength(bytes.Repeat([]byte{'a'}, 230)),
+		TypeCodes:   []byte{byte(TypeCodeText)},
+		ColumnCount: 1,
+		isOwned:     true,
 	}, Cell{
 		Key:         2,
 		NullBitmask: bitwise.Set(uint64(0), 0),
+		TypeCodes:   []byte{byte(TypeCodeText)},
+		ColumnCount: 1,
 	})
 
 	buf := make([]byte, node.Size())
@@ -45,7 +41,7 @@ func TestLeafNode_Marshal(t *testing.T) {
 	require.NoError(t, err)
 
 	recreatedNode := NewLeafNode()
-	_, err = recreatedNode.Unmarshal(columns, buf)
+	_, err = recreatedNode.Unmarshal(buf)
 	require.NoError(t, err)
 
 	assert.Equal(t, node, recreatedNode)
