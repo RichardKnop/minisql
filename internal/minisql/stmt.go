@@ -1442,20 +1442,17 @@ func columnNames(columns []Column) string {
 
 // Check whether a row with the given columns can fit in a page if all columns are inlined
 func canInlinedRowFitInPage(columns []Column) bool {
-	remaining := UsablePageSize
+	var used uint32
 	for _, col := range columns {
 		if col.Kind.IsText() {
 			// For TEXT and VARCHAR, assume each column has maximum inline size
 			// and will take 4+255 bytes each (length prefix + max varchar inline size)
-			remaining -= (varcharLengthPrefixSize + MaxInlineVarchar)
+			used += varcharLengthPrefixSize + MaxInlineVarchar
 		} else {
-			remaining -= int(col.Size)
-		}
-		if remaining < 0 {
-			return false
+			used += col.Size
 		}
 	}
-	return true
+	return used <= UsablePageSize
 }
 
 func (s Statement) validateInsert(table *Table) error {
@@ -1806,7 +1803,7 @@ func isValueValidForColumn(col Column, val OptionalValue) error {
 		}
 		switch col.Kind {
 		case Varchar:
-			if utf8.RuneCountInString(val.Value.(TextPointer).String()) > int(col.Size) {
+			if int64(utf8.RuneCountInString(val.Value.(TextPointer).String())) > int64(col.Size) {
 				return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", col.Name, col.Size)
 			}
 		case Text:
