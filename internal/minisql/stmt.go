@@ -41,6 +41,23 @@ const (
 	Vacuum
 	Pragma
 	Explain
+	// AlterTable is an ALTER TABLE DDL statement (ADD/DROP/RENAME COLUMN, RENAME TO).
+	AlterTable
+)
+
+// AlterTableAction identifies which operation an ALTER TABLE statement performs.
+type AlterTableAction int
+
+// AlterTableAction constants enumerate the supported ALTER TABLE operations.
+const (
+	// AlterTableAddColumn adds a new column to an existing table.
+	AlterTableAddColumn AlterTableAction = iota + 1
+	// AlterTableDropColumn tombstones a column so new rows omit it.
+	AlterTableDropColumn
+	// AlterTableRenameColumn renames an existing column in-place.
+	AlterTableRenameColumn
+	// AlterTableRenameTo renames the table itself.
+	AlterTableRenameTo
 )
 
 func (s StatementKind) String() string {
@@ -75,6 +92,8 @@ func (s StatementKind) String() string {
 		return "PRAGMA"
 	case Explain:
 		return "EXPLAIN"
+	case AlterTable:
+		return "ALTER TABLE"
 	default:
 		return "UNKNOWN"
 	}
@@ -408,6 +427,11 @@ type Statement struct {
 	UpdateFromAlias    string     // alias for the UPDATE FROM table (e.g. "d" in FROM departments d)
 	UpdateFromSubquery *Statement // non-nil when UPDATE FROM clause is a subquery
 	CTEs               []CTE      // non-nil for WITH … SELECT statements
+	// ALTER TABLE fields
+	AlterTableAction AlterTableAction // which ALTER TABLE operation to perform
+	AlterColumnName  string           // column being dropped or old name for RENAME COLUMN
+	NewColumnName    string           // new column name for RENAME COLUMN … TO
+	NewTableName     string           // new table name for RENAME TO
 	// CacheKey is the original SQL text set by PrepareStatement; it is the key
 	// used to look up and store the query plan in the plan cache.  Empty for
 	// statements that were not prepared via PrepareStatement (ad-hoc queries).
@@ -541,6 +565,10 @@ func (s Statement) Clone() Statement {
 		UpdateFromTable:    s.UpdateFromTable,
 		UpdateFromAlias:    s.UpdateFromAlias,
 		ForeignKeys:        s.ForeignKeys, // slice of value structs, safe to share
+		AlterTableAction:   s.AlterTableAction,
+		AlterColumnName:    s.AlterColumnName,
+		NewColumnName:      s.NewColumnName,
+		NewTableName:       s.NewTableName,
 	}
 	for i := range s.Inserts {
 		stmt.Inserts[i] = make([]OptionalValue, len(s.Inserts[i]))
@@ -751,9 +779,9 @@ func (s Statement) ReadOnly() bool {
 }
 
 // IsDDL reports whether the statement is a data-definition statement
-// (CREATE TABLE, DROP TABLE, CREATE INDEX, or DROP INDEX).
+// (CREATE/DROP TABLE, CREATE/DROP INDEX, or ALTER TABLE).
 func (s Statement) IsDDL() bool {
-	return s.Kind == CreateTable || s.Kind == DropTable || s.Kind == CreateIndex || s.Kind == DropIndex
+	return s.Kind == CreateTable || s.Kind == DropTable || s.Kind == CreateIndex || s.Kind == DropIndex || s.Kind == AlterTable
 }
 
 // ColumnByName looks up a column in the statement's schema by name.
@@ -1709,6 +1737,9 @@ func (s Statement) HasOutputField(name string) bool {
 }
 
 func (s Statement) validateColumnValue(table *Table, col Column, val OptionalValue) error {
+	if col.Deleted {
+		return nil
+	}
 	if _, ok := val.Value.(Placeholder); ok {
 		return fmt.Errorf("unbound placeholder in value for field %q", col.Name)
 	}

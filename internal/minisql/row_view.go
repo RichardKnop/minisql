@@ -91,9 +91,9 @@ func (rv RowView) IsNull(idx int) (bool, error) {
 	if idx < 0 || idx >= len(rv.columns) {
 		return false, fmt.Errorf("column index %d out of bounds", idx)
 	}
-	// Column added after this row was written → treat as NULL.
+	// Column added after this row was written → NULL unless a default is set.
 	if idx >= rv.columnCount {
-		return true, nil
+		return !rv.columns[idx].DefaultValue.Valid, nil
 	}
 	// Tombstoned column → treat as NULL.
 	if rv.columns[idx].Deleted {
@@ -136,7 +136,7 @@ func (rv RowView) ValueAt(idx int) (OptionalValue, error) {
 	if idx >= rv.columnCount {
 		col := rv.columns[idx]
 		if col.DefaultValue.Valid {
-			return col.DefaultValue, nil
+			return coerceDefaultToColumnKind(col), nil
 		}
 		return OptionalValue{}, nil
 	}
@@ -231,6 +231,13 @@ func (rv RowView) BoolAt(idx int) (bool, bool, error) {
 	if null, err := rv.IsNull(idx); err != nil || null {
 		return false, false, err
 	}
+	if idx >= rv.columnCount {
+		dv := coerceDefaultToColumnKind(rv.columns[idx])
+		if b, ok := dv.Value.(bool); ok {
+			return b, dv.Valid, nil
+		}
+		return false, false, nil
+	}
 	if err := rv.requireKind(idx, Boolean); err != nil {
 		return false, false, err
 	}
@@ -251,6 +258,17 @@ func (rv RowView) Int64At(idx int) (int64, bool, error) {
 	}
 	if null, err := rv.IsNull(idx); err != nil || null {
 		return 0, false, err
+	}
+	// Lazy ADD COLUMN with default: no bytes in this row for this column.
+	if idx >= rv.columnCount {
+		dv := coerceDefaultToColumnKind(rv.columns[idx])
+		switch n := dv.Value.(type) {
+		case int32:
+			return int64(n), dv.Valid, nil
+		case int64:
+			return n, dv.Valid, nil
+		}
+		return 0, false, nil
 	}
 	col := rv.columns[idx]
 	if col.Kind != Int4 && col.Kind != Int8 && col.Kind != Timestamp {
@@ -276,6 +294,16 @@ func (rv RowView) Float64At(idx int) (float64, bool, error) {
 	}
 	if null, err := rv.IsNull(idx); err != nil || null {
 		return 0, false, err
+	}
+	if idx >= rv.columnCount {
+		dv := coerceDefaultToColumnKind(rv.columns[idx])
+		switch n := dv.Value.(type) {
+		case float32:
+			return float64(n), dv.Valid, nil
+		case float64:
+			return n, dv.Valid, nil
+		}
+		return 0, false, nil
 	}
 	col := rv.columns[idx]
 	if col.Kind != Real && col.Kind != Double {
@@ -304,6 +332,13 @@ func (rv RowView) TextAt(idx int) (TextPointer, error) {
 	}
 	if idx < 0 || idx >= len(rv.columns) {
 		return TextPointer{}, fmt.Errorf("column index %d out of bounds", idx)
+	}
+	if idx >= rv.columnCount {
+		dv := coerceDefaultToColumnKind(rv.columns[idx])
+		if tp, ok := dv.Value.(TextPointer); ok {
+			return tp, nil
+		}
+		return TextPointer{}, nil
 	}
 	col := rv.columns[idx]
 	if !col.Kind.IsText() {
@@ -454,4 +489,30 @@ func (rv RowView) offsetOf(targetIdx int) (int, error) {
 		return 0, fmt.Errorf("column offset %d exceeds encoded row length %d", offset, len(rv.value))
 	}
 	return offset, nil
+}
+
+// coerceDefaultToColumnKind converts a column's DefaultValue to the native Go
+// type expected by the driver for that column kind.  The parser always stores
+// integer defaults as int64; numeric columns narrower than int64 must be
+// narrowed so that database/sql Scan calls work correctly.
+func coerceDefaultToColumnKind(col Column) OptionalValue {
+	v := col.DefaultValue
+	switch col.Kind {
+	case Int4:
+		if i, ok := v.Value.(int64); ok {
+			return OptionalValue{Value: int32(i), Valid: true}
+		}
+	case Boolean:
+		if i, ok := v.Value.(int64); ok {
+			return OptionalValue{Value: i != 0, Valid: true}
+		}
+	case Real:
+		switch n := v.Value.(type) {
+		case int64:
+			return OptionalValue{Value: float32(n), Valid: true}
+		case float64:
+			return OptionalValue{Value: float32(n), Valid: true}
+		}
+	}
+	return v
 }

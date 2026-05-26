@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -465,7 +466,7 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 		return d.executePragmaStatement(ctx, stmt)
 	case Explain:
 		return d.executeExplain(ctx, stmt)
-	case CreateTable, DropTable, CreateIndex, DropIndex:
+	case CreateTable, DropTable, CreateIndex, DropIndex, AlterTable:
 		return d.executeDDLStatement(ctx, stmt)
 	case Insert, Select, Update, Delete:
 		// WITH … SELECT — CTE statement. Route before resolveSubqueries because
@@ -589,6 +590,15 @@ func (d *Database) init(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// Ensure SchemaTable entries are processed before index/key entries.
+	// ALTER TABLE re-inserts the table schema row (delete+insert), giving it a
+	// new autoincrement RowID that may be higher than existing index row IDs.
+	// Sorting by type (SchemaTable=1 < SchemaPrimaryKey=2 < ...) guarantees
+	// tables are always loaded before their associated indexes on reopen.
+	sort.Slice(schemas, func(i, j int) bool {
+		return schemas[i].Type < schemas[j].Type
+	})
 
 	for _, schema := range schemas {
 		switch schema.Type {
@@ -982,6 +992,8 @@ func (d *Database) executeDDLStatement(ctx context.Context, stmt Statement) (Sta
 		execErr = d.dropIndex(ctx, stmt)
 	case Analyze:
 		execErr = d.Analyze(ctx, stmt.TableName)
+	case AlterTable:
+		execErr = d.executeAlterTable(ctx, stmt)
 	default:
 		return StatementResult{}, fmt.Errorf("unrecognized DDL statement type: %v", stmt.Kind)
 	}

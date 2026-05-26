@@ -131,6 +131,13 @@ func (p *parserItem) doParseCreateTable() error {
 		nullNotNull := p.peek()
 		p.step = stepCreateTableColumnUnique
 		switch nullNotNull {
+		case "DROPPED":
+			// Tombstone: column was dropped via ALTER TABLE DROP COLUMN.
+			// The DDL round-trips correctly so the decoder can still skip the bytes.
+			p.Columns[len(p.Columns)-1].Deleted = true
+			p.pop()
+			p.step = stepCreateTableCommaOrClosingParens
+			return nil
 		case "NOT NULL":
 			p.Columns[len(p.Columns)-1].Nullable = false
 		case "NULL":

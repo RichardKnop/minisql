@@ -586,6 +586,7 @@ rows.Scan(&owner)
 | `NULL` and `NOT NULL` | Via null bit mask included in each row/cell |
 | `DEFAULT` | Supported for all columns, including `NOW()` for `TIMESTAMP` |
 | `DROP TABLE` | |
+| `ALTER TABLE` | `ADD COLUMN`, `DROP COLUMN`, `RENAME COLUMN … TO`, `RENAME TO`. See [ALTER TABLE](#alter-table). |
 | `CREATE INDEX`, `DROP INDEX` | Secondary non-unique indexes; primary and unique indexes are declared as part of `CREATE TABLE`. Supports composite (multi-column), partial (`WHERE` clause), and expression indexes. See [Indexes](#indexes). |
 | `INSERT` | Single row or multiple rows via a tuple of values separated by commas |
 | `ON CONFLICT` | Both `DO NOTHING` and `DO UPDATE` supported (with `EXCLUDED` pseudo table syntax for updating) |
@@ -772,6 +773,51 @@ _, err := db.Exec(`create table "users" (
 
 ```go
 _, err := db.Exec(`drop table "users";`)
+```
+
+### ALTER TABLE
+
+MiniSQL supports four `ALTER TABLE` operations. All changes are persisted to the schema and survive a database reopen.
+
+#### Add a column
+
+Appends a new column to the table schema. Existing rows are not rewritten on disk — the lazy ADD COLUMN mechanism returns the column's default value (or `NULL` for columns without a default) when an old row is read.
+
+```sql
+-- Nullable column — existing rows return NULL.
+ALTER TABLE users ADD COLUMN score INT4;
+
+-- NOT NULL with a default — existing rows return the default value.
+ALTER TABLE users ADD COLUMN active BOOLEAN NOT NULL DEFAULT true;
+
+-- VARCHAR column.
+ALTER TABLE users ADD COLUMN nickname VARCHAR(64);
+```
+
+Primary-key columns and columns whose name already exists in the table are rejected.
+
+#### Drop a column
+
+Marks a column as deleted (tombstone). The column bytes are not removed from existing rows but are skipped during reads. New rows write zero bytes for the dropped slot. Primary-key columns and columns referenced by an index or foreign key cannot be dropped.
+
+```sql
+ALTER TABLE users DROP COLUMN internal_note;
+```
+
+#### Rename a column
+
+Updates the column name in the schema without touching stored row data.
+
+```sql
+ALTER TABLE users RENAME COLUMN nm TO full_name;
+```
+
+#### Rename a table
+
+Renames the table and updates all associated index and foreign-key schema entries.
+
+```sql
+ALTER TABLE users RENAME TO members;
 ```
 
 ### Indexes
