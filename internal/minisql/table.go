@@ -475,10 +475,9 @@ func (t *Table) createNewRoot(ctx context.Context, rightChildPageIdx PageIndex) 
 		return nil, fmt.Errorf("get left child page: %w", err)
 	}
 
-	t.logger.Debug("create new root",
-		zap.Int("left_child_index", int(leftChildPage.Index)),
-		zap.Int("right_child_index", int(rightChildPageIdx)),
-	)
+	if ce := t.logger.Check(zap.DebugLevel, "create new root"); ce != nil {
+		ce.Write(zap.Int("left_child_index", int(leftChildPage.Index)), zap.Int("right_child_index", int(rightChildPageIdx)))
+	}
 
 	// Copy all node contents to left child
 	if oldRootPage.LeafNode != nil {
@@ -641,10 +640,9 @@ func (t *Table) InternalNodeSplitInsert(ctx context.Context, pageIdx, childPageI
 	newPage.InternalNode = NewInternalNode()
 	newPage.LeafNode = nil
 
-	t.logger.Debug("internal node split insert",
-		zap.Int("page_index", int(pageIdx)),
-		zap.Int("new_page_index", int(newPage.Index)),
-	)
+	if ce := t.logger.Check(zap.DebugLevel, "internal node split insert"); ce != nil {
+		ce.Write(zap.Int("page_index", int(pageIdx)), zap.Int("new_page_index", int(newPage.Index)))
+	}
 
 	if splittingRoot {
 		/*

@@ -199,6 +199,11 @@ func (d *Database) PrepareStatement(ctx context.Context, query string) (Statemen
 	stmt := statements[0]
 	stmt.CacheKey = query
 
+	// Pre-allocate the insert column-order cache so all clones share one object.
+	if stmt.Kind == Insert {
+		stmt.insertCache = &insertPrepCache{}
+	}
+
 	// Cache the parsed statement
 	d.stmtCache.Put(query, stmt, true)
 

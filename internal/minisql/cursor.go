@@ -69,11 +69,13 @@ func (c *Cursor) LeafNodeSplitInsert(ctx context.Context, key RowID, row Row) er
 		return fmt.Errorf("get new page: %w", err)
 	}
 
-	c.Table.logger.Debug("leaf node split insert",
-		zap.Int("key", int(key)),
-		zap.Int("old_max_key", int(originalMaxKey)),
-		zap.Int("new_page_index", int(newPage.Index)),
-	)
+	if ce := c.Table.logger.Check(zap.DebugLevel, "leaf node split insert"); ce != nil {
+		ce.Write(
+			zap.Int("key", int(key)),
+			zap.Int("old_max_key", int(originalMaxKey)),
+			zap.Int("new_page_index", int(newPage.Index)),
+		)
+	}
 
 	newPage.LeafNode = NewLeafNode()
 	newPage.LeafNode.Header.Parent = splitPage.LeafNode.Header.Parent

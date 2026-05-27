@@ -274,10 +274,12 @@ func (n *LeafNode) Unmarshal(buf []byte) (uint64, error) {
 	}
 	i += hi
 
-	if cap(n.Cells) < int(n.Header.Cells) {
-		n.Cells = make([]Cell, n.Header.Cells)
+	if cap(n.Cells) <= int(n.Header.Cells) {
+		// Allocate one extra slot so the next append (insert into this page)
+		// does not immediately trigger a reallocation.
+		n.Cells = make([]Cell, n.Header.Cells, n.Header.Cells+1)
 	} else {
-		n.Cells = n.Cells[:n.Header.Cells] // Reuse capacity
+		n.Cells = n.Cells[:n.Header.Cells] // Reuse capacity (already has headroom)
 	}
 
 	for idx := 0; idx < int(n.Header.Cells); idx++ {

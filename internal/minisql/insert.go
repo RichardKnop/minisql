@@ -191,11 +191,13 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			return StatementResult{}, errors.New("trying to insert into non leaf node")
 		}
 
-		t.logger.Debug("inserting row",
-			zap.Int("page_index", int(cursor.PageIdx)),
-			zap.Int("cell_index", int(cursor.CellIdx)),
-			zap.Int("row_id", int(nextRowID)),
-		)
+		if ce := t.logger.Check(zap.DebugLevel, "inserting row"); ce != nil {
+			ce.Write(
+				zap.Int("page_index", int(cursor.PageIdx)),
+				zap.Int("cell_index", int(cursor.CellIdx)),
+				zap.Int("row_id", int(nextRowID)),
+			)
+		}
 
 		if cursor.CellIdx < page.LeafNode.Header.Cells {
 			if page.LeafNode.Cells[cursor.CellIdx].Key == nextRowID {

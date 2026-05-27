@@ -22,7 +22,9 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, err
 	}
 
-	t.logger.Debug("query plan", zap.String("query type", "UPDATE"), zap.Any("plan", plan))
+	if ce := t.logger.Check(zap.DebugLevel, "query plan"); ce != nil {
+		ce.Write(zap.String("query type", "UPDATE"), zap.Any("plan", plan))
+	}
 
 	selectedFields := fieldsFromColumns(t.Columns...)
 
@@ -161,7 +163,9 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 	}
 
-	t.logger.Debug("updated rows", zap.Int("count", result.RowsAffected))
+	if ce := t.logger.Check(zap.DebugLevel, "updated rows"); ce != nil {
+		ce.Write(zap.Int("count", result.RowsAffected))
+	}
 
 	if len(stmt.ReturningFields) > 0 {
 		allFields := fieldsFromColumns(t.Columns...)

@@ -147,8 +147,9 @@ func (tm *TransactionManager) CheckpointWAL(dbFile DBFile) error {
 	}
 	tm.mu.Unlock()
 
-	tm.logger.Debug("WAL checkpoint completed",
-		zap.Int64("frames_checkpointed", framesBefore))
+	if ce := tm.logger.Check(zap.DebugLevel, "WAL checkpoint completed"); ce != nil {
+		ce.Write(zap.Int64("frames_checkpointed", framesBefore))
+	}
 
 	return nil
 }
@@ -228,7 +229,9 @@ func (tm *TransactionManager) BeginTransaction(ctx context.Context) (*Transactio
 	tm.transactions[tx.ID] = tx
 	tm.mu.Unlock()
 
-	tm.logger.Debug("begin transaction", zap.Uint64("tx_id", uint64(tx.ID)))
+	if ce := tm.logger.Check(zap.DebugLevel, "begin transaction"); ce != nil {
+		ce.Write(zap.Uint64("tx_id", uint64(tx.ID)))
+	}
 
 	return tx, nil
 }
@@ -255,10 +258,9 @@ func (tm *TransactionManager) BeginReadOnlyTransaction(ctx context.Context) *Tra
 	tm.transactions[tx.ID] = tx
 	tm.mu.Unlock()
 
-	tm.logger.Debug("begin read-only transaction",
-		zap.Uint64("tx_id", uint64(tx.ID)),
-		zap.Uint64("snapshot_seq", tx.SnapshotSeq),
-	)
+	if ce := tm.logger.Check(zap.DebugLevel, "begin read-only transaction"); ce != nil {
+		ce.Write(zap.Uint64("tx_id", uint64(tx.ID)), zap.Uint64("snapshot_seq", tx.SnapshotSeq))
+	}
 	return tx
 }
 
@@ -401,7 +403,9 @@ func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction)
 		tx.Commit()
 		delete(tm.transactions, tx.ID)
 		tm.trimPageVersionHistoryLocked()
-		tm.logger.Debug("commit read-only transaction", zap.Uint64("tx_id", uint64(tx.ID)))
+		if ce := tm.logger.Check(zap.DebugLevel, "commit read-only transaction"); ce != nil {
+			ce.Write(zap.Uint64("tx_id", uint64(tx.ID)))
+		}
 		return nil
 	}
 
@@ -448,7 +452,9 @@ func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction)
 	}
 	tx.Commit()
 	delete(tm.transactions, tx.ID)
-	tm.logger.Debug("commit transaction", zap.Uint64("tx_id", uint64(tx.ID)))
+	if ce := tm.logger.Check(zap.DebugLevel, "commit transaction"); ce != nil {
+		ce.Write(zap.Uint64("tx_id", uint64(tx.ID)))
+	}
 	return nil
 }
 
@@ -486,7 +492,9 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 		delete(tm.transactions, tx.ID)
 		tm.trimPageVersionHistoryLocked()
 		tm.mu.Unlock()
-		tm.logger.Debug("commit read-only transaction (WAL)", zap.Uint64("tx_id", uint64(tx.ID)))
+		if ce := tm.logger.Check(zap.DebugLevel, "commit read-only transaction (WAL)"); ce != nil {
+			ce.Write(zap.Uint64("tx_id", uint64(tx.ID)))
+		}
 		return nil
 	}
 	tm.mu.Unlock()
@@ -557,7 +565,9 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 		}
 	}
 
-	tm.logger.Debug("commit transaction (WAL)", zap.Uint64("tx_id", uint64(tx.ID)))
+	if ce := tm.logger.Check(zap.DebugLevel, "commit transaction (WAL)"); ce != nil {
+		ce.Write(zap.Uint64("tx_id", uint64(tx.ID)))
+	}
 
 	// Step 6: Trigger auto-checkpoint if the WAL has grown past the threshold.
 	tm.runAutoCheckpoint(ctx)
@@ -687,7 +697,9 @@ func (tm *TransactionManager) runAutoCheckpoint(_ context.Context) {
 	blocked := tm.hasActiveSnapshotReadersLocked()
 	tm.mu.RUnlock()
 	if blocked {
-		tm.logger.Debug("auto-checkpoint deferred: active snapshot readers")
+		if ce := tm.logger.Check(zap.DebugLevel, "auto-checkpoint deferred: active snapshot readers"); ce != nil {
+			ce.Write()
+		}
 		return
 	}
 	if err := tm.checkpointFn(); err != nil {
@@ -723,6 +735,8 @@ func (tm *TransactionManager) RollbackTransaction(ctx context.Context, tx *Trans
 	tm.trimPageVersionHistoryLocked()
 	tm.mu.Unlock()
 
-	tm.logger.Debug("rollback transaction", zap.Uint64("tx_id", uint64(tx.ID)))
+	if ce := tm.logger.Check(zap.DebugLevel, "rollback transaction"); ce != nil {
+		ce.Write(zap.Uint64("tx_id", uint64(tx.ID)))
+	}
 }
 

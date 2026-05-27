@@ -24,7 +24,9 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, err
 	}
 
-	t.logger.Debug("query plan", zap.String("query type", "DELETE"), zap.Any("plan", plan))
+	if ce := t.logger.Check(zap.DebugLevel, "query plan"); ce != nil {
+		ce.Write(zap.String("query type", "DELETE"), zap.Any("plan", plan))
+	}
 
 	// Always select all columns so the full row is available for index cleanup on delete.
 	selectedFields := fieldsFromColumns(t.Columns...)
@@ -75,7 +77,9 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 		result.RowsAffected += 1
 	}
 
-	t.logger.Debug("deleted rows", zap.Int("count", result.RowsAffected))
+	if ce := t.logger.Check(zap.DebugLevel, "deleted rows"); ce != nil {
+		ce.Write(zap.Int("count", result.RowsAffected))
+	}
 
 	// Update the in-memory row-count cache (only for user tables).
 	if t.getRowCount != nil && result.RowsAffected > 0 {

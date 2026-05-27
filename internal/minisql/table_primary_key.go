@@ -110,10 +110,12 @@ func (t *Table) insertPrimaryKey(ctx context.Context, keyParts []OptionalValue, 
 		return 0, fmt.Errorf("failed to cast primary key value for %s: %w", t.PrimaryKey.Name, err)
 	}
 
-	t.logger.Debug("inserting primary key",
-		zap.String("index", t.PrimaryKey.Name),
-		zap.Any("key", castedKey),
-	)
+	if ce := t.logger.Check(zap.DebugLevel, "inserting primary key"); ce != nil {
+		ce.Write(
+			zap.String("index", t.PrimaryKey.Name),
+			zap.Any("key", castedKey),
+		)
+	}
 
 	if err := t.PrimaryKey.Index.Insert(ctx, castedKey, rowID); err != nil {
 		return 0, fmt.Errorf("failed to insert primary key %s: %w", t.PrimaryKey.Name, err)
@@ -137,10 +139,12 @@ func (t *Table) insertAutoincrementedPrimaryKey(ctx context.Context, rowID RowID
 	}
 	newPrimaryKey := lastPrimaryKey + 1
 
-	t.logger.Debug("inserting autoincremented primary key",
-		zap.String("index", t.PrimaryKey.Name),
-		zap.Int("key", int(newPrimaryKey)),
-	)
+	if ce := t.logger.Check(zap.DebugLevel, "inserting autoincremented primary key"); ce != nil {
+		ce.Write(
+			zap.String("index", t.PrimaryKey.Name),
+			zap.Int("key", int(newPrimaryKey)),
+		)
+	}
 
 	if err := t.PrimaryKey.Index.Insert(ctx, newPrimaryKey, rowID); err != nil {
 		return 0, fmt.Errorf("failed to insert primary key %s: %w", t.PrimaryKey.Name, err)
@@ -168,9 +172,9 @@ func (t *Table) insertCompositePrimaryKey(ctx context.Context, keyParts []Option
 
 	ck := NewCompositeKey(t.PrimaryKey.Columns, keyValues...)
 
-	t.logger.Debug("inserting composite primary key",
-		zap.String("index", t.PrimaryKey.Name),
-	)
+	if ce := t.logger.Check(zap.DebugLevel, "inserting composite primary key"); ce != nil {
+		ce.Write(zap.String("index", t.PrimaryKey.Name))
+	}
 
 	if err := t.PrimaryKey.Index.Insert(ctx, ck, rowID); err != nil {
 		return 0, fmt.Errorf("failed to insert primary key %s: %w", t.PrimaryKey.Name, err)
