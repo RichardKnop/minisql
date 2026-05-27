@@ -2,11 +2,9 @@ package e2etests
 
 // TestHashJoin exercises the hash-join execution path.
 //
-// Hash join is chosen when the right (inner/build) table has no index on its
-// join column.  The queries below use "departments" as the outer (left) table
-// and "employees" as the inner (right/build) table.  employees.dept_id has no
-// secondary index, so the planner picks JoinAlgorithmHash instead of the
-// indexed nested-loop path.
+// The greedy join planner prefers index-eligible nodes as the inner (lookup)
+// side.  A plain hash join is chosen only when the inner table has no index on
+// its join column even after greedy reordering.
 func (s *TestSuite) TestHashJoin() {
 	_, err := s.db.Exec(`create table "departments" (
 		dept_id  int8 primary key autoincrement,
@@ -14,7 +12,9 @@ func (s *TestSuite) TestHashJoin() {
 	);`)
 	s.Require().NoError(err)
 
-	// dept_id on employees has NO secondary index — join on it must use hash join.
+	// dept_id on employees has NO secondary index.  The greedy planner will
+	// promote departments (PK on dept_id) to the inner side and use an index
+	// NL join instead of a hash join for this pair.
 	_, err = s.db.Exec(`create table "employees" (
 		emp_id   int8 primary key autoincrement,
 		dept_id  int8 not null,
@@ -143,11 +143,53 @@ func (s *TestSuite) TestHashJoin() {
 		s.Equal("Engineering", got[3].dept)
 	})
 
-	s.Run("explain_shows_hash_algorithm", func() {
+	s.Run("explain_shows_nested_loop_via_pk", func() {
+		// departments.dept_id is the PK.  Greedy reordering promotes departments
+		// to the inner side so the planner uses an index NL join (faster and
+		// lower-memory than hash join for this small table).
 		rows := s.collectExplain(`
 			EXPLAIN SELECT e.name
 			FROM "departments" AS d
 			INNER JOIN "employees" AS e ON d.dept_id = e.dept_id`)
+		var joinRow *explainResult
+		for i := range rows {
+			if rows[i].Operation == "join" {
+				joinRow = &rows[i]
+				break
+			}
+		}
+		s.Require().NotNil(joinRow, "expected a 'join' row in EXPLAIN output")
+		s.Contains(joinRow.Detail, "algorithm=nested_loop")
+		// employees is the outer (probe) side, departments is the inner (index lookup).
+		s.Contains(joinRow.Detail, "left=e")
+		s.Contains(joinRow.Detail, "right=d")
+	})
+
+	s.Run("explain_shows_hash_when_no_index_on_join_col", func() {
+		// Two tables joined through a column that has no index on either side.
+		// Hash join is the only viable O(N+M) strategy.
+		_, err := s.db.Exec(`create table "hj_refs" (
+			ref_id   int8 primary key autoincrement,
+			bucket   int8 not null
+		)`)
+		s.Require().NoError(err)
+		_, err = s.db.Exec(`create table "hj_items" (
+			item_id  int8 primary key autoincrement,
+			bucket   int8 not null,
+			label    varchar(20) not null
+		)`)
+		s.Require().NoError(err)
+
+		_, err = s.db.Exec(`insert into "hj_refs" (bucket) values (1),(2),(3)`)
+		s.Require().NoError(err)
+		_, err = s.db.Exec(`insert into "hj_items" (bucket, label) values (1,'a'),(2,'b'),(1,'c')`)
+		s.Require().NoError(err)
+
+		// Neither hj_refs.bucket nor hj_items.bucket has an index — hash join.
+		rows := s.collectExplain(`
+			EXPLAIN SELECT r.ref_id, i.label
+			FROM "hj_refs" AS r
+			INNER JOIN "hj_items" AS i ON r.bucket = i.bucket`)
 		var joinRow *explainResult
 		for i := range rows {
 			if rows[i].Operation == "join" {

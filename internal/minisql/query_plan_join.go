@@ -136,6 +136,11 @@ type joinGraphNode struct {
 	tableAlias string
 	table      *Table
 	rows       int64 // estimated row count from ANALYZE; -1 if unknown
+	// indexPartners maps a partner table alias to true when this node has an
+	// index on its join column for that partner.  A non-empty map means this
+	// node is a good candidate for the inner (build/lookup) side of an
+	// index-NL join.  Populated by collectJoinGraph.
+	indexPartners map[string]bool
 }
 
 // joinGraphEdge is an undirected edge in the join graph: the ON conditions
@@ -197,7 +202,55 @@ func (t *Table) collectJoinGraph(ctx context.Context, stmt Statement) ([]joinGra
 	if !walk(stmt.Joins) {
 		return nil, nil, false
 	}
+
+	// Precompute index eligibility: for each edge, check whether each endpoint
+	// has an index on its join column.  This guides greedy reordering to prefer
+	// index-eligible nodes as the inner (lookup) side, enabling indexed NL joins.
+	nodeByAlias := make(map[string]*joinGraphNode, len(nodes))
+	for i := range nodes {
+		nodeByAlias[nodes[i].tableAlias] = &nodes[i]
+	}
+	for _, e := range edges {
+		for _, pair := range [2]struct{ self, partner string }{{e.alias1, e.alias2}, {e.alias2, e.alias1}} {
+			n := nodeByAlias[pair.self]
+			if n == nil || n.table == nil {
+				continue
+			}
+			cols := joinColumnsForAlias(e.conditions, pair.self)
+			if len(cols) > 0 && n.table.findIndexOnColumns(cols) != nil {
+				if n.indexPartners == nil {
+					n.indexPartners = make(map[string]bool)
+				}
+				n.indexPartners[pair.partner] = true
+			}
+		}
+	}
+
 	return nodes, edges, true
+}
+
+// joinColumnsForAlias extracts the column names that belong to targetAlias from
+// a set of equi-join conditions.  Used to determine which column of a node
+// participates in the join so we can check index availability.
+func joinColumnsForAlias(conditions Conditions, targetAlias string) []string {
+	var cols []string
+	for _, cond := range conditions {
+		if cond.Operator != Eq || cond.Operand1.Type != OperandField || cond.Operand2.Type != OperandField {
+			continue
+		}
+		f1, ok1 := cond.Operand1.Value.(Field)
+		f2, ok2 := cond.Operand2.Value.(Field)
+		if !ok1 || !ok2 {
+			continue
+		}
+		switch targetAlias {
+		case f1.AliasPrefix:
+			cols = append(cols, f1.Name)
+		case f2.AliasPrefix:
+			cols = append(cols, f2.Name)
+		}
+	}
+	return cols
 }
 
 // greedyJoinOrder returns a reordered sequence of joinGraphNodes and, for each
@@ -230,10 +283,45 @@ func greedyJoinOrder(nodes []joinGraphNode, edges []joinGraphEdge) ([]joinGraphN
 		adj[e.alias2] = append(adj[e.alias2], i)
 	}
 
-	// Find the node with fewest rows to start.
+	// Find the start (base/probe) node.
+	//
+	// A node with an index on a join column is best kept as the inner (lookup)
+	// side so the planner can use an index NL join instead of a hash join.
+	// Therefore we prefer to start with a node that has NO such index.
+	// Among equally index-ineligible nodes, prefer the one with the most rows
+	// (larger probe table is fine; it keeps the smaller table as the inner
+	// build/lookup side, minimising hash-table memory when no index exists).
+	// When all nodes have index-eligible joins, or none do, fall back to the
+	// original fewest-rows heuristic (ties broken by row count).
+	anyHasIndex := false
+	for _, n := range nodes {
+		if len(n.indexPartners) > 0 {
+			anyHasIndex = true
+			break
+		}
+	}
+
 	startIdx := 0
 	for i, n := range nodes {
-		if n.rows < nodes[startIdx].rows {
+		cur := nodes[startIdx]
+		var preferI bool
+		if anyHasIndex {
+			curHasIdx := len(cur.indexPartners) > 0
+			nHasIdx := len(n.indexPartners) > 0
+			switch {
+			case !nHasIdx && curHasIdx:
+				preferI = true // n has no index: better as base/probe
+			case nHasIdx && !curHasIdx:
+				preferI = false // cur has no index: keep it
+			case !nHasIdx && !curHasIdx:
+				preferI = n.rows > cur.rows // both non-indexed: larger as probe
+			default:
+				preferI = n.rows < cur.rows // both indexed: fewest rows (original)
+			}
+		} else {
+			preferI = n.rows < cur.rows // no indexes anywhere: original heuristic
+		}
+		if preferI {
 			startIdx = i
 		}
 	}
@@ -273,7 +361,27 @@ func greedyJoinOrder(nodes []joinGraphNode, edges []joinGraphEdge) ([]joinGraphN
 					continue
 				}
 				n := nodes[nodeIdx]
-				if bestNodeIdx == -1 || n.rows < bestRows {
+				// Prefer candidates with an index on the join column for any
+				// already-placed (done) alias — they enable an index NL join as
+				// the inner side and are always better than a hash-build node.
+				// Among equally index-eligible candidates, prefer fewer rows.
+				nHasIdx := false
+				for doneA := range done {
+					if n.indexPartners[doneA] {
+						nHasIdx = true
+						break
+					}
+				}
+				bHasIdx := false
+				if bestNodeIdx != -1 {
+					for doneA := range done {
+						if nodes[bestNodeIdx].indexPartners[doneA] {
+							bHasIdx = true
+							break
+						}
+					}
+				}
+				if bestNodeIdx == -1 || (nHasIdx && !bHasIdx) || (nHasIdx == bHasIdx && n.rows < bestRows) {
 					bestNodeIdx = nodeIdx
 					bestEdgeIdx = edgeIdx
 					bestRows = n.rows
