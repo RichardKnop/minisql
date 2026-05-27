@@ -1,5 +1,22 @@
 # Benchmark Results
 
+## 2026-05-27 — Plan Cache Extension for Bound-Condition Queries
+
+**Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
+**Branch:** `main`  
+**Command:** `go test -tags bench -run='^$' -bench=Update_ByPK -benchmem -count=5 ./benchmarks/`
+
+One optimization eliminating the per-call query planning cost for indexed DML prepared statements:
+
+- **Plan cache for bound-condition queries** (`query_plan.go`): `PlanQuery` now caches plans for prepared `UPDATE`/`DELETE`/`SELECT` statements where the `WHERE` clause uses simple indexed equality conditions. On a cache hit, `rehydratePlanIndexKeys` rebuilds only the `IndexKeys` slice from current bound values without re-running the full planner. Three guards ensure correctness: `planConditionsAreCacheable` rejects subquery/expression/placeholder operands that would change the plan shape; `planIsCacheableWithConditions` only caches plans composed entirely of `ScanTypeIndexPoint` scans with no secondary filters or sub-scans; and `rehydratePlanIndexKeys` falls back to full re-planning if key extraction fails.
+
+**Memory improvements vs previous baseline (2026-05-27 Update/Query Planning baseline):**
+
+| Benchmark | Memory before | Memory after | Δ allocs |
+|---|---:|---:|---:|
+| Update_ByPK/minisql | 5.7 KiB / 53 allocs | 5.2 KiB / 46 allocs | −13% |
+| Delete_ByPK/minisql | 5.9 KiB / 73 allocs | 5.3 KiB / 65 allocs | −11% |
+
 ## 2026-05-27 — Update/Query Planning Allocation Reduction
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
@@ -77,7 +94,7 @@ This baseline reflects the greedy join planner improvement merged since the prev
 | Having_Filter/sqlite | 2.29 ms | 1.9 KiB | 111 |
 | Distinct_HighCardinality/minisql | 3.81 ms | 1.73 MiB | 40,141 |
 | Distinct_HighCardinality/sqlite | 6.53 ms | 586.3 KiB | 40,010 |
-| Delete_ByPK/minisql | 27.0 µs | 5.9 KiB | 73 |
+| Delete_ByPK/minisql | 22.0 µs | 5.3 KiB | 65 |
 | Delete_ByPK/sqlite | 110.1 µs | 447 B | 19 |
 | ForeignKey_Insert/minisql | 16.6 µs | 3.0 KiB | 32 |
 | ForeignKey_Insert/sqlite | 62.9 µs | 192 B | 8 |
@@ -157,7 +174,7 @@ This baseline reflects the greedy join planner improvement merged since the prev
 | Subquery_InList/sqlite | 4.26 ms | 234.7 KiB | 20,010 |
 | OnConflict_DoUpdate/minisql | 11.4 µs | 2.5 KiB | 34 |
 | OnConflict_DoUpdate/sqlite | 53.6 µs | 259 B | 10 |
-| Update_ByPK/minisql | 15.7 µs | 5.7 KiB | 53 |
+| Update_ByPK/minisql | 10.1 µs | 5.2 KiB | 46 |
 | Update_ByPK/sqlite | 60.5 µs | 263 B | 10 |
 
 ## Memory Outliers
@@ -175,6 +192,6 @@ The largest remaining memory consumers (minisql only, excluding intentional sequ
 
 Good next optimisation targets:
 
-- Extend plan cache to UPDATE/DELETE with bound conditions: the plan shape (which index to use) is stable across executions of the same prepared statement; only `IndexKeys` change. Re-injecting keys after cache retrieval would eliminate the entire per-call planning cost (~1 KiB/op on Update_ByPK).
 - Streaming SELECT delivery that reads directly from RowView into the driver dest slice (eliminating `Materialize()`)
 - Streaming term extraction for inverted-index build and maintenance
+- Reduce per-row clone overhead in `Insert_Batch` (~1.9 KiB/row vs SQLite's 310 B)

@@ -216,16 +216,30 @@ SELECT * from users ORDER BY created DESC; - use index on created for ordering
 SELECT * from users ORDER BY non_indexed_col; - order in memory
 */
 func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error) {
-	// Plan cache: safe only when stmt.Conditions is empty (no bound values in the
-	// plan) and there are no JOINs (join plans embed per-execution join key values).
-	// ORDER BY-only queries are the primary beneficiary: the index-vs-sort decision
-	// is schema-derived and stable across all executions of the same SQL.
+	// Plan cache eligibility:
+	//  - No JOINs (join plans embed per-execution join-key values).
+	//  - Either no conditions (schema-derived plan, e.g. ORDER BY skip-sort), or all
+	//    conditions are simple bound literals (no subqueries, expressions, or unbound
+	//    placeholders).  For the latter, the plan *structure* (which index to use, scan
+	//    type) is determined solely by the condition column names — not the values —
+	//    so the same plan shape applies to every execution of the same prepared statement.
+	//    IndexKeys are per-execution; they are re-derived after cache retrieval.
+	hasConditions := len(stmt.Conditions) > 0
 	canCache := stmt.CacheKey != "" && t.planCache != nil &&
-		len(stmt.Conditions) == 0 && len(stmt.Joins) == 0
+		len(stmt.Joins) == 0 &&
+		(!hasConditions || planConditionsAreCacheable(stmt.Conditions))
 
 	if canCache {
 		if cached, ok := t.planCache.Get(stmt.CacheKey); ok {
-			return applyScanLimit(cached.(QueryPlan), stmt), nil
+			plan := cached.(QueryPlan)
+			if hasConditions {
+				if hydrated, ok := rehydratePlanIndexKeys(plan, stmt, t); ok {
+					return applyScanLimit(hydrated, stmt), nil
+				}
+				// Re-hydration failed (schema change?). Fall through to full re-plan.
+			} else {
+				return applyScanLimit(plan, stmt), nil
+			}
 		}
 	}
 
@@ -234,11 +248,112 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error
 		return QueryPlan{}, err
 	}
 
-	if canCache {
+	if canCache && (!hasConditions || planIsCacheableWithConditions(plan)) {
 		t.planCache.Put(stmt.CacheKey, plan, true)
 	}
 
 	return applyScanLimit(plan, stmt), nil
+}
+
+// planConditionsAreCacheable returns true when every condition in conds has
+// simple bound operands — no subqueries, no expression-tree operands, no
+// unbound placeholders.  Plans derived from such conditions are safe to cache
+// because index selection depends only on the condition structure (which
+// columns appear in the WHERE clause), not on the runtime values.
+func planConditionsAreCacheable(conds OneOrMore) bool {
+	for _, group := range conds {
+		for _, cond := range group {
+			if cond.Operand1.Type == OperandExpr {
+				return false
+			}
+			switch cond.Operand2.Type {
+			case OperandSubquery, OperandExpr, OperandPlaceholder:
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// planIsCacheableWithConditions returns true when the plan consists entirely
+// of index equality (ScanTypeIndexPoint) scans that carry no post-index filters
+// and no sub-scans.  For such plans only IndexKeys change between executions
+// of the same prepared statement; they can be cheaply re-derived via
+// rehydratePlanIndexKeys without re-running the full planner.
+func planIsCacheableWithConditions(plan QueryPlan) bool {
+	if len(plan.Scans) == 0 {
+		return false
+	}
+	for _, scan := range plan.Scans {
+		if scan.Type != ScanTypeIndexPoint {
+			return false
+		}
+		if len(scan.Filters) > 0 || len(scan.SubScans) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// rehydratePlanIndexKeys returns a copy of plan with the IndexKeys on each
+// ScanTypeIndexPoint scan rebuilt from the current bound stmt.Conditions.
+// plan.Scans[i] is assumed to correspond to stmt.Conditions[i] — which holds
+// for plans produced by setIndexScans (one scan per OR group, in group order).
+// Returns (plan, false) if re-hydration cannot proceed, signalling a fallback
+// to a full re-plan.
+func rehydratePlanIndexKeys(plan QueryPlan, stmt Statement, t *Table) (QueryPlan, bool) {
+	scans := make([]Scan, len(plan.Scans))
+	copy(scans, plan.Scans)
+	for i := range scans {
+		if scans[i].Type != ScanTypeIndexPoint {
+			continue
+		}
+		if i >= len(stmt.Conditions) {
+			return plan, false
+		}
+		keys := extractScanIndexKeys(t, scans[i], stmt.Conditions[i])
+		if keys == nil {
+			return plan, false
+		}
+		scans[i].IndexKeys = keys
+	}
+	plan.Scans = scans
+	return plan, true
+}
+
+// extractScanIndexKeys re-derives the IndexKeys for one ScanTypeIndexPoint scan by
+// matching each of the scan's IndexColumns against the conditions in group and
+// calling equalityKeys.  Returns nil if any column cannot be matched.
+func extractScanIndexKeys(t *Table, scan Scan, group Conditions) []any {
+	var keys []any
+	for _, indexCol := range scan.IndexColumns {
+		col, ok := t.ColumnByName(indexCol.Name)
+		if !ok {
+			return nil
+		}
+		for _, cond := range group {
+			if cond.Operand1.Type != OperandField {
+				continue
+			}
+			field, ok := cond.Operand1.Value.(Field)
+			if !ok || field.Name != indexCol.Name {
+				continue
+			}
+			if !isEquality(cond) || cond.Operand2.Type == OperandNull {
+				continue
+			}
+			extracted, err := equalityKeys(col, cond)
+			if err != nil || len(extracted) == 0 {
+				return nil
+			}
+			keys = append(keys, extracted...)
+			break
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	return keys
 }
 
 // applyScanLimit attaches a ScanLimit to each scan in the plan when LIMIT is present
