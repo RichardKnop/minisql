@@ -882,6 +882,53 @@ func TestGreedyJoinOrder_FallbackOnUnknownRowCount(t *testing.T) {
 	assert.False(t, ok, "should fall back when any table has unknown row count")
 }
 
+func TestGreedyJoinOrder_IndexPreference(t *testing.T) {
+	t.Parallel()
+
+	// emp (10K rows, no index on join col) + dept (100 rows, index on join col).
+	// Greedy should start with emp (large, no index) so that dept becomes the
+	// inner (INLJ target).  The old row-count-only heuristic would have picked
+	// dept (smallest) as base, putting emp on the build side — wrong for hash join.
+	nodes := []joinGraphNode{
+		{tableAlias: "emp", rows: 10000, indexPartners: nil},
+		{tableAlias: "dept", rows: 100, indexPartners: map[string]bool{"emp": true}},
+	}
+	edges := []joinGraphEdge{
+		{alias1: "emp", alias2: "dept", joinType: Inner},
+	}
+
+	orderedNodes, _, ok := greedyJoinOrder(nodes, edges)
+	require.True(t, ok)
+	require.Len(t, orderedNodes, 2)
+	assert.Equal(t, "emp", orderedNodes[0].tableAlias, "large no-index table should be base (probe)")
+	assert.Equal(t, "dept", orderedNodes[1].tableAlias, "indexed table should be inner (INLJ target)")
+}
+
+func TestGreedyJoinOrder_IndexPreferenceNextNode(t *testing.T) {
+	t.Parallel()
+
+	// Three tables: A (1000 rows, no index), B (500 rows, index on join col with A),
+	// C (200 rows, no index).
+	// A should start (no index, most rows among non-indexed nodes).
+	// Then B should be picked next (has index with A) before C (no index).
+	nodes := []joinGraphNode{
+		{tableAlias: "a", rows: 1000},
+		{tableAlias: "b", rows: 500, indexPartners: map[string]bool{"a": true}},
+		{tableAlias: "c", rows: 200},
+	}
+	edges := []joinGraphEdge{
+		{alias1: "a", alias2: "b", joinType: Inner},
+		{alias1: "a", alias2: "c", joinType: Inner},
+	}
+
+	orderedNodes, _, ok := greedyJoinOrder(nodes, edges)
+	require.True(t, ok)
+	require.Len(t, orderedNodes, 3)
+	assert.Equal(t, "a", orderedNodes[0].tableAlias)
+	assert.Equal(t, "b", orderedNodes[1].tableAlias, "index-eligible node should be preferred as inner")
+	assert.Equal(t, "c", orderedNodes[2].tableAlias)
+}
+
 func TestGreedyJoinOrder_UserOrderPreservedWhenAlreadyOptimal(t *testing.T) {
 	t.Parallel()
 

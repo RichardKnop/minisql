@@ -76,8 +76,13 @@ func (s *TestSuite) TestGreedyJoinReorder() {
 	})
 
 	s.Run("plan_reflects_reorder", func() {
-		// EXPLAIN should show categories (c, 3 rows) as the left (base) side and
-		// items (i, 30 rows) as the right side after greedy reordering.
+		// EXPLAIN should show items (i, 30 rows) as the left (probe) side and
+		// categories (c, 3 rows) as the right (inner/INLJ) side.
+		//
+		// gr_categories has a PK on cat_id — when used as the inner table its
+		// join column (cat_id) has an index, enabling an indexed NL join.
+		// The greedy planner therefore keeps gr_items as the probe/base side
+		// and promotes gr_categories to the inner (lookup) side.
 		rows := s.collectExplain(`
 			EXPLAIN SELECT i.name, c.label
 			FROM "gr_items" AS i
@@ -86,11 +91,10 @@ func (s *TestSuite) TestGreedyJoinReorder() {
 		joinRow := s.findExplainRow(rows, "join")
 		s.Require().NotNil(joinRow, "expected a join row in EXPLAIN output")
 		s.Contains(joinRow.Detail, "type=inner")
-		// Greedy: categories (3) < items (30) → c is left, i is right.
-		// items has a PK on item_id but NOT on cat_id.
-		// categories has a PK on cat_id → items joins categories via PK → nested_loop.
-		s.Contains(joinRow.Detail, "left=c")
-		s.Contains(joinRow.Detail, "right=i")
+		s.Contains(joinRow.Detail, "algorithm=nested_loop")
+		// items is the probe (left/base), categories is the inner (right, index lookup).
+		s.Contains(joinRow.Detail, "left=i")
+		s.Contains(joinRow.Detail, "right=c")
 	})
 
 	s.Run("three_table_chain_correct", func() {
