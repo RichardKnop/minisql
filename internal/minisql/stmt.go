@@ -245,16 +245,6 @@ func fieldsFromColumns(columns ...Column) []Field {
 	return fields
 }
 
-func textOverflowColumns(columns ...Column) []Column {
-	overflowColumns := make([]Column, 0, len(columns))
-	for _, col := range columns {
-		if !col.MayUseOverflowText() {
-			continue
-		}
-		overflowColumns = append(overflowColumns, col)
-	}
-	return overflowColumns
-}
 
 func textOverflowFields(columns ...Column) []Field {
 	overflowFields := make([]Field, 0, len(columns))
@@ -533,10 +523,12 @@ func (s Statement) NumPlaceholders() int {
 func (s Statement) Clone() Statement {
 	// For INSERT, Fields are always fully rebuilt by prepareInsert — share the
 	// reference to avoid an allocation that immediately becomes dead.
-	// For all other kinds, deep-copy so that downstream mutations (e.g. BindArguments
-	// filling Placeholder values) don't corrupt the prepared statement.
+	// For UPDATE, BindArguments only reads Fields (to find which Updates keys hold
+	// placeholders) and never writes to it — share the reference too.
+	// For all other kinds, deep-copy so that downstream mutations don't corrupt
+	// the prepared statement.
 	var fields []Field
-	if s.Kind == Insert {
+	if s.Kind == Insert || s.Kind == Update {
 		fields = s.Fields
 	} else {
 		fields = make([]Field, len(s.Fields))

@@ -222,7 +222,7 @@ func (tm *TransactionManager) BeginTransaction(ctx context.Context) (*Transactio
 	tx := &Transaction{
 		ID:        tm.nextTxID,
 		StartTime: time.Now(),
-		WriteSet:  make(map[PageIndex]WriteInfo),
+		WriteSet:  make(map[PageIndex]WriteInfo, 8),
 		Status:    TxActive,
 	}
 	tm.nextTxID += 1
