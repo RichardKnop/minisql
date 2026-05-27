@@ -200,4 +200,112 @@ func (s *TestSuite) TestReturning() {
 		s.Require().False(rows.Next(), "DO NOTHING should return no rows")
 		s.Require().NoError(rows.Err())
 	})
+
+	s.Run("INSERT_RETURNING_star", func() {
+		rows, err := s.db.Query(
+			`insert into users (name, email, score, created_at) values (?, ?, ?, ?) returning *`,
+			"Star", "star@example.com", int64(77), time.Now(),
+		)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		// returning * gives all 5 columns: id, name, email, score, created_at
+		cols, err := rows.Columns()
+		s.Require().NoError(err)
+		s.Require().Len(cols, 5)
+
+		var id, score int64
+		var name, email string
+		var ts time.Time
+		s.Require().NoError(rows.Scan(&id, &name, &email, &score, &ts))
+		s.Greater(id, int64(0))
+		s.Equal("Star", name)
+		s.Equal(int64(77), score)
+		s.Require().False(rows.Next())
+		s.Require().NoError(rows.Err())
+	})
+
+	s.Run("UPDATE_RETURNING_star", func() {
+		var id int64
+		s.Require().NoError(s.db.QueryRow(
+			`insert into users (name, email, score, created_at) values (?, ?, ?, ?) returning id`,
+			"StarUpd", "starupd@example.com", int64(1), time.Now(),
+		).Scan(&id))
+
+		rows, err := s.db.Query(
+			`update users set score = ? where id = ? returning *`,
+			int64(99), id,
+		)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		cols, err := rows.Columns()
+		s.Require().NoError(err)
+		s.Require().Len(cols, 5)
+
+		var gotID, score int64
+		var name, email string
+		var ts time.Time
+		s.Require().NoError(rows.Scan(&gotID, &name, &email, &score, &ts))
+		s.Equal(id, gotID)
+		s.Equal(int64(99), score)
+		s.Require().False(rows.Next())
+		s.Require().NoError(rows.Err())
+	})
+
+	s.Run("DELETE_RETURNING_star", func() {
+		var id int64
+		s.Require().NoError(s.db.QueryRow(
+			`insert into users (name, email, score, created_at) values (?, ?, ?, ?) returning id`,
+			"StarDel", "stardel@example.com", int64(5), time.Now(),
+		).Scan(&id))
+
+		rows, err := s.db.Query(`delete from users where id = ? returning *`, id)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		cols, err := rows.Columns()
+		s.Require().NoError(err)
+		s.Require().Len(cols, 5)
+
+		var gotID, score int64
+		var name, email string
+		var ts time.Time
+		s.Require().NoError(rows.Scan(&gotID, &name, &email, &score, &ts))
+		s.Equal(id, gotID)
+		s.Equal("StarDel", name)
+		s.Require().False(rows.Next())
+		s.Require().NoError(rows.Err())
+	})
+
+	s.Run("UPDATE_RETURNING_no_matching_rows", func() {
+		rows, err := s.db.Query(`update users set score = ? where id = 999999 returning id`, int64(0))
+		s.Require().NoError(err)
+		defer rows.Close()
+		s.Require().False(rows.Next(), "UPDATE matching no rows should return empty result set")
+		s.Require().NoError(rows.Err())
+	})
+
+	s.Run("INSERT_ON_CONFLICT_DO_UPDATE_RETURNING_non_conflict", func() {
+		// Fresh insert with DO UPDATE — row is inserted normally, returned as if INSERT.
+		rows, err := s.db.Query(
+			`insert into users (name, email, score, created_at) values (?, ?, ?, ?) on conflict do update set score = 0 returning id, name, score`,
+			"Fresh", "fresh@example.com", int64(42), time.Now(),
+		)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		var id, score int64
+		var name string
+		s.Require().NoError(rows.Scan(&id, &name, &score))
+		s.Greater(id, int64(0))
+		s.Equal("Fresh", name)
+		s.Equal(int64(42), score)
+		s.Require().False(rows.Next())
+		s.Require().NoError(rows.Err())
+	})
 }

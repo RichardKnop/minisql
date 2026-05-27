@@ -968,31 +968,31 @@ func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, err
 	}
 
 	f1 := field1.Value.(Field)
-	aColumn1, idx1 := r.getColumnQualified(f1.AliasPrefix, f1.Name)
+	col1, idx1 := r.getColumnQualified(f1.AliasPrefix, f1.Name)
 	if idx1 < 0 {
 		return false, fmt.Errorf("row does not contain column '%s'", f1.Name)
 	}
 
 	f2 := field2.Value.(Field)
-	aColumn2, idx2 := r.getColumnQualified(f2.AliasPrefix, f2.Name)
+	col2, idx2 := r.getColumnQualified(f2.AliasPrefix, f2.Name)
 	if idx2 < 0 {
 		return false, fmt.Errorf("row does not contain column '%s'", f2.Name)
 	}
 
-	if aColumn1.Kind != aColumn2.Kind {
+	if col1.Kind != col2.Kind {
 		return false, nil
 	}
 
-	value1, ok := r.GetValue(aColumn1.Name)
+	value1, ok := r.GetValue(col1.Name)
 	if !ok {
 		return false, fmt.Errorf("row does not have '%s' column", f1.Name)
 	}
-	value2, ok := r.GetValue(aColumn2.Name)
+	value2, ok := r.GetValue(col2.Name)
 	if !ok {
 		return false, fmt.Errorf("row does not have '%s' column", f2.Name)
 	}
 
-	switch aColumn1.Kind {
+	switch col1.Kind {
 	case Boolean:
 		return compareBoolean(value1.Value.(bool), value2.Value.(bool), operator)
 	case Int4:
@@ -1008,7 +1008,7 @@ func (r Row) compareFields(field1, field2 Operand, operator Operator) (bool, err
 	case Timestamp:
 		return compareTimestamp(value1.Value.(TimestampMicros), value2.Value.(TimestampMicros), operator)
 	default:
-		return false, fmt.Errorf("unknown column kind '%s'", aColumn1.Kind)
+		return false, fmt.Errorf("unknown column kind '%s'", col1.Kind)
 	}
 }
 

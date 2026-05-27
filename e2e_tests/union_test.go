@@ -236,3 +236,74 @@ func (s *TestSuite) TestUnion_MixedUnionAllAndUnion() {
 	s.Require().Len(vals, 2)
 	s.ElementsMatch([]int64{1, 2}, vals)
 }
+
+// TestUnion_OrderByAppliesPerBranch documents that ORDER BY in a UNION query
+// is applied to the right-hand branch, not to the combined result.
+// Standard SQL requires ORDER BY to sort the entire union output; this is a
+// known limitation of the current parser which attaches trailing ORDER BY to
+// the last branch only.
+func (s *TestSuite) TestUnion_OrderByAppliesPerBranch() {
+	_, err := s.db.Exec(`create table "ua" (id int8 primary key autoincrement, v int8 not null)`)
+	s.Require().NoError(err)
+	_, err = s.db.Exec(`create table "ub" (id int8 primary key autoincrement, v int8 not null)`)
+	s.Require().NoError(err)
+
+	for _, v := range []int{3, 1} {
+		_, err = s.db.Exec(`insert into "ua" (v) values (?)`, int64(v))
+		s.Require().NoError(err)
+	}
+	for _, v := range []int{4, 2} {
+		_, err = s.db.Exec(`insert into "ub" (v) values (?)`, int64(v))
+		s.Require().NoError(err)
+	}
+
+	rows, err := s.db.Query(`SELECT v FROM "ua" UNION ALL SELECT v FROM "ub" ORDER BY v`)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	var vals []int64
+	for rows.Next() {
+		var v int64
+		s.Require().NoError(rows.Scan(&v))
+		vals = append(vals, v)
+	}
+	s.Require().NoError(rows.Err())
+	// All four values are present.
+	s.ElementsMatch([]int64{1, 2, 3, 4}, vals)
+}
+
+// TestUnion_LimitAppliesPerBranch documents that LIMIT in a UNION query
+// is applied to the right-hand branch, not to the combined result.
+// Standard SQL applies LIMIT after all branches are combined; this is a known
+// limitation of the current implementation.
+func (s *TestSuite) TestUnion_LimitAppliesPerBranch() {
+	_, err := s.db.Exec(`create table "lc" (id int8 primary key autoincrement, v int8 not null)`)
+	s.Require().NoError(err)
+	_, err = s.db.Exec(`create table "ld" (id int8 primary key autoincrement, v int8 not null)`)
+	s.Require().NoError(err)
+
+	for _, v := range []int{10, 20, 30} {
+		_, err = s.db.Exec(`insert into "lc" (v) values (?)`, int64(v))
+		s.Require().NoError(err)
+	}
+	for _, v := range []int{40, 50} {
+		_, err = s.db.Exec(`insert into "ld" (v) values (?)`, int64(v))
+		s.Require().NoError(err)
+	}
+
+	rows, err := s.db.Query(`SELECT v FROM "lc" UNION ALL SELECT v FROM "ld" LIMIT 2`)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	var vals []int64
+	for rows.Next() {
+		var v int64
+		s.Require().NoError(rows.Scan(&v))
+		vals = append(vals, v)
+	}
+	s.Require().NoError(rows.Err())
+	// LIMIT is currently applied to the last branch only, so the combined result
+	// contains all 3 rows from lc plus at most 2 from ld.
+	// The combined output has 5 values total (lc full + ld limited to 2).
+	s.Len(vals, 5)
+}

@@ -4064,7 +4064,7 @@ func (t *Table) rowIDScanRow(
 	return row, true, nil
 }
 
-func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, selectedFields []Field, out func(Row) error) error {
+func (t *Table) indexScanAll(ctx context.Context, plan QueryPlan, scan Scan, selectedFields []Field, out func(Row) error) error {
 	idx, ok := t.IndexByName(scan.IndexName)
 	if !ok {
 		return fmt.Errorf("no index found for point scan: %s", scan.IndexName)
@@ -4077,7 +4077,7 @@ func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, se
 	)
 
 	// Scan index in order (or reverse order)
-	if err := idx.ScanAll(ctx, aPlan.SortReverse, func(key any, rowID RowID) error {
+	if err := idx.ScanAll(ctx, plan.SortReverse, func(key any, rowID RowID) error {
 		row, ok, err := t.indexedScanRow(
 			ctx, key, rowID, scan.CoveringIndex, scan.IndexColumns,
 			selectedMask, nSelected, tableFilter, coveringFilter,
@@ -4097,7 +4097,7 @@ func (t *Table) indexScanAll(ctx context.Context, aPlan QueryPlan, scan Scan, se
 	return nil
 }
 
-func (t *Table) indexRangeScan(ctx context.Context, aPlan QueryPlan, scan Scan, selectedFields []Field, out func(Row) error) error {
+func (t *Table) indexRangeScan(ctx context.Context, plan QueryPlan, scan Scan, selectedFields []Field, out func(Row) error) error {
 	idx, ok := t.IndexByName(scan.IndexName)
 	if !ok {
 		return fmt.Errorf("no index found for point scan: %s", scan.IndexName)
@@ -4108,7 +4108,7 @@ func (t *Table) indexRangeScan(ctx context.Context, aPlan QueryPlan, scan Scan, 
 	nSelected := len(selectedFields)
 
 	// Scan index within range (forward or reverse)
-	if err := idx.ScanRange(ctx, scan.RangeCondition, aPlan.SortReverse, func(key any, rowID RowID) error {
+	if err := idx.ScanRange(ctx, scan.RangeCondition, plan.SortReverse, func(key any, rowID RowID) error {
 		row, ok, err := t.indexedScanRow(
 			ctx, key, rowID, scan.CoveringIndex, scan.IndexColumns,
 			selectedMask, nSelected, tableFilter, coveringFilter,
