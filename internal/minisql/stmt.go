@@ -5,8 +5,18 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
+
+// insertPrepCache holds the static column-order metadata for a prepared INSERT
+// statement. It is computed once on the first Exec and then read-only, so all
+// clones of the same prepared statement share the pointer safely.
+type insertPrepCache struct {
+	once         sync.Once
+	colFieldIdx  []int   // len=nCols; maps table column position → Fields index (-1 = omitted)
+	sortedFields []Field // Fields in table column order; read-only after init
+}
 
 // ConflictAction describes what to do when an INSERT violates a uniqueness constraint.
 type ConflictAction int
@@ -442,6 +452,10 @@ type Statement struct {
 	IfNotExists    bool
 	ExplainAnalyze bool
 	Distinct       bool
+	// insertCache is non-nil for INSERT statements prepared via PrepareStatement.
+	// It caches the static column-order metadata computed by prepareInsert so that
+	// repeated Exec calls on the same prepared statement skip the per-Exec allocation.
+	insertCache *insertPrepCache
 }
 
 // HasWindowFuncs reports whether the SELECT field list contains at least one
@@ -569,6 +583,7 @@ func (s Statement) Clone() Statement {
 		AlterColumnName:    s.AlterColumnName,
 		NewColumnName:      s.NewColumnName,
 		NewTableName:       s.NewTableName,
+		insertCache:        s.insertCache,
 	}
 	for i := range s.Inserts {
 		stmt.Inserts[i] = make([]OptionalValue, len(s.Inserts[i]))
@@ -872,36 +887,68 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 	}
 	nUpdateFields := len(s.Fields) - nInsertFields
 
-	// Build colFieldIdx: for each table column (by position), the index into the
-	// original s.Fields where that column appears, or -1 if it was omitted.
-	// One O(C²) pass, but C ≤ 64 so it is effectively O(1).
-	colFieldIdx := make([]int, nCols)
-	for i := range colFieldIdx {
-		colFieldIdx[i] = -1
-	}
-	for i, col := range s.Columns {
-		for k := 0; k < nInsertFields; k++ {
-			if s.Fields[k].Name == col.Name {
-				colFieldIdx[i] = k
-				break
+	// Build or reuse the column-field index and sorted Fields template.
+	// For prepared statements (insertCache != nil) this is computed once and cached;
+	// subsequent Exec calls reuse the cached slices, eliminating per-Exec allocations.
+	var colFieldIdx []int
+	if s.insertCache != nil {
+		cache := s.insertCache
+		cache.once.Do(func() {
+			idx := make([]int, nCols)
+			for i := range idx {
+				idx[i] = -1
+			}
+			for i, col := range s.Columns {
+				for k := 0; k < nInsertFields; k++ {
+					if s.Fields[k].Name == col.Name {
+						idx[i] = k
+						break
+					}
+				}
+			}
+			sorted := make([]Field, nCols, nCols+nUpdateFields)
+			for i, col := range s.Columns {
+				if k := idx[i]; k >= 0 {
+					sorted[i] = s.Fields[k]
+				} else {
+					sorted[i] = Field{Name: col.Name}
+				}
+			}
+			if nUpdateFields > 0 {
+				sorted = append(sorted, s.Fields[nInsertFields:]...)
+			}
+			cache.colFieldIdx = idx
+			cache.sortedFields = sorted
+		})
+		colFieldIdx = cache.colFieldIdx
+		s.Fields = cache.sortedFields
+	} else {
+		// One-shot INSERT (not from PrepareStatement): compute inline as before.
+		colFieldIdx = make([]int, nCols)
+		for i := range colFieldIdx {
+			colFieldIdx[i] = -1
+		}
+		for i, col := range s.Columns {
+			for k := 0; k < nInsertFields; k++ {
+				if s.Fields[k].Name == col.Name {
+					colFieldIdx[i] = k
+					break
+				}
 			}
 		}
-	}
-
-	// Rebuild Fields in table-column order with a single allocation.
-	// Append the DO UPDATE SET fields (if any) at the end.
-	newFields := make([]Field, nCols, nCols+nUpdateFields)
-	for i, col := range s.Columns {
-		if k := colFieldIdx[i]; k >= 0 {
-			newFields[i] = s.Fields[k]
-		} else {
-			newFields[i] = Field{Name: col.Name}
+		newFields := make([]Field, nCols, nCols+nUpdateFields)
+		for i, col := range s.Columns {
+			if k := colFieldIdx[i]; k >= 0 {
+				newFields[i] = s.Fields[k]
+			} else {
+				newFields[i] = Field{Name: col.Name}
+			}
 		}
+		if nUpdateFields > 0 {
+			newFields = append(newFields, s.Fields[nInsertFields:]...)
+		}
+		s.Fields = newFields
 	}
-	if nUpdateFields > 0 {
-		newFields = append(newFields, s.Fields[nInsertFields:]...)
-	}
-	s.Fields = newFields
 
 	// Rebuild each insert row in column order, applying defaults and resolving
 	// NOW() / timestamp values inline — one allocation per row.

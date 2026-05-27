@@ -98,10 +98,9 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 			keyValues = append(keyValues, castedKey)
 		}
 		ck := NewCompositeKey(secondaryIndex.Columns, keyValues...)
-		t.logger.Debug("inserting secondary index key",
-			zap.String("index", secondaryIndex.Name),
-			zap.Any("key", ck),
-		)
+		if ce := t.logger.Check(zap.DebugLevel, "inserting secondary index key"); ce != nil {
+			ce.Write(zap.String("index", secondaryIndex.Name), zap.Any("key", ck))
+		}
 		if err := secondaryIndex.Index.Insert(ctx, ck, rowID); err != nil {
 			return fmt.Errorf("failed to insert key for secondary index %s: %w", secondaryIndex.Name, err)
 		}
@@ -120,10 +119,9 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 		return fmt.Errorf("failed to cast key value for secondary index  %s: %w", secondaryIndex.Name, err)
 	}
 
-	t.logger.Debug("inserting secondary index key",
-		zap.String("index", secondaryIndex.Name),
-		zap.Any("key", castedKey),
-	)
+	if ce := t.logger.Check(zap.DebugLevel, "inserting secondary index key"); ce != nil {
+		ce.Write(zap.String("index", secondaryIndex.Name), zap.Any("key", castedKey))
+	}
 
 	if err := secondaryIndex.Index.Insert(ctx, castedKey, rowID); err != nil {
 		return fmt.Errorf("failed to insert key for secondary index %s: %w", secondaryIndex.Name, err)

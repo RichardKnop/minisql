@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"time"
+	"unsafe"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
 )
@@ -127,7 +128,12 @@ func toInternalArgs(args []driver.NamedValue) ([]any, error) {
 		case int64, float64, bool:
 			internalArgs = append(internalArgs, v)
 		case string:
-			internalArgs = append(internalArgs, minisql.NewTextPointer([]byte(v)))
+			// Reuse the string's backing bytes without copying. The TextPointer is
+			// valid only for the duration of this Exec/Query call: `args` (and thus
+			// the underlying string data) is kept alive by the caller's stack frame,
+			// and the TextPointer is consumed before ExecContext/QueryContext returns.
+			b := unsafe.Slice(unsafe.StringData(v), len(v))
+			internalArgs = append(internalArgs, minisql.NewTextPointer(b))
 		case time.Time:
 			t := minisql.Time{
 				Year:         int32(v.Year()),

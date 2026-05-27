@@ -64,7 +64,9 @@ func (d *Database) executeUpdateFrom(ctx context.Context, stmt Statement) (State
 		return StatementResult{}, err
 	}
 
-	targetTable.logger.Debug("query plan", zap.String("query type", "UPDATE FROM"), zap.Any("plan", plan))
+	if ce := targetTable.logger.Check(zap.DebugLevel, "query plan"); ce != nil {
+		ce.Write(zap.String("query type", "UPDATE FROM"), zap.Any("plan", plan))
+	}
 
 	allFields := fieldsFromColumns(targetTable.Columns...)
 
@@ -151,7 +153,9 @@ func (d *Database) executeUpdateFrom(ctx context.Context, stmt Statement) (State
 		result.Rows = NewSliceIterator(returningRows)
 	}
 
-	targetTable.logger.Debug("updated rows (UPDATE FROM)", zap.Int("count", result.RowsAffected))
+	if ce := targetTable.logger.Check(zap.DebugLevel, "updated rows (UPDATE FROM)"); ce != nil {
+		ce.Write(zap.Int("count", result.RowsAffected))
+	}
 	return result, nil
 }
 

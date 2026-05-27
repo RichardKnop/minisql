@@ -48,7 +48,9 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return StatementResult{}, err
 	}
 
-	t.logger.Debug("query plan", zap.String("query type", "SELECT"), zap.Any("plan", plan))
+	if ce := t.logger.Check(zap.DebugLevel, "query plan"); ce != nil {
+		ce.Write(zap.String("query type", "SELECT"), zap.Any("plan", plan))
+	}
 
 	if stmt.IsSelectCountAll() && len(stmt.Joins) == 0 && t.virtualRows == nil {
 		result, ok, err := t.tryCountFromExactInvertedIndex(ctx, plan)

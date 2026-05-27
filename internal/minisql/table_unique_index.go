@@ -54,10 +54,9 @@ func (t *Table) insertUniqueIndexKey(ctx context.Context, uniqueIndex UniqueInde
 		return fmt.Errorf("failed to cast key value for unique index  %s: %w", uniqueIndex.Name, err)
 	}
 
-	t.logger.Debug("inserting unique index key",
-		zap.String("index", uniqueIndex.Name),
-		zap.Any("key", castedKey),
-	)
+	if ce := t.logger.Check(zap.DebugLevel, "inserting unique index key"); ce != nil {
+		ce.Write(zap.String("index", uniqueIndex.Name), zap.Any("key", castedKey))
+	}
 
 	if err := uniqueIndex.Index.Insert(ctx, castedKey, rowID); err != nil {
 		return fmt.Errorf("failed to insert key for unique index %s: %w", uniqueIndex.Name, err)
@@ -91,10 +90,9 @@ func (t *Table) insertUniqueCompositeIndexKey(ctx context.Context, uniqueIndex U
 
 	ck := NewCompositeKey(uniqueIndex.Columns[0:len(keyValues)], keyValues...)
 
-	t.logger.Debug("inserting unique index key",
-		zap.String("index", uniqueIndex.Name),
-		zap.Any("key", ck),
-	)
+	if ce := t.logger.Check(zap.DebugLevel, "inserting unique index key"); ce != nil {
+		ce.Write(zap.String("index", uniqueIndex.Name), zap.Any("key", ck))
+	}
 
 	if err := uniqueIndex.Index.Insert(ctx, ck, rowID); err != nil {
 		return fmt.Errorf("failed to insert key for unique index %s: %w", uniqueIndex.Name, err)
