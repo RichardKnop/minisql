@@ -41,6 +41,23 @@ const (
 	Vacuum
 	Pragma
 	Explain
+	// AlterTable is an ALTER TABLE DDL statement (ADD/DROP/RENAME COLUMN, RENAME TO).
+	AlterTable
+)
+
+// AlterTableAction identifies which operation an ALTER TABLE statement performs.
+type AlterTableAction int
+
+// AlterTableAction constants enumerate the supported ALTER TABLE operations.
+const (
+	// AlterTableAddColumn adds a new column to an existing table.
+	AlterTableAddColumn AlterTableAction = iota + 1
+	// AlterTableDropColumn tombstones a column so new rows omit it.
+	AlterTableDropColumn
+	// AlterTableRenameColumn renames an existing column in-place.
+	AlterTableRenameColumn
+	// AlterTableRenameTo renames the table itself.
+	AlterTableRenameTo
 )
 
 func (s StatementKind) String() string {
@@ -75,6 +92,8 @@ func (s StatementKind) String() string {
 		return "PRAGMA"
 	case Explain:
 		return "EXPLAIN"
+	case AlterTable:
+		return "ALTER TABLE"
 	default:
 		return "UNKNOWN"
 	}
@@ -195,6 +214,12 @@ type Column struct {
 	Size            uint32
 	Nullable        bool
 	DefaultValueNow bool
+	// Deleted marks a column that has been dropped via ALTER TABLE DROP COLUMN.
+	// Deleted columns remain in the schema so that existing cells (which still
+	// carry their bytes at that position) can be decoded correctly.  They are
+	// invisible to all query processing and new rows write TypeCodeNull + set
+	// the NullBitmask bit for the slot.
+	Deleted bool
 }
 
 // MayUseOverflowText reports whether values in this column may live on overflow pages.
@@ -402,6 +427,11 @@ type Statement struct {
 	UpdateFromAlias    string     // alias for the UPDATE FROM table (e.g. "d" in FROM departments d)
 	UpdateFromSubquery *Statement // non-nil when UPDATE FROM clause is a subquery
 	CTEs               []CTE      // non-nil for WITH … SELECT statements
+	// ALTER TABLE fields
+	AlterTableAction AlterTableAction // which ALTER TABLE operation to perform
+	AlterColumnName  string           // column being dropped or old name for RENAME COLUMN
+	NewColumnName    string           // new column name for RENAME COLUMN … TO
+	NewTableName     string           // new table name for RENAME TO
 	// CacheKey is the original SQL text set by PrepareStatement; it is the key
 	// used to look up and store the query plan in the plan cache.  Empty for
 	// statements that were not prepared via PrepareStatement (ad-hoc queries).
@@ -535,6 +565,10 @@ func (s Statement) Clone() Statement {
 		UpdateFromTable:    s.UpdateFromTable,
 		UpdateFromAlias:    s.UpdateFromAlias,
 		ForeignKeys:        s.ForeignKeys, // slice of value structs, safe to share
+		AlterTableAction:   s.AlterTableAction,
+		AlterColumnName:    s.AlterColumnName,
+		NewColumnName:      s.NewColumnName,
+		NewTableName:       s.NewTableName,
 	}
 	for i := range s.Inserts {
 		stmt.Inserts[i] = make([]OptionalValue, len(s.Inserts[i]))
@@ -745,9 +779,9 @@ func (s Statement) ReadOnly() bool {
 }
 
 // IsDDL reports whether the statement is a data-definition statement
-// (CREATE TABLE, DROP TABLE, CREATE INDEX, or DROP INDEX).
+// (CREATE/DROP TABLE, CREATE/DROP INDEX, or ALTER TABLE).
 func (s Statement) IsDDL() bool {
-	return s.Kind == CreateTable || s.Kind == DropTable || s.Kind == CreateIndex || s.Kind == DropIndex
+	return s.Kind == CreateTable || s.Kind == DropTable || s.Kind == CreateIndex || s.Kind == DropIndex || s.Kind == AlterTable
 }
 
 // ColumnByName looks up a column in the statement's schema by name.
@@ -1408,20 +1442,17 @@ func columnNames(columns []Column) string {
 
 // Check whether a row with the given columns can fit in a page if all columns are inlined
 func canInlinedRowFitInPage(columns []Column) bool {
-	remaining := UsablePageSize
+	var used uint32
 	for _, col := range columns {
 		if col.Kind.IsText() {
 			// For TEXT and VARCHAR, assume each column has maximum inline size
 			// and will take 4+255 bytes each (length prefix + max varchar inline size)
-			remaining -= (varcharLengthPrefixSize + MaxInlineVarchar)
+			used += varcharLengthPrefixSize + MaxInlineVarchar
 		} else {
-			remaining -= int(col.Size)
-		}
-		if remaining < 0 {
-			return false
+			used += col.Size
 		}
 	}
-	return true
+	return used <= UsablePageSize
 }
 
 func (s Statement) validateInsert(table *Table) error {
@@ -1703,6 +1734,9 @@ func (s Statement) HasOutputField(name string) bool {
 }
 
 func (s Statement) validateColumnValue(table *Table, col Column, val OptionalValue) error {
+	if col.Deleted {
+		return nil
+	}
 	if _, ok := val.Value.(Placeholder); ok {
 		return fmt.Errorf("unbound placeholder in value for field %q", col.Name)
 	}
@@ -1769,7 +1803,7 @@ func isValueValidForColumn(col Column, val OptionalValue) error {
 		}
 		switch col.Kind {
 		case Varchar:
-			if utf8.RuneCountInString(val.Value.(TextPointer).String()) > int(col.Size) {
+			if int64(utf8.RuneCountInString(val.Value.(TextPointer).String())) > int64(col.Size) {
 				return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", col.Name, col.Size)
 			}
 		case Text:
@@ -1911,12 +1945,16 @@ func (s Statement) createTableDDL() string {
 		if col.Kind == Varchar {
 			fmt.Fprintf(&sb, "(%d)", col.Size)
 		}
-		if col.Name == pkColumn {
+		switch {
+		case col.Deleted:
+			// Tombstone marker persisted in DDL so schema round-trips correctly.
+			sb.WriteString(" dropped")
+		case col.Name == pkColumn:
 			sb.WriteString(" primary key")
 			if s.PrimaryKey.Autoincrement {
 				sb.WriteString(" autoincrement")
 			}
-		} else {
+		default:
 			if !col.Nullable {
 				sb.WriteString(" not null")
 			}

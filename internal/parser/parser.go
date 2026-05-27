@@ -43,6 +43,7 @@ var reservedWords = []string{
 	// statement types
 	"EXPLAIN ANALYZE", "EXPLAIN",
 	"CREATE TABLE", "DROP TABLE", "CREATE FULLTEXT INDEX", "CREATE INVERTED INDEX", "CREATE INDEX", "DROP INDEX",
+	"ALTER TABLE", "ADD COLUMN", "DROP COLUMN", "RENAME COLUMN", "RENAME TO", "DROPPED",
 	"SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
 	"*", "COUNT(*)", "SUM(", "AVG(", "MIN(", "MAX(", "GROUP BY", "HAVING", "ORDER BY", "LIMIT", "OFFSET",
@@ -163,6 +164,18 @@ const (
 	stepWithCTEName
 	stepWithCTEAs
 	stepWithCTECommaOrSelect
+	// ALTER TABLE parsing steps
+	stepAlterTableName
+	stepAlterTableAction
+	stepAlterTableAddColumnName
+	stepAlterTableAddColumnType
+	stepAlterTableAddColumnVarcharLen
+	stepAlterTableAddColumnConstraints
+	stepAlterTableDropColumnName
+	stepAlterTableRenameColumnOldName
+	stepAlterTableRenameColumnTo
+	stepAlterTableRenameColumnNewName
+	stepAlterTableRenameTo
 	stepStatementEnd
 )
 
@@ -237,6 +250,10 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 				p.Kind = minisql.DropIndex
 				p.pop()
 				p.step = stepDropIndexName
+			case "ALTER TABLE":
+				p.Kind = minisql.AlterTable
+				p.pop()
+				p.step = stepAlterTableName
 			case "WITH":
 				p.pop()
 				p.step = stepWithCTEName
@@ -340,6 +357,23 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 		//------------------
 		case stepDropIndexName:
 			if err := p.doParseDropIndex(); err != nil {
+				return statements, err
+			}
+		// -----------------
+		// ALTER TABLE
+		//------------------
+		case stepAlterTableName,
+			stepAlterTableAction,
+			stepAlterTableAddColumnName,
+			stepAlterTableAddColumnType,
+			stepAlterTableAddColumnVarcharLen,
+			stepAlterTableAddColumnConstraints,
+			stepAlterTableDropColumnName,
+			stepAlterTableRenameColumnOldName,
+			stepAlterTableRenameColumnTo,
+			stepAlterTableRenameColumnNewName,
+			stepAlterTableRenameTo:
+			if err := p.doParseAlterTable(); err != nil {
 				return statements, err
 			}
 		// -----------------

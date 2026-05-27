@@ -8,6 +8,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// makeTestCell builds a Cell with the correct TypeCodes for test use.
+// Production code uses cursor.saveToCell; this helper keeps tests concise.
+func makeTestCell(key RowID, nullBitmask uint64, value []byte, columns []Column) Cell {
+	return Cell{
+		Key:         key,
+		NullBitmask: nullBitmask,
+		Value:       value,
+		TypeCodes:   TypeCodesFromColumns(columns),
+		ColumnCount: uint8(len(columns)),
+	}
+}
+
 func TestRowView_ValueAt(t *testing.T) {
 	t.Parallel()
 
@@ -17,11 +29,7 @@ func TestRowView_ValueAt(t *testing.T) {
 	data, err := row.Marshal()
 	require.NoError(t, err)
 
-	view := NewRowView(row.Columns, Cell{
-		Key:         row.Key,
-		NullBitmask: row.NullBitmask(),
-		Value:       data,
-	})
+	view := NewRowView(row.Columns, makeTestCell(row.Key, row.NullBitmask(), data, row.Columns))
 
 	assert.Equal(t, row.Key, view.Key())
 	assert.Equal(t, row.Columns, view.Columns())
@@ -41,10 +49,7 @@ func TestRowView_NamedAndNullAccessors(t *testing.T) {
 	data, err := row.Marshal()
 	require.NoError(t, err)
 
-	view := NewRowView(row.Columns, Cell{
-		NullBitmask: row.NullBitmask(),
-		Value:       data,
-	})
+	view := NewRowView(row.Columns, makeTestCell(0, row.NullBitmask(), data, row.Columns))
 
 	isNull, err := view.IsNull(2)
 	require.NoError(t, err)
@@ -67,10 +72,7 @@ func TestRowView_TypedAccessors(t *testing.T) {
 	data, err := row.Marshal()
 	require.NoError(t, err)
 
-	view := NewRowView(row.Columns, Cell{
-		NullBitmask: row.NullBitmask(),
-		Value:       data,
-	})
+	view := NewRowView(row.Columns, makeTestCell(0, row.NullBitmask(), data, row.Columns))
 
 	gotID, ok, err := view.Int64At(0)
 	require.NoError(t, err)
@@ -109,10 +111,7 @@ func TestRowView_UUIDAt(t *testing.T) {
 	data, err := row.Marshal()
 	require.NoError(t, err)
 
-	view := NewRowView(row.Columns, Cell{
-		NullBitmask: row.NullBitmask(),
-		Value:       data,
-	})
+	view := NewRowView(row.Columns, makeTestCell(0, row.NullBitmask(), data, row.Columns))
 
 	got, ok, err := view.UUIDAt(0)
 	require.NoError(t, err)
@@ -130,10 +129,7 @@ func TestRowView_OverflowAwareAccessors(t *testing.T) {
 	data, err := row.Marshal()
 	require.NoError(t, err)
 
-	view := NewRowView(row.Columns, Cell{
-		NullBitmask: row.NullBitmask(),
-		Value:       data,
-	})
+	view := NewRowView(row.Columns, makeTestCell(0, row.NullBitmask(), data, row.Columns))
 
 	value, err := view.ValueAtWithOverflow(context.Background(), nil, 0)
 	require.NoError(t, err)
@@ -163,10 +159,7 @@ func TestRowView_OverflowAwareAccessorsRequirePagerForOverflow(t *testing.T) {
 	data, err := row.Marshal()
 	require.NoError(t, err)
 
-	view := NewRowView(row.Columns, Cell{
-		NullBitmask: row.NullBitmask(),
-		Value:       data,
-	})
+	view := NewRowView(row.Columns, makeTestCell(0, row.NullBitmask(), data, row.Columns))
 
 	_, err = view.ValueAtWithOverflow(context.Background(), nil, 0)
 	require.Error(t, err)
@@ -187,11 +180,7 @@ func TestRowView_Materialize(t *testing.T) {
 	data, err := row.Marshal()
 	require.NoError(t, err)
 
-	view := NewRowView(row.Columns, Cell{
-		Key:         7,
-		NullBitmask: row.NullBitmask(),
-		Value:       data,
-	})
+	view := NewRowView(row.Columns, makeTestCell(7, row.NullBitmask(), data, row.Columns))
 	mask := selectedColumnsMask(row.Columns, []Field{
 		{Name: row.Columns[0].Name},
 		{Name: row.Columns[1].Name},
@@ -217,10 +206,7 @@ func TestRowView_CheckOneOrMoreWithColumnIndexes(t *testing.T) {
 	data, err := row.Marshal()
 	require.NoError(t, err)
 
-	view := NewRowView(row.Columns, Cell{
-		NullBitmask: row.NullBitmask(),
-		Value:       data,
-	})
+	view := NewRowView(row.Columns, makeTestCell(0, row.NullBitmask(), data, row.Columns))
 	columnIndexes := make(map[string]int, len(row.Columns))
 	for i, col := range row.Columns {
 		columnIndexes[col.Name] = i
@@ -254,10 +240,7 @@ func TestRowView_CheckOneOrMoreWithColumnIndexes_Null(t *testing.T) {
 	data, err := row.Marshal()
 	require.NoError(t, err)
 
-	view := NewRowView(row.Columns, Cell{
-		NullBitmask: row.NullBitmask(),
-		Value:       data,
-	})
+	view := NewRowView(row.Columns, makeTestCell(0, row.NullBitmask(), data, row.Columns))
 	columnIndexes := map[string]int{"age": 2}
 
 	ok, err := view.CheckOneOrMoreWithColumnIndexes(

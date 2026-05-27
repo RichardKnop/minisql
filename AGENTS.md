@@ -99,6 +99,8 @@ MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLi
 │   │   │
 │   │   │  ── Types & Values ──
 │   │   ├── row.go                # Row struct + OptionalValue + marshal/unmarshal
+│   │   ├── row_view.go           # RowView: zero-copy lazy decoder over a raw Cell buffer
+│   │   ├── type_code.go          # TypeCode: one-byte per-column on-disk tag; TypeCodesFromColumns
 │   │   ├── cursor.go             # Row cursor for B+ tree leaf traversal
 │   │   ├── text_pointer.go       # TextPointer: inline (≤255B) vs overflow-page TEXT/JSON
 │   │   ├── timestamp.go          # TimestampMicros: microseconds since 2000-01-01 UTC
@@ -669,6 +671,29 @@ When adding filtering/transformation stages, insert them as goroutines between `
 
 ---
 
+### Self-describing cell format
+
+Every B+ tree leaf cell is self-describing. The on-disk layout is:
+
+```
+[8B NullBitmask] [8B Key] [1B ColumnCount] [ColumnCount TypeCode bytes] [packed values]
+```
+
+- `TypeCode` (one byte per column, declared in `type_code.go`) encodes the on-disk type independently of the current schema.
+- `ColumnCount = 0` means no TypeCodes are present (treated as an all-null / empty row by `RowView`).
+- `Cell.Unmarshal` is schema-free: it uses TypeCodes to compute byte widths without consulting the table schema.
+- `TypeCodesFromColumns(columns []Column) []byte` builds the TypeCode slice for a column list; deleted columns get `TypeCodeNull`.
+- **Lazy ADD COLUMN**: rows written before a column was added have `ColumnCount < len(schema.Columns)`; `RowView` returns the column default without touching storage.
+- **Tombstone DROP COLUMN**: `Column.Deleted = true` in the schema; old rows still carry real bytes at that position (TypeCode tells the decoder how to skip them); new rows write `TypeCodeNull` (0 bytes).
+
+In tests, always populate `Cell.TypeCodes` and `Cell.ColumnCount`:
+- Within `package minisql`: use `makeTestCell(key, nullBitmask, data, columns)`.
+- From external packages (e.g., `package minisql_test`): set `TypeCodes: minisql.TypeCodesFromColumns(cols)` and `ColumnCount: uint8(len(cols))` inline.
+
+See `agent-os/standards/storage-engine/page-layout.md` for the full TypeCode table and format rules.
+
+---
+
 ### Text storage
 
 - `TextPointer` wraps `[]byte`. Always use `TextPointer.String()` for logical comparison; never compare `TextPointer.Data` bytes directly (inline vs overflow representations differ).
@@ -740,7 +765,6 @@ Parser files mirror engine files: `parser/select.go` ↔ `internal/minisql/selec
 - **Single connection enforced** — `Driver.Open` returns `ErrDatabaseAlreadyOpen` when a second `sql.Open` targets the same file path (enforced by a per-file lock map in the driver). Multiple in-process connections to the same file would corrupt the page cache.
 - **No `database/sql` connection pooling** — always `db.SetMaxOpenConns(1)` / `db.SetMaxIdleConns(1)`.
 - **No savepoints** — `SAVEPOINT` / `ROLLBACK TO SAVEPOINT` are not yet implemented.
-- **No window functions** — `RANK()`, `ROW_NUMBER()`, `SUM() OVER`, `LAG()`, etc. are not yet implemented.
 - **No ALTER TABLE** — schema evolution requires CREATE + INSERT SELECT + DROP + RENAME.
 - **No hash indexes** — all indexes use B+ tree; O(1) hash equality lookups are not yet implemented.
 - **Multi-column `ORDER BY` index optimisation** — requires all directions to be uniform (all ASC or all DESC) and the composite index column order to match exactly. Mixed ASC/DESC falls back to in-memory sort.

@@ -166,7 +166,7 @@ PRAGMA parallel_scan = off;
 
 ## Storage
 
-Each page size is `4096 bytes`. Rows larger than page size are not supported. Therefore, the largest allowed inline row size is `4065 bytes` (with exception of root page 0 which has first 100 bytes reserved for config). Variable text colums can use overflow pages and are not limited by page size.
+Each page size is `4096 bytes`. Rows larger than page size are not supported. Therefore, the largest allowed inline row size is `4065 bytes` (with exception of root page 0 which has first 100 bytes reserved for config). Variable text columns can use overflow pages and are not limited by page size.
 
 ```
 4096 (page size) 
@@ -179,9 +179,22 @@ Each page size is `4096 bytes`. Rows larger than page size are not supported. Th
 
 All tables are kept track of via a system table `minisql_schema` which contains table name, `CREATE TABLE` SQL to document table structure and a root page index indicating which page contains root node of the table B+ Tree.
 
-Each row has an internal row ID which is an unsigned 64 bit integer starting at 0. These are used as keys in B+ Tree data structure. 
+Each row has an internal row ID which is an unsigned 64 bit integer starting at 0. These are used as keys in B+ Tree data structure.
 
 Moreover, each row starts with 64 bit null mask which determines which values are NULL. Because of the NULL bit mask being an unsigned 64 bit integer, there is a limit of `maximum 64 columns per table`.
+
+### Self-describing cell format
+
+Every B+ tree leaf cell is self-describing. The on-disk layout is:
+
+```
+[8B NullBitmask] [8B Key] [1B ColumnCount] [N TypeCode bytes] [packed values]
+```
+
+Each cell stores a one-byte `ColumnCount` followed by `ColumnCount` type-code bytes (one per column). The type code encodes the on-disk width for each column independently of the current schema. This makes cells self-describing in two ways:
+
+- **Lazy ADD COLUMN**: rows written before a column was added carry a smaller `ColumnCount`. Readers return the column's default value for positions beyond `ColumnCount` — no B+ tree rebuild required.
+- **Tombstone DROP COLUMN**: the schema marks a column `Deleted = true`. Old rows still carry real bytes at the dropped position; the type code tells the decoder how many bytes to skip. New rows written after the DROP carry a zero-width `TypeCodeNull` placeholder — also no rebuild required.
 
 ### Storage Data Structures
 
@@ -573,6 +586,7 @@ rows.Scan(&owner)
 | `NULL` and `NOT NULL` | Via null bit mask included in each row/cell |
 | `DEFAULT` | Supported for all columns, including `NOW()` for `TIMESTAMP` |
 | `DROP TABLE` | |
+| `ALTER TABLE` | `ADD COLUMN`, `DROP COLUMN`, `RENAME COLUMN … TO`, `RENAME TO`. See [ALTER TABLE](#alter-table). |
 | `CREATE INDEX`, `DROP INDEX` | Secondary non-unique indexes; primary and unique indexes are declared as part of `CREATE TABLE`. Supports composite (multi-column), partial (`WHERE` clause), and expression indexes. See [Indexes](#indexes). |
 | `INSERT` | Single row or multiple rows via a tuple of values separated by commas |
 | `ON CONFLICT` | Both `DO NOTHING` and `DO UPDATE` supported (with `EXCLUDED` pseudo table syntax for updating) |
@@ -759,6 +773,51 @@ _, err := db.Exec(`create table "users" (
 
 ```go
 _, err := db.Exec(`drop table "users";`)
+```
+
+### ALTER TABLE
+
+MiniSQL supports four `ALTER TABLE` operations. All changes are persisted to the schema and survive a database reopen.
+
+#### Add a column
+
+Appends a new column to the table schema. Existing rows are not rewritten on disk — the lazy ADD COLUMN mechanism returns the column's default value (or `NULL` for columns without a default) when an old row is read.
+
+```sql
+-- Nullable column — existing rows return NULL.
+ALTER TABLE users ADD COLUMN score INT4;
+
+-- NOT NULL with a default — existing rows return the default value.
+ALTER TABLE users ADD COLUMN active BOOLEAN NOT NULL DEFAULT true;
+
+-- VARCHAR column.
+ALTER TABLE users ADD COLUMN nickname VARCHAR(64);
+```
+
+Primary-key columns and columns whose name already exists in the table are rejected.
+
+#### Drop a column
+
+Marks a column as deleted (tombstone). The column bytes are not removed from existing rows but are skipped during reads. New rows write zero bytes for the dropped slot. Primary-key columns and columns referenced by an index or foreign key cannot be dropped.
+
+```sql
+ALTER TABLE users DROP COLUMN internal_note;
+```
+
+#### Rename a column
+
+Updates the column name in the schema without touching stored row data.
+
+```sql
+ALTER TABLE users RENAME COLUMN nm TO full_name;
+```
+
+#### Rename a table
+
+Renames the table and updates all associated index and foreign-key schema entries.
+
+```sql
+ALTER TABLE users RENAME TO members;
 ```
 
 ### Indexes

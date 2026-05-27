@@ -7,28 +7,29 @@ import (
 	"testing"
 	"time"
 
-	internalminisql "github.com/RichardKnop/minisql/internal/minisql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/RichardKnop/minisql/internal/minisql"
 )
 
 func TestRowsColumnsCloseAndNext(t *testing.T) {
 	t.Parallel()
 
-	columns := []internalminisql.Column{
-		{Name: "id", Kind: internalminisql.Int8, Size: 8},
-		{Name: "name", Kind: internalminisql.Varchar, Size: internalminisql.MaxInlineVarchar},
-		{Name: "created", Kind: internalminisql.Timestamp, Size: 8},
-		{Name: "nullable", Kind: internalminisql.Varchar, Size: internalminisql.MaxInlineVarchar},
+	columns := []minisql.Column{
+		{Name: "id", Kind: minisql.Int8, Size: 8},
+		{Name: "name", Kind: minisql.Varchar, Size: minisql.MaxInlineVarchar},
+		{Name: "created", Kind: minisql.Timestamp, Size: 8},
+		{Name: "nullable", Kind: minisql.Varchar, Size: minisql.MaxInlineVarchar},
 	}
-	ts := internalminisql.MustParseTimestampMicros("2024-06-15 12:34:56.123456")
+	ts := minisql.MustParseTimestampMicros("2024-06-15 12:34:56.123456")
 	rows := Rows{
 		columns: columns,
-		iter: internalminisql.NewSliceIterator([]internalminisql.Row{
-			internalminisql.NewRowWithValues(columns, []internalminisql.OptionalValue{
+		iter: minisql.NewSliceIterator([]minisql.Row{
+			minisql.NewRowWithValues(columns, []minisql.OptionalValue{
 				{Valid: true, Value: int64(1)},
-				{Valid: true, Value: internalminisql.NewTextPointer([]byte("alice"))},
-				{Valid: true, Value: internalminisql.TimestampMicros(ts)},
+				{Valid: true, Value: minisql.NewTextPointer([]byte("alice"))},
+				{Valid: true, Value: minisql.TimestampMicros(ts)},
 				{},
 			}),
 		}),
@@ -53,9 +54,9 @@ func TestRowsNextReturnsIteratorError(t *testing.T) {
 
 	wantErr := assert.AnError
 	rows := Rows{
-		columns: []internalminisql.Column{{Name: "id", Kind: internalminisql.Int8}},
-		iter: internalminisql.NewIterator(func(context.Context) (internalminisql.Row, error) {
-			return internalminisql.Row{}, wantErr
+		columns: []minisql.Column{{Name: "id", Kind: minisql.Int8}},
+		iter: minisql.NewIterator(func(context.Context) (minisql.Row, error) {
+			return minisql.Row{}, wantErr
 		}),
 		ctx: context.Background(),
 	}
@@ -67,11 +68,11 @@ func TestRowsNextReturnsIteratorError(t *testing.T) {
 func TestRowsNextValidatesDestinationWidth(t *testing.T) {
 	t.Parallel()
 
-	columns := []internalminisql.Column{{Name: "id", Kind: internalminisql.Int8}}
+	columns := []minisql.Column{{Name: "id", Kind: minisql.Int8}}
 	rows := Rows{
 		columns: columns,
-		iter: internalminisql.NewSliceIterator([]internalminisql.Row{
-			internalminisql.NewRowWithValues(columns, []internalminisql.OptionalValue{
+		iter: minisql.NewSliceIterator([]minisql.Row{
+			minisql.NewRowWithValues(columns, []minisql.OptionalValue{
 				{Valid: true, Value: int64(1)},
 			}),
 		}),
@@ -86,17 +87,17 @@ func TestRowsNextValidatesDestinationWidth(t *testing.T) {
 func TestRowsNextUsesRowViews(t *testing.T) {
 	t.Parallel()
 
-	columns := []internalminisql.Column{
-		{Name: "id", Kind: internalminisql.Int8, Size: 8},
-		{Name: "name", Kind: internalminisql.Varchar, Size: internalminisql.MaxInlineVarchar},
-		{Name: "created", Kind: internalminisql.Timestamp, Size: 8},
-		{Name: "nullable", Kind: internalminisql.Varchar, Size: internalminisql.MaxInlineVarchar},
+	columns := []minisql.Column{
+		{Name: "id", Kind: minisql.Int8, Size: 8},
+		{Name: "name", Kind: minisql.Varchar, Size: minisql.MaxInlineVarchar},
+		{Name: "created", Kind: minisql.Timestamp, Size: 8},
+		{Name: "nullable", Kind: minisql.Varchar, Size: minisql.MaxInlineVarchar},
 	}
-	ts := internalminisql.MustParseTimestampMicros("2024-06-15 12:34:56.123456")
-	row := internalminisql.NewRowWithValues(columns, []internalminisql.OptionalValue{
+	ts := minisql.MustParseTimestampMicros("2024-06-15 12:34:56.123456")
+	row := minisql.NewRowWithValues(columns, []minisql.OptionalValue{
 		{Valid: true, Value: int64(1)},
-		{Valid: true, Value: internalminisql.NewTextPointer([]byte("alice"))},
-		{Valid: true, Value: internalminisql.TimestampMicros(ts)},
+		{Valid: true, Value: minisql.NewTextPointer([]byte("alice"))},
+		{Valid: true, Value: minisql.TimestampMicros(ts)},
 		{},
 	})
 	data, err := row.Marshal()
@@ -105,10 +106,12 @@ func TestRowsNextUsesRowViews(t *testing.T) {
 	rows := Rows{
 		columns:             columns,
 		rowViewFieldIndexes: []int{0, 1, 2, 3},
-		rowViewIter: internalminisql.NewSliceRowViewIterator([]internalminisql.RowView{
-			internalminisql.NewRowView(columns, internalminisql.Cell{
+		rowViewIter: minisql.NewSliceRowViewIterator([]minisql.RowView{
+			minisql.NewRowView(columns, minisql.Cell{
 				Value:       data,
 				NullBitmask: row.NullBitmask(),
+				TypeCodes:   minisql.TypeCodesFromColumns(columns),
+				ColumnCount: uint8(len(columns)),
 			}),
 		}),
 		ctx:         context.Background(),

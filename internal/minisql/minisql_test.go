@@ -111,10 +111,12 @@ var (
 			},
 		},
 		int((PageSize-uint32(RootPageConfigSize)-
-			7- // base header
-			8- // leaf header
-			5*8- // 5 keys
-			5*8- // 5 null bitmasks
+			7-          // base header
+			8-          // leaf header
+			5*8-        // 5 keys
+			5*8-        // 5 null bitmasks
+			5*1-        // 5 ColumnCount bytes (self-describing cell format)
+			5*8-        // 5×8 TypeCode bytes (8 columns: 6 base + 2 varchars, self-consistent)
 			5*mediumRowBaseSize)/5),
 	)
 
@@ -161,10 +163,12 @@ var (
 			},
 		},
 		int((PageSize - uint32(RootPageConfigSize) -
-			7 - // base header
-			8 - // leaf header
-			8 - // 5 keys
-			8 - // 5 null bitmasks
+			7 -  // base header
+			8 -  // leaf header
+			8 -  // 1 key
+			8 -  // 1 null bitmask
+			1 -  // 1 ColumnCount byte (self-describing cell format)
+			21 - // 21 TypeCode bytes (21 columns: 6 base + 15 varchars, self-consistent)
 			bigRowBaseSize)),
 	)
 
@@ -705,14 +709,18 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				},
 				Cells: []Cell{
 					{
-						Key:     1,
-						Value:   prefixWithLength([]byte("ccc")),
-						isOwned: true,
+						Key:         1,
+						Value:       prefixWithLength([]byte("ccc")),
+						TypeCodes:   []byte{byte(TypeCodeText)},
+						ColumnCount: 1,
+						isOwned:     true,
 					},
 					{
-						Key:     2,
-						Value:   prefixWithLength([]byte("ddd")),
-						isOwned: true,
+						Key:         2,
+						Value:       prefixWithLength([]byte("ddd")),
+						TypeCodes:   []byte{byte(TypeCodeText)},
+						ColumnCount: 1,
+						isOwned:     true,
 					},
 				},
 			},
@@ -731,9 +739,11 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				},
 				Cells: []Cell{
 					{
-						Key:     5,
-						Value:   prefixWithLength([]byte("aaa")),
-						isOwned: true,
+						Key:         5,
+						Value:       prefixWithLength([]byte("aaa")),
+						TypeCodes:   []byte{byte(TypeCodeText)},
+						ColumnCount: 1,
+						isOwned:     true,
 					},
 				},
 			},
@@ -752,14 +762,18 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				},
 				Cells: []Cell{
 					{
-						Key:     12,
-						Value:   prefixWithLength([]byte("bbb")),
-						isOwned: true,
+						Key:         12,
+						Value:       prefixWithLength([]byte("bbb")),
+						TypeCodes:   []byte{byte(TypeCodeText)},
+						ColumnCount: 1,
+						isOwned:     true,
 					},
 					{
-						Key:     18,
-						Value:   prefixWithLength([]byte("fff")),
-						isOwned: true,
+						Key:         18,
+						Value:       prefixWithLength([]byte("fff")),
+						TypeCodes:   []byte{byte(TypeCodeText)},
+						ColumnCount: 1,
+						isOwned:     true,
 					},
 				},
 			},
@@ -777,9 +791,11 @@ func newTestBtree() (*Page, []*Page, []*Page) {
 				},
 				Cells: []Cell{
 					{
-						Key:     21,
-						Value:   prefixWithLength([]byte("ggg")),
-						isOwned: true,
+						Key:         21,
+						Value:       prefixWithLength([]byte("ggg")),
+						TypeCodes:   []byte{byte(TypeCodeText)},
+						ColumnCount: 1,
+						isOwned:     true,
 					},
 				},
 			},

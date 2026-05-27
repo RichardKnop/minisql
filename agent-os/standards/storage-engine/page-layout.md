@@ -50,3 +50,52 @@ Rules:
 ## Usable space
 
 `UsablePageSize = 4096 - 7 - 8 - 8 - 8` — page size minus base header, node header, key, and null bitmask overhead.
+
+## Self-describing cell format (leaf nodes)
+
+Every leaf cell is self-describing: it encodes its own column count and per-column type codes so the decoder never needs the table schema to parse byte widths. The on-disk layout for a single cell is:
+
+```
+[8 bytes NullBitmask] [8 bytes Key] [1 byte ColumnCount] [ColumnCount bytes TypeCodes] [packed values]
+```
+
+| Field | Size | Notes |
+|---|---:|---|
+| `NullBitmask` | 8 | Bit N=1 means column N is NULL (no value bytes written for it) |
+| `Key` | 8 | Internal row ID (B+ tree key) |
+| `ColumnCount` | 1 | Number of TypeCode bytes that follow; 0 means no TypeCodes (legacy/empty) |
+| `TypeCodes[0..N-1]` | N | One `TypeCode` byte per column (see table below) |
+| packed values | variable | Each column's value bytes, in order; NULLs and `TypeCodeNull` slots consume 0 bytes |
+
+### TypeCode values
+
+| Constant | Value | Byte width | Notes |
+|---|---:|---:|---|
+| `TypeCodeNull` | 0 | 0 | Dropped-column placeholder; occupies no bytes in the value area |
+| `TypeCodeBool` | 1 | 1 | |
+| `TypeCodeInt4` | 2 | 4 | |
+| `TypeCodeInt8` | 3 | 8 | |
+| `TypeCodeReal` | 4 | 4 | |
+| `TypeCodeDouble` | 5 | 8 | |
+| `TypeCodeTimestamp` | 6 | 8 | Microseconds since 2000-01-01 UTC |
+| `TypeCodeUUID` | 7 | 16 | Fixed 16-byte UUID |
+| `TypeCodeText` | 8 | 4 + N | 4-byte length prefix then data; covers VARCHAR, TEXT, JSON |
+
+### Lazy ADD COLUMN
+
+When a row was written before a column was added to the schema, `cell.ColumnCount < len(schema.Columns)`. A `RowView` returns the column's declared `Default` value for positions ≥ `ColumnCount`. The B+ tree is **never rewritten** — zero migration cost.
+
+### Tombstone DROP COLUMN
+
+When a column is marked `Deleted = true` in the schema:
+
+- **Old rows** (written before the DROP): still contain real bytes at the dropped position. The `TypeCode` at that position tells the decoder how many bytes to skip, so decoding remains correct without the schema.
+- **New rows** (written after the DROP): write `TypeCodeNull` at the dropped position (0 bytes) and set the corresponding `NullBitmask` bit.
+
+This means DROP COLUMN is also a zero-rebuild operation at the storage level.
+
+### Rules
+
+- When constructing a `Cell` in tests, always set both `TypeCodes` and `ColumnCount` — an empty/nil `TypeCodes` with `ColumnCount = 0` makes `RowView` treat every column as lazily-added (all NULLs). Use the `makeTestCell(key, nullBitmask, data, columns)` helper (package `minisql`) or populate inline for external packages.
+- `TypeCodesFromColumns(columns []Column)` builds the correct `[]byte` for a column list; deleted columns get `TypeCodeNull`.
+- `Cell.Unmarshal` produces `nil` TypeCodes (not `[]byte{}`) when `ColumnCount == 0` to preserve round-trip equality with zero-value `Cell{}` structs.

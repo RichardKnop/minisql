@@ -17,11 +17,18 @@ import (
 // For combined join views, inner != nil and splitIdx separates outer columns
 // (indexes 0..splitIdx-1) from inner columns (indexes splitIdx..N-1).
 // All typed accessors transparently route inner-column reads through inner.
+//
+// typeCodes and columnCount come from the underlying Cell and drive byte-offset
+// calculation independently of the current schema (self-describing format).
+// When idx >= columnCount the column was added after this row was written;
+// ValueAt returns the schema default for that position (lazy ADD COLUMN).
 type RowView struct {
 	columns     []Column
 	value       []byte
+	typeCodes   []byte // Cell.TypeCodes
 	nullBitmask uint64
 	key         RowID
+	columnCount int     // Cell.ColumnCount; columns beyond this are lazily added
 	inner       *RowView // non-nil for combined join views; routes inner-column reads
 	innerPager  TxPager  // pager for inner table (overflow text in inner columns)
 	splitIdx    int      // outer column count; columns[splitIdx:] belong to inner
@@ -33,6 +40,8 @@ func NewRowView(columns []Column, cell Cell) RowView {
 	return RowView{
 		columns:     columns,
 		value:       cell.Value,
+		typeCodes:   cell.TypeCodes,
+		columnCount: int(cell.ColumnCount),
 		nullBitmask: cell.NullBitmask,
 		key:         cell.Key,
 	}
@@ -48,6 +57,8 @@ func NewCombinedRowView(combinedCols []Column, outerView RowView, innerView *Row
 	return RowView{
 		columns:     combinedCols,
 		value:       outerView.value,
+		typeCodes:   outerView.typeCodes,
+		columnCount: outerView.columnCount,
 		nullBitmask: outerView.nullBitmask,
 		key:         outerView.key,
 		inner:       innerView,
@@ -68,6 +79,8 @@ func (rv RowView) Columns() []Column {
 }
 
 // IsNull reports whether column idx is SQL NULL.
+// Returns true for lazily-added columns (idx >= columnCount) and for
+// tombstoned columns (col.Deleted == true).
 func (rv RowView) IsNull(idx int) (bool, error) {
 	if rv.splitIdx > 0 && idx >= rv.splitIdx {
 		if rv.innerIsNull {
@@ -77,6 +90,14 @@ func (rv RowView) IsNull(idx int) (bool, error) {
 	}
 	if idx < 0 || idx >= len(rv.columns) {
 		return false, fmt.Errorf("column index %d out of bounds", idx)
+	}
+	// Column added after this row was written → NULL unless a default is set.
+	if idx >= rv.columnCount {
+		return !rv.columns[idx].DefaultValue.Valid, nil
+	}
+	// Tombstoned column → treat as NULL.
+	if rv.columns[idx].Deleted {
+		return true, nil
 	}
 	return bitwise.IsSet(rv.nullBitmask, idx), nil
 }
@@ -110,6 +131,18 @@ func (rv RowView) ValueAt(idx int) (OptionalValue, error) {
 	}
 	if idx < 0 || idx >= len(rv.columns) {
 		return OptionalValue{}, fmt.Errorf("column index %d out of bounds", idx)
+	}
+	// Lazy ADD COLUMN: column was added after this row was written.
+	if idx >= rv.columnCount {
+		col := rv.columns[idx]
+		if col.DefaultValue.Valid {
+			return coerceDefaultToColumnKind(col), nil
+		}
+		return OptionalValue{}, nil
+	}
+	// Tombstone DROP COLUMN: column is logically deleted.
+	if rv.columns[idx].Deleted {
+		return OptionalValue{}, nil
 	}
 	isNull, err := rv.IsNull(idx)
 	if err != nil {
@@ -198,6 +231,13 @@ func (rv RowView) BoolAt(idx int) (bool, bool, error) {
 	if null, err := rv.IsNull(idx); err != nil || null {
 		return false, false, err
 	}
+	if idx >= rv.columnCount {
+		dv := coerceDefaultToColumnKind(rv.columns[idx])
+		if b, ok := dv.Value.(bool); ok {
+			return b, dv.Valid, nil
+		}
+		return false, false, nil
+	}
 	if err := rv.requireKind(idx, Boolean); err != nil {
 		return false, false, err
 	}
@@ -218,6 +258,17 @@ func (rv RowView) Int64At(idx int) (int64, bool, error) {
 	}
 	if null, err := rv.IsNull(idx); err != nil || null {
 		return 0, false, err
+	}
+	// Lazy ADD COLUMN with default: no bytes in this row for this column.
+	if idx >= rv.columnCount {
+		dv := coerceDefaultToColumnKind(rv.columns[idx])
+		switch n := dv.Value.(type) {
+		case int32:
+			return int64(n), dv.Valid, nil
+		case int64:
+			return n, dv.Valid, nil
+		}
+		return 0, false, nil
 	}
 	col := rv.columns[idx]
 	if col.Kind != Int4 && col.Kind != Int8 && col.Kind != Timestamp {
@@ -243,6 +294,16 @@ func (rv RowView) Float64At(idx int) (float64, bool, error) {
 	}
 	if null, err := rv.IsNull(idx); err != nil || null {
 		return 0, false, err
+	}
+	if idx >= rv.columnCount {
+		dv := coerceDefaultToColumnKind(rv.columns[idx])
+		switch n := dv.Value.(type) {
+		case float32:
+			return float64(n), dv.Valid, nil
+		case float64:
+			return n, dv.Valid, nil
+		}
+		return 0, false, nil
 	}
 	col := rv.columns[idx]
 	if col.Kind != Real && col.Kind != Double {
@@ -271,6 +332,13 @@ func (rv RowView) TextAt(idx int) (TextPointer, error) {
 	}
 	if idx < 0 || idx >= len(rv.columns) {
 		return TextPointer{}, fmt.Errorf("column index %d out of bounds", idx)
+	}
+	if idx >= rv.columnCount {
+		dv := coerceDefaultToColumnKind(rv.columns[idx])
+		if tp, ok := dv.Value.(TextPointer); ok {
+			return tp, nil
+		}
+		return TextPointer{}, nil
 	}
 	col := rv.columns[idx]
 	if !col.Kind.IsText() {
@@ -390,17 +458,32 @@ func (rv RowView) requireKind(idx int, kind ColumnKind) error {
 	return nil
 }
 
+// offsetOf computes the byte offset within rv.value where column targetIdx starts.
+// It uses the cell's TypeCodes (self-describing format) rather than the schema,
+// so it works correctly for rows written with an older or newer schema version.
+// Columns beyond rv.columnCount contribute 0 bytes (lazy ADD COLUMN).
 func (rv RowView) offsetOf(targetIdx int) (int, error) {
 	offset := 0
 	for i := 0; i < targetIdx; i++ {
+		if i >= rv.columnCount {
+			// Column was added after this row; no bytes present.
+			break
+		}
 		if bitwise.IsSet(rv.nullBitmask, i) {
-			continue
+			continue // NULL: no bytes in value area
 		}
-		size, err := encodedColumnSize(rv.columns[i], rv.value, offset)
-		if err != nil {
-			return 0, err
+		tc := TypeCode(rv.typeCodes[i])
+		sz := typeCodeFixedSize(tc)
+		if sz >= 0 {
+			offset += sz
+		} else {
+			// TypeCodeText: 4-byte length prefix + data.
+			if offset+varcharLengthPrefixSize > len(rv.value) {
+				return 0, fmt.Errorf("text column %d offset %d exceeds encoded row length %d", i, offset, len(rv.value))
+			}
+			length := unmarshalUint32(rv.value, uint64(offset))
+			offset += int(TextPointer{Length: length}.Size())
 		}
-		offset += size
 	}
 	if offset > len(rv.value) {
 		return 0, fmt.Errorf("column offset %d exceeds encoded row length %d", offset, len(rv.value))
@@ -408,23 +491,28 @@ func (rv RowView) offsetOf(targetIdx int) (int, error) {
 	return offset, nil
 }
 
-func encodedColumnSize(col Column, data []byte, offset int) (int, error) {
+// coerceDefaultToColumnKind converts a column's DefaultValue to the native Go
+// type expected by the driver for that column kind.  The parser always stores
+// integer defaults as int64; numeric columns narrower than int64 must be
+// narrowed so that database/sql Scan calls work correctly.
+func coerceDefaultToColumnKind(col Column) OptionalValue {
+	v := col.DefaultValue
 	switch col.Kind {
-	case Boolean:
-		return 1, nil
-	case Int4, Real:
-		return 4, nil
-	case Int8, Double, Timestamp:
-		return 8, nil
-	case Varchar, Text, JSON:
-		if offset+varcharLengthPrefixSize > len(data) {
-			return 0, fmt.Errorf("text column %s offset %d exceeds encoded row length %d", col.Name, offset, len(data))
+	case Int4:
+		if i, ok := v.Value.(int64); ok {
+			return OptionalValue{Value: int32(i), Valid: true}
 		}
-		length := unmarshalUint32(data, uint64(offset))
-		return int(TextPointer{Length: length}.Size()), nil
-	case UUID:
-		return 16, nil
-	default:
-		return 0, fmt.Errorf("unsupported column kind %s", col.Kind)
+	case Boolean:
+		if i, ok := v.Value.(int64); ok {
+			return OptionalValue{Value: i != 0, Valid: true}
+		}
+	case Real:
+		switch n := v.Value.(type) {
+		case int64:
+			return OptionalValue{Value: float32(n), Valid: true}
+		case float64:
+			return OptionalValue{Value: float32(n), Valid: true}
+		}
 	}
+	return v
 }

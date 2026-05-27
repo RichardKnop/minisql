@@ -1,6 +1,8 @@
 package minisql
 
 import (
+	"fmt"
+
 	"github.com/RichardKnop/minisql/pkg/bitwise"
 )
 
@@ -48,24 +50,30 @@ func (h *LeafNodeHeader) Unmarshal(buf []byte) (uint64, error) {
 	return h.Size(), nil
 }
 
-// Cell is a single row stored in a leaf B+ tree node. Value is a raw byte slice
-// containing all non-NULL column values packed sequentially; NullBitmask tracks
-// which column positions are NULL. isOwned controls copy-on-write behaviour.
+// Cell is a single row stored in a leaf B+ tree node.
+//
+// On-disk layout (v2 self-describing format):
+//
+//	[8B NullBitmask][8B Key][1B ColumnCount][ColumnCount TypeCode bytes][packed non-NULL values]
+//
+// TypeCodes carries one TypeCode per column as written; together with NullBitmask
+// it fully describes the byte layout without needing the current table schema.
+// ColumnCount < len(schema) signals a row written before ADD COLUMN (lazy migration).
 type Cell struct {
 	Value       []byte
+	TypeCodes   []byte // one TypeCode per column; len == ColumnCount
 	NullBitmask uint64
 	Key         RowID
+	ColumnCount uint8
 	isOwned     bool
 }
 
-// Size returns the serialised byte size of the cell: 8-byte NullBitmask, 8-byte key,
-// plus the length of the packed value slice.
+// Size returns the serialised byte size of the cell.
 func (c *Cell) Size() uint64 {
-	// 8 bytes for null bitmask, 8 bytes for key
-	return 8 + 8 + uint64(len(c.Value))
+	return 8 + 8 + 1 + uint64(c.ColumnCount) + uint64(len(c.Value))
 }
 
-// Marshal serialises the cell into buf: NullBitmask, key, then raw value bytes.
+// Marshal serialises the cell into buf.
 func (c *Cell) Marshal(buf []byte) {
 	i := uint64(0)
 
@@ -75,14 +83,20 @@ func (c *Cell) Marshal(buf []byte) {
 	marshalUint64(buf, uint64(c.Key), i)
 	i += 8
 
-	n := copy(buf[i:], c.Value)
-	i += uint64(n)
+	buf[i] = c.ColumnCount
+	i++
+
+	copy(buf[i:], c.TypeCodes)
+	i += uint64(c.ColumnCount)
+
+	copy(buf[i:], c.Value)
 }
 
-// Unmarshal deserialises a cell from buf using the column schema to determine
-// each field's size. Value is copied into owned memory (isOwned=true) so that
-// the cell does not alias the source buffer, which may be returned to a pool.
-func (c *Cell) Unmarshal(columns []Column, buf []byte) (uint64, error) {
+// Unmarshal deserialises a cell from buf. The cell is self-describing: column
+// widths are determined from the stored TypeCodes, not from an external schema.
+// Value is copied into owned memory so that the cell does not alias the source
+// buffer (WAL frame buffers are pooled and reused across commits).
+func (c *Cell) Unmarshal(buf []byte) (uint64, error) {
 	offset := uint64(0)
 
 	c.NullBitmask = unmarshalUint64(buf, offset)
@@ -91,26 +105,40 @@ func (c *Cell) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	c.Key = RowID(unmarshalUint64(buf, offset))
 	offset += 8
 
-	// Pass 1: Calculate total size needed for all column values
+	c.ColumnCount = buf[offset]
+	offset++
+
+	// Read TypeCodes (nil when ColumnCount == 0 to match uninitialized Cell).
+	if c.ColumnCount > 0 {
+		c.TypeCodes = make([]byte, c.ColumnCount)
+		copy(c.TypeCodes, buf[offset:offset+uint64(c.ColumnCount)])
+		offset += uint64(c.ColumnCount)
+	}
+
+	// Pass 1: calculate total value bytes using TypeCodes + NullBitmask.
 	totalSize := uint64(0)
 	scanOffset := offset
-	for i, col := range columns {
+	for i := 0; i < int(c.ColumnCount); i++ {
 		if bitwise.IsSet(c.NullBitmask, i) {
 			continue
 		}
-		if col.Kind.IsText() {
-			size := unmarshalInt32(buf, scanOffset)
-			totalSize += 4 + uint64(size)
-			scanOffset += 4 + uint64(size)
+		tc := TypeCode(c.TypeCodes[i])
+		sz := typeCodeFixedSize(tc)
+		if sz >= 0 {
+			totalSize += uint64(sz)
+			scanOffset += uint64(sz)
 		} else {
-			totalSize += uint64(col.Size)
-			scanOffset += uint64(col.Size)
+			// TypeCodeText: 4-byte length prefix + data.
+			if scanOffset+4 > uint64(len(buf)) {
+				return 0, fmt.Errorf("cell unmarshal: text column %d offset %d exceeds buffer length %d", i, scanOffset, len(buf))
+			}
+			length := unmarshalInt32(buf, scanOffset)
+			totalSize += 4 + uint64(length)
+			scanOffset += 4 + uint64(length)
 		}
 	}
 
-	// Pass 2: Copy value bytes into owned memory. A zero-copy sub-slice would alias
-	// the source buffer (WAL frame buffers are returned to pageDataPool on the next
-	// commit and reused as pageBuf, corrupting any c.Value still pointing into them).
+	// Pass 2: copy value bytes into owned memory.
 	if totalSize > 0 {
 		c.Value = make([]byte, totalSize)
 		copy(c.Value, buf[offset:offset+totalSize])
@@ -141,14 +169,16 @@ func (n *LeafNode) Clone() *LeafNode {
 		return nodeCopy
 	}
 
-	// Shallow copy - share Value slices
+	// Shallow copy - share Value and TypeCodes slices
 	nodeCopy.Cells = make([]Cell, len(n.Cells))
 	for i := range n.Cells {
 		nodeCopy.Cells[i] = Cell{
 			NullBitmask: n.Cells[i].NullBitmask,
 			Key:         n.Cells[i].Key,
-			Value:       n.Cells[i].Value, // Share the slice!
-			isOwned:     false,            // Mark as shared
+			Value:       n.Cells[i].Value,     // Share the slice!
+			TypeCodes:   n.Cells[i].TypeCodes, // Share the slice!
+			ColumnCount: n.Cells[i].ColumnCount,
+			isOwned:     false, // Mark as shared
 		}
 	}
 	return nodeCopy
@@ -171,9 +201,12 @@ func (n *LeafNode) DeepClone() *LeafNode {
 			NullBitmask: n.Cells[i].NullBitmask,
 			Key:         n.Cells[i].Key,
 			Value:       make([]byte, len(n.Cells[i].Value)),
-			isOwned:     true, // Mark as owned
+			TypeCodes:   make([]byte, len(n.Cells[i].TypeCodes)),
+			ColumnCount: n.Cells[i].ColumnCount,
+			isOwned:     true,
 		}
 		copy(nodeCopy.Cells[i].Value, n.Cells[i].Value)
+		copy(nodeCopy.Cells[i].TypeCodes, n.Cells[i].TypeCodes)
 	}
 	return nodeCopy
 }
@@ -231,7 +264,8 @@ func (n *LeafNode) Marshal(buf []byte) error {
 }
 
 // Unmarshal deserialises the leaf node from buf and returns the total bytes consumed.
-func (n *LeafNode) Unmarshal(columns []Column, buf []byte) (uint64, error) {
+// Cells are self-describing (TypeCodes stored per cell) so no schema is needed.
+func (n *LeafNode) Unmarshal(buf []byte) (uint64, error) {
 	i := uint64(0)
 
 	hi, err := n.Header.Unmarshal(buf[i:])
@@ -247,7 +281,7 @@ func (n *LeafNode) Unmarshal(columns []Column, buf []byte) (uint64, error) {
 	}
 
 	for idx := 0; idx < int(n.Header.Cells); idx++ {
-		ci, err := n.Cells[idx].Unmarshal(columns, buf[i:])
+		ci, err := n.Cells[idx].Unmarshal(buf[i:])
 		if err != nil {
 			return 0, err
 		}
@@ -376,9 +410,10 @@ func (n *LeafNode) AvailableSpace() uint64 {
 }
 
 // HasSpaceForRow reports whether the node has enough free space to store the
-// given row (row size + 8-byte key + 8-byte null bitmask).
+// given row.  The cell overhead is: 8B NullBitmask + 8B Key + 1B ColumnCount
+// + 1B per column (TypeCodes) + value bytes.
 func (n *LeafNode) HasSpaceForRow(row Row) bool {
-	return row.Size()+8+8 <= n.AvailableSpace()
+	return row.Size()+8+8+1+uint64(len(row.Columns)) <= n.AvailableSpace()
 }
 
 // AtLeastHalfFull reports whether the node is at least half full by space,

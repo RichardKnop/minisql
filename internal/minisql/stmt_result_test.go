@@ -28,7 +28,7 @@ func TestMaterializeResultRowsUsesRowViews(t *testing.T) {
 			return nil
 		}),
 		RowViews: NewSliceRowViewIterator([]RowView{
-			NewRowView(row.Columns, Cell{Key: row.Key, Value: data}),
+			NewRowView(row.Columns, makeTestCell(row.Key, row.NullBitmask(), data, row.Columns)),
 		}),
 		Columns:             []Column{row.Columns[0], row.Columns[2]},
 		RowViewFieldIndexes: []int{0, 2},
@@ -58,11 +58,7 @@ func TestLazyRowViewMaterializingIteratorOpensOnDemand(t *testing.T) {
 	newIter := func() RowViewIterator {
 		openCount += 1
 		return newRowViewIteratorWithClose(func(ctx context.Context) (RowView, error) {
-			return NewRowView(row.Columns, Cell{
-				Key:         row.Key,
-				Value:       data,
-				NullBitmask: row.NullBitmask(),
-			}), nil
+			return NewRowView(row.Columns, makeTestCell(row.Key, row.NullBitmask(), data, row.Columns)), nil
 		}, func() error {
 			closeCount += 1
 			return nil

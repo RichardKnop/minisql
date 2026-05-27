@@ -52,7 +52,7 @@ func (p *tablePager) unmarshal(totalPages uint32, pageIdx PageIndex, buf []byte)
 	case PageTypeLeaf:
 		// Leaf node
 		leaf := NewLeafNode()
-		_, err := leaf.Unmarshal(p.columns, buf[idx:])
+		_, err := leaf.Unmarshal(buf[idx:])
 		if err != nil {
 			return nil, err
 		}
