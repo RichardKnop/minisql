@@ -431,7 +431,7 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 	}
 
 	// Remove any overflow pages
-	if overflowColumns := textOverflowColumns(c.Table.Columns...); len(overflowColumns) > 0 {
+	if overflowColumns := c.Table.textOverflowCols; len(overflowColumns) > 0 {
 		// TODO - a more efficient implementation would be to try to reuse existing overflow pages
 		// if possible. For example if text size didn't change much and fits into existing overflow pages.
 		changedColumns := make([]Column, 0, len(changedValues))

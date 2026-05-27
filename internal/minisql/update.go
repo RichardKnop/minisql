@@ -26,7 +26,7 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 		ce.Write(zap.String("query type", "UPDATE"), zap.Any("plan", plan))
 	}
 
-	selectedFields := fieldsFromColumns(t.Columns...)
+	selectedFields := t.allFields
 
 	result := StatementResult{
 		Columns: t.Columns,
@@ -168,14 +168,13 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 	}
 
 	if len(stmt.ReturningFields) > 0 {
-		allFields := fieldsFromColumns(t.Columns...)
 		returningRows := make([]Row, 0, len(updatedKeys))
 		for _, key := range updatedKeys {
 			cursor, err := t.Seek(ctx, key)
 			if err != nil {
 				return result, err
 			}
-			row, err := cursor.fetchRow(ctx, false, allFields...)
+			row, err := cursor.fetchRow(ctx, false, t.allFields...)
 			if err != nil {
 				return result, err
 			}

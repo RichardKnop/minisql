@@ -335,7 +335,8 @@ func (t *Table) planQueryUncached(ctx context.Context, stmt Statement) (QueryPla
 
 // indexMatch represents a potential index match for equality conditions
 type indexMatch struct {
-	matchedConditions   map[int]bool
+	matchedConditions   []bool // indexed by condition position within the group
+	numMatched          int    // count of true entries in matchedConditions
 	rangeCondition      *RangeCondition
 	stats               *IndexStats
 	info                IndexInfo
@@ -376,10 +377,8 @@ func (t *Table) findBestEqualityIndexMatch(group Conditions) *indexMatch {
 			}
 
 			// Same selectivity - prefer more matched columns
-			newMatchedCols := len(newMatch.matchedConditions)
-			bestMatchedCols := len(bestMatch.matchedConditions)
-			if newMatchedCols != bestMatchedCols {
-				return newMatchedCols > bestMatchedCols
+			if newMatch.numMatched != bestMatch.numMatched {
+				return newMatch.numMatched > bestMatch.numMatched
 			}
 
 			// Same matched columns - prefer primary key, then unique
@@ -402,10 +401,8 @@ func (t *Table) findBestEqualityIndexMatch(group Conditions) *indexMatch {
 		}
 
 		// Both are PK or both are not PK - compare number of matched columns (more is better)
-		newMatchedCols := len(newMatch.matchedConditions)
-		bestMatchedCols := len(bestMatch.matchedConditions)
-		if newMatchedCols != bestMatchedCols {
-			return newMatchedCols > bestMatchedCols
+		if newMatch.numMatched != bestMatch.numMatched {
+			return newMatch.numMatched > bestMatch.numMatched
 		}
 
 		// Same number of columns - prefer by index type (unique over secondary)
@@ -489,9 +486,12 @@ func (t *Table) findBestEqualityIndexMatch(group Conditions) *indexMatch {
 				continue
 			}
 		}
+		mc := make([]bool, len(group))
+		mc[condIdx] = true
 		exprMatch := &indexMatch{
 			info:              si.IndexInfo,
-			matchedConditions: map[int]bool{condIdx: true},
+			matchedConditions: mc,
+			numMatched:        1,
 			keys:              keys,
 		}
 		if isBetterMatch(exprMatch) {
@@ -678,8 +678,14 @@ func literalText(expr *Expr) (string, bool) {
 // tryMatchIndex attempts to match an index against the conditions in a group.
 // It returns a match if it can find equality conditions for a prefix of the index columns.
 func (t *Table) tryMatchIndex(indexInfo IndexInfo, group Conditions) *indexMatch {
-	matchedConditions := make(map[int]bool)
-	var compositeKey []any
+	// Use a bool slice keyed by condition index — cheaper than map[int]bool since
+	// condition indices are contiguous 0..len(group)-1 and the slice is tiny enough
+	// to be stack-allocated by the compiler for common single-condition WHERE clauses.
+	matchedConditions := make([]bool, len(group))
+	var (
+		compositeKey []any
+		numMatched   int
+	)
 
 	// For composite indexes, we need to match columns in order from left to right
 	for colIdx, indexCol := range indexInfo.Columns {
@@ -731,6 +737,7 @@ func (t *Table) tryMatchIndex(indexInfo IndexInfo, group Conditions) *indexMatch
 			}
 
 			matchedConditions[condIdx] = true
+			numMatched++
 			compositeKey = append(compositeKey, keys...)
 			foundMatch = true
 			break
@@ -744,7 +751,7 @@ func (t *Table) tryMatchIndex(indexInfo IndexInfo, group Conditions) *indexMatch
 	}
 
 	// No conditions matched this index
-	if len(matchedConditions) == 0 {
+	if numMatched == 0 {
 		return nil
 	}
 
@@ -753,7 +760,7 @@ func (t *Table) tryMatchIndex(indexInfo IndexInfo, group Conditions) *indexMatch
 	_, isUnique := t.UniqueIndexes[indexInfo.Name]
 
 	// Determine if this is a partial match (prefix of composite index)
-	numMatchedColumns := len(matchedConditions)
+	numMatchedColumns := numMatched
 	isPartialMatch := numMatchedColumns > 0 && numMatchedColumns < len(indexInfo.Columns)
 
 	var indexKeys []any
@@ -814,6 +821,7 @@ func (t *Table) tryMatchIndex(indexInfo IndexInfo, group Conditions) *indexMatch
 	match := &indexMatch{
 		info:                indexInfo,
 		matchedConditions:   matchedConditions,
+		numMatched:          numMatched,
 		keys:                indexKeys,
 		estKeyStr:           estKeyStr,
 		rangeCondition:      rangeCondition,
@@ -987,7 +995,7 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 		}
 
 		// Also collect indexes that could be used for range scans
-		for _, cond := range group {
+		for condIdx, cond := range group {
 			if cond.Operand1.Type != OperandField {
 				continue
 			}
@@ -1005,17 +1013,8 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 			}
 
 			// Skip if this condition was already matched for equality
-			if match != nil {
-				alreadyMatched := false
-				for condIdx := range match.matchedConditions {
-					if &group[condIdx] == &cond {
-						alreadyMatched = true
-						break
-					}
-				}
-				if alreadyMatched {
-					continue
-				}
+			if match != nil && match.matchedConditions[condIdx] {
+				continue
 			}
 
 			// Check if this could be used for range scan
@@ -1056,8 +1055,10 @@ func (p *QueryPlan) setIndexScans(t *Table, conditions OneOrMore) error {
 
 					// Collect the complete set of covered condition indices.
 					allCovered := make(map[int]bool)
-					for k := range match.matchedConditions {
-						allCovered[k] = true
+					for k, ok := range match.matchedConditions {
+						if ok {
+							allCovered[k] = true
+						}
 					}
 					for k := range additionalCovered {
 						allCovered[k] = true

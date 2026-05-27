@@ -53,6 +53,10 @@ type Table struct {
 	// checks here first and stores results after planning. Nil for system tables
 	// and virtual tables created for derived-table subqueries.
 	planCache LRUCache[string]
+	// allFields and textOverflowCols are derived from Columns at construction time
+	// and reused across calls to avoid per-call allocations.
+	allFields        []Field
+	textOverflowCols []Column
 	// rightmostTablePage caches the last leaf page index for SeekNextRowID so that
 	// sequential (autoincrement) inserts skip the O(log N) root→leaf traversal.
 	// lastTxIDTablePage guards against stale hints from rolled-back transactions.
@@ -91,9 +95,15 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 		table.provider = &singleTableProvider{table: table}
 	}
 
-	// Build column name -> column index cache
+	// Build column name -> column index cache; also pre-compute derived column slices.
 	for i, col := range columns {
 		table.columnCache[col.Name] = i
+	}
+	table.allFields = fieldsFromColumns(columns...)
+	for _, col := range columns {
+		if col.MayUseOverflowText() {
+			table.textOverflowCols = append(table.textOverflowCols, col)
+		}
 	}
 
 	// Apply options
