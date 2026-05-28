@@ -166,16 +166,19 @@ PRAGMA parallel_scan = off;
 
 ## Storage
 
-Each page size is `4096 bytes`. Rows larger than page size are not supported. Therefore, the largest allowed inline row size is `4065 bytes` (with exception of root page 0 which has first 100 bytes reserved for config). Variable text columns can use overflow pages and are not limited by page size.
+Each page size is `4096 bytes`. Rows larger than page size are not supported. Therefore, the largest allowed inline row size is `4061 bytes` (with exception of root page 0 which has first 100 bytes reserved for config). Variable text columns can use overflow pages and are not limited by page size.
 
 ```
-4096 (page size) 
-- 7 (base header size) 
-- 8 (internal / leaf node header size) 
-- 8 (null bit mask) 
-- 8 (internal row ID / key) 
-= 4065
+4096 (page size)
+-  7 (base header size)
+-  8 (internal / leaf node header size)
+-  8 (null bit mask)
+-  8 (internal row ID / key)
+-  4 (CRC32-IEEE checksum, last 4 bytes of every page)
+= 4061
 ```
+
+Every page carries a 4-byte CRC32-IEEE checksum in its final 4 bytes. The checksum is written at flush time and verified on every read from the database file; a mismatch returns `ErrPageChecksumMismatch` so silent bit-flip corruption is detected immediately.
 
 All tables are kept track of via a system table `minisql_schema` which contains table name, `CREATE TABLE` SQL to document table structure and a root page index indicating which page contains root node of the table B+ Tree.
 

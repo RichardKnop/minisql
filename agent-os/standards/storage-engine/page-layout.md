@@ -47,9 +47,19 @@ Rules:
 - The reserved bytes are part of the format contract; do not reuse them casually.
 - If the header format changes, update docs/tests/standards in the same change.
 
+## Page checksum
+
+The **last 4 bytes** of every page hold a CRC32-IEEE checksum (`pageChecksumSize = 4`). The checksum covers all preceding bytes in the page (`buf[:PageSize-4]`).
+
+- Written at flush time in `pager.go` (`writePageChecksum` / `writeRootPageChecksum`).
+- Also embedded in WAL frames at serialization time in `serializeWritesForWAL` (`transaction_manager.go`), so the WAL checkpoint path copies frames verbatim without recomputing checksums.
+- Verified on every read from the database file (`verifyPageChecksum` in `GetPage`). A mismatch returns `pkg/errors.PageChecksumError{PageIndex}`, which wraps the sentinel `ErrPageChecksumMismatch`.
+- Page 0 is two-piece on disk (header + B-tree data); `writeRootPageChecksum` hashes both pieces together and stores the result at the end of the page so `verifyPageChecksum` on the full 4096-byte read sees a consistent checksum.
+- All capacity constants (`UsablePageSize`, `InternalNodeMaxCells`, `RootInternalNodeMaxCells`, `MaxOverflowPageData`, inverted-index body sizes) are derived with `pageChecksumSize` already subtracted. Do not add `pageChecksumSize` again in new code — read the constant definitions in `page.go`, `internal_node.go`, and `overflow_page.go` for the exact formulas.
+
 ## Usable space
 
-`UsablePageSize = 4096 - 7 - 8 - 8 - 8` — page size minus base header, node header, key, and null bitmask overhead.
+`UsablePageSize = 4096 - 7 - 8 - 8 - 8 - 4` — page size minus base header, node header, key, null bitmask overhead, and the 4-byte CRC32-IEEE checksum.
 
 ## Self-describing cell format (leaf nodes)
 
