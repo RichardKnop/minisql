@@ -19,7 +19,7 @@ func TestParse_DerivedTableBasic(t *testing.T) {
 	require.Len(t, stmts, 1)
 	stmt := stmts[0]
 	assert.Equal(t, minisql.Select, stmt.Kind)
-	assert.Equal(t, "", stmt.TableName)
+	assert.Empty(t, stmt.TableName)
 	require.NotNil(t, stmt.FromSubquery)
 	assert.Equal(t, "t", stmt.FromSubqueryAlias)
 	assert.Equal(t, minisql.Select, stmt.FromSubquery.Kind)

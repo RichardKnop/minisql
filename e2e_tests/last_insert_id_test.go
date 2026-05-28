@@ -75,6 +75,6 @@ func (s *TestSuite) TestLastInsertId() {
 		s.Require().NoError(err)
 		id, err := res.LastInsertId()
 		s.Require().NoError(err)
-		s.Greater(id, int64(0))
+		s.Positive(id)
 	})
 }

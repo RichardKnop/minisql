@@ -149,7 +149,7 @@ func (s *TestSuite) TestSelectDistinct() {
 		}
 		s.Require().NoError(rows.Err())
 
-		s.Require().Len(players, 0)
+		s.Require().Empty(players)
 	})
 
 	s.Run("DISTINCT with nullable column treats NULLs as equal", func() {

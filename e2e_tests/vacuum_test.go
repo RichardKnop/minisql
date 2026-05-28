@@ -142,7 +142,7 @@ func (s *TestSuite) TestVacuum_SchemaPreservedAfterVacuum() {
 	s.Require().NoError(err)
 
 	schemasAfter := s.scanSchemas()
-	s.Require().Equal(len(schemasBefore), len(schemasAfter), "schema row count should not change")
+	s.Require().Len(schemasAfter, len(schemasBefore), "schema row count should not change")
 
 	for i, before := range schemasBefore {
 		after := schemasAfter[i]

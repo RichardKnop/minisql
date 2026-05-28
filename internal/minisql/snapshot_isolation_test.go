@@ -173,7 +173,7 @@ func TestSnapshotIsolation_VersionHistoryGC(t *testing.T) {
 	txManager.mu.RLock()
 	historySize := len(txManager.pageVersionHistory)
 	txManager.mu.RUnlock()
-	assert.Greater(t, historySize, 0, "version history must be populated while reader is active")
+	assert.Positive(t, historySize, "version history must be populated while reader is active")
 
 	// After the read transaction commits, version history must be cleared.
 	require.NoError(t, txManager.CommitTransaction(ctx, readTx))
@@ -207,7 +207,7 @@ func TestSnapshotIsolation_CheckpointBlockedByReader(t *testing.T) {
 
 	// Checkpoint must be blocked.
 	checkErr := env.txManager.CheckpointWAL(env.dbFile)
-	assert.ErrorIs(t, checkErr, ErrCheckpointBlockedByReaders)
+	require.ErrorIs(t, checkErr, ErrCheckpointBlockedByReaders)
 
 	// After the reader commits, checkpoint must succeed.
 	require.NoError(t, env.txManager.CommitTransaction(ctx, readTx))

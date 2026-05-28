@@ -131,7 +131,7 @@ func (s *TestSuite) TestForeignKey_Insert_InvalidFK() {
 	_, err := s.db.Exec(`insert into "orders" (user_id, amount) values (99, 100)`)
 	s.Require().Error(err)
 	var fkErr minisqlErrors.ErrForeignKeyViolation
-	s.True(errors.As(err, &fkErr), "expected ErrForeignKeyViolation, got %T: %v", err, err)
+	s.Require().ErrorAs(err, &fkErr)
 	s.Equal("orders", fkErr.ChildTable)
 	s.Equal([]string{"user_id"}, fkErr.ChildColumns)
 	s.Equal("users", fkErr.ParentTable)
@@ -192,7 +192,7 @@ func (s *TestSuite) TestForeignKey_Delete_ParentReferencedRow_Blocked() {
 	_, err = s.db.Exec(`delete from "users" where id = 1`)
 	s.Require().Error(err)
 	var fkErr minisqlErrors.ErrForeignKeyParentViolation
-	s.True(errors.As(err, &fkErr), "expected ErrForeignKeyParentViolation, got %T: %v", err, err)
+	s.Require().ErrorAs(err, &fkErr)
 	s.Equal("users", fkErr.ParentTable)
 	s.Equal([]string{"id"}, fkErr.ParentColumns)
 	s.Equal("orders", fkErr.ChildTable)
@@ -261,7 +261,7 @@ func (s *TestSuite) TestForeignKey_Update_ChildFKColumn_InvalidTarget() {
 	_, err = s.db.Exec(`update "orders" set user_id = 999 where id = 1`)
 	s.Require().Error(err)
 	var fkErr minisqlErrors.ErrForeignKeyViolation
-	s.True(errors.As(err, &fkErr), "expected ErrForeignKeyViolation, got %T: %v", err, err)
+	s.Require().ErrorAs(err, &fkErr)
 }
 
 func (s *TestSuite) TestForeignKey_Update_NonFKColumn_Unrestricted() {
@@ -321,7 +321,7 @@ func (s *TestSuite) TestForeignKey_Reopen_StillEnforced() {
 	_, err = s.db.Exec(`insert into "orders" (user_id, amount) values (99, 50)`)
 	s.Require().Error(err)
 	var fkErr minisqlErrors.ErrForeignKeyViolation
-	s.True(errors.As(err, &fkErr), "expected ErrForeignKeyViolation after reopen, got %T: %v", err, err)
+	s.Require().ErrorAs(err, &fkErr)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -348,7 +348,7 @@ func (s *TestSuite) TestForeignKey_SelfReferential() {
 	_, err = s.db.Exec(`insert into "categories" (name, parent_id) values ('Bad', 99)`)
 	s.Require().Error(err)
 	var fkErr minisqlErrors.ErrForeignKeyViolation
-	s.True(errors.As(err, &fkErr))
+	s.Require().ErrorAs(err, &fkErr)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -365,7 +365,7 @@ func (s *TestSuite) TestForeignKey_BatchInsert_OneInvalidRow() {
 	_, err = s.db.Exec(`insert into "orders" (user_id, amount) values (1, 10), (99, 20)`)
 	s.Require().Error(err)
 	var fkErr minisqlErrors.ErrForeignKeyViolation
-	s.True(errors.As(err, &fkErr))
+	s.Require().ErrorAs(err, &fkErr)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -685,7 +685,7 @@ func (s *TestSuite) TestForeignKey_MultiColumn_InvalidFK() {
 	_, err = stmt2.Exec(int64(1), int64(99), int64(3))
 	s.Require().Error(err)
 	var fkErr minisqlErrors.ErrForeignKeyViolation
-	s.True(errors.As(err, &fkErr), "expected ErrForeignKeyViolation, got %T: %v", err, err)
+	s.Require().ErrorAs(err, &fkErr)
 }
 
 func (s *TestSuite) TestForeignKey_MultiColumn_DeleteParent_Blocked() {
@@ -725,7 +725,7 @@ func (s *TestSuite) TestForeignKey_MultiColumn_DeleteParent_Blocked() {
 	_, err = stmt3.Exec(int64(1), int64(10))
 	s.Require().Error(err)
 	var fkErr minisqlErrors.ErrForeignKeyParentViolation
-	s.True(errors.As(err, &fkErr), "expected ErrForeignKeyParentViolation, got %T: %v", err, err)
+	s.Require().ErrorAs(err, &fkErr)
 }
 
 func (s *TestSuite) TestForeignKey_MultiColumn_OnDeleteCascade() {

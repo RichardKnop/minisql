@@ -217,7 +217,7 @@ func TestDatabase_IntegrityCheck(t *testing.T) {
 		report, err := db.IntegrityCheck(context.Background())
 		require.NoError(t, err)
 		assert.True(t, report.Ok())
-		assert.Greater(t, report.CheckedLivePages, 0)
+		assert.Positive(t, report.CheckedLivePages)
 	})
 
 	t.Run("missing unique index entry is reported", func(t *testing.T) {

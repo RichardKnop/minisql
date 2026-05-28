@@ -250,7 +250,7 @@ func (s *TestSuite) TestInsertOnConflictDoNothing() {
 			`insert into users("email", "name") values('alice@example.com', 'Alice Again');`,
 		)
 		s.Require().Error(err)
-		s.ErrorIs(err, minisql.ErrDuplicateKey)
+		s.Require().ErrorIs(err, minisql.ErrDuplicateKey)
 		s.Nil(result)
 	})
 

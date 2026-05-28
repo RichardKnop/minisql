@@ -107,7 +107,7 @@ func TestDatabase_Analyze(t *testing.T) {
 	assert.Equal(t, int64(100), pkStats.NEntry)
 	assert.Equal(t, []int64{100}, pkStats.NDistinct)
 	assert.NotNil(t, pkStats.Hist, "PK on Int8 column should have a histogram")
-	assert.Equal(t, histogramBuckets+1, len(pkStats.Hist.Bounds))
+	assert.Len(t, pkStats.Hist.Bounds, histogramBuckets+1)
 
 	// Unique index on email (Varchar) — no histogram for text columns.
 	assert.Equal(t, Stats{

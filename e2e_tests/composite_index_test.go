@@ -58,7 +58,7 @@ func (s *TestSuite) TestCompositeIndex() {
 
 		result, err := stmt.Exec("Winfield", "Wolfe")
 		s.Require().Error(err)
-		s.ErrorIs(err, minisql.ErrDuplicateKey)
+		s.Require().ErrorIs(err, minisql.ErrDuplicateKey)
 		s.Equal("failed to insert primary key pkey__users: duplicate key", err.Error())
 		s.Nil(result)
 	})
@@ -91,7 +91,7 @@ func (s *TestSuite) TestCompositeIndex() {
 		s.execQuery(`delete from users where first_name = 'Ambrosine' and last_name = 'Deeann';`, 1)
 
 		users := s.collectCompositeUsers(`select * from users where first_name = 'Ambrosine' and last_name = 'Deeann';`)
-		s.Require().Len(users, 0)
+		s.Require().Empty(users)
 
 		s.countRowsInTable("users", 9)
 	})

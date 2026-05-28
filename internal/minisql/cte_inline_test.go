@@ -500,14 +500,14 @@ func TestInlineCTE(t *testing.T) {
 		assert.Equal(t, "users", merged.TableName)
 		assert.Empty(t, merged.TableAlias)
 		// Alias prefix on fields and conditions must be stripped.
-		assert.Equal(t, "", merged.Fields[0].AliasPrefix)
+		assert.Empty(t, merged.Fields[0].AliasPrefix)
 		assert.Equal(t, "name", merged.Fields[0].Name)
 		// Conditions: body cond AND outer cond merged.
 		require.Len(t, merged.Conditions, 1)
 		require.Len(t, merged.Conditions[0], 2)
 		assert.Equal(t, "score", merged.Conditions[0][0].Operand1.Value.(Field).Name)
 		assert.Equal(t, "id", merged.Conditions[0][1].Operand1.Value.(Field).Name)
-		assert.Equal(t, "", merged.Conditions[0][1].Operand1.Value.(Field).AliasPrefix)
+		assert.Empty(t, merged.Conditions[0][1].Operand1.Value.(Field).AliasPrefix)
 	})
 
 	t.Run("outer_select_star_body_has_fields", func(t *testing.T) {

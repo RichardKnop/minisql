@@ -476,7 +476,7 @@ func TestFKChildFindRows_VirtualTable(t *testing.T) {
 
 	rows, err = db.fkChildFindRows(context.Background(), table, []string{"user_id"}, []any{int64(99)})
 	require.NoError(t, err)
-	assert.Len(t, rows, 0)
+	assert.Empty(t, rows)
 }
 
 func TestCheckChildFK_FKDisabled(t *testing.T) {

@@ -898,7 +898,7 @@ func TestMarshalUnmarshalFloat64(t *testing.T) {
 		buf := make([]byte, 8)
 		marshalFloat64(buf, v, 0)
 		got := unmarshalFloat64(buf, 0)
-		assert.Equal(t, v, got)
+		assert.InDelta(t, v, got, 1e-9)
 	}
 }
 

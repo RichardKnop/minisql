@@ -707,7 +707,7 @@ func TestParse_Select(t *testing.T) {
 			aStatement, err := New().Parse(context.Background(), aTestCase.SQL)
 			if aTestCase.Err != nil {
 				require.Error(t, err)
-				assert.ErrorIs(t, err, aTestCase.Err)
+				require.ErrorIs(t, err, aTestCase.Err)
 			} else {
 				require.NoError(t, err)
 			}
@@ -828,7 +828,7 @@ func TestParse_SelectGroupBy(t *testing.T) {
 			aStatement, err := New().Parse(context.Background(), aTestCase.SQL)
 			if aTestCase.Err != nil {
 				require.Error(t, err)
-				assert.ErrorIs(t, err, aTestCase.Err)
+				require.ErrorIs(t, err, aTestCase.Err)
 			} else {
 				require.NoError(t, err)
 			}
@@ -969,7 +969,7 @@ func TestParse_SelectHaving(t *testing.T) {
 			aStatement, err := New().Parse(context.Background(), aTestCase.SQL)
 			if aTestCase.Err != nil {
 				require.Error(t, err)
-				assert.ErrorIs(t, err, aTestCase.Err)
+				require.ErrorIs(t, err, aTestCase.Err)
 			} else {
 				require.NoError(t, err)
 			}
@@ -1079,7 +1079,7 @@ func TestParse_SelectArithmetic(t *testing.T) {
 			aStatement, err := New().Parse(context.Background(), aTestCase.SQL)
 			if aTestCase.Err != nil {
 				require.Error(t, err)
-				assert.ErrorIs(t, err, aTestCase.Err)
+				require.ErrorIs(t, err, aTestCase.Err)
 			} else {
 				require.NoError(t, err)
 			}
@@ -1217,7 +1217,7 @@ func TestParse_SelectScalarFunctions(t *testing.T) {
 			aStatement, err := New().Parse(context.Background(), aTestCase.SQL)
 			if aTestCase.Err != nil {
 				require.Error(t, err)
-				assert.ErrorIs(t, err, aTestCase.Err)
+				require.ErrorIs(t, err, aTestCase.Err)
 			} else {
 				require.NoError(t, err)
 			}
@@ -1379,7 +1379,7 @@ func TestParse_SelectCaseWhen(t *testing.T) {
 			aStatement, err := New().Parse(context.Background(), aTestCase.SQL)
 			if aTestCase.Err != nil {
 				require.Error(t, err)
-				assert.ErrorIs(t, err, aTestCase.Err)
+				require.ErrorIs(t, err, aTestCase.Err)
 			} else {
 				require.NoError(t, err)
 			}

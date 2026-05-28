@@ -14,6 +14,7 @@ linters:
     - nilerr        # returns nil despite checking err != nil
     - revive        # comprehensive replacement for golint
     - staticcheck   # SA*, S*, QF* checks
+    - testifylint   # enforce require vs assert discipline in tests
     - unused        # unused code
 
   settings:

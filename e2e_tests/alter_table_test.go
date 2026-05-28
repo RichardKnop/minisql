@@ -242,8 +242,8 @@ func (s *TestSuite) TestAlterTable_RenameTo() {
 
 	// Old name should be gone.
 	_, err = s.db.ExecContext(ctx, `select * from "items";`)
-	s.Error(err)
-	s.ErrorContains(err, `table does not exist`)
+	s.Require().Error(err)
+	s.Require().ErrorContains(err, `table does not exist`)
 
 	// New name should work.
 	var id int64

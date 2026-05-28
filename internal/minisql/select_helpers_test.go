@@ -280,7 +280,7 @@ func TestBuildGroupKey(t *testing.T) {
 		t.Parallel()
 		row := makeRow(OptionalValue{Value: int64(1), Valid: true})
 		key := string(buildGroupKey(nil, row, []int{}))
-		assert.Equal(t, "", key)
+		assert.Empty(t, key)
 	})
 }
 

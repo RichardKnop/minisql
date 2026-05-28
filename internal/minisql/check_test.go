@@ -1,7 +1,6 @@
 package minisql
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -42,7 +41,7 @@ func TestValidateCheckConstraints(t *testing.T) {
 		err := validateCheckConstraints(columns, makeRow(1, 0))
 		require.Error(t, err)
 		var checkErr ErrCheckConstraintViolation
-		require.True(t, errors.As(err, &checkErr))
+		require.ErrorAs(t, err, &checkErr)
 		assert.Equal(t, "price", checkErr.ColumnName)
 		assert.Equal(t, "price > 0", checkErr.Expr)
 	})

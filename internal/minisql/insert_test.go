@@ -2,7 +2,6 @@ package minisql
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/RichardKnop/minisql/pkg/bitwise"
@@ -286,9 +285,9 @@ func TestTable_Insert_SplitInternalNode_CreateNewRoot(t *testing.T) {
 		assert.Equal(t, 1, int(aLeaf.LeafNode.Header.Cells))
 		assert.Equal(t, i, int(aLeaf.LeafNode.Cells[0].Key))
 		if i < 166 {
-			assert.Equal(t, 335, int(aLeaf.LeafNode.Header.Parent), fmt.Sprintf("parent not 335 %d", i))
+			assert.Equal(t, 335, int(aLeaf.LeafNode.Header.Parent), "parent not 335 %d", i)
 		} else {
-			assert.Equal(t, 334, int(aLeaf.LeafNode.Header.Parent), fmt.Sprintf("parent not 334 %d", i))
+			assert.Equal(t, 334, int(aLeaf.LeafNode.Header.Parent), "parent not 334 %d", i)
 		}
 	}
 }

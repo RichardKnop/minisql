@@ -73,7 +73,7 @@ func (s *TestSuite) TestInnerJoin() {
 			{2, "Bob", 3, 150},
 		}
 
-		s.Equal(len(expectedResults), len(actualResults), "Expected %d rows, got %d", len(expectedResults), len(actualResults))
+		s.Len(actualResults, len(expectedResults), "Expected %d rows, got %d", len(expectedResults), len(actualResults))
 
 		// Check that each expected result exists in actual results
 		for _, expected := range expectedResults {

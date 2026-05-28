@@ -90,8 +90,8 @@ func (s *TestSuite) TestPreparedStmts() {
 		users := s.collectUsers(`select * from users;`)
 		s.Require().Len(users, 3)
 		s.Equal("New Name", users[0].Name.String)
-		s.Equal("", users[1].Name.String)
-		s.Equal("", users[2].Name.String)
+		s.Empty(users[1].Name.String)
+		s.Empty(users[2].Name.String)
 	})
 
 	s.Run("Delete users zero affected rows", func() {
@@ -137,6 +137,6 @@ func (s *TestSuite) TestPreparedStmts() {
 		s.Require().Equal(int64(1), rowsAffected)
 
 		users := s.collectUsers(`select * from users;`)
-		s.Require().Len(users, 0)
+		s.Require().Empty(users)
 	})
 }

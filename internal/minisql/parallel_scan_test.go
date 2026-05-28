@@ -102,7 +102,7 @@ func TestParallelSequentialScan_MatchesSequential(t *testing.T) {
 	sortRowsByKey(seqRows)
 	sortRowsByKey(parRows)
 
-	assert.Equal(t, len(seqRows), len(parRows))
+	assert.Len(t, parRows, len(seqRows))
 	assert.Equal(t, seqRows, parRows)
 }
 

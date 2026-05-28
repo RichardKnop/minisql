@@ -223,7 +223,7 @@ func TestEvalCast_IntToDouble(t *testing.T) {
 	}
 	val, err := expr.Eval(Row{})
 	require.NoError(t, err)
-	assert.Equal(t, float64(5), val)
+	assert.InDelta(t, float64(5), val, 1e-9)
 }
 
 func TestEvalCast_IntToText(t *testing.T) {
@@ -286,7 +286,7 @@ func TestEvalCast_TextToDouble_LeadingFloat(t *testing.T) {
 	}
 	val, err := expr.Eval(row)
 	require.NoError(t, err)
-	assert.Equal(t, float64(3.7), val)
+	assert.InDelta(t, float64(3.7), val, 1e-9)
 }
 
 func TestEvalCast_BoolToInt8(t *testing.T) {

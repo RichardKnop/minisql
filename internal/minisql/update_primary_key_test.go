@@ -103,7 +103,7 @@ func TestTable_Update_PrimaryKey(t *testing.T) {
 			return err
 		})
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrDuplicateKey)
+		require.ErrorIs(t, err, ErrDuplicateKey)
 		assert.Equal(t, 0, result.RowsAffected)
 
 		checkRows(ctx, t, table, rows)
@@ -280,7 +280,7 @@ func TestTable_Update_CompositePrimaryKey(t *testing.T) {
 			return err
 		})
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrDuplicateKey)
+		require.ErrorIs(t, err, ErrDuplicateKey)
 		assert.Equal(t, 0, result.RowsAffected)
 
 		checkRowsWithCompositePrimaryKey(ctx, t, table, rows)

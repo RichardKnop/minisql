@@ -96,7 +96,7 @@ func TestCompositeKey_Prefix(t *testing.T) {
 
 	t.Run("prefix of 0 columns gives empty comparison", func(t *testing.T) {
 		p := ck.Prefix(0)
-		assert.Len(t, p.Comparison, 0)
+		assert.Empty(t, p.Comparison)
 	})
 
 	t.Run("prefix of 1 column gives 8-byte comparison", func(t *testing.T) {

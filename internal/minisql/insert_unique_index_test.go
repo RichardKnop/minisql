@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
@@ -101,7 +100,7 @@ func TestTable_Insert_UniqueIndex(t *testing.T) {
 			return err
 		})
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrDuplicateKey)
+		require.ErrorIs(t, err, ErrDuplicateKey)
 
 		checkRows(ctx, t, table, rows)
 	})
@@ -199,7 +198,7 @@ func TestTable_Insert_CompositeUniqueIndex(t *testing.T) {
 			return err
 		})
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrDuplicateKey)
+		require.ErrorIs(t, err, ErrDuplicateKey)
 
 		checkRows(ctx, t, table, rows)
 	})

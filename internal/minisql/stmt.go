@@ -962,26 +962,10 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 				continue
 			}
 
-			if val.Valid {
-				if fn, ok := val.Value.(Function); ok {
-					if fn.Name == FunctionNow.Name {
-						val.Value = TimestampMicros(now.TotalMicroseconds())
-					} else {
-						return Statement{}, fmt.Errorf("unsupported function %q in INSERT", fn.Name)
-					}
-				} else if col.Kind == Timestamp {
-					timestamp, err := parseTimeValue(val.Value)
-					if err != nil {
-						return Statement{}, err
-					}
-					val.Value = timestamp
-				} else if col.Kind == UUID {
-					uv, err := toUUIDValue(val.Value)
-					if err != nil {
-						return Statement{}, fmt.Errorf("column %q: %w", col.Name, err)
-					}
-					val.Value = uv
-				}
+			var err error
+			val, err = coerceColumnValue(col, val, now, "INSERT")
+			if err != nil {
+				return Statement{}, err
 			}
 			newRow[i] = val
 		}
@@ -999,34 +983,16 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 			if _, ok := val.Value.(ExcludedRef); ok {
 				continue
 			}
-			if fn, ok := val.Value.(Function); ok {
-				if fn.Name != FunctionNow.Name {
-					return Statement{}, fmt.Errorf("unsupported function %q in ON CONFLICT DO UPDATE", fn.Name)
-				}
-				val.Value = TimestampMicros(now.TotalMicroseconds())
-				s.Updates[name] = val
-				continue
-			}
 			col, ok := s.ColumnByName(name)
 			if !ok {
 				continue
 			}
-			switch col.Kind {
-			case Timestamp:
-				timestamp, err := parseTimeValue(val.Value)
-				if err != nil {
-					return Statement{}, fmt.Errorf("invalid timestamp in ON CONFLICT DO UPDATE SET %s: %w", name, err)
-				}
-				val.Value = timestamp
-				s.Updates[name] = val
-			case UUID:
-				uv, err := toUUIDValue(val.Value)
-				if err != nil {
-					return Statement{}, fmt.Errorf("invalid UUID in ON CONFLICT DO UPDATE SET %s: %w", name, err)
-				}
-				val.Value = uv
-				s.Updates[name] = val
+			var err error
+			val, err = coerceColumnValue(col, val, now, "ON CONFLICT DO UPDATE")
+			if err != nil {
+				return Statement{}, err
 			}
+			s.Updates[name] = val
 		}
 	}
 
@@ -1059,32 +1025,48 @@ func (s Statement) prepareUpdate(now Time) (Statement, error) {
 			continue
 		}
 
-		if fn, ok := updateValue.Value.(Function); ok {
-			if fn.Name == FunctionNow.Name {
-				updateValue.Value = TimestampMicros(now.TotalMicroseconds())
-				s.Updates[name] = updateValue
-			} else {
-				return Statement{}, fmt.Errorf("unsupported function %q in UPDATE", fn.Name)
-			}
-		} else if col.Kind == Timestamp {
-			timestamp, err := parseTimeValue(updateValue.Value)
-			if err != nil {
-				return Statement{}, err
-			}
-			updateValue.Value = timestamp
-			s.Updates[name] = updateValue
-		} else if col.Kind == UUID {
-			uv, err := toUUIDValue(updateValue.Value)
-			if err != nil {
-				return Statement{}, fmt.Errorf("column %q: %w", name, err)
-			}
-			updateValue.Value = uv
-			s.Updates[name] = updateValue
+		var err error
+		updateValue, err = coerceColumnValue(col, updateValue, now, "UPDATE")
+		if err != nil {
+			return Statement{}, err
 		}
+		s.Updates[name] = updateValue
 
 	}
 
 	return s, nil
+}
+
+// coerceColumnValue resolves NOW() function literals and converts raw text
+// values in val to the internal representation required by col's kind
+// (TimestampMicros for Timestamp, UUIDValue for UUID). ctx is included in
+// error messages to identify the calling SQL clause (e.g. "INSERT").
+func coerceColumnValue(col Column, val OptionalValue, now Time, ctx string) (OptionalValue, error) {
+	if !val.Valid {
+		return val, nil
+	}
+	if fn, ok := val.Value.(Function); ok {
+		if fn.Name != FunctionNow.Name {
+			return val, fmt.Errorf("unsupported function %q in %s", fn.Name, ctx)
+		}
+		val.Value = TimestampMicros(now.TotalMicroseconds())
+		return val, nil
+	}
+	switch col.Kind {
+	case Timestamp:
+		ts, err := parseTimeValue(val.Value)
+		if err != nil {
+			return val, err
+		}
+		val.Value = ts
+	case UUID:
+		uv, err := toUUIDValue(val.Value)
+		if err != nil {
+			return val, fmt.Errorf("column %q: %w", col.Name, err)
+		}
+		val.Value = uv
+	}
+	return val, nil
 }
 
 // prepareWhere converts timestamp string values in WHERE conditions to Time.

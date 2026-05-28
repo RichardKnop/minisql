@@ -50,7 +50,7 @@ func TestToInternalArgs(t *testing.T) {
 		got, err := toInternalArgs(args)
 		require.NoError(t, err)
 		require.Len(t, got, 1)
-		assert.Equal(t, float64(3.14), got[0])
+		assert.InDelta(t, float64(3.14), got[0], 1e-9)
 	})
 
 	t.Run("bool is passed through unchanged", func(t *testing.T) {
@@ -102,7 +102,7 @@ func TestToInternalArgs(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, got, 4)
 		assert.Equal(t, int64(1), got[0])
-		assert.Equal(t, float64(2.5), got[1])
+		assert.InDelta(t, float64(2.5), got[1], 1e-9)
 		assert.Equal(t, true, got[2])
 		// got[3] is a TextPointer
 		assert.NotNil(t, got[3])

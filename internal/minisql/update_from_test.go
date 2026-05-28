@@ -142,8 +142,8 @@ func TestBuildUpdateFromMergedRow_ColumnCount(t *testing.T) {
 	merged := buildUpdateFromMergedRow(targetRow, "tgt", fromRow)
 
 	// 2 target cols × 2 (plain + qualified) + 1 FROM col = 5
-	assert.Equal(t, 5, len(merged.Columns))
-	assert.Equal(t, 5, len(merged.Values))
+	assert.Len(t, merged.Columns, 5)
+	assert.Len(t, merged.Values, 5)
 }
 
 func TestResolveUpdateFromExprs(t *testing.T) {

@@ -79,7 +79,7 @@ func (s *TestSuite) TestChainJoin() {
 			{"Alice", 150, "Widget", 3},
 			{"Bob", 200, "Gadget", 5},
 		}
-		s.Require().Equal(len(want), len(got))
+		s.Require().Len(got, len(want))
 		for i, w := range want {
 			s.Equal(w.name, got[i].name, "row %d name", i)
 			s.Equal(w.total, got[i].total, "row %d total", i)
@@ -113,7 +113,7 @@ func (s *TestSuite) TestChainJoin() {
 		}
 		s.Require().NoError(rows.Err())
 
-		s.Require().Equal(2, len(got))
+		s.Require().Len(got, 2)
 		s.Equal("Alice", got[0].name)
 		s.Equal(int64(300), got[0].total)
 		s.Equal("Widget", got[0].product)
@@ -232,7 +232,7 @@ func (s *TestSuite) TestChainJoinWithIndex() {
 		{"Engineering", "Bob", 45},
 		{"Marketing", "Carol", 30},
 	}
-	s.Require().Equal(len(want), len(got))
+	s.Require().Len(got, len(want))
 	for i, w := range want {
 		s.Equal(w.dept, got[i].dept, "row %d dept", i)
 		s.Equal(w.emp, got[i].emp, "row %d emp", i)

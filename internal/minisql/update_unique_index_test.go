@@ -116,7 +116,7 @@ func TestTable_Update_UniqueIndex(t *testing.T) {
 			return err
 		})
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrDuplicateKey)
+		require.ErrorIs(t, err, ErrDuplicateKey)
 		assert.Equal(t, 0, result.RowsAffected)
 
 		checkRows(ctx, t, table, rows)
@@ -306,7 +306,7 @@ func TestTable_Update_CompositeUniqueIndex(t *testing.T) {
 			return err
 		})
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrDuplicateKey)
+		require.ErrorIs(t, err, ErrDuplicateKey)
 		assert.Equal(t, 0, result.RowsAffected)
 
 		checkRows(ctx, t, table, rows)

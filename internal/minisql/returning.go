@@ -19,6 +19,25 @@ func returningColumns(fields []Field, tableColumns []Column) []Column {
 	return out
 }
 
+// applyReturning projects rows through RETURNING fields and populates result.
+// When fields is empty the function is a no-op (RETURNING clause absent).
+func applyReturning(result *StatementResult, rows []Row, fields []Field, tableColumns []Column) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	projected := make([]Row, 0, len(rows))
+	for _, row := range rows {
+		p, err := projectReturning(row, fields)
+		if err != nil {
+			return err
+		}
+		projected = append(projected, p)
+	}
+	result.Columns = returningColumns(fields, tableColumns)
+	result.Rows = NewSliceIterator(projected)
+	return nil
+}
+
 // projectReturning projects a row down to the columns requested by a RETURNING
 // clause. The returned Row has one Value per field (in field order).
 func projectReturning(row Row, fields []Field) (Row, error) {

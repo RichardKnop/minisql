@@ -22,7 +22,7 @@ func TestNewPager_Empty(t *testing.T) {
 
 	assert.Equal(t, int64(0), pager.fileSize)
 	assert.Equal(t, 0, int(pager.totalPages))
-	assert.Len(t, pager.pages, 0)
+	assert.Empty(t, pager.pages)
 }
 
 func TestNewPager_WithDBHeader(t *testing.T) {

@@ -607,7 +607,7 @@ func TestWAL_WriteBuffering_ExplicitFlush(t *testing.T) {
 	w.flushThreshold = 1 << 20 // 1 MiB — won't auto-flush in this test
 
 	require.NoError(t, w.AppendTransaction([]WALPage{{Index: 0, Data: makeTestPage(0xAA)}}))
-	assert.Greater(t, w.pendingLen, 0, "frame should be buffered")
+	assert.Positive(t, w.pendingLen, "frame should be buffered")
 
 	// Explicit flush makes the frame visible on disk.
 	require.NoError(t, w.Flush())
@@ -636,7 +636,7 @@ func TestWAL_WriteBuffering_CheckpointFlushes(t *testing.T) {
 
 	page0 := makeTestPage(0xCC)
 	require.NoError(t, w.AppendTransaction([]WALPage{{Index: 0, Data: page0}}))
-	assert.Greater(t, w.pendingLen, 0)
+	assert.Positive(t, w.pendingLen)
 
 	dbFile, err := os.OpenFile(tmp.Name(), os.O_RDWR|os.O_CREATE, 0o644)
 	require.NoError(t, err)

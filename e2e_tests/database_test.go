@@ -80,7 +80,7 @@ func (s *TestSuite) TestCreateTable() {
 		s.countRowsInTable("minisql_schema", 4)
 
 		schemas := s.scanSchemas()
-		s.Require().Equal(4, len(schemas))
+		s.Require().Len(schemas, 4)
 		s.assertSchemaTable(schemas[0])
 		s.assertUsersTable(schemas[1], 1, schemas[2], 2, schemas[3], 3)
 	})
@@ -113,7 +113,7 @@ func (s *TestSuite) TestCreateTable() {
 		s.Equal(1, count)
 
 		schemas := s.scanSchemas()
-		s.Require().Equal(1, len(schemas))
+		s.Require().Len(schemas, 1)
 		s.assertSchemaTable(schemas[0])
 	})
 
@@ -146,7 +146,7 @@ func (s *TestSuite) TestCreateTable() {
 		s.countRowsInTable("minisql_schema", 9)
 
 		schemas := s.scanSchemas()
-		s.Require().Equal(9, len(schemas))
+		s.Require().Len(schemas, 9)
 
 		// System table should be unchanged
 		s.assertSchemaTable(schemas[0])

@@ -172,11 +172,11 @@ func TestAnyToFloat64(t *testing.T) {
 
 	f, ok := anyToFloat64(int32(7))
 	assert.True(t, ok)
-	assert.Equal(t, float64(7), f)
+	assert.InDelta(t, float64(7), f, 1e-9)
 
 	f, ok = anyToFloat64(int64(42))
 	assert.True(t, ok)
-	assert.Equal(t, float64(42), f)
+	assert.InDelta(t, float64(42), f, 1e-9)
 
 	f, ok = anyToFloat64(float32(3.14))
 	assert.True(t, ok)
@@ -184,7 +184,7 @@ func TestAnyToFloat64(t *testing.T) {
 
 	f, ok = anyToFloat64(float64(2.718))
 	assert.True(t, ok)
-	assert.Equal(t, 2.718, f)
+	assert.InDelta(t, 2.718, f, 1e-9)
 
 	_, ok = anyToFloat64("not a number")
 	assert.False(t, ok)
@@ -200,20 +200,20 @@ func TestHistogramCDF(t *testing.T) {
 
 	t.Run("empty_bounds_returns_half", func(t *testing.T) {
 		t.Parallel()
-		assert.Equal(t, 0.5, histogramCDF([]float64{}, 50))
-		assert.Equal(t, 0.5, histogramCDF([]float64{10}, 50))
+		assert.InDelta(t, 0.5, histogramCDF([]float64{}, 50), 1e-9)
+		assert.InDelta(t, 0.5, histogramCDF([]float64{10}, 50), 1e-9)
 	})
 
 	t.Run("below_min_returns_zero", func(t *testing.T) {
 		t.Parallel()
-		assert.Equal(t, 0.0, histogramCDF(bounds, -1))
-		assert.Equal(t, 0.0, histogramCDF(bounds, 0))
+		assert.InDelta(t, 0.0, histogramCDF(bounds, -1), 1e-9)
+		assert.InDelta(t, 0.0, histogramCDF(bounds, 0), 1e-9)
 	})
 
 	t.Run("above_max_returns_one", func(t *testing.T) {
 		t.Parallel()
-		assert.Equal(t, 1.0, histogramCDF(bounds, 100))
-		assert.Equal(t, 1.0, histogramCDF(bounds, 200))
+		assert.InDelta(t, 1.0, histogramCDF(bounds, 100), 1e-9)
+		assert.InDelta(t, 1.0, histogramCDF(bounds, 200), 1e-9)
 	})
 
 	t.Run("midpoint_of_first_bucket", func(t *testing.T) {
@@ -236,9 +236,9 @@ func TestHistogramCDF(t *testing.T) {
 		// All values the same: bounds = [5, 5, 5].
 		degen := []float64{5, 5, 5}
 		// v=5 falls exactly on bounds[0], so returns 0.
-		assert.Equal(t, 0.0, histogramCDF(degen, 5))
+		assert.InDelta(t, 0.0, histogramCDF(degen, 5), 1e-9)
 		// v=6 > bounds[n=2] so returns 1.
-		assert.Equal(t, 1.0, histogramCDF(degen, 6))
+		assert.InDelta(t, 1.0, histogramCDF(degen, 6), 1e-9)
 	})
 }
 
@@ -256,7 +256,7 @@ func TestEstimateSelectivityWithHistogram(t *testing.T) {
 		}
 		sel := estimateSelectivityWithHistogram(nil, rc)
 		// Fallback: both bounds → 0.3
-		assert.Equal(t, 0.3, sel)
+		assert.InDelta(t, 0.3, sel, 1e-9)
 	})
 
 	t.Run("short_hist_falls_back", func(t *testing.T) {
@@ -265,7 +265,7 @@ func TestEstimateSelectivityWithHistogram(t *testing.T) {
 		rc := RangeCondition{Lower: &RangeBound{Value: int64(10)}}
 		sel := estimateSelectivityWithHistogram(shortHist, rc)
 		// Fallback: one bound → 0.5
-		assert.Equal(t, 0.5, sel)
+		assert.InDelta(t, 0.5, sel, 1e-9)
 	})
 
 	t.Run("full_range_covered", func(t *testing.T) {
@@ -319,7 +319,7 @@ func TestEstimateSelectivityWithHistogram(t *testing.T) {
 			Upper: &RangeBound{Value: int64(10), Inclusive: true},
 		}
 		sel := estimateSelectivityWithHistogram(hist, rc)
-		assert.Equal(t, 0.0, sel)
+		assert.InDelta(t, 0.0, sel, 1e-9)
 	})
 }
 
@@ -332,24 +332,24 @@ func TestEstimateRangeSelectivity(t *testing.T) {
 			Lower: &RangeBound{Value: int64(10)},
 			Upper: &RangeBound{Value: int64(90)},
 		}
-		assert.Equal(t, 0.3, estimateRangeSelectivity(rc))
+		assert.InDelta(t, 0.3, estimateRangeSelectivity(rc), 1e-9)
 	})
 
 	t.Run("lower_only", func(t *testing.T) {
 		t.Parallel()
 		rc := RangeCondition{Lower: &RangeBound{Value: int64(10)}}
-		assert.Equal(t, 0.5, estimateRangeSelectivity(rc))
+		assert.InDelta(t, 0.5, estimateRangeSelectivity(rc), 1e-9)
 	})
 
 	t.Run("upper_only", func(t *testing.T) {
 		t.Parallel()
 		rc := RangeCondition{Upper: &RangeBound{Value: int64(90)}}
-		assert.Equal(t, 0.5, estimateRangeSelectivity(rc))
+		assert.InDelta(t, 0.5, estimateRangeSelectivity(rc), 1e-9)
 	})
 
 	t.Run("no_bounds_full_scan", func(t *testing.T) {
 		t.Parallel()
-		assert.Equal(t, 1.0, estimateRangeSelectivity(RangeCondition{}))
+		assert.InDelta(t, 1.0, estimateRangeSelectivity(RangeCondition{}), 1e-9)
 	})
 }
 
@@ -359,25 +359,25 @@ func TestSelectivity(t *testing.T) {
 	t.Run("zero_entries", func(t *testing.T) {
 		t.Parallel()
 		s := IndexStats{NEntry: 0, NDistinct: []int64{5}}
-		assert.Equal(t, 0.0, s.Selectivity())
+		assert.InDelta(t, 0.0, s.Selectivity(), 1e-9)
 	})
 
 	t.Run("no_ndistinct", func(t *testing.T) {
 		t.Parallel()
 		s := IndexStats{NEntry: 1000}
-		assert.Equal(t, 0.0, s.Selectivity())
+		assert.InDelta(t, 0.0, s.Selectivity(), 1e-9)
 	})
 
 	t.Run("normal_case", func(t *testing.T) {
 		t.Parallel()
 		s := IndexStats{NEntry: 1000, NDistinct: []int64{100}}
-		assert.Equal(t, 0.1, s.Selectivity())
+		assert.InDelta(t, 0.1, s.Selectivity(), 1e-9)
 	})
 
 	t.Run("composite_uses_last_ndistinct", func(t *testing.T) {
 		t.Parallel()
 		s := IndexStats{NEntry: 1000, NDistinct: []int64{10, 500}}
-		assert.Equal(t, 0.5, s.Selectivity())
+		assert.InDelta(t, 0.5, s.Selectivity(), 1e-9)
 	})
 }
 
@@ -406,8 +406,8 @@ func TestBuildEquiDepthHistogram(t *testing.T) {
 		// 3 values, 100 buckets → clamped to 3 buckets, 4 bounds.
 		h := buildEquiDepthHistogram([]float64{1, 5, 10}, 100)
 		require.NotNil(t, h)
-		assert.Equal(t, 1.0, h.Bounds[0])
-		assert.Equal(t, 10.0, h.Bounds[len(h.Bounds)-1])
+		assert.InDelta(t, 1.0, h.Bounds[0], 1e-9)
+		assert.InDelta(t, 10.0, h.Bounds[len(h.Bounds)-1], 1e-9)
 	})
 
 	t.Run("typical_case", func(t *testing.T) {
@@ -419,8 +419,8 @@ func TestBuildEquiDepthHistogram(t *testing.T) {
 		h := buildEquiDepthHistogram(sorted, 4)
 		require.NotNil(t, h)
 		require.Len(t, h.Bounds, 5)
-		assert.Equal(t, 1.0, h.Bounds[0])
-		assert.Equal(t, 100.0, h.Bounds[4])
+		assert.InDelta(t, 1.0, h.Bounds[0], 1e-9)
+		assert.InDelta(t, 100.0, h.Bounds[4], 1e-9)
 	})
 }
 

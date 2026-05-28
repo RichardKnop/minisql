@@ -106,24 +106,24 @@ func (s *TestSuite) TestStarSchemaJoin() {
 			results = append(results, r)
 		}
 
-		s.Require().Equal(4, len(results))
+		s.Require().Len(results, 4)
 
 		// Verify the combinations (sorted by name, amount, city)
-		s.Assert().Equal("Alice", results[0].name)
-		s.Assert().Equal(int64(100), results[0].amount)
-		s.Assert().Equal("Boston", results[0].city)
+		s.Equal("Alice", results[0].name)
+		s.Equal(int64(100), results[0].amount)
+		s.Equal("Boston", results[0].city)
 
-		s.Assert().Equal("Alice", results[1].name)
-		s.Assert().Equal(int64(100), results[1].amount)
-		s.Assert().Equal("New York", results[1].city)
+		s.Equal("Alice", results[1].name)
+		s.Equal(int64(100), results[1].amount)
+		s.Equal("New York", results[1].city)
 
-		s.Assert().Equal("Alice", results[2].name)
-		s.Assert().Equal(int64(250), results[2].amount)
-		s.Assert().Equal("Boston", results[2].city)
+		s.Equal("Alice", results[2].name)
+		s.Equal(int64(250), results[2].amount)
+		s.Equal("Boston", results[2].city)
 
-		s.Assert().Equal("Alice", results[3].name)
-		s.Assert().Equal(int64(250), results[3].amount)
-		s.Assert().Equal("New York", results[3].city)
+		s.Equal("Alice", results[3].name)
+		s.Equal(int64(250), results[3].amount)
+		s.Equal("New York", results[3].city)
 	})
 
 	// Test 2: Star join with WHERE clause on joined tables
@@ -154,10 +154,10 @@ func (s *TestSuite) TestStarSchemaJoin() {
 			results = append(results, r)
 		}
 
-		s.Require().Equal(1, len(results))
-		s.Assert().Equal("Alice", results[0].name)
-		s.Assert().Equal(int64(100), results[0].amount)
-		s.Assert().Equal("New York", results[0].city)
+		s.Require().Len(results, 1)
+		s.Equal("Alice", results[0].name)
+		s.Equal(int64(100), results[0].amount)
+		s.Equal("New York", results[0].city)
 	})
 
 	// Test 3: Two-table join (subset of star schema)
@@ -184,13 +184,13 @@ func (s *TestSuite) TestStarSchemaJoin() {
 			results = append(results, r)
 		}
 
-		s.Require().Equal(3, len(results))
-		s.Assert().Equal("Alice", results[0].name)
-		s.Assert().Equal(int64(100), results[0].amount)
-		s.Assert().Equal("Alice", results[1].name)
-		s.Assert().Equal(int64(250), results[1].amount)
-		s.Assert().Equal("Bob", results[2].name)
-		s.Assert().Equal(int64(50), results[2].amount)
+		s.Require().Len(results, 3)
+		s.Equal("Alice", results[0].name)
+		s.Equal(int64(100), results[0].amount)
+		s.Equal("Alice", results[1].name)
+		s.Equal(int64(250), results[1].amount)
+		s.Equal("Bob", results[2].name)
+		s.Equal(int64(50), results[2].amount)
 	})
 
 	// Test 4: Star join with all columns selected
@@ -214,9 +214,9 @@ func (s *TestSuite) TestStarSchemaJoin() {
 			s.Require().NoError(err)
 			count += 1
 			// All rows should be for Alice (user_id = 1)
-			s.Assert().Equal(int64(1), userID)
-			s.Assert().Equal("Alice", name)
-			s.Assert().Equal("alice@example.com", email)
+			s.Equal(int64(1), userID)
+			s.Equal("Alice", name)
+			s.Equal("alice@example.com", email)
 		}
 
 		s.Require().Equal(4, count) // Alice: 2 orders × 2 addresses = 4
@@ -275,9 +275,9 @@ func (s *TestSuite) TestStarSchemaNoIndexes() {
 	var amount int64
 	err = rows.Scan(&name, &amount, &method)
 	s.Require().NoError(err)
-	s.Assert().Equal("Alice", name)
-	s.Assert().Equal(int64(100), amount)
-	s.Assert().Equal("credit", method)
+	s.Equal("Alice", name)
+	s.Equal(int64(100), amount)
+	s.Equal("credit", method)
 
 	// Should be only one row
 	s.Require().False(rows.Next())
@@ -353,7 +353,7 @@ func (s *TestSuite) TestStarSchemaLargeResult() {
 		err := rows.Scan(&name, &product, &rating)
 		s.Require().NoError(err)
 		count += 1
-		s.Assert().Equal("Alice", name)
+		s.Equal("Alice", name)
 	}
 
 	// 3 orders × 2 reviews = 6 combinations
