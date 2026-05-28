@@ -5,11 +5,11 @@ import (
 )
 
 // InternalNode capacity constants derived from page and header sizes.
-// Page size: 4096, Header size: 6 (base) + 8 (internal), ICell size: 12.
+// Page size: 4096, Header size: 6 (base) + 8 (internal), ICell size: 12, checksum: 4.
 const (
-	// InternalNodeMaxCells is (4096 - 6 - 8) / 12.
-	InternalNodeMaxCells = 340
-	// RootInternalNodeMaxCells is (4096 - 6 - 8 - 100) / 12.
+	// InternalNodeMaxCells is (4096 - 6 - 8 - 4) / 12.
+	InternalNodeMaxCells = 339
+	// RootInternalNodeMaxCells is (4096 - 6 - 8 - 100 - 4) / 12.
 	RootInternalNodeMaxCells = 331
 )
 

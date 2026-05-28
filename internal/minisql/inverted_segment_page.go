@@ -77,7 +77,7 @@ func NewInvertedSegmentPage() *invertedSegmentPage {
 	header := invertedSegmentPageHeader{
 		FormatVersion: invertedPageFormatVersion,
 		FreeStart:     uint16((invertedSegmentPageHeader{}).size()),
-		FreeEnd:       PageSize,
+		FreeEnd:       PageSize - pageChecksumSize,
 	}
 	return &invertedSegmentPage{Header: header}
 }

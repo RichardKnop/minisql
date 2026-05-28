@@ -388,11 +388,12 @@ func (n *LeafNode) Keys() []RowID {
 }
 
 // MaxSpace returns the maximum number of bytes available for cell data in the
-// page, accounting for the larger root-page header when IsRoot is set.
+// page, accounting for the larger root-page header when IsRoot is set and the
+// 4-byte CRC32 checksum reserved at the end of every page.
 func (n *LeafNode) MaxSpace() uint64 {
-	maxSpace := PageSize - headerSize()
+	maxSpace := PageSize - headerSize() - pageChecksumSize
 	if n.Header.IsRoot {
-		maxSpace = PageSize - rootHeaderSize()
+		maxSpace = PageSize - rootHeaderSize() - pageChecksumSize
 	}
 	return maxSpace
 }

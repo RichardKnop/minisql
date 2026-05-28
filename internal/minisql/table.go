@@ -1362,11 +1362,10 @@ func (t *Table) mergeInternalNodes(ctx context.Context, parent, left, right *Pag
 }
 
 func (t *Table) maxICells(pageIdx PageIndex) int {
-	maxICells := t.maximumICells
-	if maxICells == InternalNodeMaxCells && pageIdx == 0 {
-		maxICells = maxICells - uint32(RootPageConfigSize/ICellSize) - 1 // root page has less space
+	if t.maximumICells == InternalNodeMaxCells && pageIdx == 0 {
+		return RootInternalNodeMaxCells
 	}
-	return int(maxICells)
+	return int(t.maximumICells)
 }
 
 type callback func(page *Page)

@@ -111,12 +111,13 @@ var (
 			},
 		},
 		int((PageSize-uint32(RootPageConfigSize)-
-			7-          // base header
-			8-          // leaf header
-			5*8-        // 5 keys
-			5*8-        // 5 null bitmasks
-			5*1-        // 5 ColumnCount bytes (self-describing cell format)
-			5*8-        // 5×8 TypeCode bytes (8 columns: 6 base + 2 varchars, self-consistent)
+			uint32(pageChecksumSize)- // 4-byte CRC32 checksum at end of page
+			7-                        // base header
+			8-                        // leaf header
+			5*8-                      // 5 keys
+			5*8-                      // 5 null bitmasks
+			5*1-                      // 5 ColumnCount bytes (self-describing cell format)
+			5*8-                      // 5×8 TypeCode bytes (8 columns: 6 base + 2 varchars, self-consistent)
 			5*mediumRowBaseSize)/5),
 	)
 
@@ -163,12 +164,13 @@ var (
 			},
 		},
 		int((PageSize - uint32(RootPageConfigSize) -
-			7 -  // base header
-			8 -  // leaf header
-			8 -  // 1 key
-			8 -  // 1 null bitmask
-			1 -  // 1 ColumnCount byte (self-describing cell format)
-			21 - // 21 TypeCode bytes (21 columns: 6 base + 15 varchars, self-consistent)
+			uint32(pageChecksumSize) - // 4-byte CRC32 checksum at end of page
+			7 -                        // base header
+			8 -                        // leaf header
+			8 -                        // 1 key
+			8 -                        // 1 null bitmask
+			1 -                        // 1 ColumnCount byte (self-describing cell format)
+			21 -                       // 21 TypeCode bytes (21 columns: 6 base + 15 varchars, self-consistent)
 			bigRowBaseSize)),
 	)
 

@@ -106,7 +106,7 @@ func NewInvertedEntryPage(isLeaf bool) *invertedEntryPage {
 		FormatVersion: invertedPageFormatVersion,
 		IsLeaf:        isLeaf,
 		FreeStart:     uint16((invertedEntryPageHeader{}).size()),
-		FreeEnd:       PageSize,
+		FreeEnd:       PageSize - pageChecksumSize,
 	}
 	return &invertedEntryPage{Header: header}
 }
@@ -345,7 +345,7 @@ func NewInvertedPostingPage(level byte) *invertedPostingPage {
 		FormatVersion: invertedPageFormatVersion,
 		Level:         level,
 		FreeStart:     uint16((invertedPostingPageHeader{}).size()),
-		FreeEnd:       PageSize,
+		FreeEnd:       PageSize - pageChecksumSize,
 	}
 	return &invertedPostingPage{Header: header}
 }

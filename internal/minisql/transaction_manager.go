@@ -603,6 +603,9 @@ func (tm *TransactionManager) serializeWritesForWAL(ctx context.Context, tx *Tra
 		if err != nil {
 			return nil, fmt.Errorf("serialize page 0 for WAL: %w", err)
 		}
+		// Embed the page checksum so that WAL checkpoint can copy the frame
+		// verbatim to the DB file and GetPage can verify it on next open.
+		writePageChecksum(frame)
 		pages = append(pages, WALPage{Index: 0, Data: frame})
 	}
 
@@ -616,6 +619,7 @@ func (tm *TransactionManager) serializeWritesForWAL(ctx context.Context, tx *Tra
 			releasePages()
 			return nil, fmt.Errorf("marshal page %d for WAL: %w", pageIdx, err)
 		}
+		writePageChecksum(buf)
 		pages = append(pages, WALPage{Index: pageIdx, Data: buf})
 	}
 
