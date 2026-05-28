@@ -4,9 +4,14 @@ const (
 	// PageSize is the fixed size in bytes of every database page (4 KiB).
 	PageSize = 4096 // 4 kilobytes
 
+	// pageChecksumSize is the number of bytes reserved at the end of every page
+	// for the CRC32-IEEE checksum (format version 2+).
+	pageChecksumSize = 4
+
 	// UsablePageSize returns the usable size of a page after accounting for headers
-	// Page size minus base + internal/leaf header, minus key and null bitmask
-	UsablePageSize = PageSize - 7 - 8 - 8 - 8
+	// and the trailing 4-byte CRC32 checksum.
+	// Page size minus base + internal/leaf header, minus key and null bitmask, minus checksum.
+	UsablePageSize = PageSize - 7 - 8 - 8 - 8 - pageChecksumSize
 )
 
 // PageIndex is a 0-based index that identifies a page within a database file.

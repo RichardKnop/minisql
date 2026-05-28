@@ -2435,12 +2435,12 @@ func groupInvertedPostingBlocksIntoPages(blocks []invertedPostingBlock, level by
 		candidate := append(append([]invertedPostingBlock(nil), groups[lastIdx]...), block)
 		page := NewInvertedPostingPage(level)
 		page.Blocks = candidate
-		if err := ensureInvertedPostingPageFits(page, PageSize); err == nil {
+		if err := ensureInvertedPostingPageFits(page, PageSize-pageChecksumSize); err == nil {
 			groups[lastIdx] = candidate
 			continue
 		}
 		page.Blocks = []invertedPostingBlock{block}
-		if err := ensureInvertedPostingPageFits(page, PageSize); err != nil {
+		if err := ensureInvertedPostingPageFits(page, PageSize-pageChecksumSize); err != nil {
 			return nil, err
 		}
 		groups = append(groups, []invertedPostingBlock{block})
@@ -2582,12 +2582,13 @@ func invertedPostingPageUsedBytes(page *invertedPostingPage) uint64 {
 	return used
 }
 
-// invertedPageBodySize returns usable bytes for root and non-root inverted pages.
+// invertedPageBodySize returns usable bytes for root and non-root inverted pages,
+// excluding the 4-byte CRC32 checksum reserved at the end of every page.
 func invertedPageBodySize(pageIdx PageIndex) int {
 	if pageIdx == 0 {
-		return PageSize - RootPageConfigSize
+		return PageSize - RootPageConfigSize - pageChecksumSize
 	}
-	return PageSize
+	return PageSize - pageChecksumSize
 }
 
 // boolToInt converts found flags into slice-bound offsets.

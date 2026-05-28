@@ -661,10 +661,10 @@ func copyIndexNode(anyNode any) any {
 	}
 }
 
-// MaxSpace returns the total bytes available for cells in a page (page size minus header).
+// MaxSpace returns the total bytes available for cells in a page (page size minus header
+// and the 4-byte CRC32 checksum reserved at the end of every page).
 func (n *IndexNode[T]) MaxSpace() uint64 {
-	maxSpace := PageSize - indexHeaderSize()
-	return maxSpace
+	return PageSize - indexHeaderSize() - pageChecksumSize
 }
 
 // TakenSpace returns the total number of bytes currently occupied by all cells

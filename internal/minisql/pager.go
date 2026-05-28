@@ -2,11 +2,14 @@ package minisql
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"sync"
 
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 	"github.com/RichardKnop/minisql/pkg/lrucache"
 )
 
@@ -224,6 +227,9 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 		if err != nil {
 			return nil, err
 		}
+		if err := verifyPageChecksum(buf, pageIdx); err != nil {
+			return nil, err
+		}
 	}
 
 	// Unmarshal the page (CPU-intensive work, no lock held)
@@ -349,6 +355,7 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 	}
 
 	if pageIdx != 0 {
+		writePageChecksum(buf)
 		_, err := p.file.WriteAt(buf, int64(pageIdx)*int64(p.pageSize))
 		return err
 	}
@@ -357,6 +364,11 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 	if err := dbHeader.MarshalTo(headerBuf[:]); err != nil {
 		return err
 	}
+
+	// Checksum for page 0 covers the full assembled page:
+	// file[0:4092] = headerBuf[0:100] + buf[0:3992].
+	// Store the 4-byte result at buf[3992:3996] (= file[4092:4096]).
+	writeRootPageChecksum(headerBuf[:], buf, p.pageSize)
 
 	_, err := p.file.WriteAt(headerBuf[:], 0)
 	if err != nil {
@@ -442,17 +454,18 @@ func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) err
 
 	for _, mp := range marshaled {
 		if !mp.isRoot {
-			// Regular page write
+			writePageChecksum(mp.buf)
 			_, err := p.file.WriteAt(mp.buf, int64(mp.pageIdx)*int64(p.pageSize))
 			if err != nil {
 				return fmt.Errorf("error writing page %d: %w", mp.pageIdx, err)
 			}
 		} else {
-			// Root page with header
 			var headerBuf [RootPageConfigSize]byte
 			if err := mp.header.MarshalTo(headerBuf[:]); err != nil {
 				return fmt.Errorf("error marshaling header: %w", err)
 			}
+
+			writeRootPageChecksum(headerBuf[:], mp.buf, p.pageSize)
 
 			_, err := p.file.WriteAt(headerBuf[:], 0)
 			if err != nil {
@@ -467,6 +480,38 @@ func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) err
 	}
 
 	return fastSync(p.file)
+}
+
+// writePageChecksum computes CRC32-IEEE over the first PageSize-4 bytes of buf
+// and stores the result in the last 4 bytes.  Called after marshalPage for all
+// non-root pages.
+func writePageChecksum(buf []byte) {
+	checksum := crc32.ChecksumIEEE(buf[:len(buf)-pageChecksumSize])
+	binary.LittleEndian.PutUint32(buf[len(buf)-pageChecksumSize:], checksum)
+}
+
+// writeRootPageChecksum computes the CRC32-IEEE checksum for the assembled
+// page-0 layout (headerBuf + first (pageSize-RootPageConfigSize-4) bytes of
+// buf) and stores it at buf[pageSize-RootPageConfigSize-4 :
+// pageSize-RootPageConfigSize].  This is the last 4 bytes of the on-disk page.
+func writeRootPageChecksum(headerBuf, buf []byte, pageSize int) {
+	dataEnd := pageSize - RootPageConfigSize - pageChecksumSize // = 3992
+	h := crc32.NewIEEE()
+	h.Write(headerBuf)
+	h.Write(buf[:dataEnd])
+	binary.LittleEndian.PutUint32(buf[dataEnd:dataEnd+pageChecksumSize], h.Sum32())
+}
+
+// verifyPageChecksum reads the CRC32-IEEE stored in the last 4 bytes of buf and
+// compares it against the computed value.  Returns ErrPageChecksumMismatch on
+// mismatch so the caller can surface a corruption error.
+func verifyPageChecksum(buf []byte, pageIdx PageIndex) error {
+	stored := binary.LittleEndian.Uint32(buf[len(buf)-pageChecksumSize:])
+	computed := crc32.ChecksumIEEE(buf[:len(buf)-pageChecksumSize])
+	if stored != computed {
+		return minisqlErrors.PageChecksumError{PageIndex: uint32(pageIdx)}
+	}
+	return nil
 }
 
 func marshalPage(page *Page, buf []byte) error {
@@ -496,29 +541,39 @@ func marshalPage(page *Page, buf []byte) error {
 			return fmt.Errorf("error marshaling index overflow node: %w", err)
 		}
 	case page.InvertedEntryPage != nil:
+		// Reserve pageChecksumSize bytes at the end for the CRC32 checksum.
+		// For page 0 also strip the DB-header prefix (RootPageConfigSize bytes).
 		if page.Index == 0 {
-			buf = buf[:PageSize-RootPageConfigSize]
+			buf = buf[:PageSize-RootPageConfigSize-pageChecksumSize]
+		} else {
+			buf = buf[:PageSize-pageChecksumSize]
 		}
 		if err := page.InvertedEntryPage.Marshal(buf); err != nil {
 			return fmt.Errorf("error marshaling inverted entry page: %w", err)
 		}
 	case page.InvertedPostPage != nil:
 		if page.Index == 0 {
-			buf = buf[:PageSize-RootPageConfigSize]
+			buf = buf[:PageSize-RootPageConfigSize-pageChecksumSize]
+		} else {
+			buf = buf[:PageSize-pageChecksumSize]
 		}
 		if err := page.InvertedPostPage.Marshal(buf); err != nil {
 			return fmt.Errorf("error marshaling inverted posting page: %w", err)
 		}
 	case page.InvertedMetaPage != nil:
 		if page.Index == 0 {
-			buf = buf[:PageSize-RootPageConfigSize]
+			buf = buf[:PageSize-RootPageConfigSize-pageChecksumSize]
+		} else {
+			buf = buf[:PageSize-pageChecksumSize]
 		}
 		if err := page.InvertedMetaPage.Marshal(buf); err != nil {
 			return fmt.Errorf("error marshaling inverted meta page: %w", err)
 		}
 	case page.InvertedSegmentPage != nil:
 		if page.Index == 0 {
-			buf = buf[:PageSize-RootPageConfigSize]
+			buf = buf[:PageSize-RootPageConfigSize-pageChecksumSize]
+		} else {
+			buf = buf[:PageSize-pageChecksumSize]
 		}
 		if err := page.InvertedSegmentPage.Marshal(buf); err != nil {
 			return fmt.Errorf("error marshaling inverted segment page: %w", err)

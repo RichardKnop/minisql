@@ -9,8 +9,8 @@ const (
 	// leaf cell before the value is spilled to overflow pages.
 	MaxInlineVarchar = 255 // Store up to 255 bytes inline
 	// MaxOverflowPageData is the maximum number of data bytes that fit in a
-	// single overflow page (page size − type byte − header).
-	MaxOverflowPageData = 4096 - 1 - 8 // Page size - page type byte - OverflowPageHeader size
+	// single overflow page (page size − type byte − header − 4-byte checksum).
+	MaxOverflowPageData = PageSize - 1 - 8 - pageChecksumSize
 	// MaxOverflowTextSize limits the maximum size of a text value to 16 overflow pages.
 	MaxOverflowTextSize     = MaxOverflowPageData * 16
 	varcharLengthPrefixSize = 4
