@@ -53,6 +53,10 @@ func (r Row) Size() uint64 {
 			continue
 		}
 
+		if col.Kind.IsVector() {
+			size += 8 // 4-byte dims + 4-byte first overflow page index
+			continue
+		}
 		if !col.Kind.IsText() {
 			size += uint64(col.Size)
 			continue
@@ -272,6 +276,11 @@ func compareValue(kind ColumnKind, v1, v2 OptionalValue) bool {
 		u2, ok2 := v2.Value.(UUIDValue)
 		return ok1 && ok2 && u1 == u2
 	}
+	if kind.IsVector() {
+		// VectorPointer contains a slice and is not directly comparable; vectors
+		// on indexes are not supported, so just report "changed" to be safe.
+		return false
+	}
 	if !kind.IsText() {
 		return v1.Value == v2.Value
 	}
@@ -397,6 +406,13 @@ func (r Row) Marshal() ([]byte, error) {
 			}
 			copy(buf[offset:offset+16], value[:])
 			offset += 16
+		case Vector:
+			vp, ok := r.Values[i].Value.(VectorPointer)
+			if !ok {
+				return nil, fmt.Errorf("could not cast value for column %s to VectorPointer", col.Name)
+			}
+			vp.Marshal(buf, offset)
+			offset += 8
 		}
 	}
 

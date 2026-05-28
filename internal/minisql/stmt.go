@@ -169,6 +169,9 @@ const (
 	Timestamp
 	JSON
 	UUID
+	// Vector is the VECTOR(n) column type storing n-dimensional float32 embeddings.
+	// The dimension count is stored in Column.Size; data lives in overflow pages.
+	Vector
 )
 
 // IsInt reports whether the column kind is an integer type (INT4 or INT8).
@@ -198,6 +201,8 @@ func (k ColumnKind) String() string {
 		return "json"
 	case UUID:
 		return "uuid"
+	case Vector:
+		return "vector"
 	default:
 		return "unknown"
 	}
@@ -211,6 +216,11 @@ func (k ColumnKind) IsText() bool {
 // IsUUID reports whether the column kind is UUID.
 func (k ColumnKind) IsUUID() bool {
 	return k == UUID
+}
+
+// IsVector reports whether the column kind is a vector embedding type.
+func (k ColumnKind) IsVector() bool {
+	return k == Vector
 }
 
 // Column describes a single column in a table's schema, including its data type,
@@ -235,6 +245,12 @@ type Column struct {
 // MayUseOverflowText reports whether values in this column may live on overflow pages.
 func (c Column) MayUseOverflowText() bool {
 	return c.Kind == Text || c.Kind == JSON || (c.Kind == Varchar && c.Size > MaxInlineVarchar)
+}
+
+// MayUseOverflowVector reports whether values in this column live on vector overflow pages.
+// All VECTOR(n) columns always use overflow pages regardless of dimension count.
+func (c Column) MayUseOverflowVector() bool {
+	return c.Kind == Vector
 }
 
 func fieldsFromColumns(columns ...Column) []Field {
@@ -1065,6 +1081,15 @@ func coerceColumnValue(col Column, val OptionalValue, now Time, ctx string) (Opt
 			return val, fmt.Errorf("column %q: %w", col.Name, err)
 		}
 		val.Value = uv
+	case Vector:
+		vp, err := toVectorPointer(val.Value)
+		if err != nil {
+			return val, fmt.Errorf("column %q: %w", col.Name, err)
+		}
+		if col.Size > 0 && vp.Dims != col.Size {
+			return val, fmt.Errorf("column %q: vector has %d dimensions, expected %d", col.Name, vp.Dims, col.Size)
+		}
+		val.Value = vp
 	}
 	return val, nil
 }
@@ -1859,6 +1884,11 @@ func isValueValidForColumn(col Column, val OptionalValue) error {
 		default:
 			return fmt.Errorf("expects a UUID string for column %q", col.Name)
 		}
+	case Vector:
+		_, ok := val.Value.(VectorPointer)
+		if !ok {
+			return fmt.Errorf("expects a VectorPointer value for vector column %q", col.Name)
+		}
 	}
 	return nil
 }
@@ -1963,7 +1993,7 @@ func (s Statement) createTableDDL() string {
 
 	for i, col := range s.Columns {
 		fmt.Fprintf(&sb, "	%s %s", col.Name, col.Kind)
-		if col.Kind == Varchar {
+		if col.Kind == Varchar || col.Kind == Vector {
 			fmt.Fprintf(&sb, "(%d)", col.Size)
 		}
 		switch {

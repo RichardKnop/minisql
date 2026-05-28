@@ -243,6 +243,10 @@ func (c *Cursor) saveToCell(ctx context.Context, node *LeafNode, cellIdx uint32,
 	if err != nil {
 		return fmt.Errorf("store overflow texts: %w", err)
 	}
+	row, err = row.storeOverflowVectors(ctx, c.Table.pager)
+	if err != nil {
+		return fmt.Errorf("store overflow vectors: %w", err)
+	}
 
 	rowBuf, err := row.Marshal()
 	if err != nil {
@@ -430,7 +434,7 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 		return true, nil
 	}
 
-	// Remove any overflow pages
+	// Remove any overflow pages for changed text columns.
 	if overflowColumns := c.Table.textOverflowCols; len(overflowColumns) > 0 {
 		// TODO - a more efficient implementation would be to try to reuse existing overflow pages
 		// if possible. For example if text size didn't change much and fits into existing overflow pages.
@@ -447,9 +451,28 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 		}
 	}
 
+	// Remove any overflow pages for changed vector columns.
+	if overflowColumns := c.Table.vectorOverflowCols; len(overflowColumns) > 0 {
+		changedColumns := make([]Column, 0, len(changedValues))
+		for _, col := range overflowColumns {
+			_, ok := changedValues[col.Name]
+			if !ok {
+				continue
+			}
+			changedColumns = append(changedColumns, col)
+		}
+		if err := c.Table.freeOverflowPages(ctx, oldRow, changedColumns...); err != nil {
+			return false, err
+		}
+	}
+
 	row, err = row.storeOverflowTexts(ctx, c.Table.pager)
 	if err != nil {
 		return false, fmt.Errorf("store overflow texts: %w", err)
+	}
+	row, err = row.storeOverflowVectors(ctx, c.Table.pager)
+	if err != nil {
+		return false, fmt.Errorf("store overflow vectors: %w", err)
 	}
 
 	if c.Table.HasPrimaryKey() {

@@ -53,10 +53,11 @@ type Table struct {
 	// checks here first and stores results after planning. Nil for system tables
 	// and virtual tables created for derived-table subqueries.
 	planCache LRUCache[string]
-	// allFields and textOverflowCols are derived from Columns at construction time
-	// and reused across calls to avoid per-call allocations.
-	allFields        []Field
-	textOverflowCols []Column
+	// allFields, textOverflowCols, and vectorOverflowCols are derived from Columns at
+	// construction time and reused across calls to avoid per-call allocations.
+	allFields         []Field
+	textOverflowCols  []Column
+	vectorOverflowCols []Column
 	// rightmostTablePage caches the last leaf page index for SeekNextRowID so that
 	// sequential (autoincrement) inserts skip the O(log N) root→leaf traversal.
 	// lastTxIDTablePage guards against stale hints from rolled-back transactions.
@@ -103,6 +104,9 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 	for _, col := range columns {
 		if col.MayUseOverflowText() {
 			table.textOverflowCols = append(table.textOverflowCols, col)
+		}
+		if col.MayUseOverflowVector() {
+			table.vectorOverflowCols = append(table.vectorOverflowCols, col)
 		}
 	}
 
@@ -867,36 +871,67 @@ func (t *Table) freeOverflowPages(ctx context.Context, row Row, onlyForColumns .
 		columns = onlyForColumns
 	}
 	for _, col := range columns {
-		if !col.Kind.IsText() {
-			continue
-		}
-		value, ok := row.GetValue(col.Name)
-		if !ok || !value.Valid {
-			continue
-		}
-		textPointer, ok := value.Value.(TextPointer)
-		if !ok {
-			return fmt.Errorf("expected TextPointer value for text column %s", col.Name)
-		}
-		if textPointer.IsInline() {
-			continue
-		}
-		pagesToFree := make([]PageIndex, 0, 1)
-		overflowPage, err := t.pager.GetOverflowPage(ctx, textPointer.FirstPage)
-		if err != nil {
-			return err
-		}
-		pagesToFree = append(pagesToFree, overflowPage.Index)
-		for overflowPage.OverflowPage.Header.NextPage > 0 {
-			overflowPage, err = t.pager.GetOverflowPage(ctx, overflowPage.OverflowPage.Header.NextPage)
+		switch {
+		case col.Kind.IsText():
+			value, ok := row.GetValue(col.Name)
+			if !ok || !value.Valid {
+				continue
+			}
+			textPointer, ok := value.Value.(TextPointer)
+			if !ok {
+				return fmt.Errorf("expected TextPointer value for text column %s", col.Name)
+			}
+			if textPointer.IsInline() {
+				continue
+			}
+			pagesToFree := make([]PageIndex, 0, 1)
+			overflowPage, err := t.pager.GetOverflowPage(ctx, textPointer.FirstPage)
 			if err != nil {
 				return err
 			}
 			pagesToFree = append(pagesToFree, overflowPage.Index)
-		}
-		for _, pageIdx := range pagesToFree {
-			if err := t.pager.AddFreePage(ctx, pageIdx); err != nil {
+			for overflowPage.OverflowPage.Header.NextPage > 0 {
+				overflowPage, err = t.pager.GetOverflowPage(ctx, overflowPage.OverflowPage.Header.NextPage)
+				if err != nil {
+					return err
+				}
+				pagesToFree = append(pagesToFree, overflowPage.Index)
+			}
+			for _, pageIdx := range pagesToFree {
+				if err := t.pager.AddFreePage(ctx, pageIdx); err != nil {
+					return err
+				}
+			}
+
+		case col.Kind.IsVector():
+			value, ok := row.GetValue(col.Name)
+			if !ok || !value.Valid {
+				continue
+			}
+			vp, ok := value.Value.(VectorPointer)
+			if !ok {
+				return fmt.Errorf("expected VectorPointer value for vector column %s", col.Name)
+			}
+			if vp.Dims == 0 || vp.FirstPage == 0 {
+				continue
+			}
+			pagesToFree := make([]PageIndex, 0, 1)
+			overflowPage, err := t.pager.GetOverflowPage(ctx, vp.FirstPage)
+			if err != nil {
 				return err
+			}
+			pagesToFree = append(pagesToFree, overflowPage.Index)
+			for overflowPage.OverflowPage.Header.NextPage > 0 {
+				overflowPage, err = t.pager.GetOverflowPage(ctx, overflowPage.OverflowPage.Header.NextPage)
+				if err != nil {
+					return err
+				}
+				pagesToFree = append(pagesToFree, overflowPage.Index)
+			}
+			for _, pageIdx := range pagesToFree {
+				if err := t.pager.AddFreePage(ctx, pageIdx); err != nil {
+					return err
+				}
 			}
 		}
 	}

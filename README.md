@@ -12,6 +12,7 @@
 4. JSON + UUID as native types
 5. Built-in full-text search
 6. Built-in JSON inverted index
+7. Built-in vector similarity search (`VECTOR(n)` column type + `VEC_L2` / `VEC_COSINE` distance functions)
 
 To use minisql in your Go code, import the driver:
 
@@ -366,6 +367,7 @@ if err := rows.Err(); err != nil {
 | `TIMESTAMP`  | 8-byte signed integer representing number of microseconds from `2000-01-01 00:00:00 UTC` (`Postgres epoch`). Supported range is from `4713 BC` to `294276 AD` inclusive. |
 | `JSON`       | Variable-length JSON document. Stored as compact text (whitespace stripped on write). Validated on insert/update — invalid JSON is rejected. Supports path extraction via `->` / `->>` operators and `JSON_*` functions. See [JSON Type](#json-type). |
 | `UUID`       | Fixed 16-byte binary UUID stored inline in B-tree pages. Accepts the standard hyphenated form `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`. Upper-case input is normalised to lowercase on write. Invalid values are rejected at insert/update time. Returned as a lowercase hyphenated string. See [UUID Type](#uuid-type). |
+| `VECTOR(n)`  | n-dimensional float32 embedding vector. `n` is the dimension count declared in the column definition. The 8-byte inline leaf cell stores the dimension count and a pointer to overflow pages where the raw float32 data lives. Values are passed as bracket-delimited float lists: `'[0.1, 0.2, 0.3]'`. Returned as a string in the same format (trailing zeros stripped: `0.0` → `0`, `1.0` → `1`). Supports distance queries via `VEC_L2` and `VEC_COSINE`. See [Vector Type](#vector-type). |
 
 ## TIMESTAMP Spec
 
@@ -506,6 +508,84 @@ SELECT CAST('{"a": 1}' AS JSON);  -- Returns: {"a":1}  (compacted)
 - Extracting a key that does not exist returns SQL `NULL`.
 - Applying `->` or `->>` to a SQL `NULL` returns `NULL`.
 
+## Vector Type
+
+The `vector(n)` column type stores an `n`-dimensional float32 embedding vector. The dimension count is fixed at table-creation time and enforced on every insert and update.
+
+- Values are passed as bracket-delimited comma-separated float lists: `'[0.1, 0.2, 0.3]'`.
+- Values are returned as strings in the same bracket format (trailing zeros stripped: `1.0` → `1`, `0.0` → `0`).
+- The inline B-tree cell is 8 bytes (4-byte dimension count + 4-byte first overflow page index). Actual float data always lives on overflow pages.
+- Nullable vector columns are supported — pass `nil` to store SQL `NULL`.
+- Dimension mismatch on insert/update is rejected with an error.
+
+```sql
+CREATE TABLE documents (
+    id        int8 primary key autoincrement,
+    body      text not null,
+    embedding vector(3) not null
+);
+```
+
+### Inserting Vectors
+
+Pass vector values as strings via prepared statements:
+
+```go
+_, err := db.Exec(
+    `INSERT INTO documents (body, embedding) VALUES (?, ?)`,
+    "hello world", "[0.1, 0.2, 0.3]",
+)
+```
+
+### Querying Vectors
+
+```go
+rows, err := db.QueryContext(ctx,
+    `SELECT id, body, embedding FROM documents WHERE id = 1`)
+// ...
+var id int64
+var body, embedding string
+rows.Scan(&id, &body, &embedding)
+// embedding == "[0.1, 0.2, 0.3]"
+```
+
+### Vector Distance Functions
+
+Use `VEC_L2` (Euclidean distance) or `VEC_COSINE` (cosine distance) to measure similarity. The literal vector argument must be a bracket-delimited float string:
+
+```sql
+-- Find the 5 nearest documents to a query vector (smallest L2 distance first)
+SELECT id, body, VEC_L2(embedding, '[0.1, 0.2, 0.3]') AS dist
+FROM documents
+ORDER BY dist
+LIMIT 5;
+
+-- Top-3 most similar by cosine distance (identical direction = 0, orthogonal = 1)
+SELECT id, body, VEC_COSINE(embedding, '[1.0, 0.0, 0.0]') AS dist
+FROM documents
+ORDER BY dist
+LIMIT 3;
+
+-- Filtered vector search: only search within a category
+SELECT id, VEC_L2(embedding, '[1.0, 0.0]') AS dist
+FROM tagged_docs
+WHERE category = 'tech'
+ORDER BY dist
+LIMIT 10;
+```
+
+**`VEC_L2(col, literal)`** — Euclidean (L2) distance: `sqrt(Σ(aᵢ − bᵢ)²)`. Returns `0.0` for identical vectors.
+
+**`VEC_COSINE(col, literal)`** — Cosine distance: `1 − (a · b) / (|a| × |b|)`. Returns `0.0` for identical direction, `1.0` for orthogonal vectors. Both vectors must be non-zero; zero-vector input returns an error.
+
+### Nullable Vector Columns
+
+```go
+var emb *string
+rows.Scan(&emb)
+// emb == nil when the column value is NULL
+```
+
 ## UUID Type
 
 The `uuid` column type stores a standard UUID in fixed 16-byte binary form, inline in the B-tree page. No overflow pages are used.
@@ -614,6 +694,7 @@ rows.Scan(&owner)
 | Numeric functions | `ABS(n)` — absolute value (preserves input type); `FLOOR(n)`, `CEIL(n)` — floor/ceiling; `ROUND(n[, d])` — round to `d` decimal places (default 0); `MOD(a, b)` — modulo (integer or float). All usable in `SELECT`, `UPDATE SET`, composable with each other and arithmetic |
 | Date/time functions | `NOW()` — current UTC timestamp; `DATE_TRUNC('unit', ts)` — truncate to `year`/`month`/`week`/`day`/`hour`/`minute`/`second`; `EXTRACT('field', ts)` / `DATE_PART('field', ts)` — extract numeric field (`year`, `month`, `day`, `hour`, `minute`, `second`, `dow`); `TO_TIMESTAMP('str')` — parse timestamp string into a TIMESTAMP value. All usable in `SELECT`, `UPDATE SET`, composable with other expressions |
 | Full-text search functions | `MATCH(doc, query)` and `TS_RANK(doc, query)` provide initial full-text semantics. `CREATE FULLTEXT INDEX` can accelerate literal `MATCH` predicates on one `TEXT`/`VARCHAR` column. |
+| Vector distance functions | `VEC_L2(col, literal)` — Euclidean distance between a `VECTOR(n)` column and a literal vector string. `VEC_COSINE(col, literal)` — cosine distance (0 = identical direction, 1 = orthogonal). Both return `DOUBLE`. Use with `ORDER BY dist LIMIT k` for nearest-neighbour search. See [Vector Type](#vector-type). |
 | `CASE WHEN` | Searched form: `CASE WHEN cond THEN result … ELSE default END`; simple form: `CASE expr WHEN val THEN result … ELSE default END`. Multiple WHEN clauses, optional ELSE (omitting returns NULL). Usable in `SELECT` (including nested in arithmetic), `UPDATE SET`, supports `IS NULL` / `IS NOT NULL` / all comparison operators in conditions |
 | `UNION` / `UNION ALL` | Combine results of two or more `SELECT` statements. `UNION ALL` concatenates all rows (duplicates kept); `UNION` deduplicates the combined result. Chains of three or more branches supported (e.g. `SELECT … UNION ALL SELECT … UNION SELECT …`). Each branch may have its own `WHERE` clause. |
 | `CAST(expr AS type)` | Standard SQL type coercion. Supported target types: `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE`, `TEXT`, `VARCHAR(n)`, `TIMESTAMP`, `JSON`, `UUID`. Follows SQLite semantics: float→int truncates toward zero; text→int/float parses leading digits (non-numeric input → 0). `CAST(x AS JSON)` validates and compacts the value. `CAST(x AS UUID)` parses a UUID string and stores it in binary form. `CAST(uuid_col AS TEXT)` formats the 16-byte value back to a hyphenated lowercase string. NULL propagates. Usable anywhere an expression is valid (e.g. `SELECT CAST(price AS INT8)`, `SELECT CAST(n AS TEXT) AS label`, `SELECT CAST(id AS TEXT) FROM widgets`). |
@@ -682,6 +763,22 @@ rows.Scan(&owner)
 | `JSON_TYPE(doc[, path])` | JSON type name of the value (`object`, `array`, `text`, `integer`, `real`, `true`, `false`, `null`). |
 | `JSON_ARRAY_LENGTH(doc)` | Number of elements in a JSON array. |
 | `JSON_CONTAINS(doc, query)` | Boolean JSON subset containment, indexable with `CREATE INVERTED INDEX` when the query JSON is a literal. |
+
+#### Vector Distance Functions
+
+| Function | Description |
+|----------|-------------|
+| `VEC_L2(col, literal)` | Euclidean (L2) distance between a `VECTOR(n)` column and a bracket-delimited float literal. Returns `DOUBLE`. `0.0` for identical vectors. |
+| `VEC_COSINE(col, literal)` | Cosine distance: `1 − cosine_similarity`. Returns `DOUBLE`. `0.0` = identical direction, `1.0` = orthogonal. Both vectors must be non-zero. |
+
+Both functions are usable in `SELECT`, composable with `AS` aliases, and support `ORDER BY alias LIMIT k` for nearest-neighbour queries.
+
+```sql
+SELECT body, VEC_L2(embedding, '[0.1, 0.2, 0.3]') AS dist
+FROM documents
+ORDER BY dist
+LIMIT 5;
+```
 
 #### Full-Text Search Functions
 
