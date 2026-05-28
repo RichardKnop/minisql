@@ -143,14 +143,11 @@ func (d *Database) executeUpdateFrom(ctx context.Context, stmt Statement) (State
 			if err != nil {
 				return result, err
 			}
-			projected, err := projectReturning(row, stmt.ReturningFields)
-			if err != nil {
-				return result, err
-			}
-			returningRows = append(returningRows, projected)
+			returningRows = append(returningRows, row)
 		}
-		result.Columns = returningColumns(stmt.ReturningFields, targetTable.Columns)
-		result.Rows = NewSliceIterator(returningRows)
+		if err := applyReturning(&result, returningRows, stmt.ReturningFields, targetTable.Columns); err != nil {
+			return result, err
+		}
 	}
 
 	if ce := targetTable.logger.Check(zap.DebugLevel, "updated rows (UPDATE FROM)"); ce != nil {

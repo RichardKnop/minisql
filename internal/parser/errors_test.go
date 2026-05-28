@@ -74,12 +74,12 @@ func TestParseError_Unwrap(t *testing.T) {
 	}
 
 	t.Run("errors.Is matches wrapped sentinel", func(t *testing.T) {
-		assert.True(t, errors.Is(pe, sentinel))
+		assert.ErrorIs(t, pe, sentinel)
 	})
 
 	t.Run("errors.Is does not match unrelated error", func(t *testing.T) {
 		other := errors.New("other error")
-		assert.False(t, errors.Is(pe, other))
+		assert.NotErrorIs(t, pe, other)
 	})
 
 	t.Run("Unwrap returns sentinel directly", func(t *testing.T) {
@@ -88,7 +88,7 @@ func TestParseError_Unwrap(t *testing.T) {
 
 	t.Run("ParseError with nil err unwraps to nil", func(t *testing.T) {
 		inline := &ParseError{Pos: 0, Near: "foo", Msg: "some message"}
-		assert.Nil(t, inline.Unwrap())
+		assert.NoError(t, inline.Unwrap())
 	})
 }
 
@@ -163,12 +163,12 @@ func TestParserItem_errorf(t *testing.T) {
 	require.Error(t, err)
 
 	var pe *ParseError
-	require.True(t, errors.As(err, &pe))
+	require.ErrorAs(t, err, &pe)
 
 	assert.Equal(t, 7, pe.Pos)
 	assert.Equal(t, "foo FROM bar", pe.Near)
 	assert.Equal(t, `at SELECT: unexpected token "foo"`, pe.Msg)
-	assert.Nil(t, pe.Unwrap(), "errorf should not wrap a sentinel")
+	require.NoError(t, pe.Unwrap(), "errorf should not wrap a sentinel")
 	assert.Equal(t, `at SELECT: unexpected token "foo" (near "foo FROM bar", position 7)`, err.Error())
 }
 
@@ -188,12 +188,12 @@ func TestParserItem_wrapErr(t *testing.T) {
 	require.Error(t, err)
 
 	var pe *ParseError
-	require.True(t, errors.As(err, &pe))
+	require.ErrorAs(t, err, &pe)
 
 	assert.Equal(t, 6, pe.Pos)
 	assert.Equal(t, "123 = foo", pe.Near)
 	assert.Equal(t, "at WHERE: expected field", pe.Msg)
-	assert.True(t, errors.Is(err, sentinel), "wrapErr must preserve errors.Is for the sentinel")
+	require.ErrorIs(t, err, sentinel, "wrapErr must preserve errors.Is for the sentinel")
 	assert.Equal(t, `at WHERE: expected field (near "123 = foo", position 6)`, err.Error())
 }
 
@@ -208,10 +208,10 @@ func TestParserItem_wrapErr_atEndOfInput(t *testing.T) {
 	err := p.wrapErr(sentinel)
 
 	var pe *ParseError
-	require.True(t, errors.As(err, &pe))
+	require.ErrorAs(t, err, &pe)
 
 	assert.Equal(t, 0, pe.Pos)
 	assert.Empty(t, pe.Near)
 	assert.Equal(t, "statement kind cannot be empty (position 0)", err.Error())
-	assert.True(t, errors.Is(err, sentinel))
+	assert.ErrorIs(t, err, sentinel)
 }

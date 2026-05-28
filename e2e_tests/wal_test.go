@@ -153,7 +153,7 @@ func TestWAL_Checkpoint(t *testing.T) {
 	walPath := dbPath + "-wal"
 	info, err := os.Stat(walPath)
 	require.NoError(t, err)
-	assert.Greater(t, info.Size(), int64(0), "WAL file should be non-empty before checkpoint")
+	assert.Positive(t, info.Size(), "WAL file should be non-empty before checkpoint")
 
 	// Run the pragma checkpoint.
 	rows, err := db.Query(`PRAGMA wal_checkpoint;`)

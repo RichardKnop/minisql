@@ -53,7 +53,7 @@ func TestPushDownFilters(t *testing.T) {
 		// Both conditions should stay in base filters as a single AND group
 		assert.Len(t, baseFilters, 1, "Should have 1 condition group")
 		assert.Len(t, baseFilters[0], 2, "Group should have 2 conditions")
-		assert.Len(t, joinFilters["p"], 0, "Join table should have no filters")
+		assert.Empty(t, joinFilters["p"], "Join table should have no filters")
 	})
 
 	t.Run("Multiple OR-separated condition groups - base table only", func(t *testing.T) {
@@ -78,7 +78,7 @@ func TestPushDownFilters(t *testing.T) {
 		assert.Len(t, baseFilters, 2, "Should have 2 condition groups (OR-separated)")
 		assert.Len(t, baseFilters[0], 2, "First group should have 2 conditions (AND-separated)")
 		assert.Len(t, baseFilters[1], 1, "Second group should have 1 condition")
-		assert.Len(t, joinFilters["p"], 0, "Join table should have no filters")
+		assert.Empty(t, joinFilters["p"], "Join table should have no filters")
 	})
 
 	t.Run("Conditions split between base and join tables", func(t *testing.T) {
@@ -148,7 +148,7 @@ func TestPushDownFilters(t *testing.T) {
 
 		assert.Len(t, baseFilters, 1, "Should have 1 condition group")
 		assert.Len(t, baseFilters[0], 1, "Group should have 1 condition")
-		assert.Len(t, joinFilters["p"], 0, "Join table should have no filters")
+		assert.Empty(t, joinFilters["p"], "Join table should have no filters")
 	})
 
 	t.Run("Multiple join tables with conditions", func(t *testing.T) {
@@ -212,7 +212,7 @@ func TestPushDownFilters(t *testing.T) {
 		assert.Equal(t, "role", baseFilters[1][0].Operand1.Value.(Field).Name)
 
 		// Join table should have no filters in this case
-		assert.Len(t, joinFilters["p"], 0, "Join table should have no filters")
+		assert.Empty(t, joinFilters["p"], "Join table should have no filters")
 	})
 }
 
@@ -262,7 +262,7 @@ func TestExtractJoinColumnPairs(t *testing.T) {
 
 		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Len(t, pairs, 1, "Should extract one column pair")
 		assert.Equal(t, "id", pairs[0].BaseTableColumn.Name)
 		assert.Equal(t, "a", pairs[0].BaseTableColumn.AliasPrefix)
@@ -287,7 +287,7 @@ func TestExtractJoinColumnPairs(t *testing.T) {
 
 		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Len(t, pairs, 2, "Should extract two column pairs")
 
 		// First pair
@@ -315,7 +315,7 @@ func TestExtractJoinColumnPairs(t *testing.T) {
 
 		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Len(t, pairs, 1, "Should extract one column pair")
 		assert.Equal(t, "id", pairs[0].BaseTableColumn.Name)
 		assert.Equal(t, "a_id", pairs[0].JoinTableColumn.Name)
@@ -344,7 +344,7 @@ func TestExtractJoinColumnPairs(t *testing.T) {
 
 		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Len(t, pairs, 2, "Should extract only the two valid join conditions")
 		assert.Equal(t, "id", pairs[0].BaseTableColumn.Name)
 		assert.Equal(t, "a_id", pairs[0].JoinTableColumn.Name)
@@ -364,7 +364,7 @@ func TestExtractJoinColumnPairs(t *testing.T) {
 
 		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
 
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "could not extract valid join columns")
 		assert.Nil(t, pairs)
 	})
@@ -381,7 +381,7 @@ func TestExtractJoinColumnPairs(t *testing.T) {
 
 		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
 
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "column nonexistent_column does not exist in base table")
 		assert.Nil(t, pairs)
 	})
@@ -398,7 +398,7 @@ func TestExtractJoinColumnPairs(t *testing.T) {
 
 		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
 
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "column nonexistent_column does not exist in join table")
 		assert.Nil(t, pairs)
 	})
@@ -416,7 +416,7 @@ func TestExtractJoinColumnPairs(t *testing.T) {
 
 		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
 
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "could not extract valid join columns")
 		assert.Nil(t, pairs)
 	})
@@ -426,7 +426,7 @@ func TestExtractJoinColumnPairs(t *testing.T) {
 
 		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
 
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "could not extract valid join columns")
 		assert.Nil(t, pairs)
 	})
@@ -449,7 +449,7 @@ func TestExtractJoinColumnPairs(t *testing.T) {
 
 		pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
 
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "column invalid does not exist in join table")
 		assert.Nil(t, pairs)
 	})
@@ -1158,7 +1158,7 @@ func TestPushDownFilters_UnknownAlias(t *testing.T) {
 
 	assert.Len(t, baseFilters, 1, "Unknown alias condition falls back to base group")
 	assert.Len(t, baseFilters[0], 1)
-	assert.Len(t, joinFilters["p"], 0)
+	assert.Empty(t, joinFilters["p"])
 }
 
 func TestExtractJoinColumnPairs_NonFieldOperand(t *testing.T) {
@@ -1185,7 +1185,7 @@ func TestExtractJoinColumnPairs_NonFieldOperand(t *testing.T) {
 	}
 
 	pairs, err := extractJoinColumnPairs(conditions, "a", "b", baseTable, joinTable)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Nil(t, pairs)
 }
 

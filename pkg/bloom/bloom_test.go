@@ -24,7 +24,7 @@ func TestNew_ZeroN_Clamped(t *testing.T) {
 	// n=0 should be clamped to 1, not panic.
 	f := New(0, 0.01)
 	require.NotNil(t, f)
-	assert.Greater(t, f.M(), uint64(0))
+	assert.Positive(t, f.M())
 }
 
 func TestNew_BadFPRate_Clamped(t *testing.T) {

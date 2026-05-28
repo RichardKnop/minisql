@@ -311,8 +311,8 @@ func (s *TestSuite) TestNumericFunctions_FLOOR_CEIL() {
 	var floored, ceiled float64
 	err = s.db.QueryRow(`select FLOOR(amount), CEIL(amount) from "prices"`).Scan(&floored, &ceiled)
 	s.Require().NoError(err)
-	s.Equal(float64(9), floored)
-	s.Equal(float64(10), ceiled)
+	s.InDelta(float64(9), floored, 1e-9)
+	s.InDelta(float64(10), ceiled, 1e-9)
 }
 
 func (s *TestSuite) TestNumericFunctions_ROUND() {
@@ -328,7 +328,7 @@ func (s *TestSuite) TestNumericFunctions_ROUND() {
 	var rounded, rounded2 float64
 	err = s.db.QueryRow(`select ROUND(value), ROUND(value, 2) from "measurements"`).Scan(&rounded, &rounded2)
 	s.Require().NoError(err)
-	s.Equal(float64(3), rounded)
+	s.InDelta(float64(3), rounded, 1e-9)
 	s.InDelta(float64(3.14), rounded2, 1e-9)
 }
 

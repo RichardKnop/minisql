@@ -51,7 +51,7 @@ func TestExpr_String(t *testing.T) {
 		Right: &Expr{Column: "c"},
 		Op:    ArithAdd,
 	}).String())
-	assert.Equal(t, "", (*Expr)(nil).String())
+	assert.Empty(t, (*Expr)(nil).String())
 }
 
 func TestExpr_Columns(t *testing.T) {
@@ -87,7 +87,7 @@ func TestExpr_Eval_Literal(t *testing.T) {
 
 	res, err = (&Expr{Literal: float64(3.5)}).Eval(row)
 	require.NoError(t, err)
-	assert.Equal(t, float64(3.5), res)
+	assert.InDelta(t, float64(3.5), res, 1e-9)
 }
 
 func TestExpr_Eval_ColumnRef(t *testing.T) {
@@ -145,7 +145,7 @@ func TestExpr_Eval_IntegerArithmetic(t *testing.T) {
 	// Division always produces float64
 	res, err = expr(ArithDiv, 4).Eval(row)
 	require.NoError(t, err)
-	assert.Equal(t, float64(2.5), res)
+	assert.InDelta(t, float64(2.5), res, 1e-9)
 }
 
 func TestExpr_Eval_FloatArithmetic(t *testing.T) {
@@ -493,7 +493,7 @@ func TestExpr_Eval_TextSearch(t *testing.T) {
 
 		rank, err := (&Expr{FuncName: "TS_RANK", Args: []*Expr{{Column: "body"}, textExpr("minisql")}}).Eval(nullRow)
 		require.NoError(t, err)
-		assert.Equal(t, float64(0), rank)
+		assert.InDelta(t, float64(0), rank, 1e-9)
 	})
 }
 
@@ -631,7 +631,7 @@ func TestExpr_Eval_SUBSTR(t *testing.T) {
 	t.Run("start beyond end returns empty", func(t *testing.T) {
 		t.Parallel()
 		e := &Expr{FuncName: "SUBSTR", Args: []*Expr{textExpr("hi"), {Literal: int64(10)}}}
-		assert.Equal(t, "", evalText(t, e, NewRow(nil)))
+		assert.Empty(t, evalText(t, e, NewRow(nil)))
 	})
 
 	t.Run("length exceeds string returns remainder", func(t *testing.T) {
@@ -689,7 +689,7 @@ func TestExpr_Eval_CONCAT(t *testing.T) {
 	t.Run("all null returns empty string", func(t *testing.T) {
 		t.Parallel()
 		e := &Expr{FuncName: "CONCAT", Args: []*Expr{{IsNull: true}, {IsNull: true}}}
-		assert.Equal(t, "", evalText(t, e, NewRow(nil)))
+		assert.Empty(t, evalText(t, e, NewRow(nil)))
 	})
 
 	t.Run("from columns", func(t *testing.T) {
@@ -774,7 +774,7 @@ func TestExpr_Eval_FLOOR_CEIL(t *testing.T) {
 		e := &Expr{FuncName: "FLOOR", Args: []*Expr{{Literal: float64(3.9)}}}
 		v, err := e.Eval(row)
 		require.NoError(t, err)
-		assert.Equal(t, float64(3), v)
+		assert.InDelta(t, float64(3), v, 1e-9)
 	})
 
 	t.Run("CEIL float", func(t *testing.T) {
@@ -782,7 +782,7 @@ func TestExpr_Eval_FLOOR_CEIL(t *testing.T) {
 		e := &Expr{FuncName: "CEIL", Args: []*Expr{{Literal: float64(3.1)}}}
 		v, err := e.Eval(row)
 		require.NoError(t, err)
-		assert.Equal(t, float64(4), v)
+		assert.InDelta(t, float64(4), v, 1e-9)
 	})
 
 	t.Run("FLOOR integer is unchanged", func(t *testing.T) {
@@ -806,7 +806,7 @@ func TestExpr_Eval_FLOOR_CEIL(t *testing.T) {
 		e := &Expr{FuncName: "FLOOR", Args: []*Expr{{Literal: float64(-2.3)}}}
 		v, err := e.Eval(row)
 		require.NoError(t, err)
-		assert.Equal(t, float64(-3), v)
+		assert.InDelta(t, float64(-3), v, 1e-9)
 	})
 
 	t.Run("CEIL negative float", func(t *testing.T) {
@@ -814,7 +814,7 @@ func TestExpr_Eval_FLOOR_CEIL(t *testing.T) {
 		e := &Expr{FuncName: "CEIL", Args: []*Expr{{Literal: float64(-2.7)}}}
 		v, err := e.Eval(row)
 		require.NoError(t, err)
-		assert.Equal(t, float64(-2), v)
+		assert.InDelta(t, float64(-2), v, 1e-9)
 	})
 
 	t.Run("null propagates", func(t *testing.T) {
@@ -835,7 +835,7 @@ func TestExpr_Eval_ROUND(t *testing.T) {
 		e := &Expr{FuncName: "ROUND", Args: []*Expr{{Literal: float64(3.5)}}}
 		v, err := e.Eval(row)
 		require.NoError(t, err)
-		assert.Equal(t, float64(4), v)
+		assert.InDelta(t, float64(4), v, 1e-9)
 	})
 
 	t.Run("round down", func(t *testing.T) {
@@ -843,7 +843,7 @@ func TestExpr_Eval_ROUND(t *testing.T) {
 		e := &Expr{FuncName: "ROUND", Args: []*Expr{{Literal: float64(3.4)}}}
 		v, err := e.Eval(row)
 		require.NoError(t, err)
-		assert.Equal(t, float64(3), v)
+		assert.InDelta(t, float64(3), v, 1e-9)
 	})
 
 	t.Run("round to 2 decimal places", func(t *testing.T) {
@@ -1273,15 +1273,15 @@ func TestToFloat64(t *testing.T) {
 
 	v, err := toFloat64(int64(10))
 	require.NoError(t, err)
-	assert.Equal(t, float64(10), v)
+	assert.InDelta(t, float64(10), v, 1e-9)
 
 	v, err = toFloat64(float64(3.14))
 	require.NoError(t, err)
-	assert.Equal(t, 3.14, v)
+	assert.InDelta(t, 3.14, v, 1e-9)
 
 	v, err = toFloat64(int32(5))
 	require.NoError(t, err)
-	assert.Equal(t, float64(5), v)
+	assert.InDelta(t, float64(5), v, 1e-9)
 
 	v, err = toFloat64(float32(2.5))
 	require.NoError(t, err)

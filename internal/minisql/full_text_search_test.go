@@ -220,8 +220,8 @@ func TestTextSearchRank(t *testing.T) {
 	t.Run("empty inputs and stop-word-only queries have zero rank", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Equal(t, float64(0), textSearchRank("MiniSQL database", "the and of"))
-		assert.Equal(t, float64(0), textSearchRank("", "minisql"))
-		assert.Equal(t, float64(0), textSearchRank("MiniSQL database", `"unterminated phrase`))
+		assert.InDelta(t, float64(0), textSearchRank("MiniSQL database", "the and of"), 1e-9)
+		assert.InDelta(t, float64(0), textSearchRank("", "minisql"), 1e-9)
+		assert.InDelta(t, float64(0), textSearchRank("MiniSQL database", `"unterminated phrase`), 1e-9)
 	})
 }

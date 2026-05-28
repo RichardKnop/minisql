@@ -2,7 +2,6 @@ package minisql
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -100,8 +99,7 @@ func TestNormaliseJSON(t *testing.T) {
 			got, err := normaliseJSON(tt.input)
 			if tt.wantErr != "" {
 				require.Error(t, err)
-				assert.True(t, strings.Contains(err.Error(), tt.wantErr),
-					"expected error containing %q, got %q", tt.wantErr, err.Error())
+				assert.Contains(t, err.Error(), tt.wantErr)
 				return
 			}
 			require.NoError(t, err)
@@ -271,7 +269,7 @@ func TestJSONToScalar_ObjectAndArray(t *testing.T) {
 	got := jsonToScalar(obj)
 	tp, ok := got.(TextPointer)
 	require.True(t, ok, "expected TextPointer for object, got %T", got)
-	assert.Equal(t, `{"k":"v"}`, tp.String())
+	assert.JSONEq(t, `{"k":"v"}`, tp.String())
 
 	arr := []any{float64(1), float64(2)}
 	got = jsonToScalar(arr)

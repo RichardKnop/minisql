@@ -49,7 +49,7 @@ func TestStatement_AddJoin(t *testing.T) {
 		assert.Equal(t, "posts", join.TableName)
 		assert.Equal(t, "p", join.TableAlias)
 		assert.Equal(t, conditions, join.Conditions)
-		assert.Len(t, join.Joins, 0)
+		assert.Empty(t, join.Joins)
 	})
 
 	t.Run("first join - from table does not match statement table", func(t *testing.T) {
@@ -246,7 +246,7 @@ func TestStatement_AddJoin(t *testing.T) {
 
 		// First join should remain unchanged
 		assert.Equal(t, "posts", result.Joins[0].TableName)
-		assert.Len(t, result.Joins[0].Joins, 0)
+		assert.Empty(t, result.Joins[0].Joins)
 
 		// Second join should have the nested join
 		commentsJoin := result.Joins[1]
@@ -304,7 +304,7 @@ func TestStatement_AddJoin(t *testing.T) {
 		// Verify profiles join
 		profilesJoin := stmt.Joins[1]
 		assert.Equal(t, "profiles", profilesJoin.TableName)
-		assert.Len(t, profilesJoin.Joins, 0)
+		assert.Empty(t, profilesJoin.Joins)
 	})
 
 	t.Run("all join types", func(t *testing.T) {

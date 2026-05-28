@@ -2,7 +2,6 @@ package e2etests
 
 import (
 	"database/sql"
-	"errors"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
 )
@@ -32,7 +31,7 @@ func (s *TestSuite) TestCheckConstraints() {
 		_, err = stmt.Exec("Bad", int64(0), int64(5))
 		s.Require().Error(err)
 		var checkErr minisql.ErrCheckConstraintViolation
-		s.True(errors.As(err, &checkErr), "expected ErrCheckConstraintViolation, got %T: %v", err, err)
+		s.Require().ErrorAs(err, &checkErr)
 		s.Equal("price", checkErr.ColumnName)
 	})
 
@@ -44,7 +43,7 @@ func (s *TestSuite) TestCheckConstraints() {
 		_, err = stmt.Exec("Bad", int64(5), int64(-1))
 		s.Require().Error(err)
 		var checkErr minisql.ErrCheckConstraintViolation
-		s.True(errors.As(err, &checkErr), "expected ErrCheckConstraintViolation, got %T: %v", err, err)
+		s.Require().ErrorAs(err, &checkErr)
 		s.Equal("qty", checkErr.ColumnName)
 	})
 
@@ -67,7 +66,7 @@ func (s *TestSuite) TestCheckConstraints() {
 		_, err = stmt.Exec(int64(0))
 		s.Require().Error(err)
 		var checkErr minisql.ErrCheckConstraintViolation
-		s.True(errors.As(err, &checkErr), "expected ErrCheckConstraintViolation, got %T: %v", err, err)
+		s.Require().ErrorAs(err, &checkErr)
 		s.Equal("price", checkErr.ColumnName)
 	})
 }
@@ -98,7 +97,7 @@ func (s *TestSuite) TestCheckConstraints_DDLRoundTrip() {
 	_, err = s.db.Exec(`insert into "scores" (score) values (5)`)
 	s.Require().Error(err)
 	var checkErr minisql.ErrCheckConstraintViolation
-	s.True(errors.As(err, &checkErr), "expected ErrCheckConstraintViolation after reopen, got %T: %v", err, err)
+	s.Require().ErrorAs(err, &checkErr)
 	s.Equal("score", checkErr.ColumnName)
 }
 
@@ -116,7 +115,7 @@ func (s *TestSuite) TestCheckConstraints_VarcharColumn() {
 	_, err = s.db.Exec(`insert into "items" (code) values ('')`)
 	s.Require().Error(err)
 	var checkErr minisql.ErrCheckConstraintViolation
-	s.True(errors.As(err, &checkErr), "expected ErrCheckConstraintViolation, got %T: %v", err, err)
+	s.Require().ErrorAs(err, &checkErr)
 	s.Equal("code", checkErr.ColumnName)
 }
 
@@ -138,6 +137,6 @@ func (s *TestSuite) TestCheckConstraints_DefaultAndCheck() {
 	_, err = stmt.Exec(int64(0))
 	s.Require().Error(err)
 	var checkErr minisql.ErrCheckConstraintViolation
-	s.True(errors.As(err, &checkErr), "expected ErrCheckConstraintViolation, got %T: %v", err, err)
+	s.Require().ErrorAs(err, &checkErr)
 	s.Equal("cnt", checkErr.ColumnName)
 }

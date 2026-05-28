@@ -454,12 +454,12 @@ func TestTransactionManager_ExecuteInTransaction(t *testing.T) {
 			return nil
 		}
 
-		assert.Len(t, txManager.transactions, 0)
+		assert.Empty(t, txManager.transactions)
 
 		err := txManager.ExecuteInTransaction(ctx, fn)
 		require.NoError(t, err)
 
-		assert.Len(t, txManager.transactions, 0)
+		assert.Empty(t, txManager.transactions)
 		assert.True(t, fnRan)
 
 		mock.AssertExpectationsForObjects(t, pagerMock, saverMock)

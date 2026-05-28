@@ -128,10 +128,10 @@ func TestTable_BTreeInvariants_DeleteRegression_52Then5(t *testing.T) {
 func assertTableBTreeInvariants(t *testing.T, pager *pagerImpl, table *Table) {
 	t.Helper()
 
-	require.Greater(t, int(pager.TotalPages()), 0)
+	require.Positive(t, int(pager.TotalPages()))
 	rootPage := pager.pages[table.GetRootPageIdx()]
 	require.NotNil(t, rootPage)
-	require.True(t, (rootPage.LeafNode != nil) != (rootPage.InternalNode != nil), "root must be either leaf or internal")
+	require.NotEqual(t, rootPage.LeafNode != nil, rootPage.InternalNode != nil, "root must be either leaf or internal")
 
 	state := &tableTreeCheckState{
 		t:       t,
@@ -192,7 +192,7 @@ func (s *tableTreeCheckState) walk(pageIdx, parentIdx PageIndex, depth int) tabl
 	page := s.pager.pages[pageIdx]
 	require.NotNil(s.t, page)
 	require.Nil(s.t, page.FreePage, "reachable table page %d cannot also be free", pageIdx)
-	require.True(s.t, (page.LeafNode != nil) != (page.InternalNode != nil), "page %d must be either leaf or internal", pageIdx)
+	require.NotEqual(s.t, page.LeafNode != nil, page.InternalNode != nil, "page %d must be either leaf or internal", pageIdx)
 
 	if page.LeafNode != nil {
 		node := page.LeafNode

@@ -173,7 +173,7 @@ func TestParse_CheckConstraint(t *testing.T) {
 			got, err := New().Parse(context.Background(), aTestCase.SQL)
 			if aTestCase.Err != nil {
 				require.Error(t, err)
-				assert.ErrorIs(t, err, aTestCase.Err)
+				require.ErrorIs(t, err, aTestCase.Err)
 			} else {
 				require.NoError(t, err)
 			}

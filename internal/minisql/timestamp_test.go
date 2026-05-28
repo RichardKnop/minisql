@@ -478,7 +478,7 @@ func TestParseTimestamp(t *testing.T) {
 				assert.Equal(t, tt.err.Error(), err.Error())
 				return
 			}
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expected, actual)
 			assert.Equal(t, tt.expectedTotal, actual.TotalMicroseconds())
 			assert.Equal(t, tt.timestampStr, actual.String())

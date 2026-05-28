@@ -604,7 +604,7 @@ func TestWindowFuncString(t *testing.T) {
 			assert.Equal(t, tc.want, windowFuncString(wf))
 		})
 	}
-	assert.Equal(t, "", windowFuncString(nil))
+	assert.Empty(t, windowFuncString(nil))
 }
 
 // ── Integration: Table.Select with window functions ────────────────────────

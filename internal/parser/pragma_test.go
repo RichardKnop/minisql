@@ -85,7 +85,7 @@ func TestParse_Pragma(t *testing.T) {
 			statements, err := New().Parse(context.Background(), testCase.SQL)
 			if testCase.Err != nil {
 				require.Error(t, err)
-				assert.ErrorIs(t, err, testCase.Err)
+				require.ErrorIs(t, err, testCase.Err)
 				assert.Empty(t, statements)
 				return
 			}

@@ -45,7 +45,7 @@ func TestRowsColumnsCloseAndNext(t *testing.T) {
 	assert.Equal(t, time.Date(2024, 6, 15, 12, 34, 56, 123456000, time.UTC), dest[2])
 	assert.Nil(t, dest[3])
 
-	assert.ErrorIs(t, rows.Next(dest), io.EOF)
+	require.ErrorIs(t, rows.Next(dest), io.EOF)
 	require.NoError(t, rows.Close())
 }
 
@@ -125,5 +125,5 @@ func TestRowsNextUsesRowViews(t *testing.T) {
 	assert.Equal(t, time.Date(2024, 6, 15, 12, 34, 56, 123456000, time.UTC), dest[2])
 	assert.Nil(t, dest[3])
 
-	assert.ErrorIs(t, rows.Next(dest), io.EOF)
+	require.ErrorIs(t, rows.Next(dest), io.EOF)
 }

@@ -3,7 +3,6 @@ package e2etests
 import (
 	"context"
 	"database/sql"
-	"strings"
 )
 
 type explainResult struct {
@@ -56,8 +55,8 @@ func (s *TestSuite) TestExplainUnsupportedStatement() {
 	rows, err := s.db.QueryContext(context.Background(), `EXPLAIN INSERT INTO users("email", "name") VALUES ('x@example.com', 'X');`)
 	s.Require().Error(err)
 	s.Nil(rows)
-	s.True(strings.Contains(err.Error(), "EXPLAIN currently supports SELECT statements only"))
-	s.True(strings.Contains(err.Error(), "got INSERT"))
+	s.Contains(err.Error(), "EXPLAIN currently supports SELECT statements only")
+	s.Contains(err.Error(), "got INSERT")
 }
 
 func (s *TestSuite) TestExplainSelectWithWhereSubquery() {

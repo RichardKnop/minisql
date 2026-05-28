@@ -3,6 +3,7 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"go.uber.org/zap"
 )
@@ -59,12 +60,8 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 			return stmt
 		}
 		merged := make(map[string]OptionalValue, len(stmt.Updates)+len(rowMap))
-		for k, v := range stmt.Updates {
-			merged[k] = v
-		}
-		for k, v := range rowMap {
-			merged[k] = v
-		}
+		maps.Copy(merged, stmt.Updates)
+		maps.Copy(merged, rowMap)
 		s := stmt
 		s.Updates = merged
 		return s
@@ -178,14 +175,11 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 			if err != nil {
 				return result, err
 			}
-			projected, err := projectReturning(row, stmt.ReturningFields)
-			if err != nil {
-				return result, err
-			}
-			returningRows = append(returningRows, projected)
+			returningRows = append(returningRows, row)
 		}
-		result.Columns = returningColumns(stmt.ReturningFields, t.Columns)
-		result.Rows = NewSliceIterator(returningRows)
+		if err := applyReturning(&result, returningRows, stmt.ReturningFields, t.Columns); err != nil {
+			return result, err
+		}
 	}
 
 	return result, nil

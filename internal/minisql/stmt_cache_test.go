@@ -53,19 +53,19 @@ func TestDatabase_PrepareStatementCaching(t *testing.T) {
 
 	// First call should parse and set CacheKey.
 	stmt1, err := db.PrepareStatement(ctx, query1)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, stmt1Want, stmt1)
 
 	// Second call with same query should return cached statement (CacheKey preserved).
 	stmt2, err := db.PrepareStatement(ctx, query1)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, stmt1Want, stmt2)
 
 	mockParser.On("Parse", ctx, query2).Return([]Statement{stmt2Mock}, nil).Once()
 
 	// Different query should parse separately.
 	stmt3, err := db.PrepareStatement(ctx, query2)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotEqual(t, stmt1, stmt3, "Different queries should have different statements")
 	assert.Equal(t, stmt2Want, stmt3)
 }

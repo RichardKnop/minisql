@@ -110,7 +110,7 @@ func TestTable_findBestEqualityIndexMatch_WithoutStats(t *testing.T) {
 		match := table.findBestEqualityIndexMatch(conditions)
 		require.NotNil(t, match)
 		assert.Equal(t, "idx_ab", match.info.Name)
-		assert.Equal(t, 2, len(match.matchedConditions))
+		assert.Len(t, match.matchedConditions, 2)
 	})
 }
 
@@ -257,7 +257,7 @@ func TestTable_findBestEqualityIndexMatch_WithStats(t *testing.T) {
 		require.NotNil(t, match)
 		// Same selectivity, but idx_ab matches more columns
 		assert.Equal(t, "idx_ab", match.info.Name)
-		assert.Equal(t, 2, len(match.matchedConditions))
+		assert.Len(t, match.matchedConditions, 2)
 	})
 
 	t.Run("same selectivity and columns - prefer primary key", func(t *testing.T) {
@@ -584,7 +584,7 @@ func TestTable_findBestEqualityIndexMatch_EdgeCases(t *testing.T) {
 		require.NotNil(t, match)
 		// Composite index has better selectivity (80% vs 1%)
 		assert.Equal(t, "idx_composite", match.info.Name)
-		assert.Equal(t, 3, len(match.matchedConditions))
+		assert.Len(t, match.matchedConditions, 3)
 	})
 }
 

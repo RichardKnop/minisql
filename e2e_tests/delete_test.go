@@ -31,7 +31,7 @@ func (s *TestSuite) TestDelete() {
 
 		var before int64
 		s.Require().NoError(s.db.QueryRow(`select count(*) from "del_users"`).Scan(&before))
-		s.Greater(before, int64(0))
+		s.Positive(before)
 
 		res, err := s.db.Exec(`delete from "del_users"`)
 		s.Require().NoError(err)

@@ -35,7 +35,7 @@ func (s *TestSuite) TestJSON() {
 		var payload string
 		s.Require().NoError(rows.Scan(&payload))
 		// Stored in compact form
-		s.Equal(`{"type":"scroll","y":99}`, payload)
+		s.JSONEq(`{"type":"scroll","y":99}`, payload)
 	})
 
 	s.Run("INSERT_json_array", func() {

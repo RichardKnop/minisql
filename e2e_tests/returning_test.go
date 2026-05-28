@@ -25,7 +25,7 @@ func (s *TestSuite) TestReturning() {
 		s.Require().True(rows.Next())
 		var id int64
 		s.Require().NoError(rows.Scan(&id))
-		s.Greater(id, int64(0))
+		s.Positive(id)
 		s.Require().False(rows.Next())
 		s.Require().NoError(rows.Err())
 	})
@@ -42,7 +42,7 @@ func (s *TestSuite) TestReturning() {
 		var id, score int64
 		var name string
 		s.Require().NoError(rows.Scan(&id, &name, &score))
-		s.Greater(id, int64(0))
+		s.Positive(id)
 		s.Equal("Bob", name)
 		s.Equal(int64(20), score)
 		s.Require().False(rows.Next())
@@ -219,7 +219,7 @@ func (s *TestSuite) TestReturning() {
 		var name, email string
 		var ts time.Time
 		s.Require().NoError(rows.Scan(&id, &name, &email, &score, &ts))
-		s.Greater(id, int64(0))
+		s.Positive(id)
 		s.Equal("Star", name)
 		s.Equal(int64(77), score)
 		s.Require().False(rows.Next())
@@ -302,7 +302,7 @@ func (s *TestSuite) TestReturning() {
 		var id, score int64
 		var name string
 		s.Require().NoError(rows.Scan(&id, &name, &score))
-		s.Greater(id, int64(0))
+		s.Positive(id)
 		s.Equal("Fresh", name)
 		s.Equal(int64(42), score)
 		s.Require().False(rows.Next())

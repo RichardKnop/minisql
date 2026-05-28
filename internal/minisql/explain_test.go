@@ -135,7 +135,7 @@ func TestRangeDetail(t *testing.T) {
 
 	t.Run("no bounds", func(t *testing.T) {
 		t.Parallel()
-		assert.Equal(t, "", string(rangeDetail(RangeCondition{})))
+		assert.Empty(t, string(rangeDetail(RangeCondition{})))
 	})
 }
 

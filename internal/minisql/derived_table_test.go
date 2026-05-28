@@ -52,8 +52,8 @@ func TestStripFieldsAlias(t *testing.T) {
 
 	got := stripFieldsAlias(fields, "t")
 
-	assert.Equal(t, "", got[0].AliasPrefix)
-	assert.Equal(t, "", got[1].AliasPrefix)
+	assert.Empty(t, got[0].AliasPrefix)
+	assert.Empty(t, got[1].AliasPrefix)
 	assert.Equal(t, "u", got[2].AliasPrefix, "non-matching alias must be preserved")
 
 	// Original slice must not be mutated.
@@ -77,7 +77,7 @@ func TestStripConditionAlias(t *testing.T) {
 
 	got := stripConditionAlias(cond, "t")
 
-	assert.Equal(t, "", got.Operand1.Value.(Field).AliasPrefix)
+	assert.Empty(t, got.Operand1.Value.(Field).AliasPrefix)
 	assert.Equal(t, OperandInteger, got.Operand2.Type) // literal unchanged
 
 	// Field-to-field condition: both sides have alias.
@@ -87,8 +87,8 @@ func TestStripConditionAlias(t *testing.T) {
 		Operand2: Operand{Type: OperandField, Value: Field{Name: "b", AliasPrefix: "t"}},
 	}
 	got2 := stripConditionAlias(cond2, "t")
-	assert.Equal(t, "", got2.Operand1.Value.(Field).AliasPrefix)
-	assert.Equal(t, "", got2.Operand2.Value.(Field).AliasPrefix)
+	assert.Empty(t, got2.Operand1.Value.(Field).AliasPrefix)
+	assert.Empty(t, got2.Operand2.Value.(Field).AliasPrefix)
 }
 
 func TestStripConditionsAlias(t *testing.T) {
@@ -106,7 +106,7 @@ func TestStripConditionsAlias(t *testing.T) {
 
 	got := stripConditionsAlias(conds, "sub")
 
-	assert.Equal(t, "", got[0][0].Operand1.Value.(Field).AliasPrefix)
+	assert.Empty(t, got[0][0].Operand1.Value.(Field).AliasPrefix)
 	// Original must not be mutated.
 	assert.Equal(t, "sub", conds[0][0].Operand1.Value.(Field).AliasPrefix)
 }
@@ -121,7 +121,7 @@ func TestStripOrderByAlias(t *testing.T) {
 			{Field: Field{Name: "name", AliasPrefix: "other"}, Direction: Asc},
 		}
 		got := stripOrderByAlias(ob, "t")
-		assert.Equal(t, "", got[0].Field.AliasPrefix)
+		assert.Empty(t, got[0].Field.AliasPrefix)
 		assert.Equal(t, Desc, got[0].Direction)
 		assert.Equal(t, "other", got[1].Field.AliasPrefix, "non-matching alias preserved")
 		// Original must not be mutated.
@@ -151,7 +151,7 @@ func TestStripAggregatesAlias(t *testing.T) {
 	got := stripAggregatesAlias(aggs, "t")
 
 	assert.Equal(t, "amount", got[0].Column)
-	assert.Equal(t, "", got[1].Column)
+	assert.Empty(t, got[1].Column)
 	assert.Equal(t, "other.price", got[2].Column)
 
 	// Original must not be mutated.
@@ -248,11 +248,11 @@ func TestStripDerivedTableAliasPrefix(t *testing.T) {
 
 	got := stripDerivedTableAliasPrefix(stmt, "d")
 
-	assert.Equal(t, "", got.Fields[0].AliasPrefix)
-	assert.Equal(t, "", got.Fields[1].AliasPrefix)
-	assert.Equal(t, "", got.Conditions[0][0].Operand1.Value.(Field).AliasPrefix)
-	assert.Equal(t, "", got.OrderBy[0].Field.AliasPrefix)
-	assert.Equal(t, "", got.GroupBy[0].AliasPrefix)
+	assert.Empty(t, got.Fields[0].AliasPrefix)
+	assert.Empty(t, got.Fields[1].AliasPrefix)
+	assert.Empty(t, got.Conditions[0][0].Operand1.Value.(Field).AliasPrefix)
+	assert.Empty(t, got.OrderBy[0].Field.AliasPrefix)
+	assert.Empty(t, got.GroupBy[0].AliasPrefix)
 
 	// Original must not be mutated.
 	assert.Equal(t, "d", stmt.Fields[0].AliasPrefix)
