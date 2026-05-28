@@ -162,7 +162,8 @@ type Conn struct {
 	slowQueryThreshold time.Duration
 }
 
-// Ping ...
+// Ping verifies the connection is still alive. MiniSQL is an embedded engine
+// with no network layer, so this always succeeds.
 func (c *Conn) Ping(ctx context.Context) error {
 	// TODO - implement a real ping?
 	return nil
@@ -340,21 +341,24 @@ func (c *Conn) QueryContext(ctx context.Context, query string, args []driver.Nam
 	}, nil
 }
 
-// SetTransaction ...
+// SetTransaction associates an active write transaction with this connection.
+// Passing nil clears the current transaction after commit or rollback.
 func (c *Conn) SetTransaction(tx *minisql.Transaction) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.transaction = tx
 }
 
-// HasActiveTransaction ...
+// HasActiveTransaction reports whether an explicit BEGIN transaction is
+// currently open on this connection.
 func (c *Conn) HasActiveTransaction() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.transaction != nil
 }
 
-// TransactionContext ...
+// TransactionContext returns a context that carries the connection's active
+// transaction, or the original context if no transaction is open.
 func (c *Conn) TransactionContext(ctx context.Context) context.Context {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

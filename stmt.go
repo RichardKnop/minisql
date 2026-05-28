@@ -10,7 +10,9 @@ import (
 	"github.com/RichardKnop/minisql/internal/minisql"
 )
 
-// Stmt ...
+// Stmt is a database/sql/driver.Stmt implementation for a prepared SQL
+// statement. It holds a pre-parsed statement and binds arguments at execution
+// time via ExecContext or QueryContext.
 type Stmt struct {
 	conn      *Conn
 	query     string
@@ -49,7 +51,9 @@ func (s Stmt) Exec(args []driver.Value) (driver.Result, error) {
 	return nil, fmt.Errorf("Exec without context is not supported; use ExecContext instead")
 }
 
-// ExecContext ...
+// ExecContext executes the prepared statement with the given arguments.
+// It binds placeholder values, runs the statement, and returns the affected
+// row count and last-insert-id wrapped in a Result.
 func (s Stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (result driver.Result, err error) {
 	start := time.Now()
 	defer func() {
@@ -82,7 +86,9 @@ func (s Stmt) Query(args []driver.Value) (driver.Rows, error) {
 	return nil, fmt.Errorf("Query without context is not supported; use QueryContext instead")
 }
 
-// QueryContext ...
+// QueryContext executes the prepared query with the given arguments and returns
+// the result rows. A read-only snapshot transaction is opened automatically for
+// SELECT statements and committed when the returned Rows is closed.
 func (s Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (rows driver.Rows, err error) {
 	start := time.Now()
 	defer func() {
