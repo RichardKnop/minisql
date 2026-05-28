@@ -9,7 +9,9 @@ import (
 	"github.com/RichardKnop/minisql/internal/minisql"
 )
 
-// Rows ...
+// Rows is a database/sql/driver.Rows implementation that iterates over the
+// results of a SELECT query. It supports both the materialised row iterator
+// path and the zero-copy RowView path used by covering-index scans.
 type Rows struct {
 	columns             []minisql.Column
 	rowViewFieldIndexes []int

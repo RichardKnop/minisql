@@ -1,6 +1,7 @@
 package minisql
 
-// Result ...
+// Result is a database/sql/driver.Result implementation returned by INSERT,
+// UPDATE, and DELETE statements.
 type Result struct {
 	rowsAffected int64
 	lastInsertID int64
