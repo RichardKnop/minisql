@@ -760,7 +760,7 @@ Parser files mirror engine files: `parser/select.go` ↔ `internal/minisql/selec
 ## Constraints and Known Limits
 
 - **Maximum 64 columns per table** — enforced by the 64-bit NULL bitmask in each row.
-- **Maximum row size: ~4,065 bytes** — a row must fit in a single page (overflow pages handle TEXT/JSON column data, but the row header + fixed-width fields must fit).
+- **Maximum row size: ~4,061 bytes** — a row must fit in a single page (overflow pages handle TEXT/JSON column data, but the row header + fixed-width fields must fit). The 4-byte CRC32-IEEE checksum at the end of every page is included in this reduction from the raw 4096-byte page size.
 - **TEXT/VARCHAR key columns in indexes** — TEXT columns cannot be primary-key or unique-index key columns (enforced in `validateCreateTable`). VARCHAR up to `MaxIndexKeySize` is permitted.
 - **Single connection enforced** — `Driver.Open` returns `ErrDatabaseAlreadyOpen` when a second `sql.Open` targets the same file path (enforced by a per-file lock map in the driver). Multiple in-process connections to the same file would corrupt the page cache.
 - **No `database/sql` connection pooling** — always `db.SetMaxOpenConns(1)` / `db.SetMaxIdleConns(1)`.
