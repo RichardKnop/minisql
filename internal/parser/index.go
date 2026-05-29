@@ -150,8 +150,8 @@ func (p *parserItem) parseCreateIndexWithOptions() error {
 			}
 			p.IndexHNSWM = int(n)
 		case "EF_CONSTRUCTION":
-			n, err := strconv.ParseUint(optionValue, 10, 32)
-			if err != nil || n == 0 {
+			n, err := strconv.ParseInt(optionValue, 10, 32)
+			if err != nil || n <= 0 {
 				return p.errorf("at CREATE INDEX: WITH ef_construction must be a positive integer, got %q", optionValue)
 			}
 			p.IndexHNSWEfConstruct = int(n)
