@@ -809,7 +809,7 @@ func (d *Database) tableFromSQL(ctx context.Context, schema Schema) (*Table, err
 	), nil
 }
 
-func (d *Database) initPrimaryKey(ctx context.Context, schema Schema) error {
+func (d *Database) initPrimaryKey(_ context.Context, schema Schema) error {
 	// TODO - parse SQL once we store it for primary indexes? Right now it will be NULL
 
 	table, ok := d.tables[schema.TableName]
@@ -838,7 +838,7 @@ func (d *Database) initPrimaryKey(ctx context.Context, schema Schema) error {
 	return nil
 }
 
-func (d *Database) initUniqueIndex(ctx context.Context, schema Schema) error {
+func (d *Database) initUniqueIndex(_ context.Context, schema Schema) error {
 	// TODO - parse SQL once we store it for unique indexes? Right now it will be NULL
 
 	table, ok := d.tables[schema.TableName]
@@ -904,14 +904,16 @@ func (d *Database) initSecondaryIndex(ctx context.Context, schema Schema) error 
 	}
 	secondaryIndex := SecondaryIndex{
 		IndexInfo: IndexInfo{
-			Name:          schema.Name,
-			Columns:       []Column{indexColumn},
-			WhereClause:   stmt.IndexWhereClause,
-			WhereCond:     stmt.Conditions,
-			Expression:    stmt.IndexExpression,
-			ExpressionSQL: stmt.IndexExpressionSQL,
-			Tokenizer:     stmt.IndexTokenizer,
-			Method:        stmt.IndexMethod,
+			Name:               schema.Name,
+			Columns:            []Column{indexColumn},
+			WhereClause:        stmt.IndexWhereClause,
+			WhereCond:          stmt.Conditions,
+			Expression:         stmt.IndexExpression,
+			ExpressionSQL:      stmt.IndexExpressionSQL,
+			Tokenizer:          stmt.IndexTokenizer,
+			Method:             stmt.IndexMethod,
+			HNSWM:              stmt.IndexHNSWM,
+			HNSWEfConstruction: stmt.IndexHNSWEfConstruct,
 		},
 	}
 
@@ -927,6 +929,14 @@ func (d *Database) initSecondaryIndex(ctx context.Context, schema Schema) error 
 			return err
 		}
 		secondaryIndex.InvertedIndex = invertedIdx
+	} else if secondaryIndexUsesDedicatedHNSWStorage(secondaryIndex.Method) {
+		tp := NewTransactionalPager(
+			d.factory.ForHNSWIndex(),
+			d.txManager,
+			table.Name,
+			schema.Name,
+		)
+		secondaryIndex.HNSWIndex = OpenHNSWIndex(tp, schema.RootPage)
 	} else {
 		storageColumns := secondaryIndexStorageColumns(secondaryIndex)
 
@@ -1508,6 +1518,9 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, table *Table
 		return err
 	}
 	if exists {
+		if stmt.IfNotExists {
+			return nil
+		}
 		return errIndexAlreadyExists
 	}
 
@@ -1546,14 +1559,16 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, table *Table
 
 	secondaryIndex := SecondaryIndex{
 		IndexInfo: IndexInfo{
-			Name:          stmt.IndexName,
-			Columns:       indexColumns,
-			WhereClause:   stmt.IndexWhereClause,
-			WhereCond:     stmt.Conditions,
-			Expression:    stmt.IndexExpression,
-			ExpressionSQL: stmt.IndexExpressionSQL,
-			Tokenizer:     stmt.IndexTokenizer,
-			Method:        stmt.IndexMethod,
+			Name:               stmt.IndexName,
+			Columns:            indexColumns,
+			WhereClause:        stmt.IndexWhereClause,
+			WhereCond:          stmt.Conditions,
+			Expression:         stmt.IndexExpression,
+			ExpressionSQL:      stmt.IndexExpressionSQL,
+			Tokenizer:          stmt.IndexTokenizer,
+			Method:             stmt.IndexMethod,
+			HNSWM:              stmt.IndexHNSWM,
+			HNSWEfConstruction: stmt.IndexHNSWEfConstruct,
 		},
 	}
 	secondaryIndex, err = d.createSecondaryIndex(ctx, stmt, table, secondaryIndex)
@@ -1562,7 +1577,8 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, table *Table
 	}
 
 	// Scan table and populate index
-	if err := d.populateIndex(ctx, table, secondaryIndex); err != nil {
+	secondaryIndex, err = d.populateIndex(ctx, stmt, table, secondaryIndex)
+	if err != nil {
 		return err
 	}
 
@@ -1571,12 +1587,16 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, table *Table
 	return nil
 }
 
-func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryIndex SecondaryIndex) error {
+func (d *Database) populateIndex(ctx context.Context, stmt Statement, table *Table, secondaryIndex SecondaryIndex) (SecondaryIndex, error) {
 	if secondaryIndex.Method == IndexMethodFullText {
-		return d.populateFullTextIndex(ctx, table, secondaryIndex)
+		return secondaryIndex, d.populateFullTextIndex(ctx, table, secondaryIndex)
 	}
 	if secondaryIndex.Method == IndexMethodInverted {
-		return d.populateJSONInvertedIndex(ctx, table, secondaryIndex)
+		return secondaryIndex, d.populateJSONInvertedIndex(ctx, table, secondaryIndex)
+	}
+	if secondaryIndex.Method == IndexMethodHNSW {
+		updated, err := d.populateHNSWIndex(ctx, stmt, table, secondaryIndex)
+		return updated, err
 	}
 
 	result, err := table.Select(ctx, Statement{
@@ -1584,7 +1604,7 @@ func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryInd
 		Fields: fieldsFromColumns(table.Columns...),
 	})
 	if err != nil {
-		return err
+		return secondaryIndex, err
 	}
 
 	for result.Rows.Next(ctx) {
@@ -1594,7 +1614,7 @@ func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryInd
 		if len(secondaryIndex.WhereCond) > 0 {
 			ok, err := row.CheckOneOrMore(secondaryIndex.WhereCond)
 			if err != nil {
-				return fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)
+				return secondaryIndex, fmt.Errorf("partial index %s where check: %w", secondaryIndex.Name, err)
 			}
 			if !ok {
 				continue
@@ -1604,23 +1624,23 @@ func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryInd
 		switch {
 		case secondaryIndex.Method == IndexMethodFullText:
 			if err := table.insertFullTextIndexKeys(ctx, secondaryIndex, row.Key, row); err != nil {
-				return err
+				return secondaryIndex, err
 			}
 		case secondaryIndex.Method == IndexMethodInverted:
 			if err := table.insertInvertedIndexKeys(ctx, secondaryIndex, row.Key, row); err != nil {
-				return err
+				return secondaryIndex, err
 			}
 		case secondaryIndex.Expression != nil:
 			// Expression index: evaluate expression against the row.
 			key, ok, err := evalExprIndexKey(secondaryIndex.Expression, secondaryIndex.Columns[0], row)
 			if err != nil {
-				return fmt.Errorf("expression index %s eval: %w", secondaryIndex.Name, err)
+				return secondaryIndex, fmt.Errorf("expression index %s eval: %w", secondaryIndex.Name, err)
 			}
 			if !ok {
 				continue // NULL result — don't index this row
 			}
 			if err := secondaryIndex.Index.Insert(ctx, key, row.Key); err != nil {
-				return err
+				return secondaryIndex, err
 			}
 		case len(secondaryIndex.Columns) > 1:
 			// Composite secondary index: build a CompositeKey from all index columns
@@ -1629,7 +1649,7 @@ func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryInd
 			for _, col := range secondaryIndex.Columns {
 				keyValue, ok := row.GetValue(col.Name)
 				if !ok {
-					return fmt.Errorf("column %s does not exist on row in table %s", col.Name, table.Name)
+					return secondaryIndex, fmt.Errorf("column %s does not exist on row in table %s", col.Name, table.Name)
 				}
 				if !keyValue.Valid {
 					allValid = false
@@ -1637,7 +1657,7 @@ func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryInd
 				}
 				castedKeyValue, err := castKeyValue(col, keyValue.Value)
 				if err != nil {
-					return err
+					return secondaryIndex, err
 				}
 				keyValues = append(keyValues, castedKeyValue)
 			}
@@ -1646,32 +1666,32 @@ func (d *Database) populateIndex(ctx context.Context, table *Table, secondaryInd
 			}
 			ck := NewCompositeKey(secondaryIndex.Columns, keyValues...)
 			if err := secondaryIndex.Index.Insert(ctx, ck, row.Key); err != nil {
-				return err
+				return secondaryIndex, err
 			}
 		default:
 			// Single-column secondary index
 			keyValue, ok := row.GetValue(secondaryIndex.Columns[0].Name)
 			if !ok {
-				return fmt.Errorf("column %s does not exist on row in table %s", secondaryIndex.Columns[0].Name, table.Name)
+				return secondaryIndex, fmt.Errorf("column %s does not exist on row in table %s", secondaryIndex.Columns[0].Name, table.Name)
 			}
 			if !keyValue.Valid {
 				continue // skip NULLs
 			}
 			castedKeyValue, err := castKeyValue(secondaryIndex.Columns[0], keyValue.Value)
 			if err != nil {
-				return err
+				return secondaryIndex, err
 			}
 			if err := secondaryIndex.Index.Insert(ctx, castedKeyValue, row.Key); err != nil {
-				return err
+				return secondaryIndex, err
 			}
 		}
 	}
 
 	if err := result.Rows.Err(); err != nil {
-		return err
+		return secondaryIndex, err
 	}
 
-	return nil
+	return secondaryIndex, nil
 }
 
 func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, secondaryIndex SecondaryIndex) error {
@@ -1850,6 +1870,95 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		return err
 	}
 	return flush()
+}
+
+// populateHNSWIndex batch-builds an HNSW graph from every row in the table,
+// writes it to pages, inserts the schema row with the real root page index, and
+// registers the index on the table. It returns the updated SecondaryIndex with
+// HNSWIndex set so the caller can propagate it into DDL change records.
+func (d *Database) populateHNSWIndex(ctx context.Context, stmt Statement, table *Table, secondaryIndex SecondaryIndex) (SecondaryIndex, error) {
+	if len(secondaryIndex.Columns) != 1 {
+		return secondaryIndex, fmt.Errorf("HNSW index %s requires exactly one column", secondaryIndex.Name)
+	}
+	colName := secondaryIndex.Columns[0].Name
+
+	// Collect all (RowID, VectorPointer) pairs from the table.
+	result, err := table.Select(ctx, Statement{
+		Kind:   Select,
+		Fields: []Field{{Name: colName}},
+	})
+	if err != nil {
+		return secondaryIndex, fmt.Errorf("HNSW populate: scan table: %w", err)
+	}
+
+	var rows []hnswBuildRow
+	for result.Rows.Next(ctx) {
+		row := result.Rows.Row()
+		val, ok := row.GetValue(colName)
+		if !ok || !val.Valid {
+			continue
+		}
+		vp, err := toVectorPointer(val.Value)
+		if err != nil {
+			continue
+		}
+		rows = append(rows, hnswBuildRow{RowID: row.Key, Vec: vp})
+	}
+	if err := result.Rows.Err(); err != nil {
+		return secondaryIndex, fmt.Errorf("HNSW populate: scan error: %w", err)
+	}
+
+	txPager := NewTransactionalPager(
+		d.factory.ForHNSWIndex(),
+		d.txManager,
+		table.Name,
+		secondaryIndex.Name,
+	)
+
+	m := secondaryIndex.HNSWM
+	if m <= 0 {
+		m = HNSWDefaultM
+	}
+	ef := secondaryIndex.HNSWEfConstruction
+	if ef <= 0 {
+		ef = HNSWDefaultEfConstruction
+	}
+
+	var rootPageIdx PageIndex
+	if len(rows) == 0 {
+		// Empty table: allocate an empty meta page so the schema has a valid root page.
+		metaPage, err := txPager.GetFreePage(ctx)
+		if err != nil {
+			return secondaryIndex, fmt.Errorf("HNSW populate: get meta page: %w", err)
+		}
+		metaPage.HNSWMetaPage = &hnswMetaPage{
+			M:              uint16(m),
+			EfConstruction: uint32(ef),
+			EntryPoint:     hnswNoEntryPoint,
+		}
+		rootPageIdx = metaPage.Index
+	} else {
+		rootPageIdx, err = BuildHNSWIndex(ctx, txPager, m, ef, rows)
+		if err != nil {
+			return secondaryIndex, fmt.Errorf("HNSW populate: build: %w", err)
+		}
+	}
+
+	// Insert the schema row now that we know the real root page index.
+	if err := d.insertSchema(ctx, Schema{
+		Type:      SchemaSecondaryIndex,
+		Name:      secondaryIndex.Name,
+		TableName: table.Name,
+		RootPage:  rootPageIdx,
+		DDL:       stmt.DDL(),
+	}); err != nil {
+		return secondaryIndex, fmt.Errorf("HNSW populate: insert schema: %w", err)
+	}
+
+	secondaryIndex.HNSWIndex = OpenHNSWIndex(txPager, rootPageIdx)
+	table.SetSecondaryIndex(secondaryIndex)
+
+	return secondaryIndex, nil
 }
 
 func scanInvertedIndexDocumentRowViews(ctx context.Context, table *Table, secondaryIndex SecondaryIndex, consume func(RowID, TextPointer) error) error {
@@ -2105,6 +2214,9 @@ func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, tab
 		}
 		rootPageIdx = metaPage.Index
 		secondaryIndex.InvertedIndex = invertedIdx
+	} else if secondaryIndexUsesDedicatedHNSWStorage(secondaryIndex.Method) {
+		// HNSW: page allocation and schema insertion are deferred to populateHNSWIndex,
+		// which knows the real root page after BuildHNSWIndex runs.
 	} else {
 		storageColumns := secondaryIndexStorageColumns(secondaryIndex)
 		txPager := NewTransactionalPager(
@@ -2127,14 +2239,18 @@ func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, tab
 		secondaryIndex.Index = createdIndex
 	}
 
-	if err := d.insertSchema(ctx, Schema{
-		Type:      SchemaSecondaryIndex,
-		Name:      secondaryIndex.Name,
-		TableName: table.Name,
-		RootPage:  rootPageIdx,
-		DDL:       stmt.DDL(),
-	}); err != nil {
-		return SecondaryIndex{}, err
+	// HNSW indexes insert their schema row inside populateHNSWIndex once the real
+	// root page index is known (BuildHNSWIndex allocates it during construction).
+	if !secondaryIndexUsesDedicatedHNSWStorage(secondaryIndex.Method) {
+		if err := d.insertSchema(ctx, Schema{
+			Type:      SchemaSecondaryIndex,
+			Name:      secondaryIndex.Name,
+			TableName: table.Name,
+			RootPage:  rootPageIdx,
+			DDL:       stmt.DDL(),
+		}); err != nil {
+			return SecondaryIndex{}, err
+		}
 	}
 
 	return secondaryIndex, nil

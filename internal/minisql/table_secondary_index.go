@@ -14,6 +14,7 @@ import (
 type SecondaryIndex struct {
 	Index         BTreeIndex
 	InvertedIndex invertedIndex
+	HNSWIndex     *hnswIndex
 	IndexInfo
 }
 
@@ -29,6 +30,10 @@ func secondaryIndexStorageColumns(secondaryIndex SecondaryIndex) []Column {
 
 func secondaryIndexUsesDedicatedInvertedStorage(method IndexMethod) bool {
 	return method == IndexMethodFullText || method == IndexMethodInverted
+}
+
+func secondaryIndexUsesDedicatedHNSWStorage(method IndexMethod) bool {
+	return method == IndexMethodHNSW
 }
 
 func invertedIndexPostingModeForIndexMethod(method IndexMethod) invertedIndexPostingMode {
@@ -53,6 +58,11 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 	}
 	if secondaryIndex.Method == IndexMethodInverted {
 		return t.insertInvertedIndexKeys(ctx, secondaryIndex, rowID, row)
+	}
+	// HNSW indexes are batch-built at CREATE INDEX time; online INSERT updates are
+	// deferred to Phase 2b.  Skip silently so normal INSERT/UPDATE/DELETE works.
+	if secondaryIndex.Method == IndexMethodHNSW {
+		return nil
 	}
 	if secondaryIndex.Index == nil {
 		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
@@ -136,6 +146,10 @@ func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 	}
 	if secondaryIndex.Method == IndexMethodInverted {
 		return t.updateInvertedIndexKeys(ctx, secondaryIndex, oldRow, row)
+	}
+	// HNSW indexes are batch-built; online UPDATE maintenance is deferred to Phase 2b.
+	if secondaryIndex.Method == IndexMethodHNSW {
+		return nil
 	}
 	if secondaryIndex.Index == nil {
 		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)

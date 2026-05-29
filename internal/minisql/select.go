@@ -6168,3 +6168,42 @@ func (t *Table) indexUnionScan(ctx context.Context, scan Scan, selectedFields []
 	}
 	return nil
 }
+
+// hnswIndexScan executes an approximate nearest-neighbor search using an HNSW
+// vector index.  It returns the top-k rows ordered by distance to the query vector.
+func (t *Table) hnswIndexScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
+	secondaryIndex, ok := t.SecondaryIndexes[scan.IndexName]
+	if !ok || secondaryIndex.Method != IndexMethodHNSW || secondaryIndex.HNSWIndex == nil {
+		return fmt.Errorf("no HNSW index found for scan: %s", scan.IndexName)
+	}
+
+	k := int(scan.ScanLimit)
+	if k <= 0 {
+		k = HNSWDefaultEfSearch
+	}
+
+	distFn := makeDistFunc(ctx, t, scan.IndexColumns[0].Name, scan.HNSWQueryVec, scan.HNSWFuncName)
+	rowIDs, err := secondaryIndex.HNSWIndex.Search(ctx, k, HNSWDefaultEfSearch, distFn)
+	if err != nil {
+		return fmt.Errorf("HNSW search failed: %w", err)
+	}
+
+	selectedMask := selectedColumnsMask(t.Columns, selectedFields)
+	nSelected := len(selectedFields)
+	for _, rowID := range rowIDs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		row, found, err := t.rowIDScanRow(ctx, rowID, selectedMask, nSelected, nil)
+		if err != nil {
+			return err
+		}
+		if !found {
+			continue
+		}
+		if err := out(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}

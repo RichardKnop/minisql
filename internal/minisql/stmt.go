@@ -340,6 +340,9 @@ const (
 	IndexMethodFullText
 	// IndexMethodInverted is reserved for future JSON inverted indexes.
 	IndexMethodInverted
+	// IndexMethodHNSW builds a Hierarchical Navigable Small World graph for
+	// approximate nearest-neighbor vector search.
+	IndexMethodHNSW
 )
 
 func (m IndexMethod) String() string {
@@ -350,6 +353,8 @@ func (m IndexMethod) String() string {
 		return "fulltext"
 	case IndexMethodInverted:
 		return "inverted"
+	case IndexMethodHNSW:
+		return "hnsw"
 	default:
 		return "unknown"
 	}
@@ -415,11 +420,13 @@ type Statement struct {
 	Limit              OptionalValue
 	TableName          string
 	TableAlias         string
-	IndexExpression    *Expr // nil = column index; non-nil = expression index
-	IndexName          string
-	IndexWhereClause   string // raw SQL of the partial index predicate (empty = full index)
-	IndexExpressionSQL string // raw SQL of the index expression (empty = column index)
-	IndexTokenizer     string // tokenizer option for full-text indexes
+	IndexExpression      *Expr // nil = column index; non-nil = expression index
+	IndexName            string
+	IndexWhereClause     string // raw SQL of the partial index predicate (empty = full index)
+	IndexExpressionSQL   string // raw SQL of the index expression (empty = column index)
+	IndexTokenizer       string // tokenizer option for full-text indexes
+	IndexHNSWM           int    // HNSW WITH (m = …) option; 0 = use HNSWDefaultM
+	IndexHNSWEfConstruct int    // HNSW WITH (ef_construction = …) option; 0 = use HNSWDefaultEfConstruction
 	Target             string
 	PragmaName         string
 	PragmaValue        string
@@ -1462,6 +1469,24 @@ func (s Statement) validateCreateIndexMethod(table *Table) error {
 			return fmt.Errorf("inverted index column %q must be JSON", col.Name)
 		}
 		return nil
+	case IndexMethodHNSW:
+		if s.IndexExpression != nil {
+			return errors.New("HNSW indexes do not support expression keys")
+		}
+		if s.IndexTokenizer != "" {
+			return errors.New("HNSW indexes do not support tokenizer options")
+		}
+		if len(s.Columns) != 1 {
+			return errors.New("HNSW indexes require exactly one column")
+		}
+		col, ok := table.ColumnByName(s.Columns[0].Name)
+		if !ok {
+			return fmt.Errorf("column %s does not exist on table %s", s.Columns[0].Name, s.TableName)
+		}
+		if col.Kind != Vector {
+			return fmt.Errorf("HNSW index column %q must be VECTOR(n)", col.Name)
+		}
+		return nil
 	default:
 		return fmt.Errorf("unknown index method %s", s.IndexMethod)
 	}
@@ -2092,6 +2117,8 @@ func (s Statement) createIndexDDL() string {
 		fmt.Fprintf(&sb, "create fulltext index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName)
 	case IndexMethodInverted:
 		fmt.Fprintf(&sb, "create inverted index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName)
+	case IndexMethodHNSW:
+		fmt.Fprintf(&sb, "create hnsw index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName)
 	default:
 		fmt.Fprintf(&sb, "create index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName)
 	}
@@ -2111,6 +2138,17 @@ func (s Statement) createIndexDDL() string {
 	sb.WriteString("\n)")
 	if s.IndexTokenizer != "" {
 		fmt.Fprintf(&sb, " with (tokenizer = '%s')", s.IndexTokenizer)
+	}
+	if s.IndexMethod == IndexMethodHNSW {
+		m := s.IndexHNSWM
+		if m <= 0 {
+			m = HNSWDefaultM
+		}
+		ef := s.IndexHNSWEfConstruct
+		if ef <= 0 {
+			ef = HNSWDefaultEfConstruction
+		}
+		fmt.Fprintf(&sb, " with (m = %d, ef_construction = %d)", m, ef)
 	}
 	if s.IndexWhereClause != "" {
 		fmt.Fprintf(&sb, " where %s", s.IndexWhereClause)

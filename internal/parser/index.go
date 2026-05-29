@@ -3,6 +3,7 @@ package parser
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
@@ -142,6 +143,18 @@ func (p *parserItem) parseCreateIndexWithOptions() error {
 		switch optionName {
 		case "TOKENIZER":
 			p.IndexTokenizer = strings.ToLower(optionValue)
+		case "M":
+			n, err := strconv.Atoi(optionValue)
+			if err != nil || n <= 0 {
+				return p.errorf("at CREATE INDEX: WITH m must be a positive integer, got %q", optionValue)
+			}
+			p.IndexHNSWM = n
+		case "EF_CONSTRUCTION":
+			n, err := strconv.Atoi(optionValue)
+			if err != nil || n <= 0 {
+				return p.errorf("at CREATE INDEX: WITH ef_construction must be a positive integer, got %q", optionValue)
+			}
+			p.IndexHNSWEfConstruct = n
 		default:
 			return p.errorf("at CREATE INDEX: unknown WITH option %q", optionName)
 		}

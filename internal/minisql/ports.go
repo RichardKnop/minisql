@@ -41,6 +41,8 @@ type PagerFactory interface {
 	ForIndex(columns []Column, unique bool) Pager
 	// ForInvertedIndex returns a Pager for inverted (full-text / JSON) index pages.
 	ForInvertedIndex() Pager
+	// ForHNSWIndex returns a Pager that unmarshals HNSW meta and data pages.
+	ForHNSWIndex() Pager
 }
 
 // TxPagerFactory is a function that opens a transactional pager for the named

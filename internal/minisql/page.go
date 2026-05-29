@@ -32,6 +32,8 @@ type Page struct {
 	InvertedPostPage    *invertedPostingPage
 	InvertedMetaPage    *invertedMetaPage
 	InvertedSegmentPage *invertedSegmentPage
+	HNSWMetaPage        *hnswMetaPage
+	HNSWDataPage        *hnswDataPage
 	Index               PageIndex
 }
 
@@ -71,6 +73,11 @@ func (p *Page) Clone() *Page {
 		pageCopy.InvertedMetaPage = p.InvertedMetaPage.Clone()
 	case p.InvertedSegmentPage != nil:
 		pageCopy.InvertedSegmentPage = p.InvertedSegmentPage.Clone()
+	case p.HNSWMetaPage != nil:
+		clone := *p.HNSWMetaPage
+		pageCopy.HNSWMetaPage = &clone
+	case p.HNSWDataPage != nil:
+		pageCopy.HNSWDataPage = p.HNSWDataPage.clone()
 	}
 
 	return pageCopy

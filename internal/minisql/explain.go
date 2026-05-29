@@ -464,6 +464,8 @@ func (t *Table) executeExplainScan(ctx context.Context, plan QueryPlan, scan Sca
 		return t.fullTextIndexScan(ctx, scan, selectedFields, out)
 	case ScanTypeInverted:
 		return t.invertedIndexScan(ctx, scan, selectedFields, out)
+	case ScanTypeHNSW:
+		return t.hnswIndexScan(ctx, scan, selectedFields, out)
 	default:
 		return fmt.Errorf("unhandled scan type in EXPLAIN ANALYZE: %d", scan.Type)
 	}

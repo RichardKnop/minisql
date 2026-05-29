@@ -42,7 +42,7 @@ var reservedWords = []string{
 	"BOOLEAN", "INT4", "INT8", "REAL", "DOUBLE", "TEXT", "VARCHAR(", "TIMESTAMP", "JSON", "UUID", "VECTOR(",
 	// statement types
 	"EXPLAIN ANALYZE", "EXPLAIN",
-	"CREATE TABLE", "DROP TABLE", "CREATE FULLTEXT INDEX", "CREATE INVERTED INDEX", "CREATE INDEX", "DROP INDEX",
+	"CREATE TABLE", "DROP TABLE", "CREATE FULLTEXT INDEX", "CREATE INVERTED INDEX", "CREATE HNSW INDEX", "CREATE INDEX", "DROP INDEX",
 	"ALTER TABLE", "ADD COLUMN", "DROP COLUMN", "RENAME COLUMN", "RENAME TO", "DROPPED",
 	"SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
 	// statement other
@@ -245,6 +245,11 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 			case "CREATE INVERTED INDEX":
 				p.Kind = minisql.CreateIndex
 				p.IndexMethod = minisql.IndexMethodInverted
+				p.pop()
+				p.step = stepCreateIndexIfNotExists
+			case "CREATE HNSW INDEX":
+				p.Kind = minisql.CreateIndex
+				p.IndexMethod = minisql.IndexMethodHNSW
 				p.pop()
 				p.step = stepCreateIndexIfNotExists
 			case "DROP INDEX":

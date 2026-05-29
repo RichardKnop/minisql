@@ -22,6 +22,10 @@ type IndexInfo struct {
 	Tokenizer     string // tokenizer option for full-text indexes
 	Columns       []Column
 	Method        IndexMethod
+	// HNSWM and HNSWEfConstruction are the build-time parameters for IndexMethodHNSW indexes.
+	// Zero values mean "use the global defaults" (HNSWDefaultM, HNSWDefaultEfConstruction).
+	HNSWM              int
+	HNSWEfConstruction int
 }
 
 // IsBTree reports whether this index uses the scalar B+ tree access method.
