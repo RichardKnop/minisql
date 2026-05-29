@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -1918,6 +1919,9 @@ func (d *Database) populateHNSWIndex(ctx context.Context, stmt Statement, table 
 	m := secondaryIndex.HNSWM
 	if m <= 0 {
 		m = HNSWDefaultM
+	}
+	if m > math.MaxUint16 {
+		return secondaryIndex, fmt.Errorf("HNSW populate: m must be <= %d, got %d", math.MaxUint16, m)
 	}
 	ef := secondaryIndex.HNSWEfConstruction
 	if ef <= 0 {

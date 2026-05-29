@@ -188,9 +188,10 @@ type hnswCandidate struct {
 // maxHeap is a max-heap of candidates by distance (furthest element at top).
 type maxHeap []hnswCandidate
 
-func (h maxHeap) Len() int            { return len(h) }
-func (h maxHeap) Less(i, j int) bool  { return h[i].dist > h[j].dist }
-func (h maxHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
+func (h maxHeap) Len() int           { return len(h) }
+func (h maxHeap) Less(i, j int) bool { return h[i].dist > h[j].dist }
+func (h maxHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+
 // Push implements heap.Interface.
 func (h *maxHeap) Push(x any) { *h = append(*h, x.(hnswCandidate)) }
 
@@ -200,9 +201,10 @@ func (h *maxHeap) Pop() any { old := *h; n := len(old); x := old[n-1]; *h = old[
 // minHeap is a min-heap of candidates by distance (nearest element at top).
 type minHeap []hnswCandidate
 
-func (h minHeap) Len() int            { return len(h) }
-func (h minHeap) Less(i, j int) bool  { return h[i].dist < h[j].dist }
-func (h minHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
+func (h minHeap) Len() int           { return len(h) }
+func (h minHeap) Less(i, j int) bool { return h[i].dist < h[j].dist }
+func (h minHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+
 // Push implements heap.Interface.
 func (h *minHeap) Push(x any) { *h = append(*h, x.(hnswCandidate)) }
 
@@ -427,6 +429,19 @@ func writeHNSWGraph(ctx context.Context, pager TxPager, graph *hnswGraph) (PageI
 	}
 
 	entryLevel := max(graph.EntryLevel, 0)
+	if graph.M < 0 || graph.M > math.MaxUint16 {
+		return 0, fmt.Errorf("HNSW write: M out of uint16 range: %d", graph.M)
+	}
+	if graph.EfConstruction < 0 || graph.EfConstruction > math.MaxUint32 {
+		return 0, fmt.Errorf("HNSW write: ef_construction out of uint32 range: %d", graph.EfConstruction)
+	}
+	if entryLevel > math.MaxUint8 {
+		return 0, fmt.Errorf("HNSW write: entry level out of uint8 range: %d", entryLevel)
+	}
+	if len(graph.Nodes) > math.MaxUint32 {
+		return 0, fmt.Errorf("HNSW write: node count out of uint32 range: %d", len(graph.Nodes))
+	}
+
 	metaPage.HNSWMetaPage = &hnswMetaPage{
 		M:              uint16(graph.M),
 		EfConstruction: uint32(graph.EfConstruction),

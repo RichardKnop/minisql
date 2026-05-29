@@ -144,17 +144,17 @@ func (p *parserItem) parseCreateIndexWithOptions() error {
 		case "TOKENIZER":
 			p.IndexTokenizer = strings.ToLower(optionValue)
 		case "M":
-			n, err := strconv.Atoi(optionValue)
-			if err != nil || n <= 0 {
-				return p.errorf("at CREATE INDEX: WITH m must be a positive integer, got %q", optionValue)
+			n, err := strconv.ParseUint(optionValue, 10, 16)
+			if err != nil || n <= 0 || n > 65535 {
+				return p.errorf("at CREATE INDEX: WITH m must be an integer in range [1, 65535], got %q", optionValue)
 			}
-			p.IndexHNSWM = n
+			p.IndexHNSWM = int(n)
 		case "EF_CONSTRUCTION":
-			n, err := strconv.Atoi(optionValue)
-			if err != nil || n <= 0 {
+			n, err := strconv.ParseUint(optionValue, 10, 32)
+			if err != nil || n == 0 {
 				return p.errorf("at CREATE INDEX: WITH ef_construction must be a positive integer, got %q", optionValue)
 			}
-			p.IndexHNSWEfConstruct = n
+			p.IndexHNSWEfConstruct = int(n)
 		default:
 			return p.errorf("at CREATE INDEX: unknown WITH option %q", optionName)
 		}
