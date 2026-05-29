@@ -181,6 +181,10 @@ func (rv RowView) ValueAt(idx int) (OptionalValue, error) {
 		var value UUIDValue
 		copy(value[:], rv.value[offset:offset+16])
 		return OptionalValue{Value: value, Valid: true}, nil
+	case Vector:
+		var vp VectorPointer
+		vp.Unmarshal(rv.value, uint64(offset))
+		return OptionalValue{Value: vp, Valid: true}, nil
 	default:
 		return OptionalValue{}, fmt.Errorf("unsupported column kind %s", col.Kind)
 	}
@@ -203,21 +207,35 @@ func (rv RowView) ValueAtWithOverflow(ctx context.Context, pager TxPager, idx in
 		return value, err
 	}
 	col := rv.columns[idx]
-	if !col.MayUseOverflowText() {
-		return value, nil
+	if col.MayUseOverflowText() {
+		textPointer, ok := value.Value.(TextPointer)
+		if !ok {
+			return OptionalValue{}, fmt.Errorf("expected TextPointer value for text column %s", col.Name)
+		}
+		if !textPointer.IsInline() && pager == nil {
+			return OptionalValue{}, fmt.Errorf("overflow text column %d requires a pager", idx)
+		}
+		textPointer, err = textPointer.readOverflowText(ctx, pager)
+		if err != nil {
+			return OptionalValue{}, err
+		}
+		return OptionalValue{Valid: true, Value: textPointer}, nil
 	}
-	textPointer, ok := value.Value.(TextPointer)
-	if !ok {
-		return OptionalValue{}, fmt.Errorf("expected TextPointer value for text column %s", col.Name)
+	if col.MayUseOverflowVector() {
+		vp, ok := value.Value.(VectorPointer)
+		if !ok {
+			return OptionalValue{}, fmt.Errorf("expected VectorPointer value for vector column %s", col.Name)
+		}
+		if pager == nil {
+			return OptionalValue{}, fmt.Errorf("vector overflow column %d requires a pager", idx)
+		}
+		vp, err = vp.readOverflow(ctx, pager)
+		if err != nil {
+			return OptionalValue{}, err
+		}
+		return OptionalValue{Valid: true, Value: vp}, nil
 	}
-	if !textPointer.IsInline() && pager == nil {
-		return OptionalValue{}, fmt.Errorf("overflow text column %d requires a pager", idx)
-	}
-	textPointer, err = textPointer.readOverflowText(ctx, pager)
-	if err != nil {
-		return OptionalValue{}, err
-	}
-	return OptionalValue{Valid: true, Value: textPointer}, nil
+	return value, nil
 }
 
 // BoolAt lazily decodes a BOOLEAN column.
@@ -439,13 +457,17 @@ func (rv RowView) Materialize(selectedMask []bool) (Row, error) {
 	return row, nil
 }
 
-// MaterializeWithOverflow decodes selected columns and loads overflow text.
+// MaterializeWithOverflow decodes selected columns and loads overflow text and vector data.
 func (rv RowView) MaterializeWithOverflow(ctx context.Context, pager TxPager, selectedMask []bool) (Row, error) {
 	row, err := rv.Materialize(selectedMask)
 	if err != nil {
 		return Row{}, err
 	}
-	return row.readOverflowTexts(ctx, pager)
+	row, err = row.readOverflowTexts(ctx, pager)
+	if err != nil {
+		return Row{}, err
+	}
+	return row.readOverflowVectors(ctx, pager)
 }
 
 func (rv RowView) requireKind(idx int, kind ColumnKind) error {

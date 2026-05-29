@@ -474,7 +474,8 @@ func isBuiltinFunction(name string) bool {
 		"EXTRACT", "DATE_PART",
 		"TO_TIMESTAMP",
 		"JSON_EXTRACT", "JSON_VALID", "JSON_TYPE", "JSON_ARRAY_LENGTH", "JSON_CONTAINS",
-		"MATCH", "TS_RANK":
+		"MATCH", "TS_RANK",
+		"VEC_L2", "VEC_COSINE":
 		return true
 	}
 	return isWindowFunction(name)

@@ -74,9 +74,12 @@ func (p *parserItem) doParseCreateTable() error {
 		}
 		p.pop()
 		p.Columns[len(p.Columns)-1].Kind = col.Kind
-		if col.Kind == minisql.Varchar {
+		switch col.Kind {
+		case minisql.Varchar:
 			p.step = stepCreateTableVarcharLength
-		} else {
+		case minisql.Vector:
+			p.step = stepCreateTableVectorLength
+		default:
 			p.Columns[len(p.Columns)-1].Size = col.Size
 			p.step = stepCreateTableColumnPrimaryKey
 		}
@@ -97,6 +100,23 @@ func (p *parserItem) doParseCreateTable() error {
 		closingParens := p.peek()
 		if closingParens != ")" {
 			return p.errorf("at CREATE TABLE: expecting closing parenthesis after varchar size")
+		}
+		p.pop()
+		p.step = stepCreateTableColumnPrimaryKey
+	case stepCreateTableVectorLength:
+		sizeToken := p.peek()
+		dims, err := strconv.ParseUint(sizeToken, 10, 32)
+		if err != nil {
+			return p.errorf("at CREATE TABLE: vector dimension '%s' must be an integer", sizeToken)
+		}
+		if dims == 0 {
+			return p.errorf("at CREATE TABLE: vector dimension must be a positive integer")
+		}
+		p.pop()
+		p.Columns[len(p.Columns)-1].Size = uint32(dims)
+		closingParens := p.peek()
+		if closingParens != ")" {
+			return p.errorf("at CREATE TABLE: expecting closing parenthesis after vector dimension")
 		}
 		p.pop()
 		p.step = stepCreateTableColumnPrimaryKey
@@ -567,6 +587,8 @@ func isColumnDef(token string) (minisql.Column, bool) {
 		return minisql.Column{Kind: minisql.JSON}, true
 	case "UUID":
 		return minisql.Column{Kind: minisql.UUID, Size: 16}, true
+	case "VECTOR(":
+		return minisql.Column{Kind: minisql.Vector}, true
 	default:
 		return minisql.Column{}, false
 	}

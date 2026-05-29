@@ -322,6 +322,11 @@ func (t *Table) parallelScanWorker(
 					send(parallelScanResult{err: err})
 					return
 				}
+				row, err = row.readOverflowVectors(ctx, t.pager)
+				if err != nil {
+					send(parallelScanResult{err: err})
+					return
+				}
 				if !send(parallelScanResult{row: row}) {
 					return
 				}

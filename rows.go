@@ -87,6 +87,8 @@ func (r *Rows) Next(dest []driver.Value) error {
 			dest[i] = minisql.FromMicroseconds(int64(v)).GoTime()
 		case minisql.UUIDValue:
 			dest[i] = v.String()
+		case minisql.VectorPointer:
+			dest[i] = minisql.FormatVector(v)
 		default:
 			dest[i] = aRow.Values[i].Value
 		}
@@ -179,6 +181,19 @@ func (r *Rows) rowViewDriverValue(view minisql.RowView, destIdx, fieldIdx int) (
 			return nil, err
 		}
 		return value.String(), nil
+	case minisql.Vector:
+		value, err := view.ValueAtWithOverflow(r.ctx, r.rowViewPager, fieldIdx)
+		if err != nil {
+			return nil, err
+		}
+		if !value.Valid {
+			return nil, nil
+		}
+		vp, ok := value.Value.(minisql.VectorPointer)
+		if !ok {
+			return nil, fmt.Errorf("expected VectorPointer for vector column")
+		}
+		return minisql.FormatVector(vp), nil
 	default:
 		value, err := view.ValueAt(fieldIdx)
 		if err != nil {

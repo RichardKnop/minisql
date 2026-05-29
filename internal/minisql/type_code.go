@@ -26,6 +26,7 @@ const (
 	TypeCodeTimestamp TypeCode = 6
 	TypeCodeUUID      TypeCode = 7
 	TypeCodeText      TypeCode = 8
+	TypeCodeVector    TypeCode = 9
 )
 
 // kindToTypeCode maps a ColumnKind to its TypeCode.
@@ -47,6 +48,8 @@ func kindToTypeCode(k ColumnKind) TypeCode {
 		return TypeCodeUUID
 	case Varchar, Text, JSON:
 		return TypeCodeText
+	case Vector:
+		return TypeCodeVector
 	default:
 		return TypeCodeNull
 	}
@@ -83,6 +86,8 @@ func typeCodeFixedSize(tc TypeCode) int {
 		return 16
 	case TypeCodeText:
 		return -1
+	case TypeCodeVector:
+		return 8 // 4-byte dims + 4-byte first overflow page index
 	default:
 		return 0
 	}

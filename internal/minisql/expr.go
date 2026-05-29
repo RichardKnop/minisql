@@ -1486,6 +1486,66 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 		}
 		return jsonContains(docStr, queryStr)
 
+	// ── Vector distance functions ──────────────────────────────────────────────
+
+	case "VEC_L2":
+		if len(e.Args) != 2 {
+			return nil, fmt.Errorf("VEC_L2 requires exactly 2 arguments")
+		}
+		arg0, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		arg1, err := e.Args[1].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if arg0 == nil || arg1 == nil {
+			return nil, nil
+		}
+		a, err := toVectorPointer(arg0)
+		if err != nil {
+			return nil, fmt.Errorf("VEC_L2: first argument: %w", err)
+		}
+		b, err := toVectorPointer(arg1)
+		if err != nil {
+			return nil, fmt.Errorf("VEC_L2: second argument: %w", err)
+		}
+		dist, err := L2Distance(a, b)
+		if err != nil {
+			return nil, err
+		}
+		return dist, nil
+
+	case "VEC_COSINE":
+		if len(e.Args) != 2 {
+			return nil, fmt.Errorf("VEC_COSINE requires exactly 2 arguments")
+		}
+		arg0, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		arg1, err := e.Args[1].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if arg0 == nil || arg1 == nil {
+			return nil, nil
+		}
+		a, err := toVectorPointer(arg0)
+		if err != nil {
+			return nil, fmt.Errorf("VEC_COSINE: first argument: %w", err)
+		}
+		b, err := toVectorPointer(arg1)
+		if err != nil {
+			return nil, fmt.Errorf("VEC_COSINE: second argument: %w", err)
+		}
+		dist, err := CosineDistance(a, b)
+		if err != nil {
+			return nil, err
+		}
+		return dist, nil
+
 	default:
 		return nil, fmt.Errorf("unknown function %q", e.FuncName)
 	}

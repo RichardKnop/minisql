@@ -39,7 +39,7 @@ var reservedWords = []string{
 	// arithmetic operators (JSON arrow ops must come before "-" for longest-match tokenization)
 	"+", "->>", "->", "-", "/",
 	// column types
-	"BOOLEAN", "INT4", "INT8", "REAL", "DOUBLE", "TEXT", "VARCHAR(", "TIMESTAMP", "JSON", "UUID",
+	"BOOLEAN", "INT4", "INT8", "REAL", "DOUBLE", "TEXT", "VARCHAR(", "TIMESTAMP", "JSON", "UUID", "VECTOR(",
 	// statement types
 	"EXPLAIN ANALYZE", "EXPLAIN",
 	"CREATE TABLE", "DROP TABLE", "CREATE FULLTEXT INDEX", "CREATE INVERTED INDEX", "CREATE INDEX", "DROP INDEX",
@@ -81,6 +81,7 @@ const (
 	stepCreateTableColumn
 	stepCreateTableColumnDef
 	stepCreateTableVarcharLength
+	stepCreateTableVectorLength
 	stepCreateTableColumnPrimaryKey
 	stepCreateTableColumnNullNotNull
 	stepCreateTableColumnUnique
@@ -305,6 +306,7 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 			stepCreateTableColumn,
 			stepCreateTableColumnDef,
 			stepCreateTableVarcharLength,
+			stepCreateTableVectorLength,
 			stepCreateTableColumnPrimaryKey,
 			stepCreateTableColumnNullNotNull,
 			stepCreateTableColumnUnique,
