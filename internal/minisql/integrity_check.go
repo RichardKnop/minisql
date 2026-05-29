@@ -129,11 +129,12 @@ func (d *Database) QuickCheck(ctx context.Context) (IntegrityReport, error) {
 			}
 		}
 		for _, index := range table.SecondaryIndexes {
-			if secondaryIndexUsesDedicatedInvertedStorage(index.Method) && index.InvertedIndex != nil {
+			switch {
+			case secondaryIndexUsesDedicatedInvertedStorage(index.Method) && index.InvertedIndex != nil:
 				rootPages[index.InvertedIndex.GetRootPageIdx()] = fmt.Sprintf("index %s", index.Name)
-			} else if secondaryIndexUsesDedicatedHNSWStorage(index.Method) && index.HNSWIndex != nil {
+			case secondaryIndexUsesDedicatedHNSWStorage(index.Method) && index.HNSWIndex != nil:
 				rootPages[index.HNSWIndex.rootPageIdx] = fmt.Sprintf("index %s", index.Name)
-			} else if index.Index != nil {
+			case index.Index != nil:
 				rootPages[index.Index.GetRootPageIdx()] = fmt.Sprintf("index %s", index.Name)
 			}
 		}

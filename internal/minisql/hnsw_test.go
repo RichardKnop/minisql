@@ -172,7 +172,7 @@ func TestBuildAndReadHNSWGraph(t *testing.T) {
 			return err
 		}
 		assert.True(t, g.hasEntry)
-		assert.Equal(t, len(vecs), len(g.Nodes))
+		assert.Len(t, g.Nodes, len(vecs))
 
 		query := VectorPointer{Dims: 3, Data: []float32{1, 0, 0}}
 		distFn := testL2DistFn(vecs, query)

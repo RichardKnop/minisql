@@ -917,7 +917,8 @@ func (d *Database) initSecondaryIndex(ctx context.Context, schema Schema) error 
 		},
 	}
 
-	if secondaryIndexUsesDedicatedInvertedStorage(secondaryIndex.Method) {
+	switch {
+	case secondaryIndexUsesDedicatedInvertedStorage(secondaryIndex.Method):
 		tp := NewTransactionalPager(
 			d.factory.ForInvertedIndex(),
 			d.txManager,
@@ -929,7 +930,7 @@ func (d *Database) initSecondaryIndex(ctx context.Context, schema Schema) error 
 			return err
 		}
 		secondaryIndex.InvertedIndex = invertedIdx
-	} else if secondaryIndexUsesDedicatedHNSWStorage(secondaryIndex.Method) {
+	case secondaryIndexUsesDedicatedHNSWStorage(secondaryIndex.Method):
 		tp := NewTransactionalPager(
 			d.factory.ForHNSWIndex(),
 			d.txManager,
@@ -937,10 +938,9 @@ func (d *Database) initSecondaryIndex(ctx context.Context, schema Schema) error 
 			schema.Name,
 		)
 		secondaryIndex.HNSWIndex = OpenHNSWIndex(tp, schema.RootPage)
-	} else {
+	default:
 		storageColumns := secondaryIndexStorageColumns(secondaryIndex)
 
-		// Create and set BTree index instance
 		tp := NewTransactionalPager(
 			d.factory.ForIndex(storageColumns, false),
 			d.txManager,
@@ -2186,7 +2186,10 @@ func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, tab
 	d.logger.Sugar().With("column", secondaryIndex.Columns[0].Name).Debug("creating secondary index")
 
 	var rootPageIdx PageIndex
-	if secondaryIndexUsesDedicatedInvertedStorage(secondaryIndex.Method) {
+	// HNSW: page allocation and schema insertion are deferred to populateHNSWIndex,
+	// which knows the real root page after BuildHNSWIndex runs.
+	switch {
+	case secondaryIndexUsesDedicatedInvertedStorage(secondaryIndex.Method):
 		txPager := NewTransactionalPager(
 			d.factory.ForInvertedIndex(),
 			d.txManager,
@@ -2214,10 +2217,7 @@ func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, tab
 		}
 		rootPageIdx = metaPage.Index
 		secondaryIndex.InvertedIndex = invertedIdx
-	} else if secondaryIndexUsesDedicatedHNSWStorage(secondaryIndex.Method) {
-		// HNSW: page allocation and schema insertion are deferred to populateHNSWIndex,
-		// which knows the real root page after BuildHNSWIndex runs.
-	} else {
+	case !secondaryIndexUsesDedicatedHNSWStorage(secondaryIndex.Method):
 		storageColumns := secondaryIndexStorageColumns(secondaryIndex)
 		txPager := NewTransactionalPager(
 			d.factory.ForIndex(storageColumns, false),

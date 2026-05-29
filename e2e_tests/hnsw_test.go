@@ -139,3 +139,113 @@ func (s *TestSuite) TestHNSWIndex_WithParams() {
 		s.Require().NoError(err)
 	})
 }
+
+// TestHNSWIndex_OnlineMaintenance verifies that INSERT, DELETE and UPDATE keep
+// the HNSW index consistent with the underlying table.
+func (s *TestSuite) TestHNSWIndex_OnlineMaintenance() {
+	_, err := s.db.Exec(`create table "om_vecs" (
+		id   int8 primary key autoincrement,
+		tag  varchar(50) not null,
+		v    vector(2) not null
+	);`)
+	s.Require().NoError(err)
+
+	// Seed a few rows so the index is non-trivial at creation time.
+	seed := []string{"[1.0, 0.0]", "[2.0, 0.0]", "[3.0, 0.0]"}
+	for _, vec := range seed {
+		_, err := s.db.Exec(`insert into om_vecs (tag, v) values (?, ?)`, vec, vec)
+		s.Require().NoError(err)
+	}
+
+	_, err = s.db.Exec(`CREATE HNSW INDEX "idx_om" ON "om_vecs" (v);`)
+	s.Require().NoError(err)
+
+	s.Run("online_insert_is_searchable", func() {
+		// Insert a new row AFTER index creation — it must be reachable via ANN search.
+		_, err := s.db.Exec(
+			`insert into om_vecs (tag, v) values (?, ?)`,
+			"new", "[10.0, 0.0]",
+		)
+		s.Require().NoError(err)
+
+		res, err := s.db.QueryContext(context.Background(),
+			`SELECT tag, VEC_L2(v, '[10.0, 0.0]') AS dist FROM om_vecs ORDER BY dist LIMIT 1;`)
+		s.Require().NoError(err)
+		defer res.Close()
+
+		s.Require().True(res.Next())
+		var tag string
+		var dist float64
+		s.Require().NoError(res.Scan(&tag, &dist))
+		s.Equal("new", tag, "online-inserted row should be found as nearest")
+		s.InDelta(0.0, dist, 1e-6)
+	})
+
+	s.Run("online_delete_is_not_returned", func() {
+		// Insert a distinctive row and verify it's found.
+		_, err := s.db.Exec(
+			`insert into om_vecs (tag, v) values (?, ?)`,
+			"todelete", "[50.0, 0.0]",
+		)
+		s.Require().NoError(err)
+
+		// Confirm it's the nearest to its own position.
+		res, err := s.db.QueryContext(context.Background(),
+			`SELECT tag FROM om_vecs WHERE tag = ? LIMIT 1;`, "todelete")
+		s.Require().NoError(err)
+		s.Require().True(res.Next())
+		s.Require().NoError(res.Close())
+
+		// Delete it.
+		_, err = s.db.Exec(`DELETE FROM om_vecs WHERE tag = ?;`, "todelete")
+		s.Require().NoError(err)
+
+		// After deletion, the row must not appear in any result.
+		res2, err := s.db.QueryContext(context.Background(),
+			`SELECT tag FROM om_vecs WHERE tag = ? LIMIT 1;`, "todelete")
+		s.Require().NoError(err)
+		s.False(res2.Next(), "deleted row should not be returned by table scan")
+		s.Require().NoError(res2.Close())
+
+		// ANN result should not return "todelete".
+		res3, err := s.db.QueryContext(context.Background(),
+			`SELECT tag, VEC_L2(v, '[50.0, 0.0]') AS dist FROM om_vecs ORDER BY dist LIMIT 1;`)
+		s.Require().NoError(err)
+		defer res3.Close()
+		if res3.Next() {
+			var tag string
+			var dist float64
+			s.Require().NoError(res3.Scan(&tag, &dist))
+			s.NotEqual("todelete", tag, "deleted row must not be returned by ANN search")
+		}
+	})
+
+	s.Run("online_update_vector_is_findable", func() {
+		// Insert a row and then move its vector far away.
+		_, err := s.db.Exec(
+			`insert into om_vecs (tag, v) values (?, ?)`,
+			"tomove", "[100.0, 0.0]",
+		)
+		s.Require().NoError(err)
+
+		// Move it.
+		_, err = s.db.Exec(
+			`UPDATE om_vecs SET v = ? WHERE tag = ?;`,
+			"[200.0, 0.0]", "tomove",
+		)
+		s.Require().NoError(err)
+
+		// It should now be nearest to [200, 0], not [100, 0].
+		res, err := s.db.QueryContext(context.Background(),
+			`SELECT tag, VEC_L2(v, '[200.0, 0.0]') AS dist FROM om_vecs ORDER BY dist LIMIT 1;`)
+		s.Require().NoError(err)
+		defer res.Close()
+
+		s.Require().True(res.Next())
+		var tag string
+		var dist float64
+		s.Require().NoError(res.Scan(&tag, &dist))
+		s.Equal("tomove", tag, "updated row should be found at its new position")
+		s.InDelta(0.0, dist, 1e-6)
+	})
+}

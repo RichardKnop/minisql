@@ -191,8 +191,11 @@ type maxHeap []hnswCandidate
 func (h maxHeap) Len() int            { return len(h) }
 func (h maxHeap) Less(i, j int) bool  { return h[i].dist > h[j].dist }
 func (h maxHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *maxHeap) Push(x any)         { *h = append(*h, x.(hnswCandidate)) }
-func (h *maxHeap) Pop() any           { old := *h; n := len(old); x := old[n-1]; *h = old[:n-1]; return x }
+// Push implements heap.Interface.
+func (h *maxHeap) Push(x any) { *h = append(*h, x.(hnswCandidate)) }
+
+// Pop implements heap.Interface.
+func (h *maxHeap) Pop() any { old := *h; n := len(old); x := old[n-1]; *h = old[:n-1]; return x }
 
 // minHeap is a min-heap of candidates by distance (nearest element at top).
 type minHeap []hnswCandidate
@@ -200,8 +203,11 @@ type minHeap []hnswCandidate
 func (h minHeap) Len() int            { return len(h) }
 func (h minHeap) Less(i, j int) bool  { return h[i].dist < h[j].dist }
 func (h minHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *minHeap) Push(x any)         { *h = append(*h, x.(hnswCandidate)) }
-func (h *minHeap) Pop() any           { old := *h; n := len(old); x := old[n-1]; *h = old[:n-1]; return x }
+// Push implements heap.Interface.
+func (h *minHeap) Push(x any) { *h = append(*h, x.(hnswCandidate)) }
+
+// Pop implements heap.Interface.
+func (h *minHeap) Pop() any { old := *h; n := len(old); x := old[n-1]; *h = old[:n-1]; return x }
 
 // greedyStep performs a single-step greedy 1-NN descent at a given layer.
 // skipID is a RowID to ignore (the node being inserted, or ^RowID(0) for pure search).
@@ -214,6 +220,9 @@ func (g *hnswGraph) greedyStep(ep RowID, epDist float64, skipID RowID, layer int
 		improved := false
 		for _, nb := range node.Neighbors[layer] {
 			if nb == skipID {
+				continue
+			}
+			if g.Nodes[nb] == nil {
 				continue
 			}
 			d, err := distFn(nb)
@@ -259,6 +268,9 @@ func (g *hnswGraph) beamSearch(ep RowID, epDist float64, skipID RowID, layer, ef
 		}
 		for _, nb := range node.Neighbors[layer] {
 			if visited[nb] {
+				continue
+			}
+			if g.Nodes[nb] == nil {
 				continue
 			}
 			visited[nb] = true
@@ -414,10 +426,7 @@ func writeHNSWGraph(ctx context.Context, pager TxPager, graph *hnswGraph) (PageI
 		firstDataPage = uint32(allocatedPages[0].Index)
 	}
 
-	entryLevel := graph.EntryLevel
-	if entryLevel < 0 {
-		entryLevel = 0
-	}
+	entryLevel := max(graph.EntryLevel, 0)
 	metaPage.HNSWMetaPage = &hnswMetaPage{
 		M:              uint16(graph.M),
 		EfConstruction: uint32(graph.EfConstruction),
@@ -508,6 +517,153 @@ func (idx *hnswIndex) Search(ctx context.Context, k, efSearch int, distFn func(R
 		return nil, err
 	}
 	return g.search(k, efSearch, distFn)
+}
+
+// ---- online DML maintenance ----
+
+// Insert adds rowID to the HNSW index.  distFn returns the L2 distance from
+// rowID's vector to any existing node's vector.  Both the in-memory graph and
+// the on-disk pages are updated within the current transaction.
+func (idx *hnswIndex) Insert(ctx context.Context, rowID RowID, distFn func(RowID) (float64, error)) error {
+	g, err := idx.loadGraph(ctx)
+	if err != nil {
+		return fmt.Errorf("HNSW Insert: load graph: %w", err)
+	}
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	if err := g.insert(rowID, distFn); err != nil {
+		return fmt.Errorf("HNSW Insert: graph insert rowID %d: %w", rowID, err)
+	}
+	return idx.replaceDataPages(ctx, g)
+}
+
+// Delete removes rowID from the HNSW index.  Dangling neighbor references to
+// the removed node are silently skipped at search time because greedyStep and
+// beamSearch guard on g.Nodes[rowID] == nil.
+func (idx *hnswIndex) Delete(ctx context.Context, rowID RowID) error {
+	g, err := idx.loadGraph(ctx)
+	if err != nil {
+		return fmt.Errorf("HNSW Delete: load graph: %w", err)
+	}
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	delete(g.Nodes, rowID)
+	if g.hasEntry && g.EntryPoint == rowID {
+		g.hasEntry = false
+		var bestLevel int
+		for id, node := range g.Nodes {
+			if level := len(node.Neighbors) - 1; !g.hasEntry || level > bestLevel {
+				g.EntryPoint = id
+				g.EntryLevel = level
+				bestLevel = level
+				g.hasEntry = true
+			}
+		}
+	}
+	return idx.replaceDataPages(ctx, g)
+}
+
+// replaceDataPages frees the existing data page chain for the index and writes
+// a fresh one for g, then updates the meta page at idx.rootPageIdx in-place.
+// M and EfConstruction are preserved from the existing meta page.
+func (idx *hnswIndex) replaceDataPages(ctx context.Context, g *hnswGraph) error {
+	// Fetch the meta page in write mode.
+	metaPage, err := idx.pager.ModifyPage(ctx, idx.rootPageIdx)
+	if err != nil {
+		return fmt.Errorf("HNSW replaceDataPages: get meta page: %w", err)
+	}
+	if metaPage.HNSWMetaPage == nil {
+		return fmt.Errorf("HNSW replaceDataPages: page %d is not an HNSW meta page", idx.rootPageIdx)
+	}
+
+	// Free the old data page chain.
+	pageIdx := PageIndex(metaPage.HNSWMetaPage.FirstDataPage)
+	for pageIdx != 0 {
+		p, err := idx.pager.ReadPage(ctx, pageIdx)
+		if err != nil {
+			return fmt.Errorf("HNSW replaceDataPages: read data page %d: %w", pageIdx, err)
+		}
+		if p.HNSWDataPage == nil {
+			return fmt.Errorf("HNSW replaceDataPages: page %d is not an HNSW data page", pageIdx)
+		}
+		nextIdx := PageIndex(p.HNSWDataPage.NextPage)
+		if err := idx.pager.AddFreePage(ctx, pageIdx); err != nil {
+			return fmt.Errorf("HNSW replaceDataPages: free data page %d: %w", pageIdx, err)
+		}
+		pageIdx = nextIdx
+	}
+
+	// Build node records from the current graph.
+	records := make([]hnswNodeRecord, 0, len(g.Nodes))
+	for rowID, node := range g.Nodes {
+		rec := hnswNodeRecord{RowID: uint64(rowID)}
+		for _, layerNeighbors := range node.Neighbors {
+			uNeighbors := make([]uint64, len(layerNeighbors))
+			for i, nb := range layerNeighbors {
+				uNeighbors[i] = uint64(nb)
+			}
+			rec.Neighbors = append(rec.Neighbors, uNeighbors)
+		}
+		records = append(records, rec)
+	}
+
+	// Pack records into page-sized groups.
+	usableSize := PageSize - pageChecksumSize - hnswDataPageHeaderSize
+	var groups [][]hnswNodeRecord
+	var grpNodes []hnswNodeRecord
+	grpSize := 0
+	for _, rec := range records {
+		sz := nodeRecordSize(rec)
+		if grpSize+sz > usableSize && len(grpNodes) > 0 {
+			groups = append(groups, grpNodes)
+			grpNodes = nil
+			grpSize = 0
+		}
+		grpNodes = append(grpNodes, rec)
+		grpSize += sz
+	}
+	if len(grpNodes) > 0 {
+		groups = append(groups, grpNodes)
+	}
+
+	// Allocate new data pages.
+	newDataPages := make([]*Page, len(groups))
+	for i := range groups {
+		p, err := idx.pager.GetFreePage(ctx)
+		if err != nil {
+			return fmt.Errorf("HNSW replaceDataPages: alloc data page: %w", err)
+		}
+		newDataPages[i] = p
+	}
+
+	// Wire next-page pointers and assign content.
+	for i, grp := range groups {
+		var nextPage uint32
+		if i+1 < len(newDataPages) {
+			nextPage = uint32(newDataPages[i+1].Index)
+		}
+		newDataPages[i].HNSWDataPage = &hnswDataPage{NextPage: nextPage, Nodes: grp}
+	}
+
+	// Update the meta page in-place, preserving M and EfConstruction.
+	var firstDataPage uint32
+	if len(newDataPages) > 0 {
+		firstDataPage = uint32(newDataPages[0].Index)
+	}
+	entryLevel := max(g.EntryLevel, 0)
+	entryPoint := hnswNoEntryPoint
+	if g.hasEntry {
+		entryPoint = uint64(g.EntryPoint)
+	}
+	metaPage.HNSWMetaPage = &hnswMetaPage{
+		M:              metaPage.HNSWMetaPage.M,
+		EfConstruction: metaPage.HNSWMetaPage.EfConstruction,
+		EntryPoint:     entryPoint,
+		EntryLevel:     uint8(entryLevel),
+		NodeCount:      uint32(len(g.Nodes)),
+		FirstDataPage:  firstDataPage,
+	}
+	return nil
 }
 
 // ---- factory functions ----
