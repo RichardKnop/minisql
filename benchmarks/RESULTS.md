@@ -145,6 +145,27 @@ Top CPU consumers (6.65 s total):
 
 **Remaining bottleneck:** Vector overflow-page I/O now dominates both allocation count and latency for ANNSearch. `makeDistFunc` reads each node's `[]float32` from disk on every distance evaluation. P2 (vector caching at `loadGraph` time) is the next high-leverage target.
 
+---
+
+## 2026-05-30 — HNSW P2 Persistent Vector Cache
+
+**Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
+**Branch:** `feat/vector-search-hnsw-index`  
+**Changes:** `hnswIndex` gains `vecCache map[RowID]VectorPointer` + `vecMu sync.RWMutex`. `makeDistFunc` calls `idx.cachedVector()` (read-path lock-free, write-lock only on cold miss) instead of `table.loadVectorByRowID` per distFn call. Online DML keeps the cache consistent: `insertHNSWIndexKey` adds the new vector, `deleteHNSWIndexKey`/`updateHNSWIndexKey` evict the stale entry.
+
+### ANN search improvement (cumulative from baseline)
+
+| Corpus | Dims | top-k | Baseline ns | After P1 ns | After P2 ns | Δ P2 | Baseline allocs | After P2 allocs | Δ allocs |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 000 rows | 3 | 1 | 195 µs | 232 µs | **76 µs** | **−61%** | 1 362 | 330 | **−76%** |
+| 1 000 rows | 3 | 10 | 185 µs | 203 µs | **90 µs** | **−51%** | 1 458 | 435 | **−70%** |
+| 1 000 rows | 128 | 1 | 761 µs | 681 µs | **264 µs** | **−61%** | 4 224 | 585 | **−86%** |
+| 1 000 rows | 128 | 10 | 837 µs | 751 µs | **348 µs** | **−54%** | 4 335 | 697 | **−84%** |
+
+**Key finding:** Eliminating per-search overflow-page I/O (the dominant cost post-P1) drops ANNSearch latency 51–61% and allocs 70–86% at steady state (after first-query warm-up). The cached path amortizes across queries: the first search per index pays the full disk-read cost; every subsequent search is pure in-memory arithmetic + map lookups.
+
+**Remaining targets:** P1.4 (incremental `replaceDataPages` — online INSERT is still O(N) pages per row) and P3 (flat array for `g.Nodes` to improve graph-traversal cache locality).
+
 ## 2026-05-27 — Plan Cache Extension for Bound-Condition Queries
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
