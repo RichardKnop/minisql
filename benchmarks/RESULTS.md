@@ -13,6 +13,13 @@
 | 1 | 264 µs | 265 µs | ~0% | 585 | 582 | ~0% |
 | 10 | 348 µs | 345 µs | ~−1% | 697 | 697 | 0% |
 
+### ANN search — dims128/n10000 (absolute, no pre-P3 baseline)
+
+| top-k | ns/op | B/op | allocs/op |
+|---:|---:|---:|---:|
+| 1 | 542 µs | 123 KiB | 752 |
+| 10 | 611 µs | 176 KiB | 879 |
+
 **Finding:** No measurable ANNSearch improvement at n=1,000. The graph at this size fits in CPU L2/L3 cache regardless of allocation layout, and HNSW traversal follows a pseudo-random neighbour-pointer pattern that limits spatial-locality gains. The `vecCache` (P2) already removed the dominant cost (overflow-page I/O); remaining time is SQL overhead and distance arithmetic. The structural benefit of `nodeStore` is reduced GC pressure on large graphs: replacing ~N individual heap objects with a single contiguous allocation reduces GC scan overhead and fragmentation at n=10,000+.
 
 ---
