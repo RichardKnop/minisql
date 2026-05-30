@@ -1,5 +1,22 @@
 # Benchmark Results
 
+## 2026-05-30 — HNSW P3 Flat Node Backing Store
+
+**Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
+**Branch:** `feat/vector-search-hnsw-index`  
+**Changes:** `hnswGraph` gains `nodeStore []hnswNodeData` — a pre-allocated flat backing array sized to `meta.NodeCount`. `readHNSWGraph` now appends each deserialized node into `nodeStore` and stores a pointer into it in the `Nodes` map, instead of individually heap-allocating each node. All pre-loaded `Nodes` map values point into contiguous memory, improving cache locality during graph traversal. Online-inserted nodes (INSERT path) continue to be individually heap-allocated since they must remain stable after `nodeStore` capacity is exhausted.
+
+### ANN search — dims128/n1000 (cumulative vs baseline)
+
+| top-k | After P2 ns/op | After P3 ns/op | Δ | After P2 allocs | After P3 allocs | Δ |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 264 µs | 265 µs | ~0% | 585 | 582 | ~0% |
+| 10 | 348 µs | 345 µs | ~−1% | 697 | 697 | 0% |
+
+**Finding:** No measurable ANNSearch improvement at n=1,000. The graph at this size fits in CPU L2/L3 cache regardless of allocation layout, and HNSW traversal follows a pseudo-random neighbour-pointer pattern that limits spatial-locality gains. The `vecCache` (P2) already removed the dominant cost (overflow-page I/O); remaining time is SQL overhead and distance arithmetic. The structural benefit of `nodeStore` is reduced GC pressure on large graphs: replacing ~N individual heap objects with a single contiguous allocation reduces GC scan overhead and fragmentation at n=10,000+.
+
+---
+
 ## 2026-05-30 — Vector Search (HNSW) Baseline
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  

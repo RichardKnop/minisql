@@ -28,8 +28,14 @@ const (
 // readHNSWGraph populates nodeToPage and lastDataPage; insert marks dirty nodes;
 // incrementalInsert rewrites only the dirty pages and appends the new node.
 // replaceDataPages (used by Delete) always rebuilds nodeToPage from scratch.
+//
+// nodeStore is a pre-allocated flat backing array for node data loaded by
+// readHNSWGraph.  All Nodes map values for pre-loaded nodes point into it,
+// giving contiguous memory layout and better cache locality during traversal.
+// Online-inserted nodes are individually heap-allocated and not in nodeStore.
 type hnswGraph struct {
 	Nodes          map[RowID]*hnswNodeData
+	nodeStore      []hnswNodeData      // flat backing store for readHNSWGraph-loaded nodes
 	M              int
 	EfConstruction int
 	EntryPoint     RowID
@@ -545,6 +551,9 @@ func readHNSWGraph(ctx context.Context, pager TxPager, rootPageIdx PageIndex) (*
 	// Walk the data page chain, populate Nodes, and build the nodeToPage index
 	// for incremental page updates during online DML.
 	g.nodeToPage = make(map[RowID]PageIndex, int(meta.NodeCount))
+	// Pre-allocate flat backing store so all Nodes map values point into contiguous
+	// memory — improves cache locality during beamSearch neighbour traversal.
+	g.nodeStore = make([]hnswNodeData, 0, int(meta.NodeCount))
 	pageIdx := PageIndex(meta.FirstDataPage)
 	for pageIdx != 0 {
 		p, err := pager.ReadPage(ctx, pageIdx)
@@ -556,7 +565,7 @@ func readHNSWGraph(ctx context.Context, pager TxPager, rootPageIdx PageIndex) (*
 		}
 		dp := p.HNSWDataPage
 		for _, rec := range dp.Nodes {
-			node := &hnswNodeData{Neighbors: make([][]RowID, len(rec.Neighbors))}
+			node := hnswNodeData{Neighbors: make([][]RowID, len(rec.Neighbors))}
 			for l, layer := range rec.Neighbors {
 				neighbors := make([]RowID, len(layer))
 				for i, nb := range layer {
@@ -564,7 +573,8 @@ func readHNSWGraph(ctx context.Context, pager TxPager, rootPageIdx PageIndex) (*
 				}
 				node.Neighbors[l] = neighbors
 			}
-			g.Nodes[RowID(rec.RowID)] = node
+			g.nodeStore = append(g.nodeStore, node)
+			g.Nodes[RowID(rec.RowID)] = &g.nodeStore[len(g.nodeStore)-1]
 			g.nodeToPage[RowID(rec.RowID)] = pageIdx
 		}
 		if dp.NextPage == 0 {
