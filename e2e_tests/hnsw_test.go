@@ -98,6 +98,55 @@ func (s *TestSuite) TestHNSWIndex_CreateAndSearch() {
 	})
 }
 
+// TestHNSWIndex_DropIndex verifies that DROP INDEX frees all HNSW pages and
+// that the database remains consistent (no orphan pages) afterward.
+func (s *TestSuite) TestHNSWIndex_DropIndex() {
+	_, err := s.db.Exec(`create table "drop_vecs" (
+		id int8 primary key autoincrement,
+		v  vector(3) not null
+	);`)
+	s.Require().NoError(err)
+
+	for i := 1; i <= 5; i++ {
+		_, err := s.db.Exec(
+			`insert into drop_vecs (v) values (?)`,
+			fmt.Sprintf("[%d.0, 0.0, 0.0]", i),
+		)
+		s.Require().NoError(err)
+	}
+
+	_, err = s.db.Exec(`CREATE HNSW INDEX "idx_drop" ON "drop_vecs" (v);`)
+	s.Require().NoError(err)
+
+	s.Run("drop_index_succeeds", func() {
+		_, err := s.db.Exec(`DROP INDEX "idx_drop";`)
+		s.Require().NoError(err)
+	})
+
+	s.Run("integrity_check_clean_after_drop", func() {
+		results := s.collectPragmaResults(`PRAGMA integrity_check;`)
+		s.Require().Len(results, 1)
+		s.Equal("ok", results[0].Code)
+	})
+
+	s.Run("recreate_after_drop_works", func() {
+		_, err := s.db.Exec(`CREATE HNSW INDEX "idx_drop" ON "drop_vecs" (v);`)
+		s.Require().NoError(err)
+
+		res, err := s.db.QueryContext(context.Background(),
+			`SELECT id, VEC_L2(v, '[3.0, 0.0, 0.0]') AS dist FROM drop_vecs ORDER BY dist LIMIT 1;`)
+		s.Require().NoError(err)
+		defer res.Close()
+
+		s.Require().True(res.Next())
+		var id int64
+		var dist float64
+		s.Require().NoError(res.Scan(&id, &dist))
+		s.Equal(int64(3), id)
+		s.InDelta(0.0, dist, 1e-6)
+	})
+}
+
 func (s *TestSuite) TestHNSWIndex_WithParams() {
 	_, err := s.db.Exec(`create table "vecs_params" (
 		id int8 primary key autoincrement,

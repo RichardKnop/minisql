@@ -2089,6 +2089,16 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 		if err := freeable.FreeAll(ctx); err != nil {
 			return err
 		}
+	} else if secondaryIndexUsesDedicatedHNSWStorage(secondaryIndex.Method) {
+		txPager := NewTransactionalPager(
+			d.factory.ForHNSWIndex(),
+			d.txManager,
+			table.Name,
+			schema.Name,
+		)
+		if err := freeHNSWIndexPages(ctx, txPager, schema.RootPage); err != nil {
+			return err
+		}
 	} else {
 		storageColumns := secondaryIndexStorageColumns(secondaryIndex)
 

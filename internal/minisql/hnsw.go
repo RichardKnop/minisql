@@ -689,6 +689,41 @@ func OpenHNSWIndex(pager TxPager, rootPageIdx PageIndex) *hnswIndex {
 	return &hnswIndex{pager: pager, rootPageIdx: rootPageIdx}
 }
 
+// freeHNSWIndexPages releases every page belonging to an HNSW index — the meta
+// page and the entire data-page chain — back to the free list.  Called by
+// DROP INDEX to reclaim space without leaving orphan pages.
+func freeHNSWIndexPages(ctx context.Context, pager TxPager, rootPageIdx PageIndex) error {
+	metaPage, err := pager.ReadPage(ctx, rootPageIdx)
+	if err != nil {
+		return fmt.Errorf("HNSW drop: read meta page %d: %w", rootPageIdx, err)
+	}
+	if metaPage.HNSWMetaPage == nil {
+		return fmt.Errorf("HNSW drop: page %d is not an HNSW meta page", rootPageIdx)
+	}
+
+	// Walk and free the data page chain first so the meta page can be freed last.
+	dataPageIdx := PageIndex(metaPage.HNSWMetaPage.FirstDataPage)
+	for dataPageIdx != 0 {
+		dp, err := pager.ReadPage(ctx, dataPageIdx)
+		if err != nil {
+			return fmt.Errorf("HNSW drop: read data page %d: %w", dataPageIdx, err)
+		}
+		if dp.HNSWDataPage == nil {
+			return fmt.Errorf("HNSW drop: page %d is not an HNSW data page", dataPageIdx)
+		}
+		nextIdx := PageIndex(dp.HNSWDataPage.NextPage)
+		if err := pager.AddFreePage(ctx, dataPageIdx); err != nil {
+			return fmt.Errorf("HNSW drop: free data page %d: %w", dataPageIdx, err)
+		}
+		dataPageIdx = nextIdx
+	}
+
+	if err := pager.AddFreePage(ctx, rootPageIdx); err != nil {
+		return fmt.Errorf("HNSW drop: free meta page %d: %w", rootPageIdx, err)
+	}
+	return nil
+}
+
 // BuildHNSWIndex builds a new HNSW graph from the supplied row set, writes it
 // to pages, and returns the meta page index (used as the schema RootPage).
 //
