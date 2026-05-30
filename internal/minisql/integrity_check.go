@@ -64,6 +64,10 @@ func (d *Database) IntegrityCheck(ctx context.Context) (IntegrityReport, error) 
 				report = d.walkInvertedIndexPages(ctx, report, table.Name, index.Name, index.InvertedIndex.GetRootPageIdx(), livePages)
 				continue
 			}
+			if secondaryIndexUsesDedicatedHNSWStorage(index.Method) && index.HNSWIndex != nil {
+				report = d.walkHNSWIndexPages(ctx, report, table.Name, index.Name, index.HNSWIndex.rootPageIdx, livePages)
+				continue
+			}
 			if index.Index == nil {
 				continue
 			}
@@ -125,9 +129,12 @@ func (d *Database) QuickCheck(ctx context.Context) (IntegrityReport, error) {
 			}
 		}
 		for _, index := range table.SecondaryIndexes {
-			if secondaryIndexUsesDedicatedInvertedStorage(index.Method) && index.InvertedIndex != nil {
+			switch {
+			case secondaryIndexUsesDedicatedInvertedStorage(index.Method) && index.InvertedIndex != nil:
 				rootPages[index.InvertedIndex.GetRootPageIdx()] = fmt.Sprintf("index %s", index.Name)
-			} else if index.Index != nil {
+			case secondaryIndexUsesDedicatedHNSWStorage(index.Method) && index.HNSWIndex != nil:
+				rootPages[index.HNSWIndex.rootPageIdx] = fmt.Sprintf("index %s", index.Name)
+			case index.Index != nil:
 				rootPages[index.Index.GetRootPageIdx()] = fmt.Sprintf("index %s", index.Name)
 			}
 		}
@@ -166,6 +173,10 @@ func (d *Database) QuickCheck(ctx context.Context) (IntegrityReport, error) {
 		for _, index := range table.SecondaryIndexes {
 			if secondaryIndexUsesDedicatedInvertedStorage(index.Method) && index.InvertedIndex != nil {
 				report = d.checkInvertedIndexRoot(ctx, report, table.Name, index.Name, index.InvertedIndex.GetRootPageIdx())
+				continue
+			}
+			if secondaryIndexUsesDedicatedHNSWStorage(index.Method) && index.HNSWIndex != nil {
+				report = d.checkHNSWIndexRoot(ctx, report, table.Name, index.Name, index.HNSWIndex.rootPageIdx)
 				continue
 			}
 			if index.Index == nil {
@@ -383,6 +394,123 @@ func (d *Database) checkInvertedIndexRoot(ctx context.Context, report IntegrityR
 			Page:    pageIndexPtr(pageIdx),
 			Object:  indexName,
 		})
+	}
+
+	return report
+}
+
+func (d *Database) checkHNSWIndexRoot(ctx context.Context, report IntegrityReport, tableName, indexName string, pageIdx PageIndex) IntegrityReport {
+	if pageIdx >= PageIndex(report.TotalPages) {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_root_out_of_range",
+			Message: fmt.Sprintf("index %s on table %s has root page %d outside database page range", indexName, tableName, pageIdx),
+			Page:    pageIndexPtr(pageIdx),
+			Object:  indexName,
+		})
+		return report
+	}
+	page, err := d.factory.ForHNSWIndex().GetPage(ctx, pageIdx)
+	if err != nil {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_root_decode_failed",
+			Message: fmt.Sprintf("failed to decode root page for index %s on table %s: %v", indexName, tableName, err),
+			Page:    pageIndexPtr(pageIdx),
+			Object:  indexName,
+		})
+		return report
+	}
+	report.CheckedRootPages += 1
+	if page.HNSWMetaPage == nil {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_root_invalid_type",
+			Message: fmt.Sprintf("index %s on table %s root page %d is not an HNSW meta page", indexName, tableName, pageIdx),
+			Page:    pageIndexPtr(pageIdx),
+			Object:  indexName,
+		})
+	}
+	return report
+}
+
+func (d *Database) walkHNSWIndexPages(ctx context.Context, report IntegrityReport, tableName, indexName string, root PageIndex, livePages map[PageIndex]string) IntegrityReport {
+	objectName := fmt.Sprintf("index %s on table %s", indexName, tableName)
+
+	if root >= PageIndex(report.TotalPages) {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_page_out_of_range",
+			Message: fmt.Sprintf("%s references root page %d outside database page range", objectName, root),
+			Page:    pageIndexPtr(root),
+			Object:  indexName,
+		})
+		return report
+	}
+	report = markLivePage(report, livePages, root, objectName)
+
+	pager := d.factory.ForHNSWIndex()
+	metaPage, err := pager.GetPage(ctx, root)
+	if err != nil {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_page_decode_failed",
+			Message: fmt.Sprintf("failed to decode meta page %d for %s: %v", root, objectName, err),
+			Page:    pageIndexPtr(root),
+			Object:  indexName,
+		})
+		return report
+	}
+	report.CheckedRootPages += 1
+	if metaPage.HNSWMetaPage == nil {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_page_invalid_type",
+			Message: fmt.Sprintf("%s root page %d is not an HNSW meta page", objectName, root),
+			Page:    pageIndexPtr(root),
+			Object:  indexName,
+		})
+		return report
+	}
+
+	visited := make(map[PageIndex]struct{})
+	dataPageIdx := PageIndex(metaPage.HNSWMetaPage.FirstDataPage)
+	for dataPageIdx != 0 {
+		if dataPageIdx >= PageIndex(report.TotalPages) {
+			report.Issues = append(report.Issues, IntegrityIssue{
+				Code:    "index_page_out_of_range",
+				Message: fmt.Sprintf("%s references data page %d outside database page range", objectName, dataPageIdx),
+				Page:    pageIndexPtr(dataPageIdx),
+				Object:  indexName,
+			})
+			break
+		}
+		if _, seen := visited[dataPageIdx]; seen {
+			report.Issues = append(report.Issues, IntegrityIssue{
+				Code:    "index_page_cycle",
+				Message: fmt.Sprintf("%s HNSW data page chain contains a cycle at page %d", objectName, dataPageIdx),
+				Page:    pageIndexPtr(dataPageIdx),
+				Object:  indexName,
+			})
+			break
+		}
+		visited[dataPageIdx] = struct{}{}
+		report = markLivePage(report, livePages, dataPageIdx, objectName)
+
+		page, err := pager.GetPage(ctx, dataPageIdx)
+		if err != nil {
+			report.Issues = append(report.Issues, IntegrityIssue{
+				Code:    "index_page_decode_failed",
+				Message: fmt.Sprintf("failed to decode HNSW data page %d for %s: %v", dataPageIdx, objectName, err),
+				Page:    pageIndexPtr(dataPageIdx),
+				Object:  indexName,
+			})
+			break
+		}
+		if page.HNSWDataPage == nil {
+			report.Issues = append(report.Issues, IntegrityIssue{
+				Code:    "index_page_invalid_type",
+				Message: fmt.Sprintf("%s data page %d is not an HNSW data page", objectName, dataPageIdx),
+				Page:    pageIndexPtr(dataPageIdx),
+				Object:  indexName,
+			})
+			break
+		}
+		dataPageIdx = PageIndex(page.HNSWDataPage.NextPage)
 	}
 
 	return report
@@ -844,6 +972,10 @@ func (d *Database) checkTableIndexConsistency(ctx context.Context, report Integr
 					tableIndex: index,
 				})
 			}
+			continue
+		}
+		// HNSW is an approximate structure — no exact key/row consistency to verify.
+		if secondaryIndexUsesDedicatedHNSWStorage(index.Method) {
 			continue
 		}
 		if !index.IsBTree() || index.Index == nil {

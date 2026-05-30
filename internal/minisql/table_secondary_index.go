@@ -14,6 +14,7 @@ import (
 type SecondaryIndex struct {
 	Index         BTreeIndex
 	InvertedIndex invertedIndex
+	HNSWIndex     *hnswIndex
 	IndexInfo
 }
 
@@ -29,6 +30,10 @@ func secondaryIndexStorageColumns(secondaryIndex SecondaryIndex) []Column {
 
 func secondaryIndexUsesDedicatedInvertedStorage(method IndexMethod) bool {
 	return method == IndexMethodFullText || method == IndexMethodInverted
+}
+
+func secondaryIndexUsesDedicatedHNSWStorage(method IndexMethod) bool {
+	return method == IndexMethodHNSW
 }
 
 func invertedIndexPostingModeForIndexMethod(method IndexMethod) invertedIndexPostingMode {
@@ -53,6 +58,9 @@ func (t *Table) insertSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 	}
 	if secondaryIndex.Method == IndexMethodInverted {
 		return t.insertInvertedIndexKeys(ctx, secondaryIndex, rowID, row)
+	}
+	if secondaryIndex.Method == IndexMethodHNSW {
+		return t.insertHNSWIndexKey(ctx, secondaryIndex, rowID, row)
 	}
 	if secondaryIndex.Index == nil {
 		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
@@ -136,6 +144,9 @@ func (t *Table) updateSecondaryIndexKey(ctx context.Context, secondaryIndex Seco
 	}
 	if secondaryIndex.Method == IndexMethodInverted {
 		return t.updateInvertedIndexKeys(ctx, secondaryIndex, oldRow, row)
+	}
+	if secondaryIndex.Method == IndexMethodHNSW {
+		return t.updateHNSWIndexKey(ctx, secondaryIndex, row)
 	}
 	if secondaryIndex.Index == nil {
 		return fmt.Errorf("table %s has secondary index %s but no Btree index instance", t.Name, secondaryIndex.Name)
@@ -616,4 +627,89 @@ func (t *Table) updateCompositeSecondaryIndexKey(ctx context.Context, secondaryI
 	}
 
 	return nil
+}
+
+// insertHNSWIndexKey inserts rowID into the HNSW index using the vector from row.
+func (t *Table) insertHNSWIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, rowID RowID, row Row) error {
+	if secondaryIndex.HNSWIndex == nil {
+		return nil // not yet materialised (build phase)
+	}
+	colName := secondaryIndex.Columns[0].Name
+	val, ok := row.GetValue(colName)
+	if !ok || !val.Valid {
+		return nil // NULL vector — skip
+	}
+	newVP, ok := val.Value.(VectorPointer)
+	if !ok {
+		return fmt.Errorf("HNSW index %s: expected VectorPointer for %q, got %T", secondaryIndex.Name, colName, val.Value)
+	}
+	distFn := func(otherID RowID) (float64, error) {
+		otherVP, err := t.loadVectorByRowID(ctx, otherID, colName)
+		if err != nil {
+			return 0, err
+		}
+		return L2Distance(newVP, otherVP)
+	}
+	return secondaryIndex.HNSWIndex.Insert(ctx, rowID, distFn)
+}
+
+// deleteHNSWIndexKey removes rowID from the HNSW index.
+func (t *Table) deleteHNSWIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, rowID RowID) error {
+	if secondaryIndex.HNSWIndex == nil {
+		return nil
+	}
+	return secondaryIndex.HNSWIndex.Delete(ctx, rowID)
+}
+
+// updateHNSWIndexKey removes the old node for row.Key and re-inserts it with the
+// updated vector from row.  Called only when the indexed vector column changed.
+func (t *Table) updateHNSWIndexKey(ctx context.Context, secondaryIndex SecondaryIndex, row Row) error {
+	if secondaryIndex.HNSWIndex == nil {
+		return nil
+	}
+	colName := secondaryIndex.Columns[0].Name
+	idx := secondaryIndex.HNSWIndex
+	g, err := idx.loadGraph(ctx)
+	if err != nil {
+		return fmt.Errorf("HNSW updateHNSWIndexKey: load graph: %w", err)
+	}
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	// Remove old node.
+	rowID := row.Key
+	delete(g.Nodes, rowID)
+	if g.hasEntry && g.EntryPoint == rowID {
+		g.hasEntry = false
+		var bestLevel int
+		for id, node := range g.Nodes {
+			if level := len(node.Neighbors) - 1; !g.hasEntry || level > bestLevel {
+				g.EntryPoint = id
+				g.EntryLevel = level
+				bestLevel = level
+				g.hasEntry = true
+			}
+		}
+	}
+
+	// Re-insert with the new vector (or skip if now NULL).
+	val, ok := row.GetValue(colName)
+	if !ok || !val.Valid {
+		return idx.replaceDataPages(ctx, g)
+	}
+	newVP, ok := val.Value.(VectorPointer)
+	if !ok {
+		return fmt.Errorf("HNSW index %s: expected VectorPointer for %q, got %T", secondaryIndex.Name, colName, val.Value)
+	}
+	distFn := func(otherID RowID) (float64, error) {
+		otherVP, err := t.loadVectorByRowID(ctx, otherID, colName)
+		if err != nil {
+			return 0, err
+		}
+		return L2Distance(newVP, otherVP)
+	}
+	if err := g.insert(rowID, distFn); err != nil {
+		return fmt.Errorf("HNSW updateHNSWIndexKey: graph insert: %w", err)
+	}
+	return idx.replaceDataPages(ctx, g)
 }

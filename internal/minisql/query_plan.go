@@ -36,6 +36,8 @@ const (
 	ScanTypeFullText
 	// ScanTypeInverted runs a JSON inverted index lookup for JSON_CONTAINS predicates.
 	ScanTypeInverted
+	// ScanTypeHNSW runs an approximate nearest-neighbor search using an HNSW vector index.
+	ScanTypeHNSW
 )
 
 func (st ScanType) String() string {
@@ -60,6 +62,8 @@ func (st ScanType) String() string {
 		return "fulltext"
 	case ScanTypeInverted:
 		return "inverted"
+	case ScanTypeHNSW:
+		return "hnsw_scan"
 	default:
 		return "unknown"
 	}
@@ -146,9 +150,13 @@ type Scan struct {
 	// ScanLimit, when non-zero, tells the scan to stop after emitting this many qualifying rows.
 	// Set by PlanQuery when LIMIT is present, no in-memory sort is required, and no DISTINCT.
 	// For LIMIT N OFFSET M the value is M+N so that skipped rows are also counted.
-	ScanLimit     int64
-	Type          ScanType
+	ScanLimit    int64
+	Type         ScanType
 	CoveringIndex bool
+	// HNSWFuncName is "VEC_L2" or "VEC_COSINE" for ScanTypeHNSW scans.
+	HNSWFuncName string
+	// HNSWQueryVec is the query vector for ScanTypeHNSW scans, extracted at plan time.
+	HNSWQueryVec VectorPointer
 }
 
 /*
@@ -408,6 +416,13 @@ func (t *Table) planQueryUncached(ctx context.Context, stmt Statement) (QueryPla
 			Filters:   stmt.Conditions,
 		}},
 		OrderBy: stmt.OrderBy,
+	}
+
+	// HNSW scan detection runs before the no-conditions early-return because HNSW
+	// queries typically have no WHERE clause — they rely on ORDER BY dist LIMIT k.
+	if hnswScan, ok := t.tryHNSWScan(stmt); ok {
+		plan.Scans = []Scan{hnswScan}
+		return plan, nil
 	}
 
 	// If there is no where clause, no need to consider index scans
@@ -788,6 +803,101 @@ func literalText(expr *Expr) (string, bool) {
 		return "", false
 	}
 	return tp.String(), true
+}
+
+// tryHNSWScan detects the ANN query pattern:
+//
+//	SELECT …, VEC_L2(col, '<literal>') AS alias FROM t ORDER BY alias [ASC] LIMIT k
+//
+// and returns a ScanTypeHNSW scan when a matching HNSW index exists on the vector column.
+// It returns false for any query that does not match the expected pattern exactly.
+func (t *Table) tryHNSWScan(stmt Statement) (Scan, bool) {
+	// Must have a positive LIMIT (k > 0).
+	if !stmt.Limit.Valid {
+		return Scan{}, false
+	}
+	k, ok := stmt.Limit.Value.(int64)
+	if !ok || k <= 0 {
+		return Scan{}, false
+	}
+
+	// Must ORDER BY a single field (the distance alias).
+	if len(stmt.OrderBy) != 1 {
+		return Scan{}, false
+	}
+	orderAlias := stmt.OrderBy[0].Field.Name
+
+	// Find a VEC_L2 or VEC_COSINE expression in the SELECT field list whose alias
+	// matches the ORDER BY field name.
+	var (
+		distExpr *Expr
+		funcName string
+	)
+	for _, f := range stmt.Fields {
+		if f.Expr == nil {
+			continue
+		}
+		if f.Expr.FuncName != "VEC_L2" && f.Expr.FuncName != "VEC_COSINE" {
+			continue
+		}
+		alias := f.Alias
+		if alias == "" {
+			alias = f.Expr.String() // unaliased — unlikely to match
+		}
+		if alias != orderAlias {
+			continue
+		}
+		distExpr = f.Expr
+		funcName = f.Expr.FuncName
+		break
+	}
+	if distExpr == nil || len(distExpr.Args) != 2 {
+		return Scan{}, false
+	}
+
+	// The first argument must be a bare column reference.
+	colArg := distExpr.Args[0]
+	if colArg.Column == "" {
+		return Scan{}, false
+	}
+	colName := colArg.Column
+
+	// The second argument must be a literal evaluatable without a row.
+	queryVal, err := distExpr.Args[1].Eval(Row{})
+	if err != nil || queryVal == nil {
+		return Scan{}, false
+	}
+	queryVec, err := toVectorPointer(queryVal)
+	if err != nil {
+		return Scan{}, false
+	}
+
+	// Find an HNSW index on the named column.
+	var matchedIndex SecondaryIndex
+	foundIndex := false
+	for _, idx := range t.SecondaryIndexes {
+		if idx.Method != IndexMethodHNSW || len(idx.Columns) != 1 {
+			continue
+		}
+		if idx.Columns[0].Name == colName {
+			matchedIndex = idx
+			foundIndex = true
+			break
+		}
+	}
+	if !foundIndex {
+		return Scan{}, false
+	}
+
+	return Scan{
+		TableName:    t.Name,
+		Type:         ScanTypeHNSW,
+		IndexName:    matchedIndex.Name,
+		IndexColumns: []Column{matchedIndex.Columns[0]},
+		HNSWFuncName: funcName,
+		HNSWQueryVec: queryVec,
+		ScanLimit:    k,
+	}, true
 }
 
 // tryMatchIndex attempts to match an index against the conditions in a group.
@@ -1654,6 +1764,8 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 			return t.fullTextIndexScan(ctx, p.Scans[0], selectedFields, out)
 		case ScanTypeInverted:
 			return t.invertedIndexScan(ctx, p.Scans[0], selectedFields, out)
+		case ScanTypeHNSW:
+			return t.hnswIndexScan(ctx, p.Scans[0], selectedFields, out)
 		case ScanTypeSequential:
 			return t.sequentialScan(ctx, p.Scans[0], selectedFields, out)
 		default:

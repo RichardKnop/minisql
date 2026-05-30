@@ -578,6 +578,24 @@ func marshalPage(page *Page, buf []byte) error {
 		if err := page.InvertedSegmentPage.Marshal(buf); err != nil {
 			return fmt.Errorf("error marshaling inverted segment page: %w", err)
 		}
+	case page.HNSWMetaPage != nil:
+		if page.Index == 0 {
+			buf = buf[:PageSize-RootPageConfigSize-pageChecksumSize]
+		} else {
+			buf = buf[:PageSize-pageChecksumSize]
+		}
+		if err := page.HNSWMetaPage.Marshal(buf); err != nil {
+			return fmt.Errorf("error marshaling HNSW meta page: %w", err)
+		}
+	case page.HNSWDataPage != nil:
+		if page.Index == 0 {
+			buf = buf[:PageSize-RootPageConfigSize-pageChecksumSize]
+		} else {
+			buf = buf[:PageSize-pageChecksumSize]
+		}
+		if err := page.HNSWDataPage.Marshal(buf); err != nil {
+			return fmt.Errorf("error marshaling HNSW data page: %w", err)
+		}
 	default:
 		return errors.New("no known node type found")
 	}

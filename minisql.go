@@ -349,6 +349,16 @@ func (c *Conn) SetTransaction(tx *minisql.Transaction) {
 	c.transaction = tx
 }
 
+// CheckNamedValue implements driver.NamedValueChecker so that []float32 bind
+// arguments are passed through to toInternalArgs without being rejected by the
+// database/sql default converter (which only accepts the standard driver.Value types).
+func (c *Conn) CheckNamedValue(nv *driver.NamedValue) error {
+	if _, ok := nv.Value.([]float32); ok {
+		return nil // accepted as-is; toInternalArgs handles the conversion
+	}
+	return driver.ErrSkip // fall back to the default checker for everything else
+}
+
 // HasActiveTransaction reports whether an explicit BEGIN transaction is
 // currently open on this connection.
 func (c *Conn) HasActiveTransaction() bool {

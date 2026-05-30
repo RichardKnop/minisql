@@ -196,6 +196,8 @@ func (p *Page) Clear() {
 	p.InvertedPostPage = nil
 	p.InvertedMetaPage = nil
 	p.InvertedSegmentPage = nil
+	p.HNSWMetaPage = nil
+	p.HNSWDataPage = nil
 }
 
 // AddFreePage marks pageIdx as a free page and prepends it to the free list.

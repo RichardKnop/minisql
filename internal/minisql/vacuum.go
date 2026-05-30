@@ -99,6 +99,9 @@ func (d *Database) Vacuum(ctx context.Context) error {
 		}
 	}
 
+	// Non-HNSW indexes are recreated before rows so that INSERT maintenance
+	// keeps them in sync as rows are copied.  HNSW indexes use batch-build-only
+	// maintenance, so they must be created AFTER the rows are copied.
 	for _, schema := range schemas {
 		if schema.Type != SchemaSecondaryIndex {
 			continue
@@ -106,6 +109,9 @@ func (d *Database) Vacuum(ctx context.Context) error {
 		stmts, err := d.parser.Parse(tempCtx, schema.DDL)
 		if err != nil {
 			return fmt.Errorf("vacuum: parse index DDL for table %q: %w", schema.TableName, err)
+		}
+		if stmts[0].IndexMethod == IndexMethodHNSW {
+			continue // deferred until after row copy
 		}
 		if err := tempDB.txManager.ExecuteInTransaction(tempCtx, func(txCtx context.Context) error {
 			_, err := tempDB.ExecuteStatement(txCtx, stmts[0])
@@ -164,7 +170,29 @@ func (d *Database) Vacuum(ctx context.Context) error {
 		}
 	}
 
-	// --- PHASE 6: Flush and close both databases. ---
+	// --- PHASE 6: Recreate HNSW indexes now that all rows are in the temp DB. ---
+	// HNSW uses batch-build-only maintenance, so the index must be built after
+	// the table is fully populated.
+	for _, schema := range schemas {
+		if schema.Type != SchemaSecondaryIndex {
+			continue
+		}
+		stmts, err := d.parser.Parse(tempCtx, schema.DDL)
+		if err != nil {
+			return fmt.Errorf("vacuum: parse HNSW index DDL for table %q: %w", schema.TableName, err)
+		}
+		if stmts[0].IndexMethod != IndexMethodHNSW {
+			continue
+		}
+		if err := tempDB.txManager.ExecuteInTransaction(tempCtx, func(txCtx context.Context) error {
+			_, err := tempDB.ExecuteStatement(txCtx, stmts[0])
+			return err
+		}); err != nil {
+			return fmt.Errorf("vacuum: recreate HNSW index for table %q: %w", schema.TableName, err)
+		}
+	}
+
+	// --- PHASE 8: Flush and close both databases. ---
 	if err := tempDB.Close(); err != nil {
 		return fmt.Errorf("vacuum: close temp database: %w", err)
 	}
@@ -172,7 +200,7 @@ func (d *Database) Vacuum(ctx context.Context) error {
 		return fmt.Errorf("vacuum: close live database: %w", err)
 	}
 
-	// --- PHASE 7: Safe atomic file swap. ---
+	// --- PHASE 9: Safe atomic file swap. ---
 	// Remove any stale backup from a previous failed vacuum.
 	os.Remove(backupFile)
 
@@ -196,7 +224,7 @@ func (d *Database) Vacuum(ctx context.Context) error {
 	os.Remove(backupFile)
 	vacuumDone = true
 
-	// --- PHASE 8: Reopen the database with the compacted file. ---
+	// --- PHASE 10: Reopen the database with the compacted file. ---
 	newFile, err := os.OpenFile(d.GetFileName(), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return fmt.Errorf("vacuum: reopen database file: %w", err)

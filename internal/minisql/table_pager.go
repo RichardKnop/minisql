@@ -27,6 +27,10 @@ const (
 	PageTypeInvertedMeta
 	// PageTypeInvertedSegment identifies log-structured inverted-index segment pages.
 	PageTypeInvertedSegment
+	// PageTypeHNSWMeta identifies the HNSW vector-index metadata page.
+	PageTypeHNSWMeta
+	// PageTypeHNSWData identifies a page that stores packed HNSW node records.
+	PageTypeHNSWData
 )
 
 type tablePager struct {

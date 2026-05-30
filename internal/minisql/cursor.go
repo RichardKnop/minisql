@@ -728,6 +728,12 @@ func (c *Cursor) deleteSecondaryIndexKeys(ctx context.Context, row Row) error {
 			}
 			continue
 		}
+		if secondaryIndex.Method == IndexMethodHNSW {
+			if err := c.Table.deleteHNSWIndexKey(ctx, secondaryIndex, row.Key); err != nil {
+				return err
+			}
+			continue
+		}
 
 		// Partial index: row was not in the index if it didn't satisfy the WHERE predicate.
 		if ok, err := secondaryIndex.rowSatisfiesWhereCond(row); err != nil {
