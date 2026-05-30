@@ -1207,7 +1207,7 @@ func TestTable_MakeDistFunc(t *testing.T) {
 
 	// VEC_L2: distance from [1,0,0] to itself should be 0; to [0,1,0] sqrt(2).
 	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		distFn := makeDistFunc(ctx, table, "v", query, "VEC_L2")
+		distFn := makeDistFunc(ctx, nil, table, "v", query, "VEC_L2")
 
 		d0, err := distFn(RowID(0))
 		if err != nil {
@@ -1233,7 +1233,7 @@ func TestTable_MakeDistFunc(t *testing.T) {
 
 	// VEC_COSINE path.
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		distFn := makeDistFunc(ctx, table, "v", query, "VEC_COSINE")
+		distFn := makeDistFunc(ctx, nil, table, "v", query, "VEC_COSINE")
 		d, err := distFn(RowID(0))
 		if err != nil {
 			return err
@@ -1245,7 +1245,7 @@ func TestTable_MakeDistFunc(t *testing.T) {
 
 	// Unknown distance function must return an error.
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		distFn := makeDistFunc(ctx, table, "v", query, "VEC_UNKNOWN")
+		distFn := makeDistFunc(ctx, nil, table, "v", query, "VEC_UNKNOWN")
 		_, err := distFn(RowID(0))
 		return err
 	})
@@ -1253,7 +1253,7 @@ func TestTable_MakeDistFunc(t *testing.T) {
 
 	// loadVectorByRowID failure: bad colName propagates through distFn.
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-		distFn := makeDistFunc(ctx, table, "no_such_col", query, "VEC_L2")
+		distFn := makeDistFunc(ctx, nil, table, "no_such_col", query, "VEC_L2")
 		_, err := distFn(RowID(0))
 		return err
 	})
@@ -1262,7 +1262,7 @@ func TestTable_MakeDistFunc(t *testing.T) {
 	// Dimension mismatch: query has 2 dims but rows have 3 dims → L2Distance error.
 	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		mismatchQuery := VectorPointer{Dims: 2, Data: []float32{1, 0}}
-		distFn := makeDistFunc(ctx, table, "v", mismatchQuery, "VEC_L2")
+		distFn := makeDistFunc(ctx, nil, table, "v", mismatchQuery, "VEC_L2")
 		_, err := distFn(RowID(0))
 		return err
 	})

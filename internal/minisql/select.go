@@ -6182,7 +6182,7 @@ func (t *Table) hnswIndexScan(ctx context.Context, scan Scan, selectedFields []F
 		k = HNSWDefaultEfSearch
 	}
 
-	distFn := makeDistFunc(ctx, t, scan.IndexColumns[0].Name, scan.HNSWQueryVec, scan.HNSWFuncName)
+	distFn := makeDistFunc(ctx, secondaryIndex.HNSWIndex, t, scan.IndexColumns[0].Name, scan.HNSWQueryVec, scan.HNSWFuncName)
 	rowIDs, err := secondaryIndex.HNSWIndex.Search(ctx, k, HNSWDefaultEfSearch, distFn)
 	if err != nil {
 		return fmt.Errorf("HNSW search failed: %w", err)

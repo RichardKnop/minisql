@@ -1769,7 +1769,8 @@ func (idx *logStructuredInvertedIndex) writeSegmentCells(ctx context.Context, ce
 	pageStart := 0
 	for i, cell := range cells {
 		cellSize := cell.size()
-		if (invertedSegmentPageHeader{}).size()+2+cellSize > uint64(PageSize) {
+		const segmentPageUsable = uint64(PageSize - pageChecksumSize)
+		if (invertedSegmentPageHeader{}).size()+2+cellSize > segmentPageUsable {
 			return 0, fmt.Errorf("inverted segment cell for term %q exceeds page size", cell.Term)
 		}
 		if currentPage == nil {
@@ -1781,7 +1782,7 @@ func (idx *logStructuredInvertedIndex) writeSegmentCells(ctx context.Context, ce
 			rootPageIdx = page.Index
 			currentSize = currentSegmentPageSize(currentPage.InvertedSegmentPage)
 		}
-		if currentSize+2+cellSize > uint64(PageSize) {
+		if currentSize+2+cellSize > segmentPageUsable {
 			currentPage.InvertedSegmentPage.Cells = cells[pageStart:i:i]
 			nextPage, err := idx.newSegmentPage(ctx)
 			if err != nil {

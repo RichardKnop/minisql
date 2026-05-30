@@ -2071,7 +2071,8 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 	}
 
 	// Free pages for the index
-	if secondaryIndexUsesDedicatedInvertedStorage(secondaryIndex.Method) {
+	switch {
+	case secondaryIndexUsesDedicatedInvertedStorage(secondaryIndex.Method):
 		txPager := NewTransactionalPager(
 			d.factory.ForInvertedIndex(),
 			d.txManager,
@@ -2089,7 +2090,17 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 		if err := freeable.FreeAll(ctx); err != nil {
 			return err
 		}
-	} else {
+	case secondaryIndexUsesDedicatedHNSWStorage(secondaryIndex.Method):
+		txPager := NewTransactionalPager(
+			d.factory.ForHNSWIndex(),
+			d.txManager,
+			table.Name,
+			schema.Name,
+		)
+		if err := freeHNSWIndexPages(ctx, txPager, schema.RootPage); err != nil {
+			return err
+		}
+	default:
 		storageColumns := secondaryIndexStorageColumns(secondaryIndex)
 
 		txPager := NewTransactionalPager(

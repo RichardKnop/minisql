@@ -23,14 +23,29 @@ const (
 // hnswGraph is the in-memory representation of a fully-built HNSW graph.
 // It is populated during CREATE INDEX (batch build) and then serialised to pages.
 // On subsequent database opens it is lazily reconstructed from those pages.
+//
+// nodeToPage / lastDataPage / dirtyNodes support incremental page updates:
+// readHNSWGraph populates nodeToPage and lastDataPage; insert marks dirty nodes;
+// incrementalInsert rewrites only the dirty pages and appends the new node.
+// replaceDataPages (used by Delete) always rebuilds nodeToPage from scratch.
+//
+// nodeStore is a pre-allocated flat backing array for node data loaded by
+// readHNSWGraph.  All Nodes map values for pre-loaded nodes point into it,
+// giving contiguous memory layout and better cache locality during traversal.
+// Online-inserted nodes are individually heap-allocated and not in nodeStore.
 type hnswGraph struct {
 	Nodes          map[RowID]*hnswNodeData
+	nodeStore      []hnswNodeData      // flat backing store for readHNSWGraph-loaded nodes
 	M              int
 	EfConstruction int
 	EntryPoint     RowID
 	EntryLevel     int
 	hasEntry       bool    // false when graph is empty
 	ml             float64 // = 1 / ln(M), controls level assignment probability
+
+	nodeToPage   map[RowID]PageIndex  // nil = page tracking not active (batch build path)
+	lastDataPage PageIndex            // index of the last page in the data-page chain
+	dirtyNodes   map[RowID]struct{}   // nodes modified since last serialisation; reset after each DML
 }
 
 type hnswNodeData struct {
@@ -39,11 +54,18 @@ type hnswNodeData struct {
 
 // hnswIndex is the runtime handle for an HNSW vector index.  The graph is
 // loaded lazily on the first Search call and cached for subsequent calls.
+//
+// vecCache stores the raw float32 vectors for each indexed row, keyed by RowID.
+// It is populated lazily on first distance-function miss and updated by online
+// DML (Insert/Delete operations keep it consistent with the in-memory graph).
+// This eliminates overflow-page I/O on the hot search path after the first query.
 type hnswIndex struct {
 	pager       TxPager
 	rootPageIdx PageIndex
 	graph       *hnswGraph
 	mu          sync.RWMutex
+	vecCache    map[RowID]VectorPointer
+	vecMu       sync.RWMutex
 }
 
 // GetRootPageIdx returns the index of the HNSW metadata page in the database file.
@@ -69,11 +91,19 @@ func newHNSWGraph(m, efConstruction int) *hnswGraph {
 
 // insert adds a new node with the given rowID to the HNSW graph.
 // distFn returns the distance from the new node's vector to any other node's vector.
+// When g.nodeToPage != nil (incremental mode), modified nodes are recorded in g.dirtyNodes.
 func (g *hnswGraph) insert(rowID RowID, distFn func(RowID) (float64, error)) error {
 	level := g.randomLevel()
 
 	node := &hnswNodeData{Neighbors: make([][]RowID, level+1)}
 	g.Nodes[rowID] = node
+
+	if g.nodeToPage != nil {
+		if g.dirtyNodes == nil {
+			g.dirtyNodes = make(map[RowID]struct{}, 64)
+		}
+		g.dirtyNodes[rowID] = struct{}{} // new node
+	}
 
 	if !g.hasEntry {
 		g.EntryPoint = rowID
@@ -120,6 +150,10 @@ func (g *hnswGraph) insert(rowID RowID, distFn func(RowID) (float64, error)) err
 				// Build a dist-fn relative to nb for pruning.
 				nbDistFn := func(other RowID) (float64, error) { return distFn(other) }
 				nbNode.Neighbors[l] = g.pruneNeighbors(nb, nbNode.Neighbors[l], mMax, nbDistFn)
+			}
+			// Mark the modified neighbour dirty (its page record needs updating).
+			if g.nodeToPage != nil {
+				g.dirtyNodes[nb] = struct{}{}
 			}
 		}
 
@@ -181,6 +215,31 @@ func (g *hnswGraph) search(k, efSearch int, distFn func(RowID) (float64, error))
 // ---- internal helpers ----
 
 type hnswCandidate struct {
+	rowID RowID
+	dist  float64
+}
+
+// hnswSearchBuf holds pre-allocated scratch structures reused across beamSearch
+// calls via hnswSearchBufPool.  Each get/put cycle clears the maps and resets
+// the slice lengths so the underlying backing arrays are kept alive.
+type hnswSearchBuf struct {
+	visited map[RowID]bool
+	cands   minHeap
+	results maxHeap
+}
+
+var hnswSearchBufPool = sync.Pool{
+	New: func() any {
+		return &hnswSearchBuf{
+			visited: make(map[RowID]bool, HNSWDefaultEfConstruction*2),
+			cands:   make(minHeap, 0, HNSWDefaultEfConstruction),
+			results: make(maxHeap, 0, HNSWDefaultEfConstruction),
+		}
+	},
+}
+
+// hnswPair is used by pruneNeighbors for its stack-allocated sort buffer.
+type hnswPair struct {
 	rowID RowID
 	dist  float64
 }
@@ -248,15 +307,26 @@ func (g *hnswGraph) greedyStep(ep RowID, epDist float64, skipID RowID, layer int
 // skipID is excluded from expansion (the inserting node or ^RowID(0) for search).
 // Returns candidates sorted nearest-first.
 func (g *hnswGraph) beamSearch(ep RowID, epDist float64, skipID RowID, layer, ef int, distFn func(RowID) (float64, error)) ([]hnswCandidate, error) {
-	visited := make(map[RowID]bool, ef*2)
+	buf := hnswSearchBufPool.Get().(*hnswSearchBuf)
+	defer hnswSearchBufPool.Put(buf)
+
+	// Reset pooled structures without freeing backing arrays.
+	clear(buf.visited)
+	buf.cands = buf.cands[:0]
+	buf.results = buf.results[:0]
+
+	visited := buf.visited
 	visited[ep] = true
 	if skipID != ^RowID(0) {
 		visited[skipID] = true
 	}
 
-	cands := &minHeap{{ep, epDist}}
+	buf.cands = append(buf.cands, hnswCandidate{ep, epDist})
+	cands := &buf.cands
 	heap.Init(cands)
-	results := &maxHeap{{ep, epDist}}
+
+	buf.results = append(buf.results, hnswCandidate{ep, epDist})
+	results := &buf.results
 	heap.Init(results)
 
 	for cands.Len() > 0 {
@@ -290,7 +360,7 @@ func (g *hnswGraph) beamSearch(ep RowID, epDist float64, skipID RowID, layer, ef
 		}
 	}
 
-	// Drain the max-heap into a nearest-first slice.
+	// Drain the max-heap into a nearest-first slice (caller owns this allocation).
 	out := make([]hnswCandidate, results.Len())
 	for i := len(out) - 1; i >= 0; i-- {
 		out[i] = heap.Pop(results).(hnswCandidate)
@@ -309,12 +379,11 @@ func (g *hnswGraph) selectNeighbors(candidates []hnswCandidate, mMax int) []RowI
 }
 
 // pruneNeighbors trims a neighbor list to mMax, keeping the mMax closest neighbors.
+// pairsBuf is a stack-allocated scratch buffer; M≤32 in practice so 2*M+4=68
+// fits comfortably within the 72-slot array and avoids a heap allocation.
 func (g *hnswGraph) pruneNeighbors(self RowID, neighbors []RowID, mMax int, distFn func(RowID) (float64, error)) []RowID {
-	type pair struct {
-		rowID RowID
-		dist  float64
-	}
-	pairs := make([]pair, 0, len(neighbors))
+	var pairsBuf [72]hnswPair
+	pairs := pairsBuf[:0]
 	for _, nb := range neighbors {
 		if nb == self {
 			continue
@@ -323,7 +392,9 @@ func (g *hnswGraph) pruneNeighbors(self RowID, neighbors []RowID, mMax int, dist
 		if err != nil {
 			continue
 		}
-		pairs = append(pairs, pair{nb, d})
+		if len(pairs) < len(pairsBuf) {
+			pairs = append(pairs, hnswPair{nb, d})
+		}
 	}
 	// Insertion sort (neighbor lists are small).
 	for i := 1; i < len(pairs); i++ {
@@ -472,10 +543,17 @@ func readHNSWGraph(ctx context.Context, pager TxPager, rootPageIdx PageIndex) (*
 	}
 
 	if meta.NodeCount == 0 || meta.FirstDataPage == 0 {
+		// Empty graph: initialise tracking structures so incremental insert works.
+		g.nodeToPage = make(map[RowID]PageIndex)
 		return g, nil
 	}
 
-	// Walk the data page chain and populate Nodes.
+	// Walk the data page chain, populate Nodes, and build the nodeToPage index
+	// for incremental page updates during online DML.
+	g.nodeToPage = make(map[RowID]PageIndex, int(meta.NodeCount))
+	// Pre-allocate flat backing store so all Nodes map values point into contiguous
+	// memory — improves cache locality during beamSearch neighbour traversal.
+	g.nodeStore = make([]hnswNodeData, 0, int(meta.NodeCount))
 	pageIdx := PageIndex(meta.FirstDataPage)
 	for pageIdx != 0 {
 		p, err := pager.ReadPage(ctx, pageIdx)
@@ -487,7 +565,7 @@ func readHNSWGraph(ctx context.Context, pager TxPager, rootPageIdx PageIndex) (*
 		}
 		dp := p.HNSWDataPage
 		for _, rec := range dp.Nodes {
-			node := &hnswNodeData{Neighbors: make([][]RowID, len(rec.Neighbors))}
+			node := hnswNodeData{Neighbors: make([][]RowID, len(rec.Neighbors))}
 			for l, layer := range rec.Neighbors {
 				neighbors := make([]RowID, len(layer))
 				for i, nb := range layer {
@@ -495,7 +573,12 @@ func readHNSWGraph(ctx context.Context, pager TxPager, rootPageIdx PageIndex) (*
 				}
 				node.Neighbors[l] = neighbors
 			}
-			g.Nodes[RowID(rec.RowID)] = node
+			g.nodeStore = append(g.nodeStore, node)
+			g.Nodes[RowID(rec.RowID)] = &g.nodeStore[len(g.nodeStore)-1]
+			g.nodeToPage[RowID(rec.RowID)] = pageIdx
+		}
+		if dp.NextPage == 0 {
+			g.lastDataPage = pageIdx
 		}
 		pageIdx = PageIndex(dp.NextPage)
 	}
@@ -539,6 +622,8 @@ func (idx *hnswIndex) Search(ctx context.Context, k, efSearch int, distFn func(R
 // Insert adds rowID to the HNSW index.  distFn returns the L2 distance from
 // rowID's vector to any existing node's vector.  Both the in-memory graph and
 // the on-disk pages are updated within the current transaction.
+// When nodeToPage tracking is active (normal operation after loadGraph), only
+// the dirty pages are rewritten instead of the full O(N) page chain.
 func (idx *hnswIndex) Insert(ctx context.Context, rowID RowID, distFn func(RowID) (float64, error)) error {
 	g, err := idx.loadGraph(ctx)
 	if err != nil {
@@ -548,6 +633,9 @@ func (idx *hnswIndex) Insert(ctx context.Context, rowID RowID, distFn func(RowID
 	defer idx.mu.Unlock()
 	if err := g.insert(rowID, distFn); err != nil {
 		return fmt.Errorf("HNSW Insert: graph insert rowID %d: %w", rowID, err)
+	}
+	if g.nodeToPage != nil {
+		return idx.incrementalInsert(ctx, g, rowID)
 	}
 	return idx.replaceDataPages(ctx, g)
 }
@@ -678,6 +766,149 @@ func (idx *hnswIndex) replaceDataPages(ctx context.Context, g *hnswGraph) error 
 		NodeCount:      uint32(len(g.Nodes)),
 		FirstDataPage:  firstDataPage,
 	}
+
+	// Rebuild nodeToPage so incremental inserts after this full rewrite are accurate.
+	g.nodeToPage = make(map[RowID]PageIndex, len(g.Nodes))
+	g.lastDataPage = 0
+	for i, p := range newDataPages {
+		for _, rec := range p.HNSWDataPage.Nodes {
+			g.nodeToPage[RowID(rec.RowID)] = p.Index
+		}
+		if i == len(newDataPages)-1 {
+			g.lastDataPage = p.Index
+		}
+	}
+	g.dirtyNodes = nil
+	return nil
+}
+
+// buildNodeRecord serialises the current in-memory state of a graph node into
+// an hnswNodeRecord ready for page writes.
+func buildNodeRecord(rowID RowID, node *hnswNodeData) hnswNodeRecord {
+	rec := hnswNodeRecord{RowID: uint64(rowID)}
+	for _, layerNeighbors := range node.Neighbors {
+		uNeighbors := make([]uint64, len(layerNeighbors))
+		for i, nb := range layerNeighbors {
+			uNeighbors[i] = uint64(nb)
+		}
+		rec.Neighbors = append(rec.Neighbors, uNeighbors)
+	}
+	return rec
+}
+
+// incrementalInsert updates only the pages that changed as a result of inserting
+// newRowID into the graph.  It rewrites each page that contains a dirty (modified)
+// existing node and appends the new node's record to the last data page (or a new
+// one if the last page is full).  Falls back to replaceDataPages on overflow.
+func (idx *hnswIndex) incrementalInsert(ctx context.Context, g *hnswGraph, newRowID RowID) error {
+	usableSize := PageSize - pageChecksumSize - hnswDataPageHeaderSize
+
+	// 1. Collect pages that contain dirty existing nodes (excluding the brand-new node).
+	dirtyPageSet := make(map[PageIndex]bool, len(g.dirtyNodes))
+	for rowID := range g.dirtyNodes {
+		if rowID == newRowID {
+			continue // new node — handled in step 2
+		}
+		if pageIdx, ok := g.nodeToPage[rowID]; ok {
+			dirtyPageSet[pageIdx] = true
+		}
+	}
+
+	// 2. Rewrite each dirty page in-place.
+	for pageIdx := range dirtyPageSet {
+		p, err := idx.pager.ModifyPage(ctx, pageIdx)
+		if err != nil {
+			return fmt.Errorf("HNSW incrementalInsert: modify page %d: %w", pageIdx, err)
+		}
+		newRecs := make([]hnswNodeRecord, 0, len(p.HNSWDataPage.Nodes))
+		totalSz := 0
+		for _, oldRec := range p.HNSWDataPage.Nodes {
+			rowID := RowID(oldRec.RowID)
+			node := g.Nodes[rowID]
+			if node == nil {
+				continue // node was deleted between writes — omit
+			}
+			rec := buildNodeRecord(rowID, node)
+			totalSz += nodeRecordSize(rec)
+			if totalSz > usableSize {
+				// Records no longer fit after update — fall back to full rewrite.
+				g.nodeToPage = nil
+				return idx.replaceDataPages(ctx, g)
+			}
+			newRecs = append(newRecs, rec)
+		}
+		p.HNSWDataPage.Nodes = newRecs
+	}
+
+	// 3. Append the new node to the last data page or a new page.
+	if newNode := g.Nodes[newRowID]; newNode != nil {
+		newRec := buildNodeRecord(newRowID, newNode)
+		newRecSz := nodeRecordSize(newRec)
+
+		appended := false
+		if g.lastDataPage != 0 {
+			lastP, err := idx.pager.ModifyPage(ctx, g.lastDataPage)
+			if err != nil {
+				return fmt.Errorf("HNSW incrementalInsert: modify last page %d: %w", g.lastDataPage, err)
+			}
+			existingSz := 0
+			for _, rec := range lastP.HNSWDataPage.Nodes {
+				existingSz += nodeRecordSize(rec)
+			}
+			if existingSz+newRecSz <= usableSize {
+				lastP.HNSWDataPage.Nodes = append(lastP.HNSWDataPage.Nodes, newRec)
+				g.nodeToPage[newRowID] = g.lastDataPage
+				appended = true
+			}
+		}
+
+		if !appended {
+			// Allocate a new data page for the new node.
+			newDataPage, err := idx.pager.GetFreePage(ctx)
+			if err != nil {
+				return fmt.Errorf("HNSW incrementalInsert: alloc data page: %w", err)
+			}
+			newDataPage.HNSWDataPage = &hnswDataPage{Nodes: []hnswNodeRecord{newRec}}
+			g.nodeToPage[newRowID] = newDataPage.Index
+
+			if g.lastDataPage != 0 {
+				// Chain new page after the current last page.
+				prevLast, err := idx.pager.ModifyPage(ctx, g.lastDataPage)
+				if err != nil {
+					return fmt.Errorf("HNSW incrementalInsert: modify prev-last page %d: %w", g.lastDataPage, err)
+				}
+				prevLast.HNSWDataPage.NextPage = uint32(newDataPage.Index)
+			} else {
+				// No data pages existed yet — update meta's FirstDataPage.
+				metaP, err := idx.pager.ModifyPage(ctx, idx.rootPageIdx)
+				if err != nil {
+					return fmt.Errorf("HNSW incrementalInsert: modify meta page: %w", err)
+				}
+				metaP.HNSWMetaPage.FirstDataPage = uint32(newDataPage.Index)
+			}
+			g.lastDataPage = newDataPage.Index
+		}
+	}
+
+	// 4. Update the meta page (entry point + node count may have changed).
+	metaPage, err := idx.pager.ModifyPage(ctx, idx.rootPageIdx)
+	if err != nil {
+		return fmt.Errorf("HNSW incrementalInsert: modify meta page: %w", err)
+	}
+	entryPoint := uint64(hnswNoEntryPoint)
+	if g.hasEntry {
+		entryPoint = uint64(g.EntryPoint)
+	}
+	metaPage.HNSWMetaPage = &hnswMetaPage{
+		M:              metaPage.HNSWMetaPage.M,
+		EfConstruction: metaPage.HNSWMetaPage.EfConstruction,
+		EntryPoint:     entryPoint,
+		EntryLevel:     uint8(max(g.EntryLevel, 0)),
+		NodeCount:      uint32(len(g.Nodes)),
+		FirstDataPage:  metaPage.HNSWMetaPage.FirstDataPage,
+	}
+
+	g.dirtyNodes = nil
 	return nil
 }
 
@@ -687,6 +918,41 @@ func (idx *hnswIndex) replaceDataPages(ctx context.Context, g *hnswGraph) error 
 // at rootPageIdx.  The graph is loaded lazily on first Search.
 func OpenHNSWIndex(pager TxPager, rootPageIdx PageIndex) *hnswIndex {
 	return &hnswIndex{pager: pager, rootPageIdx: rootPageIdx}
+}
+
+// freeHNSWIndexPages releases every page belonging to an HNSW index — the meta
+// page and the entire data-page chain — back to the free list.  Called by
+// DROP INDEX to reclaim space without leaving orphan pages.
+func freeHNSWIndexPages(ctx context.Context, pager TxPager, rootPageIdx PageIndex) error {
+	metaPage, err := pager.ReadPage(ctx, rootPageIdx)
+	if err != nil {
+		return fmt.Errorf("HNSW drop: read meta page %d: %w", rootPageIdx, err)
+	}
+	if metaPage.HNSWMetaPage == nil {
+		return fmt.Errorf("HNSW drop: page %d is not an HNSW meta page", rootPageIdx)
+	}
+
+	// Walk and free the data page chain first so the meta page can be freed last.
+	dataPageIdx := PageIndex(metaPage.HNSWMetaPage.FirstDataPage)
+	for dataPageIdx != 0 {
+		dp, err := pager.ReadPage(ctx, dataPageIdx)
+		if err != nil {
+			return fmt.Errorf("HNSW drop: read data page %d: %w", dataPageIdx, err)
+		}
+		if dp.HNSWDataPage == nil {
+			return fmt.Errorf("HNSW drop: page %d is not an HNSW data page", dataPageIdx)
+		}
+		nextIdx := PageIndex(dp.HNSWDataPage.NextPage)
+		if err := pager.AddFreePage(ctx, dataPageIdx); err != nil {
+			return fmt.Errorf("HNSW drop: free data page %d: %w", dataPageIdx, err)
+		}
+		dataPageIdx = nextIdx
+	}
+
+	if err := pager.AddFreePage(ctx, rootPageIdx); err != nil {
+		return fmt.Errorf("HNSW drop: free meta page %d: %w", rootPageIdx, err)
+	}
+	return nil
 }
 
 // BuildHNSWIndex builds a new HNSW graph from the supplied row set, writes it
@@ -728,16 +994,61 @@ type hnswBuildRow struct {
 
 // ---- distance helper ----
 
-// makeDistFunc builds a closure that loads and caches the vector for each RowID
-// from the main table and returns its distance to the query vector under the
-// named function ("VEC_L2" or "VEC_COSINE").
-func makeDistFunc(ctx context.Context, table *Table, colName string, query VectorPointer, funcName string) func(RowID) (float64, error) {
+// cachedVector returns the VectorPointer (with Data populated) for rowID,
+// loading it from the table exactly once and caching the result for reuse
+// across queries.  Online DML (insertHNSWIndexKey, deleteHNSWIndexKey) keeps
+// the cache consistent with the in-memory graph.
+func (idx *hnswIndex) cachedVector(ctx context.Context, table *Table, rowID RowID, colName string) (VectorPointer, error) {
+	idx.vecMu.RLock()
+	if vp, ok := idx.vecCache[rowID]; ok {
+		idx.vecMu.RUnlock()
+		return vp, nil
+	}
+	idx.vecMu.RUnlock()
+
+	vp, err := table.loadVectorByRowID(ctx, rowID, colName)
+	if err != nil {
+		return VectorPointer{}, err
+	}
+
+	idx.vecMu.Lock()
+	if idx.vecCache == nil {
+		idx.vecCache = make(map[RowID]VectorPointer, 64)
+	}
+	idx.vecCache[rowID] = vp
+	idx.vecMu.Unlock()
+	return vp, nil
+}
+
+// evictVector removes a RowID from the vector cache.  Called by Delete to keep
+// the cache consistent with the in-memory graph.
+func (idx *hnswIndex) evictVector(rowID RowID) {
+	idx.vecMu.Lock()
+	delete(idx.vecCache, rowID)
+	idx.vecMu.Unlock()
+}
+
+// makeDistFunc builds a closure that returns the distance from each node's
+// vector to the query vector.  When idx is non-nil, vectors are fetched via
+// idx.cachedVector so each node is read from overflow pages at most once per
+// index lifetime.  When idx is nil (unit-test contexts), the function falls
+// back to table.loadVectorByRowID on every call.
+// A per-call map[RowID]float64 deduplicates re-visits within a single search.
+func makeDistFunc(ctx context.Context, idx *hnswIndex, table *Table, colName string, query VectorPointer, funcName string) func(RowID) (float64, error) {
 	cache := make(map[RowID]float64)
 	return func(rowID RowID) (float64, error) {
 		if d, ok := cache[rowID]; ok {
 			return d, nil
 		}
-		vp, err := table.loadVectorByRowID(ctx, rowID, colName)
+		var (
+			vp  VectorPointer
+			err error
+		)
+		if idx != nil {
+			vp, err = idx.cachedVector(ctx, table, rowID, colName)
+		} else {
+			vp, err = table.loadVectorByRowID(ctx, rowID, colName)
+		}
 		if err != nil {
 			return 0, err
 		}
