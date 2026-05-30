@@ -23,6 +23,11 @@ const (
 // hnswGraph is the in-memory representation of a fully-built HNSW graph.
 // It is populated during CREATE INDEX (batch build) and then serialised to pages.
 // On subsequent database opens it is lazily reconstructed from those pages.
+//
+// nodeToPage / lastDataPage / dirtyNodes support incremental page updates:
+// readHNSWGraph populates nodeToPage and lastDataPage; insert marks dirty nodes;
+// incrementalInsert rewrites only the dirty pages and appends the new node.
+// replaceDataPages (used by Delete) always rebuilds nodeToPage from scratch.
 type hnswGraph struct {
 	Nodes          map[RowID]*hnswNodeData
 	M              int
@@ -31,6 +36,10 @@ type hnswGraph struct {
 	EntryLevel     int
 	hasEntry       bool    // false when graph is empty
 	ml             float64 // = 1 / ln(M), controls level assignment probability
+
+	nodeToPage   map[RowID]PageIndex  // nil = page tracking not active (batch build path)
+	lastDataPage PageIndex            // index of the last page in the data-page chain
+	dirtyNodes   map[RowID]struct{}   // nodes modified since last serialisation; reset after each DML
 }
 
 type hnswNodeData struct {
@@ -76,11 +85,19 @@ func newHNSWGraph(m, efConstruction int) *hnswGraph {
 
 // insert adds a new node with the given rowID to the HNSW graph.
 // distFn returns the distance from the new node's vector to any other node's vector.
+// When g.nodeToPage != nil (incremental mode), modified nodes are recorded in g.dirtyNodes.
 func (g *hnswGraph) insert(rowID RowID, distFn func(RowID) (float64, error)) error {
 	level := g.randomLevel()
 
 	node := &hnswNodeData{Neighbors: make([][]RowID, level+1)}
 	g.Nodes[rowID] = node
+
+	if g.nodeToPage != nil {
+		if g.dirtyNodes == nil {
+			g.dirtyNodes = make(map[RowID]struct{}, 64)
+		}
+		g.dirtyNodes[rowID] = struct{}{} // new node
+	}
 
 	if !g.hasEntry {
 		g.EntryPoint = rowID
@@ -127,6 +144,10 @@ func (g *hnswGraph) insert(rowID RowID, distFn func(RowID) (float64, error)) err
 				// Build a dist-fn relative to nb for pruning.
 				nbDistFn := func(other RowID) (float64, error) { return distFn(other) }
 				nbNode.Neighbors[l] = g.pruneNeighbors(nb, nbNode.Neighbors[l], mMax, nbDistFn)
+			}
+			// Mark the modified neighbour dirty (its page record needs updating).
+			if g.nodeToPage != nil {
+				g.dirtyNodes[nb] = struct{}{}
 			}
 		}
 
@@ -516,10 +537,14 @@ func readHNSWGraph(ctx context.Context, pager TxPager, rootPageIdx PageIndex) (*
 	}
 
 	if meta.NodeCount == 0 || meta.FirstDataPage == 0 {
+		// Empty graph: initialise tracking structures so incremental insert works.
+		g.nodeToPage = make(map[RowID]PageIndex)
 		return g, nil
 	}
 
-	// Walk the data page chain and populate Nodes.
+	// Walk the data page chain, populate Nodes, and build the nodeToPage index
+	// for incremental page updates during online DML.
+	g.nodeToPage = make(map[RowID]PageIndex, int(meta.NodeCount))
 	pageIdx := PageIndex(meta.FirstDataPage)
 	for pageIdx != 0 {
 		p, err := pager.ReadPage(ctx, pageIdx)
@@ -540,6 +565,10 @@ func readHNSWGraph(ctx context.Context, pager TxPager, rootPageIdx PageIndex) (*
 				node.Neighbors[l] = neighbors
 			}
 			g.Nodes[RowID(rec.RowID)] = node
+			g.nodeToPage[RowID(rec.RowID)] = pageIdx
+		}
+		if dp.NextPage == 0 {
+			g.lastDataPage = pageIdx
 		}
 		pageIdx = PageIndex(dp.NextPage)
 	}
@@ -583,6 +612,8 @@ func (idx *hnswIndex) Search(ctx context.Context, k, efSearch int, distFn func(R
 // Insert adds rowID to the HNSW index.  distFn returns the L2 distance from
 // rowID's vector to any existing node's vector.  Both the in-memory graph and
 // the on-disk pages are updated within the current transaction.
+// When nodeToPage tracking is active (normal operation after loadGraph), only
+// the dirty pages are rewritten instead of the full O(N) page chain.
 func (idx *hnswIndex) Insert(ctx context.Context, rowID RowID, distFn func(RowID) (float64, error)) error {
 	g, err := idx.loadGraph(ctx)
 	if err != nil {
@@ -592,6 +623,9 @@ func (idx *hnswIndex) Insert(ctx context.Context, rowID RowID, distFn func(RowID
 	defer idx.mu.Unlock()
 	if err := g.insert(rowID, distFn); err != nil {
 		return fmt.Errorf("HNSW Insert: graph insert rowID %d: %w", rowID, err)
+	}
+	if g.nodeToPage != nil {
+		return idx.incrementalInsert(ctx, g, rowID)
 	}
 	return idx.replaceDataPages(ctx, g)
 }
@@ -722,6 +756,149 @@ func (idx *hnswIndex) replaceDataPages(ctx context.Context, g *hnswGraph) error 
 		NodeCount:      uint32(len(g.Nodes)),
 		FirstDataPage:  firstDataPage,
 	}
+
+	// Rebuild nodeToPage so incremental inserts after this full rewrite are accurate.
+	g.nodeToPage = make(map[RowID]PageIndex, len(g.Nodes))
+	g.lastDataPage = 0
+	for i, p := range newDataPages {
+		for _, rec := range p.HNSWDataPage.Nodes {
+			g.nodeToPage[RowID(rec.RowID)] = p.Index
+		}
+		if i == len(newDataPages)-1 {
+			g.lastDataPage = p.Index
+		}
+	}
+	g.dirtyNodes = nil
+	return nil
+}
+
+// buildNodeRecord serialises the current in-memory state of a graph node into
+// an hnswNodeRecord ready for page writes.
+func buildNodeRecord(rowID RowID, node *hnswNodeData) hnswNodeRecord {
+	rec := hnswNodeRecord{RowID: uint64(rowID)}
+	for _, layerNeighbors := range node.Neighbors {
+		uNeighbors := make([]uint64, len(layerNeighbors))
+		for i, nb := range layerNeighbors {
+			uNeighbors[i] = uint64(nb)
+		}
+		rec.Neighbors = append(rec.Neighbors, uNeighbors)
+	}
+	return rec
+}
+
+// incrementalInsert updates only the pages that changed as a result of inserting
+// newRowID into the graph.  It rewrites each page that contains a dirty (modified)
+// existing node and appends the new node's record to the last data page (or a new
+// one if the last page is full).  Falls back to replaceDataPages on overflow.
+func (idx *hnswIndex) incrementalInsert(ctx context.Context, g *hnswGraph, newRowID RowID) error {
+	usableSize := PageSize - pageChecksumSize - hnswDataPageHeaderSize
+
+	// 1. Collect pages that contain dirty existing nodes (excluding the brand-new node).
+	dirtyPageSet := make(map[PageIndex]bool, len(g.dirtyNodes))
+	for rowID := range g.dirtyNodes {
+		if rowID == newRowID {
+			continue // new node — handled in step 2
+		}
+		if pageIdx, ok := g.nodeToPage[rowID]; ok {
+			dirtyPageSet[pageIdx] = true
+		}
+	}
+
+	// 2. Rewrite each dirty page in-place.
+	for pageIdx := range dirtyPageSet {
+		p, err := idx.pager.ModifyPage(ctx, pageIdx)
+		if err != nil {
+			return fmt.Errorf("HNSW incrementalInsert: modify page %d: %w", pageIdx, err)
+		}
+		newRecs := make([]hnswNodeRecord, 0, len(p.HNSWDataPage.Nodes))
+		totalSz := 0
+		for _, oldRec := range p.HNSWDataPage.Nodes {
+			rowID := RowID(oldRec.RowID)
+			node := g.Nodes[rowID]
+			if node == nil {
+				continue // node was deleted between writes — omit
+			}
+			rec := buildNodeRecord(rowID, node)
+			totalSz += nodeRecordSize(rec)
+			if totalSz > usableSize {
+				// Records no longer fit after update — fall back to full rewrite.
+				g.nodeToPage = nil
+				return idx.replaceDataPages(ctx, g)
+			}
+			newRecs = append(newRecs, rec)
+		}
+		p.HNSWDataPage.Nodes = newRecs
+	}
+
+	// 3. Append the new node to the last data page or a new page.
+	if newNode := g.Nodes[newRowID]; newNode != nil {
+		newRec := buildNodeRecord(newRowID, newNode)
+		newRecSz := nodeRecordSize(newRec)
+
+		appended := false
+		if g.lastDataPage != 0 {
+			lastP, err := idx.pager.ModifyPage(ctx, g.lastDataPage)
+			if err != nil {
+				return fmt.Errorf("HNSW incrementalInsert: modify last page %d: %w", g.lastDataPage, err)
+			}
+			existingSz := 0
+			for _, rec := range lastP.HNSWDataPage.Nodes {
+				existingSz += nodeRecordSize(rec)
+			}
+			if existingSz+newRecSz <= usableSize {
+				lastP.HNSWDataPage.Nodes = append(lastP.HNSWDataPage.Nodes, newRec)
+				g.nodeToPage[newRowID] = g.lastDataPage
+				appended = true
+			}
+		}
+
+		if !appended {
+			// Allocate a new data page for the new node.
+			newDataPage, err := idx.pager.GetFreePage(ctx)
+			if err != nil {
+				return fmt.Errorf("HNSW incrementalInsert: alloc data page: %w", err)
+			}
+			newDataPage.HNSWDataPage = &hnswDataPage{Nodes: []hnswNodeRecord{newRec}}
+			g.nodeToPage[newRowID] = newDataPage.Index
+
+			if g.lastDataPage != 0 {
+				// Chain new page after the current last page.
+				prevLast, err := idx.pager.ModifyPage(ctx, g.lastDataPage)
+				if err != nil {
+					return fmt.Errorf("HNSW incrementalInsert: modify prev-last page %d: %w", g.lastDataPage, err)
+				}
+				prevLast.HNSWDataPage.NextPage = uint32(newDataPage.Index)
+			} else {
+				// No data pages existed yet — update meta's FirstDataPage.
+				metaP, err := idx.pager.ModifyPage(ctx, idx.rootPageIdx)
+				if err != nil {
+					return fmt.Errorf("HNSW incrementalInsert: modify meta page: %w", err)
+				}
+				metaP.HNSWMetaPage.FirstDataPage = uint32(newDataPage.Index)
+			}
+			g.lastDataPage = newDataPage.Index
+		}
+	}
+
+	// 4. Update the meta page (entry point + node count may have changed).
+	metaPage, err := idx.pager.ModifyPage(ctx, idx.rootPageIdx)
+	if err != nil {
+		return fmt.Errorf("HNSW incrementalInsert: modify meta page: %w", err)
+	}
+	entryPoint := uint64(hnswNoEntryPoint)
+	if g.hasEntry {
+		entryPoint = uint64(g.EntryPoint)
+	}
+	metaPage.HNSWMetaPage = &hnswMetaPage{
+		M:              metaPage.HNSWMetaPage.M,
+		EfConstruction: metaPage.HNSWMetaPage.EfConstruction,
+		EntryPoint:     entryPoint,
+		EntryLevel:     uint8(max(g.EntryLevel, 0)),
+		NodeCount:      uint32(len(g.Nodes)),
+		FirstDataPage:  metaPage.HNSWMetaPage.FirstDataPage,
+	}
+
+	g.dirtyNodes = nil
 	return nil
 }
 
