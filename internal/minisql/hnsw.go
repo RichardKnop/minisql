@@ -185,6 +185,31 @@ type hnswCandidate struct {
 	dist  float64
 }
 
+// hnswSearchBuf holds pre-allocated scratch structures reused across beamSearch
+// calls via hnswSearchBufPool.  Each get/put cycle clears the maps and resets
+// the slice lengths so the underlying backing arrays are kept alive.
+type hnswSearchBuf struct {
+	visited map[RowID]bool
+	cands   minHeap
+	results maxHeap
+}
+
+var hnswSearchBufPool = sync.Pool{
+	New: func() any {
+		return &hnswSearchBuf{
+			visited: make(map[RowID]bool, HNSWDefaultEfConstruction*2),
+			cands:   make(minHeap, 0, HNSWDefaultEfConstruction),
+			results: make(maxHeap, 0, HNSWDefaultEfConstruction),
+		}
+	},
+}
+
+// hnswPair is used by pruneNeighbors for its stack-allocated sort buffer.
+type hnswPair struct {
+	rowID RowID
+	dist  float64
+}
+
 // maxHeap is a max-heap of candidates by distance (furthest element at top).
 type maxHeap []hnswCandidate
 
@@ -248,15 +273,26 @@ func (g *hnswGraph) greedyStep(ep RowID, epDist float64, skipID RowID, layer int
 // skipID is excluded from expansion (the inserting node or ^RowID(0) for search).
 // Returns candidates sorted nearest-first.
 func (g *hnswGraph) beamSearch(ep RowID, epDist float64, skipID RowID, layer, ef int, distFn func(RowID) (float64, error)) ([]hnswCandidate, error) {
-	visited := make(map[RowID]bool, ef*2)
+	buf := hnswSearchBufPool.Get().(*hnswSearchBuf)
+	defer hnswSearchBufPool.Put(buf)
+
+	// Reset pooled structures without freeing backing arrays.
+	clear(buf.visited)
+	buf.cands = buf.cands[:0]
+	buf.results = buf.results[:0]
+
+	visited := buf.visited
 	visited[ep] = true
 	if skipID != ^RowID(0) {
 		visited[skipID] = true
 	}
 
-	cands := &minHeap{{ep, epDist}}
+	buf.cands = append(buf.cands, hnswCandidate{ep, epDist})
+	cands := &buf.cands
 	heap.Init(cands)
-	results := &maxHeap{{ep, epDist}}
+
+	buf.results = append(buf.results, hnswCandidate{ep, epDist})
+	results := &buf.results
 	heap.Init(results)
 
 	for cands.Len() > 0 {
@@ -290,7 +326,7 @@ func (g *hnswGraph) beamSearch(ep RowID, epDist float64, skipID RowID, layer, ef
 		}
 	}
 
-	// Drain the max-heap into a nearest-first slice.
+	// Drain the max-heap into a nearest-first slice (caller owns this allocation).
 	out := make([]hnswCandidate, results.Len())
 	for i := len(out) - 1; i >= 0; i-- {
 		out[i] = heap.Pop(results).(hnswCandidate)
@@ -309,12 +345,11 @@ func (g *hnswGraph) selectNeighbors(candidates []hnswCandidate, mMax int) []RowI
 }
 
 // pruneNeighbors trims a neighbor list to mMax, keeping the mMax closest neighbors.
+// pairsBuf is a stack-allocated scratch buffer; M≤32 in practice so 2*M+4=68
+// fits comfortably within the 72-slot array and avoids a heap allocation.
 func (g *hnswGraph) pruneNeighbors(self RowID, neighbors []RowID, mMax int, distFn func(RowID) (float64, error)) []RowID {
-	type pair struct {
-		rowID RowID
-		dist  float64
-	}
-	pairs := make([]pair, 0, len(neighbors))
+	var pairsBuf [72]hnswPair
+	pairs := pairsBuf[:0]
 	for _, nb := range neighbors {
 		if nb == self {
 			continue
@@ -323,7 +358,9 @@ func (g *hnswGraph) pruneNeighbors(self RowID, neighbors []RowID, mMax int, dist
 		if err != nil {
 			continue
 		}
-		pairs = append(pairs, pair{nb, d})
+		if len(pairs) < len(pairsBuf) {
+			pairs = append(pairs, hnswPair{nb, d})
+		}
 	}
 	// Insertion sort (neighbor lists are small).
 	for i := 1; i < len(pairs); i++ {
