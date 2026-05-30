@@ -250,6 +250,98 @@ func (s *TestSuite) TestHNSWIndex_OnlineMaintenance() {
 	})
 }
 
+// TestHNSWIndex_PersistsAcrossRestart verifies that the HNSW graph is correctly
+// serialised to pages and fully reconstructed after a database close/reopen.
+func (s *TestSuite) TestHNSWIndex_PersistsAcrossRestart() {
+	_, err := s.db.Exec(`create table "restart_vecs" (
+		id  int8 primary key autoincrement,
+		tag varchar(50) not null,
+		v   vector(3) not null
+	);`)
+	s.Require().NoError(err)
+
+	seed := []struct {
+		tag string
+		vec string
+	}{
+		{"origin", "[0.0, 0.0, 0.0]"},
+		{"x1", "[1.0, 0.0, 0.0]"},
+		{"x2", "[2.0, 0.0, 0.0]"},
+		{"y1", "[0.0, 1.0, 0.0]"},
+		{"z1", "[0.0, 0.0, 1.0]"},
+		{"diag", "[1.0, 1.0, 1.0]"},
+		{"far", "[10.0, 10.0, 10.0]"},
+	}
+	for _, r := range seed {
+		_, err := s.db.Exec(`insert into restart_vecs (tag, v) values (?, ?)`, r.tag, r.vec)
+		s.Require().NoError(err)
+	}
+
+	_, err = s.db.Exec(`CREATE HNSW INDEX "idx_restart" ON "restart_vecs" (v);`)
+	s.Require().NoError(err)
+
+	// Record expected ANN result before restart.
+	queryVec := `'[1.0, 0.0, 0.0]'`
+	nearestTagBefore := s.hnswNearestTag("restart_vecs", queryVec)
+	s.Equal("x1", nearestTagBefore, "pre-restart: nearest to [1,0,0] should be x1")
+
+	// Simulate a process restart.
+	s.db = s.reopenDB()
+
+	s.Run("ann_search_correct_after_restart", func() {
+		nearestTagAfter := s.hnswNearestTag("restart_vecs", queryVec)
+		s.Equal(nearestTagBefore, nearestTagAfter, "post-restart ANN result must match pre-restart")
+	})
+
+	s.Run("planner_uses_hnsw_scan_after_restart", func() {
+		rows := s.collectExplain(`EXPLAIN SELECT id, VEC_L2(v, '[1.0, 0.0, 0.0]') AS dist FROM restart_vecs ORDER BY dist LIMIT 1;`)
+		s.Require().NotEmpty(rows)
+		ops := make([]string, 0, len(rows))
+		for _, r := range rows {
+			ops = append(ops, r.Operation)
+		}
+		s.Contains(ops, "hnsw_scan", "planner must still choose hnsw_scan after restart")
+	})
+
+	s.Run("online_insert_after_restart_is_searchable", func() {
+		_, err := s.db.Exec(`insert into restart_vecs (tag, v) values (?, ?)`, "post_restart", "[5.0, 0.0, 0.0]")
+		s.Require().NoError(err)
+
+		tag := s.hnswNearestTag("restart_vecs", `'[5.0, 0.0, 0.0]'`)
+		s.Equal("post_restart", tag, "row inserted after restart must be reachable via ANN search")
+	})
+
+	s.Run("second_restart_graph_still_consistent", func() {
+		// Persist the online insert and verify the graph survives another restart.
+		s.db = s.reopenDB()
+
+		tag := s.hnswNearestTag("restart_vecs", `'[5.0, 0.0, 0.0]'`)
+		s.Equal("post_restart", tag, "graph must survive a second restart with the online-inserted node intact")
+	})
+
+	s.Run("integrity_check_passes_after_restart", func() {
+		results := s.collectPragmaResults(`PRAGMA integrity_check;`)
+		s.Require().Len(results, 1)
+		s.Equal("ok", results[0].Code)
+	})
+}
+
+// hnswNearestTag runs a TOP-1 ANN query on the named table and returns the
+// "tag" column of the nearest row.  queryVec must be a quoted SQL literal
+// (e.g. "'[1.0, 0.0, 0.0]'") because the parser does not support ? inside VEC_L2.
+func (s *TestSuite) hnswNearestTag(table, queryVec string) string {
+	q := `SELECT tag, VEC_L2(v, ` + queryVec + `) AS dist FROM ` + table + ` ORDER BY dist LIMIT 1;`
+	res, err := s.db.QueryContext(context.Background(), q)
+	s.Require().NoError(err)
+	defer res.Close()
+	s.Require().True(res.Next())
+	var tag string
+	var dist float64
+	s.Require().NoError(res.Scan(&tag, &dist))
+	s.Require().NoError(res.Err())
+	return tag
+}
+
 // TestHNSWIndex_Float32SliceBindArg verifies that []float32 can be passed
 // directly as a bind argument for both INSERT and vector distance queries.
 func (s *TestSuite) TestHNSWIndex_Float32SliceBindArg() {

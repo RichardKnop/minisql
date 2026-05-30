@@ -605,14 +605,24 @@ func (d *Database) checkTableLeafPage(ctx context.Context, report IntegrityRepor
 			continue
 		}
 		for i, col := range table.Columns {
-			if !col.Kind.IsText() || !row.Values[i].Valid {
+			objectName := fmt.Sprintf("table %s column %s", table.Name, col.Name)
+			if !row.Values[i].Valid {
 				continue
 			}
-			tp, ok := row.Values[i].Value.(TextPointer)
-			if !ok || tp.IsInline() || tp.FirstPage == 0 {
-				continue
+			switch {
+			case col.Kind.IsText():
+				tp, ok := row.Values[i].Value.(TextPointer)
+				if !ok || tp.IsInline() || tp.FirstPage == 0 {
+					continue
+				}
+				report = d.walkOverflowPages(report, objectName, tp.FirstPage, livePages)
+			case col.Kind.IsVector():
+				vp, ok := row.Values[i].Value.(VectorPointer)
+				if !ok || vp.FirstPage == 0 {
+					continue
+				}
+				report = d.walkOverflowPages(report, objectName, vp.FirstPage, livePages)
 			}
-			report = d.walkOverflowPages(report, fmt.Sprintf("table %s column %s", table.Name, col.Name), tp.FirstPage, livePages)
 		}
 	}
 	return report
