@@ -643,14 +643,26 @@ func (t *Table) insertHNSWIndexKey(ctx context.Context, secondaryIndex Secondary
 	if !ok {
 		return fmt.Errorf("HNSW index %s: expected VectorPointer for %q, got %T", secondaryIndex.Name, colName, val.Value)
 	}
+	idx := secondaryIndex.HNSWIndex
 	distFn := func(otherID RowID) (float64, error) {
-		otherVP, err := t.loadVectorByRowID(ctx, otherID, colName)
+		otherVP, err := idx.cachedVector(ctx, t, otherID, colName)
 		if err != nil {
 			return 0, err
 		}
 		return L2Distance(newVP, otherVP)
 	}
-	return secondaryIndex.HNSWIndex.Insert(ctx, rowID, distFn)
+	if err := idx.Insert(ctx, rowID, distFn); err != nil {
+		return err
+	}
+	// Populate the vector cache for the newly inserted node so future searches
+	// can compute distances without a disk read.
+	idx.vecMu.Lock()
+	if idx.vecCache == nil {
+		idx.vecCache = make(map[RowID]VectorPointer, 64)
+	}
+	idx.vecCache[rowID] = newVP
+	idx.vecMu.Unlock()
+	return nil
 }
 
 // deleteHNSWIndexKey removes rowID from the HNSW index.
@@ -658,6 +670,7 @@ func (t *Table) deleteHNSWIndexKey(ctx context.Context, secondaryIndex Secondary
 	if secondaryIndex.HNSWIndex == nil {
 		return nil
 	}
+	secondaryIndex.HNSWIndex.evictVector(rowID)
 	return secondaryIndex.HNSWIndex.Delete(ctx, rowID)
 }
 
@@ -692,6 +705,9 @@ func (t *Table) updateHNSWIndexKey(ctx context.Context, secondaryIndex Secondary
 		}
 	}
 
+	// Evict the old vector from the cache before re-inserting with the new one.
+	idx.evictVector(rowID)
+
 	// Re-insert with the new vector (or skip if now NULL).
 	val, ok := row.GetValue(colName)
 	if !ok || !val.Valid {
@@ -702,7 +718,7 @@ func (t *Table) updateHNSWIndexKey(ctx context.Context, secondaryIndex Secondary
 		return fmt.Errorf("HNSW index %s: expected VectorPointer for %q, got %T", secondaryIndex.Name, colName, val.Value)
 	}
 	distFn := func(otherID RowID) (float64, error) {
-		otherVP, err := t.loadVectorByRowID(ctx, otherID, colName)
+		otherVP, err := idx.cachedVector(ctx, t, otherID, colName)
 		if err != nil {
 			return 0, err
 		}
@@ -711,5 +727,12 @@ func (t *Table) updateHNSWIndexKey(ctx context.Context, secondaryIndex Secondary
 	if err := g.insert(rowID, distFn); err != nil {
 		return fmt.Errorf("HNSW updateHNSWIndexKey: graph insert: %w", err)
 	}
+	// Update the cache with the new vector.
+	idx.vecMu.Lock()
+	if idx.vecCache == nil {
+		idx.vecCache = make(map[RowID]VectorPointer, 64)
+	}
+	idx.vecCache[rowID] = newVP
+	idx.vecMu.Unlock()
 	return idx.replaceDataPages(ctx, g)
 }

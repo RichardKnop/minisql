@@ -39,11 +39,18 @@ type hnswNodeData struct {
 
 // hnswIndex is the runtime handle for an HNSW vector index.  The graph is
 // loaded lazily on the first Search call and cached for subsequent calls.
+//
+// vecCache stores the raw float32 vectors for each indexed row, keyed by RowID.
+// It is populated lazily on first distance-function miss and updated by online
+// DML (Insert/Delete operations keep it consistent with the in-memory graph).
+// This eliminates overflow-page I/O on the hot search path after the first query.
 type hnswIndex struct {
 	pager       TxPager
 	rootPageIdx PageIndex
 	graph       *hnswGraph
 	mu          sync.RWMutex
+	vecCache    map[RowID]VectorPointer
+	vecMu       sync.RWMutex
 }
 
 // GetRootPageIdx returns the index of the HNSW metadata page in the database file.
@@ -800,16 +807,61 @@ type hnswBuildRow struct {
 
 // ---- distance helper ----
 
-// makeDistFunc builds a closure that loads and caches the vector for each RowID
-// from the main table and returns its distance to the query vector under the
-// named function ("VEC_L2" or "VEC_COSINE").
-func makeDistFunc(ctx context.Context, table *Table, colName string, query VectorPointer, funcName string) func(RowID) (float64, error) {
+// cachedVector returns the VectorPointer (with Data populated) for rowID,
+// loading it from the table exactly once and caching the result for reuse
+// across queries.  Online DML (insertHNSWIndexKey, deleteHNSWIndexKey) keeps
+// the cache consistent with the in-memory graph.
+func (idx *hnswIndex) cachedVector(ctx context.Context, table *Table, rowID RowID, colName string) (VectorPointer, error) {
+	idx.vecMu.RLock()
+	if vp, ok := idx.vecCache[rowID]; ok {
+		idx.vecMu.RUnlock()
+		return vp, nil
+	}
+	idx.vecMu.RUnlock()
+
+	vp, err := table.loadVectorByRowID(ctx, rowID, colName)
+	if err != nil {
+		return VectorPointer{}, err
+	}
+
+	idx.vecMu.Lock()
+	if idx.vecCache == nil {
+		idx.vecCache = make(map[RowID]VectorPointer, 64)
+	}
+	idx.vecCache[rowID] = vp
+	idx.vecMu.Unlock()
+	return vp, nil
+}
+
+// evictVector removes a RowID from the vector cache.  Called by Delete to keep
+// the cache consistent with the in-memory graph.
+func (idx *hnswIndex) evictVector(rowID RowID) {
+	idx.vecMu.Lock()
+	delete(idx.vecCache, rowID)
+	idx.vecMu.Unlock()
+}
+
+// makeDistFunc builds a closure that returns the distance from each node's
+// vector to the query vector.  When idx is non-nil, vectors are fetched via
+// idx.cachedVector so each node is read from overflow pages at most once per
+// index lifetime.  When idx is nil (unit-test contexts), the function falls
+// back to table.loadVectorByRowID on every call.
+// A per-call map[RowID]float64 deduplicates re-visits within a single search.
+func makeDistFunc(ctx context.Context, idx *hnswIndex, table *Table, colName string, query VectorPointer, funcName string) func(RowID) (float64, error) {
 	cache := make(map[RowID]float64)
 	return func(rowID RowID) (float64, error) {
 		if d, ok := cache[rowID]; ok {
 			return d, nil
 		}
-		vp, err := table.loadVectorByRowID(ctx, rowID, colName)
+		var (
+			vp  VectorPointer
+			err error
+		)
+		if idx != nil {
+			vp, err = idx.cachedVector(ctx, table, rowID, colName)
+		} else {
+			vp, err = table.loadVectorByRowID(ctx, rowID, colName)
+		}
 		if err != nil {
 			return 0, err
 		}
