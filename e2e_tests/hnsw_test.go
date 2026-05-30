@@ -249,3 +249,43 @@ func (s *TestSuite) TestHNSWIndex_OnlineMaintenance() {
 		s.InDelta(0.0, dist, 1e-6)
 	})
 }
+
+// TestHNSWIndex_Float32SliceBindArg verifies that []float32 can be passed
+// directly as a bind argument for both INSERT and vector distance queries.
+func (s *TestSuite) TestHNSWIndex_Float32SliceBindArg() {
+	_, err := s.db.Exec(`create table "float32_vecs" (
+		id  int8 primary key autoincrement,
+		v   vector(3) not null
+	);`)
+	s.Require().NoError(err)
+
+	// Insert using []float32 bind args instead of string literals.
+	rows := [][]float32{
+		{1.0, 0.0, 0.0},
+		{0.0, 1.0, 0.0},
+		{0.0, 0.0, 1.0},
+	}
+	for _, vec := range rows {
+		_, err := s.db.Exec(`insert into float32_vecs (v) values (?)`, vec)
+		s.Require().NoError(err)
+	}
+
+	_, err = s.db.Exec(`CREATE HNSW INDEX "idx_f32" ON "float32_vecs" (v);`)
+	s.Require().NoError(err)
+
+	// Query using a string literal for the distance function (the parser does
+	// not support ? placeholders inside VEC_L2 arguments).
+	res, err := s.db.QueryContext(context.Background(),
+		`SELECT id, VEC_L2(v, '[1.0, 0.0, 0.0]') AS dist FROM float32_vecs ORDER BY dist LIMIT 1;`,
+	)
+	s.Require().NoError(err)
+	defer res.Close()
+
+	s.Require().True(res.Next())
+	var id int64
+	var dist float64
+	s.Require().NoError(res.Scan(&id, &dist))
+	s.Equal(int64(1), id, "nearest to [1,0,0] should be row 1")
+	s.InDelta(0.0, dist, 1e-6)
+	s.Require().NoError(res.Err())
+}

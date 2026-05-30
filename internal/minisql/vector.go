@@ -86,6 +86,8 @@ func toVectorPointer(v any) (VectorPointer, error) {
 	switch vp := v.(type) {
 	case VectorPointer:
 		return vp, nil
+	case []float32:
+		return VectorPointer{Dims: uint32(len(vp)), Data: vp}, nil
 	case TextPointer:
 		return ParseVectorLiteral(vp.String())
 	case string:

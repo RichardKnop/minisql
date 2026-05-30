@@ -133,6 +133,8 @@ func toInternalArgs(args []driver.NamedValue) ([]any, error) {
 			internalArgs = append(internalArgs, nil)
 		case int64, float64, bool:
 			internalArgs = append(internalArgs, v)
+		case []float32:
+			internalArgs = append(internalArgs, minisql.VectorPointer{Dims: uint32(len(v)), Data: v})
 		case string:
 			// Reuse the string's backing bytes without copying. The TextPointer is
 			// valid only for the duration of this Exec/Query call: `args` (and thus
