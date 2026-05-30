@@ -166,6 +166,34 @@ Top CPU consumers (6.65 s total):
 
 **Remaining targets:** P1.4 (incremental `replaceDataPages` — online INSERT is still O(N) pages per row) and P3 (flat array for `g.Nodes` to improve graph-traversal cache locality).
 
+---
+
+## 2026-05-30 — HNSW P1.4 Incremental INSERT Page Writes
+
+**Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
+**Branch:** `feat/vector-search-hnsw-index`  
+**Changes:** `hnswGraph` gains `nodeToPage map[RowID]PageIndex`, `lastDataPage PageIndex`, and `dirtyNodes map[RowID]struct{}`. `readHNSWGraph` populates the first two while walking the data-page chain. `insert()` marks each modified neighbour in `dirtyNodes`. `hnswIndex.Insert` dispatches to the new `incrementalInsert` which: (1) rewrites only the pages containing dirty existing nodes, (2) appends the new node to the last data page or a fresh one, (3) updates the meta page — O(M) page writes instead of O(N). `replaceDataPages` (Delete path) rebuilds `nodeToPage` from the freshly written pages so tracking stays accurate. Falls back to `replaceDataPages` on rare page-overflow.
+
+### Online INSERT overhead improvement
+
+| Dims | Baseline ns/op | After P1.4 ns/op | Δ | Baseline MB/op | After P1.4 MB/op | Δ |
+|---:|---:|---:|---:|---:|---:|---:|
+| 3 | 9 336 µs | 1 679 µs | **−82%** | 8.46 | 0.68 | **−92%** |
+| 128 | 15 343 µs | 3 929 µs | **−74%** | 17.93 | 0.74 | **−96%** |
+| 768 | 33 185 µs | 12 241 µs | **−63%** | 62.00 | 0.77 | **−99%** |
+
+**INSERT overhead vs no-index baseline:**
+
+| Dims | Before (×) | After (×) |
+|---:|---:|---:|
+| 3 | 358 | **65** |
+| 128 | 568 | **145** |
+| 768 | 1 144 | **422** |
+
+The remaining overhead is dominated by graph traversal (beamSearch at efConstruction=200) and the necessary page writes for dirty neighbours — both are inherent to the HNSW algorithm.
+
+**Next target:** P3 — flat array for `g.Nodes` (replace `map[RowID]*hnswNodeData` with a contiguous slice for better cache locality during graph traversal).
+
 ## 2026-05-27 — Plan Cache Extension for Bound-Condition Queries
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
