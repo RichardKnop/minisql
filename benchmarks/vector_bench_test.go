@@ -153,52 +153,58 @@ func BenchmarkHNSW_BuildIndex(b *testing.B) {
 
 // BenchmarkHNSW_ANNSearch measures approximate nearest-neighbor top-k search
 // routed through the HNSW index for different corpus sizes, dimensions, and k.
+//
+// The database is seeded and the HNSW index is built ONCE per (dims, n) pair
+// and shared across all k sub-benchmarks, avoiding redundant O(n) index builds
+// for large corpora (e.g. dims768/n10000 takes ~220s to build).
 func BenchmarkHNSW_ANNSearch(b *testing.B) {
 	for _, dims := range vecDims {
 		for _, n := range []int{vecSmallN, vecMediumN} {
-			for _, k := range []int{1, 10} {
-				b.Run(fmt.Sprintf("dims%d/n%d/top%d", dims, n, k), func(b *testing.B) {
-					r := rand.New(rand.NewPCG(42, uint64(dims)))
-					db, cleanup := openVecDB(b, dims)
-					defer cleanup()
-					seedVectors(b, db, r, dims, n)
-					createHNSWIndex(b, db)
+			b.Run(fmt.Sprintf("dims%d/n%d", dims, n), func(b *testing.B) {
+				r := rand.New(rand.NewPCG(42, uint64(dims)))
+				db, cleanup := openVecDB(b, dims)
+				defer cleanup()
+				seedVectors(b, db, r, dims, n)
+				createHNSWIndex(b, db)
 
-					// Pre-generate a pool of query literals to avoid formatting
-					// allocations in the measured loop.
-					const queryPoolSize = 256
-					queries := make([]string, queryPoolSize)
-					for i := range queries {
-						queries[i] = vecLiteral(randVec(r, dims))
-					}
+				// Pre-generate a pool of query literals to avoid formatting
+				// allocations in the measured loop.
+				const queryPoolSize = 256
+				queries := make([]string, queryPoolSize)
+				for i := range queries {
+					queries[i] = vecLiteral(randVec(r, dims))
+				}
 
-					b.ResetTimer()
-					for i := range b.N {
-						q := queries[i%queryPoolSize]
-						sql := fmt.Sprintf(
-							`SELECT id, VEC_L2(v, '%s') AS dist FROM vecs ORDER BY dist LIMIT %d;`,
-							q, k,
-						)
-						rows, err := db.Query(sql)
-						if err != nil {
-							b.Fatalf("query: %v", err)
-						}
-						var id int64
-						var dist float64
-						for rows.Next() {
-							if err := rows.Scan(&id, &dist); err != nil {
-								rows.Close()
-								b.Fatalf("scan: %v", err)
+				for _, k := range []int{1, 10} {
+					b.Run(fmt.Sprintf("top%d", k), func(b *testing.B) {
+						b.ResetTimer()
+						for i := range b.N {
+							q := queries[i%queryPoolSize]
+							sql := fmt.Sprintf(
+								`SELECT id, VEC_L2(v, '%s') AS dist FROM vecs ORDER BY dist LIMIT %d;`,
+								q, k,
+							)
+							rows, err := db.Query(sql)
+							if err != nil {
+								b.Fatalf("query: %v", err)
 							}
-						}
-						if err := rows.Err(); err != nil {
+							var id int64
+							var dist float64
+							for rows.Next() {
+								if err := rows.Scan(&id, &dist); err != nil {
+									rows.Close()
+									b.Fatalf("scan: %v", err)
+								}
+							}
+							if err := rows.Err(); err != nil {
+								rows.Close()
+								b.Fatalf("rows err: %v", err)
+							}
 							rows.Close()
-							b.Fatalf("rows err: %v", err)
 						}
-						rows.Close()
-					}
-				})
-			}
+					})
+				}
+			})
 		}
 	}
 }
