@@ -1,5 +1,118 @@
 # Benchmark Results
 
+## 2026-05-30 — Vector Search (HNSW) Baseline
+
+**Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
+**Branch:** `feat/vector-search-hnsw-index`  
+**Command:** `LOG_LEVEL=warn go test -tags bench -run='^$' -bench='HNSW' -benchmem -count=1 -cpuprofile=hnsw_cpu.prof -memprofile=hnsw_mem.prof ./benchmarks/`  
+**Runtime:** `3026s` (dominated by 10K-row/high-dim build and search cases)
+
+First profiled baseline for the HNSW vector index. All numbers are **pre-optimisation**
+and serve as the target to beat.
+
+### Index build (`CREATE HNSW INDEX`)
+
+| Corpus | Dims | ns/op | MB/op | allocs/op |
+|---|---:|---:|---:|---:|
+| 1 000 rows | 3 | 1 041 ms | 488 | 8 203 245 |
+| 1 000 rows | 128 | 2 412 ms | 594 | 9 819 871 |
+| 1 000 rows | 768 | 8 162 ms | 599 | 9 983 884 |
+| 10 000 rows | 3 | 14 449 ms | 5 872 | 99 161 288 |
+| 10 000 rows | 128 | 64 873 ms | 13 714 | 181 777 307 |
+| 10 000 rows | 768 | 227 401 ms | 13 493 | 190 396 625 |
+
+**Key observation:** allocation count grows super-linearly with N (99M allocs for 10K 3D rows vs 8.2M for 1K — 12× more allocs for 10× more rows). Memory is proportional to N × dims at 10K but not at 1K, hinting at per-node fixed overhead dominating at small N.
+
+### ANN search (HNSW index, top-1 and top-10)
+
+| Corpus | Dims | top-k | ns/op | MB/op | allocs/op |
+|---|---:|---:|---:|---:|---:|
+| 1 000 rows | 3 | 1 | 195 µs | 0.07 | 1 362 |
+| 1 000 rows | 3 | 10 | 185 µs | 0.07 | 1 458 |
+| 1 000 rows | 128 | 1 | 761 µs | 0.79 | 4 224 |
+| 1 000 rows | 128 | 10 | 837 µs | 0.84 | 4 335 |
+| 1 000 rows | 768 | 1 | 2 115 µs | 3.86 | 4 286 |
+| 1 000 rows | 768 | 10 | 2 541 µs | 4.14 | 4 411 |
+| 10 000 rows | 3 | 1 | 813 µs | 1.05 | 4 766 |
+| 10 000 rows | 3 | 10 | 947 µs | 1.09 | 5 033 |
+| 10 000 rows | 128 | 1 | 67 ms | 5.91 | 22 515 |
+| 10 000 rows | 128 | 10 | 4 ms | 5.71 | 21 054 |
+| 10 000 rows | 768 | 1 | 6 ms | 11.25 | 19 142 |
+| 10 000 rows | 768 | 10 | 7 ms | 11.76 | 19 773 |
+
+### Sequential scan baseline (no index, brute force, top-1)
+
+| Corpus | Dims | ns/op | MB/op | allocs/op |
+|---|---:|---:|---:|---:|
+| 1 000 rows | 3 | 633 µs | 0.65 | 10 821 |
+| 1 000 rows | 128 | 8 249 µs | 5.93 | 11 826 |
+| 1 000 rows | 768 | 46 021 µs | 31.47 | 11 855 |
+
+**HNSW speedup (1 000 rows, top-1):**
+
+| Dims | HNSW | SeqScan | Speedup |
+|---:|---:|---:|---:|
+| 3 | 195 µs | 633 µs | **3.2×** |
+| 128 | 761 µs | 8 249 µs | **10.8×** |
+| 768 | 2 115 µs | 46 021 µs | **21.8×** |
+
+The speedup increases with dimension because the fraction of the corpus visited by the graph traversal stays roughly constant while the per-distance-computation cost grows linearly with dims.
+
+### Online INSERT maintenance (with vs without index)
+
+| Dims | with index ns/op | no index ns/op | overhead | with index allocs | no index allocs |
+|---:|---:|---:|---:|---:|---:|
+| 3 | 9 336 µs | 26 µs | **358×** | 69 431 | 45 |
+| 128 | 15 343 µs | 27 µs | **568×** | 90 912 | 45 |
+| 768 | 33 185 µs | 29 µs | **1 144×** | 89 008 | 44 |
+
+Online INSERT overhead is extreme because `replaceDataPages` **re-serialises the entire graph** on every single insert, making online maintenance O(N) pages-written per row.
+
+---
+
+### Profiler findings (`pprof` alloc_space, 3D/1K build)
+
+Top allocators (3 × BenchmarkHNSW_BuildIndex/dims3/n1000, ~511 MB total each):
+
+| Symbol | Alloc MB | % total | Root cause |
+|---|---:|---:|---|
+| `beamSearch` | 1 099 | 36% | `make(map[RowID]bool, ef*2)` per call; heap slice growth |
+| `pruneNeighbors` | 503 | 16% | `[]pair` slice allocated per invocation |
+| `maxHeap.Push` | 423 | 14% | append-growth of the heap backing array |
+| `insert` (frame) | 310 | 10% | neighbor slice allocation per layer |
+| `minHeap.Push` | 226 | 7% | append-growth of the beam-search candidate heap |
+| `maxHeap.Pop` | 184 | 6% | result slice populated from heap drain |
+| `minHeap.Pop` | 161 | 5% | candidate popped as interface{} then type-asserted |
+
+Top CPU consumers (6.65 s total):
+
+| Symbol | CPU % | Root cause |
+|---|---:|---|
+| `container/heap.down` | 14% | heap sift-down on every beamSearch step |
+| `runtime.mapaccess1_fast64` | 10% | `visited[nb]` lookup inside beamSearch inner loop |
+| `beamSearch` | 8% | total frame excluding callees |
+| `pruneNeighbors` | 5% | sort + slice ops |
+
+---
+
+### Priority optimisation targets (pre-baseline)
+
+**P1 — highest impact:**
+
+1. **Pool or replace `visited map[RowID]bool` in `beamSearch`** — biggest single allocator (36%). Replace with a generation-counter bitset or sync.Pool'd map to eliminate O(ef) map allocs per search.
+2. **Pre-allocate and pool heaps** — allocate `make([]hnswCandidate, 0, ef)` once per search session rather than growing from zero each call.
+3. **`pruneNeighbors`: stack-allocate small neighbor lists** — M ≤ 32 in practice; use a fixed-size `[64]pair` array on the stack instead of `[]pair`.
+4. **`replaceDataPages`: incremental page update** — instead of rewriting the full graph on every INSERT/DELETE, track dirty nodes and write only changed/new pages. This changes online-insert complexity from O(N) to O(1) pages.
+
+**P2 — medium impact:**
+
+5. **Per-query vector cache as slice** — replace `map[RowID]float64` in `makeDistFunc` with a dense slice indexed by sequential position; avoids map overhead for each distance lookup during search.
+6. **Load graph vectors into memory at `loadGraph` time** — cache the full vector dataset alongside the graph so search never needs to hit overflow pages.
+
+**P3 — lower impact:**
+
+7. **Flat array for `g.Nodes`** — replace `map[RowID]*hnswNodeData` with a slice indexed by dense position for better cache locality during graph traversal.
+
 ## 2026-05-27 — Plan Cache Extension for Bound-Condition Queries
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
