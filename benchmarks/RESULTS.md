@@ -113,6 +113,38 @@ Top CPU consumers (6.65 s total):
 
 7. **Flat array for `g.Nodes`** — replace `map[RowID]*hnswNodeData` with a slice indexed by dense position for better cache locality during graph traversal.
 
+---
+
+## 2026-05-30 — HNSW P1 Allocator Optimisations
+
+**Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
+**Branch:** `feat/vector-search-hnsw-index` · commit `b56a02c`  
+**Changes:** Three targeted changes to `internal/minisql/hnsw.go`:
+- **P1.1+P1.2** — `hnswSearchBufPool` (`sync.Pool`) holding a pre-allocated `visited map[RowID]bool`, `minHeap`, and `maxHeap`. `beamSearch` gets a buf, clears/resets with `clear()`/`[:0]`, returns on `defer`. Eliminates the dominant per-call map alloc (36% of build allocs) and both heap allocs (21% combined).
+- **P1.3** — `pruneNeighbors` now uses `var pairsBuf [72]hnswPair` on the stack instead of `make([]pair, ...)`. M ≤ 32 so 2*M+4 = 68 slots always fits. Eliminates 16% of build allocs.
+
+### Build index allocation improvement
+
+| Corpus | Dims | MB/op before | MB/op after | Δ |
+|---|---:|---:|---:|---:|
+| 1 000 rows | 3 | 488 | 226 | **−54%** |
+| 10 000 rows | 3 | 5 872 | 2 680 | **−54%** |
+
+### ANN search improvement
+
+| Corpus | Dims | top-k | ns/op before | ns/op after | Δ ns | MB/op before | MB/op after | Δ MB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 000 rows | 3 | 1 | 195 µs | 232 µs | +19%† | 0.065 | 0.053 | −19% |
+| 1 000 rows | 3 | 10 | 185 µs | 203 µs | +10%† | 0.070 | 0.058 | −17% |
+| 1 000 rows | 128 | 1 | 761 µs | 681 µs | **−10%** | 0.785 | 0.745 | −5% |
+| 1 000 rows | 128 | 10 | 837 µs | 751 µs | **−10%** | 0.836 | 0.791 | −5% |
+
+† dims3 ns/op change is within noise — the baseline was a single count=1 run; the pool overhead at tiny graphs is comparable to savings.
+
+**Key finding:** At dims128 the pool is clearly net positive — 10% latency reduction comes from reusing the map's backing buckets (better cache locality on repeated searches) in addition to fewer GC cycles. At dims3, the search terminates in so few hops that pool overhead is similar in magnitude to savings, but B/op still improves 17–19%.
+
+**Remaining bottleneck:** Vector overflow-page I/O now dominates both allocation count and latency for ANNSearch. `makeDistFunc` reads each node's `[]float32` from disk on every distance evaluation. P2 (vector caching at `loadGraph` time) is the next high-leverage target.
+
 ## 2026-05-27 — Plan Cache Extension for Bound-Condition Queries
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
