@@ -1873,17 +1873,10 @@ func (idx *logStructuredInvertedIndex) applyRowIDSegmentStatesToBase(
 	terms := sortedRowIDSegmentStateTerms(states)
 	for _, term := range terms {
 		state := states[term]
-		for _, rowID := range sortedRowIDsFromSet(state.deletes) {
-			if err := idx.base.Delete(ctx, term, invertedPosting{RowID: rowID}); err != nil {
-				return fmt.Errorf("compact inverted segment delete term %q: %w", term, err)
-			}
-		}
-		insertPostings := postingsFromRowIDs(sortedRowIDsFromSet(state.inserts))
-		if len(insertPostings) == 0 {
-			continue
-		}
-		if err := idx.base.InsertMany(ctx, term, insertPostings); err != nil {
-			return fmt.Errorf("compact inverted segment insert term %q: %w", term, err)
+		deletes := sortedRowIDsFromSet(state.deletes)
+		inserts := sortedRowIDsFromSet(state.inserts)
+		if err := idx.base.ApplyRowIDChanges(ctx, term, deletes, inserts); err != nil {
+			return fmt.Errorf("compact inverted row-ID segment term %q: %w", term, err)
 		}
 	}
 	return nil
@@ -1910,14 +1903,6 @@ func (idx *logStructuredInvertedIndex) applySegmentStatesToBase(
 		}
 	}
 	return nil
-}
-
-func postingsFromRowIDs(rowIDs []RowID) []invertedPosting {
-	postings := make([]invertedPosting, 0, len(rowIDs))
-	for _, rowID := range rowIDs {
-		postings = append(postings, invertedPosting{RowID: rowID})
-	}
-	return postings
 }
 
 func (idx *logStructuredInvertedIndex) visitSegmentCells(ctx context.Context, root PageIndex, visit func(invertedSegmentCell) error) error {
