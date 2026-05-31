@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"runtime"
 	"sync"
 )
 
@@ -35,7 +36,7 @@ const (
 // Online-inserted nodes are individually heap-allocated and not in nodeStore.
 type hnswGraph struct {
 	Nodes          map[RowID]*hnswNodeData
-	nodeStore      []hnswNodeData      // flat backing store for readHNSWGraph-loaded nodes
+	nodeStore      []hnswNodeData     // flat backing store for readHNSWGraph-loaded nodes
 	M              int
 	EfConstruction int
 	EntryPoint     RowID
@@ -43,12 +44,21 @@ type hnswGraph struct {
 	hasEntry       bool    // false when graph is empty
 	ml             float64 // = 1 / ln(M), controls level assignment probability
 
-	nodeToPage   map[RowID]PageIndex  // nil = page tracking not active (batch build path)
-	lastDataPage PageIndex            // index of the last page in the data-page chain
-	dirtyNodes   map[RowID]struct{}   // nodes modified since last serialisation; reset after each DML
+	nodeToPage   map[RowID]PageIndex // nil = page tracking not active (batch build path)
+	lastDataPage PageIndex           // index of the last page in the data-page chain
+	dirtyNodes   map[RowID]struct{}  // nodes modified since last serialisation; reset after each DML
+
+	// Parallel build synchronisation — zero-value is correct; unused outside BuildHNSWIndex.
+	nodesMu sync.RWMutex // guards Nodes map reads (RLock) and writes (Lock)
+	entryMu sync.Mutex   // guards EntryPoint / EntryLevel / hasEntry
 }
 
 type hnswNodeData struct {
+	// mu guards Neighbors during concurrent batch builds.  It is set to a
+	// non-nil *sync.Mutex only for nodes created by parallelInsert (batch
+	// build path).  Nodes loaded from disk by readHNSWGraph leave mu nil;
+	// they are only accessed under the outer hnswIndex.mu write lock.
+	mu        *sync.Mutex
 	Neighbors [][]RowID // Neighbors[l] = neighbor RowIDs at layer l
 }
 
@@ -347,6 +357,229 @@ func (g *hnswGraph) greedyStep(ep RowID, epDist float64, skipID RowID, layer int
 		}
 	}
 	return ep, epDist, nil
+}
+
+// parallelGreedyStep is the concurrent-safe analogue of greedyStep used during
+// parallel batch builds.  It acquires g.nodesMu.RLock for each map lookup and
+// node.mu.Lock to copy each neighbour list before ranging over it.
+func (g *hnswGraph) parallelGreedyStep(ep RowID, epDist float64, skipID RowID, layer int, distFn func(RowID) (float64, error)) (RowID, float64, error) {
+	for {
+		g.nodesMu.RLock()
+		node := g.Nodes[ep]
+		g.nodesMu.RUnlock()
+
+		if node == nil || layer >= len(node.Neighbors) {
+			break
+		}
+
+		// Copy the neighbour-list header under the node lock so we can range
+		// over it safely after releasing the lock.
+		node.mu.Lock()
+		nbrs := node.Neighbors[layer]
+		node.mu.Unlock()
+
+		improved := false
+		for _, nb := range nbrs {
+			if nb == skipID {
+				continue
+			}
+			g.nodesMu.RLock()
+			exists := g.Nodes[nb] != nil
+			g.nodesMu.RUnlock()
+			if !exists {
+				continue
+			}
+			d, err := distFn(nb)
+			if err != nil {
+				return ep, epDist, err
+			}
+			if d < epDist {
+				ep = nb
+				epDist = d
+				improved = true
+			}
+		}
+		if !improved {
+			break
+		}
+	}
+	return ep, epDist, nil
+}
+
+// parallelBeamSearch is the concurrent-safe analogue of beamSearch used during
+// parallel batch builds.  Each map lookup is guarded by g.nodesMu.RLock and each
+// neighbour-list read is guarded by node.mu.Lock.
+func (g *hnswGraph) parallelBeamSearch(buf *hnswSearchBuf, ep RowID, epDist float64, skipID RowID, layer, ef int, distFn func(RowID) (float64, error)) ([]hnswCandidate, error) {
+	buf.visited.reset()
+	buf.cands = buf.cands[:0]
+	buf.results = buf.results[:0]
+
+	visited := &buf.visited
+	visited.add(ep)
+	if skipID != ^RowID(0) {
+		visited.add(skipID)
+	}
+
+	buf.cands = append(buf.cands, hnswCandidate{ep, epDist})
+	cands := &buf.cands
+	heap.Init(cands)
+
+	buf.results = append(buf.results, hnswCandidate{ep, epDist})
+	results := &buf.results
+	heap.Init(results)
+
+	for cands.Len() > 0 {
+		c := heap.Pop(cands).(hnswCandidate)
+		if results.Len() >= ef && c.dist > (*results)[0].dist {
+			break
+		}
+
+		g.nodesMu.RLock()
+		node := g.Nodes[c.rowID]
+		g.nodesMu.RUnlock()
+		if node == nil {
+			continue
+		}
+
+		// Copy neighbour-list header; safe to range after unlock.
+		node.mu.Lock()
+		var nbrs []RowID
+		if layer < len(node.Neighbors) {
+			nbrs = node.Neighbors[layer]
+		}
+		node.mu.Unlock()
+
+		for _, nb := range nbrs {
+			if visited.contains(nb) {
+				continue
+			}
+			g.nodesMu.RLock()
+			exists := g.Nodes[nb] != nil
+			g.nodesMu.RUnlock()
+			if !exists {
+				continue
+			}
+			visited.add(nb)
+			d, err := distFn(nb)
+			if err != nil {
+				return nil, err
+			}
+			if results.Len() < ef || d < (*results)[0].dist {
+				heap.Push(cands, hnswCandidate{nb, d})
+				heap.Push(results, hnswCandidate{nb, d})
+				if results.Len() > ef {
+					heap.Pop(results)
+				}
+			}
+		}
+	}
+
+	n := results.Len()
+	if n > cap(buf.out) {
+		buf.out = make([]hnswCandidate, n)
+	} else {
+		buf.out = buf.out[:n]
+	}
+	for i := n - 1; i >= 0; i-- {
+		buf.out[i] = heap.Pop(results).(hnswCandidate)
+	}
+	return buf.out, nil
+}
+
+// parallelInsert is the concurrent-safe analogue of insert used by
+// BuildHNSWIndex when nWorkers > 1.  Multiple goroutines may call
+// parallelInsert simultaneously on the same graph.
+//
+// Node pointer stability: the new node is added to g.Nodes only after its
+// own Neighbors are set and bidirectional connections to existing nodes are
+// done.  Between those writes and the map insertion, other goroutines that
+// encounter rowID as a neighbour reference will find g.Nodes[rowID]==nil and
+// skip it, which is correct for approximate search.  After map insertion,
+// traversals can follow edges both to and from the new node.
+func (g *hnswGraph) parallelInsert(rowID RowID, distFn func(RowID) (float64, error)) error {
+	level := g.randomLevel()
+	node := &hnswNodeData{mu: new(sync.Mutex), Neighbors: make([][]RowID, level+1)}
+
+	g.entryMu.Lock()
+	if !g.hasEntry {
+		g.hasEntry = true
+		g.EntryPoint = rowID
+		g.EntryLevel = level
+		g.entryMu.Unlock()
+		g.nodesMu.Lock()
+		g.Nodes[rowID] = node
+		g.nodesMu.Unlock()
+		return nil
+	}
+	ep := g.EntryPoint
+	epLevel := g.EntryLevel
+	g.entryMu.Unlock()
+
+	epDist, err := distFn(ep)
+	if err != nil {
+		return err
+	}
+
+	for l := epLevel; l > level; l-- {
+		ep, epDist, err = g.parallelGreedyStep(ep, epDist, rowID, l, distFn)
+		if err != nil {
+			return err
+		}
+	}
+
+	buf := hnswSearchBufPool.Get().(*hnswSearchBuf)
+	defer hnswSearchBufPool.Put(buf)
+
+	for l := min(level, epLevel); l >= 0; l-- {
+		mMax := g.M
+		if l == 0 {
+			mMax = 2 * g.M
+		}
+		candidates, err := g.parallelBeamSearch(buf, ep, epDist, rowID, l, g.EfConstruction, distFn)
+		if err != nil {
+			return err
+		}
+		neighbors := g.selectNeighbors(candidates, mMax)
+
+		node.mu.Lock()
+		node.Neighbors[l] = neighbors
+		node.mu.Unlock()
+
+		for _, nb := range neighbors {
+			g.nodesMu.RLock()
+			nbNode := g.Nodes[nb]
+			g.nodesMu.RUnlock()
+			if nbNode == nil {
+				continue
+			}
+			nbNode.mu.Lock()
+			if l < len(nbNode.Neighbors) {
+				nbNode.Neighbors[l] = append(nbNode.Neighbors[l], rowID)
+				if len(nbNode.Neighbors[l]) > mMax {
+					nbNode.Neighbors[l] = g.pruneNeighbors(nb, nbNode.Neighbors[l], mMax, distFn)
+				}
+			}
+			nbNode.mu.Unlock()
+		}
+
+		if len(candidates) > 0 {
+			ep = candidates[0].rowID
+			epDist = candidates[0].dist
+		}
+	}
+
+	g.nodesMu.Lock()
+	g.Nodes[rowID] = node
+	g.nodesMu.Unlock()
+
+	g.entryMu.Lock()
+	if level > g.EntryLevel {
+		g.EntryPoint = rowID
+		g.EntryLevel = level
+	}
+	g.entryMu.Unlock()
+
+	return nil
 }
 
 // beamSearch performs an ef-wide beam search at a given layer.
@@ -1051,6 +1284,12 @@ func (bv *hnswBuildVecs) distL2(curStart int, otherID RowID) (float64, error) {
 //
 // rows contains (RowID, VectorPointer) pairs.  The graph always uses L2
 // distance during construction; queries may use any supported distance function.
+//
+// When GOMAXPROCS > 1, nodes are inserted concurrently using a worker pool.
+// The parallel path uses fine-grained per-node mutexes and a shared RWMutex on
+// the Nodes map, so graph quality is comparable to serial construction — HNSW
+// is approximate, and minor topology differences from concurrent scheduling are
+// within normal variance.
 func BuildHNSWIndex(ctx context.Context, pager TxPager, m, efConstruction int, rows []hnswBuildRow) (PageIndex, error) {
 	graph := newHNSWGraph(m, efConstruction)
 
@@ -1059,16 +1298,84 @@ func BuildHNSWIndex(ctx context.Context, pager TxPager, m, efConstruction int, r
 	// individually-allocated VectorPointer.Data slices from the table scan.
 	bv := newHNSWBuildVecs(rows)
 
-	for _, r := range rows {
-		curStart := bv.pos[r.RowID]
-		distFn := func(otherID RowID) (float64, error) {
-			return bv.distL2(curStart, otherID)
-		}
-		if err := graph.insert(r.RowID, distFn); err != nil {
-			return 0, fmt.Errorf("HNSW build: insert rowID %d: %w", r.RowID, err)
-		}
+	nWorkers := runtime.GOMAXPROCS(0)
+	if nWorkers > len(rows) {
+		nWorkers = len(rows)
 	}
 
+	if nWorkers <= 1 {
+		// Single-threaded path — no locking overhead.
+		for _, r := range rows {
+			curStart := bv.pos[r.RowID]
+			distFn := func(otherID RowID) (float64, error) {
+				return bv.distL2(curStart, otherID)
+			}
+			if err := graph.insert(r.RowID, distFn); err != nil {
+				return 0, fmt.Errorf("HNSW build: insert rowID %d: %w", r.RowID, err)
+			}
+		}
+		return writeHNSWGraph(ctx, pager, graph)
+	}
+
+	type buildWork struct {
+		rowID    RowID
+		curStart int
+	}
+
+	workCh := make(chan buildWork, nWorkers)
+	buildCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var (
+		wg       sync.WaitGroup
+		errMu    sync.Mutex
+		buildErr error
+	)
+
+	for range nWorkers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-buildCtx.Done():
+					return
+				case w, ok := <-workCh:
+					if !ok {
+						return
+					}
+					curStart := w.curStart
+					distFn := func(otherID RowID) (float64, error) {
+						return bv.distL2(curStart, otherID)
+					}
+					if err := graph.parallelInsert(w.rowID, distFn); err != nil {
+						errMu.Lock()
+						if buildErr == nil {
+							buildErr = err
+						}
+						errMu.Unlock()
+						cancel()
+						return
+					}
+				}
+			}
+		}()
+	}
+
+outer:
+	for _, r := range rows {
+		select {
+		case <-buildCtx.Done():
+			break outer
+		case workCh <- buildWork{rowID: r.RowID, curStart: bv.pos[r.RowID]}:
+		}
+	}
+	close(workCh)
+	wg.Wait()
+
+	if buildErr != nil {
+		return 0, fmt.Errorf("HNSW build: %w", buildErr)
+	}
 	return writeHNSWGraph(ctx, pager, graph)
 }
 
