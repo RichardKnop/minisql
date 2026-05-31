@@ -563,6 +563,56 @@ func (idx *dedicatedInvertedIndex) LoadRowIDs(ctx context.Context, term string, 
 	return collectRowIDsFromIterator(ctx, iter, idx.mode, hint)
 }
 
+// ApplyRowIDChanges merges sorted row-ID deletes and inserts into one term
+// rewrite. It is used when folding JSON mutation segments into the base index.
+func (idx *dedicatedInvertedIndex) ApplyRowIDChanges(ctx context.Context, term string, deletes, inserts []RowID) error {
+	if idx.mode != invertedPostingModeRowIDs {
+		return fmt.Errorf("inverted index %s uses posting mode %d", idx.name, idx.mode)
+	}
+	if len(deletes) == 0 && len(inserts) == 0 {
+		return nil
+	}
+
+	leafPage, err := idx.findEntryLeafPage(ctx, term)
+	if err != nil {
+		return err
+	}
+	page, err := idx.pager.ModifyPage(ctx, leafPage.Index)
+	if err != nil {
+		return fmt.Errorf("modify inverted entry leaf %d: %w", leafPage.Index, err)
+	}
+	if page.InvertedEntryPage == nil || !page.InvertedEntryPage.Header.IsLeaf {
+		return fmt.Errorf("inverted entry page %d is not a leaf", page.Index)
+	}
+
+	entryPage := page.InvertedEntryPage
+	cellIdx, found := findInvertedEntryCell(entryPage.Cells, term)
+	var oldCell invertedEntryCell
+	var existing []invertedPosting
+	if found {
+		oldCell = entryPage.Cells[cellIdx]
+		existing, err = idx.decodeInvertedEntryCell(ctx, oldCell)
+		if err != nil {
+			return err
+		}
+	}
+
+	merged := mergeRowIDPostings(existing, deletes, inserts)
+	if equalRowIDPostings(existing, merged) {
+		return nil
+	}
+	if found {
+		if err := idx.freePostingTree(ctx, oldCell); err != nil {
+			return err
+		}
+		entryPage.Cells = slices.Delete(entryPage.Cells, cellIdx, cellIdx+1)
+		if err := idx.rebalanceEntryPageAfterDelete(ctx, page.Index); err != nil {
+			return err
+		}
+	}
+	return idx.InsertMany(ctx, term, merged)
+}
+
 // ForEachRowID streams sorted row IDs for a row-id-only inverted term.
 func (idx *dedicatedInvertedIndex) ForEachRowID(ctx context.Context, term string, fn func(RowID) error) error {
 	if idx.mode != invertedPostingModeRowIDs {
@@ -2514,6 +2564,56 @@ func removeInvertedPosting(mode invertedPostingMode, postings []invertedPosting,
 	}
 	grouped[i].Positions = positions
 	return grouped
+}
+
+// mergeRowIDPostings applies sorted row-ID removals and additions without
+// allocating a map for the common JSON foldback path.
+func mergeRowIDPostings(existing []invertedPosting, deletes, inserts []RowID) []invertedPosting {
+	merged := make([]invertedPosting, 0, len(existing)+len(inserts))
+	var existingIdx, insertIdx, deleteIdx int
+	for existingIdx < len(existing) || insertIdx < len(inserts) {
+		var rowID RowID
+		switch {
+		case insertIdx >= len(inserts):
+			rowID = existing[existingIdx].RowID
+			existingIdx++
+		case existingIdx >= len(existing):
+			rowID = inserts[insertIdx]
+			insertIdx++
+		case existing[existingIdx].RowID < inserts[insertIdx]:
+			rowID = existing[existingIdx].RowID
+			existingIdx++
+		case existing[existingIdx].RowID > inserts[insertIdx]:
+			rowID = inserts[insertIdx]
+			insertIdx++
+		default:
+			rowID = existing[existingIdx].RowID
+			existingIdx++
+			insertIdx++
+		}
+		for deleteIdx < len(deletes) && deletes[deleteIdx] < rowID {
+			deleteIdx++
+		}
+		if deleteIdx < len(deletes) && deletes[deleteIdx] == rowID {
+			continue
+		}
+		if len(merged) == 0 || merged[len(merged)-1].RowID != rowID {
+			merged = append(merged, invertedPosting{RowID: rowID})
+		}
+	}
+	return merged
+}
+
+func equalRowIDPostings(left, right []invertedPosting) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i].RowID != right[i].RowID {
+			return false
+		}
+	}
+	return true
 }
 
 // ensureInvertedEntryPageFits verifies an entry page can marshal into pageSize.
