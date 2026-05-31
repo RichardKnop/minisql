@@ -126,6 +126,12 @@ func (p *parserItem) parseFactor() (*minisql.Expr, error) {
 		return &minisql.Expr{IsNull: true}, nil
 	}
 
+	// Bind-parameter placeholder
+	if token == "?" {
+		p.pop()
+		return &minisql.Expr{Literal: minisql.Placeholder{}}, nil
+	}
+
 	// CASE expression
 	if strings.ToUpper(token) == "CASE" {
 		p.pop()
