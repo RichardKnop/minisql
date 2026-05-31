@@ -126,13 +126,18 @@ func (g *hnswGraph) insert(rowID RowID, distFn func(RowID) (float64, error)) err
 		}
 	}
 
+	// Acquire a search buffer for the beam-search phase and hold it for all
+	// layers so buf.out is reused without reallocation across iterations.
+	buf := hnswSearchBufPool.Get().(*hnswSearchBuf)
+	defer hnswSearchBufPool.Put(buf)
+
 	// Beam search and wiring from min(level, entryLevel) down to 0.
 	for l := min(level, g.EntryLevel); l >= 0; l-- {
 		mMax := g.M
 		if l == 0 {
 			mMax = 2 * g.M
 		}
-		candidates, err := g.beamSearch(ep, epDist, rowID, l, g.EfConstruction, distFn)
+		candidates, err := g.beamSearch(buf, ep, epDist, rowID, l, g.EfConstruction, distFn)
 		if err != nil {
 			return err
 		}
@@ -147,9 +152,7 @@ func (g *hnswGraph) insert(rowID RowID, distFn func(RowID) (float64, error)) err
 			}
 			nbNode.Neighbors[l] = append(nbNode.Neighbors[l], rowID)
 			if len(nbNode.Neighbors[l]) > mMax {
-				// Build a dist-fn relative to nb for pruning.
-				nbDistFn := func(other RowID) (float64, error) { return distFn(other) }
-				nbNode.Neighbors[l] = g.pruneNeighbors(nb, nbNode.Neighbors[l], mMax, nbDistFn)
+				nbNode.Neighbors[l] = g.pruneNeighbors(nb, nbNode.Neighbors[l], mMax, distFn)
 			}
 			// Mark the modified neighbour dirty (its page record needs updating).
 			if g.nodeToPage != nil {
@@ -158,6 +161,8 @@ func (g *hnswGraph) insert(rowID RowID, distFn func(RowID) (float64, error)) err
 		}
 
 		// Advance entry point to the closest candidate for the next layer.
+		// candidates is buf.out — safe to read here; the next iteration's
+		// beamSearch call will overwrite buf.out, but we read it before that.
 		if len(candidates) > 0 {
 			ep = candidates[0].rowID
 			epDist = candidates[0].dist
@@ -199,7 +204,9 @@ func (g *hnswGraph) search(k, efSearch int, distFn func(RowID) (float64, error))
 	}
 
 	// Beam search at layer 0.
-	candidates, err := g.beamSearch(ep, epDist, ^RowID(0), 0, efSearch, distFn)
+	buf := hnswSearchBufPool.Get().(*hnswSearchBuf)
+	defer hnswSearchBufPool.Put(buf)
+	candidates, err := g.beamSearch(buf, ep, epDist, ^RowID(0), 0, efSearch, distFn)
 	if err != nil {
 		return nil, err
 	}
@@ -220,12 +227,14 @@ type hnswCandidate struct {
 }
 
 // hnswSearchBuf holds pre-allocated scratch structures reused across beamSearch
-// calls via hnswSearchBufPool.  Each get/put cycle clears the maps and resets
-// the slice lengths so the underlying backing arrays are kept alive.
+// calls.  The buf is owned by insert or search for its full duration — a single
+// buf is passed through all beamSearch calls within one operation, so its out
+// slice is valid until the NEXT beamSearch call with the same buf.
 type hnswSearchBuf struct {
 	visited map[RowID]bool
 	cands   minHeap
 	results maxHeap
+	out     []hnswCandidate // reusable output; valid until next beamSearch call with this buf
 }
 
 var hnswSearchBufPool = sync.Pool{
@@ -305,12 +314,11 @@ func (g *hnswGraph) greedyStep(ep RowID, epDist float64, skipID RowID, layer int
 
 // beamSearch performs an ef-wide beam search at a given layer.
 // skipID is excluded from expansion (the inserting node or ^RowID(0) for search).
-// Returns candidates sorted nearest-first.
-func (g *hnswGraph) beamSearch(ep RowID, epDist float64, skipID RowID, layer, ef int, distFn func(RowID) (float64, error)) ([]hnswCandidate, error) {
-	buf := hnswSearchBufPool.Get().(*hnswSearchBuf)
-	defer hnswSearchBufPool.Put(buf)
-
-	// Reset pooled structures without freeing backing arrays.
+// Returns candidates sorted nearest-first in buf.out; the slice is valid until
+// the next beamSearch call using the same buf.
+// buf is owned by the caller (insert or search); beamSearch does not touch the pool.
+func (g *hnswGraph) beamSearch(buf *hnswSearchBuf, ep RowID, epDist float64, skipID RowID, layer, ef int, distFn func(RowID) (float64, error)) ([]hnswCandidate, error) {
+	// Reset without freeing backing arrays.
 	clear(buf.visited)
 	buf.cands = buf.cands[:0]
 	buf.results = buf.results[:0]
@@ -360,18 +368,24 @@ func (g *hnswGraph) beamSearch(ep RowID, epDist float64, skipID RowID, layer, ef
 		}
 	}
 
-	// Drain the max-heap into a nearest-first slice (caller owns this allocation).
-	out := make([]hnswCandidate, results.Len())
-	for i := len(out) - 1; i >= 0; i-- {
-		out[i] = heap.Pop(results).(hnswCandidate)
+	// Drain the max-heap into buf.out (reusing its backing array).
+	n := results.Len()
+	if n > cap(buf.out) {
+		buf.out = make([]hnswCandidate, n)
+	} else {
+		buf.out = buf.out[:n]
 	}
-	return out, nil
+	for i := n - 1; i >= 0; i-- {
+		buf.out[i] = heap.Pop(results).(hnswCandidate)
+	}
+	return buf.out, nil
 }
 
 // selectNeighbors chooses up to mMax neighbors from candidates (already sorted nearest-first).
+// The returned slice has cap=mMax+1 so the first bidirectional append never reallocates.
 func (g *hnswGraph) selectNeighbors(candidates []hnswCandidate, mMax int) []RowID {
 	n := min(mMax, len(candidates))
-	result := make([]RowID, n)
+	result := make([]RowID, n, mMax+1)
 	for i := range n {
 		result[i] = candidates[i].rowID
 	}
@@ -955,6 +969,46 @@ func freeHNSWIndexPages(ctx context.Context, pager TxPager, rootPageIdx PageInde
 	return nil
 }
 
+// hnswBuildVecs packs all build-time vectors into a single contiguous []float32
+// for cache-friendly L2 distance computation during graph construction.
+// vecPos maps each RowID to its starting index in data.
+type hnswBuildVecs struct {
+	data []float32
+	pos  map[RowID]int
+	dims int
+}
+
+func newHNSWBuildVecs(rows []hnswBuildRow) hnswBuildVecs {
+	if len(rows) == 0 {
+		return hnswBuildVecs{}
+	}
+	dims := int(rows[0].Vec.Dims)
+	data := make([]float32, len(rows)*dims)
+	pos := make(map[RowID]int, len(rows))
+	for i, r := range rows {
+		start := i * dims
+		copy(data[start:start+dims], r.Vec.Data)
+		pos[r.RowID] = start
+	}
+	return hnswBuildVecs{data: data, pos: pos, dims: dims}
+}
+
+// distL2 computes L2 distance from the vector at curStart to the vector for otherID.
+func (bv *hnswBuildVecs) distL2(curStart int, otherID RowID) (float64, error) {
+	otherStart, ok := bv.pos[otherID]
+	if !ok {
+		return 0, fmt.Errorf("HNSW build: vector not cached for rowID %d", otherID)
+	}
+	cur := bv.data[curStart : curStart+bv.dims]
+	oth := bv.data[otherStart : otherStart+bv.dims]
+	var sum float64
+	for i, v := range cur {
+		d := float64(v) - float64(oth[i])
+		sum += d * d
+	}
+	return math.Sqrt(sum), nil
+}
+
 // BuildHNSWIndex builds a new HNSW graph from the supplied row set, writes it
 // to pages, and returns the meta page index (used as the schema RootPage).
 //
@@ -963,20 +1017,15 @@ func freeHNSWIndexPages(ctx context.Context, pager TxPager, rootPageIdx PageInde
 func BuildHNSWIndex(ctx context.Context, pager TxPager, m, efConstruction int, rows []hnswBuildRow) (PageIndex, error) {
 	graph := newHNSWGraph(m, efConstruction)
 
-	// Cache all vectors to avoid repeated page reads during graph construction.
-	vecCache := make(map[RowID]VectorPointer, len(rows))
-	for _, r := range rows {
-		vecCache[r.RowID] = r.Vec
-	}
+	// Pack all vectors into a single contiguous float32 array.  This gives
+	// better cache locality during L2 distance computation compared to the
+	// individually-allocated VectorPointer.Data slices from the table scan.
+	bv := newHNSWBuildVecs(rows)
 
 	for _, r := range rows {
-		currentVec := r.Vec
+		curStart := bv.pos[r.RowID]
 		distFn := func(otherID RowID) (float64, error) {
-			otherVec, ok := vecCache[otherID]
-			if !ok {
-				return 0, fmt.Errorf("HNSW build: vector not cached for rowID %d", otherID)
-			}
-			return L2Distance(currentVec, otherVec)
+			return bv.distL2(curStart, otherID)
 		}
 		if err := graph.insert(r.RowID, distFn); err != nil {
 			return 0, fmt.Errorf("HNSW build: insert rowID %d: %w", r.RowID, err)

@@ -167,24 +167,28 @@ func BenchmarkHNSW_ANNSearch(b *testing.B) {
 				seedVectors(b, db, r, dims, n)
 				createHNSWIndex(b, db)
 
-				// Pre-generate a pool of query literals to avoid formatting
-				// allocations in the measured loop.
+				// Pre-generate a pool of query vectors to avoid allocations in
+				// the measured loop.
 				const queryPoolSize = 256
-				queries := make([]string, queryPoolSize)
-				for i := range queries {
-					queries[i] = vecLiteral(randVec(r, dims))
+				queryVecs := make([][]float32, queryPoolSize)
+				for i := range queryVecs {
+					queryVecs[i] = randVec(r, dims)
 				}
 
 				for _, k := range []int{1, 10} {
+					k := k
+					sql := fmt.Sprintf(
+						`SELECT id, VEC_L2(v, ?) AS dist FROM vecs ORDER BY dist LIMIT %d;`, k,
+					)
+					stmt, err := db.Prepare(sql)
+					if err != nil {
+						b.Fatalf("prepare: %v", err)
+					}
+					defer stmt.Close()
 					b.Run(fmt.Sprintf("top%d", k), func(b *testing.B) {
 						b.ResetTimer()
 						for i := range b.N {
-							q := queries[i%queryPoolSize]
-							sql := fmt.Sprintf(
-								`SELECT id, VEC_L2(v, '%s') AS dist FROM vecs ORDER BY dist LIMIT %d;`,
-								q, k,
-							)
-							rows, err := db.Query(sql)
+							rows, err := stmt.Query(queryVecs[i%queryPoolSize])
 							if err != nil {
 								b.Fatalf("query: %v", err)
 							}
@@ -223,19 +227,17 @@ func BenchmarkHNSW_SeqScan(b *testing.B) {
 				// No HNSW index — forces a sequential scan.
 
 				const queryPoolSize = 256
-				queries := make([]string, queryPoolSize)
-				for i := range queries {
-					queries[i] = vecLiteral(randVec(r, dims))
+				sqls := make([]string, queryPoolSize)
+				for i := range sqls {
+					sqls[i] = fmt.Sprintf(
+						`SELECT id, VEC_L2(v, '%s') AS dist FROM vecs ORDER BY dist LIMIT 1;`,
+						vecLiteral(randVec(r, dims)),
+					)
 				}
 
 				b.ResetTimer()
 				for i := range b.N {
-					q := queries[i%queryPoolSize]
-					sql := fmt.Sprintf(
-						`SELECT id, VEC_L2(v, '%s') AS dist FROM vecs ORDER BY dist LIMIT 1;`,
-						q,
-					)
-					rows, err := db.Query(sql)
+					rows, err := db.Query(sqls[i%queryPoolSize])
 					if err != nil {
 						b.Fatalf("query: %v", err)
 					}
@@ -274,9 +276,15 @@ func BenchmarkHNSW_Insert_WithIndex(b *testing.B) {
 			}
 			defer stmt.Close()
 
+			const vecPoolSize = 256
+			vecPool := make([][]float32, vecPoolSize)
+			for i := range vecPool {
+				vecPool[i] = randVec(r, dims)
+			}
+
 			b.ResetTimer()
-			for range b.N {
-				if _, err := stmt.Exec(randVec(r, dims)); err != nil {
+			for i := range b.N {
+				if _, err := stmt.Exec(vecPool[i%vecPoolSize]); err != nil {
 					b.Fatalf("insert: %v", err)
 				}
 			}
@@ -300,9 +308,15 @@ func BenchmarkHNSW_Insert_NoIndex(b *testing.B) {
 			}
 			defer stmt.Close()
 
+			const vecPoolSize = 256
+			vecPool := make([][]float32, vecPoolSize)
+			for i := range vecPool {
+				vecPool[i] = randVec(r, dims)
+			}
+
 			b.ResetTimer()
-			for range b.N {
-				if _, err := stmt.Exec(randVec(r, dims)); err != nil {
+			for i := range b.N {
+				if _, err := stmt.Exec(vecPool[i%vecPoolSize]); err != nil {
 					b.Fatalf("insert: %v", err)
 				}
 			}

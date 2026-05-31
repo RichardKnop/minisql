@@ -71,11 +71,18 @@ func BenchmarkFullText_Insert_WithIndex(b *testing.B) {
 			stmt := prepareFullTextInsert(b, db, d)
 			defer stmt.Close()
 
+			const docPoolSize = 256
+			type docEntry struct{ title, body string }
+			docPool := make([]docEntry, docPoolSize)
 			faker := gofakeit.New(11)
+			for i := range docPool {
+				title, body := generatedFullTextDoc(faker, i)
+				docPool[i] = docEntry{title: title, body: body}
+			}
 			b.ResetTimer()
 			for i := range b.N {
-				title, body := generatedFullTextDoc(faker, i)
-				if _, err := stmt.Exec(i+1, title, body); err != nil {
+				doc := docPool[i%docPoolSize]
+				if _, err := stmt.Exec(i+1, doc.title, doc.body); err != nil {
 					b.Fatalf("insert full-text row: %v", err)
 				}
 			}
@@ -104,10 +111,14 @@ func BenchmarkFullText_Search_SingleTerm(b *testing.B) {
 					db, cleanup := openSeededFullTextBenchDB(b, d, invertedSeedN)
 					defer cleanup()
 					query := fullTextSearchSQL(d, tc.query, tc.sqliteFts)
-
+					countStmt, err := db.Prepare(query)
+					if err != nil {
+						b.Fatalf("prepare count: %v", err)
+					}
+					defer countStmt.Close()
 					b.ResetTimer()
 					for range b.N {
-						n := queryCount(b, db, query)
+						n := queryCountStmt(b, countStmt)
 						if n != tc.wantRows {
 							b.Fatalf("expected %d rows, got %d", tc.wantRows, n)
 						}
@@ -126,10 +137,14 @@ func BenchmarkFullText_Search_MultiTermAND(b *testing.B) {
 			db, cleanup := openSeededFullTextBenchDB(b, d, invertedSeedN)
 			defer cleanup()
 			query := fullTextSearchSQL(d, "common cohort17", "common cohort17")
-
+			countStmt, err := db.Prepare(query)
+			if err != nil {
+				b.Fatalf("prepare count: %v", err)
+			}
+			defer countStmt.Close()
 			b.ResetTimer()
 			for range b.N {
-				n := queryCount(b, db, query)
+				n := queryCountStmt(b, countStmt)
 				if n != invertedSeedN/100 {
 					b.Fatalf("expected %d rows, got %d", invertedSeedN/100, n)
 				}
@@ -146,10 +161,14 @@ func BenchmarkFullText_Search_Phrase(b *testing.B) {
 			db, cleanup := openSeededFullTextBenchDB(b, d, invertedSeedN)
 			defer cleanup()
 			query := fullTextSearchSQL(d, `"alpha beta"`, `"alpha beta"`)
-
+			countStmt, err := db.Prepare(query)
+			if err != nil {
+				b.Fatalf("prepare count: %v", err)
+			}
+			defer countStmt.Close()
 			b.ResetTimer()
 			for range b.N {
-				n := queryCount(b, db, query)
+				n := queryCountStmt(b, countStmt)
 				if n != invertedSeedN/10 {
 					b.Fatalf("expected %d rows, got %d", invertedSeedN/10, n)
 				}
@@ -177,10 +196,14 @@ func BenchmarkFullText_Search_AfterDeletes(b *testing.B) {
 			}
 			query := fullTextSearchSQL(d, "common", "common")
 			wantRows := invertedSeedN - deletedRows
-
+			countStmt, err := db.Prepare(query)
+			if err != nil {
+				b.Fatalf("prepare count: %v", err)
+			}
+			defer countStmt.Close()
 			b.ResetTimer()
 			for range b.N {
-				n := queryCount(b, db, query)
+				n := queryCountStmt(b, countStmt)
 				if n != wantRows {
 					b.Fatalf("expected %d rows, got %d", wantRows, n)
 				}
@@ -268,11 +291,20 @@ func BenchmarkJSONInverted_Insert_WithIndex(b *testing.B) {
 			mustExec(b, db, `create inverted index "idx_events_payload" on "events_json" (payload)`)
 			stmt := prepareJSONInsert(b, db, d)
 			defer stmt.Close()
+			const eventPoolSize = 256
+			type eventEntry struct{ name, payload string }
+			eventPool := make([]eventEntry, eventPoolSize)
 			faker := gofakeit.New(21)
-
+			for i := range eventPool {
+				eventPool[i] = eventEntry{
+					name:    fmt.Sprintf("event-%06d", i),
+					payload: generatedJSONPayload(faker, i),
+				}
+			}
 			b.ResetTimer()
 			for i := range b.N {
-				if _, err := stmt.Exec(i+1, fmt.Sprintf("event-%06d", i), generatedJSONPayload(faker, i)); err != nil {
+				ev := eventPool[i%eventPoolSize]
+				if _, err := stmt.Exec(i+1, ev.name, ev.payload); err != nil {
 					b.Fatalf("insert JSON row: %v", err)
 				}
 			}
@@ -311,10 +343,14 @@ func BenchmarkJSONInverted_Contains_AfterDeletes(b *testing.B) {
 			}
 			query := `select count(*) from "events_json" where JSON_CONTAINS(payload, '{"type":"click"}')`
 			wantRows := jsonClickRowsAfterDeletingPrefix(invertedSeedN, deletedRows)
-
+			countStmt, err := db.Prepare(query)
+			if err != nil {
+				b.Fatalf("prepare count: %v", err)
+			}
+			defer countStmt.Close()
 			b.ResetTimer()
 			for range b.N {
-				n := queryCount(b, db, query)
+				n := queryCountStmt(b, countStmt)
 				if n != wantRows {
 					b.Fatalf("expected %d rows, got %d", wantRows, n)
 				}
@@ -402,9 +438,14 @@ func benchJSONContains(b *testing.B, name, minisqlPredicateJSON, sqlitePredicate
 			b.Run(tc.name, func(b *testing.B) {
 				db, cleanup := openSeededJSONBenchDB(b, tc.driver, invertedSeedN, tc.indexed)
 				defer cleanup()
+				countStmt, err := db.Prepare(tc.query)
+				if err != nil {
+					b.Fatalf("prepare count: %v", err)
+				}
+				defer countStmt.Close()
 				b.ResetTimer()
 				for range b.N {
-					n := queryCount(b, db, tc.query)
+					n := queryCountStmt(b, countStmt)
 					if n != wantRows {
 						b.Fatalf("expected %d rows, got %d", wantRows, n)
 					}
@@ -714,6 +755,15 @@ func queryCount(t testing.TB, db *sql.DB, query string) int {
 	var count int
 	if err := db.QueryRow(query).Scan(&count); err != nil {
 		t.Fatalf("query count %q: %v", query, err)
+	}
+	return count
+}
+
+func queryCountStmt(t testing.TB, stmt *sql.Stmt) int {
+	t.Helper()
+	var count int
+	if err := stmt.QueryRow().Scan(&count); err != nil {
+		t.Fatalf("query count: %v", err)
 	}
 	return count
 }

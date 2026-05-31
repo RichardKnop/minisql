@@ -76,6 +76,37 @@ type Expr struct {
 	IsNull         bool
 }
 
+// cloneExpr returns a deep copy of an Expr tree so that BindArguments can
+// substitute Placeholder{} literals without corrupting the original.
+func cloneExpr(e *Expr) *Expr {
+	if e == nil {
+		return nil
+	}
+	out := *e
+	out.Left = cloneExpr(e.Left)
+	out.Right = cloneExpr(e.Right)
+	out.CastExpr = cloneExpr(e.CastExpr)
+	out.CaseInput = cloneExpr(e.CaseInput)
+	out.CaseElse = cloneExpr(e.CaseElse)
+	if len(e.Args) > 0 {
+		out.Args = make([]*Expr, len(e.Args))
+		for i, arg := range e.Args {
+			out.Args[i] = cloneExpr(arg)
+		}
+	}
+	if len(e.CaseClauses) > 0 {
+		out.CaseClauses = make([]CaseWhen, len(e.CaseClauses))
+		for i, cl := range e.CaseClauses {
+			out.CaseClauses[i] = CaseWhen{
+				Cond: cl.Cond,
+				When: cloneExpr(cl.When),
+				Then: cloneExpr(cl.Then),
+			}
+		}
+	}
+	return &out
+}
+
 // String returns a human-readable representation suitable for use as a default column name.
 func (e *Expr) String() string {
 	return e.str(false)

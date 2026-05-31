@@ -537,7 +537,66 @@ func (s Statement) NumPlaceholders() int {
 		count += cte.Body.NumPlaceholders()
 	}
 
+	// Count placeholders embedded in SELECT field expressions (e.g. VEC_L2(v, ?)).
+	if s.Kind == Select {
+		for _, field := range s.Fields {
+			count += countExprPlaceholders(field.Expr)
+		}
+	}
+
 	return count
+}
+
+// countExprPlaceholders counts Placeholder{} literals in an Expr tree.
+func countExprPlaceholders(e *Expr) int {
+	if e == nil {
+		return 0
+	}
+	if _, ok := e.Literal.(Placeholder); ok {
+		return 1
+	}
+	count := countExprPlaceholders(e.Left) +
+		countExprPlaceholders(e.Right) +
+		countExprPlaceholders(e.CastExpr) +
+		countExprPlaceholders(e.CaseInput) +
+		countExprPlaceholders(e.CaseElse)
+	for _, arg := range e.Args {
+		count += countExprPlaceholders(arg)
+	}
+	for _, cl := range e.CaseClauses {
+		count += countExprPlaceholders(cl.When) + countExprPlaceholders(cl.Then)
+	}
+	return count
+}
+
+// substituteExprPlaceholders replaces Placeholder{} literals in an Expr tree
+// with values consumed from args (left-to-right). Modifies the tree in-place;
+// callers must operate on a cloned copy.
+func substituteExprPlaceholders(e *Expr, args *[]any) *Expr {
+	if e == nil {
+		return nil
+	}
+	if _, ok := e.Literal.(Placeholder); ok {
+		if len(*args) == 0 {
+			return e
+		}
+		val := (*args)[0]
+		*args = (*args)[1:]
+		return &Expr{Literal: val}
+	}
+	e.Left = substituteExprPlaceholders(e.Left, args)
+	e.Right = substituteExprPlaceholders(e.Right, args)
+	e.CastExpr = substituteExprPlaceholders(e.CastExpr, args)
+	e.CaseInput = substituteExprPlaceholders(e.CaseInput, args)
+	e.CaseElse = substituteExprPlaceholders(e.CaseElse, args)
+	for i, arg := range e.Args {
+		e.Args[i] = substituteExprPlaceholders(arg, args)
+	}
+	for i, cl := range e.CaseClauses {
+		e.CaseClauses[i].When = substituteExprPlaceholders(cl.When, args)
+		e.CaseClauses[i].Then = substituteExprPlaceholders(cl.Then, args)
+	}
+	return e
 }
 
 // Clone returns a deep copy of the statement, safe to mutate independently.
@@ -556,6 +615,11 @@ func (s Statement) Clone() Statement {
 	} else {
 		fields = make([]Field, len(s.Fields))
 		copy(fields, s.Fields)
+		for i, f := range fields {
+			if f.Expr != nil {
+				fields[i].Expr = cloneExpr(f.Expr)
+			}
+		}
 	}
 
 	stmt := Statement{
@@ -772,6 +836,19 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 				cond.Operand2.Value = newList
 				stmt.Conditions[i][j] = cond
 			}
+		}
+	}
+
+	// Bind placeholders in SELECT field expressions (e.g. VEC_L2(v, ?)).
+	if s.Kind == Select {
+		for i, field := range stmt.Fields {
+			if countExprPlaceholders(field.Expr) == 0 {
+				continue
+			}
+			if len(args) == 0 {
+				return Statement{}, errors.New("not enough arguments to bind placeholders")
+			}
+			stmt.Fields[i].Expr = substituteExprPlaceholders(field.Expr, &args)
 		}
 	}
 
