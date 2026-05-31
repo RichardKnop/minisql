@@ -12,7 +12,7 @@
 4. JSON + UUID as native types
 5. Built-in full-text search
 6. Built-in JSON inverted index
-7. Built-in vector similarity search (`VECTOR(n)` column type + `VEC_L2` / `VEC_COSINE` distance functions)
+7. Built-in vector similarity search (`VECTOR(n)` column type + `VEC_L2` / `VEC_COSINE` distance functions + HNSW approximate nearest-neighbour index)
 
 To use minisql in your Go code, import the driver:
 
@@ -551,16 +551,16 @@ rows.Scan(&id, &body, &embedding)
 
 ### Vector Distance Functions
 
-Use `VEC_L2` (Euclidean distance) or `VEC_COSINE` (cosine distance) to measure similarity. The literal vector argument must be a bracket-delimited float string:
+Use `VEC_L2` (Euclidean distance) or `VEC_COSINE` (cosine distance) to measure similarity. The query vector can be a bracket-delimited float string literal or a `?` bind parameter:
 
 ```sql
--- Find the 5 nearest documents to a query vector (smallest L2 distance first)
+-- Find the 5 nearest documents to a query vector (string literal)
 SELECT id, body, VEC_L2(embedding, '[0.1, 0.2, 0.3]') AS dist
 FROM documents
 ORDER BY dist
 LIMIT 5;
 
--- Top-3 most similar by cosine distance (identical direction = 0, orthogonal = 1)
+-- Top-3 most similar by cosine distance
 SELECT id, body, VEC_COSINE(embedding, '[1.0, 0.0, 0.0]') AS dist
 FROM documents
 ORDER BY dist
@@ -574,9 +574,19 @@ ORDER BY dist
 LIMIT 10;
 ```
 
-**`VEC_L2(col, literal)`** — Euclidean (L2) distance: `sqrt(Σ(aᵢ − bᵢ)²)`. Returns `0.0` for identical vectors.
+```go
+// Prepared statement with []float32 bind parameter — efficient for repeated searches
+stmt, err := db.Prepare(
+    `SELECT id, body, VEC_L2(embedding, ?) AS dist FROM documents ORDER BY dist LIMIT 5`,
+)
+rows, err := stmt.Query([]float32{0.1, 0.2, 0.3})
+```
 
-**`VEC_COSINE(col, literal)`** — Cosine distance: `1 − (a · b) / (|a| × |b|)`. Returns `0.0` for identical direction, `1.0` for orthogonal vectors. Both vectors must be non-zero; zero-vector input returns an error.
+When a `CREATE HNSW INDEX` exists on the column and a `LIMIT` is present, the query planner automatically routes the search through the HNSW graph for approximate nearest-neighbour (ANN) results instead of scanning every row. See [HNSW Vector Index](#hnsw-vector-index).
+
+**`VEC_L2(col, vec)`** — Euclidean (L2) distance: `sqrt(Σ(aᵢ − bᵢ)²)`. Returns `0.0` for identical vectors.
+
+**`VEC_COSINE(col, vec)`** — Cosine distance: `1 − (a · b) / (|a| × |b|)`. Returns `0.0` for identical direction, `1.0` for orthogonal vectors. Both vectors must be non-zero; zero-vector input returns an error.
 
 ### Nullable Vector Columns
 
@@ -694,7 +704,8 @@ rows.Scan(&owner)
 | Numeric functions | `ABS(n)` — absolute value (preserves input type); `FLOOR(n)`, `CEIL(n)` — floor/ceiling; `ROUND(n[, d])` — round to `d` decimal places (default 0); `MOD(a, b)` — modulo (integer or float). All usable in `SELECT`, `UPDATE SET`, composable with each other and arithmetic |
 | Date/time functions | `NOW()` — current UTC timestamp; `DATE_TRUNC('unit', ts)` — truncate to `year`/`month`/`week`/`day`/`hour`/`minute`/`second`; `EXTRACT('field', ts)` / `DATE_PART('field', ts)` — extract numeric field (`year`, `month`, `day`, `hour`, `minute`, `second`, `dow`); `TO_TIMESTAMP('str')` — parse timestamp string into a TIMESTAMP value. All usable in `SELECT`, `UPDATE SET`, composable with other expressions |
 | Full-text search functions | `MATCH(doc, query)` and `TS_RANK(doc, query)` provide initial full-text semantics. `CREATE FULLTEXT INDEX` can accelerate literal `MATCH` predicates on one `TEXT`/`VARCHAR` column. |
-| Vector distance functions | `VEC_L2(col, literal)` — Euclidean distance between a `VECTOR(n)` column and a literal vector string. `VEC_COSINE(col, literal)` — cosine distance (0 = identical direction, 1 = orthogonal). Both return `DOUBLE`. Use with `ORDER BY dist LIMIT k` for nearest-neighbour search. See [Vector Type](#vector-type). |
+| Vector distance functions | `VEC_L2(col, vec)` — Euclidean distance between a `VECTOR(n)` column and a query vector (string literal or `?` bind parameter). `VEC_COSINE(col, vec)` — cosine distance (0 = identical direction, 1 = orthogonal). Both return `DOUBLE`. Use with `ORDER BY dist LIMIT k` for nearest-neighbour search. See [Vector Type](#vector-type) and [HNSW Vector Index](#hnsw-vector-index). |
+| `CREATE HNSW INDEX` | Builds a Hierarchical Navigable Small World (HNSW) graph index on a `VECTOR(n)` column for approximate nearest-neighbour (ANN) search. Optional parameters: `WITH (m = 16, ef_construction = 200)`. The query planner uses the index automatically for `ORDER BY VEC_L2(col, ?) LIMIT k` queries. `INSERT`, `UPDATE`, and `DELETE` maintain the graph automatically. See [HNSW Vector Index](#hnsw-vector-index). |
 | `CASE WHEN` | Searched form: `CASE WHEN cond THEN result … ELSE default END`; simple form: `CASE expr WHEN val THEN result … ELSE default END`. Multiple WHEN clauses, optional ELSE (omitting returns NULL). Usable in `SELECT` (including nested in arithmetic), `UPDATE SET`, supports `IS NULL` / `IS NOT NULL` / all comparison operators in conditions |
 | `UNION` / `UNION ALL` | Combine results of two or more `SELECT` statements. `UNION ALL` concatenates all rows (duplicates kept); `UNION` deduplicates the combined result. Chains of three or more branches supported (e.g. `SELECT … UNION ALL SELECT … UNION SELECT …`). Each branch may have its own `WHERE` clause. |
 | `CAST(expr AS type)` | Standard SQL type coercion. Supported target types: `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE`, `TEXT`, `VARCHAR(n)`, `TIMESTAMP`, `JSON`, `UUID`. Follows SQLite semantics: float→int truncates toward zero; text→int/float parses leading digits (non-numeric input → 0). `CAST(x AS JSON)` validates and compacts the value. `CAST(x AS UUID)` parses a UUID string and stores it in binary form. `CAST(uuid_col AS TEXT)` formats the 16-byte value back to a hyphenated lowercase string. NULL propagates. Usable anywhere an expression is valid (e.g. `SELECT CAST(price AS INT8)`, `SELECT CAST(n AS TEXT) AS label`, `SELECT CAST(id AS TEXT) FROM widgets`). |
@@ -768,16 +779,25 @@ rows.Scan(&owner)
 
 | Function | Description |
 |----------|-------------|
-| `VEC_L2(col, literal)` | Euclidean (L2) distance between a `VECTOR(n)` column and a bracket-delimited float literal. Returns `DOUBLE`. `0.0` for identical vectors. |
-| `VEC_COSINE(col, literal)` | Cosine distance: `1 − cosine_similarity`. Returns `DOUBLE`. `0.0` = identical direction, `1.0` = orthogonal. Both vectors must be non-zero. |
+| `VEC_L2(col, vec)` | Euclidean (L2) distance between a `VECTOR(n)` column and a query vector. Returns `DOUBLE`. `0.0` for identical vectors. |
+| `VEC_COSINE(col, vec)` | Cosine distance: `1 − cosine_similarity`. Returns `DOUBLE`. `0.0` = identical direction, `1.0` = orthogonal. Both vectors must be non-zero. |
 
-Both functions are usable in `SELECT`, composable with `AS` aliases, and support `ORDER BY alias LIMIT k` for nearest-neighbour queries.
+The query vector (`vec`) can be a bracket-delimited float string literal (`'[0.1, 0.2, 0.3]'`) or a `?` bind parameter accepting a `[]float32` value. Both functions are usable in `SELECT`, composable with `AS` aliases, and support `ORDER BY alias LIMIT k` for nearest-neighbour queries. When a `CREATE HNSW INDEX` exists on the column and a `LIMIT` is present, the planner automatically routes the query through the HNSW graph for approximate nearest-neighbour search.
 
 ```sql
+-- String literal query vector
 SELECT body, VEC_L2(embedding, '[0.1, 0.2, 0.3]') AS dist
 FROM documents
 ORDER BY dist
 LIMIT 5;
+```
+
+```go
+// Bind parameter — use a prepared statement for efficient repeated search
+stmt, _ := db.Prepare(
+    `SELECT body, VEC_L2(embedding, ?) AS dist FROM documents ORDER BY dist LIMIT 5`,
+)
+rows, _ := stmt.Query([]float32{0.1, 0.2, 0.3})
 ```
 
 #### Full-Text Search Functions
@@ -937,6 +957,7 @@ MiniSQL supports several index types, each suited to a different access pattern.
 | Expression | `CREATE INDEX` with expression | `CREATE INDEX idx ON t (LOWER(col))` |
 | Full-text | `CREATE FULLTEXT INDEX` | `CREATE FULLTEXT INDEX idx ON articles (body) WITH (tokenizer = 'simple')` |
 | JSON inverted | `CREATE INVERTED INDEX` | `CREATE INVERTED INDEX idx ON events (payload)` |
+| HNSW vector | `CREATE HNSW INDEX` | `CREATE HNSW INDEX idx ON docs (embedding)` |
 
 #### Primary Key Index
 
@@ -1082,6 +1103,93 @@ SELECT * FROM users WHERE LOWER(TRIM(email)) = 'alice@example.com';
 Expression indexes only store entries for rows where the expression evaluates to a non-NULL result. `INSERT`, `UPDATE`, and `DELETE` evaluate the expression automatically to keep the index up to date.
 
 `NOW()` and other non-deterministic functions are rejected at `CREATE INDEX` time.
+
+#### HNSW Vector Index
+
+The HNSW (Hierarchical Navigable Small World) index accelerates approximate nearest-neighbour (ANN) vector search on `VECTOR(n)` columns. Without an index, a distance query requires a full table scan that computes distances for every row. An HNSW index reduces search to a sublinear graph traversal, with typical speedups of 10–100× for large corpora.
+
+```sql
+-- Create an HNSW index on a vector column
+CREATE HNSW INDEX "idx_embedding" ON "documents" (embedding);
+
+-- With explicit graph parameters
+CREATE HNSW INDEX "idx_embedding" ON "documents" (embedding)
+    WITH (m = 16, ef_construction = 200);
+
+-- Drop the index (standard DROP INDEX)
+DROP INDEX "idx_embedding";
+```
+
+**Parameters** (all optional — defaults are suitable for most workloads):
+
+| Parameter | Default | Description |
+|---|---|---|
+| `m` | `16` | Maximum bidirectional links per node per layer. Higher values improve recall at the cost of more memory and slower inserts. |
+| `ef_construction` | `200` | Beam width during index construction. Higher values improve index quality but slow down `CREATE HNSW INDEX` and online inserts. |
+
+**Using the index in queries:**
+
+The query planner automatically uses the HNSW index when a query has the form `ORDER BY VEC_L2(col, query_vec) LIMIT k` or `ORDER BY VEC_COSINE(col, query_vec) LIMIT k`. The query vector can be a string literal or a `?` bind parameter:
+
+```sql
+-- Top-5 nearest neighbours by L2 distance (string literal)
+SELECT id, body, VEC_L2(embedding, '[0.1, 0.2, 0.3]') AS dist
+FROM documents
+ORDER BY dist
+LIMIT 5;
+```
+
+```go
+// Top-5 nearest neighbours using a prepared statement and []float32 bind arg
+stmt, err := db.Prepare(
+    `SELECT id, body, VEC_L2(embedding, ?) AS dist FROM documents ORDER BY dist LIMIT 5`,
+)
+rows, err := stmt.Query([]float32{0.1, 0.2, 0.3})
+```
+
+The HNSW scan is used only when:
+- The `ORDER BY` expression is a single `VEC_L2` or `VEC_COSINE` call on an indexed column.
+- A `LIMIT k` is present (determines how many nearest neighbours to retrieve).
+- The query vector is evaluable at plan time (a string literal or a bound `?` parameter).
+
+Without all three conditions the planner falls back to a sequential scan.
+
+**Online DML maintenance:**
+
+The HNSW graph is maintained automatically for `INSERT`, `UPDATE`, and `DELETE`. Each inserted row is wired into the graph; updated or deleted rows have their entries removed. No rebuild is needed after individual row changes.
+
+**Checking index health:**
+
+```sql
+PRAGMA integrity_check;
+```
+
+This verifies the HNSW graph structure along with all other indexes.
+
+**Example — seeding and searching a document store:**
+
+```go
+db.SetMaxOpenConns(1)
+
+_, err = db.Exec(`CREATE TABLE documents (
+    id        INT8 PRIMARY KEY AUTOINCREMENT,
+    body      TEXT NOT NULL,
+    embedding VECTOR(3) NOT NULL
+)`)
+
+_, err = db.Exec(`CREATE HNSW INDEX "idx_embedding" ON "documents" (embedding)`)
+
+// Insert rows; the HNSW graph is updated on each insert.
+ins, err := db.Prepare(`INSERT INTO documents (body, embedding) VALUES (?, ?)`)
+ins.Exec("hello world", []float32{0.1, 0.2, 0.3})
+ins.Exec("foo bar",     []float32{0.9, 0.1, 0.5})
+
+// ANN search via prepared statement — no SQL rebuild on every call.
+search, err := db.Prepare(
+    `SELECT id, body, VEC_L2(embedding, ?) AS dist FROM documents ORDER BY dist LIMIT 3`,
+)
+rows, err := search.Query([]float32{0.0, 0.2, 0.4})
+```
 
 #### Covering Index (Index-Only Scan)
 
