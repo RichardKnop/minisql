@@ -226,12 +226,48 @@ type hnswCandidate struct {
 	dist  float64
 }
 
+// hnswBitset is a compact bit-set for RowID membership checks during beam search.
+// It uses a flat []uint64 backing array, growing on demand, and tracks the highest
+// word written so reset() zeroes only the live range — O(maxWord) not O(capacity).
+type hnswBitset struct {
+	words   []uint64
+	maxWord int // highest word index ever set; -1 when empty
+}
+
+func (b *hnswBitset) contains(id RowID) bool {
+	w := int(id >> 6)
+	if w >= len(b.words) {
+		return false
+	}
+	return b.words[w]>>(id&63)&1 != 0
+}
+
+func (b *hnswBitset) add(id RowID) {
+	w := int(id >> 6)
+	if w >= len(b.words) {
+		grown := make([]uint64, w+1)
+		copy(grown, b.words)
+		b.words = grown
+	}
+	b.words[w] |= uint64(1) << (id & 63)
+	if w > b.maxWord {
+		b.maxWord = w
+	}
+}
+
+func (b *hnswBitset) reset() {
+	if b.maxWord >= 0 {
+		clear(b.words[:b.maxWord+1])
+		b.maxWord = -1
+	}
+}
+
 // hnswSearchBuf holds pre-allocated scratch structures reused across beamSearch
 // calls.  The buf is owned by insert or search for its full duration — a single
 // buf is passed through all beamSearch calls within one operation, so its out
 // slice is valid until the NEXT beamSearch call with the same buf.
 type hnswSearchBuf struct {
-	visited map[RowID]bool
+	visited hnswBitset
 	cands   minHeap
 	results maxHeap
 	out     []hnswCandidate // reusable output; valid until next beamSearch call with this buf
@@ -240,7 +276,8 @@ type hnswSearchBuf struct {
 var hnswSearchBufPool = sync.Pool{
 	New: func() any {
 		return &hnswSearchBuf{
-			visited: make(map[RowID]bool, HNSWDefaultEfConstruction*2),
+			// 256 words covers RowIDs 0–16383 without growth for typical workloads.
+			visited: hnswBitset{words: make([]uint64, 256), maxWord: -1},
 			cands:   make(minHeap, 0, HNSWDefaultEfConstruction),
 			results: make(maxHeap, 0, HNSWDefaultEfConstruction),
 		}
@@ -319,14 +356,14 @@ func (g *hnswGraph) greedyStep(ep RowID, epDist float64, skipID RowID, layer int
 // buf is owned by the caller (insert or search); beamSearch does not touch the pool.
 func (g *hnswGraph) beamSearch(buf *hnswSearchBuf, ep RowID, epDist float64, skipID RowID, layer, ef int, distFn func(RowID) (float64, error)) ([]hnswCandidate, error) {
 	// Reset without freeing backing arrays.
-	clear(buf.visited)
+	buf.visited.reset()
 	buf.cands = buf.cands[:0]
 	buf.results = buf.results[:0]
 
-	visited := buf.visited
-	visited[ep] = true
+	visited := &buf.visited
+	visited.add(ep)
 	if skipID != ^RowID(0) {
-		visited[skipID] = true
+		visited.add(skipID)
 	}
 
 	buf.cands = append(buf.cands, hnswCandidate{ep, epDist})
@@ -347,13 +384,13 @@ func (g *hnswGraph) beamSearch(buf *hnswSearchBuf, ep RowID, epDist float64, ski
 			continue
 		}
 		for _, nb := range node.Neighbors[layer] {
-			if visited[nb] {
+			if visited.contains(nb) {
 				continue
 			}
 			if g.Nodes[nb] == nil {
 				continue
 			}
-			visited[nb] = true
+			visited.add(nb)
 			d, err := distFn(nb)
 			if err != nil {
 				return nil, err
