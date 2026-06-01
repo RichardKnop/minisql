@@ -1536,14 +1536,22 @@ func postingsFromMap(postingsByRowID map[RowID]invertedPosting) []invertedPostin
 }
 
 func segmentCellsForRowIDs(kind byte, term string, rowIDs []RowID) ([]invertedSegmentCell, uint32, error) {
+	return appendSegmentCellsForRowIDs(nil, kind, term, rowIDs)
+}
+
+func appendSegmentCellsForRowIDs(
+	cells []invertedSegmentCell,
+	kind byte,
+	term string,
+	rowIDs []RowID,
+) ([]invertedSegmentCell, uint32, error) {
 	if len(rowIDs) == 0 {
-		return nil, 0, nil
+		return cells, 0, nil
 	}
 	blocks, err := makeRowIDInvertedPostingBlocksFromRowIDs(rowIDs)
 	if err != nil {
 		return nil, 0, err
 	}
-	cells := make([]invertedSegmentCell, 0, len(blocks))
 	offset := 0
 	for _, block := range blocks {
 		n := 0
@@ -1801,11 +1809,12 @@ func rowIDMutationSegmentCells(kind byte, rowIDsByTerm map[string][]RowID) ([]in
 		rowIDs := rowIDsByTerm[term]
 		sortRowIDs(rowIDs)
 		rowIDs = compactSortedRowIDs(rowIDs)
-		termCells, postingCount, err := segmentCellsForRowIDs(kind, term, rowIDs)
+		var postingCount uint32
+		var err error
+		cells, postingCount, err = appendSegmentCellsForRowIDs(cells, kind, term, rowIDs)
 		if err != nil {
 			return nil, 0, err
 		}
-		cells = append(cells, termCells...)
 		totalPostingCount += postingCount
 	}
 	return cells, totalPostingCount, nil

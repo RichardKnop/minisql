@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -156,6 +157,63 @@ func TestLogStructuredInvertedIndex_ApplyBatchWritesSegments(t *testing.T) {
 	require.NoError(t, err)
 	postings := collectInvertedIteratorPostings(t, ctx, iter)
 	assert.Equal(t, []invertedPosting{{RowID: 21}, {RowID: 22}}, postings)
+}
+
+func TestLogStructuredInvertedIndex_ApplyRowIDBatchWritesSortedSegmentPages(t *testing.T) {
+	ctx := context.Background()
+	index, txManager, metaRoot := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModeRowIDs)
+
+	const termCount = 80
+	inserts := make(map[string][]RowID, termCount)
+	for i := range termCount {
+		term := fmt.Sprintf("term-%03d-%0200d", i, i)
+		inserts[term] = []RowID{RowID(i + 2)}
+	}
+	mixedTerm := fmt.Sprintf("term-%03d-%0200d", termCount/2, termCount/2)
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return index.ApplyRowIDBatch(ctx, invertedRowIDMutationBatch{
+			inserts: inserts,
+			deletes: map[string][]RowID{mixedTerm: {1}},
+		})
+	}))
+
+	metaPage, err := index.pager.ReadPage(ctx, metaRoot)
+	require.NoError(t, err)
+	require.Len(t, metaPage.InvertedMetaPage.Segments, 1)
+	segment := metaPage.InvertedMetaPage.Segments[0]
+	assert.Equal(t, invertedSegmentKindMixed, segment.Kind)
+	assert.Equal(t, fmt.Sprintf("term-%03d-%0200d", 0, 0), segment.FirstTerm)
+	assert.Equal(t, fmt.Sprintf("term-%03d-%0200d", termCount-1, termCount-1), segment.LastTerm)
+
+	var cells []invertedSegmentCell
+	pageCount := 0
+	for pageIdx := segment.RootPage; pageIdx != 0; {
+		page, err := index.pager.ReadPage(ctx, pageIdx)
+		require.NoError(t, err)
+		require.NotNil(t, page.InvertedSegmentPage)
+		cells = append(cells, page.InvertedSegmentPage.Cells...)
+		pageIdx = page.InvertedSegmentPage.Header.NextPage
+		pageCount++
+	}
+	assert.Greater(t, pageCount, 1)
+	for i := 1; i < len(cells); i++ {
+		assert.LessOrEqual(t, cells[i-1].Term, cells[i].Term)
+	}
+	mixedCellIdx := -1
+	for i, cell := range cells {
+		if cell.Term == mixedTerm {
+			mixedCellIdx = i
+			break
+		}
+	}
+	require.NotEqual(t, -1, mixedCellIdx)
+	require.Less(t, mixedCellIdx+1, len(cells))
+	assert.Equal(t, invertedSegmentKindDelete, cells[mixedCellIdx].Kind)
+	assert.Equal(t, invertedSegmentKindInsert, cells[mixedCellIdx+1].Kind)
+
+	iter, err := index.Lookup(ctx, mixedTerm)
+	require.NoError(t, err)
+	assert.Equal(t, []invertedPosting{{RowID: termCount/2 + 2}}, collectInvertedIteratorPostings(t, ctx, iter))
 }
 
 func TestLogStructuredInvertedIndex_ApplyBatchGroupsSegmentPostings(t *testing.T) {
