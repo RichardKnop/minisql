@@ -300,6 +300,15 @@ GitHub Actions runs on every push and PR to `main` with two parallel jobs:
 
 ---
 
+## Git Workflow
+
+- Always work on a feature branch. If the current branch is `main`, create or switch to a feature branch before editing files or creating commits.
+- Never commit directly to `main`.
+- Never merge a feature branch into `main` locally as part of the agent workflow.
+- Push the feature branch and open or update a GitHub pull request when integration is requested. Merges into `main` must happen on GitHub after CI passes.
+
+---
+
 ## How to Add a New SQL Feature
 
 Adding any SQL feature touches four layers in a fixed order. Use existing features as reference implementations.
