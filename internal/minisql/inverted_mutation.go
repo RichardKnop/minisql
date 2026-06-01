@@ -10,10 +10,19 @@ type invertedBatchApplier interface {
 	ApplyBatch(context.Context, invertedIndexMutationBatch) error
 }
 
+type invertedRowIDBatchApplier interface {
+	ApplyRowIDBatch(context.Context, invertedRowIDMutationBatch) error
+}
+
 type invertedIndexMutationBatch struct {
 	mode    invertedIndexPostingMode
 	inserts map[string][]invertedPosting
 	deletes map[string][]invertedPosting
+}
+
+type invertedRowIDMutationBatch struct {
+	inserts map[string][]RowID
+	deletes map[string][]RowID
 }
 
 func newInvertedIndexMutationBatch(mode invertedIndexPostingMode) invertedIndexMutationBatch {
@@ -63,6 +72,29 @@ func (b invertedIndexMutationBatch) Apply(ctx context.Context, index invertedInd
 		return applier.ApplyBatch(ctx, b)
 	}
 	return applyInvertedIndexMutationBatchLegacy(ctx, index, b)
+}
+
+// Apply applies a compact row-ID-only batch to index.
+func (b invertedRowIDMutationBatch) Apply(ctx context.Context, index invertedIndex) error {
+	if len(b.inserts) == 0 && len(b.deletes) == 0 {
+		return nil
+	}
+	if applier, ok := index.(invertedRowIDBatchApplier); ok {
+		return applier.ApplyRowIDBatch(ctx, b)
+	}
+
+	batch := newInvertedIndexMutationBatchWithCapacity(invertedIndexPostingModeRowIDs, len(b.inserts), len(b.deletes))
+	for term, rowIDs := range b.inserts {
+		for _, rowID := range rowIDs {
+			batch.Insert(term, invertedPosting{RowID: rowID})
+		}
+	}
+	for term, rowIDs := range b.deletes {
+		for _, rowID := range rowIDs {
+			batch.Delete(term, invertedPosting{RowID: rowID})
+		}
+	}
+	return batch.Apply(ctx, index)
 }
 
 func applyInvertedIndexMutationBatchLegacy(ctx context.Context, index invertedIndex, batch invertedIndexMutationBatch) error {

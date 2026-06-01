@@ -43,12 +43,54 @@ func TestInvertedIndexMutationBatch_ApplyLegacyInDeterministicOrder(t *testing.T
 	}, index.calls)
 }
 
+func TestInvertedRowIDMutationBatch_ApplyUsesRowIDBatchApplier(t *testing.T) {
+	t.Parallel()
+
+	index := &recordingRowIDBatchInvertedIndex{}
+	batch := invertedRowIDMutationBatch{
+		inserts: map[string][]RowID{"status:open": {10}},
+		deletes: map[string][]RowID{"status:closed": {9}},
+	}
+
+	require.NoError(t, batch.Apply(context.Background(), index))
+	require.Len(t, index.batches, 1)
+	assert.Equal(t, []RowID{10}, index.batches[0].inserts["status:open"])
+	assert.Equal(t, []RowID{9}, index.batches[0].deletes["status:closed"])
+	assert.False(t, index.legacyCalled)
+}
+
+func TestInvertedRowIDMutationBatch_ApplyFallsBackToLegacyBatch(t *testing.T) {
+	t.Parallel()
+
+	index := &recordingLegacyInvertedIndex{mode: invertedIndexPostingModeRowIDs}
+	batch := invertedRowIDMutationBatch{
+		inserts: map[string][]RowID{"a": {1, 2}},
+		deletes: map[string][]RowID{"b": {4}},
+	}
+
+	require.NoError(t, batch.Apply(context.Background(), index))
+	assert.Equal(t, []string{
+		"delete:b:4",
+		"insertMany:a:1,2",
+	}, index.calls)
+}
+
 type recordingBatchInvertedIndex struct {
 	recordingLegacyInvertedIndex
 	batches []invertedIndexMutationBatch
 }
 
 func (r *recordingBatchInvertedIndex) ApplyBatch(_ context.Context, batch invertedIndexMutationBatch) error {
+	r.batches = append(r.batches, batch)
+	return nil
+}
+
+type recordingRowIDBatchInvertedIndex struct {
+	recordingLegacyInvertedIndex
+	batches []invertedRowIDMutationBatch
+}
+
+func (r *recordingRowIDBatchInvertedIndex) ApplyRowIDBatch(_ context.Context, batch invertedRowIDMutationBatch) error {
 	r.batches = append(r.batches, batch)
 	return nil
 }
