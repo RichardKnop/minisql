@@ -202,7 +202,7 @@ Largest per-operation heap consumers (minisql only):
 - `HNSW_BuildIndex` dims128/n10000: **3.83 GiB/op** — same structural cost, lower per-vector overhead
 - `JSONInverted_BuildIndex`: **3.26 MiB/op** — JSON decoding plus in-memory term→row-ID map during bulk build
 - `Distinct_HighCardinality`: **1.69 MiB/op** — in-memory dedup set for 10K distinct rows
-- `FullText_BuildIndex`: **1.66 MiB/op** — per-doc postings map during log-structured segment build
+- `FullText_BuildIndex`: **1.80 MiB/op** — per-doc postings map during log-structured segment build
 - `Vacuum_Small`: **1.49 MiB/op** — full copy-compact-swap; structural cost
 - `Join_Inner_SmallLarge`: **1.24 MiB/op** — INLJ result materialization for 10K matched rows
 - `Select_FullScan`: **1.24 MiB/op** — ~8 allocs/row from `Materialize()` per RowView
