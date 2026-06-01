@@ -25,6 +25,23 @@ type invertedRowIDMutationBatch struct {
 	deletes map[string][]RowID
 }
 
+func newInvertedRowIDMutationBatchWithCapacity(insertTerms, deleteTerms int) invertedRowIDMutationBatch {
+	return invertedRowIDMutationBatch{
+		inserts: make(map[string][]RowID, insertTerms),
+		deletes: make(map[string][]RowID, deleteTerms),
+	}
+}
+
+// Insert records an inserted row ID for term.
+func (b *invertedRowIDMutationBatch) Insert(term string, rowID RowID) {
+	b.inserts[term] = append(b.inserts[term], rowID)
+}
+
+// Delete records a deleted row ID for term.
+func (b *invertedRowIDMutationBatch) Delete(term string, rowID RowID) {
+	b.deletes[term] = append(b.deletes[term], rowID)
+}
+
 func newInvertedIndexMutationBatch(mode invertedIndexPostingMode) invertedIndexMutationBatch {
 	return newInvertedIndexMutationBatchWithCapacity(mode, 0, 0)
 }

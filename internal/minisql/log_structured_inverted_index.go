@@ -3,7 +3,6 @@ package minisql
 import (
 	"context"
 	"fmt"
-	"slices"
 	"sort"
 )
 
@@ -506,7 +505,23 @@ func (idx *logStructuredInvertedIndex) rowIDSegmentStates(
 	meta *invertedMetaPage,
 	term string,
 ) ([]rowIDSegmentState, error) {
-	var states []rowIDSegmentState
+	maxStateCount := int(^uint(0) >> 1)
+	totalPostingCount := 0
+	for _, segment := range meta.Segments {
+		if !segmentMayContainTerm(segment, term) {
+			continue
+		}
+		if err := idx.visitSegmentTermCells(ctx, segment.RootPage, term, func(cell invertedSegmentCell) error {
+			if uint64(totalPostingCount)+uint64(cell.DocFreq) > uint64(maxStateCount) {
+				return fmt.Errorf("inverted row-ID segment state count exceeds maximum int")
+			}
+			totalPostingCount += int(cell.DocFreq)
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+	states := make([]rowIDSegmentState, 0, totalPostingCount)
 	for _, segment := range meta.Segments {
 		if !segmentMayContainTerm(segment, term) {
 			continue
@@ -525,7 +540,6 @@ func (idx *logStructuredInvertedIndex) rowIDSegmentStates(
 			default:
 				return fmt.Errorf("unknown inverted segment kind %d", kind)
 			}
-			states = slices.Grow(states, int(cell.DocFreq))
 			return appendBlockRowIDStates(&states, cell.Block, idx.Mode(), keep)
 		}); err != nil {
 			return nil, err
@@ -1380,10 +1394,10 @@ func (idx *logStructuredInvertedIndex) reduceRowIDSegmentStates(
 				kind = cell.Kind
 			}
 			state := states[cell.Term]
-			if state.inserts == nil {
+			if kind == invertedSegmentKindInsert && state.inserts == nil {
 				state.inserts = make(map[RowID]struct{})
 			}
-			if state.deletes == nil {
+			if kind == invertedSegmentKindDelete && state.deletes == nil {
 				state.deletes = make(map[RowID]struct{})
 			}
 			mode, err := forEachInvertedPostingRowID(cell.Block.Payload, func(rowID RowID) error {
@@ -1434,10 +1448,10 @@ func (idx *logStructuredInvertedIndex) reduceSegmentStates(
 				kind = cell.Kind
 			}
 			state := states[cell.Term]
-			if state.inserts == nil {
+			if kind == invertedSegmentKindInsert && state.inserts == nil {
 				state.inserts = make(map[RowID]invertedPosting)
 			}
-			if state.deletes == nil {
+			if kind == invertedSegmentKindDelete && state.deletes == nil {
 				state.deletes = make(map[RowID]invertedPosting)
 			}
 			mode, err := forEachInvertedPostingPosition(cell.Block.Payload, func(rowID RowID, positions []uint32) error {
