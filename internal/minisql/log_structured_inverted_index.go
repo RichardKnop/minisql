@@ -34,6 +34,7 @@ type rowIDSegmentState struct {
 
 var _ invertedIndex = (*logStructuredInvertedIndex)(nil)
 var _ invertedBatchApplier = (*logStructuredInvertedIndex)(nil)
+var _ invertedRowIDBatchApplier = (*logStructuredInvertedIndex)(nil)
 
 // OpenInvertedIndex opens either a log-structured or legacy dedicated inverted index.
 func OpenInvertedIndex(ctx context.Context, name string, mode invertedIndexPostingMode, pager TxPager, rootPageIdx PageIndex) (invertedIndex, error) {
@@ -159,6 +160,14 @@ func (idx *logStructuredInvertedIndex) ApplyBatch(ctx context.Context, batch inv
 		return fmt.Errorf("inverted mutation batch uses posting mode %d, expected %d", batch.mode, idx.Mode())
 	}
 	return idx.appendMutationBatchSegment(ctx, batch)
+}
+
+// ApplyRowIDBatch appends a compact row-ID-only batch as a segment.
+func (idx *logStructuredInvertedIndex) ApplyRowIDBatch(ctx context.Context, batch invertedRowIDMutationBatch) error {
+	if idx.Mode() != invertedPostingModeRowIDs {
+		return fmt.Errorf("inverted index %s uses posting mode %d", idx.name, idx.Mode())
+	}
+	return idx.appendRowIDMutationBatchSegment(ctx, batch)
 }
 
 // Lookup returns posting blocks for term.
@@ -1150,9 +1159,31 @@ func (idx *logStructuredInvertedIndex) appendMutationBatchSegment(ctx context.Co
 	if err != nil {
 		return err
 	}
+	return idx.appendSegmentCells(ctx, deleteCells, insertCells, deletePostingCount+insertPostingCount)
+}
+
+func (idx *logStructuredInvertedIndex) appendRowIDMutationBatchSegment(ctx context.Context, batch invertedRowIDMutationBatch) error {
+	if len(batch.deletes) == 0 && len(batch.inserts) == 0 {
+		return nil
+	}
+	deleteCells, deletePostingCount, err := rowIDMutationSegmentCells(invertedSegmentKindDelete, batch.deletes)
+	if err != nil {
+		return err
+	}
+	insertCells, insertPostingCount, err := rowIDMutationSegmentCells(invertedSegmentKindInsert, batch.inserts)
+	if err != nil {
+		return err
+	}
+	return idx.appendSegmentCells(ctx, deleteCells, insertCells, deletePostingCount+insertPostingCount)
+}
+
+func (idx *logStructuredInvertedIndex) appendSegmentCells(
+	ctx context.Context,
+	deleteCells, insertCells []invertedSegmentCell,
+	postingCount uint32,
+) error {
 	cells := append(deleteCells, insertCells...)
 	sortSegmentCells(cells)
-	postingCount := deletePostingCount + insertPostingCount
 	firstTerm, lastTerm := segmentTermBounds(cells)
 	rootPage, err := idx.writeSegmentCells(ctx, cells)
 	if err != nil {
@@ -1760,6 +1791,33 @@ func (idx *logStructuredInvertedIndex) mutationSegmentCells(kind byte, postingsB
 		totalPostingCount += postingCount
 	}
 	return cells, totalPostingCount, nil
+}
+
+func rowIDMutationSegmentCells(kind byte, rowIDsByTerm map[string][]RowID) ([]invertedSegmentCell, uint32, error) {
+	terms := sortedRowIDMutationTerms(rowIDsByTerm)
+	cells := make([]invertedSegmentCell, 0, len(terms))
+	var totalPostingCount uint32
+	for _, term := range terms {
+		rowIDs := rowIDsByTerm[term]
+		sortRowIDs(rowIDs)
+		rowIDs = compactSortedRowIDs(rowIDs)
+		termCells, postingCount, err := segmentCellsForRowIDs(kind, term, rowIDs)
+		if err != nil {
+			return nil, 0, err
+		}
+		cells = append(cells, termCells...)
+		totalPostingCount += postingCount
+	}
+	return cells, totalPostingCount, nil
+}
+
+func sortedRowIDMutationTerms(rowIDsByTerm map[string][]RowID) []string {
+	terms := make([]string, 0, len(rowIDsByTerm))
+	for term := range rowIDsByTerm {
+		terms = append(terms, term)
+	}
+	sort.Strings(terms)
+	return terms
 }
 
 func (idx *logStructuredInvertedIndex) writeSegmentCells(ctx context.Context, cells []invertedSegmentCell) (PageIndex, error) {

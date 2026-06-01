@@ -1791,27 +1791,26 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		return fmt.Errorf("table %s has inverted index %s but no inverted index instance", table.Name, secondaryIndex.Name)
 	}
 
-	postingsByTerm := make(map[string][]invertedPosting, populateInvertedIndexInitialTerms)
+	rowIDsByTerm := make(map[string][]RowID, populateInvertedIndexInitialTerms)
 	termBuf := make([]string, 0, 16)
 	bufferedPostings := 0
 	flush := func() error {
-		if len(postingsByTerm) == 0 {
+		if len(rowIDsByTerm) == 0 {
 			return nil
 		}
-		batch := invertedIndexMutationBatch{
-			mode:    secondaryIndex.InvertedIndex.Mode(),
-			inserts: postingsByTerm,
+		batch := invertedRowIDMutationBatch{
+			inserts: rowIDsByTerm,
 		}
 		if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
 			return fmt.Errorf("failed to insert JSON term batch for inverted index %s: %w", secondaryIndex.Name, err)
 		}
-		postingsByTerm = make(map[string][]invertedPosting, populateInvertedIndexInitialTerms)
+		rowIDsByTerm = make(map[string][]RowID, populateInvertedIndexInitialTerms)
 		bufferedPostings = 0
 		return nil
 	}
 	addTerms := func(rowID RowID, terms []string) error {
 		for _, term := range terms {
-			postingsByTerm[term] = append(postingsByTerm[term], invertedPosting{RowID: rowID})
+			rowIDsByTerm[term] = append(rowIDsByTerm[term], rowID)
 			bufferedPostings += 1
 		}
 		if bufferedPostings >= populateInvertedIndexFlushPostings {
