@@ -1,17 +1,5 @@
 # Benchmark Results
 
-## 2026-05-31 — HNSW optimizations
-
-Three targeted improvements to the HNSW vector index since the 2026-05-30 baseline:
-
-1. **Prepared statements for ANN search** — eliminated SQL re-parse overhead on every query iteration; 27–53% search speedup.
-2. **Visited bitset** — replaced the `map[RowID]bool` visited set in beam search with a compact `[]uint64` bitset; ~6% additional search improvement by eliminating ~6 400 hash lookups per search at dims128/n10000.
-3. **Parallel batch build** — `BuildHNSWIndex` now uses a `runtime.GOMAXPROCS(0)`-wide worker pool; distance computation is embarrassingly parallel, giving **4.8× speedup** on dims768/n10000 (227 s → 47.8 s on Apple M1 Max, 10 cores).
-
-HNSW tables below reflect the post-optimization numbers. All other benchmark sections are unchanged from the 2026-05-30 baseline.
-
----
-
 ## 2026-05-30 — Baseline
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
@@ -56,18 +44,20 @@ SQLite comparisons use the `sqlite` driver compiled into the same test binary. A
 
 ## Full-Text Search (minisql log-structured vs SQLite FTS5)
 
+**Inverted-index sections refreshed:** 2026-06-01 on `refactor/optimising-inverted-index` with `make bench-inverted BENCH_COUNT=5`. Values are means across five runs. Build benchmarks use `1x`; runtime benchmarks use `10x`.
+
 | Benchmark | minisql | sqlite | minisql B/op | sqlite B/op | minisql allocs | sqlite allocs |
 |---|---:|---:|---:|---:|---:|---:|
-| FullText_BuildIndex (1,000 docs/op) | 3.02 ms | 1.95 ms | 1.66 MiB | 392 B | 16,375 | 20 |
-| FullText_Insert_WithIndex | 48.5 µs | 87.3 µs | 22.4 KiB | 439 B | 178 | 18 |
-| FullText_Search_SingleTerm/rare | 17.1 µs | 10.2 µs | 4.4 KiB | 392 B | 67 | 12 |
-| FullText_Search_SingleTerm/medium | 16.7 µs | 11.6 µs | 4.4 KiB | 392 B | 67 | 12 |
-| FullText_Search_SingleTerm/common | 17.3 µs | 64.0 µs | 4.4 KiB | 408 B | 69 | 14 |
-| FullText_Search_MultiTermAND | 27.3 µs | 37.0 µs | 13.5 KiB | 392 B | 88 | 12 |
-| FullText_Search_Phrase | 28.2 µs | 27.9 µs | 28.7 KiB | 400 B | 304 | 13 |
-| FullText_Search_AfterDeletes | 86.2 µs | — | 77.7 KiB | — | 90 | — |
-| FullText_Update_WithIndex | 45.6 µs | 94.6 µs | 25.9 KiB | 291 B | 214 | 12 |
-| FullText_Delete_WithIndex | 60.9 µs | 134 µs | 25.2 KiB | 135 B | 195 | 6 |
+| FullText_BuildIndex (1,000 docs/op) | 3.69 ms | 2.69 ms | 1.80 MiB | 696 B | 16,722 | 36 |
+| FullText_Insert_WithIndex | 90.4 µs | 183 µs | 35.5 KiB | 398 B | 88 | 10 |
+| FullText_Search_SingleTerm/rare | 103 µs | 429 µs | 32.4 KiB | 551 B | 47 | 14 |
+| FullText_Search_SingleTerm/medium | 103 µs | 423 µs | 32.4 KiB | 550 B | 47 | 14 |
+| FullText_Search_SingleTerm/common | 77.6 µs | 369 µs | 32.5 KiB | 567 B | 49 | 16 |
+| FullText_Search_MultiTermAND | 100 µs | 366 µs | 41.4 KiB | 551 B | 68 | 14 |
+| FullText_Search_Phrase | 104 µs | 315 µs | 56.4 KiB | 558 B | 284 | 15 |
+| FullText_Search_AfterDeletes | 309 µs | — | 111 KiB | — | 71 | — |
+| FullText_Update_WithIndex | 107 µs | 415 µs | 58.4 KiB | 411 B | 137 | 12 |
+| FullText_Delete_WithIndex | 64.7 µs | 146 µs | 28.8 KiB | 258 B | 98 | 6 |
 
 ---
 
@@ -75,14 +65,14 @@ SQLite comparisons use the `sqlite` driver compiled into the same test binary. A
 
 | Benchmark | minisql indexed | comparison | minisql B/op | minisql allocs |
 |---|---:|---:|---:|---:|
-| JSONInverted_BuildIndex (1,000 docs/op) | 4.40 ms | — | 3.98 MiB | 63,047 |
-| JSONInverted_Insert_WithIndex | 61.0 µs | — | 53.0 KiB | 214 |
-| JSONInverted_Contains_KeyValue (334 matches) | 27.3 µs | 30.3 µs (sqlite expr idx) | 10.0 KiB | 101 |
-| JSONInverted_Contains_KeyValue seq scan | 1.92 ms | 706 µs (sqlite json scan) | 2.00 MiB | 38,096 |
-| JSONInverted_Contains_ObjectSubset (334 matches) | 38.7 µs | 126 µs (sqlite expr idx) | 11.1 KiB | 141 |
-| JSONInverted_Contains_AfterDeletes (167 matches) | 137 µs | — | 74.6 KiB | 118 |
-| JSONInverted_Update_WithIndex | 8.1 µs | — | 5.4 KiB | 65 |
-| JSONInverted_Delete_WithIndex | 324 µs | — | 1,011 KiB | 382 |
+| JSONInverted_BuildIndex (1,000 docs/op) | 4.60 ms | — | 3.26 MiB | 63,056 |
+| JSONInverted_Insert_WithIndex | 66.9 µs | — | 42.0 KiB | 181 |
+| JSONInverted_Contains_KeyValue (334 matches) | 86.3 µs | 297 µs (sqlite expr idx) | 31.4 KiB | 80 |
+| JSONInverted_Contains_KeyValue seq scan | 2.07 ms | 1.02 ms (sqlite json scan) | 1.94 MiB | 38,070 |
+| JSONInverted_Contains_ObjectSubset (334 matches) | 104 µs | 518 µs (sqlite expr idx) | 32.5 KiB | 120 |
+| JSONInverted_Contains_AfterDeletes (167 matches) | 381 µs | — | 106.6 KiB | 99 |
+| JSONInverted_Update_WithIndex | 127 µs | — | 57.6 KiB | 236 |
+| JSONInverted_Delete_WithIndex | 73.4 µs | — | 33.0 KiB | 170 |
 
 ---
 
@@ -150,81 +140,57 @@ SQLite comparisons use the `sqlite` driver compiled into the same test binary. A
 
 ### Build index (CREATE HNSW INDEX over pre-seeded table)
 
-Numbers updated 2026-05-31 to reflect parallel build (GOMAXPROCS=10 worker pool).
-
-| Corpus | Dims | ns/op | rows/op | Speedup vs serial |
-|---:|---:|---:|---:|---:|
-| 1,000 | 3 | 742 ms | 1,000 | 1.3× |
-| 10,000 | 3 | 10.4 s | 10,000 | 1.1× |
-| 1,000 | 128 | 1.13 s | 1,000 | 2.0× |
-| 10,000 | 128 | 28.3 s | 10,000 | 2.1× |
-| 1,000 | 768 | 2.23 s | 1,000 | 4.5× |
-| 10,000 | 768 | 47.8 s | 10,000 | 4.8× |
-
-Serial baselines (GOMAXPROCS=1 fallback path, 2026-05-30):
-
-| Corpus | Dims | ns/op |
-|---:|---:|---:|
-| 1,000 | 3 | 968 ms |
-| 10,000 | 3 | 11.9 s |
-| 1,000 | 128 | 2.29 s |
-| 10,000 | 128 | 60.7 s |
-| 1,000 | 768 | 10.1 s |
-| 10,000 | 768 | 227 s |
-
-Low-dimensional cases gain little because graph-topology construction (inherently sequential) dominates over distance computation. High-dimensional cases see the biggest gains because L2 distance (O(dims) per pair) dominates and is embarrassingly parallel across workers.
+| Corpus | Dims | ns/op | rows/op | B/op | allocs/op |
+|---:|---:|---:|---:|---:|---:|
+| 1,000 | 3 | 968 ms | 1,000 | 226 MiB | 7,866,021 |
+| 10,000 | 3 | 13.2 s | 10,000 | 2.62 GiB | 95,396,072 |
+| 1,000 | 128 | 2.24 s | 1,000 | 250 MiB | 9,285,518 |
+| 10,000 | 128 | 58.4 s | 10,000 | 3.83 GiB | 176,827,221 |
+| 1,000 | 768 | 8.22 s | 1,000 | 270 MiB | 10,047,415 |
+| 10,000 | 768 | 208 s | 10,000 | 4.00 GiB | 183,656,828 |
 
 ### ANN search (VEC_L2 ORDER BY … LIMIT k, routed through HNSW index)
 
-Numbers updated 2026-05-31 (prepared statements + visited bitset).
-
-| Corpus | Dims | top-k | ns/op |
-|---:|---:|---:|---:|
-| 1,000 | 3 | 1 | 40.6 µs |
-| 1,000 | 3 | 10 | 48.3 µs |
-| 10,000 | 3 | 1 | 51.8 µs |
-| 10,000 | 3 | 10 | 59.2 µs |
-| 1,000 | 128 | 1 | 197 µs |
-| 1,000 | 128 | 10 | 209 µs |
-| 10,000 | 128 | 1 | 365 µs |
-| 10,000 | 128 | 10 | 412 µs |
-| 1,000 | 768 | 1 | 757 µs |
-| 1,000 | 768 | 10 | 784 µs |
-| 10,000 | 768 | 1 | 1.59 ms |
-| 10,000 | 768 | 10 | 1.57 ms |
-
-Improvement vs 2026-05-30 baseline (prepared statements + bitset combined):
-
-| Corpus | Dims | top-k | Before | After | Speedup |
+| Corpus | Dims | top-k | ns/op | B/op | allocs/op |
 |---:|---:|---:|---:|---:|---:|
-| 10,000 | 128 | 1 | 483 µs | 365 µs | 1.32× |
-| 10,000 | 768 | 1 | 1.77 ms | 1.59 ms | 1.11× |
+| 1,000 | 3 | 1 | 73.8 µs | 23.4 KiB | 329 |
+| 1,000 | 3 | 10 | 82.9 µs | 28.3 KiB | 435 |
+| 10,000 | 3 | 1 | 90.1 µs | 29.2 KiB | 335 |
+| 10,000 | 3 | 10 | 128 µs | 75.6 KiB | 561 |
+| 1,000 | 128 | 1 | 261 µs | 75.8 KiB | 581 |
+| 1,000 | 128 | 10 | 342 µs | 129 KiB | 696 |
+| 10,000 | 128 | 1 | 483 µs | 114 KiB | 721 |
+| 10,000 | 128 | 10 | 585 µs | 169 KiB | 844 |
+| 1,000 | 768 | 1 | 907 µs | 190 KiB | 613 |
+| 1,000 | 768 | 10 | 1.33 ms | 479 KiB | 729 |
+| 10,000 | 768 | 1 | 1.77 ms | 246 KiB | 767 |
+| 10,000 | 768 | 10 | 2.14 ms | 522 KiB | 885 |
 
 ### Sequential scan (brute-force, no HNSW index — baseline for speedup comparison)
 
-| Corpus | Dims | top-k | ns/op |
-|---:|---:|---:|---:|
-| 1,000 | 3 | 1 | 1.13 ms |
-| 1,000 | 128 | 1 | 11.9 ms |
-| 1,000 | 768 | 1 | 57.6 ms |
+| Corpus | Dims | top-k | ns/op | B/op | allocs/op |
+|---:|---:|---:|---:|---:|---:|
+| 1,000 | 3 | 1 | 638 µs | 664 KiB | 10,822 |
+| 1,000 | 128 | 1 | 8.15 ms | 6.08 MiB | 11,830 |
+| 1,000 | 768 | 1 | 45.0 ms | 31.5 MiB | 11,855 |
 
-**HNSW speedup vs sequential scan (top-1, n=1,000), updated 2026-05-31:**
+**HNSW speedup vs sequential scan (top-1, n=1,000):**
 
 | Dims | Sequential | HNSW | Speedup |
 |---:|---:|---:|---:|
-| 3 | 1.13 ms | 40.6 µs | **28×** |
-| 128 | 11.9 ms | 197 µs | **60×** |
-| 768 | 57.6 ms | 757 µs | **76×** |
+| 3 | 638 µs | 73.8 µs | **8.6×** |
+| 128 | 8.15 ms | 261 µs | **31×** |
+| 768 | 45.0 ms | 907 µs | **50×** |
 
 ### Online INSERT overhead (single row, 1,000-row starting corpus)
 
 | Dims | With HNSW index | No index | Overhead |
 |---:|---:|---:|---:|
-| 3 | 1.69 ms | 28.5 µs | **59×** |
-| 128 | 4.17 ms | 29.4 µs | **142×** |
-| 768 | 13.2 ms | 28.7 µs | **460×** |
+| 3 | 1.71 ms | 25.2 µs | **68×** |
+| 128 | 3.89 ms | 25.4 µs | **153×** |
+| 768 | 11.4 ms | 28.0 µs | **408×** |
 
-The overhead is dominated by HNSW graph traversal at `efConstruction=200` and the page writes for dirty neighbour nodes — both inherent to the algorithm. Online single-row inserts use the sequential path; parallel build applies only to `CREATE HNSW INDEX` (batch build).
+The overhead is dominated by HNSW graph traversal at `efConstruction=200` and the page writes for dirty neighbour nodes — both inherent to the algorithm.
 
 ---
 
@@ -232,19 +198,20 @@ The overhead is dominated by HNSW graph traversal at `efConstruction=200` and th
 
 Largest per-operation heap consumers (minisql only):
 
-- `HNSW_BuildIndex` dims768/n10000: **~4 GiB/op** — dominated by neighbour-list allocations across 10K nodes; wall-clock is now 47.8 s (parallel build, 10 cores) vs 227 s serial
-- `HNSW_BuildIndex` dims128/n10000: **~3.8 GiB/op** — same structural cost, lower per-vector overhead; 28.3 s parallel vs 60.7 s serial
-- `JSONInverted_BuildIndex`: **3.98 MiB/op** — in-memory term→postings map during bulk build
+- `HNSW_BuildIndex` dims768/n10000: **4.00 GiB/op** — O(N²) distance matrix during greedy layer construction; dominated by neighbour-list allocations across 10K nodes
+- `HNSW_BuildIndex` dims128/n10000: **3.83 GiB/op** — same structural cost, lower per-vector overhead
+- `JSONInverted_BuildIndex`: **3.26 MiB/op** — JSON decoding plus in-memory term→row-ID map during bulk build
 - `Distinct_HighCardinality`: **1.69 MiB/op** — in-memory dedup set for 10K distinct rows
-- `FullText_BuildIndex`: **1.66 MiB/op** — per-doc postings map during log-structured segment build
+- `FullText_BuildIndex`: **1.80 MiB/op** — per-doc postings map during log-structured segment build
 - `Vacuum_Small`: **1.49 MiB/op** — full copy-compact-swap; structural cost
 - `Join_Inner_SmallLarge`: **1.24 MiB/op** — INLJ result materialization for 10K matched rows
 - `Select_FullScan`: **1.24 MiB/op** — ~8 allocs/row from `Materialize()` per RowView
-- `JSONInverted_Delete_WithIndex`: **1,011 KiB/op** — full posting list read into memory on delete
+- `JSONInverted_Delete_WithIndex`: **33.0 KiB/op** — reduced by bulk row-ID foldback; no longer a major memory outlier
 - `Insert_Batch` / `PreparedBatch`: **~193 KiB/op** — ~1.9 KiB/row vs SQLite's 310 B; remaining cost is per-row clone + B-tree page I/O
 
 ## Good Next Optimisation Targets
 
 - Streaming SELECT delivery that reads directly from RowView into the driver dest slice (eliminating `Materialize()`)
-- Streaming term extraction for inverted-index build and maintenance
+- Reduce JSON decode/tree-walk allocations during inverted-index build and maintenance
+- Reassess full-text runtime allocations under the split inverted benchmark harness
 - Reduce per-row clone overhead in `Insert_Batch` (~1.9 KiB/row vs SQLite's 310 B)
