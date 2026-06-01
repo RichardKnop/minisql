@@ -117,6 +117,52 @@ func TestDedicatedInvertedIndex_InsertManyRowIDPostings(t *testing.T) {
 	assert.Equal(t, []invertedPosting{{RowID: 2}, {RowID: 5}}, collectDedicatedInvertedPostings(t, ctx, index, "k:user.id"))
 }
 
+func TestDedicatedInvertedIndex_ApplyRowIDChanges(t *testing.T) {
+	index, txManager := newTestDedicatedInvertedIndex(t, "idx_json", invertedIndexPostingModeRowIDs)
+	ctx := context.Background()
+	const term = `kv:type:s:"click"`
+
+	postings := make([]invertedPosting, 180)
+	expected := make(map[RowID]bool, len(postings))
+	for i := range postings {
+		rowID := wideTestRowID(i + 1)
+		postings[i] = invertedPosting{RowID: rowID}
+		expected[rowID] = true
+	}
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return index.InsertMany(ctx, term, postings)
+	}))
+	require.Equal(t, invertedPostingKindTree, requireDedicatedInvertedEntryCell(t, ctx, index, term).PostingKind)
+
+	deletes := []RowID{wideTestRowID(1), wideTestRowID(90), wideTestRowID(180)}
+	inserts := []RowID{wideTestRowID(150), wideTestRowID(181), wideTestRowID(182)}
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return index.ApplyRowIDChanges(ctx, term, deletes, inserts)
+	}))
+	for _, rowID := range deletes {
+		delete(expected, rowID)
+	}
+	for _, rowID := range inserts {
+		expected[rowID] = true
+	}
+	assertDedicatedInvertedIndexMatchesRowIDs(t, ctx, index, term, expected)
+
+	allRowIDs := make([]RowID, 0, len(expected))
+	for rowID := range expected {
+		allRowIDs = append(allRowIDs, rowID)
+	}
+	slices.Sort(allRowIDs)
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return index.ApplyRowIDChanges(ctx, term, allRowIDs, nil)
+	}))
+	assert.Empty(t, collectDedicatedInvertedPostings(t, ctx, index, term))
+
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		return index.ApplyRowIDChanges(ctx, term, []RowID{wideTestRowID(999)}, []RowID{wideTestRowID(7)})
+	}))
+	assert.Equal(t, []invertedPosting{{RowID: wideTestRowID(7)}}, collectDedicatedInvertedPostings(t, ctx, index, term))
+}
+
 func TestDedicatedInvertedIndex_PositionalInlinePostings(t *testing.T) {
 	index, txManager := newTestDedicatedInvertedIndex(t, "idx_body", invertedIndexPostingModePositions)
 	ctx := context.Background()
