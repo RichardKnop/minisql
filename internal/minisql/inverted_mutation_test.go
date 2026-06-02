@@ -75,6 +75,17 @@ func TestInvertedRowIDMutationBatch_ApplyFallsBackToLegacyBatch(t *testing.T) {
 	}, index.calls)
 }
 
+func TestInvertedRowIDMutationBatch_LazilyInitializesMaps(t *testing.T) {
+	t.Parallel()
+
+	var batch invertedRowIDMutationBatch
+	batch.Insert("status:open", 10)
+	batch.Delete("status:closed", 9)
+
+	assert.Equal(t, []RowID{10}, batch.inserts["status:open"])
+	assert.Equal(t, []RowID{9}, batch.deletes["status:closed"])
+}
+
 type recordingBatchInvertedIndex struct {
 	recordingLegacyInvertedIndex
 	batches []invertedIndexMutationBatch

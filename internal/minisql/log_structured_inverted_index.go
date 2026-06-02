@@ -1425,11 +1425,15 @@ func (idx *logStructuredInvertedIndex) appendMutationBatchSegment(ctx context.Co
 	if len(batch.deletes) == 0 && len(batch.inserts) == 0 {
 		return nil
 	}
-	deleteCells, deletePostingCount, err := idx.mutationSegmentCells(invertedSegmentKindDelete, batch.deletes)
+	extraDeleteCellCapacity := 0
+	if len(batch.deletes) > 0 {
+		extraDeleteCellCapacity = len(batch.inserts)
+	}
+	deleteCells, deletePostingCount, err := idx.mutationSegmentCells(invertedSegmentKindDelete, batch.deletes, extraDeleteCellCapacity)
 	if err != nil {
 		return err
 	}
-	insertCells, insertPostingCount, err := idx.mutationSegmentCells(invertedSegmentKindInsert, batch.inserts)
+	insertCells, insertPostingCount, err := idx.mutationSegmentCells(invertedSegmentKindInsert, batch.inserts, 0)
 	if err != nil {
 		return err
 	}
@@ -1440,11 +1444,15 @@ func (idx *logStructuredInvertedIndex) appendRowIDMutationBatchSegment(ctx conte
 	if len(batch.deletes) == 0 && len(batch.inserts) == 0 {
 		return nil
 	}
-	deleteCells, deletePostingCount, err := rowIDMutationSegmentCells(invertedSegmentKindDelete, batch.deletes)
+	extraDeleteCellCapacity := 0
+	if len(batch.deletes) > 0 {
+		extraDeleteCellCapacity = len(batch.inserts)
+	}
+	deleteCells, deletePostingCount, err := rowIDMutationSegmentCells(invertedSegmentKindDelete, batch.deletes, extraDeleteCellCapacity)
 	if err != nil {
 		return err
 	}
-	insertCells, insertPostingCount, err := rowIDMutationSegmentCells(invertedSegmentKindInsert, batch.inserts)
+	insertCells, insertPostingCount, err := rowIDMutationSegmentCells(invertedSegmentKindInsert, batch.inserts, 0)
 	if err != nil {
 		return err
 	}
@@ -1518,25 +1526,42 @@ func (idx *logStructuredInvertedIndex) compactOldestSegmentRun(ctx context.Conte
 	}
 
 	run := append([]invertedSegmentDescriptor(nil), meta.Segments[start:end]...)
-	cells, postingCount, err := idx.mergeSegmentRunCells(ctx, run)
-	if err != nil {
-		return false, err
+	var writeResult invertedSegmentWriteResult
+	if idx.Mode() == invertedPostingModeRowIDs {
+		writeResult, err = idx.mergeRowIDSegmentRun(ctx, run)
+		if err != nil {
+			return false, err
+		}
+	} else {
+		var cells []invertedSegmentCell
+		var postingCount uint32
+		cells, postingCount, err = idx.mergeSegmentRunCells(ctx, run)
+		if err != nil {
+			return false, err
+		}
+		sortSegmentCells(cells)
+		rootPage, err := idx.writeSegmentCells(ctx, cells)
+		if err != nil {
+			return false, err
+		}
+		firstTerm, lastTerm := segmentTermBounds(cells)
+		writeResult = invertedSegmentWriteResult{
+			rootPage:     rootPage,
+			postingCount: postingCount,
+			kind:         segmentCellsKind(cells),
+			firstTerm:    firstTerm,
+			lastTerm:     lastTerm,
+		}
 	}
-	sortSegmentCells(cells)
-	rootPage, err := idx.writeSegmentCells(ctx, cells)
-	if err != nil {
-		return false, err
-	}
-	firstTerm, lastTerm := segmentTermBounds(cells)
 	nextLevel := run[len(run)-1].Level + 1
 	replacement := invertedSegmentDescriptor{
 		Generation:   run[len(run)-1].Generation,
-		RootPage:     rootPage,
-		PostingCount: postingCount,
-		Kind:         segmentCellsKind(cells),
+		RootPage:     writeResult.rootPage,
+		PostingCount: writeResult.postingCount,
+		Kind:         writeResult.kind,
 		Level:        nextLevel,
-		FirstTerm:    firstTerm,
-		LastTerm:     lastTerm,
+		FirstTerm:    writeResult.firstTerm,
+		LastTerm:     writeResult.lastTerm,
 	}
 
 	metaPage, err := idx.pager.ModifyPage(ctx, idx.rootPageIdx)
@@ -2057,9 +2082,13 @@ func invertedSegmentCellKindOrder(kind byte) int {
 	return 1
 }
 
-func (idx *logStructuredInvertedIndex) mutationSegmentCells(kind byte, postingsByTerm map[string][]invertedPosting) ([]invertedSegmentCell, uint32, error) {
+func (idx *logStructuredInvertedIndex) mutationSegmentCells(
+	kind byte,
+	postingsByTerm map[string][]invertedPosting,
+	extraCellCapacity int,
+) ([]invertedSegmentCell, uint32, error) {
 	terms := sortedInvertedMutationTerms(postingsByTerm)
-	cells := make([]invertedSegmentCell, 0, len(terms))
+	cells := make([]invertedSegmentCell, 0, len(terms)+extraCellCapacity)
 	var totalPostingCount uint32
 	for _, term := range terms {
 		postings := postingsByTerm[term]
@@ -2075,9 +2104,9 @@ func (idx *logStructuredInvertedIndex) mutationSegmentCells(kind byte, postingsB
 	return cells, totalPostingCount, nil
 }
 
-func rowIDMutationSegmentCells(kind byte, rowIDsByTerm map[string][]RowID) ([]invertedSegmentCell, uint32, error) {
+func rowIDMutationSegmentCells(kind byte, rowIDsByTerm map[string][]RowID, extraCellCapacity int) ([]invertedSegmentCell, uint32, error) {
 	terms := sortedRowIDMutationTerms(rowIDsByTerm)
-	cells := make([]invertedSegmentCell, 0, len(terms))
+	cells := make([]invertedSegmentCell, 0, len(terms)+extraCellCapacity)
 	var totalPostingCount uint32
 	for _, term := range terms {
 		rowIDs := rowIDsByTerm[term]
@@ -2166,11 +2195,7 @@ func (idx *logStructuredInvertedIndex) compactSegments(ctx context.Context) erro
 		return segments[i].Generation < segments[j].Generation
 	})
 	if idx.Mode() == invertedPostingModeRowIDs {
-		states, err := idx.reduceRowIDSegmentStates(ctx, segments)
-		if err != nil {
-			return err
-		}
-		if err := idx.applyRowIDSegmentStatesToBase(ctx, states); err != nil {
+		if err := idx.applyRowIDSegmentsToBase(ctx, segments); err != nil {
 			return err
 		}
 		return idx.clearSegmentsAfterBaseFoldback(ctx, segments)
@@ -2204,22 +2229,6 @@ func (idx *logStructuredInvertedIndex) clearSegmentsAfterBaseFoldback(
 		return fmt.Errorf("inverted index %s root page %d is not a metadata page", idx.name, idx.rootPageIdx)
 	}
 	metaPage.InvertedMetaPage.Segments = nil
-	return nil
-}
-
-func (idx *logStructuredInvertedIndex) applyRowIDSegmentStatesToBase(
-	ctx context.Context,
-	states map[string]rowIDSegmentTermState,
-) error {
-	terms := sortedRowIDSegmentStateTerms(states)
-	for _, term := range terms {
-		state := states[term]
-		deletes := sortedRowIDsFromSet(state.deletes)
-		inserts := sortedRowIDsFromSet(state.inserts)
-		if err := idx.base.ApplyRowIDChanges(ctx, term, deletes, inserts); err != nil {
-			return fmt.Errorf("compact inverted row-ID segment term %q: %w", term, err)
-		}
-	}
 	return nil
 }
 
