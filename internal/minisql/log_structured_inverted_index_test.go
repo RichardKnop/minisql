@@ -216,6 +216,51 @@ func TestLogStructuredInvertedIndex_ApplyRowIDBatchWritesSortedSegmentPages(t *t
 	assert.Equal(t, []invertedPosting{{RowID: termCount/2 + 2}}, collectInvertedIteratorPostings(t, ctx, iter))
 }
 
+func TestInvertedSegmentWriter_WritesMultiplePagesAndTracksMetadata(t *testing.T) {
+	ctx := context.Background()
+	index, txManager, _ := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModeRowIDs)
+
+	var result invertedSegmentWriteResult
+	require.NoError(t, txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		writer := index.newSegmentWriter(ctx)
+		for i := range 80 {
+			kind := invertedSegmentKindInsert
+			if i == 0 {
+				kind = invertedSegmentKindDelete
+			}
+			if err := writer.append(invertedSegmentCell{
+				Term: fmt.Sprintf("term-%03d-%0200d", i, i),
+				Block: invertedPostingBlock{
+					PostingCount: 1,
+					Payload:      []byte{255},
+				},
+				PostingCount: 1,
+				Kind:         kind,
+			}); err != nil {
+				return err
+			}
+		}
+		var err error
+		result, err = writer.finish()
+		return err
+	}))
+
+	assert.Equal(t, uint32(80), result.postingCount)
+	assert.Equal(t, invertedSegmentKindMixed, result.kind)
+	assert.Equal(t, fmt.Sprintf("term-%03d-%0200d", 0, 0), result.firstTerm)
+	assert.Equal(t, fmt.Sprintf("term-%03d-%0200d", 79, 79), result.lastTerm)
+
+	pageCount := 0
+	for pageIdx := result.rootPage; pageIdx != 0; {
+		page, err := index.pager.ReadPage(ctx, pageIdx)
+		require.NoError(t, err)
+		require.NotNil(t, page.InvertedSegmentPage)
+		pageIdx = page.InvertedSegmentPage.Header.NextPage
+		pageCount++
+	}
+	assert.Greater(t, pageCount, 1)
+}
+
 func TestLogStructuredInvertedIndex_ApplyBatchGroupsSegmentPostings(t *testing.T) {
 	ctx := context.Background()
 	index, txManager, _ := newTestLogStructuredInvertedIndex(t, invertedIndexPostingModePositions)

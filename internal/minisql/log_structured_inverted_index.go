@@ -1526,25 +1526,42 @@ func (idx *logStructuredInvertedIndex) compactOldestSegmentRun(ctx context.Conte
 	}
 
 	run := append([]invertedSegmentDescriptor(nil), meta.Segments[start:end]...)
-	cells, postingCount, err := idx.mergeSegmentRunCells(ctx, run)
-	if err != nil {
-		return false, err
+	var writeResult invertedSegmentWriteResult
+	if idx.Mode() == invertedPostingModeRowIDs {
+		writeResult, err = idx.mergeRowIDSegmentRun(ctx, run)
+		if err != nil {
+			return false, err
+		}
+	} else {
+		var cells []invertedSegmentCell
+		var postingCount uint32
+		cells, postingCount, err = idx.mergeSegmentRunCells(ctx, run)
+		if err != nil {
+			return false, err
+		}
+		sortSegmentCells(cells)
+		rootPage, err := idx.writeSegmentCells(ctx, cells)
+		if err != nil {
+			return false, err
+		}
+		firstTerm, lastTerm := segmentTermBounds(cells)
+		writeResult = invertedSegmentWriteResult{
+			rootPage:     rootPage,
+			postingCount: postingCount,
+			kind:         segmentCellsKind(cells),
+			firstTerm:    firstTerm,
+			lastTerm:     lastTerm,
+		}
 	}
-	sortSegmentCells(cells)
-	rootPage, err := idx.writeSegmentCells(ctx, cells)
-	if err != nil {
-		return false, err
-	}
-	firstTerm, lastTerm := segmentTermBounds(cells)
 	nextLevel := run[len(run)-1].Level + 1
 	replacement := invertedSegmentDescriptor{
 		Generation:   run[len(run)-1].Generation,
-		RootPage:     rootPage,
-		PostingCount: postingCount,
-		Kind:         segmentCellsKind(cells),
+		RootPage:     writeResult.rootPage,
+		PostingCount: writeResult.postingCount,
+		Kind:         writeResult.kind,
 		Level:        nextLevel,
-		FirstTerm:    firstTerm,
-		LastTerm:     lastTerm,
+		FirstTerm:    writeResult.firstTerm,
+		LastTerm:     writeResult.lastTerm,
 	}
 
 	metaPage, err := idx.pager.ModifyPage(ctx, idx.rootPageIdx)
