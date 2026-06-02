@@ -29,18 +29,24 @@ func normaliseJSON(s string) (string, error) {
 	if !utf8.ValidString(s) {
 		return "", ErrInvalidJSON{Cause: fmt.Errorf("invalid UTF-8")}
 	}
-	var raw json.RawMessage
-	if err := json.Unmarshal([]byte(s), &raw); err != nil {
+	var compacted bytes.Buffer
+	compacted.Grow(len(s))
+	if err := json.Compact(&compacted, []byte(s)); err != nil {
 		return "", ErrInvalidJSON{Cause: err}
 	}
-	compacted, err := json.Marshal(raw)
-	if err != nil {
-		return "", ErrInvalidJSON{Cause: err}
-	}
-	if bytes.IndexByte(compacted, 0) >= 0 {
+	compactedBytes := compacted.Bytes()
+	if bytes.IndexByte(compactedBytes, 0) >= 0 {
 		return "", ErrInvalidJSON{Cause: fmt.Errorf("null byte not allowed in JSON")}
 	}
-	return string(compacted), nil
+	if bytes.ContainsAny(compactedBytes, "<>&") ||
+		bytes.Contains(compactedBytes, []byte{0xe2, 0x80, 0xa8}) ||
+		bytes.Contains(compactedBytes, []byte{0xe2, 0x80, 0xa9}) {
+		var escaped bytes.Buffer
+		escaped.Grow(compacted.Len())
+		json.HTMLEscape(&escaped, compactedBytes)
+		return escaped.String(), nil
+	}
+	return compacted.String(), nil
 }
 
 // jsonExtract extracts the value at path from doc and returns both forms:
