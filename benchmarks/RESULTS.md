@@ -44,20 +44,22 @@ SQLite comparisons use the `sqlite` driver compiled into the same test binary. A
 
 ## Full-Text Search (minisql log-structured vs SQLite FTS5)
 
-**Inverted-index sections refreshed:** 2026-06-01 on `refactor/optimising-inverted-index` with `make bench-inverted BENCH_COUNT=5`. Values are means across five runs. Build benchmarks use `1x`; runtime benchmarks use `10x`.
+**Inverted-index sections refreshed:** 2026-06-02 on `codex/inverted-index-local-memory-wins` with `make bench-inverted BENCH_COUNT=3`. Values are means across three runs. Build benchmarks use `1x`; runtime benchmarks use `10x`.
+
+**Latest memory improvement:** compact JSON DML batches and exact row-ID state sizing reduced `JSONInverted_Contains_AfterDeletes` from **106.6 KiB/op** to **82.7 KiB/op**.
 
 | Benchmark | minisql | sqlite | minisql B/op | sqlite B/op | minisql allocs | sqlite allocs |
 |---|---:|---:|---:|---:|---:|---:|
-| FullText_BuildIndex (1,000 docs/op) | 3.69 ms | 2.69 ms | 1.80 MiB | 696 B | 16,722 | 36 |
-| FullText_Insert_WithIndex | 90.4 µs | 183 µs | 35.5 KiB | 398 B | 88 | 10 |
-| FullText_Search_SingleTerm/rare | 103 µs | 429 µs | 32.4 KiB | 551 B | 47 | 14 |
-| FullText_Search_SingleTerm/medium | 103 µs | 423 µs | 32.4 KiB | 550 B | 47 | 14 |
-| FullText_Search_SingleTerm/common | 77.6 µs | 369 µs | 32.5 KiB | 567 B | 49 | 16 |
-| FullText_Search_MultiTermAND | 100 µs | 366 µs | 41.4 KiB | 551 B | 68 | 14 |
-| FullText_Search_Phrase | 104 µs | 315 µs | 56.4 KiB | 558 B | 284 | 15 |
-| FullText_Search_AfterDeletes | 309 µs | — | 111 KiB | — | 71 | — |
-| FullText_Update_WithIndex | 107 µs | 415 µs | 58.4 KiB | 411 B | 137 | 12 |
-| FullText_Delete_WithIndex | 64.7 µs | 146 µs | 28.8 KiB | 258 B | 98 | 6 |
+| FullText_BuildIndex (1,000 docs/op) | 11.95 ms | 3.06 ms | 1.82 MiB | 696 B | 16,710 | 36 |
+| FullText_Insert_WithIndex | 222 µs | 428 µs | 35.5 KiB | 397 B | 88 | 10 |
+| FullText_Search_SingleTerm/rare | 163 µs | 586 µs | 32.4 KiB | 552 B | 47 | 14 |
+| FullText_Search_SingleTerm/medium | 249 µs | 499 µs | 32.4 KiB | 551 B | 47 | 14 |
+| FullText_Search_SingleTerm/common | 87.0 µs | 388 µs | 32.5 KiB | 567 B | 49 | 16 |
+| FullText_Search_MultiTermAND | 91.3 µs | 498 µs | 41.4 KiB | 551 B | 68 | 14 |
+| FullText_Search_Phrase | 112 µs | 290 µs | 56.4 KiB | 560 B | 284 | 15 |
+| FullText_Search_AfterDeletes | 374 µs | — | 111 KiB | — | 71 | — |
+| FullText_Update_WithIndex | 117 µs | 370 µs | 58.4 KiB | 409 B | 137 | 11 |
+| FullText_Delete_WithIndex | 79.2 µs | 204 µs | 28.8 KiB | 259 B | 98 | 6 |
 
 ---
 
@@ -65,14 +67,14 @@ SQLite comparisons use the `sqlite` driver compiled into the same test binary. A
 
 | Benchmark | minisql indexed | comparison | minisql B/op | minisql allocs |
 |---|---:|---:|---:|---:|
-| JSONInverted_BuildIndex (1,000 docs/op) | 4.60 ms | — | 3.26 MiB | 63,056 |
-| JSONInverted_Insert_WithIndex | 66.9 µs | — | 42.0 KiB | 181 |
-| JSONInverted_Contains_KeyValue (334 matches) | 86.3 µs | 297 µs (sqlite expr idx) | 31.4 KiB | 80 |
-| JSONInverted_Contains_KeyValue seq scan | 2.07 ms | 1.02 ms (sqlite json scan) | 1.94 MiB | 38,070 |
-| JSONInverted_Contains_ObjectSubset (334 matches) | 104 µs | 518 µs (sqlite expr idx) | 32.5 KiB | 120 |
-| JSONInverted_Contains_AfterDeletes (167 matches) | 381 µs | — | 106.6 KiB | 99 |
-| JSONInverted_Update_WithIndex | 127 µs | — | 57.6 KiB | 236 |
-| JSONInverted_Delete_WithIndex | 73.4 µs | — | 33.0 KiB | 170 |
+| JSONInverted_BuildIndex (1,000 docs/op) | 9.62 ms | — | 3.26 MiB | 63,057 |
+| JSONInverted_Insert_WithIndex | 94.2 µs | — | 41.7 KiB | 181 |
+| JSONInverted_Contains_KeyValue (334 matches) | 113 µs | 324 µs (sqlite expr idx) | 31.4 KiB | 80 |
+| JSONInverted_Contains_KeyValue seq scan | 3.84 ms | 1.21 ms (sqlite json scan) | 1.94 MiB | 38,070 |
+| JSONInverted_Contains_ObjectSubset (334 matches) | 163 µs | 448 µs (sqlite expr idx) | 32.5 KiB | 120 |
+| JSONInverted_Contains_AfterDeletes (167 matches) | 471 µs | — | 82.7 KiB | 95 |
+| JSONInverted_Update_WithIndex | 156 µs | — | 58.2 KiB | 240 |
+| JSONInverted_Delete_WithIndex | 298 µs | — | 32.6 KiB | 170 |
 
 ---
 
@@ -202,11 +204,11 @@ Largest per-operation heap consumers (minisql only):
 - `HNSW_BuildIndex` dims128/n10000: **3.83 GiB/op** — same structural cost, lower per-vector overhead
 - `JSONInverted_BuildIndex`: **3.26 MiB/op** — JSON decoding plus in-memory term→row-ID map during bulk build
 - `Distinct_HighCardinality`: **1.69 MiB/op** — in-memory dedup set for 10K distinct rows
-- `FullText_BuildIndex`: **1.80 MiB/op** — per-doc postings map during log-structured segment build
+- `FullText_BuildIndex`: **1.82 MiB/op** — per-doc postings map during log-structured segment build
 - `Vacuum_Small`: **1.49 MiB/op** — full copy-compact-swap; structural cost
 - `Join_Inner_SmallLarge`: **1.24 MiB/op** — INLJ result materialization for 10K matched rows
 - `Select_FullScan`: **1.24 MiB/op** — ~8 allocs/row from `Materialize()` per RowView
-- `JSONInverted_Delete_WithIndex`: **33.0 KiB/op** — reduced by bulk row-ID foldback; no longer a major memory outlier
+- `JSONInverted_Delete_WithIndex`: **32.6 KiB/op** — reduced by bulk row-ID foldback; no longer a major memory outlier
 - `Insert_Batch` / `PreparedBatch`: **~193 KiB/op** — ~1.9 KiB/row vs SQLite's 310 B; remaining cost is per-row clone + B-tree page I/O
 
 ## Good Next Optimisation Targets
