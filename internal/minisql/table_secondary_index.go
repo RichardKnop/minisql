@@ -435,7 +435,7 @@ func (t *Table) updateInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 	if err != nil {
 		return err
 	}
-	batch := newInvertedRowIDMutationBatchWithCapacity(len(newTerms), len(oldTerms))
+	var batch invertedRowIDMutationBatch
 	oldIdx, newIdx := 0, 0
 	for oldIdx < len(oldTerms) && newIdx < len(newTerms) {
 		oldTerm, newTerm := oldTerms[oldIdx], newTerms[newIdx]

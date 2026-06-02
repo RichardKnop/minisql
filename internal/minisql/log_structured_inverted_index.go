@@ -1425,11 +1425,15 @@ func (idx *logStructuredInvertedIndex) appendMutationBatchSegment(ctx context.Co
 	if len(batch.deletes) == 0 && len(batch.inserts) == 0 {
 		return nil
 	}
-	deleteCells, deletePostingCount, err := idx.mutationSegmentCells(invertedSegmentKindDelete, batch.deletes)
+	extraDeleteCellCapacity := 0
+	if len(batch.deletes) > 0 {
+		extraDeleteCellCapacity = len(batch.inserts)
+	}
+	deleteCells, deletePostingCount, err := idx.mutationSegmentCells(invertedSegmentKindDelete, batch.deletes, extraDeleteCellCapacity)
 	if err != nil {
 		return err
 	}
-	insertCells, insertPostingCount, err := idx.mutationSegmentCells(invertedSegmentKindInsert, batch.inserts)
+	insertCells, insertPostingCount, err := idx.mutationSegmentCells(invertedSegmentKindInsert, batch.inserts, 0)
 	if err != nil {
 		return err
 	}
@@ -1440,11 +1444,15 @@ func (idx *logStructuredInvertedIndex) appendRowIDMutationBatchSegment(ctx conte
 	if len(batch.deletes) == 0 && len(batch.inserts) == 0 {
 		return nil
 	}
-	deleteCells, deletePostingCount, err := rowIDMutationSegmentCells(invertedSegmentKindDelete, batch.deletes)
+	extraDeleteCellCapacity := 0
+	if len(batch.deletes) > 0 {
+		extraDeleteCellCapacity = len(batch.inserts)
+	}
+	deleteCells, deletePostingCount, err := rowIDMutationSegmentCells(invertedSegmentKindDelete, batch.deletes, extraDeleteCellCapacity)
 	if err != nil {
 		return err
 	}
-	insertCells, insertPostingCount, err := rowIDMutationSegmentCells(invertedSegmentKindInsert, batch.inserts)
+	insertCells, insertPostingCount, err := rowIDMutationSegmentCells(invertedSegmentKindInsert, batch.inserts, 0)
 	if err != nil {
 		return err
 	}
@@ -2057,9 +2065,13 @@ func invertedSegmentCellKindOrder(kind byte) int {
 	return 1
 }
 
-func (idx *logStructuredInvertedIndex) mutationSegmentCells(kind byte, postingsByTerm map[string][]invertedPosting) ([]invertedSegmentCell, uint32, error) {
+func (idx *logStructuredInvertedIndex) mutationSegmentCells(
+	kind byte,
+	postingsByTerm map[string][]invertedPosting,
+	extraCellCapacity int,
+) ([]invertedSegmentCell, uint32, error) {
 	terms := sortedInvertedMutationTerms(postingsByTerm)
-	cells := make([]invertedSegmentCell, 0, len(terms))
+	cells := make([]invertedSegmentCell, 0, len(terms)+extraCellCapacity)
 	var totalPostingCount uint32
 	for _, term := range terms {
 		postings := postingsByTerm[term]
@@ -2075,9 +2087,9 @@ func (idx *logStructuredInvertedIndex) mutationSegmentCells(kind byte, postingsB
 	return cells, totalPostingCount, nil
 }
 
-func rowIDMutationSegmentCells(kind byte, rowIDsByTerm map[string][]RowID) ([]invertedSegmentCell, uint32, error) {
+func rowIDMutationSegmentCells(kind byte, rowIDsByTerm map[string][]RowID, extraCellCapacity int) ([]invertedSegmentCell, uint32, error) {
 	terms := sortedRowIDMutationTerms(rowIDsByTerm)
-	cells := make([]invertedSegmentCell, 0, len(terms))
+	cells := make([]invertedSegmentCell, 0, len(terms)+extraCellCapacity)
 	var totalPostingCount uint32
 	for _, term := range terms {
 		rowIDs := rowIDsByTerm[term]

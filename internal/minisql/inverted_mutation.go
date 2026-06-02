@@ -34,11 +34,17 @@ func newInvertedRowIDMutationBatchWithCapacity(insertTerms, deleteTerms int) inv
 
 // Insert records an inserted row ID for term.
 func (b *invertedRowIDMutationBatch) Insert(term string, rowID RowID) {
+	if b.inserts == nil {
+		b.inserts = make(map[string][]RowID)
+	}
 	b.inserts[term] = append(b.inserts[term], rowID)
 }
 
 // Delete records a deleted row ID for term.
 func (b *invertedRowIDMutationBatch) Delete(term string, rowID RowID) {
+	if b.deletes == nil {
+		b.deletes = make(map[string][]RowID)
+	}
 	b.deletes[term] = append(b.deletes[term], rowID)
 }
 
