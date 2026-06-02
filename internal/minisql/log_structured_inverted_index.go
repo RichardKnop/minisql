@@ -43,6 +43,30 @@ type rowIDSegmentStateStream struct {
 	heap    []int
 }
 
+type positionCountTransform struct {
+	delta int64
+	floor uint32
+	reset bool
+}
+
+type positionCountSegmentState struct {
+	rowID     RowID
+	transform positionCountTransform
+}
+
+type positionCountSegmentStateSource struct {
+	cursor        invertedPostingRowIDCursor
+	rowID         RowID
+	positionCount uint32
+	kind          byte
+	order         int
+}
+
+type positionCountSegmentStateStream struct {
+	sources []positionCountSegmentStateSource
+	heap    []int
+}
+
 var _ invertedIndex = (*logStructuredInvertedIndex)(nil)
 var _ invertedBatchApplier = (*logStructuredInvertedIndex)(nil)
 var _ invertedRowIDBatchApplier = (*logStructuredInvertedIndex)(nil)
@@ -858,14 +882,104 @@ func (idx *logStructuredInvertedIndex) countPositionDocFreq(
 	meta *invertedMetaPage,
 	term string,
 ) (uint32, error) {
-	countsByRowID := make(map[RowID]uint32)
+	stream, err := idx.newPositionCountSegmentStateStream(ctx, meta, term)
+	if err != nil {
+		return 0, err
+	}
+	state, stateOK, err := stream.next(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	var docFreq uint32
+	countSurviving := func(positionCount uint32) error {
+		if positionCount == 0 {
+			return nil
+		}
+		if docFreq == ^uint32(0) {
+			return fmt.Errorf("inverted position document count exceeds maximum uint32")
+		}
+		docFreq++
+		return nil
+	}
 	baseIter, err := idx.base.Lookup(ctx, term)
 	if err != nil {
 		return 0, err
 	}
-	if err := idx.applyIteratorPositionCounts(ctx, countsByRowID, baseIter, invertedSegmentKindInsert); err != nil {
-		return 0, err
+	for {
+		block, ok, err := baseIter.NextBlock(ctx)
+		if err != nil {
+			return 0, err
+		}
+		if !ok {
+			break
+		}
+		mode, err := forEachInvertedPostingDocCount(block.Payload, func(rowID RowID, positionCount uint32) error {
+			for stateOK && state.rowID < rowID {
+				count, err := state.transform.apply(0)
+				if err != nil {
+					return err
+				}
+				if err := countSurviving(count); err != nil {
+					return err
+				}
+				state, stateOK, err = stream.next(ctx)
+				if err != nil {
+					return err
+				}
+			}
+			if stateOK && state.rowID == rowID {
+				positionCount, err = state.transform.apply(positionCount)
+				if err != nil {
+					return err
+				}
+				state, stateOK, err = stream.next(ctx)
+				if err != nil {
+					return err
+				}
+			}
+			return countSurviving(positionCount)
+		})
+		if err != nil {
+			return 0, err
+		}
+		if mode != idx.Mode() {
+			return 0, fmt.Errorf("inverted posting block uses posting mode %d, expected %d", mode, idx.Mode())
+		}
 	}
+	for stateOK {
+		count, err := state.transform.apply(0)
+		if err != nil {
+			return 0, err
+		}
+		if err := countSurviving(count); err != nil {
+			return 0, err
+		}
+		state, stateOK, err = stream.next(ctx)
+		if err != nil {
+			return 0, err
+		}
+	}
+	return docFreq, nil
+}
+
+func (idx *logStructuredInvertedIndex) newPositionCountSegmentStateStream(
+	ctx context.Context,
+	meta *invertedMetaPage,
+	term string,
+) (*positionCountSegmentStateStream, error) {
+	sourceHint := 0
+	for _, segment := range meta.Segments {
+		if segmentMayContainTerm(segment, term) {
+			sourceHint++
+		}
+	}
+	sourceHint = min(sourceHint, logStructuredInvertedIndexMergeRunSize)
+	stream := &positionCountSegmentStateStream{
+		sources: make([]positionCountSegmentStateSource, 0, sourceHint),
+		heap:    make([]int, 0, sourceHint),
+	}
+	order := 0
 	for _, segment := range meta.Segments {
 		if !segmentMayContainTerm(segment, term) {
 			continue
@@ -875,64 +989,163 @@ func (idx *logStructuredInvertedIndex) countPositionDocFreq(
 			if kind == invertedSegmentKindMixed {
 				kind = cell.Kind
 			}
-			return idx.applyBlockPositionCounts(countsByRowID, cell.Block, kind)
-		}); err != nil {
-			return 0, err
-		}
-	}
-	return uint32(len(countsByRowID)), nil
-}
-
-func (idx *logStructuredInvertedIndex) applyIteratorPositionCounts(
-	ctx context.Context,
-	countsByRowID map[RowID]uint32,
-	iter invertedPostingIterator,
-	kind byte,
-) error {
-	for {
-		block, ok, err := iter.NextBlock(ctx)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-		if err := idx.applyBlockPositionCounts(countsByRowID, block, kind); err != nil {
-			return err
-		}
-	}
-}
-
-func (idx *logStructuredInvertedIndex) applyBlockPositionCounts(
-	countsByRowID map[RowID]uint32,
-	block invertedPostingBlock,
-	kind byte,
-) error {
-	mode, err := forEachInvertedPostingDocCount(block.Payload, func(rowID RowID, positionCount uint32) error {
-		switch kind {
-		case invertedSegmentKindInsert:
-			countsByRowID[rowID] += positionCount
-		case invertedSegmentKindDelete:
-			if positionCount == 0 {
-				delete(countsByRowID, rowID)
+			if kind != invertedSegmentKindInsert && kind != invertedSegmentKindDelete {
+				return fmt.Errorf("unknown inverted segment kind %d", kind)
+			}
+			cursor, err := newInvertedPostingRowIDCursor(cell.Block.Payload)
+			if err != nil {
+				return err
+			}
+			if cursor.mode != idx.Mode() {
+				return fmt.Errorf("inverted posting block uses posting mode %d, expected %d", cursor.mode, idx.Mode())
+			}
+			rowID, positionCount, ok, err := cursor.nextDocCount()
+			if err != nil {
+				return err
+			}
+			if !ok {
 				return nil
 			}
-			countsByRowID[rowID] -= min(countsByRowID[rowID], positionCount)
-			if countsByRowID[rowID] == 0 {
-				delete(countsByRowID, rowID)
-			}
-		default:
-			return fmt.Errorf("unknown inverted segment kind %d", kind)
+			stream.sources = append(stream.sources, positionCountSegmentStateSource{
+				cursor:        cursor,
+				rowID:         rowID,
+				positionCount: positionCount,
+				kind:          kind,
+				order:         order,
+			})
+			stream.push(len(stream.sources) - 1)
+			order++
+			return nil
+		}); err != nil {
+			return nil, err
 		}
-		return nil
-	})
+	}
+	return stream, nil
+}
+
+func (t *positionCountTransform) add(kind byte, positionCount uint32) error {
+	switch kind {
+	case invertedSegmentKindInsert:
+		if t.floor > ^uint32(0)-positionCount {
+			return fmt.Errorf("inverted position count exceeds maximum uint32")
+		}
+		t.delta += int64(positionCount)
+		t.floor += positionCount
+	case invertedSegmentKindDelete:
+		if positionCount == 0 {
+			t.delta = 0
+			t.floor = 0
+			t.reset = true
+			return nil
+		}
+		t.delta -= int64(positionCount)
+		t.floor -= min(t.floor, positionCount)
+	default:
+		return fmt.Errorf("unknown inverted segment kind %d", kind)
+	}
+	return nil
+}
+
+func (t positionCountTransform) apply(positionCount uint32) (uint32, error) {
+	if t.reset {
+		return t.floor, nil
+	}
+	count := int64(positionCount) + t.delta
+	if count < int64(t.floor) {
+		return t.floor, nil
+	}
+	if count > int64(^uint32(0)) {
+		return 0, fmt.Errorf("inverted position count exceeds maximum uint32")
+	}
+	return uint32(count), nil
+}
+
+func (s *positionCountSegmentStateStream) next(ctx context.Context) (positionCountSegmentState, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return positionCountSegmentState{}, false, err
+	}
+	if len(s.heap) == 0 {
+		return positionCountSegmentState{}, false, nil
+	}
+	sourceIdx := s.pop()
+	source := &s.sources[sourceIdx]
+	state := positionCountSegmentState{rowID: source.rowID}
+	if err := state.transform.add(source.kind, source.positionCount); err != nil {
+		return positionCountSegmentState{}, false, err
+	}
+	if err := s.advance(sourceIdx); err != nil {
+		return positionCountSegmentState{}, false, err
+	}
+	for len(s.heap) > 0 && s.sources[s.heap[0]].rowID == state.rowID {
+		sourceIdx = s.pop()
+		source = &s.sources[sourceIdx]
+		if err := state.transform.add(source.kind, source.positionCount); err != nil {
+			return positionCountSegmentState{}, false, err
+		}
+		if err := s.advance(sourceIdx); err != nil {
+			return positionCountSegmentState{}, false, err
+		}
+	}
+	return state, true, nil
+}
+
+func (s *positionCountSegmentStateStream) advance(sourceIdx int) error {
+	rowID, positionCount, ok, err := s.sources[sourceIdx].cursor.nextDocCount()
 	if err != nil {
 		return err
 	}
-	if mode != idx.Mode() {
-		return fmt.Errorf("inverted segment block uses posting mode %d, expected %d", mode, idx.Mode())
+	if !ok {
+		return nil
 	}
+	s.sources[sourceIdx].rowID = rowID
+	s.sources[sourceIdx].positionCount = positionCount
+	s.push(sourceIdx)
 	return nil
+}
+
+func (s *positionCountSegmentStateStream) push(sourceIdx int) {
+	s.heap = append(s.heap, sourceIdx)
+	for child := len(s.heap) - 1; child > 0; {
+		parent := (child - 1) / 2
+		if !s.less(s.heap[child], s.heap[parent]) {
+			break
+		}
+		s.heap[parent], s.heap[child] = s.heap[child], s.heap[parent]
+		child = parent
+	}
+}
+
+func (s *positionCountSegmentStateStream) pop() int {
+	sourceIdx := s.heap[0]
+	last := len(s.heap) - 1
+	s.heap[0] = s.heap[last]
+	s.heap = s.heap[:last]
+	for parent := 0; ; {
+		left := parent*2 + 1
+		if left >= len(s.heap) {
+			break
+		}
+		child := left
+		right := left + 1
+		if right < len(s.heap) && s.less(s.heap[right], s.heap[left]) {
+			child = right
+		}
+		if !s.less(s.heap[child], s.heap[parent]) {
+			break
+		}
+		s.heap[parent], s.heap[child] = s.heap[child], s.heap[parent]
+		parent = child
+	}
+	return sourceIdx
+}
+
+func (s *positionCountSegmentStateStream) less(leftIdx, rightIdx int) bool {
+	left := s.sources[leftIdx]
+	right := s.sources[rightIdx]
+	if left.rowID != right.rowID {
+		return left.rowID < right.rowID
+	}
+	return left.order < right.order
 }
 
 func (idx *logStructuredInvertedIndex) applyIteratorPositions(
