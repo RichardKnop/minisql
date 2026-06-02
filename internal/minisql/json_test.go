@@ -57,6 +57,16 @@ func TestNormaliseJSON(t *testing.T) {
 			want:  `"hello"`,
 		},
 		{
+			name:  "HTML escapes",
+			input: `{"x":"<>&"}`,
+			want:  `{"x":"\u003c\u003e\u0026"}`,
+		},
+		{
+			name:  "unicode line separator escape",
+			input: "{\"x\":\"\u2028\"}",
+			want:  `{"x":"\u2028"}`,
+		},
+		{
 			name:  "null literal",
 			input: `null`,
 			want:  `null`,

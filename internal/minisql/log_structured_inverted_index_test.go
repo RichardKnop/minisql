@@ -268,6 +268,13 @@ func TestLogStructuredInvertedIndex_RowIDMixedSegmentsKeepReinsertedRows(t *test
 	require.NoError(t, err)
 	assert.Equal(t, []RowID{7, 9}, rowIDs)
 
+	var streamedRowIDs []RowID
+	require.NoError(t, index.ForEachRowID(ctx, term, func(rowID RowID) error {
+		streamedRowIDs = append(streamedRowIDs, rowID)
+		return nil
+	}))
+	assert.Equal(t, []RowID{7, 9}, streamedRowIDs)
+
 	stats, err := index.Stats(ctx, term)
 	require.NoError(t, err)
 	assert.Equal(t, invertedPostingStats{DocFreq: 2, PostingCount: 2}, stats)
@@ -419,6 +426,10 @@ func TestLogStructuredInvertedIndex_PositionalDeleteRemovesSelectedPositions(t *
 	stats, err := index.Stats(ctx, term)
 	require.NoError(t, err)
 	assert.Equal(t, invertedPostingStats{DocFreq: 1, PostingCount: 2}, stats)
+
+	docFreq, err := index.CountDocFreq(ctx, term)
+	require.NoError(t, err)
+	assert.Equal(t, uint32(1), docFreq)
 }
 
 func TestLogStructuredInvertedIndex_ReplaceSegmentReinsertsSameRow(t *testing.T) {
@@ -444,6 +455,10 @@ func TestLogStructuredInvertedIndex_ReplaceSegmentReinsertsSameRow(t *testing.T)
 	require.NoError(t, err)
 	postings := collectInvertedIteratorPostings(t, ctx, iter)
 	assert.Equal(t, []invertedPosting{{RowID: 5, Positions: []uint32{2, 4}}}, postings)
+
+	docFreq, err := index.CountDocFreq(ctx, term)
+	require.NoError(t, err)
+	assert.Equal(t, uint32(1), docFreq)
 
 	metaPage, err := index.pager.ReadPage(ctx, metaRoot)
 	require.NoError(t, err)

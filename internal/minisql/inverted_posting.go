@@ -20,6 +20,72 @@ type invertedPosting struct {
 	Positions []uint32
 }
 
+type invertedPostingRowIDCursor struct {
+	encoded   []byte
+	mode      invertedPostingMode
+	offset    int
+	prevRowID RowID
+	haveRow   bool
+}
+
+func newInvertedPostingRowIDCursor(encoded []byte) (invertedPostingRowIDCursor, error) {
+	if len(encoded) < 2 {
+		return invertedPostingRowIDCursor{}, fmt.Errorf("decode inverted postings: short buffer")
+	}
+	if encoded[0] != invertedPostingCodecVersion {
+		return invertedPostingRowIDCursor{}, fmt.Errorf("decode inverted postings: unsupported codec version %d", encoded[0])
+	}
+	mode := invertedPostingMode(encoded[1])
+	if mode != invertedPostingModeRowIDs && mode != invertedPostingModePositions {
+		return invertedPostingRowIDCursor{}, fmt.Errorf("decode inverted postings: unknown mode %d", mode)
+	}
+	return invertedPostingRowIDCursor{
+		encoded: encoded,
+		mode:    mode,
+		offset:  2,
+	}, nil
+}
+
+func (c *invertedPostingRowIDCursor) next() (RowID, bool, error) {
+	rowID, _, ok, err := c.nextDocCount()
+	return rowID, ok, err
+}
+
+func (c *invertedPostingRowIDCursor) nextDocCount() (RowID, uint32, bool, error) {
+	if c.offset >= len(c.encoded) {
+		return 0, 0, false, nil
+	}
+	rowDelta, n := binary.Uvarint(c.encoded[c.offset:])
+	if n <= 0 {
+		return 0, 0, false, fmt.Errorf("decode inverted posting row delta at byte %d", c.offset)
+	}
+	c.offset += n
+
+	rowID := RowID(rowDelta)
+	if c.haveRow {
+		rowID = c.prevRowID + RowID(rowDelta)
+	}
+	var positionCount uint32 = 1
+	if c.mode == invertedPostingModePositions {
+		count, n := binary.Uvarint(c.encoded[c.offset:])
+		if n <= 0 {
+			return 0, 0, false, fmt.Errorf("decode inverted posting position count at byte %d", c.offset)
+		}
+		c.offset += n
+		positionCount = uint32(count)
+		for range count {
+			_, n := binary.Uvarint(c.encoded[c.offset:])
+			if n <= 0 {
+				return 0, 0, false, fmt.Errorf("decode inverted posting position delta at byte %d", c.offset)
+			}
+			c.offset += n
+		}
+	}
+	c.prevRowID = rowID
+	c.haveRow = true
+	return rowID, positionCount, true, nil
+}
+
 // encodeInvertedPostingList serializes postings into the v1 row-grouped codec.
 // Row IDs are sorted and delta-encoded; positional postings also store sorted
 // per-row position deltas.
@@ -38,10 +104,18 @@ func encodeInvertedPostingList(mode invertedPostingMode, postings []invertedPost
 // grouped by row ID, and deduplicated. It is used by posting-tree block packing
 // to avoid repeatedly regrouping prefixes while searching for a block boundary.
 func encodeGroupedInvertedPostingList(mode invertedPostingMode, grouped []invertedPosting) ([]byte, error) {
+	return encodeGroupedInvertedPostingListWithCapacity(mode, grouped, encodedGroupedInvertedPostingListSize(mode, grouped))
+}
+
+func encodeGroupedInvertedPostingListWithCapacity(
+	mode invertedPostingMode,
+	grouped []invertedPosting,
+	capacity int,
+) ([]byte, error) {
 	if mode != invertedPostingModeRowIDs && mode != invertedPostingModePositions {
 		return nil, fmt.Errorf("unknown inverted posting mode %d", mode)
 	}
-	buf := make([]byte, 0, 2+len(grouped)*binary.MaxVarintLen64*2)
+	buf := make([]byte, 0, capacity)
 	buf = append(buf, invertedPostingCodecVersion, byte(mode))
 
 	var (
@@ -73,6 +147,16 @@ func encodeGroupedInvertedPostingList(mode invertedPostingMode, grouped []invert
 		prevRowID = posting.RowID
 	}
 	return buf, nil
+}
+
+func encodedGroupedInvertedPostingListSize(mode invertedPostingMode, grouped []invertedPosting) int {
+	size := 2
+	var prevRowID RowID
+	for i, posting := range grouped {
+		size += encodedGroupedPostingSize(mode, posting, prevRowID, i == 0)
+		prevRowID = posting.RowID
+	}
+	return size
 }
 
 // encodeTrailingInvertedPosting serializes one posting that follows prevRowID
