@@ -193,7 +193,7 @@ func TestLogStructuredInvertedIndex_ApplyRowIDBatchWritesSortedSegmentPages(t *t
 		require.NotNil(t, page.InvertedSegmentPage)
 		cells = append(cells, page.InvertedSegmentPage.Cells...)
 		pageIdx = page.InvertedSegmentPage.Header.NextPage
-		pageCount++
+		pageCount += 1
 	}
 	assert.Greater(t, pageCount, 1)
 	for i := 1; i < len(cells); i++ {
@@ -256,7 +256,7 @@ func TestInvertedSegmentWriter_WritesMultiplePagesAndTracksMetadata(t *testing.T
 		require.NoError(t, err)
 		require.NotNil(t, page.InvertedSegmentPage)
 		pageIdx = page.InvertedSegmentPage.Header.NextPage
-		pageCount++
+		pageCount += 1
 	}
 	assert.Greater(t, pageCount, 1)
 }

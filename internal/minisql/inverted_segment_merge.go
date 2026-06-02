@@ -35,7 +35,7 @@ func (c *invertedSegmentCellCursor) advance() error {
 	for {
 		if c.page != nil && c.cellIdx < len(c.page.InvertedSegmentPage.Cells) {
 			c.cell = c.page.InvertedSegmentPage.Cells[c.cellIdx]
-			c.cellIdx++
+			c.cellIdx += 1
 			c.ok = true
 			return nil
 		}
@@ -62,17 +62,9 @@ func (idx *logStructuredInvertedIndex) mergeRowIDSegmentRun(
 	ctx context.Context,
 	segments []invertedSegmentDescriptor,
 ) (invertedSegmentWriteResult, error) {
-	segments = append([]invertedSegmentDescriptor(nil), segments...)
-	sort.SliceStable(segments, func(i, j int) bool {
-		return segments[i].Generation < segments[j].Generation
-	})
-	cursors := make([]*invertedSegmentCellCursor, 0, len(segments))
-	for _, segment := range segments {
-		cursor, err := idx.newSegmentCellCursor(ctx, segment.RootPage)
-		if err != nil {
-			return invertedSegmentWriteResult{}, err
-		}
-		cursors = append(cursors, cursor)
+	segments, cursors, err := idx.rowIDSegmentCursors(ctx, segments)
+	if err != nil {
+		return invertedSegmentWriteResult{}, err
 	}
 
 	writer := idx.newSegmentWriter(ctx)
@@ -97,6 +89,59 @@ func (idx *logStructuredInvertedIndex) mergeRowIDSegmentRun(
 		}
 	}
 	return writer.finish()
+}
+
+func (idx *logStructuredInvertedIndex) applyRowIDSegmentsToBase(
+	ctx context.Context,
+	segments []invertedSegmentDescriptor,
+) error {
+	segments, cursors, err := idx.rowIDSegmentCursors(ctx, segments)
+	if err != nil {
+		return err
+	}
+
+	for {
+		term, ok := nextRowIDSegmentTerm(cursors)
+		if !ok {
+			break
+		}
+		state := rowIDSegmentTermState{}
+		for i, cursor := range cursors {
+			for cursor.ok && cursor.cell.Term == term {
+				if err := idx.applyRowIDSegmentCellState(segments[i], cursor.cell, &state); err != nil {
+					return err
+				}
+				if err := cursor.advance(); err != nil {
+					return err
+				}
+			}
+		}
+		deletes := sortedRowIDsFromSet(state.deletes)
+		inserts := sortedRowIDsFromSet(state.inserts)
+		if err := idx.base.ApplyRowIDChanges(ctx, term, deletes, inserts); err != nil {
+			return fmt.Errorf("compact inverted row-ID segment term %q: %w", term, err)
+		}
+	}
+	return nil
+}
+
+func (idx *logStructuredInvertedIndex) rowIDSegmentCursors(
+	ctx context.Context,
+	segments []invertedSegmentDescriptor,
+) ([]invertedSegmentDescriptor, []*invertedSegmentCellCursor, error) {
+	segments = append([]invertedSegmentDescriptor(nil), segments...)
+	sort.SliceStable(segments, func(i, j int) bool {
+		return segments[i].Generation < segments[j].Generation
+	})
+	cursors := make([]*invertedSegmentCellCursor, 0, len(segments))
+	for _, segment := range segments {
+		cursor, err := idx.newSegmentCellCursor(ctx, segment.RootPage)
+		if err != nil {
+			return nil, nil, err
+		}
+		cursors = append(cursors, cursor)
+	}
+	return segments, cursors, nil
 }
 
 func nextRowIDSegmentTerm(cursors []*invertedSegmentCellCursor) (string, bool) {

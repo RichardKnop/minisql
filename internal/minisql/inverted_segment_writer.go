@@ -79,7 +79,7 @@ func (w *invertedSegmentWriter) updateResult(cell invertedSegmentCell) {
 		w.result.kind = cell.Kind
 		w.result.firstTerm = cell.Term
 		w.result.lastTerm = cell.Term
-		w.cellCount++
+		w.cellCount += 1
 		return
 	}
 	if cell.Kind != w.result.kind {
@@ -91,5 +91,5 @@ func (w *invertedSegmentWriter) updateResult(cell invertedSegmentCell) {
 	if cell.Term > w.result.lastTerm {
 		w.result.lastTerm = cell.Term
 	}
-	w.cellCount++
+	w.cellCount += 1
 }

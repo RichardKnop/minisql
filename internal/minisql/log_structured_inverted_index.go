@@ -2195,11 +2195,7 @@ func (idx *logStructuredInvertedIndex) compactSegments(ctx context.Context) erro
 		return segments[i].Generation < segments[j].Generation
 	})
 	if idx.Mode() == invertedPostingModeRowIDs {
-		states, err := idx.reduceRowIDSegmentStates(ctx, segments)
-		if err != nil {
-			return err
-		}
-		if err := idx.applyRowIDSegmentStatesToBase(ctx, states); err != nil {
+		if err := idx.applyRowIDSegmentsToBase(ctx, segments); err != nil {
 			return err
 		}
 		return idx.clearSegmentsAfterBaseFoldback(ctx, segments)
@@ -2233,22 +2229,6 @@ func (idx *logStructuredInvertedIndex) clearSegmentsAfterBaseFoldback(
 		return fmt.Errorf("inverted index %s root page %d is not a metadata page", idx.name, idx.rootPageIdx)
 	}
 	metaPage.InvertedMetaPage.Segments = nil
-	return nil
-}
-
-func (idx *logStructuredInvertedIndex) applyRowIDSegmentStatesToBase(
-	ctx context.Context,
-	states map[string]rowIDSegmentTermState,
-) error {
-	terms := sortedRowIDSegmentStateTerms(states)
-	for _, term := range terms {
-		state := states[term]
-		deletes := sortedRowIDsFromSet(state.deletes)
-		inserts := sortedRowIDsFromSet(state.inserts)
-		if err := idx.base.ApplyRowIDChanges(ctx, term, deletes, inserts); err != nil {
-			return fmt.Errorf("compact inverted row-ID segment term %q: %w", term, err)
-		}
-	}
 	return nil
 }
 
