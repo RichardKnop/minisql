@@ -31,6 +31,18 @@ type rowIDSegmentState struct {
 	keep  bool
 }
 
+type rowIDSegmentStateSource struct {
+	cursor invertedPostingRowIDCursor
+	rowID  RowID
+	keep   bool
+	order  int
+}
+
+type rowIDSegmentStateStream struct {
+	sources []rowIDSegmentStateSource
+	heap    []int
+}
+
 var _ invertedIndex = (*logStructuredInvertedIndex)(nil)
 var _ invertedBatchApplier = (*logStructuredInvertedIndex)(nil)
 var _ invertedRowIDBatchApplier = (*logStructuredInvertedIndex)(nil)
@@ -340,19 +352,7 @@ func (idx *logStructuredInvertedIndex) ForEachRowID(ctx context.Context, term st
 		return forEachRowIDFromPostingIterator(ctx, iter, idx.Mode(), fn)
 	}
 
-	rowIDs, err := idx.loadMergedRowIDs(ctx, meta, term, 0)
-	if err != nil {
-		return err
-	}
-	for _, rowID := range rowIDs {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := fn(rowID); err != nil {
-			return err
-		}
-	}
-	return nil
+	return idx.forEachMergedRowID(ctx, meta, term, fn)
 }
 
 func (idx *logStructuredInvertedIndex) countMergedRowIDs(
@@ -360,12 +360,8 @@ func (idx *logStructuredInvertedIndex) countMergedRowIDs(
 	meta *invertedMetaPage,
 	term string,
 ) (uint32, error) {
-	baseCount, err := idx.base.CountDocFreq(ctx, term)
-	if err != nil {
-		return 0, err
-	}
 	if len(meta.Segments) == 0 || !segmentsMayContainTerm(meta.Segments, term) {
-		return baseCount, nil
+		return idx.base.CountDocFreq(ctx, term)
 	}
 	if insertOnlySegmentsMayContainTerm(meta.Segments, term) {
 		stats, err := idx.statsInsertOnlySegments(ctx, meta, term)
@@ -375,42 +371,15 @@ func (idx *logStructuredInvertedIndex) countMergedRowIDs(
 		return stats.DocFreq, nil
 	}
 
-	states, err := idx.rowIDSegmentStates(ctx, meta, term)
-	if err != nil {
-		return 0, err
-	}
-	if len(states) == 0 {
-		return baseCount, nil
-	}
-
-	count := baseCount
-	stateIdx := 0
-	baseIter, err := idx.base.Lookup(ctx, term)
-	if err != nil {
-		return 0, err
-	}
-	if err := forEachRowIDFromPostingIterator(ctx, baseIter, idx.Mode(), func(rowID RowID) error {
-		for stateIdx < len(states) && states[stateIdx].rowID < rowID {
-			stateIdx++
+	var count uint32
+	err := idx.forEachMergedRowID(ctx, meta, term, func(RowID) error {
+		if count == ^uint32(0) {
+			return fmt.Errorf("inverted row-ID count exceeds maximum uint32")
 		}
-		if stateIdx >= len(states) || states[stateIdx].rowID != rowID {
-			return nil
-		}
-		if !states[stateIdx].keep {
-			count--
-		}
-		stateIdx++
+		count++
 		return nil
-	}); err != nil {
-		return 0, err
-	}
-
-	for ; stateIdx < len(states); stateIdx++ {
-		if states[stateIdx].keep {
-			count++
-		}
-	}
-	return count, nil
+	})
+	return count, err
 }
 
 func (idx *logStructuredInvertedIndex) loadMergedRowIDs(
@@ -426,51 +395,17 @@ func (idx *logStructuredInvertedIndex) loadMergedRowIDs(
 		return idx.loadInsertOnlyRowIDs(ctx, meta, term, hint)
 	}
 
-	states, err := idx.rowIDSegmentStates(ctx, meta, term)
-	if err != nil {
+	rowIDs := make([]RowID, 0, hint)
+	if err := idx.forEachMergedRowID(ctx, meta, term, func(rowID RowID) error {
+		rowIDs = append(rowIDs, rowID)
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	if len(states) == 0 {
-		return idx.base.LoadRowIDs(ctx, term, hint)
-	}
-
-	baseRowIDs, err := idx.base.LoadRowIDs(ctx, term, hint)
-	if err != nil {
-		return nil, err
-	}
-	surviving := baseRowIDs[:0]
-	stateIdx := 0
-	for _, rowID := range baseRowIDs {
-		for stateIdx < len(states) && states[stateIdx].rowID < rowID {
-			stateIdx++
-		}
-		if stateIdx >= len(states) || states[stateIdx].rowID != rowID {
-			surviving = append(surviving, rowID)
-			continue
-		}
-		if states[stateIdx].keep {
-			surviving = append(surviving, rowID)
-		}
-		stateIdx++
-	}
-
-	if stateIdx >= len(states) {
-		if len(surviving) == 0 {
-			return nil, nil
-		}
-		return surviving, nil
-	}
-
-	for ; stateIdx < len(states); stateIdx++ {
-		if states[stateIdx].keep {
-			surviving = append(surviving, states[stateIdx].rowID)
-		}
-	}
-	if len(surviving) == 0 {
+	if len(rowIDs) == 0 {
 		return nil, nil
 	}
-	sortRowIDs(surviving)
-	return compactSortedRowIDs(surviving), nil
+	return rowIDs, nil
 }
 
 func (idx *logStructuredInvertedIndex) loadInsertOnlyRowIDs(
@@ -500,28 +435,76 @@ func (idx *logStructuredInvertedIndex) loadInsertOnlyRowIDs(
 	return compactSortedRowIDs(rowIDs), nil
 }
 
-func (idx *logStructuredInvertedIndex) rowIDSegmentStates(
+func (idx *logStructuredInvertedIndex) forEachMergedRowID(
 	ctx context.Context,
 	meta *invertedMetaPage,
 	term string,
-) ([]rowIDSegmentState, error) {
-	maxStateCount := int(^uint(0) >> 1)
-	totalPostingCount := 0
-	for _, segment := range meta.Segments {
-		if !segmentMayContainTerm(segment, term) {
-			continue
-		}
-		if err := idx.visitSegmentTermCells(ctx, segment.RootPage, term, func(cell invertedSegmentCell) error {
-			if uint64(totalPostingCount)+uint64(cell.DocFreq) > uint64(maxStateCount) {
-				return fmt.Errorf("inverted row-ID segment state count exceeds maximum int")
+	fn func(RowID) error,
+) error {
+	stream, err := idx.newRowIDSegmentStateStream(ctx, meta, term)
+	if err != nil {
+		return err
+	}
+	state, stateOK, err := stream.next(ctx)
+	if err != nil {
+		return err
+	}
+	if err := idx.base.ForEachRowID(ctx, term, func(rowID RowID) error {
+		for stateOK && state.rowID < rowID {
+			if state.keep {
+				if err := fn(state.rowID); err != nil {
+					return err
+				}
 			}
-			totalPostingCount += int(cell.DocFreq)
-			return nil
-		}); err != nil {
-			return nil, err
+			state, stateOK, err = stream.next(ctx)
+			if err != nil {
+				return err
+			}
+		}
+		if stateOK && state.rowID == rowID {
+			if state.keep {
+				if err := fn(rowID); err != nil {
+					return err
+				}
+			}
+			state, stateOK, err = stream.next(ctx)
+			return err
+		}
+		return fn(rowID)
+	}); err != nil {
+		return err
+	}
+	for stateOK {
+		if state.keep {
+			if err := fn(state.rowID); err != nil {
+				return err
+			}
+		}
+		state, stateOK, err = stream.next(ctx)
+		if err != nil {
+			return err
 		}
 	}
-	states := make([]rowIDSegmentState, 0, totalPostingCount)
+	return nil
+}
+
+func (idx *logStructuredInvertedIndex) newRowIDSegmentStateStream(
+	ctx context.Context,
+	meta *invertedMetaPage,
+	term string,
+) (*rowIDSegmentStateStream, error) {
+	sourceHint := 0
+	for _, segment := range meta.Segments {
+		if segmentMayContainTerm(segment, term) {
+			sourceHint++
+		}
+	}
+	sourceHint = min(sourceHint, logStructuredInvertedIndexMergeRunSize)
+	stream := &rowIDSegmentStateStream{
+		sources: make([]rowIDSegmentStateSource, 0, sourceHint),
+		heap:    make([]int, 0, sourceHint),
+	}
+	order := 0
 	for _, segment := range meta.Segments {
 		if !segmentMayContainTerm(segment, term) {
 			continue
@@ -540,28 +523,111 @@ func (idx *logStructuredInvertedIndex) rowIDSegmentStates(
 			default:
 				return fmt.Errorf("unknown inverted segment kind %d", kind)
 			}
-			return appendBlockRowIDStates(&states, cell.Block, idx.Mode(), keep)
+			cursor, err := newInvertedPostingRowIDCursor(cell.Block.Payload)
+			if err != nil {
+				return err
+			}
+			if cursor.mode != idx.Mode() {
+				return fmt.Errorf("inverted posting block uses posting mode %d, expected %d", cursor.mode, idx.Mode())
+			}
+			rowID, ok, err := cursor.next()
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return nil
+			}
+			stream.sources = append(stream.sources, rowIDSegmentStateSource{
+				cursor: cursor,
+				rowID:  rowID,
+				keep:   keep,
+				order:  order,
+			})
+			stream.push(len(stream.sources) - 1)
+			order++
+			return nil
 		}); err != nil {
 			return nil, err
 		}
 	}
-	if len(states) == 0 {
-		return nil, nil
+	return stream, nil
+}
+
+func (s *rowIDSegmentStateStream) next(ctx context.Context) (rowIDSegmentState, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return rowIDSegmentState{}, false, err
 	}
-	sort.SliceStable(states, func(i, j int) bool {
-		return states[i].rowID < states[j].rowID
-	})
-	writeIdx := 0
-	for i := 0; i < len(states); {
-		j := i + 1
-		for j < len(states) && states[j].rowID == states[i].rowID {
-			j++
+	if len(s.heap) == 0 {
+		return rowIDSegmentState{}, false, nil
+	}
+	sourceIdx := s.pop()
+	source := &s.sources[sourceIdx]
+	state := rowIDSegmentState{rowID: source.rowID, keep: source.keep}
+	order := source.order
+	if err := s.advance(sourceIdx); err != nil {
+		return rowIDSegmentState{}, false, err
+	}
+	for len(s.heap) > 0 && s.sources[s.heap[0]].rowID == state.rowID {
+		sourceIdx = s.pop()
+		source = &s.sources[sourceIdx]
+		if source.order > order {
+			state.keep = source.keep
+			order = source.order
 		}
-		states[writeIdx] = states[j-1]
-		writeIdx++
-		i = j
+		if err := s.advance(sourceIdx); err != nil {
+			return rowIDSegmentState{}, false, err
+		}
 	}
-	return states[:writeIdx], nil
+	return state, true, nil
+}
+
+func (s *rowIDSegmentStateStream) advance(sourceIdx int) error {
+	rowID, ok, err := s.sources[sourceIdx].cursor.next()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	s.sources[sourceIdx].rowID = rowID
+	s.push(sourceIdx)
+	return nil
+}
+
+func (s *rowIDSegmentStateStream) push(sourceIdx int) {
+	s.heap = append(s.heap, sourceIdx)
+	for child := len(s.heap) - 1; child > 0; {
+		parent := (child - 1) / 2
+		if s.sources[s.heap[parent]].rowID <= s.sources[s.heap[child]].rowID {
+			break
+		}
+		s.heap[parent], s.heap[child] = s.heap[child], s.heap[parent]
+		child = parent
+	}
+}
+
+func (s *rowIDSegmentStateStream) pop() int {
+	sourceIdx := s.heap[0]
+	last := len(s.heap) - 1
+	s.heap[0] = s.heap[last]
+	s.heap = s.heap[:last]
+	for parent := 0; ; {
+		left := parent*2 + 1
+		if left >= len(s.heap) {
+			break
+		}
+		child := left
+		right := left + 1
+		if right < len(s.heap) && s.sources[s.heap[right]].rowID < s.sources[s.heap[left]].rowID {
+			child = right
+		}
+		if s.sources[s.heap[parent]].rowID <= s.sources[s.heap[child]].rowID {
+			break
+		}
+		s.heap[parent], s.heap[child] = s.heap[child], s.heap[parent]
+		parent = child
+	}
+	return sourceIdx
 }
 
 // FreeAll releases the base index, all segments, and the metadata root.
@@ -738,25 +804,6 @@ func (idx *logStructuredInvertedIndex) statsInsertOnlySegments(
 func appendBlockRowIDs(rowIDs *[]RowID, block invertedPostingBlock, expectedMode invertedPostingMode) error {
 	mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
 		*rowIDs = append(*rowIDs, rowID)
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	if mode != expectedMode {
-		return fmt.Errorf("inverted posting block uses posting mode %d, expected %d", mode, expectedMode)
-	}
-	return nil
-}
-
-func appendBlockRowIDStates(
-	states *[]rowIDSegmentState,
-	block invertedPostingBlock,
-	expectedMode invertedPostingMode,
-	keep bool,
-) error {
-	mode, err := forEachInvertedPostingRowID(block.Payload, func(rowID RowID) error {
-		*states = append(*states, rowIDSegmentState{rowID: rowID, keep: keep})
 		return nil
 	})
 	if err != nil {

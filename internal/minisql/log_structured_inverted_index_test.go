@@ -268,6 +268,13 @@ func TestLogStructuredInvertedIndex_RowIDMixedSegmentsKeepReinsertedRows(t *test
 	require.NoError(t, err)
 	assert.Equal(t, []RowID{7, 9}, rowIDs)
 
+	var streamedRowIDs []RowID
+	require.NoError(t, index.ForEachRowID(ctx, term, func(rowID RowID) error {
+		streamedRowIDs = append(streamedRowIDs, rowID)
+		return nil
+	}))
+	assert.Equal(t, []RowID{7, 9}, streamedRowIDs)
+
 	stats, err := index.Stats(ctx, term)
 	require.NoError(t, err)
 	assert.Equal(t, invertedPostingStats{DocFreq: 2, PostingCount: 2}, stats)
