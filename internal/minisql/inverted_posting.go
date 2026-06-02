@@ -104,10 +104,18 @@ func encodeInvertedPostingList(mode invertedPostingMode, postings []invertedPost
 // grouped by row ID, and deduplicated. It is used by posting-tree block packing
 // to avoid repeatedly regrouping prefixes while searching for a block boundary.
 func encodeGroupedInvertedPostingList(mode invertedPostingMode, grouped []invertedPosting) ([]byte, error) {
+	return encodeGroupedInvertedPostingListWithCapacity(mode, grouped, encodedGroupedInvertedPostingListSize(mode, grouped))
+}
+
+func encodeGroupedInvertedPostingListWithCapacity(
+	mode invertedPostingMode,
+	grouped []invertedPosting,
+	capacity int,
+) ([]byte, error) {
 	if mode != invertedPostingModeRowIDs && mode != invertedPostingModePositions {
 		return nil, fmt.Errorf("unknown inverted posting mode %d", mode)
 	}
-	buf := make([]byte, 0, 2+len(grouped)*binary.MaxVarintLen64*2)
+	buf := make([]byte, 0, capacity)
 	buf = append(buf, invertedPostingCodecVersion, byte(mode))
 
 	var (
@@ -139,6 +147,16 @@ func encodeGroupedInvertedPostingList(mode invertedPostingMode, grouped []invert
 		prevRowID = posting.RowID
 	}
 	return buf, nil
+}
+
+func encodedGroupedInvertedPostingListSize(mode invertedPostingMode, grouped []invertedPosting) int {
+	size := 2
+	var prevRowID RowID
+	for i, posting := range grouped {
+		size += encodedGroupedPostingSize(mode, posting, prevRowID, i == 0)
+		prevRowID = posting.RowID
+	}
+	return size
 }
 
 // encodeTrailingInvertedPosting serializes one posting that follows prevRowID

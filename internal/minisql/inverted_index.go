@@ -2428,13 +2428,13 @@ func encodeLargestInvertedPostingBlock(mode invertedPostingMode, postings []inve
 	for i, posting := range postings {
 		postingSize := encodedGroupedPostingSize(mode, posting, prevRowID, i == 0)
 		if i > 0 && used+postingSize > maxPayload {
-			payload, err := encodeGroupedInvertedPostingList(mode, postings[:i])
+			payload, err := encodeGroupedInvertedPostingListWithCapacity(mode, postings[:i], used)
 			return i, payload, err
 		}
 		used += postingSize
 		prevRowID = posting.RowID
 	}
-	payload, err := encodeGroupedInvertedPostingList(mode, postings)
+	payload, err := encodeGroupedInvertedPostingListWithCapacity(mode, postings, used)
 	return len(postings), payload, err
 }
 
