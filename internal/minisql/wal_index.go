@@ -90,13 +90,18 @@ func (wi *WALIndex) MaxPageIndex() PageIndex {
 	return maxIdx
 }
 
-// Reset discards all entries.  Called after a successful checkpoint + WAL
-// truncation to reflect that the WAL no longer contains any data that is not
-// already in the main DB file.
+// Reset discards all entries and recycles their page buffers.  Called after a
+// successful checkpoint + WAL truncation to reflect that the WAL no longer
+// contains any data that is not already in the main DB file.
 func (wi *WALIndex) Reset() {
 	wi.mu.Lock()
+	pages := wi.pages
 	wi.pages = make(map[PageIndex][]byte)
 	wi.mu.Unlock()
+
+	for _, data := range pages {
+		pageDataPool.Put(data)
+	}
 }
 
 // Rebuild replaces the index contents with the latest committed frame for each
