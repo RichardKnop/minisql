@@ -394,9 +394,9 @@ func (t *Table) insertInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 	if err != nil {
 		return err
 	}
-	batch := newInvertedIndexMutationBatchWithCapacity(secondaryIndex.InvertedIndex.Mode(), len(terms), 0)
+	batch := newInvertedRowIDMutationBatchWithCapacity(len(terms), 0)
 	for _, term := range terms {
-		batch.Insert(term, invertedPosting{RowID: rowID})
+		batch.Insert(term, rowID)
 	}
 	if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
 		return fmt.Errorf("failed to insert JSON terms for inverted index %s: %w", secondaryIndex.Name, err)
@@ -435,7 +435,7 @@ func (t *Table) updateInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 	if err != nil {
 		return err
 	}
-	batch := newInvertedIndexMutationBatch(secondaryIndex.InvertedIndex.Mode())
+	batch := newInvertedRowIDMutationBatchWithCapacity(len(newTerms), len(oldTerms))
 	oldIdx, newIdx := 0, 0
 	for oldIdx < len(oldTerms) && newIdx < len(newTerms) {
 		oldTerm, newTerm := oldTerms[oldIdx], newTerms[newIdx]
@@ -445,18 +445,18 @@ func (t *Table) updateInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 			continue
 		}
 		if oldTerm < newTerm {
-			batch.Delete(oldTerm, invertedPosting{RowID: rowID})
+			batch.Delete(oldTerm, rowID)
 			oldIdx++
 			continue
 		}
-		batch.Insert(newTerm, invertedPosting{RowID: rowID})
+		batch.Insert(newTerm, rowID)
 		newIdx++
 	}
 	for ; oldIdx < len(oldTerms); oldIdx++ {
-		batch.Delete(oldTerms[oldIdx], invertedPosting{RowID: rowID})
+		batch.Delete(oldTerms[oldIdx], rowID)
 	}
 	for ; newIdx < len(newTerms); newIdx++ {
-		batch.Insert(newTerms[newIdx], invertedPosting{RowID: rowID})
+		batch.Insert(newTerms[newIdx], rowID)
 	}
 	if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
 		return fmt.Errorf("failed to update JSON terms for inverted index %s: %w", secondaryIndex.Name, err)
@@ -472,9 +472,9 @@ func (t *Table) deleteInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 	if err != nil {
 		return err
 	}
-	batch := newInvertedIndexMutationBatchWithCapacity(secondaryIndex.InvertedIndex.Mode(), 0, len(terms))
+	batch := newInvertedRowIDMutationBatchWithCapacity(0, len(terms))
 	for _, term := range terms {
-		batch.Delete(term, invertedPosting{RowID: rowID})
+		batch.Delete(term, rowID)
 	}
 	if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
 		return fmt.Errorf("failed to delete JSON terms for inverted index %s: %w", secondaryIndex.Name, err)
