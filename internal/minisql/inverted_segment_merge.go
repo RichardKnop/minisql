@@ -158,6 +158,38 @@ func (idx *logStructuredInvertedIndex) applyRowIDSegmentsToBase(
 	return nil
 }
 
+func (idx *logStructuredInvertedIndex) applyPostingSegmentsToBase(
+	ctx context.Context,
+	segments []invertedSegmentDescriptor,
+) error {
+	segments, cursors, err := idx.segmentCursors(ctx, segments)
+	if err != nil {
+		return err
+	}
+
+	for {
+		term, ok := nextSegmentTerm(cursors)
+		if !ok {
+			break
+		}
+		state := segmentTermState{}
+		for i, cursor := range cursors {
+			for cursor.ok && cursor.cell.Term == term {
+				if err := idx.applySegmentCellState(segments[i], cursor.cell, &state); err != nil {
+					return err
+				}
+				if err := cursor.advance(); err != nil {
+					return err
+				}
+			}
+		}
+		if err := idx.applySegmentTermStateToBase(ctx, term, state); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (idx *logStructuredInvertedIndex) segmentCursors(
 	ctx context.Context,
 	segments []invertedSegmentDescriptor,
@@ -309,6 +341,26 @@ func (idx *logStructuredInvertedIndex) appendSegmentTermState(
 		if err := writer.append(cell); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (idx *logStructuredInvertedIndex) applySegmentTermStateToBase(
+	ctx context.Context,
+	term string,
+	state segmentTermState,
+) error {
+	for _, posting := range postingsFromMap(state.deletes) {
+		if err := idx.base.Delete(ctx, term, posting); err != nil {
+			return fmt.Errorf("compact inverted segment delete term %q: %w", term, err)
+		}
+	}
+	insertPostings := postingsFromMap(state.inserts)
+	if len(insertPostings) == 0 {
+		return nil
+	}
+	if err := idx.base.InsertMany(ctx, term, insertPostings); err != nil {
+		return fmt.Errorf("compact inverted segment insert term %q: %w", term, err)
 	}
 	return nil
 }

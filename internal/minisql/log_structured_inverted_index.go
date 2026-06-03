@@ -1590,51 +1590,6 @@ func applyRowIDSegmentStateDelete(state rowIDSegmentTermState, rowID RowID) {
 	state.deletes[rowID] = struct{}{}
 }
 
-func (idx *logStructuredInvertedIndex) reduceSegmentStates(
-	ctx context.Context,
-	segments []invertedSegmentDescriptor,
-) (map[string]segmentTermState, error) {
-	states := make(map[string]segmentTermState)
-	for _, segment := range segments {
-		if err := idx.visitSegmentCells(ctx, segment.RootPage, func(cell invertedSegmentCell) error {
-			kind := segment.Kind
-			if kind == invertedSegmentKindMixed {
-				kind = cell.Kind
-			}
-			state := states[cell.Term]
-			if kind == invertedSegmentKindInsert && state.inserts == nil {
-				state.inserts = make(map[RowID]invertedPosting)
-			}
-			if kind == invertedSegmentKindDelete && state.deletes == nil {
-				state.deletes = make(map[RowID]invertedPosting)
-			}
-			mode, err := forEachInvertedPostingPosition(cell.Block.Payload, func(rowID RowID, positions []uint32) error {
-				posting := invertedPosting{RowID: rowID, Positions: positions}
-				switch kind {
-				case invertedSegmentKindInsert:
-					applySegmentStateInsert(idx.Mode(), state, posting)
-				case invertedSegmentKindDelete:
-					applySegmentStateDelete(idx.Mode(), state, posting)
-				default:
-					return fmt.Errorf("unknown inverted segment kind %d", kind)
-				}
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-			if mode != idx.Mode() {
-				return fmt.Errorf("inverted segment block uses posting mode %d, expected %d", mode, idx.Mode())
-			}
-			states[cell.Term] = state
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-	}
-	return states, nil
-}
-
 func applySegmentStateInsert(mode invertedPostingMode, state segmentTermState, posting invertedPosting) {
 	if mode == invertedPostingModePositions {
 		existing := state.inserts[posting.RowID]
@@ -1674,15 +1629,6 @@ func applySegmentStateDelete(mode invertedPostingMode, state segmentTermState, p
 	}
 	delete(state.inserts, posting.RowID)
 	state.deletes[posting.RowID] = posting
-}
-
-func sortedSegmentStateTerms(states map[string]segmentTermState) []string {
-	terms := make([]string, 0, len(states))
-	for term := range states {
-		terms = append(terms, term)
-	}
-	sort.Strings(terms)
-	return terms
 }
 
 func postingsFromMap(postingsByRowID map[RowID]invertedPosting) []invertedPosting {
@@ -2048,11 +1994,7 @@ func (idx *logStructuredInvertedIndex) compactSegments(ctx context.Context) erro
 		return idx.clearSegmentsAfterBaseFoldback(ctx, segments)
 	}
 
-	states, err := idx.reduceSegmentStates(ctx, segments)
-	if err != nil {
-		return err
-	}
-	if err := idx.applySegmentStatesToBase(ctx, states); err != nil {
+	if err := idx.applyPostingSegmentsToBase(ctx, segments); err != nil {
 		return err
 	}
 	return idx.clearSegmentsAfterBaseFoldback(ctx, segments)
@@ -2076,48 +2018,6 @@ func (idx *logStructuredInvertedIndex) clearSegmentsAfterBaseFoldback(
 		return fmt.Errorf("inverted index %s root page %d is not a metadata page", idx.name, idx.rootPageIdx)
 	}
 	metaPage.InvertedMetaPage.Segments = nil
-	return nil
-}
-
-func (idx *logStructuredInvertedIndex) applySegmentStatesToBase(
-	ctx context.Context,
-	states map[string]segmentTermState,
-) error {
-	terms := sortedSegmentStateTerms(states)
-	for _, term := range terms {
-		state := states[term]
-		for _, posting := range postingsFromMap(state.deletes) {
-			if err := idx.base.Delete(ctx, term, posting); err != nil {
-				return fmt.Errorf("compact inverted segment delete term %q: %w", term, err)
-			}
-		}
-		insertPostings := postingsFromMap(state.inserts)
-		if len(insertPostings) == 0 {
-			continue
-		}
-		if err := idx.base.InsertMany(ctx, term, insertPostings); err != nil {
-			return fmt.Errorf("compact inverted segment insert term %q: %w", term, err)
-		}
-	}
-	return nil
-}
-
-func (idx *logStructuredInvertedIndex) visitSegmentCells(ctx context.Context, root PageIndex, visit func(invertedSegmentCell) error) error {
-	for pageIdx := root; pageIdx != 0; {
-		page, err := idx.pager.ReadPage(ctx, pageIdx)
-		if err != nil {
-			return fmt.Errorf("read inverted segment page %d: %w", pageIdx, err)
-		}
-		if page.InvertedSegmentPage == nil {
-			return fmt.Errorf("inverted segment page %d has unexpected page type", pageIdx)
-		}
-		for _, cell := range page.InvertedSegmentPage.Cells {
-			if err := visit(cell); err != nil {
-				return err
-			}
-		}
-		pageIdx = page.InvertedSegmentPage.Header.NextPage
-	}
 	return nil
 }
 
