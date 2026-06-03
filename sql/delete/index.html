@@ -10,29 +10,31 @@
       
       
       
-        <link rel="canonical" href="https://richardknop.github.io/minisql/">
+        <link rel="canonical" href="https://richardknop.github.io/minisql/sql/delete/">
       
       
+        <link rel="prev" href="../update/">
       
-        <link rel="next" href="getting-started/">
+      
+        <link rel="next" href="../operators/">
       
       
         
       
       
-      <link rel="icon" href="assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>MiniSQL</title>
+        <title>DELETE - MiniSQL</title>
       
     
     
-      <link rel="stylesheet" href="assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -51,7 +53,7 @@
       
     
     
-    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -76,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#minisql" class="md-skip">
+        <a href="#delete" class="md-skip">
           Skip to content
         </a>
       
@@ -92,7 +94,7 @@
 
 <header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="." title="MiniSQL" class="md-header__button md-logo" aria-label="MiniSQL" data-md-component="logo">
+    <a href="../.." title="MiniSQL" class="md-header__button md-logo" aria-label="MiniSQL" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -112,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Home
+              DELETE
             
           </span>
         </div>
@@ -222,11 +224,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="." class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
         
   
   
@@ -245,7 +245,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="getting-started/" class="md-tabs__link">
+      <a href="../../getting-started/" class="md-tabs__link">
         
   
   
@@ -264,7 +264,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="connection/" class="md-tabs__link">
+      <a href="../../connection/" class="md-tabs__link">
         
   
   
@@ -283,7 +283,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="architecture/" class="md-tabs__link">
+      <a href="../../architecture/" class="md-tabs__link">
         
   
   
@@ -302,7 +302,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="data-types/" class="md-tabs__link">
+      <a href="../../data-types/" class="md-tabs__link">
         
   
   
@@ -319,11 +319,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="sql/create-table/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../create-table/" class="md-tabs__link">
           
   
   
@@ -343,7 +345,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="indexes/overview/" class="md-tabs__link">
+        <a href="../../indexes/overview/" class="md-tabs__link">
           
   
   
@@ -363,7 +365,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="functions/string/" class="md-tabs__link">
+        <a href="../../functions/string/" class="md-tabs__link">
           
   
   
@@ -381,7 +383,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="json/" class="md-tabs__link">
+      <a href="../../json/" class="md-tabs__link">
         
   
   
@@ -400,7 +402,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="vector-search/" class="md-tabs__link">
+      <a href="../../vector-search/" class="md-tabs__link">
         
   
   
@@ -419,7 +421,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="encryption/" class="md-tabs__link">
+      <a href="../../encryption/" class="md-tabs__link">
         
   
   
@@ -438,7 +440,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="constraints/" class="md-tabs__link">
+      <a href="../../constraints/" class="md-tabs__link">
         
   
   
@@ -457,7 +459,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="system-table/" class="md-tabs__link">
+      <a href="../../system-table/" class="md-tabs__link">
         
   
   
@@ -476,7 +478,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="limitations/" class="md-tabs__link">
+      <a href="../../limitations/" class="md-tabs__link">
         
   
   
@@ -517,7 +519,7 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="." title="MiniSQL" class="md-nav__button md-logo" aria-label="MiniSQL" data-md-component="logo">
+    <a href="../.." title="MiniSQL" class="md-nav__button md-logo" aria-label="MiniSQL" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -544,37 +546,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Home
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="." class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -590,70 +565,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#why-minisql" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Why MiniSQL?
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#quick-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Quick start
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#key-characteristics" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Key characteristics
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#navigation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Navigation
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -665,7 +576,7 @@
   
   
     <li class="md-nav__item">
-      <a href="getting-started/" class="md-nav__link">
+      <a href="../../getting-started/" class="md-nav__link">
         
   
   
@@ -692,7 +603,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connection/" class="md-nav__link">
+      <a href="../../connection/" class="md-nav__link">
         
   
   
@@ -719,7 +630,7 @@
   
   
     <li class="md-nav__item">
-      <a href="architecture/" class="md-nav__link">
+      <a href="../../architecture/" class="md-nav__link">
         
   
   
@@ -746,7 +657,7 @@
   
   
     <li class="md-nav__item">
-      <a href="data-types/" class="md-nav__link">
+      <a href="../../data-types/" class="md-nav__link">
         
   
   
@@ -770,28 +681,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
-        
-          
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -809,7 +723,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -827,7 +741,7 @@
   
   
     <li class="md-nav__item">
-      <a href="sql/create-table/" class="md-nav__link">
+      <a href="../create-table/" class="md-nav__link">
         
   
   
@@ -855,7 +769,7 @@
   
   
     <li class="md-nav__item">
-      <a href="sql/insert/" class="md-nav__link">
+      <a href="../insert/" class="md-nav__link">
         
   
   
@@ -883,7 +797,7 @@
   
   
     <li class="md-nav__item">
-      <a href="sql/select/" class="md-nav__link">
+      <a href="../select/" class="md-nav__link">
         
   
   
@@ -911,7 +825,7 @@
   
   
     <li class="md-nav__item">
-      <a href="sql/update/" class="md-nav__link">
+      <a href="../update/" class="md-nav__link">
         
   
   
@@ -936,10 +850,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="sql/delete/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DELETE
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -955,6 +896,81 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#basic-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic syntax
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#basic-delete" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic DELETE
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#delete-with-returning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DELETE with RETURNING
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#delete-with-subquery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DELETE with subquery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -967,7 +983,7 @@
   
   
     <li class="md-nav__item">
-      <a href="sql/operators/" class="md-nav__link">
+      <a href="../operators/" class="md-nav__link">
         
   
   
@@ -995,7 +1011,7 @@
   
   
     <li class="md-nav__item">
-      <a href="sql/transactions/" class="md-nav__link">
+      <a href="../transactions/" class="md-nav__link">
         
   
   
@@ -1023,7 +1039,7 @@
   
   
     <li class="md-nav__item">
-      <a href="sql/explain/" class="md-nav__link">
+      <a href="../explain/" class="md-nav__link">
         
   
   
@@ -1112,7 +1128,7 @@
   
   
     <li class="md-nav__item">
-      <a href="indexes/overview/" class="md-nav__link">
+      <a href="../../indexes/overview/" class="md-nav__link">
         
   
   
@@ -1140,7 +1156,7 @@
   
   
     <li class="md-nav__item">
-      <a href="indexes/btree/" class="md-nav__link">
+      <a href="../../indexes/btree/" class="md-nav__link">
         
   
   
@@ -1168,7 +1184,7 @@
   
   
     <li class="md-nav__item">
-      <a href="indexes/fulltext/" class="md-nav__link">
+      <a href="../../indexes/fulltext/" class="md-nav__link">
         
   
   
@@ -1196,7 +1212,7 @@
   
   
     <li class="md-nav__item">
-      <a href="indexes/json-inverted/" class="md-nav__link">
+      <a href="../../indexes/json-inverted/" class="md-nav__link">
         
   
   
@@ -1224,7 +1240,7 @@
   
   
     <li class="md-nav__item">
-      <a href="indexes/hnsw/" class="md-nav__link">
+      <a href="../../indexes/hnsw/" class="md-nav__link">
         
   
   
@@ -1313,7 +1329,7 @@
   
   
     <li class="md-nav__item">
-      <a href="functions/string/" class="md-nav__link">
+      <a href="../../functions/string/" class="md-nav__link">
         
   
   
@@ -1341,7 +1357,7 @@
   
   
     <li class="md-nav__item">
-      <a href="functions/numeric/" class="md-nav__link">
+      <a href="../../functions/numeric/" class="md-nav__link">
         
   
   
@@ -1369,7 +1385,7 @@
   
   
     <li class="md-nav__item">
-      <a href="functions/datetime/" class="md-nav__link">
+      <a href="../../functions/datetime/" class="md-nav__link">
         
   
   
@@ -1397,7 +1413,7 @@
   
   
     <li class="md-nav__item">
-      <a href="functions/aggregate/" class="md-nav__link">
+      <a href="../../functions/aggregate/" class="md-nav__link">
         
   
   
@@ -1425,7 +1441,7 @@
   
   
     <li class="md-nav__item">
-      <a href="functions/window/" class="md-nav__link">
+      <a href="../../functions/window/" class="md-nav__link">
         
   
   
@@ -1453,7 +1469,7 @@
   
   
     <li class="md-nav__item">
-      <a href="functions/json/" class="md-nav__link">
+      <a href="../../functions/json/" class="md-nav__link">
         
   
   
@@ -1481,7 +1497,7 @@
   
   
     <li class="md-nav__item">
-      <a href="functions/conditional/" class="md-nav__link">
+      <a href="../../functions/conditional/" class="md-nav__link">
         
   
   
@@ -1516,7 +1532,7 @@
   
   
     <li class="md-nav__item">
-      <a href="json/" class="md-nav__link">
+      <a href="../../json/" class="md-nav__link">
         
   
   
@@ -1543,7 +1559,7 @@
   
   
     <li class="md-nav__item">
-      <a href="vector-search/" class="md-nav__link">
+      <a href="../../vector-search/" class="md-nav__link">
         
   
   
@@ -1570,7 +1586,7 @@
   
   
     <li class="md-nav__item">
-      <a href="encryption/" class="md-nav__link">
+      <a href="../../encryption/" class="md-nav__link">
         
   
   
@@ -1597,7 +1613,7 @@
   
   
     <li class="md-nav__item">
-      <a href="constraints/" class="md-nav__link">
+      <a href="../../constraints/" class="md-nav__link">
         
   
   
@@ -1624,7 +1640,7 @@
   
   
     <li class="md-nav__item">
-      <a href="system-table/" class="md-nav__link">
+      <a href="../../system-table/" class="md-nav__link">
         
   
   
@@ -1651,7 +1667,7 @@
   
   
     <li class="md-nav__item">
-      <a href="limitations/" class="md-nav__link">
+      <a href="../../limitations/" class="md-nav__link">
         
   
   
@@ -1698,10 +1714,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#why-minisql" class="md-nav__link">
+  <a href="#basic-syntax" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why MiniSQL?
+        Basic syntax
       
     </span>
   </a>
@@ -1709,10 +1725,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#quick-start" class="md-nav__link">
+  <a href="#basic-delete" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Quick start
+        Basic DELETE
       
     </span>
   </a>
@@ -1720,10 +1736,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#key-characteristics" class="md-nav__link">
+  <a href="#delete-with-returning" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Key characteristics
+        DELETE with RETURNING
       
     </span>
   </a>
@@ -1731,10 +1747,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#navigation" class="md-nav__link">
+  <a href="#delete-with-subquery" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Navigation
+        DELETE with subquery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
       
     </span>
   </a>
@@ -1759,6 +1786,46 @@
   
 
 
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="../create-table/" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    SQL Reference
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
               
               <article class="md-content__inner md-typeset">
                 
@@ -1769,173 +1836,72 @@
   
 
 
-<h1 id="minisql">MiniSQL<a class="headerlink" href="#minisql" title="Permanent link">&para;</a></h1>
-<p><strong>MiniSQL</strong> is an embedded, single-file SQL database written in pure Go, inspired by SQLite but borrowing ideas from PostgreSQL. It requires zero CGO and zero external dependencies beyond the Go standard library.</p>
-<h2 id="why-minisql">Why MiniSQL?<a class="headerlink" href="#why-minisql" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Feature</th>
-<th>MiniSQL</th>
-<th>SQLite</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Language</td>
-<td>Pure Go / zero CGO</td>
-<td>C</td>
-</tr>
-<tr>
-<td>Read concurrency</td>
-<td>MVCC snapshot isolation</td>
-<td>WAL reader/writer lock</td>
-</tr>
-<tr>
-<td>Parallel scan</td>
-<td>✅</td>
-<td>❌</td>
-</tr>
-<tr>
-<td>Native JSON type</td>
-<td>✅</td>
-<td>Extension only</td>
-</tr>
-<tr>
-<td>Native UUID type</td>
-<td>✅</td>
-<td>❌</td>
-</tr>
-<tr>
-<td>Built-in full-text search</td>
-<td>✅ (BM25)</td>
-<td>Extension only</td>
-</tr>
-<tr>
-<td>JSON inverted index</td>
-<td>✅</td>
-<td>❌</td>
-</tr>
-<tr>
-<td>Vector similarity search</td>
-<td>✅ (HNSW ANN)</td>
-<td>Extension only</td>
-</tr>
-<tr>
-<td>Transparent page encryption</td>
-<td>✅ (AES-256-CTR)</td>
-<td>Extension only</td>
-</tr>
-</tbody>
-</table>
-<h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
-<div class="language-go highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="p">(</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span><span class="s">&quot;database/sql&quot;</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nx">_</span><span class="w"> </span><span class="s">&quot;github.com/RichardKnop/minisql&quot;</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">)</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nx">db</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">sql</span><span class="p">.</span><span class="nx">Open</span><span class="p">(</span><span class="s">&quot;minisql&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;./my.db&quot;</span><span class="p">)</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="nx">log</span><span class="p">.</span><span class="nx">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">}</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="c1">// MiniSQL requires exactly one open connection</span>
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="nx">db</span><span class="p">.</span><span class="nx">SetMaxOpenConns</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="nx">db</span><span class="p">.</span><span class="nx">SetMaxIdleConns</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="k">defer</span><span class="w"> </span><span class="nx">db</span><span class="p">.</span><span class="nx">Close</span><span class="p">()</span>
-</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
-</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">db</span><span class="p">.</span><span class="nx">Exec</span><span class="p">(</span><span class="s">`create table &quot;users&quot; (</span>
-</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="s">    id    int8 primary key autoincrement,</span>
-</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="s">    email varchar(255) unique,</span>
-</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="s">    name  text,</span>
-</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="s">    created timestamp default now()</span>
-</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="s">)`</span><span class="p">)</span>
-</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>
-</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">db</span><span class="p">.</span><span class="nx">Exec</span><span class="p">(</span>
-</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="w">    </span><span class="s">`insert into &quot;users&quot; (email, name) values (?, ?)`</span><span class="p">,</span>
-</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="w">    </span><span class="s">&quot;alice@example.com&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Alice&quot;</span><span class="p">,</span>
-</span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="p">)</span>
-</span><span id="__span-0-26"><a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>
-</span><span id="__span-0-27"><a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="nx">rows</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">db</span><span class="p">.</span><span class="nx">Query</span><span class="p">(</span><span class="s">`select id, name from &quot;users&quot; order by id`</span><span class="p">)</span>
-</span><span id="__span-0-28"><a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="k">defer</span><span class="w"> </span><span class="nx">rows</span><span class="p">.</span><span class="nx">Close</span><span class="p">()</span>
-</span><span id="__span-0-29"><a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="k">for</span><span class="w"> </span><span class="nx">rows</span><span class="p">.</span><span class="nx">Next</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
-</span><span id="__span-0-30"><a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="w">    </span><span class="kd">var</span><span class="w"> </span><span class="nx">id</span><span class="w"> </span><span class="kt">int64</span>
-</span><span id="__span-0-31"><a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a><span class="w">    </span><span class="kd">var</span><span class="w"> </span><span class="nx">name</span><span class="w"> </span><span class="kt">string</span>
-</span><span id="__span-0-32"><a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="w">    </span><span class="nx">rows</span><span class="p">.</span><span class="nx">Scan</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">id</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">name</span><span class="p">)</span>
-</span><span id="__span-0-33"><a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="w">    </span><span class="nx">fmt</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;%d  %s\n&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">id</span><span class="p">,</span><span class="w"> </span><span class="nx">name</span><span class="p">)</span>
-</span><span id="__span-0-34"><a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="p">}</span>
+<h1 id="delete">DELETE<a class="headerlink" href="#delete" title="Permanent link">&para;</a></h1>
+<h2 id="basic-syntax">Basic syntax<a class="headerlink" href="#basic-syntax" title="Permanent link">&para;</a></h2>
+<div class="language-sql highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">DELETE</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="k">table_name</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">condition</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">[</span><span class="n">RETURNING</span><span class="w"> </span><span class="n">column_list</span><span class="p">]</span>
 </span></code></pre></div>
-<h2 id="key-characteristics">Key characteristics<a class="headerlink" href="#key-characteristics" title="Permanent link">&para;</a></h2>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>MiniSQL requires a <code>WHERE</code> clause on every <code>DELETE</code>. A DELETE without a WHERE clause is a parse error. To remove all rows, use <code>DELETE FROM table_name WHERE true</code> or <code>TRUNCATE</code> (not yet implemented).</p>
+</div>
+<hr />
+<h2 id="basic-delete">Basic DELETE<a class="headerlink" href="#basic-delete" title="Permanent link">&para;</a></h2>
+<div class="language-sql highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1">-- Delete one row by primary key</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">DELETE</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">users</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1">-- Delete by condition</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="k">DELETE</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">sessions</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">expires</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="s1">&#39;2024-01-01 00:00:00&#39;</span><span class="p">;</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1">-- Delete with multiple conditions</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="k">DELETE</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">user_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;cancelled&#39;</span><span class="p">;</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1">-- Delete with bind parameters</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="k">DELETE</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">tokens</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">user_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="n">token</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">?</span><span class="p">;</span>
+</span></code></pre></div>
+<hr />
+<h2 id="delete-with-returning">DELETE with RETURNING<a class="headerlink" href="#delete-with-returning" title="Permanent link">&para;</a></h2>
+<p><code>RETURNING</code> makes DELETE behave like a query — it returns the deleted rows.</p>
+<div class="language-sql highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1">-- Return the deleted row&#39;s id</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">DELETE</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">users</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="n">RETURNING</span><span class="w"> </span><span class="n">id</span><span class="p">;</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1">-- Return multiple columns</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="k">DELETE</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">sessions</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">expires</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">NOW</span><span class="p">()</span><span class="w"> </span><span class="n">RETURNING</span><span class="w"> </span><span class="n">id</span><span class="p">,</span><span class="w"> </span><span class="n">user_id</span><span class="p">;</span>
+</span></code></pre></div>
+<p>In Go:</p>
+<div class="language-go highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nx">rows</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">db</span><span class="p">.</span><span class="nx">Query</span><span class="p">(</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span><span class="s">`DELETE FROM sessions WHERE expires &lt; ? RETURNING id, user_id`</span><span class="p">,</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nx">time</span><span class="p">.</span><span class="nx">Now</span><span class="p">(),</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="p">)</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="k">defer</span><span class="w"> </span><span class="nx">rows</span><span class="p">.</span><span class="nx">Close</span><span class="p">()</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="k">for</span><span class="w"> </span><span class="nx">rows</span><span class="p">.</span><span class="nx">Next</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="kd">var</span><span class="w"> </span><span class="nx">id</span><span class="p">,</span><span class="w"> </span><span class="nx">userID</span><span class="w"> </span><span class="kt">int64</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="nx">rows</span><span class="p">.</span><span class="nx">Scan</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">id</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">userID</span><span class="p">)</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">    </span><span class="c1">// handle deleted session</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="p">}</span>
+</span></code></pre></div>
+<hr />
+<h2 id="delete-with-subquery">DELETE with subquery<a class="headerlink" href="#delete-with-subquery" title="Permanent link">&para;</a></h2>
+<div class="language-sql highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1">-- Delete orders for banned users</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">DELETE</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">user_id</span><span class="w"> </span><span class="k">IN</span><span class="w"> </span><span class="p">(</span><span class="k">SELECT</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">users</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">banned</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">true</span><span class="p">);</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="c1">-- Delete the oldest sessions, keeping only the 10 most recent per user</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="k">DELETE</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">sessions</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">IN</span><span class="w"> </span><span class="p">(</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">    </span><span class="k">SELECT</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">sessions</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">    </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">created_at</span><span class="w"> </span><span class="k">DESC</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">    </span><span class="k">LIMIT</span><span class="w"> </span><span class="mi">10</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="p">);</span>
+</span></code></pre></div>
+<hr />
+<h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Single file</strong> — the entire database is one <code>*.db</code> file plus a <code>*-wal</code> WAL file.</li>
-<li><strong>Write-Ahead Log</strong> — all-or-nothing commits; safe crash recovery; automatic checkpoint.</li>
-<li><strong>OCC writes + MVCC reads</strong> — one writer at a time; unlimited concurrent readers with snapshot isolation.</li>
-<li><strong>B+ tree storage</strong> — fixed 4 096-byte pages with CRC32 integrity checking on every page.</li>
-<li><strong>Max 64 columns per table</strong> — tracked via a 64-bit NULL bitmask.</li>
-<li><strong><code>database/sql</code> compatible</strong> — works with any Go code that uses the standard <code>database/sql</code> interface.</li>
+<li>Foreign-key constraints are checked on delete when <code>PRAGMA foreign_keys = on</code> (the default). Deleting a parent row that has child rows referencing it returns an error.</li>
+<li><code>RETURNING</code> returns the row values <em>before</em> deletion — useful for audit logging or cascading application logic.</li>
+<li>To delete all rows efficiently, use <code>DELETE FROM table_name WHERE true</code>.</li>
 </ul>
-<h2 id="navigation">Navigation<a class="headerlink" href="#navigation" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Section</th>
-<th>What you'll find</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="getting-started/">Getting Started</a></td>
-<td>Installation, connection, first queries</td>
-</tr>
-<tr>
-<td><a href="connection/">Connection</a></td>
-<td>DSN parameters, connection pooling</td>
-</tr>
-<tr>
-<td><a href="architecture/">Architecture</a></td>
-<td>Storage, WAL, concurrency model</td>
-</tr>
-<tr>
-<td><a href="data-types/">Data Types</a></td>
-<td>All supported column types</td>
-</tr>
-<tr>
-<td><a href="sql/create-table/">SQL Reference</a></td>
-<td>Full SQL syntax reference</td>
-</tr>
-<tr>
-<td><a href="indexes/overview/">Indexes</a></td>
-<td>B-tree, full-text, JSON, HNSW</td>
-</tr>
-<tr>
-<td><a href="functions/string/">Functions</a></td>
-<td>All built-in functions</td>
-</tr>
-<tr>
-<td><a href="json/">JSON</a></td>
-<td>JSON type, operators, inverted index</td>
-</tr>
-<tr>
-<td><a href="vector-search/">Vector Search</a></td>
-<td>VECTOR type and HNSW ANN search</td>
-</tr>
-<tr>
-<td><a href="encryption/">Encryption</a></td>
-<td>Transparent AES-256-CTR encryption</td>
-</tr>
-<tr>
-<td><a href="constraints/">Constraints</a></td>
-<td>CHECK, FK, NOT NULL, UNIQUE</td>
-</tr>
-<tr>
-<td><a href="system-table/">System Table</a></td>
-<td><code>minisql_schema</code> structure</td>
-</tr>
-<tr>
-<td><a href="limitations/">Limitations</a></td>
-<td>Known limitations and workarounds</td>
-</tr>
-</tbody>
-</table>
 
 
 
@@ -1972,15 +1938,31 @@
       
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
+          
+          <a href="../update/" class="md-footer__link md-footer__link--prev" aria-label="Previous: UPDATE">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                UPDATE
+              </div>
+            </div>
+          </a>
+        
         
           
-          <a href="getting-started/" class="md-footer__link md-footer__link--next" aria-label="Next: Getting Started">
+          <a href="../operators/" class="md-footer__link md-footer__link--next" aria-label="Next: Operators &amp; WHERE">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Getting Started
+                Operators & WHERE
               </div>
             </div>
             <div class="md-footer__button md-icon">
@@ -2035,10 +2017,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.path", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "search.share", "content.tabs.link", "content.code.copy", "content.code.annotate", "content.tooltips", "toc.follow"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.path", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "search.share", "content.tabs.link", "content.code.copy", "content.code.annotate", "content.tooltips", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>
