@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"unicode/utf8"
+
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 // insertPrepCache holds the static column-order metadata for a prepared INSERT
@@ -1893,13 +1895,13 @@ func (s Statement) validateColumnValue(table *Table, col Column, val OptionalVal
 		isPkColumn = true
 	}
 	if !val.Valid && isPkColumn && !table.PrimaryKey.Autoincrement {
-		return fmt.Errorf("primary key on field %q cannot be NULL", col.Name)
+		return minisqlErrors.ErrNotNullViolation{Table: table.Name, Column: col.Name}
 	}
 	if !val.Valid && !col.Nullable && !isPkColumn {
-		return fmt.Errorf("field %q cannot be NULL", col.Name)
+		return minisqlErrors.ErrNotNullViolation{Table: table.Name, Column: col.Name}
 	}
 	if err := isValueValidForColumn(col, val); err != nil {
-		return fmt.Errorf("invalid field value: %w", err)
+		return minisqlErrors.ErrTypeMismatch{Table: table.Name, Column: col.Name, Expected: col.Kind.String(), Detail: err.Error()}
 	}
 	return nil
 }

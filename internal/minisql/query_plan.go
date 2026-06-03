@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 // ScanType selects the execution strategy the query planner assigns to a Scan.
@@ -1742,7 +1744,7 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 	if len(p.Scans) == 1 {
 		t, ok := provider.GetTable(ctx, p.Scans[0].TableName)
 		if !ok {
-			return fmt.Errorf("%w: %s", errTableDoesNotExist, p.Scans[0].TableName)
+			return minisqlErrors.ErrNoSuchTable{Name: p.Scans[0].TableName}
 		}
 
 		switch p.Scans[0].Type {
@@ -1775,7 +1777,7 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 	for _, scan := range p.Scans {
 		t, ok := provider.GetTable(ctx, scan.TableName)
 		if !ok {
-			return fmt.Errorf("%w: %s", errTableDoesNotExist, scan.TableName)
+			return minisqlErrors.ErrNoSuchTable{Name: scan.TableName}
 		}
 
 		switch scan.Type {

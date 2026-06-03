@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 var errExplainUnsupportedStatement = errors.New("EXPLAIN currently supports SELECT statements only")
@@ -59,7 +61,7 @@ func (d *Database) executeExplain(ctx context.Context, stmt Statement) (Statemen
 
 	table, ok := d.GetTable(ctx, inner.TableName)
 	if !ok {
-		return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, inner.TableName)
+		return StatementResult{}, minisqlErrors.ErrNoSuchTable{Name: inner.TableName}
 	}
 
 	inner.TableName = table.Name
@@ -170,7 +172,7 @@ func (d *Database) executeExplainCTEs(ctx context.Context, inner Statement, anal
 
 	mainTable, ok := d.GetTable(mainCtx, mainStmt.TableName)
 	if !ok {
-		return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, mainStmt.TableName)
+		return StatementResult{}, minisqlErrors.ErrNoSuchTable{Name: mainStmt.TableName}
 	}
 	mainStmt.Columns = mainTable.Columns
 

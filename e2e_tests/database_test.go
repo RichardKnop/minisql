@@ -3,6 +3,7 @@ package e2etests
 import (
 	_ "github.com/RichardKnop/minisql"
 	"github.com/RichardKnop/minisql/internal/minisql"
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 type schema struct {
@@ -65,7 +66,9 @@ func (s *TestSuite) TestCreateTable() {
 	s.Run("Create table fails if table already exists", func() {
 		_, err := s.db.Exec(createUsersTableSQL)
 		s.Require().Error(err)
-		s.Equal("table already exists", err.Error())
+		var tblExistsErr minisqlErrors.ErrTableAlreadyExists
+		s.Require().ErrorAs(err, &tblExistsErr)
+		s.NotEmpty(tblExistsErr.Name)
 	})
 
 	s.Run("Create table with IF NOT EXISTS does not fail if table exists", func() {

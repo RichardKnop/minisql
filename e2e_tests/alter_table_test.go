@@ -3,6 +3,8 @@ package e2etests
 import (
 	"context"
 	"database/sql"
+
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 // TestAlterTable_AddColumn verifies that a new column can be added to an existing
@@ -243,7 +245,9 @@ func (s *TestSuite) TestAlterTable_RenameTo() {
 	// Old name should be gone.
 	_, err = s.db.ExecContext(ctx, `select * from "items";`)
 	s.Require().Error(err)
-	s.Require().ErrorContains(err, `table does not exist`)
+	var noTblErr minisqlErrors.ErrNoSuchTable
+	s.Require().ErrorAs(err, &noTblErr)
+	s.Equal("items", noTblErr.Name)
 
 	// New name should work.
 	var id int64

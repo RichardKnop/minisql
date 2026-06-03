@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 func TestNewDatabase(t *testing.T) {
@@ -423,7 +425,9 @@ func TestDatabase_CreateIndex(t *testing.T) {
 			return err
 		})
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "table does not exist")
+		var noTblErr minisqlErrors.ErrNoSuchTable
+		require.ErrorAs(t, err, &noTblErr)
+		assert.Equal(t, "bogus", noTblErr.Name)
 	})
 
 	t.Run("Create index", func(t *testing.T) {
@@ -471,7 +475,9 @@ func TestDatabase_CreateIndex(t *testing.T) {
 			return err
 		})
 		require.Error(t, err)
-		assert.ErrorIs(t, err, errIndexAlreadyExists)
+		var idxExistsErr minisqlErrors.ErrIndexAlreadyExists
+		require.ErrorAs(t, err, &idxExistsErr)
+		assert.Equal(t, "foo_bar", idxExistsErr.Name)
 	})
 
 	t.Run("Drop index when index does not exist", func(t *testing.T) {
@@ -484,7 +490,9 @@ func TestDatabase_CreateIndex(t *testing.T) {
 			return err
 		})
 		require.Error(t, err)
-		assert.ErrorIs(t, err, errIndexDoesNotExist)
+		var noIdxErr minisqlErrors.ErrNoSuchIndex
+		require.ErrorAs(t, err, &noIdxErr)
+		assert.Equal(t, "bogus", noIdxErr.Name)
 	})
 
 	t.Run("Drop index", func(t *testing.T) {

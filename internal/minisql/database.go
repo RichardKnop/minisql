@@ -18,10 +18,6 @@ import (
 
 var (
 	errUnrecognizedStatementType = errors.New("unrecognised statement type")
-	errTableDoesNotExist         = errors.New("table does not exist")
-	errTableAlreadyExists        = errors.New("table already exists")
-	errIndexDoesNotExist         = errors.New("index does not exist")
-	errIndexAlreadyExists        = errors.New("index already exists")
 	errIndexOnJSONColumn         = errors.New("b-tree index on JSON column is not supported")
 )
 
@@ -291,7 +287,7 @@ func (d *Database) Reopen(ctx context.Context, factory PagerFactory, saver PageS
 func (d *Database) pagerFactory(ctx context.Context, tableName, indexName string) (Pager, error) {
 	table, ok := d.lockedProvider.GetTable(ctx, tableName)
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", errTableDoesNotExist, tableName)
+		return nil, minisqlErrors.ErrNoSuchTable{Name: tableName}
 	}
 	if indexName == "" {
 		return d.factory.ForTable(table.Columns), nil
@@ -308,7 +304,7 @@ func (d *Database) pagerFactory(ctx context.Context, tableName, indexName string
 			}
 		}
 		if len(columns) == 0 {
-			return nil, errIndexDoesNotExist
+			return nil, minisqlErrors.ErrNoSuchIndex{Name: indexName}
 		}
 	}
 
@@ -546,7 +542,7 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 
 		table, ok := d.GetTable(ctx, stmt.TableName)
 		if !ok {
-			return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, stmt.TableName)
+			return StatementResult{}, minisqlErrors.ErrNoSuchTable{Name: stmt.TableName}
 		}
 
 		return d.executeTableStatement(ctx, table, stmt)
@@ -980,7 +976,7 @@ func (d *Database) executeDDLStatement(ctx context.Context, stmt Statement) (Sta
 			return StatementResult{}, err
 		}
 		if !exists {
-			return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, stmt.TableName)
+			return StatementResult{}, minisqlErrors.ErrNoSuchTable{Name: stmt.TableName}
 		}
 		table, err = d.tableFromSQL(ctx, tableSchema)
 		if err != nil {
@@ -1099,7 +1095,7 @@ func (d *Database) executeUnion(ctx context.Context, stmt Statement) (StatementR
 	for i, s := range stmts {
 		table, ok := d.GetTable(ctx, s.TableName)
 		if !ok {
-			return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, s.TableName)
+			return StatementResult{}, minisqlErrors.ErrNoSuchTable{Name: s.TableName}
 		}
 
 		result, err := d.executeTableStatement(ctx, table, s)
@@ -1173,7 +1169,7 @@ func (d *Database) executeUnionAllStreaming(ctx context.Context, stmts []Stateme
 	for i, s := range stmts {
 		table, ok := d.GetTable(ctx, s.TableName)
 		if !ok {
-			return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, s.TableName)
+			return StatementResult{}, minisqlErrors.ErrNoSuchTable{Name: s.TableName}
 		}
 
 		result, err := d.executeTableStatement(ctx, table, s)
@@ -1221,7 +1217,7 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 		if stmt.IfNotExists {
 			return d.tables[stmt.TableName], nil
 		}
-		return nil, errTableAlreadyExists
+		return nil, minisqlErrors.ErrTableAlreadyExists{Name: stmt.TableName}
 	}
 
 	d.logger.Sugar().With("name", stmt.TableName).Debug("creating table")
@@ -1384,7 +1380,7 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 		return err
 	}
 	if !exists {
-		return fmt.Errorf("%w: %s", errTableDoesNotExist, name)
+		return minisqlErrors.ErrNoSuchTable{Name: name}
 	}
 	tableToDelete := d.tables[name]
 
@@ -1522,7 +1518,7 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, table *Table
 		if stmt.IfNotExists {
 			return nil
 		}
-		return errIndexAlreadyExists
+		return minisqlErrors.ErrIndexAlreadyExists{Name: stmt.IndexName}
 	}
 
 	// Resolve index columns from the table schema, or build a synthetic column for expression indexes.
@@ -2022,7 +2018,7 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 		return err
 	}
 	if !exists {
-		return errIndexDoesNotExist
+		return minisqlErrors.ErrNoSuchIndex{Name: stmt.IndexName}
 	}
 	stmts, err := d.parser.Parse(ctx, schema.DDL)
 	if err != nil {
@@ -2038,7 +2034,7 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 		return err
 	}
 	if !exists {
-		return fmt.Errorf("%w: %s", errTableDoesNotExist, schema.TableName)
+		return minisqlErrors.ErrNoSuchTable{Name: schema.TableName}
 	}
 	table, err := d.tableFromSQL(ctx, tableSchema)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/RichardKnop/minisql/pkg/bloom"
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 const (
@@ -74,7 +75,7 @@ func buildHashBuckets(ctx context.Context, plan QueryPlan, provider TableProvide
 		innerScan := plan.Scans[join.RightScanIndex]
 		innerTable, ok := provider.GetTable(ctx, innerScan.TableName)
 		if !ok {
-			return nil, fmt.Errorf("%w: %s", errTableDoesNotExist, innerScan.TableName)
+			return nil, minisqlErrors.ErrNoSuchTable{Name: innerScan.TableName}
 		}
 		// Size the Bloom filter using the inner table's row-count estimate.
 		// Fall back to bloomMinN when no statistics are available.

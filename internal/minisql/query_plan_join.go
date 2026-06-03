@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 // joinMemo holds precomputed, per-join-level state that is constant across all
@@ -474,7 +476,7 @@ func (t *Table) planJoinQueryGreedy(ctx context.Context, stmt Statement) (QueryP
 			fromTableName := plan.Scans[leftScanIndex].TableName
 			ft, ftOk := t.provider.GetTable(ctx, fromTableName)
 			if !ftOk {
-				return QueryPlan{}, false, fmt.Errorf("%w: %s", errTableDoesNotExist, fromTableName)
+				return QueryPlan{}, false, minisqlErrors.ErrNoSuchTable{Name: fromTableName}
 			}
 			fromTable = ft
 		}
@@ -573,13 +575,13 @@ func (t *Table) flattenJoinTree(
 		} else {
 			fromTable, ok = t.provider.GetTable(ctx, fromScan.TableName)
 			if !ok {
-				return fmt.Errorf("%w: %s", errTableDoesNotExist, fromScan.TableName)
+				return minisqlErrors.ErrNoSuchTable{Name: fromScan.TableName}
 			}
 		}
 
 		joinedTable, ok := t.provider.GetTable(ctx, join.TableName)
 		if !ok {
-			return fmt.Errorf("%w: %s", errTableDoesNotExist, join.TableName)
+			return minisqlErrors.ErrNoSuchTable{Name: join.TableName}
 		}
 
 		joinColumnPairs, err := extractJoinColumnPairs(
@@ -993,7 +995,7 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 	baseScan := p.Scans[0]
 	baseTable, ok := provider.GetTable(ctx, baseScan.TableName)
 	if !ok {
-		return fmt.Errorf("%w: %s", errTableDoesNotExist, baseScan.TableName)
+		return minisqlErrors.ErrNoSuchTable{Name: baseScan.TableName}
 	}
 
 	// Precompute per-join-level state that is constant across all outer rows.
@@ -1004,7 +1006,7 @@ func (p QueryPlan) executeNestedLoopJoin(ctx context.Context, provider TableProv
 		innerScan := p.Scans[join.RightScanIndex]
 		innerTable, innerOK := provider.GetTable(ctx, innerScan.TableName)
 		if !innerOK {
-			return fmt.Errorf("%w: %s", errTableDoesNotExist, innerScan.TableName)
+			return minisqlErrors.ErrNoSuchTable{Name: innerScan.TableName}
 		}
 
 		var combinedCols []Column
@@ -1581,7 +1583,7 @@ func (p QueryPlan) executeRightJoinPass(ctx context.Context, provider TableProvi
 	baseScan := p.Scans[0]
 	baseTable, ok := provider.GetTable(ctx, baseScan.TableName)
 	if !ok {
-		return fmt.Errorf("%w: %s", errTableDoesNotExist, baseScan.TableName)
+		return minisqlErrors.ErrNoSuchTable{Name: baseScan.TableName}
 	}
 	baseFields := fieldsFromColumns(baseTable.Columns...)
 
@@ -1593,7 +1595,7 @@ func (p QueryPlan) executeRightJoinPass(ctx context.Context, provider TableProvi
 		innerScan := p.Scans[join.RightScanIndex]
 		innerTable, ok := provider.GetTable(ctx, innerScan.TableName)
 		if !ok {
-			return fmt.Errorf("%w: %s", errTableDoesNotExist, innerScan.TableName)
+			return minisqlErrors.ErrNoSuchTable{Name: innerScan.TableName}
 		}
 		innerFields := fieldsFromColumns(innerTable.Columns...)
 
@@ -1702,7 +1704,7 @@ func (p QueryPlan) buildRightJoinNullRow(ctx context.Context, provider TableProv
 	baseScan := p.Scans[0]
 	baseTable, ok := provider.GetTable(ctx, baseScan.TableName)
 	if !ok {
-		return Row{}, fmt.Errorf("%w: %s", errTableDoesNotExist, baseScan.TableName)
+		return Row{}, minisqlErrors.ErrNoSuchTable{Name: baseScan.TableName}
 	}
 
 	// Build the combined row scan-by-scan (base first, then each join in order).
@@ -1718,7 +1720,7 @@ func (p QueryPlan) buildRightJoinNullRow(ctx context.Context, provider TableProv
 	} else {
 		join0Table, ok := provider.GetTable(ctx, join0Scan.TableName)
 		if !ok {
-			return Row{}, fmt.Errorf("%w: %s", errTableDoesNotExist, join0Scan.TableName)
+			return Row{}, minisqlErrors.ErrNoSuchTable{Name: join0Scan.TableName}
 		}
 		firstInnerRow = nullRowForColumns(join0Table.Columns)
 	}
@@ -1735,7 +1737,7 @@ func (p QueryPlan) buildRightJoinNullRow(ctx context.Context, provider TableProv
 		} else {
 			jiTable, ok := provider.GetTable(ctx, jiScan.TableName)
 			if !ok {
-				return Row{}, fmt.Errorf("%w: %s", errTableDoesNotExist, jiScan.TableName)
+				return Row{}, minisqlErrors.ErrNoSuchTable{Name: jiScan.TableName}
 			}
 			innerRow = nullRowForColumns(jiTable.Columns)
 		}

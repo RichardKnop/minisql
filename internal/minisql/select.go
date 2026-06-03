@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 // ErrNoMoreRows is returned by an Iterator's row function when the result set is exhausted.
@@ -1919,7 +1921,7 @@ func (t *Table) selectHashJoinDirectRowView(
 	outerScan := plan.Scans[0]
 	outerTable, ok := t.provider.GetTable(ctx, outerScan.TableName)
 	if !ok {
-		return StatementResult{}, true, fmt.Errorf("%w: %s", errTableDoesNotExist, outerScan.TableName)
+		return StatementResult{}, true, minisqlErrors.ErrNoSuchTable{Name: outerScan.TableName}
 	}
 	if outerTable.virtualRows != nil || outerTable.parallelScan {
 		return StatementResult{}, false, nil
@@ -1932,7 +1934,7 @@ func (t *Table) selectHashJoinDirectRowView(
 
 	innerTable, ok := t.provider.GetTable(ctx, innerScan.TableName)
 	if !ok {
-		return StatementResult{}, true, fmt.Errorf("%w: %s", errTableDoesNotExist, innerScan.TableName)
+		return StatementResult{}, true, minisqlErrors.ErrNoSuchTable{Name: innerScan.TableName}
 	}
 
 	combinedCols := buildCombinedColumns(outerTable.Columns, outerScan.TableAlias, innerTable.Columns, innerScan.TableAlias)
@@ -2019,7 +2021,7 @@ func (t *Table) selectINLJDirectRowView(
 	outerScan := plan.Scans[0]
 	outerTable, ok := t.provider.GetTable(ctx, outerScan.TableName)
 	if !ok {
-		return StatementResult{}, true, fmt.Errorf("%w: %s", errTableDoesNotExist, outerScan.TableName)
+		return StatementResult{}, true, minisqlErrors.ErrNoSuchTable{Name: outerScan.TableName}
 	}
 	if outerTable.virtualRows != nil || outerTable.parallelScan {
 		return StatementResult{}, false, nil
@@ -2039,7 +2041,7 @@ func (t *Table) selectINLJDirectRowView(
 
 	innerTable, ok := t.provider.GetTable(ctx, innerScan.TableName)
 	if !ok {
-		return StatementResult{}, true, fmt.Errorf("%w: %s", errTableDoesNotExist, innerScan.TableName)
+		return StatementResult{}, true, minisqlErrors.ErrNoSuchTable{Name: innerScan.TableName}
 	}
 	if !innerTable.isUniquePointIndex(innerScan.IndexName) {
 		return StatementResult{}, false, nil

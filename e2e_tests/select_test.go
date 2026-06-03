@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 func (s *TestSuite) TestSelect() {
@@ -52,7 +53,9 @@ values(100, 'Johnathan_Walker250+new@ptr6k.page', 'Johnathan Walker', '2024-01-0
 values('Johnathan Walker', 'Johnathan_Walker250@ptr6k.page', '2024-01-02 15:30:27');`)
 		s.Require().Error(err)
 		s.Require().ErrorIs(err, minisql.ErrDuplicateKey)
-		s.Equal("failed to insert key for unique index key__users__email: duplicate key", err.Error())
+		var uvErr minisqlErrors.ErrUniqueViolation
+		s.Require().ErrorAs(err, &uvErr)
+		s.Equal("users", uvErr.Table)
 		s.Nil(result)
 	})
 
