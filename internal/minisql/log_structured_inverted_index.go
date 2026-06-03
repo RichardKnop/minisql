@@ -1533,24 +1533,9 @@ func (idx *logStructuredInvertedIndex) compactOldestSegmentRun(ctx context.Conte
 			return false, err
 		}
 	} else {
-		var cells []invertedSegmentCell
-		var postingCount uint32
-		cells, postingCount, err = idx.mergeSegmentRunCells(ctx, run)
+		writeResult, err = idx.mergePostingSegmentRun(ctx, run)
 		if err != nil {
 			return false, err
-		}
-		sortSegmentCells(cells)
-		rootPage, err := idx.writeSegmentCells(ctx, cells)
-		if err != nil {
-			return false, err
-		}
-		firstTerm, lastTerm := segmentTermBounds(cells)
-		writeResult = invertedSegmentWriteResult{
-			rootPage:     rootPage,
-			postingCount: postingCount,
-			kind:         segmentCellsKind(cells),
-			firstTerm:    firstTerm,
-			lastTerm:     lastTerm,
 		}
 	}
 	nextLevel := run[len(run)-1].Level + 1
@@ -1585,78 +1570,6 @@ func (idx *logStructuredInvertedIndex) compactOldestSegmentRun(ctx context.Conte
 	return true, nil
 }
 
-func (idx *logStructuredInvertedIndex) mergeSegmentRunCells(
-	ctx context.Context,
-	segments []invertedSegmentDescriptor,
-) ([]invertedSegmentCell, uint32, error) {
-	if idx.Mode() == invertedPostingModeRowIDs {
-		return idx.mergeRowIDSegmentRunCells(ctx, segments)
-	}
-
-	states, err := idx.reduceSegmentStates(ctx, segments)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	terms := sortedSegmentStateTerms(states)
-	var cells []invertedSegmentCell
-	var totalPostingCount uint32
-	for _, term := range terms {
-		state := states[term]
-		deletePostings := postingsFromMap(state.deletes)
-		deleteCells, deletePostingCount, err := idx.segmentCellsForPostings(invertedSegmentKindDelete, term, deletePostings)
-		if err != nil {
-			return nil, 0, err
-		}
-		insertPostings := postingsFromMap(state.inserts)
-		insertCells, insertPostingCount, err := idx.segmentCellsForPostings(invertedSegmentKindInsert, term, insertPostings)
-		if err != nil {
-			return nil, 0, err
-		}
-		cells = append(cells, deleteCells...)
-		cells = append(cells, insertCells...)
-		totalPostingCount += deletePostingCount + insertPostingCount
-	}
-	if len(cells) == 0 {
-		return nil, 0, fmt.Errorf("cannot merge empty inverted segment run")
-	}
-	return cells, totalPostingCount, nil
-}
-
-func (idx *logStructuredInvertedIndex) mergeRowIDSegmentRunCells(
-	ctx context.Context,
-	segments []invertedSegmentDescriptor,
-) ([]invertedSegmentCell, uint32, error) {
-	states, err := idx.reduceRowIDSegmentStates(ctx, segments)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	terms := sortedRowIDSegmentStateTerms(states)
-	var cells []invertedSegmentCell
-	var totalPostingCount uint32
-	for _, term := range terms {
-		state := states[term]
-		deleteRowIDs := sortedRowIDsFromSet(state.deletes)
-		deleteCells, deletePostingCount, err := segmentCellsForRowIDs(invertedSegmentKindDelete, term, deleteRowIDs)
-		if err != nil {
-			return nil, 0, err
-		}
-		insertRowIDs := sortedRowIDsFromSet(state.inserts)
-		insertCells, insertPostingCount, err := segmentCellsForRowIDs(invertedSegmentKindInsert, term, insertRowIDs)
-		if err != nil {
-			return nil, 0, err
-		}
-		cells = append(cells, deleteCells...)
-		cells = append(cells, insertCells...)
-		totalPostingCount += deletePostingCount + insertPostingCount
-	}
-	if len(cells) == 0 {
-		return nil, 0, fmt.Errorf("cannot merge empty inverted segment run")
-	}
-	return cells, totalPostingCount, nil
-}
-
 type segmentTermState struct {
 	inserts map[RowID]invertedPosting
 	deletes map[RowID]invertedPosting
@@ -1665,50 +1578,6 @@ type segmentTermState struct {
 type rowIDSegmentTermState struct {
 	inserts map[RowID]struct{}
 	deletes map[RowID]struct{}
-}
-
-func (idx *logStructuredInvertedIndex) reduceRowIDSegmentStates(
-	ctx context.Context,
-	segments []invertedSegmentDescriptor,
-) (map[string]rowIDSegmentTermState, error) {
-	states := make(map[string]rowIDSegmentTermState)
-	for _, segment := range segments {
-		if err := idx.visitSegmentCells(ctx, segment.RootPage, func(cell invertedSegmentCell) error {
-			kind := segment.Kind
-			if kind == invertedSegmentKindMixed {
-				kind = cell.Kind
-			}
-			state := states[cell.Term]
-			if kind == invertedSegmentKindInsert && state.inserts == nil {
-				state.inserts = make(map[RowID]struct{})
-			}
-			if kind == invertedSegmentKindDelete && state.deletes == nil {
-				state.deletes = make(map[RowID]struct{})
-			}
-			mode, err := forEachInvertedPostingRowID(cell.Block.Payload, func(rowID RowID) error {
-				switch kind {
-				case invertedSegmentKindInsert:
-					applyRowIDSegmentStateInsert(state, rowID)
-				case invertedSegmentKindDelete:
-					applyRowIDSegmentStateDelete(state, rowID)
-				default:
-					return fmt.Errorf("unknown inverted segment kind %d", kind)
-				}
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-			if mode != idx.Mode() {
-				return fmt.Errorf("inverted segment block uses posting mode %d, expected %d", mode, idx.Mode())
-			}
-			states[cell.Term] = state
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-	}
-	return states, nil
 }
 
 func applyRowIDSegmentStateInsert(state rowIDSegmentTermState, rowID RowID) {
@@ -1808,15 +1677,6 @@ func applySegmentStateDelete(mode invertedPostingMode, state segmentTermState, p
 }
 
 func sortedSegmentStateTerms(states map[string]segmentTermState) []string {
-	terms := make([]string, 0, len(states))
-	for term := range states {
-		terms = append(terms, term)
-	}
-	sort.Strings(terms)
-	return terms
-}
-
-func sortedRowIDSegmentStateTerms(states map[string]rowIDSegmentTermState) []string {
 	terms := make([]string, 0, len(states))
 	for term := range states {
 		terms = append(terms, term)
@@ -2060,19 +1920,6 @@ func sortSegmentCells(cells []invertedSegmentCell) {
 		}
 		return invertedSegmentCellKindOrder(cells[i].Kind) < invertedSegmentCellKindOrder(cells[j].Kind)
 	})
-}
-
-func segmentCellsKind(cells []invertedSegmentCell) byte {
-	if len(cells) == 0 {
-		return invertedSegmentKindMixed
-	}
-	kind := cells[0].Kind
-	for _, cell := range cells[1:] {
-		if cell.Kind != kind {
-			return invertedSegmentKindMixed
-		}
-	}
-	return kind
 }
 
 func invertedSegmentCellKindOrder(kind byte) int {

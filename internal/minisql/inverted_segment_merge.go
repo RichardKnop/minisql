@@ -62,14 +62,14 @@ func (idx *logStructuredInvertedIndex) mergeRowIDSegmentRun(
 	ctx context.Context,
 	segments []invertedSegmentDescriptor,
 ) (invertedSegmentWriteResult, error) {
-	segments, cursors, err := idx.rowIDSegmentCursors(ctx, segments)
+	segments, cursors, err := idx.segmentCursors(ctx, segments)
 	if err != nil {
 		return invertedSegmentWriteResult{}, err
 	}
 
 	writer := idx.newSegmentWriter(ctx)
 	for {
-		term, ok := nextRowIDSegmentTerm(cursors)
+		term, ok := nextSegmentTerm(cursors)
 		if !ok {
 			break
 		}
@@ -91,17 +91,50 @@ func (idx *logStructuredInvertedIndex) mergeRowIDSegmentRun(
 	return writer.finish()
 }
 
+func (idx *logStructuredInvertedIndex) mergePostingSegmentRun(
+	ctx context.Context,
+	segments []invertedSegmentDescriptor,
+) (invertedSegmentWriteResult, error) {
+	segments, cursors, err := idx.segmentCursors(ctx, segments)
+	if err != nil {
+		return invertedSegmentWriteResult{}, err
+	}
+
+	writer := idx.newSegmentWriter(ctx)
+	for {
+		term, ok := nextSegmentTerm(cursors)
+		if !ok {
+			break
+		}
+		state := segmentTermState{}
+		for i, cursor := range cursors {
+			for cursor.ok && cursor.cell.Term == term {
+				if err := idx.applySegmentCellState(segments[i], cursor.cell, &state); err != nil {
+					return invertedSegmentWriteResult{}, err
+				}
+				if err := cursor.advance(); err != nil {
+					return invertedSegmentWriteResult{}, err
+				}
+			}
+		}
+		if err := idx.appendSegmentTermState(writer, term, state); err != nil {
+			return invertedSegmentWriteResult{}, err
+		}
+	}
+	return writer.finish()
+}
+
 func (idx *logStructuredInvertedIndex) applyRowIDSegmentsToBase(
 	ctx context.Context,
 	segments []invertedSegmentDescriptor,
 ) error {
-	segments, cursors, err := idx.rowIDSegmentCursors(ctx, segments)
+	segments, cursors, err := idx.segmentCursors(ctx, segments)
 	if err != nil {
 		return err
 	}
 
 	for {
-		term, ok := nextRowIDSegmentTerm(cursors)
+		term, ok := nextSegmentTerm(cursors)
 		if !ok {
 			break
 		}
@@ -125,7 +158,7 @@ func (idx *logStructuredInvertedIndex) applyRowIDSegmentsToBase(
 	return nil
 }
 
-func (idx *logStructuredInvertedIndex) rowIDSegmentCursors(
+func (idx *logStructuredInvertedIndex) segmentCursors(
 	ctx context.Context,
 	segments []invertedSegmentDescriptor,
 ) ([]invertedSegmentDescriptor, []*invertedSegmentCellCursor, error) {
@@ -144,7 +177,7 @@ func (idx *logStructuredInvertedIndex) rowIDSegmentCursors(
 	return segments, cursors, nil
 }
 
-func nextRowIDSegmentTerm(cursors []*invertedSegmentCellCursor) (string, bool) {
+func nextSegmentTerm(cursors []*invertedSegmentCellCursor) (string, bool) {
 	var term string
 	ok := false
 	for _, cursor := range cursors {
@@ -202,6 +235,68 @@ func appendRowIDSegmentTermState(
 		return err
 	}
 	insertCells, _, err := segmentCellsForRowIDs(invertedSegmentKindInsert, term, sortedRowIDsFromSet(state.inserts))
+	if err != nil {
+		return err
+	}
+	for _, cell := range deleteCells {
+		if err := writer.append(cell); err != nil {
+			return err
+		}
+	}
+	for _, cell := range insertCells {
+		if err := writer.append(cell); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (idx *logStructuredInvertedIndex) applySegmentCellState(
+	segment invertedSegmentDescriptor,
+	cell invertedSegmentCell,
+	state *segmentTermState,
+) error {
+	kind := segment.Kind
+	if kind == invertedSegmentKindMixed {
+		kind = cell.Kind
+	}
+	if kind == invertedSegmentKindInsert && state.inserts == nil {
+		state.inserts = make(map[RowID]invertedPosting)
+	}
+	if kind == invertedSegmentKindDelete && state.deletes == nil {
+		state.deletes = make(map[RowID]invertedPosting)
+	}
+	mode, err := forEachInvertedPostingPosition(cell.Block.Payload, func(rowID RowID, positions []uint32) error {
+		posting := invertedPosting{RowID: rowID, Positions: positions}
+		switch kind {
+		case invertedSegmentKindInsert:
+			applySegmentStateInsert(idx.Mode(), *state, posting)
+		case invertedSegmentKindDelete:
+			applySegmentStateDelete(idx.Mode(), *state, posting)
+		default:
+			return fmt.Errorf("unknown inverted segment kind %d", kind)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if mode != idx.Mode() {
+		return fmt.Errorf("inverted segment block uses posting mode %d, expected %d", mode, idx.Mode())
+	}
+	return nil
+}
+
+func (idx *logStructuredInvertedIndex) appendSegmentTermState(
+	writer *invertedSegmentWriter,
+	term string,
+	state segmentTermState,
+) error {
+	deleteCells, _, err := idx.segmentCellsForPostings(invertedSegmentKindDelete, term, postingsFromMap(state.deletes))
+	if err != nil {
+		return err
+	}
+	insertCells, _, err := idx.segmentCellsForPostings(invertedSegmentKindInsert, term, postingsFromMap(state.inserts))
 	if err != nil {
 		return err
 	}
