@@ -63,11 +63,7 @@ func (t *Table) insertUniqueIndexKey(ctx context.Context, uniqueIndex UniqueInde
 
 	if err := uniqueIndex.Index.Insert(ctx, castedKey, rowID); err != nil {
 		if errors.Is(err, ErrDuplicateKey) {
-			cols := make([]string, len(uniqueIndex.Columns))
-			for i, c := range uniqueIndex.Columns {
-				cols[i] = c.Name
-			}
-			return minisqlErrors.NewUniqueViolation(t.Name, uniqueIndex.Name, cols, err)
+			return newUniqueViolationError(t.Name, uniqueIndex.Name, uniqueIndex.Columns, err)
 		}
 		return fmt.Errorf("failed to insert key for unique index %s: %w", uniqueIndex.Name, err)
 	}
@@ -106,11 +102,7 @@ func (t *Table) insertUniqueCompositeIndexKey(ctx context.Context, uniqueIndex U
 
 	if err := uniqueIndex.Index.Insert(ctx, ck, rowID); err != nil {
 		if errors.Is(err, ErrDuplicateKey) {
-			cols := make([]string, len(uniqueIndex.Columns))
-			for i, c := range uniqueIndex.Columns {
-				cols[i] = c.Name
-			}
-			return minisqlErrors.NewUniqueViolation(t.Name, uniqueIndex.Name, cols, err)
+			return newUniqueViolationError(t.Name, uniqueIndex.Name, uniqueIndex.Columns, err)
 		}
 		return fmt.Errorf("failed to insert key for unique index %s: %w", uniqueIndex.Name, err)
 	}
@@ -154,11 +146,7 @@ func (t *Table) updateUniqueIndexKey(ctx context.Context, uniqueIndex UniqueInde
 		// If the new index key is already taken, we return an error without modifying the existing row
 		if err := uniqueIndex.Index.Insert(ctx, castedKey, rowID); err != nil {
 			if errors.Is(err, ErrDuplicateKey) {
-				cols := make([]string, len(uniqueIndex.Columns))
-				for i, c := range uniqueIndex.Columns {
-					cols[i] = c.Name
-				}
-				return minisqlErrors.NewUniqueViolation(t.Name, uniqueIndex.Name, cols, err)
+				return newUniqueViolationError(t.Name, uniqueIndex.Name, uniqueIndex.Columns, err)
 			}
 			return fmt.Errorf("failed to insert key for unique index %s: %w", uniqueIndex.Name, err)
 		}
@@ -219,11 +207,7 @@ func (t *Table) updateCompositeUniqueIndexKey(ctx context.Context, uniqueIndex U
 		ck := NewCompositeKey(uniqueIndex.Columns, newKeyValues...)
 		if err := uniqueIndex.Index.Insert(ctx, ck, rowID); err != nil {
 			if errors.Is(err, ErrDuplicateKey) {
-				cols := make([]string, len(uniqueIndex.Columns))
-				for i, c := range uniqueIndex.Columns {
-					cols[i] = c.Name
-				}
-				return minisqlErrors.NewUniqueViolation(t.Name, uniqueIndex.Name, cols, err)
+				return newUniqueViolationError(t.Name, uniqueIndex.Name, uniqueIndex.Columns, err)
 			}
 			return fmt.Errorf("failed to insert key for unique index %s: %w", uniqueIndex.Name, err)
 		}
@@ -238,4 +222,12 @@ func (t *Table) updateCompositeUniqueIndexKey(ctx context.Context, uniqueIndex U
 	}
 
 	return nil
+}
+
+func newUniqueViolationError(tableName, indexName string, columns []Column, cause error) error {
+	cols := make([]string, len(columns))
+	for i, c := range columns {
+		cols[i] = c.Name
+	}
+	return minisqlErrors.NewUniqueViolation(tableName, indexName, cols, cause)
 }

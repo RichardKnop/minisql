@@ -1,6 +1,8 @@
 package errors
 
-import "fmt"
+import (
+	"fmt"
+)
 
 // ErrNoSuchTable is returned when a statement references a table that does not
 // exist in the database schema.
