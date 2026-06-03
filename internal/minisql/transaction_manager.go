@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	pkgcrypto "github.com/RichardKnop/minisql/pkg/crypto"
 	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
@@ -41,6 +42,7 @@ type TransactionManager struct {
 	checkpointFn         func() error
 	rowCountApplier      func(map[string]int64)
 	logger               *zap.Logger
+	cipher               *pkgcrypto.PageCipher // nil when encryption is disabled
 	pageLastCommittedSeq map[PageIndex]uint64
 	pageVersionHistory   map[PageIndex][]pageVersion
 	commitHook           func(commitPhase)
@@ -81,6 +83,13 @@ func NewTransactionManager(logger *zap.Logger, dbFilePath string, factory TxPage
 		saver:                saver,
 		ddlSaver:             ddlSaver,
 	}
+}
+
+// SetCipher wires an AES-256-CTR cipher into the transaction manager so that
+// WAL frames are encrypted before being written and decrypted after being read.
+// Must be called before any concurrent transaction begins.
+func (tm *TransactionManager) SetCipher(c *pkgcrypto.PageCipher) {
+	tm.cipher = c
 }
 
 // SetCheckpointFunc registers a callback that is invoked by runAutoCheckpoint
@@ -606,6 +615,11 @@ func (tm *TransactionManager) serializeWritesForWAL(ctx context.Context, tx *Tra
 		// Embed the page checksum so that WAL checkpoint can copy the frame
 		// verbatim to the DB file and GetPage can verify it on next open.
 		writePageChecksum(frame)
+		// Encrypt the B-tree + checksum portion (frame[100:4096]); the header
+		// (frame[0:100]) stays plaintext so the salt can be read on startup.
+		if tm.cipher != nil {
+			tm.cipher.XORKeyStream(frame[RootPageConfigSize:], 0)
+		}
 		pages = append(pages, WALPage{Index: 0, Data: frame})
 	}
 
@@ -620,6 +634,9 @@ func (tm *TransactionManager) serializeWritesForWAL(ctx context.Context, tx *Tra
 			return nil, fmt.Errorf("marshal page %d for WAL: %w", pageIdx, err)
 		}
 		writePageChecksum(buf)
+		if tm.cipher != nil {
+			tm.cipher.XORKeyStream(buf, uint32(pageIdx))
+		}
 		pages = append(pages, WALPage{Index: pageIdx, Data: buf})
 	}
 

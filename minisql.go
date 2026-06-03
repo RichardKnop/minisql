@@ -131,6 +131,9 @@ func (d *Driver) newDB(config *ConnectionConfig) (*minisql.Database, error) {
 	if config.ParallelScan {
 		dbOpts = append(dbOpts, minisql.WithParallelScanEnabled())
 	}
+	if len(config.EncryptionKey) > 0 {
+		dbOpts = append(dbOpts, minisql.WithEncryptionKey(config.EncryptionKey))
+	}
 
 	return minisql.NewDatabase(
 		context.Background(),

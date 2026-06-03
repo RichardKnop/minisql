@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -42,6 +43,7 @@ type ConnectionConfig struct {
 	SlowQueryThreshold     time.Duration   // Log queries at WARN when elapsed time meets or exceeds this duration (0 = disabled)
 	Synchronous            SynchronousMode // WAL fsync mode: off, normal (default), full
 	ParallelScan           bool            // Enable concurrent leaf-page scanning (default: false)
+	EncryptionKey          []byte          // AES-256-CTR page encryption key (nil = no encryption)
 }
 
 // DefaultConnectionConfig returns default configuration.
@@ -68,6 +70,7 @@ func DefaultConnectionConfig(filePath string) *ConnectionConfig {
 //   - slow_query_threshold=50ms         : Log queries taking at least this long (0 = disabled)
 //   - synchronous=off|normal|full       : WAL fsync mode (default: normal, matching SQLite WAL default)
 //   - parallel_scan=on|off              : Enable concurrent leaf-page scanning (default: off)
+//   - encryption_key=<hex>             : Hex-encoded AES-256-CTR encryption key (default: no encryption)
 //
 // Examples:
 //   - "./my.db"                                       : Default settings
@@ -76,6 +79,7 @@ func DefaultConnectionConfig(filePath string) *ConnectionConfig {
 //   - "./my.db?wal_write_buffer_size=0"               : Disable write batching (flush every commit)
 //   - "./my.db?synchronous=full"                      : fsync on every commit (maximum durability)
 //   - "./my.db?parallel_scan=on"                      : Enable parallel full table scans
+//   - "./my.db?encryption_key=deadbeef..."            : Enable transparent page encryption
 //   - "./my.db?log_level=info&max_cached_pages=500"   : Multiple parameters
 func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 	// Split on first '?' to separate path from query params
@@ -168,6 +172,18 @@ func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 		default:
 			return nil, fmt.Errorf("invalid parallel_scan parameter: expected on or off, got %q", psStr)
 		}
+	}
+
+	// Parse encryption_key parameter (hex-encoded)
+	if keyHex := queryParams.Get("encryption_key"); keyHex != "" {
+		key, err := hex.DecodeString(keyHex)
+		if err != nil {
+			return nil, fmt.Errorf("invalid encryption_key parameter: must be a hex-encoded string: %w", err)
+		}
+		if len(key) == 0 {
+			return nil, fmt.Errorf("invalid encryption_key parameter: key must not be empty")
+		}
+		config.EncryptionKey = key
 	}
 
 	return config, nil

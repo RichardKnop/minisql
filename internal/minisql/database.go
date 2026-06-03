@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"math"
@@ -12,6 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
+	pkgcrypto "github.com/RichardKnop/minisql/pkg/crypto"
 	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 	"github.com/RichardKnop/minisql/pkg/lrucache"
 )
@@ -62,6 +64,9 @@ type Database struct {
 	// foreignKeysEnabled controls whether FK constraints are enforced.
 	// Default true; toggled by PRAGMA foreign_keys = on|off.
 	foreignKeysEnabled bool
+	// encryptionKey holds the caller-supplied raw key material used to derive
+	// the AES-256-CTR page cipher.  nil when encryption is disabled.
+	encryptionKey []byte
 }
 
 type clock func() Time
@@ -120,6 +125,10 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, par
 
 	for _, opt := range opts {
 		opt(db)
+	}
+
+	if err := db.setupEncryption(ctx); err != nil {
+		return nil, fmt.Errorf("setup encryption: %w", err)
 	}
 
 	if err := db.txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
@@ -271,6 +280,14 @@ func (d *Database) Reopen(ctx context.Context, factory PagerFactory, saver PageS
 		d.txManager.walIndex = d.walIndex
 		d.txManager.checkpointThreshold = checkpointThreshold
 		d.txManager.SetCheckpointFunc(checkpointFn)
+	}
+
+	// Re-inject the cipher into the new pager and transaction manager so that
+	// encrypted databases continue to work after a reopen (e.g. after VACUUM).
+	if len(d.encryptionKey) > 0 {
+		if err := d.setupEncryption(ctx); err != nil {
+			return fmt.Errorf("reopen: restore encryption: %w", err)
+		}
 	}
 
 	// Use a fresh context so init runs in a brand-new transaction on the new
@@ -548,6 +565,101 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 		return d.executeTableStatement(ctx, table, stmt)
 	}
 	return StatementResult{}, errUnrecognizedStatementType
+}
+
+// setupEncryption inspects d.encryptionKey and the current database state to
+// configure transparent AES-256-CTR page encryption.
+//
+//   - New database (no pages anywhere) + key supplied: generates a random 32-byte
+//     salt, stores it in the in-memory pager header, and installs the cipher.
+//   - Existing encrypted database + matching key: reads salt from the header and
+//     installs the cipher.
+//   - Any mismatch (key without encrypted DB, encrypted DB without key): error.
+func (d *Database) setupEncryption(ctx context.Context) error {
+	if len(d.encryptionKey) == 0 {
+		// No key supplied: verify the existing database is not encrypted.
+		// Check the main file header first; fall back to the WAL index when the
+		// main file is empty (WAL-only mode after a clean shutdown without checkpoint).
+		var hdr DatabaseHeader
+		if p, ok := d.saver.(*pagerImpl); ok {
+			if p.TotalPages() > 0 {
+				hdr = p.GetHeader(ctx)
+			} else if d.walIndex != nil && d.walIndex.Size() > 0 {
+				if walData, ok2 := d.walIndex.Lookup(0); ok2 {
+					_ = UnmarshalDatabaseHeader(walData[:RootPageConfigSize], &hdr)
+				}
+			}
+		}
+		if hdr.EncryptionMode != EncryptionModeNone {
+			return fmt.Errorf("database is encrypted (mode %d) but no encryption key was provided", hdr.EncryptionMode)
+		}
+		return nil
+	}
+
+	key := d.encryptionKey
+	totalPages := d.saver.TotalPages()
+	walEmpty := d.walIndex == nil || d.walIndex.Size() == 0
+
+	var salt []byte
+
+	if totalPages == 0 && walEmpty {
+		// Brand-new database: generate a fresh random salt and record it in the
+		// in-memory pager header so that the first page-0 WAL frame includes it.
+		saltBuf := make([]byte, 32)
+		if _, err := rand.Read(saltBuf); err != nil {
+			return fmt.Errorf("generate encryption salt: %w", err)
+		}
+		salt = saltBuf
+
+		if p, ok := d.saver.(*pagerImpl); ok {
+			hdr := p.GetHeader(ctx)
+			hdr.EncryptionMode = EncryptionModeAES256CTR
+			copy(hdr.EncryptionSalt[:], salt)
+			p.SaveHeader(ctx, hdr)
+		}
+	} else {
+		// Existing database: read the header to get the stored salt.
+		var hdr DatabaseHeader
+		if totalPages > 0 {
+			if p, ok := d.saver.(*pagerImpl); ok {
+				hdr = p.GetHeader(ctx)
+			}
+		} else {
+			// WAL-only mode: peek at the WAL index directly.  The first 100 bytes
+			// of the page-0 frame are always plaintext header so the salt is
+			// readable before the cipher is bootstrapped.
+			walData, ok := d.walIndex.Lookup(0)
+			if !ok {
+				return fmt.Errorf("WAL-only mode but no page 0 in WAL index")
+			}
+			if err := UnmarshalDatabaseHeader(walData[:RootPageConfigSize], &hdr); err != nil {
+				return fmt.Errorf("read encryption header from WAL: %w", err)
+			}
+		}
+
+		if hdr.EncryptionMode == EncryptionModeNone {
+			return fmt.Errorf("an encryption key was provided but the database is not encrypted; " +
+				"to enable encryption, create a new database or use an already-encrypted one")
+		}
+		if hdr.EncryptionMode != EncryptionModeAES256CTR {
+			return fmt.Errorf("unsupported encryption mode %d in database header", hdr.EncryptionMode)
+		}
+		salt = hdr.EncryptionSalt[:]
+	}
+
+	cipher, err := pkgcrypto.NewPageCipher(key, salt)
+	if err != nil {
+		return fmt.Errorf("create page cipher: %w", err)
+	}
+
+	// Inject cipher into the pager (for read/write of DB file pages and WAL
+	// index pages) and into the transaction manager (for WAL serialization).
+	if p, ok := d.saver.(*pagerImpl); ok {
+		p.SetCipher(cipher)
+	}
+	d.txManager.SetCipher(cipher)
+
+	return nil
 }
 
 func (d *Database) init(ctx context.Context) error {

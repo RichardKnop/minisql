@@ -57,7 +57,11 @@ func (d *Database) Vacuum(ctx context.Context) error {
 		return fmt.Errorf("vacuum: create temp pager: %w", err)
 	}
 
-	tempDB, err := NewDatabase(context.Background(), d.logger, tempFile, d.parser, tempPager, tempPager, nil)
+	tempDBOpts := []DatabaseOption{}
+	if len(d.encryptionKey) > 0 {
+		tempDBOpts = append(tempDBOpts, WithEncryptionKey(d.encryptionKey))
+	}
+	tempDB, err := NewDatabase(context.Background(), d.logger, tempFile, d.parser, tempPager, tempPager, nil, tempDBOpts...)
 	if err != nil {
 		return fmt.Errorf("vacuum: init temp database: %w", err)
 	}

@@ -38,3 +38,22 @@ func WithParallelScanEnabled() DatabaseOption {
 		d.parallelScan = true
 	}
 }
+
+// WithEncryptionKey enables transparent AES-256-CTR page encryption using key.
+// The key is never written to disk; a random per-database salt is stored in the
+// plaintext database header and used to derive the actual AES key via HKDF.
+//
+// Rules:
+//   - New databases: a fresh salt is generated and encryption is set up.
+//   - Existing encrypted databases: the stored salt is read and combined with key.
+//   - Mismatched state (key provided for unencrypted DB or vice-versa): error.
+//
+// The key must not be empty.  Any length is accepted; longer keys provide more
+// entropy but the derived key is always 256 bits regardless.
+func WithEncryptionKey(key []byte) DatabaseOption {
+	return func(d *Database) {
+		if len(key) > 0 {
+			d.encryptionKey = key
+		}
+	}
+}

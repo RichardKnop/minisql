@@ -9,6 +9,7 @@ import (
 	"io"
 	"sync"
 
+	pkgcrypto "github.com/RichardKnop/minisql/pkg/crypto"
 	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 	"github.com/RichardKnop/minisql/pkg/lrucache"
 )
@@ -35,6 +36,7 @@ type pagerImpl struct {
 	file           DBFile
 	bufferPool     *sync.Pool
 	walIndex       *WALIndex
+	cipher         *pkgcrypto.PageCipher // nil when encryption is disabled
 	pages          []*Page
 	pageSize       int
 	maxCachedPages int
@@ -111,6 +113,13 @@ func (p *pagerImpl) SetWALIndex(walIndex *WALIndex) {
 	}
 }
 
+// SetCipher wires an AES-256-CTR cipher into the pager.  Once set, GetPage
+// decrypts pages after reading them, and Flush/FlushBatch encrypt pages before
+// writing them.  Must be called before any concurrent page access begins.
+func (p *pagerImpl) SetCipher(c *pkgcrypto.PageCipher) {
+	p.cipher = c
+}
+
 // Close syncs the file to ensure pending writes are flushed, then closes it.
 func (p *pagerImpl) Close() error {
 	if err := fastSync(p.file); err != nil {
@@ -158,6 +167,17 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 	// a page.
 	if wi != nil {
 		if walData, ok := wi.Lookup(pageIdx); ok {
+			// Decrypt a copy so we never mutate the shared WAL index buffer.
+			if p.cipher != nil {
+				decrypted := make([]byte, len(walData))
+				copy(decrypted, walData)
+				if pageIdx == 0 {
+					p.cipher.XORKeyStream(decrypted[RootPageConfigSize:], 0)
+				} else {
+					p.cipher.XORKeyStream(decrypted, uint32(pageIdx))
+				}
+				walData = decrypted
+			}
 			newPage, err := unmarshaler(totalPages, pageIdx, walData)
 			if err != nil {
 				return nil, fmt.Errorf("unmarshal page %d from WAL index: %w", pageIdx, err)
@@ -226,6 +246,15 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 		_, err := p.file.ReadAt(buf, offset)
 		if err != nil {
 			return nil, err
+		}
+		// Decrypt before checksum verification: the on-page CRC32 was computed over
+		// plaintext and then included inside the encrypted region.
+		if p.cipher != nil {
+			if pageIdx == 0 {
+				p.cipher.XORKeyStream(buf[RootPageConfigSize:], 0)
+			} else {
+				p.cipher.XORKeyStream(buf, uint32(pageIdx))
+			}
 		}
 		if err := verifyPageChecksum(buf, pageIdx); err != nil {
 			return nil, err
@@ -356,6 +385,9 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 
 	if pageIdx != 0 {
 		writePageChecksum(buf)
+		if p.cipher != nil {
+			p.cipher.XORKeyStream(buf, uint32(pageIdx))
+		}
 		_, err := p.file.WriteAt(buf, int64(pageIdx)*int64(p.pageSize))
 		return err
 	}
@@ -369,6 +401,13 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 	// file[0:4092] = headerBuf[0:100] + buf[0:3992].
 	// Store the 4-byte result at buf[3992:3996] (= file[4092:4096]).
 	writeRootPageChecksum(headerBuf[:], buf, p.pageSize)
+
+	// Encrypt the B-tree + checksum portion (file[100:4096]) in place.
+	// The plaintext header (file[0:100]) is never encrypted so that the
+	// encryption salt can be read on startup before the cipher is ready.
+	if p.cipher != nil {
+		p.cipher.XORKeyStream(buf[:p.pageSize-RootPageConfigSize], 0)
+	}
 
 	_, err := p.file.WriteAt(headerBuf[:], 0)
 	if err != nil {
@@ -455,6 +494,9 @@ func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) err
 	for _, mp := range marshaled {
 		if !mp.isRoot {
 			writePageChecksum(mp.buf)
+			if p.cipher != nil {
+				p.cipher.XORKeyStream(mp.buf, uint32(mp.pageIdx))
+			}
 			_, err := p.file.WriteAt(mp.buf, int64(mp.pageIdx)*int64(p.pageSize))
 			if err != nil {
 				return fmt.Errorf("error writing page %d: %w", mp.pageIdx, err)
@@ -466,6 +508,10 @@ func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) err
 			}
 
 			writeRootPageChecksum(headerBuf[:], mp.buf, p.pageSize)
+
+			if p.cipher != nil {
+				p.cipher.XORKeyStream(mp.buf[:p.pageSize-RootPageConfigSize], 0)
+			}
 
 			_, err := p.file.WriteAt(headerBuf[:], 0)
 			if err != nil {
