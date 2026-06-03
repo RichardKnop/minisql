@@ -13,6 +13,7 @@
 5. Built-in full-text search
 6. Built-in JSON inverted index
 7. Built-in vector similarity search (`VECTOR(n)` column type + `VEC_L2` / `VEC_COSINE` distance functions + HNSW approximate nearest-neighbour index)
+8. Transparent AES-256-CTR page encryption with HKDF key derivation
 
 To use minisql in your Go code, import the driver:
 
@@ -65,6 +66,7 @@ MiniSQL supports optional connection string parameters:
 | `slow_query_threshold` | Go duration, e.g. `50ms`, `2s` | `0` | Log queries taking at least this long at WARN level (0 = disabled) |
 | `synchronous` | `off`, `normal`, `full` | `normal` | WAL fsync mode (see [WAL durability](#wal-durability-modes) below) |
 | `parallel_scan` | `on`, `off` | `off` | Enable concurrent leaf-page scanning for full table scans (see [Parallel Full Table Scan](#parallel-full-table-scan) below) |
+| `encryption_key` | hex-encoded bytes | _(none)_ | Enable transparent AES-256-CTR page encryption (see [Transparent Page Encryption](#transparent-page-encryption) below) |
 
 **Examples:**
 ```go
@@ -164,6 +166,39 @@ PRAGMA parallel_scan = off;
 |------|------------------|--------|-------------|
 | off | _(default)_ | `PRAGMA parallel_scan = off` | Single-goroutine sequential leaf scan. Best for small tables or single-CPU environments. |
 | on | `parallel_scan=on` | `PRAGMA parallel_scan = on` | Leaf pages partitioned across `runtime.NumCPU()` goroutines. Rows delivered in arrival order (not row-ID order). |
+
+## Transparent Page Encryption
+
+MiniSQL supports transparent AES-256-CTR page encryption. When enabled, every page written to disk (both the main database file and the WAL) is encrypted before being written and decrypted on read. The application sees normal SQL; encryption is completely transparent.
+
+**How it works:**
+
+- **Key derivation:** The user-supplied key is combined with a randomly-generated 32-byte per-database salt via HKDF (RFC 5869, SHA-256) to produce a 256-bit AES key. The key itself is never stored on disk.
+- **Mode:** AES-256-CTR. No padding, ciphertext is the same length as plaintext.
+- **Nonce:** `[8 zero bytes || big-endian page index]` — deterministic and unique per page, safe for data-at-rest encryption.
+- **Plaintext header:** The first 100 bytes of page 0 (the database header) are always stored in plaintext so the salt and encryption mode can be read before the cipher is bootstrapped. All other page data is encrypted.
+- **WAL consistency:** Writes to the WAL are encrypted; the WAL checksum is computed over ciphertext. Reads decrypt before checksum verification.
+- **VACUUM:** The compacted database produced by `VACUUM` is encrypted with the same key.
+
+**Enable via connection string (hex-encoded key):**
+
+```go
+import "encoding/hex"
+
+key := []byte("my-32-byte-secret-key!!")   // any length; longer = more entropy
+db, err := sql.Open("minisql", "./my.db?encryption_key=" + hex.EncodeToString(key))
+```
+
+**Mismatch detection:** MiniSQL returns an error if:
+- An encryption key is provided but the database was created without encryption.
+- No key is provided but the database is encrypted.
+- The wrong key is provided (the page checksum check fails on open).
+
+**Security notes:**
+- The encryption key must be kept secret by the application — it is not derivable from anything stored in the database file.
+- For maximum entropy use a 32-byte (256-bit) randomly generated key stored in a secrets manager.
+- Passing the key in the connection string means it appears in the DSN string; avoid logging the full DSN.
+- Encryption protects data at rest. It does not protect data in transit or in memory.
 
 ## Storage
 

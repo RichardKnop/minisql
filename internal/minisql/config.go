@@ -11,18 +11,30 @@ const (
 	// DatabaseFileFormatVersion identifies the current on-disk file header format.
 	DatabaseFileFormatVersion = uint32(1)
 
-	databaseHeaderMagicOffset         = 0
-	databaseHeaderVersionOffset       = 8
-	databaseHeaderPageSizeOffset      = 12
-	databaseHeaderFirstFreePageOffset = 16
-	databaseHeaderFreePageCountOffset = 20
-	databaseHeaderMetadataSize        = 24
+	databaseHeaderMagicOffset          = 0
+	databaseHeaderVersionOffset        = 8
+	databaseHeaderPageSizeOffset       = 12
+	databaseHeaderFirstFreePageOffset  = 16
+	databaseHeaderFreePageCountOffset  = 20
+	databaseHeaderEncryptionModeOffset = 24 // 1 byte: 0=none, 1=AES-256-CTR
+	databaseHeaderEncryptionSaltOffset = 25 // 32 bytes: random per-database salt
+	databaseHeaderMetadataSize         = 57 // bytes 57-99 reserved for future use
+)
+
+// Encryption mode constants stored in DatabaseHeader.EncryptionMode.
+const (
+	EncryptionModeNone      = uint8(0) // no encryption (default)
+	EncryptionModeAES256CTR = uint8(1) // AES-256-CTR with HKDF-derived key
 )
 
 // DatabaseHeader stores the global database state persisted at the start of the first page.
+// Bytes 0-99 of page 0 are always written as plaintext so that the encryption
+// salt can be read before the cipher is bootstrapped.
 type DatabaseHeader struct {
-	FirstFreePage PageIndex // Points to first free page, 0 if none
-	FreePageCount uint32    // Number of free pages available
+	FirstFreePage  PageIndex  // Points to first free page, 0 if none
+	FreePageCount  uint32     // Number of free pages available
+	EncryptionMode uint8      // 0 = none, 1 = AES-256-CTR
+	EncryptionSalt [32]byte   // per-database random salt for HKDF key derivation
 }
 
 // Size returns the fixed serialised byte size of the database header.
@@ -50,6 +62,8 @@ func (h *DatabaseHeader) MarshalTo(buf []byte) error {
 	marshalUint32(buf, PageSize, databaseHeaderPageSizeOffset)
 	marshalUint32(buf, uint32(h.FirstFreePage), databaseHeaderFirstFreePageOffset)
 	marshalUint32(buf, h.FreePageCount, databaseHeaderFreePageCountOffset)
+	buf[databaseHeaderEncryptionModeOffset] = h.EncryptionMode
+	copy(buf[databaseHeaderEncryptionSaltOffset:], h.EncryptionSalt[:])
 	return nil
 }
 
@@ -75,5 +89,7 @@ func UnmarshalDatabaseHeader(buf []byte, dbHeader *DatabaseHeader) error {
 
 	dbHeader.FirstFreePage = PageIndex(unmarshalUint32(buf, databaseHeaderFirstFreePageOffset))
 	dbHeader.FreePageCount = unmarshalUint32(buf, databaseHeaderFreePageCountOffset)
+	dbHeader.EncryptionMode = buf[databaseHeaderEncryptionModeOffset]
+	copy(dbHeader.EncryptionSalt[:], buf[databaseHeaderEncryptionSaltOffset:databaseHeaderEncryptionSaltOffset+32])
 	return nil
 }

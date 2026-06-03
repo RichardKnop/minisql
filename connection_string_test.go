@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"encoding/hex"
 	"testing"
 	"time"
 
@@ -256,6 +257,26 @@ func TestParseConnectionString(t *testing.T) {
 			connStr:     "./test.db?parallel_scan=maybe",
 			wantErr:     true,
 			errContains: "invalid parallel_scan parameter",
+		},
+		{
+			name:    "encryption_key set",
+			connStr: "./test.db?encryption_key=" + hex.EncodeToString([]byte("my-secret-key-32bytes-long-paddd")),
+			wantConfig: &ConnectionConfig{
+				FilePath:               "./test.db",
+				WALCheckpointThreshold: DefaultWALCheckpointThreshold,
+				WALWriteBufferSize:     DefaultWALWriteBufferSize,
+				LogLevel:               "warn",
+				MaxCachedPages:         minisql.PageCacheSize,
+				Synchronous:            SynchronousNormal,
+				EncryptionKey:          []byte("my-secret-key-32bytes-long-paddd"),
+			},
+			wantErr: false,
+		},
+		{
+			name:        "invalid encryption_key (not hex)",
+			connStr:     "./test.db?encryption_key=not-hex!!",
+			wantErr:     true,
+			errContains: "invalid encryption_key parameter",
 		},
 	}
 
