@@ -70,7 +70,7 @@ func TestEncryption_WriteAndRead(t *testing.T) {
 	// --- Reopen and verify rows are readable ---
 	{
 		db := openEncryptedDB(t, path, key)
-		defer db.Close()
+		defer func() { require.NoError(t, db.Close()) }()
 
 		rows, err := db.QueryContext(context.Background(), `select value from "secrets" order by id`)
 		require.NoError(t, err)
@@ -228,7 +228,7 @@ func TestEncryption_VacuumPreservesEncryption(t *testing.T) {
 	var count int
 	err = db.QueryRow(`select count(*) from "data"`).Scan(&count)
 	require.NoError(t, err)
-	assert.Greater(t, count, 0)
+	assert.Positive(t, count)
 
 	require.NoError(t, db.Close())
 }

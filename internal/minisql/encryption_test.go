@@ -95,7 +95,7 @@ func TestEncryption_WriteAndRead(t *testing.T) {
 		mp := new(MockParser)
 		mp.On("Parse", mock.Anything, usersStmt.DDL()).Return([]Statement{usersStmt}, nil)
 		db := openEncryptedDB(t, path, key, mp)
-		defer db.Close()
+		defer func() { require.NoError(t, db.Close()) }()
 
 		ctx := context.Background()
 		var names []string
