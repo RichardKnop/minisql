@@ -1533,24 +1533,9 @@ func (idx *logStructuredInvertedIndex) compactOldestSegmentRun(ctx context.Conte
 			return false, err
 		}
 	} else {
-		var cells []invertedSegmentCell
-		var postingCount uint32
-		cells, postingCount, err = idx.mergeSegmentRunCells(ctx, run)
+		writeResult, err = idx.mergePostingSegmentRun(ctx, run)
 		if err != nil {
 			return false, err
-		}
-		sortSegmentCells(cells)
-		rootPage, err := idx.writeSegmentCells(ctx, cells)
-		if err != nil {
-			return false, err
-		}
-		firstTerm, lastTerm := segmentTermBounds(cells)
-		writeResult = invertedSegmentWriteResult{
-			rootPage:     rootPage,
-			postingCount: postingCount,
-			kind:         segmentCellsKind(cells),
-			firstTerm:    firstTerm,
-			lastTerm:     lastTerm,
 		}
 	}
 	nextLevel := run[len(run)-1].Level + 1
@@ -1585,78 +1570,6 @@ func (idx *logStructuredInvertedIndex) compactOldestSegmentRun(ctx context.Conte
 	return true, nil
 }
 
-func (idx *logStructuredInvertedIndex) mergeSegmentRunCells(
-	ctx context.Context,
-	segments []invertedSegmentDescriptor,
-) ([]invertedSegmentCell, uint32, error) {
-	if idx.Mode() == invertedPostingModeRowIDs {
-		return idx.mergeRowIDSegmentRunCells(ctx, segments)
-	}
-
-	states, err := idx.reduceSegmentStates(ctx, segments)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	terms := sortedSegmentStateTerms(states)
-	var cells []invertedSegmentCell
-	var totalPostingCount uint32
-	for _, term := range terms {
-		state := states[term]
-		deletePostings := postingsFromMap(state.deletes)
-		deleteCells, deletePostingCount, err := idx.segmentCellsForPostings(invertedSegmentKindDelete, term, deletePostings)
-		if err != nil {
-			return nil, 0, err
-		}
-		insertPostings := postingsFromMap(state.inserts)
-		insertCells, insertPostingCount, err := idx.segmentCellsForPostings(invertedSegmentKindInsert, term, insertPostings)
-		if err != nil {
-			return nil, 0, err
-		}
-		cells = append(cells, deleteCells...)
-		cells = append(cells, insertCells...)
-		totalPostingCount += deletePostingCount + insertPostingCount
-	}
-	if len(cells) == 0 {
-		return nil, 0, fmt.Errorf("cannot merge empty inverted segment run")
-	}
-	return cells, totalPostingCount, nil
-}
-
-func (idx *logStructuredInvertedIndex) mergeRowIDSegmentRunCells(
-	ctx context.Context,
-	segments []invertedSegmentDescriptor,
-) ([]invertedSegmentCell, uint32, error) {
-	states, err := idx.reduceRowIDSegmentStates(ctx, segments)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	terms := sortedRowIDSegmentStateTerms(states)
-	var cells []invertedSegmentCell
-	var totalPostingCount uint32
-	for _, term := range terms {
-		state := states[term]
-		deleteRowIDs := sortedRowIDsFromSet(state.deletes)
-		deleteCells, deletePostingCount, err := segmentCellsForRowIDs(invertedSegmentKindDelete, term, deleteRowIDs)
-		if err != nil {
-			return nil, 0, err
-		}
-		insertRowIDs := sortedRowIDsFromSet(state.inserts)
-		insertCells, insertPostingCount, err := segmentCellsForRowIDs(invertedSegmentKindInsert, term, insertRowIDs)
-		if err != nil {
-			return nil, 0, err
-		}
-		cells = append(cells, deleteCells...)
-		cells = append(cells, insertCells...)
-		totalPostingCount += deletePostingCount + insertPostingCount
-	}
-	if len(cells) == 0 {
-		return nil, 0, fmt.Errorf("cannot merge empty inverted segment run")
-	}
-	return cells, totalPostingCount, nil
-}
-
 type segmentTermState struct {
 	inserts map[RowID]invertedPosting
 	deletes map[RowID]invertedPosting
@@ -1667,50 +1580,6 @@ type rowIDSegmentTermState struct {
 	deletes map[RowID]struct{}
 }
 
-func (idx *logStructuredInvertedIndex) reduceRowIDSegmentStates(
-	ctx context.Context,
-	segments []invertedSegmentDescriptor,
-) (map[string]rowIDSegmentTermState, error) {
-	states := make(map[string]rowIDSegmentTermState)
-	for _, segment := range segments {
-		if err := idx.visitSegmentCells(ctx, segment.RootPage, func(cell invertedSegmentCell) error {
-			kind := segment.Kind
-			if kind == invertedSegmentKindMixed {
-				kind = cell.Kind
-			}
-			state := states[cell.Term]
-			if kind == invertedSegmentKindInsert && state.inserts == nil {
-				state.inserts = make(map[RowID]struct{})
-			}
-			if kind == invertedSegmentKindDelete && state.deletes == nil {
-				state.deletes = make(map[RowID]struct{})
-			}
-			mode, err := forEachInvertedPostingRowID(cell.Block.Payload, func(rowID RowID) error {
-				switch kind {
-				case invertedSegmentKindInsert:
-					applyRowIDSegmentStateInsert(state, rowID)
-				case invertedSegmentKindDelete:
-					applyRowIDSegmentStateDelete(state, rowID)
-				default:
-					return fmt.Errorf("unknown inverted segment kind %d", kind)
-				}
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-			if mode != idx.Mode() {
-				return fmt.Errorf("inverted segment block uses posting mode %d, expected %d", mode, idx.Mode())
-			}
-			states[cell.Term] = state
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-	}
-	return states, nil
-}
-
 func applyRowIDSegmentStateInsert(state rowIDSegmentTermState, rowID RowID) {
 	state.inserts[rowID] = struct{}{}
 	delete(state.deletes, rowID)
@@ -1719,51 +1588,6 @@ func applyRowIDSegmentStateInsert(state rowIDSegmentTermState, rowID RowID) {
 func applyRowIDSegmentStateDelete(state rowIDSegmentTermState, rowID RowID) {
 	delete(state.inserts, rowID)
 	state.deletes[rowID] = struct{}{}
-}
-
-func (idx *logStructuredInvertedIndex) reduceSegmentStates(
-	ctx context.Context,
-	segments []invertedSegmentDescriptor,
-) (map[string]segmentTermState, error) {
-	states := make(map[string]segmentTermState)
-	for _, segment := range segments {
-		if err := idx.visitSegmentCells(ctx, segment.RootPage, func(cell invertedSegmentCell) error {
-			kind := segment.Kind
-			if kind == invertedSegmentKindMixed {
-				kind = cell.Kind
-			}
-			state := states[cell.Term]
-			if kind == invertedSegmentKindInsert && state.inserts == nil {
-				state.inserts = make(map[RowID]invertedPosting)
-			}
-			if kind == invertedSegmentKindDelete && state.deletes == nil {
-				state.deletes = make(map[RowID]invertedPosting)
-			}
-			mode, err := forEachInvertedPostingPosition(cell.Block.Payload, func(rowID RowID, positions []uint32) error {
-				posting := invertedPosting{RowID: rowID, Positions: positions}
-				switch kind {
-				case invertedSegmentKindInsert:
-					applySegmentStateInsert(idx.Mode(), state, posting)
-				case invertedSegmentKindDelete:
-					applySegmentStateDelete(idx.Mode(), state, posting)
-				default:
-					return fmt.Errorf("unknown inverted segment kind %d", kind)
-				}
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-			if mode != idx.Mode() {
-				return fmt.Errorf("inverted segment block uses posting mode %d, expected %d", mode, idx.Mode())
-			}
-			states[cell.Term] = state
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-	}
-	return states, nil
 }
 
 func applySegmentStateInsert(mode invertedPostingMode, state segmentTermState, posting invertedPosting) {
@@ -1805,24 +1629,6 @@ func applySegmentStateDelete(mode invertedPostingMode, state segmentTermState, p
 	}
 	delete(state.inserts, posting.RowID)
 	state.deletes[posting.RowID] = posting
-}
-
-func sortedSegmentStateTerms(states map[string]segmentTermState) []string {
-	terms := make([]string, 0, len(states))
-	for term := range states {
-		terms = append(terms, term)
-	}
-	sort.Strings(terms)
-	return terms
-}
-
-func sortedRowIDSegmentStateTerms(states map[string]rowIDSegmentTermState) []string {
-	terms := make([]string, 0, len(states))
-	for term := range states {
-		terms = append(terms, term)
-	}
-	sort.Strings(terms)
-	return terms
 }
 
 func postingsFromMap(postingsByRowID map[RowID]invertedPosting) []invertedPosting {
@@ -2062,19 +1868,6 @@ func sortSegmentCells(cells []invertedSegmentCell) {
 	})
 }
 
-func segmentCellsKind(cells []invertedSegmentCell) byte {
-	if len(cells) == 0 {
-		return invertedSegmentKindMixed
-	}
-	kind := cells[0].Kind
-	for _, cell := range cells[1:] {
-		if cell.Kind != kind {
-			return invertedSegmentKindMixed
-		}
-	}
-	return kind
-}
-
 func invertedSegmentCellKindOrder(kind byte) int {
 	if kind == invertedSegmentKindDelete {
 		return 0
@@ -2201,11 +1994,7 @@ func (idx *logStructuredInvertedIndex) compactSegments(ctx context.Context) erro
 		return idx.clearSegmentsAfterBaseFoldback(ctx, segments)
 	}
 
-	states, err := idx.reduceSegmentStates(ctx, segments)
-	if err != nil {
-		return err
-	}
-	if err := idx.applySegmentStatesToBase(ctx, states); err != nil {
+	if err := idx.applyPostingSegmentsToBase(ctx, segments); err != nil {
 		return err
 	}
 	return idx.clearSegmentsAfterBaseFoldback(ctx, segments)
@@ -2229,48 +2018,6 @@ func (idx *logStructuredInvertedIndex) clearSegmentsAfterBaseFoldback(
 		return fmt.Errorf("inverted index %s root page %d is not a metadata page", idx.name, idx.rootPageIdx)
 	}
 	metaPage.InvertedMetaPage.Segments = nil
-	return nil
-}
-
-func (idx *logStructuredInvertedIndex) applySegmentStatesToBase(
-	ctx context.Context,
-	states map[string]segmentTermState,
-) error {
-	terms := sortedSegmentStateTerms(states)
-	for _, term := range terms {
-		state := states[term]
-		for _, posting := range postingsFromMap(state.deletes) {
-			if err := idx.base.Delete(ctx, term, posting); err != nil {
-				return fmt.Errorf("compact inverted segment delete term %q: %w", term, err)
-			}
-		}
-		insertPostings := postingsFromMap(state.inserts)
-		if len(insertPostings) == 0 {
-			continue
-		}
-		if err := idx.base.InsertMany(ctx, term, insertPostings); err != nil {
-			return fmt.Errorf("compact inverted segment insert term %q: %w", term, err)
-		}
-	}
-	return nil
-}
-
-func (idx *logStructuredInvertedIndex) visitSegmentCells(ctx context.Context, root PageIndex, visit func(invertedSegmentCell) error) error {
-	for pageIdx := root; pageIdx != 0; {
-		page, err := idx.pager.ReadPage(ctx, pageIdx)
-		if err != nil {
-			return fmt.Errorf("read inverted segment page %d: %w", pageIdx, err)
-		}
-		if page.InvertedSegmentPage == nil {
-			return fmt.Errorf("inverted segment page %d has unexpected page type", pageIdx)
-		}
-		for _, cell := range page.InvertedSegmentPage.Cells {
-			if err := visit(cell); err != nil {
-				return err
-			}
-		}
-		pageIdx = page.InvertedSegmentPage.Header.NextPage
-	}
 	return nil
 }
 
