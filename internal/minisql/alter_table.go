@@ -3,6 +3,8 @@ package minisql
 import (
 	"context"
 	"fmt"
+
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 // executeAlterTable dispatches an ALTER TABLE statement to the appropriate
@@ -13,7 +15,7 @@ func (d *Database) executeAlterTable(ctx context.Context, stmt Statement) error 
 		return err
 	}
 	if !exists {
-		return fmt.Errorf("%w: %s", errTableDoesNotExist, stmt.TableName)
+		return minisqlErrors.ErrNoSuchTable{Name: stmt.TableName}
 	}
 
 	switch stmt.AlterTableAction {

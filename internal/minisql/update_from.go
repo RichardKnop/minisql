@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"go.uber.org/zap"
+
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
 type ctxKeyUpdateFromRows struct{}
@@ -32,7 +34,7 @@ func updateFromRowsFromContext(ctx context.Context) ([]Row, bool) {
 func (d *Database) executeUpdateFrom(ctx context.Context, stmt Statement) (StatementResult, error) {
 	targetTable, ok := d.tables[stmt.TableName]
 	if !ok {
-		return StatementResult{}, fmt.Errorf("%w: %s", errTableDoesNotExist, stmt.TableName)
+		return StatementResult{}, minisqlErrors.ErrNoSuchTable{Name: stmt.TableName}
 	}
 
 	// FROM rows are pre-materialised in ExecuteStatement (before the write lock
@@ -178,7 +180,7 @@ func (d *Database) materialiseFromSource(ctx context.Context, stmt Statement) ([
 
 	fromTable, ok := d.tables[stmt.UpdateFromTable]
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", errTableDoesNotExist, stmt.UpdateFromTable)
+		return nil, minisqlErrors.ErrNoSuchTable{Name: stmt.UpdateFromTable}
 	}
 	if fromAlias == "" {
 		fromAlias = stmt.UpdateFromTable

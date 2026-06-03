@@ -2,17 +2,13 @@ package minisql
 
 import (
 	"fmt"
+
+	minisqlErrors "github.com/RichardKnop/minisql/pkg/errors"
 )
 
-// ErrCheckConstraintViolation is returned when an INSERT or UPDATE row fails a CHECK constraint.
-type ErrCheckConstraintViolation struct {
-	ColumnName string
-	Expr       string
-}
-
-func (e ErrCheckConstraintViolation) Error() string {
-	return fmt.Sprintf("check constraint violation on column %q: %s", e.ColumnName, e.Expr)
-}
+// ErrCheckConstraintViolation aliases the public type so internal and e2e
+// tests can reference it via either package without an import cycle.
+type ErrCheckConstraintViolation = minisqlErrors.ErrCheckConstraintViolation
 
 // validateCheckConstraints verifies that row satisfies every column-level CHECK
 // constraint defined in columns.  Returns ErrCheckConstraintViolation on the
