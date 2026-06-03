@@ -4,7 +4,11 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/RichardKnop/minisql)](https://goreportcard.com/report/github.com/RichardKnop/minisql)
 [![Donate Bitcoin](https://img.shields.io/badge/donate-bitcoin-orange.svg)](https://richardknop.github.io/donate/)
 
-`MiniSQL` is an embedded single file database written in Golang, inspired by `SQLite` but borrows ideas from other databases such as `Postgres` too. It can differentiate itself from `SQLite` in several areas: 
+MiniSQL is an embedded single file database written in Golang, inspired by `SQLite` but borrows ideas from other databases such as `Postgres` too. 
+
+See the [documentation](https://richardknop.github.io/minisql/).
+
+MiniSQL can differentiate itself from `SQLite` in several areas: 
 
 1. Pure Go / zero CGO
 2. MVCC snapshot isolation (for reads, serialized single-writer for writes)
