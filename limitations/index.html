@@ -1856,20 +1856,12 @@
 <td>Full transaction rollback is supported</td>
 </tr>
 <tr>
-<td><code>TRUNCATE TABLE</code></td>
-<td>Use <code>DELETE FROM table_name WHERE true</code> instead</td>
-</tr>
-<tr>
 <td><code>CREATE TABLE AS SELECT</code></td>
 <td>Use a regular <code>CREATE TABLE</code> followed by <code>INSERT INTO … SELECT</code></td>
 </tr>
 <tr>
 <td><code>MERGE</code> / <code>UPSERT</code> by conflict target</td>
 <td><code>ON CONFLICT DO NOTHING / DO UPDATE</code> is supported but without explicit conflict-column targeting</td>
-</tr>
-<tr>
-<td><code>FULL OUTER JOIN</code></td>
-<td>INNER, LEFT, and RIGHT JOINs are supported</td>
 </tr>
 <tr>
 <td><code>CROSS JOIN</code></td>
@@ -1903,10 +1895,6 @@
 <td><code>HAVING</code> does not accept <code>?</code> placeholders</td>
 <td>Use literal values in HAVING conditions</td>
 </tr>
-<tr>
-<td><code>DELETE</code> always requires <code>WHERE</code></td>
-<td>Use <code>DELETE FROM t WHERE true</code> to delete all rows</td>
-</tr>
 </tbody>
 </table>
 <hr />
@@ -1936,8 +1924,8 @@
 <td>Use <code>VARCHAR(n)</code> for indexed string columns</td>
 </tr>
 <tr>
-<td>No multi-value <code>IN</code> bind parameter</td>
-<td>List values individually or use a subquery</td>
+<td>No slice expansion in <code>IN</code></td>
+<td><code>IN (?, ?)</code> with individual bind args works; passing a <code>[]T</code> slice as a single <code>?</code> does not. List values as separate <code>?</code> placeholders or use a subquery</td>
 </tr>
 </tbody>
 </table>
