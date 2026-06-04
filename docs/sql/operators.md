@@ -99,6 +99,29 @@ SELECT * FROM users WHERE id IN (SELECT user_id FROM orders WHERE amount > 100);
 SELECT * FROM users WHERE id NOT IN (SELECT user_id FROM banned_users);
 ```
 
+### Bind parameters with IN
+
+Use one `?` placeholder per value — this is the standard behaviour across all `database/sql` drivers (SQLite, MySQL, PostgreSQL included):
+
+```go
+// ✅ one placeholder per value
+rows, err := db.Query(
+    `SELECT * FROM users WHERE id IN (?, ?, ?)`,
+    1, 2, 3,
+)
+```
+
+To build the placeholder list dynamically from a Go slice, use [`sqlx.In`](https://jmoiron.github.io/sqlx/#inQueries) which rewrites the query before it reaches the driver:
+
+```go
+import "github.com/jmoiron/sqlx"
+
+ids := []int64{1, 2, 3}
+query, args, err := sqlx.In(`SELECT * FROM users WHERE id IN (?)`, ids)
+// query is now "SELECT * FROM users WHERE id IN (?, ?, ?)"
+rows, err := db.Query(query, args...)
+```
+
 ---
 
 ## IS NULL and IS NOT NULL
