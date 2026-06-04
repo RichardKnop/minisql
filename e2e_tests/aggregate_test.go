@@ -632,6 +632,95 @@ func (s *TestSuite) TestHaving() {
 		s.Require().Error(err)
 		s.Contains(err.Error(), "HAVING requires GROUP BY")
 	})
+
+	s.Run("HAVING with placeholder", func() {
+		// Only groups where SUM(total_paid) > 40: user_id=2 (70) and user_id=3 (50).
+		rows, err := s.db.QueryContext(context.Background(),
+			`select user_id, SUM(total_paid) from orders GROUP BY user_id HAVING SUM(total_paid) > ?;`,
+			int64(40),
+		)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type row struct {
+			userID int64
+			sum    int64
+		}
+		var got []row
+		for rows.Next() {
+			var r row
+			s.Require().NoError(rows.Scan(&r.userID, &r.sum))
+			got = append(got, r)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(got, 2)
+
+		sort.Slice(got, func(i, j int) bool { return got[i].userID < got[j].userID })
+		s.Equal(int64(2), got[0].userID)
+		s.Equal(int64(70), got[0].sum)
+		s.Equal(int64(3), got[1].userID)
+		s.Equal(int64(50), got[1].sum)
+	})
+
+	s.Run("WHERE and HAVING both with placeholders", func() {
+		// WHERE total_paid > 10 removes user_id=1 row with total=10.
+		// user_id=1: 20 → sum=20, user_id=2: 30+40 → sum=70, user_id=3: 50 → sum=50
+		// HAVING SUM > 30 keeps user_id=2 (70) and user_id=3 (50).
+		rows, err := s.db.QueryContext(context.Background(),
+			`select user_id, SUM(total_paid) from orders where total_paid > ? GROUP BY user_id HAVING SUM(total_paid) > ?;`,
+			int64(10), int64(30),
+		)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type row struct {
+			userID int64
+			sum    int64
+		}
+		var got []row
+		for rows.Next() {
+			var r row
+			s.Require().NoError(rows.Scan(&r.userID, &r.sum))
+			got = append(got, r)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(got, 2)
+
+		sort.Slice(got, func(i, j int) bool { return got[i].userID < got[j].userID })
+		s.Equal(int64(2), got[0].userID)
+		s.Equal(int64(70), got[0].sum)
+		s.Equal(int64(3), got[1].userID)
+		s.Equal(int64(50), got[1].sum)
+	})
+
+	s.Run("HAVING COUNT with placeholder", func() {
+		// Only groups with COUNT(*) >= 2: user_id=1 and user_id=2.
+		rows, err := s.db.QueryContext(context.Background(),
+			`select user_id, COUNT(*) from orders GROUP BY user_id HAVING COUNT(*) >= ?;`,
+			int64(2),
+		)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type row struct {
+			userID int64
+			count  int64
+		}
+		var got []row
+		for rows.Next() {
+			var r row
+			s.Require().NoError(rows.Scan(&r.userID, &r.count))
+			got = append(got, r)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(got, 2)
+
+		sort.Slice(got, func(i, j int) bool { return got[i].userID < got[j].userID })
+		s.Equal(int64(1), got[0].userID)
+		s.Equal(int64(2), got[0].count)
+		s.Equal(int64(2), got[1].userID)
+		s.Equal(int64(2), got[1].count)
+	})
 }
 
 func (s *TestSuite) TestGroupByWithJoinRejected() {

@@ -540,6 +540,22 @@ func (s Statement) NumPlaceholders() int {
 		count += cte.Body.NumPlaceholders()
 	}
 
+	for _, condGroup := range s.Having {
+		for _, cond := range condGroup {
+			if cond.Operand2.Type == OperandPlaceholder {
+				count += 1
+				continue
+			}
+			if cond.Operand2.Type == OperandList {
+				for _, value := range cond.Operand2.Value.([]any) {
+					if _, ok := value.(Placeholder); ok {
+						count += 1
+					}
+				}
+			}
+		}
+	}
+
 	// Count placeholders embedded in SELECT field expressions (e.g. VEC_L2(v, ?)).
 	if s.Kind == Select {
 		for _, field := range s.Fields {
@@ -838,6 +854,38 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 				}
 				cond.Operand2.Value = newList
 				stmt.Conditions[i][j] = cond
+			}
+		}
+	}
+
+	for i, condGroup := range stmt.Having {
+		for j, cond := range condGroup {
+			if cond.Operand2.Type == OperandPlaceholder {
+				if len(args) == 0 {
+					return Statement{}, errors.New("not enough arguments to bind placeholders")
+				}
+				cond.Operand2.Type = operandTypeFromAny(args[0])
+				cond.Operand2.Value = args[0]
+				stmt.Having[i][j] = cond
+				args = args[1:]
+				continue
+			}
+			if cond.Operand2.Type == OperandList {
+				origList := cond.Operand2.Value.([]any)
+				newList := make([]any, len(origList))
+				copy(newList, origList)
+				for k, value := range newList {
+					if _, ok := value.(Placeholder); !ok {
+						continue
+					}
+					if len(args) == 0 {
+						return Statement{}, errors.New("not enough arguments to bind placeholders")
+					}
+					newList[k] = args[0]
+					args = args[1:]
+				}
+				cond.Operand2.Value = newList
+				stmt.Having[i][j] = cond
 			}
 		}
 	}
