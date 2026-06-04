@@ -70,7 +70,6 @@ MiniSQL is a research and learning project, not yet production-ready. This page 
 - `CREATE TRIGGER`
 - `ALTER TABLE … MODIFY COLUMN` (type changes)
 - `ALTER TABLE … ADD CONSTRAINT` after table creation
-- `RETURNING` on `UPDATE` and `DELETE` with subquery targets
 
 ---
 
