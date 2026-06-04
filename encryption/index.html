@@ -1624,6 +1624,67 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#key-rotation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key rotation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Key rotation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#via-sql-pragma-rekey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Via SQL (PRAGMA rekey)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#via-the-go-api_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Via the Go API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adding-encryption-to-an-existing-plaintext-database" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding encryption to an existing plaintext database
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-happens-during-rotation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What happens during rotation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1833,6 +1894,67 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#key-rotation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key rotation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Key rotation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#via-sql-pragma-rekey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Via SQL (PRAGMA rekey)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#via-the-go-api_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Via the Go API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adding-encryption-to-an-existing-plaintext-database" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding encryption to an existing plaintext database
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-happens-during-rotation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What happens during rotation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2006,11 +2128,61 @@
 </span><span id="__span-4-44"><a id="__codelineno-4-44" name="__codelineno-4-44" href="#__codelineno-4-44"></a><span class="p">}</span>
 </span></code></pre></div>
 <hr />
+<hr />
+<h2 id="key-rotation">Key rotation<a class="headerlink" href="#key-rotation" title="Permanent link">&para;</a></h2>
+<p>Key rotation re-encrypts the entire database with a new key.  It is implemented
+as a crash-safe copy-and-swap (the same mechanism as <code>VACUUM</code>) so the original
+file is never modified in place.  A <code>.bak</code> backup is kept until the swap
+succeeds.</p>
+<h3 id="via-sql-pragma-rekey">Via SQL (PRAGMA rekey)<a class="headerlink" href="#via-sql-pragma-rekey" title="Permanent link">&para;</a></h3>
+<div class="language-sql highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">PRAGMA</span><span class="w"> </span><span class="n">rekey</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;&lt;hex-encoded-new-key&gt;&#39;</span><span class="p">;</span>
+</span></code></pre></div>
+<p>The value must be a hex-encoded key (same encoding as the DSN <code>encryption_key</code>
+parameter).</p>
+<div class="language-go highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">import</span><span class="w"> </span><span class="s">&quot;encoding/hex&quot;</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nx">newKey</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span><span class="w"> </span><span class="mi">32</span><span class="p">)</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nx">rand</span><span class="p">.</span><span class="nx">Read</span><span class="p">(</span><span class="nx">newKey</span><span class="p">)</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="c1">// Rotate while the connection is still open.</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">db</span><span class="p">.</span><span class="nx">ExecContext</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="s">`PRAGMA rekey = &#39;`</span><span class="o">+</span><span class="nx">hex</span><span class="p">.</span><span class="nx">EncodeToString</span><span class="p">(</span><span class="nx">newKey</span><span class="p">)</span><span class="o">+</span><span class="s">`&#39;`</span><span class="p">)</span>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">    </span><span class="nx">log</span><span class="p">.</span><span class="nx">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="p">}</span>
+</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>
+</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="c1">// After this call the in-process connection uses the new key.</span>
+</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="c1">// The next time you open the file you must supply newKey, not the old one.</span>
+</span></code></pre></div>
+<h3 id="via-the-go-api_1">Via the Go API<a class="headerlink" href="#via-the-go-api_1" title="Permanent link">&para;</a></h3>
+<div class="language-go highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">import</span><span class="w"> </span><span class="s">&quot;github.com/RichardKnop/minisql/internal/minisql&quot;</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1">// db is a *minisql.Database (obtained via NewDatabase or cast from driver.Conn).</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">db</span><span class="p">.</span><span class="nx">ReKey</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">newKey</span><span class="p">)</span><span class="w">   </span><span class="c1">// key rotation / adding encryption</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nx">err</span><span class="w">  </span><span class="p">=</span><span class="w"> </span><span class="nx">db</span><span class="p">.</span><span class="nx">ReKey</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="kc">nil</span><span class="p">)</span><span class="w">      </span><span class="c1">// remove encryption</span>
+</span></code></pre></div>
+<p><code>ReKey(ctx, nil)</code> strips encryption — the resulting file is plaintext.
+There is no SQL equivalent for removing encryption; use the Go API directly.</p>
+<h3 id="adding-encryption-to-an-existing-plaintext-database">Adding encryption to an existing plaintext database<a class="headerlink" href="#adding-encryption-to-an-existing-plaintext-database" title="Permanent link">&para;</a></h3>
+<div class="language-sql highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1">-- DB was opened without a key; add encryption in-place.</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">PRAGMA</span><span class="w"> </span><span class="n">rekey</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;&lt;hex-encoded-new-key&gt;&#39;</span><span class="p">;</span>
+</span></code></pre></div>
+<p>After this, re-open the database with the key in the DSN:</p>
+<div class="language-go highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nx">dsn</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="s">&quot;/path/to/db.db?encryption_key=&quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">hex</span><span class="p">.</span><span class="nx">EncodeToString</span><span class="p">(</span><span class="nx">newKey</span><span class="p">)</span>
+</span></code></pre></div>
+<h3 id="what-happens-during-rotation">What happens during rotation<a class="headerlink" href="#what-happens-during-rotation" title="Permanent link">&para;</a></h3>
+<ol>
+<li>A temporary database file is created and encrypted with the new key (gets a fresh random salt).</li>
+<li>All schema and rows are copied from the live database (decrypted with the old key → re-encrypted with the new key).</li>
+<li>The live file is atomically replaced by the temp file.</li>
+<li>The in-process connection is re-opened and the new cipher is installed.</li>
+</ol>
+<p>The operation holds the exclusive write lock for its full duration (same as <code>VACUUM</code>).</p>
+<hr />
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Encryption adds one AES-CTR encrypt/decrypt operation per page read or write. For most workloads the overhead is negligible.</li>
 <li>The database file and WAL file should be treated as equally sensitive — both contain encrypted pages.</li>
-<li>There is no support for key rotation; to change the key, use <code>VACUUM</code> after re-opening with the new key (VACUUM rewrites all pages, but key change support is a planned feature).</li>
+<li>Key rotation always generates a fresh random salt, so the derived AES key changes even if the raw key material is the same.</li>
 <li><code>PRAGMA integrity_check</code> works on encrypted databases — pages are decrypted in-memory before the check.</li>
 </ul>
 

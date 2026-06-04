@@ -1968,8 +1968,8 @@
 <td>Use <code>VACUUM</code> to compact; copy the file while no writes are active</td>
 </tr>
 <tr>
-<td>No key rotation for encryption</td>
-<td>Re-encrypt by opening with old key, then VACUUM (planned feature)</td>
+<td>Removing encryption has no SQL equivalent</td>
+<td>Use <code>PRAGMA rekey = '&lt;hex&gt;'</code> to rotate or add a key; to remove encryption entirely use <code>db.ReKey(ctx, nil)</code> via the Go API</td>
 </tr>
 <tr>
 <td><code>VACUUM</code> requires exclusive access</td>
