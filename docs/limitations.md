@@ -54,7 +54,7 @@ MiniSQL is a research and learning project, not yet production-ready. This page 
 |-----------|-------|
 | No connection pooling | `db.SetMaxOpenConns(1)` is required |
 | No online backup API | Use `VACUUM` to compact; copy the file while no writes are active |
-| No key rotation for encryption | Re-encrypt by opening with old key, then VACUUM (planned feature) |
+| Removing encryption has no SQL equivalent | Use `PRAGMA rekey = '<hex>'` to rotate or add a key; to remove encryption entirely use `db.ReKey(ctx, nil)` via the Go API |
 | `VACUUM` requires exclusive access | Blocks all other connections for its duration |
 
 ---

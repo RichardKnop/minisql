@@ -143,9 +143,80 @@ func main() {
 
 ---
 
+---
+
+## Key rotation
+
+Key rotation re-encrypts the entire database with a new key.  It is implemented
+as a crash-safe copy-and-swap (the same mechanism as `VACUUM`) so the original
+file is never modified in place.  A `.bak` backup is kept until the swap
+succeeds.
+
+### Via SQL (PRAGMA rekey)
+
+```sql
+PRAGMA rekey = '<hex-encoded-new-key>';
+```
+
+The value must be a hex-encoded key (same encoding as the DSN `encryption_key`
+parameter).
+
+```go
+import "encoding/hex"
+
+newKey := make([]byte, 32)
+rand.Read(newKey)
+
+// Rotate while the connection is still open.
+_, err = db.ExecContext(ctx, `PRAGMA rekey = '`+hex.EncodeToString(newKey)+`'`)
+if err != nil {
+    log.Fatal(err)
+}
+
+// After this call the in-process connection uses the new key.
+// The next time you open the file you must supply newKey, not the old one.
+```
+
+### Via the Go API
+
+```go
+import "github.com/RichardKnop/minisql/internal/minisql"
+
+// db is a *minisql.Database (obtained via NewDatabase or cast from driver.Conn).
+err := db.ReKey(ctx, newKey)   // key rotation / adding encryption
+err  = db.ReKey(ctx, nil)      // remove encryption
+```
+
+`ReKey(ctx, nil)` strips encryption — the resulting file is plaintext.
+There is no SQL equivalent for removing encryption; use the Go API directly.
+
+### Adding encryption to an existing plaintext database
+
+```sql
+-- DB was opened without a key; add encryption in-place.
+PRAGMA rekey = '<hex-encoded-new-key>';
+```
+
+After this, re-open the database with the key in the DSN:
+
+```go
+dsn := "/path/to/db.db?encryption_key=" + hex.EncodeToString(newKey)
+```
+
+### What happens during rotation
+
+1. A temporary database file is created and encrypted with the new key (gets a fresh random salt).
+2. All schema and rows are copied from the live database (decrypted with the old key → re-encrypted with the new key).
+3. The live file is atomically replaced by the temp file.
+4. The in-process connection is re-opened and the new cipher is installed.
+
+The operation holds the exclusive write lock for its full duration (same as `VACUUM`).
+
+---
+
 ## Notes
 
 - Encryption adds one AES-CTR encrypt/decrypt operation per page read or write. For most workloads the overhead is negligible.
 - The database file and WAL file should be treated as equally sensitive — both contain encrypted pages.
-- There is no support for key rotation; to change the key, use `VACUUM` after re-opening with the new key (VACUUM rewrites all pages, but key change support is a planned feature).
+- Key rotation always generates a fresh random salt, so the derived AES key changes even if the raw key material is the same.
 - `PRAGMA integrity_check` works on encrypted databases — pages are decrypted in-memory before the check.

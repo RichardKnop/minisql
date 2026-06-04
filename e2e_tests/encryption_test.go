@@ -186,6 +186,135 @@ func TestEncryption_KeyForUnencryptedDB(t *testing.T) {
 	assert.Contains(t, pingErr.Error(), "not encrypted")
 }
 
+// TestEncryption_ReKey_Rotation verifies that PRAGMA rekey rotates to a new key:
+// the database is unreadable with the old key and readable with the new key.
+func TestEncryption_ReKey_Rotation(t *testing.T) {
+	t.Parallel()
+
+	oldKey := []byte("e2e-old-key-rotation-32bytes-pad")
+	newKey := []byte("e2e-new-key-rotation-32bytes-pad")
+
+	f, err := os.CreateTemp("", "minisql-e2e-rekey-*.db")
+	require.NoError(t, err)
+	path := f.Name()
+	f.Close()
+	defer func() {
+		os.Remove(path)
+		os.Remove(path + "-wal")
+	}()
+
+	// Create encrypted DB and insert a sentinel row.
+	{
+		db := openEncryptedDB(t, path, oldKey)
+		_, err = db.Exec(`create table "vault" (id int8 primary key autoincrement, secret text not null)`)
+		require.NoError(t, err)
+		_, err = db.Exec(`insert into "vault" (secret) values (?)`, "top-secret-value")
+		require.NoError(t, err)
+
+		// Rotate the key via PRAGMA.
+		_, err = db.ExecContext(context.Background(),
+			`PRAGMA rekey = '`+hex.EncodeToString(newKey)+`'`)
+		require.NoError(t, err)
+
+		// Data must be readable on the same (now re-keyed) connection.
+		var secret string
+		err = db.QueryRow(`select secret from "vault" where id = 1`).Scan(&secret)
+		require.NoError(t, err)
+		assert.Equal(t, "top-secret-value", secret)
+
+		require.NoError(t, db.Close())
+	}
+
+	// File must still be encrypted (no plaintext).
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.False(t, bytes.Contains(raw, []byte("top-secret-value")), "plaintext found after key rotation")
+
+	// Opening with the old key must fail.
+	db2, err := sql.Open("minisql", encryptedDSN(path, oldKey))
+	require.NoError(t, err)
+	db2.SetMaxOpenConns(1)
+	assert.Error(t, db2.Ping(), "expected error when opening with old key after rotation")
+	db2.Close()
+
+	// Opening with the new key must succeed and data must be intact.
+	{
+		db := openEncryptedDB(t, path, newKey)
+		defer func() { require.NoError(t, db.Close()) }()
+		var secret string
+		err = db.QueryRow(`select secret from "vault" where id = 1`).Scan(&secret)
+		require.NoError(t, err)
+		assert.Equal(t, "top-secret-value", secret)
+	}
+}
+
+// TestEncryption_ReKey_AddEncryption verifies that PRAGMA rekey on a plaintext
+// database encrypts it and makes it unreadable without a key.
+func TestEncryption_ReKey_AddEncryption(t *testing.T) {
+	t.Parallel()
+
+	newKey := []byte("e2e-add-encryption-key-32bytes!!")
+
+	f, err := os.CreateTemp("", "minisql-e2e-rekey-add-*.db")
+	require.NoError(t, err)
+	path := f.Name()
+	f.Close()
+	defer func() {
+		os.Remove(path)
+		os.Remove(path + "-wal")
+	}()
+
+	// Create a plaintext database and insert data.
+	{
+		db, err := sql.Open("minisql", path)
+		require.NoError(t, err)
+		db.SetMaxOpenConns(1)
+		require.NoError(t, db.Ping())
+
+		_, err = db.Exec(`create table "vault" (id int8 primary key autoincrement, secret text not null)`)
+		require.NoError(t, err)
+		_, err = db.Exec(`insert into "vault" (secret) values (?)`, "plaintext-to-encrypt")
+		require.NoError(t, err)
+
+		// Add encryption via PRAGMA rekey.
+		_, err = db.ExecContext(context.Background(),
+			`PRAGMA rekey = '`+hex.EncodeToString(newKey)+`'`)
+		require.NoError(t, err)
+
+		// Data must be readable immediately after.
+		var secret string
+		err = db.QueryRow(`select secret from "vault" where id = 1`).Scan(&secret)
+		require.NoError(t, err)
+		assert.Equal(t, "plaintext-to-encrypt", secret)
+
+		require.NoError(t, db.Close())
+	}
+
+	// File must now be encrypted.
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.False(t, bytes.Contains(raw, []byte("plaintext-to-encrypt")), "plaintext found after adding encryption")
+
+	// Opening without a key must fail.
+	db2, err := sql.Open("minisql", path)
+	require.NoError(t, err)
+	db2.SetMaxOpenConns(1)
+	pingErr := db2.Ping()
+	db2.Close()
+	require.Error(t, pingErr)
+	assert.Contains(t, pingErr.Error(), "encrypted")
+
+	// Opening with the new key must succeed.
+	{
+		db := openEncryptedDB(t, path, newKey)
+		defer func() { require.NoError(t, db.Close()) }()
+		var secret string
+		err = db.QueryRow(`select secret from "vault" where id = 1`).Scan(&secret)
+		require.NoError(t, err)
+		assert.Equal(t, "plaintext-to-encrypt", secret)
+	}
+}
+
 // TestEncryption_VacuumPreservesEncryption verifies that VACUUM on an encrypted
 // database produces a compacted file that is still encrypted and readable.
 func TestEncryption_VacuumPreservesEncryption(t *testing.T) {
