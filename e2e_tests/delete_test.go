@@ -1,5 +1,59 @@
 package e2etests
 
+func (s *TestSuite) TestTruncateTable() {
+	_, err := s.db.Exec(`create table "trunc_users" (
+		id    int8 primary key autoincrement,
+		email varchar(255) not null unique
+	)`)
+	s.Require().NoError(err)
+
+	s.Run("truncate removes all rows", func() {
+		_, err := s.db.Exec(
+			`insert into "trunc_users" (email) values (?), (?), (?)`,
+			"a@example.com", "b@example.com", "c@example.com",
+		)
+		s.Require().NoError(err)
+
+		var before int64
+		s.Require().NoError(s.db.QueryRow(`select count(*) from "trunc_users"`).Scan(&before))
+		s.Equal(int64(3), before)
+
+		res, err := s.db.Exec(`TRUNCATE TABLE "trunc_users"`)
+		s.Require().NoError(err)
+		n, err := res.RowsAffected()
+		s.Require().NoError(err)
+		s.Equal(int64(3), n)
+
+		var after int64
+		s.Require().NoError(s.db.QueryRow(`select count(*) from "trunc_users"`).Scan(&after))
+		s.Equal(int64(0), after)
+	})
+
+	s.Run("truncate on empty table returns 0 rows affected", func() {
+		res, err := s.db.Exec(`TRUNCATE TABLE "trunc_users"`)
+		s.Require().NoError(err)
+		n, err := res.RowsAffected()
+		s.Require().NoError(err)
+		s.Equal(int64(0), n)
+	})
+
+	s.Run("insert after truncate reuses unique slots", func() {
+		_, err := s.db.Exec(`insert into "trunc_users" (email) values (?)`, "first@example.com")
+		s.Require().NoError(err)
+
+		_, err = s.db.Exec(`TRUNCATE TABLE "trunc_users"`)
+		s.Require().NoError(err)
+
+		// Same unique value should be insertable again after truncate.
+		_, err = s.db.Exec(`insert into "trunc_users" (email) values (?)`, "first@example.com")
+		s.Require().NoError(err)
+
+		var count int64
+		s.Require().NoError(s.db.QueryRow(`select count(*) from "trunc_users"`).Scan(&count))
+		s.Equal(int64(1), count)
+	})
+}
+
 func (s *TestSuite) TestDelete() {
 	_, err := s.db.Exec(`create table "del_users" (
 		id   int8 primary key autoincrement,
