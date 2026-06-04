@@ -12,7 +12,6 @@ MiniSQL is a research and learning project, not yet production-ready. This page 
 | Savepoints (`SAVEPOINT`, `RELEASE`, `ROLLBACK TO`) | Full transaction rollback is supported |
 | `TRUNCATE TABLE` | Use `DELETE FROM table_name WHERE true` instead |
 | `CREATE TABLE AS SELECT` | Use a regular `CREATE TABLE` followed by `INSERT INTO … SELECT` |
-| `INSERT INTO … SELECT` | Not yet supported |
 | `MERGE` / `UPSERT` by conflict target | `ON CONFLICT DO NOTHING / DO UPDATE` is supported but without explicit conflict-column targeting |
 | `FULL OUTER JOIN` | INNER, LEFT, and RIGHT JOINs are supported |
 | `CROSS JOIN` | Not supported |

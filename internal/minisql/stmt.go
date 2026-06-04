@@ -451,6 +451,7 @@ type Statement struct {
 	UpdateFromTable    string     // table name in UPDATE … FROM clause (empty = no UPDATE FROM)
 	UpdateFromAlias    string     // alias for the UPDATE FROM table (e.g. "d" in FROM departments d)
 	UpdateFromSubquery *Statement // non-nil when UPDATE FROM clause is a subquery
+	InsertSelectStmt  *Statement // non-nil for INSERT INTO … SELECT
 	CTEs               []CTE      // non-nil for WITH … SELECT statements
 	// ALTER TABLE fields
 	AlterTableAction AlterTableAction // which ALTER TABLE operation to perform
@@ -1606,7 +1607,7 @@ func canInlinedRowFitInPage(columns []Column) bool {
 }
 
 func (s Statement) validateInsert(table *Table) error {
-	if len(s.Inserts) == 0 {
+	if len(s.Inserts) == 0 && s.InsertSelectStmt == nil {
 		return errors.New("at least one row to insert is required")
 	}
 

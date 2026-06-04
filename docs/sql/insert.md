@@ -57,6 +57,86 @@ for _, u := range users {
 
 ---
 
+## INSERT INTO … SELECT
+
+Populate a table from a query result instead of a literal `VALUES` list.
+
+```sql
+INSERT INTO table_name (col1, col2, ...)
+SELECT expr1, expr2, ...
+FROM source_table
+[WHERE condition];
+```
+
+The column list is required. The number of SELECT output columns must match the number of target columns.
+
+### Copy all rows
+
+```sql
+INSERT INTO archived_users (email, name)
+SELECT email, name FROM users;
+```
+
+### Copy a filtered subset
+
+```sql
+INSERT INTO archived_users (email, name)
+SELECT email, name FROM users
+WHERE created < '2024-01-01';
+```
+
+### Copy a transformed subset
+
+```sql
+INSERT INTO audit_log (user_id, action, ts)
+SELECT id, 'signup', created FROM users
+WHERE created > '2025-01-01';
+```
+
+### Bulk move between tables
+
+```sql
+INSERT INTO orders_archive (order_id, user_id, total_paid)
+SELECT order_id, user_id, total_paid FROM orders
+WHERE created < '2024-01-01';
+
+DELETE FROM orders WHERE created < '2024-01-01';
+```
+
+### With ON CONFLICT
+
+```sql
+INSERT INTO archived_users (email, name)
+SELECT email, name FROM users
+ON CONFLICT DO NOTHING;
+```
+
+### With RETURNING
+
+```go
+rows, err := db.Query(`
+    INSERT INTO archived_users (email, name)
+    SELECT email, name FROM users WHERE id = ?
+    RETURNING id, email
+`, userID)
+defer rows.Close()
+for rows.Next() {
+    var id int64
+    var email string
+    rows.Scan(&id, &email)
+}
+```
+
+### Seeding from a subquery
+
+```sql
+INSERT INTO product_stats (product_id, total_orders)
+SELECT product_id, COUNT(*) FROM orders
+GROUP BY product_id;
+```
+
+---
+
 ## ON CONFLICT
 
 ### DO NOTHING
