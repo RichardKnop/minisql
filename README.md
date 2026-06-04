@@ -59,7 +59,7 @@ Setting `LOG_LEVEL=info` suppresses debug output and makes test failures easier 
 ### Run linter
 
 ```sh
-golangci-lint run
+make lint
 ```
 
 ### Benchmarks & profiling
