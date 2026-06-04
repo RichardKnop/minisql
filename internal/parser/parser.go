@@ -44,7 +44,7 @@ var reservedWords = []string{
 	"EXPLAIN ANALYZE", "EXPLAIN",
 	"CREATE TABLE", "DROP TABLE", "CREATE FULLTEXT INDEX", "CREATE INVERTED INDEX", "CREATE HNSW INDEX", "CREATE INDEX", "DROP INDEX",
 	"ALTER TABLE", "ADD COLUMN", "DROP COLUMN", "RENAME COLUMN", "RENAME TO", "DROPPED",
-	"SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM",
+	"SELECT", "INSERT INTO", "VALUES", "UPDATE", "DELETE FROM", "TRUNCATE TABLE",
 	// statement other
 	"*", "COUNT(*)", "SUM(", "AVG(", "MIN(", "MAX(", "GROUP BY", "HAVING", "ORDER BY", "LIMIT", "OFFSET",
 	"PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "DEFAULT", "NOT NULL", "NULL", "UNIQUE",
@@ -140,6 +140,7 @@ const (
 	stepUpdateComma
 	stepUpdateFrom
 	stepDeleteFromTable
+	stepTruncateTable
 	stepSelectField
 	stepSelectFrom
 	stepSelectComma
@@ -279,6 +280,10 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 				p.Kind = minisql.Delete
 				p.pop()
 				p.step = stepDeleteFromTable
+			case "TRUNCATE TABLE":
+				p.Kind = minisql.Delete
+				p.pop()
+				p.step = stepTruncateTable
 			case "ANALYZE":
 				p.Kind = minisql.Analyze
 				p.pop()
@@ -441,9 +446,9 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 				return statements, err
 			}
 		// -----------------
-		// DELETE FROM
+		// DELETE FROM / TRUNCATE TABLE
 		//------------------
-		case stepDeleteFromTable:
+		case stepDeleteFromTable, stepTruncateTable:
 			if err := p.doParseDelete(); err != nil {
 				return statements, err
 			}

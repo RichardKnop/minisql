@@ -10,7 +10,6 @@ MiniSQL is a research and learning project, not yet production-ready. This page 
 |---------|-------|
 | Recursive CTEs (`WITH RECURSIVE`) | Non-recursive CTEs are fully supported |
 | Savepoints (`SAVEPOINT`, `RELEASE`, `ROLLBACK TO`) | Full transaction rollback is supported |
-| `TRUNCATE TABLE` | Use `DELETE FROM table_name WHERE true` instead |
 | `CREATE TABLE AS SELECT` | Use a regular `CREATE TABLE` followed by `INSERT INTO … SELECT` |
 | `MERGE` / `UPSERT` by conflict target | `ON CONFLICT DO NOTHING / DO UPDATE` is supported but without explicit conflict-column targeting |
 | `FULL OUTER JOIN` | INNER, LEFT, and RIGHT JOINs are supported |
@@ -26,7 +25,6 @@ MiniSQL is a research and learning project, not yet production-ready. This page 
 | Negative integer literals rejected | Use `?` bind parameter with a negative `int64` value: `db.Exec("… WHERE n > ?", int64(-1))` |
 | `FROM table alias` (bare alias) | Use `FROM table AS alias` |
 | `HAVING` does not accept `?` placeholders | Use literal values in HAVING conditions |
-| `DELETE` always requires `WHERE` | Use `DELETE FROM t WHERE true` to delete all rows |
 
 ---
 

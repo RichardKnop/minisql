@@ -4,12 +4,9 @@
 
 ```sql
 DELETE FROM table_name
-WHERE condition
+[WHERE condition]
 [RETURNING column_list]
 ```
-
-!!! warning
-    MiniSQL requires a `WHERE` clause on every `DELETE`. A DELETE without a WHERE clause is a parse error. To remove all rows, use `DELETE FROM table_name WHERE true` or `TRUNCATE` (not yet implemented).
 
 ---
 
@@ -28,6 +25,19 @@ DELETE FROM orders WHERE user_id = 5 AND status = 'cancelled';
 -- Delete with bind parameters
 DELETE FROM tokens WHERE user_id = ? AND token = ?;
 ```
+
+---
+
+## DELETE all rows
+
+Omit `WHERE` to remove every row in the table:
+
+```sql
+DELETE FROM sessions;
+```
+
+!!! warning
+    There is no confirmation prompt. A DELETE without a WHERE clause removes all rows immediately and cannot be undone without a rollback. Use `TRUNCATE TABLE` for the same effect with identical semantics.
 
 ---
 
@@ -78,8 +88,42 @@ WHERE id NOT IN (
 
 ---
 
+## TRUNCATE TABLE
+
+`TRUNCATE TABLE` is shorthand for a full-table delete with no WHERE clause. It removes every row and maintains all indexes and foreign-key constraints exactly as a plain DELETE would.
+
+```sql
+TRUNCATE TABLE table_name;
+```
+
+It is semantically equivalent to:
+
+```sql
+DELETE FROM table_name;
+```
+
+Use `TRUNCATE` when intent matters for readability — it makes it explicit that you mean to empty the whole table, not that you forgot a WHERE clause.
+
+```sql
+-- Clear a cache table between test runs
+TRUNCATE TABLE session_cache;
+
+-- Reset a staging table before a bulk load
+TRUNCATE TABLE import_staging;
+```
+
+After a TRUNCATE, unique constraint slots are freed so previously-inserted values can be reinserted:
+
+```sql
+INSERT INTO users (email) VALUES ('alice@example.com');
+TRUNCATE TABLE users;
+INSERT INTO users (email) VALUES ('alice@example.com'); -- succeeds
+```
+
+---
+
 ## Notes
 
 - Foreign-key constraints are checked on delete when `PRAGMA foreign_keys = on` (the default). Deleting a parent row that has child rows referencing it returns an error.
 - `RETURNING` returns the row values *before* deletion — useful for audit logging or cascading application logic.
-- To delete all rows efficiently, use `DELETE FROM table_name WHERE true`.
+- Omitting `WHERE` deletes all rows. Use `TRUNCATE TABLE` for identical semantics with a clearer intent.

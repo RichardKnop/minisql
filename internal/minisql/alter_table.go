@@ -49,7 +49,7 @@ func (d *Database) alterTableAddColumn(ctx context.Context, stmt Statement) erro
 	live := 0
 	for _, col := range table.Columns {
 		if !col.Deleted {
-			live++
+			live += 1
 		}
 	}
 	if live+1 > MaxColumns {
@@ -257,10 +257,10 @@ func (d *Database) updateTableSchema(ctx context.Context, table *Table) error {
 // the current in-memory Table state (used by all ALTER TABLE sub-executors).
 func tableStatementFromTable(t *Table) Statement {
 	stmt := Statement{
-		Kind:       CreateTable,
-		TableName:  t.Name,
-		Columns:    t.Columns,
-		PrimaryKey: t.PrimaryKey,
+		Kind:        CreateTable,
+		TableName:   t.Name,
+		Columns:     t.Columns,
+		PrimaryKey:  t.PrimaryKey,
 		ForeignKeys: t.ForeignKeys,
 	}
 	for _, ui := range t.UniqueIndexes {
@@ -285,4 +285,3 @@ func rewriteIndexDDLTableName(si SecondaryIndex, _, newTable string) string {
 	}
 	return s.DDL()
 }
-
