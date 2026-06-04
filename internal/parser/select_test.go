@@ -962,6 +962,67 @@ func TestParse_SelectHaving(t *testing.T) {
 			},
 			nil,
 		},
+		{
+			"HAVING with placeholder",
+			"SELECT user_id, SUM(total) FROM orders GROUP BY user_id HAVING SUM(total) > ?;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "orders",
+					Fields: []minisql.Field{
+						{Name: "user_id"},
+						{Name: "SUM(total)"},
+					},
+					Aggregates: []minisql.AggregateExpr{
+						{},
+						{Kind: minisql.AggregateSum, Column: "total"},
+					},
+					GroupBy: []minisql.Field{{Name: "user_id"}},
+					Having: minisql.OneOrMore{
+						{{
+							Operand1: minisql.Operand{Type: minisql.OperandField, Value: minisql.Field{Name: "SUM(total)"}},
+							Operator: minisql.Gt,
+							Operand2: minisql.Operand{Type: minisql.OperandPlaceholder},
+						}},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE and HAVING both with placeholders",
+			"SELECT user_id, COUNT(*) FROM orders WHERE status = ? GROUP BY user_id HAVING COUNT(*) >= ?;",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Select,
+					TableName: "orders",
+					Fields: []minisql.Field{
+						{Name: "user_id"},
+						{Name: "COUNT(*)"},
+					},
+					Aggregates: []minisql.AggregateExpr{
+						{},
+						{Kind: minisql.AggregateCount},
+					},
+					GroupBy: []minisql.Field{{Name: "user_id"}},
+					Conditions: minisql.OneOrMore{
+						{{
+							Operand1: minisql.Operand{Type: minisql.OperandField, Value: minisql.Field{Name: "status"}},
+							Operator: minisql.Eq,
+							Operand2: minisql.Operand{Type: minisql.OperandPlaceholder},
+						}},
+					},
+					Having: minisql.OneOrMore{
+						{{
+							Operand1: minisql.Operand{Type: minisql.OperandField, Value: minisql.Field{Name: "COUNT(*)"}},
+							Operator: minisql.Gte,
+							Operand2: minisql.Operand{Type: minisql.OperandPlaceholder},
+						}},
+					},
+				},
+			},
+			nil,
+		},
 	}
 
 	for _, aTestCase := range testCases {

@@ -22,7 +22,6 @@ MiniSQL is a research and learning project, not yet production-ready. This page 
 | Limitation | Workaround |
 |-----------|------------|
 | `FROM table alias` (bare alias) | Use `FROM table AS alias` |
-| `HAVING` does not accept `?` placeholders | Use literal values in HAVING conditions |
 
 ---
 
