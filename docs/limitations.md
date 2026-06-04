@@ -12,7 +12,6 @@ MiniSQL is a research and learning project, not yet production-ready. This page 
 | Savepoints (`SAVEPOINT`, `RELEASE`, `ROLLBACK TO`) | Full transaction rollback is supported |
 | `CREATE TABLE AS SELECT` | Use a regular `CREATE TABLE` followed by `INSERT INTO … SELECT` |
 | `MERGE` / `UPSERT` by conflict target | `ON CONFLICT DO NOTHING / DO UPDATE` is supported but without explicit conflict-column targeting |
-| `FULL OUTER JOIN` | INNER, LEFT, and RIGHT JOINs are supported |
 | `CROSS JOIN` | Not supported |
 | Lateral joins | Not supported |
 
@@ -36,7 +35,7 @@ MiniSQL is a research and learning project, not yet production-ready. This page 
 | No `INTERVAL` column type | `INTERVAL` literals are supported in arithmetic expressions only |
 | No `DECIMAL` / `NUMERIC` types | Use `INT8` for fixed-precision integers or `DOUBLE` for approximation |
 | `TEXT` columns cannot be primary keys or unique-index keys | Use `VARCHAR(n)` for indexed string columns |
-| No multi-value `IN` bind parameter | List values individually or use a subquery |
+| No slice expansion in `IN` | `IN (?, ?)` with individual bind args works; passing a `[]T` slice as a single `?` does not. List values as separate `?` placeholders or use a subquery |
 
 ---
 
