@@ -2,6 +2,7 @@ package parser
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/RichardKnop/minisql/internal/minisql"
@@ -12,6 +13,53 @@ var (
 	errInsertFieldValueCountMismatch = errors.New("at INSERT INTO: value count doesn't match field count")
 	errInsertNoFields                = errors.New("at INSERT INTO: expected at least one field to insert")
 )
+
+// insertSelectBoundary returns the byte offset in upperSQL (already normalised,
+// upper-cased) where the SELECT sub-statement ends. It stops at the first
+// occurrence of "ON CONFLICT" or "RETURNING" (INSERT-level keywords) at
+// paren depth 0 and outside string literals, or at the end of the string.
+func insertSelectBoundary(upperSQL string) int {
+	depth := 0
+	i := 0
+	for i < len(upperSQL) {
+		switch upperSQL[i] {
+		case '\'':
+			i++
+			for i < len(upperSQL) && upperSQL[i] != '\'' {
+				i++
+			}
+			if i < len(upperSQL) {
+				i++ // skip closing quote
+			}
+		case '(':
+			depth++
+			i++
+		case ')':
+			depth--
+			i++
+		default:
+			if depth == 0 {
+				rem := upperSQL[i:]
+				if isInsertKeywordAt(rem, "ON CONFLICT") || isInsertKeywordAt(rem, "RETURNING") {
+					return i
+				}
+			}
+			i++
+		}
+	}
+	return i
+}
+
+// isInsertKeywordAt reports whether rem starts with kw followed by a space,
+// semicolon, or end-of-string (i.e. kw is a complete token, not a prefix of
+// a longer identifier).
+func isInsertKeywordAt(rem, kw string) bool {
+	if !strings.HasPrefix(rem, kw) {
+		return false
+	}
+	rest := rem[len(kw):]
+	return rest == "" || rest[0] == ' ' || rest[0] == ';'
+}
 
 func (p *parserItem) doParseInsert() error {
 	switch p.step {
@@ -51,8 +99,38 @@ func (p *parserItem) doParseInsert() error {
 		p.step = stepInsertValuesRWord
 	case stepInsertValuesRWord:
 		valuesRWord := p.peek()
+		if strings.ToUpper(valuesRWord) == "SELECT" {
+			// INSERT INTO … SELECT — parse the SELECT as a sub-statement.
+			//
+			// Limit the sub-parser to the SELECT portion only: stop before any
+			// INSERT-level keyword (ON CONFLICT, RETURNING) at paren depth 0.
+			// This prevents the SELECT parser from consuming those tokens.
+			boundary := insertSelectBoundary(p.upperSQL[p.i:])
+			rest := &parserItem{
+				sql:      p.sql[p.i : p.i+boundary],
+				upperSQL: p.upperSQL[p.i : p.i+boundary],
+				step:     stepBeginning,
+			}
+			selectStmts, err := rest.doParse()
+			if err != nil {
+				return fmt.Errorf("INSERT INTO … SELECT: %w", err)
+			}
+			if len(selectStmts) != 1 {
+				return p.errorf("at INSERT INTO … SELECT: expected exactly one SELECT statement")
+			}
+			if selectStmts[0].Kind != minisql.Select {
+				return p.errorf("at INSERT INTO … SELECT: expected SELECT statement")
+			}
+			selectStmt := selectStmts[0]
+			p.InsertSelectStmt = &selectStmt
+			p.i += rest.i
+			// Transition to stepInsertValuesCommaBeforeOpeningParens so the normal
+			// INSERT post-value handling processes ON CONFLICT / RETURNING / end.
+			p.step = stepInsertValuesCommaBeforeOpeningParens
+			return nil
+		}
 		if strings.ToUpper(valuesRWord) != "VALUES" {
-			return p.errorf("at INSERT INTO: expected VALUES")
+			return p.errorf("at INSERT INTO: expected VALUES or SELECT")
 		}
 		p.pop()
 		p.step = stepInsertValuesOpeningParens

@@ -206,7 +206,9 @@ func (d *Database) PrepareStatement(ctx context.Context, query string) (Statemen
 	stmt.CacheKey = query
 
 	// Pre-allocate the insert column-order cache so all clones share one object.
-	if stmt.Kind == Insert {
+	// INSERT … SELECT cannot use the cache: column layout comes from the runtime
+	// SELECT result, not from the static statement structure.
+	if stmt.Kind == Insert && stmt.InsertSelectStmt == nil {
 		stmt.insertCache = &insertPrepCache{}
 	}
 
@@ -552,6 +554,16 @@ func (d *Database) ExecuteStatement(ctx context.Context, stmt Statement) (Statem
 		if stmt.Kind == Update {
 			var err error
 			ctx, err = d.resolveSetSubqueries(ctx, &stmt)
+			if err != nil {
+				return StatementResult{}, err
+			}
+		}
+
+		// INSERT INTO … SELECT: execute the SELECT before acquiring the write lock.
+		// This avoids a re-entrant dbLock deadlock (GetTable → RLock inside Lock).
+		if stmt.Kind == Insert && stmt.InsertSelectStmt != nil {
+			var err error
+			stmt, err = d.materialiseInsertSelect(ctx, stmt)
 			if err != nil {
 				return StatementResult{}, err
 			}
@@ -1166,6 +1178,44 @@ func (d *Database) executeTableStatement(ctx context.Context, table *Table, stmt
 	}
 
 	return StatementResult{}, fmt.Errorf("unrecognized table statement type: %v", stmt.Kind)
+}
+
+// materialiseInsertSelect executes the SELECT sub-statement of an INSERT INTO … SELECT
+// and converts the result rows into stmt.Inserts so that the normal INSERT path can proceed.
+// It must be called before the exclusive write lock is acquired to avoid a re-entrant
+// dbLock deadlock (SELECT reads call GetTable → RLock).
+func (d *Database) materialiseInsertSelect(ctx context.Context, stmt Statement) (Statement, error) {
+	result, err := d.ExecuteStatement(ctx, *stmt.InsertSelectStmt)
+	if err != nil {
+		return Statement{}, fmt.Errorf("INSERT INTO … SELECT: %w", err)
+	}
+	rows, err := materializeResultRows(ctx, result)
+	if err != nil {
+		return Statement{}, fmt.Errorf("INSERT INTO … SELECT: materialise: %w", err)
+	}
+
+	// Compute how many of stmt.Fields are INSERT target fields (vs. DO UPDATE SET fields).
+	nInsertFields := len(stmt.Fields)
+	if stmt.ConflictAction == ConflictActionDoUpdate && len(stmt.Updates) > 0 {
+		if n := len(stmt.Fields) - len(stmt.Updates); n >= 0 {
+			nInsertFields = n
+		}
+	}
+
+	inserts := make([][]OptionalValue, 0, len(rows))
+	for _, row := range rows {
+		if len(row.Values) != nInsertFields {
+			return Statement{}, fmt.Errorf(
+				"INSERT INTO … SELECT: SELECT returns %d column(s) but INSERT expects %d",
+				len(row.Values), nInsertFields,
+			)
+		}
+		insertRow := make([]OptionalValue, nInsertFields)
+		copy(insertRow, row.Values)
+		inserts = append(inserts, insertRow)
+	}
+	stmt.Inserts = inserts
+	return stmt, nil
 }
 
 // flattenUnionChain traverses a linked chain of UnionClause nodes (built by the parser)

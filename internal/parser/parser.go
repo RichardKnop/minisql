@@ -776,7 +776,7 @@ func (p *parserItem) validate(stmt minisql.Statement) error {
 			}
 		}
 	}
-	if stmt.Kind == minisql.Insert && len(stmt.Inserts) == 0 {
+	if stmt.Kind == minisql.Insert && len(stmt.Inserts) == 0 && stmt.InsertSelectStmt == nil {
 		return errNoRowsToInsert
 	}
 	if stmt.Kind == minisql.Insert {
