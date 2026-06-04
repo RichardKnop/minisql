@@ -422,6 +422,66 @@ func TestParse_Where(t *testing.T) {
 			},
 			nil,
 		},
+		{
+			"WHERE with negative integer literal",
+			"WHERE b = -1",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsEqual(minisql.Field{Name: "b"}, minisql.OperandInteger, int64(-1)),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with negative integer in greater-than condition",
+			"WHERE score > -100",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsGreater(minisql.Field{Name: "score"}, minisql.OperandInteger, int64(-100)),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with negative float literal",
+			"WHERE b = -1.5",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsEqual(minisql.Field{Name: "b"}, minisql.OperandFloat, float64(-1.5)),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with negative integer in BETWEEN bounds",
+			"WHERE score BETWEEN -10 AND -1",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsBetween(minisql.Field{Name: "score"}, int64(-10), int64(-1)),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with negative integers in IN list",
+			"WHERE b IN (-1, -2, -3)",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsInAny(minisql.Field{Name: "b"}, int64(-1), int64(-2), int64(-3)),
+				},
+			},
+			nil,
+		},
+		{
+			"WHERE with mixed positive and negative integers in IN list",
+			"WHERE b IN (-1, 0, 1)",
+			minisql.OneOrMore{
+				{
+					minisql.FieldIsInAny(minisql.Field{Name: "b"}, int64(-1), int64(0), int64(1)),
+				},
+			},
+			nil,
+		},
 	}
 
 	for _, aTestCase := range testCases {

@@ -394,6 +394,45 @@ func TestParse_Insert(t *testing.T) {
 			},
 			nil,
 		},
+		{
+			"INSERT with negative integer literal works",
+			"INSERT INTO 'a' (b) VALUES (-42);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Insert,
+					TableName: "a",
+					Fields:    []minisql.Field{{Name: "b"}},
+					Inserts:   [][]minisql.OptionalValue{{{Value: int64(-42), Valid: true}}},
+				},
+			},
+			nil,
+		},
+		{
+			"INSERT with negative float literal works",
+			"INSERT INTO 'a' (b) VALUES (-3.14);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Insert,
+					TableName: "a",
+					Fields:    []minisql.Field{{Name: "b"}},
+					Inserts:   [][]minisql.OptionalValue{{{Value: float64(-3.14), Valid: true}}},
+				},
+			},
+			nil,
+		},
+		{
+			"INSERT with mixed positive and negative values works",
+			"INSERT INTO 'a' (b, c) VALUES (-1, 2);",
+			[]minisql.Statement{
+				{
+					Kind:      minisql.Insert,
+					TableName: "a",
+					Fields:    []minisql.Field{{Name: "b"}, {Name: "c"}},
+					Inserts:   [][]minisql.OptionalValue{{{Value: int64(-1), Valid: true}, {Value: int64(2), Valid: true}}},
+				},
+			},
+			nil,
+		},
 	}
 
 	for _, aTestCase := range testCases {

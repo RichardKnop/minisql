@@ -622,6 +622,12 @@ func (p *parserItem) peekWithLength() (string, int) {
 			}
 		}
 
+		// Don't consume '-' as an operator when it is immediately followed by a
+		// digit — that is a negative number literal, not binary subtraction.
+		if rWord == "-" && p.i+1 < len(p.sql) && unicode.IsDigit(rune(p.sql[p.i+1])) {
+			continue
+		}
+
 		return p.upperSQL[p.i:end], len(rWord)
 	}
 
@@ -630,12 +636,19 @@ func (p *parserItem) peekWithLength() (string, int) {
 		return p.peekQuotedStringWithLength()
 	}
 
-	// Next for numbers (floats or integers)
+	// Next for numbers (floats or integers), including negative literals ('-' + digit).
 	if unicode.IsDigit(rune(p.sql[p.i])) {
 		_, ln := p.peekNumberWithLength()
 		if ln > 0 {
 			return p.sql[p.i : p.i+ln], ln
 		}
+	}
+	if p.sql[p.i] == '-' && p.i+1 < len(p.sql) && unicode.IsDigit(rune(p.sql[p.i+1])) {
+		end := p.i + 2
+		for end < len(p.sql) && (unicode.IsDigit(rune(p.sql[end])) || p.sql[end] == '.') {
+			end++
+		}
+		return p.sql[p.i:end], end - p.i
 	}
 
 	// And finally for identifiers
@@ -715,6 +728,21 @@ func (p *parserItem) peekValue() (any, int) {
 			return int64(number), ln
 		}
 		return number, ln
+	}
+	// Negative numeric literal: '-' immediately followed by a digit.
+	if p.i+1 < len(p.sql) && p.sql[p.i] == '-' && unicode.IsDigit(rune(p.sql[p.i+1])) {
+		savedI := p.i
+		p.i++
+		number, ln = p.peekNumberWithLength()
+		p.i = savedI
+		if ln > 0 {
+			number = -number
+			totalLen := 1 + ln
+			if float64(int64(number)) == number {
+				return int64(number), totalLen
+			}
+			return number, totalLen
+		}
 	}
 	quotedValue, ln := p.peekQuotedStringWithLength()
 	if ln > 0 {

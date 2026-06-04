@@ -666,7 +666,7 @@ When adding filtering/transformation stages, insert them as goroutines between `
 - JSON functions: `JSON_EXTRACT`, `JSON_VALID`, `JSON_TYPE`, `JSON_ARRAY_LENGTH`.
 - `JSON_CONTAINS(col, '{"key":"val"}')` uses the JSON inverted index when one exists.
 - `CAST(x AS JSON)` and `CAST(uuid AS TEXT)` are supported.
-- Parser does not support negative integer literals in SQL — use `?` placeholder with `int64` arg instead.
+- Negative integer and float literals are supported directly in SQL (e.g., `WHERE n = -1`, `VALUES (-42)`).
 
 ---
 
@@ -780,7 +780,7 @@ Parser files mirror engine files: `parser/select.go` ↔ `internal/minisql/selec
 - **Partial index implication check** — conservative syntactic containment: each condition in the index WHERE must appear verbatim in the query WHERE. Semantically equivalent but textually different conditions are not recognised.
 - **CHECK constraints** — column-level only; table-level CHECK is not yet implemented.
 - **FOREIGN KEY** — single-column only; composite FK is not yet implemented. Actions: RESTRICT, NO ACTION, SET NULL, CASCADE.
-- **Parser negative integer literals** — the parser does not support negative integer literals directly in SQL. Use `?` placeholder with a negative `int64` argument instead.
+- **`FROM table alias`** — bare alias (without `AS`) is not supported; write `FROM t AS alias`.
 
 ---
 
