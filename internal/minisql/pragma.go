@@ -2,6 +2,7 @@ package minisql
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 )
@@ -39,6 +40,8 @@ func (d *Database) executePragmaStatement(ctx context.Context, stmt Statement) (
 			return StatementResult{}, fmt.Errorf("WAL checkpoint failed: %w", err)
 		}
 		return walCheckpointResult(), nil
+	case "rekey":
+		return d.executeRekeyPragma(ctx, stmt)
 	case "synchronous":
 		return d.executeSynchronousPragma(stmt)
 	case "parallel_scan":
@@ -228,6 +231,37 @@ func walCheckpointResult() StatementResult {
 		Columns: walCheckpointResultColumns,
 		Rows:    rowsIterator([]Row{row}),
 	}
+}
+
+var rekeyResultColumns = []Column{
+	{Kind: Text, Name: "rekey"},
+}
+
+// executeRekeyPragma handles PRAGMA rekey = '<hex-encoded-key>'.
+// It re-encrypts the database with the supplied key (key rotation or adding
+// encryption).  Pass an empty string to remove encryption.
+func (d *Database) executeRekeyPragma(ctx context.Context, stmt Statement) (StatementResult, error) {
+	if stmt.PragmaValue == "" {
+		return StatementResult{}, fmt.Errorf("PRAGMA rekey: a hex-encoded key value is required; " +
+			"to remove encryption use the Go API db.ReKey(ctx, nil)")
+	}
+	newKey, err := hex.DecodeString(stmt.PragmaValue)
+	if err != nil {
+		return StatementResult{}, fmt.Errorf("PRAGMA rekey: key must be hex-encoded: %w", err)
+	}
+	if len(newKey) == 0 {
+		return StatementResult{}, fmt.Errorf("PRAGMA rekey: decoded key must not be empty")
+	}
+	if err := d.ReKey(ctx, newKey); err != nil {
+		return StatementResult{}, fmt.Errorf("PRAGMA rekey: %w", err)
+	}
+	row := NewRowWithValues(rekeyResultColumns, []OptionalValue{
+		{Value: NewTextPointer([]byte("ok")), Valid: true},
+	})
+	return StatementResult{
+		Columns: rekeyResultColumns,
+		Rows:    rowsIterator([]Row{row}),
+	}, nil
 }
 
 func rowsIterator(rows []Row) Iterator {

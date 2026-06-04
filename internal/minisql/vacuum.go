@@ -28,6 +28,29 @@ import (
 // VACUUM must not be called from inside an explicit user transaction; doing so
 // returns an error.
 func (d *Database) Vacuum(ctx context.Context) error {
+	return d.vacuumWithKey(ctx, d.encryptionKey)
+}
+
+// ReKey re-encrypts the database with newKey, atomically replacing the
+// database file via the same crash-safe copy-and-swap as VACUUM.
+//
+// Use cases:
+//   - Key rotation:         open with oldKey, call ReKey(ctx, newKey)
+//   - Add encryption:       open unencrypted DB, call ReKey(ctx, newKey)
+//   - Remove encryption:    open with oldKey, call ReKey(ctx, nil)
+//
+// The new file gets a fresh random salt, so the derived AES key changes even
+// if the raw key material is the same as before.  All data is preserved.
+//
+// ReKey must not be called from inside an explicit user transaction.
+func (d *Database) ReKey(ctx context.Context, newKey []byte) error {
+	return d.vacuumWithKey(ctx, newKey)
+}
+
+// vacuumWithKey is the shared implementation for Vacuum and ReKey.
+// It creates a temp database encrypted with newKey (nil = plaintext), copies
+// all data, atomically swaps the files, and reopens with newKey.
+func (d *Database) vacuumWithKey(ctx context.Context, newKey []byte) error {
 	tempFile := d.GetFileName() + ".tmp"
 	backupFile := d.GetFileName() + ".bak"
 
@@ -58,8 +81,8 @@ func (d *Database) Vacuum(ctx context.Context) error {
 	}
 
 	tempDBOpts := []DatabaseOption{}
-	if len(d.encryptionKey) > 0 {
-		tempDBOpts = append(tempDBOpts, WithEncryptionKey(d.encryptionKey))
+	if len(newKey) > 0 {
+		tempDBOpts = append(tempDBOpts, WithEncryptionKey(newKey))
 	}
 	tempDB, err := NewDatabase(context.Background(), d.logger, tempFile, d.parser, tempPager, tempPager, nil, tempDBOpts...)
 	if err != nil {
@@ -239,6 +262,11 @@ func (d *Database) Vacuum(ctx context.Context) error {
 		newFile.Close()
 		return fmt.Errorf("vacuum: create new pager: %w", err)
 	}
+
+	// Update the encryption key before reopening so that setupEncryption inside
+	// Reopen uses the new key (relevant when adding, rotating, or removing
+	// encryption via ReKey).
+	d.encryptionKey = newKey
 
 	// Reopen replaces d.txManager with a fresh instance so stale page version
 	// numbers from the old file cannot cause spurious OCC conflicts.

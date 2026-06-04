@@ -110,7 +110,7 @@ MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLi
 │   │   │
 │   │   │  ── Infrastructure ──
 │   │   ├── ports.go              # All key interfaces (Parser, Pager, TxPager, BTreeIndex, …)
-│   │   ├── pragma.go             # PRAGMA handler (synchronous, parallel_scan, foreign_keys, …)
+│   │   ├── pragma.go             # PRAGMA handler (synchronous, parallel_scan, foreign_keys, rekey, …)
 │   │   ├── config.go             # Constants: PageSize, MaxColumns, LRU defaults, …
 │   │   └── mocks_test.go         # Auto-generated mocks (never edit by hand)
 │   │
@@ -677,6 +677,8 @@ When adding filtering/transformation stages, insert them as goroutines between `
 - Opening a database requires a valid header magic/version/page size; old header layouts are intentionally rejected during the unstable pre-1.0 period.
 - When changing the header format, update both `internal/minisql/config.go` and `agent-os/standards/storage-engine/page-layout.md` in the same change.
 - WAL commits write frames to `{dbpath}-wal` and update the in-memory WAL index; the main database file is only written during a checkpoint.
+- **Transparent page encryption**: `WithEncryptionKey(key []byte)` option enables AES-256-CTR. The encryption salt (32 bytes) is stored in the plaintext header; the AES key is `HKDF(userKey, salt)`. Page 0 bytes 0-99 are always plaintext.
+- **Key rotation**: `db.ReKey(ctx, newKey)` or `PRAGMA rekey = '<hex>'` — uses the VACUUM copy-and-swap mechanism; the output file gets a fresh salt. `db.ReKey(ctx, nil)` removes encryption.
 
 ---
 
