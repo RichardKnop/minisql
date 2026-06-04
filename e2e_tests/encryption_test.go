@@ -234,8 +234,9 @@ func TestEncryption_ReKey_Rotation(t *testing.T) {
 	db2, err := sql.Open("minisql", encryptedDSN(path, oldKey))
 	require.NoError(t, err)
 	db2.SetMaxOpenConns(1)
-	assert.Error(t, db2.Ping(), "expected error when opening with old key after rotation")
+	pingErr := db2.Ping()
 	db2.Close()
+	require.Error(t, pingErr, "expected error when opening with old key after rotation")
 
 	// Opening with the new key must succeed and data must be intact.
 	{
