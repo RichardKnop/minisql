@@ -1919,10 +1919,6 @@
 <td><code>TEXT</code> columns cannot be primary keys or unique-index keys</td>
 <td>Use <code>VARCHAR(n)</code> for indexed string columns</td>
 </tr>
-<tr>
-<td>No slice expansion in <code>IN</code></td>
-<td><code>IN (?, ?)</code> with individual bind args works; passing a <code>[]T</code> slice as a single <code>?</code> does not. List values as separate <code>?</code> placeholders or use a subquery</td>
-</tr>
 </tbody>
 </table>
 <hr />
