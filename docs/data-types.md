@@ -42,15 +42,6 @@ CREATE TABLE stats (
 );
 ```
 
-!!! warning "No negative integer literals in SQL"
-    The SQL parser does not accept negative integer literals directly.
-    Use `?` placeholders with negative `int64` values in Go code:
-
-    ```go
-    db.Exec("insert into t (n) values (?)", int64(-42)) // ✅
-    // db.Exec("insert into t (n) values (-42)")        // ❌ parse error
-    ```
-
 ### REAL and DOUBLE
 
 ```sql
