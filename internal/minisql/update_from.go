@@ -70,7 +70,7 @@ func (d *Database) executeUpdateFrom(ctx context.Context, stmt Statement) (State
 		ce.Write(zap.String("query type", "UPDATE FROM"), zap.Any("plan", plan))
 	}
 
-	allFields := fieldsFromColumns(targetTable.Columns...)
+	allFields := targetTable.allFields
 
 	type pendingUpdate struct {
 		row  Row

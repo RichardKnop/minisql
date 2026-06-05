@@ -29,7 +29,7 @@ func (t *Table) Delete(ctx context.Context, stmt Statement) (StatementResult, er
 	}
 
 	// Always select all columns so the full row is available for index cleanup on delete.
-	selectedFields := fieldsFromColumns(t.Columns...)
+	selectedFields := t.allFields
 
 	result := StatementResult{
 		Columns: t.Columns,
