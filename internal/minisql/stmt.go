@@ -263,7 +263,6 @@ func fieldsFromColumns(columns ...Column) []Field {
 	return fields
 }
 
-
 func textOverflowFields(columns ...Column) []Field {
 	overflowFields := make([]Field, 0, len(columns))
 	for _, col := range columns {
@@ -414,14 +413,14 @@ type CTE struct {
 // a single SQL statement of any kind (DML, DDL, transaction control, etc.) and
 // is passed through preparation, binding, validation, and execution unchanged.
 type Statement struct {
-	PrimaryKey         PrimaryKey
-	Aliases            map[string]string
-	Functions          map[string]Function
-	Updates            map[string]OptionalValue
-	Offset             OptionalValue
-	Limit              OptionalValue
-	TableName          string
-	TableAlias         string
+	PrimaryKey           PrimaryKey
+	Aliases              map[string]string
+	Functions            map[string]Function
+	Updates              map[string]OptionalValue
+	Offset               OptionalValue
+	Limit                OptionalValue
+	TableName            string
+	TableAlias           string
 	IndexExpression      *Expr // nil = column index; non-nil = expression index
 	IndexName            string
 	IndexWhereClause     string // raw SQL of the partial index predicate (empty = full index)
@@ -429,30 +428,30 @@ type Statement struct {
 	IndexTokenizer       string // tokenizer option for full-text indexes
 	IndexHNSWM           int    // HNSW WITH (m = …) option; 0 = use HNSWDefaultM
 	IndexHNSWEfConstruct int    // HNSW WITH (ef_construction = …) option; 0 = use HNSWDefaultEfConstruction
-	Target             string
-	PragmaName         string
-	PragmaValue        string
-	Fields             []Field
-	Inserts            [][]OptionalValue
-	Aggregates         []AggregateExpr
-	GroupBy            []Field
-	Having             OneOrMore
-	Unions             []UnionClause
-	Joins              []Join
-	OrderBy            []OrderBy
-	UniqueIndexes      []UniqueIndex
-	ForeignKeys        []ForeignKey
-	Columns            []Column
-	Conditions         OneOrMore
-	ReturningFields    []Field
-	ExplainStatement   *Statement
-	FromSubquery       *Statement // non-nil when FROM clause is a derived table
-	FromSubqueryAlias  string     // alias for the derived table (e.g. "t" in FROM (...) t)
-	UpdateFromTable    string     // table name in UPDATE … FROM clause (empty = no UPDATE FROM)
-	UpdateFromAlias    string     // alias for the UPDATE FROM table (e.g. "d" in FROM departments d)
-	UpdateFromSubquery *Statement // non-nil when UPDATE FROM clause is a subquery
-	InsertSelectStmt  *Statement // non-nil for INSERT INTO … SELECT
-	CTEs               []CTE      // non-nil for WITH … SELECT statements
+	Target               string
+	PragmaName           string
+	PragmaValue          string
+	Fields               []Field
+	Inserts              [][]OptionalValue
+	Aggregates           []AggregateExpr
+	GroupBy              []Field
+	Having               OneOrMore
+	Unions               []UnionClause
+	Joins                []Join
+	OrderBy              []OrderBy
+	UniqueIndexes        []UniqueIndex
+	ForeignKeys          []ForeignKey
+	Columns              []Column
+	Conditions           OneOrMore
+	ReturningFields      []Field
+	ExplainStatement     *Statement
+	FromSubquery         *Statement // non-nil when FROM clause is a derived table
+	FromSubqueryAlias    string     // alias for the derived table (e.g. "t" in FROM (...) t)
+	UpdateFromTable      string     // table name in UPDATE … FROM clause (empty = no UPDATE FROM)
+	UpdateFromAlias      string     // alias for the UPDATE FROM table (e.g. "d" in FROM departments d)
+	UpdateFromSubquery   *Statement // non-nil when UPDATE FROM clause is a subquery
+	InsertSelectStmt     *Statement // non-nil for INSERT INTO … SELECT
+	CTEs                 []CTE      // non-nil for WITH … SELECT statements
 	// ALTER TABLE fields
 	AlterTableAction AlterTableAction // which ALTER TABLE operation to perform
 	AlterColumnName  string           // column being dropped or old name for RENAME COLUMN
@@ -472,6 +471,10 @@ type Statement struct {
 	// It caches the static column-order metadata computed by prepareInsert so that
 	// repeated Exec calls on the same prepared statement skip the per-Exec allocation.
 	insertCache *insertPrepCache
+	// boundArgs holds pending prepared INSERT arguments for the table-aware
+	// prepareInsert path. It is only set for simple prepared INSERT statements
+	// where binding can be safely delayed until table columns are available.
+	boundArgs []any
 }
 
 // HasWindowFuncs reports whether the SELECT field list contains at least one
@@ -682,6 +685,7 @@ func (s Statement) Clone() Statement {
 		NewColumnName:      s.NewColumnName,
 		NewTableName:       s.NewTableName,
 		insertCache:        s.insertCache,
+		boundArgs:          s.boundArgs,
 	}
 	for i := range s.Inserts {
 		stmt.Inserts[i] = make([]OptionalValue, len(s.Inserts[i]))
@@ -737,6 +741,14 @@ func (s Statement) Clone() Statement {
 // arguments in left-to-right order. It clones the statement first so the
 // original prepared form is not modified and can be reused with different args.
 func (s Statement) BindArguments(args ...any) (Statement, error) {
+	if s.canDelayPreparedInsertBind() {
+		stmt := s
+		stmt.Inserts = make([][]OptionalValue, len(s.Inserts))
+		copy(stmt.Inserts, s.Inserts)
+		stmt.boundArgs = args
+		return stmt, nil
+	}
+
 	// Clone statement so we can keep using the preparement statement
 	// with different arguments without modifying it
 	stmt := s.Clone()
@@ -904,6 +916,16 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 	}
 
 	return stmt, nil
+}
+
+func (s Statement) canDelayPreparedInsertBind() bool {
+	return s.Kind == Insert &&
+		s.insertCache != nil &&
+		s.InsertSelectStmt == nil &&
+		s.ConflictAction != ConflictActionDoUpdate &&
+		len(s.CTEs) == 0 &&
+		len(s.Conditions) == 0 &&
+		len(s.Having) == 0
 }
 
 func operandTypeFromAny(value any) OperandType {
@@ -1093,6 +1115,16 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 		s.Fields = newFields
 	}
 
+	boundArgs := s.boundArgs
+	if len(boundArgs) > 0 && !insertFieldOrderMatchesColumnOrder(colFieldIdx, nInsertFields) {
+		var err error
+		s, err = s.bindPendingInsertArgs(boundArgs)
+		if err != nil {
+			return Statement{}, err
+		}
+		boundArgs = nil
+	}
+
 	// Rebuild each insert row in column order, applying defaults and resolving
 	// NOW() / timestamp values inline — one allocation per row.
 	for j := range s.Inserts {
@@ -1102,6 +1134,17 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 			var val OptionalValue
 			if k >= 0 {
 				val = s.Inserts[j][k]
+				if _, ok := val.Value.(Placeholder); ok {
+					if len(boundArgs) == 0 {
+						return Statement{}, errors.New("not enough arguments to bind placeholders")
+					}
+					if boundArgs[0] == nil {
+						val = OptionalValue{}
+					} else {
+						val = OptionalValue{Value: boundArgs[0], Valid: true}
+					}
+					boundArgs = boundArgs[1:]
+				}
 			} else {
 				// Column was omitted — apply table default.
 				if col.DefaultValue.Valid {
@@ -1148,6 +1191,48 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 	}
 
 	return s, nil
+}
+
+func insertFieldOrderMatchesColumnOrder(colFieldIdx []int, nInsertFields int) bool {
+	lastColIdx := -1
+	for fieldIdx := 0; fieldIdx < nInsertFields; fieldIdx++ {
+		colIdx := -1
+		for i, idx := range colFieldIdx {
+			if idx == fieldIdx {
+				colIdx = i
+				break
+			}
+		}
+		if colIdx < 0 || colIdx < lastColIdx {
+			return false
+		}
+		lastColIdx = colIdx
+	}
+	return true
+}
+
+func (s Statement) bindPendingInsertArgs(args []any) (Statement, error) {
+	stmt := s.Clone()
+	stmt.boundArgs = nil
+
+	for i, insert := range stmt.Inserts {
+		for j, val := range insert {
+			if _, ok := val.Value.(Placeholder); !ok {
+				continue
+			}
+			if len(args) == 0 {
+				return Statement{}, errors.New("not enough arguments to bind placeholders")
+			}
+			if args[0] == nil {
+				stmt.Inserts[i][j] = OptionalValue{}
+			} else {
+				stmt.Inserts[i][j] = OptionalValue{Value: args[0], Valid: true}
+			}
+			args = args[1:]
+		}
+	}
+
+	return stmt, nil
 }
 
 func (s Statement) prepareUpdate(now Time) (Statement, error) {

@@ -157,6 +157,8 @@ type LeafNode struct {
 	Header LeafNodeHeader
 }
 
+const leafNodeCellAppendSlack = 32
+
 // Clone cretes a shallow copy of the leaf node, sharing value slices
 // until they are about to be modified at which point PrepareModifyCell
 // should be called to clone the value slice for that cell.
@@ -221,6 +223,21 @@ func (n *LeafNode) PrepareModifyCell(idx uint32) {
 	n.Cells[idx].Value = make([]byte, len(oldValue))
 	copy(n.Cells[idx].Value, oldValue)
 	n.Cells[idx].isOwned = true
+}
+
+// EnsureCellIndex grows Cells so idx can be assigned directly.
+func (n *LeafNode) EnsureCellIndex(idx uint32) {
+	if idx < uint32(len(n.Cells)) {
+		return
+	}
+	needed := int(idx) + 1
+	if needed <= cap(n.Cells) {
+		n.Cells = n.Cells[:needed]
+		return
+	}
+	grown := make([]Cell, needed, needed+leafNodeCellAppendSlack)
+	copy(grown, n.Cells)
+	n.Cells = grown
 }
 
 // NewLeafNode allocates a new leaf node, optionally pre-populated with the

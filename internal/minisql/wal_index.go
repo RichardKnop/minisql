@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"sort"
 	"sync"
 )
 
@@ -23,6 +24,12 @@ import (
 type WALIndex struct {
 	pages map[PageIndex][]byte
 	mu    sync.RWMutex
+}
+
+// WALIndexPage is one page snapshot from the WAL index.
+type WALIndexPage struct {
+	Data  []byte
+	Index PageIndex
 }
 
 // NewWALIndex creates an empty WALIndex.
@@ -88,6 +95,26 @@ func (wi *WALIndex) MaxPageIndex() PageIndex {
 		}
 	}
 	return maxIdx
+}
+
+// SnapshotSorted returns the current indexed pages ordered by page index.
+// The returned Data slices are direct references into the index and must be
+// treated as read-only.
+func (wi *WALIndex) SnapshotSorted() []WALIndexPage {
+	wi.mu.RLock()
+	pages := make([]WALIndexPage, 0, len(wi.pages))
+	for idx, data := range wi.pages {
+		pages = append(pages, WALIndexPage{
+			Index: idx,
+			Data:  data,
+		})
+	}
+	wi.mu.RUnlock()
+
+	sort.Slice(pages, func(i, j int) bool {
+		return pages[i].Index < pages[j].Index
+	})
+	return pages
 }
 
 // Reset discards all entries and recycles their page buffers.  Called after a

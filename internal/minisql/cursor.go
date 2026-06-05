@@ -256,11 +256,7 @@ func (c *Cursor) saveToCell(ctx context.Context, node *LeafNode, cellIdx uint32,
 	// When splitting nodes, we will be iterating over all cells from last cell to first,
 	// and assigning them to either the original node or the new node. Thus, we expand the
 	// cell slice here as it will be filled from end to start.
-	if cellIdx >= uint32(len(node.Cells)) {
-		for i := uint32(len(node.Cells)); i <= cellIdx; i++ {
-			node.Cells = append(node.Cells, Cell{})
-		}
-	}
+	node.EnsureCellIndex(cellIdx)
 
 	// Build TypeCodes from row columns. Deleted columns use TypeCodeNull.
 	typeCodes := make([]byte, len(row.Columns))
