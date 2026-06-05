@@ -191,7 +191,7 @@ func collectJSONInvertedTerms(terms *[]string, path string, value any) {
 		if path == "" {
 			path = "$"
 		}
-		appendJSONInvertedTerm(terms, "kv:"+path+":"+jsonInvertedScalarTerm(v))
+		appendJSONInvertedScalarTerm(terms, path, v)
 	}
 }
 
@@ -202,6 +202,55 @@ func appendJSONInvertedTerm(terms *[]string, term string) {
 		return
 	}
 	*terms = append(*terms, term)
+}
+
+func appendJSONInvertedScalarTerm(terms *[]string, path string, value any) {
+	term := make([]byte, 0, len("kv:")+len(path)+1+jsonInvertedScalarTermSizeHint(value))
+	term = append(term, "kv:"...)
+	term = append(term, path...)
+	term = append(term, ':')
+	term = appendJSONInvertedScalarTermBytes(term, value)
+	if len(term) > MaxIndexKeySize {
+		return
+	}
+	*terms = append(*terms, string(term))
+}
+
+func jsonInvertedScalarTermSizeHint(value any) int {
+	switch v := value.(type) {
+	case nil:
+		return len("null")
+	case string:
+		return len("s:") + len(v) + 2
+	case bool:
+		return len("b:false")
+	case json.Number:
+		return len("n:") + len(v.String())
+	default:
+		return 16
+	}
+}
+
+func appendJSONInvertedScalarTermBytes(dst []byte, value any) []byte {
+	switch v := value.(type) {
+	case nil:
+		return append(dst, "null"...)
+	case string:
+		dst = append(dst, "s:"...)
+		return strconv.AppendQuote(dst, v)
+	case bool:
+		if v {
+			return append(dst, "b:true"...)
+		}
+		return append(dst, "b:false"...)
+	case json.Number:
+		dst = append(dst, "n:"...)
+		return append(dst, canonicalJSONNumber(v)...)
+	default:
+		encoded, _ := json.Marshal(v)
+		dst = append(dst, "j:"...)
+		return append(dst, encoded...)
+	}
 }
 
 // joinJSONInvertedPath appends an escaped object key to the current dotted JSON
