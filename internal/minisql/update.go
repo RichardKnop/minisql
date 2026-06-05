@@ -167,11 +167,7 @@ func (t *Table) Update(ctx context.Context, stmt Statement) (StatementResult, er
 	if len(stmt.ReturningFields) > 0 {
 		returningRows := make([]Row, 0, len(updatedKeys))
 		for _, key := range updatedKeys {
-			cursor, err := t.Seek(ctx, key)
-			if err != nil {
-				return result, err
-			}
-			row, err := cursor.fetchRow(ctx, false, t.allFields...)
+			row, err := t.rowByRowID(ctx, key, t.allFields...)
 			if err != nil {
 				return result, err
 			}

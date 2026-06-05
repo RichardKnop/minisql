@@ -137,11 +137,7 @@ func (d *Database) executeUpdateFrom(ctx context.Context, stmt Statement) (State
 	if len(stmt.ReturningFields) > 0 {
 		returningRows := make([]Row, 0, len(updatedKeys))
 		for _, key := range updatedKeys {
-			cursor, err := targetTable.Seek(ctx, key)
-			if err != nil {
-				return result, err
-			}
-			row, err := cursor.fetchRow(ctx, false, allFields...)
+			row, err := targetTable.rowByRowID(ctx, key, allFields...)
 			if err != nil {
 				return result, err
 			}

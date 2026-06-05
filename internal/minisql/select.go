@@ -2860,6 +2860,18 @@ func (t *Table) rowViewByRowID(ctx context.Context, rowID RowID) (RowView, error
 	return t.rowViewByRowIDFromPage(ctx, rootPage, rowID)
 }
 
+func (t *Table) rowByRowID(ctx context.Context, rowID RowID, selectedFields ...Field) (Row, error) {
+	view, err := t.rowViewByRowID(ctx, rowID)
+	if err != nil {
+		return Row{}, err
+	}
+	row, err := view.MaterializeWithOverflow(ctx, t.pager, selectedColumnsMask(t.Columns, selectedFields))
+	if err != nil {
+		return Row{}, fmt.Errorf("materialize row: %w", err)
+	}
+	return row, nil
+}
+
 func (t *Table) rowViewByRowIDFromPage(ctx context.Context, page *Page, rowID RowID) (RowView, error) {
 	if page.LeafNode != nil {
 		cellIdx := seekLeafCellIndex(page.LeafNode, rowID)
