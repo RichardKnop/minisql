@@ -1863,7 +1863,7 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 	tokenRuneBuf := make([]rune, 0, 32)
 	rowPostings := make(map[string]invertedPosting, 16)
 	bufferedPostings := 0
-	flush := func() error {
+	flush := func(reset bool) error {
 		if len(postingsByTerm) == 0 {
 			return nil
 		}
@@ -1874,7 +1874,9 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 		if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
 			return fmt.Errorf("failed to insert token batch for full-text index %s: %w", secondaryIndex.Name, err)
 		}
-		postingsByTerm = make(map[string][]invertedPosting, populateInvertedIndexInitialTerms)
+		if reset {
+			postingsByTerm = make(map[string][]invertedPosting, populateInvertedIndexInitialTerms)
+		}
 		bufferedPostings = 0
 		return nil
 	}
@@ -1885,7 +1887,7 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 			bufferedPostings += len(posting.Positions)
 		}
 		if bufferedPostings >= populateInvertedIndexFlushPostings {
-			if err := flush(); err != nil {
+			if err := flush(true); err != nil {
 				return err
 			}
 		}
@@ -1905,7 +1907,7 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 		if err != nil {
 			return err
 		}
-		return flush()
+		return flush(false)
 	}
 
 	result, err := table.Select(ctx, Statement{
@@ -1941,7 +1943,7 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 	if err := result.Rows.Err(); err != nil {
 		return err
 	}
-	return flush()
+	return flush(false)
 }
 
 func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, secondaryIndex SecondaryIndex) error {
@@ -1952,7 +1954,7 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 	rowIDsByTerm := make(map[string][]RowID, populateInvertedIndexInitialTerms)
 	termBuf := make([]string, 0, 16)
 	bufferedPostings := 0
-	flush := func() error {
+	flush := func(reset bool) error {
 		if len(rowIDsByTerm) == 0 {
 			return nil
 		}
@@ -1962,7 +1964,9 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
 			return fmt.Errorf("failed to insert JSON term batch for inverted index %s: %w", secondaryIndex.Name, err)
 		}
-		rowIDsByTerm = make(map[string][]RowID, populateInvertedIndexInitialTerms)
+		if reset {
+			rowIDsByTerm = make(map[string][]RowID, populateInvertedIndexInitialTerms)
+		}
 		bufferedPostings = 0
 		return nil
 	}
@@ -1972,7 +1976,7 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 			bufferedPostings += 1
 		}
 		if bufferedPostings >= populateInvertedIndexFlushPostings {
-			if err := flush(); err != nil {
+			if err := flush(true); err != nil {
 				return err
 			}
 		}
@@ -1992,7 +1996,7 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		if err != nil {
 			return err
 		}
-		return flush()
+		return flush(false)
 	}
 
 	result, err := table.Select(ctx, Statement{
@@ -2027,7 +2031,7 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 	if err := result.Rows.Err(); err != nil {
 		return err
 	}
-	return flush()
+	return flush(false)
 }
 
 // populateHNSWIndex batch-builds an HNSW graph from every row in the table,
