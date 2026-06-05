@@ -3,6 +3,7 @@ package minisql
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -50,14 +51,17 @@ func jsonInvertedTermsForDocument(doc string) ([]string, error) {
 }
 
 func jsonInvertedTermsForDocumentInto(doc string, terms []string) ([]string, error) {
-	value, err := decodeJSONForInvertedIndex(doc)
-	if err != nil {
-		return nil, err
-	}
-	return jsonInvertedTermsInto(value, terms), nil
+	return jsonInvertedTermsForDocumentBytesInto([]byte(doc), terms)
 }
 
 func jsonInvertedTermsForDocumentBytesInto(doc []byte, terms []string) ([]string, error) {
+	scanned, err := scanJSONInvertedTerms(doc, terms)
+	if err == nil {
+		return scanned, nil
+	}
+	if !errors.Is(err, errJSONInvertedScannerFallback) {
+		return nil, err
+	}
 	value, err := decodeJSONBytesForInvertedIndex(doc)
 	if err != nil {
 		return nil, err
@@ -191,17 +195,85 @@ func collectJSONInvertedTerms(terms *[]string, path string, value any) {
 		if path == "" {
 			path = "$"
 		}
-		appendJSONInvertedTerm(terms, "kv:"+path+":"+jsonInvertedScalarTerm(v))
+		appendJSONInvertedScalarTerm(terms, path, v)
 	}
 }
 
 // appendJSONInvertedTerm adds a term only when it fits in the B+ tree key size
 // used by the v1 inverted-index storage.
 func appendJSONInvertedTerm(terms *[]string, term string) {
-	if len([]byte(term)) > MaxIndexKeySize {
+	if len(term) > MaxIndexKeySize {
 		return
 	}
 	*terms = append(*terms, term)
+}
+
+func appendJSONInvertedScalarTerm(terms *[]string, path string, value any) {
+	capacity, ok := jsonInvertedScalarTermCapacity(path, value)
+	if !ok {
+		return
+	}
+	term := make([]byte, 0, capacity)
+	term = append(term, "kv:"...)
+	term = append(term, path...)
+	term = append(term, ':')
+	term = appendJSONInvertedScalarTermBytes(term, value)
+	if len(term) > MaxIndexKeySize {
+		return
+	}
+	*terms = append(*terms, string(term))
+}
+
+func jsonInvertedScalarTermCapacity(path string, value any) (int, bool) {
+	const scalarTermPrefixSize = len("kv:") + 1
+	baseSize := scalarTermPrefixSize + len(path)
+	if baseSize > MaxIndexKeySize {
+		return 0, false
+	}
+
+	remaining := MaxIndexKeySize - baseSize
+	valueSize := jsonInvertedScalarTermSizeHint(value)
+	if valueSize > remaining {
+		return 0, false
+	}
+	return baseSize + valueSize, true
+}
+
+func jsonInvertedScalarTermSizeHint(value any) int {
+	switch v := value.(type) {
+	case nil:
+		return len("null")
+	case string:
+		return len("s:") + len(v) + 2
+	case bool:
+		return len("b:false")
+	case json.Number:
+		return len("n:") + len(v.String())
+	default:
+		return 16
+	}
+}
+
+func appendJSONInvertedScalarTermBytes(dst []byte, value any) []byte {
+	switch v := value.(type) {
+	case nil:
+		return append(dst, "null"...)
+	case string:
+		dst = append(dst, "s:"...)
+		return strconv.AppendQuote(dst, v)
+	case bool:
+		if v {
+			return append(dst, "b:true"...)
+		}
+		return append(dst, "b:false"...)
+	case json.Number:
+		dst = append(dst, "n:"...)
+		return append(dst, canonicalJSONNumber(v)...)
+	default:
+		encoded, _ := json.Marshal(v)
+		dst = append(dst, "j:"...)
+		return append(dst, encoded...)
+	}
 }
 
 // joinJSONInvertedPath appends an escaped object key to the current dotted JSON

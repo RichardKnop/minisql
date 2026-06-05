@@ -49,6 +49,82 @@ func TestJSONInvertedTermsSkipOverlongGeneratedTerms(t *testing.T) {
 	assert.NotContains(t, terms, `kv:long:s:"`+strings.Repeat("x", MaxIndexKeySize+1)+`"`)
 }
 
+func TestScanJSONInvertedTermsMatchesDecodedTerms(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		doc  string
+	}{
+		{
+			name: "object",
+			doc:  `{"type":"click","user":{"id":"u1","country":"GB"},"tags":["web","mobile"],"active":true,"count":1}`,
+		},
+		{
+			name: "escaped path and scalar",
+			doc:  `{"a.b":"line\none","array[key]":["quote\"value"],"slash\\key":null}`,
+		},
+		{
+			name: "root scalar",
+			doc:  `"click"`,
+		},
+		{
+			name: "root array",
+			doc:  `[{"type":"click"},"web",false,1.50]`,
+		},
+		{
+			name: "empty containers",
+			doc:  `{"empty_object":{},"empty_array":[]}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			value, err := decodeJSONForInvertedIndex(tt.doc)
+			require.NoError(t, err)
+			want := jsonInvertedTermsInto(value, nil)
+
+			got, err := scanJSONInvertedTerms([]byte(tt.doc), nil)
+			require.NoError(t, err)
+			assert.Equal(t, want, got)
+		})
+	}
+}
+
+func TestScanJSONInvertedTermsDuplicateKeyRequestsFallback(t *testing.T) {
+	t.Parallel()
+
+	_, err := scanJSONInvertedTerms([]byte(`{"type":"click","type":"view"}`), nil)
+	require.ErrorIs(t, err, errJSONInvertedScannerFallback)
+
+	terms, err := jsonInvertedTermsForDocument(`{"type":"click","type":"view"}`)
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"k:type",
+		`kv:type:s:"view"`,
+	}, terms)
+}
+
+func TestScanJSONInvertedTermsRejectsInvalidJSON(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		`{"missing":}`,
+		`{"leading":01}`,
+		`{"bad_escape":"\x"}`,
+		`{"unterminated":"value}`,
+		`true false`,
+	}
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			t.Parallel()
+			_, err := scanJSONInvertedTerms([]byte(input), nil)
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestJSONContains(t *testing.T) {
 	t.Parallel()
 

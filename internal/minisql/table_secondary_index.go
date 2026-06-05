@@ -359,13 +359,17 @@ func fullTextPostingsByTermInto(
 ) map[string]invertedPosting {
 	for term, posting := range postings {
 		posting.RowID = rowID
-		posting.Positions = posting.Positions[:0]
+		posting.Positions = nil
 		postings[term] = posting
 	}
 	for _, token := range tokens {
 		posting := postings[token.Term]
 		posting.RowID = rowID
-		posting.Positions = append(posting.Positions, token.Position)
+		if len(posting.Positions) == 0 {
+			posting.Positions = singleFullTextPositionSlice(token.Position)
+		} else {
+			posting.Positions = append(posting.Positions, token.Position)
+		}
 		postings[token.Term] = posting
 	}
 	for term, posting := range postings {
@@ -378,6 +382,23 @@ func fullTextPostingsByTermInto(
 		postings[term] = posting
 	}
 	return postings
+}
+
+var singleFullTextPositionSlices = initSingleFullTextPositionSlices()
+
+func initSingleFullTextPositionSlices() [256][]uint32 {
+	var positions [256][]uint32
+	for i := range positions {
+		positions[i] = []uint32{uint32(i)}
+	}
+	return positions
+}
+
+func singleFullTextPositionSlice(position uint32) []uint32 {
+	if position < uint32(len(singleFullTextPositionSlices)) {
+		return singleFullTextPositionSlices[position]
+	}
+	return []uint32{position}
 }
 
 func (t *Table) insertInvertedIndexKeys(ctx context.Context, secondaryIndex SecondaryIndex, rowID RowID, row Row) error {
