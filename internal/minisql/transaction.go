@@ -160,6 +160,9 @@ func (tx *Transaction) TrackWrite(pageIdx PageIndex, page, originalPage *Page, t
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
 
+	if tx.WriteSet == nil {
+		tx.WriteSet = make(map[PageIndex]WriteInfo)
+	}
 	tx.WriteSet[pageIdx] = WriteInfo{
 		Page:         page,
 		Table:        table,
