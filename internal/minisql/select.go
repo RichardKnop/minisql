@@ -2853,11 +2853,55 @@ func (t *Table) scanIndexRangeRowIDs(ctx context.Context, plan QueryPlan, scan S
 }
 
 func (t *Table) rowViewByRowID(ctx context.Context, rowID RowID) (RowView, error) {
-	cursor, err := t.Seek(ctx, rowID)
+	rootPage, err := t.pager.ReadPage(ctx, t.GetRootPageIdx())
 	if err != nil {
 		return RowView{}, fmt.Errorf("find row failed: %w", err)
 	}
-	return cursor.fetchRowView(ctx)
+	return t.rowViewByRowIDFromPage(ctx, rootPage, rowID)
+}
+
+func (t *Table) rowViewByRowIDFromPage(ctx context.Context, page *Page, rowID RowID) (RowView, error) {
+	if page.LeafNode != nil {
+		cellIdx := seekLeafCellIndex(page.LeafNode, rowID)
+		if cellIdx >= page.LeafNode.Header.Cells || page.LeafNode.Cells[cellIdx].Key != rowID {
+			return RowView{}, fmt.Errorf("row id %d not found", rowID)
+		}
+		return NewRowView(t.Columns, page.LeafNode.Cells[cellIdx]), nil
+	}
+	if page.InternalNode == nil {
+		return RowView{}, errors.New("root page type")
+	}
+
+	childIdx := page.InternalNode.IndexOfChild(rowID)
+	childPageIdx, err := page.InternalNode.Child(childIdx)
+	if err != nil {
+		return RowView{}, err
+	}
+	childPage, err := t.pager.ReadPage(ctx, childPageIdx)
+	if err != nil {
+		return RowView{}, fmt.Errorf("internal node seek: %w", err)
+	}
+	return t.rowViewByRowIDFromPage(ctx, childPage, rowID)
+}
+
+func seekLeafCellIndex(node *LeafNode, rowID RowID) uint32 {
+	var (
+		minIdx uint32
+		maxIdx = node.Header.Cells
+	)
+	for i := maxIdx; i != minIdx; {
+		index := (minIdx + i) / 2
+		keyIdx := node.Cells[index].Key
+		if rowID == keyIdx {
+			return index
+		}
+		if rowID < keyIdx {
+			i = index
+		} else {
+			minIdx = index + 1
+		}
+	}
+	return minIdx
 }
 
 func rowViewProjectionPlan(columns []Column, fields []Field, allowedAliases ...string) ([]int, []Column, bool) {
