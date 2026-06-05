@@ -202,14 +202,18 @@ func collectJSONInvertedTerms(terms *[]string, path string, value any) {
 // appendJSONInvertedTerm adds a term only when it fits in the B+ tree key size
 // used by the v1 inverted-index storage.
 func appendJSONInvertedTerm(terms *[]string, term string) {
-	if len([]byte(term)) > MaxIndexKeySize {
+	if len(term) > MaxIndexKeySize {
 		return
 	}
 	*terms = append(*terms, term)
 }
 
 func appendJSONInvertedScalarTerm(terms *[]string, path string, value any) {
-	term := make([]byte, 0, len("kv:")+len(path)+1+jsonInvertedScalarTermSizeHint(value))
+	capacity, ok := jsonInvertedScalarTermCapacity(path, value)
+	if !ok {
+		return
+	}
+	term := make([]byte, 0, capacity)
 	term = append(term, "kv:"...)
 	term = append(term, path...)
 	term = append(term, ':')
@@ -218,6 +222,21 @@ func appendJSONInvertedScalarTerm(terms *[]string, path string, value any) {
 		return
 	}
 	*terms = append(*terms, string(term))
+}
+
+func jsonInvertedScalarTermCapacity(path string, value any) (int, bool) {
+	const scalarTermPrefixSize = len("kv:") + 1
+	baseSize := scalarTermPrefixSize + len(path)
+	if baseSize > MaxIndexKeySize {
+		return 0, false
+	}
+
+	remaining := MaxIndexKeySize - baseSize
+	valueSize := jsonInvertedScalarTermSizeHint(value)
+	if valueSize > remaining {
+		return 0, false
+	}
+	return baseSize + valueSize, true
 }
 
 func jsonInvertedScalarTermSizeHint(value any) int {
