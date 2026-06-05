@@ -11,6 +11,27 @@ import (
 	"go.uber.org/zap"
 )
 
+func TestTransaction_RowCountDeltaFastPath(t *testing.T) {
+	t.Parallel()
+
+	tx := &Transaction{Status: TxActive}
+	tx.AddRowCountDelta("users", 1)
+	tx.AddRowCountDelta("users", 2)
+
+	var seen []string
+	var total int64
+	tx.ForEachRowCountDelta(func(table string, delta int64) {
+		seen = append(seen, table)
+		total += delta
+	})
+	assert.Equal(t, []string{"users"}, seen)
+	assert.Equal(t, int64(3), total)
+	assert.Equal(t, map[string]int64{"users": 3}, tx.RowCountDeltas())
+
+	tx.AddRowCountDelta("orders", -1)
+	assert.Equal(t, map[string]int64{"users": 3, "orders": -1}, tx.RowCountDeltas())
+}
+
 func TestTransactionManager_Commit(t *testing.T) {
 	t.Parallel()
 
@@ -48,6 +69,7 @@ func TestTransactionManager_Commit(t *testing.T) {
 		assert.Equal(t, TxActive, tx.Status)
 
 		tx.DBHeaderWrite = &DatabaseHeader{FirstFreePage: 2, FreePageCount: 10}
+		tx.WriteSet = make(map[PageIndex]WriteInfo)
 		tx.WriteSet[4] = WriteInfo{
 			Page:  &Page{Index: PageIndex(4)},
 			Table: "users",
@@ -112,6 +134,7 @@ func TestTransactionManager_Rollback(t *testing.T) {
 	assert.Equal(t, int32(1), txManager.activeWriters.Load())
 
 	tx.DBHeaderWrite = &DatabaseHeader{FirstFreePage: 2, FreePageCount: 10}
+	tx.WriteSet = make(map[PageIndex]WriteInfo)
 	tx.WriteSet[4] = WriteInfo{
 		Page:  &Page{Index: PageIndex(4)},
 		Table: "users",
@@ -154,6 +177,7 @@ func TestTransactionManager_WAL_Commit(t *testing.T) {
 
 		tx, err := env.txManager.BeginTransaction(ctx)
 		require.NoError(t, err)
+		tx.WriteSet = make(map[PageIndex]WriteInfo)
 		tx.WriteSet[4] = WriteInfo{
 			Page:  &Page{Index: PageIndex(4), LeafNode: NewLeafNode()},
 			Table: "users",
@@ -185,6 +209,7 @@ func TestTransactionManager_WAL_Commit(t *testing.T) {
 		tx, err := env.txManager.BeginTransaction(ctx)
 		require.NoError(t, err)
 		tx.DBHeaderWrite = &DatabaseHeader{FirstFreePage: 5, FreePageCount: 3}
+		tx.WriteSet = make(map[PageIndex]WriteInfo)
 		tx.WriteSet[2] = WriteInfo{
 			Page:  &Page{Index: PageIndex(2), LeafNode: NewLeafNode()},
 			Table: "orders",
@@ -245,6 +270,7 @@ func TestTransactionManager_WAL_CrashRecovery(t *testing.T) {
 
 		tx, err := env.txManager.BeginTransaction(ctx)
 		require.NoError(t, err)
+		tx.WriteSet = make(map[PageIndex]WriteInfo)
 		tx.WriteSet[7] = WriteInfo{
 			Page:  &Page{Index: PageIndex(7), LeafNode: NewLeafNode()},
 			Table: "foo",
@@ -273,6 +299,7 @@ func TestTransactionManager_WAL_CrashRecovery(t *testing.T) {
 
 		tx, err := env.txManager.BeginTransaction(ctx)
 		require.NoError(t, err)
+		tx.WriteSet = make(map[PageIndex]WriteInfo)
 		tx.WriteSet[8] = WriteInfo{
 			Page:  &Page{Index: PageIndex(8), LeafNode: NewLeafNode()},
 			Table: "bar",
@@ -398,6 +425,7 @@ func TestTransactionManager_CheckpointWAL(t *testing.T) {
 		// Write one transaction with a modified page so a WAL frame is appended.
 		tx, err := txManager.BeginTransaction(ctx)
 		require.NoError(t, err)
+		tx.WriteSet = make(map[PageIndex]WriteInfo)
 		tx.WriteSet[2] = WriteInfo{
 			Page:  &Page{Index: PageIndex(2), LeafNode: NewLeafNode()},
 			Table: "t1",

@@ -194,6 +194,7 @@ func TestSnapshotIsolation_CheckpointBlockedByReader(t *testing.T) {
 	// Commit a write so there is something to checkpoint.
 	writeTx, err := env.txManager.BeginTransaction(ctx)
 	require.NoError(t, err)
+	writeTx.WriteSet = make(map[PageIndex]WriteInfo)
 	writeTx.WriteSet[2] = WriteInfo{
 		Page:  &Page{Index: PageIndex(2), LeafNode: NewLeafNode()},
 		Table: "t",

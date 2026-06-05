@@ -105,6 +105,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, par
 
 	db.txManager = NewTransactionManager(logger, dbFilePath, db.pagerFactory, saver, db)
 	db.txManager.SetRowCountApplier(db.applyRowCountDeltas)
+	db.txManager.SetRowCountDeltaApplier(db.applyRowCountDelta)
 
 	if walCfg != nil {
 		db.wal = walCfg.WAL
@@ -277,6 +278,7 @@ func (d *Database) Reopen(ctx context.Context, factory PagerFactory, saver PageS
 	)
 	d.txManager = NewTransactionManager(d.logger, d.dbFilePath, d.pagerFactory, saver, d)
 	d.txManager.SetRowCountApplier(d.applyRowCountDeltas)
+	d.txManager.SetRowCountDeltaApplier(d.applyRowCountDelta)
 	if d.wal != nil {
 		d.txManager.wal = d.wal
 		d.txManager.walIndex = d.walIndex
@@ -351,6 +353,14 @@ func (d *Database) applyRowCountDeltas(deltas map[string]int64) {
 		if _, tracked := d.rowCounts[name]; tracked {
 			d.rowCounts[name] += delta
 		}
+	}
+	d.rowCountsMu.Unlock()
+}
+
+func (d *Database) applyRowCountDelta(name string, delta int64) {
+	d.rowCountsMu.Lock()
+	if _, tracked := d.rowCounts[name]; tracked {
+		d.rowCounts[name] += delta
 	}
 	d.rowCountsMu.Unlock()
 }
