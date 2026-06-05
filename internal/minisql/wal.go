@@ -479,6 +479,38 @@ func (w *WAL) Checkpoint(dbFile DBFile) error {
 	return nil
 }
 
+// CheckpointPages copies already-indexed committed WAL pages to the database
+// file. It is used by TransactionManager, which maintains the latest committed
+// page image in WALIndex as transactions commit. The WAL is still flushed first
+// so crash recovery remains safe if a process dies mid-checkpoint.
+func (w *WAL) CheckpointPages(dbFile DBFile, pages []WALIndexPage) error {
+	if err := w.flush(); err != nil {
+		return fmt.Errorf("flush pending WAL frames before checkpoint: %w", err)
+	}
+	if len(pages) == 0 {
+		return nil
+	}
+
+	psz := int64(w.pageSize)
+	for _, page := range pages {
+		if uint32(len(page.Data)) != w.pageSize {
+			return fmt.Errorf("checkpoint page %d: data length %d != page size %d", page.Index, len(page.Data), w.pageSize)
+		}
+		offset := int64(page.Index) * psz
+		if _, err := dbFile.WriteAt(page.Data, offset); err != nil {
+			return fmt.Errorf("checkpoint page %d: %w", page.Index, err)
+		}
+	}
+
+	if SynchronousMode(w.synchronous.Load()) != SynchronousOff {
+		if err := fastSync(dbFile); err != nil {
+			return fmt.Errorf("sync database after WAL checkpoint: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // Truncate resets the WAL to an empty state after a successful checkpoint.
 // The file header is rewritten with fresh salts so that any unreachable frames
 // left behind by a partial truncation are automatically invalidated.

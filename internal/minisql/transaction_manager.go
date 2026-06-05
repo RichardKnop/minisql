@@ -140,7 +140,12 @@ func (tm *TransactionManager) CheckpointWAL(dbFile DBFile) error {
 
 	framesBefore := tm.wal.FrameCount()
 
-	if err := tm.wal.Checkpoint(dbFile); err != nil {
+	if tm.walIndex != nil {
+		pages := tm.walIndex.SnapshotSorted()
+		if err := tm.wal.CheckpointPages(dbFile, pages); err != nil {
+			return fmt.Errorf("WAL checkpoint: %w", err)
+		}
+	} else if err := tm.wal.Checkpoint(dbFile); err != nil {
 		return fmt.Errorf("WAL checkpoint: %w", err)
 	}
 
@@ -303,7 +308,6 @@ func (tm *TransactionManager) hasActiveSnapshotReadersLocked() bool {
 	}
 	return false
 }
-
 
 // appendPageVersionLocked adds an old page snapshot to the version history for
 // pageIdx.  validUntilSeq is the highest SnapshotSeq for which this version
@@ -760,4 +764,3 @@ func (tm *TransactionManager) RollbackTransaction(ctx context.Context, tx *Trans
 		ce.Write(zap.Uint64("tx_id", uint64(tx.ID)))
 	}
 }
-
