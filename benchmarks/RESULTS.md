@@ -1,10 +1,10 @@
 # Benchmark Results
 
-## 2026-06-03 — Baseline
+## 2026-06-03 — Baseline (inverted sections refreshed 2026-06-05)
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
-**Branch:** `codex/json-build-memory-reassessment`
-**Command:** `make bench BENCH_COUNT=1`
+**Branch:** full-suite baseline from `codex/json-build-memory-reassessment`; inverted refresh from `codex/profile-inverted-build-memory`  
+**Command:** full-suite baseline from `make bench BENCH_COUNT=1`; inverted refresh command shown below  
 **GOMAXPROCS:** 10  
 
 SQLite comparisons use the `sqlite` driver compiled into the same test binary. All minisql benchmarks run against a fresh temp-file database per sub-benchmark. Times are wall-clock (`ns/op`); memory figures are heap allocations reported by the Go runtime.
@@ -44,22 +44,26 @@ SQLite comparisons use the `sqlite` driver compiled into the same test binary. A
 
 ## Full-Text Search (minisql log-structured vs SQLite FTS5)
 
-**Inverted-index sections refreshed:** 2026-06-03 on `codex/json-build-memory-reassessment` with the full `make bench BENCH_COUNT=1` suite.
+**Inverted-index sections refreshed:** 2026-06-05 on `codex/profile-inverted-build-memory` with:
 
-**Latest memory improvement:** streaming row-ID segment-run merges and base foldback keep JSON segment compaction term-at-a-time. On the full-suite baseline, `JSONInverted_Insert_WithIndex` is down from **51.6 KiB/op** to **29.9 KiB/op** and `JSONInverted_Delete_WithIndex` is down from **33.0 KiB/op** to **31.0 KiB/op**.
+```bash
+LOG_LEVEL=warn go test -tags bench -bench='Benchmark(FullText|JSONInverted)' -benchmem -count=1 -run '^$' ./benchmarks/
+```
+
+**Latest memory improvement:** direct JSON term scanning avoids full `encoding/json` tree materialisation for index term extraction, final build flushes avoid one throwaway mutation map, and single-position full-text postings reuse cached immutable slices. `JSONInverted_BuildIndex` is down from **3.17 MiB/op** to **1.26 MiB/op**, while `FullText_BuildIndex` is down from **1.52 MiB/op** to **1.40 MiB/op**.
 
 | Benchmark | minisql | sqlite | minisql B/op | sqlite B/op | minisql allocs | sqlite allocs |
 |---|---:|---:|---:|---:|---:|---:|
-| FullText_BuildIndex (1,000 docs/op) | 5.30 ms | 3.73 ms | 1.52 MiB | 392 B | 16,290 | 20 |
-| FullText_Insert_WithIndex | 71.9 µs | 146 µs | 15.6 KiB | 271 B | 136 | 10 |
-| FullText_Search_SingleTerm/rare | 7.31 µs | 9.51 µs | 2.31 KiB | 408 B | 41 | 13 |
-| FullText_Search_SingleTerm/medium | 7.07 µs | 10.5 µs | 2.31 KiB | 408 B | 41 | 13 |
-| FullText_Search_SingleTerm/common | 7.77 µs | 83.3 µs | 2.32 KiB | 424 B | 43 | 15 |
-| FullText_Search_MultiTermAND | 29.3 µs | 47.1 µs | 11.3 KiB | 408 B | 62 | 13 |
-| FullText_Search_Phrase | 40.9 µs | 33.7 µs | 26.2 KiB | 416 B | 278 | 14 |
-| FullText_Search_AfterDeletes | 107 µs | — | 11.1 KiB | — | 49 | — |
-| FullText_Update_WithIndex | 60.9 µs | 175 µs | 21.7 KiB | 290 B | 193 | 12 |
-| FullText_Delete_WithIndex | 101 µs | 204 µs | 22.4 KiB | 135 B | 186 | 6 |
+| FullText_BuildIndex (1,000 docs/op) | 3.01 ms | 2.06 ms | 1.40 MiB | 392 B | 12,297 | 20 |
+| FullText_Insert_WithIndex | 45.7 µs | 83.9 µs | 16.8 KiB | 271 B | 138 | 10 |
+| FullText_Search_SingleTerm/rare | 4.43 µs | 6.76 µs | 2.31 KiB | 408 B | 41 | 13 |
+| FullText_Search_SingleTerm/medium | 4.12 µs | 7.92 µs | 2.31 KiB | 408 B | 41 | 13 |
+| FullText_Search_SingleTerm/common | 4.10 µs | 61.1 µs | 2.32 KiB | 424 B | 43 | 15 |
+| FullText_Search_MultiTermAND | 15.0 µs | 33.8 µs | 11.3 KiB | 408 B | 62 | 13 |
+| FullText_Search_Phrase | 15.5 µs | 24.6 µs | 26.2 KiB | 416 B | 278 | 14 |
+| FullText_Search_AfterDeletes | 81.4 µs | — | 11.1 KiB | — | 49 | — |
+| FullText_Update_WithIndex | 44.8 µs | 96.2 µs | 22.3 KiB | 291 B | 194 | 12 |
+| FullText_Delete_WithIndex | 61.1 µs | 142 µs | 21.8 KiB | 135 B | 180 | 6 |
 
 ---
 
@@ -67,14 +71,14 @@ SQLite comparisons use the `sqlite` driver compiled into the same test binary. A
 
 | Benchmark | minisql indexed | comparison | minisql B/op | minisql allocs |
 |---|---:|---:|---:|---:|
-| JSONInverted_BuildIndex (1,000 docs/op) | 8.93 ms | — | 3.17 MiB | 63,010 |
-| JSONInverted_Insert_WithIndex | 108 µs | — | 29.9 KiB | 183 |
-| JSONInverted_Contains_KeyValue (334 matches) | 27.4 µs | 35.6 µs (sqlite expr idx) | 7.73 KiB | 75 |
-| JSONInverted_Contains_KeyValue seq scan | 4.05 ms | 1.08 ms (sqlite json scan) | 1.94 MiB | 38,068 |
-| JSONInverted_Contains_ObjectSubset (334 matches) | 43.5 µs | 166 µs (sqlite expr idx) | 8.80 KiB | 115 |
-| JSONInverted_Contains_AfterDeletes (167 matches) | 100 µs | — | 19.2 KiB | 78 |
-| JSONInverted_Update_WithIndex | 11.4 µs | — | 4.61 KiB | 52 |
-| JSONInverted_Delete_WithIndex | 180 µs | — | 31.0 KiB | 195 |
+| JSONInverted_BuildIndex (1,000 docs/op) | 2.76 ms | — | 1.26 MiB | 26,669 |
+| JSONInverted_Insert_WithIndex | 78.5 µs | — | 38.4 KiB | 148 |
+| JSONInverted_Contains_KeyValue (334 matches) | 22.3 µs | 33.9 µs (sqlite expr idx) | 7.71 KiB | 74 |
+| JSONInverted_Contains_KeyValue seq scan | 3.38 ms | 812 µs (sqlite json scan) | 1.94 MiB | 38,067 |
+| JSONInverted_Contains_ObjectSubset (334 matches) | 38.6 µs | 141 µs (sqlite expr idx) | 8.76 KiB | 112 |
+| JSONInverted_Contains_AfterDeletes (167 matches) | 74.4 µs | — | 19.2 KiB | 77 |
+| JSONInverted_Update_WithIndex | 8.40 µs | — | 4.55 KiB | 51 |
+| JSONInverted_Delete_WithIndex | 164 µs | — | 31.2 KiB | 159 |
 
 ---
 
@@ -202,19 +206,18 @@ Largest per-operation heap consumers (minisql only):
 
 - `HNSW_BuildIndex` dims768/n10000: **3.66 GiB/op** — O(N²) distance matrix during greedy layer construction; dominated by neighbour-list allocations across 10K nodes
 - `HNSW_BuildIndex` dims128/n10000: **3.50 GiB/op** — same structural cost, lower per-vector overhead
-- `JSONInverted_BuildIndex`: **3.17 MiB/op** — JSON decoding plus in-memory term→row-ID map during bulk build
 - `Distinct_HighCardinality`: **1.69 MiB/op** — in-memory dedup set for 10K distinct rows
-- `FullText_BuildIndex`: **1.52 MiB/op** — token-position accumulation and posting payload encoding during log-structured segment build
 - `Vacuum_Small`: **1.52 MiB/op** — full copy-compact-swap; structural cost
+- `FullText_BuildIndex`: **1.40 MiB/op** — token-position accumulation, posting slice growth, and segment-cell materialisation during log-structured segment build
+- `JSONInverted_BuildIndex`: **1.26 MiB/op** — direct term scanner removed most JSON decode/tree-walk allocation; remaining cost is term map and segment build
 - `Join_Inner_SmallLarge`: **1.25 MiB/op** — INLJ result materialization for 10K matched rows
 - `Select_FullScan`: **1.24 MiB/op** — ~8 allocs/row from `Materialize()` per RowView
-- `JSONInverted_Delete_WithIndex`: **31.0 KiB/op** — reduced by streaming row-ID segment merges and base foldback; no longer a major memory outlier
+- `JSONInverted_Delete_WithIndex`: **31.2 KiB/op** — reduced by streaming row-ID segment merges and base foldback; no longer a major memory outlier
 - `Insert_Batch` / `PreparedBatch`: **~178-179 KiB/op** — ~1.8 KiB/row vs SQLite's 310 B; remaining cost is per-row clone + B-tree page I/O
 
 ## Good Next Optimisation Targets
 
 - Streaming SELECT delivery that reads directly from RowView into the driver dest slice (eliminating `Materialize()`)
-- Reduce JSON decode/tree-walk allocations during inverted-index build and maintenance
-- Add a direct compacting JSON term scanner only if a prototype can preserve duplicate-key semantics without regressing allocations
-- Extend direct segment-writer compaction to positional/full-text postings
+- Reduce full-text build memory by avoiding large `postingsByTerm[term]` slice growth and segment-cell materialisation
+- Consider a dedicated streaming full-text segment builder for bulk CREATE INDEX
 - Reduce per-row clone overhead in `Insert_Batch` (~1.8 KiB/row vs SQLite's 310 B)
