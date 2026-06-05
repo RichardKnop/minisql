@@ -139,4 +139,20 @@ func (s *TestSuite) TestPreparedStmts() {
 		users := s.collectUsers(`select * from users;`)
 		s.Require().Empty(users)
 	})
+
+	s.Run("Insert user with reordered columns", func() {
+		stmt, err := s.db.Prepare(`insert into users("name", "email", "created") values(?, ?, ?)`)
+		s.Require().NoError(err)
+
+		result, err := stmt.Exec("Column Order", "column_order@example.com", "2024-01-02 12:00:00")
+		s.Require().NoError(err)
+
+		rowsAffected, err := result.RowsAffected()
+		s.Require().NoError(err)
+		s.Require().Equal(int64(1), rowsAffected)
+
+		user := s.collectUser(`select * from users where email = 'column_order@example.com';`)
+		s.Equal("Column Order", user.Name.String)
+		s.Equal(time.Date(2024, 1, 2, 12, 0, 0, 0, time.UTC), user.Created)
+	})
 }
