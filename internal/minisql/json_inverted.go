@@ -3,6 +3,7 @@ package minisql
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -50,14 +51,17 @@ func jsonInvertedTermsForDocument(doc string) ([]string, error) {
 }
 
 func jsonInvertedTermsForDocumentInto(doc string, terms []string) ([]string, error) {
-	value, err := decodeJSONForInvertedIndex(doc)
-	if err != nil {
-		return nil, err
-	}
-	return jsonInvertedTermsInto(value, terms), nil
+	return jsonInvertedTermsForDocumentBytesInto([]byte(doc), terms)
 }
 
 func jsonInvertedTermsForDocumentBytesInto(doc []byte, terms []string) ([]string, error) {
+	scanned, err := scanJSONInvertedTerms(doc, terms)
+	if err == nil {
+		return scanned, nil
+	}
+	if !errors.Is(err, errJSONInvertedScannerFallback) {
+		return nil, err
+	}
 	value, err := decodeJSONBytesForInvertedIndex(doc)
 	if err != nil {
 		return nil, err
