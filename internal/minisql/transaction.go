@@ -54,11 +54,14 @@ type Transaction struct {
 	WriteSet       map[PageIndex]WriteInfo
 	DBHeaderWrite  *DatabaseHeader
 	rowCountDeltas map[string]int64
+	rowCountTable  string
+	rowCountDelta  int64
 	ID             TransactionID
 	Status         TransactionStatus
 	SnapshotSeq    uint64
 	mu             sync.RWMutex
 	ReadOnly       bool
+	hasRowCount    bool
 }
 
 // TransactionStatus represents the lifecycle state of a transaction.
@@ -85,6 +88,9 @@ func (tx *Transaction) Abort() {
 	tx.WriteSet = nil
 	tx.DBHeaderWrite = nil
 	tx.rowCountDeltas = nil
+	tx.rowCountTable = ""
+	tx.rowCountDelta = 0
+	tx.hasRowCount = false
 }
 
 // AddRowCountDelta records a net row-count change for the named table.
@@ -94,11 +100,27 @@ func (tx *Transaction) AddRowCountDelta(table string, delta int64) {
 		return
 	}
 	tx.mu.Lock()
-	if tx.rowCountDeltas == nil {
-		tx.rowCountDeltas = make(map[string]int64, 1)
+	defer tx.mu.Unlock()
+	if tx.rowCountDeltas != nil {
+		tx.rowCountDeltas[table] += delta
+		return
 	}
+	if !tx.hasRowCount {
+		tx.rowCountTable = table
+		tx.rowCountDelta = delta
+		tx.hasRowCount = true
+		return
+	}
+	if tx.rowCountTable == table {
+		tx.rowCountDelta += delta
+		return
+	}
+	tx.rowCountDeltas = make(map[string]int64, 2)
+	tx.rowCountDeltas[tx.rowCountTable] = tx.rowCountDelta
 	tx.rowCountDeltas[table] += delta
-	tx.mu.Unlock()
+	tx.rowCountTable = ""
+	tx.rowCountDelta = 0
+	tx.hasRowCount = false
 }
 
 // RowCountDeltas returns the accumulated row-count deltas.  The returned map
@@ -106,7 +128,26 @@ func (tx *Transaction) AddRowCountDelta(table string, delta int64) {
 func (tx *Transaction) RowCountDeltas() map[string]int64 {
 	tx.mu.RLock()
 	defer tx.mu.RUnlock()
+	if tx.rowCountDeltas == nil && tx.hasRowCount {
+		return map[string]int64{tx.rowCountTable: tx.rowCountDelta}
+	}
 	return tx.rowCountDeltas
+}
+
+// ForEachRowCountDelta calls fn for each accumulated row-count delta without
+// materialising a map for the common single-table transaction case.
+func (tx *Transaction) ForEachRowCountDelta(fn func(string, int64)) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+	if tx.rowCountDeltas != nil {
+		for table, delta := range tx.rowCountDeltas {
+			fn(table, delta)
+		}
+		return
+	}
+	if tx.hasRowCount {
+		fn(tx.rowCountTable, tx.rowCountDelta)
+	}
 }
 
 // TrackWrite records a modified page in the transaction write set.

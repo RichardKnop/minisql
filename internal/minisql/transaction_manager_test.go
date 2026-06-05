@@ -11,6 +11,27 @@ import (
 	"go.uber.org/zap"
 )
 
+func TestTransaction_RowCountDeltaFastPath(t *testing.T) {
+	t.Parallel()
+
+	tx := &Transaction{Status: TxActive}
+	tx.AddRowCountDelta("users", 1)
+	tx.AddRowCountDelta("users", 2)
+
+	var seen []string
+	var total int64
+	tx.ForEachRowCountDelta(func(table string, delta int64) {
+		seen = append(seen, table)
+		total += delta
+	})
+	assert.Equal(t, []string{"users"}, seen)
+	assert.Equal(t, int64(3), total)
+	assert.Equal(t, map[string]int64{"users": 3}, tx.RowCountDeltas())
+
+	tx.AddRowCountDelta("orders", -1)
+	assert.Equal(t, map[string]int64{"users": 3, "orders": -1}, tx.RowCountDeltas())
+}
+
 func TestTransactionManager_Commit(t *testing.T) {
 	t.Parallel()
 

@@ -41,6 +41,7 @@ type TransactionManager struct {
 	factory              TxPagerFactory
 	checkpointFn         func() error
 	rowCountApplier      func(map[string]int64)
+	rowCountDeltaApplier func(string, int64)
 	logger               *zap.Logger
 	cipher               *pkgcrypto.PageCipher // nil when encryption is disabled
 	pageLastCommittedSeq map[PageIndex]uint64
@@ -105,6 +106,12 @@ func (tm *TransactionManager) SetCheckpointFunc(fn func() error) {
 // COUNT(*) queries can be answered in O(1) without a leaf-page walk.
 func (tm *TransactionManager) SetRowCountApplier(fn func(map[string]int64)) {
 	tm.rowCountApplier = fn
+}
+
+// SetRowCountDeltaApplier registers a callback for applying a single table
+// row-count delta without materialising a map.
+func (tm *TransactionManager) SetRowCountDeltaApplier(fn func(string, int64)) {
+	tm.rowCountDeltaApplier = fn
 }
 
 // CheckpointWAL checkpoints the WAL into dbFile, then truncates it.
@@ -458,11 +465,7 @@ func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction)
 		tm.ddlSaver.SaveDDLChanges(ctx, tx.DDLChanges)
 	}
 
-	if tm.rowCountApplier != nil {
-		if deltas := tx.RowCountDeltas(); len(deltas) > 0 {
-			tm.rowCountApplier(deltas)
-		}
-	}
+	tm.applyRowCountDeltas(tx)
 	tx.Commit()
 	delete(tm.transactions, tx.ID)
 	if ce := tm.logger.Check(zap.DebugLevel, "commit transaction"); ce != nil {
@@ -474,6 +477,18 @@ func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction)
 func (tm *TransactionManager) runCommitHook(phase commitPhase) {
 	if tm.commitHook != nil {
 		tm.commitHook(phase)
+	}
+}
+
+func (tm *TransactionManager) applyRowCountDeltas(tx *Transaction) {
+	if tm.rowCountDeltaApplier != nil {
+		tx.ForEachRowCountDelta(tm.rowCountDeltaApplier)
+		return
+	}
+	if tm.rowCountApplier != nil {
+		if deltas := tx.RowCountDeltas(); len(deltas) > 0 {
+			tm.rowCountApplier(deltas)
+		}
 	}
 }
 
@@ -557,11 +572,7 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 	if tx.DDLChanges.HasChanges() {
 		tm.ddlSaver.SaveDDLChanges(ctx, tx.DDLChanges)
 	}
-	if tm.rowCountApplier != nil {
-		if deltas := tx.RowCountDeltas(); len(deltas) > 0 {
-			tm.rowCountApplier(deltas)
-		}
-	}
+	tm.applyRowCountDeltas(tx)
 	tx.Commit()
 	delete(tm.transactions, tx.ID)
 	tm.mu.Unlock()
