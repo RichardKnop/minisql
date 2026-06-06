@@ -1,5 +1,23 @@
 # AGENTS.md — MiniSQL Codebase Guide for AI Coding Agents
 
+## Critical Agent Rules
+
+Read these first. They are the highest-priority repo-specific rules.
+
+- Always work on a feature branch. If the current branch is `main`, create or switch to a feature branch before editing files or creating commits.
+- Never commit directly to `main`, and never merge a branch into `main` locally. Integration happens on GitHub after CI passes.
+- Agent-created branches should use `codex/<short-topic>` unless the user asks for another name.
+- Preserve user work. Do not revert, overwrite, or “clean up” changes you did not make unless the user explicitly asks.
+- Correctness and transaction guarantees outrank performance. Be especially conservative in WAL, pager, transaction, MVCC, index maintenance, and constraint code.
+- Run targeted tests for the area you changed, then `make lint` before committing. For broad storage/query changes, run the wider relevant package or e2e suite.
+- For benchmark or profiling work, put profiles in `/tmp`, remove generated binaries such as `benchmarks.test`, and update `benchmarks/RESULTS.md` only when benchmark data changes.
+- Never hand-edit generated files such as `internal/minisql/mocks_test.go`; regenerate them with the documented command.
+- Do not commit secrets, local database files, WAL files, profiles, coverage HTML, benchmark binaries, or other local artifacts.
+
+## Instruction Scope
+
+This root file contains global workflow and architecture guidance. More specific instructions may exist in nested `AGENTS.md` files; the closest file to the code being edited wins when instructions overlap.
+
 ## Project Overview
 
 MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLite. It implements a hand-written recursive-descent + state-machine SQL parser, a B+ tree storage engine with 4 KB pages, an LRU page cache, a Write-Ahead Log (WAL) for crash recovery, single-writer enforcement (via an atomic counter) for write transactions, and in-memory MVCC snapshot isolation for read-only transactions. It registers itself as a `database/sql` driver.
@@ -8,7 +26,7 @@ MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLi
 **Go version:** 1.26
 **Not production-ready.** Treat it as a research/learning project.
 
-**Feature summary:** INSERT/SELECT/UPDATE/DELETE, ON CONFLICT DO NOTHING/DO UPDATE, UNION/UNION ALL, DISTINCT, GROUP BY/HAVING, ORDER BY (multi-column), LIMIT/OFFSET, INNER/LEFT/RIGHT JOIN (arbitrary chain topology), CASE WHEN, CAST, INTERVAL, arithmetic, scalar functions, subqueries (non-correlated scalar + IN/NOT IN in WHERE, derived tables in FROM, CTEs, correlated UPDATE FROM), CHECK/FOREIGN KEY/NOT NULL/UNIQUE constraints, RETURNING, EXPLAIN/EXPLAIN ANALYZE, VACUUM, ANALYZE, PRAGMA, prepared statements (`?` placeholders), data types BOOLEAN/INT4/INT8/REAL/DOUBLE/TEXT/VARCHAR/TIMESTAMP/JSON/UUID, B-tree indexes (primary, unique, secondary, composite, covering, partial, expression), full-text inverted index, JSON inverted index, parallel full table scans, slow query logging.
+**Feature summary:** INSERT/SELECT/UPDATE/DELETE, ON CONFLICT DO NOTHING/DO UPDATE, UNION/UNION ALL, DISTINCT, GROUP BY/HAVING, ORDER BY (multi-column), LIMIT/OFFSET, INNER/LEFT/RIGHT JOIN (arbitrary chain topology), CASE WHEN, CAST, INTERVAL, arithmetic, scalar functions, subqueries (non-correlated scalar + IN/NOT IN in WHERE, derived tables in FROM, CTEs, correlated UPDATE FROM), CHECK/FOREIGN KEY/NOT NULL/UNIQUE constraints, RETURNING, EXPLAIN/EXPLAIN ANALYZE, VACUUM, ANALYZE, PRAGMA, prepared statements (`?` placeholders), data types BOOLEAN/INT4/INT8/REAL/DOUBLE/TEXT/VARCHAR/TIMESTAMP/JSON/UUID/VECTOR, B-tree indexes (primary, unique, secondary, composite, covering, partial, expression), full-text inverted index, JSON inverted index, HNSW vector index, parallel full table scans, slow query logging.
 
 ---
 
@@ -78,6 +96,10 @@ MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLi
 │   │   ├── expr_index.go         # Expression index: evalExprIndexKey, FindExpressionIndex
 │   │   ├── full_text_search.go   # Full-text search: tokeniser, TF-IDF scoring, MATCH queries
 │   │   ├── full_text_posting.go  # Inverted index posting list encoding/decoding
+│   │   ├── hnsw.go               # HNSW graph build/search and vector-index DML maintenance
+│   │   ├── hnsw_page.go          # HNSW meta/data page marshal/unmarshal
+│   │   ├── hnsw_pager.go         # HNSW-specific pager unmarshaling wrapper
+│   │   ├── vector.go             # VECTOR storage, parsing, formatting, and distance functions
 │   │   ├── analyze.go            # ANALYZE: build equi-depth histograms for index statistics
 │   │   ├── integrity_check.go    # Integrity check: B-tree invariants + index consistency
 │   │   │
@@ -145,6 +167,7 @@ MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLi
 │   ├── update_bench_test.go      # UPDATE benchmarks: by PK
 │   ├── delete_bench_test.go      # DELETE benchmarks: by PK
 │   ├── inverted_bench_test.go    # Full-text + JSON inverted index benchmarks
+│   ├── vector_bench_test.go      # VECTOR + HNSW build/search/DML benchmarks
 │   └── txn_bench_test.go         # Transaction benchmarks (build-tag: bench)
 │
 ├── e2e_tests/                    # End-to-end tests (testify suite, real DB files)
@@ -173,6 +196,7 @@ MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLi
 │   ├── full_text_test.go         # MATCH() full-text search
 │   ├── functions_test.go         # Scalar functions (COALESCE, SUBSTR, DATE_TRUNC, etc.)
 │   ├── hash_join_test.go         # Hash join selection and execution
+│   ├── hnsw_test.go              # HNSW vector index lifecycle and online maintenance
 │   ├── index_method_test.go      # Index type validation (FULLTEXT, INVERTED)
 │   ├── insert_on_conflict_test.go # ON CONFLICT DO NOTHING / DO UPDATE
 │   ├── interval_test.go          # INTERVAL timestamp arithmetic
@@ -199,6 +223,7 @@ MiniSQL is an embedded, single-file SQL database written in Go, inspired by SQLi
 │   ├── update_test.go            # UPDATE
 │   ├── uuid_test.go              # UUID column type
 │   ├── vacuum_test.go            # VACUUM
+│   ├── vector_test.go            # VECTOR type and distance functions
 │   └── wal_test.go               # WAL persistence across reopen
 │
 └── agent-os/standards/           # Tribal knowledge standards (read before working on subsystems)
@@ -289,6 +314,29 @@ go test -bench=BenchmarkConcurrent -benchtime=10s ./e2e_tests/
 go test -bench=. -benchmem ./internal/minisql/
 ```
 
+Benchmark and profiling hygiene:
+- Use `-run '^$'` with benchmark commands so tests do not run accidentally.
+- Put CPU and memory profiles in `/tmp`, not in the repository.
+- Remove generated benchmark binaries such as `benchmarks.test` before committing.
+- Start with targeted benchmark slices while profiling; run the full benchmark suite before integration when a performance branch is ready.
+- When benchmark data changes, update `benchmarks/RESULTS.md` with the branch, command, platform, and newest baseline values.
+
+---
+
+## Validation Matrix
+
+Use the smallest meaningful checks while iterating, then broaden before committing or handoff.
+
+| Change type | Minimum validation |
+|---|---|
+| Parser change | `LOG_LEVEL=warn go test ./internal/parser/... -count=1` plus relevant e2e tests |
+| Query planning/execution change | Targeted `internal/minisql` tests plus relevant `e2e_tests` suite case |
+| Storage, WAL, pager, transaction, MVCC | Targeted unit tests, relevant e2e tests (`tx`, `wal`, `concurrency`, `vacuum`), and extra care around rollback/commit paths |
+| Index maintenance | Unit tests for the index family plus e2e DML tests covering insert/update/delete and persistence |
+| Benchmark/performance change | Before/after targeted benchmark with `-benchmem`; update `benchmarks/RESULTS.md` when baseline numbers change |
+| Public API or driver change | Relevant root package tests plus e2e database/sql usage |
+| Docs-only change | No tests required unless examples or commands are changed; run markdown-related checks if introduced later |
+
 ---
 
 ## CI
@@ -306,6 +354,7 @@ GitHub Actions runs on every push and PR to `main` with two parallel jobs:
 - Never commit directly to `main`.
 - Never merge a feature branch into `main` locally as part of the agent workflow.
 - Push the feature branch and open or update a GitHub pull request when integration is requested. Merges into `main` must happen on GitHub after CI passes.
+- Agent-created branches should use `codex/<short-topic>` by default. The older `feat/`, `fix/`, `refactor/`, `test/`, `chore/`, and `docs/` prefixes are also acceptable when requested by the user.
 
 ---
 
@@ -389,6 +438,7 @@ PagerFactory  ForTable(columns []Column) Pager
               ForIndex(columns []Column, unique bool) Pager
               ForFullTextIndex(col Column) Pager
               ForInvertedIndex(col Column) Pager
+              ForHNSWIndex() Pager
 Pager         GetPage / GetHeader / TotalPages
 PageSaver     SavePage / SaveHeader + Flusher
 TxPager       ReadPage / ModifyPage / GetFreePage / AddFreePage / GetOverflowPage
@@ -788,7 +838,7 @@ Parser files mirror engine files: `parser/select.go` ↔ `internal/minisql/selec
 
 ## Branch and Commit Conventions
 
-**Branch names:** `feat/`, `refactor/`, `fix/`, `test/`, `chore/`, `docs/`
+**Branch names:** agents should use `codex/<short-topic>` by default. Human-authored branches may use `feat/`, `refactor/`, `fix/`, `test/`, `chore/`, or `docs/`.
 **Commit message format:** `<type>: <short description>`
 
 ```
