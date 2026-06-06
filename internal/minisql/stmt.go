@@ -904,6 +904,98 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 	return stmt, nil
 }
 
+// BindArgumentsFrom substitutes placeholders by pulling argument values from next.
+// It handles simple UPDATE and DELETE statements without CTEs/subqueries; callers
+// should fall back to BindArguments when ok is false.
+func (s Statement) BindArgumentsFrom(next func() (any, error)) (Statement, bool, error) {
+	if !s.canBindArgumentsFrom() {
+		return Statement{}, false, nil
+	}
+
+	stmt := s.Clone()
+	if s.Kind == Update {
+		for _, field := range stmt.Fields {
+			val, ok := stmt.Updates[field.Name]
+			if !ok {
+				continue
+			}
+			if _, ok := val.Value.(Placeholder); !ok {
+				continue
+			}
+			arg, err := next()
+			if err != nil {
+				return Statement{}, true, err
+			}
+			if arg == nil {
+				stmt.Updates[field.Name] = OptionalValue{}
+			} else {
+				stmt.Updates[field.Name] = OptionalValue{Value: arg, Valid: true}
+			}
+		}
+	}
+
+	if err := bindConditionArgumentsFrom(stmt.Conditions, next); err != nil {
+		return Statement{}, true, err
+	}
+
+	return stmt, true, nil
+}
+
+func (s Statement) canBindArgumentsFrom() bool {
+	if s.Kind != Update && s.Kind != Delete {
+		return false
+	}
+	if len(s.CTEs) > 0 || len(s.Having) > 0 || len(s.Unions) > 0 {
+		return false
+	}
+	if s.ExplainStatement != nil || s.FromSubquery != nil || s.UpdateFromSubquery != nil {
+		return false
+	}
+	for _, group := range s.Conditions {
+		for _, cond := range group {
+			if cond.Operand1.Type == OperandExpr || cond.Operand2.Type == OperandSubquery {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func bindConditionArgumentsFrom(conditions OneOrMore, next func() (any, error)) error {
+	for i, condGroup := range conditions {
+		for j, cond := range condGroup {
+			if cond.Operand2.Type == OperandPlaceholder {
+				arg, err := next()
+				if err != nil {
+					return err
+				}
+				cond.Operand2.Type = operandTypeFromAny(arg)
+				cond.Operand2.Value = arg
+				conditions[i][j] = cond
+				continue
+			}
+			if cond.Operand2.Type == OperandList {
+				origList := cond.Operand2.Value.([]any)
+				newList := make([]any, len(origList))
+				copy(newList, origList)
+				for k, value := range newList {
+					if _, ok := value.(Placeholder); !ok {
+						continue
+					}
+					arg, err := next()
+					if err != nil {
+						return err
+					}
+					newList[k] = arg
+				}
+				cond.Operand2.Value = newList
+				conditions[i][j] = cond
+			}
+		}
+	}
+	return nil
+}
+
 func (s Statement) canDelayPreparedInsertBind() bool {
 	return s.Kind == Insert &&
 		s.insertCache != nil &&

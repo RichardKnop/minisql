@@ -3,6 +3,7 @@ package minisql
 import (
 	"context"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"time"
 	"unsafe"
@@ -60,12 +61,7 @@ func (s Stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (result
 		s.conn.logSlowQuery(s.query, time.Since(start), err)
 	}()
 
-	internalArgs, err := toInternalArgs(args)
-	if err != nil {
-		return nil, err
-	}
-
-	stmtWithArgs, err := s.statement.BindArguments(internalArgs...)
+	stmtWithArgs, err := s.bindNamedArguments(args)
 	if err != nil {
 		return nil, err
 	}
@@ -95,12 +91,7 @@ func (s Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (rows 
 		s.conn.logSlowQuery(s.query, time.Since(start), err)
 	}()
 
-	internalArgs, err := toInternalArgs(args)
-	if err != nil {
-		return nil, err
-	}
-
-	stmtWithArgs, err := s.statement.BindArguments(internalArgs...)
+	stmtWithArgs, err := s.bindNamedArguments(args)
 	if err != nil {
 		return nil, err
 	}
@@ -124,38 +115,73 @@ func (s Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (rows 
 	}, nil
 }
 
+type namedArgReader struct {
+	args []driver.NamedValue
+	idx  int
+}
+
+func (r *namedArgReader) next() (any, error) {
+	if r.idx >= len(r.args) {
+		return nil, errors.New("not enough arguments to bind placeholders")
+	}
+	value, err := toInternalArg(r.args[r.idx])
+	r.idx++
+	return value, err
+}
+
+func (s Stmt) bindNamedArguments(args []driver.NamedValue) (minisql.Statement, error) {
+	reader := namedArgReader{args: args}
+	if stmt, ok, err := s.statement.BindArgumentsFrom(reader.next); ok || err != nil {
+		return stmt, err
+	}
+
+	internalArgs, err := toInternalArgs(args)
+	if err != nil {
+		return minisql.Statement{}, err
+	}
+	return s.statement.BindArguments(internalArgs...)
+}
+
 func toInternalArgs(args []driver.NamedValue) ([]any, error) {
 	internalArgs := make([]any, len(args))
 	// Supported argument types: int64, float64, bool, []byte, string, time.Time
 	for i, arg := range args {
-		switch v := arg.Value.(type) {
-		case nil:
-			internalArgs[i] = nil
-		case int64, float64, bool:
-			internalArgs[i] = v
-		case []float32:
-			internalArgs[i] = minisql.VectorPointer{Dims: uint32(len(v)), Data: v}
-		case string:
-			// Reuse the string's backing bytes without copying. The TextPointer is
-			// valid only for the duration of this Exec/Query call: `args` (and thus
-			// the underlying string data) is kept alive by the caller's stack frame,
-			// and the TextPointer is consumed before ExecContext/QueryContext returns.
-			b := unsafe.Slice(unsafe.StringData(v), len(v))
-			internalArgs[i] = minisql.NewTextPointer(b)
-		case time.Time:
-			t := minisql.Time{
-				Year:         int32(v.Year()),
-				Month:        int8(v.Month()),
-				Day:          int8(v.Day()),
-				Hour:         int8(v.Hour()),
-				Minutes:      int8(v.Minute()),
-				Seconds:      int8(v.Second()),
-				Microseconds: int32(v.Nanosecond() / 1000),
-			}
-			internalArgs[i] = minisql.TimestampMicros(t.TotalMicroseconds())
-		default:
-			return nil, fmt.Errorf("unsupported argument type: %T", arg)
+		value, err := toInternalArg(arg)
+		if err != nil {
+			return nil, err
 		}
+		internalArgs[i] = value
 	}
 	return internalArgs, nil
+}
+
+func toInternalArg(arg driver.NamedValue) (any, error) {
+	switch v := arg.Value.(type) {
+	case nil:
+		return nil, nil
+	case int64, float64, bool:
+		return v, nil
+	case []float32:
+		return minisql.VectorPointer{Dims: uint32(len(v)), Data: v}, nil
+	case string:
+		// Reuse the string's backing bytes without copying. The TextPointer is
+		// valid only for the duration of this Exec/Query call: `args` (and thus
+		// the underlying string data) is kept alive by the caller's stack frame,
+		// and the TextPointer is consumed before ExecContext/QueryContext returns.
+		b := unsafe.Slice(unsafe.StringData(v), len(v))
+		return minisql.NewTextPointer(b), nil
+	case time.Time:
+		t := minisql.Time{
+			Year:         int32(v.Year()),
+			Month:        int8(v.Month()),
+			Day:          int8(v.Day()),
+			Hour:         int8(v.Hour()),
+			Minutes:      int8(v.Minute()),
+			Seconds:      int8(v.Second()),
+			Microseconds: int32(v.Nanosecond() / 1000),
+		}
+		return minisql.TimestampMicros(t.TotalMicroseconds()), nil
+	default:
+		return nil, fmt.Errorf("unsupported argument type: %T", arg)
+	}
 }
