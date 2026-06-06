@@ -3,13 +3,13 @@
 ## Current Baseline
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
-**Branch:** `codex/profile-hnsw-build`  
-**Command:** `make bench BENCH_COUNT=1` followed by `make bench-report`; HNSW tables refreshed with targeted `go test -tags bench -bench '^BenchmarkHNSW_...' -benchmem` runs  
+**Branch:** `codex/profile-distinct-subquery`  
+**Command:** `make bench BENCH_COUNT=1` followed by `make bench-report`; HNSW tables refreshed with targeted `go test -tags bench -bench '^BenchmarkHNSW_...' -benchmem` runs; DISTINCT/subquery rows refreshed with `go test -tags bench -run '^$' -bench 'Benchmark(Distinct_HighCardinality|Subquery_InList)$' -benchmem -count=1 ./benchmarks/`  
 **GOMAXPROCS:** 10  
 
 SQLite comparisons use the `sqlite` driver compiled into the same test binary. MiniSQL benchmarks run against fresh temp-file databases per sub-benchmark. Times are wall-clock (`ns/op`); memory figures are heap allocations reported by the Go runtime.
 
-This file was refreshed from scratch after the latest DML allocation work, including transaction write-set inlining, auto-commit transaction reuse, direct prepared DML argument binding, and HNSW typed candidate-heap allocation reduction.
+This file was refreshed from scratch after the latest DML allocation work, including transaction write-set inlining, auto-commit transaction reuse, direct prepared DML argument binding, and HNSW typed candidate-heap allocation reduction. DISTINCT/subquery rows were subsequently refreshed after RowView predicate fast paths and DISTINCT seen-set pre-sizing.
 
 ---
 
@@ -50,9 +50,9 @@ The results are grouped by benchmark family so each table can be read without ho
 |---|---|---|---|---|---|---|
 | GROUP BY aggregate | 979.73 µs | 2.10 ms | 0.5× | 35.5 KiB | 3.5 KiB | 459 / 309 |
 | HAVING filter | 741.87 µs | 1.95 ms | 0.4× | 27.4 KiB | 1.9 KiB | 264 / 111 |
-| DISTINCT high cardinality | 2.97 ms | 5.86 ms | 0.5× | 1.68 MiB | 586.3 KiB | 40,140 / 40,010 |
+| DISTINCT high cardinality | 4.10 ms | 8.44 ms | 0.5× | 1.26 MiB | 586.3 KiB | 40,093 / 40,010 |
 | CTE materialise | 793.64 µs | 437.25 µs | 1.8× | 6.6 KiB | 400 B | 86 / 13 |
-| Subquery IN list | 4.46 ms | 3.59 ms | 1.2× | 853.3 KiB | 234.7 KiB | 35,098 / 20,010 |
+| Subquery IN list | 4.03 ms | 5.07 ms | 0.8× | 715.8 KiB | 234.7 KiB | 20,200 / 20,010 |
 
 ### Joins
 
@@ -158,17 +158,17 @@ The results are grouped by benchmark family so each table can be read without ho
 | HNSW | Build index, dims768, 10k rows | 208.1 MiB |
 | HNSW | Build index, dims128, 10k rows | 134.7 MiB |
 | HNSW | Build index, dims3, 10k rows | 120.2 MiB |
-| DISTINCT | High-cardinality distinct | 1.68 MiB |
 | Full-text | Build index | 1.39 MiB |
-| JSON inverted | Build index | 1.26 MiB |
 | Maintenance | VACUUM small | 1.28 MiB |
+| DISTINCT | High-cardinality distinct | 1.26 MiB |
+| JSON inverted | Build index | 1.26 MiB |
 | SELECT | Full scan | 1.23 MiB |
 | Join | Inner join, small-large | 1.00 MiB |
-| Subquery | IN list | 853.3 KiB |
+| Subquery | IN list | 715.8 KiB |
 
 ### Good Next Optimisation Targets
 
 - HNSW build allocation growth is much lower after typed candidate heaps, but it remains the largest broad-suite outlier at 10k rows.
 - Full-text and JSON build paths still allocate multiple MiB per operation and remain the most relevant inverted-index targets.
-- DISTINCT and subquery materialisation remain useful non-inverted-index targets if we continue looking for smaller wins before another structural refactor.
+- DISTINCT and subquery materialisation are improved after RowView predicate fast paths and DISTINCT seen-set pre-sizing, but DISTINCT remains near the MiB/op outlier group.
 - VACUUM is still much more expensive than SQLite in both time and memory, but it is a less common operational path than DML and SELECT.
