@@ -61,20 +61,32 @@ Setting `LOG_LEVEL=info` suppresses debug output and makes test failures easier 
 MiniSQL uses Go's built-in fuzzer (`go test -fuzz`) to find parser bugs and
 storage corruption issues that structured unit tests are unlikely to reach.
 
-**Run the parser fuzzer** (stops after 60 s; adjust `-fuzztime` as needed):
+Three fuzz targets are maintained:
+
+| Target | Package | What it finds |
+|--------|---------|---------------|
+| `FuzzParser` | `./internal/parser/` | Parser panics / infinite loops on arbitrary SQL input |
+| `FuzzPageUnmarshal` | `./internal/minisql/` | Panics in B-tree page deserialization on truncated/corrupt pages |
+| `FuzzRowView` | `./internal/minisql/` | Panics in row value decoding (`RowView.ValueAt`) on arbitrary cell bytes |
+
+**Run a fuzzer** (stops after 60 s; adjust `-fuzztime` as needed):
 
 ```sh
-go test -fuzz=FuzzParser -fuzztime=60s ./internal/parser/
+go test -fuzz=FuzzParser       -fuzztime=60s ./internal/parser/
+go test -fuzz=FuzzPageUnmarshal -fuzztime=60s ./internal/minisql/
+go test -fuzz=FuzzRowView      -fuzztime=60s ./internal/minisql/
 ```
 
 **Run seeds only** (fast, no mutation — safe for CI):
 
 ```sh
-go test -run=FuzzParser ./internal/parser/
+go test -run=FuzzParser        ./internal/parser/
+go test -run=FuzzPageUnmarshal ./internal/minisql/
+go test -run=FuzzRowView       ./internal/minisql/
 ```
 
-Corpus entries that previously found real bugs live in
-`internal/parser/testdata/fuzz/FuzzParser/` and are automatically replayed as
+Corpus entries that previously found real bugs live under each package's
+`testdata/fuzz/<FuzzTarget>/` directory and are automatically replayed as
 ordinary unit tests on every `go test` run. When the fuzzer discovers a new
 crash it writes the minimised input to that directory; commit it so the fix is
 covered by CI forever.
