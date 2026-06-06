@@ -21,6 +21,8 @@ import (
 var (
 	errUnrecognizedStatementType = errors.New("unrecognised statement type")
 	errIndexOnJSONColumn         = errors.New("b-tree index on JSON column is not supported")
+	errIndexOnTextColumn         = errors.New("b-tree index on TEXT column is not supported")
+	errIndexOnVectorColumn       = errors.New("b-tree index on VECTOR column is not supported")
 )
 
 const populateInvertedIndexFlushPostings = 64 * 1024
@@ -1699,8 +1701,13 @@ func (d *Database) createIndex(ctx context.Context, stmt Statement, table *Table
 			if !ok {
 				return fmt.Errorf("column %s does not exist on table %s", stmtCol.Name, stmt.TableName)
 			}
-			if stmt.IndexMethod == IndexMethodBTree && col.Kind == JSON {
+			switch {
+			case stmt.IndexMethod == IndexMethodBTree && col.Kind == JSON:
 				return fmt.Errorf("%w: column %q on table %q", errIndexOnJSONColumn, col.Name, stmt.TableName)
+			case stmt.IndexMethod == IndexMethodBTree && col.Kind == Text:
+				return fmt.Errorf("%w: column %q on table %q", errIndexOnTextColumn, col.Name, stmt.TableName)
+			case stmt.IndexMethod == IndexMethodBTree && col.Kind == Vector:
+				return fmt.Errorf("%w: column %q on table %q", errIndexOnVectorColumn, col.Name, stmt.TableName)
 			}
 			indexColumns = append(indexColumns, col)
 		}
