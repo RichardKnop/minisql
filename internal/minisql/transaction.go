@@ -99,6 +99,24 @@ func (tx *Transaction) Abort() {
 	tx.hasFirstWrite = false
 }
 
+func (tx *Transaction) resetForReuse() {
+	tx.DDLChanges = DDLChanges{}
+	tx.StartTime = time.Time{}
+	tx.WriteSet = nil
+	tx.DBHeaderWrite = nil
+	tx.firstWrite = WriteInfo{}
+	tx.rowCountDeltas = nil
+	tx.rowCountTable = ""
+	tx.rowCountDelta = 0
+	tx.firstWritePage = 0
+	tx.ID = 0
+	tx.Status = 0
+	tx.SnapshotSeq = 0
+	tx.ReadOnly = false
+	tx.hasRowCount = false
+	tx.hasFirstWrite = false
+}
+
 // AddRowCountDelta records a net row-count change for the named table.
 // It is a no-op for read-only transactions.
 func (tx *Transaction) AddRowCountDelta(table string, delta int64) {

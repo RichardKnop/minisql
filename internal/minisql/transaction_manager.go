@@ -55,6 +55,7 @@ type TransactionManager struct {
 	checkpointThreshold  int
 	nextTxID             TransactionID
 	activeWriters        atomic.Int32
+	autoTxPool           sync.Pool
 	mu                   sync.RWMutex
 	walWriteMu           sync.Mutex
 }
@@ -212,7 +213,7 @@ func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(
 		return fn(ctx)
 	}
 
-	tx, err := tm.BeginTransaction(ctx)
+	tx, err := tm.beginTransaction(ctx, true)
 	if err != nil {
 		return err
 	}
@@ -220,31 +221,45 @@ func (tm *TransactionManager) ExecuteInTransaction(ctx context.Context, fn func(
 
 	if err := fn(ctx); err != nil {
 		tm.RollbackTransaction(ctx, tx)
+		tm.releaseAutoTransaction(tx)
 		return err
 	}
 
 	if err := tm.CommitTransaction(ctx, tx); err != nil {
 		tm.RollbackTransaction(ctx, tx)
+		tm.releaseAutoTransaction(tx)
 		return err
 	}
 
+	tm.releaseAutoTransaction(tx)
 	return nil
 }
 
 // BeginTransaction starts a new write transaction and registers it with the manager.
 // Returns ErrConcurrentWriter if another write transaction is already active.
 func (tm *TransactionManager) BeginTransaction(ctx context.Context) (*Transaction, error) {
+	return tm.beginTransaction(ctx, false)
+}
+
+func (tm *TransactionManager) beginTransaction(ctx context.Context, pooled bool) (*Transaction, error) {
 	tm.mu.Lock()
 	if tm.activeWriters.Load() > 0 {
 		tm.mu.Unlock()
 		return nil, ErrConcurrentWriter
 	}
 	tm.activeWriters.Add(1)
-	tx := &Transaction{
-		ID:        tm.nextTxID,
-		StartTime: time.Now(),
-		Status:    TxActive,
+	var tx *Transaction
+	if pooled {
+		if pooledTx := tm.autoTxPool.Get(); pooledTx != nil {
+			tx = pooledTx.(*Transaction)
+		}
 	}
+	if tx == nil {
+		tx = &Transaction{}
+	}
+	tx.ID = tm.nextTxID
+	tx.StartTime = time.Now()
+	tx.Status = TxActive
 	tm.nextTxID += 1
 	tm.transactions[tx.ID] = tx
 	tm.mu.Unlock()
@@ -254,6 +269,11 @@ func (tm *TransactionManager) BeginTransaction(ctx context.Context) (*Transactio
 	}
 
 	return tx, nil
+}
+
+func (tm *TransactionManager) releaseAutoTransaction(tx *Transaction) {
+	tx.resetForReuse()
+	tm.autoTxPool.Put(tx)
 }
 
 // BeginReadOnlyTransaction starts a read-only transaction with snapshot
