@@ -747,7 +747,10 @@ func TestTable_Select_NonUniqueSecondaryIndexPointUsesRowViews(t *testing.T) {
 		freePage.LeafNode.Header.IsRoot = true
 		table = NewTable(testLogger, txPager, txManager, testTableName, testColumns[0:3], freePage.Index, nil)
 
-		indexPager := pager.ForIndex(indexCols, false)
+		indexPager, err := pager.ForIndex(indexCols, false)
+		if err != nil {
+			return err
+		}
 		txIndexPager := NewTransactionalPager(indexPager, txManager, testTableName, indexName)
 		indexRoot, err := txIndexPager.GetFreePage(ctx)
 		if err != nil {

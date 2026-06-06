@@ -544,12 +544,16 @@ func addQuickCheckTestTableWithSecondaryIndex(db *Database, pager *pagerImpl, ta
 		pager.totalPages = uint32(indexRootPageIdx) + 1
 	}
 
+	indexForPager, indexForPagerErr := pager.ForIndex(columns[1:2], false)
+	if indexForPagerErr != nil {
+		panic(indexForPagerErr)
+	}
 	index, err := NewNonUniqueIndex[string](
 		testLogger,
 		db.txManager,
 		indexName,
 		columns[1:2],
-		NewTransactionalPager(pager.ForIndex(columns[1:2], false), db.txManager, tableName, indexName),
+		NewTransactionalPager(indexForPager, db.txManager, tableName, indexName),
 		indexRootPageIdx,
 	)
 	if err != nil {

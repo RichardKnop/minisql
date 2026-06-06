@@ -341,7 +341,7 @@ func (d *Database) pagerFactory(ctx context.Context, tableName, indexName string
 		}
 	}
 
-	return d.factory.ForIndex(columns, unique), nil
+	return d.factory.ForIndex(columns, unique)
 }
 
 // applyRowCountDeltas applies committed insert/delete row-count changes to the
@@ -947,12 +947,11 @@ func (d *Database) initPrimaryKey(_ context.Context, schema Schema) error {
 	if !ok {
 		return fmt.Errorf("table %s for primary key index %s does not exist", schema.TableName, schema.Name)
 	}
-	tp := NewTransactionalPager(
-		d.factory.ForIndex(table.PrimaryKey.Columns, true),
-		d.txManager,
-		table.Name,
-		schema.Name,
-	)
+	pkPager, err := d.factory.ForIndex(table.PrimaryKey.Columns, true)
+	if err != nil {
+		return err
+	}
+	tp := NewTransactionalPager(pkPager, d.txManager, table.Name, schema.Name)
 	btreeIndex, err := table.newBTreeIndex(tp, schema.RootPage, table.PrimaryKey.Columns, table.PrimaryKey.Name, true)
 	if err != nil {
 		return err
@@ -980,12 +979,11 @@ func (d *Database) initUniqueIndex(_ context.Context, schema Schema) error {
 	if !ok {
 		return fmt.Errorf("unique index %s does not exist on table %s", schema.Name, schema.TableName)
 	}
-	tp := NewTransactionalPager(
-		d.factory.ForIndex(uniqueIndex.Columns, true),
-		d.txManager,
-		table.Name,
-		schema.Name,
-	)
+	uiPager, err := d.factory.ForIndex(uniqueIndex.Columns, true)
+	if err != nil {
+		return err
+	}
+	tp := NewTransactionalPager(uiPager, d.txManager, table.Name, schema.Name)
 	btreeIndex, err := table.newBTreeIndex(tp, schema.RootPage, uniqueIndex.Columns, uniqueIndex.Name, true)
 	if err != nil {
 		return err
@@ -1071,13 +1069,11 @@ func (d *Database) initSecondaryIndex(ctx context.Context, schema Schema) error 
 		secondaryIndex.HNSWIndex = OpenHNSWIndex(tp, schema.RootPage)
 	default:
 		storageColumns := secondaryIndexStorageColumns(secondaryIndex)
-
-		tp := NewTransactionalPager(
-			d.factory.ForIndex(storageColumns, false),
-			d.txManager,
-			table.Name,
-			schema.Name,
-		)
+		siPager, err := d.factory.ForIndex(storageColumns, false)
+		if err != nil {
+			return err
+		}
+		tp := NewTransactionalPager(siPager, d.txManager, table.Name, schema.Name)
 		btreeIndex, err := table.newBTreeIndex(tp, schema.RootPage, storageColumns, secondaryIndex.Name, false)
 		if err != nil {
 			return err
@@ -1612,13 +1608,11 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	})
 	// And then free pages for the primary key index if any
 	if tableToDelete.HasPrimaryKey() {
-
-		txPager := NewTransactionalPager(
-			d.factory.ForIndex(tableToDelete.PrimaryKey.Columns, true),
-			d.txManager,
-			tableToDelete.Name,
-			tableToDelete.PrimaryKey.Name,
-		)
+		pkPager, err := d.factory.ForIndex(tableToDelete.PrimaryKey.Columns, true)
+		if err != nil {
+			return err
+		}
+		txPager := NewTransactionalPager(pkPager, d.txManager, tableToDelete.Name, tableToDelete.PrimaryKey.Name)
 
 		_ = tableToDelete.PrimaryKey.Index.BFS(ctx, func(page *Page) {
 			if err := txPager.AddFreePage(ctx, page.Index); err != nil {
@@ -1633,13 +1627,11 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	}
 	// And then free pages for unique indexes index if any
 	for _, uniqueIndex := range tableToDelete.UniqueIndexes {
-
-		txPager := NewTransactionalPager(
-			d.factory.ForIndex(uniqueIndex.Columns, true),
-			d.txManager,
-			tableToDelete.Name,
-			uniqueIndex.Name,
-		)
+		uiPager, err := d.factory.ForIndex(uniqueIndex.Columns, true)
+		if err != nil {
+			return err
+		}
+		txPager := NewTransactionalPager(uiPager, d.txManager, tableToDelete.Name, uniqueIndex.Name)
 
 		_ = uniqueIndex.Index.BFS(ctx, func(page *Page) {
 			if err := txPager.AddFreePage(ctx, page.Index); err != nil {
@@ -1654,13 +1646,12 @@ func (d *Database) dropTable(ctx context.Context, name string) error {
 	}
 	// And then free pages for secondary indexes index if any
 	for _, secondaryIndex := range tableToDelete.SecondaryIndexes {
-
-		txPager := NewTransactionalPager(
-			d.factory.ForIndex(secondaryIndexStorageColumns(secondaryIndex), false),
-			d.txManager,
-			tableToDelete.Name,
-			secondaryIndex.Name,
-		)
+		siCols := secondaryIndexStorageColumns(secondaryIndex)
+		siPager, err := d.factory.ForIndex(siCols, false)
+		if err != nil {
+			return err
+		}
+		txPager := NewTransactionalPager(siPager, d.txManager, tableToDelete.Name, secondaryIndex.Name)
 
 		_ = secondaryIndex.Index.BFS(ctx, func(page *Page) {
 			if err := txPager.AddFreePage(ctx, page.Index); err != nil {
@@ -2273,14 +2264,11 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 		}
 	default:
 		storageColumns := secondaryIndexStorageColumns(secondaryIndex)
-
-		txPager := NewTransactionalPager(
-			d.factory.ForIndex(storageColumns, false),
-			d.txManager,
-			table.Name,
-			schema.Name,
-		)
-
+		siPager, err := d.factory.ForIndex(storageColumns, false)
+		if err != nil {
+			return err
+		}
+		txPager := NewTransactionalPager(siPager, d.txManager, table.Name, schema.Name)
 		btreeIndex, err := table.newBTreeIndex(txPager, schema.RootPage, storageColumns, schema.Name, false)
 		if err != nil {
 			return err
@@ -2307,12 +2295,11 @@ func (d *Database) dropIndex(ctx context.Context, stmt Statement) error {
 func (d *Database) createPrimaryKey(ctx context.Context, table *Table, columns []Column) (BTreeIndex, error) {
 	d.logger.Sugar().With("columns", columns).Debug("creating primary key")
 
-	txPager := NewTransactionalPager(
-		d.factory.ForIndex(columns, true),
-		d.txManager,
-		table.Name,
-		table.PrimaryKey.Name,
-	)
+	pkPager, err := d.factory.ForIndex(columns, true)
+	if err != nil {
+		return nil, err
+	}
+	txPager := NewTransactionalPager(pkPager, d.txManager, table.Name, table.PrimaryKey.Name)
 
 	freePage, err := txPager.GetFreePage(ctx)
 	if err != nil {
@@ -2339,12 +2326,11 @@ func (d *Database) createPrimaryKey(ctx context.Context, table *Table, columns [
 func (d *Database) createUniqueIndex(ctx context.Context, table *Table, uniqueIndex UniqueIndex) (BTreeIndex, error) {
 	d.logger.Sugar().With("column", uniqueIndex.Columns[0].Name).Debug("creating unique index")
 
-	txPager := NewTransactionalPager(
-		d.factory.ForIndex(uniqueIndex.Columns, true),
-		d.txManager,
-		table.Name,
-		uniqueIndex.Name,
-	)
+	uiPager, err := d.factory.ForIndex(uniqueIndex.Columns, true)
+	if err != nil {
+		return nil, err
+	}
+	txPager := NewTransactionalPager(uiPager, d.txManager, table.Name, uniqueIndex.Name)
 
 	freePage, err := txPager.GetFreePage(ctx)
 	if err != nil {
@@ -2405,12 +2391,11 @@ func (d *Database) createSecondaryIndex(ctx context.Context, stmt Statement, tab
 		secondaryIndex.InvertedIndex = invertedIdx
 	case !secondaryIndexUsesDedicatedHNSWStorage(secondaryIndex.Method):
 		storageColumns := secondaryIndexStorageColumns(secondaryIndex)
-		txPager := NewTransactionalPager(
-			d.factory.ForIndex(storageColumns, false),
-			d.txManager,
-			table.Name,
-			secondaryIndex.Name,
-		)
+		siPager, err := d.factory.ForIndex(storageColumns, false)
+		if err != nil {
+			return SecondaryIndex{}, err
+		}
+		txPager := NewTransactionalPager(siPager, d.txManager, table.Name, secondaryIndex.Name)
 
 		freePage, err := txPager.GetFreePage(ctx)
 		if err != nil {

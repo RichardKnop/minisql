@@ -15,10 +15,11 @@ func TestIndex_Seek(t *testing.T) {
 		ctx           = context.Background()
 		keys          = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
 		col           = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager    = pager.ForIndex([]Column{col}, true)
-		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
-		txPager       = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
+	indexPager, err := pager.ForIndex([]Column{col}, true)
+	require.NoError(t, err)
+	txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
+	txPager := NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	idx, err := NewUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
 	idx.maximumKeys = 3
@@ -116,13 +117,14 @@ func TestIndex_SeekLastKey(t *testing.T) {
 		ctx           = context.Background()
 		keys          = []int64{16, 9, 5, 18, 11, 1, 14, 7, 10, 6, 20, 19, 8, 2, 13, 12, 17, 3, 4, 21, 15}
 		col           = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager    = pager.ForIndex([]Column{col}, true)
-		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
-		txPager       = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
+	indexPager, err := pager.ForIndex([]Column{col}, true)
+	require.NoError(t, err)
+	txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
+	txPager := NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 
 	// Initialize empty index, this normally happens in the database init step
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		freePage, err := txPager.GetFreePage(ctx)
 		if err != nil {
 			return err

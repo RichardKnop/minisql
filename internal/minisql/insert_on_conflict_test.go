@@ -19,11 +19,12 @@ func TestTable_Insert_OnConflictDoUpdate_UniqueIndex(t *testing.T) {
 		rows          = gen.RowsWithUniqueIndex(5)
 		table         *Table
 		indexName     = UniqueIndexName(testTableName, "email")
-		indexPager    = pager.ForIndex(testColumns[1:2], true)
-		txIndexPager  = NewTransactionalPager(indexPager, txManager, testTableName, indexName)
 	)
+	indexPager, err := pager.ForIndex(testColumns[1:2], true)
+	require.NoError(t, err)
+	txIndexPager := NewTransactionalPager(indexPager, txManager, testTableName, indexName)
 
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		freePage, err := txPager.GetFreePage(ctx)
 		if err != nil {
 			return err
@@ -205,11 +206,12 @@ func TestTable_Insert_OnConflictDoUpdate_ExcludedRef_UniqueIndex(t *testing.T) {
 		rows          = gen.RowsWithUniqueIndex(5)
 		table         *Table
 		indexName     = UniqueIndexName(testTableName, "email")
-		indexPager    = pager.ForIndex(testColumns[1:2], true)
-		txIndexPager  = NewTransactionalPager(indexPager, txManager, testTableName, indexName)
 	)
+	indexPager, err := pager.ForIndex(testColumns[1:2], true)
+	require.NoError(t, err)
+	txIndexPager := NewTransactionalPager(indexPager, txManager, testTableName, indexName)
 
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		freePage, err := txPager.GetFreePage(ctx)
 		if err != nil {
 			return err
@@ -380,13 +382,14 @@ func TestTable_Insert_OnConflictDoNothing_UniqueIndex(t *testing.T) {
 		rows          = gen.RowsWithUniqueIndex(5)
 		table         *Table
 		indexName     = UniqueIndexName(testTableName, "email")
-		indexPager    = pager.ForIndex(testColumns[1:2], true)
-		// Use the same txManager for the index pager so page-version tracking is consistent.
-		txIndexPager = NewTransactionalPager(indexPager, txManager, testTableName, indexName)
 	)
+	indexPager, err := pager.ForIndex(testColumns[1:2], true)
+	require.NoError(t, err)
+	// Use the same txManager for the index pager so page-version tracking is consistent.
+	txIndexPager := NewTransactionalPager(indexPager, txManager, testTableName, indexName)
 
 	// Set up table and insert initial rows
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		freePage, err := txPager.GetFreePage(ctx)
 		if err != nil {
 			return err

@@ -42,10 +42,11 @@ func TestIndex_NonUnique_Delete(t *testing.T) {
 		pager, dbFile = initTest(t)
 		ctx           = context.Background()
 		col           = Column{Name: "test_column", Kind: Int8, Size: 8}
-		indexPager    = pager.ForIndex([]Column{col}, true)
-		txManager     = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
-		txPager       = NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	)
+	indexPager, err := pager.ForIndex([]Column{col}, true)
+	require.NoError(t, err)
+	txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
+	txPager := NewTransactionalPager(indexPager, txManager, testTableName, "test_index")
 	idx, err := NewNonUniqueIndex[int64](testLogger, txManager, "test_index", []Column{col}, txPager, 0)
 	require.NoError(t, err)
 

@@ -1273,7 +1273,7 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 
 func insertFieldOrderMatchesColumnOrder(colFieldIdx []int, nInsertFields int) bool {
 	lastColIdx := -1
-	for fieldIdx := 0; fieldIdx < nInsertFields; fieldIdx++ {
+	for fieldIdx := range nInsertFields {
 		colIdx := -1
 		for i, idx := range colFieldIdx {
 			if idx == fieldIdx {

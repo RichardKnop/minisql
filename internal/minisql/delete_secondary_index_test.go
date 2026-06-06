@@ -44,12 +44,9 @@ func TestTable_Delete_SingleSecondaryIndex(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	txIndexPager := NewTransactionalPager(
-		pager.ForIndex(indexCol, false),
-		txManager,
-		testTableName,
-		indexName,
-	)
+	idxPager, err := pager.ForIndex(indexCol, false)
+	require.NoError(t, err)
+	txIndexPager := NewTransactionalPager(idxPager, txManager, testTableName, indexName)
 
 	// Build the secondary index and insert rows.
 	stmt := Statement{
@@ -134,12 +131,9 @@ func TestTable_Delete_CompositeSecondaryIndex(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	txIndexPager := NewTransactionalPager(
-		pager.ForIndex(indexCols, false),
-		txManager,
-		testTableName,
-		indexName,
-	)
+	idxPager2, err := pager.ForIndex(indexCols, false)
+	require.NoError(t, err)
+	txIndexPager := NewTransactionalPager(idxPager2, txManager, testTableName, indexName)
 
 	// Build the composite secondary index and insert rows.
 	stmt := Statement{

@@ -1,6 +1,6 @@
 # B-tree Indexes
 
-Every table's primary key is a B-tree. Additional B-tree indexes can be created on any column or combination of columns.
+Every table's primary key is a B-tree. Additional B-tree indexes can be created on most column types — see [Supported column types](#supported-column-types) for the full list.
 
 ---
 
@@ -142,10 +142,37 @@ Dropping a primary key index requires dropping the table.
 
 ---
 
+## Supported column types
+
+B-tree secondary indexes support the following column types:
+
+| Column type | Notes |
+|-------------|-------|
+| `BOOLEAN` | |
+| `INT4` | |
+| `INT8` | |
+| `REAL` | |
+| `DOUBLE` | |
+| `TIMESTAMP` | |
+| `UUID` | |
+| `VARCHAR(n)` | Keys are stored inline up to 255 bytes; longer values are rejected |
+| Composite | Any combination of the above in a multi-column index |
+
+### Types that do not support B-tree indexes
+
+| Column type | Alternative |
+|-------------|-------------|
+| `TEXT` | Use `CREATE FULLTEXT INDEX` for token search, or an expression index on `SUBSTR(col, 1, 255)` for prefix matching |
+| `JSON` | Use `CREATE INVERTED INDEX` for `JSON_CONTAINS` queries |
+| `VECTOR(n)` | Use `CREATE HNSW INDEX` for approximate nearest-neighbour search |
+
+`TEXT` and `JSON` columns are designed for unbounded content. A B-tree index requires keys that fit within a single 4 KiB page (255 bytes for `VARCHAR`); text that overflows to linked overflow pages cannot be used as a B-tree key without truncation, which would silently break equality and uniqueness semantics. The dedicated index types (`FULLTEXT`, `INVERTED`, `HNSW`) are purpose-built for each data shape.
+
+---
+
 ## Notes
 
 - B-tree indexes are stored as independent B+ trees with doubly-linked leaf pages.
-- `VARCHAR(n)` and `UUID` columns can be indexed; `TEXT` columns can be indexed only via expression indexes.
 - The planner uses table statistics from `ANALYZE` to choose between indexes.
 - `CREATE UNIQUE INDEX` enforces uniqueness at the storage level.
 - Composite primary keys (`PRIMARY KEY (col1, col2)`) use a composite B-tree key.

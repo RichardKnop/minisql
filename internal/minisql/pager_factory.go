@@ -29,26 +29,40 @@ func (p *pagerImpl) ForHNSWIndex() Pager {
 // chosen from the column kind. Composite (multi-column) indexes always use
 // CompositeKey; single-column indexes select the concrete key type that matches
 // the column kind (int8, int32, int64, float32, float64, string, or UUIDValue).
-func (p *pagerImpl) ForIndex(columns []Column, unique bool) Pager {
+//
+// Text, JSON, and Vector columns are not supported for B-tree secondary indexes:
+//   - TEXT / JSON: use CREATE FULLTEXT INDEX or CREATE INVERTED INDEX instead.
+//   - VECTOR: use CREATE HNSW INDEX instead.
+func (p *pagerImpl) ForIndex(columns []Column, unique bool) (Pager, error) {
 	if len(columns) > 1 {
-		return &indexPager[CompositeKey]{p, columns, unique}
+		return &indexPager[CompositeKey]{p, columns, unique}, nil
 	}
 	switch columns[0].Kind {
 	case Boolean:
-		return &indexPager[int8]{p, columns, unique}
+		return &indexPager[int8]{p, columns, unique}, nil
 	case Int4:
-		return &indexPager[int32]{p, columns, unique}
+		return &indexPager[int32]{p, columns, unique}, nil
 	case Int8, Timestamp:
-		return &indexPager[int64]{p, columns, unique}
+		return &indexPager[int64]{p, columns, unique}, nil
 	case Real:
-		return &indexPager[float32]{p, columns, unique}
+		return &indexPager[float32]{p, columns, unique}, nil
 	case Double:
-		return &indexPager[float64]{p, columns, unique}
+		return &indexPager[float64]{p, columns, unique}, nil
 	case Varchar:
-		return &indexPager[string]{p, columns, unique}
+		return &indexPager[string]{p, columns, unique}, nil
 	case UUID:
-		return &indexPager[UUIDValue]{p, columns, unique}
+		return &indexPager[UUIDValue]{p, columns, unique}, nil
+	case Text, JSON:
+		return nil, fmt.Errorf(
+			"column %q (%s) cannot be used in a B-tree secondary index: "+
+				"TEXT and JSON columns support only FULLTEXT INDEX or INVERTED INDEX",
+			columns[0].Name, columns[0].Kind)
+	case Vector:
+		return nil, fmt.Errorf(
+			"column %q (%s) cannot be used in a B-tree secondary index: "+
+				"VECTOR columns support only HNSW INDEX",
+			columns[0].Name, columns[0].Kind)
 	default:
-		panic(fmt.Sprintf("unsupported index column type: %v", columns[0].Kind))
+		return nil, fmt.Errorf("unsupported index column type %q", columns[0].Kind)
 	}
 }

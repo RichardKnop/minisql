@@ -4,12 +4,14 @@ MiniSQL supports four index types. The query planner automatically selects the b
 
 ## Index types
 
-| Type | Best for | SQL |
-|------|----------|-----|
-| [B-tree](btree.md) | Equality, range, ORDER BY, covering | `CREATE INDEX` |
-| [Full-text](fulltext.md) | Token search in TEXT columns | `CREATE FULLTEXT INDEX` |
-| [JSON inverted](json-inverted.md) | Containment queries on JSON columns | `CREATE INVERTED INDEX` |
-| [HNSW vector](hnsw.md) | Approximate nearest-neighbour on VECTOR columns | `CREATE HNSW INDEX` |
+| Type | Column types | Best for | SQL |
+|------|-------------|----------|-----|
+| [B-tree](btree.md) | `BOOLEAN`, `INT4`, `INT8`, `REAL`, `DOUBLE`, `TIMESTAMP`, `UUID`, `VARCHAR(n)` | Equality, range, ORDER BY, covering | `CREATE INDEX` |
+| [Full-text](fulltext.md) | `TEXT` | Token search (BM25 ranking) | `CREATE FULLTEXT INDEX` |
+| [JSON inverted](json-inverted.md) | `JSON` | Containment queries (`JSON_CONTAINS`) | `CREATE INVERTED INDEX` |
+| [HNSW vector](hnsw.md) | `VECTOR(n)` | Approximate nearest-neighbour (`VEC_L2`, `VEC_COSINE`) | `CREATE HNSW INDEX` |
+
+Each index type is purpose-built for its column kind. `TEXT`, `JSON`, and `VECTOR` columns cannot be used in a B-tree secondary index — attempting to do so returns an error with a suggestion to use the appropriate index type.
 
 ---
 

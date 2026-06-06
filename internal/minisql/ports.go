@@ -38,7 +38,9 @@ type PagerFactory interface {
 	// ForTable returns a Pager that unmarshals rows using the given column schema.
 	ForTable([]Column) Pager
 	// ForIndex returns a Pager that unmarshals index nodes for the given columns.
-	ForIndex(columns []Column, unique bool) Pager
+	// Returns an error if the column type is not supported for B-tree indexes
+	// (e.g. TEXT columns require a FULLTEXT INDEX instead).
+	ForIndex(columns []Column, unique bool) (Pager, error)
 	// ForInvertedIndex returns a Pager for inverted (full-text / JSON) index pages.
 	ForInvertedIndex() Pager
 	// ForHNSWIndex returns a Pager that unmarshals HNSW meta and data pages.

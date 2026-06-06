@@ -49,14 +49,13 @@ func TestTable_Select_UniqueIndex(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	var (
-		indexPager   = pager.ForIndex(testColumns[1:2], true)
-		txIndexPager = NewTransactionalPager(
-			indexPager,
-			table.txManager,
-			testTableName,
-			table.UniqueIndexes[indexName].Name,
-		)
+	indexPager, err := pager.ForIndex(testColumns[1:2], true)
+	require.NoError(t, err)
+	txIndexPager := NewTransactionalPager(
+		indexPager,
+		table.txManager,
+		testTableName,
+		table.UniqueIndexes[indexName].Name,
 	)
 
 	// Batch insert test rows
