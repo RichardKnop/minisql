@@ -158,6 +158,17 @@ func (rv RowView) ValueAt(idx int) (OptionalValue, error) {
 	}
 
 	col := rv.columns[idx]
+
+	// Guard against a truncated value buffer: verify enough bytes remain for
+	// this column's fixed-width data before doing any direct index reads.
+	if idx < len(rv.typeCodes) {
+		sz := typeCodeFixedSize(TypeCode(rv.typeCodes[idx]))
+		if sz > 0 && offset+sz > len(rv.value) {
+			return OptionalValue{}, fmt.Errorf("column %d (%s): value data truncated (need %d bytes at offset %d, have %d)",
+				idx, col.Name, sz, offset, len(rv.value))
+		}
+	}
+
 	switch col.Kind {
 	case Boolean:
 		return OptionalValue{Value: unmarshalBool(rv.value, uint64(offset)), Valid: true}, nil
@@ -422,6 +433,9 @@ func (rv RowView) UUIDAt(idx int) (UUIDValue, bool, error) {
 	offset, err := rv.offsetOf(idx)
 	if err != nil {
 		return UUIDValue{}, false, err
+	}
+	if offset+16 > len(rv.value) {
+		return UUIDValue{}, false, fmt.Errorf("UUID column %d: value data truncated (need 16 bytes at offset %d, have %d)", idx, offset, len(rv.value))
 	}
 	var value UUIDValue
 	copy(value[:], rv.value[offset:offset+16])

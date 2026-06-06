@@ -75,11 +75,17 @@ func (tp *TextPointer) Marshal(buf []byte, i uint64) error {
 // is sub-sliced directly into the page buffer (zero-copy). For overflow text,
 // only FirstPage is set; actual data is loaded later by readOverflowTexts.
 func (tp *TextPointer) Unmarshal(buf []byte, i uint64) error {
+	if i+4 > uint64(len(buf)) {
+		return fmt.Errorf("text pointer unmarshal: buffer too short for length prefix at offset %d (have %d bytes)", i, len(buf))
+	}
 	// Read length prefix
 	tp.Length = unmarshalUint32(buf, i)
 	i += 4
 
 	if tp.IsInline() {
+		if i+uint64(tp.Length) > uint64(len(buf)) {
+			return fmt.Errorf("text pointer unmarshal: buffer too short for inline data (need %d bytes at offset %d, have %d)", tp.Length, i, len(buf))
+		}
 		// Sub-slice page buffer directly — zero allocation, zero copy.
 		// Inline text is read-only after unmarshal; Marshal copies it out via copy().
 		tp.Data = buf[i : i+uint64(tp.Length)]
@@ -88,6 +94,9 @@ func (tp *TextPointer) Unmarshal(buf []byte, i uint64) error {
 	}
 
 	// Read first overflow page index
+	if i+4 > uint64(len(buf)) {
+		return fmt.Errorf("text pointer unmarshal: buffer too short for overflow page index at offset %d (have %d bytes)", i, len(buf))
+	}
 	tp.FirstPage = PageIndex(unmarshalUint32(buf, i))
 	i += 4
 	return nil
