@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"fmt"
 	"math"
 )
 
@@ -49,6 +50,9 @@ func (h *InternalNodeHeader) Marshal(buf []byte) {
 
 // Unmarshal deserialises the header from buf and returns the number of bytes consumed.
 func (h *InternalNodeHeader) Unmarshal(buf []byte) (uint64, error) {
+	if uint64(len(buf)) < h.Size() {
+		return 0, fmt.Errorf("internal node header unmarshal: buffer too short (%d < %d)", len(buf), h.Size())
+	}
 	i := uint64(0)
 
 	hi, err := h.Header.Unmarshal(buf[i:])
@@ -99,6 +103,9 @@ func (c *ICell) Marshal(buf []byte) {
 
 // Unmarshal deserialises an ICell from buf and returns the number of bytes consumed.
 func (c *ICell) Unmarshal(buf []byte) (uint64, error) {
+	if uint64(len(buf)) < c.Size() {
+		return 0, fmt.Errorf("ICell unmarshal: buffer too short (%d < %d)", len(buf), c.Size())
+	}
 	i := uint64(0)
 
 	c.Key = RowID(unmarshalUint64(buf, i))
@@ -179,6 +186,10 @@ func (n *InternalNode) Unmarshal(buf []byte) (uint64, error) {
 		return 0, err
 	}
 	i += hi
+
+	if n.Header.KeysNum > InternalNodeMaxCells {
+		return 0, fmt.Errorf("internal node unmarshal: KeysNum %d exceeds max %d", n.Header.KeysNum, InternalNodeMaxCells)
+	}
 
 	for idx := range n.ICells[0:n.Header.KeysNum] {
 		ci, err := n.ICells[idx].Unmarshal(buf[i:])

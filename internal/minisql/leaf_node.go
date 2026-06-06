@@ -35,6 +35,9 @@ func (h *LeafNodeHeader) Marshal(buf []byte) {
 
 // Unmarshal deserialises the header from buf and returns the number of bytes consumed.
 func (h *LeafNodeHeader) Unmarshal(buf []byte) (uint64, error) {
+	if uint64(len(buf)) < h.Size() {
+		return 0, fmt.Errorf("leaf node header unmarshal: buffer too short (%d < %d)", len(buf), h.Size())
+	}
 	i := uint64(0)
 
 	hi, err := h.Header.Unmarshal(buf[i:])
@@ -97,6 +100,10 @@ func (c *Cell) Marshal(buf []byte) {
 // Value is copied into owned memory so that the cell does not alias the source
 // buffer (WAL frame buffers are pooled and reused across commits).
 func (c *Cell) Unmarshal(buf []byte) (uint64, error) {
+	const minCellSize = 8 + 8 + 1 // NullBitmask + Key + ColumnCount
+	if len(buf) < minCellSize {
+		return 0, fmt.Errorf("cell unmarshal: buffer too short (%d < %d)", len(buf), minCellSize)
+	}
 	offset := uint64(0)
 
 	c.NullBitmask = unmarshalUint64(buf, offset)
@@ -110,6 +117,9 @@ func (c *Cell) Unmarshal(buf []byte) (uint64, error) {
 
 	// Read TypeCodes (nil when ColumnCount == 0 to match uninitialized Cell).
 	if c.ColumnCount > 0 {
+		if offset+uint64(c.ColumnCount) > uint64(len(buf)) {
+			return 0, fmt.Errorf("cell unmarshal: TypeCodes truncated (need %d bytes at offset %d, have %d)", c.ColumnCount, offset, len(buf))
+		}
 		c.TypeCodes = make([]byte, c.ColumnCount)
 		copy(c.TypeCodes, buf[offset:offset+uint64(c.ColumnCount)])
 		offset += uint64(c.ColumnCount)
@@ -140,6 +150,9 @@ func (c *Cell) Unmarshal(buf []byte) (uint64, error) {
 
 	// Pass 2: copy value bytes into owned memory.
 	if totalSize > 0 {
+		if offset+totalSize > uint64(len(buf)) {
+			return 0, fmt.Errorf("cell unmarshal: value data truncated (need %d bytes at offset %d, have %d)", totalSize, offset, len(buf))
+		}
 		c.Value = make([]byte, totalSize)
 		copy(c.Value, buf[offset:offset+totalSize])
 		c.isOwned = true
@@ -290,6 +303,12 @@ func (n *LeafNode) Unmarshal(buf []byte) (uint64, error) {
 		return 0, err
 	}
 	i += hi
+
+	// A single 4096-byte page can hold at most PageSize cells even if each were 1 byte.
+	// Guard against a corrupted Cells field that would cause a multi-GB allocation.
+	if n.Header.Cells > PageSize {
+		return 0, fmt.Errorf("leaf node unmarshal: Cells count %d exceeds maximum %d", n.Header.Cells, PageSize)
+	}
 
 	if cap(n.Cells) <= int(n.Header.Cells) {
 		// Allocate one extra slot so the next append (insert into this page)
