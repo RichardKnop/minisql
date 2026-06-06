@@ -26,6 +26,10 @@ func (n *FreePage) Marshal(buf []byte) error {
 // Unmarshal deserialises a free-page record from buf, reading the type byte
 // and the next-free-page pointer.
 func (n *FreePage) Unmarshal(buf []byte) error {
+	const minSize = 1 + 4 // type byte + NextFreePage
+	if len(buf) < minSize {
+		return fmt.Errorf("free page unmarshal: buffer too short (%d < %d)", len(buf), minSize)
+	}
 	i := uint64(0)
 
 	if buf[i] != PageTypeFree {

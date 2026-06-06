@@ -61,6 +61,10 @@ func (h *OverflowPage) Marshal(buf []byte) error {
 // Unmarshal deserialises the overflow page from buf, validating the type byte.
 // Data is sub-sliced directly into the page buffer (zero-copy).
 func (h *OverflowPage) Unmarshal(buf []byte) error {
+	const minHeaderSize = 1 + 4 + 4 // type byte + NextPage + DataSize
+	if len(buf) < minHeaderSize {
+		return fmt.Errorf("overflow page unmarshal: buffer too short (%d < %d)", len(buf), minHeaderSize)
+	}
 	i := uint64(0)
 
 	if buf[i] != PageTypeOverflow {
@@ -76,6 +80,9 @@ func (h *OverflowPage) Unmarshal(buf []byte) error {
 
 	// Sub-slice page buffer directly — zero allocation, zero copy.
 	// Callers only read h.Data (readOverflowTexts appends it); nothing mutates it after unmarshal.
+	if i+uint64(h.Header.DataSize) > uint64(len(buf)) {
+		return fmt.Errorf("overflow page unmarshal: data truncated (need %d bytes at offset %d, have %d)", h.Header.DataSize, i, len(buf))
+	}
 	h.Data = buf[i : i+uint64(h.Header.DataSize)]
 
 	return nil

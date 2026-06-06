@@ -44,6 +44,9 @@ func (h *Header) Marshal(buf []byte) {
 
 // Unmarshal reads the header fields from buf and returns the number of bytes consumed.
 func (h *Header) Unmarshal(buf []byte) (uint64, error) {
+	if uint64(len(buf)) < h.Size() {
+		return 0, fmt.Errorf("header unmarshal: buffer too short (%d < %d)", len(buf), h.Size())
+	}
 	if buf[0] != PageTypeLeaf && buf[0] != PageTypeInternal {
 		return 0, fmt.Errorf("unrecognised page type byte %d", buf[0])
 	}
