@@ -44,7 +44,7 @@ See the [Getting Started](https://richardknop.github.io/minisql/getting-started/
 MiniSQL uses [mockery](https://github.com/vektra/mockery) to generate interface mocks:
 
 ```sh
-go install github.com/vektra/mockery/v3@v3.6.1
+go install github.com/vektra/mockery/v3@v3.7.0
 mockery
 ```
 

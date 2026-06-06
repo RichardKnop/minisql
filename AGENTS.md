@@ -283,7 +283,7 @@ Runs tests with `-coverprofile`, prints a per-function summary to stdout, and wr
 
 ### Regenerate mocks (after changing an interface in `ports.go`)
 ```bash
-go install github.com/vektra/mockery/v3@v3.6.1
+go install github.com/vektra/mockery/v3@v3.7.0
 mockery
 ```
 Mocks are written to `internal/minisql/mocks_test.go`. **Never edit this file by hand.**
