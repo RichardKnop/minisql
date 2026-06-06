@@ -3,13 +3,13 @@
 ## Current Baseline
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
-**Branch:** `codex/profile-delete-overflow-fields`  
-**Command:** `make bench BENCH_COUNT=1` followed by `make bench-report`  
+**Branch:** `codex/profile-hnsw-build`  
+**Command:** `make bench BENCH_COUNT=1` followed by `make bench-report`; HNSW tables refreshed with targeted `go test -tags bench -bench '^BenchmarkHNSW_...' -benchmem` runs  
 **GOMAXPROCS:** 10  
 
 SQLite comparisons use the `sqlite` driver compiled into the same test binary. MiniSQL benchmarks run against fresh temp-file databases per sub-benchmark. Times are wall-clock (`ns/op`); memory figures are heap allocations reported by the Go runtime.
 
-This file was refreshed from scratch after the latest DML allocation work, including transaction write-set inlining, auto-commit transaction reuse, and direct prepared DML argument binding.
+This file was refreshed from scratch after the latest DML allocation work, including transaction write-set inlining, auto-commit transaction reuse, direct prepared DML argument binding, and HNSW typed candidate-heap allocation reduction.
 
 ---
 
@@ -111,29 +111,29 @@ The results are grouped by benchmark family so each table can be read without ho
 
 | Dims | Rows | Time | Memory | Allocs |
 |---|---|---|---|---|
-| 3 | 1000 | 662.52 ms | 194.04 MiB | 7,768,409 |
-| 3 | 10000 | 9.04 s | 2.23 GiB | 95,105,657 |
-| 128 | 1000 | 777.36 ms | 223.69 MiB | 9,570,982 |
-| 128 | 10000 | 27.14 s | 3.45 GiB | 176,117,164 |
-| 768 | 1000 | 1.23 s | 243.87 MiB | 10,147,373 |
-| 768 | 10000 | 28.44 s | 3.67 GiB | 185,663,670 |
+| 3 | 1000 | 658.29 ms | 4.81 MiB | 34,945 |
+| 3 | 10000 | 8.88 s | 120.2 MiB | 433,369 |
+| 128 | 1000 | 785.49 ms | 6.30 MiB | 36,263 |
+| 128 | 10000 | 23.65 s | 134.7 MiB | 432,720 |
+| 768 | 1000 | 1.19 s | 13.61 MiB | 37,226 |
+| 768 | 10000 | 29.12 s | 208.1 MiB | 442,866 |
 
 ### HNSW ANN Search
 
 | Dims | Rows | Top K | Time | Memory | Allocs |
 |---|---|---|---|---|---|
-| 3 | 1000 | 1 | 36.53 µs | 17.3 KiB | 304 |
-| 3 | 1000 | 10 | 43.31 µs | 20.9 KiB | 372 |
-| 3 | 10000 | 1 | 46.20 µs | 26.4 KiB | 297 |
-| 3 | 10000 | 10 | 52.13 µs | 30.1 KiB | 369 |
-| 128 | 1000 | 1 | 187.28 µs | 49.1 KiB | 534 |
-| 128 | 1000 | 10 | 196.64 µs | 61.6 KiB | 615 |
-| 128 | 10000 | 1 | 362.34 µs | 87.0 KiB | 656 |
-| 128 | 10000 | 10 | 364.70 µs | 99.5 KiB | 737 |
-| 768 | 1000 | 1 | 743.72 µs | 54.6 KiB | 564 |
-| 768 | 1000 | 10 | 751.65 µs | 112.1 KiB | 640 |
-| 768 | 10000 | 1 | 1.49 ms | 92.6 KiB | 693 |
-| 768 | 10000 | 10 | 1.50 ms | 150.1 KiB | 774 |
+| 3 | 1000 | 1 | 29.80 µs | 13.4 KiB | 57 |
+| 3 | 1000 | 10 | 35.80 µs | 17.1 KiB | 125 |
+| 3 | 10000 | 1 | 41.75 µs | 22.7 KiB | 59 |
+| 3 | 10000 | 10 | 50.39 µs | 26.4 KiB | 131 |
+| 128 | 1000 | 1 | 176.17 µs | 41.7 KiB | 62 |
+| 128 | 1000 | 10 | 183.74 µs | 54.3 KiB | 143 |
+| 128 | 10000 | 1 | 376.77 µs | 77.8 KiB | 67 |
+| 128 | 10000 | 10 | 386.71 µs | 90.3 KiB | 148 |
+| 768 | 1000 | 1 | 696.54 µs | 46.7 KiB | 62 |
+| 768 | 1000 | 10 | 722.59 µs | 104.2 KiB | 138 |
+| 768 | 10000 | 1 | 2.03 ms | 82.8 KiB | 67 |
+| 768 | 10000 | 10 | 2.22 ms | 140.3 KiB | 148 |
 
 ### HNSW Sequential Scan
 
@@ -147,17 +147,17 @@ The results are grouped by benchmark family so each table can be read without ho
 
 | Dims | With index | No index | Time ratio |
 |---|---|---|---|
-| 3 | 1.39 ms / 449.6 KiB | 21.38 µs / 6.9 KiB | 65.2× |
-| 128 | 3.54 ms / 516.2 KiB | 21.60 µs / 7.4 KiB | 164.0× |
-| 768 | 12.62 ms / 614.5 KiB | 22.62 µs / 9.8 KiB | 558.1× |
+| 3 | 1.24 ms / 220.6 KiB | 21.38 µs / 6.9 KiB | 57.9× |
+| 128 | 3.31 ms / 232.1 KiB | 21.60 µs / 7.4 KiB | 153.4× |
+| 768 | 12.67 ms / 314.3 KiB | 22.62 µs / 9.8 KiB | 559.9× |
 
 ### Memory Outliers
 
 | Area | Benchmark | MiniSQL memory |
 |---|---|---|
-| HNSW | Build index, dims768, 10k rows | 3.67 GiB |
-| HNSW | Build index, dims128, 10k rows | 3.45 GiB |
-| HNSW | Build index, dims3, 10k rows | 2.23 GiB |
+| HNSW | Build index, dims768, 10k rows | 208.1 MiB |
+| HNSW | Build index, dims128, 10k rows | 134.7 MiB |
+| HNSW | Build index, dims3, 10k rows | 120.2 MiB |
 | DISTINCT | High-cardinality distinct | 1.68 MiB |
 | Full-text | Build index | 1.39 MiB |
 | JSON inverted | Build index | 1.26 MiB |
@@ -168,7 +168,7 @@ The results are grouped by benchmark family so each table can be read without ho
 
 ### Good Next Optimisation Targets
 
-- HNSW build allocation growth is now the largest broad-suite outlier by far, especially at 10k rows.
+- HNSW build allocation growth is much lower after typed candidate heaps, but it remains the largest broad-suite outlier at 10k rows.
 - Full-text and JSON build paths still allocate multiple MiB per operation and remain the most relevant inverted-index targets.
 - DISTINCT and subquery materialisation remain useful non-inverted-index targets if we continue looking for smaller wins before another structural refactor.
 - VACUUM is still much more expensive than SQLite in both time and memory, but it is a less common operational path than DML and SELECT.
