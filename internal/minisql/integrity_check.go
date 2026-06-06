@@ -340,7 +340,16 @@ func (d *Database) checkIndexRoot(ctx context.Context, report IntegrityReport, t
 		return report
 	}
 
-	page, err := d.factory.ForIndex(columns, unique).GetPage(ctx, pageIdx)
+	idxPager, err := d.factory.ForIndex(columns, unique)
+	if err != nil {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_unsupported_column_type",
+			Message: fmt.Sprintf("index %s on table %s has an unsupported column type: %v", indexName, tableName, err),
+			Object:  indexName,
+		})
+		return report
+	}
+	page, err := idxPager.GetPage(ctx, pageIdx)
 	if err != nil {
 		report.Issues = append(report.Issues, IntegrityIssue{
 			Code:    "index_root_decode_failed",
@@ -681,7 +690,15 @@ func (d *Database) walkOverflowPages(report IntegrityReport, objectName string, 
 }
 
 func (d *Database) walkIndexPages(ctx context.Context, report IntegrityReport, tableName, indexName string, columns []Column, unique bool, root PageIndex, livePages map[PageIndex]string) IntegrityReport {
-	pager := d.factory.ForIndex(columns, unique)
+	pager, err := d.factory.ForIndex(columns, unique)
+	if err != nil {
+		report.Issues = append(report.Issues, IntegrityIssue{
+			Code:    "index_unsupported_column_type",
+			Message: fmt.Sprintf("index %s on table %s has an unsupported column type: %v", indexName, tableName, err),
+			Object:  indexName,
+		})
+		return report
+	}
 	visited := make(map[PageIndex]struct{})
 	stack := []PageIndex{root}
 	objectName := fmt.Sprintf("index %s on table %s", indexName, tableName)

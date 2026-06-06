@@ -43,12 +43,9 @@ func TestTable_Update_SingleSecondaryIndex(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	txIndexPager := NewTransactionalPager(
-		pager.ForIndex(indexCol, false),
-		txManager,
-		testTableName,
-		indexName,
-	)
+	idxPager, err := pager.ForIndex(indexCol, false)
+	require.NoError(t, err)
+	txIndexPager := NewTransactionalPager(idxPager, txManager, testTableName, indexName)
 
 	stmt := Statement{
 		Kind:    Insert,

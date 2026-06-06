@@ -43,12 +43,9 @@ func TestTable_Select_PrimaryKey(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	txPrimaryKeyPager := NewTransactionalPager(
-		pager.ForIndex(table.PrimaryKey.Columns, true),
-		table.txManager,
-		testTableName,
-		table.PrimaryKey.Name,
-	)
+	idxPager, err := pager.ForIndex(table.PrimaryKey.Columns, true)
+	require.NoError(t, err)
+	txPrimaryKeyPager := NewTransactionalPager(idxPager, table.txManager, testTableName, table.PrimaryKey.Name)
 
 	// Batch insert test rows
 	stmt := Statement{

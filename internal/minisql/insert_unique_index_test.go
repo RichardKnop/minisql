@@ -18,16 +18,17 @@ func TestTable_Insert_UniqueIndex(t *testing.T) {
 		rows          = gen.RowsWithUniqueIndex(10)
 		table         *Table
 		indexName     = UniqueIndexName(testTableName, "email")
-		indexPager    = pager.ForIndex(testColumns[1:2], true)
-		txIndexPager  = NewTransactionalPager(
-			indexPager,
-			NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil),
-			testTableName,
-			indexName,
-		)
+	)
+	indexPager, err := pager.ForIndex(testColumns[1:2], true)
+	require.NoError(t, err)
+	txIndexPager := NewTransactionalPager(
+		indexPager,
+		NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil),
+		testTableName,
+		indexName,
 	)
 
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		freePage, err := txPager.GetFreePage(ctx)
 		if err != nil {
 			return err
@@ -116,16 +117,17 @@ func TestTable_Insert_CompositeUniqueIndex(t *testing.T) {
 		rows          = gen.RowsWithCompositeKey(10)
 		table         *Table
 		indexName     = UniqueIndexName(testTableName, "email")
-		indexPager    = pager.ForIndex(testCompositeKeyColumns[1:3], true)
-		txIndexPager  = NewTransactionalPager(
-			indexPager,
-			NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil),
-			testTableName,
-			indexName,
-		)
+	)
+	indexPager, err := pager.ForIndex(testCompositeKeyColumns[1:3], true)
+	require.NoError(t, err)
+	txIndexPager := NewTransactionalPager(
+		indexPager,
+		NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil),
+		testTableName,
+		indexName,
 	)
 
-	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+	err = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
 		freePage, err := txPager.GetFreePage(ctx)
 		if err != nil {
 			return err

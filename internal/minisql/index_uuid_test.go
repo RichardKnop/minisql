@@ -15,7 +15,8 @@ func TestUUIDIndex_InsertAndSeek(t *testing.T) {
 	ctx := context.Background()
 
 	col := Column{Name: "id", Kind: UUID, Size: 16}
-	indexPager := pager.ForIndex([]Column{col}, true)
+	indexPager, err := pager.ForIndex([]Column{col}, true)
+	require.NoError(t, err)
 	txManager := NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(indexPager), pager, nil)
 	txPager := NewTransactionalPager(indexPager, txManager, "uuid_table", "uuid_index")
 

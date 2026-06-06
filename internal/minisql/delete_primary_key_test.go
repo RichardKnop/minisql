@@ -41,12 +41,9 @@ func TestTable_Delete_PrimaryKey(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	txIndexPager := NewTransactionalPager(
-		pager.ForIndex(table.PrimaryKey.Columns, true),
-		table.txManager,
-		testTableName,
-		table.PrimaryKey.Name,
-	)
+	idxPager, err := pager.ForIndex(table.PrimaryKey.Columns, true)
+	require.NoError(t, err)
+	txIndexPager := NewTransactionalPager(idxPager, table.txManager, testTableName, table.PrimaryKey.Name)
 
 	// Batch insert test rows
 	stmt := Statement{
@@ -139,12 +136,9 @@ func TestTable_Delete_CompositePrimaryKey(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	txIndexPager := NewTransactionalPager(
-		pager.ForIndex(table.PrimaryKey.Columns, true),
-		table.txManager,
-		testTableName,
-		table.PrimaryKey.Name,
-	)
+	idxPager2, err := pager.ForIndex(table.PrimaryKey.Columns, true)
+	require.NoError(t, err)
+	txIndexPager := NewTransactionalPager(idxPager2, table.txManager, testTableName, table.PrimaryKey.Name)
 
 	// Batch insert test rows
 	stmt := Statement{

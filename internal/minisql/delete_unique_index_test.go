@@ -47,15 +47,9 @@ func TestTable_Delete_UniqueIndex(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	txIndexPager := NewTransactionalPager(
-		pager.ForIndex(
-			table.UniqueIndexes[indexName].Columns,
-			true,
-		),
-		table.txManager,
-		table.Name,
-		table.UniqueIndexes[indexName].Name,
-	)
+	idxPager, err := pager.ForIndex(table.UniqueIndexes[indexName].Columns, true)
+	require.NoError(t, err)
+	txIndexPager := NewTransactionalPager(idxPager, table.txManager, table.Name, table.UniqueIndexes[indexName].Name)
 
 	// Batch insert test rows
 	stmt := Statement{
@@ -156,12 +150,9 @@ func TestTable_Delete_CompositeUniqueIndex(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	txIndexPager := NewTransactionalPager(
-		pager.ForIndex(table.UniqueIndexes[indexName].Columns, true),
-		table.txManager,
-		testTableName,
-		table.UniqueIndexes[indexName].Name,
-	)
+	idxPager2, err := pager.ForIndex(table.UniqueIndexes[indexName].Columns, true)
+	require.NoError(t, err)
+	txIndexPager := NewTransactionalPager(idxPager2, table.txManager, testTableName, table.UniqueIndexes[indexName].Name)
 
 	// Batch insert test rows
 	stmt := Statement{
