@@ -35,6 +35,20 @@ func (p *pagerImpl) ForHNSWIndex() Pager {
 //   - VECTOR: use CREATE HNSW INDEX instead.
 func (p *pagerImpl) ForIndex(columns []Column, unique bool) (Pager, error) {
 	if len(columns) > 1 {
+		for _, col := range columns {
+			switch col.Kind {
+			case Text, JSON:
+				return nil, fmt.Errorf(
+					"column %q (%s) cannot be used in a B-tree secondary index: "+
+						"TEXT and JSON columns support only FULLTEXT INDEX or INVERTED INDEX",
+					col.Name, col.Kind)
+			case Vector:
+				return nil, fmt.Errorf(
+					"column %q (%s) cannot be used in a B-tree secondary index: "+
+						"VECTOR columns support only HNSW INDEX",
+					col.Name, col.Kind)
+			}
+		}
 		return &indexPager[CompositeKey]{p, columns, unique}, nil
 	}
 	switch columns[0].Kind {
