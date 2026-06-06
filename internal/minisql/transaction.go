@@ -53,15 +53,18 @@ type Transaction struct {
 	StartTime      time.Time
 	WriteSet       map[PageIndex]WriteInfo
 	DBHeaderWrite  *DatabaseHeader
+	firstWrite     WriteInfo
 	rowCountDeltas map[string]int64
 	rowCountTable  string
 	rowCountDelta  int64
+	firstWritePage PageIndex
 	ID             TransactionID
 	Status         TransactionStatus
 	SnapshotSeq    uint64
 	mu             sync.RWMutex
 	ReadOnly       bool
 	hasRowCount    bool
+	hasFirstWrite  bool
 }
 
 // TransactionStatus represents the lifecycle state of a transaction.
@@ -87,10 +90,13 @@ func (tx *Transaction) Abort() {
 	tx.Status = TxAborted
 	tx.WriteSet = nil
 	tx.DBHeaderWrite = nil
+	tx.firstWrite = WriteInfo{}
 	tx.rowCountDeltas = nil
 	tx.rowCountTable = ""
 	tx.rowCountDelta = 0
+	tx.firstWritePage = 0
 	tx.hasRowCount = false
+	tx.hasFirstWrite = false
 }
 
 // AddRowCountDelta records a net row-count change for the named table.
@@ -161,7 +167,22 @@ func (tx *Transaction) TrackWrite(pageIdx PageIndex, page, originalPage *Page, t
 	defer tx.mu.Unlock()
 
 	if tx.WriteSet == nil {
-		tx.WriteSet = make(map[PageIndex]WriteInfo)
+		info := WriteInfo{
+			Page:         page,
+			Table:        table,
+			Index:        index,
+			OriginalPage: originalPage,
+			InPlace:      inPlace,
+		}
+		if !tx.hasFirstWrite || tx.firstWritePage == pageIdx {
+			tx.firstWritePage = pageIdx
+			tx.firstWrite = info
+			tx.hasFirstWrite = true
+			return
+		}
+		tx.WriteSet = make(map[PageIndex]WriteInfo, 2)
+		tx.WriteSet[tx.firstWritePage] = tx.firstWrite
+		tx.hasFirstWrite = false
 	}
 	tx.WriteSet[pageIdx] = WriteInfo{
 		Page:         page,
@@ -188,7 +209,46 @@ type WritePage struct {
 
 // GetWriteVersions returns the transaction's write set.
 func (tx *Transaction) GetWriteVersions() map[PageIndex]WriteInfo {
+	if tx.WriteSet == nil && tx.hasFirstWrite {
+		return map[PageIndex]WriteInfo{tx.firstWritePage: tx.firstWrite}
+	}
 	return tx.WriteSet
+}
+
+// WriteCount returns the number of pages modified by the transaction.
+func (tx *Transaction) WriteCount() int {
+	if tx.WriteSet != nil {
+		return len(tx.WriteSet)
+	}
+	if tx.hasFirstWrite {
+		return 1
+	}
+	return 0
+}
+
+// GetWriteInfo returns the modified page metadata for pageIdx, if present.
+func (tx *Transaction) GetWriteInfo(pageIdx PageIndex) (WriteInfo, bool) {
+	if tx.WriteSet != nil {
+		info, exists := tx.WriteSet[pageIdx]
+		return info, exists
+	}
+	if tx.hasFirstWrite && tx.firstWritePage == pageIdx {
+		return tx.firstWrite, true
+	}
+	return WriteInfo{}, false
+}
+
+// ForEachWrite calls fn for each modified page in the transaction.
+func (tx *Transaction) ForEachWrite(fn func(PageIndex, WriteInfo)) {
+	if tx.WriteSet != nil {
+		for pageIdx, info := range tx.WriteSet {
+			fn(pageIdx, info)
+		}
+		return
+	}
+	if tx.hasFirstWrite {
+		fn(tx.firstWritePage, tx.firstWrite)
+	}
 }
 
 // GetModifiedPage returns the in-memory modified copy of the page at pageIdx, if any.
@@ -196,8 +256,11 @@ func (tx *Transaction) GetModifiedPage(pageIdx PageIndex) (*Page, bool) {
 	tx.mu.RLock()
 	defer tx.mu.RUnlock()
 
-	modifiedPage, exists := tx.WriteSet[pageIdx]
-	return modifiedPage.Page, exists
+	modifiedPage, exists := tx.GetWriteInfo(pageIdx)
+	if !exists {
+		return nil, false
+	}
+	return modifiedPage.Page, true
 }
 
 // GetModifiedDBHeader returns the in-memory modified database header, if any.

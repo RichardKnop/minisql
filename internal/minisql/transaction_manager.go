@@ -416,8 +416,8 @@ func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction)
 		return fmt.Errorf("transaction %d is not active", tx.ID)
 	}
 
-	writeInfos := tx.GetWriteVersions()
-	isReadOnly := len(writeInfos) == 0 && !tx.DDLChanges.HasChanges()
+	writeCount := tx.WriteCount()
+	isReadOnly := writeCount == 0 && !tx.DDLChanges.HasChanges()
 	if isReadOnly {
 		tx.Commit()
 		delete(tm.transactions, tx.ID)
@@ -433,7 +433,7 @@ func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction)
 	newSeq := tm.commitSeq
 	minSnap := tm.minActiveSnapshotSeqLocked()
 
-	pagesToFlush := make([]PageIndex, 0, len(tx.WriteSet)+1)
+	pagesToFlush := make([]PageIndex, 0, writeCount+1)
 
 	// Apply DB header write first.
 	if header, modified := tx.GetModifiedDBHeader(); modified {
@@ -443,14 +443,14 @@ func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction)
 	// Apply page writes.  For each page, save the old version into the history
 	// before overwriting the cache so active snapshot readers can still see the
 	// pre-commit state.
-	for pageIdx, info := range writeInfos {
+	tx.ForEachWrite(func(pageIdx PageIndex, info WriteInfo) {
 		if minSnap < newSeq && info.OriginalPage != nil {
 			tm.appendPageVersionLocked(pageIdx, newSeq-1, info.OriginalPage)
 		}
 		tm.saver.SavePage(ctx, pageIdx, info.Page)
 		tm.pageLastCommittedSeq[pageIdx] = newSeq
 		pagesToFlush = append(pagesToFlush, pageIdx)
-	}
+	})
 
 	// Flush to disk.  Panic on failure: in-memory state is already ahead of disk.
 	if err := tm.saver.FlushBatch(ctx, pagesToFlush); err != nil {
@@ -512,8 +512,8 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 		tm.mu.Unlock()
 		return fmt.Errorf("transaction %d is not active", tx.ID)
 	}
-	writeInfos := tx.GetWriteVersions()
-	isReadOnly := len(writeInfos) == 0 && !tx.DDLChanges.HasChanges()
+	writeCount := tx.WriteCount()
+	isReadOnly := writeCount == 0 && !tx.DDLChanges.HasChanges()
 	if isReadOnly {
 		tx.Commit()
 		delete(tm.transactions, tx.ID)
@@ -561,13 +561,13 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 	tm.commitSeq += 1
 	newSeq := tm.commitSeq
 	minSnap := tm.minActiveSnapshotSeqLocked()
-	for pageIdx, info := range writeInfos {
+	tx.ForEachWrite(func(pageIdx PageIndex, info WriteInfo) {
 		if minSnap < newSeq && info.OriginalPage != nil {
 			tm.appendPageVersionLocked(pageIdx, newSeq-1, info.OriginalPage)
 		}
 		tm.saver.SavePage(ctx, pageIdx, info.Page)
 		tm.pageLastCommittedSeq[pageIdx] = newSeq
-	}
+	})
 	if tx.DDLChanges.HasChanges() {
 		tm.ddlSaver.SaveDDLChanges(ctx, tx.DDLChanges)
 	}
@@ -602,13 +602,12 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 // Page 0 receives special treatment: its WAL frame must combine the DB-header
 // bytes (first RootPageConfigSize bytes) with the B-tree content of page 0.
 func (tm *TransactionManager) serializeWritesForWAL(ctx context.Context, tx *Transaction) ([]WALPage, error) {
-	writeInfos := tx.GetWriteVersions()
 	header, dbHeaderModified := tx.GetModifiedDBHeader()
 
-	page0Info, page0Modified := writeInfos[0]
+	page0Info, page0Modified := tx.GetWriteInfo(0)
 	needPage0Frame := dbHeaderModified || page0Modified
 
-	pages := make([]WALPage, 0, len(writeInfos)+1)
+	pages := make([]WALPage, 0, tx.WriteCount()+1)
 	releasePages := func() {
 		for _, wp := range pages {
 			if wp.Data != nil {
@@ -637,21 +636,29 @@ func (tm *TransactionManager) serializeWritesForWAL(ctx context.Context, tx *Tra
 		pages = append(pages, WALPage{Index: 0, Data: frame})
 	}
 
-	for pageIdx, info := range writeInfos {
+	var writeErr error
+	tx.ForEachWrite(func(pageIdx PageIndex, info WriteInfo) {
+		if writeErr != nil {
+			return
+		}
 		if pageIdx == 0 {
-			continue // already included above
+			return // already included above
 		}
 		buf := pageDataPool.Get().([]byte)
 		if err := marshalPage(info.Page, buf); err != nil {
 			pageDataPool.Put(buf)
 			releasePages()
-			return nil, fmt.Errorf("marshal page %d for WAL: %w", pageIdx, err)
+			writeErr = fmt.Errorf("marshal page %d for WAL: %w", pageIdx, err)
+			return
 		}
 		writePageChecksum(buf)
 		if tm.cipher != nil {
 			tm.cipher.XORKeyStream(buf, uint32(pageIdx))
 		}
 		pages = append(pages, WALPage{Index: pageIdx, Data: buf})
+	})
+	if writeErr != nil {
+		return nil, writeErr
 	}
 
 	return pages, nil
@@ -757,11 +764,11 @@ func (tm *TransactionManager) RollbackTransaction(ctx context.Context, tx *Trans
 	// the committed version from the WAL index.  Pages that were cloned
 	// (InPlace == false) leave their original untouched in the LRU;
 	// discarding the WriteSet clone is sufficient for those.
-	for pageIdx, info := range tx.WriteSet {
+	tx.ForEachWrite(func(pageIdx PageIndex, info WriteInfo) {
 		if info.InPlace {
 			tm.saver.InvalidatePage(pageIdx)
 		}
-	}
+	})
 	tx.Abort()
 
 	// Clean up transaction and GC any version history that is no longer needed.
