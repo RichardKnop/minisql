@@ -1792,7 +1792,11 @@ func (t *Table) selectStreamingDirectRowView(
 	}
 
 	if stmt.Distinct {
-		distinctFactory := newDistinctRowViewIteratorFactory(ctx, t.pager, newRowViewIter, fieldIndexes, t.Columns, remaining, offset, hasLimit, hasOffset)
+		distinctFactory := newDistinctRowViewIteratorFactory(
+			ctx, t.pager, newRowViewIter, fieldIndexes, t.Columns,
+			distinctSeenCapacityFromEstimate(t.estimatedRowCount()),
+			remaining, offset, hasLimit, hasOffset,
+		)
 		result.RowViews = distinctFactory()
 		result.RowViewPager = t.pager
 		result.RowViewFieldIndexes = fieldIndexes
@@ -3138,6 +3142,17 @@ func appendDistinctKeyFromView(
 	return buf, nil
 }
 
+func distinctSeenCapacityFromEstimate(n int64) int {
+	if n <= 0 {
+		return 0
+	}
+	maxInt := int64(^uint(0) >> 1)
+	if n > maxInt {
+		return int(maxInt)
+	}
+	return int(n)
+}
+
 // newDistinctRowViewIteratorFactory returns a factory that creates a
 // RowViewIterator wrapping innerFactory with DISTINCT dedup applied via a
 // hash-set keyed by the projected column values.  LIMIT/OFFSET are applied
@@ -3149,6 +3164,7 @@ func newDistinctRowViewIteratorFactory(
 	innerFactory func() RowViewIterator,
 	fieldIndexes []int,
 	columns []Column,
+	seenCapacity int,
 	remaining int64,
 	offset int64,
 	hasLimit bool,
@@ -3156,7 +3172,7 @@ func newDistinctRowViewIteratorFactory(
 ) func() RowViewIterator {
 	return func() RowViewIterator {
 		inner := innerFactory()
-		seen := make(map[string]struct{})
+		seen := make(map[string]struct{}, seenCapacity)
 		buf := make([]byte, 0, 64)
 		rem := remaining
 		off := offset

@@ -28,8 +28,165 @@ func compileRowViewFilterForColumns(columns []Column, pager TxPager, conditions 
 	for i := range columns {
 		columnIndexes[columns[i].Name] = i
 	}
+	if fastFilter, ok := compileSimpleRowViewFilter(columns, conditions, columnIndexes); ok {
+		return fastFilter
+	}
 	return func(ctx context.Context, view RowView) (bool, error) {
 		return view.CheckOneOrMoreWithColumnIndexes(ctx, pager, conditions, columnIndexes)
+	}
+}
+
+type rowViewConditionFunc func(RowView) (bool, error)
+
+func compileSimpleRowViewFilter(columns []Column, conditions OneOrMore, columnIndexes map[string]int) (func(context.Context, RowView) (bool, error), bool) {
+	groups := make([][]rowViewConditionFunc, len(conditions))
+	for groupIdx, group := range conditions {
+		groups[groupIdx] = make([]rowViewConditionFunc, len(group))
+		for condIdx, cond := range group {
+			condFunc, ok := compileSimpleRowViewCondition(columns, cond, columnIndexes)
+			if !ok {
+				return nil, false
+			}
+			groups[groupIdx][condIdx] = condFunc
+		}
+	}
+	return func(_ context.Context, view RowView) (bool, error) {
+		for _, group := range groups {
+			groupOK := true
+			for _, condFunc := range group {
+				ok, err := condFunc(view)
+				if err != nil {
+					return false, err
+				}
+				if !ok {
+					groupOK = false
+					break
+				}
+			}
+			if groupOK {
+				return true, nil
+			}
+		}
+		return false, nil
+	}, true
+}
+
+func compileSimpleRowViewCondition(columns []Column, cond Condition, columnIndexes map[string]int) (rowViewConditionFunc, bool) {
+	if cond.Operand1.IsField() && !cond.Operand2.IsField() {
+		return compileSimpleRowViewFieldValueCondition(columns, cond.Operand1, cond.Operand2, cond.Operator, columnIndexes)
+	}
+	if cond.Operand2.IsField() && !cond.Operand1.IsField() {
+		return compileSimpleRowViewFieldValueCondition(columns, cond.Operand2, cond.Operand1, cond.Operator, columnIndexes)
+	}
+	return nil, false
+}
+
+func compileSimpleRowViewFieldValueCondition(
+	columns []Column,
+	fieldOperand Operand,
+	valueOperand Operand,
+	operator Operator,
+	columnIndexes map[string]int,
+) (rowViewConditionFunc, bool) {
+	if valueOperand.Type == OperandList || valueOperand.Type == OperandField || valueOperand.Type == OperandExpr {
+		return nil, false
+	}
+	field := fieldOperand.Value.(Field)
+	colIdx, ok := rowViewColumnIndex(field, columnIndexes)
+	if !ok {
+		return nil, false
+	}
+	col := columns[colIdx]
+	if valueOperand.Type == OperandNull {
+		switch operator {
+		case Eq:
+			return func(view RowView) (bool, error) {
+				return view.IsNull(colIdx)
+			}, true
+		case Ne:
+			return func(view RowView) (bool, error) {
+				isNull, err := view.IsNull(colIdx)
+				return !isNull, err
+			}, true
+		default:
+			return nil, false
+		}
+	}
+	switch col.Kind {
+	case Boolean:
+		want, ok := valueOperand.Value.(bool)
+		if !ok {
+			return nil, false
+		}
+		return func(view RowView) (bool, error) {
+			got, valid, err := view.BoolAt(colIdx)
+			if err != nil || !valid {
+				return false, err
+			}
+			return compareBoolean(got, want, operator)
+		}, true
+	case Int4:
+		want, ok := valueOperand.Value.(int64)
+		if !ok {
+			return nil, false
+		}
+		return func(view RowView) (bool, error) {
+			got, valid, err := view.Int64At(colIdx)
+			if err != nil || !valid {
+				return false, err
+			}
+			return compareInt4(got, want, operator)
+		}, true
+	case Int8:
+		want, ok := valueOperand.Value.(int64)
+		if !ok {
+			return nil, false
+		}
+		return func(view RowView) (bool, error) {
+			got, valid, err := view.Int64At(colIdx)
+			if err != nil || !valid {
+				return false, err
+			}
+			return compareInt8(got, want, operator)
+		}, true
+	case Real:
+		want, ok := valueOperand.Value.(float64)
+		if !ok {
+			return nil, false
+		}
+		return func(view RowView) (bool, error) {
+			got, valid, err := view.Float64At(colIdx)
+			if err != nil || !valid {
+				return false, err
+			}
+			return compareReal(float32(got), float32(want), operator)
+		}, true
+	case Double:
+		want, ok := valueOperand.Value.(float64)
+		if !ok {
+			return nil, false
+		}
+		return func(view RowView) (bool, error) {
+			got, valid, err := view.Float64At(colIdx)
+			if err != nil || !valid {
+				return false, err
+			}
+			return compareDouble(got, want, operator)
+		}, true
+	case Timestamp:
+		want, ok := valueOperand.Value.(TimestampMicros)
+		if !ok {
+			return nil, false
+		}
+		return func(view RowView) (bool, error) {
+			got, valid, err := view.Int64At(colIdx)
+			if err != nil || !valid {
+				return false, err
+			}
+			return compareTimestamp(TimestampMicros(got), want, operator)
+		}, true
+	default:
+		return nil, false
 	}
 }
 
