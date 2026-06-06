@@ -53,10 +53,11 @@ type Table struct {
 	// checks here first and stores results after planning. Nil for system tables
 	// and virtual tables created for derived-table subqueries.
 	planCache LRUCache[string]
-	// allFields, textOverflowCols, and vectorOverflowCols are derived from Columns at
+	// allFields, overflow masks, textOverflowCols, and vectorOverflowCols are derived from Columns at
 	// construction time and reused across calls to avoid per-call allocations.
-	allFields         []Field
-	textOverflowCols  []Column
+	allFields          []Field
+	textOverflowMask   []bool
+	textOverflowCols   []Column
 	vectorOverflowCols []Column
 	// rightmostTablePage caches the last leaf page index for SeekNextRowID so that
 	// sequential (autoincrement) inserts skip the O(log N) root→leaf traversal.
@@ -103,7 +104,13 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 	table.allFields = fieldsFromColumns(columns...)
 	for _, col := range columns {
 		if col.MayUseOverflowText() {
+			if table.textOverflowMask == nil {
+				table.textOverflowMask = make([]bool, len(columns))
+			}
 			table.textOverflowCols = append(table.textOverflowCols, col)
+			if idx, ok := table.columnCache[col.Name]; ok {
+				table.textOverflowMask[idx] = true
+			}
 		}
 		if col.MayUseOverflowVector() {
 			table.vectorOverflowCols = append(table.vectorOverflowCols, col)
@@ -771,8 +778,8 @@ func (t *Table) DeleteKey(ctx context.Context, pageIdx PageIndex, key RowID) err
 	cellToDelete, ok := page.LeafNode.Delete(key)
 
 	// Remove any overflow pages
-	if overflowFields := textOverflowFields(t.Columns...); len(overflowFields) > 0 && ok {
-		row, err := NewRowView(t.Columns, cellToDelete).MaterializeWithOverflow(ctx, t.pager, selectedColumnsMask(t.Columns, overflowFields))
+	if len(t.textOverflowCols) > 0 && ok {
+		row, err := NewRowView(t.Columns, cellToDelete).MaterializeWithOverflow(ctx, t.pager, t.textOverflowMask)
 		if err != nil {
 			return err
 		}

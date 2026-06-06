@@ -263,20 +263,6 @@ func fieldsFromColumns(columns ...Column) []Field {
 	return fields
 }
 
-func textOverflowFields(columns ...Column) []Field {
-	overflowFields := make([]Field, 0, len(columns))
-	for _, col := range columns {
-		if !col.Kind.IsText() {
-			continue
-		}
-		if col.Kind == Varchar && col.Size <= MaxInlineVarchar {
-			continue
-		}
-		overflowFields = append(overflowFields, Field{Name: col.Name})
-	}
-	return overflowFields
-}
-
 // Field represents a single item in a SELECT list (or GROUP BY / ORDER BY clause).
 // For plain column references only Name is set; for expressions Expr is non-nil;
 // Alias holds the AS alias, and AliasPrefix holds the table alias for qualified names.
