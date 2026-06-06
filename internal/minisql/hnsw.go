@@ -1,7 +1,6 @@
 package minisql
 
 import (
-	"container/heap"
 	"context"
 	"fmt"
 	"math"
@@ -36,7 +35,7 @@ const (
 // Online-inserted nodes are individually heap-allocated and not in nodeStore.
 type hnswGraph struct {
 	Nodes          map[RowID]*hnswNodeData
-	nodeStore      []hnswNodeData     // flat backing store for readHNSWGraph-loaded nodes
+	nodeStore      []hnswNodeData // flat backing store for readHNSWGraph-loaded nodes
 	M              int
 	EfConstruction int
 	EntryPoint     RowID
@@ -307,11 +306,53 @@ func (h maxHeap) Len() int           { return len(h) }
 func (h maxHeap) Less(i, j int) bool { return h[i].dist > h[j].dist }
 func (h maxHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 
-// Push implements heap.Interface.
-func (h *maxHeap) Push(x any) { *h = append(*h, x.(hnswCandidate)) }
+func (h *maxHeap) push(x hnswCandidate) {
+	*h = append(*h, x)
+	maxHeapUp(*h, len(*h)-1)
+}
 
-// Pop implements heap.Interface.
-func (h *maxHeap) Pop() any { old := *h; n := len(old); x := old[n-1]; *h = old[:n-1]; return x }
+func (h *maxHeap) pop() hnswCandidate {
+	old := *h
+	n := len(old) - 1
+	x := old[0]
+	if n > 0 {
+		old[0] = old[n]
+		maxHeapDown(old, 0, n)
+	}
+	old[n] = hnswCandidate{}
+	*h = old[:n]
+	return x
+}
+
+func maxHeapUp(h maxHeap, j int) {
+	for {
+		i := (j - 1) / 2
+		if i == j || !h.Less(j, i) {
+			break
+		}
+		h.Swap(i, j)
+		j = i
+	}
+}
+
+func maxHeapDown(h maxHeap, i0, n int) {
+	i := i0
+	for {
+		j1 := 2*i + 1
+		if j1 >= n || j1 < 0 {
+			break
+		}
+		j := j1
+		if j2 := j1 + 1; j2 < n && h.Less(j2, j1) {
+			j = j2
+		}
+		if !h.Less(j, i) {
+			break
+		}
+		h.Swap(i, j)
+		i = j
+	}
+}
 
 // minHeap is a min-heap of candidates by distance (nearest element at top).
 type minHeap []hnswCandidate
@@ -320,11 +361,53 @@ func (h minHeap) Len() int           { return len(h) }
 func (h minHeap) Less(i, j int) bool { return h[i].dist < h[j].dist }
 func (h minHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 
-// Push implements heap.Interface.
-func (h *minHeap) Push(x any) { *h = append(*h, x.(hnswCandidate)) }
+func (h *minHeap) push(x hnswCandidate) {
+	*h = append(*h, x)
+	minHeapUp(*h, len(*h)-1)
+}
 
-// Pop implements heap.Interface.
-func (h *minHeap) Pop() any { old := *h; n := len(old); x := old[n-1]; *h = old[:n-1]; return x }
+func (h *minHeap) pop() hnswCandidate {
+	old := *h
+	n := len(old) - 1
+	x := old[0]
+	if n > 0 {
+		old[0] = old[n]
+		minHeapDown(old, 0, n)
+	}
+	old[n] = hnswCandidate{}
+	*h = old[:n]
+	return x
+}
+
+func minHeapUp(h minHeap, j int) {
+	for {
+		i := (j - 1) / 2
+		if i == j || !h.Less(j, i) {
+			break
+		}
+		h.Swap(i, j)
+		j = i
+	}
+}
+
+func minHeapDown(h minHeap, i0, n int) {
+	i := i0
+	for {
+		j1 := 2*i + 1
+		if j1 >= n || j1 < 0 {
+			break
+		}
+		j := j1
+		if j2 := j1 + 1; j2 < n && h.Less(j2, j1) {
+			j = j2
+		}
+		if !h.Less(j, i) {
+			break
+		}
+		h.Swap(i, j)
+		i = j
+	}
+}
 
 // greedyStep performs a single-step greedy 1-NN descent at a given layer.
 // skipID is a RowID to ignore (the node being inserted, or ^RowID(0) for pure search).
@@ -422,14 +505,12 @@ func (g *hnswGraph) parallelBeamSearch(buf *hnswSearchBuf, ep RowID, epDist floa
 
 	buf.cands = append(buf.cands, hnswCandidate{ep, epDist})
 	cands := &buf.cands
-	heap.Init(cands)
 
 	buf.results = append(buf.results, hnswCandidate{ep, epDist})
 	results := &buf.results
-	heap.Init(results)
 
 	for cands.Len() > 0 {
-		c := heap.Pop(cands).(hnswCandidate)
+		c := cands.pop()
 		if results.Len() >= ef && c.dist > (*results)[0].dist {
 			break
 		}
@@ -465,10 +546,10 @@ func (g *hnswGraph) parallelBeamSearch(buf *hnswSearchBuf, ep RowID, epDist floa
 				return nil, err
 			}
 			if results.Len() < ef || d < (*results)[0].dist {
-				heap.Push(cands, hnswCandidate{nb, d})
-				heap.Push(results, hnswCandidate{nb, d})
+				cands.push(hnswCandidate{nb, d})
+				results.push(hnswCandidate{nb, d})
 				if results.Len() > ef {
-					heap.Pop(results)
+					results.pop()
 				}
 			}
 		}
@@ -481,7 +562,7 @@ func (g *hnswGraph) parallelBeamSearch(buf *hnswSearchBuf, ep RowID, epDist floa
 		buf.out = buf.out[:n]
 	}
 	for i := n - 1; i >= 0; i-- {
-		buf.out[i] = heap.Pop(results).(hnswCandidate)
+		buf.out[i] = results.pop()
 	}
 	return buf.out, nil
 }
@@ -601,14 +682,12 @@ func (g *hnswGraph) beamSearch(buf *hnswSearchBuf, ep RowID, epDist float64, ski
 
 	buf.cands = append(buf.cands, hnswCandidate{ep, epDist})
 	cands := &buf.cands
-	heap.Init(cands)
 
 	buf.results = append(buf.results, hnswCandidate{ep, epDist})
 	results := &buf.results
-	heap.Init(results)
 
 	for cands.Len() > 0 {
-		c := heap.Pop(cands).(hnswCandidate)
+		c := cands.pop()
 		if results.Len() >= ef && c.dist > (*results)[0].dist {
 			break
 		}
@@ -629,10 +708,10 @@ func (g *hnswGraph) beamSearch(buf *hnswSearchBuf, ep RowID, epDist float64, ski
 				return nil, err
 			}
 			if results.Len() < ef || d < (*results)[0].dist {
-				heap.Push(cands, hnswCandidate{nb, d})
-				heap.Push(results, hnswCandidate{nb, d})
+				cands.push(hnswCandidate{nb, d})
+				results.push(hnswCandidate{nb, d})
 				if results.Len() > ef {
-					heap.Pop(results)
+					results.pop()
 				}
 			}
 		}
@@ -646,7 +725,7 @@ func (g *hnswGraph) beamSearch(buf *hnswSearchBuf, ep RowID, epDist float64, ski
 		buf.out = buf.out[:n]
 	}
 	for i := n - 1; i >= 0; i-- {
-		buf.out[i] = heap.Pop(results).(hnswCandidate)
+		buf.out[i] = results.pop()
 	}
 	return buf.out, nil
 }
@@ -687,9 +766,9 @@ func (g *hnswGraph) pruneNeighbors(self RowID, neighbors []RowID, mMax int, dist
 		}
 	}
 	n := min(mMax, len(pairs))
-	result := make([]RowID, n)
+	result := neighbors[:0]
 	for i := range n {
-		result[i] = pairs[i].rowID
+		result = append(result, pairs[i].rowID)
 	}
 	return result
 }
