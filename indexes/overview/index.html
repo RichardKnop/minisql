@@ -1843,6 +1843,7 @@
 <thead>
 <tr>
 <th>Type</th>
+<th>Column types</th>
 <th>Best for</th>
 <th>SQL</th>
 </tr>
@@ -1850,26 +1851,31 @@
 <tbody>
 <tr>
 <td><a href="../btree/">B-tree</a></td>
+<td><code>BOOLEAN</code>, <code>INT4</code>, <code>INT8</code>, <code>REAL</code>, <code>DOUBLE</code>, <code>TIMESTAMP</code>, <code>UUID</code>, <code>VARCHAR(n)</code></td>
 <td>Equality, range, ORDER BY, covering</td>
 <td><code>CREATE INDEX</code></td>
 </tr>
 <tr>
 <td><a href="../fulltext/">Full-text</a></td>
-<td>Token search in TEXT columns</td>
+<td><code>TEXT</code></td>
+<td>Token search (BM25 ranking)</td>
 <td><code>CREATE FULLTEXT INDEX</code></td>
 </tr>
 <tr>
 <td><a href="../json-inverted/">JSON inverted</a></td>
-<td>Containment queries on JSON columns</td>
+<td><code>JSON</code></td>
+<td>Containment queries (<code>JSON_CONTAINS</code>)</td>
 <td><code>CREATE INVERTED INDEX</code></td>
 </tr>
 <tr>
 <td><a href="../hnsw/">HNSW vector</a></td>
-<td>Approximate nearest-neighbour on VECTOR columns</td>
+<td><code>VECTOR(n)</code></td>
+<td>Approximate nearest-neighbour (<code>VEC_L2</code>, <code>VEC_COSINE</code>)</td>
 <td><code>CREATE HNSW INDEX</code></td>
 </tr>
 </tbody>
 </table>
+<p>Each index type is purpose-built for its column kind. <code>TEXT</code>, <code>JSON</code>, and <code>VECTOR</code> columns cannot be used in a B-tree secondary index — attempting to do so returns an error with a suggestion to use the appropriate index type.</p>
 <hr />
 <h2 id="creating-indexes">Creating indexes<a class="headerlink" href="#creating-indexes" title="Permanent link">&para;</a></h2>
 <div class="language-sql highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1">-- B-tree secondary index</span>

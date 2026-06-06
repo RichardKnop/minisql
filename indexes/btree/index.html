@@ -1191,6 +1191,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#supported-column-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported column types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Supported column types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#types-that-do-not-support-b-tree-indexes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Types that do not support B-tree indexes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1824,6 +1852,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#supported-column-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported column types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Supported column types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#types-that-do-not-support-b-tree-indexes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Types that do not support B-tree indexes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1903,7 +1959,7 @@
 
 
 <h1 id="b-tree-indexes">B-tree Indexes<a class="headerlink" href="#b-tree-indexes" title="Permanent link">&para;</a></h1>
-<p>Every table's primary key is a B-tree. Additional B-tree indexes can be created on any column or combination of columns.</p>
+<p>Every table's primary key is a B-tree. Additional B-tree indexes can be created on most column types — see <a href="#supported-column-types">Supported column types</a> for the full list.</p>
 <hr />
 <h2 id="primary-key-index">Primary key index<a class="headerlink" href="#primary-key-index" title="Permanent link">&para;</a></h2>
 <p>Defined in <code>CREATE TABLE</code>:</p>
@@ -1996,10 +2052,82 @@
 </span></code></pre></div>
 <p>Dropping a primary key index requires dropping the table.</p>
 <hr />
+<h2 id="supported-column-types">Supported column types<a class="headerlink" href="#supported-column-types" title="Permanent link">&para;</a></h2>
+<p>B-tree secondary indexes support the following column types:</p>
+<table>
+<thead>
+<tr>
+<th>Column type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BOOLEAN</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>INT4</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>INT8</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>REAL</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>DOUBLE</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>TIMESTAMP</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>UUID</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>VARCHAR(n)</code></td>
+<td>Keys are stored inline up to 255 bytes; longer values are rejected</td>
+</tr>
+<tr>
+<td>Composite</td>
+<td>Any combination of the above in a multi-column index</td>
+</tr>
+</tbody>
+</table>
+<h3 id="types-that-do-not-support-b-tree-indexes">Types that do not support B-tree indexes<a class="headerlink" href="#types-that-do-not-support-b-tree-indexes" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Column type</th>
+<th>Alternative</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TEXT</code></td>
+<td>Use <code>CREATE FULLTEXT INDEX</code> for token search, or an expression index on <code>SUBSTR(col, 1, 255)</code> for prefix matching</td>
+</tr>
+<tr>
+<td><code>JSON</code></td>
+<td>Use <code>CREATE INVERTED INDEX</code> for <code>JSON_CONTAINS</code> queries</td>
+</tr>
+<tr>
+<td><code>VECTOR(n)</code></td>
+<td>Use <code>CREATE HNSW INDEX</code> for approximate nearest-neighbour search</td>
+</tr>
+</tbody>
+</table>
+<p><code>TEXT</code> and <code>JSON</code> columns are designed for unbounded content. A B-tree index requires keys that fit within a single 4 KiB page (255 bytes for <code>VARCHAR</code>); text that overflows to linked overflow pages cannot be used as a B-tree key without truncation, which would silently break equality and uniqueness semantics. The dedicated index types (<code>FULLTEXT</code>, <code>INVERTED</code>, <code>HNSW</code>) are purpose-built for each data shape.</p>
+<hr />
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
 <li>B-tree indexes are stored as independent B+ trees with doubly-linked leaf pages.</li>
-<li><code>VARCHAR(n)</code> and <code>UUID</code> columns can be indexed; <code>TEXT</code> columns can be indexed only via expression indexes.</li>
 <li>The planner uses table statistics from <code>ANALYZE</code> to choose between indexes.</li>
 <li><code>CREATE UNIQUE INDEX</code> enforces uniqueness at the storage level.</li>
 <li>Composite primary keys (<code>PRIMARY KEY (col1, col2)</code>) use a composite B-tree key.</li>
