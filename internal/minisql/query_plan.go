@@ -152,8 +152,8 @@ type Scan struct {
 	// ScanLimit, when non-zero, tells the scan to stop after emitting this many qualifying rows.
 	// Set by PlanQuery when LIMIT is present, no in-memory sort is required, and no DISTINCT.
 	// For LIMIT N OFFSET M the value is M+N so that skipped rows are also counted.
-	ScanLimit    int64
-	Type         ScanType
+	ScanLimit     int64
+	Type          ScanType
 	CoveringIndex bool
 	// HNSWFuncName is "VEC_L2" or "VEC_COSINE" for ScanTypeHNSW scans.
 	HNSWFuncName string
@@ -333,14 +333,15 @@ func rehydratePlanIndexKeys(plan QueryPlan, stmt Statement, t *Table) (QueryPlan
 
 // extractScanIndexKeys re-derives the IndexKeys for one ScanTypeIndexPoint scan by
 // matching each of the scan's IndexColumns against the conditions in group and
-// calling equalityKeys.  Returns nil if any column cannot be matched.
+// appending cast key values.  Returns nil if any column cannot be matched.
 func extractScanIndexKeys(t *Table, scan Scan, group Conditions) []any {
-	var keys []any
+	keys := make([]any, 0, len(scan.IndexColumns))
 	for _, indexCol := range scan.IndexColumns {
 		col, ok := t.ColumnByName(indexCol.Name)
 		if !ok {
 			return nil
 		}
+		matched := false
 		for _, cond := range group {
 			if cond.Operand1.Type != OperandField {
 				continue
@@ -352,18 +353,46 @@ func extractScanIndexKeys(t *Table, scan Scan, group Conditions) []any {
 			if !isEquality(cond) || cond.Operand2.Type == OperandNull {
 				continue
 			}
-			extracted, err := equalityKeys(col, cond)
-			if err != nil || len(extracted) == 0 {
+			var err error
+			keys, err = appendEqualityKeys(keys, col, cond)
+			if err != nil {
 				return nil
 			}
-			keys = append(keys, extracted...)
+			matched = true
 			break
+		}
+		if !matched {
+			return nil
 		}
 	}
 	if len(keys) == 0 {
 		return nil
 	}
 	return keys
+}
+
+func appendEqualityKeys(dst []any, col Column, cond Condition) ([]any, error) {
+	if cond.Operator == Eq {
+		keyValue, err := castKeyValue(col, cond.Operand2.Value)
+		if err != nil {
+			return nil, err
+		}
+		return append(dst, keyValue), nil
+	}
+
+	rawValues, ok := cond.Operand2.Value.([]any)
+	if !ok {
+		return nil, errors.New("invalid values for IN")
+	}
+	for _, rawValue := range rawValues {
+		keyValue, err := castKeyValue(col, rawValue)
+		if err != nil {
+			return nil, err
+		}
+		dst = append(dst, keyValue)
+	}
+
+	return dst, nil
 }
 
 // applyScanLimit attaches a ScanLimit to each scan in the plan when LIMIT is present
@@ -467,12 +496,12 @@ func (t *Table) planQueryUncached(ctx context.Context, stmt Statement) (QueryPla
 
 // indexMatch represents a potential index match for equality conditions
 type indexMatch struct {
-	matchedConditions   []bool // indexed by condition position within the group
-	numMatched          int    // count of true entries in matchedConditions
-	rangeCondition      *RangeCondition
-	stats               *IndexStats
-	info                IndexInfo
-	keys                []any
+	matchedConditions []bool // indexed by condition position within the group
+	numMatched        int    // count of true entries in matchedConditions
+	rangeCondition    *RangeCondition
+	stats             *IndexStats
+	info              IndexInfo
+	keys              []any
 	// estKeyStr is the MCV lookup key for the first equality key — populated
 	// only for single-value Eq conditions; empty for IN or composite paths.
 	estKeyStr           string
