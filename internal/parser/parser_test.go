@@ -73,6 +73,41 @@ func TestPeekIntWithLength(t *testing.T) {
 	}
 }
 
+// TestParse_FuzzerRegressions covers inputs that previously caused infinite
+// loops in the parser. Each case must return within a reasonable time and
+// must not panic — an error return is acceptable.
+func TestParse_FuzzerRegressions(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		sql  string
+	}{
+		{
+			// \x15 (NAK) is a C0 control character that strings.Fields does not
+			// treat as whitespace. The tokenizer had no rule for it and returned
+			// ("", 0) from peekWithLength, so pop() never advanced p.i.
+			name: "control character mid-SQL causes infinite loop",
+			sql:  "SELECT * FROM users\x15ORDER BY id ASC;",
+		},
+		{
+			// \xe7 is an invalid UTF-8 lead byte; strings.Map re-encodes it as
+			// U+FFFD (\xef\xbf\xbd). The tokenizer also returned ("", 0) for
+			// U+FFFD, and stepStatementEnd looped forever when peek() returned ""
+			// but p.i was still less than len(sql).
+			name: "non-ASCII byte mid-SQL causes infinite loop",
+			sql:  "SELECT * FROM users\xe7\xe7\xe7\xe7\xe7E id IN (1, 2, 3);",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// The test must complete (no hang); a parse error is fine.
+			_, _ = New().Parse(context.Background(), tc.sql)
+		})
+	}
+}
+
 func TestPeekIdentifierWithLength(t *testing.T) {
 	t.Parallel()
 

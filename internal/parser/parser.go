@@ -205,7 +205,18 @@ func New() *parser {
 
 // Parse parses the given SQL string and returns a slice of statements.
 func (p *parser) Parse(ctx context.Context, sql string) ([]minisql.Statement, error) {
-	normalised := strings.Join(strings.Fields(sql), " ")
+	// Replace all control characters with spaces before splitting. strings.Fields
+	// normalises common whitespace (tab, newline, etc.) but leaves other control
+	// characters such as \x15 (NAK) in place. The tokenizer has no rule for them
+	// and would loop infinitely. Replacing with a space (not dropping) preserves
+	// word boundaries for control chars used as separators in multi-line SQL.
+	stripped := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, sql)
+	normalised := strings.Join(strings.Fields(stripped), " ")
 	item := &parserItem{
 		sql:      normalised,
 		upperSQL: strings.ToUpper(normalised),
@@ -552,6 +563,11 @@ func (p *parserItem) doParse() ([]minisql.Statement, error) {
 				} else {
 					return statements, nil
 				}
+			} else if p.i < len(p.sql) {
+				// peek() returned "" but we are not at EOF: unrecognized bytes remain
+				// (e.g. non-ASCII outside a quoted string). Return an error instead of
+				// looping forever.
+				return statements, p.errorf("at STATEMENT: unexpected character")
 			}
 		}
 	}

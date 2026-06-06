@@ -1,0 +1,2 @@
+go test fuzz v1
+string("SELECT * FROM users\xe7\xe7\xe7\xe7\xe7E id IN (1, 2, 3);")

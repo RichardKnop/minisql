@@ -56,6 +56,29 @@ LOG_LEVEL=info go test ./... -count=1
 
 Setting `LOG_LEVEL=info` suppresses debug output and makes test failures easier to read.
 
+### Fuzz testing
+
+MiniSQL uses Go's built-in fuzzer (`go test -fuzz`) to find parser bugs and
+storage corruption issues that structured unit tests are unlikely to reach.
+
+**Run the parser fuzzer** (stops after 60 s; adjust `-fuzztime` as needed):
+
+```sh
+go test -fuzz=FuzzParser -fuzztime=60s ./internal/parser/
+```
+
+**Run seeds only** (fast, no mutation — safe for CI):
+
+```sh
+go test -run=FuzzParser ./internal/parser/
+```
+
+Corpus entries that previously found real bugs live in
+`internal/parser/testdata/fuzz/FuzzParser/` and are automatically replayed as
+ordinary unit tests on every `go test` run. When the fuzzer discovers a new
+crash it writes the minimised input to that directory; commit it so the fix is
+covered by CI forever.
+
 ### Run linter
 
 ```sh
