@@ -54,6 +54,16 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		ce.Write(zap.String("query type", "SELECT"), zap.Any("plan", plan))
 	}
 
+	// For JOIN queries with GROUP BY or aggregates, replace stmt.Columns with the
+	// combined alias-prefixed column list so that groupByAccumulator and newAggStates
+	// can resolve column indices against the combined join schema (e.g. "o.user_id",
+	// "u.name") rather than the base table schema.
+	if len(plan.Joins) > 0 && (stmt.IsSelectGroupBy() || stmt.IsSelectAggregate()) {
+		if combined, ok := combinedJoinSchema(ctx, plan, t.provider); ok {
+			stmt.Columns = combined
+		}
+	}
+
 	if stmt.IsSelectCountAll() && len(stmt.Joins) == 0 && t.virtualRows == nil {
 		result, ok, err := t.tryCountFromExactInvertedIndex(ctx, plan)
 		if err != nil {
@@ -187,13 +197,13 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return countResult(count), nil
 	}
 
-	// GROUP BY + single sequential scan: stream rows through a reuse buffer to avoid
-	// one make([]OptionalValue) per row. Falls back to the general path for virtual
-	// tables and parallel scans (handled inside selectGroupByZeroAlloc).
+	// GROUP BY + single sequential scan (no joins): stream rows through a reuse buffer
+	// to avoid one make([]OptionalValue) per row. Falls back to the general path for
+	// virtual tables and parallel scans (handled inside selectGroupByZeroAlloc).
 	if stmt.IsSelectGroupBy() && len(plan.Joins) == 0 && len(plan.Scans) == 1 && plan.Scans[0].Type == ScanTypeSequential {
 		return t.selectGroupByZeroAlloc(ctx, stmt, plan.Scans[0], selectedFields)
 	}
-	if stmt.IsSelectGroupBy() && len(plan.Joins) == 0 {
+	if stmt.IsSelectGroupBy() {
 		return t.selectGroupByStreaming(ctx, stmt, plan, selectedFields)
 	}
 
@@ -201,8 +211,8 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return result, err
 	}
 
-	if stmt.IsSelectAggregate() && len(plan.Joins) == 0 {
-		if len(plan.Scans) == 1 && plan.Scans[0].Type == ScanTypeSequential && t.virtualRows == nil && !t.parallelScan {
+	if stmt.IsSelectAggregate() {
+		if len(plan.Joins) == 0 && len(plan.Scans) == 1 && plan.Scans[0].Type == ScanTypeSequential && t.virtualRows == nil && !t.parallelScan {
 			return t.selectAggregateSequentialRowView(ctx, stmt, plan.Scans[0], selectedFields)
 		}
 		return t.selectAggregateStreaming(ctx, stmt, plan, selectedFields)
@@ -252,9 +262,22 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return result, err
 	}
 
+	// COUNT(*) + JOIN: count matching rows without materialising them.
+	if stmt.IsSelectCountAll() && len(plan.Joins) > 0 {
+		var count int64
+		if err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
+			count += 1
+			return nil
+		}); err != nil {
+			return StatementResult{}, err
+		}
+		return countResult(count), nil
+	}
+
 	// Materialising path: buffer every matching row, then dispatch.
-	// Reached for JOIN queries that require GROUP BY, aggregate, or semi/anti-semi
-	// joins — where all rows must be collected before output can begin.
+	// Reached for JOIN queries that require semi/anti-semi joins — where all
+	// rows must be collected before output can begin.
+	// GROUP BY, aggregate, and COUNT(*) JOINs exit via dedicated paths above.
 	// Simple JOINs (including DISTINCT and ORDER BY + LIMIT) exit via the
 	// dedicated paths above.
 	//
@@ -318,6 +341,39 @@ func countResult(count int64) StatementResult {
 			[]OptionalValue{{Valid: true, Value: count}},
 		)),
 	}
+}
+
+// combinedJoinSchema builds the alias-prefixed column list for a JOIN query,
+// mirroring the schema constructed inside executeNestedLoopJoin. The result is
+// used to update stmt.Columns so that groupByAccumulator and newAggStates can
+// resolve column indices against the combined join schema (e.g. "o.user_id")
+// rather than the base table schema.
+func combinedJoinSchema(ctx context.Context, plan QueryPlan, provider TableProvider) ([]Column, bool) {
+	if len(plan.Joins) == 0 || len(plan.Scans) == 0 {
+		return nil, false
+	}
+	baseScan := plan.Scans[0]
+	baseTable, ok := provider.GetTable(ctx, baseScan.TableName)
+	if !ok {
+		return nil, false
+	}
+	firstJoin := plan.Joins[0]
+	firstInnerScan := plan.Scans[firstJoin.RightScanIndex]
+	firstInner, ok := provider.GetTable(ctx, firstInnerScan.TableName)
+	if !ok {
+		return nil, false
+	}
+	combined := buildCombinedColumns(baseTable.Columns, baseScan.TableAlias, firstInner.Columns, firstInnerScan.TableAlias)
+	for i := 1; i < len(plan.Joins); i++ {
+		join := plan.Joins[i]
+		innerScan := plan.Scans[join.RightScanIndex]
+		innerTable, ok := provider.GetTable(ctx, innerScan.TableName)
+		if !ok {
+			return nil, false
+		}
+		combined = buildCombinedColumnsProgressive(combined, innerTable.Columns, innerScan.TableAlias)
+	}
+	return combined, true
 }
 
 // countAllLeafWalk counts every row in the table.
@@ -814,8 +870,15 @@ func newGroupByAccumulator(stmt Statement, t *Table, estRows int) *groupByAccumu
 		if stmt.Aggregates[i].Kind != 0 {
 			continue
 		}
+		// Build the qualified form of the SELECT field name (e.g. "o.user_id") so
+		// that JOIN queries with alias-prefixed SELECT columns match GROUP BY entries
+		// that store the full qualified name (e.g. Field{Name: "o.user_id"}).
+		qualifiedFieldName := stmt.Fields[i].Name
+		if stmt.Fields[i].AliasPrefix != "" {
+			qualifiedFieldName = stmt.Fields[i].AliasPrefix + "." + stmt.Fields[i].Name
+		}
 		for j, gf := range stmt.GroupBy {
-			if gf.Name == stmt.Fields[i].Name {
+			if gf.Name == stmt.Fields[i].Name || gf.Name == qualifiedFieldName {
 				fieldToGroupByIdx[i] = j
 				break
 			}
@@ -5034,14 +5097,14 @@ func intersectInvertedRowIDsWithTerm(
 			lastRowID = rowID
 
 			for candidateIdx < len(candidates) && candidates[candidateIdx] < rowID {
-				candidateIdx++
+				candidateIdx += 1
 			}
 			if candidateIdx >= len(candidates) {
 				return nil
 			}
 			if candidates[candidateIdx] == rowID {
 				out = append(out, rowID)
-				candidateIdx++
+				candidateIdx += 1
 			}
 			return nil
 		})
@@ -5071,14 +5134,14 @@ func intersectInvertedRowIDsWithScanner(
 			return err
 		}
 		for candidateIdx < len(candidates) && candidates[candidateIdx] < rowID {
-			candidateIdx++
+			candidateIdx += 1
 		}
 		if candidateIdx >= len(candidates) {
 			return nil
 		}
 		if candidates[candidateIdx] == rowID {
 			out = append(out, rowID)
-			candidateIdx++
+			candidateIdx += 1
 		}
 		return nil
 	})

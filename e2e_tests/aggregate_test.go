@@ -723,18 +723,137 @@ func (s *TestSuite) TestHaving() {
 	})
 }
 
-func (s *TestSuite) TestGroupByWithJoinRejected() {
+func (s *TestSuite) TestGroupByWithJoin() {
 	_, err := s.db.Exec(createOrdersTableSQL)
 	s.Require().NoError(err)
 
 	_, err = s.db.Exec(createUsersTableSQL)
 	s.Require().NoError(err)
 
-	_, err = s.db.Exec(`
-		select o.user_id, SUM(o.total_paid)
-		from orders as o
-		inner join users as u on u.id = o.user_id
-		GROUP BY o.user_id;`)
-	s.Require().Error(err)
-	s.Contains(err.Error(), "GROUP BY cannot be combined with JOIN")
+	// users: id=1 name="Alice", id=2 name="Bob"
+	s.execQuery(`insert into users(name, email) values ('Alice', 'alice@example.com'), ('Bob', 'bob@example.com');`, 2)
+
+	// orders: user 1 paid 10+20=30, user 2 paid 30+40=70
+	s.execQuery(`insert into orders(user_id, product_id, total_paid) values
+(1, 1, 10),
+(1, 2, 20),
+(2, 1, 30),
+(2, 3, 40);`, 4)
+
+	s.Run("JOIN + GROUP BY + SUM", func() {
+		rows, err := s.db.QueryContext(context.Background(), `
+			select o.user_id, SUM(o.total_paid)
+			from orders as o
+			inner join users as u on u.id = o.user_id
+			GROUP BY o.user_id;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type row struct {
+			userID int64
+			sum    int64
+		}
+		var got []row
+		for rows.Next() {
+			var r row
+			s.Require().NoError(rows.Scan(&r.userID, &r.sum))
+			got = append(got, r)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(got, 2)
+
+		sort.Slice(got, func(i, j int) bool { return got[i].userID < got[j].userID })
+		s.Equal(int64(1), got[0].userID)
+		s.Equal(int64(30), got[0].sum)
+		s.Equal(int64(2), got[1].userID)
+		s.Equal(int64(70), got[1].sum)
+	})
+
+	s.Run("JOIN + GROUP BY + COUNT(*)", func() {
+		rows, err := s.db.QueryContext(context.Background(), `
+			select o.user_id, COUNT(*)
+			from orders as o
+			inner join users as u on u.id = o.user_id
+			GROUP BY o.user_id;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type row struct {
+			userID int64
+			count  int64
+		}
+		var got []row
+		for rows.Next() {
+			var r row
+			s.Require().NoError(rows.Scan(&r.userID, &r.count))
+			got = append(got, r)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(got, 2)
+
+		sort.Slice(got, func(i, j int) bool { return got[i].userID < got[j].userID })
+		s.Equal(int64(1), got[0].userID)
+		s.Equal(int64(2), got[0].count)
+		s.Equal(int64(2), got[1].userID)
+		s.Equal(int64(2), got[1].count)
+	})
+
+	s.Run("JOIN + GROUP BY + HAVING", func() {
+		// Only groups where SUM(total_paid) > 40: user_id=2 (70).
+		rows, err := s.db.QueryContext(context.Background(), `
+			select o.user_id, SUM(o.total_paid)
+			from orders as o
+			inner join users as u on u.id = o.user_id
+			GROUP BY o.user_id
+			HAVING SUM(o.total_paid) > 40;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type row struct {
+			userID int64
+			sum    int64
+		}
+		var got []row
+		for rows.Next() {
+			var r row
+			s.Require().NoError(rows.Scan(&r.userID, &r.sum))
+			got = append(got, r)
+		}
+		s.Require().NoError(rows.Err())
+		s.Require().Len(got, 1)
+		s.Equal(int64(2), got[0].userID)
+		s.Equal(int64(70), got[0].sum)
+	})
+
+	s.Run("JOIN + COUNT(*) without GROUP BY", func() {
+		rows, err := s.db.QueryContext(context.Background(), `
+			select COUNT(*)
+			from orders as o
+			inner join users as u on u.id = o.user_id;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		var count int64
+		s.Require().NoError(rows.Scan(&count))
+		s.Equal(int64(4), count)
+		s.Require().False(rows.Next())
+		s.Require().NoError(rows.Err())
+	})
+
+	s.Run("JOIN + SUM without GROUP BY", func() {
+		rows, err := s.db.QueryContext(context.Background(), `
+			select SUM(o.total_paid)
+			from orders as o
+			inner join users as u on u.id = o.user_id;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		var sum int64
+		s.Require().NoError(rows.Scan(&sum))
+		s.Equal(int64(100), sum)
+		s.Require().False(rows.Next())
+		s.Require().NoError(rows.Err())
+	})
 }
