@@ -3773,12 +3773,27 @@ func (t *Table) selectWithSortRowView(
 		return StatementResult{}, true, err
 	}
 
-	if err := t.sortRows(allRows, plan.OrderBy); err != nil {
+	// allOrderByInProjected is true when every ORDER BY column is already present
+	// in the projected (SELECT) fields — no extra sort-only column was appended by
+	// orderByHeapFields. In that case, extending the sort by the remaining projected
+	// fields guarantees equal projected rows are adjacent → hash-free adjacent dedup.
+	// When ORDER BY references columns outside the SELECT list, duplicate projected
+	// rows can land non-adjacently after sorting, so we must fall back to the hash set.
+	allOrderByInProjected := len(sortFields) == len(requestedFields)
+	effectiveOrderBy := plan.OrderBy
+	if stmt.Distinct && allOrderByInProjected {
+		effectiveOrderBy = distinctExtendOrderBy(plan.OrderBy, requestedFields)
+	}
+	if err := t.sortRows(allRows, effectiveOrderBy); err != nil {
 		return StatementResult{}, true, err
 	}
 
 	if stmt.Distinct {
-		allRows = deduplicateRows(allRows, requestedFields)
+		if allOrderByInProjected {
+			allRows = deduplicateSortedRows(allRows, requestedFields)
+		} else {
+			allRows = deduplicateRows(allRows, requestedFields)
+		}
 	}
 
 	offset := 0
@@ -5459,6 +5474,8 @@ func (r Row) rowDistinctKey() string {
 
 // deduplicateRows removes duplicate rows based on their projected values for the given fields.
 // It preserves the first occurrence of each unique row and maintains input order.
+// Uses a hash set — call deduplicateSortedRows instead when the rows are already sorted
+// by (at least) all of fields, which avoids the map allocation entirely.
 func deduplicateRows(rows []Row, fields []Field) []Row {
 	seen := make(map[string]struct{}, len(rows))
 	out := make([]Row, 0, len(rows))
@@ -5472,6 +5489,70 @@ func deduplicateRows(rows []Row, fields []Field) []Row {
 		out = append(out, row)
 	}
 	return out
+}
+
+// deduplicateSortedRows removes duplicate rows by comparing adjacent pairs.
+// rows must be sorted such that equal projected rows (same values for fields) are
+// adjacent — use distinctExtendOrderBy to guarantee this before calling sortRows.
+// In-place: returns a sub-slice of the input; no heap allocation.
+func deduplicateSortedRows(rows []Row, fields []Field) []Row {
+	if len(rows) <= 1 {
+		return rows
+	}
+	w := 1
+	for i := 1; i < len(rows); i++ {
+		equal := true
+		for _, f := range fields {
+			va, _ := rows[i].getValueQualified(f.AliasPrefix, f.Name)
+			vb, _ := rows[w-1].getValueQualified(f.AliasPrefix, f.Name)
+			if compareValues(va, vb) != 0 {
+				equal = false
+				break
+			}
+		}
+		if !equal {
+			rows[w] = rows[i]
+			w++
+		}
+	}
+	return rows[:w]
+}
+
+// distinctExtendOrderBy returns an extended ORDER BY slice that appends any
+// requestedFields not already present in orderBy as ascending tiebreakers.
+// This guarantees that equal projected rows are adjacent after sorting,
+// enabling hash-free deduplication via deduplicateSortedRows.
+func distinctExtendOrderBy(orderBy []OrderBy, requestedFields []Field) []OrderBy {
+	if len(requestedFields) == 0 {
+		return orderBy
+	}
+	inOrderBy := make(map[string]struct{}, len(orderBy)*2)
+	for _, clause := range orderBy {
+		inOrderBy[clause.Field.Name] = struct{}{}
+		if clause.Field.AliasPrefix != "" {
+			inOrderBy[clause.Field.AliasPrefix+"."+clause.Field.Name] = struct{}{}
+		}
+	}
+	extended := make([]OrderBy, len(orderBy), len(orderBy)+len(requestedFields))
+	copy(extended, orderBy)
+	for _, f := range requestedFields {
+		if f.Expr != nil {
+			continue
+		}
+		key := f.Name
+		if _, ok := inOrderBy[key]; ok {
+			continue
+		}
+		if f.AliasPrefix != "" {
+			qualified := f.AliasPrefix + "." + f.Name
+			if _, ok := inOrderBy[qualified]; ok {
+				continue
+			}
+		}
+		extended = append(extended, OrderBy{Field: f, Direction: Asc})
+		inOrderBy[f.Name] = struct{}{}
+	}
+	return extended
 }
 
 func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {

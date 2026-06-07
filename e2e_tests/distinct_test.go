@@ -178,4 +178,89 @@ func (s *TestSuite) TestSelectDistinct() {
 		// Expect: NULL, 'bar', 'foo' — 3 distinct values
 		s.Require().Len(vals, 3)
 	})
+
+	// The next two subtests exercise the sort-then-adjacent-dedup path introduced
+	// to eliminate the per-group hash-set allocation for DISTINCT + ORDER BY queries.
+
+	s.Run("DISTINCT on multiple columns ORDER BY subset — sort-then-dedup path", func() {
+		// ORDER BY player (subset of projected player, level) — exercises extended sort
+		// where level is added as a secondary tiebreaker so equal (player, level) pairs
+		// are adjacent and can be removed by adjacent comparison without a hash set.
+		rows, err := s.db.QueryContext(context.Background(), `select distinct player, level from scores order by player, level;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type pair struct {
+			Player string
+			Level  int32
+		}
+		var pairs []pair
+		for rows.Next() {
+			var p pair
+			s.Require().NoError(rows.Scan(&p.Player, &p.Level))
+			pairs = append(pairs, p)
+		}
+		s.Require().NoError(rows.Err())
+
+		// (Alice,1), (Alice,2), (Bob,1), (Bob,2), (Carol,3) = 5 distinct pairs, sorted
+		s.Require().Len(pairs, 5)
+		s.Equal("Alice", pairs[0].Player)
+		s.Equal(int32(1), pairs[0].Level)
+		s.Equal("Alice", pairs[1].Player)
+		s.Equal(int32(2), pairs[1].Level)
+		s.Equal("Bob", pairs[2].Player)
+		s.Equal("Carol", pairs[4].Player)
+		s.Equal(int32(3), pairs[4].Level)
+	})
+
+	s.Run("DISTINCT ORDER BY desc preserves correct order after dedup", func() {
+		// Descending ORDER BY forces a different sort order — adjacent dedup must still
+		// correctly identify and remove the duplicate (Alice, 1) and (Bob, 2) pairs.
+		rows, err := s.db.QueryContext(context.Background(), `select distinct player, level from scores order by player desc, level desc;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		type pair struct {
+			Player string
+			Level  int32
+		}
+		var pairs []pair
+		for rows.Next() {
+			var p pair
+			s.Require().NoError(rows.Scan(&p.Player, &p.Level))
+			pairs = append(pairs, p)
+		}
+		s.Require().NoError(rows.Err())
+
+		// Same 5 distinct pairs but in reverse order
+		s.Require().Len(pairs, 5)
+		s.Equal("Carol", pairs[0].Player)
+		s.Equal(int32(3), pairs[0].Level)
+		s.Equal("Bob", pairs[1].Player)
+		s.Equal(int32(2), pairs[1].Level)
+		s.Equal("Bob", pairs[2].Player)
+		s.Equal(int32(1), pairs[2].Level)
+		s.Equal("Alice", pairs[3].Player)
+		s.Equal("Alice", pairs[4].Player)
+	})
+
+	s.Run("DISTINCT ORDER BY with OFFSET and no LIMIT", func() {
+		rows, err := s.db.QueryContext(context.Background(), `select distinct level from scores order by level;`)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		var levels []int32
+		for rows.Next() {
+			var l int32
+			s.Require().NoError(rows.Scan(&l))
+			levels = append(levels, l)
+		}
+		s.Require().NoError(rows.Err())
+
+		// levels 1, 2, 3 — all three distinct
+		s.Require().Len(levels, 3)
+		s.Equal(int32(1), levels[0])
+		s.Equal(int32(2), levels[1])
+		s.Equal(int32(3), levels[2])
+	})
 }
