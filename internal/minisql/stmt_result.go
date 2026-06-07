@@ -183,7 +183,7 @@ func (i *Iterator) Next(ctx context.Context) bool {
 	if i.err != nil {
 		return false
 	}
-	if i.end {
+	if i.end || i.rowFunc == nil {
 		return false
 	}
 	row, err := i.rowFunc(ctx)
