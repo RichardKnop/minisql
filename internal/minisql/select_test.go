@@ -1180,6 +1180,113 @@ func TestTable_SelectAggregate(t *testing.T) {
 	})
 }
 
+// TestTable_Select_DistinctOrderByIndexedAdjacentDedup exercises the
+// streaming adjacent-compare dedup path (newDistinctAdjacentRowViewIteratorFactory)
+// which activates when an index delivers rows in ORDER BY order and all projected
+// fields are covered by ORDER BY.  Inserting rows with duplicate emails verifies
+// that duplicates are removed and unique rows are returned in sorted order.
+func TestTable_Select_DistinctOrderByIndexedAdjacentDedup(t *testing.T) {
+	pager, dbFile := initTest(t)
+
+	var (
+		ctx        = context.Background()
+		tablePager = pager.ForTable(testColumns[0:3])
+		txManager  = NewTransactionManager(zap.NewNop(), dbFile.Name(), mockPagerFactory(tablePager), pager, nil)
+		txPager    = NewTransactionalPager(tablePager, txManager, testTableName, "")
+		table      *Table
+		indexName  = "idx__test_adjacent_email"
+		indexCols  = testColumns[1:2] // email column
+	)
+
+	// Insert rows: three distinct emails, one duplicated so dedup is exercised.
+	insertRows := []Row{
+		NewRowWithValues(testColumns[0:3], []OptionalValue{
+			{Value: int64(1), Valid: true},
+			{Value: NewTextPointer([]byte("alice@example.com")), Valid: true},
+			{Value: int32(30), Valid: true},
+		}),
+		NewRowWithValues(testColumns[0:3], []OptionalValue{
+			{Value: int64(2), Valid: true},
+			{Value: NewTextPointer([]byte("bob@example.com")), Valid: true},
+			{Value: int32(25), Valid: true},
+		}),
+		NewRowWithValues(testColumns[0:3], []OptionalValue{
+			{Value: int64(3), Valid: true},
+			{Value: NewTextPointer([]byte("alice@example.com")), Valid: true}, // duplicate
+			{Value: int32(40), Valid: true},
+		}),
+		NewRowWithValues(testColumns[0:3], []OptionalValue{
+			{Value: int64(4), Valid: true},
+			{Value: NewTextPointer([]byte("carol@example.com")), Valid: true},
+			{Value: int32(20), Valid: true},
+		}),
+	}
+
+	err := txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
+		freePage, err := txPager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		freePage.LeafNode = NewLeafNode()
+		freePage.LeafNode.Header.IsRoot = true
+		table = NewTable(testLogger, txPager, txManager, testTableName, testColumns[0:3], freePage.Index, nil)
+
+		indexPager, err := pager.ForIndex(indexCols, false)
+		if err != nil {
+			return err
+		}
+		txIndexPager := NewTransactionalPager(indexPager, txManager, testTableName, indexName)
+		indexRoot, err := txIndexPager.GetFreePage(ctx)
+		if err != nil {
+			return err
+		}
+		idx, err := table.createBTreeIndex(txIndexPager, indexRoot, indexCols, indexName, false)
+		if err != nil {
+			return err
+		}
+		table.SetSecondaryIndex(SecondaryIndex{IndexInfo: IndexInfo{Name: indexName, Columns: indexCols}, Index: idx})
+
+		stmt := Statement{
+			Kind:    Insert,
+			Fields:  fieldsFromColumns(testColumns[0:3]...),
+			Inserts: make([][]OptionalValue, 0, len(insertRows)),
+		}
+		for _, row := range insertRows {
+			stmt.Inserts = append(stmt.Inserts, row.Values)
+		}
+		_, err = table.Insert(ctx, stmt)
+		return err
+	})
+	require.NoError(t, err)
+
+	// SELECT DISTINCT email ORDER BY email — index delivers rows in email order,
+	// allProjectedInOrderBy is true → newDistinctAdjacentRowViewIteratorFactory used.
+	result, err := table.Select(ctx, Statement{
+		Kind:     Select,
+		Distinct: true,
+		Fields:   []Field{{Name: "email"}},
+		OrderBy:  []OrderBy{{Field: Field{Name: "email"}, Direction: Asc}},
+	})
+	require.NoError(t, err)
+
+	got := collectRows(ctx, result)
+	require.Len(t, got, 3) // alice, bob, carol — alice de-duplicated
+	emailStr := func(row Row) string {
+		v, _ := row.GetValue("email")
+		switch val := v.Value.(type) {
+		case TextPointer:
+			return val.String()
+		case string:
+			return val
+		default:
+			return ""
+		}
+	}
+	assert.Equal(t, "alice@example.com", emailStr(got[0]))
+	assert.Equal(t, "bob@example.com", emailStr(got[1]))
+	assert.Equal(t, "carol@example.com", emailStr(got[2]))
+}
+
 func collectRows(ctx context.Context, r StatementResult) []Row {
 	results := []Row{}
 	for r.Rows.Next(ctx) {
