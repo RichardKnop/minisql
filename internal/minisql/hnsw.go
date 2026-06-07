@@ -61,6 +61,33 @@ type hnswNodeData struct {
 	Neighbors [][]RowID // Neighbors[l] = neighbor RowIDs at layer l
 }
 
+func newHNSWNodeData(level, m int, withMutex bool) *hnswNodeData {
+	node := &hnswNodeData{Neighbors: make([][]RowID, level+1)}
+	if withMutex {
+		node.mu = new(sync.Mutex)
+	}
+
+	totalCap := 0
+	for l := range level + 1 {
+		totalCap += hnswNeighborLayerCap(l, m)
+	}
+	store := make([]RowID, totalCap)
+	offset := 0
+	for l := range level + 1 {
+		layerCap := hnswNeighborLayerCap(l, m)
+		node.Neighbors[l] = store[offset : offset : offset+layerCap]
+		offset += layerCap
+	}
+	return node
+}
+
+func hnswNeighborLayerCap(layer, m int) int {
+	if layer == 0 {
+		return 2*m + 1
+	}
+	return m + 1
+}
+
 // hnswIndex is the runtime handle for an HNSW vector index.  The graph is
 // loaded lazily on the first Search call and cached for subsequent calls.
 //
@@ -104,7 +131,7 @@ func newHNSWGraph(m, efConstruction int) *hnswGraph {
 func (g *hnswGraph) insert(rowID RowID, distFn func(RowID) (float64, error)) error {
 	level := g.randomLevel()
 
-	node := &hnswNodeData{Neighbors: make([][]RowID, level+1)}
+	node := newHNSWNodeData(level, g.M, false)
 	g.Nodes[rowID] = node
 
 	if g.nodeToPage != nil {
@@ -150,7 +177,7 @@ func (g *hnswGraph) insert(rowID RowID, distFn func(RowID) (float64, error)) err
 		if err != nil {
 			return err
 		}
-		neighbors := g.selectNeighbors(candidates, mMax)
+		neighbors := g.selectNeighborsInto(node.Neighbors[l], candidates, mMax)
 		node.Neighbors[l] = neighbors
 
 		// Bidirectional connections — update each chosen neighbour's list.
@@ -579,7 +606,7 @@ func (g *hnswGraph) parallelBeamSearch(buf *hnswSearchBuf, ep RowID, epDist floa
 // traversals can follow edges both to and from the new node.
 func (g *hnswGraph) parallelInsert(rowID RowID, distFn func(RowID) (float64, error)) error {
 	level := g.randomLevel()
-	node := &hnswNodeData{mu: new(sync.Mutex), Neighbors: make([][]RowID, level+1)}
+	node := newHNSWNodeData(level, g.M, true)
 
 	g.entryMu.Lock()
 	if !g.hasEntry {
@@ -620,7 +647,7 @@ func (g *hnswGraph) parallelInsert(rowID RowID, distFn func(RowID) (float64, err
 		if err != nil {
 			return err
 		}
-		neighbors := g.selectNeighbors(candidates, mMax)
+		neighbors := g.selectNeighborsInto(node.Neighbors[l], candidates, mMax)
 
 		node.mu.Lock()
 		node.Neighbors[l] = neighbors
@@ -730,13 +757,13 @@ func (g *hnswGraph) beamSearch(buf *hnswSearchBuf, ep RowID, epDist float64, ski
 	return buf.out, nil
 }
 
-// selectNeighbors chooses up to mMax neighbors from candidates (already sorted nearest-first).
-// The returned slice has cap=mMax+1 so the first bidirectional append never reallocates.
-func (g *hnswGraph) selectNeighbors(candidates []hnswCandidate, mMax int) []RowID {
+// selectNeighborsInto chooses up to mMax neighbors from candidates (already sorted nearest-first).
+// dst is the per-node layer slice whose cap leaves one spare slot for bidirectional append.
+func (g *hnswGraph) selectNeighborsInto(dst []RowID, candidates []hnswCandidate, mMax int) []RowID {
 	n := min(mMax, len(candidates))
-	result := make([]RowID, n, mMax+1)
+	result := dst[:0]
 	for i := range n {
-		result[i] = candidates[i].rowID
+		result = append(result, candidates[i].rowID)
 	}
 	return result
 }

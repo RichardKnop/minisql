@@ -59,6 +59,7 @@ type hashJoinBucket struct {
 	rows         map[string][]Row         // non-nil for regular joins using the legacy path
 	cells        map[string][]compactCell // non-nil for regular joins using the compact path
 	present      map[string]struct{}      // non-nil for Semi/AntiSemi joins
+	intPresent   map[int64]struct{}       // non-nil for single-column int-like Semi/AntiSemi joins
 	innerColumns []Column
 	filter       *bloom.Filter
 }
@@ -98,7 +99,6 @@ func buildHashBuckets(ctx context.Context, plan QueryPlan, provider TableProvide
 
 		switch {
 		case isSemiJoin:
-			bucket.present = make(map[string]struct{})
 			if useRowViewPath {
 				// Semi-join RowView path: key-only scan, no row materialisation.
 				if err := buildSemiJoinBucketFromRowViews(ctx, innerTable, innerScan, join, bucket); err != nil {
@@ -107,6 +107,7 @@ func buildHashBuckets(ctx context.Context, plan QueryPlan, provider TableProvide
 				buckets[i] = bucket
 				continue
 			}
+			bucket.present = make(map[string]struct{})
 		case useRowViewPath:
 			// Regular join RowView path: store compact cell bytes instead of full
 			// rows, deferring []OptionalValue allocation to probe-hit time.
@@ -173,6 +174,12 @@ func buildSemiJoinBucketFromRowViews(ctx context.Context, innerTable *Table, inn
 		colIdxs[p] = idx
 		colKinds[p] = innerTable.Columns[idx].Kind
 	}
+	useIntKey := join.Type == Semi && len(colIdxs) == 1 && isHashJoinIntKeyKind(colKinds[0])
+	if useIntKey {
+		bucket.intPresent = make(map[int64]struct{})
+	} else if bucket.present == nil {
+		bucket.present = make(map[string]struct{})
+	}
 
 	innerFields := fieldsFromColumns(innerTable.Columns...)
 	filter := innerTable.compileRowViewScanFilter(innerScan, innerFields)
@@ -213,18 +220,28 @@ func buildSemiJoinBucketFromRowViews(ctx context.Context, innerTable *Table, inn
 			continue
 		}
 
-		var valid bool
-		keyBuf, valid, err = appendHashKeyFromView(keyBuf[:0], view, colIdxs, colKinds)
-		if err != nil {
-			return err
-		}
-		if !valid {
-			continue // NULL key — never matches
-		}
-		if _, exists := bucket.present[string(keyBuf)]; !exists {
-			key := string(keyBuf)
-			bucket.present[key] = struct{}{}
-			bucket.filter.Add(keyBuf)
+		if useIntKey {
+			key, valid, err := intHashKeyFromView(view, colIdxs[0])
+			if err != nil {
+				return err
+			}
+			if valid {
+				bucket.intPresent[key] = struct{}{}
+			}
+		} else {
+			var valid bool
+			keyBuf, valid, err = appendHashKeyFromView(keyBuf[:0], view, colIdxs, colKinds)
+			if err != nil {
+				return err
+			}
+			if !valid {
+				continue // NULL key — never matches
+			}
+			if _, exists := bucket.present[string(keyBuf)]; !exists {
+				key := string(keyBuf)
+				bucket.present[key] = struct{}{}
+				bucket.filter.Add(keyBuf)
+			}
 		}
 	}
 	return nil
@@ -470,6 +487,22 @@ func appendHashKeyFromView(buf []byte, view RowView, colIdxs []int, colKinds []C
 	return buf, true, nil
 }
 
+func isHashJoinIntKeyKind(kind ColumnKind) bool {
+	return kind == Int4 || kind == Int8 || kind == Timestamp
+}
+
+func intHashKeyFromView(view RowView, colIdx int) (int64, bool, error) {
+	isNull, err := view.IsNull(colIdx)
+	if err != nil || isNull {
+		return 0, false, err
+	}
+	v, _, err := view.Int64At(colIdx)
+	if err != nil {
+		return 0, false, err
+	}
+	return v, true, nil
+}
+
 // semiJoinProbeRowViewIteratorFactory returns a factory that creates a
 // RowViewIterator scanning the outer (probe) table sequentially. For each outer
 // row it extracts the join key via typed accessors (no boxing), checks the
@@ -498,6 +531,7 @@ func semiJoinProbeRowViewIteratorFactory(
 		colIdxs[p] = idx
 		colKinds[p] = outerTable.Columns[idx].Kind
 	}
+	useIntKey := bucket.intPresent != nil && len(colIdxs) == 1 && isHashJoinIntKeyKind(colKinds[0])
 
 	cursor, err := outerTable.SeekFirst(ctx)
 	if err != nil {
@@ -542,18 +576,32 @@ func semiJoinProbeRowViewIteratorFactory(
 					}
 				}
 
-				keyBuf, valid, scanErr = appendHashKeyFromView(keyBuf[:0], view, colIdxs, colKinds)
-				if scanErr != nil {
-					return RowView{}, scanErr
-				}
-				if !valid {
-					continue
-				}
-				if !bucket.filter.MayContain(keyBuf) {
-					continue
-				}
-				if _, present := bucket.present[string(keyBuf)]; !present {
-					continue
+				if useIntKey {
+					var key int64
+					key, valid, scanErr = intHashKeyFromView(view, colIdxs[0])
+					if scanErr != nil {
+						return RowView{}, scanErr
+					}
+					if !valid {
+						continue
+					}
+					if _, present := bucket.intPresent[key]; !present {
+						continue
+					}
+				} else {
+					keyBuf, valid, scanErr = appendHashKeyFromView(keyBuf[:0], view, colIdxs, colKinds)
+					if scanErr != nil {
+						return RowView{}, scanErr
+					}
+					if !valid {
+						continue
+					}
+					if !bucket.filter.MayContain(keyBuf) {
+						continue
+					}
+					if _, present := bucket.present[string(keyBuf)]; !present {
+						continue
+					}
 				}
 				if hasOffset && iterOffset > 0 {
 					iterOffset -= 1

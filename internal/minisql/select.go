@@ -1853,7 +1853,7 @@ func (t *Table) selectSemiJoinDirectRowView(
 		return StatementResult{}, true, err
 	}
 	bucket, hasBucket := hashTables[0]
-	if !hasBucket || bucket.present == nil {
+	if !hasBucket || (bucket.present == nil && bucket.intPresent == nil) {
 		return StatementResult{}, false, nil
 	}
 
