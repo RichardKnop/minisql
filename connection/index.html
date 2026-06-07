@@ -2007,7 +2007,7 @@
 </span></code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>Disk spill only applies to the <code>selectWithSortRowView</code> fast path: sequential scans with no joins, no <code>LIMIT</code>, and no aggregate/GROUP BY. Queries that do not match this path sort in memory as before, regardless of <code>sort_mem_limit</code>.</p>
+<p>Disk spill applies universally to all <code>ORDER BY</code> queries — sequential scans, joins, <code>DISTINCT</code>, and multi-column sorts — whenever the accumulated row data exceeds <code>sort_mem_limit</code>. The only exception is <code>ORDER BY</code> with <code>LIMIT</code> (and no <code>DISTINCT</code>), which uses a bounded min-heap sized to <code>OFFSET + LIMIT</code> rows and never needs to spill.</p>
 </div>
 <p>Parallel scan is most beneficial for large tables on multi-core machines running filter-heavy queries. For small tables or single-CPU environments the overhead typically outweighs the benefit.</p>
 
