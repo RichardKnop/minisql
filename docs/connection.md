@@ -133,6 +133,6 @@ PRAGMA sort_mem_limit = 0;          -- disable disk spill
 ```
 
 !!! note
-    Disk spill only applies to the `selectWithSortRowView` fast path: sequential scans with no joins, no `LIMIT`, and no aggregate/GROUP BY. Queries that do not match this path sort in memory as before, regardless of `sort_mem_limit`.
+    Disk spill applies universally to all `ORDER BY` queries — sequential scans, joins, `DISTINCT`, and multi-column sorts — whenever the accumulated row data exceeds `sort_mem_limit`. The only exception is `ORDER BY` with `LIMIT` (and no `DISTINCT`), which uses a bounded min-heap sized to `OFFSET + LIMIT` rows and never needs to spill.
 
 Parallel scan is most beneficial for large tables on multi-core machines running filter-heavy queries. For small tables or single-CPU environments the overhead typically outweighs the benefit.

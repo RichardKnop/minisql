@@ -276,6 +276,17 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		return countResult(count), nil
 	}
 
+	// Universal ORDER BY spill: when sortMemLimit is set and this is a sort
+	// query that cannot be bounded by a heap (no LIMIT, or LIMIT+DISTINCT),
+	// stream rows through plan.Execute with periodic disk flushes to bound
+	// peak memory regardless of result cardinality.
+	// LIMIT+no-DISTINCT is excluded because selectJoinWithSortStreamingLimit
+	// already bounds memory to O(LIMIT), or the heap path in selectWithSort
+	// handles it in O(LIMIT) memory.
+	if plan.SortInMemory && t.sortMemLimit > 0 && (!stmt.Limit.Valid || stmt.Distinct) {
+		return t.selectWithSortSpill(ctx, stmt, plan, selectedFields, requestedFields)
+	}
+
 	// Materialising path: buffer every matching row, then dispatch.
 	// Reached for JOIN queries that require semi/anti-semi joins — where all
 	// rows must be collected before output can begin.
@@ -4165,6 +4176,140 @@ func (t *Table) selectWithSort(stmt Statement, plan QueryPlan, allRows []Row, re
 	return result, nil
 }
 
+// selectWithSortSpill is the universal ORDER BY path that streams rows through
+// plan.Execute and flushes sorted runs to disk when accumBytes exceeds
+// t.sortMemLimit, then N-way merges all runs — bounding peak heap memory
+// regardless of result cardinality.
+//
+// It is invoked for any plan.SortInMemory query where sortMemLimit > 0 and
+// the heap optimisation (LIMIT without DISTINCT) is not applicable.
+func (t *Table) selectWithSortSpill(
+	ctx context.Context,
+	stmt Statement,
+	plan QueryPlan,
+	selectedFields []Field,
+	requestedFields []Field,
+) (StatementResult, error) {
+	outputFields := orderByOutputFields(requestedFields)
+
+	var (
+		allRows      []Row
+		accumBytes   int64
+		tmpRuns      []string
+		spillColumns []Column
+	)
+
+	cleanupRuns := func() {
+		for _, p := range tmpRuns {
+			_ = os.Remove(p)
+		}
+	}
+
+	flushRun := func() error {
+		if len(allRows) == 0 {
+			return nil
+		}
+		if err := t.sortRows(allRows, plan.OrderBy); err != nil {
+			return err
+		}
+		w, err := newRunWriter()
+		if err != nil {
+			return err
+		}
+		for _, r := range allRows {
+			if wErr := w.writeRow(r); wErr != nil {
+				_ = w.close()
+				return wErr
+			}
+		}
+		path := w.filePath()
+		if err := w.close(); err != nil {
+			return err
+		}
+		tmpRuns = append(tmpRuns, path)
+		allRows = allRows[:0]
+		accumBytes = 0
+		return nil
+	}
+
+	err := plan.Execute(ctx, t.provider, selectedFields, func(row Row) error {
+		var err error
+		row, err = addOrderByOutputFieldsToRow(row, outputFields, plan.OrderBy)
+		if err != nil {
+			return err
+		}
+		if spillColumns == nil && len(row.Columns) > 0 {
+			spillColumns = row.Columns
+		}
+		accumBytes += int64(row.Size()) + 16
+		allRows = append(allRows, row)
+		if t.sortMemLimit > 0 && accumBytes >= t.sortMemLimit {
+			return flushRun()
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, errLimitReached) {
+		cleanupRuns()
+		return StatementResult{}, err
+	}
+
+	if len(tmpRuns) > 0 {
+		if err := t.sortRows(allRows, plan.OrderBy); err != nil {
+			cleanupRuns()
+			return StatementResult{}, err
+		}
+		merged, err := t.externalSortMerge(tmpRuns, allRows, spillColumns, plan.OrderBy)
+		if err != nil {
+			return StatementResult{}, err
+		}
+		allRows = merged
+	} else {
+		if err := t.sortRows(allRows, plan.OrderBy); err != nil {
+			return StatementResult{}, err
+		}
+	}
+
+	if stmt.Distinct {
+		allRows = deduplicateRows(allRows, requestedFields)
+	}
+
+	offset := 0
+	if stmt.Offset.Valid {
+		offset = int(stmt.Offset.Value.(int64))
+	}
+	hasLimit := stmt.Limit.Valid
+	var limit int
+	if hasLimit {
+		limit = int(stmt.Limit.Value.(int64))
+	}
+
+	if offset >= len(allRows) {
+		allRows = nil
+	} else {
+		end := offset + limit
+		if hasLimit && end < len(allRows) {
+			allRows = allRows[offset:end]
+		} else {
+			allRows = allRows[offset:]
+		}
+	}
+
+	idx := 0
+	result := StatementResult{
+		Columns: t.selectResultColumns(stmt, requestedFields),
+	}
+	result.Rows = NewIterator(func(ctx context.Context) (Row, error) {
+		if idx >= len(allRows) {
+			return Row{}, ErrNoMoreRows
+		}
+		row := allRows[idx]
+		idx++
+		return projectRow(row, requestedFields)
+	})
+
+	return result, nil
+}
+
 func (t *Table) selectResultColumns(stmt Statement, requestedFields []Field) []Column {
 	columns := make([]Column, len(requestedFields))
 	for i, field := range requestedFields {
@@ -4259,6 +4404,7 @@ func addOrderByOutputFieldsToRow(row Row, outputFields map[string]Field, orderBy
 		}
 
 		var value OptionalValue
+		var extraCol Column
 		if field.Expr != nil {
 			result, err := field.Expr.Eval(updated)
 			if err != nil {
@@ -4267,19 +4413,53 @@ func addOrderByOutputFieldsToRow(row Row, outputFields map[string]Field, orderBy
 			if result != nil {
 				value = OptionalValue{Value: result, Valid: true}
 			}
+			// Derive column Kind from the evaluated value so rows can be serialized
+			// to disk during external sort without losing the sort key.
+			extraCol = Column{Name: field.OutputName(), Kind: kindFromValue(value.Value)}
 		} else {
+			sourceCol, _ := updated.getColumnQualified(field.AliasPrefix, field.Name)
 			existing, found := updated.getValueQualified(field.AliasPrefix, field.Name)
 			if !found {
 				continue
 			}
 			value = existing
+			// Preserve the source column's Kind so the extra sort key round-trips
+			// through external sort run files (Marshal/UnmarshalRow).
+			extraCol = Column{Name: field.OutputName(), Kind: sourceCol.Kind, Size: sourceCol.Size}
 		}
 
-		updated.Columns = append(updated.Columns, Column{Name: field.OutputName()})
+		updated.Columns = append(updated.Columns, extraCol)
 		updated.Values = append(updated.Values, value)
 	}
 
 	return updated, nil
+}
+
+// kindFromValue infers a ColumnKind from the Go type of a value returned by
+// expression evaluation. Used when adding extra ORDER BY output columns so that
+// the column carries a proper Kind for Marshal/UnmarshalRow round-trips during
+// external sort.
+func kindFromValue(v any) ColumnKind {
+	switch v.(type) {
+	case bool:
+		return Boolean
+	case int32:
+		return Int4
+	case int64:
+		return Int8
+	case float32:
+		return Real
+	case float64:
+		return Double
+	case string, TextPointer:
+		return Varchar
+	case TimestampMicros:
+		return Timestamp
+	case UUIDValue:
+		return UUID
+	default:
+		return 0
+	}
 }
 
 func (t *Table) indexedScanRow(
