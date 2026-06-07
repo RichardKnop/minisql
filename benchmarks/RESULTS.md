@@ -9,7 +9,7 @@
 
 SQLite comparisons use the `sqlite` driver compiled into the same test binary. MiniSQL benchmarks run against fresh temp-file databases per sub-benchmark. Times are wall-clock (`ns/op`) median of 3 runs; memory figures are heap allocations reported by the Go runtime.
 
-This file was refreshed after the GROUP BY + JOIN support addition, the `groupOrder` slice removal from `groupByAccumulator`, and the `computeGroupValues` refactor. The GROUP BY / HAVING memory is modestly improved (was 35.5 / 27.4 KiB, now 33.6 / 25.6 KiB) after eliminating the redundant per-group string copy in `groupOrder`.
+This file was refreshed after the GROUP BY + JOIN support addition, the `groupOrder` slice removal from `groupByAccumulator`, and the `computeGroupValues` refactor. The GROUP BY / HAVING memory is modestly improved (was 35.5 / 27.4 KiB, now 33.6 / 25.6 KiB) after eliminating the redundant per-group string copy in `groupOrder`. A new `DISTINCT + ORDER BY indexed` row was added (2026-06-07) to capture the streaming adjacent-compare dedup path that activates when an index covers the ORDER BY columns.
 
 ---
 
@@ -52,6 +52,7 @@ The results are grouped by benchmark family so each table can be read without ho
 | HAVING filter | 822.4 µs | 2.10 ms | 0.4× | 25.6 KiB | 1.9 KiB | 263 / 111 |
 | DISTINCT high cardinality | 3.17 ms | 6.39 ms | 0.5× | 1.27 MiB | 586.3 KiB | 40,093 / 40,010 |
 | DISTINCT + ORDER BY high cardinality | 4.46 ms | 5.79 ms | 0.8× | 4.53 MiB | 586.3 KiB | 90,097 / 40,010 |
+| DISTINCT + ORDER BY indexed | 3.99 ms | 3.81 ms | 1.0× | 4.59 MiB | 586.3 KiB | 60,079 / 40,010 |
 | CTE materialise | 380.4 µs | 502.0 µs | 0.8× | 6.6 KiB | 400 B | 89 / 13 |
 | Subquery IN list | 2.90 ms | 4.10 ms | 0.7× | 559.0 KiB | 234.7 KiB | 15,197 / 20,010 |
 
@@ -175,5 +176,6 @@ The results are grouped by benchmark family so each table can be read without ho
 - Full-text and JSON build paths still allocate multiple MiB per operation and remain the most relevant inverted-index targets.
 - GROUP BY / HAVING memory gap vs SQLite (9.6× / 13.1×) is largely structural: Go's runtime map has higher per-entry overhead than SQLite's C hash table. The `groupOrder` redundancy was removed (saved ~1.6–2 KiB/op); arena interning was tried and rejected (old backing arrays accumulate in GC via map string references). Further reduction requires a custom open-address hash table — low ROI at this stage.
 - DISTINCT high cardinality without ORDER BY (1.27 MiB vs SQLite 586 KiB, 2.2×): streaming hash-set path; the gap is structural — SQLite sorts/hashes on the C side and delivers rows lazily, avoiding upfront Go heap allocation.
-- DISTINCT + ORDER BY high cardinality (4.53 MiB vs SQLite 586 KiB): ORDER BY requires upfront materialization of all rows before sorting, which doubles alloc count vs the no-ORDER-BY streaming path. The sort-then-adjacent-dedup optimization (committed 2026-06-07) removes the hash-set overhead from deduplication, but the dominant cost is now the O(N) row materialization for sorting — unavoidable without a C-side or disk-backed sort.
+- DISTINCT + ORDER BY high cardinality (4.53 MiB vs SQLite 586 KiB): ORDER BY requires upfront materialization of all rows before sorting, which doubles alloc count vs the no-ORDER-BY streaming path. The sort-then-adjacent-dedup optimization removes the hash-set overhead from deduplication, but the dominant cost is the O(N) row materialization for sorting — unavoidable without a disk-backed sort (see ROADMAP).
+- DISTINCT + ORDER BY indexed (3.99 ms / 4.59 MiB / 60,079 allocs): when an index covers ORDER BY, streaming adjacent-compare dedup (`newDistinctAdjacentRowViewIteratorFactory`) eliminates the hash set, saving ~30,018 allocs/op vs the in-memory sort path. Still limited by per-row materialization overhead from the `database/sql` layer.
 - VACUUM is much improved after streaming row copy, though it still allocates far more than SQLite because it rebuilds the compacted MiniSQL database through normal table/index write paths.

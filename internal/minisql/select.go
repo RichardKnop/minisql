@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -1498,10 +1499,15 @@ func (t *Table) selectStreamingDirect(
 		offset = stmt.Offset.Value.(int64)
 	}
 
+	// When the index delivers rows in ORDER BY order and every projected field
+	// is in ORDER BY, equal projected rows are adjacent → adjacent-compare dedup
+	// uses O(1) memory instead of an O(N) hash set.
+	adjacentDedup := stmt.Distinct && !plan.SortInMemory && len(plan.OrderBy) > 0 && allProjectedInOrderBy(requestedFields, plan.OrderBy)
 	var seen map[string]struct{}
-	if stmt.Distinct {
+	if stmt.Distinct && !adjacentDedup {
 		seen = make(map[string]struct{})
 	}
+	var prevDistinctKey string
 
 	// When LIMIT is present, pre-size to exactly the limit so append never reallocates.
 	// Without LIMIT, start empty and grow as needed.
@@ -1519,10 +1525,17 @@ func (t *Table) selectStreamingDirect(
 		}
 		if stmt.Distinct {
 			key := p.rowDistinctKey()
-			if _, dup := seen[key]; dup {
-				return nil
+			if adjacentDedup {
+				if key == prevDistinctKey {
+					return nil
+				}
+				prevDistinctKey = key
+			} else {
+				if _, dup := seen[key]; dup {
+					return nil
+				}
+				seen[key] = struct{}{}
 			}
-			seen[key] = struct{}{}
 		}
 		if hasOffset && offset > 0 {
 			offset -= 1
@@ -1863,11 +1876,19 @@ func (t *Table) selectStreamingDirectRowView(
 	}
 
 	if stmt.Distinct {
-		distinctFactory := newDistinctRowViewIteratorFactory(
-			ctx, t.pager, newRowViewIter, fieldIndexes, t.Columns,
-			distinctSeenCapacityFromEstimate(t.estimatedRowCount()),
-			remaining, offset, hasLimit, hasOffset,
-		)
+		var distinctFactory func() RowViewIterator
+		if !plan.SortInMemory && allProjectedInOrderBy(requestedFields, plan.OrderBy) {
+			distinctFactory = newDistinctAdjacentRowViewIteratorFactory(
+				ctx, t.pager, newRowViewIter, fieldIndexes, t.Columns,
+				remaining, offset, hasLimit, hasOffset,
+			)
+		} else {
+			distinctFactory = newDistinctRowViewIteratorFactory(
+				ctx, t.pager, newRowViewIter, fieldIndexes, t.Columns,
+				distinctSeenCapacityFromEstimate(t.estimatedRowCount()),
+				remaining, offset, hasLimit, hasOffset,
+			)
+		}
 		result.RowViews = distinctFactory()
 		result.RowViewPager = t.pager
 		result.RowViewFieldIndexes = fieldIndexes
@@ -3279,6 +3300,66 @@ func newDistinctRowViewIteratorFactory(
 				}
 				if hasLimit {
 					rem -= 1
+				}
+				return view, nil
+			}
+		}, inner.Close)
+	}
+}
+
+// newDistinctAdjacentRowViewIteratorFactory is like newDistinctRowViewIteratorFactory
+// but uses adjacent-compare instead of a hash set.  It is only correct when the
+// underlying iterator delivers rows in ORDER BY order and every projected field
+// is covered by ORDER BY — in that case equal projected rows are guaranteed to
+// be adjacent, so a single prevKey []byte suffices for dedup (O(1) memory).
+func newDistinctAdjacentRowViewIteratorFactory(
+	ctx context.Context,
+	pager TxPager,
+	innerFactory func() RowViewIterator,
+	fieldIndexes []int,
+	columns []Column,
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) func() RowViewIterator {
+	return func() RowViewIterator {
+		inner := innerFactory()
+		var prevKey []byte
+		buf := make([]byte, 0, 64)
+		rem := remaining
+		off := offset
+		done := false
+
+		return newRowViewIteratorWithClose(func(iterCtx context.Context) (RowView, error) {
+			if done || (hasLimit && rem == 0) {
+				return RowView{}, ErrNoMoreRows
+			}
+			for {
+				if !inner.Next(iterCtx) {
+					done = true
+					if err := inner.Err(); err != nil {
+						return RowView{}, err
+					}
+					return RowView{}, ErrNoMoreRows
+				}
+				view := inner.RowView()
+				buf = buf[:0]
+				var err error
+				buf, err = appendDistinctKeyFromView(ctx, pager, buf, view, fieldIndexes, columns)
+				if err != nil {
+					return RowView{}, err
+				}
+				if bytes.Equal(buf, prevKey) {
+					continue
+				}
+				prevKey = append(prevKey[:0], buf...)
+				if hasOffset && off > 0 {
+					off--
+					continue
+				}
+				if hasLimit {
+					rem--
 				}
 				return view, nil
 			}
@@ -5553,6 +5634,39 @@ func distinctExtendOrderBy(orderBy []OrderBy, requestedFields []Field) []OrderBy
 		inOrderBy[f.Name] = struct{}{}
 	}
 	return extended
+}
+
+// allProjectedInOrderBy returns true when every non-expression field in
+// requestedFields is covered by an ORDER BY clause.  When the plan's index
+// already delivers rows in ORDER BY order (!SortInMemory), this means equal
+// projected rows arrive adjacently — adjacent-compare dedup is then O(1)
+// instead of an O(N) hash set.
+func allProjectedInOrderBy(requestedFields []Field, orderBy []OrderBy) bool {
+	if len(requestedFields) == 0 || len(orderBy) == 0 {
+		return false
+	}
+	inOrderBy := make(map[string]struct{}, len(orderBy)*2)
+	for _, clause := range orderBy {
+		inOrderBy[clause.Field.Name] = struct{}{}
+		if clause.Field.AliasPrefix != "" {
+			inOrderBy[clause.Field.AliasPrefix+"."+clause.Field.Name] = struct{}{}
+		}
+	}
+	for _, f := range requestedFields {
+		if f.Expr != nil {
+			return false
+		}
+		if _, ok := inOrderBy[f.Name]; ok {
+			continue
+		}
+		if f.AliasPrefix != "" {
+			if _, ok := inOrderBy[f.AliasPrefix+"."+f.Name]; ok {
+				continue
+			}
+		}
+		return false
+	}
+	return true
 }
 
 func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {
