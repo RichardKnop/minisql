@@ -69,6 +69,7 @@ for rows.Next() {
 | Section | What you'll find |
 |---------|-----------------|
 | [Getting Started](getting-started.md) | Installation, connection, first queries |
+| [CLI Shell](cli.md) | Interactive shell, `-c` flag, dot commands |
 | [Connection](connection.md) | DSN parameters, connection pooling |
 | [Architecture](architecture.md) | Storage, WAL, concurrency model |
 | [Data Types](data-types.md) | All supported column types |

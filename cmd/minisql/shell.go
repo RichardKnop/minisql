@@ -19,14 +19,14 @@ const (
 )
 
 type shell struct {
-	db        *sql.DB
-	out       io.Writer
-	mode      outputMode
-	timer     bool
-	buf       strings.Builder
-	scanner   *bufio.Scanner
-	filePath  string
-	isatty    bool
+	db       *sql.DB
+	out      io.Writer
+	mode     outputMode
+	timer    bool
+	buf      strings.Builder
+	scanner  *bufio.Scanner
+	filePath string
+	isatty   bool
 }
 
 func newShell(db *sql.DB, filePath string) *shell {
@@ -102,7 +102,7 @@ func statementComplete(buf string) bool {
 		case c == '\'' && !inDouble:
 			// Check for escaped quote (doubled).
 			if inSingle && i+1 < len(buf) && buf[i+1] == '\'' {
-				i++
+				i += 1
 			} else {
 				inSingle = !inSingle
 			}
@@ -153,7 +153,7 @@ func (s *shell) exec(query string) {
 			row[i] = formatValue(v)
 		}
 		resultRows = append(resultRows, row)
-		rowsAffected++
+		rowsAffected += 1
 	}
 	if err := rows.Err(); err != nil {
 		fmt.Fprintf(s.out, "Error: %v\n", err)

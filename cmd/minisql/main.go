@@ -2,26 +2,48 @@ package main
 
 import (
 	"database/sql"
+	"flag"
 	"fmt"
 	"os"
 
 	_ "github.com/RichardKnop/minisql"
 )
 
-const usage = `Usage: minisql <database-file>
+const usage = `Usage: minisql [options] <database-file>
 
 Opens (or creates) a MiniSQL database and starts an interactive SQL shell.
 SQL statements must be terminated with a semicolon (;).
 Enter ".help" for dot command reference.
+
+Options:
+  -c <query>   Execute a single SQL statement and exit (no shell).
+               May be specified multiple times to run several statements.
+  -csv         Set output mode to CSV (default: table).
+  -h, --help   Show this message.
+
+Examples:
+  minisql my.db
+  minisql -c 'select * from "users"' my.db
+  minisql -c 'create table "t" (id int8)' -c 'insert into "t" values (1)' my.db
+  minisql -csv -c 'select * from "users"' my.db
 `
 
 func main() {
-	if len(os.Args) != 2 || os.Args[1] == "-h" || os.Args[1] == "--help" {
+	var (
+		queries multiFlag
+		csvMode bool
+	)
+	flag.Var(&queries, "c", "SQL statement to execute (may be repeated)")
+	flag.BoolVar(&csvMode, "csv", false, "output in CSV format")
+	flag.Usage = func() { fmt.Fprint(os.Stderr, usage) }
+	flag.Parse()
+
+	if flag.NArg() != 1 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(1)
 	}
 
-	filePath := os.Args[1]
+	filePath := flag.Arg(0)
 
 	db, err := sql.Open("minisql", filePath)
 	if err != nil {
@@ -38,5 +60,32 @@ func main() {
 	}
 	defer db.Close()
 
-	newShell(db, filePath).run()
+	sh := newShell(db, filePath)
+	if csvMode {
+		sh.mode = modeCSV
+	}
+
+	if len(queries) > 0 {
+		for _, q := range queries {
+			sh.exec(q)
+		}
+		return
+	}
+
+	sh.run()
+}
+
+// multiFlag collects repeated -c flags into a slice.
+type multiFlag []string
+
+func (f *multiFlag) String() string {
+	if f == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", []string(*f))
+}
+
+func (f *multiFlag) Set(v string) error {
+	*f = append(*f, v)
+	return nil
 }
