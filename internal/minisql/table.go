@@ -33,6 +33,9 @@ type Table struct {
 	// parallelScan enables concurrent leaf-page scanning via parallelSequentialScan.
 	// Toggled by PRAGMA parallel_scan = on/off.
 	parallelScan bool
+	// sortMemLimit is the maximum bytes of row data to accumulate in memory before
+	// spilling a sorted run to a temp file. 0 disables external sort.
+	sortMemLimit int64
 	// ForeignKeys holds all outgoing FK constraints defined on this table.
 	ForeignKeys []ForeignKey
 	// fkColumnSet is a fast-lookup set of column names that are FK columns.

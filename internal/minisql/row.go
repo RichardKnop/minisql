@@ -1119,6 +1119,84 @@ func (r Row) NullBitmask() uint64 {
 	return bitmask
 }
 
+// UnmarshalRow decodes a row from the compact value bytes produced by Marshal,
+// using the provided schema, internal key, and null bitmask.
+// It mirrors the encoding in Marshal: NULLs (flagged in nullBitmask) consume no bytes.
+func UnmarshalRow(buf []byte, columns []Column, key RowID, nullBitmask uint64) (Row, error) {
+	values := make([]OptionalValue, len(columns))
+	offset := uint64(0)
+	for i, col := range columns {
+		if bitwise.IsSet(nullBitmask, i) {
+			values[i] = OptionalValue{Valid: false}
+			continue
+		}
+		switch col.Kind {
+		case Boolean:
+			if offset+1 > uint64(len(buf)) {
+				return Row{}, fmt.Errorf("UnmarshalRow: truncated at column %d (%s)", i, col.Name)
+			}
+			values[i] = OptionalValue{Value: unmarshalBool(buf, offset), Valid: true}
+			offset += 1
+		case Int4:
+			if offset+4 > uint64(len(buf)) {
+				return Row{}, fmt.Errorf("UnmarshalRow: truncated at column %d (%s)", i, col.Name)
+			}
+			values[i] = OptionalValue{Value: unmarshalInt32(buf, offset), Valid: true}
+			offset += 4
+		case Int8:
+			if offset+8 > uint64(len(buf)) {
+				return Row{}, fmt.Errorf("UnmarshalRow: truncated at column %d (%s)", i, col.Name)
+			}
+			values[i] = OptionalValue{Value: unmarshalInt64(buf, offset), Valid: true}
+			offset += 8
+		case Real:
+			if offset+4 > uint64(len(buf)) {
+				return Row{}, fmt.Errorf("UnmarshalRow: truncated at column %d (%s)", i, col.Name)
+			}
+			values[i] = OptionalValue{Value: unmarshalFloat32(buf, offset), Valid: true}
+			offset += 4
+		case Double:
+			if offset+8 > uint64(len(buf)) {
+				return Row{}, fmt.Errorf("UnmarshalRow: truncated at column %d (%s)", i, col.Name)
+			}
+			values[i] = OptionalValue{Value: unmarshalFloat64(buf, offset), Valid: true}
+			offset += 8
+		case Varchar, Text, JSON:
+			var tp TextPointer
+			if err := tp.Unmarshal(buf, offset); err != nil {
+				return Row{}, fmt.Errorf("UnmarshalRow: column %d (%s): %w", i, col.Name, err)
+			}
+			values[i] = OptionalValue{Value: tp, Valid: true}
+			offset += tp.Size()
+		case Timestamp:
+			if offset+8 > uint64(len(buf)) {
+				return Row{}, fmt.Errorf("UnmarshalRow: truncated at column %d (%s)", i, col.Name)
+			}
+			values[i] = OptionalValue{Value: TimestampMicros(unmarshalInt64(buf, offset)), Valid: true}
+			offset += 8
+		case UUID:
+			if offset+16 > uint64(len(buf)) {
+				return Row{}, fmt.Errorf("UnmarshalRow: truncated at column %d (%s)", i, col.Name)
+			}
+			var uuid UUIDValue
+			copy(uuid[:], buf[offset:offset+16])
+			values[i] = OptionalValue{Value: uuid, Valid: true}
+			offset += 16
+		case Vector:
+			if offset+8 > uint64(len(buf)) {
+				return Row{}, fmt.Errorf("UnmarshalRow: truncated at column %d (%s)", i, col.Name)
+			}
+			var vp VectorPointer
+			vp.Unmarshal(buf, offset)
+			values[i] = OptionalValue{Value: vp, Valid: true}
+			offset += 8
+		default:
+			return Row{}, fmt.Errorf("UnmarshalRow: unsupported column kind %s", col.Kind)
+		}
+	}
+	return Row{Columns: columns, Values: values, Key: key}, nil
+}
+
 func marshalBool(buf []byte, b bool, i uint64) []byte {
 	if b {
 		buf[i] = byte(1)

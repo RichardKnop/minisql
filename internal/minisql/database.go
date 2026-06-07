@@ -69,6 +69,9 @@ type Database struct {
 	// encryptionKey holds the caller-supplied raw key material used to derive
 	// the AES-256-CTR page cipher.  nil when encryption is disabled.
 	encryptionKey []byte
+	// sortMemLimit is the maximum bytes of row data accumulated in memory before
+	// spilling a sorted run to disk during ORDER BY. 0 disables external sort.
+	sortMemLimit int64
 }
 
 type clock func() Time
@@ -86,6 +89,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, par
 		rowCounts:          make(map[string]int64),
 		referencedBy:       make(map[string][]inboundFK),
 		foreignKeysEnabled: true,
+		sortMemLimit:       defaultSortMemLimit,
 		dbLock:             new(sync.RWMutex),
 		stmtCache:          lrucache.New[string](defaultMaxCachedStatements),
 		planCache:          lrucache.New[string](defaultMaxCachedPlans),
@@ -925,6 +929,7 @@ func (d *Database) tableFromSQL(ctx context.Context, schema Schema) (*Table, err
 	}
 
 	opts = append(opts, WithParallelScan(d.parallelScan))
+	opts = append(opts, withSortMemLimit(d.sortMemLimit))
 
 	if len(stmt.ForeignKeys) > 0 {
 		opts = append(opts, WithForeignKeys(stmt.ForeignKeys))
@@ -1470,6 +1475,7 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 	}
 
 	opts = append(opts, WithParallelScan(d.parallelScan))
+	opts = append(opts, withSortMemLimit(d.sortMemLimit))
 
 	if len(stmt.ForeignKeys) > 0 {
 		opts = append(opts, WithForeignKeys(stmt.ForeignKeys))
