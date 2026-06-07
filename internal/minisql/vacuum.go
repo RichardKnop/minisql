@@ -166,9 +166,10 @@ func (d *Database) vacuumWithKey(ctx context.Context, newKey []byte) error {
 		liveFields := fieldsFromColumns(liveTable.Columns...)
 		insertFields := fieldsFromColumns(tempTable.Columns...)
 
-		// Stream rows from the live table into one temp-table transaction.
-		// The temp database is discarded on any VACUUM failure, so per-row
-		// commits add cost without improving durability or correctness.
+		// Stream rows into one temp-table transaction. The temp database is not
+		// visible until the final atomic swap and is discarded on failure, so
+		// committing each copied row separately would add overhead without making
+		// the live database more durable or correct.
 		if err := tempDB.txManager.ExecuteInTransaction(tempCtx, func(copyCtx context.Context) error {
 			return d.txManager.ExecuteInTransaction(ctx, func(readCtx context.Context) error {
 				result, err := liveTable.Select(readCtx, Statement{
