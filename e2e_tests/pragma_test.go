@@ -117,6 +117,49 @@ func (s *TestSuite) TestPragma_Synchronous_SetNormal() {
 	s.Equal(int32(1), mode)
 }
 
+func (s *TestSuite) TestPragma_SortMemLimit_ReadDefault() {
+	rows, err := s.db.QueryContext(context.Background(), `PRAGMA sort_mem_limit;`)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	s.Require().NoError(err)
+	s.Equal([]string{"sort_mem_limit"}, cols)
+
+	s.Require().True(rows.Next())
+	var limit int64
+	s.Require().NoError(rows.Scan(&limit))
+	s.Equal(int64(4*1024*1024), limit)
+}
+
+func (s *TestSuite) TestPragma_SortMemLimit_Set() {
+	_, err := s.db.Exec(`PRAGMA sort_mem_limit = 1048576;`)
+	s.Require().NoError(err)
+
+	rows, err := s.db.QueryContext(context.Background(), `PRAGMA sort_mem_limit;`)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	s.Require().True(rows.Next())
+	var limit int64
+	s.Require().NoError(rows.Scan(&limit))
+	s.Equal(int64(1048576), limit)
+}
+
+func (s *TestSuite) TestPragma_SortMemLimit_SetZeroDisables() {
+	_, err := s.db.Exec(`PRAGMA sort_mem_limit = 0;`)
+	s.Require().NoError(err)
+
+	rows, err := s.db.QueryContext(context.Background(), `PRAGMA sort_mem_limit;`)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	s.Require().True(rows.Next())
+	var limit int64
+	s.Require().NoError(rows.Scan(&limit))
+	s.Equal(int64(0), limit)
+}
+
 func (s *TestSuite) collectPragmaResults(query string) []pragmaResult {
 	rows, err := s.db.QueryContext(context.Background(), query)
 	s.Require().NoError(err)

@@ -35,6 +35,13 @@ func WithParallelScan(enabled bool) TableOption {
 	}
 }
 
+// withSortMemLimit sets the sort-spill threshold for this table (package-internal).
+func withSortMemLimit(n int64) TableOption {
+	return func(t *Table) {
+		t.sortMemLimit = n
+	}
+}
+
 // WithForeignKeys sets the outgoing FK constraints on the table.
 func WithForeignKeys(fks []ForeignKey) TableOption {
 	return func(t *Table) {

@@ -33,6 +33,10 @@ const DefaultWALCheckpointThreshold = 1000
 // the cost of slightly higher data-loss exposure on unclean shutdown.
 const DefaultWALWriteBufferSize = 64 * 1024
 
+// DefaultSortMemLimit is the default maximum bytes of row data held in memory
+// before an ORDER BY query spills sorted runs to disk (4 MiB).
+const DefaultSortMemLimit = 4 * 1024 * 1024
+
 // ConnectionConfig holds parsed connection string parameters.
 type ConnectionConfig struct {
 	FilePath               string          // Database file path
@@ -44,6 +48,7 @@ type ConnectionConfig struct {
 	Synchronous            SynchronousMode // WAL fsync mode: off, normal (default), full
 	ParallelScan           bool            // Enable concurrent leaf-page scanning (default: false)
 	EncryptionKey          []byte          // AES-256-CTR page encryption key (nil = no encryption)
+	SortMemLimit           int64           // Max bytes in memory before ORDER BY spills to disk (default: 4 MiB; 0 = disabled)
 }
 
 // DefaultConnectionConfig returns default configuration.
@@ -55,6 +60,7 @@ func DefaultConnectionConfig(filePath string) *ConnectionConfig {
 		LogLevel:               "warn",
 		MaxCachedPages:         minisql.PageCacheSize,
 		Synchronous:            SynchronousNormal,
+		SortMemLimit:           DefaultSortMemLimit,
 	}
 }
 
@@ -184,6 +190,15 @@ func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 			return nil, fmt.Errorf("invalid encryption_key parameter: key must not be empty")
 		}
 		config.EncryptionKey = key
+	}
+
+	// Parse sort_mem_limit parameter (bytes; 0 = disable external sort)
+	if limitStr := queryParams.Get("sort_mem_limit"); limitStr != "" {
+		limit, err := strconv.ParseInt(limitStr, 10, 64)
+		if err != nil || limit < 0 {
+			return nil, fmt.Errorf("invalid sort_mem_limit parameter: must be a non-negative integer (bytes), got %q", limitStr)
+		}
+		config.SortMemLimit = limit
 	}
 
 	return config, nil

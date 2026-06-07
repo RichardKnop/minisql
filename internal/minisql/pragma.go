@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 )
 
 var errUnknownPragma = errors.New("unknown pragma")
@@ -48,6 +49,8 @@ func (d *Database) executePragmaStatement(ctx context.Context, stmt Statement) (
 		return d.executeParallelScanPragma(stmt)
 	case "foreign_keys":
 		return d.executeForeignKeysPragma(stmt)
+	case "sort_mem_limit":
+		return d.executeSortMemLimitPragma(stmt)
 	default:
 		return StatementResult{}, fmt.Errorf("%w: %s", errUnknownPragma, stmt.PragmaName)
 	}
@@ -124,6 +127,35 @@ func (d *Database) executeParallelScanPragma(stmt Statement) (StatementResult, e
 	d.dbLock.Unlock()
 
 	return boolPragmaResult(parallelScanResultColumns, enabled), nil
+}
+
+var sortMemLimitResultColumns = []Column{
+	{Kind: Int8, Size: 8, Name: "sort_mem_limit"},
+}
+
+func (d *Database) executeSortMemLimitPragma(stmt Statement) (StatementResult, error) {
+	if stmt.PragmaValue == "" {
+		d.dbLock.RLock()
+		limit := d.sortMemLimit
+		d.dbLock.RUnlock()
+		row := NewRowWithValues(sortMemLimitResultColumns, []OptionalValue{{Value: limit, Valid: true}})
+		return StatementResult{Columns: sortMemLimitResultColumns, Rows: rowsIterator([]Row{row})}, nil
+	}
+
+	n, err := strconv.ParseInt(stmt.PragmaValue, 10, 64)
+	if err != nil || n < 0 {
+		return StatementResult{}, fmt.Errorf("invalid sort_mem_limit value %q: expected a non-negative integer (bytes)", stmt.PragmaValue)
+	}
+
+	d.dbLock.Lock()
+	d.sortMemLimit = n
+	for _, table := range d.tables {
+		table.sortMemLimit = n
+	}
+	d.dbLock.Unlock()
+
+	row := NewRowWithValues(sortMemLimitResultColumns, []OptionalValue{{Value: n, Valid: true}})
+	return StatementResult{Columns: sortMemLimitResultColumns, Rows: rowsIterator([]Row{row})}, nil
 }
 
 func parseBoolPragma(s string) (bool, error) {

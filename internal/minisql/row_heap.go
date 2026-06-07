@@ -58,12 +58,12 @@ func (h *rowHeap) Swap(i, j int) {
 }
 
 // Push appends a row to the heap's backing slice; called by container/heap internals.
-func (h *rowHeap) Push(x interface{}) {
+func (h *rowHeap) Push(x any) {
 	h.rows = append(h.rows, x.(Row))
 }
 
 // Pop removes and returns the root element from the heap's backing slice; called by container/heap internals.
-func (h *rowHeap) Pop() interface{} {
+func (h *rowHeap) Pop() any {
 	old := h.rows
 	n := len(old)
 	x := old[n-1]

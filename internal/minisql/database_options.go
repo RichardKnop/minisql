@@ -10,6 +10,11 @@ type DatabaseOption func(*Database)
 const (
 	defaultMaxCachedStatements = 1000
 	defaultMaxCachedPlans      = 1000
+	defaultSortMemLimit        = 4 * 1024 * 1024 // 4 MiB
+
+	// DefaultSortMemLimit is the exported default for use by the root package's
+	// connection string parser.
+	DefaultSortMemLimit = defaultSortMemLimit
 )
 
 // WithMaxCachedStatements configures the maximum number of prepared statements to keep in the LRU cache.
@@ -36,6 +41,15 @@ func WithMaxCachedPlans(maxPlans int) DatabaseOption {
 func WithParallelScanEnabled() DatabaseOption {
 	return func(d *Database) {
 		d.parallelScan = true
+	}
+}
+
+// WithSortMemLimit sets the maximum bytes of row data accumulated in memory before
+// spilling to a temp file during an ORDER BY sort. 0 disables external sort.
+// The default is 4 MiB.
+func WithSortMemLimit(n int64) DatabaseOption {
+	return func(d *Database) {
+		d.sortMemLimit = n
 	}
 }
 

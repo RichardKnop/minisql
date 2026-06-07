@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -3844,16 +3845,6 @@ func (t *Table) selectWithSortRowView(
 		return StatementResult{}, false, nil
 	}
 
-	scan := plan.Scans[0]
-	allRows := make([]Row, 0)
-	err := t.scanProjectedRowViews(ctx, scan, selectedFields, fieldIndexes, sortColumns, func(row Row) error {
-		allRows = append(allRows, row)
-		return nil
-	})
-	if err != nil {
-		return StatementResult{}, true, err
-	}
-
 	// allOrderByInProjected is true when every ORDER BY column is already present
 	// in the projected (SELECT) fields — no extra sort-only column was appended by
 	// orderByHeapFields. In that case, extending the sort by the remaining projected
@@ -3865,8 +3856,73 @@ func (t *Table) selectWithSortRowView(
 	if stmt.Distinct && allOrderByInProjected {
 		effectiveOrderBy = distinctExtendOrderBy(plan.OrderBy, requestedFields)
 	}
-	if err := t.sortRows(allRows, effectiveOrderBy); err != nil {
+
+	scan := plan.Scans[0]
+	var (
+		allRows    []Row
+		accumBytes int64
+		tmpRuns    []string
+	)
+
+	flushRun := func() error {
+		if len(allRows) == 0 {
+			return nil
+		}
+		if err := t.sortRows(allRows, effectiveOrderBy); err != nil {
+			return err
+		}
+		w, err := newRunWriter()
+		if err != nil {
+			return err
+		}
+		for _, r := range allRows {
+			if wErr := w.writeRow(r); wErr != nil {
+				_ = w.close()
+				return wErr
+			}
+		}
+		path := w.filePath()
+		if err := w.close(); err != nil {
+			return err
+		}
+		tmpRuns = append(tmpRuns, path)
+		allRows = allRows[:0]
+		accumBytes = 0
+		return nil
+	}
+
+	err := t.scanProjectedRowViews(ctx, scan, selectedFields, fieldIndexes, sortColumns, func(row Row) error {
+		accumBytes += int64(row.Size()) + 16 // 8-byte RowID + 8-byte NullBitmask
+		allRows = append(allRows, row)
+		if t.sortMemLimit > 0 && accumBytes >= t.sortMemLimit {
+			return flushRun()
+		}
+		return nil
+	})
+	if err != nil {
+		for _, p := range tmpRuns {
+			_ = os.Remove(p)
+		}
 		return StatementResult{}, true, err
+	}
+
+	if len(tmpRuns) > 0 {
+		// External merge: sort remaining in-memory rows, then N-way merge all runs.
+		if err := t.sortRows(allRows, effectiveOrderBy); err != nil {
+			for _, p := range tmpRuns {
+				_ = os.Remove(p)
+			}
+			return StatementResult{}, true, err
+		}
+		merged, err := t.externalSortMerge(tmpRuns, allRows, sortColumns, effectiveOrderBy)
+		if err != nil {
+			return StatementResult{}, true, err
+		}
+		allRows = merged
+	} else {
+		if err := t.sortRows(allRows, effectiveOrderBy); err != nil {
+			return StatementResult{}, true, err
+		}
 	}
 
 	if stmt.Distinct {
