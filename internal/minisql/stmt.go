@@ -1944,18 +1944,16 @@ func (s Statement) validateSelect(table *Table) error {
 		}
 	}
 
-	// GROUP BY cannot be combined with JOINs (not yet supported).
-	if len(s.GroupBy) > 0 && len(s.Joins) > 0 {
-		return errors.New("GROUP BY cannot be combined with JOIN")
-	}
-
 	// HAVING requires GROUP BY.
 	if len(s.Having) > 0 && len(s.GroupBy) == 0 {
 		return errors.New("HAVING requires GROUP BY")
 	}
 
 	// HAVING condition fields must be aggregate functions or GROUP BY columns.
-	if len(s.Having) > 0 {
+	// For JOIN queries, HAVING references use alias-qualified column names (e.g.
+	// "SUM(o.total_paid)") that cannot be resolved against a single table schema at
+	// parse time — skip the validation and rely on execution-time errors.
+	if len(s.Having) > 0 && len(s.Joins) == 0 {
 		groupBySet := make(map[string]struct{}, len(s.GroupBy))
 		for _, f := range s.GroupBy {
 			groupBySet[f.Name] = struct{}{}
@@ -1991,13 +1989,28 @@ func (s Statement) validateSelect(table *Table) error {
 			agg := s.Aggregates[i]
 			if agg.Kind == 0 {
 				// Non-aggregate column must appear in GROUP BY.
+				// Check both the bare name and the alias-qualified name (e.g. "user_id"
+				// and "o.user_id") so that JOIN queries with qualified SELECT columns
+				// match GROUP BY entries that use the full qualified form.
+				qualified := field.Name
+				if field.AliasPrefix != "" {
+					qualified = field.AliasPrefix + "." + field.Name
+				}
 				if _, ok := groupBySet[field.Name]; !ok {
-					return fmt.Errorf("non-aggregate column %q must appear in GROUP BY", field.Name)
+					if _, ok := groupBySet[qualified]; !ok {
+						return fmt.Errorf("non-aggregate column %q must appear in GROUP BY", field.Name)
+					}
 				}
 				continue
 			}
 			if agg.Column == "" {
 				continue // COUNT(*) has no source column to validate
+			}
+			// For JOIN queries, aggregate columns are alias-qualified (e.g. "o.total_paid")
+			// and cannot be resolved against a single table schema at parse time.
+			// Execution validates them against the combined join schema.
+			if len(s.Joins) > 0 {
+				continue
 			}
 			col, ok := table.ColumnByName(agg.Column)
 			if !ok {
@@ -2014,9 +2027,12 @@ func (s Statement) validateSelect(table *Table) error {
 		}
 
 		// Validate GROUP BY columns exist in the table schema.
-		for _, f := range s.GroupBy {
-			if _, ok := table.ColumnByName(f.Name); !ok {
-				return fmt.Errorf("unknown GROUP BY column %q in table %q", f.Name, table.Name)
+		// Skip for JOIN queries: GROUP BY columns are alias-qualified and span multiple tables.
+		if len(s.Joins) == 0 {
+			for _, f := range s.GroupBy {
+				if _, ok := table.ColumnByName(f.Name); !ok {
+					return fmt.Errorf("unknown GROUP BY column %q in table %q", f.Name, table.Name)
+				}
 			}
 		}
 
