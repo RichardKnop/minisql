@@ -1,6 +1,7 @@
 package minisql
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -816,7 +817,6 @@ type groupByAccumulator struct {
 	fieldToGroupByIdx []int
 	groupMap          map[string]int32
 	groupEntries      []groupEntry
-	groupOrder        []string
 	aggStatePool      []groupAggState
 	groupValPool      []OptionalValue
 	keyBuf            []byte
@@ -943,7 +943,6 @@ func newGroupByAccumulator(stmt Statement, t *Table, estRows int) *groupByAccumu
 		fieldToGroupByIdx: fieldToGroupByIdx,
 		groupMap:          make(map[string]int32, estGroups),
 		groupEntries:      make([]groupEntry, 0, estGroups),
-		groupOrder:        make([]string, 0, estGroups),
 		aggStatePool:      make([]groupAggState, 0, estGroups*numAggs),
 		groupValPool:      make([]OptionalValue, 0, estGroups*numGroupBy),
 		minMaxPool:        minMaxPool,
@@ -958,10 +957,10 @@ func newGroupByAccumulator(stmt Statement, t *Table, estRows int) *groupByAccumu
 func (acc *groupByAccumulator) process(row Row) {
 	acc.keyBuf = buildGroupKey(acc.keyBuf[:0], row, acc.groupByColIdx)
 
+	// Use string(acc.keyBuf) only for the map lookup — the compiler elides the
+	// allocation when the string is used solely as a map key (no escape).
 	gsIdx, exists := acc.groupMap[string(acc.keyBuf)]
 	if !exists {
-		key := string(acc.keyBuf) // one alloc per new group
-
 		aggStart := int32(len(acc.aggStatePool))
 		for i := range len(acc.aggregates) {
 			acc.aggStatePool = append(acc.aggStatePool, groupAggState{useIntSum: acc.useIntSum[i]})
@@ -990,8 +989,7 @@ func (acc *groupByAccumulator) process(row Row) {
 			groupValStart: gvStart,
 			minMaxStart:   mmStart,
 		})
-		acc.groupMap[key] = gsIdx
-		acc.groupOrder = append(acc.groupOrder, key)
+		acc.groupMap[string(acc.keyBuf)] = gsIdx
 	}
 
 	aggBase := int(acc.groupEntries[gsIdx].aggStateStart)
@@ -1067,8 +1065,6 @@ func (acc *groupByAccumulator) processView(view RowView) error {
 
 	gsIdx, exists := acc.groupMap[string(acc.keyBuf)]
 	if !exists {
-		key := string(acc.keyBuf) // one alloc per new group
-
 		aggStart := int32(len(acc.aggStatePool))
 		for i := range len(acc.aggregates) {
 			acc.aggStatePool = append(acc.aggStatePool, groupAggState{useIntSum: acc.useIntSum[i]})
@@ -1101,8 +1097,7 @@ func (acc *groupByAccumulator) processView(view RowView) error {
 			groupValStart: gvStart,
 			minMaxStart:   mmStart,
 		})
-		acc.groupMap[key] = gsIdx
-		acc.groupOrder = append(acc.groupOrder, key)
+		acc.groupMap[string(acc.keyBuf)] = gsIdx
 	}
 
 	aggBase := int(acc.groupEntries[gsIdx].aggStateStart)
@@ -1285,9 +1280,66 @@ func (t *Table) selectGroupByZeroAlloc(ctx context.Context, stmt Statement, scan
 	return acc.buildResult(stmt, t)
 }
 
+// computeGroupValues fills values[0:nFields] with the aggregate results for the
+// gi-th group (in insertion order). The caller must pre-allocate values.
+func (acc *groupByAccumulator) computeGroupValues(gi int, values []OptionalValue) {
+	entry := acc.groupEntries[gi]
+	aggBase := int(entry.aggStateStart)
+	gvBase := int(entry.groupValStart)
+	mmBase := int(entry.minMaxStart)
+	for i, agg := range acc.aggregates {
+		switch agg.Kind {
+		case 0:
+			if j := acc.fieldToGroupByIdx[i]; j >= 0 {
+				values[i] = acc.groupValPool[gvBase+j]
+			} else {
+				values[i] = OptionalValue{}
+			}
+		case AggregateCount:
+			values[i] = OptionalValue{Valid: true, Value: acc.aggStatePool[aggBase+i].count}
+		case AggregateSum:
+			st := acc.aggStatePool[aggBase+i]
+			if st.hasValue {
+				if st.useIntSum {
+					values[i] = OptionalValue{Valid: true, Value: st.sumI}
+				} else {
+					values[i] = OptionalValue{Valid: true, Value: st.sumF}
+				}
+			} else {
+				values[i] = OptionalValue{}
+			}
+		case AggregateAvg:
+			st := acc.aggStatePool[aggBase+i]
+			if st.hasValue && st.count > 0 {
+				if st.useIntSum {
+					values[i] = OptionalValue{Valid: true, Value: float64(st.sumI) / float64(st.count)}
+				} else {
+					values[i] = OptionalValue{Valid: true, Value: st.sumF / float64(st.count)}
+				}
+			} else {
+				values[i] = OptionalValue{}
+			}
+		case AggregateMin:
+			slot := mmBase + acc.minMaxAggSlot[i]
+			if acc.minMaxPool[slot].Valid {
+				values[i] = acc.minMaxPool[slot]
+			} else {
+				values[i] = OptionalValue{}
+			}
+		case AggregateMax:
+			slot := mmBase + acc.minMaxAggSlot[i]
+			if acc.minMaxPool[slot].Valid {
+				values[i] = acc.minMaxPool[slot]
+			} else {
+				values[i] = OptionalValue{}
+			}
+		}
+	}
+}
+
 func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementResult, error) {
 	nFields := len(stmt.Fields)
-	nGroups := len(acc.groupOrder)
+	nGroups := len(acc.groupEntries)
 
 	// Build result column metadata.
 	resultColumns := make([]Column, nFields)
@@ -1319,57 +1371,14 @@ func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementR
 	}
 
 	// Preallocate one flat block for all group values — one alloc covers every group.
-	// passedIndices tracks which group indices passed HAVING, using int32 (4 bytes each)
-	// instead of full Row structs (48 bytes each).
+	// passedIndices tracks which groups passed HAVING, using int32 (4 bytes each)
+	// instead of full Row structs.
 	allResultValues := make([]OptionalValue, nGroups*nFields)
 	passedIndices := make([]int32, 0, nGroups)
 
-	for gi, key := range acc.groupOrder {
-		gsIdx := acc.groupMap[key]
-		aggBase := int(acc.groupEntries[gsIdx].aggStateStart)
-		gvBase := int(acc.groupEntries[gsIdx].groupValStart)
-		mmBase := int(acc.groupEntries[gsIdx].minMaxStart)
-
+	for gi := range nGroups {
 		values := allResultValues[gi*nFields : (gi+1)*nFields]
-
-		for i, agg := range acc.aggregates {
-			switch agg.Kind {
-			case 0:
-				if j := acc.fieldToGroupByIdx[i]; j >= 0 {
-					values[i] = acc.groupValPool[gvBase+j]
-				}
-			case AggregateCount:
-				values[i] = OptionalValue{Valid: true, Value: acc.aggStatePool[aggBase+i].count}
-			case AggregateSum:
-				st := acc.aggStatePool[aggBase+i]
-				if st.hasValue {
-					if st.useIntSum {
-						values[i] = OptionalValue{Valid: true, Value: st.sumI}
-					} else {
-						values[i] = OptionalValue{Valid: true, Value: st.sumF}
-					}
-				}
-			case AggregateAvg:
-				st := acc.aggStatePool[aggBase+i]
-				if st.hasValue && st.count > 0 {
-					if st.useIntSum {
-						values[i] = OptionalValue{Valid: true, Value: float64(st.sumI) / float64(st.count)}
-					} else {
-						values[i] = OptionalValue{Valid: true, Value: st.sumF / float64(st.count)}
-					}
-				}
-			case AggregateMin:
-				slot := mmBase + acc.minMaxAggSlot[i]
-				if acc.minMaxPool[slot].Valid {
-					values[i] = acc.minMaxPool[slot]
-				}
-			case AggregateMax:
-				slot := mmBase + acc.minMaxAggSlot[i]
-				if acc.minMaxPool[slot].Valid {
-					values[i] = acc.minMaxPool[slot]
-				}
-			}
-		}
+		acc.computeGroupValues(gi, values)
 
 		// Apply HAVING filter against the computed aggregate row.
 		if len(stmt.Having) > 0 {
@@ -1490,10 +1499,15 @@ func (t *Table) selectStreamingDirect(
 		offset = stmt.Offset.Value.(int64)
 	}
 
+	// When the index delivers rows in ORDER BY order and every projected field
+	// is in ORDER BY, equal projected rows are adjacent → adjacent-compare dedup
+	// uses O(1) memory instead of an O(N) hash set.
+	adjacentDedup := stmt.Distinct && !plan.SortInMemory && len(plan.OrderBy) > 0 && allProjectedInOrderBy(requestedFields, plan.OrderBy)
 	var seen map[string]struct{}
-	if stmt.Distinct {
+	if stmt.Distinct && !adjacentDedup {
 		seen = make(map[string]struct{})
 	}
+	var prevDistinctKey string
 
 	// When LIMIT is present, pre-size to exactly the limit so append never reallocates.
 	// Without LIMIT, start empty and grow as needed.
@@ -1511,10 +1525,17 @@ func (t *Table) selectStreamingDirect(
 		}
 		if stmt.Distinct {
 			key := p.rowDistinctKey()
-			if _, dup := seen[key]; dup {
-				return nil
+			if adjacentDedup {
+				if key == prevDistinctKey {
+					return nil
+				}
+				prevDistinctKey = key
+			} else {
+				if _, dup := seen[key]; dup {
+					return nil
+				}
+				seen[key] = struct{}{}
 			}
-			seen[key] = struct{}{}
 		}
 		if hasOffset && offset > 0 {
 			offset -= 1
@@ -1855,11 +1876,19 @@ func (t *Table) selectStreamingDirectRowView(
 	}
 
 	if stmt.Distinct {
-		distinctFactory := newDistinctRowViewIteratorFactory(
-			ctx, t.pager, newRowViewIter, fieldIndexes, t.Columns,
-			distinctSeenCapacityFromEstimate(t.estimatedRowCount()),
-			remaining, offset, hasLimit, hasOffset,
-		)
+		var distinctFactory func() RowViewIterator
+		if !plan.SortInMemory && allProjectedInOrderBy(requestedFields, plan.OrderBy) {
+			distinctFactory = newDistinctAdjacentRowViewIteratorFactory(
+				ctx, t.pager, newRowViewIter, fieldIndexes, t.Columns,
+				remaining, offset, hasLimit, hasOffset,
+			)
+		} else {
+			distinctFactory = newDistinctRowViewIteratorFactory(
+				ctx, t.pager, newRowViewIter, fieldIndexes, t.Columns,
+				distinctSeenCapacityFromEstimate(t.estimatedRowCount()),
+				remaining, offset, hasLimit, hasOffset,
+			)
+		}
 		result.RowViews = distinctFactory()
 		result.RowViewPager = t.pager
 		result.RowViewFieldIndexes = fieldIndexes
@@ -3278,6 +3307,66 @@ func newDistinctRowViewIteratorFactory(
 	}
 }
 
+// newDistinctAdjacentRowViewIteratorFactory is like newDistinctRowViewIteratorFactory
+// but uses adjacent-compare instead of a hash set.  It is only correct when the
+// underlying iterator delivers rows in ORDER BY order and every projected field
+// is covered by ORDER BY — in that case equal projected rows are guaranteed to
+// be adjacent, so a single prevKey []byte suffices for dedup (O(1) memory).
+func newDistinctAdjacentRowViewIteratorFactory(
+	ctx context.Context,
+	pager TxPager,
+	innerFactory func() RowViewIterator,
+	fieldIndexes []int,
+	columns []Column,
+	remaining int64,
+	offset int64,
+	hasLimit bool,
+	hasOffset bool,
+) func() RowViewIterator {
+	return func() RowViewIterator {
+		inner := innerFactory()
+		var prevKey []byte
+		buf := make([]byte, 0, 64)
+		rem := remaining
+		off := offset
+		done := false
+
+		return newRowViewIteratorWithClose(func(iterCtx context.Context) (RowView, error) {
+			if done || (hasLimit && rem == 0) {
+				return RowView{}, ErrNoMoreRows
+			}
+			for {
+				if !inner.Next(iterCtx) {
+					done = true
+					if err := inner.Err(); err != nil {
+						return RowView{}, err
+					}
+					return RowView{}, ErrNoMoreRows
+				}
+				view := inner.RowView()
+				buf = buf[:0]
+				var err error
+				buf, err = appendDistinctKeyFromView(ctx, pager, buf, view, fieldIndexes, columns)
+				if err != nil {
+					return RowView{}, err
+				}
+				if bytes.Equal(buf, prevKey) {
+					continue
+				}
+				prevKey = append(prevKey[:0], buf...)
+				if hasOffset && off > 0 {
+					off--
+					continue
+				}
+				if hasLimit {
+					rem--
+				}
+				return view, nil
+			}
+		}, inner.Close)
+	}
+}
+
 func (t *Table) selectStreaming(stmt Statement, scanned []Row, requestedFields []Field) (StatementResult, error) {
 	result := StatementResult{
 		Columns: t.selectResultColumns(stmt, requestedFields),
@@ -3765,12 +3854,27 @@ func (t *Table) selectWithSortRowView(
 		return StatementResult{}, true, err
 	}
 
-	if err := t.sortRows(allRows, plan.OrderBy); err != nil {
+	// allOrderByInProjected is true when every ORDER BY column is already present
+	// in the projected (SELECT) fields — no extra sort-only column was appended by
+	// orderByHeapFields. In that case, extending the sort by the remaining projected
+	// fields guarantees equal projected rows are adjacent → hash-free adjacent dedup.
+	// When ORDER BY references columns outside the SELECT list, duplicate projected
+	// rows can land non-adjacently after sorting, so we must fall back to the hash set.
+	allOrderByInProjected := len(sortFields) == len(requestedFields)
+	effectiveOrderBy := plan.OrderBy
+	if stmt.Distinct && allOrderByInProjected {
+		effectiveOrderBy = distinctExtendOrderBy(plan.OrderBy, requestedFields)
+	}
+	if err := t.sortRows(allRows, effectiveOrderBy); err != nil {
 		return StatementResult{}, true, err
 	}
 
 	if stmt.Distinct {
-		allRows = deduplicateRows(allRows, requestedFields)
+		if allOrderByInProjected {
+			allRows = deduplicateSortedRows(allRows, requestedFields)
+		} else {
+			allRows = deduplicateRows(allRows, requestedFields)
+		}
 	}
 
 	offset := 0
@@ -5451,6 +5555,8 @@ func (r Row) rowDistinctKey() string {
 
 // deduplicateRows removes duplicate rows based on their projected values for the given fields.
 // It preserves the first occurrence of each unique row and maintains input order.
+// Uses a hash set — call deduplicateSortedRows instead when the rows are already sorted
+// by (at least) all of fields, which avoids the map allocation entirely.
 func deduplicateRows(rows []Row, fields []Field) []Row {
 	seen := make(map[string]struct{}, len(rows))
 	out := make([]Row, 0, len(rows))
@@ -5464,6 +5570,103 @@ func deduplicateRows(rows []Row, fields []Field) []Row {
 		out = append(out, row)
 	}
 	return out
+}
+
+// deduplicateSortedRows removes duplicate rows by comparing adjacent pairs.
+// rows must be sorted such that equal projected rows (same values for fields) are
+// adjacent — use distinctExtendOrderBy to guarantee this before calling sortRows.
+// In-place: returns a sub-slice of the input; no heap allocation.
+func deduplicateSortedRows(rows []Row, fields []Field) []Row {
+	if len(rows) <= 1 {
+		return rows
+	}
+	w := 1
+	for i := 1; i < len(rows); i++ {
+		equal := true
+		for _, f := range fields {
+			va, _ := rows[i].getValueQualified(f.AliasPrefix, f.Name)
+			vb, _ := rows[w-1].getValueQualified(f.AliasPrefix, f.Name)
+			if compareValues(va, vb) != 0 {
+				equal = false
+				break
+			}
+		}
+		if !equal {
+			rows[w] = rows[i]
+			w++
+		}
+	}
+	return rows[:w]
+}
+
+// distinctExtendOrderBy returns an extended ORDER BY slice that appends any
+// requestedFields not already present in orderBy as ascending tiebreakers.
+// This guarantees that equal projected rows are adjacent after sorting,
+// enabling hash-free deduplication via deduplicateSortedRows.
+func distinctExtendOrderBy(orderBy []OrderBy, requestedFields []Field) []OrderBy {
+	if len(requestedFields) == 0 {
+		return orderBy
+	}
+	inOrderBy := make(map[string]struct{}, len(orderBy)*2)
+	for _, clause := range orderBy {
+		inOrderBy[clause.Field.Name] = struct{}{}
+		if clause.Field.AliasPrefix != "" {
+			inOrderBy[clause.Field.AliasPrefix+"."+clause.Field.Name] = struct{}{}
+		}
+	}
+	extended := make([]OrderBy, len(orderBy), len(orderBy)+len(requestedFields))
+	copy(extended, orderBy)
+	for _, f := range requestedFields {
+		if f.Expr != nil {
+			continue
+		}
+		key := f.Name
+		if _, ok := inOrderBy[key]; ok {
+			continue
+		}
+		if f.AliasPrefix != "" {
+			qualified := f.AliasPrefix + "." + f.Name
+			if _, ok := inOrderBy[qualified]; ok {
+				continue
+			}
+		}
+		extended = append(extended, OrderBy{Field: f, Direction: Asc})
+		inOrderBy[f.Name] = struct{}{}
+	}
+	return extended
+}
+
+// allProjectedInOrderBy returns true when every non-expression field in
+// requestedFields is covered by an ORDER BY clause.  When the plan's index
+// already delivers rows in ORDER BY order (!SortInMemory), this means equal
+// projected rows arrive adjacently — adjacent-compare dedup is then O(1)
+// instead of an O(N) hash set.
+func allProjectedInOrderBy(requestedFields []Field, orderBy []OrderBy) bool {
+	if len(requestedFields) == 0 || len(orderBy) == 0 {
+		return false
+	}
+	inOrderBy := make(map[string]struct{}, len(orderBy)*2)
+	for _, clause := range orderBy {
+		inOrderBy[clause.Field.Name] = struct{}{}
+		if clause.Field.AliasPrefix != "" {
+			inOrderBy[clause.Field.AliasPrefix+"."+clause.Field.Name] = struct{}{}
+		}
+	}
+	for _, f := range requestedFields {
+		if f.Expr != nil {
+			return false
+		}
+		if _, ok := inOrderBy[f.Name]; ok {
+			continue
+		}
+		if f.AliasPrefix != "" {
+			if _, ok := inOrderBy[f.AliasPrefix+"."+f.Name]; ok {
+				continue
+			}
+		}
+		return false
+	}
+	return true
 }
 
 func (t *Table) sequentialScan(ctx context.Context, scan Scan, selectedFields []Field, out func(Row) error) error {

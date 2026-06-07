@@ -3,13 +3,13 @@
 ## Current Baseline
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
-**Branch:** `codex/profile-remaining-outliers`  
-**Command:** `make bench BENCH_COUNT=1` followed by `make bench-report`; HNSW tables refreshed with targeted `go test -tags bench -bench '^BenchmarkHNSW_...' -benchmem` runs; DISTINCT/subquery rows refreshed with `go test -tags bench -run '^$' -bench 'Benchmark(Distinct_HighCardinality|Subquery_InList)$' -benchmem -count=1 ./benchmarks/`; VACUUM row refreshed with `go test -tags bench -run '^$' -bench '^BenchmarkVacuum_Small$' -benchmem -count=1 ./benchmarks/`; latest subquery and HNSW build rows refreshed with `go test -tags bench -run '^$' -bench '^BenchmarkSubquery_InList$' -benchmem -count=1 ./benchmarks/` and `go test -tags bench -run '^$' -bench '^BenchmarkHNSW_BuildIndex$' -benchmem -benchtime=1x ./benchmarks/`  
-**GOMAXPROCS:** 10  
+**Branch:** `main`  
+**Command:** `go test -tags bench ./benchmarks/ -run='^$' -bench='...' -benchmem -count=3` for each family; HNSW rows from a previous run (unchanged — HNSW build takes 50+ s per sub-benchmark). All other rows refreshed 2026-06-07.  
+**GOMAXPROCS:** 10
 
-SQLite comparisons use the `sqlite` driver compiled into the same test binary. MiniSQL benchmarks run against fresh temp-file databases per sub-benchmark. Times are wall-clock (`ns/op`); memory figures are heap allocations reported by the Go runtime.
+SQLite comparisons use the `sqlite` driver compiled into the same test binary. MiniSQL benchmarks run against fresh temp-file databases per sub-benchmark. Times are wall-clock (`ns/op`) median of 3 runs; memory figures are heap allocations reported by the Go runtime.
 
-This file was refreshed from scratch after the latest DML allocation work, including transaction write-set inlining, auto-commit transaction reuse, direct prepared DML argument binding, and HNSW typed candidate-heap allocation reduction. DISTINCT/subquery rows were subsequently refreshed after RowView predicate fast paths and DISTINCT seen-set pre-sizing. VACUUM was refreshed after streaming row copy into the temporary compacted database. Subquery and HNSW build rows were refreshed again after typed semi-join membership and per-node HNSW neighbor backing allocation.
+This file was refreshed after the GROUP BY + JOIN support addition, the `groupOrder` slice removal from `groupByAccumulator`, and the `computeGroupValues` refactor. The GROUP BY / HAVING memory is modestly improved (was 35.5 / 27.4 KiB, now 33.6 / 25.6 KiB) after eliminating the redundant per-group string copy in `groupOrder`. A new `DISTINCT + ORDER BY indexed` row was added (2026-06-07) to capture the streaming adjacent-compare dedup path that activates when an index covers the ORDER BY columns.
 
 ---
 
@@ -21,91 +21,93 @@ The results are grouped by benchmark family so each table can be read without ho
 
 | Benchmark | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs |
 |---|---|---|---|---|---|---|
-| Point scan | 4.80 µs | 3.47 µs | 1.4× | 3.7 KiB | 679 B | 47 / 26 |
-| Limit | 7.13 µs | 7.95 µs | 0.9× | 3.8 KiB | 1.7 KiB | 97 / 104 |
-| Full scan | 3.65 ms | 5.12 ms | 0.7× | 1.23 MiB | 1.29 MiB | 79,822 / 99,758 |
-| Count star | 6.30 µs | 9.65 µs | 0.7× | 2.6 KiB | 400 B | 27 / 13 |
-| Index range scan | 670.66 µs | 752.23 µs | 0.9× | 83.8 KiB | 85.9 KiB | 5,539 / 6,581 |
-| Secondary index, low selectivity | 1.76 ms | 2.67 ms | 0.7× | 314.9 KiB | 313.0 KiB | 24,920 / 29,886 |
-| Secondary index, low selectivity limit | 7.90 µs | 8.32 µs | 1.0× | 4.1 KiB | 1.1 KiB | 89 / 64 |
-| Range scan | 1.49 ms | 879.16 µs | 1.7× | 80.8 KiB | 85.9 KiB | 5,507 / 6,581 |
+| Point scan | 6.39 µs | 4.15 µs | 1.5× | 3.7 KiB | 679 B | 47 / 26 |
+| Limit | 8.77 µs | 9.66 µs | 0.9× | 3.8 KiB | 1.7 KiB | 97 / 104 |
+| Full scan | 4.42 ms | 6.12 ms | 0.7× | 1.23 MiB | 1.29 MiB | 79,823 / 99,758 |
+| Count star | 7.65 µs | 10.93 µs | 0.7× | 2.6 KiB | 400 B | 27 / 13 |
+| Index range scan | 1.11 ms | 879.6 µs | 1.3× | 83.8 KiB | 85.9 KiB | 5,539 / 6,581 |
+| Secondary index, low selectivity | 2.01 ms | 3.14 ms | 0.6× | 315.0 KiB | 313.0 KiB | 24,920 / 29,886 |
+| Secondary index, low selectivity limit | 9.41 µs | 9.30 µs | 1.0× | 4.1 KiB | 1.1 KiB | 89 / 64 |
+| Range scan | 879.6 µs | 1.01 ms | 0.9× | 80.8 KiB | 85.9 KiB | 5,511 / 6,581 |
 
 ### INSERT, UPDATE, DELETE, and Constraints
 
 | Benchmark | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs |
 |---|---|---|---|---|---|---|
-| Insert single row | 10.88 µs | 43.95 µs | 0.2× | 2.1 KiB | 311 B | 31 / 12 |
-| Insert batch | 369.66 µs | 253.47 µs | 1.5× | 133.6 KiB | 31.0 KiB | 2,637 / 1,300 |
-| Insert prepared batch | 396.14 µs | 234.67 µs | 1.7× | 132.5 KiB | 31.0 KiB | 2,634 / 1,300 |
-| Insert multi-values | 198.06 µs | 177.99 µs | 1.1× | 109.6 KiB | 25.2 KiB | 1,757 / 616 |
-| Update by PK | 8.26 µs | 37.67 µs | 0.2× | 3.8 KiB | 263 B | 40 / 10 |
-| Delete by PK | 16.80 µs | 78.92 µs | 0.2× | 3.3 KiB | 447 B | 55 / 19 |
-| ON CONFLICT DO UPDATE | 7.42 µs | 36.39 µs | 0.2× | 1.6 KiB | 260 B | 31 / 10 |
-| Foreign key insert | 11.32 µs | 43.07 µs | 0.3× | 1.9 KiB | 192 B | 28 / 8 |
-| Foreign key delete cascade | 23.35 µs | 50.96 µs | 0.5× | 7.2 KiB | 128 B | 112 / 5 |
+| Insert single row | 12.67 µs | 54.64 µs | 0.2× | 2.1 KiB | 311 B | 31 / 12 |
+| Insert batch | 437.0 µs | 309.3 µs | 1.4× | 133.6 KiB | 31.0 KiB | 2,632 / 1,299 |
+| Insert prepared batch | 402.6 µs | 249.8 µs | 1.6× | 132.4 KiB | 31.0 KiB | 2,633 / 1,299 |
+| Insert multi-values | 219.5 µs | 193.3 µs | 1.1× | 109.5 KiB | 25.2 KiB | 1,756 / 616 |
+| Update by PK | 9.81 µs | 47.98 µs | 0.2× | 3.8 KiB | 263 B | 40 / 10 |
+| Delete by PK | 18.48 µs | 103.2 µs | 0.2× | 3.3 KiB | 447 B | 55 / 19 |
+| ON CONFLICT DO UPDATE | 9.08 µs | 43.20 µs | 0.2× | 1.6 KiB | 259 B | 31 / 10 |
+| Foreign key insert | 12.28 µs | 57.78 µs | 0.2× | 1.9 KiB | 191 B | 28 / 8 |
+| Foreign key delete cascade | 51.50 µs | 83.25 µs | 0.6× | 7.2 KiB | 128 B | 111 / 5 |
 
 ### Aggregates, DISTINCT, CTE, and Subquery
 
 | Benchmark | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs |
 |---|---|---|---|---|---|---|
-| GROUP BY aggregate | 979.73 µs | 2.10 ms | 0.5× | 35.5 KiB | 3.5 KiB | 459 / 309 |
-| HAVING filter | 741.87 µs | 1.95 ms | 0.4× | 27.4 KiB | 1.9 KiB | 264 / 111 |
-| DISTINCT high cardinality | 4.10 ms | 8.44 ms | 0.5× | 1.26 MiB | 586.3 KiB | 40,093 / 40,010 |
-| CTE materialise | 793.64 µs | 437.25 µs | 1.8× | 6.6 KiB | 400 B | 86 / 13 |
-| Subquery IN list | 4.46 ms | 5.81 ms | 0.8× | 559.1 KiB | 234.7 KiB | 15,198 / 20,010 |
+| GROUP BY aggregate | 987.1 µs | 2.31 ms | 0.4× | 33.6 KiB | 3.5 KiB | 458 / 309 |
+| HAVING filter | 822.4 µs | 2.10 ms | 0.4× | 25.6 KiB | 1.9 KiB | 263 / 111 |
+| DISTINCT high cardinality | 3.17 ms | 6.39 ms | 0.5× | 1.27 MiB | 586.3 KiB | 40,093 / 40,010 |
+| DISTINCT + ORDER BY high cardinality | 4.46 ms | 5.79 ms | 0.8× | 4.53 MiB | 586.3 KiB | 90,097 / 40,010 |
+| DISTINCT + ORDER BY indexed | 3.99 ms | 3.81 ms | 1.0× | 4.59 MiB | 586.3 KiB | 60,079 / 40,010 |
+| CTE materialise | 380.4 µs | 502.0 µs | 0.8× | 6.6 KiB | 400 B | 89 / 13 |
+| Subquery IN list | 2.90 ms | 4.10 ms | 0.7× | 559.0 KiB | 234.7 KiB | 15,197 / 20,010 |
 
 ### Joins
 
 | Benchmark | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs |
 |---|---|---|---|---|---|---|
-| Inner join, small-large | 5.68 ms | 4.66 ms | 1.2× | 1.00 MiB | 1.07 MiB | 79,855 / 99,757 |
-| Inner join, low selectivity | 108.11 µs | 735.45 µs | 0.1× | 21.1 KiB | 11.3 KiB | 1,198 / 1,009 |
-| Left join, unmatched rows | 3.64 ms | 4.13 ms | 0.9× | 869.4 KiB | 708.2 KiB | 79,643 / 70,157 |
+| Inner join, small-large | 6.56 ms | 5.98 ms | 1.1× | 1.00 MiB | 1.07 MiB | 79,855 / 99,757 |
+| Inner join, low selectivity | 129.6 µs | 860.9 µs | 0.15× | 21.0 KiB | 11.3 KiB | 1,198 / 1,009 |
+| Left join, unmatched rows | 4.38 ms | 5.19 ms | 0.8× | 869.0 KiB | 708.2 KiB | 79,643 / 70,157 |
 
 ### Full-Text Inverted Index
 
 | Benchmark | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs |
 |---|---|---|---|---|---|---|
-| Build index | 2.95 ms | 2.01 ms | 1.5× | 1.39 MiB | 392 B | 12,295 / 20 |
-| Insert with index | 36.43 µs | 87.09 µs | 0.4× | 12.8 KiB | 271 B | 132 / 10 |
-| Search single term, rare | 4.57 µs | 6.54 µs | 0.7× | 2.4 KiB | 408 B | 41 / 13 |
-| Search single term, medium | 4.14 µs | 7.61 µs | 0.5× | 2.4 KiB | 408 B | 41 / 13 |
-| Search single term, common | 4.24 µs | 61.16 µs | 0.1× | 2.4 KiB | 424 B | 43 / 15 |
-| Search multi-term AND | 14.93 µs | 33.26 µs | 0.4× | 11.4 KiB | 408 B | 62 / 13 |
-| Search phrase | 15.61 µs | 24.50 µs | 0.6× | 26.3 KiB | 416 B | 278 / 14 |
-| Update with index | 35.41 µs | 97.40 µs | 0.4× | 18.0 KiB | 291 B | 187 / 12 |
-| Delete with index | 48.01 µs | 138.41 µs | 0.3× | 17.4 KiB | 135 B | 175 / 6 |
+| Build index | 4.34 ms | 2.71 ms | 1.6× | 1.43 MiB | 392 B | 12,359 / 20 |
+| Insert with index | 41.71 µs | 112.5 µs | 0.4× | 13.0 KiB | 271 B | 133 / 10 |
+| Search single term, rare | 6.64 µs | 7.65 µs | 0.9× | 2.4 KiB | 408 B | 41 / 13 |
+| Search single term, medium | 6.85 µs | 8.73 µs | 0.8× | 2.4 KiB | 408 B | 41 / 13 |
+| Search single term, common | 6.13 µs | 70.71 µs | 0.1× | 2.4 KiB | 424 B | 43 / 15 |
+| Search multi-term AND | 20.59 µs | 39.08 µs | 0.5× | 11.4 KiB | 408 B | 62 / 13 |
+| Search phrase | 27.43 µs | 26.53 µs | 1.0× | 26.3 KiB | 416 B | 278 / 14 |
+| Update with index | 44.66 µs | 133.9 µs | 0.3× | 18.4 KiB | 290 B | 190 / 12 |
+| Delete with index | 57.07 µs | 175.3 µs | 0.3× | 17.1 KiB | 135 B | 173 / 6 |
 
 ### Full-Text MiniSQL-Only Checks
 
 | Benchmark | Time | Memory | Allocs |
 |---|---|---|---|
-| Search after deletes | 81.57 µs | 11.1 KiB | 49 |
+| Search after deletes | 93.63 µs | 11.1 KiB | 49 |
 
 ### JSON Inverted Index DML
 
 | Benchmark | Time | Memory | Allocs |
 |---|---|---|---|
-| Build index | 1.93 ms | 1.26 MiB | 26,669 |
-| Insert with index | 48.91 µs | 59.6 KiB | 146 |
-| Contains after deletes | 59.19 µs | 19.2 KiB | 77 |
-| Update with index | 5.97 µs | 4.2 KiB | 46 |
-| Delete with index | 112.67 µs | 26.6 KiB | 150 |
+| Build index | 3.55 ms | 1.25 MiB | 26,674 |
+| Insert with index | 66.64 µs | 48.1 KiB | 144 |
+| Contains after deletes | 75.47 µs | 19.2 KiB | 77 |
+| Update with index | 9.30 µs | 4.2 KiB | 46 |
+| Delete with index | 134.9 µs | 26.6 KiB | 150 |
 
 ### JSON Contains Comparisons
 
 | Predicate | MiniSQL indexed | MiniSQL sequential | SQLite JSON scan | SQLite expression index |
 |---|---|---|---|---|
-| Key/value | 16.39 µs / 7.8 KiB | 1.90 ms / 1.94 MiB | 712.05 µs / 424 B | 26.02 µs / 424 B |
-| Object subset | 28.70 µs / 8.8 KiB | 1.98 ms / 1.94 MiB | 730.76 µs / 424 B | 121.03 µs / 424 B |
+| Key/value | 21.82 µs / 7.8 KiB | 3.62 ms / 1.94 MiB | 858.0 µs / 424 B | 30.48 µs / 424 B |
+| Object subset | 33.52 µs / 8.8 KiB | 3.58 ms / 1.94 MiB | 830.6 µs / 424 B | 140.7 µs / 424 B |
 
 ### Maintenance and Explain
 
 | Benchmark | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs |
 |---|---|---|---|---|---|---|
-| VACUUM small | 2.34 ms | 556.88 µs | 4.2× | 752.5 KiB | 91 B | 6,982 / 4 |
-| WAL checkpoint | 194.44 µs | 104.85 µs | 1.9× | 3.3 KiB | 440 B | 37 / 12 |
-| EXPLAIN | 5.46 µs | 1.21 µs | 4.5× | 6.0 KiB | 680 B | 55 / 18 |
+| VACUUM small | 2.15 ms | 583.7 µs | 3.7× | 752.5 KiB | 91 B | 6,982 / 4 |
+| WAL checkpoint | 357.0 µs | 171.8 µs | 2.1× | 3.3 KiB | 441 B | 37 / 12 |
+| EXPLAIN | 7.45 µs | 1.75 µs | 4.3× | 6.0 KiB | 680 B | 55 / 18 |
 
 ### HNSW Build Index
 
@@ -155,20 +157,25 @@ The results are grouped by benchmark family so each table can be read without ho
 
 | Area | Benchmark | MiniSQL memory |
 |---|---|---|
-| HNSW | Build index, dims768, 10k rows | 208.1 MiB |
-| HNSW | Build index, dims128, 10k rows | 134.7 MiB |
-| HNSW | Build index, dims3, 10k rows | 120.2 MiB |
-| Full-text | Build index | 1.39 MiB |
-| DISTINCT | High-cardinality distinct | 1.26 MiB |
-| JSON inverted | Build index | 1.26 MiB |
+| HNSW | Build index, dims768, 10k rows | 207.7 MiB |
+| HNSW | Build index, dims128, 10k rows | 136.7 MiB |
+| HNSW | Build index, dims3, 10k rows | 140.8 MiB |
+| Full-text | Build index | 1.43 MiB |
+| DISTINCT | High-cardinality distinct (no ORDER BY) | 1.27 MiB |
+| DISTINCT | High-cardinality distinct + ORDER BY | 4.53 MiB |
+| JSON inverted | Build index | 1.25 MiB |
 | SELECT | Full scan | 1.23 MiB |
 | Join | Inner join, small-large | 1.00 MiB |
+| Join | Left join, unmatched rows | 869.0 KiB |
 | Maintenance | VACUUM small | 752.5 KiB |
-| Subquery | IN list | 715.8 KiB |
+| Subquery | IN list | 559.0 KiB |
 
 ### Good Next Optimisation Targets
 
 - HNSW build allocation counts are much lower after typed candidate heaps and per-node neighbor backing allocation, but build memory remains the largest broad-suite outlier at 10k rows.
 - Full-text and JSON build paths still allocate multiple MiB per operation and remain the most relevant inverted-index targets.
-- DISTINCT and subquery materialisation are improved after RowView predicate fast paths, DISTINCT seen-set pre-sizing, and typed semi-join membership, but DISTINCT remains near the MiB/op outlier group.
+- GROUP BY / HAVING memory gap vs SQLite (9.6× / 13.1×) is largely structural: Go's runtime map has higher per-entry overhead than SQLite's C hash table. The `groupOrder` redundancy was removed (saved ~1.6–2 KiB/op); arena interning was tried and rejected (old backing arrays accumulate in GC via map string references). Further reduction requires a custom open-address hash table — low ROI at this stage.
+- DISTINCT high cardinality without ORDER BY (1.27 MiB vs SQLite 586 KiB, 2.2×): streaming hash-set path; the gap is structural — SQLite sorts/hashes on the C side and delivers rows lazily, avoiding upfront Go heap allocation.
+- DISTINCT + ORDER BY high cardinality (4.53 MiB vs SQLite 586 KiB): ORDER BY requires upfront materialization of all rows before sorting, which doubles alloc count vs the no-ORDER-BY streaming path. The sort-then-adjacent-dedup optimization removes the hash-set overhead from deduplication, but the dominant cost is the O(N) row materialization for sorting — unavoidable without a disk-backed sort (see ROADMAP).
+- DISTINCT + ORDER BY indexed (3.99 ms / 4.59 MiB / 60,079 allocs): when an index covers ORDER BY, streaming adjacent-compare dedup (`newDistinctAdjacentRowViewIteratorFactory`) eliminates the hash set, saving ~30,018 allocs/op vs the in-memory sort path. Still limited by per-row materialization overhead from the `database/sql` layer.
 - VACUUM is much improved after streaming row copy, though it still allocates far more than SQLite because it rebuilds the compacted MiniSQL database through normal table/index write paths.

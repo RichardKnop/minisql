@@ -334,6 +334,239 @@ func TestGroupByColumnIndex(t *testing.T) {
 	})
 }
 
+func TestDeduplicateSortedRows(t *testing.T) {
+	t.Parallel()
+
+	cols := []Column{
+		{Name: "name", Kind: Varchar, Size: MaxInlineVarchar},
+		{Name: "age", Kind: Int8, Size: 8},
+	}
+	nameField := Field{Name: "name"}
+	bothFields := []Field{{Name: "name"}, {Name: "age"}}
+
+	row := func(name string, age int64) Row {
+		return NewRowWithValues(cols, []OptionalValue{
+			{Value: NewTextPointer([]byte(name)), Valid: true},
+			{Value: age, Valid: true},
+		})
+	}
+
+	t.Run("empty input returns empty", func(t *testing.T) {
+		t.Parallel()
+		result := deduplicateSortedRows(nil, bothFields)
+		assert.Empty(t, result)
+	})
+
+	t.Run("single row returned unchanged", func(t *testing.T) {
+		t.Parallel()
+		rows := []Row{row("alice", 30)}
+		result := deduplicateSortedRows(rows, bothFields)
+		assert.Len(t, result, 1)
+	})
+
+	t.Run("no duplicates all preserved", func(t *testing.T) {
+		t.Parallel()
+		rows := []Row{row("alice", 30), row("bob", 25), row("carol", 40)}
+		result := deduplicateSortedRows(rows, bothFields)
+		assert.Len(t, result, 3)
+	})
+
+	t.Run("adjacent duplicates removed", func(t *testing.T) {
+		t.Parallel()
+		rows := []Row{row("alice", 30), row("alice", 30), row("bob", 25)}
+		result := deduplicateSortedRows(rows, bothFields)
+		assert.Len(t, result, 2)
+	})
+
+	t.Run("all identical rows collapsed to one", func(t *testing.T) {
+		t.Parallel()
+		rows := []Row{row("alice", 30), row("alice", 30), row("alice", 30)}
+		result := deduplicateSortedRows(rows, bothFields)
+		assert.Len(t, result, 1)
+	})
+
+	t.Run("runs of duplicates each collapsed", func(t *testing.T) {
+		t.Parallel()
+		rows := []Row{
+			row("alice", 30), row("alice", 30),
+			row("bob", 25), row("bob", 25), row("bob", 25),
+			row("carol", 40),
+		}
+		result := deduplicateSortedRows(rows, bothFields)
+		assert.Len(t, result, 3)
+	})
+
+	t.Run("dedup on single field ignores second column difference", func(t *testing.T) {
+		t.Parallel()
+		// same name, different age — when only comparing on name they look equal
+		rows := []Row{row("alice", 30), row("alice", 35)}
+		result := deduplicateSortedRows(rows, []Field{nameField})
+		assert.Len(t, result, 1)
+	})
+
+	t.Run("in-place: modifies and sub-slices original backing array", func(t *testing.T) {
+		t.Parallel()
+		rows := []Row{row("a", 1), row("a", 1), row("b", 2)}
+		result := deduplicateSortedRows(rows, bothFields)
+		assert.Len(t, result, 2)
+		// result must be a sub-slice of the same backing array
+		assert.Equal(t, &rows[0], &result[0])
+	})
+}
+
+func TestDistinctExtendOrderBy(t *testing.T) {
+	t.Parallel()
+
+	emailField := Field{Name: "email"}
+	nameField := Field{Name: "name"}
+	ageField := Field{Name: "age"}
+	exprField := Field{Name: "lower_name", Expr: &Expr{FuncName: "LOWER"}}
+
+	orderByEmail := []OrderBy{{Field: emailField, Direction: Asc}}
+	orderByName := []OrderBy{{Field: nameField, Direction: Desc}}
+
+	t.Run("empty requestedFields returns orderBy unchanged", func(t *testing.T) {
+		t.Parallel()
+		result := distinctExtendOrderBy(orderByEmail, nil)
+		assert.Equal(t, orderByEmail, result)
+	})
+
+	t.Run("all fields already in ORDER BY — no extension", func(t *testing.T) {
+		t.Parallel()
+		result := distinctExtendOrderBy(orderByEmail, []Field{emailField})
+		assert.Len(t, result, 1)
+		assert.Equal(t, "email", result[0].Field.Name)
+	})
+
+	t.Run("missing field appended as ascending tiebreaker", func(t *testing.T) {
+		t.Parallel()
+		result := distinctExtendOrderBy(orderByName, []Field{nameField, ageField})
+		assert.Len(t, result, 2)
+		assert.Equal(t, "name", result[0].Field.Name)
+		assert.Equal(t, Desc, result[0].Direction)
+		assert.Equal(t, "age", result[1].Field.Name)
+		assert.Equal(t, Asc, result[1].Direction)
+	})
+
+	t.Run("expression fields skipped", func(t *testing.T) {
+		t.Parallel()
+		result := distinctExtendOrderBy(orderByName, []Field{nameField, exprField})
+		assert.Len(t, result, 1, "expr field must not be appended")
+	})
+
+	t.Run("alias-qualified ORDER BY field not re-appended", func(t *testing.T) {
+		t.Parallel()
+		qualified := Field{Name: "email", AliasPrefix: "u"}
+		orderBy := []OrderBy{{Field: qualified, Direction: Asc}}
+		// requestedField without alias but same name — should still be skipped
+		result := distinctExtendOrderBy(orderBy, []Field{emailField})
+		// email is already in ORDER BY (bare name lookup), so no extension
+		assert.Len(t, result, 1)
+	})
+
+	t.Run("multiple missing fields all appended", func(t *testing.T) {
+		t.Parallel()
+		result := distinctExtendOrderBy(nil, []Field{nameField, ageField, emailField})
+		assert.Len(t, result, 3)
+		assert.Equal(t, Asc, result[0].Direction)
+		assert.Equal(t, Asc, result[1].Direction)
+		assert.Equal(t, Asc, result[2].Direction)
+	})
+
+	t.Run("original ORDER BY direction preserved", func(t *testing.T) {
+		t.Parallel()
+		result := distinctExtendOrderBy(orderByName, []Field{nameField, emailField})
+		assert.Equal(t, Desc, result[0].Direction)
+		assert.Equal(t, Asc, result[1].Direction)
+	})
+}
+
+func TestAllProjectedInOrderBy(t *testing.T) {
+	t.Parallel()
+
+	emailField := Field{Name: "email"}
+	nameField := Field{Name: "name"}
+	ageField := Field{Name: "age"}
+	exprField := Field{Name: "lower_name", Expr: &Expr{FuncName: "LOWER"}}
+
+	orderByEmail := []OrderBy{{Field: emailField, Direction: Asc}}
+	orderByBoth := []OrderBy{{Field: emailField, Direction: Asc}, {Field: nameField, Direction: Asc}}
+
+	t.Run("empty requestedFields returns false", func(t *testing.T) {
+		t.Parallel()
+		assert.False(t, allProjectedInOrderBy(nil, orderByEmail))
+	})
+
+	t.Run("empty orderBy returns false", func(t *testing.T) {
+		t.Parallel()
+		assert.False(t, allProjectedInOrderBy([]Field{emailField}, nil))
+	})
+
+	t.Run("all fields covered returns true", func(t *testing.T) {
+		t.Parallel()
+		assert.True(t, allProjectedInOrderBy([]Field{emailField}, orderByEmail))
+	})
+
+	t.Run("all fields covered multi-column returns true", func(t *testing.T) {
+		t.Parallel()
+		assert.True(t, allProjectedInOrderBy([]Field{emailField, nameField}, orderByBoth))
+	})
+
+	t.Run("uncovered field returns false", func(t *testing.T) {
+		t.Parallel()
+		assert.False(t, allProjectedInOrderBy([]Field{emailField, ageField}, orderByEmail))
+	})
+
+	t.Run("expression field returns false", func(t *testing.T) {
+		t.Parallel()
+		assert.False(t, allProjectedInOrderBy([]Field{exprField}, orderByEmail))
+	})
+
+	t.Run("alias-qualified ORDER BY covers bare requested field via bare-name entry", func(t *testing.T) {
+		t.Parallel()
+		qualifiedOB := []OrderBy{{Field: Field{Name: "email", AliasPrefix: "u"}, Direction: Asc}}
+		// The map stores both "email" (bare) and "u.email" (qualified) for the ORDER BY clause.
+		// A bare emailField lookup hits the bare-name entry → covered.
+		assert.True(t, allProjectedInOrderBy([]Field{emailField}, qualifiedOB))
+	})
+
+	t.Run("alias-qualified requested field matched by alias-qualified ORDER BY", func(t *testing.T) {
+		t.Parallel()
+		qualifiedField := Field{Name: "email", AliasPrefix: "u"}
+		qualifiedOB := []OrderBy{{Field: qualifiedField, Direction: Asc}}
+		assert.True(t, allProjectedInOrderBy([]Field{qualifiedField}, qualifiedOB))
+	})
+
+	t.Run("single field not in ORDER BY returns false", func(t *testing.T) {
+		t.Parallel()
+		assert.False(t, allProjectedInOrderBy([]Field{ageField}, orderByEmail))
+	})
+}
+
+func TestDistinctSeenCapacityFromEstimate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("zero estimate returns zero", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, 0, distinctSeenCapacityFromEstimate(0))
+	})
+
+	t.Run("negative estimate returns zero", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, 0, distinctSeenCapacityFromEstimate(-1))
+	})
+
+	t.Run("small positive estimate returned as-is", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, 100, distinctSeenCapacityFromEstimate(100))
+	})
+
+	t.Run("large estimate within int range returned as-is", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, 10_000, distinctSeenCapacityFromEstimate(10_000))
+	})
+}
+
 func TestWhereCondColumns(t *testing.T) {
 	t.Parallel()
 

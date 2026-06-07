@@ -177,3 +177,151 @@ func BenchmarkDistinct_HighCardinality(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkDistinct_OrderBy measures DISTINCT + ORDER BY on the email column
+// (all unique, high cardinality). Exercises the sort-then-adjacent-dedup path
+// in selectWithSortRowView which avoids the per-row hash-set allocation.
+func BenchmarkDistinct_OrderBy(b *testing.B) {
+	for _, d := range drivers {
+		b.Run(d.name, func(b *testing.B) {
+			db, cleanup := openDB(b, d)
+			defer cleanup()
+
+			var (
+				createT string
+				insertT string
+				query   string
+			)
+			switch d.name {
+			case "minisql":
+				createT = `create table "bench_distinct_ob" (id int8 primary key autoincrement, email varchar(255))`
+				insertT = `insert into "bench_distinct_ob" (email) values (?)`
+				query = `select distinct email from "bench_distinct_ob" order by email`
+			default:
+				createT = `CREATE TABLE bench_distinct_ob (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT)`
+				insertT = `INSERT INTO bench_distinct_ob (email) VALUES (?)`
+				query = `SELECT DISTINCT email FROM bench_distinct_ob ORDER BY email`
+			}
+
+			mustExec(b, db, createT)
+			tx, err := db.Begin()
+			if err != nil {
+				b.Fatalf("begin: %v", err)
+			}
+			ins, err := tx.Prepare(insertT)
+			if err != nil {
+				_ = tx.Rollback()
+				b.Fatalf("prepare insert: %v", err)
+			}
+			for i := range aggregateSeedN {
+				if _, err := ins.Exec(fmt.Sprintf("user%06d@example.com", i)); err != nil {
+					_ = tx.Rollback()
+					b.Fatalf("insert %d: %v", i, err)
+				}
+			}
+			ins.Close()
+			if err := tx.Commit(); err != nil {
+				b.Fatalf("commit: %v", err)
+			}
+
+			b.ResetTimer()
+			for range b.N {
+				rows, err := db.Query(query)
+				if err != nil {
+					b.Fatalf("query: %v", err)
+				}
+				n := 0
+				for rows.Next() {
+					var email string
+					if err := rows.Scan(&email); err != nil {
+						rows.Close()
+						b.Fatalf("scan: %v", err)
+					}
+					n += 1
+				}
+				rows.Close()
+				if err := rows.Err(); err != nil {
+					b.Fatalf("rows err: %v", err)
+				}
+				b.ReportMetric(float64(n), "rows/op")
+			}
+		})
+	}
+}
+
+// BenchmarkDistinct_OrderBy_Indexed measures DISTINCT + ORDER BY on an indexed
+// column (all unique, high cardinality).  With an index on email the query
+// planner sets SortInMemory=false and delivers rows via index scan already in
+// email order.  MiniSQL uses streaming adjacent-compare dedup — O(1) memory —
+// instead of materialising all rows or building a hash set.
+func BenchmarkDistinct_OrderBy_Indexed(b *testing.B) {
+	for _, d := range drivers {
+		b.Run(d.name, func(b *testing.B) {
+			db, cleanup := openDB(b, d)
+			defer cleanup()
+
+			var (
+				createT   string
+				createIdx string
+				insertT   string
+				query     string
+			)
+			switch d.name {
+			case "minisql":
+				createT = `create table "bench_distinct_idx" (id int8 primary key autoincrement, email varchar(255))`
+				createIdx = `create index "idx_bench_distinct_email" on "bench_distinct_idx" (email)`
+				insertT = `insert into "bench_distinct_idx" (email) values (?)`
+				query = `select distinct email from "bench_distinct_idx" order by email`
+			default:
+				createT = `CREATE TABLE bench_distinct_idx (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT)`
+				createIdx = `CREATE INDEX IF NOT EXISTS idx_bench_distinct_email ON bench_distinct_idx (email)`
+				insertT = `INSERT INTO bench_distinct_idx (email) VALUES (?)`
+				query = `SELECT DISTINCT email FROM bench_distinct_idx ORDER BY email`
+			}
+
+			mustExec(b, db, createT)
+			tx, err := db.Begin()
+			if err != nil {
+				b.Fatalf("begin: %v", err)
+			}
+			ins, err := tx.Prepare(insertT)
+			if err != nil {
+				_ = tx.Rollback()
+				b.Fatalf("prepare insert: %v", err)
+			}
+			for i := range aggregateSeedN {
+				if _, err := ins.Exec(fmt.Sprintf("user%06d@example.com", i)); err != nil {
+					_ = tx.Rollback()
+					b.Fatalf("insert %d: %v", i, err)
+				}
+			}
+			ins.Close()
+			if err := tx.Commit(); err != nil {
+				b.Fatalf("commit: %v", err)
+			}
+			mustExec(b, db, createIdx)
+
+			b.ResetTimer()
+			for range b.N {
+				rows, err := db.Query(query)
+				if err != nil {
+					b.Fatalf("query: %v", err)
+				}
+				n := 0
+				for rows.Next() {
+					var email string
+					if err := rows.Scan(&email); err != nil {
+						rows.Close()
+						b.Fatalf("scan: %v", err)
+					}
+					n += 1
+				}
+				rows.Close()
+				if err := rows.Err(); err != nil {
+					b.Fatalf("rows err: %v", err)
+				}
+				b.ReportMetric(float64(n), "rows/op")
+			}
+		})
+	}
+}
