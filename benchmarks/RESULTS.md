@@ -72,10 +72,10 @@ which flushes the rows across ~8 sorted run files that are then N-way merged.
 The ~11× overhead is dominated by temp-file I/O in `runWriter`/`runReader`/`externalSortMerge`
 and is the primary target for future optimisation (e.g. buffered I/O, larger default batch size).
 
-| Sub-benchmark | Time | Rows/op |
-|---|---|---|
-| no-spill | 5.2 ms | 10 000 |
-| spill-64k | 55.9 ms | 10 000 |
+| Sub-benchmark | Time | Rows/op | Notes |
+|---|---|---|---|
+| no-spill | 5.2 ms | 10 000 | pure in-memory sort, baseline |
+| spill-64k | 12.5 ms | 10 000 | after buffered I/O (64 KiB); was 55.9 ms unbuffered (~4.5× improvement) |
 
 ### Full-Text Inverted Index
 

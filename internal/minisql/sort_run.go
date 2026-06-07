@@ -1,12 +1,18 @@
 package minisql
 
 import (
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 )
+
+// sortRunBufSize is the I/O buffer size used by runWriter and runReader.
+// 64 KiB amortises the per-record syscall cost across ~1 000+ rows per flush,
+// matching a common sort-memory threshold without over-allocating per reader.
+const sortRunBufSize = 64 * 1024
 
 // runWriter writes sorted Row records to a temporary file for external merge sort.
 //
@@ -16,8 +22,13 @@ import (
 //	[8 bytes: RowID, little-endian uint64]
 //	[8 bytes: NullBitmask, little-endian uint64]
 //	[value bytes, as produced by Row.Marshal()]
+//
+// All writes go through a bufio.Writer so that the two Write calls per row
+// (header + value) are coalesced into large sequential OS writes rather than
+// one syscall per field.
 type runWriter struct {
 	file *os.File
+	buf  *bufio.Writer
 }
 
 func newRunWriter() (*runWriter, error) {
@@ -25,7 +36,7 @@ func newRunWriter() (*runWriter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sort run: create temp file: %w", err)
 	}
-	return &runWriter{file: f}, nil
+	return &runWriter{file: f, buf: bufio.NewWriterSize(f, sortRunBufSize)}, nil
 }
 
 func (w *runWriter) writeRow(r Row) error {
@@ -37,11 +48,11 @@ func (w *runWriter) writeRow(r Row) error {
 	binary.BigEndian.PutUint32(hdr[0:4], uint32(len(valueBytes)))
 	binary.LittleEndian.PutUint64(hdr[4:12], uint64(r.Key))
 	binary.LittleEndian.PutUint64(hdr[12:20], r.NullBitmask())
-	if _, err := w.file.Write(hdr[:]); err != nil {
+	if _, err := w.buf.Write(hdr[:]); err != nil {
 		return fmt.Errorf("sort run: write header: %w", err)
 	}
 	if len(valueBytes) > 0 {
-		if _, err := w.file.Write(valueBytes); err != nil {
+		if _, err := w.buf.Write(valueBytes); err != nil {
 			return fmt.Errorf("sort run: write value: %w", err)
 		}
 	}
@@ -50,11 +61,21 @@ func (w *runWriter) writeRow(r Row) error {
 
 func (w *runWriter) filePath() string { return w.file.Name() }
 
-func (w *runWriter) close() error { return w.file.Close() }
+func (w *runWriter) close() error {
+	if err := w.buf.Flush(); err != nil {
+		_ = w.file.Close()
+		return fmt.Errorf("sort run: flush write buffer: %w", err)
+	}
+	return w.file.Close()
+}
 
 // runReader reads Row records from a sorted temp file written by runWriter.
+// Reads are buffered via bufio.Reader so that the two ReadFull calls per row
+// (header + value) are served from an in-memory buffer rather than individual
+// OS read syscalls.
 type runReader struct {
 	file    *os.File
+	buf     *bufio.Reader
 	columns []Column
 	current Row
 	err     error
@@ -66,7 +87,11 @@ func newRunReader(path string, columns []Column) (*runReader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sort run: open %s: %w", path, err)
 	}
-	rr := &runReader{file: f, columns: columns}
+	rr := &runReader{
+		file:    f,
+		buf:     bufio.NewReaderSize(f, sortRunBufSize),
+		columns: columns,
+	}
 	rr.advance()
 	if rr.err != nil {
 		_ = f.Close()
@@ -94,7 +119,7 @@ func (rr *runReader) Next() {
 
 func (rr *runReader) advance() {
 	var hdr [20]byte
-	_, err := io.ReadFull(rr.file, hdr[:])
+	_, err := io.ReadFull(rr.buf, hdr[:])
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		rr.done = true
 		return
@@ -108,9 +133,11 @@ func (rr *runReader) advance() {
 	key := RowID(binary.LittleEndian.Uint64(hdr[4:12]))
 	nullBitmask := binary.LittleEndian.Uint64(hdr[12:20])
 
+	// Each row gets its own buffer so that TextPointer.Data (which sub-slices
+	// directly into valueBuf) remains valid for the lifetime of the row.
 	valueBuf := make([]byte, valLen)
 	if valLen > 0 {
-		if _, err := io.ReadFull(rr.file, valueBuf); err != nil {
+		if _, err := io.ReadFull(rr.buf, valueBuf); err != nil {
 			rr.err = fmt.Errorf("sort run: read value bytes: %w", err)
 			rr.done = true
 			return
