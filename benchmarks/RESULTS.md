@@ -50,7 +50,8 @@ The results are grouped by benchmark family so each table can be read without ho
 |---|---|---|---|---|---|---|
 | GROUP BY aggregate | 987.1 µs | 2.31 ms | 0.4× | 33.6 KiB | 3.5 KiB | 458 / 309 |
 | HAVING filter | 822.4 µs | 2.10 ms | 0.4× | 25.6 KiB | 1.9 KiB | 263 / 111 |
-| DISTINCT high cardinality | 3.57 ms | 6.48 ms | 0.6× | 1.27 MiB | 586.3 KiB | 40,093 / 40,010 |
+| DISTINCT high cardinality | 3.17 ms | 6.39 ms | 0.5× | 1.27 MiB | 586.3 KiB | 40,093 / 40,010 |
+| DISTINCT + ORDER BY high cardinality | 4.46 ms | 5.79 ms | 0.8× | 4.53 MiB | 586.3 KiB | 90,097 / 40,010 |
 | CTE materialise | 380.4 µs | 502.0 µs | 0.8× | 6.6 KiB | 400 B | 89 / 13 |
 | Subquery IN list | 2.90 ms | 4.10 ms | 0.7× | 559.0 KiB | 234.7 KiB | 15,197 / 20,010 |
 
@@ -159,7 +160,8 @@ The results are grouped by benchmark family so each table can be read without ho
 | HNSW | Build index, dims128, 10k rows | 136.7 MiB |
 | HNSW | Build index, dims3, 10k rows | 140.8 MiB |
 | Full-text | Build index | 1.43 MiB |
-| DISTINCT | High-cardinality distinct | 1.27 MiB |
+| DISTINCT | High-cardinality distinct (no ORDER BY) | 1.27 MiB |
+| DISTINCT | High-cardinality distinct + ORDER BY | 4.53 MiB |
 | JSON inverted | Build index | 1.25 MiB |
 | SELECT | Full scan | 1.23 MiB |
 | Join | Inner join, small-large | 1.00 MiB |
@@ -172,5 +174,6 @@ The results are grouped by benchmark family so each table can be read without ho
 - HNSW build allocation counts are much lower after typed candidate heaps and per-node neighbor backing allocation, but build memory remains the largest broad-suite outlier at 10k rows.
 - Full-text and JSON build paths still allocate multiple MiB per operation and remain the most relevant inverted-index targets.
 - GROUP BY / HAVING memory gap vs SQLite (9.6× / 13.1×) is largely structural: Go's runtime map has higher per-entry overhead than SQLite's C hash table. The `groupOrder` redundancy was removed (saved ~1.6–2 KiB/op); arena interning was tried and rejected (old backing arrays accumulate in GC via map string references). Further reduction requires a custom open-address hash table — low ROI at this stage.
-- DISTINCT high cardinality (1.27 MiB vs SQLite 586 KiB, 2.2×): a sort-then-deduplicate path for `DISTINCT … ORDER BY` queries would eliminate the hash set entirely for that shape — in progress.
+- DISTINCT high cardinality without ORDER BY (1.27 MiB vs SQLite 586 KiB, 2.2×): streaming hash-set path; the gap is structural — SQLite sorts/hashes on the C side and delivers rows lazily, avoiding upfront Go heap allocation.
+- DISTINCT + ORDER BY high cardinality (4.53 MiB vs SQLite 586 KiB): ORDER BY requires upfront materialization of all rows before sorting, which doubles alloc count vs the no-ORDER-BY streaming path. The sort-then-adjacent-dedup optimization (committed 2026-06-07) removes the hash-set overhead from deduplication, but the dominant cost is now the O(N) row materialization for sorting — unavoidable without a C-side or disk-backed sort.
 - VACUUM is much improved after streaming row copy, though it still allocates far more than SQLite because it rebuilds the compacted MiniSQL database through normal table/index write paths.
