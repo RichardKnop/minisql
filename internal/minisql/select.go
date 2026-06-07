@@ -816,7 +816,6 @@ type groupByAccumulator struct {
 	fieldToGroupByIdx []int
 	groupMap          map[string]int32
 	groupEntries      []groupEntry
-	groupOrder        []string
 	aggStatePool      []groupAggState
 	groupValPool      []OptionalValue
 	keyBuf            []byte
@@ -943,7 +942,6 @@ func newGroupByAccumulator(stmt Statement, t *Table, estRows int) *groupByAccumu
 		fieldToGroupByIdx: fieldToGroupByIdx,
 		groupMap:          make(map[string]int32, estGroups),
 		groupEntries:      make([]groupEntry, 0, estGroups),
-		groupOrder:        make([]string, 0, estGroups),
 		aggStatePool:      make([]groupAggState, 0, estGroups*numAggs),
 		groupValPool:      make([]OptionalValue, 0, estGroups*numGroupBy),
 		minMaxPool:        minMaxPool,
@@ -958,10 +956,10 @@ func newGroupByAccumulator(stmt Statement, t *Table, estRows int) *groupByAccumu
 func (acc *groupByAccumulator) process(row Row) {
 	acc.keyBuf = buildGroupKey(acc.keyBuf[:0], row, acc.groupByColIdx)
 
+	// Use string(acc.keyBuf) only for the map lookup — the compiler elides the
+	// allocation when the string is used solely as a map key (no escape).
 	gsIdx, exists := acc.groupMap[string(acc.keyBuf)]
 	if !exists {
-		key := string(acc.keyBuf) // one alloc per new group
-
 		aggStart := int32(len(acc.aggStatePool))
 		for i := range len(acc.aggregates) {
 			acc.aggStatePool = append(acc.aggStatePool, groupAggState{useIntSum: acc.useIntSum[i]})
@@ -990,8 +988,7 @@ func (acc *groupByAccumulator) process(row Row) {
 			groupValStart: gvStart,
 			minMaxStart:   mmStart,
 		})
-		acc.groupMap[key] = gsIdx
-		acc.groupOrder = append(acc.groupOrder, key)
+		acc.groupMap[string(acc.keyBuf)] = gsIdx
 	}
 
 	aggBase := int(acc.groupEntries[gsIdx].aggStateStart)
@@ -1067,8 +1064,6 @@ func (acc *groupByAccumulator) processView(view RowView) error {
 
 	gsIdx, exists := acc.groupMap[string(acc.keyBuf)]
 	if !exists {
-		key := string(acc.keyBuf) // one alloc per new group
-
 		aggStart := int32(len(acc.aggStatePool))
 		for i := range len(acc.aggregates) {
 			acc.aggStatePool = append(acc.aggStatePool, groupAggState{useIntSum: acc.useIntSum[i]})
@@ -1101,8 +1096,7 @@ func (acc *groupByAccumulator) processView(view RowView) error {
 			groupValStart: gvStart,
 			minMaxStart:   mmStart,
 		})
-		acc.groupMap[key] = gsIdx
-		acc.groupOrder = append(acc.groupOrder, key)
+		acc.groupMap[string(acc.keyBuf)] = gsIdx
 	}
 
 	aggBase := int(acc.groupEntries[gsIdx].aggStateStart)
@@ -1285,9 +1279,66 @@ func (t *Table) selectGroupByZeroAlloc(ctx context.Context, stmt Statement, scan
 	return acc.buildResult(stmt, t)
 }
 
+// computeGroupValues fills values[0:nFields] with the aggregate results for the
+// gi-th group (in insertion order). The caller must pre-allocate values.
+func (acc *groupByAccumulator) computeGroupValues(gi int, values []OptionalValue) {
+	entry := acc.groupEntries[gi]
+	aggBase := int(entry.aggStateStart)
+	gvBase := int(entry.groupValStart)
+	mmBase := int(entry.minMaxStart)
+	for i, agg := range acc.aggregates {
+		switch agg.Kind {
+		case 0:
+			if j := acc.fieldToGroupByIdx[i]; j >= 0 {
+				values[i] = acc.groupValPool[gvBase+j]
+			} else {
+				values[i] = OptionalValue{}
+			}
+		case AggregateCount:
+			values[i] = OptionalValue{Valid: true, Value: acc.aggStatePool[aggBase+i].count}
+		case AggregateSum:
+			st := acc.aggStatePool[aggBase+i]
+			if st.hasValue {
+				if st.useIntSum {
+					values[i] = OptionalValue{Valid: true, Value: st.sumI}
+				} else {
+					values[i] = OptionalValue{Valid: true, Value: st.sumF}
+				}
+			} else {
+				values[i] = OptionalValue{}
+			}
+		case AggregateAvg:
+			st := acc.aggStatePool[aggBase+i]
+			if st.hasValue && st.count > 0 {
+				if st.useIntSum {
+					values[i] = OptionalValue{Valid: true, Value: float64(st.sumI) / float64(st.count)}
+				} else {
+					values[i] = OptionalValue{Valid: true, Value: st.sumF / float64(st.count)}
+				}
+			} else {
+				values[i] = OptionalValue{}
+			}
+		case AggregateMin:
+			slot := mmBase + acc.minMaxAggSlot[i]
+			if acc.minMaxPool[slot].Valid {
+				values[i] = acc.minMaxPool[slot]
+			} else {
+				values[i] = OptionalValue{}
+			}
+		case AggregateMax:
+			slot := mmBase + acc.minMaxAggSlot[i]
+			if acc.minMaxPool[slot].Valid {
+				values[i] = acc.minMaxPool[slot]
+			} else {
+				values[i] = OptionalValue{}
+			}
+		}
+	}
+}
+
 func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementResult, error) {
 	nFields := len(stmt.Fields)
-	nGroups := len(acc.groupOrder)
+	nGroups := len(acc.groupEntries)
 
 	// Build result column metadata.
 	resultColumns := make([]Column, nFields)
@@ -1319,57 +1370,14 @@ func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementR
 	}
 
 	// Preallocate one flat block for all group values — one alloc covers every group.
-	// passedIndices tracks which group indices passed HAVING, using int32 (4 bytes each)
-	// instead of full Row structs (48 bytes each).
+	// passedIndices tracks which groups passed HAVING, using int32 (4 bytes each)
+	// instead of full Row structs.
 	allResultValues := make([]OptionalValue, nGroups*nFields)
 	passedIndices := make([]int32, 0, nGroups)
 
-	for gi, key := range acc.groupOrder {
-		gsIdx := acc.groupMap[key]
-		aggBase := int(acc.groupEntries[gsIdx].aggStateStart)
-		gvBase := int(acc.groupEntries[gsIdx].groupValStart)
-		mmBase := int(acc.groupEntries[gsIdx].minMaxStart)
-
+	for gi := range nGroups {
 		values := allResultValues[gi*nFields : (gi+1)*nFields]
-
-		for i, agg := range acc.aggregates {
-			switch agg.Kind {
-			case 0:
-				if j := acc.fieldToGroupByIdx[i]; j >= 0 {
-					values[i] = acc.groupValPool[gvBase+j]
-				}
-			case AggregateCount:
-				values[i] = OptionalValue{Valid: true, Value: acc.aggStatePool[aggBase+i].count}
-			case AggregateSum:
-				st := acc.aggStatePool[aggBase+i]
-				if st.hasValue {
-					if st.useIntSum {
-						values[i] = OptionalValue{Valid: true, Value: st.sumI}
-					} else {
-						values[i] = OptionalValue{Valid: true, Value: st.sumF}
-					}
-				}
-			case AggregateAvg:
-				st := acc.aggStatePool[aggBase+i]
-				if st.hasValue && st.count > 0 {
-					if st.useIntSum {
-						values[i] = OptionalValue{Valid: true, Value: float64(st.sumI) / float64(st.count)}
-					} else {
-						values[i] = OptionalValue{Valid: true, Value: st.sumF / float64(st.count)}
-					}
-				}
-			case AggregateMin:
-				slot := mmBase + acc.minMaxAggSlot[i]
-				if acc.minMaxPool[slot].Valid {
-					values[i] = acc.minMaxPool[slot]
-				}
-			case AggregateMax:
-				slot := mmBase + acc.minMaxAggSlot[i]
-				if acc.minMaxPool[slot].Valid {
-					values[i] = acc.minMaxPool[slot]
-				}
-			}
-		}
+		acc.computeGroupValues(gi, values)
 
 		// Apply HAVING filter against the computed aggregate row.
 		if len(stmt.Having) > 0 {
