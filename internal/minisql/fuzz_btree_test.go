@@ -80,15 +80,13 @@ func FuzzBTreeWrite(f *testing.F) {
 
 		// Full scan must not panic and must drain without error.
 		_ = txManager.ExecuteInTransaction(ctx, func(txCtx context.Context) error {
-			result, err := table.Select(txCtx, Statement{
+			if result, err := table.Select(txCtx, Statement{
 				Kind:   Select,
 				Fields: fieldsFromColumns(columns...),
-			})
-			if err != nil {
-				return nil
-			}
-			for result.Rows.Next(txCtx) {
-				_ = result.Rows.Row()
+			}); err == nil {
+				for result.Rows.Next(txCtx) {
+					_ = result.Rows.Row()
+				}
 			}
 			return nil
 		})
@@ -96,18 +94,16 @@ func FuzzBTreeWrite(f *testing.F) {
 		// Point-lookup for each live id must not panic.
 		for id := range liveIDs {
 			_ = txManager.ExecuteInTransaction(ctx, func(txCtx context.Context) error {
-				result, err := table.Select(txCtx, Statement{
+				if result, err := table.Select(txCtx, Statement{
 					Kind:   Select,
 					Fields: fieldsFromColumns(columns...),
 					Conditions: OneOrMore{{
 						FieldIsEqual(Field{Name: "id"}, OperandInteger, id),
 					}},
-				})
-				if err != nil {
-					return nil
-				}
-				for result.Rows.Next(txCtx) {
-					_ = result.Rows.Row()
+				}); err == nil {
+					for result.Rows.Next(txCtx) {
+						_ = result.Rows.Row()
+					}
 				}
 				return nil
 			})

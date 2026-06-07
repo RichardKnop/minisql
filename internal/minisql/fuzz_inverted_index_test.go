@@ -91,30 +91,22 @@ func FuzzInvertedIndex(f *testing.F) {
 
 		// Lookup and iterate must not panic on any term.
 		_ = txManager.ExecuteInTransaction(ctx, func(ctx context.Context) error {
-			opened, err := OpenInvertedIndex(ctx, "fuzz_idx", invertedIndexPostingModeRowIDs, txPager, metaRoot)
-			if err != nil {
-				return nil
-			}
-
-			iter, err := opened.Lookup(ctx, term)
-			if err != nil {
-				return nil
-			}
-			// Drain the iterator.
-			for {
-				_, ok, err := iter.NextBlock(ctx)
-				if err != nil || !ok {
-					break
+			opened, openErr := OpenInvertedIndex(ctx, "fuzz_idx", invertedIndexPostingModeRowIDs, txPager, metaRoot)
+			if openErr == nil {
+				if iter, lookupErr := opened.Lookup(ctx, term); lookupErr == nil {
+					for {
+						_, ok, err := iter.NextBlock(ctx)
+						if err != nil || !ok {
+							break
+						}
+					}
+				}
+				if scanner, ok := opened.(invertedRowIDScanner); ok {
+					_ = scanner.ForEachRowID(ctx, term, func(_ RowID) error {
+						return nil
+					})
 				}
 			}
-
-			// ForEachRowID must not panic.
-			if scanner, ok := opened.(invertedRowIDScanner); ok {
-				_ = scanner.ForEachRowID(ctx, term, func(_ RowID) error {
-					return nil
-				})
-			}
-
 			return nil
 		})
 	})
