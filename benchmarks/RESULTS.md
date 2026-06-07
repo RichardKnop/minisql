@@ -64,6 +64,19 @@ The results are grouped by benchmark family so each table can be read without ho
 | Inner join, low selectivity | 129.6 µs | 860.9 µs | 0.15× | 21.0 KiB | 11.3 KiB | 1,198 / 1,009 |
 | Left join, unmatched rows | 4.38 ms | 5.19 ms | 0.8× | 869.0 KiB | 708.2 KiB | 79,643 / 70,157 |
 
+### ORDER BY Disk Spill
+
+MiniSQL-only sub-benchmarks on a 10 000-row table sorted by a `varchar(255)` email column.
+`no-spill` uses `sort_mem_limit=0` (pure in-memory sort); `spill-64k` uses `sort_mem_limit=65536`,
+which flushes the rows across ~8 sorted run files that are then N-way merged.
+The ~11× overhead is dominated by temp-file I/O in `runWriter`/`runReader`/`externalSortMerge`
+and is the primary target for future optimisation (e.g. buffered I/O, larger default batch size).
+
+| Sub-benchmark | Time | Rows/op | Notes |
+|---|---|---|---|
+| no-spill | 5.2 ms | 10 000 | pure in-memory sort, baseline |
+| spill-64k | 12.5 ms | 10 000 | after buffered I/O (64 KiB); was 55.9 ms unbuffered (~4.5× improvement) |
+
 ### Full-Text Inverted Index
 
 | Benchmark | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs |
