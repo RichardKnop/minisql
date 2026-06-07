@@ -148,3 +148,20 @@ func TestLRUCache_Concurrent(t *testing.T) {
 		assert.True(t, ok, "key %s should be in cache", key)
 	}
 }
+
+func TestLRUCache_Purge(t *testing.T) {
+	t.Parallel()
+
+	cache := New[string](3)
+	cache.Put("foo key", mockValue{"foo"}, true)
+	cache.Put("bar key", mockValue{"bar"}, true)
+
+	cache.Purge()
+
+	assert.Empty(t, cache.entries)
+	assert.Nil(t, cache.head)
+	assert.Nil(t, cache.tail)
+	value, ok := cache.Get("foo key")
+	assert.False(t, ok)
+	assert.Nil(t, value)
+}
