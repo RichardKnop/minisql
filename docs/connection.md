@@ -17,6 +17,7 @@
 | `slow_query_threshold` | `0` (disabled) | Log queries at WARN level when elapsed time meets or exceeds this value. Accepts Go duration strings: `50ms`, `2s`. |
 | `synchronous` | `normal` | WAL fsync mode. See [WAL durability modes](#wal-durability-modes). |
 | `parallel_scan` | `off` | Enable concurrent leaf-page scanning for full table scans. See [Parallel scan](#parallel-scan). |
+| `sort_mem_limit` | `4194304` | Maximum bytes of row data held in memory before an `ORDER BY` sort spills to disk. Set to `0` to disable disk spill (all sorted rows stay in memory). See [Disk-backed sort](#disk-backed-sort). |
 | `encryption_key` | _(none)_ | Hex-encoded AES-256-CTR encryption key. See [Encryption](encryption.md). |
 
 ## Examples
@@ -39,6 +40,12 @@ db, err := sql.Open("minisql", "./my.db?slow_query_threshold=50ms")
 
 // Enable parallel full table scans
 db, err := sql.Open("minisql", "./my.db?parallel_scan=on")
+
+// Raise ORDER BY sort memory to 64 MiB before spilling to disk
+db, err := sql.Open("minisql", "./my.db?sort_mem_limit=67108864")
+
+// Disable disk spill entirely (all sorted rows stay in memory)
+db, err := sql.Open("minisql", "./my.db?sort_mem_limit=0")
 
 // Encrypted database
 import "encoding/hex"
@@ -104,5 +111,28 @@ PRAGMA parallel_scan = off;
 
 !!! note
     Parallel scan does **not** guarantee row-ID ordering. If your query depends on insertion order, always add an explicit `ORDER BY`.
+
+## Disk-backed sort
+
+`ORDER BY` queries accumulate matching rows in memory to sort them. When the total size of those rows exceeds `sort_mem_limit` bytes (default 4 MiB), MiniSQL flushes the current sorted batch to a temporary file and continues accumulating. At the end of the scan all temp files are merged with a min-heap into a single sorted stream.
+
+```go
+// Raise the threshold to 64 MiB for analytics workloads with large result sets
+db, err := sql.Open("minisql", "./my.db?sort_mem_limit=67108864")
+
+// Disable disk spill entirely (use when you know result sets are small)
+db, err := sql.Open("minisql", "./my.db?sort_mem_limit=0")
+```
+
+Or adjust at runtime per-session with PRAGMA:
+
+```sql
+PRAGMA sort_mem_limit;              -- returns current limit in bytes
+PRAGMA sort_mem_limit = 67108864;   -- set to 64 MiB
+PRAGMA sort_mem_limit = 0;          -- disable disk spill
+```
+
+!!! note
+    Disk spill only applies to the `selectWithSortRowView` fast path: sequential scans with no joins, no `LIMIT`, and no aggregate/GROUP BY. Queries that do not match this path sort in memory as before, regardless of `sort_mem_limit`.
 
 Parallel scan is most beneficial for large tables on multi-core machines running filter-heavy queries. For small tables or single-CPU environments the overhead typically outweighs the benefit.
