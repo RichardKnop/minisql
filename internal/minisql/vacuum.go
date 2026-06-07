@@ -163,37 +163,36 @@ func (d *Database) vacuumWithKey(ctx context.Context, newKey []byte) error {
 			return fmt.Errorf("vacuum: temp table %q not found", schema.Name)
 		}
 
-		// Read all rows from the live table in a single read transaction.
-		var rows []Row
-		if err := d.txManager.ExecuteInTransaction(ctx, func(txCtx context.Context) error {
-			result, err := liveTable.Select(txCtx, Statement{
-				Kind:   Select,
-				Fields: fieldsFromColumns(liveTable.Columns...),
-			})
-			if err != nil {
-				return err
-			}
-			for result.Rows.Next(txCtx) {
-				rows = append(rows, result.Rows.Row())
-			}
-			return result.Rows.Err()
-		}); err != nil {
-			return fmt.Errorf("vacuum: read table %q: %w", schema.Name, err)
-		}
+		liveFields := fieldsFromColumns(liveTable.Columns...)
+		insertFields := fieldsFromColumns(tempTable.Columns...)
 
-		// Insert each row into the temp table.  Each insert is its own
-		// transaction so a failure on one row doesn't silently roll back others.
-		for _, row := range rows {
-			if err := tempDB.txManager.ExecuteInTransaction(tempCtx, func(txCtx context.Context) error {
-				_, err := tempTable.Insert(txCtx, Statement{
-					Kind:    Insert,
-					Fields:  fieldsFromColumns(tempTable.Columns...),
-					Inserts: [][]OptionalValue{row.Values},
+		// Stream rows into one temp-table transaction. The temp database is not
+		// visible until the final atomic swap and is discarded on failure, so
+		// committing each copied row separately would add overhead without making
+		// the live database more durable or correct.
+		if err := tempDB.txManager.ExecuteInTransaction(tempCtx, func(copyCtx context.Context) error {
+			return d.txManager.ExecuteInTransaction(ctx, func(readCtx context.Context) error {
+				result, err := liveTable.Select(readCtx, Statement{
+					Kind:   Select,
+					Fields: liveFields,
 				})
-				return err
-			}); err != nil {
-				return fmt.Errorf("vacuum: insert row into temp table %q: %w", schema.Name, err)
-			}
+				if err != nil {
+					return err
+				}
+				for result.Rows.Next(readCtx) {
+					row := result.Rows.Row()
+					if _, err := tempTable.Insert(copyCtx, Statement{
+						Kind:    Insert,
+						Fields:  insertFields,
+						Inserts: [][]OptionalValue{row.Values},
+					}); err != nil {
+						return err
+					}
+				}
+				return result.Rows.Err()
+			})
+		}); err != nil {
+			return fmt.Errorf("vacuum: copy rows for table %q: %w", schema.Name, err)
 		}
 	}
 

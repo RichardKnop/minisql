@@ -3,13 +3,13 @@
 ## Current Baseline
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
-**Branch:** `codex/profile-distinct-subquery`  
-**Command:** `make bench BENCH_COUNT=1` followed by `make bench-report`; HNSW tables refreshed with targeted `go test -tags bench -bench '^BenchmarkHNSW_...' -benchmem` runs; DISTINCT/subquery rows refreshed with `go test -tags bench -run '^$' -bench 'Benchmark(Distinct_HighCardinality|Subquery_InList)$' -benchmem -count=1 ./benchmarks/`  
+**Branch:** `codex/profile-vacuum-small`  
+**Command:** `make bench BENCH_COUNT=1` followed by `make bench-report`; HNSW tables refreshed with targeted `go test -tags bench -bench '^BenchmarkHNSW_...' -benchmem` runs; DISTINCT/subquery rows refreshed with `go test -tags bench -run '^$' -bench 'Benchmark(Distinct_HighCardinality|Subquery_InList)$' -benchmem -count=1 ./benchmarks/`; VACUUM row refreshed with `go test -tags bench -run '^$' -bench '^BenchmarkVacuum_Small$' -benchmem -count=1 ./benchmarks/`  
 **GOMAXPROCS:** 10  
 
 SQLite comparisons use the `sqlite` driver compiled into the same test binary. MiniSQL benchmarks run against fresh temp-file databases per sub-benchmark. Times are wall-clock (`ns/op`); memory figures are heap allocations reported by the Go runtime.
 
-This file was refreshed from scratch after the latest DML allocation work, including transaction write-set inlining, auto-commit transaction reuse, direct prepared DML argument binding, and HNSW typed candidate-heap allocation reduction. DISTINCT/subquery rows were subsequently refreshed after RowView predicate fast paths and DISTINCT seen-set pre-sizing.
+This file was refreshed from scratch after the latest DML allocation work, including transaction write-set inlining, auto-commit transaction reuse, direct prepared DML argument binding, and HNSW typed candidate-heap allocation reduction. DISTINCT/subquery rows were subsequently refreshed after RowView predicate fast paths and DISTINCT seen-set pre-sizing. VACUUM was refreshed after streaming row copy into the temporary compacted database.
 
 ---
 
@@ -103,7 +103,7 @@ The results are grouped by benchmark family so each table can be read without ho
 
 | Benchmark | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs |
 |---|---|---|---|---|---|---|
-| VACUUM small | 18.78 ms | 256.38 µs | 73.2× | 1.28 MiB | 89 B | 11,464 / 4 |
+| VACUUM small | 2.34 ms | 556.88 µs | 4.2× | 752.5 KiB | 91 B | 6,982 / 4 |
 | WAL checkpoint | 194.44 µs | 104.85 µs | 1.9× | 3.3 KiB | 440 B | 37 / 12 |
 | EXPLAIN | 5.46 µs | 1.21 µs | 4.5× | 6.0 KiB | 680 B | 55 / 18 |
 
@@ -159,11 +159,11 @@ The results are grouped by benchmark family so each table can be read without ho
 | HNSW | Build index, dims128, 10k rows | 134.7 MiB |
 | HNSW | Build index, dims3, 10k rows | 120.2 MiB |
 | Full-text | Build index | 1.39 MiB |
-| Maintenance | VACUUM small | 1.28 MiB |
 | DISTINCT | High-cardinality distinct | 1.26 MiB |
 | JSON inverted | Build index | 1.26 MiB |
 | SELECT | Full scan | 1.23 MiB |
 | Join | Inner join, small-large | 1.00 MiB |
+| Maintenance | VACUUM small | 752.5 KiB |
 | Subquery | IN list | 715.8 KiB |
 
 ### Good Next Optimisation Targets
@@ -171,4 +171,4 @@ The results are grouped by benchmark family so each table can be read without ho
 - HNSW build allocation growth is much lower after typed candidate heaps, but it remains the largest broad-suite outlier at 10k rows.
 - Full-text and JSON build paths still allocate multiple MiB per operation and remain the most relevant inverted-index targets.
 - DISTINCT and subquery materialisation are improved after RowView predicate fast paths and DISTINCT seen-set pre-sizing, but DISTINCT remains near the MiB/op outlier group.
-- VACUUM is still much more expensive than SQLite in both time and memory, but it is a less common operational path than DML and SELECT.
+- VACUUM is much improved after streaming row copy, though it still allocates far more than SQLite because it rebuilds the compacted MiniSQL database through normal table/index write paths.
