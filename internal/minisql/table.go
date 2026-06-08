@@ -56,6 +56,8 @@ type Table struct {
 	// checks here first and stores results after planning. Nil for system tables
 	// and virtual tables created for derived-table subqueries.
 	planCache LRUCache[string]
+	// metrics is the shared engine counter store. nil when not wired (unit tests).
+	metrics *engineMetrics
 	// allFields, overflow masks, textOverflowCols, and vectorOverflowCols are derived from Columns at
 	// construction time and reused across calls to avoid per-call allocations.
 	allFields          []Field

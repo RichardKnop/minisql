@@ -50,6 +50,7 @@ type Database struct {
 	planCache      LRUCache[string]
 	tables         map[string]*Table
 	txManager      *TransactionManager
+	metrics        *engineMetrics
 	dbLock         *sync.RWMutex
 	walIndex       *WALIndex
 	clock          clock
@@ -109,9 +110,18 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, par
 	}
 	db.lockedProvider = &lockedTableProvider{db: db}
 
+	db.metrics = &engineMetrics{}
+	// Wire metrics into subsystems that live in the same package.
+	// pagerImpl is always the concrete type for saver in production; the type
+	// assertion is a no-op for test doubles that use a different PageSaver.
+	if p, ok := saver.(*pagerImpl); ok {
+		p.SetMetrics(db.metrics)
+	}
+
 	db.txManager = NewTransactionManager(logger, dbFilePath, db.pagerFactory, saver, db)
 	db.txManager.SetRowCountApplier(db.applyRowCountDeltas)
 	db.txManager.SetRowCountDeltaApplier(db.applyRowCountDelta)
+	db.txManager.SetMetrics(db.metrics)
 
 	if walCfg != nil {
 		db.wal = walCfg.WAL
@@ -127,6 +137,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, par
 		if walCfg.WAL != nil {
 			walCfg.WAL.SetSynchronous(walCfg.Synchronous)
 			walCfg.WAL.SetWriteBufferSize(walCfg.WALWriteBufferSize)
+			walCfg.WAL.SetMetrics(db.metrics)
 		}
 	}
 
@@ -145,6 +156,22 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, par
 	}
 
 	return db, nil
+}
+
+// RecordQuery increments the query counters. Called by the driver layer after
+// each ExecContext or QueryContext call completes.
+func (d *Database) RecordQuery(slow bool) {
+	if m := d.metrics; m != nil {
+		m.recordQuery(slow)
+	}
+}
+
+// ReadEngineMetrics returns a point-in-time snapshot of engine-level counters.
+func (d *Database) ReadEngineMetrics() EngineSnapshot {
+	if d.metrics == nil {
+		return EngineSnapshot{}
+	}
+	return d.metrics.snapshot()
 }
 
 // GetTable retrieves a table by name in a thread-safe manner.
@@ -930,6 +957,7 @@ func (d *Database) tableFromSQL(ctx context.Context, schema Schema) (*Table, err
 
 	opts = append(opts, WithParallelScan(d.parallelScan))
 	opts = append(opts, withSortMemLimit(d.sortMemLimit))
+	opts = append(opts, withMetrics(d.metrics))
 
 	if len(stmt.ForeignKeys) > 0 {
 		opts = append(opts, WithForeignKeys(stmt.ForeignKeys))
@@ -1476,6 +1504,7 @@ func (d *Database) createTable(ctx context.Context, stmt Statement) (*Table, err
 
 	opts = append(opts, WithParallelScan(d.parallelScan))
 	opts = append(opts, withSortMemLimit(d.sortMemLimit))
+	opts = append(opts, withMetrics(d.metrics))
 
 	if len(stmt.ForeignKeys) > 0 {
 		opts = append(opts, WithForeignKeys(stmt.ForeignKeys))
