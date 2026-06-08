@@ -118,8 +118,8 @@ Every `SELECT` statement runs inside a **read-only transaction** with snapshot i
 └──────────┬──────────────────────────┬───────────────┘
            │                          │
 ┌──────────▼──────────┐  ┌────────────▼───────────────┐
-│    Page cache (LRU) │  │   WAL (write-ahead log)     │
-│    In-memory        │  │   {dbpath}-wal              │
+│    Page cache (LRU) │  │   WAL (write-ahead log)    │
+│    In-memory        │  │   {dbpath}-wal             │
 └──────────┬──────────┘  └────────────┬───────────────┘
            │                          │
 ┌──────────▼──────────────────────────▼───────────────┐
