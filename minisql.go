@@ -253,7 +253,12 @@ func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (result driver.Result, err error) {
 	start := time.Now()
 	defer func() {
-		c.logSlowQuery(query, time.Since(start), err)
+		elapsed := time.Since(start)
+		slow := c.slowQueryThreshold > 0 && elapsed >= c.slowQueryThreshold
+		c.db.RecordQuery(slow)
+		if slow {
+			c.logSlowQuery(query, elapsed, err)
+		}
 	}()
 
 	statements, err := c.parser.Parse(ctx, query)
@@ -297,7 +302,12 @@ func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.Name
 func (c *Conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (rows driver.Rows, err error) {
 	start := time.Now()
 	defer func() {
-		c.logSlowQuery(query, time.Since(start), err)
+		elapsed := time.Since(start)
+		slow := c.slowQueryThreshold > 0 && elapsed >= c.slowQueryThreshold
+		c.db.RecordQuery(slow)
+		if slow {
+			c.logSlowQuery(query, elapsed, err)
+		}
 	}()
 
 	statements, err := c.parser.Parse(ctx, query)

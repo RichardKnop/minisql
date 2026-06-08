@@ -42,6 +42,12 @@ func withSortMemLimit(n int64) TableOption {
 	}
 }
 
+// withMetrics wires the shared engine counter store into the table so that
+// sort metrics (in-memory vs spill) are tracked automatically.
+func withMetrics(m *engineMetrics) TableOption {
+	return func(t *Table) { t.metrics = m }
+}
+
 // WithForeignKeys sets the outgoing FK constraints on the table.
 func WithForeignKeys(fks []ForeignKey) TableOption {
 	return func(t *Table) {

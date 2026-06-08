@@ -97,15 +97,20 @@ type WALReadFrame struct {
 type WAL struct {
 	file           *os.File
 	filepath       string
-	pendingBuf     []byte // write-buffer accumulating frames not yet sent to the OS
-	pendingLen     int    // valid bytes in pendingBuf
-	flushThreshold int    // flush when pendingLen >= this; 0 = flush every commit
+	metrics        *engineMetrics // nil when metrics are not wired
+	pendingBuf     []byte         // write-buffer accumulating frames not yet sent to the OS
+	pendingLen     int            // valid bytes in pendingBuf
+	flushThreshold int            // flush when pendingLen >= this; 0 = flush every commit
 	nextOffset     int64
 	pageSize       uint32
 	salt1          uint32
 	salt2          uint32
 	synchronous    atomic.Int32 // SynchronousMode; default SynchronousNormal
 }
+
+// SetMetrics wires an engineMetrics counter store into the WAL so that
+// frame writes, checkpoints, and current WAL size are tracked automatically.
+func (w *WAL) SetMetrics(m *engineMetrics) { w.metrics = m }
 
 // Synchronous returns the current synchronous mode.
 func (w *WAL) Synchronous() SynchronousMode {
@@ -278,6 +283,10 @@ func (w *WAL) AppendTransaction(pages []WALPage) error {
 				return fmt.Errorf("sync WAL after append: %w", err)
 			}
 		}
+	}
+	if m := w.metrics; m != nil {
+		m.walFramesWritten.Add(int64(len(pages)))
+		m.walCurrentFrames.Store(w.FrameCount())
 	}
 	return nil
 }
@@ -539,6 +548,9 @@ func (w *WAL) Truncate() error {
 	}
 
 	w.nextOffset = WALFileHeaderSize
+	if m := w.metrics; m != nil {
+		m.walCurrentFrames.Store(0)
+	}
 	return nil
 }
 

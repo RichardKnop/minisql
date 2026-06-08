@@ -37,6 +37,7 @@ type pagerImpl struct {
 	bufferPool     *sync.Pool
 	walIndex       *WALIndex
 	cipher         *pkgcrypto.PageCipher // nil when encryption is disabled
+	metrics        *engineMetrics        // nil when metrics are not wired
 	pages          []*Page
 	pageSize       int
 	maxCachedPages int
@@ -98,6 +99,15 @@ func NewPager(file DBFile, pageSize, maxCachedPages int) (*pagerImpl, error) {
 	return pager, nil
 }
 
+// SetMetrics wires an engineMetrics counter store into the pager so that
+// cache hits, misses, evictions, and current size are tracked automatically.
+func (p *pagerImpl) SetMetrics(m *engineMetrics) {
+	p.metrics = m
+	if m != nil {
+		m.pageCacheCapacity = int64(p.maxCachedPages)
+	}
+}
+
 // SetWALIndex wires a WAL index into the pager.  Once set, cache misses in
 // GetPage check the index before falling back to a DB-file read.
 //
@@ -153,12 +163,18 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 		if pageIdx == 0 {
 			p.lruCache.GetAndPromote(pageIdx)
 		}
-		// No LRU update needed for cache hits - Get() already incremented access count
+		if m := p.metrics; m != nil {
+			m.pageCacheHits.Add(1)
+		}
 		return page, nil
 	}
 	totalPages := p.totalPages
 	wi := p.walIndex
 	p.mu.RUnlock()
+
+	if m := p.metrics; m != nil {
+		m.pageCacheMisses.Add(1)
+	}
 
 	// WAL check: on a cache miss, look up the WAL index before touching the DB
 	// file.  WAL pages may not yet be on disk (checkpoint pending), so this check
@@ -213,6 +229,10 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 			evictedIdx, evicted := p.lruCache.EvictIfNeeded()
 			if evicted {
 				p.pages[evictedIdx] = nil
+				if m := p.metrics; m != nil {
+					m.pageCacheEvictions.Add(1)
+					m.pageCacheSize.Add(-1)
+				}
 			}
 
 			if len(p.pages) < int(pageIdx)+1 {
@@ -228,6 +248,9 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 			}
 
 			p.lruCache.Put(pageIdx, struct{}{}, false)
+			if m := p.metrics; m != nil {
+				m.pageCacheSize.Add(1)
+			}
 			return p.pages[pageIdx], nil
 		}
 	}
@@ -292,6 +315,10 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 	evickedIdx, evicted := p.lruCache.EvictIfNeeded()
 	if evicted {
 		p.pages[evickedIdx] = nil
+		if m := p.metrics; m != nil {
+			m.pageCacheEvictions.Add(1)
+			m.pageCacheSize.Add(-1)
+		}
 	}
 
 	// Extend sparse array if needed
@@ -311,6 +338,9 @@ func (p *pagerImpl) GetPage(ctx context.Context, pageIdx PageIndex, unmarshaler 
 
 	// Track this page access
 	p.lruCache.Put(pageIdx, struct{}{}, false)
+	if m := p.metrics; m != nil {
+		m.pageCacheSize.Add(1)
+	}
 
 	return p.pages[pageIdx], nil
 }

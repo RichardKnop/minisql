@@ -28,6 +28,7 @@ linters:
         - (*database/sql.Rows).Close
         - (*database/sql.Stmt).Close
         - (*database/sql.DB).Close
+        - (*database/sql.Conn).Close
         - os.Remove
         # Print functions: ignoring write errors is conventional.
         - fmt.Fprint

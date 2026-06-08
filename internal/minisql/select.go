@@ -3897,6 +3897,10 @@ func (t *Table) selectWithSortRowView(
 			return err
 		}
 		tmpRuns = append(tmpRuns, path)
+		if m := t.metrics; m != nil {
+			m.sortSpillRuns.Add(1)
+			m.sortSpillBytes.Add(accumBytes)
+		}
 		allRows = allRows[:0]
 		accumBytes = 0
 		return nil
@@ -3933,6 +3937,9 @@ func (t *Table) selectWithSortRowView(
 	} else {
 		if err := t.sortRows(allRows, effectiveOrderBy); err != nil {
 			return StatementResult{}, true, err
+		}
+		if m := t.metrics; m != nil {
+			m.sortsInMemory.Add(1)
 		}
 	}
 
@@ -4227,6 +4234,10 @@ func (t *Table) selectWithSortSpill(
 			return err
 		}
 		tmpRuns = append(tmpRuns, path)
+		if m := t.metrics; m != nil {
+			m.sortSpillRuns.Add(1)
+			m.sortSpillBytes.Add(accumBytes)
+		}
 		allRows = allRows[:0]
 		accumBytes = 0
 		return nil
@@ -4266,6 +4277,9 @@ func (t *Table) selectWithSortSpill(
 	} else {
 		if err := t.sortRows(allRows, plan.OrderBy); err != nil {
 			return StatementResult{}, err
+		}
+		if m := t.metrics; m != nil {
+			m.sortsInMemory.Add(1)
 		}
 	}
 

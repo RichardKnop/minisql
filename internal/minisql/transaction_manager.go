@@ -44,6 +44,7 @@ type TransactionManager struct {
 	rowCountDeltaApplier func(string, int64)
 	logger               *zap.Logger
 	cipher               *pkgcrypto.PageCipher // nil when encryption is disabled
+	metrics              *engineMetrics         // nil when metrics are not wired
 	pageLastCommittedSeq map[PageIndex]uint64
 	pageVersionHistory   map[PageIndex][]pageVersion
 	commitHook           func(commitPhase)
@@ -86,6 +87,10 @@ func NewTransactionManager(logger *zap.Logger, dbFilePath string, factory TxPage
 		ddlSaver:             ddlSaver,
 	}
 }
+
+// SetMetrics wires an engineMetrics counter store into the transaction manager
+// so that commits and rollbacks are tracked automatically.
+func (tm *TransactionManager) SetMetrics(m *engineMetrics) { tm.metrics = m }
 
 // SetCipher wires an AES-256-CTR cipher into the transaction manager so that
 // WAL frames are encrypted before being written and decrypted after being read.
@@ -145,6 +150,10 @@ func (tm *TransactionManager) CheckpointWAL(dbFile DBFile) error {
 
 	tm.walWriteMu.Lock()
 	defer tm.walWriteMu.Unlock()
+
+	if m := tm.metrics; m != nil {
+		m.walCheckpoints.Add(1)
+	}
 
 	framesBefore := tm.wal.FrameCount()
 
@@ -487,6 +496,9 @@ func (tm *TransactionManager) commitDirect(ctx context.Context, tx *Transaction)
 	tm.applyRowCountDeltas(tx)
 	tx.Commit()
 	delete(tm.transactions, tx.ID)
+	if m := tm.metrics; m != nil {
+		m.txCommits.Add(1)
+	}
 	if ce := tm.logger.Check(zap.DebugLevel, "commit transaction"); ce != nil {
 		ce.Write(zap.Uint64("tx_id", uint64(tx.ID)))
 	}
@@ -608,6 +620,9 @@ func (tm *TransactionManager) commitWithWAL(ctx context.Context, tx *Transaction
 		}
 	}
 
+	if m := tm.metrics; m != nil {
+		m.txCommits.Add(1)
+	}
 	if ce := tm.logger.Check(zap.DebugLevel, "commit transaction (WAL)"); ce != nil {
 		ce.Write(zap.Uint64("tx_id", uint64(tx.ID)))
 	}
@@ -797,6 +812,9 @@ func (tm *TransactionManager) RollbackTransaction(ctx context.Context, tx *Trans
 	tm.trimPageVersionHistoryLocked()
 	tm.mu.Unlock()
 
+	if m := tm.metrics; m != nil {
+		m.txRollbacks.Add(1)
+	}
 	if ce := tm.logger.Check(zap.DebugLevel, "rollback transaction"); ce != nil {
 		ce.Write(zap.Uint64("tx_id", uint64(tx.ID)))
 	}
