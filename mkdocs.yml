@@ -99,6 +99,9 @@ nav:
   - Constraints: constraints.md
   - System Table: system-table.md
   - Limitations: limitations.md
+  - Blog:
+    - blog/index.md
+    - "Building MiniSQL v1.0": blog/minisql-1.0.md
 
 extra:
   social:
