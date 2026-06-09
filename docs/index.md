@@ -80,6 +80,7 @@ for rows.Next() {
 | [Vector Search](vector-search.md) | VECTOR type and HNSW ANN search |
 | [Encryption](encryption.md) | Transparent AES-256-CTR encryption |
 | [Metrics](metrics.md) | Native engine statistics API |
+| [Backup](backup.md) | Online backup while the database is live |
 | [Constraints](constraints.md) | CHECK, FK, NOT NULL, UNIQUE |
 | [System Table](system-table.md) | `minisql_schema` structure |
 | [Limitations](limitations.md) | Known limitations and workarounds |
