@@ -2038,7 +2038,7 @@
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── Cell data — rows / index entries
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>└── CRC32 checksum — last 4 bytes
 </span></code></pre></div>
-<p>Usable inline cell space per non-root page is <strong>~4 061 bytes</strong>. Large values (TEXT/JSON &gt; 255 bytes, all VECTOR data) spill onto <strong>overflow pages</strong> chained via next-page pointers, bypassing the per-page limit.</p>
+<p>Usable inline cell space per non-root page is <strong>~4 061 bytes</strong>. Large values (TEXT/JSON &gt; 512 bytes, all VECTOR data) spill onto <strong>overflow pages</strong> chained via next-page pointers, bypassing the per-page limit.</p>
 <h3 id="b-tree">B+ Tree<a class="headerlink" href="#b-tree" title="Permanent link">&para;</a></h3>
 <p>Every table and every index is stored as an independent <strong>B+ tree</strong>:</p>
 <ul>

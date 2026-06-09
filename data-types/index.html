@@ -2009,17 +2009,17 @@
 </tr>
 <tr>
 <td><code>VARCHAR(n)</code></td>
-<td>Variable, ≤ 255 bytes inline</td>
+<td>Variable, ≤ 512 bytes inline</td>
 <td>At most <em>n</em> bytes</td>
 <td><code>string</code></td>
-<td>Inline storage up to 255 bytes; overflow pages for larger values</td>
+<td>Inline storage up to 512 bytes; overflow pages for larger values</td>
 </tr>
 <tr>
 <td><code>TEXT</code></td>
 <td>Variable, unlimited</td>
 <td>UTF-8 text</td>
 <td><code>string</code></td>
-<td>Always uses overflow pages for values &gt; 255 bytes</td>
+<td>Always uses overflow pages for values &gt; 512 bytes</td>
 </tr>
 <tr>
 <td><code>TIMESTAMP</code></td>
@@ -2082,8 +2082,8 @@
 </span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="p">);</span>
 </span></code></pre></div>
 <ul>
-<li>Values up to 255 bytes are stored <strong>inline</strong> in the leaf cell.</li>
-<li>Values longer than 255 bytes spill onto overflow pages (VARCHAR effectively becomes TEXT for large values).</li>
+<li>Values up to 512 bytes are stored <strong>inline</strong> in the leaf cell.</li>
+<li>Values longer than 512 bytes spill onto overflow pages (VARCHAR effectively becomes TEXT for large values).</li>
 <li>Can be used as primary key or unique key columns (up to 255 bytes).</li>
 </ul>
 <h3 id="text">TEXT<a class="headerlink" href="#text" title="Permanent link">&para;</a></h3>
