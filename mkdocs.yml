@@ -66,11 +66,16 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Getting Started: getting-started.md
-  - Connection: connection.md
-  - Architecture: architecture.md
-  - Data Types: data-types.md
-  - SQL Reference:
+  - Blog:
+    - blog/index.md
+    - "Building MiniSQL v1.0": blog/minisql-1.0.md
+  - Guide:
+    - Getting Started: getting-started.md
+    - Connection: connection.md
+    - CLI Shell: cli.md
+    - Architecture: architecture.md
+  - SQL:
+    - Data Types: data-types.md
     - CREATE / ALTER / DROP: sql/create-table.md
     - INSERT: sql/insert.md
     - SELECT: sql/select.md
@@ -85,6 +90,8 @@ nav:
     - Full-text Search: indexes/fulltext.md
     - JSON Inverted Index: indexes/json-inverted.md
     - HNSW Vector Index: indexes/hnsw.md
+    - JSON: json.md
+    - Vector Search: vector-search.md
   - Functions:
     - String: functions/string.md
     - Numeric: functions/numeric.md
@@ -93,15 +100,13 @@ nav:
     - Window: functions/window.md
     - JSON: functions/json.md
     - Conditional: functions/conditional.md
-  - JSON: json.md
-  - Vector Search: vector-search.md
-  - Encryption: encryption.md
-  - Constraints: constraints.md
-  - System Table: system-table.md
-  - Limitations: limitations.md
-  - Blog:
-    - blog/index.md
-    - "Building MiniSQL v1.0": blog/minisql-1.0.md
+  - Reference:
+    - Encryption: encryption.md
+    - Constraints: constraints.md
+    - Backup: backup.md
+    - Metrics: metrics.md
+    - System Table: system-table.md
+    - Limitations: limitations.md
 
 extra:
   social:
