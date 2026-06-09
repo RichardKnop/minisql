@@ -173,17 +173,9 @@ func (c *Conn) Ping(ctx context.Context) error {
 	return nil
 }
 
-// Close invalidates and potentially stops any current
-// prepared statements and transactions, marking this
-// connection as no longer in use.
-//
-// Because the sql package maintains a free pool of
-// connections and only calls Close when there's a surplus of
-// idle connections, it shouldn't be necessary for drivers to
-// do their own connection caching.
-//
-// Drivers must ensure all network calls made by Close
-// do not block indefinitely (e.g. apply a timeout).
+// Close flushes the WAL write-buffer, releases the page cache, and marks
+// the database file as available for a new connection. It is called
+// automatically by database/sql when the connection is returned to the pool.
 func (c *Conn) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

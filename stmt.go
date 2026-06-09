@@ -20,13 +20,8 @@ type Stmt struct {
 	statement minisql.Statement
 }
 
-// Close closes the statement.
-//
-// As of Go 1.1, a Stmt will not be closed if it's in use
-// by any queries.
-//
-// Drivers must ensure all network calls made by Close
-// do not block indefinitely (e.g. apply a timeout).
+// Close releases resources associated with the prepared statement.
+// MiniSQL statements hold no persistent server-side state, so this is a no-op.
 func (s Stmt) Close() error {
 	return nil
 }

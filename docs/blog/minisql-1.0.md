@@ -227,6 +227,8 @@ go install github.com/RichardKnop/minisql/cmd/minisql@latest
 brew install minisql
 ```
 
-Source and full documentation: [github.com/RichardKnop/minisql](https://github.com/RichardKnop/minisql) · [richardknop.github.io/minisql](https://richardknop.github.io/minisql/)
+Source and full documentation: 
+- [github.com/RichardKnop/minisql](https://github.com/RichardKnop/minisql)
+- [richardknop.github.io/minisql](https://richardknop.github.io/minisql/)
 
 Feedback, bug reports, and contributions are welcome — the project is in active development.
