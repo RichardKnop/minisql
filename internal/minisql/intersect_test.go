@@ -133,8 +133,8 @@ func intersectTestTable(t *testing.T) (*Table, *TransactionManager) {
 	const tblName = "events"
 	cols := []Column{
 		{Kind: Int8, Size: 8, Name: "id"},
-		{Kind: Varchar, Size: MaxInlineVarchar, Name: "cat"},
-		{Kind: Varchar, Size: MaxInlineVarchar, Name: "status"},
+		{Kind: Varchar, Size: MaxIndexKeySize, Name: "cat"},
+		{Kind: Varchar, Size: MaxIndexKeySize, Name: "status"},
 	}
 
 	createStmt := Statement{

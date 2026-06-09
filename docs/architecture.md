@@ -15,7 +15,7 @@ Page layout (4 096 bytes)
 └── CRC32 checksum — last 4 bytes
 ```
 
-Usable inline cell space per non-root page is **~4 061 bytes**. Large values (TEXT/JSON > 255 bytes, all VECTOR data) spill onto **overflow pages** chained via next-page pointers, bypassing the per-page limit.
+Usable inline cell space per non-root page is **~4 061 bytes**. Large values (TEXT/JSON > 512 bytes, all VECTOR data) spill onto **overflow pages** chained via next-page pointers, bypassing the per-page limit.
 
 ### B+ Tree
 

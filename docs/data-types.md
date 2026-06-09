@@ -9,8 +9,8 @@
 | `INT8` | 8 bytes | −9 223 372 036 854 775 808 … 9 223 372 036 854 775 807 | `int64` | 64-bit signed integer; required for `AUTOINCREMENT` |
 | `REAL` | 4 bytes | IEEE 754 single-precision | `float32` | |
 | `DOUBLE` | 8 bytes | IEEE 754 double-precision | `float64` | |
-| `VARCHAR(n)` | Variable, ≤ 255 bytes inline | At most *n* bytes | `string` | Inline storage up to 255 bytes; overflow pages for larger values |
-| `TEXT` | Variable, unlimited | UTF-8 text | `string` | Always uses overflow pages for values > 255 bytes |
+| `VARCHAR(n)` | Variable, ≤ 512 bytes inline | At most *n* bytes | `string` | Inline storage up to 512 bytes; overflow pages for larger values |
+| `TEXT` | Variable, unlimited | UTF-8 text | `string` | Always uses overflow pages for values > 512 bytes |
 | `TIMESTAMP` | 8 bytes | 4713 BC … 294 276 AD | `time.Time` | Microseconds since 2000-01-01 (PostgreSQL epoch); timezone-naive |
 | `JSON` | Variable, unlimited | Valid UTF-8 JSON text | `string` | Validated on insert/update; overflow pages for large values |
 | `UUID` | 16 bytes (fixed) | Hyphenated string `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` | `string` | Stored as inline binary; output is lowercase |
@@ -62,8 +62,8 @@ CREATE TABLE users (
 );
 ```
 
-- Values up to 255 bytes are stored **inline** in the leaf cell.
-- Values longer than 255 bytes spill onto overflow pages (VARCHAR effectively becomes TEXT for large values).
+- Values up to 512 bytes are stored **inline** in the leaf cell.
+- Values longer than 512 bytes spill onto overflow pages (VARCHAR effectively becomes TEXT for large values).
 - Can be used as primary key or unique key columns (up to 255 bytes).
 
 ### TEXT

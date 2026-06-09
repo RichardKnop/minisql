@@ -523,7 +523,7 @@ func addQuickCheckTestTableWithSecondaryIndex(db *Database, pager *pagerImpl, ta
 		},
 		{
 			Kind:     Varchar,
-			Size:     MaxInlineVarchar,
+			Size:     MaxIndexKeySize,
 			Name:     "email",
 			Nullable: true,
 		},

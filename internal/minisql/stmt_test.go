@@ -583,7 +583,7 @@ func TestStatement_Validate(t *testing.T) {
 			{
 				Name: "id",
 				Kind: Varchar,
-				Size: MaxInlineVarchar,
+				Size: MaxIndexKeySize,
 			},
 		}
 		stmt := Statement{
@@ -916,14 +916,14 @@ func TestStatement_Validate(t *testing.T) {
 			Inserts: [][]OptionalValue{
 				{
 					{Value: int32(1), Valid: true},
-					{Value: NewTextPointer(bytes.Repeat([]byte{'a'}, 256)), Valid: true},
+					{Value: NewTextPointer(bytes.Repeat([]byte{'a'}, MaxInlineVarchar+1)), Valid: true},
 				},
 			},
 		}
 
 		err := stmt.Validate(table)
 		require.Error(t, err)
-		assert.ErrorContains(t, err, `field "email" exceeds maximum VARCHAR length of 255`)
+		assert.ErrorContains(t, err, fmt.Sprintf(`field "email" exceeds maximum VARCHAR length of %d`, MaxInlineVarchar))
 	})
 
 	t.Run("UPDATE with unknown field should fail", func(t *testing.T) {
@@ -1512,7 +1512,7 @@ func TestStatement_DDL(t *testing.T) {
 			},
 			{
 				Kind: Varchar,
-				Size: MaxInlineVarchar,
+				Size: 255,
 				Name: "c",
 			},
 			{

@@ -329,7 +329,7 @@ func TestTable_Insert_Overflow(t *testing.T) {
 		assert.NotNil(t, pager.pages[0].LeafNode)
 		assert.NotNil(t, pager.pages[1].OverflowPage)
 		assert.Equal(t, 0, int(pager.pages[1].OverflowPage.Header.NextPage))
-		assert.Equal(t, 355, int(pager.pages[1].OverflowPage.Header.DataSize))
+		assert.Equal(t, int(MaxInlineVarchar+100), int(pager.pages[1].OverflowPage.Header.DataSize))
 	})
 
 	t.Run("Now insert a text that will overflow to a 2 pages", func(t *testing.T) {

@@ -21,7 +21,7 @@ func TestParse_CreateTable(t *testing.T) {
 	emailColumn := minisql.Column{
 		Name:     "email",
 		Kind:     minisql.Varchar,
-		Size:     minisql.MaxInlineVarchar,
+		Size:     255,
 		Nullable: true,
 	}
 
@@ -194,7 +194,7 @@ func TestParse_CreateTable(t *testing.T) {
 						{
 							Name:     "bar",
 							Kind:     minisql.Varchar,
-							Size:     minisql.MaxInlineVarchar,
+							Size:     255,
 							Nullable: true,
 						},
 					},
@@ -305,7 +305,7 @@ func TestParse_CreateTable(t *testing.T) {
 						{
 							Name:     "sit",
 							Kind:     minisql.Varchar,
-							Size:     minisql.MaxInlineVarchar,
+							Size:     255,
 							Nullable: true,
 						},
 					},
@@ -368,7 +368,7 @@ func TestParse_CreateTable(t *testing.T) {
 						{
 							Name:     "bar",
 							Kind:     minisql.Varchar,
-							Size:     minisql.MaxInlineVarchar,
+							Size:     255,
 							Nullable: true,
 						},
 					},

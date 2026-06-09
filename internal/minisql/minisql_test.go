@@ -35,7 +35,7 @@ var (
 		},
 		{
 			Kind:     Varchar,
-			Size:     MaxInlineVarchar,
+			Size:     MaxIndexKeySize,
 			Name:     "email",
 			Nullable: true,
 		},
@@ -66,9 +66,9 @@ var (
 			DefaultValue: OptionalValue{Value: MustParseTimestampMicros("0001-01-01 00:00:00.000000"), Valid: true},
 		},
 	}
-	testRowSize = uint64(8 + 4 + 255 + 4 + 1 + 4 + 8) // calculated size of testColumns
+	testRowSize = uint64(8 + (varcharLengthPrefixSize + MaxIndexKeySize) + 4 + 1 + 4 + 8) // calculated size of testColumns
 
-	mediumRowBaseSize = uint32(8 + (varcharLengthPrefixSize + MaxInlineVarchar) + 4 + 1 + 4 + 8)
+	mediumRowBaseSize = uint32(8 + (varcharLengthPrefixSize + MaxIndexKeySize) + 4 + 1 + 4 + 8)
 	// Append varchars until row size is so that 5 of these full rows can fit into a page
 	testMediumColumns = appendUntilSize(
 		[]Column{
@@ -79,7 +79,7 @@ var (
 			},
 			{
 				Kind:     Varchar,
-				Size:     MaxInlineVarchar,
+				Size:     MaxIndexKeySize,
 				Name:     "email",
 				Nullable: true,
 			},
@@ -121,7 +121,7 @@ var (
 			5*mediumRowBaseSize)/5),
 	)
 
-	bigRowBaseSize = uint32(8 + (varcharLengthPrefixSize + MaxInlineVarchar) + 4 + 1 + 4 + 8)
+	bigRowBaseSize = uint32(8 + (varcharLengthPrefixSize + MaxIndexKeySize) + 4 + 1 + 4 + 8)
 	// Append varcharts until row size is so that one full row fills en entire page
 	testBigColumns = appendUntilSize(
 		[]Column{
@@ -132,7 +132,7 @@ var (
 			},
 			{
 				Kind:     Varchar,
-				Size:     MaxInlineVarchar,
+				Size:     MaxIndexKeySize,
 				Name:     "email",
 				Nullable: true,
 			},
@@ -241,7 +241,7 @@ func (g *dataGen) Row() Row {
 
 func (g *dataGen) paddedEmail() TextPointer {
 	email := g.Email()
-	paddingLength := MaxInlineVarchar - len(email)
+	paddingLength := MaxIndexKeySize - len(email)
 	parts := strings.Split(email, "@")
 	parts[0] += "+"
 	for i := 0; i < paddingLength-1; i++ {
