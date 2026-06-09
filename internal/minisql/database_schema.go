@@ -1,8 +1,6 @@
 package minisql
 
-import (
-	"fmt"
-)
+
 
 const (
 	// SchemaTableName is the internal table used to store schema metadata.
@@ -79,13 +77,7 @@ var (
 	}
 
 	// MainTableSQL is the DDL used to create the internal schema metadata table.
-	MainTableSQL = fmt.Sprintf(`create table "%s" (
-	type int4 not null,
-	name varchar(255) not null,
-	tbl_name varchar(255),
-	root_page int4 not null,
-	sql text
-);`, SchemaTableName)
+	MainTableSQL = `create table "` + SchemaTableName + `" (type int4 not null, name varchar(255) not null, tbl_name varchar(255), root_page int4 not null, sql text);`
 
 	mainTableFields = fieldsFromColumns(mainTableColumns...)
 )

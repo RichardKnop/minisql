@@ -609,7 +609,7 @@ func (w *WAL) FrameCount() int64 {
 //
 // The caller owns the returned *WAL and must call WAL.Close() when done.
 // walIndex is populated in-place; it must be non-nil.
-// recovered is true when an existing WAL file with committed frames was found.
+// recovered is true when an existing WAL file with uncheckpointed committed frames was found.
 func OpenWALAndRebuildIndex(dbPath string, pageSize uint32, walIndex *WALIndex) (wal *WAL, recovered bool, err error) {
 	wal, err = OpenWAL(dbPath, pageSize)
 	if err != nil {

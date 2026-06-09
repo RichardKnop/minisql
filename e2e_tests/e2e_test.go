@@ -10,41 +10,21 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
-var createUsersTableSQL = `create table "users" (
-	id int8 primary key autoincrement,
-	email varchar(255) unique,
-	name text,
-	created timestamp default now()
-);`
+// These vars serve two purposes: they are sent to the engine via Exec, and they
+// are compared against table.SQL() which returns the normalized DDL stored in
+// minisql_schema. The engine normalizes DDL on write (compact, single-line), so
+// both uses must use the compact format.
+var createUsersTableSQL = `create table "users" (id int8 primary key autoincrement, email varchar(255) unique, name text, created timestamp default now());`
 
-var createUsersTimestampIndexSQL = `create index "idx_created" on "users" (
-	created
-);`
+var createUsersTimestampIndexSQL = `create index "idx_created" on "users" (created);`
 
 var dropUsersTimestampIndexSQL = `drop index "idx_created";`
 
-var createUsersTableIfNotExistsSQL = `create table if not exists "users" (
-	id int8 primary key autoincrement,
-	email varchar(255) unique,
-	name text,
-	created timestamp default now()
-);`
+var createUsersTableIfNotExistsSQL = `create table if not exists "users" (id int8 primary key autoincrement, email varchar(255) unique, name text, created timestamp default now());`
 
-var createProductsTableSQL = `create table "products" (
-	product_id int8 primary key autoincrement,
-	name text not null,
-	description text,
-	price int4 not null,
-	created timestamp default now()
-);`
+var createProductsTableSQL = `create table "products" (product_id int8 primary key autoincrement, name text not null, description text, price int4 not null, created timestamp default now());`
 
-var createOrdersTableSQL = `create table "orders" (
-	order_id int8 primary key autoincrement,
-	user_id int8 not null,
-	product_id int4 not null,
-	total_paid int4 not null,
-	created timestamp default now()
-);`
+var createOrdersTableSQL = `create table "orders" (order_id int8 primary key autoincrement, user_id int8 not null, product_id int4 not null, total_paid int4 not null, created timestamp default now());`
 
 type dataGen struct {
 	*gofakeit.Faker
