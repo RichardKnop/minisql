@@ -2310,7 +2310,7 @@ func (s Statement) DDL() string {
 
 func (s Statement) createTableDDL() string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "create table \"%s\" (\n", s.TableName)
+	fmt.Fprintf(&sb, "create table \"%s\" (", s.TableName)
 
 	var pkColumn string
 	if len(s.PrimaryKey.Columns) == 1 {
@@ -2324,7 +2324,7 @@ func (s Statement) createTableDDL() string {
 	}
 
 	for i, col := range s.Columns {
-		fmt.Fprintf(&sb, "	%s %s", col.Name, col.Kind)
+		fmt.Fprintf(&sb, "%s %s", col.Name, col.Kind)
 		if col.Kind == Varchar || col.Kind == Vector {
 			fmt.Fprintf(&sb, "(%d)", col.Size)
 		}
@@ -2369,12 +2369,11 @@ func (s Statement) createTableDDL() string {
 			}
 		}
 		if i < len(s.Columns)-1 {
-			sb.WriteString(",\n")
+			sb.WriteString(", ")
 		}
 	}
 	if len(s.PrimaryKey.Columns) > 1 {
-		sb.WriteString(",\n")
-		sb.WriteString("	primary key (")
+		sb.WriteString(", primary key (")
 		for j, col := range s.PrimaryKey.Columns {
 			sb.WriteString(col.Name)
 			if j < len(s.PrimaryKey.Columns)-1 {
@@ -2387,8 +2386,7 @@ func (s Statement) createTableDDL() string {
 		if len(uniqueIndex.Columns) == 1 {
 			continue
 		}
-		sb.WriteString(",\n")
-		sb.WriteString("	unique (")
+		sb.WriteString(", unique (")
 		for j, col := range uniqueIndex.Columns {
 			sb.WriteString(col.Name)
 			if j < len(uniqueIndex.Columns)-1 {
@@ -2399,7 +2397,6 @@ func (s Statement) createTableDDL() string {
 	}
 
 	for _, fk := range s.ForeignKeys {
-		sb.WriteString(",\n")
 		childCols := make([]string, len(fk.Columns))
 		parentCols := make([]string, len(fk.TargetColumns))
 		for i, c := range fk.Columns {
@@ -2408,12 +2405,12 @@ func (s Statement) createTableDDL() string {
 		for i, c := range fk.TargetColumns {
 			parentCols[i] = `"` + c + `"`
 		}
-		fmt.Fprintf(&sb, "\tconstraint \"%s\" foreign key (%s) references \"%s\" (%s) on delete %s on update %s",
+		fmt.Fprintf(&sb, ", constraint \"%s\" foreign key (%s) references \"%s\" (%s) on delete %s on update %s",
 			fk.Name, strings.Join(childCols, ", "), fk.TargetTable, strings.Join(parentCols, ", "),
 			fk.OnDelete.String(), fk.OnUpdate.String())
 	}
 
-	sb.WriteString("\n);")
+	sb.WriteString(");")
 	return sb.String()
 }
 
@@ -2421,28 +2418,28 @@ func (s Statement) createIndexDDL() string {
 	var sb strings.Builder
 	switch s.IndexMethod {
 	case IndexMethodFullText:
-		fmt.Fprintf(&sb, "create fulltext index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName)
+		fmt.Fprintf(&sb, "create fulltext index \"%s\" on \"%s\" (", s.IndexName, s.TableName)
 	case IndexMethodInverted:
-		fmt.Fprintf(&sb, "create inverted index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName)
+		fmt.Fprintf(&sb, "create inverted index \"%s\" on \"%s\" (", s.IndexName, s.TableName)
 	case IndexMethodHNSW:
-		fmt.Fprintf(&sb, "create hnsw index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName)
+		fmt.Fprintf(&sb, "create hnsw index \"%s\" on \"%s\" (", s.IndexName, s.TableName)
 	default:
-		fmt.Fprintf(&sb, "create index \"%s\" on \"%s\" (\n", s.IndexName, s.TableName)
+		fmt.Fprintf(&sb, "create index \"%s\" on \"%s\" (", s.IndexName, s.TableName)
 	}
 
 	for i, col := range s.Columns {
 		if s.IndexExpression != nil && i == 0 {
-			fmt.Fprintf(&sb, "	%s", s.IndexExpressionSQL)
+			sb.WriteString(s.IndexExpressionSQL)
 		} else {
-			fmt.Fprintf(&sb, "	%s", col.Name)
+			sb.WriteString(col.Name)
 		}
 
 		if i < len(s.Columns)-1 {
-			sb.WriteString(",\n")
+			sb.WriteString(", ")
 		}
 	}
 
-	sb.WriteString("\n)")
+	sb.WriteString(")")
 	if s.IndexTokenizer != "" {
 		fmt.Fprintf(&sb, " with (tokenizer = '%s')", s.IndexTokenizer)
 	}

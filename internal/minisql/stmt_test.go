@@ -1565,17 +1565,7 @@ func TestStatement_DDL(t *testing.T) {
 			},
 		}
 
-		expected := `create table "users" (
-	a int4 primary key autoincrement,
-	b int8 not null,
-	c varchar(255) not null unique,
-	d text not null,
-	e boolean not null default false,
-	f real,
-	g real,
-	h timestamp not null,
-	i timestamp default now()
-);`
+		expected := `create table "users" (a int4 primary key autoincrement, b int8 not null, c varchar(255) not null unique, d text not null, e boolean not null default false, f real, g real, h timestamp not null, i timestamp default now());`
 
 		actual := stmt.DDL()
 		assert.Equal(t, expected, actual)
@@ -1595,9 +1585,7 @@ func TestStatement_DDL(t *testing.T) {
 			},
 		}
 
-		expected := `create table "test_table_123" (
-	column_with_underscore int4 not null
-);`
+		expected := `create table "test_table_123" (column_with_underscore int4 not null);`
 
 		actual := stmt.DDL()
 		assert.Equal(t, expected, actual)
@@ -1625,11 +1613,7 @@ func TestStatement_DDL(t *testing.T) {
 			PrimaryKey: NewPrimaryKey("pk__foo", columns[0:2], false),
 		}
 
-		expected := `create table "foo" (
-	bar int4 not null,
-	baz int4 not null,
-	primary key (bar, baz)
-);`
+		expected := `create table "foo" (bar int4 not null, baz int4 not null, primary key (bar, baz));`
 
 		actual := stmt.DDL()
 		assert.Equal(t, expected, actual)
@@ -1664,11 +1648,7 @@ func TestStatement_DDL(t *testing.T) {
 			},
 		}
 
-		expected := `create table "foo" (
-	bar int4 not null,
-	baz int4 not null,
-	unique (bar, baz)
-);`
+		expected := `create table "foo" (bar int4 not null, baz int4 not null, unique (bar, baz));`
 
 		actual := stmt.DDL()
 		assert.Equal(t, expected, actual)
@@ -1719,14 +1699,7 @@ func TestStatement_DDL(t *testing.T) {
 			},
 		}
 
-		expected := `create table "foo" (
-	bar int4 not null,
-	baz int4 not null,
-	lorem varchar(100) not null,
-	ipsum varchar(100) not null,
-	unique (bar, baz),
-	unique (lorem, ipsum)
-);`
+		expected := `create table "foo" (bar int4 not null, baz int4 not null, lorem varchar(100) not null, ipsum varchar(100) not null, unique (bar, baz), unique (lorem, ipsum));`
 
 		actual := stmt.DDL()
 		assert.Equal(t, expected, actual)
@@ -1747,9 +1720,7 @@ func TestStatement_DDL(t *testing.T) {
 			},
 		}
 
-		expected := `create index "idx_users_on_foo" on "users" (
-	foo
-);`
+		expected := `create index "idx_users_on_foo" on "users" (foo);`
 
 		actual := stmt.DDL()
 		assert.Equal(t, expected, actual)
@@ -1770,10 +1741,7 @@ func TestStatement_DDL(t *testing.T) {
 			},
 		}
 
-		expected := `create index "idx_users_on_foo_bar" on "users" (
-	foo,
-	bar
-);`
+		expected := `create index "idx_users_on_foo_bar" on "users" (foo, bar);`
 
 		actual := stmt.DDL()
 		assert.Equal(t, expected, actual)
@@ -1791,9 +1759,7 @@ func TestStatement_DDL(t *testing.T) {
 			},
 		}
 
-		expected := `create fulltext index "idx_articles_body" on "articles" (
-	body
-) with (tokenizer = 'simple');`
+		expected := `create fulltext index "idx_articles_body" on "articles" (body) with (tokenizer = 'simple');`
 
 		actual := stmt.DDL()
 		assert.Equal(t, expected, actual)
@@ -1810,9 +1776,7 @@ func TestStatement_DDL(t *testing.T) {
 			},
 		}
 
-		expected := `create inverted index "idx_events_payload" on "events" (
-	payload
-);`
+		expected := `create inverted index "idx_events_payload" on "events" (payload);`
 
 		actual := stmt.DDL()
 		assert.Equal(t, expected, actual)
@@ -1840,11 +1804,7 @@ func TestStatement_DDL(t *testing.T) {
 			},
 		}
 
-		expected := `create table "orders" (
-	id int8 primary key autoincrement,
-	user_id int8 not null,
-	constraint "fk__orders__users__user_id" foreign key ("user_id") references "users" ("id") on delete restrict on update restrict
-);`
+		expected := `create table "orders" (id int8 primary key autoincrement, user_id int8 not null, constraint "fk__orders__users__user_id" foreign key ("user_id") references "users" ("id") on delete restrict on update restrict);`
 
 		actual := stmt.DDL()
 		assert.Equal(t, expected, actual)
@@ -1874,13 +1834,7 @@ func TestStatement_DDL(t *testing.T) {
 			},
 		}
 
-		expected := `create table "shipment_lines" (
-	id int8 primary key autoincrement,
-	order_id int8 not null,
-	product_id int8 not null,
-	shipped int8 not null,
-	constraint "fk__shipment_lines__order_lines__order_id_product_id" foreign key ("order_id", "product_id") references "order_lines" ("order_id", "product_id") on delete cascade on update restrict
-);`
+		expected := `create table "shipment_lines" (id int8 primary key autoincrement, order_id int8 not null, product_id int8 not null, shipped int8 not null, constraint "fk__shipment_lines__order_lines__order_id_product_id" foreign key ("order_id", "product_id") references "order_lines" ("order_id", "product_id") on delete cascade on update restrict);`
 
 		actual := stmt.DDL()
 		assert.Equal(t, expected, actual)
@@ -1917,13 +1871,7 @@ func TestStatement_DDL(t *testing.T) {
 			},
 		}
 
-		expected := `create table "order_items" (
-	id int8 primary key autoincrement,
-	order_id int8 not null,
-	product_id int8 not null,
-	constraint "fk__order_items__orders__order_id" foreign key ("order_id") references "orders" ("id") on delete restrict on update restrict,
-	constraint "fk__order_items__products__product_id" foreign key ("product_id") references "products" ("id") on delete no action on update no action
-);`
+		expected := `create table "order_items" (id int8 primary key autoincrement, order_id int8 not null, product_id int8 not null, constraint "fk__order_items__orders__order_id" foreign key ("order_id") references "orders" ("id") on delete restrict on update restrict, constraint "fk__order_items__products__product_id" foreign key ("product_id") references "products" ("id") on delete no action on update no action);`
 
 		actual := stmt.DDL()
 		assert.Equal(t, expected, actual)

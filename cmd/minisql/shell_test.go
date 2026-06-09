@@ -441,20 +441,3 @@ func TestShell_Exec_DDL_Silent(t *testing.T) {
 	assert.NotContains(t, out.String(), "row(s)")
 }
 
-// --- newline escaping in table output ---
-
-func TestEscapeForTable(t *testing.T) {
-	assert.Equal(t, `hello\nworld`, escapeForTable("hello\nworld"))
-	assert.Equal(t, `hello\r\nworld`, escapeForTable("hello\r\nworld"))
-	assert.Equal(t, `col1\tcol2`, escapeForTable("col1\tcol2"))
-	assert.Equal(t, "no specials", escapeForTable("no specials"))
-}
-
-func TestPrintTable_NewlineInCell(t *testing.T) {
-	var buf strings.Builder
-	printTable(&buf, []string{"note"}, [][]string{{"line1\nline2"}})
-	out := buf.String()
-	// The raw newline must not appear — it must be escaped.
-	assert.NotContains(t, out, "line1\nline2")
-	assert.Contains(t, out, `line1\nline2`)
-}

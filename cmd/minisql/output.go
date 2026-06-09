@@ -41,7 +41,7 @@ func printTable(w io.Writer, cols []string, rows [][]string) {
 	for _, row := range rows {
 		for i, cell := range row {
 			if i < len(widths) {
-				widths[i] = max(widths[i], utf8.RuneCountInString(escapeForTable(cell)))
+				widths[i] = max(widths[i], utf8.RuneCountInString(cell))
 			}
 		}
 	}
@@ -67,22 +67,12 @@ func printTableRow(w io.Writer, cells []string, widths []int) {
 	for i, width := range widths {
 		var cell string
 		if i < len(cells) {
-			cell = escapeForTable(cells[i])
+			cell = cells[i]
 		}
 		pad := max(0, width-utf8.RuneCountInString(cell))
 		parts[i] = cell + strings.Repeat(" ", pad)
 	}
 	fmt.Fprintln(w, strings.Join(parts, "  "))
-}
-
-// escapeForTable replaces control characters that would break table formatting
-// with their visible escape sequences. CSV mode is not affected.
-func escapeForTable(s string) string {
-	s = strings.ReplaceAll(s, "\r\n", `\r\n`)
-	s = strings.ReplaceAll(s, "\n", `\n`)
-	s = strings.ReplaceAll(s, "\r", `\r`)
-	s = strings.ReplaceAll(s, "\t", `\t`)
-	return s
 }
 
 func printCSV(w io.Writer, cols []string, rows [][]string) {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -64,12 +65,37 @@ func (s *shell) readLine(prompt string) (string, error) {
 	return s.scanner.Text(), nil
 }
 
+// historyFile returns the path to the persistent history file (~/.minisql_history).
+func historyFile() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".minisql_history")
+}
+
 func (s *shell) run() {
 	if s.isatty {
 		fmt.Fprintf(s.out, "MiniSQL — %s\nEnter \".help\" for usage hints.\n", s.filePath)
 	}
 	if s.liner != nil {
-		defer func() { _ = s.liner.Close() }()
+		// Load history from previous sessions.
+		if hf := historyFile(); hf != "" {
+			if f, err := os.Open(hf); err == nil {
+				_, _ = s.liner.ReadHistory(f)
+				_ = f.Close()
+			}
+		}
+		defer func() {
+			// Persist history for future sessions.
+			if hf := historyFile(); hf != "" {
+				if f, err := os.Create(hf); err == nil {
+					_, _ = s.liner.WriteHistory(f)
+					_ = f.Close()
+				}
+			}
+			_ = s.liner.Close()
+		}()
 	}
 
 	for {
@@ -114,6 +140,9 @@ func (s *shell) run() {
 			stmt := strings.TrimSpace(s.buf.String())
 			s.buf.Reset()
 			if stmt != "" && stmt != ";" {
+				if s.liner != nil {
+					s.liner.AppendHistory(stmt)
+				}
 				s.exec(stmt)
 			}
 		}
