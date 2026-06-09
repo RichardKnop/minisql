@@ -9,6 +9,13 @@ import (
 	_ "github.com/RichardKnop/minisql"
 )
 
+// Set by goreleaser via -ldflags at release time.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 const usage = `Usage: minisql [options] <database-file>
 
 Opens (or creates) a MiniSQL database and starts an interactive SQL shell.
@@ -16,10 +23,11 @@ SQL statements must be terminated with a semicolon (;).
 Enter ".help" for dot command reference.
 
 Options:
-  -c <query>   Execute a single SQL statement and exit (no shell).
-               May be specified multiple times to run several statements.
-  -csv         Set output mode to CSV (default: table).
-  -h, --help   Show this message.
+  -c <query>      Execute a single SQL statement and exit (no shell).
+                  May be specified multiple times to run several statements.
+  -csv            Set output mode to CSV (default: table).
+  -version        Print version information and exit.
+  -h, --help      Show this message.
 
 Examples:
   minisql my.db
@@ -30,13 +38,20 @@ Examples:
 
 func main() {
 	var (
-		queries multiFlag
-		csvMode bool
+		queries     multiFlag
+		csvMode     bool
+		showVersion bool
 	)
 	flag.Var(&queries, "c", "SQL statement to execute (may be repeated)")
 	flag.BoolVar(&csvMode, "csv", false, "output in CSV format")
+	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 	flag.Parse()
+
+	if showVersion {
+		fmt.Printf("minisql %s (commit %s, built %s)\n", version, commit, date)
+		return
+	}
 
 	if flag.NArg() != 1 {
 		fmt.Fprint(os.Stderr, usage)
