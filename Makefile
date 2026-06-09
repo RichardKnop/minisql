@@ -25,6 +25,9 @@ BENCH_INVERTED_RUNTIME_TIME ?= 10x
 build:
 	go build -v ./...
 
+build-cli:
+	go build -o minisql cmd/minisql/*.go
+
 test:
 	LOG_LEVEL=info go test ./... -count=1
 

@@ -22,8 +22,17 @@ MiniSQL is an embedded single-file SQL database written in Go, inspired by SQLit
 
 ## Installation
 
+```bash
+go get github.com/RichardKnop/minisql
+```
+
+Import the driver (blank import registers it with `database/sql`):
+
 ```go
-import _ "github.com/RichardKnop/minisql"
+import (
+    "database/sql"
+    _ "github.com/RichardKnop/minisql"
+)
 ```
 
 ```go
@@ -36,6 +45,29 @@ defer db.Close()
 ```
 
 See the [Getting Started](https://richardknop.github.io/minisql/getting-started/) guide and [Connection](https://richardknop.github.io/minisql/connection/) reference for full details.
+
+## CLI
+
+```bash
+go install github.com/RichardKnop/minisql/cmd/minisql@latest
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/RichardKnop/minisql
+cd minisql
+go build -o minisql ./cmd/minisql/
+```
+
+Or install with homebrew:
+
+```bash
+brew install minisql
+```
+
+See the [CLI Shell](https://richardknop.github.io/minisql/cli/)
+
 
 ## Development
 

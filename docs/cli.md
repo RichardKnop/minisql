@@ -16,6 +16,12 @@ cd minisql
 go build -o minisql ./cmd/minisql/
 ```
 
+Or install with homebrew:
+
+```bash
+brew install minisql
+```
+
 ## Usage
 
 ```
@@ -46,6 +52,7 @@ minisql> create table "users" (
       ->     age  int4
       -> );
 minisql> insert into "users" (name, age) values ('alice', 30), ('bob', 25);
+2 row(s) affected
 minisql> select * from "users";
 id  name   age
 --  -----  ---
@@ -55,6 +62,8 @@ minisql> .quit
 ```
 
 - Statements span multiple lines and are executed when a `;` is reached.
+- Use the up/down arrow keys to navigate command history. History is persisted across sessions in `~/.minisql_history`.
+- `Ctrl-C` cancels the current in-progress statement without exiting.
 - `Ctrl-D` (EOF) exits the shell after flushing any buffered input.
 - When stdin is not a terminal (pipe or redirect), prompts are suppressed.
 
@@ -107,11 +116,7 @@ users
 
 ```
 minisql> .schema users
-create table "users" (
-    id   int8 primary key autoincrement,
-    name varchar(255),
-    age  int4
-);
+create table "users" (id int8 primary key autoincrement, name varchar(255), age int4);
 ```
 
 ### Output modes

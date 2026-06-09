@@ -6,14 +6,7 @@ import (
 	"github.com/RichardKnop/minisql/internal/minisql"
 )
 
-var createCompositeUsersTableSQL = `create table "users" (
-	first_name varchar(100) not null,
-	last_name varchar(100) not null,
-	email varchar(255),
-	dob timestamp,
-	created timestamp default now(),
-	primary key (first_name, last_name)
-);`
+var createCompositeUsersTableSQL = `create table "users" (first_name varchar(100) not null, last_name varchar(100) not null, email varchar(255), dob timestamp, created timestamp default now(), primary key (first_name, last_name));`
 
 func (s *TestSuite) TestCompositeIndex() {
 	_, err := s.db.Exec(createCompositeUsersTableSQL)
