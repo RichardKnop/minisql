@@ -268,7 +268,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 
 		assert.Equal(t, MaxOverflowPageData, int(pager.pages[2].OverflowPage.Header.DataSize))
 		assert.Equal(t, 100, int(pager.pages[3].OverflowPage.Header.DataSize))
-		assert.Equal(t, 455, int(pager.pages[4].OverflowPage.Header.DataSize))
+		assert.Equal(t, int(MaxInlineVarchar+200), int(pager.pages[4].OverflowPage.Header.DataSize))
 	})
 
 	t.Run("Update overflow text to inline text", func(t *testing.T) {
@@ -319,7 +319,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 
 		assert.Equal(t, MaxOverflowPageData, int(pager.pages[2].OverflowPage.Header.DataSize))
 		assert.Equal(t, 100, int(pager.pages[3].OverflowPage.Header.DataSize))
-		assert.Equal(t, 455, int(pager.pages[4].OverflowPage.Header.DataSize))
+		assert.Equal(t, int(MaxInlineVarchar+200), int(pager.pages[4].OverflowPage.Header.DataSize))
 
 		assertFreePages(t, tablePager, []PageIndex{1})
 	})
@@ -371,7 +371,7 @@ func TestTable_Update_Overflow(t *testing.T) {
 		assert.Equal(t, 0, int(pager.pages[4].OverflowPage.Header.NextPage))
 
 		assert.Equal(t, MaxOverflowPageData-100, int(pager.pages[3].OverflowPage.Header.DataSize))
-		assert.Equal(t, 455, int(pager.pages[4].OverflowPage.Header.DataSize))
+		assert.Equal(t, int(MaxInlineVarchar+200), int(pager.pages[4].OverflowPage.Header.DataSize))
 
 		assertFreePages(t, tablePager, []PageIndex{2, 1})
 	})

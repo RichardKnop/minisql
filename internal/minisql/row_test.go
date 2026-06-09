@@ -52,7 +52,7 @@ func TestRow_Marshal(t *testing.T) {
 		// 1 for boolean
 		// 4 for real
 		// 8 for timestamp
-		assert.Equal(t, uint64(8+(varcharLengthPrefixSize+MaxInlineVarchar)+4+1+4+8), row.Size())
+		assert.Equal(t, uint64(8+(varcharLengthPrefixSize+MaxIndexKeySize)+4+1+4+8), row.Size())
 
 		data, err := row.Marshal()
 		require.NoError(t, err)

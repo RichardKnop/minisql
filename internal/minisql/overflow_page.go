@@ -7,7 +7,7 @@ import (
 const (
 	// MaxInlineVarchar is the maximum number of bytes stored directly inside a
 	// leaf cell before the value is spilled to overflow pages.
-	MaxInlineVarchar = 255 // Store up to 255 bytes inline
+	MaxInlineVarchar = 512 // Store up to 512 bytes inline
 	// MaxOverflowPageData is the maximum number of data bytes that fit in a
 	// single overflow page (page size − type byte − header − 4-byte checksum).
 	MaxOverflowPageData = PageSize - 1 - 8 - pageChecksumSize

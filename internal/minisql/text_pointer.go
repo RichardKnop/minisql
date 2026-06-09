@@ -6,6 +6,11 @@ import (
 	"fmt"
 )
 
+// textOverflowFlag occupies bit 31 of the on-disk uint32 length field.
+// When set the value is stored on overflow pages; when clear the value is inline.
+// The lower 31 bits always hold the actual byte length, so text up to 2 GiB is supported.
+const textOverflowFlag uint32 = 1 << 31
+
 // TextPointer is stored in the main row; text of length <= MaxInlineVarchar is stored inline,
 // otherwise it points to an overflow page.
 type TextPointer struct {
@@ -50,55 +55,55 @@ func (tp TextPointer) NumberOfPages() uint32 {
 	return tp.Length/MaxOverflowPageData + 1
 }
 
-// Marshal serialises the pointer into buf at offset i: a 4-byte length prefix
-// followed by either the inline data or the first overflow page index.
+// Marshal serialises the pointer into buf at offset i.
+// Inline:   [uint32 length (bit31=0)][length bytes of data]
+// Overflow: [uint32 length | textOverflowFlag (bit31=1)][uint32 first_page_index]
 func (tp *TextPointer) Marshal(buf []byte, i uint64) error {
-	// Write length prefix
-	marshalUint32(buf, tp.Length, i)
-	i += 4
-
 	if tp.IsInline() {
-		// Write actual text
-		n := copy(buf[i:i+uint64(tp.Length)], tp.Data)
-		i += uint64(n)
+		marshalUint32(buf, tp.Length, i) // bit31 = 0: inline
+		i += 4
+		copy(buf[i:i+uint64(tp.Length)], tp.Data)
 		return nil
 	}
 
-	// Write first overflow page index
-	marshalUint32(buf, uint32(tp.FirstPage), i)
+	marshalUint32(buf, tp.Length|textOverflowFlag, i) // bit31 = 1: overflow
 	i += 4
-
+	marshalUint32(buf, uint32(tp.FirstPage), i)
 	return nil
 }
 
 // Unmarshal reads a text pointer from buf at offset i. For inline text, Data
 // is sub-sliced directly into the page buffer (zero-copy). For overflow text,
 // only FirstPage is set; actual data is loaded later by readOverflowTexts.
+//
+// The on-disk format uses bit 31 of the uint32 length field as an overflow flag
+// (textOverflowFlag) so the inline/overflow distinction is stored on disk and
+// does not depend on the value of MaxInlineVarchar at read time.
 func (tp *TextPointer) Unmarshal(buf []byte, i uint64) error {
 	if i+4 > uint64(len(buf)) {
 		return fmt.Errorf("text pointer unmarshal: buffer too short for length prefix at offset %d (have %d bytes)", i, len(buf))
 	}
-	// Read length prefix
-	tp.Length = unmarshalUint32(buf, i)
+	stored := unmarshalUint32(buf, i)
 	i += 4
 
-	if tp.IsInline() {
-		if i+uint64(tp.Length) > uint64(len(buf)) {
-			return fmt.Errorf("text pointer unmarshal: buffer too short for inline data (need %d bytes at offset %d, have %d)", tp.Length, i, len(buf))
+	if stored&textOverflowFlag != 0 {
+		// Overflow: actual length is stored in bits 0–30.
+		tp.Length = stored &^ textOverflowFlag
+		if i+4 > uint64(len(buf)) {
+			return fmt.Errorf("text pointer unmarshal: buffer too short for overflow page index at offset %d (have %d bytes)", i, len(buf))
 		}
-		// Sub-slice page buffer directly — zero allocation, zero copy.
-		// Inline text is read-only after unmarshal; Marshal copies it out via copy().
-		tp.Data = buf[i : i+uint64(tp.Length)]
-		i += uint64(tp.Length)
+		tp.FirstPage = PageIndex(unmarshalUint32(buf, i))
 		return nil
 	}
 
-	// Read first overflow page index
-	if i+4 > uint64(len(buf)) {
-		return fmt.Errorf("text pointer unmarshal: buffer too short for overflow page index at offset %d (have %d bytes)", i, len(buf))
+	// Inline: stored value is the actual length (bit31 = 0).
+	tp.Length = stored
+	if i+uint64(tp.Length) > uint64(len(buf)) {
+		return fmt.Errorf("text pointer unmarshal: buffer too short for inline data (need %d bytes at offset %d, have %d)", tp.Length, i, len(buf))
 	}
-	tp.FirstPage = PageIndex(unmarshalUint32(buf, i))
-	i += 4
+	// Sub-slice page buffer directly — zero allocation, zero copy.
+	// Inline text is read-only after unmarshal; Marshal copies it out via copy().
+	tp.Data = buf[i : i+uint64(tp.Length)]
 	return nil
 }
 
