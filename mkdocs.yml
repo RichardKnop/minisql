@@ -66,6 +66,9 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Blog:
+    - blog/index.md
+    - "Building MiniSQL v1.0": blog/minisql-1.0.md
   - Getting Started: getting-started.md
   - Connection: connection.md
   - Architecture: architecture.md
@@ -99,9 +102,6 @@ nav:
   - Constraints: constraints.md
   - System Table: system-table.md
   - Limitations: limitations.md
-  - Blog:
-    - blog/index.md
-    - "Building MiniSQL v1.0": blog/minisql-1.0.md
 
 extra:
   social:
