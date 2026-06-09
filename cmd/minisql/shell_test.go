@@ -366,3 +366,95 @@ func TestShell_Run_ErrorContinues(t *testing.T) {
 	// The id column header from the second query must still appear.
 	assert.Contains(t, got, "id")
 }
+
+// --- isSelectLike ---
+
+func TestIsSelectLike(t *testing.T) {
+	cases := []struct {
+		query string
+		want  bool
+	}{
+		{"select * from t", true},
+		{"SELECT 1", true},
+		{"with cte as (select 1) select * from cte", true},
+		{"explain select * from t", true},
+		{"values (1),(2)", true},
+		{"insert into t values (1)", false},
+		{"update t set x=1", false},
+		{"delete from t", false},
+		{"create table t (id int8)", false},
+		{"drop table t", false},
+		// RETURNING makes DML produce rows
+		{"insert into t (id) values (1) returning id", true},
+		{"update t set x=1 returning x", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.query, func(t *testing.T) {
+			assert.Equal(t, tc.want, isSelectLike(tc.query))
+		})
+	}
+}
+
+// --- DML feedback ---
+
+func TestShell_Exec_Insert_RowsAffected(t *testing.T) {
+	db := openTestDB(t)
+	_, err := db.Exec(`create table "t" (id int8, name varchar(255))`)
+	require.NoError(t, err)
+
+	sh, out := newTestShell(db, "")
+	sh.exec(`insert into "t" (id, name) values (1, 'alice'), (2, 'bob')`)
+	assert.Contains(t, out.String(), "2 row(s) affected")
+}
+
+func TestShell_Exec_Update_RowsAffected(t *testing.T) {
+	db := openTestDB(t)
+	_, err := db.Exec(`create table "t" (id int8, name varchar(255))`)
+	require.NoError(t, err)
+	_, err = db.Exec(`insert into "t" (id, name) values (1, 'alice'), (2, 'bob')`)
+	require.NoError(t, err)
+
+	sh, out := newTestShell(db, "")
+	sh.exec(`update "t" set name = 'x' where id = 1`)
+	assert.Contains(t, out.String(), "1 row(s) affected")
+}
+
+func TestShell_Exec_Delete_RowsAffected(t *testing.T) {
+	db := openTestDB(t)
+	_, err := db.Exec(`create table "t" (id int8)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`insert into "t" (id) values (1),(2),(3)`)
+	require.NoError(t, err)
+
+	sh, out := newTestShell(db, "")
+	sh.exec(`delete from "t"`)
+	assert.Contains(t, out.String(), "3 row(s) affected")
+}
+
+func TestShell_Exec_DDL_Silent(t *testing.T) {
+	db := openTestDB(t)
+
+	sh, out := newTestShell(db, "")
+	sh.exec(`create table "t" (id int8)`)
+	// DDL succeeds silently — no "rows affected" output, no error.
+	assert.NotContains(t, out.String(), "Error:")
+	assert.NotContains(t, out.String(), "row(s)")
+}
+
+// --- newline escaping in table output ---
+
+func TestEscapeForTable(t *testing.T) {
+	assert.Equal(t, `hello\nworld`, escapeForTable("hello\nworld"))
+	assert.Equal(t, `hello\r\nworld`, escapeForTable("hello\r\nworld"))
+	assert.Equal(t, `col1\tcol2`, escapeForTable("col1\tcol2"))
+	assert.Equal(t, "no specials", escapeForTable("no specials"))
+}
+
+func TestPrintTable_NewlineInCell(t *testing.T) {
+	var buf strings.Builder
+	printTable(&buf, []string{"note"}, [][]string{{"line1\nline2"}})
+	out := buf.String()
+	// The raw newline must not appear — it must be escaped.
+	assert.NotContains(t, out, "line1\nline2")
+	assert.Contains(t, out, `line1\nline2`)
+}

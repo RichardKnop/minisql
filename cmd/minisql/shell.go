@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/mattn/go-isatty"
+	"github.com/peterh/liner"
 )
 
 const (
@@ -24,47 +26,74 @@ type shell struct {
 	mode     outputMode
 	timer    bool
 	buf      strings.Builder
-	scanner  *bufio.Scanner
+	scanner  *bufio.Scanner // used when liner is nil (non-tty / tests)
+	liner    *liner.State   // used for interactive tty sessions
 	filePath string
 	isatty   bool
 }
 
 func newShell(db *sql.DB, filePath string) *shell {
-	sc := bufio.NewScanner(os.Stdin)
-	sc.Buffer(make([]byte, 1<<20), 1<<20) // 1 MiB max line length
-	return &shell{
+	sh := &shell{
 		db:       db,
 		out:      os.Stdout,
 		mode:     modeTable,
-		scanner:  sc,
 		filePath: filePath,
 		isatty:   isatty.IsTerminal(os.Stdin.Fd()),
 	}
+	if sh.isatty {
+		l := liner.NewLiner()
+		l.SetCtrlCAborts(true)
+		sh.liner = l
+	} else {
+		sc := bufio.NewScanner(os.Stdin)
+		sc.Buffer(make([]byte, 1<<20), 1<<20)
+		sh.scanner = sc
+	}
+	return sh
+}
+
+// readLine returns the next input line, showing prompt in tty mode.
+// Returns ("", io.EOF) on end-of-input, ("", liner.ErrPromptAborted) on Ctrl+C.
+func (s *shell) readLine(prompt string) (string, error) {
+	if s.liner != nil {
+		return s.liner.Prompt(prompt)
+	}
+	if !s.scanner.Scan() {
+		return "", io.EOF
+	}
+	return s.scanner.Text(), nil
 }
 
 func (s *shell) run() {
 	if s.isatty {
 		fmt.Fprintf(s.out, "MiniSQL — %s\nEnter \".help\" for usage hints.\n", s.filePath)
 	}
+	if s.liner != nil {
+		defer func() { _ = s.liner.Close() }()
+	}
 
 	for {
-		if s.isatty {
-			if s.buf.Len() == 0 {
-				fmt.Fprint(s.out, promptPrimary)
-			} else {
-				fmt.Fprint(s.out, promptContinuation)
-			}
+		prompt := promptPrimary
+		if s.buf.Len() > 0 {
+			prompt = promptContinuation
 		}
 
-		if !s.scanner.Scan() {
-			// EOF or error — flush any buffered partial statement.
+		line, err := s.readLine(prompt)
+		if errors.Is(err, liner.ErrPromptAborted) {
+			// Ctrl+C — discard the in-progress buffer and start fresh.
+			if s.buf.Len() > 0 {
+				s.buf.Reset()
+				fmt.Fprintln(s.out, "^C")
+			}
+			continue
+		}
+		if err != nil {
+			// EOF (Ctrl+D) or scanner finished — flush any partial statement.
 			if s.buf.Len() > 0 {
 				s.exec(strings.TrimSpace(s.buf.String()))
 			}
 			break
 		}
-
-		line := s.scanner.Text()
 
 		// Dot commands are always single-line.
 		trimmed := strings.TrimSpace(line)
@@ -115,10 +144,38 @@ func statementComplete(buf string) bool {
 	return false
 }
 
+// isSelectLike returns true for statements that produce a result set and
+// should be executed with db.Query rather than db.Exec.
+func isSelectLike(query string) bool {
+	fields := strings.Fields(query)
+	if len(fields) == 0 {
+		return false
+	}
+	switch strings.ToUpper(fields[0]) {
+	case "SELECT", "WITH", "EXPLAIN", "VALUES", "TABLE":
+		return true
+	}
+	// INSERT/UPDATE/DELETE with a RETURNING clause also produces rows.
+	return hasReturning(strings.ToUpper(query))
+}
+
+// hasReturning does a lightweight scan for a RETURNING keyword outside quotes.
+func hasReturning(upper string) bool {
+	return strings.Contains(upper, "RETURNING")
+}
+
 func (s *shell) exec(query string) {
 	start := time.Now()
 
-	// Attempt as a query first; fall back to Exec for statements that return no rows.
+	if isSelectLike(query) {
+		s.execQuery(query, start)
+	} else {
+		s.execStatement(query, start)
+	}
+}
+
+// execQuery runs statements that return rows (SELECT, EXPLAIN, WITH, RETURNING).
+func (s *shell) execQuery(query string, start time.Time) {
 	rows, err := s.db.Query(query)
 	if err != nil {
 		fmt.Fprintf(s.out, "Error: %v\n", err)
@@ -142,7 +199,6 @@ func (s *shell) exec(query string) {
 		ptrs[i] = &vals[i]
 	}
 
-	rowsAffected := 0
 	for rows.Next() {
 		if err := rows.Scan(ptrs...); err != nil {
 			fmt.Fprintf(s.out, "Error: %v\n", err)
@@ -153,7 +209,6 @@ func (s *shell) exec(query string) {
 			row[i] = formatValue(v)
 		}
 		resultRows = append(resultRows, row)
-		rowsAffected += 1
 	}
 	if err := rows.Err(); err != nil {
 		fmt.Fprintf(s.out, "Error: %v\n", err)
@@ -162,8 +217,27 @@ func (s *shell) exec(query string) {
 
 	if len(cols) > 0 {
 		printResult(s.out, cols, resultRows, s.mode)
-	} else if rowsAffected > 0 {
-		fmt.Fprintf(s.out, "%d row(s) affected\n", rowsAffected)
+	}
+
+	if s.timer {
+		fmt.Fprintf(s.out, "Time: %.3fs\n", time.Since(start).Seconds())
+	}
+}
+
+// execStatement runs DML/DDL via db.Exec and reports rows affected.
+func (s *shell) execStatement(query string, start time.Time) {
+	result, err := s.db.Exec(query)
+	if err != nil {
+		fmt.Fprintf(s.out, "Error: %v\n", err)
+		if s.timer {
+			fmt.Fprintf(s.out, "Time: %.3fs\n", time.Since(start).Seconds())
+		}
+		return
+	}
+
+	n, err := result.RowsAffected()
+	if err == nil && n > 0 {
+		fmt.Fprintf(s.out, "%d row(s) affected\n", n)
 	}
 
 	if s.timer {
