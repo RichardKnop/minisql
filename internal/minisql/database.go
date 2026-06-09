@@ -73,6 +73,10 @@ type Database struct {
 	// sortMemLimit is the maximum bytes of row data accumulated in memory before
 	// spilling a sorted run to disk during ORDER BY. 0 disables external sort.
 	sortMemLimit int64
+	// backupHook is called by Backup after the WAL snapshot is taken and
+	// walWriteMu is released, just before the page-copy loop begins.
+	// Nil in production; set by tests to inject concurrent operations.
+	backupHook func()
 }
 
 type clock func() Time

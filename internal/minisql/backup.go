@@ -84,6 +84,12 @@ func (d *Database) Backup(_ context.Context, destPath string) (retErr error) {
 		}
 	}()
 
+	// backupHook is nil in production; tests inject concurrent operations here
+	// to verify the checkpoint-blocking invariant.
+	if d.backupHook != nil {
+		d.backupHook()
+	}
+
 	// --- PHASE 4: Copy pages (writers unblocked, checkpoints blocked). ---
 	// WAL snapshot bytes take priority.  Pages absent from the snapshot are read
 	// from the DB file — safe because no checkpoint can flush post-snapshot WAL
