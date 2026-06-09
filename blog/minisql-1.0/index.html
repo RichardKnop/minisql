@@ -10,13 +10,11 @@
       
       
       
-        <link rel="canonical" href="https://richardknop.github.io/minisql/functions/json/">
+        <link rel="canonical" href="https://richardknop.github.io/minisql/blog/minisql-1.0/">
       
       
-        <link rel="prev" href="../window/">
+        <link rel="prev" href="../">
       
-      
-        <link rel="next" href="../conditional/">
       
       
         
@@ -27,7 +25,7 @@
     
     
       
-        <title>JSON - MiniSQL</title>
+        <title>Building MiniSQL v1.0 - MiniSQL</title>
       
     
     
@@ -78,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#json-functions" class="md-skip">
+        <a href="#building-minisql-a-pure-go-embedded-sql-database" class="md-skip">
           Skip to content
         </a>
       
@@ -114,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              JSON
+              Building MiniSQL v1.0
             
           </span>
         </div>
@@ -359,13 +357,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../string/" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../functions/string/" class="md-tabs__link">
           
   
   
@@ -495,11 +491,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../blog/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
           
   
   
@@ -1187,31 +1185,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
             
   
   
@@ -1229,7 +1224,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_8">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1247,7 +1242,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../string/" class="md-nav__link">
+      <a href="../../functions/string/" class="md-nav__link">
         
   
   
@@ -1275,7 +1270,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../numeric/" class="md-nav__link">
+      <a href="../../functions/numeric/" class="md-nav__link">
         
   
   
@@ -1303,7 +1298,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../datetime/" class="md-nav__link">
+      <a href="../../functions/datetime/" class="md-nav__link">
         
   
   
@@ -1331,7 +1326,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../aggregate/" class="md-nav__link">
+      <a href="../../functions/aggregate/" class="md-nav__link">
         
   
   
@@ -1359,7 +1354,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../window/" class="md-nav__link">
+      <a href="../../functions/window/" class="md-nav__link">
         
   
   
@@ -1384,37 +1379,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    JSON
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../functions/json/" class="md-nav__link">
         
   
   
@@ -1430,153 +1398,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#path-operators" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Path operators
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Path operators">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#-json-fragment" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        -&gt; — JSON fragment
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#-sql-scalar" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        -&gt;&gt; — SQL scalar
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#chaining" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Chaining
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#json_extractjson-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        JSON_EXTRACT(json, path)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#json_containsjson-value" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        JSON_CONTAINS(json, value)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#json_typejson-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        JSON_TYPE(json [, path])
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#json_array_lengthjson-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        JSON_ARRAY_LENGTH(json [, path])
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#json_validjson" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        JSON_VALID(json)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cast-to-json" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        CAST to JSON
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#examples" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Examples
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1589,7 +1410,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../conditional/" class="md-nav__link">
+      <a href="../../functions/conditional/" class="md-nav__link">
         
   
   
@@ -1783,28 +1604,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_15" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_15" >
-        
-          
-          <label class="md-nav__link" for="__nav_15" id="__nav_15_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_15" id="__nav_15_label" tabindex="">
             
   
   
@@ -1822,7 +1646,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_15_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_15_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_15">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1840,7 +1664,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../blog/" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -1865,10 +1689,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../blog/minisql-1.0/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building MiniSQL v1.0
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1884,6 +1735,236 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-build-another-database" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why Build Another Database?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#storage-pages-and-overflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storage: pages and overflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b-trees-everywhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        B+ trees everywhere
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#write-ahead-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Write-Ahead Log
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#concurrency-occ-writes-mvcc-reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Concurrency: OCC writes, MVCC reads
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sql-parser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SQL Parser
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#query-planner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Query Planner
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#index-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Index Types
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#built-in-features-vs-sqlite" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Built-in Features vs SQLite
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmarks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmarks
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Benchmarks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#single-row-dml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-row DML
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#analytical-queries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Analytical queries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#full-text-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full-text search
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-sqlite-wins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where SQLite wins
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#honest-trade-offs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Honest Trade-offs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#whats-next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What's Next
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#try-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Try It
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1923,22 +2004,33 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#path-operators" class="md-nav__link">
+  <a href="#why-build-another-database" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Path operators
+        Why Build Another Database?
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Path operators">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Architecture">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#-json-fragment" class="md-nav__link">
+  <a href="#storage-pages-and-overflow" class="md-nav__link">
     <span class="md-ellipsis">
       
-        -&gt; — JSON fragment
+        Storage: pages and overflow
       
     </span>
   </a>
@@ -1946,10 +2038,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#-sql-scalar" class="md-nav__link">
+  <a href="#b-trees-everywhere" class="md-nav__link">
     <span class="md-ellipsis">
       
-        -&gt;&gt; — SQL scalar
+        B+ trees everywhere
       
     </span>
   </a>
@@ -1957,10 +2049,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#chaining" class="md-nav__link">
+  <a href="#write-ahead-log" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Chaining
+        Write-Ahead Log
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#concurrency-occ-writes-mvcc-reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Concurrency: OCC writes, MVCC reads
       
     </span>
   </a>
@@ -1973,10 +2076,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#json_extractjson-path" class="md-nav__link">
+  <a href="#sql-parser" class="md-nav__link">
     <span class="md-ellipsis">
       
-        JSON_EXTRACT(json, path)
+        SQL Parser
       
     </span>
   </a>
@@ -1984,10 +2087,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#json_containsjson-value" class="md-nav__link">
+  <a href="#query-planner" class="md-nav__link">
     <span class="md-ellipsis">
       
-        JSON_CONTAINS(json, value)
+        Query Planner
       
     </span>
   </a>
@@ -1995,10 +2098,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#json_typejson-path" class="md-nav__link">
+  <a href="#index-types" class="md-nav__link">
     <span class="md-ellipsis">
       
-        JSON_TYPE(json [, path])
+        Index Types
       
     </span>
   </a>
@@ -2006,10 +2109,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#json_array_lengthjson-path" class="md-nav__link">
+  <a href="#built-in-features-vs-sqlite" class="md-nav__link">
     <span class="md-ellipsis">
       
-        JSON_ARRAY_LENGTH(json [, path])
+        Built-in Features vs SQLite
       
     </span>
   </a>
@@ -2017,10 +2120,71 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#json_validjson" class="md-nav__link">
+  <a href="#benchmarks" class="md-nav__link">
     <span class="md-ellipsis">
       
-        JSON_VALID(json)
+        Benchmarks
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Benchmarks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#single-row-dml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-row DML
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#analytical-queries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Analytical queries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#full-text-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full-text search
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-sqlite-wins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where SQLite wins
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#honest-trade-offs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Honest Trade-offs
       
     </span>
   </a>
@@ -2028,10 +2192,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#cast-to-json" class="md-nav__link">
+  <a href="#whats-next" class="md-nav__link">
     <span class="md-ellipsis">
       
-        CAST to JSON
+        What's Next
       
     </span>
   </a>
@@ -2039,10 +2203,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#examples" class="md-nav__link">
+  <a href="#try-it" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Examples
+        Try It
       
     </span>
   </a>
@@ -2092,10 +2256,10 @@
     
     
       <li class="md-path__item">
-        <a href="../string/" class="md-path__link">
+        <a href="../" class="md-path__link">
           
   <span class="md-ellipsis">
-    Functions
+    Blog
   </span>
 
         </a>
@@ -2117,92 +2281,395 @@
   
 
 
-<h1 id="json-functions">JSON Functions<a class="headerlink" href="#json-functions" title="Permanent link">&para;</a></h1>
-<p>MiniSQL provides operators and functions for navigating and querying <code>JSON</code> columns.</p>
-<p>See also <a href="../../json/">JSON</a> for the data type reference and <a href="../../indexes/json-inverted/">JSON Inverted Index</a> for indexed JSON queries.</p>
+<h1 id="building-minisql-a-pure-go-embedded-sql-database">Building MiniSQL: A Pure-Go Embedded SQL Database<a class="headerlink" href="#building-minisql-a-pure-go-embedded-sql-database" title="Permanent link">&para;</a></h1>
+<p><em>June 2026</em></p>
+<p>When you reach for an embedded database in Go, the answer is usually SQLite — either the CGO-wrapped <code>mattn/go-sqlite3</code> or the C-to-Go transpiled <code>modernc.org/sqlite</code>. Both are excellent, but they share the same origin: decades-old C code bridged into Go.</p>
+<p>MiniSQL started from a simple question: what does an embedded SQL database look like if you build it in Go from scratch — the B+ tree, the WAL, the query planner, the parser — all idiomatic Go, all zero CGO? After roughly a year of evenings and weekends, the answer is <a href="https://github.com/RichardKnop/minisql">v1.0.0</a>. This post covers the architecture decisions, what worked, what didn't, and how it compares to SQLite.</p>
 <hr />
-<h2 id="path-operators">Path operators<a class="headerlink" href="#path-operators" title="Permanent link">&para;</a></h2>
-<h3 id="-json-fragment"><code>-&gt;</code> — JSON fragment<a class="headerlink" href="#-json-fragment" title="Permanent link">&para;</a></h3>
-<p>Returns the value at a key (object) or index (array) as a JSON string.</p>
-<div class="language-sql highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">payload</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="s1">&#39;user&#39;</span><span class="w">       </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="p">;</span><span class="w">   </span><span class="c1">-- &#39;{&quot;name&quot;:&quot;alice&quot;}&#39;</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">payload</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="mi">0</span><span class="w">            </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="p">;</span><span class="w">   </span><span class="c1">-- first array element as JSON</span>
-</span></code></pre></div>
-<h3 id="-sql-scalar"><code>-&gt;&gt;</code> — SQL scalar<a class="headerlink" href="#-sql-scalar" title="Permanent link">&para;</a></h3>
-<p>Returns the value as a SQL scalar (string or number), not a JSON fragment.</p>
-<div class="language-sql highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">payload</span><span class="w"> </span><span class="o">-&gt;&gt;</span><span class="w"> </span><span class="s1">&#39;user&#39;</span><span class="w">      </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="p">;</span><span class="w">   </span><span class="c1">-- &#39;alice&#39;</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">payload</span><span class="w"> </span><span class="o">-&gt;&gt;</span><span class="w"> </span><span class="s1">&#39;uid&#39;</span><span class="w">       </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="p">;</span><span class="w">   </span><span class="c1">-- &#39;42&#39; (string)</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">payload</span><span class="w"> </span><span class="o">-&gt;&gt;</span><span class="w"> </span><span class="mi">0</span><span class="w">           </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="p">;</span><span class="w">   </span><span class="c1">-- first array element as string</span>
-</span></code></pre></div>
-<h3 id="chaining">Chaining<a class="headerlink" href="#chaining" title="Permanent link">&para;</a></h3>
-<div class="language-sql highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">payload</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="s1">&#39;address&#39;</span><span class="w"> </span><span class="o">-&gt;&gt;</span><span class="w"> </span><span class="s1">&#39;city&#39;</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">users</span><span class="p">;</span>
-</span></code></pre></div>
+<h2 id="why-build-another-database">Why Build Another Database?<a class="headerlink" href="#why-build-another-database" title="Permanent link">&para;</a></h2>
+<p><strong>Honest answer:</strong> it was interesting. Building a database teaches you things that reading about databases doesn't.</p>
+<p><strong>Practical answer:</strong> a pure-Go embedded database without CGO simplifies cross-compilation, removes the C toolchain dependency, and opens the door to building in features that SQLite treats as optional extensions — native full-text search, first-class <code>JSON</code>, a <code>UUID</code> type, a <code>TIMESTAMP</code> type that behaves like PostgreSQL's, vector similarity search, and transparent page encryption — all without shipping extra <code>.so</code> files or loading dynamic extensions.</p>
 <hr />
-<h2 id="json_extractjson-path">JSON_EXTRACT(json, path)<a class="headerlink" href="#json_extractjson-path" title="Permanent link">&para;</a></h2>
-<p>Extracts a value at the given path. Returns a SQL scalar. Returns <code>NULL</code> if the path does not exist.</p>
-<div class="language-sql highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_EXTRACT</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;user&#39;</span><span class="p">)</span><span class="w">        </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="p">;</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_EXTRACT</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;score&#39;</span><span class="p">)</span><span class="w">       </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="p">;</span><span class="w">  </span><span class="c1">-- returned as number</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_EXTRACT</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;tags.0&#39;</span><span class="p">)</span><span class="w">      </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="p">;</span><span class="w">  </span><span class="c1">-- first element of &#39;tags&#39; array</span>
+<h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>┌─────────────────────────────────────────────┐
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>│            Go application                   │
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│          database/sql interface             │
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>└────────────────────┬────────────────────────┘
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>                     │
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>┌────────────────────▼────────────────────────┐
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│              MiniSQL driver                 │
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│                                             │
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│   Parser ──► Planner ──► Executor           │
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│                              │              │
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│                 Transaction Manager         │
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│              OCC writes · MVCC reads        │
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>└──────────┬───────────────────────┬──────────┘
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>           │                       │
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>┌──────────▼──────────┐ ┌──────────▼──────────┐
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>│   LRU page cache    │ │  Write-ahead log    │
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>│  2 000 pages / 8 MB │ │    {db}-wal         │
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>└──────────┬──────────┘ └──────────┬──────────┘
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>           │                       │
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>┌──────────▼───────────────────────▼──────────┐
+</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>│               Database file                 │
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>│     B+ trees · 4 KiB pages · CRC32          │
+</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>│     Optional AES-256-CTR encryption         │
+</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>└─────────────────────────────────────────────┘
 </span></code></pre></div>
+<h3 id="storage-pages-and-overflow">Storage: pages and overflow<a class="headerlink" href="#storage-pages-and-overflow" title="Permanent link">&para;</a></h3>
+<p>The database file is divided into fixed-size <strong>4 096-byte pages</strong>, each ending with a 4-byte CRC32-IEEE checksum verified on every read. A bad checksum is an immediate error — corrupted pages are never silently accepted.</p>
+<p>Large values — <code>TEXT</code> longer than 255 bytes, <code>JSON</code>, <code>VECTOR</code> — spill onto <strong>overflow pages</strong> chained via next-page pointers. This mirrors SQLite's overflow design rather than PostgreSQL's TOAST: simpler to implement, no separate storage namespace, and the common case of small rows stays fast. The trade-off: reading a single overflowed column still traverses the full chain.</p>
+<h3 id="b-trees-everywhere">B+ trees everywhere<a class="headerlink" href="#b-trees-everywhere" title="Permanent link">&para;</a></h3>
+<p>Every table and every index is an independent <strong>B+ tree</strong>:</p>
+<ul>
+<li><strong>Leaf nodes</strong> hold row data (for tables) or index entries (for indexes).</li>
+<li><strong>Internal nodes</strong> hold routing keys and child page pointers.</li>
+<li>Leaf nodes at the same level are <strong>doubly-linked</strong>, so range scans walk the list without re-descending the tree on each step.</li>
+</ul>
+<p>The schema catalog (<code>minisql_schema</code>) is itself a B+ tree, so the metadata is stored with the same engine as user data.</p>
+<h3 id="write-ahead-log">Write-Ahead Log<a class="headerlink" href="#write-ahead-log" title="Permanent link">&para;</a></h3>
+<p>All commits append modified pages to a WAL file (<code>{db}-wal</code>) before touching the main file. The main file is updated only during a <strong>checkpoint</strong>, which fires automatically after 1 000 WAL frames (configurable via <code>wal_checkpoint_threshold</code>).</p>
+<p>On startup, MiniSQL replays committed-but-uncheckpointed frames — normal WAL behaviour, not crash recovery. Partially written frames are discarded.</p>
+<h3 id="concurrency-occ-writes-mvcc-reads">Concurrency: OCC writes, MVCC reads<a class="headerlink" href="#concurrency-occ-writes-mvcc-reads" title="Permanent link">&para;</a></h3>
+<p>Two different models coexist, one for each access pattern:</p>
+<p><strong>Writes — Optimistic Concurrency Control.</strong> One writer runs at a time. The engine tracks a read-set of page versions within the transaction. At commit, it checks for conflicts: if another transaction modified any page in the read-set since it was first read, <code>ErrTxConflict</code> is returned and the caller can retry. No locks are held during query execution.</p>
+<p><strong>Reads — MVCC Snapshot Isolation.</strong> Each read-only transaction captures the current commit sequence number at <code>BEGIN</code>. Subsequent page reads that would see a newer version are served from a per-page version history. The reader sees a fully consistent snapshot regardless of concurrent writers. Writers never block readers; readers never block writers.</p>
 <hr />
-<h2 id="json_containsjson-value">JSON_CONTAINS(json, value)<a class="headerlink" href="#json_containsjson-value" title="Permanent link">&para;</a></h2>
-<p>Returns <code>true</code> if <code>json</code> contains <code>value</code> as a sub-document or element. Used with the <a href="../../indexes/json-inverted/">JSON inverted index</a>.</p>
-<div class="language-sql highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1">-- Object containment</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">JSON_CONTAINS</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;{&quot;action&quot;: &quot;login&quot;}&#39;</span><span class="p">);</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1">-- Scalar element in array or nested value</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">JSON_CONTAINS</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;&quot;go&quot;&#39;</span><span class="p">);</span>
-</span></code></pre></div>
+<h2 id="sql-parser">SQL Parser<a class="headerlink" href="#sql-parser" title="Permanent link">&para;</a></h2>
+<p>The parser is a <strong>hand-written state machine</strong> — no parser generator, no ANTLR, no yacc. Each SQL keyword is dispatched through a step machine that advances token-by-token and builds a <code>Statement</code> struct.</p>
+<p>The trade-off vs a generated parser is development speed: new syntax requires writing state transitions by hand. The payoff is complete control over error messages, zero runtime generation dependencies, and straightforward behaviour under partial input — which is what makes the interactive CLI's multi-line continuation prompt work correctly.</p>
 <hr />
-<h2 id="json_typejson-path">JSON_TYPE(json [, path])<a class="headerlink" href="#json_typejson-path" title="Permanent link">&para;</a></h2>
-<p>Returns the JSON type of the value as a string: <code>'object'</code>, <code>'array'</code>, <code>'string'</code>, <code>'number'</code>, <code>'boolean'</code>, or <code>'null'</code>.</p>
-<div class="language-sql highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_TYPE</span><span class="p">(</span><span class="s1">&#39;{&quot;a&quot;: 1}&#39;</span><span class="p">);</span><span class="w">           </span><span class="c1">-- &#39;object&#39;</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_TYPE</span><span class="p">(</span><span class="s1">&#39;[1, 2, 3]&#39;</span><span class="p">);</span><span class="w">          </span><span class="c1">-- &#39;array&#39;</span>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_TYPE</span><span class="p">(</span><span class="s1">&#39;&quot;hello&quot;&#39;</span><span class="p">);</span><span class="w">            </span><span class="c1">-- &#39;string&#39;</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_TYPE</span><span class="p">(</span><span class="s1">&#39;42&#39;</span><span class="p">);</span><span class="w">                 </span><span class="c1">-- &#39;number&#39;</span>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_TYPE</span><span class="p">(</span><span class="s1">&#39;true&#39;</span><span class="p">);</span><span class="w">              </span><span class="c1">-- &#39;boolean&#39;</span>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
-</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1">-- At a specific path</span>
-</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_TYPE</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;tags&#39;</span><span class="p">)</span><span class="w">      </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="p">;</span><span class="w">  </span><span class="c1">-- &#39;array&#39;</span>
-</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_TYPE</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;score&#39;</span><span class="p">)</span><span class="w">     </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="p">;</span><span class="w">  </span><span class="c1">-- &#39;number&#39;</span>
-</span></code></pre></div>
+<h2 id="query-planner">Query Planner<a class="headerlink" href="#query-planner" title="Permanent link">&para;</a></h2>
+<p>The planner is <strong>cost-based</strong>, driven by statistics populated by <code>ANALYZE</code>:</p>
+<ul>
+<li>Row counts, column cardinality, min/max histograms, most-common values (MCV).</li>
+<li>For each predicate, the planner scores all candidate indexes (B-tree, full-text, inverted, HNSW) and picks the cheapest access path.</li>
+<li>Predicate pushdown: filters are applied as close to the scan as possible.</li>
+<li>Covering index detection: if an index contains all projected columns, the main table is never touched.</li>
+<li>Join reordering for star-schema queries; semi-join and anti-semi-join rewrites for <code>IN</code>/<code>NOT IN</code> subqueries.</li>
+</ul>
+<p>Use <code>EXPLAIN</code> and <code>EXPLAIN ANALYZE</code> to inspect the chosen plan.</p>
 <hr />
-<h2 id="json_array_lengthjson-path">JSON_ARRAY_LENGTH(json [, path])<a class="headerlink" href="#json_array_lengthjson-path" title="Permanent link">&para;</a></h2>
-<p>Returns the number of elements in a JSON array, or <code>NULL</code> if the target is not an array.</p>
-<div class="language-sql highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_ARRAY_LENGTH</span><span class="p">(</span><span class="s1">&#39;[1, 2, 3]&#39;</span><span class="p">);</span><span class="w">        </span><span class="c1">-- 3</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_ARRAY_LENGTH</span><span class="p">(</span><span class="s1">&#39;[]&#39;</span><span class="p">);</span><span class="w">               </span><span class="c1">-- 0</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_ARRAY_LENGTH</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span><span class="w">       </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="p">;</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_ARRAY_LENGTH</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;tags&#39;</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="p">;</span><span class="w">  </span><span class="c1">-- length of payload.tags</span>
-</span></code></pre></div>
+<h2 id="index-types">Index Types<a class="headerlink" href="#index-types" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Index</th>
+<th>Backed by</th>
+<th>Use case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>B-tree</td>
+<td>Separate B+ tree pages</td>
+<td>Primary key, unique constraint, secondary index</td>
+</tr>
+<tr>
+<td>Inverted</td>
+<td>Posting lists per token</td>
+<td>Full-text search — <code>MATCH</code>, <code>TS_RANK</code> (BM25)</td>
+</tr>
+<tr>
+<td>JSON inverted</td>
+<td>Posting lists per path/value</td>
+<td><code>JSON_CONTAINS</code> queries</td>
+</tr>
+<tr>
+<td>HNSW</td>
+<td>Hierarchical navigable small world graph</td>
+<td>Vector similarity — <code>VEC_L2</code>, <code>VEC_COSINE</code></td>
+</tr>
+</tbody>
+</table>
+<p>The full-text and JSON inverted indexes are <strong>log-structured</strong>: inserts append new posting entries; deletes mark tombstones; background merges consolidate entries. This keeps insert latency low at the cost of slightly higher merge work at query time.</p>
+<p>The HNSW vector index supports both L2 distance and cosine similarity and is integrated into the query planner, so <code>ORDER BY VEC_L2(embedding, ?) LIMIT 10</code> automatically uses the ANN index rather than a full sequential scan.</p>
 <hr />
-<h2 id="json_validjson">JSON_VALID(json)<a class="headerlink" href="#json_validjson" title="Permanent link">&para;</a></h2>
-<p>Returns <code>1</code> if the string is valid JSON, <code>0</code> otherwise.</p>
-<div class="language-sql highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_VALID</span><span class="p">(</span><span class="s1">&#39;{&quot;a&quot;: 1}&#39;</span><span class="p">);</span><span class="w">       </span><span class="c1">-- 1</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_VALID</span><span class="p">(</span><span class="s1">&#39;not json&#39;</span><span class="p">);</span><span class="w">        </span><span class="c1">-- 0</span>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">JSON_VALID</span><span class="p">(</span><span class="k">NULL</span><span class="p">);</span><span class="w">              </span><span class="c1">-- NULL</span>
-</span></code></pre></div>
+<h2 id="built-in-features-vs-sqlite">Built-in Features vs SQLite<a class="headerlink" href="#built-in-features-vs-sqlite" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>MiniSQL</th>
+<th>SQLite</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pure Go, zero CGO</td>
+<td>✅</td>
+<td>❌ (CGO or transpiled C)</td>
+</tr>
+<tr>
+<td><code>TIMESTAMP</code> column type</td>
+<td>✅ PostgreSQL-compatible</td>
+<td>❌ (TEXT / INTEGER / REAL)</td>
+</tr>
+<tr>
+<td><code>UUID</code> column type</td>
+<td>✅</td>
+<td>❌</td>
+</tr>
+<tr>
+<td><code>JSON</code> column type + operators</td>
+<td>✅</td>
+<td>Partial (json1 extension)</td>
+</tr>
+<tr>
+<td>Native full-text search</td>
+<td>✅ inverted index + BM25</td>
+<td>✅ FTS5 extension</td>
+</tr>
+<tr>
+<td>JSON inverted index</td>
+<td>✅</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>Vector similarity search</td>
+<td>✅ HNSW ANN</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>Transparent page encryption</td>
+<td>✅ AES-256-CTR + HKDF</td>
+<td>❌ (paid SEE extension)</td>
+</tr>
+<tr>
+<td>MVCC snapshot reads</td>
+<td>✅</td>
+<td>✅ (WAL mode)</td>
+</tr>
+<tr>
+<td>Parallel full-table scan</td>
+<td>✅</td>
+<td>❌</td>
+</tr>
+</tbody>
+</table>
 <hr />
-<h2 id="cast-to-json">CAST to JSON<a class="headerlink" href="#cast-to-json" title="Permanent link">&para;</a></h2>
-<div class="language-sql highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="k">CAST</span><span class="p">(</span><span class="s1">&#39;{&quot;a&quot;: 1}&#39;</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">JSON</span><span class="p">);</span>
-</span></code></pre></div>
-<p>Validates and normalises the JSON on insert/update.</p>
+<h2 id="benchmarks">Benchmarks<a class="headerlink" href="#benchmarks" title="Permanent link">&para;</a></h2>
+<p>All numbers are from an Apple M1 Max running darwin/arm64 and Go 1.26.3. The SQLite comparison is against <a href="https://pkg.go.dev/modernc.org/sqlite"><code>modernc.org/sqlite</code></a> — a <strong>pure-Go</strong> port, not the CGO driver — so the comparison is on an even footing: no CGO overhead on either side. Times are median of 3 runs. Ratio below 1.0× means MiniSQL is faster.</p>
+<h3 id="single-row-dml">Single-row DML<a class="headerlink" href="#single-row-dml" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>MiniSQL</th>
+<th>SQLite</th>
+<th>Ratio</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Insert</td>
+<td>12.67 µs</td>
+<td>54.64 µs</td>
+<td><strong>0.23×</strong></td>
+</tr>
+<tr>
+<td>Update by PK</td>
+<td>9.81 µs</td>
+<td>47.98 µs</td>
+<td><strong>0.20×</strong></td>
+</tr>
+<tr>
+<td>Delete by PK</td>
+<td>18.48 µs</td>
+<td>103.2 µs</td>
+<td><strong>0.18×</strong></td>
+</tr>
+<tr>
+<td>ON CONFLICT DO UPDATE</td>
+<td>9.08 µs</td>
+<td>43.20 µs</td>
+<td><strong>0.21×</strong></td>
+</tr>
+<tr>
+<td>Foreign key insert</td>
+<td>12.28 µs</td>
+<td>57.78 µs</td>
+<td><strong>0.21×</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Single-row writes are consistently <strong>4–5× faster</strong>. MiniSQL's OCC model takes no locks during execution and the per-transaction commit path is lightweight for single-page mutations. modernc/sqlite carries more per-statement bookkeeping overhead from its SQLite heritage.</p>
+<h3 id="analytical-queries">Analytical queries<a class="headerlink" href="#analytical-queries" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>MiniSQL</th>
+<th>SQLite</th>
+<th>Ratio</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Full table scan (10k rows)</td>
+<td>4.42 ms</td>
+<td>6.12 ms</td>
+<td><strong>0.72×</strong></td>
+</tr>
+<tr>
+<td>GROUP BY aggregate</td>
+<td>987 µs</td>
+<td>2.31 ms</td>
+<td><strong>0.43×</strong></td>
+</tr>
+<tr>
+<td>HAVING filter</td>
+<td>822 µs</td>
+<td>2.10 ms</td>
+<td><strong>0.39×</strong></td>
+</tr>
+<tr>
+<td>DISTINCT high cardinality</td>
+<td>3.17 ms</td>
+<td>6.39 ms</td>
+<td><strong>0.50×</strong></td>
+</tr>
+<tr>
+<td>Subquery IN list</td>
+<td>2.90 ms</td>
+<td>4.10 ms</td>
+<td><strong>0.71×</strong></td>
+</tr>
+<tr>
+<td>Inner join, low selectivity</td>
+<td>130 µs</td>
+<td>861 µs</td>
+<td><strong>0.15×</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="full-text-search">Full-text search<a class="headerlink" href="#full-text-search" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>MiniSQL</th>
+<th>SQLite FTS5</th>
+<th>Ratio</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Common-term search</td>
+<td>6.13 µs</td>
+<td>70.71 µs</td>
+<td><strong>0.09×</strong></td>
+</tr>
+<tr>
+<td>Multi-term AND</td>
+<td>20.59 µs</td>
+<td>39.08 µs</td>
+<td><strong>0.53×</strong></td>
+</tr>
+<tr>
+<td>Insert with FTS index</td>
+<td>41.71 µs</td>
+<td>112.5 µs</td>
+<td><strong>0.37×</strong></td>
+</tr>
+<tr>
+<td>Update with FTS index</td>
+<td>44.66 µs</td>
+<td>133.9 µs</td>
+<td><strong>0.33×</strong></td>
+</tr>
+<tr>
+<td>Delete with FTS index</td>
+<td>57.07 µs</td>
+<td>175.3 µs</td>
+<td><strong>0.33×</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="where-sqlite-wins">Where SQLite wins<a class="headerlink" href="#where-sqlite-wins" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>MiniSQL</th>
+<th>SQLite</th>
+<th>Ratio</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Point scan (PK lookup)</td>
+<td>6.39 µs</td>
+<td>4.15 µs</td>
+<td>1.54×</td>
+</tr>
+<tr>
+<td>Insert batch (100 rows)</td>
+<td>437 µs</td>
+<td>309 µs</td>
+<td>1.41×</td>
+</tr>
+<tr>
+<td>Insert prepared batch</td>
+<td>403 µs</td>
+<td>250 µs</td>
+<td>1.61×</td>
+</tr>
+<tr>
+<td>WAL checkpoint</td>
+<td>357 µs</td>
+<td>172 µs</td>
+<td>2.08×</td>
+</tr>
+<tr>
+<td>VACUUM</td>
+<td>2.15 ms</td>
+<td>584 µs</td>
+<td>3.68×</td>
+</tr>
+</tbody>
+</table>
+<p>Point scans and batch inserts favour SQLite because its page-level data layout and tight column scanning loop have lower per-row overhead than MiniSQL's row materialisation path. VACUUM is the largest gap: MiniSQL rebuilds the compacted database through normal write paths (page-by-page via the B+ tree write API) whereas SQLite can do a more direct block-level copy. This is a known optimisation target.</p>
 <hr />
-<h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
-<div class="language-sql highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1">-- Filter by nested JSON field</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">payload</span><span class="w"> </span><span class="o">-&gt;&gt;</span><span class="w"> </span><span class="s1">&#39;action&#39;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;login&#39;</span><span class="p">;</span>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1">-- Extract a numeric field and compare</span>
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="k">CAST</span><span class="p">(</span><span class="n">payload</span><span class="w"> </span><span class="o">-&gt;&gt;</span><span class="w"> </span><span class="s1">&#39;score&#39;</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="nb">INT8</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">90</span><span class="p">;</span>
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
-</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="c1">-- Navigate nested structure</span>
-</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">payload</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="s1">&#39;meta&#39;</span><span class="w"> </span><span class="o">-&gt;&gt;</span><span class="w"> </span><span class="s1">&#39;version&#39;</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="k">version</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">events</span><span class="p">;</span>
-</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>
-</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="c1">-- Aggregate over a JSON field</span>
-</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">payload</span><span class="w"> </span><span class="o">-&gt;&gt;</span><span class="w"> </span><span class="s1">&#39;country&#39;</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">country</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">cnt</span>
-</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="k">FROM</span><span class="w"> </span><span class="n">events</span>
-</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">payload</span><span class="w"> </span><span class="o">-&gt;&gt;</span><span class="w"> </span><span class="s1">&#39;action&#39;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;signup&#39;</span>
-</span><span id="__span-9-14"><a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">payload</span><span class="w"> </span><span class="o">-&gt;&gt;</span><span class="w"> </span><span class="s1">&#39;country&#39;</span>
-</span><span id="__span-9-15"><a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">cnt</span><span class="w"> </span><span class="k">DESC</span><span class="p">;</span>
+<h2 id="honest-trade-offs">Honest Trade-offs<a class="headerlink" href="#honest-trade-offs" title="Permanent link">&para;</a></h2>
+<p><strong>Use MiniSQL if:</strong></p>
+<ul>
+<li>You want zero-CGO, single binary cross-compilation with no C toolchain.</li>
+<li>You need native full-text search, JSON querying, or vector similarity without bolting on extensions.</li>
+<li>Single-row write latency matters — 4–5× faster than SQLite in our benchmarks.</li>
+<li>You want <code>TIMESTAMP</code> stored as microseconds (not the SQLite triple-type ambiguity), or a real <code>UUID</code> column type.</li>
+<li>Transparent encryption at rest is a requirement without paying for a commercial extension.</li>
+</ul>
+<p><strong>Use SQLite if:</strong></p>
+<ul>
+<li>You need 20+ years of production hardening and a mature ecosystem.</li>
+<li>Your workload is read-heavy with frequent point lookups.</li>
+<li>You run VACUUM frequently and care about its latency.</li>
+<li>SQLite file format compatibility or third-party tool support is required.</li>
+</ul>
+<hr />
+<h2 id="whats-next">What's Next<a class="headerlink" href="#whats-next" title="Permanent link">&para;</a></h2>
+<p>MiniSQL v1.0 is usable, but several things need work before it deserves to be called production-grade:</p>
+<ul>
+<li><strong>VACUUM performance</strong> — direct block-level copy rather than the current write-path rebuild.</li>
+<li><strong>Batch insert</strong> — reduce per-row allocation overhead; bulk-load path for large inserts.</li>
+<li><strong>Memory</strong> — HNSW index build peaks at 200+ MiB for 10k rows at 768 dimensions; GROUP BY / HAVING use 10–13× more heap than SQLite's C hash table (structural Go-vs-C gap, but a custom open-address hash table would close most of it).</li>
+<li><strong>Savepoints</strong> — <code>SAVEPOINT</code> / <code>ROLLBACK TO</code> not yet implemented.</li>
+<li><strong>Observability</strong> — a <code>db.Metrics()</code> API for query counts, cache hit rate, checkpoint frequency.</li>
+</ul>
+<p>More profiling and optimisation work is planned; the benchmark suite in <code>benchmarks/</code> has a baseline file that makes regressions visible before they ship.</p>
+<hr />
+<h2 id="try-it">Try It<a class="headerlink" href="#try-it" title="Permanent link">&para;</a></h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Use as a library</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>go<span class="w"> </span>get<span class="w"> </span>github.com/RichardKnop/minisql
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Interactive CLI</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>go<span class="w"> </span>install<span class="w"> </span>github.com/RichardKnop/minisql/cmd/minisql@latest
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="c1"># or</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>brew<span class="w"> </span>install<span class="w"> </span>minisql
 </span></code></pre></div>
+<p>Source and full documentation: <a href="https://github.com/RichardKnop/minisql">github.com/RichardKnop/minisql</a> · <a href="https://richardknop.github.io/minisql/">richardknop.github.io/minisql</a></p>
+<p>Feedback, bug reports, and contributions are welcome — the project is in active development.</p>
 
 
 
@@ -2240,7 +2707,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../window/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Window">
+          <a href="../" class="md-footer__link md-footer__link--prev" aria-label="Previous: Blog">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2250,27 +2717,11 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Window
+                Blog
               </div>
             </div>
           </a>
         
-        
-          
-          <a href="../conditional/" class="md-footer__link md-footer__link--next" aria-label="Next: Conditional">
-            <div class="md-footer__title">
-              <span class="md-footer__direction">
-                Next
-              </span>
-              <div class="md-ellipsis">
-                Conditional
-              </div>
-            </div>
-            <div class="md-footer__button md-icon">
-              
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
-            </div>
-          </a>
         
       </nav>
     

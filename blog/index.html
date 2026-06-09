@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://richardknop.github.io/minisql/system-table/">
+        <link rel="canonical" href="https://richardknop.github.io/minisql/blog/">
       
       
-        <link rel="prev" href="../constraints/">
+        <link rel="prev" href="../limitations/">
       
       
-        <link rel="next" href="../limitations/">
+        <link rel="next" href="minisql-1.0/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>System Table - MiniSQL</title>
+        <title>Blog - MiniSQL</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#system-tables" class="md-skip">
+        <a href="#blog" class="md-skip">
           Skip to content
         </a>
       
@@ -114,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              System Table
+              Blog
             
           </span>
         </div>
@@ -455,11 +455,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href="../system-table/" class="md-tabs__link">
         
   
   
@@ -495,11 +493,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../blog/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
           
   
   
@@ -1552,37 +1552,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    System Table
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../system-table/" class="md-nav__link">
         
   
   
@@ -1598,126 +1571,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#minisql_schema" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        minisql_schema
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="minisql_schema">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#structure" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Structure
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#querying-the-schema" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Querying the schema
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#type-values" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Type values
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#minisql_stats" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        minisql_stats
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="minisql_stats">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#what-analyze-collects" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What ANALYZE collects
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#usage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Usage
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#notes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notes
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1753,28 +1606,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_15" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_15" >
-        
-          
-          <label class="md-nav__link" for="__nav_15" id="__nav_15_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_15" id="__nav_15_label" tabindex="">
             
   
   
@@ -1792,7 +1648,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_15_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_15_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_15">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1807,10 +1663,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../blog/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blog
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1826,6 +1709,37 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#building-minisql-a-pure-go-embedded-sql-database" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building MiniSQL: A Pure-Go Embedded SQL Database
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1838,7 +1752,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../blog/minisql-1.0/" class="md-nav__link">
+      <a href="minisql-1.0/" class="md-nav__link">
         
   
   
@@ -1893,99 +1807,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#minisql_schema" class="md-nav__link">
+  <a href="#building-minisql-a-pure-go-embedded-sql-database" class="md-nav__link">
     <span class="md-ellipsis">
       
-        minisql_schema
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="minisql_schema">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#structure" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Structure
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#querying-the-schema" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Querying the schema
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#type-values" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Type values
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#minisql_stats" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        minisql_stats
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="minisql_stats">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#what-analyze-collects" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What ANALYZE collects
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#usage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Usage
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#notes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notes
+        Building MiniSQL: A Pure-Go Embedded SQL Database
       
     </span>
   </a>
@@ -2010,6 +1835,46 @@
   
 
 
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href=".." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="./" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    Blog
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
               
               <article class="md-content__inner md-typeset">
                 
@@ -2020,125 +1885,10 @@
   
 
 
-<h1 id="system-tables">System Tables<a class="headerlink" href="#system-tables" title="Permanent link">&para;</a></h1>
-<p>MiniSQL maintains internal tables that store schema metadata and query planner statistics. These tables are read-only from SQL and are automatically maintained by the engine.</p>
-<hr />
-<h2 id="minisql_schema">minisql_schema<a class="headerlink" href="#minisql_schema" title="Permanent link">&para;</a></h2>
-<p><code>minisql_schema</code> stores the schema definition for every user table and index. It is the single source of truth for the database schema — analogous to <code>sqlite_schema</code> in SQLite or <code>information_schema</code> in PostgreSQL.</p>
-<h3 id="structure">Structure<a class="headerlink" href="#structure" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Column</th>
-<th>Type</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>type</code></td>
-<td><code>INT4</code></td>
-<td>Object kind: <code>1</code> = table, <code>2</code> = primary key, <code>3</code> = unique index, <code>4</code> = secondary index, <code>5</code> = foreign key</td>
-</tr>
-<tr>
-<td><code>name</code></td>
-<td><code>VARCHAR(255)</code></td>
-<td>Object name (table name, index name, or FK constraint name)</td>
-</tr>
-<tr>
-<td><code>tbl_name</code></td>
-<td><code>VARCHAR(255)</code></td>
-<td>Parent table name (for indexes and foreign keys); NULL for tables</td>
-</tr>
-<tr>
-<td><code>root_page</code></td>
-<td><code>INT4</code></td>
-<td>B-tree root page number for this object</td>
-</tr>
-<tr>
-<td><code>sql</code></td>
-<td><code>TEXT</code></td>
-<td>DDL statement that created this object</td>
-</tr>
-</tbody>
-</table>
-<h3 id="querying-the-schema">Querying the schema<a class="headerlink" href="#querying-the-schema" title="Permanent link">&para;</a></h3>
-<div class="language-sql highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1">-- List all user tables</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="k">sql</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">minisql_schema</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="k">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1">-- List all indexes on a specific table</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="k">type</span><span class="p">,</span><span class="w"> </span><span class="k">sql</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="k">FROM</span><span class="w"> </span><span class="n">minisql_schema</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">tbl_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;users&#39;</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">type</span><span class="w"> </span><span class="k">IN</span><span class="w"> </span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">);</span>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1">-- List all foreign keys</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="n">tbl_name</span><span class="p">,</span><span class="w"> </span><span class="k">sql</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">minisql_schema</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="k">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span>
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="c1">-- Show DDL for a specific table</span>
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="k">SELECT</span><span class="w"> </span><span class="k">sql</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">minisql_schema</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="k">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;users&#39;</span><span class="p">;</span>
-</span></code></pre></div>
-<h3 id="type-values">Type values<a class="headerlink" href="#type-values" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Value</th>
-<th>Constant</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>1</td>
-<td><code>SchemaTable</code></td>
-<td>User table</td>
-</tr>
-<tr>
-<td>2</td>
-<td><code>SchemaPrimaryKey</code></td>
-<td>Primary key index</td>
-</tr>
-<tr>
-<td>3</td>
-<td><code>SchemaUniqueIndex</code></td>
-<td>Unique index</td>
-</tr>
-<tr>
-<td>4</td>
-<td><code>SchemaSecondaryIndex</code></td>
-<td>Secondary / fulltext / inverted / HNSW index</td>
-</tr>
-<tr>
-<td>5</td>
-<td><code>SchemaForeignKey</code></td>
-<td>Foreign key constraint</td>
-</tr>
-</tbody>
-</table>
-<hr />
-<h2 id="minisql_stats">minisql_stats<a class="headerlink" href="#minisql_stats" title="Permanent link">&para;</a></h2>
-<p><code>minisql_stats</code> stores column statistics collected by the <code>ANALYZE</code> command. The query planner reads these statistics to estimate row counts, choose indexes, and order joins.</p>
-<p>Statistics are populated by:</p>
-<div class="language-sql highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">ANALYZE</span><span class="w"> </span><span class="k">table_name</span><span class="p">;</span>
-</span></code></pre></div>
-<h3 id="what-analyze-collects">What ANALYZE collects<a class="headerlink" href="#what-analyze-collects" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Row count per table</li>
-<li>Distinct value count (cardinality) per column</li>
-<li>Value distribution histograms per column</li>
-<li>Most-common values (MCV) per column</li>
-</ul>
-<h3 id="usage">Usage<a class="headerlink" href="#usage" title="Permanent link">&para;</a></h3>
-<div class="language-sql highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1">-- Check that stats exist for a table</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">minisql_stats</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">tbl_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;orders&#39;</span><span class="p">;</span>
-</span></code></pre></div>
-<hr />
-<h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
-<ul>
-<li>Both system tables are read-only from SQL — writing to them directly is rejected.</li>
-<li><code>minisql_schema</code> is always consistent with the current schema; DDL operations (CREATE TABLE, DROP TABLE, CREATE INDEX, etc.) update it atomically within the same transaction.</li>
-<li><code>minisql_stats</code> is stale until <code>ANALYZE</code> is run; the planner falls back to default estimates for tables without statistics.</li>
-<li>System tables do not appear in <code>SELECT * FROM minisql_schema WHERE type = 1</code> because the filter on <code>type = 1</code> (user tables) excludes them. They are visible if you query without a type filter.</li>
-</ul>
+<h1 id="blog">Blog<a class="headerlink" href="#blog" title="Permanent link">&para;</a></h1>
+<h2 id="building-minisql-a-pure-go-embedded-sql-database"><a href="minisql-1.0/">Building MiniSQL: A Pure-Go Embedded SQL Database</a><a class="headerlink" href="#building-minisql-a-pure-go-embedded-sql-database" title="Permanent link">&para;</a></h2>
+<p><em>June 2026</em></p>
+<p>The technical journey behind MiniSQL v1.0: storage engine design, concurrency model, query planner, four index types, and an honest benchmark comparison against SQLite.</p>
 
 
 
@@ -2176,7 +1926,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../constraints/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Constraints">
+          <a href="../limitations/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Limitations">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2186,20 +1936,20 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Constraints
+                Limitations
               </div>
             </div>
           </a>
         
         
           
-          <a href="../limitations/" class="md-footer__link md-footer__link--next" aria-label="Next: Limitations">
+          <a href="minisql-1.0/" class="md-footer__link md-footer__link--next" aria-label="Next: Building MiniSQL v1.0">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Limitations
+                Building MiniSQL v1.0
               </div>
             </div>
             <div class="md-footer__button md-icon">
