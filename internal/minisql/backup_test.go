@@ -45,7 +45,7 @@ func newBackupTestDB(t *testing.T) (*Database, string) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		db.Close()
+		require.NoError(t, db.Close())
 		os.Remove(dbPath)
 		os.Remove(dbPath + "-wal")
 	})
@@ -199,7 +199,7 @@ func TestBackup_CheckpointBlockedDuringCopy(t *testing.T) {
 	)
 	require.NoError(t, err)
 	defer func() {
-		backupDB.Close()
+		require.NoError(t, backupDB.Close())
 		os.Remove(destPath + "-wal")
 	}()
 
