@@ -122,7 +122,7 @@ func (d *Driver) newDB(config *ConnectionConfig) (*minisql.Database, error) {
 	}
 
 	if recovered {
-		d.logger.Warn("WAL replay: uncommitted-to-disk frames found and replayed into WAL index",
+		d.logger.Info("WAL recovery: replayed uncheckpointed frames from previous session",
 			zap.String("db_path", config.FilePath),
 			zap.Int("frames_in_index", walIndex.Size()))
 	}
