@@ -53,6 +53,25 @@ signs:
     artifacts: checksum
     output: true
 
+brews:
+  - name: minisql
+    ids: [minisql]
+    repository:
+      owner: RichardKnop
+      name: homebrew-minisql
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "chore: update minisql formula to {{ .Tag }}"
+    homepage: "https://github.com/RichardKnop/minisql"
+    description: "Embedded single-file SQL database in pure Go — faster than SQLite on latency benchmarks."
+    license: "Apache-2.0"
+    install: |
+      bin.install "minisql"
+    test: |
+      system "#{bin}/minisql", "-version"
+
 changelog:
   sort: asc
   filters:
