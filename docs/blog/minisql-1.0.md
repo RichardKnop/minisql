@@ -209,7 +209,6 @@ MiniSQL v1.0 is usable, but several things need work before it deserves to be ca
 - **Batch insert** — reduce per-row allocation overhead; bulk-load path for large inserts.
 - **Memory** — HNSW index build peaks at 200+ MiB for 10k rows at 768 dimensions; GROUP BY / HAVING use 10–13× more heap than SQLite's C hash table (structural Go-vs-C gap, but a custom open-address hash table would close most of it).
 - **Savepoints** — `SAVEPOINT` / `ROLLBACK TO` not yet implemented.
-- **Observability** — a `db.Metrics()` API for query counts, cache hit rate, checkpoint frequency.
 
 More profiling and optimisation work is planned; the benchmark suite in `benchmarks/` has a baseline file that makes regressions visible before they ship.
 
@@ -228,6 +227,7 @@ brew install minisql
 ```
 
 Source and full documentation: 
+
 - [github.com/RichardKnop/minisql](https://github.com/RichardKnop/minisql)
 - [richardknop.github.io/minisql](https://richardknop.github.io/minisql/)
 
