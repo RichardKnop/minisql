@@ -112,6 +112,9 @@ func (p *parserItem) doParseCreateTable() error {
 		if dims == 0 {
 			return p.errorf("at CREATE TABLE: vector dimension must be a positive integer")
 		}
+		if dims > uint64(minisql.MaxVectorDims) {
+			return p.errorf("at CREATE TABLE: vector dimension %d exceeds maximum of %d", dims, minisql.MaxVectorDims)
+		}
 		p.pop()
 		p.Columns[len(p.Columns)-1].Size = uint32(dims)
 		closingParens := p.peek()

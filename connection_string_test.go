@@ -203,13 +203,13 @@ func TestParseConnectionString(t *testing.T) {
 			name:        "invalid max_cached_pages - negative",
 			connStr:     "./test.db?max_cached_pages=-100",
 			wantErr:     true,
-			errContains: "must be non-negative",
+			errContains: "must be a non-negative integer",
 		},
 		{
 			name:        "invalid max_cached_pages - not a number",
 			connStr:     "./test.db?max_cached_pages=abc",
 			wantErr:     true,
-			errContains: "must be a positive integer",
+			errContains: "must be a non-negative integer",
 		},
 		{
 			name:        "invalid log level",
@@ -331,6 +331,24 @@ func TestParseConnectionString(t *testing.T) {
 			connStr:     "./test.db?sort_mem_limit=big",
 			wantErr:     true,
 			errContains: "invalid sort_mem_limit parameter",
+		},
+		{
+			name:        "sort_mem_limit exceeds maximum",
+			connStr:     "./test.db?sort_mem_limit=3221225472",
+			wantErr:     true,
+			errContains: "exceeds maximum of 2 GiB",
+		},
+		{
+			name:        "wal_write_buffer_size exceeds maximum",
+			connStr:     "./test.db?wal_write_buffer_size=268435457",
+			wantErr:     true,
+			errContains: "exceeds maximum of 256 MiB",
+		},
+		{
+			name:        "encryption_key too short",
+			connStr:     "./test.db?encryption_key=" + hex.EncodeToString([]byte("tooshort")),
+			wantErr:     true,
+			errContains: "key too short",
 		},
 	}
 
