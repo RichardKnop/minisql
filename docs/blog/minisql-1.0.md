@@ -49,7 +49,7 @@ MiniSQL started from a simple question: what does an embedded SQL database look 
 
 The database file is divided into fixed-size **4 096-byte pages**, each ending with a 4-byte CRC32-IEEE checksum verified on every read. A bad checksum is an immediate error — corrupted pages are never silently accepted.
 
-Large values — `TEXT` longer than 255 bytes, `JSON`, `VECTOR` — spill onto **overflow pages** chained via next-page pointers. This mirrors SQLite's overflow design rather than PostgreSQL's TOAST: simpler to implement, no separate storage namespace, and the common case of small rows stays fast. The trade-off: reading a single overflowed column still traverses the full chain.
+Large values — `TEXT` longer than 512 bytes, `JSON`, `VECTOR` — spill onto **overflow pages** chained via next-page pointers. This mirrors SQLite's overflow design rather than PostgreSQL's TOAST: simpler to implement, no separate storage namespace, and the common case of small rows stays fast. The trade-off: reading a single overflowed column still traverses the full chain.
 
 ### B+ trees everywhere
 
