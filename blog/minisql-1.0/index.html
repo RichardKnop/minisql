@@ -2386,7 +2386,7 @@
 </span></code></pre></div>
 <h3 id="storage-pages-and-overflow">Storage: pages and overflow<a class="headerlink" href="#storage-pages-and-overflow" title="Permanent link">&para;</a></h3>
 <p>The database file is divided into fixed-size <strong>4 096-byte pages</strong>, each ending with a 4-byte CRC32-IEEE checksum verified on every read. A bad checksum is an immediate error — corrupted pages are never silently accepted.</p>
-<p>Large values — <code>TEXT</code> longer than 255 bytes, <code>JSON</code>, <code>VECTOR</code> — spill onto <strong>overflow pages</strong> chained via next-page pointers. This mirrors SQLite's overflow design rather than PostgreSQL's TOAST: simpler to implement, no separate storage namespace, and the common case of small rows stays fast. The trade-off: reading a single overflowed column still traverses the full chain.</p>
+<p>Large values — <code>TEXT</code> longer than 512 bytes, <code>JSON</code>, <code>VECTOR</code> — spill onto <strong>overflow pages</strong> chained via next-page pointers. This mirrors SQLite's overflow design rather than PostgreSQL's TOAST: simpler to implement, no separate storage namespace, and the common case of small rows stays fast. The trade-off: reading a single overflowed column still traverses the full chain.</p>
 <h3 id="b-trees-everywhere">B+ trees everywhere<a class="headerlink" href="#b-trees-everywhere" title="Permanent link">&para;</a></h3>
 <p>Every table and every index is an independent <strong>B+ tree</strong>:</p>
 <ul>
