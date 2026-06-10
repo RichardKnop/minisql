@@ -1601,6 +1601,14 @@ func (s Statement) validateCreateTable() error {
 		if col.Name == "" {
 			return errors.New("column name cannot be empty")
 		}
+		if col.Kind == Vector {
+			if col.Size == 0 {
+				return fmt.Errorf("column %q: VECTOR dimension must be a positive integer", col.Name)
+			}
+			if col.Size > MaxVectorDims {
+				return fmt.Errorf("column %q: VECTOR dimension %d exceeds maximum of %d", col.Name, col.Size, MaxVectorDims)
+			}
+		}
 		nameMap[col.Name] = struct{}{}
 	}
 

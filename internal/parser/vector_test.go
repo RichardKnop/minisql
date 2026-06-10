@@ -71,6 +71,30 @@ func TestParse_VectorColumn(t *testing.T) {
 	}
 }
 
+func TestParse_VectorColumnDimensionBounds(t *testing.T) {
+	t.Parallel()
+
+	t.Run("zero dimension rejected", func(t *testing.T) {
+		t.Parallel()
+		_, err := New().Parse(context.Background(), "CREATE TABLE t (id int8 primary key, v vector(0));")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "dimension")
+	})
+
+	t.Run("max dimension accepted", func(t *testing.T) {
+		t.Parallel()
+		_, err := New().Parse(context.Background(), "CREATE TABLE t (id int8 primary key, v vector(16384));")
+		require.NoError(t, err)
+	})
+
+	t.Run("dimension exceeding max rejected", func(t *testing.T) {
+		t.Parallel()
+		_, err := New().Parse(context.Background(), "CREATE TABLE t (id int8 primary key, v vector(16385));")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "exceeds maximum")
+	})
+}
+
 func TestParse_VecL2Function(t *testing.T) {
 	t.Parallel()
 

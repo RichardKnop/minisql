@@ -8,6 +8,12 @@ import (
 	"strings"
 )
 
+// MaxVectorDims is the maximum number of dimensions a VECTOR(n) column may
+// have. 16 384 covers every current embedding model with comfortable headroom
+// while preventing make([]float32, n) from attempting multi-gigabyte
+// allocations on malformed or adversarial input.
+const MaxVectorDims = 16384
+
 // VectorPointer is stored in the leaf cell for a VECTOR(n) column.
 // The 8-byte inline representation holds the dimension count and the first
 // overflow page index; actual float32 data lives on overflow pages.

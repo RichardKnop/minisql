@@ -113,11 +113,14 @@ func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 		config.WALCheckpointThreshold = thresh
 	}
 
-	// Parse wal_write_buffer_size parameter
+	// Parse wal_write_buffer_size parameter (0 = flush every commit; max 256 MiB)
 	if bufSizeStr := queryParams.Get("wal_write_buffer_size"); bufSizeStr != "" {
 		bufSize, err := strconv.Atoi(bufSizeStr)
 		if err != nil || bufSize < 0 {
 			return nil, fmt.Errorf("invalid wal_write_buffer_size parameter: must be a non-negative integer, got %q", bufSizeStr)
+		}
+		if bufSize > 256*1024*1024 {
+			return nil, fmt.Errorf("invalid wal_write_buffer_size parameter: %d exceeds maximum of 256 MiB", bufSize)
 		}
 		config.WALWriteBufferSize = bufSize
 	}
@@ -133,14 +136,11 @@ func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 		}
 	}
 
-	// Parse max_cached_pages parameter
+	// Parse max_cached_pages parameter (0 = use default)
 	if maxPagesStr := queryParams.Get("max_cached_pages"); maxPagesStr != "" {
 		maxPages, err := strconv.Atoi(maxPagesStr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid max_cached_pages parameter: must be a positive integer, got %q", maxPagesStr)
-		}
-		if maxPages < 0 {
-			return nil, fmt.Errorf("invalid max_cached_pages parameter: must be non-negative, got %d", maxPages)
+		if err != nil || maxPages < 0 {
+			return nil, fmt.Errorf("invalid max_cached_pages parameter: must be a non-negative integer (0 = use default), got %q", maxPagesStr)
 		}
 		config.MaxCachedPages = maxPages
 	}
@@ -180,23 +180,26 @@ func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 		}
 	}
 
-	// Parse encryption_key parameter (hex-encoded)
+	// Parse encryption_key parameter (hex-encoded, minimum 16 bytes / 32 hex chars)
 	if keyHex := queryParams.Get("encryption_key"); keyHex != "" {
 		key, err := hex.DecodeString(keyHex)
 		if err != nil {
 			return nil, fmt.Errorf("invalid encryption_key parameter: must be a hex-encoded string: %w", err)
 		}
-		if len(key) == 0 {
-			return nil, fmt.Errorf("invalid encryption_key parameter: key must not be empty")
+		if len(key) < 16 {
+			return nil, fmt.Errorf("invalid encryption_key parameter: key too short (%d bytes), minimum is 16 bytes (32 hex chars)", len(key))
 		}
 		config.EncryptionKey = key
 	}
 
-	// Parse sort_mem_limit parameter (bytes; 0 = disable external sort)
+	// Parse sort_mem_limit parameter (bytes; 0 = disable external sort; max 2 GiB)
 	if limitStr := queryParams.Get("sort_mem_limit"); limitStr != "" {
 		limit, err := strconv.ParseInt(limitStr, 10, 64)
 		if err != nil || limit < 0 {
 			return nil, fmt.Errorf("invalid sort_mem_limit parameter: must be a non-negative integer (bytes), got %q", limitStr)
+		}
+		if limit > 2*1024*1024*1024 {
+			return nil, fmt.Errorf("invalid sort_mem_limit parameter: %d exceeds maximum of 2 GiB", limit)
 		}
 		config.SortMemLimit = limit
 	}
