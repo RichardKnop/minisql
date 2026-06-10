@@ -2723,7 +2723,6 @@
 <li><strong>Batch insert</strong> — reduce per-row allocation overhead; bulk-load path for large inserts.</li>
 <li><strong>Memory</strong> — HNSW index build peaks at 200+ MiB for 10k rows at 768 dimensions; GROUP BY / HAVING use 10–13× more heap than SQLite's C hash table (structural Go-vs-C gap, but a custom open-address hash table would close most of it).</li>
 <li><strong>Savepoints</strong> — <code>SAVEPOINT</code> / <code>ROLLBACK TO</code> not yet implemented.</li>
-<li><strong>Observability</strong> — a <code>db.Metrics()</code> API for query counts, cache hit rate, checkpoint frequency.</li>
 </ul>
 <p>More profiling and optimisation work is planned; the benchmark suite in <code>benchmarks/</code> has a baseline file that makes regressions visible before they ship.</p>
 <hr />
@@ -2736,9 +2735,11 @@
 </span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="c1"># or</span>
 </span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>brew<span class="w"> </span>install<span class="w"> </span>minisql
 </span></code></pre></div>
-<p>Source and full documentation: 
-- <a href="https://github.com/RichardKnop/minisql">github.com/RichardKnop/minisql</a>
-- <a href="https://richardknop.github.io/minisql/">richardknop.github.io/minisql</a></p>
+<p>Source and full documentation: </p>
+<ul>
+<li><a href="https://github.com/RichardKnop/minisql">github.com/RichardKnop/minisql</a></li>
+<li><a href="https://richardknop.github.io/minisql/">richardknop.github.io/minisql</a></li>
+</ul>
 <p>Feedback, bug reports, and contributions are welcome — the project is in active development.</p>
 
 
