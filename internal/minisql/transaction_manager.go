@@ -57,6 +57,7 @@ type TransactionManager struct {
 	nextTxID             TransactionID
 	activeWriters        atomic.Int32
 	autoTxPool           sync.Pool
+	cachedReadTx         *Transaction // single reusable read-only tx; accessed under mu
 	mu                   sync.RWMutex
 	walWriteMu           sync.Mutex
 }
@@ -294,15 +295,32 @@ func (tm *TransactionManager) releaseAutoTransaction(tx *Transaction) {
 // SnapshotSeq is captured inside tm.mu so it is atomic with the transaction
 // registration — preventing a race where a write commits between the map
 // insert and the seq capture.
+// ReleaseReadOnlyTransaction returns a completed read-only transaction to the
+// single-slot cache so BeginReadOnlyTransaction can reuse it without allocating.
+// Must be called after CommitTransaction or RollbackTransaction.
+func (tm *TransactionManager) ReleaseReadOnlyTransaction(tx *Transaction) {
+	tx.resetForReuse()
+	tm.mu.Lock()
+	if tm.cachedReadTx == nil {
+		tm.cachedReadTx = tx
+	}
+	tm.mu.Unlock()
+}
+
 func (tm *TransactionManager) BeginReadOnlyTransaction(ctx context.Context) *Transaction {
 	tm.mu.Lock()
-	tx := &Transaction{
-		ID:          tm.nextTxID,
-		StartTime:   time.Now(),
-		Status:      TxActive,
-		ReadOnly:    true,
-		SnapshotSeq: tm.commitSeq,
+	var tx *Transaction
+	if tm.cachedReadTx != nil {
+		tx = tm.cachedReadTx
+		tm.cachedReadTx = nil
+	} else {
+		tx = &Transaction{}
 	}
+	tx.ID = tm.nextTxID
+	tx.StartTime = time.Now()
+	tx.Status = TxActive
+	tx.ReadOnly = true
+	tx.SnapshotSeq = tm.commitSeq
 	tm.nextTxID += 1
 	tm.transactions[tx.ID] = tx
 	tm.mu.Unlock()

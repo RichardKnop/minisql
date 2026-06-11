@@ -1612,7 +1612,7 @@ func (t *Table) selectStreamingDirectCoveringIndex(
 	if stmt.Distinct || len(plan.Scans) != 1 {
 		return StatementResult{}, false, nil
 	}
-	scan := plan.Scans[0]
+	scan := plan.resolvedScan(0)
 	if !scan.CoveringIndex {
 		return StatementResult{}, false, nil
 	}
@@ -1820,7 +1820,7 @@ func (t *Table) selectStreamingDirectRowView(
 	}
 
 	result := StatementResult{Columns: resultColumns}
-	scan := plan.Scans[0]
+	scan := plan.resolvedScan(0)
 	var tableFilter func(context.Context, RowView) (bool, error)
 	if scan.Type == ScanTypeInverted {
 		var ok bool

@@ -99,6 +99,7 @@ func (s Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (rows 
 
 	return &Rows{
 		columns:             result.Columns,
+		columnNames:         buildColumnNames(result.Columns),
 		iter:                result.Rows,
 		rowViewIter:         result.RowViews,
 		rowViewPager:        result.RowViewPager,

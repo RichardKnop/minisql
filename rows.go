@@ -15,6 +15,7 @@ import (
 // rather than directly.
 type Rows struct {
 	columns             []minisql.Column
+	columnNames         []string // precomputed from columns; nil means compute on demand
 	rowViewFieldIndexes []int
 	iter                minisql.Iterator
 	rowViewIter         minisql.RowViewIterator
@@ -26,16 +27,24 @@ type Rows struct {
 	txClosed            bool
 }
 
+// buildColumnNames extracts the Name field from each Column into a plain string slice.
+func buildColumnNames(cols []minisql.Column) []string {
+	names := make([]string, len(cols))
+	for i, c := range cols {
+		names[i] = c.Name
+	}
+	return names
+}
+
 // Columns returns the names of the columns. The number of
 // columns of the result is inferred from the length of the
 // slice. If a particular column name isn't known, an empty
 // string should be returned for that entry.
 func (r Rows) Columns() []string {
-	names := make([]string, 0, len(r.columns))
-	for _, aColumn := range r.columns {
-		names = append(names, aColumn.Name)
+	if r.columnNames != nil {
+		return r.columnNames
 	}
-	return names
+	return buildColumnNames(r.columns)
 }
 
 // Close closes the rows iterator.
@@ -212,13 +221,17 @@ func (r *Rows) closeReadTx(success bool) error {
 		return nil
 	}
 	r.txClosed = true
+	tx := r.tx
 	if !success {
-		r.txManager.RollbackTransaction(r.ctx, r.tx)
+		r.txManager.RollbackTransaction(r.ctx, tx)
+		r.txManager.ReleaseReadOnlyTransaction(tx)
 		return nil
 	}
-	if err := r.txManager.CommitTransaction(r.ctx, r.tx); err != nil {
-		r.txManager.RollbackTransaction(r.ctx, r.tx)
+	if err := r.txManager.CommitTransaction(r.ctx, tx); err != nil {
+		r.txManager.RollbackTransaction(r.ctx, tx)
+		r.txManager.ReleaseReadOnlyTransaction(tx)
 		return err
 	}
+	r.txManager.ReleaseReadOnlyTransaction(tx)
 	return nil
 }

@@ -358,7 +358,8 @@ func buildExplainResult(ctx context.Context, plan QueryPlan, table *Table, provi
 
 func (p QueryPlan) explainRows(ctx context.Context, table *Table, provider TableProvider) []explainRow {
 	rows := make([]explainRow, 0, len(p.Scans)+len(p.Joins)+1)
-	for _, scan := range p.Scans {
+	for i := range p.Scans {
+		scan := p.resolvedScan(i)
 		// Use the scan's own table for row-count estimates so join table scans
 		// are not incorrectly estimated using the base table's statistics.
 		scanTable := table
