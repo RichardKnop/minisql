@@ -286,15 +286,6 @@ func (tm *TransactionManager) releaseAutoTransaction(tx *Transaction) {
 	tm.autoTxPool.Put(tx)
 }
 
-// BeginReadOnlyTransaction starts a read-only transaction with snapshot
-// isolation.  The transaction sees a consistent snapshot of the database as
-// of the moment it begins: any write committed after this call is invisible
-// to it.  TrackRead calls are no-ops; conflict validation is skipped at
-// commit time.  Read-only transactions never return ErrTxConflict.
-//
-// SnapshotSeq is captured inside tm.mu so it is atomic with the transaction
-// registration — preventing a race where a write commits between the map
-// insert and the seq capture.
 // ReleaseReadOnlyTransaction returns a completed read-only transaction to the
 // single-slot cache so BeginReadOnlyTransaction can reuse it without allocating.
 // Must be called after CommitTransaction or RollbackTransaction.
@@ -307,6 +298,15 @@ func (tm *TransactionManager) ReleaseReadOnlyTransaction(tx *Transaction) {
 	tm.mu.Unlock()
 }
 
+// BeginReadOnlyTransaction starts a read-only transaction with snapshot
+// isolation.  The transaction sees a consistent snapshot of the database as
+// of the moment it begins: any write committed after this call is invisible
+// to it.  TrackRead calls are no-ops; conflict validation is skipped at
+// commit time.  Read-only transactions never return ErrTxConflict.
+//
+// SnapshotSeq is captured inside tm.mu so it is atomic with the transaction
+// registration — preventing a race where a write commits between the map
+// insert and the seq capture.
 func (tm *TransactionManager) BeginReadOnlyTransaction(ctx context.Context) *Transaction {
 	tm.mu.Lock()
 	var tx *Transaction
