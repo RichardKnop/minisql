@@ -112,26 +112,37 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 	default:
 		if !stmt.IsSelectCountAll() {
 			requestedFields = stmt.Fields
-			// For selectedFields, replace computed expression fields with the
-			// underlying column references they read from (so the scan fetches
-			// the right data from disk).  Plain column fields pass through
-			// unchanged.
-			selectedFields = exprSourceFields(requestedFields)
 		}
-
-		// Pre-allocate for WHERE condition fields (estimate: 2 operands per condition)
-		conditionFieldsEstimate := 0
-		for _, conditions := range stmt.Conditions {
-			conditionFieldsEstimate += len(conditions) * 2
-		}
-		if cap(selectedFields) == 0 && conditionFieldsEstimate > 0 {
-			selectedFields = make([]Field, 0, conditionFieldsEstimate)
-		}
-
-		for _, conditions := range stmt.Conditions {
-			for _, cond := range conditions {
-				selectedFields = appendOperandSourceFields(selectedFields, cond.Operand1)
-				selectedFields = appendOperandSourceFields(selectedFields, cond.Operand2)
+		// For simple streaming queries (no GROUP BY, no aggregates, no in-memory sort,
+		// no JOINs, no window functions), selectedFields is computed lazily just before
+		// selectStreamingDirect — the fast paths (covering-index, row-view) use only
+		// requestedFields and don't need it at all.
+		// For slow-path queries and COUNT(*) with WHERE filters, compute eagerly now.
+		isSimpleStreaming := !stmt.IsSelectCountAll() && !stmt.IsSelectGroupBy() &&
+			!stmt.IsSelectAggregate() && !plan.SortInMemory && len(plan.Joins) == 0 &&
+			!stmt.HasWindowFuncs()
+		if !isSimpleStreaming {
+			if !stmt.IsSelectCountAll() {
+				if stmt.cachedSelectedFields != nil {
+					selectedFields = stmt.cachedSelectedFields
+				} else {
+					selectedFields = exprSourceFields(requestedFields)
+				}
+			}
+			// Always append condition operand fields — needed for COUNT(*) sequential
+			// scan filters to read the right column data.
+			conditionFieldsEstimate := 0
+			for _, conditions := range stmt.Conditions {
+				conditionFieldsEstimate += len(conditions) * 2
+			}
+			if cap(selectedFields) == 0 && conditionFieldsEstimate > 0 {
+				selectedFields = make([]Field, 0, conditionFieldsEstimate)
+			}
+			for _, conditions := range stmt.Conditions {
+				for _, cond := range conditions {
+					selectedFields = appendOperandSourceFields(selectedFields, cond.Operand1)
+					selectedFields = appendOperandSourceFields(selectedFields, cond.Operand2)
+				}
 			}
 		}
 	}
@@ -174,6 +185,26 @@ func (t *Table) Select(ctx context.Context, stmt Statement) (StatementResult, er
 		}
 		if result, ok, err := t.selectStreamingDirectRowView(ctx, stmt, plan, requestedFields); ok || err != nil {
 			return result, err
+		}
+		// Neither fast path handled the query; compute selectedFields now for the
+		// selectStreamingDirect fallback (sequential scans, non-row-view index paths).
+		if stmt.cachedSelectedFields != nil {
+			selectedFields = stmt.cachedSelectedFields
+		} else {
+			selectedFields = exprSourceFields(requestedFields)
+			conditionFieldsEstimate := 0
+			for _, conditions := range stmt.Conditions {
+				conditionFieldsEstimate += len(conditions) * 2
+			}
+			if cap(selectedFields) == 0 && conditionFieldsEstimate > 0 {
+				selectedFields = make([]Field, 0, conditionFieldsEstimate)
+			}
+			for _, conditions := range stmt.Conditions {
+				for _, cond := range conditions {
+					selectedFields = appendOperandSourceFields(selectedFields, cond.Operand1)
+					selectedFields = appendOperandSourceFields(selectedFields, cond.Operand2)
+				}
+			}
 		}
 		return t.selectStreamingDirect(ctx, stmt, plan, selectedFields, requestedFields)
 	}
@@ -1775,9 +1806,17 @@ func (t *Table) selectStreamingDirectRowView(
 	if t.virtualRows != nil || len(plan.Scans) != 1 {
 		return StatementResult{}, false, nil
 	}
-	fieldIndexes, resultColumns, ok := rowViewProjectionPlan(t.Columns, requestedFields, stmt.TableName, stmt.TableAlias)
-	if !ok {
-		return StatementResult{}, false, nil
+	var fieldIndexes []int
+	var resultColumns []Column
+	if plan.CachedFieldIndexes != nil {
+		fieldIndexes = plan.CachedFieldIndexes
+		resultColumns = plan.CachedResultColumns
+	} else {
+		var ok bool
+		fieldIndexes, resultColumns, ok = rowViewProjectionPlan(t.Columns, requestedFields, stmt.TableName, stmt.TableAlias)
+		if !ok {
+			return StatementResult{}, false, nil
+		}
 	}
 
 	result := StatementResult{Columns: resultColumns}

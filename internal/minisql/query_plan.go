@@ -131,6 +131,14 @@ type QueryPlan struct {
 	OrderBy      []OrderBy
 	SortInMemory bool
 	SortReverse  bool
+
+	// CachedFieldIndexes and CachedResultColumns are the precomputed output of
+	// rowViewProjectionPlan for simple SELECT statements (no GROUP BY, no
+	// aggregates, no JOINs). Populated by PlanQuery before storing the plan in
+	// the plan cache so that selectStreamingDirectRowView can skip the per-call
+	// allocation on every cache hit. Both nil means not cached.
+	CachedFieldIndexes  []int
+	CachedResultColumns []Column
 }
 
 // Scan describes a single table or index scan operation within a QueryPlan.
@@ -256,6 +264,20 @@ func (t *Table) PlanQuery(ctx context.Context, stmt Statement) (QueryPlan, error
 	plan, err := t.planQueryUncached(ctx, stmt)
 	if err != nil {
 		return QueryPlan{}, err
+	}
+
+	// Precompute the row-view projection for simple SELECT statements so that
+	// selectStreamingDirectRowView can reuse it without allocating on every call.
+	// The projection depends only on t.Columns and stmt.Fields, both of which are
+	// stable for the lifetime of the cached plan (ALTER TABLE invalidates the cache).
+	// Only done when the plan itself is cacheable — ad-hoc queries without a CacheKey
+	// are one-shot and don't benefit.
+	if canCache && stmt.Kind == Select && !stmt.IsSelectCountAll() && !stmt.IsSelectGroupBy() &&
+		!stmt.IsSelectAggregate() && len(stmt.Joins) == 0 {
+		if fi, rc, ok := rowViewProjectionPlan(t.Columns, stmt.Fields, stmt.TableName, stmt.TableAlias); ok {
+			plan.CachedFieldIndexes = fi
+			plan.CachedResultColumns = rc
+		}
 	}
 
 	if canCache && (!hasConditions || planIsCacheableWithConditions(plan)) {

@@ -35,6 +35,7 @@ func TestDatabase_PrepareStatementCaching(t *testing.T) {
 	}
 	stmt1Want := stmt1Mock
 	stmt1Want.CacheKey = query1
+	stmt1Want.cachedSelectedFields = []Field{{Name: "id"}}
 
 	query2 := `SELECT * FROM posts WHERE user_id = ?`
 	stmt2Mock := Statement{
@@ -48,6 +49,7 @@ func TestDatabase_PrepareStatementCaching(t *testing.T) {
 	}
 	stmt2Want := stmt2Mock
 	stmt2Want.CacheKey = query2
+	stmt2Want.cachedSelectedFields = []Field{{Name: "user_id"}}
 
 	mockParser.On("Parse", ctx, query1).Return([]Statement{stmt1Mock}, nil).Once()
 
