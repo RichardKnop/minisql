@@ -53,6 +53,24 @@ func anyToOperand(v any) Operand {
 	}
 }
 
+// conditionsCanSkipFolding returns true when every condition has at least one
+// field operand and neither operand is OperandExpr, meaning there is no
+// constant sub-expression to fold.  Called as a fast-path to avoid iterating
+// through all conditions when folding is guaranteed to be a no-op.
+func conditionsCanSkipFolding(conds OneOrMore) bool {
+	for _, group := range conds {
+		for _, cond := range group {
+			if cond.Operand1.Type == OperandExpr || cond.Operand2.Type == OperandExpr {
+				return false
+			}
+			if !cond.Operand1.IsField() && !cond.Operand2.IsField() {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // FoldConditions evaluates constant sub-expressions in conds, replacing
 // OperandExpr operands with concrete literals where possible.
 //
@@ -62,6 +80,9 @@ func anyToOperand(v any) Operand {
 //   - (nil, true, nil):  every AND group was pruned; the WHERE can never match.
 //   - (_, _, err):       an expression evaluation error occurred.
 func FoldConditions(conds OneOrMore) (result OneOrMore, alwaysFalse bool, err error) {
+	if conditionsCanSkipFolding(conds) {
+		return conds, false, nil
+	}
 	for _, group := range conds {
 		folded, groupFalse, groupTrue, ferr := foldAndGroup(group)
 		if ferr != nil {

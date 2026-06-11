@@ -336,6 +336,7 @@ func (c *Conn) QueryContext(ctx context.Context, query string, args []driver.Nam
 
 	return &Rows{
 		columns:             result.Columns,
+		columnNames:         buildColumnNames(result.Columns),
 		iter:                result.Rows,
 		rowViewIter:         result.RowViews,
 		rowViewPager:        result.RowViewPager,
@@ -401,18 +402,22 @@ func (c *Conn) executeQueryStatement(ctx context.Context, stmt minisql.Statement
 	result, err := c.db.ExecuteStatement(txCtx, stmt)
 	if err != nil {
 		txManager.RollbackTransaction(txCtx, tx)
+		txManager.ReleaseReadOnlyTransaction(tx)
 		return minisql.StatementResult{}, ctx, nil, err
 	}
 
 	if len(result.RowViewFieldIndexes) > 0 {
+		// Streaming row-views: tx stays alive until Rows.closeReadTx releases it.
 		return result, txCtx, tx, nil
 	}
 
 	if err := txManager.CommitTransaction(txCtx, tx); err != nil {
 		txManager.RollbackTransaction(txCtx, tx)
+		txManager.ReleaseReadOnlyTransaction(tx)
 		return minisql.StatementResult{}, ctx, nil, err
 	}
 
+	txManager.ReleaseReadOnlyTransaction(tx)
 	return result, ctx, nil, nil
 }
 

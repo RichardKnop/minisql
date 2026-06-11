@@ -139,46 +139,46 @@ All numbers are from an Apple M1 Max running darwin/arm64 and Go 1.26.3. The SQL
 
 | Operation | MiniSQL | SQLite | Ratio |
 |---|---|---|---|
-| Insert | 12.67 µs | 54.64 µs | **0.23×** |
-| Update by PK | 9.81 µs | 47.98 µs | **0.20×** |
-| Delete by PK | 18.48 µs | 103.2 µs | **0.18×** |
-| ON CONFLICT DO UPDATE | 9.08 µs | 43.20 µs | **0.21×** |
-| Foreign key insert | 12.28 µs | 57.78 µs | **0.21×** |
+| Insert | 13.2 µs | 103 µs | **0.13×** |
+| Update by PK | 8.08 µs | 39.4 µs | **0.20×** |
+| Delete by PK | 14.6 µs | 58.1 µs | **0.25×** |
+| ON CONFLICT DO UPDATE | 7.69 µs | 56.0 µs | **0.14×** |
+| Foreign key insert | 11.0 µs | 46.4 µs | **0.24×** |
 
-Single-row writes are consistently **4–5× faster**. MiniSQL's OCC model takes no locks during execution and the per-transaction commit path is lightweight for single-page mutations. modernc/sqlite carries more per-statement bookkeeping overhead from its SQLite heritage.
+Single-row writes are consistently **4–8× faster**. MiniSQL's OCC model takes no locks during execution and the per-transaction commit path is lightweight for single-page mutations. modernc/sqlite carries more per-statement bookkeeping overhead from its SQLite heritage.
 
 ### Analytical queries
 
 | Operation | MiniSQL | SQLite | Ratio |
 |---|---|---|---|
-| Full table scan (10k rows) | 4.42 ms | 6.12 ms | **0.72×** |
-| GROUP BY aggregate | 987 µs | 2.31 ms | **0.43×** |
-| HAVING filter | 822 µs | 2.10 ms | **0.39×** |
-| DISTINCT high cardinality | 3.17 ms | 6.39 ms | **0.50×** |
-| Subquery IN list | 2.90 ms | 4.10 ms | **0.71×** |
-| Inner join, low selectivity | 130 µs | 861 µs | **0.15×** |
+| Full table scan (10k rows) | 3.75 ms | 5.30 ms | **0.71×** |
+| GROUP BY aggregate | 989 µs | 2.46 ms | **0.40×** |
+| HAVING filter | 814 µs | 2.26 ms | **0.36×** |
+| DISTINCT high cardinality | 3.37 ms | 6.42 ms | **0.52×** |
+| Subquery IN list | 3.04 ms | 3.72 ms | **0.82×** |
+| Inner join, low selectivity | 113 µs | 765 µs | **0.15×** |
 
 ### Full-text search
 
 | Operation | MiniSQL | SQLite FTS5 | Ratio |
 |---|---|---|---|
-| Common-term search | 6.13 µs | 70.71 µs | **0.09×** |
-| Multi-term AND | 20.59 µs | 39.08 µs | **0.53×** |
-| Insert with FTS index | 41.71 µs | 112.5 µs | **0.37×** |
-| Update with FTS index | 44.66 µs | 133.9 µs | **0.33×** |
-| Delete with FTS index | 57.07 µs | 175.3 µs | **0.33×** |
+| Common-term search | 4.36 µs | 64.2 µs | **0.07×** |
+| Multi-term AND | 15.3 µs | 35.0 µs | **0.44×** |
+| Insert with FTS index | 39.1 µs | 94.1 µs | **0.42×** |
+| Update with FTS index | 37.2 µs | 113.4 µs | **0.33×** |
+| Delete with FTS index | 92.6 µs | 210.5 µs | **0.44×** |
 
 ### Where SQLite wins
 
 | Operation | MiniSQL | SQLite | Ratio |
 |---|---|---|---|
-| Point scan (PK lookup) | 6.39 µs | 4.15 µs | 1.54× |
-| Insert batch (100 rows) | 437 µs | 309 µs | 1.41× |
-| Insert prepared batch | 403 µs | 250 µs | 1.61× |
-| WAL checkpoint | 357 µs | 172 µs | 2.08× |
-| VACUUM | 2.15 ms | 584 µs | 3.68× |
+| Point scan (PK lookup) | 4.33 µs | 3.44 µs | 1.3× |
+| Insert batch (100 rows) | 360 µs | 241 µs | 1.49× |
+| Insert prepared batch | 358 µs | 249 µs | 1.44× |
+| WAL checkpoint | 204 µs | 102 µs | 2.0× |
+| VACUUM | 1.66 ms | 307 µs | 5.4× |
 
-Point scans and batch inserts favour SQLite because its page-level data layout and tight column scanning loop have lower per-row overhead than MiniSQL's row materialisation path. VACUUM is the largest gap: MiniSQL rebuilds the compacted database through normal write paths (page-by-page via the B+ tree write API) whereas SQLite can do a more direct block-level copy. This is a known optimisation target.
+Point scans and batch inserts favour SQLite because its page-level data layout and tight column scanning loop have lower per-row overhead than MiniSQL's row materialisation path. The point-scan ratio improved from 1.5× to 1.3× after Tier-1/Tier-2 allocation optimisations. VACUUM is the largest gap: MiniSQL rebuilds the compacted database through normal write paths (page-by-page via the B+ tree write API) whereas SQLite can do a more direct block-level copy. This is a known optimisation target.
 
 ---
 

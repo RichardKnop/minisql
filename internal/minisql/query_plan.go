@@ -139,6 +139,22 @@ type QueryPlan struct {
 	// allocation on every cache hit. Both nil means not cached.
 	CachedFieldIndexes  []int
 	CachedResultColumns []Column
+
+	// RuntimeIndexKeys holds per-execution IndexKeys for ScanTypeIndexPoint scans
+	// that were rehydrated from a cached plan.  Stored here rather than baked into
+	// Scans so that the shared cached []Scan slice is never mutated.
+	// resolvedScan(i) merges RuntimeIndexKeys[i] with Scans[i] at call time.
+	// nil means all IndexKeys are already embedded in Scans (non-cached path).
+	RuntimeIndexKeys [][]any
+}
+
+// resolvedScan returns Scans[i] with RuntimeIndexKeys[i] applied when set.
+func (p QueryPlan) resolvedScan(i int) Scan {
+	scan := p.Scans[i]
+	if i < len(p.RuntimeIndexKeys) && p.RuntimeIndexKeys[i] != nil {
+		scan.IndexKeys = p.RuntimeIndexKeys[i]
+	}
+	return scan
 }
 
 // Scan describes a single table or index scan operation within a QueryPlan.
@@ -327,29 +343,30 @@ func planIsCacheableWithConditions(plan QueryPlan) bool {
 	return true
 }
 
-// rehydratePlanIndexKeys returns a copy of plan with the IndexKeys on each
-// ScanTypeIndexPoint scan rebuilt from the current bound stmt.Conditions.
+// rehydratePlanIndexKeys returns a copy of plan with RuntimeIndexKeys populated
+// for each ScanTypeIndexPoint scan from the current bound stmt.Conditions.
 // plan.Scans[i] is assumed to correspond to stmt.Conditions[i] — which holds
 // for plans produced by setIndexScans (one scan per OR group, in group order).
+// Keys are stored in RuntimeIndexKeys rather than baking them into a Scans copy,
+// avoiding the 264-byte-per-scan struct copy on the hot path.
 // Returns (plan, false) if re-hydration cannot proceed, signalling a fallback
 // to a full re-plan.
 func rehydratePlanIndexKeys(plan QueryPlan, stmt Statement, t *Table) (QueryPlan, bool) {
-	scans := make([]Scan, len(plan.Scans))
-	copy(scans, plan.Scans)
-	for i := range scans {
-		if scans[i].Type != ScanTypeIndexPoint {
+	runtimeKeys := make([][]any, len(plan.Scans))
+	for i, scan := range plan.Scans {
+		if scan.Type != ScanTypeIndexPoint {
 			continue
 		}
 		if i >= len(stmt.Conditions) {
 			return plan, false
 		}
-		keys := extractScanIndexKeys(t, scans[i], stmt.Conditions[i])
+		keys := extractScanIndexKeys(t, scan, stmt.Conditions[i])
 		if keys == nil {
 			return plan, false
 		}
-		scans[i].IndexKeys = keys
+		runtimeKeys[i] = keys
 	}
-	plan.Scans = scans
+	plan.RuntimeIndexKeys = runtimeKeys
 	return plan, true
 }
 
@@ -440,8 +457,12 @@ func applyScanLimit(plan QueryPlan, stmt Statement) QueryPlan {
 	copy(scans, plan.Scans)
 	for i := range scans {
 		scans[i].ScanLimit = scanLimit
+		if i < len(plan.RuntimeIndexKeys) && plan.RuntimeIndexKeys[i] != nil {
+			scans[i].IndexKeys = plan.RuntimeIndexKeys[i]
+		}
 	}
 	plan.Scans = scans
+	plan.RuntimeIndexKeys = nil
 	return plan
 }
 
@@ -1793,39 +1814,41 @@ func (p QueryPlan) Execute(ctx context.Context, provider TableProvider, selected
 	}
 
 	if len(p.Scans) == 1 {
-		t, ok := provider.GetTable(ctx, p.Scans[0].TableName)
+		scan0 := p.resolvedScan(0)
+		t, ok := provider.GetTable(ctx, scan0.TableName)
 		if !ok {
-			return minisqlErrors.ErrNoSuchTable{Name: p.Scans[0].TableName}
+			return minisqlErrors.ErrNoSuchTable{Name: scan0.TableName}
 		}
 
-		switch p.Scans[0].Type {
+		switch scan0.Type {
 		case ScanTypeIndexAll:
-			return t.indexScanAll(ctx, p, p.Scans[0], selectedFields, out)
+			return t.indexScanAll(ctx, p, scan0, selectedFields, out)
 		case ScanTypeIndexRange:
-			return t.indexRangeScan(ctx, p, p.Scans[0], selectedFields, out)
+			return t.indexRangeScan(ctx, p, scan0, selectedFields, out)
 		case ScanTypeIndexPoint:
-			return t.indexPointScan(ctx, p.Scans[0], selectedFields, out)
+			return t.indexPointScan(ctx, scan0, selectedFields, out)
 		case ScanTypeIndexFirst:
-			return t.indexEndpointScan(ctx, p.Scans[0], selectedFields, out, false)
+			return t.indexEndpointScan(ctx, scan0, selectedFields, out, false)
 		case ScanTypeIndexLast:
-			return t.indexEndpointScan(ctx, p.Scans[0], selectedFields, out, true)
+			return t.indexEndpointScan(ctx, scan0, selectedFields, out, true)
 		case ScanTypeIndexIntersect:
-			return t.indexIntersectScan(ctx, p.Scans[0], selectedFields, out)
+			return t.indexIntersectScan(ctx, scan0, selectedFields, out)
 		case ScanTypeIndexUnion:
-			return t.indexUnionScan(ctx, p.Scans[0], selectedFields, out)
+			return t.indexUnionScan(ctx, scan0, selectedFields, out)
 		case ScanTypeFullText:
-			return t.fullTextIndexScan(ctx, p.Scans[0], selectedFields, out)
+			return t.fullTextIndexScan(ctx, scan0, selectedFields, out)
 		case ScanTypeInverted:
-			return t.invertedIndexScan(ctx, p.Scans[0], selectedFields, out)
+			return t.invertedIndexScan(ctx, scan0, selectedFields, out)
 		case ScanTypeHNSW:
-			return t.hnswIndexScan(ctx, p.Scans[0], selectedFields, out)
+			return t.hnswIndexScan(ctx, scan0, selectedFields, out)
 		case ScanTypeSequential:
-			return t.sequentialScan(ctx, p.Scans[0], selectedFields, out)
+			return t.sequentialScan(ctx, scan0, selectedFields, out)
 		default:
-			return fmt.Errorf("unhandled scan type in single scan: %d", p.Scans[0].Type)
+			return fmt.Errorf("unhandled scan type in single scan: %d", scan0.Type)
 		}
 	}
-	for _, scan := range p.Scans {
+	for i := range p.Scans {
+		scan := p.resolvedScan(i)
 		t, ok := provider.GetTable(ctx, scan.TableName)
 		if !ok {
 			return minisqlErrors.ErrNoSuchTable{Name: scan.TableName}
