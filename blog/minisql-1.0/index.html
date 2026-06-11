@@ -2531,37 +2531,37 @@
 <tbody>
 <tr>
 <td>Insert</td>
-<td>12.67 µs</td>
-<td>54.64 µs</td>
-<td><strong>0.23×</strong></td>
+<td>13.2 µs</td>
+<td>103 µs</td>
+<td><strong>0.13×</strong></td>
 </tr>
 <tr>
 <td>Update by PK</td>
-<td>9.81 µs</td>
-<td>47.98 µs</td>
+<td>8.08 µs</td>
+<td>39.4 µs</td>
 <td><strong>0.20×</strong></td>
 </tr>
 <tr>
 <td>Delete by PK</td>
-<td>18.48 µs</td>
-<td>103.2 µs</td>
-<td><strong>0.18×</strong></td>
+<td>14.6 µs</td>
+<td>58.1 µs</td>
+<td><strong>0.25×</strong></td>
 </tr>
 <tr>
 <td>ON CONFLICT DO UPDATE</td>
-<td>9.08 µs</td>
-<td>43.20 µs</td>
-<td><strong>0.21×</strong></td>
+<td>7.69 µs</td>
+<td>56.0 µs</td>
+<td><strong>0.14×</strong></td>
 </tr>
 <tr>
 <td>Foreign key insert</td>
-<td>12.28 µs</td>
-<td>57.78 µs</td>
-<td><strong>0.21×</strong></td>
+<td>11.0 µs</td>
+<td>46.4 µs</td>
+<td><strong>0.24×</strong></td>
 </tr>
 </tbody>
 </table>
-<p>Single-row writes are consistently <strong>4–5× faster</strong>. MiniSQL's OCC model takes no locks during execution and the per-transaction commit path is lightweight for single-page mutations. modernc/sqlite carries more per-statement bookkeeping overhead from its SQLite heritage.</p>
+<p>Single-row writes are consistently <strong>4–8× faster</strong>. MiniSQL's OCC model takes no locks during execution and the per-transaction commit path is lightweight for single-page mutations. modernc/sqlite carries more per-statement bookkeeping overhead from its SQLite heritage.</p>
 <h3 id="analytical-queries">Analytical queries<a class="headerlink" href="#analytical-queries" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -2575,38 +2575,38 @@
 <tbody>
 <tr>
 <td>Full table scan (10k rows)</td>
-<td>4.42 ms</td>
-<td>6.12 ms</td>
-<td><strong>0.72×</strong></td>
-</tr>
-<tr>
-<td>GROUP BY aggregate</td>
-<td>987 µs</td>
-<td>2.31 ms</td>
-<td><strong>0.43×</strong></td>
-</tr>
-<tr>
-<td>HAVING filter</td>
-<td>822 µs</td>
-<td>2.10 ms</td>
-<td><strong>0.39×</strong></td>
-</tr>
-<tr>
-<td>DISTINCT high cardinality</td>
-<td>3.17 ms</td>
-<td>6.39 ms</td>
-<td><strong>0.50×</strong></td>
-</tr>
-<tr>
-<td>Subquery IN list</td>
-<td>2.90 ms</td>
-<td>4.10 ms</td>
+<td>3.75 ms</td>
+<td>5.30 ms</td>
 <td><strong>0.71×</strong></td>
 </tr>
 <tr>
+<td>GROUP BY aggregate</td>
+<td>989 µs</td>
+<td>2.46 ms</td>
+<td><strong>0.40×</strong></td>
+</tr>
+<tr>
+<td>HAVING filter</td>
+<td>814 µs</td>
+<td>2.26 ms</td>
+<td><strong>0.36×</strong></td>
+</tr>
+<tr>
+<td>DISTINCT high cardinality</td>
+<td>3.37 ms</td>
+<td>6.42 ms</td>
+<td><strong>0.52×</strong></td>
+</tr>
+<tr>
+<td>Subquery IN list</td>
+<td>3.04 ms</td>
+<td>3.72 ms</td>
+<td><strong>0.82×</strong></td>
+</tr>
+<tr>
 <td>Inner join, low selectivity</td>
-<td>130 µs</td>
-<td>861 µs</td>
+<td>113 µs</td>
+<td>765 µs</td>
 <td><strong>0.15×</strong></td>
 </tr>
 </tbody>
@@ -2624,33 +2624,33 @@
 <tbody>
 <tr>
 <td>Common-term search</td>
-<td>6.13 µs</td>
-<td>70.71 µs</td>
-<td><strong>0.09×</strong></td>
+<td>4.36 µs</td>
+<td>64.2 µs</td>
+<td><strong>0.07×</strong></td>
 </tr>
 <tr>
 <td>Multi-term AND</td>
-<td>20.59 µs</td>
-<td>39.08 µs</td>
-<td><strong>0.53×</strong></td>
+<td>15.3 µs</td>
+<td>35.0 µs</td>
+<td><strong>0.44×</strong></td>
 </tr>
 <tr>
 <td>Insert with FTS index</td>
-<td>41.71 µs</td>
-<td>112.5 µs</td>
-<td><strong>0.37×</strong></td>
+<td>39.1 µs</td>
+<td>94.1 µs</td>
+<td><strong>0.42×</strong></td>
 </tr>
 <tr>
 <td>Update with FTS index</td>
-<td>44.66 µs</td>
-<td>133.9 µs</td>
+<td>37.2 µs</td>
+<td>113.4 µs</td>
 <td><strong>0.33×</strong></td>
 </tr>
 <tr>
 <td>Delete with FTS index</td>
-<td>57.07 µs</td>
-<td>175.3 µs</td>
-<td><strong>0.33×</strong></td>
+<td>92.6 µs</td>
+<td>210.5 µs</td>
+<td><strong>0.44×</strong></td>
 </tr>
 </tbody>
 </table>
@@ -2667,37 +2667,37 @@
 <tbody>
 <tr>
 <td>Point scan (PK lookup)</td>
-<td>6.39 µs</td>
-<td>4.15 µs</td>
-<td>1.54×</td>
+<td>4.33 µs</td>
+<td>3.44 µs</td>
+<td>1.3×</td>
 </tr>
 <tr>
 <td>Insert batch (100 rows)</td>
-<td>437 µs</td>
-<td>309 µs</td>
-<td>1.41×</td>
+<td>360 µs</td>
+<td>241 µs</td>
+<td>1.49×</td>
 </tr>
 <tr>
 <td>Insert prepared batch</td>
-<td>403 µs</td>
-<td>250 µs</td>
-<td>1.61×</td>
+<td>358 µs</td>
+<td>249 µs</td>
+<td>1.44×</td>
 </tr>
 <tr>
 <td>WAL checkpoint</td>
-<td>357 µs</td>
-<td>172 µs</td>
-<td>2.08×</td>
+<td>204 µs</td>
+<td>102 µs</td>
+<td>2.0×</td>
 </tr>
 <tr>
 <td>VACUUM</td>
-<td>2.15 ms</td>
-<td>584 µs</td>
-<td>3.68×</td>
+<td>1.66 ms</td>
+<td>307 µs</td>
+<td>5.4×</td>
 </tr>
 </tbody>
 </table>
-<p>Point scans and batch inserts favour SQLite because its page-level data layout and tight column scanning loop have lower per-row overhead than MiniSQL's row materialisation path. VACUUM is the largest gap: MiniSQL rebuilds the compacted database through normal write paths (page-by-page via the B+ tree write API) whereas SQLite can do a more direct block-level copy. This is a known optimisation target.</p>
+<p>Point scans and batch inserts favour SQLite because its page-level data layout and tight column scanning loop have lower per-row overhead than MiniSQL's row materialisation path. The point-scan ratio improved from 1.5× to 1.3× after Tier-1/Tier-2 allocation optimisations. VACUUM is the largest gap: MiniSQL rebuilds the compacted database through normal write paths (page-by-page via the B+ tree write API) whereas SQLite can do a more direct block-level copy. This is a known optimisation target.</p>
 <hr />
 <h2 id="honest-trade-offs">Honest Trade-offs<a class="headerlink" href="#honest-trade-offs" title="Permanent link">&para;</a></h2>
 <p><strong>Use MiniSQL if:</strong></p>
