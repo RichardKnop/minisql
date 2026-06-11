@@ -461,6 +461,11 @@ type Statement struct {
 	// prepareInsert path. It is only set for simple prepared INSERT statements
 	// where binding can be safely delayed until table columns are available.
 	boundArgs []any
+	// cachedSelectedFields is the precomputed "selectedFields" for simple SELECT
+	// statements — the union of projected column fields and WHERE condition column
+	// references. Populated at PrepareStatement time; nil means not cached.
+	// The slice is never mutated during execution, so it is safe to share across clones.
+	cachedSelectedFields []Field
 }
 
 // HasWindowFuncs reports whether the SELECT field list contains at least one
@@ -473,6 +478,47 @@ func (s Statement) HasWindowFuncs() bool {
 		}
 	}
 	return false
+}
+
+// selectFieldsNeedCopy reports whether BindArguments will write to stmt.Fields
+// for a SELECT statement. This is only true when a SELECT field expression
+// contains a placeholder (e.g. VEC_L2(embedding, ?)).
+func (s Statement) selectFieldsNeedCopy() bool {
+	for _, f := range s.Fields {
+		if countExprPlaceholders(f.Expr) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// precomputeSelectedFields populates cachedSelectedFields for simple SELECT
+// statements where the set of columns needed from disk is fully determined by
+// the static query structure (no sub-expressions, no subqueries, no JOINs).
+// Called once at PrepareStatement time; the result is shared across clones.
+func (s *Statement) precomputeSelectedFields() {
+	if s.Kind != Select || s.IsSelectCountAll() || s.IsSelectGroupBy() || s.IsSelectAggregate() {
+		return
+	}
+	if s.FromSubquery != nil || len(s.CTEs) > 0 || len(s.Joins) > 0 || len(s.Unions) > 0 {
+		return
+	}
+	for _, group := range s.Conditions {
+		for _, cond := range group {
+			if cond.Operand1.Type == OperandExpr || cond.Operand2.Type == OperandExpr ||
+				cond.Operand2.Type == OperandSubquery {
+				return
+			}
+		}
+	}
+	sf := exprSourceFields(s.Fields)
+	for _, group := range s.Conditions {
+		for _, cond := range group {
+			sf = appendOperandSourceFields(sf, cond.Operand1)
+			sf = appendOperandSourceFields(sf, cond.Operand2)
+		}
+	}
+	s.cachedSelectedFields = sf
 }
 
 // NumPlaceholders returns the number of placeholder parameters (?) in the statement.
@@ -615,10 +661,14 @@ func (s Statement) Clone() Statement {
 	// reference to avoid an allocation that immediately becomes dead.
 	// For UPDATE, BindArguments only reads Fields (to find which Updates keys hold
 	// placeholders) and never writes to it — share the reference too.
-	// For all other kinds, deep-copy so that downstream mutations don't corrupt
-	// the prepared statement.
+	// For DELETE, Fields is never accessed during execution — share.
+	// For SELECT, BindArguments only writes to Fields when a SELECT expression
+	// itself contains a placeholder (e.g. VEC_L2(v, ?)). In the common case of
+	// plain column fields with no embedded placeholders, Fields is read-only and
+	// safe to share.
 	var fields []Field
-	if s.Kind == Insert || s.Kind == Update {
+	if s.Kind == Insert || s.Kind == Update || s.Kind == Delete ||
+		(s.Kind == Select && !s.selectFieldsNeedCopy()) {
 		fields = s.Fields
 	} else {
 		fields = make([]Field, len(s.Fields))
@@ -670,8 +720,9 @@ func (s Statement) Clone() Statement {
 		AlterColumnName:    s.AlterColumnName,
 		NewColumnName:      s.NewColumnName,
 		NewTableName:       s.NewTableName,
-		insertCache:        s.insertCache,
-		boundArgs:          s.boundArgs,
+		insertCache:          s.insertCache,
+		boundArgs:            s.boundArgs,
+		cachedSelectedFields: s.cachedSelectedFields, // immutable; safe to share
 	}
 	for i := range s.Inserts {
 		stmt.Inserts[i] = make([]OptionalValue, len(s.Inserts[i]))

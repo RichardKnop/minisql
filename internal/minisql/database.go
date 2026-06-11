@@ -250,6 +250,10 @@ func (d *Database) PrepareStatement(ctx context.Context, query string) (Statemen
 		stmt.insertCache = &insertPrepCache{}
 	}
 
+	// Precompute the selected-fields slice for simple SELECT statements so that
+	// repeated executions of the prepared statement avoid recomputing it each time.
+	stmt.precomputeSelectedFields()
+
 	// Cache the parsed statement
 	d.stmtCache.Put(query, stmt, true)
 
