@@ -54,7 +54,7 @@ Existing rows receive a freshly generated UUID for the new column.
 
 `GEN_RANDOM_UUID()` produces **version 4** UUIDs — 122 bits of cryptographic randomness with 6 fixed version/variant bits. This matches PostgreSQL's `gen_random_uuid()` behaviour.
 
-The alternative is **version 7** (RFC 9562, 2024), which embeds a Unix millisecond timestamp in the high bits, making values monotonically increasing within the same millisecond. This improves B-tree insertion locality (sequential writes avoid random page splits) but leaks creation-time information. MiniSQL currently generates v4; if you need sorted identifiers consider using `INT8 PRIMARY KEY AUTOINCREMENT` or supplying v7 UUIDs from your application layer.
+The alternative is **version 7** (RFC 9562, 2024), which embeds a Unix millisecond timestamp in the high bits, making values monotonically increasing within the same millisecond. This improves B-tree insertion locality (sequential writes avoid random page splits) but leaks creation-time information. The `UUID` column type is version-agnostic — it stores any valid 16-byte UUID regardless of version — so you can supply v7 UUIDs from your application layer and insert them normally. `GEN_RANDOM_UUID()` specifically produces v4; if you need the B-tree locality benefit of v7, generate them in your application and pass them as bind parameters.
 
 ### Return type
 
