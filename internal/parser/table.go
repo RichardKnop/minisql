@@ -211,6 +211,14 @@ func (p *parserItem) doParseCreateTable() error {
 			p.pop()
 			return nil
 		}
+		if strings.ToUpper(p.peek()) == "GEN_RANDOM_UUID()" {
+			if p.Columns[len(p.Columns)-1].Kind != minisql.UUID {
+				return p.errorf("at CREATE TABLE: GEN_RANDOM_UUID() default value is only valid for UUID columns")
+			}
+			p.Columns[len(p.Columns)-1].DefaultValueGenRandUUID = true
+			p.pop()
+			return nil
+		}
 		defaultValue, n := p.peekValue()
 		if n == 0 {
 			return p.wrapErr(errCreateTableDefaultValueExpected)

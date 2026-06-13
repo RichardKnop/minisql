@@ -99,13 +99,20 @@ func (p *parserItem) doParseAlterTable() error {
 			p.pop()
 		case "DEFAULT":
 			p.pop()
-			if strings.ToUpper(p.peek()) == "NOW()" {
+			switch strings.ToUpper(p.peek()) {
+			case "NOW()":
 				if p.Columns[len(p.Columns)-1].Kind != minisql.Timestamp {
 					return p.errorf("at ALTER TABLE ADD COLUMN: NOW() default is only valid for TIMESTAMP columns")
 				}
 				p.Columns[len(p.Columns)-1].DefaultValueNow = true
 				p.pop()
-			} else {
+			case "GEN_RANDOM_UUID()":
+				if p.Columns[len(p.Columns)-1].Kind != minisql.UUID {
+					return p.errorf("at ALTER TABLE ADD COLUMN: GEN_RANDOM_UUID() default is only valid for UUID columns")
+				}
+				p.Columns[len(p.Columns)-1].DefaultValueGenRandUUID = true
+				p.pop()
+			default:
 				defaultValue, n := p.peekValue()
 				if n == 0 {
 					return p.errorf("at ALTER TABLE ADD COLUMN: expected default value after DEFAULT")

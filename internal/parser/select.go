@@ -53,7 +53,7 @@ func (p *parserItem) doParseSelect() error {
 		upperIdent := strings.ToUpper(identifier)
 		isAggFunc := aggregateKindFromToken(upperIdent) != 0
 
-		if !isIdentifier(identifier) && identifier != "*" && upperIdent != "COUNT(*)" && !isAggFunc && upperIdent != "NOW()" {
+		if !isIdentifier(identifier) && identifier != "*" && upperIdent != "COUNT(*)" && !isAggFunc && upperIdent != "NOW()" && upperIdent != "GEN_RANDOM_UUID()" {
 			return p.wrapErr(errSelectWithoutFields)
 		}
 

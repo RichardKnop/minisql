@@ -48,7 +48,7 @@ var reservedWords = []string{
 	// statement other
 	"*", "COUNT(*)", "SUM(", "AVG(", "MIN(", "MAX(", "GROUP BY", "HAVING", "ORDER BY", "LIMIT", "OFFSET",
 	"PRIMARY KEY AUTOINCREMENT", "PRIMARY KEY", "DEFAULT", "NOT NULL", "NULL", "UNIQUE",
-	"IS NULL", "IS NOT NULL", "NOT BETWEEN", "NOT LIKE", "BETWEEN", "LIKE", "TRUE", "FALSE", "NOW()",
+	"IS NULL", "IS NOT NULL", "NOT BETWEEN", "NOT LIKE", "BETWEEN", "LIKE", "TRUE", "FALSE", "NOW()", "GEN_RANDOM_UUID()",
 	"CHECK",
 	"IF NOT EXISTS", "WHERE", "FROM", "SET NULL", "SET", "ASC", "DESC", "AS",
 	"BEGIN", "COMMIT", "ROLLBACK", "ANALYZE", "VACUUM",

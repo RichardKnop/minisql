@@ -1,5 +1,126 @@
 package e2etests
 
+import (
+	"regexp"
+)
+
+var uuidRegexp = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+func (s *TestSuite) TestGenRandomUUID() {
+	_, err := s.db.Exec(`create table accounts (
+		id      uuid    not null default gen_random_uuid(),
+		name    text    not null,
+		ref_id  uuid
+	);`)
+	s.Require().NoError(err)
+
+	s.Run("default_generates_uuid_on_omit", func() {
+		_, err := s.db.Exec(`insert into accounts (name) values (?)`, "Alice")
+		s.Require().NoError(err)
+
+		rows, err := s.db.Query(`select id, name from accounts where name = ?`, "Alice")
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		var gotID, gotName string
+		s.Require().NoError(rows.Scan(&gotID, &gotName))
+		s.Equal("Alice", gotName)
+		s.Regexp(uuidRegexp, gotID, "generated UUID must be valid v4")
+	})
+
+	s.Run("explicit_gen_random_uuid_in_values", func() {
+		_, err := s.db.Exec(`insert into accounts (id, name) values (gen_random_uuid(), ?)`, "Bob")
+		s.Require().NoError(err)
+
+		rows, err := s.db.Query(`select id from accounts where name = ?`, "Bob")
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		var gotID string
+		s.Require().NoError(rows.Scan(&gotID))
+		s.Regexp(uuidRegexp, gotID, "explicit GEN_RANDOM_UUID() must produce valid v4 UUID")
+	})
+
+	s.Run("update_set_gen_random_uuid", func() {
+		_, err := s.db.Exec(`insert into accounts (name) values (?)`, "Carol")
+		s.Require().NoError(err)
+
+		_, err = s.db.Exec(`update accounts set ref_id = gen_random_uuid() where name = ?`, "Carol")
+		s.Require().NoError(err)
+
+		rows, err := s.db.Query(`select ref_id from accounts where name = ?`, "Carol")
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		var gotRefID string
+		s.Require().NoError(rows.Scan(&gotRefID))
+		s.Regexp(uuidRegexp, gotRefID, "UPDATE SET gen_random_uuid() must produce valid v4 UUID")
+	})
+
+	s.Run("select_gen_random_uuid_scalar", func() {
+		// SELECT gen_random_uuid() as an expression alongside a real column.
+		rows, err := s.db.Query(`select gen_random_uuid() from accounts where name = ?`, "Alice")
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		var gotID string
+		s.Require().NoError(rows.Scan(&gotID))
+		s.Regexp(uuidRegexp, gotID, "SELECT gen_random_uuid() must produce valid v4 UUID")
+	})
+
+	s.Run("two_inserts_get_distinct_uuids", func() {
+		_, err := s.db.Exec(`insert into accounts (name) values (?)`, "Dave")
+		s.Require().NoError(err)
+		_, err = s.db.Exec(`insert into accounts (name) values (?)`, "Eve")
+		s.Require().NoError(err)
+
+		rows, err := s.db.Query(`select id from accounts where name = ? or name = ? order by name`, "Dave", "Eve")
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		var ids []string
+		for rows.Next() {
+			var id string
+			s.Require().NoError(rows.Scan(&id))
+			ids = append(ids, id)
+		}
+		s.Require().Len(ids, 2)
+		s.NotEqual(ids[0], ids[1], "each row must get a unique UUID")
+	})
+
+	s.Run("ddl_round_trip_preserves_default", func() {
+		_, err := s.db.Exec(`create table sessions (
+			token   uuid    not null default gen_random_uuid(),
+			user_id int8    not null
+		);`)
+		s.Require().NoError(err)
+
+		_, err = s.db.Exec(`insert into sessions (user_id) values (?)`, 42)
+		s.Require().NoError(err)
+
+		rows, err := s.db.Query(`select token from sessions where user_id = ?`, 42)
+		s.Require().NoError(err)
+		defer rows.Close()
+
+		s.Require().True(rows.Next())
+		var tok string
+		s.Require().NoError(rows.Scan(&tok))
+		s.Regexp(uuidRegexp, tok, "UUID generated after DDL round-trip must be valid v4")
+	})
+
+	s.Run("gen_random_uuid_on_non_uuid_column_rejected", func() {
+		_, err := s.db.Exec(`create table bad_default (
+			id   int8    not null,
+			name text    default gen_random_uuid() not null
+		);`)
+		s.Require().Error(err, "GEN_RANDOM_UUID() default must be rejected on non-UUID column")
+	})
+}
+
 func (s *TestSuite) TestUUID() {
 	_, err := s.db.Exec(`create table widgets (
 		id    uuid primary key,
