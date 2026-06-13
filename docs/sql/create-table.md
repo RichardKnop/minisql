@@ -20,7 +20,8 @@ CREATE TABLE table_name (
 | `NULL` | Explicitly marks column as nullable (default). |
 | `UNIQUE` | Creates a unique index on this column. |
 | `DEFAULT value` | Default value when column is omitted from INSERT. |
-| `DEFAULT NOW()` | Default current UTC timestamp for TIMESTAMP columns. |
+| `DEFAULT NOW()` | Default current UTC timestamp for `TIMESTAMP` columns. |
+| `DEFAULT GEN_RANDOM_UUID()` | Default random UUID v4 for `UUID` columns. |
 | `CHECK (expr)` | Rejects rows where expression is false. |
 | `REFERENCES table (col)` | Inline foreign key. |
 
@@ -102,6 +103,20 @@ CREATE TABLE orders (
     amount  INT8 NOT NULL,
     CONSTRAINT fk_orders_users FOREIGN KEY (user_id) REFERENCES users (id)
 );
+```
+
+**Table with a UUID primary key (auto-generated):**
+
+```sql
+CREATE TABLE users (
+    id         UUID         NOT NULL DEFAULT GEN_RANDOM_UUID(),
+    email      VARCHAR(255) NOT NULL UNIQUE,
+    name       TEXT         NOT NULL,
+    created_at TIMESTAMP    DEFAULT NOW()
+);
+
+-- id is generated automatically on every insert
+INSERT INTO users (email, name) VALUES ('alice@example.com', 'Alice');
 ```
 
 **Table with JSON, UUID, and VECTOR columns:**

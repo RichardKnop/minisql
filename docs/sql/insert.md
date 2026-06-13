@@ -26,11 +26,12 @@ INSERT INTO users (email, name) VALUES
 Omit columns that have defaults — they are filled in automatically:
 
 ```sql
--- active defaults to true, created defaults to NOW()
+-- active defaults to true, created defaults to NOW(), id defaults to GEN_RANDOM_UUID()
 INSERT INTO users (email, name) VALUES ('eve@example.com', 'Eve');
 
--- Explicit NOW()
+-- Explicit NOW() or GEN_RANDOM_UUID() in VALUES
 INSERT INTO events (name, created) VALUES ('login', NOW());
+INSERT INTO sessions (id, user_id) VALUES (GEN_RANDOM_UUID(), 42);
 ```
 
 ### Bind parameters
@@ -267,6 +268,26 @@ _, err = db.Exec(
 ```
 
 ## Inserting UUID
+
+**Auto-generate with `DEFAULT GEN_RANDOM_UUID()`** (recommended):
+
+```sql
+CREATE TABLE users (
+    id    UUID NOT NULL DEFAULT GEN_RANDOM_UUID(),
+    email VARCHAR(255) NOT NULL
+);
+
+-- id is generated automatically — omit it from the column list
+INSERT INTO users (email) VALUES ('alice@example.com');
+```
+
+**Explicit `GEN_RANDOM_UUID()` call in VALUES:**
+
+```sql
+INSERT INTO sessions (id, user_id) VALUES (GEN_RANDOM_UUID(), 1);
+```
+
+**Explicit UUID string literal:**
 
 ```sql
 INSERT INTO sessions (id, user_id)

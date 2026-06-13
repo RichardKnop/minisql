@@ -121,11 +121,16 @@ INSERT INTO events (payload) VALUES ('["go","sql","json"]');
 ### UUID
 
 ```sql
-CREATE TABLE sessions (
-    id      UUID PRIMARY KEY,
-    user_id INT8 NOT NULL
+CREATE TABLE users (
+    id      UUID     NOT NULL DEFAULT GEN_RANDOM_UUID(),
+    email   VARCHAR(255) NOT NULL UNIQUE,
+    name    TEXT     NOT NULL
 );
 
+-- id is generated automatically
+INSERT INTO users (email, name) VALUES ('alice@example.com', 'Alice');
+
+-- or supply an explicit value
 INSERT INTO sessions (id, user_id)
 VALUES ('550e8400-e29b-41d4-a716-446655440000', 1);
 
@@ -134,6 +139,7 @@ SELECT CAST('550e8400-e29b-41d4-a716-446655440000' AS UUID);
 
 - Stored as 16-byte binary (compact, no string overhead).
 - Accepted and returned as lowercase hyphenated string.
+- Use `DEFAULT GEN_RANDOM_UUID()` to auto-generate a random UUID v4 on INSERT. See [UUID Functions](functions/uuid.md).
 
 ### VECTOR(n)
 
