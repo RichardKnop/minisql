@@ -1163,6 +1163,18 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 		}
 		return math.Mod(af, bf), nil
 
+	// ── UUID functions ───────────────────────────────────────────────────────
+
+	case "GEN_RANDOM_UUID":
+		if len(e.Args) != 0 {
+			return nil, fmt.Errorf("GEN_RANDOM_UUID takes no arguments")
+		}
+		uuid, err := NewRandomUUID()
+		if err != nil {
+			return nil, fmt.Errorf("GEN_RANDOM_UUID: %w", err)
+		}
+		return uuid, nil
+
 	// ── Date/time functions ──────────────────────────────────────────────────
 
 	case "NOW":

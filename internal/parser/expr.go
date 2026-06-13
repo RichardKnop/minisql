@@ -160,6 +160,12 @@ func (p *parserItem) parseFactor() (*minisql.Expr, error) {
 		return &minisql.Expr{FuncName: "NOW"}, nil
 	}
 
+	// GEN_RANDOM_UUID() is tokenised as a single reserved-word — no argument list to parse.
+	if token == "GEN_RANDOM_UUID()" {
+		p.pop()
+		return &minisql.Expr{FuncName: "GEN_RANDOM_UUID"}, nil
+	}
+
 	// Scalar literals: integer, float, string, boolean
 	value, ln := p.peekValue()
 	if ln > 0 {

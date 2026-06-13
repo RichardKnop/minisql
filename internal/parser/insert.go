@@ -162,6 +162,12 @@ func (p *parserItem) doParseInsert() error {
 			p.step = stepInsertValuesCommaOrClosingParens
 			return nil
 		}
+		if specialValue == "GEN_RANDOM_UUID()" {
+			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1], minisql.OptionalValue{Value: minisql.FunctionGenRandomUUID, Valid: true})
+			p.pop()
+			p.step = stepInsertValuesCommaOrClosingParens
+			return nil
+		}
 		value, ln := p.peekValue()
 		if ln > 0 {
 			var insertValue minisql.OptionalValue
@@ -271,6 +277,10 @@ func (p *parserItem) doParseInsert() error {
 			p.pop()
 		case "NOW()":
 			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: minisql.FunctionNow, Valid: true})
+			p.nextUpdateField = ""
+			p.pop()
+		case "GEN_RANDOM_UUID()":
+			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: minisql.FunctionGenRandomUUID, Valid: true})
 			p.nextUpdateField = ""
 			p.pop()
 		default:

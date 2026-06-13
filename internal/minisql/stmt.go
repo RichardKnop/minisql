@@ -234,8 +234,9 @@ type Column struct {
 	Check           string // raw SQL text of CHECK expression, e.g. "age > 0"
 	Kind            ColumnKind
 	Size            uint32
-	Nullable        bool
-	DefaultValueNow bool
+	Nullable                bool
+	DefaultValueNow         bool
+	DefaultValueGenRandUUID bool
 	// Deleted marks a column that has been dropped via ALTER TABLE DROP COLUMN.
 	// Deleted columns remain in the schema so that existing cells (which still
 	// carry their bytes at that position) can be decoded correctly.  They are
@@ -369,9 +370,13 @@ type Function struct {
 }
 
 const nowFunctionName = "NOW()"
+const genRandomUUIDFunctionName = "GEN_RANDOM_UUID()"
 
 // FunctionNow is the sentinel value used for the NOW() scalar function in default values.
 var FunctionNow = Function{Name: nowFunctionName}
+
+// FunctionGenRandomUUID is the sentinel value used for the GEN_RANDOM_UUID() scalar function in default values.
+var FunctionGenRandomUUID = Function{Name: genRandomUUIDFunctionName}
 
 // Placeholder is the sentinel type for a ? bind parameter in a prepared statement.
 type Placeholder struct{}
@@ -1276,10 +1281,17 @@ func (s Statement) prepareInsert(now Time) (Statement, error) {
 				}
 			} else {
 				// Column was omitted — apply table default.
-				if col.DefaultValue.Valid {
+				switch {
+				case col.DefaultValue.Valid:
 					val = col.DefaultValue
-				} else if col.DefaultValueNow {
+				case col.DefaultValueNow:
 					val = OptionalValue{Valid: true, Value: TimestampMicros(now.TotalMicroseconds())}
+				case col.DefaultValueGenRandUUID:
+					uuid, err := NewRandomUUID()
+					if err != nil {
+						return Statement{}, fmt.Errorf("GEN_RANDOM_UUID: %w", err)
+					}
+					val = OptionalValue{Valid: true, Value: uuid}
 				}
 				newRow[i] = val
 				continue
@@ -1411,11 +1423,20 @@ func coerceColumnValue(col Column, val OptionalValue, now Time, ctx string) (Opt
 		return val, nil
 	}
 	if fn, ok := val.Value.(Function); ok {
-		if fn.Name != FunctionNow.Name {
+		switch fn.Name {
+		case FunctionNow.Name:
+			val.Value = TimestampMicros(now.TotalMicroseconds())
+			return val, nil
+		case FunctionGenRandomUUID.Name:
+			uuid, err := NewRandomUUID()
+			if err != nil {
+				return val, fmt.Errorf("GEN_RANDOM_UUID: %w", err)
+			}
+			val.Value = uuid
+			return val, nil
+		default:
 			return val, fmt.Errorf("unsupported function %q in %s", fn.Name, ctx)
 		}
-		val.Value = TimestampMicros(now.TotalMicroseconds())
-		return val, nil
 	}
 	switch col.Kind {
 	case Timestamp:
@@ -1903,6 +1924,9 @@ func (s Statement) validateInsert(table *Table) error {
 			continue
 		}
 		if col.DefaultValue.Valid {
+			continue
+		}
+		if col.DefaultValueNow || col.DefaultValueGenRandUUID {
 			continue
 		}
 		if hasPk && col.Name == pkColumn.Name && table.PrimaryKey.Autoincrement {
@@ -2403,9 +2427,12 @@ func (s Statement) createTableDDL() string {
 			if _, ok := uniqueKeys[col.Name]; ok {
 				sb.WriteString(" unique")
 			}
-			if col.DefaultValueNow {
+			switch {
+			case col.DefaultValueNow:
 				sb.WriteString(" default now()")
-			} else if col.DefaultValue.Valid {
+			case col.DefaultValueGenRandUUID:
+				sb.WriteString(" default gen_random_uuid()")
+			case col.DefaultValue.Valid:
 				switch col.Kind {
 				case Boolean:
 					if col.DefaultValue.Value.(bool) {

@@ -99,6 +99,10 @@ func (p *parserItem) doParseUpdate() error {
 			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: minisql.FunctionNow, Valid: true})
 			p.nextUpdateField = ""
 			p.pop()
+		case "GEN_RANDOM_UUID()":
+			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: minisql.FunctionGenRandomUUID, Valid: true})
+			p.nextUpdateField = ""
+			p.pop()
 		case "TRUE":
 			p.setUpdate(p.nextUpdateField, minisql.OptionalValue{Value: true, Valid: true})
 			p.nextUpdateField = ""
