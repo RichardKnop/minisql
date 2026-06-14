@@ -1,7 +1,6 @@
 package minisql
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 )
@@ -191,6 +190,155 @@ func (tp *TextPointer) storeOverflowText(ctx context.Context, pager TxPager) err
 	return nil
 }
 
+// updateOverflowText writes overflow pages for tp, reusing the chain rooted at
+// oldFirstPage wherever possible instead of free-then-reallocating.
+//
+// GetOverflowPage calls ModifyPage internally, so the pages it returns are
+// already in the write set and can be overwritten without an additional pager
+// call. The three cases are:
+//
+//   - same size (most common on UPDATE): reuse all old pages, zero free/alloc calls.
+//   - new > old: reuse old pages, call GetFreePage for the tail extension.
+//   - new < old: reuse new-length prefix, call AddFreePage for the excess tail.
+//
+// When oldFirstPage == 0 (old value was inline or absent) the call falls
+// through to storeOverflowText so callers need not special-case this.
+func (tp *TextPointer) updateOverflowText(ctx context.Context, pager TxPager, oldFirstPage PageIndex) error {
+	if tp.IsInline() {
+		return nil
+	}
+	if oldFirstPage == 0 {
+		return tp.storeOverflowText(ctx, pager)
+	}
+	if len(tp.Data) > MaxOverflowTextSize {
+		return fmt.Errorf("text size %d exceeds maximum overflow text size %d", len(tp.Data), MaxOverflowTextSize)
+	}
+
+	// Walk old chain. GetOverflowPage calls ModifyPage, so each page is already
+	// writable; we record the NextPage before the reuse loop overwrites it.
+	type entry struct {
+		page *Page
+		next PageIndex
+	}
+	old := make([]entry, 0, tp.NumberOfPages())
+	for curIdx := oldFirstPage; curIdx > 0; {
+		p, err := pager.GetOverflowPage(ctx, curIdx)
+		if err != nil {
+			return fmt.Errorf("read old overflow page %d: %w", curIdx, err)
+		}
+		next := p.OverflowPage.Header.NextPage
+		old = append(old, entry{p, next})
+		curIdx = next
+	}
+
+	numNewPages := tp.NumberOfPages()
+	numOldPages := uint32(len(old))
+	reuse := min(numNewPages, numOldPages)
+	dataSizeToStore := tp.Length
+
+	var previousPage *Page
+	for i := range reuse {
+		p := old[i].page
+		if i == 0 {
+			tp.FirstPage = p.Index
+		}
+		dataSize := min(dataSizeToStore, MaxOverflowPageData)
+		dataSizeToStore -= dataSize
+		p.OverflowPage.Header.DataSize = dataSize
+		p.OverflowPage.Header.NextPage = 0
+		p.OverflowPage.Data = tp.Data[i*MaxOverflowPageData : i*MaxOverflowPageData+dataSize]
+		if previousPage != nil {
+			previousPage.OverflowPage.Header.NextPage = p.Index
+		}
+		previousPage = p
+	}
+
+	// New text is longer than old chain: allocate extra pages at the tail.
+	for i := reuse; i < numNewPages; i++ {
+		freePage, err := pager.GetFreePage(ctx)
+		if err != nil {
+			return fmt.Errorf("allocate overflow page: %w", err)
+		}
+		dataSize := min(dataSizeToStore, MaxOverflowPageData)
+		dataSizeToStore -= dataSize
+		freePage.OverflowPage = &OverflowPage{
+			Header: OverflowPageHeader{DataSize: dataSize},
+			Data:   tp.Data[i*MaxOverflowPageData : i*MaxOverflowPageData+dataSize],
+		}
+		if previousPage != nil {
+			previousPage.OverflowPage.Header.NextPage = freePage.Index
+		}
+		previousPage = freePage
+	}
+
+	// New text is shorter than old chain: return excess tail pages to the free list.
+	for i := reuse; i < numOldPages; i++ {
+		if err := pager.AddFreePage(ctx, old[i].page.Index); err != nil {
+			return fmt.Errorf("free excess overflow page: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// updateOverflowTexts handles the text-overflow UPDATE hot path, replacing the
+// freeOverflowPages + storeOverflowTexts pair. It only touches columns present
+// in changedCols, which:
+//   - avoids re-storing unchanged overflow columns (which would orphan their
+//     existing pages and create duplicate chains), and
+//   - eliminates the free-then-reallocate cycle by reusing old pages in-place.
+func (r Row) updateOverflowTexts(ctx context.Context, pager TxPager, oldRow Row, changedCols map[string]Column) (Row, error) {
+	for i, col := range r.Columns {
+		if !col.Kind.IsText() {
+			continue
+		}
+		if _, isChanged := changedCols[col.Name]; !isChanged {
+			continue
+		}
+		value := r.Values[i]
+		if !value.Valid {
+			continue
+		}
+		newTP, ok := value.Value.(TextPointer)
+		if !ok {
+			return r, fmt.Errorf("expected TextPointer value for text column %s", col.Name)
+		}
+
+		// Determine whether the old value occupied an overflow chain.
+		var oldFirstPage PageIndex
+		if oldVal, ok2 := oldRow.GetValue(col.Name); ok2 && oldVal.Valid {
+			if oldTP, ok3 := oldVal.Value.(TextPointer); ok3 && !oldTP.IsInline() {
+				oldFirstPage = oldTP.FirstPage
+			}
+		}
+
+		if newTP.IsInline() {
+			// New value fits inline; free the old overflow chain if one existed.
+			if oldFirstPage != 0 {
+				for curIdx := oldFirstPage; curIdx > 0; {
+					p, err := pager.GetOverflowPage(ctx, curIdx)
+					if err != nil {
+						return r, fmt.Errorf("read overflow page %d: %w", curIdx, err)
+					}
+					next := p.OverflowPage.Header.NextPage
+					if err := pager.AddFreePage(ctx, curIdx); err != nil {
+						return r, fmt.Errorf("free overflow page %d: %w", curIdx, err)
+					}
+					curIdx = next
+				}
+			}
+			continue
+		}
+
+		// New value needs overflow pages — reuse old chain where possible.
+		if err := newTP.updateOverflowText(ctx, pager, oldFirstPage); err != nil {
+			return r, fmt.Errorf("update overflow text for column %s: %w", col.Name, err)
+		}
+		r.Values[i] = OptionalValue{Valid: true, Value: newTP}
+	}
+	return r, nil
+}
+
 func (tp TextPointer) readOverflowText(ctx context.Context, pager TxPager) (TextPointer, error) {
 	if tp.IsInline() {
 		return tp, nil
@@ -216,7 +364,7 @@ func (tp TextPointer) readOverflowText(ctx context.Context, pager TxPager) (Text
 		remainingSize -= dataSize
 		currentPageIdx = overflowPage.OverflowPage.Header.NextPage
 	}
-	tp.Data = bytes.Trim(overflowData, "\x00")
+	tp.Data = overflowData
 	return tp, nil
 }
 

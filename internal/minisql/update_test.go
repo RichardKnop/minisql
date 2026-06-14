@@ -362,18 +362,19 @@ func TestTable_Update_Overflow(t *testing.T) {
 		require.Equal(t, 5, int(pager.TotalPages()))
 		assert.NotNil(t, pager.pages[0].LeafNode)
 		assert.NotNil(t, pager.pages[1].FreePage)
-		assert.NotNil(t, pager.pages[2].FreePage) // freed overflow page
-		// freed overflow page which gets reused when shrinking from 2 to 1 overflow pages
-		assert.NotNil(t, pager.pages[3].OverflowPage)
+		// page 2 is reused in-place (first page of old chain → first page of new chain)
+		assert.NotNil(t, pager.pages[2].OverflowPage)
+		// page 3 is freed as the excess tail (old chain was 2 pages, new is 1)
+		assert.NotNil(t, pager.pages[3].FreePage)
 		assert.NotNil(t, pager.pages[4].OverflowPage)
 
-		assert.Equal(t, 0, int(pager.pages[3].OverflowPage.Header.NextPage))
+		assert.Equal(t, 0, int(pager.pages[2].OverflowPage.Header.NextPage))
 		assert.Equal(t, 0, int(pager.pages[4].OverflowPage.Header.NextPage))
 
-		assert.Equal(t, MaxOverflowPageData-100, int(pager.pages[3].OverflowPage.Header.DataSize))
+		assert.Equal(t, MaxOverflowPageData-100, int(pager.pages[2].OverflowPage.Header.DataSize))
 		assert.Equal(t, int(MaxInlineVarchar+200), int(pager.pages[4].OverflowPage.Header.DataSize))
 
-		assertFreePages(t, tablePager, []PageIndex{2, 1})
+		assertFreePages(t, tablePager, []PageIndex{3, 1})
 	})
 
 	t.Run("Update overflow text to expand overflow pages from 1 to 2", func(t *testing.T) {
@@ -414,19 +415,20 @@ func TestTable_Update_Overflow(t *testing.T) {
 		require.Equal(t, 5, int(pager.TotalPages()))
 		assert.NotNil(t, pager.pages[0].LeafNode)
 		assert.NotNil(t, pager.pages[1].FreePage)
-		// this free page gets reused when expanding from 1 to 2 overflow pages
+		// page 2 still holds rows[2]'s updated profile (unchanged by this test)
 		assert.NotNil(t, pager.pages[2].OverflowPage)
-		// freed overflow page which gets reused when shrinking from 2 to 1 overflow pages
+		// page 3 is re-allocated from the free list as the second page of the expansion
 		assert.NotNil(t, pager.pages[3].OverflowPage)
+		// page 4 is reused in-place as the first page of rows[0]'s expanded profile
 		assert.NotNil(t, pager.pages[4].OverflowPage)
 
 		assert.Equal(t, 0, int(pager.pages[3].OverflowPage.Header.NextPage))
-		assert.Equal(t, 2, int(pager.pages[4].OverflowPage.Header.NextPage))
+		assert.Equal(t, 3, int(pager.pages[4].OverflowPage.Header.NextPage))
 		assert.Equal(t, 0, int(pager.pages[2].OverflowPage.Header.NextPage))
 
-		assert.Equal(t, MaxOverflowPageData-100, int(pager.pages[3].OverflowPage.Header.DataSize))
+		assert.Equal(t, MaxOverflowPageData-100, int(pager.pages[2].OverflowPage.Header.DataSize))
 		assert.Equal(t, MaxOverflowPageData, int(pager.pages[4].OverflowPage.Header.DataSize))
-		assert.Equal(t, 200, int(pager.pages[2].OverflowPage.Header.DataSize))
+		assert.Equal(t, 200, int(pager.pages[3].OverflowPage.Header.DataSize))
 
 		assertFreePages(t, tablePager, []PageIndex{1})
 	})
