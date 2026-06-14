@@ -797,6 +797,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#exporting-to-a-csv-file-o" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exporting to a CSV file (-o)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#dot-commands" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2112,6 +2123,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#exporting-to-a-csv-file-o" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exporting to a CSV file (-o)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#dot-commands" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2286,6 +2308,10 @@
 <td>Set output format to CSV (default: table).</td>
 </tr>
 <tr>
+<td><code>-o &lt;file&gt;</code></td>
+<td>Write query output to a file in CSV format (implies <code>-csv</code>). Errors and status messages are still printed to stderr.</td>
+</tr>
+<tr>
 <td><code>-h</code> / <code>--help</code></td>
 <td>Print usage.</td>
 </tr>
@@ -2333,6 +2359,21 @@
 </span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>minisql<span class="w"> </span>-csv<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;select * from &quot;users&quot;&#39;</span><span class="w"> </span>my.db<span class="w"> </span><span class="p">|</span><span class="w"> </span>cut<span class="w"> </span>-d,<span class="w"> </span>-f2
 </span></code></pre></div>
 <p>Output mode flags apply to <code>-c</code> as well — combine <code>-csv</code> with <code>-c</code> for machine-readable output.</p>
+<h2 id="exporting-to-a-csv-file-o">Exporting to a CSV file (<code>-o</code>)<a class="headerlink" href="#exporting-to-a-csv-file-o" title="Permanent link">&para;</a></h2>
+<p>Use <code>-o &lt;file&gt;</code> to write query results directly to a file instead of stdout. CSV format is enabled automatically.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Export a table to a file</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>minisql<span class="w"> </span>-o<span class="w"> </span>users.csv<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;select * from &quot;users&quot;&#39;</span><span class="w"> </span>my.db
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># Export with an explicit query</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>minisql<span class="w"> </span>-o<span class="w"> </span>report.csv<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;select name, age from &quot;users&quot; where age &gt; 25 order by age&#39;</span><span class="w"> </span>my.db
+</span></code></pre></div>
+<p>Errors and status messages (row counts, timing) are printed to stderr and never written to the output file, so the file always contains valid CSV even when something goes wrong.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># The CSV file is clean; errors appear only in the terminal</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>minisql<span class="w"> </span>-o<span class="w"> </span>out.csv<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;select * from &quot;missing_table&quot;&#39;</span><span class="w"> </span>my.db
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># stderr: Error: table &quot;missing_table&quot; not found</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># out.csv: (empty)</span>
+</span></code></pre></div>
+<p><code>-o</code> is intended for a single SELECT query. When multiple <code>-c</code> flags are used alongside <code>-o</code>, each SELECT writes its own header line followed by its rows, which produces invalid CSV for most parsers. For multi-step exports, run a single query that joins or unions the data you need.</p>
 <h2 id="dot-commands">Dot commands<a class="headerlink" href="#dot-commands" title="Permanent link">&para;</a></h2>
 <p>Dot commands control the shell itself and are always single-line.</p>
 <table>
@@ -2374,45 +2415,45 @@
 </tbody>
 </table>
 <h3 id="tables"><code>.tables</code><a class="headerlink" href="#tables" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>minisql&gt; .tables
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>name
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>----
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>events
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>users
+<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>minisql&gt; .tables
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>name
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>----
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>events
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>users
 </span></code></pre></div>
 <h3 id="schema"><code>.schema</code><a class="headerlink" href="#schema" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>minisql&gt; .schema users
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>create table &quot;users&quot; (id int8 primary key autoincrement, name varchar(255), age int4);
+<div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>minisql&gt; .schema users
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>create table &quot;users&quot; (id int8 primary key autoincrement, name varchar(255), age int4);
 </span></code></pre></div>
 <h3 id="output-modes">Output modes<a class="headerlink" href="#output-modes" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>minisql&gt; .mode table
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>minisql&gt; select id, name from &quot;users&quot;;
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>id  name
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>--  -----
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>1   alice
-</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>2   bob
-</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>
-</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>minisql&gt; .mode csv
-</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>minisql&gt; select id, name from &quot;users&quot;;
-</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>id,name
-</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>1,alice
-</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>2,bob
+<div class="language-text highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>minisql&gt; .mode table
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>minisql&gt; select id, name from &quot;users&quot;;
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>id  name
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>--  -----
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>1   alice
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>2   bob
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>minisql&gt; .mode csv
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>minisql&gt; select id, name from &quot;users&quot;;
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>id,name
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>1,alice
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>2,bob
 </span></code></pre></div>
 <h3 id="query-timing">Query timing<a class="headerlink" href="#query-timing" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>minisql&gt; .timer on
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>minisql&gt; select count(*) from &quot;users&quot;;
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>COUNT(*)
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>--------
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>2
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>Time: 0.001s
+<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>minisql&gt; .timer on
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>minisql&gt; select count(*) from &quot;users&quot;;
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>COUNT(*)
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>--------
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>2
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>Time: 0.001s
 </span></code></pre></div>
 <h2 id="scripting-via-stdin">Scripting via stdin<a class="headerlink" href="#scripting-via-stdin" title="Permanent link">&para;</a></h2>
 <p>Pipe a SQL script into the shell for batch operations:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>minisql<span class="w"> </span>my.db<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="s">create table &quot;logs&quot; (id int8 primary key autoincrement, msg text);</span>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="s">insert into &quot;logs&quot; (msg) values (&#39;hello&#39;);</span>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="s">select * from &quot;logs&quot;;</span>
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="s">EOF</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>minisql<span class="w"> </span>my.db<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="s">create table &quot;logs&quot; (id int8 primary key autoincrement, msg text);</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="s">insert into &quot;logs&quot; (msg) values (&#39;hello&#39;);</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="s">select * from &quot;logs&quot;;</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="s">EOF</span>
 </span></code></pre></div>
 
 
