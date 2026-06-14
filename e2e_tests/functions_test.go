@@ -753,7 +753,7 @@ func (s *TestSuite) TestPasswordFunctions_Bcrypt_HashAndVerify() {
 	s.Require().NoError(
 		s.db.QueryRow(`select password from "bcrypt_users" where email = 'bob@example.com'`).Scan(&stored),
 	)
-	s.True(len(stored) > 0)
+	s.NotEmpty(stored)
 	s.Contains(stored, "$2")
 
 	var match int64

@@ -17,7 +17,7 @@ func TestArgon2idHash_ProducesPhcFormat(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(h, "$argon2id$"), "hash should start with $argon2id$, got %q", h)
 	// PHC format has exactly 5 $ separators → 6 parts when split on $.
-	assert.Equal(t, 6, len(strings.Split(h, "$")))
+	assert.Len(t, strings.Split(h, "$"), 6)
 }
 
 func TestArgon2idHash_UniquePerCall(t *testing.T) {
@@ -156,13 +156,13 @@ func TestParseArgon2idHash_RoundTrip(t *testing.T) {
 	encoded, err := argon2idHash("round-trip")
 	require.NoError(t, err)
 
-	m, iters, p, salt, hash, err := parseArgon2idHash(encoded)
+	params, err := parseArgon2idHash(encoded)
 	require.NoError(t, err)
-	assert.Equal(t, argon2Memory, m)
-	assert.Equal(t, argon2Iterations, iters)
-	assert.Equal(t, argon2Parallelism, p)
-	assert.Len(t, salt, argon2SaltLength)
-	assert.Len(t, hash, int(argon2KeyLength))
+	assert.Equal(t, argon2Memory, params.memory)
+	assert.Equal(t, argon2Iterations, params.iterations)
+	assert.Equal(t, argon2Parallelism, params.parallelism)
+	assert.Len(t, params.salt, argon2SaltLength)
+	assert.Len(t, params.hash, int(argon2KeyLength))
 }
 
 func TestParseArgon2idHash_MalformedInputs(t *testing.T) {
@@ -173,9 +173,31 @@ func TestParseArgon2idHash_MalformedInputs(t *testing.T) {
 		"$bcrypt$something",
 		"$argon2id$v=19$m=65536",          // too few parts
 		"$argon2id$v=19$m=65536,t=3,p=4$", // missing hash segment
+		// malformed key=value pair (no '=')
+		"$argon2id$v=19$m65536,t=3,p=4$dGVzdA$dGVzdA",
+		// non-numeric parameter value
+		"$argon2id$v=19$m=abc,t=3,p=4$dGVzdA$dGVzdA",
+		// memory > MaxUint32
+		"$argon2id$v=19$m=4294967296,t=3,p=4$dGVzdA$dGVzdA",
+		// iterations > MaxUint32
+		"$argon2id$v=19$m=65536,t=4294967296,p=4$dGVzdA$dGVzdA",
+		// parallelism > MaxUint8
+		"$argon2id$v=19$m=65536,t=3,p=256$dGVzdA$dGVzdA",
+		// invalid base64 in salt
+		"$argon2id$v=19$m=65536,t=3,p=4$!!!$dGVzdA",
+		// invalid base64 in hash
+		"$argon2id$v=19$m=65536,t=3,p=4$dGVzdA$!!!",
 	}
 	for _, b := range bad {
-		_, _, _, _, _, err := parseArgon2idHash(b)
+		_, err := parseArgon2idHash(b)
 		assert.Error(t, err, "expected error for input %q", b)
 	}
+}
+
+func TestBcryptHash_InvalidCostReturnsError(t *testing.T) {
+	t.Parallel()
+
+	// bcrypt.MaxCost is 31; cost 32 must produce an error.
+	_, err := bcryptHash("password", 32)
+	assert.Error(t, err)
 }

@@ -537,10 +537,11 @@ func (s Statement) NumPlaceholders() int {
 	if s.Kind == Insert {
 		for _, anInsert := range s.Inserts {
 			for _, val := range anInsert {
-				if _, ok := val.Value.(Placeholder); ok {
-					count += 1
-				} else if expr, ok := val.Value.(*Expr); ok {
-					count += countExprPlaceholders(expr)
+				switch v := val.Value.(type) {
+				case Placeholder:
+					count++
+				case *Expr:
+					count += countExprPlaceholders(v)
 				}
 			}
 		}
@@ -833,7 +834,8 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 	if s.Kind == Insert {
 		for i, anInsert := range stmt.Inserts {
 			for j, val := range anInsert {
-				if _, ok := val.Value.(Placeholder); ok {
+				switch v := val.Value.(type) {
+				case Placeholder:
 					if len(args) == 0 {
 						return Statement{}, errors.New("not enough arguments to bind placeholders")
 					}
@@ -843,13 +845,13 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 						stmt.Inserts[i][j].Value = args[0]
 					}
 					args = args[1:]
-				} else if expr, ok := val.Value.(*Expr); ok {
-					n := countExprPlaceholders(expr)
+				case *Expr:
+					n := countExprPlaceholders(v)
 					if n > 0 {
 						if len(args) < n {
 							return Statement{}, errors.New("not enough arguments to bind placeholders")
 						}
-						cloned := cloneExpr(expr)
+						cloned := cloneExpr(v)
 						exprArgs := make([]any, n)
 						copy(exprArgs, args[:n])
 						args = args[n:]

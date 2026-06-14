@@ -3,7 +3,9 @@ package minisql
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -44,59 +46,78 @@ func argon2idHash(password string) (string, error) {
 // argon2idVerify checks password against a PHC-format Argon2id hash string.
 // Returns true when the password matches.
 func argon2idVerify(password, encoded string) (bool, error) {
-	m, t, p, salt, storedHash, err := parseArgon2idHash(encoded)
+	params, err := parseArgon2idHash(encoded)
 	if err != nil {
 		return false, err
 	}
-	keyLen := uint32(len(storedHash))
-	candidate := argon2.IDKey([]byte(password), salt, t, m, p, keyLen)
+	keyLen := uint32(len(params.hash))
+	candidate := argon2.IDKey([]byte(password), params.salt, params.iterations, params.memory, params.parallelism, keyLen)
 
 	// Constant-time comparison.
-	if len(candidate) != len(storedHash) {
+	if len(candidate) != len(params.hash) {
 		return false, nil
 	}
 	var diff byte
 	for i := range candidate {
-		diff |= candidate[i] ^ storedHash[i]
+		diff |= candidate[i] ^ params.hash[i]
 	}
 	return diff == 0, nil
 }
 
+// argon2idHashParams holds the decoded fields of a PHC-format Argon2id string.
+type argon2idHashParams struct {
+	memory      uint32
+	iterations  uint32
+	parallelism uint8
+	salt        []byte
+	hash        []byte
+}
+
 // parseArgon2idHash decodes a PHC-format Argon2id string produced by argon2idHash.
-func parseArgon2idHash(encoded string) (memory, time uint32, parallelism uint8, salt, hash []byte, err error) {
+func parseArgon2idHash(encoded string) (argon2idHashParams, error) {
 	// Expected format: $argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 6 || parts[0] != "" || parts[1] != "argon2id" {
-		return 0, 0, 0, nil, nil, fmt.Errorf("ARGON2ID_VERIFY: invalid hash format")
+		return argon2idHashParams{}, fmt.Errorf("ARGON2ID_VERIFY: invalid hash format")
 	}
+	var params argon2idHashParams
 	// parts[2] = "v=19"  (version — we accept any value)
 	// parts[3] = "m=65536,t=3,p=4"
-	params := parts[3]
-	for _, kv := range strings.Split(params, ",") {
+	for _, kv := range strings.Split(parts[3], ",") {
 		key, val, ok := strings.Cut(kv, "=")
 		if !ok {
-			return 0, 0, 0, nil, nil, fmt.Errorf("ARGON2ID_VERIFY: malformed param %q", kv)
+			return argon2idHashParams{}, fmt.Errorf("ARGON2ID_VERIFY: malformed param %q", kv)
 		}
 		n, nerr := strconv.ParseUint(val, 10, 64)
 		if nerr != nil {
-			return 0, 0, 0, nil, nil, fmt.Errorf("ARGON2ID_VERIFY: param %q: %w", key, nerr)
+			return argon2idHashParams{}, fmt.Errorf("ARGON2ID_VERIFY: param %q: %w", key, nerr)
 		}
 		switch key {
 		case "m":
-			memory = uint32(n)
+			if n > math.MaxUint32 {
+				return argon2idHashParams{}, fmt.Errorf("ARGON2ID_VERIFY: memory parameter out of range: %d", n)
+			}
+			params.memory = uint32(n)
 		case "t":
-			time = uint32(n)
+			if n > math.MaxUint32 {
+				return argon2idHashParams{}, fmt.Errorf("ARGON2ID_VERIFY: iterations parameter out of range: %d", n)
+			}
+			params.iterations = uint32(n)
 		case "p":
-			parallelism = uint8(n)
+			if n > math.MaxUint8 {
+				return argon2idHashParams{}, fmt.Errorf("ARGON2ID_VERIFY: parallelism parameter out of range: %d", n)
+			}
+			params.parallelism = uint8(n)
 		}
 	}
-	if salt, err = base64.RawStdEncoding.DecodeString(parts[4]); err != nil {
-		return 0, 0, 0, nil, nil, fmt.Errorf("ARGON2ID_VERIFY: decode salt: %w", err)
+	var err error
+	if params.salt, err = base64.RawStdEncoding.DecodeString(parts[4]); err != nil {
+		return argon2idHashParams{}, fmt.Errorf("ARGON2ID_VERIFY: decode salt: %w", err)
 	}
-	if hash, err = base64.RawStdEncoding.DecodeString(parts[5]); err != nil {
-		return 0, 0, 0, nil, nil, fmt.Errorf("ARGON2ID_VERIFY: decode hash: %w", err)
+	if params.hash, err = base64.RawStdEncoding.DecodeString(parts[5]); err != nil {
+		return argon2idHashParams{}, fmt.Errorf("ARGON2ID_VERIFY: decode hash: %w", err)
 	}
-	return memory, time, parallelism, salt, hash, nil
+	return params, nil
 }
 
 // bcryptHash hashes password using bcrypt at the given cost (0 = default).
@@ -115,7 +136,7 @@ func bcryptHash(password string, cost int) (string, error) {
 // Returns true when the password matches.
 func bcryptVerify(password, hash string) (bool, error) {
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	if err == bcrypt.ErrMismatchedHashAndPassword {
+	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
 		return false, nil
 	}
 	if err != nil {

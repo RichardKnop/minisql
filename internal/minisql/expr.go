@@ -1276,6 +1276,9 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 				if !ok {
 					return nil, fmt.Errorf("BCRYPT_HASH: cost must be an integer, got %T", costVal)
 				}
+				if c < 0 || c > math.MaxInt32 {
+					return nil, fmt.Errorf("BCRYPT_HASH: cost out of range: %d", c)
+				}
 				cost = int(c)
 			}
 		}
