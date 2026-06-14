@@ -33,11 +33,14 @@ func openTestDB(t *testing.T) *sql.DB {
 }
 
 // newTestShell builds a shell that reads from input and writes to a buffer.
+// Both result data and status/error messages go to the same buffer so that
+// existing assertions on "Error:" and "row(s) affected" continue to work.
 func newTestShell(db *sql.DB, input string) (*shell, *strings.Builder) {
 	var out strings.Builder
 	sh := &shell{
 		db:      db,
 		out:     &out,
+		errOut:  &out,
 		mode:    modeTable,
 		scanner: bufio.NewScanner(strings.NewReader(input)),
 		isatty:  false,
@@ -467,5 +470,85 @@ func TestShell_Exec_Vector_Display(t *testing.T) {
 	got := out.String()
 	assert.NotContains(t, got, "Error:")
 	assert.Contains(t, got, "[1.5, 2, 3.75]")
+}
+
+// --- -o file output ---
+
+// newFileShell creates a shell whose result output goes to f and whose
+// error/status output goes to errBuf, simulating the -o flag behaviour.
+func newFileShell(db *sql.DB, f *os.File, errBuf *strings.Builder) *shell {
+	return &shell{
+		db:      db,
+		out:     f,
+		errOut:  errBuf,
+		mode:    modeCSV,
+		scanner: bufio.NewScanner(strings.NewReader("")),
+		isatty:  false,
+	}
+}
+
+func TestShell_OutputFile_WritesCSV(t *testing.T) {
+	db := openTestDB(t)
+	_, err := db.Exec(`create table "t" (id int8, name varchar(255))`)
+	require.NoError(t, err)
+	_, err = db.Exec(`insert into "t" (id, name) values (1, 'alice'), (2, 'bob')`)
+	require.NoError(t, err)
+
+	f, err := os.CreateTemp("", "minisql_out_*.csv")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.Remove(f.Name()) })
+
+	var errBuf strings.Builder
+	sh := newFileShell(db, f, &errBuf)
+	sh.exec(`select id, name from "t"`)
+	require.NoError(t, f.Close())
+
+	content, err := os.ReadFile(f.Name())
+	require.NoError(t, err)
+	assert.Equal(t, "id,name\n1,alice\n2,bob\n", string(content))
+	assert.Empty(t, errBuf.String())
+}
+
+func TestShell_OutputFile_ErrorsGoToErrOut(t *testing.T) {
+	db := openTestDB(t)
+
+	f, err := os.CreateTemp("", "minisql_out_*.csv")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.Remove(f.Name()) })
+
+	var errBuf strings.Builder
+	sh := newFileShell(db, f, &errBuf)
+	sh.exec(`select * from "nonexistent"`)
+	require.NoError(t, f.Close())
+
+	// Error must appear in errOut, not in the CSV file.
+	content, err := os.ReadFile(f.Name())
+	require.NoError(t, err)
+	assert.Empty(t, string(content))
+	assert.Contains(t, errBuf.String(), "Error:")
+}
+
+func TestShell_OutputFile_NullAndSpecialChars(t *testing.T) {
+	db := openTestDB(t)
+	_, err := db.Exec(`create table "t" (id int8, note varchar(255))`)
+	require.NoError(t, err)
+	_, err = db.Exec(`insert into "t" (id, note) values (1, 'hello, world'), (2, null)`)
+	require.NoError(t, err)
+
+	f, err := os.CreateTemp("", "minisql_out_*.csv")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.Remove(f.Name()) })
+
+	var errBuf strings.Builder
+	sh := newFileShell(db, f, &errBuf)
+	sh.exec(`select id, note from "t"`)
+	require.NoError(t, f.Close())
+
+	content, err := os.ReadFile(f.Name())
+	require.NoError(t, err)
+	// comma in value must be quoted; NULL renders as empty string in CSV.
+	assert.Contains(t, string(content), `"hello, world"`)
+	assert.Contains(t, string(content), "2,")
+	assert.Empty(t, errBuf.String())
 }
 
