@@ -961,14 +961,18 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 }
 
 // BindArgumentsFrom substitutes placeholders by pulling argument values from next.
-// It handles simple UPDATE and DELETE statements without CTEs/subqueries; callers
-// should fall back to BindArguments when ok is false.
+// It handles simple UPDATE and DELETE statements without CTEs/subqueries;
+// callers should fall back to BindArguments when ok is false.
+//
+// The streaming approach avoids allocating an intermediate []any slice that
+// BindArguments requires, which matters on hot update/delete paths.
 func (s Statement) BindArgumentsFrom(next func() (any, error)) (Statement, bool, error) {
 	if !s.canBindArgumentsFrom() {
 		return Statement{}, false, nil
 	}
 
 	stmt := s.Clone()
+
 	if s.Kind == Update {
 		for _, field := range stmt.Fields {
 			val, ok := stmt.Updates[field.Name]
@@ -998,23 +1002,24 @@ func (s Statement) BindArgumentsFrom(next func() (any, error)) (Statement, bool,
 }
 
 func (s Statement) canBindArgumentsFrom() bool {
-	if s.Kind != Update && s.Kind != Delete {
-		return false
-	}
-	if len(s.CTEs) > 0 || len(s.Having) > 0 || len(s.Unions) > 0 {
-		return false
-	}
-	if s.ExplainStatement != nil || s.FromSubquery != nil || s.UpdateFromSubquery != nil {
-		return false
-	}
-	for _, group := range s.Conditions {
-		for _, cond := range group {
-			if cond.Operand1.Type == OperandExpr || cond.Operand2.Type == OperandSubquery {
-				return false
+	switch s.Kind {
+	case Update, Delete:
+		if len(s.CTEs) > 0 || len(s.Having) > 0 || len(s.Unions) > 0 {
+			return false
+		}
+		if s.ExplainStatement != nil || s.FromSubquery != nil || s.UpdateFromSubquery != nil {
+			return false
+		}
+		for _, group := range s.Conditions {
+			for _, cond := range group {
+				if cond.Operand1.Type == OperandExpr || cond.Operand2.Type == OperandSubquery {
+					return false
+				}
 			}
 		}
+		return true
 	}
-	return true
+	return false
 }
 
 func bindConditionArgumentsFrom(conditions OneOrMore, next func() (any, error)) error {
