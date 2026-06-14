@@ -1558,3 +1558,29 @@ func TestEvalCastJSON(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+func TestNaturalSortKey(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"", ""},
+		{"abc", "abc"},
+		{"1", "00000000000000000001"},
+		{"10", "00000000000000000010"},
+		{"1.2.10", "00000000000000000001.00000000000000000002.00000000000000000010"},
+		{"file1.txt", "file00000000000000000001.txt"},
+		{"file10.txt", "file00000000000000000010.txt"},
+		{"v1.2.3-beta4", "v00000000000000000001.00000000000000000002.00000000000000000003-beta00000000000000000004"},
+		{"007", "00000000000000000007"},
+		{"no-numbers-here", "no-numbers-here"},
+	}
+	for _, tc := range cases {
+		got := naturalSortKey(tc.input)
+		if got != tc.want {
+			t.Errorf("naturalSortKey(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}

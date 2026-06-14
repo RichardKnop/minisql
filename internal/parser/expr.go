@@ -478,6 +478,7 @@ func isBuiltinFunction(name string) bool {
 		"SUBSTR",
 		"REPLACE",
 		"CONCAT",
+		"NATURAL_SORT",
 		"ABS",
 		"FLOOR", "CEIL",
 		"ROUND",

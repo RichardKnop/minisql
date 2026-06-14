@@ -2179,6 +2179,9 @@ func (s Statement) validateSelect(table *Table) error {
 
 	if len(s.OrderBy) > 0 {
 		for _, anOrderBy := range s.OrderBy {
+			if anOrderBy.Field.Expr != nil {
+				continue // expression ORDER BY (e.g. NATURAL_SORT(col)) — no column validation needed
+			}
 			_, ok := table.ColumnByName(anOrderBy.Field.Name)
 			if !ok && !s.HasOutputField(anOrderBy.Field.Name) {
 				return fmt.Errorf("unknown field %q in ORDER BY clause", anOrderBy.Field.Name)

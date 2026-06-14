@@ -1021,6 +1021,23 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 		}
 		return NewTextPointer([]byte(buf.String())), nil
 
+	case "NATURAL_SORT":
+		if len(e.Args) != 1 {
+			return nil, fmt.Errorf("NATURAL_SORT requires exactly 1 argument")
+		}
+		v, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if v == nil {
+			return nil, nil
+		}
+		s, ok := toStringVal(v)
+		if !ok {
+			return nil, fmt.Errorf("NATURAL_SORT: argument must be a string, got %T", v)
+		}
+		return NewTextPointer([]byte(naturalSortKey(s))), nil
+
 	// ── Numeric functions ────────────────────────────────────────────────────
 
 	case "ABS":
@@ -1631,4 +1648,33 @@ func toFloat64(v any) (float64, error) {
 	default:
 		return 0, fmt.Errorf("cannot use %T as a numeric operand", v)
 	}
+}
+
+// naturalSortKey converts s to a sort key where each run of ASCII digits is
+// zero-padded to 20 characters, so that a plain lexicographic comparison of
+// the resulting keys gives the same order as natural (human) sort.
+//
+// Example: "1.10.2" → "00000000000000000001.00000000000000000010.00000000000000000002"
+func naturalSortKey(s string) string {
+	var buf strings.Builder
+	buf.Grow(len(s) + 20) // preallocate; at least len(s), more if there are numbers
+	i := 0
+	for i < len(s) {
+		if s[i] >= '0' && s[i] <= '9' {
+			j := i + 1
+			for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+				j++
+			}
+			// Zero-pad to 20 digits.
+			for k := j - i; k < 20; k++ {
+				buf.WriteByte('0')
+			}
+			buf.WriteString(s[i:j])
+			i = j
+		} else {
+			buf.WriteByte(s[i])
+			i++
+		}
+	}
+	return buf.String()
 }
