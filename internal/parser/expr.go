@@ -479,6 +479,8 @@ func isBuiltinFunction(name string) bool {
 		"REPLACE",
 		"CONCAT",
 		"NATURAL_SORT",
+		"ARGON2ID_HASH", "ARGON2ID_VERIFY",
+		"BCRYPT_HASH", "BCRYPT_VERIFY",
 		"ABS",
 		"FLOOR", "CEIL",
 		"ROUND",

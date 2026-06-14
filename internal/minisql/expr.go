@@ -1192,6 +1192,137 @@ func (e *Expr) evalFunc(row Row) (any, error) {
 		}
 		return uuid, nil
 
+	// ── Password hashing functions ───────────────────────────────────────────
+
+	case "ARGON2ID_HASH":
+		if len(e.Args) != 1 {
+			return nil, fmt.Errorf("ARGON2ID_HASH requires exactly 1 argument")
+		}
+		v, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if v == nil {
+			return nil, nil
+		}
+		s, ok := toStringVal(v)
+		if !ok {
+			return nil, fmt.Errorf("ARGON2ID_HASH: argument must be a string, got %T", v)
+		}
+		h, err := argon2idHash(s)
+		if err != nil {
+			return nil, err
+		}
+		return NewTextPointer([]byte(h)), nil
+
+	case "ARGON2ID_VERIFY":
+		if len(e.Args) != 2 {
+			return nil, fmt.Errorf("ARGON2ID_VERIFY requires exactly 2 arguments")
+		}
+		pwVal, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if pwVal == nil {
+			return nil, nil
+		}
+		hashVal, err := e.Args[1].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if hashVal == nil {
+			return nil, nil
+		}
+		pw, ok := toStringVal(pwVal)
+		if !ok {
+			return nil, fmt.Errorf("ARGON2ID_VERIFY: argument 1 must be a string, got %T", pwVal)
+		}
+		h, ok := toStringVal(hashVal)
+		if !ok {
+			return nil, fmt.Errorf("ARGON2ID_VERIFY: argument 2 must be a string, got %T", hashVal)
+		}
+		match, err := argon2idVerify(pw, h)
+		if err != nil {
+			return nil, err
+		}
+		if match {
+			return int64(1), nil
+		}
+		return int64(0), nil
+
+	case "BCRYPT_HASH":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			return nil, fmt.Errorf("BCRYPT_HASH requires 1 or 2 arguments")
+		}
+		v, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if v == nil {
+			return nil, nil
+		}
+		s, ok := toStringVal(v)
+		if !ok {
+			return nil, fmt.Errorf("BCRYPT_HASH: argument 1 must be a string, got %T", v)
+		}
+		cost := 0
+		if len(e.Args) == 2 {
+			costVal, err := e.Args[1].Eval(row)
+			if err != nil {
+				return nil, err
+			}
+			if costVal != nil {
+				c, ok := toInt64(costVal)
+				if !ok {
+					return nil, fmt.Errorf("BCRYPT_HASH: cost must be an integer, got %T", costVal)
+				}
+				if c < 0 || c > math.MaxInt32 {
+					return nil, fmt.Errorf("BCRYPT_HASH: cost out of range: %d", c)
+				}
+				cost = int(c)
+			}
+		}
+		h, err := bcryptHash(s, cost)
+		if err != nil {
+			return nil, err
+		}
+		return NewTextPointer([]byte(h)), nil
+
+	case "BCRYPT_VERIFY":
+		if len(e.Args) != 2 {
+			return nil, fmt.Errorf("BCRYPT_VERIFY requires exactly 2 arguments")
+		}
+		pwVal, err := e.Args[0].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if pwVal == nil {
+			return nil, nil
+		}
+		hashVal, err := e.Args[1].Eval(row)
+		if err != nil {
+			return nil, err
+		}
+		if hashVal == nil {
+			return nil, nil
+		}
+		pw, ok := toStringVal(pwVal)
+		if !ok {
+			return nil, fmt.Errorf("BCRYPT_VERIFY: argument 1 must be a string, got %T", pwVal)
+		}
+		h, ok := toStringVal(hashVal)
+		if !ok {
+			return nil, fmt.Errorf("BCRYPT_VERIFY: argument 2 must be a string, got %T", hashVal)
+		}
+		match, err := bcryptVerify(pw, h)
+		if err != nil {
+			return nil, err
+		}
+		if match {
+			return int64(1), nil
+		}
+		return int64(0), nil
+
 	// ── Date/time functions ──────────────────────────────────────────────────
 
 	case "NOW":
