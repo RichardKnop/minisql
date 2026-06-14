@@ -441,3 +441,31 @@ func TestShell_Exec_DDL_Silent(t *testing.T) {
 	assert.NotContains(t, out.String(), "row(s)")
 }
 
+func TestShell_Exec_JSON_Display(t *testing.T) {
+	db := openTestDB(t)
+	_, err := db.Exec(`create table "j" (id int8, doc json)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`insert into "j" (id, doc) values (1, '{"key":"value","num":42}')`)
+	require.NoError(t, err)
+
+	sh, out := newTestShell(db, "")
+	sh.exec(`select doc from "j" where id = 1`)
+	got := out.String()
+	assert.NotContains(t, got, "Error:")
+	assert.Contains(t, got, `{"key":"value","num":42}`)
+}
+
+func TestShell_Exec_Vector_Display(t *testing.T) {
+	db := openTestDB(t)
+	_, err := db.Exec(`create table "v" (id int8, embedding vector(3))`)
+	require.NoError(t, err)
+	_, err = db.Exec(`insert into "v" (id, embedding) values (1, '[1.5, 2, 3.75]')`)
+	require.NoError(t, err)
+
+	sh, out := newTestShell(db, "")
+	sh.exec(`select embedding from "v" where id = 1`)
+	got := out.String()
+	assert.NotContains(t, got, "Error:")
+	assert.Contains(t, got, "[1.5, 2, 3.75]")
+}
+
