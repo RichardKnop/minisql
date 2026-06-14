@@ -400,7 +400,7 @@ func (idx *logStructuredInvertedIndex) countMergedRowIDs(
 		if count == ^uint32(0) {
 			return fmt.Errorf("inverted row-ID count exceeds maximum uint32")
 		}
-		count++
+		count += 1
 		return nil
 	})
 	return count, err
@@ -520,7 +520,7 @@ func (idx *logStructuredInvertedIndex) newRowIDSegmentStateStream(
 	sourceHint := 0
 	for _, segment := range meta.Segments {
 		if segmentMayContainTerm(segment, term) {
-			sourceHint++
+			sourceHint += 1
 		}
 	}
 	sourceHint = min(sourceHint, logStructuredInvertedIndexMergeRunSize)
@@ -568,7 +568,7 @@ func (idx *logStructuredInvertedIndex) newRowIDSegmentStateStream(
 				order:  order,
 			})
 			stream.push(len(stream.sources) - 1)
-			order++
+			order += 1
 			return nil
 		}); err != nil {
 			return nil, err
@@ -714,7 +714,7 @@ func (idx *logStructuredInvertedIndex) visitSegmentTermCells(ctx context.Context
 			if err := visit(cells[i]); err != nil {
 				return err
 			}
-			i++
+			i += 1
 		}
 		pageIdx = page.InvertedSegmentPage.Header.NextPage
 	}
@@ -754,7 +754,7 @@ func (it *concatenatingInvertedPostingIterator) NextBlock(ctx context.Context) (
 		if ok {
 			return block, true, nil
 		}
-		it.index++
+		it.index += 1
 	}
 	return invertedPostingBlock{}, false, nil
 }
@@ -770,7 +770,7 @@ func (it *sliceInvertedPostingIterator) NextBlock(context.Context) (invertedPost
 		return invertedPostingBlock{}, false, nil
 	}
 	block := it.blocks[it.index]
-	it.index++
+	it.index += 1
 	return block, true, nil
 }
 
@@ -899,7 +899,7 @@ func (idx *logStructuredInvertedIndex) countPositionDocFreq(
 		if docFreq == ^uint32(0) {
 			return fmt.Errorf("inverted position document count exceeds maximum uint32")
 		}
-		docFreq++
+		docFreq += 1
 		return nil
 	}
 	baseIter, err := idx.base.Lookup(ctx, term)
@@ -971,7 +971,7 @@ func (idx *logStructuredInvertedIndex) newPositionCountSegmentStateStream(
 	sourceHint := 0
 	for _, segment := range meta.Segments {
 		if segmentMayContainTerm(segment, term) {
-			sourceHint++
+			sourceHint += 1
 		}
 	}
 	sourceHint = min(sourceHint, logStructuredInvertedIndexMergeRunSize)
@@ -1014,7 +1014,7 @@ func (idx *logStructuredInvertedIndex) newPositionCountSegmentStateStream(
 				order:         order,
 			})
 			stream.push(len(stream.sources) - 1)
-			order++
+			order += 1
 			return nil
 		}); err != nil {
 			return nil, err
@@ -1229,7 +1229,7 @@ func compactUint32s(values []uint32) []uint32 {
 	out := 0
 	for i := 1; i < len(values); i++ {
 		if values[out] != values[i] {
-			out++
+			out += 1
 			values[out] = values[i]
 		}
 	}
@@ -1244,7 +1244,7 @@ func removeUint32s(values, removals []uint32) []uint32 {
 	removeIdx := 0
 	for _, value := range values {
 		for removeIdx < len(removals) && removals[removeIdx] < value {
-			removeIdx++
+			removeIdx += 1
 		}
 		if removeIdx < len(removals) && removals[removeIdx] == value {
 			continue
@@ -1273,7 +1273,7 @@ func compactSortedRowIDs(rowIDs []RowID) []RowID {
 			continue
 		}
 		rowIDs[writeIdx] = rowID
-		writeIdx++
+		writeIdx += 1
 	}
 	return rowIDs[:writeIdx]
 }
@@ -1512,7 +1512,7 @@ func (idx *logStructuredInvertedIndex) compactOldestSegmentRun(ctx context.Conte
 		level := meta.Segments[i].Level
 		j := i + 1
 		for j < len(meta.Segments) && meta.Segments[j].Level == level {
-			j++
+			j += 1
 		}
 		if j-i >= logStructuredInvertedIndexMergeRunSize {
 			start = i
@@ -1661,7 +1661,7 @@ func appendSegmentCellsForRowIDs(
 	for _, block := range blocks {
 		n := 0
 		for offset+n < len(rowIDs) && rowIDs[offset+n] <= block.LastRowID {
-			n++
+			n += 1
 		}
 		cells = append(cells, invertedSegmentCell{
 			Term:         term,
@@ -1735,7 +1735,7 @@ func appendSegmentCellsForBlocks(
 	for _, block := range blocks {
 		n := 0
 		for offset+n < len(postings) && postings[offset+n].RowID <= block.LastRowID {
-			n++
+			n += 1
 		}
 		cells = append(cells, invertedSegmentCell{
 			Term:         term,

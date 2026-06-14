@@ -112,7 +112,7 @@ func (p *hnswDataPage) Marshal(buf []byte) error {
 			level = 0
 		}
 		buf[off] = byte(level)
-		off++
+		off += 1
 		for _, neighbors := range node.Neighbors {
 			binary.BigEndian.PutUint16(buf[off:off+2], uint16(len(neighbors)))
 			off += 2
@@ -145,7 +145,7 @@ func (p *hnswDataPage) Unmarshal(buf []byte) error {
 		node.RowID = binary.BigEndian.Uint64(buf[off : off+8])
 		off += 8
 		level := int(buf[off])
-		off++
+		off += 1
 		node.Neighbors = make([][]uint64, level+1)
 		for l := range level + 1 {
 			if off+2 > len(buf) {

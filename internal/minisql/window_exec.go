@@ -18,7 +18,7 @@ func (t *Table) selectWithWindowFuncs(ctx context.Context, stmt Statement) (Stat
 	baseStmt := stmt
 	baseStmt.Fields = []Field{{Name: "*"}}
 	baseStmt.Aggregates = nil
-	baseStmt.OrderBy = nil  // we will sort after window computation
+	baseStmt.OrderBy = nil // we will sort after window computation
 	baseStmt.Limit = OptionalValue{}
 	baseStmt.Offset = OptionalValue{}
 	// HasWindowFuncs() on baseStmt returns false because we replaced Fields.
@@ -250,7 +250,7 @@ func evalWindowOverPartition(rows []Row, partition windowPartition, wf *WindowFu
 		rank := 1
 		for pos, ri := range idx {
 			if pos > 0 && !peerRows(rows[idx[pos-1]], rows[ri], wf.Spec.OrderBy) {
-				rank++
+				rank += 1
 			}
 			out[ri] = intVal(int64(rank))
 		}
@@ -527,7 +527,7 @@ func aggWindowAvg(rows []Row, idx []int, start, end int, wf *WindowFunc) (Option
 		if v == nil {
 			continue
 		}
-		count++
+		count += 1
 		switch n := v.(type) {
 		case int64:
 			sum += float64(n)
@@ -555,7 +555,7 @@ func aggWindowCount(rows []Row, idx []int, start, end int, wf *WindowFunc) (Opti
 			return OptionalValue{}, err
 		}
 		if v != nil {
-			count++
+			count += 1
 		}
 	}
 	return intVal(count), nil

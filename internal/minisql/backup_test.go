@@ -91,7 +91,7 @@ func countBackupRows(t *testing.T, db *Database, tbl *Table) int {
 			return err
 		}
 		for result.Rows.Next(txCtx) {
-			count++
+			count += 1
 		}
 		return result.Rows.Err()
 	})
@@ -150,8 +150,8 @@ func TestBackup_CheckpointBlockedDuringCopy(t *testing.T) {
 	// Install the hook. It fires after the backup has taken its WAL snapshot
 	// and released walWriteMu but before the page-copy loop starts.
 	var (
-		hookFired          bool
-		checkpointBlocked  bool
+		hookFired         bool
+		checkpointBlocked bool
 	)
 	db.backupHook = func() {
 		hookFired = true

@@ -87,7 +87,7 @@ func (c *Cell) Marshal(buf []byte) {
 	i += 8
 
 	buf[i] = c.ColumnCount
-	i++
+	i += 1
 
 	copy(buf[i:], c.TypeCodes)
 	i += uint64(c.ColumnCount)
@@ -113,7 +113,7 @@ func (c *Cell) Unmarshal(buf []byte) (uint64, error) {
 	offset += 8
 
 	c.ColumnCount = buf[offset]
-	offset++
+	offset += 1
 
 	// Read TypeCodes (nil when ColumnCount == 0 to match uninitialized Cell).
 	if c.ColumnCount > 0 {

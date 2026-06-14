@@ -24,19 +24,19 @@ func insertSelectBoundary(upperSQL string) int {
 	for i < len(upperSQL) {
 		switch upperSQL[i] {
 		case '\'':
-			i++
+			i += 1
 			for i < len(upperSQL) && upperSQL[i] != '\'' {
-				i++
+				i += 1
 			}
 			if i < len(upperSQL) {
-				i++ // skip closing quote
+				i += 1 // skip closing quote
 			}
 		case '(':
-			depth++
-			i++
+			depth += 1
+			i += 1
 		case ')':
-			depth--
-			i++
+			depth -= 1
+			i += 1
 		default:
 			if depth == 0 {
 				rem := upperSQL[i:]
@@ -44,7 +44,7 @@ func insertSelectBoundary(upperSQL string) int {
 					return i
 				}
 			}
-			i++
+			i += 1
 		}
 	}
 	return i

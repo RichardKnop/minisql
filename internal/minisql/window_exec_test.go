@@ -172,7 +172,7 @@ func TestWindowExec_Ntile(t *testing.T) {
 
 	buckets := map[int64]int{}
 	for _, v := range vals {
-		buckets[v.Value.(int64)]++
+		buckets[v.Value.(int64)] += 1
 	}
 	// 5 rows into 2 buckets: bucket 1 gets ceil(5/2)=3, bucket 2 gets 2.
 	assert.Equal(t, 3, buckets[1])
@@ -227,7 +227,7 @@ func TestWindowExec_Lag(t *testing.T) {
 	nullCount := 0
 	for _, v := range vals {
 		if !v.Valid {
-			nullCount++
+			nullCount += 1
 		}
 	}
 	assert.Equal(t, 1, nullCount, "exactly one NULL (first row in partition)")
@@ -249,7 +249,7 @@ func TestWindowExec_Lead(t *testing.T) {
 	nullCount := 0
 	for _, v := range vals {
 		if !v.Valid {
-			nullCount++
+			nullCount += 1
 		}
 	}
 	assert.Equal(t, 1, nullCount, "exactly one NULL (last row in partition)")
@@ -751,7 +751,7 @@ func TestTable_SelectWithWindowFuncs_Limit(t *testing.T) {
 
 	count := 0
 	for result.Rows.Next(ctx) {
-		count++
+		count += 1
 	}
 	require.NoError(t, result.Rows.Err())
 	assert.Equal(t, 2, count)

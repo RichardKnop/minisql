@@ -228,12 +228,12 @@ func (k ColumnKind) IsVector() bool {
 // Column describes a single column in a table's schema, including its data type,
 // size, nullability, default value, and optional CHECK constraint.
 type Column struct {
-	DefaultValue    OptionalValue
-	CheckCond       *ConditionNode // parsed CHECK expression (nil if no CHECK constraint)
-	Name            string
-	Check           string // raw SQL text of CHECK expression, e.g. "age > 0"
-	Kind            ColumnKind
-	Size            uint32
+	DefaultValue            OptionalValue
+	CheckCond               *ConditionNode // parsed CHECK expression (nil if no CHECK constraint)
+	Name                    string
+	Check                   string // raw SQL text of CHECK expression, e.g. "age > 0"
+	Kind                    ColumnKind
+	Size                    uint32
 	Nullable                bool
 	DefaultValueNow         bool
 	DefaultValueGenRandUUID bool
@@ -539,7 +539,7 @@ func (s Statement) NumPlaceholders() int {
 			for _, val := range anInsert {
 				switch v := val.Value.(type) {
 				case Placeholder:
-					count++
+					count += 1
 				case *Expr:
 					count += countExprPlaceholders(v)
 				}
@@ -699,45 +699,45 @@ func (s Statement) Clone() Statement {
 	}
 
 	stmt := Statement{
-		Kind:               s.Kind,
-		CacheKey:           s.CacheKey,
-		IfNotExists:        s.IfNotExists,
-		TableName:          s.TableName,
-		TableAlias:         s.TableAlias,
-		IndexName:          s.IndexName,
-		IndexWhereClause:   s.IndexWhereClause,
-		IndexExpression:    s.IndexExpression,
-		IndexExpressionSQL: s.IndexExpressionSQL,
-		IndexTokenizer:     s.IndexTokenizer,
-		Target:             s.Target,
-		PragmaName:         s.PragmaName,
-		PragmaValue:        s.PragmaValue,
-		ConflictAction:     s.ConflictAction,
-		Columns:            s.Columns,
-		Distinct:           s.Distinct,
-		Fields:             fields,
-		Aggregates:         s.Aggregates, // slice of value types, safe to share
-		Aliases:            s.Aliases,
-		Inserts:            make([][]OptionalValue, len(s.Inserts)),
-		Functions:          s.Functions,
-		Conditions:         make(OneOrMore, len(s.Conditions)),
-		GroupBy:            s.GroupBy,
-		Having:             s.Having,
-		Joins:              s.Joins,
-		OrderBy:            s.OrderBy,
-		Limit:              s.Limit,
-		Offset:             s.Offset,
-		ReturningFields:    s.ReturningFields,
-		ExplainAnalyze:     s.ExplainAnalyze,
-		IndexMethod:        s.IndexMethod,
-		FromSubqueryAlias:  s.FromSubqueryAlias,
-		UpdateFromTable:    s.UpdateFromTable,
-		UpdateFromAlias:    s.UpdateFromAlias,
-		ForeignKeys:        s.ForeignKeys, // slice of value structs, safe to share
-		AlterTableAction:   s.AlterTableAction,
-		AlterColumnName:    s.AlterColumnName,
-		NewColumnName:      s.NewColumnName,
-		NewTableName:       s.NewTableName,
+		Kind:                 s.Kind,
+		CacheKey:             s.CacheKey,
+		IfNotExists:          s.IfNotExists,
+		TableName:            s.TableName,
+		TableAlias:           s.TableAlias,
+		IndexName:            s.IndexName,
+		IndexWhereClause:     s.IndexWhereClause,
+		IndexExpression:      s.IndexExpression,
+		IndexExpressionSQL:   s.IndexExpressionSQL,
+		IndexTokenizer:       s.IndexTokenizer,
+		Target:               s.Target,
+		PragmaName:           s.PragmaName,
+		PragmaValue:          s.PragmaValue,
+		ConflictAction:       s.ConflictAction,
+		Columns:              s.Columns,
+		Distinct:             s.Distinct,
+		Fields:               fields,
+		Aggregates:           s.Aggregates, // slice of value types, safe to share
+		Aliases:              s.Aliases,
+		Inserts:              make([][]OptionalValue, len(s.Inserts)),
+		Functions:            s.Functions,
+		Conditions:           make(OneOrMore, len(s.Conditions)),
+		GroupBy:              s.GroupBy,
+		Having:               s.Having,
+		Joins:                s.Joins,
+		OrderBy:              s.OrderBy,
+		Limit:                s.Limit,
+		Offset:               s.Offset,
+		ReturningFields:      s.ReturningFields,
+		ExplainAnalyze:       s.ExplainAnalyze,
+		IndexMethod:          s.IndexMethod,
+		FromSubqueryAlias:    s.FromSubqueryAlias,
+		UpdateFromTable:      s.UpdateFromTable,
+		UpdateFromAlias:      s.UpdateFromAlias,
+		ForeignKeys:          s.ForeignKeys, // slice of value structs, safe to share
+		AlterTableAction:     s.AlterTableAction,
+		AlterColumnName:      s.AlterColumnName,
+		NewColumnName:        s.NewColumnName,
+		NewTableName:         s.NewTableName,
 		insertCache:          s.insertCache,
 		boundArgs:            s.boundArgs,
 		cachedSelectedFields: s.cachedSelectedFields, // immutable; safe to share

@@ -4356,7 +4356,7 @@ func (t *Table) selectWithSortSpill(
 			return Row{}, ErrNoMoreRows
 		}
 		row := allRows[idx]
-		idx++
+		idx += 1
 		return projectRow(row, requestedFields)
 	})
 
@@ -5882,7 +5882,7 @@ func deduplicateSortedRows(rows []Row, fields []Field) []Row {
 		}
 		if !equal {
 			rows[w] = rows[i]
-			w++
+			w += 1
 		}
 	}
 	return rows[:w]

@@ -461,17 +461,17 @@ func (t *Table) updateInvertedIndexKeys(ctx context.Context, secondaryIndex Seco
 	for oldIdx < len(oldTerms) && newIdx < len(newTerms) {
 		oldTerm, newTerm := oldTerms[oldIdx], newTerms[newIdx]
 		if oldTerm == newTerm {
-			oldIdx++
-			newIdx++
+			oldIdx += 1
+			newIdx += 1
 			continue
 		}
 		if oldTerm < newTerm {
 			batch.Delete(oldTerm, rowID)
-			oldIdx++
+			oldIdx += 1
 			continue
 		}
 		batch.Insert(newTerm, rowID)
-		newIdx++
+		newIdx += 1
 	}
 	for ; oldIdx < len(oldTerms); oldIdx++ {
 		batch.Delete(oldTerms[oldIdx], rowID)
@@ -574,7 +574,7 @@ func filterIndexableTextSearchTokenPositions(positions []textSearchTokenPosition
 			continue
 		}
 		positions[writeIdx] = token
-		writeIdx++
+		writeIdx += 1
 	}
 	return positions[:writeIdx]
 }

@@ -96,7 +96,7 @@ func (s *jsonInvertedScanner) parseValue(path string) error {
 }
 
 func (s *jsonInvertedScanner) parseObject(path string) error {
-	s.pos++
+	s.pos += 1
 	s.skipSpace()
 	if s.consumeByte('}') {
 		return nil
@@ -145,7 +145,7 @@ func (s *jsonInvertedScanner) parseObject(path string) error {
 }
 
 func (s *jsonInvertedScanner) parseArray(path string) error {
-	s.pos++
+	s.pos += 1
 	s.skipSpace()
 	if s.consumeByte(']') {
 		return nil
@@ -204,7 +204,7 @@ func (s *jsonInvertedScanner) parseString(needValue bool) (jsonStringToken, erro
 		switch {
 		case c == '"':
 			raw := s.input[rawStart:s.pos]
-			s.pos++
+			s.pos += 1
 			if !hasEscape {
 				token := jsonStringToken{raw: raw}
 				if needValue {
@@ -219,7 +219,7 @@ func (s *jsonInvertedScanner) parseString(needValue bool) (jsonStringToken, erro
 			return jsonStringToken{value: decoded, raw: raw, hasEscape: true}, nil
 		case c == '\\':
 			hasEscape = true
-			s.pos++
+			s.pos += 1
 			if s.pos >= len(s.input) {
 				return jsonStringToken{}, errors.New("invalid string escape at end of JSON input")
 			}
@@ -228,18 +228,18 @@ func (s *jsonInvertedScanner) parseString(needValue bool) (jsonStringToken, erro
 				return jsonStringToken{}, fmt.Errorf("invalid string escape %q at byte %d", esc, s.pos)
 			}
 			if esc == 'u' {
-				for i := 0; i < 4; i++ {
-					s.pos++
+				for range 4 {
+					s.pos += 1
 					if s.pos >= len(s.input) || !isJSONHex(s.input[s.pos]) {
 						return jsonStringToken{}, fmt.Errorf("invalid unicode escape at byte %d", s.pos)
 					}
 				}
 			}
-			s.pos++
+			s.pos += 1
 		case c < 0x20:
 			return jsonStringToken{}, fmt.Errorf("invalid control character in string at byte %d", s.pos)
 		case c < utf8.RuneSelf:
-			s.pos++
+			s.pos += 1
 		default:
 			r, size := utf8.DecodeRune(s.input[s.pos:])
 			if r == utf8.RuneError && size == 1 {
@@ -279,7 +279,7 @@ func (s *jsonInvertedScanner) scanNumber() error {
 		}
 	case isJSONDigitOneToNine(s.peekByte()):
 		for isJSONDigit(s.peekByte()) {
-			s.pos++
+			s.pos += 1
 		}
 	default:
 		return fmt.Errorf("invalid JSON number at byte %d", start)
@@ -289,19 +289,19 @@ func (s *jsonInvertedScanner) scanNumber() error {
 			return fmt.Errorf("invalid JSON number fraction at byte %d", start)
 		}
 		for isJSONDigit(s.peekByte()) {
-			s.pos++
+			s.pos += 1
 		}
 	}
 	if s.peekByte() == 'e' || s.peekByte() == 'E' {
-		s.pos++
+		s.pos += 1
 		if s.peekByte() == '+' || s.peekByte() == '-' {
-			s.pos++
+			s.pos += 1
 		}
 		if !isJSONDigit(s.peekByte()) {
 			return fmt.Errorf("invalid JSON number exponent at byte %d", start)
 		}
 		for isJSONDigit(s.peekByte()) {
-			s.pos++
+			s.pos += 1
 		}
 	}
 	return nil
@@ -319,7 +319,7 @@ func (s *jsonInvertedScanner) skipSpace() {
 	for s.pos < len(s.input) {
 		switch s.input[s.pos] {
 		case ' ', '\n', '\r', '\t':
-			s.pos++
+			s.pos += 1
 		default:
 			return
 		}
@@ -330,7 +330,7 @@ func (s *jsonInvertedScanner) consumeByte(c byte) bool {
 	if s.pos >= len(s.input) || s.input[s.pos] != c {
 		return false
 	}
-	s.pos++
+	s.pos += 1
 	return true
 }
 

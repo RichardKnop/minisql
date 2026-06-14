@@ -100,7 +100,7 @@ func (t *Table) externalSortMerge(tmpPaths []string, inMemory []Row, columns []C
 		if item.readerIdx == inMemReaderIdx {
 			if inMemIdx < len(inMemory) {
 				heap.Push(h, mergeItem{row: inMemory[inMemIdx], readerIdx: inMemReaderIdx})
-				inMemIdx++
+				inMemIdx += 1
 			}
 		} else {
 			rr := readers[item.readerIdx]

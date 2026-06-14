@@ -1794,7 +1794,7 @@ func naturalSortKey(s string) string {
 		if s[i] >= '0' && s[i] <= '9' {
 			j := i + 1
 			for j < len(s) && s[j] >= '0' && s[j] <= '9' {
-				j++
+				j += 1
 			}
 			// Zero-pad to 20 digits.
 			for k := j - i; k < 20; k++ {
@@ -1804,7 +1804,7 @@ func naturalSortKey(s string) string {
 			i = j
 		} else {
 			buf.WriteByte(s[i])
-			i++
+			i += 1
 		}
 	}
 	return buf.String()

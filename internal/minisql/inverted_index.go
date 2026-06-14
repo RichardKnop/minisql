@@ -2369,7 +2369,7 @@ func appendRowIDInvertedPostingBlocks(
 		payload = append(payload, tmp[:n]...)
 		lastRowID = rowID
 		prevRowID = rowID
-		postingCount++
+		postingCount += 1
 	}
 
 	blocks = append(blocks, invertedPostingBlock{
@@ -2468,7 +2468,7 @@ func uvarintSize(value uint64) int {
 	size := 1
 	for value >= 0x80 {
 		value >>= 7
-		size++
+		size += 1
 	}
 	return size
 }
@@ -2576,23 +2576,23 @@ func mergeRowIDPostings(existing []invertedPosting, deletes, inserts []RowID) []
 		switch {
 		case insertIdx >= len(inserts):
 			rowID = existing[existingIdx].RowID
-			existingIdx++
+			existingIdx += 1
 		case existingIdx >= len(existing):
 			rowID = inserts[insertIdx]
-			insertIdx++
+			insertIdx += 1
 		case existing[existingIdx].RowID < inserts[insertIdx]:
 			rowID = existing[existingIdx].RowID
-			existingIdx++
+			existingIdx += 1
 		case existing[existingIdx].RowID > inserts[insertIdx]:
 			rowID = inserts[insertIdx]
-			insertIdx++
+			insertIdx += 1
 		default:
 			rowID = existing[existingIdx].RowID
-			existingIdx++
-			insertIdx++
+			existingIdx += 1
+			insertIdx += 1
 		}
 		for deleteIdx < len(deletes) && deletes[deleteIdx] < rowID {
-			deleteIdx++
+			deleteIdx += 1
 		}
 		if deleteIdx < len(deletes) && deletes[deleteIdx] == rowID {
 			continue

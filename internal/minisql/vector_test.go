@@ -32,7 +32,7 @@ func (m *mockTxPager) ModifyPage(ctx context.Context, idx PageIndex) (*Page, err
 }
 func (m *mockTxPager) GetFreePage(_ context.Context) (*Page, error) {
 	idx := m.nextIdx
-	m.nextIdx++
+	m.nextIdx += 1
 	p := &Page{Index: idx}
 	m.pages[idx] = p
 	return p, nil

@@ -185,10 +185,10 @@ type parser struct{}
 
 type parserItem struct {
 	minisql.Statement
-	i        int    // where we are in the query
-	sql      string // original (case-preserved) SQL, used for literals and identifiers
-	upperSQL string // strings.ToUpper(sql), computed once; used for keyword matching
-	step     step
+	i                 int    // where we are in the query
+	sql               string // original (case-preserved) SQL, used for literals and identifiers
+	upperSQL          string // strings.ToUpper(sql), computed once; used for keyword matching
+	step              step
 	nextUpdateField   string
 	joinInProgress    minisql.Join
 	cteNameInProgress string
@@ -662,7 +662,7 @@ func (p *parserItem) peekWithLength() (string, int) {
 	if p.sql[p.i] == '-' && p.i+1 < len(p.sql) && unicode.IsDigit(rune(p.sql[p.i+1])) {
 		end := p.i + 2
 		for end < len(p.sql) && (unicode.IsDigit(rune(p.sql[end])) || p.sql[end] == '.') {
-			end++
+			end += 1
 		}
 		return p.sql[p.i:end], end - p.i
 	}
@@ -748,7 +748,7 @@ func (p *parserItem) peekValue() (any, int) {
 	// Negative numeric literal: '-' immediately followed by a digit.
 	if p.i+1 < len(p.sql) && p.sql[p.i] == '-' && unicode.IsDigit(rune(p.sql[p.i+1])) {
 		savedI := p.i
-		p.i++
+		p.i += 1
 		number, ln = p.peekNumberWithLength()
 		p.i = savedI
 		if ln > 0 {

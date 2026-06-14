@@ -805,7 +805,7 @@ func (g *hnswGraph) pruneNeighbors(self RowID, neighbors []RowID, mMax int, dist
 func (g *hnswGraph) randomLevel() int {
 	level := 0
 	for rand.Float64() < (1.0-1.0/float64(g.M)) && level < 16 {
-		level++
+		level += 1
 	}
 	return level
 }
