@@ -36,6 +36,7 @@ The database file is created automatically if it does not exist.
 |------|-------------|
 | `-c <query>` | Execute a SQL statement and exit (may be repeated). |
 | `-csv` | Set output format to CSV (default: table). |
+| `-o <file>` | Write query output to a file in CSV format (implies `-csv`). Errors and status messages are still printed to stderr. |
 | `-h` / `--help` | Print usage. |
 
 ## Interactive shell
@@ -87,6 +88,29 @@ minisql -csv -c 'select * from "users"' my.db | cut -d, -f2
 ```
 
 Output mode flags apply to `-c` as well — combine `-csv` with `-c` for machine-readable output.
+
+## Exporting to a CSV file (`-o`)
+
+Use `-o <file>` to write query results directly to a file instead of stdout. CSV format is enabled automatically.
+
+```bash
+# Export a table to a file
+minisql -o users.csv -c 'select * from "users"' my.db
+
+# Export with an explicit query
+minisql -o report.csv -c 'select name, age from "users" where age > 25 order by age' my.db
+```
+
+Errors and status messages (row counts, timing) are printed to stderr and never written to the output file, so the file always contains valid CSV even when something goes wrong.
+
+```bash
+# The CSV file is clean; errors appear only in the terminal
+minisql -o out.csv -c 'select * from "missing_table"' my.db
+# stderr: Error: table "missing_table" not found
+# out.csv: (empty)
+```
+
+`-o` is intended for a single SELECT query. When multiple `-c` flags are used alongside `-o`, each SELECT writes its own header line followed by its rows, which produces invalid CSV for most parsers. For multi-step exports, run a single query that joins or unions the data you need.
 
 ## Dot commands
 
