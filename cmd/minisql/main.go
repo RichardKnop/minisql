@@ -40,6 +40,10 @@ Examples:
 `
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	var (
 		queries     multiFlag
 		csvMode     bool
@@ -55,12 +59,12 @@ func main() {
 
 	if showVersion {
 		fmt.Printf("minisql %s (commit %s, built %s)\n", version, commit, date)
-		return
+		return 0
 	}
 
 	if flag.NArg() != 1 {
 		fmt.Fprint(os.Stderr, usage)
-		os.Exit(1)
+		return 1
 	}
 
 	filePath := flag.Arg(0)
@@ -68,7 +72,7 @@ func main() {
 	db, err := sql.Open("minisql", filePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error opening %s: %v\n", filePath, err)
-		os.Exit(1)
+		return 1
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
@@ -76,7 +80,7 @@ func main() {
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
 		fmt.Fprintf(os.Stderr, "Error connecting to %s: %v\n", filePath, err)
-		os.Exit(1)
+		return 1
 	}
 	defer db.Close()
 
@@ -88,7 +92,7 @@ func main() {
 		f, err := os.Create(outputFile)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error opening output file %s: %v\n", outputFile, err)
-			os.Exit(1)
+			return 1
 		}
 		defer f.Close()
 		sh.out = f
@@ -99,10 +103,11 @@ func main() {
 		for _, q := range queries {
 			sh.exec(q)
 		}
-		return
+		return 0
 	}
 
 	sh.run()
+	return 0
 }
 
 // multiFlag collects repeated -c flags into a slice.
