@@ -20,8 +20,8 @@ func (h *mergeHeap) Len() int { return len(h.items) }
 
 func (h *mergeHeap) Less(i, j int) bool {
 	for _, clause := range h.orderBy {
-		vi, foundI := h.items[i].row.getValueQualified(clause.Field.AliasPrefix, clause.Field.Name)
-		vj, foundJ := h.items[j].row.getValueQualified(clause.Field.AliasPrefix, clause.Field.Name)
+		vi, foundI, _ := evalOrderByValue(clause, h.items[i].row)
+		vj, foundJ, _ := evalOrderByValue(clause, h.items[j].row)
 		if !foundI || !foundJ {
 			continue
 		}

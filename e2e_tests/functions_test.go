@@ -490,3 +490,156 @@ func (s *TestSuite) TestDateTimeFunctions_TO_TIMESTAMP() {
 	s.Require().NoError(err)
 	s.Equal("2025-06-01 12:00:00", created.UTC().Format("2006-01-02 15:04:05"))
 }
+
+// ── NATURAL_SORT ─────────────────────────────────────────────────────────────
+
+func (s *TestSuite) TestNaturalSort_OrderBySemver() {
+	_, err := s.db.Exec(`create table "releases" (
+		id      int8 primary key autoincrement,
+		version varchar(64) not null
+	)`)
+	s.Require().NoError(err)
+
+	versions := []string{"1.10.2", "1.2.0", "1.9.1", "2.0.0", "1.2.10", "10.0.0"}
+	stmt, err := s.db.Prepare(`insert into "releases" (version) values (?)`)
+	s.Require().NoError(err)
+	for _, v := range versions {
+		_, err = stmt.Exec(v)
+		s.Require().NoError(err)
+	}
+	stmt.Close()
+
+	rows, err := s.db.Query(`select version from "releases" order by NATURAL_SORT(version)`)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	var got []string
+	for rows.Next() {
+		var v string
+		s.Require().NoError(rows.Scan(&v))
+		got = append(got, v)
+	}
+	s.Require().NoError(rows.Err())
+
+	want := []string{"1.2.0", "1.2.10", "1.9.1", "1.10.2", "2.0.0", "10.0.0"}
+	s.Equal(want, got)
+}
+
+func (s *TestSuite) TestNaturalSort_MixedAlphaNumeric() {
+	_, err := s.db.Exec(`create table "files" (
+		id   int8 primary key autoincrement,
+		name varchar(64) not null
+	)`)
+	s.Require().NoError(err)
+
+	names := []string{"file10.txt", "file2.txt", "file1.txt", "file20.txt"}
+	stmt, err := s.db.Prepare(`insert into "files" (name) values (?)`)
+	s.Require().NoError(err)
+	for _, n := range names {
+		_, err = stmt.Exec(n)
+		s.Require().NoError(err)
+	}
+	stmt.Close()
+
+	rows, err := s.db.Query(`select name from "files" order by NATURAL_SORT(name)`)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	var got []string
+	for rows.Next() {
+		var n string
+		s.Require().NoError(rows.Scan(&n))
+		got = append(got, n)
+	}
+	s.Require().NoError(rows.Err())
+
+	s.Equal([]string{"file1.txt", "file2.txt", "file10.txt", "file20.txt"}, got)
+}
+
+func (s *TestSuite) TestNaturalSort_NullPropagation() {
+	_, err := s.db.Exec(`create table "items" (
+		id    int8 primary key autoincrement,
+		label varchar(64)
+	)`)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`insert into "items" (label) values (NULL)`)
+	s.Require().NoError(err)
+
+	var result *string
+	err = s.db.QueryRow(`select NATURAL_SORT(label) from "items"`).Scan(&result)
+	s.Require().NoError(err)
+	s.Nil(result)
+}
+
+func (s *TestSuite) TestNaturalSort_SelectKey() {
+	_, err := s.db.Exec(`create table "pkgs" (
+		id      int8 primary key autoincrement,
+		version varchar(64) not null
+	)`)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(`insert into "pkgs" (version) values ('3.1.0')`)
+	s.Require().NoError(err)
+
+	var key string
+	err = s.db.QueryRow(`select NATURAL_SORT(version) from "pkgs"`).Scan(&key)
+	s.Require().NoError(err)
+	// 3 → 20-digit padded, dots preserved
+	s.Equal("00000000000000000003.00000000000000000001.00000000000000000000", key)
+}
+
+func (s *TestSuite) TestNaturalSort_OrderByDesc() {
+	_, err := s.db.Exec(`create table "tags" (
+		id   int8 primary key autoincrement,
+		name varchar(64) not null
+	)`)
+	s.Require().NoError(err)
+
+	for _, n := range []string{"v1.9.0", "v1.10.0", "v1.2.0"} {
+		_, err = s.db.Exec(`insert into "tags" (name) values (?)`, n)
+		s.Require().NoError(err)
+	}
+
+	rows, err := s.db.Query(`select name from "tags" order by NATURAL_SORT(name) desc`)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	var got []string
+	for rows.Next() {
+		var n string
+		s.Require().NoError(rows.Scan(&n))
+		got = append(got, n)
+	}
+	s.Require().NoError(rows.Err())
+
+	s.Equal([]string{"v1.10.0", "v1.9.0", "v1.2.0"}, got)
+}
+
+func (s *TestSuite) TestNaturalSort_WithLimit() {
+	_, err := s.db.Exec(`create table "versions" (
+		id  int8 primary key autoincrement,
+		ver varchar(64) not null
+	)`)
+	s.Require().NoError(err)
+
+	for _, v := range []string{"1.10.0", "1.2.0", "1.9.0", "2.0.0", "0.9.0"} {
+		_, err = s.db.Exec(`insert into "versions" (ver) values (?)`, v)
+		s.Require().NoError(err)
+	}
+
+	// Top 3 oldest versions.
+	rows, err := s.db.Query(`select ver from "versions" order by NATURAL_SORT(ver) limit 3`)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	var got []string
+	for rows.Next() {
+		var v string
+		s.Require().NoError(rows.Scan(&v))
+		got = append(got, v)
+	}
+	s.Require().NoError(rows.Err())
+
+	s.Equal([]string{"0.9.0", "1.2.0", "1.9.0"}, got)
+}

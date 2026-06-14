@@ -30,8 +30,8 @@ func (h *rowHeap) Less(i, j int) bool {
 	// For a min-heap that keeps largest elements, we reverse the comparison
 	// This way, the smallest element is at the top and gets popped first
 	for _, clause := range h.orderBy {
-		valI, foundI := h.rows[i].getValueQualified(clause.Field.AliasPrefix, clause.Field.Name)
-		valJ, foundJ := h.rows[j].getValueQualified(clause.Field.AliasPrefix, clause.Field.Name)
+		valI, foundI, _ := evalOrderByValue(clause, h.rows[i])
+		valJ, foundJ, _ := evalOrderByValue(clause, h.rows[j])
 
 		if !foundI || !foundJ {
 			continue
@@ -87,8 +87,8 @@ func (h *rowHeap) PushRow(row Row) {
 		shouldReplace := false
 
 		for _, clause := range h.orderBy {
-			valRoot, foundRoot := h.rows[0].getValueQualified(clause.Field.AliasPrefix, clause.Field.Name)
-			valNew, foundNew := row.getValueQualified(clause.Field.AliasPrefix, clause.Field.Name)
+			valRoot, foundRoot, _ := evalOrderByValue(clause, h.rows[0])
+			valNew, foundNew, _ := evalOrderByValue(clause, row)
 
 			if !foundRoot || !foundNew {
 				continue

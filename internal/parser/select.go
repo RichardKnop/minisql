@@ -501,6 +501,28 @@ func (p *parserItem) doParseSelect() error {
 		if identifier == "*" {
 			return p.errorf(`at ORDER BY: cannot order by "*"`)
 		}
+
+		// If the token is a known scalar function, parse the full call as an expression.
+		if isBuiltinFunction(strings.ToUpper(identifier)) {
+			expr, err := p.parseExpr()
+			if err != nil {
+				return p.errorf("at ORDER BY: %v", err)
+			}
+			theDirection := minisql.Asc
+			if direction := strings.ToUpper(p.peek()); direction == "ASC" || direction == "DESC" {
+				if direction == "DESC" {
+					theDirection = minisql.Desc
+				}
+				p.pop()
+			}
+			p.OrderBy = append(p.OrderBy, minisql.OrderBy{
+				Field:     minisql.Field{Expr: expr},
+				Direction: theDirection,
+			})
+			p.step = stepSelectOrderByComma
+			return nil
+		}
+
 		p.pop()
 
 		// Parse field name and optional alias prefix (e.g., "u.name" -> prefix="u", name="name")

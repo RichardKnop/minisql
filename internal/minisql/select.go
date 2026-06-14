@@ -1444,8 +1444,8 @@ func (acc *groupByAccumulator) buildResult(stmt Statement, t *Table) (StatementR
 			rowA := NewRowWithValues(resultColumns, allResultValues[int(a)*nFields:(int(a)+1)*nFields])
 			rowB := NewRowWithValues(resultColumns, allResultValues[int(b)*nFields:(int(b)+1)*nFields])
 			for _, clause := range stmt.OrderBy {
-				valA, foundA := rowA.getValueQualified(clause.Field.AliasPrefix, clause.Field.Name)
-				valB, foundB := rowB.getValueQualified(clause.Field.AliasPrefix, clause.Field.Name)
+				valA, foundA, _ := evalOrderByValue(clause, rowA)
+				valB, foundB, _ := evalOrderByValue(clause, rowB)
 				if !foundA || !foundB {
 					continue
 				}
