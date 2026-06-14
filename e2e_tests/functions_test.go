@@ -643,3 +643,197 @@ func (s *TestSuite) TestNaturalSort_WithLimit() {
 
 	s.Equal([]string{"0.9.0", "1.2.0", "1.9.0"}, got)
 }
+
+// ── Password hashing functions ────────────────────────────────────────────────
+
+func (s *TestSuite) TestPasswordFunctions_Argon2id_HashAndVerify() {
+	_, err := s.db.Exec(`create table "users" (
+		id       int8 primary key autoincrement,
+		email    varchar(255) not null,
+		password text not null
+	)`)
+	s.Require().NoError(err)
+
+	// Insert a row, hashing the password at INSERT time.
+	_, err = s.db.Exec(
+		`insert into "users" (email, password) values (?, ARGON2ID_HASH(?))`,
+		"alice@example.com", "s3cr3t",
+	)
+	s.Require().NoError(err)
+
+	// The stored hash must look like a PHC Argon2id string.
+	var stored string
+	s.Require().NoError(
+		s.db.QueryRow(`select password from "users" where email = 'alice@example.com'`).Scan(&stored),
+	)
+	s.Contains(stored, "$argon2id$")
+
+	// ARGON2ID_VERIFY returns 1 for the correct password, 0 for wrong.
+	var match int64
+	s.Require().NoError(
+		s.db.QueryRow(
+			`select ARGON2ID_VERIFY(?, password) from "users" where email = ?`,
+			"s3cr3t", "alice@example.com",
+		).Scan(&match),
+	)
+	s.Equal(int64(1), match)
+
+	s.Require().NoError(
+		s.db.QueryRow(
+			`select ARGON2ID_VERIFY(?, password) from "users" where email = ?`,
+			"wrong", "alice@example.com",
+		).Scan(&match),
+	)
+	s.Equal(int64(0), match)
+}
+
+func (s *TestSuite) TestPasswordFunctions_Argon2id_UniqueHashes() {
+	_, err := s.db.Exec(`create table "accounts" (
+		id   int8 primary key autoincrement,
+		hash text not null
+	)`)
+	s.Require().NoError(err)
+
+	// Same password inserted twice must produce different hashes (random salt).
+	for range 2 {
+		_, err = s.db.Exec(`insert into "accounts" (hash) values (ARGON2ID_HASH('password'))`)
+		s.Require().NoError(err)
+	}
+
+	rows, err := s.db.Query(`select hash from "accounts"`)
+	s.Require().NoError(err)
+	defer rows.Close()
+
+	var hashes []string
+	for rows.Next() {
+		var h string
+		s.Require().NoError(rows.Scan(&h))
+		hashes = append(hashes, h)
+	}
+	s.Require().NoError(rows.Err())
+	s.Require().Len(hashes, 2)
+	s.NotEqual(hashes[0], hashes[1])
+}
+
+func (s *TestSuite) TestPasswordFunctions_Argon2id_NullPropagation() {
+	_, err := s.db.Exec(`create table "nullpw" (pw text)`)
+	s.Require().NoError(err)
+	_, err = s.db.Exec(`insert into "nullpw" (pw) values (NULL)`)
+	s.Require().NoError(err)
+
+	var hashResult *string
+	s.Require().NoError(
+		s.db.QueryRow(`select ARGON2ID_HASH(pw) from "nullpw"`).Scan(&hashResult),
+	)
+	s.Nil(hashResult)
+
+	var verifyResult *int64
+	s.Require().NoError(
+		s.db.QueryRow(`select ARGON2ID_VERIFY('x', pw) from "nullpw"`).Scan(&verifyResult),
+	)
+	s.Nil(verifyResult)
+}
+
+func (s *TestSuite) TestPasswordFunctions_Bcrypt_HashAndVerify() {
+	_, err := s.db.Exec(`create table "bcrypt_users" (
+		id       int8 primary key autoincrement,
+		email    varchar(255) not null,
+		password text not null
+	)`)
+	s.Require().NoError(err)
+
+	// Use cost 4 (minimum) so the test runs quickly.
+	_, err = s.db.Exec(
+		`insert into "bcrypt_users" (email, password) values (?, BCRYPT_HASH(?, 4))`,
+		"bob@example.com", "hunter2",
+	)
+	s.Require().NoError(err)
+
+	var stored string
+	s.Require().NoError(
+		s.db.QueryRow(`select password from "bcrypt_users" where email = 'bob@example.com'`).Scan(&stored),
+	)
+	s.True(len(stored) > 0)
+	s.Contains(stored, "$2")
+
+	var match int64
+	s.Require().NoError(
+		s.db.QueryRow(
+			`select BCRYPT_VERIFY(?, password) from "bcrypt_users" where email = ?`,
+			"hunter2", "bob@example.com",
+		).Scan(&match),
+	)
+	s.Equal(int64(1), match)
+
+	s.Require().NoError(
+		s.db.QueryRow(
+			`select BCRYPT_VERIFY(?, password) from "bcrypt_users" where email = ?`,
+			"wrong", "bob@example.com",
+		).Scan(&match),
+	)
+	s.Equal(int64(0), match)
+}
+
+func (s *TestSuite) TestPasswordFunctions_Bcrypt_DefaultCost() {
+	// BCRYPT_HASH with no cost argument should succeed (uses default cost).
+	_, err := s.db.Exec(`create table "bcrypt_cost_test" (id int8 primary key)`)
+	s.Require().NoError(err)
+	_, err = s.db.Exec(`insert into "bcrypt_cost_test" (id) values (1)`)
+	s.Require().NoError(err)
+
+	var h string
+	s.Require().NoError(
+		s.db.QueryRow(`select BCRYPT_HASH('secret') from "bcrypt_cost_test"`).Scan(&h),
+	)
+	s.Contains(h, "$2")
+}
+
+func (s *TestSuite) TestPasswordFunctions_Bcrypt_NullPropagation() {
+	_, err := s.db.Exec(`create table "nullpw2" (pw text)`)
+	s.Require().NoError(err)
+	_, err = s.db.Exec(`insert into "nullpw2" (pw) values (NULL)`)
+	s.Require().NoError(err)
+
+	var hashResult *string
+	s.Require().NoError(
+		s.db.QueryRow(`select BCRYPT_HASH(pw) from "nullpw2"`).Scan(&hashResult),
+	)
+	s.Nil(hashResult)
+
+	var verifyResult *int64
+	s.Require().NoError(
+		s.db.QueryRow(`select BCRYPT_VERIFY('x', pw) from "nullpw2"`).Scan(&verifyResult),
+	)
+	s.Nil(verifyResult)
+}
+
+func (s *TestSuite) TestPasswordFunctions_UsedInWhere() {
+	_, err := s.db.Exec(`create table "members" (
+		id       int8 primary key autoincrement,
+		email    varchar(255) not null,
+		password text not null
+	)`)
+	s.Require().NoError(err)
+
+	_, err = s.db.Exec(
+		`insert into "members" (email, password) values (?, ARGON2ID_HASH(?))`,
+		"carol@example.com", "p@ssw0rd",
+	)
+	s.Require().NoError(err)
+
+	// Authenticate: select the user only when the password matches.
+	var email string
+	err = s.db.QueryRow(
+		`select email from "members" where ARGON2ID_VERIFY(?, password) = 1`,
+		"p@ssw0rd",
+	).Scan(&email)
+	s.Require().NoError(err)
+	s.Equal("carol@example.com", email)
+
+	// Wrong password returns no rows.
+	err = s.db.QueryRow(
+		`select email from "members" where ARGON2ID_VERIFY(?, password) = 1`,
+		"wrong",
+	).Scan(&email)
+	s.ErrorContains(err, "no rows")
+}

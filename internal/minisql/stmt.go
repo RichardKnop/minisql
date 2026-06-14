@@ -539,6 +539,8 @@ func (s Statement) NumPlaceholders() int {
 			for _, val := range anInsert {
 				if _, ok := val.Value.(Placeholder); ok {
 					count += 1
+				} else if expr, ok := val.Value.(*Expr); ok {
+					count += countExprPlaceholders(expr)
 				}
 			}
 		}
@@ -562,6 +564,11 @@ func (s Statement) NumPlaceholders() int {
 
 	for _, condGroup := range s.Conditions {
 		for _, cond := range condGroup {
+			if cond.Operand1.Type == OperandExpr {
+				if expr, ok := cond.Operand1.Value.(*Expr); ok {
+					count += countExprPlaceholders(expr)
+				}
+			}
 			if cond.Operand2.Type == OperandPlaceholder {
 				count += 1
 				continue
@@ -571,6 +578,11 @@ func (s Statement) NumPlaceholders() int {
 					if _, ok := value.(Placeholder); ok {
 						count += 1
 					}
+				}
+			}
+			if cond.Operand2.Type == OperandExpr {
+				if expr, ok := cond.Operand2.Value.(*Expr); ok {
+					count += countExprPlaceholders(expr)
 				}
 			}
 		}
@@ -821,18 +833,29 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 	if s.Kind == Insert {
 		for i, anInsert := range stmt.Inserts {
 			for j, val := range anInsert {
-				if _, ok := val.Value.(Placeholder); !ok {
-					continue
+				if _, ok := val.Value.(Placeholder); ok {
+					if len(args) == 0 {
+						return Statement{}, errors.New("not enough arguments to bind placeholders")
+					}
+					if args[0] == nil {
+						stmt.Inserts[i][j] = OptionalValue{}
+					} else {
+						stmt.Inserts[i][j].Value = args[0]
+					}
+					args = args[1:]
+				} else if expr, ok := val.Value.(*Expr); ok {
+					n := countExprPlaceholders(expr)
+					if n > 0 {
+						if len(args) < n {
+							return Statement{}, errors.New("not enough arguments to bind placeholders")
+						}
+						cloned := cloneExpr(expr)
+						exprArgs := make([]any, n)
+						copy(exprArgs, args[:n])
+						args = args[n:]
+						stmt.Inserts[i][j].Value = substituteExprPlaceholders(cloned, &exprArgs)
+					}
 				}
-				if len(args) == 0 {
-					return Statement{}, errors.New("not enough arguments to bind placeholders")
-				}
-				if args[0] == nil {
-					stmt.Inserts[i][j] = OptionalValue{}
-				} else {
-					stmt.Inserts[i][j].Value = args[0]
-				}
-				args = args[1:]
 			}
 		}
 		// Bind DO UPDATE SET placeholders in field order.
@@ -880,8 +903,39 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 		}
 	}
 
+	// Bind placeholders in SELECT field expressions before WHERE conditions, so
+	// that left-to-right SQL text order is respected (SELECT fields appear before
+	// WHERE in the query, and users pass args in that order).
+	if s.Kind == Select {
+		for i, field := range stmt.Fields {
+			if countExprPlaceholders(field.Expr) == 0 {
+				continue
+			}
+			if len(args) == 0 {
+				return Statement{}, errors.New("not enough arguments to bind placeholders")
+			}
+			stmt.Fields[i].Expr = substituteExprPlaceholders(field.Expr, &args)
+		}
+	}
+
 	for i, condGroup := range stmt.Conditions {
 		for j, cond := range condGroup {
+			if cond.Operand1.Type == OperandExpr {
+				if expr, ok := cond.Operand1.Value.(*Expr); ok {
+					n := countExprPlaceholders(expr)
+					if n > 0 {
+						if len(args) < n {
+							return Statement{}, errors.New("not enough arguments to bind placeholders")
+						}
+						cloned := cloneExpr(expr)
+						exprArgs := make([]any, n)
+						copy(exprArgs, args[:n])
+						args = args[n:]
+						cond.Operand1.Value = substituteExprPlaceholders(cloned, &exprArgs)
+						stmt.Conditions[i][j] = cond
+					}
+				}
+			}
 			if cond.Operand2.Type == OperandPlaceholder {
 				if len(args) == 0 {
 					return Statement{}, errors.New("not enough arguments to bind placeholders")
@@ -908,6 +962,22 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 				}
 				cond.Operand2.Value = newList
 				stmt.Conditions[i][j] = cond
+			}
+			if cond.Operand2.Type == OperandExpr {
+				if expr, ok := cond.Operand2.Value.(*Expr); ok {
+					n := countExprPlaceholders(expr)
+					if n > 0 {
+						if len(args) < n {
+							return Statement{}, errors.New("not enough arguments to bind placeholders")
+						}
+						cloned := cloneExpr(expr)
+						exprArgs := make([]any, n)
+						copy(exprArgs, args[:n])
+						args = args[n:]
+						cond.Operand2.Value = substituteExprPlaceholders(cloned, &exprArgs)
+						stmt.Conditions[i][j] = cond
+					}
+				}
 			}
 		}
 	}
@@ -941,19 +1011,6 @@ func (s Statement) BindArguments(args ...any) (Statement, error) {
 				cond.Operand2.Value = newList
 				stmt.Having[i][j] = cond
 			}
-		}
-	}
-
-	// Bind placeholders in SELECT field expressions (e.g. VEC_L2(v, ?)).
-	if s.Kind == Select {
-		for i, field := range stmt.Fields {
-			if countExprPlaceholders(field.Expr) == 0 {
-				continue
-			}
-			if len(args) == 0 {
-				return Statement{}, errors.New("not enough arguments to bind placeholders")
-			}
-			stmt.Fields[i].Expr = substituteExprPlaceholders(field.Expr, &args)
 		}
 	}
 
@@ -1426,6 +1483,16 @@ func (s Statement) prepareUpdate(now Time) (Statement, error) {
 func coerceColumnValue(col Column, val OptionalValue, now Time, ctx string) (OptionalValue, error) {
 	if !val.Valid {
 		return val, nil
+	}
+	if expr, ok := val.Value.(*Expr); ok {
+		v, err := expr.Eval(Row{})
+		if err != nil {
+			return val, fmt.Errorf("expression in INSERT: %w", err)
+		}
+		if v == nil {
+			return OptionalValue{}, nil
+		}
+		val.Value = v
 	}
 	if fn, ok := val.Value.(Function); ok {
 		switch fn.Name {

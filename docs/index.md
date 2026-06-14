@@ -75,7 +75,7 @@ for rows.Next() {
 | [Data Types](data-types.md) | All supported column types |
 | [SQL Reference](sql/create-table.md) | Full SQL syntax reference |
 | [Indexes](indexes/overview.md) | B-tree, full-text, JSON, HNSW |
-| [Functions](functions/string.md) | String, numeric, date/time, UUID, aggregate, window, JSON functions |
+| [Functions](functions/string.md) | String, numeric, date/time, UUID, aggregate, window, JSON, password functions |
 | [JSON](json.md) | JSON type, operators, inverted index |
 | [Vector Search](vector-search.md) | VECTOR type and HNSW ANN search |
 | [Encryption](encryption.md) | Transparent AES-256-CTR encryption |

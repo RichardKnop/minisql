@@ -168,6 +168,17 @@ func (p *parserItem) doParseInsert() error {
 			p.step = stepInsertValuesCommaOrClosingParens
 			return nil
 		}
+		// Scalar function call (e.g. ARGON2ID_HASH(?), UPPER('x')).
+		if isBuiltinFunction(specialValue) {
+			expr, err := p.parseExpr()
+			if err != nil {
+				return p.errorf("at INSERT INTO: %v", err)
+			}
+			p.Inserts[len(p.Inserts)-1] = append(p.Inserts[len(p.Inserts)-1],
+				minisql.OptionalValue{Value: expr, Valid: true})
+			p.step = stepInsertValuesCommaOrClosingParens
+			return nil
+		}
 		value, ln := p.peekValue()
 		if ln > 0 {
 			var insertValue minisql.OptionalValue
