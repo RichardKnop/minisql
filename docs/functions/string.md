@@ -89,6 +89,38 @@ Alternatively, use the `||` operator:
 SELECT first_name || ' ' || last_name FROM users;
 ```
 
+## NATURAL_SORT(str)
+
+Converts a string to a sort key where each run of ASCII digits is zero-padded to 20 characters. Comparing these keys lexicographically gives the same order as natural (human) sort — numeric segments are compared by value, not by byte sequence.
+
+```sql
+-- Semantic version ordering
+SELECT version FROM releases ORDER BY NATURAL_SORT(version);
+-- '1.2.0', '1.9.1', '1.10.2', '2.0.0', '10.0.0'   ✓
+-- (plain ORDER BY version gives '1.10.2', '1.2.0', '1.9.1', ...)
+
+-- File names with embedded numbers
+SELECT name FROM files ORDER BY NATURAL_SORT(name);
+-- 'file1.txt', 'file2.txt', 'file10.txt', 'file20.txt'
+
+-- Descending
+SELECT version FROM releases ORDER BY NATURAL_SORT(version) DESC;
+
+-- Inspect the sort key
+SELECT NATURAL_SORT('1.10.2');
+-- '00000000000000000001.00000000000000000010.00000000000000000002'
+```
+
+`NATURAL_SORT` returns `NULL` when its argument is `NULL`.
+
+The key can also be stored in an expression index to accelerate queries that always sort by natural order:
+
+```sql
+CREATE INDEX idx_releases_ver ON releases (NATURAL_SORT(version));
+
+SELECT version FROM releases ORDER BY NATURAL_SORT(version) LIMIT 10;
+```
+
 ## NULL behaviour
 
 All string functions return `NULL` if any non-skippable argument is `NULL`:
