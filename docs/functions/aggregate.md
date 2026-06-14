@@ -86,9 +86,6 @@ GROUP BY user_id
 HAVING SUM(amount) > 1000;
 ```
 
-!!! note
-    `HAVING` does not support `?` bind parameters. Use literal values in HAVING conditions.
-
 ## COUNT(DISTINCT …)
 
 ```sql

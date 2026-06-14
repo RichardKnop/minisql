@@ -96,6 +96,7 @@ nav:
     - String: functions/string.md
     - Numeric: functions/numeric.md
     - Date & Time: functions/datetime.md
+    - UUID: functions/uuid.md
     - Aggregate: functions/aggregate.md
     - Window: functions/window.md
     - JSON: functions/json.md
