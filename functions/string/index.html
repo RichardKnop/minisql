@@ -1522,6 +1522,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#natural_sortstr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NATURAL_SORT(str)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#null-behaviour" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2110,6 +2121,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#natural_sortstr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NATURAL_SORT(str)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#null-behaviour" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2250,20 +2272,44 @@
 <p>Alternatively, use the <code>||</code> operator:</p>
 <div class="language-sql highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">first_name</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="s1">&#39; &#39;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">last_name</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">users</span><span class="p">;</span>
 </span></code></pre></div>
+<h2 id="natural_sortstr">NATURAL_SORT(str)<a class="headerlink" href="#natural_sortstr" title="Permanent link">&para;</a></h2>
+<p>Converts a string to a sort key where each run of ASCII digits is zero-padded to 20 characters. Comparing these keys lexicographically gives the same order as natural (human) sort — numeric segments are compared by value, not by byte sequence.</p>
+<div class="language-sql highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1">-- Semantic version ordering</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="k">version</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">releases</span><span class="w"> </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">NATURAL_SORT</span><span class="p">(</span><span class="k">version</span><span class="p">);</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="c1">-- &#39;1.2.0&#39;, &#39;1.9.1&#39;, &#39;1.10.2&#39;, &#39;2.0.0&#39;, &#39;10.0.0&#39;   ✓</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1">-- (plain ORDER BY version gives &#39;1.10.2&#39;, &#39;1.2.0&#39;, &#39;1.9.1&#39;, ...)</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="c1">-- File names with embedded numbers</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">name</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">files</span><span class="w"> </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">NATURAL_SORT</span><span class="p">(</span><span class="n">name</span><span class="p">);</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="c1">-- &#39;file1.txt&#39;, &#39;file2.txt&#39;, &#39;file10.txt&#39;, &#39;file20.txt&#39;</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="c1">-- Descending</span>
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="k">SELECT</span><span class="w"> </span><span class="k">version</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">releases</span><span class="w"> </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">NATURAL_SORT</span><span class="p">(</span><span class="k">version</span><span class="p">)</span><span class="w"> </span><span class="k">DESC</span><span class="p">;</span>
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>
+</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="c1">-- Inspect the sort key</span>
+</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">NATURAL_SORT</span><span class="p">(</span><span class="s1">&#39;1.10.2&#39;</span><span class="p">);</span>
+</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="c1">-- &#39;00000000000000000001.00000000000000000010.00000000000000000002&#39;</span>
+</span></code></pre></div>
+<p><code>NATURAL_SORT</code> returns <code>NULL</code> when its argument is <code>NULL</code>.</p>
+<p>The key can also be stored in an expression index to accelerate queries that always sort by natural order:</p>
+<div class="language-sql highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="n">idx_releases_ver</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">releases</span><span class="w"> </span><span class="p">(</span><span class="n">NATURAL_SORT</span><span class="p">(</span><span class="k">version</span><span class="p">));</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="k">version</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">releases</span><span class="w"> </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">NATURAL_SORT</span><span class="p">(</span><span class="k">version</span><span class="p">)</span><span class="w"> </span><span class="k">LIMIT</span><span class="w"> </span><span class="mi">10</span><span class="p">;</span>
+</span></code></pre></div>
 <h2 id="null-behaviour">NULL behaviour<a class="headerlink" href="#null-behaviour" title="Permanent link">&para;</a></h2>
 <p>All string functions return <code>NULL</code> if any non-skippable argument is <code>NULL</code>:</p>
-<div class="language-sql highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="k">UPPER</span><span class="p">(</span><span class="k">NULL</span><span class="p">);</span><span class="w">         </span><span class="c1">-- NULL</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="k">LENGTH</span><span class="p">(</span><span class="k">NULL</span><span class="p">);</span><span class="w">        </span><span class="c1">-- NULL</span>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="k">REPLACE</span><span class="p">(</span><span class="k">NULL</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;a&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;b&#39;</span><span class="p">);</span><span class="w"> </span><span class="c1">-- NULL</span>
+<div class="language-sql highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="k">UPPER</span><span class="p">(</span><span class="k">NULL</span><span class="p">);</span><span class="w">         </span><span class="c1">-- NULL</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="k">LENGTH</span><span class="p">(</span><span class="k">NULL</span><span class="p">);</span><span class="w">        </span><span class="c1">-- NULL</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="k">REPLACE</span><span class="p">(</span><span class="k">NULL</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;a&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;b&#39;</span><span class="p">);</span><span class="w"> </span><span class="c1">-- NULL</span>
 </span></code></pre></div>
 <p><code>CONCAT</code> is an exception — it skips <code>NULL</code> arguments and returns the concatenation of non-null values.</p>
 <hr />
 <h2 id="expression-index-example">Expression index example<a class="headerlink" href="#expression-index-example" title="Permanent link">&para;</a></h2>
 <p>String functions can be used in expression indexes to accelerate function-based predicates:</p>
-<div class="language-sql highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="n">idx_lower_email</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">users</span><span class="w"> </span><span class="p">(</span><span class="k">LOWER</span><span class="p">(</span><span class="n">email</span><span class="p">));</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="c1">-- Uses the expression index</span>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">users</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="k">LOWER</span><span class="p">(</span><span class="n">email</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;alice@example.com&#39;</span><span class="p">;</span>
+<div class="language-sql highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="n">idx_lower_email</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">users</span><span class="w"> </span><span class="p">(</span><span class="k">LOWER</span><span class="p">(</span><span class="n">email</span><span class="p">));</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="c1">-- Uses the expression index</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">users</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="k">LOWER</span><span class="p">(</span><span class="n">email</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;alice@example.com&#39;</span><span class="p">;</span>
 </span></code></pre></div>
 
 
