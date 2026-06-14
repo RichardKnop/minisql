@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://richardknop.github.io/minisql/functions/aggregate/">
       
       
-        <link rel="prev" href="../datetime/">
+        <link rel="prev" href="../uuid/">
       
       
         <link rel="next" href="../window/">
@@ -1444,6 +1444,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../uuid/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UUID
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -2167,10 +2195,6 @@
 </span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">user_id</span>
 </span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="k">HAVING</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">1000</span><span class="p">;</span>
 </span></code></pre></div>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p><code>HAVING</code> does not support <code>?</code> bind parameters. Use literal values in HAVING conditions.</p>
-</div>
 <h2 id="countdistinct">COUNT(DISTINCT …)<a class="headerlink" href="#countdistinct" title="Permanent link">&para;</a></h2>
 <div class="language-sql highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1">-- Number of unique products ordered</span>
 </span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="k">DISTINCT</span><span class="w"> </span><span class="n">product_id</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">order_lines</span><span class="p">;</span>
@@ -2236,7 +2260,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../datetime/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Date &amp; Time">
+          <a href="../uuid/" class="md-footer__link md-footer__link--prev" aria-label="Previous: UUID">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2246,7 +2270,7 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Date & Time
+                UUID
               </div>
             </div>
           </a>
