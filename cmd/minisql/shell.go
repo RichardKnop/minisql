@@ -23,7 +23,8 @@ const (
 
 type shell struct {
 	db       *sql.DB
-	out      io.Writer
+	out      io.Writer // receives query result data (table or CSV rows)
+	errOut   io.Writer // receives errors, status lines, timing — never mixed into result output
 	mode     outputMode
 	timer    bool
 	buf      strings.Builder
@@ -37,6 +38,7 @@ func newShell(db *sql.DB, filePath string) *shell {
 	sh := &shell{
 		db:       db,
 		out:      os.Stdout,
+		errOut:   os.Stdout,
 		mode:     modeTable,
 		filePath: filePath,
 		isatty:   isatty.IsTerminal(os.Stdin.Fd()),
@@ -76,7 +78,7 @@ func historyFile() string {
 
 func (s *shell) run() {
 	if s.isatty {
-		fmt.Fprintf(s.out, "MiniSQL — %s\nEnter \".help\" for usage hints.\n", s.filePath)
+		fmt.Fprintf(s.errOut, "MiniSQL — %s\nEnter \".help\" for usage hints.\n", s.filePath)
 	}
 	if s.liner != nil {
 		// Load history from previous sessions.
@@ -207,9 +209,9 @@ func (s *shell) exec(query string) {
 func (s *shell) execQuery(query string, start time.Time) {
 	rows, err := s.db.Query(query)
 	if err != nil {
-		fmt.Fprintf(s.out, "Error: %v\n", err)
+		fmt.Fprintf(s.errOut, "Error: %v\n", err)
 		if s.timer {
-			fmt.Fprintf(s.out, "Time: %.3fs\n", time.Since(start).Seconds())
+			fmt.Fprintf(s.errOut, "Time: %.3fs\n", time.Since(start).Seconds())
 		}
 		return
 	}
@@ -217,7 +219,7 @@ func (s *shell) execQuery(query string, start time.Time) {
 
 	cols, err := rows.Columns()
 	if err != nil {
-		fmt.Fprintf(s.out, "Error: %v\n", err)
+		fmt.Fprintf(s.errOut, "Error: %v\n", err)
 		return
 	}
 
@@ -230,7 +232,7 @@ func (s *shell) execQuery(query string, start time.Time) {
 
 	for rows.Next() {
 		if err := rows.Scan(ptrs...); err != nil {
-			fmt.Fprintf(s.out, "Error: %v\n", err)
+			fmt.Fprintf(s.errOut, "Error: %v\n", err)
 			return
 		}
 		row := make([]string, len(cols))
@@ -240,7 +242,7 @@ func (s *shell) execQuery(query string, start time.Time) {
 		resultRows = append(resultRows, row)
 	}
 	if err := rows.Err(); err != nil {
-		fmt.Fprintf(s.out, "Error: %v\n", err)
+		fmt.Fprintf(s.errOut, "Error: %v\n", err)
 		return
 	}
 
@@ -249,7 +251,7 @@ func (s *shell) execQuery(query string, start time.Time) {
 	}
 
 	if s.timer {
-		fmt.Fprintf(s.out, "Time: %.3fs\n", time.Since(start).Seconds())
+		fmt.Fprintf(s.errOut, "Time: %.3fs\n", time.Since(start).Seconds())
 	}
 }
 
@@ -257,20 +259,20 @@ func (s *shell) execQuery(query string, start time.Time) {
 func (s *shell) execStatement(query string, start time.Time) {
 	result, err := s.db.Exec(query)
 	if err != nil {
-		fmt.Fprintf(s.out, "Error: %v\n", err)
+		fmt.Fprintf(s.errOut, "Error: %v\n", err)
 		if s.timer {
-			fmt.Fprintf(s.out, "Time: %.3fs\n", time.Since(start).Seconds())
+			fmt.Fprintf(s.errOut, "Time: %.3fs\n", time.Since(start).Seconds())
 		}
 		return
 	}
 
 	n, err := result.RowsAffected()
 	if err == nil && n > 0 {
-		fmt.Fprintf(s.out, "%d row(s) affected\n", n)
+		fmt.Fprintf(s.errOut, "%d row(s) affected\n", n)
 	}
 
 	if s.timer {
-		fmt.Fprintf(s.out, "Time: %.3fs\n", time.Since(start).Seconds())
+		fmt.Fprintf(s.errOut, "Time: %.3fs\n", time.Since(start).Seconds())
 	}
 }
 
@@ -304,7 +306,7 @@ func (s *shell) dotCommand(cmd string) {
 
 	case ".mode":
 		if len(fields) < 2 {
-			fmt.Fprintf(s.out, "current output mode: %s\n", s.modeName())
+			fmt.Fprintf(s.errOut, "current output mode: %s\n", s.modeName())
 			return
 		}
 		switch fields[1] {
@@ -313,12 +315,12 @@ func (s *shell) dotCommand(cmd string) {
 		case "csv":
 			s.mode = modeCSV
 		default:
-			fmt.Fprintf(s.out, "Error: unknown mode %q (choose: table, csv)\n", fields[1])
+			fmt.Fprintf(s.errOut, "Error: unknown mode %q (choose: table, csv)\n", fields[1])
 		}
 
 	case ".timer":
 		if len(fields) < 2 {
-			fmt.Fprintf(s.out, "timer: %v\n", onOff(s.timer))
+			fmt.Fprintf(s.errOut, "timer: %v\n", onOff(s.timer))
 			return
 		}
 		switch fields[1] {
@@ -327,7 +329,7 @@ func (s *shell) dotCommand(cmd string) {
 		case "off":
 			s.timer = false
 		default:
-			fmt.Fprintf(s.out, "Error: unknown timer setting %q (choose: on, off)\n", fields[1])
+			fmt.Fprintf(s.errOut, "Error: unknown timer setting %q (choose: on, off)\n", fields[1])
 		}
 
 	case ".tables":
@@ -343,7 +345,7 @@ func (s *shell) dotCommand(cmd string) {
 		s.printDDL(query)
 
 	default:
-		fmt.Fprintf(s.out, "Error: unknown dot command %q — try .help\n", fields[0])
+		fmt.Fprintf(s.errOut, "Error: unknown dot command %q — try .help\n", fields[0])
 	}
 }
 
@@ -352,7 +354,7 @@ func (s *shell) dotCommand(cmd string) {
 func (s *shell) printDDL(query string) {
 	rows, err := s.db.Query(query)
 	if err != nil {
-		fmt.Fprintf(s.out, "Error: %v\n", err)
+		fmt.Fprintf(s.errOut, "Error: %v\n", err)
 		return
 	}
 	defer rows.Close()
@@ -360,7 +362,7 @@ func (s *shell) printDDL(query string) {
 	for rows.Next() {
 		var ddl string
 		if err := rows.Scan(&ddl); err != nil {
-			fmt.Fprintf(s.out, "Error: %v\n", err)
+			fmt.Fprintf(s.errOut, "Error: %v\n", err)
 			return
 		}
 		if !first {
@@ -371,7 +373,7 @@ func (s *shell) printDDL(query string) {
 		fmt.Fprintln(s.out, clean+";")
 	}
 	if err := rows.Err(); err != nil {
-		fmt.Fprintf(s.out, "Error: %v\n", err)
+		fmt.Fprintf(s.errOut, "Error: %v\n", err)
 	}
 }
 
