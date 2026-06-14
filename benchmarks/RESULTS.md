@@ -9,6 +9,8 @@
 
 SQLite comparisons use the `sqlite` driver compiled into the same test binary. MiniSQL benchmarks run against fresh temp-file databases per sub-benchmark. Times are wall-clock (`ns/op`) median of 3 runs; memory figures are heap allocations reported by the Go runtime.
 
+2026-06-14: Overflow page reuse on UPDATE — `updateOverflowTexts` replaces the free-then-reallocate cycle (`freeOverflowPages` + `storeOverflowTexts`) with in-place reuse of existing overflow pages. `GetOverflowPage` already calls `ModifyPage` internally so the pages are already writable; new data is written directly, eliminating N `AddFreePage` + N `GetFreePage` calls per reused page. Excess tail pages are freed when the new value is shorter; extra pages are allocated when it is longer. Also fixes a latent bug where unchanged text-overflow columns were re-stored on UPDATE (creating orphaned duplicate chains). Net effect on same-size overflow UPDATE: −26% time at inline, −43% at 1-page, −39% at 4-page, −36% at 16-page; allocs halved at 16-page (131→60); MiniSQL now beats SQLite at 16-page updates (100 µs vs 138 µs).
+
 This file was refreshed after Tier-2 point-scan optimizations (2026-06-11): `conditionsCanSkipFolding` avoids folding work for bound-parameter WHERE clauses; `buildColumnNames` precomputes `Rows.Columns()` names once at construction; `RuntimeIndexKeys [][]any` decouples per-execution index key injection from the static `Scan` struct (avoids a 264-byte-per-scan copy on the rehydration hot path); read-only transaction object reused via a single-slot cache under the existing `mu` lock instead of allocating a new `Transaction` on every read query. Net effect on point scan: −20% heap (2.5 KiB→2.0 KiB/op), −7% alloc count (42→39/op), −2% time.
 
 Tier-1 (same date): `Statement.Clone()` shares the Fields slice instead of deep-copying it when SELECT field expressions contain no placeholders; `cachedSelectedFields` precomputed once at `PrepareStatement` time; `QueryPlan.CachedFieldIndexes`/`CachedResultColumns` cache the `rowViewProjectionPlan` result for prepared statements. Combined effect: −31% heap, −11% allocs on point scan.
@@ -185,6 +187,50 @@ which flushes the rows across ~8 sorted run files that are then N-way merged.
 | Join | Left join, unmatched rows | 869 KiB |
 | Maintenance | VACUUM small | 753 KiB |
 | Subquery | IN list | 559 KiB |
+
+### Overflow Page INSERT
+
+One INSERT per b.N iteration, auto-commit. "inline" (512 B) fits within `MaxInlineVarchar` and uses no overflow pages; it is the control group. `1pg`/`4pg`/`16pg` spill to 1, 4, and 16 overflow pages respectively.
+
+| Blob size | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs (MiniSQL / SQLite) |
+|---|---|---|---|---|---|---|
+| inline (512 B) | 16.1 µs | 58.8 µs | 0.27× | 4.3 KiB | 144 B | 28 / 7 |
+| 1pg (~4 KB) | 42.2 µs | 76.5 µs | 0.55× | 19.6 KiB | 144 B | 45 / 7 |
+| 4pg (~16 KB) | 89.5 µs | 122 µs | 0.73× | 58.0 KiB | 144 B | 72 / 7 |
+| 16pg (~64 KB) | 275 µs | 363 µs | 0.76× | 213 KiB | 144 B | 177 / 7 |
+
+### Overflow Page Point Read
+
+100 rows seeded once; each b.N iteration does one `SELECT … WHERE id = ?` and traverses the overflow chain.
+
+| Blob size | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs (MiniSQL / SQLite) |
+|---|---|---|---|---|---|---|
+| inline (512 B) | 5.66 µs | 3.90 µs | 1.5× | 2.4 KiB | 1.5 KiB | 40 / 18 |
+| 1pg (~4 KB) | 8.52 µs | 7.37 µs | 1.2× | 9.9 KiB | 8.5 KiB | 41 / 18 |
+| 4pg (~16 KB) | 14.8 µs | 23.2 µs | 0.64× | 33.8 KiB | 32.5 KiB | 41 / 18 |
+| 16pg (~64 KB) | 32.9 µs | 76.1 µs | 0.43× | 130 KiB | 128 KiB | 41 / 18 |
+
+### Overflow Page Full Scan
+
+50 rows seeded once; each b.N iteration scans all 50 rows reading every overflow chain.
+
+| Blob size | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs (MiniSQL / SQLite) |
+|---|---|---|---|---|---|---|
+| inline (512 B) | 25.9 µs | 41.9 µs | 0.62× | 27.1 KiB | 51.4 KiB | 123 / 214 |
+| 1pg (~4 KB) | 157 µs | 192 µs | 0.82× | 402 KiB | 401 KiB | 173 / 214 |
+| 4pg (~16 KB) | 466 µs | 864 µs | 0.54× | 1.56 MiB | 1.56 MiB | 173 / 214 |
+| 16pg (~64 KB) | 1.14 ms | 3.49 ms | 0.33× | 6.25 MiB | 6.25 MiB | 173 / 214 |
+
+### Overflow Page UPDATE (after in-place reuse optimization, 2026-06-14)
+
+One row seeded; each b.N iteration updates the blob body (alternates two payloads to prevent short-circuit). Old overflow chain is reused in-place — no free+alloc per page for same-size updates.
+
+| Blob size | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs (MiniSQL / SQLite) |
+|---|---|---|---|---|---|---|
+| inline (512 B) | 7.4 µs | 40.0 µs | 0.19× | 4.6 KiB | 176 B | 33 / 7 |
+| 1pg (~4 KB) | 15.0 µs | 45.1 µs | 0.33× | 15.9 KiB | 176 B | 40 / 7 |
+| 4pg (~16 KB) | 33.2 µs | 79.8 µs | 0.42× | 52.2 KiB | 176 B | 44 / 7 |
+| 16pg (~64 KB) | 100 µs | 138 µs | 0.73× | 201 KiB | 176 B | 60 / 7 |
 
 ### Good Next Optimisation Targets
 

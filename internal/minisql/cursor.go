@@ -430,20 +430,13 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 		return true, nil
 	}
 
-	// Remove any overflow pages for changed text columns.
-	if overflowColumns := c.Table.textOverflowCols; len(overflowColumns) > 0 {
-		// TODO - a more efficient implementation would be to try to reuse existing overflow pages
-		// if possible. For example if text size didn't change much and fits into existing overflow pages.
-		changedColumns := make([]Column, 0, len(changedValues))
-		for _, col := range overflowColumns {
-			_, ok := changedValues[col.Name]
-			if !ok {
-				continue
-			}
-			changedColumns = append(changedColumns, col)
-		}
-		if err := c.Table.freeOverflowPages(ctx, oldRow, changedColumns...); err != nil {
-			return false, err
+	// Update overflow text pages for changed columns, reusing old pages in-place
+	// where possible (avoids AddFreePage + GetFreePage churn on same-size updates).
+	if len(c.Table.textOverflowCols) > 0 {
+		var err error
+		row, err = row.updateOverflowTexts(ctx, c.Table.pager, oldRow, changedValues)
+		if err != nil {
+			return false, fmt.Errorf("update overflow texts: %w", err)
 		}
 	}
 
@@ -462,10 +455,6 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 		}
 	}
 
-	row, err = row.storeOverflowTexts(ctx, c.Table.pager)
-	if err != nil {
-		return false, fmt.Errorf("store overflow texts: %w", err)
-	}
 	row, err = row.storeOverflowVectors(ctx, c.Table.pager)
 	if err != nil {
 		return false, fmt.Errorf("store overflow vectors: %w", err)
