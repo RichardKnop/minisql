@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -356,11 +357,16 @@ func (c *Conn) SetTransaction(tx *minisql.Transaction) {
 	c.transaction = tx
 }
 
-// CheckNamedValue implements driver.NamedValueChecker so that []float32 bind
-// arguments are passed through to toInternalArgs without being rejected by the
-// database/sql default converter (which only accepts the standard driver.Value types).
+// CheckNamedValue implements driver.NamedValueChecker so that non-standard
+// bind argument types are passed through to toInternalArgs without being
+// rejected by the database/sql default converter.
+//
+//   - []float32 — vector embedding bound to a VECTOR(n) column.
+//   - io.Reader — large text/JSON value streamed to overflow pages without
+//     loading the full content into memory.
 func (c *Conn) CheckNamedValue(nv *driver.NamedValue) error {
-	if _, ok := nv.Value.([]float32); ok {
+	switch nv.Value.(type) {
+	case []float32, io.Reader:
 		return nil // accepted as-is; toInternalArgs handles the conversion
 	}
 	return driver.ErrSkip // fall back to the default checker for everything else

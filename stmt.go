@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 	"unsafe"
 
@@ -166,6 +167,8 @@ func toInternalArg(arg driver.NamedValue) (any, error) {
 		// and the TextPointer is consumed before ExecContext/QueryContext returns.
 		b := unsafe.Slice(unsafe.StringData(v), len(v))
 		return minisql.NewTextPointer(b), nil
+	case io.Reader:
+		return minisql.ReaderValue{R: v}, nil
 	case time.Time:
 		t := minisql.Time{
 			Year:         int32(v.Year()),
