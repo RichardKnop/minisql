@@ -138,13 +138,16 @@ func (c *Cell) Unmarshal(buf []byte) (uint64, error) {
 			totalSize += uint64(sz)
 			scanOffset += uint64(sz)
 		} else {
-			// TypeCodeText: 4-byte length prefix + data.
+			// TypeCodeText: inline → 4-byte length + data; overflow → 4-byte
+			// length+flag + 4-byte page index.  Use TextPointer.Size() so the
+			// overflow flag (bit 31 of the uint32 length) is handled correctly.
 			if scanOffset+4 > uint64(len(buf)) {
 				return 0, fmt.Errorf("cell unmarshal: text column %d offset %d exceeds buffer length %d", i, scanOffset, len(buf))
 			}
-			length := unmarshalInt32(buf, scanOffset)
-			totalSize += 4 + uint64(length)
-			scanOffset += 4 + uint64(length)
+			rawLen := unmarshalUint32(buf, scanOffset)
+			textSize := TextPointer{Length: rawLen}.Size()
+			totalSize += textSize
+			scanOffset += textSize
 		}
 	}
 
