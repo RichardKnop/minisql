@@ -165,3 +165,41 @@ func TestLRUCache_Purge(t *testing.T) {
 	assert.False(t, ok)
 	assert.Nil(t, value)
 }
+
+func TestLRUCache_Delete(t *testing.T) {
+	t.Parallel()
+
+	cache := New[string](5)
+	cache.Put("a", mockValue{"1"}, true)
+	cache.Put("b", mockValue{"2"}, true)
+	cache.Put("c", mockValue{"3"}, true)
+
+	// Delete middle entry.
+	cache.Delete("b")
+	_, ok := cache.Get("b")
+	assert.False(t, ok, "deleted entry should not be found")
+
+	// Remaining entries still accessible.
+	v, ok := cache.Get("a")
+	assert.True(t, ok)
+	assert.Equal(t, mockValue{"1"}, v)
+	v, ok = cache.Get("c")
+	assert.True(t, ok)
+	assert.Equal(t, mockValue{"3"}, v)
+
+	// Delete non-existent key is a no-op.
+	cache.Delete("zzz")
+	assert.Len(t, cache.entries, 2)
+
+	// Delete head.
+	cache.Delete("c") // most recently inserted = head
+	assert.Len(t, cache.entries, 1)
+	_, ok = cache.Get("c")
+	assert.False(t, ok)
+
+	// Delete tail (last remaining entry).
+	cache.Delete("a")
+	assert.Empty(t, cache.entries)
+	assert.Nil(t, cache.head)
+	assert.Nil(t, cache.tail)
+}

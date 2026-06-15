@@ -215,7 +215,7 @@ func newTestHNSWIndex(t *testing.T, seedVecs map[RowID][]float32, dims uint32) (
 	})
 	require.NoError(t, err)
 
-	idx := OpenHNSWIndex(txPager, rootPageIdx)
+	idx := OpenHNSWIndex(txPager, rootPageIdx, defaultHNSWVecCacheSize)
 	return idx, txManager
 }
 
@@ -234,7 +234,7 @@ func TestHNSWIndex_GetRootPageIdx(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	idx := OpenHNSWIndex(txPager, rootPageIdx)
+	idx := OpenHNSWIndex(txPager, rootPageIdx, defaultHNSWVecCacheSize)
 	assert.Equal(t, rootPageIdx, idx.GetRootPageIdx())
 }
 
@@ -451,7 +451,7 @@ func newTestHNSWTable(t *testing.T, dims uint32) (*Table, SecondaryIndex, *Trans
 	})
 	require.NoError(t, err)
 
-	idx := OpenHNSWIndex(txPager, rootPageIdx)
+	idx := OpenHNSWIndex(txPager, rootPageIdx, defaultHNSWVecCacheSize)
 	si := SecondaryIndex{
 		HNSWIndex: idx,
 		IndexInfo: IndexInfo{
@@ -1147,7 +1147,7 @@ func newTestTableWithVectorRows(t *testing.T, vecs [][]float32, dims uint32) (*T
 	})
 	require.NoError(t, err)
 
-	idx := OpenHNSWIndex(hnswTxPager, rootPageIdx)
+	idx := OpenHNSWIndex(hnswTxPager, rootPageIdx, defaultHNSWVecCacheSize)
 	si := SecondaryIndex{
 		HNSWIndex: idx,
 		IndexInfo: IndexInfo{
@@ -1330,6 +1330,47 @@ func testBuildGraph(t *testing.T, g *hnswGraph, vecs map[RowID][]float32) {
 		}
 		require.NoError(t, g.insert(id, distFn))
 	}
+}
+
+// TestHNSW_VecCacheLRU_Cap verifies that the vector cache evicts entries when
+// it reaches its configured size limit, bounding memory usage on large tables.
+func TestHNSW_VecCacheLRU_Cap(t *testing.T) {
+	const cacheSize = 3
+
+	idx := OpenHNSWIndex(nil, 0, cacheSize)
+
+	// Fill the cache exactly to capacity.
+	for i := range cacheSize {
+		idx.vecCache.Put(RowID(i), VectorPointer{Dims: 2, Data: []float32{float32(i), 0}}, true)
+	}
+
+	// All entries should be present.
+	for i := range cacheSize {
+		_, ok := idx.vecCache.Get(RowID(i))
+		assert.True(t, ok, "entry %d should be cached", i)
+	}
+
+	// Adding one more entry must evict the LRU entry (the cache is bounded).
+	idx.vecCache.Put(RowID(cacheSize), VectorPointer{Dims: 2, Data: []float32{float32(cacheSize), 0}}, true)
+
+	present := 0
+	for i := range cacheSize + 1 {
+		if _, ok := idx.vecCache.Get(RowID(i)); ok {
+			present += 1
+		}
+	}
+	// Exactly cacheSize entries should remain after eviction.
+	assert.Equal(t, cacheSize, present, "cache should hold at most %d entries", cacheSize)
+
+	// evictVector removes a specific entry.
+	// Repopulate so we have a known entry to evict.
+	idx.vecCache.Put(RowID(99), VectorPointer{Dims: 2, Data: []float32{99, 0}}, true)
+	_, before := idx.vecCache.Get(RowID(99))
+	assert.True(t, before, "entry 99 should be present before eviction")
+
+	idx.evictVector(RowID(99))
+	_, after := idx.vecCache.Get(RowID(99))
+	assert.False(t, after, "entry 99 should be absent after eviction")
 }
 
 func testL2DistFn(vecs map[RowID][]float32, query VectorPointer) func(RowID) (float64, error) {

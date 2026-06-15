@@ -136,6 +136,7 @@ func (d *Driver) newDB(config *ConnectionConfig) (*minisql.Database, error) {
 		dbOpts = append(dbOpts, minisql.WithEncryptionKey(config.EncryptionKey))
 	}
 	dbOpts = append(dbOpts, minisql.WithSortMemLimit(config.SortMemLimit))
+	dbOpts = append(dbOpts, minisql.WithHNSWVecCacheSize(config.HNSWVecCacheSize))
 
 	return minisql.NewDatabase(
 		context.Background(),

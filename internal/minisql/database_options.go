@@ -11,10 +11,18 @@ const (
 	defaultMaxCachedStatements = 1000
 	defaultMaxCachedPlans      = 1000
 	defaultSortMemLimit        = 4 * 1024 * 1024 // 4 MiB
+	// defaultHNSWVecCacheSize is the default number of vector entries kept in the
+	// per-index LRU cache.  Each entry is one VectorPointer (8 bytes overhead +
+	// dims×4 bytes of float32 data).  4096 entries at 128 dims ≈ 2 MiB; at 768
+	// dims ≈ 12 MiB.  Raise via WithHNSWVecCacheSize or hnsw_vec_cache_size=N.
+	defaultHNSWVecCacheSize = 4096
 
 	// DefaultSortMemLimit is the exported default for use by the root package's
 	// connection string parser.
 	DefaultSortMemLimit = defaultSortMemLimit
+	// DefaultHNSWVecCacheSize is the exported default for use by the root package's
+	// connection string parser.
+	DefaultHNSWVecCacheSize = defaultHNSWVecCacheSize
 )
 
 // WithMaxCachedStatements configures the maximum number of prepared statements to keep in the LRU cache.
@@ -50,6 +58,18 @@ func WithParallelScanEnabled() DatabaseOption {
 func WithSortMemLimit(n int64) DatabaseOption {
 	return func(d *Database) {
 		d.sortMemLimit = n
+	}
+}
+
+// WithHNSWVecCacheSize sets the maximum number of vector entries cached per HNSW
+// index. Each entry holds the full float32 slice for one row. Larger values
+// reduce overflow-page I/O during ANN search at the cost of more RAM. The
+// default is 4096. Setting n ≤ 0 is a no-op (default is preserved).
+func WithHNSWVecCacheSize(n int) DatabaseOption {
+	return func(d *Database) {
+		if n > 0 {
+			d.hnswVecCacheSize = n
+		}
 	}
 }
 

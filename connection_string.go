@@ -37,6 +37,10 @@ const DefaultWALWriteBufferSize = 64 * 1024
 // before an ORDER BY query spills sorted runs to disk (4 MiB).
 const DefaultSortMemLimit = 4 * 1024 * 1024
 
+// DefaultHNSWVecCacheSize is the default number of vector entries cached per
+// HNSW index.  Each slot holds the full float32 slice for one row (dims×4 bytes).
+const DefaultHNSWVecCacheSize = minisql.DefaultHNSWVecCacheSize
+
 // ConnectionConfig holds parsed connection string parameters.
 type ConnectionConfig struct {
 	FilePath               string          // Database file path
@@ -49,6 +53,7 @@ type ConnectionConfig struct {
 	ParallelScan           bool            // Enable concurrent leaf-page scanning (default: false)
 	EncryptionKey          []byte          // AES-256-CTR page encryption key (nil = no encryption)
 	SortMemLimit           int64           // Max bytes in memory before ORDER BY spills to disk (default: 4 MiB; 0 = disabled)
+	HNSWVecCacheSize       int             // Max vector entries per HNSW index LRU cache (default: 4096)
 }
 
 // DefaultConnectionConfig returns default configuration.
@@ -61,6 +66,7 @@ func DefaultConnectionConfig(filePath string) *ConnectionConfig {
 		MaxCachedPages:         minisql.PageCacheSize,
 		Synchronous:            SynchronousNormal,
 		SortMemLimit:           DefaultSortMemLimit,
+		HNSWVecCacheSize:       DefaultHNSWVecCacheSize,
 	}
 }
 
@@ -77,6 +83,7 @@ func DefaultConnectionConfig(filePath string) *ConnectionConfig {
 //   - synchronous=off|normal|full       : WAL fsync mode (default: normal, matching SQLite WAL default)
 //   - parallel_scan=on|off              : Enable concurrent leaf-page scanning (default: off)
 //   - encryption_key=<hex>             : Hex-encoded AES-256-CTR encryption key (default: no encryption)
+//   - hnsw_vec_cache_size=N            : Per-index HNSW vector LRU cache size in entries (default: 4096)
 //
 // Examples:
 //   - "./my.db"                                       : Default settings
@@ -190,6 +197,15 @@ func ParseConnectionString(connStr string) (*ConnectionConfig, error) {
 			return nil, fmt.Errorf("invalid encryption_key parameter: key too short (%d bytes), minimum is 16 bytes (32 hex chars)", len(key))
 		}
 		config.EncryptionKey = key
+	}
+
+	// Parse hnsw_vec_cache_size parameter (entries per index; must be > 0)
+	if sizeStr := queryParams.Get("hnsw_vec_cache_size"); sizeStr != "" {
+		size, err := strconv.Atoi(sizeStr)
+		if err != nil || size <= 0 {
+			return nil, fmt.Errorf("invalid hnsw_vec_cache_size parameter: must be a positive integer, got %q", sizeStr)
+		}
+		config.HNSWVecCacheSize = size
 	}
 
 	// Parse sort_mem_limit parameter (bytes; 0 = disable external sort; max 2 GiB)

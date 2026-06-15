@@ -174,6 +174,27 @@ func (c *cacheImpl[T]) moveToFront(entry *cacheEntry[T]) {
 	c.addToFront(entry)
 }
 
+// Delete removes the entry for key, if present.
+func (c *cacheImpl[T]) Delete(key T) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[key]
+	if !ok {
+		return
+	}
+	if entry.prev != nil {
+		entry.prev.next = entry.next
+	} else {
+		c.head = entry.next
+	}
+	if entry.next != nil {
+		entry.next.prev = entry.prev
+	} else {
+		c.tail = entry.prev
+	}
+	delete(c.entries, key)
+}
+
 // Purge removes all entries from the cache, resetting it to an empty state.
 func (c *cacheImpl[T]) Purge() {
 	c.mu.Lock()

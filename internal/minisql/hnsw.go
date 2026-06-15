@@ -7,6 +7,8 @@ import (
 	"math/rand/v2"
 	"runtime"
 	"sync"
+
+	"github.com/RichardKnop/minisql/pkg/lrucache"
 )
 
 const (
@@ -95,13 +97,13 @@ func hnswNeighborLayerCap(layer, m int) int {
 // It is populated lazily on first distance-function miss and updated by online
 // DML (Insert/Delete operations keep it consistent with the in-memory graph).
 // This eliminates overflow-page I/O on the hot search path after the first query.
+// The cache is bounded by an LRU to prevent unbounded memory growth on large tables.
 type hnswIndex struct {
 	pager       TxPager
 	rootPageIdx PageIndex
 	graph       *hnswGraph
 	mu          sync.RWMutex
-	vecCache    map[RowID]VectorPointer
-	vecMu       sync.RWMutex
+	vecCache    LRUCache[RowID]
 }
 
 // GetRootPageIdx returns the index of the HNSW metadata page in the database file.
@@ -1306,8 +1308,17 @@ func (idx *hnswIndex) incrementalInsert(ctx context.Context, g *hnswGraph, newRo
 
 // OpenHNSWIndex returns a handle for an existing HNSW index whose meta page is
 // at rootPageIdx.  The graph is loaded lazily on first Search.
-func OpenHNSWIndex(pager TxPager, rootPageIdx PageIndex) *hnswIndex {
-	return &hnswIndex{pager: pager, rootPageIdx: rootPageIdx}
+// vecCacheSize is the maximum number of vector entries to keep in the LRU cache;
+// use DefaultHNSWVecCacheSize when no specific tuning is needed.
+func OpenHNSWIndex(pager TxPager, rootPageIdx PageIndex, vecCacheSize int) *hnswIndex {
+	if vecCacheSize <= 0 {
+		vecCacheSize = defaultHNSWVecCacheSize
+	}
+	return &hnswIndex{
+		pager:       pager,
+		rootPageIdx: rootPageIdx,
+		vecCache:    lrucache.New[RowID](vecCacheSize),
+	}
 }
 
 // freeHNSWIndexPages releases every page belonging to an HNSW index — the meta
@@ -1496,35 +1507,26 @@ type hnswBuildRow struct {
 // cachedVector returns the VectorPointer (with Data populated) for rowID,
 // loading it from the table exactly once and caching the result for reuse
 // across queries.  Online DML (insertHNSWIndexKey, deleteHNSWIndexKey) keeps
-// the cache consistent with the in-memory graph.
+// the cache consistent with the in-memory graph.  The LRU cap prevents
+// unbounded growth on large tables.
 func (idx *hnswIndex) cachedVector(ctx context.Context, table *Table, rowID RowID, colName string) (VectorPointer, error) {
-	idx.vecMu.RLock()
-	if vp, ok := idx.vecCache[rowID]; ok {
-		idx.vecMu.RUnlock()
-		return vp, nil
+	if v, ok := idx.vecCache.Get(rowID); ok {
+		return v.(VectorPointer), nil
 	}
-	idx.vecMu.RUnlock()
 
 	vp, err := table.loadVectorByRowID(ctx, rowID, colName)
 	if err != nil {
 		return VectorPointer{}, err
 	}
 
-	idx.vecMu.Lock()
-	if idx.vecCache == nil {
-		idx.vecCache = make(map[RowID]VectorPointer, 64)
-	}
-	idx.vecCache[rowID] = vp
-	idx.vecMu.Unlock()
+	idx.vecCache.Put(rowID, vp, true)
 	return vp, nil
 }
 
 // evictVector removes a RowID from the vector cache.  Called by Delete to keep
 // the cache consistent with the in-memory graph.
 func (idx *hnswIndex) evictVector(rowID RowID) {
-	idx.vecMu.Lock()
-	delete(idx.vecCache, rowID)
-	idx.vecMu.Unlock()
+	idx.vecCache.Delete(rowID)
 }
 
 // makeDistFunc builds a closure that returns the distance from each node's
