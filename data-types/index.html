@@ -990,6 +990,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#streaming-large-textjson-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streaming large TEXT/JSON values
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2193,6 +2204,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#streaming-large-textjson-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streaming large TEXT/JSON values
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2318,10 +2340,10 @@
 </tr>
 <tr>
 <td><code>TEXT</code></td>
-<td>Variable, unlimited</td>
+<td>Variable, ≤ 64 MiB</td>
 <td>UTF-8 text</td>
-<td><code>string</code></td>
-<td>Always uses overflow pages for values &gt; 512 bytes</td>
+<td><code>string</code> / <code>io.Reader</code></td>
+<td>Overflow pages for values &gt; 512 bytes; accepts <code>io.Reader</code> for streaming</td>
 </tr>
 <tr>
 <td><code>TIMESTAMP</code></td>
@@ -2332,10 +2354,10 @@
 </tr>
 <tr>
 <td><code>JSON</code></td>
-<td>Variable, unlimited</td>
+<td>Variable, ≤ 64 MiB</td>
 <td>Valid UTF-8 JSON text</td>
-<td><code>string</code></td>
-<td>Validated on insert/update; overflow pages for large values</td>
+<td><code>string</code> / <code>io.Reader</code></td>
+<td>Validated on insert/update; accepts <code>io.Reader</code> for streaming (validation skipped)</td>
 </tr>
 <tr>
 <td><code>UUID</code></td>
@@ -2396,8 +2418,9 @@
 </span></code></pre></div>
 <ul>
 <li>Always uses overflow pages for values exceeding the inline threshold.</li>
-<li>Unlimited size (bounded only by available disk space).</li>
+<li>Maximum value size is <strong>64 MiB</strong> per row.</li>
 <li>Cannot be a primary key or unique key column.</li>
+<li>Accepts an <code>io.Reader</code> as a bind parameter to stream large values without loading the full content into memory (see <a href="#streaming-large-textjson-values">Streaming large TEXT/JSON values</a>).</li>
 </ul>
 <h3 id="timestamp">TIMESTAMP<a class="headerlink" href="#timestamp" title="Permanent link">&para;</a></h3>
 <div class="language-sql highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">events</span><span class="w"> </span><span class="p">(</span>
@@ -2443,8 +2466,10 @@
 </span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">events</span><span class="w"> </span><span class="p">(</span><span class="n">payload</span><span class="p">)</span><span class="w"> </span><span class="k">VALUES</span><span class="w"> </span><span class="p">(</span><span class="s1">&#39;[&quot;go&quot;,&quot;sql&quot;,&quot;json&quot;]&#39;</span><span class="p">);</span>
 </span></code></pre></div>
 <ul>
-<li>Validated as legal JSON on every insert and update.</li>
+<li>Validated as legal JSON on every insert and update (validation is skipped when binding an <code>io.Reader</code> — the caller must supply valid JSON).</li>
 <li>Stored as compact UTF-8 text (whitespace not preserved).</li>
+<li>Maximum value size is <strong>64 MiB</strong> per row.</li>
+<li>Accepts an <code>io.Reader</code> as a bind parameter to stream large JSON values without loading the full content into memory (see <a href="#streaming-large-textjson-values">Streaming large TEXT/JSON values</a>).</li>
 <li>Use <code>-&gt;</code> and <code>-&gt;&gt;</code> path operators and JSON functions for access. See <a href="../json/">JSON</a>.</li>
 </ul>
 <h3 id="uuid">UUID<a class="headerlink" href="#uuid" title="Permanent link">&para;</a></h3>
@@ -2483,6 +2508,41 @@
 <li>All vector data lives on overflow pages; the inline cell stores only the dimension count and the first overflow page index.</li>
 <li>Values are passed as bracket-delimited strings <code>'[f1, f2, …, fn]'</code> or <code>[]float32</code> bind parameters.</li>
 <li>Used with <code>VEC_L2</code> and <code>VEC_COSINE</code> distance functions for similarity search. See <a href="../vector-search/">Vector Search</a>.</li>
+</ul>
+<hr />
+<h2 id="streaming-large-textjson-values">Streaming large TEXT/JSON values<a class="headerlink" href="#streaming-large-textjson-values" title="Permanent link">&para;</a></h2>
+<p><code>TEXT</code> and <code>JSON</code> columns accept an <code>io.Reader</code> as a bind parameter. MiniSQL reads the stream in page-sized chunks and writes each chunk directly to overflow pages, keeping peak memory usage at roughly one page (~4 KB) rather than the full value size.</p>
+<div class="language-go highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nx">f</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">os</span><span class="p">.</span><span class="nx">Open</span><span class="p">(</span><span class="s">&quot;large-document.txt&quot;</span><span class="p">)</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nx">log</span><span class="p">.</span><span class="nx">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="p">}</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="k">defer</span><span class="w"> </span><span class="nx">f</span><span class="p">.</span><span class="nx">Close</span><span class="p">()</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">db</span><span class="p">.</span><span class="nx">Exec</span><span class="p">(</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="w">    </span><span class="s">`INSERT INTO articles (title, body) VALUES (?, ?)`</span><span class="p">,</span>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="w">    </span><span class="s">&quot;My Article&quot;</span><span class="p">,</span>
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="w">    </span><span class="nx">f</span><span class="p">,</span><span class="w"> </span><span class="c1">// io.Reader — streamed directly to overflow pages</span>
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>Works the same for <code>JSON</code> columns:</p>
+<div class="language-go highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nx">f</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">os</span><span class="p">.</span><span class="nx">Open</span><span class="p">(</span><span class="s">&quot;large-payload.json&quot;</span><span class="p">)</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nx">log</span><span class="p">.</span><span class="nx">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="p">}</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="k">defer</span><span class="w"> </span><span class="nx">f</span><span class="p">.</span><span class="nx">Close</span><span class="p">()</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">db</span><span class="p">.</span><span class="nx">Exec</span><span class="p">(</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="w">    </span><span class="s">`INSERT INTO events (payload) VALUES (?)`</span><span class="p">,</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="w">    </span><span class="nx">f</span><span class="p">,</span>
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="p">)</span>
+</span></code></pre></div>
+<p><strong>Constraints and caveats:</strong></p>
+<ul>
+<li>Maximum value size is <strong>64 MiB</strong>. Exceeding this returns an error and the transaction is rolled back.</li>
+<li><code>io.Reader</code> is <strong>not</strong> supported for <code>VARCHAR</code> columns — the engine cannot validate the declared length limit without consuming the full stream. Use <code>TEXT</code> instead.</li>
+<li>When binding an <code>io.Reader</code> to a <code>JSON</code> column, MiniSQL skips JSON structure validation. The caller is responsible for supplying valid JSON.</li>
+<li>If the reader yields ≤ 512 bytes, MiniSQL falls back to inline storage with no overflow pages allocated.</li>
+<li>The reader is consumed exactly once and is not rewound on retry. Wrap with a resettable source if your transaction may be retried on conflict.</li>
 </ul>
 
 
