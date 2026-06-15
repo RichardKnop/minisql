@@ -16,7 +16,7 @@ CREATE TABLE events (
 
 - Values must be valid JSON; invalid JSON is rejected on insert and update.
 - Stored as compact UTF-8 text (whitespace is not preserved).
-- Size is unlimited (large values use overflow pages).
+- Maximum value size is **64 MiB** per row (large values use overflow pages).
 - Validated automatically — no application-level validation needed.
 
 ---
@@ -42,6 +42,24 @@ _, err = db.Exec(
     `{"action": "purchase", "amount": 99.99}`,
 )
 ```
+
+### Streaming large JSON values
+
+For payloads that are too large to hold in memory comfortably, bind an `io.Reader` instead of a string. MiniSQL streams the content in page-sized chunks directly to overflow pages:
+
+```go
+f, err := os.Open("large-payload.json")
+if err != nil {
+    log.Fatal(err)
+}
+defer f.Close()
+
+_, err = db.Exec(`INSERT INTO events (payload) VALUES (?)`, f)
+```
+
+- Maximum size is **64 MiB**. Exceeding this returns an error.
+- JSON structure validation is skipped for streamed values — the caller must supply valid JSON.
+- The reader is consumed exactly once; wrap with a resettable source if the transaction may be retried on conflict.
 
 ---
 
