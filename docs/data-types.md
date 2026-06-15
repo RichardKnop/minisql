@@ -10,9 +10,9 @@
 | `REAL` | 4 bytes | IEEE 754 single-precision | `float32` | |
 | `DOUBLE` | 8 bytes | IEEE 754 double-precision | `float64` | |
 | `VARCHAR(n)` | Variable, ≤ 512 bytes inline | At most *n* bytes | `string` | Inline storage up to 512 bytes; overflow pages for larger values |
-| `TEXT` | Variable, unlimited | UTF-8 text | `string` | Always uses overflow pages for values > 512 bytes |
+| `TEXT` | Variable, ≤ 64 MiB | UTF-8 text | `string` / `io.Reader` | Overflow pages for values > 512 bytes; accepts `io.Reader` for streaming |
 | `TIMESTAMP` | 8 bytes | 4713 BC … 294 276 AD | `time.Time` | Microseconds since 2000-01-01 (PostgreSQL epoch); timezone-naive |
-| `JSON` | Variable, unlimited | Valid UTF-8 JSON text | `string` | Validated on insert/update; overflow pages for large values |
+| `JSON` | Variable, ≤ 64 MiB | Valid UTF-8 JSON text | `string` / `io.Reader` | Validated on insert/update; accepts `io.Reader` for streaming (validation skipped) |
 | `UUID` | 16 bytes (fixed) | Hyphenated string `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` | `string` | Stored as inline binary; output is lowercase |
 | `VECTOR(n)` | 8 bytes inline + overflow | `[f1, f2, …, fn]` — *n* × float32 | `string` / `[]float32` | *n* fixed at column definition; data always on overflow pages |
 
@@ -76,8 +76,9 @@ CREATE TABLE articles (
 ```
 
 - Always uses overflow pages for values exceeding the inline threshold.
-- Unlimited size (bounded only by available disk space).
+- Maximum value size is **64 MiB** per row.
 - Cannot be a primary key or unique key column.
+- Accepts an `io.Reader` as a bind parameter to stream large values without loading the full content into memory (see [Streaming large TEXT/JSON values](#streaming-large-textjson-values)).
 
 ### TIMESTAMP
 
@@ -114,8 +115,10 @@ INSERT INTO events (payload) VALUES ('{"user":"alice","uid":42}');
 INSERT INTO events (payload) VALUES ('["go","sql","json"]');
 ```
 
-- Validated as legal JSON on every insert and update.
+- Validated as legal JSON on every insert and update (validation is skipped when binding an `io.Reader` — the caller must supply valid JSON).
 - Stored as compact UTF-8 text (whitespace not preserved).
+- Maximum value size is **64 MiB** per row.
+- Accepts an `io.Reader` as a bind parameter to stream large JSON values without loading the full content into memory (see [Streaming large TEXT/JSON values](#streaming-large-textjson-values)).
 - Use `->` and `->>` path operators and JSON functions for access. See [JSON](json.md).
 
 ### UUID
@@ -158,3 +161,46 @@ VALUES ('hello world', '[0.1, 0.2, 0.3]');
 - All vector data lives on overflow pages; the inline cell stores only the dimension count and the first overflow page index.
 - Values are passed as bracket-delimited strings `'[f1, f2, …, fn]'` or `[]float32` bind parameters.
 - Used with `VEC_L2` and `VEC_COSINE` distance functions for similarity search. See [Vector Search](vector-search.md).
+
+---
+
+## Streaming large TEXT/JSON values
+
+`TEXT` and `JSON` columns accept an `io.Reader` as a bind parameter. MiniSQL reads the stream in page-sized chunks and writes each chunk directly to overflow pages, keeping peak memory usage at roughly one page (~4 KB) rather than the full value size.
+
+```go
+f, err := os.Open("large-document.txt")
+if err != nil {
+    log.Fatal(err)
+}
+defer f.Close()
+
+_, err = db.Exec(
+    `INSERT INTO articles (title, body) VALUES (?, ?)`,
+    "My Article",
+    f, // io.Reader — streamed directly to overflow pages
+)
+```
+
+Works the same for `JSON` columns:
+
+```go
+f, err := os.Open("large-payload.json")
+if err != nil {
+    log.Fatal(err)
+}
+defer f.Close()
+
+_, err = db.Exec(
+    `INSERT INTO events (payload) VALUES (?)`,
+    f,
+)
+```
+
+**Constraints and caveats:**
+
+- Maximum value size is **64 MiB**. Exceeding this returns an error and the transaction is rolled back.
+- `io.Reader` is **not** supported for `VARCHAR` columns — the engine cannot validate the declared length limit without consuming the full stream. Use `TEXT` instead.
+- When binding an `io.Reader` to a `JSON` column, MiniSQL skips JSON structure validation. The caller is responsible for supplying valid JSON.
+- If the reader yields ≤ 512 bytes, MiniSQL falls back to inline storage with no overflow pages allocated.
+- The reader is consumed exactly once and is not rewound on retry. Wrap with a resettable source if your transaction may be retried on conflict.

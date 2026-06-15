@@ -3,7 +3,14 @@ package minisql
 import (
 	"context"
 	"fmt"
+	"io"
 )
+
+// ReaderValue wraps an io.Reader for binding large text values to query
+// parameters without loading the entire content into memory. The reader is
+// consumed exactly once during INSERT or UPDATE execution and written to
+// overflow pages in MaxOverflowPageData-sized chunks.
+type ReaderValue struct{ R io.Reader }
 
 // textOverflowFlag occupies bit 31 of the on-disk uint32 length field.
 // When set the value is stored on overflow pages; when clear the value is inline.
@@ -51,7 +58,7 @@ func (tp TextPointer) String() string {
 
 // NumberOfPages returns the number of overflow pages required to store the text.
 func (tp TextPointer) NumberOfPages() uint32 {
-	return tp.Length/MaxOverflowPageData + 1
+	return (tp.Length + MaxOverflowPageData - 1) / MaxOverflowPageData
 }
 
 // Marshal serialises the pointer into buf at offset i.
@@ -133,19 +140,26 @@ func (r Row) storeOverflowTexts(ctx context.Context, pager TxPager) (Row, error)
 		if !value.Valid {
 			continue
 		}
-		textPointer, ok := value.Value.(TextPointer)
-		if !ok {
-			return r, fmt.Errorf("expected TextPointer value for text column %s", col.Name)
+		switch v := value.Value.(type) {
+		case TextPointer:
+			// Inline text needs no overflow page and the TextPointer is unchanged —
+			// skip the re-assignment that would box TextPointer into any (heap alloc).
+			if v.IsInline() {
+				continue
+			}
+			if err := v.storeOverflowText(ctx, pager); err != nil {
+				return r, err
+			}
+			r.Values[i] = OptionalValue{Valid: true, Value: v}
+		case ReaderValue:
+			tp, err := storeOverflowTextFromReader(ctx, pager, v.R)
+			if err != nil {
+				return r, fmt.Errorf("store overflow text from reader for column %s: %w", col.Name, err)
+			}
+			r.Values[i] = OptionalValue{Valid: true, Value: tp}
+		default:
+			return r, fmt.Errorf("expected TextPointer or ReaderValue for text column %s", col.Name)
 		}
-		// Inline text needs no overflow page and the TextPointer is unchanged —
-		// skip the re-assignment that would box TextPointer into any (heap alloc).
-		if textPointer.IsInline() {
-			continue
-		}
-		if err := textPointer.storeOverflowText(ctx, pager); err != nil {
-			return r, err
-		}
-		r.Values[i] = OptionalValue{Valid: true, Value: textPointer}
 	}
 	return r, nil
 }
@@ -188,6 +202,88 @@ func (tp *TextPointer) storeOverflowText(ctx context.Context, pager TxPager) err
 	}
 
 	return nil
+}
+
+// storeOverflowTextFromReader writes the content of r to overflow pages in
+// MaxOverflowPageData-sized chunks, returning a TextPointer with Length and
+// FirstPage set. The reader is consumed exactly once; no more than one chunk
+// is held in memory at a time.
+//
+// If the reader yields <= MaxInlineVarchar bytes the value fits inline: the
+// data is copied into the returned TextPointer and no overflow pages are
+// allocated. If the reader yields more than MaxOverflowTextSize bytes an error
+// is returned.
+func storeOverflowTextFromReader(ctx context.Context, pager TxPager, r io.Reader) (TextPointer, error) {
+	buf := make([]byte, MaxOverflowPageData)
+
+	// Read the first chunk. Use it to decide inline vs overflow.
+	n, readErr := io.ReadFull(r, buf)
+	if readErr != nil && readErr != io.ErrUnexpectedEOF {
+		if readErr == io.EOF {
+			return NewTextPointer(nil), nil // empty reader → empty inline text
+		}
+		return TextPointer{}, fmt.Errorf("read text from reader: %w", readErr)
+	}
+	if readErr == io.ErrUnexpectedEOF && n <= int(MaxInlineVarchar) {
+		// Fits inline — copy so the caller's buf can be reused.
+		data := make([]byte, n)
+		copy(data, buf[:n])
+		return NewTextPointer(data), nil
+	}
+
+	// Overflow path. Write first page.
+	firstChunk := make([]byte, n)
+	copy(firstChunk, buf[:n])
+
+	firstPage, err := pager.GetFreePage(ctx)
+	if err != nil {
+		return TextPointer{}, fmt.Errorf("allocate overflow page: %w", err)
+	}
+	tp := TextPointer{Length: uint32(n), FirstPage: firstPage.Index}
+	firstPage.OverflowPage = &OverflowPage{
+		Header: OverflowPageHeader{DataSize: uint32(n)},
+		Data:   firstChunk,
+	}
+	prevPage := firstPage
+
+	if readErr == io.ErrUnexpectedEOF {
+		return tp, nil // single overflow page
+	}
+
+	// Continue reading and writing pages until the reader is exhausted.
+	for {
+		n, readErr = io.ReadFull(r, buf)
+		if n == 0 {
+			break // io.EOF with nothing read
+		}
+		if readErr != nil && readErr != io.ErrUnexpectedEOF {
+			return TextPointer{}, fmt.Errorf("read text from reader: %w", readErr)
+		}
+		if uint64(tp.Length)+uint64(n) > uint64(MaxOverflowTextSize) {
+			return TextPointer{}, fmt.Errorf("text size exceeds maximum overflow text size %d", MaxOverflowTextSize)
+		}
+
+		chunk := make([]byte, n)
+		copy(chunk, buf[:n])
+		tp.Length += uint32(n)
+
+		freePage, err := pager.GetFreePage(ctx)
+		if err != nil {
+			return TextPointer{}, fmt.Errorf("allocate overflow page: %w", err)
+		}
+		prevPage.OverflowPage.Header.NextPage = freePage.Index
+		freePage.OverflowPage = &OverflowPage{
+			Header: OverflowPageHeader{DataSize: uint32(n)},
+			Data:   chunk,
+		}
+		prevPage = freePage
+
+		if readErr == io.ErrUnexpectedEOF {
+			break // last (partial) chunk
+		}
+	}
+
+	return tp, nil
 }
 
 // updateOverflowText writes overflow pages for tp, reusing the chain rooted at
@@ -299,21 +395,43 @@ func (r Row) updateOverflowTexts(ctx context.Context, pager TxPager, oldRow Row,
 		if !value.Valid {
 			continue
 		}
-		newTP, ok := value.Value.(TextPointer)
-		if !ok {
-			return r, fmt.Errorf("expected TextPointer value for text column %s", col.Name)
-		}
 
 		// Determine whether the old value occupied an overflow chain.
 		var oldFirstPage PageIndex
-		if oldVal, ok2 := oldRow.GetValue(col.Name); ok2 && oldVal.Valid {
-			if oldTP, ok3 := oldVal.Value.(TextPointer); ok3 && !oldTP.IsInline() {
+		if oldVal, ok := oldRow.GetValue(col.Name); ok && oldVal.Valid {
+			if oldTP, ok2 := oldVal.Value.(TextPointer); ok2 && !oldTP.IsInline() {
 				oldFirstPage = oldTP.FirstPage
 			}
 		}
 
-		if newTP.IsInline() {
-			// New value fits inline; free the old overflow chain if one existed.
+		switch v := value.Value.(type) {
+		case TextPointer:
+			if v.IsInline() {
+				// New value fits inline; free the old overflow chain if one existed.
+				if oldFirstPage != 0 {
+					for curIdx := oldFirstPage; curIdx > 0; {
+						p, err := pager.GetOverflowPage(ctx, curIdx)
+						if err != nil {
+							return r, fmt.Errorf("read overflow page %d: %w", curIdx, err)
+						}
+						next := p.OverflowPage.Header.NextPage
+						if err := pager.AddFreePage(ctx, curIdx); err != nil {
+							return r, fmt.Errorf("free overflow page %d: %w", curIdx, err)
+						}
+						curIdx = next
+					}
+				}
+			} else {
+				// New value needs overflow pages — reuse old chain where possible.
+				if err := v.updateOverflowText(ctx, pager, oldFirstPage); err != nil {
+					return r, fmt.Errorf("update overflow text for column %s: %w", col.Name, err)
+				}
+				r.Values[i] = OptionalValue{Valid: true, Value: v}
+			}
+
+		case ReaderValue:
+			// Length is unknown upfront so we cannot reuse old pages in-place.
+			// Free the old chain first, then stream fresh pages.
 			if oldFirstPage != 0 {
 				for curIdx := oldFirstPage; curIdx > 0; {
 					p, err := pager.GetOverflowPage(ctx, curIdx)
@@ -327,14 +445,15 @@ func (r Row) updateOverflowTexts(ctx context.Context, pager TxPager, oldRow Row,
 					curIdx = next
 				}
 			}
-			continue
-		}
+			newTP, err := storeOverflowTextFromReader(ctx, pager, v.R)
+			if err != nil {
+				return r, fmt.Errorf("update overflow text from reader for column %s: %w", col.Name, err)
+			}
+			r.Values[i] = OptionalValue{Valid: true, Value: newTP}
 
-		// New value needs overflow pages — reuse old chain where possible.
-		if err := newTP.updateOverflowText(ctx, pager, oldFirstPage); err != nil {
-			return r, fmt.Errorf("update overflow text for column %s: %w", col.Name, err)
+		default:
+			return r, fmt.Errorf("expected TextPointer or ReaderValue for text column %s", col.Name)
 		}
-		r.Values[i] = OptionalValue{Valid: true, Value: newTP}
 	}
 	return r, nil
 }

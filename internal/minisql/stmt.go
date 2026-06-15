@@ -2335,22 +2335,32 @@ func isValueValidForColumn(col Column, val OptionalValue) error {
 			return fmt.Errorf("expects DOUBLE value for %q", col.Name)
 		}
 	case Varchar, Text:
-		tp, ok := val.Value.(TextPointer)
-		if !ok {
+		switch tv := val.Value.(type) {
+		case TextPointer:
+			switch col.Kind {
+			case Varchar:
+				if int64(utf8.RuneCountInString(tv.String())) > int64(col.Size) {
+					return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", col.Name, col.Size)
+				}
+			case Text:
+				if utf8.RuneCountInString(tv.String()) > MaxOverflowTextSize {
+					return fmt.Errorf("field %q exceeds maximum TEXT length of %d", col.Name, MaxOverflowTextSize)
+				}
+			}
+			if !utf8.ValidString(tv.String()) {
+				return fmt.Errorf("expects valid UTF-8 string for %q", col.Name)
+			}
+		case ReaderValue:
+			// ReaderValue is not supported for VARCHAR (size cannot be validated
+			// without consuming the stream). For TEXT the size and UTF-8 checks
+			// are deferred to write time; the caller is responsible for providing
+			// valid UTF-8 content within MaxOverflowTextSize bytes.
+			if col.Kind == Varchar {
+				return fmt.Errorf("io.Reader binding is not supported for VARCHAR column %q; use TEXT instead", col.Name)
+			}
+			_ = tv // accepted; consumed during storeOverflowTexts
+		default:
 			return fmt.Errorf("expects a text value for %q", col.Name)
-		}
-		switch col.Kind {
-		case Varchar:
-			if int64(utf8.RuneCountInString(val.Value.(TextPointer).String())) > int64(col.Size) {
-				return fmt.Errorf("field %q exceeds maximum VARCHAR length of %d", col.Name, col.Size)
-			}
-		case Text:
-			if utf8.RuneCountInString(val.Value.(TextPointer).String()) > MaxOverflowTextSize {
-				return fmt.Errorf("field %q exceeds maximum TEXT length of %d", col.Name, MaxOverflowTextSize)
-			}
-		}
-		if !utf8.ValidString(tp.String()) {
-			return fmt.Errorf("expects valid UTF-8 string for %q", col.Name)
 		}
 	case Timestamp:
 		_, ok := val.Value.(TimestampMicros)
@@ -2358,12 +2368,17 @@ func isValueValidForColumn(col Column, val OptionalValue) error {
 			return fmt.Errorf("expects timestamp value for %q", col.Name)
 		}
 	case JSON:
-		tp, ok := val.Value.(TextPointer)
-		if !ok {
+		switch tv := val.Value.(type) {
+		case TextPointer:
+			if _, err := normaliseJSON(tv.String()); err != nil {
+				return fmt.Errorf("field %q: %w", col.Name, err)
+			}
+		case ReaderValue:
+			// JSON structure validation is deferred to write time; the caller
+			// is responsible for providing well-formed JSON within MaxOverflowTextSize bytes.
+			_ = tv
+		default:
 			return fmt.Errorf("expects a text value for JSON column %q", col.Name)
-		}
-		if _, err := normaliseJSON(tp.String()); err != nil {
-			return fmt.Errorf("field %q: %w", col.Name, err)
 		}
 	case UUID:
 		switch v := val.Value.(type) {

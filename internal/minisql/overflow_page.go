@@ -11,8 +11,11 @@ const (
 	// MaxOverflowPageData is the maximum number of data bytes that fit in a
 	// single overflow page (page size − type byte − header − 4-byte checksum).
 	MaxOverflowPageData = PageSize - 1 - 8 - pageChecksumSize
-	// MaxOverflowTextSize limits the maximum size of a text value to 16 overflow pages.
-	MaxOverflowTextSize     = MaxOverflowPageData * 16
+	// MaxOverflowTextSize is the maximum byte length of a TEXT or JSON value.
+	// 64 MiB covers realistic document, API-response, and config payloads.
+	// Larger content should be stored externally (e.g. object storage) with
+	// only a URL or key kept in the database.
+	MaxOverflowTextSize     = 64 * 1024 * 1024
 	varcharLengthPrefixSize = 4
 )
 
