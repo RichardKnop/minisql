@@ -130,57 +130,57 @@ which flushes the rows across ~8 sorted run files that are then N-way merged.
 
 ### HNSW Build Index
 
-Single-iteration benchmarks at large N — expect ±15% variance between runs due to thermal effects.
+`vecMediumN` reduced from 10,000 → 3,000 so each sub-benchmark completes in 2–6 s instead of 9–38 s. Small-N cases (n=1000) run multiple iterations; large-N cases (n=3000) may be single-iteration — expect ±15% variance from thermal effects.
 
 | Dims | Rows | Time | Memory | Allocs |
 |---|---|---|---|---|
-| 3 | 1000 | 710.8 ms | 6.1 MiB | 26,845 |
-| 3 | 10000 | 9.32 s | 121 MiB | 327,583 |
-| 128 | 1000 | 762.9 ms | 6.3 MiB | 26,246 |
-| 128 | 10000 | 23.1 s | 155 MiB | 345,994 |
-| 768 | 1000 | 1.27 s | 13.7 MiB | 27,555 |
-| 768 | 10000 | 38.5 s | 229 MiB | 348,048 |
+| 3 | 1000 | 660 ms | 5.6 MiB | 26,352 |
+| 3 | 3000 | 2.55 s | 42.9 MiB | 104,849 |
+| 128 | 1000 | 794 ms | 6.7 MiB | 26,820 |
+| 128 | 3000 | 3.97 s | 41.1 MiB | 104,451 |
+| 768 | 1000 | 1.19 s | 13.7 MiB | 26,595 |
+| 768 | 3000 | 5.56 s | 72.9 MiB | 108,838 |
 
 ### HNSW ANN Search
 
 | Dims | Rows | Top K | Time | Memory | Allocs |
 |---|---|---|---|---|---|
-| 3 | 1000 | 1 | 31.0 µs | 13.2 KiB | 55 |
-| 3 | 1000 | 10 | 37.0 µs | 16.9 KiB | 123 |
-| 3 | 10000 | 1 | 43.9 µs | 22.5 KiB | 57 |
-| 3 | 10000 | 10 | 52.1 µs | 26.2 KiB | 129 |
-| 128 | 1000 | 1 | 175.5 µs | 41.5 KiB | 60 |
-| 128 | 1000 | 10 | 187.2 µs | 54.1 KiB | 141 |
-| 128 | 10000 | 1 | 370.9 µs | 77.6 KiB | 65 |
-| 128 | 10000 | 10 | 375.5 µs | 90.1 KiB | 146 |
-| 768 | 1000 | 1 | 707.9 µs | 46.6 KiB | 60 |
-| 768 | 1000 | 10 | 745.8 µs | 104.1 KiB | 136 |
-| 768 | 10000 | 1 | 1.47 ms | 82.6 KiB | 65 |
-| 768 | 10000 | 10 | 1.51 ms | 140.2 KiB | 146 |
+| 3 | 1000 | 1 | 33.4 µs | 13.2 KiB | 55 |
+| 3 | 1000 | 10 | 39.6 µs | 16.9 KiB | 123 |
+| 3 | 3000 | 1 | 45.7 µs | 22.5 KiB | 57 |
+| 3 | 3000 | 10 | 53.1 µs | 26.2 KiB | 129 |
+| 128 | 1000 | 1 | 181 µs | 41.6 KiB | 60 |
+| 128 | 1000 | 10 | 190 µs | 54.1 KiB | 141 |
+| 128 | 3000 | 1 | 302 µs | 77.6 KiB | 65 |
+| 128 | 3000 | 10 | 301 µs | 90.2 KiB | 146 |
+| 768 | 1000 | 1 | 691 µs | 46.5 KiB | 60 |
+| 768 | 1000 | 10 | 726 µs | 104.1 KiB | 136 |
+| 768 | 3000 | 1 | 1.09 ms | 82.6 KiB | 65 |
+| 768 | 3000 | 10 | 1.16 ms | 140.1 KiB | 145 |
 
 ### HNSW Sequential Scan
 
 | Dims | Rows | Top K | Time | Memory | Allocs |
 |---|---|---|---|---|---|
-| 3 | 1000 | 1 | 660.8 µs | 664.3 KiB | 10,821 |
-| 128 | 1000 | 1 | 8.42 ms | 5.93 MiB | 11,826 |
-| 768 | 1000 | 1 | 45.6 ms | 31.4 MiB | 11,850 |
+| 3 | 1000 | 1 | 674 µs | 664 KiB | 10,821 |
+| 128 | 1000 | 1 | 8.61 ms | 6.07 MiB | 11,825 |
+| 768 | 1000 | 1 | 47.4 ms | 31.4 MiB | 11,850 |
 
 ### HNSW Insert Overhead
 
 | Dims | With index | No index | Time ratio |
 |---|---|---|---|
-| 3 | 1.18 ms / 224 KiB | 21.6 µs / 6.9 KiB | 54.6× |
-| 128 | 3.23 ms / 231 KiB | 20.8 µs / 7.4 KiB | 155.4× |
-| 768 | 12.2 ms / 320 KiB | 21.5 µs / 9.8 KiB | 566.1× |
+| 3 | 1.19 ms / 223 KiB | 22.6 µs / 6.9 KiB | 52.7× |
+| 128 | 3.35 ms / 220 KiB | 20.4 µs / 7.4 KiB | 164.2× |
+| 768 | 14.0 ms / 246 KiB | 21.6 µs / 9.8 KiB | 647.7× |
 
 ### Memory Outliers
 
 | Area | Benchmark | MiniSQL memory |
 |---|---|---|
-| HNSW | Build index, dims768, 10k rows | 229 MiB |
-| HNSW | Build index, dims128, 10k rows | 155 MiB |
-| HNSW | Build index, dims3, 10k rows | 121 MiB |
+| HNSW | Build index, dims768, 3k rows | 72.9 MiB |
+| HNSW | Build index, dims128, 3k rows | 41.1 MiB |
+| HNSW | Build index, dims3, 3k rows | 42.9 MiB |
 | DISTINCT | High-cardinality distinct + ORDER BY | 4.54 MiB |
 | DISTINCT | High-cardinality distinct + ORDER BY indexed | 4.38 MiB |
 | DISTINCT | High-cardinality distinct (no ORDER BY) | 1.26 MiB |
@@ -238,7 +238,7 @@ One row seeded; each b.N iteration updates the blob body. Old overflow chain is 
 
 ### Good Next Optimisation Targets
 
-- HNSW build allocation counts are stable; build memory remains the largest broad-suite outlier at 10k rows (229 MiB for dims768). Single-iteration benchmarks carry high variance — compare only against a fresh count=3 run.
+- HNSW build allocation counts are stable; build memory remains the largest broad-suite outlier at 3k rows (72.9 MiB for dims768). The 3k corpus was chosen so each sub-benchmark completes in 2–6 s (was 9–38 s at 10k). Single-iteration benchmarks carry high variance — compare only against a fresh count=3 run.
 - Full-text and JSON build paths still allocate ~1.3–1.4 MiB per operation and remain the most relevant inverted-index targets.
 - GROUP BY / HAVING memory gap vs SQLite (9.6× / 13.3×) is largely structural: Go's runtime map has higher per-entry overhead than SQLite's C hash table. Further reduction requires a custom open-address hash table — low ROI at this stage.
 - DISTINCT high cardinality without ORDER BY (1.26 MiB vs SQLite 586 KiB, 2.2×): streaming hash-set path; the gap is structural — SQLite sorts/hashes on the C side and delivers rows lazily, avoiding upfront Go heap allocation.

@@ -14,9 +14,11 @@ import (
 )
 
 // Corpus sizes and vector dimensions used across vector benchmarks.
+// vecMediumN was reduced from 10,000 to 3,000 so the build benchmark
+// completes in ~3-5s per sub-benchmark instead of ~38s.
 const (
 	vecSmallN  = 1_000
-	vecMediumN = 10_000
+	vecMediumN = 3_000
 )
 
 var vecDims = []int{3, 128, 768}
