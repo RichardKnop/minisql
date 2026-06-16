@@ -784,6 +784,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#hnsw-vector-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HNSW vector cache
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2071,6 +2082,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#hnsw-vector-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HNSW vector cache
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2194,6 +2216,11 @@
 <td>Maximum bytes of row data held in memory before an <code>ORDER BY</code> sort spills to disk. Set to <code>0</code> to disable disk spill (all sorted rows stay in memory). See <a href="#disk-backed-sort">Disk-backed sort</a>.</td>
 </tr>
 <tr>
+<td><code>hnsw_vec_cache_size</code></td>
+<td><code>4096</code></td>
+<td>Maximum number of vector entries cached per HNSW index. Each slot holds the full <code>float32</code> slice for one row (<code>dims × 4</code> bytes). See <a href="#hnsw-vector-cache">HNSW vector cache</a>.</td>
+</tr>
+<tr>
 <td><code>encryption_key</code></td>
 <td><em>(none)</em></td>
 <td>Hex-encoded AES-256-CTR encryption key. See <a href="../encryption/">Encryption</a>.</td>
@@ -2225,13 +2252,16 @@
 </span><span id="__span-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="c1">// Disable disk spill entirely (all sorted rows stay in memory)</span>
 </span><span id="__span-1-23"><a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="nx">db</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">sql</span><span class="p">.</span><span class="nx">Open</span><span class="p">(</span><span class="s">&quot;minisql&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;./my.db?sort_mem_limit=0&quot;</span><span class="p">)</span>
 </span><span id="__span-1-24"><a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>
-</span><span id="__span-1-25"><a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="c1">// Encrypted database</span>
-</span><span id="__span-1-26"><a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="kn">import</span><span class="w"> </span><span class="s">&quot;encoding/hex&quot;</span>
-</span><span id="__span-1-27"><a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="nx">key</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="p">[]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&quot;my-32-byte-secret-key&quot;</span><span class="p">)</span>
-</span><span id="__span-1-28"><a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="nx">db</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">sql</span><span class="p">.</span><span class="nx">Open</span><span class="p">(</span><span class="s">&quot;minisql&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;./my.db?encryption_key=&quot;</span><span class="o">+</span><span class="nx">hex</span><span class="p">.</span><span class="nx">EncodeToString</span><span class="p">(</span><span class="nx">key</span><span class="p">))</span>
-</span><span id="__span-1-29"><a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>
-</span><span id="__span-1-30"><a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a><span class="c1">// Multiple parameters</span>
-</span><span id="__span-1-31"><a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a><span class="nx">db</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">sql</span><span class="p">.</span><span class="nx">Open</span><span class="p">(</span><span class="s">&quot;minisql&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;./my.db?log_level=info&amp;max_cached_pages=4000&amp;synchronous=full&quot;</span><span class="p">)</span>
+</span><span id="__span-1-25"><a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="c1">// Raise HNSW vector cache to 16 384 entries for large high-dimensional tables</span>
+</span><span id="__span-1-26"><a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="nx">db</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">sql</span><span class="p">.</span><span class="nx">Open</span><span class="p">(</span><span class="s">&quot;minisql&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;./my.db?hnsw_vec_cache_size=16384&quot;</span><span class="p">)</span>
+</span><span id="__span-1-27"><a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>
+</span><span id="__span-1-28"><a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="c1">// Encrypted database</span>
+</span><span id="__span-1-29"><a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a><span class="kn">import</span><span class="w"> </span><span class="s">&quot;encoding/hex&quot;</span>
+</span><span id="__span-1-30"><a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a><span class="nx">key</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="p">[]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&quot;my-32-byte-secret-key&quot;</span><span class="p">)</span>
+</span><span id="__span-1-31"><a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a><span class="nx">db</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">sql</span><span class="p">.</span><span class="nx">Open</span><span class="p">(</span><span class="s">&quot;minisql&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;./my.db?encryption_key=&quot;</span><span class="o">+</span><span class="nx">hex</span><span class="p">.</span><span class="nx">EncodeToString</span><span class="p">(</span><span class="nx">key</span><span class="p">))</span>
+</span><span id="__span-1-32"><a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a>
+</span><span id="__span-1-33"><a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a><span class="c1">// Multiple parameters</span>
+</span><span id="__span-1-34"><a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a><span class="nx">db</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">sql</span><span class="p">.</span><span class="nx">Open</span><span class="p">(</span><span class="s">&quot;minisql&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;./my.db?log_level=info&amp;max_cached_pages=4000&amp;synchronous=full&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h2 id="connection-pooling">Connection pooling<a class="headerlink" href="#connection-pooling" title="Permanent link">&para;</a></h2>
 <div class="admonition warning">
@@ -2312,6 +2342,24 @@
 <p>Disk spill applies universally to all <code>ORDER BY</code> queries — sequential scans, joins, <code>DISTINCT</code>, and multi-column sorts — whenever the accumulated row data exceeds <code>sort_mem_limit</code>. The only exception is <code>ORDER BY</code> with <code>LIMIT</code> (and no <code>DISTINCT</code>), which uses a bounded min-heap sized to <code>OFFSET + LIMIT</code> rows and never needs to spill.</p>
 </div>
 <p>Parallel scan is most beneficial for large tables on multi-core machines running filter-heavy queries. For small tables or single-CPU environments the overhead typically outweighs the benefit.</p>
+<h2 id="hnsw-vector-cache">HNSW vector cache<a class="headerlink" href="#hnsw-vector-cache" title="Permanent link">&para;</a></h2>
+<p>Each HNSW index keeps a per-index LRU cache of raw <code>float32</code> vectors, keyed by row ID. During ANN search, the engine computes distances between candidate nodes and the query vector. Cached vectors avoid an overflow-page read per candidate on the hot search path.</p>
+<p><strong>Memory per cache entry:</strong> <code>dims × 4 bytes</code>. For example:
+- 128-dim vectors, 4096 entries: <strong>2 MiB</strong> per index
+- 768-dim vectors, 4096 entries: <strong>12 MiB</strong> per index</p>
+<p><strong>When to tune:</strong></p>
+<ul>
+<li><strong>Large tables with high query throughput</strong> — increase the cache so more of the working set fits. HNSW search visits <code>O(log N)</code> nodes, and entry-point nodes at the top layers are accessed by almost every query. As long as those fit in cache, hit rates are high regardless of table size.</li>
+<li><strong>Many HNSW indexes on the same database</strong> — each index has its own independent cache. If you have four 768-dim indexes at the default 4096 entries each, that is 48 MiB total. Reduce per-index size if memory is constrained.</li>
+<li><strong>Small tables (&lt; 4096 rows)</strong> — the default is already oversized; the cache will simply never be full. No tuning needed.</li>
+</ul>
+<div class="language-go highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1">// 16 384 entries for a 768-dim index on a 100k-row table (~48 MiB)</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nx">db</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">sql</span><span class="p">.</span><span class="nx">Open</span><span class="p">(</span><span class="s">&quot;minisql&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;./my.db?hnsw_vec_cache_size=16384&quot;</span><span class="p">)</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1">// Multiple parameters</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="nx">db</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">sql</span><span class="p">.</span><span class="nx">Open</span><span class="p">(</span><span class="s">&quot;minisql&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;./my.db?hnsw_vec_cache_size=8192&amp;max_cached_pages=4000&quot;</span><span class="p">)</span>
+</span></code></pre></div>
+<p>The cache is populated lazily on first access and kept consistent with online DML: INSERT adds the new vector, DELETE evicts it, UPDATE replaces the old entry. The cache is never persisted to disk.</p>
 
 
 
