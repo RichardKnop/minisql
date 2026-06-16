@@ -157,6 +157,92 @@ func (r Row) storeOverflowVectors(ctx context.Context, pager TxPager) (Row, erro
 	return r, nil
 }
 
+// updateOverflow writes float32 data to overflow pages for vp, reusing the
+// chain rooted at oldFirstPage in-place. VECTOR(n) columns have a fixed
+// dimension, so the old and new chains always have the same page count — every
+// UPDATE is a pure page-reuse (zero free/alloc calls).
+//
+// When oldFirstPage == 0 (old value was nil or zero-dims) the call falls
+// through to storeOverflow so callers need not special-case this.
+func (vp *VectorPointer) updateOverflow(ctx context.Context, pager TxPager, oldFirstPage PageIndex) error {
+	if vp.Dims == 0 {
+		return nil
+	}
+	if oldFirstPage == 0 {
+		return vp.storeOverflow(ctx, pager)
+	}
+
+	rawBytes := make([]byte, vp.Dims*4)
+	for i, f := range vp.Data {
+		marshalFloat32(rawBytes, f, uint64(i)*4)
+	}
+
+	totalBytes := uint32(len(rawBytes))
+	remaining := totalBytes
+	offset := uint32(0)
+
+	var previousPage *Page
+	curIdx := oldFirstPage
+	for curIdx > 0 {
+		p, err := pager.GetOverflowPage(ctx, curIdx)
+		if err != nil {
+			return fmt.Errorf("read old vector overflow page %d: %w", curIdx, err)
+		}
+		next := p.OverflowPage.Header.NextPage
+		if previousPage == nil {
+			vp.FirstPage = p.Index
+		}
+		dataSize := min(remaining, MaxOverflowPageData)
+		remaining -= dataSize
+		p.OverflowPage.Header.DataSize = dataSize
+		p.OverflowPage.Header.NextPage = 0
+		p.OverflowPage.Data = rawBytes[offset : offset+dataSize]
+		offset += dataSize
+		if previousPage != nil {
+			previousPage.OverflowPage.Header.NextPage = p.Index
+		}
+		previousPage = p
+		curIdx = next
+	}
+	return nil
+}
+
+// updateOverflowVectors handles the vector-overflow UPDATE hot path, replacing the
+// freeOverflowPages + storeOverflowVectors pair. It only touches columns present
+// in changedCols and reuses the existing overflow chain in-place (VECTOR(n) dims
+// are fixed, so old and new chains are always the same length).
+func (r Row) updateOverflowVectors(ctx context.Context, pager TxPager, oldRow Row, changedCols map[string]Column) (Row, error) {
+	for i, col := range r.Columns {
+		if !col.Kind.IsVector() {
+			continue
+		}
+		if _, isChanged := changedCols[col.Name]; !isChanged {
+			continue
+		}
+		value := r.Values[i]
+		if !value.Valid {
+			continue
+		}
+		vp, ok := value.Value.(VectorPointer)
+		if !ok {
+			return r, fmt.Errorf("expected VectorPointer for vector column %s", col.Name)
+		}
+
+		var oldFirstPage PageIndex
+		if oldVal, ok := oldRow.GetValue(col.Name); ok && oldVal.Valid {
+			if oldVP, ok2 := oldVal.Value.(VectorPointer); ok2 && oldVP.FirstPage != 0 {
+				oldFirstPage = oldVP.FirstPage
+			}
+		}
+
+		if err := vp.updateOverflow(ctx, pager, oldFirstPage); err != nil {
+			return r, fmt.Errorf("update overflow vector for column %s: %w", col.Name, err)
+		}
+		r.Values[i] = OptionalValue{Valid: true, Value: vp}
+	}
+	return r, nil
+}
+
 func (vp *VectorPointer) storeOverflow(ctx context.Context, pager TxPager) error {
 	if vp.Dims == 0 {
 		return nil

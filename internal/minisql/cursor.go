@@ -440,24 +440,14 @@ func (c *Cursor) update(ctx context.Context, stmt Statement, row Row) (bool, err
 		}
 	}
 
-	// Remove any overflow pages for changed vector columns.
-	if overflowColumns := c.Table.vectorOverflowCols; len(overflowColumns) > 0 {
-		changedColumns := make([]Column, 0, len(changedValues))
-		for _, col := range overflowColumns {
-			_, ok := changedValues[col.Name]
-			if !ok {
-				continue
-			}
-			changedColumns = append(changedColumns, col)
+	// Update overflow pages for changed vector columns, reusing old pages in-place
+	// (VECTOR(n) dims are fixed so old and new chains are always the same length).
+	if len(c.Table.vectorOverflowCols) > 0 {
+		var err error
+		row, err = row.updateOverflowVectors(ctx, c.Table.pager, oldRow, changedValues)
+		if err != nil {
+			return false, fmt.Errorf("update overflow vectors: %w", err)
 		}
-		if err := c.Table.freeOverflowPages(ctx, oldRow, changedColumns...); err != nil {
-			return false, err
-		}
-	}
-
-	row, err = row.storeOverflowVectors(ctx, c.Table.pager)
-	if err != nil {
-		return false, fmt.Errorf("store overflow vectors: %w", err)
 	}
 
 	if c.Table.HasPrimaryKey() {
