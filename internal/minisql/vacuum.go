@@ -222,9 +222,14 @@ func (d *Database) vacuumWithKey(ctx context.Context, newKey []byte) error {
 	if err := tempDB.Close(); err != nil {
 		return fmt.Errorf("vacuum: close temp database: %w", err)
 	}
-	if err := d.Close(); err != nil {
+	// Close the live database without checkpointing or syncing — it is about to
+	// be replaced by the compacted copy. Delete the WAL file before renaming to
+	// prevent stale frames from being replayed against the new database on restart.
+	liveWALPath := d.GetFileName() + "-wal"
+	if err := d.closeForDiscard(); err != nil {
 		return fmt.Errorf("vacuum: close live database: %w", err)
 	}
+	os.Remove(liveWALPath)
 
 	// --- PHASE 9: Safe atomic file swap. ---
 	// Remove any stale backup from a previous failed vacuum.
@@ -269,8 +274,27 @@ func (d *Database) vacuumWithKey(ctx context.Context, newKey []byte) error {
 
 	// Reopen replaces d.txManager with a fresh instance so stale page version
 	// numbers from the old file cannot cause spurious OCC conflicts.
+	// Note: d.wal is nil here (set by closeForDiscard), so the Reopen init
+	// transaction commits via commitDirect, avoiding WAL frame allocs.
 	if err := d.Reopen(tempCtx, newPager, newPager); err != nil {
 		return fmt.Errorf("vacuum: reopen database: %w", err)
+	}
+
+	// Restore WAL AFTER Reopen so the init transaction above used commitDirect.
+	// closeForDiscard deleted the old WAL file; create a fresh one and reset the
+	// WAL index (which still holds stale frame mappings from the old file) so
+	// subsequent reads fall through to the DB file for pages not yet in the WAL.
+	if d.walIndex != nil {
+		d.walIndex.Reset()
+		newWAL, _, walErr := OpenWALAndRebuildIndex(d.GetFileName(), PageSize, d.walIndex)
+		if walErr != nil {
+			return fmt.Errorf("vacuum: create WAL for reopened database: %w", walErr)
+		}
+		d.wal = newWAL
+		d.walDBFile = newFile
+		d.txManager.wal = newWAL
+		d.txManager.walIndex = d.walIndex
+		newPager.SetWALIndex(d.walIndex)
 	}
 
 	return nil

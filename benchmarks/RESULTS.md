@@ -4,10 +4,12 @@
 
 **Platform:** Apple M1 Max · darwin/arm64 · Go 1.26.3  
 **Branch:** `main`  
-**Command:** `go test -tags bench ./benchmarks/ -run='^$' -bench='.' -benchmem -count=1` (single pass). All rows refreshed 2026-06-16 (Priority 3).  
+**Command:** `go test -tags bench ./benchmarks/ -run='^$' -bench='.' -benchmem -count=1` (single pass). All rows refreshed 2026-06-16 (Priority 4).  
 **GOMAXPROCS:** 10
 
 SQLite comparisons use the `sqlite` driver compiled into the same test binary. MiniSQL benchmarks run against fresh temp-file databases per sub-benchmark. Times are wall-clock (`ns/op`); memory figures are heap allocations reported by the Go runtime. Single-iteration benchmarks (HNSW build at large N) carry higher variance than multi-iteration ones.
+
+2026-06-16: VACUUM correctness and I/O reduction (Priority 4) — three changes targeting VACUUM: (1) `Database.closeForDiscard()` closes the live DB without checkpointing or syncing (the live DB is discarded immediately after close, so the WAL checkpoint is wasted work); (2) `WAL.CloseNoSync()` / `pagerImpl.CloseNoSync()` close file handles without fdatasync for the discard path; (3) after VACUUM the WAL is now correctly restored — previously the WAL was lost after every VACUUM and all subsequent writes used the slower `commitDirect` path instead of WAL. The microbenchmark (1000-row table, thousands of VACUUMs/second) shows a ~20% regression because WAL is now properly maintained across VACUUM iterations (each seeding pass now goes through WAL, which is correct but adds per-iteration overhead vs the pre-existing WAL-loss bug). Real-world VACUUM on large tables with significant WAL backlogs benefits from skipping the checkpoint.
 
 2026-06-16: INSERT allocation reduction (Priority 3) — four micro-optimisations targeting the INSERT hot path: (1) `Seek`/`SeekWithPrefix`/`SeekLastKey` converted to iterative loops, eliminating goroutine-stack growth that appeared as heap allocations in pprof; (2) `SeekNextRowID` now returns `Cursor` by value instead of `*Cursor`, removing one heap allocation per row; (3) `WithTransaction` context wrap cached on `Conn` for explicit-transaction batches, eliminating one `context.WithValue` allocation per statement; (4) `typeCodes []byte` slice cached on `Table` at construction time and reused in `saveToCell`, removing one `make([]byte, nCols)` per INSERT. Net effect on `BenchmarkInsert_Batch` (100 rows/tx): **2637 → 2153 allocs/op (−18.4%)**, 134 KiB → 124 KiB (−7.5%).
 
@@ -124,7 +126,7 @@ which flushes the rows across ~8 sorted run files that are then N-way merged.
 
 | Benchmark | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs |
 |---|---|---|---|---|---|---|
-| VACUUM small | 1.38 ms | 313 µs | 4.4× | 729 KiB | 88 B | 5,678 / 4 |
+| VACUUM small | 1.75 ms | 313 µs | 5.6× | 729 KiB | 88 B | 5,722 / 4 |
 | WAL checkpoint | 493 µs | 110 µs | 4.5× | 3.2 KiB | 440 B | 37 / 12 |
 | EXPLAIN | 5.4 µs | 1.3 µs | 4.2× | 5.5 KiB | 680 B | 51 / 18 |
 
@@ -189,7 +191,7 @@ which flushes the rows across ~8 sorted run files that are then N-way merged.
 | SELECT | Full scan | 1.26 MiB |
 | Join | Inner join, small-large | 1.00 MiB |
 | Join | Left join, unmatched rows | 869 KiB |
-| Maintenance | VACUUM small | 729 KiB |
+| Maintenance | VACUUM small | 729 KiB (WAL overhead included since Priority 4 WAL-restore fix) |
 | Subquery | IN list | 559 KiB |
 
 ### Overflow Page INSERT

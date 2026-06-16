@@ -289,6 +289,27 @@ func (d *Database) Close() error {
 	return d.saver.Close()
 }
 
+// closeForDiscard releases all file handles without checkpointing or syncing.
+// It is used during VACUUM when the live database is about to be replaced by a
+// compacted copy: the WAL checkpoint and fdatasync calls that Close normally
+// performs are expensive and unnecessary for a file that is immediately discarded.
+//
+// The caller must delete the WAL file (dbFilePath+"-wal") after closeForDiscard
+// returns, before renaming the compacted file into place, to prevent stale WAL
+// frames from being replayed against the new database on restart.
+func (d *Database) closeForDiscard() error {
+	if d.wal != nil {
+		if err := d.wal.CloseNoSync(); err != nil {
+			d.logger.Warn("failed to close WAL on discard", zap.Error(err))
+		}
+		d.wal = nil
+	}
+	if nc, ok := d.saver.(interface{ CloseNoSync() error }); ok {
+		return nc.CloseNoSync()
+	}
+	return d.saver.Close()
+}
+
 // Checkpoint checkpoints the WAL into the database file and truncates the WAL.
 // It is a no-op when no WAL is configured.
 //
@@ -324,11 +345,14 @@ func (d *Database) Reopen(ctx context.Context, factory PagerFactory, saver PageS
 	d.txManager = NewTransactionManager(d.logger, d.dbFilePath, d.pagerFactory, saver, d)
 	d.txManager.SetRowCountApplier(d.applyRowCountDeltas)
 	d.txManager.SetRowCountDeltaApplier(d.applyRowCountDelta)
+	// Always preserve checkpoint settings so they remain available even when WAL
+	// is wired in after Reopen (e.g. in vacuumWithKey which sets up WAL after init).
+	d.txManager.checkpointThreshold = checkpointThreshold
+	d.txManager.SetCheckpointFunc(checkpointFn)
 	if d.wal != nil {
 		d.txManager.wal = d.wal
 		d.txManager.walIndex = d.walIndex
-		d.txManager.checkpointThreshold = checkpointThreshold
-		d.txManager.SetCheckpointFunc(checkpointFn)
+		saver.SetWALIndex(d.walIndex)
 	}
 
 	// Re-inject the cipher into the new pager and transaction manager so that
