@@ -28,6 +28,11 @@ var (
 const populateInvertedIndexFlushPostings = 64 * 1024
 const populateInvertedIndexInitialTerms = 1024
 
+type flatPosting struct {
+	term    string
+	posting invertedPosting
+}
+
 // WALConfig bundles the Write-Ahead Log objects that NewDatabase needs.
 // Pass nil when creating in-memory/test databases that do not require WAL.
 type WALConfig struct {
@@ -1937,24 +1942,48 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 		return fmt.Errorf("table %s has full-text index %s but no inverted index instance", table.Name, secondaryIndex.Name)
 	}
 
-	postingsByTerm := make(map[string][]invertedPosting, populateInvertedIndexInitialTerms)
+	flatBuf := make([]flatPosting, 0, populateInvertedIndexInitialTerms)
 	tokenBuf := make([]textSearchTokenPosition, 0, 16)
 	tokenRuneBuf := make([]rune, 0, 32)
 	rowPostings := make(map[string]invertedPosting, 16)
 	bufferedPostings := 0
 	flush := func(reset bool) error {
-		if len(postingsByTerm) == 0 {
+		if len(flatBuf) == 0 {
 			return nil
+		}
+		sort.Slice(flatBuf, func(i, j int) bool { return flatBuf[i].term < flatBuf[j].term })
+		// Count unique terms for an exact-size map hint (avoids massive over-allocation
+		// that would result from using len(flatBuf) as the hint).
+		nTerms := 1
+		for k := 1; k < len(flatBuf); k++ {
+			if flatBuf[k].term != flatBuf[k-1].term {
+				nTerms += 1
+			}
+		}
+		// Lay all postings into one contiguous block, then point per-term sub-slices
+		// into it — a single large allocation instead of one per unique term.
+		postingPool := make([]invertedPosting, len(flatBuf))
+		for i, e := range flatBuf {
+			postingPool[i] = e.posting
+		}
+		inserts := make(map[string][]invertedPosting, nTerms)
+		for i := 0; i < len(flatBuf); {
+			j := i + 1
+			for j < len(flatBuf) && flatBuf[j].term == flatBuf[i].term {
+				j += 1
+			}
+			inserts[flatBuf[i].term] = postingPool[i:j]
+			i = j
 		}
 		batch := invertedIndexMutationBatch{
 			mode:    secondaryIndex.InvertedIndex.Mode(),
-			inserts: postingsByTerm,
+			inserts: inserts,
 		}
 		if err := batch.Apply(ctx, secondaryIndex.InvertedIndex); err != nil {
 			return fmt.Errorf("failed to insert token batch for full-text index %s: %w", secondaryIndex.Name, err)
 		}
 		if reset {
-			postingsByTerm = make(map[string][]invertedPosting, populateInvertedIndexInitialTerms)
+			flatBuf = flatBuf[:0]
 		}
 		bufferedPostings = 0
 		return nil
@@ -1962,7 +1991,7 @@ func (d *Database) populateFullTextIndex(ctx context.Context, table *Table, seco
 	addPostings := func(rowID RowID, tokens []textSearchTokenPosition) error {
 		rowPostings = fullTextPostingsByTermInto(rowID, tokens, rowPostings)
 		for term, posting := range rowPostings {
-			postingsByTerm[term] = append(postingsByTerm[term], posting)
+			flatBuf = append(flatBuf, flatPosting{term: term, posting: posting})
 			bufferedPostings += len(posting.Positions)
 		}
 		if bufferedPostings >= populateInvertedIndexFlushPostings {
