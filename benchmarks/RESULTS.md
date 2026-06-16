@@ -11,6 +11,8 @@ SQLite comparisons use the `sqlite` driver compiled into the same test binary. M
 
 2026-06-16: VACUUM correctness and I/O reduction (Priority 4) — three changes targeting VACUUM: (1) `Database.closeForDiscard()` closes the live DB without checkpointing or syncing (the live DB is discarded immediately after close, so the WAL checkpoint is wasted work); (2) `WAL.CloseNoSync()` / `pagerImpl.CloseNoSync()` close file handles without fdatasync for the discard path; (3) after VACUUM the WAL is now correctly restored — previously the WAL was lost after every VACUUM and all subsequent writes used the slower `commitDirect` path instead of WAL. The microbenchmark (1000-row table, thousands of VACUUMs/second) shows a ~20% regression because WAL is now properly maintained across VACUUM iterations (each seeding pass now goes through WAL, which is correct but adds per-iteration overhead vs the pre-existing WAL-loss bug). Real-world VACUUM on large tables with significant WAL backlogs benefits from skipping the checkpoint.
 
+2026-06-16: Inverted index build allocation reduction (second pass) — two changes targeting `mutationSegmentCells` and `rowIDMutationSegmentCells`: (1) pre-size the cells slice to avoid growth: `len(terms)` was too small when multi-block terms (e.g., "common" with 1000 docs spans 5 × 1 KB blocks) pushed total cells past capacity — compute an extra-block estimate from posting counts and pre-allocate exactly; (2) pool the `[]string` terms-sort buffer via `sync.Pool` so the ~30 KB backing array is reused across build iterations rather than allocated fresh each time. Full-text build: **1.19 MiB → 1.06 MiB (−11%)**.
+
 2026-06-16: Inverted index build allocation reduction — skip `append(deleteCells, insertCells...)` copy in `appendSegmentCells` for the insert-only path (build, online INSERT). Both callers discard their slice arguments after the call, so aliasing `cells = insertCells` and sorting in-place is safe. Full-text build: **1.42 MiB → 1.19 MiB (−16%)**, 3.44 ms → 3.08 ms (−10%); JSON inverted build: **1.29 MiB → 1.17 MiB (−9%)**, 2.11 ms → 2.00 ms (−5%).
 
 2026-06-16: INSERT allocation reduction (Priority 3) — four micro-optimisations targeting the INSERT hot path: (1) `Seek`/`SeekWithPrefix`/`SeekLastKey` converted to iterative loops, eliminating goroutine-stack growth that appeared as heap allocations in pprof; (2) `SeekNextRowID` now returns `Cursor` by value instead of `*Cursor`, removing one heap allocation per row; (3) `WithTransaction` context wrap cached on `Conn` for explicit-transaction batches, eliminating one `context.WithValue` allocation per statement; (4) `typeCodes []byte` slice cached on `Table` at construction time and reused in `saveToCell`, removing one `make([]byte, nCols)` per INSERT. Net effect on `BenchmarkInsert_Batch` (100 rows/tx): **2637 → 2153 allocs/op (−18.4%)**, 134 KiB → 124 KiB (−7.5%).
@@ -91,7 +93,7 @@ which flushes the rows across ~8 sorted run files that are then N-way merged.
 
 | Benchmark | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs |
 |---|---|---|---|---|---|---|
-| Build index | 3.08 ms | 2.08 ms | 1.49× | 1.19 MiB | 392 B | 12,222 / 20 |
+| Build index | 3.08 ms | 2.08 ms | 1.49× | 1.06 MiB | 392 B | 12,298 / 20 |
 | Insert with index | 40.2 µs | 100.5 µs | 0.40× | 14.4 KiB | 271 B | 135 / 10 |
 | Search single term, rare | 5.4 µs | 7.0 µs | 0.77× | 2.1 KiB | 408 B | 39 / 13 |
 | Search single term, medium | 5.3 µs | 8.3 µs | 0.64× | 2.1 KiB | 408 B | 39 / 13 |
@@ -188,7 +190,7 @@ which flushes the rows across ~8 sorted run files that are then N-way merged.
 | DISTINCT | High-cardinality distinct + ORDER BY | 4.54 MiB |
 | DISTINCT | High-cardinality distinct + ORDER BY indexed | 4.38 MiB |
 | DISTINCT | High-cardinality distinct (no ORDER BY) | 1.26 MiB |
-| Full-text | Build index | 1.19 MiB |
+| Full-text | Build index | 1.06 MiB |
 | JSON inverted | Build index | 1.17 MiB |
 | SELECT | Full scan | 1.26 MiB |
 | Join | Inner join, small-large | 1.00 MiB |
@@ -243,7 +245,7 @@ One row seeded; each b.N iteration updates the blob body. Old overflow chain is 
 ### Good Next Optimisation Targets
 
 - HNSW build allocation counts are stable; build memory remains the largest broad-suite outlier at 3k rows (72.9 MiB for dims768). The 3k corpus was chosen so each sub-benchmark completes in 2–6 s (was 9–38 s at 10k). Single-iteration benchmarks carry high variance — compare only against a fresh count=3 run.
-- Full-text and JSON build paths still allocate ~1.2 MiB per operation and remain the most relevant inverted-index targets.
+- Full-text build allocates ~1.06 MiB per operation; JSON inverted build ~1.17 MiB. Both remain the most relevant inverted-index memory targets. The dominant remaining cost (~57% of full-text build allocations) is per-term `[]invertedPosting` slice growth in the accumulation map — addressable via a two-pass frequency pre-scan or flat-buffer sort-at-flush approach.
 - GROUP BY / HAVING memory gap vs SQLite (9.6× / 13.3×) is largely structural: Go's runtime map has higher per-entry overhead than SQLite's C hash table. Further reduction requires a custom open-address hash table — low ROI at this stage.
 - DISTINCT high cardinality without ORDER BY (1.26 MiB vs SQLite 586 KiB, 2.2×): streaming hash-set path; the gap is structural — SQLite sorts/hashes on the C side and delivers rows lazily, avoiding upfront Go heap allocation.
 - DISTINCT + ORDER BY high cardinality (4.53 MiB vs SQLite 586 KiB): ORDER BY requires upfront materialization of all rows before sorting. The sort-then-adjacent-dedup optimization removes hash-set overhead from deduplication, but the dominant cost is O(N) row materialization — unavoidable without disk-backed sort (see ROADMAP).

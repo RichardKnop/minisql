@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 )
 
 const (
@@ -1887,8 +1888,30 @@ func (idx *logStructuredInvertedIndex) mutationSegmentCells(
 	postingsByTerm map[string][]invertedPosting,
 	extraCellCapacity int,
 ) ([]invertedSegmentCell, uint32, error) {
-	terms := sortedInvertedMutationTerms(postingsByTerm)
-	cells := make([]invertedSegmentCell, 0, len(terms)+extraCellCapacity)
+	// Use a pooled string slice to avoid a per-flush allocation for the sorted
+	// term list (typically ~30 KB for builds with ~2000 unique terms).
+	termsPtr := getMutationTermSlice(len(postingsByTerm))
+	terms := *termsPtr
+	for term := range postingsByTerm {
+		terms = append(terms, term)
+	}
+	sort.Strings(terms)
+	*termsPtr = terms
+	defer putMutationTermSlice(termsPtr)
+
+	// Pre-size cells to avoid growth. Each term produces at least one cell, but
+	// terms with large posting lists span multiple 1 KB blocks and produce more.
+	// Conservative estimate: 5 bytes per posting → postingsPerBlock = 204.
+	// Extra cells = extra blocks beyond the first for each multi-block term.
+	extraBlocks := 0
+	const approxPostingsPerBlock = invertedPostingBlockPayloadMax / 5
+	for _, postings := range postingsByTerm {
+		if n := len(postings); n > approxPostingsPerBlock {
+			extraBlocks += (n - 1) / approxPostingsPerBlock
+		}
+	}
+
+	cells := make([]invertedSegmentCell, 0, len(terms)+extraCellCapacity+extraBlocks)
 	var totalPostingCount uint32
 	for _, term := range terms {
 		postings := postingsByTerm[term]
@@ -1905,8 +1928,29 @@ func (idx *logStructuredInvertedIndex) mutationSegmentCells(
 }
 
 func rowIDMutationSegmentCells(kind byte, rowIDsByTerm map[string][]RowID, extraCellCapacity int) ([]invertedSegmentCell, uint32, error) {
-	terms := sortedRowIDMutationTerms(rowIDsByTerm)
-	cells := make([]invertedSegmentCell, 0, len(terms)+extraCellCapacity)
+	// Use a pooled string slice to avoid a per-flush allocation for the sorted
+	// term list.
+	termsPtr := getMutationTermSlice(len(rowIDsByTerm))
+	terms := *termsPtr
+	for term := range rowIDsByTerm {
+		terms = append(terms, term)
+	}
+	sort.Strings(terms)
+	*termsPtr = terms
+	defer putMutationTermSlice(termsPtr)
+
+	// Pre-size cells to avoid growth. Each row ID varint is at least 1 byte; use
+	// 2 bytes as a conservative estimate so high-frequency terms (> 512 row IDs)
+	// get their extra blocks counted.
+	extraBlocks := 0
+	const approxRowIDsPerBlock = invertedPostingBlockPayloadMax / 2
+	for _, rowIDs := range rowIDsByTerm {
+		if n := len(rowIDs); n > approxRowIDsPerBlock {
+			extraBlocks += (n - 1) / approxRowIDsPerBlock
+		}
+	}
+
+	cells := make([]invertedSegmentCell, 0, len(terms)+extraCellCapacity+extraBlocks)
 	var totalPostingCount uint32
 	for _, term := range terms {
 		rowIDs := rowIDsByTerm[term]
@@ -1923,13 +1967,23 @@ func rowIDMutationSegmentCells(kind byte, rowIDsByTerm map[string][]RowID, extra
 	return cells, totalPostingCount, nil
 }
 
-func sortedRowIDMutationTerms(rowIDsByTerm map[string][]RowID) []string {
-	terms := make([]string, 0, len(rowIDsByTerm))
-	for term := range rowIDsByTerm {
-		terms = append(terms, term)
+// mutationTermsPool pools *[]string backing arrays used to sort mutation batch
+// terms in mutationSegmentCells and rowIDMutationSegmentCells. Each pooled value
+// is a pointer to a slice so the slice header is heap-allocated once and reused.
+var mutationTermsPool sync.Pool
+
+func getMutationTermSlice(hint int) *[]string {
+	if v := mutationTermsPool.Get(); v != nil {
+		p := v.(*[]string)
+		*p = (*p)[:0]
+		return p
 	}
-	sort.Strings(terms)
-	return terms
+	s := make([]string, 0, hint)
+	return &s
+}
+
+func putMutationTermSlice(p *[]string) {
+	mutationTermsPool.Put(p)
 }
 
 func (idx *logStructuredInvertedIndex) writeSegmentCells(ctx context.Context, cells []invertedSegmentCell) (PageIndex, error) {
