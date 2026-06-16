@@ -166,6 +166,9 @@ type Conn struct {
 	closeFunc          func()
 	mu                 sync.RWMutex
 	slowQueryThreshold time.Duration
+	// txCtx cache: avoids calling WithTransaction on every row within an explicit transaction.
+	lastExecBaseCtx context.Context
+	lastExecTxCtx   context.Context
 }
 
 // Ping verifies the connection is still alive. MiniSQL is an embedded engine
@@ -356,6 +359,10 @@ func (c *Conn) SetTransaction(tx *minisql.Transaction) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.transaction = tx
+	if tx == nil {
+		c.lastExecBaseCtx = nil
+		c.lastExecTxCtx = nil
+	}
 }
 
 // CheckNamedValue implements driver.NamedValueChecker so that non-standard
@@ -430,8 +437,11 @@ func (c *Conn) executeQueryStatement(ctx context.Context, stmt minisql.Statement
 
 func (c *Conn) executeStatement(ctx context.Context, stmt minisql.Statement) (minisql.StatementResult, error) {
 	if c.HasActiveTransaction() {
-		ctx = minisql.WithTransaction(ctx, c.transaction)
-		return c.db.ExecuteStatement(ctx, stmt)
+		if ctx != c.lastExecBaseCtx {
+			c.lastExecBaseCtx = ctx
+			c.lastExecTxCtx = minisql.WithTransaction(ctx, c.transaction)
+		}
+		return c.db.ExecuteStatement(c.lastExecTxCtx, stmt)
 	}
 
 	// Execute in auto-commit transaction.  Use a read-only transaction for

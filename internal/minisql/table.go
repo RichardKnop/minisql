@@ -58,12 +58,13 @@ type Table struct {
 	planCache LRUCache[string]
 	// metrics is the shared engine counter store. nil when not wired (unit tests).
 	metrics *engineMetrics
-	// allFields, overflow masks, textOverflowCols, and vectorOverflowCols are derived from Columns at
-	// construction time and reused across calls to avoid per-call allocations.
+	// allFields, overflow masks, textOverflowCols, vectorOverflowCols, and cachedTypeCodes are derived
+	// from Columns at construction time and reused across calls to avoid per-call allocations.
 	allFields          []Field
 	textOverflowMask   []bool
 	textOverflowCols   []Column
 	vectorOverflowCols []Column
+	cachedTypeCodes    []byte
 	// rightmostTablePage caches the last leaf page index for SeekNextRowID so that
 	// sequential (autoincrement) inserts skip the O(log N) root→leaf traversal.
 	// lastTxIDTablePage guards against stale hints from rolled-back transactions.
@@ -121,6 +122,15 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 			table.vectorOverflowCols = append(table.vectorOverflowCols, col)
 		}
 	}
+	typeCodes := make([]byte, len(columns))
+	for i, col := range columns {
+		if col.Deleted {
+			typeCodes[i] = byte(TypeCodeNull)
+		} else {
+			typeCodes[i] = byte(kindToTypeCode(col.Kind))
+		}
+	}
+	table.cachedTypeCodes = typeCodes
 
 	// Apply options
 	for _, opt := range opts {
@@ -317,12 +327,11 @@ func (t *Table) IndexByName(name string) (BTreeIndex, bool) {
 }
 
 // SeekNextRowID returns cursor pointing at the position after the last row ID
-// plus a new row ID to insert
-func (t *Table) SeekNextRowID(ctx context.Context, pageIdx PageIndex) (*Cursor, RowID, error) {
+// plus a new row ID to insert.
+func (t *Table) SeekNextRowID(ctx context.Context, pageIdx PageIndex) (Cursor, RowID, error) {
 	// Fast path: skip the root→leaf traversal when we already know the last leaf.
-	// Only applies at the root entry point (not during internal recursion) and
-	// only when running inside a transaction — without a transaction context we
-	// cannot guard against stale hints from rolled-back transactions.
+	// Only applies at the root entry point and only inside a transaction so we
+	// can guard against stale hints from rolled-back transactions.
 	if pageIdx == t.rootPageIdx {
 		if tx := TxFromContext(ctx); tx != nil {
 			// Per-transaction guard: invalidate the hint when a new transaction starts
@@ -339,7 +348,7 @@ func (t *Table) SeekNextRowID(ctx context.Context, pageIdx PageIndex) (*Cursor, 
 					if err == nil {
 						nextRowID = maxKey + 1
 					}
-					return &Cursor{
+					return Cursor{
 						Table:   t,
 						PageIdx: PageIndex(cached),
 						CellIdx: page.LeafNode.Header.Cells,
@@ -351,28 +360,32 @@ func (t *Table) SeekNextRowID(ctx context.Context, pageIdx PageIndex) (*Cursor, 
 		}
 	}
 
-	page, err := t.pager.ReadPage(ctx, pageIdx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("seek next row ID: %w", err)
+	for {
+		page, err := t.pager.ReadPage(ctx, pageIdx)
+		if err != nil {
+			return Cursor{}, 0, fmt.Errorf("seek next row ID: %w", err)
+		}
+		if page.LeafNode == nil {
+			pageIdx = page.InternalNode.Header.RightChild
+			continue
+		}
+		if page.LeafNode.Header.NextLeaf != 0 {
+			pageIdx = page.LeafNode.Header.NextLeaf
+			continue
+		}
+		maxKey, err := t.GetMaxKey(ctx, page)
+		nextRowID := maxKey
+		if err == nil {
+			nextRowID = maxKey + 1
+		}
+		// Warm the cache: this is the confirmed last leaf.
+		t.rightmostTablePage.Store(int64(pageIdx))
+		return Cursor{
+			Table:   t,
+			PageIdx: pageIdx,
+			CellIdx: page.LeafNode.Header.Cells,
+		}, nextRowID, nil
 	}
-	if page.LeafNode == nil {
-		return t.SeekNextRowID(ctx, page.InternalNode.Header.RightChild)
-	}
-	if page.LeafNode.Header.NextLeaf != 0 {
-		return t.SeekNextRowID(ctx, page.LeafNode.Header.NextLeaf)
-	}
-	maxKey, err := t.GetMaxKey(ctx, page)
-	nextRowID := maxKey
-	if err == nil {
-		nextRowID = maxKey + 1
-	}
-	// Warm the cache: this is the confirmed last leaf.
-	t.rightmostTablePage.Store(int64(pageIdx))
-	return &Cursor{
-		Table:   t,
-		PageIdx: pageIdx,
-		CellIdx: page.LeafNode.Header.Cells,
-	}, nextRowID, nil
 }
 
 // SeekFirst returns a cursor pointing at the first row in the table.

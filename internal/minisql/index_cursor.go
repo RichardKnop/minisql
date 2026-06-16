@@ -171,31 +171,33 @@ func (ui *Index[T]) Seek(ctx context.Context, page *Page, keyAny any) (IndexCurs
 		return IndexCursor[T]{}, false, fmt.Errorf("invalid key type: %T", keyAny)
 	}
 
-	node := page.IndexNode.(*IndexNode[T])
+	for {
+		node := page.IndexNode.(*IndexNode[T])
 
-	// Binary search: first position where Cells[pos].Key >= key.
-	pos := sort.Search(int(node.Header.Keys), func(i int) bool {
-		return compare(node.Cells[i].Key, key) >= 0
-	})
-	if pos < int(node.Header.Keys) && compare(node.Cells[pos].Key, key) == 0 {
-		return IndexCursor[T]{
-			Index:   ui,
-			PageIdx: page.Index,
-			CellIdx: uint32(pos),
-		}, true, nil
+		// Binary search: first position where Cells[pos].Key >= key.
+		pos := sort.Search(int(node.Header.Keys), func(i int) bool {
+			return compare(node.Cells[i].Key, key) >= 0
+		})
+		if pos < int(node.Header.Keys) && compare(node.Cells[pos].Key, key) == 0 {
+			return IndexCursor[T]{
+				Index:   ui,
+				PageIdx: page.Index,
+				CellIdx: uint32(pos),
+			}, true, nil
+		}
+		if node.Header.IsLeaf {
+			return IndexCursor[T]{}, false, nil
+		}
+		childIdx, err := node.Child(uint32(pos))
+		if err != nil {
+			return IndexCursor[T]{}, false, fmt.Errorf("get child: %w", err)
+		}
+		childPage, err := ui.pager.ReadPage(ctx, childIdx)
+		if err != nil {
+			return IndexCursor[T]{}, false, fmt.Errorf("get child page: %w", err)
+		}
+		page = childPage
 	}
-	if node.Header.IsLeaf {
-		return IndexCursor[T]{}, false, nil
-	}
-	childIdx, err := node.Child(uint32(pos))
-	if err != nil {
-		return IndexCursor[T]{}, false, fmt.Errorf("get child: %w", err)
-	}
-	childPage, err := ui.pager.ReadPage(ctx, childIdx)
-	if err != nil {
-		return IndexCursor[T]{}, false, fmt.Errorf("get child page: %w", err)
-	}
-	return ui.Seek(ctx, childPage, key)
 }
 
 // SeekWithPrefix descends from page to find the first cell whose CompositeKey
@@ -211,45 +213,50 @@ func (ui *Index[T]) SeekWithPrefix(ctx context.Context, page *Page, prefixAny an
 		return IndexCursor[T]{}, false, fmt.Errorf("SeekWithPrefix only supports CompositeKey prefix, got: %T", prefixAny)
 	}
 
-	i := uint32(0)
-	node := page.IndexNode.(*IndexNode[T])
+	for {
+		i := uint32(0)
+		node := page.IndexNode.(*IndexNode[T])
 
-	for i < node.Header.Keys && compare(prefixAny.(CompositeKey), any(node.Cells[i].Key).(CompositeKey).Prefix(prefixColumns)) > 0 {
-		i += 1
+		for i < node.Header.Keys && compare(prefixAny.(CompositeKey), any(node.Cells[i].Key).(CompositeKey).Prefix(prefixColumns)) > 0 {
+			i += 1
+		}
+		if i < node.Header.Keys && compare(prefixAny.(CompositeKey), any(node.Cells[i].Key).(CompositeKey).Prefix(prefixColumns)) == 0 {
+			return IndexCursor[T]{
+				Index:   ui,
+				PageIdx: page.Index,
+				CellIdx: uint32(i),
+			}, true, nil
+		}
+		if node.Header.IsLeaf {
+			return IndexCursor[T]{}, false, nil
+		}
+		childIdx, err := node.Child(uint32(i))
+		if err != nil {
+			return IndexCursor[T]{}, false, fmt.Errorf("get child: %w", err)
+		}
+		childPage, err := ui.pager.ReadPage(ctx, childIdx)
+		if err != nil {
+			return IndexCursor[T]{}, false, fmt.Errorf("get child page: %w", err)
+		}
+		page = childPage
 	}
-	if i < node.Header.Keys && compare(prefixAny.(CompositeKey), any(node.Cells[i].Key).(CompositeKey).Prefix(prefixColumns)) == 0 {
-		return IndexCursor[T]{
-			Index:   ui,
-			PageIdx: page.Index,
-			CellIdx: uint32(i),
-		}, true, nil
-	}
-	if node.Header.IsLeaf {
-		return IndexCursor[T]{}, false, nil
-	}
-	childIdx, err := node.Child(uint32(i))
-	if err != nil {
-		return IndexCursor[T]{}, false, fmt.Errorf("get child: %w", err)
-	}
-	childPage, err := ui.pager.ReadPage(ctx, childIdx)
-	if err != nil {
-		return IndexCursor[T]{}, false, fmt.Errorf("get child page: %w", err)
-	}
-	return ui.SeekWithPrefix(ctx, childPage, prefixAny, prefixColumns)
 }
 
 // SeekLastKey returns the largest key in the index, used for autoincrement primary keys.
 func (ui *Index[T]) SeekLastKey(ctx context.Context, pageIdx PageIndex) (any, error) {
-	page, err := ui.pager.ReadPage(ctx, pageIdx)
-	if err != nil {
-		return nil, fmt.Errorf("seek next row ID: %w", err)
+	for {
+		page, err := ui.pager.ReadPage(ctx, pageIdx)
+		if err != nil {
+			return nil, fmt.Errorf("seek next row ID: %w", err)
+		}
+		node := page.IndexNode.(*IndexNode[T])
+		if !node.Header.IsLeaf {
+			pageIdx = node.Header.RightChild
+			continue
+		}
+		if node.Header.Keys == 0 {
+			return int64(0), nil
+		}
+		return node.Cells[node.Header.Keys-1].Key, nil
 	}
-	node := page.IndexNode.(*IndexNode[T])
-	if !node.Header.IsLeaf {
-		return ui.SeekLastKey(ctx, node.Header.RightChild)
-	}
-	if node.Header.Keys == 0 {
-		return int64(0), nil
-	}
-	return node.Cells[node.Header.Keys-1].Key, nil
 }
