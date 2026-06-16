@@ -12,8 +12,9 @@ import (
 
 // mockTxPager is a minimal in-memory TxPager implementation for unit tests.
 type mockTxPager struct {
-	pages   map[PageIndex]*Page
-	nextIdx PageIndex
+	pages      map[PageIndex]*Page
+	freedPages []PageIndex
+	nextIdx    PageIndex
 }
 
 func newMockTxPager() *mockTxPager {
@@ -37,7 +38,10 @@ func (m *mockTxPager) GetFreePage(_ context.Context) (*Page, error) {
 	m.pages[idx] = p
 	return p, nil
 }
-func (m *mockTxPager) AddFreePage(_ context.Context, _ PageIndex) error { return nil }
+func (m *mockTxPager) AddFreePage(_ context.Context, idx PageIndex) error {
+	m.freedPages = append(m.freedPages, idx)
+	return nil
+}
 func (m *mockTxPager) GetOverflowPage(ctx context.Context, idx PageIndex) (*Page, error) {
 	return m.ReadPage(ctx, idx)
 }
@@ -372,6 +376,138 @@ func TestCosineDistanceDimensionMismatch(t *testing.T) {
 	_, err := CosineDistance(a, b)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dimension mismatch")
+}
+
+// TestVectorUpdateOverflow_ReusesPagesInPlace verifies that updateOverflow rewrites
+// data into the same overflow pages without allocating new pages or freeing old ones.
+func TestVectorUpdateOverflow_ReusesPagesInPlace(t *testing.T) {
+	pager := newMockTxPager()
+	ctx := context.Background()
+
+	orig := VectorPointer{Dims: 4, Data: []float32{1.0, 2.0, 3.0, 4.0}}
+	require.NoError(t, orig.storeOverflow(ctx, pager))
+
+	allocatedAfterStore := pager.nextIdx
+	oldFirstPage := orig.FirstPage
+	require.NotEqual(t, PageIndex(0), oldFirstPage)
+
+	updated := VectorPointer{Dims: 4, Data: []float32{5.0, 6.0, 7.0, 8.0}}
+	require.NoError(t, updated.updateOverflow(ctx, pager, oldFirstPage))
+
+	// Same page index reused — no new allocations, no pages freed.
+	assert.Equal(t, allocatedAfterStore, pager.nextIdx, "no new pages should be allocated")
+	assert.Empty(t, pager.freedPages, "no pages should be freed")
+	assert.Equal(t, oldFirstPage, updated.FirstPage, "FirstPage must point to the reused page")
+
+	// Read back and verify new data.
+	updated.Data = nil
+	updated, err := updated.readOverflow(ctx, pager)
+	require.NoError(t, err)
+	for i, want := range []float32{5.0, 6.0, 7.0, 8.0} {
+		assert.InDelta(t, want, updated.Data[i], 0.0001, "component %d", i)
+	}
+}
+
+// TestVectorUpdateOverflow_FallbackWhenNoOldChain verifies that updateOverflow
+// falls through to storeOverflow when oldFirstPage == 0.
+func TestVectorUpdateOverflow_FallbackWhenNoOldChain(t *testing.T) {
+	pager := newMockTxPager()
+	ctx := context.Background()
+
+	vp := VectorPointer{Dims: 3, Data: []float32{1.0, 2.0, 3.0}}
+	require.NoError(t, vp.updateOverflow(ctx, pager, 0))
+
+	assert.NotEqual(t, PageIndex(0), vp.FirstPage, "new pages must be allocated when no old chain")
+	assert.Empty(t, pager.freedPages)
+}
+
+// TestVectorUpdateOverflow_MultiPage verifies page reuse across a multi-page chain.
+func TestVectorUpdateOverflow_MultiPage(t *testing.T) {
+	pager := newMockTxPager()
+	ctx := context.Background()
+
+	// 2500 floats spans 3 overflow pages.
+	dims := uint32(2500)
+	origData := make([]float32, dims)
+	for i := range origData {
+		origData[i] = float32(i)
+	}
+	orig := VectorPointer{Dims: dims, Data: origData}
+	require.NoError(t, orig.storeOverflow(ctx, pager))
+
+	allocatedAfterStore := pager.nextIdx
+	oldFirstPage := orig.FirstPage
+
+	newData := make([]float32, dims)
+	for i := range newData {
+		newData[i] = float32(dims - uint32(i))
+	}
+	updated := VectorPointer{Dims: dims, Data: newData}
+	require.NoError(t, updated.updateOverflow(ctx, pager, oldFirstPage))
+
+	assert.Equal(t, allocatedAfterStore, pager.nextIdx, "no new pages allocated for same-size update")
+	assert.Empty(t, pager.freedPages)
+	assert.Equal(t, oldFirstPage, updated.FirstPage)
+
+	updated.Data = nil
+	updated, err := updated.readOverflow(ctx, pager)
+	require.NoError(t, err)
+	for i, want := range newData {
+		assert.InDelta(t, want, updated.Data[i], 0.0001, "component %d", i)
+	}
+}
+
+// TestUpdateOverflowVectors_OnlyChangedColumns verifies that updateOverflowVectors
+// only touches columns listed in changedCols, leaving unchanged columns alone.
+func TestUpdateOverflowVectors_OnlyChangedColumns(t *testing.T) {
+	pager := newMockTxPager()
+	ctx := context.Background()
+
+	col1 := Column{Name: "v1", Kind: Vector, Size: 2}
+	col2 := Column{Name: "v2", Kind: Vector, Size: 2}
+
+	vp1 := VectorPointer{Dims: 2, Data: []float32{1.0, 2.0}}
+	vp2 := VectorPointer{Dims: 2, Data: []float32{3.0, 4.0}}
+
+	oldRow := Row{
+		Columns: []Column{col1, col2},
+		Values: []OptionalValue{
+			{Valid: true, Value: vp1},
+			{Valid: true, Value: vp2},
+		},
+	}
+	var err error
+	oldRow, err = oldRow.storeOverflowVectors(ctx, pager)
+	require.NoError(t, err)
+
+	allocatedAfterStore := pager.nextIdx
+
+	oldVP1 := oldRow.Values[0].Value.(VectorPointer)
+	oldVP2 := oldRow.Values[1].Value.(VectorPointer)
+
+	// New row: v1 changes, v2 is unchanged.
+	newVP1 := VectorPointer{Dims: 2, Data: []float32{9.0, 10.0}}
+	newRow := Row{
+		Columns: []Column{col1, col2},
+		Values: []OptionalValue{
+			{Valid: true, Value: newVP1},
+			{Valid: true, Value: oldVP2},
+		},
+	}
+	changedCols := map[string]Column{"v1": col1}
+
+	newRow, err = newRow.updateOverflowVectors(ctx, pager, oldRow, changedCols)
+	require.NoError(t, err)
+
+	// Only v1 was updated — no new pages, v2's FirstPage untouched.
+	assert.Equal(t, allocatedAfterStore, pager.nextIdx, "no new pages for same-size update")
+	assert.Empty(t, pager.freedPages)
+
+	updatedVP1 := newRow.Values[0].Value.(VectorPointer)
+	assert.Equal(t, oldVP1.FirstPage, updatedVP1.FirstPage, "v1 must reuse old pages")
+
+	updatedVP2 := newRow.Values[1].Value.(VectorPointer)
+	assert.Equal(t, oldVP2.FirstPage, updatedVP2.FirstPage, "v2 FirstPage unchanged")
 }
 
 // TestFormatVectorRoundTrip verifies that FormatVector then ParseVectorLiteral is lossless
