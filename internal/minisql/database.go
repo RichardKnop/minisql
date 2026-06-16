@@ -73,6 +73,9 @@ type Database struct {
 	// sortMemLimit is the maximum bytes of row data accumulated in memory before
 	// spilling a sorted run to disk during ORDER BY. 0 disables external sort.
 	sortMemLimit int64
+	// hnswVecCacheSize is the maximum number of vector entries per HNSW index LRU
+	// cache.  Defaults to defaultHNSWVecCacheSize.
+	hnswVecCacheSize int
 	// backupHook is called by Backup after the WAL snapshot is taken and
 	// walWriteMu is released, just before the page-copy loop begins.
 	// Nil in production; set by tests to inject concurrent operations.
@@ -95,6 +98,7 @@ func NewDatabase(ctx context.Context, logger *zap.Logger, dbFilePath string, par
 		referencedBy:       make(map[string][]inboundFK),
 		foreignKeysEnabled: true,
 		sortMemLimit:       defaultSortMemLimit,
+		hnswVecCacheSize:   defaultHNSWVecCacheSize,
 		dbLock:             new(sync.RWMutex),
 		stmtCache:          lrucache.New[string](defaultMaxCachedStatements),
 		planCache:          lrucache.New[string](defaultMaxCachedPlans),
@@ -1109,7 +1113,7 @@ func (d *Database) initSecondaryIndex(ctx context.Context, schema Schema) error 
 			table.Name,
 			schema.Name,
 		)
-		secondaryIndex.HNSWIndex = OpenHNSWIndex(tp, schema.RootPage)
+		secondaryIndex.HNSWIndex = OpenHNSWIndex(tp, schema.RootPage, d.hnswVecCacheSize)
 	default:
 		storageColumns := secondaryIndexStorageColumns(secondaryIndex)
 		siPager, err := d.factory.ForIndex(storageColumns, false)
@@ -2171,7 +2175,7 @@ func (d *Database) populateHNSWIndex(ctx context.Context, stmt Statement, table 
 		return secondaryIndex, fmt.Errorf("HNSW populate: insert schema: %w", err)
 	}
 
-	secondaryIndex.HNSWIndex = OpenHNSWIndex(txPager, rootPageIdx)
+	secondaryIndex.HNSWIndex = OpenHNSWIndex(txPager, rootPageIdx, d.hnswVecCacheSize)
 	table.SetSecondaryIndex(secondaryIndex)
 
 	return secondaryIndex, nil

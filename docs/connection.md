@@ -18,6 +18,7 @@
 | `synchronous` | `normal` | WAL fsync mode. See [WAL durability modes](#wal-durability-modes). |
 | `parallel_scan` | `off` | Enable concurrent leaf-page scanning for full table scans. See [Parallel scan](#parallel-scan). |
 | `sort_mem_limit` | `4194304` | Maximum bytes of row data held in memory before an `ORDER BY` sort spills to disk. Set to `0` to disable disk spill (all sorted rows stay in memory). See [Disk-backed sort](#disk-backed-sort). |
+| `hnsw_vec_cache_size` | `4096` | Maximum number of vector entries cached per HNSW index. Each slot holds the full `float32` slice for one row (`dims × 4` bytes). See [HNSW vector cache](#hnsw-vector-cache). |
 | `encryption_key` | _(none)_ | Hex-encoded AES-256-CTR encryption key. See [Encryption](encryption.md). |
 
 ## Examples
@@ -46,6 +47,9 @@ db, err := sql.Open("minisql", "./my.db?sort_mem_limit=67108864")
 
 // Disable disk spill entirely (all sorted rows stay in memory)
 db, err := sql.Open("minisql", "./my.db?sort_mem_limit=0")
+
+// Raise HNSW vector cache to 16 384 entries for large high-dimensional tables
+db, err := sql.Open("minisql", "./my.db?hnsw_vec_cache_size=16384")
 
 // Encrypted database
 import "encoding/hex"
@@ -136,3 +140,27 @@ PRAGMA sort_mem_limit = 0;          -- disable disk spill
     Disk spill applies universally to all `ORDER BY` queries — sequential scans, joins, `DISTINCT`, and multi-column sorts — whenever the accumulated row data exceeds `sort_mem_limit`. The only exception is `ORDER BY` with `LIMIT` (and no `DISTINCT`), which uses a bounded min-heap sized to `OFFSET + LIMIT` rows and never needs to spill.
 
 Parallel scan is most beneficial for large tables on multi-core machines running filter-heavy queries. For small tables or single-CPU environments the overhead typically outweighs the benefit.
+
+## HNSW vector cache
+
+Each HNSW index keeps a per-index LRU cache of raw `float32` vectors, keyed by row ID. During ANN search, the engine computes distances between candidate nodes and the query vector. Cached vectors avoid an overflow-page read per candidate on the hot search path.
+
+**Memory per cache entry:** `dims × 4 bytes`. For example:
+- 128-dim vectors, 4096 entries: **2 MiB** per index
+- 768-dim vectors, 4096 entries: **12 MiB** per index
+
+**When to tune:**
+
+- **Large tables with high query throughput** — increase the cache so more of the working set fits. HNSW search visits `O(log N)` nodes, and entry-point nodes at the top layers are accessed by almost every query. As long as those fit in cache, hit rates are high regardless of table size.
+- **Many HNSW indexes on the same database** — each index has its own independent cache. If you have four 768-dim indexes at the default 4096 entries each, that is 48 MiB total. Reduce per-index size if memory is constrained.
+- **Small tables (< 4096 rows)** — the default is already oversized; the cache will simply never be full. No tuning needed.
+
+```go
+// 16 384 entries for a 768-dim index on a 100k-row table (~48 MiB)
+db, err := sql.Open("minisql", "./my.db?hnsw_vec_cache_size=16384")
+
+// Multiple parameters
+db, err := sql.Open("minisql", "./my.db?hnsw_vec_cache_size=8192&max_cached_pages=4000")
+```
+
+The cache is populated lazily on first access and kept consistent with online DML: INSERT adds the new vector, DELETE evicts it, UPDATE replaces the old entry. The cache is never persisted to disk.

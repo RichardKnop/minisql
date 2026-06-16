@@ -677,12 +677,7 @@ func (t *Table) insertHNSWIndexKey(ctx context.Context, secondaryIndex Secondary
 	}
 	// Populate the vector cache for the newly inserted node so future searches
 	// can compute distances without a disk read.
-	idx.vecMu.Lock()
-	if idx.vecCache == nil {
-		idx.vecCache = make(map[RowID]VectorPointer, 64)
-	}
-	idx.vecCache[rowID] = newVP
-	idx.vecMu.Unlock()
+	idx.vecCache.Put(rowID, newVP, true)
 	return nil
 }
 
@@ -749,11 +744,6 @@ func (t *Table) updateHNSWIndexKey(ctx context.Context, secondaryIndex Secondary
 		return fmt.Errorf("HNSW updateHNSWIndexKey: graph insert: %w", err)
 	}
 	// Update the cache with the new vector.
-	idx.vecMu.Lock()
-	if idx.vecCache == nil {
-		idx.vecCache = make(map[RowID]VectorPointer, 64)
-	}
-	idx.vecCache[rowID] = newVP
-	idx.vecMu.Unlock()
+	idx.vecCache.Put(rowID, newVP, true)
 	return idx.replaceDataPages(ctx, g)
 }

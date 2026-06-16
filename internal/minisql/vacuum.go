@@ -80,7 +80,7 @@ func (d *Database) vacuumWithKey(ctx context.Context, newKey []byte) error {
 		return fmt.Errorf("vacuum: create temp pager: %w", err)
 	}
 
-	tempDBOpts := []DatabaseOption{}
+	tempDBOpts := []DatabaseOption{WithHNSWVecCacheSize(d.hnswVecCacheSize)}
 	if len(newKey) > 0 {
 		tempDBOpts = append(tempDBOpts, WithEncryptionKey(newKey))
 	}

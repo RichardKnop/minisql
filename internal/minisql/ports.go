@@ -28,6 +28,8 @@ type LRUCache[T any] interface {
 	Put(T, any, bool)
 	// EvictIfNeeded removes the least-recently-used entry when the cache is full.
 	EvictIfNeeded() (T, bool)
+	// Delete removes the entry for key, if present.
+	Delete(T)
 	// Purge removes all entries, used to invalidate the plan cache on schema changes.
 	Purge()
 }
