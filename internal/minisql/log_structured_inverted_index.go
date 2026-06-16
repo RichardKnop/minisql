@@ -1464,7 +1464,14 @@ func (idx *logStructuredInvertedIndex) appendSegmentCells(
 	deleteCells, insertCells []invertedSegmentCell,
 	postingCount uint32,
 ) error {
-	cells := append(deleteCells, insertCells...)
+	// For the common insert-only path (build, online INSERT), skip the append-copy
+	// and sort insertCells in-place. Both callers discard their slices after this call.
+	var cells []invertedSegmentCell
+	if len(deleteCells) == 0 {
+		cells = insertCells
+	} else {
+		cells = append(deleteCells, insertCells...)
+	}
 	sortSegmentCells(cells)
 	firstTerm, lastTerm := segmentTermBounds(cells)
 	rootPage, err := idx.writeSegmentCells(ctx, cells)

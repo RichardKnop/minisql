@@ -2033,6 +2033,7 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 	rowIDsByTerm := make(map[string][]RowID, populateInvertedIndexInitialTerms)
 	termBuf := make([]string, 0, 16)
 	bufferedPostings := 0
+
 	flush := func(reset bool) error {
 		if len(rowIDsByTerm) == 0 {
 			return nil
@@ -2049,6 +2050,7 @@ func (d *Database) populateJSONInvertedIndex(ctx context.Context, table *Table, 
 		bufferedPostings = 0
 		return nil
 	}
+
 	addTerms := func(rowID RowID, terms []string) error {
 		for _, term := range terms {
 			rowIDsByTerm[term] = append(rowIDsByTerm[term], rowID)
