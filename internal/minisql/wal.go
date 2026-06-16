@@ -566,6 +566,13 @@ func (w *WAL) Delete() error {
 	return nil
 }
 
+// CloseNoSync closes the WAL file handle without flushing pending frames or
+// syncing. Used when the database is being discarded (e.g. the live database
+// during VACUUM) and WAL durability is not required.
+func (w *WAL) CloseNoSync() error {
+	return w.file.Close()
+}
+
 // Close flushes any pending frames, fsyncs (unless SynchronousOff), and closes
 // the WAL file.  On clean shutdown this guarantees all committed transactions
 // are durable before the file handle is released.

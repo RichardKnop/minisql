@@ -130,6 +130,12 @@ func (p *pagerImpl) SetCipher(c *pkgcrypto.PageCipher) {
 	p.cipher = c
 }
 
+// CloseNoSync closes the underlying file handle without syncing. Used when the
+// database file is being discarded (e.g. during VACUUM of the live database).
+func (p *pagerImpl) CloseNoSync() error {
+	return p.file.Close()
+}
+
 // Close syncs the file to ensure pending writes are flushed, then closes it.
 func (p *pagerImpl) Close() error {
 	if err := fastSync(p.file); err != nil {
