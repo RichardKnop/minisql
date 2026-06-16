@@ -65,7 +65,7 @@ func TestTable_SeekNextRowID(t *testing.T) {
 
 		cursor, rowID, err := table.SeekNextRowID(ctx, table.GetRootPageIdx())
 		require.NoError(t, err)
-		assert.Equal(t, &Cursor{
+		assert.Equal(t, Cursor{
 			Table:   table,
 			PageIdx: 0,
 			CellIdx: 0,
@@ -86,7 +86,7 @@ func TestTable_SeekNextRowID(t *testing.T) {
 		cursor, rowID, err := table.SeekNextRowID(ctx, table.GetRootPageIdx())
 		require.NoError(t, err)
 		require.NoError(t, err)
-		assert.Equal(t, &Cursor{
+		assert.Equal(t, Cursor{
 			Table:   table,
 			PageIdx: 6,
 			CellIdx: 1,
