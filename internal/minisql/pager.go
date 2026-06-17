@@ -45,6 +45,12 @@ type pagerImpl struct {
 	mu             sync.RWMutex
 	dbHeader       DatabaseHeader
 	totalPages     uint32
+	// noIntermediateSync defers all writes to Close(): Flush/FlushBatch skip
+	// WriteAt+fsync, letting pages accumulate in the pager cache. Close() then
+	// writes all cached pages in sorted order — one pwrite per consecutive run —
+	// and does a single fsync. Used by the VACUUM temp DB to collapse O(commits)
+	// pwrite+fsync calls into one sequential write + one fsync.
+	noIntermediateSync bool
 }
 
 // NewPager opens the database file and initialises the pager.
@@ -130,6 +136,14 @@ func (p *pagerImpl) SetCipher(c *pkgcrypto.PageCipher) {
 	p.cipher = c
 }
 
+// SetNoIntermediateSync controls whether Flush/FlushBatch skip fsync after each
+// write, deferring durability to the single fsync in Close().  Enable this for
+// temp/scratch files (like the VACUUM copy) that are discarded on crash anyway —
+// it reduces the fsync count from O(commits) to 1.
+func (p *pagerImpl) SetNoIntermediateSync(v bool) {
+	p.noIntermediateSync = v
+}
+
 // CloseNoSync closes the underlying file handle without syncing. Used when the
 // database file is being discarded (e.g. during VACUUM of the live database).
 func (p *pagerImpl) CloseNoSync() error {
@@ -137,11 +151,131 @@ func (p *pagerImpl) CloseNoSync() error {
 }
 
 // Close syncs the file to ensure pending writes are flushed, then closes it.
+// When noIntermediateSync is set, all cached pages are written to disk first
+// (in sorted-index order, with consecutive pages in one WriteAt), then synced.
 func (p *pagerImpl) Close() error {
+	if p.noIntermediateSync {
+		if err := p.flushAllCached(); err != nil {
+			return fmt.Errorf("deferred flush on close: %w", err)
+		}
+	}
 	if err := fastSync(p.file); err != nil {
 		return fmt.Errorf("failed to sync file before close: %w", err)
 	}
 	return p.file.Close()
+}
+
+// flushAllCached writes every page currently in the pager cache to the DB file.
+// Page 0 is written first with its special header layout; all other pages are
+// written in ascending index order, with consecutive runs coalesced into a
+// single WriteAt to minimise syscall count.
+// Called by Close() when noIntermediateSync is true.
+func (p *pagerImpl) flushAllCached() error {
+	p.mu.RLock()
+	dbHeader := p.dbHeader
+	pages := p.pages // read-only snapshot of the slice header
+	p.mu.RUnlock()
+
+	// Collect non-nil, non-root page indices.
+	// Page 0 uses a different on-disk layout (interleaved DB header), so it is
+	// written first via writeRootPage.
+	nonRoot := make([]PageIndex, 0, len(pages))
+	for i, pg := range pages {
+		if pg == nil {
+			continue
+		}
+		if i == 0 {
+			if err := p.writeRootPage(pg, &dbHeader); err != nil {
+				return fmt.Errorf("flush page 0: %w", err)
+			}
+			continue
+		}
+		nonRoot = append(nonRoot, PageIndex(i))
+	}
+
+	if len(nonRoot) == 0 {
+		return nil
+	}
+
+	// nonRoot is already in ascending order (built by iterating pages[]).
+	// Coalesce consecutive pages into single WriteAt calls.
+	runStart := 0
+	for i := 1; i <= len(nonRoot); i++ {
+		if i < len(nonRoot) && nonRoot[i] == nonRoot[i-1]+1 {
+			continue
+		}
+		if err := p.writeConsecutiveRun(nonRoot[runStart:i], pages); err != nil {
+			return err
+		}
+		runStart = i
+	}
+	return nil
+}
+
+// writeRootPage writes page 0 to disk with its special layout:
+// bytes [0, RootPageConfigSize) hold the database header; bytes [RootPageConfigSize, pageSize) hold the B-tree payload.
+func (p *pagerImpl) writeRootPage(pg *Page, dbHeader *DatabaseHeader) error {
+	buf := p.bufferPool.Get().([]byte)
+	defer p.bufferPool.Put(buf)
+	clear(buf)
+	if err := marshalPage(pg, buf); err != nil {
+		return err
+	}
+	var headerBuf [RootPageConfigSize]byte
+	if err := dbHeader.MarshalTo(headerBuf[:]); err != nil {
+		return err
+	}
+	writeRootPageChecksum(headerBuf[:], buf, p.pageSize)
+	if p.cipher != nil {
+		p.cipher.XORKeyStream(buf[:p.pageSize-RootPageConfigSize], 0)
+	}
+	if _, err := p.file.WriteAt(headerBuf[:], 0); err != nil {
+		return err
+	}
+	_, err := p.file.WriteAt(buf[0:p.pageSize-RootPageConfigSize], int64(RootPageConfigSize))
+	return err
+}
+
+// writeConsecutiveRun marshals and writes a slice of consecutive non-root page
+// indices in a single WriteAt call.
+func (p *pagerImpl) writeConsecutiveRun(indices []PageIndex, pages []*Page) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	if len(indices) == 1 {
+		idx := indices[0]
+		pg := pages[idx]
+		buf := p.bufferPool.Get().([]byte)
+		defer p.bufferPool.Put(buf)
+		clear(buf)
+		if err := marshalPage(pg, buf); err != nil {
+			return fmt.Errorf("marshal page %d: %w", idx, err)
+		}
+		writePageChecksum(buf)
+		if p.cipher != nil {
+			p.cipher.XORKeyStream(buf, uint32(idx))
+		}
+		_, err := p.file.WriteAt(buf, int64(idx)*int64(p.pageSize))
+		return err
+	}
+
+	// Multi-page run: one contiguous allocation → one WriteAt syscall.
+	combined := make([]byte, len(indices)*p.pageSize)
+	for i, idx := range indices {
+		seg := combined[i*p.pageSize : (i+1)*p.pageSize]
+		if err := marshalPage(pages[idx], seg); err != nil {
+			return fmt.Errorf("marshal page %d: %w", idx, err)
+		}
+		writePageChecksum(seg)
+		if p.cipher != nil {
+			p.cipher.XORKeyStream(seg, uint32(idx))
+		}
+	}
+	offset := int64(indices[0]) * int64(p.pageSize)
+	if _, err := p.file.WriteAt(combined, offset); err != nil {
+		return fmt.Errorf("write run pages %d-%d: %w", indices[0], indices[len(indices)-1], err)
+	}
+	return nil
 }
 
 // TotalPages returns the current total number of pages tracked by the pager,
@@ -400,7 +534,13 @@ func (p *pagerImpl) SavePage(ctx context.Context, pageIdx PageIndex, page *Page)
 // Flush marshals the page at pageIdx and writes it to the DB file. For page 0
 // it writes the database header first, then the remainder of the page data, and
 // calls fsync to ensure durability. No-ops if the page is not in cache.
+// When noIntermediateSync is set, the page stays in the pager cache and is
+// written by Close().
 func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
+	if p.noIntermediateSync {
+		return nil // page stays in cache; Close() will write all cached pages
+	}
+
 	p.mu.RLock()
 	if int(pageIdx) >= len(p.pages) || p.pages[pageIdx] == nil {
 		p.mu.RUnlock()
@@ -460,7 +600,13 @@ func (p *pagerImpl) Flush(ctx context.Context, pageIdx PageIndex) error {
 // FlushBatch writes multiple pages to disk in a single operation.
 // This reduces the number of syscalls and allows the OS to optimize I/O.
 // Pages are marshaled in parallel outside of locks, then written sequentially.
+// When noIntermediateSync is set, pages stay in the pager cache and are
+// written by Close().
 func (p *pagerImpl) FlushBatch(ctx context.Context, pageIndices []PageIndex) error {
+	if p.noIntermediateSync {
+		return nil // pages stay in cache; Close() will write all cached pages
+	}
+
 	if len(pageIndices) == 0 {
 		return nil
 	}

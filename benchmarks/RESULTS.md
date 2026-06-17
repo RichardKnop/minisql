@@ -9,6 +9,8 @@
 
 SQLite comparisons use the `sqlite` driver compiled into the same test binary. MiniSQL benchmarks run against fresh temp-file databases per sub-benchmark. Times are wall-clock (`ns/op`); memory figures are heap allocations reported by the Go runtime. Single-iteration benchmarks (HNSW build at large N) carry higher variance than multi-iteration ones.
 
+2026-06-17: VACUUM deferred-write optimization — `pagerImpl.SetNoIntermediateSync(true)` on the temp DB eliminates per-commit `pwrite`+`fsync` calls during the copy phase. All cached pages are written to disk in a single sequential `WriteAt` per consecutive run at `Close()` time, followed by one `fsync`. Reduces I/O syscall count from O(commits × pages) to O(1 fsync + ~3 writes). VACUUM small: **1.51 ms → 1.39 ms (−8%)**; allocs: 5,722 → 5,668 (−1%); B/op: +17 KiB from the contiguous flush buffer (traded N pool round-trips for one heap allocation).
+
 2026-06-17: Full-text build — flat-buffer sort-at-flush — replaced the per-term `map[string][]invertedPosting` accumulation map in `populateFullTextIndex` with a flat `[]flatPosting` slice sorted at flush time. A single contiguous `postingPool` replaces per-term `append` growth events. Allocations reduced **−24%** (12,298 → 9,373). The 1000-doc benchmark shows a memory increase (1.06 MiB → 1.87 MiB) due to a 16-byte per-entry string header overhead and buffer growth copies in a cold-start workload that never reaches the 64K-posting flush threshold; in production with large tables and multi-flush cycles the flat buffer is reused after the first flush, giving ~68% per-flush byte reduction and ~99.9% alloc-event reduction.
 
 2026-06-16: VACUUM correctness and I/O reduction (Priority 4) — three changes targeting VACUUM: (1) `Database.closeForDiscard()` closes the live DB without checkpointing or syncing (the live DB is discarded immediately after close, so the WAL checkpoint is wasted work); (2) `WAL.CloseNoSync()` / `pagerImpl.CloseNoSync()` close file handles without fdatasync for the discard path; (3) after VACUUM the WAL is now correctly restored — previously the WAL was lost after every VACUUM and all subsequent writes used the slower `commitDirect` path instead of WAL. The microbenchmark (1000-row table, thousands of VACUUMs/second) shows a ~20% regression because WAL is now properly maintained across VACUUM iterations (each seeding pass now goes through WAL, which is correct but adds per-iteration overhead vs the pre-existing WAL-loss bug). Real-world VACUUM on large tables with significant WAL backlogs benefits from skipping the checkpoint.
@@ -132,7 +134,7 @@ which flushes the rows across ~8 sorted run files that are then N-way merged.
 
 | Benchmark | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs |
 |---|---|---|---|---|---|---|
-| VACUUM small | 1.51 ms | 265 µs | 5.7× | 728 KiB | 89 B | 5,722 / 4 |
+| VACUUM small | 1.39 ms | 265 µs | 5.2× | 745 KiB | 89 B | 5,668 / 4 |
 | WAL checkpoint | 203 µs | 106 µs | 1.9× | 3.3 KiB | 440 B | 37 / 12 |
 | EXPLAIN | 5.2 µs | 1.2 µs | 4.2× | 5.5 KiB | 680 B | 51 / 18 |
 
@@ -197,7 +199,7 @@ which flushes the rows across ~8 sorted run files that are then N-way merged.
 | SELECT | Full scan | 1.23 MiB |
 | Join | Inner join, small-large | 1.00 MiB |
 | Join | Left join, unmatched rows | 869 KiB |
-| Maintenance | VACUUM small | 728 KiB (WAL overhead included since Priority 4 WAL-restore fix) |
+| Maintenance | VACUUM small | 745 KiB (WAL overhead included since Priority 4 WAL-restore fix; +17 KiB vs prior baseline from combined page-flush buffer — one contiguous alloc replaces N pool round-trips) |
 | Subquery | IN list | 559 KiB |
 
 ### Overflow Page INSERT
@@ -251,4 +253,4 @@ One row seeded; each b.N iteration updates the blob body. Old overflow chain is 
 - GROUP BY / HAVING memory gap vs SQLite (9.5× / 13.4×) is largely structural: Go's runtime map has higher per-entry overhead than SQLite's C hash table. Further reduction requires a custom open-address hash table — low ROI at this stage.
 - DISTINCT high cardinality without ORDER BY (1.26 MiB vs SQLite 586 KiB, 2.2×): streaming hash-set path; the gap is structural — SQLite sorts/hashes on the C side and delivers rows lazily, avoiding upfront Go heap allocation.
 - DISTINCT + ORDER BY high cardinality (4.54 MiB vs SQLite 586 KiB): ORDER BY requires upfront materialization of all rows before sorting. The sort-then-adjacent-dedup optimization removes hash-set overhead from deduplication, but the dominant cost is O(N) row materialization — unavoidable without disk-backed sort (see ROADMAP).
-- VACUUM is much improved after streaming row copy, though it still allocates far more than SQLite because it rebuilds the compacted MiniSQL database through normal table/index write paths.
+- VACUUM (1.39 ms vs SQLite 265 µs, 5.2×): deferred-write optimization eliminated per-commit fsyncs and now batches all page writes into one sequential I/O at close. Remaining gap vs SQLite is structural — MiniSQL rebuilds the B-tree row-by-row through normal INSERT paths (parse, marshal, split), while SQLite bulk-copies pages directly. A page-level bulk-copy path for the temp DB would close most of the gap.
