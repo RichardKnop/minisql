@@ -79,6 +79,10 @@ func (d *Database) vacuumWithKey(ctx context.Context, newKey []byte) error {
 		f.Close()
 		return fmt.Errorf("vacuum: create temp pager: %w", err)
 	}
+	// Skip per-commit fsyncs for the temp DB — it is a scratch file discarded on
+	// crash (the original is intact until the atomic rename succeeds). One fsync
+	// happens in Close() before the rename, which is sufficient for crash safety.
+	tempPager.SetNoIntermediateSync(true)
 
 	tempDBOpts := []DatabaseOption{WithHNSWVecCacheSize(d.hnswVecCacheSize)}
 	if len(newKey) > 0 {

@@ -289,3 +289,194 @@ func TestNewPager_InvalidDatabaseHeader(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, "invalid database header magic", err.Error())
 }
+
+// TestPager_NoIntermediateSync_FlushIsNoop verifies that Flush is a no-op
+// when noIntermediateSync is true: the page stays in the in-memory cache but
+// nothing reaches the file until Close is called.
+func TestPager_NoIntermediateSync_FlushIsNoop(t *testing.T) {
+	t.Parallel()
+
+	dbFile, err := os.CreateTemp("", testDBName)
+	require.NoError(t, err)
+	defer dbFile.Close()
+	defer os.Remove(dbFile.Name())
+
+	pager, err := NewPager(dbFile, PageSize, 1000)
+	require.NoError(t, err)
+	pager.SetNoIntermediateSync(true)
+
+	leaf := NewLeafNode()
+	leaf.Header.IsRoot = true
+	leaf.Header.NextLeaf = PageIndex(42) // sentinel value to check after reload
+	pager.pages = append(pager.pages, &Page{Index: 0, LeafNode: leaf})
+	pager.totalPages = 1
+
+	// Flush must be a no-op: the file should remain empty.
+	require.NoError(t, pager.Flush(context.Background(), 0))
+
+	info, err := dbFile.Stat()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), info.Size(), "file must still be empty after Flush with noIntermediateSync")
+}
+
+// TestPager_NoIntermediateSync_FlushBatchIsNoop verifies that FlushBatch is a
+// no-op when noIntermediateSync is true.
+func TestPager_NoIntermediateSync_FlushBatchIsNoop(t *testing.T) {
+	t.Parallel()
+
+	dbFile, err := os.CreateTemp("", testDBName)
+	require.NoError(t, err)
+	defer dbFile.Close()
+	defer os.Remove(dbFile.Name())
+
+	pager, err := NewPager(dbFile, PageSize, 1000)
+	require.NoError(t, err)
+	pager.SetNoIntermediateSync(true)
+
+	rootPage, internalPages, leafPages := newTestBtree()
+	pager.pages = append(pager.pages,
+		rootPage,
+		internalPages[0],
+		internalPages[1],
+		leafPages[0],
+		leafPages[1],
+	)
+	pager.totalPages = 5
+
+	indices := []PageIndex{0, 1, 2, 3, 4}
+	require.NoError(t, pager.FlushBatch(context.Background(), indices))
+
+	info, err := dbFile.Stat()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), info.Size(), "file must still be empty after FlushBatch with noIntermediateSync")
+}
+
+// TestPager_NoIntermediateSync_CloseWritesAllPages verifies the full deferred
+// path: Flush/FlushBatch are no-ops, but Close flushes all cached pages to
+// disk. A fresh pager opened on the same file must read back identical pages.
+func TestPager_NoIntermediateSync_CloseWritesAllPages(t *testing.T) {
+	t.Parallel()
+
+	dbFile, err := os.CreateTemp("", testDBName)
+	require.NoError(t, err)
+	defer os.Remove(dbFile.Name())
+
+	pager, err := NewPager(dbFile, PageSize, 1000)
+	require.NoError(t, err)
+	pager.SetNoIntermediateSync(true)
+
+	rootPage, internalPages, leafPages := newTestBtree()
+	allPages := []*Page{rootPage, internalPages[0], internalPages[1], leafPages[0], leafPages[1], leafPages[2], leafPages[3]}
+	pager.pages = append(pager.pages, allPages...)
+	pager.totalPages = uint32(len(allPages))
+
+	// FlushBatch should be a no-op; file stays empty.
+	indices := make([]PageIndex, len(allPages))
+	for i := range indices {
+		indices[i] = PageIndex(i)
+	}
+	require.NoError(t, pager.FlushBatch(context.Background(), indices))
+
+	info, err := dbFile.Stat()
+	require.NoError(t, err)
+	require.Equal(t, int64(0), info.Size(), "file must still be empty before Close")
+
+	// Close must flush all cached pages, then sync and close the file.
+	require.NoError(t, pager.Close())
+
+	info, err = os.Stat(dbFile.Name())
+	require.NoError(t, err)
+	assert.Equal(t, int64(len(allPages))*int64(PageSize), info.Size(),
+		"file must contain all pages after Close")
+
+	// Reopen and verify every page is readable with the correct content.
+	dbFile2, err := os.Open(dbFile.Name())
+	require.NoError(t, err)
+	defer dbFile2.Close()
+
+	pager2, err := NewPager(dbFile2, PageSize, 1000)
+	require.NoError(t, err)
+	assert.Equal(t, uint32(len(allPages)), pager2.TotalPages())
+
+	columns := []Column{{Kind: Varchar, Size: 270}}
+	tablePager := pager2.ForTable(columns)
+	ctx := context.Background()
+
+	page0, err := tablePager.GetPage(ctx, 0)
+	require.NoError(t, err)
+	assert.Equal(t, rootPage, page0)
+
+	page1, err := tablePager.GetPage(ctx, 1)
+	require.NoError(t, err)
+	assert.Equal(t, internalPages[0], page1)
+
+	page3, err := tablePager.GetPage(ctx, 3)
+	require.NoError(t, err)
+	assert.Equal(t, leafPages[0], page3)
+}
+
+// TestPager_NoIntermediateSync_NonConsecutivePages verifies that
+// flushAllCached correctly handles a sparse set of page indices (non-consecutive
+// runs are each written in separate WriteAt calls, not one combined buffer).
+func TestPager_NoIntermediateSync_NonConsecutivePages(t *testing.T) {
+	t.Parallel()
+
+	dbFile, err := os.CreateTemp("", testDBName)
+	require.NoError(t, err)
+	defer os.Remove(dbFile.Name())
+
+	pager, err := NewPager(dbFile, PageSize, 1000)
+	require.NoError(t, err)
+	pager.SetNoIntermediateSync(true)
+
+	// Place pages at non-consecutive indices: 0, 2, 4 (gaps at 1 and 3).
+	leaf0 := NewLeafNode()
+	leaf0.Header.IsRoot = true
+	leaf0.Header.NextLeaf = 11
+
+	leaf2 := NewLeafNode()
+	leaf2.Header.NextLeaf = 22
+
+	leaf4 := NewLeafNode()
+	leaf4.Header.NextLeaf = 44
+
+	pager.pages = []*Page{
+		{Index: 0, LeafNode: leaf0},
+		nil,
+		{Index: 2, LeafNode: leaf2},
+		nil,
+		{Index: 4, LeafNode: leaf4},
+	}
+	pager.totalPages = 5
+
+	require.NoError(t, pager.Close())
+
+	// File must be exactly 5 pages (indices 0-4), even though 1 and 3 are nil.
+	info, err := os.Stat(dbFile.Name())
+	require.NoError(t, err)
+	assert.Equal(t, int64(5)*int64(PageSize), info.Size())
+
+	// Reopen and read back the three written pages.
+	dbFile2, err := os.Open(dbFile.Name())
+	require.NoError(t, err)
+	defer dbFile2.Close()
+
+	pager2, err := NewPager(dbFile2, PageSize, 1000)
+	require.NoError(t, err)
+
+	columns := []Column{{Kind: Varchar, Size: 270}}
+	tp := pager2.ForTable(columns)
+	ctx := context.Background()
+
+	p0, err := tp.GetPage(ctx, 0)
+	require.NoError(t, err)
+	assert.Equal(t, PageIndex(11), p0.LeafNode.Header.NextLeaf)
+
+	p2, err := tp.GetPage(ctx, 2)
+	require.NoError(t, err)
+	assert.Equal(t, PageIndex(22), p2.LeafNode.Header.NextLeaf)
+
+	p4, err := tp.GetPage(ctx, 4)
+	require.NoError(t, err)
+	assert.Equal(t, PageIndex(44), p4.LeafNode.Header.NextLeaf)
+}
