@@ -9,6 +9,8 @@
 
 SQLite comparisons use the `sqlite` driver compiled into the same test binary. MiniSQL benchmarks run against fresh temp-file databases per sub-benchmark. Times are wall-clock (`ns/op`); memory figures are heap allocations reported by the Go runtime. Single-iteration benchmarks (HNSW build at large N) carry higher variance than multi-iteration ones.
 
+2026-06-17: VACUUM direct row-copy path (`vacuumCopier`) — replaces the per-row `Statement{...}` + `[][]OptionalValue` + `rowValues` allocations in the VACUUM copy loop with a `vacuumCopier` struct that pre-computes column-index maps once per table and calls `insertPrimaryKey` / `insertUniqueIndexKey` / `insertSecondaryIndexKey` / `LeafNodeInsert` directly. Skips field-name linear scans (`InsertValuesForColumns`), `rowValues` allocation, JSON normalisation, check-constraint validation, FK checks, conflict checks, and RETURNING overhead — all unnecessary when copying pre-validated data from the live database. VACUUM small: **1.39 ms → 1.22 ms (−12%)**; allocs: 5,668 → 4,667 (−18%); B/op: 745 KiB → 687 KiB (−8%).
+
 2026-06-17: VACUUM deferred-write optimization — `pagerImpl.SetNoIntermediateSync(true)` on the temp DB eliminates per-commit `pwrite`+`fsync` calls during the copy phase. All cached pages are written to disk in a single sequential `WriteAt` per consecutive run at `Close()` time, followed by one `fsync`. Reduces I/O syscall count from O(commits × pages) to O(1 fsync + ~3 writes). VACUUM small: **1.51 ms → 1.39 ms (−8%)**; allocs: 5,722 → 5,668 (−1%); B/op: +17 KiB from the contiguous flush buffer (traded N pool round-trips for one heap allocation).
 
 2026-06-17: Full-text build — flat-buffer sort-at-flush — replaced the per-term `map[string][]invertedPosting` accumulation map in `populateFullTextIndex` with a flat `[]flatPosting` slice sorted at flush time. A single contiguous `postingPool` replaces per-term `append` growth events. Allocations reduced **−24%** (12,298 → 9,373). The 1000-doc benchmark shows a memory increase (1.06 MiB → 1.87 MiB) due to a 16-byte per-entry string header overhead and buffer growth copies in a cold-start workload that never reaches the 64K-posting flush threshold; in production with large tables and multi-flush cycles the flat buffer is reused after the first flush, giving ~68% per-flush byte reduction and ~99.9% alloc-event reduction.
@@ -134,7 +136,7 @@ which flushes the rows across ~8 sorted run files that are then N-way merged.
 
 | Benchmark | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs |
 |---|---|---|---|---|---|---|
-| VACUUM small | 1.39 ms | 265 µs | 5.2× | 745 KiB | 89 B | 5,668 / 4 |
+| VACUUM small | 1.22 ms | 288 µs | 4.2× | 687 KiB | 88 B | 4,667 / 4 |
 | WAL checkpoint | 203 µs | 106 µs | 1.9× | 3.3 KiB | 440 B | 37 / 12 |
 | EXPLAIN | 5.2 µs | 1.2 µs | 4.2× | 5.5 KiB | 680 B | 51 / 18 |
 
@@ -199,7 +201,7 @@ which flushes the rows across ~8 sorted run files that are then N-way merged.
 | SELECT | Full scan | 1.23 MiB |
 | Join | Inner join, small-large | 1.00 MiB |
 | Join | Left join, unmatched rows | 869 KiB |
-| Maintenance | VACUUM small | 745 KiB (WAL overhead included since Priority 4 WAL-restore fix; +17 KiB vs prior baseline from combined page-flush buffer — one contiguous alloc replaces N pool round-trips) |
+| Maintenance | VACUUM small | 687 KiB (WAL overhead included since Priority 4 WAL-restore fix) |
 | Subquery | IN list | 559 KiB |
 
 ### Overflow Page INSERT

@@ -6,6 +6,112 @@ import (
 	"os"
 )
 
+// vacuumCopier pre-computes the column-to-index maps for a table so that the
+// per-row copy path can extract key parts with direct slice indexing instead of
+// linear field-name scans.  Create one per table before the copy loop and reuse
+// it for every row.
+type vacuumCopier struct {
+	table   *Table
+	pkIdx   []int            // t.Columns position for each PK column
+	uniqIdx map[string][]int // uniqueIndex.Name → t.Columns positions for each column
+	secIdx  map[string][]int // secondaryIndex.Name → t.Columns positions; absent = expression index
+}
+
+func newVacuumCopier(t *Table) *vacuumCopier {
+	colPos := make(map[string]int, len(t.Columns))
+	for i, col := range t.Columns {
+		colPos[col.Name] = i
+	}
+	vc := &vacuumCopier{
+		table:   t,
+		uniqIdx: make(map[string][]int, len(t.UniqueIndexes)),
+		secIdx:  make(map[string][]int, len(t.SecondaryIndexes)),
+	}
+	if t.HasPrimaryKey() {
+		vc.pkIdx = make([]int, len(t.PrimaryKey.Columns))
+		for i, col := range t.PrimaryKey.Columns {
+			vc.pkIdx[i] = colPos[col.Name]
+		}
+	}
+	for name, ui := range t.UniqueIndexes {
+		idxs := make([]int, len(ui.Columns))
+		for i, col := range ui.Columns {
+			idxs[i] = colPos[col.Name]
+		}
+		vc.uniqIdx[name] = idxs
+	}
+	for name, si := range t.SecondaryIndexes {
+		if si.Expression != nil {
+			continue // absent entry marks an expression index; row is passed as-is
+		}
+		idxs := make([]int, len(si.Columns))
+		for i, col := range si.Columns {
+			idxs[i] = colPos[col.Name]
+		}
+		vc.secIdx[name] = idxs
+	}
+	return vc
+}
+
+// copyRow inserts one row from the live DB into the temp table.  It is
+// functionally equivalent to Table.Insert but avoids per-row overhead that is
+// unnecessary when copying validated data:
+//
+//   - No Statement / [][]OptionalValue allocation
+//   - No field-name linear scans (InsertValuesForColumns)
+//   - No rowValues copy (row.Values used directly)
+//   - No JSON normalisation (already normalised in the live DB)
+//   - No check-constraint or FK validation (already enforced in the live DB)
+//   - No conflict checks (temp DB is empty — duplicates are impossible)
+//   - No RETURNING or lastInsertID tracking (not needed during VACUUM)
+func (vc *vacuumCopier) copyRow(ctx context.Context, row Row) error {
+	t := vc.table
+	cursor, nextRowID, err := t.SeekNextRowID(ctx, t.GetRootPageIdx())
+	if err != nil {
+		return err
+	}
+	if t.HasPrimaryKey() {
+		keyParts := make([]OptionalValue, len(vc.pkIdx))
+		for i, colIdx := range vc.pkIdx {
+			keyParts[i] = row.Values[colIdx]
+		}
+		if _, err := t.insertPrimaryKey(ctx, keyParts, nextRowID); err != nil {
+			return err
+		}
+	}
+	for name, uniqueIndex := range t.UniqueIndexes {
+		colIdxs := vc.uniqIdx[name]
+		keyParts := make([]OptionalValue, len(colIdxs))
+		for i, colIdx := range colIdxs {
+			keyParts[i] = row.Values[colIdx]
+		}
+		if err := t.insertUniqueIndexKey(ctx, uniqueIndex, keyParts, nextRowID); err != nil {
+			return err
+		}
+	}
+	for name, secondaryIndex := range t.SecondaryIndexes {
+		var keyParts []OptionalValue
+		if colIdxs, ok := vc.secIdx[name]; ok {
+			keyParts = make([]OptionalValue, len(colIdxs))
+			for i, colIdx := range colIdxs {
+				keyParts[i] = row.Values[colIdx]
+			}
+		}
+		if err := t.insertSecondaryIndexKey(ctx, secondaryIndex, keyParts, nextRowID, row); err != nil {
+			return err
+		}
+	}
+	if err := cursor.LeafNodeInsert(ctx, nextRowID, row); err != nil {
+		return err
+	}
+	if t.getRowCount != nil {
+		if tx := TxFromContext(ctx); tx != nil {
+			tx.AddRowCountDelta(t.Name, 1)
+		}
+	}
+	return nil
+}
+
 // Vacuum compacts the database file by copying all live data into a fresh file,
 // then atomically replacing the original.  The algorithm is:
 //
@@ -168,7 +274,7 @@ func (d *Database) vacuumWithKey(ctx context.Context, newKey []byte) error {
 		}
 
 		liveFields := fieldsFromColumns(liveTable.Columns...)
-		insertFields := fieldsFromColumns(tempTable.Columns...)
+		copier := newVacuumCopier(tempTable)
 
 		// Stream rows into one temp-table transaction. The temp database is not
 		// visible until the final atomic swap and is discarded on failure, so
@@ -184,12 +290,7 @@ func (d *Database) vacuumWithKey(ctx context.Context, newKey []byte) error {
 					return err
 				}
 				for result.Rows.Next(readCtx) {
-					row := result.Rows.Row()
-					if _, err := tempTable.Insert(copyCtx, Statement{
-						Kind:    Insert,
-						Fields:  insertFields,
-						Inserts: [][]OptionalValue{row.Values},
-					}); err != nil {
+					if err := copier.copyRow(copyCtx, result.Rows.Row()); err != nil {
 						return err
 					}
 				}
