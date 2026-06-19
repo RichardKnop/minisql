@@ -35,9 +35,14 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 	newRowsInserted := 0
 	var returningRows []Row
 	var lastInsertID int64
-	// Allocate once and reuse across iterations. saveToCell marshals the row to
-	// bytes immediately, so the backing array is safe to overwrite next iteration.
-	rowValues := make([]OptionalValue, len(t.Columns))
+	// For multi-row inserts, allocate a shared buffer that is overwritten each
+	// iteration (saveToCell marshals immediately so the next iteration is safe).
+	// For single-row inserts taking the column-aligned fast path, we alias
+	// rowValues to the values slice directly and skip the allocation entirely.
+	var rowValues []OptionalValue
+	if len(stmt.Inserts) > 1 {
+		rowValues = make([]OptionalValue, len(t.Columns))
+	}
 	for insertIdx, values := range stmt.Inserts {
 		switch stmt.ConflictAction {
 		case ConflictActionDoNothing:
@@ -123,14 +128,22 @@ func (t *Table) Insert(ctx context.Context, stmt Statement) (StatementResult, er
 			}
 		}
 
-		// Assemble row values in table-column order into the reused rowValues slice.
-		// Fast path: after prepareInsert, values[i] == value for t.Columns[i] — just copy.
+		// Assemble row values in table-column order.
+		// Fast path: after prepareInsert, values[i] == value for t.Columns[i].
+		//   Multi-row: copy into the shared buffer (safe to overwrite each iteration).
+		//   Single-row: alias rowValues to values directly — no allocation needed.
 		// Slow path: direct Insert call without prepareInsert — use field-name lookup.
 		if len(values) == len(t.Columns) {
-			// prepareInsert was called; values are already in column order.
-			copy(rowValues, values)
+			if rowValues != nil {
+				copy(rowValues, values)
+			} else {
+				rowValues = values
+			}
 		} else {
 			// Direct call without prepareInsert; resolve by field name.
+			if rowValues == nil {
+				rowValues = make([]OptionalValue, len(t.Columns))
+			}
 			// Clear stale values from prior iteration before selective assignment.
 			clear(rowValues)
 			fieldPositions := make(map[string]int, len(stmt.Fields))

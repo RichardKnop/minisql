@@ -9,6 +9,8 @@
 
 SQLite comparisons use the `sqlite` driver compiled into the same test binary. MiniSQL benchmarks run against fresh temp-file databases per sub-benchmark. Times are wall-clock (`ns/op`); memory figures are heap allocations reported by the Go runtime. Single-iteration benchmarks (HNSW build at large N) carry higher variance than multi-iteration ones.
 
+2026-06-19: INSERT autoincrement cache + single-row `rowValues` elimination — two targeted allocator removals. (1) `lastAutoincrementKey atomic.Int64` on `Table` (initialised to −1) caches the last written PK value; `insertAutoincrementedPrimaryKey` uses the cache directly and falls back to `SeekLastKey` only on cold start, eliminating the per-insert B-tree traversal and its `int64→any` boxing. Explicit PK inserts update the cache via a CAS high-water-mark loop so gaps from explicit keys are handled correctly. (2) `Table.Insert` no longer allocates a `rowValues` buffer for single-row inserts that arrive in column order (the common prepared-stmt path): when `len(stmt.Inserts)==1` and `len(values)==len(t.Columns)` we alias `rowValues = values` directly, skipping one `make([]OptionalValue, nCols)` per exec. Net effect on batch insert (100 rows/tx): allocs **2,143 → 1,954 (−8.8%)**, memory **123 KiB → 115 KiB (−6.5%)**; multi-values INSERT allocs **1,457 → 1,363 (−6.5%)** (single-row optimisation does not apply to multi-row statements; only the SeekLastKey saving contributes there).
+
 2026-06-17: VACUUM direct row-copy path (`vacuumCopier`) — replaces the per-row `Statement{...}` + `[][]OptionalValue` + `rowValues` allocations in the VACUUM copy loop with a `vacuumCopier` struct that pre-computes column-index maps once per table and calls `insertPrimaryKey` / `insertUniqueIndexKey` / `insertSecondaryIndexKey` / `LeafNodeInsert` directly. Skips field-name linear scans (`InsertValuesForColumns`), `rowValues` allocation, JSON normalisation, check-constraint validation, FK checks, conflict checks, and RETURNING overhead — all unnecessary when copying pre-validated data from the live database. VACUUM small: **1.39 ms → 1.22 ms (−12%)**; allocs: 5,668 → 4,667 (−18%); B/op: 745 KiB → 687 KiB (−8%).
 
 2026-06-17: VACUUM deferred-write optimization — `pagerImpl.SetNoIntermediateSync(true)` on the temp DB eliminates per-commit `pwrite`+`fsync` calls during the copy phase. All cached pages are written to disk in a single sequential `WriteAt` per consecutive run at `Close()` time, followed by one `fsync`. Reduces I/O syscall count from O(commits × pages) to O(1 fsync + ~3 writes). VACUUM small: **1.51 ms → 1.39 ms (−8%)**; allocs: 5,722 → 5,668 (−1%); B/op: +17 KiB from the contiguous flush buffer (traded N pool round-trips for one heap allocation).
@@ -55,9 +57,9 @@ The results are grouped by benchmark family. In comparison tables, a time ratio 
 | Benchmark | MiniSQL time | SQLite time | Time ratio | MiniSQL memory | SQLite memory | Allocs |
 |---|---|---|---|---|---|---|
 | Insert single row | 11.0 µs | 56.7 µs | 0.19× | 2.0 KiB | 311 B | 27 / 12 |
-| Insert batch | 353 µs | 240 µs | 1.47× | 124 KiB | 31.0 KiB | 2,144 / 1,301 |
-| Insert prepared batch | 342 µs | 235 µs | 1.45× | 123 KiB | 31.0 KiB | 2,143 / 1,300 |
-| Insert multi-values | 193 µs | 186 µs | 1.04× | 107 KiB | 25.2 KiB | 1,457 / 616 |
+| Insert batch | 373 µs | 271 µs | 1.38× | 116 KiB | 31.8 KiB | 1,955 / 1,309 |
+| Insert prepared batch | 368 µs | 268 µs | 1.37× | 115 KiB | 31.8 KiB | 1,954 / 1,308 |
+| Insert multi-values | 212 µs | 209 µs | 1.01× | 109 KiB | 25.9 KiB | 1,363 / 623 |
 | Update by PK | 8.3 µs | 39.1 µs | 0.21× | 3.6 KiB | 263 B | 38 / 10 |
 | Delete by PK | 15.6 µs | 86.1 µs | 0.18× | 3.1 KiB | 447 B | 49 / 19 |
 | ON CONFLICT DO UPDATE | 7.7 µs | 40.9 µs | 0.19× | 1.6 KiB | 259 B | 29 / 10 |
