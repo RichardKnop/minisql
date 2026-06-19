@@ -125,6 +125,22 @@ func (t *Table) insertPrimaryKey(ctx context.Context, keyParts []OptionalValue, 
 		return 0, fmt.Errorf("failed to insert primary key %s: %w", t.PrimaryKey.Name, err)
 	}
 
+	// Keep the autoincrement high-water mark in sync so that subsequent
+	// auto-generated keys don't collide with explicitly inserted keys.
+	if t.PrimaryKey.Autoincrement {
+		if newKey, ok := castedKey.(int64); ok {
+			for {
+				cached := t.lastAutoincrementKey.Load()
+				if cached >= newKey {
+					break
+				}
+				if t.lastAutoincrementKey.CompareAndSwap(cached, newKey) {
+					break
+				}
+			}
+		}
+	}
+
 	return castedKey, nil
 }
 
@@ -133,15 +149,22 @@ func (t *Table) insertAutoincrementedPrimaryKey(ctx context.Context, rowID RowID
 		return 0, fmt.Errorf("autoincrement primary key %s must be of type INT8", t.PrimaryKey.Name)
 	}
 
-	lastKey, err := t.PrimaryKey.Index.SeekLastKey(ctx, t.PrimaryKey.Index.GetRootPageIdx())
-	if err != nil {
-		return 0, err
+	var newPrimaryKey int64
+	if cached := t.lastAutoincrementKey.Load(); cached >= 0 {
+		// Fast path: skip B-tree traversal; the cache holds the last written key.
+		newPrimaryKey = cached + 1
+	} else {
+		// Cold path: traverse PK index to find the highest existing key.
+		lastKey, err := t.PrimaryKey.Index.SeekLastKey(ctx, t.PrimaryKey.Index.GetRootPageIdx())
+		if err != nil {
+			return 0, err
+		}
+		lastPrimaryKey, ok := lastKey.(int64)
+		if !ok {
+			return 0, errors.New("failed to cast last primary key value for autoincrement")
+		}
+		newPrimaryKey = lastPrimaryKey + 1
 	}
-	lastPrimaryKey, ok := lastKey.(int64)
-	if !ok {
-		return 0, errors.New("failed to cast last primary key value for autoincrement")
-	}
-	newPrimaryKey := lastPrimaryKey + 1
 
 	if ce := t.logger.Check(zap.DebugLevel, "inserting autoincremented primary key"); ce != nil {
 		ce.Write(
@@ -154,6 +177,7 @@ func (t *Table) insertAutoincrementedPrimaryKey(ctx context.Context, rowID RowID
 		return 0, fmt.Errorf("failed to insert primary key %s: %w", t.PrimaryKey.Name, err)
 	}
 
+	t.lastAutoincrementKey.Store(newPrimaryKey)
 	return newPrimaryKey, nil
 }
 

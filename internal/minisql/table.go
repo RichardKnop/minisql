@@ -70,6 +70,12 @@ type Table struct {
 	// lastTxIDTablePage guards against stale hints from rolled-back transactions.
 	rightmostTablePage atomic.Int64
 	lastTxIDTablePage  atomic.Uint64
+	// lastAutoincrementKey caches the most recently written autoincrement PK value,
+	// eliminating the per-insert SeekLastKey B-tree traversal.
+	// -1 = not yet seeded; on first autoincrement insert SeekLastKey initialises it.
+	// Gaps from rolled-back transactions are acceptable — autoincrement only
+	// guarantees monotonic increase, not contiguity.
+	lastAutoincrementKey atomic.Int64
 	Name               string
 	Columns            []Column
 	rootPageIdx        PageIndex
@@ -97,6 +103,7 @@ func NewTable(logger *zap.Logger, pager TxPager, txManager *TransactionManager, 
 	}
 
 	table.rightmostTablePage.Store(-1)
+	table.lastAutoincrementKey.Store(-1)
 
 	// If no provider is given, create a simple single-table provider for testing
 	if provider == nil {
