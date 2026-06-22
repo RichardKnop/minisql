@@ -792,6 +792,23 @@ func (s Statement) Clone() Statement {
 	return stmt
 }
 
+// BindArgumentsReusing is the allocation-free fast path for prepared INSERT
+// statements. It is equivalent to the BindArguments delayed-bind fast path but
+// uses caller-supplied buffers (args and outerBuf) instead of allocating new
+// ones, so that drivers with per-connection reuse buffers pay zero heap cost
+// per exec. Both buffers must have length == len(s.Inserts) args consumed.
+// Returns false when the statement is not eligible for delayed binding.
+func (s Statement) BindArgumentsReusing(args []any, outerBuf [][]OptionalValue) (Statement, bool) {
+	if !s.canDelayPreparedInsertBind() || len(outerBuf) < len(s.Inserts) {
+		return Statement{}, false
+	}
+	copy(outerBuf, s.Inserts)
+	stmt := s
+	stmt.Inserts = outerBuf
+	stmt.boundArgs = args
+	return stmt, true
+}
+
 // BindArguments substitutes ? placeholders in the statement with the provided
 // arguments in left-to-right order. It clones the statement first so the
 // original prepared form is not modified and can be reused with different args.

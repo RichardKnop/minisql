@@ -169,6 +169,12 @@ type Conn struct {
 	// txCtx cache: avoids calling WithTransaction on every row within an explicit transaction.
 	lastExecBaseCtx context.Context
 	lastExecTxCtx   context.Context
+	// insertArgsBuf and insertsOuterBuf are reused across INSERT ExecContext calls
+	// to eliminate the per-call make([]any, N) and make([][]OptionalValue, N) allocs
+	// that would otherwise occur in toInternalArgs and BindArguments respectively.
+	// Safe because database/sql guarantees each Conn is used by at most one goroutine.
+	insertArgsBuf   []any
+	insertsOuterBuf [][]minisql.OptionalValue
 }
 
 // Ping verifies the connection is still alive. MiniSQL is an embedded engine
