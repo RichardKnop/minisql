@@ -132,6 +132,32 @@ func (s Stmt) bindNamedArguments(args []driver.NamedValue) (minisql.Statement, e
 		return stmt, err
 	}
 
+	// Fast path for prepared INSERT with delayed binding: reuse the conn's arg and
+	// outer-inserts buffers to avoid the two per-exec heap allocations (make([]any, N)
+	// and make([][]OptionalValue, N)) that the generic BindArguments path incurs.
+	n := len(args)
+	nTuples := len(s.statement.Inserts)
+	if cap(s.conn.insertArgsBuf) >= n {
+		s.conn.insertArgsBuf = s.conn.insertArgsBuf[:n]
+	} else {
+		s.conn.insertArgsBuf = make([]any, n)
+	}
+	if cap(s.conn.insertsOuterBuf) >= nTuples {
+		s.conn.insertsOuterBuf = s.conn.insertsOuterBuf[:nTuples]
+	} else {
+		s.conn.insertsOuterBuf = make([][]minisql.OptionalValue, nTuples)
+	}
+	for i, arg := range args {
+		v, err := toInternalArg(arg)
+		if err != nil {
+			return minisql.Statement{}, err
+		}
+		s.conn.insertArgsBuf[i] = v
+	}
+	if stmt, ok := s.statement.BindArgumentsReusing(s.conn.insertArgsBuf, s.conn.insertsOuterBuf); ok {
+		return stmt, nil
+	}
+
 	internalArgs, err := toInternalArgs(args)
 	if err != nil {
 		return minisql.Statement{}, err
