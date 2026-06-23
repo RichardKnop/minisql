@@ -2,154 +2,154 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://richardknop.github.io/minisql/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/architecture/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/backup/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/cli/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/connection/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/constraints/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/data-types/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/encryption/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/getting-started/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/json/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/limitations/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/metrics/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/system-table/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/vector-search/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/blog/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/blog/minisql-1.0/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/functions/aggregate/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/functions/conditional/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/functions/datetime/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/functions/json/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/functions/numeric/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/functions/password/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/functions/string/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/functions/uuid/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/functions/window/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/indexes/btree/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/indexes/fulltext/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/indexes/hnsw/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/indexes/json-inverted/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/indexes/overview/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/sql/create-table/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/sql/delete/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/sql/explain/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/sql/insert/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/sql/operators/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/sql/select/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/sql/transactions/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
     <url>
          <loc>https://richardknop.github.io/minisql/sql/update/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-06-23</lastmod>
     </url>
 </urlset>
