@@ -1,5 +1,8 @@
 ./minisql
 db
+:memory:
+:memory:-wal
+:memory:-shm
 coverage.out
 coverage.html
 test-output.txt
